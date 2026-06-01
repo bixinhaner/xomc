@@ -3,10 +3,14 @@
 > **适用对象**：现场实施工程师、运维工程师。
 > **适用场景**：OMC 无线网管系统交付到运营商**内网环境**，目标网络**不通公网**。
 > **配套交付物**：两个互相独立的离线交付包（可从构建机 HTTP 服务下载）——
-> **项目包** `omc-<test|release>-<版本号>-amd64.tar.xz`（OMC 本体）与
+> **项目包** `omc-<test|release>-<版本号>-amd64.tar.xz`（OMC 业务镜像 + 部署模板）与
 > **基础设施包** `omc-infra-<版本号>-amd64.tar.xz`（Docker 引擎 + 基础镜像）。
 > **配套文档**：交付包的制作见《OMC离线交付包构建手册（构建侧）》（运维侧无需关心）。
-> **文档状态**：v2.0（双包拆分），需随产品版本迭代同步维护。
+> **文档状态**：v3.0（全 docker compose 部署 + 双包拆分），需随产品版本迭代同步维护。
+>
+> ⚠️ **部署模式（v3）**：本版本为**全 docker compose 部署**——所有 OMC 服务
+> （app / acs / worker / web / 监控栈）都以 **docker 容器**运行，宿主机上**不再放业务
+> 二进制、不再装 systemd 单元**。`docker load` 导入镜像后用 `docker compose` 一键起全栈。
 >
 > ⚠️ **架构**：当前发布仅有 **amd64（x86_64）** 包。目标机 `uname -m` 应返回
 > `x86_64`；若是 `aarch64`/`arm64` 等其它架构，请联系构建侧（不在本期发布范围）。
@@ -15,78 +19,96 @@
 
 ## 1. 概述
 
-OMC 采用「构建侧编译、运维侧只跑二进制」的交付模式。**运维侧拿到两个互相独立的
-离线交付包**，照本手册第 5 章逐步执行即可把系统跑起来：
+OMC 采用「构建侧 `docker build` 业务镜像、运维侧全 docker compose 跑容器」的交付模式。
+**运维侧拿到两个互相独立的离线交付包**，照本手册第 5 章逐步执行即可把系统跑起来：
 
-- **项目包** `omc-<test|release>-<版本>-<架构>.tar.xz`——OMC 二进制 + 前端 + 配置 + 数据库迁移 + 部署模板。发版频繁。
-- **基础设施包** `omc-infra-<版本>-<架构>.tar.xz`——Docker 引擎离线安装包 + 基础镜像。不常变更。
+- **项目包** `omc-<test|release>-<版本>-<架构>.tar.xz`——OMC 业务镜像（app/acs/worker/web）+ 配置 + 数据库迁移 + 字典 + 部署模板 + 监控配置。发版频繁。
+- **基础设施包** `omc-infra-<版本>-<架构>.tar.xz`——Docker 引擎离线安装包 + Compose v2 + Buildx + 基础镜像（+ 默认含监控栈镜像）。不常变更。
 
 两个包**各自独立的版本号**，首次部署两个都要；之后日常升级通常只更新项目包。
 
-- **不需要 Go**、不需要 Go 三方组件、不需要 Node/npm——交付物是已编译的静态二进制。
-- **不需要联网**——所有依赖（含 Docker 引擎、基础设施镜像）都在两个交付包内。
-- 唯一需要在内网安装的"基础软件"是 **Docker**，它本身也打进基础设施包离线安装。
+- **不需要 Go**、不需要 Node/npm——业务代码已编译进 docker 镜像。
+- **不需要联网**——所有依赖（含 Docker 引擎、基础设施镜像、业务镜像）都在两个交付包内。
+- 唯一需要在内网安装的"基础软件"是 **Docker（含 Compose v2 / Buildx）**，它本身也打进基础设施包离线安装。
 
 | 组件 | 交付形态 | 运维侧操作 |
 |------|---------|-----------|
-| omcgo-app / omcgo-acs / omcgo-worker | 已编译静态二进制 | systemd 托管运行 |
-| omcgo-migrate / omcgo-seed、omcctl | 已编译二进制（运维工具） | 按需执行 |
-| 前端 webcode | 已编译静态资源 | nginx 容器提供 |
-| PostgreSQL/TimescaleDB、Redis、NATS、MinIO | Docker 镜像离线包 | `docker load` 导入 |
-| Docker 引擎 | 静态二进制 + 安装脚本 | 离线安装 |
+| omcgo app / acs / worker / web(nginx) | `docker save` 业务镜像 tar | `docker load` 导入，`docker compose up -d` 运行 |
+| 数据库迁移 schema + seed | `migrations/`，goose 一次性容器执行 | `deploy.sh` 自动跑 `migrate-schema` / `migrate-seed-sql` 容器 |
+| PostgreSQL/TimescaleDB、Redis、NATS、MinIO、监控栈 | Docker 镜像离线包 | `docker load` 导入 |
+| Docker 引擎 / Compose v2 / Buildx | 静态二进制 + 安装脚本 | 离线安装 |
 
 ---
 
 ## 2. 部署架构与端口
 
-OMC 由 **3 个业务进程 + 1 个前端 + 4 个基础设施 + 可选监控栈**组成。推荐拓扑：
+OMC 由 **3 个业务容器 + 1 个前端容器 + 4 个基础设施容器 + 可选监控栈**组成，
+全部由 `docker compose`（compose project = `omcgo`，网络 = `omcgo-net`）编排：
 
 ```
-┌──────────────────────────── 单台/多台 Linux 服务器（内网）────────────────────────────┐
-│                                                                                      │
-│   宿主机进程（二进制 + systemd 托管）            Docker 容器（基础设施）               │
-│   ┌───────────────────────────────┐            ┌──────────────────────────────────┐  │
-│   │ omcgo-app    :8081 /:8444 TLS │            │ postgres (TimescaleDB pg16) :5432 │  │
-│   │              :50051 gRPC      │───┐        │ redis                       :6379 │  │
-│   │              :9091 metrics    │   │        │ nats (JetStream)            :4222 │  │
-│   ├───────────────────────────────┤   ├───────▶│ minio                  :9000/:9001│  │
-│   │ omcgo-acs    :7557 /:7558 TLS │   │        └──────────────────────────────────┘  │
-│   │              :3478 STUN       │   │                                              │
-│   │              :9090 metrics    │   │        Docker 容器（前端 / 可选监控）         │
-│   ├───────────────────────────────┤   │        ┌──────────────────────────────────┐  │
-│   │ omcgo-worker :9092 metrics    │───┘        │ nginx(web)            :8080/:8081 │  │
-│   └───────────────────────────────┘            │ prometheus/grafana/loki ... 可选  │  │
-│                                                 └──────────────────────────────────┘  │
-└──────────────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────── 单台/多台 Linux 服务器（内网）────────────────────────┐
+│   docker compose 全栈（compose project = omcgo，network = omcgo-net）          │
+│                                                                              │
+│   业务容器                                基础设施容器                          │
+│   ┌────────────────────────────────┐    ┌────────────────────────────────┐  │
+│   │ web(nginx) :8081 Web UI+REST   │    │ postgres(TimescaleDB pg16):5432 │  │
+│   │            :8080 TR-069 ACS 反代│    │ redis                     :6379 │  │
+│   │ app   127.0.0.1:9091 metrics   │───▶│ nats(JetStream)  :4222/127.0.0.1:8222│
+│   │ acs   :7547 CPE TR-069         │    │ minio              :9000/:9001  │  │
+│   │       :7557 connection-request │    └────────────────────────────────┘  │
+│   │       127.0.0.1:9095 metrics   │    监控容器（默认含，可 --skip-monitoring）│
+│   │ worker 127.0.0.1:9092 metrics  │    ┌────────────────────────────────┐  │
+│   └────────────────────────────────┘    │ prometheus:9090 alertmanager:9093│ │
+│                                          │ grafana:3030 loki:3100 tempo ... │ │
+│                                          └────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────────────────────┘
         ▲                                   ▲
-        │ 北向 OSS                            │ 南向 TR-069（CPE 基站经 :7557 回连 ACS）
+        │ 北向 OSS（app）                     │ 南向 TR-069（CPE 基站填 :8080 作 ACS URL）
 ```
 
 设计取舍：
 
-- **基础设施容器化**：PostgreSQL（含 TimescaleDB 扩展）、Redis、NATS、MinIO 原生安装版本敏感、依赖复杂，统一用官方镜像容器化。
-- **OMC 三进程跑宿主二进制 + systemd**：静态编译无运行时依赖；systemd 是运维最熟悉的进程托管方式（开机自启、崩溃拉起、优雅停止）。
-- **前端走 nginx 容器**：静态资源 + 反向代理一体。
+- **全容器化**：基础设施（PG/Redis/NATS/MinIO）与业务（app/acs/worker/web）统一用 docker
+  镜像 + compose 编排，开机自启、崩溃拉起由 docker `restart` 策略负责，运维只需 `docker compose`。
+- **前端走 nginx 容器**：静态资源 + 反向代理一体，`:8081` 服务 Web UI 与 `/api`，`:8080` 反代 TR-069 给 acs。
 
 ### 2.1 组件与端口清单
 
-| 类别 | 组件 | 默认端口 | 说明 |
-|------|------|---------|------|
-| OMC | omcgo-app | 8081(HTTP) / 8444(TLS) / 50051(gRPC) / 9091(metrics) | 管理面 REST + 北向 |
-| OMC | omcgo-acs | 7557(HTTP) / 7558(TLS) / 3478(STUN) / 9090(metrics) | TR-069 ACS，CPE 接入 |
-| OMC | omcgo-worker | 9092(metrics) | 后台 PM/MR/KPI 处理 |
-| 前端 | nginx(web) | 8080 / 8081 | 静态资源 + `/api` 反代到 app |
-| 基础设施 | postgres(TimescaleDB) | 5432 | 业务库 + 时序库 |
-| 基础设施 | redis | 6379 | 会话/缓存/命令队列 |
-| 基础设施 | nats | 4222 / 8222 | JetStream 消息 / 监控 |
-| 基础设施 | minio | 9000 / 9001 | 对象存储 / 控制台 |
-| 监控(可选) | prometheus / grafana / alertmanager / loki | 9090 / 3030 / 9093 / 3100 | 指标 + 日志 + 告警 |
+> ⚠️ **Web 管理界面在 `:8081`**（nginx server block，`/api` 反代到 app）；**`:8080`** 是
+> 给**基站设备**填的 ACS URL（TR-069 CWMP 反代到 acs），**人不浏览**。
+
+**内网可达（0.0.0.0 绑定）**：
+
+| 端口 | 组件 | 用途 / 使用方 |
+|------|------|--------------|
+| **8081** | web(nginx) | **Web 管理界面 + REST + SSE**，运维浏览器登录（默认 admin/admin123） |
+| **8080** | web(nginx) | **基站连接（TR-069 ACS 反代）**，基站设备侧填作 ACS URL |
+| 7547 | acs | CPE → ACS（HTTP，TR-069 标准端口；nginx :8080 反代到此） |
+| 7557 | acs | 内部 connection-request 接口 |
+| 5432 | postgres(TimescaleDB) | 业务库 + 时序库 |
+| 6379 | redis | 会话/缓存/命令队列（当前无密码，仅受信内网可接受） |
+| 4222 | nats | JetStream 客户端 |
+| 9000 / 9001 | minio | S3 API / Console UI |
+| 9090 / 9093 / 3030 / 3100 | 监控（可选） | prometheus / alertmanager / grafana(宿主3030→容器3000) / loki |
+
+**仅本机回环 127.0.0.1（从工作机访问需 SSH 隧道）**：
+
+| 端口 | 服务 | 接入方式 |
+|------|------|---------|
+| 9091 | app 健康 / metrics | `curl 127.0.0.1:9091/healthz` 或 `/metrics` |
+| 9095 | acs 健康 / metrics | `curl 127.0.0.1:9095/healthz`（容器内是 9090） |
+| 9092 | worker 健康 / metrics | `curl 127.0.0.1:9092/healthz` |
+| 8222 | NATS HTTP 监控 | `http://127.0.0.1:8222` |
+
+> ⚠️ `5432 / 6379 / 4222 / 9000 / 9001` 对内网全开（0.0.0.0）——部署前必须改强口令（见 §6.1）。
+> Redis 当前无密码，仅受信任内网可接受；公网 / DMZ 须配 `requirepass` 并同步 `etc/*.prod.yaml`。
+> 防火墙 / 安全组在出公网前必须 deny 这 5 个端口。
 
 ---
 
 ## 3. 交付包内容说明
 
-交付物是**两个独立交付包**，各自每架构一份（amd64 / arm64），按目标机架构二选一。
+交付物是**两个独立交付包**，各自一份 amd64 包。
 
 ### 3.1 项目包 `omc-<test|release>-<版本>-<架构>/`
 
@@ -95,20 +117,22 @@ OMC 本体。发版频繁，走"版本目录 + `current` 软链"管理（见 §5
 ```
 omc-<test|release>-<版本>-<架构>/
 ├── README.md                      # 项目包说明 + 版本号 + 渠道
-├── VERSION                        # 项目版本 / 渠道 / 架构 / 构建时间 / git commit
+├── VERSION                        # 项目版本 / 渠道 / 架构 / 镜像前缀 / 构建时间 / git commit
 ├── checksums.sha256               # 全部文件 SHA256，用于校验完整性
 │
-├── bin/                           # ① OMC 已编译二进制
-│   └── omcgo-app / omcgo-acs / omcgo-worker / omcgo-migrate / omcgo-seed / omcctl
-├── web/dist/                      # ② 前端已编译静态资源
-├── etc/                           # ③ 配置模板（app/acs/worker.prod.yaml，需现场修改）
-├── data/                          # ④ 启动期加载的字典 XML
-├── configs/                       # ⑤ Casbin RBAC 模型 casbin_model.conf
-├── migrations/                    # ⑥ 数据库迁移 SQL（schema + seed/）
-├── deploy/                        # ⑦ 部署脚本与模板
-│   ├── docker-compose.infra.yml / docker-compose.web.yml / .env
+├── images/                        # ① OMC 业务镜像（docker save）
+│   └── business-images-<版本>-<架构>.tar   #   omcgo/{app,acs,worker,web}:<版本>
+├── data/                          # ② 启动期加载的字典 XML（可挂载覆盖镜像内默认值）
+├── configs/                       # ③ Casbin RBAC 模型等（可挂载覆盖）
+├── migrations/                    # ④ 数据库迁移 SQL（schema + seed/，goose 容器执行）
+├── etc/                           # ⑤ 配置模板 app/acs/worker.prod.yaml（需现场改口令）
+├── deploy/                        # ⑥ 部署脚本与模板
+│   ├── docker-compose.infra.yml / .app.yml / .web.yml / .monitoring.yml
+│   ├── .env                       #   镜像 tag + 默认口令 + JWT（部署前必改）
 │   ├── nginx.conf / default.conf
-│   ├── systemd/                   #   omcgo-app/acs/worker.service 模板
+│   ├── monitoring/                #   prometheus/grafana/loki/tempo/otelcol/alertmanager 配置
+│   ├── deploy.sh                  #   一键部署
+│   ├── svc.sh                     #   日常启停 / 重启 / 日志
 │   └── healthcheck.sh             #   健康检查脚本
 └── docs/
     └── OMC内网离线部署手册（运维侧）.md   # 本文档
@@ -121,17 +145,18 @@ Docker 引擎 + 基础镜像。不常变更，**一台机器装一次**（不随
 ```
 omc-infra-<版本>-<架构>/
 ├── README.md                      # 基础设施包说明 + 安装步骤
-├── VERSION                        # 基础设施版本 / 架构 / Docker 版本 / 构建时间
+├── VERSION                        # 基础设施版本 / 架构 / Docker / Compose / Buildx 版本 / 构建时间
 ├── checksums.sha256               # 全部文件 SHA256
 │
 ├── setup-mirrors.sh               # 系统加速三合一：Docker / npm / Golang 配 / 换 / 查 / 取消
 ├── docker/                        # ① Docker 引擎离线安装
 │   ├── docker-<ver>.tgz           #   Docker 静态二进制包
-│   └── install-docker.sh          #   离线安装脚本（装完自动调用 ../setup-mirrors.sh 引导加速）
-└── images/                        # ② Docker 镜像离线包
+│   ├── docker-compose             #   Compose v2 静态二进制
+│   ├── docker-buildx              #   Buildx 静态二进制
+│   └── install-docker.sh          #   离线安装脚本（装完自动调 ../setup-mirrors.sh 引导加速）
+└── images/                        # ② Docker 镜像离线包（docker save）
     ├── infra-images-<架构>.tar     #   postgres / redis / nats / minio / nginx
-    ├── monitoring-images-<架构>.tar #   监控栈（v2 默认包含；用 build-images.sh
-                                    #    --infra-only 可关闭）
+    ├── monitoring-images-<架构>.tar #   监控栈（默认包含；用 build-images.sh --infra-only 可关闭）
     └── images.manifest             #   镜像清单
 ```
 
@@ -139,11 +164,12 @@ omc-infra-<版本>-<架构>/
 
 | 目录 | 所属包 | 说明 |
 |------|--------|------|
-| `bin/` | 项目包 | OMC 核心二进制，静态编译，直接运行 |
-| `etc/*.prod.yaml` | 项目包 | 配置**模板**，含开发默认值，部署时**必须修改**密码与连接地址 |
-| `data/` `configs/` `migrations/` | 项目包 | 与 `bin/` **强绑定同版本**，严禁跨版本混用 |
-| `docker/` | 基础设施包 | Docker 引擎离线安装包 + 安装脚本 |
-| `images/` | 基础设施包 | 基础设施 Docker 镜像，`docker load` 导入 |
+| `images/` | 项目包 | OMC 业务镜像 tar（`docker save`），`docker load` 导入即用 |
+| `etc/*.prod.yaml` | 项目包 | 配置**模板**，含开发默认值，部署时**必须修改**密码（容器可挂载覆盖镜像内默认值） |
+| `data/` `configs/` `migrations/` | 项目包 | 与业务镜像 **强绑定同版本**，严禁跨版本混用 |
+| `deploy/.env` | 项目包 | 业务镜像 tag + 基础设施 / 监控镜像标签 + 默认口令 + JWT，`docker compose` 引用 |
+| `docker/` | 基础设施包 | Docker 引擎 + Compose + Buildx 离线安装包 + 安装脚本 |
+| `images/` | 基础设施包 | 基础设施 / 监控 Docker 镜像，`docker load` 导入 |
 
 > **两个包版本号互相独立**：项目包版本（`omc-test/omc-release-...`）与基础设施包版本
 > （`omc-infra-...`）各自演进。`deploy/.env`（项目包内）记录基础设施镜像标签，须与
@@ -158,35 +184,34 @@ omc-infra-<版本>-<架构>/
 | 资源 | 最小 | 推荐 | 说明 |
 |------|------|------|------|
 | CPU | 8 核 | 16 核+ | ACS 热路径 + Worker 并发 |
-| 内存 | 16 GB | 32 GB+ | 基础设施 + 三进程 |
+| 内存 | 16 GB | 32 GB+ | 基础设施 + 业务容器 + 监控栈 |
 | 磁盘 | 200 GB SSD | 1 TB SSD+ | PM/MR/固件文件约 500 GB/月增长 |
 | 网络 | 千兆 | 万兆 | 南向 CPE + 北向 OSS |
 
 ### 4.2 操作系统与内核
 
-- **架构**：x86-64（amd64）或 ARM64。每个版本均提供两种架构交付包，按目标机
-  `uname -m` 选用（`x86_64`→amd64，`aarch64`→arm64）。
+- **架构**：x86-64（amd64）。目标机 `uname -m` 须为 `x86_64`。
 - **发行版**：主流 Linux（CentOS 7+/Rocky/Ubuntu 20.04+/麒麟 V10/统信 UOS 等）。
 - **内核**：≥ 3.10（Docker 要求），推荐 ≥ 4.x。
-- **systemd**：托管 OMC 三进程与 dockerd。
+- **内核 IP 转发**：Docker 容器网络依赖，需开启（见 §5 步骤 2.1）。
 - 关闭或正确配置 **SELinux / 防火墙**（见 §9 #6）。
 
 ### 4.3 端口规划
 
 部署前确认 §2.1 全部端口在目标机**未被占用**，且内网防火墙策略放行：
 
-- CPE 基站 → ACS：`7557`（及 `7558` TLS、`3478` STUN）。
-- 浏览器 → 前端：`8080`/`8081`。
-- 基础设施端口（5432/6379/4222/9000…）建议仅**本机回环**可达。
+- CPE 基站 → ACS：`8080`（nginx 反代到 acs `:7547`）。
+- 浏览器 → Web 管理界面：`8081`。
+- 基础设施端口（5432/6379/4222/9000…）建议仅**受信内网**可达，出公网前必须 deny。
 
 ### 4.4 交付前环境检查清单
 
 实施工程师进场前与客户确认（任一不满足需提前协调）：
 
-- [ ] 目标服务器架构（amd64 / arm64）与数量
+- [ ] 目标服务器架构（须 amd64）与数量
 - [ ] 操作系统发行版与内核版本
 - [ ] 内核 IP 转发可启用（`net.ipv4.ip_forward`，见 §5 步骤 2.1）
-- [ ] 是否已安装 Docker；若有，版本是否满足（≥ 20.10）
+- [ ] 是否已安装 Docker；若有，版本是否满足（≥ 20.10）且含 compose v2 插件
 - [ ] root 或 sudo 权限
 - [ ] §2.1 端口是否空闲、防火墙是否可放行
 - [ ] 磁盘容量与挂载点（数据盘路径）
@@ -203,49 +228,41 @@ omc-infra-<版本>-<架构>/
 > 以下命令默认以 **root** 执行。安装根目录约定为 `/opt/omc`，数据盘约定为 `/data`。
 > 全程**无需联网**。先读 §5.0 目录布局约定，再按步骤执行。
 
-> 🚀 **快速通道**：如果你按 §5.0 / 步骤 1 准备好目录结构后，可以直接跑
-> `sudo bash /opt/omc/current/deploy/deploy.sh` **一键部署**，自动完成步骤 4-10。
-> 想精细控制每步、或第一次需要熟悉细节再按手动步骤走。详见 §5.10 一键部署。
+> 🚀 **推荐路径**：按 §5.0 + 步骤 1（解压）+ 步骤 2（装 Docker）准备好后，直接跑
+> `sudo bash /opt/omc/current/deploy/deploy.sh` **一键部署**，自动完成镜像 load /
+> migrate / seed / 起全栈 / 健康检查。详见 §5.10。下面的「手动步骤」便于理解细节与排错。
 
 ### 5.0 目录布局与版本管理约定
 
 OMC 采用**「版本目录 + `current` 软链」**方式存放**不同版本的项目包**，便于保留历史
-版本、秒级切换、快速回滚——每个项目交付版本独立一个目录，互不覆盖；`current` 软链指向
-当前运行版本。基础设施包（Docker 引擎 + 镜像）一台机器只装一次，不随项目版本走。
+版本、秒级切换、快速回滚。`current` 软链指向当前运行版本。基础设施包（Docker 引擎 +
+镜像）一台机器只装一次，不随项目版本走。
 
 ```
 /opt/omc/
 ├── releases/                       # 各项目版本独立目录，互不覆盖
-│   ├── 0.0.1-20260518-1030/        #   一个项目包解压成一个版本目录
-│   │   ├── bin/  web/  data/  configs/  migrations/  deploy/
+│   ├── 0.1.0-20260518-1030/        #   一个项目包解压成一个版本目录
+│   │   ├── images/ data/ configs/ migrations/ etc/ deploy/
 │   │   └── VERSION
-│   ├── 0.0.2/
-│   └── 1.0.0/                      #   ← 最新版本
-├── current  ->  releases/1.0.0     # 软链：指向"当前运行版本"，升级/回滚只切它
+│   └── 0.1.0-20260601-0900/        #   ← 最新版本
+├── current  ->  releases/0.1.0-20260601-0900   # 软链：当前运行版本，升级/回滚只切它
 ├── infra/                          # 基础设施包解压处（docker/ + images/），装一次
 ├── etc/                            # 实例配置（跨版本保留，不随交付包覆盖）
-│   ├── app.prod.yaml  acs.prod.yaml  worker.prod.yaml
-│   └── keys/                       #   登录 RSA 私钥等，绝不随版本走
-├── run/logs/                       # 运行日志（跨版本保留）
+│   └── app.prod.yaml  acs.prod.yaml  worker.prod.yaml
+├── data/                           # host 主权的自定义 XML（param-mappings-custom / indicator-library-custom）
+├── run/logs/{app,acs,worker,nginx}/ # 运行日志（跨版本保留）
 └── packages/                       # （可选）交付包压缩档原始存档备查
 ```
 
-**四类内容的存放原则**：
-
-| 类别 | 内容 | 存放位置 | 升级时行为 |
-|------|------|---------|-----------|
-| **项目版本相关** | `bin/`、`web/`、`data/`、`configs/`、`migrations/`、`deploy/` | `releases/<版本>/` | 新版本进新目录，旧目录保留 |
-| **基础设施** | Docker 引擎、基础镜像（来自基础设施包） | `/opt/omc/infra/` | 装一次；仅基础设施包升级时才更新 |
-| **实例配置** | `*.prod.yaml`、`keys/`（站点密码/IP/密钥） | `/opt/omc/etc/` | 不覆盖；新版本模板在 `releases/<版本>/etc/`，按需 diff 合并 |
-| **持久数据** | 运行日志；数据库 / MinIO 数据（docker 卷内） | `/opt/omc/run/`、docker volume | 不随版本走 |
+> 数据库 / MinIO / 监控历史数据落在 **docker 数据卷**（`pgdata`/`miniodata`/`redisdata`/
+> `natsdata`/`prometheusdata`/`grafanadata`/`lokidata`/`tempodata`），不随版本走、不在 `/opt/omc` 下。
 
 **关键约定**：
 
-- **`current` 软链 = 当前运行版本**。systemd 单元、nginx、脚本一律走 `/opt/omc/current/...`，**不写死版本号**。
-- **`data/`、`configs/`、`migrations/` 必须与 `bin/` 同版本**——字典 XML、Casbin 模型、迁移 SQL 都与二进制强绑定，**严禁跨版本混用**。
-- **升级** = 解压新版本目录 → 跑迁移 → 切 `current` 软链 → 重启；**回滚** = `current` 切回旧版本目录 → 重启（详见 §8）。切换是原子的 `ln -sfn`，秒级生效。
+- **`current` 软链 = 当前运行版本**。`deploy.sh` / `svc.sh` / compose 文件一律走 `/opt/omc/current/...`，**不写死版本号**。
+- **`data/`、`configs/`、`migrations/` 必须与业务镜像同版本**——字典 XML、Casbin 模型、迁移 SQL 都与镜像强绑定，**严禁跨版本混用**。
+- **升级** = 解压新版本目录 → 跑 `deploy.sh` → 切 `current` + 起新镜像容器；**回滚** = 旧版本目录重跑 `deploy.sh --skip-migrate`（详见 §8）。
 - **保留最近 3 个版本**目录，更早的可 `rm -rf` 回收磁盘。
-- 下文 `/opt/omc/current/` 即"当前版本目录"，`/opt/omc/etc/` 为跨版本保留的实例配置目录。
 
 ### 步骤 1 — 上传与解压交付包
 
@@ -253,13 +270,13 @@ OMC 采用**「版本目录 + `current` 软链」**方式存放**不同版本的
 版本目录 `/opt/omc/releases/<版本>/`。
 
 ```bash
-# 先确认目标机架构，选用对应交付包：x86_64→amd64，aarch64→arm64
+# 先确认目标机架构（须 x86_64 → amd64）
 uname -m
 
-ARCH=<架构>              # amd64 或 arm64
-PROJ=<项目包文件名>      # 如 omc-test-0.0.1-20260518-1030-$ARCH（测试阶段）
-                         # 或 omc-release-1.0.0-$ARCH（正式发布）
-INFRA=<基础设施包文件名> # 如 omc-infra-0.0.1-$ARCH
+ARCH=amd64
+PROJ=<项目包文件名>      # 如 omc-test-0.1.0-20260518-1030-amd64（测试阶段）
+                         # 或 omc-release-1.0.0-...-amd64（正式发布）
+INFRA=<基础设施包文件名> # 如 omc-infra-0.1.0-...-amd64
 VER=<项目版本号>         # 项目包 VERSION 文件的 project_version，作为 releases/ 目录名
 
 mkdir -p /opt/omc/releases/$VER /opt/omc/infra /opt/omc/etc /opt/omc/run/logs /opt/omc/packages
@@ -273,13 +290,10 @@ sha256sum -c checksums.sha256                      # 校验包内文件
 
 # (2) 项目包 —— 解压到独立的 releases/<版本>/ 目录
 cd /opt/omc/releases/$VER
-# 将 $PROJ.tar.xz 上传至此（架构须与上面 uname -m 匹配）
+# 将 $PROJ.tar.xz 上传至此
 sha256sum -c $PROJ.tar.xz.sha256
 tar xf $PROJ.tar.xz --strip-components=1
 sha256sum -c checksums.sha256
-
-# 原始包存档备查（可选）
-mv /opt/omc/infra/$INFRA.tar.xz* /opt/omc/releases/$VER/$PROJ.tar.xz* /opt/omc/packages/ 2>/dev/null || true
 
 # 把本项目版本设为"当前版本"——current 软链是后续所有步骤的统一入口
 ln -sfn /opt/omc/releases/$VER /opt/omc/current
@@ -291,8 +305,7 @@ ln -sfn /opt/omc/releases/$VER /opt/omc/current
 
 Docker 的 bridge 容器网络、容器间通信、宿主端口映射均依赖 Linux **IP 转发**。
 加固过的 / 信创 Linux 常默认 `net.ipv4.ip_forward = 0`——此时容器无法联网、
-端口映射失效，启动容器会报：
-`WARNING: IPv4 forwarding is disabled. Networking will not work.`
+端口映射失效，启动容器会报 `WARNING: IPv4 forwarding is disabled.`
 
 ```bash
 # (1) 加载网桥过滤内核模块，并设为开机自动加载
@@ -307,10 +320,8 @@ net.bridge.bridge-nf-call-iptables = 1
 net.bridge.bridge-nf-call-ip6tables = 1
 EOF
 
-# (3) 立即生效
+# (3) 立即生效 +（4）校验：三项均须为 1
 sysctl --system
-
-# (4) 校验：三项均须为 1
 sysctl net.ipv4.ip_forward net.bridge.bridge-nf-call-iptables net.bridge.bridge-nf-call-ip6tables
 ```
 
@@ -318,232 +329,170 @@ sysctl net.ipv4.ip_forward net.bridge.bridge-nf-call-iptables net.bridge.bridge-
 > 需确认其 IP 伪装/转发策略已开启（`firewall-cmd --add-masquerade --permanent`），
 > 或在每次 firewalld 重载后重新执行 `sysctl --system`。
 
-#### 2.2 离线安装 Docker
+#### 2.2 离线安装 Docker（含 Compose v2 / Buildx）
 
-> 若目标机**已装** Docker 且版本满足（≥ 20.10），跳过本小节。
+> 若目标机**已装** Docker 且版本满足（≥ 20.10、含 compose v2 插件），可跳过本小节；
+> deploy.sh 检测到只有 compose v1 时会从 infra bundle 自动补装 v2 插件。
 
 `install-docker.sh` **全程离线、不联网下载**——它只解压基础设施包 `docker/` 目录内
-**随包带来的** `docker-<版本>.tgz`（Docker 官方静态二进制，构建侧已预先下载好）。
-若该目录缺 `docker-*.tgz`，脚本会直接报错而非联网，需联系交付方补齐基础设施包。
+**随包带来的** `docker-<版本>.tgz`、`docker-compose`、`docker-buildx`（构建侧已预先下载好）。
 
 ```bash
 cd /opt/omc/infra/docker
-bash install-docker.sh        # 解压随包的 docker-*.tgz 到 /usr/local/bin，装 systemd 单元
+sudo bash install-docker.sh   # 解压随包 docker 三件套，装 systemd 单元 + cli-plugins
 systemctl enable --now docker
 docker version                # 确认 Client/Server 均正常
+docker compose version        # 确认 compose v2 插件就位
 ```
 
 **自动检测 `/var` 容量**：脚本在解压二进制前会 `df` 检查 `/var` 可用空间。
-**可用 < 15G 时弹出提示**：
-
-```
-⚠ /var 可用空间 4G < 15G —— docker 数据放 /var 容易撑爆
-  建议改用 /home（/home 可用 35G）：
-    docker 数据    → /home/docker-data
-    containerd 数据 → /home/containerd-data
-切换到 /home？[Y/n]
-```
-
-- **回车（默认 Y）** → 自动建 `/home/{docker,containerd}-data` 并配置：
-  - `/etc/docker/daemon.json` 的 `data-root` 指向 `/home/docker-data`
-  - `containerd.service` 的 `ExecStart` 加 `--root /home/containerd-data`
-- **输入 n** → 继续走默认 `/var/lib/{docker,containerd}`（自担撑爆风险）
-- **非交互模式**（stdin 非 TTY，例如被 deploy.sh 调起）：自动按 Y 切换
-
-装完用 `docker info | grep -E 'Docker Root Dir|Containerd'` 复核两个路径生效。
-`/var` 可用 ≥ 15G 时不弹提示，行为与之前一致。
+**可用 < 15G 时弹出提示**，回车默认切到 `/home`（建 `/home/{docker,containerd}-data`
+并改 `data-root` / containerd `--root`）；输入 `n` 继续走默认 `/var/lib`；非交互模式
+（被 deploy.sh 调起）自动按 Y 切换。装完用 `docker info | grep -E 'Docker Root Dir|Containerd'` 复核。
 
 ### 步骤 3 — 导入 Docker 镜像
 
-镜像来自基础设施包，导入到本机一次即可（项目升级不需重导）。
+镜像来自两个包：基础设施 / 监控镜像来自基础设施包（导一次即可，项目升级不需重导），
+业务镜像来自项目包（每次升级随新版本导入）。
 
 ```bash
+# (1) 基础设施 + 监控镜像（来自基础设施包，一台机器一次）
 cd /opt/omc/infra/images
-docker load -i infra-images-<架构>.tar
-docker load -i monitoring-images-<架构>.tar      # 若部署监控
-docker images                                     # 对照 images.manifest 核对
+docker load -i infra-images-amd64.tar
+docker load -i monitoring-images-amd64.tar           # 若部署监控
+# (2) 业务镜像（来自项目包，随版本走）
+docker load -i /opt/omc/current/images/business-images-<版本>-amd64.tar
+docker images                                         # 对照 images.manifest 核对
 ```
 
-> **关于 tar 内双 tag**：`docker load` 后会看到两套引用——原 tag（如
-> `redis:7-alpine`）与 `*-saved` 后缀 tag（如 `redis:7-alpine-amd64-saved`）。
-> **运维只需关心原 tag**，`docker-compose.yml` 里 `image: redis:7-alpine` 直接可用；
-> `*-saved` tag 是构建侧本地缓存用的命名隔离标识，运维不需手工清理。
+> **关于 tar 内双 tag**：基础设施 tar `docker load` 后会看到两套引用——原 tag（如
+> `redis:7-alpine`）与 `*-amd64-saved` 后缀 tag。**运维只需关心原 tag**，
+> `docker-compose.yml` 里 `image: redis:7-alpine` 直接可用；`*-saved` tag 是构建侧
+> 本地缓存的命名隔离标识，运维不需手工清理。
+
+> 实操中**推荐直接用 `deploy.sh`**（§5.10）完成镜像 load——脚本会 `docker image inspect`
+> 判断镜像是否已存在，已存在则跳过 load 并重启容器，缺失才 load，幂等安全。
 
 ### 步骤 4 — 规划与修改配置（**安全关键，必做**）
 
-配置模板随版本走（在 `/opt/omc/current/etc/`），实例配置统一放**跨版本保留**的
-`/opt/omc/etc/`。首次部署先复制模板再修改：
+默认口令出现在**两处**，**必须同步修改**，否则 OMC 容器连不上 PostgreSQL / MinIO：
+
+1. `/opt/omc/current/deploy/.env`——`docker compose` 起容器时的**初始口令 / 镜像版本**（仅首次 volume 创建时生效）
+2. `/opt/omc/etc/{app,acs,worker}.prod.yaml`——OMC 容器连接中间件时的**客户端口令**
+
+首次部署先把模板复制到跨版本保留的 `etc/`（deploy.sh 首次会自动做；手动如下）：
 
 ```bash
-# 首次部署：把本版本配置模板复制到 etc/（-n：已存在则不覆盖，保护已有站点配置）
-cp -rn /opt/omc/current/etc/. /opt/omc/etc/
+cp -rn /opt/omc/current/etc/. /opt/omc/etc/         # -n：已存在则不覆盖，保护已有站点配置
 ```
 
-`/opt/omc/etc/*.prod.yaml` 含开发默认值，**生产部署前必须修改**：
+必改项：
 
-| 配置项 | 默认值（模板） | 必改为 |
-|--------|--------------|--------|
-| PostgreSQL 密码 | `omcgo123` | 强密码 |
-| MinIO 账号/密码 | `minioadmin/minioadmin` | 强密码 |
-| JWT 密钥 `jwt.secret` | 示例字符串 | ≥32 位随机串（多副本须一致） |
-| Grafana 密码 | `admin/admin` | 强密码 |
-| 各组件连接地址 | `postgres:5432` `redis:6379` `nats:4222` `minio:9000` `acs:7547` | 见下方说明 |
+| 配置项 | 默认值（.env / 模板） | 必改为 |
+|--------|----------------------|--------|
+| PostgreSQL 密码 | `POSTGRES_PASSWORD=omcgo123` | 强密码 |
+| MinIO 账号/密码 | `MINIO_ROOT_USER/PASSWORD=minioadmin` | 强密码 |
+| Grafana 密码 | `GRAFANA_ADMIN_PASSWORD=admin` | 强密码 |
+| JWT 密钥 | `OMCGO_JWT_SECRET=...`（.env）/ `jwt.secret`（yaml） | ≥32 位随机串（多副本须一致） |
 
-**连接地址说明**：OMC 三进程跑在宿主机、基础设施在容器，需把配置里的 docker 服务名改为宿主可达地址：
+**容器间地址（compose 内部网络）**：业务容器与基础设施容器同在 `omcgo-net` 网络，
+`*.prod.yaml` 里用 **docker 服务名**互联（无需改 IP）：
 
 ```yaml
-# /opt/omc/etc/{app,acs,worker}.prod.yaml
-db:    { dsn: "postgres://omcgo:<强密码>@127.0.0.1:5432/omcgo?sslmode=disable" }
-tsdb:  { dsn: "postgres://omcgo:<强密码>@127.0.0.1:5432/omcgo?sslmode=disable" }
-redis: { addrs: ["127.0.0.1:6379"] }
-nats:  { url: "nats://127.0.0.1:4222" }
-minio: { endpoint: "127.0.0.1:9000", access_key: "<强账号>", secret_key: "<强密码>" }
+# /opt/omc/etc/{app,acs,worker}.prod.yaml（容器内挂载覆盖镜像默认值）
+db:    { dsn: "postgres://omcgo:<强密码>@postgres:5432/omcgo?sslmode=disable" }
+tsdb:  { dsn: "postgres://omcgo:<强密码>@postgres:5432/omcgo?sslmode=disable" }
+redis: { addrs: ["redis:6379"] }
+nats:  { url: "nats://nats:4222" }
+minio: { endpoint: "minio:9000", access_key: "<强账号>", secret_key: "<强密码>" }
 ```
 
-同步修改 `/opt/omc/current/deploy/docker-compose.infra.yml` 内 `POSTGRES_PASSWORD`、`MINIO_ROOT_*` 与配置一致。
+> ⚠️ `.env` 中的口令与 `*.prod.yaml` 中的口令必须**完全一致**。`.env` 的口令只在
+> PostgreSQL/MinIO **首次创建数据卷**时写入；若已起过容器再改 `.env` 口令，需先删数据卷
+> 或进容器改库内口令，否则业务容器认证失败。详见下载页 §9「配置文件修改指南」。
 
-### 步骤 5 — 启动基础设施容器
+### 步骤 5 — 一键起全栈（推荐）
+
+完成步骤 1-4 后，直接跑 `deploy.sh`（§5.10），它会自动 load 镜像、起基础设施、跑
+migrate/seed、起业务+web+监控、健康检查。**手动分步**仅用于理解 / 排错：
 
 ```bash
 cd /opt/omc/current/deploy
-# 数据卷建议落到数据盘（编辑 compose 把 volumes 指到 /data/omc/...）
-docker compose -f docker-compose.infra.yml up -d
-docker compose -f docker-compose.infra.yml ps        # 4 个服务均 healthy 再继续
+COMPOSE="docker compose -p omcgo -f docker-compose.infra.yml -f docker-compose.app.yml -f docker-compose.web.yml -f docker-compose.monitoring.yml"
+
+# 5.1 起基础设施，等 PG / Redis 就绪
+$COMPOSE up -d postgres redis nats minio
+
+# 5.2 数据库迁移（goose 一次性容器；schema 与 seed 各自独立 goose 版本表）
+$COMPOSE up --exit-code-from migrate-schema migrate-schema  ; $COMPOSE rm -f migrate-schema
+$COMPOSE up --exit-code-from migrate-seed-sql migrate-seed-sql ; $COMPOSE rm -f migrate-seed-sql
+
+# 5.3 起业务 + web + 监控
+$COMPOSE up -d
+
+# 5.4 健康检查
+bash /opt/omc/current/deploy/healthcheck.sh
 ```
 
-容器：`postgres`（TimescaleDB pg16）、`redis`、`nats`（JetStream）、`minio`。
+> 迁移走容器内 `omcgo-migrate`（goose 幂等），**无需宿主机二进制**。`migrate-schema` /
+> `migrate-seed-sql` 是 compose 中的一次性服务（`network_mode: service:postgres`，跑完即退）。
 
-### 步骤 6 — 初始化数据库（迁移）
-
-数据库迁移分 **schema（表结构）** 与 **seed（种子数据）** 两步，使用各自独立的 goose 版本表：
-
-```bash
-cd /opt/omc/current
-DSN="postgres://omcgo:<强密码>@127.0.0.1:5432/omcgo?sslmode=disable"
-
-# 6.1 表结构
-./bin/omcgo-migrate --dsn "$DSN" --path migrations up
-
-# 6.2 种子数据（独立 goose 版本表）
-GOOSE_TABLE=goose_db_version_seed ./bin/omcgo-migrate --dsn "$DSN" --path migrations/seed up
-```
-
-> 迁移幂等，可重复执行。升级版本时同样先跑迁移再换二进制。
-
-### 步骤 7 — 部署 OMC 三进程（二进制 + systemd）
-
-`omcgo-app/acs/worker` 启动时按**相对路径**加载 `data/`（字典 XML）与 `configs/`（Casbin
-模型），因此 systemd 单元的 `WorkingDirectory` **必须**设为 `/opt/omc/current`（当前
-版本目录软链）。配置用绝对路径指向跨版本保留的 `/opt/omc/etc/`——升级时只切软链、不改单元。
-
-`/opt/omc/current/deploy/systemd/omcgo-app.service` 模板：
-
-```ini
-[Unit]
-Description=OMC App Service (omcgo-app)
-After=network.target docker.service
-Requires=docker.service
-StartLimitIntervalSec=300                          # 崩溃循环熔断窗口
-StartLimitBurst=5                                  # 300s 内重启达 5 次即进 failed 停止重试
-
-[Service]
-Type=notify                                        # 进程经 sd_notify 上报 READY=1 后才算启动完成
-NotifyAccess=main
-WorkingDirectory=/opt/omc/current                  # 关键：软链，相对路径 data/、configs/ 在此解析
-ExecStart=/opt/omc/current/bin/omcgo-app --config /opt/omc/etc/app.prod.yaml
-Restart=on-failure
-RestartSec=5s
-WatchdogSec=30s                                    # 看门狗：30s 未喂狗（进程卡死）即重启
-TimeoutStartSec=300s                               # 启动期上限（含 DB/字典加载）
-LimitNOFILE=65536                                  # 文件描述符上限（见 §9 #8）
-Environment=OMCGO_ENV=prod
-Environment=TZ=Asia/Shanghai
-
-[Install]
-WantedBy=multi-user.target
-```
-
-> **自动重启与故障暴露（单元已内置，运维无需改）**：
-> - `Restart=on-failure` —— 进程崩溃退出后 5s 自动拉起。
-> - `WatchdogSec=30s` + `Type=notify` —— 进程**卡死**（死锁、不退出但无响应）时，
->   程序内的喂狗 goroutine 停止上报心跳，systemd 超 30s 即判定卡死并重启。
->   这是 `Restart=on-failure` 抓不到的故障（进程没退出）。
-> - `StartLimitBurst=5` —— 若进程**崩溃循环**（起来又挂），300s 内重启 5 次后进入
->   `failed` 态、**停止重试**。这是有意为之：让 Prometheus `OMCAppDown` 告警明确
->   暴露「这台修不好了」并通过邮件通知人工介入，而非无限重启刷日志掩盖故障。
->   人工修复后用 `systemctl reset-failed omcgo-app && systemctl start omcgo-app` 恢复。
-
-安装并启动（acs、worker 同理，分别指向 `acs.prod.yaml`、`worker.prod.yaml`）：
-
-```bash
-cp /opt/omc/current/deploy/systemd/omcgo-*.service /etc/systemd/system/
-systemctl daemon-reload
-systemctl enable --now omcgo-app omcgo-acs omcgo-worker
-systemctl status omcgo-app omcgo-acs omcgo-worker     # 均 active(running)
-```
-
-> **启动顺序**：基础设施 → 迁移 → 三进程。
-> systemd 单元一次安装、长期不动；升级换版本只需切 `current` 软链 + `systemctl restart`（见 §8）。
-
-### 步骤 8 — 部署前端
-
-```bash
-cd /opt/omc/current/deploy
-# docker-compose.web.yml 已挂载 web/dist + nginx.conf + default.conf
-docker compose -f docker-compose.web.yml up -d
-```
-
-`default.conf` 将 `/api` 反向代理到 OMC app。OMC 三进程跑宿主机时，需把代理
-`upstream` 改为 `host.docker.internal:8081`（compose 已配 `extra_hosts`）或宿主机实际 IP。
-
-### 步骤 9 —（可选）部署监控栈
-
-```bash
-cd /opt/omc/current/deploy
-docker compose -f docker-compose.monitoring.yml up -d
-```
-
-Prometheus 采集三进程 metrics（9090/9091/9092）+ 基础服务 exporter（postgres/redis/nats
-经 exporter、minio 自带指标端点），Grafana 看板、Loki 收集日志。告警规则含进程存活、
-连接池、基础服务存活/容量（见 `monitoring/alerts/`），经 AlertManager 邮件通知。非必需，可后置。
-
-### 步骤 10 — 启动校验
+### 步骤 6 — 启动校验
 
 ```bash
 bash /opt/omc/current/deploy/healthcheck.sh
-# 或手动：
-curl -s http://127.0.0.1:8081/health        # app 健康
-curl -s http://127.0.0.1:7557/              # acs 存活
-curl -s http://127.0.0.1:9091/metrics | head  # metrics 暴露
-docker compose -f /opt/omc/current/deploy/docker-compose.infra.yml ps   # 基础设施 healthy
+# healthcheck 检查：app/acs/worker/postgres/redis/nats/minio（+web+监控）容器 running，
+# 以及 5 个核心健康端点（app/acs/worker /healthz、app /metrics、前端 SPA :8081）。
 ```
 
-浏览器访问 `http://<服务器IP>:8080`，用初始管理员账号登录（见交付包 `README.md`），完成首次登录改密。
+浏览器访问 `http://<服务器IP>:8081`，用初始管理员账号登录（`admin`/`admin123`），完成首次登录改密。
 
 ### 5.10 一键部署（推荐）
 
-完成 §5.0 目录布局 + §5（步骤 1 解压）后，可直接跑 `deploy.sh` 自动化执行步骤 3-10：
+完成 §5.0 目录布局 + 步骤 1（解压）+ 步骤 2（装 Docker）后，直接跑 `deploy.sh`：
 
 ```bash
-sudo bash /opt/omc/current/deploy/deploy.sh                # 全套（推荐首次）
-sudo bash /opt/omc/current/deploy/deploy.sh --skip-infra   # 日常升级（基础设施已装）
-sudo bash /opt/omc/current/deploy/deploy.sh --check-only   # 只做环境 precheck
-sudo bash /opt/omc/current/deploy/deploy.sh -h             # 看全部参数
+sudo bash /opt/omc/current/deploy/deploy.sh                  # 全套（推荐首次）
+sudo bash /opt/omc/current/deploy/deploy.sh --skip-infra     # 日常升级（基础设施镜像已 load）
+sudo bash /opt/omc/current/deploy/deploy.sh --skip-monitoring # 不起监控栈
+sudo bash /opt/omc/current/deploy/deploy.sh --skip-migrate   # 不跑 migrate/seed
+sudo bash /opt/omc/current/deploy/deploy.sh --check-only     # 只做环境 precheck
+sudo bash /opt/omc/current/deploy/deploy.sh --overwrite-etc  # 用新包模板覆盖 etc（旧 etc 自动备份）
+sudo bash /opt/omc/current/deploy/deploy.sh -h               # 看全部参数
 ```
 
-**10 步自动化覆盖**：precheck → 建立目录布局 → load 基础镜像（从 `/opt/omc/infra/images/`）
-→ 默认口令检查（含交互确认） → infra compose up → 等就绪（PG + Redis ping ≤ 90s）
-→ db migrate → db seed（首次自动打 `.seed.done` mark）→ install systemd 单元
-（app/acs/worker，开机自启） → web compose up → 调 healthcheck.sh。
+**9 步自动化覆盖**：precheck（含 compose v2 自检 / 缺失时从 infra bundle 自动装 v2 插件）→
+旧 systemd 单元自动迁移（兼容历史宿主二进制部署，停掉并备份 `omcgo-{app,acs,worker}.service`）→
+建立目录布局 + `current` 软链 → load 镜像（基础设施 + 监控 + 业务，从 `/opt/omc/infra/images/`
+与版本目录 `images/`；已存在则跳过 load 并重启容器）→ 默认口令检查（含交互确认）→
+组装 compose 命令 → 起基础设施 + 等就绪（PG + Redis ping ≤ 90s）+ 容器内 `migrate-schema` /
+`migrate-seed-sql`（goose 幂等，migrate 失败自动重试 3 次）→ `docker compose up -d` 全栈 → 调 `healthcheck.sh`。
 
-**幂等**：所有步骤均可重跑。二次运行视情况跳过已完成项（seed 看 mark 文件、
-镜像 load 跳过同 digest、systemd 单元差异比对后备份覆盖）。
+**幂等**：所有步骤均可重跑。二次运行视情况跳过已完成项（镜像 `docker image inspect`
+命中即跳过 load 并 restart、seed 走 goose 版本表自动 catch up、`etc/` 已有实例配置默认保留不覆盖）。
 
-**安全要求**：deploy.sh **会主动检查** `docker-compose.infra.yml` 内默认口令
-（`omcgo123` / `minioadmin`），存在时弹交互确认；生产部署务必在跑 deploy 前先按
-§4.1 改强口令。
+**安全要求**：deploy.sh **会主动检查** `deploy/.env` 内默认口令（`omcgo123` /
+`minioadmin` / `admin`），存在时弹交互确认；生产部署务必在跑 deploy 前先按 §4 / §6.1 改强口令。
 
-### 5.11 系统加速设置（可选 / 安装后任意时刻可改）
+### 5.11 日常运维 — `svc.sh`
+
+部署完成后，日常启停 / 重启 / 查日志用 `svc.sh`（与 deploy.sh 同目录，无须再跑 deploy.sh）：
+
+```bash
+cd /opt/omc/current/deploy
+bash svc.sh status                  # 查看所有服务状态（默认）
+bash svc.sh start [svc...]          # 启动全栈，或指定服务
+bash svc.sh stop  [svc...]          # 停止（容器保留，volume 保留）
+bash svc.sh restart [svc...]        # 重启全栈，或指定服务
+bash svc.sh logs app --tail 200     # 查看 app 日志
+bash svc.sh logs acs -f             # 跟随 acs 日志（Ctrl-C 退出）
+bash svc.sh down                    # 关栈并删容器（保留 volume）
+bash svc.sh --skip-monitoring restart   # 不操作监控栈
+```
+
+> svc.sh 自动按存在性拼 4 个 compose 文件，compose project 固定 `omcgo`（与 deploy.sh 一致），不需 root（除非 docker daemon 需 sudo）。
+
+### 5.12 系统加速设置（可选 / 安装后任意时刻可改）
 
 `install-docker.sh` 装完 Docker 后会引导选择加速；后期想换或单独配置：
 
@@ -552,65 +501,41 @@ sudo bash /opt/omc/infra/setup-mirrors.sh                    # 交互选单（�
 sudo bash /opt/omc/infra/setup-mirrors.sh --docker daocloud  # 仅 Docker（非交互）
 sudo bash /opt/omc/infra/setup-mirrors.sh --npm taobao       # 仅 npm
 sudo bash /opt/omc/infra/setup-mirrors.sh --golang goproxycn # 仅 Golang
-sudo bash /opt/omc/infra/setup-mirrors.sh \
-     --docker daocloud --npm taobao --golang goproxycn              # 三合一一次过
-sudo bash /opt/omc/infra/setup-mirrors.sh --show             # 看当前三项
-sudo bash /opt/omc/infra/setup-mirrors.sh --remove           # 取消全部
-sudo bash /opt/omc/infra/setup-mirrors.sh -h                 # 全参数
+sudo bash /opt/omc/infra/setup-mirrors.sh --show / --remove  # 看当前三项 / 取消全部
 ```
-
-**三个目标各自的内置选项**：
 
 | 目标 | 选项 | 说明 |
 |------|------|------|
-| Docker | `official` | 不设置，回归 docker hub 官方 |
-| Docker | `daocloud` | DaoCloud `https://docker.m.daocloud.io`（推荐） |
-| Docker | `xuanyuan` | 轩辕镜像 `https://docker.xuanyuan.me` |
-| npm | `official` | 不设置，回归 `https://registry.npmjs.org` |
-| npm | `taobao` | 淘宝 `https://registry.npmmirror.com`（推荐） |
-| Golang | `official` | 不设置，使用 `proxy.golang.org` |
-| Golang | `goproxycn` | `https://goproxy.cn,direct` + `GOSUMDB=sum.golang.google.cn`（推荐） |
+| Docker | `official` / `daocloud`（推荐 `https://docker.m.daocloud.io`）/ `xuanyuan` | 写 `/etc/docker/daemon.json` 的 `registry-mirrors`（python3 merge 保留其它键，变更时 restart docker） |
+| npm | `official` / `taobao`（推荐 `https://registry.npmmirror.com`） | 写系统级 `/etc/npmrc`，不动用户 `~/.npmrc` |
+| Golang | `official` / `goproxycn`（推荐 `https://goproxy.cn,direct` + `GOSUMDB=sum.golang.google.cn`） | 写 `/etc/profile.d/goproxy.sh`，新 shell 自动加载 |
 
-**实现**：
-- Docker：写 `/etc/docker/daemon.json` 的 `registry-mirrors`（python3 merge 保留
-  其它键，自动备份 `daemon.json.bak.<时间戳>`），变更时 `systemctl restart docker`
-- npm：写 `/etc/npmrc`（系统级，所有用户生效），不动用户 `~/.npmrc`
-- Golang：写 `/etc/profile.d/goproxy.sh`（导出 `GOPROXY` / `GOSUMDB`），新 shell
-  自动加载；当前 shell 需 `source` 或重新登录
-
-> 纯离线场景下三项加速对**首次部署**没有影响（镜像 / npm 包 / Go 模块都已随包交付）；
+> 纯离线场景下三项加速对**首次部署**没有影响（镜像 / 包 / 模块都已随包交付）；
 > 配置加速主要利于运维侧后续临时 `docker pull`、`npm install`、`go install` 提速。
 
-### 5.12 部署后访问 + 初始账号
+### 5.13 部署后访问 + 初始账号
 
 | 端点 | URL | 初始账号 |
 |------|-----|---------|
-| **Web 管理页** | `http://<服务器IP>:8080` | `admin` / `admin123` |
+| **Web 管理页** | `http://<服务器IP>:8081` | `admin` / `admin123` |
+| 基站 ACS URL | `http://<服务器IP>:8080`（基站设备侧填，人不浏览） | — |
 | MinIO Console | `http://<服务器IP>:9001` | `minioadmin` / `minioadmin` |
-| PostgreSQL | `127.0.0.1:5432` | `omcgo` / `omcgo123` |
-| Grafana（可选监控栈） | `http://<服务器IP>:3000` | `admin` / `admin` |
-| App 健康端点 | `http://<服务器IP>:8081/health` | — |
-| ACS 健康端点 | `http://<服务器IP>:9090/healthz` | — |
+| PostgreSQL | `<服务器IP>:5432` | `omcgo` / `omcgo123` |
+| Grafana（可选监控栈） | `http://<服务器IP>:3030` | `admin` / `admin` |
+| app 健康端点 | `http://127.0.0.1:9091/healthz` | — |
+| acs 健康端点 | `http://127.0.0.1:9095/healthz`（容器内 9090） | — |
 
-> ⚠️ **生产部署前**：上述默认口令必须改强口令，并同步 `docker-compose.infra.yml`
-> 与 `*.prod.yaml`；用户首次登录 Web UI 强制改密。
+> ⚠️ **生产部署前**：上述默认口令必须改强口令，并同步 `deploy/.env` 与 `*.prod.yaml`；用户首次登录 Web UI 强制改密。
 
-### 5.13 脚本帮助速查
-
-每个交付侧脚本都有 `-h | --help`：
+### 5.14 脚本帮助速查
 
 ```bash
-sudo bash /opt/omc/infra/docker/install-docker.sh -h         # 装 Docker
-sudo bash /opt/omc/infra/setup-mirrors.sh -h          # Docker/npm/Golang 加速
-sudo bash /opt/omc/current/deploy/deploy.sh -h               # 一键部署
-bash /opt/omc/current/deploy/healthcheck.sh -h               # 健康校验
+sudo bash /opt/omc/infra/docker/install-docker.sh -h    # 装 Docker / Compose / Buildx
+sudo bash /opt/omc/infra/setup-mirrors.sh -h            # Docker/npm/Golang 加速
+sudo bash /opt/omc/current/deploy/deploy.sh -h          # 一键部署
+bash /opt/omc/current/deploy/svc.sh -h                  # 日常启停 / 重启 / 日志
+bash /opt/omc/current/deploy/healthcheck.sh -h          # 健康校验
 ```
-
-### 5.14 备选：全容器化部署
-
-若运维更倾向统一用 docker-compose 管理，可由构建侧额外把三进程二进制封装为极简镜像，
-随 `images/` 交付，运维侧 `docker compose up -d` 一把启动全部服务。仍满足"交付二进制"
-——只是二进制被薄镜像包裹。两方案择一，不混用。
 
 ---
 
@@ -618,29 +543,37 @@ bash /opt/omc/current/deploy/healthcheck.sh -h               # 健康校验
 
 ### 6.1 安全必改项
 
-见 §5 步骤 4 表格。**严禁**用模板默认密码上生产。
+见 §5 步骤 4 表格。**严禁**用模板默认密码上生产；`.env` 与 `*.prod.yaml` 两处口令必须一致。
 
 ### 6.2 `*.prod.yaml` 关键项
 
 | 段 | 项 | 说明 |
 |----|----|----|
 | `server` | `port` / `tls_port` / `grpc_port` | 服务监听端口 |
-| `db` / `tsdb` | `dsn` / `max_conns` | 数据库连接，连接数按规模调 |
-| `redis` | `addrs` / `pool_size` | Redis 地址 |
-| `nats` | `url` | NATS 地址 |
-| `minio` | `endpoint` / `buckets` | 对象存储；buckets 首启自动创建 |
+| `db` / `tsdb` | `dsn` / `max_conns` | 数据库连接（容器内用服务名 `postgres:5432`），连接数按规模调 |
+| `redis` | `addrs` / `pool_size` | Redis 地址（容器内 `redis:6379`） |
+| `nats` | `url` | NATS 地址（容器内 `nats:4222`） |
+| `minio` | `endpoint` / `buckets` | 对象存储（容器内 `minio:9000`）；buckets 首启自动创建 |
 | `jwt` | `secret` / `*_ttl` | 令牌密钥与有效期 |
 | `login_crypto` | `private_key_path` / `allow_plaintext` | 登录密码 RSA 加密；HTTP 内网无 TLS 时可设 `allow_plaintext: true`（仅受信内网） |
 | `batch_processor` | `workers` | Periodic Inform 批量并发，建议 = CPU 核数/2 |
 | `log` | `level` / `output_paths` / `rotation` | 日志级别（prod 建议 `warn`）、路径、轮转 |
 | `license` | `signing.public_key_dir` / `strict` | License 治理；strict=true 需放 OEM 公钥 |
-| `notification` | `smtp.*` / `alert_webhook.*` | 告警邮件通知。默认 `smtp.enabled: false`；需告警邮件时填 `smtp.host`/`from` 并置 `enabled: true`，收件人填 `alert_webhook.recipients`（详见《告警处置Runbook.md》与 `monitoring/alertmanager.yml`） |
+| `notification` | `smtp.*` / `alert_webhook.*` | 告警邮件通知。默认 `smtp.enabled: false`；需告警邮件时填 `smtp.host`/`from` 并置 `enabled: true`（详见《告警处置Runbook.md》与 `monitoring/alertmanager.yml`） |
 
 ### 6.3 TLS 与密钥
 
-- **TLS**：默认 `tls.enabled: false`（内网 HTTP）。需加密时用 `deploy/certs/` 自签脚本生成证书，或导入企业 CA 证书，置 `enabled: true` 并填 `cert_file`/`key_file`。
+- **TLS**：默认内网 HTTP。需加密时用 `deploy/certs/` 自签脚本生成证书，或导入企业 CA 证书并配置 nginx / 业务 yaml。
 - **登录 RSA 私钥**：`login_crypto.private_key_path` 指向的 PEM 需在部署时生成并放入 `/opt/omc/etc/keys/`；**多副本部署必须共用同一份**（keyID 一致）。
 - 内网纯 HTTP 访问时浏览器 `crypto.subtle` 不可用，可临时启用 `allow_plaintext: true`（审计日志会标记），但推荐尽快上 TLS。
+
+### 6.4 host 主权的自定义 XML 目录
+
+deploy.sh 首次部署会建两个 host bind mount 目录（容器内 UID 10001 写入），与镜像内
+builtin XML 物理隔离，升级保留运维已设权限：
+
+- `/opt/omc/data/param-mappings-custom`（T-0178 自定义 paramModel XML）
+- `/opt/omc/data/indicator-library-custom/{enb,gsm,gnb}`（T-0180 自定义 indicator XML，三制式分桶）
 
 ---
 
@@ -648,15 +581,14 @@ bash /opt/omc/current/deploy/healthcheck.sh -h               # 健康校验
 
 部署完成后逐项确认：
 
-- [ ] 4 个基础设施容器状态 `healthy`
-- [ ] 数据库 schema + seed 迁移均成功（`goose_db_version*` 表有记录）
-- [ ] `omcgo-app/acs/worker` 三进程 `active(running)`，且重启宿主后自启
-- [ ] `/health` 返回正常，`/metrics` 可抓取
-- [ ] 前端页面可访问、可登录、首登改密完成
-- [ ] CPE 基站能 Inform 接入 ACS（`:7557`），设备出现在设备列表
-- [ ] 默认密码（PG/MinIO/JWT/Grafana/管理员）全部已改
+- [ ] 4 个基础设施容器 + 3 个业务容器 + web 容器（+监控）均 `running`（`svc.sh status`）
+- [ ] 数据库 schema + seed 迁移均成功（`migrate-schema` / `migrate-seed-sql` 容器 exit 0）
+- [ ] `healthcheck.sh` 全部 `[OK]`（容器 running + 5 个健康端点）
+- [ ] 前端 `http://<IP>:8081` 可访问、可登录、首登改密完成
+- [ ] CPE 基站能 Inform 接入 ACS（基站填 `http://<IP>:8080` 作 ACS URL），设备出现在设备列表
+- [ ] 默认密码（PG/MinIO/JWT/Grafana/管理员）全部已改，`.env` 与 `*.prod.yaml` 一致
 - [ ] 日志正常写入 `/opt/omc/run/logs/`，轮转生效
-- [ ] 关键端口防火墙策略已按规划放行/收敛
+- [ ] 关键端口防火墙策略已按规划放行/收敛（5432/6379/4222/9000/9001 出公网前 deny）
 - [ ] 数据盘容量与告警阈值已设置
 - [ ] 备份方案（见 §8）已落实并演练
 
@@ -665,79 +597,87 @@ bash /opt/omc/current/deploy/healthcheck.sh -h               # 健康校验
 ## 8. 升级与回滚
 
 升级/回滚基于 §5.0 的「版本目录 + `current` 软链」：新版本进新的 `releases/<版本>/`
-目录，切软链即生效，旧版本目录原样留存、可秒级回退。systemd 单元一次安装后无需再改。
+目录，`deploy.sh` 切软链 + 起新镜像容器，旧版本目录原样留存、可快速回退。
 
 > 本节是**项目包升级**（日常）。基础设施包很少升级；需要时（基础设施包出了新版本）
-> 重新执行 §5 步骤 1(1) + 步骤 3，把新基础设施包解压到 `/opt/omc/infra/` 并
+> 重新执行 §5 步骤 1(1) + 步骤 3(1)，把新基础设施包解压到 `/opt/omc/infra/` 并
 > `docker load` 新镜像，与项目包升级互不影响。
 
 ### 8.1 升级（项目包）
 
 ```bash
-VER=<新项目版本号> ; ARCH=<架构>
-PROJ=<新项目包文件名>     # 如 omc-test-<版本>-$ARCH 或 omc-release-<版本>-$ARCH
-DSN="postgres://omcgo:<密码>@127.0.0.1:5432/omcgo?sslmode=disable"
+VER=<新项目版本号>
+PROJ=<新项目包文件名>     # 如 omc-test-<版本>-amd64 或 omc-release-<版本>-amd64
 
 # 1) 备份（不可省）：数据库 + 当前实例配置（MinIO 数据按客户备份方案另行快照）
-pg_dump "$DSN" > /opt/omc/packages/db-backup-$(date +%F).sql
+docker exec $(docker ps -qf name=postgres) \
+  pg_dump -U omcgo omcgo > /opt/omc/packages/db-backup-$(date +%F).sql
 cp -r /opt/omc/etc /opt/omc/packages/etc-backup-$(date +%F)
 
 # 2) 解压新版本到独立目录（current 暂不动，老版本仍在运行）
 mkdir -p /opt/omc/releases/$VER && cd /opt/omc/releases/$VER
 tar xf $PROJ.tar.xz --strip-components=1
 sha256sum -c checksums.sha256
+ln -sfn /opt/omc/releases/$VER /opt/omc/current
 
 # 3) 配置：比对新版本模板有无新增项，按需手工合并到 /opt/omc/etc/（不要整体覆盖）
 diff -ru /opt/omc/etc /opt/omc/releases/$VER/etc
 
-# 4) 跑数据库迁移（用新版本的 migrations，幂等、向后兼容）
-/opt/omc/releases/$VER/bin/omcgo-migrate --dsn "$DSN" --path /opt/omc/releases/$VER/migrations up
-GOOSE_TABLE=goose_db_version_seed /opt/omc/releases/$VER/bin/omcgo-migrate \
-  --dsn "$DSN" --path /opt/omc/releases/$VER/migrations/seed up
+# 4) 跑 deploy.sh：自动 load 新业务镜像、跑 migrate/seed（幂等、向后兼容）、起新容器
+sudo bash /opt/omc/current/deploy/deploy.sh --skip-infra
 
-# 4.1)（可选，仅首次升级到含 Stage 2 路径翻译的版本时执行）
-#     历史 device_parameters 行的 parameter_path 是基站私有 path（privatePath），
-#     从该版本起改写为系统级 standardPath。dry-run 预览 → apply 真实迁移。
-#     无脏数据 / 老版本本来就走 standardPath 的环境可跳过本步。
-/opt/omc/releases/$VER/bin/omcctl --config /opt/omc/etc/omcgo-app.prod.yaml \
-  mml migrate-device-params                       # 默认 dry-run，输出"would update N rows"
-/opt/omc/releases/$VER/bin/omcctl --config /opt/omc/etc/omcgo-app.prod.yaml \
-  mml migrate-device-params --apply --batch=500   # 真实执行；--batch 控制单事务行数
-# 校验：psql -d omcgo -c "SELECT count(*) FROM device_parameters WHERE parameter_path LIKE 'Device.X_%';"
-# 期望：0（或仅剩无 mapping 的私有路径）
-
-# 5) 切 current 软链 + 重启三进程（systemd 单元无需改动）
-systemctl stop omcgo-app omcgo-acs omcgo-worker
-ln -sfn /opt/omc/releases/$VER /opt/omc/current
-systemctl start omcgo-app omcgo-acs omcgo-worker
-
-# 6) 前端：current 已指向新版本，重建 nginx 容器即用上新 web/dist
-docker compose -f /opt/omc/current/deploy/docker-compose.web.yml up -d --force-recreate
-
-# 7) 跑 §7 验收清单
+# 5) 跑 §7 验收清单
 ```
+
+> 业务镜像 tag 含版本号，新旧镜像并存；`deploy.sh` 起容器时按 `.env` 的新 tag 拉起，
+> 旧容器被 `up -d` 滚动替换。新版本若引入新表 / 新 seed，goose 自动追加。
+
+#### 8.1.1（可选）device_parameters 路径翻译迁移
+
+仅首次升级到含 Stage 2 路径翻译的版本时执行：历史 `device_parameters` 行的
+`parameter_path` 是基站私有 path，从该版本起改写为系统级 standardPath。`omcctl` 运维 CLI
+随 **worker 镜像**发布（`docker exec` 进 worker 容器跑，默认连 `OMCCTL_SERVER=http://app:8081`）：
+
+```bash
+WORKER=$(docker ps -qf name=worker)
+docker exec "$WORKER" omcctl mml migrate-device-params                       # dry-run，输出 would update N rows
+docker exec "$WORKER" omcctl mml migrate-device-params --apply --batch=500   # 真实执行
+```
+
+无脏数据 / 老版本本来就走 standardPath 的环境可跳过本步。
 
 ### 8.2 回滚
 
-二进制 / 前端回滚就是**把 `current` 软链切回旧版本目录**，秒级完成：
+把 `current` 软链切回旧版本目录并用旧镜像重起容器：
 
 ```bash
-systemctl stop omcgo-app omcgo-acs omcgo-worker
 ln -sfn /opt/omc/releases/<旧版本> /opt/omc/current
-systemctl start omcgo-app omcgo-acs omcgo-worker
-docker compose -f /opt/omc/current/deploy/docker-compose.web.yml up -d --force-recreate
+sudo bash /opt/omc/current/deploy/deploy.sh --skip-infra --skip-migrate
 ```
 
 - **配置**：用 §8.1 步骤 1 备份的 `etc-backup-*` 还原 `/opt/omc/etc/`。
-- **数据库**：若新版本迁移含**破坏性变更**（删列/改类型/删表），回滚旧二进制后 schema 不兼容，须用 §8.1 步骤 1 的 `pg_dump` 备份恢复——**因此升级前备份绝不可省**；向后兼容的迁移则无需动数据库。
+- **数据库**：若新版本迁移含**破坏性变更**（删列/改类型/删表），回滚旧镜像后 schema 不兼容，须用 §8.1 步骤 1 的 `pg_dump` 备份恢复——**因此升级前备份绝不可省**；向后兼容的迁移则无需动数据库（故回滚加 `--skip-migrate`）。
 
 ### 8.3 版本留存策略
 
 - `releases/` 下**保留最近 3 个版本**目录，供回滚与问题排查。
-- 清理更早版本：确认 `current` 未指向后 `rm -rf /opt/omc/releases/<旧版本>`。
+- 清理更早版本：确认 `current` 未指向后 `rm -rf /opt/omc/releases/<旧版本>`，并 `docker rmi` 对应旧业务镜像。
 - 交付包原件存档于 `/opt/omc/packages/`，可长期保留。
 
 > 升级前务必完成 `pg_dump` + MinIO 备份，并已在测试环境演练过回滚流程。
+
+### 8.4 卸载
+
+```bash
+sudo bash /opt/omc/current/deploy/deploy.sh --uninstall                 # dry-run，只列将做的动作
+sudo bash /opt/omc/current/deploy/deploy.sh --uninstall --no-dry-run    # 真删（再做一次交互确认）
+sudo bash /opt/omc/current/deploy/deploy.sh --uninstall --no-dry-run --keep-data --keep-images
+                                                                        # 删容器+/opt/omc，但保留数据卷与业务镜像
+```
+
+> 卸载默认 **dry-run**，仅打印将停止/删除的容器、数据卷、网络、业务镜像、`/opt/omc`。
+> `--no-dry-run` 才真删；`--keep-data` 保留 docker 数据卷（pg/minio/redis/tempo/loki）；
+> `--keep-images` 保留 `omcgo/*` 业务镜像。**不卸载 Docker 引擎本身**（如需：`install-docker.sh --uninstall`）。
 
 ---
 
@@ -747,24 +687,25 @@ docker compose -f /opt/omc/current/deploy/docker-compose.web.yml up -d --force-r
 
 | # | 因素 | 风险 | 应对 |
 |---|------|------|------|
-| 1 | **CPU 架构** | amd64 包跑到 arm64 机器（或反之）直接无法执行 | 每个版本均提供 amd64 与 arm64 两个交付包；部署前 `uname -m` 确认架构（`x86_64`→amd64，`aarch64`→arm64）并选用对应包 |
+| 1 | **CPU 架构** | 当前仅 amd64 包，跑到 arm64 机器无法执行 | 部署前 `uname -m` 确认为 `x86_64`；arm64 联系构建侧 |
 | 2 | **操作系统/内核** | 国产化 OS（麒麟/统信）或老旧内核对 Docker、cgroup 支持差异 | 交付前确认发行版+内核；Docker 用静态二进制规避包管理器差异；信创环境提前在同型号机验证 |
-| 3 | **时间同步** | 内网无公网 NTP，多机时钟漂移 → JWT 失效、TLS 校验失败、定时任务错乱、日志时序混乱 | 确认是否有内网 NTP；无则指定一台为 NTP 源；容器统一挂 `/etc/localtime`、`TZ=Asia/Shanghai` |
-| 4 | **时区** | 容器/宿主时区不一致 → 时序数据、日志、调度偏差 | 全栈固定 `Asia/Shanghai`，容器挂 `/etc/localtime:ro` |
-| 5 | **端口冲突** | 目标机已有服务占用 5432/6379/8081 等 | §4.4 提前核查；冲突时改 compose 端口映射 + 同步改 `*.prod.yaml` |
+| 3 | **时间同步** | 内网无公网 NTP，多机时钟漂移 → JWT 失效、TLS 校验失败、定时任务错乱 | 确认内网 NTP；无则指定一台为 NTP 源；容器统一 `TZ=Asia/Shanghai` |
+| 4 | **时区** | 容器/宿主时区不一致 → 时序数据、日志、调度偏差 | 全栈固定 `Asia/Shanghai` |
+| 5 | **端口冲突** | 目标机已有服务占用 8081/8080/5432/6379 等 | §4.4 提前核查；冲突时改 compose 端口映射 + 同步改 `.env`/`*.prod.yaml` |
 | 6 | **防火墙/SELinux** | iptables/firewalld 拦截容器网络与对外端口；SELinux 阻止容器挂载卷 | 放行 §2.1 端口；SELinux 设宽容模式或为卷打 `:z` 标签；记录变更供安全审计 |
-| 7 | **磁盘容量** | PM/MR/固件文件约 500 GB/月增长，pgdata/miniodata 撑爆根盘 | 数据卷落独立数据盘；设容量告警；配置 PM/MR 文件生命周期清理 |
-| 8 | **文件描述符上限** | 高并发下 ACS 会话 + nginx 连接耗尽 fd → 拒绝连接 | systemd `LimitNOFILE=65536`；nginx 容器 `ulimits.nofile`；调宿主 `/etc/security/limits.conf` |
-| 9 | **数据库选型** | 客户要求用既有 PG 实例，但缺 TimescaleDB 扩展 → 时序表创建失败 | 优先用交付包内 TimescaleDB 容器；若用外部 PG，必须确认已装 TimescaleDB 扩展且版本兼容 pg16 |
-| 10 | **容器 DNS** | 容器内 DNS 解析异常（已知痛点，见 `deployments/docker/DOCKER_DNS_FIX.md`） | OMC 跑宿主机用 IP 直连可规避；全容器化时按该文档配置 `docker-daemon-dns.json` |
+| 7 | **磁盘容量** | PM/MR/固件文件约 500 GB/月增长，pgdata/miniodata 撑爆根盘 | docker `data-root` 落独立数据盘（install-docker.sh 可切 /home）；设容量告警；配 PM/MR 生命周期清理 |
+| 8 | **文件描述符上限** | 高并发下 ACS 会话 + nginx 连接耗尽 fd → 拒绝连接 | compose `ulimits.nofile`；调宿主 `/etc/security/limits.conf` 与 dockerd `LimitNOFILE` |
+| 9 | **数据库选型** | 客户要求用既有 PG 实例，但缺 TimescaleDB 扩展 → 时序表创建失败 | 优先用交付包内 TimescaleDB 容器；若用外部 PG，必须确认已装 TimescaleDB 扩展且兼容 pg16 |
+| 10 | **容器 DNS** | 容器内 DNS 解析异常（已知痛点，见 `deployments/docker/DOCKER_DNS_FIX.md`） | 按该文档配置 `docker-daemon-dns.json`；compose 内服务名互联走 docker 内部 DNS |
 | 11 | **内网镜像仓库** | 有 Harbor 则镜像分发更优；无则只能逐机 `docker load` | 交付前确认；有 Harbor 可改为推仓库 + compose 引用 |
 | 12 | **镜像版本一致性** | 自行 `docker pull` 浮动标签会覆盖交付镜像、导致版本漂移 | 镜像版本已由构建侧固化；运维侧只 `docker load` 交付包内镜像，勿自行 `docker pull` |
-| 13 | **CPE 回连网络** | ACS 与 CPE 基站之间 NAT/防火墙阻断 Connection Request / STUN | 确认 CPE 的 ACS URL 指向正确、`:7557`/`:3478` 可达；STUN 用于 NAT 穿透需放行 UDP |
-| 14 | **多副本密钥一致** | app 多副本但 JWT/登录 RSA 密钥不一致 → 令牌跨副本失效 | 多副本共用同一份 `jwt.secret` 与 `login_crypto` 私钥 |
-| 15 | **现场源码编译需求** | 个别客户安全审计要求内网内编译，而非接收二进制 | 默认不需要；如确有此要求，由构建侧按《构建手册》§8 提供离线源码+依赖包 |
-| 16 | **权限** | 无 root/sudo 无法装 Docker、写 systemd | 交付前确认权限；最小权限方案需提前与客户协商 |
-| 17 | **优雅停机** | 直接 kill 进程丢失会话/未刷盘数据 | 用 `systemctl stop`（进程响应 SIGTERM 优雅关闭）；`worker` 关闭超时 30s |
-| 18 | **内核 IP 转发未开** | 加固/信创 Linux 默认 `net.ipv4.ip_forward=0` → Docker 容器无法联网、端口映射失效，容器启动报 `IPv4 forwarding is disabled` | 部署前按 §5 步骤 2.1 开启 `net.ipv4.ip_forward` 与 `bridge-nf-call-iptables`；firewalld 重载会重置，需配 masquerade 或重载后再 `sysctl --system` |
+| 13 | **CPE 回连网络** | ACS 与 CPE 基站之间 NAT/防火墙阻断 Inform / Connection Request | 确认 CPE 的 ACS URL 指向 `http://<IP>:8080`、`:7557` 可达 |
+| 14 | **多副本密钥一致** | app 多副本但 JWT/登录 RSA 密钥不一致 → 令牌跨副本失效 | 多副本共用同一份 `jwt.secret` / `OMCGO_JWT_SECRET` 与 `login_crypto` 私钥 |
+| 15 | **权限** | 无 root/sudo 无法装 Docker、写 `/opt/omc` | 交付前确认权限；最小权限方案需提前与客户协商 |
+| 16 | **优雅停机** | 直接 `docker kill` 丢失会话/未刷盘数据 | 用 `svc.sh stop` / `docker compose stop`（容器响应 SIGTERM 优雅关闭） |
+| 17 | **内核 IP 转发未开** | 加固/信创 Linux 默认 `net.ipv4.ip_forward=0` → 容器无法联网、端口映射失效 | 按 §5 步骤 2.1 开启；firewalld 重载会重置，需配 masquerade 或重载后再 `sysctl --system` |
+| 18 | **compose 版本** | 系统装的 docker-compose V1（Python）不识别 compose v3 写法 → 报 Unsupported config option | deploy.sh 优先用 `docker compose` V2，缺失时从 infra bundle 自动装 v2 插件；或 `install-docker.sh` 重装 |
+| 19 | **`.env` 与 yaml 口令不一致** | 改了 `.env` 但已起过容器 / 没同步 yaml → 业务容器认证失败 | 首次起容器前同步两处口令；已起过需删数据卷或进容器改库内口令（详见下载页 §9） |
 
 ---
 
@@ -772,24 +713,24 @@ docker compose -f /opt/omc/current/deploy/docker-compose.web.yml up -d --force-r
 
 | 现象 | 排查方向 |
 |------|---------|
-| 三进程起不来 | `journalctl -u omcgo-app -n 100`；检查 `WorkingDirectory` 是否 `/opt/omc/current`、`current` 软链是否指向有效版本目录（否则 `data/`、`configs/` 加载失败） |
-| 进程状态 `failed`、`systemctl start` 不再拉起 | 崩溃循环触发了 `StartLimitBurst` 熔断（300s 内挂 5 次）。先 `journalctl -u omcgo-app -n 200` 定位根因并修复，再 `systemctl reset-failed omcgo-app && systemctl start omcgo-app` 恢复 |
-| 进程被反复重启但无崩溃日志 | 多半是卡死被 `WatchdogSec` 命中（`journalctl` 见 `watchdog timeout`）。查是否依赖（DB/Redis）长时间无响应导致主流程阻塞；确认基础设施容器 `healthy` |
-| 端点对非超管返回 500 `casbin authorizer not configured` | `configs/casbin_model.conf` 缺失或路径不对 |
-| 启动报字典 XML 加载失败 | `data/` 目录缺失或 `WorkingDirectory` 不对 |
-| 连不上数据库/Redis | `*.prod.yaml` 地址是否改成 `127.0.0.1`；基础设施容器是否 `healthy` |
-| 迁移失败 | 检查 DSN、PG 是否就绪；schema 与 seed 用**不同** goose 版本表（`GOOSE_TABLE`） |
-| 前端能开但接口 502 | nginx `default.conf` 的 upstream 是否指向正确的 app 地址/端口 |
-| CPE 接不进来 | 防火墙 `:7557`；CPE 的 ACS URL；网络可达性；ACS 日志 `/opt/omc/run/logs/acs/acs.log` |
-| 时间相关报错（令牌/证书） | 见 §9 #3 时间同步 |
+| 业务容器起不来 / 反复重启 | `cd /opt/omc/current/deploy && bash svc.sh logs app`（或 acs/worker）；看是否连不上 DB/Redis（基础设施容器是否 healthy） |
+| 容器认证 PostgreSQL/MinIO 失败 | `.env` 与 `*.prod.yaml` 口令是否一致；`.env` 改过但数据卷已用旧口令创建（见 §9 #19） |
+| 端点对非超管返回 500 `casbin authorizer not configured` | `configs/casbin_model.conf` 缺失或挂载路径不对 |
+| 启动报字典 XML 加载失败 | `data/` 目录缺失或挂载不对；确认 `current` 软链指向有效版本目录 |
+| migrate 容器失败 | 检查 PG 是否就绪（deploy.sh 等 90s）；schema 与 seed 用**不同** goose 版本表；`$COMPOSE logs migrate-schema` |
+| 前端能开但接口 502 | nginx `default.conf` 的 `app_backend` upstream；app 容器是否 running |
+| CPE 接不进来 | 防火墙 `:8080`（nginx→acs `:7547`）；CPE 的 ACS URL；`svc.sh logs acs` |
+| 报 `Unsupported config option` | docker-compose V1 不兼容 compose v3，按 §9 #18 装 v2 插件 |
+| 容器起不来 / 端口映射不通 / 报 `IPv4 forwarding is disabled` | 内核 IP 转发未开，按 §5 步骤 2.1 配置 |
 | 容器 DNS 解析失败 | 见 §9 #10，参考 `deployments/docker/DOCKER_DNS_FIX.md` |
-| 容器起不来 / 端口映射不通 / 报 `IPv4 forwarding is disabled` | 内核 IP 转发未开，按 §5 步骤 2.1 配置 `net.ipv4.ip_forward=1` |
+| 时间相关报错（令牌/证书） | 见 §9 #3 时间同步 |
 
-日志位置：`/opt/omc/run/logs/{app,acs,worker,nginx}/`，zap JSON 格式，lumberjack 自动轮转。
+日志位置：容器日志 `docker compose -p omcgo logs <svc>`（或 `svc.sh logs <svc>`）；
+业务日志文件 `/opt/omc/run/logs/{app,acs,worker,nginx}/`，zap JSON 格式，lumberjack 自动轮转。
 
-> **Prometheus 告警的逐条处置**（进程崩溃/卡死、基础服务、连接池、业务积压等
-> 20 条告警的含义、排查、处置、升级路径）见 [`告警处置Runbook.md`](./告警处置Runbook.md)。
+> **Prometheus 告警的逐条处置**（容器存活、基础服务、连接池、业务积压等告警的含义、
+> 排查、处置、升级路径）见 [`告警处置Runbook.md`](./告警处置Runbook.md)。
 
 ---
 
-**文档结束。** 端口、配置项、镜像版本以实际交付版本的 `etc/*.prod.yaml`、`deploy/` 为准。
+**文档结束。** 端口、配置项、镜像版本以实际交付版本的 `deploy/.env`、`etc/*.prod.yaml`、`deploy/docker-compose.*.yml` 为准。
