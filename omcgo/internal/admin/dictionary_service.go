@@ -205,6 +205,7 @@ func (s *DictionaryService) CreateDictionaryDetail(ctx context.Context, req Crea
 
 	detail := &DictionaryDetail{
 		Label:           req.Label,
+		LabelI18n:       req.LabelI18n,
 		Value:           req.Value,
 		Extend:          req.Extend,
 		Status:          true,
@@ -278,6 +279,9 @@ func (s *DictionaryService) UpdateDictionaryDetail(ctx context.Context, req Upda
 
 	if req.Label != nil {
 		detail.Label = *req.Label
+	}
+	if req.LabelI18n != nil {
+		detail.LabelI18n = req.LabelI18n
 	}
 	if req.Value != nil {
 		detail.Value = *req.Value

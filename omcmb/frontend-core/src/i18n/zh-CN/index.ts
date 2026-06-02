@@ -117,6 +117,8 @@ const messages: Record<string, string> = {
 
   // system/DataDictionary
   'dictionary.detail.parentLabel':       '父级字典项',
+  'dictionary.detail.labelZh':           '展示值(中文)',
+  'dictionary.detail.labelEn':           '展示值(英语)',
   'dictionary.detail.parentPlaceholder': '（顶层项）',
 
   // system/RolePermission - 内置角色提示 + 设备分组绑定提示

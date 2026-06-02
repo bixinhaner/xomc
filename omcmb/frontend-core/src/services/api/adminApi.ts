@@ -133,6 +133,8 @@ export interface DictionaryRefreshResponse {
 
 export interface CreateDictionaryDetailPayload {
   label: string;
+  // 展示值多语言({"zh-CN":...,"en-US":...}) → 后端 label_i18n。
+  labelI18n?: Record<string, string>;
   value: string;
   extend?: string;
   status?: boolean;
@@ -145,6 +147,7 @@ export interface CreateDictionaryDetailPayload {
 export interface UpdateDictionaryDetailPayload {
   id: number;
   label?: string;
+  labelI18n?: Record<string, string>;
   value?: string;
   extend?: string;
   status?: boolean;
@@ -279,6 +282,7 @@ function toBackendDictionaryDetailBody(
   const body: Record<string, unknown> = {};
   if (p.id !== undefined) body.id = p.id;
   if (p.label !== undefined) body.label = p.label;
+  if (p.labelI18n !== undefined) body.label_i18n = p.labelI18n;
   if (p.value !== undefined) body.value = p.value;
   if (p.extend !== undefined) body.extend = p.extend;
   if (p.status !== undefined) body.status = p.status;

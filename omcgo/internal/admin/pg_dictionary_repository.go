@@ -339,8 +339,8 @@ func (r *PgDictionaryDetailRepository) Create(ctx context.Context, detail *Dicti
 	}
 
 	query, args, err := storage.Psql.Insert("sys_dictionary_details").
-		Columns("label", "value", "extend", "status", "sort", "sys_dictionary_id", "parent_id", "level", "origin", "created_at", "updated_at").
-		Values(detail.Label, detail.Value, detail.Extend, detail.Status, detail.Sort, detail.SysDictionaryID, detail.ParentID, detail.Level, origin, now, now).
+		Columns("label", "label_i18n", "value", "extend", "status", "sort", "sys_dictionary_id", "parent_id", "level", "origin", "created_at", "updated_at").
+		Values(detail.Label, marshalI18n(detail.LabelI18n), detail.Value, detail.Extend, detail.Status, detail.Sort, detail.SysDictionaryID, detail.ParentID, detail.Level, origin, now, now).
 		Suffix("RETURNING id, created_at, updated_at").
 		ToSql()
 	if err != nil {
@@ -444,6 +444,19 @@ func (r *PgDictionaryDetailRepository) List(ctx context.Context, req DictionaryD
 	return items, total, rows.Err()
 }
 
+// marshalI18n: map[string]string → JSONB bytes,供 pgx 直接写 jsonb 列。
+// 空/nil → '{}'(列 NOT NULL DEFAULT '{}')。
+func marshalI18n(m map[string]string) []byte {
+	if len(m) == 0 {
+		return []byte(`{}`)
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return []byte(`{}`)
+	}
+	return b
+}
+
 func (r *PgDictionaryDetailRepository) Update(ctx context.Context, detail *DictionaryDetail) error {
 	now := time.Now()
 
@@ -453,6 +466,8 @@ func (r *PgDictionaryDetailRepository) Update(ctx context.Context, detail *Dicti
 	if detail.Label != "" {
 		builder = builder.Set("label", detail.Label)
 	}
+	// label_i18n 始终回写(service 已合并 GetByID 加载值 + 本次 req 覆盖)。
+	builder = builder.Set("label_i18n", marshalI18n(detail.LabelI18n))
 	if detail.Value != "" {
 		builder = builder.Set("value", detail.Value)
 	}

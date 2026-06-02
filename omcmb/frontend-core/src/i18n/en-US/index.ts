@@ -117,6 +117,8 @@ const messages: Record<string, string> = {
 
   // system/DataDictionary
   'dictionary.detail.parentLabel':       'Parent item',
+  'dictionary.detail.labelZh':           'Display value (Chinese)',
+  'dictionary.detail.labelEn':           'Display value (English)',
   'dictionary.detail.parentPlaceholder': '(top level)',
 
   // system/RolePermission - builtin role alert + device group binding alert

@@ -119,6 +119,8 @@ type DictionaryListRequest struct {
 // CreateDictionaryDetailRequest is the input for creating a dictionary detail.
 type CreateDictionaryDetailRequest struct {
 	Label           string `json:"label" binding:"required"`
+	// LabelI18n: 展示值多语言({"zh-CN":...,"en-US":...}),写入 label_i18n JSONB。
+	LabelI18n       map[string]string `json:"label_i18n"`
 	Value           string `json:"value" binding:"required"`
 	Extend          string `json:"extend"`
 	Status          *bool  `json:"status"`
@@ -132,6 +134,8 @@ type CreateDictionaryDetailRequest struct {
 type UpdateDictionaryDetailRequest struct {
 	ID              int64   `json:"id" binding:"required"`
 	Label           *string `json:"label"`
+	// LabelI18n: 展示值多语言;非 nil 时整体覆盖 label_i18n。
+	LabelI18n       map[string]string `json:"label_i18n"`
 	Value           *string `json:"value"`
 	Extend          *string `json:"extend"`
 	Status          *bool   `json:"status"`

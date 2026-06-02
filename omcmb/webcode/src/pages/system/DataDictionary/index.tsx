@@ -440,7 +440,7 @@ function DictDetailPanel({ selectedDict }: DictDetailPanelProps) {
   const [searchLabel, setSearchLabel] = useState('');
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [editingDetail, setEditingDetail] = useState<DictionaryDetail | null>(null);
-  const [detailForm] = Form.useForm<CreateDictionaryDetailPayload>();
+  const [detailForm] = Form.useForm<CreateDictionaryDetailPayload & { labelEn?: string }>();
   // T-0182:托管字典(source_table != null)隐藏"+添加详情" / "+添加子项";
   // auto 行编辑/删除禁用(只读),manual 行仍允许(方案 A 兼容历史数据)。
   const isManaged = !!selectedDict?.sourceTable;
@@ -504,7 +504,8 @@ function DictDetailPanel({ selectedDict }: DictDetailPanelProps) {
   const openEdit = (detail: DictionaryDetail) => {
     setEditingDetail(detail);
     detailForm.setFieldsValue({
-      label: detail.label,
+      label: detail.labelI18n?.['zh-CN'] ?? detail.label,
+      labelEn: detail.labelI18n?.['en-US'] ?? '',
       value: detail.value,
       extend: detail.extend,
       status: detail.status,
@@ -526,10 +527,14 @@ function DictDetailPanel({ selectedDict }: DictDetailPanelProps) {
 
   const handleSave = () => {
     void detailForm.validateFields().then((vals) => {
+      // 展示值双语:label(中文) + labelEn(英语) → label_i18n;label 保留=中文(向后兼容)。
+      const { labelEn, ...rest } = vals as typeof vals & { labelEn?: string };
+      const labelI18n = { 'zh-CN': rest.label ?? '', 'en-US': (labelEn ?? '').trim() };
       // antd Select allowClear 会把空值返回为 undefined；显式归一为 null（=切顶层）。
       const normalized = {
-        ...vals,
-        parentId: (vals as { parentId?: number | null }).parentId ?? null,
+        ...rest,
+        labelI18n,
+        parentId: (rest as { parentId?: number | null }).parentId ?? null,
       };
       if (editingDetail) {
         updateDetailMutation.mutate({ id: editingDetail.id, ...normalized });
@@ -860,8 +865,11 @@ function DictDetailPanel({ selectedDict }: DictDetailPanelProps) {
               optionFilterProp="label"
             />
           </Form.Item>
-          <Form.Item name="label" label={t('dictionary.label')} rules={[{ required: true }]}>
-            <Input placeholder={t('dictionary.label')} />
+          <Form.Item name="label" label={t('dictionary.detail.labelZh')} rules={[{ required: true }]}>
+            <Input placeholder={t('dictionary.detail.labelZh')} />
+          </Form.Item>
+          <Form.Item name="labelEn" label={t('dictionary.detail.labelEn')}>
+            <Input placeholder={t('dictionary.detail.labelEn')} />
           </Form.Item>
           <Form.Item name="value" label={t('dictionary.value')} rules={[{ required: true }]}>
             <Input placeholder={t('dictionary.value')} />
