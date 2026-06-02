@@ -10,6 +10,8 @@ export interface LineSeries {
   name: string;
   data: (number | null)[];
   color?: string;
+  /** 为 true 时该线强制画虚线（lineStyle.type='dashed'），用于「上一周期」对比线。默认按索引走原样式。 */
+  dashed?: boolean;
 }
 
 export interface LineChartProps {
@@ -22,6 +24,12 @@ export interface LineChartProps {
   yAxisName?: string;
   unit?: string; // 单位，如 "Mbps", "%" 等
   showLegend?: boolean;
+  /**
+   * 周期对比 tooltip 补充行：与 xData 同长，每项为「上一周期真实起~止」文案。
+   * 存在且当前桶项非空时，在 tooltip 当前时间行下方补一行「上一周期 …」；缺项不显示。
+   * 不传 = 原行为不变（向后兼容）。
+   */
+  compareLabels?: (string | undefined)[];
 }
 
 // Line styles for differentiating multiple series
@@ -38,6 +46,7 @@ const LineChart: React.FC<LineChartProps> = ({
   yAxisName,
   unit,
   showLegend = true,
+  compareLabels,
 }) => {
   const isDark = useIsDark();
   const appTheme = useAppStore((s) => s.theme);
@@ -103,7 +112,7 @@ const LineChart: React.FC<LineChartProps> = ({
         appendToBody: true,
         className: 'chart-tooltip',
         formatter: (params: unknown) => {
-          const items = params as Array<{ marker: string; seriesName: string; value: unknown; axisValue: string }>;
+          const items = params as Array<{ marker: string; seriesName: string; value: unknown; axisValue: string; dataIndex: number }>;
           if (!Array.isArray(items) || items.length === 0) return '';
           // 附加单位到数值后（如果单位不为空且不是"%"）
           const displayUnit = (unit && unit !== '%') ? `${unit}` : '';
@@ -111,8 +120,15 @@ const LineChart: React.FC<LineChartProps> = ({
           const lines = items.map(item =>
             `${item.marker} ${item.seriesName}: <strong>${item.value}${unitSuffix}</strong>`
           );
+          // 周期对比：当前时间行下方补一行「上一周期 …」（缺项不显示）。
+          const idx = items[0].dataIndex;
+          const compareLabel = compareLabels?.[idx];
+          const headerExtra = compareLabel
+            ? `<div style="font-size: 11px; color: #8c8c8c; margin-bottom: 4px;">上一周期 ${compareLabel}</div>`
+            : '';
           return `<div style="max-height: 200px; overflow-y: auto;">
             <div style="font-weight: 600; margin-bottom: 4px;">${items[0].axisValue}</div>
+            ${headerExtra}
             ${lines.join('<br/>')}
           </div>`;
         },
@@ -150,7 +166,10 @@ const LineChart: React.FC<LineChartProps> = ({
       },
       series: series.map((s, i) => {
         const color = s.color ?? palette[i % palette.length];
-        const lineStyleType = LINE_STYLES[Math.floor(i / SYMBOL_SHAPES.length) % LINE_STYLES.length];
+        // dashed 显式优先：上一周期对比线强制虚线；否则按索引走原样式（向后兼容）。
+        const lineStyleType = s.dashed
+          ? 'dashed'
+          : LINE_STYLES[Math.floor(i / SYMBOL_SHAPES.length) % LINE_STYLES.length];
         const symbolShape = SYMBOL_SHAPES[i % SYMBOL_SHAPES.length];
 
         return {
@@ -177,7 +196,7 @@ const LineChart: React.FC<LineChartProps> = ({
               shadowColor: isDark ? 'rgba(0,0,0,0.3)' : 'rgba(0,0,0,0.15)',
             },
           },
-          areaStyle: areaFill
+          areaStyle: areaFill && !s.dashed
             ? {
                 opacity: 0.1,
                 color: {
@@ -198,7 +217,7 @@ const LineChart: React.FC<LineChartProps> = ({
         };
       }),
     };
-  }, [title, xData, series, areaFill, smooth, yAxisName, unit, isDark, appTheme, palette, showLegend]);
+  }, [title, xData, series, areaFill, smooth, yAxisName, unit, isDark, appTheme, palette, showLegend, compareLabels]);
 
   return (
     <ReactECharts

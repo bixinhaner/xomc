@@ -43,7 +43,7 @@ import { formatObjectLdn } from '@core/types/pmObject';
 import { useT } from '@/hooks/useT';
 import type { Alarm } from '@core/types/alarm';
 import type { Device } from '@core/types/device';
-import { buildKpiCharts } from './kpiSeries';
+import { buildKpiCharts, buildKpiCompareData } from './kpiSeries';
 import ParameterTreeTab from './ParameterTreeTab';
 import QuickSettingsTab from './QuickSettingsTab';
 import LicenseParamsTab from './LicenseParamsTab';
@@ -151,6 +151,30 @@ function formatKpiAxisLabel(iso: string, granularity: 'hourly' | 'daily'): strin
     return `${mm}-${dd} ${hh}:00`;
   }
   return `${mm}-${dd}`;
+}
+
+// 周期对比上一周期窗口（spec §11.1，长度守恒）：当前 [start,end]，L=end-start → 上周期 [start-L, start]。
+// 复刻 dashboardFilterUtils.previousWindow 语义，这里直接用 ISO 串/毫秒实现（不引入 dayjs）。
+function previousKpiWindow(startTime: string, endTime: string): { startTime: string; endTime: string } {
+  const startMs = Date.parse(startTime);
+  const endMs = Date.parse(endTime);
+  const lengthMs = endMs - startMs;
+  return {
+    startTime: new Date(startMs - lengthMs).toISOString(),
+    endTime: startTime,
+  };
+}
+
+// tooltip 上一周期文案：「真实起 ~ 止」；缺结束时间只显示起点。粒度决定时分显示与否。
+function formatCompareLabel(
+  startIso: string,
+  endIso: string,
+  granularity: 'hourly' | 'daily',
+): string | undefined {
+  if (!startIso) return undefined;
+  const start = formatKpiAxisLabel(startIso, granularity);
+  const end = endIso ? formatKpiAxisLabel(endIso, granularity) : '';
+  return end && end !== start ? `${start} ~ ${end}` : start;
 }
 
 // ─── 字段定义组件 ────────────────────────────────────────────────────────
@@ -871,10 +895,38 @@ function KPITabContent({ device, t }: KPITabContentProps) {
   const { data: rows, isLoading, isFetching, isError, refetch } =
     useAggregatedMetricsByDevices(baseParams, sn ? [sn] : [], enabled);
 
+  // 周期对比（spec §11，常驻开启、无开关）：再发一个上一周期窗口查询，其余参数完全一致。
+  const prevWindow = useMemo(
+    () => previousKpiWindow(queryWindow.startTime, queryWindow.endTime),
+    [queryWindow.startTime, queryWindow.endTime],
+  );
+  const prevParams = useMemo(
+    () => ({ ...baseParams, startTime: prevWindow.startTime, endTime: prevWindow.endTime }),
+    [baseParams, prevWindow.startTime, prevWindow.endTime],
+  );
+  // 原始平移毫秒（= 当前窗口长 L），对齐时吸附到整数粒度步长（防带零头整条虚线全空）。
+  const offsetMs = useMemo(
+    () => Date.parse(queryWindow.endTime) - Date.parse(queryWindow.startTime),
+    [queryWindow.startTime, queryWindow.endTime],
+  );
+  const { data: prevRows } = useAggregatedMetricsByDevices(prevParams, sn ? [sn] : [], enabled);
+
   // 聚合行 → 每 K 编号一张图（纯函数，按 objectLdn 过滤、null 占位不画点）。
   const charts = useMemo(
     () => buildKpiCharts(rows, kpiConfig, objectLdn || null),
     [rows, kpiConfig, objectLdn],
+  );
+  // 上一周期图（同口径、同 objectLdn 过滤），再吸附对齐到当前周期 X 轴。
+  const prevCharts = useMemo(
+    () => buildKpiCharts(prevRows, kpiConfig, objectLdn || null),
+    [prevRows, kpiConfig, objectLdn],
+  );
+  const compareDatas = useMemo(
+    () =>
+      charts.map((c, i) =>
+        buildKpiCompareData(c, prevCharts[i], offsetMs, queryWindow.granularity),
+      ),
+    [charts, prevCharts, offsetMs, queryWindow.granularity],
   );
 
   if (kpiConfig.length === 0) {
@@ -960,7 +1012,22 @@ function KPITabContent({ device, t }: KPITabContentProps) {
       <Row gutter={[16, 16]}>
         {kpiConfig.map((kpi, idx) => {
           const chart = charts[idx];
+          const compare = compareDatas[idx];
           const xLabels = chart.xData.map((iso) => formatKpiAxisLabel(iso, queryWindow.granularity));
+          // 上一周期 tooltip 文案（每点对应上周期真实起止），仅当上周期有数据时挂线。
+          const hasCompare = !compare.isEmpty;
+          const compareLabels = hasCompare
+            ? compare.compareBuckets.map((s, i) =>
+                formatCompareLabel(s, compare.compareBucketEnds[i] ?? '', queryWindow.granularity),
+              )
+            : undefined;
+          const seriesName = chart.displayName || kpi.label;
+          const lineSeries = hasCompare
+            ? [
+                { name: seriesName, data: chart.values },
+                { name: `${seriesName}（上一周期）`, data: compare.values, dashed: true },
+              ]
+            : [{ name: seriesName, data: chart.values }];
 
           return (
             <Col key={kpi.key} xs={24} sm={12}>
@@ -997,7 +1064,8 @@ function KPITabContent({ device, t }: KPITabContentProps) {
                   <LineChart
                     title=""
                     xData={xLabels}
-                    series={[{ name: chart.displayName || kpi.label, data: chart.values }]}
+                    series={lineSeries}
+                    compareLabels={compareLabels}
                     unit={kpi.unit || undefined}
                     height={220}
                     areaFill
