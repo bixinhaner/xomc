@@ -449,11 +449,37 @@ Related: F06
 
 ## 14. 常用命令
 
-### 一键启停（推荐日常）
+### 服务重启规则（CRITICAL — 统一用 docker compose）
+
+> **重启 / 重建后端服务（app / acs / worker）一律走 docker compose，禁止用 `run/scripts/restart-all.sh`。**
+> 本项目的运行态是 docker compose 编排的容器栈（`deployments/docker/docker-compose.yml`，app/acs/worker 由 `Dockerfile.*` 从源码构建）；`run/scripts/*` 是裸进程跑法，与容器栈并存会造成端口冲突、状态不一致、排障困难。AI 与运维在本仓库内重启服务时只用下面的 docker compose 命令。
+
+```bash
+cd deployments/docker
+
+# 改了 Go 代码后重建并重启（最常用）：重新构建镜像 + 重新创建容器
+docker compose up -d --build app worker          # 只重建受影响的服务
+docker compose up -d --build acs                 # ACS 同理
+
+# 新增了数据库迁移：先跑 migrate-seed（镜像内 bake 了迁移文件，需 --build）
+docker compose up -d --build migrate-seed && docker compose up migrate-seed
+
+# 仅重启（无代码变更，不重建镜像）
+docker compose restart app worker
+
+# 查看状态 / 日志 / 停止
+docker compose ps
+docker compose logs -f --tail=100 app worker
+docker compose down                              # 停止并移除容器（保留卷）
+```
+
+宿主端口：app metrics `:9091`、acs `:7557`/metrics `:9095`、worker metrics `:9092`、web(nginx) `:8080`/`:8081`、Grafana `:3030`、Prometheus `:9090`。
+
+### 一键启停（裸进程跑法，仅在未使用 docker 栈时用；**不要用于重启容器化服务**）
 
 ```bash
 bash run/scripts/start-all.sh       # 依赖 → 后端三进程 → 前端 :3000 → 设计基线 :3001
-bash run/scripts/restart-all.sh     # 全部重启
+bash run/scripts/restart-all.sh     # 全部重启（⚠️ 不要用它重启 docker compose 栈，见上方规则）
 bash run/scripts/status.sh          # 查看 PID / 端口占用
 bash run/scripts/stop-all.sh        # 停止全部
 ```
