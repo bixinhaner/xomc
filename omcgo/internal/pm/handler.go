@@ -39,6 +39,11 @@ type Handler struct {
 	asyncJobRepo  asyncjob.Repository           // T-0164 收尾 G5-Gap-2：手动重算入口入队 async_jobs
 	metrics       *PMMetrics
 	logger        *zap.Logger
+	// bucketLoc 是查询期空桶填充的桶对齐时区（T-0192b）。
+	// 与 T-0192 后台汇总侧（cmd/worker/aggregator.go）的业务时区对齐，
+	// 让日/周/月填充占位桶落业务时区本地零点（北京 00:00）而非 UTC 零点（北京早 8 点）。
+	// nil 时回落 time.UTC（与改造前行为一致，安全默认）。
+	bucketLoc *time.Location
 }
 
 // WithAggregator 注入 G5 聚合查询入口（可选；nil 时退回老路径）。
@@ -52,6 +57,17 @@ func (h *Handler) WithAggregator(aggr *aggregator.Aggregator) *Handler {
 // WithAsyncJobRepo 注入 asyncjob 仓库（G5-Gap-2 手动重算端点用）。
 func (h *Handler) WithAsyncJobRepo(repo asyncjob.Repository) *Handler {
 	h.asyncJobRepo = repo
+	return h
+}
+
+// WithTimezone 注入查询期空桶填充的桶对齐业务时区（T-0192b，可选）。
+//
+// 调用方：cmd/app/provider/router.go 在初始化 pm.Handler 后调用，loc 由
+// cmd/app/provider/pm.go 从 c.Cfg.PM.Timezone 解析（空值默认 Asia/Shanghai、
+// LoadLocation 失败回落 UTC，参照 worker 的 resolvePMTimezone）。
+// 传 nil 时保持改造前行为（回落 UTC）。
+func (h *Handler) WithTimezone(loc *time.Location) *Handler {
+	h.bucketLoc = loc
 	return h
 }
 
@@ -300,7 +316,7 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 	// 透视表里看到行结构 — 区分"指标无值"与"设备此时段完全无采样"。
 	// 仅 device 维度（含单 OUI+SN 过滤）+ start/end + metric_paths 齐全时启用，避免补出超大笛卡尔积。
 	if c.Query("fill_empty") == "true" {
-		rows = fillEmptyBuckets(rows, req)
+		rows = fillEmptyBuckets(rows, req, h.bucketLoc)
 	}
 	response.OK(c, gin.H{"items": rows, "total": len(rows)})
 }
@@ -308,7 +324,11 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 // fillEmptyBuckets 计算 (时间桶 × 指标) 笛卡尔积，对实际 rows 没覆盖的组合补一行
 // Filled=true 占位（DeviceOUI/SN 来自 req，MetricValue=0 仅占位，前端 mapper 见 filled=true
 // 渲染 "-"）。仅 device 维度生效。
-func fillEmptyBuckets(rows []aggregator.Row, req aggregator.QueryRequest) []aggregator.Row {
+func fillEmptyBuckets(rows []aggregator.Row, req aggregator.QueryRequest, loc *time.Location) []aggregator.Row {
+	// nil 时回落 UTC（保持改造前行为，安全默认）。
+	if loc == nil {
+		loc = time.UTC
+	}
 	if req.Dimension == aggregator.DimensionDeviceGroup || req.Dimension == aggregator.DimensionAggregateGroup {
 		return rows
 	}
@@ -325,7 +345,7 @@ func fillEmptyBuckets(rows []aggregator.Row, req aggregator.QueryRequest) []aggr
 	}
 	sn := req.DeviceSNs[0]
 
-	buckets := bucketStartsBetween(req.StartTime, req.EndTime, req.Granularity)
+	buckets := bucketStartsBetween(req.StartTime, req.EndTime, req.Granularity, loc)
 	if len(buckets) == 0 {
 		return rows
 	}
@@ -387,7 +407,10 @@ func granularityDuration(g metrics.Granularity) time.Duration {
 
 // bucketStartsBetween 枚举 [start, end) 内的所有桶起点，对齐到粒度边界。
 // 上限：1000 个桶（防止误用 15min 拉年区间炸笛卡尔积）。
-func bucketStartsBetween(start, end time.Time, g metrics.Granularity) []time.Time {
+//
+// T-0192b：桶对齐按业务时区 loc 切天（日/周/月落 loc 本地零点），与 T-0192 后台
+// 汇总侧对齐，避免填充桶落 UTC 零点（= 北京早 8 点）而与真实行错位、去重不命中。
+func bucketStartsBetween(start, end time.Time, g metrics.Granularity, loc *time.Location) []time.Time {
 	const maxBuckets = 1000
 	if !end.After(start) {
 		return nil
@@ -396,8 +419,11 @@ func bucketStartsBetween(start, end time.Time, g metrics.Granularity) []time.Tim
 	if dur <= 0 {
 		return nil
 	}
-	// 把 start 对齐到桶边界
-	cur := alignToBucket(start.UTC(), g)
+	if loc == nil {
+		loc = time.UTC
+	}
+	// 把 start 投影到业务时区后对齐到桶边界（mirror T-0192：now.In(loc) 后截零点）。
+	cur := alignToBucket(start.In(loc), g)
 	out := make([]time.Time, 0, 64)
 	for cur.Before(end) && len(out) < maxBuckets {
 		out = append(out, cur)

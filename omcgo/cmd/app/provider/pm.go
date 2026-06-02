@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
+
+	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/core/asyncjob"
 	"github.com/omcgo/omcgo/internal/core/dictloader"
@@ -132,6 +135,10 @@ func initPMModule(c *Container) error {
 		logger.Warn("ensure indicator custom dir failed; uploads/deletes may fail until host bind mount is ready")
 	}
 
+	// T-0192b：解析 PM 业务时区给查询期空桶填充对齐用（与 T-0192 后台汇总侧同源）。
+	// 空值默认 Asia/Shanghai；LoadLocation 失败回落 UTC + Warn（不 panic）。
+	pmBucketLoc := resolvePMTimezone(c.Cfg.PM.Timezone, logger)
+
 	// Store deps for route registration
 	c.pmHandlerDeps = &pmHandlerDeps{
 		pmCounterRepo:          pmCounterRepo,
@@ -148,10 +155,30 @@ func initPMModule(c *Container) error {
 		indicatorHandler:       indicatorHandler,
 		indicatorRESTHandler:   indicatorRESTHandler,
 		indicatorFileHandler:   indicatorFileHandler,
+		pmBucketLoc:            pmBucketLoc,
 	}
 
 	logger.Info("PM module initialized")
 	return nil
+}
+
+// resolvePMTimezone 解析 PM 业务时区（T-0192b，app 查询侧）。
+//
+// 行为与 worker 端 cmd/worker/aggregator.go::resolvePMTimezone 一致：
+// 空值默认 "Asia/Shanghai"；LoadLocation 失败回落 time.UTC + Warn（不 panic）。
+// 容器内有 tzdata 兜底，正常不会回落。两处 ≤5 行重复可接受（不跨 cmd 共享私有函数）。
+func resolvePMTimezone(tz string, logger *zap.Logger) *time.Location {
+	if tz == "" {
+		tz = "Asia/Shanghai"
+	}
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		logger.Warn("load pm timezone failed; fall back to UTC",
+			zap.String("timezone", tz), zap.Error(err))
+		return time.UTC
+	}
+	logger.Info("pm query-fill timezone resolved", zap.String("timezone", loc.String()))
+	return loc
 }
 
 // indicatorReloader 把 dictloader.Registry.ReloadOne(...)(Report, error)
@@ -185,4 +212,6 @@ type pmHandlerDeps struct {
 	indicatorHandler     *indicator.IndicatorHandler
 	indicatorRESTHandler *indicator.RESTHandler
 	indicatorFileHandler *indicator.FileHandler // T-0180 P1.3 XML 文件粒度管理
+
+	pmBucketLoc *time.Location // T-0192b 查询期空桶填充桶对齐业务时区
 }

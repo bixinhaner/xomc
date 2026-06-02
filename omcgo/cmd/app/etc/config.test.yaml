@@ -92,6 +92,10 @@ task:
   default_expires_in_seconds: 120
   sweep_interval_seconds: 10
 
+# F03 PM（app 侧仅用到 timezone：T-0192b 查询期空桶填充按业务时区切天，与 worker 同源）。
+pm:
+  timezone: Asia/Shanghai
+
 provision:
   enabled: true
   auto_configure: false

@@ -310,6 +310,7 @@ type AppConfig struct {
 	BatchProcessor  BatchProcessorConfig  `mapstructure:"batch_processor"`
 	License         LicenseConfig         `mapstructure:"license"`
 	Task            TaskConfig            `mapstructure:"task"`
+	PM              PMConfig              `mapstructure:"pm"` // T-0192b: 查询期空桶填充按业务时区切天（仅用到 Timezone）
 	MR              MRConfig              `mapstructure:"mr"`
 	Notification    NotificationConfig    `mapstructure:"notification"`
 	Metrics         MetricsConfig         `mapstructure:"metrics"`
