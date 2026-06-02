@@ -2,7 +2,6 @@ import { useMemo } from 'react';
 import type { CSSProperties } from 'react';
 import { Checkbox, Input, Tag, Tooltip, Empty } from 'antd';
 import { NumberOutlined } from '@ant-design/icons';
-import AccessTypeTag from './AccessTypeTag';
 import SubFieldInfoPopover from './SubFieldInfoPopover';
 import { useMmlConsoleStore } from '@core/store/mmlConsoleStore';
 import type { Statement } from '@core/types/mmlConsole';
@@ -131,9 +130,9 @@ export default function SubFieldInputList({ statement }: SubFieldInputListProps)
               {/* 填充剩余空间，把图标列推到右侧对齐 */}
               <div style={{ flex: 1 }} />
               {/* 行尾"图标列"(2026-05-28 用户决策,与 SubFieldChecklist 统一):
-                  固定 160px 宽,行间对齐贴右。内含 #多实例 + AccessTypeTag +
-                  OnReboot Tag(条件渲染)。宽度比 LST 单图标列大,因为 MOD/ADD 有
-                  多个标签集群。 */}
+                  固定 160px 宽,行间对齐贴右。内含 #多实例 + OnReboot Tag(条件渲染)
+                  + 字段详情。2026-06-02 用户决策:移除"读写 <TYPE>"AccessTypeTag——
+                  access / 类型 / 约束已在"字段详情"弹窗里展示,行内 Tag 与之重复。 */}
               <div
                 style={{
                   flex: '0 0 160px',
@@ -145,12 +144,6 @@ export default function SubFieldInputList({ statement }: SubFieldInputListProps)
                 }}
               >
                 {multiInstanceHint(sf.tr069Path, t('mml.console.subField.multiInstanceTip'))}
-                <AccessTypeTag
-                  accessType={sf.accessType}
-                  valueType={sf.valueType}
-                  constraintText={sf.constraintText}
-                  tr069Path={sf.tr069Path}
-                />
                 {sf.changeApplies === 'OnReboot' && (
                   <Tag color="warning">{t('mml.console.subField.onReboot')}</Tag>
                 )}
@@ -158,7 +151,7 @@ export default function SubFieldInputList({ statement }: SubFieldInputListProps)
                 <SubFieldInfoPopover sf={sf} />
               </div>
             </div>
-            {/* 约束 / 取值范围已合并到 AccessTypeTag（用户决策 2026-05-22），
+            {/* 约束 / 取值范围 / access / 类型均在行尾"字段详情"弹窗里展示，
                 输入框下方不再重复渲染 hint 行，避免视觉冗余。 */}
           </div>
         );
