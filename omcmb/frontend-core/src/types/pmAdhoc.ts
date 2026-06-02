@@ -91,6 +91,10 @@ export interface AdhocResultRow {
   // T-0187 多线系列键来源：product 维度的产品 id、band/device_group/aggregate_group 维度的 object_ldn。
   productId?: string;
   objectLdn?: string;
+  // PM-线名解析：后端读时 LEFT JOIN 解析出的可读名（product 任务才有 productName、
+  // device_group 任务才有 deviceGroupName；缺失则空，前端图例回退 id 前 8 位）。
+  productName?: string;
+  deviceGroupName?: string;
 }
 
 /**
@@ -168,6 +172,9 @@ export interface BackendAdhocResultRow {
   // T-0187：后端 resultDTO 已吐这两个分组键（handler.go），前端补透传。
   product_id?: string;
   object_ldn?: string;
+  // PM-线名解析：后端读时 JOIN 解析出的可读名（缺失则 omitempty 不下发）。
+  product_name?: string;
+  device_group_name?: string;
 }
 
 export interface BackendAdhocTaskRun {
@@ -245,5 +252,7 @@ export function mapBackendAdhocResult(b: BackendAdhocResultRow): AdhocResultRow 
     endTime: b.end_time,
     productId: b.product_id || undefined,
     objectLdn: b.object_ldn || undefined,
+    productName: b.product_name || undefined,
+    deviceGroupName: b.device_group_name || undefined,
   };
 }

@@ -20,6 +20,8 @@ function row(p: Partial<AdhocResultRow>): AdhocResultRow {
     endTime: p.endTime ?? '2026-05-30T01:00:00Z',
     productId: p.productId,
     objectLdn: p.objectLdn,
+    productName: p.productName,
+    deviceGroupName: p.deviceGroupName,
   };
 }
 
@@ -63,6 +65,22 @@ describe('seriesLabelOf — 系列标签', () => {
   });
   it('product → id 前 8', () => {
     expect(seriesLabelOf('9259a43e-301f-49b5', 'product')).toBe('产品 9259a43e');
+  });
+
+  // PM-线名解析：传入后端解析名时显示可读名，缺失回退 id 前 8。
+  it('product → 命中解析名显示产品名', () => {
+    expect(seriesLabelOf('9259a43e-301f-49b5', 'product', 'CMCC 皮基站 LTE')).toBe('产品 CMCC 皮基站 LTE');
+  });
+  it('product → 解析名缺失回退 id 前 8', () => {
+    expect(seriesLabelOf('9259a43e-301f-49b5', 'product', undefined)).toBe('产品 9259a43e');
+    expect(seriesLabelOf('9259a43e-301f-49b5', 'product', '')).toBe('产品 9259a43e');
+  });
+  it('device_group → 命中解析名显示组名', () => {
+    expect(seriesLabelOf('DeviceGroup=abcd1234-ef', 'device_group', '华东一区')).toBe('设备组 华东一区');
+  });
+  it('device_group → 解析名缺失回退 uuid 前 8', () => {
+    expect(seriesLabelOf('DeviceGroup=abcd1234-ef', 'device_group', undefined)).toBe('设备组 abcd1234');
+    expect(seriesLabelOf('DeviceGroup=abcd1234-ef', 'device_group', '')).toBe('设备组 abcd1234');
   });
 });
 
@@ -158,5 +176,37 @@ describe('buildMetricCharts — 转置', () => {
     const charts = buildMetricCharts(rows, 'network', 'hourly');
     expect(charts[0].displayName).toBe('RRC 成功率');
     expect(charts[0].series[0].name).toBe('全网');
+  });
+
+  // PM-线名解析：product 维度系列名优先用后端解析名；缺失回退 id 前 8。
+  it('product 维度：解析名命中显示产品名', () => {
+    const rows = [
+      row({ metricPath: 'M1', productId: '9259a43e-301f', productName: 'CMCC 皮基站', startTime: 't0', metricValue: 1 }),
+    ];
+    const charts = buildMetricCharts(rows, 'product', 'hourly');
+    expect(charts[0].series[0].name).toBe('产品 CMCC 皮基站');
+  });
+  it('product 维度：解析名缺失回退 id 前 8', () => {
+    const rows = [
+      row({ metricPath: 'M1', productId: '9259a43e-301f', productName: undefined, startTime: 't0', metricValue: 1 }),
+    ];
+    const charts = buildMetricCharts(rows, 'product', 'hourly');
+    expect(charts[0].series[0].name).toBe('产品 9259a43e');
+  });
+
+  // PM-线名解析：device_group 维度系列名优先用后端解析名；缺失回退 uuid 前 8。
+  it('device_group 维度：解析名命中显示组名', () => {
+    const rows = [
+      row({ metricPath: 'M1', objectLdn: 'DeviceGroup=abcd1234-ef', deviceGroupName: '华东一区', startTime: 't0', metricValue: 1 }),
+    ];
+    const charts = buildMetricCharts(rows, 'device_group', 'hourly');
+    expect(charts[0].series[0].name).toBe('设备组 华东一区');
+  });
+  it('device_group 维度：解析名缺失回退 uuid 前 8', () => {
+    const rows = [
+      row({ metricPath: 'M1', objectLdn: 'DeviceGroup=abcd1234-ef', deviceGroupName: undefined, startTime: 't0', metricValue: 1 }),
+    ];
+    const charts = buildMetricCharts(rows, 'device_group', 'hourly');
+    expect(charts[0].series[0].name).toBe('设备组 abcd1234');
   });
 });

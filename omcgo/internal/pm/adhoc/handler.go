@@ -392,25 +392,31 @@ type resultsFilter struct {
 // buildResultsQuery 纯函数：拼 adhoc results 查询 SQL + 占位参数。
 // 抽出来便于单测（带/不带大时间段两路）；时间段非法值容错忽略而非报错。
 func buildResultsQuery(taskID uuid.UUID, f resultsFilter, limit, offset int) (string, []any) {
+	// PM-线名解析：LEFT JOIN 在读时把分组键 ID 解析成可读名 —— product 维度按 product_id 取
+	// products.product_name；device_group 维度按 'DeviceGroup='||id 比对 object_ldn 取 device_groups.name。
+	// 两 JOIN 都是 LEFT，互不影响（product 任务时组名 NULL、组任务时产品名 NULL）；名缺失（脏数据/已删）也返 NULL，前端回退 id 前 8 位。
 	q := `
-SELECT id, task_id, device_oui, device_sn, product_id, metric_path, metric_type, metric_value,
-       statis_type, granularity, time, start_time, end_time, ingest_time, object_ldn, extra
-FROM pm_adhoc_aggregation_results
-WHERE task_id = $1`
+SELECT r.id, r.task_id, r.device_oui, r.device_sn, r.product_id, r.metric_path, r.metric_type, r.metric_value,
+       r.statis_type, r.granularity, r.time, r.start_time, r.end_time, r.ingest_time, r.object_ldn, r.extra,
+       p.product_name, g.name AS device_group_name
+FROM pm_adhoc_aggregation_results r
+LEFT JOIN products p ON p.id = r.product_id
+LEFT JOIN device_groups g ON ('DeviceGroup=' || g.id::text) = r.object_ldn
+WHERE r.task_id = $1`
 	args := []any{taskID}
 	pos := 2
 	if f.DeviceSN != "" {
-		q += fmt.Sprintf(" AND device_sn = $%d", pos)
+		q += fmt.Sprintf(" AND r.device_sn = $%d", pos)
 		args = append(args, f.DeviceSN)
 		pos++
 	}
 	if f.MetricPath != "" {
-		q += fmt.Sprintf(" AND metric_path = $%d", pos)
+		q += fmt.Sprintf(" AND r.metric_path = $%d", pos)
 		args = append(args, f.MetricPath)
 		pos++
 	}
 	if f.Granularity != "" {
-		q += fmt.Sprintf(" AND granularity = $%d", pos)
+		q += fmt.Sprintf(" AND r.granularity = $%d", pos)
 		args = append(args, f.Granularity)
 		pos++
 	}
@@ -418,14 +424,14 @@ WHERE task_id = $1`
 	// 命中则按 time 列窗口过滤，与现有 ORDER BY time DESC 同列；非法值忽略（容错而非 400）。
 	if f.StartTime != "" {
 		if t, err := time.Parse(time.RFC3339, f.StartTime); err == nil {
-			q += fmt.Sprintf(" AND time >= $%d", pos)
+			q += fmt.Sprintf(" AND r.time >= $%d", pos)
 			args = append(args, t)
 			pos++
 		}
 	}
 	if f.EndTime != "" {
 		if t, err := time.Parse(time.RFC3339, f.EndTime); err == nil {
-			q += fmt.Sprintf(" AND time <= $%d", pos)
+			q += fmt.Sprintf(" AND r.time <= $%d", pos)
 			args = append(args, t)
 			pos++
 		}
@@ -433,11 +439,11 @@ WHERE task_id = $1`
 	// T-0193：任务小区/PLMN 白名单（查看级收口）。非空时只返回选中 object_ldn 行；
 	// 空 = 不过滤（全小区，向后兼容旧任务）。与上面"只看 N 指标"同层。
 	if len(f.ObjectLDNs) > 0 {
-		q += fmt.Sprintf(" AND object_ldn = ANY($%d)", pos)
+		q += fmt.Sprintf(" AND r.object_ldn = ANY($%d)", pos)
 		args = append(args, f.ObjectLDNs)
 		pos++
 	}
-	q += fmt.Sprintf(" ORDER BY time DESC LIMIT $%d OFFSET $%d", pos, pos+1)
+	q += fmt.Sprintf(" ORDER BY r.time DESC LIMIT $%d OFFSET $%d", pos, pos+1)
 	args = append(args, limit, offset)
 	return q, args
 }
@@ -497,6 +503,10 @@ func (h *Handler) Results(c *gin.Context) {
 		DeviceSN    string    `json:"device_sn"`
 		// product 维度结果的分组键（T-0182-fix）；device/aggregate_group 维度为空。
 		ProductID   string    `json:"product_id,omitempty"`
+		// PM-线名解析：读时 LEFT JOIN 解析出的可读名。product 任务才有 ProductName，
+		// device_group 任务才有 DeviceGroupName；缺失（已删/脏数据）则空，前端回退 id 前 8 位。
+		ProductName     string `json:"product_name,omitempty"`
+		DeviceGroupName string `json:"device_group_name,omitempty"`
 		MetricPath  string    `json:"metric_path"`
 		// KPI 行 metric_path 是 K 编号；display_name 为按编号回填的友好名（PLMN 级带标记）。counter 行 = metric_path。
 		DisplayName string    `json:"display_name,omitempty"`
@@ -516,10 +526,12 @@ func (h *Handler) Results(c *gin.Context) {
 		var resultID, taskID uuid.UUID
 		var productID *uuid.UUID // product_id 列可空（仅 product 维度有值）
 		var extraBytes []byte
+		var productName, deviceGroupName *string // LEFT JOIN 命中才有值，未命中（NULL）则空
 		if err := rows.Scan(
 			&resultID, &taskID, &dto.DeviceOUI, &dto.DeviceSN, &productID, &dto.MetricPath,
 			&dto.MetricType, &dto.MetricValue, &dto.StatisType, &dto.Granularity,
 			&dto.Time, &dto.StartTime, &dto.EndTime, &dto.IngestTime, &dto.ObjectLDN, &extraBytes,
+			&productName, &deviceGroupName,
 		); err != nil {
 			commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 			return
@@ -528,6 +540,12 @@ func (h *Handler) Results(c *gin.Context) {
 		dto.TaskID = taskID.String()
 		if productID != nil && *productID != uuid.Nil {
 			dto.ProductID = productID.String()
+		}
+		if productName != nil {
+			dto.ProductName = *productName
+		}
+		if deviceGroupName != nil {
+			dto.DeviceGroupName = *deviceGroupName
 		}
 		items = append(items, dto)
 	}

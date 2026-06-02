@@ -74,11 +74,14 @@ export function seriesKeyOf(row: AdhocResultRow, dimension: AdhocDimension): str
  *   network          → '全网'
  *   device           → SN 原样
  *   band             → '频段 X'（剥 `Band=` 前缀）
- *   device_group     → '设备组 <uuid前8>'（剥 `DeviceGroup=` 前缀）
- *   product          → '产品 <id前8>'
+ *   device_group     → '设备组 <组名>'（后端 JOIN 解析名优先；缺失回退 uuid 前 8，剥 `DeviceGroup=` 前缀）
+ *   product          → '产品 <产品名>'（后端 JOIN 解析名优先；缺失回退 id 前 8）
  *   aggregate_group  → '聚合组' + LDN（小区级，带原 LDN 便于区分多小区）
+ *
+ * PM-线名解析：name 为后端读时 JOIN 解析出的可读名（product 维度=产品名、device_group 维度=组名）。
+ * 命中（非空）时显示可读名；缺失（脏数据/已删/NULL）回退现状的 id 前 8 位，保证不空白。
  */
-export function seriesLabelOf(key: string, dimension: AdhocDimension): string {
+export function seriesLabelOf(key: string, dimension: AdhocDimension, name?: string): string {
   switch (dimension) {
     case 'network':
       return '全网';
@@ -89,11 +92,12 @@ export function seriesLabelOf(key: string, dimension: AdhocDimension): string {
       return `频段 ${v}`;
     }
     case 'device_group': {
+      if (name) return `设备组 ${name}`;
       const v = key.startsWith('DeviceGroup=') ? key.slice('DeviceGroup='.length) : key;
       return `设备组 ${v.slice(0, 8)}`;
     }
     case 'product':
-      return `产品 ${key.slice(0, 8)}`;
+      return name ? `产品 ${name}` : `产品 ${key.slice(0, 8)}`;
     case 'aggregate_group':
       return `聚合组 ${key}`;
     default:
@@ -153,7 +157,14 @@ export function buildMetricCharts(
       pts = new Map();
       m.points.set(key, pts);
       m.seriesOrder.push(key);
-      m.seriesName.set(key, seriesLabelOf(key, dimension));
+      // PM-线名解析：把该行后端 JOIN 解析出的可读名按维度取出传给标签函数（缺失则 undefined 回退 id 前 8）。
+      const readableName =
+        dimension === 'product'
+          ? r.productName
+          : dimension === 'device_group'
+            ? r.deviceGroupName
+            : undefined;
+      m.seriesName.set(key, seriesLabelOf(key, dimension, readableName));
     }
     // 同 (系列, 桶) 多行取后到值（正常一行一值）。
     pts.set(r.startTime, r.metricValue);
