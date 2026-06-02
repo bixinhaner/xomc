@@ -4,13 +4,11 @@ import type {
   IndicatorListFilter,
   IndicatorGroup,
   PlatformFormula,
-  IndicatorUnit,
   CreateIndicatorInput,
   UpdateIndicatorInput,
   CreateGroupInput,
   UpdateGroupInput,
   EnabledIndicatorsRequest,
-  UnitInput,
   DeviceType,
   IndicatorPlatformSummary,
   IndicatorFile,
@@ -63,12 +61,6 @@ interface BackendFormula {
   description?: string;
 }
 
-interface BackendUnit {
-  id: string;
-  en_name: string;
-  cn_name: string;
-}
-
 function mapIndicator(b: BackendIndicator, deviceType: DeviceType): IndicatorInfo {
   return {
     id: b.id,
@@ -112,10 +104,6 @@ function mapFormula(b: BackendFormula): PlatformFormula {
     formula: b.formula,
     description: b.description,
   };
-}
-
-function mapUnit(b: BackendUnit): IndicatorUnit {
-  return { id: b.id, enName: b.en_name, cnName: b.cn_name };
 }
 
 function indicatorPayload(
@@ -305,36 +293,6 @@ export const indicatorLibraryApi = {
       operatorCode: data.operator_code,
       enable: data.enable,
     };
-  },
-
-  async listUnits(): Promise<{ items: IndicatorUnit[]; total: number }> {
-    const { data } = await http.get<{ items: BackendUnit[]; total: number }>('/indicator-units');
-    return {
-      items: (data.items || []).map(mapUnit),
-      total: data.total || 0,
-    };
-  },
-
-  async upsertUnit(input: UnitInput): Promise<IndicatorUnit> {
-    const { data } = await http.post<BackendUnit>('/indicator-units', {
-      id: input.id,
-      en_name: input.enName,
-      cn_name: input.cnName,
-    });
-    return mapUnit(data);
-  },
-
-  async updateUnit(id: string, input: UnitInput): Promise<IndicatorUnit> {
-    const { data } = await http.put<BackendUnit>(`/indicator-units/${id}`, {
-      id: input.id,
-      en_name: input.enName,
-      cn_name: input.cnName,
-    });
-    return mapUnit(data);
-  },
-
-  async deleteUnit(id: string): Promise<void> {
-    await http.delete(`/indicator-units/${id}`);
   },
 
   async cacheRefresh(): Promise<{ refreshed: boolean; note?: string }> {

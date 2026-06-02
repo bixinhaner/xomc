@@ -1,4 +1,4 @@
-import type { IndicatorInfo, IndicatorGroup, PlatformFormula, IndicatorUnit } from '../../types/indicatorLibrary';
+import type { IndicatorInfo, IndicatorGroup, PlatformFormula } from '../../types/indicatorLibrary';
 
 export const mockIndicators: Record<string, IndicatorInfo[]> = {
   ENB: [
@@ -37,9 +37,3 @@ export const mockEnabledIndicators: Record<string, Record<string, string[]>> = {
   GSM: { cmcc: ['GSM-2001'] },
   GNB: { cmcc: ['GNB-3001'] },
 };
-
-export const mockUnits: IndicatorUnit[] = [
-  { id: 'percent', enName: '%', cnName: '百分比' },
-  { id: 'count', enName: 'Count', cnName: '次数' },
-  { id: 'mbps', enName: 'Mbps', cnName: '兆比特每秒' },
-];

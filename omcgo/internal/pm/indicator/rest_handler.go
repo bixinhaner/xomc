@@ -22,7 +22,6 @@ import (
 type RESTHandler struct {
 	svc      *IndicatorManagementService
 	formula  PlatformFormulaRepository
-	units    *PgUnitRepository
 	reloader Reloader
 	fileRepo FileRepository // T-0180 P1.5: 供 ImportDirectory ?mode=reload 调 DeleteOrphansBefore
 	logger   *zap.Logger
@@ -38,7 +37,6 @@ type Reloader interface {
 func NewRESTHandler(
 	svc *IndicatorManagementService,
 	formula PlatformFormulaRepository,
-	units *PgUnitRepository,
 	reloader Reloader,
 	fileRepo FileRepository,
 	logger *zap.Logger,
@@ -46,7 +44,7 @@ func NewRESTHandler(
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &RESTHandler{svc: svc, formula: formula, units: units, reloader: reloader, fileRepo: fileRepo, logger: logger.Named("indicator.rest")}
+	return &RESTHandler{svc: svc, formula: formula, reloader: reloader, fileRepo: fileRepo, logger: logger.Named("indicator.rest")}
 }
 
 // RegisterRoutes 挂在 /api/v1 下。
@@ -78,12 +76,6 @@ func (h *RESTHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	eg.GET("", h.GetEnabled)
 	eg.PUT("", h.SetEnabled)
 
-	// indicator-units
-	ug := rg.Group("/indicator-units")
-	ug.GET("", h.ListUnits)
-	ug.POST("", h.UpsertUnit)
-	ug.PUT("/:id", h.UpdateUnit)
-	ug.DELETE("/:id", h.DeleteUnit)
 }
 
 // ── 公共 helper ─────────────────────────────────────────────────────
@@ -517,65 +509,6 @@ func (h *RESTHandler) SetEnabled(c *gin.Context) {
 	response.OK(c, gin.H{"updated": len(req.IndicatorIDs), "operator_code": op, "enable": req.Enable})
 }
 
-// ── Indicator units ─────────────────────────────────────────────────
-
-type upsertUnitReq struct {
-	ID     string `json:"id" binding:"required"`
-	EnName string `json:"en_name"`
-	CnName string `json:"cn_name"`
-}
-
-func (h *RESTHandler) ListUnits(c *gin.Context) {
-	items, err := h.units.List(c.Request.Context())
-	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
-		return
-	}
-	response.OK(c, gin.H{"items": items, "total": len(items)})
-}
-
-func (h *RESTHandler) UpsertUnit(c *gin.Context) {
-	var req upsertUnitReq
-	if err := c.ShouldBindJSON(&req); err != nil {
-		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
-		return
-	}
-	u, err := h.units.Upsert(c.Request.Context(), strings.TrimSpace(req.ID), req.EnName, req.CnName)
-	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
-		return
-	}
-	response.OKWithStatus(c, http.StatusCreated, u)
-}
-
-func (h *RESTHandler) UpdateUnit(c *gin.Context) {
-	id := c.Param("id")
-	var req upsertUnitReq
-	if err := c.ShouldBindJSON(&req); err != nil {
-		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
-		return
-	}
-	u, err := h.units.Upsert(c.Request.Context(), id, req.EnName, req.CnName)
-	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
-		return
-	}
-	response.OK(c, u)
-}
-
-func (h *RESTHandler) DeleteUnit(c *gin.Context) {
-	id := c.Param("id")
-	ok, err := h.units.Delete(c.Request.Context(), id)
-	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusConflict, err)
-		return
-	}
-	if !ok {
-		commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
-		return
-	}
-	response.OK(c, gin.H{"deleted": true, "id": id})
-}
 
 // ── Cache + Import ──────────────────────────────────────────────────
 

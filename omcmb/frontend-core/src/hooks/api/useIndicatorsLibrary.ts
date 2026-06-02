@@ -10,7 +10,6 @@ import type {
   CreateGroupInput,
   UpdateGroupInput,
   EnabledIndicatorsRequest,
-  UnitInput,
   IndicatorReloadMode,
   TechLower,
 } from '../../types/indicatorLibrary';
@@ -203,44 +202,6 @@ export function useSetEnabledIndicators() {
         queryKey: [...IL_KEY, 'enabled', vars.deviceType, vars.operatorCode],
       });
       void qc.invalidateQueries({ queryKey: [...IL_KEY, 'list', vars.deviceType] });
-    },
-  });
-}
-
-export function useIndicatorUnits() {
-  return useQuery({
-    queryKey: [...IL_KEY, 'units'],
-    queryFn: () => api.listUnits(),
-    staleTime: 5 * 60 * 1000,
-  });
-}
-
-export function useUpsertUnit() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (input: UnitInput) => api.upsertUnit(input),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: [...IL_KEY, 'units'] });
-    },
-  });
-}
-
-export function useUpdateUnit() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, input }: { id: string; input: UnitInput }) => api.updateUnit(id, input),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: [...IL_KEY, 'units'] });
-    },
-  });
-}
-
-export function useDeleteUnit() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (id: string) => api.deleteUnit(id),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: [...IL_KEY, 'units'] });
     },
   });
 }

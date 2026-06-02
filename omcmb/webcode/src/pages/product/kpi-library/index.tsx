@@ -16,7 +16,6 @@ import { useSearchParams } from 'react-router-dom';
 import { Card, Button, Space, Popconfirm, message, Select, Input } from 'antd';
 import {
   ArrowLeftOutlined,
-  AppstoreOutlined,
   CloudDownloadOutlined,
   InboxOutlined,
   ReloadOutlined,
@@ -31,7 +30,6 @@ import { techToDeviceType } from '@core/types/indicatorLibrary';
 import SummaryTab from './SummaryTab';
 import IndicatorsByTech from './IndicatorsByTech';
 import UploadXmlModal from './UploadXmlModal';
-import UnitsDrawer from './UnitsDrawer';
 import { useT } from '@/hooks/useT';
 
 const TECH_LABEL: Record<TechLower, string> = {
@@ -92,7 +90,6 @@ export default function KpiLibraryPage() {
   };
 
   // ── 公共状态 ────────────────────────────────────────────────
-  const [unitsOpen, setUnitsOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
 
   const importMut = useIndicatorImportDirectory();
@@ -122,9 +119,6 @@ export default function KpiLibraryPage() {
   // 全局操作按钮(列表态 toolbar 右侧)
   const globalActions = (
     <Space wrap>
-      <Button icon={<AppstoreOutlined />} onClick={() => setUnitsOpen(true)}>
-        {t('product.kpi.unitsDefinition')}
-      </Button>
       <Button icon={<InboxOutlined />} onClick={() => setUploadOpen(true)}>
         {t('common.importXml')}
       </Button>
@@ -244,7 +238,6 @@ export default function KpiLibraryPage() {
       )}
 
       {/* 抽屉与弹窗 */}
-      <UnitsDrawer open={unitsOpen} onClose={() => setUnitsOpen(false)} />
       <UploadXmlModal open={uploadOpen} onClose={() => setUploadOpen(false)} />
     </div>
   );

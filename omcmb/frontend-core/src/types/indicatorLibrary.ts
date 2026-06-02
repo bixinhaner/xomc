@@ -51,12 +51,6 @@ export interface PlatformFormula {
   description?: string;
 }
 
-export interface IndicatorUnit {
-  id: string;
-  enName: string;
-  cnName: string;
-}
-
 export interface CreateIndicatorInput {
   id: string;
   name: string;
@@ -90,11 +84,6 @@ export interface EnabledIndicatorsRequest {
   enable: boolean;
 }
 
-export interface UnitInput {
-  id: string;
-  enName: string;
-  cnName: string;
-}
 
 // ── T-0180 P4: 自定义 XML 分层目录 + drill-down 视图类型 ──────────────────
 

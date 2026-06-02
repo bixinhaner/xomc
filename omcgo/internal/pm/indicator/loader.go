@@ -28,7 +28,8 @@ const defaultGroupID = "default"
 //
 // 加载语义（设计 §2.6 + 实施计划 §1.2 注："{enabled} / 多文件 OR 合并 / operator_code 桶刷新" 在 P2-09 增强）：
 //   1. 扫描 enb/*.xml + GSM.xml + GNB.xml
-//   2. 收集 distinct unitId → 插入 indicator_unit（按 id UPSERT）
+//   2. （单位已下线）指标单位改由数据字典 type='indicator_unit' 管理，初始化走
+//      migrations/seed/000007；Loader 不再写 indicator_unit 表
 //   3. 插入 indicator_group_{enb,gsm,gnb} 占位 group（id="default"，satisfy NOT NULL FK）
 //   4. UPSERT perf_indicators_{enb,gsm,gnb}（按 id 唯一）
 //   5. 重写 rela_platform_indicator_formula_{enb,gsm,gnb} — 每 (platform_name, indicator_id) 一行
@@ -161,15 +162,8 @@ func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	// 3a) units — 收集所有 distinct unitId(三制式合并)
-	allDocs := append([]xmlIndicatorModel{}, enbDocs...)
-	allDocs = append(allDocs, gsmDocs...)
-	allDocs = append(allDocs, gnbDocs...)
-	unitsLoaded, err := upsertUnits(ctx, tx, allDocs)
-	if err != nil {
-		return rep, fmt.Errorf("upsert indicator_unit: %w", err)
-	}
-	rep.RowsAffected += unitsLoaded
+	// 3a) units 已下线:指标单位改由数据字典(sys_dictionaries type='indicator_unit')
+	//     统一管理,初始化走 migrations/seed/000007;Loader 不再写 indicator_unit 表。
 
 	// 3b) groups — 三个 device type 各一个占位
 	if err := ensureDefaultGroups(ctx, tx); err != nil {
@@ -241,8 +235,7 @@ func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
 	l.logger.Info("indicators loaded",
 		zap.Int("enb_indicators", len(enbRecords)), zap.Int("enb_formulas", len(enbFormulas)),
 		zap.Int("gsm_indicators", len(gsmRecords)), zap.Int("gsm_formulas", len(gsmFormulas)),
-		zap.Int("gnb_indicators", len(gnbRecords)), zap.Int("gnb_formulas", len(gnbFormulas)),
-		zap.Int("units", unitsLoaded))
+		zap.Int("gnb_indicators", len(gnbRecords)), zap.Int("gnb_formulas", len(gnbFormulas)))
 
 	if rep.HasErrors() {
 		return rep, rep.FirstError()
@@ -338,32 +331,6 @@ type formulaRow struct {
 	Formula      string
 }
 
-func upsertUnits(ctx context.Context, tx pgx.Tx, docs []xmlIndicatorModel) (int, error) {
-	uniq := make(map[string]struct{}, 32)
-	for _, d := range docs {
-		for _, i := range d.Indicators {
-			if u := strings.TrimSpace(i.UnitID); u != "" {
-				uniq[u] = struct{}{}
-			}
-		}
-	}
-	if len(uniq) == 0 {
-		return 0, nil
-	}
-	ib := sq.StatementBuilder.PlaceholderFormat(sq.Dollar).Insert("indicator_unit").Columns("id", "en_name", "cn_name")
-	for u := range uniq {
-		ib = ib.Values(u, u, u) // P1-06 baseline：en/cn name 占位等同 id；UI 工作时再补
-	}
-	ib = ib.Suffix("ON CONFLICT (id) DO NOTHING")
-	sqlStr, args, err := ib.ToSql()
-	if err != nil {
-		return 0, fmt.Errorf("build indicator_unit sql: %w", err)
-	}
-	if _, err := tx.Exec(ctx, sqlStr, args...); err != nil {
-		return 0, err
-	}
-	return len(uniq), nil
-}
 
 func ensureDefaultGroups(ctx context.Context, tx pgx.Tx) error {
 	for _, dt := range []string{"enb", "gsm", "gnb"} {

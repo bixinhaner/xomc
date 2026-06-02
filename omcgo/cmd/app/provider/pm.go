@@ -112,14 +112,13 @@ func initPMModule(c *Container) error {
 	indicatorHandler := indicator.NewIndicatorHandler(indicatorSvc, logger.Named("indicator"))
 
 	// T-0098 P3-03：REST 风格 KPI 治理 API（/api/v1/indicators 系列）
-	// 复用既有 IndicatorManagementService + PlatformFormulaRepository；
-	// 新增 PgUnitRepository 承担 indicator_unit CRUD。
-	indicatorUnitRepo := indicator.NewPgUnitRepository(c.PgPool)
+	// 复用既有 IndicatorManagementService + PlatformFormulaRepository。
+	// 单位定义已迁移到数据字典(seed/000007),units CRUD 下线,不再注入 unit repo。
 	indicatorReloader := &indicatorReloader{reg: c.DictLoaderRegistry}
 	// T-0180 P1.5: 提前构造 fileRepo,RESTHandler 和 FileHandler 共用同一实例
 	indicatorFileRepo := indicator.NewPgFileRepository(c.PgPool)
 	indicatorRESTHandler := indicator.NewRESTHandler(
-		indicatorSvc, platformFormulaRepo, indicatorUnitRepo, indicatorReloader,
+		indicatorSvc, platformFormulaRepo, indicatorReloader,
 		indicatorFileRepo, logger.Named("indicator-rest"),
 	)
 

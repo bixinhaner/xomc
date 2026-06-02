@@ -4,13 +4,11 @@ import type {
   IndicatorListFilter,
   IndicatorGroup,
   PlatformFormula,
-  IndicatorUnit,
   CreateIndicatorInput,
   UpdateIndicatorInput,
   CreateGroupInput,
   UpdateGroupInput,
   EnabledIndicatorsRequest,
-  UnitInput,
   IndicatorPlatformSummary,
   IndicatorFile,
   IndicatorReloadMode,
@@ -24,7 +22,6 @@ import {
   mockGroups,
   mockFormulas,
   mockEnabledIndicators,
-  mockUnits,
 } from '../data/indicatorLibrary';
 
 const indicators: Record<DeviceType, IndicatorInfo[]> = {
@@ -46,8 +43,6 @@ const enabled: Record<DeviceType, Record<string, string[]>> = {
   GSM: { ...mockEnabledIndicators.GSM },
   GNB: { ...mockEnabledIndicators.GNB },
 };
-
-let units: IndicatorUnit[] = [...mockUnits];
 
 function clone<T>(v: T): T {
   return JSON.parse(JSON.stringify(v)) as T;
@@ -208,29 +203,6 @@ export const indicatorLibraryService = {
       operatorCode: request.operatorCode,
       enable: request.enable,
     };
-  },
-
-  async listUnits() {
-    return { items: clone(units), total: units.length };
-  },
-
-  async upsertUnit(input: UnitInput): Promise<IndicatorUnit> {
-    const idx = units.findIndex((u) => u.id === input.id);
-    const item: IndicatorUnit = { id: input.id, enName: input.enName, cnName: input.cnName };
-    if (idx >= 0) units[idx] = item;
-    else units.push(item);
-    return clone(item);
-  },
-
-  async updateUnit(id: string, input: UnitInput): Promise<IndicatorUnit> {
-    const idx = units.findIndex((u) => u.id === id);
-    if (idx < 0) throw new Error(`unit ${id} not found`);
-    units[idx] = { id: input.id, enName: input.enName, cnName: input.cnName };
-    return clone(units[idx]);
-  },
-
-  async deleteUnit(id: string): Promise<void> {
-    units = units.filter((u) => u.id !== id);
   },
 
   async cacheRefresh() {
