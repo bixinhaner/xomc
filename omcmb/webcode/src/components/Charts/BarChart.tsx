@@ -25,6 +25,8 @@ export interface BarChartProps {
   barWidth?: number | string;
   /** 圆角大小，默认 6，设为 0 则无圆角 */
   borderRadius?: number;
+  /** 是否显示图例，默认 true */
+  showLegend?: boolean;
   /** 自定义 tooltip formatter，兼容 ECharts 原生类型 */
   tooltipFormatter?: (params: CallbackDataParams | CallbackDataParams[]) => string;
   /** 点击事件回调 */
@@ -40,6 +42,7 @@ const BarChart: React.FC<BarChartProps> = ({
   yAxisName,
   barWidth,
   borderRadius = 6,
+  showLegend = true,
   tooltipFormatter,
   onClick,
 }) => {
@@ -124,10 +127,10 @@ const BarChart: React.FC<BarChartProps> = ({
             top: 4,
           }
         : undefined,
-      legend: {
+      legend: showLegend ? {
         ...(base.legend as object),
         top: title ? 28 : 8,
-      },
+      } : undefined,
       grid: {
         ...(base.grid as object),
         top: title ? 56 : 40,

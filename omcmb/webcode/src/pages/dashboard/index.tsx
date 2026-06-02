@@ -6,11 +6,9 @@ import {
   Button,
   Card,
   Col,
-  List,
   Row,
   Space,
   Spin,
-  Tag,
   Typography,
   message,
 } from 'antd';
@@ -33,15 +31,9 @@ import {
 } from '@ant-design/icons';
 import KPICard from '@/components/KPICard';
 import BarChart from '@/components/Charts/BarChart';
-import GISMap from '@/components/GISMap';
 import EmptyState from '@/components/common/EmptyState';
-import { MAP_CONFIG } from '@/components/GISMap/constants';
-import type { MapDevice } from '@/components/GISMap';
-import type { DeviceGeo } from '@core/types/map';
 import { useDashboardData, useDeviceStatusByType, useKPIGroupTrend } from '@core/hooks/api/useDashboard';
 import { MultiKPITrendChart } from '@/components/dashboard';
-import { useAlarmCount, useCurrentAlarms } from '@core/hooks/api/useAlarms';
-import { useMapDevicesGeo } from '@core/hooks/api/useTopology';
 import { useUserStore } from '@core/store/userStore';
 import { useT } from '@/hooks/useT';
 import { useThemeToken } from '@/hooks/useThemeToken';
@@ -74,25 +66,8 @@ const DASHBOARD_CONFIG = {
   showPRBUtil: false,            // PRB利用率趋势 - PRB utilization trend chart
   showUETrend: true,             // UE用户数趋势 - UE user trend chart (Phase 2 feature, backend not implemented)
   showRefreshControls: false,    // 刷新控制栏 - Refresh controls (last update time + refresh button)
+  showDeviceMap: false,          // 设备地图 - Device map (GISMap)
 } as const;
-
-function formatAlarmTime(value: string | undefined): string {
-  if (!value) {
-    return '--';
-  }
-
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return value;
-  }
-
-  return parsed.toLocaleTimeString('zh-CN', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  });
-}
 
 /** 格式化最后登录时间 */
 function formatLastLogin(lastLoginTime?: string): string {
@@ -128,11 +103,6 @@ const QUICK_ACCESS_ITEMS = [
 export default function DashboardPage() {
   const navigate = useNavigate();
   const { data: dashboardData, isLoading } = useDashboardData();
-  const { data: alarmCount } = useAlarmCount();
-  const { data: currentAlarmData, isLoading: isCurrentAlarmsLoading } = useCurrentAlarms({
-    page: 1,
-    pageSize: 6,
-  });
   const t = useT();
   const token = useThemeToken();
   const queryClient = useQueryClient();
@@ -194,38 +164,6 @@ export default function DashboardPage() {
     ueTimeRange
   );
 
-  // 获取设备地理数据（与 GISMapView 相同的数据源）
-  const mapFilterParams = useMemo(() => ({
-    // 仪表板场景：获取所有状态的设备
-    status: undefined,
-    // 获取所有设备组的设备
-    groupIds: undefined,
-    // 启用请求
-    enabled: true,
-    // 限制数量，避免仪表板加载过慢
-    pageSize: 100,
-  }), []);
-
-  const { data: devicesGeoData } = useMapDevicesGeo(mapFilterParams);
-
-  // 转换 DeviceGeo 为 MapDevice 格式
-  const mapDevices = useMemo(() => {
-    if (!devicesGeoData?.items?.length) return [];
-    return devicesGeoData.items.map((device: DeviceGeo) => ({
-      id: device.id,
-      lat: device.latitude,
-      lng: device.longitude,
-      name: device.name,
-      status: device.status,
-      sn: device.sn,
-      groupName: device.groupName,
-      address: device.address,
-      alarmCount: device.alarmCount,
-      type: device.type,
-      groupId: device.groupId,
-    }));
-  }, [devicesGeoData]);
-
   // KPI values — use real data when available, fall back to sensible defaults
   const totalDevices = dashboardData?.summary?.deviceCounts?.total ?? 1284;
   const onlineDevices = dashboardData?.summary?.deviceCounts?.online ?? 1137;
@@ -242,32 +180,6 @@ export default function DashboardPage() {
   const kpiSummary = dashboardData?.summary?.kpiSummary ?? {};
   const currentActiveUE = Math.floor(
     (kpiSummary['UE_ACTIVE'] ?? ueTrendData['UE_ACTIVE']?.current?.slice(-1)[0]?.value) ?? 0
-  );
-
-  // Alarm severity counts - 没有数据时默认为 0，不显示虚假数据
-  const critical = alarmCount?.critical ?? 0;
-  const major = alarmCount?.major ?? 0;
-  const minor = alarmCount?.minor ?? 0;
-  const warning = alarmCount?.warning ?? 0;
-
-  const SEVERITY_LABEL: Record<string, string> = useMemo(() => ({
-    critical: t('alarm.severity.critical'),
-    major: t('alarm.severity.major'),
-    minor: t('alarm.severity.minor'),
-    warning: t('alarm.severity.warning'),
-  }), [t]);
-
-  // Recent active alarms
-  const recentAlarms = useMemo(
-    () =>
-      (currentAlarmData?.items || []).map((alarm) => ({
-        id: alarm.id,
-        alarmName: alarm.alarmName || alarm.alarmIdentifier,
-        deviceName: alarm.deviceName || alarm.deviceSn,
-        severity: alarm.severity,
-        eventTime: formatAlarmTime(alarm.eventTime),
-      })),
-    [currentAlarmData]
   );
 
   // Device status bar chart data - 按技术类型分组
@@ -296,14 +208,56 @@ export default function DashboardPage() {
     return { isEmpty: false, xData, series };
   }, [deviceStatusByTypeData, t]);
 
+  // Alarm distribution bar chart data - 按告警等级分组统计
+  // 使用 dashboardData.summary.alarmCounts（全部告警）而非 currentAlarmData（仅6条）
+  const alarmDistributionData = useMemo(() => {
+    const alarmCounts = dashboardData?.summary?.alarmCounts;
+
+    if (!alarmCounts) {
+      return { isEmpty: true, xData: [], series: [] };
+    }
+
+    // 检查是否有任何告警
+    const hasAlarms = alarmCounts.critical > 0 || alarmCounts.major > 0 ||
+                      alarmCounts.minor > 0 || alarmCounts.warning > 0;
+
+    if (!hasAlarms) {
+      return { isEmpty: true, xData: [], series: [] };
+    }
+
+    // X轴：告警等级（按严重程度顺序）
+    const xData = [
+      t('alarm.severity.critical'),
+      t('alarm.severity.major'),
+      t('alarm.severity.minor'),
+      t('alarm.severity.warning'),
+    ];
+
+    // 单一系列，每个柱子带独立的颜色（使用 ECharts data 对象格式）
+    const data = [
+      { value: alarmCounts.critical, itemStyle: { color: SEVERITY_COLOR.critical } },
+      { value: alarmCounts.major, itemStyle: { color: SEVERITY_COLOR.major } },
+      { value: alarmCounts.minor, itemStyle: { color: SEVERITY_COLOR.minor } },
+      { value: alarmCounts.warning, itemStyle: { color: SEVERITY_COLOR.warning } },
+    ];
+
+    const series = [
+      {
+        name: t('dashboard.alarmCount'),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        data: data as any[],
+      },
+    ];
+
+    return { isEmpty: false, xData, series };
+  }, [dashboardData, t]);
+
   const dashboardRef = useRef<HTMLDivElement>(null);
   useScrollReveal(dashboardRef);
 
-  const handleDeviceClick = useCallback(
-    (device: MapDevice) => {
-      if (device.sn) {
-        void navigate(`/device/detail/${device.sn}`);
-      }
+  const handleAlarmChartClick = useCallback(
+    (_index: number, _name: string) => {
+      void navigate('/alarm/current');
     },
     [navigate]
   );
@@ -452,6 +406,7 @@ export default function DashboardPage() {
           <Card
             title={t('dashboard.deviceStatusByType')}
             size="small"
+            extra={<span style={{ visibility: 'hidden', fontSize: 13 }}>……</span>}
             styles={{ body: { padding: '8px 0 0', flex: 1, display: 'flex', flexDirection: 'column' } }}
             style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
           >
@@ -467,6 +422,7 @@ export default function DashboardPage() {
                 xData={deviceStatusData.xData}
                 series={deviceStatusData.series}
                 height={260}
+                barWidth={32}
               />
             )}
           </Card>
@@ -474,126 +430,42 @@ export default function DashboardPage() {
         </Col>
 
         <Col xs={24} lg={12} style={{ display: 'flex' }}>
-          <TiltCard maxTilt={5} style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
+          <TiltCard maxTilt={7} style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
           <Card
-            title={t('dashboard.deviceMap')}
-            size="small"
-            styles={{ body: { padding: 8, flex: 1, display: 'flex', flexDirection: 'column' } }}
-            style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
-          >
-            <GISMap
-              devices={mapDevices}
-              height={260}
-              defaultCenter={MAP_CONFIG.defaultCenter}
-              defaultZoom={MAP_CONFIG.defaultZoom}
-              tileUrl={MAP_CONFIG.tileUrl}
-              showStats={false}
-              showMetadataTip={false}
-              onDeviceClick={handleDeviceClick}
-            />
-          </Card>
-          </TiltCard>
-        </Col>
-      </Row>
-
-      {/* Row 4: Alarm Summary (Full Width) */}
-      <Row gutter={[16, 16]} align="stretch" className="omc-scroll-reveal" data-delay="3">
-        <Col xs={24} lg={24} style={{ display: 'flex' }}>
-          <TiltCard maxTilt={6} style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
-          <Card
-            title={t('dashboard.alarmSummary')}
+            title={t('dashboard.alarmLevelStatistics')}
             size="small"
             extra={
               <a onClick={() => void navigate('/alarm/current')} style={{ fontSize: 13 }}>
                 {t('dashboard.viewAll')}
               </a>
             }
-            styles={{ body: { padding: 0, flex: 1, display: 'flex', flexDirection: 'column' } }}
+            styles={{ body: { padding: '8px 0 0', flex: 1, display: 'flex', flexDirection: 'column' } }}
             style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
           >
-            {/* Severity count tags */}
-            <div style={{ padding: '12px 16px', display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-              {(['critical', 'major', 'minor', 'warning'] as const).map((sev) => {
-                const counts: Record<string, number> = { critical, major, minor, warning };
-                return (
-                  <div
-                    key={sev}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      padding: '6px 16px',
-                      background: `${SEVERITY_COLOR[sev]}10`,
-                      border: `1px solid ${SEVERITY_COLOR[sev]}40`,
-                      borderRadius: 8,
-                      cursor: 'pointer',
-                    }}
-                    onClick={() => void navigate('/alarm/current')}
-                  >
-                    <span
-                      style={{
-                        display: 'inline-block',
-                        width: 10,
-                        height: 10,
-                        borderRadius: '50%',
-                        background: SEVERITY_COLOR[sev],
-                      }}
-                    />
-                    <Text style={{ fontSize: 13, color: token.colorText }}>{SEVERITY_LABEL[sev]}</Text>
-                    <Text strong style={{ fontSize: 18, color: SEVERITY_COLOR[sev] }}>
-                      {counts[sev]}
-                    </Text>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Recent alarm list */}
-            <List
-              size="small"
-              loading={isCurrentAlarmsLoading}
-              dataSource={recentAlarms}
-              style={{ padding: '0 8px 8px' }}
-              renderItem={(alarm) => (
-                <List.Item
-                  style={{ padding: '6px 8px', borderRadius: 4 }}
-                  onClick={() => void navigate('/alarm/current')}
-                >
-                  <Space size={8} style={{ width: '100%', justifyContent: 'space-between' }}>
-                    <Space size={8}>
-                      <Tag
-                        color={
-                          alarm.severity === 'critical'
-                            ? 'red'
-                            : alarm.severity === 'major'
-                            ? 'orange'
-                            : alarm.severity === 'minor'
-                            ? 'gold'
-                            : 'blue'
-                        }
-                        style={{ margin: 0, fontSize: 11 }}
-                      >
-                        {SEVERITY_LABEL[alarm.severity]}
-                      </Tag>
-                      <Text style={{ fontSize: 13 }}>{alarm.alarmName}</Text>
-                      <Text type="secondary" style={{ fontSize: 12 }}>
-                        {alarm.deviceName}
-                      </Text>
-                    </Space>
-                    <Text type="secondary" style={{ fontSize: 12, flexShrink: 0 }}>
-                      {alarm.eventTime}
-                    </Text>
-                  </Space>
-                </List.Item>
-              )}
-            />
+            {isLoading ? (
+              <div style={{ height: 260, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Spin tip={t('common.loading')} />
+              </div>
+            ) : alarmDistributionData.isEmpty ? (
+              <EmptyState description={t('alarm.noActiveAlarms')} />
+            ) : (
+              <BarChart
+                title=""
+                xData={alarmDistributionData.xData}
+                series={alarmDistributionData.series}
+                height={260}
+                barWidth={32}
+                showLegend={false}
+                onClick={handleAlarmChartClick}
+              />
+            )}
           </Card>
           </TiltCard>
         </Col>
       </Row>
 
-      {/* Row 6: User Profile + Quick Access */}
-      <Row gutter={[16, 16]} align="stretch" className="omc-scroll-reveal" data-delay="5">
+      {/* Row 4: User Profile + Quick Access */}
+      <Row gutter={[16, 16]} align="stretch" className="omc-scroll-reveal" data-delay="3">
         <Col xs={24} lg={6} style={{ display: 'flex' }}>
           <TiltCard maxTilt={8} style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
           <Card
