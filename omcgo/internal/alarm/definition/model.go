@@ -27,6 +27,7 @@ type AlarmDefinition struct {
 	CnSuggestion      string
 	EnSuggestion      string
 	IsShow            bool
+	Description        string // 用户可编辑的描述/备注（不来自 XML）
 }
 
 // SeverityLevel 对应 alarm_severity_levels 表（设计 §3.2.1，4 行种子由 P1-04 写入）。

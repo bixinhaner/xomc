@@ -26,6 +26,7 @@ interface BackendDefinition {
   en_probable_cause?: string;
   cn_suggestion?: string;
   en_suggestion?: string;
+  description?: string;
   is_show: boolean;
   is_unknown?: boolean;
   created_at?: string;
@@ -92,6 +93,7 @@ function mapDef(b: BackendDefinition): AlarmDefinition {
     enProbableCause: b.en_probable_cause,
     cnSuggestion: b.cn_suggestion,
     enSuggestion: b.en_suggestion,
+    description: b.description,
     isShow: b.is_show,
     isUnknown: b.is_unknown,
     createdAt: b.created_at,
@@ -134,6 +136,7 @@ function defPayload(
   if (input.enProbableCause !== undefined) p.en_probable_cause = input.enProbableCause;
   if (input.cnSuggestion !== undefined) p.cn_suggestion = input.cnSuggestion;
   if (input.enSuggestion !== undefined) p.en_suggestion = input.enSuggestion;
+  if (input.description !== undefined) p.description = input.description;
   if (input.isShow !== undefined) p.is_show = input.isShow;
   return p;
 }

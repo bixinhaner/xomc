@@ -84,6 +84,7 @@ type CreateInput struct {
 	CnSuggestion    string
 	EnSuggestion    string
 	IsShow          bool
+	Description      string
 }
 
 // UpdateInput 是 Update 入参；nil 字段保留原值。
@@ -98,6 +99,7 @@ type UpdateInput struct {
 	CnSuggestion    *string
 	EnSuggestion    *string
 	IsShow          *bool
+	Description      *string
 }
 
 // UnknownAlarmStat 是 unknown-stats 端点的单条结果。

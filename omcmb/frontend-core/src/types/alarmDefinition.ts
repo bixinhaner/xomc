@@ -15,6 +15,7 @@ export interface AlarmDefinition {
   enProbableCause?: string;
   cnSuggestion?: string;
   enSuggestion?: string;
+  description?: string;
   isShow: boolean;
   isUnknown?: boolean;
   createdAt?: string;
@@ -60,6 +61,7 @@ export interface CreateAlarmDefinitionInput {
   enProbableCause?: string;
   cnSuggestion?: string;
   enSuggestion?: string;
+  description?: string;
   isShow?: boolean;
 }
 

@@ -86,6 +86,7 @@ type createReq struct {
 	CnSuggestion    string `json:"cn_suggestion"`
 	EnSuggestion    string `json:"en_suggestion"`
 	IsShow          *bool  `json:"is_show"`
+	Description     string `json:"description"`
 }
 
 type updateReq struct {
@@ -99,6 +100,7 @@ type updateReq struct {
 	CnSuggestion    *string `json:"cn_suggestion"`
 	EnSuggestion    *string `json:"en_suggestion"`
 	IsShow          *bool   `json:"is_show"`
+	Description     *string `json:"description"`
 }
 
 type defView struct {
@@ -116,6 +118,7 @@ type defView struct {
 	CnSuggestion    string    `json:"cn_suggestion"`
 	EnSuggestion    string    `json:"en_suggestion"`
 	IsShow          bool      `json:"is_show"`
+	Description     string    `json:"description"`
 }
 
 func toView(rd *ResolvedDefinition) defView {
@@ -134,6 +137,7 @@ func toView(rd *ResolvedDefinition) defView {
 		CnSuggestion:    rd.CnSuggestion,
 		EnSuggestion:    rd.EnSuggestion,
 		IsShow:          rd.IsShow,
+		Description:     rd.Description,
 	}
 }
 
@@ -210,6 +214,7 @@ func (h *Handler) Create(c *gin.Context) {
 		EnProbableCause: req.EnProbableCause,
 		CnSuggestion:    req.CnSuggestion,
 		EnSuggestion:    req.EnSuggestion,
+		Description:     req.Description,
 		IsShow:          true,
 	}
 	if req.IsShow != nil {
@@ -242,6 +247,7 @@ func (h *Handler) Update(c *gin.Context) {
 		CnSuggestion:    req.CnSuggestion,
 		EnSuggestion:    req.EnSuggestion,
 		IsShow:          req.IsShow,
+		Description:     req.Description,
 	})
 	if errors.Is(err, ErrUnknownIdentifier) {
 		commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)

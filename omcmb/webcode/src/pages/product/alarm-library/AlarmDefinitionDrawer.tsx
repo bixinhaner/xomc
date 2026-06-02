@@ -33,6 +33,7 @@ interface FormValues {
   enProbableCause?: string;
   cnSuggestion?: string;
   enSuggestion?: string;
+  description?: string;
   isShow: boolean;
 }
 
@@ -64,6 +65,7 @@ export default function AlarmDefinitionDrawer({
         enProbableCause: definition.enProbableCause,
         cnSuggestion: definition.cnSuggestion,
         enSuggestion: definition.enSuggestion,
+        description: definition.description,
         isShow: definition.isShow,
       });
     } else {
@@ -90,6 +92,7 @@ export default function AlarmDefinitionDrawer({
           enProbableCause: v.enProbableCause,
           cnSuggestion: v.cnSuggestion,
           enSuggestion: v.enSuggestion,
+          description: v.description,
           isShow: v.isShow,
         };
         await updateMut.mutateAsync({ identifier: definition.identifier, input });
@@ -106,6 +109,7 @@ export default function AlarmDefinitionDrawer({
           enProbableCause: v.enProbableCause,
           cnSuggestion: v.cnSuggestion,
           enSuggestion: v.enSuggestion,
+          description: v.description,
           isShow: v.isShow,
         };
         await createMut.mutateAsync(input);
@@ -187,6 +191,9 @@ export default function AlarmDefinitionDrawer({
         </Form.Item>
         <Form.Item name="enSuggestion" label="Suggestion (EN)">
           <Input.TextArea rows={2} />
+        </Form.Item>
+        <Form.Item name="description" label={t('table.description')}>
+          <Input.TextArea rows={2} placeholder={t('table.description')} />
         </Form.Item>
         <Form.Item name="isShow" label={t('product.alarm.def.uiShow')} valuePropName="checked">
           <Switch />

@@ -34,7 +34,6 @@ import {
   CloudUploadOutlined,
   DeleteOutlined,
   EyeOutlined,
-  InboxOutlined,
   PlusOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
@@ -53,7 +52,6 @@ import type {
   AlarmNeTypeStat,
 } from '@core/types/alarmDefinition';
 import AlarmDefinitionDrawer from './AlarmDefinitionDrawer';
-import AlarmUploadXmlModal from './AlarmUploadXmlModal';
 import { makeSeqColumn } from '@/components/Table/seqColumn';
 import { useT } from '@/hooks/useT';
 // 2026-05-29:"未识别频次"入口暂时隐藏(后端聚合 / 统计逻辑未完工,详见
@@ -124,7 +122,6 @@ export default function AlarmLibraryPage() {
   // ── 公共 ───────────────────────────────────────────────────────
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState<AlarmDefinition | null>(null);
-  const [uploadOpen, setUploadOpen] = useState(false);
   // statsOpen 暂时移除 — "未识别频次"功能未完工(见 backlog T-0181)
 
   const delMut = useDeleteAlarmDefinition();
@@ -276,6 +273,13 @@ export default function AlarmLibraryPage() {
     { title: t('alarmLibrary.col.cnName'), dataIndex: 'cnName', width: 200 },
     { title: t('alarmLibrary.col.enName'), dataIndex: 'enName', width: 220, ellipsis: true },
     {
+      title: t('table.description'),
+      dataIndex: 'description',
+      width: 220,
+      ellipsis: true,
+      render: (v: string) => v || <span style={{ color: '#bfbfbf' }}>-</span>,
+    },
+    {
       title: t('alarmLibrary.col.severityLevel'),
       dataIndex: 'severityCode',
       width: 110,
@@ -383,10 +387,7 @@ export default function AlarmLibraryPage() {
               </>
             ) : (
               <>
-                {/* 上传自定义 XML(严格对标 kpi-library) */}
-                <Button icon={<InboxOutlined />} onClick={() => setUploadOpen(true)}>
-                  {t('common.upload')}
-                </Button>
+                {/* 上传功能已删除：与「导入 XML」重复（用户决策 2026-06-02）。 */}
                 {/* 2026-05-29 与 parammodel 对齐拆两按钮:导入 = 加法 UPSERT;重载 = destructive 删孤儿 */}
                 <Popconfirm
                   title={t('product.kpi.importTitle')}
@@ -502,7 +503,6 @@ export default function AlarmLibraryPage() {
           setEditing(null);
         }}
       />
-      <AlarmUploadXmlModal open={uploadOpen} onClose={() => setUploadOpen(false)} />
       {/* <UnknownStatsModal open={statsOpen} onClose={() => setStatsOpen(false)} /> */}
     </div>
   );
