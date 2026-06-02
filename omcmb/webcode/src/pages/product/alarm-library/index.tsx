@@ -54,6 +54,7 @@ import type {
 } from '@core/types/alarmDefinition';
 import AlarmDefinitionDrawer from './AlarmDefinitionDrawer';
 import AlarmUploadXmlModal from './AlarmUploadXmlModal';
+import { makeSeqColumn } from '@/components/Table/seqColumn';
 import { useT } from '@/hooks/useT';
 // 2026-05-29:"未识别频次"入口暂时隐藏(后端聚合 / 统计逻辑未完工,详见
 // backlog T-0181)。组件文件 UnknownStatsModal.tsx 保留备用,功能就绪后:
@@ -467,7 +468,7 @@ export default function AlarmLibraryPage() {
           <Table<AlarmDefinition>
             rowKey="id"
             loading={isDetailLoading}
-            columns={detailColumns}
+            columns={[makeSeqColumn<AlarmDefinition>({ title: t('table.rowNumber'), current: detailData?.page || 1, pageSize: detailData?.pageSize || 20 }), ...detailColumns]}
             dataSource={detailItems}
             size="small"
             pagination={{
@@ -483,7 +484,7 @@ export default function AlarmLibraryPage() {
           <Table<AlarmNeTypeStat>
             rowKey={(r) => `${r.neType}__${r.loadedFrom}`}
             loading={isNeTypesLoading}
-            columns={neTypesColumns}
+            columns={[makeSeqColumn<AlarmNeTypeStat>({ title: t('table.rowNumber'), dataSource: neTypesItems }), ...neTypesColumns]}
             dataSource={neTypesItems}
             size="small"
             pagination={{ pageSize: 20, showTotal: (total) => t('product.alarm.totalNeTypes', { count: total }) }}

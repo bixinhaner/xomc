@@ -11,6 +11,7 @@ import {
   Tooltip,
   Typography,
 } from 'antd';
+import { makeSeqColumn } from '@/components/Table/seqColumn';
 import {
   PlusOutlined,
   ReloadOutlined,
@@ -87,18 +88,6 @@ export default function ProductsPage() {
   }, [items, patternStats]);
 
   const columns = [
-    {
-      title: t('common.sortOrder'),
-      width: 80,
-      align: 'center' as const,
-      render: (_: unknown, row: Product) => {
-        const stats = patternStats.get(row.id);
-        if (!stats) {
-          return <Text type="secondary">—</Text>;
-        }
-        return <Tag color="blue">{stats.minSortOrder}</Tag>;
-      },
-    },
     {
       title: t('product.products.col.productName'),
       dataIndex: 'name',
@@ -324,7 +313,7 @@ export default function ProductsPage() {
         <Table<Product>
           rowKey="id"
           loading={isLoading}
-          columns={columns}
+          columns={[makeSeqColumn<Product>({ title: t('table.rowNumber'), dataSource: sortedItems }), ...columns]}
           dataSource={sortedItems}
           pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (total) => t('common.totalCount', { count: total }) }}
           size="small"

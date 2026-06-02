@@ -7,6 +7,7 @@ import {
   useDeleteParamModel,
 } from '@core/hooks/api/useParamModels';
 import type { ParamModel, ParamModelSource, UpdateParamModelInput } from '@core/types/paramModel';
+import { makeSeqColumn } from '@/components/Table/seqColumn';
 import { useT } from '@/hooks/useT';
 
 interface Props {
@@ -163,7 +164,7 @@ export default function ModelsTab({ selectedName, onSelect, keyword }: Props) {
       <Table<ParamModel>
         rowKey="id"
         loading={isLoading}
-        columns={columns}
+        columns={[makeSeqColumn<ParamModel>({ title: t('table.rowNumber'), dataSource: items }), ...columns]}
         dataSource={items}
         size="small"
         pagination={{ pageSize: 20, showTotal: (total) => t('common.totalCount', { count: total }) }}

@@ -27,6 +27,17 @@ import { useAlarmCount, useTriggerAlarmSync } from '@core/hooks/api/useAlarms';
 import { useCreateUnifiedFileTransferTask } from '@core/hooks/api/useUnifiedFileTransfer';
 import { useDownloadStationLog } from '@core/hooks/api/useStationLog';
 import { stationLogApi } from '@core/services/api/stationLogApi';
+import { deviceApi } from '@core/services/api/deviceApi';
+import { createApiSwitch } from '@core/services/apiSwitch';
+import { deviceService } from '@core/mock/services/deviceService';
+import {
+  resolveVisibleExportColumns,
+  buildCsvContent,
+  triggerCsvDownload,
+  triggerXlsxDownload,
+  exportTimestamp,
+  fetchAllPaged,
+} from './deviceExport';
 import { useT } from '@/hooks/useT';
 import { useUserStore } from '@core/store/userStore';
 import { useAppStore } from '@core/store/appStore';
@@ -43,6 +54,11 @@ const SEVERITY_COLOR: Record<string, string> = {
   warning: 'blue',
   none: 'default',
 };
+
+// 列表导出复用 useDeviceList 背后同一套 mock/real 切换,保证导出与展示口径一致。
+const exportDeviceApi = createApiSwitch(deviceService as unknown as typeof deviceApi, deviceApi);
+// DataTable tableId,导出时据此读取"列设置"localStorage(须与 <DataTable tableId> 一致)。
+const DEVICE_LIST_TABLE_ID = 'device-list-table';
 
 /**
  * 格式化离线时长为可读字符串
@@ -100,6 +116,26 @@ function formatOfflineDuration(days?: number, hours?: number, minutes?: number):
 
   // 不足1分钟
   return <Tag color="default">{'<1分钟'}</Tag>;
+}
+
+// 离线时长的纯文本版(导出用)——与 formatOfflineDuration 的文案口径保持一致,
+// 但去掉 <Tag> 包装,便于写入 CSV/XLSX 单元格。
+function offlineDurationText(days?: number, hours?: number, minutes?: number): string {
+  if (days === undefined || days === null) return '-';
+  if (days >= 365) {
+    const years = Math.floor(days / 365);
+    const remainDays = days % 365;
+    return remainDays > 0 ? `${years}年${remainDays}天` : `${years}年`;
+  }
+  if (days >= 30) {
+    const months = Math.floor(days / 30);
+    const remainDays = days % 30;
+    return remainDays > 0 ? `${months}个月${remainDays}天` : `${months}个月`;
+  }
+  if (days > 0) return hours && hours > 0 ? `${days}天${hours}小时` : `${days}天`;
+  if (hours && hours > 0) return minutes && minutes > 0 ? `${hours}小时${minutes}分钟` : `${hours}小时`;
+  if (minutes && minutes > 0) return `${minutes}分钟`;
+  return '<1分钟';
 }
 
 // 哪些 filter 字段在 URL 里以 CSV 形式编码、需要解析回数组（与 FILTER_FIELDS
@@ -782,18 +818,7 @@ export default function DeviceList() {
     [modal, message, t, batchReboot, triggerAlarmSync, createUfteTask, navigate, devices]
   );
 
-  // 导出 — 直接选择格式后触发
-  const handleExport = useCallback(
-    (format: 'xlsx' | 'csv') => {
-      // TODO: 根据 format 选择 API 端点
-      // CSV: POST /cell/cpeinfos/exportCellsToCsv.action
-      // XLSX: POST /cell/cpeinfos/exportCellsToExcel.action
-      setExportMenuOpen(false);
-      console.log('export:', format);
-      void message.info(t('common.exportInProgress'));
-    },
-    [message, t]
-  );
+  // 导出实现见 columns 定义之后的 handleExport(依赖 columns,需在其后声明)。
 
   /** 解析多小区逗号分隔值为 cell 数组 */
   const parseCellValues = useCallback((v: string | undefined | null): string[] => {
@@ -1318,6 +1343,138 @@ export default function DeviceList() {
 
     ],
     [navigate, t, fmtTime, fmtDuration, fmtStatus, renderMultiCellStatus, renderActivationStatus, remarkHeaderRender, message, downloadStationLog, mapConnStatus, getSeverityLabel]
+  );
+
+  // ─── 列表导出(用户决策 2026-06-02) ──────────────────────────────────────
+  // 1) 仅导出当前筛选条件命中的全部数据(跨分页拉全量,受 EXPORT_ROW_CAP 上限保护);
+  // 2) 导出列与列顺序严格以"列设置"(ColumnVisibility)为准 —— 即与表格当前展示一致。
+
+  // 单元格取值：与列 render 的可读文案对齐;特殊列(状态/告警/时间/时长/枚举)单独
+  // 格式化,其余列回退到 record[dataIndex] 原值(数组以逗号拼接,空值 → 空串)。
+  const formatExportCell = useCallback(
+    (record: Device, key: string, dataIndex?: string): string => {
+      switch (key) {
+        case 'connStatus':
+          return mapConnStatus(record.connStatus) === 'online' ? t('status.online') : t('status.offline');
+        case 'alarmLevel':
+          return getSeverityLabel(record.alarmLevel);
+        case 'onlineTime':
+          return fmtTime(record.onlineTime);
+        case 'offlineTime':
+          return fmtTime(record.offlineTime);
+        case 'firstOnlineTime':
+          return fmtTime(record.firstOnlineTime);
+        case 'lastInformTime':
+          return fmtTime(record.lastInformTime);
+        case 'lastOnlineTime':
+          return fmtTime(record.lastOnlineTime);
+        case 'onlineDuration':
+          return fmtDuration(record.onlineDuration);
+        case 'offlineDuration':
+          return record.connStatus === 'offline'
+            ? offlineDurationText(record.offlineDays, record.offlineHours, record.offlineMinutes)
+            : '-';
+        case 'halobFlag':
+          return record.halobFlag == null
+            ? '-'
+            : record.halobFlag
+              ? t('status.enabled')
+              : t('status.disabled');
+        case 'adminState': {
+          const m: Record<string, string> = { '1': 'Locked', '2': 'Unlocked', '3': 'ShuttingDown' };
+          return record.adminState != null ? (m[String(record.adminState)] ?? String(record.adminState)) : '-';
+        }
+        case 'ueCount': {
+          const v = record.ueCount;
+          return v === -1 || v == null ? '--' : String(v);
+        }
+        case 'opState': {
+          // 激活状态由 cellStatus 聚合得出(与 renderActivationStatus 同口径),
+          // 而非 record.opState 原值 —— 否则导出会得到 "1" 这类内部码而非"激活/未激活"。
+          const cs = record.cellStatus;
+          if (!cs || cs === '--') return '-';
+          return cs === 'normal' ? t('status.active') : t('status.inactive');
+        }
+        default: {
+          const v = dataIndex ? (record as unknown as Record<string, unknown>)[dataIndex] : undefined;
+          if (Array.isArray(v)) return v.join(', ');
+          return v == null ? '' : String(v);
+        }
+      }
+    },
+    [mapConnStatus, getSeverityLabel, fmtTime, fmtDuration, t]
+  );
+
+  // 按当前筛选条件并发分页拉取全部命中数据(不受列表当前页/页大小限制)。
+  // 全表无筛选时可达 3W+ 行,串行逐页会慢到像"点了没反应",故用并发池 + 进度回调。
+  const fetchAllFilteredDevices = useCallback(
+    (onProgress?: (loaded: number, total: number) => void) =>
+      fetchAllPaged<Device>(
+        async (page, pageSize) => {
+          const resp = await exportDeviceApi.getList({
+            ...filterParams,
+            page,
+            pageSize,
+          } as Parameters<typeof useDeviceList>[0]);
+          return { items: resp.items, total: resp.total ?? resp.items.length };
+        },
+        { onProgress },
+      ),
+    [filterParams]
+  );
+
+  // 导出 — 选择格式(xlsx/csv)后触发：筛选生效 + 列以"列设置"为准。
+  const handleExport = useCallback(
+    async (format: 'xlsx' | 'csv') => {
+      setExportMenuOpen(false);
+      const exportCols = resolveVisibleExportColumns(columns, DEVICE_LIST_TABLE_ID);
+      if (exportCols.length === 0) {
+        void message.warning(t('common.noColumnsToExport'));
+        return;
+      }
+      const msgKey = 'device-list-export';
+      message.open({ key: msgKey, type: 'loading', content: t('common.exportInProgress'), duration: 0 });
+      try {
+        // 进度更新做节流(全表 34 页会在 ~1s 内回调 34 次):同一 key 高频 message.open
+        // 在部分机器上会出现"内容还没渲染就被下一次替换"的空白闪烁。限制为最多每 300ms
+        // 刷新一次,并始终渲染最后一次(loaded===total),既给反馈又不抖动。
+        let lastProgressAt = 0;
+        const { items: rowsData, capped } = await fetchAllFilteredDevices((loaded, total) => {
+          const now = Date.now();
+          if (loaded < total && now - lastProgressAt < 300) return;
+          lastProgressAt = now;
+          const content = t('common.exportProgress', { loaded, total }) || `${loaded}/${total}`;
+          message.open({ key: msgKey, type: 'loading', content, duration: 0 });
+        });
+        if (rowsData.length === 0) {
+          message.open({ key: msgKey, type: 'warning', content: t('common.noDataToExport') });
+          return;
+        }
+        const headers = exportCols.map((c) => c.title);
+        const matrix = rowsData.map((dev) => exportCols.map((c) => formatExportCell(dev, c.key, c.dataIndex)));
+        const filename = `device-list-${exportTimestamp()}.${format}`;
+        if (format === 'csv') {
+          triggerCsvDownload(buildCsvContent(headers, matrix), filename);
+        } else {
+          triggerXlsxDownload(headers, matrix, filename, 'devices');
+        }
+        // 命中上限时显式告知用户被截断,避免"以为导全了实际只导了一部分"。
+        message.open({
+          key: msgKey,
+          type: capped ? 'warning' : 'success',
+          content: capped
+            ? t('common.exportCapped', { count: rowsData.length })
+            : t('common.exportSuccess', { count: rowsData.length }),
+        });
+      } catch (e) {
+        message.open({
+          key: msgKey,
+          type: 'error',
+          content: t('common.exportFailed', { reason: e instanceof Error ? e.message : String(e) }),
+        });
+      }
+    },
+    [columns, message, t, fetchAllFilteredDevices, formatExportCell]
   );
 
   const batchActions = useMemo((): BatchAction[] => [

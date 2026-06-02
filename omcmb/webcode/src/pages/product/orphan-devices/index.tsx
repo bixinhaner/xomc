@@ -17,6 +17,7 @@ import { ThunderboltOutlined, LinkOutlined } from '@ant-design/icons';
 import { useOrphanDevices, useRematchOrphan } from '@core/hooks/api/useProducts';
 import type { OrphanDevice } from '@core/types/product';
 import BindProductModal from './BindProductModal';
+import { makeSeqColumn } from '@/components/Table/seqColumn';
 import { useT } from '@/hooks/useT';
 
 export default function OrphanDevicesPage() {
@@ -154,7 +155,7 @@ export default function OrphanDevicesPage() {
           <Table<OrphanDevice>
             rowKey="id"
             loading={isLoading}
-            columns={columns}
+            columns={[makeSeqColumn<OrphanDevice>({ title: t('table.rowNumber'), current: page, pageSize }), ...columns]}
             dataSource={items}
             size="small"
             pagination={{

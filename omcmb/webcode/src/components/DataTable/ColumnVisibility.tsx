@@ -32,8 +32,10 @@ interface ColumnVisibilityProps {
   onOrderChange?: (orderedKeys: string[]) => void;
 }
 
-const VIS_STORAGE_PREFIX = 'omc_col_vis_';
-const ORDER_STORAGE_PREFIX = 'omc_col_order_';
+// 导出(如 device/list 列表导出)需读取同一份"列设置"状态,故前缀对外暴露,
+// 避免常量在多处硬编码漂移。
+export const VIS_STORAGE_PREFIX = 'omc_col_vis_';
+export const ORDER_STORAGE_PREFIX = 'omc_col_order_';
 
 // ─── Sortable row ───────────────────────────────────────────────────────────
 

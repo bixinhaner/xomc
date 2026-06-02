@@ -30,6 +30,7 @@ import {
   useDeleteMapping,
 } from '@core/hooks/api/useParamModels';
 import type { ParamMapping, CreateMappingInput, UpdateMappingInput } from '@core/types/paramModel';
+import { makeSeqColumn } from '@/components/Table/seqColumn';
 import { useT } from '@/hooks/useT';
 
 const { Text } = Typography;
@@ -237,7 +238,7 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
       <Table<ParamMapping>
         rowKey="id"
         loading={isLoading}
-        columns={columns}
+        columns={[makeSeqColumn<ParamMapping>({ title: t('table.rowNumber'), dataSource: filtered }), ...columns]}
         dataSource={filtered}
         size="small"
         pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (total) => t('common.totalCount', { count: total }) }}

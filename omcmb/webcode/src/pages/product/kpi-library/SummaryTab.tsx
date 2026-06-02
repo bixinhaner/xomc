@@ -23,6 +23,7 @@ import {
   useIndicatorSummary,
   useIndicatorDeleteFile,
 } from '@core/hooks/api/useIndicatorsLibrary';
+import { makeSeqColumn } from '@/components/Table/seqColumn';
 import { useT } from '@/hooks/useT';
 
 interface Props {
@@ -156,7 +157,7 @@ export default function SummaryTab({ onSelect }: Props) {
       <Table<IndicatorPlatformSummary>
         rowKey={(r) => `${r.tech}__${r.platform}__${r.loadedFrom}`}
         loading={isLoading}
-        columns={columns}
+        columns={[makeSeqColumn<IndicatorPlatformSummary>({ title: t('table.rowNumber'), dataSource: items }), ...columns]}
         dataSource={items}
         size="small"
         pagination={false}

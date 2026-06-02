@@ -22,6 +22,7 @@ import {
 } from '@core/hooks/api/useIndicatorsLibrary';
 import type { DeviceType, IndicatorInfo } from '@core/types/indicatorLibrary';
 import IndicatorDrawer from './IndicatorDrawer';
+import { makeSeqColumn } from '@/components/Table/seqColumn';
 import { useT } from '@/hooks/useT';
 
 interface Filter {
@@ -132,7 +133,7 @@ export default function IndicatorsByTech({ deviceType, filter }: Props) {
       <Table<IndicatorInfo>
         rowKey="id"
         loading={isLoading}
-        columns={columns}
+        columns={[makeSeqColumn<IndicatorInfo>({ title: t('table.rowNumber'), current: page, pageSize }), ...columns]}
         dataSource={items}
         size="small"
         pagination={{

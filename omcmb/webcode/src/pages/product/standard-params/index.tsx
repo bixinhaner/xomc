@@ -28,6 +28,7 @@ import {
   useDeleteStandard,
 } from '@core/hooks/api/useParamModels';
 import type { StandardParam, UpsertStandardInput } from '@core/types/paramModel';
+import { makeSeqColumn } from '@/components/Table/seqColumn';
 import { useT } from '@/hooks/useT';
 
 export default function StandardParamsPage() {
@@ -53,13 +54,13 @@ export default function StandardParamsPage() {
   const items = data?.items || [];
 
   const columns = [
-    { title: 'standard_path', dataIndex: 'standardPath', ellipsis: true },
-    { title: 'entry_type', dataIndex: 'entryType', width: 100 },
-    { title: 'access', dataIndex: 'access', width: 100 },
-    { title: 'data_type', dataIndex: 'dataType', width: 100 },
-    { title: 'change_applies', dataIndex: 'changeApplies', width: 130 },
-    { title: 'min', dataIndex: 'minValue', width: 80 },
-    { title: 'max', dataIndex: 'maxValue', width: 80 },
+    { title: t('product.standardParams.col.standardPath'), dataIndex: 'standardPath', ellipsis: true },
+    { title: t('product.standardParams.col.entryType'), dataIndex: 'entryType', width: 100 },
+    { title: t('product.standardParams.col.access'), dataIndex: 'access', width: 100 },
+    { title: t('product.standardParams.col.dataType'), dataIndex: 'dataType', width: 100 },
+    { title: t('product.standardParams.col.changeApplies'), dataIndex: 'changeApplies', width: 130 },
+    { title: t('product.standardParams.col.min'), dataIndex: 'minValue', width: 80 },
+    { title: t('product.standardParams.col.max'), dataIndex: 'maxValue', width: 80 },
     {
       title: t('common.action'),
       width: 120,
@@ -153,7 +154,7 @@ export default function StandardParamsPage() {
         <Table<StandardParam>
           rowKey="standardPath"
           loading={isLoading}
-          columns={columns}
+          columns={[makeSeqColumn<StandardParam>({ title: t('table.rowNumber'), dataSource: items }), ...columns]}
           dataSource={items}
           size="small"
           pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (total) => t('common.totalCount', { count: total }) }}
