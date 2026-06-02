@@ -23,7 +23,7 @@ export interface GroupDialogsProps {
 
   // Add Child Group (Level-2) Drawer
   addChildDrawerOpen: boolean;
-  addChildForm: FormInstance<{ name: string; matchingMode: 'deviceName' | 'lac' | 'tac'; tacRag: string }>;
+  addChildForm: FormInstance<{ name_i18n?: Record<string, string>; matchingMode: 'deviceName' | 'lac' | 'tac'; tacRag: string }>;
   addChildParentName?: string;
   matchingMode: string | undefined;
   nameFilters: NameFilterItem[];
@@ -36,7 +36,7 @@ export interface GroupDialogsProps {
 
   // Edit Level-2 Group Drawer
   editLevel2DrawerOpen: boolean;
-  editLevel2Form: FormInstance<{ name: string; matchingMode: 'deviceName' | 'lac' | 'tac'; tacRag: string }>;
+  editLevel2Form: FormInstance<{ name_i18n?: Record<string, string>; matchingMode: 'deviceName' | 'lac' | 'tac'; tacRag: string }>;
   editLevel2ParentName?: string;
   editLevel2MatchingMode: string | undefined;
   editLevel2NameFilters: NameFilterItem[];

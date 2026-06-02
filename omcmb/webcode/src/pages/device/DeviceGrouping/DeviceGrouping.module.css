@@ -49,6 +49,7 @@
 /* 分组统计标签 */
 .groupCountBadge {
   composes: treeNodeCountBadge;
+  flex-shrink: 0;
 }
 
 /* 禁用展开收起箭头的所有背景和hover效果 */
@@ -75,6 +76,11 @@
   display: flex;
   align-items: center;
   background: transparent !important;
+  /* 约束宽度：让长分组名在 treeNodeText 处省略号截断，而不是把右侧「合计」
+   * 徽标和操作按钮（编辑/删除）挤出可视区导致无法点击。 */
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
 }
 
 :global(.group-tree .ant-tree-node-content-wrapper:hover) {

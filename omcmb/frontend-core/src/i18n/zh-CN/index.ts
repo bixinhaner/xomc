@@ -949,6 +949,7 @@ const messages: Record<string, string> = {
   // device 分组保存错误提示（biz_code 1107 = ErrCodeGroupNameDuplicate）
   'device.group.saveFailed':       '保存分组失败',
   'device.group.nameDuplicate':    '同一父级下已存在同名分组，请换一个名称重试',
+  'device.group.editMatchingSuccess': '成功，设备数据异步更新中，请稍后再次刷新页面',
   'device.childGroupName':      '子分组名称',
   'device.groupNameLabel':      '分组名称',
   'device.superiorGroup':       '上级分组',
@@ -5656,6 +5657,7 @@ const messages: Record<string, string> = {
   'mml.admin.catalog.form.logicalCodePlaceholder':'例如 MML_QRY_CELL',
   'mml.admin.catalog.form.nameZh':             '中文名称',
   'mml.admin.catalog.form.nameEn':             '英文名称',
+  'mml.admin.catalog.form.name':               '名称',
   'mml.admin.catalog.form.targetObject':       '目标对象路径',
   'mml.admin.catalog.form.requireConfirm':     '需二次确认',
   'mml.admin.catalog.form.sortOrder':          '排序',

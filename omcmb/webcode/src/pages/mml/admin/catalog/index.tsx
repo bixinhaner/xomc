@@ -148,10 +148,12 @@ export default function MMLAdminCatalog() {
           target: {
             id: group.id,
             groupCode: group.groupCode,
-            displayNameI18n: group.displayNameI18n ?? {
-              'zh-CN': group.displayName,
-              'en-US': group.displayName,
-            },
+            // displayNameI18n 可能存在但值为空（部分种子分组名落在 displayName 上），
+            // 此时退回 displayName 兜底，保证编辑弹窗能正确回填中/英文。
+            displayNameI18n:
+              group.displayNameI18n?.['zh-CN'] || group.displayNameI18n?.['en-US']
+                ? group.displayNameI18n
+                : { 'zh-CN': group.displayName, 'en-US': group.displayName },
             displayOrder: group.displayOrder,
           },
         });

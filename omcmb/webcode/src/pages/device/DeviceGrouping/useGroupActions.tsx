@@ -12,7 +12,8 @@ export interface AddGroupFormValues {
 }
 
 export interface AddChildFormValues {
-  name: string;
+  /** i18n 名称 — 与一级分组一致，I18nInput 序列化为 { 'zh-CN', 'en-US' }。 */
+  name_i18n?: Record<string, string>;
   matchingMode: 'deviceName' | 'lac' | 'tac';
   tacRag: string;
 }
@@ -193,7 +194,15 @@ export function useGroupActions(deps: {
         tacRag = grp.tacList.join(',');
       }
 
-      editLevel2Form.setFieldsValue({ name: grp.name, matchingMode: mode, tacRag });
+      // i18n 名称回填：已有 nameI18n 用之；否则把 legacy name 套进 zh-CN / en-US
+      // （与一级编辑 openEditLevel1 同策略）。
+      editLevel2Form.setFieldsValue({
+        name_i18n: grp.nameI18n && Object.keys(grp.nameI18n).length > 0
+          ? grp.nameI18n
+          : { 'zh-CN': grp.name, 'en-US': grp.name },
+        matchingMode: mode,
+        tacRag,
+      });
 
       // 回填 name_rule_list 到 NameFilters hook 的内部状态
       if (mode === 'deviceName' && Array.isArray(grp.nameRuleList) && grp.nameRuleList.length > 0) {
@@ -295,6 +304,8 @@ export function useGroupActions(deps: {
   const handleSaveChildGroup = useCallback(async () => {
     try {
       const values = await addChildForm.validateFields();
+      // i18n 名称：zh-CN 作 legacy name fallback，完整 i18n map 发后端（同一级）。
+      const nameZh = values.name_i18n?.['zh-CN'] || '';
 
       let matching_mode: string | undefined;
       let name_rule_list: NameFilterItem[] | undefined;
@@ -313,7 +324,8 @@ export function useGroupActions(deps: {
       }
 
       await createGroupMutation.mutateAsync({
-        name: values.name,
+        name: nameZh,
+        name_i18n: values.name_i18n,
         parent_id: parentGroupId ?? undefined,
         remark: '',
         matching_mode,
@@ -332,6 +344,8 @@ export function useGroupActions(deps: {
     try {
       const values = await editLevel2Form.validateFields();
       if (!editLevel2GroupId) return;
+      // i18n 名称：zh-CN 作 legacy name fallback，完整 i18n map 发后端（同一级）。
+      const nameZh = values.name_i18n?.['zh-CN'] || '';
 
       // R1.3: 全量替换语义 — 用户在表单上看到的就是最终落库的，避免增量合并歧义。
       // 切换 matchingMode 时显式清空非当前模式的列表字段，让后端覆盖为空数组。
@@ -356,14 +370,17 @@ export function useGroupActions(deps: {
       await updateGroupMutation.mutateAsync({
         id: editLevel2GroupId,
         data: {
-          name: values.name,
+          name: nameZh,
+          name_i18n: values.name_i18n,
           matching_mode,
           name_rule_list,
           lac_list,
           tac_list,
         },
       });
-      void message.success(t('common.success'));
+      // 改匹配方式会触发后端异步 fireGroupMatch 重新入组，设备数据非即时刷新，
+      // 提示用户稍后再刷新页面（区别于一级编辑的通用「成功」）。
+      void message.success(t('device.group.editMatchingSuccess'));
       setEditLevel2DrawerOpen(false);
       void refetchGroups();
     } catch (err) {

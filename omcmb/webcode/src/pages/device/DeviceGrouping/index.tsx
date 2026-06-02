@@ -205,6 +205,7 @@ export default function DeviceGrouping() {
     message,
     t,
     refetch,
+    refetchGroups,
     selectedGroupId,
     selectedGroupName: selectedGroup ? (fromRecord(selectedGroup as unknown as Record<string, unknown>, 'name') || selectedGroup.name) : undefined,
   });

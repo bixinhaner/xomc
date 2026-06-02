@@ -16,12 +16,14 @@ export function useImportExportHandlers(deps: {
   message: ReturnType<typeof AppNS.useApp>['message'];
   t: (id: string, values?: Record<string, string | number>) => string;
   refetch: () => Promise<unknown>;
+  /** 刷新左侧设备分组树（导入会改变各分组的设备数，需同步刷新树上的「合计」）。 */
+  refetchGroups: () => Promise<unknown>;
   /** 当前选中的设备分组 ID；undefined 表示「全部」根节点。 */
   selectedGroupId: string | null;
   /** 当前选中分组名（拼文件名用），undefined 时用「all」。 */
   selectedGroupName?: string;
 }) {
-  const { message, t, refetch, selectedGroupId, selectedGroupName } = deps;
+  const { message, t, refetch, refetchGroups, selectedGroupId, selectedGroupName } = deps;
 
   // opts.devices 非空 → 仅导出这些（选中）设备，直接用已加载对象，不再拉全量；
   // 否则导出当前分组全部设备（分页拉取）。列字段与 DeviceListPanel 表格一致。
@@ -93,9 +95,10 @@ export function useImportExportHandlers(deps: {
           t('device.batchImport.allSucceeded', { succeeded: result.succeeded })
         );
       }
-      await refetch();
+      // 设备列表 + 分组树同步刷新（导入把设备划入当前分组，树上「合计」会变）。
+      await Promise.all([refetch(), refetchGroups()]);
     },
-    [message, t, refetch]
+    [message, t, refetch, refetchGroups]
   );
 
   const handleDownloadTemplate = useCallback(() => {

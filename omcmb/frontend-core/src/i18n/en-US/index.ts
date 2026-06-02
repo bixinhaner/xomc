@@ -947,6 +947,7 @@ const messages: Record<string, string> = {
   // device group save error prompts (biz_code 1107 = ErrCodeGroupNameDuplicate)
   'device.group.saveFailed':       'Failed to save group',
   'device.group.nameDuplicate':    'A group with the same name already exists under this parent. Please use a different name.',
+  'device.group.editMatchingSuccess': 'Success. Device data is updating asynchronously, please refresh the page again later.',
   'device.childGroupName':      'Child Group Name',
   'device.groupNameLabel':      'Group Name',
   'device.superiorGroup':       'Parent Group',
@@ -5639,6 +5640,7 @@ const messages: Record<string, string> = {
   'mml.admin.catalog.form.logicalCodePlaceholder':'e.g. MML_QRY_CELL',
   'mml.admin.catalog.form.nameZh':             'Display Name (zh-CN)',
   'mml.admin.catalog.form.nameEn':             'Display Name (en-US)',
+  'mml.admin.catalog.form.name':               'Display Name',
   'mml.admin.catalog.form.targetObject':       'Target Object',
   'mml.admin.catalog.form.requireConfirm':     'Require Confirmation',
   'mml.admin.catalog.form.sortOrder':          'Sort Order',

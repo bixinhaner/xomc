@@ -124,7 +124,15 @@ function buildTreeData(
       selectable: true,
       title: (
         <div className={`${styles.groupNode} ${isL1 ? styles.groupNodeLevel1 : styles.groupNodeLevel2}`}>
-          <Tooltip title={displayName(group)} mouseEnterDelay={0.8} placement="right">
+          {/* placement=topLeft 让长名提示浮在节点上方，避免 placement=right 时提示框
+              盖住右侧「合计」徽标和操作按钮；pointerEvents:none 再保险——即便有重叠
+              也让点击穿透到下方的「编辑/删除」三点按钮。 */}
+          <Tooltip
+            title={displayName(group)}
+            mouseEnterDelay={0.8}
+            placement="topLeft"
+            styles={{ root: { pointerEvents: 'none' } }}
+          >
             <span className={styles.treeNodeContent}>
               {isL1 ? (
                 <FolderOutlined style={{ marginRight: 3, fontSize: 12, color: '#FA8C16' }} />
