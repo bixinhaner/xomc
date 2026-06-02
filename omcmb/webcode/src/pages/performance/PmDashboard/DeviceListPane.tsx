@@ -229,7 +229,7 @@ export default function DeviceListPane() {
       hr,
     );
     const prev = buildDeviceMetricCharts(prevRows, submitted.granularity);
-    return attachCompareSeries(cur, prev, submitted.offsetMs);
+    return attachCompareSeries(cur, prev, submitted.offsetMs, submitted.granularity);
   }, [rawRows, rawPrevRows, submitted]);
 
   // ── 行为 ───────────────────────────────────────────────────────────

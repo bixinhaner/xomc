@@ -37,8 +37,14 @@ export interface MetricChart {
   /** 与 buckets 一一对应的桶结束时间（endTime），供 tooltip 显示「开始~结束」时间段 */
   bucketEnds: string[];
   series: MetricSeries[];
-  /** T-0189 周期对比：上一周期系列（已按 +L 偏移对齐到当前轴），ChartCard 渲染为虚线。 */
+  /** T-0189 周期对比：上一周期系列（已按整数粒度步长对齐到当前轴），ChartCard 渲染为虚线。 */
   compareSeries?: MetricSeries[];
+  /**
+   * T-0194 周期对比 tooltip：每个当前轴索引对应的上一周期桶起止时间（与 buckets 索引对齐，
+   * 无对应点处留空串）。供 ChartCard tooltip 补显上一周期真实「开始~结束」时间段。
+   */
+  compareBuckets?: string[];
+  compareBucketEnds?: string[];
 }
 
 /**

@@ -74,62 +74,113 @@ describe('previousWindow', () => {
 });
 
 describe('buildCompareSeries', () => {
-  it('上一周期值按 +offsetMs 偏移对齐当前轴', () => {
+  it('上一周期值按整数粒度步长偏移对齐当前轴（干净 offset）', () => {
     // 当前桶 10:00 / 11:00；上一周期桶（前 1 小时窗口）09:00 / 10:00。
     const offsetMs = dayjs('2026-05-25T10:00:00Z').valueOf() - dayjs('2026-05-25T09:00:00Z').valueOf();
     const currentBuckets = ['2026-05-25T10:00:00Z', '2026-05-25T11:00:00Z'];
     const prevBuckets = ['2026-05-25T09:00:00Z', '2026-05-25T10:00:00Z'];
     const prevSeries: MetricSeries[] = [{ key: 'SN-A', name: 'SN-A', values: [5, 7] }];
 
-    const out = buildCompareSeries(currentBuckets, prevSeries, prevBuckets, offsetMs);
+    const out = buildCompareSeries(currentBuckets, prevSeries, prevBuckets, offsetMs, 'hourly');
     // prev 09:00(=5) → +1h → 10:00（当前轴位置0）；prev 10:00(=7) → +1h → 11:00（当前轴位置1）
-    expect(out).toHaveLength(1);
-    expect(out[0].key).toBe('SN-A__prev');
-    expect(out[0].name).toContain('上一周期');
-    expect(out[0].values).toEqual([5, 7]);
+    expect(out.series).toHaveLength(1);
+    expect(out.series[0].key).toBe('SN-A__prev');
+    expect(out.series[0].name).toContain('上一周期');
+    expect(out.series[0].values).toEqual([5, 7]);
   });
 
-  it('当前桶在上一周期无对应 → "-"（断线）', () => {
+  it('核心回归：offsetMs 带亚秒/分钟零头仍精确对齐（吸附整步长）', () => {
+    // hourly：窗口长 = 1h + 643ms 零头（默认 end=dayjs() 带毫秒典型场景）。
+    const offsetMs = 3600_000 + 643;
+    const currentBuckets = ['2026-05-25T10:00:00Z', '2026-05-25T11:00:00Z'];
+    const prevBuckets = ['2026-05-25T09:00:00Z', '2026-05-25T10:00:00Z'];
+    const prevSeries: MetricSeries[] = [{ key: 'SN-A', name: 'SN-A', values: [5, 7] }];
+    const out = buildCompareSeries(currentBuckets, prevSeries, prevBuckets, offsetMs, 'hourly');
+    // 吸附到 3600000，整点桶精确落位，不再全 '-'。
+    expect(out.series[0].values).toEqual([5, 7]);
+  });
+
+  it('daily 粒度按整日步长吸附（offset 带零头）', () => {
+    const offsetMs = 86_400_000 + 12_345; // 1 天 + 零头
+    const currentBuckets = ['2026-05-25T00:00:00Z', '2026-05-26T00:00:00Z'];
+    const prevBuckets = ['2026-05-24T00:00:00Z', '2026-05-25T00:00:00Z'];
+    const prevSeries: MetricSeries[] = [{ key: 'SN-A', name: 'SN-A', values: [3, 4] }];
+    const out = buildCompareSeries(currentBuckets, prevSeries, prevBuckets, offsetMs, 'daily');
+    expect(out.series[0].values).toEqual([3, 4]);
+  });
+
+  it('month 粒度按整数日历月平移（不按固定毫秒漂移出月界）', () => {
+    // 上一周期 3/31、4/30；offset≈1 个月，日历月平移后应落到当前轴 4/30、5/31。
+    const offsetMs = 30 * 86_400_000 + 999; // ≈1 月 + 零头
+    const currentBuckets = ['2026-04-30T00:00:00Z', '2026-05-31T00:00:00Z'];
+    const prevBuckets = ['2026-03-30T00:00:00Z', '2026-04-30T00:00:00Z'];
+    const prevSeries: MetricSeries[] = [{ key: 'SN-A', name: 'SN-A', values: [11, 22] }];
+    const out = buildCompareSeries(currentBuckets, prevSeries, prevBuckets, offsetMs, 'monthly');
+    // 3/30 +1月 → 4/30（位置0）；4/30 +1月 → 5/30 ≠ 5/31 → 位置1 无对应为 '-'。
+    expect(out.series[0].values[0]).toBe(11);
+    expect(out.series[0].values[1]).toBe('-');
+  });
+
+  it('当前桶在上一周期无对应 → "-"（断线，不串位）', () => {
     const offsetMs = 3600_000;
     const currentBuckets = ['2026-05-25T10:00:00Z', '2026-05-25T12:00:00Z'];
     const prevBuckets = ['2026-05-25T09:00:00Z']; // 偏移后只覆盖 10:00
     const prevSeries: MetricSeries[] = [{ key: 'SN-A', name: 'SN-A', values: [5] }];
-    const out = buildCompareSeries(currentBuckets, prevSeries, prevBuckets, offsetMs);
-    expect(out[0].values).toEqual([5, '-']);
+    const out = buildCompareSeries(currentBuckets, prevSeries, prevBuckets, offsetMs, 'hourly');
+    expect(out.series[0].values).toEqual([5, '-']);
+  });
+
+  it('compareBuckets 与当前轴索引对齐，留上一周期真实起止时间（无对应处空串）', () => {
+    const offsetMs = 3600_000;
+    const currentBuckets = ['2026-05-25T10:00:00Z', '2026-05-25T11:00:00Z'];
+    const prevBuckets = ['2026-05-25T09:00:00Z']; // 只覆盖当前轴位置0
+    const prevSeries: MetricSeries[] = [{ key: 'SN-A', name: 'SN-A', values: [5] }];
+    const out = buildCompareSeries(currentBuckets, prevSeries, prevBuckets, offsetMs, 'hourly');
+    // 位置0 对应上一周期真实桶 09:00（非当前轴 10:00 标签）；位置1 无对应 → 空串。
+    expect(out.compareBuckets).toEqual(['2026-05-25T09:00:00Z', '']);
   });
 
   it('空数据不抛错', () => {
-    expect(() => buildCompareSeries([], [], [], 0)).not.toThrow();
-    expect(buildCompareSeries([], [], [], 0)).toEqual([]);
+    expect(() => buildCompareSeries([], [], [], 0, 'hourly')).not.toThrow();
+    expect(buildCompareSeries([], [], [], 0, 'hourly').series).toEqual([]);
   });
 });
 
 describe('attachCompareSeries', () => {
-  function chart(metricPath: string, buckets: string[], series: MetricSeries[]): MetricChart {
-    return { metricPath, displayName: metricPath, buckets, series };
+  function chart(
+    metricPath: string,
+    buckets: string[],
+    series: MetricSeries[],
+    bucketEnds?: string[],
+  ): MetricChart {
+    return { metricPath, displayName: metricPath, buckets, bucketEnds: bucketEnds ?? [], series };
   }
 
-  it('按 metricPath 匹配并挂上一周期虚线系列', () => {
-    const offsetMs = 3600_000;
+  it('按 metricPath 匹配并挂上一周期虚线系列（带零头 offset 仍对齐）', () => {
+    const offsetMs = 3600_000 + 500;
     const cur = [
       chart('M1', ['2026-05-25T10:00:00Z'], [{ key: 'SN-A', name: 'SN-A', values: [1] }]),
     ];
     const prev = [
-      chart('M1', ['2026-05-25T09:00:00Z'], [{ key: 'SN-A', name: 'SN-A', values: [9] }]),
+      chart('M1', ['2026-05-25T09:00:00Z'], [{ key: 'SN-A', name: 'SN-A', values: [9] }],
+        ['2026-05-25T10:00:00Z']),
     ];
-    const out = attachCompareSeries(cur, prev, offsetMs);
+    const out = attachCompareSeries(cur, prev, offsetMs, 'hourly');
     expect(out[0].compareSeries).toBeDefined();
     expect(out[0].compareSeries![0].values).toEqual([9]);
+    // tooltip 用上一周期真实桶起止时间（与当前轴索引对齐）。
+    expect(out[0].compareBuckets).toEqual(['2026-05-25T09:00:00Z']);
+    expect(out[0].compareBucketEnds).toEqual(['2026-05-25T10:00:00Z']);
   });
 
   it('上一周期无对应 metric → 不挂 compareSeries', () => {
     const cur = [chart('M1', ['2026-05-25T10:00:00Z'], [{ key: 'SN-A', name: 'SN-A', values: [1] }])];
-    const out = attachCompareSeries(cur, [], 3600_000);
+    const out = attachCompareSeries(cur, [], 3600_000, 'hourly');
     expect(out[0].compareSeries).toBeUndefined();
   });
 
   it('空集合不抛错', () => {
-    expect(() => attachCompareSeries([], [], 0)).not.toThrow();
-    expect(attachCompareSeries([], [], 0)).toEqual([]);
+    expect(() => attachCompareSeries([], [], 0, 'hourly')).not.toThrow();
+    expect(attachCompareSeries([], [], 0, 'hourly')).toEqual([]);
   });
 });

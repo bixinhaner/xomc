@@ -49,9 +49,19 @@ export default function ChartCard({ chart }: { chart: MetricChart }) {
     const idx = arr[0].dataIndex;
     const start = chart.buckets[idx] ?? '';
     const end = chart.bucketEnds[idx] ?? '';
-    const header = end
+    let header = end
       ? `开始 ${fmtTime(start)}<br/>结束 ${fmtTime(end)}`
       : fmtTime(start);
+    // T-0194：周期对比开启时，补一行上一周期对应桶的真实「开始~结束」时间段（非照搬当前轴标签）。
+    if (chart.compareSeries && chart.compareSeries.length > 0) {
+      const pStart = chart.compareBuckets?.[idx] ?? '';
+      const pEnd = chart.compareBucketEnds?.[idx] ?? '';
+      if (pStart) {
+        header += pEnd
+          ? `<br/>上一周期 ${fmtTime(pStart)} ~ ${fmtTime(pEnd)}`
+          : `<br/>上一周期 ${fmtTime(pStart)}`;
+      }
+    }
     const lines = arr
       .map((p) => `${p.marker ?? ''}${p.seriesName ?? ''}: ${p.value ?? '-'}`)
       .join('<br/>');

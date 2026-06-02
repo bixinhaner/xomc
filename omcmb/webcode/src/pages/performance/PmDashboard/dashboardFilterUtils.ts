@@ -57,34 +57,99 @@ export function previousWindow(range: [Dayjs, Dayjs]): [Dayjs, Dayjs] {
 }
 
 /**
- * 对比序列对齐：把上一周期系列（在 prevBuckets 上的值）按 +offsetMs 偏移落到当前轴 currentBuckets。
- * 对齐规则：上一周期桶 T_prev 的值落在当前轴位置 T_prev + offsetMs（offsetMs 通常 = L = 窗口长）。
- *   即当前桶 Tc 的对比值 = 上一周期在 Tc - offsetMs 的值。
- * 当前桶在上一周期无对应点 → '-'（断线，不连）。
+ * 固定步长粒度 → 单桶毫秒步长。month 不是固定毫秒（自然月天数不等），返回 null 走日历平移。
+ * 口径与仪表盘粒度词表一致（'15min' | 'hourly' | 'daily' | 'weekly' | 'monthly'）。
+ */
+const GRAN_STEP_MS: Record<string, number> = {
+  '15min': 15 * 60 * 1000, // 900000
+  hourly: 60 * 60 * 1000, // 3600000
+  daily: 24 * 60 * 60 * 1000, // 86400000
+  weekly: 7 * 24 * 60 * 60 * 1000, // 604800000
+};
+const APPROX_MONTH_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** 该粒度的固定步长（毫秒）；month/未知粒度返回 undefined。 */
+export function granularityStepMs(granularity: string): number | undefined {
+  return GRAN_STEP_MS[granularity];
+}
+
+/**
+ * 把原始平移量 offsetMs（= 窗口长 L，可能带亚秒/分钟零头）吸附为整数个粒度步长，
+ * 使整点对齐的上一周期桶精确落到整点对齐的当前桶。
+ * 固定步长粒度：snapped = round(offsetMs/step)*step。
+ * month/未知粒度：返回 undefined（buildCompareSeries 走日历月平移分支）。
+ */
+function snapOffsetMs(offsetMs: number, granularity: string): number | undefined {
+  const step = GRAN_STEP_MS[granularity];
+  if (step === undefined) return undefined;
+  return Math.round(offsetMs / step) * step;
+}
+
+/**
+ * 对比序列对齐：把上一周期系列（在 prevBuckets 上的值）按整数个粒度步长平移落到当前轴 currentBuckets。
+ *
+ * 根因修复（T-0194）：前后两周期的桶都是后端按粒度整点/整日对齐的；原实现直接用带零头的
+ * offsetMs(=end-start) 平移后做精确毫秒等值匹配，整点桶 + 带零头偏移落到非整点毫秒，与当前
+ * 整点轴永远 miss → 整条上一周期虚线全变 '-'。现把平移量吸附到整数个粒度步长后再对齐。
+ *   - 固定步长粒度（15min/hourly/daily/weekly）：平移量吸附为 round(offsetMs/step)*step。
+ *   - month（monthly）：按整数日历月平移 dayjs(prevBucket).add(n,'month')，n=round(offsetMs/≈30d)，
+ *     避免按固定毫秒漂移出月界。
+ * 对齐后：当前桶 Tc 的对比值 = 上一周期在「Tc 对应的上一周期桶」处的值；无对应点 → '-'（断线，不连，不插值）。
  * 空数据（currentBuckets 空 / prevSeries 空）不抛错，返回对应空结果。
  *
- * @param currentBuckets 当前周期横轴桶（startTime 升序字符串）
- * @param prevSeries     上一周期系列（同 buildMetricCharts/buildDeviceMetricCharts 转置产出）
- * @param prevBuckets    上一周期横轴桶（与 prevSeries.values 一一对齐）
- * @param offsetMs       偏移毫秒（= 当前窗口长 L）
+ * 同时产出每个当前轴索引对应的上一周期桶起止时间（compareBuckets/compareBucketEnds，与 currentBuckets
+ * 索引对齐，无对应点处留空串），供 ChartCard tooltip 显示上一周期真实时间戳。
+ *
+ * @param currentBuckets   当前周期横轴桶（startTime 升序字符串）
+ * @param prevSeries       上一周期系列（同 buildMetricCharts/buildDeviceMetricCharts 转置产出）
+ * @param prevBuckets      上一周期横轴桶（与 prevSeries.values 一一对齐）
+ * @param prevBucketEnds   上一周期桶结束时间（与 prevBuckets 索引对齐，可选；缺则 compareBucketEnds 留空串）
+ * @param offsetMs         原始平移毫秒（= 当前窗口长 L，可能带零头）
+ * @param granularity      粒度（决定吸附步长 / 日历月平移）
  */
 export function buildCompareSeries(
   currentBuckets: string[],
   prevSeries: MetricSeries[],
   prevBuckets: string[],
   offsetMs: number,
+  granularity: string,
+): { series: MetricSeries[]; compareBuckets: string[]; compareBucketEnds: string[] } {
+  return {
+    series: buildCompareSeriesValues(currentBuckets, prevSeries, prevBuckets, offsetMs, granularity),
+    ...buildCompareBuckets(currentBuckets, prevBuckets, [], offsetMs, granularity),
+  };
+}
+
+/**
+ * 把上一周期桶时间戳按整数粒度步长平移到当前轴时间戳（毫秒）。
+ * 固定步长粒度：T_prev + snappedOffsetMs。month：dayjs(T_prev).add(n,'month')（整数日历月）。
+ * tz 安全：均为在整点对齐的 T_prev 上加整数步长 / 整数月，保持整点对齐（业务时区无 DST）。
+ */
+function shiftPrevToCurrentMs(prevMs: number, snapped: number | undefined, offsetMs: number): number {
+  if (snapped !== undefined) return prevMs + snapped;
+  // month 分支：按整数日历月平移。
+  const n = Math.round(offsetMs / APPROX_MONTH_MS);
+  return dayjs(prevMs).add(n, 'month').valueOf();
+}
+
+/** 仅产出对比系列值（内部复用，不含 compareBuckets）。 */
+function buildCompareSeriesValues(
+  currentBuckets: string[],
+  prevSeries: MetricSeries[],
+  prevBuckets: string[],
+  offsetMs: number,
+  granularity: string,
 ): MetricSeries[] {
-  // 当前桶 -> 索引，用「Tc - offsetMs」反查上一周期值。
-  // 上一周期桶值映射：shiftedTimestamp(ms) -> value，按系列建。
+  const snapped = snapOffsetMs(offsetMs, granularity);
   return prevSeries.map((s) => {
-    // shiftedMs -> value（上一周期 T_prev 偏移 +offsetMs 后的时间戳）
+    // 平移后时间戳(ms) -> value
     const shifted = new Map<number, MetricSeriesValue>();
     prevBuckets.forEach((b, i) => {
       const ts = dayjs(b);
       if (!ts.isValid()) return;
       const v = s.values[i];
       if (v === undefined) return;
-      shifted.set(ts.valueOf() + offsetMs, v);
+      shifted.set(shiftPrevToCurrentMs(ts.valueOf(), snapped, offsetMs), v);
     });
     const values: MetricSeriesValue[] = currentBuckets.map((cb) => {
       const ct = dayjs(cb);
@@ -97,27 +162,67 @@ export function buildCompareSeries(
 }
 
 /**
- * 把上一周期图集挂到当前图集：按 metricPath 匹配图，按 +offsetMs 对齐上一周期系列。
+ * 产出每个当前轴索引对应的上一周期桶起止时间（与 currentBuckets 索引对齐，无对应点处留空串）。
+ * 平移口径与 buildCompareSeriesValues 完全一致（同 snapped / 同日历月平移），保证 tooltip 与曲线同源。
+ */
+function buildCompareBuckets(
+  currentBuckets: string[],
+  prevBuckets: string[],
+  prevBucketEnds: string[],
+  offsetMs: number,
+  granularity: string,
+): { compareBuckets: string[]; compareBucketEnds: string[] } {
+  const snapped = snapOffsetMs(offsetMs, granularity);
+  // 当前轴时间戳(ms) -> { start, end }（上一周期原始起止时间字符串）
+  const byCurrentMs = new Map<number, { start: string; end: string }>();
+  prevBuckets.forEach((b, i) => {
+    const ts = dayjs(b);
+    if (!ts.isValid()) return;
+    byCurrentMs.set(shiftPrevToCurrentMs(ts.valueOf(), snapped, offsetMs), {
+      start: b,
+      end: prevBucketEnds[i] ?? '',
+    });
+  });
+  const compareBuckets: string[] = [];
+  const compareBucketEnds: string[] = [];
+  currentBuckets.forEach((cb) => {
+    const ct = dayjs(cb);
+    const hit = ct.isValid() ? byCurrentMs.get(ct.valueOf()) : undefined;
+    compareBuckets.push(hit?.start ?? '');
+    compareBucketEnds.push(hit?.end ?? '');
+  });
+  return { compareBuckets, compareBucketEnds };
+}
+
+/**
+ * 把上一周期图集挂到当前图集：按 metricPath 匹配图，按整数粒度步长对齐上一周期系列 + 产出上周期桶起止时间。
  * 当前图在上一周期无对应（同 metricPath）→ 不挂 compareSeries（图照常只画当前实线）。
  * 空集合不抛错。返回新数组（不就地改原图）。
  *
  * @param currentCharts 当前周期图集（buildMetricCharts/buildDeviceMetricCharts 产出）
  * @param prevCharts    上一周期图集（同口径，已套同样星期/小时段过滤后转置）
- * @param offsetMs      偏移毫秒（= 当前窗口长 L）
+ * @param offsetMs      原始平移毫秒（= 当前窗口长 L，可能带零头）
+ * @param granularity   粒度（决定吸附步长 / 日历月平移）— 必传，漏传将退化回原毫秒匹配（bug）
  */
 export function attachCompareSeries(
   currentCharts: MetricChart[],
   prevCharts: MetricChart[],
   offsetMs: number,
+  granularity: string,
 ): MetricChart[] {
   const prevByMetric = new Map<string, MetricChart>();
   prevCharts.forEach((p) => prevByMetric.set(p.metricPath, p));
   return currentCharts.map((c) => {
     const p = prevByMetric.get(c.metricPath);
     if (!p) return c;
-    return {
-      ...c,
-      compareSeries: buildCompareSeries(c.buckets, p.series, p.buckets, offsetMs),
-    };
+    const series = buildCompareSeriesValues(c.buckets, p.series, p.buckets, offsetMs, granularity);
+    const { compareBuckets, compareBucketEnds } = buildCompareBuckets(
+      c.buckets,
+      p.buckets,
+      p.bucketEnds ?? [],
+      offsetMs,
+      granularity,
+    );
+    return { ...c, compareSeries: series, compareBuckets, compareBucketEnds };
   });
 }

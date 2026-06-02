@@ -103,7 +103,7 @@ export default function TaskDashboardPane({ taskId }: Props) {
     const cur = buildMetricCharts(rows, taskQuery.data.dimension, effectiveGran);
     if (!filter.compare) return cur;
     const prev = buildMetricCharts(prevRows, taskQuery.data.dimension, effectiveGran);
-    return attachCompareSeries(cur, prev, offsetMs);
+    return attachCompareSeries(cur, prev, offsetMs, effectiveGran);
   }, [rows, prevRows, taskQuery.data, effectiveGran, filter.compare, offsetMs]);
 
   if (taskQuery.isLoading) {
