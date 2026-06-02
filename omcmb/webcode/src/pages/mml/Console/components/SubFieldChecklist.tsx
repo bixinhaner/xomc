@@ -17,16 +17,16 @@ export default function SubFieldChecklist({ statement }: SubFieldChecklistProps)
     [statement.subFields],
   );
 
-  // 固定高度容器（spec：操作面板限制 path 区域 10 行可视高度，<10 行也保留空间，
-  // >10 行出现滚动条；每行约 38px = 行内 padding 4+4 + content ~24 + flex gap 6）。
-  const VIEWPORT_HEIGHT = 380;
+  // 用户决策 2026-06-02：操作面板高度固定(含未选命令的空态)由 RightPanel 外层
+  // 容器统一控制为 8 行 PATH 高度；此处 viewport 改为 height:100% 撑满父容器,
+  // 内部 >8 行时出现滚动条。
   // 2026-05-28: antd Checkbox.Group 默认 display:inline-flex,内层 div 不显式
   // width:100% 时会按内容自然收缩,导致 viewport 拿不到完整宽度(实测 578 vs 813)。
   // 这里 width:100% + boxSizing:border-box 让 viewport 撑满父容器。
   const VIEWPORT_STYLE: CSSProperties = {
     width: '100%',
     boxSizing: 'border-box',
-    height: VIEWPORT_HEIGHT,
+    height: '100%',
     overflowY: 'auto',
     border: '1px solid #f0f0f0',
     borderRadius: 4,

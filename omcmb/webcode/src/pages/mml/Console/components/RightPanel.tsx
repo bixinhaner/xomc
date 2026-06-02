@@ -25,6 +25,10 @@ export interface RightPanelProps {
   onExecuted?: (task: MMLTask) => void;
 }
 
+// 操作面板(控制面板 / 参数路径指定)固定高度 = 8 行 PATH 显示高度(用户决策 2026-06-02)。
+// 该高度对"未选命令的空态"与"已选命令"一致生效——空态不再塌缩成一小块。
+const OP_PANEL_HEIGHT = 320;
+
 function ActiveSubView({ statement }: { statement: Statement }) {
   switch (statement.operationType) {
     case 'LST':
@@ -585,7 +589,18 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
   ]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+    // 视口高度布局(用户决策 2026-06-02):操作面板 / 参数路径指定 固定高度(≈8 行 PATH),
+    // 终端输出 flex:1 自适应填充其下方剩余空间,延伸到浏览器最下方。
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 12,
+        height: 'calc(100vh - 180px)',
+        minHeight: 460,
+      }}
+    >
+      <div style={{ flexShrink: 0 }}>
       <Tabs
         activeKey={tab}
         onChange={(k) => setTab(k as RightTab)}
@@ -598,13 +613,21 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
                 {/* v2.4 D37：MmlEditor (拼接命令 textarea + DO 执行按钮) 已下线，
                     结构化通道由下方 ConsoleActionBar 承担；用户在 SubField 区勾选 path
                     → 后端 API 通过结构化 standardPath[] 传，不再生成 MML 文本 */}
-                {/* 参数列表（LST/MOD/ADD/RMV 因 op 不同换皮）：
-                    SubFieldChecklist / SubFieldInputList / InstancePicker
-                    都已自带 height + overflowY:auto 的 viewport（380/420px），
-                    这里不再额外包 max-height + overflow:auto —— 否则形成
-                    双层 scrollable，选中 LST DEVICE_INFO 等 12+ row 命令时
-                    操作面板会出现两根滚动条（外层冗余的 + 内层真实的）。 */}
-                <div>
+                {/* 参数列表（LST/MOD/ADD/RMV 因 op 不同换皮）：内层 SubFieldChecklist /
+                    SubFieldInputList 现为 height:100% 撑满外层固定盒并自带 overflowY:auto;
+                    外层盒 overflow:auto 仅为 RMV(InstancePicker 无内滚)兜底。内层是 100%
+                    高度,外层无可滚内容 → 不会出现双层滚动条。 */}
+                {/* 操作面板固定高度盒(用户决策 2026-06-02)：无论是否选中命令,
+                    高度恒为 OP_PANEL_HEIGHT(8 行 PATH);空态居中、命令态由内层
+                    viewport 撑满并自行滚动。 */}
+                <div
+                  style={{
+                    height: OP_PANEL_HEIGHT,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    minHeight: 0,
+                  }}
+                >
                   {activeStatement ? (
                     <>
                       {/* R-4：命令含多层 {i} 占位符时显示 instance 索引输入；
@@ -616,13 +639,26 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
                         operationType={activeStatement.operationType}
                         instanceRangeMeta={activeStatement.instanceRangeMeta}
                       />
-                      <ActiveSubView statement={activeStatement} />
+                      {/* 内层 viewport(SubFieldChecklist/InputList 已 height:100%)填满剩余高度,
+                          自身 overflowY:auto 单根滚动条；外层 overflow:auto 兜底 RMV 等无内滚组件。 */}
+                      <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+                        <ActiveSubView statement={activeStatement} />
+                      </div>
                     </>
                   ) : (
-                    <Empty
-                      description={t('mml.console.stepBar.step2')}
-                      style={{ padding: 12 }}
-                    />
+                    <div
+                      style={{
+                        flex: 1,
+                        minHeight: 0,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        border: '1px solid #f0f0f0',
+                        borderRadius: 4,
+                      }}
+                    >
+                      <Empty description={t('mml.console.stepBar.step2')} />
+                    </div>
                   )}
                 </div>
                 {/* R-9.1 底部固定操作行：执行按钮显式带 op_type，避免随
@@ -650,10 +686,13 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
             label: t('mml.tabs.parameterPathCommand'),
             children: (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <ParamPathExpert
-                  command={null}
-                  onChange={setRawPathPayload}
-                />
+                {/* 参数路径指定同样固定为 8 行 PATH 高度(用户决策 2026-06-02),与控制面板一致。 */}
+                <div style={{ height: OP_PANEL_HEIGHT, overflow: 'auto' }}>
+                  <ParamPathExpert
+                    command={null}
+                    onChange={setRawPathPayload}
+                  />
+                </div>
                 <ConsoleActionBar
                   operationType={rawPathPayload.operationType as Statement['operationType']}
                   deviceCount={selectedDeviceSns.length}
@@ -669,10 +708,9 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
           },
         ]}
       />
-      {/* 终端输出移到操作面板/参数路径指定下方(用户决策 2026-06-02):上方空间留给
-          操作面板,终端常驻底部、跨 Control / ParamPath 两个 tab 可见。高度收敛到
-          240px,尽量让整页落在一屏内、不出现浏览器滚动条。 */}
-      <div style={{ height: 240, flexShrink: 0 }}>
+      </div>
+      {/* 终端输出:flex:1 自适应填充操作面板下方剩余空间,高度延伸到浏览器最下方。 */}
+      <div style={{ flex: 1, minHeight: 160 }}>
         <TerminalPanel
           lines={terminalLines}
           onClear={() => {

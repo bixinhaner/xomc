@@ -51,9 +51,10 @@ export default function SubFieldInputList({ statement }: SubFieldInputListProps)
   //
   // 2026-05-27 用户反馈:滚动条永远贴右,把右侧空间留给 path。
   // 容器移除右内 padding,让行右边顶到 scrollbar 左缘;上下/左侧 padding 保留。
-  const VIEWPORT_HEIGHT = 420;
+  // 用户决策 2026-06-02:操作面板高度固定(含未选命令空态)由 RightPanel 外层容器
+  // 统一控制;此处 viewport 改为 height:100% 撑满父容器,>8 行出现滚动条。
   const VIEWPORT_STYLE: CSSProperties = {
-    height: VIEWPORT_HEIGHT,
+    height: '100%',
     overflowY: 'auto',
     border: '1px solid #f0f0f0',
     borderRadius: 4,
