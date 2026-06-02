@@ -1177,6 +1177,13 @@ const messages: Record<string, string> = {
   'alarm.stats.hour':        'Hour',
   'alarm.stats.day':         'Day',
   'alarm.stats.alarmCount':  'Alarm Count',
+  'alarm.stats.timeRange':   'Time Range',
+  'alarm.stats.last7Days':   'Last 7 Days',
+  'alarm.stats.last30Days':  'Last 30 Days',
+  'alarm.stats.custom':      'Custom',
+  'alarm.stats.topDevices':  'Top Alarm Devices (Top 10)',
+  'alarm.severity.filter':   'Severity',
+  'alarm.severity.filterPlaceholder': 'Select severity',
   'alarm.count':             'Alarm Count',
 
   // Active alarm fields

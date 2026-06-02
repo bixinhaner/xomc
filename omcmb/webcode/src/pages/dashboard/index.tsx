@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { CallbackDataParams } from 'echarts/types/dist/shared';
 import {
   Avatar,
   Badge,
@@ -33,15 +32,13 @@ import {
   WifiOutlined,
 } from '@ant-design/icons';
 import KPICard from '@/components/KPICard';
-import PieChart from '@/components/Charts/PieChart';
 import BarChart from '@/components/Charts/BarChart';
-import LineChart from '@/components/Charts/LineChart';
 import GISMap from '@/components/GISMap';
 import EmptyState from '@/components/common/EmptyState';
 import { MAP_CONFIG } from '@/components/GISMap/constants';
 import type { MapDevice } from '@/components/GISMap';
 import type { DeviceGeo } from '@core/types/map';
-import { useDashboardData, useAlarmTrend, useTopAlarmDevices, useDeviceStatusByType, useKPIGroupTrend } from '@core/hooks/api/useDashboard';
+import { useDashboardData, useDeviceStatusByType, useKPIGroupTrend } from '@core/hooks/api/useDashboard';
 import { MultiKPITrendChart } from '@/components/dashboard';
 import { useAlarmCount, useCurrentAlarms } from '@core/hooks/api/useAlarms';
 import { useMapDevicesGeo } from '@core/hooks/api/useTopology';
@@ -72,9 +69,6 @@ const TECH_DISPLAY_NAME: Record<string, string> = {
 // Dashboard feature visibility configuration
 // This is a temporary measure to hide certain modules. Set to true to re-enable.
 const DASHBOARD_CONFIG = {
-  showAlarmDistribution: false,  // 告警级别分布 - Alarm severity distribution pie chart
-  showAlarmTrend7d: false,       // 近7天告警趋势 - 7-day alarm trend line chart
-  showTopAlarmDevices: false,    // 高频告警设备 - Top alarm devices bar chart
   showRunningTasks: false,       // 任务执行中 - Running tasks KPI card
   showQualityTrend: false,       // 无线质量指标趋势 - Quality KPI trend chart (RRC + E-RAB + Handover)
   showPRBUtil: false,            // PRB利用率趋势 - PRB utilization trend chart
@@ -185,12 +179,6 @@ export default function DashboardPage() {
   // 获取当前登录用户信息
   const currentUser = useUserStore((state) => state.currentUser);
 
-  // 获取告警趋势数据（条件渲染时使用）
-  const { data: alarmTrendData } = useAlarmTrend(7, DASHBOARD_CONFIG.showAlarmTrend7d);
-
-  // 获取TOP10告警设备数据（条件渲染时使用）
-  const { data: topAlarmDevicesData } = useTopAlarmDevices(DASHBOARD_CONFIG.showTopAlarmDevices);
-
   // 获取设备按技术类型分组的状态数据
   const { data: deviceStatusByTypeData, isLoading: isDeviceStatusLoading } = useDeviceStatusByType();
 
@@ -282,17 +270,6 @@ export default function DashboardPage() {
     [currentAlarmData]
   );
 
-  // Donut chart data for alarm severity
-  const alarmPieData = useMemo(
-    () => [
-      { name: t('alarm.severity.critical'), value: critical, color: SEVERITY_COLOR.critical },
-      { name: t('alarm.severity.major'), value: major, color: SEVERITY_COLOR.major },
-      { name: t('alarm.severity.minor'), value: minor, color: SEVERITY_COLOR.minor },
-      { name: t('alarm.severity.warning'), value: warning, color: SEVERITY_COLOR.warning },
-    ],
-    [critical, major, minor, warning, t]
-  );
-
   // Device status bar chart data - 按技术类型分组
   const deviceStatusData = useMemo(() => {
     if (!deviceStatusByTypeData || Object.keys(deviceStatusByTypeData).length === 0) {
@@ -319,75 +296,6 @@ export default function DashboardPage() {
     return { isEmpty: false, xData, series };
   }, [deviceStatusByTypeData, t]);
 
-  // 7-day alarm trend - 根据后端返回数据动态生成X轴
-  const { trendXData, alarmTrendSeries } = useMemo(() => {
-    // 没有数据时生成默认7天X轴和全0数据
-    if (!alarmTrendData?.length) {
-      const days: string[] = [];
-      for (let i = 6; i >= 0; i--) {
-        const d = new Date();
-        d.setDate(d.getDate() - i);
-        days.push(`${d.getMonth() + 1}/${d.getDate()}`);
-      }
-      const zeroData = new Array(7).fill(0);
-      return {
-        trendXData: days,
-        alarmTrendSeries: [
-          { name: t('alarm.severity.critical'), data: zeroData, color: SEVERITY_COLOR.critical },
-          { name: t('alarm.severity.major'), data: zeroData, color: SEVERITY_COLOR.major },
-          { name: t('alarm.severity.minor'), data: zeroData, color: SEVERITY_COLOR.minor },
-          { name: t('alarm.severity.warning'), data: zeroData, color: SEVERITY_COLOR.warning },
-        ],
-      };
-    }
-
-    // 从后端数据提取日期并转换为 月/日 格式
-    const xData = alarmTrendData.map((d) => {
-      const date = new Date(d.date);
-      return `${date.getMonth() + 1}/${date.getDate()}`;
-    });
-
-    // 提取各级别的趋势数据
-    const critical = alarmTrendData.map((d) => d.critical ?? 0);
-    const major = alarmTrendData.map((d) => d.major ?? 0);
-    const minor = alarmTrendData.map((d) => d.minor ?? 0);
-    const warning = alarmTrendData.map((d) => d.warning ?? 0);
-
-    return {
-      trendXData: xData,
-      alarmTrendSeries: [
-        { name: t('alarm.severity.critical'), data: critical, color: SEVERITY_COLOR.critical },
-        { name: t('alarm.severity.major'), data: major, color: SEVERITY_COLOR.major },
-        { name: t('alarm.severity.minor'), data: minor, color: SEVERITY_COLOR.minor },
-        { name: t('alarm.severity.warning'), data: warning, color: SEVERITY_COLOR.warning },
-      ],
-    };
-  }, [alarmTrendData, t]);
-
-  // TOP10 alarm devices horizontal bar chart - 使用真实API数据
-  const top10Devices = useMemo(() => {
-    if (!topAlarmDevicesData?.length) return [];
-    return topAlarmDevicesData.map(d => {
-      const techDisplay = TECH_DISPLAY_NAME[d.technology] || d.technology;
-      const deviceNumber = d.deviceSN?.slice(-4) || "????";
-      return `${techDisplay}-${deviceNumber}`;
-    });
-  }, [topAlarmDevicesData]);
-
-  const top10Series = useMemo(() => {
-    if (!topAlarmDevicesData?.length) {
-      // 无数据时返回空数组
-      return [{ name: t('dashboard.alarmCount'), data: [] }];
-    }
-    return [{
-      name: t('dashboard.alarmCount'),
-      data: topAlarmDevicesData.map(d => ({
-        value: d.alarmCount,
-        name: d.deviceSN
-      })),
-    }];
-  }, [topAlarmDevicesData, t]);
-
   const dashboardRef = useRef<HTMLDivElement>(null);
   useScrollReveal(dashboardRef);
 
@@ -398,23 +306,6 @@ export default function DashboardPage() {
       }
     },
     [navigate]
-  );
-
-  const tooltipFormatter = useCallback(
-    (params: CallbackDataParams | CallbackDataParams[]) => {
-      const paramsArray = Array.isArray(params) ? params : [params];
-      const dataIndex = paramsArray[0]?.dataIndex as number | undefined;
-      const device = topAlarmDevicesData?.[dataIndex ?? 0];
-      if (!device) return paramsArray[0]?.name ?? '';
-      return `
-        <div style="color: #8c8c8c; font-size: 12px; margin-bottom: 4px;">${device.deviceSN || '--'}</div>
-        <div style="display: flex; align-items: center; gap: 8px;">
-          <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: ${paramsArray[0]?.color}"></span>
-          <span>${paramsArray[0]?.seriesName}: ${paramsArray[0]?.value}</span>
-        </div>
-      `;
-    },
-    [topAlarmDevicesData]
   );
 
   return (
@@ -699,79 +590,6 @@ export default function DashboardPage() {
           </Card>
           </TiltCard>
         </Col>
-
-        {/* Alarm Distribution - Conditionally rendered */}
-        {DASHBOARD_CONFIG.showAlarmDistribution && (
-          <Col xs={24} lg={8} style={{ display: 'flex' }}>
-            <TiltCard maxTilt={8} style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
-            <Card
-              title={t('dashboard.alarmDistribution')}
-              size="small"
-              styles={{ body: { padding: '8px 0 0', flex: 1, display: 'flex', flexDirection: 'column' } }}
-              style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
-            >
-              <PieChart
-                title=""
-                data={alarmPieData}
-                height={220}
-                donut
-              />
-            </Card>
-            </TiltCard>
-          </Col>
-        )}
-      </Row>
-
-      {/* Row 5: (条件渲染) Alarm Trend + (条件渲染) Top10 Devices */}
-      <Row gutter={[16, 16]} align="stretch" className="omc-scroll-reveal" data-delay="4">
-        {/* 7-day Alarm Trend - Conditionally rendered */}
-        {DASHBOARD_CONFIG.showAlarmTrend7d && (
-          <Col xs={24} lg={DASHBOARD_CONFIG.showTopAlarmDevices ? 12 : 24} style={{ display: 'flex' }}>
-            <TiltCard maxTilt={7} style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
-            <Card
-              title={t('dashboard.alarmTrend7d')}
-              size="small"
-              styles={{ body: { padding: '8px 0 0', flex: 1, display: 'flex', flexDirection: 'column' } }}
-              style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
-            >
-              <LineChart
-                title=""
-                xData={trendXData}
-                series={alarmTrendSeries}
-                height={260}
-                areaFill
-              />
-            </Card>
-            </TiltCard>
-          </Col>
-        )}
-
-        {/* Top10 Alarm Devices - Conditionally rendered */}
-        {DASHBOARD_CONFIG.showTopAlarmDevices && (
-          <Col xs={24} lg={DASHBOARD_CONFIG.showAlarmTrend7d ? 12 : 24} style={{ display: 'flex' }}>
-            <TiltCard maxTilt={7} style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
-            <Card
-              title={t('dashboard.top10AlarmDevices')}
-              size="small"
-              styles={{ body: { padding: '8px 0 0', flex: 1, display: 'flex', flexDirection: 'column' } }}
-              style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
-            >
-              {top10Devices.length > 0 ? (
-                <BarChart
-                  title=""
-                  xData={top10Devices}
-                  series={top10Series}
-                  height={260}
-                  horizontal
-                  tooltipFormatter={tooltipFormatter}
-                />
-              ) : (
-                <EmptyState variant="no-data" description="" style={{ flex: 1 }} />
-              )}
-            </Card>
-            </TiltCard>
-          </Col>
-        )}
       </Row>
 
       {/* Row 6: User Profile + Quick Access */}

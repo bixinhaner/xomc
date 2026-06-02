@@ -18,6 +18,7 @@ export interface PieChartProps {
   donut?: boolean;
   showLegend?: boolean;
   centerText?: string;
+  onClick?: (data: PieDataItem) => void;
 }
 
 const PieChart: React.FC<PieChartProps> = ({
@@ -27,6 +28,7 @@ const PieChart: React.FC<PieChartProps> = ({
   donut = false,
   showLegend = true,
   centerText,
+  onClick,
 }) => {
   const isDark = useIsDark();
   const appTheme = useAppStore((s) => s.theme);
@@ -128,6 +130,10 @@ const PieChart: React.FC<PieChartProps> = ({
       option={option}
       style={{ height, width: '100%' }}
       opts={{ renderer: 'canvas' }}
+      onEvents={onClick ? { click: (params: any) => {
+        const item = data[params.dataIndex];
+        if (item) onClick(item);
+      } } : undefined}
     />
   );
 };

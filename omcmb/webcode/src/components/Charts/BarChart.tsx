@@ -27,6 +27,8 @@ export interface BarChartProps {
   borderRadius?: number;
   /** 自定义 tooltip formatter，兼容 ECharts 原生类型 */
   tooltipFormatter?: (params: CallbackDataParams | CallbackDataParams[]) => string;
+  /** 点击事件回调 */
+  onClick?: (index: number, name: string) => void;
 }
 
 const BarChart: React.FC<BarChartProps> = ({
@@ -39,6 +41,7 @@ const BarChart: React.FC<BarChartProps> = ({
   barWidth,
   borderRadius = 6,
   tooltipFormatter,
+  onClick,
 }) => {
   const isDark = useIsDark();
   const appTheme = useAppStore((s) => s.theme);
@@ -173,6 +176,11 @@ const BarChart: React.FC<BarChartProps> = ({
         option={option}
         style={{ height: computedHeight, width: '100%' }}
         opts={{ renderer: 'canvas' }}
+        onEvents={onClick ? {
+          click: (params: any) => {
+            onClick(params.dataIndex, params.name);
+          }
+        } : undefined}
       />
     </div>
   );
