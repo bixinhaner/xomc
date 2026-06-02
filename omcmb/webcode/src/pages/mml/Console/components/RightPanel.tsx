@@ -586,20 +586,6 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      {/* 终端输出：用户决策 2026-05-18 + 二次确认 — 必须放在整个 RightPanel 顶端，
-          Tabs 外。在 Tabs 内部时看起来"插在 tab 栏和 Control Panel 中间"；外置后
-          它跨 Control / ParamPath 两个 tab 永远可见，更接近真终端的固定区域感。
-          高度 320px：12px 字号 × 1.7 行高 ≈ 20.4px/行，320-标题-内边距 容纳 ~12 行
-          可见输出，覆盖更长 SetParameterValuesResponse 块。 */}
-      <div style={{ height: 320, flexShrink: 0 }}>
-        <TerminalPanel
-          lines={terminalLines}
-          onClear={() => {
-            clearTerminal();
-            setCurrentTaskIds([]);
-          }}
-        />
-      </div>
       <Tabs
         activeKey={tab}
         onChange={(k) => setTab(k as RightTab)}
@@ -683,6 +669,18 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
           },
         ]}
       />
+      {/* 终端输出移到操作面板/参数路径指定下方(用户决策 2026-06-02):上方空间留给
+          操作面板,终端常驻底部、跨 Control / ParamPath 两个 tab 可见。高度收敛到
+          240px,尽量让整页落在一屏内、不出现浏览器滚动条。 */}
+      <div style={{ height: 240, flexShrink: 0 }}>
+        <TerminalPanel
+          lines={terminalLines}
+          onClear={() => {
+            clearTerminal();
+            setCurrentTaskIds([]);
+          }}
+        />
+      </div>
     </div>
   );
 }

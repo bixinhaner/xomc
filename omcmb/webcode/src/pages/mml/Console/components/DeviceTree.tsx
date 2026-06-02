@@ -294,7 +294,7 @@ export default function DeviceTree({
         >
           <div
             style={{
-              padding: '6px 12px',
+              padding: '4px 12px',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
@@ -318,9 +318,9 @@ export default function DeviceTree({
           <div
             className="no-scrollbar"
             style={{
-              maxHeight: 80,
+              maxHeight: 56,
               overflow: 'auto',
-              padding: '2px 12px 8px',
+              padding: '2px 12px 6px',
             }}
           >
             {selectedDevices.map((d) => (

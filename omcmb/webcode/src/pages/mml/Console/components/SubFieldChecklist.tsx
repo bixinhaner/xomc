@@ -4,7 +4,6 @@ import { Checkbox, Tooltip, Empty } from 'antd';
 type CheckboxValueType = string | number | boolean;
 import { useMmlConsoleStore } from '@core/store/mmlConsoleStore';
 import type { Statement } from '@core/types/mmlConsole';
-import SubFieldInfoPopover from './SubFieldInfoPopover';
 
 export interface SubFieldChecklistProps {
   statement: Statement;
@@ -75,37 +74,20 @@ export default function SubFieldChecklist({ statement }: SubFieldChecklistProps)
             }}
           >
             <Checkbox value={sf.id} />
-            <Tooltip title={sf.label} placement="top" mouseEnterDelay={0.3}>
-              <span
-                style={{
-                  flex: '0 0 200px',
-                  fontWeight: 500,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {sf.label}
-              </span>
-            </Tooltip>
+            {/* PATH名称(sf.label):hover 显示完整 PATH(tr069Path)。
+                LST 取消"字段详情"图标,也不再单列展示 PATH —— PATH 改由本名称的 Tooltip 提示。 */}
             <span style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-              {/* path 列宽度有限（操作面板 ~600px - label 200 - checkbox/icons 占用），
-                  超长 path 必然被 ellipsis 截断。统一加 Tooltip：hover/focus 任意 path
-                  都能看到完整 monospace 路径；点击文本可复制（用户决策 2026-05-26）。
-                  placement=topLeft 让 Tooltip 不遮挡当前行下方的 description / 下一行。 */}
               <Tooltip title={sf.tr069Path} placement="topLeft" mouseEnterDelay={0.3}>
                 <span
                   style={{
-                    color: '#888',
-                    fontFamily: 'monospace',
-                    fontSize: 12,
+                    fontWeight: 500,
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
                     cursor: 'default',
                   }}
                 >
-                  {sf.tr069Path}
+                  {sf.label}
                 </span>
               </Tooltip>
               {sf.description && (
@@ -114,19 +96,6 @@ export default function SubFieldChecklist({ statement }: SubFieldChecklistProps)
                 </span>
               )}
             </span>
-            {/* 行尾"图标列"(2026-05-28 用户决策):固定 40px 宽,行间对齐,贴右紧靠
-                scrollbar。LST 用单个 InfoCircle popover 收纳完整 metadata。 */}
-            <div
-              style={{
-                flex: '0 0 40px',
-                display: 'flex',
-                justifyContent: 'center',
-                alignItems: 'center',
-                flexShrink: 0,
-              }}
-            >
-              <SubFieldInfoPopover sf={sf} />
-            </div>
           </div>
         ))}
       </div>

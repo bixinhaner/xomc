@@ -3,6 +3,7 @@ import type { CSSProperties } from 'react';
 import { Checkbox, Input, Tag, Tooltip, Empty } from 'antd';
 import { NumberOutlined } from '@ant-design/icons';
 import AccessTypeTag from './AccessTypeTag';
+import SubFieldInfoPopover from './SubFieldInfoPopover';
 import { useMmlConsoleStore } from '@core/store/mmlConsoleStore';
 import type { Statement } from '@core/types/mmlConsole';
 import { useT } from '@/hooks/useT';
@@ -91,7 +92,8 @@ export default function SubFieldInputList({ statement }: SubFieldInputListProps)
                 />
               )}
               <span style={{ flex: '0 0 200px', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                <Tooltip title={sf.label} placement="top" mouseEnterDelay={0.3}>
+                {/* PATH名称(sf.label):hover 显示完整 PATH(tr069Path) */}
+                <Tooltip title={sf.tr069Path} placement="topLeft" mouseEnterDelay={0.3}>
                   <span
                     style={{
                       fontWeight: 500,
@@ -152,6 +154,8 @@ export default function SubFieldInputList({ statement }: SubFieldInputListProps)
                 {sf.changeApplies === 'OnReboot' && (
                   <Tag color="warning">{t('mml.console.subField.onReboot')}</Tag>
                 )}
+                {/* 非 LST 命令增加"字段详情"(PATH 不在其中,改由名称 Tooltip 提示) */}
+                <SubFieldInfoPopover sf={sf} />
               </div>
             </div>
             {/* 约束 / 取值范围已合并到 AccessTypeTag（用户决策 2026-05-22），

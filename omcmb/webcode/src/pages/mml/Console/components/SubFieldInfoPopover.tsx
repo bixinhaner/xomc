@@ -17,12 +17,10 @@
  *
  * 触发方式：hover 或 click，便于鼠标 + 键盘双访问；mouseEnterDelay 0.3 防误触。
  */
-import { Popover, Typography } from 'antd';
+import { Popover } from 'antd';
 import { InfoCircleOutlined } from '@ant-design/icons';
 import type { SubFieldDef } from '@core/types/mmlConsole';
 import { useT } from '@/hooks/useT';
-
-const { Text } = Typography;
 
 export interface SubFieldInfoPopoverProps {
   sf: SubFieldDef;
@@ -82,13 +80,9 @@ export default function SubFieldInfoPopover({ sf }: SubFieldInfoPopoverProps) {
 
   const changeAppliesLabel = formatChangeApplies(sf.changeApplies, t);
 
-  // 路径行用 monospace；其余按普通排版。description 仅在非空时出行，减少空 popover 噪音。
-  const rows: InfoRow[] = [
-    {
-      label: t('mml.console.subField.info.path'),
-      value: <Text code style={{ fontSize: 12 }}>{sf.tr069Path}</Text>,
-    },
-  ];
+  // 字段详情不再展示 PATH（PATH 改由行内"PATH名称"的 Tooltip 提示）。
+  // description 仅在非空时出行，减少空 popover 噪音。
+  const rows: InfoRow[] = [];
   if (sf.description && sf.description.trim() !== '') {
     rows.push({
       label: t('mml.console.subField.info.description'),
