@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback } from 'react';
-import { Alert, Button, Descriptions, Input, Modal, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
-import { CopyOutlined, DownloadOutlined } from '@ant-design/icons';
+import { Alert, Button, Descriptions, Modal, Space, Table, Tag, Typography } from 'antd';
+import { DownloadOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 
 import ListPageLayout from '@/components/Layout/ListPageLayout';
@@ -15,7 +15,6 @@ import type {
   MMLTask,
   MMLTaskStatus,
   MMLExecuteType,
-  MMLTaskResult,
   DeviceTaskResultItem,
   MMLTaskCommandDetail,
   MMLPathTranslationView,
@@ -25,7 +24,6 @@ import type {
 import {
   useMMLTasks,
   useMMLTaskResults,
-  useDeleteMMLTask,
 } from '@core/hooks/api/useMML';
 import {
   parseMmlDeviceTaskResult,
@@ -51,12 +49,6 @@ const TASK_STATUS_TAGS: Record<MMLTaskStatus, { color: string; key: string }> = 
   completed: { color: 'success',    key: 'mml.completedStatus' },
   cancelled: { color: 'error',      key: 'mml.cancelledStatus' },
   failed:    { color: 'error',      key: 'mml.failedStatus' },
-};
-
-const TASK_RESULT_TAGS: Record<MMLTaskResult, { color: string; key: string }> = {
-  success: { color: 'success', key: 'status.success' },
-  partial: { color: 'warning', key: 'mml.partialSuccess' },
-  failed:  { color: 'error',   key: 'status.failed' },
 };
 
 function formatTime(iso?: string | null): string {
@@ -100,8 +92,6 @@ export default function TaskRecord() {
     executeType: filters.executeType && filters.executeType !== 'all' ? filters.executeType : undefined,
     result: filters.result && filters.result !== 'all' ? filters.result : undefined,
   });
-  const deleteTaskMutation = useDeleteMMLTask();
-
   const tasks = useMemo(() => data?.items ?? [], [data]);
 
   const filterFields: FilterField[] = useMemo(() => [
@@ -168,32 +158,6 @@ export default function TaskRecord() {
     setPage(1);
   }, []);
 
-  // 删除任务：敏感操作，走 Modal.confirm 二次确认。
-  const handleDelete = useCallback((task: MMLTask) => {
-    Modal.confirm({
-      title: t('common.confirmDelete'),
-      content: t('mml.confirmDeleteTask', { name: task.taskName }),
-      okText: t('common.delete'),
-      okButtonProps: { danger: true },
-      cancelText: t('common.cancel'),
-      onOk: () =>
-        new Promise<void>((resolve, reject) => {
-          deleteTaskMutation.mutate(task.id, {
-            onSuccess: () => {
-              void message.success(t('mml.taskDeleted', { name: task.taskName }));
-              resolve();
-            },
-            onError: (err) => {
-              void message.error(
-                t('mml.deleteFailed', { error: err instanceof Error ? err.message : 'Unknown' })
-              );
-              reject(err);
-            },
-          });
-        }),
-    });
-  }, [deleteTaskMutation, t]);
-
   // ---- 查看 modal state ----------------------------------------------------
   // 任务记录为只读：记录由"执行 MML 命令 / 脚本任务执行"被动产生，不提供新建/编辑。
   const [viewing, setViewing] = useState<MMLTask | null>(null);
@@ -238,27 +202,16 @@ export default function TaskRecord() {
       key: 'operation',
       title: t('table.operation'),
       dataIndex: 'id',
-      width: 140,
+      width: 90,
       fixed: 'right',
       render: (_, record) => (
-        <Space size={4}>
-          <Button
-            type="link"
-            size="small"
-            onClick={() => setViewing(record)}
-          >
-            {t('common.view')}
-          </Button>
-          <Button
-            type="link"
-            size="small"
-            danger
-            disabled={record.status === 'running'}
-            onClick={() => handleDelete(record)}
-          >
-            {t('common.delete')}
-          </Button>
-        </Space>
+        <Button
+          type="link"
+          size="small"
+          onClick={() => setViewing(record)}
+        >
+          {t('common.view')}
+        </Button>
       ),
     },
     { key: 'taskName', title: t('mml.taskName'), dataIndex: 'taskName', ellipsis: true },
@@ -295,18 +248,6 @@ export default function TaskRecord() {
       },
     },
     {
-      key: 'result',
-      title: t('mml.result'),
-      dataIndex: 'result',
-      width: 100,
-      render: (val: unknown) => {
-        const v = val as MMLTaskResult | undefined;
-        if (!v) return '-';
-        const tag = TASK_RESULT_TAGS[v];
-        return tag ? <Tag color={tag.color}>{t(tag.key)}</Tag> : <Tag>{v}</Tag>;
-      },
-    },
-    {
       key: 'startedAt',
       title: t('mml.startTime'),
       dataIndex: 'startedAt',
@@ -327,7 +268,7 @@ export default function TaskRecord() {
       width: 160,
       render: (val: unknown) => formatTime(val as string),
     },
-  ], [t, handleDelete]);
+  ], [t]);
 
   const resultColumns = useMemo(() => [
     { key: 'deviceSn', title: t('mml.deviceSn'), dataIndex: 'deviceSn', width: 160 },
@@ -609,15 +550,6 @@ interface DeviceResultExpandedProps {
 
 function DeviceResultExpanded({ row, t }: DeviceResultExpandedProps) {
   const raw = row.result?.rawOutput;
-  const handleCopyRaw = useCallback(async () => {
-    if (!raw) return;
-    try {
-      await navigator.clipboard.writeText(raw);
-      void message.success(t('common.copiedToClipboard'));
-    } catch {
-      void message.error(t('common.copyFailed'));
-    }
-  }, [raw, t]);
 
   return (
     <Space direction="vertical" size={12} style={{ width: '100%' }}>
@@ -644,49 +576,15 @@ function DeviceResultExpanded({ row, t }: DeviceResultExpandedProps) {
       )}
       <ParsedResultPanel row={row} t={t} />
       {raw && (
-        <>
-          <div>
-            <Typography.Text strong style={{ fontSize: 12, color: '#595959' }}>
-              {t('mml.formattedXml')}
-            </Typography.Text>
-            <div style={{ marginTop: 4 }}>
-              <XmlViewer xml={raw} maxHeight={320} />
-            </div>
+        <div>
+          <Typography.Text strong style={{ fontSize: 12, color: '#595959' }}>
+            {t('mml.formattedXml')}
+          </Typography.Text>
+          <div style={{ marginTop: 4 }}>
+            {/* XmlViewer 已支持折叠/复制/搜索，原「原始输出」textarea 与此重复，已移除 */}
+            <XmlViewer xml={raw} maxHeight={320} />
           </div>
-          <div>
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                marginBottom: 4,
-              }}
-            >
-              <Typography.Text strong style={{ fontSize: 12, color: '#595959' }}>
-                {t('mml.rawOutput')}
-              </Typography.Text>
-              <Tooltip title={t('common.copy')}>
-                <Button size="small" icon={<CopyOutlined />} onClick={handleCopyRaw}>
-                  {t('common.copy')}
-                </Button>
-              </Tooltip>
-            </div>
-            {/* textarea 而非 pre：浏览器原生 select-all / Ctrl+F 搜索 / 鼠标拖选都好用，
-                配合 readOnly + 等宽字体满足"查询全部信息"诉求 */}
-            <Input.TextArea
-              value={raw}
-              readOnly
-              autoSize={{ minRows: 6, maxRows: 18 }}
-              style={{
-                fontFamily:
-                  "'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace",
-                fontSize: 12,
-                lineHeight: 1.6,
-                background: '#fafafa',
-              }}
-            />
-          </div>
-        </>
+        </div>
       )}
     </Space>
   );
