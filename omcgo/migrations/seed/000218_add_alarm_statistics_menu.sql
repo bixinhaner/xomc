@@ -18,7 +18,6 @@ INSERT INTO menus (
     icon,
     show_status,
     status,
-    route_params,
     created_at,
     updated_at
 ) VALUES (
@@ -34,27 +33,23 @@ INSERT INTO menus (
     'BarChartOutlined',
     'show',
     'normal',
-    NULL,
     NOW(),
     NOW()
-) ON CONFLICT (permission_key) DO NOTHING;
+) ON CONFLICT (id) DO NOTHING;
 
--- 为管理员角色添加告警统计权限
--- 获取admin角色的ID并添加权限
-INSERT INTO role_permissions (role_id, permission_key, created_at, updated_at)
+-- 为管理员角色添加告警统计菜单权限
+INSERT INTO role_menus (role_id, menu_id, created_at)
 SELECT
-    id,
-    'alarm:statistics',
-    NOW(),
+    r.id,
+    '11111111-1111-1111-1111-111111111120',
     NOW()
-FROM roles
-WHERE name_i18n->>'zh-CN' = '管理员'
-  OR name = 'admin'
+FROM roles r
+WHERE r.code = 'admin'
 ON CONFLICT DO NOTHING;
 
 -- +goose Down
 -- 删除告警统计菜单项
 DELETE FROM menus WHERE permission_key = 'alarm:statistics';
 
--- 删除角色权限中的告警统计权限
-DELETE FROM role_permissions WHERE permission_key = 'alarm:statistics';
+-- 删除角色菜单中的告警统计权限
+DELETE FROM role_menus WHERE menu_id = '11111111-1111-1111-1111-111111111120';

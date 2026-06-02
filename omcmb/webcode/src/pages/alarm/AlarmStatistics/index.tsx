@@ -1,16 +1,19 @@
 import { useMemo, useState, useCallback, useEffect } from 'react';
-import { Card, Col, Row, Typography, DatePicker, Radio, Space, Button, Spin, Switch, Tag, Tooltip } from 'antd';
+import { Card, Col, Row, Typography, DatePicker, Radio, Space, Button, Switch, Tag, Tooltip } from 'antd';
 import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
 import { ReloadOutlined, SyncOutlined, ClockCircleOutlined } from '@ant-design/icons';
 import PieChart, { type PieDataItem } from '@/components/Charts/PieChart';
-import LineChart from '@/components/Charts/LineChart';
 import BarChart from '@/components/Charts/BarChart';
+import EmptyState from '@/components/common/EmptyState';
+import ReactECharts from 'echarts-for-react';
 import { useAlarmCount } from '@core/hooks/api/useAlarms';
 import { useAlarmTrend, useTopAlarmDevices } from '@core/hooks/api/useDashboard';
 import { useT } from '@/hooks/useT';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
+import EfficiencyCard from './EfficiencyCard';
+import AlarmHeatmap from './AlarmHeatmap';
 
 // 扩展的饼图数据项，包含严重度信息
 interface AlarmPieDataItem extends PieDataItem {
@@ -90,22 +93,20 @@ function AlarmDistributionChart({
   if (totalCount === 0) {
     return (
       <Card
-        title={t('alarm.stats.distribution')}
+        title={<span style={{ fontSize: 14, fontWeight: 500 }}>{t('alarm.stats.distribution')}</span>}
         size="small"
-        styles={{ body: { padding: '16px', height: '300px', display: 'flex', alignItems: 'center', justifyContent: 'center' } }}
+        styles={{ body: { padding: '16px', height: '280px', display: 'flex', alignItems: 'center', justifyContent: 'center' } }}
       >
-        <div style={{ color: '#999', textAlign: 'center' }}>
-          {t('common.noData')}
-        </div>
+        <EmptyState variant="no-data" style={{ padding: '20px 0' }} />
       </Card>
     );
   }
 
   return (
     <Card
-      title={t('alarm.stats.distribution')}
+      title={<span style={{ fontSize: 14, fontWeight: 500 }}>{t('alarm.stats.distribution')}</span>}
       size="small"
-      styles={{ body: { padding: '16px', height: '300px', display: 'flex', flexDirection: 'column' } }}
+      styles={{ body: { padding: '16px', height: '280px', display: 'flex', flexDirection: 'column' } }}
     >
       <PieChart
         data={data}
@@ -167,30 +168,117 @@ function AlarmTrendChart({
   if (!hasData) {
     return (
       <Card
-        title={t('alarm.stats.trend')}
+        title={<span style={{ fontSize: 14, fontWeight: 500 }}>{t('alarm.stats.trend')}</span>}
         size="small"
-        styles={{ body: { padding: '16px', height: '300px', display: 'flex', alignItems: 'center', justifyContent: 'center' } }}
+        styles={{ body: { padding: '16px', height: '280px', display: 'flex', alignItems: 'center', justifyContent: 'center' } }}
       >
-        <div style={{ color: '#999', textAlign: 'center' }}>
-          {t('common.noData')}
-        </div>
+        <EmptyState variant="no-data" style={{ padding: '20px 0' }} />
       </Card>
     );
   }
 
   return (
     <Card
-      title={t('alarm.stats.trend')}
+      title={<span style={{ fontSize: 14, fontWeight: 500 }}>{t('alarm.stats.trend')}</span>}
       size="small"
-      styles={{ body: { padding: '16px', height: '300px', display: 'flex', flexDirection: 'column' } }}
+      styles={{ body: { padding: '12px', height: '280px' } }}
     >
-      <LineChart
-        title=""
-        xData={xData}
-        series={series}
-        height="100%"
-        areaFill
-        smooth
+      <ReactECharts
+        option={{
+          tooltip: {
+            trigger: 'axis',
+            confine: true,
+            backgroundColor: 'rgba(0, 0, 0, 0.85)',
+            borderColor: '#333',
+            textStyle: { color: '#fff', fontSize: 12 },
+            formatter: (params: unknown) => {
+              const items = params as Array<{ marker: string; seriesName: string; value: number; axisValue: string; color: string }>;
+              if (!Array.isArray(items) || items.length === 0) return '';
+              const total = items.reduce((sum, item) => sum + item.value, 0);
+              return `<div style="line-height: 1.8; padding: 6px;">
+                <div style="font-weight: 600; margin-bottom: 8px; font-size: 13px; border-bottom: 1px solid #444; padding-bottom: 6px;">
+                  ${items[0].axisValue}
+                </div>
+                <div style="margin-bottom: 6px;">
+                  <span style="color: #bbb;">总计:</span>
+                  <span style="color: #fff; font-weight: 600; font-size: 14px; margin-left: 8px;">${total}</span>
+                </div>
+                ${items.map(item =>
+                  `<div style="margin: 2px 0;">
+                    ${item.marker} <span style="color: ${item.color};">${item.seriesName}</span>
+                    <span style="color: #fff; float: right; font-weight: 600;">${item.value}</span>
+                  </div>`
+                ).join('')}
+              </div>`;
+            },
+          },
+          legend: {
+            show: true,
+            top: 4,
+            left: 'center',
+            itemWidth: 16,
+            itemHeight: 10,
+            itemGap: 24,
+            textStyle: { fontSize: 12, color: '#595959' },
+            data: [
+              { name: t('alarm.severity.critical'), icon: 'rect' },
+              { name: t('alarm.severity.major'), icon: 'rect' },
+              { name: t('alarm.severity.minor'), icon: 'rect' },
+              { name: t('alarm.severity.warning'), icon: 'rect' },
+            ],
+          },
+          grid: {
+            top: 48,
+            left: 45,
+            right: 20,
+            bottom: 32,
+            containLabel: true,
+          },
+          xAxis: {
+            type: 'category',
+            data: xData,
+            boundaryGap: true,
+            axisLabel: {
+              fontSize: 11,
+              color: '#8c8c8c',
+            },
+            axisLine: { lineStyle: { color: '#e8e8e8' } },
+            axisTick: { alignWithLabel: true, show: true },
+          },
+          yAxis: {
+            type: 'value',
+            minInterval: 1,
+            axisLabel: {
+              fontSize: 11,
+              color: '#8c8c8c',
+              formatter: (value: number) => Number.isInteger(value) ? value : '',
+            },
+            splitLine: {
+              lineStyle: { type: 'dashed', color: '#f0f0f0' },
+            },
+          },
+          series: series.map((s, index) => ({
+            name: s.name,
+            type: 'bar',
+            data: s.data,
+            stack: 'alarm',
+            barWidth: days > 15 ? '60%' : '40%',
+            itemStyle: {
+              color: s.color,
+              borderRadius: [2, 2, 0, 0],
+            },
+            emphasis: {
+              focus: 'series',
+              itemStyle: {
+                shadowBlur: 10,
+                shadowColor: 'rgba(0, 0, 0, 0.2)',
+              },
+            },
+          })),
+        }}
+        style={{ height: 230, width: '100%' }}
+        opts={{ renderer: 'canvas' }}
+        notMerge={true}
       />
     </Card>
   );
@@ -243,22 +331,20 @@ function TopAlarmDevicesChart({
   if (!topDevices || topDevices.length === 0) {
     return (
       <Card
-        title={t('alarm.stats.topDevices')}
+        title={<span style={{ fontSize: 14, fontWeight: 500 }}>{t('alarm.stats.topDevices')}</span>}
         size="small"
-        styles={{ body: { padding: '16px', height: '350px', display: 'flex', alignItems: 'center', justifyContent: 'center' } }}
+        styles={{ body: { padding: '16px', height: '280px', display: 'flex', alignItems: 'center', justifyContent: 'center' } }}
       >
-        <div style={{ color: '#999', textAlign: 'center' }}>
-          {t('common.noData')}
-        </div>
+        <EmptyState variant="no-data" style={{ padding: '20px 0' }} />
       </Card>
     );
   }
 
   return (
     <Card
-      title={t('alarm.stats.topDevices')}
+      title={<span style={{ fontSize: 14, fontWeight: 500 }}>{t('alarm.stats.topDevices')}</span>}
       size="small"
-      styles={{ body: { padding: '16px', height: '350px', display: 'flex', flexDirection: 'column' } }}
+      styles={{ body: { padding: '16px', height: '280px', display: 'flex', flexDirection: 'column' } }}
     >
       <BarChart
         title=""
@@ -410,7 +496,6 @@ export default function AlarmStatistics() {
     navigate(`/alarm/current?${params.toString()}`);
   }, [navigate]);
 
-  const isLoading = isLoadingCount || isLoadingTrend || isLoadingDevices;
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', padding: '16px' }}>
@@ -454,7 +539,7 @@ export default function AlarmStatistics() {
               <Button
                 icon={<ReloadOutlined />}
                 onClick={handleRefresh}
-                loading={isLoading}
+                loading={isLoadingCount || isLoadingTrend || isLoadingDevices}
                 size="small"
               >
                 {t('common.refresh')}
@@ -489,30 +574,36 @@ export default function AlarmStatistics() {
       </div>
 
       {/* 图表区域 */}
-      <Spin spinning={isLoading}>
-        <Row gutter={[16, 16]}>
-          {/* 第一行：告警级别分布 + 告警趋势 */}
-          <Col xs={24} lg={12}>
-            <AlarmDistributionChart
-              alarmCount={alarmCount}
-              t={t}
-              onDrillDown={(severity) => handleDrillDown(severity)}
-            />
-          </Col>
-          <Col xs={24} lg={12}>
-            <AlarmTrendChart trendData={trendData} days={days} t={t} />
-          </Col>
+      <Row gutter={[16, 16]}>
+        {/* 第零行：告警效率指标 */}
+        <Col xs={24}>
+          <EfficiencyCard />
+        </Col>
 
-          {/* 第二行：高频告警设备 */}
-          <Col xs={24}>
-            <TopAlarmDevicesChart
-              devicesData={devicesData}
-              t={t}
-              onDrillDown={(deviceSN) => handleDrillDown(undefined, deviceSN)}
-            />
-          </Col>
-        </Row>
-      </Spin>
+        {/* 第一行：告警级别分布 + 告警热度图 */}
+        <Col xs={24} lg={12}>
+          <AlarmDistributionChart
+            alarmCount={alarmCount}
+            t={t}
+            onDrillDown={(severity) => handleDrillDown(severity)}
+          />
+        </Col>
+        <Col xs={24} lg={12}>
+          <AlarmHeatmap />
+        </Col>
+
+        {/* 第二行：告警趋势 + 高频告警设备 */}
+        <Col xs={24} lg={12}>
+          <AlarmTrendChart trendData={trendData} days={days} t={t} />
+        </Col>
+        <Col xs={24} lg={12}>
+          <TopAlarmDevicesChart
+            devicesData={devicesData}
+            t={t}
+            onDrillDown={(deviceSN) => handleDrillDown(undefined, deviceSN)}
+          />
+        </Col>
+      </Row>
     </div>
   );
 }

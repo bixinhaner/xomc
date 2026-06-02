@@ -481,3 +481,75 @@ export interface WidgetLayout {
     rows: number;
   };
 }
+
+// ============================================================================
+// 告警效率指标类型（Phase 2 新增）
+// ============================================================================
+
+/**
+ * 每日效率趋势数据点
+ */
+export interface DailyEfficiencyTrend {
+  /** 日期 */
+  date: string;
+  /** 当日平均确认时间（分钟） */
+  avg_acknowledge_minutes: number;
+  /** 当日平均解决时间（分钟） */
+  avg_resolve_minutes: number;
+}
+
+/**
+ * 告警处理效率指标
+ * 包含 MTTA（平均确认时间）、MTTR（平均解决时间）、确认率、清除率等关键运维指标
+ */
+export interface EfficiencyMetrics {
+  /** 告警级别 */
+  severity: string;
+  /** 已确认告警数量 */
+  acknowledged_count: number;
+  /** 已清除告警数量 */
+  cleared_count: number;
+  /** 总告警数量 */
+  total_count: number;
+  /** 平均确认时间（MTTA，分钟） */
+  avg_acknowledge_minutes: number;
+  /** 平均解决时间（MTTR，分钟） */
+  avg_resolve_minutes: number;
+  /** 确认率（百分比） */
+  acknowledge_rate: number;
+  /** 清除率（百分比） */
+  clear_rate: number;
+  /** 近7天趋势数据 */
+  daily_trend: DailyEfficiencyTrend[];
+}
+
+/**
+ * 告警热度图数据
+ * 按星期几和小时统计告警数量
+ */
+export interface HeatmapData {
+  /** 7天数据，0=周一, 6=周日 */
+  days_of_week: DayOfWeekData[];
+  /** 最大告警数（用于热力图颜色范围） */
+  max_count: number;
+}
+
+/**
+ * 一天24小时的告警数量分布
+ */
+export interface DayOfWeekData {
+  /** 星期几，0=周一, 6=周日 */
+  day: number;
+  /** 24小时告警数量，索引0=00:00-00:59, 23=23:00-23:59 */
+  hours: number[];
+}
+
+/**
+ * 按严重程度分组的告警热度图数据
+ */
+export interface AlarmHeatmapBySeverity {
+  /** 告警级别 */
+  severity: string;
+  /** 热度图数据 */
+  data: HeatmapData;
+}

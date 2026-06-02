@@ -26,6 +26,8 @@ func NewHandler(service *Service) *Handler {
 }
 
 // RegisterRoutes registers dashboard routes on the given router group.
+// NOTE: rg 应该已经应用了认证中间件（如 JWT 验证），所有端点都会自动受到保护。
+// 如需添加额外的权限检查，请在具体 handler 中实现。
 func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	dashboard := rg.Group("/dashboard")
 	{
@@ -39,6 +41,10 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		dashboard.PUT("/widgets", h.SaveWidgets)
 		dashboard.GET("/alarm-type-pie", h.GetAlarmTypePie)
 		dashboard.GET("/kpi-time-series", h.GetKPITimeSeries)
+		// 告警统计新增端点
+		dashboard.GET("/alarm-efficiency", h.GetAlarmEfficiency)
+		dashboard.GET("/alarm-heatmap", h.GetAlarmHeatmap)
+		dashboard.GET("/alarm-heatmap-by-severity", h.GetAlarmHeatmapBySeverity)
 	}
 }
 
@@ -255,4 +261,61 @@ func (h *Handler) GetDeviceStatusByType(c *gin.Context) {
 		return
 	}
 	response.OK(c, result)
+}
+
+// GetAlarmEfficiency handles GET /api/v1/dashboard/alarm-efficiency.
+// 获取告警处理效率指标（MTTA、MTTR、确认率、清除率）
+func (h *Handler) GetAlarmEfficiency(c *gin.Context) {
+	metrics, err := h.service.GetOverallEfficiencyMetrics(c.Request.Context())
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	response.OK(c, metrics)
+}
+
+// GetAlarmHeatmap handles GET /api/v1/dashboard/alarm-heatmap?days=30.
+// 获取告警热度图数据（按星期几和小时统计）
+func (h *Handler) GetAlarmHeatmap(c *gin.Context) {
+	days := 30
+	if daysStr := c.Query("days"); daysStr != "" {
+		parsed, err := strconv.Atoi(daysStr)
+		if err != nil || parsed < 1 || parsed > 365 {
+			commonerrors.AbortWithError(c, http.StatusBadRequest,
+				fmt.Errorf("invalid days parameter: must be between 1 and 365"))
+			return
+		}
+		days = parsed
+	}
+
+	heatmap, err := h.service.GetAlarmHeatmap(c.Request.Context(), days)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	response.OK(c, heatmap)
+}
+
+// GetAlarmHeatmapBySeverity handles GET /api/v1/dashboard/alarm-heatmap-by-severity?days=30&severity=critical.
+// 获取按严重程度分组的告警热度图数据
+func (h *Handler) GetAlarmHeatmapBySeverity(c *gin.Context) {
+	days := 30
+	if daysStr := c.Query("days"); daysStr != "" {
+		parsed, err := strconv.Atoi(daysStr)
+		if err != nil || parsed < 1 || parsed > 365 {
+			commonerrors.AbortWithError(c, http.StatusBadRequest,
+				fmt.Errorf("invalid days parameter: must be between 1 and 365"))
+			return
+		}
+		days = parsed
+	}
+
+	severity := c.Query("severity") // 可选：critical, major, minor, warning
+
+	heatmap, err := h.service.GetAlarmHeatmapBySeverity(c.Request.Context(), days, severity)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	response.OK(c, heatmap)
 }

@@ -425,4 +425,79 @@ export const dashboardApi = {
     );
     return mapKPITrendComparison(data);
   },
+
+  // ==================== Phase 2 新增 API ====================
+
+  /**
+   * 获取告警处理效率指标（MTTA、MTTR、确认率、清除率）
+   * GET /dashboard/alarm-efficiency
+   */
+  async getAlarmEfficiency(): Promise<EfficiencyMetrics> {
+    const { data } = await http.get<EfficiencyMetrics>('/dashboard/alarm-efficiency');
+    return data;
+  },
+
+  /**
+   * 获取告警热度图数据（按星期几和小时统计）
+   * GET /dashboard/alarm-heatmap?days=30
+   */
+  async getAlarmHeatmap(params: { days: number }): Promise<HeatmapData> {
+    const { data } = await http.get<HeatmapData>('/dashboard/alarm-heatmap', { params });
+    return data;
+  },
+
+  /**
+   * 获取按严重程度分组的告警热度图数据
+   * GET /dashboard/alarm-heatmap-by-severity?days=30&severity=critical
+   */
+  async getAlarmHeatmapBySeverity(params: {
+    days: number;
+    severity?: string;
+  }): Promise<AlarmHeatmapBySeverity> {
+    const { data } = await http.get<AlarmHeatmapBySeverity>(
+      '/dashboard/alarm-heatmap-by-severity',
+      { params }
+    );
+    return data;
+  },
 };
+
+// ==================== Phase 2 新增类型定义 ====================
+
+/** 告警处理效率指标 */
+export interface EfficiencyMetrics {
+  severity: string;
+  acknowledged_count: number;
+  cleared_count: number;
+  total_count: number;
+  avg_acknowledge_minutes: number;
+  avg_resolve_minutes: number;
+  acknowledge_rate: number;
+  clear_rate: number;
+  daily_trend: DailyEfficiencyTrend[];
+}
+
+/** 每日效率趋势数据点 */
+export interface DailyEfficiencyTrend {
+  date: string;
+  avg_acknowledge_minutes: number;
+  avg_resolve_minutes: number;
+}
+
+/** 告警热度图数据 */
+export interface HeatmapData {
+  days_of_week: DayOfWeekData[];
+  max_count: number;
+}
+
+/** 一天24小时的告警数量分布 */
+export interface DayOfWeekData {
+  day: number;
+  hours: number[];
+}
+
+/** 按严重程度分组的告警热度图数据 */
+export interface AlarmHeatmapBySeverity {
+  severity: string;
+  data: HeatmapData;
+}
