@@ -1,5 +1,5 @@
 import { useMemo, useState, useCallback, useEffect } from 'react';
-import { Card, Col, Row, Typography, DatePicker, Radio, Space, Button, Switch, Tag, Tooltip } from 'antd';
+import { Card, Col, Row, Typography, DatePicker, Radio, Space, Button, Switch, Tag, Tooltip, Spin } from 'antd';
 import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
 import { ReloadOutlined, SyncOutlined, ClockCircleOutlined } from '@ant-design/icons';
@@ -285,6 +285,9 @@ export default function AlarmStatistics() {
   const [refreshInterval] = useState(60); // 固定60秒间隔
   const [nextRefreshIn, setNextRefreshIn] = useState(refreshInterval);
 
+  // 手动刷新 loading 状态
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
   // 自动刷新倒计时
   useEffect(() => {
     let mounted = true;
@@ -371,16 +374,26 @@ export default function AlarmStatistics() {
   }, [filters]);
 
   // 数据hooks
-  const { data: alarmCount, isLoading: isLoadingCount } = useAlarmCount();
-  const { data: trendData, isLoading: isLoadingTrend } = useAlarmTrend(days);
-  const { data: devicesData, isLoading: isLoadingDevices } = useTopAlarmDevices();
+  const { data: alarmCount, refetch: refetchCount } = useAlarmCount();
+  const { data: trendData, refetch: refetchTrend } = useAlarmTrend(days);
+  const { data: devicesData, refetch: refetchDevices } = useTopAlarmDevices();
 
   // 手动刷新
-  const handleRefresh = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: ['alarms'] });
-    void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
-    setLastUpdateTime(new Date());
-  }, [queryClient]);
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    try {
+      // 并行刷新所有查询
+      await Promise.all([
+        refetchCount(),
+        refetchTrend(),
+        refetchDevices(),
+      ]);
+      setLastUpdateTime(new Date());
+    } finally {
+      // 短暂延迟确保 loading 效果可见
+      setTimeout(() => setIsRefreshing(false), 500);
+    }
+  }, [refetchCount, refetchTrend, refetchDevices]);
 
   // 时间范围变化
   const handleTimeRangeChange = (value: TimeRange) => {
@@ -449,7 +462,6 @@ export default function AlarmStatistics() {
               <Button
                 icon={<ReloadOutlined />}
                 onClick={handleRefresh}
-                loading={isLoadingCount || isLoadingTrend || isLoadingDevices}
                 size="small"
               >
                 {t('common.refresh')}
@@ -484,36 +496,38 @@ export default function AlarmStatistics() {
       </div>
 
       {/* 图表区域 */}
-      <Row gutter={[16, 16]}>
-        {/* 第零行：告警效率指标 */}
-        <Col xs={24}>
-          <EfficiencyCard />
-        </Col>
+      <Spin spinning={isRefreshing} tip={t('common.loading')} size="large">
+        <Row gutter={[16, 16]}>
+          {/* 第零行：告警效率指标 */}
+          <Col xs={24}>
+            <EfficiencyCard />
+          </Col>
 
-        {/* 第一行：告警级别分布 + 告警热度图 */}
-        <Col xs={24} lg={12}>
-          <AlarmDistributionChart
-            alarmCount={alarmCount}
-            t={t}
-            onDrillDown={(severity) => handleDrillDown(severity)}
-          />
-        </Col>
-        <Col xs={24} lg={12}>
-          <AlarmHeatmap />
-        </Col>
+          {/* 第一行：告警级别分布 + 告警热度图 */}
+          <Col xs={24} lg={12}>
+            <AlarmDistributionChart
+              alarmCount={alarmCount}
+              t={t}
+              onDrillDown={(severity) => handleDrillDown(severity)}
+            />
+          </Col>
+          <Col xs={24} lg={12}>
+            <AlarmHeatmap />
+          </Col>
 
-        {/* 第二行：告警趋势 + 高频告警设备 */}
-        <Col xs={24} lg={12}>
-          <AlarmTrendChart trendData={trendData} days={days} t={t} />
-        </Col>
-        <Col xs={24} lg={12}>
-          <TopAlarmDevicesChart
-            devicesData={devicesData}
-            t={t}
-            onDrillDown={(deviceSN) => handleDrillDown(undefined, deviceSN)}
-          />
-        </Col>
-      </Row>
+          {/* 第二行：告警趋势 + 高频告警设备 */}
+          <Col xs={24} lg={12}>
+            <AlarmTrendChart trendData={trendData} days={days} t={t} />
+          </Col>
+          <Col xs={24} lg={12}>
+            <TopAlarmDevicesChart
+              devicesData={devicesData}
+              t={t}
+              onDrillDown={(deviceSN) => handleDrillDown(undefined, deviceSN)}
+            />
+          </Col>
+        </Row>
+      </Spin>
     </div>
   );
 }
