@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { App, Button, Card, Drawer, Input, Modal, Popconfirm, Popover, Progress, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
@@ -182,8 +182,8 @@ export default function DeviceList() {
     return params;
   });
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
-  const exportMenuRef = useRef<HTMLDivElement>(null);
-  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  // 导出确认弹窗（替代原手写下拉菜单——后者在亮色主题下白底白字不可见）。
+  const [exportModalOpen, setExportModalOpen] = useState(false);
 
   // 同步 URL 参数到 filterParams（解决返回时 state 未恢复的问题）
   // 性能优化：使用浅比较替代 JSON.stringify 深度比较，避免循环依赖
@@ -227,32 +227,6 @@ export default function DeviceList() {
   //     当前值变成 filterParams 并写 URL
   //   - 返回导航：URL 里有 ?key=value 时由上面 useEffect 同步回 filterParams，
   //     不依赖 sessionStorage
-
-  useEffect(() => {
-    if (!exportMenuOpen) {
-      return undefined;
-    }
-
-    const handlePointerDown = (event: MouseEvent) => {
-      if (!exportMenuRef.current?.contains(event.target as Node)) {
-        setExportMenuOpen(false);
-      }
-    };
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setExportMenuOpen(false);
-      }
-    };
-
-    document.addEventListener('mousedown', handlePointerDown);
-    document.addEventListener('keydown', handleKeyDown);
-
-    return () => {
-      document.removeEventListener('mousedown', handlePointerDown);
-      document.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [exportMenuOpen]);
 
   // 本地任务面板状态
   type TaskStatus = 'pending' | 'running' | 'success' | 'failed';
@@ -1426,7 +1400,7 @@ export default function DeviceList() {
   // 导出 — 选择格式(xlsx/csv)后触发：筛选生效 + 列以"列设置"为准。
   const handleExport = useCallback(
     async (format: 'xlsx' | 'csv') => {
-      setExportMenuOpen(false);
+      setExportModalOpen(false);
       const exportCols = resolveVisibleExportColumns(columns, DEVICE_LIST_TABLE_ID);
       if (exportCols.length === 0) {
         void message.warning(t('common.noColumnsToExport'));
@@ -1605,83 +1579,28 @@ export default function DeviceList() {
   // R3: 导出按钮挪到 FilterBar 搜索按钮右侧（device-list-and-group-improvements-20260520.md R3）。
   // ListPageLayout.extra 不再承载，让筛选区与导出动作在视觉上一行对齐。
   const exportButton = (
-    <div
-      ref={exportMenuRef}
-      style={{ position: 'relative', display: 'inline-flex' }}
+    <Button
+      type="primary"
+      icon={<ExportOutlined />}
+      onClick={() => setExportModalOpen(true)}
     >
-      <Button
-        type="primary"
-        icon={<ExportOutlined />}
-        aria-haspopup="menu"
-        aria-expanded={exportMenuOpen}
-        onClick={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          setExportMenuOpen((open) => !open);
-        }}
-      >
-        {t('common.export')}
-      </Button>
+      {t('common.export')}
+    </Button>
+  );
 
-      {exportMenuOpen && (
-        <div
-          role="menu"
-          style={{
-            position: 'absolute',
-            top: 'calc(100% + 8px)',
-            right: 0,
-            minWidth: 96,
-            padding: 6,
-            borderRadius: 8,
-            border: '1px solid var(--color-border-secondary, #303030)',
-            background: 'var(--color-bg-elevated, #1f1f1f)',
-            boxShadow: '0 12px 32px rgba(0, 0, 0, 0.28)',
-            zIndex: 40,
-          }}
-        >
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => handleExport('xlsx')}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              width: '100%',
-              padding: '8px 12px',
-              border: 'none',
-              borderRadius: 6,
-              background: 'transparent',
-              color: 'var(--color-text, rgba(255,255,255,0.88))',
-              cursor: 'pointer',
-              font: 'inherit',
-              textAlign: 'left',
-            }}
-          >
-            XLSX
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => handleExport('csv')}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              width: '100%',
-              padding: '8px 12px',
-              border: 'none',
-              borderRadius: 6,
-              background: 'transparent',
-              color: 'var(--color-text, rgba(255,255,255,0.88))',
-              cursor: 'pointer',
-              font: 'inherit',
-              textAlign: 'left',
-            }}
-          >
-            CSV
-          </button>
-        </div>
-      )}
-    </div>
+  // 导出确认弹窗：用 antd Modal（主题感知，不会再白底白字）。固定 CSV 格式，
+  // 用户决策 2026-06-02：导出只支持 CSV，不再提供格式选择。
+  const exportConfirmModal = (
+    <Modal
+      open={exportModalOpen}
+      title={t('common.exportConfirmTitle')}
+      onCancel={() => setExportModalOpen(false)}
+      onOk={() => handleExport('csv')}
+      okText={t('common.confirm')}
+      cancelText={t('common.cancel')}
+    >
+      {t('common.exportConfirmContent')}
+    </Modal>
   );
 
   return (
@@ -1829,6 +1748,8 @@ export default function DeviceList() {
           </div>
         )}
       </Modal>
+
+      {exportConfirmModal}
     </div>
   );
 }

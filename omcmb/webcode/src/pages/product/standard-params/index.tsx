@@ -175,13 +175,13 @@ export default function StandardParamsPage() {
           <Form form={form} layout="vertical">
             <Form.Item
               name="standardPath"
-              label="standard_path"
+              label={t('product.standardParams.col.standardPath')}
               rules={[{ required: true, message: t('common.required') }]}
             >
               <Input disabled={Boolean(editing)} />
             </Form.Item>
             <Space wrap>
-              <Form.Item name="entryType" label="entry_type" rules={[{ required: true }]}>
+              <Form.Item name="entryType" label={t('product.standardParams.col.entryType')} rules={[{ required: true }]}>
                 <Select
                   options={[
                     { label: 'parameter', value: 'parameter' },
@@ -190,7 +190,7 @@ export default function StandardParamsPage() {
                   style={{ width: 140 }}
                 />
               </Form.Item>
-              <Form.Item name="access" label="access" rules={[{ required: true }]}>
+              <Form.Item name="access" label={t('product.standardParams.col.access')} rules={[{ required: true }]}>
                 <Select
                   options={[
                     { label: 'readWrite', value: 'readWrite' },
@@ -199,16 +199,16 @@ export default function StandardParamsPage() {
                   style={{ width: 140 }}
                 />
               </Form.Item>
-              <Form.Item name="dataType" label="data_type" rules={[{ required: true }]}>
+              <Form.Item name="dataType" label={t('product.standardParams.col.dataType')} rules={[{ required: true }]}>
                 <Input style={{ width: 140 }} />
               </Form.Item>
-              <Form.Item name="changeApplies" label="change_applies">
+              <Form.Item name="changeApplies" label={t('product.standardParams.col.changeApplies')}>
                 <Input style={{ width: 140 }} />
               </Form.Item>
-              <Form.Item name="minValue" label="min">
+              <Form.Item name="minValue" label={t('product.standardParams.col.min')}>
                 <Input style={{ width: 140 }} />
               </Form.Item>
-              <Form.Item name="maxValue" label="max">
+              <Form.Item name="maxValue" label={t('product.standardParams.col.max')}>
                 <Input style={{ width: 140 }} />
               </Form.Item>
             </Space>

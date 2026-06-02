@@ -242,9 +242,10 @@ export default function MenuManagement() {
   const [filters, setFilters] = useState<Record<string, string>>({});
 
   // 搜索字段配置
+  // 固定宽度：筛选框不随整行拉伸（width 设置后 FilterBar 用 flex:0 0 Npx）。
   const filterFields: FilterField[] = useMemo(() => [
-    { name: 'name', label: '菜单名称', type: 'input', placeholder: '请输入菜单名称' },
-    { name: 'status', label: '状态', type: 'select', placeholder: '请选择状态', options: MENU_STATUS_OPTIONS },
+    { name: 'name', label: '菜单名称', type: 'input', placeholder: '请输入菜单名称', width: 240 },
+    { name: 'status', label: '状态', type: 'select', placeholder: '请选择状态', options: MENU_STATUS_OPTIONS, width: 180 },
   ], []);
 
   // 根据展开状态扁平化菜单数据
@@ -693,6 +694,9 @@ export default function MenuManagement() {
           loading={isLoading}
           rowKey="id"
           scroll={{ x: 1000 }}
+          hideRealtime
+          hideColumnSettings
+          hideDensity
         />
       </Card>
 
