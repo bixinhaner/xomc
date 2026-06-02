@@ -33,6 +33,7 @@ import {
   useBatchDeleteTraceTasks,
 } from '@core/hooks/api/useTrace';
 import { useDeviceList } from '@core/hooks/api/useDevices';
+import { usePermission } from '@core/hooks/usePermission';
 import { traceApi } from '@core/services/api/traceApi';
 import type {
   TraceTask,
@@ -91,6 +92,13 @@ function formatBytes(n: number): string {
 
 export default function MessageTrace() {
   const t = useT();
+  // 按钮级权限（与 menus.permission_key 严格对齐，见 seed/000005）。
+  // 约定（PRD §4.3.6）：无权限按钮 disabled + Tooltip，不隐藏。
+  const canQuery = usePermission('ops:message-trace:query');
+  const canCreate = usePermission('ops:message-trace:create');
+  const canStop = usePermission('ops:message-trace:stop');
+  const canExport = usePermission('ops:message-trace:export');
+  const canDelete = usePermission('ops:message-trace:delete');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [createOpen, setCreateOpen] = useState(false);
@@ -263,35 +271,43 @@ export default function MessageTrace() {
         width: 340,
         render: (_v, r) => (
           <Space size="small">
-            <Button
-              size="small"
-              icon={<EyeOutlined />}
-              onClick={() => setDrawerTask(r)}
-            >
-              {t('trace.action.viewMessages')}
-            </Button>
+            <Tooltip title={canQuery ? '' : t('common.noPermission')}>
+              <Button
+                size="small"
+                icon={<EyeOutlined />}
+                disabled={!canQuery}
+                onClick={() => setDrawerTask(r)}
+              >
+                {t('trace.action.viewMessages')}
+              </Button>
+            </Tooltip>
             {r.status === 'running' && (
               <Popconfirm
                 title={t('trace.confirm.stop')}
                 onConfirm={() => handleStop(r, false)}
+                disabled={!canStop}
               >
-                <Button size="small" icon={<StopOutlined />}>
-                  {t('trace.action.stop')}
-                </Button>
+                <Tooltip title={canStop ? '' : t('common.noPermission')}>
+                  <Button size="small" icon={<StopOutlined />} disabled={!canStop}>
+                    {t('trace.action.stop')}
+                  </Button>
+                </Tooltip>
               </Popconfirm>
             )}
             {r.status !== 'purged' && (r.messageCount ?? 0) > 0 && (
-              <Tooltip title={t('trace.action.exportXml')}>
+              <Tooltip title={canExport ? t('trace.action.exportXml') : t('common.noPermission')}>
                 <Button
                   size="small"
                   icon={<DownloadOutlined />}
+                  disabled={!canExport}
                   onClick={() => handleExport(r)}
                 />
               </Tooltip>
             )}
-            {/* T-0161 单条删除：running 状态下禁用 + hint，避免发请求被后端拒 */}
-            {r.status === 'running' ? (
-              <Tooltip title={t('trace.delete.runningHint')}>
+            {/* T-0161 单条删除：running 状态下禁用 + hint，避免发请求被后端拒；
+                叠加无权限禁用 */}
+            {r.status === 'running' || !canDelete ? (
+              <Tooltip title={!canDelete ? t('common.noPermission') : t('trace.delete.runningHint')}>
                 <Button size="small" icon={<DeleteOutlined />} danger disabled>
                   {t('trace.action.delete')}
                 </Button>
@@ -311,7 +327,7 @@ export default function MessageTrace() {
         ),
       },
     ],
-    [t, handleStop, handleExport, handleDelete, deleteMut.isPending]
+    [t, handleStop, handleExport, handleDelete, deleteMut.isPending, canQuery, canStop, canExport, canDelete]
   );
 
   return (
@@ -334,23 +350,30 @@ export default function MessageTrace() {
         selectable
         selectedRowKeys={selectedKeys}
         onSelectionChange={(keys) => setSelectedKeys(keys)}
-        batchActions={[
-          {
-            key: 'batchDelete',
-            label: t('trace.action.batchDelete'),
-            icon: <DeleteOutlined />,
-            danger: true,
-            onClick: handleBatchDelete,
-          },
-        ]}
+        batchActions={
+          canDelete
+            ? [
+                {
+                  key: 'batchDelete',
+                  label: t('trace.action.batchDelete'),
+                  icon: <DeleteOutlined />,
+                  danger: true,
+                  onClick: handleBatchDelete,
+                },
+              ]
+            : []
+        }
         extraToolbarLeft={
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={() => setCreateOpen(true)}
-          >
-            {t('trace.action.create')}
-          </Button>
+          <Tooltip title={canCreate ? '' : t('common.noPermission')}>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              disabled={!canCreate}
+              onClick={() => setCreateOpen(true)}
+            >
+              {t('trace.action.create')}
+            </Button>
+          </Tooltip>
         }
       />
 
