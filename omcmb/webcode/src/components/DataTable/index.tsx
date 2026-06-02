@@ -59,6 +59,8 @@ export interface DataTableProps<T> {
   expandable?: TableProps<T>['expandable'];
   defaultDensity?: 'compact' | 'default' | 'comfortable';
   extraToolbarLeft?: React.ReactNode;
+  /** 渲染在批量操作按钮之后（如把"导入/导出"放到「删除」按钮后面）。 */
+  extraToolbarAfterBatch?: React.ReactNode;
   extraToolbarRight?: React.ReactNode;
   /** 整体隐藏工具栏（批量操作 + 列设置 / 密度 / 导出 / 实时刷新 / 刷新按钮 全部不渲染）。
    *  适用于：详情页/简单展示页/页面 extra 已自带导出+刷新按钮的场景。 */
@@ -121,6 +123,7 @@ function DataTable<T>(
     expandable,
     defaultDensity = 'default',
     extraToolbarLeft,
+    extraToolbarAfterBatch,
     extraToolbarRight,
     hideToolbar = false,
     hideRealtime = false,
@@ -447,6 +450,7 @@ function DataTable<T>(
           density={density}
           onDensityChange={setDensity}
           extraLeft={extraToolbarLeft}
+          extraAfterBatch={extraToolbarAfterBatch}
           extraRight={extraToolbarRight}
           hideRealtime={hideRealtime}
           hideColumnSettings={hideColumnSettings}

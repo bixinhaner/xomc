@@ -23,36 +23,40 @@ export function useImportExportHandlers(deps: {
 }) {
   const { message, t, refetch, selectedGroupId, selectedGroupName } = deps;
 
-  const handleExport = useCallback(async () => {
-    // 导出当前分组的所有设备，列字段与 DeviceListPanel 表格一致（useDeviceColumns）。
-    // 分页拉取避免单次 list 接口结果超大；后端默认 pageSize 上限 200，循环到 total。
-    //
-    // [device-export] 前缀的 console.info：用户在 DevTools 直接 grep 这一串就能
-    // 确认当前部署用的是带本修复的代码（旧 stub 完全没这种日志）。
-    console.info('[device-export] start', { groupId: selectedGroupId, group: selectedGroupName });
+  // opts.devices 非空 → 仅导出这些（选中）设备，直接用已加载对象，不再拉全量；
+  // 否则导出当前分组全部设备（分页拉取）。列字段与 DeviceListPanel 表格一致。
+  const handleExport = useCallback(async (opts?: { devices?: Device[] }) => {
+    console.info('[device-export] start', {
+      groupId: selectedGroupId, group: selectedGroupName, selected: opts?.devices?.length ?? 0,
+    });
     const hide = message.loading(t('common.exportInProgress'), 0);
     try {
-      const PAGE_SIZE = 500;
-      let page = 1;
-      const all: Device[] = [];
-      let total = 0;
-      // 第一页：取 total。
-      // groupId 为 null 时不传，等价于「全部」。
-      const params = {
-        page,
-        pageSize: PAGE_SIZE,
-        ...(selectedGroupId ? { groupId: selectedGroupId } : {}),
-      } as Parameters<typeof deviceApi.getList>[0];
-      const first = await deviceApi.getList(params);
-      total = first.total ?? first.items.length;
-      all.push(...first.items);
-      while (all.length < total) {
-        page += 1;
-        const next = await deviceApi.getList({ ...params, page });
-        if (next.items.length === 0) break; // 后端容错：意外提前没数据
-        all.push(...next.items);
+      let all: Device[] = [];
+      if (opts?.devices && opts.devices.length > 0) {
+        // 导出选中设备：直接用传入的设备对象，无需再请求后端。
+        all = opts.devices;
+        console.info('[device-export] export selected', all.length, 'devices');
+      } else {
+        // 导出当前分组全部：分页拉取，循环到 total。groupId 为 null 时等价「全部」。
+        const PAGE_SIZE = 500;
+        let page = 1;
+        let total = 0;
+        const params = {
+          page,
+          pageSize: PAGE_SIZE,
+          ...(selectedGroupId ? { groupId: selectedGroupId } : {}),
+        } as Parameters<typeof deviceApi.getList>[0];
+        const first = await deviceApi.getList(params);
+        total = first.total ?? first.items.length;
+        all.push(...first.items);
+        while (all.length < total) {
+          page += 1;
+          const next = await deviceApi.getList({ ...params, page });
+          if (next.items.length === 0) break; // 后端容错：意外提前没数据
+          all.push(...next.items);
+        }
+        console.info('[device-export] fetched', all.length, 'devices, total=', total);
       }
-      console.info('[device-export] fetched', all.length, 'devices, total=', total);
       if (all.length === 0) {
         hide();
         void message.warning(t('device.export.emptyGroup'));

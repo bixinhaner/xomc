@@ -38,6 +38,9 @@ interface ToolbarProps {
   density: Density;
   onDensityChange: (d: Density) => void;
   extraLeft?: React.ReactNode;
+  /** 渲染在批量操作按钮（移动/删除等）之后、左侧工具区内。用于把"导入/导出"等
+   *  非选择类操作放到「删除」按钮后面。 */
+  extraAfterBatch?: React.ReactNode;
   extraRight?: React.ReactNode;
   // T-0182 P4:细粒度隐藏三个右侧按钮(默认 false,保持现行为)。
   // 字典页这类小表+固定列+无需实时刷新的场景关掉,减少视觉噪声;
@@ -61,6 +64,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
   density,
   onDensityChange,
   extraLeft,
+  extraAfterBatch,
   extraRight,
   hideRealtime = false,
   hideColumnSettings = false,
@@ -96,6 +100,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
             ))}
           </>
         )}
+        {extraAfterBatch}
       </div>
 
       {/* Right side */}

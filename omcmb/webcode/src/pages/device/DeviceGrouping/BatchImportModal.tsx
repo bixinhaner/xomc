@@ -44,6 +44,10 @@ import {
   REQUIRED_IMPORT_SNAKE,
 } from './deviceCsvSchema';
 
+// 单次提交分批大小。后端 batch-import binding max=1000；取 500 留余量，
+// 大文件（如导出整组 2000+ 台后回灌）按批顺序提交，避免超限 + 单请求过大。
+const IMPORT_CHUNK_SIZE = 500;
+
 interface LocalParseError {
   row: number; // 1-based, 不含 header
   sn?: string;
@@ -275,24 +279,39 @@ export default function BatchImportModal({
 
     setImporting(true);
     try {
-      const resp = await deviceApi.batchImportDevices({
-        devices: parsed.devices,
-        // 仅在用户实际选中了某个分组时带上 group_id；undefined / null 时后端
-        // 维持"导入即未分组"语义。
-        ...(selectedGroupId ? { group_id: selectedGroupId } : {}),
-      });
+      const group = selectedGroupId ? { group_id: selectedGroupId } : {};
+      // 后端单次 batch-import 上限 max=1000（device_handler.go binding）。导出整组
+      // （如「北京移动」2000 台）后回灌会超限报「failed on the 'max' tag」。这里按
+      // IMPORT_CHUNK_SIZE 分批顺序提交并聚合结果，支持任意规模、避免单请求过大。
+      let total = 0;
+      let succeeded = 0;
+      let failed = 0;
+      const backendErrors: BatchImportRowError[] = [];
+      let offset = 0; // 已提交设备数，用于把分批内的 row 号还原为全局 1-based
+      for (let i = 0; i < parsed.devices.length; i += IMPORT_CHUNK_SIZE) {
+        const chunk = parsed.devices.slice(i, i + IMPORT_CHUNK_SIZE);
+        const resp = await deviceApi.batchImportDevices({ devices: chunk, ...group });
+        total += resp.total;
+        succeeded += resp.succeeded;
+        failed += resp.failed;
+        for (const e of resp.errors ?? []) {
+          // row>0 是数据行（分批内 1-based）→ 加 offset 还原全局；row===0 是分组归属告警，保留。
+          backendErrors.push({ ...e, row: e.row > 0 ? e.row + offset : e.row });
+        }
+        offset += chunk.length;
+      }
       // 把前端校验失败的行合并进 total / failed（让最终统计与 CSV 实际数据行一致）
       const finalResult: BatchImportResponse = {
-        total: resp.total + parsed.localErrors.length,
-        succeeded: resp.succeeded,
-        failed: resp.failed + parsed.localErrors.length,
+        total: total + parsed.localErrors.length,
+        succeeded,
+        failed: failed + parsed.localErrors.length,
         errors: [
           ...parsed.localErrors.map((e) => ({
             row: e.row,
             sn: e.sn,
             reason: e.reason,
           })),
-          ...(resp.errors ?? []),
+          ...backendErrors,
         ],
       };
       setResult(finalResult);

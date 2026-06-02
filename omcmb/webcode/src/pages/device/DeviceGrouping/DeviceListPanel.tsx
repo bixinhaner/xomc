@@ -1,5 +1,5 @@
-import React, { useCallback, useState } from 'react';
-import { Button, Card, Typography } from 'antd';
+import React, { useCallback, useMemo, useState } from 'react';
+import { Button, Card, Input, Typography } from 'antd';
 import { DownloadOutlined, UploadOutlined } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
 import type { BatchAction } from '@/components/DataTable';
@@ -21,6 +21,8 @@ export interface DeviceListPanelProps {
   batchActions: BatchAction[];
   onSelectionChange: (keys: React.Key[]) => void;
   onPageChange: (page: number, size: number) => void;
+  /** SN / 设备名称 模糊搜索（多个以逗号分隔），回车或点搜索触发。 */
+  onSearch: (value: string) => void;
   onExport: () => void | Promise<void>;
   /**
    * 批量导入完成回调（接收后端真实回执，含成功/失败统计）。
@@ -43,6 +45,7 @@ export default function DeviceListPanel({
   batchActions,
   onSelectionChange,
   onPageChange,
+  onSearch,
   onExport,
   onImport,
   onDownloadTemplate,
@@ -60,30 +63,36 @@ export default function DeviceListPanel({
 
   const columns = useDeviceColumns({ t });
 
+  // 导入 / 导出按钮放到工具栏「删除」按钮之后（DataTable.extraToolbarAfterBatch）。
+  const importExportButtons = useMemo(
+    () => (
+      <>
+        <Button size="small" icon={<UploadOutlined />} onClick={handleImportClick}>
+          {t('common.import')}
+        </Button>
+        <Button size="small" type="primary" icon={<DownloadOutlined />} onClick={onExport}>
+          {t('common.export')}
+        </Button>
+      </>
+    ),
+    [handleImportClick, onExport, t],
+  );
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: 16, gap: 12 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
         <Title level={5} style={{ margin: 0 }}>
           {selectedGroupName ?? t('common.all')}
           <Text type="secondary" style={{ fontSize: 13, marginLeft: 8, fontWeight: 400 }}>
             {t('table.total')} {total}
           </Text>
         </Title>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <Button
-            icon={<UploadOutlined />}
-            onClick={handleImportClick}
-          >
-            {t('common.import')}
-          </Button>
-          <Button
-            type="primary"
-            icon={<DownloadOutlined />}
-            onClick={onExport}
-          >
-            {t('common.export')}
-          </Button>
-        </div>
+        <Input.Search
+          allowClear
+          placeholder={t('device.searchSnNamePlaceholder')}
+          onSearch={onSearch}
+          style={{ width: 300 }}
+        />
       </div>
 
       <div className="device-list-table-wrapper" style={{ flex: 1, minHeight: 0 }}>
@@ -103,6 +112,7 @@ export default function DeviceListPanel({
             selectedRowKeys={selectedDeviceIds}
             onSelectionChange={onSelectionChange}
             batchActions={batchActions}
+            extraToolbarAfterBatch={importExportButtons}
             total={total}
             pageSize={pageSize}
             currentPage={currentPage}

@@ -49,6 +49,8 @@ export default function DeviceGrouping() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [selectedDeviceIds, setSelectedDeviceIds] = useState<React.Key[]>([]);
+  // SN / 设备名称 模糊搜索（多个以逗号分隔）→ 后端 ?search= → BuildSearchOR。
+  const [searchText, setSearchText] = useState('');
 
   // ── Mutations (passed into action hooks) ──
   const createGroupMutation = useCreateGroup();
@@ -74,8 +76,10 @@ export default function DeviceGrouping() {
       page: currentPage,
       pageSize,
       groupId: selectedGroupId ?? undefined,
+      // searchText → getList 映射为后端 ?search=（覆盖 SN/设备名称等，逗号分隔多关键字）
+      searchText: searchText.trim() || undefined,
     } as Parameters<typeof useDeviceList>[0]),
-    [currentPage, pageSize, selectedGroupId]
+    [currentPage, pageSize, selectedGroupId, searchText]
   );
   const { data: deviceData, isLoading, refetch } = useDeviceList(queryParams);
   const devices: Device[] = deviceData?.items ?? [];
@@ -205,6 +209,28 @@ export default function DeviceGrouping() {
     selectedGroupName: selectedGroup ? (fromRecord(selectedGroup as unknown as Record<string, unknown>, 'name') || selectedGroup.name) : undefined,
   });
 
+  // 搜索：回车/点搜索时应用，并回到第 1 页。
+  const handleSearch = useCallback((value: string) => {
+    setSearchText(value);
+    setCurrentPage(1);
+  }, []);
+
+  // 导出按钮：有选中设备 → 仅导出选中；无选中 → 二次确认后导出当前分组全部。
+  const handleExportClick = useCallback(() => {
+    const selected = devices.filter((d) => selectedDeviceIds.includes(d.id));
+    if (selected.length > 0) {
+      void handleExport({ devices: selected });
+      return;
+    }
+    modal.confirm({
+      title: t('device.export.confirmAllTitle'),
+      content: t('device.export.confirmAllContent'),
+      okText: t('device.export.confirmAllOk'),
+      cancelText: t('common.cancel'),
+      onOk: () => void handleExport(),
+    });
+  }, [devices, selectedDeviceIds, handleExport, modal, t]);
+
   // ── Tree panel ──
   const treePanel = (
     <GroupTreePanel
@@ -242,7 +268,8 @@ export default function DeviceGrouping() {
             setCurrentPage(page);
             setPageSize(size);
           }}
-          onExport={handleExport}
+          onSearch={handleSearch}
+          onExport={handleExportClick}
           onImport={handleImport}
           onDownloadTemplate={handleDownloadTemplate}
           t={t as (id: string, values?: Record<string, unknown>) => string}
