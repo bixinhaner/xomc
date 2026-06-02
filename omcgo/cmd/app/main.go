@@ -7,8 +7,6 @@ import (
 	"strings"
 	"time"
 
-	_ "time/tzdata" // T-0192b 兜底：内嵌 IANA 时区库，万一 base 镜像无 /usr/share/zoneinfo 也不静默回落 UTC
-
 	"github.com/gin-gonic/gin"
 	"github.com/omcgo/omcgo/cmd/app/provider"
 	"github.com/omcgo/omcgo/internal/core/appconfig"

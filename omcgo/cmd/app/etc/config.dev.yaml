@@ -136,13 +136,6 @@ task:
   default_expires_in_seconds: 120
   sweep_interval_seconds: 10
 
-# F03 PM（app 侧仅用到 timezone：T-0192b 查询期空桶填充按业务时区切天）。
-# 与 worker 端 pm.timezone 同源，让日/周/月填充占位桶落业务时区本地零点（北京 00:00），
-# 与 T-0192 后台汇总侧对齐，避免出现"真实点 + 早 8 点空点"两个桶。
-# 空值代码默认 Asia/Shanghai；LoadLocation 失败回落 UTC（不 panic）。
-pm:
-  timezone: Asia/Shanghai
-
 # F05 MR 测量任务（详见 docs/project/prd/F05-mr-task-management.md）
 # 字段语义参 internal/core/appconfig/config.go MRConfig 注释
 mr:

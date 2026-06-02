@@ -39,11 +39,6 @@ type Handler struct {
 	asyncJobRepo  asyncjob.Repository           // T-0164 收尾 G5-Gap-2：手动重算入口入队 async_jobs
 	metrics       *PMMetrics
 	logger        *zap.Logger
-	// bucketLoc 是查询期空桶填充的桶对齐时区（T-0192b）。
-	// 与 T-0192 后台汇总侧（cmd/worker/aggregator.go）的业务时区对齐，
-	// 让日/周/月填充占位桶落业务时区本地零点（北京 00:00）而非 UTC 零点（北京早 8 点）。
-	// nil 时回落 time.UTC（与改造前行为一致，安全默认）。
-	bucketLoc *time.Location
 }
 
 // WithAggregator 注入 G5 聚合查询入口（可选；nil 时退回老路径）。
@@ -57,17 +52,6 @@ func (h *Handler) WithAggregator(aggr *aggregator.Aggregator) *Handler {
 // WithAsyncJobRepo 注入 asyncjob 仓库（G5-Gap-2 手动重算端点用）。
 func (h *Handler) WithAsyncJobRepo(repo asyncjob.Repository) *Handler {
 	h.asyncJobRepo = repo
-	return h
-}
-
-// WithTimezone 注入查询期空桶填充的桶对齐业务时区（T-0192b，可选）。
-//
-// 调用方：cmd/app/provider/router.go 在初始化 pm.Handler 后调用，loc 由
-// cmd/app/provider/pm.go 从 c.Cfg.PM.Timezone 解析（空值默认 Asia/Shanghai、
-// LoadLocation 失败回落 UTC，参照 worker 的 resolvePMTimezone）。
-// 传 nil 时保持改造前行为（回落 UTC）。
-func (h *Handler) WithTimezone(loc *time.Location) *Handler {
-	h.bucketLoc = loc
 	return h
 }
 
