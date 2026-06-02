@@ -63,15 +63,28 @@ export default function DeviceListPanel({
 
   const columns = useDeviceColumns({ t });
 
-  // 导入 / 导出按钮放到工具栏「删除」按钮之后（DataTable.extraToolbarAfterBatch）。
+  // 搜索框放到工具栏最左、批量操作（移动/回收站/删除）按钮之前（DataTable.extraToolbarLeft）。
+  const searchBox = useMemo(
+    () => (
+      <Input.Search
+        allowClear
+        placeholder={t('device.searchSnNamePlaceholder')}
+        onSearch={onSearch}
+        style={{ width: 260 }}
+      />
+    ),
+    [onSearch, t],
+  );
+
+  // 导出 / 导入按钮放到工具栏「删除」按钮之后（DataTable.extraToolbarAfterBatch）。
   const importExportButtons = useMemo(
     () => (
       <>
-        <Button size="small" icon={<UploadOutlined />} onClick={handleImportClick}>
-          {t('common.import')}
-        </Button>
         <Button size="small" type="primary" icon={<DownloadOutlined />} onClick={onExport}>
           {t('common.export')}
+        </Button>
+        <Button size="small" icon={<UploadOutlined />} onClick={handleImportClick}>
+          {t('common.import')}
         </Button>
       </>
     ),
@@ -87,12 +100,6 @@ export default function DeviceListPanel({
             {t('table.total')} {total}
           </Text>
         </Title>
-        <Input.Search
-          allowClear
-          placeholder={t('device.searchSnNamePlaceholder')}
-          onSearch={onSearch}
-          style={{ width: 300 }}
-        />
       </div>
 
       <div className="device-list-table-wrapper" style={{ flex: 1, minHeight: 0 }}>
@@ -112,6 +119,7 @@ export default function DeviceListPanel({
             selectedRowKeys={selectedDeviceIds}
             onSelectionChange={onSelectionChange}
             batchActions={batchActions}
+            extraToolbarLeft={searchBox}
             extraToolbarAfterBatch={importExportButtons}
             total={total}
             pageSize={pageSize}
