@@ -34,6 +34,8 @@ export interface MetricChart {
   displayName: string;
   /** 该图横轴桶（startTime 升序去重） */
   buckets: string[];
+  /** 与 buckets 一一对应的桶结束时间（endTime），供 tooltip 显示「开始~结束」时间段 */
+  bucketEnds: string[];
   series: MetricSeries[];
   /** T-0189 周期对比：上一周期系列（已按 +L 偏移对齐到当前轴），ChartCard 渲染为虚线。 */
   compareSeries?: MetricSeries[];
@@ -115,6 +117,8 @@ export function buildMetricCharts(
     {
       displayName: string;
       buckets: Set<string>;
+      // startTime → endTime（同桶各行 endTime 相同，后到覆盖）
+      ends: Map<string, string>;
       seriesOrder: string[];
       seriesName: Map<string, string>;
       points: Map<string, Map<string, number>>;
@@ -127,6 +131,7 @@ export function buildMetricCharts(
       m = {
         displayName: r.displayName || r.metricPath,
         buckets: new Set(),
+        ends: new Map(),
         seriesOrder: [],
         seriesName: new Map(),
         points: new Map(),
@@ -135,6 +140,7 @@ export function buildMetricCharts(
       metricOrder.push(r.metricPath);
     }
     m.buckets.add(r.startTime);
+    m.ends.set(r.startTime, r.endTime);
     const key = seriesKeyOf(r, dimension);
     let pts = m.points.get(key);
     if (!pts) {
@@ -150,6 +156,7 @@ export function buildMetricCharts(
   return metricOrder.map((metricPath) => {
     const m = byMetric.get(metricPath)!;
     const buckets = Array.from(m.buckets).sort();
+    const bucketEnds = buckets.map((b) => m.ends.get(b) ?? '');
     const series: MetricSeries[] = m.seriesOrder.map((key) => {
       const pts = m.points.get(key)!;
       const values: MetricSeriesValue[] = buckets.map((b) => {
@@ -158,6 +165,6 @@ export function buildMetricCharts(
       });
       return { key, name: m.seriesName.get(key) ?? key, values };
     });
-    return { metricPath, displayName: m.displayName, buckets, series };
+    return { metricPath, displayName: m.displayName, buckets, bucketEnds, series };
   });
 }

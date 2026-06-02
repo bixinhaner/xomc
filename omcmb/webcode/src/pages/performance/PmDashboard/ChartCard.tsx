@@ -11,11 +11,18 @@ import ReactECharts from 'echarts-for-react';
 import dayjs from 'dayjs';
 import type { MetricChart } from './taskDashboardUtils';
 
+const fmtTime = (t: string) => (dayjs(t).isValid() ? dayjs(t).format('MM-DD HH:mm') : t);
+
+/** ECharts axis-trigger tooltip 回调单项（只取本组件用到的字段）。 */
+interface TooltipParam {
+  dataIndex: number;
+  seriesName?: string;
+  marker?: string;
+  value?: number | string;
+}
+
 export default function ChartCard({ chart }: { chart: MetricChart }) {
-  const xLabels = useMemo(
-    () => chart.buckets.map((b) => (dayjs(b).isValid() ? dayjs(b).format('MM-DD HH:mm') : b)),
-    [chart.buckets],
-  );
+  const xLabels = useMemo(() => chart.buckets.map(fmtTime), [chart.buckets]);
   const currentSeries = chart.series.map((s) => ({
     name: s.name,
     type: 'line',
@@ -34,12 +41,28 @@ export default function ChartCard({ chart }: { chart: MetricChart }) {
     connectNulls: false,
     lineStyle: { type: 'dashed' as const },
   }));
+  // tooltip 表头显示该桶的「开始~结束」时间段（每个点代表一个时间桶，非单时间点）。
+  // 数据点起止时间来自后端返回的 startTime/endTime（已转置进 chart.buckets / chart.bucketEnds）。
+  const tooltipFormatter = (params: TooltipParam | TooltipParam[]) => {
+    const arr = Array.isArray(params) ? params : [params];
+    if (arr.length === 0) return '';
+    const idx = arr[0].dataIndex;
+    const start = chart.buckets[idx] ?? '';
+    const end = chart.bucketEnds[idx] ?? '';
+    const header = end
+      ? `开始 ${fmtTime(start)}<br/>结束 ${fmtTime(end)}`
+      : fmtTime(start);
+    const lines = arr
+      .map((p) => `${p.marker ?? ''}${p.seriesName ?? ''}: ${p.value ?? '-'}`)
+      .join('<br/>');
+    return `${header}<hr style="margin:4px 0;border:none;border-top:1px solid #eee"/>${lines}`;
+  };
   const option = {
     grid: { left: 56, right: 16, top: 36, bottom: 40 },
     xAxis: { type: 'category', data: xLabels, boundaryGap: false },
     yAxis: { type: 'value', scale: true },
     series: [...currentSeries, ...compareSeries],
-    tooltip: { trigger: 'axis' },
+    tooltip: { trigger: 'axis', formatter: tooltipFormatter },
     legend: { type: 'scroll', top: 4 },
   };
   return (

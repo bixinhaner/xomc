@@ -14,7 +14,7 @@ function row(p: Partial<AggregatedRow>): AggregatedRow {
     granularity: p.granularity ?? '15min',
     time: p.startTime ?? '2026-05-30T00:00:00Z',
     startTime: p.startTime ?? '2026-05-30T00:00:00Z',
-    endTime: '2026-05-30T00:15:00Z',
+    endTime: p.endTime ?? '2026-05-30T00:15:00Z',
     ingestTime: '2026-05-30T00:16:00Z',
     objectLdn: p.objectLdn ?? null,
     filled: p.filled,
@@ -73,6 +73,17 @@ describe('buildDeviceMetricCharts — 设备级转置', () => {
 
   it('空输入 → 空数组', () => {
     expect(buildDeviceMetricCharts([], '15min')).toEqual([]);
+  });
+
+  it('bucketEnds 与 buckets 一一对应记录每桶结束时间（含占位桶）', () => {
+    const rows: AggregatedRow[] = [
+      row({ deviceSn: 'SN-A', metricPath: 'M1', startTime: 'T1', endTime: 'T1-end', metricValue: 1, objectLdn: 'Cellid=1' }),
+      // 占位行：无小区 + null 值，提前 return，但桶 T2 仍须有结束时间
+      row({ deviceSn: 'SN-A', metricPath: 'M1', startTime: 'T2', endTime: 'T2-end', metricValue: null, filled: true, objectLdn: null }),
+    ];
+    const charts = buildDeviceMetricCharts(rows, '15min');
+    expect(charts[0].buckets).toEqual(['T1', 'T2']);
+    expect(charts[0].bucketEnds).toEqual(['T1-end', 'T2-end']);
   });
 
   it('粒度过滤 → 只取选中粒度的行', () => {

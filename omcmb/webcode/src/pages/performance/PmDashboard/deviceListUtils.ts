@@ -41,6 +41,8 @@ export function buildDeviceMetricCharts(
     {
       displayName: string;
       buckets: Set<string>;
+      // startTime → endTime（同桶各行 endTime 相同，后到覆盖）；含占位桶以保证桶轴每点都有结束时间
+      ends: Map<string, string>;
       seriesOrder: string[];
       // seriesKey → { name, points }；name 是友好名（设备尾号 · 小区 · PLMN）。
       series: Map<string, { name: string; points: Map<string, number> }>;
@@ -53,6 +55,7 @@ export function buildDeviceMetricCharts(
       m = {
         displayName: r.displayName || r.metricPath,
         buckets: new Set(),
+        ends: new Map(),
         seriesOrder: [],
         series: new Map(),
       };
@@ -60,6 +63,7 @@ export function buildDeviceMetricCharts(
       metricOrder.push(r.metricPath);
     }
     m.buckets.add(r.startTime);
+    m.ends.set(r.startTime, r.endTime);
     // T-0193 分线键：设备 + 小区/PLMN 组合。缺 object_ldn → 兜底退化为按设备单线。
     const sn = r.deviceSn || UNKNOWN_SN;
     const ldn = r.objectLdn ?? '';
@@ -84,6 +88,7 @@ export function buildDeviceMetricCharts(
   return metricOrder.map((metricPath) => {
     const m = byMetric.get(metricPath)!;
     const buckets = Array.from(m.buckets).sort();
+    const bucketEnds = buckets.map((b) => m.ends.get(b) ?? '');
     const series: MetricSeries[] = m.seriesOrder.map((key) => {
       const s = m.series.get(key)!;
       const values: MetricSeriesValue[] = buckets.map((b) => {
@@ -92,7 +97,7 @@ export function buildDeviceMetricCharts(
       });
       return { key, name: s.name, values };
     });
-    return { metricPath, displayName: m.displayName, buckets, series };
+    return { metricPath, displayName: m.displayName, buckets, bucketEnds, series };
   });
 }
 

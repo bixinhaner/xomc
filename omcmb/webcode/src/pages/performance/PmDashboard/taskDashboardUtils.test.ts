@@ -17,7 +17,7 @@ function row(p: Partial<AdhocResultRow>): AdhocResultRow {
     granularity: p.granularity ?? 'hourly',
     time: p.startTime ?? '2026-05-30T00:00:00Z',
     startTime: p.startTime ?? '2026-05-30T00:00:00Z',
-    endTime: '2026-05-30T01:00:00Z',
+    endTime: p.endTime ?? '2026-05-30T01:00:00Z',
     productId: p.productId,
     objectLdn: p.objectLdn,
   };
@@ -141,6 +141,16 @@ describe('buildMetricCharts — 转置', () => {
 
   it('空数据 → 空图列表', () => {
     expect(buildMetricCharts([], 'network', 'hourly')).toEqual([]);
+  });
+
+  it('bucketEnds 与 buckets 一一对应记录每桶结束时间', () => {
+    const rows = [
+      row({ metricPath: 'M1', startTime: 't0', endTime: 't0-end', metricValue: 1 }),
+      row({ metricPath: 'M1', startTime: 't1', endTime: 't1-end', metricValue: 2 }),
+    ];
+    const charts = buildMetricCharts(rows, 'network', 'hourly');
+    expect(charts[0].buckets).toEqual(['t0', 't1']);
+    expect(charts[0].bucketEnds).toEqual(['t0-end', 't1-end']);
   });
 
   it('displayName 回填系列名（network 仍用维度标签）', () => {
