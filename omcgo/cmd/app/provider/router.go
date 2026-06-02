@@ -127,6 +127,11 @@ func Setup(r *gin.Engine, c *Container) error {
 		Init:    func() error { return initEventLogModule(c) },
 	})
 	graph.Add(components.ModuleInitializer{
+		Name:    "rebootrecord",
+		Depends: []string{"eventlog", "stationlog"},
+		Init:    func() error { return initRebootRecordModule(c) },
+	})
+	graph.Add(components.ModuleInitializer{
 		Name:    "dashboard",
 		Depends: []string{"device", "alarm", "pm", "topology"},
 		Init:    func() error { return initDashboardModule(c) },
@@ -544,6 +549,11 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	// ----- EventLog routes → resource "devices" -----
 	if md.eventlogHandler != nil {
 		md.eventlogHandler.RegisterRoutes(permGroup("devices"))
+	}
+
+	// ----- RebootRecord routes（统一重启记录）→ resource "devices" -----
+	if md.rebootrecordHandler != nil {
+		md.rebootrecordHandler.RegisterRoutes(permGroup("devices"))
 	}
 
 	// ----- File Manager routes → resource "devices" -----

@@ -40,10 +40,12 @@ func (s *Service) RecordBootEvent(ctx context.Context, snap device.BootEventSnap
 		now = time.Now()
 	}
 
-	// event_data 编码 boot_count 与事件列表（前端列表暂不展示，留给未来扩展/排错）
+	// event_data 编码 boot_count / 事件列表 / 重启前运行秒数。
+	// runtime 没有独立列（避免新增迁移），统一重启记录视图从此 JSONB 取值。
 	dataMap := map[string]interface{}{
-		"boot_count": snap.BootCount,
-		"events":     snap.Events,
+		"boot_count":            snap.BootCount,
+		"events":                snap.Events,
+		"runtime_before_reboot": snap.RuntimeBeforeReboot,
 	}
 	dataBytes, _ := json.Marshal(dataMap)
 

@@ -45,6 +45,7 @@ import (
 	"github.com/omcgo/omcgo/internal/pm"
 	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/internal/provision"
+	"github.com/omcgo/omcgo/internal/rebootrecord"
 	"github.com/omcgo/omcgo/internal/report"
 	"github.com/omcgo/omcgo/internal/software"
 	"github.com/omcgo/omcgo/internal/stationlog"
@@ -1093,6 +1094,19 @@ func initEventLogModule(c *Container) error {
 	return nil
 }
 
+// initRebootRecordModule 初始化统一重启记录模块（只读 UNION event_logs + station_fault_logs）。
+// 仅供「启动记录」页面单列表展示，不写入；写入仍由 device.RecordBootFromInform 分流到两表。
+func initRebootRecordModule(c *Container) error {
+	logger := c.Logger.Named("rebootrecord")
+
+	repo := rebootrecord.NewPgRepository(c.PgPool)
+	svc := rebootrecord.NewService(repo, logger)
+	c.miscDeps.rebootrecordHandler = rebootrecord.NewHandler(svc, logger)
+
+	logger.Info("rebootrecord module initialized")
+	return nil
+}
+
 // initDashboardModule 初始化 F06 仪表盘模块。
 func initDashboardModule(c *Container) error {
 	logger := c.Logger.Named("dashboard")
@@ -1812,6 +1826,9 @@ type miscDeps struct {
 
 	// EventLog（设备活动审计流水）
 	eventlogHandler *eventlog.Handler
+
+	// RebootRecord（统一重启记录只读视图）
+	rebootrecordHandler *rebootrecord.Handler
 
 	// Dashboard
 	dashboardHandler *dashboard.Handler

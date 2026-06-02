@@ -521,6 +521,14 @@ const messages: Record<string, string> = {
   'page.rebootRecords.title':   'Reboot Records',
   'page.rebootRecords.tab.boot':     'Reboot',
   'page.rebootRecords.tab.abnormal': 'Abnormal Reboot',
+  'page.rebootRecords.column.type':        'Type',
+  'page.rebootRecords.column.reason':      'Reboot Reason',
+  'page.rebootRecords.filter.rebootType':  'Reboot Type',
+  'page.rebootRecords.type.all':           'All',
+  'page.rebootRecords.type.normal':        'Normal Reboot',
+  'page.rebootRecords.type.abnormal':      'Abnormal Reboot',
+  'page.rebootRecords.stat.totalCount':    'Total Reboots',
+  'page.rebootRecords.stat.abnormalCount': 'Abnormal Count',
   'page.abnormalReboot.title':  'Abnormal Reboot Records',
 
   // -------------------------------------------------------------------------

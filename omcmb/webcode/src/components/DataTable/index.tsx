@@ -57,6 +57,8 @@ export interface DataTableProps<T> {
   onExport?: (format: 'xlsx' | 'csv') => void;
   alarmRowStyle?: (record: T) => 'critical' | 'major' | 'minor' | 'warning' | null;
   expandable?: TableProps<T>['expandable'];
+  /** 行属性（行点击等）。透传给内部 antd Table —— 历史上漏接，导致 onRow 被静默丢弃。 */
+  onRow?: TableProps<T>['onRow'];
   defaultDensity?: 'compact' | 'default' | 'comfortable';
   extraToolbarLeft?: React.ReactNode;
   /** 渲染在批量操作按钮之后（如把"导入/导出"放到「删除」按钮后面）。 */
@@ -121,6 +123,7 @@ function DataTable<T>(
     onExport,
     alarmRowStyle,
     expandable,
+    onRow,
     defaultDensity = 'default',
     extraToolbarLeft,
     extraToolbarAfterBatch,
@@ -467,6 +470,7 @@ function DataTable<T>(
           rowSelection={rowSelection}
           rowClassName={rowClassName}
           expandable={expandable}
+          onRow={onRow}
           size={tableSize}
           scroll={effectiveScroll}
           pagination={false}

@@ -521,6 +521,14 @@ const messages: Record<string, string> = {
   'page.rebootRecords.title':   '重启记录',
   'page.rebootRecords.tab.boot':     '重启',
   'page.rebootRecords.tab.abnormal': '异常重启',
+  'page.rebootRecords.column.type':        '类型',
+  'page.rebootRecords.column.reason':      '重启原因',
+  'page.rebootRecords.filter.rebootType':  '重启类型',
+  'page.rebootRecords.type.all':           '全部',
+  'page.rebootRecords.type.normal':        '正常重启',
+  'page.rebootRecords.type.abnormal':      '异常重启',
+  'page.rebootRecords.stat.totalCount':    '总重启次数',
+  'page.rebootRecords.stat.abnormalCount': '异常次数',
   'page.abnormalReboot.title':  '异常重启记录',
 
   // -------------------------------------------------------------------------

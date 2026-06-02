@@ -1376,15 +1376,16 @@ func (s *DeviceService) RecordBootFromInform(ctx context.Context, device *model.
 		// 单纯 1 BOOT（无 HaltReason）→ event_logs 普通事件日志。
 		// 与异常重启分两个表：station_fault_logs 是异常+文件管理，event_logs 是审计流水。
 		bootSnap := BootEventSnapshot{
-			DeviceID:        device.ID,
-			DeviceSN:        device.SerialNumber,
-			DeviceName:      device.DeviceName,
-			OperateIP:       device.IPAddress,
-			SoftwareVersion: device.FirmwareVersion,
-			IsGNB:           device.Technology == model.TechNR,
-			BootCount:       bootCount,
-			Events:          events,
-			OccurredAt:      now,
+			DeviceID:            device.ID,
+			DeviceSN:            device.SerialNumber,
+			DeviceName:          device.DeviceName,
+			OperateIP:           device.IPAddress,
+			SoftwareVersion:     device.FirmwareVersion,
+			RuntimeBeforeReboot: runtimeBeforeReboot,
+			IsGNB:               device.Technology == model.TechNR,
+			BootCount:           bootCount,
+			Events:              events,
+			OccurredAt:          now,
 		}
 		if device.Technology == model.TechNR {
 			bootSnap.DeviceType = "gNB"

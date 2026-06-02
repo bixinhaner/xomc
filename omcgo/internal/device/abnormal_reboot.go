@@ -55,9 +55,11 @@ type BootEventSnapshot struct {
 	IsGNB           bool
 	OperateIP       string
 	SoftwareVersion string
-	BootCount       int
-	Events          []string // 原始 Inform 事件码列表，便于排错
-	OccurredAt      time.Time
+	// 重启前设备已运行的秒数；0 表示未知（与异常重启 AbnormalRebootSnapshot 对齐）
+	RuntimeBeforeReboot int64
+	BootCount           int
+	Events              []string // 原始 Inform 事件码列表，便于排错
+	OccurredAt          time.Time
 }
 
 // BootEventRecorder 是 DeviceService 用来把普通 1 BOOT 写入 event_logs 的窄接口。
