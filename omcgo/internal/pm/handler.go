@@ -12,10 +12,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/minio/minio-go/v7"
+	"github.com/omcgo/omcgo/internal/core/asyncjob"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/response"
-	"github.com/omcgo/omcgo/internal/core/asyncjob"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/indicator"
@@ -33,7 +33,7 @@ type Handler struct {
 	fileStore     PMFileStore
 	minioClient   *minio.Client
 	pmBucket      string
-	pool          *pgxpool.Pool // T-0164-P3 fix: 反查 devices 拿 (oui, sn) 给 KPIEngine
+	pool          *pgxpool.Pool                 // T-0164-P3 fix: 反查 devices 拿 (oui, sn) 给 KPIEngine
 	indicatorRepo indicator.IndicatorRepository // T-0164-P1：/pm/kpi/definitions 数据源（替代旧 carrier KPIDefinitions 列表）
 	aggr          *aggregator.Aggregator        // T-0164-P5 / G5：按粒度路由聚合表查询（hourly/daily/weekly/monthly + device_group）
 	asyncJobRepo  asyncjob.Repository           // T-0164 收尾 G5-Gap-2：手动重算入口入队 async_jobs
@@ -312,73 +312,85 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	// fill_empty=true：按 (时间桶 × 指标) 笛卡尔补齐占位行，让"该设备此时段无样本"也能在
-	// 透视表里看到行结构 — 区分"指标无值"与"设备此时段完全无采样"。
-	// 仅 device 维度（含单 OUI+SN 过滤）+ start/end + metric_paths 齐全时启用，避免补出超大笛卡尔积。
+	// fill_empty=true：数据驱动补齐占位行（T-0192d）。只对"已存在真实记录组"里所查
+	// 但缺失的指标补一行占位，让透视表能区分"该时段有采样但此指标无值"与"此指标有值"。
+	// 没有任何真实行的时间桶/object 永不出现（空时段不凭空造桶）。
+	// 仅 device 维度（单 OUI+SN）+ metric_paths 非空时启用。
 	if c.Query("fill_empty") == "true" {
-		rows = fillEmptyBuckets(rows, req, h.bucketLoc)
+		rows = fillEmptyBuckets(rows, req)
 	}
 	response.OK(c, gin.H{"items": rows, "total": len(rows)})
 }
 
-// fillEmptyBuckets 计算 (时间桶 × 指标) 笛卡尔积，对实际 rows 没覆盖的组合补一行
-// Filled=true 占位（DeviceOUI/SN 来自 req，MetricValue=0 仅占位，前端 mapper 见 filled=true
-// 渲染 "-"）。仅 device 维度生效。
-func fillEmptyBuckets(rows []aggregator.Row, req aggregator.QueryRequest, loc *time.Location) []aggregator.Row {
-	// nil 时回落 UTC（保持改造前行为，安全默认）。
-	if loc == nil {
-		loc = time.UTC
-	}
+// fillEmptyBuckets 数据驱动补齐占位行（T-0192d）。
+//
+// 语义：判断单位 = 一条测量记录身份 = (object_ldn, 时间桶)。只遍历查询已返回的真实行
+// （Filled=false），按 (object_ldn 归一, Time) 分组；对每个**已存在**的分组，req.MetricPaths
+// 里缺失的指标补一行占位（身份/时段字段直接抄该组代表行、不做任何桶推算，MetricValue=0、
+// Filled=true、DisplayName 沿用同 metric_path 真实行的友好名）。没有任何真实行的时间桶/object
+// 永不出现 —— 空时段不凭空造桶。
+//
+// 分组键含 object_ldn（nil = 设备级，归一为固定空键），修旧实现去重键漏 object_ldn 的 bug：
+// 多小区/PLMN 同时段各自独立填充、互不串。
+//
+// 仅 device 维度（单 SN）+ metric_paths 非空时启用；多 SN / 组维度原样返回。
+func fillEmptyBuckets(rows []aggregator.Row, req aggregator.QueryRequest) []aggregator.Row {
 	if req.Dimension == aggregator.DimensionDeviceGroup || req.Dimension == aggregator.DimensionAggregateGroup {
 		return rows
 	}
-	if len(req.MetricPaths) == 0 || req.StartTime.IsZero() || req.EndTime.IsZero() {
+	if len(req.MetricPaths) == 0 {
 		return rows
 	}
-	// 单 OUI+SN 过滤（前端 KPIQuery 总是 1:1 拆分发请求）— 多 SN 复合查询不补
+	// 单 SN 过滤（前端 KPIQuery 总是 1:1 拆分发请求）— 多 SN 复合查询不补。
 	if len(req.DeviceSNs) != 1 {
 		return rows
 	}
-	oui := ""
-	if len(req.DeviceOUIs) == 1 {
-		oui = req.DeviceOUIs[0]
-	}
-	sn := req.DeviceSNs[0]
 
-	buckets := bucketStartsBetween(req.StartTime, req.EndTime, req.Granularity, loc)
-	if len(buckets) == 0 {
-		return rows
-	}
-
-	// 已有行的键集合（time-truncated-to-bucket + metric_path）+ 各 metric_path 的显示名，
-	// 让补齐占位行沿用真实行同款 DisplayName（KPI 列头不致一半友好名一半 K 编号）。
-	have := make(map[string]struct{}, len(rows))
+	// 各 metric_path 的友好名（占位行沿用，KPI 列头不致一半友好名一半 K 编号）。
 	nameByPath := make(map[string]string, len(req.MetricPaths))
+
+	// 按 (object_ldn 归一, Time) 分组：记录每组已出现的 metric_path 集合 + 一行代表行。
+	type group struct {
+		rep  aggregator.Row      // 代表行，占位行抄它的身份/时段字段
+		have map[string]struct{} // 已出现的 metric_path 集合
+	}
+	groups := make(map[string]*group)
+	order := make([]string, 0) // 保持分组出现顺序，占位行追加稳定
+
 	for _, r := range rows {
-		// time 桶按 r.Time（aggregator 已对齐桶起点）
-		have[bucketKey(r.Time, r.MetricPath)] = struct{}{}
+		if r.Filled {
+			continue // 只看真实行（防御性：正常此时 rows 全为真实行）
+		}
 		if r.DisplayName != "" {
 			nameByPath[r.MetricPath] = r.DisplayName
 		}
+		key := groupKey(r.ObjectLDN, r.Time)
+		g := groups[key]
+		if g == nil {
+			g = &group{rep: r, have: make(map[string]struct{})}
+			groups[key] = g
+			order = append(order, key)
+		}
+		g.have[r.MetricPath] = struct{}{}
 	}
 
-	for _, b := range buckets {
-		// EndTime 按自然桶边界（月走自然月末 = 下月 1 号本地零点，其余沿用固定时长），
-		// 让悬停 tooltip 的"时段起止"对月桶显示正确（月桶 +30 天会漂出 5/31、6/30）。
-		bucketEnd := nextBucketStart(b, req.Granularity, loc)
+	// 对每个已存在分组，补 req.MetricPaths 里缺的指标。
+	for _, key := range order {
+		g := groups[key]
 		for _, mp := range req.MetricPaths {
-			if _, ok := have[bucketKey(b, mp)]; ok {
+			if _, ok := g.have[mp]; ok {
 				continue
 			}
 			rows = append(rows, aggregator.Row{
-				DeviceOUI:   oui,
-				DeviceSN:    sn,
+				DeviceOUI:   g.rep.DeviceOUI,
+				DeviceSN:    g.rep.DeviceSN,
 				MetricPath:  mp,
 				DisplayName: nameByPath[mp],
-				Granularity: req.Granularity,
-				Time:        b,
-				StartTime:   b,
-				EndTime:     bucketEnd,
+				Granularity: g.rep.Granularity,
+				Time:        g.rep.Time,
+				StartTime:   g.rep.StartTime,
+				EndTime:     g.rep.EndTime,
+				ObjectLDN:   g.rep.ObjectLDN,
 				Filled:      true,
 			})
 		}
@@ -386,95 +398,14 @@ func fillEmptyBuckets(rows []aggregator.Row, req aggregator.QueryRequest, loc *t
 	return rows
 }
 
-func bucketKey(t time.Time, metricPath string) string {
-	return t.UTC().Format(time.RFC3339) + "||" + metricPath
-}
-
-// nextBucketStart 返回 cur 桶的下一个桶起点（= 当前桶的自然结束边界）。
-//
-// 月粒度走自然月：从对齐后的"月 1 号本地零点"用 AddDate(0,1,0) 跳到下月 1 号
-// （因桶起点恒为 1 号，AddDate 的"下月同日"语义等价"下月 1 号"，跨年自动 +1、
-// 闰年 2 月仍正确跳 3 月），取代固定 30 天 dur 步进（避免逐月漂移出 5/31、6/30）。
-// 其余粒度沿用固定时长（周=精确 7 天、日=精确 24 小时、时=1h、15min=15min），
-// 与改造前完全一致、零回归。
-func nextBucketStart(cur time.Time, g metrics.Granularity, loc *time.Location) time.Time {
-	if g == metrics.GranularityMonthly {
-		if loc == nil {
-			loc = time.UTC
-		}
-		return cur.In(loc).AddDate(0, 1, 0)
+// groupKey 构造 (object_ldn, time) 分组键。object_ldn=nil（设备级）归一为固定空键，
+// 与有值的 object_ldn 互不混淆；time 用 UTC RFC3339 规范化。
+func groupKey(objectLDN *string, t time.Time) string {
+	ldn := "\x00" // nil 哨兵：与任何真实 object_ldn 串值不可能相等
+	if objectLDN != nil {
+		ldn = *objectLDN
 	}
-	return cur.Add(granularityDuration(g))
-}
-
-// granularityDuration 返回粒度固定时长（步进 / EndTime 占位用；月粒度不再走此函数，
-// 改由 nextBucketStart 按自然月 AddDate，此处 30 天近似仅作非月路径的安全兜底残留）。
-func granularityDuration(g metrics.Granularity) time.Duration {
-	switch g {
-	case metrics.Granularity15Min:
-		return 15 * time.Minute
-	case metrics.GranularityHourly:
-		return time.Hour
-	case metrics.GranularityDaily:
-		return 24 * time.Hour
-	case metrics.GranularityWeekly:
-		return 7 * 24 * time.Hour
-	case metrics.GranularityMonthly:
-		return 30 * 24 * time.Hour
-	}
-	return time.Hour
-}
-
-// bucketStartsBetween 枚举 [start, end) 内的所有桶起点，对齐到粒度边界。
-// 上限：1000 个桶（防止误用 15min 拉年区间炸笛卡尔积）。
-//
-// T-0192b：桶对齐按业务时区 loc 切天（日/周/月落 loc 本地零点），与 T-0192 后台
-// 汇总侧对齐，避免填充桶落 UTC 零点（= 北京早 8 点）而与真实行错位、去重不命中。
-func bucketStartsBetween(start, end time.Time, g metrics.Granularity, loc *time.Location) []time.Time {
-	const maxBuckets = 1000
-	if !end.After(start) {
-		return nil
-	}
-	dur := granularityDuration(g)
-	if dur <= 0 {
-		return nil
-	}
-	if loc == nil {
-		loc = time.UTC
-	}
-	// 把 start 投影到业务时区后对齐到桶边界（mirror T-0192：now.In(loc) 后截零点）。
-	cur := alignToBucket(start.In(loc), g)
-	out := make([]time.Time, 0, 64)
-	for cur.Before(end) && len(out) < maxBuckets {
-		out = append(out, cur)
-		// 月粒度按自然月步进（AddDate 跳下月 1 号），其余粒度按固定时长，集中收口避免散落 if。
-		cur = nextBucketStart(cur, g, loc)
-	}
-	return out
-}
-
-// alignToBucket 把时间向下对齐到粒度桶起点。
-func alignToBucket(t time.Time, g metrics.Granularity) time.Time {
-	switch g {
-	case metrics.Granularity15Min:
-		min := t.Minute()
-		return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), (min/15)*15, 0, 0, t.Location())
-	case metrics.GranularityHourly:
-		return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 0, 0, 0, t.Location())
-	case metrics.GranularityDaily:
-		return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
-	case metrics.GranularityWeekly:
-		// 以周一为周起点（与 ISO week 一致）
-		offset := int(t.Weekday()) - 1
-		if offset < 0 {
-			offset = 6
-		}
-		base := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
-		return base.AddDate(0, 0, -offset)
-	case metrics.GranularityMonthly:
-		return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, t.Location())
-	}
-	return t
+	return ldn + "||" + t.UTC().Format(time.RFC3339Nano)
 }
 
 // RecomputeAggregation POST /pm/aggregation/recompute（T-0164 收尾 G5-Gap-2）
