@@ -49,8 +49,6 @@ export default function DeviceGrouping() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [selectedDeviceIds, setSelectedDeviceIds] = useState<React.Key[]>([]);
-  // 「开启实时刷新」按钮 → useDeviceList.refetchInterval（5s 一次轮询）。
-  const [autoRefresh, setAutoRefresh] = useState(false);
 
   // ── Mutations (passed into action hooks) ──
   const createGroupMutation = useCreateGroup();
@@ -79,9 +77,7 @@ export default function DeviceGrouping() {
     } as Parameters<typeof useDeviceList>[0]),
     [currentPage, pageSize, selectedGroupId]
   );
-  const { data: deviceData, isLoading, refetch } = useDeviceList(queryParams, {
-    refetchInterval: autoRefresh ? 5000 : undefined,
-  });
+  const { data: deviceData, isLoading, refetch } = useDeviceList(queryParams);
   const devices: Device[] = deviceData?.items ?? [];
   const total = deviceData?.total ?? 0;
 
@@ -246,12 +242,9 @@ export default function DeviceGrouping() {
             setCurrentPage(page);
             setPageSize(size);
           }}
-          onRefresh={() => void refetch()}
-          onRealtimeRefreshChange={setAutoRefresh}
           onExport={handleExport}
           onImport={handleImport}
           onDownloadTemplate={handleDownloadTemplate}
-          onEditDevice={deviceActions.open.edit}
           t={t as (id: string, values?: Record<string, unknown>) => string}
         />
       </TreeListPageLayout>

@@ -13,8 +13,6 @@ import type {
   BatchImportDevice,
   BatchImportResponse,
   BatchImportRowError,
-  CarrierCode,
-  DeviceTechnology,
 } from '@core/types/device';
 
 const { Dragger } = Upload;
@@ -45,9 +43,6 @@ import {
   KNOWN_IMPORT_SNAKE,
   REQUIRED_IMPORT_SNAKE,
 } from './deviceCsvSchema';
-
-const ALLOWED_CARRIERS: readonly CarrierCode[] = ['cmcc', 'ctcc', 'cucc'];
-const ALLOWED_TECH: readonly DeviceTechnology[] = ['lte', 'nr'];
 
 interface LocalParseError {
   row: number; // 1-based, 不含 header
@@ -123,111 +118,26 @@ function parseCsv(
     };
 
     const serialNumber = get('serial_number');
-    const oui = get('oui');
-    const carrier = get('carrier');
-    const technology = get('technology');
 
-    // 必填校验
-    const requiredValues: Record<string, string | undefined> = {
-      serial_number: serialNumber,
-      oui,
-      carrier,
-      technology,
-    };
+    // 必填校验：导入只需 SN（产品语义：按 SN 更新已有设备名称/备注 + 归入当前分组）。
+    let validRow = true;
     for (const field of REQUIRED_IMPORT_SNAKE) {
-      if (!requiredValues[field]) {
+      // 当前 REQUIRED_IMPORT_SNAKE = ['serial_number']；保持通用循环以便后续增列。
+      if (!get(field)) {
         localErrors.push({
           row: userRow,
           sn: serialNumber,
           reason: t('device.batchImport.requiredMissing', { row: userRow, field }),
         });
-      }
-    }
-
-    // 枚举校验
-    let validRow: boolean = !!(serialNumber && oui && carrier && technology);
-    if (carrier && !ALLOWED_CARRIERS.includes(carrier as CarrierCode)) {
-      localErrors.push({
-        row: userRow,
-        sn: serialNumber,
-        reason: t('device.batchImport.invalidEnum', {
-          row: userRow,
-          field: 'carrier',
-          value: carrier,
-          allowed: ALLOWED_CARRIERS.join('|'),
-        }),
-      });
-      validRow = false;
-    }
-    if (technology && !ALLOWED_TECH.includes(technology as DeviceTechnology)) {
-      localErrors.push({
-        row: userRow,
-        sn: serialNumber,
-        reason: t('device.batchImport.invalidEnum', {
-          row: userRow,
-          field: 'technology',
-          value: technology,
-          allowed: ALLOWED_TECH.join('|'),
-        }),
-      });
-      validRow = false;
-    }
-
-    // 数字字段（latitude/longitude）：空就不传，非空必须能 parseFloat
-    const latRaw = get('latitude');
-    const lngRaw = get('longitude');
-    let latitude: number | undefined;
-    let longitude: number | undefined;
-
-    if (latRaw !== undefined) {
-      const v = Number.parseFloat(latRaw);
-      if (Number.isNaN(v)) {
-        localErrors.push({
-          row: userRow,
-          sn: serialNumber,
-          reason: t('device.batchImport.invalidNumber', {
-            row: userRow,
-            field: 'latitude',
-            value: latRaw,
-          }),
-        });
         validRow = false;
-      } else {
-        latitude = v;
-      }
-    }
-    if (lngRaw !== undefined) {
-      const v = Number.parseFloat(lngRaw);
-      if (Number.isNaN(v)) {
-        localErrors.push({
-          row: userRow,
-          sn: serialNumber,
-          reason: t('device.batchImport.invalidNumber', {
-            row: userRow,
-            field: 'longitude',
-            value: lngRaw,
-          }),
-        });
-        validRow = false;
-      } else {
-        longitude = v;
       }
     }
 
-    if (validRow && serialNumber && oui && carrier && technology) {
+    if (validRow && serialNumber) {
       devices.push({
         serial_number: serialNumber,
-        oui,
-        carrier: carrier as CarrierCode,
-        technology: technology as DeviceTechnology,
-        product_class: get('product_class'),
-        manufacturer: get('manufacturer'),
-        model_name: get('model_name'),
-        ip_address: get('ip_address'),
         device_name: get('device_name'),
-        site_id: get('site_id'),
-        latitude,
-        longitude,
+        remark: get('remark'),
       });
     }
   }

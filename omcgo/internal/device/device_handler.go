@@ -672,9 +672,21 @@ func (h *Handler) BatchDeleteDevices(c *gin.Context) {
 // GroupID（可选）：用户在 /device/group 页面选中的二级分组 ID；后端在所有
 // CreateDevice 成功后一次性把这批新设备 BatchAddDevices 进该分组。未传时
 // 设备保持"未分组"，由后续 inform 心跳触发的规则或手工编辑归组。
+// BatchImportDeviceRow 是 SN 批量导入的单行。
+//
+// 产品语义：导入【只更新已注册设备】的 名称 / 备注，并把这批 SN 划入当前所选分组；
+// 【不新建设备】。原因：设备由 TR-069 inform 自动注册，且 devices.carrier 是 NOT NULL
+// 的不可变 LIST 分区键（由 OUI/inform 决定），无法凭 SN 新建一条合法设备。
+// SN 不存在的行返回失败回执（设备不存在）。
+type BatchImportDeviceRow struct {
+	SerialNumber string  `json:"serial_number" binding:"required"`
+	DeviceName   *string `json:"device_name"`
+	Remark       *string `json:"remark"`
+}
+
 type BatchImportRequest struct {
-	Devices []CreateDeviceRequest `json:"devices" binding:"required,min=1,max=1000,dive"`
-	GroupID *uuid.UUID            `json:"group_id,omitempty" binding:"omitempty,uuid"`
+	Devices []BatchImportDeviceRow `json:"devices" binding:"required,min=1,max=1000,dive"`
+	GroupID *uuid.UUID             `json:"group_id,omitempty" binding:"omitempty,uuid"`
 }
 
 // BatchImportResponse 报告本次批次的成功/失败统计 + 失败明细。
@@ -704,37 +716,54 @@ func (h *Handler) BatchImportDevices(c *gin.Context) {
 		return
 	}
 
-	resp := BatchImportResponse{Total: len(req.Devices)}
-	createdIDs := make([]uuid.UUID, 0, len(req.Devices))
-	for i, dev := range req.Devices {
-		created, err := h.service.CreateDevice(c.Request.Context(), dev)
-		if err != nil {
-			resp.Failed++
-			reason := err.Error()
-			if errors.Is(err, commonerrors.ErrAlreadyExists) {
-				reason = "SN 已存在"
-			}
-			resp.Errors = append(resp.Errors, BatchImportRowError{
-				Row:    i + 1,
-				SN:     dev.SerialNumber,
-				Reason: reason,
-			})
-			continue
-		}
-		resp.Succeeded++
-		if created != nil {
-			createdIDs = append(createdIDs, created.ID)
-		}
+	// 操作人（用于 device_info 审计字段）。
+	updater := ""
+	if v, ok := c.Get(admin.CtxKeyUsername); ok {
+		updater, _ = v.(string)
 	}
 
-	// 用户在 /device/group 页面选中分组时，把这批新设备一次性写入 device_group_members。
-	// 失败不影响导入回执的成功/失败统计——设备本身已经落库，仅归属分组失败，给一条
-	// warning row 让前端用户感知（而不是默默吞掉）。
-	if req.GroupID != nil && len(createdIDs) > 0 {
-		if err := h.service.BatchAssignToGroup(c.Request.Context(), *req.GroupID, createdIDs); err != nil {
+	resp := BatchImportResponse{Total: len(req.Devices)}
+	matchedIDs := make([]uuid.UUID, 0, len(req.Devices))
+	for i, row := range req.Devices {
+		// 按 SN 查已注册设备；不存在 → 该行失败（不新建）。
+		dev, err := h.service.GetBySerialNumber(c.Request.Context(), row.SerialNumber)
+		if err != nil || dev == nil {
+			resp.Failed++
+			reason := "设备不存在（导入仅更新已注册设备的名称/备注，并归入当前分组）"
+			if err != nil && !errors.Is(err, commonerrors.ErrNotFound) {
+				reason = err.Error()
+			}
+			resp.Errors = append(resp.Errors, BatchImportRowError{Row: i + 1, SN: row.SerialNumber, Reason: reason})
+			continue
+		}
+
+		// 更新设备名称（devices.device_name —— 列表显示名）。
+		if row.DeviceName != nil {
+			if _, err := h.service.UpdateDevice(c.Request.Context(), dev.ID, UpdateDeviceRequest{DeviceName: row.DeviceName}); err != nil {
+				resp.Failed++
+				resp.Errors = append(resp.Errors, BatchImportRowError{Row: i + 1, SN: row.SerialNumber, Reason: "更新设备名称失败：" + err.Error()})
+				continue
+			}
+		}
+		// 更新备注（device_info.remark）。
+		if row.Remark != nil {
+			if err := h.service.UpdateDeviceInfo(c.Request.Context(), dev.ID, UpdateDeviceInfoRequest{Remark: row.Remark}, updater); err != nil {
+				resp.Failed++
+				resp.Errors = append(resp.Errors, BatchImportRowError{Row: i + 1, SN: row.SerialNumber, Reason: "更新备注失败：" + err.Error()})
+				continue
+			}
+		}
+		resp.Succeeded++
+		matchedIDs = append(matchedIDs, dev.ID)
+	}
+
+	// 产品要求：把本次导入命中的所有 SN 一次性划入当前所选分组（device_group_members）。
+	// 归组失败不回滚名称/备注更新，给一条 warning row 让用户感知（不默默吞掉）。
+	if req.GroupID != nil && len(matchedIDs) > 0 {
+		if err := h.service.BatchAssignToGroup(c.Request.Context(), *req.GroupID, matchedIDs); err != nil {
 			resp.Errors = append(resp.Errors, BatchImportRowError{
 				Row:    0,
-				Reason: "设备已创建，但归入指定分组失败：" + err.Error(),
+				Reason: "名称/备注已更新，但归入指定分组失败：" + err.Error(),
 			})
 		}
 	}

@@ -99,7 +99,8 @@ export function useImportExportHandlers(deps: {
     // deviceCsvSchema）；解析器接受中文 + snake_case 两种表头（向后兼容）。
     const required = IMPORT_COLUMNS.filter((c) => c.required).map((c) => c.zh).join(', ');
     const optional = IMPORT_COLUMNS.filter((c) => !c.required).map((c) => c.zh).join(', ');
-    const csvComment = `# 必填: ${required} | 可选: ${optional} | 运营商: cmcc|ctcc|cucc | 制式: lte|nr`;
+    // 导入按 SN 匹配已注册设备，更新名称/备注并归入当前分组（不新建设备）。
+    const csvComment = `# 必填: ${required} | 可选: ${optional} | 说明: 按 SN 匹配已注册设备，更新名称/备注并归入当前分组；SN 不存在的行会失败`;
     const csvHeader = IMPORT_COLUMNS.map((c) => csvField(c.zh)).join(',');
     const csvExamples = [0, 1, 2].map((rowIdx) =>
       IMPORT_COLUMNS.map((c) => csvField(c.example[rowIdx] ?? '')).join(','),

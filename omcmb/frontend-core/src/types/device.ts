@@ -47,24 +47,15 @@ export interface CreateDeviceInput {
   longitude?: number;
 }
 
-// 批量导入单行数据（wire 层使用 snake_case，与后端 device.CreateDeviceRequest 一一对应）。
-// 与 CreateDeviceInput 同语义，区别仅在序列化命名空间：
-//   - CreateDeviceInput 走单次 create，由 deviceApi.create() 内部 camelCase → snake_case 手动映射；
-//   - BatchImportDevice 走批量 POST，由 BatchImportModal 解析 CSV 后直接以 snake_case 提交，
-//     避免每行做一次 mapping helper 调用。
+// 批量导入单行数据（wire 层 snake_case，与后端 device.BatchImportDeviceRow 一一对应）。
+//
+// 产品语义：导入【只更新已注册设备】的 名称 / 备注，并把这批 SN 划入当前所选分组
+// （不新建设备——设备由 TR-069 inform 注册，carrier 是不可变分区键无法凭 SN 新建）。
+// 故仅需 serial_number（必填）+ device_name / remark（可选）。
 export interface BatchImportDevice {
   serial_number: string;
-  oui: string;
-  carrier: CarrierCode;
-  technology: DeviceTechnology;
-  product_class?: string;
-  manufacturer?: string;
-  model_name?: string;
-  ip_address?: string;
   device_name?: string;
-  site_id?: string;
-  latitude?: number;
-  longitude?: number;
+  remark?: string;
 }
 
 export interface BatchImportRequest {

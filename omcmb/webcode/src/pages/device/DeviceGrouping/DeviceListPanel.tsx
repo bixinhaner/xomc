@@ -21,9 +21,6 @@ export interface DeviceListPanelProps {
   batchActions: BatchAction[];
   onSelectionChange: (keys: React.Key[]) => void;
   onPageChange: (page: number, size: number) => void;
-  onRefresh: () => void;
-  /** 实时刷新按钮翻转回调 —— 透传给 DataTable.onRealtimeRefreshChange。 */
-  onRealtimeRefreshChange?: (enabled: boolean) => void;
   onExport: () => void | Promise<void>;
   /**
    * 批量导入完成回调（接收后端真实回执，含成功/失败统计）。
@@ -31,7 +28,6 @@ export interface DeviceListPanelProps {
    */
   onImport: (result: BatchImportResponse) => void | Promise<void>;
   onDownloadTemplate: () => void;
-  onEditDevice: (device: Device) => void;
   t: (id: string, values?: Record<string, string | number>) => string;
 }
 
@@ -47,12 +43,9 @@ export default function DeviceListPanel({
   batchActions,
   onSelectionChange,
   onPageChange,
-  onRefresh,
-  onRealtimeRefreshChange,
   onExport,
   onImport,
   onDownloadTemplate,
-  onEditDevice,
   t,
 }: DeviceListPanelProps) {
   const [importModalOpen, setImportModalOpen] = useState(false);
@@ -65,7 +58,7 @@ export default function DeviceListPanel({
     setImportModalOpen(false);
   }, []);
 
-  const columns = useDeviceColumns({ onEditDevice, t });
+  const columns = useDeviceColumns({ t });
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: 16, gap: 12 }}>
@@ -81,7 +74,7 @@ export default function DeviceListPanel({
             icon={<UploadOutlined />}
             onClick={handleImportClick}
           >
-            {t('common.batchImport')}
+            {t('common.import')}
           </Button>
           <Button
             type="primary"
@@ -114,8 +107,9 @@ export default function DeviceListPanel({
             pageSize={pageSize}
             currentPage={currentPage}
             onPageChange={onPageChange}
-            onRefresh={onRefresh}
-            onRealtimeRefreshChange={onRealtimeRefreshChange}
+            hideRealtime
+            hideColumnSettings
+            hideDensity
             defaultDensity="default"
             scroll={{ x: 'max-content', y: 100 }}
             showRowNumber
