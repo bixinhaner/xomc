@@ -164,3 +164,202 @@ func TestFillEmptyBuckets_FillDisabledBoundaries(t *testing.T) {
 		assert.Empty(t, out, "device_group dimension must not fill")
 	})
 }
+
+// ── T-0192c：月粒度自然月步进 ───────────────────────────────────────────────
+
+// TestNextBucketStart_MonthlyNaturalMonth 验证月粒度走自然月步进（AddDate(0,1,0)），
+// 而非固定 30 天：普通月、跨年（12 月→次年 1 月，年份 +1）、闰年（2 月→3 月仍正确）。
+func TestNextBucketStart_MonthlyNaturalMonth(t *testing.T) {
+	loc := beijing(t)
+	cases := []struct {
+		name string
+		cur  time.Time
+		want time.Time
+	}{
+		{
+			name: "ordinary month Jan->Feb",
+			cur:  time.Date(2026, 1, 1, 0, 0, 0, 0, loc),
+			want: time.Date(2026, 2, 1, 0, 0, 0, 0, loc),
+		},
+		{
+			name: "Feb->Mar non-leap",
+			cur:  time.Date(2026, 2, 1, 0, 0, 0, 0, loc),
+			want: time.Date(2026, 3, 1, 0, 0, 0, 0, loc),
+		},
+		{
+			name: "leap year Feb->Mar (2/29 month still lands 3/1)",
+			cur:  time.Date(2024, 2, 1, 0, 0, 0, 0, loc),
+			want: time.Date(2024, 3, 1, 0, 0, 0, 0, loc),
+		},
+		{
+			name: "cross year Dec->next Jan (year+1)",
+			cur:  time.Date(2026, 12, 1, 0, 0, 0, 0, loc),
+			want: time.Date(2027, 1, 1, 0, 0, 0, 0, loc),
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := nextBucketStart(c.cur, metrics.GranularityMonthly, loc)
+			assert.True(t, c.want.Equal(got), "want %s got %s", c.want, got)
+			// 落点恒为下月 1 号本地零点（不漂移）。
+			inLoc := got.In(loc)
+			assert.Equal(t, 1, inLoc.Day(), "monthly next bucket must land on day 1")
+			assert.Equal(t, 0, inLoc.Hour())
+		})
+	}
+}
+
+// TestNextBucketStart_MonthlyNilLocFallsBackUTC 验证月粒度 loc=nil 回落 UTC，不 panic。
+func TestNextBucketStart_MonthlyNilLocFallsBackUTC(t *testing.T) {
+	cur := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	got := nextBucketStart(cur, metrics.GranularityMonthly, nil)
+	assert.Equal(t, time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC), got.UTC())
+}
+
+// TestNextBucketStart_NonMonthlyFixedDuration 验证非月粒度沿用固定时长步进（零回归）：
+// 周=精确 7 天、日=精确 24 小时、时=1h、15min=15min，与改造前一致。
+func TestNextBucketStart_NonMonthlyFixedDuration(t *testing.T) {
+	loc := beijing(t)
+	base := time.Date(2026, 6, 2, 0, 0, 0, 0, loc)
+	cases := []struct {
+		g   metrics.Granularity
+		dur time.Duration
+	}{
+		{metrics.Granularity15Min, 15 * time.Minute},
+		{metrics.GranularityHourly, time.Hour},
+		{metrics.GranularityDaily, 24 * time.Hour},
+		{metrics.GranularityWeekly, 7 * 24 * time.Hour},
+	}
+	for _, c := range cases {
+		got := nextBucketStart(base, c.g, loc)
+		assert.True(t, base.Add(c.dur).Equal(got),
+			"granularity %v must step fixed %v", c.g, c.dur)
+	}
+}
+
+// TestBucketStartsBetween_MonthlyLandsOnFirstOfMonth 验证月桶序列起点恒落每月 1 号本地零点，
+// 连续跨多月（含跨 1/31、2/28、12/31）逐月落 1 号、不随月份累积漂移、不出现 5/31 & 6/30。
+func TestBucketStartsBetween_MonthlyLandsOnFirstOfMonth(t *testing.T) {
+	loc := beijing(t)
+	// 查询窗：北京 2026-01-15 ~ 2026-07-15（跨 6 个月边界，含 1/31、2/28）。
+	start := time.Date(2026, 1, 15, 8, 0, 0, 0, loc)
+	end := time.Date(2026, 7, 15, 0, 0, 0, 0, loc)
+
+	buckets := bucketStartsBetween(start, end, metrics.GranularityMonthly, loc)
+	// 对齐后首桶 = 1 月 1 号；含 1~7 月 1 号共 7 个。
+	require.Len(t, buckets, 7)
+
+	wantMonths := []time.Month{time.January, time.February, time.March, time.April, time.May, time.June, time.July}
+	for i, b := range buckets {
+		inLoc := b.In(loc)
+		assert.Equal(t, 1, inLoc.Day(), "bucket %d must be day 1, got %s", i, inLoc)
+		assert.Equal(t, 0, inLoc.Hour())
+		assert.Equal(t, 0, inLoc.Minute())
+		assert.Equal(t, wantMonths[i], inLoc.Month(), "bucket %d month mismatch", i)
+		assert.Equal(t, 2026, inLoc.Year())
+	}
+	// 显式断言：不出现 5/31、6/30 这类漂移桶（固定 30 天步进的旧 bug 表征）。
+	for _, b := range buckets {
+		inLoc := b.In(loc)
+		assert.False(t, inLoc.Day() == 30 || inLoc.Day() == 31,
+			"must not produce drifted bucket like 5/31 or 6/30, got %s", inLoc)
+	}
+}
+
+// TestBucketStartsBetween_MonthlyCrossYear 验证月桶跨年正确（12 月→次年 1 月，年份 +1）。
+func TestBucketStartsBetween_MonthlyCrossYear(t *testing.T) {
+	loc := beijing(t)
+	// 查询窗：北京 2026-11-10 ~ 2027-02-10（跨 12/31 年界）。
+	start := time.Date(2026, 11, 10, 0, 0, 0, 0, loc)
+	end := time.Date(2027, 2, 10, 0, 0, 0, 0, loc)
+
+	buckets := bucketStartsBetween(start, end, metrics.GranularityMonthly, loc)
+	// 11 月、12 月、次年 1 月、次年 2 月 共 4 个。
+	require.Len(t, buckets, 4)
+
+	want := []time.Time{
+		time.Date(2026, 11, 1, 0, 0, 0, 0, loc),
+		time.Date(2026, 12, 1, 0, 0, 0, 0, loc),
+		time.Date(2027, 1, 1, 0, 0, 0, 0, loc),
+		time.Date(2027, 2, 1, 0, 0, 0, 0, loc),
+	}
+	for i := range want {
+		assert.True(t, want[i].Equal(buckets[i]), "bucket %d want %s got %s", i, want[i], buckets[i])
+	}
+}
+
+// TestFillEmptyBuckets_MonthlyEndTimeIsNextMonthFirst 验证填充月桶 EndTime = 下月 1 号本地零点
+// （不是起点 +30 天）。
+func TestFillEmptyBuckets_MonthlyEndTimeIsNextMonthFirst(t *testing.T) {
+	loc := beijing(t)
+	req := aggregator.QueryRequest{
+		Granularity: metrics.GranularityMonthly,
+		Dimension:   aggregator.DimensionDevice,
+		DeviceOUIs:  []string{"OUI1"},
+		DeviceSNs:   []string{"SN1"},
+		MetricPaths: []string{"m.a"},
+		// 查询窗：北京 1 月 ~ 3 月（含 1 月、2 月两个桶）。
+		StartTime: time.Date(2026, 1, 1, 0, 0, 0, 0, loc),
+		EndTime:   time.Date(2026, 3, 1, 0, 0, 0, 0, loc),
+	}
+
+	out := fillEmptyBuckets(nil, req, loc)
+	require.Len(t, out, 2, "should fill Jan + Feb")
+
+	byMonth := make(map[time.Month]aggregator.Row, 2)
+	for _, r := range out {
+		require.True(t, r.Filled)
+		byMonth[r.Time.In(loc).Month()] = r
+	}
+	// 1 月桶 EndTime = 2 月 1 号（28 天后，非 +30 天）。
+	jan := byMonth[time.January]
+	assert.True(t, time.Date(2026, 2, 1, 0, 0, 0, 0, loc).Equal(jan.EndTime),
+		"Jan bucket EndTime must be Feb 1, got %s", jan.EndTime)
+	// 2 月桶 EndTime = 3 月 1 号（仅 28 天，固定 +30 天会漂到 3/2）。
+	feb := byMonth[time.February]
+	assert.True(t, time.Date(2026, 3, 1, 0, 0, 0, 0, loc).Equal(feb.EndTime),
+		"Feb bucket EndTime must be Mar 1, got %s", feb.EndTime)
+	// 起止边界自洽：StartTime = 桶起点，EndTime = 下月 1 号。
+	assert.True(t, jan.StartTime.Equal(jan.Time))
+}
+
+// TestFillEmptyBuckets_MonthlyDedupHitsFirstOfMonthRow 验证月桶去重键与真实物化月行
+// （落每月 1 号本地零点）对齐：同一月不产生"真实点 + 漂移空点"孪生桶。
+func TestFillEmptyBuckets_MonthlyDedupHitsFirstOfMonthRow(t *testing.T) {
+	loc := beijing(t)
+	// 真实行落北京 2 月 1 号本地零点（worker 物化月数据落每月 1 号，T-0192）。
+	realTime := time.Date(2026, 2, 1, 0, 0, 0, 0, loc)
+	req := aggregator.QueryRequest{
+		Granularity: metrics.GranularityMonthly,
+		Dimension:   aggregator.DimensionDevice,
+		DeviceOUIs:  []string{"OUI1"},
+		DeviceSNs:   []string{"SN1"},
+		MetricPaths: []string{"m.a"},
+		// 查询窗：1 月 ~ 4 月（含 1/2/3 三个月桶）。
+		StartTime: time.Date(2026, 1, 1, 0, 0, 0, 0, loc),
+		EndTime:   time.Date(2026, 4, 1, 0, 0, 0, 0, loc),
+	}
+	rows := []aggregator.Row{
+		{DeviceOUI: "OUI1", DeviceSN: "SN1", MetricPath: "m.a", Time: realTime, Granularity: metrics.GranularityMonthly},
+	}
+
+	out := fillEmptyBuckets(rows, req, loc)
+	// 3 个月桶，2 月已有真实行 → 补 1 月、3 月两个占位 + 1 真实 = 3 行（无孪生）。
+	require.Len(t, out, 3, "should have 1 real (Feb) + 2 filled (Jan, Mar), no twin bucket")
+
+	var filledCount, realCount int
+	for _, r := range out {
+		if r.Filled {
+			filledCount++
+			assert.Equal(t, 1, r.Time.In(loc).Day(), "filled monthly bucket must land day 1")
+			// 占位行不得与真实行同月（否则就是孪生桶）。
+			assert.NotEqual(t, time.February, r.Time.In(loc).Month(),
+				"Feb has real row, must not produce twin filled bucket")
+		} else {
+			realCount++
+			assert.True(t, realTime.Equal(r.Time))
+		}
+	}
+	assert.Equal(t, 2, filledCount)
+	assert.Equal(t, 1, realCount)
+}

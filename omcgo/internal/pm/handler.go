@@ -362,8 +362,10 @@ func fillEmptyBuckets(rows []aggregator.Row, req aggregator.QueryRequest, loc *t
 		}
 	}
 
-	dur := granularityDuration(req.Granularity)
 	for _, b := range buckets {
+		// EndTime 按自然桶边界（月走自然月末 = 下月 1 号本地零点，其余沿用固定时长），
+		// 让悬停 tooltip 的"时段起止"对月桶显示正确（月桶 +30 天会漂出 5/31、6/30）。
+		bucketEnd := nextBucketStart(b, req.Granularity, loc)
 		for _, mp := range req.MetricPaths {
 			if _, ok := have[bucketKey(b, mp)]; ok {
 				continue
@@ -376,7 +378,7 @@ func fillEmptyBuckets(rows []aggregator.Row, req aggregator.QueryRequest, loc *t
 				Granularity: req.Granularity,
 				Time:        b,
 				StartTime:   b,
-				EndTime:     b.Add(dur),
+				EndTime:     bucketEnd,
 				Filled:      true,
 			})
 		}
@@ -388,7 +390,25 @@ func bucketKey(t time.Time, metricPath string) string {
 	return t.UTC().Format(time.RFC3339) + "||" + metricPath
 }
 
-// granularityDuration 返回粒度近似时长（用于 EndTime 占位；月按 30 天近似）。
+// nextBucketStart 返回 cur 桶的下一个桶起点（= 当前桶的自然结束边界）。
+//
+// 月粒度走自然月：从对齐后的"月 1 号本地零点"用 AddDate(0,1,0) 跳到下月 1 号
+// （因桶起点恒为 1 号，AddDate 的"下月同日"语义等价"下月 1 号"，跨年自动 +1、
+// 闰年 2 月仍正确跳 3 月），取代固定 30 天 dur 步进（避免逐月漂移出 5/31、6/30）。
+// 其余粒度沿用固定时长（周=精确 7 天、日=精确 24 小时、时=1h、15min=15min），
+// 与改造前完全一致、零回归。
+func nextBucketStart(cur time.Time, g metrics.Granularity, loc *time.Location) time.Time {
+	if g == metrics.GranularityMonthly {
+		if loc == nil {
+			loc = time.UTC
+		}
+		return cur.In(loc).AddDate(0, 1, 0)
+	}
+	return cur.Add(granularityDuration(g))
+}
+
+// granularityDuration 返回粒度固定时长（步进 / EndTime 占位用；月粒度不再走此函数，
+// 改由 nextBucketStart 按自然月 AddDate，此处 30 天近似仅作非月路径的安全兜底残留）。
 func granularityDuration(g metrics.Granularity) time.Duration {
 	switch g {
 	case metrics.Granularity15Min:
@@ -427,7 +447,8 @@ func bucketStartsBetween(start, end time.Time, g metrics.Granularity, loc *time.
 	out := make([]time.Time, 0, 64)
 	for cur.Before(end) && len(out) < maxBuckets {
 		out = append(out, cur)
-		cur = cur.Add(dur)
+		// 月粒度按自然月步进（AddDate 跳下月 1 号），其余粒度按固定时长，集中收口避免散落 if。
+		cur = nextBucketStart(cur, g, loc)
 	}
 	return out
 }
