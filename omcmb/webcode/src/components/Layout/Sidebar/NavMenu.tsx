@@ -84,15 +84,7 @@ function buildStaticMenuItems(groups: NavGroup[], t: (id: string) => string): Me
   if (!groups) return [];
   return groups.map((group) => {
     const children = group.children || [];
-    if (children.length === 1) {
-      const child = children[0];
-      return {
-        type: 'item' as const,
-        key: child.key,
-        icon: STATIC_ICON_MAP[group.iconName],
-        label: t(group.label),
-      };
-    }
+    // 单子节点也保持为可展开子菜单（不扁平化），与动态菜单行为一致。
     return {
       type: 'submenu' as const,
       key: group.key,
@@ -116,9 +108,6 @@ function buildStaticKeyToChild(groups: NavGroup[]): Map<string, NavChild> {
     const children = group.children || [];
     for (const child of children) {
       map.set(child.key, child);
-    }
-    if (children.length === 1) {
-      map.set(group.key, children[0]);
     }
   }
   return map;
@@ -164,7 +153,7 @@ type MenuLabelResolver = (menu: DynamicMenu) => string;
 /**
  * 把后端菜单树转 antd Menu items。规则：
  *  - 仅渲染 type='directory'|'menu'（按钮跳过）
- *  - 单子节点目录扁平化（与 NAV_CONFIG 行为一致）
+ *  - 目录即使只有一个子节点也保持为可展开子菜单（不扁平化），保证子菜单可见
  *  - 隐藏 status!=active 或 showStatus='hide' 的节点
  *  - label 走 resolveMenuLabel：nameI18n[locale] > nameI18n['zh-CN'] > name
  *  - icon 仅当 showIcon=true 时渲染（sys_configs.system.show_menu_icon 全局开关）
@@ -196,17 +185,9 @@ function buildDynamicMenuItems(
         };
       }
 
-      // 单子节点目录扁平化
-      if (visibleChildren.length === 1) {
-        const only = visibleChildren[0];
-        return {
-          type: 'item' as const,
-          key: only.routePath || only.id,
-          icon: icon(m),
-          label: label(m),
-        };
-      }
-
+      // 目录：哪怕只有一个子节点，也保持为可展开的子菜单并显示该子节点
+      // （不再扁平化成父级直跳——否则「运维管理」这种单子目录会直接跳到
+      //  「TR069 报文跟踪」页且子菜单不显示）。
       return {
         type: 'submenu' as const,
         key: m.id,
@@ -226,16 +207,7 @@ function buildDynamicKeyToLeaf(menus: DynamicMenu[], label: MenuLabelResolver): 
       if (m.type === 'menu' && m.routePath) {
         map.set(m.routePath, { key: m.routePath, label: label(m), path: m.routePath });
       }
-      // 单子节点目录扁平化：父目录 key 也指向唯一子节点
-      const visibleChildren = (m.children ?? [])
-        .filter(isVisible)
-        .filter((c) => c.type !== 'button');
-      if (m.type === 'directory' && visibleChildren.length === 1) {
-        const only = visibleChildren[0];
-        if (only.routePath) {
-          map.set(only.routePath, { key: only.routePath, label: label(only), path: only.routePath });
-        }
-      }
+      // 子节点（含单子目录的唯一子节点）由递归 walk 统一映射，无需扁平化特例。
       if (m.children?.length) walk(m.children);
     }
   };
