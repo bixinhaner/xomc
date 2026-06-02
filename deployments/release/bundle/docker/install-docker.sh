@@ -89,6 +89,19 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# ── Docker 网段规划 ───────────────────────────────────────────────────────
+# 公司内网约定：Docker 网络一律落在 173.x 段,避开公司 172.x 内网(172.17/172.24
+# 等仍在不断扩张)。三段互不重叠、整体避开 172:
+#   - docker0 默认网桥(bip)          → 173.17.0.0/16
+#   - omcgo-net(compose 业务网,固定) → 173.18.0.0/16（在 docker-compose.infra.yml 锁定）
+#   - 其它/未来自动创建的网络(池)     → 173.19.0.0/16，每网络 /24
+# 如需换段:改下面三个变量(或部署前用同名环境变量覆盖)即可,改一处即生效。
+# 说明:173.x 是公网地址族,这里沿用公司既有内部系统的约定(内网"借用"),
+#       前提是本机及内网都不会去访问真实的 173.17~173.19 公网目的地。
+DOCKER_BIP="${DOCKER_BIP:-173.17.0.1/16}"
+DOCKER_ADDR_POOL_BASE="${DOCKER_ADDR_POOL_BASE:-173.19.0.0/16}"
+DOCKER_ADDR_POOL_SIZE="${DOCKER_ADDR_POOL_SIZE:-24}"
+
 cd "$(dirname "$SELF")"
 
 [ "$(id -u)" = 0 ] || die "请以 root 执行（sudo bash $0 ...）"
@@ -489,6 +502,36 @@ PYEOF
     fi
   fi
   log "已写入 ${DAEMON_JSON}：data-root = ${DATA_ROOT}"
+fi
+
+# ── docker 网段写入 daemon.json（bip + default-address-pools）────────────
+# 始终执行(网段规划是公司内网硬性约定,不像 data-root/mirror 是可选项):
+# 把 docker0 与自动分配池从默认的 172.17/172.18… 移到 173.x,避开公司 172 内网。
+# 用 python3 merge,保留 data-root / registry-mirrors 等其它键。
+DAEMON_JSON=/etc/docker/daemon.json
+mkdir -p /etc/docker
+if command -v python3 >/dev/null 2>&1; then
+  [ -f "$DAEMON_JSON" ] && cp -a "$DAEMON_JSON" "$DAEMON_JSON.bak.$(date +%Y%m%d%H%M%S)"
+  python3 - "$DAEMON_JSON" "$DOCKER_BIP" "$DOCKER_ADDR_POOL_BASE" "$DOCKER_ADDR_POOL_SIZE" <<'PYEOF'
+import json, os, sys
+p, bip, pool_base, pool_size = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
+data = {}
+if os.path.exists(p) and os.path.getsize(p) > 0:
+    try:
+        data = json.load(open(p))
+    except json.JSONDecodeError:
+        data = {}
+data['bip'] = bip
+data['default-address-pools'] = [{'base': pool_base, 'size': pool_size}]
+with open(p, 'w') as f:
+    json.dump(data, f, indent=2, ensure_ascii=False)
+    f.write('\n')
+PYEOF
+  log "已写入 ${DAEMON_JSON}：bip=${DOCKER_BIP}, default-address-pools=${DOCKER_ADDR_POOL_BASE}(/${DOCKER_ADDR_POOL_SIZE})"
+else
+  warn "未装 python3,无法安全 merge daemon.json 网段配置。请手动在 $DAEMON_JSON 加：
+        \"bip\": \"${DOCKER_BIP}\",
+        \"default-address-pools\": [{\"base\": \"${DOCKER_ADDR_POOL_BASE}\", \"size\": ${DOCKER_ADDR_POOL_SIZE}}]"
 fi
 
 # ── 启用并启动（开机自启）────────────────────────────────────────────────

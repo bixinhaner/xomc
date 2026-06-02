@@ -350,6 +350,50 @@ docker compose version        # 确认 compose v2 插件就位
 并改 `data-root` / containerd `--root`）；输入 `n` 继续走默认 `/var/lib`；非交互模式
 （被 deploy.sh 调起）自动按 Y 切换。装完用 `docker info | grep -E 'Docker Root Dir|Containerd'` 复核。
 
+#### 2.3 Docker 网段规划（**必看**：避开公司 172.x 内网）
+
+公司内网大量使用 `172.x`（如 `172.17`、`172.24`，且在持续扩张）。Docker **默认**把
+`docker0` 放 `172.17.0.0/16`、自动网络放 `172.18+`，会与公司内网**撞段** —— 宿主把
+`172.17.0.0/16` 路由进 `docker0`，**公司 172.17 网段的电脑访问不了本机服务**（回程被
+docker0 劫持，请求能到但回包回不去）。
+
+`install-docker.sh` 已把 Docker 全部网络迁到公司约定的 **`173.x`** 段（互不重叠、整体避开 172）：
+
+| 用途 | 网段 | 配置位置 |
+|------|------|---------|
+| `docker0`（`bip`） | `173.17.0.0/16` | `install-docker.sh` 写 `/etc/docker/daemon.json` |
+| `omcgo-net`（业务网，固定） | `173.18.0.0/16` | `deploy/docker-compose.infra.yml` |
+| 自动/未来网络（池） | `173.19.0.0/16` | `daemon.json` `default-address-pools` |
+
+- **全新装机**：跑 `install-docker.sh` 即自动写好,无需额外操作。
+- **换段**：改 `install-docker.sh` 顶部 `DOCKER_BIP`/`DOCKER_ADDR_POOL_BASE`（或同名环境变量
+  覆盖）+ `infra.yml` 的 `omcgo-net.ipam`；三段保持不重叠且避开公司在用段。
+- **目标机已装 Docker（不会自动套用）**：手动改 `daemon.json` 后重启,见下方排障。
+
+校验：`ip route` 里 `172.17` **不应**再指向 `docker0`，且 `docker0` 应为 `173.17.x`。
+
+> 🔧 **排障 —— 公司 172.17 网段电脑打不开本系统**
+> 现象:其它网段(如 172.24)能访问,唯独 172.17 段电脑超时。
+> 根因:`docker0` 占了 `172.17.0.0/16`，回程路由被劫持。
+> 处理(已装 Docker 的机器)：
+> ```bash
+> sudo cp /etc/docker/daemon.json /etc/docker/daemon.json.bak 2>/dev/null
+> sudo python3 - <<'PY'
+> import json,os
+> p="/etc/docker/daemon.json"; d={}
+> if os.path.exists(p) and os.path.getsize(p):
+>     try: d=json.load(open(p))
+>     except: d={}
+> d["bip"]="173.17.0.1/16"
+> d["default-address-pools"]=[{"base":"173.19.0.0/16","size":24}]
+> json.dump(d,open(p,"w"),indent=2,ensure_ascii=False); open(p,"a").write("\n")
+> PY
+> cd /opt/omc/releases/current/deploy && docker compose -p omcgo down   # 释放旧 172.x 网络
+> sudo systemctl restart docker            # docker0 重建到 173.17
+> docker network prune -f                  # 清残留 172.x 旧网桥
+> # 重新起栈见步骤 5；回滚:还原 daemon.json.bak 后重启 docker
+> ```
+
 ### 步骤 3 — 导入 Docker 镜像
 
 镜像来自两个包：基础设施 / 监控镜像来自基础设施包（导一次即可，项目升级不需重导），
