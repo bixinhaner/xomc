@@ -1,6 +1,11 @@
 -- +goose Up
 -- 创建告警效率指标物化视图
 -- 用于统计告警处理的效率指标：MTTA（平均确认时间）、MTTR（平均解决时间）、确认率、清除率
+--
+-- 数据范围说明：
+-- - 只统计近30天内已清除的告警（WHERE cleared_at > NOW() - INTERVAL '30 days'）
+-- - 不包含未清除的活动告警，因为无法计算 MTTR（解决时间）
+-- - 不包含30天前的告警，确保指标反映当前的处理效率
 CREATE MATERIALIZED VIEW IF NOT EXISTS alarm_efficiency_metrics AS
 SELECT
     severity,

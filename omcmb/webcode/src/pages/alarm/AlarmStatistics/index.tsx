@@ -14,6 +14,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import EfficiencyCard from './EfficiencyCard';
 import AlarmHeatmap from './AlarmHeatmap';
+import { createAlarmTrendChartOption, createAlarmPieChartOption } from './chartConfig';
 
 // 扩展的饼图数据项，包含严重度信息
 interface AlarmPieDataItem extends PieDataItem {
@@ -184,98 +185,7 @@ function AlarmTrendChart({
       styles={{ body: { padding: '12px', height: '280px' } }}
     >
       <ReactECharts
-        option={{
-          tooltip: {
-            trigger: 'axis',
-            confine: true,
-            backgroundColor: 'rgba(0, 0, 0, 0.85)',
-            borderColor: '#333',
-            textStyle: { color: '#fff', fontSize: 12 },
-            formatter: (params: unknown) => {
-              const items = params as Array<{ marker: string; seriesName: string; value: number; axisValue: string; color: string }>;
-              if (!Array.isArray(items) || items.length === 0) return '';
-              const total = items.reduce((sum, item) => sum + item.value, 0);
-              return `<div style="line-height: 1.8; padding: 6px;">
-                <div style="font-weight: 600; margin-bottom: 8px; font-size: 13px; border-bottom: 1px solid #444; padding-bottom: 6px;">
-                  ${items[0].axisValue}
-                </div>
-                <div style="margin-bottom: 6px;">
-                  <span style="color: #bbb;">总计:</span>
-                  <span style="color: #fff; font-weight: 600; font-size: 14px; margin-left: 8px;">${total}</span>
-                </div>
-                ${items.map(item =>
-                  `<div style="margin: 2px 0;">
-                    ${item.marker} <span style="color: ${item.color};">${item.seriesName}</span>
-                    <span style="color: #fff; float: right; font-weight: 600;">${item.value}</span>
-                  </div>`
-                ).join('')}
-              </div>`;
-            },
-          },
-          legend: {
-            show: true,
-            top: 4,
-            left: 'center',
-            itemWidth: 16,
-            itemHeight: 10,
-            itemGap: 24,
-            textStyle: { fontSize: 12, color: '#595959' },
-            data: [
-              { name: t('alarm.severity.critical'), icon: 'rect' },
-              { name: t('alarm.severity.major'), icon: 'rect' },
-              { name: t('alarm.severity.minor'), icon: 'rect' },
-              { name: t('alarm.severity.warning'), icon: 'rect' },
-            ],
-          },
-          grid: {
-            top: 48,
-            left: 45,
-            right: 20,
-            bottom: 32,
-            containLabel: true,
-          },
-          xAxis: {
-            type: 'category',
-            data: xData,
-            boundaryGap: true,
-            axisLabel: {
-              fontSize: 11,
-              color: '#8c8c8c',
-            },
-            axisLine: { lineStyle: { color: '#e8e8e8' } },
-            axisTick: { alignWithLabel: true, show: true },
-          },
-          yAxis: {
-            type: 'value',
-            minInterval: 1,
-            axisLabel: {
-              fontSize: 11,
-              color: '#8c8c8c',
-              formatter: (value: number) => Number.isInteger(value) ? value : '',
-            },
-            splitLine: {
-              lineStyle: { type: 'dashed', color: '#f0f0f0' },
-            },
-          },
-          series: series.map((s, index) => ({
-            name: s.name,
-            type: 'bar',
-            data: s.data,
-            stack: 'alarm',
-            barWidth: days > 15 ? '60%' : '40%',
-            itemStyle: {
-              color: s.color,
-              borderRadius: [2, 2, 0, 0],
-            },
-            emphasis: {
-              focus: 'series',
-              itemStyle: {
-                shadowBlur: 10,
-                shadowColor: 'rgba(0, 0, 0, 0.2)',
-              },
-            },
-          })),
-        }}
+        option={createAlarmTrendChartOption(xData, series, days, t)}
         style={{ height: 230, width: '100%' }}
         opts={{ renderer: 'canvas' }}
         notMerge={true}

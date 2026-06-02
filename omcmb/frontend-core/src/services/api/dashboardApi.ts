@@ -1,5 +1,13 @@
 import http from '../http';
-import type { DashboardSummary, KPIDelta } from '../../types/dashboard';
+import type {
+  DashboardSummary,
+  KPIDelta,
+  EfficiencyMetrics,
+  DailyEfficiencyTrend,
+  HeatmapData,
+  DayOfWeekData,
+  AlarmHeatmapBySeverity,
+} from '../../types/dashboard';
 import type { DashboardChartData } from '../../mock/data/dashboard';
 
 // --- Backend response types ---
@@ -461,43 +469,3 @@ export const dashboardApi = {
     return data;
   },
 };
-
-// ==================== Phase 2 新增类型定义 ====================
-
-/** 告警处理效率指标 */
-export interface EfficiencyMetrics {
-  severity: string;
-  acknowledged_count: number;
-  cleared_count: number;
-  total_count: number;
-  avg_acknowledge_minutes: number;
-  avg_resolve_minutes: number;
-  acknowledge_rate: number;
-  clear_rate: number;
-  daily_trend: DailyEfficiencyTrend[];
-}
-
-/** 每日效率趋势数据点 */
-export interface DailyEfficiencyTrend {
-  date: string;
-  avg_acknowledge_minutes: number;
-  avg_resolve_minutes: number;
-}
-
-/** 告警热度图数据 */
-export interface HeatmapData {
-  days_of_week: DayOfWeekData[];
-  max_count: number;
-}
-
-/** 一天24小时的告警数量分布 */
-export interface DayOfWeekData {
-  day: number;
-  hours: number[];
-}
-
-/** 按严重程度分组的告警热度图数据 */
-export interface AlarmHeatmapBySeverity {
-  severity: string;
-  data: HeatmapData;
-}

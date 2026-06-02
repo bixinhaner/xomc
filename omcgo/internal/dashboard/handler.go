@@ -26,8 +26,11 @@ func NewHandler(service *Service) *Handler {
 }
 
 // RegisterRoutes registers dashboard routes on the given router group.
-// NOTE: rg 应该已经应用了认证中间件（如 JWT 验证），所有端点都会自动受到保护。
-// 如需添加额外的权限检查，请在具体 handler 中实现。
+//
+// Authentication & Authorization:
+// - The router group 'rg' should have authentication middleware applied (e.g., JWT verification)
+// - All endpoints below are automatically protected once registered with this group
+// - For additional permission checks, implement them in individual handlers
 func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	dashboard := rg.Group("/dashboard")
 	{

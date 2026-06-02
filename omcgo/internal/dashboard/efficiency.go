@@ -29,10 +29,11 @@ type DailyEfficiencyTrend struct {
 	AvgResolveMinutes     float64 `json:"avg_resolve_minutes"`     // 当日平均解决时间
 }
 
-// GetEfficiencyMetrics retrieves alarm handling efficiency metrics.
-// 获取告警处理效率指标，包括 MTTA、MTTR、确认率、清除率及近7天趋势
+// GetEfficiencyMetrics retrieves alarm handling efficiency metrics from materialized view.
+// 获取告警处理效率指标（从物化视图，按严重程度分组）
+// 注意：此函数返回最高严重程度（critical）的指标，如需所有严重程度的聚合数据，请使用 GetOverallEfficiencyMetrics
 func (s *Service) GetEfficiencyMetrics(ctx context.Context) (*EfficiencyMetrics, error) {
-	// 从物化视图获取按严重程度分组的效率指标
+	// 从物化视图获取按严重程度分组的效率指标，使用 CASE WHEN 确保按优先级排序
 	query := `
 		SELECT
 			severity,
@@ -44,7 +45,15 @@ func (s *Service) GetEfficiencyMetrics(ctx context.Context) (*EfficiencyMetrics,
 			acknowledge_rate,
 			clear_rate
 		FROM alarm_efficiency_metrics
-		ORDER BY severity
+		ORDER BY
+			CASE severity
+				WHEN 'critical' THEN 1
+				WHEN 'major' THEN 2
+				WHEN 'minor' THEN 3
+				WHEN 'warning' THEN 4
+				ELSE 5
+			END
+		LIMIT 1
 	`
 
 	rows, err := s.pgPool.Query(ctx, query)
@@ -91,19 +100,12 @@ func (s *Service) GetEfficiencyMetrics(ctx context.Context) (*EfficiencyMetrics,
 			zap.Int("scan_errors", scanErrors))
 	}
 
-	// 如果没有数据，返回空指标
+	// 如果没有数据，返回 nil
 	if len(metrics) == 0 {
-		return &EfficiencyMetrics{
-			Severity:      "all",
-			DailyTrend:    []DailyEfficiencyTrend{},
-			AvgAcknowledgeMinutes: 0,
-			AvgResolveMinutes:     0,
-			AcknowledgeRate:       0,
-			ClearRate:             0,
-		}, nil
+		return nil, nil
 	}
 
-	// 返回第一个指标（或可以合并所有严重程度）
+	// 返回最高严重程度（critical）的指标
 	return &metrics[0], nil
 }
 
