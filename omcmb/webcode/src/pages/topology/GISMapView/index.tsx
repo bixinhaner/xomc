@@ -11,8 +11,8 @@
  */
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { useIntl } from 'react-intl';
-import { Checkbox, Spin, Empty, Collapse, Input } from 'antd';
-import { SearchOutlined, PlusOutlined, MinusOutlined, CaretDownOutlined } from '@ant-design/icons';
+import { Checkbox, Spin, Empty, Collapse, Input, Tooltip } from 'antd';
+import { SearchOutlined, PlusOutlined, MinusOutlined, CaretDownOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons';
 import GISMap from '@/components/GISMap';
 import { MAP_CONFIG } from '@/components/GISMap/constants';
 import type { GISMapRef } from '@/components/GISMap';
@@ -108,10 +108,14 @@ export default function GISMapView() {
     offline: true,
   });
 
-  // 左侧筛选面板折叠状态（默认设备组收起，设备状态展开）
+  // 左侧筛选面板折叠状态（默认设备组展开，设备状态展开）
   const [filterPanelActiveKeys, setFilterPanelActiveKeys] = useState<string[]>([
     'deviceStatus',   // 设备状态
+    'deviceGroup',    // 设备组（新增：默认展开）
   ]);
+
+  // 侧边栏折叠状态（默认展开）
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // ========== 显示/隐藏控制配置 ==========
   // 筛选Header显示配置（默认隐藏）
@@ -416,14 +420,25 @@ export default function GISMapView() {
 
   // ========== 样式定义 ==========
 
+  // 侧边栏容器样式（包含折叠按钮）
+  const sidebarContainerStyle: React.CSSProperties = {
+    position: 'relative',
+    height: '100%',
+    display: 'flex',
+    alignItems: 'flex-start',
+    transition: 'width 0.3s ease',
+  };
+
   const leftPanelStyle: React.CSSProperties = {
-    width: 280,
+    width: sidebarCollapsed ? 0 : 280,
     height: '100%',
     background: 'linear-gradient(180deg, #FAFBFC 0%, #F5F7FA 100%)',
-    borderRight: '1px solid #E8E8E8',
+    borderRight: sidebarCollapsed ? 'none' : '1px solid #E8E8E8',
     display: 'flex',
     flexDirection: 'column',
     overflow: 'hidden',
+    opacity: sidebarCollapsed ? 0 : 1,
+    transition: 'width 0.3s ease, opacity 0.3s ease, border-right 0.3s ease',
   };
 
   // 左侧面板中间可滚动区域
@@ -499,6 +514,30 @@ export default function GISMapView() {
     transition: transitionString(['box-shadow', 'transform'], 'fast'),
   };
 
+  // 侧边栏折叠按钮样式
+  const collapseButtonStyle: React.CSSProperties = {
+    position: 'absolute',
+    left: sidebarCollapsed ? 12 : 288,
+    top: 20,
+    width: 32,
+    height: 32,
+    background: '#FFF',
+    borderRadius: '50%',
+    boxShadow: SHADOWS.medium,
+    border: `1px solid ${COLORS.neutral[200]}`,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    zIndex: 600, // 确保在搜索框之上（搜索框 z-index: 500）
+    transition: 'left 0.3s ease, background 0.2s, transform 0.2s',
+  };
+
+  const collapseButtonHoverStyle: React.CSSProperties = {
+    background: COLORS.neutral[100],
+    transform: 'scale(1.1)',
+  };
+
   const zoomButtonStyle: React.CSSProperties = {
     width: 32,
     height: 32,
@@ -513,11 +552,11 @@ export default function GISMapView() {
     transition: transitionString(['background', 'transform'], 'fast'),
   };
 
-  // 地图设备搜索框样式
+  // 地图设备搜索框样式（固定位置，不随侧边栏状态变化）
   const deviceSearchStyle: React.CSSProperties = {
     position: 'absolute',
-    left: 20,
-    top: 20,
+    left: 60,
+    top: 15,
     width: 320,
     zIndex: 500,
   };
@@ -569,10 +608,37 @@ export default function GISMapView() {
 
   // ========== 渲染 ==========
 
+  // 折叠按钮 hover 状态管理
+  const [collapseButtonHovered, setCollapseButtonHovered] = useState(false);
+
   return (
     <div style={{ display: 'flex', width: '100%', height: '100%', background: '#F0F2F5' }}>
-      {/* 左侧筛选面板 */}
-      <div style={leftPanelStyle}>
+      {/* 左侧筛选面板容器 */}
+      <div style={sidebarContainerStyle}>
+        {/* 折叠/展开按钮 */}
+        <Tooltip
+          title={sidebarCollapsed ? intl.formatMessage({ id: 'common.expand' }) : intl.formatMessage({ id: 'common.collapse' })}
+          placement="right"
+        >
+          <div
+            style={{
+              ...collapseButtonStyle,
+              ...(collapseButtonHovered ? collapseButtonHoverStyle : {}),
+            }}
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            onMouseEnter={() => setCollapseButtonHovered(true)}
+            onMouseLeave={() => setCollapseButtonHovered(false)}
+          >
+            {sidebarCollapsed ? (
+              <RightOutlined style={{ fontSize: 14, color: COLORS.neutral[600] }} />
+            ) : (
+              <LeftOutlined style={{ fontSize: 14, color: COLORS.neutral[600] }} />
+            )}
+          </div>
+        </Tooltip>
+
+        {/* 左侧筛选面板 */}
+        <div style={leftPanelStyle}>
         {/* Header - 可通过 SHOW_FILTER_HEADER 控制 */}
         {SHOW_FILTER_HEADER && (
           <div
@@ -831,6 +897,7 @@ export default function GISMapView() {
           ]}
         />
         </div>
+      </div>
       </div>
 
       {/* 地图区域 */}
