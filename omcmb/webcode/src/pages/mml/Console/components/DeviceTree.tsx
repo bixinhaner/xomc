@@ -3,7 +3,7 @@ import { Button, Checkbox, Input, List, Pagination, Select, Space, Tag, Typograp
 import { SearchOutlined, UserAddOutlined, DeleteOutlined } from '@ant-design/icons';
 import type { ConsoleDevice } from '../types';
 import { STATUS_COLORS } from '../types';
-import { DEVICE_PAGE_SIZE } from '../constants';
+import { DEVICE_PAGE_SIZE, DEVICE_ROW_HEIGHT, DEVICE_VISIBLE_ROWS } from '../constants';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import { useT } from '@/hooks/useT';
 import { useDictionary } from '@core/hooks/api/useSystem';
@@ -186,12 +186,11 @@ export default function DeviceTree({
         </Checkbox>
       </div>
 
-      {/* 设备列表 */}
+      {/* 设备列表：固定 13 行高度，超过 13 条出现滚动条（每页 DEVICE_PAGE_SIZE=50 条） */}
       <div
         className="no-scrollbar"
         style={{
-          flex: 1,
-          minHeight: 0,
+          height: DEVICE_ROW_HEIGHT * DEVICE_VISIBLE_ROWS,
           overflow: 'auto',
           background: token.colorBgContainer,
         }}
