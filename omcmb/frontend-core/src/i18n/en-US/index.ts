@@ -1969,6 +1969,31 @@ const messages: Record<string, string> = {
   'kpi.handoverFailures':      'Handover Failures',
   'kpi.volteMos':              'VoLTE Call Quality',
 
+  // Device detail KPI panel curated indicator names (fallback; charts prefer backend displayName)
+  'kpi.K900010002':            'RRC Setup Success Rate',
+  'kpi.K900010005':            'E-RAB Setup Success Rate',
+  'kpi.K900010014':            'Downlink PRB Utilization Rate',
+  'kpi.K900010013':            'Uplink PRB Utilization Rate',
+  'kpi.K900010015':            'Data Volume DL',
+  'kpi.K900010016':            'Data Volume UL',
+  'kpi.K900010021':            'HO InterEnb Out Success Rate',
+  'kpi.K900010027':            'E-RAB Drop Rate',
+  'kpi.KGNB0517':              'DL Avg User Throughput',
+  'kpi.KGNB0516':              'UL Avg User Throughput',
+  'kpi.KGNB0506':              'Downlink PRB Utilization Rate',
+  'kpi.KGNB0505':              'Uplink PRB Utilization Rate',
+  'kpi.KGSM0102':              'Call Success Rate',
+  'kpi.KGSM0103':              'Call Drop Rate',
+  'kpi.KGSM0101':              'Handover Success Rate',
+
+  // Device detail KPI panel UI
+  'device.kpi.byDay':          'By Day',
+  'device.kpi.byWeek':         'By Week',
+  'device.kpi.deviceLevel':    'Device level (all)',
+  'device.kpi.object':         'Object',
+  'device.kpi.loadFailed':     'Failed to load KPI data',
+  'device.kpi.noConfig':       'No KPI indicator config for {networkType}',
+
   // KPI tree categories
   'kpi.tree.all':              'All KPIs',
   'kpi.tree.enbSet':           'eNB Indicator Set',

@@ -1974,6 +1974,31 @@ const messages: Record<string, string> = {
   'kpi.handoverFailures':      '切换失败次数',
   'kpi.volteMos':              'VoLTE通话质量',
 
+  // 设备详情 KPI 面板精选指标名（兜底；图表优先用后端回填 displayName）
+  'kpi.K900010002':            'RRC连接建立成功率',
+  'kpi.K900010005':            'E-RAB建立成功率',
+  'kpi.K900010014':            '下行PRB平均占用率',
+  'kpi.K900010013':            '上行PRB平均占用率',
+  'kpi.K900010015':            '下行数据业务流量',
+  'kpi.K900010016':            '上行数据业务流量',
+  'kpi.K900010021':            'eNB间切换成功率-切出',
+  'kpi.K900010027':            'E-RAB掉线率',
+  'kpi.KGNB0517':              '下行用户平均速率',
+  'kpi.KGNB0516':              '上行用户平均速率',
+  'kpi.KGNB0506':              '下行PRB平均利用率',
+  'kpi.KGNB0505':              '上行PRB平均利用率',
+  'kpi.KGSM0102':              '电话成功率',
+  'kpi.KGSM0103':              '电话掉线率',
+  'kpi.KGSM0101':              'Handover切换成功率',
+
+  // 设备详情 KPI 面板 UI
+  'device.kpi.byDay':          '按天',
+  'device.kpi.byWeek':         '按周',
+  'device.kpi.deviceLevel':    '设备级（全部）',
+  'device.kpi.object':         '对象',
+  'device.kpi.loadFailed':     'KPI 数据加载失败',
+  'device.kpi.noConfig':       '暂无 {networkType} 制式的 KPI 指标配置',
+
   // KPI tree categories
   'kpi.tree.all':              '全部KPI',
   'kpi.tree.enbSet':           'eNB指标集',

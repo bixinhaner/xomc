@@ -11,8 +11,10 @@ import {
   Col,
   Descriptions,
   Dropdown,
+  Empty,
   Radio,
   Row,
+  Select,
   Skeleton,
   Space,
   Table,
@@ -36,9 +38,12 @@ import { useDeviceBySn, useSyncDeviceParams } from '@core/hooks/api/useDevices';
 import { useQuickSettingsGroups } from '@core/hooks/api/useQuickSettings';
 import { useResolvedCellInstances } from '@core/hooks/api/useResolvedCellInstances';
 import { useAcknowledgeAlarms, useClearAlarms, useCurrentAlarms, useUnacknowledgeAlarms } from '@core/hooks/api/useAlarms';
+import { useAggregatedMetricsByDevices, useMetricObjects } from '@core/hooks/api/usePmQuery';
+import { formatObjectLdn } from '@core/types/pmObject';
 import { useT } from '@/hooks/useT';
 import type { Alarm } from '@core/types/alarm';
 import type { Device } from '@core/types/device';
+import { buildKpiCharts } from './kpiSeries';
 import ParameterTreeTab from './ParameterTreeTab';
 import QuickSettingsTab from './QuickSettingsTab';
 import LicenseParamsTab from './LicenseParamsTab';
@@ -72,31 +77,31 @@ interface KPIConfigRaw {
   category: string;
 }
 
-// eNB KPI 配置 (8 项)
+// eNB KPI 配置 (8 项) —— key 为真实 K 编号（pm_metrics.metric_path），与 spec §3 LTE 映射表一致。
 const ENB_KPI_CONFIG_RAW: KPIConfigRaw[] = [
-  { key: 'enbDownlinkPRBUtilizationRate', labelKey: 'kpi.enbDlPrbUtil', unit: '%', category: 'utilization' },
-  { key: 'enbUplinkPRBUtilizationRate', labelKey: 'kpi.enbUlPrbUtil', unit: '%', category: 'utilization' },
-  { key: 'enbHoS1SuccRate', labelKey: 'kpi.enbHoS1SuccRate', unit: '%', category: 'mobility' },
-  { key: 'enbHoX2SuccRate', labelKey: 'kpi.enbHoX2SuccRate', unit: '%', category: 'mobility' },
-  { key: 'enbHoInterEnbSuccRate', labelKey: 'kpi.enbHoInterSuccRate', unit: '%', category: 'mobility' },
-  { key: 'enbRrcSetupSuccessRate', labelKey: 'kpi.enbRrcSetupSuccRate', unit: '%', category: 'accessibility' },
-  { key: 'enbAvgThroughputDL', labelKey: 'kpi.enbAvgDlThroughput', unit: 'Mbps', category: 'traffic' },
-  { key: 'enbAvgThroughputUL', labelKey: 'kpi.enbAvgUlThroughput', unit: 'Mbps', category: 'traffic' },
+  { key: 'K900010002', labelKey: 'kpi.K900010002', unit: '%', category: 'accessibility' },
+  { key: 'K900010005', labelKey: 'kpi.K900010005', unit: '%', category: 'accessibility' },
+  { key: 'K900010014', labelKey: 'kpi.K900010014', unit: '%', category: 'utilization' },
+  { key: 'K900010013', labelKey: 'kpi.K900010013', unit: '%', category: 'utilization' },
+  { key: 'K900010015', labelKey: 'kpi.K900010015', unit: '', category: 'traffic' },
+  { key: 'K900010016', labelKey: 'kpi.K900010016', unit: '', category: 'traffic' },
+  { key: 'K900010021', labelKey: 'kpi.K900010021', unit: '%', category: 'mobility' },
+  { key: 'K900010027', labelKey: 'kpi.K900010027', unit: '%', category: 'retainability' },
 ];
 
-// gNB KPI 配置 (4 项)
+// gNB KPI 配置 (4 项) —— 与 spec §3 NR/5G 映射表一致。
 const GNB_KPI_CONFIG_RAW: KPIConfigRaw[] = [
-  { key: 'gnbThroughputDL', labelKey: 'kpi.dlThroughput', unit: 'Mbps', category: 'traffic' },
-  { key: 'gnbThroughputUL', labelKey: 'kpi.ulThroughput', unit: 'Mbps', category: 'traffic' },
-  { key: 'gnbDownlinkPRBUtilizationRate', labelKey: 'kpi.enbDlPrbUtil', unit: '%', category: 'utilization' },
-  { key: 'gnbUplinkPRBUtilizationRate', labelKey: 'kpi.enbUlPrbUtil', unit: '%', category: 'utilization' },
+  { key: 'KGNB0517', labelKey: 'kpi.KGNB0517', unit: '', category: 'traffic' },
+  { key: 'KGNB0516', labelKey: 'kpi.KGNB0516', unit: '', category: 'traffic' },
+  { key: 'KGNB0506', labelKey: 'kpi.KGNB0506', unit: '%', category: 'utilization' },
+  { key: 'KGNB0505', labelKey: 'kpi.KGNB0505', unit: '%', category: 'utilization' },
 ];
 
-// GSM KPI 配置 (3 项)
+// GSM KPI 配置 (3 项) —— 与 spec §3 GSM/2G 映射表一致。
 const GSM_KPI_CONFIG_RAW: KPIConfigRaw[] = [
-  { key: 'gsmCallSetupSuccRate', labelKey: 'kpi.accessRate', unit: '%', category: 'accessibility' },
-  { key: 'gsmCallDropRate', labelKey: 'kpi.dropRate', unit: '%', category: 'retainability' },
-  { key: 'gsmHandoverSuccessRate', labelKey: 'kpi.handoverSuccessRate', unit: '%', category: 'mobility' },
+  { key: 'KGSM0102', labelKey: 'kpi.KGSM0102', unit: '%', category: 'accessibility' },
+  { key: 'KGSM0103', labelKey: 'kpi.KGSM0103', unit: '%', category: 'retainability' },
+  { key: 'KGSM0101', labelKey: 'kpi.KGSM0101', unit: '%', category: 'mobility' },
 ];
 
 function translateKPIConfigs(raw: KPIConfigRaw[], t: (id: string) => string): KPIConfig[] {
@@ -117,48 +122,36 @@ const getKPIConfig = (networkType: string, t: (id: string) => string): KPIConfig
   }
 };
 
-// 生成趋势日期标签（天/周）
-function generateTrendLabels(mode: 'day' | 'week'): string[] {
+// 「按天/按周」→ 聚合查询粒度 + 时间窗（spec §4）。
+//   按天 = hourly 最近 24 小时；按周 = daily 最近 7 天。
+//   X 轴用返回行的真实 time（不再硬造标签）。
+function kpiQueryWindow(mode: 'day' | 'week'): {
+  granularity: 'hourly' | 'daily';
+  startTime: string;
+  endTime: string;
+} {
+  const now = new Date();
+  const end = now.toISOString();
   if (mode === 'day') {
-    // 按天：显示24小时整点
-    return Array.from({ length: 24 }, (_, i) => `${i}:00`);
-  } else {
-    // 按周：显示最近7天
-    const labels: string[] = [];
-    const today = new Date();
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date(today);
-      d.setDate(d.getDate() - i);
-      labels.push(`${d.getMonth() + 1}/${d.getDate()}`);
-    }
-    return labels;
+    const start = new Date(now.getTime() - 24 * 3_600_000).toISOString();
+    return { granularity: 'hourly', startTime: start, endTime: end };
   }
-};
+  const start = new Date(now.getTime() - 7 * 86_400_000).toISOString();
+  return { granularity: 'daily', startTime: start, endTime: end };
+}
 
-// 预定义颜色数组
-const CHART_COLORS = [
-  '#1677FF',
-  '#52C41A',
-  '#FA8C16',
-  '#722ED1',
-  '#13C2C2',
-  '#EB2F96',
-  '#1890FF',
-  '#FAAD14',
-];
-
-// 根据KPI配置生成类别趋势数据
-const generateCategoryTrendSeries = (kpis: KPIConfig[], mode: 'day' | 'week') => {
-  const count = mode === 'day' ? 24 : 7; // 按天24个点，按周7个点
-  const randomData = (base: number = 50, range: number = 40) =>
-    Array.from({ length: count }, () => Math.floor(Math.random() * range) + base);
-
-  return kpis.map((kpi, index) => ({
-    name: kpi.label,
-    data: randomData(),
-    color: CHART_COLORS[index % CHART_COLORS.length],
-  }));
-};
+// X 轴时间桶 → 人类可读标签：hourly 显示「MM-DD HH:00」，daily 显示「MM-DD」。
+function formatKpiAxisLabel(iso: string, granularity: 'hourly' | 'daily'): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  if (granularity === 'hourly') {
+    const hh = String(d.getHours()).padStart(2, '0');
+    return `${mm}-${dd} ${hh}:00`;
+  }
+  return `${mm}-${dd}`;
+}
 
 // ─── 字段定义组件 ────────────────────────────────────────────────────────
 
@@ -844,9 +837,45 @@ interface KPITabContentProps {
 
 function KPITabContent({ device, t }: KPITabContentProps) {
   const [timeMode, setTimeMode] = useState<'day' | 'week'>('day');
+  // 下钻对象：'' = 设备级（全部）；否则为某 objectLdn。客户端侧按 objectLdn 过滤聚合行。
+  const [objectLdn, setObjectLdn] = useState<string>('');
 
   const networkType = device.networkType ?? '';
-  const kpiConfig = getKPIConfig(networkType, t);
+  const kpiConfig = useMemo(() => getKPIConfig(networkType, t), [networkType, t]);
+  const sn = device.sn;
+  const technology = normalizeQuickSettingsNetworkType(networkType); // eNB→lte / gNB→nr / GSM→gsm
+
+  const queryWindow = useMemo(() => kpiQueryWindow(timeMode), [timeMode]);
+  const metricPaths = useMemo(() => kpiConfig.map((c) => c.key), [kpiConfig]);
+
+  // 下钻对象清单（该设备 PM 数据里实际出现过的小区/PLMN）。
+  const { data: metricObjects = [] } = useMetricObjects(
+    sn ? [sn] : [],
+    technology || undefined,
+  );
+
+  // 真实聚合查询：单设备传 [sn]，dimension=device、metricType=kpi、fillEmpty=true。
+  const enabled = Boolean(sn) && kpiConfig.length > 0;
+  const baseParams = useMemo(
+    () => ({
+      granularity: queryWindow.granularity,
+      dimension: 'device' as const,
+      metricPaths,
+      metricType: 'kpi' as const,
+      startTime: queryWindow.startTime,
+      endTime: queryWindow.endTime,
+      fillEmpty: true,
+    }),
+    [queryWindow.granularity, queryWindow.startTime, queryWindow.endTime, metricPaths],
+  );
+  const { data: rows, isLoading, isFetching, isError, refetch } =
+    useAggregatedMetricsByDevices(baseParams, sn ? [sn] : [], enabled);
+
+  // 聚合行 → 每 K 编号一张图（纯函数，按 objectLdn 过滤、null 占位不画点）。
+  const charts = useMemo(
+    () => buildKpiCharts(rows, kpiConfig, objectLdn || null),
+    [rows, kpiConfig, objectLdn],
+  );
 
   if (kpiConfig.length === 0) {
     return (
@@ -854,19 +883,44 @@ function KPITabContent({ device, t }: KPITabContentProps) {
         <Alert
           type="info"
           message={t('common.noData')}
-          description={`暂无 ${networkType || '未知制式'} 的 KPI 指标配置`}
+          description={t('device.kpi.noConfig', { networkType: networkType || '-' })}
           showIcon
         />
       </div>
     );
   }
 
-  const trendLabels = generateTrendLabels(timeMode);
+  const objectOptions = [
+    { label: t('device.kpi.deviceLevel'), value: '' },
+    ...metricObjects.map((o) => ({
+      label: formatObjectLdn(o.objectLdn),
+      value: o.objectLdn,
+    })),
+  ];
 
   return (
     <div style={{ padding: '0 0 16px' }}>
-      {/* 时间维度切换 */}
-      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'flex-end' }}>
+      {/* 工具栏：下钻对象选择 + 时间维度切换 + 刷新 */}
+      <div
+        style={{
+          marginBottom: 16,
+          display: 'flex',
+          justifyContent: 'flex-end',
+          alignItems: 'center',
+          gap: 12,
+          flexWrap: 'wrap',
+        }}
+      >
+        <Space size={4}>
+          <Text type="secondary" style={{ fontSize: 13 }}>{t('device.kpi.object')}</Text>
+          <Select
+            size="small"
+            value={objectLdn}
+            options={objectOptions}
+            onChange={setObjectLdn}
+            style={{ minWidth: 200 }}
+          />
+        </Space>
         <Radio.Group
           value={timeMode}
           onChange={(e) => setTimeMode(e.target.value)}
@@ -874,15 +928,39 @@ function KPITabContent({ device, t }: KPITabContentProps) {
           buttonStyle="solid"
           size="small"
         >
-          <Radio.Button value="day">按天</Radio.Button>
-          <Radio.Button value="week">按周</Radio.Button>
+          <Radio.Button value="day">{t('device.kpi.byDay')}</Radio.Button>
+          <Radio.Button value="week">{t('device.kpi.byWeek')}</Radio.Button>
         </Radio.Group>
+        <Button
+          size="small"
+          icon={<ReloadOutlined />}
+          loading={isFetching}
+          onClick={() => refetch()}
+        >
+          {t('common.refresh')}
+        </Button>
       </div>
+
+      {/* 出错提示（可重试） */}
+      {isError && (
+        <Alert
+          type="error"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message={t('device.kpi.loadFailed')}
+          action={
+            <Button size="small" onClick={() => refetch()}>
+              {t('common.retry')}
+            </Button>
+          }
+        />
+      )}
 
       {/* 每个 KPI 指标单独显示趋势图 */}
       <Row gutter={[16, 16]}>
-        {kpiConfig.map((kpi) => {
-          const trendSeries = generateCategoryTrendSeries([kpi], timeMode);
+        {kpiConfig.map((kpi, idx) => {
+          const chart = charts[idx];
+          const xLabels = chart.xData.map((iso) => formatKpiAxisLabel(iso, queryWindow.granularity));
 
           return (
             <Col key={kpi.key} xs={24} sm={12}>
@@ -897,15 +975,34 @@ function KPITabContent({ device, t }: KPITabContentProps) {
                   color: 'var(--color-gray-700, #525252)',
                   marginBottom: 8,
                 }}>
-                  {kpi.label}
+                  {chart.displayName || kpi.label}
                 </div>
-                <LineChart
-                  title=""
-                  xData={trendLabels}
-                  series={trendSeries}
-                  height={220}
-                  areaFill
-                />
+                {isLoading ? (
+                  <Skeleton.Node active style={{ width: '100%', height: 220 }}>
+                    <div style={{ width: 1, height: 220 }} />
+                  </Skeleton.Node>
+                ) : chart.isEmpty ? (
+                  <div style={{
+                    height: 220,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}>
+                    <Empty
+                      image={Empty.PRESENTED_IMAGE_SIMPLE}
+                      description={t('common.noData')}
+                    />
+                  </div>
+                ) : (
+                  <LineChart
+                    title=""
+                    xData={xLabels}
+                    series={[{ name: chart.displayName || kpi.label, data: chart.values }]}
+                    unit={kpi.unit || undefined}
+                    height={220}
+                    areaFill
+                  />
+                )}
               </div>
             </Col>
           );
