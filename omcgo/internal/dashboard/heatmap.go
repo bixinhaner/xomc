@@ -191,7 +191,7 @@ func (s *Service) selectHeatmapResult(heatmapBySeverity map[string]*HeatmapData,
 	}
 
 	// 返回所有严重程度中告警最多的一个作为默认
-	maxSev, maxCount := findMaxSeverity(heatmapBySeverity)
+	maxSev, _ := findMaxSeverity(heatmapBySeverity)
 	if maxSev != "" {
 		return &AlarmHeatmapBySeverity{
 			Severity: maxSev,
