@@ -299,7 +299,7 @@ const messages: Record<string, string> = {
   'product.matchTester.matched':     '产品匹配',
 
   // /product/param-model
-  'product.paramModel.searchPh':     '搜索参数模型名称 / 描述',
+  'product.paramModel.searchPh':     '名称 / 描述',
   'product.paramModel.reloadTitle':  '确认重载 XML?',
   'product.paramModel.reloadHint':   '旧文件会自动备份为 .bak.<ts>。',
   'product.paramModel.reloadDesc':   '从 datamodels/ destructive 全量重载: DB 中已无 XML 对应的孤儿模型 → 删除; 关联的 param_mappings 级联删除; 关联的 products.param_model_id 被置空 (SET NULL)',
@@ -311,7 +311,7 @@ const messages: Record<string, string> = {
   'product.paramModel.pathSearchPh':  '搜索 path',
 
   // /product/standard-params
-  'product.standardParams.searchPh':  '搜索 standard_path',
+  'product.standardParams.searchPh':  '搜索 标准PATH',
 
   // /product/kpi-library
   'product.kpi.reloadDesc':           '重新加载 系统内置 + 自定义 所有 XML: DB 中已无 XML 对应的孤儿 → 删除',
@@ -348,7 +348,7 @@ const messages: Record<string, string> = {
   'product.kpi.importTitle':          '确认导入 XML?',
 
   // /product/alarm-library
-  'product.alarm.searchPh':           '搜索 identifier / 名称',
+  'product.alarm.searchPh':           '搜索 identifier / 名称 / 描述',
   'product.alarm.allFilter':          '全部',
   'product.alarm.severityLabel':      '严重级别',
   'product.alarm.importDesc':         '从 datamodels/ 加法 UPSERT 当前 XML 文件中的告警定义: DB 中已无 XML 对应的孤儿告警 → 保留不删除',
@@ -3599,6 +3599,8 @@ const messages: Record<string, string> = {
   'common.enterTaskName':        '请输入任务名称',
   'common.noDataToExport':       '没有可导出的数据',
   'common.noColumnsToExport':    '请先在"列设置"中勾选至少一列',
+  'common.exportConfirmTitle':   '导出确认',
+  'common.exportConfirmContent': '将导出当前筛选条件下命中的全部设备数据（CSV 格式），是否继续？',
   'common.exportProgress':       '正在导出 {loaded}/{total} 条...',
   'common.exportCapped':         '数据量较大,已导出前 {count} 条(达到单次导出上限)',
   'common.deviceGroup':          '设备组',
@@ -6356,7 +6358,7 @@ const messages: Record<string, string> = {
   'perf.picker.searchMetricPlaceholder': '按指标路径 / 中文名 搜索',
   'perf.picker.selectedMetric':          '已选指标：',
   'perf.picker.noSelectedMetric':        '未选择任何指标',
-  'product.standardParams.col.standardPath': '标准路径',
+  'product.standardParams.col.standardPath': '标准 PATH',
   'product.standardParams.col.entryType': '条目类型',
   'product.standardParams.col.access': '访问权限',
   'product.standardParams.col.dataType': '数据类型',

@@ -299,7 +299,7 @@ const messages: Record<string, string> = {
   'product.matchTester.matched':     'Product match',
 
   // /product/param-model
-  'product.paramModel.searchPh':     'Search model name / description',
+  'product.paramModel.searchPh':     'Name / description',
   'product.paramModel.reloadTitle':  'Confirm reload XML?',
   'product.paramModel.reloadHint':   'Old files auto-backup as .bak.<ts>.',
   'product.paramModel.reloadDesc':   'Destructive full reload from datamodels/: orphan models with no XML → delete; related param_mappings cascade delete; related products.param_model_id → SET NULL',
@@ -311,7 +311,7 @@ const messages: Record<string, string> = {
   'product.paramModel.pathSearchPh':  'Search path',
 
   // /product/standard-params
-  'product.standardParams.searchPh':  'Search standard_path',
+  'product.standardParams.searchPh':  'Search standard PATH',
 
   // /product/kpi-library
   'product.kpi.reloadDesc':           'Reload built-in + custom XMLs: orphan indicators with no XML → delete',
@@ -348,7 +348,7 @@ const messages: Record<string, string> = {
   'product.kpi.importTitle':          'Confirm import XML?',
 
   // /product/alarm-library
-  'product.alarm.searchPh':           'Search identifier / name',
+  'product.alarm.searchPh':           'Search identifier / name / description',
   'product.alarm.allFilter':          'All',
   'product.alarm.severityLabel':      'Severity',
   'product.alarm.importDesc':         'Additive UPSERT of alarms from current XML files in datamodels/: orphan alarms with no XML → keep',
@@ -3581,6 +3581,8 @@ const messages: Record<string, string> = {
   'common.enterTaskName':        'Please enter task name',
   'common.noDataToExport':       'No data to export',
   'common.noColumnsToExport':    'Please select at least one column in "Column Settings"',
+  'common.exportConfirmTitle':   'Export Confirmation',
+  'common.exportConfirmContent': 'This will export all devices matching the current filters (CSV format). Continue?',
   'common.exportProgress':       'Exporting {loaded}/{total} ...',
   'common.exportCapped':         'Large dataset: exported the first {count} rows (single-export cap reached)',
   'common.deviceGroup':          'Device Group',
@@ -6331,7 +6333,7 @@ const messages: Record<string, string> = {
   'perf.picker.searchMetricPlaceholder': 'Search by metric path / Chinese name',
   'perf.picker.selectedMetric':          'Selected Metrics:',
   'perf.picker.noSelectedMetric':        'No metric selected',
-  'product.standardParams.col.standardPath': 'Standard Path',
+  'product.standardParams.col.standardPath': 'Standard PATH',
   'product.standardParams.col.entryType': 'Entry Type',
   'product.standardParams.col.access': 'Access',
   'product.standardParams.col.dataType': 'Data Type',
