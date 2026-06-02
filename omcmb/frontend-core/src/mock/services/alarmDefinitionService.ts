@@ -5,6 +5,8 @@ import type {
   CreateAlarmDefinitionInput,
   UpdateAlarmDefinitionInput,
   UnknownStatsFilter,
+  AlarmUploadResult,
+  AlarmDeleteFileResult,
 } from '../../types/alarmDefinition';
 import {
   mockAlarmDefinitions,
@@ -139,5 +141,20 @@ export const alarmDefinitionService = {
 
   async importDirectory() {
     return { reloaded: 'alarm-definition' };
+  },
+
+  async uploadXml(file: File, _options: { force?: boolean } = {}): Promise<AlarmUploadResult> {
+    return {
+      uploaded: true,
+      filename: file.name,
+      loadedFrom: `alarm-definitions-custom/${file.name}`,
+      overwrite: false,
+      backup: '',
+      reloaded: true,
+    };
+  },
+
+  async deleteFile(loadedFrom: string): Promise<AlarmDeleteFileResult> {
+    return { deleted: true, loadedFrom, rowsAffected: 0, backup: '' };
   },
 };

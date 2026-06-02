@@ -24,6 +24,7 @@ import {
   Input,
   Select,
   Popconfirm,
+  Tooltip,
   message,
   Typography,
 } from 'antd';
@@ -33,6 +34,7 @@ import {
   CloudUploadOutlined,
   DeleteOutlined,
   EyeOutlined,
+  InboxOutlined,
   PlusOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
@@ -43,6 +45,7 @@ import {
   useAlarmDefinitionImportDirectory,
   useAlarmDefinitionReloadDirectory,
   useAlarmDefinitionCacheRefresh,
+  useAlarmDeleteFile,
 } from '@core/hooks/api/useAlarmDefinitions';
 import type {
   AlarmDefinition,
@@ -50,6 +53,7 @@ import type {
   AlarmNeTypeStat,
 } from '@core/types/alarmDefinition';
 import AlarmDefinitionDrawer from './AlarmDefinitionDrawer';
+import AlarmUploadXmlModal from './AlarmUploadXmlModal';
 import { useT } from '@/hooks/useT';
 // 2026-05-29:"未识别频次"入口暂时隐藏(后端聚合 / 统计逻辑未完工,详见
 // backlog T-0181)。组件文件 UnknownStatsModal.tsx 保留备用,功能就绪后:
@@ -75,6 +79,7 @@ const FILTER_LABEL_STYLE = {
   fontSize: 12,
   whiteSpace: 'nowrap' as const,
 };
+
 
 export default function AlarmLibraryPage() {
   const t = useT();
@@ -118,9 +123,11 @@ export default function AlarmLibraryPage() {
   // ── 公共 ───────────────────────────────────────────────────────
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState<AlarmDefinition | null>(null);
+  const [uploadOpen, setUploadOpen] = useState(false);
   // statsOpen 暂时移除 — "未识别频次"功能未完工(见 backlog T-0181)
 
   const delMut = useDeleteAlarmDefinition();
+  const deleteFileMut = useAlarmDeleteFile();
   // 2026-05-29:与 parammodel 对齐拆 import / reload 两个 mutation,UI 拆两按钮:
   //   - 导入 XML(import):加法 UPSERT,不删孤儿(UI 中手工添加的告警保留)
   //   - 重载 XML(reload):destructive 全量重载,删 DB 中无 XML 对应的孤儿
@@ -155,7 +162,7 @@ export default function AlarmLibraryPage() {
   // (ITU-T X.733 标准术语),zh 翻成 严重/主要/次要/警告。
   const neTypesColumns = [
     {
-      title: t('alarmLibrary.col.neType'),
+      title: t('common.name'),
       dataIndex: 'neType',
       width: 160,
       render: (v: string, row: AlarmNeTypeStat) => (
@@ -170,11 +177,28 @@ export default function AlarmLibraryPage() {
       ),
     },
     {
-      title: t('alarmLibrary.col.xmlSource'),
+      // 来源:后端 source.go::ClassifySource 按 loaded_from 前缀派生,前端只渲染(对标 kpi-library)
+      title: t('common.source'),
+      dataIndex: 'source',
+      width: 90,
+      filters: [
+        { text: t('common.builtin'), value: 'builtin' },
+        { text: t('common.custom'), value: 'custom' },
+      ],
+      onFilter: (val: boolean | React.Key, row: AlarmNeTypeStat) => row.source === val,
+      render: (s: AlarmNeTypeStat['source']) =>
+        s === 'custom'
+          ? <Tag color="blue">{t('common.custom')}</Tag>
+          : <Tag>{t('common.builtin')}</Tag>,
+    },
+    {
+      // 加载源:显示完整路径(参考 product/kpi-library)
+      title: t('common.loadedFrom'),
       dataIndex: 'loadedFrom',
-      width: 200,
+      width: 420,
+      ellipsis: true,
       render: (v: string) =>
-        v ? <Tag>{v}</Tag> : <Tag color="warning">{t('alarmLibrary.cell.unfilled')}</Tag>,
+        v ? <Tooltip title={v}><code>{v}</code></Tooltip> : <Tag color="warning">{t('alarmLibrary.cell.unfilled')}</Tag>,
     },
     { title: t('alarmLibrary.col.totalCount'), dataIndex: 'total', width: 100 },
     {
@@ -200,6 +224,43 @@ export default function AlarmLibraryPage() {
       dataIndex: 'warningCnt',
       width: 100,
       render: (v: number) => (v > 0 ? <Tag color="blue">{v}</Tag> : <span>—</span>),
+    },
+    {
+      // 操作:仅自定义(custom)XML 可删;内置(builtin)置灰 + Tooltip(对标 kpi-library)
+      title: t('alarmLibrary.col.actions'),
+      width: 80,
+      render: (_: unknown, row: AlarmNeTypeStat) =>
+        row.deletable ? (
+          <Popconfirm
+            title={t('product.alarm.xml.delTitle')}
+            description={
+              <div style={{ maxWidth: 320 }}>
+                {t('product.alarm.xml.deleteBullet1Pre')}<code>.deleted.&lt;ts&gt;</code>{t('product.alarm.xml.deleteBullet1Post')}
+                <br />{t('product.alarm.xml.deleteBullet2', { count: row.total })}
+              </div>
+            }
+            okText={t('common.delete')}
+            okButtonProps={{ danger: true }}
+            onConfirm={() =>
+              deleteFileMut
+                .mutateAsync(row.loadedFrom)
+                .then((r) =>
+                  message.success(
+                    r.backup
+                      ? t('product.alarm.xml.deleteSuccessWithBackup', { backup: r.backup })
+                      : t('common.deleted'),
+                  ),
+                )
+                .catch((e) => message.error((e as Error).message))
+            }
+          >
+            <Button size="small" danger icon={<DeleteOutlined />} />
+          </Popconfirm>
+        ) : (
+          <Tooltip title={t('product.alarm.xml.builtinTip')} placement="topRight">
+            <Button size="small" danger disabled icon={<DeleteOutlined />} aria-label="builtin XML not deletable" />
+          </Tooltip>
+        ),
     },
   ];
 
@@ -321,6 +382,10 @@ export default function AlarmLibraryPage() {
               </>
             ) : (
               <>
+                {/* 上传自定义 XML(严格对标 kpi-library) */}
+                <Button icon={<InboxOutlined />} onClick={() => setUploadOpen(true)}>
+                  {t('common.upload')}
+                </Button>
                 {/* 2026-05-29 与 parammodel 对齐拆两按钮:导入 = 加法 UPSERT;重载 = destructive 删孤儿 */}
                 <Popconfirm
                   title={t('product.kpi.importTitle')}
@@ -436,6 +501,7 @@ export default function AlarmLibraryPage() {
           setEditing(null);
         }}
       />
+      <AlarmUploadXmlModal open={uploadOpen} onClose={() => setUploadOpen(false)} />
       {/* <UnknownStatsModal open={statsOpen} onClose={() => setStatsOpen(false)} /> */}
     </div>
   );

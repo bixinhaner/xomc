@@ -8,6 +8,8 @@ import type {
   CreateAlarmDefinitionInput,
   UpdateAlarmDefinitionInput,
   UnknownStatsFilter,
+  AlarmUploadResult,
+  AlarmDeleteFileResult,
 } from '../../types/alarmDefinition';
 
 interface BackendDefinition {
@@ -52,6 +54,8 @@ interface BackendUnknownStat {
 interface BackendNeTypeStat {
   ne_type: string;
   loaded_from: string;
+  source?: string;
+  deletable?: boolean;
   total: number;
   critical_cnt: number;
   major_cnt: number;
@@ -63,6 +67,8 @@ function mapNeTypeStat(b: BackendNeTypeStat): AlarmNeTypeStat {
   return {
     neType: b.ne_type,
     loadedFrom: b.loaded_from,
+    source: (b.source ?? 'unknown') as AlarmNeTypeStat['source'],
+    deletable: Boolean(b.deletable),
     total: b.total,
     criticalCnt: b.critical_cnt,
     majorCnt: b.major_cnt,
@@ -269,5 +275,48 @@ export const alarmDefinitionApi = {
       '/alarm-definitions/import-directory?mode=reload',
     );
     return data;
+  },
+
+  /** 上传自定义告警 XML(multipart)。同名冲突后端返 409,前端走 force=true 重试覆盖。 */
+  async uploadXml(file: File, options: { force?: boolean } = {}): Promise<AlarmUploadResult> {
+    const form = new FormData();
+    form.append('file', file);
+    const params: Record<string, string> = {};
+    if (options.force) params.force = 'true';
+    const { data } = await http.post<{
+      uploaded: boolean;
+      filename: string;
+      loaded_from: string;
+      overwrite: boolean;
+      backup: string;
+      reloaded: boolean;
+    }>('/alarm-definitions/upload-xml', form, {
+      params,
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return {
+      uploaded: data.uploaded,
+      filename: data.filename,
+      loadedFrom: data.loaded_from,
+      overwrite: data.overwrite,
+      backup: data.backup,
+      reloaded: data.reloaded,
+    };
+  },
+
+  /** 删除自定义告警 XML(loadedFrom 含 / 须 encodeURIComponent)。仅 custom 可删,内置后端返 403。 */
+  async deleteFile(loadedFrom: string): Promise<AlarmDeleteFileResult> {
+    const { data } = await http.delete<{
+      deleted: boolean;
+      loaded_from: string;
+      rows_affected: number;
+      backup: string;
+    }>(`/alarm-definitions/files/${encodeURIComponent(loadedFrom)}`);
+    return {
+      deleted: data.deleted,
+      loadedFrom: data.loaded_from,
+      rowsAffected: data.rows_affected,
+      backup: data.backup,
+    };
   },
 };

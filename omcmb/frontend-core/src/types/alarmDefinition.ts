@@ -70,11 +70,34 @@ export interface UnknownStatsFilter {
   days?: number;
 }
 
+// 告警 XML 来源(后端 source.go::ClassifySource 派生,前端只渲染)。
+export type AlarmSource = 'builtin' | 'custom' | 'unknown';
+
+// 自定义 XML 上传结果(对标 indicator)。
+export interface AlarmUploadResult {
+  uploaded: boolean;
+  filename: string;
+  loadedFrom: string;
+  overwrite: boolean;
+  backup: string;
+  reloaded: boolean;
+}
+
+// 自定义 XML 删除结果(对标 indicator)。
+export interface AlarmDeleteFileResult {
+  deleted: boolean;
+  loadedFrom: string;
+  rowsAffected: number;
+  backup: string;
+}
+
 // T-0179 drill-down 一级视图聚合行(后端 NeTypeStat)。
 // loadedFrom 为空字符串表示历史数据未回填(Loader 未重跑过 → 显示"未知 XML 来源")。
 export interface AlarmNeTypeStat {
   neType: string;
   loadedFrom: string;
+  source: AlarmSource;   // 后端派生:builtin(alarm-definitions/)/custom(alarm-definitions-custom/)/unknown
+  deletable: boolean;    // 后端守门:仅 custom 可删
   total: number;
   criticalCnt: number;
   majorCnt: number;

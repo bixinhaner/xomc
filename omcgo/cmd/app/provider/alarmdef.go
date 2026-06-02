@@ -5,6 +5,8 @@ import (
 	"errors"
 	"time"
 
+	"go.uber.org/zap"
+
 	alarmdef "github.com/omcgo/omcgo/internal/alarm/definition"
 	"github.com/omcgo/omcgo/internal/core/dictloader"
 )
@@ -43,8 +45,17 @@ func initAlarmDefModule(c *Container) error {
 	reloader := &alarmDefReloader{reg: c.DictLoaderRegistry}
 	handler := alarmdef.NewHandler(service, reloader, logger)
 
+	// 自定义 XML 上传/删除(严格对标 T-0180 indicator):FileHandler 复用 service(RefreshCache)
+	// 与 reloader(ReloadOne)。启动期确保 custom 目录存在。
+	fileRepo := alarmdef.NewPgFileRepository(c.PgPool)
+	fileHandler := alarmdef.NewFileHandler(fileRepo, service, reloader, c.Cfg.DictLoader.XMLBaseDir, logger)
+	if err := alarmdef.EnsureBaseDir(c.Cfg.DictLoader.XMLBaseDir); err != nil {
+		logger.Warn("ensure alarm custom dir failed; uploads may fail until dir exists", zap.Error(err))
+	}
+
 	c.AlarmDefRegistry = registry
 	c.AlarmDefHandler = handler
+	c.AlarmDefFileHandler = fileHandler
 	logger.Info("alarm-definition module initialized",
 		// 暴露行数到 startup log，便于排障
 	)

@@ -69,6 +69,18 @@ const (
 	ErrCodeIndicatorUploadInvalidName   = 2043
 	ErrCodeIndicatorUploadInvalidRoot   = 2044
 	ErrCodeIndicatorUploadTooLarge      = 2045
+
+	// Alarm 自定义 XML 上传/删除（严格对标 indicator，2050 段）
+	// AlarmBuiltinNotDeletable: DELETE 内置（alarm-definitions/）→ 403
+	// AlarmBackupFailed:        DELETE 备份失败保守回滚 → 500
+	// AlarmUploadInvalidName:   上传文件名违反 ^[A-Za-z0-9_-]{1,64}\.xml$ → 400
+	// AlarmUploadInvalidRoot:   上传 XML 根元素 ≠ <alarmModel> → 400
+	// AlarmUploadTooLarge:      上传文件 > MaxUploadXMLSize (1 MiB) → 400
+	ErrCodeAlarmBuiltinNotDeletable = 2050
+	ErrCodeAlarmBackupFailed        = 2051
+	ErrCodeAlarmUploadInvalidName   = 2052
+	ErrCodeAlarmUploadInvalidRoot   = 2053
+	ErrCodeAlarmUploadTooLarge      = 2054
 )
 
 // ACS / TR069 (3000-3999)

@@ -497,6 +497,60 @@ Loader.parseDocs
 - `omcmb/frontend-core/src/hooks/api/useIndicatorsLibrary.ts` — +5 React Query hooks
 - `omcmb/webcode/src/pages/product/kpi-library/{index,SummaryTab,IndicatorsByTech,XMLFilesModal,UploadXmlModal,UnitsDrawer}.tsx` — drill-down + URL 同步
 
+#### 5.3.3 Alarm 自定义 XML 分层目录（严格对标 T-0180 indicator）
+
+**核心契约**:builtin XML 与 custom XML 物理隔离两套目录,Loader 启动期合并扫描;后端唯一真值源 + 前端零代码同步。与 T-0180 indicator 同范式,**关键差异**:告警按 ne_type 组织、custom 目录**扁平**(无 enb/gsm/gnb 子目录);"自定义"对应用户上传的 XML 文件。
+
+| 目录 | 位置 | 来源 | 生命周期 |
+|------|------|------|---------|
+| `data/alarm-definitions/` | 镜像层 `COPY` 进 `/etc/omcgo/data` | 发版构建(每 ne_type 一个文件,如 ENB.xml) | 跟随镜像版本 |
+| `data/alarm-definitions-custom/` | host bind mount `/opt/omc/data/...` | 运维通过 UI 上传(扁平,`<file>.xml`) | 跟随 host(升级不丢) |
+
+**设计决策**(沿用 T-0180 D1-D5):custom 默认胜出;内置删除按钮置灰 + Tooltip;`.deleted/.bak` 保留 30 天 + `.tmp` 1 小时(worker cron `0 3 * * *`);DELETE 备份失败保守回滚;source 唯一真值源在后端。
+
+**唯一真值源链路**(改判定只动 `source.go`):
+```
+Loader.resolveSources（builtin + custom 双目录合并,custom 默认胜出）
+  → loadAlarmFile 写 loaded_from = "alarm-definitions/ENB.xml" 或 "alarm-definitions-custom/MY.xml"（含目录前缀）
+  → alarm_definitions.loaded_from 列
+  → ClassifySource(loadedFrom) 返 builtin/custom/unknown
+  → IsDeletable(loadedFrom) 守门 DELETE handler + 填充 NeTypeStat.Deletable
+  → 前端 alarm-library NeTypes 表渲染来源 Tag + 删除按钮可见性
+```
+
+**单实例假设**:Upload/Delete 通过 `acquireFileLock(basename)` 进程内 `sync.Map[name]*sync.Mutex` 互斥;多实例横扩前需补 PG advisory lock(与 indicator 同 Open)。
+
+**新增错误码**(`global/errors.go` 2050 段):
+- `ErrCodeAlarmBuiltinNotDeletable = 2050` — DELETE 内置返 403
+- `ErrCodeAlarmBackupFailed = 2051` — DELETE 备份失败保守回滚返 500
+- `ErrCodeAlarmUploadInvalidName = 2052` — 文件名违规 → 400
+- `ErrCodeAlarmUploadInvalidRoot = 2053` — XML 根非 `<alarmModel>` → 400
+- `ErrCodeAlarmUploadTooLarge = 2054` — 文件 > 1 MiB → 400
+
+**新增 Prometheus 指标**:`alarm_backup_cleanup_total{kind="deleted|bak|tmp", result="swept|error|skipped"}` (worker)
+
+**新增 HTTP 端点**(/api/v1,super_admin):
+- `POST /alarm-definitions/upload-xml[?force=]` — multipart 上传,同步 Loader.Reload + RefreshCache
+- `DELETE /alarm-definitions/files/{*loadedFrom}` — IsDeletable 守门 + 按 loaded_from 删 alarm_definitions
+- `GET /alarm-definitions/ne-types`(既有)新增返 `source` / `deletable` 字段
+
+**相关代码索引**:
+- `internal/alarm/definition/source.go` — Source / ClassifySource / IsDeletable + 4 共享常量(前缀 `alarm-definitions(-custom)/`)
+- `internal/alarm/definition/upload.go` — 上传校验器(filename / `<alarmModel>` root / path-containment / 限长读)
+- `internal/alarm/definition/file_handler.go` — FileHandler:UploadXML / DeleteFile + acquireFileLock + EnsureBaseDir + validCustomPath
+- `internal/alarm/definition/file_repository.go` — FileRepository(CountByLoadedFrom / DeleteByLoadedFrom,单表)
+- `internal/alarm/definition/backup_cleanup.go` — BackupCleanup(扁平 customDir 单层扫描)+ 指标
+- `internal/alarm/definition/loader.go` — Loader.resolveSources 双目录合并 + 写前缀 loaded_from
+- `internal/alarm/definition/{repository,pg_repository}.go` — NeTypeStat.Source/Deletable 查询层派生
+- `internal/core/appconfig/config.go` — AlarmDefinitionLoaderConfig 加 CustomDirectory / CustomOverrides / Backup*
+- `migrations/seed/000006_alarm_definitions_loaded_from_prefix.sql` — loaded_from 历史数据回填前缀
+- `cmd/app/provider/alarmdef.go` — FileHandler 接入 + EnsureBaseDir 启动期
+- `cmd/worker/main.go::startAlarmBackupCleanup` — cron 注册 + 30s catch-up
+- `deployments/docker/docker-compose.yml` + `release/bundle/deploy/docker-compose.app.yml` — app+worker bind mount
+- `deployments/release/bundle/deploy/deploy.sh` — 首次部署 mkdir + chown 10001 + chmod 0750
+- `omcmb/frontend-core/src/{types/alarmDefinition,services/api/alarmDefinitionApi,hooks/api/useAlarmDefinitions}.ts` — 类型 + uploadXml/deleteFile + hooks
+- `omcmb/webcode/src/pages/product/alarm-library/{index,AlarmUploadXmlModal}.tsx` — 上传按钮 + 来源/加载源列 + 删除列
+
 ### 5.4 事件驱动规范
 
 **EventBus 双实现**：

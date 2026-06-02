@@ -253,6 +253,7 @@ if [ "$UNINSTALL" = 1 ]; then
   log "        · /etc/systemd/system/omcgo*.service(早期 systemd 单元):sudo systemctl disable --now omcgo*; sudo rm /etc/systemd/system/omcgo*.service"
   log "        · /opt/omc/data/param-mappings-custom(若不在 $OMC_ROOT 下的 host bind mount):sudo rm -rf"
   log "        · /opt/omc/data/indicator-library-custom(T-0180 indicator 三制式 host bind mount):sudo rm -rf"
+  log "        · /opt/omc/data/alarm-definitions-custom(告警自定义 XML host bind mount):sudo rm -rf"
   exit 0
 fi
 
@@ -424,6 +425,19 @@ if [ ! -d "$OMC_ROOT/data/indicator-library-custom" ]; then
   chmod -R 0750 "$OMC_ROOT/data/indicator-library-custom"
 else
   log "$OMC_ROOT/data/indicator-library-custom 已存在,保留运维已设权限不动(T-0180)"
+fi
+
+# 告警库自定义 XML 目录(host 主权,扁平结构 — 与 indicator 三制式子目录不同)
+# 容器内挂载点 = /etc/omcgo/data/alarm-definitions-custom (compose 已配)
+# 应用启动期 EnsureBaseDir 会幂等 mkdir,本步骤是 host 侧前置兜底(权限不能在容器内调)。
+if [ ! -d "$OMC_ROOT/data/alarm-definitions-custom" ]; then
+  log "首次部署：初始化告警自定义 XML 目录 $OMC_ROOT/data/alarm-definitions-custom"
+  mkdir -p "$OMC_ROOT/data/alarm-definitions-custom"
+  chown 10001:10001 "$OMC_ROOT/data/alarm-definitions-custom" 2>/dev/null \
+    || warn "chown 10001:10001 失败(UID 不存在 host 上属正常);容器内仍以 10001 写入"
+  chmod 0750 "$OMC_ROOT/data/alarm-definitions-custom"
+else
+  log "$OMC_ROOT/data/alarm-definitions-custom 已存在,保留运维已设权限不动"
 fi
 
 RELEASE_DIR="$OMC_ROOT/releases/$VERSION"

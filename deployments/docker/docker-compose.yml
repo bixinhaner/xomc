@@ -200,6 +200,8 @@ services:
       # 与 builtin 镜像层 /etc/omcgo/data/indicator-library/ 物理隔离;
       # dev 直接 bind mount 到源码;prod 走 /opt/omc/data/indicator-library-custom
       - ../../omcgo/data/indicator-library-custom:/etc/omcgo/data/indicator-library-custom
+      # 自定义告警 XML(扁平目录;与 builtin /etc/omcgo/data/alarm-definitions/ 物理隔离)
+      - ../../omcgo/data/alarm-definitions-custom:/etc/omcgo/data/alarm-definitions-custom
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       migrate-seed:
@@ -238,6 +240,8 @@ services:
       - ../../omcgo/data/indicator-library:/etc/omcgo/data/indicator-library
       # T-0180: 自定义 indicator XML(worker BackupCleanup cron 需 rw 清理三制式子目录残留)
       - ../../omcgo/data/indicator-library-custom:/etc/omcgo/data/indicator-library-custom
+      # 自定义告警 XML(worker BackupCleanup cron 需 rw 清理扁平目录残留)
+      - ../../omcgo/data/alarm-definitions-custom:/etc/omcgo/data/alarm-definitions-custom
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       migrate-seed:

@@ -78,8 +78,9 @@ type Container struct {
 	ParamIntersect *parammodel.IntersectService
 
 	// AlarmDefModule 设置（T-0098 P3-04）
-	AlarmDefRegistry *alarmdef.Registry
-	AlarmDefHandler  *alarmdef.Handler
+	AlarmDefRegistry    *alarmdef.Registry
+	AlarmDefHandler     *alarmdef.Handler
+	AlarmDefFileHandler *alarmdef.FileHandler
 
 	// ParamModelHandler 设置（T-0098 P3-02）
 	ParamModelRepo    *parammodel.PgRepository

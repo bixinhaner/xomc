@@ -229,8 +229,30 @@ func (c IndicatorLoaderConfig) CustomOverridesEnabled() bool {
 
 // AlarmDefinitionLoaderConfig 控制告警库 Loader 行为（T-0098 P1-06）。
 // 扫描 {XMLBaseDir}/{Directory}/，按文件名推断 ne_type（ENB.xml → "ENB"）。
+//
+// 严格对标 T-0180 indicator：镜像层 builtin 与 host bind mount custom 双目录合并扫描，
+// 同名文件由 CustomOverrides 控制（默认 custom 胜出）。alarm 目录是扁平结构
+// （每个 ne_type 一个 XML 文件），custom 同样扁平。
 type AlarmDefinitionLoaderConfig struct {
 	Directory string `mapstructure:"directory"` // 默认 "alarm-definitions"
+
+	// CustomDirectory 自定义 XML 持久化目录（用户上传 alarm XML）。
+	CustomDirectory string `mapstructure:"custom_directory"` // 默认 "alarm-definitions-custom"
+	// CustomOverrides 使用 *bool 三态（与 ParamModel / Indicator 同口径）：
+	//   nil（yaml 不写）→ CustomOverridesEnabled()=true（默认 custom 胜出）
+	CustomOverrides *bool `mapstructure:"custom_overrides"`
+
+	// worker BackupCleanup cron（对标 T-0180 indicator）：
+	//   - .deleted.<ts> / .bak.<ts> 超过 N 天即清理（默认 30）
+	//   - .tmp.<uuid> 超过 1 小时即清理（写盘中断残留）
+	BackupRetentionDays int    `mapstructure:"backup_retention_days"`
+	BackupCleanupCron   string `mapstructure:"backup_cleanup_cron"`
+}
+
+// CustomOverridesEnabled 是 Loader 与测试调用方的唯一入口，不直接读 *bool。
+// nil（yaml 不写）→ true（默认 custom 胜出，与 ParamModel / Indicator 一致）。
+func (c AlarmDefinitionLoaderConfig) CustomOverridesEnabled() bool {
+	return c.CustomOverrides == nil || *c.CustomOverrides
 }
 
 // ProductLoaderConfig 控制产品装配件 Loader 行为（T-0098 P1-06）。

@@ -464,6 +464,9 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	// 扫 customDir/<enb,gsm,gnb>/ 三制式子目录下 .deleted/.bak/.tmp 残留。
 	startIndicatorBackupCleanup(w, cfg, logger)
 
+	// 告警库自定义 XML 备份清理 cron(对标 indicator,扁平 customDir,同 03:00 默认)。
+	startAlarmBackupCleanup(w, cfg, logger)
+
 	// T-0182 P2: 数据字典数据源每日同步 cron(每天 02:00 BJT)。
 	// 遍历所有 source_table != NULL AND status=true 的字典,SyncEngine 拉源表
 	// distinct 行 → upsert/delete auto 项。失败发 dictionary.refresh.failed 事件。
@@ -590,6 +593,64 @@ func startIndicatorBackupCleanup(w *workerInfra, cfg *appconfig.WorkerConfig, lo
 		if swept > 0 {
 			logger.Info("indicator backup cleanup startup catch-up",
 				zap.Int("swept", swept))
+		}
+	}()
+}
+
+// startAlarmBackupCleanup 启动告警库自定义 XML 备份清理 cron(对标 indicator)。
+//
+//   - 注册 cron(默认 "0 3 * * *");无效表达式 fallback 默认值
+//   - 启动期延迟 30s 跑一次 catch-up:防 worker 长期宕机后备份堆积
+//   - customDir 是扁平目录 (.../alarm-definitions-custom),Run() 直接扫单层
+//   - 单实例假设;横扩需加 PG advisory lock(与 indicator 同,P1 不做)
+func startAlarmBackupCleanup(w *workerInfra, cfg *appconfig.WorkerConfig, logger *zap.Logger) {
+	alarmCfg := cfg.DictLoader.AlarmDefinition
+	customSub := alarmCfg.CustomDirectory
+	if customSub == "" {
+		customSub = definition.CustomDirSubdir
+	}
+	customDir := filepath.Join(cfg.DictLoader.XMLBaseDir, customSub)
+	cronExpr := alarmCfg.BackupCleanupCron
+	if cronExpr == "" {
+		cronExpr = definition.DefaultAlarmBackupCleanupCron
+	}
+
+	metrics := definition.NewBackupCleanupMetrics(w.MetricsReg)
+	cleanup := definition.NewBackupCleanup(customDir, alarmCfg.BackupRetentionDays, metrics, logger)
+
+	c := cron.New()
+	if _, err := c.AddFunc(cronExpr, func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		if _, runErr := cleanup.Run(ctx); runErr != nil {
+			logger.Warn("alarm backup cleanup run failed", zap.Error(runErr))
+		}
+	}); err != nil {
+		logger.Warn("invalid alarm backup cleanup cron; using default",
+			zap.String("cron", cronExpr), zap.Error(err))
+		_, _ = c.AddFunc(definition.DefaultAlarmBackupCleanupCron, func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+			_, _ = cleanup.Run(ctx)
+		})
+	}
+	c.Start()
+	logger.Info("alarm backup cleanup cron started",
+		zap.String("custom_dir", customDir),
+		zap.String("cron", cronExpr),
+		zap.Int("retention_days", alarmCfg.BackupRetentionDays))
+
+	go func() {
+		time.Sleep(30 * time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		swept, err := cleanup.Run(ctx)
+		if err != nil {
+			logger.Warn("alarm backup cleanup startup catch-up failed", zap.Error(err))
+			return
+		}
+		if swept > 0 {
+			logger.Info("alarm backup cleanup startup catch-up", zap.Int("swept", swept))
 		}
 	}()
 }

@@ -434,6 +434,10 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	if c.AlarmDefHandler != nil {
 		c.AlarmDefHandler.RegisterRoutes(superAdminGroup)
 	}
+	// 告警自定义 XML 上传/删除(严格对标 indicator FileHandler)
+	if c.AlarmDefFileHandler != nil {
+		c.AlarmDefFileHandler.RegisterRoutes(superAdminGroup)
+	}
 
 	// ----- T-0098 P3-02: ParamModel routes → super_admin only -----
 	if c.ParamModelHandler != nil {

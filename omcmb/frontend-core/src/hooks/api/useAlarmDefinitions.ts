@@ -116,3 +116,25 @@ export function useAlarmDefinitionReloadDirectory() {
     },
   });
 }
+
+// 自定义 XML 上传:成功后 invalidate 所有 alarm-defs 查询(ne-types / list 立即反映新告警)。
+export function useAlarmUploadXml() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ file, force }: { file: File; force?: boolean }) => api.uploadXml(file, { force }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: AD_KEY });
+    },
+  });
+}
+
+// 自定义 XML 删除:成功后 invalidate 所有 alarm-defs 查询。
+export function useAlarmDeleteFile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (loadedFrom: string) => api.deleteFile(loadedFrom),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: AD_KEY });
+    },
+  });
+}

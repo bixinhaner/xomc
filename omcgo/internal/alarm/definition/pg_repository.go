@@ -425,6 +425,9 @@ SELECT d.ne_type,
 		); err != nil {
 			return nil, fmt.Errorf("scan ne-type-stat row: %w", err)
 		}
+		// 来源由 loaded_from 前缀派生(后端唯一真值源,对标 indicator/parammodel)。
+		s.Source = string(ClassifySource(s.LoadedFrom))
+		s.Deletable = IsDeletable(s.LoadedFrom)
 		out = append(out, s)
 	}
 	return out, rows.Err()

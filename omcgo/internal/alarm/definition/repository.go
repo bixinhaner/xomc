@@ -113,13 +113,15 @@ type UnknownAlarmStat struct {
 // LoadedFrom 为空表示该 ne_type 下存在历史数据未回填(Loader 未重跑)。前端按
 // (ne_type, loaded_from) 双键展示;Total 是按 ne_type 单键的合计。
 type NeTypeStat struct {
-	NeType       string `json:"ne_type"`
-	LoadedFrom   string `json:"loaded_from"`
-	Total        int    `json:"total"`
-	CriticalCnt  int    `json:"critical_cnt"`
-	MajorCnt     int    `json:"major_cnt"`
-	MinorCnt     int    `json:"minor_cnt"`
-	WarningCnt   int    `json:"warning_cnt"`
+	NeType      string `json:"ne_type"`
+	LoadedFrom  string `json:"loaded_from"`
+	Source      string `json:"source"`    // ClassifySource(loaded_from) 派生:builtin/custom/unknown
+	Deletable   bool   `json:"deletable"` // IsDeletable(loaded_from) 派生:仅 custom 可删
+	Total       int    `json:"total"`
+	CriticalCnt int    `json:"critical_cnt"`
+	MajorCnt    int    `json:"major_cnt"`
+	MinorCnt    int    `json:"minor_cnt"`
+	WarningCnt  int    `json:"warning_cnt"`
 }
 
 // ResolvedDefinition 是 AlarmDefinition + severity 反查后的合成结构，供 Registry 直接缓存。

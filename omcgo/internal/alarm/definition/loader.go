@@ -36,7 +36,10 @@ type Loader struct {
 
 func NewLoader(pool *pgxpool.Pool, cfg appconfig.AlarmDefinitionLoaderConfig, baseDir string, logger *zap.Logger) *Loader {
 	if cfg.Directory == "" {
-		cfg.Directory = "alarm-definitions"
+		cfg.Directory = BuiltinDirSubdir
+	}
+	if cfg.CustomDirectory == "" {
+		cfg.CustomDirectory = CustomDirSubdir
 	}
 	if logger == nil {
 		logger = zap.NewNop()
@@ -54,10 +57,10 @@ func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
 	rep := dictloader.NewReport(LoaderName)
 	defer rep.Finish()
 
-	dir := filepath.Join(l.base, l.cfg.Directory)
-	entries, err := os.ReadDir(dir)
+	// T-0180 对标:builtin + custom 双目录合并扫描;同名文件按 CustomOverrides 决定胜负。
+	sources, err := l.resolveSources()
 	if err != nil {
-		return rep, fmt.Errorf("read alarm dir %s: %w", dir, err)
+		return rep, err
 	}
 
 	severityMap, err := l.fetchSeverityMap(ctx)
@@ -71,20 +74,14 @@ func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
 	// 跨文件 identifier 去重：first-seen 胜出，重复 identifier 记录 error 并跳过
 	seenIdentifier := make(map[string]string, 512)
 
-	for _, e := range entries {
-		if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
-			continue
-		}
-		if !strings.EqualFold(filepath.Ext(e.Name()), ".xml") {
-			continue
-		}
+	for _, src := range sources {
 		rep.FilesScanned++
-		path := filepath.Join(dir, e.Name())
-		rows, err := l.loadAlarmFile(ctx, path, severityMap, seenIdentifier)
+		name := filepath.Base(src.AbsPath)
+		rows, err := l.loadAlarmFile(ctx, src.AbsPath, src.LoadedFrom, severityMap, seenIdentifier)
 		if err != nil {
-			rep.AddError(e.Name(), "parse-or-persist", err)
+			rep.AddError(name, "parse-or-persist", err)
 			rep.FilesSkipped++
-			l.logger.Error("alarm file failed", zap.String("file", e.Name()), zap.Error(err))
+			l.logger.Error("alarm file failed", zap.String("file", name), zap.Error(err))
 			continue
 		}
 		rep.FilesLoaded++
@@ -97,7 +94,67 @@ func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
 	return rep, nil
 }
 
-func (l *Loader) loadAlarmFile(ctx context.Context, path string, severityMap map[string]string, seen map[string]string) (int, error) {
+// alarmFileSource 配对一个待加载 XML 的绝对路径与其 loaded_from 列值(含目录前缀)。
+type alarmFileSource struct {
+	AbsPath    string // os.ReadFile 用
+	LoadedFrom string // "alarm-definitions/ENB.xml" 或 "alarm-definitions-custom/MY.xml"
+}
+
+// resolveSources 合并扫描 builtin（cfg.Directory）与 custom（cfg.CustomDirectory）两目录,
+// 按 basename 去重:CustomOverridesEnabled() 决定同名时谁胜出(默认 custom 胜出)。
+// custom 目录允许不存在(尚无任何上传)。LoadedFrom 始终带目录前缀,供 ClassifySource 判定。
+func (l *Loader) resolveSources() ([]alarmFileSource, error) {
+	byName := make(map[string]alarmFileSource, 16)
+	order := make([]string, 0, 16)
+
+	scan := func(subdir string) error {
+		dir := filepath.Join(l.base, subdir)
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil // builtin 必有(已 ensure),custom 可缺
+			}
+			return fmt.Errorf("read alarm dir %s: %w", dir, err)
+		}
+		for _, e := range entries {
+			if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+				continue
+			}
+			if !strings.EqualFold(filepath.Ext(e.Name()), ".xml") {
+				continue
+			}
+			name := e.Name()
+			if _, ok := byName[name]; !ok {
+				order = append(order, name)
+			}
+			byName[name] = alarmFileSource{
+				AbsPath:    filepath.Join(dir, name),
+				LoadedFrom: filepath.ToSlash(filepath.Join(subdir, name)),
+			}
+		}
+		return nil
+	}
+
+	// 后扫描者覆盖先扫描者:customWins → 先 builtin 后 custom;否则相反。
+	first, second := l.cfg.Directory, l.cfg.CustomDirectory
+	if !l.cfg.CustomOverridesEnabled() {
+		first, second = l.cfg.CustomDirectory, l.cfg.Directory
+	}
+	if err := scan(first); err != nil {
+		return nil, err
+	}
+	if err := scan(second); err != nil {
+		return nil, err
+	}
+
+	out := make([]alarmFileSource, 0, len(order))
+	for _, name := range order {
+		out = append(out, byName[name])
+	}
+	return out, nil
+}
+
+func (l *Loader) loadAlarmFile(ctx context.Context, path, loadedFrom string, severityMap map[string]string, seen map[string]string) (int, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return 0, fmt.Errorf("read %s: %w", path, err)
@@ -119,7 +176,6 @@ func (l *Loader) loadAlarmFile(ctx context.Context, path string, severityMap map
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	loadedFrom := filepath.Base(path)
 	rows, err := batchUpsertAlarms(ctx, tx, neType, loadedFrom, doc.Alarms, severityMap, seen, l.logger)
 	if err != nil {
 		return 0, err
