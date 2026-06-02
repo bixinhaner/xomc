@@ -10,7 +10,6 @@ import {
   Space,
   Table,
   Popconfirm,
-  Checkbox,
   message,
   Typography,
   Tag,
@@ -55,13 +54,6 @@ interface FormValues {
   indicatorDeviceType: string;
   indicatorPlatform: string;
   alarmNeType: string;
-  enableFiletype11: boolean;
-  enableUnknownAlarm: boolean;
-  override_data_type: boolean;
-  override_access: boolean;
-  override_min_value: boolean;
-  override_max_value: boolean;
-  override_change_applies: boolean;
 }
 
 const DEVICE_TYPE_OPTIONS = [
@@ -75,6 +67,16 @@ const TECH_OPTIONS = [
   { label: 'NR (5G)', value: 'nr' },
   { label: 'GSM', value: 'gsm' },
 ];
+
+// 上传策略 / 属性覆盖默认值：原"上传策略"页签已下线，新增时套用默认；
+// 编辑时沿用产品已有值（避免保存时把不可见字段清零）。
+const DEFAULT_OVERRIDE: DeviceAttrsOverride = {
+  data_type: false,
+  access: true,
+  min_value: false,
+  max_value: false,
+  change_applies: true,
+};
 
 export default function ProductDrawer({ open, product, onClose }: Props) {
   const t = useT();
@@ -103,7 +105,6 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
   useEffect(() => {
     if (!open) return;
     if (product) {
-      const o = product.deviceAttrsOverride || {};
       form.setFieldsValue({
         name: product.name,
         vendor: product.vendor,
@@ -114,38 +115,14 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
         indicatorDeviceType: product.indicatorDeviceType,
         indicatorPlatform: product.indicatorPlatform,
         alarmNeType: product.alarmNeType,
-        enableFiletype11: product.enableFiletype11,
-        enableUnknownAlarm: product.enableUnknownAlarm,
-        override_data_type: Boolean(o.data_type),
-        override_access: Boolean(o.access),
-        override_min_value: Boolean(o.min_value),
-        override_max_value: Boolean(o.max_value),
-        override_change_applies: Boolean(o.change_applies),
       });
     } else {
       form.resetFields();
-      form.setFieldsValue({
-        enableFiletype11: true,
-        enableUnknownAlarm: false,
-        override_data_type: false,
-        override_access: true,
-        override_min_value: false,
-        override_max_value: false,
-        override_change_applies: true,
-      });
     }
     setActiveTab('basic');
     setNewPattern('');
     setPendingPatterns([]);
   }, [open, product, form]);
-
-  const buildOverride = (v: FormValues): DeviceAttrsOverride => ({
-    data_type: v.override_data_type,
-    access: v.override_access,
-    min_value: v.override_min_value,
-    max_value: v.override_max_value,
-    change_applies: v.override_change_applies,
-  });
 
   const handleSubmit = async () => {
     try {
@@ -160,9 +137,9 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
           indicatorDeviceType: v.indicatorDeviceType,
           indicatorPlatform: v.indicatorPlatform,
           alarmNeType: v.alarmNeType,
-          enableFiletype11: v.enableFiletype11,
-          enableUnknownAlarm: v.enableUnknownAlarm,
-          deviceAttrsOverride: buildOverride(v),
+          enableFiletype11: product.enableFiletype11,
+          enableUnknownAlarm: product.enableUnknownAlarm,
+          deviceAttrsOverride: product.deviceAttrsOverride ?? DEFAULT_OVERRIDE,
           paramModelId: v.paramModelId,
           clearParamModel: !v.paramModelId,
         };
@@ -178,9 +155,9 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
           indicatorDeviceType: v.indicatorDeviceType,
           indicatorPlatform: v.indicatorPlatform,
           alarmNeType: v.alarmNeType,
-          enableFiletype11: v.enableFiletype11,
-          enableUnknownAlarm: v.enableUnknownAlarm,
-          deviceAttrsOverride: buildOverride(v),
+          enableFiletype11: true,
+          enableUnknownAlarm: false,
+          deviceAttrsOverride: DEFAULT_OVERRIDE,
           paramModelId: v.paramModelId,
           patterns: pendingPatterns.length > 0 ? pendingPatterns : undefined,
         };
@@ -384,72 +361,6 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
                       optionFilterProp="label"
                       notFoundContent={alarmNeTypes ? t('product.product.drawer.notFoundAlarms') : t('common.loading')}
                     />
-                  </Form.Item>
-                </>
-              ),
-            },
-            {
-              key: 'refs',
-              label: t('product.product.drawer.tabDict'),
-              children: (
-                <Space direction="vertical" style={{ width: '100%' }}>
-                  <Text>
-                    {t('product.product.drawer.paramModelLine')}{' '}
-                    {form.getFieldValue('paramModelId')
-                      ? (paramModels?.items || []).find((m) => m.id === form.getFieldValue('paramModelId'))
-                          ?.name || '—'
-                      : t('product.product.drawer.notAssigned')}
-                  </Text>
-                  <Text>{t('product.product.drawer.indicatorDeviceTypeLine', { type: form.getFieldValue('indicatorDeviceType') ?? '', platform: form.getFieldValue('indicatorPlatform') ?? '' })}</Text>
-                  <Text>{t('product.product.drawer.alarmNeTypeLine', { type: form.getFieldValue('alarmNeType') ?? '' })}</Text>
-                  <Text type="secondary">
-                    {t('product.product.drawer.refCountHint')}
-                  </Text>
-                </Space>
-              ),
-            },
-            {
-              key: 'upload',
-              label: t('product.product.drawer.tabUpload'),
-              children: (
-                <>
-                  <Form.Item
-                    name="enableFiletype11"
-                    label={t('product.products.enableFt11')}
-                    valuePropName="checked"
-                    extra={t('product.product.drawer.uploadEnabledExtra')}
-                  >
-                    <Switch />
-                  </Form.Item>
-                  <Form.Item
-                    label={t('product.products.attrsOverride')}
-                    extra={t('product.product.drawer.intersectAttrExtra')}
-                  >
-                    <Space wrap>
-                      <Form.Item name="override_access" valuePropName="checked" noStyle>
-                        <Checkbox>access</Checkbox>
-                      </Form.Item>
-                      <Form.Item name="override_change_applies" valuePropName="checked" noStyle>
-                        <Checkbox>change_applies</Checkbox>
-                      </Form.Item>
-                      <Form.Item name="override_min_value" valuePropName="checked" noStyle>
-                        <Checkbox>min_value</Checkbox>
-                      </Form.Item>
-                      <Form.Item name="override_max_value" valuePropName="checked" noStyle>
-                        <Checkbox>max_value</Checkbox>
-                      </Form.Item>
-                      <Form.Item name="override_data_type" valuePropName="checked" noStyle>
-                        <Checkbox disabled>{t('product.products.dataTypeLock')}</Checkbox>
-                      </Form.Item>
-                    </Space>
-                  </Form.Item>
-                  <Form.Item
-                    name="enableUnknownAlarm"
-                    label={t('product.products.acceptUnknown')}
-                    valuePropName="checked"
-                    extra={t('product.product.drawer.unknownAlarmExtra')}
-                  >
-                    <Switch />
                   </Form.Item>
                 </>
               ),

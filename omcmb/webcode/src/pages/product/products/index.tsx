@@ -193,41 +193,33 @@ export default function ProductsPage() {
       render: (v: boolean) => (v ? <Tag color="warning">{t('common.accept')}</Tag> : <Tag>{t('common.discard')}</Tag>),
     },
     {
-      title: t('product.products.col.deviceCount'),
-      dataIndex: 'deviceCount',
-      width: 80,
-      render: (v: number) => <Tag color="blue">{v}</Tag>,
-    },
-    {
       title: t('common.action'),
-      width: 220,
+      width: 120,
       render: (_: unknown, row: Product) => (
         <Space>
-          <Button
-            size="small"
-            icon={<EditOutlined />}
-            onClick={() => {
-              setEditingProduct(row);
-              setDrawerOpen(true);
-            }}
-          >
-            {t('common.edit')}
-          </Button>
-          <Tooltip title={t('product.products.clearTooltip')}>
-            <Popconfirm
-              title={t('product.products.confirmReset', { name: row.name })}
-              onConfirm={() =>
-                resetDiscMut
-                  .mutateAsync(row.id)
-                  .then((r) => message.success(t('product.products.resetSuccess', { count: r.deletedRows })))
-                  .catch((e) => message.error((e as Error).message))
-              }
-            >
-              <Button size="small" icon={<ClearOutlined />}>
-                {t('product.products.resetBtn')}
-              </Button>
-            </Popconfirm>
+          <Tooltip title={t('common.edit')}>
+            <Button
+              size="small"
+              icon={<EditOutlined />}
+              onClick={() => {
+                setEditingProduct(row);
+                setDrawerOpen(true);
+              }}
+            />
           </Tooltip>
+          <Popconfirm
+            title={t('product.products.confirmReset', { name: row.name })}
+            onConfirm={() =>
+              resetDiscMut
+                .mutateAsync(row.id)
+                .then((r) => message.success(t('product.products.resetSuccess', { count: r.deletedRows })))
+                .catch((e) => message.error((e as Error).message))
+            }
+          >
+            <Tooltip title={t('product.products.resetBtn')}>
+              <Button size="small" icon={<ClearOutlined />} />
+            </Tooltip>
+          </Popconfirm>
           <Popconfirm
             title={t('product.products.confirmDelete', { name: row.name })}
             onConfirm={() =>
@@ -237,7 +229,9 @@ export default function ProductsPage() {
                 .catch((e) => message.error((e as Error).message))
             }
           >
-            <Button size="small" danger icon={<DeleteOutlined />} />
+            <Tooltip title={t('common.delete')}>
+              <Button size="small" danger icon={<DeleteOutlined />} />
+            </Tooltip>
           </Popconfirm>
         </Space>
       ),

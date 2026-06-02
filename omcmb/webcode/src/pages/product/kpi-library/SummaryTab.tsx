@@ -43,7 +43,7 @@ export default function SummaryTab({ onSelect }: Props) {
 
   const columns = [
     {
-      title: t('common.platform'),
+      title: t('common.name'),
       dataIndex: 'platform',
       width: 160,
       render: (v: string, row: IndicatorPlatformSummary) => (
@@ -56,12 +56,6 @@ export default function SummaryTab({ onSelect }: Props) {
           {v}
         </Button>
       ),
-    },
-    {
-      title: t('common.tech'),
-      dataIndex: 'tech',
-      width: 130,
-      render: (v: TechLower) => <Tag color="geekblue">{TECH_LABEL[v]}</Tag>,
     },
     {
       // 后端 source.go::ClassifySource 派生,前端只渲染
@@ -87,6 +81,12 @@ export default function SummaryTab({ onSelect }: Props) {
       width: 420,
       ellipsis: true,
       render: (v: string) => <Tooltip title={v}><code>{v}</code></Tooltip>,
+    },
+    {
+      title: t('common.tech'),
+      dataIndex: 'tech',
+      width: 130,
+      render: (v: TechLower) => <Tag color="geekblue">{TECH_LABEL[v]}</Tag>,
     },
     { title: t('common.indicators'), dataIndex: 'indicators', width: 90 },
     {

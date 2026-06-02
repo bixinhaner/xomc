@@ -58,18 +58,18 @@ export default function OrphanDevicesPage() {
     },
     {
       title: t('common.action'),
-      width: 120,
+      width: 80,
       render: (_: unknown, row: OrphanDevice) => (
-        <Button
-          size="small"
-          icon={<LinkOutlined />}
-          onClick={() => {
-            setBindTargets([row]);
-            setBindOpen(true);
-          }}
-        >
-          {t('common.bind')}
-        </Button>
+        <Tooltip title={t('common.bind')}>
+          <Button
+            size="small"
+            icon={<LinkOutlined />}
+            onClick={() => {
+              setBindTargets([row]);
+              setBindOpen(true);
+            }}
+          />
+        </Tooltip>
       ),
     },
   ];

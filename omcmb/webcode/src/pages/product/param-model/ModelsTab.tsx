@@ -54,9 +54,6 @@ export default function ModelsTab({ selectedName, onSelect, keyword }: Props) {
         </Button>
       ),
     },
-    { title: t('product.paramModel.models.colTotalEntries'), dataIndex: 'totalEntries', width: 90 },
-    { title: t('product.paramModel.models.colTotalObjects'), dataIndex: 'totalObjects', width: 90 },
-    { title: t('product.paramModel.models.colTotalParams'), dataIndex: 'totalParams', width: 90 },
     {
       // T-0178: 来源列 — 后端 source.go::ClassifySource 派生,前端只渲染
       title: t('common.source'),
@@ -81,6 +78,9 @@ export default function ModelsTab({ selectedName, onSelect, keyword }: Props) {
       },
     },
     { title: t('common.loadedFrom'), dataIndex: 'loadedFrom', width: 260, ellipsis: true },
+    { title: t('product.paramModel.models.colTotalEntries'), dataIndex: 'totalEntries', width: 90 },
+    { title: t('product.paramModel.models.colTotalObjects'), dataIndex: 'totalObjects', width: 90 },
+    { title: t('product.paramModel.models.colTotalParams'), dataIndex: 'totalParams', width: 90 },
     {
       title: t('common.activate'),
       dataIndex: 'isActive',
