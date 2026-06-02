@@ -19,6 +19,7 @@ type Repository interface {
 	Create(ctx context.Context, e *EventLog) error
 	List(ctx context.Context, filter Filter) ([]*EventLog, int64, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*EventLog, error)
+	StatByDevice(ctx context.Context, filter Filter) ([]*DeviceRebootStat, error)
 }
 
 var cols = []string{
@@ -133,6 +134,62 @@ func (r *PgRepository) List(ctx context.Context, filter Filter) ([]*EventLog, in
 		items = append(items, e)
 	}
 	return items, total, rows.Err()
+}
+
+// StatByDevice 按 device_sn 聚合事件次数（跟随过滤条件，不分页，按次数倒序）。
+// device_name 取该设备最近一条记录上的值（历史改名时以最新为准）。
+func (r *PgRepository) StatByDevice(ctx context.Context, filter Filter) ([]*DeviceRebootStat, error) {
+	base := storage.Psql.Select(
+		"device_sn",
+		"COUNT(*) AS reboot_count",
+		"MAX(occurred_at) AS latest_at",
+		"(ARRAY_AGG(device_name ORDER BY occurred_at DESC))[1] AS device_name",
+	).From("event_logs")
+
+	if filter.DeviceSN != "" {
+		pattern := "%" + filter.DeviceSN + "%"
+		base = base.Where(sq.ILike{"device_sn": pattern})
+	}
+	if filter.EventType != "" {
+		base = base.Where(sq.Eq{"event_type": filter.EventType})
+	}
+	if filter.StartTime != nil {
+		base = base.Where(sq.GtOrEq{"occurred_at": *filter.StartTime})
+	}
+	if filter.EndTime != nil {
+		base = base.Where(sq.LtOrEq{"occurred_at": *filter.EndTime})
+	}
+
+	query, args, err := base.
+		GroupBy("device_sn").
+		OrderBy("reboot_count DESC", "device_sn ASC").
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build stat event_logs: %w", err)
+	}
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query stat event_logs: %w", err)
+	}
+	defer rows.Close()
+
+	var items []*DeviceRebootStat
+	for rows.Next() {
+		var (
+			s          DeviceRebootStat
+			latestAt   *time.Time
+			deviceName *string
+		)
+		if err := rows.Scan(&s.DeviceSN, &s.RebootCount, &latestAt, &deviceName); err != nil {
+			return nil, fmt.Errorf("scan stat event_logs: %w", err)
+		}
+		s.LatestAt = latestAt
+		if deviceName != nil {
+			s.DeviceName = *deviceName
+		}
+		items = append(items, &s)
+	}
+	return items, rows.Err()
 }
 
 func (r *PgRepository) GetByID(ctx context.Context, id uuid.UUID) (*EventLog, error) {

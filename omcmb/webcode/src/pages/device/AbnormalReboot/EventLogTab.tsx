@@ -1,5 +1,6 @@
 import { useState, useMemo, useCallback } from 'react';
-import { Button, Space, Tag, Typography, Modal, Row, Col, Card, Statistic, message } from 'antd';
+import { Button, Space, Tag, Typography, Modal, Card, Table, message } from 'antd';
+import type { ColumnsType } from 'antd/es/table';
 import { ExportOutlined, BarChartOutlined } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
 import FilterBar from '@/components/FilterBar';
@@ -7,11 +8,13 @@ import type { FilterField } from '@/components/FilterBar';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import { useT } from '@/hooks/useT';
-import { useEventLogList } from '@core/hooks/api/useEventLog';
+import { useEventLogList, useEventLogStatByDevice } from '@core/hooks/api/useEventLog';
 import {
   eventLogApi,
   type EventLog,
   type EventLogListParams,
+  type EventLogStatParams,
+  type DeviceRebootStat,
   type EventType,
 } from '@core/services/api/eventLogApi';
 
@@ -104,15 +107,86 @@ export default function EventLogTab() {
   const dataSource = data?.items ?? [];
   const total = data?.total ?? 0;
 
-  const statistics = useMemo(() => {
-    const counts: Record<string, number> = {};
-    dataSource.forEach((row) => {
-      counts[row.eventType] = (counts[row.eventType] || 0) + 1;
+  // 统计弹窗：按设备聚合的重启次数（跟随当前筛选、去掉分页），仅弹窗打开时请求。
+  const statParams = useMemo<EventLogStatParams>(() => {
+    const { deviceSn, eventType, startTime, endTime } = queryParams;
+    return { deviceSn, eventType, startTime, endTime };
+  }, [queryParams]);
+
+  const { data: statData, isLoading: statLoading } = useEventLogStatByDevice(
+    statParams,
+    statisticVisible,
+  );
+  const statRows = statData?.items ?? [];
+
+  const statColumns = useMemo<ColumnsType<DeviceRebootStat>>(
+    () => [
+      {
+        title: t('log.deviceCode'),
+        dataIndex: 'deviceSn',
+        key: 'deviceSn',
+        width: 200,
+        render: (val: string) => (
+          <Typography.Text style={{ fontFamily: 'monospace' }}>{val}</Typography.Text>
+        ),
+      },
+      {
+        title: t('log.event.stat.deviceName'),
+        dataIndex: 'deviceName',
+        key: 'deviceName',
+        render: (val: string) => val || '-',
+      },
+      {
+        title: t('log.event.stat.rebootCount'),
+        dataIndex: 'rebootCount',
+        key: 'rebootCount',
+        width: 120,
+        defaultSortOrder: 'descend',
+        sorter: (a: DeviceRebootStat, b: DeviceRebootStat) => a.rebootCount - b.rebootCount,
+        render: (val: number) => <Tag color="blue">{val}</Tag>,
+      },
+      {
+        title: t('log.event.stat.latestAt'),
+        dataIndex: 'latestAt',
+        key: 'latestAt',
+        width: 180,
+        render: (val: string) => (val ? val.replace('T', ' ').slice(0, 19) : '-'),
+      },
+    ],
+    [t],
+  );
+
+  // 统计行已全量在内存（后端不分页），导出直接基于 statRows，无需再请求。
+  const handleExportStat = () => {
+    if (statRows.length === 0) {
+      void message.warning(t('log.exception.exportEmpty'));
+      return;
+    }
+    const rows = statRows.map((r) => ({
+      [t('log.deviceCode')]: r.deviceSn,
+      [t('log.event.stat.deviceName')]: r.deviceName || '-',
+      [t('log.event.stat.rebootCount')]: r.rebootCount,
+      [t('log.event.stat.latestAt')]: r.latestAt ? r.latestAt.replace('T', ' ').slice(0, 19) : '-',
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const widthOfStr = (s: string) => {
+      let w = 0;
+      for (const ch of s) w += /[一-鿿＀-￯]/.test(ch) ? 2 : 1;
+      return w;
+    };
+    ws['!cols'] = Object.keys(rows[0] ?? {}).map((key) => {
+      let max = widthOfStr(key);
+      for (const row of rows) {
+        const v = String((row as Record<string, unknown>)[key] ?? '');
+        if (widthOfStr(v) > max) max = widthOfStr(v);
+      }
+      return { wch: Math.min(Math.max(max + 2, 10), 50) };
     });
-    return Object.entries(counts)
-      .map(([code, count]) => ({ code, label: labelOfEventType(code), count }))
-      .sort((a, b) => b.count - a.count);
-  }, [dataSource, labelOfEventType]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, t('log.event.statModal.title'));
+    XLSX.writeFile(wb, `${t('log.event.statModal.title')}_${exportTimestamp()}.xlsx`);
+    void message.success(t('log.exception.exportSuccess', { count: statRows.length }));
+  };
 
   const filterFields: FilterField[] = useMemo(
     () => [
@@ -292,21 +366,27 @@ export default function EventLogTab() {
         open={statisticVisible}
         onCancel={() => setStatisticVisible(false)}
         footer={null}
-        width={640}
+        width={760}
       >
-        <Card size="small" title={t('log.event.stat.eventDistribution')}>
-          {statistics.length === 0 ? (
-            <Typography.Text type="secondary">-</Typography.Text>
-          ) : (
-            <Row gutter={[16, 16]}>
-              {statistics.map((s) => (
-                <Col span={12} key={s.code}>
-                  <Statistic title={s.label} value={s.count} />
-                </Col>
-              ))}
-            </Row>
-          )}
-        </Card>
+        <Space style={{ marginBottom: 12, display: 'flex', justifyContent: 'flex-end' }}>
+          <Button
+            type="primary"
+            icon={<ExportOutlined />}
+            onClick={handleExportStat}
+            disabled={statRows.length === 0}
+          >
+            {t('log.event.export')}
+          </Button>
+        </Space>
+        <Table<DeviceRebootStat>
+          size="small"
+          rowKey="deviceSn"
+          loading={statLoading}
+          columns={statColumns}
+          dataSource={statRows}
+          pagination={{ pageSize: 10, size: 'small', showSizeChanger: true }}
+          scroll={{ y: 380 }}
+        />
       </Modal>
     </>
   );

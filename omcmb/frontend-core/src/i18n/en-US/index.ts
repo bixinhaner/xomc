@@ -4776,8 +4776,11 @@ const messages: Record<string, string> = {
   'log.event.column.reason':                 'Reason',
   'log.event.column.time':                   'Time',
   'log.event.seq':                           'No.',
-  'log.event.statModal.title':               'Event Statistics',
+  'log.event.statModal.title':               'Device Reboot Statistics',
   'log.event.stat.eventDistribution':        'Event Distribution',
+  'log.event.stat.deviceName':               'Device Name',
+  'log.event.stat.rebootCount':              'Reboot Count',
+  'log.event.stat.latestAt':                 'Latest Reboot Time',
 
   // -------------------------------------------------------------------------
   // MML - ScriptTask

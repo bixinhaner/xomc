@@ -26,10 +26,12 @@ func NewHandler(svc *Service, logger *zap.Logger) *Handler {
 // RegisterRoutes 挂载于 /api/v1 下：
 //
 //	GET /event-logs                 列表 + 过滤
+//	GET /event-logs/statistics      按设备聚合重启次数（跟随过滤条件）
 //	GET /event-logs/:id             详情
 func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	g := rg.Group("/event-logs")
 	g.GET("", h.List)
+	g.GET("/statistics", h.Statistics)
 	g.GET("/:id", h.Get)
 }
 
@@ -82,6 +84,44 @@ func (h *Handler) List(c *gin.Context) {
 		"total": total,
 		"page":  filter.Page,
 		"size":  filter.PageSize,
+	})
+}
+
+// Statistics godoc
+// @Summary 按设备聚合事件日志重启次数（跟随过滤条件，不分页）
+// @Param device_sn   query string false "设备 SN（模糊匹配 ILIKE）"
+// @Param event_type  query string false "事件类型：boot / ..."
+// @Param start_time  query string false "起始时间 RFC3339"
+// @Param end_time    query string false "结束时间 RFC3339"
+func (h *Handler) Statistics(c *gin.Context) {
+	var filter Filter
+
+	if v := strings.TrimSpace(c.Query("device_sn")); v != "" {
+		filter.DeviceSN = v
+	}
+	if v := strings.TrimSpace(c.Query("event_type")); v != "" {
+		filter.EventType = v
+	}
+	if v := c.Query("start_time"); v != "" {
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			filter.StartTime = &t
+		}
+	}
+	if v := c.Query("end_time"); v != "" {
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			filter.EndTime = &t
+		}
+	}
+
+	items, err := h.svc.StatByDevice(c.Request.Context(), filter)
+	if err != nil {
+		h.logger.Error("stat event logs by device", zap.Error(err))
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	response.OK(c, gin.H{
+		"items": items,
+		"total": len(items),
 	})
 }
 

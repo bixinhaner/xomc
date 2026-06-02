@@ -68,6 +68,44 @@ export interface EventLogListResponse {
   size: number;
 }
 
+// ---- 按设备聚合的重启次数统计 ----
+
+interface BackendDeviceRebootStat {
+  device_sn: string;
+  device_name?: string;
+  reboot_count: number;
+  latest_at?: string | null;
+}
+
+export interface DeviceRebootStat {
+  deviceSn: string;
+  deviceName: string;
+  rebootCount: number;
+  latestAt: string;
+}
+
+// 统计跟随当前筛选条件，但不分页（后端一次返回全部设备聚合行）
+export interface EventLogStatParams {
+  deviceSn?: string;
+  eventType?: EventType;
+  startTime?: string; // RFC3339
+  endTime?: string;
+}
+
+export interface EventLogStatResponse {
+  items: DeviceRebootStat[];
+  total: number;
+}
+
+export function mapBackendDeviceRebootStat(b: BackendDeviceRebootStat): DeviceRebootStat {
+  return {
+    deviceSn: b.device_sn,
+    deviceName: b.device_name ?? '',
+    rebootCount: b.reboot_count,
+    latestAt: b.latest_at ?? '',
+  };
+}
+
 export function mapBackendEventLog(b: BackendEventLog): EventLog {
   return {
     id: b.id,
@@ -111,5 +149,22 @@ export const eventLogApi = {
     return http
       .get<BackendEventLog>(`${BASE}/${id}`)
       .then((res) => mapBackendEventLog(res.data));
+  },
+
+  statByDevice(params: EventLogStatParams): Promise<EventLogStatResponse> {
+    const query: Record<string, string | number> = {};
+    if (params.deviceSn) query.device_sn = params.deviceSn;
+    if (params.eventType) query.event_type = params.eventType;
+    if (params.startTime) query.start_time = params.startTime;
+    if (params.endTime) query.end_time = params.endTime;
+
+    return http
+      .get<{ items: BackendDeviceRebootStat[] | null; total: number }>(`${BASE}/statistics`, {
+        params: query,
+      })
+      .then((res) => ({
+        items: (res.data.items ?? []).map(mapBackendDeviceRebootStat),
+        total: res.data.total,
+      }));
   },
 };

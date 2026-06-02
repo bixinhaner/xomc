@@ -37,6 +37,15 @@ type EventLog struct {
 	CreatedAt       time.Time  `json:"created_at"`
 }
 
+// DeviceRebootStat 按设备聚合的重启次数统计（event_logs GROUP BY device_sn）。
+// LatestAt 为该设备最近一次事件时间，可能为空（理论上聚合后必有值，留指针以防边界）。
+type DeviceRebootStat struct {
+	DeviceSN    string     `json:"device_sn"`
+	DeviceName  string     `json:"device_name,omitempty"`
+	RebootCount int64      `json:"reboot_count"`
+	LatestAt    *time.Time `json:"latest_at,omitempty"`
+}
+
 // Filter 查询过滤条件
 type Filter struct {
 	DeviceSN   string

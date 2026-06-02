@@ -85,3 +85,8 @@ func (s *Service) List(ctx context.Context, filter Filter) ([]*EventLog, int64, 
 func (s *Service) GetByID(ctx context.Context, id uuid.UUID) (*EventLog, error) {
 	return s.repo.GetByID(ctx, id)
 }
+
+// StatByDevice 按设备聚合事件日志重启次数（跟随过滤条件，不分页）。
+func (s *Service) StatByDevice(ctx context.Context, filter Filter) ([]*DeviceRebootStat, error) {
+	return s.repo.StatByDevice(ctx, filter)
+}
