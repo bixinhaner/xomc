@@ -134,7 +134,7 @@ provision:
     gpv_timeout: 30s
     auto_activate_model: false
   auto_sync:
-    enabled: false
+    enabled: true
     sync_on_bootstrap: true
     sync_on_firmware_change: true
     max_concurrent: 20
