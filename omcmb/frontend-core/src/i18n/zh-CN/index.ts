@@ -344,6 +344,7 @@ const messages: Record<string, string> = {
   'product.kpi.indicator.formulaLabel':'公式 (formula)',
   'product.kpi.indicator.formulaPh':  '如 C1 / (C1 + C2) * 100',
   'product.kpi.indicator.formulasTitle':'全平台公式 / Per-Platform Formulas',
+  'product.kpi.indicator.arithmetic': '编号公式 (arithmetic)',
   'product.kpi.xml.builtinTip':       '内置 KPI XML 不可删除!',
   'product.kpi.xml.delTitle':         '确认删除该自定义 XML?',
   'product.kpi.xml.manageTitle':      '管理 XML 文件',

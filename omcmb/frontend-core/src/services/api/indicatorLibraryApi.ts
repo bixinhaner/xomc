@@ -30,6 +30,8 @@ interface BackendIndicator {
   description?: string;
   // 后端实际下发字符串 '0' / '1'（非布尔）；需归一化，否则 JS 里非空字符串 '0' 也是真值。
   is_counter?: boolean | number | string;
+  // PM-P3:编号版公式(perf_indicators_*.arithmetic),后端 PerfIndicator JSON 已带 arithmetic。
+  arithmetic?: string;
   product_type?: string;
   operator_code?: string;
   is_enabled?: boolean;
@@ -73,6 +75,7 @@ function mapIndicator(b: BackendIndicator, deviceType: DeviceType): IndicatorInf
     description: b.description,
     // 归一化：后端发 '0'/'1' 字符串（与 indicatorApi.ts 一致），不能直接当布尔用
     isCounter: b.is_counter === true || b.is_counter === 1 || b.is_counter === '1' || b.is_counter === 'true',
+    arithmetic: b.arithmetic,
     productClass: b.product_type,
     operatorCode: b.operator_code,
     isEnabled: b.is_enabled,

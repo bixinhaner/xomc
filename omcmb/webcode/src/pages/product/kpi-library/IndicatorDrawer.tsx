@@ -145,6 +145,11 @@ export default function IndicatorDrawer({ open, deviceType, indicator, enabled, 
             <Descriptions.Item label={t('product.kpi.indicator.enabledTag')} span={2}>
               {enabled ? <Tag color="success">{t('product.kpi.indicator.enabledTag')}</Tag> : <Tag>{t('product.kpi.indicator.disabledTag')}</Tag>}
             </Descriptions.Item>
+            {/* PM-P3:界面公式展示用编号版 arithmetic(对运维编号才是工作语言);
+                标准名版 formula 退为工程内部物,见下方"全平台公式"表(保留 CRUD)。 */}
+            <Descriptions.Item label={t('product.kpi.indicator.arithmetic')} span={2}>
+              {indicator.arithmetic ? <code style={{ fontSize: 12 }}>{indicator.arithmetic}</code> : '—'}
+            </Descriptions.Item>
             <Descriptions.Item label={t('common.description')} span={2}>
               {indicator.description || '—'}
             </Descriptions.Item>

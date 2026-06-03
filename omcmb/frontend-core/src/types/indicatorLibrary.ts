@@ -15,6 +15,10 @@ export interface IndicatorInfo {
   unit?: string;
   description?: string;
   isCounter?: boolean;
+  // PM-P3:编号版公式(perf_indicators_*.arithmetic)。派生 KPI 为编号算术式(如
+  // (C000060011+C000060022)/1000),原始计数为自身编号。界面公式展示用此字段
+  // (对运维编号才是工作语言);标准名版 formula 表退为工程内部物,不再用于展示。
+  arithmetic?: string;
   productClass?: string;
   operatorCode?: string;
   isEnabled?: boolean;

@@ -59,8 +59,8 @@ type KPIDef struct {
 	IndicatorID  string
 	Name         string   // perf_indicators_*.en_name（亦用作 model.KPIValue.KPIName）
 	StatisType   string
-	Formula      string   // rela_platform_indicator_formula_*.formula
-	Dependencies []string // 公式里引用的 counter 名（用于 KPIEngine 取数）
+	Formula      string   // PM-P3：perf_indicators_*.arithmetic（编号公式，如 (C000060011+C000060022)/1000）
+	Dependencies []string // 公式里引用的 counter 编号（与编号化后 pm_metrics.metric_path 一致，用于 KPIEngine 取数）
 }
 
 // ── 错误信号 ─────────────────────────────────────────────────────────────
@@ -262,7 +262,7 @@ func (r *Router) loadFromDB(ctx context.Context, prod *product.Product) (*KPIRou
 		return nil, fmt.Errorf("list indicators by IDs (%d): %w", len(indicatorIDs), err)
 	}
 
-	return assembleRoute(prod, dt, indicators, formulas, r.logger), nil
+	return assembleRoute(prod, dt, indicators, r.logger), nil
 }
 
 func uniqueIndicatorIDs(formulas []*indicator.PlatformFormula) []string {
@@ -278,24 +278,24 @@ func uniqueIndicatorIDs(formulas []*indicator.PlatformFormula) []string {
 	return out
 }
 
-// assembleRoute 把 indicators + formulas 拼成 KPIRoute。
+// assembleRoute 把 indicators 拼成 KPIRoute。
+//
+// PM-P3：公式内容从标准名版 formula 表切到编号版 `perf_indicators_*.arithmetic`，
+// 与编号化落库的计数器（pm_metrics.metric_path）全程编号、直接对上、零翻译。
+// formulas 参数仍由 loadFromDB 用于决定「该平台支持哪些 KPI」的成员资格
+// （uniqueIndicatorIDs → ListByIDs），故此处 indicators 只含该平台引用的指标；
+// assembleRoute 不再读 formula 内容。
 //
 // 拆分规则（perf_indicators_*.is_counter）：
 //   - is_counter='1'：CounterDef（无公式）
-//   - is_counter='0' 且 formula 行存在：KPIDef（formula 取自 rela_platform_indicator_formula_*）
-//   - is_counter='0' 但无 formula 行：跳过 + WARN（platform 已选但 formula 漏配，运维问题）
+//   - is_counter='0' 且 arithmetic 非空：KPIDef（Formula = arithmetic 编号公式）
+//   - is_counter='0' 但 arithmetic 为空：跳过 + WARN（platform 已选但编号公式缺失，运维问题）
 func assembleRoute(
 	prod *product.Product,
 	dt indicator.DeviceType,
 	indicators []*indicator.PerfIndicator,
-	formulas []*indicator.PlatformFormula,
 	logger *zap.Logger,
 ) *KPIRoute {
-	formulaByIndicator := make(map[string]string, len(formulas))
-	for _, f := range formulas {
-		formulaByIndicator[f.IndicatorID] = f.Formula
-	}
-
 	route := &KPIRoute{
 		ProductID:           prod.ID,
 		IndicatorPlatform:   prod.IndicatorPlatform,
@@ -315,21 +315,23 @@ func assembleRoute(
 			})
 			continue
 		}
-		// is_counter='0' → KPI
-		formulaExpr, ok := formulaByIndicator[ind.ID]
-		if !ok || formulaExpr == "" {
-			logger.Warn("indicator marked KPI but no formula in platform_indicator_formula; skip",
+		// is_counter='0' → KPI，公式取编号版 arithmetic。
+		arithmetic := derefStr(ind.Arithmetic)
+		if arithmetic == "" {
+			logger.Warn("indicator marked KPI but arithmetic (numbered formula) empty; skip",
 				zap.String("indicator_id", ind.ID),
 				zap.String("platform", prod.IndicatorPlatform),
 				zap.String("device_type", string(dt)))
 			continue
 		}
-		deps := extractFormulaDeps(formulaExpr)
+		// Formula 与 Dependencies 同源：都从 arithmetic 提取（同一个 expr.Parse().Identifiers()），
+		// 否则 KPIEngine 会按标准名取数 → 编号化后 pm_metrics 是编号 → 取不到 counter。
+		deps := extractFormulaDeps(arithmetic)
 		route.KPIs = append(route.KPIs, KPIDef{
 			IndicatorID:  ind.ID,
 			Name:         ind.EnName,
 			StatisType:   statisType,
-			Formula:      formulaExpr,
+			Formula:      arithmetic,
 			Dependencies: deps,
 		})
 	}

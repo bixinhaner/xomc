@@ -27,12 +27,19 @@ import (
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
 
-// kpiMeta 是一个派生 KPI 的重算元数据。
+// kpiMeta 是一个被请求指标的重算元数据。
+//
+// PM-P3 起统一走编号版 arithmetic：
+//   - 派生 KPI（K 编码）：arithmetic = 编号算术式（如 (C0001+C0002)/1000），deps = 引用的 counter 编号；
+//   - 原始计数（C 编码）：arithmetic = 自身编号 → 公式=自己 → 恒等输出该 counter 桶内聚合值。
+//
+// 两类都进 kpiMeta（去掉了旧的 is_counter='0' 过滤），统一经 recomputeKPIs 重算。
 type kpiMeta struct {
-	code       string   // K-code（= 结果行 MetricPath）
-	statisType string   // perf_indicators_*.statis_type（如 pct），写进结果行 StatisType
-	formula    string   // rela_platform_indicator_formula_*.formula
-	deps       []string // 公式里引用的 counter 名（3GPP 名，对应 pm_metrics.metric_path）
+	code       string   // 指标编号（= 结果行 MetricPath）
+	statisType string   // perf_indicators_*.statis_type（如 pct / sum / avg / max），写进结果行 StatisType
+	formula    string   // perf_indicators_*.arithmetic（编号公式；原始计数为自身编号）
+	deps       []string // 公式里引用的 counter 编号（对应编号化后 pm_metrics.metric_path）
+	isCounter  bool     // perf_indicators_*.is_counter='1'：原始计数 → 重算行保持 metric_type='counter'
 }
 
 // kpiRecomputeNeeded 判断是否需要走 KPI 重算（组维度 + 请求里含派生 KPI）。
@@ -44,37 +51,39 @@ func kpiRecomputeNeeded(q QueryRequest) bool {
 	return len(q.MetricPaths) > 0
 }
 
-// resolveKPIMetadata 把请求里的 metric_paths 拆成「派生 KPI 集合」+「普通 counter 路径集合」。
+// resolveKPIMetadata 把请求里的 metric_paths 拆成「按 arithmetic 重算的指标集合」+「无元数据的路径集合」。
 //
-// 查法照搬 lookupIndicatorNames 的 UNION 范式：跨三张 perf_indicators_* 表 JOIN 各自的
-// rela_platform_indicator_formula_* 取 is_counter='0' 的派生 KPI 的 {statis_type, formula}。
-// K-code 在三表全局唯一（无跨表重叠），UNION 即可覆盖，无需按制式分表查。
+// PM-P3 改造：
+//   - 直接读 perf_indicators_*.arithmetic（编号公式），不再 JOIN rela_platform_indicator_formula_*；
+//   - 去掉 is_counter='0' 过滤——派生 KPI（K）与原始计数（C）只要 arithmetic 非空都进 kpiMeta。
+//     原始计数 arithmetic = 自身编号 → 公式=自己 → 经 recomputeKPIs 恒等输出该 counter 桶内聚合值，
+//     从根上消除「原始计数被那道过滤挡掉、零行」的旧 bug。
+//   - 额外取 is_counter，用于 recomputeKPIs 给原始计数行保持 metric_type='counter'（不被误标成 kpi）。
 //
-// 同一 K-code 跨平台公式已确认一致；防御性兜底：若取到多行（多平台 / 多 formula），
-// 取第一个并对「不同 formula」log warn。
+// 查法照搬 lookupIndicatorNames 的 UNION 范式跨三张 perf_indicators_* 表。
+// 编号在三表全局唯一（无跨表重叠），UNION 即可覆盖。
+//
+// 同一编号跨表 arithmetic 已确认一致；防御性兜底：若取到多行，取第一个并对「不同公式」log warn。
 //
 // 返回：
-//   - kpis：请求里命中 is_counter='0' 且有 formula 的派生 KPI（含 deps）
-//   - userCounters：请求里其余路径（用户主动请求的 counter，原样保留）
+//   - kpis：请求里命中且 arithmetic 非空的指标（派生 KPI + 原始计数，含 deps）
+//   - userCounters：请求里其余无元数据的路径（原样保留）
 func (a *Aggregator) resolveKPIMetadata(ctx context.Context, paths []string) (kpis []kpiMeta, userCounters []string) {
 	if len(paths) == 0 {
 		return nil, nil
 	}
 	const tmpl = `
-SELECT pi.id, pi.statis_type, rf.formula
-FROM perf_indicators_enb pi
-JOIN rela_platform_indicator_formula_enb rf ON rf.indicator_id = pi.id
-WHERE pi.id = ANY($1) AND pi.is_counter = '0' AND COALESCE(rf.formula, '') <> ''
+SELECT id, statis_type, arithmetic, is_counter
+FROM perf_indicators_enb
+WHERE id = ANY($1) AND COALESCE(arithmetic, '') <> ''
 UNION ALL
-SELECT pi.id, pi.statis_type, rf.formula
-FROM perf_indicators_gnb pi
-JOIN rela_platform_indicator_formula_gnb rf ON rf.indicator_id = pi.id
-WHERE pi.id = ANY($1) AND pi.is_counter = '0' AND COALESCE(rf.formula, '') <> ''
+SELECT id, statis_type, arithmetic, is_counter
+FROM perf_indicators_gnb
+WHERE id = ANY($1) AND COALESCE(arithmetic, '') <> ''
 UNION ALL
-SELECT pi.id, pi.statis_type, rf.formula
-FROM perf_indicators_gsm pi
-JOIN rela_platform_indicator_formula_gsm rf ON rf.indicator_id = pi.id
-WHERE pi.id = ANY($1) AND pi.is_counter = '0' AND COALESCE(rf.formula, '') <> ''`
+SELECT id, statis_type, arithmetic, is_counter
+FROM perf_indicators_gsm
+WHERE id = ANY($1) AND COALESCE(arithmetic, '') <> ''`
 
 	metaByCode := make(map[string]kpiMeta)
 	rows, err := a.db.Query(ctx, tmpl, paths)
@@ -86,8 +95,8 @@ WHERE pi.id = ANY($1) AND pi.is_counter = '0' AND COALESCE(rf.formula, '') <> ''
 	defer rows.Close()
 	for rows.Next() {
 		var id string
-		var statis, formula *string
-		if err := rows.Scan(&id, &statis, &formula); err != nil {
+		var statis, formula, isCounter *string
+		if err := rows.Scan(&id, &statis, &formula, &isCounter); err != nil {
 			a.logger.Warn("kpi recompute metadata scan failed", zap.Error(err))
 			return nil, paths
 		}
@@ -102,17 +111,21 @@ WHERE pi.id = ANY($1) AND pi.is_counter = '0' AND COALESCE(rf.formula, '') <> ''
 		if statis != nil {
 			st = *statis
 		}
+		ic := ""
+		if isCounter != nil {
+			ic = *isCounter
+		}
 		if prev, ok := metaByCode[id]; ok {
 			if prev.formula != f {
-				a.logger.Warn("kpi has multiple distinct formulas across platforms; keep first",
+				a.logger.Warn("indicator has multiple distinct arithmetic across tables; keep first",
 					zap.String("code", id), zap.String("kept", prev.formula), zap.String("ignored", f))
 			}
 			continue // 取第一个
 		}
 		parsed, perr := expr.Parse(f)
 		if perr != nil {
-			a.logger.Warn("kpi formula parse failed; skip recompute for code",
-				zap.String("code", id), zap.String("formula", f), zap.Error(perr))
+			a.logger.Warn("indicator arithmetic parse failed; skip recompute for code",
+				zap.String("code", id), zap.String("arithmetic", f), zap.Error(perr))
 			continue
 		}
 		metaByCode[id] = kpiMeta{
@@ -120,6 +133,7 @@ WHERE pi.id = ANY($1) AND pi.is_counter = '0' AND COALESCE(rf.formula, '') <> ''
 			statisType: st,
 			formula:    f,
 			deps:       parsed.Identifiers(),
+			isCounter:  ic == "1",
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -188,12 +202,18 @@ func rowGroupKey(r Row) groupKey {
 	}
 }
 
-// recomputeKPIs 是组维度 KPI 重算后处理：在已聚合出的 counter 行基础上，按 (维度键, 桶) 重算 KPI 行。
+// recomputeKPIs 是组维度重算后处理：在已聚合出的 counter 行基础上，按 (维度键, 桶) 重算指标行。
 //
 // counterRows 是分维度函数返回的「只含 counter 行」的聚合结果（调用方已把 metric_paths 换成
 // effectiveCounterPaths 且强制 metric_type='counter'）。
 //
-// 返回：用户请求的 counter 行（剔除仅为重算引入的 deps）+ 重算出的 KPI 行。
+// PM-P3：kpis 现含两类——
+//   - 派生 KPI（km.isCounter=false）：按 arithmetic 编号公式重算，产 metric_type='kpi' 行；
+//   - 原始计数（km.isCounter=true，arithmetic=自身）：直接透传该 counter 的聚合行（保留
+//     metric_type='counter' / StatisType / Extra），不走公式合成，避免被误标成 kpi 行或丢 Extra。
+//
+// 返回：用户请求且无元数据的 counter 行 + 原始计数透传行 + 派生 KPI 重算行
+//（仅为重算引入、用户没主动请求的 deps counter 行被剔除）。
 func recomputeKPIs(counterRows []Row, kpis []kpiMeta, userCounters []string) []Row {
 	// 1. 按 (维度键, 桶) 归拢 counter 值 + 记录每个键的代表行（透传维度身份 / 时间字段）。
 	type bucket struct {
@@ -212,20 +232,33 @@ func recomputeKPIs(counterRows []Row, kpis []kpiMeta, userCounters []string) []R
 		b.values[r.MetricPath] = r.MetricValue
 	}
 
-	// 2. 输出：先放用户主动请求的 counter 行（剔除 deps-only）。
-	userSet := make(map[string]struct{}, len(userCounters))
+	// 2. passthrough 集合 = 用户请求的无元数据 counter ∪ 原始计数（arithmetic=自身）。
+	//    这两类直接透传原始 counter 行（保留 StatisType / Extra / metric_type='counter'）。
+	passthrough := make(map[string]struct{}, len(userCounters)+len(kpis))
 	for _, c := range userCounters {
-		userSet[c] = struct{}{}
+		passthrough[c] = struct{}{}
+	}
+	// 仅派生 KPI 需要走公式重算合成新行。
+	derived := make([]kpiMeta, 0, len(kpis))
+	for _, km := range kpis {
+		if km.isCounter {
+			passthrough[km.code] = struct{}{}
+		} else {
+			derived = append(derived, km)
+		}
 	}
 	out := make([]Row, 0, len(counterRows))
 	for _, r := range counterRows {
-		if _, ok := userSet[r.MetricPath]; ok {
+		if _, ok := passthrough[r.MetricPath]; ok {
 			out = append(out, r)
 		}
 	}
 
-	// 3. 逐 (桶, KPI) 重算。为保证输出顺序稳定（先按 counter 行出现序遍历桶），
+	// 3. 逐 (桶, 派生 KPI) 重算。为保证输出顺序稳定（先按 counter 行出现序遍历桶），
 	//    用 counterRows 的出现序锚定桶遍历序。
+	if len(derived) == 0 {
+		return out
+	}
 	seenBucket := make(map[groupKey]struct{})
 	for _, r := range counterRows {
 		k := rowGroupKey(r)
@@ -234,7 +267,7 @@ func recomputeKPIs(counterRows []Row, kpis []kpiMeta, userCounters []string) []R
 		}
 		seenBucket[k] = struct{}{}
 		b := buckets[k]
-		for _, km := range kpis {
+		for _, km := range derived {
 			f, err := expr.Parse(km.formula)
 			if err != nil {
 				continue

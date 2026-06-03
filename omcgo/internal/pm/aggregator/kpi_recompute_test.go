@@ -13,9 +13,15 @@ import (
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
 
-// metaRow 是 resolveKPIMetadata UNION 查询的一行：id, statis_type, formula。
+// metaRow 是 resolveKPIMetadata UNION 查询的一行：id, statis_type, arithmetic, is_counter。
+// 默认 is_counter='0'（派生 KPI）。原始计数用 metaCounterRow。
 func metaRow(id, statis, formula string) []any {
-	return []any{id, statis, formula}
+	return []any{id, statis, formula, "0"}
+}
+
+// metaCounterRow 是原始计数（is_counter='1'）的元数据行：arithmetic=自身编号。
+func metaCounterRow(id, statis string) []any {
+	return []any{id, statis, id, "1"}
 }
 
 // productRow 是 queryProductTable SELECT 的一行：
@@ -237,6 +243,148 @@ func Test_Recompute_MultiGroupBucket_NoCrossContamination(t *testing.T) {
 	}
 	assert.InDelta(t, 25.0, byPid[pidA], 1e-9, "产品A 100/400=25%")
 	assert.InDelta(t, 50.0, byPid[pidB], 1e-9, "产品B 100/200=50%")
+}
+
+// ── PM-P3: arithmetic 编号公式求值成功（派生 KPI 走 arithmetic 列而非 formula 表）────
+//
+// 编号公式 (C000030140+C000030141)/(C000030142+C000030143)*100：
+// 分子 30+10=40，分母 100+300=400 → 40/400*100=10%。验证编号公式经 arithmetic 列解析求值成功。
+func Test_Recompute_ArithmeticNumberedFormula_Success(t *testing.T) {
+	now := time.Date(2026, 6, 3, 10, 0, 0, 0, time.UTC)
+	db := &recordingDB{
+		results: []pgx.Rows{
+			&fakeRows{rows: [][]any{
+				metaRow("K000010050", "pct", "(C000030140+C000030141)/(C000030142+C000030143)*100"),
+			}},
+			&fakeRows{rows: [][]any{
+				networkRow("C000030140", "counter", 30, "sum", "hourly", now),
+				networkRow("C000030141", "counter", 10, "sum", "hourly", now),
+				networkRow("C000030142", "counter", 100, "sum", "hourly", now),
+				networkRow("C000030143", "counter", 300, "sum", "hourly", now),
+			}},
+			&fakeRows{}, // backfill
+		},
+	}
+	a := New(db, nil, nil)
+	rows, err := a.Query(context.Background(), QueryRequest{
+		Granularity: metrics.GranularityHourly,
+		Dimension:   DimensionNetwork,
+		MetricPaths: []string{"K000010050"},
+	})
+	require.NoError(t, err)
+	require.Len(t, rows, 1, "仅 KPI 行，deps counter 用户未请求被剔除")
+	assert.Equal(t, "K000010050", rows[0].MetricPath)
+	assert.Equal(t, metrics.MetricTypeKPI, rows[0].MetricType)
+	assert.InDelta(t, 10.0, rows[0].MetricValue, 1e-9)
+}
+
+// ── PM-P3: 依赖 counter 缺失时跳过该桶该 KPI（不产假 0）────────────────────────
+//
+// 公式引用 C000030142，但聚合结果里只有 C000030140（分母 counter 没出现）→ Evaluate 取不到 → 跳过。
+func Test_Recompute_DepCounterMissing_SkipsNoFakeZero(t *testing.T) {
+	now := time.Date(2026, 6, 3, 10, 0, 0, 0, time.UTC)
+	db := &recordingDB{
+		results: []pgx.Rows{
+			&fakeRows{rows: [][]any{
+				metaRow("K000010051", "pct", "C000030140/C000030142*100"),
+			}},
+			&fakeRows{rows: [][]any{
+				// 只有分子，分母 C000030142 这个桶里缺失。
+				networkRow("C000030140", "counter", 50, "sum", "hourly", now),
+			}},
+			&fakeRows{}, // backfill
+		},
+	}
+	a := New(db, nil, nil)
+	rows, err := a.Query(context.Background(), QueryRequest{
+		Granularity: metrics.GranularityHourly,
+		Dimension:   DimensionNetwork,
+		MetricPaths: []string{"K000010051"},
+	})
+	require.NoError(t, err, "依赖 counter 缺失不报错")
+	assert.Empty(t, rows, "依赖 counter 缺失该桶该 KPI 跳过，不产假 0")
+}
+
+// ── PM-P3: 原始计数 arithmetic=自身 → 恒等透传该 counter 桶内聚合值 ──────────────
+//
+// 去掉 is_counter='0' 过滤后，原始计数（is_counter='1'，arithmetic=自身编号）被纳入 kpiMeta。
+// recomputeKPIs 对原始计数走 passthrough：直接输出该 counter 的聚合行，
+// 保留 metric_type='counter' + StatisType（不被误标成 kpi、不丢行、不假 0）。
+func Test_Recompute_RawCounter_IdentityPassthrough(t *testing.T) {
+	now := time.Date(2026, 6, 3, 10, 0, 0, 0, time.UTC)
+	db := &recordingDB{
+		results: []pgx.Rows{
+			// 原始计数 C000060216（小区在服时长），arithmetic=自身，statis=sum。
+			&fakeRows{rows: [][]any{
+				metaCounterRow("C000060216", "sum"),
+			}},
+			// effective counter = {C000060216}（其 deps=自身），聚合出该 counter 行。
+			&fakeRows{rows: [][]any{
+				networkRow("C000060216", "counter", 31.0, "sum", "hourly", now),
+			}},
+			&fakeRows{}, // backfill
+		},
+	}
+	a := New(db, nil, nil)
+	rows, err := a.Query(context.Background(), QueryRequest{
+		Granularity: metrics.GranularityHourly,
+		Dimension:   DimensionNetwork,
+		MetricPaths: []string{"C000060216"},
+	})
+	require.NoError(t, err)
+	require.Len(t, rows, 1, "原始计数恒等透传一行，不重复不丢行")
+	assert.Equal(t, "C000060216", rows[0].MetricPath)
+	assert.Equal(t, metrics.MetricTypeCounter, rows[0].MetricType,
+		"原始计数保持 metric_type='counter'，不被误标成 kpi")
+	assert.InDelta(t, 31.0, rows[0].MetricValue, 1e-9, "输出=该 counter 桶内聚合值，非假 0")
+	require.NotNil(t, rows[0].StatisType, "StatisType 正确透传")
+	assert.Equal(t, metrics.StatisSum, *rows[0].StatisType)
+}
+
+// ── PM-P3: 原始计数 + 派生 KPI 混合请求 ─────────────────────────────────────────
+//
+// 请求 [C000060216(原始计数), K000010002(派生 pct)]：
+// 原始计数 passthrough 出 counter 行；派生 KPI 重算出 kpi 行；纯 dep counter 不出现。
+func Test_Recompute_RawCounterPlusDerivedKPI_Mixed(t *testing.T) {
+	now := time.Date(2026, 6, 3, 10, 0, 0, 0, time.UTC)
+	db := &recordingDB{
+		results: []pgx.Rows{
+			&fakeRows{rows: [][]any{
+				metaCounterRow("C000060216", "sum"),
+				metaRow("K000010002", "pct", "C000030001/C000030002*100"),
+			}},
+			&fakeRows{rows: [][]any{
+				networkRow("C000060216", "counter", 31, "sum", "hourly", now),
+				networkRow("C000030001", "counter", 100, "sum", "hourly", now),
+				networkRow("C000030002", "counter", 400, "sum", "hourly", now),
+			}},
+			&fakeRows{}, // backfill
+		},
+	}
+	a := New(db, nil, nil)
+	rows, err := a.Query(context.Background(), QueryRequest{
+		Granularity: metrics.GranularityHourly,
+		Dimension:   DimensionNetwork,
+		MetricPaths: []string{"C000060216", "K000010002"},
+	})
+	require.NoError(t, err)
+
+	var counterPaths, kpiPaths []string
+	valByPath := map[string]float64{}
+	for _, r := range rows {
+		valByPath[r.MetricPath] = r.MetricValue
+		if r.MetricType == metrics.MetricTypeKPI {
+			kpiPaths = append(kpiPaths, r.MetricPath)
+		} else {
+			counterPaths = append(counterPaths, r.MetricPath)
+		}
+	}
+	assert.Equal(t, []string{"C000060216"}, counterPaths, "原始计数 counter 行透传")
+	assert.NotContains(t, counterPaths, "C000030001", "纯 dep counter 不出现")
+	assert.NotContains(t, counterPaths, "C000030002", "纯 dep counter 不出现")
+	assert.Equal(t, []string{"K000010002"}, kpiPaths, "派生 KPI 重算行")
+	assert.InDelta(t, 31.0, valByPath["C000060216"], 1e-9)
+	assert.InDelta(t, 25.0, valByPath["K000010002"], 1e-9)
 }
 
 // ── 纯函数：effectiveCounterPaths 去重并合并 deps ───────────────────────────

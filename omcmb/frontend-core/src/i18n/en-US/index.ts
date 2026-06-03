@@ -344,6 +344,7 @@ const messages: Record<string, string> = {
   'product.kpi.indicator.formulaLabel':'Formula (formula)',
   'product.kpi.indicator.formulaPh':  'e.g. C1 / (C1 + C2) * 100',
   'product.kpi.indicator.formulasTitle':'All Platforms Formulas / Per-Platform Formulas',
+  'product.kpi.indicator.arithmetic': 'Numbered Formula (arithmetic)',
   'product.kpi.xml.builtinTip':       'Built-in KPI XML cannot be deleted!',
   'product.kpi.xml.delTitle':         'Confirm delete this custom XML?',
   'product.kpi.xml.manageTitle':      'Manage XML files',

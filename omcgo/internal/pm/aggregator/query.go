@@ -200,20 +200,17 @@ func (a *Aggregator) scanCountSub(ctx context.Context, inner sq.SelectBuilder) (
 }
 
 // backfillDisplayNames 给结果行补 DisplayName：
-//   - counter 行：DisplayName = metric_path（本身就是可读名）
 //   - kpi 行：metric_path 是 K 编号，按编号批量查指标库 cn_name 回填
+//   - counter 行：PM-P2/P3 编号化后 metric_path 是 C 编号，同样按编号查指标库本地化名回填；
+//     查不到（如历史遗留的标准名 counter）则回退用 metric_path 本身，保证不空白、不改旧行为。
 //
 // 编号在 perf_indicators_{enb,gnb,gsm} 三表全局唯一（无跨表重叠），故一次 UNION 查询
-// 即可覆盖，无需按设备类型分别解析。查不到的编号回退用编号本身，保证不空白。
+// 即可覆盖，无需按设备类型分别解析。
 func (a *Aggregator) backfillDisplayNames(ctx context.Context, rows []Row) {
 	codeSet := make(map[string]struct{})
 	for i := range rows {
-		if rows[i].MetricType == metrics.MetricTypeKPI {
-			if rows[i].MetricPath != "" {
-				codeSet[rows[i].MetricPath] = struct{}{}
-			}
-		} else {
-			rows[i].DisplayName = rows[i].MetricPath
+		if rows[i].MetricPath != "" {
+			codeSet[rows[i].MetricPath] = struct{}{}
 		}
 	}
 	if len(codeSet) == 0 {
@@ -225,13 +222,10 @@ func (a *Aggregator) backfillDisplayNames(ctx context.Context, rows []Row) {
 	}
 	nameByCode := a.lookupIndicatorNames(ctx, codes)
 	for i := range rows {
-		if rows[i].MetricType != metrics.MetricTypeKPI {
-			continue
-		}
 		if name, ok := nameByCode[rows[i].MetricPath]; ok && name != "" {
 			rows[i].DisplayName = name
 		} else {
-			rows[i].DisplayName = rows[i].MetricPath // 回退：编号本身
+			rows[i].DisplayName = rows[i].MetricPath // 回退：编号 / 标准名本身
 		}
 	}
 }

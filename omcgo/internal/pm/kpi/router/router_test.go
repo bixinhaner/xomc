@@ -114,16 +114,17 @@ func newBaseDevice(sn, productClass string) *fakeDevice {
 
 func sampleIndicators() []*indicator.PerfIndicator {
 	return []*indicator.PerfIndicator{
-		{ID: "C-001", EnName: "RRC_Conn_Att", IsCounter: "1", StatisType: sptr("sum"), ReportKey: sptr("RRC.AttConn")},
-		{ID: "C-002", EnName: "RRC_Conn_Succ", IsCounter: "1", StatisType: sptr("sum"), ReportKey: sptr("RRC.SuccConn")},
-		{ID: "K-001", EnName: "RRC_Succ_Rate", IsCounter: "0", StatisType: sptr("pct")},
+		{ID: "C000000001", EnName: "RRC_Conn_Att", IsCounter: "1", StatisType: sptr("sum"), ReportKey: sptr("RRC.AttConn")},
+		{ID: "C000000002", EnName: "RRC_Conn_Succ", IsCounter: "1", StatisType: sptr("sum"), ReportKey: sptr("RRC.SuccConn")},
+		// PM-P3：KPI 公式来源切到编号版 arithmetic（引用 counter 编号），不再用标准名 formula 表。
+		{ID: "K-001", EnName: "RRC_Succ_Rate", IsCounter: "0", StatisType: sptr("pct"), Arithmetic: sptr("C000000002/C000000001*100")},
 	}
 }
 
 func sampleFormulas() []*indicator.PlatformFormula {
+	// PM-P3：formula 表仅决定「该平台支持哪些 KPI」的成员资格（uniqueIndicatorIDs → ListByIDs），
+	// 公式内容已切到 arithmetic，故此处只需声明 K-001 被该平台引用即可（formula 内容不再被读取）。
 	return []*indicator.PlatformFormula{
-		// 注意：is_counter='1' 的 counter 通常 platform formula 表里也会有一条占位行
-		// （indicator 同时被多个 platform 引用 / loader 行为），这里只放 KPI 一条即可。
 		{IndicatorID: "K-001", PlatformName: "BLQ-LTE-V1", Formula: "RRC_Conn_Succ / RRC_Conn_Att"},
 	}
 }
@@ -154,12 +155,14 @@ func TestRouter_LookupByDevice_AllMissThenDBLoad(t *testing.T) {
 	for _, cd := range route.Counters {
 		reportKeyByID[cd.IndicatorID] = cd.ReportKey
 	}
-	require.Equal(t, "RRC.AttConn", reportKeyByID["C-001"])
-	require.Equal(t, "RRC.SuccConn", reportKeyByID["C-002"])
-	require.Len(t, route.KPIs, 1, "one is_counter='0' indicator with formula should land in KPIs")
+	require.Equal(t, "RRC.AttConn", reportKeyByID["C000000001"])
+	require.Equal(t, "RRC.SuccConn", reportKeyByID["C000000002"])
+	require.Len(t, route.KPIs, 1, "one is_counter='0' indicator with arithmetic should land in KPIs")
 	require.Equal(t, "RRC_Succ_Rate", route.KPIs[0].Name)
-	require.Equal(t, "RRC_Conn_Succ / RRC_Conn_Att", route.KPIs[0].Formula)
-	require.ElementsMatch(t, []string{"RRC_Conn_Succ", "RRC_Conn_Att"}, route.KPIs[0].Dependencies)
+	// PM-P3：Formula 为编号版 arithmetic（不再是标准名 formula）。
+	require.Equal(t, "C000000002/C000000001*100", route.KPIs[0].Formula)
+	// Dependencies 与 Formula 同源（从 arithmetic 提取），是 counter 编号。
+	require.ElementsMatch(t, []string{"C000000002", "C000000001"}, route.KPIs[0].Dependencies)
 }
 
 // Case 2: L1 命中 — 第二次查询不再调用 DB / L2。
@@ -240,6 +243,33 @@ func TestRouter_LookupByDevice_PlatformNoFormula(t *testing.T) {
 	require.Equal(t, productID, route.ProductID)
 	require.Empty(t, route.Counters)
 	require.Empty(t, route.KPIs)
+}
+
+// PM-P3 Case: is_counter='0' 但 arithmetic 为空 → 跳过 + warn，不进 KPIs。
+func TestRouter_LookupByDevice_KPIEmptyArithmeticSkipped(t *testing.T) {
+	productID := uuid.New()
+	r := newRouterWithFakes(t,
+		newBaseDevice("SN-A01", "FAPService.BLQ_LTE"),
+		newProductMatch(productID, "BLQ-LTE-V1", "ENB"),
+		&fakeIndicators{rows: []*indicator.PerfIndicator{
+			{ID: "C000000001", EnName: "RRC_Conn_Att", IsCounter: "1", StatisType: sptr("sum"), ReportKey: sptr("RRC.AttConn")},
+			// KPI 但 arithmetic 为空（运维漏配编号公式）→ 必须被跳过。
+			{ID: "K-NIL", EnName: "Broken_KPI", IsCounter: "0", StatisType: sptr("pct"), Arithmetic: nil},
+			// KPI arithmetic 为空串 → 同样跳过。
+			{ID: "K-EMPTY", EnName: "Broken_KPI2", IsCounter: "0", StatisType: sptr("pct"), Arithmetic: sptr("")},
+		}},
+		&fakeFormulas{rows: []*indicator.PlatformFormula{
+			{IndicatorID: "K-NIL", PlatformName: "BLQ-LTE-V1", Formula: "x/y"},
+			{IndicatorID: "K-EMPTY", PlatformName: "BLQ-LTE-V1", Formula: "x/y"},
+		}},
+		nil,
+	)
+
+	route, err := r.LookupByDevice(context.Background(), "SN-A01")
+	require.NoError(t, err)
+	require.NotNil(t, route)
+	require.Len(t, route.Counters, 1)
+	require.Empty(t, route.KPIs, "arithmetic 为空的 KPI 被跳过，不产生 KPIDef")
 }
 
 // ── 衍生健壮性 case（非 plan 5 个，但顺手写一下确保边界）──────────
