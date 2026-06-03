@@ -12,7 +12,7 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { useIntl } from 'react-intl';
 import { Checkbox, Spin, Empty, Collapse, Input, Tooltip } from 'antd';
-import { SearchOutlined, PlusOutlined, MinusOutlined, CaretDownOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons';
+import { SearchOutlined, PlusOutlined, MinusOutlined, CaretDownOutlined } from '@ant-design/icons';
 import GISMap from '@/components/GISMap';
 import { MAP_CONFIG } from '@/components/GISMap/constants';
 import type { GISMapRef } from '@/components/GISMap';
@@ -82,6 +82,23 @@ function getAllDescendantIds(node: DeviceGroupNode): string[] {
   return ids;
 }
 
+// 图标绘制组件（双箭头图标）
+const CollapseIcon = ({ direction }: { direction: 'left' | 'right' }) => (
+  <svg width={14} height={14} viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+    {direction === 'left' ? (
+      <>
+        <path d="M8.5 3.5L5 7L8.5 10.5" stroke="#262626" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+        <path d="M5 3.5L1.5 7L5 10.5" stroke="#262626" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+      </>
+    ) : (
+      <>
+        <path d="M5.5 3.5L9 7L5.5 10.5" stroke="#262626" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+        <path d="M9 3.5L12.5 7L9 10.5" stroke="#262626" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+      </>
+    )}
+  </svg>
+);
+
 export default function GISMapView() {
   const token = useThemeToken();
   const intl = useIntl();
@@ -118,8 +135,6 @@ export default function GISMapView() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // ========== 显示/隐藏控制配置 ==========
-  // 筛选Header显示配置（默认隐藏）
-  const SHOW_FILTER_HEADER = false;
   // 图例模块显示配置（默认隐藏）
   const SHOW_LEGEND = false;
 
@@ -514,11 +529,13 @@ export default function GISMapView() {
     transition: transitionString(['box-shadow', 'transform'], 'fast'),
   };
 
-  // 侧边栏折叠按钮样式
+  // ========== 侧边栏折叠按钮设计 ==========
+
+  // 侧边栏折叠按钮样式（右上角圆形按钮）
   const collapseButtonStyle: React.CSSProperties = {
     position: 'absolute',
     left: sidebarCollapsed ? 12 : 288,
-    top: 20,
+    top: 16,
     width: 32,
     height: 32,
     background: '#FFF',
@@ -529,7 +546,7 @@ export default function GISMapView() {
     alignItems: 'center',
     justifyContent: 'center',
     cursor: 'pointer',
-    zIndex: 600, // 确保在搜索框之上（搜索框 z-index: 500）
+    zIndex: 600,
     transition: 'left 0.3s ease, background 0.2s, transform 0.2s',
   };
 
@@ -556,7 +573,7 @@ export default function GISMapView() {
   const deviceSearchStyle: React.CSSProperties = {
     position: 'absolute',
     left: 60,
-    top: 15,
+    top: 12,
     width: 320,
     zIndex: 500,
   };
@@ -630,32 +647,15 @@ export default function GISMapView() {
             onMouseLeave={() => setCollapseButtonHovered(false)}
           >
             {sidebarCollapsed ? (
-              <RightOutlined style={{ fontSize: 14, color: COLORS.neutral[600] }} />
+              <CollapseIcon direction="right" />
             ) : (
-              <LeftOutlined style={{ fontSize: 14, color: COLORS.neutral[600] }} />
+              <CollapseIcon direction="left" />
             )}
           </div>
         </Tooltip>
 
         {/* 左侧筛选面板 */}
         <div style={leftPanelStyle}>
-        {/* Header - 可通过 SHOW_FILTER_HEADER 控制 */}
-        {SHOW_FILTER_HEADER && (
-          <div
-            style={{
-              height: 64,
-              background: '#FFF',
-              display: 'flex',
-              alignItems: 'center',
-              padding: '0 20px',
-              borderBottom: '1px solid #E8E8E8',
-            }}
-          >
-            <span style={{ fontSize: 18, fontWeight: 600, color: 'var(--color-neutral-800)' }}>
-              {intl.formatMessage({ id: 'common.filter' })}
-            </span>
-          </div>
-        )}
 
         {/* 中间可滚动区域 */}
         <div style={leftPanelMiddleStyle}>
