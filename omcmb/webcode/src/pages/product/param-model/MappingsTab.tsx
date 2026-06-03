@@ -2,14 +2,12 @@ import { useMemo, useState } from 'react';
 import {
   Card,
   Table,
-  Tag,
   Button,
   Space,
   Select,
   Input,
   Modal,
   Form,
-  Switch,
   message,
   Popconfirm,
   Tooltip,
@@ -112,15 +110,11 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
     },
     { title: t('product.paramModel.mappings.col.privatePath'), dataIndex: 'privatePath', ellipsis: true },
     { title: t('product.paramModel.mappings.col.entryType'), dataIndex: 'entryType', width: 90 },
-    { title: t('product.paramModel.mappings.col.access'), dataIndex: 'access', width: 100 },
+    { title: t('product.paramModel.mappings.col.access'), dataIndex: 'access', width: 110 },
     { title: t('product.paramModel.mappings.col.dataType'), dataIndex: 'dataType', width: 100 },
-    {
-      title: t('product.paramModel.mappings.col.storable'),
-      dataIndex: 'isStorable',
-      width: 90,
-      render: (v: boolean) => (v ? <Tag color="success">{t('common.yes')}</Tag> : <Tag>{t('common.no')}</Tag>),
-    },
-    { title: t('product.paramModel.mappings.col.swVersion'), dataIndex: 'softwareVersion', width: 80 },
+    { title: t('product.paramModel.mappings.col.changeApplies'), dataIndex: 'changeApplies', width: 110 },
+    { title: t('product.paramModel.mappings.col.min'), dataIndex: 'minValue', width: 80 },
+    { title: t('product.paramModel.mappings.col.max'), dataIndex: 'maxValue', width: 80 },
     {
       title: t('common.action'),
       width: 120,
@@ -229,7 +223,7 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
               setCreating(true);
               setEditing(null);
               form.resetFields();
-              form.setFieldsValue({ entryType: 'parameter', access: 'readWrite', isStorable: true, isActive: true });
+              form.setFieldsValue({ entryType: 'parameter', access: 'readWrite', dataType: 'string', changeApplies: 'reload' });
             }}
           >
             {t('product.paramModel.mappings.newBtn')}
@@ -261,7 +255,7 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
         <Form form={form} layout="vertical">
           <Form.Item
             name="standardPath"
-            label="standard_path"
+            label={t('product.paramModel.mappings.col.standardPath')}
             rules={[{ required: true, message: t('common.required') }]}
             extra={t('product.paramModel.mappings.privatePathExtra')}
           >
@@ -269,40 +263,31 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
           </Form.Item>
           <Form.Item
             name="privatePath"
-            label="private_path"
+            label={t('product.paramModel.mappings.col.privatePath')}
             rules={[{ required: true, message: t('common.required') }]}
           >
             <Input placeholder="X_VENDOR_AccessPoint.{i}.PLMNID" />
           </Form.Item>
           <Space style={{ width: '100%' }} size="middle" wrap>
-            <Form.Item name="entryType" label="entry_type">
+            <Form.Item name="entryType" label={t('product.paramModel.mappings.col.entryType')} rules={[{ required: true }]}>
               <Select options={ENTRY_OPTIONS} style={{ width: 140 }} />
             </Form.Item>
-            <Form.Item name="access" label="access">
+            <Form.Item name="access" label={t('product.paramModel.mappings.col.access')} rules={[{ required: true }]}>
               <Select options={ACCESS_OPTIONS} style={{ width: 140 }} />
             </Form.Item>
-            <Form.Item name="dataType" label="data_type">
+            <Form.Item name="dataType" label={t('product.paramModel.mappings.col.dataType')} rules={[{ required: true }]}>
               <Input style={{ width: 140 }} placeholder="string / int / bool" />
-            </Form.Item>
-            <Form.Item name="changeApplies" label="change_applies">
-              <Input style={{ width: 140 }} placeholder="reload / immediate" />
-            </Form.Item>
-            <Form.Item name="softwareVersion" label="sw_version">
-              <Input style={{ width: 120 }} />
             </Form.Item>
           </Space>
           <Space wrap>
-            <Form.Item name="minValue" label="min_value">
+            <Form.Item name="changeApplies" label={t('product.paramModel.mappings.col.changeApplies')}>
+              <Input style={{ width: 140 }} placeholder="reload / immediate" />
+            </Form.Item>
+            <Form.Item name="minValue" label={t('product.paramModel.mappings.col.min')}>
               <Input style={{ width: 140 }} />
             </Form.Item>
-            <Form.Item name="maxValue" label="max_value">
+            <Form.Item name="maxValue" label={t('product.paramModel.mappings.col.max')}>
               <Input style={{ width: 140 }} />
-            </Form.Item>
-            <Form.Item name="isStorable" label="storable" valuePropName="checked">
-              <Switch />
-            </Form.Item>
-            <Form.Item name="isActive" label={t('common.active')} valuePropName="checked">
-              <Switch />
             </Form.Item>
           </Space>
         </Form>
