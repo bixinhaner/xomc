@@ -28,6 +28,24 @@
     <param name="RootSequenceIndex" titleZh="根序列索引" titleEn="Root Sequence Index"
            standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PRACH.RootSequenceIndex"/>
   </group>
+  <group id="enb-mme" titleZh="MME IP+PLMN 列表" titleEn="MME IP + PLMN List">
+    <param name="MmeIpPlmnList" titleZh="MME IP+PLMN 列表" titleEn="MME IP + PLMN List"
+           standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.MmeIpPlmnList"/>
+  </group>
+  <group id="device-time" titleZh="时间与同步" titleEn="Time and Sync">
+    <param name="NTPServer1" titleZh="NTP 服务器 1" titleEn="NTP Server 1"
+           standardPath="Device.Time.NTPServer1"/>
+    <param name="NTPServer2" titleZh="NTP 服务器 2" titleEn="NTP Server 2"
+           standardPath="Device.Time.NTPServer2"/>
+    <param name="NTPServer3" titleZh="NTP 服务器 3" titleEn="NTP Server 3"
+           standardPath="Device.Time.NTPServer3"/>
+    <param name="NTPServer4" titleZh="NTP 服务器 4" titleEn="NTP Server 4"
+           standardPath="Device.Time.NTPServer4"/>
+    <param name="NTPServer5" titleZh="NTP 服务器 5" titleEn="NTP Server 5"
+           standardPath="Device.Time.NTPServer5"/>
+    <param name="LocalTimeZoneName" titleZh="本地时区" titleEn="Local Time Zone"
+           standardPath="Device.Time.LocalTimeZoneName"/>
+  </group>
   <group id="enb-neighbor-cell" titleZh="邻区列表" titleEn="Neighbor Cell List"
          multiInstance="true" maxInstances="32"
          objectPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.">

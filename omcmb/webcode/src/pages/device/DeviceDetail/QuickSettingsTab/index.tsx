@@ -113,14 +113,18 @@ export default function QuickSettingsTab({ deviceId, networkType }: QuickSetting
     if (!isENB || !isBM) {
       return groups;
     }
-    const prefix = activeBmTech === 'GSM'
-      ? 'Device.Services.GsmBTSCellDT.'
-      : 'Device.Services.FAPService.';
     return groups.filter((group) => {
-      if ((group.objectPath ?? '').startsWith(prefix)) {
+      const paths = [group.objectPath ?? '', ...group.params.map((param) => param.standardPath ?? '')];
+      const hasGsmScopedPath = paths.some((path) => path.startsWith('Device.Services.GsmBTSCellDT.'));
+      const hasLteScopedPath = paths.some((path) => path.startsWith('Device.Services.FAPService.'));
+
+      if (!hasGsmScopedPath && !hasLteScopedPath) {
         return true;
       }
-      return group.params.some((param) => (param.standardPath ?? '').startsWith(prefix));
+      if (activeBmTech === 'GSM') {
+        return hasGsmScopedPath;
+      }
+      return hasLteScopedPath;
     });
   }, [data?.groups, isENB, isBM, activeBmTech]);
 

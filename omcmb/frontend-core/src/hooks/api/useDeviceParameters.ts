@@ -21,6 +21,20 @@ export function useDeviceParameters(
   });
 }
 
+export function useSearchParameters(deviceId: string, query: string, limit = 100, enabled = true) {
+  return useQuery({
+    queryKey: ['devices', 'parameters', 'search', deviceId, query, limit],
+    queryFn: async () => {
+      if (typeof api.searchParameters === 'function') {
+        return api.searchParameters(deviceId, query, limit);
+      }
+      const result = await api.getParameters(deviceId, { search: query, page: 1, pageSize: limit });
+      return result.items;
+    },
+    enabled: Boolean(deviceId) && Boolean(query) && enabled,
+  });
+}
+
 export function useDeviceParameterTree(deviceId: string) {
   return useQuery({
     queryKey: ['devices', 'parameter-tree', deviceId],
@@ -42,6 +56,9 @@ export function useUpdateParameters() {
     onSuccess: (_result, { deviceId }) => {
       void queryClient.invalidateQueries({
         queryKey: ['devices', 'parameters', deviceId],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ['devices', 'parameters', 'search', deviceId],
       });
       void queryClient.invalidateQueries({
         queryKey: ['devices', 'parameter-tree', deviceId],

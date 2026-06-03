@@ -16,6 +16,8 @@
            standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoDLSIB.ScsSpecificCarrierList.{i}.SCSSpecificCarrier.SubcarrierSpacing"/>
     <param name="NRARFCNDL" titleZh="NR 下行频点" titleEn="NRARFCNDL"
            standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.RF.NRARFCNDL"/>
+    <param name="SsbFrequency" titleZh="SSB 频点" titleEn="SSB Frequency"
+           standardPath="Device.Services.FAPService.1.CellConfig.{i}.NR.RAN.RF.SsbFrequency"/>
     <param name="NRARFCNUL" titleZh="NR 上行频点" titleEn="NRARFCNUL"
            standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.RF.NRARFCNUL"/>
     <param name="NumOfRxAntenna" titleZh="接收天线数" titleEn="Num Of Rx Antenna"
@@ -40,6 +42,76 @@
            standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoULSIB.ScsSpecificCarrierList.{i}.SCSSpecificCarrier.CarrierBandwidth"/>
     <param name="ULSubCarrierSpacing" titleZh="上行子载波间隔" titleEn="UL SubCarrier Spacing"
            standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoULSIB.ScsSpecificCarrierList.{i}.SCSSpecificCarrier.SubcarrierSpacing"/>
+  </group>
+  <group id="gnb-core" titleZh="核心网参数" titleEn="Core Network Parameters">
+    <param name="PLMNID" titleZh="PLMN" titleEn="PLMN"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.CN.TA.{i}.PLMNList.{i}.PLMNID"/>
+    <param name="TAC" titleZh="TAC" titleEn="TAC"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.CN.TA.{i}.TAC"/>
+    <param name="AmfIP1" titleZh="AMF IP" titleEn="AMF IP"
+           standardPath="Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.AmfIP1"/>
+    <param name="gNBName" titleZh="gNB Name" titleEn="gNB Name"
+           standardPath="Device.Services.FAPService.1.FAPControl.NR.RAN.Common.gNBName"/>
+    <param name="NguBindInterface" titleZh="NGU 本地地址" titleEn="NGU Local Address"
+           standardPath="Device.FAP.NguIpBind{i}.BindInterface"/>
+    <param name="gNBId" titleZh="gNB ID" titleEn="gNB ID"
+           standardPath="Device.Services.FAPService.{i}.FAPControl.NR.RAN.Common.gNBId"/>
+    <param name="gNBIdLength" titleZh="gNB Length" titleEn="gNB ID Length"
+           standardPath="Device.Services.FAPService.{i}.FAPControl.NR.RAN.Common.gNBIdLength"/>
+    <param name="NrcellIdentity" titleZh="NCI" titleEn="NCI"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.CN.TA.{i}.NrcellIdentity"/>
+  </group>
+  <group id="gnb-tdd" titleZh="TDD 配置" titleEn="TDD Configuration">
+    <param name="DlULTransmissionPeriodicity" titleZh="TDD 时隙周期" titleEn="TDD Periodicity"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.TddULDLConfigurationCommon.pattern1.DlULTransmissionPeriodicity"/>
+    <param name="NrofDownlinkSlots" titleZh="下行时隙数" titleEn="Downlink Slots"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.TddULDLConfigurationCommon.pattern1.NrofDownlinkSlots"/>
+    <param name="NrofDownlinkSymbols" titleZh="下行特殊符号数" titleEn="Downlink Symbols"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.TddULDLConfigurationCommon.pattern1.NrofDownlinkSymbols"/>
+    <param name="NrofUplinkSlots" titleZh="上行时隙数" titleEn="Uplink Slots"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.TddULDLConfigurationCommon.pattern1.NrofUplinkSlots"/>
+    <param name="NrofUplinkSymbols" titleZh="上行特殊符号数" titleEn="Uplink Symbols"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.TddULDLConfigurationCommon.pattern1.NrofUplinkSymbols"/>
+  </group>
+  <group id="device-time" titleZh="时间设置" titleEn="Time Settings">
+    <param name="LocalTimeZoneName" titleZh="本地时区" titleEn="Local Time Zone"
+           standardPath="Device.Time.LocalTimeZoneName"/>
+    <param name="NTPServer1" titleZh="NTP 服务器 1" titleEn="NTP Server 1"
+           standardPath="Device.Time.NTPServer1"/>
+    <param name="NTPServer2" titleZh="NTP 服务器 2" titleEn="NTP Server 2"
+           standardPath="Device.Time.NTPServer2"/>
+    <param name="NTPServer3" titleZh="NTP 服务器 3" titleEn="NTP Server 3"
+           standardPath="Device.Time.NTPServer3"/>
+    <param name="NTPServer4" titleZh="NTP 服务器 4" titleEn="NTP Server 4"
+           standardPath="Device.Time.NTPServer4"/>
+    <param name="NTPServer5" titleZh="NTP 服务器 5" titleEn="NTP Server 5"
+           standardPath="Device.Time.NTPServer5"/>
+  </group>
+  <group id="gnb-ipsec" titleZh="IPSec 参数" titleEn="IPSec Settings"
+         multiInstance="true" maxInstances="4"
+         objectPath="Device.FAP.Ipsec.{i}.">
+    <param name="TUNNEL_ENABLE" titleZh="TunnelEnable" titleEn="Tunnel Enable" leaf="TUNNEL_ENABLE"/>
+    <param name="TUNNEL_GATEWAY" titleZh="网关地址" titleEn="Gateway" leaf="TUNNEL_GATEWAY"/>
+    <param name="TUNNEL_LEFT_AUTH" titleZh="leftAuth" titleEn="Left Auth" leaf="TUNNEL_LEFT_AUTH"/>
+    <param name="TUNNEL_RIGHT_AUTH" titleZh="rightAuth" titleEn="Right Auth" leaf="TUNNEL_RIGHT_AUTH"/>
+    <param name="LEFT_IDENTIFIER" titleZh="leftId" titleEn="Left ID" leaf="LEFT_IDENTIFIER"/>
+    <param name="RIGHT_IDENTIFIER" titleZh="rightId" titleEn="Right ID" leaf="RIGHT_IDENTIFIER"/>
+    <param name="LEFTSOURCEIP" titleZh="leftSourceIp" titleEn="Left Source IP" leaf="LEFTSOURCEIP"/>
+    <param name="LEFTSUBNET" titleZh="leftSubnet" titleEn="Left Subnet" leaf="LEFTSUBNET"/>
+    <param name="RIGHT_SUBNET" titleZh="Right Subnet" titleEn="Right Subnet" leaf="RIGHT_SUBNET"/>
+    <param name="TUNNEL_FRAGMENTATION" titleZh="fragmentation" titleEn="Fragmentation" leaf="TUNNEL_FRAGMENTATION"/>
+    <param name="IKE_ENCRYPTION" titleZh="IKE Encryption" titleEn="IKE Encryption" leaf="IKE_ENCRYPTION"/>
+    <param name="IKE_DH_GROUP" titleZh="IKE DH Group" titleEn="IKE DH Group" leaf="IKE_DH_GROUP"/>
+    <param name="IKE_AUTHENTICATION" titleZh="IKE Authentication" titleEn="IKE Authentication" leaf="IKE_AUTHENTICATION"/>
+    <param name="ESP_ENCRYPTION" titleZh="ESP Encryption" titleEn="ESP Encryption" leaf="ESP_ENCRYPTION"/>
+    <param name="ESP_DH_GROUP" titleZh="ESP DH Group" titleEn="ESP DH Group" leaf="ESP_DH_GROUP"/>
+    <param name="ESP_AUTHENTICATION" titleZh="ESP Authentication" titleEn="ESP Authentication" leaf="ESP_AUTHENTICATION"/>
+    <param name="KEYLIFE" titleZh="KeyLife" titleEn="Key Life" leaf="KEYLIFE"/>
+    <param name="IKELIFETIME" titleZh="IKELifeTime" titleEn="IKE Lifetime" leaf="IKELIFETIME"/>
+    <param name="REKEYMARGIN" titleZh="RekeyMargin" titleEn="Rekey Margin" leaf="REKEYMARGIN"/>
+    <param name="DPDACTION" titleZh="Dpdaction" titleEn="DPD Action" leaf="DPDACTION"/>
+    <param name="DPDDELAY" titleZh="Dpddelay" titleEn="DPD Delay" leaf="DPDDELAY"/>
+    <param name="LEFT_INTERFACE" titleZh="Left Interface" titleEn="Left Interface" leaf="LEFT_INTERFACE"/>
   </group>
        <group id="gnb-nr-neighbor-cell" titleZh="NR 邻区列表" titleEn="NR Neighbor Cell List"
                              multiInstance="true" maxInstances="32"

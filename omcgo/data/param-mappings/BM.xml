@@ -1,5 +1,5 @@
 <?xml version="1.0" ?>
-<parameterModel paramModel="BM" totalEntries="543">
+<parameterModel paramModel="BM" totalEntries="544">
     <objects>
         <object name="Device.DeviceInfo.EU." standardPath="Device.DeviceInfo.EU." access="READ_ONLY" changeApplies="Immediate"/>
         <object name="Device.DeviceInfo.EU.{i}.RU." standardPath="Device.DeviceInfo.EU.{i}.RU." access="READ_ONLY" changeApplies="Immediate"/>
@@ -234,6 +234,7 @@
         <param name="Device.Services.FAPService.Ipsec.IPSEC_ENABLE" standardPath="Device.Services.FAPService.Ipsec.IPSEC_ENABLE" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate"/>
         <param name="Device.Services.FAPService.MmePoolConfigParam.{i}.MMEIp" standardPath="Device.Services.FAPService.CellConfig.LTE.MmePoolConfigParam.{i}.MMEIp1" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param name="Device.Services.FAPService.MmePoolConfigParam.{i}.PLMNID" standardPath="Device.Services.FAPService.CellConfig.LTE.MmePoolConfigParam.{i}.PLMNID" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.MmeIpPlmnList" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.MmeIpPlmnList" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param name="Device.Services.FAPService.{i}.AccessMgmt.LTE.HNBName" standardPath="Device.Services.FAPService.{i}.AccessMgmt.LTE.HNBName" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="48"/>
         <param name="Device.Services.FAPService.{i}.Capabilities.LTE.BandsSupported" standardPath="Device.Services.FAPService.{i}.Capabilities.LTE.BandsSupported" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
         <param name="Device.Services.FAPService.{i}.Capabilities.LTE.DuplexMode" standardPath="Device.Services.FAPService.{i}.Capabilities.LTE.DuplexMode" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>

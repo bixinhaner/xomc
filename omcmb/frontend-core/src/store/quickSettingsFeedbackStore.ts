@@ -28,6 +28,14 @@ export interface MultiFeedback {
 
 export type Feedback = CellFeedback | MultiFeedback;
 
+export type QuickSettingsDraftValue =
+  | string
+  | number
+  | boolean
+  | null
+  | QuickSettingsDraftValue[]
+  | { [key: string]: QuickSettingsDraftValue };
+
 export function feedbackKey(
   deviceId: string,
   groupId: string,
@@ -46,7 +54,7 @@ interface FeedbackState {
    * 用于跨顶层 TabBar 切换时保留用户编辑（DeviceDetail 整树卸载，CellParameterForm 内部 form state 丢失）。
    * 保存成功后由调用方 clearDraft 清掉。
    */
-  drafts: Record<string, Record<string, string>>;
+  drafts: Record<string, Record<string, QuickSettingsDraftValue>>;
   /**
    * 强制 remount 计数器，按 deviceId 索引。
    * 头部"刷新"按钮 bump 后，QuickSettingsTab 把它拼进子组件 key，触发 CellParameterForm / MultiInstanceTable
@@ -58,7 +66,7 @@ interface FeedbackState {
   patchFeedback: (key: string, patch: Partial<Feedback>) => void;
   clearByDevice: (deviceId: string) => void;
 
-  setDraftField: (key: string, name: string, value: string) => void;
+  setDraftField: (key: string, name: string, value: QuickSettingsDraftValue) => void;
   clearDraft: (key: string) => void;
   /**
    * 删除 drafts[key] 下所有以 prefix 开头的字段，用于 MultiInstanceTable 单行 save/delete
@@ -88,7 +96,7 @@ export const useQuickSettingsFeedbackStore = create<FeedbackState>()(
 
       clearByDevice: (deviceId) => {
         const next: Record<string, Feedback> = {};
-        const nextDrafts: Record<string, Record<string, string>> = {};
+        const nextDrafts: Record<string, Record<string, QuickSettingsDraftValue>> = {};
         const prefix = `${deviceId}::`;
         for (const [k, v] of Object.entries(get().entries)) {
           if (!k.startsWith(prefix)) next[k] = v;
@@ -113,7 +121,7 @@ export const useQuickSettingsFeedbackStore = create<FeedbackState>()(
       clearDraftPrefix: (key, prefix) => {
         const cur = get().drafts[key];
         if (!cur) return;
-        const filtered: Record<string, string> = {};
+        const filtered: Record<string, QuickSettingsDraftValue> = {};
         for (const [n, v] of Object.entries(cur)) {
           if (!n.startsWith(prefix)) filtered[n] = v;
         }

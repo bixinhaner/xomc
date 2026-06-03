@@ -1,5 +1,5 @@
 <?xml version="1.0" ?>
-<parameterModel paramModel="MLQ" totalEntries="557">
+<parameterModel paramModel="MLQ" totalEntries="558">
     <objects>
         <object name="Device.FaultMgmt.CurrentAlarm." standardPath="Device.FaultMgmt.CurrentAlarm." access="READ_ONLY" changeApplies="Immediate"/>
         <object name="Device.FaultMgmt.ExpeditedEvent." standardPath="Device.FaultMgmt.ExpeditedEvent." access="READ_ONLY" changeApplies="Immediate"/>
@@ -187,6 +187,7 @@
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.EPC.TAC" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.EPC.TAC" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="65535"/>
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.MmePoolConfigParam.{i}.MMEIp1" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.MmePoolConfigParam.{i}.MMEIp1" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="256"/>
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.MmePoolConfigParam.{i}.PLMNID" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.MmePoolConfigParam.{i}.PLMNID" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="5" max="6"/>
+        <param name="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.MmeIpPlmnList" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.MmeIpPlmnList" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Common.CellIdentity" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Common.CellIdentity" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="268435455"/>
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.Common.NCellChangeHigh" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.Common.NCellChangeHigh" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.Common.NCellChangeMedium" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.Common.NCellChangeMedium" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>

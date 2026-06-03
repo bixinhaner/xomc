@@ -271,6 +271,17 @@ export const deviceParameterApi = {
     };
   },
 
+  async searchParameters(deviceId: string, query: string, limit = 100): Promise<DeviceParameter[]> {
+    if (!query.trim()) {
+      return [];
+    }
+    const { data } = await http.get<{ items: BackendDeviceParameter[]; total: number }>(
+      `/devices/${deviceId}/parameters/search`,
+      { params: { q: query, limit } }
+    );
+    return (data.items || []).map(mapBackendParameter);
+  },
+
   async getParameterTree(deviceId: string): Promise<ParameterTreeNode[]> {
     const { data } = await http.get<{ tree: BackendParameterTreeNode[]; total: number }>(
       `/devices/${deviceId}/parameters/tree`

@@ -42,14 +42,41 @@
     <param name="RootSequenceIndex" titleZh="根序列索引" titleEn="Root Sequence Index"
            standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PRACH.RootSequenceIndex"/>
   </group>
-  <group id="enb-plmn" titleZh="PLMN 列表" titleEn="PLMN List"
-         multiInstance="true" maxInstances="6"
-         objectPath="Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.">
-    <param name="PLMNID" titleZh="PLMN" titleEn="PLMN" leaf="PLMNID"/>
-    <param name="Enable" titleZh="启用" titleEn="Enable" leaf="Enable"/>
-    <param name="IsPrimary" titleZh="主 PLMN" titleEn="Is Primary" leaf="IsPrimary"/>
-    <param name="CellReservedForOperatorUse" titleZh="运营商保留" titleEn="Operator Reserved" leaf="CellReservedForOperatorUse"/>
-  </group>
+       <group id="enb-mme" titleZh="MME IP+PLMN 列表" titleEn="MME IP + PLMN List">
+              <param name="MmeIpPlmnList" titleZh="MME IP+PLMN 列表" titleEn="MME IP + PLMN List"
+                                    standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.MmeIpPlmnList"/>
+       </group>
+       <group id="device-sync" titleZh="时间与同步" titleEn="Time and Sync">
+              <param name="tfcsManagerPrimsrc" titleZh="同步源" titleEn="Sync Source"
+                                    standardPath="Device.ManagementServer.tfcsManagerPrimsrc"/>
+              <param name="tfcsSyncState" titleZh="同步状态" titleEn="Sync State"
+                                    standardPath="Device.ManagementServer.tfcsSyncState"/>
+       </group>
+       <group id="device-ipsec" titleZh="IPSec 参数" titleEn="IPSec Settings"
+                             multiInstance="true" maxInstances="4"
+                             objectPath="Device.FAP.Ipsec.{i}.">
+              <param name="TUNNEL_ENABLE" titleZh="TunnelEnable" titleEn="Tunnel Enable" leaf="TUNNEL_ENABLE"/>
+              <param name="TUNNEL_GATEWAY" titleZh="网关地址" titleEn="Gateway" leaf="TUNNEL_GATEWAY"/>
+              <param name="LEFT_AUTH" titleZh="leftAuth" titleEn="Left Auth" leaf="LEFT_AUTH"/>
+              <param name="RIGHT_AUTH" titleZh="rightAuth" titleEn="Right Auth" leaf="RIGHT_AUTH"/>
+              <param name="LEFT_IDENTIFIER" titleZh="leftId" titleEn="Left ID" leaf="LEFT_IDENTIFIER"/>
+              <param name="RIGHT_IDENTIFIER" titleZh="rightId" titleEn="Right ID" leaf="RIGHT_IDENTIFIER"/>
+              <param name="LEFTSOURCEIP" titleZh="leftSourceIp" titleEn="Left Source IP" leaf="LEFTSOURCEIP"/>
+              <param name="LEFT_SUBNET" titleZh="leftSubnet" titleEn="Left Subnet" leaf="LEFT_SUBNET"/>
+              <param name="RIGHT_SUBNET" titleZh="Right Subnet" titleEn="Right Subnet" leaf="RIGHT_SUBNET"/>
+              <param name="FRAGMENTATION" titleZh="fragmentation" titleEn="Fragmentation" leaf="FRAGMENTATION"/>
+              <param name="IKE_ENCRYPTION" titleZh="IKE Encryption" titleEn="IKE Encryption" leaf="IKE_ENCRYPTION"/>
+              <param name="IKE_DH_GROUP" titleZh="IKE DH Group" titleEn="IKE DH Group" leaf="IKE_DH_GROUP"/>
+              <param name="IKE_AUTHENTICATION" titleZh="IKE Authentication" titleEn="IKE Authentication" leaf="IKE_AUTHENTICATION"/>
+              <param name="ESP_ENCRYPTION" titleZh="ESP Encryption" titleEn="ESP Encryption" leaf="ESP_ENCRYPTION"/>
+              <param name="ESP_DH_GROUP" titleZh="ESP DH Group" titleEn="ESP DH Group" leaf="ESP_DH_GROUP"/>
+              <param name="ESP_AUTHENTICATION" titleZh="ESP Authentication" titleEn="ESP Authentication" leaf="ESP_AUTHENTICATION"/>
+              <param name="KEYLIFE" titleZh="KeyLife" titleEn="Key Life" leaf="KEYLIFE"/>
+              <param name="IKELIFETIME" titleZh="IKELifeTime" titleEn="IKE Lifetime" leaf="IKELIFETIME"/>
+              <param name="REKEYMARGIN" titleZh="RekeyMargin" titleEn="Rekey Margin" leaf="REKEYMARGIN"/>
+              <param name="DPDACTION" titleZh="Dpdaction" titleEn="DPD Action" leaf="DPDACTION"/>
+              <param name="DPDDELAY" titleZh="Dpddelay" titleEn="DPD Delay" leaf="DPDDELAY"/>
+       </group>
   <group id="enb-neighbor-freq" titleZh="异频载波列表" titleEn="Inter-Frequency Carrier List"
          multiInstance="true" maxInstances="8"
          objectPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.">
@@ -132,6 +159,8 @@
   <group id="gsm-abis" titleZh="Abis 接口" titleEn="Abis Settings">
     <param name="IPAUnitID" titleZh="ipa-Unit ID" titleEn="ipa-Unit ID"
            standardPath="Device.Services.GsmBTSCellDT.{i}.IPAUnitID"/>
+    <param name="GsmBtsBindMib" titleZh="Bind IP" titleEn="Bind IP"
+           standardPath="Device.Services.GsmBTSCellDT.{i}.GsmBtsBindMib"/>
     <param name="OMLRemoteIP" titleZh="Remote IP" titleEn="Remote IP"
            standardPath="Device.Services.GsmBTSCellDT.{i}.OMLRemoteIP"/>
     <param name="OMLRemoteIPBak" titleZh="Remote IP 备份" titleEn="Remote IP Backup"

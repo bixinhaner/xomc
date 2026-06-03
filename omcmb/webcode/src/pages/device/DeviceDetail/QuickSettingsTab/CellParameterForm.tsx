@@ -1,17 +1,18 @@
 import { useEffect, useMemo, useState, Fragment } from 'react';
-import { Button, Card, Col, Form, Input, Row, Select, Space, Spin, Tag, Typography, message, notification } from 'antd';
+import { Button, Card, Col, Form, Input, Row, Select, Space, Spin, Table, Tag, Typography, message, notification } from 'antd';
 import type { FormInstance } from 'antd';
-import { CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, SendOutlined, SyncOutlined } from '@ant-design/icons';
+import { CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, DeleteOutlined, PlusOutlined, SendOutlined, SyncOutlined } from '@ant-design/icons';
 import { useQueryClient } from '@tanstack/react-query';
-import { useParameterSchema, useUpdateParameters } from '@core/hooks/api/useDeviceParameters';
+import { useParameterSchema, useSearchParameters, useUpdateParameters } from '@core/hooks/api/useDeviceParameters';
 import { useDeviceTaskStatus } from '@core/hooks/api/useDeviceTask';
 import { notificationKeys } from '@core/hooks/api/useNotificationCenter';
 import {
   feedbackKey,
   useQuickSettingsFeedbackStore,
   type CellFeedback,
+  type QuickSettingsDraftValue,
 } from '@core/store/quickSettingsFeedbackStore';
-import type { ParameterSchemaItem, ParameterUpdateRequest } from '@core/types/deviceParameter';
+import type { DeviceParameter, ParameterSchemaItem, ParameterUpdateRequest } from '@core/types/deviceParameter';
 import type { DeviceTaskStatus } from '@core/types/deviceTask';
 import type { QuickSettingsGroup } from '@core/types/quicksettings';
 import { applyInstanceContext, getEffectiveEnumMeta, validateValue, type QuickSettingsInstanceContext } from './validators';
@@ -236,6 +237,266 @@ interface CellParameterFormProps {
   locale: 'zh-CN' | 'en-US';
 }
 
+interface BindSelectOption {
+  value: string;
+  label: string;
+}
+
+interface SpecialFieldConfig {
+  kind: 'input' | 'mme-ip-plmn-table' | 'bind-select';
+  configPath: string;
+  displayPath?: string;
+  placeholder?: string;
+  forceWritable?: boolean;
+}
+
+interface MmeIpPlmnRow {
+  key: string;
+  mmeIp: string;
+  plmn: string;
+}
+
+interface MmeIpPlmnTableProps {
+  value?: MmeIpPlmnRow[];
+  onChange?: (value: MmeIpPlmnRow[]) => void;
+  disabled?: boolean;
+  locale: 'zh-CN' | 'en-US';
+}
+
+function normalizeMmeIpPlmnRows(rows: MmeIpPlmnRow[]): MmeIpPlmnRow[] {
+  return rows
+    .map((row) => ({
+      key: row.key,
+      mmeIp: String(row.mmeIp ?? '').trim(),
+      plmn: String(row.plmn ?? '').trim(),
+    }))
+    .filter((row) => row.mmeIp || row.plmn);
+}
+
+function parseMmeIpPlmnList(raw: unknown): MmeIpPlmnRow[] {
+  const text = String(raw ?? '').trim();
+  if (!text) return [];
+  return text
+    .split(/[;,\n]+/)
+    .map((item, idx) => {
+      const [mmeIp = '', plmn = ''] = item.split('+');
+      return {
+        key: `row-${idx}-${mmeIp.trim()}-${plmn.trim()}`,
+        mmeIp: mmeIp.trim(),
+        plmn: plmn.trim(),
+      };
+    });
+}
+
+function serializeMmeIpPlmnList(rows: MmeIpPlmnRow[]): string {
+  return normalizeMmeIpPlmnRows(rows)
+    .map((row) => `${row.mmeIp}+${row.plmn}`)
+    .join(',');
+}
+
+function isMmeIpPlmnRows(value: unknown): value is MmeIpPlmnRow[] {
+  return Array.isArray(value)
+    && value.every((item) => (
+      item && typeof item === 'object' && 'mmeIp' in item && 'plmn' in item
+    ));
+}
+
+function toMmeIpPlmnRows(value: QuickSettingsDraftValue | string | undefined): MmeIpPlmnRow[] {
+  if (isMmeIpPlmnRows(value)) {
+    return (value as MmeIpPlmnRow[]).map((row, idx) => ({
+      ...row,
+      key: row.key || `row-${idx}`,
+      mmeIp: String(row.mmeIp ?? ''),
+      plmn: String(row.plmn ?? ''),
+    }));
+  }
+  return parseMmeIpPlmnList(value);
+}
+
+function MmeIpPlmnTable({ value = [], onChange, disabled = false, locale }: MmeIpPlmnTableProps) {
+  const rows = isMmeIpPlmnRows(value) ? value : [];
+
+  const setRows = (nextRows: MmeIpPlmnRow[]) => {
+    onChange?.(nextRows);
+  };
+
+  const updateCell = (key: string, field: 'mmeIp' | 'plmn', nextValue: string) => {
+    setRows(rows.map((row) => (row.key === key ? { ...row, [field]: nextValue } : row)));
+  };
+
+  const addRow = () => {
+    setRows([
+      ...rows,
+      { key: `row-${Date.now()}-${rows.length}`, mmeIp: '', plmn: '' },
+    ]);
+  };
+
+  const removeRow = (key: string) => {
+    setRows(rows.filter((row) => row.key !== key));
+  };
+
+  const columns = [
+    {
+      title: locale === 'zh-CN' ? 'MME IP' : 'MME IP',
+      dataIndex: 'mmeIp',
+      key: 'mmeIp',
+      render: (_: unknown, row: MmeIpPlmnRow) => (
+        <Input
+          value={row.mmeIp}
+          disabled={disabled}
+          placeholder="127.0.0.1"
+          onChange={(e) => updateCell(row.key, 'mmeIp', e.target.value)}
+        />
+      ),
+    },
+    {
+      title: locale === 'zh-CN' ? 'PLMN' : 'PLMN',
+      dataIndex: 'plmn',
+      key: 'plmn',
+      render: (_: unknown, row: MmeIpPlmnRow) => (
+        <Input
+          value={row.plmn}
+          disabled={disabled}
+          placeholder="46000"
+          onChange={(e) => updateCell(row.key, 'plmn', e.target.value)}
+        />
+      ),
+    },
+    {
+      title: locale === 'zh-CN' ? '操作' : 'Actions',
+      key: 'actions',
+      width: 80,
+      render: (_: unknown, row: MmeIpPlmnRow) => (
+        <Button
+          danger
+          type="text"
+          icon={<DeleteOutlined />}
+          disabled={disabled}
+          onClick={() => removeRow(row.key)}
+        />
+      ),
+    },
+  ];
+
+  return (
+    <Space direction="vertical" style={{ width: '100%' }} size={8}>
+      <Table<MmeIpPlmnRow>
+        size="small"
+        rowKey="key"
+        pagination={false}
+        columns={columns}
+        dataSource={rows}
+      />
+      <Button
+        icon={<PlusOutlined />}
+        onClick={addRow}
+        disabled={disabled}
+      >
+        {locale === 'zh-CN' ? '新增一行' : 'Add Row'}
+      </Button>
+    </Space>
+  );
+}
+
+function buildSpecialFieldConfig(
+  groupId: string,
+  paramName: string,
+  instanceContext: QuickSettingsInstanceContext,
+): SpecialFieldConfig | null {
+  if (groupId === 'gsm-abis' && paramName === 'GsmBtsBindMib') {
+    return {
+      kind: 'bind-select',
+      configPath: applyInstanceContext('Device.Services.GsmBTSCellDT.{i}.GsmBtsBindMib', instanceContext),
+      displayPath: applyInstanceContext('Device.Services.GsmBTSCellDT.{i}.GsmBtsIpAddr', instanceContext),
+      forceWritable: true,
+    };
+  }
+  if (groupId === 'enb-mme' && paramName === 'MmeIpPlmnList') {
+    return {
+      kind: 'mme-ip-plmn-table',
+      configPath: applyInstanceContext('Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.MmeIpPlmnList', instanceContext),
+      forceWritable: true,
+    };
+  }
+  if (groupId === 'gnb-core' && paramName === 'gNBName') {
+    return {
+      kind: 'input',
+      configPath: 'Device.Services.FAPService.1.FAPControl.NR.RAN.Common.gNBName',
+      forceWritable: true,
+    };
+  }
+  if (groupId === 'gnb-core' && paramName === 'NguBindInterface') {
+    return {
+      kind: 'bind-select',
+      configPath: applyInstanceContext('Device.FAP.NguIpBind{i}.BindInterface', instanceContext),
+      displayPath: applyInstanceContext('Device.FAP.NguIpBind{i}.NguLocalIp', instanceContext),
+      forceWritable: true,
+    };
+  }
+  return null;
+}
+
+function normalizeInterfaceType(value?: string | null): string {
+  return String(value ?? '').trim().toLowerCase();
+}
+
+function buildBindSelectOptions(parameters: ParameterSchemaItem[]): BindSelectOption[] {
+  const interfaceKinds = new Map<string, string>();
+  for (const item of parameters) {
+    const match = /^Device\.Ethernet\.Interface\.(\d+)\.interfaceType$/i.exec(item.path);
+    if (!match) continue;
+    interfaceKinds.set(match[1], normalizeInterfaceType(item.currentValue));
+  }
+
+  const options: BindSelectOption[] = [];
+  for (const item of parameters) {
+    const currentValue = String(item.currentValue ?? '').trim();
+    if (!currentValue) continue;
+
+    const directMatch = /^Device\.Ethernet\.Interface\.(\d+)\.(IPv[46]Address\.\d+\.IPAddress)$/.exec(item.path);
+    if (directMatch) {
+      if (interfaceKinds.get(directMatch[1]) === 'wan') {
+        options.push({
+          value: item.path,
+          label: `${currentValue}`,
+        });
+      }
+      continue;
+    }
+
+    const vlanMatch = /^Device\.Ethernet\.Interface\.(\d+)\.VlanInterface\.\d+\.(IPv[46]Address\.\d+\.IPAddress)$/.exec(item.path);
+    if (vlanMatch && interfaceKinds.get(vlanMatch[1]) === 'wan') {
+      options.push({
+        value: item.path,
+        label: `${currentValue}`,
+      });
+    }
+  }
+
+  return options.sort((left, right) => left.label.localeCompare(right.label));
+}
+
+function appendCurrentBindOption(
+  options: BindSelectOption[],
+  currentPath: string,
+  displayValue: string,
+): BindSelectOption[] {
+  if (!currentPath || options.some((option) => option.value === currentPath)) {
+    return options;
+  }
+  const label = displayValue || 'Unknown IP';
+  return [{ value: currentPath, label }, ...options];
+}
+
+function getRawValueByPath(rawParameterByPath: Map<string, DeviceParameter>, path: string): DeviceParameter | undefined {
+  return rawParameterByPath.get(path);
+}
+
+function findRawValueBySuffix(parameters: DeviceParameter[] | undefined, suffix: string): DeviceParameter | undefined {
+  if (!parameters) return undefined;
+  return parameters.find((item) => item.parameterPath.endsWith(suffix));
+}
+
 /**
  * 单实例分组表单（如「小区参数」）。
  *
@@ -277,6 +538,35 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
     [group, instanceContext],
   );
   const { data: schemaResp, isLoading, refetch } = useParameterSchema(deviceId, commonPrefix);
+  const { data: ethernetSchemaResp } = useParameterSchema(
+    deviceId,
+    'Device.Ethernet.Interface.',
+    group.id === 'gsm-abis' || group.id === 'gnb-core',
+  );
+  const { data: mmeIpPlmnParams } = useSearchParameters(
+    deviceId,
+    group.id === 'enb-mme' ? 'MmeIpPlmnList' : '',
+    50,
+    group.id === 'enb-mme',
+  );
+  const { data: nrCommonParams } = useSearchParameters(
+    deviceId,
+    group.id === 'gnb-core' ? 'Device.Services.FAPService.1.FAPControl.NR.RAN.Common.' : '',
+    50,
+    group.id === 'gnb-core',
+  );
+  const { data: nrNguParams } = useSearchParameters(
+    deviceId,
+    group.id === 'gnb-core' ? 'Device.FAP.NguIpBind' : '',
+    200,
+    group.id === 'gnb-core',
+  );
+  const { data: deviceTimeParams } = useSearchParameters(
+    deviceId,
+    group.id === 'device-time' ? 'Device.Time.' : '',
+    200,
+    group.id === 'device-time',
+  );
 
   // BM GSM 专属:并行拉 RU 节点 schema,用于在 gsm-cell 表单中展示"绑定 RU 的 Route Index"。
   // 拉取与主 schema 解耦,避免污染 commonPrefix 退化成 Device. 触发全量拉取。
@@ -304,6 +594,34 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
     schemaResp?.parameters.forEach((p) => map.set(p.path, p));
     return map;
   }, [schemaResp]);
+  const rawParameterByPath = useMemo(() => {
+    const map = new Map<string, DeviceParameter>();
+    for (const item of [...(mmeIpPlmnParams ?? []), ...(nrCommonParams ?? []), ...(nrNguParams ?? []), ...(deviceTimeParams ?? [])]) {
+      map.set(item.parameterPath, item);
+    }
+    return map;
+  }, [mmeIpPlmnParams, nrCommonParams, nrNguParams, deviceTimeParams]);
+  const bindSelectOptions = useMemo(
+    () => buildBindSelectOptions(ethernetSchemaResp?.parameters ?? []),
+    [ethernetSchemaResp],
+  );
+  const bindIpByPath = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const option of bindSelectOptions) {
+      map.set(option.value, option.label);
+    }
+    return map;
+  }, [bindSelectOptions]);
+  const specialConfigByName = useMemo(() => {
+    const map = new Map<string, SpecialFieldConfig>();
+    for (const param of group.params) {
+      const config = buildSpecialFieldConfig(group.id, param.name, instanceContext);
+      if (config) {
+        map.set(param.name, config);
+      }
+    }
+    return map;
+  }, [group.id, group.params, instanceContext]);
 
   // T-0159: 交叉镜像 — 反查表 resolved standardPath → form field name，
   // 让 onValuesChange 时能据 constraints.mirrorWith 找到对端 form field 并 setFieldValue 同步。
@@ -322,39 +640,69 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
     if (!schemaResp) return;
     group.params.forEach((p) => {
       if (draft && draft[p.name] !== undefined) {
-        form.setFieldValue(p.name, draft[p.name]);
+        if (specialConfigByName.get(p.name)?.kind === 'mme-ip-plmn-table') {
+          form.setFieldValue(p.name, toMmeIpPlmnRows(draft[p.name]));
+        } else {
+          form.setFieldValue(p.name, String(draft[p.name] ?? ''));
+        }
         return;
       }
       // 优先级 2: 用户在当前会话已 touched
       if (form.isFieldTouched(p.name)) return;
       // 优先级 3: schema 原值
-      const path = applyInstanceContext(p.standardPath || '', instanceContext);
+      const special = specialConfigByName.get(p.name);
+      const path = special?.configPath ?? applyInstanceContext(p.standardPath || '', instanceContext);
       const item = schemaByPath.get(path);
-      form.setFieldValue(p.name, item?.currentValue ?? '');
+      const rawItem = getRawValueByPath(rawParameterByPath, path)
+        ?? (special?.kind === 'mme-ip-plmn-table'
+          ? findRawValueBySuffix(mmeIpPlmnParams, '.MmeIpPlmnList')
+          : special?.kind === 'bind-select' && p.name === 'NguBindInterface'
+            ? findRawValueBySuffix(nrNguParams, '.BindInterface')
+            : undefined);
+      if (special?.kind === 'mme-ip-plmn-table') {
+        form.setFieldValue(p.name, toMmeIpPlmnRows(rawItem?.parameterValue ?? item?.currentValue ?? ''));
+      } else {
+        form.setFieldValue(p.name, rawItem?.parameterValue ?? item?.currentValue ?? '');
+      }
     });
-  }, [schemaResp, group, instanceContext, form, schemaByPath, draft]);
+  }, [schemaResp, group, instanceContext, form, schemaByPath, rawParameterByPath, draft, specialConfigByName]);
 
   const handleSave = async () => {
-    const values = form.getFieldsValue() as Record<string, string>;
+    const values = form.getFieldsValue() as Record<string, unknown>;
     const updates: ParameterUpdateRequest[] = [];
     const errors: Record<string, string> = {};
 
     for (const p of group.params) {
-      const path = applyInstanceContext(p.standardPath || '', instanceContext);
+      const special = specialConfigByName.get(p.name);
+      const path = special?.configPath ?? applyInstanceContext(p.standardPath || '', instanceContext);
       const item = schemaByPath.get(path);
-      const newVal = values[p.name] ?? '';
-      const oldVal = item?.currentValue ?? '';
+      const rawItem = getRawValueByPath(rawParameterByPath, path)
+        ?? (special?.kind === 'mme-ip-plmn-table'
+          ? findRawValueBySuffix(mmeIpPlmnParams, '.MmeIpPlmnList')
+          : special?.kind === 'bind-select' && p.name === 'NguBindInterface'
+            ? findRawValueBySuffix(nrNguParams, '.BindInterface')
+            : undefined);
+
+      if (special?.kind === 'mme-ip-plmn-table') {
+        values[p.name] = normalizeMmeIpPlmnRows(toMmeIpPlmnRows(values[p.name]));
+      }
+
+      const newVal = special?.kind === 'mme-ip-plmn-table'
+        ? serializeMmeIpPlmnList(toMmeIpPlmnRows(values[p.name]))
+        : String(values[p.name] ?? '');
+      const oldVal = rawItem?.parameterValue ?? item?.currentValue ?? '';
       if (newVal === oldVal) continue;
 
-      const err = validateValue(newVal, (item?.type as never) ?? 'string', item?.constraints);
+      const parameterType = rawItem?.parameterType ?? (item?.type as never) ?? 'string';
+      const err = validateValue(newVal, parameterType, item?.constraints);
       if (err) {
         errors[p.name] = err;
         continue;
       }
       updates.push({
-        parameterPath: path,
+        parameterPath: rawItem?.parameterPath ?? path,
         parameterValue: newVal,
-        parameterType: (item?.type as never) ?? 'string',
+        parameterType,
       });
     }
 
@@ -428,11 +776,15 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
         return;
       }
       if (cancelled) return;
-      const nextValues: Record<string, string> = {};
+      const nextValues: Record<string, unknown> = {};
       const refreshedSchemaByPath = new Map((refreshed.data?.parameters ?? []).map((item) => [item.path, item]));
       for (const p of group.params) {
-        const path = applyInstanceContext(p.standardPath || '', instanceContext);
-        nextValues[p.name] = refreshedSchemaByPath.get(path)?.currentValue ?? '';
+        const special = specialConfigByName.get(p.name);
+        const path = special?.configPath ?? applyInstanceContext(p.standardPath || '', instanceContext);
+        const refreshedValue = refreshedSchemaByPath.get(path)?.currentValue ?? '';
+        nextValues[p.name] = special?.kind === 'mme-ip-plmn-table'
+          ? toMmeIpPlmnRows(refreshedValue)
+          : refreshedValue;
       }
       form.setFieldsValue(nextValues);
       clearDraft(fbKey);
@@ -441,7 +793,7 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
     return () => {
       cancelled = true;
     };
-  }, [lastTask?.id, lastTask?.status, refetch, group.params, instanceContext, form, clearDraft, fbKey, group.titleZh]);
+  }, [lastTask?.id, lastTask?.status, refetch, group.params, instanceContext, form, clearDraft, fbKey, group.titleZh, specialConfigByName]);
 
   // T-0146:基站应答失败时弹一次 notification(只在 status 第一次变成 failed 时触发,避免重复弹)
   // notifiedFailedTaskId 同样存 store —— 切顶层 tab 再切回不会重复弹。
@@ -462,6 +814,13 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
   }, [lastTask, lastSubmit, group.titleZh, patchFeedback, fbKey]);
 
   const title = locale === 'zh-CN' ? group.titleZh : group.titleEn;
+  const visibleLastSubmit = useMemo(() => {
+    if (!lastSubmit) return null;
+    if (lastSubmit.submitStatus === 'failed_to_queue' && Date.now() - lastSubmit.at > 60_000) {
+      return null;
+    }
+    return lastSubmit;
+  }, [lastSubmit]);
 
   return (
     <Card
@@ -469,11 +828,11 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
       size="small"
       extra={
         <Space>
-          {lastSubmit && (() => {
-            const spec = statusTagSpec(lastSubmit, lastTask?.status);
+          {visibleLastSubmit && (() => {
+            const spec = statusTagSpec(visibleLastSubmit, lastTask?.status);
             return (
               <Tag icon={spec.icon} color={spec.color}>
-                {spec.label} · {lastSubmit.count} 项 · {formatTime(lastSubmit.at)}
+                {spec.label} · {visibleLastSubmit.count} 项 · {formatTime(visibleLastSubmit.at)}
               </Tag>
             );
           })()}
@@ -491,14 +850,21 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
         onValuesChange={(changedValues) => {
           // 同步到 store draft，跨顶层 TabBar 切走切回可恢复
           for (const [name, value] of Object.entries(changedValues)) {
-            setDraftField(fbKey, name, String(value ?? ''));
+            const p = group.params.find((q) => q.name === name);
+            const special = p ? specialConfigByName.get(p.name) : undefined;
+            if (special?.kind === 'mme-ip-plmn-table') {
+              setDraftField(fbKey, name, toMmeIpPlmnRows(value as QuickSettingsDraftValue));
+            } else {
+              setDraftField(fbKey, name, String(value ?? ''));
+            }
           }
           // T-0159: 交叉镜像 — 改 A 字段时把 A 的新值同步写入镜像字段 B（如 TDD 上下行带宽必须相等）。
           // antd Form.setFieldValue 不会触发 onValuesChange，故不会无限递归。
           for (const [name, value] of Object.entries(changedValues)) {
             const p = group.params.find((q) => q.name === name);
             if (!p) continue;
-            const path = applyInstanceContext(p.standardPath || '', instanceContext);
+            const special = specialConfigByName.get(name);
+            const path = special?.configPath ?? applyInstanceContext(p.standardPath || '', instanceContext);
             const sItem = schemaByPath.get(path);
             const mirrorPath = sItem?.constraints?.mirrorWith;
             if (!mirrorPath) continue;
@@ -516,10 +882,14 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
             for (const [name, value] of Object.entries(changedValues)) {
               const p = group.params.find((q) => q.name === name);
               if (!p) continue;
-              const path = applyInstanceContext(p.standardPath || '', instanceContext);
+              const special = specialConfigByName.get(name);
+              const path = special?.configPath ?? applyInstanceContext(p.standardPath || '', instanceContext);
               const sItem = schemaByPath.get(path);
+              const normalizedValue = special?.kind === 'mme-ip-plmn-table'
+                ? serializeMmeIpPlmnList(toMmeIpPlmnRows(value as QuickSettingsDraftValue))
+                : String(value ?? '');
               const err = validateValue(
-                String(value ?? ''),
+                normalizedValue,
                 (sItem?.type as never) ?? 'string',
                 sItem?.constraints,
               );
@@ -533,7 +903,7 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
                 if (mirrorName && mirrorName !== name) {
                   const mItem = schemaByPath.get(resolvedMirror);
                   const mErr = validateValue(
-                    String(value ?? ''),
+                    normalizedValue,
                     (mItem?.type as never) ?? 'string',
                     mItem?.constraints,
                   );
@@ -548,8 +918,24 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
       >
         <Row gutter={16}>
           {group.params.map((p) => {
-            const path = applyInstanceContext(p.standardPath || '', instanceContext);
+            const special = specialConfigByName.get(p.name);
+            const path = special?.configPath ?? applyInstanceContext(p.standardPath || '', instanceContext);
             const item = schemaByPath.get(path);
+            const rawItem = getRawValueByPath(rawParameterByPath, path)
+              ?? (special?.kind === 'mme-ip-plmn-table'
+                ? findRawValueBySuffix(mmeIpPlmnParams, '.MmeIpPlmnList')
+                : special?.kind === 'bind-select' && p.name === 'NguBindInterface'
+                  ? findRawValueBySuffix(nrNguParams, '.BindInterface')
+                  : undefined);
+            const displayPath = special?.displayPath;
+            const displayValue = displayPath
+              ? getRawValueByPath(rawParameterByPath, displayPath)?.parameterValue
+                ?? (special?.kind === 'bind-select' && p.name === 'NguBindInterface'
+                  ? findRawValueBySuffix(nrNguParams, '.NguLocalIp')?.parameterValue
+                  : undefined)
+                ?? schemaByPath.get(displayPath)?.currentValue
+                ?? ''
+              : '';
             // 紧贴 ARFCN 之后插入派生的 Frequency(MHz) 显示行(GSM 空口分组专属)。
             const renderFrequencyAfter = group.id === 'gsm-cell' && p.name === 'CurrentArfcn';
             // BM GSM 专属:在 BscSelect 后插入"绑定 RU 的 Route Index"派生行。
@@ -559,31 +945,69 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
             const renderLteFreqAfter = isLteCell && p.name === 'DLEarfcn';
             const renderCellIdAfter = isLteCell && p.name === 'ECI';
             const render2T4RAfter = isLteCell && p.name === 'AntennaPortsCount';
-            const writable = item?.writable ?? false;
+            const isDeviceTimeParam = group.id === 'device-time';
+            const writable = special?.forceWritable
+              ?? rawItem?.writable
+              ?? item?.writable
+              ?? (isDeviceTimeParam ? true : false);
             const error = fieldErrors[p.name];
             const constraintHint = formatConstraintHint(item);
+            const currentBindPath = String(form.getFieldValue(p.name) ?? rawItem?.parameterValue ?? item?.currentValue ?? '');
+            const resolvedDisplayValue = displayValue || bindIpByPath.get(currentBindPath) || '';
             const label = (
               <Space size={4}>
-                <span>{locale === 'zh-CN' ? p.titleZh : p.titleEn}</span>
+                <span style={special?.kind === 'mme-ip-plmn-table' ? { whiteSpace: 'nowrap' } : undefined}>
+                  {locale === 'zh-CN' ? p.titleZh : p.titleEn}
+                </span>
                 {!writable && <Text type="secondary" style={{ fontSize: 12 }}>(只读)</Text>}
                 {constraintHint && (
                   <Text type="secondary" style={{ fontSize: 12 }}>
                     {constraintHint}
                   </Text>
                 )}
+                {special?.kind === 'bind-select' && resolvedDisplayValue && (
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {locale === 'zh-CN' ? `当前 IP: ${resolvedDisplayValue}` : `Current IP: ${resolvedDisplayValue}`}
+                  </Text>
+                )}
               </Space>
             );
             const enumMeta = getEffectiveEnumMeta(item?.constraints, path);
-            const isEnum = Boolean(enumMeta && enumMeta.values.length > 0);
+            const isEnum = !special && Boolean(enumMeta && enumMeta.values.length > 0);
+            const extra = special?.kind === 'mme-ip-plmn-table'
+              ? (locale === 'zh-CN'
+                ? '每行一组 MME IP + PLMN，支持新增/删除/编辑'
+                : 'Each row is one MME IP + PLMN pair')
+              : special?.kind === 'bind-select'
+                ? undefined
+                : undefined;
+            const effectiveBindOptions = special?.kind === 'bind-select'
+              ? appendCurrentBindOption(
+                  bindSelectOptions,
+                  currentBindPath,
+                  resolvedDisplayValue,
+                )
+              : [];
             const input = (
-              <Col span={12} key={p.name}>
+              <Col span={special?.kind === 'mme-ip-plmn-table' ? 24 : 12} key={p.name}>
                 <Form.Item
-                  label={label}
+                  label={special?.kind === 'mme-ip-plmn-table' ? undefined : label}
                   name={p.name}
                   validateStatus={error ? 'error' : undefined}
                   help={error}
+                  extra={extra}
                 >
-                  {isEnum ? (
+                  {special?.kind === 'bind-select' ? (
+                    <Select
+                      disabled={!writable}
+                      showSearch
+                      optionFilterProp="label"
+                      placeholder={locale === 'zh-CN' ? '请选择 WAN/VLAN IP 地址' : 'Select a WAN/VLAN IP address'}
+                      options={effectiveBindOptions}
+                    />
+                  ) : special?.kind === 'mme-ip-plmn-table' ? (
+                    <MmeIpPlmnTable disabled={!writable} locale={locale} />
+                  ) : isEnum ? (
                     <Select
                       disabled={!writable}
                       placeholder={item?.defaultValue || ''}
@@ -593,7 +1017,7 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
                       }))}
                     />
                   ) : (
-                    <Input disabled={!writable} placeholder={item?.defaultValue || ''} />
+                    <Input disabled={!writable} placeholder={special?.placeholder || item?.defaultValue || ''} />
                   )}
                 </Form.Item>
               </Col>
