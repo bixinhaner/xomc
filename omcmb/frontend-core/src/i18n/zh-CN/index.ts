@@ -6239,6 +6239,9 @@ const messages: Record<string, string> = {
   'perf.adhoc.descTech':                 '制式',
   'perf.adhoc.descStatus':               '当前状态',
   'perf.adhoc.descSelectedMetrics':      '已选指标',
+  'perf.adhoc.descDevices':              '选定设备',
+  'perf.adhoc.descDevicesCount':         '共 {count} 台',
+  'perf.adhoc.descMetricsCount':         '共 {count} 个',
   'perf.adhoc.anyTech':                  '不限制式',
   // T-0194：内置任务「编辑指标」弹窗
   'perf.adhoc.editMetricTitle':          '编辑指标：{name}',

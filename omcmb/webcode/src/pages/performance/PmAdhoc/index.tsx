@@ -437,6 +437,26 @@ export default function PmAdhocPage() {
                   technology={selectedTask.technology}
                 />
               </Descriptions.Item>
+              {/* 选定设备 — 按设备/自选设备维度圈定的设备清单（数据已落库回传，仅详情未渲染）。
+                  全量聚合维度（产品/频段/全网/设备组）不挑具体设备 → deviceSns 空则不显示此行。 */}
+              {selectedTask.deviceSns.length > 0 && (
+                <Descriptions.Item
+                  label={intl.formatMessage({ id: 'perf.adhoc.descDevices' })}
+                  span={2}
+                >
+                  <Typography.Text type="secondary" style={{ marginRight: 8 }}>
+                    {intl.formatMessage(
+                      { id: 'perf.adhoc.descDevicesCount' },
+                      { count: selectedTask.deviceSns.length },
+                    )}
+                  </Typography.Text>
+                  {selectedTask.deviceSns.map((sn) => (
+                    <Tag key={sn} style={{ marginBottom: 4 }}>
+                      {sn}
+                    </Tag>
+                  ))}
+                </Descriptions.Item>
+              )}
             </Descriptions>
 
             <Tabs

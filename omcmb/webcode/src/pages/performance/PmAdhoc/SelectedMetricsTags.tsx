@@ -42,6 +42,9 @@ export default function SelectedMetricsTags({ metricPaths, technology }: Props) 
 
   return (
     <Spin spinning={isLoading} size="small">
+      <Typography.Text type="secondary" style={{ marginRight: 8 }}>
+        {intl.formatMessage({ id: 'perf.adhoc.descMetricsCount' }, { count: metricPaths.length })}
+      </Typography.Text>
       <Space size={[4, 4]} wrap>
         {metricPaths.map((code) => {
           const ind = nameById.get(code);

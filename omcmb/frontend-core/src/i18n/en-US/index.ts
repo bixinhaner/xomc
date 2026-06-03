@@ -6214,6 +6214,9 @@ const messages: Record<string, string> = {
   'perf.adhoc.descTech':                 'Technology',
   'perf.adhoc.descStatus':               'Current Status',
   'perf.adhoc.descSelectedMetrics':      'Selected Metrics',
+  'perf.adhoc.descDevices':              'Selected Devices',
+  'perf.adhoc.descDevicesCount':         '{count} total',
+  'perf.adhoc.descMetricsCount':         '{count} total',
   'perf.adhoc.anyTech':                  'Any Technology',
   // T-0194: builtin task "edit metrics" modal
   'perf.adhoc.editMetricTitle':          'Edit Metrics: {name}',
