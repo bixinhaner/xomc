@@ -123,6 +123,17 @@ export default function AlarmLibraryPage() {
   );
   const detailItems = useMemo(() => detailData?.items || [], [detailData]);
 
+  // 严重级别下拉选项的数据源:独立查询,只按 neType 取全量,**不带 severityCode/keyword 过滤**。
+  // 否则选项从被过滤后的 detailItems 派生时,选中某级别会让列表收缩到该级别,下拉随之只剩
+  // 当前一项,无法直接切换其它级别(必须先清空)。单 ne_type severity 低基数,pageSize 取大值即可全覆盖。
+  const severitySourceFilter = useMemo<AlarmDefinitionFilter>(
+    () => ({ neType: selectedNeType, page: 1, pageSize: 200 }),
+    [selectedNeType]
+  );
+  const { data: severitySourceData } = useAlarmDefinitionList(
+    inDetail ? severitySourceFilter : { page: 1, pageSize: 1 }
+  );
+
   // ── 公共 ───────────────────────────────────────────────────────
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState<AlarmDefinition | null>(null);
@@ -137,16 +148,11 @@ export default function AlarmLibraryPage() {
   const reloadMut = useAlarmDefinitionReloadDirectory();
   const cacheMut = useAlarmDefinitionCacheRefresh();
 
-  // 2026-05-29 用户决策:过滤下拉的源不再走 /alarm-severity-levels(后端原始数组
-  // + 无 json tag + 缺 cn/en 拆分,前端 sevData 永远空 → 下拉为空);改为从当前
-  // 页 detailItems 的 severityCode/severityName 排重派生 — 与表格"严重级别"列
-  // 100% 一致,不出现"有选项但表里没数据"的悖论。
-  // 局限:服务端分页时其它页存在但本页缺失的 severity 不会进下拉。考虑到
-  // 单 ne_type 的 severity 多为 4 个低基数(Critical/Major/Minor/Warning),
-  // pageSize=20 的首页通常已全覆盖。
+  // 2026-06-03:严重级别下拉从 severitySourceData(不带 severityCode 过滤的独立查询)排重派生,
+  // 选项稳定、不随选中收缩;与表格"严重级别"列口径仍一致(同一 alarm_definitions 数据源)。
   const severityOptions = useMemo(() => {
     const byCode = new Map<number, string>();
-    detailItems.forEach((row) => {
+    (severitySourceData?.items || []).forEach((row) => {
       if (!byCode.has(row.severityCode)) {
         byCode.set(row.severityCode, row.severityName ?? '');
       }
@@ -157,7 +163,7 @@ export default function AlarmLibraryPage() {
         value: code,
       }))
       .sort((left, right) => left.value - right.value);
-  }, [detailItems]);
+  }, [severitySourceData]);
 
   // ── 一级表列 ────────────────────────────────────────────────────
   // 2026-05-29:严重级别列头改 i18n;en 仍是 Critical/Major/Minor/Warning
