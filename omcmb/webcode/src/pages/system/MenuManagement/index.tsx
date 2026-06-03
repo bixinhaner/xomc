@@ -34,10 +34,9 @@ import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
+import I18nInput from '@/components/I18nInput';
 import { useT } from '@/hooks/useT';
 import http from '@core/services/http';
-import { SUPPORTED_LOCALES, LOCALE_DISPLAY } from '@core/i18n';
-import type { Locale } from '@core/types/common';
 import { useAppStore } from '@core/store/appStore';
 import {
   useSysConfigsByCategory,
@@ -45,10 +44,6 @@ import {
 } from '@core/hooks/api/useSystem';
 import styles from './index.module.css';
 
-// 菜单管理 UI 暴露的额外语言：除主语言（zh-CN）外的所有支持语言。
-// 扩展新语言只需在 frontend-core/src/i18n/index.ts 追加 SUPPORTED_LOCALES，
-// 表单自动多出一行输入框，无需改本文件。
-const EXTRA_LOCALES: readonly Locale[] = SUPPORTED_LOCALES.filter((l) => l !== 'zh-CN');
 
 // 菜单类型
 type MenuType = 'menu' | 'directory' | 'button';
@@ -319,10 +314,9 @@ export default function MenuManagement() {
   const handleEdit = useCallback((menu: MenuItem) => {
     setSelectedMenu(menu);
     form.setFieldsValue({
-      name: menu.name,
-      // 多语言译文字典回显到嵌套 form 字段（namePath: ['nameI18n', locale]）；
-      // 缺译文的 locale 在表单里就是空字符串，保存时聚合逻辑会自动剔除。
-      nameI18n: menu.nameI18n ?? {},
+      // 名称中英文统一进 nameI18n（I18nInput 双子段 zh-CN/en-US）；
+      // zh-CN 以 menu.name 为权威回填，其余 locale 取自 menu.nameI18n。
+      nameI18n: { ...(menu.nameI18n ?? {}), 'zh-CN': menu.name },
       type: menu.type,
       sort: menu.sort,
       permissionKey: menu.permissionKey,
@@ -346,15 +340,13 @@ export default function MenuManagement() {
   //   - 其他 locale 取自嵌套字段；空字符串视为"未填"，从结果剔除（避免存空字符串污染回退链）
   // 返回值始终是一个 map（最小含 zh-CN）；上层把它放进 payload.name_i18n。
   const buildNameI18nPayload = useCallback(
-    (formName: string, formNameI18n: Record<string, string> | undefined): Record<string, string> => {
-      const result: Record<string, string> = { 'zh-CN': formName };
-      if (formNameI18n) {
-        for (const locale of EXTRA_LOCALES) {
-          const v = formNameI18n[locale];
-          if (typeof v === 'string' && v.trim() !== '') {
-            result[locale] = v;
-          }
-        }
+    (formNameI18n: Record<string, string> | undefined): Record<string, string> => {
+      const src = formNameI18n ?? {};
+      // zh-CN 为主标识必填；其余 locale 空字符串视为未填，从结果剔除（避免污染回退链）。
+      const result: Record<string, string> = { 'zh-CN': (src['zh-CN'] ?? '').trim() };
+      for (const [locale, v] of Object.entries(src)) {
+        if (locale === 'zh-CN') continue;
+        if (typeof v === 'string' && v.trim() !== '') result[locale] = v;
       }
       return result;
     },
@@ -369,8 +361,8 @@ export default function MenuManagement() {
     form.validateFields().then((vals) => {
       if (!selectedMenu) return;
       const payload: UpdateMenuPayload = {
-        name: vals.name,
-        name_i18n: buildNameI18nPayload(vals.name, vals.nameI18n),
+        name: (vals.nameI18n?.['zh-CN'] ?? '').trim(),
+        name_i18n: buildNameI18nPayload(vals.nameI18n),
         type: vals.type,
         sort_order: vals.sort,
         permission_key: vals.permissionKey,
@@ -430,8 +422,8 @@ export default function MenuManagement() {
   const handleAddSave = useCallback(() => {
     addForm.validateFields().then((vals) => {
       const payload: CreateMenuPayload = {
-        name: vals.name,
-        name_i18n: buildNameI18nPayload(vals.name, vals.nameI18n),
+        name: (vals.nameI18n?.['zh-CN'] ?? '').trim(),
+        name_i18n: buildNameI18nPayload(vals.nameI18n),
         type: vals.type,
         permission_key: vals.permissionKey || '',
         parent_id: vals.parentId === '0' ? null : vals.parentId,
@@ -640,23 +632,7 @@ export default function MenuManagement() {
     },
   ], [t, handleEdit, handleDelete, expandedKeys, toggleExpand, handleMoveUp, handleMoveDown]);
 
-  // i18n 字段块：在每个含"菜单名称"输入框的表单分支后追加。
-  // 除主语言（zh-CN）外的每种 locale 一个输入框。
-  // 数组循环 EXTRA_LOCALES 实现「新增语言只改 SUPPORTED_LOCALES 一处」。
-  const i18nFields = (
-    <>
-      {EXTRA_LOCALES.map((locale) => (
-        <Form.Item
-          key={locale}
-          name={['nameI18n', locale]}
-          label={`菜单名称（${LOCALE_DISPLAY[locale]}）`}
-          extra={`可选；未填时在 ${LOCALE_DISPLAY[locale]} 语境下回退到中文`}
-        >
-          <Input placeholder={`${LOCALE_DISPLAY[locale]} 名称`} maxLength={64} />
-        </Form.Item>
-      ))}
-    </>
-  );
+  // 菜单名称中英文已统一改用 <I18nInput name="nameI18n">（见下方各表单项），原 i18nFields 块下线。
 
   return (
     <ListPageLayout
@@ -729,14 +705,7 @@ export default function MenuManagement() {
         }
       >
         <Form form={form} layout="vertical">
-          <Form.Item
-            name="name"
-            label={t('menu.form.nameZh')}
-            rules={[{ required: true, message: '请输入菜单名称' }]}
-          >
-            <Input placeholder={t('menu.placeholder.name')} maxLength={50} />
-          </Form.Item>
-          {i18nFields}
+          <I18nInput name="nameI18n" label={t('menu.form.name')} required maxLength={50} />
           <Form.Item
             name="type"
             label={t('menu.form.type')}
@@ -1019,14 +988,7 @@ export default function MenuManagement() {
                     >
                       <InputNumber min={1} max={999} style={{ width: '100%' }} placeholder={t('menu.placeholder.sortOrder')} />
                     </Form.Item>
-                    <Form.Item
-                      name="name"
-                      label={t('menu.form.nameZh')}
-                      rules={[{ required: true, message: '请输入菜单名称' }]}
-                    >
-                      <Input placeholder={t('menu.placeholder.name')} maxLength={50} />
-                    </Form.Item>
-                    {i18nFields}
+                    <I18nInput name="nameI18n" label={t('menu.form.name')} required maxLength={50} />
                     <Form.Item
                       name="icon"
                       label={t('system.menu.icon')}
@@ -1100,14 +1062,7 @@ export default function MenuManagement() {
                     >
                       <InputNumber min={1} max={999} style={{ width: '100%' }} placeholder={t('menu.placeholder.sortOrder')} />
                     </Form.Item>
-                    <Form.Item
-                      name="name"
-                      label={t('menu.form.nameZh')}
-                      rules={[{ required: true, message: '请输入菜单名称' }]}
-                    >
-                      <Input placeholder={t('menu.placeholder.name')} maxLength={50} />
-                    </Form.Item>
-                    {i18nFields}
+                    <I18nInput name="nameI18n" label={t('menu.form.name')} required maxLength={50} />
                     <Form.Item
                       name="icon"
                       label={t('system.menu.icon')}
@@ -1199,14 +1154,7 @@ export default function MenuManagement() {
                     >
                       <InputNumber min={1} max={999} style={{ width: '100%' }} placeholder={t('menu.placeholder.sortOrder')} />
                     </Form.Item>
-                    <Form.Item
-                      name="name"
-                      label={t('menu.form.nameZh')}
-                      rules={[{ required: true, message: '请输入菜单名称' }]}
-                    >
-                      <Input placeholder={t('menu.placeholder.name')} maxLength={50} />
-                    </Form.Item>
-                    {i18nFields}
+                    <I18nInput name="nameI18n" label={t('menu.form.name')} required maxLength={50} />
                     <Form.Item
                       name="permissionKey"
                       label={t('menu.form.permissionKey')}
