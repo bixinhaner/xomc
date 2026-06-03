@@ -1,0 +1,10 @@
+<?xml version="1.0" ?>
+<parameterModel paramModel="TESTPM" totalEntries="3">
+    <objects>
+        <object name="Device.X_TEST_Obj." standardPath="Device.X_TEST_Obj." access="READ_WRITE" changeApplies="Immediate"/>
+    </objects>
+    <parameters>
+        <param name="Device.X_TEST_Obj.ParamA" standardPath="Device.X_TEST_Obj.ParamA" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="64"/>
+        <param name="Device.X_TEST_Obj.ParamB" standardPath="Device.X_TEST_Obj.ParamB" access="READ_ONLY" type="INT" changeApplies="Immediate"/>
+    </parameters>
+</parameterModel>

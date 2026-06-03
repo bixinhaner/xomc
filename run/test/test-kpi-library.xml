@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<indicatorModel platform="TESTKPI" indicatorCount="3">
+    <indicators>
+        <indicator id="TST000001" groupId="1798a814848341638bf02d2684aaaaf8" enName="Test.Kpi.One" reportKey="Test.Kpi.One" cnName="测试指标一-V1" isBuildIn="0" isCounter="1" dataType="整数" unitId="time" statisType="sum" arithmetic="TST000001" indicatorLevel="device" formula="Test.Kpi.One" />
+        <indicator id="TST000002" groupId="1798a814848341638bf02d2684aaaaf8" enName="Test.Kpi.Two" reportKey="Test.Kpi.Two" cnName="测试指标二" isBuildIn="0" isCounter="1" dataType="整数" unitId="time" statisType="sum" arithmetic="TST000002" indicatorLevel="device" formula="Test.Kpi.Two" />
+        <indicator id="TST000003" groupId="1798a814848341638bf02d2684aaaaf8" enName="Test.Kpi.Three" reportKey="Test.Kpi.Three" cnName="测试指标三-将被删除" isBuildIn="0" isCounter="1" dataType="整数" unitId="time" statisType="sum" arithmetic="TST000003" indicatorLevel="device" formula="Test.Kpi.Three" />
+    </indicators>
+</indicatorModel>

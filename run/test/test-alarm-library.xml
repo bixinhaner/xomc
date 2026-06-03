@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<alarmModel neType="TESTNE" deviceType="1" totalCount="3">
+    <alarms>
+        <alarm identifier="99001" cnName="测试告警一-V1" enName="Test Alarm One" severity="Critical" eventType="30099" cnProbableCause="测试可能原因一" enProbableCause="test cause one" cnSuggestion="测试建议一" enSuggestion="test suggestion one" isShow="Y" />
+        <alarm identifier="99002" cnName="测试告警二" enName="Test Alarm Two" severity="Major" eventType="30099" cnProbableCause="测试可能原因二" enProbableCause="test cause two" cnSuggestion="测试建议二" enSuggestion="test suggestion two" isShow="Y" />
+        <alarm identifier="99003" cnName="测试告警三-将被删除" enName="Test Alarm Three" severity="Minor" eventType="30099" cnProbableCause="测试可能原因三" enProbableCause="test cause three" cnSuggestion="测试建议三" enSuggestion="test suggestion three" isShow="Y" />
+    </alarms>
+</alarmModel>
