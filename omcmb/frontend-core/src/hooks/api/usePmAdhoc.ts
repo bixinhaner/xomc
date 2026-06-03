@@ -6,15 +6,18 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createApiSwitch } from '../../services/apiSwitch';
 import { pmAdhocApi, pmAdhocMock } from '../../services/api/pmAdhocApi';
 import type { CreateAdhocTaskInput, UpdateAdhocTaskInput } from '../../types/pmAdhoc';
+import { useAppStore } from '../../store/appStore';
 
 const api = createApiSwitch(pmAdhocMock, pmAdhocApi);
 
 const ADHOC_KEY = ['pm-adhoc-tasks'] as const;
 
 export function usePmAdhocList(opts?: { refetchInterval?: number; isBuiltin?: boolean }) {
+  // locale 并入查询键：切语言后内置任务名随后端本地化重取（pm-name-i18n）。
+  const locale = useAppStore((s) => s.locale);
   return useQuery({
     // 查询键带 isBuiltin，内置区/自建区两次调用各自独立缓存（T-0186）
-    queryKey: [...ADHOC_KEY, 'list', { isBuiltin: opts?.isBuiltin ?? null }],
+    queryKey: [...ADHOC_KEY, 'list', { isBuiltin: opts?.isBuiltin ?? null, locale }],
     queryFn: () =>
       api.list(opts?.isBuiltin === undefined ? undefined : { isBuiltin: opts.isBuiltin }),
     refetchInterval: opts?.refetchInterval,
@@ -22,8 +25,10 @@ export function usePmAdhocList(opts?: { refetchInterval?: number; isBuiltin?: bo
 }
 
 export function usePmAdhocDetail(id: string | undefined) {
+  // locale 并入查询键：切语言后内置任务名随后端本地化重取（pm-name-i18n）。
+  const locale = useAppStore((s) => s.locale);
   return useQuery({
-    queryKey: [...ADHOC_KEY, 'detail', id],
+    queryKey: [...ADHOC_KEY, 'detail', id, locale],
     queryFn: () => api.get(id as string),
     enabled: Boolean(id),
   });
@@ -70,8 +75,10 @@ export function usePmAdhocResults(
   // T-0189 大时间段驱动取数：startTime/endTime 透传后端 + 并入 queryKey（窗口变化即重取）。
   const startTime = opts?.startTime;
   const endTime = opts?.endTime;
+  // locale 并入查询键：切语言后图表标题指标名随后端本地化重取（pm-name-i18n）。
+  const locale = useAppStore((s) => s.locale);
   return useQuery({
-    queryKey: [...ADHOC_KEY, 'results', taskId, { limit, startTime, endTime }],
+    queryKey: [...ADHOC_KEY, 'results', taskId, { limit, startTime, endTime, locale }],
     queryFn: () => api.results(taskId as string, limit, 0, startTime, endTime),
     enabled: Boolean(taskId),
   });

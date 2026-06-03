@@ -6,6 +6,7 @@
  */
 
 import { useQuery, useMutation, useQueryClient, useQueries } from '@tanstack/react-query';
+import { useAppStore } from '../../store/appStore';
 import { pmQueryApi } from '../../services/api/pmQueryApi';
 import { pmDashboardApi } from '../../services/api/pmDashboardApi';
 import { pmObjectsApi, pmObjectsMock } from '../../services/api/pmObjectsApi';
@@ -68,9 +69,11 @@ export function useAggregatedMetricsByDevices(
   deviceSns: string[],
   enabled: boolean,
 ) {
+  // locale 并入查询键：切语言后图表标题指标名随后端本地化重取（pm-name-i18n）。
+  const locale = useAppStore((s) => s.locale);
   const queries = useQueries({
     queries: deviceSns.map((sn) => ({
-      queryKey: ['pm-aggregated', { ...baseParams, deviceSn: sn }],
+      queryKey: ['pm-aggregated', { ...baseParams, deviceSn: sn, locale }],
       queryFn: () => pmDashboardApi.queryAggregated({ ...baseParams, deviceSn: sn }),
       enabled,
       staleTime: 30_000,

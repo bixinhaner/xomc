@@ -253,6 +253,7 @@ func setupMiddleware(r *gin.Engine, c *Container) {
 
 	r.Use(middleware.RequestIDWithConfig(middleware.RequestIDConfig{Prefix: requestIDPrefix}))
 	r.Use(middleware.Tracing("omcgo-app"))
+	r.Use(middleware.Locale()) // 解析 Accept-Language → ctx，供指标名 / 内置任务名按语言本地化
 	r.Use(middleware.CORS(middleware.CORSConfig{AllowOrigins: corsOrigins}))
 	r.Use(middleware.RequestLogger())
 	// RateLimit: per-IP token bucket，防止单 IP 洪泛拖垮后端。

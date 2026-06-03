@@ -15,9 +15,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 
+	appcontext "github.com/omcgo/omcgo/internal/core/context"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/response"
+	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
 
 // Handler 是 G7 adhoc 任务的 REST 入口。
@@ -101,14 +103,17 @@ type taskResponseDTO struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
-func taskToDTO(t *Task) taskResponseDTO {
-	dim := string(t.Dimension)
-	if dim == "" {
-		dim = string(DimensionDevice)
+func taskToDTO(ctx context.Context, t *Task) taskResponseDTO {
+	dimVal := t.Dimension
+	if dimVal == "" {
+		dimVal = DimensionDevice
 	}
+	dim := string(dimVal)
+	// 内置任务名按 locale 本地化（en 组装 Built-in-<维度>-<制式>，zh 用库里原值）；自建任务原样。
+	name := localizeTaskName(appcontext.GetLocale(ctx), t.Name, t.IsBuiltin, dimVal, t.Technology)
 	return taskResponseDTO{
 		ID:            t.ID.String(),
-		Name:          t.Name,
+		Name:          name,
 		Mode:          string(t.Mode),
 		CronExpr:      t.CronExpr,
 		DeviceSNs:     t.DeviceSNs,
@@ -333,7 +338,7 @@ func (h *Handler) List(c *gin.Context) {
 	}
 	dtos := make([]taskResponseDTO, 0, len(tasks))
 	for i := range tasks {
-		dtos = append(dtos, taskToDTO(&tasks[i]))
+		dtos = append(dtos, taskToDTO(c.Request.Context(), &tasks[i]))
 	}
 	response.OK(c, gin.H{"items": dtos, "total": len(dtos)})
 }
@@ -354,7 +359,7 @@ func (h *Handler) Get(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	response.OK(c, taskToDTO(t))
+	response.OK(c, taskToDTO(c.Request.Context(), t))
 }
 
 // updateRequestDTO 是 PATCH /pm/adhoc/tasks/:id 的入参（T-0194）。
@@ -739,16 +744,18 @@ func (h *Handler) Results(c *gin.Context) {
 	response.OK(c, gin.H{"items": items, "total": total})
 }
 
-// lookupIndicatorNames 按编号集合一次性查三张指标表，返回 code → cn_name（缺则 en_name）。
+// lookupIndicatorNames 按编号集合一次性查三张指标表，返回 code → 本地化显示名。
+// 取名方向按 ctx 中的 locale 决定（中文 cn_name 优先 / 英文 en_name 优先，空则回退另一种）。
 // K 编号在 perf_indicators_{enb,gnb,gsm} 三表全局唯一，一次 UNION 即可覆盖（与 aggregator 查询层一致）。
 func (h *Handler) lookupIndicatorNames(ctx context.Context, codes []string) map[string]string {
 	out := make(map[string]string, len(codes))
-	const tmpl = `
-SELECT id, COALESCE(NULLIF(cn_name, ''), en_name) AS display_name FROM perf_indicators_enb  WHERE id = ANY($1)
+	nameExpr := metrics.IndicatorDisplayNameExpr(appcontext.GetLocale(ctx))
+	tmpl := fmt.Sprintf(`
+SELECT id, %[1]s AS display_name FROM perf_indicators_enb  WHERE id = ANY($1)
 UNION ALL
-SELECT id, COALESCE(NULLIF(cn_name, ''), en_name) AS display_name FROM perf_indicators_gnb  WHERE id = ANY($1)
+SELECT id, %[1]s AS display_name FROM perf_indicators_gnb  WHERE id = ANY($1)
 UNION ALL
-SELECT id, COALESCE(NULLIF(cn_name, ''), en_name) AS display_name FROM perf_indicators_gsm  WHERE id = ANY($1)`
+SELECT id, %[1]s AS display_name FROM perf_indicators_gsm  WHERE id = ANY($1)`, nameExpr)
 	rows, err := h.pool.Query(ctx, tmpl, codes)
 	if err != nil {
 		h.logger.Warn("backfill adhoc display names query failed; fall back to codes", zap.Error(err))

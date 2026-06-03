@@ -11,6 +11,7 @@ import { Space, Spin, Tag, Typography } from 'antd';
 import { useIndicatorCandidates } from '@core/hooks/api/usePerformance';
 import type { IndicatorCandidate } from '@core/services/api/pmApi';
 import type { DeviceType } from '@core/types/indicatorLibrary';
+import { useAppStore } from '@core/store/appStore';
 
 const TECH_TO_DEVICE_TYPE: Record<string, DeviceType> = {
   lte: 'ENB',
@@ -25,6 +26,7 @@ interface Props {
 
 export default function SelectedMetricsTags({ metricPaths, technology }: Props) {
   const intl = useIntl();
+  const isEn = useAppStore((s) => s.locale) === 'en-US';
   // 无制式（不限）时无法定位单一指标库 → 直接显编号（回退语义，不报错）。
   const deviceType = technology ? TECH_TO_DEVICE_TYPE[technology] : undefined;
   const { data: candidates, isLoading } = useIndicatorCandidates(deviceType, {
@@ -48,8 +50,11 @@ export default function SelectedMetricsTags({ metricPaths, technology }: Props) 
       <Space size={[4, 4]} wrap>
         {metricPaths.map((code) => {
           const ind = nameById.get(code);
-          // 命中 → 「编号 + 中/英名」；缺失 → 回退显编号。
-          const label = ind ? `${ind.id} ${ind.cnName || ind.name}`.trim() : code;
+          // 命中 → 「编号 + 按界面语言取名」（英文优先 enName / 中文优先 cnName，空则回退另一种）；
+          // 缺失 → 回退显编号。
+          const label = ind
+            ? `${ind.id} ${isEn ? ind.enName || ind.cnName : ind.cnName || ind.enName}`.trim()
+            : code;
           return <Tag key={code}>{label}</Tag>;
         })}
       </Space>

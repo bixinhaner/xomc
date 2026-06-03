@@ -5,6 +5,7 @@ import axios, {
   type AxiosError,
 } from 'axios';
 import { useUserStore } from '../store/userStore';
+import { useAppStore } from '../store/appStore';
 import { useMock } from './apiSwitch';
 
 // --- Parameter name conversion (camelCase → snake_case) ---
@@ -72,6 +73,12 @@ http.interceptors.request.use(
     const { accessToken } = useUserStore.getState();
     if (accessToken && config.headers) {
       config.headers.Authorization = `Bearer ${accessToken}`;
+    }
+
+    // 注入当前界面语言 Accept-Language（zh-CN / en-US），供后端按语言返回本地化显示名
+    // （指标名 / 内置任务名）。值即 appStore.locale，无需映射。
+    if (config.headers) {
+      config.headers['Accept-Language'] = useAppStore.getState().locale;
     }
 
     // Convert query params from camelCase to snake_case

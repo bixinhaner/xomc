@@ -23,6 +23,7 @@ import {
 import { SearchOutlined, ClearOutlined } from '@ant-design/icons';
 import { useIndicatorList } from '@core/hooks/api/useIndicatorsLibrary';
 import type { DeviceType, IndicatorInfo } from '@core/types/indicatorLibrary';
+import { useAppStore } from '@core/store/appStore';
 
 const { Text } = Typography;
 
@@ -33,9 +34,10 @@ function metricValueOf(r: IndicatorInfo): string {
   return r.isCounter ? r.enName ?? r.id : r.id;
 }
 
-// 选中标签的友好显示名：优先中文名，回退英文名 / 编号。
-function metricLabelOf(r: IndicatorInfo): string {
-  return r.cnName || r.enName || r.id;
+// 选中标签的友好显示名：按当前界面语言优先取对应名，空则回退另一种 / 编号
+// （pm-name-i18n：英文态选 enName 优先，中文态选 cnName 优先）。
+function metricLabelOf(r: IndicatorInfo, en: boolean): string {
+  return en ? r.enName || r.cnName || r.id : r.cnName || r.enName || r.id;
 }
 
 interface MetricPickerModalProps {
@@ -65,6 +67,7 @@ export default function MetricPickerModal({
   lockDeviceType = false,
 }: MetricPickerModalProps) {
   const intl = useIntl();
+  const isEn = useAppStore((s) => s.locale) === 'en-US';
   // 非锁定态：用户可在弹窗内自行切换设备类型（KPIQuery 用法），用内部 state。
   const [deviceTypeState, setDeviceType] = useState<DeviceType>(initialDeviceType);
   const [keyword, setKeyword] = useState('');
@@ -91,12 +94,15 @@ export default function MetricPickerModal({
   // 不用 useEffect），供「已选」面板标签显示友好名，避免露出 K 编号。
   const [labelMap, setLabelMap] = useState<Record<string, string>>({});
   const [seenItems, setSeenItems] = useState(items);
-  if (seenItems !== items) {
+  // 语言切换时也要刷新已选标签名（pm-name-i18n）：把 isEn 并入 sync 触发条件。
+  const [seenIsEn, setSeenIsEn] = useState(isEn);
+  if (seenItems !== items || seenIsEn !== isEn) {
     setSeenItems(items);
+    setSeenIsEn(isEn);
     if (items.length > 0) {
       setLabelMap((prev) => {
         const next = { ...prev };
-        for (const it of items) next[metricValueOf(it)] = metricLabelOf(it);
+        for (const it of items) next[metricValueOf(it)] = metricLabelOf(it, isEn);
         return next;
       });
     }

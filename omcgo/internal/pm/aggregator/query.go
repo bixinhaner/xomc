@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	appcontext "github.com/omcgo/omcgo/internal/core/context"
 	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
@@ -235,15 +236,18 @@ func (a *Aggregator) backfillDisplayNames(ctx context.Context, rows []Row) {
 	}
 }
 
-// lookupIndicatorNames 按编号集合一次性查三张指标表，返回 code → cn_name（缺则 en_name）。
+// lookupIndicatorNames 按编号集合一次性查三张指标表，返回 code → 本地化显示名。
+// 取名方向按 ctx 中的 locale 决定（中文 cn_name 优先 / 英文 en_name 优先，空则回退另一种），
+// 与 adhoc 结果回填层共用同一取名口径（metrics.IndicatorDisplayNameExpr）。
 func (a *Aggregator) lookupIndicatorNames(ctx context.Context, codes []string) map[string]string {
 	out := make(map[string]string, len(codes))
-	const tmpl = `
-SELECT id, COALESCE(NULLIF(cn_name, ''), en_name) AS display_name FROM perf_indicators_enb  WHERE id = ANY($1)
+	nameExpr := metrics.IndicatorDisplayNameExpr(appcontext.GetLocale(ctx))
+	tmpl := fmt.Sprintf(`
+SELECT id, %[1]s AS display_name FROM perf_indicators_enb  WHERE id = ANY($1)
 UNION ALL
-SELECT id, COALESCE(NULLIF(cn_name, ''), en_name) AS display_name FROM perf_indicators_gnb  WHERE id = ANY($1)
+SELECT id, %[1]s AS display_name FROM perf_indicators_gnb  WHERE id = ANY($1)
 UNION ALL
-SELECT id, COALESCE(NULLIF(cn_name, ''), en_name) AS display_name FROM perf_indicators_gsm  WHERE id = ANY($1)`
+SELECT id, %[1]s AS display_name FROM perf_indicators_gsm  WHERE id = ANY($1)`, nameExpr)
 	rows, err := a.db.Query(ctx, tmpl, codes)
 	if err != nil {
 		a.logger.Warn("backfill display names query failed; fall back to codes", zap.Error(err))
