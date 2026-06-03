@@ -205,6 +205,7 @@ export default function RecycleBin() {
         label: t('common.search'),
         type: 'input',
         placeholder: t('recycle.searchPlaceholder'),
+        width: 240,
       },
       {
         name: 'group_id',
@@ -215,6 +216,7 @@ export default function RecycleBin() {
           value: g.id,
         })),
         placeholder: t('common.pleaseSelect'),
+        width: 220,
       },
     ],
     [t, deviceGroupOptions]
@@ -286,27 +288,29 @@ export default function RecycleBin() {
   );
 
   return (
-    <ListPageLayout
-      title={t('nav.device.recycle')}
-      extra={
-        <Button type="primary" icon={<ImportOutlined />} onClick={handleOpenImportModal}>
+    <ListPageLayout>
+      {/* 2026-06-03 用户决策:去掉"回收站"标题;筛选条件与「导入」同一行,
+          筛选靠左(字段固定宽度)、导入按钮两端对齐推到页面最右(flex space-between)。 */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <FilterBar
+            filterId="recycle-bin"
+            fields={FILTER_FIELDS}
+            onSearch={(v) => {
+              setFilterParams(v);
+              setCurrentPage(1);
+            }}
+            onReset={() => {
+              setFilterParams({});
+              setCurrentPage(1);
+            }}
+            collapsedRows={1}
+          />
+        </div>
+        <Button type="primary" icon={<ImportOutlined />} onClick={handleOpenImportModal} style={{ flexShrink: 0 }}>
           {t('common.import')}
         </Button>
-      }
-    >
-      <FilterBar
-        filterId="recycle-bin"
-        fields={FILTER_FIELDS}
-        onSearch={(v) => {
-          setFilterParams(v);
-          setCurrentPage(1);
-        }}
-        onReset={() => {
-          setFilterParams({});
-          setCurrentPage(1);
-        }}
-        collapsedRows={1}
-      />
+      </div>
 
       <Card
         size="small"
