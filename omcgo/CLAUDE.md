@@ -789,6 +789,32 @@ TRUNCATE alarm_libraries CASCADE;
 - [ ] 无与 `seed/` 目录的重复 INSERT（或均使用 `ON CONFLICT`）
 - [ ] JSON 字符串无尾随逗号
 - [ ] **TRUNCATE 被 FK 引用的表时**：与所有引用方写在同一条语句，或加 `CASCADE`
+- [ ] **改了已被 seed 引用的表**（增/删/改字段或约束）：确认所有既有 seed 仍能在新结构上跑通——新增列可空或带 `DEFAULT`、收紧约束前已 backfill、删列/改名走两阶段（详见 §5.5.11）
+
+#### 5.5.11 Schema 演进不破坏既有种子数据（CRITICAL）
+
+**根因**：`migrate-seed` 用独立版本表 `goose_db_version_seed` 且 `depends_on migrate-schema`，执行模型是「**先全部 schema，再全部 seed**」。因此**每个旧 seed 文件总在「被后续所有 DDL 改过的最终表结构」上执行**——seed 按写入时的结构写，却跑在未来的结构上。改 schema 时只要破坏了任一既有 seed 的前提，全新库 / 存量库重跑 `migrate-seed` 就失败。本项目反复踩此坑。
+
+**五种破坏场景与安全做法**：
+
+| schema 变更 | 旧 seed 为何失败 | 安全做法 |
+|------------|----------------|---------|
+| 删列 | `INSERT (...,删掉的列,...)` 引用不存在列 | 两阶段：先废弃（保留列）→ 确认无 seed/代码引用 → 下个 release 再 `DROP` |
+| 加无默认 `NOT NULL` 列 | 旧 seed 不给该列 → NOT NULL 违反 | 直接带 `DEFAULT`；或三步：加可空列 → `UPDATE` backfill（含 seed 行）→ 再加 `NOT NULL` |
+| 收紧 `CHECK`/`UNIQUE`/`FK` | 旧 seed 的值不再满足新约束 | 同一迁移内**先 `UPDATE` 修存量数据**满足新约束，再加约束 |
+| 改列名 | seed 引用旧列名 | 先加新列双写 → 迁移 seed/代码 → 再删旧列（跨 release） |
+| 改类型 | seed 字面值无法隐式转换 | `ALTER ... TYPE ... USING <转换>`，确认 seed 值可转 |
+
+**五条铁律**：
+1. **新增列一律可空或带 `DEFAULT`**，绝不裸加「无默认 `NOT NULL`」列。
+2. **收紧约束前，同一迁移内先 backfill 修存量数据**（含 seed 插入的行），再加约束。
+3. **删列 / 改名走两阶段，跨 release 完成**——同 release 内删列极易打爆旧 seed。
+4. **已 applied 的旧 seed 文件内容不回头改**（改了会触发 `check-schema-drift.sh` 的 checksum 漂移）——结构兼容责任放在**新的 schema 迁移**里（backfill / 改约束），而非回头改旧 seed。
+5. **seed 侧防御**：显式列名（禁隐式全列 `VALUES`）+ `ON CONFLICT` + **只插稳定核心列**（易变列交给 `DEFAULT`），缩小 seed 对结构的耦合面。
+
+**治本（治标铁律之外，强烈建议补 CI 门禁）**：现有 CI 对迁移只做静态 lint（撞号 + goose 标记），**不真跑迁移**。应在 CI 起一个全新 postgres 真跑 `make migrate-schema-up && make migrate-seed-up`，并补一个「存量库重跑」场景（先跑到上个 release + 灌数据，再跑新迁移）——让「旧 seed × 新结构」不兼容在 PR 就 fail，而非漏到部署。
+
+> **历史教训**：`f9565e1a` —— `000004` pm_tasks 的 `dimension` CHECK 漏了 `'network'`，存量库重跑 migrate 时既有数据 / seed 不满足 CHECK 直接失败（补救是在迁移里放宽 CHECK）。
 
 ### 5.6 全局 API 密钥约定（.api-key）
 
