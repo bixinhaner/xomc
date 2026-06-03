@@ -205,8 +205,13 @@ export const indicatorLibraryService = {
     };
   },
 
-  async cacheRefresh() {
+  async cacheRefresh(): Promise<{ refreshed: boolean; note?: string }> {
     return { refreshed: true, note: 'mock refresh' };
+  },
+
+  // 与真实 api 对齐(按 tech, platform upsert 描述);mock 下无持久化,空实现即可。
+  async updateFileDescription(_tech: TechLower, _platform: string, _description: string): Promise<void> {
+    return;
   },
 
   async importDirectory(mode: IndicatorReloadMode = 'import'): Promise<IndicatorReloadResult> {

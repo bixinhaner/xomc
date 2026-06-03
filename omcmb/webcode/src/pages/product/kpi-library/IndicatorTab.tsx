@@ -175,6 +175,8 @@ export default function IndicatorTab({ deviceType }: Props) {
         open={drawerOpen}
         deviceType={deviceType}
         indicator={selected}
+        // 启用状态与列表开关同源(default 启用桶 enabledSet)
+        enabled={selected ? enabledSet.has(selected.id) : false}
         onClose={() => {
           setDrawerOpen(false);
           setSelected(null);

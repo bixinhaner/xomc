@@ -68,27 +68,27 @@ export default function IndicatorsByTech({ deviceType, filter }: Props) {
   const enabledSet = useMemo(() => new Set(enabledData?.items || []), [enabledData]);
 
   const columns = [
-    { title: 'ID', dataIndex: 'id', width: 140 },
-    { title: t('common.cnName'), dataIndex: 'cnName', width: 180 },
-    { title: t('common.enName'), dataIndex: 'enName', width: 220, ellipsis: true },
+    { title: 'ID', dataIndex: 'id', width: 150 },
+    { title: t('common.cnName'), dataIndex: 'cnName', width: 200, ellipsis: true },
+    // 英文名作为弹性列吸收剩余宽度(ellipsis 防溢出)
+    { title: t('common.enName'), dataIndex: 'enName', ellipsis: true },
     {
       title: t('common.group'),
       dataIndex: 'groupName',
-      width: 140,
+      width: 150,
       render: (v: string, row: IndicatorInfo) =>
         v || row.groupId ? <Tag color="purple">{v || row.groupId}</Tag> : <span>—</span>,
     },
     // 2026-05-29 用户决策:删除"平台"列 — 详情态由 URL ?platform= 锁定,
     // 同一视图下所有行都属同一 platform,列冗余。
-    { title: t('product.kpi.col.counterType'), dataIndex: 'counterType', width: 110 },
+    // 2026-06-03 用户决策:删除"计数器类型 / 单位"列 — 数据常空,无展示价值。
     ...(deviceType === 'GNB'
       ? []
-      : [{ title: t('common.level'), dataIndex: 'indicatorLevel', width: 90 }]),
-    { title: t('common.unit'), dataIndex: 'unit', width: 80 },
+      : [{ title: t('common.level'), dataIndex: 'indicatorLevel', width: 100 }]),
     {
       title: t('common.enable'),
       dataIndex: 'id',
-      width: 80,
+      width: 90,
       render: (id: string) => (
         <Switch
           size="small"
@@ -114,7 +114,7 @@ export default function IndicatorsByTech({ deviceType, filter }: Props) {
     },
     {
       title: t('common.action'),
-      width: 80,
+      width: 90,
       render: (_: unknown, row: IndicatorInfo) => (
         <Button
           size="small"
@@ -152,6 +152,9 @@ export default function IndicatorsByTech({ deviceType, filter }: Props) {
         open={drawerOpen}
         deviceType={deviceType}
         indicator={selected}
+        // 启用状态唯一真值源:与列表开关同走 default 启用桶(enabledSet),
+        // 避免用 indicator.isEnabled(列表行字段未反映 default 桶)导致抽屉恒显未启用。
+        enabled={selected ? enabledSet.has(selected.id) : false}
         onClose={() => {
           setDrawerOpen(false);
           setSelected(null);

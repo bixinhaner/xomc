@@ -26,6 +26,9 @@ interface Props {
   open: boolean;
   deviceType: DeviceType;
   indicator: IndicatorInfo | null;
+  // 2026-06-03:启用状态由父组件按 default 启用桶(enabledSet)传入,
+  // 与列表开关同源;不再用 indicator.isEnabled(未反映 default 桶)。
+  enabled: boolean;
   onClose: () => void;
 }
 
@@ -34,7 +37,7 @@ interface FormulaFormValues {
   formula: string;
 }
 
-export default function IndicatorDrawer({ open, deviceType, indicator, onClose }: Props) {
+export default function IndicatorDrawer({ open, deviceType, indicator, enabled, onClose }: Props) {
   const t = useT();
   const { data: formulasData } = useFormulas(deviceType, indicator?.id);
   const upsertMut = useUpsertFormula();
@@ -140,7 +143,7 @@ export default function IndicatorDrawer({ open, deviceType, indicator, onClose }
             <Descriptions.Item label={t('product.kpi.indicator.counterType')}>{indicator.counterType || '—'}</Descriptions.Item>
             <Descriptions.Item label={t('product.kpi.indicator.level')}>{indicator.indicatorLevel || '—'}</Descriptions.Item>
             <Descriptions.Item label={t('product.kpi.indicator.enabledTag')} span={2}>
-              {indicator.isEnabled ? <Tag color="success">{t('product.kpi.indicator.enabledTag')}</Tag> : <Tag>{t('product.kpi.indicator.disabledTag')}</Tag>}
+              {enabled ? <Tag color="success">{t('product.kpi.indicator.enabledTag')}</Tag> : <Tag>{t('product.kpi.indicator.disabledTag')}</Tag>}
             </Descriptions.Item>
             <Descriptions.Item label={t('common.description')} span={2}>
               {indicator.description || '—'}
