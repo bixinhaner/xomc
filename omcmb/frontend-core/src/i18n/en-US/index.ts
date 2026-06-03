@@ -127,7 +127,7 @@ const messages: Record<string, string> = {
   'role.noGroupBinding.title':            'This role has no device-group binding',
   'role.noGroupBinding.editDesc':         'Users with this role will not see any device data. Please pick at least one level-2 device group in the Data Permission tab.',
   'role.noGroupBinding.viewDesc':         'Users with this role will not see any device data.',
-  'role.noGroupBinding.tag':              '⚠️ No device group',
+  'role.noGroupBinding.tag':              '⚠️ No device access',
 
   // F3 batch 2 — system/UserManagement (38 strings)
   'user.tooltip.builtinNoDisable':  'Built-in users cannot be disabled to avoid locking out the system login entry',
