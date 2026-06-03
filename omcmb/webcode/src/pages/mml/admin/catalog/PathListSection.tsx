@@ -64,20 +64,17 @@ export default function PathListSection({
       ellipsis: true,
     },
     {
-      title: t('mml.admin.catalog.subField.labelZh'),
-      key: 'labelZh',
-      width: 140,
+      title: t('mml.admin.catalog.commands.displayName'),
+      key: 'label',
+      width: 160,
       ellipsis: true,
       render: (_, sf) =>
-        sf.labelI18n?.['zh-CN'] || sf.labelI18n?.zh || '-',
-    },
-    {
-      title: t('mml.admin.catalog.subField.labelEn'),
-      key: 'labelEn',
-      width: 140,
-      ellipsis: true,
-      render: (_, sf) =>
-        sf.labelI18n?.['en-US'] || sf.labelI18n?.en || '-',
+        sf.labelI18n?.['zh-CN'] ||
+        sf.labelI18n?.['en-US'] ||
+        sf.labelI18n?.zh ||
+        sf.labelI18n?.en ||
+        sf.label ||
+        '-',
     },
     {
       title: t('mml.admin.catalog.subField.standardPath'),

@@ -58,6 +58,16 @@ function buildTreeData(
             onContextMenu(`add-child:${group.id}`);
           },
         },
+        {
+          // 2026-06-03 用户决策:内置一级分组也允许「编辑」名称;删除仍禁止(内置保护)。
+          key: 'edit-level1',
+          label: t('common.edit'),
+          icon: <EditOutlined />,
+          onClick: (info) => {
+            info.domEvent.stopPropagation();
+            onContextMenu(`edit-level1:${group.id}`);
+          },
+        },
       ];
     } else if (isRootLevel) {
       menuItems = [

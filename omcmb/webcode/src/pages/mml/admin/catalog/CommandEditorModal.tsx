@@ -30,8 +30,7 @@ interface FormValues {
   commandCode: string;
   logicalCode: string;
   operationType: BackendOperationType;
-  displayNameZh: string;
-  displayNameEn: string;
+  displayName: string;
   targetObject?: string;
   requireConfirm: boolean;
 }
@@ -65,9 +64,10 @@ export default function CommandEditorModal({
         commandCode: values.commandCode,
         logicalCode: values.logicalCode,
         operationType: values.operationType,
+        // 去多语言:单值显示名同时写 displayNameZh / displayNameEn 两路(沿用后端契约字段)。
         commandNameI18n: {
-          'zh-CN': values.displayNameZh,
-          'en-US': values.displayNameEn,
+          'zh-CN': values.displayName,
+          'en-US': values.displayName,
         },
         targetObject: values.targetObject || undefined,
         requireConfirm: values.requireConfirm,
@@ -138,18 +138,11 @@ export default function CommandEditorModal({
           <Select options={OPERATION_TYPES.map((op) => ({ label: op, value: op }))} />
         </Form.Item>
         <Form.Item
-          name="displayNameZh"
-          label={t('mml.admin.catalog.form.nameZh')}
+          name="displayName"
+          label={t('mml.admin.catalog.commands.displayName')}
           rules={[{ required: true, message: t('mml.admin.catalog.validation.required') }]}
         >
           <Input placeholder={t('mml.admin.catalog.placeholder.queryCellStatus')} />
-        </Form.Item>
-        <Form.Item
-          name="displayNameEn"
-          label={t('mml.admin.catalog.form.nameEn')}
-          rules={[{ required: true, message: t('mml.admin.catalog.validation.required') }]}
-        >
-          <Input placeholder="Query Cell Status" />
         </Form.Item>
         <Form.Item
           name="targetObject"

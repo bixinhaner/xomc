@@ -12,7 +12,7 @@
  * batch 端点按 standard_params 元数据自动派生，让维护人员减少 90% 重复劳动。
  */
 import { useState, useMemo, useEffect } from 'react';
-import { Modal, Table, Input, Form, Space, Tag, Alert, message } from 'antd';
+import { Modal, Table, Input, Form, Space, Tag, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import StandardParamSelect from './StandardParamSelect';
 import type { StandardParamView } from '@core/types/mmlAdmin';
@@ -20,6 +20,7 @@ import {
   useBatchCreateSubFields,
 } from '@core/hooks/api/useMmlAdmin';
 import { useT } from '@/hooks/useT';
+import { deriveLabel } from './deriveLabel';
 
 export interface AddSubFieldsModalProps {
   open: boolean;
@@ -36,8 +37,8 @@ interface PreviewRow {
   description: string;
   /** autofill：path 末段 UPPER_SNAKE */
   mmlCode: string;
-  labelZh: string;
-  labelEn: string;
+  /** 单值显示名（去多语言）；提交仍只传 standardPathIds，由后端派生。 */
+  label: string;
   access: string;
   dataType: string;
 }
@@ -60,27 +61,6 @@ function deriveMmlCode(path: string): string {
       out += ch;
     } else if (isLower) {
       out += ch.toUpperCase();
-    }
-    prevLower = isLower;
-  }
-  return out;
-}
-
-/** humanize 末段：UserLabel → "User Label"。 */
-function deriveLabelEn(path: string): string {
-  const idx = path.lastIndexOf('.');
-  const leaf = idx >= 0 ? path.slice(idx + 1) : path;
-  let out = '';
-  let prevLower = false;
-  for (let i = 0; i < leaf.length; i++) {
-    const ch = leaf[i];
-    const isUpper = ch >= 'A' && ch <= 'Z';
-    const isLower = ch >= 'a' && ch <= 'z';
-    if (i > 0 && prevLower && isUpper) out += ' ';
-    if (ch === '_' || ch === '-') {
-      out += ' ';
-    } else {
-      out += ch;
     }
     prevLower = isLower;
   }
@@ -120,8 +100,7 @@ export default function AddSubFieldsModal({
           standardPath: sp.standardPath,
           description: sp.description,
           mmlCode,
-          labelZh: sp.description || mmlCode,
-          labelEn: deriveLabelEn(sp.standardPath),
+          label: sp.description || deriveLabel(sp.standardPath) || mmlCode,
           access: sp.access,
           dataType: sp.dataType,
         });
@@ -157,17 +136,17 @@ export default function AddSubFieldsModal({
       ),
     },
     {
-      title: 'label (zh)',
-      dataIndex: 'labelZh',
-      key: 'labelZh',
+      title: t('mml.admin.catalog.commands.displayName'),
+      dataIndex: 'label',
+      key: 'label',
       ellipsis: true,
       render: (_: unknown, row: PreviewRow, idx: number) => (
         <Input
           size="small"
-          value={row.labelZh}
+          value={row.label}
           onChange={(e) => {
             const v = e.target.value;
-            setRows((p) => p.map((r, i) => (i === idx ? { ...r, labelZh: v } : r)));
+            setRows((p) => p.map((r, i) => (i === idx ? { ...r, label: v } : r)));
           }}
         />
       ),
@@ -226,12 +205,6 @@ export default function AddSubFieldsModal({
             excludeIds={existingPathIds}
           />
         </Form.Item>
-        <Alert
-          type="info"
-          showIcon
-          message={t('mml.admin.catalog.subField.batchAutofillHint')}
-          style={{ marginBottom: 12 }}
-        />
         <Table<PreviewRow>
           rowKey="paramId"
           size="small"

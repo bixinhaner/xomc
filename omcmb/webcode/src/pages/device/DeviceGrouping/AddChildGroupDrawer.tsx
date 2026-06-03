@@ -4,13 +4,12 @@ import type { FormInstance } from 'antd';
 import type { NameFilterItem } from './types';
 import { generateOperators } from './types';
 import NameFilterEditor, { FilterConditionLabel } from './NameFilterEditor';
-import I18nInput from '@/components/I18nInput';
 
 const { Text } = Typography;
 
 export interface AddChildGroupDrawerProps {
   open: boolean;
-  form: FormInstance<{ name_i18n?: Record<string, string>; matchingMode: 'deviceName' | 'lac' | 'tac'; tacRag: string }>;
+  form: FormInstance<{ name?: string; matchingMode: 'deviceName' | 'lac' | 'tac'; tacRag: string }>;
   /** 上级（一级）分组名称，只读展示，自动填充。 */
   parentGroupName?: string;
   matchingMode: string | undefined;
@@ -79,8 +78,14 @@ export default function AddChildGroupDrawer({
           <Form.Item label={t('device.superiorGroup')} style={{ marginBottom: 12 }}>
             <Input value={parentGroupName ?? ''} disabled />
           </Form.Item>
-          <Form.Item label={t('device.groupNameLabel')} required style={{ marginBottom: 0 }}>
-            <I18nInput name="name_i18n" required maxLength={50} />
+          <Form.Item
+            name="name"
+            label={t('device.groupNameLabel')}
+            required
+            rules={[{ required: true, message: t('device.groupNameLabel') }]}
+            style={{ marginBottom: 0 }}
+          >
+            <Input maxLength={50} placeholder={t('device.groupNameLabel')} />
           </Form.Item>
         </div>
 

@@ -1,14 +1,13 @@
 import { useMemo } from 'react';
-import { Button, Drawer, Form, TreeSelect } from 'antd';
+import { Button, Drawer, Form, Input, TreeSelect } from 'antd';
 import type { FormInstance } from 'antd';
 import type { GroupItem } from './types';
-import I18nInput from '@/components/I18nInput';
 
 export interface AddGroupDrawerProps {
   open: boolean;
   form: FormInstance<{
-    name_i18n?: Record<string, string>;
-    description_i18n?: Record<string, string>;
+    name?: string;
+    description?: string;
     parentId?: string;
   }>;
   groups: GroupItem[];
@@ -57,8 +56,14 @@ export default function AddGroupDrawer({ open, form, groups, onOk, onCancel, t }
           <div style={{ marginBottom: 12, fontWeight: 500, color: 'var(--color-text)' }}>
             {t('device.basicInfo')}
           </div>
-          <Form.Item label={t('table.name')} required style={{ marginBottom: 12 }}>
-            <I18nInput name="name_i18n" required maxLength={50} />
+          <Form.Item
+            name="name"
+            label={t('table.name')}
+            required
+            rules={[{ required: true, message: t('table.name') }]}
+            style={{ marginBottom: 12 }}
+          >
+            <Input maxLength={50} placeholder={t('table.name')} />
           </Form.Item>
           <Form.Item
             name="parentId"
@@ -86,8 +91,8 @@ export default function AddGroupDrawer({ open, form, groups, onOk, onCancel, t }
           <div style={{ marginBottom: 12, fontWeight: 500, color: 'var(--color-text)' }}>
             {t('table.description')}
           </div>
-          <Form.Item style={{ marginBottom: 0 }}>
-            <I18nInput name="description_i18n" required={false} textarea rows={3} maxLength={200} />
+          <Form.Item name="description" style={{ marginBottom: 0 }}>
+            <Input.TextArea rows={3} maxLength={200} placeholder={t('table.description')} />
           </Form.Item>
         </div>
       </Form>

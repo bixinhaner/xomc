@@ -1,14 +1,13 @@
 import { useMemo } from 'react';
-import { Form, Modal, TreeSelect } from 'antd';
+import { Form, Input, Modal, TreeSelect } from 'antd';
 import type { FormInstance } from 'antd';
 import type { GroupItem } from './types';
-import I18nInput from '@/components/I18nInput';
 
 export interface EditGroupModalProps {
   open: boolean;
   form: FormInstance<{
-    name_i18n?: Record<string, string>;
-    description_i18n?: Record<string, string>;
+    name?: string;
+    description?: string;
     parentId?: string;
   }>;
   groups: GroupItem[];
@@ -49,8 +48,13 @@ export default function EditGroupModal({
       okText={t('common.save')}
     >
       <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
-        <Form.Item label={t('table.name')} required>
-          <I18nInput name="name_i18n" required maxLength={128} />
+        <Form.Item
+          name="name"
+          label={t('table.name')}
+          required
+          rules={[{ required: true, message: t('table.name') }]}
+        >
+          <Input maxLength={128} placeholder={t('table.name')} />
         </Form.Item>
         <Form.Item
           name="parentId"
@@ -66,8 +70,8 @@ export default function EditGroupModal({
             treeDefaultExpandAll
           />
         </Form.Item>
-        <Form.Item label={t('table.description')}>
-          <I18nInput name="description_i18n" required={false} textarea rows={3} />
+        <Form.Item name="description" label={t('table.description')}>
+          <Input.TextArea rows={3} maxLength={200} placeholder={t('table.description')} />
         </Form.Item>
       </Form>
     </Modal>

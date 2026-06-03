@@ -3,6 +3,7 @@ import { Modal, Form, Input, InputNumber, Switch, message } from 'antd';
 import { useUpdateSubField } from '@core/hooks/api/useMmlAdmin';
 import type { AdminSubFieldEnriched } from '@core/types/mmlAdmin';
 import { useT } from '@/hooks/useT';
+import { deriveLabel } from './deriveLabel';
 
 // 2026-05-27 mml-admin-catalog-redesign-20260527 §5.2：行内编辑 path。
 // 仅改 labelI18n / defaultSelected / displayOrder；mmlCode 与 tr069Path 只读
@@ -16,8 +17,8 @@ export interface EditSubFieldModalProps {
 }
 
 interface FormValues {
-  labelZh: string;
-  labelEn: string;
+  /** 单值显示名;提交时 labelI18n zh-CN / en-US 两路同值。 */
+  label: string;
   defaultSelected: boolean;
   sortOrder: number;
 }
@@ -36,8 +37,8 @@ export default function EditSubFieldModal({
   useEffect(() => {
     if (!open || !subField) return;
     form.setFieldsValue({
-      labelZh: subField.labelI18n?.['zh-CN'] ?? '',
-      labelEn: subField.labelI18n?.['en-US'] ?? '',
+      label:
+        subField.labelI18n?.['zh-CN'] || subField.labelI18n?.['en-US'] || '',
       defaultSelected: subField.defaultSelected,
       sortOrder: subField.sortOrder,
     });
@@ -51,9 +52,10 @@ export default function EditSubFieldModal({
         commandId,
         subFieldId: subField.id,
         req: {
+          // 去多语言:单值显示名同时写 zh-CN / en-US 两路。
           labelI18n: {
-            'zh-CN': values.labelZh,
-            'en-US': values.labelEn,
+            'zh-CN': values.label,
+            'en-US': values.label,
           },
           defaultSelected: values.defaultSelected,
           sortOrder: values.sortOrder,
@@ -87,18 +89,15 @@ export default function EditSubFieldModal({
           <Input value={subField?.tr069Path ?? ''} disabled />
         </Form.Item>
         <Form.Item
-          name="labelZh"
-          label={t('mml.admin.catalog.subField.labelZh')}
+          name="label"
+          label={t('mml.admin.catalog.commands.displayName')}
           rules={[{ required: true, message: t('mml.admin.catalog.validation.required') }]}
         >
-          <Input placeholder={t('mml.admin.catalog.placeholder.cellId')} />
-        </Form.Item>
-        <Form.Item
-          name="labelEn"
-          label={t('mml.admin.catalog.subField.labelEn')}
-          rules={[{ required: true, message: t('mml.admin.catalog.validation.required') }]}
-        >
-          <Input placeholder="Cell ID" />
+          <Input
+            placeholder={
+              subField?.tr069Path ? deriveLabel(subField.tr069Path) : undefined
+            }
+          />
         </Form.Item>
         <Form.Item
           name="defaultSelected"

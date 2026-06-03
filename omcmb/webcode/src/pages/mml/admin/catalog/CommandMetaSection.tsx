@@ -43,8 +43,7 @@ interface FormValues {
   commandCode: string;
   logicalCode: string;
   operationType: MMLOperationType;
-  displayNameZh: string;
-  displayNameEn: string;
+  displayName: string;
   targetObject?: string;
   requireConfirm: boolean;
 }
@@ -55,10 +54,11 @@ function toFormValues(cmd: GroupTreeCommand, groupId: string): FormValues {
     commandCode: cmd.commandCode,
     logicalCode: cmd.logicalCode,
     operationType: cmd.operationType,
-    displayNameZh:
-      cmd.logicalNameI18n?.['zh-CN'] ?? cmd.displayName ?? '',
-    displayNameEn:
-      cmd.logicalNameI18n?.['en-US'] ?? '',
+    displayName:
+      cmd.logicalNameI18n?.['zh-CN'] ||
+      cmd.logicalNameI18n?.['en-US'] ||
+      cmd.displayName ||
+      '',
     targetObject: cmd.targetObject ?? undefined,
     requireConfirm: cmd.requireConfirm,
   };
@@ -98,9 +98,10 @@ export default function CommandMetaSection({
         req: {
           groupId: values.groupId,
           logicalCode: values.logicalCode,
+          // 去多语言:单值显示名同时写 zh-CN / en-US 两路(沿用后端契约字段)。
           commandNameI18n: {
-            'zh-CN': values.displayNameZh,
-            'en-US': values.displayNameEn,
+            'zh-CN': values.displayName,
+            'en-US': values.displayName,
           },
           targetObject: values.targetObject || null,
           requireConfirm: values.requireConfirm,
@@ -166,15 +167,8 @@ export default function CommandMetaSection({
             <Input disabled />
           </Form.Item>
           <Form.Item
-            name="displayNameZh"
-            label={t('mml.admin.catalog.form.nameZh')}
-            rules={[{ required: true, message: t('mml.admin.catalog.validation.required') }]}
-          >
-            <Input />
-          </Form.Item>
-          <Form.Item
-            name="displayNameEn"
-            label={t('mml.admin.catalog.form.nameEn')}
+            name="displayName"
+            label={t('mml.admin.catalog.commands.displayName')}
             rules={[{ required: true, message: t('mml.admin.catalog.validation.required') }]}
           >
             <Input />

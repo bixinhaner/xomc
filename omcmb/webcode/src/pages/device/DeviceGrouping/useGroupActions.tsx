@@ -5,15 +5,15 @@ import { parseRangeString } from './types';
 import type { UseNameFiltersReturn } from './useNameFilters';
 
 export interface AddGroupFormValues {
-  /** i18n dual-language inputs — I18nInput 嵌套字段。 */
-  name_i18n?: Record<string, string>;
-  description_i18n?: Record<string, string>;
+  /** 单值名称 — 表单只有一个 antd Input（去多语言，方案 A）。 */
+  name?: string;
+  description?: string;
   parentId?: string;
 }
 
 export interface AddChildFormValues {
-  /** i18n 名称 — 与一级分组一致，I18nInput 序列化为 { 'zh-CN', 'en-US' }。 */
-  name_i18n?: Record<string, string>;
+  /** 单值名称 — 与一级分组一致，单个 antd Input。 */
+  name?: string;
   matchingMode: 'deviceName' | 'lac' | 'tac';
   tacRag: string;
 }
@@ -160,14 +160,10 @@ export function useGroupActions(deps: {
       const grp = groups.find((g) => g.id === groupId);
       if (!grp) return;
       setEditingGroupId(groupId);
-      // i18n 表单值兜底:已有 nameI18n 用之;否则把 legacy name/description 套进 zh-CN
+      // 单值回填:顶层 name/description 优先,fallback 到 i18n 的 zh-CN(向后兼容)。
       editForm.setFieldsValue({
-        name_i18n: grp.nameI18n && Object.keys(grp.nameI18n).length > 0
-          ? grp.nameI18n
-          : { 'zh-CN': grp.name, 'en-US': grp.name },
-        description_i18n: grp.descriptionI18n && Object.keys(grp.descriptionI18n).length > 0
-          ? grp.descriptionI18n
-          : { 'zh-CN': grp.description, 'en-US': grp.description },
+        name: grp.name || grp.nameI18n?.['zh-CN'] || '',
+        description: grp.description || grp.descriptionI18n?.['zh-CN'] || '',
         parentId: grp.parentId || undefined,
       });
       setEditModalOpen(true);
@@ -194,12 +190,9 @@ export function useGroupActions(deps: {
         tacRag = grp.tacList.join(',');
       }
 
-      // i18n 名称回填：已有 nameI18n 用之；否则把 legacy name 套进 zh-CN / en-US
-      // （与一级编辑 openEditLevel1 同策略）。
+      // 单值名称回填：顶层 name 优先，fallback 到 i18n 的 zh-CN（与一级编辑同策略）。
       editLevel2Form.setFieldsValue({
-        name_i18n: grp.nameI18n && Object.keys(grp.nameI18n).length > 0
-          ? grp.nameI18n
-          : { 'zh-CN': grp.name, 'en-US': grp.name },
+        name: grp.name || grp.nameI18n?.['zh-CN'] || '',
         matchingMode: mode,
         tacRag,
       });
@@ -258,16 +251,16 @@ export function useGroupActions(deps: {
   const handleAddGroup = useCallback(async () => {
     try {
       const values = await addForm.validateFields();
-      // 从 i18n form 字段中提取 legacy 字段(zh-CN 作 fallback),保留完整 i18n map 发后端。
-      const nameZh = values.name_i18n?.['zh-CN'] || '';
-      const descZh = values.description_i18n?.['zh-CN'] || '';
+      // 单值表单 → 同时发顶层单值与 i18n 单键({'zh-CN': 值}),后端读哪个都拿到同一值。
+      const name = values.name || '';
+      const desc = values.description || '';
       await createGroupMutation.mutateAsync({
-        name: nameZh,
-        name_i18n: values.name_i18n,
-        description_i18n: values.description_i18n,
+        name,
+        name_i18n: { 'zh-CN': name },
+        description_i18n: { 'zh-CN': desc },
         parent_id: values.parentId || undefined,
-        remark: descZh,
-        remark_i18n: values.description_i18n,
+        remark: desc,
+        remark_i18n: { 'zh-CN': desc },
       });
       void message.success(t('common.success'));
       setAddModalOpen(false);
@@ -280,17 +273,18 @@ export function useGroupActions(deps: {
     try {
       if (!editingGroupId) return;
       const values = await editForm.validateFields();
-      const nameZh = values.name_i18n?.['zh-CN'] || '';
-      const descZh = values.description_i18n?.['zh-CN'] || '';
+      // 单值表单 → 同时发顶层单值与 i18n 单键({'zh-CN': 值})。
+      const name = values.name || '';
+      const desc = values.description || '';
       await updateGroupMutation.mutateAsync({
         id: editingGroupId,
         data: {
-          name: nameZh,
-          name_i18n: values.name_i18n,
-          description_i18n: values.description_i18n,
+          name,
+          name_i18n: { 'zh-CN': name },
+          description_i18n: { 'zh-CN': desc },
           parent_id: values.parentId || undefined,
-          remark: descZh,
-          remark_i18n: values.description_i18n,
+          remark: desc,
+          remark_i18n: { 'zh-CN': desc },
         },
       });
       void message.success(t('common.success'));
@@ -304,8 +298,8 @@ export function useGroupActions(deps: {
   const handleSaveChildGroup = useCallback(async () => {
     try {
       const values = await addChildForm.validateFields();
-      // i18n 名称：zh-CN 作 legacy name fallback，完整 i18n map 发后端（同一级）。
-      const nameZh = values.name_i18n?.['zh-CN'] || '';
+      // 单值名称 → 同时发顶层单值与 i18n 单键({'zh-CN': 值})（同一级）。
+      const name = values.name || '';
 
       let matching_mode: string | undefined;
       let name_rule_list: NameFilterItem[] | undefined;
@@ -324,8 +318,8 @@ export function useGroupActions(deps: {
       }
 
       await createGroupMutation.mutateAsync({
-        name: nameZh,
-        name_i18n: values.name_i18n,
+        name,
+        name_i18n: { 'zh-CN': name },
         parent_id: parentGroupId ?? undefined,
         remark: '',
         matching_mode,
@@ -344,8 +338,8 @@ export function useGroupActions(deps: {
     try {
       const values = await editLevel2Form.validateFields();
       if (!editLevel2GroupId) return;
-      // i18n 名称：zh-CN 作 legacy name fallback，完整 i18n map 发后端（同一级）。
-      const nameZh = values.name_i18n?.['zh-CN'] || '';
+      // 单值名称 → 同时发顶层单值与 i18n 单键({'zh-CN': 值})（同一级）。
+      const name = values.name || '';
 
       // R1.3: 全量替换语义 — 用户在表单上看到的就是最终落库的，避免增量合并歧义。
       // 切换 matchingMode 时显式清空非当前模式的列表字段，让后端覆盖为空数组。
@@ -370,8 +364,8 @@ export function useGroupActions(deps: {
       await updateGroupMutation.mutateAsync({
         id: editLevel2GroupId,
         data: {
-          name: nameZh,
-          name_i18n: values.name_i18n,
+          name,
+          name_i18n: { 'zh-CN': name },
           matching_mode,
           name_rule_list,
           lac_list,

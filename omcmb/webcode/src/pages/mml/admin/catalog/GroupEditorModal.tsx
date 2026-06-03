@@ -2,7 +2,6 @@ import { useEffect } from 'react';
 import { Modal, Form, Input, InputNumber, message } from 'antd';
 import { useCreateGroup, useUpdateGroup } from '@core/hooks/api/useMmlAdmin';
 import { useT } from '@/hooks/useT';
-import I18nInput from '@/components/I18nInput';
 
 // 2026-05-27 重构（mml-admin-catalog-redesign-20260527）：移除 create-child mode。
 // 一级分组语义下，create 永远 parentId=null；rename 仅改 group_code / 显示名 / 排序。
@@ -24,8 +23,8 @@ export interface GroupEditorModalProps {
 
 interface FormValues {
   groupCode: string;
-  /** i18n 名称 — 与设备分组一致，I18nInput 序列化为 { 'zh-CN', 'en-US' }。 */
-  displayName_i18n?: Record<string, string>;
+  /** 单值显示名；提交时 zh-CN / en-US 两路同值（复用 displayNameI18n transform）。 */
+  displayName: string;
   displayOrder: number;
 }
 
@@ -46,10 +45,7 @@ export default function GroupEditorModal({
     if (mode === 'rename' && targetGroup) {
       form.setFieldsValue({
         groupCode: targetGroup.groupCode,
-        displayName_i18n: {
-          'zh-CN': targetGroup.displayNameI18n['zh-CN'] ?? '',
-          'en-US': targetGroup.displayNameI18n['en-US'] ?? '',
-        },
+        displayName: targetGroup.displayNameI18n?.['zh-CN'] || '',
         displayOrder: targetGroup.displayOrder,
       });
     } else {
@@ -66,9 +62,10 @@ export default function GroupEditorModal({
   const handleOk = async () => {
     try {
       const values = await form.validateFields();
+      // 去多语言:单值显示名同时写入 zh-CN / en-US 两路,保证后端读哪路都拿到该值。
       const displayNameI18n: Record<string, string> = {
-        'zh-CN': values.displayName_i18n?.['zh-CN'] ?? '',
-        'en-US': values.displayName_i18n?.['en-US'] ?? '',
+        'zh-CN': values.displayName,
+        'en-US': values.displayName,
       };
       if (mode === 'rename') {
         if (!targetGroup) return;
@@ -126,8 +123,12 @@ export default function GroupEditorModal({
             disabled={mode === 'rename'}
           />
         </Form.Item>
-        <Form.Item label={t('mml.admin.catalog.form.name')} required>
-          <I18nInput name="displayName_i18n" required maxLength={128} />
+        <Form.Item
+          name="displayName"
+          label={t('mml.admin.catalog.form.name')}
+          rules={[{ required: true, message: t('mml.admin.catalog.validation.required') }]}
+        >
+          <Input maxLength={128} />
         </Form.Item>
         <Form.Item
           name="displayOrder"
