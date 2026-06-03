@@ -7,7 +7,7 @@
  *   文件删除仍留在 XMLFilesModal。
  */
 import { useState } from 'react';
-import { Card, Table, Tag, Button, Tooltip, message, Input, Modal } from 'antd';
+import { Card, Table, Button, Tooltip, message, Input, Modal } from 'antd';
 import { EditOutlined } from '@ant-design/icons';
 import type { AxiosError } from 'axios';
 import type { IndicatorPlatformSummary, TechLower } from '@core/types/indicatorLibrary';
@@ -100,7 +100,8 @@ export default function SummaryTab({ onSelect, query = '' }: Props) {
       title: t('product.kpi.summary.col.tech'),
       dataIndex: 'tech',
       width: 120,
-      render: (v: TechLower) => <Tag color="geekblue">{TECH_LABEL[v]}</Tag>,
+      // 2026-06-03 用户决策:制式列字体色对齐"加载源"列(默认文本色,与 <code> 同),不再用蓝色 Tag。
+      render: (v: TechLower) => <code>{TECH_LABEL[v]}</code>,
     },
     { title: t('common.indicators'), dataIndex: 'indicators', width: 90 },
     {
