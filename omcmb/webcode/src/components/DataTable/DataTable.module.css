@@ -112,6 +112,26 @@
   background-color: var(--color-row-hover) !important;
 }
 
+/* 固定列(选择/序号列 fixed:true)单元格需不透明背景,否则横向滚动时其它列内容透出、与固定列重叠。
+   斑马 + hover 感知,与上面行背景保持一致。 */
+:global(.omc-data-table) :global(.row-odd) > td:global(.ant-table-cell-fix-left),
+:global(.omc-data-table) :global(.row-odd) > td:global(.ant-table-cell-fix-right) {
+  background-color: var(--color-bg-container) !important;
+}
+:global(.omc-data-table) :global(.row-even) > td:global(.ant-table-cell-fix-left),
+:global(.omc-data-table) :global(.row-even) > td:global(.ant-table-cell-fix-right) {
+  background-color: var(--color-neutral-50) !important;
+}
+:global(.omc-data-table) :global(.ant-table-tbody > tr:hover) > td:global(.ant-table-cell-fix-left),
+:global(.omc-data-table) :global(.ant-table-tbody > tr:hover) > td:global(.ant-table-cell-fix-right) {
+  background-color: var(--color-row-hover) !important;
+}
+/* 固定表头单元格同样需不透明(纵向滚动时不被表体透出) */
+:global(.omc-data-table) :global(.ant-table-thead > tr > th.ant-table-cell-fix-left),
+:global(.omc-data-table) :global(.ant-table-thead > tr > th.ant-table-cell-fix-right) {
+  background-color: var(--color-neutral-50) !important;
+}
+
 /* Alarm row styles */
 :global(.omc-data-table) :global(.row-critical > td) {
   border-left: 3px solid #F5222D !important;

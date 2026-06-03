@@ -13,7 +13,7 @@
  */
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Card, Button, Space, Select, Input } from 'antd';
+import { Card, Button, Space, Select } from 'antd';
 import {
   ArrowLeftOutlined,
   InboxOutlined,
@@ -24,6 +24,7 @@ import { techToDeviceType } from '@core/types/indicatorLibrary';
 import SummaryTab from './SummaryTab';
 import IndicatorsByTech from './IndicatorsByTech';
 import UploadXmlModal from './UploadXmlModal';
+import SearchInput from '@/components/SearchInput';
 import { useT } from '@/hooks/useT';
 
 const TECH_LABEL: Record<TechLower, string> = {
@@ -137,7 +138,7 @@ export default function KpiLibraryPage() {
               </Space>
               <Space wrap>
                 {/* 2026-05-29 用户决策:搜索框放在分组筛选前面(主要操作前置) */}
-                <Input.Search
+                <SearchInput
                   placeholder={t('product.kpi.idNameSearchPh')}
                   allowClear
                   value={detailKeyword}
@@ -160,7 +161,7 @@ export default function KpiLibraryPage() {
           ) : (
             <>
               {/* 列表态左侧:一级平台搜索框(与右侧「导入 XML」等操作同一行) */}
-              <Input.Search
+              <SearchInput
                 placeholder={t('product.kpi.summary.searchPh')}
                 allowClear
                 value={summaryQuery}

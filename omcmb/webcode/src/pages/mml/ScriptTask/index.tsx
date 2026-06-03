@@ -6,6 +6,7 @@ import dayjs from 'dayjs';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
+import SearchInput from '@/components/SearchInput';
 import ScriptTaskDrawer from '../components/ScriptTaskDrawer';
 import { useT } from '@/hooks/useT';
 
@@ -202,7 +203,7 @@ export default function ScriptTask() {
       }
     >
       <div style={{ marginBottom: 16 }}>
-        <Input.Search
+        <SearchInput
           placeholder={t('mml.scriptName')}
           allowClear
           style={{ width: 300 }}

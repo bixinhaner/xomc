@@ -29,6 +29,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useT } from '@/hooks/useT';
 
 import ListPageLayout from '@/components/Layout/ListPageLayout';
+import SearchInput from '@/components/SearchInput';
 import MRTasksPanel from '@/pages/mr/Tasks';
 import {
   useBatchDeleteUfteTasks,
@@ -1267,7 +1268,7 @@ export default function FileTransferCenter() {
                 children: (
                   <Space direction="vertical" size={12} style={{ width: '100%' }}>
                     <Space wrap>
-                      <Input.Search
+                      <SearchInput
                         allowClear
                         placeholder={t('ufte.search.tasks')}
                         value={taskKeywordInput}
@@ -1367,7 +1368,7 @@ export default function FileTransferCenter() {
                 children: (
                   <Space direction="vertical" size={12} style={{ width: '100%' }}>
                     <Space wrap>
-                      <Input.Search
+                      <SearchInput
                         allowClear
                         placeholder={t('ufte.search.devices')}
                         value={deviceKeywordInput}

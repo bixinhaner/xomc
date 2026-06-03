@@ -195,6 +195,20 @@ const ColumnVisibility: React.FC<ColumnVisibilityProps> = ({
   );
 
   const totalVisible = settableColumns.filter((c) => !hiddenKeys.includes(c.key)).length;
+  const allChecked = settableColumns.length > 0 && totalVisible === settableColumns.length;
+  const someChecked = totalVisible > 0 && totalVisible < settableColumns.length;
+
+  // 全选/取消全选:仅作用于可设置列(排除 actions 等固定列)。
+  const handleToggleAll = useCallback(
+    (checked: boolean) => {
+      const settableSet = new Set(settableColumns.map((c) => c.key));
+      const next = checked
+        ? hiddenKeys.filter((k) => !settableSet.has(k)) // 显示全部:从隐藏集移除可设置列
+        : [...new Set([...hiddenKeys, ...settableColumns.map((c) => c.key)])]; // 隐藏全部可设置列
+      persistHidden(next);
+    },
+    [settableColumns, hiddenKeys, persistHidden]
+  );
 
   // ─── popover content ──────────────────────────────────────────────────
 
@@ -204,9 +218,15 @@ const ColumnVisibility: React.FC<ColumnVisibilityProps> = ({
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         marginBottom: 8, paddingBottom: 8, borderBottom: '1px solid #f0f0f0',
       }}>
-        <span style={{ fontSize: 13, color: '#8c8c8c' }}>
-          {totalVisible}/{settableColumns.length}
-        </span>
+        <Checkbox
+          checked={allChecked}
+          indeterminate={someChecked}
+          onChange={(e) => handleToggleAll(e.target.checked)}
+        >
+          <span style={{ fontSize: 13 }}>
+            {isZh ? '全选' : 'All'} ({totalVisible}/{settableColumns.length})
+          </span>
+        </Checkbox>
         <Button type="link" size="small" onClick={handleReset} style={{ padding: 0 }}>
           {isZh ? '重置' : 'Reset'}
         </Button>

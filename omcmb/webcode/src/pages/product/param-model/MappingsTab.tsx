@@ -28,6 +28,7 @@ import {
 } from '@core/hooks/api/useParamModels';
 import type { ParamMapping, CreateMappingInput, UpdateMappingInput } from '@core/types/paramModel';
 import { makeSeqColumn } from '@/components/Table/seqColumn';
+import SearchInput from '@/components/SearchInput';
 import { useT } from '@/hooks/useT';
 
 interface Props {
@@ -198,7 +199,7 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
             <span style={{ fontWeight: 600 }}>{selectedName}</span>
           </Space>
           <Space wrap>
-            <Input.Search
+            <SearchInput
               placeholder={t('product.paramModel.pathSearchPh')}
               allowClear
               value={keyword}

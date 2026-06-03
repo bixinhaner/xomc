@@ -1,7 +1,8 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { Button, Card, Input, Typography } from 'antd';
+import { Button, Card, Typography } from 'antd';
 import { DownloadOutlined, UploadOutlined } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
+import SearchInput from '@/components/SearchInput';
 import type { BatchAction } from '@/components/DataTable';
 import type { Device, BatchImportResponse } from '@core/types/device';
 import BatchImportModal from './BatchImportModal';
@@ -66,9 +67,10 @@ export default function DeviceListPanel({
   // 搜索框放到工具栏最左、批量操作（移动/回收站/删除）按钮之前（DataTable.extraToolbarLeft）。
   const searchBox = useMemo(
     () => (
-      <Input.Search
+      <SearchInput
         allowClear
         placeholder={t('device.searchSnNamePlaceholder')}
+        // 2026-06-03:SearchInput 已用 Tooltip(hover+focus)展示完整 placeholder,无需再设 title。
         onSearch={onSearch}
         style={{ width: 260 }}
       />
@@ -102,6 +104,9 @@ export default function DeviceListPanel({
         </Title>
       </div>
 
+      {/* 2026-06-03 用户决策:搜索框从表格工具栏移出,独立成一行显示 */}
+      <div>{searchBox}</div>
+
       <div className="device-list-table-wrapper" style={{ flex: 1, minHeight: 0 }}>
         <Card
           size="small"
@@ -119,7 +124,6 @@ export default function DeviceListPanel({
             selectedRowKeys={selectedDeviceIds}
             onSelectionChange={onSelectionChange}
             batchActions={batchActions}
-            extraToolbarLeft={searchBox}
             extraToolbarAfterBatch={importExportButtons}
             total={total}
             pageSize={pageSize}

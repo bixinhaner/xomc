@@ -4,7 +4,6 @@ import {
   Table,
   Button,
   Space,
-  Input,
   Tag,
   Popconfirm,
   message,
@@ -12,6 +11,7 @@ import {
   Typography,
 } from 'antd';
 import { makeSeqColumn } from '@/components/Table/seqColumn';
+import SearchInput from '@/components/SearchInput';
 import {
   PlusOutlined,
   EditOutlined,
@@ -216,7 +216,7 @@ export default function ProductsPage() {
           }}
         >
           <Space size={8} wrap>
-            <Input.Search
+            <SearchInput
               placeholder={t('product.products.searchPh')}
               allowClear
               value={keyword}

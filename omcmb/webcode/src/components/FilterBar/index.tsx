@@ -269,6 +269,8 @@ const FilterBar: React.FC<FilterBarProps> = ({
             <div
               key={field.name}
               className={styles.fieldItem}
+              // 2026-06-03:字段较窄时 placeholder 会被截断;hover 显示完整提示文案(原生 title)。
+              title={field.placeholder ?? field.label}
               style={{
                 ...(field.width !== undefined
                   ? {

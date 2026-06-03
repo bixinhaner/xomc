@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Card, Table, Input, Switch, Button, Space, Select, message, Popconfirm } from 'antd';
+import { Card, Table, Switch, Button, Space, Select, message, Popconfirm } from 'antd';
 import { EyeOutlined, DeleteOutlined } from '@ant-design/icons';
 import {
   useIndicatorList,
@@ -10,6 +10,7 @@ import {
 } from '@core/hooks/api/useIndicatorsLibrary';
 import type { DeviceType, IndicatorInfo } from '@core/types/indicatorLibrary';
 import IndicatorDrawer from './IndicatorDrawer';
+import SearchInput from '@/components/SearchInput';
 import { useT } from '@/hooks/useT';
 
 interface Props {
@@ -140,7 +141,7 @@ export default function IndicatorTab({ deviceType }: Props) {
               style={{ width: 200 }}
             />
           )}
-          <Input.Search
+          <SearchInput
             placeholder={t('product.kpi.idNameSearchPh')}
             allowClear
             value={keyword}

@@ -23,7 +23,6 @@ import {
   Tag,
   Button,
   Space,
-  Input,
   Select,
   Popconfirm,
   Tooltip,
@@ -51,6 +50,7 @@ import type {
 import AlarmDefinitionDrawer from './AlarmDefinitionDrawer';
 import AlarmUploadXmlModal from './AlarmUploadXmlModal';
 import { makeSeqColumn } from '@/components/Table/seqColumn';
+import SearchInput from '@/components/SearchInput';
 import { useT } from '@/hooks/useT';
 // 2026-05-29:"未识别频次"入口暂时隐藏(后端聚合 / 统计逻辑未完工,详见
 // backlog T-0181)。组件文件 UnknownStatsModal.tsx 保留备用,功能就绪后:
@@ -330,7 +330,7 @@ export default function AlarmLibraryPage() {
             </Space>
           ) : (
             // 列表态左侧:按"名称"(ne_type)模糊搜索;客户端过滤(数据量小)
-            <Input.Search
+            <SearchInput
               placeholder={t('product.alarm.neSearchPh')}
               allowClear
               value={neKeyword}
@@ -345,7 +345,7 @@ export default function AlarmLibraryPage() {
               // 2026-05-29 用户决策:搜索框置于"严重级别"前(主操作前置,与 kpi-library
               // 详情态 toolbar 范式一致)。
               <>
-                <Input.Search
+                <SearchInput
                   placeholder={t('product.alarm.searchPh')}
                   allowClear
                   onSearch={(v) =>

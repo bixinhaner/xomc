@@ -525,6 +525,17 @@ export default function DeviceList() {
     dictToOptions,
   ]);
 
+  // 2026-06-03 用户决策:下拉(select/multi-select)提示统一在前面加「请选择」(无显式 placeholder 时回退 label,此处前置请选择)。
+  const filterFields = useMemo(
+    () =>
+      FILTER_FIELDS.map((f) =>
+        (f.type === 'select' || f.type === 'multi-select') && !f.placeholder
+          ? { ...f, placeholder: `${t('common.pleaseSelect')}${f.label ?? ''}` }
+          : f
+      ),
+    [FILTER_FIELDS, t]
+  );
+
   // 统计面板 — 基于筛选条件的全量统计（由后端 stats 字段返回，非当前页）
   // T-0162: 优先用 online_count / offline_count（与 backend DeviceListStats 1:1）；
   // 老 stats.online / stats.offline 字段在新前端不再使用（仅 mapListResponse 内部
@@ -1609,7 +1620,7 @@ export default function DeviceList() {
         <ListPageLayout>
           <FilterBar
             filterId="device-list"
-            fields={FILTER_FIELDS}
+            fields={filterFields}
             onSearch={handleSearch}
             onReset={handleReset}
             collapsedRows={1}

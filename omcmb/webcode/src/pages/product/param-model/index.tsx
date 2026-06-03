@@ -25,7 +25,7 @@
  *   - 详情态彻底不渲染顶部 toolbar Card
  */
 import { useState } from 'react';
-import { Card, Input, Button, Space, message, Upload, Modal } from 'antd';
+import { Card, Button, Space, message, Upload, Modal } from 'antd';
 import type { UploadProps } from 'antd';
 import { InboxOutlined } from '@ant-design/icons';
 import {
@@ -35,6 +35,7 @@ import {
 import type { AxiosError } from 'axios';
 import ModelsTab from './ModelsTab';
 import MappingsTab from './MappingsTab';
+import SearchInput from '@/components/SearchInput';
 import { useT } from '@/hooks/useT';
 
 export default function ParamModelPage() {
@@ -120,7 +121,7 @@ export default function ParamModelPage() {
       {!inDetail && (
         <Card size="small" style={{ marginBottom: 12 }}>
           <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-            <Input.Search
+            <SearchInput
               placeholder={t('product.paramModel.searchPh')}
               allowClear
               value={keyword}

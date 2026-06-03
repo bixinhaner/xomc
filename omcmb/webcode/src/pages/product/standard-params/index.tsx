@@ -29,6 +29,7 @@ import {
 } from '@core/hooks/api/useParamModels';
 import type { StandardParam, UpsertStandardInput } from '@core/types/paramModel';
 import { makeSeqColumn } from '@/components/Table/seqColumn';
+import SearchInput from '@/components/SearchInput';
 import { useT } from '@/hooks/useT';
 
 export default function StandardParamsPage() {
@@ -119,7 +120,7 @@ export default function StandardParamsPage() {
           }}
         >
           <Space>
-            <Input.Search
+            <SearchInput
               placeholder={t('product.standardParams.searchPh')}
               allowClear
               value={keyword}

@@ -9,6 +9,7 @@ import {
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
+import SearchInput from '@/components/SearchInput';
 import {
   useProvisioningTasks,
   useCreateProvisioningTask,
@@ -210,7 +211,7 @@ export default function AutoProvisioning() {
             setCurrentPage(1);
           }}
         />
-        <Input.Search
+        <SearchInput
           placeholder="Device ID"
           allowClear
           style={{ width: 300 }}

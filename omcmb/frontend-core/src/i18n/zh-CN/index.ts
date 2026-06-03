@@ -3289,7 +3289,7 @@ const messages: Record<string, string> = {
   // Recycle Bin (回收站)
   // -------------------------------------------------------------------------
   'recycle.title':                  '回收站',
-  'recycle.serialNumber':           '小站编码',
+  'recycle.serialNumber':           '基站编码',
   'recycle.macAddress':             'MAC地址',
   'recycle.hostName':               'HostName',
   'recycle.longitude':              '经度',
@@ -3305,7 +3305,7 @@ const messages: Record<string, string> = {
   'recycle.restore':                '移出回收站',
   'recycle.restoreConfirm':         '确认将选中的 {count} 个设备移出回收站？',
   'recycle.deleteConfirm':          '确认删除选中的 {count} 个设备？此操作不可恢复。',
-  'recycle.searchPlaceholder':      '小站编码 / MAC地址',
+  'recycle.searchPlaceholder':      '基站编码 / MAC地址',
   'recycle.importConfirm':          '确认批量导入设备到回收站？',
   'recycle.importTips':             '导入说明',
   'recycle.importFormatTip':        '仅支持 CSV 格式文件',

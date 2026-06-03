@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
-import { Card, Table, Tag, Input, Empty } from 'antd';
+import { Card, Table, Tag, Empty } from 'antd';
 import { useOrphanDevices } from '@core/hooks/api/useProducts';
 import type { OrphanDevice } from '@core/types/product';
 import { makeSeqColumn } from '@/components/Table/seqColumn';
+import SearchInput from '@/components/SearchInput';
 import { useT } from '@/hooks/useT';
 
 export default function OrphanDevicesPage() {
@@ -45,7 +46,7 @@ export default function OrphanDevicesPage() {
     <div style={{ padding: 16 }}>
       <Card size="small">
         <div style={{ marginBottom: 12 }}>
-          <Input.Search
+          <SearchInput
             placeholder={t('product.orphan.searchPh')}
             allowClear
             style={{ width: 320 }}
