@@ -6192,7 +6192,6 @@ const messages: Record<string, string> = {
   'perf.adhoc.colName':                  'Name',
   'perf.adhoc.colMode':                  'Mode',
   'perf.adhoc.colProgress':              'Progress',
-  'perf.adhoc.colDeviceCount':           'Device Count',
   'perf.adhoc.colCreatedAt':             'Created At',
   'perf.adhoc.colOperation':             'Action',
   'perf.adhoc.btnViewDetail':            'View Detail',

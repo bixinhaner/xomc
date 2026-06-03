@@ -222,8 +222,17 @@ function TaskTable({
             '—'
           ),
       },
-      { title: intl.formatMessage({ id: 'perf.adhoc.colDeviceCount' }), render: (_, r) => r.deviceSns.length, width: 80 },
-      { title: intl.formatMessage({ id: 'perf.adhoc.colCreatedAt' }), dataIndex: 'createdAt', width: 180, render: (v: string) => fmtTime(v) },
+      // 创建时间列仅自建区保留；内置区去掉（内置任务创建时间无意义）。设备数列两区都去。
+      ...(isBuiltinArea
+        ? []
+        : [
+            {
+              title: intl.formatMessage({ id: 'perf.adhoc.colCreatedAt' }),
+              dataIndex: 'createdAt',
+              width: 180,
+              render: (v: string) => fmtTime(v),
+            } as ColumnsType<AdhocTask>[number],
+          ]),
       {
         title: intl.formatMessage({ id: 'perf.adhoc.colOperation' }),
         width: 230,

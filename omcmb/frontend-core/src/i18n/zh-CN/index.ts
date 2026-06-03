@@ -6217,7 +6217,6 @@ const messages: Record<string, string> = {
   'perf.adhoc.colName':                  '名称',
   'perf.adhoc.colMode':                  '模式',
   'perf.adhoc.colProgress':              '进度',
-  'perf.adhoc.colDeviceCount':           '设备数',
   'perf.adhoc.colCreatedAt':             '创建时间',
   'perf.adhoc.colOperation':             '操作',
   'perf.adhoc.btnViewDetail':            '查看详情',
