@@ -105,6 +105,12 @@ export default function ProductsPage() {
       render: (v: string) => <Tag>{v.toUpperCase()}</Tag>,
     },
     {
+      title: t('product.products.radioModes'),
+      dataIndex: 'radioModes',
+      width: 110,
+      render: (v?: string) => (v ? <Tag color="cyan">{v}</Tag> : <Text type="secondary">—</Text>),
+    },
+    {
       title: t('product.products.col.indicatorPlatform'),
       dataIndex: 'indicatorPlatform',
       width: 140,
