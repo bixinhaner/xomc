@@ -814,7 +814,7 @@ export default function RoleManagement() {
   }, [selectedRole, hasAnyPermission, isBuiltIn, selectedDeviceGroupIds, allSecondLevelIds, doEditSubmit, message, modal, t]);
 
   const filterFields: FilterField[] = useMemo(() => [
-    { name: 'roleName', label: t('role.roleName'), type: 'input', placeholder: t('role.roleName') },
+    { name: 'roleName', label: t('role.roleName'), type: 'input', placeholder: t('role.roleName'), width: 240 },
   ], [t]);
 
   const columns: DataTableColumn<Role & Record<string, unknown>>[] = useMemo(() => [
@@ -1333,20 +1333,23 @@ export default function RoleManagement() {
   }, [form]);
 
   return (
-    <ListPageLayout
-      title={t('nav.system.roles')}
-      extra={
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateVisible(true)}>
-          {t('common.add')}
-        </Button>
-      }
-    >
-      <FilterBar
-        filterId="role-management-filter"
-        fields={filterFields}
-        onSearch={(vals) => { setFilters(vals); setPage(1); }}
-        onReset={() => { setFilters({}); setPage(1); }}
-      />
+    <ListPageLayout>
+      {/* 2026-06-03 用户决策:去"角色管理"标题;筛选与操作按钮同一行(筛选靠左、按钮靠右)。 */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <FilterBar
+            filterId="role-management-filter"
+            fields={filterFields}
+            onSearch={(vals) => { setFilters(vals); setPage(1); }}
+            onReset={() => { setFilters({}); setPage(1); }}
+          />
+        </div>
+        <Space style={{ flexShrink: 0 }}>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateVisible(true)}>
+            {t('common.add')}
+          </Button>
+        </Space>
+      </div>
       <Card
         size="small"
         bordered
@@ -1364,6 +1367,10 @@ export default function RoleManagement() {
           currentPage={page}
           onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
           onRefresh={() => void refetch()}
+          hideRealtime
+          hideColumnSettings
+          hideDensity
+          hideRefresh
           selectable
           selectedRowKeys={selectedKeys}
           onSelectionChange={(keys) => setSelectedKeys(keys)}

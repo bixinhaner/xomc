@@ -3,9 +3,8 @@ import {
   App,
   Button,
   Card,
-  Radio,
+  Tabs,
   Tag,
-  Space,
   Tooltip,
 } from 'antd';
 import {
@@ -173,9 +172,9 @@ export default function OperationLogPage() {
 
   // 操作日志筛选字段
   const operationFilterFields: FilterField[] = useMemo(() => [
-    { name: 'operator', label: t('log.operator'), type: 'select', options: mockUserOptions },
-    { name: 'operateIp', label: t('log.clientIp'), type: 'input' },
-    { name: 'logName', label: t('log.logName'), type: 'select', options: getOperationLogNameOptions },
+    { name: 'operator', label: t('log.operator'), type: 'select', options: mockUserOptions, width: 160 },
+    { name: 'operateIp', label: t('log.clientIp'), type: 'input', width: 160 },
+    { name: 'logName', label: t('log.logName'), type: 'select', options: getOperationLogNameOptions, width: 160 },
     {
       name: 'result',
       label: t('log.result'),
@@ -184,17 +183,18 @@ export default function OperationLogPage() {
         { label: t('log.success'), value: '1' },
         { label: t('log.failure'), value: '0' },
       ],
+      width: 160,
     },
-    { name: 'reason', label: t('log.reason'), type: 'input' },
-    { name: 'timeRange', label: t('log.timeRange'), type: 'date-range', span: 2 },
+    { name: 'reason', label: t('log.reason'), type: 'input', width: 160 },
+    { name: 'timeRange', label: t('log.timeRange'), type: 'date-range', width: 260 },
   ], [t, mockUserOptions, getOperationLogNameOptions]);
 
   // 安全日志筛选字段
   const securityFilterFields: FilterField[] = useMemo(() => [
-    { name: 'id', label: 'ID', type: 'input' },
-    { name: 'operator', label: t('log.operator'), type: 'select', options: mockUserOptions },
-    { name: 'operateIp', label: t('log.clientIp'), type: 'input' },
-    { name: 'logName', label: t('log.logName'), type: 'select', options: getSecurityLogNameOptions },
+    { name: 'id', label: 'ID', type: 'input', width: 160 },
+    { name: 'operator', label: t('log.operator'), type: 'select', options: mockUserOptions, width: 160 },
+    { name: 'operateIp', label: t('log.clientIp'), type: 'input', width: 160 },
+    { name: 'logName', label: t('log.logName'), type: 'select', options: getSecurityLogNameOptions, width: 160 },
     {
       name: 'result',
       label: t('log.result'),
@@ -203,14 +203,15 @@ export default function OperationLogPage() {
         { label: t('log.success'), value: '1' },
         { label: t('log.failure'), value: '0' },
       ],
+      width: 160,
     },
-    { name: 'timeRange', label: t('log.timeRange'), type: 'date-range', span: 2 },
+    { name: 'timeRange', label: t('log.timeRange'), type: 'date-range', width: 260 },
   ], [t, mockUserOptions, getSecurityLogNameOptions]);
 
   // 系统日志筛选字段
   const systemFilterFields: FilterField[] = useMemo(() => [
-    { name: 'id', label: 'ID', type: 'input' },
-    { name: 'logName', label: t('log.logName'), type: 'select', options: getSystemLogNameOptions },
+    { name: 'id', label: 'ID', type: 'input', width: 160 },
+    { name: 'logName', label: t('log.logName'), type: 'select', options: getSystemLogNameOptions, width: 160 },
     {
       name: 'result',
       label: t('log.result'),
@@ -219,16 +220,17 @@ export default function OperationLogPage() {
         { label: t('log.success'), value: '1' },
         { label: t('log.failure'), value: '0' },
       ],
+      width: 160,
     },
-    { name: 'timeRange', label: t('log.timeRange'), type: 'date-range', span: 2 },
+    { name: 'timeRange', label: t('log.timeRange'), type: 'date-range', width: 260 },
   ], [t, getSystemLogNameOptions]);
 
   // 北向接口日志筛选字段
   const northboundFilterFields: FilterField[] = useMemo(() => [
-    { name: 'ipAddress', label: t('log.ipAddress'), type: 'input' },
-    { name: 'name', label: t('log.name'), type: 'input' },
-    { name: 'type', label: t('log.type'), type: 'select', options: getNorthboundTypeOptions },
-    { name: 'timeRange', label: t('log.timeRange'), type: 'date-range', span: 2 },
+    { name: 'ipAddress', label: t('log.ipAddress'), type: 'input', width: 160 },
+    { name: 'name', label: t('log.name'), type: 'input', width: 160 },
+    { name: 'type', label: t('log.type'), type: 'select', options: getNorthboundTypeOptions, width: 160 },
+    { name: 'timeRange', label: t('log.timeRange'), type: 'date-range', width: 260 },
   ], [t, getNorthboundTypeOptions]);
 
   // 根据当前 tab 获取筛选字段
@@ -361,21 +363,26 @@ export default function OperationLogPage() {
   }, [activeTab, operationColumns, t, northboundTypeTextMap]);
 
   return (
-    <ListPageLayout title={t('log.operationLog')}>
-      {/* Tab 页签 + 工具栏 */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Radio.Group
-          value={activeTab}
-          onChange={(e) => handleTabChange(e.target.value)}
-          optionType="button"
-          buttonStyle="solid"
-        >
-          <Radio.Button value="operation">{t('log.operationLog')}</Radio.Button>
-          <Radio.Button value="security">{t('log.securityLog')}</Radio.Button>
-          <Radio.Button value="system">{t('log.systemLog')}</Radio.Button>
-          <Radio.Button value="northbound">{t('log.northboundLog')}</Radio.Button>
-        </Radio.Group>
-        <Space>
+    <ListPageLayout>
+      {/* 四类日志改为标签页(Tabs) */}
+      <Tabs
+        activeKey={activeTab}
+        onChange={handleTabChange}
+        items={[
+          { key: 'operation', label: t('log.operationLog') },
+          { key: 'security', label: t('log.securityLog') },
+          { key: 'system', label: t('log.systemLog') },
+          { key: 'northbound', label: t('log.northboundLog') },
+        ]}
+      />
+
+      <FilterBar
+        filterId={`${activeTab}-log-filter`}
+        fields={getFilterFields()}
+        onSearch={handleSearch}
+        onReset={handleReset}
+        collapsedRows={1}
+        extra={
           <Button
             type="primary"
             icon={<DownloadOutlined />}
@@ -384,15 +391,7 @@ export default function OperationLogPage() {
           >
             {t('common.export')}
           </Button>
-        </Space>
-      </div>
-
-      <FilterBar
-        filterId={`${activeTab}-log-filter`}
-        fields={getFilterFields()}
-        onSearch={handleSearch}
-        onReset={handleReset}
-        collapsedRows={1}
+        }
       />
 
       {/* 日志列表 */}
@@ -413,6 +412,10 @@ export default function OperationLogPage() {
           currentPage={page}
           onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
           onRefresh={() => void refetch()}
+          hideRealtime
+          hideColumnSettings
+          hideDensity
+          hideRefresh
           scroll={{ x: 1400, y: 'calc(100vh - 420px)' }}
         />
       </Card>

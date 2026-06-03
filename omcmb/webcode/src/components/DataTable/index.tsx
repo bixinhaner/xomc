@@ -73,6 +73,7 @@ export interface DataTableProps<T> {
   hideRealtime?: boolean;
   hideColumnSettings?: boolean;
   hideDensity?: boolean;
+  hideRefresh?: boolean;
   scroll?: { x?: number | string; y?: number | string };
   size?: 'small' | 'middle' | 'large';
   showPagination?: boolean;
@@ -132,6 +133,7 @@ function DataTable<T>(
     hideRealtime = false,
     hideColumnSettings = false,
     hideDensity = false,
+    hideRefresh = false,
     scroll,
     size,
     showPagination = true,
@@ -458,6 +460,7 @@ function DataTable<T>(
           hideRealtime={hideRealtime}
           hideColumnSettings={hideColumnSettings}
           hideDensity={hideDensity}
+          hideRefresh={hideRefresh}
         />
       )}
 

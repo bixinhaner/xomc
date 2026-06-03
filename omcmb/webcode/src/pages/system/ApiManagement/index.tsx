@@ -108,12 +108,14 @@ export default function ApiManagement() {
       label: t('api.path'),
       type: 'input',
       placeholder: t('api.pathPlaceholder'),
+      width: 240,
     },
     {
       name: 'name',
       label: t('api.name'),
       type: 'input',
       placeholder: t('api.namePlaceholder'),
+      width: 240,
     },
     {
       name: 'apiGroup',
@@ -121,6 +123,7 @@ export default function ApiManagement() {
       type: 'select',
       placeholder: t('common.pleaseSelect'),
       options: apiGroups.map((g) => ({ label: g, value: g })),
+      width: 180,
     },
     {
       name: 'method',
@@ -128,6 +131,7 @@ export default function ApiManagement() {
       type: 'select',
       placeholder: t('common.pleaseSelect'),
       options: HTTP_METHODS.map((m) => ({ label: m, value: m })),
+      width: 180,
     },
   ];
 
@@ -340,18 +344,24 @@ export default function ApiManagement() {
 
   return (
     <ListPageLayout>
-      <FilterBar
-        filterId="api-management"
-        fields={filterFields}
-        onSearch={(vals) => {
-          setFilters(vals);
-          setPage(1);
-        }}
-        onReset={() => {
-          setFilters({});
-          setPage(1);
-        }}
-      />
+      {/* 2026-06-03 用户决策:筛选与操作按钮(新增/批量删除/同步)同一行,筛选靠左、按钮靠右。 */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <FilterBar
+            filterId="api-management"
+            fields={filterFields}
+            onSearch={(vals) => {
+              setFilters(vals);
+              setPage(1);
+            }}
+            onReset={() => {
+              setFilters({});
+              setPage(1);
+            }}
+          />
+        </div>
+        <div style={{ flexShrink: 0 }}>{toolbar}</div>
+      </div>
 
       <Card
         size="small"
@@ -366,7 +376,9 @@ export default function ApiManagement() {
           loading={isLoading}
           rowKey="id"
           selectable
-          extraToolbarLeft={toolbar}
+          hideRealtime
+          hideColumnSettings
+          hideDensity
           total={data?.total ?? 0}
           currentPage={page}
           pageSize={pageSize}

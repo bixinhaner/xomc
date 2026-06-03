@@ -226,7 +226,7 @@ export default function SystemConfig() {
   }));
 
   return (
-    <ListPageLayout title={t('nav.system.config')}>
+    <ListPageLayout>
       {/* 页签切换 - 放在 Card 外部 */}
       <Tabs
         activeKey={activeTab}

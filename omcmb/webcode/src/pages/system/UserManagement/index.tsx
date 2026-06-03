@@ -379,7 +379,7 @@ export default function UserManagement() {
   };
 
   const filterFields: FilterField[] = useMemo(() => [
-    { name: 'userName', label: t('user.userName'), type: 'input', placeholder: t('user.userName') },
+    { name: 'userName', label: t('user.userName'), type: 'input', placeholder: t('user.userName'), width: 240 },
   ], [t]);
 
   const columns: DataTableColumn<User & Record<string, unknown>>[] = useMemo(() => [
@@ -662,25 +662,27 @@ export default function UserManagement() {
   ], [t, form, isBuiltIn, handleDelete, handleCopy, forceLogout, updateUser, modal, message, renderOperator]);
 
   return (
-    <ListPageLayout
-      title={t('nav.system.users')}
-      extra={
-        <>
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreateDrawer} style={{ marginRight: 8 }}>
+    <ListPageLayout>
+      {/* 2026-06-03 用户决策:去"用户管理"标题;筛选条件与操作按钮(新增/导出)同一行,
+          筛选靠左、按钮两端对齐推到最右(与产品中心/回收站范式一致)。 */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <FilterBar
+            filterId="user-management-filter"
+            fields={filterFields}
+            onSearch={(vals) => { setFilters(vals); setPage(1); }}
+            onReset={() => { setFilters({}); setPage(1); }}
+          />
+        </div>
+        <Space style={{ flexShrink: 0 }}>
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreateDrawer}>
             {t('common.add')}
           </Button>
-          <Button icon={<ExportOutlined />} style={{ marginRight: 8 }}>
+          <Button icon={<ExportOutlined />}>
             {t('common.export')}
           </Button>
-        </>
-      }
-    >
-      <FilterBar
-        filterId="user-management-filter"
-        fields={filterFields}
-        onSearch={(vals) => { setFilters(vals); setPage(1); }}
-        onReset={() => { setFilters({}); setPage(1); }}
-      />
+        </Space>
+      </div>
       <Card
         size="small"
         bordered

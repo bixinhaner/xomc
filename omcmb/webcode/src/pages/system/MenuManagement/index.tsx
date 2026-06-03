@@ -636,7 +636,6 @@ export default function MenuManagement() {
 
   return (
     <ListPageLayout
-      title={t('menu.modal.title')}
       extra={
         <Space>
           <span style={{ color: 'var(--color-text-secondary)' }}>{t('menu.showIcon')}</span>
@@ -673,6 +672,7 @@ export default function MenuManagement() {
           hideRealtime
           hideColumnSettings
           hideDensity
+          hideRefresh
         />
       </Card>
 

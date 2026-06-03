@@ -49,6 +49,8 @@ interface ToolbarProps {
   hideRealtime?: boolean;
   hideColumnSettings?: boolean;
   hideDensity?: boolean;
+  // 2026-06-03:细粒度隐藏"刷新"按钮(与上面三个同范式)。某些页面不需要手动刷新入口。
+  hideRefresh?: boolean;
 }
 
 const Toolbar: React.FC<ToolbarProps> = ({
@@ -69,6 +71,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
   hideRealtime = false,
   hideColumnSettings = false,
   hideDensity = false,
+  hideRefresh = false,
 }) => {
   const t = useT();
   const hasSelection = selectedRowKeys.length > 0;
@@ -131,7 +134,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
         )}
         {!hideDensity && <DensityToggle density={density} onChange={onDensityChange} />}
         {onExport && <ExportButton onExport={onExport} />}
-        {onRefresh && (
+        {!hideRefresh && onRefresh && (
           <Tooltip title={t('common.refresh')}>
             <Button
               icon={<ReloadOutlined />}

@@ -160,7 +160,7 @@ export default function GroupManagement() {
   }, [data?.items, isBuiltIn, t, deleteGroups, modal, message]);
 
   const filterFields: FilterField[] = useMemo(() => [
-    { name: 'groupName', label: t('group.groupName'), type: 'input', placeholder: t('group.groupName') },
+    { name: 'groupName', label: t('group.groupName'), type: 'input', placeholder: t('group.groupName'), width: 240 },
   ], [t]);
 
   const columns: DataTableColumn<Group & Record<string, unknown>>[] = useMemo(() => [
@@ -246,20 +246,23 @@ export default function GroupManagement() {
   ], [t, form, isBuiltIn, handleDelete]);
 
   return (
-    <ListPageLayout
-      title={t('nav.system.groups')}
-      extra={
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateVisible(true)}>
-          {t('common.add')}
-        </Button>
-      }
-    >
-      <FilterBar
-        filterId="group-management-filter"
-        fields={filterFields}
-        onSearch={(vals) => { setFilters(vals); setPage(1); }}
-        onReset={() => { setFilters({}); setPage(1); }}
-      />
+    <ListPageLayout>
+      {/* 2026-06-03 用户决策:去"用户组"标题;筛选与操作按钮同一行(筛选靠左、按钮靠右)。 */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <FilterBar
+            filterId="group-management-filter"
+            fields={filterFields}
+            onSearch={(vals) => { setFilters(vals); setPage(1); }}
+            onReset={() => { setFilters({}); setPage(1); }}
+          />
+        </div>
+        <Space style={{ flexShrink: 0 }}>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateVisible(true)}>
+            {t('common.add')}
+          </Button>
+        </Space>
+      </div>
       <DataTable
         tableId="group-management-list"
         columns={columns}
