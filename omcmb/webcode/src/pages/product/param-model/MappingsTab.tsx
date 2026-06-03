@@ -60,36 +60,38 @@ function countPlaceholder(p: string): number {
 
 export default function MappingsTab({ selectedName, onBack }: Props) {
   const t = useT();
-  const STORABLE_OPTIONS = [
-    { label: t('common.all'), value: 'all' },
-    { label: t('product.paramModel.mappings.filterStorable'), value: 'true' },
-    { label: t('product.paramModel.mappings.filterNotStorable'), value: 'false' },
-  ];
   const { data, isLoading } = useParamMappings(selectedName);
   const createMut = useCreateMapping();
   const updateMut = useUpdateMapping();
   const deleteMut = useDeleteMapping();
 
-  const [storableFilter, setStorableFilter] = useState<'all' | 'true' | 'false'>('all');
+  // 条目类型筛选(对齐 standard-params 页面):'' = 全部
+  const [entryFilter, setEntryFilter] = useState('');
   const [keyword, setKeyword] = useState('');
   const [editing, setEditing] = useState<ParamMapping | null>(null);
   const [creating, setCreating] = useState(false);
   const [form] = Form.useForm<CreateMappingInput | UpdateMappingInput>();
 
+  // 条目类型下拉(对齐 standard-params 的 ENTRY_OPTIONS:全部 / parameter / object)
+  const ENTRY_FILTER_OPTIONS = [
+    { label: t('common.all'), value: '' },
+    { label: 'parameter', value: 'parameter' },
+    { label: 'object', value: 'object' },
+  ];
+
   const filtered = useMemo(() => {
     let list = data?.items || [];
-    if (storableFilter === 'true') list = list.filter((m) => m.isStorable);
-    if (storableFilter === 'false') list = list.filter((m) => !m.isStorable);
+    if (entryFilter) list = list.filter((m) => m.entryType === entryFilter);
     if (keyword.trim()) {
       const k = keyword.trim().toLowerCase();
       list = list.filter((m) => (m.standardPath + ' ' + m.privatePath).toLowerCase().includes(k));
     }
     return list;
-  }, [data, storableFilter, keyword]);
+  }, [data, entryFilter, keyword]);
 
   const columns = [
     {
-      title: 'standard_path',
+      title: t('product.paramModel.mappings.col.standardPath'),
       dataIndex: 'standardPath',
       ellipsis: true,
       render: (v: string, row: ParamMapping) => {
@@ -108,17 +110,17 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
         );
       },
     },
-    { title: 'private_path', dataIndex: 'privatePath', ellipsis: true },
-    { title: 'entry', dataIndex: 'entryType', width: 90 },
-    { title: 'access', dataIndex: 'access', width: 100 },
-    { title: 'data_type', dataIndex: 'dataType', width: 100 },
+    { title: t('product.paramModel.mappings.col.privatePath'), dataIndex: 'privatePath', ellipsis: true },
+    { title: t('product.paramModel.mappings.col.entryType'), dataIndex: 'entryType', width: 90 },
+    { title: t('product.paramModel.mappings.col.access'), dataIndex: 'access', width: 100 },
+    { title: t('product.paramModel.mappings.col.dataType'), dataIndex: 'dataType', width: 100 },
     {
-      title: 'storable',
+      title: t('product.paramModel.mappings.col.storable'),
       dataIndex: 'isStorable',
       width: 90,
       render: (v: boolean) => (v ? <Tag color="success">{t('common.yes')}</Tag> : <Tag>{t('common.no')}</Tag>),
     },
-    { title: 'sw', dataIndex: 'softwareVersion', width: 80 },
+    { title: t('product.paramModel.mappings.col.swVersion'), dataIndex: 'softwareVersion', width: 80 },
     {
       title: t('common.action'),
       width: 120,
@@ -215,10 +217,10 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
             style={{ width: 220 }}
           />
           <Select
-            value={storableFilter}
-            onChange={(v) => setStorableFilter(v)}
-            options={STORABLE_OPTIONS}
-            style={{ width: 130 }}
+            value={entryFilter}
+            onChange={(v) => setEntryFilter(v)}
+            options={ENTRY_FILTER_OPTIONS}
+            style={{ width: 120 }}
           />
           <Button
             type="primary"
