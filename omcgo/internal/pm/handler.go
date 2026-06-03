@@ -303,7 +303,17 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 	if c.Query("fill_empty") == "true" {
 		rows = fillEmptyBuckets(rows, req)
 	}
-	response.OK(c, gin.H{"items": rows, "total": len(rows)})
+	// 真实总数：跑一次同过滤的 COUNT，让 total 反映命中真实总数而非本页返回行数
+	// （T-0194 截断诚实提示）。命中 limit 时 total>len(rows)，前端据此提示「已截断」。
+	// 仅在指定了 limit 时才多跑一次（无 limit = 全量返回，total 即 len 无需 COUNT）；
+	// COUNT 失败不阻断结果返回，退回本页行数兜底。
+	total := len(rows)
+	if req.Limit > 0 {
+		if n, err := h.aggr.Count(c.Request.Context(), req); err == nil {
+			total = n
+		}
+	}
+	response.OK(c, gin.H{"items": rows, "total": total})
 }
 
 // fillEmptyBuckets 数据驱动补齐占位行（T-0192d）。

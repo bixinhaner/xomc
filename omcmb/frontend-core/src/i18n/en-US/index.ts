@@ -6147,6 +6147,7 @@ const messages: Record<string, string> = {
   'perf.dashboard.emptyPickConditions':  'Select technology / device / metric, then click "Plot"',
   'perf.dashboard.emptyNoDataForCondition':'No data under the selected conditions',
   'perf.dashboard.deviceListSummary':    'Device list plot',
+  'perf.dashboard.truncatedTip':         'Results truncated: showing latest {shown} of {total} rows. Narrow the time range or reduce metrics.',
   'perf.dashboard.deviceUnit':           '{count} devices',
 
   // -------------------------------------------------------------------------
@@ -6320,6 +6321,7 @@ const messages: Record<string, string> = {
   'perf.adhoc.colStartTime':             'Start Time',
   'perf.adhoc.colEndTime':               'End Time',
   'perf.adhoc.resultSummary':            '{deviceCount} devices × {metricCount} metrics × {granCount} granularities',
+  'perf.adhoc.truncatedTip':             'Results truncated: showing latest {shown} of {total} rows. Narrow the time range or reduce metrics.',
   'perf.adhoc.exportExcel':              'Export Excel',
   'perf.adhoc.noGranInfo':               'Task has no granularity info',
   'perf.adhoc.emptyGranNoData':          'No data at {gran} granularity',

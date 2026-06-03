@@ -132,3 +132,52 @@ func Test_buildResultsQuery_CombinedFilters(t *testing.T) {
 	// 确保子句顺序：device_sn 先于 time
 	assert.True(t, strings.Index(q, "AND r.device_sn") < strings.Index(q, "AND r.time >="))
 }
+
+// ── buildResultsCountQuery（T-0194 截断诚实提示）───────────────────────────────
+
+// COUNT 查询：SELECT COUNT(*)，无 ORDER BY / LIMIT / OFFSET / LEFT JOIN，只保留同 WHERE。
+func Test_buildResultsCountQuery_BareTaskID(t *testing.T) {
+	id := uuid.New()
+	q, args := buildResultsCountQuery(id, resultsFilter{})
+
+	assert.Contains(t, q, "SELECT COUNT(*)")
+	assert.Contains(t, q, "WHERE r.task_id = $1")
+	assert.NotContains(t, q, "ORDER BY")
+	assert.NotContains(t, q, "LIMIT")
+	assert.NotContains(t, q, "OFFSET")
+	assert.NotContains(t, q, "LEFT JOIN")
+	assert.Equal(t, []any{id}, args)
+}
+
+// COUNT 与 buildResultsQuery 用同一套 WHERE：同样的过滤项产出同样的谓词与占位顺序（去分页）。
+func Test_buildResultsCountQuery_SameWhereAsData(t *testing.T) {
+	id := uuid.New()
+	f := resultsFilter{
+		DeviceSN:    "SN-1",
+		MetricPath:  "K1001",
+		Granularity: "hourly",
+		StartTime:   "2026-05-20T00:00:00Z",
+		EndTime:     "2026-05-21T00:00:00Z",
+		ObjectLDNs:  []string{"Cellid=1,PLMN=46000"},
+	}
+	q, args := buildResultsCountQuery(id, f)
+
+	assert.Contains(t, q, "AND r.device_sn = $2")
+	assert.Contains(t, q, "AND r.metric_path = $3")
+	assert.Contains(t, q, "AND r.granularity = $4")
+	assert.Contains(t, q, "AND r.time >= $5")
+	assert.Contains(t, q, "AND r.time <= $6")
+	assert.Contains(t, q, "AND r.object_ldn = ANY($7)")
+	// args = [taskID, SN, metricPath, granularity, start, end, ldns]，无 limit/offset 尾巴
+	assert.Len(t, args, 7)
+	assert.Equal(t, id, args[0])
+	assert.Equal(t, "SN-1", args[1])
+}
+
+// 非法时间值与数据查询一致地被忽略（容错，不进 WHERE）。
+func Test_buildResultsCountQuery_InvalidTimeIgnored(t *testing.T) {
+	id := uuid.New()
+	q, args := buildResultsCountQuery(id, resultsFilter{StartTime: "not-a-time"})
+	assert.NotContains(t, q, "AND r.time >=")
+	assert.Equal(t, []any{id}, args)
+}

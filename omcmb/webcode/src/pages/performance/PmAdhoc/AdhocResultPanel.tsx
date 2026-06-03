@@ -111,7 +111,11 @@ function buildAdhocColumns(intl: IntlShape, taskDeviceSns: string[]): AdhocCol[]
 export function AdhocResultPanel({ taskId, embedded = false }: Props) {
   const intl = useIntl();
   const taskQuery = usePmAdhocDetail(taskId);
-  const { data: rows = [], isLoading: rowsLoading } = usePmAdhocResults(taskId);
+  const { data: resultsResp, isLoading: rowsLoading } = usePmAdhocResults(taskId);
+  const rows = resultsResp?.rows ?? [];
+  const totalRows = resultsResp?.total ?? rows.length;
+  // T-0194：真实总数 > 返回行数 = 被 limit 截断，给诚实提示。
+  const truncated = totalRows > rows.length;
 
   const granularities = useMemo(() => taskQuery.data?.granularities ?? [], [taskQuery.data?.granularities]);
   const [activeGran, setActiveGran] = useState<string | undefined>(undefined);
@@ -197,11 +201,25 @@ export function AdhocResultPanel({ taskId, embedded = false }: Props) {
       />
     );
 
+  // T-0194：截断诚实提示——返回行数 < 真实总数时显示，提示缩小范围。
+  const truncationAlert = truncated ? (
+    <Alert
+      type="warning"
+      showIcon
+      style={{ marginBottom: 8 }}
+      message={intl.formatMessage(
+        { id: 'perf.adhoc.truncatedTip' },
+        { shown: rows.length, total: totalRows },
+      )}
+    />
+  ) : null;
+
   // 嵌入仪表盘 Panel：外层卡片由 Panel 提供，这里不再套 Card
   if (embedded) {
     return (
       <div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>{summary}</div>
+        {truncationAlert}
         {body}
       </div>
     );
@@ -225,6 +243,7 @@ export function AdhocResultPanel({ taskId, embedded = false }: Props) {
       }
       extra={summary}
     >
+      {truncationAlert}
       {body}
     </Card>
   );

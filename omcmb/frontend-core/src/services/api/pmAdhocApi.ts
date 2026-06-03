@@ -99,7 +99,7 @@ export const pmAdhocApi = {
     offset = 0,
     startTime?: string,
     endTime?: string,
-  ): Promise<AdhocResultRow[]> {
+  ): Promise<{ rows: AdhocResultRow[]; total: number }> {
     // 大时间段（页签1 仪表盘）：startTime/endTime 为 RFC3339，透传为 start_time/end_time query 参数。
     const params: Record<string, unknown> = { limit, offset };
     if (startTime) params.start_time = startTime;
@@ -107,7 +107,9 @@ export const pmAdhocApi = {
     const { data } = await http.get<ResultsResponse>(`/pm/adhoc/tasks/${id}/results`, {
       params,
     });
-    return (data.items ?? []).map(mapBackendAdhocResult);
+    const rows = (data.items ?? []).map(mapBackendAdhocResult);
+    // T-0194：total 是后端真实 COUNT(*)，rows.length<total 即被 limit 截断（前端据此提示）。
+    return { rows, total: data.total ?? rows.length };
   },
   async runs(id: string, limit = 50, offset = 0): Promise<AdhocTaskRun[]> {
     const { data } = await http.get<RunsResponse>(`/pm/adhoc/tasks/${id}/runs`, {
@@ -197,7 +199,7 @@ export const pmAdhocMock: typeof pmAdhocApi = {
     if (t) t.status = 'canceled';
   },
   async results() {
-    return [];
+    return { rows: [], total: 0 };
   },
   async runs(id: string) {
     // 简化 mock：返回两条运行记录（一成一败）便于 UI 调试

@@ -6172,6 +6172,7 @@ const messages: Record<string, string> = {
   'perf.dashboard.emptyPickConditions':  '选择制式 / 设备 / 指标后点「出图」',
   'perf.dashboard.emptyNoDataForCondition':'所选条件下暂无数据',
   'perf.dashboard.deviceListSummary':    '设备列表出图',
+  'perf.dashboard.truncatedTip':         '结果已截断：仅显示最新 {shown} / 共 {total} 行，请缩小时间范围或减少指标数',
   'perf.dashboard.deviceUnit':           '{count} 设备',
 
   // -------------------------------------------------------------------------
@@ -6345,6 +6346,7 @@ const messages: Record<string, string> = {
   'perf.adhoc.colStartTime':             '开始时间',
   'perf.adhoc.colEndTime':               '结束时间',
   'perf.adhoc.resultSummary':            '{deviceCount} 设备 × {metricCount} 指标 × {granCount} 粒度',
+  'perf.adhoc.truncatedTip':             '结果已截断：仅显示最新 {shown} / 共 {total} 行，请缩小时间范围或减少指标数',
   'perf.adhoc.exportExcel':              '导出 Excel',
   'perf.adhoc.noGranInfo':               '任务无粒度信息',
   'perf.adhoc.emptyGranNoData':          '{gran} 粒度暂无数据',

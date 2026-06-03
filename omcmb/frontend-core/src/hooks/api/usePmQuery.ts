@@ -80,9 +80,14 @@ export function useAggregatedMetricsByDevices(
   const isFetching = queries.some((q) => q.isFetching);
   const isError = queries.some((q) => q.isError);
   const errors = queries.map((q) => q.error).filter(Boolean);
-  const data: AggregatedRow[] = queries.flatMap((q) => q.data ?? []);
+  const data: AggregatedRow[] = queries.flatMap((q) => q.data?.rows ?? []);
+  // T-0194：跨设备汇总真实总数；任一设备查询命中 limit（返回行数 < 该设备真实总数）即判截断。
+  const total: number = queries.reduce((sum, q) => sum + (q.data?.total ?? 0), 0);
+  const truncated = queries.some(
+    (q) => q.data != null && q.data.total > q.data.rows.length,
+  );
   const refetch = () => queries.forEach((q) => void q.refetch());
-  return { data, isLoading, isFetching, isError, errors, refetch };
+  return { data, total, truncated, isLoading, isFetching, isError, errors, refetch };
 }
 
 /**

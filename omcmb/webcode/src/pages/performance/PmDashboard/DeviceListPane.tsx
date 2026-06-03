@@ -19,6 +19,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useIntl } from 'react-intl';
 import {
+  Alert,
   App,
   Button,
   Card,
@@ -162,6 +163,8 @@ export default function DeviceListPane() {
 
   const {
     data: rawRows = [],
+    total: rawTotal,
+    truncated,
     isLoading,
     isFetching,
     errors,
@@ -412,6 +415,17 @@ export default function DeviceListPane() {
         </Card>
       ) : (
         <>
+          {truncated ? (
+            <Alert
+              type="warning"
+              showIcon
+              style={{ marginBottom: 12 }}
+              message={intl.formatMessage(
+                { id: 'perf.dashboard.truncatedTip' },
+                { shown: rawRows.length, total: rawTotal },
+              )}
+            />
+          ) : null}
           <Card size="small" style={{ marginBottom: 12 }}>
             <Space size={8} wrap>
               <Typography.Text strong>

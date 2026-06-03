@@ -180,7 +180,9 @@ export const pmDashboardApi = {
   },
 
   // G6 Phase 4: 走 G5 aggregator → 按粒度路由聚合表（hourly+ 直查物化表，15min 退回 pm_metrics 原表）。
-  async queryAggregated(params: AggregatedQueryParams): Promise<AggregatedRow[]> {
+  async queryAggregated(
+    params: AggregatedQueryParams,
+  ): Promise<{ rows: AggregatedRow[]; total: number }> {
     // metricPaths 后端期望 comma-separated；其它 snake_case 参数手工拼，避免被 http 拦截器误转。
     const qp: Record<string, string | number | undefined> = {
       granularity: params.granularity,
@@ -202,7 +204,9 @@ export const pmDashboardApi = {
       '/pm/metrics/aggregated',
       { params: qp },
     );
-    return (data.items ?? []).map(mapBackendAggregatedRow);
+    const rows = (data.items ?? []).map(mapBackendAggregatedRow);
+    // T-0194：total 是后端真实 COUNT（命中 limit 时 > rows.length），前端据此提示截断。
+    return { rows, total: data.total ?? rows.length };
   },
 };
 
@@ -344,7 +348,7 @@ export const pmDashboardMock: typeof pmDashboardApi = {
   },
 
   // Mock：每个 metric 拉出 deterministic 序列。粒度按入参 8 桶。
-  async queryAggregated(params): Promise<AggregatedRow[]> {
+  async queryAggregated(params): Promise<{ rows: AggregatedRow[]; total: number }> {
     const buckets = mockBuckets(params.granularity);
     const paths = params.metricPaths && params.metricPaths.length > 0
       ? params.metricPaths
@@ -370,7 +374,7 @@ export const pmDashboardMock: typeof pmDashboardApi = {
         });
       });
     });
-    return out;
+    return { rows: out, total: out.length };
   },
 };
 

@@ -119,6 +119,85 @@ func (a *Aggregator) Query(ctx context.Context, q QueryRequest) ([]Row, error) {
 	return rows, nil
 }
 
+// Count 返回与 Query 同过滤条件下命中行的真实总数（忽略 Limit / Offset），
+// 用于截断诚实提示（T-0194 C2）：handler 拿它和实际返回行数比，命中 limit 时前端提示「已截断」。
+//
+// 各维度的「行」口径与 Query 一致：
+//   - device：直接表行（无聚合），COUNT(*)。
+//   - device_group / aggregate_group / product / band / network：现场 GROUP BY 后的分组数，
+//     故 COUNT(*) FROM (<同 Query 的 GROUP BY 子查询，去 ORDER BY/LIMIT/OFFSET>) sub。
+//
+// KPI recompute 不改变分组身份（只把同 (object,time) 分组的 counter 行重算成 KPI 行），
+// 故总数以「存储层命中分组数」为准，是诚实的「DB 命中多少」。
+func (a *Aggregator) Count(ctx context.Context, q QueryRequest) (int, error) {
+	if q.Dimension == "" {
+		q.Dimension = DimensionDevice
+	}
+	table, err := SelectTable(q.Granularity, q.Dimension)
+	if err != nil {
+		return 0, err
+	}
+	// Count 不分页：清掉 Limit/Offset，避免被带进子查询。
+	q.Limit = 0
+	q.Offset = 0
+
+	switch q.Dimension {
+	case DimensionDevice:
+		qb := storage.Psql.Select("COUNT(*)").From(table)
+		qb = applyDeviceFilters(qb, q)
+		return a.scanCount(ctx, qb)
+	case DimensionDeviceGroup:
+		inner := storage.Psql.Select("1").From(table)
+		inner = applyGroupFilters(inner, q)
+		inner = inner.GroupBy("device_group_id", "metric_path", "granularity", "time")
+		return a.scanCountSub(ctx, inner)
+	case DimensionAggregateGroup:
+		inner := storage.Psql.Select("1").From(table)
+		inner = applyDeviceFilters(inner, q)
+		inner = inner.GroupBy("metric_path", "granularity", "time", "object_ldn")
+		return a.scanCountSub(ctx, inner)
+	case DimensionNetwork:
+		inner := storage.Psql.Select("1").From(table)
+		inner = applyCommonFilters(inner, q)
+		inner = inner.GroupBy("metric_path", "granularity", "time")
+		return a.scanCountSub(ctx, inner)
+	default:
+		// product / band：内部 SQL 是手拼字符串（带 JOIN / CTE），无 squirrel builder 可复用。
+		// 复用各自的 Query 取数再数行数——对窄查询（前端按单设备 1:1 拆分）开销可接受，
+		// 且这些维度本身分组后行数远小于 device 维度，不构成 100K 规模瓶颈。
+		rows, err := a.Query(ctx, q)
+		if err != nil {
+			return 0, err
+		}
+		return len(rows), nil
+	}
+}
+
+func (a *Aggregator) scanCount(ctx context.Context, qb sq.SelectBuilder) (int, error) {
+	sqlStr, args, err := qb.ToSql()
+	if err != nil {
+		return 0, fmt.Errorf("aggregator.Count build: %w", err)
+	}
+	var n int
+	if err := a.db.QueryRow(ctx, sqlStr, args...).Scan(&n); err != nil {
+		return 0, fmt.Errorf("aggregator.Count exec: %w", err)
+	}
+	return n, nil
+}
+
+func (a *Aggregator) scanCountSub(ctx context.Context, inner sq.SelectBuilder) (int, error) {
+	innerSQL, args, err := inner.ToSql()
+	if err != nil {
+		return 0, fmt.Errorf("aggregator.Count build sub: %w", err)
+	}
+	var n int
+	q := "SELECT COUNT(*) FROM (" + innerSQL + ") sub"
+	if err := a.db.QueryRow(ctx, q, args...).Scan(&n); err != nil {
+		return 0, fmt.Errorf("aggregator.Count exec sub: %w", err)
+	}
+	return n, nil
+}
+
 // backfillDisplayNames 给结果行补 DisplayName：
 //   - counter 行：DisplayName = metric_path（本身就是可读名）
 //   - kpi 行：metric_path 是 K 编号，按编号批量查指标库 cn_name 回填

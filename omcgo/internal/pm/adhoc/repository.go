@@ -333,11 +333,82 @@ func (r *PgRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status St
 	return nil
 }
 
+// resultBusinessKey 是结果行的业务唯一键（与 migrations/000018 的唯一索引 8 列一致）。
+// 可空列统一兜空串，对齐索引里的 COALESCE(...,'')，保证「两条空值行」也判同键。
+type resultBusinessKey struct {
+	TaskID      uuid.UUID
+	Granularity string
+	MetricPath  string
+	DeviceOUI   string
+	DeviceSN    string
+	ProductID   string // product_id::text，Nil → ""
+	ObjectLDN   string
+	Time        time.Time
+}
+
+func businessKeyOf(row ResultRow) resultBusinessKey {
+	productID := ""
+	if row.ProductID != uuid.Nil {
+		productID = row.ProductID.String()
+	}
+	ldn := ""
+	if row.ObjectLDN != nil {
+		ldn = *row.ObjectLDN
+	}
+	t := row.Time
+	if t.IsZero() {
+		t = row.EndTime
+	}
+	return resultBusinessKey{
+		TaskID:      row.TaskID,
+		Granularity: row.Granularity,
+		MetricPath:  row.MetricPath,
+		DeviceOUI:   row.DeviceOUI,
+		DeviceSN:    row.DeviceSN,
+		ProductID:   productID,
+		ObjectLDN:   ldn,
+		Time:        t,
+	}
+}
+
+// dedupResultRows 按业务唯一键对入参做同批去重（后者覆盖前者，保留最后一条），
+// 保持首次出现顺序。防止同一次 rows 切片含重复业务键时 ON CONFLICT DO UPDATE 报
+// 「command cannot affect row a second time」。纯函数，便于单测。
+func dedupResultRows(rows []ResultRow) []ResultRow {
+	if len(rows) <= 1 {
+		return rows
+	}
+	idxByKey := make(map[resultBusinessKey]int, len(rows))
+	out := make([]ResultRow, 0, len(rows))
+	for _, row := range rows {
+		key := businessKeyOf(row)
+		if i, ok := idxByKey[key]; ok {
+			out[i] = row // 后者覆盖前者（保留最后一条），位置不变
+			continue
+		}
+		idxByKey[key] = len(out)
+		out = append(out, row)
+	}
+	return out
+}
+
+// onConflictResultsBusiness 是 ON CONFLICT 的冲突目标表达式，必须与
+// migrations/000018 的 uq_pm_adhoc_results_business 索引表达式逐字一致（PG 表达式索引推断要求）。
+// 冲突命中时用 EXCLUDED 覆盖值类列（time 是冲突键不更新）。
+const onConflictResultsBusiness = `ON CONFLICT (task_id, granularity, metric_path, ` +
+	`COALESCE(device_oui, ''), COALESCE(device_sn, ''), ` +
+	`COALESCE(product_id::text, ''), COALESCE(object_ldn, ''), "time") ` +
+	`DO UPDATE SET metric_value = EXCLUDED.metric_value, ` +
+	`metric_type = EXCLUDED.metric_type, statis_type = EXCLUDED.statis_type, ` +
+	`start_time = EXCLUDED.start_time, end_time = EXCLUDED.end_time, extra = EXCLUDED.extra`
+
 // InsertResults 批量写 pm_adhoc_aggregation_results。
+// T-0194：改 ON CONFLICT DO UPDATE（值以最新一次聚合为准），入口按业务键同批去重防重复键报错。
 func (r *PgRepository) InsertResults(ctx context.Context, rows []ResultRow) error {
 	if len(rows) == 0 {
 		return nil
 	}
+	rows = dedupResultRows(rows)
 	ib := storage.Psql.Insert("pm_adhoc_aggregation_results").Columns(
 		"task_id", "device_oui", "device_sn", "product_id", "metric_path", "metric_type", "metric_value",
 		"statis_type", "granularity", "time", "start_time", "end_time", "object_ldn", "extra",
@@ -367,7 +438,7 @@ func (r *PgRepository) InsertResults(ctx context.Context, rows []ResultRow) erro
 			stype, row.Granularity, t, row.StartTime, row.EndTime, ldn, extra,
 		)
 	}
-	q, args, err := ib.ToSql()
+	q, args, err := ib.Suffix(onConflictResultsBusiness).ToSql()
 	if err != nil {
 		return fmt.Errorf("adhoc.InsertResults: build SQL: %w", err)
 	}

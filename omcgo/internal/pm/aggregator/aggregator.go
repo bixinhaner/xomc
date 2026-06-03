@@ -56,6 +56,7 @@ type KPIRouter interface {
 type PgQuerier interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
 // Aggregator 是 G5 聚合主入口；线程安全，可被多 cron runner 共享。

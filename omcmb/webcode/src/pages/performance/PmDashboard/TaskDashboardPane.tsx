@@ -61,13 +61,14 @@ export default function TaskDashboardPane({ taskId }: Props) {
   const [prevStart, prevEnd] = previousWindow(filter.range);
 
   // 大时间段驱动取数（后端按 time 窗口过滤）。仪表盘取较多结果行用于画线。
-  const { data: rawRows = [], isLoading: rowsLoading } = usePmAdhocResults(taskId, {
+  const { data: rowsResp, isLoading: rowsLoading } = usePmAdhocResults(taskId, {
     limit: RESULTS_LIMIT,
     startTime: startISO,
     endTime: endISO,
   });
+  const rawRows = rowsResp?.rows ?? [];
   // 周期对比开关打开时再拉一次上一周期（同任务、上一周期窗口）。
-  const { data: rawPrevRows = [], isLoading: prevLoading } = usePmAdhocResults(
+  const { data: prevResp, isLoading: prevLoading } = usePmAdhocResults(
     filter.compare ? taskId : undefined,
     {
       limit: RESULTS_LIMIT,
@@ -75,6 +76,7 @@ export default function TaskDashboardPane({ taskId }: Props) {
       endTime: prevEnd.toISOString(),
     },
   );
+  const rawPrevRows = prevResp?.rows ?? [];
 
   // 星期/小时段=纯前端在已取行里筛命中点（全选不过滤），当前与上一周期套同口径。
   const weekdaySet = useMemo(() => new Set(filter.weekdays), [filter.weekdays]);

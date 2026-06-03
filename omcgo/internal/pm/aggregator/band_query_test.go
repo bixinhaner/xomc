@@ -16,14 +16,27 @@ import (
 
 // recordingDB 记录每次 Query 的 SQL/args，并按调用序返回预置结果。
 type recordingDB struct {
-	sqls    []string
-	argsLog [][]any
-	results []pgx.Rows // 按调用序返回
-	errs    []error
+	sqls       []string
+	argsLog    [][]any
+	results    []pgx.Rows // 按调用序返回
+	errs       []error
+	rowResults []int // QueryRow 按调用序返回的 count
 }
 
 func (r *recordingDB) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
 	return pgconn.NewCommandTag(""), nil
+}
+
+// QueryRow 记录 SQL/args 并返回预置 count（rowResults 按调用序，缺省 0）。
+func (r *recordingDB) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	idx := len(r.sqls)
+	r.sqls = append(r.sqls, sql)
+	r.argsLog = append(r.argsLog, args)
+	n := 0
+	if idx < len(r.rowResults) {
+		n = r.rowResults[idx]
+	}
+	return countRow{n: n, sql: sql, args: args}
 }
 
 func (r *recordingDB) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {

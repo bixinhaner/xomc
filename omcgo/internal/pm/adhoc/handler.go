@@ -553,6 +553,50 @@ WHERE r.task_id = $1`
 	return q, args
 }
 
+// buildResultsCountQuery 纯函数：拼 adhoc results 的真实总数 COUNT(*) SQL + 占位参数。
+// 复用与 buildResultsQuery 完全相同的 WHERE 过滤（去掉 LEFT JOIN / ORDER BY / LIMIT / OFFSET），
+// 让 total 反映命中行真实总数（T-0194 截断诚实提示）。
+func buildResultsCountQuery(taskID uuid.UUID, f resultsFilter) (string, []any) {
+	q := `SELECT COUNT(*) FROM pm_adhoc_aggregation_results r WHERE r.task_id = $1`
+	args := []any{taskID}
+	pos := 2
+	if f.DeviceSN != "" {
+		q += fmt.Sprintf(" AND r.device_sn = $%d", pos)
+		args = append(args, f.DeviceSN)
+		pos++
+	}
+	if f.MetricPath != "" {
+		q += fmt.Sprintf(" AND r.metric_path = $%d", pos)
+		args = append(args, f.MetricPath)
+		pos++
+	}
+	if f.Granularity != "" {
+		q += fmt.Sprintf(" AND r.granularity = $%d", pos)
+		args = append(args, f.Granularity)
+		pos++
+	}
+	if f.StartTime != "" {
+		if t, err := time.Parse(time.RFC3339, f.StartTime); err == nil {
+			q += fmt.Sprintf(" AND r.time >= $%d", pos)
+			args = append(args, t)
+			pos++
+		}
+	}
+	if f.EndTime != "" {
+		if t, err := time.Parse(time.RFC3339, f.EndTime); err == nil {
+			q += fmt.Sprintf(" AND r.time <= $%d", pos)
+			args = append(args, t)
+			pos++
+		}
+	}
+	if len(f.ObjectLDNs) > 0 {
+		q += fmt.Sprintf(" AND r.object_ldn = ANY($%d)", pos)
+		args = append(args, f.ObjectLDNs)
+		pos++
+	}
+	return q, args
+}
+
 // Results GET /pm/adhoc/tasks/:id/results?device_sn=&metric_path=&granularity=&start_time=&end_time=&limit=&offset=
 func (h *Handler) Results(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
@@ -585,14 +629,15 @@ func (h *Handler) Results(c *gin.Context) {
 	}
 
 	// 直接 SQL 查 — adhoc results 只读用例，不值得再拆 repo
-	q, args := buildResultsQuery(id, resultsFilter{
+	filter := resultsFilter{
 		DeviceSN:    c.Query("device_sn"),
 		MetricPath:  c.Query("metric_path"),
 		Granularity: c.Query("granularity"),
 		StartTime:   c.Query("start_time"),
 		EndTime:     c.Query("end_time"),
 		ObjectLDNs:  task.ObjectLDNs, // 任务自带白名单（空=全小区）
-	}, limit, offset)
+	}
+	q, args := buildResultsQuery(id, filter, limit, offset)
 
 	rows, err := h.pool.Query(c.Request.Context(), q, args...)
 	if err != nil {
@@ -682,7 +727,16 @@ func (h *Handler) Results(c *gin.Context) {
 		}
 	}
 
-	response.OK(c, gin.H{"items": items, "total": len(items)})
+	// 真实总数：跑一次同 WHERE 的 COUNT(*)，让 total 反映命中行真实总数而非本页返回行数
+	// （T-0194 截断诚实提示）。COUNT 失败不阻断结果返回，退回本页行数作兜底。
+	total := len(items)
+	cq, cargs := buildResultsCountQuery(id, filter)
+	var realTotal int
+	if err := h.pool.QueryRow(c.Request.Context(), cq, cargs...).Scan(&realTotal); err == nil {
+		total = realTotal
+	}
+
+	response.OK(c, gin.H{"items": items, "total": total})
 }
 
 // lookupIndicatorNames 按编号集合一次性查三张指标表，返回 code → cn_name（缺则 en_name）。

@@ -91,7 +91,8 @@ type stubDB struct {
 	execTag  pgconn.CommandTag
 	execErr  error
 
-	queryFn func(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	queryFn    func(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	queryRowFn func(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
 func (s *stubDB) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
@@ -106,6 +107,33 @@ func (s *stubDB) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, 
 	}
 	return nil, errors.New("stubDB.Query unimplemented")
 }
+
+func (s *stubDB) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	if s.queryRowFn != nil {
+		return s.queryRowFn(ctx, sql, args...)
+	}
+	return errRow{err: errors.New("stubDB.QueryRow unimplemented")}
+}
+
+// countRow / errRow 是 PgQuerier.QueryRow 的轻量 stub：把一个固定 int（或 error）喂给 Scan。
+type countRow struct {
+	n    int
+	sql  string
+	args []any
+}
+
+func (r countRow) Scan(dest ...any) error {
+	if len(dest) == 1 {
+		if p, ok := dest[0].(*int); ok {
+			*p = r.n
+		}
+	}
+	return nil
+}
+
+type errRow struct{ err error }
+
+func (r errRow) Scan(dest ...any) error { return r.err }
 
 func Test_AggregateCounters_PassesThroughToExec(t *testing.T) {
 	db := &stubDB{execTag: pgconn.NewCommandTag("INSERT 0 3")}
@@ -437,6 +465,10 @@ func (db *preciseBucketDB) Exec(ctx context.Context, sql string, args ...any) (p
 	db.execSQL = sql
 	db.execArg = args
 	return db.execTag, nil
+}
+
+func (db *preciseBucketDB) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	return errRow{err: errors.New("preciseBucketDB.QueryRow unimplemented")}
 }
 
 func (db *preciseBucketDB) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
