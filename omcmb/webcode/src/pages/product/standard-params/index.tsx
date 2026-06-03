@@ -56,7 +56,7 @@ export default function StandardParamsPage() {
   const columns = [
     { title: t('product.standardParams.col.standardPath'), dataIndex: 'standardPath', ellipsis: true },
     { title: t('product.standardParams.col.entryType'), dataIndex: 'entryType', width: 100 },
-    { title: t('product.standardParams.col.access'), dataIndex: 'access', width: 100 },
+    { title: t('product.standardParams.col.access'), dataIndex: 'access', width: 130 },
     { title: t('product.standardParams.col.dataType'), dataIndex: 'dataType', width: 100 },
     { title: t('product.standardParams.col.changeApplies'), dataIndex: 'changeApplies', width: 130 },
     { title: t('product.standardParams.col.min'), dataIndex: 'minValue', width: 80 },

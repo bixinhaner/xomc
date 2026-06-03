@@ -1,42 +1,18 @@
 import { useMemo, useState } from 'react';
-import {
-  Card,
-  Table,
-  Button,
-  Space,
-  Tag,
-  Input,
-  message,
-  Tooltip,
-  Popconfirm,
-  Empty,
-  Row,
-  Col,
-} from 'antd';
-import { ThunderboltOutlined, LinkOutlined } from '@ant-design/icons';
-import { useOrphanDevices, useRematchOrphan } from '@core/hooks/api/useProducts';
+import { Card, Table, Tag, Input, Empty } from 'antd';
+import { useOrphanDevices } from '@core/hooks/api/useProducts';
 import type { OrphanDevice } from '@core/types/product';
-import BindProductModal from './BindProductModal';
 import { makeSeqColumn } from '@/components/Table/seqColumn';
 import { useT } from '@/hooks/useT';
 
 export default function OrphanDevicesPage() {
   const t = useT();
-  // 2026-05-28 改造:
-  //   1. server-side 分页 (10/20/50/1000)
-  //   2. SN 模糊搜索
-  //   3. 取消"刷新"按钮 — hook 已设 staleTime:0 + refetchOnMount,每次进页都
-  //      重新拉数据;批量绑定 / rematch / SN 搜索后 invalidate 同样自动刷新
+  // 2026-06-02 用户决策:孤儿设备页改为纯只读列表 —— 去掉运营商/操作列、
+  // 去掉"全量重新匹配"/"批量绑定"操作;搜索框模糊匹配 SN/OUI/产品类型/厂商。
   const [page, setPage] = useState(1);
-  // 2026-05-28 用户决策:默认 10 条/页(原 50)
   const [pageSize, setPageSize] = useState(10);
   const [search, setSearch] = useState('');
   const { data, isLoading } = useOrphanDevices({ page, pageSize, search });
-  const rematchMut = useRematchOrphan();
-
-  const [bindOpen, setBindOpen] = useState(false);
-  const [bindTargets, setBindTargets] = useState<OrphanDevice[]>([]);
-  const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
 
   const items = useMemo(() => data?.items || [], [data]);
   const total = data?.total ?? 0;
@@ -45,11 +21,10 @@ export default function OrphanDevicesPage() {
     { title: 'SN', dataIndex: 'serialNumber', width: 200 },
     { title: 'OUI', dataIndex: 'oui', width: 100 },
     {
-      title: 'productClass',
+      title: t('device.productClass'),
       dataIndex: 'productClass',
       render: (v: string) => <Tag color="orange">{v || '—'}</Tag>,
     },
-    { title: t('common.carrier'), dataIndex: 'carrier', width: 90 },
     { title: t('common.vendor'), dataIndex: 'manufacturer', width: 130 },
     {
       title: t('common.lastInform'),
@@ -57,92 +32,23 @@ export default function OrphanDevicesPage() {
       width: 180,
       render: (v?: string) => v || '—',
     },
-    {
-      title: t('common.action'),
-      width: 80,
-      render: (_: unknown, row: OrphanDevice) => (
-        <Tooltip title={t('common.bind')}>
-          <Button
-            size="small"
-            icon={<LinkOutlined />}
-            onClick={() => {
-              setBindTargets([row]);
-              setBindOpen(true);
-            }}
-          />
-        </Tooltip>
-      ),
-    },
   ];
-
-  const selectedRows = items.filter((d) => selectedKeys.includes(d.id));
-  const selectedCount = selectedRows.length;
 
   return (
     <div style={{ padding: 16 }}>
       <Card size="small">
-        {/* 2026-05-28 用户决策:去掉"孤儿设备 共 N 台"标题,搜索框靠左;
-            分页 footer 自带"共 N 台",信息不丢。 */}
-        <Row align="middle" justify="space-between" style={{ marginBottom: 12 }} gutter={8}>
-          <Col>
-            <Input.Search
-              placeholder={t('product.orphan.searchPh')}
-              allowClear
-              style={{ width: 240 }}
-              onSearch={(v) => {
-                setSearch(v.trim());
-                setPage(1);
-                setSelectedKeys([]);
-              }}
-              enterButton
-            />
-          </Col>
-          <Col>
-            <Space>
-              {/* 2026-05-28 用户决策:rematch 改异步执行 + per-admin 排重。
-                  - API 立即返 202,前端 toast"正在匹配中,请稍等"
-                  - 同一管理员重复触发 → 后端返 409,前端 toast 提醒等待
-                  - 真实绑定结果靠下一次刷新页面体现(staleTime:0 进页自动拉) */}
-              <Tooltip title={t('product.orphan.scanTooltip')}>
-                <Popconfirm
-                  title={t('product.orphan.rematchTitle')}
-                  onConfirm={() =>
-                    rematchMut
-                      .mutateAsync()
-                      .then((r) => {
-                        // 后端业务码区分:
-                        //   accepted → 锁获取成功,goroutine 已派发
-                        //   running  → 已有 rematch 在执行中,提示用户等待
-                        if (r.status === 'running') {
-                          message.warning(t('product.orphan.runningWarn'));
-                        } else {
-                          message.info(t('product.orphan.bgInfo'));
-                        }
-                      })
-                      .catch((e) =>
-                        message.error((e as Error).message || t('product.orphan.triggerFailed')),
-                      )
-                  }
-                >
-                  <Button icon={<ThunderboltOutlined />} loading={rematchMut.isPending}>
-                    {t('product.orphan.batchRematch')}
-                  </Button>
-                </Popconfirm>
-              </Tooltip>
-              <Button
-                type="primary"
-                icon={<LinkOutlined />}
-                disabled={selectedCount === 0}
-                onClick={() => {
-                  setBindTargets(selectedRows);
-                  setBindOpen(true);
-                }}
-              >
-                {selectedCount > 0 ? t('product.orphan.batchBindCount', { count: selectedCount }) : t('product.orphan.batchBind')}
-              </Button>
-            </Space>
-          </Col>
-        </Row>
+        <div style={{ marginBottom: 12 }}>
+          <Input.Search
+            placeholder={t('product.orphan.searchPh')}
+            allowClear
+            style={{ width: 320 }}
+            onSearch={(v) => {
+              setSearch(v.trim());
+              setPage(1);
+            }}
+            enterButton
+          />
+        </div>
         {items.length === 0 && !isLoading ? (
           <Empty
             description={
@@ -168,28 +74,11 @@ export default function OrphanDevicesPage() {
               onChange: (p, ps) => {
                 setPage(p);
                 if (ps !== pageSize) setPageSize(ps);
-                setSelectedKeys([]);
               },
-            }}
-            rowSelection={{
-              selectedRowKeys: selectedKeys,
-              onChange: (keys) => setSelectedKeys(keys),
             }}
           />
         )}
       </Card>
-
-      <BindProductModal
-        open={bindOpen}
-        devices={bindTargets}
-        onClose={() => {
-          setBindOpen(false);
-          setBindTargets([]);
-        }}
-        onDone={() => {
-          setSelectedKeys([]);
-        }}
-      />
     </div>
   );
 }

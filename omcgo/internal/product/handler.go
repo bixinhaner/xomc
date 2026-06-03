@@ -653,7 +653,7 @@ func (h *Handler) MatchOrder(c *gin.Context) {
 //
 // 2026-05-28 改造:支持 server-side 分页 + SN 模糊搜索。
 //   - page (default 1) / page_size (default 50, max 1000)
-//   - search: 对 serial_number 做 ILIKE '%xxx%' 过滤
+//   - search: 对 serial_number / oui / product_class / manufacturer 做 ILIKE '%xxx%' 过滤
 //   - 旧 limit 参数兼容:若 page_size 未传但 limit 传了,以 limit 作为 page_size。
 func (h *Handler) ListOrphan(c *gin.Context) {
 	page := 1

@@ -98,12 +98,16 @@ export default function AlarmLibraryPage() {
   };
 
   // ── 一级(NeTypes 聚合) ─────────────────────────────────────────
-  // 2026-05-29 调整:LTE/GSM/NR 三五行数据,搜索框无意义,已删除。
+  // 2026-06-02 用户决策:一级列表恢复"名称"模糊搜索。后端 listNeTypes 不带过滤
+  // 参数且数据量小(LTE/GSM/NR 等数行),故在前端按 neType 客户端过滤。
+  const [neKeyword, setNeKeyword] = useState('');
   const { data: neTypesData, isLoading: isNeTypesLoading } = useAlarmNeTypeStats();
-  const neTypesItems = useMemo<AlarmNeTypeStat[]>(
-    () => neTypesData?.items || [],
-    [neTypesData],
-  );
+  const neTypesItems = useMemo<AlarmNeTypeStat[]>(() => {
+    const all = neTypesData?.items || [];
+    const kw = neKeyword.trim().toLowerCase();
+    if (!kw) return all;
+    return all.filter((row) => row.neType.toLowerCase().includes(kw));
+  }, [neTypesData, neKeyword]);
 
   // ── 二级(AlarmDefinition 详情) ─────────────────────────────────
   const [detailFilter, setDetailFilter] = useState<AlarmDefinitionFilter>({
@@ -344,8 +348,14 @@ export default function AlarmLibraryPage() {
               <Text strong>{t('product.alarm.defsOf', { neType: selectedNeType ?? '' })}</Text>
             </Space>
           ) : (
-            // 列表态左侧空 — 占位让 space-between 把右侧按钮推到最右
-            <span />
+            // 列表态左侧:按"名称"(ne_type)模糊搜索;客户端过滤(数据量小)
+            <Input.Search
+              placeholder={t('product.alarm.neSearchPh')}
+              allowClear
+              value={neKeyword}
+              onChange={(e) => setNeKeyword(e.target.value)}
+              style={{ width: 220 }}
+            />
           )}
           <Space wrap>
             {inDetail ? (

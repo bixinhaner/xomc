@@ -100,16 +100,10 @@ export default function ProductsPage() {
       width: 120,
     },
     {
-      title: t('common.tech'),
+      title: t('product.products.tech'),
       dataIndex: 'tech',
-      width: 80,
+      width: 90,
       render: (v: string) => <Tag>{v.toUpperCase()}</Tag>,
-    },
-    {
-      title: t('product.products.col.indicatorDeviceType'),
-      dataIndex: 'indicatorDeviceType',
-      width: 130,
-      render: (v: string) => <Tag color="cyan">{v?.toUpperCase()}</Tag>,
     },
     {
       title: t('product.products.col.indicatorPlatform'),
@@ -147,33 +141,6 @@ export default function ProductsPage() {
           </Space>
         );
       },
-    },
-    {
-      title: t('common.activate'),
-      width: 110,
-      render: (_: unknown, row: Product) => {
-        const stats = patternStats.get(row.id);
-        if (!stats || stats.total === 0) {
-          return <Tag>{t('common.noRule')}</Tag>;
-        }
-        if (stats.active === stats.total) {
-          return <Tag color="success">{t('common.active')}</Tag>;
-        }
-        if (stats.active === 0) {
-          return <Tag>{t('common.inactive')}</Tag>;
-        }
-        return (
-          <Tag color="warning">
-            {t('product.products.col.partial', { active: stats.active, total: stats.total })}
-          </Tag>
-        );
-      },
-    },
-    {
-      title: t('product.products.col.upload'),
-      dataIndex: 'enableFiletype11',
-      width: 70,
-      render: (v: boolean) => (v ? <Tag color="success">{t('common.on')}</Tag> : <Tag>{t('common.off')}</Tag>),
     },
     {
       title: t('product.products.col.unknownAlarm'),

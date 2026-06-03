@@ -569,7 +569,7 @@ func (r *PgRepository) ListMatchOrder(ctx context.Context) ([]MatchOrderRow, err
 func (r *PgRepository) ListOrphanDevices(
 	ctx context.Context,
 	page, pageSize int,
-	searchSN string,
+	search string,
 ) ([]OrphanDevice, int, error) {
 	if page < 1 {
 		page = 1
@@ -585,10 +585,17 @@ func (r *PgRepository) ListOrphanDevices(
 	where := "WHERE product_id IS NULL AND deleted_at IS NULL"
 	args := []any{}
 	idx := 1
-	if s := strings.TrimSpace(searchSN); s != "" {
-		where += fmt.Sprintf(" AND serial_number ILIKE $%d", idx)
-		args = append(args, "%"+s+"%")
-		idx++
+	// 模糊匹配 SN / OUI / 产品类型 / 厂商(2026-06-02 用户决策:搜索框覆盖多字段)。
+	// 任一列命中即返回;oui/product_class/manufacturer 可能为 NULL,ILIKE NULL → NULL,
+	// 不命中也不报错。
+	if s := strings.TrimSpace(search); s != "" {
+		where += fmt.Sprintf(
+			" AND (serial_number ILIKE $%d OR oui ILIKE $%d OR product_class ILIKE $%d OR manufacturer ILIKE $%d)",
+			idx, idx+1, idx+2, idx+3,
+		)
+		pat := "%" + s + "%"
+		args = append(args, pat, pat, pat, pat)
+		idx += 4
 	}
 
 	// total

@@ -300,7 +300,7 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
                   <Form.Item name="vendor" label={t('common.vendor')}>
                     <Input placeholder="Comba / Baicells / ..." />
                   </Form.Item>
-                  <Form.Item name="tech" label={t('common.tech')} rules={[{ required: true }]}>
+                  <Form.Item name="tech" label={t('product.products.tech')} rules={[{ required: true }]}>
                     <Select options={TECH_OPTIONS} />
                   </Form.Item>
                   <Form.Item name="radioModes" label="Radio Modes">
