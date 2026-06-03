@@ -222,7 +222,7 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
                 form.setFieldsValue({ entryType: 'parameter', access: 'readWrite', dataType: 'string', changeApplies: 'reload' });
               }}
             >
-              {t('product.paramModel.mappings.newBtn')}
+              {t('common.create')}
             </Button>
           </Space>
         </Space>
