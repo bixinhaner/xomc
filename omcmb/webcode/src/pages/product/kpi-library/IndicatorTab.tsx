@@ -149,6 +149,7 @@ export default function IndicatorTab({ deviceType }: Props) {
               setPage(1);
             }}
             style={{ width: 320 }}
+            enterButton
           />
         </Space>
       }

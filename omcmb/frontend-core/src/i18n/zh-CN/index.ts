@@ -351,7 +351,7 @@ const messages: Record<string, string> = {
   'product.kpi.importTitle':          '确认导入 XML?',
 
   // /product/alarm-library
-  'product.alarm.searchPh':           '搜索 identifier / 名称 / 描述',
+  'product.alarm.searchPh':           '搜索 标识符 / 名称 / 描述',
   'product.alarm.neSearchPh':         '搜索 名称',
   'product.alarm.allFilter':          '全部',
   'product.alarm.severityLabel':      '严重级别',

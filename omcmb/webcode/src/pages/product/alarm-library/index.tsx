@@ -250,7 +250,7 @@ export default function AlarmLibraryPage() {
   // ── 二级表列 ────────────────────────────────────────────────────
   const detailColumns = [
     {
-      title: 'identifier',
+      title: t('product.alarm.def.identifier'),
       dataIndex: 'identifier',
       width: 140,
       render: (v: string) => <Tag color="blue">{v}</Tag>,
@@ -336,6 +336,7 @@ export default function AlarmLibraryPage() {
               value={neKeyword}
               onChange={(e) => setNeKeyword(e.target.value)}
               style={{ width: 320 }}
+              enterButton
             />
           )}
           <Space wrap>
@@ -351,6 +352,7 @@ export default function AlarmLibraryPage() {
                     setDetailFilter((f) => ({ ...f, keyword: v || undefined, page: 1 }))
                   }
                   style={{ width: 320 }}
+                  enterButton
                 />
                 <Space size={4}>
                   <span style={FILTER_LABEL_STYLE}>{t('product.alarm.severityLabel')}</span>

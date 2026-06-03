@@ -126,6 +126,7 @@ export default function ParamModelPage() {
               value={keyword}
               onChange={(e) => setKeyword(e.target.value)}
               style={{ width: 320 }}
+              enterButton
             />
             <Space>
               {/* 「导入 XML」= 用户选本地 XML 上传,落 host /opt/omc/data/param-mappings-custom/;

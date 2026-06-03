@@ -125,6 +125,7 @@ export default function StandardParamsPage() {
               value={keyword}
               onChange={(e) => setKeyword(e.target.value)}
               style={{ width: 320 }}
+              enterButton
             />
             <Select
               value={entryType}

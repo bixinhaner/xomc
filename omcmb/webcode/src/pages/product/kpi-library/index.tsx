@@ -143,6 +143,7 @@ export default function KpiLibraryPage() {
                   value={detailKeyword}
                   onChange={(e) => setDetailKeyword(e.target.value)}
                   style={{ width: 320 }}
+                  enterButton
                 />
                 <Select
                   placeholder={t('product.kpi.groupFilterPh')}
@@ -165,6 +166,7 @@ export default function KpiLibraryPage() {
                 value={summaryQuery}
                 onChange={(e) => setSummaryQuery(e.target.value)}
                 style={{ width: 320 }}
+                enterButton
               />
               {globalActions}
             </>

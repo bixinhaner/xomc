@@ -223,6 +223,7 @@ export default function ProductsPage() {
               onChange={(e) => setKeyword(e.target.value)}
               onSearch={(v) => setFilter((f) => ({ ...f, keyword: v || undefined }))}
               style={{ width: 320 }}
+              enterButton
             />
             <MatchTester />
           </Space>
