@@ -551,6 +551,11 @@ func (h *Handler) ListKPIValues(c *gin.Context) {
 // 查询参数（向后兼容老前端的 carrier 模糊搜索）：
 //   - keyword：name/cn_name/id 模糊匹配
 //   - device_type：ENB / GSM / GNB（不传 → 三表合并枚举）
+//   - include_counters：可选开关（缺省 false）。false 时维持 is_counter='0'（仅 KPI），
+//     行为与历史完全一致；true 时不按 is_counter 过滤，返回 KPI + 计数器，供向导穿梭框消费。
+//
+// 响应每条在历史字段（name/display_name/formula/unit）之外，补 id（= perf_indicators 行 ID，
+// K/C 编号）与 is_counter（"0" KPI / "1" 计数器）。默认调用方只读历史字段，零回归。
 func (h *Handler) ListKPIDefinitions(c *gin.Context) {
 	keyword := c.Query("keyword")
 	if keyword == "" {
@@ -558,6 +563,7 @@ func (h *Handler) ListKPIDefinitions(c *gin.Context) {
 		keyword = c.Query("carrier")
 	}
 	dtParam := c.Query("device_type")
+	includeCounters := parseBoolQuery(c.Query("include_counters"))
 
 	dts := []indicator.DeviceType{indicator.DeviceTypeENB, indicator.DeviceTypeGSM, indicator.DeviceTypeGNB}
 	if dtParam != "" {
@@ -571,16 +577,18 @@ func (h *Handler) ListKPIDefinitions(c *gin.Context) {
 
 	if h.indicatorRepo == nil {
 		// 测试 / 退化场景：返空集合，调用方按 total=0 处理。
-		response.OK(c, gin.H{"items": []model.KPIDefinition{}, "total": 0})
+		response.OK(c, gin.H{"items": []kpiDefinitionItem{}, "total": 0})
 		return
 	}
 
-	isCounter := "0" // KPI 而非 counter
-	var items []model.KPIDefinition
+	items := make([]kpiDefinitionItem, 0)
 	for _, dt := range dts {
 		filter := indicator.IndicatorListFilter{
 			DeviceType: string(dt),
-			IsCounter:  &isCounter,
+		}
+		if !includeCounters {
+			isCounter := "0" // 仅 KPI（默认行为，不变）
+			filter.IsCounter = &isCounter
 		}
 		if keyword != "" {
 			kw := keyword
@@ -592,18 +600,34 @@ func (h *Handler) ListKPIDefinitions(c *gin.Context) {
 			return
 		}
 		for _, r := range rows {
-			items = append(items, model.KPIDefinition{
+			items = append(items, kpiDefinitionItem{
+				ID:          r.ID,
+				IsCounter:   r.IsCounter,
 				Name:        r.EnName,
 				DisplayName: derefOr(r.CnName, r.EnName),
 				Formula:     derefOr(r.Arithmetic, ""),
 				Unit:        derefOr(r.UnitID, ""),
-				// Carrier / Technology 在新模型下不再是 KPI 维度（按平台 + 设备类型路由），
-				// 留空以保持 wire 兼容。
-				Counters: nil,
 			})
 		}
 	}
 	response.OK(c, gin.H{"items": items, "total": len(items)})
+}
+
+// kpiDefinitionItem 是 ListKPIDefinitions 的 handler 局部响应结构，
+// 历史字段（name/display_name/formula/unit）与旧 model.KPIDefinition 的 JSON 形态一致，
+// 额外补 id / is_counter。不污染共享的 model.KPIDefinition（KPI 计算引擎在用）。
+type kpiDefinitionItem struct {
+	ID          string `json:"id"`
+	IsCounter   string `json:"is_counter"`
+	Name        string `json:"name"`
+	DisplayName string `json:"display_name"`
+	Formula     string `json:"formula"`
+	Unit        string `json:"unit"`
+}
+
+// parseBoolQuery 把 query 字符串解析为 bool，仅 "true"/"1" 视为 true，其余（含空）为 false。
+func parseBoolQuery(v string) bool {
+	return v == "true" || v == "1"
 }
 
 func derefOr(p *string, fallback string) string {

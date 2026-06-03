@@ -12,6 +12,19 @@ interface BackendKPIDefinition {
   carrier: string;
   technology: string;
   counters: string[];
+  // 向导穿梭框增强：include_counters=true 时后端返回 id（K/C 编号）与 is_counter（"0"/"1"）。
+  // 旧调用（getKPIs/getAllKPIs）不依赖这两个字段，故为可选，保持零回归。
+  id?: string;
+  is_counter?: string;
+}
+
+// IndicatorCandidate 是向导第③步穿梭框消费的指标候选项（按制式、含计数器、带编号/类型）。
+export interface IndicatorCandidate {
+  id: string;        // 指标编号（K/C），即向导提交时的指标标识
+  name: string;      // en_name
+  cnName: string;    // 中文名（缺省回退 en_name）
+  enName: string;    // 英文名
+  isCounter: boolean; // true=计数器(C)，false=KPI(K)
 }
 
 interface BackendKPIValue {
@@ -57,6 +70,18 @@ function mapBackendKPIDefinition(d: BackendKPIDefinition): KPI {
     unit: d.unit,
     description: d.formula,
     category: '',
+  };
+}
+
+function mapBackendIndicatorCandidate(d: BackendKPIDefinition): IndicatorCandidate {
+  const enName = d.name;
+  const cnName = d.display_name || enName;
+  return {
+    id: d.id || d.name, // 后端补了 id（K/C 编号）；缺省退回 name 兜底
+    name: enName,
+    cnName,
+    enName,
+    isCounter: d.is_counter === '1',
   };
 }
 
@@ -220,6 +245,23 @@ export const pmApi = {
       '/pm/kpi/definitions'
     );
     return (data.items || []).map(mapBackendKPIDefinition);
+  },
+
+  // 向导第③步穿梭框：取指标候选清单（按制式，可含计数器，带编号/类型）。
+  // 走 pm 权限的 /pm/kpi/definitions（运维可访问、全量无截断），替代 super_admin 的 /indicators。
+  async getIndicatorCandidates(
+    deviceType: string,
+    opts?: { includeCounters?: boolean }
+  ): Promise<IndicatorCandidate[]> {
+    const params: Record<string, unknown> = {};
+    if (deviceType) params.device_type = deviceType;
+    if (opts?.includeCounters) params.include_counters = true;
+
+    const { data } = await http.get<BackendDefinitionsResponse>(
+      '/pm/kpi/definitions',
+      { params }
+    );
+    return (data.items || []).map(mapBackendIndicatorCandidate);
   },
 
   // PM counter records → Measurement list

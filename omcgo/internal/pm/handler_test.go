@@ -14,6 +14,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/omcgo/omcgo/internal/pm/counter"
+	"github.com/omcgo/omcgo/internal/pm/indicator"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
 	"github.com/omcgo/omcgo/internal/pm/kpi/router"
 	"github.com/stretchr/testify/assert"
@@ -81,6 +82,20 @@ func (m *pmHTaskRepo) Create(ctx context.Context, task *PerformanceTask) error {
 	return nil
 }
 
+// pmHIndicatorRepo 是 ListKPIDefinitions 用的最小 mock：只实现 ListAll，
+// 其余方法借接口嵌入留空（本测试不会触发，触发即 nil 解引用 panic 暴露误用）。
+type pmHIndicatorRepo struct {
+	indicator.IndicatorRepository
+	listAllFn func(ctx context.Context, filter indicator.IndicatorListFilter) ([]indicator.IndicatorListItem, error)
+}
+
+func (m *pmHIndicatorRepo) ListAll(ctx context.Context, filter indicator.IndicatorListFilter) ([]indicator.IndicatorListItem, error) {
+	if m.listAllFn != nil {
+		return m.listAllFn(ctx, filter)
+	}
+	return nil, nil
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -102,6 +117,16 @@ func pmHSetupRouter(cr counter.CounterRepository, kr kpi.KPIRepository, engine *
 	r := gin.New()
 	// indicatorRepo 传 nil → ListKPIDefinitions 走退化路径返空集合。
 	h := NewHandler(cr, kr, engine, tr, nil, nil, "pm-files", nil, nil, zap.NewNop())
+	h.RegisterRoutes(r.Group(""))
+	return r
+}
+
+// pmHSetupRouterWithIndicator 与 pmHSetupRouter 一致，但注入指定 indicatorRepo，
+// 供 ListKPIDefinitions 的非退化路径测试用。
+func pmHSetupRouterWithIndicator(ir indicator.IndicatorRepository) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	h := NewHandler(&pmHCounterRepo{}, &pmHKPIRepo{}, pmHNewEngine(), &pmHTaskRepo{}, nil, nil, "pm-files", nil, ir, zap.NewNop())
 	h.RegisterRoutes(r.Group(""))
 	return r
 }
@@ -218,6 +243,142 @@ func TestHandler_ListKPIDefinitions(t *testing.T) {
 	}
 	response.DecodeData(t, w.Body, &body)
 	assert.Equal(t, 0, body.Total)
+}
+
+// kpiDefRespItem 镜像 handler 的响应 wire 形态（含 id / is_counter + 历史字段）。
+type kpiDefRespItem struct {
+	ID          string `json:"id"`
+	IsCounter   string `json:"is_counter"`
+	Name        string `json:"name"`
+	DisplayName string `json:"display_name"`
+	Formula     string `json:"formula"`
+	Unit        string `json:"unit"`
+}
+
+// 默认（不带 include_counters）：仅请求 is_counter='0' 的 KPI，响应含 id/is_counter，
+// 历史字段（name=en_name / display_name=cn_name / formula / unit）保持不变 → 零回归。
+func TestHandler_ListKPIDefinitions_DefaultKPIOnly(t *testing.T) {
+	var captured indicator.IndicatorListFilter
+	ir := &pmHIndicatorRepo{
+		listAllFn: func(_ context.Context, f indicator.IndicatorListFilter) ([]indicator.IndicatorListItem, error) {
+			captured = f
+			return []indicator.IndicatorListItem{
+				{PerfIndicator: indicator.PerfIndicator{
+					ID: "K1001", EnName: "rrc_succ_rate", CnName: strPtr("RRC连接建立成功率"),
+					IsCounter: "0", Arithmetic: strPtr("a/b"), UnitID: strPtr("3"),
+				}},
+			}, nil
+		},
+	}
+	router := pmHSetupRouterWithIndicator(ir)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/pm/kpi/definitions?device_type=ENB", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	// 默认必须按 is_counter='0' 过滤。
+	require.NotNil(t, captured.IsCounter)
+	assert.Equal(t, "0", *captured.IsCounter)
+	assert.Equal(t, "ENB", captured.DeviceType)
+
+	var body struct {
+		Items []kpiDefRespItem `json:"items"`
+		Total int              `json:"total"`
+	}
+	response.DecodeData(t, w.Body, &body)
+	assert.Equal(t, 1, body.Total)
+	require.Len(t, body.Items, 1)
+	it := body.Items[0]
+	assert.Equal(t, "K1001", it.ID)
+	assert.Equal(t, "0", it.IsCounter)
+	assert.Equal(t, "rrc_succ_rate", it.Name)
+	assert.Equal(t, "RRC连接建立成功率", it.DisplayName)
+	assert.Equal(t, "a/b", it.Formula)
+	assert.Equal(t, "3", it.Unit)
+}
+
+// include_counters=true：不按 is_counter 过滤，KPI + 计数器都返回。
+func TestHandler_ListKPIDefinitions_IncludeCounters(t *testing.T) {
+	var captured indicator.IndicatorListFilter
+	ir := &pmHIndicatorRepo{
+		listAllFn: func(_ context.Context, f indicator.IndicatorListFilter) ([]indicator.IndicatorListItem, error) {
+			captured = f
+			return []indicator.IndicatorListItem{
+				{PerfIndicator: indicator.PerfIndicator{ID: "K1001", EnName: "kpi_a", IsCounter: "0"}},
+				{PerfIndicator: indicator.PerfIndicator{ID: "C2001", EnName: "counter_b", IsCounter: "1"}},
+			}, nil
+		},
+	}
+	router := pmHSetupRouterWithIndicator(ir)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/pm/kpi/definitions?device_type=ENB&include_counters=true", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	// include_counters=true → 不再按 is_counter 过滤。
+	assert.Nil(t, captured.IsCounter)
+
+	var body struct {
+		Items []kpiDefRespItem `json:"items"`
+		Total int              `json:"total"`
+	}
+	response.DecodeData(t, w.Body, &body)
+	assert.Equal(t, 2, body.Total)
+	require.Len(t, body.Items, 2)
+	assert.Equal(t, "0", body.Items[0].IsCounter)
+	assert.Equal(t, "1", body.Items[1].IsCounter)
+	assert.Equal(t, "C2001", body.Items[1].ID)
+}
+
+// device_type 指定时只查该制式表（不传则三表合并）。
+func TestHandler_ListKPIDefinitions_DeviceTypeFilter(t *testing.T) {
+	var calls []string
+	ir := &pmHIndicatorRepo{
+		listAllFn: func(_ context.Context, f indicator.IndicatorListFilter) ([]indicator.IndicatorListItem, error) {
+			calls = append(calls, f.DeviceType)
+			return nil, nil
+		},
+	}
+	router := pmHSetupRouterWithIndicator(ir)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/pm/kpi/definitions?device_type=GNB", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, []string{"GNB"}, calls)
+}
+
+// 不带 device_type → 三制式表都查一遍。
+func TestHandler_ListKPIDefinitions_AllDeviceTypes(t *testing.T) {
+	var calls []string
+	ir := &pmHIndicatorRepo{
+		listAllFn: func(_ context.Context, f indicator.IndicatorListFilter) ([]indicator.IndicatorListItem, error) {
+			calls = append(calls, f.DeviceType)
+			return nil, nil
+		},
+	}
+	router := pmHSetupRouterWithIndicator(ir)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/pm/kpi/definitions", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.ElementsMatch(t, []string{"ENB", "GSM", "GNB"}, calls)
+}
+
+// 非法 device_type → 400。
+func TestHandler_ListKPIDefinitions_InvalidDeviceType(t *testing.T) {
+	router := pmHSetupRouterWithIndicator(&pmHIndicatorRepo{})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/pm/kpi/definitions?device_type=XXX", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 func TestHandler_CalculateKPI_BadRequest(t *testing.T) {

@@ -36,7 +36,8 @@ import dayjs from 'dayjs';
 import { useCreatePmAdhoc } from '@core/hooks/api/usePmAdhoc';
 import { useDeviceList } from '@core/hooks/api/useDevices';
 import { useMetricObjectsByDevices } from '@core/hooks/api/usePmQuery';
-import { useIndicatorList } from '@core/hooks/api/useIndicatorsLibrary';
+import { useIndicatorCandidates } from '@core/hooks/api/usePerformance';
+import type { IndicatorCandidate } from '@core/services/api/pmApi';
 import type { AdhocDimension, AdhocMode } from '@core/types/pmAdhoc';
 import type { DeviceType } from '@core/types/indicatorLibrary';
 import CellDrilldownSelector from '../PmDashboard/CellDrilldownSelector';
@@ -56,6 +57,17 @@ interface DeviceTransferItem {
   key: string; // SN
   title: string; // 显示名
   technology: string;
+}
+
+// 指标穿梭框条目：key=指标 id（K/C 编号，也是提交标识），其余字段供渲染与过滤。
+interface MetricTransferItem {
+  key: string; // 指标 id（K/C 编号）
+  id: string;
+  name: string;
+  cnName: string;
+  isCounter: boolean;
+  // 搜索用拼接串（编号 + 中英文名），小写。
+  searchText: string;
 }
 
 export default function PmAdhocWizard() {
@@ -131,6 +143,8 @@ export default function PmAdhocWizard() {
 
   // ③ 指标选择（收集指标 id = K/C 码）
   const [metricPaths, setMetricPaths] = useState<string[]>([]);
+  // 穿梭框候选侧类型筛选：all=全部 / kpi=只看 KPI(K) / counter=只看计数(C)。
+  const [metricTypeFilter, setMetricTypeFilter] = useState<'all' | 'kpi' | 'counter'>('all');
 
   // ④ 聚合设置
   const [granularity, setGranularity] = useState<string>('hourly');
@@ -162,12 +176,44 @@ export default function PmAdhocWizard() {
     technology,
   );
 
-  // 指标库（按制式 → deviceType）。
+  // 指标候选（按制式 → deviceType）。走 pm 权限的 /pm/kpi/definitions：运维可访问、
+  // 全量加载无截断、含计数器。替代原 super_admin 的 /indicators（截断 + 403）。
   const deviceType = TECH_TO_DEVICE_TYPE[technology];
-  const { data: indicatorResp, isLoading: indicatorsLoading } = useIndicatorList(deviceType, {
-    pageSize: 1000,
+  const { data: candidates, isLoading: indicatorsLoading } = useIndicatorCandidates(deviceType, {
+    includeCounters: true,
   });
-  const indicatorItems = useMemo(() => indicatorResp?.items ?? [], [indicatorResp]);
+  const indicatorItems = useMemo<IndicatorCandidate[]>(() => candidates ?? [], [candidates]);
+  // 完整 lookup（id → 候选项），用于已选侧渲染与确认页指标名解析——不受类型筛选影响（D5）。
+  const indicatorById = useMemo(() => {
+    const m = new Map<string, IndicatorCandidate>();
+    for (const ind of indicatorItems) m.set(ind.id, ind);
+    return m;
+  }, [indicatorItems]);
+  // Transfer dataSource：类型筛选在 dataSource 层预过滤（不靠 antd 的 filterOption——
+  // 后者只在搜索框有输入时才被调用，空搜索下类型筛选会失效）。
+  // 规则：保留「类型匹配」或「已被选中」的候选——已选项无论类型都进 dataSource，
+  // 保证右侧已选侧按 targetKeys 完整渲染、不被类型筛选隐藏（D5）。
+  const selectedKeySet = useMemo(() => new Set(metricPaths), [metricPaths]);
+  const metricTransferItems = useMemo<MetricTransferItem[]>(
+    () =>
+      indicatorItems
+        .filter((ind) => {
+          const matchType =
+            metricTypeFilter === 'all' ||
+            (metricTypeFilter === 'kpi' && !ind.isCounter) ||
+            (metricTypeFilter === 'counter' && ind.isCounter);
+          return matchType || selectedKeySet.has(ind.id);
+        })
+        .map((ind) => ({
+          key: ind.id,
+          id: ind.id,
+          name: ind.cnName || ind.name,
+          cnName: ind.cnName,
+          isCounter: ind.isCounter,
+          searchText: `${ind.id} ${ind.name} ${ind.cnName}`.toLowerCase(),
+        })),
+    [indicatorItems, metricTypeFilter, selectedKeySet],
+  );
 
   // ── 步骤校验（决定"下一步"是否可点 / 提交是否可点）──────────────────────
   const step1Valid = name.trim().length > 0;
@@ -340,6 +386,19 @@ export default function PmAdhocWizard() {
     );
   };
 
+  // 穿梭框单行渲染：编号 + 指标名 + KPI/计数 小标签。
+  const renderMetricItem = (item: MetricTransferItem) => (
+    <Space size={6}>
+      <Tag color={item.isCounter ? 'blue' : 'orange'} style={{ marginInlineEnd: 0 }}>
+        {item.isCounter
+          ? intl.formatMessage({ id: 'perf.adhoc.metricTagCounter' })
+          : intl.formatMessage({ id: 'perf.adhoc.metricTagKpi' })}
+      </Tag>
+      <span style={{ color: '#999' }}>{item.id}</span>
+      <span>{item.name}</span>
+    </Space>
+  );
+
   const renderStep3 = () => (
     <Space direction="vertical" size="middle" style={{ width: '100%' }}>
       <Alert
@@ -350,20 +409,41 @@ export default function PmAdhocWizard() {
           { tech: technology.toUpperCase(), deviceType },
         )}
       />
-      <Select
-        mode="multiple"
-        style={{ width: '100%' }}
-        placeholder={intl.formatMessage({ id: 'perf.adhoc.metricSelectPlaceholder' })}
-        loading={indicatorsLoading}
-        value={metricPaths}
-        onChange={(v: string[]) => setMetricPaths(v)}
-        optionFilterProp="label"
-        options={indicatorItems.map((ind) => ({
-          label: `${ind.id} ${ind.name ?? ind.cnName ?? ''}`,
-          value: ind.id,
-        }))}
-        maxTagCount="responsive"
-      />
+      <Space size="middle" align="center">
+        <span style={{ fontWeight: 500 }}>
+          {intl.formatMessage({ id: 'perf.adhoc.metricTypeFilterLabel' })}
+        </span>
+        <Select
+          style={{ width: 160 }}
+          value={metricTypeFilter}
+          onChange={(v: 'all' | 'kpi' | 'counter') => setMetricTypeFilter(v)}
+          options={[
+            { label: intl.formatMessage({ id: 'perf.adhoc.metricTypeAll' }), value: 'all' },
+            { label: intl.formatMessage({ id: 'perf.adhoc.metricTypeKpi' }), value: 'kpi' },
+            { label: intl.formatMessage({ id: 'perf.adhoc.metricTypeCounter' }), value: 'counter' },
+          ]}
+        />
+      </Space>
+      <Spin spinning={indicatorsLoading}>
+        <Transfer<MetricTransferItem>
+          dataSource={metricTransferItems}
+          targetKeys={metricPaths}
+          onChange={(keys: React.Key[]) => setMetricPaths(keys.map(String))}
+          render={renderMetricItem}
+          showSearch
+          // 类型筛选已下移到 dataSource 层预过滤（见 metricTransferItems）；此处 filterOption
+          // 只负责搜索词匹配，左右两栏一致。空搜索时 antd 不调本函数也无妨——类型筛选不依赖它。
+          filterOption={(inputValue, item) => {
+            const kw = inputValue.trim().toLowerCase();
+            return kw === '' || item.searchText.includes(kw);
+          }}
+          titles={[
+            intl.formatMessage({ id: 'perf.adhoc.transferAvailableMetric' }),
+            intl.formatMessage({ id: 'perf.adhoc.transferSelectedMetric' }),
+          ]}
+          listStyle={{ width: 360, height: 380 }}
+        />
+      </Spin>
       <div style={{ color: '#888' }}>
         {intl.formatMessage({ id: 'perf.adhoc.metricSelectedCount' }, { count: metricPaths.length })}
       </div>
@@ -408,8 +488,8 @@ export default function PmAdhocWizard() {
   const renderStep5 = () => {
     const effectiveLdns = needsDevicePick ? getEffectiveLdns(cellSel, objectsByDevice) : [];
     const metricNames = metricPaths.map((id) => {
-      const ind = indicatorItems.find((x) => x.id === id);
-      return ind ? `${ind.id} ${ind.name ?? ''}`.trim() : id;
+      const ind = indicatorById.get(id);
+      return ind ? `${ind.id} ${ind.cnName || ind.name}`.trim() : id;
     });
     return (
       <Descriptions bordered column={1} size="middle">

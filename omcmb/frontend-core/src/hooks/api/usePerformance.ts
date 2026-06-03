@@ -23,6 +23,34 @@ export function useAllKPIs() {
   });
 }
 
+// 向导第③步穿梭框：取指标候选清单（按制式，含计数器，带编号/类型）。
+// 走 pm 权限的 /pm/kpi/definitions（运维可访问、全量无截断），不再用 super_admin 的 /indicators。
+export function useIndicatorCandidates(
+  deviceType: string | undefined,
+  opts?: { includeCounters?: boolean }
+) {
+  const includeCounters = opts?.includeCounters ?? true;
+  return useQuery({
+    queryKey: ['performance', 'indicator-candidates', deviceType, { includeCounters }],
+    queryFn: async () => {
+      if (useMock) {
+        // Mock 模式退化：把 mock KPI 列表映射为候选（无 counter 区分，统一当 KPI）。
+        const kpis = await performanceService.getAllKPIs();
+        return kpis.map((k) => ({
+          id: k.kpiCode,
+          name: k.kpiName,
+          cnName: k.kpiName,
+          enName: k.kpiCode,
+          isCounter: false,
+        }));
+      }
+      return pmApi.getIndicatorCandidates(deviceType as string, { includeCounters });
+    },
+    enabled: Boolean(deviceType),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
 export function useCounters(params: PageRequest) {
   return useQuery({
     queryKey: ['performance', 'counters', params],
