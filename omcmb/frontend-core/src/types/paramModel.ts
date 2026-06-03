@@ -14,13 +14,9 @@ export interface ParamModel {
   description: string;
   isActive: boolean;
   loadedFrom: string;
-  // T-0178: 由后端 source.go 派生,前端不重新推导(唯一真值源在后端)。
-  // source: builtin → 内置出厂 XML(数据来自镜像);
-  //         custom  → 自定义上传 XML(数据来自 host 持久化目录);
-  //         unknown → 历史无前缀数据(迁移前的旧行),保守对待。
-  // deletable: 删除按钮可见性。仅 custom 行 true,内置/未知一律置灰 + Tooltip。
-  source: ParamModelSource;
-  deletable: boolean;
+  // 2026-06-03:取消 builtin/custom 区分后,来源不再展示、全部可删;字段保留可选以兼容后端历史返回。
+  source?: ParamModelSource;
+  deletable?: boolean;
   createdAt?: string;
   updatedAt?: string;
 }

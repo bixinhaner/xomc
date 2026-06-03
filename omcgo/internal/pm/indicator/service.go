@@ -465,7 +465,7 @@ func (s *IndicatorManagementService) buildIDMap(ctx context.Context, dt DeviceTy
 }
 
 // BumpCacheVersion 递增 indicator:cache_version（dictloader 标准协议 key），
-// 触发其他实例 30s 轮询感知缓存失效。供 cache/refresh 端点 + 写路径调用。
+// 触发其他实例 30s 轮询感知缓存失效。供 upload-xml 端点(重载后刷新)+ 写路径调用。
 func (s *IndicatorManagementService) BumpCacheVersion(ctx context.Context) {
 	if s.redis == nil {
 		return

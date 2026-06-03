@@ -102,19 +102,19 @@ func TestAcquireFileLock_ConcurrentSameName(t *testing.T) {
 	}
 }
 
-// TestDeleteSourceGuard 验证守门函数对所有 4 种 loaded_from 形态的判定一致。
-// 这是 Delete handler 守门"事前判定"逻辑的最小契约——handler 行为依赖于此返回值。
+// TestDeleteSourceGuard 验证 XML 管理重构后删除规则:全部可删。
+// 取消 builtin/custom 守门,IsDeletable 对所有 loaded_from 形态一律返 true。
 func TestDeleteSourceGuard(t *testing.T) {
 	cases := []struct {
 		loadedFrom string
 		want       bool // IsDeletable
 	}{
-		{"param-mappings/BTS.xml", false},        // 内置 → 不可删
+		{"param-mappings/BTS.xml", true},         // 内置 → 现在也可删
 		{"param-mappings-custom/CBQQ.xml", true}, // 自定义 → 可删
-		{"param-mappings-custom/BTS.xml", true},  // 同名覆盖 custom 仍可删 (self-healing)
-		{"BTS.xml", false},                       // 历史无前缀 → 保守拒删
-		{"", false},                              // 异常空 → 拒删
-		{"../../etc/passwd", false},              // 路径遍历 → 拒删(防御)
+		{"param-mappings-custom/BTS.xml", true},  // 同名覆盖 custom 可删
+		{"BTS.xml", true},                        // 历史无前缀 → 可删
+		{"", true},                               // 异常空 → 可删
+		{"../../etc/passwd", true},               // 路径遍历形态 → 可删(IsDeletable 不再守门)
 	}
 	for _, tc := range cases {
 		if got := IsDeletable(tc.loadedFrom); got != tc.want {

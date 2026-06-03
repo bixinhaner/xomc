@@ -188,20 +188,10 @@ services:
       # 在 worker 容器写 supported="false",通过 bind mount 反映到宿主源码目录,
       # 容器重建/重启都不会丢标注;operator 用 git diff 审阅后 commit。
       - ../../omcgo/data/param-mappings:/etc/omcgo/data/param-mappings
-      # T-0178: 自定义 paramModel XML 持久化(host 主权,与 builtin 物理隔离)。
-      # dev 环境直接 bind mount 到源码 data/param-mappings-custom/,改 XML 立刻生效;
-      # prod compose 走 /opt/omc/data/param-mappings-custom (release/bundle/deploy 配置)
-      - ../../omcgo/data/param-mappings-custom:/etc/omcgo/data/param-mappings-custom
       # T-0180: builtin indicator XML 镜像层目录 bind-mount(与 T-0183 param-mappings
-      # 同范式)。dev 工作流"移除 builtin XML → 重载 → 验证孤儿删除"必须 bind-mount,
-      # 否则容器 layer 内副本永不变;prod compose(release/bundle)不挂以保持镜像不可变。
+      # 同范式)。dev 工作流"上传/移除 XML → 重载 → 验证"写进源码 builtin 目录立刻生效。
+      # 2026-06-03:取消 custom 分层目录,上传统一落 builtin(dev 落源码树)。
       - ../../omcgo/data/indicator-library:/etc/omcgo/data/indicator-library
-      # T-0180: 自定义 indicator XML 分层目录(enb/gsm/gnb 三制式子目录)
-      # 与 builtin 镜像层 /etc/omcgo/data/indicator-library/ 物理隔离;
-      # dev 直接 bind mount 到源码;prod 走 /opt/omc/data/indicator-library-custom
-      - ../../omcgo/data/indicator-library-custom:/etc/omcgo/data/indicator-library-custom
-      # 自定义告警 XML(扁平目录;与 builtin /etc/omcgo/data/alarm-definitions/ 物理隔离)
-      - ../../omcgo/data/alarm-definitions-custom:/etc/omcgo/data/alarm-definitions-custom
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       migrate-seed:
@@ -233,15 +223,9 @@ services:
       # T-0183: XML 字典 rw 挂载 — omcctl sweep-paths --apply 在 worker 容器内直接
       # 写 supported="false",通过 bind mount 反映到宿主,git diff 审阅后 commit。
       - ../../omcgo/data/param-mappings:/etc/omcgo/data/param-mappings
-      # T-0178: 自定义 paramModel XML(worker BackupCleanup cron 需 rw 清理 .deleted/.bak/.tmp)
-      - ../../omcgo/data/param-mappings-custom:/etc/omcgo/data/param-mappings-custom
-      # T-0180: builtin indicator XML 镜像层目录 bind-mount(与 T-0183 param-mappings
-      # 同范式),与 app 服务保持文件视图一致 — worker reload/cleanup 也能看到同一份。
+      # T-0180: builtin indicator XML 镜像层目录 bind-mount,与 app 服务保持文件视图一致。
+      # 2026-06-03:取消 custom 分层目录,上传统一落 builtin。
       - ../../omcgo/data/indicator-library:/etc/omcgo/data/indicator-library
-      # T-0180: 自定义 indicator XML(worker BackupCleanup cron 需 rw 清理三制式子目录残留)
-      - ../../omcgo/data/indicator-library-custom:/etc/omcgo/data/indicator-library-custom
-      # 自定义告警 XML(worker BackupCleanup cron 需 rw 清理扁平目录残留)
-      - ../../omcgo/data/alarm-definitions-custom:/etc/omcgo/data/alarm-definitions-custom
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       migrate-seed:

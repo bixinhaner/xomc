@@ -8,10 +8,12 @@
  *   4. URL 同步 ?neType=ENB(刷新不回列表;返回按钮显式回一级)
  *   5. 8 个 icon 对齐 param-model 风格(返回 / 上传 / 重载 / 刷新 / 删除 / 详情 / 新增 / 警告)
  *
- * 2026-05-29 二次调整(本次):
- *   a. "重载 XML" / "刷新缓存" 只在一级页面保留,详情页面不显示
- *   b. 列表头改 i18n,中英文随站点语言切换
- *   c. 取消"搜索网元类型"输入框 — 数据极少(LTE/GSM/NR 等),无搜索必要
+ * 2026-06-03 三页统一(本次):
+ *   a. 合并「导入 XML / 重载 XML / 刷新缓存」为单个「导入 XML」按钮 —— 打开文件上传弹窗
+ *      AlarmUploadXmlModal(端点 POST /alarm-definitions/upload-xml,后端上传内部已自动
+ *      destructive 重载 + 刷新缓存);旧的 import-directory / cache/refresh 端点已下线。
+ *   b. 一级 ne-types 表删除"来源(builtin/custom)"列,保留"加载源(loaded_from)"列。
+ *   c. 所有文件均可删除,去掉 deletable 置灰守门。
  */
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
@@ -30,20 +32,15 @@ import {
 } from 'antd';
 import {
   ArrowLeftOutlined,
-  CloudDownloadOutlined,
   CloudUploadOutlined,
   DeleteOutlined,
   EyeOutlined,
   PlusOutlined,
-  ReloadOutlined,
 } from '@ant-design/icons';
 import {
   useAlarmDefinitionList,
   useAlarmNeTypeStats,
   useDeleteAlarmDefinition,
-  useAlarmDefinitionImportDirectory,
-  useAlarmDefinitionReloadDirectory,
-  useAlarmDefinitionCacheRefresh,
   useAlarmDeleteFile,
 } from '@core/hooks/api/useAlarmDefinitions';
 import type {
@@ -52,6 +49,7 @@ import type {
   AlarmNeTypeStat,
 } from '@core/types/alarmDefinition';
 import AlarmDefinitionDrawer from './AlarmDefinitionDrawer';
+import AlarmUploadXmlModal from './AlarmUploadXmlModal';
 import { makeSeqColumn } from '@/components/Table/seqColumn';
 import { useT } from '@/hooks/useT';
 // 2026-05-29:"未识别频次"入口暂时隐藏(后端聚合 / 统计逻辑未完工,详见
@@ -137,16 +135,12 @@ export default function AlarmLibraryPage() {
   // ── 公共 ───────────────────────────────────────────────────────
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState<AlarmDefinition | null>(null);
+  // 2026-06-03:「导入 XML」改为打开文件上传弹窗(替代旧 import-directory 调用)。
+  const [uploadOpen, setUploadOpen] = useState(false);
   // statsOpen 暂时移除 — "未识别频次"功能未完工(见 backlog T-0181)
 
   const delMut = useDeleteAlarmDefinition();
   const deleteFileMut = useAlarmDeleteFile();
-  // 2026-05-29:与 parammodel 对齐拆 import / reload 两个 mutation,UI 拆两按钮:
-  //   - 导入 XML(import):加法 UPSERT,不删孤儿(UI 中手工添加的告警保留)
-  //   - 重载 XML(reload):destructive 全量重载,删 DB 中无 XML 对应的孤儿
-  const importMut = useAlarmDefinitionImportDirectory();
-  const reloadMut = useAlarmDefinitionReloadDirectory();
-  const cacheMut = useAlarmDefinitionCacheRefresh();
 
   // 2026-06-03:严重级别下拉从 severitySourceData(不带 severityCode 过滤的独立查询)排重派生,
   // 选项稳定、不随选中收缩;与表格"严重级别"列口径仍一致(同一 alarm_definitions 数据源)。
@@ -185,21 +179,7 @@ export default function AlarmLibraryPage() {
       ),
     },
     {
-      // 来源:后端 source.go::ClassifySource 按 loaded_from 前缀派生,前端只渲染(对标 kpi-library)
-      title: t('common.source'),
-      dataIndex: 'source',
-      width: 90,
-      filters: [
-        { text: t('common.builtin'), value: 'builtin' },
-        { text: t('common.custom'), value: 'custom' },
-      ],
-      onFilter: (val: boolean | React.Key, row: AlarmNeTypeStat) => row.source === val,
-      render: (s: AlarmNeTypeStat['source']) =>
-        s === 'custom'
-          ? <Tag color="blue">{t('common.custom')}</Tag>
-          : <Tag>{t('common.builtin')}</Tag>,
-    },
-    {
+      // 2026-06-03 用户决策:去掉"来源(builtin/custom)"列,保留"加载源(loaded_from)"列。
       // 加载源:显示完整路径(参考 product/kpi-library)
       title: t('common.loadedFrom'),
       dataIndex: 'loadedFrom',
@@ -234,41 +214,36 @@ export default function AlarmLibraryPage() {
       render: (v: number) => (v > 0 ? <Tag color="blue">{v}</Tag> : <span>—</span>),
     },
     {
-      // 操作:仅自定义(custom)XML 可删;内置(builtin)置灰 + Tooltip(对标 kpi-library)
+      // 2026-06-03 用户决策:所有文件均可删除,去掉 deletable 置灰守门。
       title: t('alarmLibrary.col.actions'),
       width: 80,
-      render: (_: unknown, row: AlarmNeTypeStat) =>
-        row.deletable ? (
-          <Popconfirm
-            title={t('product.alarm.xml.delTitle')}
-            description={
-              <div style={{ maxWidth: 320 }}>
-                {t('product.alarm.xml.deleteBullet1Pre')}<code>.deleted.&lt;ts&gt;</code>{t('product.alarm.xml.deleteBullet1Post')}
-                <br />{t('product.alarm.xml.deleteBullet2', { count: row.total })}
-              </div>
-            }
-            okText={t('common.delete')}
-            okButtonProps={{ danger: true }}
-            onConfirm={() =>
-              deleteFileMut
-                .mutateAsync(row.loadedFrom)
-                .then((r) =>
-                  message.success(
-                    r.backup
-                      ? t('product.alarm.xml.deleteSuccessWithBackup', { backup: r.backup })
-                      : t('common.deleted'),
-                  ),
-                )
-                .catch((e) => message.error((e as Error).message))
-            }
-          >
-            <Button size="small" danger icon={<DeleteOutlined />} />
-          </Popconfirm>
-        ) : (
-          <Tooltip title={t('product.alarm.xml.builtinTip')} placement="topRight">
-            <Button size="small" danger disabled icon={<DeleteOutlined />} aria-label="builtin XML not deletable" />
-          </Tooltip>
-        ),
+      render: (_: unknown, row: AlarmNeTypeStat) => (
+        <Popconfirm
+          title={t('product.alarm.xml.delTitle')}
+          description={
+            <div style={{ maxWidth: 320 }}>
+              {t('product.alarm.xml.deleteBullet1Pre')}<code>.deleted.&lt;ts&gt;</code>{t('product.alarm.xml.deleteBullet1Post')}
+              <br />{t('product.alarm.xml.deleteBullet2', { count: row.total })}
+            </div>
+          }
+          okText={t('common.delete')}
+          okButtonProps={{ danger: true }}
+          onConfirm={() =>
+            deleteFileMut
+              .mutateAsync(row.loadedFrom)
+              .then((r) =>
+                message.success(
+                  r.backup
+                    ? t('product.alarm.xml.deleteSuccessWithBackup', { backup: r.backup })
+                    : t('common.deleted'),
+                ),
+              )
+              .catch((e) => message.error((e as Error).message))
+          }
+        >
+          <Button size="small" danger icon={<DeleteOutlined />} />
+        </Popconfirm>
+      ),
     },
   ];
 
@@ -402,78 +377,11 @@ export default function AlarmLibraryPage() {
                 </Button>
               </>
             ) : (
-              <>
-                {/* 上传功能已删除：与「导入 XML」重复（用户决策 2026-06-02）。 */}
-                {/* 2026-05-29 与 parammodel 对齐拆两按钮:导入 = 加法 UPSERT;重载 = destructive 删孤儿 */}
-                <Popconfirm
-                  title={t('product.kpi.importTitle')}
-                  description={
-                    <div style={{ maxWidth: 320 }}>
-                      {t('product.alarm.importDesc')}
-                      <br />{t('product.alarm.bullet.importAdd')}
-                      <br />{t('product.alarm.bullet.importUpdate')}
-                      
-                    </div>
-                  }
-                  okText={t('product.kpi.importOk')}
-                  cancelText={t('common.cancel')}
-                  placement="bottomRight"
-                  onConfirm={() => {
-                    importMut
-                      .mutateAsync()
-                      .then((r) => message.success(t('product.alarm.importSuccess', { count: r.reloaded })))
-                      .catch((error) => message.error((error as Error).message));
-                  }}
-                >
-                  <Button icon={<CloudUploadOutlined />} loading={importMut.isPending}>
-                    {t('common.importXml')}
-                  </Button>
-                </Popconfirm>
-                <Popconfirm
-                  title={t('product.paramModel.reloadTitle')}
-                  description={
-                    <div style={{ maxWidth: 360 }}>
-                      {t('product.alarm.reloadDesc')}
-                      <br />{t('product.alarm.bullet.reloadUpsert')}
-                      
-                      <br />{t('common.actionUndoable')}
-                    </div>
-                  }
-                  okText={t('product.products.reloadOk')}
-                  cancelText={t('common.cancel')}
-                  okButtonProps={{ danger: true }}
-                  placement="bottomRight"
-                  onConfirm={() => {
-                    reloadMut
-                      .mutateAsync()
-                      .then((raw) => {
-                        const r = raw as { reloaded: number; orphans_deleted: number };
-                        return message.success(
-                          r.orphans_deleted > 0
-                            ? t('product.alarm.reloadOrphans', { count: r.reloaded, orphans: r.orphans_deleted })
-                            : t('product.alarm.reloadSuccess', { count: r.reloaded }),
-                        );
-                      })
-                      .catch((error) => message.error((error as Error).message));
-                  }}
-                >
-                  <Button icon={<CloudDownloadOutlined />} loading={reloadMut.isPending} danger>
-                    {t('common.reloadXml')}
-                  </Button>
-                </Popconfirm>
-                <Button
-                  icon={<ReloadOutlined />}
-                  loading={cacheMut.isPending}
-                  onClick={() =>
-                    cacheMut
-                      .mutateAsync()
-                      .then(() => message.success(t('common.cacheRefreshed')))
-                      .catch((e) => message.error((e as Error).message))
-                  }
-                >
-                  {t('common.refreshCache')}
-                </Button>
-              </>
+              // 2026-06-03 用户决策:合并为单个「导入 XML」按钮 → 打开文件上传弹窗。
+              // 后端上传端点内部已自动 destructive 重载 + 刷新缓存,前端无需再单独调。
+              <Button icon={<CloudUploadOutlined />} onClick={() => setUploadOpen(true)}>
+                {t('common.importXml')}
+              </Button>
             )}
           </Space>
         </Space>
@@ -519,6 +427,7 @@ export default function AlarmLibraryPage() {
           setEditing(null);
         }}
       />
+      <AlarmUploadXmlModal open={uploadOpen} onClose={() => setUploadOpen(false)} />
       {/* <UnknownStatsModal open={statsOpen} onClose={() => setStatsOpen(false)} /> */}
     </div>
   );

@@ -2,7 +2,6 @@ package indicator
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -20,11 +19,9 @@ import (
 // （/api/v1/indicators 系列）。它与既有 IndicatorHandler（/pm/indicatormg 子树）
 // 路径互不重叠，是治理（产品管理皮肤）视角的纯 REST 入口。
 type RESTHandler struct {
-	svc      *IndicatorManagementService
-	formula  PlatformFormulaRepository
-	reloader Reloader
-	fileRepo FileRepository // T-0180 P1.5: 供 ImportDirectory ?mode=reload 调 DeleteOrphansBefore
-	logger   *zap.Logger
+	svc     *IndicatorManagementService
+	formula PlatformFormulaRepository
+	logger  *zap.Logger
 }
 
 // Reloader 抽象 dictloader.Registry.ReloadOne — 让 handler 不强依赖 dictloader。
@@ -32,19 +29,19 @@ type Reloader interface {
 	ReloadOne(ctx context.Context, name string) error
 }
 
-// NewRESTHandler 构造 P3-03 REST handler。
-// fileRepo 可为 nil — 此时 ImportDirectory ?mode=reload 返 503(测试场景常用)。
+// NewRESTHandler 构造 REST handler(indicator 行级 CRUD + groups + enabled)。
+//
+// 2026-06-03 用户决策:import-directory / cache/refresh 端点已下线(合并进 upload-xml),
+// 故不再需要 reloader / fileRepo 注入。
 func NewRESTHandler(
 	svc *IndicatorManagementService,
 	formula PlatformFormulaRepository,
-	reloader Reloader,
-	fileRepo FileRepository,
 	logger *zap.Logger,
 ) *RESTHandler {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &RESTHandler{svc: svc, formula: formula, reloader: reloader, fileRepo: fileRepo, logger: logger.Named("indicator.rest")}
+	return &RESTHandler{svc: svc, formula: formula, logger: logger.Named("indicator.rest")}
 }
 
 // RegisterRoutes 挂在 /api/v1 下。
@@ -53,8 +50,6 @@ func (h *RESTHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	ig := rg.Group("/indicators")
 	ig.GET("", h.ListIndicators)
 	ig.GET("/platforms", h.ListPlatforms)
-	ig.POST("/import-directory", h.ImportDirectory)
-	ig.POST("/cache/refresh", h.CacheRefresh)
 	ig.GET("/:id", h.GetIndicator)
 	ig.POST("", h.CreateIndicator)
 	ig.PUT("/:id", h.UpdateIndicator)
@@ -507,65 +502,4 @@ func (h *RESTHandler) SetEnabled(c *gin.Context) {
 		return
 	}
 	response.OK(c, gin.H{"updated": len(req.IndicatorIDs), "operator_code": op, "enable": req.Enable})
-}
-
-
-// ── Cache + Import ──────────────────────────────────────────────────
-
-// ImportDirectory POST /api/v1/indicators/import-directory?mode=import|reload
-//
-// T-0180 P1.5: 解析 ?mode= 路由两种语义:
-//   - import(默认,向后兼容)— 仅 Loader.Reload(加法 UPSERT);不删孤儿
-//   - reload — Loader.Reload + 三制式 DeleteOrphansBefore(destructive 全量重载)
-//     依赖 perf_indicators_<tech> BEFORE UPDATE trigger 自动刷 updated_at
-func (h *RESTHandler) ImportDirectory(c *gin.Context) {
-	if h.reloader == nil {
-		commonerrors.AbortWithError(c, http.StatusServiceUnavailable, errors.New("dictloader registry not wired"))
-		return
-	}
-
-	mode, err := ParseReloadMode(c.Query("mode"))
-	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
-		return
-	}
-
-	switch mode {
-	case ReloadModeImport:
-		// 老行为:仅 UPSERT,不删孤儿
-		if err := h.reloader.ReloadOne(c.Request.Context(), LoaderName); err != nil {
-			commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
-			return
-		}
-		response.OK(c, gin.H{
-			"reloaded": LoaderName,
-			"mode":     string(ReloadModeImport),
-		})
-
-	case ReloadModeReload:
-		// destructive 模式需 fileRepo 才能删孤儿
-		if h.fileRepo == nil {
-			commonerrors.AbortWithError(c, http.StatusServiceUnavailable,
-				errors.New("file repository not wired; reload mode unavailable"))
-			return
-		}
-		result, err := PerformReloadWithOrphans(c.Request.Context(), h.fileRepo, h.reloader, h.logger)
-		if err != nil {
-			commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
-			return
-		}
-		response.OK(c, gin.H{
-			"reloaded": LoaderName,
-			"mode":     string(result.Mode),
-			"orphans":  result.Orphans,
-		})
-	}
-}
-
-func (h *RESTHandler) CacheRefresh(c *gin.Context) {
-	// 触发跨实例失效：递增 indicator:cache_version（设计 §2.8 + dictloader §5.4 协议）。
-	// service 自身用 pull-through 缓存，本端实例下次查询从 DB 重读；其他实例 30s 内
-	// 轮询到 cache_version 变化后清空 L1 sync.Map。
-	h.svc.BumpCacheVersion(c.Request.Context())
-	response.OK(c, gin.H{"refreshed": true})
 }

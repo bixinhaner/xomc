@@ -361,6 +361,14 @@ ratelimit:inform:{device_serial}     — 限流计数器
 
 #### 5.3.1 ParamModel 自定义 XML 分层目录（T-0178）
 
+> **⚠️ 2026-06-03 已变更（用户决策，下方历史描述部分作废）**：
+> 「导入 XML / 重载 XML / 刷新缓存」三功能合并为单个 **「导入 XML」**。
+> - 取消 builtin/custom 目录区分：上传**直接写 builtin 目录** `param-mappings/`（**接受升级丢失**，不再写 `*-custom`）；同名直接覆盖（前端上传前查重 + 覆盖确认，旧文件备份 `.bak.<ts>`）。
+> - 上传端点内部串联 **destructive 重载（删孤儿）+ 刷新缓存**；前端不再单独调用。
+> - 删除 HTTP 端点 `POST /param-models/import-directory`、`POST /param-models/cache/refresh`（底层 reload/cache 逻辑保留，供上传流程内部调用）。
+> - `source.go::IsDeletable` 恒 true（全部可删），前端去掉「来源」列、删除按钮恒可点。
+> 下面 T-0178 关于 custom 分层目录、`IsDeletable` 守门、来源列的描述均为历史背景，**以本注记为准**。
+
 **核心契约**：builtin XML 与 custom XML **物理隔离**两个目录,Loader 启动期合并扫描;后端唯一真值源 + 前端零代码同步规则改动。
 
 | 目录 | 位置 | 来源 | 生命周期 |
@@ -413,6 +421,9 @@ Loader.loadParamModelFile
 - `omcmb/webcode/src/pages/product/param-model/{index,ModelsTab}.tsx` — Upload + 来源 + 置灰
 
 #### 5.3.2 Indicator 自定义 XML 分层目录（T-0180）
+
+> **⚠️ 2026-06-03 已变更（用户决策，下方历史描述部分作废）**：同 5.3.1。
+> 「导入/重载/刷新缓存」合并为单个 **「导入 XML」**；上传**直接写 builtin** `indicator-library/`（ENB→`enb/<name>.xml`，GSM/GNB→根级 `GSM.xml`/`GNB.xml`，**接受升级丢失**）；上传端点内串联 **destructive 重载（`PerformReloadWithOrphans` 删孤儿）+ BumpCacheVersion**；删除 `POST /indicators/import-directory`、`POST /indicators/cache/refresh`；`IsDeletable` 恒 true，前端去「来源」列、全可删。以本注记为准。
 
 **核心契约**:builtin XML 与 custom XML 物理隔离两套目录,Loader 启动期合并扫描;后端唯一真值源 + 前端零代码同步。结构与 T-0178 ParamModel 同范式,**关键差异**:custom 侧三制式子目录化(`enb/gsm/gnb/`)而非扁平。
 
@@ -498,6 +509,9 @@ Loader.parseDocs
 - `omcmb/webcode/src/pages/product/kpi-library/{index,SummaryTab,IndicatorsByTech,XMLFilesModal,UploadXmlModal,UnitsDrawer}.tsx` — drill-down + URL 同步
 
 #### 5.3.3 Alarm 自定义 XML 分层目录（严格对标 T-0180 indicator）
+
+> **⚠️ 2026-06-03 已变更（用户决策，下方历史描述部分作废）**：同 5.3.1。
+> 「导入/重载/刷新缓存」合并为单个 **「导入 XML」**；上传**直接写 builtin** `alarm-definitions/<name>.xml`（**接受升级丢失**）；上传端点内串联 **destructive 重载（删孤儿 `DeleteOrphansSince`）+ RefreshCache**；删除 `POST /alarm-definitions/import-directory`、`POST /alarm-definitions/cache/refresh`；`IsDeletable` 恒 true，前端去「来源」列、全可删。以本注记为准。
 
 **核心契约**:builtin XML 与 custom XML 物理隔离两套目录,Loader 启动期合并扫描;后端唯一真值源 + 前端零代码同步。与 T-0180 indicator 同范式,**关键差异**:告警按 ne_type 组织、custom 目录**扁平**(无 enb/gsm/gnb 子目录);"自定义"对应用户上传的 XML 文件。
 

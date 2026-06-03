@@ -256,31 +256,9 @@ export const alarmDefinitionApi = {
     };
   },
 
-  async cacheRefresh(): Promise<{ refreshed: boolean }> {
-    const { data } = await http.post<{ refreshed: boolean }>('/alarm-definitions/cache/refresh');
-    return data;
-  },
-
-  /** 2026-05-29:与 parammodel 模式对齐,拆 import / reload 两个语义,同端点
-   *  走 ?mode= 区分。
-   *  import 模式 = 加法 UPSERT(不删孤儿,UI 中手工添加的告警保留);
-   *  reload 模式 = destructive 全量重载(完成 UPSERT 后删 DB 中无 XML 对应的孤儿)。
-   */
-  async importDirectory(): Promise<{ reloaded: string; mode: string; orphans_deleted: number }> {
-    const { data } = await http.post<{ reloaded: string; mode: string; orphans_deleted: number }>(
-      '/alarm-definitions/import-directory?mode=import',
-    );
-    return data;
-  },
-
-  async reloadDirectory(): Promise<{ reloaded: string; mode: string; orphans_deleted: number }> {
-    const { data } = await http.post<{ reloaded: string; mode: string; orphans_deleted: number }>(
-      '/alarm-definitions/import-directory?mode=reload',
-    );
-    return data;
-  },
-
-  /** 上传自定义告警 XML(multipart)。同名冲突后端返 409,前端走 force=true 重试覆盖。 */
+  /** 上传自定义告警 XML(multipart)。同名冲突后端返 409,前端走 force=true 重试覆盖。
+   *  2026-06-03:后端上传端点内部已自动 destructive 重载(删孤儿)+ 刷新缓存,
+   *  旧的 cacheRefresh / importDirectory / reloadDirectory 端点已下线。 */
   async uploadXml(file: File, options: { force?: boolean } = {}): Promise<AlarmUploadResult> {
     const form = new FormData();
     form.append('file', file);

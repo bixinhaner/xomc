@@ -10,7 +10,6 @@ import type {
   CreateGroupInput,
   UpdateGroupInput,
   EnabledIndicatorsRequest,
-  IndicatorReloadMode,
   TechLower,
 } from '../../types/indicatorLibrary';
 
@@ -202,23 +201,6 @@ export function useSetEnabledIndicators() {
         queryKey: [...IL_KEY, 'enabled', vars.deviceType, vars.operatorCode],
       });
       void qc.invalidateQueries({ queryKey: [...IL_KEY, 'list', vars.deviceType] });
-    },
-  });
-}
-
-export function useIndicatorCacheRefresh() {
-  return useMutation({
-    mutationFn: () => api.cacheRefresh(),
-  });
-}
-
-export function useIndicatorImportDirectory() {
-  const qc = useQueryClient();
-  return useMutation({
-    // T-0180 P1.5: 默认 "import"(向后兼容);UI "重载 XML" 按钮传 "reload"
-    mutationFn: (mode: IndicatorReloadMode = 'import') => api.importDirectory(mode),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: IL_KEY });
     },
   });
 }

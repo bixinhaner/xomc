@@ -20,16 +20,18 @@ import (
 	"github.com/omcgo/omcgo/internal/core/response"
 )
 
-// FileHandler 提供告警库 XML 文件粒度的上传/删除端点(严格对标 T-0180 indicator FileHandler;
-// 告警侧 custom 目录扁平,无 tech 段):
-//   - POST   /api/v1/alarm-definitions/upload-xml[?force=] — 上传自定义 XML,自动 Reload + RefreshCache
-//   - DELETE /api/v1/alarm-definitions/files/{*loadedFrom}  — 删除自定义 XML + DB 行 + RefreshCache
+// FileHandler 提供告警库 XML 文件粒度的上传/删除端点。告警库 XML 管理重构后,
+// "导入 XML / 重载 XML / 刷新缓存"三个功能合并为一个 upload-xml 端点:
+//   - POST   /api/v1/alarm-definitions/upload-xml[?force=] — 写文件(同名 force 覆盖 + .bak 备份)
+//     → destructive 全量重载(删孤儿)→ RefreshCache,三步顺序完成
+//   - DELETE /api/v1/alarm-definitions/files/{*loadedFrom}  — 删除 XML 文件 + DB 行 + RefreshCache
 //
-// 与 handler.go 的 CRUD(单条告警定义粒度)隔离,本 handler 管文件粒度。
+// 取消 builtin/custom 区分:上传统一写进 builtin 目录(Loader 扫描的同一目录),
+// 接受升级丢失;所有文件均可删。与 handler.go 的 CRUD(单条告警定义粒度)隔离。
 type FileHandler struct {
 	repo      FileRepository
-	service   *Service // RefreshCache:上传/删除后刷新内存 Registry
-	reloader  Reloader // ReloadOne:上传后重扫目录 UPSERT 入库(可为 nil → 跳过)
+	service   *Service // RefreshCache + DeleteOrphansSince:上传/删除后刷新内存 Registry / 删孤儿
+	reloader  Reloader // ReloadOne:上传后全量重扫目录 UPSERT 入库(可为 nil → 跳过)
 	baseDir   string   // XMLBaseDir(= dictloader.XMLBaseDir,如 /etc/omcgo/data)
 	fileLocks sync.Map // map[basename(string)]*sync.Mutex
 	logger    *zap.Logger
@@ -44,7 +46,7 @@ func NewFileHandler(repo FileRepository, service *Service, reloader Reloader, ba
 }
 
 // RegisterRoutes 挂在 /api/v1 之下;内部使用 /alarm-definitions/... 子路径。
-// gin 的 *loadedFrom 是 catch-all wildcard,承载 "alarm-definitions-custom/MY.xml" 多段相对路径。
+// gin 的 *loadedFrom 是 catch-all wildcard,承载 "alarm-definitions/MY.xml" 多段相对路径。
 func (h *FileHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	g := rg.Group("/alarm-definitions")
 	g.POST("/upload-xml", h.UploadXML)
@@ -70,9 +72,14 @@ func (h *FileHandler) refreshCache(ctx context.Context) {
 	}
 }
 
-// validCustomPath 校验 loaded_from 恰好 = alarm-definitions-custom/<file>.xml(两段,防遍历)。
-func validCustomPath(loadedFrom string) bool {
-	if !strings.HasPrefix(loadedFrom, CustomDirPrefix) {
+// validAlarmFilePath 校验 loaded_from 恰好 = alarm-definitions/<file>.xml 或
+// alarm-definitions-custom/<file>.xml(两段,防遍历)。
+//
+// 告警库 XML 管理重构后上传统一写进 builtin 目录,故主路径是 BuiltinDirPrefix;
+// 同时兼容历史 custom 行(重构前上传过的文件),让其仍可删除。
+func validAlarmFilePath(loadedFrom string) bool {
+	if !strings.HasPrefix(loadedFrom, BuiltinDirPrefix) &&
+		!strings.HasPrefix(loadedFrom, CustomDirPrefix) {
 		return false
 	}
 	parts := strings.Split(loadedFrom, "/")
@@ -84,15 +91,15 @@ func validCustomPath(loadedFrom string) bool {
 
 // DeleteFile DELETE /api/v1/alarm-definitions/files/{loadedFrom}
 //
-// 守门链(对标 indicator DeleteFile):
+// 告警库 XML 管理重构后取消 builtin/custom 区分,所有 XML 文件一律可删
+// (IsDeletable 恒 true,不再有 403 拦截)。守门链:
 //  1. 解码 + normalize loaded_from
-//  2. IsDeletable → false 返 403 + ErrCodeAlarmBuiltinNotDeletable
-//  3. validCustomPath 二次防遍历
-//  4. CountByLoadedFrom=0 且 文件不存在 → 404
-//  5. acquireFileLock 持锁
-//  6. 物理 rename .deleted.<ts> 备份;失败保守回滚返 500 + ErrCodeAlarmBackupFailed
-//  7. DeleteByLoadedFrom;失败 rename 回滚
-//  8. RefreshCache + 审计日志 + 200
+//  2. validAlarmFilePath 二次防遍历(接受 builtin/custom 两种前缀)
+//  3. CountByLoadedFrom=0 且 文件不存在 → 404
+//  4. acquireFileLock 持锁
+//  5. 物理 rename .deleted.<ts> 备份;失败保守回滚返 500 + ErrCodeAlarmBackupFailed
+//  6. DeleteByLoadedFrom;失败 rename 回滚
+//  7. RefreshCache + 审计日志 + 200
 func (h *FileHandler) DeleteFile(c *gin.Context) {
 	raw := strings.TrimPrefix(c.Param("loadedFrom"), "/")
 	loadedFrom := filepath.ToSlash(filepath.Clean(raw))
@@ -101,20 +108,10 @@ func (h *FileHandler) DeleteFile(c *gin.Context) {
 		return
 	}
 
-	if !IsDeletable(loadedFrom) {
-		h.logger.Info("audit: alarm file delete rejected (builtin or unknown)",
-			zap.String("audit_action", "alarm.delete.rejected_builtin"),
-			zap.String("loaded_from", loadedFrom),
-			zap.String("source", string(ClassifySource(loadedFrom))))
-		commonerrors.AbortWithError(c, http.StatusForbidden,
-			fmt.Errorf("alarm XML %q (source=%s) is not deletable; "+
-				"builtin files are managed by the release image (data/alarm-definitions/) [code=%d]",
-				loadedFrom, ClassifySource(loadedFrom), global.ErrCodeAlarmBuiltinNotDeletable))
-		return
-	}
-	if !validCustomPath(loadedFrom) {
+	if !validAlarmFilePath(loadedFrom) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest,
-			fmt.Errorf("invalid custom alarm path %q (expected %s<file>.xml)", loadedFrom, CustomDirPrefix))
+			fmt.Errorf("invalid alarm xml path %q (expected %s<file>.xml or %s<file>.xml)",
+				loadedFrom, BuiltinDirPrefix, CustomDirPrefix))
 		return
 	}
 
@@ -171,8 +168,8 @@ func (h *FileHandler) DeleteFile(c *gin.Context) {
 	if backupPath != "" {
 		backupName = filepath.Base(backupPath)
 	}
-	h.logger.Info("audit: alarm file deleted (custom)",
-		zap.String("audit_action", "alarm.delete.custom"),
+	h.logger.Info("audit: alarm file deleted",
+		zap.String("audit_action", "alarm.delete"),
 		zap.String("loaded_from", loadedFrom),
 		zap.Int("rows_affected", rowsAffected),
 		zap.String("backup", backupName))
@@ -188,8 +185,9 @@ func (h *FileHandler) DeleteFile(c *gin.Context) {
 // UploadXML POST /api/v1/alarm-definitions/upload-xml[?force=true]
 //
 // multipart/form-data;字段 file = XML 字节流。守门链:文件大小 → 文件名白名单 →
-// XML 根 <alarmModel> → 路径不逃逸。写入:tmp → (overwrite 备份 .bak) → rename →
-// Reload(UPSERT 入库)→ RefreshCache。
+// XML 根 <alarmModel> → 路径不逃逸(写进 builtin 目录)。写入:tmp → (overwrite 备份 .bak)
+// → rename → destructive 全量重载(UPSERT 入库 + 删孤儿)→ RefreshCache。
+// 后三步失败只 Warn 不致命(文件已落盘)。
 func (h *FileHandler) UploadXML(c *gin.Context) {
 	force := c.Query("force") == "true"
 
@@ -239,19 +237,21 @@ func (h *FileHandler) UploadXML(c *gin.Context) {
 		return
 	}
 
-	customDir := filepath.Join(h.baseDir, CustomDirSubdir)
-	targetPath := filepath.Join(customDir, base)
-	if !pathContainedIn(customDir, targetPath) {
+	// 告警库 XML 管理重构:取消 builtin/custom 区分,上传直接写进 builtin 目录
+	// (Loader 扫描的同一目录),接受升级丢失。
+	builtinDir := filepath.Join(h.baseDir, BuiltinDirSubdir)
+	targetPath := filepath.Join(builtinDir, base)
+	if !pathContainedIn(builtinDir, targetPath) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest,
-			fmt.Errorf("computed target path %q escapes custom dir %q", targetPath, customDir))
+			fmt.Errorf("computed target path %q escapes builtin dir %q", targetPath, builtinDir))
 		return
 	}
 
 	unlock := h.acquireFileLock(base)
 	defer unlock()
 
-	if err := os.MkdirAll(customDir, 0o755); err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, fmt.Errorf("mkdir custom dir: %w", err))
+	if err := os.MkdirAll(builtinDir, 0o755); err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, fmt.Errorf("mkdir builtin dir: %w", err))
 		return
 	}
 
@@ -295,8 +295,14 @@ func (h *FileHandler) UploadXML(c *gin.Context) {
 		return
 	}
 
-	loadedFrom := filepath.ToSlash(filepath.Join(CustomDirSubdir, base))
+	loadedFrom := filepath.ToSlash(filepath.Join(BuiltinDirSubdir, base))
 
+	// 导入 = 写文件 → destructive 全量重载(删孤儿) → RefreshCache,三步顺序完成。
+	// 任一后续步骤失败只 Warn 不致命(文件已落盘,DB 最多落后一拍)。
+	//
+	// destructive 删孤儿:记录 startedAt,Loader 全量 UPSERT 后用 updated_at < startedAt
+	// 判定本次未被触达的旧定义为孤儿并删除(与原"重载 XML"端点 mode=reload 同语义)。
+	startedAt := time.Now()
 	reloadOK := true
 	if h.reloader != nil {
 		if err := h.reloader.ReloadOne(c.Request.Context(), LoaderName); err != nil {
@@ -306,6 +312,19 @@ func (h *FileHandler) UploadXML(c *gin.Context) {
 				zap.String("loaded_from", loadedFrom), zap.Error(err))
 		}
 	}
+
+	var orphansDeleted int64
+	if reloadOK && h.service != nil {
+		n, err := h.service.DeleteOrphansSince(c.Request.Context(), startedAt)
+		if err != nil {
+			h.logger.Warn("audit: alarm upload orphan cleanup failed (reload ok, orphans kept)",
+				zap.String("audit_action", "alarm.upload.orphan_cleanup_failed"),
+				zap.String("loaded_from", loadedFrom), zap.Error(err))
+		} else {
+			orphansDeleted = n
+		}
+	}
+
 	h.refreshCache(c.Request.Context())
 
 	backupName := ""
@@ -318,6 +337,7 @@ func (h *FileHandler) UploadXML(c *gin.Context) {
 		zap.Bool("overwrite", overwrite),
 		zap.Int("body_size", len(body)),
 		zap.Bool("reload_ok", reloadOK),
+		zap.Int64("orphans_deleted", orphansDeleted),
 		zap.String("backup", backupName))
 
 	status := http.StatusCreated
@@ -325,20 +345,23 @@ func (h *FileHandler) UploadXML(c *gin.Context) {
 		status = http.StatusOK
 	}
 	response.OKWithStatus(c, status, gin.H{
-		"uploaded":    true,
-		"filename":    base,
-		"loaded_from": loadedFrom,
-		"overwrite":   overwrite,
-		"backup":      backupName,
-		"reloaded":    reloadOK,
+		"uploaded":        true,
+		"filename":        base,
+		"loaded_from":     loadedFrom,
+		"overwrite":       overwrite,
+		"backup":          backupName,
+		"reloaded":        reloadOK,
+		"orphans_deleted": orphansDeleted,
 	})
 }
 
-// EnsureBaseDir 确保 baseDir/<CustomDirSubdir>/ 目录存在(0755)。启动期由 provider 调用。
+// EnsureBaseDir 确保 baseDir/<BuiltinDirSubdir>/ 目录存在(0755)。启动期由 provider 调用。
+// 告警库 XML 管理重构后上传统一写进 builtin 目录(Loader 扫描的同一目录),故这里确保
+// builtin 目录存在(镜像层通常已有,空库 / 本地裸跑时兜底)。
 func EnsureBaseDir(baseDir string) error {
-	dir := filepath.Join(baseDir, CustomDirSubdir)
+	dir := filepath.Join(baseDir, BuiltinDirSubdir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("ensure alarm custom dir %s: %w", dir, err)
+		return fmt.Errorf("ensure alarm builtin dir %s: %w", dir, err)
 	}
 	return nil
 }

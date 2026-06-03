@@ -8,41 +8,16 @@ import (
 	"go.uber.org/zap"
 )
 
-// ReloadMode 是 POST /api/v1/indicators/import-directory?mode= 的合法值。
-type ReloadMode string
-
-const (
-	// ReloadModeImport: 加法 UPSERT — 仅刷新 XML 中已有指标的 DB 行,
-	// 不删除 XML 文件已移除但 DB 仍残留的"孤儿"指标(向后兼容,默认行为)。
-	ReloadModeImport ReloadMode = "import"
-	// ReloadModeReload: destructive 全量重载 — 触发 Loader 全量 UPSERT
-	// (BEFORE UPDATE trigger 自动刷 updated_at),然后删除 updated_at <
-	// 重载开始时刻 的孤儿指标 + 级联 formula/enabled 行。
-	ReloadModeReload ReloadMode = "reload"
-)
-
-// ParseReloadMode 解析 ?mode= query 值;空串视为 import(向后兼容老接口)。
-//
-// 非空但非 import/reload 返错(供 handler 转 400)。
-func ParseReloadMode(s string) (ReloadMode, error) {
-	switch s {
-	case "", string(ReloadModeImport):
-		return ReloadModeImport, nil
-	case string(ReloadModeReload):
-		return ReloadModeReload, nil
-	default:
-		return "", fmt.Errorf("invalid mode %q: must be one of import|reload", s)
-	}
-}
-
 // ReloadResult 是 PerformReloadWithOrphans 的返回值。
 // Orphans 按 tech 拆分,便于前端 message.success 显示 "已重载 + 删 N+M+K 个孤儿"。
+//
+// 2026-06-03 用户决策:导入 XML / 重载 XML / 刷新缓存 三功能合并为单一"导入 XML",
+// 上传端点内部固定走 destructive 重载(全量 + 删孤儿),不再有 import/reload 模式区分。
 type ReloadResult struct {
-	Mode    ReloadMode      `json:"mode"`
-	Orphans map[string]int  `json:"orphans"` // tech → 主表删除行数(仅 reload 模式非空)
+	Orphans map[string]int `json:"orphans"` // tech → 主表删除行数
 }
 
-// PerformReloadWithOrphans 执行 mode=reload 的核心 orchestration:
+// PerformReloadWithOrphans 执行 destructive 全量重载的核心 orchestration:
 //
 //  1. 记录 start = time.Now()(用作孤儿截断时刻)
 //  2. 调用 reloader.ReloadOne(LoaderName) — Loader 全量 UPSERT;
@@ -52,8 +27,7 @@ type ReloadResult struct {
 //
 // 任一步失败立即返,部分成功不视为成功(前端 message.error 显示具体原因)。
 //
-// 与 ReloadModeImport 的区别只在于"是否做 step 3";老 import-directory 端点
-// 保持仅 step 2 行为兼容(import 模式)。
+// 调用方:UploadXML 上传成功后串联此函数(写文件 → destructive 重载 → 刷新缓存)。
 func PerformReloadWithOrphans(
 	ctx context.Context,
 	repo FileRepository,
@@ -76,7 +50,6 @@ func PerformReloadWithOrphans(
 	}
 
 	result := ReloadResult{
-		Mode:    ReloadModeReload,
 		Orphans: make(map[string]int, 3),
 	}
 	for _, tech := range []string{"enb", "gsm", "gnb"} {

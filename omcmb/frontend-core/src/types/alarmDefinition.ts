@@ -98,8 +98,9 @@ export interface AlarmDeleteFileResult {
 export interface AlarmNeTypeStat {
   neType: string;
   loadedFrom: string;
-  source: AlarmSource;   // 后端派生:builtin(alarm-definitions/)/custom(alarm-definitions-custom/)/unknown
-  deletable: boolean;    // 后端守门:仅 custom 可删
+  // 2026-06-03:取消 builtin/custom 区分后,来源不再展示、全部可删;字段保留可选以兼容后端历史返回。
+  source?: AlarmSource;
+  deletable?: boolean;
   total: number;
   criticalCnt: number;
   majorCnt: number;

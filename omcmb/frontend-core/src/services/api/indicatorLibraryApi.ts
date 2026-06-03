@@ -12,8 +12,6 @@ import type {
   DeviceType,
   IndicatorPlatformSummary,
   IndicatorFile,
-  IndicatorReloadMode,
-  IndicatorReloadResult,
   IndicatorUploadResult,
   IndicatorDeleteFileResult,
   TechLower,
@@ -292,27 +290,6 @@ export const indicatorLibraryApi = {
       updated: data.updated,
       operatorCode: data.operator_code,
       enable: data.enable,
-    };
-  },
-
-  async cacheRefresh(): Promise<{ refreshed: boolean; note?: string }> {
-    const { data } = await http.post<{ refreshed: boolean; note?: string }>('/indicators/cache/refresh');
-    return data;
-  },
-
-  // T-0180 P1.5: import-directory 加 ?mode= 路由
-  //   "import"(默认) — 加法 UPSERT,不删孤儿(向后兼容)
-  //   "reload"        — destructive 全量重载 + 三制式孤儿删除
-  async importDirectory(mode: IndicatorReloadMode = 'import'): Promise<IndicatorReloadResult> {
-    const { data } = await http.post<{
-      reloaded: string;
-      mode: string;
-      orphans?: Record<string, number>;
-    }>(`/indicators/import-directory?mode=${mode}`);
-    return {
-      reloaded: data.reloaded,
-      mode: (data.mode as IndicatorReloadMode) ?? mode,
-      orphans: data.orphans as Record<TechLower, number> | undefined,
     };
   },
 

@@ -10,36 +10,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// ── ParseReloadMode 表驱动 ──────────────────────────────────────────
-
-func TestParseReloadMode(t *testing.T) {
-	cases := []struct {
-		name    string
-		input   string
-		want    ReloadMode
-		wantErr bool
-	}{
-		{"empty defaults to import", "", ReloadModeImport, false},
-		{"explicit import", "import", ReloadModeImport, false},
-		{"reload", "reload", ReloadModeReload, false},
-
-		{"unknown rejected", "destroy", "", true},
-		{"case-sensitive RELOAD rejected", "RELOAD", "", true},
-		{"whitespace rejected", "  reload", "", true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := ParseReloadMode(tc.input)
-			if tc.wantErr {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-				assert.Equal(t, tc.want, got)
-			}
-		})
-	}
-}
-
 // ── PerformReloadWithOrphans 行为 ────────────────────────────────────
 
 func TestPerformReloadWithOrphans_HappyPath(t *testing.T) {
@@ -53,7 +23,6 @@ func TestPerformReloadWithOrphans_HappyPath(t *testing.T) {
 	}
 	result, err := PerformReloadWithOrphans(context.Background(), repo, reloader, zap.NewNop())
 	assert.NoError(t, err)
-	assert.Equal(t, ReloadModeReload, result.Mode)
 	assert.Equal(t, 5, result.Orphans["enb"])
 	assert.Equal(t, 2, result.Orphans["gsm"])
 	assert.Equal(t, 0, result.Orphans["gnb"])

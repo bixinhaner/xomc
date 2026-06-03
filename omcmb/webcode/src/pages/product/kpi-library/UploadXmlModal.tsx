@@ -9,14 +9,16 @@
  *   <indicatorModel> 根 + platform 必填 + deviceType 匹配 tech);
  * 前端仅做 size/类型提示,真校验留后端响应。
  *
- * 409 冲突 → 弹二次确认走 force=true 重试;后端备份为 .bak.<ts>。
+ * 上传前查重(2026-06-03):真正上传前先用 useIndicatorFiles(tech) 取该制式已存在
+ *   的 XML 文件名,若文件名重复则弹覆盖确认 → force=true 上传;不重复则直接上传。
+ * 409 冲突 → 弹二次确认走 force=true 重试(后端兜底);后端备份为 .bak.<ts>。
  */
 import { useState } from 'react';
-import { Modal, Form, Select, Upload, message, Button, Space, Tag } from 'antd';
+import { Modal, Form, Select, Upload, message, Button, Space } from 'antd';
 import type { UploadFile, UploadProps } from 'antd/es/upload/interface';
 import { InboxOutlined } from '@ant-design/icons';
 import type { AxiosError } from 'axios';
-import { useIndicatorUploadXml } from '@core/hooks/api/useIndicatorsLibrary';
+import { useIndicatorUploadXml, useIndicatorFiles } from '@core/hooks/api/useIndicatorsLibrary';
 import type { TechLower } from '@core/types/indicatorLibrary';
 import { useT } from '@/hooks/useT';
 
@@ -58,6 +60,18 @@ export default function UploadXmlModal({ open, onClose }: Props) {
   const [form] = Form.useForm<FormValues>();
   const [fileList, setFileList] = useState<UploadFile[]>([]);
   const uploadMut = useIndicatorUploadXml();
+
+  // 上传前查重数据源:按当前所选制式取已存在的 XML 文件清单(loadedFrom)。
+  // 文件名比对走 basename 大小写不敏感,与后端同名判定口径一致。
+  const watchedTech = Form.useWatch('tech', form);
+  const { data: filesData } = useIndicatorFiles(open ? watchedTech : undefined);
+  const isDuplicate = (fileName: string): boolean => {
+    const target = fileName.toLowerCase();
+    return (filesData?.items || []).some((f) => {
+      const base = f.loadedFrom.split('/').pop()?.toLowerCase() ?? '';
+      return base === target;
+    });
+  };
 
   const reset = () => {
     form.resetFields();
@@ -103,6 +117,22 @@ export default function UploadXmlModal({ open, onClose }: Props) {
     }
   };
 
+  // 弹覆盖确认(查重命中 / 后端 409 兜底共用),确认后带 force=true 上传。
+  const confirmOverride = (tech: TechLower, file: File) => {
+    Modal.confirm({
+      title: t('product.kpi.upload.overrideTitle'),
+      content: (
+        <div style={{ maxWidth: 360 }}>
+          {t('product.kpi.upload.overrideContentPre')}<code>{file.name}</code>{t('product.kpi.upload.overrideContentPost')}
+          <br />{t('product.kpi.upload.backupHint')}
+        </div>
+      ),
+      okText: t('common.override'),
+      okButtonProps: { danger: true },
+      onOk: () => doUpload(tech, file, true),
+    });
+  };
+
   const handleSubmit = async () => {
     try {
       const v = await form.validateFields();
@@ -111,7 +141,13 @@ export default function UploadXmlModal({ open, onClose }: Props) {
         message.error(t('product.kpi.upload.selectXmlMsg'));
         return;
       }
-      await doUpload(v.tech, fileList[0].originFileObj, false);
+      const file = fileList[0].originFileObj;
+      // 上传前查重:文件名已存在 → 先弹覆盖确认;否则直接上传(409 仍作兜底)。
+      if (isDuplicate(file.name)) {
+        confirmOverride(v.tech, file);
+        return;
+      }
+      await doUpload(v.tech, file, false);
     } catch {
       /* form validation 失败,antd 自动显示错误,无需额外处理 */
     }
@@ -146,12 +182,7 @@ export default function UploadXmlModal({ open, onClose }: Props) {
 
   return (
     <Modal
-      title={
-        <Space>
-          <span>{t('product.kpi.upload.title')}</span>
-          <Tag color="blue">indicator-library-custom</Tag>
-        </Space>
-      }
+      title={t('product.kpi.upload.title')}
       open={open}
       onCancel={handleClose}
       footer={

@@ -87,15 +87,8 @@ services:
       - /opt/omc/etc/app.prod.yaml:/etc/omcgo/app.prod.yaml:ro
       # 日志卷（promtail / otelcol filelog 同样路径采集）
       - /opt/omc/run/logs/app:/run/logs/app
-      # T-0178: 自定义 paramModel XML 持久化(host 主权)
-      # 与镜像内 /etc/omcgo/data/param-mappings/(builtin,只读) 物理隔离,
-      # 升级 docker compose up -d 重建容器时 host 目录不动,custom XML 不丢
-      - /opt/omc/data/param-mappings-custom:/etc/omcgo/data/param-mappings-custom
-      # T-0180: 自定义 indicator XML 分层目录(enb/gsm/gnb 三制式子目录,host 主权)
-      # 与镜像内 /etc/omcgo/data/indicator-library/(builtin,只读) 物理隔离
-      - /opt/omc/data/indicator-library-custom:/etc/omcgo/data/indicator-library-custom
-      # 自定义告警 XML(扁平目录,host 主权);与镜像内 alarm-definitions/(builtin) 物理隔离
-      - /opt/omc/data/alarm-definitions-custom:/etc/omcgo/data/alarm-definitions-custom
+      # 2026-06-03:取消 custom 分层目录,上传统一落镜像内 builtin 目录(接受升级丢失);
+      # 不再 bind-mount *-custom 持久目录。
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       migrate-seed-sql:
@@ -150,13 +143,7 @@ services:
     volumes:
       - /opt/omc/etc/worker.prod.yaml:/etc/omcgo/worker.prod.yaml:ro
       - /opt/omc/run/logs/worker:/run/logs/worker
-      # T-0178: worker BackupCleanup cron(P2 阶段实施)需 unlink .deleted/.bak/.tmp
-      # 残留文件,因此 rw 挂载与 app 共享同一目录(单实例假设,CLAUDE.md §5.3 TODO)
-      - /opt/omc/data/param-mappings-custom:/etc/omcgo/data/param-mappings-custom
-      # T-0180: indicator 自定义 XML;worker BackupCleanup 扫 enb/gsm/gnb 子目录
-      - /opt/omc/data/indicator-library-custom:/etc/omcgo/data/indicator-library-custom
-      # 告警自定义 XML;worker BackupCleanup 扫扁平目录 .deleted/.bak/.tmp 残留
-      - /opt/omc/data/alarm-definitions-custom:/etc/omcgo/data/alarm-definitions-custom
+      # 2026-06-03:取消 custom 分层目录,不再 bind-mount *-custom 持久目录。
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       migrate-seed-sql:

@@ -112,18 +112,19 @@ func initPMModule(c *Container) error {
 	// 复用既有 IndicatorManagementService + PlatformFormulaRepository。
 	// 单位定义已迁移到数据字典(seed/000007),units CRUD 下线,不再注入 unit repo。
 	indicatorReloader := &indicatorReloader{reg: c.DictLoaderRegistry}
-	// T-0180 P1.5: 提前构造 fileRepo,RESTHandler 和 FileHandler 共用同一实例
+	// fileRepo 由 FileHandler 用于上传后的 destructive 重载(删孤儿)
 	indicatorFileRepo := indicator.NewPgFileRepository(c.PgPool)
+	// 2026-06-03 用户决策:import-directory / cache/refresh 端点已下线,RESTHandler 只保留行级 CRUD
 	indicatorRESTHandler := indicator.NewRESTHandler(
-		indicatorSvc, platformFormulaRepo, indicatorReloader,
-		indicatorFileRepo, logger.Named("indicator-rest"),
+		indicatorSvc, platformFormulaRepo, logger.Named("indicator-rest"),
 	)
 
-	// T-0180 P1.3+P1.4: XML 文件粒度管理(DELETE 守门 + 级联清理 + 上传 + 聚合 + 列表)
+	// XML 文件粒度管理(DELETE 级联清理 + 上传 + 聚合 + 列表)
 	// XMLBaseDir 与 dictloader 共用,确保 loaded_from 相对路径能 join 到正确绝对路径
-	// reloader 同 indicatorReloader(P1.4 Upload 成功后同步 Reload Loader,让 DB 立即可见新指标)
+	// 2026-06-03 用户决策:上传 = 写 builtin 目录 → destructive 重载(删孤儿)→ 刷新缓存
+	// reloader 触发 Loader.Reload;cache=indicatorSvc 重载成功后 BumpCacheVersion
 	indicatorFileHandler := indicator.NewFileHandler(
-		indicatorFileRepo, indicatorReloader, c.Cfg.DictLoader.XMLBaseDir, logger.Named("indicator-file"),
+		indicatorFileRepo, indicatorReloader, indicatorSvc, c.Cfg.DictLoader.XMLBaseDir, logger.Named("indicator-file"),
 	)
 	// 启动期幂等 mkdir host bind mount 三制式子目录,首次部署不报错
 	if err := indicator.EnsureBaseDir(context.Background(), c.Cfg.DictLoader.XMLBaseDir); err != nil {

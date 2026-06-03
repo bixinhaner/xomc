@@ -125,17 +125,6 @@ export interface IndicatorFile {
   onDisk: boolean;
 }
 
-// IndicatorReloadMode 对应后端 ReloadMode("import" | "reload");
-// import = 加法 UPSERT(默认/向后兼容);reload = destructive 全量重载 + 删孤儿
-export type IndicatorReloadMode = 'import' | 'reload';
-
-export interface IndicatorReloadResult {
-  reloaded: string;  // "indicator"
-  mode: IndicatorReloadMode;
-  // reload 模式下三制式孤儿删除计数;import 模式不返
-  orphans?: Record<TechLower, number>;
-}
-
 export interface IndicatorUploadResult {
   uploaded: boolean;
   filename: string;

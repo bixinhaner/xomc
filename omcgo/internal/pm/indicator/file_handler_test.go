@@ -132,7 +132,8 @@ func newTestRouterWithReloader(t *testing.T, repo FileRepository, reloader Reloa
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	rg := r.Group("/api/v1")
-	h := NewFileHandler(repo, reloader, baseDir, zap.NewNop())
+	// cache 传 nil:测试不验证缓存刷新(BumpCacheVersion 走 service+redis,单测无 redis)
+	h := NewFileHandler(repo, reloader, nil, baseDir, zap.NewNop())
 	h.RegisterRoutes(rg)
 	return r
 }
@@ -152,31 +153,57 @@ func writeCustomXML(t *testing.T, baseDir, tech, name string) string {
 	return filepath.ToSlash(rel)
 }
 
-// ── parseCustomTech 表驱动 ─────────────────────────────────────────
+// writeBuiltinENBXML 在 baseDir/indicator-library/enb/<file>.xml 写入空 indicator XML
+// (上传现在落地 builtin 目录,同名冲突/覆盖测试需预置 builtin 侧文件)。
+func writeBuiltinENBXML(t *testing.T, baseDir, name string) string {
+	t.Helper()
+	rel := filepath.Join(BuiltinDirSubdir, "enb", name)
+	abs := filepath.Join(baseDir, rel)
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	body := []byte(`<indicatorModel platform="X" indicatorCount="0"></indicatorModel>`)
+	if err := os.WriteFile(abs, body, 0o644); err != nil {
+		t.Fatalf("write %s: %v", abs, err)
+	}
+	return filepath.ToSlash(rel)
+}
 
-func TestParseCustomTech(t *testing.T) {
+// ── parseFileTech 表驱动 ─────────────────────────────────────────
+//
+// 2026-06-03 用户决策后,builtin 与 custom 路径都需识别 tech;builtin 不再被拒。
+
+func TestParseFileTech(t *testing.T) {
 	cases := []struct {
 		name     string
 		path     string
 		wantTech string
 		wantErr  bool
 	}{
-		{"valid enb", "indicator-library-custom/enb/MY.xml", "enb", false},
-		{"valid gsm", "indicator-library-custom/gsm/X.xml", "gsm", false},
-		{"valid gnb", "indicator-library-custom/gnb/Y.xml", "gnb", false},
+		// builtin(上传现在写这里)
+		{"builtin enb", "indicator-library/enb/ALL.xml", "enb", false},
+		{"builtin gsm root", "indicator-library/GSM.xml", "gsm", false},
+		{"builtin gnb root", "indicator-library/GNB.xml", "gnb", false},
 
-		{"builtin path rejected", "indicator-library/enb/ALL.xml", "", true},
+		// custom(历史残留仍可删)
+		{"custom enb", "indicator-library-custom/enb/MY.xml", "enb", false},
+		{"custom gsm", "indicator-library-custom/gsm/X.xml", "gsm", false},
+		{"custom gnb", "indicator-library-custom/gnb/Y.xml", "gnb", false},
+
 		{"empty path rejected", "", "", true},
 		{"wrong prefix rejected", "other/enb/X.xml", "", true},
-		{"too few segments", "indicator-library-custom/MY.xml", "", true},
-		{"too many segments", "indicator-library-custom/enb/sub/MY.xml", "", true},
-		{"invalid tech", "indicator-library-custom/lte/MY.xml", "", true},
+		{"bare filename rejected", "BARE.xml", "", true},
+		{"custom too few segments", "indicator-library-custom/MY.xml", "", true},
+		{"custom too many segments", "indicator-library-custom/enb/sub/MY.xml", "", true},
+		{"custom invalid tech", "indicator-library-custom/lte/MY.xml", "", true},
+		{"builtin unknown root file", "indicator-library/OTHER.xml", "", true},
+		{"builtin invalid tech subdir", "indicator-library/lte/X.xml", "", true},
 		{"traversal in filename", "indicator-library-custom/enb/../etc/passwd", "", true},
-		{"missing filename", "indicator-library-custom/enb/", "", true},
+		{"missing filename custom", "indicator-library-custom/enb/", "", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := parseCustomTech(tc.path)
+			got, err := parseFileTech(tc.path)
 			if tc.wantErr {
 				assert.Error(t, err)
 			} else {
@@ -189,31 +216,62 @@ func TestParseCustomTech(t *testing.T) {
 
 // ── DeleteFile HTTP 行为 ────────────────────────────────────────────
 
-func TestDeleteFile_BuiltinRejected_403(t *testing.T) {
+// 2026-06-03 用户决策:取消 builtin/custom 区分,builtin 文件现在也可删。
+func TestDeleteFile_BuiltinNowDeletable_200(t *testing.T) {
 	baseDir := t.TempDir()
-	repo := &mockFileRepository{}
+	// 在 builtin enb 子目录写一个文件
+	abs := filepath.Join(baseDir, BuiltinDirSubdir, "enb", "ALL.xml")
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(abs, []byte(`<indicatorModel platform="X"></indicatorModel>`), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	repo := &mockFileRepository{count: 5, deleteRows: 5}
 	r := newTestRouter(t, repo, baseDir)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/indicators/files/indicator-library/enb/ALL.xml", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusForbidden, w.Code)
-	body := w.Body.String()
-	assert.Contains(t, body, fmt.Sprintf("code=%d", global.ErrCodeIndicatorBuiltinNotDeletable))
-	assert.False(t, repo.calledDelete, "守门应在 repo 之前命中")
+	assert.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+	assert.True(t, repo.calledDelete)
+	assert.Equal(t, "enb", repo.calledTech)
 }
 
-func TestDeleteFile_UnknownPathRejected_403(t *testing.T) {
+// builtin 根级 GSM.xml 也可删(tech 由文件名推断)。
+func TestDeleteFile_BuiltinGsmRoot_200(t *testing.T) {
+	baseDir := t.TempDir()
+	abs := filepath.Join(baseDir, BuiltinDirSubdir, "GSM.xml")
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(abs, []byte(`<indicatorModel platform="BSC"></indicatorModel>`), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	repo := &mockFileRepository{count: 3, deleteRows: 3}
+	r := newTestRouter(t, repo, baseDir)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/indicators/files/indicator-library/GSM.xml", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+	assert.True(t, repo.calledDelete)
+	assert.Equal(t, "gsm", repo.calledTech)
+}
+
+func TestDeleteFile_BarePathRejected_400(t *testing.T) {
 	baseDir := t.TempDir()
 	repo := &mockFileRepository{}
 	r := newTestRouter(t, repo, baseDir)
 
-	// 裸文件名(无前缀)被分类为 Unknown → 守门拒绝
+	// 裸文件名(无前缀)无法推断 tech → 400
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/indicators/files/BARE.xml", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusForbidden, w.Code)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.False(t, repo.calledDelete)
 }
 
 func TestDeleteFile_InvalidTechSegment_400(t *testing.T) {
@@ -345,10 +403,9 @@ func TestEnsureBaseDir(t *testing.T) {
 	baseDir := t.TempDir()
 	err := EnsureBaseDir(context.Background(), baseDir)
 	assert.NoError(t, err)
-	for _, tech := range []string{"enb", "gsm", "gnb"} {
-		_, err := os.Stat(filepath.Join(baseDir, CustomDirSubdir, tech))
-		assert.NoError(t, err, "tech=%s 子目录应存在", tech)
-	}
+	// 2026-06-03 用户决策:上传写 builtin 目录,EnsureBaseDir 确保 builtin enb 子目录存在
+	_, err = os.Stat(filepath.Join(baseDir, BuiltinDirSubdir, "enb"))
+	assert.NoError(t, err, "builtin enb 子目录应存在")
 
 	// 幂等:重复跑不报错
 	err = EnsureBaseDir(context.Background(), baseDir)
@@ -446,9 +503,10 @@ func TestListFiles_DBAndDiskMerge(t *testing.T) {
 	}
 
 	// 1. builtin/ALL — DB 有 + 物理无(没在 baseDir 下) → OnDisk=false
+	// 2026-06-03 用户决策:builtin 现在也可删 → Deletable=true
 	if it, ok := byLF["indicator-library/enb/ALL.xml"]; ok {
 		assert.Equal(t, "builtin", it.Source)
-		assert.False(t, it.Deletable)
+		assert.True(t, it.Deletable)
 		assert.Equal(t, 123, it.Count)
 	}
 	// 2. custom/LOADED — DB 有 + 物理无(测试中没写) → OnDisk=false 但 Source/Deletable 正确
@@ -506,13 +564,13 @@ func TestUpload_HappyPath_201(t *testing.T) {
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusCreated, w.Code, "body=%s", w.Body.String())
 
-	// 物理文件应在 baseDir/indicator-library-custom/enb/MY.xml
-	target := filepath.Join(baseDir, CustomDirSubdir, "enb", "MY.xml")
+	// 2026-06-03:物理文件写进 builtin 目录 baseDir/indicator-library/enb/MY.xml
+	target := filepath.Join(baseDir, BuiltinDirSubdir, "enb", "MY.xml")
 	got, err := os.ReadFile(target)
 	assert.NoError(t, err)
 	assert.Equal(t, xml, got)
 
-	// Reloader 被调一次
+	// Reloader 被调一次(destructive 重载内部调 ReloadOne)
 	assert.Equal(t, 1, reloader.calls)
 
 	// 响应体含 loaded_from / overwrite=false
@@ -520,14 +578,15 @@ func TestUpload_HappyPath_201(t *testing.T) {
 		Data map[string]any `json:"data"`
 	}
 	_ = json.Unmarshal(w.Body.Bytes(), &resp)
-	assert.Equal(t, "indicator-library-custom/enb/MY.xml", resp.Data["loaded_from"])
+	assert.Equal(t, "indicator-library/enb/MY.xml", resp.Data["loaded_from"])
 	assert.Equal(t, false, resp.Data["overwrite"])
+	assert.Equal(t, true, resp.Data["reloaded"])
 }
 
 func TestUpload_OverwriteWithBackup_200(t *testing.T) {
 	baseDir := t.TempDir()
-	// 预置同名旧文件
-	writeCustomXML(t, baseDir, "enb", "MY.xml")
+	// 预置同名旧文件(builtin 侧)
+	writeBuiltinENBXML(t, baseDir, "MY.xml")
 	reloader := &stubReloader{}
 	repo := &mockFileRepository{}
 	r := newTestRouterWithReloader(t, repo, reloader, baseDir)
@@ -541,11 +600,11 @@ func TestUpload_OverwriteWithBackup_200(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
 
 	// 原文件被新内容覆盖
-	got, _ := os.ReadFile(filepath.Join(baseDir, CustomDirSubdir, "enb", "MY.xml"))
+	got, _ := os.ReadFile(filepath.Join(baseDir, BuiltinDirSubdir, "enb", "MY.xml"))
 	assert.Equal(t, xml, got)
 
 	// 同目录下有 .bak.* 备份
-	entries, _ := os.ReadDir(filepath.Join(baseDir, CustomDirSubdir, "enb"))
+	entries, _ := os.ReadDir(filepath.Join(baseDir, BuiltinDirSubdir, "enb"))
 	hasBackup := false
 	for _, e := range entries {
 		if strings.Contains(e.Name(), ".bak.") {
@@ -557,7 +616,7 @@ func TestUpload_OverwriteWithBackup_200(t *testing.T) {
 
 func TestUpload_ConflictWithoutForce_409(t *testing.T) {
 	baseDir := t.TempDir()
-	writeCustomXML(t, baseDir, "enb", "MY.xml")
+	writeBuiltinENBXML(t, baseDir, "MY.xml")
 	reloader := &stubReloader{}
 	repo := &mockFileRepository{}
 	r := newTestRouterWithReloader(t, repo, reloader, baseDir)

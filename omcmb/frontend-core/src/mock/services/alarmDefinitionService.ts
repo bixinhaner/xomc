@@ -42,6 +42,20 @@ export const alarmDefinitionService = {
     };
   },
 
+  // 2026-06-03:与 real api 对齐 — 全量返回(mock 数据量小,一次性返回,不分页)。
+  async listAll(filter?: Omit<AlarmDefinitionFilter, 'page'>) {
+    let items = [...definitions];
+    if (filter?.neType) items = items.filter((d) => d.neType === filter.neType);
+    if (filter?.severityCode !== undefined)
+      items = items.filter((d) => d.severityCode === filter.severityCode);
+    if (filter?.keyword) {
+      const k = filter.keyword.toLowerCase();
+      items = items.filter((d) => (d.identifier + d.cnName + d.enName).toLowerCase().includes(k));
+    }
+    if (filter?.isUnknown !== undefined) items = items.filter((d) => Boolean(d.isUnknown) === filter.isUnknown);
+    return { items: clone(items), total: items.length, page: 1, pageSize: items.length };
+  },
+
   async get(identifier: string): Promise<AlarmDefinition> {
     const d = definitions.find((x) => x.identifier === identifier);
     if (!d) throw new Error(`alarm definition ${identifier} not found`);
@@ -133,14 +147,6 @@ export const alarmDefinitionService = {
       }
     }
     return { items: Array.from(grouped.values()).sort((a, b) => a.neType.localeCompare(b.neType)) };
-  },
-
-  async cacheRefresh() {
-    return { refreshed: true };
-  },
-
-  async importDirectory() {
-    return { reloaded: 'alarm-definition' };
   },
 
   async uploadXml(file: File, _options: { force?: boolean } = {}): Promise<AlarmUploadResult> {

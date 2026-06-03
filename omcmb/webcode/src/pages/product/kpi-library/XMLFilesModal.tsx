@@ -2,12 +2,12 @@
  * XMLFilesModal — T-0180 P4 "管理 XML 文件"弹窗(per tech)。
  *
  * 列出该制式下所有 XML 文件:DB GROUP BY loaded_from + 物理盘 uploaded-but-not-loaded 合并。
- * 每行:文件名 / 来源 Tag(内置/自定义/未知)/ 指标数 / 删除按钮(内置置灰)。
+ * 每行:文件名 / 来源 Tag(内置/自定义/未知)/ 指标数 / 删除按钮。
  *
- * 删除走 IsDeletable 守门(后端 file_handler.go):仅 source=custom 行可点;
+ * 2026-06-03 用户决策:所有文件均可删除,去掉 deletable 守门(后端 deletable 恒为 true)。
  * onConfirm 调 useIndicatorDeleteFile,成功后 refetch 同步刷新 Summary + 二级表。
  */
-import { Modal, Table, Tag, Button, Popconfirm, Tooltip, message, Space } from 'antd';
+import { Modal, Table, Tag, Button, Popconfirm, message, Space } from 'antd';
 import { DeleteOutlined } from '@ant-design/icons';
 import {
   useIndicatorFiles,
@@ -71,43 +71,35 @@ export default function XMLFilesModal({ open, tech, onClose }: Props) {
     {
       title: t('common.action'),
       width: 100,
-      render: (_: unknown, row: IndicatorFile) => {
-        if (!row.deletable) {
-          return (
-            <Tooltip title={t('product.kpi.xml.builtinTip')}>
-              <Button size="small" danger disabled icon={<DeleteOutlined />} />
-            </Tooltip>
-          );
-        }
-        return (
-          <Popconfirm
-            title={t('product.kpi.xml.delTitle')}
-            description={
-              <div style={{ maxWidth: 280 }}>
-                {t('product.kpi.xml.deleteBullet1Pre')}<code>.deleted.&lt;ts&gt;</code>{t('product.kpi.xml.deleteBullet1Post')}
-                <br />
-                {t('product.kpi.xml.deleteBullet2', { count: row.count })}
-              </div>
-            }
-            okText={t('common.delete')}
-            cancelText={t('common.cancel')}
-            okButtonProps={{ danger: true }}
-            onConfirm={() =>
-              deleteMut
-                .mutateAsync(row.loadedFrom)
-                .then((r) => {
-                  message.success(
-                    r.backup ? t('product.kpi.xml.deleteSuccessWithBackup', { backup: r.backup }) : t('common.deleted')
-                  );
-                  void refetch();
-                })
-                .catch((e) => message.error((e as Error).message))
-            }
-          >
-            <Button size="small" danger icon={<DeleteOutlined />} />
-          </Popconfirm>
-        );
-      },
+      // 2026-06-03:所有文件均可删除,去掉 deletable 置灰守门。
+      render: (_: unknown, row: IndicatorFile) => (
+        <Popconfirm
+          title={t('product.kpi.xml.delTitle')}
+          description={
+            <div style={{ maxWidth: 280 }}>
+              {t('product.kpi.xml.deleteBullet1Pre')}<code>.deleted.&lt;ts&gt;</code>{t('product.kpi.xml.deleteBullet1Post')}
+              <br />
+              {t('product.kpi.xml.deleteBullet2', { count: row.count })}
+            </div>
+          }
+          okText={t('common.delete')}
+          cancelText={t('common.cancel')}
+          okButtonProps={{ danger: true }}
+          onConfirm={() =>
+            deleteMut
+              .mutateAsync(row.loadedFrom)
+              .then((r) => {
+                message.success(
+                  r.backup ? t('product.kpi.xml.deleteSuccessWithBackup', { backup: r.backup }) : t('common.deleted')
+                );
+                void refetch();
+              })
+              .catch((e) => message.error((e as Error).message))
+          }
+        >
+          <Button size="small" danger icon={<DeleteOutlined />} />
+        </Popconfirm>
+      ),
     },
   ];
 

@@ -3,14 +3,16 @@
  * 告警侧无"目标制式",ne_type 由 XML 内容 / 文件名在加载时推断,故只需选文件)。
  *
  * 校验链(后端 file_handler.UploadXML 已守:文件名 + size + <alarmModel> 根);
- * 前端仅做 size/类型提示。409 冲突 → 二次确认走 force=true 覆盖(后端备份 .bak.<ts>)。
+ * 前端仅做 size/类型提示。
+ * 上传前查重(2026-06-03):真正上传前先用 useAlarmNeTypeStats 取已存在的 XML 文件名,
+ *   若文件名重复则弹覆盖确认 → force=true 上传;不重复则直接上传(409 仍作兜底)。
  */
 import { useState } from 'react';
-import { Modal, Form, Upload, message, Button, Space, Tag } from 'antd';
+import { Modal, Form, Upload, message, Button, Space } from 'antd';
 import type { UploadFile, UploadProps } from 'antd/es/upload/interface';
 import { InboxOutlined } from '@ant-design/icons';
 import type { AxiosError } from 'axios';
-import { useAlarmUploadXml } from '@core/hooks/api/useAlarmDefinitions';
+import { useAlarmUploadXml, useAlarmNeTypeStats } from '@core/hooks/api/useAlarmDefinitions';
 import { useT } from '@/hooks/useT';
 
 interface Props {
@@ -26,10 +28,36 @@ export default function AlarmUploadXmlModal({ open, onClose }: Props) {
   const [fileList, setFileList] = useState<UploadFile[]>([]);
   const uploadMut = useAlarmUploadXml();
 
+  // 上传前查重数据源:ne-types 聚合行的 loadedFrom basename(大小写不敏感)。
+  const { data: neTypesData } = useAlarmNeTypeStats();
+  const isDuplicate = (fileName: string): boolean => {
+    const target = fileName.toLowerCase();
+    return (neTypesData?.items || []).some((row) => {
+      const base = (row.loadedFrom || '').split('/').pop()?.toLowerCase() ?? '';
+      return base === target;
+    });
+  };
+
   const handleClose = () => {
     form.resetFields();
     setFileList([]);
     onClose();
+  };
+
+  // 弹覆盖确认(查重命中 / 后端 409 兜底共用),确认后带 force=true 上传。
+  const confirmOverride = (file: File) => {
+    Modal.confirm({
+      title: t('product.alarm.upload.overrideTitle'),
+      content: (
+        <div style={{ maxWidth: 360 }}>
+          {t('product.alarm.upload.overrideContentPre')}<code>{file.name}</code>{t('product.alarm.upload.overrideContentPost')}
+          <br />{t('product.alarm.upload.backupHint')}
+        </div>
+      ),
+      okText: t('common.override'),
+      okButtonProps: { danger: true },
+      onOk: () => doUpload(file, true),
+    });
   };
 
   const doUpload = async (file: File, force: boolean) => {
@@ -44,18 +72,7 @@ export default function AlarmUploadXmlModal({ open, onClose }: Props) {
     } catch (e: unknown) {
       const ax = e as AxiosError<{ msg?: string; message?: string }>;
       if (ax.response?.status === 409 && !force) {
-        Modal.confirm({
-          title: t('product.alarm.upload.overrideTitle'),
-          content: (
-            <div style={{ maxWidth: 360 }}>
-              {t('product.alarm.upload.overrideContentPre')}<code>{file.name}</code>{t('product.alarm.upload.overrideContentPost')}
-              <br />{t('product.alarm.upload.backupHint')}
-            </div>
-          ),
-          okText: t('common.override'),
-          okButtonProps: { danger: true },
-          onOk: () => doUpload(file, true),
-        });
+        confirmOverride(file);
         return;
       }
       const body = ax.response?.data as { msg?: string; message?: string } | undefined;
@@ -68,7 +85,13 @@ export default function AlarmUploadXmlModal({ open, onClose }: Props) {
       message.error(t('product.alarm.upload.selectXmlMsg'));
       return;
     }
-    void doUpload(fileList[0].originFileObj, false);
+    const file = fileList[0].originFileObj;
+    // 上传前查重:文件名已存在 → 先弹覆盖确认;否则直接上传(409 仍作兜底)。
+    if (isDuplicate(file.name)) {
+      confirmOverride(file);
+      return;
+    }
+    void doUpload(file, false);
   };
 
   const uploadProps: UploadProps = {
@@ -88,12 +111,7 @@ export default function AlarmUploadXmlModal({ open, onClose }: Props) {
 
   return (
     <Modal
-      title={
-        <Space>
-          <span>{t('product.alarm.upload.title')}</span>
-          <Tag color="blue">alarm-definitions-custom</Tag>
-        </Space>
-      }
+      title={t('product.alarm.upload.title')}
       open={open}
       onCancel={handleClose}
       footer={

@@ -60,15 +60,17 @@ func ClassifySource(loadedFrom string) Source {
 }
 
 // IsDeletable 是 DELETE /indicators/files/{path} 端点与前端 deletable 字段的
-// 唯一判定函数(T-0180 PRD §3 GWT-5 守门规则)。
+// 唯一判定函数。
 //
-// 当前规则:仅 SourceCustom 可删。SourceBuiltin / SourceUnknown 一律不可删
-// (后者从安全侧考虑:无法确认来源时按保守语义拒绝,避免误删用户/历史数据)。
+// 当前规则(2026-06-03 用户决策:取消 builtin/custom 区分,接受升级丢失):
+// 所有文件一律可删。上传直接写进 builtin 目录,builtin/custom 来源概念不再用于
+// 守门;ClassifySource 仍保留用于前端展示来源 Tag,但不影响删除权限。
 //
 // 调用方:
-//   - 后端 handler.DeleteIndicatorFile 入口守门(返 403 ErrCodeIndicatorBuiltinNotDeletable)
-//   - List/Files DTO 的 deletable 字段填值
+//   - 后端 DeleteFile 入口(不再做来源守门)
+//   - List/Files DTO 的 deletable 字段填值(恒为 true)
 //   - 前端不重新推导,直接渲染 deletable bool
 func IsDeletable(loadedFrom string) bool {
-	return ClassifySource(loadedFrom) == SourceCustom
+	_ = loadedFrom
+	return true
 }

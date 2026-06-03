@@ -154,14 +154,6 @@ export const paramModelService = {
     return { deleted: 0 };
   },
 
-  async cacheRefresh() {
-    return { refreshed: true };
-  },
-
-  async importDirectory() {
-    return { reloaded: 'param-model' };
-  },
-
   // T-0178: mock 上传 — 不真存盘,模拟成功返回。force=true 时设 overwrite=true。
   async uploadXML(
     file: File,

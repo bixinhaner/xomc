@@ -2,8 +2,9 @@
  * SummaryTab — KPI 指标库一级列表(2026-06-02:"一个平台一条")。
  *
  * 用户决策:一个 XML 文件即一个平台,一级列表按平台聚合,每平台唯一一行。
- * 列:序号 / 平台(link → 二级) / 制式 / 指标数 / 描述 / 操作(编辑描述)。
- * 去掉"来源 / 加载源 / 删除"列 —— 文件管理(上传/删除/来源)留在 XMLFilesModal。
+ * 列:序号 / 平台(link → 二级) / 加载源 / 制式 / 指标数 / 描述 / 操作(编辑描述)。
+ * 2026-06-03 用户决策:去掉"来源(builtin/custom)"列,保留"加载源(loaded_from)"列;
+ *   文件删除仍留在 XMLFilesModal。
  */
 import { useState } from 'react';
 import { Card, Table, Tag, Button, Tooltip, message, Input, Modal } from 'antd';
@@ -86,14 +87,6 @@ export default function SummaryTab({ onSelect, query = '' }: Props) {
           {v}
         </Button>
       ),
-    },
-    {
-      // 后端 source.go::ClassifySource 派生,前端只渲染
-      title: t('common.source'),
-      dataIndex: 'source',
-      width: 90,
-      render: (s: IndicatorPlatformSummary['source']) =>
-        s === 'custom' ? <Tag color="blue">{t('common.custom')}</Tag> : <Tag>{t('common.builtin')}</Tag>,
     },
     {
       // 该平台对应的 XML 文件(后端 MAX(formula.loaded_from));一文件一平台故单值

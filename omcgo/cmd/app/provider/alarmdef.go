@@ -14,8 +14,8 @@ import (
 // defaultAlarmDefRefreshTimeout 控制 P3-04 启动期 alarmdef.Registry.Refresh 的硬上限。
 const defaultAlarmDefRefreshTimeout = 30 * time.Second
 
-// alarmdefReloaderUnwiredErr 当 dictloader.Registry 未注入时，import-directory 端点
-// 直接返回此错误。
+// alarmdefReloaderUnwiredErr 当 dictloader.Registry 未注入时，upload-xml 端点的重载
+// 步骤返回此错误（FileHandler 仅 Warn，不致命）。
 var alarmdefReloaderUnwiredErr = errors.New("dictloader registry not wired in app")
 
 // initAlarmDefModule 装配 T-0098 P3-04 告警定义 handler 链路：
@@ -25,8 +25,8 @@ var alarmdefReloaderUnwiredErr = errors.New("dictloader registry not wired in ap
 // 与 dictload 不同：Registry 只读 DB，不读 XML；DB 数据由 dictload 阶段写入。
 // 因此本模块声明 Depends=["dictload"]，确保启动期顺序正确（也容忍空 DB）。
 //
-// Provider 同时构造 dictloader.Registry → Reloader 适配器，把
-// /api/v1/alarm-definitions/import-directory 端点接到 dictloader 的 ReloadOne。
+// Provider 同时构造 dictloader.Registry → Reloader 适配器，供 FileHandler 的
+// upload-xml 流程（写文件 → destructive 重载删孤儿 → RefreshCache）调用 ReloadOne。
 func initAlarmDefModule(c *Container) error {
 	logger := c.Logger.Named("alarmdef")
 
@@ -43,14 +43,16 @@ func initAlarmDefModule(c *Container) error {
 
 	service := alarmdef.NewService(repo, registry, c.Redis, logger)
 	reloader := &alarmDefReloader{reg: c.DictLoaderRegistry}
-	handler := alarmdef.NewHandler(service, reloader, logger)
+	handler := alarmdef.NewHandler(service, logger)
 
-	// 自定义 XML 上传/删除(严格对标 T-0180 indicator):FileHandler 复用 service(RefreshCache)
-	// 与 reloader(ReloadOne)。启动期确保 custom 目录存在。
+	// 告警库 XML 管理重构:导入/重载/刷新合并进 FileHandler 的 upload-xml 端点
+	// (写文件 → destructive 重载删孤儿 → RefreshCache)。FileHandler 复用 service
+	// (RefreshCache + DeleteOrphansSince)与 reloader(ReloadOne)。上传统一写进 builtin
+	// 目录,启动期确保该目录存在。
 	fileRepo := alarmdef.NewPgFileRepository(c.PgPool)
 	fileHandler := alarmdef.NewFileHandler(fileRepo, service, reloader, c.Cfg.DictLoader.XMLBaseDir, logger)
 	if err := alarmdef.EnsureBaseDir(c.Cfg.DictLoader.XMLBaseDir); err != nil {
-		logger.Warn("ensure alarm custom dir failed; uploads may fail until dir exists", zap.Error(err))
+		logger.Warn("ensure alarm builtin dir failed; uploads may fail until dir exists", zap.Error(err))
 	}
 
 	c.AlarmDefRegistry = registry

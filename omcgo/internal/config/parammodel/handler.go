@@ -75,18 +75,20 @@ func (o *optInt64) Ptr() *int64 {
 // 写路径会自动调用 Registry.Refresh 同步内存映射缓存；XML 重载通过
 // Reloader 接口注入（dictloader.Registry.ReloadOne 适配器）。
 //
-// T-0178: baseDir 与 Loader 共用,DELETE/Upload 物理路径解析基础;
-// customDir 是 Upload 落地的绝对路径(NewHandler 一次性算出);
+// XML 管理重构:取消 builtin/custom 自定义目录区分 —— Upload 直接写
+// builtin 目录(Loader 扫描的同一目录 param-mappings/),接受升级丢失。
+// baseDir 与 Loader 共用,DELETE/Upload 物理路径解析基础;
+// builtinDir 是 Upload 落地的绝对路径(NewHandler 一次性算出);
 // fileLocks 提供 per-filename 进程内互斥(Upload + Delete + ReloadOne 三方共用,
 // 避免同名文件并发写入竞态)。
 type Handler struct {
-	repo      *PgRepository
-	registry  *Registry
-	reloader  Reloader
-	logger    *zap.Logger
-	baseDir   string
-	customDir string   // absolute path = filepath.Join(baseDir, CustomDirSubdir)
-	fileLocks sync.Map // map[basename]*sync.Mutex
+	repo       *PgRepository
+	registry   *Registry
+	reloader   Reloader
+	logger     *zap.Logger
+	baseDir    string
+	builtinDir string   // absolute path = filepath.Join(baseDir, BuiltinDirSubdir)
+	fileLocks  sync.Map // map[basename]*sync.Mutex
 }
 
 // Reloader 抽象 dictloader.Registry.ReloadOne — 让 handler 不强依赖 dictloader 包。
@@ -94,19 +96,19 @@ type Reloader interface {
 	ReloadOne(ctx context.Context, name string) error
 }
 
-// NewHandler 构造 Handler；reloader 可为 nil（import-directory 端点会返回 503）。
-// baseDir 来自 DictLoaderConfig.XMLBaseDir,用于 T-0178 Custom XML 物理删除/上传定位。
+// NewHandler 构造 Handler；reloader 可为 nil（导入 XML 时 destructiveReload 跳过重载，
+// 只写文件，仅 Warn）。baseDir 来自 DictLoaderConfig.XMLBaseDir,用于 XML 物理删除/上传定位。
 func NewHandler(repo *PgRepository, registry *Registry, reloader Reloader, baseDir string, logger *zap.Logger) *Handler {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
 	return &Handler{
-		repo:      repo,
-		registry:  registry,
-		reloader:  reloader,
-		baseDir:   baseDir,
-		customDir: filepath.Join(baseDir, CustomDirSubdir),
-		logger:    logger.Named("parammodel.handler"),
+		repo:       repo,
+		registry:   registry,
+		reloader:   reloader,
+		baseDir:    baseDir,
+		builtinDir: filepath.Join(baseDir, BuiltinDirSubdir),
+		logger:     logger.Named("parammodel.handler"),
 	}
 }
 
@@ -127,9 +129,9 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	g := rg.Group("/param-models")
 	// 集中操作（无 :name）
 	g.GET("", h.ListModels)
-	g.POST("/import-directory", h.ImportDirectory)
-	g.POST("/upload-xml", h.UploadXML) // T-0178: 上传自定义 paramModel XML
-	g.POST("/cache/refresh", h.CacheRefresh)
+	// 导入 XML：写文件(同名覆盖+备份) → destructive 重载(全量+删孤儿) → 刷新缓存，
+	// 三步在单端点内顺序完成（合并了旧的 import-directory / cache-refresh）。
+	g.POST("/upload-xml", h.UploadXML)
 	g.POST("/translate", h.Translate)
 	// 标准参数树（位于 /param-models/standard 子路径）
 	g.GET("/standard", h.ListStandard)
@@ -236,11 +238,12 @@ func (h *Handler) UpdateModel(c *gin.Context) {
 	response.OK(c, toModelView(m))
 }
 
-// DeleteModel 删除 paramModel(T-0178 §9.5 守门顺序)。
+// DeleteModel 删除 paramModel。
 //
-// 守门规则:
-//  1. 仅 Source=custom(loaded_from 以 "param-mappings-custom/" 开头)的模型可删
-//     →内置 / 历史无前缀数据返 403 ErrCodeParamModelBuiltinNotDeletable
+// XML 管理重构:取消 builtin/custom 删除守门,所有文件均可删除。
+//
+// 流程:
+//  1. 取出 loaded_from 定位物理文件
 //  2. per-filename mutex 与 Upload / 单文件 Reload 互斥
 //  3. 物理 rename → "<file>.deleted.<14位ts>" 备份(可回滚)
 //     · ENOENT 容忍:文件已被外部 rm,视为"已备份",继续删 DB
@@ -253,7 +256,7 @@ func (h *Handler) UpdateModel(c *gin.Context) {
 func (h *Handler) DeleteModel(c *gin.Context) {
 	name := c.Param("name")
 
-	// 1. 先取出 loaded_from,判定 Source
+	// 1. 先取出 loaded_from 定位物理文件
 	pm, err := h.repo.GetParamModelByName(c.Request.Context(), name)
 	if errors.Is(err, ErrNoParamModel) {
 		commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
@@ -261,20 +264,6 @@ func (h *Handler) DeleteModel(c *gin.Context) {
 	}
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
-		return
-	}
-
-	if !IsDeletable(pm.LoadedFrom) {
-		h.logger.Info("audit: param-model delete rejected (builtin)",
-			zap.String("audit_action", "parammodel.delete.rejected_builtin"),
-			zap.String("name", name),
-			zap.String("loaded_from", pm.LoadedFrom),
-			zap.String("source", string(ClassifySource(pm.LoadedFrom))))
-		commonerrors.AbortWithError(c, http.StatusForbidden,
-			fmt.Errorf("builtin param model %q (loaded_from=%s) is not deletable; "+
-				"to remove, delete the XML in data/param-mappings/ in the release image "+
-				"and re-deploy [code=%d]",
-				name, pm.LoadedFrom, global.ErrCodeParamModelBuiltinNotDeletable))
 		return
 	}
 
@@ -329,8 +318,8 @@ func (h *Handler) DeleteModel(c *gin.Context) {
 			zap.String("name", name))
 	}
 
-	h.logger.Info("audit: param-model deleted (custom)",
-		zap.String("audit_action", "parammodel.delete.custom"),
+	h.logger.Info("audit: param-model deleted",
+		zap.String("audit_action", "parammodel.delete"),
 		zap.String("name", name),
 		zap.String("loaded_from", pm.LoadedFrom),
 		zap.String("backup", filepath.Base(backupPath)))
@@ -343,29 +332,34 @@ func (h *Handler) DeleteModel(c *gin.Context) {
 	})
 }
 
-// UploadXML 接收用户上传的自定义 paramModel XML(T-0178 §9.4)。
+// UploadXML 导入 paramModel XML —— "导入 XML" 合并端点(XML 管理重构)。
 //
 // POST /api/v1/param-models/upload-xml[?force=true]
 // Content-Type: multipart/form-data
 // Field: file
 //
+// 合并了旧的"导入 / 重载 / 刷新缓存"三个功能:写文件 → destructive 重载
+// (全量+删孤儿) → 刷新缓存,三步在本端点内顺序完成。文件直接写 builtin 目录
+// (Loader 扫描的同一目录 param-mappings/),取消 custom 目录区分,接受升级丢失。
+//
 // 校验链(顺序敏感,任一失败即 400/409,审计明确拒绝原因):
 //  1. 文件名:filepath.Base + uploadFilenamePattern 白名单正则 +
 //     reservedUploadFilenames 保留名拦截
 //  2. 大小:file.Size <= MaxUploadXMLSize (1 MiB)
-//  3. 内容:validateUploadXML 根元素 = <paramModel>
-//  4. 路径:filepath.Join(customDir, base) 经 pathContainedIn 二次验证不逃逸 customDir
+//  3. 内容:validateUploadXML 根元素 = <parameterModel>
+//  4. 路径:filepath.Join(builtinDir, base) 经 pathContainedIn 二次验证不逃逸 builtinDir
 //
 // 写入流程(全程 per-filename 锁):
-//  1. 确保 customDir 存在(MkdirAll,首次上传场景)
+//  1. 确保 builtinDir 存在(MkdirAll,首次上传场景)
 //  2. 检查同名:存在但无 ?force=true → 409 Conflict
 //  3. 写 tmp 文件:targetPath + .tmp.<uuid>(原子写第一步)
 //     defer os.Remove(tmp) — 任何路径退出都清掉残留
 //  4. 若同名存在 + force=true:os.Rename(target, target+.bak.<ts>) 备份
 //  5. os.Rename(tmp, target) 原子上线;失败 → 反向 rename 还原 .bak
-//  6. 触发全量 ReloadOne("param-model") 更新 DB(reload 失败不算 upload 失败,
-//     文件已落地用户可手动 reload 重试)
-//  7. registry.Refresh
+//  6. destructiveReload:全量 ReloadOne("param-model") + 删孤儿(原 import-directory
+//     ?mode=reload 底层逻辑);reload 失败不算 upload 失败(文件已落地),只 Warn,
+//     响应 reloaded 字段反映状态
+//  7. registry.Refresh(原 cache-refresh 底层逻辑)
 //
 // 安全:
 //   - 文件名正则拒绝路径分隔符 / 点开头 / 空白 / 多扩展名
@@ -441,13 +435,13 @@ func (h *Handler) UploadXML(c *gin.Context) {
 	}
 
 	// 校验 4: 路径包含性二次防御
-	targetPath := filepath.Join(h.customDir, base)
-	if !pathContainedIn(h.customDir, targetPath) {
+	targetPath := filepath.Join(h.builtinDir, base)
+	if !pathContainedIn(h.builtinDir, targetPath) {
 		h.logger.Error("audit: upload rejected (path traversal detected)",
 			zap.String("audit_action", "parammodel.upload.rejected_path_traversal"),
 			zap.String("filename", base),
 			zap.String("computed_path", targetPath),
-			zap.String("custom_dir", h.customDir))
+			zap.String("builtin_dir", h.builtinDir))
 		commonerrors.AbortWithError(c, http.StatusBadRequest,
 			fmt.Errorf("path traversal detected for filename %q", base))
 		return
@@ -457,10 +451,10 @@ func (h *Handler) UploadXML(c *gin.Context) {
 	unlock := h.acquireFileLock(base)
 	defer unlock()
 
-	// 确保 custom 目录存在(首次部署 + 0750 = owner rwx,group rx,others -)
-	if err := os.MkdirAll(h.customDir, 0o750); err != nil {
+	// 确保 builtin 目录存在(首次部署 + 0750 = owner rwx,group rx,others -)
+	if err := os.MkdirAll(h.builtinDir, 0o750); err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError,
-			fmt.Errorf("ensure custom dir: %w", err))
+			fmt.Errorf("ensure builtin dir: %w", err))
 		return
 	}
 
@@ -470,7 +464,7 @@ func (h *Handler) UploadXML(c *gin.Context) {
 	exists := statErr == nil
 	if exists && !force {
 		commonerrors.AbortWithError(c, http.StatusConflict,
-			fmt.Errorf("custom xml %q already exists; use ?force=true to overwrite "+
+			fmt.Errorf("xml %q already exists; use ?force=true to overwrite "+
 				"(existing file will be backed up to .bak.<ts>)", base))
 		return
 	}
@@ -515,22 +509,10 @@ func (h *Handler) UploadXML(c *gin.Context) {
 		return
 	}
 
-	// 4. 触发全量 ReloadOne(文件级 reload 当前未支持;全量 reload 幂等且 <1s)
-	if h.reloader != nil {
-		if err := h.reloader.ReloadOne(c.Request.Context(), LoaderName); err != nil {
-			// 文件已落地,reload 失败不阻塞 upload 响应,用户可手动 reload 重试
-			h.logger.Warn("post-upload reload failed",
-				zap.String("filename", base),
-				zap.Error(err))
-		}
-	}
-	if h.registry != nil {
-		if err := h.registry.Refresh(c.Request.Context()); err != nil {
-			h.logger.Warn("post-upload registry refresh failed",
-				zap.String("filename", base),
-				zap.Error(err))
-		}
-	}
+	// 4. destructive 重载(全量 + 删孤儿)+ 刷新缓存。
+	//    文件已落地,reload/cache 失败不阻塞 upload 响应,只 Warn;
+	//    响应 reloaded/orphans_deleted 字段反映实际状态,用户可重新导入重试。
+	reloaded, orphansDeleted := h.destructiveReload(c.Request.Context(), "upload:"+base)
 
 	action := "parammodel.upload.success"
 	if exists {
@@ -541,12 +523,16 @@ func (h *Handler) UploadXML(c *gin.Context) {
 		zap.String("filename", base),
 		zap.Int64("size", file.Size),
 		zap.Bool("overwrite", exists),
+		zap.Bool("reloaded", reloaded),
+		zap.Int64("orphans_deleted", orphansDeleted),
 		zap.String("backup", filepath.Base(backupPath)))
 
 	out := gin.H{
-		"filename":  base,
-		"size":      file.Size,
-		"overwrite": exists,
+		"filename":        base,
+		"size":            file.Size,
+		"overwrite":       exists,
+		"reloaded":        reloaded,
+		"orphans_deleted": orphansDeleted,
 	}
 	if backupPath != "" {
 		out["backup"] = filepath.Base(backupPath)
@@ -984,74 +970,54 @@ func (h *Handler) Translate(c *gin.Context) {
 	})
 }
 
-// ── Cache + Import ──────────────────────────────────────────────────
+// ── Reload ──────────────────────────────────────────────────────────
 
-// ImportDirectory 从 datamodels/ 目录加载 XML。
+// destructiveReload 执行 destructive 全量重载 + 删孤儿 + 刷新缓存,
+// 是"导入 XML"端点(UploadXML)在写文件后串联调用的可复用逻辑
+// (沿用旧 import-directory ?mode=reload 的语义):
+//  1. 全量 ReloadOne("param-model") —— UPSERT 所有 XML 中的模型
+//  2. 删除 DB 中所有未被本次加载触及(updated_at < startedAt)的 param_models
+//     (孤儿模型);param_mappings CASCADE 删除;products.param_model_id SET NULL
+//  3. registry.Refresh 刷新内存映射缓存(cache_version 协调由 Registry 内部处理)
 //
-// Query params:
-//   - mode=import (默认): 加法 UPSERT —— 仅写入/更新现有 XML 中的模型，
-//     不删除 DB 中不在 XML 文件里的孤儿模型（手工 UI 添加项保留）。
-//   - mode=reload: destructive 全量重载 —— 完成 UPSERT 后，
-//     删除 DB 中所有未被本次加载触达的 param_models（孤儿模型）；
-//     param_mappings CASCADE 删除；products.param_model_id SET NULL。
-func (h *Handler) ImportDirectory(c *gin.Context) {
+// 容错:reload / 删孤儿 / 刷新缓存任一失败只 Warn 不致命(文件已落地,
+// 调用方可重新导入重试)。返回 reloaded 标志(reload 成功且未致命失败)与
+// orphansDeleted 计数,供端点响应反映实际状态。
+func (h *Handler) destructiveReload(ctx context.Context, reason string) (reloaded bool, orphansDeleted int64) {
 	if h.reloader == nil {
-		commonerrors.AbortWithError(c, http.StatusServiceUnavailable,
-			fmt.Errorf("dictloader registry not wired"))
-		return
-	}
-	mode := strings.ToLower(strings.TrimSpace(c.Query("mode")))
-	if mode == "" {
-		mode = "import"
-	}
-	if mode != "import" && mode != "reload" {
-		commonerrors.AbortWithError(c, http.StatusBadRequest,
-			fmt.Errorf("invalid mode %q (expected import|reload)", mode))
-		return
+		h.logger.Warn("destructive reload skipped: dictloader registry not wired",
+			zap.String("reason", reason))
+		return false, 0
 	}
 
-	// destructive 模式：记录开始时间，便于事后按 updated_at 识别孤儿
+	// 记录开始时间,便于事后按 updated_at 识别孤儿
 	startedAt := time.Now()
 
-	if err := h.reloader.ReloadOne(c.Request.Context(), "param-model"); err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
-		return
+	if err := h.reloader.ReloadOne(ctx, LoaderName); err != nil {
+		h.logger.Warn("destructive reload failed",
+			zap.String("reason", reason),
+			zap.Error(err))
+		return false, 0
 	}
+	reloaded = true
 
-	var orphansDeleted int64
-	if mode == "reload" {
-		var err error
-		orphansDeleted, err = h.repo.DeleteOrphansSince(c.Request.Context(), startedAt)
-		if err != nil {
-			commonerrors.AbortWithError(c, http.StatusInternalServerError,
-				fmt.Errorf("cleanup orphan param_models: %w", err))
-			return
-		}
+	deleted, err := h.repo.DeleteOrphansSince(ctx, startedAt)
+	if err != nil {
+		h.logger.Warn("cleanup orphan param_models failed",
+			zap.String("reason", reason),
+			zap.Error(err))
+	} else {
+		orphansDeleted = deleted
 	}
 
 	if h.registry != nil {
-		if err := h.registry.Refresh(c.Request.Context()); err != nil {
-			h.logger.Warn("post-reload param registry refresh failed", zap.Error(err))
+		if err := h.registry.Refresh(ctx); err != nil {
+			h.logger.Warn("post-reload param registry refresh failed",
+				zap.String("reason", reason),
+				zap.Error(err))
 		}
 	}
-	response.OK(c, gin.H{
-		"reloaded":         "param-model",
-		"mode":             mode,
-		"orphans_deleted":  orphansDeleted,
-	})
-}
-
-func (h *Handler) CacheRefresh(c *gin.Context) {
-	if h.registry == nil {
-		commonerrors.AbortWithError(c, http.StatusServiceUnavailable,
-			fmt.Errorf("param registry not wired"))
-		return
-	}
-	if err := h.registry.Refresh(c.Request.Context()); err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
-		return
-	}
-	response.OK(c, gin.H{"refreshed": true})
+	return reloaded, orphansDeleted
 }
 
 // ── helpers ─────────────────────────────────────────────────────────

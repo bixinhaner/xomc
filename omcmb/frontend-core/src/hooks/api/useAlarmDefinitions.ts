@@ -89,34 +89,6 @@ export function useAlarmSeverityLevels() {
   });
 }
 
-export function useAlarmDefinitionCacheRefresh() {
-  return useMutation({
-    mutationFn: () => api.cacheRefresh(),
-  });
-}
-
-export function useAlarmDefinitionImportDirectory() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: () => api.importDirectory(),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: AD_KEY });
-    },
-  });
-}
-
-// 2026-05-29:destructive 全量重载;成功后 invalidate 所有 alarm-defs 查询,
-// 让前端立刻看到孤儿告警被删除后的最新清单(与 useParamModelReloadDirectory 同形)。
-export function useAlarmDefinitionReloadDirectory() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: () => api.reloadDirectory(),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: AD_KEY });
-    },
-  });
-}
-
 // 自定义 XML 上传:成功后 invalidate 所有 alarm-defs 查询(ne-types / list 立即反映新告警)。
 export function useAlarmUploadXml() {
   const qc = useQueryClient();

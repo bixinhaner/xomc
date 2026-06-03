@@ -13,18 +13,12 @@
  */
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Card, Button, Space, Popconfirm, message, Select, Input } from 'antd';
+import { Card, Button, Space, Select, Input } from 'antd';
 import {
   ArrowLeftOutlined,
-  CloudDownloadOutlined,
   InboxOutlined,
-  ReloadOutlined,
 } from '@ant-design/icons';
-import {
-  useIndicatorImportDirectory,
-  useIndicatorCacheRefresh,
-  useIndicatorGroups,
-} from '@core/hooks/api/useIndicatorsLibrary';
+import { useIndicatorGroups } from '@core/hooks/api/useIndicatorsLibrary';
 import type { DeviceType, TechLower } from '@core/types/indicatorLibrary';
 import { techToDeviceType } from '@core/types/indicatorLibrary';
 import SummaryTab from './SummaryTab';
@@ -94,9 +88,6 @@ export default function KpiLibraryPage() {
   // 2026-06-03:一级 SummaryTab 搜索上提到 toolbar(与「导入 XML」同行)
   const [summaryQuery, setSummaryQuery] = useState('');
 
-  const importMut = useIndicatorImportDirectory();
-  const cacheMut = useIndicatorCacheRefresh();
-
   // 2026-05-29 详情态分组筛选数据源 — 平台过滤,只显示当前 platform 涉及的分组,
   // 避免下拉里 23 个 group 中 ~16 个选了返空。selectedPlatform 不存在(列表态)时
   // 传 undefined → 后端返全量 23 个,本组件也不会用到(只渲在详情态)。
@@ -118,63 +109,13 @@ export default function KpiLibraryPage() {
     return flat;
   }, [groupData, selectedDeviceType]);
 
-  // 全局操作按钮(列表态 toolbar 右侧)
+  // 全局操作按钮(列表态 toolbar 右侧)。
+  // 2026-06-03 用户决策:合并「导入 XML / 重载 XML / 刷新缓存」为单个「导入 XML」—
+  // 后端上传端点内部已自动做 destructive 重载(删孤儿)+ 刷新缓存,前端无需再单独调。
   const globalActions = (
     <Space wrap>
       <Button icon={<InboxOutlined />} onClick={() => setUploadOpen(true)}>
         {t('common.importXml')}
-      </Button>
-      <Popconfirm
-        title={t('product.paramModel.reloadTitle')}
-        description={
-          <div style={{ maxWidth: 360 }}>
-            {t('product.kpi.reloadDesc')}
-            <br />{t('product.kpi.bullet.reloadUpsert')}
-            
-            <br />{t('product.kpi.bullet.reloadCascade')}
-            <br />{t('common.actionUndoable')}
-          </div>
-        }
-        okText={t('product.products.reloadOk')}
-        cancelText={t('common.cancel')}
-        okButtonProps={{ danger: true }}
-        placement="bottomRight"
-        onConfirm={() => {
-          importMut
-            .mutateAsync('reload')
-            .then((r) => {
-              const orphans = r.orphans;
-              const total = orphans
-                ? (orphans.enb || 0) + (orphans.gsm || 0) + (orphans.gnb || 0)
-                : 0;
-              message.success(
-                total > 0
-                  ? t('product.kpi.reloadOrphansSummary', { total, enb: orphans?.enb ?? 0, gsm: orphans?.gsm ?? 0, gnb: orphans?.gnb ?? 0 })
-                  : t('product.kpi.reloadNoOrphans')
-              );
-            })
-            .catch((e) => message.error((e as Error).message));
-        }}
-      >
-        <Button
-          icon={<CloudDownloadOutlined />}
-          loading={importMut.isPending && importMut.variables === 'reload'}
-          danger
-        >
-          {t('common.reloadXml')}
-        </Button>
-      </Popconfirm>
-      <Button
-        icon={<ReloadOutlined />}
-        loading={cacheMut.isPending}
-        onClick={() =>
-          cacheMut
-            .mutateAsync()
-            .then((r) => message.success(r.note ? r.note : t('common.cacheRefreshed')))
-            .catch((e) => message.error((e as Error).message))
-        }
-      >
-        {t('common.refreshCache')}
       </Button>
     </Space>
   );

@@ -40,8 +40,8 @@ func TestClassifySource(t *testing.T) {
 	}
 }
 
-// TestIsDeletable 验证守门规则:仅 SourceCustom 可删。
-// PRD §3 GWT-3 + GWT-4 + GWT-5 行为基础。
+// TestIsDeletable 验证 XML 管理重构后的删除规则:全部可删。
+// 取消 builtin/custom 删除守门,所有 loaded_from 形态一律返 true。
 func TestIsDeletable(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -49,10 +49,10 @@ func TestIsDeletable(t *testing.T) {
 		want       bool
 	}{
 		{"custom is deletable", "param-mappings-custom/CBQQ.xml", true},
-		{"builtin is NOT deletable", "param-mappings/BTS.xml", false},
-		{"legacy bare filename is NOT deletable", "BTS.xml", false},
-		{"empty is NOT deletable", "", false},
-		{"path traversal is NOT deletable", "../../etc/passwd", false},
+		{"builtin is deletable", "param-mappings/BTS.xml", true},
+		{"legacy bare filename is deletable", "BTS.xml", true},
+		{"empty is deletable", "", true},
+		{"path traversal is deletable", "../../etc/passwd", true},
 		{"custom same-name override is deletable", "param-mappings-custom/BTS.xml", true},
 	}
 

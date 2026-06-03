@@ -59,15 +59,15 @@ func ClassifySource(loadedFrom string) Source {
 }
 
 // IsDeletable 是 DELETE /param-models/:name 端点与前端 deletable 字段的
-// 唯一判定函数(T-0178 §9.5 守门规则)。
+// 唯一判定函数。
 //
-// 当前规则:仅 SourceCustom 可删。SourceBuiltin / SourceUnknown 一律不可删
-// (后者从安全侧考虑:无法确认来源时按保守语义拒绝,避免误删用户/历史数据)。
+// 当前规则(XML 管理重构):全部可删。取消 builtin/custom 删除守门 —
+// 用户决策接受"上传即写 builtin 目录、升级丢失",所有文件(builtin/custom/
+// unknown)都允许在线删除。source 分类仅用于前端来源 Tag 展示,不再用于守门。
 //
 // 调用方:
-//   - 后端 handler.DeleteParamModel 入口守门(返 403 ErrCodeBuiltinNotDeletable)
-//   - List/Detail DTO 的 deletable 字段填值
+//   - List/Detail DTO 的 deletable 字段填值(恒为 true)
 //   - 前端不重新推导,直接渲染 deletable bool
 func IsDeletable(loadedFrom string) bool {
-	return ClassifySource(loadedFrom) == SourceCustom
+	return true
 }

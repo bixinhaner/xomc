@@ -47,7 +47,7 @@ type FileRepository interface {
 	// DeleteOrphansBefore 删除 perf_indicators_<tech> 中 updated_at < before 的行
 	// 与级联的 rela_platform_indicator_formula_<tech> + enabled_pm_indicators_<tech>。
 	//
-	// 使用场景:ImportDirectory ?mode=reload 期间,先记录 start := time.Now(),
+	// 使用场景:upload-xml 上传后 destructive 重载期间,先记录 start := time.Now(),
 	// 然后触发 Loader.ReloadOne(UPSERT 触发 BEFORE UPDATE trigger 自动刷 updated_at),
 	// 再调本方法删除 updated_at < start 的指标 — 即"Reload 未覆盖到的孤儿"。
 	//

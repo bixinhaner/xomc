@@ -1,12 +1,12 @@
 import { useMemo, useState } from 'react';
-import { Card, Table, Tag, Button, Space, Modal, Form, Input, Switch, message, Popconfirm, Tooltip } from 'antd';
+import { Card, Table, Tag, Button, Space, Modal, Form, Input, Switch, message, Popconfirm } from 'antd';
 import { EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import {
   useParamModelList,
   useUpdateParamModel,
   useDeleteParamModel,
 } from '@core/hooks/api/useParamModels';
-import type { ParamModel, ParamModelSource, UpdateParamModelInput } from '@core/types/paramModel';
+import type { ParamModel, UpdateParamModelInput } from '@core/types/paramModel';
 import { makeSeqColumn } from '@/components/Table/seqColumn';
 import { useT } from '@/hooks/useT';
 
@@ -55,29 +55,7 @@ export default function ModelsTab({ selectedName, onSelect, keyword }: Props) {
         </Button>
       ),
     },
-    {
-      // T-0178: 来源列 — 后端 source.go::ClassifySource 派生,前端只渲染
-      title: t('common.source'),
-      dataIndex: 'source',
-      width: 90,
-      // 2026-05-29 用户决策:unknown 行已在数据层被过滤,filter 选项去掉"未知"
-      filters: [
-        { text: t('common.builtin'), value: 'builtin' as ParamModelSource },
-        { text: t('common.custom'), value: 'custom' as ParamModelSource },
-      ],
-      onFilter: (val: boolean | React.Key, row: ParamModel) => row.source === val,
-      render: (s: ParamModelSource | undefined, row: ParamModel) => {
-        // 防御:理论上 unknown 已被双层过滤(后端 SQL + 前端 useMemo)拦掉,
-        // 这里只可能命中 builtin / custom;留 fallback 防御老缓存边界场景
-        const tag =
-          s === 'custom' ? (
-            <Tag color="blue">{t('common.custom')}</Tag>
-          ) : (
-            <Tag>{t('common.builtin')}</Tag>
-          );
-        return <Tooltip title={row.loadedFrom}>{tag}</Tooltip>;
-      },
-    },
+    // 2026-06-03 用户决策:去掉"来源(builtin/custom)"列,保留"加载源(loaded_from)"列。
     { title: t('common.loadedFrom'), dataIndex: 'loadedFrom', width: 260, ellipsis: true },
     { title: t('product.paramModel.models.colTotalEntries'), dataIndex: 'totalEntries', width: 90 },
     { title: t('product.paramModel.models.colTotalObjects'), dataIndex: 'totalObjects', width: 90 },
@@ -102,45 +80,27 @@ export default function ModelsTab({ selectedName, onSelect, keyword }: Props) {
               form.setFieldsValue({ description: row.description, isActive: row.isActive });
             }}
           />
-          {/* T-0178: 仅 deletable=true(custom)行可点击删除;内置/未知置灰 + Tooltip */}
-          {row.deletable ? (
-            <Popconfirm
-              title={t('product.paramModel.models.confirmDeleteCustom', { name: row.name })}
-              description={
-                <div style={{ maxWidth: 320 }}>
-                  · {t('product.paramModel.models.deleteBullet1Pre')} <code>.deleted.&lt;ts&gt;</code> {t('product.paramModel.models.deleteBullet1Post')}
-                  <br />· {t('product.paramModel.cascadeHint')}
-                  <br />· {t('product.paramModel.models.deleteBullet2')}
-                </div>
-              }
-              okButtonProps={{ danger: true }}
-              okText={t('product.paramModel.delConfirm')}
-              onConfirm={() =>
-                deleteMut
-                  .mutateAsync(row.name)
-                  .then(() => message.success(t('common.deleted')))
-                  .catch((e) => message.error((e as Error).message))
-              }
-            >
-              <Button size="small" danger icon={<DeleteOutlined />} />
-            </Popconfirm>
-          ) : (
-            <Tooltip
-              title={
-                <div style={{ maxWidth: 240 }}>
-                  {t('product.paramModel.models.builtinHint')}
-                </div>
-              }
-              placement="topRight"
-            >
-              <Button
-                size="small"
-                icon={<DeleteOutlined />}
-                disabled
-                aria-label="builtin XML not deletable"
-              />
-            </Tooltip>
-          )}
+          {/* 2026-06-03 用户决策:所有模型均可删除,去掉 deletable 置灰守门。 */}
+          <Popconfirm
+            title={t('product.paramModel.models.confirmDeleteCustom', { name: row.name })}
+            description={
+              <div style={{ maxWidth: 320 }}>
+                · {t('product.paramModel.models.deleteBullet1Pre')} <code>.deleted.&lt;ts&gt;</code> {t('product.paramModel.models.deleteBullet1Post')}
+                <br />· {t('product.paramModel.cascadeHint')}
+                <br />· {t('product.paramModel.models.deleteBullet2')}
+              </div>
+            }
+            okButtonProps={{ danger: true }}
+            okText={t('product.paramModel.delConfirm')}
+            onConfirm={() =>
+              deleteMut
+                .mutateAsync(row.name)
+                .then(() => message.success(t('common.deleted')))
+                .catch((e) => message.error((e as Error).message))
+            }
+          >
+            <Button size="small" danger icon={<DeleteOutlined />} />
+          </Popconfirm>
         </Space>
       ),
     },

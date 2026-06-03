@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -20,29 +19,28 @@ import (
 // Handler 暴露 /api/v1/alarm-definitions/* 与 /api/v1/alarm-severity-levels（设计 §3.5）。
 //
 // 写路径走 Service（DB + Registry refresh）。读路径直接走 repo（保持 ListAll 等
-// 既有方法的语义）。XML 导入复用 dictloader.Loader 的 Reload — 通过 Reloader
-// 接口注入，避免 handler 直接依赖 dictloader 包。
+// 既有方法的语义）。告警库 XML 管理重构后,XML 的"导入/重载/刷新"已合并进 FileHandler
+// 的 upload-xml 端点(写文件 → destructive 重载删孤儿 → RefreshCache 三步串联),
+// 本 Handler 只保留 CRUD 与只读聚合端点。
 type Handler struct {
-	service  *Service
-	reloader Reloader
-	logger   *zap.Logger
+	service *Service
+	logger  *zap.Logger
 }
 
-// Reloader 抽象 dictloader.Registry.ReloadOne — 让 handler 不强依赖 dictloader 包。
+// Reloader 抽象 dictloader.Registry.ReloadOne — 让上层不强依赖 dictloader 包。
 //
-// 任一实现失败时 handler 返回 500 + 详细 message；调用方不会破坏数据库。
-// 返回值与 dictloader.Registry.ReloadOne 同：(Report-like, error)；handler 仅
-// 关心 error，返回的第一个值由 provider 适配为 nil/任意类型即可。
+// 由 FileHandler 的 upload-xml 流程消费:上传后调 ReloadOne 触发 Loader 全量重扫
+// 目录 UPSERT 入库。返回值仅关心 error,provider 适配 dictloader.Registry.ReloadOne。
 type Reloader interface {
 	ReloadOne(ctx context.Context, name string) error
 }
 
-// NewHandler 构造 Handler。reloader 为 nil 时 import-directory 端点返回 503。
-func NewHandler(service *Service, reloader Reloader, logger *zap.Logger) *Handler {
+// NewHandler 构造 Handler。
+func NewHandler(service *Service, logger *zap.Logger) *Handler {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &Handler{service: service, reloader: reloader, logger: logger.Named("alarmdef.handler")}
+	return &Handler{service: service, logger: logger.Named("alarmdef.handler")}
 }
 
 // RegisterRoutes 注册到给定 RouterGroup。
@@ -54,8 +52,6 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	g.GET("", h.List)
 	g.GET("/ne-types", h.NeTypes)
 	g.GET("/unknown-stats", h.UnknownStats)
-	g.POST("/import-directory", h.ImportDirectory)
-	g.POST("/cache/refresh", h.CacheRefresh)
 	g.GET("/:identifier", h.Get)
 	g.POST("", h.Create)
 	g.PUT("/:identifier", h.Update)
@@ -327,72 +323,4 @@ func (h *Handler) NeTypes(c *gin.Context) {
 		return
 	}
 	response.OK(c, gin.H{"items": stats})
-}
-
-// ImportDirectory POST /api/v1/alarm-definitions/import-directory
-//
-// Query params:
-//   - mode=import (默认): 加法 UPSERT — 仅写入/更新现有 XML 中的告警定义,
-//     不删除 DB 中不在 XML 文件里的孤儿(运维手工 UI 添加的告警保留)。
-//   - mode=reload: destructive 全量重载 — 完成 UPSERT 后删除 DB 中所有未被
-//     本次加载触达的 alarm_definitions(按 updated_at < startedAt 判定);
-//     与 parammodel ImportDirectory 同语义。
-//
-// 调用 dictloader.Reload(LoaderName):扫描 XML 目录 → UPSERT alarm_definitions →
-// (可选)删孤儿 → RefreshCache。
-func (h *Handler) ImportDirectory(c *gin.Context) {
-	if h.reloader == nil {
-		commonerrors.AbortWithError(c, http.StatusServiceUnavailable,
-			fmt.Errorf("dictloader registry not wired"))
-		return
-	}
-	mode := strings.ToLower(strings.TrimSpace(c.Query("mode")))
-	if mode == "" {
-		mode = "import"
-	}
-	if mode != "import" && mode != "reload" {
-		commonerrors.AbortWithError(c, http.StatusBadRequest,
-			fmt.Errorf("invalid mode %q (expected import|reload)", mode))
-		return
-	}
-
-	// destructive 模式:记录开始时间,Loader UPSERT 后用 updated_at < startedAt
-	// 判定孤儿。BEFORE UPDATE 触发器保证 UPSERT 写 updated_at = NOW() > startedAt,
-	// 所以本次未被触达的旧定义 updated_at 会保留旧值,被纳入"孤儿"删除。
-	startedAt := time.Now()
-
-	if err := h.reloader.ReloadOne(c.Request.Context(), LoaderName); err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
-		return
-	}
-
-	var orphansDeleted int64
-	if mode == "reload" {
-		n, err := h.service.DeleteOrphansSince(c.Request.Context(), startedAt)
-		if err != nil {
-			commonerrors.AbortWithError(c, http.StatusInternalServerError,
-				fmt.Errorf("cleanup orphan alarm_definitions: %w", err))
-			return
-		}
-		orphansDeleted = n
-	}
-
-	if err := h.service.RefreshCache(c.Request.Context()); err != nil {
-		// 不阻断:DB 已 UPSERT 成功,缓存最多落后一拍
-		h.logger.Warn("post-reload registry refresh failed", zap.Error(err))
-	}
-	response.OK(c, gin.H{
-		"reloaded":        LoaderName,
-		"mode":            mode,
-		"orphans_deleted": orphansDeleted,
-	})
-}
-
-// CacheRefresh POST /api/v1/alarm-definitions/cache/refresh
-func (h *Handler) CacheRefresh(c *gin.Context) {
-	if err := h.service.RefreshCache(c.Request.Context()); err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
-		return
-	}
-	response.OK(c, gin.H{"refreshed": true})
 }
