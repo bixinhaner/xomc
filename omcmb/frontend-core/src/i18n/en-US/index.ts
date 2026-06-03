@@ -271,10 +271,10 @@ const messages: Record<string, string> = {
 
   // /product/products
   'product.products.clearTooltip':   'Clear all swVersion discovered mappings; will be rebuilt on next Bootstrap',
-  'product.products.searchPh':       'Search: name / vendor / description',
+  'product.products.searchPh':       'Search name / vendor / description',
   'product.products.reloadXmlTitle': 'Confirm reload XML?',
   'product.products.reloadOk':       'Confirm reload',
-  'product.products.reloadDesc':     'Manual UI edits on indicator platform / alarm NE type / regex rules will be overwritten by XML values.',
+  'product.products.reloadDesc':     'Regex rules are fully replaced: regexes not in the XML (including ones added via UI) will be DELETED; products absent from the XML also have their regexes cleared. Product fields (indicator platform / alarm NE type / param model, etc.) are overwritten by XML; products themselves are not deleted.',
   'product.products.delRegexTitle':  'Confirm delete this regex?',
   'product.products.name':           'Name',
   'product.products.nameRequired':   'Product name is required',
@@ -389,7 +389,7 @@ const messages: Record<string, string> = {
   'product.alarm.unknown.empty':      'No recent unknown alarms',
 
   // /product/orphan-devices
-  'product.orphan.searchPh':          'Search by SN / OUI / Product Type / Vendor (fuzzy)',
+  'product.orphan.searchPh':          'Search SN / OUI / Product Type / Vendor',
   'product.orphan.scanTooltip':       'Scan devices where product_class is non-empty but product_id is still NULL',
   'product.orphan.rematchTitle':      'Trigger full re-match?',
   'product.orphan.runningWarn':       'A run is in progress, please wait for refresh',
@@ -5956,7 +5956,7 @@ const messages: Record<string, string> = {
   'product.kpi.summary.deleteBullet2': 'Related {count} indicators + formulas cascade deleted',
   'product.kpi.summary.deleteBullet3': 'If a built-in XML with the same name exists, falls back to built-in after delete',
   'product.kpi.summary.col.tech': 'Device Mode',
-  'product.kpi.summary.searchPh': 'Search: name / description',
+  'product.kpi.summary.searchPh': 'Search name / description',
   'product.kpi.summary.editDescTitle': 'Edit description',
   'product.kpi.summary.editDescHint': 'Saved per platform (one XML file = one platform).',
   'product.kpi.summary.editDescPh': 'Enter description (leave blank to show the default note)',

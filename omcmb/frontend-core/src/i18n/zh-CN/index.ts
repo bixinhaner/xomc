@@ -271,10 +271,10 @@ const messages: Record<string, string> = {
 
   // /product/products
   'product.products.clearTooltip':   '清空所有 swVersion 的 discovered 映射；下次 Bootstrap 重新建',
-  'product.products.searchPh':       '搜索：名称 / 厂商 / 描述',
+  'product.products.searchPh':       '搜索 名称 / 厂商 / 描述',
   'product.products.reloadXmlTitle': '确认重载 XML？',
   'product.products.reloadOk':       '确认重载',
-  'product.products.reloadDesc':     'UI 中对 指标平台 / 告警网元类型 / 正则规则 等字段的手工修改将被 XML 值覆盖。',
+  'product.products.reloadDesc':     '正则规则将整表全量替换：XML 中不存在的正则（含 UI 手工新增）会被删除；XML 中没有的产品其正则也会被清空。产品字段（指标平台 / 告警网元类型 / 参数模型等）会被 XML 值覆盖；产品本身不会被删除。',
   'product.products.delRegexTitle':  '确认删除该正则？',
   'product.products.name':           '名称',
   'product.products.nameRequired':   '产品名必填',
@@ -389,7 +389,7 @@ const messages: Record<string, string> = {
   'product.alarm.unknown.empty':      '近期无未识别告警',
 
   // /product/orphan-devices
-  'product.orphan.searchPh':          '按 SN / OUI / 产品类型 / 厂商 模糊搜索',
+  'product.orphan.searchPh':          '搜索 SN / OUI / 产品类型 / 厂商',
   'product.orphan.scanTooltip':       '扫描所有 product_class 不空,但 product_id 仍为 NULL 的设备',
   'product.orphan.rematchTitle':      '确认触发全量重新匹配?',
   'product.orphan.runningWarn':       '正在执行中,请等待刷新完成',
@@ -5981,7 +5981,7 @@ const messages: Record<string, string> = {
   'product.kpi.summary.deleteBullet2': '关联的 {count} 条指标 + 公式级联删除',
   'product.kpi.summary.deleteBullet3': '若存在同名内置 XML,删除后将自动回退到内置版本',
   'product.kpi.summary.col.tech': '设备制式',
-  'product.kpi.summary.searchPh': '搜索：名称 / 描述',
+  'product.kpi.summary.searchPh': '搜索 名称 / 描述',
   'product.kpi.summary.editDescTitle': '编辑描述',
   'product.kpi.summary.editDescHint': '描述按平台维度保存(一个 XML 文件即一个平台)。',
   'product.kpi.summary.editDescPh': '请输入描述(留空则显示默认说明)',

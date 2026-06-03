@@ -231,7 +231,7 @@ export default function ProductsPage() {
               title={t('product.products.reloadXmlTitle')}
               description={
                 <div style={{ maxWidth: 320 }}>
-                  {t('product.products.reloadHint1Pre')}<code>datamodels/param-mappings/products.xml</code>{t('product.products.reloadHint1Post')}
+                  {t('product.products.reloadHint1Pre')}<code>param-mappings/products.xml</code>{t('product.products.reloadHint1Post')}
                   <br />
                   {t('product.products.reloadDesc')}
                 </div>
