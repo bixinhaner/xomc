@@ -195,7 +195,12 @@ function attachDeviceType(device: Device): DeviceWithType {
   const name = device.name?.toLowerCase() || '';
   const networkType = device.networkType?.toLowerCase() || '';
 
-  if (name.includes('gnb') || networkType.includes('5g') || networkType.includes('nr')) {
+  if (
+    name.includes('gnb') ||
+    networkType.includes('gnb') ||
+    networkType.includes('5g') ||
+    networkType.includes('nr')
+  ) {
     deviceType = 'gNB';
   } else if (name.includes('gsm') || networkType.includes('gsm')) {
     deviceType = 'GSM';

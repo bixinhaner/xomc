@@ -112,7 +112,7 @@ export default function AlarmLog() {
     },
     {
       key: 'alarmIdentifier',
-      title: t('alarm.code'),
+      title: t('alarm.alarmIdentifier'),
       dataIndex: 'alarmIdentifier',
       width: 100,
       render: (val) => <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{String(val)}</span>,

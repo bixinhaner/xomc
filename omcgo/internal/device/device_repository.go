@@ -1372,10 +1372,10 @@ func scanRecycleBinRow(rows pgx.Rows) (*model.Device, error) {
 		&d.LastBootAt, &d.BootCount, // T-0158: 新增的两列(deviceColumns 行 18-19)
 		&d.InformInterval, &siteName, &siteID, &d.Latitude, &d.Longitude,
 		&extData, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt, &deletedBy,
-		&d.LastParamSyncAt,                                 // T-0124
-		&d.LastParamSyncFailedAt, &d.LastParamSyncError,    // migration 000142
-		&d.LastOfflineReason,                                // T-0173 / migration 000184
-		&groupName,                                          // recycleBinColumns 追加的 JOIN 列
+		&d.LastParamSyncAt,                              // T-0124
+		&d.LastParamSyncFailedAt, &d.LastParamSyncError, // migration 000142
+		&d.LastOfflineReason, // T-0173 / migration 000184
+		&groupName,           // recycleBinColumns 追加的 JOIN 列
 	)
 	if err != nil {
 		return nil, err
@@ -1840,6 +1840,47 @@ func (r *PgDeviceRepository) FindStaleDevicesAdaptive(ctx context.Context, minSt
 		d, err := scanDeviceRow(rows)
 		if err != nil {
 			return nil, fmt.Errorf("scan stale device adaptive: %w", err)
+		}
+		devices = append(devices, d)
+	}
+	return devices, nil
+}
+
+// FindOfflineDevicesBefore 找出当前仍离线且 last_offline_time 早于 cutoff 的设备。
+//
+// 用于 F04 离线超时告警清理：设备离线满 1 小时仍未恢复上线时，将当前告警转历史。
+// 只返回 commissioned 且未软删设备，避免把未入网或已删除设备卷进告警生命周期处理。
+func (r *PgDeviceRepository) FindOfflineDevicesBefore(ctx context.Context, cutoff time.Time, limit int) ([]*model.Device, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+
+	builder := storage.Psql.Select(deviceColumns()...).
+		From("devices d").
+		LeftJoin("device_info di ON di.device_id = d.id").
+		Where(sq.Eq{"d.lifecycle_state": model.LifecycleCommissioned}).
+		Where(sq.Eq{"d.is_online": false}).
+		Where(notDeleted).
+		Where("di.last_offline_time IS NOT NULL").
+		Where(sq.LtOrEq{"di.last_offline_time": cutoff}).
+		OrderBy("di.last_offline_time ASC").
+		Limit(uint64(limit))
+
+	query, args, err := builder.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build find offline devices query: %w", err)
+	}
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("find offline devices before cutoff: %w", err)
+	}
+	defer rows.Close()
+
+	var devices []*model.Device
+	for rows.Next() {
+		d, err := scanDeviceRow(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan offline device row: %w", err)
 		}
 		devices = append(devices, d)
 	}

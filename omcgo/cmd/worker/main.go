@@ -238,6 +238,13 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	}
 	logger.Info("reboot monitor started")
 
+	// 设备离线超时告警清理：离线满 1 小时仍未恢复时，把当前告警归档到历史告警。
+	offlineAlarmCleaner := alarm.NewOfflineAlarmCleaner(alarmDeviceRepo, alarmPgStore, alarmEngine, logger)
+	go offlineAlarmCleaner.Run(context.Background())
+	logger.Info("offline alarm cleaner started",
+		zap.Duration("interval", alarm.DefaultOfflineAlarmCleanupInterval),
+		zap.Duration("threshold", alarm.DefaultOfflineAlarmCleanupThreshold))
+
 	// Reboot Task Closer (F01/F06)：M Reboot Inform 兜底收敛未 ACK 的 Reboot/FactoryReset 任务。
 	rebootCloser := task.NewRebootCloser(w.TaskRepo, w.TaskService, logger)
 	if err := rebootCloser.Subscribe(w.EventBus); err != nil {

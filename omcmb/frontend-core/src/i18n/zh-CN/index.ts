@@ -1239,7 +1239,7 @@ const messages: Record<string, string> = {
   'alarm.count':             '告警数量',
 
   // 活动告警字段
-  'alarm.alarmId':           '告警码',
+  'alarm.alarmId':           '告警ID',
   'alarm.alarmIdentifier':   '告警标识',
   'alarm.equipInfo':         '网元定位',
   'alarm.eventType':         '事件类型',

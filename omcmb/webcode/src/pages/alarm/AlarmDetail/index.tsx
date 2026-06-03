@@ -105,7 +105,7 @@ const AlarmDetail: React.FC<AlarmDetailProps> = ({ alarm, open, onClose }) => {
           >
             {SEVERITY_LABEL[resolvedAlarm.severity] ?? resolvedAlarm.severity}
           </Tag>
-          <span>{resolvedAlarm.alarmIdentifier || t('alarm.detail')}</span>
+          <span>{resolvedAlarm.probableCause || resolvedAlarm.description || t('alarm.detail')}</span>
         </Space>
       }
       open={open}
@@ -123,23 +123,19 @@ const AlarmDetail: React.FC<AlarmDetailProps> = ({ alarm, open, onClose }) => {
             {t('alarm.basicInfo')}
           </Text>
           <Descriptions column={1} size="small" bordered>
-            {/* 1. 序号 */}
-            <Descriptions.Item label={t('alarm.alarmId')}>
-              <Text style={{ fontFamily: 'monospace', fontWeight: 600 }}>{resolvedAlarm.id}</Text>
-            </Descriptions.Item>
-            {/* 2. 告警编码 */}
+            {/* 1. 可能原因 */}
             <Descriptions.Item label={t('alarm.alarmIdentifier')}>
-              <Text style={{ fontFamily: 'monospace' }}>{resolvedAlarm.alarmIdentifier}</Text>
+              <Text style={{ fontFamily: 'monospace' }}>{resolvedAlarm.alarmIdentifier || '-'}</Text>
             </Descriptions.Item>
-            {/* 3. 可能原因 */}
+            {/* 2. 可能原因 */}
             <Descriptions.Item label={t('alarm.possibleCause')}>
               {resolvedAlarm.probableCause || '-'}
             </Descriptions.Item>
-            {/* 4. 具体故障 */}
+            {/* 3. 具体故障 */}
             <Descriptions.Item label={t('alarm.specificProblem')}>
               {resolvedAlarm.description || '-'}
             </Descriptions.Item>
-            {/* 5. 严重程度 */}
+            {/* 4. 严重程度 */}
             <Descriptions.Item label={t('alarm.severity')}>
               <Tag
                 style={{
@@ -151,7 +147,7 @@ const AlarmDetail: React.FC<AlarmDetailProps> = ({ alarm, open, onClose }) => {
                 {SEVERITY_LABEL[resolvedAlarm.severity] ?? resolvedAlarm.severity}
               </Tag>
             </Descriptions.Item>
-            {/* 6. 事件类型 */}
+            {/* 5. 事件类型 */}
             <Descriptions.Item label={t('alarm.eventType')}>
               {t(EVENT_TYPE_CONFIG[resolvedAlarm.eventType] || 'common.unknown')}
             </Descriptions.Item>
@@ -173,9 +169,6 @@ const AlarmDetail: React.FC<AlarmDetailProps> = ({ alarm, open, onClose }) => {
             </Descriptions.Item>
             <Descriptions.Item label={t('alarm.deviceName')}>
               {resolvedAlarm.deviceName || '-'}
-            </Descriptions.Item>
-            <Descriptions.Item label={t('alarm.equipInfo')}>
-              {resolvedAlarm.equipInfo || '-'}
             </Descriptions.Item>
             {/* 9. 告警源 */}
             <Descriptions.Item label={t('alarm.neTypeCol')}>
@@ -215,12 +208,6 @@ const AlarmDetail: React.FC<AlarmDetailProps> = ({ alarm, open, onClose }) => {
                   <UserOutlined />
                   {resolvedAlarm.dealUser || '-'}
                 </Space>
-              </Descriptions.Item>
-            )}
-            {/* 15. 确认时间 - 已确认时显示 */}
-            {isConfirmed && (
-              <Descriptions.Item label={t('alarm.dealTime')}>
-                {formatTime(resolvedAlarm.dealTime)}
               </Descriptions.Item>
             )}
             {/* 16. 告警清除人 - 已清除时显示 */}
