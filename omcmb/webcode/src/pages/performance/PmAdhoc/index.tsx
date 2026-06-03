@@ -29,7 +29,7 @@ import {
   message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
+import { PlusOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons';
 import {
   usePmAdhocList,
   usePmAdhocRuns,
@@ -43,6 +43,8 @@ import type {
 } from '@core/types/pmAdhoc';
 import { CreateAdhocTaskDrawer, type CreateAdhocPreset } from './CreateAdhocTaskDrawer';
 import { AdhocResultPanel } from './AdhocResultPanel';
+import BuiltinMetricEditModal from './BuiltinMetricEditModal';
+import SelectedMetricsTags from './SelectedMetricsTags';
 
 const statusColor: Record<AdhocStatus, string> = {
   pending: 'default',
@@ -175,13 +177,18 @@ function RunHistoryTab({ taskId }: { taskId: string }) {
 function TaskTable({
   tasks,
   loading,
+  isBuiltinArea,
   onView,
   onCancel,
+  onEdit,
 }: {
   tasks: AdhocTask[];
   loading: boolean;
+  // 内置区 = true：操作列给「编辑指标」（开轻量弹窗）；自建区 = false：给「编辑」（进向导编辑页）。
+  isBuiltinArea: boolean;
   onView: (t: AdhocTask) => void;
   onCancel: (id: string) => void;
+  onEdit: (t: AdhocTask) => void;
 }) {
   const intl = useIntl();
   const columns: ColumnsType<AdhocTask> = useMemo(
@@ -216,19 +223,20 @@ function TaskTable({
           ),
       },
       { title: intl.formatMessage({ id: 'perf.adhoc.colDeviceCount' }), render: (_, r) => r.deviceSns.length, width: 80 },
-      {
-        title: intl.formatMessage({ id: 'perf.adhoc.colMetricByGran' }),
-        render: (_, r) => `${r.metricPaths.length} × ${r.granularities.length}`,
-        width: 110,
-      },
       { title: intl.formatMessage({ id: 'perf.adhoc.colCreatedAt' }), dataIndex: 'createdAt', width: 180, render: (v: string) => fmtTime(v) },
       {
         title: intl.formatMessage({ id: 'perf.adhoc.colOperation' }),
-        width: 180,
+        width: 230,
         render: (_, r) => (
           <Space>
             <Button size="small" onClick={() => onView(r)}>
               {intl.formatMessage({ id: 'perf.adhoc.btnViewDetail' })}
+            </Button>
+            {/* T-0194：内置区给「编辑指标」（只改指标集），自建区给「编辑」（进向导编辑页） */}
+            <Button size="small" icon={<EditOutlined />} onClick={() => onEdit(r)}>
+              {isBuiltinArea
+                ? intl.formatMessage({ id: 'perf.adhoc.btnEditMetrics' })
+                : intl.formatMessage({ id: 'perf.adhoc.btnEdit' })}
             </Button>
             {(r.status === 'pending' || r.status === 'running' || r.status === 'scheduled') && (
               <Button size="small" danger icon={<DeleteOutlined />} onClick={() => onCancel(r.id)}>
@@ -239,7 +247,7 @@ function TaskTable({
         ),
       },
     ],
-    [intl, onView, onCancel],
+    [intl, isBuiltinArea, onView, onCancel, onEdit],
   );
 
   return (
@@ -272,6 +280,8 @@ export default function PmAdhocPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [createPreset, setCreatePreset] = useState<CreateAdhocPreset | undefined>(undefined);
   const [selectedTask, setSelectedTask] = useState<AdhocTask | null>(null);
+  // T-0194：内置任务「编辑指标」弹窗状态。
+  const [builtinEditTask, setBuiltinEditTask] = useState<AdhocTask | null>(null);
 
   // G6-Gap-12 联动：URL preset 触发自动打开 Drawer
   useEffect(() => {
@@ -305,6 +315,14 @@ export default function PmAdhocPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // T-0194：自建任务编辑 → 进向导编辑页（/:id/edit）；内置任务编辑 → 开「编辑指标」弹窗。
+  const handleEditCustom = (t: AdhocTask) => {
+    navigate(`/performance/pm-adhoc/${t.id}/edit`);
+  };
+  const handleEditBuiltin = (t: AdhocTask) => {
+    setBuiltinEditTask(t);
+  };
+
   const handleCancel = (id: string) => {
     Modal.confirm({
       title: intl.formatMessage({ id: 'perf.adhoc.cancelTaskTitle' }),
@@ -326,8 +344,10 @@ export default function PmAdhocPage() {
         <TaskTable
           tasks={builtinTasks}
           loading={builtinLoading}
+          isBuiltinArea
           onView={setSelectedTask}
           onCancel={handleCancel}
+          onEdit={handleEditBuiltin}
         />
       </Card>
 
@@ -347,8 +367,10 @@ export default function PmAdhocPage() {
         <TaskTable
           tasks={customTasks}
           loading={customLoading}
+          isBuiltinArea={false}
           onView={setSelectedTask}
           onCancel={handleCancel}
+          onEdit={handleEditCustom}
         />
       </Card>
 
@@ -396,6 +418,16 @@ export default function PmAdhocPage() {
                   {statusLabel(intl, selectedTask.status)}
                 </Tag>
               </Descriptions.Item>
+              {/* T-0194：已选指标 — 按制式解析为可读指标名（编号+名），查不到回退显编号 */}
+              <Descriptions.Item
+                label={intl.formatMessage({ id: 'perf.adhoc.descSelectedMetrics' })}
+                span={2}
+              >
+                <SelectedMetricsTags
+                  metricPaths={selectedTask.metricPaths}
+                  technology={selectedTask.technology}
+                />
+              </Descriptions.Item>
             </Descriptions>
 
             <Tabs
@@ -416,6 +448,13 @@ export default function PmAdhocPage() {
           </>
         )}
       </Drawer>
+
+      {/* T-0194：内置任务「编辑指标」弹窗 */}
+      <BuiltinMetricEditModal
+        task={builtinEditTask}
+        open={Boolean(builtinEditTask)}
+        onClose={() => setBuiltinEditTask(null)}
+      />
     </Space>
   );
 }

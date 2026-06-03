@@ -5,7 +5,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createApiSwitch } from '../../services/apiSwitch';
 import { pmAdhocApi, pmAdhocMock } from '../../services/api/pmAdhocApi';
-import type { CreateAdhocTaskInput } from '../../types/pmAdhoc';
+import type { CreateAdhocTaskInput, UpdateAdhocTaskInput } from '../../types/pmAdhoc';
 
 const api = createApiSwitch(pmAdhocMock, pmAdhocApi);
 
@@ -34,6 +34,18 @@ export function useCreatePmAdhoc() {
   return useMutation({
     mutationFn: (input: CreateAdhocTaskInput) => api.create(input),
     onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ADHOC_KEY });
+    },
+  });
+}
+
+export function useUpdatePmAdhoc() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input: UpdateAdhocTaskInput }) =>
+      api.update(id, input),
+    onSuccess: () => {
+      // 列表 + 详情 + 结果一并失效（编辑后详情/仪表盘要拿新指标集）
       void qc.invalidateQueries({ queryKey: ADHOC_KEY });
     },
   });

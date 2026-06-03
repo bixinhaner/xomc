@@ -114,6 +114,23 @@ type CreateRequest struct {
 	Creator       string
 }
 
+// UpdateRequest 是 Repository.Update / handler.Update 的输入（T-0194 编辑任务定义）。
+//
+// IsBuiltin 决定守门口径：
+//   - false（自建任务）：更新 Name/DeviceSNs/MetricPaths/Granularities/ObjectLDNs/WindowStart/WindowEnd。
+//   - true（内置任务）：只更新 MetricPaths，其余字段忽略。
+// mode/technology/dimension/is_builtin/expire_days 不在本结构体内，不可改。
+type UpdateRequest struct {
+	IsBuiltin     bool // 由 service/handler 按既有任务标记填入，repository 据此决定更新字段集
+	Name          string
+	DeviceSNs     []string
+	MetricPaths   []string
+	Granularities []string
+	ObjectLDNs    []string
+	WindowStart   time.Time
+	WindowEnd     time.Time
+}
+
 // ListFilter 是 Repository.List 的过滤条件。
 type ListFilter struct {
 	Mode      *Mode

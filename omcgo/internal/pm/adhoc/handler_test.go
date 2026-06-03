@@ -16,12 +16,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// handlerStubRepo 仅实现 Create/List/Get/Cancel，不依赖 DB。
+// handlerStubRepo 仅实现 Create/List/Get/Cancel/Update，不依赖 DB。
 type handlerStubRepo struct {
 	mu     sync.Mutex
 	tasks  map[uuid.UUID]*Task
 	create func(CreateRequest) (uuid.UUID, error)
 	cancel func(uuid.UUID) error
+	get    func(uuid.UUID) (*Task, error)       // T-0194：注入既有任务（含 is_builtin/mode/technology）
+	update func(uuid.UUID, UpdateRequest) error  // T-0194：捕获更新入参
 }
 
 func (s *handlerStubRepo) Create(_ context.Context, req CreateRequest) (uuid.UUID, error) {
@@ -43,12 +45,21 @@ func (s *handlerStubRepo) Create(_ context.Context, req CreateRequest) (uuid.UUI
 	return id, nil
 }
 func (s *handlerStubRepo) Get(_ context.Context, id uuid.UUID) (*Task, error) {
+	if s.get != nil {
+		return s.get(id)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if t, ok := s.tasks[id]; ok {
 		return t, nil
 	}
 	return nil, ErrNotFound
+}
+func (s *handlerStubRepo) Update(_ context.Context, id uuid.UUID, req UpdateRequest) error {
+	if s.update != nil {
+		return s.update(id, req)
+	}
+	return nil
 }
 func (s *handlerStubRepo) List(_ context.Context, _ ListFilter) ([]Task, error) {
 	s.mu.Lock()

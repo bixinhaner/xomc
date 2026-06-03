@@ -230,3 +230,152 @@ func Test_Handler_Create_Oneshot_InvalidWindow_Rejected(t *testing.T) {
 	w := postCreate(t, b)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
+
+// ── T-0194：编辑任务（PATCH /pm/adhoc/tasks/:id）校验 ─────────────────────────
+
+// patchUpdate 用注入 get/update 的 stub repo 跑编辑任务。
+func patchUpdate(t *testing.T, repo Repository, id uuid.UUID, body map[string]any) *httptest.ResponseRecorder {
+	t.Helper()
+	r := newTestRouter(repo)
+	jsonBody, err := json.Marshal(body)
+	require.NoError(t, err)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/pm/adhoc/tasks/"+id.String(), bytes.NewReader(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	return w
+}
+
+// 成功路径：自建任务（device 维度 oneshot）改指标/设备/粒度/时窗 → 200，捕获的 UpdateRequest 字段正确。
+func Test_Handler_Update_Adhoc_Success(t *testing.T) {
+	id := uuid.New()
+	var captured UpdateRequest
+	repo := &handlerStubRepo{
+		get: func(uuid.UUID) (*Task, error) {
+			return &Task{ID: id, IsBuiltin: false, Mode: ModeOneshot, Dimension: DimensionDevice, Technology: ""}, nil
+		},
+		update: func(_ uuid.UUID, req UpdateRequest) error { captured = req; return nil },
+	}
+	b := map[string]any{
+		"name":          "edited",
+		"device_sns":    []string{"S1", "S2"},
+		"metric_paths":  []string{"K1001", "K1002"},
+		"granularities": []string{"daily"},
+		"window_start":  "2026-05-22T10:00:00Z",
+		"window_end":    "2026-05-22T11:00:00Z",
+	}
+	w := patchUpdate(t, repo, id, b)
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.False(t, captured.IsBuiltin)
+	assert.Equal(t, "edited", captured.Name)
+	assert.Equal(t, []string{"S1", "S2"}, captured.DeviceSNs)
+	assert.Equal(t, []string{"K1001", "K1002"}, captured.MetricPaths)
+	assert.Equal(t, []string{"daily"}, captured.Granularities)
+	assert.False(t, captured.WindowStart.IsZero())
+}
+
+// 失败路径：自建 device 维度 + 空 device_sns → 400（必填设备）。
+func Test_Handler_Update_Adhoc_EmptyDeviceSNs_Rejected(t *testing.T) {
+	id := uuid.New()
+	repo := &handlerStubRepo{
+		get: func(uuid.UUID) (*Task, error) {
+			return &Task{ID: id, IsBuiltin: false, Mode: ModeOneshot, Dimension: DimensionDevice}, nil
+		},
+	}
+	b := map[string]any{
+		"metric_paths":  []string{"M1"},
+		"granularities": []string{"hourly"},
+		"window_start":  "2026-05-22T10:00:00Z",
+		"window_end":    "2026-05-22T11:00:00Z",
+		// 不带 device_sns
+	}
+	w := patchUpdate(t, repo, id, b)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// 失败路径：自建 oneshot + window_end <= window_start → 400。
+func Test_Handler_Update_Adhoc_InvalidWindow_Rejected(t *testing.T) {
+	id := uuid.New()
+	repo := &handlerStubRepo{
+		get: func(uuid.UUID) (*Task, error) {
+			return &Task{ID: id, IsBuiltin: false, Mode: ModeOneshot, Dimension: DimensionNetwork}, nil
+		},
+	}
+	b := map[string]any{
+		"metric_paths":  []string{"M1"},
+		"granularities": []string{"hourly"},
+		"window_start":  "2026-05-22T11:00:00Z",
+		"window_end":    "2026-05-22T10:00:00Z",
+	}
+	w := patchUpdate(t, repo, id, b)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// 失败路径：自建多粒度 → 400（单粒度约束）。
+func Test_Handler_Update_Adhoc_MultiGranularity_Rejected(t *testing.T) {
+	id := uuid.New()
+	repo := &handlerStubRepo{
+		get: func(uuid.UUID) (*Task, error) {
+			return &Task{ID: id, IsBuiltin: false, Mode: ModeOneshot, Dimension: DimensionNetwork}, nil
+		},
+	}
+	b := map[string]any{
+		"metric_paths":  []string{"M1"},
+		"granularities": []string{"hourly", "daily"},
+		"window_start":  "2026-05-22T10:00:00Z",
+		"window_end":    "2026-05-22T11:00:00Z",
+	}
+	w := patchUpdate(t, repo, id, b)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// 成功路径：内置任务只取 metric_paths，传入的结构性字段（device_sns/granularities/window）被忽略；
+// IsBuiltin 透传到 UpdateRequest，且不跑结构性校验（多粒度/缺设备都不影响）。
+func Test_Handler_Update_Builtin_OnlyMetricPaths(t *testing.T) {
+	id := uuid.New()
+	var captured UpdateRequest
+	repo := &handlerStubRepo{
+		get: func(uuid.UUID) (*Task, error) {
+			return &Task{ID: id, IsBuiltin: true, Mode: ModeContinuous, Dimension: DimensionNetwork, Technology: "lte"}, nil
+		},
+		update: func(_ uuid.UUID, req UpdateRequest) error { captured = req; return nil },
+	}
+	b := map[string]any{
+		"name":          "should-be-ignored",
+		"device_sns":    []string{"X1"},
+		"metric_paths":  []string{"K2001"},
+		"granularities": []string{"hourly", "daily"}, // 多粒度对内置无所谓（不校验）
+	}
+	w := patchUpdate(t, repo, id, b)
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.True(t, captured.IsBuiltin)
+	assert.Equal(t, []string{"K2001"}, captured.MetricPaths)
+	// 内置守门：handler 不把结构性字段塞进 UpdateRequest（保持零值）
+	assert.Empty(t, captured.Name)
+	assert.Empty(t, captured.DeviceSNs)
+	assert.Empty(t, captured.Granularities)
+}
+
+// 失败路径：缺 metric_paths → 400（binding required,min=1）。
+func Test_Handler_Update_MissingMetricPaths_Rejected(t *testing.T) {
+	id := uuid.New()
+	repo := &handlerStubRepo{
+		get: func(uuid.UUID) (*Task, error) {
+			return &Task{ID: id, IsBuiltin: true}, nil
+		},
+	}
+	b := map[string]any{"granularities": []string{"hourly"}}
+	w := patchUpdate(t, repo, id, b)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// 失败路径：任务不存在 → 404。
+func Test_Handler_Update_NotFound(t *testing.T) {
+	id := uuid.New()
+	repo := &handlerStubRepo{
+		get: func(uuid.UUID) (*Task, error) { return nil, ErrNotFound },
+	}
+	b := map[string]any{"metric_paths": []string{"M1"}}
+	w := patchUpdate(t, repo, id, b)
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}

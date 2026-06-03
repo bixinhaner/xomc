@@ -43,6 +43,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		adhoc.POST("/tasks", h.Create)
 		adhoc.GET("/tasks", h.List)
 		adhoc.GET("/tasks/:id", h.Get)
+		adhoc.PATCH("/tasks/:id", h.Update) // T-0194：编辑任务定义
 		adhoc.DELETE("/tasks/:id", h.Cancel)
 		adhoc.GET("/tasks/:id/results", h.Results)
 		adhoc.GET("/tasks/:id/runs", h.Runs) // T-0186：运行历史
@@ -354,6 +355,110 @@ func (h *Handler) Get(c *gin.Context) {
 		return
 	}
 	response.OK(c, taskToDTO(t))
+}
+
+// updateRequestDTO 是 PATCH /pm/adhoc/tasks/:id 的入参（T-0194）。
+//
+// 字段集与编辑能力对齐：自建任务可改 name/device_sns/metric_paths/granularities/object_ldns/window；
+// 内置任务只取 metric_paths（其余字段服务端忽略）。mode/technology/dimension/is_builtin/expire_days 不在此结构体，不可改。
+type updateRequestDTO struct {
+	Name          string    `json:"name"`
+	DeviceSNs     []string  `json:"device_sns"`
+	MetricPaths   []string  `json:"metric_paths" binding:"required,min=1"`
+	Granularities []string  `json:"granularities"`
+	ObjectLDNs    []string  `json:"object_ldns"`
+	WindowStart   time.Time `json:"window_start"`
+	WindowEnd     time.Time `json:"window_end"`
+}
+
+// Update PATCH /pm/adhoc/tasks/:id
+//
+// 编辑任务定义（T-0194）。先取既有任务确定 is_builtin / mode / technology（结构性字段不可改，
+// 用既有值做校验基准）：
+//   - 内置任务：只更新 metric_paths，其余传入字段忽略，跳过结构性校验（设备/粒度/时窗不变）。
+//   - 自建任务：复用创建校验——单粒度、device/aggregate_group 维度设备非空、oneshot 时窗 end>start、改设备后拒跨制式。
+func (h *Handler) Update(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Fail(c, http.StatusBadRequest, "invalid id")
+		return
+	}
+	var req updateRequestDTO
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+	// 取既有任务：决定守门口径（is_builtin），并以既有结构性字段（mode/technology/dimension）做校验基准。
+	existing, err := h.repo.Get(c.Request.Context(), id)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			response.Fail(c, http.StatusNotFound, "not found")
+			return
+		}
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	upd := UpdateRequest{
+		IsBuiltin:   existing.IsBuiltin,
+		MetricPaths: req.MetricPaths,
+	}
+
+	if !existing.IsBuiltin {
+		// 自建任务：复用创建校验。
+		// 单粒度（设计 §2.4/§2.6）。
+		if len(req.Granularities) != 1 {
+			response.Fail(c, http.StatusBadRequest, "granularities must contain exactly one value (single granularity per task)")
+			return
+		}
+		// device_sns 仅 device/aggregate_group 维度必填（沿用既有维度，不可改）。
+		dim := existing.Dimension
+		if dim == "" {
+			dim = DimensionDevice
+		}
+		if (dim == DimensionDevice || dim == DimensionAggregateGroup) && len(req.DeviceSNs) == 0 {
+			response.Fail(c, http.StatusBadRequest, "device_sns is required for device/aggregate_group dimension")
+			return
+		}
+		// oneshot 时窗 end>start；continuous 强制清窗（开窗滚动，与创建一致）。
+		if existing.Mode == ModeOneshot {
+			if !req.WindowEnd.After(req.WindowStart) {
+				response.Fail(c, http.StatusBadRequest, "window_end must be after window_start for oneshot task")
+				return
+			}
+		} else {
+			req.WindowStart = time.Time{}
+			req.WindowEnd = time.Time{}
+		}
+		// 改设备后仍拒跨制式（按既有任务 technology 校验）。
+		if existing.Technology != "" && len(req.DeviceSNs) > 0 {
+			if err := h.rejectCrossTechnology(c.Request.Context(), existing.Technology, req.DeviceSNs); err != nil {
+				response.Fail(c, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+		// object_ldns 仅 device/aggregate_group 维度承载（与创建一致）。
+		objectLDNs := req.ObjectLDNs
+		if dim != DimensionDevice && dim != DimensionAggregateGroup {
+			objectLDNs = nil
+		}
+		upd.Name = req.Name
+		upd.DeviceSNs = req.DeviceSNs
+		upd.Granularities = req.Granularities
+		upd.ObjectLDNs = objectLDNs
+		upd.WindowStart = req.WindowStart
+		upd.WindowEnd = req.WindowEnd
+	}
+
+	if err := h.repo.Update(c.Request.Context(), id, upd); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			response.Fail(c, http.StatusNotFound, "not found")
+			return
+		}
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+	response.OK(c, gin.H{"id": id.String()})
 }
 
 // Cancel DELETE /pm/adhoc/tasks/:id

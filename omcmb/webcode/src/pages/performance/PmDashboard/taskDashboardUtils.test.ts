@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import type { AdhocResultRow } from '@core/types/pmAdhoc';
-import { seriesKeyOf, seriesLabelOf, buildMetricCharts } from './taskDashboardUtils';
+import {
+  seriesKeyOf,
+  seriesLabelOf,
+  buildMetricCharts,
+  filterChartsByMetricPaths,
+} from './taskDashboardUtils';
 
 // 构造结果行的小工厂——只填测试关心的字段，其余给确定默认值。
 function row(p: Partial<AdhocResultRow>): AdhocResultRow {
@@ -208,5 +213,32 @@ describe('buildMetricCharts — 转置', () => {
     ];
     const charts = buildMetricCharts(rows, 'device_group', 'hourly');
     expect(charts[0].series[0].name).toBe('设备组 abcd1234');
+  });
+});
+
+describe('filterChartsByMetricPaths — T-0194 按任务已选指标过滤出图', () => {
+  const rows: AdhocResultRow[] = [
+    row({ metricPath: 'K1', deviceSn: 'SN-A' }),
+    row({ metricPath: 'K2', deviceSn: 'SN-A' }),
+    row({ metricPath: 'K3', deviceSn: 'SN-A' }),
+  ];
+  const charts = buildMetricCharts(rows, 'device', 'hourly');
+
+  it('只保留清单内的图（数量与清单一致）', () => {
+    const out = filterChartsByMetricPaths(charts, ['K1', 'K3']);
+    expect(out.map((c) => c.metricPath)).toEqual(['K1', 'K3']);
+  });
+
+  it('清单为空 → 不过滤（兜底全画）', () => {
+    expect(filterChartsByMetricPaths(charts, [])).toHaveLength(3);
+  });
+
+  it('清单为 undefined → 不过滤（兜底全画）', () => {
+    expect(filterChartsByMetricPaths(charts, undefined)).toHaveLength(3);
+  });
+
+  it('清单含不存在的指标 → 只画命中的、不报错', () => {
+    const out = filterChartsByMetricPaths(charts, ['K2', 'K999']);
+    expect(out.map((c) => c.metricPath)).toEqual(['K2']);
   });
 });

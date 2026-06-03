@@ -43,6 +43,7 @@ type finishedRunRecord struct {
 }
 
 func (s *workerStubRepo) Create(context.Context, CreateRequest) (uuid.UUID, error) { return uuid.Nil, nil }
+func (s *workerStubRepo) Update(context.Context, uuid.UUID, UpdateRequest) error   { return nil }
 func (s *workerStubRepo) Get(context.Context, uuid.UUID) (*Task, error)            { return nil, nil }
 func (s *workerStubRepo) List(context.Context, ListFilter) ([]Task, error)         { return nil, nil }
 func (s *workerStubRepo) Cancel(context.Context, uuid.UUID) error                  { return nil }

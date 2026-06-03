@@ -106,6 +106,21 @@ export function seriesLabelOf(key: string, dimension: AdhocDimension, name?: str
 }
 
 /**
+ * T-0194：按任务「已选指标清单」过滤图表（统一对内置 + 自建生效）。
+ *   - metricPaths 非空：只保留 metricPath ∈ 清单 的图（让"指标数 X"与出图数一致）。
+ *   - metricPaths 为空：不过滤（兜底全画，避免空任务画不出）。
+ * 纯函数，便于单测；不改图内系列，只挑图。
+ */
+export function filterChartsByMetricPaths(
+  charts: MetricChart[],
+  metricPaths: string[] | undefined,
+): MetricChart[] {
+  if (!metricPaths || metricPaths.length === 0) return charts;
+  const set = new Set(metricPaths);
+  return charts.filter((c) => set.has(c.metricPath));
+}
+
+/**
  * 转置主函数：结果行 → 每指标一张图（图内按系列键分多条线，缺桶补 '-'）。
  * @param rows        任务结果行（多粒度混在一起，本函数内按 granularity 过滤）
  * @param dimension   任务聚合维度（决定系列键派生）

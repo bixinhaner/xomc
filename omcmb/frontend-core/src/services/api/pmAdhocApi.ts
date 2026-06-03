@@ -9,6 +9,7 @@ import type {
   AdhocTaskRun,
   AdhocStatus,
   CreateAdhocTaskInput,
+  UpdateAdhocTaskInput,
   BackendAdhocTask,
   BackendAdhocResultRow,
   BackendAdhocTaskRun,
@@ -71,6 +72,22 @@ export const pmAdhocApi = {
       payload.object_ldns = input.objectLdns;
     }
     const { data } = await http.post<{ id: string }>('/pm/adhoc/tasks', payload);
+    return data;
+  },
+  async update(id: string, input: UpdateAdhocTaskInput): Promise<{ id: string }> {
+    // T-0194：编辑任务定义。metric_paths 必带；其余字段仅自建任务有意义（内置后端忽略）。
+    const payload: Record<string, unknown> = {
+      metric_paths: input.metricPaths,
+    };
+    if (input.name !== undefined) payload.name = input.name;
+    if (input.deviceSns !== undefined) payload.device_sns = input.deviceSns;
+    if (input.granularities !== undefined) payload.granularities = input.granularities;
+    if (input.windowStart) payload.window_start = input.windowStart;
+    if (input.windowEnd) payload.window_end = input.windowEnd;
+    if (input.objectLdns && input.objectLdns.length > 0) {
+      payload.object_ldns = input.objectLdns;
+    }
+    const { data } = await http.patch<{ id: string }>(`/pm/adhoc/tasks/${id}`, payload);
     return data;
   },
   async cancel(id: string): Promise<void> {
@@ -158,6 +175,21 @@ export const pmAdhocMock: typeof pmAdhocApi = {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
+    return { id };
+  },
+  async update(id, input) {
+    const t = mockTasks.find((x) => x.id === id);
+    if (!t) throw new Error('not found');
+    t.metricPaths = input.metricPaths;
+    if (!t.isBuiltin) {
+      if (input.name !== undefined) t.name = input.name;
+      if (input.deviceSns !== undefined) t.deviceSns = input.deviceSns;
+      if (input.granularities !== undefined) t.granularities = input.granularities;
+      if (input.windowStart !== undefined) t.windowStart = input.windowStart;
+      if (input.windowEnd !== undefined) t.windowEnd = input.windowEnd;
+      t.objectLdns = input.objectLdns && input.objectLdns.length > 0 ? input.objectLdns : undefined;
+    }
+    t.updatedAt = new Date().toISOString();
     return { id };
   },
   async cancel(id) {

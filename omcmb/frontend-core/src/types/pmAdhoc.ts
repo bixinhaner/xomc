@@ -73,6 +73,22 @@ export interface CreateAdhocTaskInput {
   objectLdns?: string[];
 }
 
+/**
+ * 编辑任务入参（T-0194，PATCH /pm/adhoc/tasks/:id）。
+ *   - 自建任务：传 name/deviceSns/metricPaths/granularities/objectLdns/window。
+ *   - 内置任务：只需传 metricPaths（其余字段后端忽略）。
+ * mode/technology/dimension/isBuiltin 不可改，不在本结构体内。
+ */
+export interface UpdateAdhocTaskInput {
+  name?: string;
+  deviceSns?: string[];
+  metricPaths: string[];
+  granularities?: string[];
+  objectLdns?: string[];
+  windowStart?: string;
+  windowEnd?: string;
+}
+
 export interface AdhocResultRow {
   id: string;
   taskId: string;

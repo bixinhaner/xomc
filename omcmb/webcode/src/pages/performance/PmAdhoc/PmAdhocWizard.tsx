@@ -13,9 +13,9 @@
  *   提交时把各设备选中 objectLdn 汇成 objectLdns 随 create 落库（默认全勾→不传，保持现状语义）。
  */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useIntl } from 'react-intl';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import {
   Alert,
   Button,
@@ -33,7 +33,7 @@ import {
   message,
 } from 'antd';
 import dayjs from 'dayjs';
-import { useCreatePmAdhoc } from '@core/hooks/api/usePmAdhoc';
+import { useCreatePmAdhoc, useUpdatePmAdhoc, usePmAdhocDetail } from '@core/hooks/api/usePmAdhoc';
 import { useDeviceList } from '@core/hooks/api/useDevices';
 import { useMetricObjectsByDevices } from '@core/hooks/api/usePmQuery';
 import { useIndicatorCandidates } from '@core/hooks/api/usePerformance';
@@ -74,6 +74,11 @@ export default function PmAdhocWizard() {
   const intl = useIntl();
   const navigate = useNavigate();
   const createMut = useCreatePmAdhoc();
+  // T-0194：编辑模式 —— 路由带 :id 即编辑（复用本向导），无 id 则为新建。
+  const { id: editId } = useParams<{ id: string }>();
+  const isEdit = Boolean(editId);
+  const updateMut = useUpdatePmAdhoc();
+  const { data: editTask } = usePmAdhocDetail(editId);
 
   // 制式 / 维度 / 粒度选项：value 不变，仅 label / hint 走 i18n。
   const TECH_OPTIONS = useMemo<{ label: string; value: WizardTech }[]>(
@@ -152,6 +157,36 @@ export default function PmAdhocWizard() {
     dayjs().subtract(1, 'day'),
     dayjs(),
   ]);
+
+  // T-0194 编辑模式：预填守卫（只预填一次，避免覆盖用户后续编辑）+ 下钻是否被用户改动。
+  const [prefilled, setPrefilled] = useState(false);
+  const [drilldownTouched, setDrilldownTouched] = useState(false);
+  const [originalObjectLdns, setOriginalObjectLdns] = useState<string[]>([]);
+
+  // 编辑模式：详情到手后按各步初值预填（名称/制式/模式/维度/设备/指标/粒度/时窗）。
+  // 制式与模式预填后在 UI 锁定只读（结构性字段不可改）。
+  useEffect(() => {
+    if (!isEdit || prefilled || !editTask) return;
+    setName(editTask.name);
+    if (editTask.technology === 'lte' || editTask.technology === 'nr' || editTask.technology === 'gsm') {
+      setTechnology(editTask.technology);
+    }
+    setMode(editTask.mode);
+    setExpireDays(editTask.expireDays || 60);
+    setDimension(editTask.dimension);
+    setSelectedSns(editTask.deviceSns ?? []);
+    setMetricPaths(editTask.metricPaths ?? []);
+    if (editTask.granularities && editTask.granularities.length > 0) {
+      setGranularity(editTask.granularities[0]);
+    }
+    if (editTask.mode === 'oneshot' && editTask.windowStart && editTask.windowEnd) {
+      const ws = dayjs(editTask.windowStart);
+      const we = dayjs(editTask.windowEnd);
+      if (ws.isValid() && we.isValid()) setWindow([ws, we]);
+    }
+    setOriginalObjectLdns(editTask.objectLdns ?? []);
+    setPrefilled(true);
+  }, [isEdit, prefilled, editTask]);
 
   const needsDevicePick = dimension === 'device' || dimension === 'aggregate_group';
 
@@ -232,7 +267,29 @@ export default function PmAdhocWizard() {
     }
     try {
       // T-0193：自选设备分支下钻白名单——全勾→空数组→api 层不传（保持现状语义）。
-      const objectLdns = needsDevicePick ? getEffectiveLdns(cellSel, objectsByDevice) : [];
+      // 编辑模式：用户未动下钻时沿用任务原白名单（避免编辑指标顺带清掉小区过滤）。
+      let objectLdns = needsDevicePick ? getEffectiveLdns(cellSel, objectsByDevice) : [];
+      if (isEdit && !drilldownTouched && objectLdns.length === 0) {
+        objectLdns = originalObjectLdns;
+      }
+      if (isEdit && editId) {
+        // 编辑：mode/technology/dimension 锁定不可改，只发可改字段；后端按既有任务校验。
+        await updateMut.mutateAsync({
+          id: editId,
+          input: {
+            name: name.trim(),
+            deviceSns: needsDevicePick ? selectedSns : [],
+            metricPaths,
+            granularities: [granularity],
+            windowStart: mode === 'oneshot' ? window[0].toISOString() : undefined,
+            windowEnd: mode === 'oneshot' ? window[1].toISOString() : undefined,
+            objectLdns: objectLdns.length > 0 ? objectLdns : undefined,
+          },
+        });
+        message.success(intl.formatMessage({ id: 'perf.adhoc.taskUpdated' }));
+        navigate('/performance/pm-adhoc');
+        return;
+      }
       await createMut.mutateAsync({
         name: name.trim(),
         mode,
@@ -252,7 +309,12 @@ export default function PmAdhocWizard() {
       message.success(intl.formatMessage({ id: 'perf.adhoc.taskCreated' }));
       navigate('/performance/pm-adhoc');
     } catch (e) {
-      message.error(intl.formatMessage({ id: 'perf.adhoc.createFailed' }, { msg: (e as Error).message }));
+      message.error(
+        intl.formatMessage(
+          { id: isEdit ? 'perf.adhoc.updateFailed' : 'perf.adhoc.createFailed' },
+          { msg: (e as Error).message },
+        ),
+      );
     }
   };
 
@@ -269,11 +331,13 @@ export default function PmAdhocWizard() {
       </div>
       <div>
         <div style={{ marginBottom: 8, fontWeight: 500 }}>{intl.formatMessage({ id: 'perf.adhoc.fieldTechReq' })}</div>
+        {/* T-0194 编辑模式：制式锁定只读（建后不可改） */}
         <Radio.Group
           optionType="button"
           buttonStyle="solid"
           options={TECH_OPTIONS}
           value={technology}
+          disabled={isEdit}
           onChange={(e) => {
             setTechnology(e.target.value);
             // 制式切换后清空已选设备 / 指标（避免跨制式残留）
@@ -282,31 +346,50 @@ export default function PmAdhocWizard() {
             setMetricPaths([]);
           }}
         />
+        {isEdit && (
+          <div style={{ marginTop: 6, color: '#999', fontSize: 12 }}>
+            {intl.formatMessage({ id: 'perf.adhoc.editLockedTech' })}
+          </div>
+        )}
       </div>
       <div>
         <div style={{ marginBottom: 8, fontWeight: 500 }}>{intl.formatMessage({ id: 'perf.adhoc.fieldModeReq' })}</div>
+        {/* T-0194 编辑模式：模式锁定只读（变更会翻转时窗↔cron 语义） */}
         <Radio.Group
           optionType="button"
           buttonStyle="solid"
           value={mode}
+          disabled={isEdit}
           onChange={(e) => setMode(e.target.value as AdhocMode)}
           options={[
             { label: intl.formatMessage({ id: 'perf.adhoc.modeOneshotFull' }), value: 'oneshot' },
             { label: intl.formatMessage({ id: 'perf.adhoc.modeContinuousFull' }), value: 'continuous' },
           ]}
         />
+        {isEdit && (
+          <div style={{ marginTop: 6, color: '#999', fontSize: 12 }}>
+            {intl.formatMessage({ id: 'perf.adhoc.editLockedMode' })}
+          </div>
+        )}
       </div>
       {mode === 'oneshot' && (
         <div>
           <div style={{ marginBottom: 8, fontWeight: 500 }}>{intl.formatMessage({ id: 'perf.adhoc.fieldExpireDays' })}</div>
+          {/* T-0194 编辑模式：过期天数锁定只读（建后不可改，提交不发该字段） */}
           <Input
             type="number"
             min={1}
             style={{ width: 160 }}
             value={expireDays}
+            disabled={isEdit}
             onChange={(e) => setExpireDays(Number(e.target.value) || 60)}
             addonAfter={intl.formatMessage({ id: 'perf.adhoc.daySuffix' })}
           />
+          {isEdit && (
+            <div style={{ marginTop: 6, color: '#999', fontSize: 12 }}>
+              {intl.formatMessage({ id: 'perf.adhoc.editLockedExpire' })}
+            </div>
+          )}
         </div>
       )}
     </Space>
@@ -369,7 +452,10 @@ export default function PmAdhocWizard() {
                   deviceSns={selectedSns}
                   technology={technology}
                   value={cellSel}
-                  onChange={setCellSel}
+                  onChange={(v) => {
+                    setCellSel(v);
+                    setDrilldownTouched(true); // T-0194：用户改了下钻 → 编辑提交用新白名单而非原值
+                  }}
                 />
               </div>
             )}
@@ -569,7 +655,9 @@ export default function PmAdhocWizard() {
 
   return (
     <Card
-      title={intl.formatMessage({ id: 'perf.adhoc.wizardTitle' })}
+      title={intl.formatMessage({
+        id: isEdit ? 'perf.adhoc.wizardEditTitle' : 'perf.adhoc.wizardTitle',
+      })}
       extra={
         <Button onClick={() => navigate('/performance/pm-adhoc')}>
           {intl.formatMessage({ id: 'perf.adhoc.backToList' })}
@@ -591,8 +679,14 @@ export default function PmAdhocWizard() {
             {intl.formatMessage({ id: 'perf.adhoc.btnNext' })}
           </Button>
         ) : (
-          <Button type="primary" loading={createMut.isPending} onClick={handleSubmit}>
-            {intl.formatMessage({ id: 'perf.adhoc.btnSubmit' })}
+          <Button
+            type="primary"
+            loading={createMut.isPending || updateMut.isPending}
+            onClick={handleSubmit}
+          >
+            {intl.formatMessage({
+              id: isEdit ? 'perf.adhoc.btnSaveEdit' : 'perf.adhoc.btnSubmit',
+            })}
           </Button>
         )}
       </div>

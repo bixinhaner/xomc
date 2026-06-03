@@ -23,6 +23,12 @@ type Repository interface {
 	// Create 插入一行 adhoc 任务（pending 状态），返回 ID。
 	Create(ctx context.Context, req CreateRequest) (uuid.UUID, error)
 
+	// Update 更新一行 adhoc 任务定义（T-0194）。
+	//   - 自建任务（is_builtin=false）：更新 name/device_sns/metric_paths/granularities/object_ldns/window_start/window_end。
+	//   - 内置任务（is_builtin=true）：只更新 metric_paths，其余字段保持原值（服务端守门）。
+	// mode/technology/dimension/is_builtin/expire_days 一律不动。
+	Update(ctx context.Context, id uuid.UUID, req UpdateRequest) error
+
 	// Get 按 ID 取单行（不限状态）。
 	Get(ctx context.Context, id uuid.UUID) (*Task, error)
 
@@ -128,6 +134,52 @@ func (r *PgRepository) Create(ctx context.Context, req CreateRequest) (uuid.UUID
 		return uuid.Nil, fmt.Errorf("adhoc.Create: insert: %w", err)
 	}
 	return id, nil
+}
+
+// Update 更新一行 adhoc 任务定义（T-0194）。
+//
+// 内置守门：req.IsBuiltin=true 时只 SET metric_paths（其余字段保持原值）；
+// 自建任务（false）SET 全部可编辑字段。mode/technology/dimension/is_builtin/expire_days 永不进 SET。
+// 按 id + task_subtype='adhoc_aggregation' 限定；行不存在返 ErrNotFound。
+func (r *PgRepository) Update(ctx context.Context, id uuid.UUID, req UpdateRequest) error {
+	q, args, err := buildUpdateSQL(id, req)
+	if err != nil {
+		return fmt.Errorf("adhoc.Update: build SQL: %w", err)
+	}
+	tag, err := r.pool.Exec(ctx, q, args...)
+	if err != nil {
+		return fmt.Errorf("adhoc.Update: exec: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// buildUpdateSQL 构建编辑任务的 UPDATE SQL（T-0194）。抽出便于单测断言守门口径（哪些列进 SET）。
+//
+// 内置（IsBuiltin=true）：只 SET metric_paths + updated_at。
+// 自建（false）：额外 SET task_name/device_sns(JSONB)/granularities/object_ldns/window_start/window_end。
+// mode/technology/dimension/is_builtin/expire_days 永不进 SET。
+func buildUpdateSQL(id uuid.UUID, req UpdateRequest) (string, []any, error) {
+	qb := storage.Psql.Update("pm_tasks").
+		Set("metric_paths", req.MetricPaths).
+		Set("updated_at", time.Now()).
+		Where(sq.Eq{"id": id, "task_subtype": TaskSubtype})
+	if !req.IsBuiltin {
+		deviceSNsJSON, err := json.Marshal(req.DeviceSNs)
+		if err != nil {
+			return "", nil, fmt.Errorf("marshal device_sns: %w", err)
+		}
+		qb = qb.
+			Set("task_name", req.Name).
+			Set("device_sns", deviceSNsJSON).
+			Set("granularities", req.Granularities).
+			Set("object_ldns", nullableStrSlice(req.ObjectLDNs)).
+			Set("window_start", nullableTime(req.WindowStart)).
+			Set("window_end", nullableTime(req.WindowEnd))
+	}
+	return qb.ToSql()
 }
 
 func (r *PgRepository) Get(ctx context.Context, id uuid.UUID) (*Task, error) {

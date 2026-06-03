@@ -14,7 +14,7 @@ import { useIntl } from 'react-intl';
 import { Alert, Card, Empty, Segmented, Space, Spin, Tag, Typography } from 'antd';
 import dayjs from 'dayjs';
 import { usePmAdhocDetail, usePmAdhocResults } from '@core/hooks/api/usePmAdhoc';
-import { buildMetricCharts } from './taskDashboardUtils';
+import { buildMetricCharts, filterChartsByMetricPaths } from './taskDashboardUtils';
 import ChartCard from './ChartCard';
 import DashboardFilterBar, { type DashboardFilterValue } from './DashboardFilterBar';
 import {
@@ -100,9 +100,17 @@ export default function TaskDashboardPane({ taskId }: Props) {
 
   const charts = useMemo(() => {
     if (!taskQuery.data || !effectiveGran) return [];
-    const cur = buildMetricCharts(rows, taskQuery.data.dimension, effectiveGran);
+    // T-0194：按任务已选指标清单过滤出图（空清单则不过滤，兜底全画），让"指标数 X"与出图数一致。
+    const metricPaths = taskQuery.data.metricPaths;
+    const cur = filterChartsByMetricPaths(
+      buildMetricCharts(rows, taskQuery.data.dimension, effectiveGran),
+      metricPaths,
+    );
     if (!filter.compare) return cur;
-    const prev = buildMetricCharts(prevRows, taskQuery.data.dimension, effectiveGran);
+    const prev = filterChartsByMetricPaths(
+      buildMetricCharts(prevRows, taskQuery.data.dimension, effectiveGran),
+      metricPaths,
+    );
     return attachCompareSeries(cur, prev, offsetMs, effectiveGran);
   }, [rows, prevRows, taskQuery.data, effectiveGran, filter.compare, offsetMs]);
 

@@ -39,6 +39,7 @@ type stubRepo struct {
 }
 
 func (s *stubRepo) Create(context.Context, CreateRequest) (uuid.UUID, error) { return uuid.Nil, nil }
+func (s *stubRepo) Update(context.Context, uuid.UUID, UpdateRequest) error   { return nil }
 func (s *stubRepo) Get(context.Context, uuid.UUID) (*Task, error)            { return nil, nil }
 func (s *stubRepo) List(context.Context, ListFilter) ([]Task, error)         { return nil, nil }
 func (s *stubRepo) Cancel(context.Context, uuid.UUID) error                  { return nil }

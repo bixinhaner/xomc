@@ -298,6 +298,8 @@ export const routes: RouteObject[] = [
       { path: 'performance/pm-adhoc',          element: withSuspense(PmAdhocPage) },
       // T-0185 新建向导整页 5 步
       { path: 'performance/pm-adhoc/new',      element: withSuspense(PmAdhocWizard) },
+      // T-0194 编辑向导（复用同组件，带 :id 即编辑模式）
+      { path: 'performance/pm-adhoc/:id/edit', element: withSuspense(PmAdhocWizard) },
 
       // MML Management
       { path: 'mml/console',         element: withSuspense(MMLConsole) },
