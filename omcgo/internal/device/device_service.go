@@ -587,15 +587,11 @@ func (s *DeviceService) RegisterFromInform(ctx context.Context, inform *tr069.In
 			}
 			// Mark registration as online.
 			s.regRepo.UpdateStatus(ctx, preReg.ID, string(global.RegistrationOnline))
-		} else if preReg == nil {
-			// No pre-registration: assign to default L2 group.
-			defaultGroupID, _ := uuid.Parse(global.DefaultLevel2GroupID)
-			if _, err := s.groupAssigner.BatchAddDevices(ctx, defaultGroupID, []uuid.UUID{device.ID}); err != nil {
-				s.logger.Warn("assign device to default group",
-					zap.String("device_id", device.ID.String()),
-					zap.Error(err))
-			}
 		}
+		// 2026-06-03 用户决策「未分组 = 未绑定任何分组」：取消"无预登记则自动归默认 L2 组"。
+		// 无预登记的新设备保持未分组(无 device_group_members 行),由 GroupMatchEngine
+		// (device.registered / device.attributes.changed / cron)按规则命中才归组;不命中即留在
+		// "未分组设备"。这样"未分组"是真正的无成员关系,而非默认组成员。
 	}
 
 	// Sync UDP address to STUN cache
@@ -1748,6 +1744,9 @@ func (s *DeviceService) UpdateDevice(ctx context.Context, id uuid.UUID, req Upda
 		return nil, nil
 	}
 
+	// site_name(设备名称)旧值 — 改名后触发分组重匹配用。
+	oldDeviceName := device.DeviceName
+
 	if req.DeviceName != nil {
 		device.DeviceName = *req.DeviceName
 	}
@@ -1775,6 +1774,12 @@ func (s *DeviceService) UpdateDevice(ctx context.Context, id uuid.UUID, req Upda
 	// 直接喂给 ProductRegistry，stale 会让运行路径选错 product。
 	if s.cache != nil {
 		s.cache.Delete(ctx, device.SerialNumber)
+	}
+
+	// 改名(site_name 变化)后触发分组重匹配:名称是运维配置项、不走 Inform 同步路径,
+	// 故在此复用 device.attributes.changed 事件链,让 GroupMatchEngine 按名称规则即时重新归组。
+	if req.DeviceName != nil && device.DeviceName != oldDeviceName {
+		s.PublishDeviceAttributesChangedEvent(ctx, device, []string{"site_name"})
 	}
 	return device, nil
 }

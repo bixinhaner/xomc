@@ -11,9 +11,15 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/omcgo/omcgo/global"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/storage"
 )
+
+// ungroupedDevicesWhere 是"未分组设备"节点的过滤:设备未绑定任何分组(无成员关系行)。
+// 2026-06-03 用户决策「未分组 = 未绑定任何分组」——选中默认 L2 组(DefaultLevel2GroupID)时,
+// 不再按该组成员过滤,而是取 NOT EXISTS device_group_members 的设备。
+const ungroupedDevicesWhere = "NOT EXISTS (SELECT 1 FROM device_group_members m WHERE m.device_id = d.id)"
 
 // allowedSortColumnsWithInfo maps user-facing sort keys to qualified column names
 // for the devices + device_info JOIN query.
@@ -216,8 +222,13 @@ func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter
 	} else if filter.GroupID != nil || len(filter.VisibleGroups) > 0 {
 		// dgm is already joined, just add WHERE conditions
 		if filter.GroupID != nil {
-			builder = builder.Where(sq.Eq{"dgm.group_id": *filter.GroupID})
-			countBuilder = countBuilder.Where(sq.Eq{"dgm.group_id": *filter.GroupID})
+			if filter.GroupID.String() == global.DefaultLevel2GroupID {
+				builder = builder.Where(ungroupedDevicesWhere)
+				countBuilder = countBuilder.Where(ungroupedDevicesWhere)
+			} else {
+				builder = builder.Where(sq.Eq{"dgm.group_id": *filter.GroupID})
+				countBuilder = countBuilder.Where(sq.Eq{"dgm.group_id": *filter.GroupID})
+			}
 		}
 		if len(filter.VisibleGroups) > 0 {
 			builder = builder.Where(sq.Eq{"dgm.group_id": filter.VisibleGroups})
@@ -539,7 +550,11 @@ func applyDeviceFilters(b sq.SelectBuilder, filter DeviceFilter) sq.SelectBuilde
 		b = b.Where(sq.Eq{"d.product_class": SplitCSV(*filter.ProductClass)})
 	}
 	if filter.GroupID != nil {
-		b = b.Where(sq.Eq{"dgm.group_id": *filter.GroupID})
+		if filter.GroupID.String() == global.DefaultLevel2GroupID {
+			b = b.Where(ungroupedDevicesWhere)
+		} else {
+			b = b.Where(sq.Eq{"dgm.group_id": *filter.GroupID})
+		}
 	}
 	if filter.VisibleGroups != nil && len(filter.VisibleGroups) == 0 {
 		b = b.Where("FALSE")

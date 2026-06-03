@@ -418,8 +418,9 @@ func (r *PgDeviceGroupRepository) AddDeviceWithSource(ctx context.Context, group
 	return tag.RowsAffected(), nil
 }
 
-// AddDeviceAutoMatched 自动匹配命中：无条件 UPSERT 设备到 group，标 source_type='rule'。
-// 不带 manual 守护 —— 会覆盖手工分配（"最后编辑/匹配优先"语义，GroupMatchEngine 用）。
+// AddDeviceAutoMatched 自动匹配命中：UPSERT 设备到 group，标 source_type='rule'。
+// 2026-06-03 用户决策「手动优先」：带 manual 守护 —— WHERE source_type IS DISTINCT FROM 'manual'，
+// 冲突行为 manual 时跳过 UPDATE，永久保留运维手工分配（与 AddDeviceWithSource 同范式）。
 func (r *PgDeviceGroupRepository) AddDeviceAutoMatched(ctx context.Context, groupID, deviceID uuid.UUID) error {
 	const rawSQL = `
 		INSERT INTO device_group_members (group_id, device_id, added_at, source_type)
@@ -427,7 +428,8 @@ func (r *PgDeviceGroupRepository) AddDeviceAutoMatched(ctx context.Context, grou
 		ON CONFLICT (device_id) DO UPDATE SET
 			group_id = EXCLUDED.group_id,
 			added_at = EXCLUDED.added_at,
-			source_type = 'rule'`
+			source_type = 'rule'
+		WHERE device_group_members.source_type IS DISTINCT FROM 'manual'`
 
 	if _, err := r.pool.Exec(ctx, rawSQL, groupID, deviceID, time.Now()); err != nil {
 		return fmt.Errorf("auto-match add device to group: %w", err)
@@ -542,7 +544,10 @@ func (r *PgDeviceGroupRepository) MoveDevices(ctx context.Context, deviceIDs []u
 	return r.BatchAddDevices(ctx, targetGroupID, deviceIDs)
 }
 
-// MoveGroupDevicesToDefault moves all devices from the given groups to the default L2 group.
+// MoveGroupDevicesToDefault 删除分组时处理其成员设备。
+// 2026-06-03 用户决策「未分组 = 未绑定任何分组」：不再把成员回退到默认 L2 组,
+// 而是直接移除成员关系 —— 设备变为真正"未分组"(NOT EXISTS device_group_members),
+// 自然出现在"未分组设备"节点下。方法名保留以免动接口/调用点。
 func (r *PgDeviceGroupRepository) MoveGroupDevicesToDefault(ctx context.Context, groupIDs []uuid.UUID) (int64, error) {
 	return moveGroupDevicesToDefaultTx(ctx, r.pool, groupIDs)
 }
@@ -553,15 +558,11 @@ func moveGroupDevicesToDefaultTx(ctx context.Context, ex pgxExecutor, groupIDs [
 		return 0, nil
 	}
 
-	defaultGroupID, _ := uuid.Parse(global.DefaultLevel2GroupID)
-	const rawSQL = `
-		UPDATE device_group_members
-		SET group_id = $1, added_at = NOW()
-		WHERE group_id = ANY($2)`
+	const rawSQL = `DELETE FROM device_group_members WHERE group_id = ANY($1)`
 
-	tag, err := ex.Exec(ctx, rawSQL, defaultGroupID, groupIDs)
+	tag, err := ex.Exec(ctx, rawSQL, groupIDs)
 	if err != nil {
-		return 0, fmt.Errorf("move devices to default group: %w", err)
+		return 0, fmt.Errorf("remove device memberships on group delete: %w", err)
 	}
 	return tag.RowsAffected(), nil
 }
