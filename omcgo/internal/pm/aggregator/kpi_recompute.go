@@ -42,15 +42,6 @@ type kpiMeta struct {
 	isCounter  bool     // perf_indicators_*.is_counter='1'：原始计数 → 重算行保持 metric_type='counter'
 }
 
-// kpiRecomputeNeeded 判断是否需要走 KPI 重算（组维度 + 请求里含派生 KPI）。
-// device 维度与无 metric_paths 的请求直接跳过。
-func kpiRecomputeNeeded(q QueryRequest) bool {
-	if q.Dimension == DimensionDevice || q.Dimension == "" {
-		return false
-	}
-	return len(q.MetricPaths) > 0
-}
-
 // resolveKPIMetadata 把请求里的 metric_paths 拆成「按 arithmetic 重算的指标集合」+「无元数据的路径集合」。
 //
 // PM-P3 改造：

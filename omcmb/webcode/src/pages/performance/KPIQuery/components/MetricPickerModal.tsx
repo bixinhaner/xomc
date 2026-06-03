@@ -28,10 +28,12 @@ import { useAppStore } from '@core/store/appStore';
 const { Text } = Typography;
 
 // 选中值 = 该指标在 pm_metrics 里的 metric_path：
-//   KPI 落库键是 K 编号（id），counter 落库键是点分名（en_name）。
+//   原始计数指标落库编号化后（路线一·落库即编号），counter 与 KPI 落库键统一为指标编号（id）。
 //   这样选中值直接作为查询过滤条件即可命中，无需再做映射。
+//   （历史：编号化前 counter 落库键曾是点分上报名 en_name，故此处旧实现对 counter 取 en_name；
+//    P2/P3 落库改编号后随之改为统一取 id，否则按点分名查 counter 一行不出。）
 function metricValueOf(r: IndicatorInfo): string {
-  return r.isCounter ? r.enName ?? r.id : r.id;
+  return r.id;
 }
 
 // 选中标签的友好显示名：按当前界面语言优先取对应名，空则回退另一种 / 编号

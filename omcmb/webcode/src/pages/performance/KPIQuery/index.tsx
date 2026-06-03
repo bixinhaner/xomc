@@ -113,7 +113,10 @@ interface SaveTemplateFormState {
 }
 
 // KPI 编号格式（如 K900010043）。
-const KPI_CODE_RE = /^K\d+$/;
+// 指标编号（落库即编号化后，counter 与 KPI 的 metric_path 都是编号）：
+//   K 编号 K\d+ / C 编号 C\d+ / 5G·2G 编号 KGNB\d+·KGSM\d+。标准名一律带点（OTHER.CellServiceTime），
+//   不会被此正则误判为编号，故编号原样短路、点分名走下方解析。
+const KPI_CODE_RE = /^(C\d+|KGNB\d+|KGSM\d+|K\d+)$/;
 
 // 模板历史兼容：旧模板里 KPI 存的是显示名（落库改编号前），新链路按编号过滤会查空。
 // 载入时把非编号项尝试映射回编号——按显示名在指标库找唯一 KPI 项则换成其编号；
@@ -148,7 +151,8 @@ async function resolveTemplateMetricPaths(
       ambiguous.push(p);
       outPaths.push(p);
     } else {
-      // counter 或查不到：原样保留（counter 的 metric_path 即点分名）
+      // 走到这里的 p 已非编号（编号在上方短路）：旧模板里残留的点分上报名，或查不到。
+      // 原样保留——编号化后这类点分名 counter 查不到数据，仅兜底不阻断模板载入。
       outPaths.push(p);
       const counter = exact.find((it) => it.isCounter);
       if (counter) labels[p] = counter.cnName || p;
