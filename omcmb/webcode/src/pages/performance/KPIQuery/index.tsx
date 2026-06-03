@@ -10,6 +10,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
+  Alert,
   Button,
   Card,
   Form,
@@ -43,6 +44,7 @@ import {
   ClockCircleOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
+import { useIntl } from 'react-intl';
 import TreeListPageLayout from '@/components/Layout/TreeListPageLayout';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import {
@@ -187,6 +189,8 @@ export default function KPIQuery() {
   // 设备/指标选择器的目标：'main' = 主查询表单；'modal' = 模板编辑 Modal
   const [pickerTarget, setPickerTarget] = useState<'main' | 'modal'>('main');
 
+  const intl = useIntl();
+
   // ── 模板侧栏状态 ─────────────────────────────────────────────────
   const [templateTab, setTemplateTab] = useState<'public' | 'private'>('public');
   const [activeTemplateId, setActiveTemplateId] = useState<string | undefined>(undefined);
@@ -237,6 +241,8 @@ export default function KPIQuery() {
 
   const {
     data: aggregatedRows,
+    total: aggTotal,
+    truncated: aggTruncated,
     isLoading: aggLoading,
     isFetching: aggFetching,
     errors: aggErrors,
@@ -667,6 +673,18 @@ export default function KPIQuery() {
             </div>
           </Form>
         </Card>
+
+        {aggTruncated ? (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message={intl.formatMessage(
+              { id: 'perf.dashboard.truncatedTip' },
+              { shown: aggregatedRows.length, total: aggTotal },
+            )}
+          />
+        ) : null}
 
         <Card size="small" title={<span><TableOutlined /> 查询结果</span>}>
           <PivotTable rows={aggregatedRows} loading={aggLoading || aggFetching} />
