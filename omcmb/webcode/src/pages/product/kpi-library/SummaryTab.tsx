@@ -19,6 +19,8 @@ import { useT } from '@/hooks/useT';
 
 interface Props {
   onSelect: (tech: TechLower, platform: string) => void;
+  // 2026-06-03:搜索框上提到页面 toolbar(与「导入 XML」同行),query 由父组件受控传入。
+  query?: string;
 }
 
 // 2026-06-02 用户决策:制式列只显设备制式本身(ENB/GSM/GNB),不带 "(LTE)/(5G NR)" 括号注解。
@@ -28,12 +30,11 @@ const TECH_LABEL: Record<TechLower, string> = {
   gnb: 'GNB',
 };
 
-export default function SummaryTab({ onSelect }: Props) {
+export default function SummaryTab({ onSelect, query = '' }: Props) {
   const t = useT();
   const { data, isLoading } = useIndicatorSummary();
   const updateDescMut = useUpdateIndicatorFileDescription();
   const allItems = data?.items || [];
-  const [query, setQuery] = useState('');
 
   // 编辑描述(按 (制式, 平台) 维度)
   const [editRow, setEditRow] = useState<IndicatorPlatformSummary | null>(null);
@@ -87,6 +88,22 @@ export default function SummaryTab({ onSelect }: Props) {
       ),
     },
     {
+      // 后端 source.go::ClassifySource 派生,前端只渲染
+      title: t('common.source'),
+      dataIndex: 'source',
+      width: 90,
+      render: (s: IndicatorPlatformSummary['source']) =>
+        s === 'custom' ? <Tag color="blue">{t('common.custom')}</Tag> : <Tag>{t('common.builtin')}</Tag>,
+    },
+    {
+      // 该平台对应的 XML 文件(后端 MAX(formula.loaded_from));一文件一平台故单值
+      title: t('common.loadedFrom'),
+      dataIndex: 'loadedFrom',
+      width: 320,
+      ellipsis: true,
+      render: (v: string) => (v ? <Tooltip title={v}><code>{v}</code></Tooltip> : <span>—</span>),
+    },
+    {
       title: t('product.kpi.summary.col.tech'),
       dataIndex: 'tech',
       width: 120,
@@ -122,15 +139,6 @@ export default function SummaryTab({ onSelect }: Props) {
 
   return (
     <Card size="small">
-      <div style={{ marginBottom: 12 }}>
-        <Input.Search
-          placeholder={t('product.kpi.summary.searchPh')}
-          allowClear
-          style={{ width: 320 }}
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-      </div>
       <Table<IndicatorPlatformSummary>
         rowKey={(r) => `${r.tech}__${r.platform}`}
         loading={isLoading}

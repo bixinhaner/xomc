@@ -91,6 +91,8 @@ export default function KpiLibraryPage() {
 
   // ── 公共状态 ────────────────────────────────────────────────
   const [uploadOpen, setUploadOpen] = useState(false);
+  // 2026-06-03:一级 SummaryTab 搜索上提到 toolbar(与「导入 XML」同行)
+  const [summaryQuery, setSummaryQuery] = useState('');
 
   const importMut = useIndicatorImportDirectory();
   const cacheMut = useIndicatorCacheRefresh();
@@ -215,8 +217,14 @@ export default function KpiLibraryPage() {
             </>
           ) : (
             <>
-              {/* 列表态左侧留空 */}
-              <span />
+              {/* 列表态左侧:一级平台搜索框(与右侧「导入 XML」等操作同一行) */}
+              <Input.Search
+                placeholder={t('product.kpi.summary.searchPh')}
+                allowClear
+                value={summaryQuery}
+                onChange={(e) => setSummaryQuery(e.target.value)}
+                style={{ width: 320 }}
+              />
               {globalActions}
             </>
           )}
@@ -234,7 +242,7 @@ export default function KpiLibraryPage() {
           }}
         />
       ) : (
-        <SummaryTab onSelect={onSelectPlatform} />
+        <SummaryTab onSelect={onSelectPlatform} query={summaryQuery} />
       )}
 
       {/* 抽屉与弹窗 */}

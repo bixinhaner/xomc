@@ -104,13 +104,15 @@ export function techToDeviceType(t: TechLower): DeviceType {
 export type IndicatorSource = 'builtin' | 'custom' | 'unknown';
 
 // IndicatorPlatformSummary 是 /indicators/summary 端点单行 — (制式, 平台) 二元组。
-// 2026-06-02 用户决策:一个 XML 文件即一个平台,一级列表"一个平台一条"。
-// 不再含 loadedFrom/source/deletable:一级列表去掉"加载源/来源/删除"列,
-// 文件管理留在 /indicators/files(XMLFilesModal)。
+// 一个 XML 文件即一个平台,一级列表"一个平台一条"。
+// loadedFrom/source:后端 MAX(formula.loaded_from) + ClassifySource 派生,
+// 一级列表渲染"加载源/来源"两展示列(删除操作仍留在 XMLFilesModal)。
 export interface IndicatorPlatformSummary {
   tech: TechLower;
   platform: string;       // platform_name(rela_platform_indicator_formula_*.platform_name)
   indicators: number;     // 该平台的指标计数
+  loadedFrom: string;     // 该平台对应的 XML 文件相对路径(后端 MAX(formula.loaded_from))
+  source: IndicatorSource;// builtin/custom/unknown(后端由 loadedFrom 前缀派生)
   description?: string;   // 按 (tech, platform) 维度的可编辑描述
 }
 

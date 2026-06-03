@@ -69,6 +69,8 @@ type PlatformSummary struct {
 	Tech        string `json:"tech"`        // enb / gsm / gnb
 	Platform    string `json:"platform"`    // 平台名(从 rela_platform_indicator_formula_*.platform_name)
 	Indicators  int    `json:"indicators"`  // 该平台的指标计数
+	LoadedFrom  string `json:"loaded_from"` // 该平台对应的 XML 文件相对路径(MAX(formula.loaded_from),一文件一平台故单值)
+	Source      string `json:"source"`      // builtin / custom / unknown(由 LoadedFrom 前缀 ClassifySource 派生)
 	Description string `json:"description"` // 按 (tech, platform) 维度的可编辑描述
 }
 
@@ -178,9 +180,12 @@ func (r *PgFileRepository) SummaryByTech(ctx context.Context) ([]PlatformSummary
 	out := make([]PlatformSummary, 0, 16)
 	for _, tech := range []string{"enb", "gsm", "gnb"} {
 		// d.description LEFT JOIN 在 (tech, platform) 主键上至多一行,MAX 仅为满足 GROUP BY。
+		// MAX(rf.loaded_from):一个 XML 文件即一个平台,同 platform_name 的 formula 行
+		// loaded_from 单值,MAX 仅为满足 GROUP BY,取的即该平台的加载源。
 		sqlStr := fmt.Sprintf(`
 SELECT rf.platform_name,
        COUNT(DISTINCT rf.indicator_id) AS indicators,
+       COALESCE(MAX(rf.loaded_from), '') AS loaded_from,
        COALESCE(MAX(d.description), '') AS description
   FROM rela_platform_indicator_formula_%s rf
   LEFT JOIN indicator_file_descriptions d
@@ -194,10 +199,12 @@ SELECT rf.platform_name,
 		}
 		for rows.Next() {
 			row := PlatformSummary{Tech: tech}
-			if err := rows.Scan(&row.Platform, &row.Indicators, &row.Description); err != nil {
+			if err := rows.Scan(&row.Platform, &row.Indicators, &row.LoadedFrom, &row.Description); err != nil {
 				rows.Close()
 				return nil, fmt.Errorf("scan platform summary row (%s): %w", tech, err)
 			}
+			// source 由 loaded_from 前缀派生(唯一真值源 source.go);loaded_from 为空时返 unknown。
+			row.Source = string(ClassifySource(row.LoadedFrom))
 			out = append(out, row)
 		}
 		rows.Close()

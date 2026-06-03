@@ -234,7 +234,14 @@ export const indicatorLibraryService = {
         byPlatform.set(p, (byPlatform.get(p) || 0) + 1);
       }
       for (const [platform, count] of Array.from(byPlatform.entries()).sort(([a], [b]) => a.localeCompare(b))) {
-        items.push({ tech, platform, indicators: count, description: '' });
+        items.push({
+          tech,
+          platform,
+          indicators: count,
+          loadedFrom: `indicator-library/${tech}/${platform}.xml`,
+          source: 'builtin',
+          description: '',
+        });
       }
     }
     return { items };

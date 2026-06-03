@@ -324,6 +324,8 @@ export const indicatorLibraryApi = {
         tech: string;
         platform: string;
         indicators: number;
+        loaded_from?: string;
+        source?: string;
         description?: string;
       }>;
     }>('/indicators/summary');
@@ -332,6 +334,8 @@ export const indicatorLibraryApi = {
         tech: b.tech as TechLower,
         platform: b.platform,
         indicators: b.indicators,
+        loadedFrom: b.loaded_from ?? '',
+        source: (b.source ?? 'unknown') as IndicatorPlatformSummary['source'],
         description: b.description ?? '',
       })),
     };
