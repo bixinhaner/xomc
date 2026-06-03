@@ -262,3 +262,15 @@ export function useIndicatorDeleteFile() {
     },
   });
 }
+
+// 2026-06-02:按 (tech, platform) 编辑描述,成功后刷新 summary。
+export function useUpdateIndicatorFileDescription() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { tech: TechLower; platform: string; description: string }) =>
+      api.updateFileDescription(vars.tech, vars.platform, vars.description),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: IL_KEY });
+    },
+  });
+}

@@ -1,27 +1,18 @@
 /**
- * SummaryTab — T-0180 一级 (制式, 平台) 聚合表(2026-05-29 第四轮调整)。
+ * SummaryTab — KPI 指标库一级列表(2026-06-02:"一个平台一条")。
  *
- * 本轮(用户决策,对齐 T-0178 param-model 范式):
- *   1. 新增"来源"列:Tag 内置 / 自定义(后端 source.go::ClassifySource 派生)
- *   2. "XML 文件"列改名"加载源",显示完整 loaded_from(原来只显 basename)
- *   3. 新增"操作"列:仅 deletable=true(custom)显红色删除;builtin 置灰 + Tooltip
- *      "{t('product.kpi.summary.builtinHint')}"
- *
- * 历史决策(沿用):
- *   - 列粒度:每个 (制式, 平台) 唯一一行
- *   - 平台名是 type=link Button,点击 → onSelect(tech, platform)
+ * 用户决策:一个 XML 文件即一个平台,一级列表按平台聚合,每平台唯一一行。
+ * 列:序号 / 平台(link → 二级) / 制式 / 指标数 / 描述 / 操作(编辑描述)。
+ * 去掉"来源 / 加载源 / 删除"列 —— 文件管理(上传/删除/来源)留在 XMLFilesModal。
  */
-import { Card, Table, Tag, Button, Tooltip, Popconfirm, message } from 'antd';
-import { DeleteOutlined } from '@ant-design/icons';
+import { useState } from 'react';
+import { Card, Table, Tag, Button, Tooltip, message, Input, Modal } from 'antd';
+import { EditOutlined } from '@ant-design/icons';
 import type { AxiosError } from 'axios';
-import type {
-  IndicatorPlatformSummary,
-  IndicatorSource,
-  TechLower,
-} from '@core/types/indicatorLibrary';
+import type { IndicatorPlatformSummary, TechLower } from '@core/types/indicatorLibrary';
 import {
   useIndicatorSummary,
-  useIndicatorDeleteFile,
+  useUpdateIndicatorFileDescription,
 } from '@core/hooks/api/useIndicatorsLibrary';
 import { makeSeqColumn } from '@/components/Table/seqColumn';
 import { useT } from '@/hooks/useT';
@@ -30,17 +21,54 @@ interface Props {
   onSelect: (tech: TechLower, platform: string) => void;
 }
 
+// 2026-06-02 用户决策:制式列只显设备制式本身(ENB/GSM/GNB),不带 "(LTE)/(5G NR)" 括号注解。
 const TECH_LABEL: Record<TechLower, string> = {
-  enb: 'ENB (LTE)',
+  enb: 'ENB',
   gsm: 'GSM',
-  gnb: 'GNB (5G NR)',
+  gnb: 'GNB',
 };
 
 export default function SummaryTab({ onSelect }: Props) {
   const t = useT();
   const { data, isLoading } = useIndicatorSummary();
-  const deleteMut = useIndicatorDeleteFile();
-  const items = data?.items || [];
+  const updateDescMut = useUpdateIndicatorFileDescription();
+  const allItems = data?.items || [];
+  const [query, setQuery] = useState('');
+
+  // 编辑描述(按 (制式, 平台) 维度)
+  const [editRow, setEditRow] = useState<IndicatorPlatformSummary | null>(null);
+  const [draft, setDraft] = useState('');
+
+  // 自动文本兜底:未填自定义描述时展示"制式说明 · 平台 X"。
+  const autoDesc = (row: IndicatorPlatformSummary) =>
+    `${t(`product.kpi.summary.tech.${row.tech}`)} · ${t('common.platform')} ${row.platform}`;
+  // 展示用描述:有存储描述则用之,否则用自动文本。列渲染与搜索统一走这里。
+  const shownDesc = (row: IndicatorPlatformSummary) =>
+    row.description && row.description.trim() ? row.description : autoDesc(row);
+
+  // 客户端模糊筛选:名称(平台)+ 描述(summary 一次性全量返回,client 过滤即可)。
+  const q = query.trim().toLowerCase();
+  const items = q
+    ? allItems.filter(
+        (r) => r.platform.toLowerCase().includes(q) || shownDesc(r).toLowerCase().includes(q),
+      )
+    : allItems;
+
+  const saveDesc = () => {
+    if (!editRow) return;
+    updateDescMut
+      .mutateAsync({ tech: editRow.tech, platform: editRow.platform, description: draft })
+      .then(() => {
+        message.success(t('common.saved'));
+        setEditRow(null);
+      })
+      .catch((e) => {
+        const ax = e as AxiosError<{ msg?: string; message?: string }>;
+        message.error(
+          ax.response?.data?.msg ?? ax.response?.data?.message ?? (e instanceof Error ? e.message : String(e)),
+        );
+      });
+  };
 
   const columns = [
     {
@@ -59,109 +87,88 @@ export default function SummaryTab({ onSelect }: Props) {
       ),
     },
     {
-      // 后端 source.go::ClassifySource 派生,前端只渲染
-      title: t('common.source'),
-      dataIndex: 'source',
-      width: 90,
-      filters: [
-        { text: t('common.builtin'), value: 'builtin' as IndicatorSource },
-        { text: t('common.custom'), value: 'custom' as IndicatorSource },
-      ],
-      onFilter: (val: boolean | React.Key, row: IndicatorPlatformSummary) =>
-        row.source === val,
-      render: (s: IndicatorSource | undefined) =>
-        s === 'custom' ? <Tag color="blue">{t('common.custom')}</Tag> : <Tag>{t('common.builtin')}</Tag>,
-    },
-    {
-      // 2026-05-29:从"XML 文件"(只显 basename)改为"加载源"(全路径,ellipsis)
-      // 2026-05-31:列宽 260→420,容纳 `indicator-library-custom/enb/<basename>.xml`
-      //            等 50+ 字符的全路径,典型 builtin `indicator-library/enb/ALL.xml`
-      //            (32 char) 也保留余量。
-      title: t('common.loadedFrom'),
-      dataIndex: 'loadedFrom',
-      width: 420,
-      ellipsis: true,
-      render: (v: string) => <Tooltip title={v}><code>{v}</code></Tooltip>,
-    },
-    {
-      title: t('common.tech'),
+      title: t('product.kpi.summary.col.tech'),
       dataIndex: 'tech',
-      width: 130,
+      width: 120,
       render: (v: TechLower) => <Tag color="geekblue">{TECH_LABEL[v]}</Tag>,
     },
     { title: t('common.indicators'), dataIndex: 'indicators', width: 90 },
     {
-      title: t('common.note'),
+      title: t('common.description'),
       ellipsis: true,
       render: (_: unknown, row: IndicatorPlatformSummary) => (
-        <span style={{ color: 'rgba(0, 0, 0, 0.65)', fontSize: 12 }}>
-          {t(`product.kpi.summary.tech.${row.tech}`)} · {t('common.platform')} {row.platform}
-        </span>
+        <Tooltip title={shownDesc(row)}>
+          <span style={{ color: 'rgba(0, 0, 0, 0.65)', fontSize: 12 }}>{shownDesc(row)}</span>
+        </Tooltip>
       ),
     },
     {
       title: t('common.action'),
       width: 80,
-      render: (_: unknown, row: IndicatorPlatformSummary) =>
-        row.deletable ? (
-          <Popconfirm
-            title={t('product.kpi.summary.confirmDeleteXml')}
-            description={
-              <div style={{ maxWidth: 320 }}>
-                · {t('product.kpi.summary.deleteBullet1Pre')} <code>{row.loadedFrom}</code> {t('product.kpi.summary.deleteBullet1Post')}
-                <code>.deleted.&lt;ts&gt;</code> {t('product.kpi.summary.backupSuffix')}
-                <br />· {t('product.kpi.summary.deleteBullet2', { count: row.indicators })}
-                <br />· {t('product.kpi.summary.deleteBullet3')}
-              </div>
-            }
-            okButtonProps={{ danger: true }}
-            okText={t('product.paramModel.delConfirm')}
-            onConfirm={() =>
-              deleteMut
-                .mutateAsync(row.loadedFrom)
-                .then(() => message.success(t('common.deleted')))
-                .catch((e) => {
-                  const ax = e as AxiosError<{ msg?: string; message?: string }>;
-                  const msg =
-                    ax.response?.data?.msg ??
-                    ax.response?.data?.message ??
-                    (e instanceof Error ? e.message : String(e));
-                  message.error(msg);
-                })
-            }
-          >
-            <Button size="small" danger icon={<DeleteOutlined />} />
-          </Popconfirm>
-        ) : (
-          <Tooltip
-            title={
-              <div style={{ maxWidth: 240 }}>
-                {t('product.kpi.summary.builtinHint')}
-              </div>
-            }
-            placement="topRight"
-          >
-            <Button
-              size="small"
-              icon={<DeleteOutlined />}
-              disabled
-              aria-label="builtin XML not deletable"
-            />
-          </Tooltip>
-        ),
+      render: (_: unknown, row: IndicatorPlatformSummary) => (
+        <Tooltip title={t('product.kpi.summary.editDescTitle')}>
+          <Button
+            size="small"
+            icon={<EditOutlined />}
+            onClick={() => {
+              setEditRow(row);
+              setDraft(row.description ?? '');
+            }}
+          />
+        </Tooltip>
+      ),
     },
   ];
 
   return (
     <Card size="small">
+      <div style={{ marginBottom: 12 }}>
+        <Input.Search
+          placeholder={t('product.kpi.summary.searchPh')}
+          allowClear
+          style={{ width: 320 }}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      </div>
       <Table<IndicatorPlatformSummary>
-        rowKey={(r) => `${r.tech}__${r.platform}__${r.loadedFrom}`}
+        rowKey={(r) => `${r.tech}__${r.platform}`}
         loading={isLoading}
         columns={[makeSeqColumn<IndicatorPlatformSummary>({ title: t('table.rowNumber'), dataSource: items }), ...columns]}
         dataSource={items}
         size="small"
         pagination={false}
       />
+
+      <Modal
+        title={t('product.kpi.summary.editDescTitle')}
+        open={Boolean(editRow)}
+        onOk={saveDesc}
+        confirmLoading={updateDescMut.isPending}
+        onCancel={() => setEditRow(null)}
+        okText={t('common.save')}
+        destroyOnHidden
+      >
+        {editRow && (
+          <>
+            {/* 描述按 (制式, 平台) 维度 */}
+            <div style={{ color: 'rgba(0,0,0,0.45)', fontSize: 12, marginBottom: 8 }}>
+              {t('common.platform')}：<code>{TECH_LABEL[editRow.tech]} / {editRow.platform}</code>
+            </div>
+            <div style={{ color: 'rgba(0,0,0,0.45)', fontSize: 12, marginBottom: 8 }}>
+              {t('product.kpi.summary.editDescHint')}
+            </div>
+            <Input.TextArea
+              rows={4}
+              maxLength={500}
+              showCount
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder={t('product.kpi.summary.editDescPh')}
+            />
+          </>
+        )}
+      </Modal>
     </Card>
   );
 }

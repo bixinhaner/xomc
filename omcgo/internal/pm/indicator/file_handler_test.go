@@ -37,6 +37,12 @@ type mockFileRepository struct {
 	listByTech    map[string][]FileGroup // tech → groups
 	listByTechErr error
 
+	// UpsertFileDescription stub(2026-06-02:按 (tech, platform) 维度)
+	upsertDescTech     string
+	upsertDescPlatform string
+	upsertDescValue    string
+	upsertDescErr      error
+
 	// T-0180 P1.5: DeleteOrphansBefore stub
 	orphanRows    map[string]int // tech → rows to "delete" (deterministic per tech)
 	orphanErr     error
@@ -66,6 +72,13 @@ func (m *mockFileRepository) SummaryByTech(ctx context.Context) ([]PlatformSumma
 		return nil, m.summaryErr
 	}
 	return m.summary, nil
+}
+
+func (m *mockFileRepository) UpsertFileDescription(ctx context.Context, tech, platform, description string) error {
+	m.upsertDescTech = tech
+	m.upsertDescPlatform = platform
+	m.upsertDescValue = description
+	return m.upsertDescErr
 }
 
 func (m *mockFileRepository) ListFilesByTech(ctx context.Context, tech string) ([]FileGroup, error) {
@@ -356,12 +369,12 @@ func TestValidateTech(t *testing.T) {
 func TestSummary_HappyPath(t *testing.T) {
 	baseDir := t.TempDir()
 	repo := &mockFileRepository{
-		// 2026-05-29:Summary 调整为 (制式, 平台) 粒度,每平台一行
+		// 2026-06-02:Summary 调整为"一个平台一条"粒度
 		summary: []PlatformSummary{
-			{Tech: "enb", Platform: "ALL", LoadedFrom: "indicator-library/enb/ALL.xml", Indicators: 700},
-			{Tech: "enb", Platform: "BLQ", LoadedFrom: "indicator-library/enb/BLQ.xml", Indicators: 463},
-			{Tech: "gsm", Platform: "BSC", LoadedFrom: "indicator-library/GSM.xml", Indicators: 73},
-			{Tech: "gnb", Platform: "BaiBNQ", LoadedFrom: "indicator-library/GNB.xml", Indicators: 211},
+			{Tech: "enb", Platform: "ALL", Indicators: 700},
+			{Tech: "enb", Platform: "BLQ", Indicators: 463},
+			{Tech: "gsm", Platform: "BSC", Indicators: 73},
+			{Tech: "gnb", Platform: "BaiBNQ", Indicators: 211},
 		},
 	}
 	r := newTestRouter(t, repo, baseDir)
@@ -380,7 +393,6 @@ func TestSummary_HappyPath(t *testing.T) {
 	assert.Len(t, resp.Data.Items, 4)
 	assert.Equal(t, "enb", resp.Data.Items[0].Tech)
 	assert.Equal(t, "ALL", resp.Data.Items[0].Platform)
-	assert.Equal(t, "indicator-library/enb/ALL.xml", resp.Data.Items[0].LoadedFrom)
 	assert.Equal(t, 700, resp.Data.Items[0].Indicators)
 }
 

@@ -55,6 +55,7 @@ func NewFileHandler(repo FileRepository, reloader Reloader, baseDir string, logg
 func (h *FileHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	ig := rg.Group("/indicators")
 	ig.GET("/summary", h.Summary)
+	ig.PUT("/file-description", h.UpdateFileDescription)
 	ig.GET("/files", h.ListFiles)
 	ig.POST("/upload-xml", h.UploadXML)
 	files := ig.Group("/files")
@@ -244,6 +245,32 @@ func (h *FileHandler) Summary(c *gin.Context) {
 		return
 	}
 	response.OK(c, gin.H{"items": rows})
+}
+
+// UpdateFileDescription PUT /api/v1/indicators/file-description
+//
+// body: { "tech": "enb", "platform": "ALL", "description": "..." }
+// 按 (tech, platform) 维度 upsert 一条描述(2026-06-02 用户决策:一个平台一条)。
+// 描述属运维注记,不动 XML 文件本身。
+func (h *FileHandler) UpdateFileDescription(c *gin.Context) {
+	var req struct {
+		Tech        string `json:"tech" binding:"required"`
+		Platform    string `json:"platform" binding:"required"`
+		Description string `json:"description"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+	if err := validateUploadTech(req.Tech); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+	if err := h.repo.UpsertFileDescription(c.Request.Context(), req.Tech, req.Platform, req.Description); err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	response.OK(c, gin.H{"tech": req.Tech, "platform": req.Platform, "description": req.Description})
 }
 
 // fileEntry 是 ListFiles 端点单行(DB 计数 + 物理扫描 + source/deletable 派生)。

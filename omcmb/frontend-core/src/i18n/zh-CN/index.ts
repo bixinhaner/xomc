@@ -271,7 +271,7 @@ const messages: Record<string, string> = {
 
   // /product/products
   'product.products.clearTooltip':   '清空所有 swVersion 的 discovered 映射；下次 Bootstrap 重新建',
-  'product.products.searchPh':       '搜索：产品名 / 厂商 / 描述',
+  'product.products.searchPh':       '搜索：名称 / 厂商 / 描述',
   'product.products.reloadXmlTitle': '确认重载 XML？',
   'product.products.reloadOk':       '确认重载',
   'product.products.reloadDesc':     'UI 中对 指标平台 / 告警网元类型 / 正则规则 等字段的手工修改将被 XML 值覆盖。',
@@ -281,10 +281,11 @@ const messages: Record<string, string> = {
   'product.products.namePh':         '如 PicoCell-LTE-V2',
   'product.products.paramModel':     '参数模型',
   'product.products.paramModelPh':   '选择参数模型',
+  'product.products.tech':           '基站制式',
   'product.products.indicatorDevType': '指标设备类型',
-  'product.products.indicatorPlatform': '指标平台名',
+  'product.products.indicatorPlatform': 'KPI指标名称',
   'product.products.indicatorPlatformPh': '选择指标平台',
-  'product.products.alarmNeType':    '告警网元类型',
+  'product.products.alarmNeType':    '告警名称',
   'product.products.alarmNeTypePh':  '选择告警网元类型',
   'product.products.enableFt11':     '启用参数文件上传 (Upload FileType=11)',
   'product.products.attrsOverride':  '设备属性覆盖（device_attrs_override）',
@@ -299,7 +300,7 @@ const messages: Record<string, string> = {
   'product.matchTester.matched':     '产品匹配',
 
   // /product/param-model
-  'product.paramModel.searchPh':     '名称 / 描述',
+  'product.paramModel.searchPh':     '搜索 名称 /描述',
   'product.paramModel.reloadTitle':  '确认重载 XML?',
   'product.paramModel.reloadHint':   '旧文件会自动备份为 .bak.<ts>。',
   'product.paramModel.reloadDesc':   '从 datamodels/ destructive 全量重载: DB 中已无 XML 对应的孤儿模型 → 删除; 关联的 param_mappings 级联删除; 关联的 products.param_model_id 被置空 (SET NULL)',
@@ -349,6 +350,7 @@ const messages: Record<string, string> = {
 
   // /product/alarm-library
   'product.alarm.searchPh':           '搜索 identifier / 名称 / 描述',
+  'product.alarm.neSearchPh':         '搜索 名称',
   'product.alarm.allFilter':          '全部',
   'product.alarm.severityLabel':      '严重级别',
   'product.alarm.importDesc':         '从 datamodels/ 加法 UPSERT 当前 XML 文件中的告警定义: DB 中已无 XML 对应的孤儿告警 → 保留不删除',
@@ -386,7 +388,7 @@ const messages: Record<string, string> = {
   'product.alarm.unknown.empty':      '近期无未识别告警',
 
   // /product/orphan-devices
-  'product.orphan.searchPh':          '按 SN 模糊搜索',
+  'product.orphan.searchPh':          '按 SN / OUI / 产品类型 / 厂商 模糊搜索',
   'product.orphan.scanTooltip':       '扫描所有 product_class 不空,但 product_id 仍为 NULL 的设备',
   'product.orphan.rematchTitle':      '确认触发全量重新匹配?',
   'product.orphan.runningWarn':       '正在执行中,请等待刷新完成',
@@ -5977,6 +5979,11 @@ const messages: Record<string, string> = {
   'product.kpi.summary.deleteBullet1Post': '将 rename 为',
   'product.kpi.summary.deleteBullet2': '关联的 {count} 条指标 + 公式级联删除',
   'product.kpi.summary.deleteBullet3': '若存在同名内置 XML,删除后将自动回退到内置版本',
+  'product.kpi.summary.col.tech': '设备制式',
+  'product.kpi.summary.searchPh': '搜索：名称 / 描述',
+  'product.kpi.summary.editDescTitle': '编辑描述',
+  'product.kpi.summary.editDescHint': '描述按平台维度保存(一个 XML 文件即一个平台)。',
+  'product.kpi.summary.editDescPh': '请输入描述(留空则显示默认说明)',
   'product.kpi.summary.tech.enb': '4G LTE 基站(eNodeB)',
   'product.kpi.summary.tech.gsm': '2G GSM 基站控制器(BSC)',
   'product.kpi.summary.tech.gnb': '5G NR 基站(gNodeB)',
@@ -6068,10 +6075,10 @@ const messages: Record<string, string> = {
   'product.product.drawer.tabUpload': '上传策略',
   'product.product.drawer.unknownAlarmExtra': 'true 时未匹配 alarm_definitions 的告警写 fallback (severity=Warning, is_unknown=true)；false 直接丢弃',
   'product.product.drawer.uploadEnabledExtra': 'false 时跳过 Upload 流程；true 时设备不支持 SOAP Fault 触发降级到默认映射',
-  'product.products.col.alarmNeType': '告警网元类型',
+  'product.products.col.alarmNeType': '告警名称',
   'product.products.col.deviceCount': '设备数',
   'product.products.col.indicatorDeviceType': '指标设备类型',
-  'product.products.col.indicatorPlatform': '指标平台',
+  'product.products.col.indicatorPlatform': 'KPI指标名称',
   'product.products.col.partial': '部分 {active}/{total}',
   'product.products.col.productName': '名称',
   'product.products.col.regex': '正则表达式',

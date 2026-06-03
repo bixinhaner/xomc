@@ -104,16 +104,14 @@ export function techToDeviceType(t: TechLower): DeviceType {
 export type IndicatorSource = 'builtin' | 'custom' | 'unknown';
 
 // IndicatorPlatformSummary 是 /indicators/summary 端点单行 — (制式, 平台) 二元组。
-// 2026-05-29 用户决策:从"3 行/制式"调为"N 行/(制式, 平台)"粒度。
-// 2026-05-29 二次扩展:对齐 T-0178 param-model,补 source/deletable
-// (后端唯一真值源,前端只渲染)。
+// 2026-06-02 用户决策:一个 XML 文件即一个平台,一级列表"一个平台一条"。
+// 不再含 loadedFrom/source/deletable:一级列表去掉"加载源/来源/删除"列,
+// 文件管理留在 /indicators/files(XMLFilesModal)。
 export interface IndicatorPlatformSummary {
   tech: TechLower;
   platform: string;       // platform_name(rela_platform_indicator_formula_*.platform_name)
-  loadedFrom: string;     // XML 文件路径(含前缀),如 "indicator-library/enb/ALL.xml"
-  indicators: number;     // 该 (loaded_from, platform) 指标计数
-  source: IndicatorSource;
-  deletable: boolean;
+  indicators: number;     // 该平台的指标计数
+  description?: string;   // 按 (tech, platform) 维度的可编辑描述
 }
 
 // IndicatorFile 是 /indicators/files?tech= 单行 — 含 source/deletable 派生 + DB 计数。

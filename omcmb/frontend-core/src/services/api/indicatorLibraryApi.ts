@@ -316,29 +316,30 @@ export const indicatorLibraryApi = {
     };
   },
 
-  // T-0180 P1.4(2026-05-29 用户调整粒度):一级 SummaryTab 数据源 — (制式, 平台) 一行
-  // 后端返 { tech, platform, loaded_from, indicators, source, deletable },原样映射 camelCase
+  // 一级 SummaryTab 数据源 — "一个平台一条"(2026-06-02 用户决策)
+  // 后端返 { tech, platform, indicators, description },映射 camelCase
   async summary(): Promise<{ items: IndicatorPlatformSummary[] }> {
     const { data } = await http.get<{
       items: Array<{
         tech: string;
         platform: string;
-        loaded_from: string;
         indicators: number;
-        source?: string;
-        deletable?: boolean;
+        description?: string;
       }>;
     }>('/indicators/summary');
     return {
       items: (data.items || []).map((b) => ({
         tech: b.tech as TechLower,
         platform: b.platform,
-        loadedFrom: b.loaded_from,
         indicators: b.indicators,
-        source: (b.source ?? 'unknown') as IndicatorPlatformSummary['source'],
-        deletable: Boolean(b.deletable),
+        description: b.description ?? '',
       })),
     };
+  },
+
+  // 2026-06-02:按 (tech, platform) upsert 描述。
+  async updateFileDescription(tech: TechLower, platform: string, description: string): Promise<void> {
+    await http.put('/indicators/file-description', { tech, platform, description });
   },
 
   // T-0180 P1.4: 列出指定 tech 下所有 XML 文件(DB 计数 + 物理盘扫描合并)

@@ -234,21 +234,7 @@ export const indicatorLibraryService = {
         byPlatform.set(p, (byPlatform.get(p) || 0) + 1);
       }
       for (const [platform, count] of Array.from(byPlatform.entries()).sort(([a], [b]) => a.localeCompare(b))) {
-        // mock loaded_from:ENB 走 enb 子目录,GSM/GNB 走单文件根
-        const loadedFrom =
-          tech === 'enb'
-            ? `indicator-library/enb/${platform}.xml`
-            : `indicator-library/${tech.toUpperCase()}.xml`;
-        items.push({
-          tech,
-          platform,
-          loadedFrom,
-          indicators: count,
-          // 2026-05-29 对齐 T-0178 paramModel:mock 全部内置(loaded_from 前缀 indicator-library/),
-          // deletable=false 与后端 source.go::IsDeletable 在 builtin 上的判定一致。
-          source: 'builtin',
-          deletable: false,
-        });
+        items.push({ tech, platform, indicators: count, description: '' });
       }
     }
     return { items };

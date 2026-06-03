@@ -28,13 +28,17 @@ type FileRepository interface {
 	// 返回 perf_indicators_<tech> 主表删除的行数(供日志与响应体)。
 	DeleteByLoadedFrom(ctx context.Context, tech, loadedFrom string) (int, error)
 
-	// SummaryByTech 聚合三制式所有 (loaded_from, platform) 组合,每个 (制式, 平台)
-	// 一行(2026-05-29 用户决策从"三行/制式"调为"N 行/(制式,平台)粒度")。
+	// SummaryByTech 聚合三制式所有平台,每个 (制式, 平台) 一行
+	// (2026-06-02 用户决策:一个 XML 文件即一个平台,一级列表"一个平台一条")。
 	//
-	// JOIN perf_indicators_<tech> ⨝ rela_platform_indicator_formula_<tech> GROUP BY
-	// (loaded_from, platform_name);只返带 builtin/custom 前缀的 loaded_from(过滤 unknown);
-	// INNER JOIN 排除无 platform 的 indicator(罕见,通常 Loader 入库即建公式)。
+	// 计数来源 rela_platform_indicator_formula_<tech>:platform_name 是平台归属的
+	// 权威来源(perf_indicators 无 platform 列且按 id 全局去重)。GROUP BY platform_name,
+	// COUNT(DISTINCT indicator_id) 即该平台/文件的指标数。
 	SummaryByTech(ctx context.Context) ([]PlatformSummary, error)
+
+	// UpsertFileDescription 按 (tech, platform) 维度 upsert 一条可编辑描述
+	// (2026-06-02 用户决策)。一个平台对应一个 XML 文件,描述即按平台维度。
+	UpsertFileDescription(ctx context.Context, tech, platform, description string) error
 
 	// ListFilesByTech 按 (loaded_from) GROUP BY 列出指定 tech 下所有 XML 文件的
 	// 指标计数。NULL loaded_from(历史数据未回填)归到 ""(由调用方决定如何展示)。
@@ -54,20 +58,18 @@ type FileRepository interface {
 
 // PlatformSummary 是 /indicators/summary 端点单行 — (制式, 平台) 二元组粒度。
 //
-// 2026-05-29 用户决策:从"三行/制式"(TechSummary)调为"N 行/(制式, 平台)"
+// 2026-06-02 用户决策:一个 XML 文件即一个平台,一级列表"一个平台一条"。
 //   - 每个 (tech, platform_name) 唯一一行
-//   - LoadedFrom 是该 (tech, platform) 对应的 XML 文件 rel 路径(理论上 1:1 映射)
-//   - Indicators 是该文件入库的指标计数
+//   - Indicators 是该平台的指标计数(COUNT(DISTINCT indicator_id) from 公式表)
+//   - Description 是按 (tech, platform) 维度的可编辑描述(LEFT JOIN indicator_file_descriptions)
 //
-// 2026-05-29 二次扩展:对齐 T-0178 param-model 范式补 Source/Deletable —
-// 后端唯一真值源(`source.go::ClassifySource` + `IsDeletable`),前端只渲染。
+// 不再返回 loaded_from / source / deletable:一级列表去掉"加载源/来源/删除"列,
+// 文件管理(上传/删除/来源判定)留在 /indicators/files 端点(XMLFilesModal)。
 type PlatformSummary struct {
-	Tech       string `json:"tech"`        // enb / gsm / gnb
-	Platform   string `json:"platform"`    // 平台名(从 rela_platform_indicator_formula_*.platform_name)
-	LoadedFrom string `json:"loaded_from"` // XML 文件相对路径(含前缀),如 "indicator-library/enb/ALL.xml"
-	Indicators int    `json:"indicators"`  // 该 (loaded_from, platform_name) 的指标计数
-	Source     string `json:"source"`      // builtin / custom / unknown(ClassifySource 派生)
-	Deletable  bool   `json:"deletable"`   // IsDeletable(LoadedFrom):仅 custom 为 true
+	Tech        string `json:"tech"`        // enb / gsm / gnb
+	Platform    string `json:"platform"`    // 平台名(从 rela_platform_indicator_formula_*.platform_name)
+	Indicators  int    `json:"indicators"`  // 该平台的指标计数
+	Description string `json:"description"` // 按 (tech, platform) 维度的可编辑描述
 }
 
 // FileGroup 是 /indicators/files?tech= 单行 — DB 聚合视角。
@@ -162,43 +164,40 @@ DELETE FROM enabled_pm_indicators_%s
 	return int(tag.RowsAffected()), nil
 }
 
-// SummaryByTech 实现 FileRepository — 按 (tech, loaded_from, platform_name) GROUP BY,
-// 每 (制式, 平台) 一行(2026-05-29 用户决策粒度调整)。
+// SummaryByTech 实现 FileRepository — 每个 (制式, 平台) 一行
+// (2026-06-02 用户决策:一个 XML 文件即一个平台,"一个平台一条")。
 //
-// JOIN 策略:
-//   - INNER JOIN perf_indicators_<tech> 与 rela_platform_indicator_formula_<tech>
-//   - 排除 loaded_from 不带 builtin/custom 前缀的"未知"行
-//   - GROUP BY (loaded_from, platform_name) → 一文件一平台 = 一行
-//   - 实践中每 XML <indicatorModel platform="X"> 单一 platform,但允许多平台也兼容
+// 计数来源 rela_platform_indicator_formula_<tech>:platform_name 是平台归属的权威来源
+// (perf_indicators_<tech> 无 platform 列,且按 id 全局去重 first-seen,无法可靠反推平台→文件)。
+//   - GROUP BY platform_name → 一平台一行
+//   - COUNT(DISTINCT indicator_id) → 该平台/文件的指标数
+//   - LEFT JOIN indicator_file_descriptions ON (tech, platform) → 可编辑描述
 //
-// 顺序:tech 升序(enb/gsm/gnb)→ loaded_from 升序 → platform 升序,UX 稳定。
+// 顺序:tech 升序(enb/gsm/gnb)→ platform 升序,UX 稳定。
 func (r *PgFileRepository) SummaryByTech(ctx context.Context) ([]PlatformSummary, error) {
 	out := make([]PlatformSummary, 0, 16)
 	for _, tech := range []string{"enb", "gsm", "gnb"} {
+		// d.description LEFT JOIN 在 (tech, platform) 主键上至多一行,MAX 仅为满足 GROUP BY。
 		sqlStr := fmt.Sprintf(`
-SELECT pi.loaded_from,
-       rf.platform_name,
-       COUNT(DISTINCT pi.id) AS indicators
-  FROM perf_indicators_%s pi
- INNER JOIN rela_platform_indicator_formula_%s rf ON rf.indicator_id = pi.id
- WHERE pi.loaded_from LIKE 'indicator-library/%%'
-    OR pi.loaded_from LIKE 'indicator-library-custom/%%'
- GROUP BY pi.loaded_from, rf.platform_name
- ORDER BY pi.loaded_from, rf.platform_name`, tech, tech)
+SELECT rf.platform_name,
+       COUNT(DISTINCT rf.indicator_id) AS indicators,
+       COALESCE(MAX(d.description), '') AS description
+  FROM rela_platform_indicator_formula_%s rf
+  LEFT JOIN indicator_file_descriptions d
+    ON d.tech = $1 AND d.platform = rf.platform_name
+ GROUP BY rf.platform_name
+ ORDER BY rf.platform_name`, tech)
 
-		rows, err := r.pool.Query(ctx, sqlStr)
+		rows, err := r.pool.Query(ctx, sqlStr, tech)
 		if err != nil {
 			return nil, fmt.Errorf("summary platforms (%s): %w", tech, err)
 		}
 		for rows.Next() {
 			row := PlatformSummary{Tech: tech}
-			if err := rows.Scan(&row.LoadedFrom, &row.Platform, &row.Indicators); err != nil {
+			if err := rows.Scan(&row.Platform, &row.Indicators, &row.Description); err != nil {
 				rows.Close()
 				return nil, fmt.Errorf("scan platform summary row (%s): %w", tech, err)
 			}
-			// 2026-05-29:source/deletable 后端唯一真值源(对齐 T-0178 paramModel)
-			row.Source = string(ClassifySource(row.LoadedFrom))
-			row.Deletable = IsDeletable(row.LoadedFrom)
 			out = append(out, row)
 		}
 		rows.Close()
@@ -207,6 +206,18 @@ SELECT pi.loaded_from,
 		}
 	}
 	return out, nil
+}
+
+// UpsertFileDescription 实现 FileRepository — 按 (tech, platform) upsert 描述。
+func (r *PgFileRepository) UpsertFileDescription(ctx context.Context, tech, platform, description string) error {
+	const q = `
+INSERT INTO indicator_file_descriptions (tech, platform, description, created_at, updated_at)
+VALUES ($1, $2, $3, now(), now())
+ON CONFLICT (tech, platform) DO UPDATE SET description = EXCLUDED.description, updated_at = now()`
+	if _, err := r.pool.Exec(ctx, q, tech, platform, description); err != nil {
+		return fmt.Errorf("upsert indicator file description: %w", err)
+	}
+	return nil
 }
 
 // DeleteOrphansBefore 实现 FileRepository(T-0180 P1.5)。
