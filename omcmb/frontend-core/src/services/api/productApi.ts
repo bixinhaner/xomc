@@ -51,6 +51,7 @@ interface BackendMatchOrderRow {
 interface BackendOrphanDevice {
   id: string;
   serial_number: string;
+  device_name?: string;
   oui: string;
   product_class: string;
   carrier: string;
@@ -103,6 +104,7 @@ function mapBackendOrphan(b: BackendOrphanDevice): OrphanDevice {
   return {
     id: b.id,
     serialNumber: b.serial_number,
+    deviceName: b.device_name,
     oui: b.oui,
     productClass: b.product_class,
     carrier: b.carrier,

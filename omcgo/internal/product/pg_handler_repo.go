@@ -75,6 +75,7 @@ type MatchOrderRow struct {
 type OrphanDevice struct {
 	ID            uuid.UUID `json:"id"`
 	SerialNumber  string    `json:"serial_number"`
+	DeviceName    string    `json:"device_name"` // = devices.site_name(前端"设备名称"列)
 	OUI           string    `json:"oui"`
 	ProductClass  string    `json:"product_class"`
 	Carrier       string    `json:"carrier"`
@@ -610,7 +611,7 @@ func (r *PgRepository) ListOrphanDevices(
 
 	// items
 	offset := (page - 1) * pageSize
-	listSQL := "SELECT id, serial_number, oui, COALESCE(product_class,''), " +
+	listSQL := "SELECT id, serial_number, COALESCE(site_name,''), oui, COALESCE(product_class,''), " +
 		"carrier, COALESCE(manufacturer,''), last_inform_at " +
 		"FROM devices " + where +
 		" ORDER BY last_inform_at DESC NULLS LAST " +
@@ -626,7 +627,7 @@ func (r *PgRepository) ListOrphanDevices(
 	for rows.Next() {
 		var d OrphanDevice
 		var lastInform *time.Time
-		if err := rows.Scan(&d.ID, &d.SerialNumber, &d.OUI, &d.ProductClass,
+		if err := rows.Scan(&d.ID, &d.SerialNumber, &d.DeviceName, &d.OUI, &d.ProductClass,
 			&d.Carrier, &d.Manufacturer, &lastInform); err != nil {
 			return nil, 0, fmt.Errorf("scan orphan device: %w", err)
 		}

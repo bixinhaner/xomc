@@ -19,6 +19,13 @@ export default function OrphanDevicesPage() {
 
   const columns = [
     { title: 'SN', dataIndex: 'serialNumber', width: 200 },
+    {
+      title: t('device.hostName'),
+      dataIndex: 'deviceName',
+      width: 160,
+      ellipsis: true,
+      render: (v?: string) => v || '—',
+    },
     { title: 'OUI', dataIndex: 'oui', width: 100 },
     {
       title: t('device.productClass'),

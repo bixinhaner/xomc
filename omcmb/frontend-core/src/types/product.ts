@@ -48,6 +48,7 @@ export interface MatchOrderRow {
 export interface OrphanDevice {
   id: string;
   serialNumber: string;
+  deviceName?: string;
   oui: string;
   productClass: string;
   carrier: string;
