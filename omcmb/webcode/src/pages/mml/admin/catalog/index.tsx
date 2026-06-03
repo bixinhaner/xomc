@@ -263,7 +263,7 @@ export default function MMLAdminCatalog() {
 
   if (isLoading) {
     return (
-      <Card variant="borderless" title={t('mml.admin.catalog.title')}>
+      <Card variant="borderless">
         <Spin />
       </Card>
     );
@@ -272,7 +272,6 @@ export default function MMLAdminCatalog() {
   return (
     <Card
       variant="borderless"
-      title={t('mml.admin.catalog.title')}
       styles={{ body: { padding: 16 } }}
     >
       <Space style={{ width: '100%', marginBottom: 12 }} size="middle">

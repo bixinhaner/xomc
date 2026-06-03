@@ -411,11 +411,7 @@ export default function OperationLogPage() {
           pageSize={pageSize}
           currentPage={page}
           onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
-          onRefresh={() => void refetch()}
-          hideRealtime
-          hideColumnSettings
-          hideDensity
-          hideRefresh
+          hideToolbar
           scroll={{ x: 1400, y: 'calc(100vh - 420px)' }}
         />
       </Card>

@@ -635,9 +635,18 @@ export default function MenuManagement() {
   // 菜单名称中英文已统一改用 <I18nInput name="nameI18n">（见下方各表单项），原 i18nFields 块下线。
 
   return (
-    <ListPageLayout
-      extra={
-        <Space>
+    <ListPageLayout>
+      {/* 2026-06-03 用户决策:显示菜单图标开关 + 新增 与搜索同一行,靠右(对齐产品中心范式)。 */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <FilterBar
+            filterId="menu-management-filter"
+            fields={filterFields}
+            onSearch={(vals) => setFilters(vals as Record<string, string>)}
+            onReset={() => setFilters({})}
+          />
+        </div>
+        <Space style={{ flexShrink: 0 }}>
           <span style={{ color: 'var(--color-text-secondary)' }}>{t('menu.showIcon')}</span>
           <Switch
             checked={showMenuIcon}
@@ -648,14 +657,7 @@ export default function MenuManagement() {
             {t('common.add')}
           </Button>
         </Space>
-      }
-    >
-      <FilterBar
-        filterId="menu-management-filter"
-        fields={filterFields}
-        onSearch={(vals) => setFilters(vals as Record<string, string>)}
-        onReset={() => setFilters({})}
-      />
+      </div>
       <Card
         size="small"
         bordered
@@ -669,10 +671,8 @@ export default function MenuManagement() {
           loading={isLoading}
           rowKey="id"
           scroll={{ x: 1000 }}
-          hideRealtime
-          hideColumnSettings
-          hideDensity
-          hideRefresh
+          hideToolbar
+          showPagination={false}
         />
       </Card>
 

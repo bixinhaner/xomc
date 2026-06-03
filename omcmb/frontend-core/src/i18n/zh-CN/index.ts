@@ -3526,15 +3526,15 @@ const messages: Record<string, string> = {
   // -------------------------------------------------------------------------
   // API Management
   // -------------------------------------------------------------------------
-  'api.path':                  'API路径',
+  'api.path':                  '路径',
   'api.method':                '请求方法',
-  'api.group':                 'API分组',
-  'api.name':                  'API简介',
-  'api.description':           'API描述',
+  'api.group':                 '分组',
+  'api.name':                  '简介',
+  'api.description':           '描述',
   'api.addEndpoint':           '新增API',
   'api.editEndpoint':          '编辑API',
   'api.batchDelete':           '批量删除',
-  'api.sync':                  '同步API',
+  'api.sync':                  '同步',
   'api.syncConfirm':           '确认同步API',
   'api.syncConfirmContent':    '同步操作将从后端路由同步最新API列表，是否继续？',
   'api.syncSuccess':           '同步完成：新增 {created} 条，更新 {updated} 条，共 {total} 条',

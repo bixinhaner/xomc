@@ -3508,15 +3508,15 @@ const messages: Record<string, string> = {
   // -------------------------------------------------------------------------
   // API Management
   // -------------------------------------------------------------------------
-  'api.path':                  'API Path',
+  'api.path':                  'Path',
   'api.method':                'Request Method',
-  'api.group':                 'API Group',
-  'api.name':                  'API Name',
-  'api.description':           'API Description',
+  'api.group':                 'Group',
+  'api.name':                  'Summary',
+  'api.description':           'Description',
   'api.addEndpoint':           'Add API',
   'api.editEndpoint':          'Edit API',
   'api.batchDelete':           'Batch Delete',
-  'api.sync':                  'Sync APIs',
+  'api.sync':                  'Sync',
   'api.syncConfirm':           'Confirm Sync',
   'api.syncConfirmContent':    'This will sync the latest API list from backend routes. Continue?',
   'api.syncSuccess':           'Sync completed: {created} created, {updated} updated, {total} total',

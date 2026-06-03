@@ -148,7 +148,7 @@ export default function ApiManagement() {
       title: t('api.group'),
       dataIndex: 'apiGroup',
       key: 'apiGroup',
-      width: 120,
+      width: 180,
       render: (val: unknown) => {
         const v = val as string;
         return v ? <Tag color="cyan">{v}</Tag> : <span style={{ color: '#999' }}>-</span>;
@@ -317,13 +317,6 @@ export default function ApiManagement() {
   const toolbar = (
     <Space>
       <Button
-        type="primary"
-        icon={<PlusOutlined />}
-        onClick={handleAdd}
-      >
-        {t('api.addEndpoint')}
-      </Button>
-      <Button
         danger
         icon={<DeleteOutlined />}
         disabled={selectedKeys.length === 0}
@@ -338,6 +331,14 @@ export default function ApiManagement() {
         loading={syncApi.isPending}
       >
         {t('api.sync')}
+      </Button>
+      {/* 2026-06-03 用户决策:"新增API"放"同步API"之后;按钮文案精简为"新增" */}
+      <Button
+        type="primary"
+        icon={<PlusOutlined />}
+        onClick={handleAdd}
+      >
+        {t('common.add')}
       </Button>
     </Space>
   );
@@ -376,9 +377,7 @@ export default function ApiManagement() {
           loading={isLoading}
           rowKey="id"
           selectable
-          hideRealtime
-          hideColumnSettings
-          hideDensity
+          hideToolbar
           total={data?.total ?? 0}
           currentPage={page}
           pageSize={pageSize}
