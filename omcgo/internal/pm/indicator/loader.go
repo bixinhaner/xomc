@@ -374,50 +374,64 @@ func upsertIndicators(ctx context.Context, tx pgx.Tx, table string, records map[
 	return len(records), nil
 }
 
-func flushIndicators(ctx context.Context, tx pgx.Tx, table string, batch []indicatorRecord, isGnb bool) error {
-	// T-0180 P1.2: 列顺序与 ON CONFLICT 子句严格对齐;loaded_from 始终在 indicator_level 之前(非 GNB 时尾列追加)
+// indicatorColumns 返回 perf_indicators_* 的列清单(列顺序与 indicatorRowValues 严格对齐)。
+//
+// T-0180 P1.2: loaded_from 始终在 indicator_level 之前(非 GNB 时 indicator_level 尾列追加)。
+// PM-P1: report_key 紧跟 loaded_from(reportKey 与 loaded_from 同侧、同款 nullIfEmpty 落库)。
+func indicatorInsertColumns(isGnb bool) []string {
 	cols := []string{
 		"id", "en_name", "cn_name", "group_id",
 		"data_type", "unit_id", "is_build_in", "is_counter",
 		"arithmetic", "statis_type",
-		"loaded_from",
+		"loaded_from", "report_key",
 	}
 	if !isGnb {
 		cols = append(cols, "indicator_level")
 	}
+	return cols
+}
+
+// indicatorRowValues 把一条 indicatorRecord 展平为与 indicatorColumns 顺序对齐的 values。
+// 抽成纯函数便于单测验证列↔值对位(尤其 report_key 与 en_name 各就各位)。
+func indicatorInsertRow(rec indicatorRecord, isGnb bool) []interface{} {
+	ind := rec.Ind
+	enName := ind.EnName
+	if enName == "" {
+		enName = ind.ID // NOT NULL fallback
+	}
+	cnName := ind.CnName
+	if cnName == "" {
+		cnName = ind.ID
+	}
+	isBuiltIn := "1"
+	if ind.IsBuildIn == "0" {
+		isBuiltIn = "0"
+	}
+	isCounter := "1"
+	if ind.IsCounter == "0" {
+		isCounter = "0"
+	}
+	groupID := defaultGroupID
+	if g := strings.TrimSpace(ind.GroupID); g != "" {
+		groupID = g
+	}
+	row := []interface{}{
+		ind.ID, enName, cnName, groupID,
+		nullIfEmpty(ind.DataType), nullIfEmpty(ind.UnitID), isBuiltIn, isCounter,
+		nullIfEmpty(ind.Arithmetic), nullIfEmpty(ind.StatisType),
+		nullIfEmpty(rec.LoadedFrom), nullIfEmpty(ind.ReportKey),
+	}
+	if !isGnb {
+		row = append(row, nullIfEmpty(ind.IndicatorLevel))
+	}
+	return row
+}
+
+func flushIndicators(ctx context.Context, tx pgx.Tx, table string, batch []indicatorRecord, isGnb bool) error {
+	cols := indicatorInsertColumns(isGnb)
 	ib := sq.StatementBuilder.PlaceholderFormat(sq.Dollar).Insert(table).Columns(cols...)
 	for _, rec := range batch {
-		ind := rec.Ind
-		enName := ind.EnName
-		if enName == "" {
-			enName = ind.ID // NOT NULL fallback
-		}
-		cnName := ind.CnName
-		if cnName == "" {
-			cnName = ind.ID
-		}
-		isBuiltIn := "1"
-		if ind.IsBuildIn == "0" {
-			isBuiltIn = "0"
-		}
-		isCounter := "1"
-		if ind.IsCounter == "0" {
-			isCounter = "0"
-		}
-		groupID := defaultGroupID
-		if g := strings.TrimSpace(ind.GroupID); g != "" {
-			groupID = g
-		}
-		row := []interface{}{
-			ind.ID, enName, cnName, groupID,
-			nullIfEmpty(ind.DataType), nullIfEmpty(ind.UnitID), isBuiltIn, isCounter,
-			nullIfEmpty(ind.Arithmetic), nullIfEmpty(ind.StatisType),
-			nullIfEmpty(rec.LoadedFrom),
-		}
-		if !isGnb {
-			row = append(row, nullIfEmpty(ind.IndicatorLevel))
-		}
-		ib = ib.Values(row...)
+		ib = ib.Values(indicatorInsertRow(rec, isGnb)...)
 	}
 	// group_id 跟随 XML 的 GroupID（缺省 default）；XML 是真相源，重启始终对齐 XML。
 	updateClause := `ON CONFLICT (id) DO UPDATE SET
@@ -430,7 +444,8 @@ func flushIndicators(ctx context.Context, tx pgx.Tx, table string, batch []indic
 	    is_counter   = EXCLUDED.is_counter,
 	    arithmetic   = EXCLUDED.arithmetic,
 	    statis_type  = EXCLUDED.statis_type,
-	    loaded_from  = EXCLUDED.loaded_from`
+	    loaded_from  = EXCLUDED.loaded_from,
+	    report_key   = EXCLUDED.report_key`
 	if !isGnb {
 		updateClause += `, indicator_level = EXCLUDED.indicator_level`
 	}
