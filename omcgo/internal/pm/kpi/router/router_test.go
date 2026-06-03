@@ -114,8 +114,8 @@ func newBaseDevice(sn, productClass string) *fakeDevice {
 
 func sampleIndicators() []*indicator.PerfIndicator {
 	return []*indicator.PerfIndicator{
-		{ID: "C-001", EnName: "RRC_Conn_Att", IsCounter: "1", StatisType: sptr("sum")},
-		{ID: "C-002", EnName: "RRC_Conn_Succ", IsCounter: "1", StatisType: sptr("sum")},
+		{ID: "C-001", EnName: "RRC_Conn_Att", IsCounter: "1", StatisType: sptr("sum"), ReportKey: sptr("RRC.AttConn")},
+		{ID: "C-002", EnName: "RRC_Conn_Succ", IsCounter: "1", StatisType: sptr("sum"), ReportKey: sptr("RRC.SuccConn")},
 		{ID: "K-001", EnName: "RRC_Succ_Rate", IsCounter: "0", StatisType: sptr("pct")},
 	}
 }
@@ -148,6 +148,14 @@ func TestRouter_LookupByDevice_AllMissThenDBLoad(t *testing.T) {
 	require.Equal(t, indicator.DeviceTypeENB, route.IndicatorDeviceType)
 	require.Equal(t, "BLQ-LTE-V1", route.IndicatorPlatform)
 	require.Len(t, route.Counters, 2, "two is_counter='1' indicators should land in Counters")
+	// PM-P2: assembleRoute 把 perf_indicators.report_key 填进 CounterDef.ReportKey，
+	// 供解析侧白名单按 report_key 建键。
+	reportKeyByID := map[string]string{}
+	for _, cd := range route.Counters {
+		reportKeyByID[cd.IndicatorID] = cd.ReportKey
+	}
+	require.Equal(t, "RRC.AttConn", reportKeyByID["C-001"])
+	require.Equal(t, "RRC.SuccConn", reportKeyByID["C-002"])
 	require.Len(t, route.KPIs, 1, "one is_counter='0' indicator with formula should land in KPIs")
 	require.Equal(t, "RRC_Succ_Rate", route.KPIs[0].Name)
 	require.Equal(t, "RRC_Conn_Succ / RRC_Conn_Att", route.KPIs[0].Formula)

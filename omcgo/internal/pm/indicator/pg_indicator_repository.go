@@ -391,7 +391,9 @@ func (r *PgIndicatorRepository) ListByIDs(ctx context.Context, dt DeviceType, id
 	}
 
 	table := dt.IndicatorTable()
-	cols := indicatorColumnsWithoutAliasForDevice(dt)
+	// PM-P2: ListByIDs 额外取 report_key（路由→白名单据此把上报名翻成编号）。
+	// 用专属列集 + 专属 scan，避免触动 List/GetByID 的既有列序。
+	cols := indicatorColumnsByIDsForDevice(dt)
 	query, args, err := storage.Psql.Select(cols...).
 		From(table).
 		Where(sq.Eq{"id": ids}).
@@ -408,7 +410,7 @@ func (r *PgIndicatorRepository) ListByIDs(ctx context.Context, dt DeviceType, id
 
 	var result []*PerfIndicator
 	for rows.Next() {
-		ind, err := scanIndicator(rows, dt)
+		ind, err := scanIndicatorByIDs(rows, dt)
 		if err != nil {
 			return nil, err
 		}
@@ -543,6 +545,40 @@ func indicatorColumnsForDevice(dt DeviceType) []string {
 		"i.calculating_status",
 		"i.created_at", "i.updated_at",
 	}
+}
+
+// indicatorColumnsByIDsForDevice 是 ListByIDs 专属列集：在标准列集尾部追加
+// report_key（PM-P2）。追加在末尾，与 scanIndicatorByIDs 一一对位，不影响
+// List/GetByID 的列序。
+func indicatorColumnsByIDsForDevice(dt DeviceType) []string {
+	return append(indicatorColumnsWithoutAliasForDevice(dt), "report_key")
+}
+
+// scanIndicatorByIDs 扫描 ListByIDs 行（标准列 + 末尾 report_key）。
+func scanIndicatorByIDs(rows pgx.Rows, dt DeviceType) (*PerfIndicator, error) {
+	var ind PerfIndicator
+	var err error
+	if dt.HasProductTypes() {
+		err = rows.Scan(
+			&ind.ID, &ind.EnName, &ind.CnName, &ind.EnDescription, &ind.CnDescription,
+			&ind.GroupID, &ind.OperatorCode, &ind.DataType, &ind.UnitID, &ind.Updator,
+			&ind.IsBuildIn, &ind.IsCounter, &ind.Arithmetic, &ind.StatisType,
+			&ind.CalculatingStatus, &ind.ProductTypes, &ind.IndicatorLevel,
+			&ind.CreatedAt, &ind.UpdatedAt, &ind.ReportKey,
+		)
+	} else {
+		err = rows.Scan(
+			&ind.ID, &ind.EnName, &ind.CnName, &ind.EnDescription, &ind.CnDescription,
+			&ind.GroupID, &ind.OperatorCode, &ind.DataType, &ind.UnitID, &ind.Updator,
+			&ind.IsBuildIn, &ind.IsCounter, &ind.Arithmetic, &ind.StatisType,
+			&ind.CalculatingStatus,
+			&ind.CreatedAt, &ind.UpdatedAt, &ind.ReportKey,
+		)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("scan perf_indicator row (by IDs): %w", err)
+	}
+	return &ind, nil
 }
 
 func scanIndicator(row pgx.Rows, dt DeviceType) (*PerfIndicator, error) {

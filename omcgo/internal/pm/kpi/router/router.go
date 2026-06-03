@@ -50,6 +50,7 @@ type KPIRoute struct {
 type CounterDef struct {
 	IndicatorID string
 	Name        string // perf_indicators_*.en_name
+	ReportKey   string // perf_indicators_*.report_key（PM-P2：解析侧白名单据此建键，把上报名翻成编号 IndicatorID）
 	StatisType  string // sum/avg/max/pct/...
 }
 
@@ -309,6 +310,7 @@ func assembleRoute(
 			route.Counters = append(route.Counters, CounterDef{
 				IndicatorID: ind.ID,
 				Name:        ind.EnName,
+				ReportKey:   derefStr(ind.ReportKey),
 				StatisType:  statisType,
 			})
 			continue

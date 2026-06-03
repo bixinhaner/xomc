@@ -154,9 +154,10 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	pmCollector.SetDeviceLookup(pmDeviceRepo)
 
 	// T-0164 G1 BUG-6 真根因复盘 / 方案 D：collector 用指标库白名单过滤孤儿 counter。
-	// 复用 pmKPIRouter 的 LookupByDevice：route.Counters[].Name 即设备所属产品在
-	// perf_indicators_{enb,gnb,gsm} 中注册的 counter 全集。fail-open（lookup 失败 / 空集合
-	// 时跳过过滤，保留全量入库），细节见 collector.filterByWhitelist。
+	// 复用 pmKPIRouter 的 LookupByDevice：route.Counters[].ReportKey 即设备所属产品在
+	// perf_indicators_{enb,gnb,gsm} 中注册的 counter 上报名全集（PM-P2 按 report_key 建键，
+	// 命中后把上报名改写成编号 IndicatorID 落库）。fail-open（lookup 失败 / 空集合时跳过
+	// 过滤，保留全量入库），细节见 collector.filterByWhitelist。
 	pmCollector.SetCounterWhitelist(&routerCounterWhitelist{r: pmKPIRouter, log: logger})
 
 	// Runner wires retry + DLQ instrumentation around the PM handler.
@@ -798,18 +799,19 @@ func wireUnknownAlarmFallback(
 
 // parseStringSlice parses a comma-separated string into a slice.
 // routerCounterWhitelist 把 *router.Router 包装成 collector.CounterWhitelist 接口。
-// 通过 LookupByDevice 拿设备所属产品的 KPIRoute.Counters，转 name→statis_type 映射
-// 作为白名单。Lookup 失败时把错误透传给 collector，由 collector 决定 fail-open
-// （log warn + 不过滤）。
+// 通过 LookupByDevice 拿设备所属产品的 KPIRoute.Counters，转
+// report_key→{编号, statis_type} 映射作为白名单。Lookup 失败时把错误透传给
+// collector，由 collector 决定 fail-open（log warn + 不过滤）。
 //
-// T-0164-G6 收尾 BUG-A：map value 从 struct{}{} 改为 statis_type 字符串，
-// collector.filterByWhitelist 用以填充 PMCounter.StatisType，驱动 G5 自然桶聚合。
+// PM-P2：建键锚点改为 report_key（上报名、入库不可改的解析契约），value 带指标
+// 编号（IndicatorID），collector.filterByWhitelist 命中后把上报名改写成编号落库
+// （落库即编号化）。statis_type 一并回填驱动 G5 自然桶聚合（T-0164-G6 BUG-A）。
 type routerCounterWhitelist struct {
 	r   *router.Router
 	log *zap.Logger
 }
 
-func (a *routerCounterWhitelist) LookupCounters(ctx context.Context, deviceSN string) (map[string]string, error) {
+func (a *routerCounterWhitelist) LookupCounters(ctx context.Context, deviceSN string) (map[string]collector.CounterMeta, error) {
 	route, err := a.r.LookupByDevice(ctx, deviceSN)
 	if err != nil {
 		// 注意：ErrProductNotMatched / ErrInvalidProductMetadata 是业务上的"空白名单"信号，
@@ -820,9 +822,17 @@ func (a *routerCounterWhitelist) LookupCounters(ctx context.Context, deviceSN st
 	if route == nil || len(route.Counters) == 0 {
 		return nil, nil
 	}
-	out := make(map[string]string, len(route.Counters))
+	out := make(map[string]collector.CounterMeta, len(route.Counters))
 	for _, c := range route.Counters {
-		out[c.Name] = c.StatisType
+		// 按 report_key 建键（PM-P2）。report_key 缺省的 counter 不入白名单——
+		// 没有上报名锚点就无从匹配 PM 文件里的上报计数器。
+		if c.ReportKey == "" {
+			continue
+		}
+		out[c.ReportKey] = collector.CounterMeta{
+			IndicatorID: c.IndicatorID,
+			StatisType:  c.StatisType,
+		}
 	}
 	return out, nil
 }

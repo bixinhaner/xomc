@@ -15,13 +15,13 @@ import (
 // T-0164 G1 BUG-6 真根因复盘 / 方案 D：filterByWhitelist 行为单测。
 
 // fakeWhitelist 让单测脚本化 LookupCounters 返回值。
-// T-0164-G6 BUG-A：map value 由 struct{}{} 升级为 statis_type 字符串（驱动 G5 聚合）。
+// PM-P2：map 改为按 report_key 建键、value 带 {编号, statis_type}（CounterMeta）。
 type fakeWhitelist struct {
-	set map[string]string
+	set map[string]CounterMeta
 	err error
 }
 
-func (f *fakeWhitelist) LookupCounters(_ context.Context, _ string) (map[string]string, error) {
+func (f *fakeWhitelist) LookupCounters(_ context.Context, _ string) (map[string]CounterMeta, error) {
 	return f.set, f.err
 }
 
@@ -48,21 +48,53 @@ func names(cs []model.PMCounter) []string {
 	return out
 }
 
-// 核心场景：白名单含 A/B，丢 C/D（孤儿）；保留的 counter 应带 StatisType（BUG-A）。
-func TestFilterByWhitelist_DropsOrphans(t *testing.T) {
-	c := collectorWithWhitelist(&fakeWhitelist{set: map[string]string{
-		"L.Cell.Avail": "avg",
-		"RRC.AttConn":  "sum",
+// 核心场景（PM-P2）：白名单按 report_key 含 A/B → 命中后 CounterName 被改写成编号，
+// 丢 C/D（孤儿）；保留的 counter 应带正确 StatisType。
+func TestFilterByWhitelist_DropsOrphans_RewritesToIndicatorID(t *testing.T) {
+	c := collectorWithWhitelist(&fakeWhitelist{set: map[string]CounterMeta{
+		"L.Cell.Avail": {IndicatorID: "C000010001", StatisType: "avg"},
+		"RRC.AttConn":  {IndicatorID: "C000010002", StatisType: "sum"},
 	}})
 	in := sample("L.Cell.Avail", "MR.RIPPRB", "RRC.AttConn", "MR.RECEIVEDIPOWER")
 	out := c.filterByWhitelist(context.Background(), "SN-1", in)
-	assert.ElementsMatch(t, []string{"L.Cell.Avail", "RRC.AttConn"}, names(out))
-	statisByName := map[string]string{}
+	// 命中后 CounterName 已是编号（不再是上报名）。
+	assert.ElementsMatch(t, []string{"C000010001", "C000010002"}, names(out))
+	statisByID := map[string]string{}
 	for _, c := range out {
-		statisByName[c.CounterName] = c.StatisType
+		statisByID[c.CounterName] = c.StatisType
 	}
-	assert.Equal(t, "avg", statisByName["L.Cell.Avail"])
-	assert.Equal(t, "sum", statisByName["RRC.AttConn"])
+	assert.Equal(t, "avg", statisByID["C000010001"])
+	assert.Equal(t, "sum", statisByID["C000010002"])
+}
+
+// PM-P2 锚点专项：上报名匹配 report_key（而非 en_name）。构造 report_key≠en_name 的桩：
+// 白名单的键是 report_key（上报名），命中后改写为编号。若误用 en_name 建键，PM 文件
+// 上报的 report_key 就匹配不到 → 被当孤儿丢弃，本测试即失败。
+func TestFilterByWhitelist_MatchesByReportKeyNotEnName(t *testing.T) {
+	// 模拟运维把 en_name 改成人性化名字，report_key 仍是上报名。
+	// 白名单按 report_key 建键。
+	const reportKey = "L.E-RAB.SuccEst.Ratio.RAW" // 设备上报名
+	c := collectorWithWhitelist(&fakeWhitelist{set: map[string]CounterMeta{
+		reportKey: {IndicatorID: "C000060216", StatisType: "sum"},
+		// 故意放一个 en_name 键，验证它不会被命中（否则说明误用 en_name）。
+		"E-RAB建立成功率(原始)": {IndicatorID: "C999999999", StatisType: "avg"},
+	}})
+	in := sample(reportKey) // PM 文件上报的是 report_key
+	out := c.filterByWhitelist(context.Background(), "SN-1", in)
+	require.Len(t, out, 1)
+	assert.Equal(t, "C000060216", out[0].CounterName, "应按 report_key 命中并改写为对应编号")
+	assert.Equal(t, "sum", out[0].StatisType)
+}
+
+// PM-P2：上报名未命中 report_key（野计数器）→ 丢弃。
+func TestFilterByWhitelist_UnmatchedReportKey_Dropped(t *testing.T) {
+	c := collectorWithWhitelist(&fakeWhitelist{set: map[string]CounterMeta{
+		"L.Cell.Avail": {IndicatorID: "C000010001", StatisType: "avg"},
+	}})
+	in := sample("L.Cell.Avail", "WILD.Counter")
+	out := c.filterByWhitelist(context.Background(), "SN-1", in)
+	require.Len(t, out, 1)
+	assert.Equal(t, "C000010001", out[0].CounterName)
 }
 
 // fail-open：whitelist 未注入（nil）→ 不过滤。
@@ -83,7 +115,7 @@ func TestFilterByWhitelist_LookupError_NoFilter(t *testing.T) {
 
 // fail-open：lookup 返回空集合（缓存未热 / 产品无 KPI 配置）→ 不过滤。
 func TestFilterByWhitelist_EmptyWhitelist_NoFilter(t *testing.T) {
-	c := collectorWithWhitelist(&fakeWhitelist{set: map[string]string{}})
+	c := collectorWithWhitelist(&fakeWhitelist{set: map[string]CounterMeta{}})
 	in := sample("any", "thing")
 	out := c.filterByWhitelist(context.Background(), "SN-1", in)
 	require.Len(t, out, 2, "空白名单 fail-open，防止误删全部")
@@ -101,8 +133,8 @@ func TestFilterByWhitelist_EmptyCounters_Noop(t *testing.T) {
 // BUG-6 回归（最直接的场景）：模拟 Baicells 真机 PM 文件 — `MR.RIPPRB`
 // × 53 + `MR.RECEIVEDIPOWER` × 53 + 一个已注册 counter。过滤后只剩注册的那个。
 func TestFilterByWhitelist_BUG6_BaicellsOrphans(t *testing.T) {
-	c := collectorWithWhitelist(&fakeWhitelist{set: map[string]string{
-		"RRC.AttConnEstab": "sum",
+	c := collectorWithWhitelist(&fakeWhitelist{set: map[string]CounterMeta{
+		"RRC.AttConnEstab": {IndicatorID: "C000010099", StatisType: "sum"},
 	}})
 	in := []model.PMCounter{}
 	for i := 1; i <= 53; i++ {
@@ -115,14 +147,15 @@ func TestFilterByWhitelist_BUG6_BaicellsOrphans(t *testing.T) {
 
 	out := c.filterByWhitelist(context.Background(), "SN-1", in)
 	require.Len(t, out, 1)
-	assert.Equal(t, "RRC.AttConnEstab", out[0].CounterName)
+	// PM-P2：命中后 CounterName 已改写成编号。
+	assert.Equal(t, "C000010099", out[0].CounterName)
 }
 
 type trackingWhitelist struct {
 	onCall func()
 }
 
-func (t *trackingWhitelist) LookupCounters(_ context.Context, _ string) (map[string]string, error) {
+func (t *trackingWhitelist) LookupCounters(_ context.Context, _ string) (map[string]CounterMeta, error) {
 	t.onCall()
 	return nil, nil
 }

@@ -51,10 +51,21 @@ type DeviceLookup interface {
 	GetBySerialNumber(ctx context.Context, sn string) (*model.Device, error)
 }
 
-// CounterWhitelist 按设备 SN 返回指标库定义的 counter name → statis_type 映射，
+// CounterMeta 是 CounterWhitelist 命中后回填给 PMCounter 的元数据（PM-P2）。
+//   - IndicatorID：指标编号（perf_indicators_*.id，如 C000060216），落库即编号化的目标。
+//   - StatisType：'sum' / 'avg' / 'max' / 'pct'，或空串（indicator 元数据未填），驱动 G5 自然桶聚合。
+type CounterMeta struct {
+	IndicatorID string
+	StatisType  string
+}
+
+// CounterWhitelist 按设备 SN 返回指标库定义的"上报名(report_key) → CounterMeta"映射，
 // 用于：(a) 过滤 PM 文件里的孤儿 counter（厂家上报但 perf_indicators_{enb,gnb,gsm}
-// 未注册）；(b) 填充 PMCounter.StatisType，下游 counterToMetric 透传到
-// pm_metrics.statis_type 驱动 G5 自然桶聚合。
+// 未注册）；(b) 命中后把 PMCounter.CounterName 改写成指标编号（IndicatorID）——
+// PM-P2 落库即编号化的唯一翻译入口；(c) 填充 PMCounter.StatisType，下游 counterToMetric
+// 透传到 pm_metrics.statis_type 驱动 G5 自然桶聚合。
+//
+// 建键锚点是 report_key（设备上报名、入库不可改的解析契约），不是 en_name（可改的展示名）。
 //
 // 真实实现用 router.Router（设备 → product → indicator_platform → counter 子集）。
 // worker main 写 adapter 把 *router.Router 包装成此接口，避免 collector 直接耦合 router 包。
@@ -63,11 +74,10 @@ type DeviceLookup interface {
 //   - 返回 (nil, err)：collector 跳过过滤，log warn 后照常 BatchInsert 全量 counter；
 //     不阻塞 PM 处理。失败保留量比误删数据风险小。
 //   - 返回 (empty map, nil)：collector 同样跳过过滤（防误删全部 — 如启动期缓存未就绪）。
-//   - 返回 (map, nil)：map 内的 counter 保留并填充 StatisType，其他作为孤儿丢弃。
-//
-// statis_type 取值：'sum' / 'avg' / 'max' / 'pct'，或空串（indicator 元数据未填）。
+//   - 返回 (map, nil)：map 内（按 report_key 命中）的 counter 保留、改写成编号并填充
+//     StatisType，其他作为孤儿丢弃。
 type CounterWhitelist interface {
-	LookupCounters(ctx context.Context, deviceSN string) (map[string]string, error)
+	LookupCounters(ctx context.Context, deviceSN string) (map[string]CounterMeta, error)
 }
 
 // PMCollector handles PM file processing: download from MinIO, parse XML, store counters.
@@ -344,8 +354,11 @@ func (c *PMCollector) filterByWhitelist(ctx context.Context, deviceSN string, co
 	kept := counters[:0] // 原地 reslice 复用 slice
 	dropped := 0
 	for _, ctr := range counters {
-		if st, ok := allow[ctr.CounterName]; ok {
-			ctr.StatisType = st // T-0164-G6 收尾：填充 statis_type 驱动 G5 聚合 (BUG-A)
+		// PM-P2：按 report_key（=上报名 ctr.CounterName）命中白名单。命中后
+		// 把 CounterName 改写成指标编号（落库即编号化的唯一翻译入口），并填 statis_type。
+		if meta, ok := allow[ctr.CounterName]; ok {
+			ctr.CounterName = meta.IndicatorID // 上报名 → 编号
+			ctr.StatisType = meta.StatisType   // T-0164-G6 收尾：填充 statis_type 驱动 G5 聚合 (BUG-A)
 			kept = append(kept, ctr)
 		} else {
 			dropped++

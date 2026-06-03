@@ -93,6 +93,7 @@ type PerfIndicator struct {
 	Updator           *string   `json:"updator,omitempty"`
 	IsBuildIn         string    `json:"is_build_in"`
 	IsCounter         string    `json:"is_counter"`
+	ReportKey         *string   `json:"report_key,omitempty"` // PM-P2: 上报名锚点(perf_indicators_*.report_key)，解析侧据此翻成编号
 	Arithmetic        *string   `json:"arithmetic,omitempty"`
 	StatisType        *string   `json:"statis_type,omitempty"`
 	CalculatingStatus *string   `json:"calculating_status,omitempty"`
