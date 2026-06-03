@@ -283,6 +283,7 @@ const messages: Record<string, string> = {
   'product.products.paramModelPh':   'Select param model',
   'product.products.tech':           'Base Station Mode',
   'product.products.indicatorDevType': 'Indicator device type',
+  'product.products.radioModes': 'Radio Modes',
   'product.products.indicatorPlatform': 'KPI Name',
   'product.products.indicatorPlatformPh': 'Select indicator platform',
   'product.products.alarmNeType':    'Alarm Name',

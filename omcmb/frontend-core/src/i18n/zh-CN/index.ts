@@ -283,6 +283,7 @@ const messages: Record<string, string> = {
   'product.products.paramModelPh':   '选择参数模型',
   'product.products.tech':           '基站制式',
   'product.products.indicatorDevType': '指标设备类型',
+  'product.products.radioModes': '双工模式',
   'product.products.indicatorPlatform': 'KPI指标名称',
   'product.products.indicatorPlatformPh': '选择指标平台',
   'product.products.alarmNeType':    '告警名称',

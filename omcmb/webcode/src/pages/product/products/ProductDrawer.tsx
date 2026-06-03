@@ -51,22 +51,19 @@ interface FormValues {
   radioModes: string;
   description: string;
   paramModelId?: string;
-  indicatorDeviceType: string;
   indicatorPlatform: string;
   alarmNeType: string;
 }
-
-const DEVICE_TYPE_OPTIONS = [
-  { label: 'ENB (LTE)', value: 'enb' },
-  { label: 'GNB (5G NR)', value: 'gnb' },
-  { label: 'GSM', value: 'gsm' },
-];
 
 const TECH_OPTIONS = [
   { label: 'LTE (4G)', value: 'lte' },
   { label: 'NR (5G)', value: 'nr' },
   { label: 'GSM', value: 'gsm' },
 ];
+
+// 2026-06-03 用户决策:取消"指标设备类型"的修改/新增 —— 由制式(tech)派生,不再单独编辑。
+// lte→enb / nr→gnb / gsm→gsm(两者一一对应,原本冗余)。
+const TECH_TO_DEVTYPE: Record<string, string> = { lte: 'enb', nr: 'gnb', gsm: 'gsm' };
 
 // 上传策略 / 属性覆盖默认值：原"上传策略"页签已下线，新增时套用默认；
 // 编辑时沿用产品已有值（避免保存时把不可见字段清零）。
@@ -90,8 +87,10 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
   const { data: detail } = useProductDetail(isEdit ? product?.id : undefined);
   const { data: paramModels } = useParamModelList();
 
-  const indicatorDeviceType = Form.useWatch('indicatorDeviceType', form);
-  const isENB = (indicatorDeviceType || '').toUpperCase() === 'ENB';
+  // 指标设备类型由制式派生(不再单独编辑);ENB(lte) 才需要选指标平台
+  const tech = Form.useWatch('tech', form);
+  const indicatorDeviceType = TECH_TO_DEVTYPE[tech || ''] || '';
+  const isENB = indicatorDeviceType === 'enb';
   const { data: indicatorPlatforms } = useIndicatorPlatforms(isENB ? indicatorDeviceType : undefined);
   const { data: alarmNeTypes } = useAlarmNeTypes();
 
@@ -112,7 +111,6 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
         radioModes: product.radioModes,
         description: product.description,
         paramModelId: product.paramModelId,
-        indicatorDeviceType: product.indicatorDeviceType,
         indicatorPlatform: product.indicatorPlatform,
         alarmNeType: product.alarmNeType,
       });
@@ -134,7 +132,8 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
           tech: v.tech,
           radioModes: v.radioModes,
           description: v.description,
-          indicatorDeviceType: v.indicatorDeviceType,
+          // 指标设备类型由制式派生(取消单独编辑)
+          indicatorDeviceType: TECH_TO_DEVTYPE[v.tech] ?? product.indicatorDeviceType,
           indicatorPlatform: v.indicatorPlatform,
           alarmNeType: v.alarmNeType,
           enableFiletype11: product.enableFiletype11,
@@ -152,7 +151,8 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
           tech: v.tech,
           radioModes: v.radioModes,
           description: v.description,
-          indicatorDeviceType: v.indicatorDeviceType,
+          // 指标设备类型由制式派生(取消单独编辑)
+          indicatorDeviceType: TECH_TO_DEVTYPE[v.tech] ?? '',
           indicatorPlatform: v.indicatorPlatform,
           alarmNeType: v.alarmNeType,
           enableFiletype11: true,
@@ -301,9 +301,17 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
                     <Input placeholder="Comba / Baicells / ..." />
                   </Form.Item>
                   <Form.Item name="tech" label={t('product.products.tech')} rules={[{ required: true }]}>
-                    <Select options={TECH_OPTIONS} />
+                    <Select
+                      options={TECH_OPTIONS}
+                      onChange={(val) => {
+                        // 制式变更后:非 ENB(lte) 清空指标平台(平台仅 ENB 适用)
+                        if ((TECH_TO_DEVTYPE[val] || '') !== 'enb') {
+                          form.setFieldValue('indicatorPlatform', undefined);
+                        }
+                      }}
+                    />
                   </Form.Item>
-                  <Form.Item name="radioModes" label="Radio Modes">
+                  <Form.Item name="radioModes" label={t('product.products.radioModes')}>
                     <Input placeholder="fdd / tdd / fdd-tdd" />
                   </Form.Item>
                   <Form.Item
@@ -320,21 +328,6 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
                       }))}
                       showSearch
                       optionFilterProp="label"
-                    />
-                  </Form.Item>
-                  <Form.Item
-                    name="indicatorDeviceType"
-                    label={t('product.products.indicatorDevType')}
-                    rules={[{ required: true }]}
-                    extra={t('product.product.drawer.indicatorPlatformExtra')}
-                  >
-                    <Select
-                      options={DEVICE_TYPE_OPTIONS}
-                      onChange={(val) => {
-                        if ((val || '').toUpperCase() !== 'ENB') {
-                          form.setFieldValue('indicatorPlatform', undefined);
-                        }
-                      }}
                     />
                   </Form.Item>
                   {isENB && (

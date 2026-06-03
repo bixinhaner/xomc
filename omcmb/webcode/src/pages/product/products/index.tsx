@@ -14,7 +14,6 @@ import {
 import { makeSeqColumn } from '@/components/Table/seqColumn';
 import {
   PlusOutlined,
-  ReloadOutlined,
   EditOutlined,
   DeleteOutlined,
   ClearOutlined,
@@ -237,31 +236,29 @@ export default function ProductsPage() {
               placement="bottomRight"
               onConfirm={() => {
                 // 不返回 Promise — 让 Popconfirm 立即关闭；loading 反馈交给触发按钮
+                // 重载 XML 后主动刷新缓存 + 重拉列表(取消独立"刷新缓存"按钮,合并到此处)
                 importMut
                   .mutateAsync()
-                  .then((r) => message.success(t('product.products.reloadSuccess', { count: r.reloaded })))
-                  .catch((e) => message.error((e as Error).message));
-              }}
-            >
-              <Button icon={<CloudDownloadOutlined />} loading={importMut.isPending} danger>
-                {t('common.reloadXml')}
-              </Button>
-            </Popconfirm>
-            <Button
-              icon={<ReloadOutlined />}
-              loading={cacheRefMut.isPending}
-              onClick={() => {
-                cacheRefMut
-                  .mutateAsync()
-                  .then(() => {
+                  .then(async (r) => {
+                    try {
+                      await cacheRefMut.mutateAsync();
+                    } catch (e) {
+                      message.warning((e as Error).message);
+                    }
                     void refetch();
-                    message.success(t('common.cacheRefreshed'));
+                    message.success(t('product.products.reloadSuccess', { count: r.reloaded }));
                   })
                   .catch((e) => message.error((e as Error).message));
               }}
             >
-              {t('common.refreshCache')}
-            </Button>
+              <Button
+                icon={<CloudDownloadOutlined />}
+                loading={importMut.isPending || cacheRefMut.isPending}
+                danger
+              >
+                {t('common.reloadXml')}
+              </Button>
+            </Popconfirm>
             <Button
               type="primary"
               icon={<PlusOutlined />}
