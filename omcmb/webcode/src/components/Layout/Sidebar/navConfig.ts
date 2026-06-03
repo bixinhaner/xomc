@@ -100,7 +100,7 @@ export const NAV_CONFIG: NavConfig = [
       { key: 'perf-dashboard',  label: 'nav.performance.dashboard',    path: '/performance' },
       // { key: 'perf-query',      label: 'nav.performance.query',        path: '/performance/query' },  // T-0190 隐藏指标查询（旧入口，页面代码保留）
       { key: 'perf-adhoc',      label: 'nav.performance.adhoc',        path: '/performance/pm-adhoc' },
-      { key: 'perf-kpi-std',    label: 'nav.performance.kpiStandard',  path: '/performance/kpi-standard' },
+      // { key: 'perf-kpi-std',    label: 'nav.performance.kpiStandard',  path: '/performance/kpi-standard' },  // T-0180 隐藏性能侧指标库（统一到产品中心 KPI 指标库）
       // { key: 'perf-kpi-bs',     label: 'nav.performance.kpiStation',   path: '/performance/kpi-station' },  // 隐藏测量任务管理
       // { key: 'perf-chart',      label: 'nav.performance.charts',       path: '/performance/charts' },  // 隐藏性能图表
       // { key: 'perf-threshold',  label: 'nav.performance.threshold',    path: '/performance/threshold' },  // 隐藏
