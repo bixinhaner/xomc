@@ -11,7 +11,6 @@ import {
   message,
   Popconfirm,
   Tooltip,
-  Typography,
   Empty,
 } from 'antd';
 import {
@@ -30,8 +29,6 @@ import {
 import type { ParamMapping, CreateMappingInput, UpdateMappingInput } from '@core/types/paramModel';
 import { makeSeqColumn } from '@/components/Table/seqColumn';
 import { useT } from '@/hooks/useT';
-
-const { Text } = Typography;
 
 interface Props {
   selectedName?: string;
@@ -187,59 +184,58 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
   }
 
   return (
-    <Card
-      size="small"
-      // 2026-05-29 用户决策:旧"默认映射 / Mappings — X"标题删除;改用 返回 + 模型名
-      // 占左,合并原顶部 toolbar 行 + 原 Card extra 筛选行为单行布局。
-      title={
-        <Space>
-          {onBack && (
-            <Button icon={<ArrowLeftOutlined />} onClick={onBack} size="small">
-              {t('common.back')}
+    <>
+      {/* 2026-06-03:返回+筛选行对齐 kpi-library 详情页 — 独立 toolbar Card + 两端对齐 Space,
+          返回默认尺寸 + 模型名(fontWeight 600);右侧 搜索 / 条目筛选 / 新增映射。 */}
+      <Card size="small" style={{ marginBottom: 12 }}>
+        <Space style={{ width: '100%', justifyContent: 'space-between' }} wrap>
+          <Space wrap>
+            {onBack && (
+              <Button icon={<ArrowLeftOutlined />} onClick={onBack}>
+                {t('common.back')}
+              </Button>
+            )}
+            <span style={{ fontWeight: 600 }}>{selectedName}</span>
+          </Space>
+          <Space wrap>
+            <Input.Search
+              placeholder={t('product.paramModel.pathSearchPh')}
+              allowClear
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+              style={{ width: 320 }}
+              enterButton
+            />
+            <Select
+              value={entryFilter}
+              onChange={(v) => setEntryFilter(v)}
+              options={ENTRY_FILTER_OPTIONS}
+              style={{ width: 120 }}
+            />
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => {
+                setCreating(true);
+                setEditing(null);
+                form.resetFields();
+                form.setFieldsValue({ entryType: 'parameter', access: 'readWrite', dataType: 'string', changeApplies: 'reload' });
+              }}
+            >
+              {t('product.paramModel.mappings.newBtn')}
             </Button>
-          )}
-          <Text strong>{selectedName}</Text>
+          </Space>
         </Space>
-      }
-      extra={
-        <Space>
-          <Input.Search
-            placeholder={t('product.paramModel.pathSearchPh')}
-            allowClear
-            value={keyword}
-            onChange={(e) => setKeyword(e.target.value)}
-            style={{ width: 320 }}
-            enterButton
-          />
-          <Select
-            value={entryFilter}
-            onChange={(v) => setEntryFilter(v)}
-            options={ENTRY_FILTER_OPTIONS}
-            style={{ width: 120 }}
-          />
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={() => {
-              setCreating(true);
-              setEditing(null);
-              form.resetFields();
-              form.setFieldsValue({ entryType: 'parameter', access: 'readWrite', dataType: 'string', changeApplies: 'reload' });
-            }}
-          >
-            {t('product.paramModel.mappings.newBtn')}
-          </Button>
-        </Space>
-      }
-    >
-      <Table<ParamMapping>
-        rowKey="id"
-        loading={isLoading}
-        columns={[makeSeqColumn<ParamMapping>({ title: t('table.rowNumber'), dataSource: filtered }), ...columns]}
-        dataSource={filtered}
-        size="small"
-        pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (total) => t('common.totalCount', { count: total }) }}
-      />
+      </Card>
+      <Card size="small">
+        <Table<ParamMapping>
+          rowKey="id"
+          loading={isLoading}
+          columns={[makeSeqColumn<ParamMapping>({ title: t('table.rowNumber'), dataSource: filtered }), ...columns]}
+          dataSource={filtered}
+          size="small"
+          pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (total) => t('common.totalCount', { count: total }) }}
+        />
       <Modal
         title={editing ? t('product.paramModel.mappings.editTitle') : t('product.paramModel.mappings.newTitle')}
         open={Boolean(editing) || creating}
@@ -293,6 +289,7 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
           </Space>
         </Form>
       </Modal>
-    </Card>
+      </Card>
+    </>
   );
 }
