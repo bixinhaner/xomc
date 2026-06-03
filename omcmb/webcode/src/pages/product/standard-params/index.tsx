@@ -124,7 +124,7 @@ export default function StandardParamsPage() {
               allowClear
               value={keyword}
               onChange={(e) => setKeyword(e.target.value)}
-              style={{ width: 240 }}
+              style={{ width: 320 }}
             />
             <Select
               value={entryType}

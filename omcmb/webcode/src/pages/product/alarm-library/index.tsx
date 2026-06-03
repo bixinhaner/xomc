@@ -360,7 +360,7 @@ export default function AlarmLibraryPage() {
               allowClear
               value={neKeyword}
               onChange={(e) => setNeKeyword(e.target.value)}
-              style={{ width: 220 }}
+              style={{ width: 320 }}
             />
           )}
           <Space wrap>
@@ -375,7 +375,7 @@ export default function AlarmLibraryPage() {
                   onSearch={(v) =>
                     setDetailFilter((f) => ({ ...f, keyword: v || undefined, page: 1 }))
                   }
-                  style={{ width: 220 }}
+                  style={{ width: 320 }}
                 />
                 <Space size={4}>
                   <span style={FILTER_LABEL_STYLE}>{t('product.alarm.severityLabel')}</span>

@@ -114,7 +114,7 @@ export default function ParamModelPage() {
               allowClear
               value={keyword}
               onChange={(e) => setKeyword(e.target.value)}
-              style={{ width: 280 }}
+              style={{ width: 320 }}
             />
             <Space>
               {/* "导入 XML" = 用户选本地 XML 上传,落 host /opt/omc/data/param-mappings-custom/ */}

@@ -148,7 +148,7 @@ export default function IndicatorTab({ deviceType }: Props) {
               setKeyword(e.target.value);
               setPage(1);
             }}
-            style={{ width: 260 }}
+            style={{ width: 320 }}
           />
         </Space>
       }

@@ -201,7 +201,7 @@ export default function KpiLibraryPage() {
                   allowClear
                   value={detailKeyword}
                   onChange={(e) => setDetailKeyword(e.target.value)}
-                  style={{ width: 240 }}
+                  style={{ width: 320 }}
                 />
                 <Select
                   placeholder={t('product.kpi.groupFilterPh')}

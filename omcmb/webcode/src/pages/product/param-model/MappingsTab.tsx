@@ -208,7 +208,7 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
             allowClear
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
-            style={{ width: 220 }}
+            style={{ width: 320 }}
           />
           <Select
             value={entryFilter}
