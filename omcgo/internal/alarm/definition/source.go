@@ -1,13 +1,16 @@
 package definition
 
-import "strings"
+import (
+	"os"
+	"path/filepath"
+)
 
-// Source 描述一行 alarm_definitions 的物理来源(严格对标 T-0180 indicator/source.go)。
+// Source 描述一行 alarm_definitions 的物理来源。
 //
-// 三态语义:
-//   - SourceBuiltin: XML 来自镜像层 data/alarm-definitions/,只读,不可在线删
-//   - SourceCustom:  XML 来自 host bind mount data/alarm-definitions-custom/,可读写,可在线删
-//   - SourceUnknown: 历史数据或异常(loaded_from 不带目录前缀或为空),按 builtin 对待(拒删)
+// 三态语义(2026-06-04 改 sidecar 判定):
+//   - SourceBuiltin: 出厂随包 XML(无 .custom sidecar),不可在线删
+//   - SourceCustom:  用户经 UI 上传的 XML(同目录存在 X.xml.custom sidecar 标记),可在线删
+//   - SourceUnknown: loaded_from 为空等异常,按 builtin 对待(拒删)
 type Source string
 
 const (
@@ -46,24 +49,34 @@ const (
 //
 // SourceUnknown 包括历史数据(loaded_from 只存 basename 的旧 Loader 写入,migration
 // 回填前的过渡期可能见到)。
-func ClassifySource(loadedFrom string) Source {
-	switch {
-	case strings.HasPrefix(loadedFrom, CustomDirPrefix):
-		return SourceCustom
-	case strings.HasPrefix(loadedFrom, BuiltinDirPrefix):
-		return SourceBuiltin
-	default:
-		return SourceUnknown
+// CustomMarkerSuffix 是自定义 XML 的 sidecar 标记后缀。
+// 文件 X.xml 若同目录存在 X.xml.custom(空标记文件)⇒ 该 XML 为用户经 UI 上传的自定义文件。
+// 标记随文件走 → 扛过 data 反向合并升级 + DB 重建,不依赖目录前缀、不占 DB 列(2026-06-04 设计 D6)。
+const CustomMarkerSuffix = ".custom"
+
+// IsCustom 判定 loadedFrom 对应的物理文件是否自定义(同目录 sidecar 存在)。
+// baseDir = XMLBaseDir(Loader / Handler 持有);loadedFrom = 相对 baseDir 的 slash 路径。
+func IsCustom(baseDir, loadedFrom string) bool {
+	if loadedFrom == "" {
+		return false
 	}
+	_, err := os.Stat(filepath.Join(baseDir, filepath.FromSlash(loadedFrom)) + CustomMarkerSuffix)
+	return err == nil
 }
 
-// IsDeletable 是 DELETE /alarm-definitions/files/{path} 端点与前端 deletable 字段的
-// 唯一判定函数。
-//
-// 当前规则(2026-06-04 用户决策:内置数据不可删除):仅 custom 来源可删,
-// builtin(当前目录 XML 加载的内置数据)与 unknown 一律不可删。
-// ⚠️ 注:2026-06-03 起上传直接写 builtin 目录,故上传文件也判为 builtin →
-// 同样不可删(只能重新上传同名覆盖)。若需"上传可删、出厂锁定",应把上传分流到 custom 目录。
-func IsDeletable(loadedFrom string) bool {
-	return ClassifySource(loadedFrom) == SourceCustom
+// ClassifySource 根据 sidecar 判定物理来源(custom / builtin / unknown)。
+func ClassifySource(baseDir, loadedFrom string) Source {
+	if loadedFrom == "" {
+		return SourceUnknown
+	}
+	if IsCustom(baseDir, loadedFrom) {
+		return SourceCustom
+	}
+	return SourceBuiltin
+}
+
+// IsDeletable 是 DELETE /alarm-definitions/files/{path} 端点与前端 deletable 字段的唯一判定函数。
+// 仅 custom(有 sidecar)可删;builtin / unknown 一律不可删。
+func IsDeletable(baseDir, loadedFrom string) bool {
+	return IsCustom(baseDir, loadedFrom)
 }

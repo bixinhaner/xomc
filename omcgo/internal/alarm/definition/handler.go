@@ -24,6 +24,7 @@ import (
 // 本 Handler 只保留 CRUD 与只读聚合端点。
 type Handler struct {
 	service *Service
+	baseDir string // XMLBaseDir,用于 NeTypes 据 sidecar 回填 source/deletable
 	logger  *zap.Logger
 }
 
@@ -35,12 +36,12 @@ type Reloader interface {
 	ReloadOne(ctx context.Context, name string) error
 }
 
-// NewHandler 构造 Handler。
-func NewHandler(service *Service, logger *zap.Logger) *Handler {
+// NewHandler 构造 Handler。baseDir = XMLBaseDir,用于 NeTypes 据 sidecar 派生 source/deletable。
+func NewHandler(service *Service, baseDir string, logger *zap.Logger) *Handler {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &Handler{service: service, logger: logger.Named("alarmdef.handler")}
+	return &Handler{service: service, baseDir: baseDir, logger: logger.Named("alarmdef.handler")}
 }
 
 // RegisterRoutes 注册到给定 RouterGroup。
@@ -321,6 +322,11 @@ func (h *Handler) NeTypes(c *gin.Context) {
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
+	}
+	// source/deletable 据 sidecar 回填(repo 不做文件 IO)。
+	for i := range stats {
+		stats[i].Source = string(ClassifySource(h.baseDir, stats[i].LoadedFrom))
+		stats[i].Deletable = IsDeletable(h.baseDir, stats[i].LoadedFrom)
 	}
 	response.OK(c, gin.H{"items": stats})
 }

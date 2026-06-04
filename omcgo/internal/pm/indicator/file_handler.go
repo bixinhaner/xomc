@@ -184,7 +184,7 @@ func (h *FileHandler) DeleteFile(c *gin.Context) {
 	}
 
 	// 3. 内置数据守门:builtin(当前目录 XML 加载)+ unknown 不可删(2026-06-04 用户决策)
-	if !IsDeletable(loadedFrom) {
+	if !IsDeletable(h.baseDir, loadedFrom) {
 		commonerrors.AbortWithError(c, http.StatusForbidden,
 			fmt.Errorf("内置数据不允许删除(loaded_from=%q)[code=%d]", loadedFrom, global.ErrCodeIndicatorBuiltinNotDeletable))
 		return
@@ -282,6 +282,10 @@ func (h *FileHandler) Summary(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
+	// source 据 sidecar 回填(repo 不做文件 IO)
+	for i := range rows {
+		rows[i].Source = string(ClassifySource(h.baseDir, rows[i].LoadedFrom))
+	}
 	response.OK(c, gin.H{"items": rows})
 }
 
@@ -345,8 +349,8 @@ func (h *FileHandler) ListFiles(c *gin.Context) {
 	for _, fg := range dbRows {
 		entry := &fileEntry{
 			LoadedFrom: fg.LoadedFrom,
-			Source:     string(ClassifySource(fg.LoadedFrom)),
-			Deletable:  IsDeletable(fg.LoadedFrom),
+			Source:     string(ClassifySource(h.baseDir, fg.LoadedFrom)),
+			Deletable:  IsDeletable(h.baseDir, fg.LoadedFrom),
 			Count:      fg.Count,
 		}
 		// DB 中 loaded_from 不为空,Stat 一下判 on_disk

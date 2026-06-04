@@ -43,7 +43,7 @@ func initAlarmDefModule(c *Container) error {
 
 	service := alarmdef.NewService(repo, registry, c.Redis, logger)
 	reloader := &alarmDefReloader{reg: c.DictLoaderRegistry}
-	handler := alarmdef.NewHandler(service, logger)
+	handler := alarmdef.NewHandler(service, c.Cfg.DictLoader.XMLBaseDir, logger)
 
 	// 告警库 XML 管理重构:导入/重载/刷新合并进 FileHandler 的 upload-xml 端点
 	// (写文件 → destructive 重载删孤儿 → RefreshCache)。FileHandler 复用 service
@@ -58,9 +58,8 @@ func initAlarmDefModule(c *Container) error {
 	c.AlarmDefRegistry = registry
 	c.AlarmDefHandler = handler
 	c.AlarmDefFileHandler = fileHandler
-	logger.Info("alarm-definition module initialized",
-		// 暴露行数到 startup log，便于排障
-	)
+	logger.Info("alarm-definition module initialized")// 暴露行数到 startup log，便于排障
+
 	return nil
 }
 

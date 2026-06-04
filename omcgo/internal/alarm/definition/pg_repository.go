@@ -50,7 +50,7 @@ func (r *PgRepository) ListAll(ctx context.Context) ([]ResolvedDefinition, error
 		var rd ResolvedDefinition
 		var (
 			cnName, enName, cnProbCause, enProbCause, cnSugg, enSugg, description *string
-			eventType                                                            *int
+			eventType                                                             *int
 		)
 		if err := rows.Scan(
 			&rd.ID, &rd.Identifier, &rd.NeType, &cnName, &enName,
@@ -399,7 +399,7 @@ func (r *PgRepository) UnknownStats(ctx context.Context, productID *uuid.UUID, d
 // ListNeTypes 实现 WriteRepository(T-0179 drill-down 一级视图)。
 //
 // 按 (ne_type, loaded_from) 双键聚合;COUNT FILTER 一次扫表算 4 个严重级计数。
-// loaded_from NULL 通过 COALESCE 为 '' 归到"未知 XML 来源"行。
+// loaded_from NULL 通过 COALESCE 为 ” 归到"未知 XML 来源"行。
 //
 // 期望规模 ~442 行 7 个 ne_type → 7-14 行返回,无需分页。
 func (r *PgRepository) ListNeTypes(ctx context.Context) ([]NeTypeStat, error) {
@@ -431,9 +431,7 @@ SELECT d.ne_type,
 		); err != nil {
 			return nil, fmt.Errorf("scan ne-type-stat row: %w", err)
 		}
-		// 来源由 loaded_from 前缀派生(后端唯一真值源,对标 indicator/parammodel)。
-		s.Source = string(ClassifySource(s.LoadedFrom))
-		s.Deletable = IsDeletable(s.LoadedFrom)
+		// source/deletable 由 NeTypes handler 据 sidecar 回填(repo 不做文件 IO)。
 		out = append(out, s)
 	}
 	return out, rows.Err()
@@ -454,7 +452,7 @@ func scanOneResolved(row pgx.Row) (*ResolvedDefinition, error) {
 	var rd ResolvedDefinition
 	var (
 		cnName, enName, cnProbCause, enProbCause, cnSugg, enSugg, description *string
-		eventType                                                            *int
+		eventType                                                             *int
 	)
 	if err := row.Scan(
 		&rd.ID, &rd.Identifier, &rd.NeType, &cnName, &enName,
@@ -481,7 +479,7 @@ func scanResolvedDefs(rows pgx.Rows) ([]ResolvedDefinition, error) {
 		var rd ResolvedDefinition
 		var (
 			cnName, enName, cnProbCause, enProbCause, cnSugg, enSugg, description *string
-			eventType                                                            *int
+			eventType                                                             *int
 		)
 		if err := rows.Scan(
 			&rd.ID, &rd.Identifier, &rd.NeType, &cnName, &enName,

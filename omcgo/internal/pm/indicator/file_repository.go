@@ -203,8 +203,7 @@ SELECT rf.platform_name,
 				rows.Close()
 				return nil, fmt.Errorf("scan platform summary row (%s): %w", tech, err)
 			}
-			// source 由 loaded_from 前缀派生(唯一真值源 source.go);loaded_from 为空时返 unknown。
-			row.Source = string(ClassifySource(row.LoadedFrom))
+			// source 由 Summary handler 据 sidecar 回填(repo 不做文件 IO);此处仅返聚合行。
 			out = append(out, row)
 		}
 		rows.Close()

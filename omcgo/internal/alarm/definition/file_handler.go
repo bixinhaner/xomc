@@ -116,7 +116,7 @@ func (h *FileHandler) DeleteFile(c *gin.Context) {
 	}
 
 	// 内置数据守门:builtin(当前目录 XML 加载)+ unknown 不可删(2026-06-04 用户决策)
-	if !IsDeletable(loadedFrom) {
+	if !IsDeletable(h.baseDir, loadedFrom) {
 		commonerrors.AbortWithError(c, http.StatusForbidden,
 			fmt.Errorf("内置数据不允许删除(loaded_from=%q)[code=%d]", loadedFrom, global.ErrCodeAlarmBuiltinNotDeletable))
 		return

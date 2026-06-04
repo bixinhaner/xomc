@@ -46,7 +46,7 @@ type mockFileRepository struct {
 	// T-0180 P1.5: DeleteOrphansBefore stub
 	orphanRows    map[string]int // tech → rows to "delete" (deterministic per tech)
 	orphanErr     error
-	orphanCalls   []string  // 记录每次调用的 tech 序列
+	orphanCalls   []string    // 记录每次调用的 tech 序列
 	orphanCutoffs []time.Time // 记录每次 before 时刻
 }
 
@@ -149,6 +149,10 @@ func writeCustomXML(t *testing.T, baseDir, tech, name string) string {
 	body := []byte(`<indicatorModel platform="X" indicatorCount="0"></indicatorModel>`)
 	if err := os.WriteFile(abs, body, 0o644); err != nil {
 		t.Fatalf("write %s: %v", abs, err)
+	}
+	// sidecar 标记:UI 上传的 custom 文件(2026-06-04 sidecar 模型)。
+	if err := os.WriteFile(abs+CustomMarkerSuffix, []byte{}, 0o644); err != nil {
+		t.Fatalf("write sidecar %s: %v", abs+CustomMarkerSuffix, err)
 	}
 	return filepath.ToSlash(rel)
 }
@@ -286,7 +290,14 @@ func TestDeleteFile_InvalidTechSegment_400(t *testing.T) {
 
 func TestDeleteFile_NotFound_404(t *testing.T) {
 	baseDir := t.TempDir()
-	// 文件不在 + DB 0 行 → 404
+	// custom 文件:有 sidecar(过删除守门)但 .xml 已不在 + DB 0 行 → 404
+	scDir := filepath.Join(baseDir, CustomDirSubdir, "enb")
+	if err := os.MkdirAll(scDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(scDir, "NO_FILE.xml"+CustomMarkerSuffix), []byte{}, 0o644); err != nil {
+		t.Fatalf("write sidecar: %v", err)
+	}
 	repo := &mockFileRepository{count: 0}
 	r := newTestRouter(t, repo, baseDir)
 
@@ -465,8 +476,13 @@ func TestSummary_RepoError_500(t *testing.T) {
 
 func TestListFiles_DBAndDiskMerge(t *testing.T) {
 	baseDir := t.TempDir()
-	// 物理:builtin/enb/ALL.xml + custom/enb/UPLOADED_NOT_LOADED.xml
+	// 物理:custom/enb/UPLOADED_NOT_LOADED.xml(+sidecar)
 	writeCustomXML(t, baseDir, "enb", "UPLOADED_NOT_LOADED.xml")
+	// LOADED.xml 是 DB-only 行(磁盘无 .xml,OnDisk=false),但来源 custom → 单独写 sidecar 标记。
+	loadedSidecar := filepath.Join(baseDir, CustomDirSubdir, "enb", "LOADED.xml"+CustomMarkerSuffix)
+	if err := os.WriteFile(loadedSidecar, []byte{}, 0o644); err != nil {
+		t.Fatalf("write LOADED sidecar: %v", err)
+	}
 	// DB:builtin/enb/ALL.xml(123 条)+ custom/enb/LOADED.xml(7 条)
 	repo := &mockFileRepository{
 		listByTech: map[string][]FileGroup{
