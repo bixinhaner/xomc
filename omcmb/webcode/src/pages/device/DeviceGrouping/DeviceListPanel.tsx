@@ -71,8 +71,9 @@ export default function DeviceListPanel({
         allowClear
         placeholder={t('device.searchSnNamePlaceholder')}
         // 2026-06-03:SearchInput 已用 Tooltip(hover+focus)展示完整 placeholder,无需再设 title。
+        // enterButton 对齐 product/products 搜索框样式(带明显「搜索」按钮)。
+        enterButton
         onSearch={onSearch}
-        style={{ width: 260 }}
       />
     ),
     [onSearch, t],
@@ -104,9 +105,6 @@ export default function DeviceListPanel({
         </Title>
       </div>
 
-      {/* 2026-06-03 用户决策:搜索框从表格工具栏移出,独立成一行显示 */}
-      <div>{searchBox}</div>
-
       <div className="device-list-table-wrapper" style={{ flex: 1, minHeight: 0 }}>
         <Card
           size="small"
@@ -124,6 +122,7 @@ export default function DeviceListPanel({
             selectedRowKeys={selectedDeviceIds}
             onSelectionChange={onSelectionChange}
             batchActions={batchActions}
+            extraToolbarLeft={searchBox}
             extraToolbarAfterBatch={importExportButtons}
             total={total}
             pageSize={pageSize}
