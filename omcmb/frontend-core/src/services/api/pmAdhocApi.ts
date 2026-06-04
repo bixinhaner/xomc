@@ -8,6 +8,8 @@ import type {
   AdhocResultRow,
   AdhocTaskRun,
   AdhocStatus,
+  AdhocDimension,
+  AdhocFilterOptions,
   CreateAdhocTaskInput,
   UpdateAdhocTaskInput,
   BackendAdhocTask,
@@ -99,17 +101,34 @@ export const pmAdhocApi = {
     offset = 0,
     startTime?: string,
     endTime?: string,
+    productIds?: string[],
+    objectLdns?: string[],
   ): Promise<{ rows: AdhocResultRow[]; total: number }> {
     // 大时间段（页签1 仪表盘）：startTime/endTime 为 RFC3339，透传为 start_time/end_time query 参数。
+    // PM-DASH-DIMFILTER：维度子集过滤——本端点 query 是手动 snake_case 构造（不靠 Axios 自动转换），
+    // 故新参数也手写 snake_case。数组发 CSV（join(',')）而非原始数组：http.ts 无 paramsSerializer，
+    // Axios 默认把数组序列化成带方括号的 product_ids[]=a&product_ids[]=b，后端 gin QueryArray("product_ids")
+    // 按精确键名取值收不到（值落在 product_ids[] 键下）→ 子集过滤静默失效。CSV 形态 product_ids=a,b 后端
+    // parseCSVQuery 逗号切正确解析。与同仓库 pmObjectsApi.ts 的 device_sns.join(',') 既定模式一致。
     const params: Record<string, unknown> = { limit, offset };
     if (startTime) params.start_time = startTime;
     if (endTime) params.end_time = endTime;
+    if (productIds?.length) params.product_ids = productIds.join(',');
+    if (objectLdns?.length) params.object_ldns = objectLdns.join(',');
     const { data } = await http.get<ResultsResponse>(`/pm/adhoc/tasks/${id}/results`, {
       params,
     });
     const rows = (data.items ?? []).map(mapBackendAdhocResult);
     // T-0194：total 是后端真实 COUNT(*)，rows.length<total 即被 limit 截断（前端据此提示）。
     return { rows, total: data.total ?? rows.length };
+  },
+  async filterOptions(id: string): Promise<AdhocFilterOptions> {
+    // PM-DASH-DIMFILTER：列出本任务实际聚合到的子集选项（后端 SELECT DISTINCT，不被结果上限截断）。
+    // 响应字段 dimension/options/value/label 均单词，camelCase 转换不影响，直接用。
+    const { data } = await http.get<AdhocFilterOptions>(
+      `/pm/adhoc/tasks/${id}/filter-options`,
+    );
+    return { dimension: data.dimension, options: data.options ?? [] };
   },
   async runs(id: string, limit = 50, offset = 0): Promise<AdhocTaskRun[]> {
     const { data } = await http.get<RunsResponse>(`/pm/adhoc/tasks/${id}/runs`, {
@@ -200,6 +219,9 @@ export const pmAdhocMock: typeof pmAdhocApi = {
   },
   async results() {
     return { rows: [], total: 0 };
+  },
+  async filterOptions() {
+    return { dimension: 'device' as AdhocDimension, options: [] };
   },
   async runs(id: string) {
     // 简化 mock：返回两条运行记录（一成一败）便于 UI 调试

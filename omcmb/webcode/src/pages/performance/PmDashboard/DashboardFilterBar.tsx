@@ -14,7 +14,13 @@ import { useMemo } from 'react';
 import { useIntl } from 'react-intl';
 import { DatePicker, Select, Space, Switch, Typography } from 'antd';
 import type { Dayjs } from 'dayjs';
-import { ALL_HOURS, ALL_WEEKDAYS } from './dashboardFilterUtils';
+import type { AdhocDimension, AdhocFilterOption } from '@core/types/pmAdhoc';
+import {
+  ALL_HOURS,
+  ALL_WEEKDAYS,
+  dimensionFilterMeta,
+  parseBandNumber,
+} from './dashboardFilterUtils';
 
 const { RangePicker } = DatePicker;
 
@@ -39,11 +45,40 @@ export interface DashboardFilterValue {
 interface Props {
   value: DashboardFilterValue;
   onChange: (next: DashboardFilterValue) => void;
+  // PM-DASH-DIMFILTER：任务聚合维度 + 该维度可筛选子集选项 + 当前选中子集（受控）。
+  dimension?: AdhocDimension;
+  dimOptions?: AdhocFilterOption[];
+  dimSelected?: string[];
+  onDimChange?: (next: string[]) => void;
 }
 
-export default function DashboardFilterBar({ value, onChange }: Props) {
+export default function DashboardFilterBar({
+  value,
+  onChange,
+  dimension,
+  dimOptions,
+  dimSelected,
+  onDimChange,
+}: Props) {
   const intl = useIntl();
   const patch = (p: Partial<DashboardFilterValue>) => onChange({ ...value, ...p });
+
+  const dimMeta = dimensionFilterMeta(dimension);
+  // 频段维度把后端原值 label（'Band=42' 或后端给的名）可读化为「频段 42」；其余维度直接用后端 label。
+  const dimSelectOptions = useMemo(
+    () =>
+      (dimOptions ?? []).map((o) => ({
+        value: o.value,
+        label:
+          dimension === 'band'
+            ? intl.formatMessage(
+                { id: 'perf.dashboard.bandLabel' },
+                { n: parseBandNumber(o.value) },
+              )
+            : o.label,
+      })),
+    [dimOptions, dimension, intl],
+  );
 
   const weekdayOptions = useMemo(
     () =>
@@ -113,6 +148,25 @@ export default function DashboardFilterBar({ value, onChange }: Props) {
           onChange={(v) => patch({ hours: v.length === 0 ? [...ALL_HOURS] : v })}
         />
       </Space>
+
+      {dimMeta && (
+        <Space size={4} align="center">
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            {intl.formatMessage({ id: dimMeta.titleId })}
+          </Typography.Text>
+          <Select
+            mode="multiple"
+            allowClear
+            maxTagCount="responsive"
+            style={{ minWidth: 200 }}
+            placeholder={intl.formatMessage({ id: dimMeta.placeholderId })}
+            value={dimSelected ?? []}
+            options={dimSelectOptions}
+            // 默认全不选 = 不过滤 = 显示全部（无回归）；选了若干项即只看这几项。
+            onChange={(v) => onDimChange?.(v as string[])}
+          />
+        </Space>
+      )}
 
       <Space size={4} align="center">
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>

@@ -5,7 +5,10 @@ import {
   ALL_WEEKDAYS,
   attachCompareSeries,
   buildCompareSeries,
+  dimSelectionToParams,
+  dimensionFilterMeta,
   filterRowsByWeekdayHour,
+  parseBandNumber,
   previousWindow,
 } from './dashboardFilterUtils';
 import type { MetricChart, MetricSeries } from './taskDashboardUtils';
@@ -143,6 +146,82 @@ describe('buildCompareSeries', () => {
   it('空数据不抛错', () => {
     expect(() => buildCompareSeries([], [], [], 0, 'hourly')).not.toThrow();
     expect(buildCompareSeries([], [], [], 0, 'hourly').series).toEqual([]);
+  });
+});
+
+// ── PM-DASH-DIMFILTER 维度子集筛选纯函数 ───────────────────────────────
+
+describe('parseBandNumber（频段可读化）', () => {
+  it("'Band=42' → '42'（去前缀，配合 i18n 模板渲染「频段 42」)", () => {
+    expect(parseBandNumber('Band=42')).toBe('42');
+  });
+
+  it("'Band=1' → '1'", () => {
+    expect(parseBandNumber('Band=1')).toBe('1');
+  });
+
+  it('无 Band= 前缀（脏数据/非频段值）→ 原样返回，不崩、label 非空', () => {
+    expect(parseBandNumber('42')).toBe('42');
+    expect(parseBandNumber('')).toBe('');
+  });
+});
+
+describe('dimensionFilterMeta（按维度决定是否渲染筛选框）', () => {
+  it('product → 渲染「产品」框（返回产品标题/占位符键）', () => {
+    expect(dimensionFilterMeta('product')).toEqual({
+      titleId: 'perf.dashboard.filterProduct',
+      placeholderId: 'perf.dashboard.allProducts',
+    });
+  });
+
+  it('device_group → 渲染「设备组」框', () => {
+    expect(dimensionFilterMeta('device_group')).toEqual({
+      titleId: 'perf.dashboard.filterDeviceGroup',
+      placeholderId: 'perf.dashboard.allDeviceGroups',
+    });
+  });
+
+  it('band → 渲染「频段」框', () => {
+    expect(dimensionFilterMeta('band')).toEqual({
+      titleId: 'perf.dashboard.filterBand',
+      placeholderId: 'perf.dashboard.allBands',
+    });
+  });
+
+  it('device / aggregate_group / network / undefined → 不渲染（null）', () => {
+    expect(dimensionFilterMeta('device')).toBeNull();
+    expect(dimensionFilterMeta('aggregate_group')).toBeNull();
+    expect(dimensionFilterMeta('network')).toBeNull();
+    expect(dimensionFilterMeta(undefined)).toBeNull();
+  });
+});
+
+describe('dimSelectionToParams（维度选中值→results 入参）', () => {
+  it('product 维度选中 → productIds（不带 objectLdns）', () => {
+    const out = dimSelectionToParams('product', ['p1', 'p2']);
+    expect(out).toEqual({ productIds: ['p1', 'p2'] });
+    expect(out.objectLdns).toBeUndefined();
+  });
+
+  it('device_group 维度选中 → objectLdns（值是 DeviceGroup=<uuid> 原值）', () => {
+    const out = dimSelectionToParams('device_group', ['DeviceGroup=g1', 'DeviceGroup=g2']);
+    expect(out).toEqual({ objectLdns: ['DeviceGroup=g1', 'DeviceGroup=g2'] });
+    expect(out.productIds).toBeUndefined();
+  });
+
+  it('band 维度选中 → objectLdns（值是 Band=<值> 原值）', () => {
+    const out = dimSelectionToParams('band', ['Band=42']);
+    expect(out).toEqual({ objectLdns: ['Band=42'] });
+  });
+
+  it('空选中 → 不过滤（两者皆 undefined，无回归）', () => {
+    expect(dimSelectionToParams('product', [])).toEqual({});
+    expect(dimSelectionToParams('band', [])).toEqual({});
+  });
+
+  it('不可筛维度（network 等）即便误传选中也不映射出过滤入参', () => {
+    expect(dimSelectionToParams('network', ['x'])).toEqual({});
+    expect(dimSelectionToParams('device', ['x'])).toEqual({});
   });
 });
 

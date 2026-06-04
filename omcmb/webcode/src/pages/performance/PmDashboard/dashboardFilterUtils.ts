@@ -11,11 +11,68 @@
 
 import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
+import type { AdhocDimension } from '@core/types/pmAdhoc';
 import type { MetricChart, MetricSeries, MetricSeriesValue } from './taskDashboardUtils';
 
 /** 全选用的常量集合（默认行为）。 */
 export const ALL_WEEKDAYS: number[] = [0, 1, 2, 3, 4, 5, 6];
 export const ALL_HOURS: number[] = Array.from({ length: 24 }, (_, i) => i);
+
+/**
+ * PM-DASH-DIMFILTER 频段可读化：把后端给的频段分组键原值（如 'Band=42'）去掉 'Band=' 前缀，
+ * 返回纯频段号（'42'）供 i18n 模板 '频段 {n}' 渲染。
+ * 不含 'Band=' 前缀（脏数据/非频段值）时原样返回，保证不崩、label 非空。
+ * MVP 不引入频段→频率/中文名映射表（YAGNI）。
+ */
+export function parseBandNumber(value: string): string {
+  return value.startsWith('Band=') ? value.slice('Band='.length) : value;
+}
+
+/**
+ * PM-DASH-DIMFILTER 维度→筛选框元数据：决定该聚合维度是否渲染子集筛选框、用哪个标题/占位符语料键。
+ *   - product / device_group / band → 渲染对应框。
+ *   - device / aggregate_group / network → 返回 null（不渲染该框，无子集可筛）。
+ */
+export function dimensionFilterMeta(
+  dimension: AdhocDimension | undefined,
+): { titleId: string; placeholderId: string } | null {
+  switch (dimension) {
+    case 'product':
+      return {
+        titleId: 'perf.dashboard.filterProduct',
+        placeholderId: 'perf.dashboard.allProducts',
+      };
+    case 'device_group':
+      return {
+        titleId: 'perf.dashboard.filterDeviceGroup',
+        placeholderId: 'perf.dashboard.allDeviceGroups',
+      };
+    case 'band':
+      return {
+        titleId: 'perf.dashboard.filterBand',
+        placeholderId: 'perf.dashboard.allBands',
+      };
+    default:
+      // device / aggregate_group / network / undefined → 不渲染。
+      return null;
+  }
+}
+
+/**
+ * PM-DASH-DIMFILTER 维度子集选中值 → results 查询入参映射。
+ *   - product 维度选中值是 product_id → productIds。
+ *   - device_group / band 维度选中值是 object_ldn 原值（DeviceGroup=<uuid> / Band=<值>）→ objectLdns。
+ *   - 空选中 = 不过滤 = 两者皆 undefined（无回归）。
+ */
+export function dimSelectionToParams(
+  dimension: AdhocDimension | undefined,
+  selected: string[],
+): { productIds?: string[]; objectLdns?: string[] } {
+  if (selected.length === 0) return {};
+  if (dimension === 'product') return { productIds: selected };
+  if (dimension === 'device_group' || dimension === 'band') return { objectLdns: selected };
+  return {};
+}
 
 /** 带 startTime 的行（AdhocResultRow / AggregatedRow 都满足）。 */
 interface RowWithStartTime {

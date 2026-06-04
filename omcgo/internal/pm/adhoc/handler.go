@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -48,6 +49,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		adhoc.PATCH("/tasks/:id", h.Update) // T-0194：编辑任务定义
 		adhoc.DELETE("/tasks/:id", h.Cancel)
 		adhoc.GET("/tasks/:id/results", h.Results)
+		adhoc.GET("/tasks/:id/filter-options", h.FilterOptions) // PM-DASH-DIMFILTER：按维度列出可筛子集选项
 		adhoc.GET("/tasks/:id/runs", h.Runs) // T-0186：运行历史
 		adhoc.GET("/tasks/:id/progress", h.Progress) // SSE
 	}
@@ -497,6 +499,12 @@ type resultsFilter struct {
 	// ObjectLDNs T-0193：任务自带的小区/PLMN 白名单。非空时叠加 object_ldn = ANY(...) 过滤；
 	// 空 = 不过滤（全小区）。与"只看 N 指标"同一层查看级收口。
 	ObjectLDNs  []string
+	// ProductIDs PM-DASH-DIMFILTER：product 维度仪表盘按选中产品子集过滤（product_id = ANY，uuid 数组）。
+	// 空 = 不过滤。独立于 T-0193 的 ObjectLDNs（那是任务白名单），两者作为独立 WHERE 子句叠加（AND 取交集）。
+	ProductIDs  []string
+	// SubsetLDNs PM-DASH-DIMFILTER：device_group/band 维度仪表盘按选中子集过滤（object_ldn = ANY，text 数组，
+	// 值形态 'DeviceGroup=<uuid>' / 'Band=<值>'）。空 = 不过滤。与 ObjectLDNs（任务白名单）各自独立成子句。
+	SubsetLDNs  []string
 }
 
 // buildResultsQuery 纯函数：拼 adhoc results 查询 SQL + 占位参数。
@@ -553,6 +561,18 @@ WHERE r.task_id = $1`
 		args = append(args, f.ObjectLDNs)
 		pos++
 	}
+	// PM-DASH-DIMFILTER：仪表盘维度子集过滤（与上面任务白名单各自独立成子句，AND 取交集）。
+	// product 维度按 product_id 子集；device_group/band 维度按 object_ldn 子集。空 = 不过滤（向后兼容）。
+	if len(f.ProductIDs) > 0 {
+		q += fmt.Sprintf(" AND r.product_id = ANY($%d)", pos)
+		args = append(args, f.ProductIDs)
+		pos++
+	}
+	if len(f.SubsetLDNs) > 0 {
+		q += fmt.Sprintf(" AND r.object_ldn = ANY($%d)", pos)
+		args = append(args, f.SubsetLDNs)
+		pos++
+	}
 	q += fmt.Sprintf(" ORDER BY r.time DESC LIMIT $%d OFFSET $%d", pos, pos+1)
 	args = append(args, limit, offset)
 	return q, args
@@ -599,6 +619,18 @@ func buildResultsCountQuery(taskID uuid.UUID, f resultsFilter) (string, []any) {
 		args = append(args, f.ObjectLDNs)
 		pos++
 	}
+	// PM-DASH-DIMFILTER：与 buildResultsQuery 同口径——同样的 ProductIDs / SubsetLDNs 子句，
+	// 否则 count 与数据对不上（T-0194 踩过）。
+	if len(f.ProductIDs) > 0 {
+		q += fmt.Sprintf(" AND r.product_id = ANY($%d)", pos)
+		args = append(args, f.ProductIDs)
+		pos++
+	}
+	if len(f.SubsetLDNs) > 0 {
+		q += fmt.Sprintf(" AND r.object_ldn = ANY($%d)", pos)
+		args = append(args, f.SubsetLDNs)
+		pos++
+	}
 	return q, args
 }
 
@@ -641,6 +673,9 @@ func (h *Handler) Results(c *gin.Context) {
 		StartTime:   c.Query("start_time"),
 		EndTime:     c.Query("end_time"),
 		ObjectLDNs:  task.ObjectLDNs, // 任务自带白名单（空=全小区）
+		// PM-DASH-DIMFILTER：仪表盘维度子集过滤（CSV 或重复参数）。默认两者都不传 = 不过滤 = 现行行为。
+		ProductIDs: parseCSVQuery(c, "product_ids"),
+		SubsetLDNs: parseCSVQuery(c, "object_ldns"),
 	}
 	q, args := buildResultsQuery(id, filter, limit, offset)
 
@@ -742,6 +777,154 @@ func (h *Handler) Results(c *gin.Context) {
 	}
 
 	response.OK(c, gin.H{"items": items, "total": total})
+}
+
+// parseCSVQuery 读取一个既支持 CSV（逗号分隔）又支持重复参数（?k=a&k=b）的 query。
+// 返回去空白后的非空项切片；无值返回 nil（让 = ANY 子句不进 SQL = 不过滤）。
+func parseCSVQuery(c *gin.Context, key string) []string {
+	raw := c.QueryArray(key) // 重复参数形态 ?k=a&k=b
+	out := make([]string, 0, len(raw))
+	for _, v := range raw {
+		for _, part := range strings.Split(v, ",") { // 兼容单参数内逗号分隔 ?k=a,b
+			p := strings.TrimSpace(part)
+			if p != "" {
+				out = append(out, p)
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// filterOptionDTO 是 filter-options 端点单个可筛选项（value=分组键、label=能拿到的最好名）。
+type filterOptionDTO struct {
+	Value string `json:"value"`
+	Label string `json:"label"`
+}
+
+// buildFilterOptionsQuery 纯函数：按维度拼 filter-options 的 SELECT DISTINCT SQL + 占位参数。
+//
+// 返回 (sql, args, supported)。supported=false 表示该维度不支持筛选（device/aggregate_group/network），
+// 调用方据此直接回空选项数组，不查库。
+//   - product：DISTINCT product_id + LEFT JOIN products 取 product_name
+//   - device_group：DISTINCT object_ldn + LEFT JOIN device_groups 取组名（'DeviceGroup='||id 比对）
+//   - band：DISTINCT object_ldn（频段无现成名，label 给原值，可读化交前端）
+//
+// 三条 SQL 均无 LIMIT/OFFSET —— 选项是与结果分页/上限完全解耦的权威全量子集（不被结果上限截断）。
+func buildFilterOptionsQuery(dim Dimension, taskID uuid.UUID) (string, []any, bool) {
+	switch dim {
+	case DimensionProduct:
+		return `
+SELECT DISTINCT r.product_id, p.product_name
+FROM pm_adhoc_aggregation_results r
+LEFT JOIN products p ON p.id = r.product_id
+WHERE r.task_id = $1 AND r.product_id IS NOT NULL
+ORDER BY p.product_name`, []any{taskID}, true
+	case DimensionDeviceGroup:
+		return `
+SELECT DISTINCT r.object_ldn, g.name
+FROM pm_adhoc_aggregation_results r
+LEFT JOIN device_groups g ON ('DeviceGroup=' || g.id::text) = r.object_ldn
+WHERE r.task_id = $1 AND r.object_ldn LIKE 'DeviceGroup=%'
+ORDER BY g.name`, []any{taskID}, true
+	case DimensionBand:
+		return `
+SELECT DISTINCT r.object_ldn
+FROM pm_adhoc_aggregation_results r
+WHERE r.task_id = $1 AND r.object_ldn LIKE 'Band=%'
+ORDER BY r.object_ldn`, []any{taskID}, true
+	default:
+		// device / aggregate_group / network：无可筛子集
+		return "", nil, false
+	}
+}
+
+// FilterOptions GET /pm/adhoc/tasks/:id/filter-options
+//
+// 按选中任务的聚合维度，列出"该任务实际聚合了哪些产品/设备组/频段"的权威子集清单（走 SELECT DISTINCT，
+// 与结果分页/上限解耦，不被截断）。前端据此渲染对应维度的多选筛选框。
+// 维度为 device/aggregate_group/network 时返回空 options（前端不渲染筛选框）。
+func (h *Handler) FilterOptions(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Fail(c, http.StatusBadRequest, "invalid id")
+		return
+	}
+	task, err := h.repo.Get(c.Request.Context(), id)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			response.Fail(c, http.StatusNotFound, "task not found")
+			return
+		}
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	dim := task.Dimension
+	if dim == "" {
+		dim = DimensionDevice
+	}
+
+	options := make([]filterOptionDTO, 0)
+	q, args, supported := buildFilterOptionsQuery(dim, id)
+	if supported {
+		rows, err := h.pool.Query(c.Request.Context(), q, args...)
+		if err != nil {
+			commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+			return
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var opt filterOptionDTO
+			switch dim {
+			case DimensionProduct:
+				var productID uuid.UUID
+				var productName *string // LEFT JOIN 未命中（已删/脏数据）则 NULL
+				if err := rows.Scan(&productID, &productName); err != nil {
+					commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+					return
+				}
+				opt.Value = productID.String()
+				if productName != nil && *productName != "" {
+					opt.Label = *productName
+				} else {
+					// 名缺失兜底（产品已删/脏数据）：label 回退 value，保证不为空、不崩（验收 1）
+					opt.Label = productID.String()
+				}
+			case DimensionDeviceGroup:
+				var objectLDN string
+				var groupName *string
+				if err := rows.Scan(&objectLDN, &groupName); err != nil {
+					commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+					return
+				}
+				opt.Value = objectLDN
+				if groupName != nil && *groupName != "" {
+					opt.Label = *groupName
+				} else {
+					opt.Label = objectLDN // 组已删/脏数据，回退原值
+				}
+			case DimensionBand:
+				var objectLDN string
+				if err := rows.Scan(&objectLDN); err != nil {
+					commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+					return
+				}
+				// 频段无现成名，后端给原值（如 Band=42），可读化交前端
+				opt.Value = objectLDN
+				opt.Label = objectLDN
+			}
+			options = append(options, opt)
+		}
+		if err := rows.Err(); err != nil {
+			commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+			return
+		}
+	}
+
+	response.OK(c, gin.H{"dimension": string(dim), "options": options})
 }
 
 // lookupIndicatorNames 按编号集合一次性查三张指标表，返回 code → 本地化显示名。

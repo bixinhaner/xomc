@@ -89,6 +89,21 @@ export interface UpdateAdhocTaskInput {
   windowEnd?: string;
 }
 
+/**
+ * PM-DASH-DIMFILTER 维度筛选选项：value=分组键原值（product_id / 'DeviceGroup=<uuid>' / 'Band=<值>'），
+ * label=后端能拿到的最好可读名（频段可读化交前端，后端只给原值）。
+ */
+export interface AdhocFilterOption {
+  value: string;
+  label: string;
+}
+
+/** filter-options 端点响应：维度 + 该任务实际聚合到的子集选项全量清单（不被结果上限截断）。 */
+export interface AdhocFilterOptions {
+  dimension: AdhocDimension;
+  options: AdhocFilterOption[];
+}
+
 export interface AdhocResultRow {
   id: string;
   taskId: string;

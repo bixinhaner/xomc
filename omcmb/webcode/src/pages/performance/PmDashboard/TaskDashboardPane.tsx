@@ -13,7 +13,11 @@ import { useMemo, useState } from 'react';
 import { useIntl } from 'react-intl';
 import { Alert, Card, Empty, Segmented, Space, Spin, Tag, Typography } from 'antd';
 import dayjs from 'dayjs';
-import { usePmAdhocDetail, usePmAdhocResults } from '@core/hooks/api/usePmAdhoc';
+import {
+  usePmAdhocDetail,
+  usePmAdhocFilterOptions,
+  usePmAdhocResults,
+} from '@core/hooks/api/usePmAdhoc';
 import { buildMetricCharts, filterChartsByMetricPaths } from './taskDashboardUtils';
 import ChartCard from './ChartCard';
 import DashboardFilterBar, { type DashboardFilterValue } from './DashboardFilterBar';
@@ -21,6 +25,7 @@ import {
   ALL_HOURS,
   ALL_WEEKDAYS,
   attachCompareSeries,
+  dimSelectionToParams,
   filterRowsByWeekdayHour,
   previousWindow,
 } from './dashboardFilterUtils';
@@ -46,6 +51,7 @@ export default function TaskDashboardPane({ taskId }: Props) {
   const granLabel = (g: string) =>
     GRAN_MSG_IDS[g] ? intl.formatMessage({ id: GRAN_MSG_IDS[g] }) : g;
   const taskQuery = usePmAdhocDetail(taskId);
+  const dimension = taskQuery.data?.dimension;
 
   // ── 共用三级筛选 + 周期对比开关（本 Pane 持状态，驱动取数 + 二拉）──────
   const [filter, setFilter] = useState<DashboardFilterValue>({
@@ -54,6 +60,21 @@ export default function TaskDashboardPane({ taskId }: Props) {
     hours: [...ALL_HOURS],
     compare: false,
   });
+
+  // ── PM-DASH-DIMFILTER 维度子集筛选（按维度动态显示产品/设备组/频段多选框）──────
+  // dimSelected 是筛选框上选中的"分组键原值"（product 维度=product_id；device_group=DeviceGroup=<uuid>；band=Band=<值>）。
+  // 切任务（taskId 变）即清空选中，避免上个任务的子集串到新任务——用 React 官方"渲染期调整 state"
+  // 模式（记录上次 taskId，变化时同步重置），不放 effect 里 setState。
+  const [dimSelected, setDimSelected] = useState<string[]>([]);
+  const [prevTaskId, setPrevTaskId] = useState(taskId);
+  if (taskId !== prevTaskId) {
+    setPrevTaskId(taskId);
+    setDimSelected([]);
+  }
+  const { data: filterOpts } = usePmAdhocFilterOptions(taskId, dimension);
+  // 维度→入参映射（纯函数，便于单测）：product→productIds；device_group/band→objectLdns；空选不过滤。
+  const { productIds, objectLdns } = dimSelectionToParams(dimension, dimSelected);
+
   const [start, end] = filter.range;
   const startISO = start.toISOString();
   const endISO = end.toISOString();
@@ -65,6 +86,8 @@ export default function TaskDashboardPane({ taskId }: Props) {
     limit: RESULTS_LIMIT,
     startTime: startISO,
     endTime: endISO,
+    productIds,
+    objectLdns,
   });
   const rawRows = rowsResp?.rows ?? [];
   // 周期对比开关打开时再拉一次上一周期（同任务、上一周期窗口）。
@@ -74,6 +97,8 @@ export default function TaskDashboardPane({ taskId }: Props) {
       limit: RESULTS_LIMIT,
       startTime: prevStart.toISOString(),
       endTime: prevEnd.toISOString(),
+      productIds,
+      objectLdns,
     },
   );
   const rawPrevRows = prevResp?.rows ?? [];
@@ -167,7 +192,14 @@ export default function TaskDashboardPane({ taskId }: Props) {
       </Card>
 
       <Card size="small" style={{ marginBottom: 12 }}>
-        <DashboardFilterBar value={filter} onChange={setFilter} />
+        <DashboardFilterBar
+          value={filter}
+          onChange={setFilter}
+          dimension={dimension}
+          dimOptions={filterOpts?.options}
+          dimSelected={dimSelected}
+          onDimChange={setDimSelected}
+        />
       </Card>
 
       {truncated && (

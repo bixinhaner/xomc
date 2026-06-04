@@ -6168,6 +6168,14 @@ const messages: Record<string, string> = {
   'perf.dashboard.weekdayFri':           'Fri',
   'perf.dashboard.weekdaySat':           'Sat',
   'perf.dashboard.hourSuffix':           '{hour}:00',
+  // PM-DASH-DIMFILTER dimension subset filters (shown by aggregation dimension)
+  'perf.dashboard.filterProduct':        'Product',
+  'perf.dashboard.filterDeviceGroup':    'Device Group',
+  'perf.dashboard.filterBand':           'Band',
+  'perf.dashboard.allProducts':          'All Products',
+  'perf.dashboard.allDeviceGroups':      'All Device Groups',
+  'perf.dashboard.allBands':             'All Bands',
+  'perf.dashboard.bandLabel':            'Band {n}',
   // Device list panel
   'perf.dashboard.granular15min':        '15 min',
   'perf.dashboard.granularHourly':       'Hourly',

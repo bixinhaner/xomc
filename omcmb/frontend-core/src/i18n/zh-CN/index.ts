@@ -6202,6 +6202,14 @@ const messages: Record<string, string> = {
   'perf.dashboard.weekdayFri':           '周五',
   'perf.dashboard.weekdaySat':           '周六',
   'perf.dashboard.hourSuffix':           '{hour} 点',
+  // PM-DASH-DIMFILTER 维度子集筛选框（按聚合维度动态显示）
+  'perf.dashboard.filterProduct':        '产品',
+  'perf.dashboard.filterDeviceGroup':    '设备组',
+  'perf.dashboard.filterBand':           '频段',
+  'perf.dashboard.allProducts':          '全部产品',
+  'perf.dashboard.allDeviceGroups':      '全部设备组',
+  'perf.dashboard.allBands':             '全部频段',
+  'perf.dashboard.bandLabel':            '频段 {n}',
   // 设备列表面板
   'perf.dashboard.granular15min':        '15 分钟',
   'perf.dashboard.granularHourly':       '小时',
