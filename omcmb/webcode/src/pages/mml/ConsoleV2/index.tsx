@@ -169,6 +169,8 @@ export default function MMLConsoleV2() {
           setConfig({ mode: 'standard', checkedPaths: cmd.paramPaths.map((p) => p.path) });
           setConfigTouched(false);
           setCommandModalOpen(false);
+          // 选完命令自动进入「配置参数」弹框,保持 ①→②→③ 操作连续性
+          setConfigModalOpen(true);
         }}
       />
 

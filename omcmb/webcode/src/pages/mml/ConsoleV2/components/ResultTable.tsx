@@ -219,19 +219,6 @@ export default function ResultTable({
             scroll={{ x: 'max-content' }}
             sticky
             pagination={{ pageSize: 20, size: 'small', showTotal: (t) => `共 ${t} 行` }}
-            expandable={{
-              rowExpandable: (r) => r.status === 'failed',
-              expandedRowRender: (r) => (
-                <div style={{ padding: '4px 8px' }}>
-                  <Text type="danger" strong>故障：{r.faultCode}</Text>
-                  <div style={{ marginTop: 8 }}>
-                    <Text type="secondary" style={{ fontSize: 12 }}>
-                      点击「查看」可查看该设备的执行结果与格式化报文。
-                    </Text>
-                  </div>
-                </div>
-              ),
-            }}
           />
         </Space>
       )}
