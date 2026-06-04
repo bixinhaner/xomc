@@ -216,8 +216,8 @@ func TestParseFileTech(t *testing.T) {
 
 // ── DeleteFile HTTP 行为 ────────────────────────────────────────────
 
-// 2026-06-03 用户决策:取消 builtin/custom 区分,builtin 文件现在也可删。
-func TestDeleteFile_BuiltinNowDeletable_200(t *testing.T) {
+// 2026-06-04 用户决策:builtin(当前目录 XML 加载的内置数据)不可删 → DELETE 返 403。
+func TestDeleteFile_BuiltinForbidden_403(t *testing.T) {
 	baseDir := t.TempDir()
 	// 在 builtin enb 子目录写一个文件
 	abs := filepath.Join(baseDir, BuiltinDirSubdir, "enb", "ALL.xml")
@@ -234,13 +234,12 @@ func TestDeleteFile_BuiltinNowDeletable_200(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
-	assert.True(t, repo.calledDelete)
-	assert.Equal(t, "enb", repo.calledTech)
+	assert.Equal(t, http.StatusForbidden, w.Code, "body=%s", w.Body.String())
+	assert.False(t, repo.calledDelete)
 }
 
-// builtin 根级 GSM.xml 也可删(tech 由文件名推断)。
-func TestDeleteFile_BuiltinGsmRoot_200(t *testing.T) {
+// builtin 根级 GSM.xml 也是内置 → 403,不可删。
+func TestDeleteFile_BuiltinGsmRootForbidden_403(t *testing.T) {
 	baseDir := t.TempDir()
 	abs := filepath.Join(baseDir, BuiltinDirSubdir, "GSM.xml")
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
@@ -256,9 +255,8 @@ func TestDeleteFile_BuiltinGsmRoot_200(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
-	assert.True(t, repo.calledDelete)
-	assert.Equal(t, "gsm", repo.calledTech)
+	assert.Equal(t, http.StatusForbidden, w.Code, "body=%s", w.Body.String())
+	assert.False(t, repo.calledDelete)
 }
 
 func TestDeleteFile_BarePathRejected_400(t *testing.T) {
@@ -503,10 +501,10 @@ func TestListFiles_DBAndDiskMerge(t *testing.T) {
 	}
 
 	// 1. builtin/ALL — DB 有 + 物理无(没在 baseDir 下) → OnDisk=false
-	// 2026-06-03 用户决策:builtin 现在也可删 → Deletable=true
+	// 2026-06-04 用户决策:builtin 内置不可删 → Deletable=false
 	if it, ok := byLF["indicator-library/enb/ALL.xml"]; ok {
 		assert.Equal(t, "builtin", it.Source)
-		assert.True(t, it.Deletable)
+		assert.False(t, it.Deletable)
 		assert.Equal(t, 123, it.Count)
 	}
 	// 2. custom/LOADED — DB 有 + 物理无(测试中没写) → OnDisk=false 但 Source/Deletable 正确

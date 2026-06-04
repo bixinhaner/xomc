@@ -54,8 +54,7 @@ func TestClassifySource(t *testing.T) {
 	}
 }
 
-// TestIsDeletable 验证守门规则。
-// 2026-06-03 用户决策:取消 builtin/custom 区分,所有文件一律可删。
+// TestIsDeletable 验证 2026-06-04 删除规则:仅 custom 可删,builtin/unknown 不可删。
 func TestIsDeletable(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -67,15 +66,15 @@ func TestIsDeletable(t *testing.T) {
 		{"custom gnb is deletable", "indicator-library-custom/gnb/MY.xml", true},
 		{"custom same-name override is deletable", "indicator-library-custom/enb/ALL.xml", true},
 
-		// builtin 现在也可删
-		{"builtin LTE multi-file deletable", "indicator-library/enb/ALL.xml", true},
-		{"builtin GSM single-file deletable", "indicator-library/GSM.xml", true},
-		{"builtin GNB single-file deletable", "indicator-library/GNB.xml", true},
+		// builtin 内置不可删
+		{"builtin LTE multi-file not deletable", "indicator-library/enb/ALL.xml", false},
+		{"builtin GSM single-file not deletable", "indicator-library/GSM.xml", false},
+		{"builtin GNB single-file not deletable", "indicator-library/GNB.xml", false},
 
-		// 来源未知也允许删(守门交给 parseFileTech 的路径校验)
-		{"legacy bare filename deletable", "ALL.xml", true},
-		{"empty deletable", "", true},
-		{"path traversal deletable by source rule", "../../etc/passwd", true},
+		// 来源未知不可删
+		{"legacy bare filename not deletable", "ALL.xml", false},
+		{"empty not deletable", "", false},
+		{"path traversal not deletable", "../../etc/passwd", false},
 	}
 
 	for _, tc := range cases {

@@ -40,8 +40,7 @@ func TestClassifySource(t *testing.T) {
 	}
 }
 
-// TestIsDeletable 验证 XML 管理重构后的删除规则:全部可删。
-// 取消 builtin/custom 删除守门,所有 loaded_from 形态一律返 true。
+// TestIsDeletable 验证 2026-06-04 删除规则:仅 custom 可删,builtin/unknown 不可删。
 func TestIsDeletable(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -49,10 +48,10 @@ func TestIsDeletable(t *testing.T) {
 		want       bool
 	}{
 		{"custom is deletable", "param-mappings-custom/CBQQ.xml", true},
-		{"builtin is deletable", "param-mappings/BTS.xml", true},
-		{"legacy bare filename is deletable", "BTS.xml", true},
-		{"empty is deletable", "", true},
-		{"path traversal is deletable", "../../etc/passwd", true},
+		{"builtin not deletable", "param-mappings/BTS.xml", false},
+		{"legacy bare filename not deletable", "BTS.xml", false},
+		{"empty not deletable", "", false},
+		{"path traversal not deletable", "../../etc/passwd", false},
 		{"custom same-name override is deletable", "param-mappings-custom/BTS.xml", true},
 	}
 

@@ -102,19 +102,18 @@ func TestAcquireFileLock_ConcurrentSameName(t *testing.T) {
 	}
 }
 
-// TestDeleteSourceGuard 验证 XML 管理重构后删除规则:全部可删。
-// 取消 builtin/custom 守门,IsDeletable 对所有 loaded_from 形态一律返 true。
+// TestDeleteSourceGuard 验证 2026-06-04 删除规则:仅 custom 可删,builtin/unknown 不可删。
 func TestDeleteSourceGuard(t *testing.T) {
 	cases := []struct {
 		loadedFrom string
 		want       bool // IsDeletable
 	}{
-		{"param-mappings/BTS.xml", true},         // 内置 → 现在也可删
+		{"param-mappings/BTS.xml", false},        // 内置 → 不可删
 		{"param-mappings-custom/CBQQ.xml", true}, // 自定义 → 可删
 		{"param-mappings-custom/BTS.xml", true},  // 同名覆盖 custom 可删
-		{"BTS.xml", true},                        // 历史无前缀 → 可删
-		{"", true},                               // 异常空 → 可删
-		{"../../etc/passwd", true},               // 路径遍历形态 → 可删(IsDeletable 不再守门)
+		{"BTS.xml", false},                       // 历史无前缀(unknown)→ 不可删
+		{"", false},                              // 异常空(unknown)→ 不可删
+		{"../../etc/passwd", false},              // 路径遍历形态(unknown)→ 不可删
 	}
 	for _, tc := range cases {
 		if got := IsDeletable(tc.loadedFrom); got != tc.want {

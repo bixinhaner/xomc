@@ -219,7 +219,7 @@ func TestResolveLoadedFrom_ClassifierIntegration(t *testing.T) {
 		wantDel  bool
 		nickName string
 	}{
-		{"/etc/omcgo/data/param-mappings/BTS.xml", SourceBuiltin, true, "builtin BTS"},
+		{"/etc/omcgo/data/param-mappings/BTS.xml", SourceBuiltin, false, "builtin BTS"},
 		{"/etc/omcgo/data/param-mappings-custom/CBQQ.xml", SourceCustom, true, "custom CBQQ"},
 		{"/etc/omcgo/data/param-mappings-custom/BTS.xml", SourceCustom, true, "custom override BTS"},
 	}

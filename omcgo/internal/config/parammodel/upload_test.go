@@ -142,11 +142,11 @@ func TestToModelView_SourceAndDeletable(t *testing.T) {
 		wantSource    Source
 		wantDeletable bool
 	}{
-		{"builtin BTS", "param-mappings/BTS.xml", SourceBuiltin, true},
+		{"builtin BTS", "param-mappings/BTS.xml", SourceBuiltin, false},
 		{"custom CBQQ", "param-mappings-custom/CBQQ.xml", SourceCustom, true},
 		{"custom same name as builtin", "param-mappings-custom/BTS.xml", SourceCustom, true},
-		{"legacy bare", "BTS.xml", SourceUnknown, true},
-		{"empty", "", SourceUnknown, true},
+		{"legacy bare", "BTS.xml", SourceUnknown, false},
+		{"empty", "", SourceUnknown, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

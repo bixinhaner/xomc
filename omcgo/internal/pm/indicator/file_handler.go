@@ -183,6 +183,13 @@ func (h *FileHandler) DeleteFile(c *gin.Context) {
 		return
 	}
 
+	// 3. 内置数据守门:builtin(当前目录 XML 加载)+ unknown 不可删(2026-06-04 用户决策)
+	if !IsDeletable(loadedFrom) {
+		commonerrors.AbortWithError(c, http.StatusForbidden,
+			fmt.Errorf("内置数据不允许删除(loaded_from=%q)[code=%d]", loadedFrom, global.ErrCodeIndicatorBuiltinNotDeletable))
+		return
+	}
+
 	// 4. 存在性校验:DB 0 行 + 文件不在 → 404;DB 0 行但文件在 → 仍允许删(残留清理)
 	rowCount, err := h.repo.CountByLoadedFrom(c.Request.Context(), tech, loadedFrom)
 	if err != nil {
@@ -307,10 +314,10 @@ func (h *FileHandler) UpdateFileDescription(c *gin.Context) {
 // fileEntry 是 ListFiles 端点单行(DB 计数 + 物理扫描 + source/deletable 派生)。
 type fileEntry struct {
 	LoadedFrom string `json:"loaded_from"`
-	Source     string `json:"source"`       // builtin / custom / unknown
-	Deletable  bool   `json:"deletable"`    // 前端零代码渲染,直接绑定 Tag/Button.disabled
-	Count      int    `json:"count"`        // perf_indicators_<tech>.WHERE loaded_from=? 行数
-	OnDisk     bool   `json:"on_disk"`      // 物理文件是否在 baseDir 下存在(uploaded-but-not-loaded 场景=true 但 count=0)
+	Source     string `json:"source"`    // builtin / custom / unknown
+	Deletable  bool   `json:"deletable"` // 前端零代码渲染,直接绑定 Tag/Button.disabled
+	Count      int    `json:"count"`     // perf_indicators_<tech>.WHERE loaded_from=? 行数
+	OnDisk     bool   `json:"on_disk"`   // 物理文件是否在 baseDir 下存在(uploaded-but-not-loaded 场景=true 但 count=0)
 }
 
 // ListFiles GET /api/v1/indicators/files?tech=enb|gsm|gnb

@@ -267,6 +267,13 @@ func (h *Handler) DeleteModel(c *gin.Context) {
 		return
 	}
 
+	// 1.5 内置数据守门:builtin(当前目录 XML 加载)+ unknown 不可删(2026-06-04 用户决策)
+	if !IsDeletable(pm.LoadedFrom) {
+		commonerrors.AbortWithError(c, http.StatusForbidden,
+			fmt.Errorf("内置数据不允许删除(loaded_from=%q)[code=%d]", pm.LoadedFrom, global.ErrCodeParamModelBuiltinNotDeletable))
+		return
+	}
+
 	// 2. per-filename 互斥锁(Upload / Reload 共用)
 	unlock := h.acquireFileLock(filepath.Base(pm.LoadedFrom))
 	defer unlock()

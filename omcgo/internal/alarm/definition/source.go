@@ -60,9 +60,10 @@ func ClassifySource(loadedFrom string) Source {
 // IsDeletable 是 DELETE /alarm-definitions/files/{path} 端点与前端 deletable 字段的
 // 唯一判定函数。
 //
-// 当前规则(告警库 XML 管理重构,用户已拍板):取消 builtin/custom 区分,所有 XML 文件
-// 一律可删(上传直接写进 builtin 目录,接受升级丢失)。保留参数签名与 ClassifySource
-// 的来源分类能力,仅删除"内置不可删"的限制。
+// 当前规则(2026-06-04 用户决策:内置数据不可删除):仅 custom 来源可删,
+// builtin(当前目录 XML 加载的内置数据)与 unknown 一律不可删。
+// ⚠️ 注:2026-06-03 起上传直接写 builtin 目录,故上传文件也判为 builtin →
+// 同样不可删(只能重新上传同名覆盖)。若需"上传可删、出厂锁定",应把上传分流到 custom 目录。
 func IsDeletable(loadedFrom string) bool {
-	return true
+	return ClassifySource(loadedFrom) == SourceCustom
 }
