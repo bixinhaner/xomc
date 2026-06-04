@@ -98,10 +98,14 @@ func (a *Aggregator) AggregateCounters(ctx context.Context, source, target strin
 	return int(tag.RowsAffected()), nil
 }
 
-// AggregateKPIs 在 target 表内做"二阶段"KPI 聚合：
-//  1. SELECT 出 [w.Start, w.End) 桶内 (device_oui, device_sn) DISTINCT 设备
-//  2. 对每个设备：KPIRouter.LookupByDevice → KPI 列表
-//  3. 对每个 KPI：从 target 表拉公式依赖的 counter 值 → expr.Evaluate → INSERT KPI 行
+// AggregateKPIs 在 target 表内做"二阶段"KPI 聚合（T-B 多粒度：按小区/PLMN 算）：
+//  1. SELECT 出 [w.Start, w.End) 桶内 (device_oui, device_sn, object_ldn) DISTINCT 实体——
+//     每个 object_ldn（基础小区 / 各 PLMN / 设备级空串）各成一个独立 KPI 实体
+//  2. 对每个设备：KPIRouter.LookupByDevice → KPI 列表（同设备多实体共用一次路由查询）
+//  3. 对每个实体：按本 object_ldn 精确取计数器，对 PLMN 实体做跨层级配对
+//     （合并同 cellID 基础小区行的小区级计数器）→ 自身层级门槛过滤（KPI 公式须引用本实体
+//     自身行至少一个计数器，纯小区级 KPI 因此不泄漏到 PLMN 行）→ expr.Evaluate →
+//     INSERT 带实际 object_ldn 的 KPI 行
 //
 // 注意：本函数假设 AggregateCounters 已写入对应桶的 counter 行（否则 KPI 拿不到入参）。
 // 单 cron runner 内调用顺序：AggregateCounters → AggregateKPIs。
@@ -111,39 +115,67 @@ func (a *Aggregator) AggregateKPIs(ctx context.Context, target string, w WindowS
 	if a.kpiRouter == nil {
 		return 0, nil
 	}
-	devices, err := a.listDevicesInBucket(ctx, target, w)
+	entities, err := a.listEntitiesInBucket(ctx, target, w)
 	if err != nil {
-		return 0, fmt.Errorf("aggregator.AggregateKPIs list devices: %w", err)
+		return 0, fmt.Errorf("aggregator.AggregateKPIs list entities: %w", err)
 	}
-	if len(devices) == 0 {
+	if len(entities) == 0 {
 		return 0, nil
 	}
 
+	// 同设备的计数器（全 object_ldn 行）与 KPI 路由各取一次，跨该设备的多个小区/PLMN 实体复用。
+	type devCache struct {
+		route       *router.KPIRoute
+		byObjectLdn map[string]map[string]float64 // object_ldn → metric_path → value
+		loaded      bool
+		skip        bool
+	}
+	caches := map[deviceKey]*devCache{}
+
 	total := 0
-	for _, dev := range devices {
-		route, err := a.kpiRouter.LookupByDevice(ctx, dev.sn)
-		if err != nil {
-			// 单设备失败不阻塞整体（orphan / 元数据残缺都是稳定状态，记 WARN 继续）。
-			a.logger.Warn("kpi route lookup failed; skip device",
-				zap.String("device_oui", dev.oui), zap.String("device_sn", dev.sn),
-				zap.Error(err))
+	for _, ent := range entities {
+		dk := deviceKey{ent.oui, ent.sn}
+		c := caches[dk]
+		if c == nil {
+			c = &devCache{}
+			caches[dk] = c
+			route, err := a.kpiRouter.LookupByDevice(ctx, ent.sn)
+			if err != nil {
+				// 单设备失败不阻塞整体（orphan / 元数据残缺都是稳定状态，记 WARN 继续）。
+				a.logger.Warn("kpi route lookup failed; skip device",
+					zap.String("device_oui", ent.oui), zap.String("device_sn", ent.sn),
+					zap.Error(err))
+				c.skip = true
+			} else if route == nil || len(route.KPIs) == 0 {
+				c.skip = true
+			} else {
+				c.route = route
+				byLdn, err := a.loadCountersByObjectLdn(ctx, target, ent.oui, ent.sn, w)
+				if err != nil {
+					a.logger.Warn("load counters failed; skip device",
+						zap.String("device_oui", ent.oui), zap.String("device_sn", ent.sn),
+						zap.Error(err))
+					c.skip = true
+				} else {
+					c.byObjectLdn = byLdn
+					c.loaded = true
+				}
+			}
+		}
+		if c.skip || !c.loaded {
 			continue
 		}
-		if route == nil || len(route.KPIs) == 0 {
-			continue
-		}
-		counterValues, err := a.loadCountersForDevice(ctx, target, dev.oui, dev.sn, w)
+
+		counters := countersForEntity(c.byObjectLdn, ent.objectLdn)
+		// 自身层级门槛：实体本行（未经跨层级合并）的计数器集合。
+		// 仅当 KPI 公式依赖与该集合有交集时才在本实体落库——纯小区级 KPI 不引用任何 PLMN
+		// 自身计数 → 在 PLMN 实体门槛不过 → 不落（修掉「device 级 KPI 泄漏到 PLMN 行」）。
+		ownSet := c.byObjectLdn[ent.objectLdn]
+		written, err := a.evalAndInsertKPIs(ctx, target, ent, w, c.route.KPIs, counters, ownSet)
 		if err != nil {
-			a.logger.Warn("load counters failed; skip device",
-				zap.String("device_oui", dev.oui), zap.String("device_sn", dev.sn),
-				zap.Error(err))
-			continue
-		}
-		written, err := a.evalAndInsertKPIs(ctx, target, dev, w, route.KPIs, counterValues)
-		if err != nil {
-			a.logger.Warn("eval/insert kpis failed; skip device",
-				zap.String("device_oui", dev.oui), zap.String("device_sn", dev.sn),
-				zap.Error(err))
+			a.logger.Warn("eval/insert kpis failed; skip entity",
+				zap.String("device_oui", ent.oui), zap.String("device_sn", ent.sn),
+				zap.String("object_ldn", ent.objectLdn), zap.Error(err))
 			continue
 		}
 		total += written
@@ -155,54 +187,127 @@ func (a *Aggregator) AggregateKPIs(ctx context.Context, target string, w WindowS
 
 type deviceKey struct{ oui, sn string }
 
-func (a *Aggregator) listDevicesInBucket(ctx context.Context, target string, w WindowSpec) ([]deviceKey, error) {
-	sql, args := buildListDevicesInBucketSQL(target, w)
+// entityKey 是 T-B KPI 聚合的最小实体粒度：设备 + 小区/PLMN（object_ldn）。
+// object_ldn=="" 即设备级实体（与 T-A 前行为一致，KPI 行 object_ldn 仍写空串）。
+type entityKey struct{ oui, sn, objectLdn string }
+
+func (a *Aggregator) listEntitiesInBucket(ctx context.Context, target string, w WindowSpec) ([]entityKey, error) {
+	sql, args := buildListEntitiesInBucketSQL(target, w)
 	rows, err := a.db.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []deviceKey
+	var out []entityKey
 	for rows.Next() {
-		var d deviceKey
-		if err := rows.Scan(&d.oui, &d.sn); err != nil {
+		var e entityKey
+		if err := rows.Scan(&e.oui, &e.sn, &e.objectLdn); err != nil {
 			return nil, err
 		}
-		out = append(out, d)
+		out = append(out, e)
 	}
 	return out, rows.Err()
 }
 
-func (a *Aggregator) loadCountersForDevice(ctx context.Context, target, oui, sn string, w WindowSpec) (map[string]float64, error) {
-	sql, args := buildLoadCountersForDeviceSQL(target, oui, sn, w)
+// loadCountersByObjectLdn 取某设备本桶各 object_ldn 行的 counter 值，
+// 按 object_ldn 分层返回 object_ldn → metric_path → value（不再折回设备级）。
+//
+// T-A 后 target 表每 metric_path 按 object_ldn 分多行；T-B 按实体取本行计数器，
+// 故这里以 (object_ldn, metric_path) 为粒度精确带出，跨层级配对在 countersForEntity 完成。
+func (a *Aggregator) loadCountersByObjectLdn(ctx context.Context, target, oui, sn string, w WindowSpec) (map[string]map[string]float64, error) {
+	sql, args := buildLoadCountersByObjectLdnSQL(target, oui, sn, w)
 	rows, err := a.db.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := make(map[string]float64)
+	out := make(map[string]map[string]float64)
 	for rows.Next() {
-		var name string
+		var objectLdn, name string
 		var val float64
-		if err := rows.Scan(&name, &val); err != nil {
+		if err := rows.Scan(&objectLdn, &name, &val); err != nil {
 			return nil, err
 		}
-		out[name] = val
+		m := out[objectLdn]
+		if m == nil {
+			m = make(map[string]float64)
+			out[objectLdn] = m
+		}
+		m[name] = val
 	}
 	return out, rows.Err()
+}
+
+// countersForEntity 组装某实体（object_ldn）算 KPI 的入参：
+//   - 设备级实体（object_ldn==""）：取空串行的计数器（无配对）。
+//   - 基础小区实体（Cellid=N，无 PLMN）：取本行小区级计数器（无需配 PLMN）。
+//   - PLMN 实体（Cellid=N,PLMN=M）：取本 PLMN 行的 PLMN 级计数器
+//     ∪ 同 cellID=N 基础小区行的小区级计数器（跨层级配对）。
+//
+// 两类计数器 metric_path 互斥（真机实测重叠 0），合并不撞键；防御上让实体自身的值优先。
+// NR/空小区实体（cellID 提取为空）不 panic：plmn=="" 时按基础/设备级处理，仅返回本行计数器。
+func countersForEntity(byObjectLdn map[string]map[string]float64, objectLdn string) map[string]float64 {
+	out := make(map[string]float64)
+
+	cellID, plmn := metrics.ParseObjectLDN(objectLdn)
+	// PLMN 实体先铺基础小区行的小区级计数器（再被本行覆盖，确保自身优先）。
+	if plmn != "" && cellID != "" {
+		for baseLdn, vals := range byObjectLdn {
+			bCell, bPlmn := metrics.ParseObjectLDN(baseLdn)
+			if bPlmn == "" && bCell == cellID {
+				for k, v := range vals {
+					out[k] = v
+				}
+			}
+		}
+	}
+	// 本实体自身行计数器（优先级最高）。
+	for k, v := range byObjectLdn[objectLdn] {
+		out[k] = v
+	}
+	return out
+}
+
+// kpiDependsOnOwnCounters 判定一个 KPI 是否「引用了该实体自身层级（本行未经跨层级合并）
+// 的至少一个计数器」——自身层级门槛的判据。
+//
+//   - 用 router.KPIDef.Dependencies（从公式 arithmetic 提取的计数器编号清单，与公式同源）
+//     与实体自身行计数器 ownSet 求交集，非空即门槛过。
+//   - 纯小区级 KPI 在 PLMN 实体：依赖全在基础小区行、不在 PLMN 自身集 → 交集空 → 门槛不过 →
+//     不在 PLMN 落库（跨层级配对的合并仅用于给混合公式补小区级入参，不让纯小区级 KPI 现身 PLMN）。
+//   - 混合公式（同时引用小区级 + PLMN 级）在 PLMN 实体：引用了 PLMN 自身计数 → 门槛过 → 落库，
+//     并经配对补到小区级入参算出正确值。
+//   - 设备级实体（object_ldn=''）ownSet 即空串行计数器，行为不变。
+//   - Dependencies 为空（无法判定层级归属）→ 保守放行，保持原行为不被门槛误杀。
+func kpiDependsOnOwnCounters(k router.KPIDef, ownSet map[string]float64) bool {
+	if len(k.Dependencies) == 0 {
+		return true
+	}
+	for _, dep := range k.Dependencies {
+		if _, ok := ownSet[dep]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *Aggregator) evalAndInsertKPIs(
 	ctx context.Context,
 	target string,
-	dev deviceKey,
+	ent entityKey,
 	w WindowSpec,
 	kpis []router.KPIDef,
 	counters map[string]float64,
+	ownSet map[string]float64,
 ) (int, error) {
 	var rows []kpiRow
 	for _, k := range kpis {
 		if k.Formula == "" {
+			continue
+		}
+		// 自身层级门槛：公式必须引用本实体自身层级至少一个计数器才在此实体落库
+		// （否则纯小区级 KPI 会因跨层级合并的 map 里依赖齐全而泄漏到 PLMN 行）。
+		if !kpiDependsOnOwnCounters(k, ownSet) {
 			continue
 		}
 		f, err := expr.Parse(k.Formula)
@@ -226,7 +331,7 @@ func (a *Aggregator) evalAndInsertKPIs(
 		return 0, nil
 	}
 
-	sql, args := buildKPIInsertSQL(target, dev, w, rows)
+	sql, args := buildKPIInsertSQL(target, ent, w, rows)
 	tag, err := a.db.Exec(ctx, sql, args...)
 	if err != nil {
 		return 0, err
@@ -300,17 +405,19 @@ ON CONFLICT %s DO UPDATE SET
 	return sql, []any{string(w.Granularity), w.Start, w.End, w.Start, w.End}
 }
 
-// buildListDevicesInBucketSQL 构造"列出本桶有计数的设备" SELECT。
+// buildListEntitiesInBucketSQL 构造"列出本桶有计数的实体（设备 + 小区/PLMN）" SELECT。
 //
 // 读的是 target 表（每行即一个已聚合完整桶，桶尾时刻 end_time = w.End），
 // 因此必须**精确命中本桶**（end_time = w.End），而非源表式半开区间扫描。
 // 叠加 time = w.Start（hourly 表 PK 含 time，daily/weekly/monthly 该列恒为桶起点）
 // 既无害又自证锁定到唯一本桶；配合 granularity = $1 唯一定位。
 //
+// T-B：DISTINCT 维加 object_ldn——基础小区 / 各 PLMN / 设备级空串各成一个独立 KPI 实体。
+//
 // 参数顺序：$1=granularity, $2=bucket_end(=w.End), $3=bucket_start(=w.Start)
-func buildListDevicesInBucketSQL(target string, w WindowSpec) (string, []any) {
+func buildListEntitiesInBucketSQL(target string, w WindowSpec) (string, []any) {
 	sql := fmt.Sprintf(`
-SELECT DISTINCT device_oui, device_sn
+SELECT DISTINCT device_oui, device_sn, object_ldn
 FROM %s
 WHERE metric_type = 'counter'
   AND granularity = $1
@@ -319,46 +426,36 @@ WHERE metric_type = 'counter'
 	return sql, []any{string(w.Granularity), w.End, w.Start}
 }
 
-// buildLoadCountersForDeviceSQL 构造"取某设备本桶各 counter 值"（折回设备级）SELECT。
+// buildLoadCountersByObjectLdnSQL 构造"取某设备本桶各 object_ldn 行的 counter 值"SELECT。
 //
-// 与 buildListDevicesInBucketSQL 同理：读 target 表必须精确命中本桶
+// 与 buildListEntitiesInBucketSQL 同理：读 target 表必须精确命中本桶
 // （end_time = w.End），不能用半开区间——否则会命中上一桶（其 end_time = 本桶 w.Start）。
 //
-// 【T-A 关键】：T-A 后 target 表每个 metric_path 按 object_ldn 分多行（小区/PLMN 物化），
-// 而 KPI 当前仍是"设备级、不分小区"（per-cell KPI 是 T-B）。因此这里必须把同 metric_path
-// 的多个 object_ldn 行**按 statis_type 路由聚合折回设备级单值**（与 buildCountersSQL 同口径：
-// sum→SUM / avg→AVG / max→MAX / min→MIN），否则多小区设备装载进 map 会互相覆盖、
-// 且无 ORDER BY 结果非确定，KPI 入参会变成"某个随机小区的计数值"而非设备总量。
-//
-// 同 metric_path 下 statis_type 在物化时已固定一致（buildCountersSQL 把 statis_type 进了
-// GROUP BY 但 KPI 取数不分 statis_type），故用 MIN(statis_type) 取该 metric_path 的代表
-// statis_type 路由聚合分支即可。GROUP BY metric_path 保证每指标一行折回设备级。
+// 【T-B 关键】：拆掉 T-A 的"折回设备级"层——不再 GROUP BY metric_path 把多小区相加，
+// 而是按 (object_ldn, metric_path) 精确带出每行计数器（T-A 后该表每对组合恰一行），
+// 交由 countersForEntity 按实体取本行 + 对 PLMN 实体做跨层级配对。
+// 这从根上杜绝了"把基础小区 + 各 PLMN 计数相加折回设备级"导致的跨小区串味/重复叠加。
 //
 // 参数顺序：$1=oui, $2=sn, $3=granularity, $4=bucket_end(=w.End), $5=bucket_start(=w.Start)
-func buildLoadCountersForDeviceSQL(target, oui, sn string, w WindowSpec) (string, []any) {
+func buildLoadCountersByObjectLdnSQL(target, oui, sn string, w WindowSpec) (string, []any) {
 	sql := fmt.Sprintf(`
-SELECT metric_path,
-    CASE MIN(statis_type)
-        WHEN 'sum' THEN SUM(metric_value)
-        WHEN 'avg' THEN AVG(metric_value)
-        WHEN 'max' THEN MAX(metric_value)
-        WHEN 'min' THEN MIN(metric_value)
-        ELSE SUM(metric_value)
-    END
+SELECT object_ldn, metric_path, metric_value
 FROM %s
 WHERE device_oui = $1
   AND device_sn  = $2
   AND metric_type = 'counter'
   AND granularity = $3
   AND end_time = $4
-  AND time = $5
-GROUP BY metric_path`, target)
+  AND time = $5`, target)
 	return sql, []any{oui, sn, string(w.Granularity), w.End, w.Start}
 }
 
 // buildKPIInsertSQL 给 target 表构造批量 KPI INSERT。
 // 与 buildCountersSQL 不同，KPI 行是 Go 端 evaluate 后逐行插入；这里复用同样的桶时间列设计。
-func buildKPIInsertSQL(target string, dev deviceKey, w WindowSpec, rows []kpiRow) (string, []any) {
+//
+// T-B：object_ldn 由硬写 '' 改为写实体实际 object_ldn（设备级实体 object_ldn=='' 仍写 ''），
+// 让 KPI 按小区/PLMN 落库分行下钻。复用 T-A 的唯一键（已含 object_ldn），同桶重跑幂等覆盖。
+func buildKPIInsertSQL(target string, ent entityKey, w WindowSpec, rows []kpiRow) (string, []any) {
 	conflictTarget := conflictTargetForTable(target)
 	withID := targetHasIDColumn(target)
 
@@ -378,18 +475,19 @@ func buildKPIInsertSQL(target string, dev deviceKey, w WindowSpec, rows []kpiRow
 	}
 
 	for _, r := range rows {
-		oui := add(dev.oui)
-		sn := add(dev.sn)
+		oui := add(ent.oui)
+		sn := add(ent.sn)
 		path := add(r.path)
 		val := add(r.value)
 		stype := add(r.stype)
 		gran := add(string(w.Granularity))
 		bktStart := add(w.Start)
 		bktEnd := add(w.End)
-		// object_ldn 收紧为 NOT NULL DEFAULT '' 后不能再写 NULL（否则违反约束）；
-		// KPI 当前仍是"设备级、不分小区"行为（per-cell KPI 是 T-B），故写空串保持现状。
-		core := fmt.Sprintf("(%s, %s, %s, 'kpi', %s, %s, %s, %s, %s, %s, NOW(), '', NULL::jsonb)",
-			oui, sn, path, val, stype, gran, bktStart, bktStart, bktEnd)
+		objectLdn := add(ent.objectLdn)
+		// object_ldn 收紧为 NOT NULL DEFAULT '' 后不能再写 NULL；写实体实际 object_ldn
+		// （设备级实体为空串），KPI 按小区/PLMN 分行落库。
+		core := fmt.Sprintf("(%s, %s, %s, 'kpi', %s, %s, %s, %s, %s, %s, NOW(), %s, NULL::jsonb)",
+			oui, sn, path, val, stype, gran, bktStart, bktStart, bktEnd, objectLdn)
 		if withID {
 			core = "(gen_random_uuid(), " + core[1:]
 		}

@@ -2,12 +2,12 @@ package pm
 
 import (
 	"net/http"
-	"regexp"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/response"
+	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
 
 // T-0193 自选设备下钻到小区/PLMN —— 列设备小区/PLMN 只读接口。
@@ -29,21 +29,10 @@ type objectItem struct {
 	PLMN      string `json:"plmn,omitempty"`    // 解析出的 PLMN（友好名用）
 }
 
-// 解析 object_ldn（形如 'Cellid=111172245,PLMN=46068'）的 Cellid / PLMN 段。
-var (
-	cellIDRe = regexp.MustCompile(`Cellid=([0-9]+)`)
-	plmnRe   = regexp.MustCompile(`PLMN=([0-9]+)`)
-)
-
 // parseObjectLDN 从原始 object_ldn 拆出 cell_id / plmn（缺段则留空）。
+// 委托给 metrics.ParseObjectLDN 单一真值源（与 aggregator KPI 跨层级配对同口径），不另造解析。
 func parseObjectLDN(ldn string) (cellID, plmn string) {
-	if m := cellIDRe.FindStringSubmatch(ldn); len(m) == 2 {
-		cellID = m[1]
-	}
-	if m := plmnRe.FindStringSubmatch(ldn); len(m) == 2 {
-		plmn = m[1]
-	}
-	return cellID, plmn
+	return metrics.ParseObjectLDN(ldn)
 }
 
 // buildObjectsQuery 纯函数：拼"列设备小区/PLMN"查询 SQL + 占位参数。

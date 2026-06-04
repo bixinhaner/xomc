@@ -108,9 +108,10 @@ func Test_conflictTargetForTable_DeviceTablesIncludeObjectLdn(t *testing.T) {
 	}
 }
 
-// buildKPIInsertSQL：object_ldn 必须写空串 '' 而非 NULL（object_ldn 收紧 NOT NULL 后防约束崩）。
+// buildKPIInsertSQL（T-B）：object_ldn 由硬写 '' 改为写实体实际 object_ldn（参数化 $N），
+// 设备级实体（object_ldn==""）仍落空串；object_ldn 绝不写 NULL（NOT NULL 约束）。
 // 覆盖 hourly（带 id 列）与 daily（不带 id）两种目标表。
-func Test_buildKPIInsertSQL_ObjectLdnIsEmptyStringNotNull(t *testing.T) {
+func Test_buildKPIInsertSQL_WritesEntityObjectLdn(t *testing.T) {
 	w := WindowSpec{
 		Granularity: metrics.GranularityHourly,
 		Start:       time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC),
@@ -118,29 +119,33 @@ func Test_buildKPIInsertSQL_ObjectLdnIsEmptyStringNotNull(t *testing.T) {
 	}
 	rows := []kpiRow{{path: "K1", value: 0.8, stype: "pct"}}
 
-	// hourly：带 id 列，VALUES 以 gen_random_uuid() 开头
-	hourlySQL, _ := buildKPIInsertSQL("pm_metrics_hourly", deviceKey{oui: "A", sn: "S1"}, w, rows)
-	assert.Contains(t, hourlySQL, "NOW(), '', NULL::jsonb)",
-		"hourly KPI 行 object_ldn 必须是空串而非 NULL")
-	assert.NotContains(t, hourlySQL, "NOW(), NULL, NULL::jsonb)",
-		"不应再有 object_ldn=NULL 的旧写法")
-	assert.Contains(t, hourlySQL, "gen_random_uuid()")
-	assert.Contains(t, hourlySQL,
+	// PLMN 实体：object_ldn 必须作为实参写入（不再硬写空串字面量）。
+	plmnSQL, plmnArgs := buildKPIInsertSQL("pm_metrics_hourly",
+		entityKey{oui: "A", sn: "S1", objectLdn: "Cellid=111172245,PLMN=46068"}, w, rows)
+	assert.Contains(t, plmnArgs, "Cellid=111172245,PLMN=46068",
+		"KPI 行 object_ldn 必须写实体实际小区/PLMN")
+	assert.NotContains(t, plmnSQL, "NOW(), '', NULL::jsonb)",
+		"object_ldn 已参数化，不应再是硬写空串字面量")
+	assert.NotContains(t, plmnSQL, "NOW(), NULL, NULL::jsonb)", "object_ldn 绝不写 NULL")
+	assert.Contains(t, plmnSQL, "gen_random_uuid()")
+	assert.Contains(t, plmnSQL,
 		"ON CONFLICT (device_oui, device_sn, metric_path, granularity, end_time, time, object_ldn)")
 
-	// daily：不带 id 列
+	// 设备级实体（object_ldn==""）：实参仍是空串，落库 object_ldn=''（保持 T-A 前行为）。
 	dailyW := WindowSpec{
 		Granularity: metrics.GranularityDaily,
 		Start:       time.Date(2026, 5, 22, 0, 0, 0, 0, time.UTC),
 		End:         time.Date(2026, 5, 23, 0, 0, 0, 0, time.UTC),
 	}
-	dailySQL, _ := buildKPIInsertSQL("pm_metrics_daily", deviceKey{oui: "A", sn: "S1"}, dailyW, rows)
-	assert.Contains(t, dailySQL, "NOW(), '', NULL::jsonb)",
-		"daily KPI 行 object_ldn 必须是空串而非 NULL")
-	assert.NotContains(t, dailySQL, "NOW(), NULL, NULL::jsonb)")
-	assert.NotContains(t, dailySQL, "gen_random_uuid()", "daily 无 id 列")
-	assert.Contains(t, dailySQL,
+	devSQL, devArgs := buildKPIInsertSQL("pm_metrics_daily",
+		entityKey{oui: "A", sn: "S1", objectLdn: ""}, dailyW, rows)
+	assert.Contains(t, devArgs, "", "设备级实体 object_ldn 实参为空串")
+	assert.NotContains(t, devSQL, "NOW(), NULL, NULL::jsonb)")
+	assert.NotContains(t, devSQL, "gen_random_uuid()", "daily 无 id 列")
+	assert.Contains(t, devSQL,
 		"ON CONFLICT (device_oui, device_sn, metric_path, granularity, end_time, object_ldn)")
+	// daily 每行 9 个参数（含 object_ldn 实参）
+	assert.Len(t, devArgs, 9)
 }
 
 // ---------------------------------------------------------------------------
@@ -310,12 +315,12 @@ func Test_AggregateKPIs_EvaluatesFormulaAndInserts(t *testing.T) {
 		queryFn: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
 			queryCalls++
 			switch queryCalls {
-			case 1: // listDevicesInBucket
-				return &fakeRows{rows: [][]any{{"A", "S1"}}}, nil
-			case 2: // loadCountersForDevice
+			case 1: // listEntitiesInBucket: (oui, sn, object_ldn) —— 设备级实体（空串）
+				return &fakeRows{rows: [][]any{{"A", "S1", ""}}}, nil
+			case 2: // loadCountersByObjectLdn: (object_ldn, metric_path, value)
 				return &fakeRows{rows: [][]any{
-					{"numerator", float64(80)},
-					{"denominator", float64(100)},
+					{"", "numerator", float64(80)},
+					{"", "denominator", float64(100)},
 				}}, nil
 			}
 			return nil, errors.New("unexpected Query")
@@ -332,12 +337,14 @@ func Test_AggregateKPIs_EvaluatesFormulaAndInserts(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, n)
 	// 求值结果 0.8 应出现在 Exec args 中（KPI 行 metric_value 位）
-	require.Len(t, db.execArgs, 8) // oui, sn, path, val, stype, gran, bktStart, bktEnd
+	require.Len(t, db.execArgs, 9) // oui, sn, path, val, stype, gran, bktStart, bktEnd, object_ldn
 	// metric_path 落库用 K 编号(IndicatorID)，不再用显示名
 	assert.Equal(t, "K1", db.execArgs[2])
 	assert.Equal(t, float64(0.8), db.execArgs[3])
 	assert.Equal(t, "pct", db.execArgs[4])
 	assert.Equal(t, "hourly", db.execArgs[5])
+	// 设备级实体 object_ldn 落空串
+	assert.Equal(t, "", db.execArgs[8])
 }
 
 // 同显示名、不同编号的两个 KPI（device 级 + plmn 级变体）在同一桶内，
@@ -371,12 +378,12 @@ func Test_AggregateKPIs_SameDisplayNameUsesDistinctIndicatorID(t *testing.T) {
 		queryFn: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
 			queryCalls++
 			switch queryCalls {
-			case 1:
-				return &fakeRows{rows: [][]any{{"A", "S1"}}}, nil
-			case 2:
+			case 1: // listEntitiesInBucket: (oui, sn, object_ldn)
+				return &fakeRows{rows: [][]any{{"A", "S1", ""}}}, nil
+			case 2: // loadCountersByObjectLdn: (object_ldn, metric_path, value)
 				return &fakeRows{rows: [][]any{
-					{"numerator", float64(95)},
-					{"denominator", float64(100)},
+					{"", "numerator", float64(95)},
+					{"", "denominator", float64(100)},
 				}}, nil
 			}
 			return nil, errors.New("unexpected Query")
@@ -391,11 +398,11 @@ func Test_AggregateKPIs_SameDisplayNameUsesDistinctIndicatorID(t *testing.T) {
 	}
 	_, err := a.AggregateKPIs(context.Background(), "pm_metrics_hourly", w)
 	require.NoError(t, err)
-	// 两行各 8 个参数；两个 path 位（idx 2、idx 10）必须是不同编号，不能都是同一显示名
-	require.Len(t, db.execArgs, 16)
+	// 两行各 9 个参数；两个 path 位（idx 2、idx 11）必须是不同编号，不能都是同一显示名
+	require.Len(t, db.execArgs, 18)
 	assert.Equal(t, "K900010029", db.execArgs[2])
-	assert.Equal(t, "K900010059", db.execArgs[10])
-	assert.NotEqual(t, db.execArgs[2], db.execArgs[10],
+	assert.Equal(t, "K900010059", db.execArgs[11])
+	assert.NotEqual(t, db.execArgs[2], db.execArgs[11],
 		"两个同显示名 KPI 的 metric_path 必须按编号区分，否则撞 ON CONFLICT 唯一键")
 }
 
@@ -403,20 +410,22 @@ func Test_AggregateKPIs_SameDisplayNameUsesDistinctIndicatorID(t *testing.T) {
 // 路子 A：两个读本桶 counter 的 helper SQL 谓词断言（精确命中本桶，不再半开区间）
 // ---------------------------------------------------------------------------
 
-// listDevicesInBucket / loadCountersForDevice 读的是 target 表（每行即完整桶，
+// listEntitiesInBucket / loadCountersByObjectLdn 读的是 target 表（每行即完整桶，
 // end_time=w.End）。修复前用源表式半开区间 end_time>=w.Start AND end_time<w.End，
 // 会把本桶行（end_time=w.End）排除、反而命中上一桶（end_time=本桶 w.Start）。
 // 修复后必须精确命中本桶：end_time = w.End（叠加 time = w.Start 自证），
 // 且 args 携带 w.End（不再是半开的 w.Start/w.End 对）。
 
-func Test_buildListDevicesInBucketSQL_PreciseBucketMatch_Hourly(t *testing.T) {
+func Test_buildListEntitiesInBucketSQL_PreciseBucketMatch_Hourly(t *testing.T) {
 	w := WindowSpec{
 		Granularity: metrics.GranularityHourly,
 		Start:       time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC),
 		End:         time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),
 	}
-	sql, args := buildListDevicesInBucketSQL("pm_metrics_hourly", w)
+	sql, args := buildListEntitiesInBucketSQL("pm_metrics_hourly", w)
 
+	// T-B：实体枚举含 object_ldn——每个小区/PLMN 各成一独立实体
+	assert.Contains(t, sql, "SELECT DISTINCT device_oui, device_sn, object_ldn")
 	// 精确命中本桶：end_time = $N（不再是半开 >= ... AND < ...）
 	assert.Contains(t, sql, "end_time = $2")
 	assert.Contains(t, sql, "time = $3")
@@ -427,7 +436,7 @@ func Test_buildListDevicesInBucketSQL_PreciseBucketMatch_Hourly(t *testing.T) {
 	assert.Equal(t, []any{"hourly", w.End, w.Start}, args)
 }
 
-func Test_buildListDevicesInBucketSQL_PreciseBucketMatch_AllGranularities(t *testing.T) {
+func Test_buildListEntitiesInBucketSQL_PreciseBucketMatch_AllGranularities(t *testing.T) {
 	cases := []struct {
 		name        string
 		granularity metrics.Granularity
@@ -459,7 +468,8 @@ func Test_buildListDevicesInBucketSQL_PreciseBucketMatch_AllGranularities(t *tes
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			w := WindowSpec{Granularity: c.granularity, Start: c.start, End: c.end}
-			sql, args := buildListDevicesInBucketSQL(c.target, w)
+			sql, args := buildListEntitiesInBucketSQL(c.target, w)
+			assert.Contains(t, sql, "SELECT DISTINCT device_oui, device_sn, object_ldn")
 			assert.Contains(t, sql, "end_time = $2")
 			assert.NotContains(t, sql, "end_time >=")
 			assert.NotContains(t, sql, "end_time <")
@@ -468,14 +478,18 @@ func Test_buildListDevicesInBucketSQL_PreciseBucketMatch_AllGranularities(t *tes
 	}
 }
 
-func Test_buildLoadCountersForDeviceSQL_PreciseBucketMatch_Hourly(t *testing.T) {
+func Test_buildLoadCountersByObjectLdnSQL_PreciseBucketMatch_Hourly(t *testing.T) {
 	w := WindowSpec{
 		Granularity: metrics.GranularityHourly,
 		Start:       time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC),
 		End:         time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),
 	}
-	sql, args := buildLoadCountersForDeviceSQL("pm_metrics_hourly", "A", "S1", w)
+	sql, args := buildLoadCountersByObjectLdnSQL("pm_metrics_hourly", "A", "S1", w)
 
+	// T-B：按 (object_ldn, metric_path) 精确带出每行计数器，不再折回设备级（无 GROUP BY metric_path）
+	assert.Contains(t, sql, "SELECT object_ldn, metric_path, metric_value")
+	assert.NotContains(t, sql, "GROUP BY metric_path", "T-B 拆掉折回层，不再按 metric_path 聚合")
+	assert.NotContains(t, sql, "CASE MIN(statis_type)", "T-B 不再折回设备级")
 	assert.Contains(t, sql, "end_time = $4")
 	assert.Contains(t, sql, "time = $5")
 	assert.NotContains(t, sql, "end_time >=", "不应再有半开下界")
@@ -485,14 +499,15 @@ func Test_buildLoadCountersForDeviceSQL_PreciseBucketMatch_Hourly(t *testing.T) 
 	assert.Equal(t, []any{"A", "S1", "hourly", w.End, w.Start}, args)
 }
 
-func Test_buildLoadCountersForDeviceSQL_PreciseBucketMatch_Daily(t *testing.T) {
+func Test_buildLoadCountersByObjectLdnSQL_PreciseBucketMatch_Daily(t *testing.T) {
 	w := WindowSpec{
 		Granularity: metrics.GranularityDaily,
 		Start:       time.Date(2026, 5, 22, 0, 0, 0, 0, time.UTC),
 		End:         time.Date(2026, 5, 23, 0, 0, 0, 0, time.UTC),
 	}
-	sql, args := buildLoadCountersForDeviceSQL("pm_metrics_daily", "A", "S1", w)
+	sql, args := buildLoadCountersByObjectLdnSQL("pm_metrics_daily", "A", "S1", w)
 
+	assert.Contains(t, sql, "SELECT object_ldn, metric_path, metric_value")
 	assert.Contains(t, sql, "end_time = $4")
 	assert.NotContains(t, sql, "end_time >=")
 	assert.NotContains(t, sql, "end_time <")
@@ -501,55 +516,119 @@ func Test_buildLoadCountersForDeviceSQL_PreciseBucketMatch_Daily(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// T-A B1：装载计数器必须按 metric_path 折回设备级（多 object_ldn 行聚合，不被覆盖）
+// T-B：countersForEntity 跨层级配对——PLMN 实体配同小区基础行的小区级计数器
 // ---------------------------------------------------------------------------
 
-// buildLoadCountersForDeviceSQL 在 T-A 后必须 GROUP BY metric_path 并按 statis_type 路由聚合，
-// 否则同 metric_path 的多个 object_ldn（小区/PLMN）行装载进 map 会互相覆盖、结果非确定。
-func Test_buildLoadCountersForDeviceSQL_AggregatesByMetricPath(t *testing.T) {
-	w := WindowSpec{
-		Granularity: metrics.GranularityHourly,
-		Start:       time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC),
-		End:         time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),
+// 基础小区实体只取本行小区级计数器（无需配 PLMN）。
+func Test_countersForEntity_BaseCell_OwnCounters(t *testing.T) {
+	byLdn := map[string]map[string]float64{
+		"Cellid=1": {"cellNum": 30, "cellDen": 60},
+		"Cellid=2": {"cellNum": 50, "cellDen": 40},
 	}
-	sql, _ := buildLoadCountersForDeviceSQL("pm_metrics_hourly", "A", "S1", w)
-
-	assert.Contains(t, sql, "GROUP BY metric_path", "必须按 metric_path 折回设备级")
-	assert.Contains(t, sql, "CASE MIN(statis_type)", "按 statis_type 路由聚合分支")
-	assert.Contains(t, sql, "WHEN 'sum' THEN SUM(metric_value)")
-	assert.Contains(t, sql, "WHEN 'avg' THEN AVG(metric_value)")
-	assert.Contains(t, sql, "WHEN 'max' THEN MAX(metric_value)")
-	assert.Contains(t, sql, "WHEN 'min' THEN MIN(metric_value)")
-	// 不再是裸 SELECT metric_value（会被 map 覆盖）
-	assert.NotContains(t, sql, "SELECT metric_path, metric_value")
+	got := countersForEntity(byLdn, "Cellid=1")
+	assert.Equal(t, map[string]float64{"cellNum": 30, "cellDen": 60}, got,
+		"基础小区实体只取本小区计数器，不混入别的小区")
 }
 
+// 验收 #2：两个不同小区互不串味——各取本小区计数。
+func Test_countersForEntity_TwoCells_NoCrossContamination(t *testing.T) {
+	byLdn := map[string]map[string]float64{
+		"Cellid=1": {"num": 30, "den": 60},
+		"Cellid=2": {"num": 50, "den": 40},
+	}
+	c1 := countersForEntity(byLdn, "Cellid=1")
+	c2 := countersForEntity(byLdn, "Cellid=2")
+	assert.Equal(t, float64(30), c1["num"])
+	assert.Equal(t, float64(60), c1["den"])
+	assert.Equal(t, float64(50), c2["num"])
+	assert.Equal(t, float64(40), c2["den"])
+}
+
+// 验收 #3：PLMN 实体跨层级配对——本 PLMN 行的 PLMN 级计数 ∪ 同小区基础行的小区级计数。
+func Test_countersForEntity_PLMN_CrossLayerPairing(t *testing.T) {
+	byLdn := map[string]map[string]float64{
+		// 基础小区行：只上报小区级计数器
+		"Cellid=111172245":            {"cellLevelCnt": 1000},
+		// 两个 PLMN 行：各只上报 PLMN 级计数器
+		"Cellid=111172245,PLMN=00101": {"plmnLevelCnt": 200},
+		"Cellid=111172245,PLMN=46068": {"plmnLevelCnt": 350},
+	}
+	// PLMN=00101 实体：拿到本 PLMN 级 + 基础小区的小区级
+	p1 := countersForEntity(byLdn, "Cellid=111172245,PLMN=00101")
+	assert.Equal(t, float64(200), p1["plmnLevelCnt"], "本 PLMN 级计数")
+	assert.Equal(t, float64(1000), p1["cellLevelCnt"], "跨层级配上基础小区的小区级计数")
+
+	// PLMN=46068 实体：配同一基础小区，各自 PLMN 级值不串
+	p2 := countersForEntity(byLdn, "Cellid=111172245,PLMN=46068")
+	assert.Equal(t, float64(350), p2["plmnLevelCnt"])
+	assert.Equal(t, float64(1000), p2["cellLevelCnt"])
+
+	// 基础小区实体：只有小区级，不带 PLMN 级
+	base := countersForEntity(byLdn, "Cellid=111172245")
+	assert.Equal(t, float64(1000), base["cellLevelCnt"])
+	_, hasPlmn := base["plmnLevelCnt"]
+	assert.False(t, hasPlmn, "基础小区实体不应混入 PLMN 级计数器")
+}
+
+// 自身行的值优先于配上来的小区级值（防御：两类 metric_path 互斥，撞键时实体自身胜出）。
+func Test_countersForEntity_OwnValueWinsOnKeyCollision(t *testing.T) {
+	byLdn := map[string]map[string]float64{
+		"Cellid=5":          {"shared": 100},
+		"Cellid=5,PLMN=001": {"shared": 7},
+	}
+	p := countersForEntity(byLdn, "Cellid=5,PLMN=001")
+	assert.Equal(t, float64(7), p["shared"], "实体自身行的值优先")
+}
+
+// 设备级实体（object_ldn==""）只取空串行计数器，不配对。
+func Test_countersForEntity_DeviceLevel_EmptyLdn(t *testing.T) {
+	byLdn := map[string]map[string]float64{
+		"":         {"a": 1, "b": 2},
+		"Cellid=1": {"c": 9},
+	}
+	got := countersForEntity(byLdn, "")
+	assert.Equal(t, map[string]float64{"a": 1, "b": 2}, got)
+}
+
+// NR/空小区实体（parseObjectLDN 提不出 cellID）不 panic，按本行取数降级。
+func Test_countersForEntity_NonParsableLdn_NoPanic(t *testing.T) {
+	byLdn := map[string]map[string]float64{
+		"NRCellDU=Cell0": {"x": 5},
+	}
+	assert.NotPanics(t, func() {
+		got := countersForEntity(byLdn, "NRCellDU=Cell0")
+		assert.Equal(t, float64(5), got["x"])
+	})
+}
+
+// buildLoadCountersByObjectLdnSQL 的 SQL 形态在上方精确桶匹配测试已覆盖（不再折回设备级）。
+
 // ---------------------------------------------------------------------------
-// T-A B1 行为单测：用"会真做 GROUP BY 聚合"的智能桩证明多小区行折回设备级单值
+// T-B 行为单测：用 object_ldn-aware 智能桩证明 KPI 按小区/PLMN 各算一条、不串味、跨层级配对
 // ---------------------------------------------------------------------------
 
-// cellRow 带 object_ldn / statis_type，供 object_ldn-aware 桩按 metric_path 聚合。
+// cellRow 带 object_ldn，供智能桩按实体（设备 + 小区/PLMN）枚举与取数。
 type cellRow struct {
 	oui, sn   string
 	path      string
 	value     float64
-	statis    string
 	objectLdn string
 	endTime   time.Time
 	timeCol   time.Time
 }
 
-// cellAwareDB 复现 T-A 后 target 表：同 metric_path 多 object_ldn 行，
-// loadCountersForDevice 的 SQL（GROUP BY metric_path + CASE MIN(statis_type) 路由聚合）
-// 在桩里如实执行，证明装载到的是聚合值而非"末行覆盖值"。
+// cellAwareDB 复现 T-B 后 target 表：每 (object_ldn, metric_path) 一行。
+//   - listEntitiesInBucket（3 args）：DISTINCT (oui, sn, object_ldn) 实体
+//   - loadCountersByObjectLdn（5 args）：按本桶返回 (object_ldn, metric_path, value)，不折回
+// 每次 Exec 累积 args，供断言多实体多次插入。
 type cellAwareDB struct {
-	rows    []cellRow
-	execTag pgconn.CommandTag
-	execArg []any
+	rows     []cellRow
+	execTag  pgconn.CommandTag
+	execArgs [][]any
 }
 
 func (db *cellAwareDB) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
-	db.execArg = args
+	db.execArgs = append(db.execArgs, args)
 	return db.execTag, nil
 }
 
@@ -558,91 +637,79 @@ func (db *cellAwareDB) QueryRow(ctx context.Context, sql string, args ...any) pg
 }
 
 func (db *cellAwareDB) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
-	// listDevicesInBucket: args = [granularity, end_time, time]
+	// listEntitiesInBucket: args = [granularity, end_time, time]
 	if len(args) == 3 {
 		want := args[1].(time.Time)
-		seen := map[deviceKey]bool{}
+		seen := map[entityKey]bool{}
 		var out [][]any
 		for _, r := range db.rows {
 			if r.endTime.Equal(want) {
-				k := deviceKey{r.oui, r.sn}
+				k := entityKey{r.oui, r.sn, r.objectLdn}
 				if !seen[k] {
 					seen[k] = true
-					out = append(out, []any{r.oui, r.sn})
+					out = append(out, []any{r.oui, r.sn, r.objectLdn})
 				}
 			}
 		}
 		return &fakeRows{rows: out}, nil
 	}
-	// loadCountersForDevice: args = [oui, sn, granularity, end_time, time]
-	// 如实执行 GROUP BY metric_path + 按 statis_type 路由聚合（sum/avg/max/min）。
+	// loadCountersByObjectLdn: args = [oui, sn, granularity, end_time, time]
+	// 按本桶/本设备返回每 (object_ldn, metric_path) 一行（T-B 不折回设备级）。
 	if len(args) == 5 {
 		oui := args[0].(string)
 		sn := args[1].(string)
 		want := args[3].(time.Time)
-		type acc struct {
-			statis string
-			sum    float64
-			cnt    int
-			max    float64
-			min    float64
-		}
-		agg := map[string]*acc{}
-		for _, r := range db.rows {
-			if r.oui != oui || r.sn != sn || !r.endTime.Equal(want) {
-				continue
-			}
-			a := agg[r.path]
-			if a == nil {
-				a = &acc{statis: r.statis, max: r.value, min: r.value}
-				agg[r.path] = a
-			}
-			if r.statis < a.statis { // 模拟 MIN(statis_type)
-				a.statis = r.statis
-			}
-			a.sum += r.value
-			a.cnt++
-			if r.value > a.max {
-				a.max = r.value
-			}
-			if r.value < a.min {
-				a.min = r.value
-			}
-		}
 		var out [][]any
-		for path, a := range agg {
-			var v float64
-			switch a.statis {
-			case "avg":
-				v = a.sum / float64(a.cnt)
-			case "max":
-				v = a.max
-			case "min":
-				v = a.min
-			default: // sum
-				v = a.sum
+		for _, r := range db.rows {
+			if r.oui == oui && r.sn == sn && r.endTime.Equal(want) {
+				out = append(out, []any{r.objectLdn, r.path, r.value})
 			}
-			out = append(out, []any{path, v})
 		}
 		return &fakeRows{rows: out}, nil
 	}
 	return nil, errors.New("cellAwareDB.Query unexpected args len")
 }
 
-// 同 metric_path 两条 object_ldn 行（sum 口径）→ 装载结果必须是两小区之和，而非末行值。
-func Test_AggregateKPIs_MultiCellCounters_FoldBackToDevice(t *testing.T) {
+// findKPIArgs 从累积的 Exec args 里找出 object_ldn 实参等于 wantLdn 的那次插入（每次 9 参/行）。
+func findKPIArgs(execArgs [][]any, wantLdn string) []any {
+	for _, args := range execArgs {
+		if len(args) == 9 && args[8] == wantLdn {
+			return args
+		}
+	}
+	return nil
+}
+
+// findKPIArgsByPath 在累积的 Exec args 里定位「object_ldn 实参 == wantLdn 且 metric_path == wantPath」
+// 的那一行（每行 9 参：oui,sn,path,val,stype,gran,bktStart,bktEnd,object_ldn）。
+// 当某实体一次 Exec 插入多行 KPI 时（一次 Exec 累 9×N 参），逐行 9 参切片匹配。
+func findKPIArgsByPath(execArgs [][]any, wantLdn, wantPath string) []any {
+	for _, args := range execArgs {
+		for off := 0; off+9 <= len(args); off += 9 {
+			row := args[off : off+9]
+			if row[8] == wantLdn && row[2] == wantPath {
+				return row
+			}
+		}
+	}
+	return nil
+}
+
+// 验收 #1/#2：同设备两个不同小区各有不同 numerator/denominator →
+// KPI 按每个 object_ldn 各枚举一条，各用本小区计数算，互不串味（不再折回设备级 0.8）。
+func Test_AggregateKPIs_PerCell_NoCrossContamination(t *testing.T) {
 	curStart := time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC)
 	curEnd := time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC)
 
 	db := &cellAwareDB{
 		execTag: pgconn.NewCommandTag("INSERT 0 1"),
 		rows: []cellRow{
-			// numerator：小区1=30 + 小区2=50 = 80（sum 口径）；若被 map 覆盖只会留某一行 30 或 50
-			{oui: "A", sn: "S1", path: "numerator", value: 30, statis: "sum", objectLdn: "Cell1", endTime: curEnd, timeCol: curStart},
-			{oui: "A", sn: "S1", path: "numerator", value: 50, statis: "sum", objectLdn: "Cell2", endTime: curEnd, timeCol: curStart},
-			// denominator：小区1=60 + 小区2=40 = 100
-			{oui: "A", sn: "S1", path: "denominator", value: 60, statis: "sum", objectLdn: "Cell1", endTime: curEnd, timeCol: curStart},
-			{oui: "A", sn: "S1", path: "denominator", value: 40, statis: "sum", objectLdn: "Cell2", endTime: curEnd, timeCol: curStart},
+			// 小区1：30/60 = 0.5
+			{oui: "A", sn: "S1", path: "numerator", value: 30, objectLdn: "Cellid=1", endTime: curEnd, timeCol: curStart},
+			{oui: "A", sn: "S1", path: "denominator", value: 60, objectLdn: "Cellid=1", endTime: curEnd, timeCol: curStart},
+			// 小区2：50/40 = 1.25
+			{oui: "A", sn: "S1", path: "numerator", value: 50, objectLdn: "Cellid=2", endTime: curEnd, timeCol: curStart},
+			{oui: "A", sn: "S1", path: "denominator", value: 40, objectLdn: "Cellid=2", endTime: curEnd, timeCol: curStart},
 		},
 	}
 	kr := &stubKPIRouter{byDevice: map[string]*router.KPIRoute{"S1": avilRateRoute()}}
@@ -651,10 +718,172 @@ func Test_AggregateKPIs_MultiCellCounters_FoldBackToDevice(t *testing.T) {
 
 	n, err := a.AggregateKPIs(context.Background(), "pm_metrics_hourly", w)
 	require.NoError(t, err)
-	assert.Equal(t, 1, n)
-	require.Len(t, db.execArg, 8)
-	// 设备级 KPI = (30+50) / (60+40) = 0.8；若读侧未聚合（map 覆盖）会得到某随机小区比值
-	assert.Equal(t, float64(0.8), db.execArg[3], "多小区计数必须折回设备级求和后再算 KPI")
+	assert.Equal(t, 2, n, "两个小区各产一条 KPI 行")
+
+	c1 := findKPIArgs(db.execArgs, "Cellid=1")
+	require.NotNil(t, c1, "应有 Cellid=1 实体的 KPI 行")
+	assert.Equal(t, float64(0.5), c1[3], "小区1 KPI=30/60，不混入小区2")
+
+	c2 := findKPIArgs(db.execArgs, "Cellid=2")
+	require.NotNil(t, c2, "应有 Cellid=2 实体的 KPI 行")
+	assert.Equal(t, float64(1.25), c2[3], "小区2 KPI=50/40，不混入小区1")
+}
+
+// 验收 #1/#3：基础小区 + 两个 PLMN 三实体；混合公式（小区级 numerator + PLMN 级 denominator）→
+// PLMN 实体跨层级配对算出正确结果；基础小区实体缺 PLMN 级入参按规则跳过、不报错。
+func Test_AggregateKPIs_PLMN_CrossLayerPairing(t *testing.T) {
+	curStart := time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC)
+	curEnd := time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC)
+
+	// 混合公式 KPI：numerator 只在基础小区上报（小区级），denominator 只在 PLMN 行上报（PLMN 级）。
+	mixedRoute := &router.KPIRoute{
+		KPIs: []router.KPIDef{{
+			IndicatorID:  "Kmix",
+			Name:         "Mixed",
+			StatisType:   "pct",
+			Formula:      "numerator / denominator",
+			Dependencies: []string{"numerator", "denominator"},
+		}},
+	}
+	db := &cellAwareDB{
+		execTag: pgconn.NewCommandTag("INSERT 0 1"),
+		rows: []cellRow{
+			// 基础小区行：只有小区级 numerator=1000
+			{oui: "A", sn: "S1", path: "numerator", value: 1000, objectLdn: "Cellid=9", endTime: curEnd, timeCol: curStart},
+			// PLMN 行：各只有 PLMN 级 denominator
+			{oui: "A", sn: "S1", path: "denominator", value: 200, objectLdn: "Cellid=9,PLMN=00101", endTime: curEnd, timeCol: curStart},
+			{oui: "A", sn: "S1", path: "denominator", value: 500, objectLdn: "Cellid=9,PLMN=46068", endTime: curEnd, timeCol: curStart},
+		},
+	}
+	kr := &stubKPIRouter{byDevice: map[string]*router.KPIRoute{"S1": mixedRoute}}
+	a := New(db, kr, nil)
+	w := WindowSpec{Granularity: metrics.GranularityHourly, Start: curStart, End: curEnd}
+
+	n, err := a.AggregateKPIs(context.Background(), "pm_metrics_hourly", w)
+	require.NoError(t, err)
+	// 基础小区实体缺 denominator（PLMN 级）→ Evaluate 缺依赖跳过；两个 PLMN 实体各配上小区级 numerator 算出
+	assert.Equal(t, 2, n, "仅两个 PLMN 实体算出 KPI（基础小区缺 PLMN 级入参被跳过）")
+
+	p1 := findKPIArgs(db.execArgs, "Cellid=9,PLMN=00101")
+	require.NotNil(t, p1)
+	assert.Equal(t, float64(5), p1[3], "PLMN=00101：基础小区级 1000 / 本 PLMN 级 200 = 5")
+
+	p2 := findKPIArgs(db.execArgs, "Cellid=9,PLMN=46068")
+	require.NotNil(t, p2)
+	assert.Equal(t, float64(2), p2[3], "PLMN=46068：1000 / 500 = 2，不混入另一 PLMN 的 200")
+
+	// 基础小区实体不应产 Kmix 行（缺 PLMN 级 denominator）
+	assert.Nil(t, findKPIArgs(db.execArgs, "Cellid=9"), "基础小区缺 PLMN 级入参，跳过不报错")
+}
+
+// 运行栈缺陷修复（自身层级门槛）：纯小区级 KPI（公式只引用基础小区上报的小区级计数器）
+// 只能在基础小区实体落库，绝不因跨层级配对把基础小区计数合并进 PLMN map 后被无差别求值
+// 而"泄漏"到 PLMN 行（同编号、同值）。
+//
+// 构造：
+//   - 基础小区 Cellid=7 上报小区级 cellNum=40 / cellDen=80（纯小区级 KPI 的全部依赖）
+//   - 两个 PLMN 行 PLMN=00101 / PLMN=46068 上报 PLMN 级 plmnNum=10 / plmnDen=20
+//   - 纯小区级 KPI（依赖 cellNum/cellDen）+ 纯 PLMN 级 KPI（依赖 plmnNum/plmnDen）
+//
+// 断言：
+//   - 纯小区级 KPI 只在 Cellid=7 落库；两个 PLMN 实体均不得出现纯小区级 KPI（修掉泄漏）
+//   - 纯 PLMN 级 KPI 仍在两个 PLMN 实体落库（门槛不误杀）
+func Test_AggregateKPIs_PureCellKPI_DoesNotLeakToPLMN(t *testing.T) {
+	curStart := time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC)
+	curEnd := time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC)
+
+	route := &router.KPIRoute{
+		KPIs: []router.KPIDef{
+			{
+				// 纯小区级 KPI：依赖全在基础小区上报的小区级计数器
+				IndicatorID:  "KcellOnly",
+				Name:         "PureCell",
+				StatisType:   "pct",
+				Formula:      "cellNum / cellDen",
+				Dependencies: []string{"cellNum", "cellDen"},
+			},
+			{
+				// 纯 PLMN 级 KPI：依赖全在 PLMN 行上报的 PLMN 级计数器
+				IndicatorID:  "KplmnOnly",
+				Name:         "PurePLMN",
+				StatisType:   "pct",
+				Formula:      "plmnNum / plmnDen",
+				Dependencies: []string{"plmnNum", "plmnDen"},
+			},
+		},
+	}
+	db := &cellAwareDB{
+		execTag: pgconn.NewCommandTag("INSERT 0 1"),
+		rows: []cellRow{
+			// 基础小区行：小区级计数器
+			{oui: "A", sn: "S1", path: "cellNum", value: 40, objectLdn: "Cellid=7", endTime: curEnd, timeCol: curStart},
+			{oui: "A", sn: "S1", path: "cellDen", value: 80, objectLdn: "Cellid=7", endTime: curEnd, timeCol: curStart},
+			// PLMN 行：PLMN 级计数器
+			{oui: "A", sn: "S1", path: "plmnNum", value: 10, objectLdn: "Cellid=7,PLMN=00101", endTime: curEnd, timeCol: curStart},
+			{oui: "A", sn: "S1", path: "plmnDen", value: 20, objectLdn: "Cellid=7,PLMN=00101", endTime: curEnd, timeCol: curStart},
+			{oui: "A", sn: "S1", path: "plmnNum", value: 10, objectLdn: "Cellid=7,PLMN=46068", endTime: curEnd, timeCol: curStart},
+			{oui: "A", sn: "S1", path: "plmnDen", value: 20, objectLdn: "Cellid=7,PLMN=46068", endTime: curEnd, timeCol: curStart},
+		},
+	}
+	kr := &stubKPIRouter{byDevice: map[string]*router.KPIRoute{"S1": route}}
+	a := New(db, kr, nil)
+	w := WindowSpec{Granularity: metrics.GranularityHourly, Start: curStart, End: curEnd}
+
+	n, err := a.AggregateKPIs(context.Background(), "pm_metrics_hourly", w)
+	require.NoError(t, err)
+	// 基础小区 1 行（纯小区级）+ 两个 PLMN 各 1 行（纯 PLMN 级）= 3 行，无泄漏的多出行
+	assert.Equal(t, 3, n, "纯小区级 KPI 只产 1 行（基础小区），不在 PLMN 行重复")
+
+	// 纯小区级 KPI 在基础小区落库
+	base := findKPIArgsByPath(db.execArgs, "Cellid=7", "KcellOnly")
+	require.NotNil(t, base, "纯小区级 KPI 应在基础小区实体落库")
+	assert.Equal(t, float64(0.5), base[3], "40/80=0.5")
+
+	// 纯小区级 KPI 绝不出现在任何 PLMN 实体（修掉泄漏）
+	assert.Nil(t, findKPIArgsByPath(db.execArgs, "Cellid=7,PLMN=00101", "KcellOnly"),
+		"纯小区级 KPI 不得泄漏到 PLMN=00101")
+	assert.Nil(t, findKPIArgsByPath(db.execArgs, "Cellid=7,PLMN=46068", "KcellOnly"),
+		"纯小区级 KPI 不得泄漏到 PLMN=46068")
+
+	// 纯 PLMN 级 KPI 仍在两个 PLMN 实体落库（门槛不误杀）
+	p1 := findKPIArgsByPath(db.execArgs, "Cellid=7,PLMN=00101", "KplmnOnly")
+	require.NotNil(t, p1, "纯 PLMN 级 KPI 应在 PLMN=00101 落库")
+	assert.Equal(t, float64(0.5), p1[3], "10/20=0.5")
+	p2 := findKPIArgsByPath(db.execArgs, "Cellid=7,PLMN=46068", "KplmnOnly")
+	require.NotNil(t, p2, "纯 PLMN 级 KPI 应在 PLMN=46068 落库")
+
+	// 纯 PLMN 级 KPI 不应出现在基础小区（基础小区无 PLMN 级自身计数 → 门槛不过）
+	assert.Nil(t, findKPIArgsByPath(db.execArgs, "Cellid=7", "KplmnOnly"),
+		"纯 PLMN 级 KPI 不应在基础小区实体落库")
+}
+
+// kpiDependsOnOwnCounters 单测：门槛判据——公式依赖与实体自身行计数器有交集才落库。
+func Test_kpiDependsOnOwnCounters(t *testing.T) {
+	ownCell := map[string]float64{"cellNum": 1, "cellDen": 1}
+	ownPlmn := map[string]float64{"plmnNum": 1, "plmnDen": 1}
+
+	pureCell := router.KPIDef{Dependencies: []string{"cellNum", "cellDen"}}
+	purePlmn := router.KPIDef{Dependencies: []string{"plmnNum", "plmnDen"}}
+	mixed := router.KPIDef{Dependencies: []string{"cellNum", "plmnDen"}}
+
+	// 纯小区级 KPI：在基础小区自身集里依赖齐全 → 门槛过；在 PLMN 自身集里无交集 → 门槛不过
+	assert.True(t, kpiDependsOnOwnCounters(pureCell, ownCell), "纯小区级 KPI 在基础小区门槛过")
+	assert.False(t, kpiDependsOnOwnCounters(pureCell, ownPlmn), "纯小区级 KPI 在 PLMN 门槛不过（修掉泄漏）")
+
+	// 纯 PLMN 级 KPI：在 PLMN 自身集里门槛过；在基础小区自身集里门槛不过
+	assert.True(t, kpiDependsOnOwnCounters(purePlmn, ownPlmn))
+	assert.False(t, kpiDependsOnOwnCounters(purePlmn, ownCell))
+
+	// 混合公式：只要引用了 PLMN 自身至少一个计数 → 在 PLMN 实体门槛过（配对补小区级入参）
+	assert.True(t, kpiDependsOnOwnCounters(mixed, ownPlmn), "混合公式引用 PLMN 自身计数 → 门槛过")
+	// 混合公式在基础小区：引用了小区级 cellNum → 门槛过（但缺 PLMN 级入参会在 Evaluate 阶段跳过）
+	assert.True(t, kpiDependsOnOwnCounters(mixed, ownCell))
+
+	// 无 Dependencies（无法判定层级归属）→ 保守落库（不门槛拦），保持原行为
+	assert.True(t, kpiDependsOnOwnCounters(router.KPIDef{}, ownCell),
+		"无依赖清单时不被门槛拦截（保守）")
+	// 空自身集（理论上不会传入有 KPI 的实体）→ 门槛不过
+	assert.False(t, kpiDependsOnOwnCounters(pureCell, map[string]float64{}))
 }
 
 // ---------------------------------------------------------------------------
@@ -691,18 +920,18 @@ func (db *preciseBucketDB) QueryRow(ctx context.Context, sql string, args ...any
 }
 
 func (db *preciseBucketDB) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
-	// listDevicesInBucket: args = [granularity, end_time, time]
-	// loadCountersForDevice: args = [oui, sn, granularity, end_time, time]
+	// listEntitiesInBucket: args = [granularity, end_time, time] → (oui, sn, object_ldn)
+	// loadCountersByObjectLdn: args = [oui, sn, granularity, end_time, time] → (object_ldn, metric_path, value)
 	if len(args) == 3 {
 		want := args[1].(time.Time)
-		seen := map[deviceKey]bool{}
+		seen := map[entityKey]bool{}
 		var out [][]any
 		for _, r := range db.rows {
 			if r.endTime.Equal(want) {
-				k := deviceKey{r.oui, r.sn}
+				k := entityKey{r.oui, r.sn, ""} // 设备级实体（object_ldn 空串）
 				if !seen[k] {
 					seen[k] = true
-					out = append(out, []any{r.oui, r.sn})
+					out = append(out, []any{r.oui, r.sn, ""})
 				}
 			}
 		}
@@ -715,7 +944,7 @@ func (db *preciseBucketDB) Query(ctx context.Context, sql string, args ...any) (
 		var out [][]any
 		for _, r := range db.rows {
 			if r.oui == oui && r.sn == sn && r.endTime.Equal(want) {
-				out = append(out, []any{r.path, r.value})
+				out = append(out, []any{"", r.path, r.value})
 			}
 		}
 		return &fakeRows{rows: out}, nil
@@ -761,7 +990,7 @@ func Test_AggregateKPIs_TakesCurrentBucket_NotPrevious(t *testing.T) {
 	n, err := a.AggregateKPIs(context.Background(), "pm_metrics_hourly", w)
 	require.NoError(t, err)
 	assert.Equal(t, 1, n)
-	require.Len(t, db.execArg, 8)
+	require.Len(t, db.execArg, 9)
 	assert.Equal(t, float64(0.8), db.execArg[3], "KPI 必须取本桶值 0.8，而非上一桶 0.1")
 }
 
@@ -785,7 +1014,7 @@ func Test_AggregateKPIs_IsolatedBucket_StillComputes(t *testing.T) {
 	n, err := a.AggregateKPIs(context.Background(), "pm_metrics_hourly", w)
 	require.NoError(t, err)
 	assert.Equal(t, 1, n, "孤立桶本桶 KPI 仍应算出 1 行")
-	require.Len(t, db.execArg, 8)
+	require.Len(t, db.execArg, 9)
 	assert.Equal(t, float64(0.75), db.execArg[3])
 }
 
