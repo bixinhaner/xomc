@@ -72,6 +72,7 @@ const PmAdhocWizard      = React.lazy(() => import('@/pages/performance/PmAdhoc/
 
 // MML Management
 const MMLConsole         = React.lazy(() => import('@/pages/mml/Console'));
+const MMLConsoleV2       = React.lazy(() => import('@/pages/mml/ConsoleV2'));
 const MMLScript          = React.lazy(() => import('@/pages/mml/ScriptTask'));
 const MMLTaskRecord      = React.lazy(() => import('@/pages/mml/TaskRecord'));
 const MMLCommands        = React.lazy(() => import('@/pages/mml/CommandTree'));
@@ -303,6 +304,7 @@ export const routes: RouteObject[] = [
 
       // MML Management
       { path: 'mml/console',         element: withSuspense(MMLConsole) },
+      { path: 'mml/console-v2',      element: withSuspense(MMLConsoleV2) },
       { path: 'mml/script',          element: withSuspense(MMLScript) },
       { path: 'mml/task-records',    element: withSuspense(MMLTaskRecord) },
       { path: 'mml/commands',        element: withSuspense(MMLCommands) },
