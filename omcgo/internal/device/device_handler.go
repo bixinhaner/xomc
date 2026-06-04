@@ -88,8 +88,8 @@ type CreateDeviceRequest struct {
 	IPAddress  string            `json:"ip_address"`
 	DeviceName string            `json:"device_name"`
 	SiteID     string            `json:"site_id"`
-	Latitude   float64           `json:"latitude"`
-	Longitude  float64           `json:"longitude"`
+	Latitude   *float64          `json:"latitude"`
+	Longitude  *float64          `json:"longitude"`
 }
 
 // UpdateDeviceRequest defines the request body for updating a device.

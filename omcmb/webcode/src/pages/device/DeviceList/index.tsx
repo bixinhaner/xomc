@@ -1182,7 +1182,7 @@ export default function DeviceList() {
           return (
             <Space size={4}>
               <Popconfirm
-                title={`${t('device.longitude')}: ${record.longitude}   ${t('device.latitude')}: ${record.latitude}   ${t('device.gpsHeight')}(m): ${record.gpsHeight ?? '--'}`}
+                title={`${t('device.longitude')}: ${record.longitude ?? '--'}   ${t('device.latitude')}: ${record.latitude ?? '--'}   ${t('device.gpsHeight')}(m): ${record.gpsHeight ?? '--'}`}
                 description={t('device.gpsInconsistent')}
                 onConfirm={() => void message.success(t('device.gpsSyncSuccess'))}
                 okText={t('common.confirm')}
@@ -1209,7 +1209,7 @@ export default function DeviceList() {
           return (
             <Space size={4}>
               <Popconfirm
-                title={`${t('device.longitude')}: ${record.longitude}   ${t('device.latitude')}: ${record.latitude}   ${t('device.gpsHeight')}(m): ${record.gpsHeight ?? '--'}`}
+                title={`${t('device.longitude')}: ${record.longitude ?? '--'}   ${t('device.latitude')}: ${record.latitude ?? '--'}   ${t('device.gpsHeight')}(m): ${record.gpsHeight ?? '--'}`}
                 description={t('device.gpsInconsistent')}
                 onConfirm={() => void message.success(t('device.gpsSyncSuccess'))}
                 okText={t('common.confirm')}
@@ -1236,7 +1236,7 @@ export default function DeviceList() {
           return (
             <Space size={4}>
               <Popconfirm
-                title={`${t('device.longitude')}: ${record.longitude}   ${t('device.latitude')}: ${record.latitude}   ${t('device.gpsHeight')}(m): ${record.gpsHeight ?? '--'}`}
+                title={`${t('device.longitude')}: ${record.longitude ?? '--'}   ${t('device.latitude')}: ${record.latitude ?? '--'}   ${t('device.gpsHeight')}(m): ${record.gpsHeight ?? '--'}`}
                 description={t('device.gpsInconsistent')}
                 onConfirm={() => void message.success(t('device.gpsSyncSuccess'))}
                 okText={t('common.confirm')}

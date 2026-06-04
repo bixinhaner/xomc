@@ -1757,10 +1757,10 @@ func (s *DeviceService) UpdateDevice(ctx context.Context, id uuid.UUID, req Upda
 		device.ModelName = *req.ModelName
 	}
 	if req.Latitude != nil {
-		device.Latitude = *req.Latitude
+		device.Latitude = req.Latitude
 	}
 	if req.Longitude != nil {
-		device.Longitude = *req.Longitude
+		device.Longitude = req.Longitude
 	}
 	if req.Status != nil {
 		device.Status = *req.Status

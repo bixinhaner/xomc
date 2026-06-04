@@ -111,7 +111,7 @@ export default function SiteManagement() {
       width: 160,
       render: (_, record) => (
         <span style={{ fontFamily: 'monospace', fontSize: 12 }}>
-          {record.longitude.toFixed(4)}, {record.latitude.toFixed(4)}
+          {record.longitude?.toFixed(4) ?? '-'}, {record.latitude?.toFixed(4) ?? '-'}
         </span>
       ),
     },

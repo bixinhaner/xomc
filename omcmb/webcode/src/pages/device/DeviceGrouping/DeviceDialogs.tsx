@@ -27,8 +27,8 @@ export interface DeviceDialogsProps {
   editingDevice: Device | null;
   editDeviceForm: FormInstance<{
     engStatus: EngStatus;
-    longitude: number;
-    latitude: number;
+    longitude: number | null;
+    latitude: number | null;
     gpsHeight: number;
     remark: string;
   }>;

@@ -217,7 +217,9 @@ export default function GISMapView() {
   // 设备列表（转换为 MapDevice 格式）
   const mapDevices: MapDevice[] = useMemo(() => {
     if (!devicesGeoData?.items?.length) return [];
-    return devicesGeoData.items.map(deviceGeoToMapDevice);
+    return devicesGeoData.items
+      .filter(device => device.latitude != null && device.longitude != null)
+      .map(deviceGeoToMapDevice);
   }, [devicesGeoData]);
 
   // 统计数据（匹配 MapStats 类型）
@@ -1037,6 +1039,8 @@ export default function GISMapView() {
                             key={result.id}
                             style={searchResultItemStyle(index === 0)}
                             onClick={() => {
+                              // 跳过没有坐标的设备
+                              if (result.latitude == null || result.longitude == null) return;
                               setDeviceSearchExpanded(false);
                               const mapDevice: MapDevice = {
                                 id: result.id,

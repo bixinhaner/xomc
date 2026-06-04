@@ -108,8 +108,8 @@ export interface Device {
   ipAddress: string;
   subnet: string;
   site: string;
-  longitude: number;
-  latitude: number;
+  longitude: number | null;
+  latitude: number | null;
   softwareVersion: string;
   createTime: string;
 

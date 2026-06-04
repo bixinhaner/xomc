@@ -90,9 +90,9 @@ export interface DeviceGeo {
   /** 设备序列号 */
   sn: string;
   /** 经度 (东经为正) */
-  longitude: number;
+  longitude: number | null;
   /** 纬度 (北纬为正) */
-  latitude: number;
+  latitude: number | null;
   /** 设备状态 */
   status: DeviceStatus;
   /** 设备类型 */
@@ -122,9 +122,9 @@ export interface DeviceCluster {
   /** 聚合ID */
   id: string;
   /** 聚合中心点经度 */
-  longitude: number;
+  longitude: number | null;
   /** 聚合中心点纬度 */
-  latitude: number;
+  latitude: number | null;
   /** 聚合内设备数量 */
   count: number;
   /** 各状态数量统计 */
@@ -226,9 +226,9 @@ export interface DeviceSearchResult {
   /** 设备状态 */
   status: DeviceStatus;
   /** 经度 */
-  longitude: number;
+  longitude: number | null;
   /** 纬度 */
-  latitude: number;
+  latitude: number | null;
   /** 设备组名称 */
   groupName?: string;
   /** IP 地址 */
@@ -388,8 +388,8 @@ export interface BackendDeviceGeo {
   id: string;
   name: string;
   sn: string;
-  longitude: number;
-  latitude: number;
+  longitude: number | null;
+  latitude: number | null;
   status: string;
   type?: string;
   group_id: string;
@@ -411,8 +411,8 @@ export interface BackendDeviceGeo {
  */
 export interface BackendDeviceCluster {
   id: string;
-  longitude: number;
-  latitude: number;
+  longitude: number | null;
+  latitude: number | null;
   count: number;
   status_count: Record<string, number>;
   alarm_count: number;
@@ -452,8 +452,8 @@ export interface BackendSearchResult {
   name: string;
   sn: string;
   status: string;
-  longitude: number;
-  latitude: number;
+  longitude: number | null;
+  latitude: number | null;
   group_name?: string;
   /** IP 地址 */
   ip_address?: string;

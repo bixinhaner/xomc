@@ -6,8 +6,8 @@ import type { MutationLike } from './useGroupActions';
 
 export interface EditDeviceFormValues {
   engStatus: EngStatus;
-  longitude: number;
-  latitude: number;
+  longitude: number | null;
+  latitude: number | null;
   gpsHeight: number;
   remark: string;
 }

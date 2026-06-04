@@ -16,8 +16,8 @@ type EfficiencyMetrics struct {
 	TotalCount             int64                 `json:"total_count"`             // 总告警数
 	AvgAcknowledgeMinutes  float64               `json:"avg_acknowledge_minutes"`  // 平均确认时间(MTTA)
 	AvgResolveMinutes      float64               `json:"avg_resolve_minutes"`      // 平均解决时间(MTTR)
-	AcknowledgeRate        float64               `json:"acknowledge_rate"`        // 确认率(%)
-	ClearRate              float64               `json:"clear_rate"`              // 清除率(%)
+	AcknowledgeRate        *float64              `json:"acknowledge_rate"`        // 确认率(%)
+	ClearRate              *float64              `json:"clear_rate"`              // 清除率(%)
 	DailyTrend             []DailyEfficiencyTrend `json:"daily_trend"`           // 近7天趋势
 }
 

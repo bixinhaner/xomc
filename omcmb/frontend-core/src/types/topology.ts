@@ -18,8 +18,8 @@ export interface Site {
   name: string;
   domainId: string;
   address: string;
-  longitude: number;
-  latitude: number;
+  longitude: number | null;
+  latitude: number | null;
   deviceCount: number;
   status: SiteStatus;
 }

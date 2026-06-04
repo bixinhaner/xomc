@@ -63,8 +63,8 @@ type Device struct {
 	// 故 db tag 与字段名/JSON 不一致——这是有意为之，业务/API 层统一用 device_name。
 	DeviceName    string                 `json:"device_name" db:"site_name"`
 	SiteID        string                 `json:"site_id" db:"site_id"`
-	Latitude      float64                `json:"latitude" db:"latitude"`
-	Longitude     float64                `json:"longitude" db:"longitude"`
+	Latitude      *float64               `json:"latitude,omitempty" db:"latitude"`
+	Longitude     *float64               `json:"longitude,omitempty" db:"longitude"`
 	ExtensionData map[string]interface{} `json:"extension_data,omitempty" db:"extension_data"`
 	CreatedAt     time.Time              `json:"created_at" db:"created_at"`
 	UpdatedAt     time.Time              `json:"updated_at" db:"updated_at"`
