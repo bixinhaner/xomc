@@ -112,6 +112,14 @@
   background-color: var(--color-row-hover) !important;
 }
 
+/* 固定列基础不透明背景兜底:任何未被下方"按行状态"规则命中的固定单元格(含表头、
+   告警行、measure 行、无 row-odd/even 的行)都至少有一个不透明背景,杜绝横向滚动时
+   下层滚动列从固定列透出。不加 !important,让下方斑马/hover/告警的 !important 规则按需覆盖。 */
+:global(.omc-data-table) :global(.ant-table-cell-fix-left),
+:global(.omc-data-table) :global(.ant-table-cell-fix-right) {
+  background-color: var(--color-bg-container);
+}
+
 /* 固定列(选择/序号列 fixed:true)单元格需不透明背景,否则横向滚动时其它列内容透出、与固定列重叠。
    斑马 + hover 感知,与上面行背景保持一致。 */
 :global(.omc-data-table) :global(.row-odd) > td:global(.ant-table-cell-fix-left),
@@ -184,6 +192,42 @@
 }
 
 :global(.omc-data-table) :global(.row-warning:hover > td) {
+  background-color: var(--color-severity-warning-hover) !important;
+}
+
+/* 告警行的固定列单元格:与该行的告警底色一致(否则被上面斑马固定列规则按特异性盖成
+   普通底色,横向滚动时固定列与行身不同色/透出)。放在告警底色规则之后,特异性持平时
+   靠源码顺序胜出。hover 态同理。 */
+:global(.omc-data-table) :global(.row-critical) > td:global(.ant-table-cell-fix-left),
+:global(.omc-data-table) :global(.row-critical) > td:global(.ant-table-cell-fix-right) {
+  background-color: var(--color-severity-critical-bg) !important;
+}
+:global(.omc-data-table) :global(.row-major) > td:global(.ant-table-cell-fix-left),
+:global(.omc-data-table) :global(.row-major) > td:global(.ant-table-cell-fix-right) {
+  background-color: var(--color-severity-major-bg) !important;
+}
+:global(.omc-data-table) :global(.row-minor) > td:global(.ant-table-cell-fix-left),
+:global(.omc-data-table) :global(.row-minor) > td:global(.ant-table-cell-fix-right) {
+  background-color: var(--color-severity-minor-bg) !important;
+}
+:global(.omc-data-table) :global(.row-warning) > td:global(.ant-table-cell-fix-left),
+:global(.omc-data-table) :global(.row-warning) > td:global(.ant-table-cell-fix-right) {
+  background-color: var(--color-severity-warning-bg) !important;
+}
+:global(.omc-data-table) :global(.row-critical:hover) > td:global(.ant-table-cell-fix-left),
+:global(.omc-data-table) :global(.row-critical:hover) > td:global(.ant-table-cell-fix-right) {
+  background-color: var(--color-severity-critical-hover) !important;
+}
+:global(.omc-data-table) :global(.row-major:hover) > td:global(.ant-table-cell-fix-left),
+:global(.omc-data-table) :global(.row-major:hover) > td:global(.ant-table-cell-fix-right) {
+  background-color: var(--color-severity-major-hover) !important;
+}
+:global(.omc-data-table) :global(.row-minor:hover) > td:global(.ant-table-cell-fix-left),
+:global(.omc-data-table) :global(.row-minor:hover) > td:global(.ant-table-cell-fix-right) {
+  background-color: var(--color-severity-minor-hover) !important;
+}
+:global(.omc-data-table) :global(.row-warning:hover) > td:global(.ant-table-cell-fix-left),
+:global(.omc-data-table) :global(.row-warning:hover) > td:global(.ant-table-cell-fix-right) {
   background-color: var(--color-severity-warning-hover) !important;
 }
 
