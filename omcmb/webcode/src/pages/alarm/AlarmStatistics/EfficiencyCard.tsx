@@ -98,7 +98,7 @@ export default function EfficiencyCard() {
   // 从趋势数据中提取 MTTR 趋势
   const mttrTrend = useMemo(() => {
     if (!metrics?.daily_trend) return [];
-    return metrics.daily_trend.slice().reverse().map(d => d.avg_resolve_minutes);
+    return metrics.daily_trend.slice().reverse().map(d => d.avg_resolve_minutes ?? 0);
   }, [metrics]);
 
   // 计算趋势变化（最近1天 vs 前6天平均值）
@@ -112,10 +112,10 @@ export default function EfficiencyCard() {
     // 最新一天 vs 前几天平均
     const latest = trendData[0];
     const previous = trendData.slice(1);
-    const previousAvg = previous.reduce((sum, d) => sum + d.avg_resolve_minutes, 0) / previous.length;
+    const previousAvg = previous.reduce((sum, d) => sum + (d.avg_resolve_minutes ?? 0), 0) / previous.length;
 
     if (previousAvg === 0) return 0;
-    return ((latest.avg_resolve_minutes - previousAvg) / previousAvg) * 100;
+    return (((latest.avg_resolve_minutes ?? 0) - previousAvg) / previousAvg) * 100;
   }, [metrics]);
 
   if (isLoading) {
@@ -133,7 +133,7 @@ export default function EfficiencyCard() {
         styles={{ body: { padding: '16px' } }}
       >
         <div style={{ minHeight: 140, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <Spin size="large" tip={t('common.loading')} />
+          <Spin size="large" />
         </div>
       </Card>
     );
@@ -207,11 +207,11 @@ export default function EfficiencyCard() {
               style={{
                 fontSize: 28,
                 fontWeight: 600,
-                color: metrics.avg_acknowledge_minutes > 30 ? '#cf1322' : '#3f8600',
+                color: (metrics.avg_acknowledge_minutes ?? 0) > 30 ? '#cf1322' : '#3f8600',
                 fontFamily: 'SF Mono, Monaco, Consolas, monospace',
               }}
             >
-              {metrics.avg_acknowledge_minutes.toFixed(1)}
+              {(metrics.avg_acknowledge_minutes ?? 0).toFixed(1)}
             </div>
             <div style={{ fontSize: 12, color: '#8c8c8c', marginTop: 4 }}>
               {t('common.minute')}
@@ -238,7 +238,7 @@ export default function EfficiencyCard() {
                 fontFamily: 'SF Mono, Monaco, Consolas, monospace',
               }}
             >
-              {metrics.avg_resolve_minutes.toFixed(1)}
+              {(metrics.avg_resolve_minutes ?? 0).toFixed(1)}
             </div>
             <div style={{ fontSize: 12, color: '#8c8c8c', marginTop: 4 }}>
               {t('common.minute')}
@@ -253,7 +253,7 @@ export default function EfficiencyCard() {
               <div style={{ textAlign: 'center', padding: '8px 0', background: '#f5f5f5', borderRadius: 6 }}>
                 <div style={{ fontSize: 12, color: '#8c8c8c' }}>{t('alarm.stats.ackRate')}</div>
                 <div style={{ fontSize: 18, fontWeight: 600, color: '#52c41a', marginTop: 4 }}>
-                  {metrics.acknowledge_rate.toFixed(1)}%
+                  {(metrics.acknowledge_rate ?? 0).toFixed(1)}%
                 </div>
               </div>
             </Col>
@@ -261,7 +261,7 @@ export default function EfficiencyCard() {
               <div style={{ textAlign: 'center', padding: '8px 0', background: '#f5f5f5', borderRadius: 6 }}>
                 <div style={{ fontSize: 12, color: '#8c8c8c' }}>{t('alarm.stats.clearRate')}</div>
                 <div style={{ fontSize: 18, fontWeight: 600, color: '#52c41a', marginTop: 4 }}>
-                  {metrics.clear_rate.toFixed(1)}%
+                  {(metrics.clear_rate ?? 0).toFixed(1)}%
                 </div>
               </div>
             </Col>

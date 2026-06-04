@@ -93,7 +93,7 @@ const EmptyState: React.FC<EmptyStateProps> = ({
 
       <Empty
         image={Empty.PRESENTED_IMAGE_SIMPLE}
-        imageStyle={{ display: 'none' }}
+        styles={{ image: { display: 'none' } }}
         description={
           <div>
             <div style={{ fontSize: 15, fontWeight: 500, color: token.colorText, marginBottom: 6 }}>

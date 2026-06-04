@@ -492,10 +492,10 @@ export interface WidgetLayout {
 export interface DailyEfficiencyTrend {
   /** 日期 */
   date: string;
-  /** 当日平均确认时间（分钟） */
-  avg_acknowledge_minutes: number;
-  /** 当日平均解决时间（分钟） */
-  avg_resolve_minutes: number;
+  /** 当日平均确认时间（分钟）- 可能为空（当日无告警时） */
+  avg_acknowledge_minutes: number | null;
+  /** 当日平均解决时间（分钟）- 可能为空（当日无告警时） */
+  avg_resolve_minutes: number | null;
 }
 
 /**
@@ -511,14 +511,14 @@ export interface EfficiencyMetrics {
   cleared_count: number;
   /** 总告警数量 */
   total_count: number;
-  /** 平均确认时间（MTTA，分钟） */
-  avg_acknowledge_minutes: number;
-  /** 平均解决时间（MTTR，分钟） */
-  avg_resolve_minutes: number;
-  /** 确认率（百分比） */
-  acknowledge_rate: number;
-  /** 清除率（百分比） */
-  clear_rate: number;
+  /** 平均确认时间（MTTA，分钟）- 可能为空（无告警数据时） */
+  avg_acknowledge_minutes: number | null;
+  /** 平均解决时间（MTTR，分钟）- 可能为空（无告警数据时） */
+  avg_resolve_minutes: number | null;
+  /** 确认率（百分比）- 可能为空（无告警数据时） */
+  acknowledge_rate: number | null;
+  /** 清除率（百分比）- 可能为空（无告警数据时） */
+  clear_rate: number | null;
   /** 近7天趋势数据 */
   daily_trend: DailyEfficiencyTrend[];
 }

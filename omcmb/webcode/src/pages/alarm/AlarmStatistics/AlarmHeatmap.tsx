@@ -167,7 +167,7 @@ export default function AlarmHeatmap() {
     >
       {isLoading ? (
         <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <Spin size="large" tip={t('common.loading')} />
+          <Spin size="large" />
         </div>
       ) : !heatmapData || heatmapData.max_count === 0 ? (
         <EmptyState variant="no-data" style={{ padding: '40px 0' }} />

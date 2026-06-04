@@ -46,6 +46,11 @@ export interface LineChartProps {
    * 阈值线配置（如PRB利用率告警线）
    */
   thresholdLines?: ThresholdLine[];
+  /**
+   * tooltip 数值是否显示为整数（不保留小数）
+   * 适用于告警数量、设备数量等整数指标的图表
+   */
+  integerValues?: boolean;
 }
 
 // Line styles for differentiating multiple series
@@ -65,6 +70,7 @@ const LineChart: React.FC<LineChartProps> = ({
   showLegend = true,
   compareLabels,
   thresholdLines,
+  integerValues = false,
 }) => {
   const isDark = useIsDark();
   const appTheme = useAppStore((s) => s.theme);
@@ -134,12 +140,13 @@ const LineChart: React.FC<LineChartProps> = ({
           const items = params as Array<{ marker: string; seriesName: string; value: unknown; axisValue: string; dataIndex: number }>;
           if (!Array.isArray(items) || items.length === 0) return '';
 
-          // 数值格式化函数：处理null/undefined，显示"-"，否则保留2位小数
+          // 数值格式化函数：处理null/undefined，显示"-"，否则根据 integerValues 决定是否显示小数
           const formatTooltipValue = (val: unknown): string => {
             if (val === null || val === undefined || Number.isNaN(val as number)) {
               return '-';
             }
-            return (val as number).toFixed(2);
+            // integerValues=true 时显示整数，否则保留2位小数
+            return integerValues ? (val as number).toFixed(0) : (val as number).toFixed(2);
           };
 
           // 附加单位到数值后（如果单位不为空且不是"%"）

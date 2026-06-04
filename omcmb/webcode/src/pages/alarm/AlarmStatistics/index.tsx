@@ -5,8 +5,8 @@ import dayjs from 'dayjs';
 import { ReloadOutlined, SyncOutlined, ClockCircleOutlined } from '@ant-design/icons';
 import PieChart, { type PieDataItem } from '@/components/Charts/PieChart';
 import BarChart from '@/components/Charts/BarChart';
+import LineChart from '@/components/Charts/LineChart';
 import EmptyState from '@/components/common/EmptyState';
-import ReactECharts from 'echarts-for-react';
 import { useAlarmCount } from '@core/hooks/api/useAlarms';
 import { useAlarmTrend, useTopAlarmDevices } from '@core/hooks/api/useDashboard';
 import { useT } from '@/hooks/useT';
@@ -14,7 +14,6 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import EfficiencyCard from './EfficiencyCard';
 import AlarmHeatmap from './AlarmHeatmap';
-import { createAlarmTrendChartOption, createAlarmPieChartOption } from './chartConfig';
 
 // 扩展的饼图数据项，包含严重度信息
 interface AlarmPieDataItem extends PieDataItem {
@@ -184,11 +183,15 @@ function AlarmTrendChart({
       size="small"
       styles={{ body: { padding: '12px', height: '280px' } }}
     >
-      <ReactECharts
-        option={createAlarmTrendChartOption(xData, series, days, t)}
-        style={{ height: 230, width: '100%' }}
-        opts={{ renderer: 'canvas' }}
-        notMerge={true}
+      <LineChart
+        title=""
+        xData={xData}
+        series={series}
+        height={230}
+        smooth
+        areaFill
+        showLegend
+        integerValues
       />
     </Card>
   );
