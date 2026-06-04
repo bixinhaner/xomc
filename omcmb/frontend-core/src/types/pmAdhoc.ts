@@ -233,7 +233,9 @@ export function mapBackendAdhocTask(b: BackendAdhocTask): AdhocTask {
     name: b.name,
     mode: b.mode as AdhocMode,
     cronExpr: b.cron_expr,
-    deviceSns: b.device_sns,
+    // 产品/频段/全网维度不绑设备，后端该列存 JSON null → 响应 device_sns 为 null。
+    // 兜底成空数组，守住前端 string[] 契约（详情页 / 结果面板对其取 .length / .map 不再崩）。
+    deviceSns: b.device_sns ?? [],
     metricPaths: b.metric_paths,
     granularities: b.granularities,
     windowStart: b.window_start,
