@@ -16,15 +16,10 @@ import {
   PlusOutlined,
   EditOutlined,
   DeleteOutlined,
-  ClearOutlined,
-  CloudDownloadOutlined,
 } from '@ant-design/icons';
 import {
   useProductList,
   useDeleteProduct,
-  useResetDiscovered,
-  useProductCacheRefresh,
-  useProductImportDirectory,
   useMatchOrder,
 } from '@core/hooks/api/useProducts';
 import type { Product, ProductListFilter } from '@core/types/product';
@@ -46,16 +41,13 @@ export default function ProductsPage() {
   const t = useT();
   const [filter, setFilter] = useState<ProductListFilter>({});
   const [keyword, setKeyword] = useState('');
-  const { data, isLoading, refetch } = useProductList(filter);
+  const { data, isLoading } = useProductList(filter);
   const { data: matchOrderData } = useMatchOrder();
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
 
   const delMut = useDeleteProduct();
-  const resetDiscMut = useResetDiscovered();
-  const cacheRefMut = useProductCacheRefresh();
-  const importMut = useProductImportDirectory();
 
   const items = useMemo(() => data?.items || [], [data]);
 
@@ -105,10 +97,11 @@ export default function ProductsPage() {
       render: (v: string) => <Tag>{v.toUpperCase()}</Tag>,
     },
     {
-      title: t('product.products.radioModes'),
-      dataIndex: 'radioModes',
-      width: 110,
-      render: (v?: string) => (v ? <Tag color="cyan">{v}</Tag> : <Text type="secondary">—</Text>),
+      title: t('product.products.paramModel'),
+      dataIndex: 'paramModelName',
+      width: 160,
+      ellipsis: true,
+      render: (v?: string) => v || '—',
     },
     {
       title: t('product.products.col.indicatorPlatform'),
@@ -168,32 +161,25 @@ export default function ProductsPage() {
               }}
             />
           </Tooltip>
-          <Popconfirm
-            title={t('product.products.confirmReset', { name: row.name })}
-            onConfirm={() =>
-              resetDiscMut
-                .mutateAsync(row.id)
-                .then((r) => message.success(t('product.products.resetSuccess', { count: r.deletedRows })))
-                .catch((e) => message.error((e as Error).message))
-            }
-          >
-            <Tooltip title={t('product.products.resetBtn')}>
-              <Button size="small" icon={<ClearOutlined />} />
+          {row.isBuiltin ? (
+            <Tooltip title={t('product.products.builtinNoDelete')}>
+              <Button size="small" danger icon={<DeleteOutlined />} disabled />
             </Tooltip>
-          </Popconfirm>
-          <Popconfirm
-            title={t('product.products.confirmDelete', { name: row.name })}
-            onConfirm={() =>
-              delMut
-                .mutateAsync(row.id)
-                .then(() => message.success(t('common.deleted')))
-                .catch((e) => message.error((e as Error).message))
-            }
-          >
-            <Tooltip title={t('common.delete')}>
-              <Button size="small" danger icon={<DeleteOutlined />} />
-            </Tooltip>
-          </Popconfirm>
+          ) : (
+            <Popconfirm
+              title={t('product.products.confirmDelete', { name: row.name })}
+              onConfirm={() =>
+                delMut
+                  .mutateAsync(row.id)
+                  .then(() => message.success(t('common.deleted')))
+                  .catch((e) => message.error((e as Error).message))
+              }
+            >
+              <Tooltip title={t('common.delete')}>
+                <Button size="small" danger icon={<DeleteOutlined />} />
+              </Tooltip>
+            </Popconfirm>
+          )}
         </Space>
       ),
     },
@@ -228,44 +214,6 @@ export default function ProductsPage() {
             <MatchTester />
           </Space>
           <Space size={8}>
-            <Popconfirm
-              title={t('product.products.reloadXmlTitle')}
-              description={
-                <div style={{ maxWidth: 320 }}>
-                  {t('product.products.reloadHint1Pre')}<code>param-mappings/products.xml</code>{t('product.products.reloadHint1Post')}
-                  <br />
-                  {t('product.products.reloadDesc')}
-                </div>
-              }
-              okText={t('product.products.reloadOk')}
-              cancelText={t('common.cancel')}
-              okButtonProps={{ danger: true }}
-              placement="bottomRight"
-              onConfirm={() => {
-                // 不返回 Promise — 让 Popconfirm 立即关闭；loading 反馈交给触发按钮
-                // 重载 XML 后主动刷新缓存 + 重拉列表(取消独立"刷新缓存"按钮,合并到此处)
-                importMut
-                  .mutateAsync()
-                  .then(async (r) => {
-                    try {
-                      await cacheRefMut.mutateAsync();
-                    } catch (e) {
-                      message.warning((e as Error).message);
-                    }
-                    void refetch();
-                    message.success(t('product.products.reloadSuccess', { count: r.reloaded }));
-                  })
-                  .catch((e) => message.error((e as Error).message));
-              }}
-            >
-              <Button
-                icon={<CloudDownloadOutlined />}
-                loading={importMut.isPending || cacheRefMut.isPending}
-                danger
-              >
-                {t('common.reloadXml')}
-              </Button>
-            </Popconfirm>
             <Button
               type="primary"
               icon={<PlusOutlined />}

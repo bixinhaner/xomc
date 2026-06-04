@@ -18,6 +18,7 @@ export interface Product {
   radioModes: string;
   description: string;
   paramModelId?: string;
+  paramModelName?: string; // 后端反查 param_models.name；列表展示「参数模型库名称」
   indicatorDeviceType: string;
   indicatorPlatform: string;
   alarmNeType: string;
@@ -25,6 +26,7 @@ export interface Product {
   deviceAttrsOverride: DeviceAttrsOverride;
   enableUnknownAlarm: boolean;
   deviceCount: number;
+  isBuiltin: boolean; // true=products.xml 装配的内置产品，前端禁止删除
   patterns: string[]; // active 正则（按 sort_order 升序）；列表页直接展示用
 }
 

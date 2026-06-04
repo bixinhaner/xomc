@@ -24,13 +24,13 @@ const LoaderName = "product"
 // Loader 实现 dictloader.Loader（T-0098 P1-06）。
 //
 // 加载语义（设计 §4.5）：
-//   1. 读取 products.xml
-//   2. 校验三引用：
-//        - paramModel.name 存在于 param_models（命中失败 → 跳过 product + ERROR）
-//        - alarm_ne_type 存在于 alarm_definitions.ne_type（distinct）（命中失败 → 跳过 + ERROR）
-//        - indicator platform — 因 platform 表跨 3 设备类型，本 P1-06 baseline 仅 WARN（不阻塞）
-//   3. 校验 device_attrs_override.data_type ≠ "true"（设计 §4.5 校验 3）
-//   4. 事务内：UPSERT products + 清空 + 插入 product_class_patterns
+//  1. 读取 products.xml
+//  2. 校验三引用：
+//     - paramModel.name 存在于 param_models（命中失败 → 跳过 product + ERROR）
+//     - alarm_ne_type 存在于 alarm_definitions.ne_type（distinct）（命中失败 → 跳过 + ERROR）
+//     - indicator platform — 因 platform 表跨 3 设备类型，本 P1-06 baseline 仅 WARN（不阻塞）
+//  3. 校验 device_attrs_override.data_type ≠ "true"（设计 §4.5 校验 3）
+//  4. 事务内：UPSERT products + 清空 + 插入 product_class_patterns
 //
 // 必须在 ParamModel + AlarmDefinition 加载完成之后运行（provider 编排 LoadOnce 顺序）。
 type Loader struct {
@@ -158,8 +158,8 @@ func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
 		const upsertProduct = `INSERT INTO products
 		(product_name, vendor, tech, radio_modes, description, param_model_id,
 		 indicator_device_type, indicator_platform, alarm_ne_type,
-		 enable_filetype11, device_attrs_override, enable_unknown_alarm)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12)
+		 enable_filetype11, device_attrs_override, enable_unknown_alarm, is_builtin)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, TRUE)
 		ON CONFLICT (product_name) DO UPDATE
 		SET vendor                = EXCLUDED.vendor,
 		    tech                  = EXCLUDED.tech,
@@ -171,7 +171,8 @@ func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
 		    alarm_ne_type         = EXCLUDED.alarm_ne_type,
 		    enable_filetype11     = EXCLUDED.enable_filetype11,
 		    device_attrs_override = EXCLUDED.device_attrs_override,
-		    enable_unknown_alarm  = EXCLUDED.enable_unknown_alarm
+		    enable_unknown_alarm  = EXCLUDED.enable_unknown_alarm,
+		    is_builtin            = TRUE
 		RETURNING id`
 		// XML 习惯写 "4G"/"5G"/"2G"，DB 列存 canonical 小写代码 lte/nr/gsm
 		// （与 devices.technology / API 入参 ?tech=lte 完全对齐）。Loader 是 DB

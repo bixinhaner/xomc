@@ -102,8 +102,9 @@ export default function SummaryTab({ onSelect, query = '' }: Props) {
       title: t('common.description'),
       ellipsis: true,
       render: (_: unknown, row: IndicatorPlatformSummary) => (
+        // 字体大小/颜色对齐「指标数」列(默认主题文本色),避免硬编码亮色在暗黑模式下不可见。
         <Tooltip title={shownDesc(row)}>
-          <span style={{ color: 'rgba(0, 0, 0, 0.65)', fontSize: 12 }}>{shownDesc(row)}</span>
+          <span>{shownDesc(row)}</span>
         </Tooltip>
       ),
     },

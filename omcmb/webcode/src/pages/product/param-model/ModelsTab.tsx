@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Card, Table, Tag, Button, Space, Modal, Form, Input, Switch, message, Popconfirm } from 'antd';
+import { Card, Table, Tag, Button, Space, Modal, Form, Input, Switch, message, Popconfirm, Tooltip } from 'antd';
 import { EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import {
   useParamModelList,
@@ -80,7 +80,8 @@ export default function ModelsTab({ selectedName, onSelect, keyword }: Props) {
               form.setFieldsValue({ description: row.description, isActive: row.isActive });
             }}
           />
-          {/* 2026-06-03 用户决策:所有模型均可删除,去掉 deletable 置灰守门。 */}
+          {/* 2026-06-04 用户决策:内置(builtin)不可删 → 仅 custom 可删,内置置灰 + Tooltip。 */}
+          {row.deletable ? (
           <Popconfirm
             title={t('product.paramModel.models.confirmDeleteCustom', { name: row.name })}
             description={
@@ -101,6 +102,11 @@ export default function ModelsTab({ selectedName, onSelect, keyword }: Props) {
           >
             <Button size="small" danger icon={<DeleteOutlined />} />
           </Popconfirm>
+          ) : (
+            <Tooltip title={t('common.builtinNoDelete')}>
+              <Button size="small" danger icon={<DeleteOutlined />} disabled />
+            </Tooltip>
+          )}
         </Space>
       ),
     },

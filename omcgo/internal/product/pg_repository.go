@@ -49,7 +49,7 @@ func (r *PgRepository) ListActivePatterns(ctx context.Context) ([]ProductClassPa
 
 const productSelectColumns = `id, product_name, vendor, tech, radio_modes, description,
 	param_model_id, indicator_device_type, indicator_platform, alarm_ne_type,
-	enable_filetype11, device_attrs_override, enable_unknown_alarm`
+	enable_filetype11, device_attrs_override, enable_unknown_alarm, is_builtin`
 
 // GetProductByID 实现 Repository。
 func (r *PgRepository) GetProductByID(ctx context.Context, id uuid.UUID) (*Product, error) {
@@ -222,9 +222,9 @@ type rowScanner interface {
 
 func scanProduct(row rowScanner) (*Product, error) {
 	var (
-		p              Product
-		paramModelID   *uuid.UUID
-		overrideJSONB  []byte
+		p             Product
+		paramModelID  *uuid.UUID
+		overrideJSONB []byte
 	)
 	if err := row.Scan(
 		&p.ID,
@@ -240,6 +240,7 @@ func scanProduct(row rowScanner) (*Product, error) {
 		&p.EnableFileType11,
 		&overrideJSONB,
 		&p.EnableUnknownAlarm,
+		&p.IsBuiltin,
 	); err != nil {
 		return nil, err
 	}

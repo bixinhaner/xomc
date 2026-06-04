@@ -7,7 +7,7 @@
  * 2026-06-03 用户决策:所有文件均可删除,去掉 deletable 守门(后端 deletable 恒为 true)。
  * onConfirm 调 useIndicatorDeleteFile,成功后 refetch 同步刷新 Summary + 二级表。
  */
-import { Modal, Table, Tag, Button, Popconfirm, message, Space } from 'antd';
+import { Modal, Table, Tag, Button, Popconfirm, message, Space, Tooltip } from 'antd';
 import { DeleteOutlined } from '@ant-design/icons';
 import {
   useIndicatorFiles,
@@ -71,8 +71,9 @@ export default function XMLFilesModal({ open, tech, onClose }: Props) {
     {
       title: t('common.action'),
       width: 100,
-      // 2026-06-03:所有文件均可删除,去掉 deletable 置灰守门。
-      render: (_: unknown, row: IndicatorFile) => (
+      // 2026-06-04 用户决策:内置(builtin)不可删 → 仅 custom 可删,内置置灰 + Tooltip。
+      render: (_: unknown, row: IndicatorFile) =>
+        row.deletable ? (
         <Popconfirm
           title={t('product.kpi.xml.delTitle')}
           description={
@@ -99,7 +100,11 @@ export default function XMLFilesModal({ open, tech, onClose }: Props) {
         >
           <Button size="small" danger icon={<DeleteOutlined />} />
         </Popconfirm>
-      ),
+        ) : (
+          <Tooltip title={t('common.builtinNoDelete')}>
+            <Button size="small" danger icon={<DeleteOutlined />} disabled />
+          </Tooltip>
+        ),
     },
   ];
 

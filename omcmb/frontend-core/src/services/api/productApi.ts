@@ -20,6 +20,7 @@ interface BackendProduct {
   radio_modes: string;
   description: string;
   param_model_id?: string;
+  param_model_name?: string;
   indicator_device_type: string;
   indicator_platform: string;
   alarm_ne_type: string;
@@ -27,6 +28,7 @@ interface BackendProduct {
   device_attrs_override: DeviceAttrsOverride;
   enable_unknown_alarm: boolean;
   device_count?: number;
+  is_builtin?: boolean;
   patterns?: string[];
 }
 
@@ -68,6 +70,7 @@ function mapBackendProduct(bp: BackendProduct): Product {
     radioModes: bp.radio_modes,
     description: bp.description,
     paramModelId: bp.param_model_id,
+    paramModelName: bp.param_model_name,
     indicatorDeviceType: bp.indicator_device_type,
     indicatorPlatform: bp.indicator_platform,
     alarmNeType: bp.alarm_ne_type,
@@ -75,6 +78,7 @@ function mapBackendProduct(bp: BackendProduct): Product {
     deviceAttrsOverride: bp.device_attrs_override || {},
     enableUnknownAlarm: bp.enable_unknown_alarm,
     deviceCount: bp.device_count ?? 0,
+    isBuiltin: bp.is_builtin ?? false,
     patterns: bp.patterns ?? [],
   };
 }

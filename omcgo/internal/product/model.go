@@ -30,6 +30,7 @@ type Product struct {
 	EnableFileType11    bool
 	DeviceAttrsOverride map[string]any // JSONB
 	EnableUnknownAlarm  bool
+	IsBuiltin           bool // true=products.xml 装配的内置产品（禁止删除）；false=UI 新建
 }
 
 // ProductClassPattern 对应 product_class_patterns 表（设计 §4.2.2）。
@@ -87,25 +88,25 @@ type ProductClassCacheEntry struct {
 // ── XML 解析结构（设计 §4.5）────────────────────────────────────────
 
 type xmlProducts struct {
-	XMLName        xml.Name     `xml:"products"`
-	TotalProducts  int          `xml:"totalProducts,attr"`
-	TotalPatterns  int          `xml:"totalPatterns,attr"`
-	GeneratedAt    string       `xml:"generatedAt,attr"`
-	Products       []xmlProduct `xml:"product"`
+	XMLName       xml.Name     `xml:"products"`
+	TotalProducts int          `xml:"totalProducts,attr"`
+	TotalPatterns int          `xml:"totalPatterns,attr"`
+	GeneratedAt   string       `xml:"generatedAt,attr"`
+	Products      []xmlProduct `xml:"product"`
 }
 
 type xmlProduct struct {
-	Name                string                  `xml:"name,attr"`
-	Vendor              string                  `xml:"vendor,attr"`
-	Tech                string                  `xml:"tech,attr"`
-	RadioModes          string                  `xml:"radioModes,attr"`
-	Description         string                  `xml:"description"`
-	ParamModel          string                  `xml:"paramModel"`
-	EnableFileType11    string                  `xml:"enableFileType11"`
-	DeviceAttrsOverride xmlDeviceAttrsOverride  `xml:"deviceAttrsOverride"`
-	Indicator           xmlIndicatorRef         `xml:"indicator"`
-	Alarm               xmlAlarmRef             `xml:"alarm"`
-	Patterns            []xmlPattern            `xml:"patterns>pattern"`
+	Name                string                 `xml:"name,attr"`
+	Vendor              string                 `xml:"vendor,attr"`
+	Tech                string                 `xml:"tech,attr"`
+	RadioModes          string                 `xml:"radioModes,attr"`
+	Description         string                 `xml:"description"`
+	ParamModel          string                 `xml:"paramModel"`
+	EnableFileType11    string                 `xml:"enableFileType11"`
+	DeviceAttrsOverride xmlDeviceAttrsOverride `xml:"deviceAttrsOverride"`
+	Indicator           xmlIndicatorRef        `xml:"indicator"`
+	Alarm               xmlAlarmRef            `xml:"alarm"`
+	Patterns            []xmlPattern           `xml:"patterns>pattern"`
 }
 
 type xmlDeviceAttrsOverride struct {
@@ -122,8 +123,8 @@ type xmlIndicatorRef struct {
 }
 
 type xmlAlarmRef struct {
-	NeType              string `xml:"neType,attr"`
-	EnableUnknownAlarm  string `xml:"enableUnknownAlarm,attr"` // 缺省 → false（设计 §4.5）
+	NeType             string `xml:"neType,attr"`
+	EnableUnknownAlarm string `xml:"enableUnknownAlarm,attr"` // 缺省 → false（设计 §4.5）
 }
 
 type xmlPattern struct {

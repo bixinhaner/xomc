@@ -48,7 +48,6 @@ interface FormValues {
   name: string;
   vendor: string;
   tech: string;
-  radioModes: string;
   description: string;
   paramModelId?: string;
   indicatorPlatform: string;
@@ -108,7 +107,6 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
         name: product.name,
         vendor: product.vendor,
         tech: product.tech,
-        radioModes: product.radioModes,
         description: product.description,
         paramModelId: product.paramModelId,
         indicatorPlatform: product.indicatorPlatform,
@@ -130,7 +128,6 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
           name: v.name,
           vendor: v.vendor,
           tech: v.tech,
-          radioModes: v.radioModes,
           description: v.description,
           // 指标设备类型由制式派生(取消单独编辑)
           indicatorDeviceType: TECH_TO_DEVTYPE[v.tech] ?? product.indicatorDeviceType,
@@ -149,7 +146,6 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
           name: v.name,
           vendor: v.vendor,
           tech: v.tech,
-          radioModes: v.radioModes,
           description: v.description,
           // 指标设备类型由制式派生(取消单独编辑)
           indicatorDeviceType: TECH_TO_DEVTYPE[v.tech] ?? '',
@@ -310,9 +306,6 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
                         }
                       }}
                     />
-                  </Form.Item>
-                  <Form.Item name="radioModes" label={t('product.products.radioModes')}>
-                    <Input placeholder="fdd / tdd / fdd-tdd" />
                   </Form.Item>
                   <Form.Item
                     name="paramModelId"

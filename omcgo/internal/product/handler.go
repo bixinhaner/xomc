@@ -164,6 +164,7 @@ type productView struct {
 	RadioModes          string         `json:"radio_modes"`
 	Description         string         `json:"description"`
 	ParamModelID        *uuid.UUID     `json:"param_model_id,omitempty"`
+	ParamModelName      string         `json:"param_model_name,omitempty"` // 反查 param_models.name，列表展示「参数模型库名称」
 	IndicatorDeviceType string         `json:"indicator_device_type"`
 	IndicatorPlatform   string         `json:"indicator_platform"`
 	AlarmNeType         string         `json:"alarm_ne_type"`
@@ -171,7 +172,8 @@ type productView struct {
 	DeviceAttrsOverride map[string]any `json:"device_attrs_override"`
 	EnableUnknownAlarm  bool           `json:"enable_unknown_alarm"`
 	DeviceCount         int            `json:"device_count,omitempty"`
-	Patterns            []string       `json:"patterns"` // 该产品 active 正则（按 sort_order 升序），无则空数组
+	IsBuiltin           bool           `json:"is_builtin"` // true=products.xml 装配的内置产品，前端禁止删除
+	Patterns            []string       `json:"patterns"`   // 该产品 active 正则（按 sort_order 升序），无则空数组
 }
 
 func toProductView(p *Product, deviceCount int, patterns []string) productView {
@@ -187,6 +189,7 @@ func toProductView(p *Product, deviceCount int, patterns []string) productView {
 		DeviceAttrsOverride: p.DeviceAttrsOverride,
 		EnableUnknownAlarm:  p.EnableUnknownAlarm,
 		DeviceCount:         deviceCount,
+		IsBuiltin:           p.IsBuiltin,
 		Patterns:            patterns,
 	}
 }
@@ -211,6 +214,13 @@ func (h *Handler) List(c *gin.Context) {
 		h.logger.Warn("ListPatternsAllByProduct failed", zap.Error(err))
 		patternsByProduct = map[uuid.UUID][]string{}
 	}
+	// 批量反查 param_model 名称（列表展示「参数模型库名称」），一次查全表避免逐行 N+1。
+	paramModelNames, err := h.repo.ListParamModelNames(c.Request.Context())
+	if err != nil {
+		// 非致命：列表照常返回，只是 param_model_name 缺
+		h.logger.Warn("ListParamModelNames failed", zap.Error(err))
+		paramModelNames = map[uuid.UUID]string{}
+	}
 	vendor := strings.TrimSpace(c.Query("vendor"))
 	tech := strings.TrimSpace(c.Query("tech"))
 	keyword := strings.ToLower(strings.TrimSpace(c.Query("keyword")))
@@ -229,7 +239,11 @@ func (h *Handler) List(c *gin.Context) {
 				continue
 			}
 		}
-		views = append(views, toProductView(p, counts[p.ID], patternsByProduct[p.ID]))
+		view := toProductView(p, counts[p.ID], patternsByProduct[p.ID])
+		if p.ParamModelID != nil {
+			view.ParamModelName = paramModelNames[*p.ParamModelID]
+		}
+		views = append(views, view)
 	}
 	response.OK(c, gin.H{"items": views, "total": len(views)})
 }
@@ -345,20 +359,20 @@ func (h *Handler) Create(c *gin.Context) {
 }
 
 type updateProductReq struct {
-	Name                *string         `json:"name"`
-	Vendor              *string         `json:"vendor"`
-	Tech                *string         `json:"tech"`
-	RadioModes          *string         `json:"radio_modes"`
-	Description         *string         `json:"description"`
-	ParamModelName      *string         `json:"param_model_name"`
-	ParamModelID        *string         `json:"param_model_id"`
-	ClearParamModel     bool            `json:"clear_param_model"`
-	IndicatorDeviceType *string         `json:"indicator_device_type"`
-	IndicatorPlatform   *string         `json:"indicator_platform"`
-	AlarmNeType         *string         `json:"alarm_ne_type"`
-	EnableFileType11    *bool           `json:"enable_filetype11"`
-	DeviceAttrsOverride map[string]any  `json:"device_attrs_override"`
-	EnableUnknownAlarm  *bool           `json:"enable_unknown_alarm"`
+	Name                *string        `json:"name"`
+	Vendor              *string        `json:"vendor"`
+	Tech                *string        `json:"tech"`
+	RadioModes          *string        `json:"radio_modes"`
+	Description         *string        `json:"description"`
+	ParamModelName      *string        `json:"param_model_name"`
+	ParamModelID        *string        `json:"param_model_id"`
+	ClearParamModel     bool           `json:"clear_param_model"`
+	IndicatorDeviceType *string        `json:"indicator_device_type"`
+	IndicatorPlatform   *string        `json:"indicator_platform"`
+	AlarmNeType         *string        `json:"alarm_ne_type"`
+	EnableFileType11    *bool          `json:"enable_filetype11"`
+	DeviceAttrsOverride map[string]any `json:"device_attrs_override"`
+	EnableUnknownAlarm  *bool          `json:"enable_unknown_alarm"`
 }
 
 func (h *Handler) Update(c *gin.Context) {
@@ -438,6 +452,20 @@ func (h *Handler) Delete(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, fmt.Errorf("id not a uuid"))
 		return
 	}
+	// 内置产品（products.xml 装配）禁止删除——前端置灰删除按钮，后端兜底守门。
+	existing, err := h.repo.GetProductByID(c.Request.Context(), id)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if existing == nil {
+		commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
+		return
+	}
+	if existing.IsBuiltin {
+		commonerrors.AbortWithError(c, http.StatusForbidden, fmt.Errorf("内置产品不允许删除"))
+		return
+	}
 	if err := h.repo.DeleteProduct(c.Request.Context(), id); err != nil {
 		// 设备引用 → 409，其他 → 500
 		if strings.Contains(err.Error(), "referenced by") {
@@ -475,9 +503,9 @@ func (h *Handler) ResetDiscovered(c *gin.Context) {
 	// 设备数（统计当前绑定该产品的设备数；下次 Bootstrap 各自重新触发）
 	counts, _ := h.repo.CountDevicesByProduct(c.Request.Context())
 	response.OK(c, gin.H{
-		"deleted_rows":   deleted,
-		"product_id":     id,
-		"bound_devices":  counts[id],
+		"deleted_rows":  deleted,
+		"product_id":    id,
+		"bound_devices": counts[id],
 	})
 }
 

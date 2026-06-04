@@ -73,14 +73,14 @@ type MatchOrderRow struct {
 
 // OrphanDevice 单条孤儿设备。
 type OrphanDevice struct {
-	ID            uuid.UUID `json:"id"`
-	SerialNumber  string    `json:"serial_number"`
-	DeviceName    string    `json:"device_name"` // = devices.site_name(前端"设备名称"列)
-	OUI           string    `json:"oui"`
-	ProductClass  string    `json:"product_class"`
-	Carrier       string    `json:"carrier"`
-	Manufacturer  string    `json:"manufacturer"`
-	LastInformAt  *string   `json:"last_inform_at,omitempty"`
+	ID           uuid.UUID `json:"id"`
+	SerialNumber string    `json:"serial_number"`
+	DeviceName   string    `json:"device_name"` // = devices.site_name(前端"设备名称"列)
+	OUI          string    `json:"oui"`
+	ProductClass string    `json:"product_class"`
+	Carrier      string    `json:"carrier"`
+	Manufacturer string    `json:"manufacturer"`
+	LastInformAt *string   `json:"last_inform_at,omitempty"`
 }
 
 // ── ParamModel name → ID 反查（外部 Loader 已写入 param_models 表）─────
@@ -110,6 +110,26 @@ func (r *PgRepository) LookupParamModelNameByID(ctx context.Context, id uuid.UUI
 		return "", fmt.Errorf("lookup param_model name %s: %w", id, err)
 	}
 	return name, nil
+}
+
+// ListParamModelNames 一次性返回所有 param_models 的 id→name 映射，
+// 供 List handler 批量回填 productView.ParamModelName，避免逐行 N+1 反查。
+func (r *PgRepository) ListParamModelNames(ctx context.Context) (map[uuid.UUID]string, error) {
+	rows, err := r.pool.Query(ctx, `SELECT id, name FROM param_models`)
+	if err != nil {
+		return nil, fmt.Errorf("list param_model names: %w", err)
+	}
+	defer rows.Close()
+	out := make(map[uuid.UUID]string)
+	for rows.Next() {
+		var id uuid.UUID
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return nil, fmt.Errorf("scan param_model name: %w", err)
+		}
+		out[id] = name
+	}
+	return out, rows.Err()
 }
 
 // ── Product CRUD ────────────────────────────────────────────────────

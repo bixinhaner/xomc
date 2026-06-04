@@ -214,10 +214,11 @@ export default function AlarmLibraryPage() {
       render: (v: number) => (v > 0 ? <Tag color="blue">{v}</Tag> : <span>—</span>),
     },
     {
-      // 2026-06-03 用户决策:所有文件均可删除,去掉 deletable 置灰守门。
+      // 2026-06-04 用户决策:内置(builtin)不可删 → 仅 custom 可删,内置置灰 + Tooltip。
       title: t('alarmLibrary.col.actions'),
       width: 80,
-      render: (_: unknown, row: AlarmNeTypeStat) => (
+      render: (_: unknown, row: AlarmNeTypeStat) =>
+        row.deletable ? (
         <Popconfirm
           title={t('product.alarm.xml.delTitle')}
           description={
@@ -243,7 +244,11 @@ export default function AlarmLibraryPage() {
         >
           <Button size="small" danger icon={<DeleteOutlined />} />
         </Popconfirm>
-      ),
+        ) : (
+          <Tooltip title={t('common.builtinNoDelete')}>
+            <Button size="small" danger icon={<DeleteOutlined />} disabled />
+          </Tooltip>
+        ),
     },
   ];
 
