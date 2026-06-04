@@ -2,7 +2,8 @@
  * SummaryTab — KPI 指标库一级列表(2026-06-02:"一个平台一条")。
  *
  * 用户决策:一个 XML 文件即一个平台,一级列表按平台聚合,每平台唯一一行。
- * 列:序号 / 平台(link → 二级) / 加载源 / 制式 / 指标数 / 描述 / 操作(编辑描述)。
+ * 列:序号 / 平台(link → 二级) / 加载源 / 指标数 / 描述 / 操作(编辑描述)。
+ * 2026-06-04 用户决策:取消「制式」列(一文件一平台,制式已隐含于平台/描述,单列冗余)。
  * 2026-06-03 用户决策:去掉"来源(builtin/custom)"列,保留"加载源(loaded_from)"列;
  *   文件删除仍留在 XMLFilesModal。
  */
@@ -95,13 +96,6 @@ export default function SummaryTab({ onSelect, query = '' }: Props) {
       width: 320,
       ellipsis: true,
       render: (v: string) => (v ? <Tooltip title={v}><code>{v}</code></Tooltip> : <span>—</span>),
-    },
-    {
-      title: t('product.kpi.summary.col.tech'),
-      dataIndex: 'tech',
-      width: 120,
-      // 2026-06-03 用户决策:制式列字体色对齐"加载源"列(默认文本色,与 <code> 同),不再用蓝色 Tag。
-      render: (v: TechLower) => <code>{TECH_LABEL[v]}</code>,
     },
     { title: t('common.indicators'), dataIndex: 'indicators', width: 90 },
     {
