@@ -176,13 +176,13 @@ type modelView struct {
 	Deletable bool   `json:"deletable"`
 }
 
-func toModelView(m *ParamModel) modelView {
+func toModelView(baseDir string, m *ParamModel) modelView {
 	return modelView{
 		ID: m.ID, Name: m.Name,
 		TotalEntries: m.TotalEntries, TotalObjects: m.TotalObjects, TotalParams: m.TotalParams,
 		Description: m.Description, IsActive: m.IsActive, LoadedFrom: m.LoadedFrom,
-		Source:    ClassifySource(m.LoadedFrom),
-		Deletable: IsDeletable(m.LoadedFrom),
+		Source:    ClassifySource(baseDir, m.LoadedFrom),
+		Deletable: IsDeletable(baseDir, m.LoadedFrom),
 	}
 }
 
@@ -194,7 +194,7 @@ func (h *Handler) ListModels(c *gin.Context) {
 	}
 	views := make([]modelView, 0, len(models))
 	for i := range models {
-		views = append(views, toModelView(&models[i]))
+		views = append(views, toModelView(h.baseDir, &models[i]))
 	}
 	response.OK(c, gin.H{"items": views, "total": len(views)})
 }
@@ -210,7 +210,7 @@ func (h *Handler) GetModel(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	response.OK(c, toModelView(m))
+	response.OK(c, toModelView(h.baseDir, m))
 }
 
 type updateModelReq struct {
@@ -235,7 +235,7 @@ func (h *Handler) UpdateModel(c *gin.Context) {
 		return
 	}
 	h.refreshAsync(c.Request.Context(), "update-model")
-	response.OK(c, toModelView(m))
+	response.OK(c, toModelView(h.baseDir, m))
 }
 
 // DeleteModel 删除 paramModel。
@@ -268,7 +268,7 @@ func (h *Handler) DeleteModel(c *gin.Context) {
 	}
 
 	// 1.5 内置数据守门:builtin(当前目录 XML 加载)+ unknown 不可删(2026-06-04 用户决策)
-	if !IsDeletable(pm.LoadedFrom) {
+	if !IsDeletable(h.baseDir, pm.LoadedFrom) {
 		commonerrors.AbortWithError(c, http.StatusForbidden,
 			fmt.Errorf("内置数据不允许删除(loaded_from=%q)[code=%d]", pm.LoadedFrom, global.ErrCodeParamModelBuiltinNotDeletable))
 		return
@@ -596,7 +596,7 @@ func (h *Handler) ListMappings(c *gin.Context) {
 	for i := range mappings {
 		views = append(views, toMappingView(&mappings[i]))
 	}
-	response.OK(c, gin.H{"items": views, "total": len(views), "param_model": toModelView(m)})
+	response.OK(c, gin.H{"items": views, "total": len(views), "param_model": toModelView(h.baseDir, m)})
 }
 
 type createMappingReq struct {

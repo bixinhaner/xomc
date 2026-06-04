@@ -102,21 +102,22 @@ func TestAcquireFileLock_ConcurrentSameName(t *testing.T) {
 	}
 }
 
-// TestDeleteSourceGuard 验证 2026-06-04 删除规则:仅 custom 可删,builtin/unknown 不可删。
+// TestDeleteSourceGuard 验证 2026-06-04 sidecar 删除规则:有 .custom sidecar 才可删。
 func TestDeleteSourceGuard(t *testing.T) {
+	base := t.TempDir()
+	touchData(t, base, "param-mappings/BTS.xml")           // builtin
+	touchData(t, base, "param-mappings/Custom.xml")        // custom
+	touchData(t, base, "param-mappings/Custom.xml.custom") // sidecar
 	cases := []struct {
 		loadedFrom string
 		want       bool // IsDeletable
 	}{
-		{"param-mappings/BTS.xml", false},        // 内置 → 不可删
-		{"param-mappings-custom/CBQQ.xml", true}, // 自定义 → 可删
-		{"param-mappings-custom/BTS.xml", true},  // 同名覆盖 custom 可删
-		{"BTS.xml", false},                       // 历史无前缀(unknown)→ 不可删
-		{"", false},                              // 异常空(unknown)→ 不可删
-		{"../../etc/passwd", false},              // 路径遍历形态(unknown)→ 不可删
+		{"param-mappings/BTS.xml", false},   // 内置(无 sidecar)→ 不可删
+		{"param-mappings/Custom.xml", true}, // 自定义(有 sidecar)→ 可删
+		{"", false},                         // 异常空 → 不可删
 	}
 	for _, tc := range cases {
-		if got := IsDeletable(tc.loadedFrom); got != tc.want {
+		if got := IsDeletable(base, tc.loadedFrom); got != tc.want {
 			t.Errorf("IsDeletable(%q) = %v, want %v", tc.loadedFrom, got, tc.want)
 		}
 	}

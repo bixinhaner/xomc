@@ -210,26 +210,29 @@ func TestResolveLoadedFrom(t *testing.T) {
 }
 
 // TestResolveLoadedFrom_ClassifierIntegration 验证 resolveLoadedFrom 输出
-// 被 ClassifySource 正确分类(两个函数构成的完整契约链)。
+// 被 sidecar 版 ClassifySource 正确分类(两个函数构成的完整契约链)。
 func TestResolveLoadedFrom_ClassifierIntegration(t *testing.T) {
-	base := "/etc/omcgo/data"
+	base := t.TempDir()
+	touchData(t, base, "param-mappings/BTS.xml")            // builtin:仅 XML
+	touchData(t, base, "param-mappings/MyModel.xml")        // custom:XML + sidecar
+	touchData(t, base, "param-mappings/MyModel.xml.custom") // sidecar 标记
 	cases := []struct {
-		absPath  string
+		rel      string
 		wantSrc  Source
 		wantDel  bool
 		nickName string
 	}{
-		{"/etc/omcgo/data/param-mappings/BTS.xml", SourceBuiltin, false, "builtin BTS"},
-		{"/etc/omcgo/data/param-mappings-custom/CBQQ.xml", SourceCustom, true, "custom CBQQ"},
-		{"/etc/omcgo/data/param-mappings-custom/BTS.xml", SourceCustom, true, "custom override BTS"},
+		{"param-mappings/BTS.xml", SourceBuiltin, false, "builtin BTS"},
+		{"param-mappings/MyModel.xml", SourceCustom, true, "custom MyModel"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.nickName, func(t *testing.T) {
-			loadedFrom := resolveLoadedFrom(base, tc.absPath)
-			if got := ClassifySource(loadedFrom); got != tc.wantSrc {
+			absPath := filepath.Join(base, filepath.FromSlash(tc.rel))
+			loadedFrom := resolveLoadedFrom(base, absPath)
+			if got := ClassifySource(base, loadedFrom); got != tc.wantSrc {
 				t.Errorf("ClassifySource(%q) = %q, want %q", loadedFrom, got, tc.wantSrc)
 			}
-			if got := IsDeletable(loadedFrom); got != tc.wantDel {
+			if got := IsDeletable(base, loadedFrom); got != tc.wantDel {
 				t.Errorf("IsDeletable(%q) = %v, want %v", loadedFrom, got, tc.wantDel)
 			}
 		})

@@ -134,8 +134,12 @@ func TestPathContainedIn(t *testing.T) {
 }
 
 // TestToModelView_SourceAndDeletable 验证 modelView DTO 的 source/deletable
-// 字段对所有 4 种 loaded_from 形态的派生(B4.2)。
+// 由 sidecar 派生(2026-06-04)。
 func TestToModelView_SourceAndDeletable(t *testing.T) {
+	base := t.TempDir()
+	touchData(t, base, "param-mappings/BTS.xml")           // builtin
+	touchData(t, base, "param-mappings/Custom.xml")        // custom
+	touchData(t, base, "param-mappings/Custom.xml.custom") // sidecar
 	cases := []struct {
 		name          string
 		loadedFrom    string
@@ -143,15 +147,13 @@ func TestToModelView_SourceAndDeletable(t *testing.T) {
 		wantDeletable bool
 	}{
 		{"builtin BTS", "param-mappings/BTS.xml", SourceBuiltin, false},
-		{"custom CBQQ", "param-mappings-custom/CBQQ.xml", SourceCustom, true},
-		{"custom same name as builtin", "param-mappings-custom/BTS.xml", SourceCustom, true},
-		{"legacy bare", "BTS.xml", SourceUnknown, false},
+		{"custom with sidecar", "param-mappings/Custom.xml", SourceCustom, true},
 		{"empty", "", SourceUnknown, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			m := &ParamModel{Name: "X", LoadedFrom: tc.loadedFrom}
-			view := toModelView(m)
+			view := toModelView(base, m)
 			if view.Source != tc.wantSource {
 				t.Errorf("Source = %q, want %q", view.Source, tc.wantSource)
 			}

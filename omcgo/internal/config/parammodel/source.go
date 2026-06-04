@@ -1,13 +1,16 @@
 package parammodel
 
-import "strings"
+import (
+	"os"
+	"path/filepath"
+)
 
-// Source 描述一行 param_model 的物理来源(T-0178)。
+// Source 描述一行 param_model 的物理来源。
 //
-// 三态语义:
-//   - SourceBuiltin: XML 来自镜像层 data/param-mappings/,只读,不可在线删
-//   - SourceCustom:  XML 来自 host bind mount data/param-mappings-custom/,可读写,可在线删
-//   - SourceUnknown: 历史数据或异常(loaded_from 不带目录前缀),按 builtin 对待(拒删)
+// 三态语义(2026-06-04 改 sidecar 判定):
+//   - SourceBuiltin: 出厂随包 XML(无 .custom sidecar),不可在线删
+//   - SourceCustom:  用户经 UI 上传的 XML(同目录存在 X.xml.custom sidecar 标记),可在线删
+//   - SourceUnknown: loaded_from 为空等异常,按 builtin 对待(拒删)
 type Source string
 
 const (
@@ -35,41 +38,34 @@ const (
 	CustomDirSubdir  = "param-mappings-custom" // host bind mount 持久化 custom XML 目录
 )
 
-// ClassifySource 根据 param_models.loaded_from 列值判定物理来源。
-//
-// 输入约定:loaded_from 应为相对 XMLBaseDir 的 slash 路径
-// (Loader 用 filepath.ToSlash 规范化,Windows 反斜杠也兼容)。
-//
-// 行为:
-//   - 以 CustomDirPrefix 开头 → SourceCustom
-//   - 以 BuiltinDirPrefix 开头 → SourceBuiltin
-//   - 其他(空串 / 裸文件名 / 路径遍历模式)→ SourceUnknown
-//
-// SourceUnknown 包括历史数据(T-0098 P1-06 入库时未带前缀,
-// 由 T-0178 数据迁移回填 builtin/ 前缀;迁移前 / 跨重启过渡期可能见到)。
-func ClassifySource(loadedFrom string) Source {
-	switch {
-	case strings.HasPrefix(loadedFrom, CustomDirPrefix):
-		return SourceCustom
-	case strings.HasPrefix(loadedFrom, BuiltinDirPrefix):
-		return SourceBuiltin
-	default:
-		return SourceUnknown
+// CustomMarkerSuffix 是自定义 XML 的 sidecar 标记后缀。
+// 文件 X.xml 若同目录存在 X.xml.custom(空标记文件)⇒ 该 XML 为用户经 UI 上传的自定义文件。
+// 标记随文件走 → 扛过 data 反向合并升级 + DB 重建,不依赖目录前缀、不占 DB 列(2026-06-04 设计 D6)。
+const CustomMarkerSuffix = ".custom"
+
+// IsCustom 判定 loadedFrom 对应的物理文件是否自定义(同目录 sidecar 存在)。
+// baseDir = XMLBaseDir(Loader / Handler 持有);loadedFrom = 相对 baseDir 的 slash 路径。
+func IsCustom(baseDir, loadedFrom string) bool {
+	if loadedFrom == "" {
+		return false
 	}
+	_, err := os.Stat(filepath.Join(baseDir, filepath.FromSlash(loadedFrom)) + CustomMarkerSuffix)
+	return err == nil
 }
 
-// IsDeletable 是 DELETE /param-models/:name 端点与前端 deletable 字段的
-// 唯一判定函数。
-//
-// 当前规则(2026-06-04 用户决策:内置数据不可删除):仅 custom 来源可删,
-// builtin(当前目录 XML 加载的内置数据)与 unknown 一律不可删。
-// ⚠️ 注:2026-06-03 起上传直接写 builtin 目录,故上传文件也判为 builtin →
-// 同样不可删(只能重新上传同名覆盖)。若需"上传可删、出厂锁定",应把上传分流到 custom 目录。
-//
-// 调用方:
-//   - DeleteModel 入口守门(builtin/unknown → 403 ErrCodeParamModelBuiltinNotDeletable)
-//   - List/Detail DTO 的 deletable 字段填值
-//   - 前端不重新推导,直接渲染 deletable bool
-func IsDeletable(loadedFrom string) bool {
-	return ClassifySource(loadedFrom) == SourceCustom
+// ClassifySource 根据 sidecar 判定物理来源(custom / builtin / unknown)。
+func ClassifySource(baseDir, loadedFrom string) Source {
+	if loadedFrom == "" {
+		return SourceUnknown
+	}
+	if IsCustom(baseDir, loadedFrom) {
+		return SourceCustom
+	}
+	return SourceBuiltin
+}
+
+// IsDeletable 是 DELETE /param-models/:name 端点与前端 deletable 字段的唯一判定函数。
+// 仅 custom(有 sidecar)可删;builtin / unknown 一律不可删。
+func IsDeletable(baseDir, loadedFrom string) bool {
+	return IsCustom(baseDir, loadedFrom)
 }
