@@ -99,5 +99,20 @@ export interface ExecMeta {
   commandName?: string;
 }
 
+/** 一次执行命令记录(含结果快照,供「命令记录」列表点击回看)。 */
+export interface ExecRecord {
+  id: string;
+  /** 执行时间 HH:mm:ss */
+  time: string;
+  /** 执行的命令名称(标准模式命令名 / 裸路径模式 "裸路径 LST" 等) */
+  commandName: string;
+  operationType: MMLOperationType;
+  /** 本次执行的设备数 */
+  deviceCount: number;
+  execMeta: ExecMeta;
+  columns: ResultColumn[];
+  rows: ResultRow[];
+}
+
 /** 导出格式 */
 export type ExportFormat = 'csv' | 'xlsx' | 'json';

@@ -28,7 +28,7 @@ interface RawPathPanelProps {
 /**
  * 参数路径指定（裸路径专家模式，设计 §3.9）—— 操作类型下拉 + 可增删的 TR-069 路径行；
  * MOD 每行追加值列；ADD/RMV 协议单次仅作用一个对象，锁单行。当前为 mock：编辑态通过
- * onChange 上抛，由 OperationPanel/index 在执行时驱动结果表格。
+ * onChange 上抛，由 ConfigParamsModal/index 在执行时驱动结果表格。
  */
 export default function RawPathPanel({ value, onChange, suggestions }: RawPathPanelProps) {
   const { operationType, rows } = value;

@@ -1,45 +1,60 @@
-import { useRef, useState } from 'react';
-import { Col, Row, Space } from 'antd';
+import { useMemo, useRef, useState } from 'react';
+import { Space } from 'antd';
 import SelectionBar from './components/SelectionBar';
 import DeviceSelectModal from './components/DeviceSelectModal';
 import CommandSelectModal from './components/CommandSelectModal';
-import OperationPanel from './components/OperationPanel';
+import ConfigParamsModal from './components/ConfigParamsModal';
+import CommandHistoryPanel from './components/CommandHistoryPanel';
 import ResultTable from './components/ResultTable';
-import type { CommandItem, ExecMeta, ExecRequest, ResultColumn, ResultRow } from './types';
+import type { CommandItem, ExecMeta, ExecRecord, ExecRequest, ResultColumn } from './types';
 import { buildColumns, buildColumnsFromRawPaths, buildResultRows } from './mock';
-import { isReadOp } from './constants';
+import { isReadOp, opLabel } from './constants';
+import { useConsoleHistory } from './useConsoleHistory';
+
+let recordSeq = 1;
 
 /**
- * MML 控制台 V2（设计 docs/design/mml-console-redesign-20260603.md）。
+ * MML 控制台 V2（设计 docs/design/mml-console-redesign-20260603.md，含 §3.10 二轮完善）。
  *
- * 与 V1（/mml/console）并存、互不影响：V2 以「结果表格」为主舞台，设备/命令选择收纳进
- * 顶部选择条 + 弹框，左操作区 + 右结果表格左右分区（设计 §3.2 主推方案）。左操作区支持
- * 「命令参数（结构化）/ 指定参数（裸路径专家）」双模式（§3.9）。
- *
- * 当前阶段为前端 mock 实现，执行结果由 mock.ts 生成，待后端 results-schema / export
- * 端点就绪后再桥接真实 useMML* hooks（P1/P2）。
+ * 顶部条 ①设备 ②命令 ③配置参数(弹框) + 执行;主舞台「命令记录(可收缩,展开 30%) ｜ 执行结果」
+ * 左右分区,结果默认显示最近一次执行,点击记录联动回看。当前为前端 mock 实现。
  */
 export default function MMLConsoleV2() {
   const [deviceModalOpen, setDeviceModalOpen] = useState(false);
   const [commandModalOpen, setCommandModalOpen] = useState(false);
+  const [configModalOpen, setConfigModalOpen] = useState(false);
 
   const [selectedSns, setSelectedSns] = useState<string[]>([]);
   const [command, setCommand] = useState<CommandItem | null>(null);
+  const [config, setConfig] = useState<ExecRequest | null>(null);
+  const [configTouched, setConfigTouched] = useState(false);
 
+  // 命令记录数据层（方案 A：当前 mock 种子+会话追加，后续切 /mml/tasks，详见 useConsoleHistory）。
+  const { records, activeId, activeRecord, select, append } = useConsoleHistory();
   const [running, setRunning] = useState(false);
-  const [hasExecuted, setHasExecuted] = useState(false);
-  const [columns, setColumns] = useState<ResultColumn[]>([]);
-  const [rows, setRows] = useState<ResultRow[]>([]);
-  const [execMeta, setExecMeta] = useState<ExecMeta | null>(null);
+  const [historyCollapsed, setHistoryCollapsed] = useState(true); // 默认收缩(§3.10.4)
 
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const handleExecute = (req: ExecRequest) => {
+  // 配置摘要(顶部条③显示)。未手动配置时不显示(走默认全部)。
+  const configSummary = useMemo(() => {
+    if (!configTouched || !config) return undefined;
+    if (config.mode === 'standard') return `命令参数 · ${config.checkedPaths.length} 路径`;
+    const n = config.rows.filter((r) => r.path.trim()).length;
+    return `指定参数 · ${n} PATH · ${config.operationType}`;
+  }, [config, configTouched]);
+
+  const canExecute = useMemo(() => {
+    if (running || selectedSns.length === 0) return false;
+    if (config?.mode === 'raw') return config.rows.some((r) => r.path.trim() !== '');
+    return !!command; // standard(含默认配置)需有命令
+  }, [running, selectedSns.length, config, command]);
+
+  const runExecute = (req: ExecRequest) => {
     if (selectedSns.length === 0) return;
 
     let nextColumns: ResultColumn[];
     let meta: ExecMeta;
-
     if (req.mode === 'standard') {
       if (!command) return;
       nextColumns = buildColumns(command, req.checkedPaths);
@@ -60,25 +75,31 @@ export default function MMLConsoleV2() {
       };
     }
 
+    const deviceCount = selectedSns.length;
     setRunning(true);
-    setHasExecuted(true);
-    setColumns(nextColumns);
-    setExecMeta(meta);
-    setRows([]);
-    // mock 异步：模拟扇出执行耗时后一次性回填（真实接入时改为 SSE 就地更新每行）
+    // mock 异步:模拟扇出耗时后落一条记录并置为当前(真实接入改 SSE 就地更新)
     timerRef.current = setTimeout(() => {
-      setRows(buildResultRows(nextColumns, selectedSns, meta.read, meta.operationType));
+      const rows = buildResultRows(nextColumns, selectedSns, meta.read, meta.operationType);
+      const rec: ExecRecord = {
+        id: `rec-${recordSeq++}`,
+        time: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
+        commandName: meta.commandName ?? `裸路径 ${opLabel(meta.operationType)}`,
+        operationType: meta.operationType,
+        deviceCount,
+        execMeta: meta,
+        columns: nextColumns,
+        rows,
+      };
+      append(rec);
       setRunning(false);
     }, 900);
   };
 
-  const handleClear = () => {
-    if (timerRef.current) clearTimeout(timerRef.current);
-    setRunning(false);
-    setHasExecuted(false);
-    setRows([]);
-    setColumns([]);
-    setExecMeta(null);
+  const handleExecute = () => {
+    // 顶部「执行」按钮:用已保存配置;未手动配置时用默认(标准模式全部路径)
+    const req: ExecRequest =
+      config ?? { mode: 'standard', checkedPaths: command?.paramPaths.map((p) => p.path) ?? [] };
+    runExecute(req);
   };
 
   return (
@@ -86,32 +107,46 @@ export default function MMLConsoleV2() {
       <SelectionBar
         deviceCount={selectedSns.length}
         command={command}
+        configSummary={configSummary}
+        running={running}
+        canExecute={canExecute}
         onPickDevices={() => setDeviceModalOpen(true)}
         onPickCommand={() => setCommandModalOpen(true)}
+        onConfigParams={() => setConfigModalOpen(true)}
+        onExecute={handleExecute}
       />
 
-      {/* 操作区与结果区高度固定、自适应浏览器视口高度（减去顶部 header/tab 栏 + 选择条），
-          内部各自滚动，不把整页撑高。 */}
-      <Row gutter={12} align="stretch" style={{ height: 'calc(100vh - 220px)', minHeight: 420 }}>
-        <Col xs={24} lg={9} style={{ height: '100%' }}>
-          <OperationPanel
-            command={command}
-            deviceCount={selectedSns.length}
-            running={running}
-            onExecute={handleExecute}
-            onClear={handleClear}
+      <div style={{ display: 'flex', gap: 12, height: 'calc(100vh - 220px)', minHeight: 420 }}>
+        {historyCollapsed ? (
+          <CommandHistoryPanel
+            records={records}
+            activeId={activeId}
+            collapsed
+            onSelect={select}
+            onToggleCollapsed={() => setHistoryCollapsed(false)}
           />
-        </Col>
-        <Col xs={24} lg={15} style={{ height: '100%' }}>
+        ) : (
+          <div style={{ flex: '0 0 24%', minWidth: 0 }}>
+            <CommandHistoryPanel
+              records={records}
+              activeId={activeId}
+              collapsed={false}
+              onSelect={select}
+              onToggleCollapsed={() => setHistoryCollapsed(true)}
+            />
+          </div>
+        )}
+
+        <div style={{ flex: 1, minWidth: 0 }}>
           <ResultTable
-            execMeta={execMeta}
-            columns={columns}
-            rows={rows}
+            execMeta={activeRecord?.execMeta ?? null}
+            columns={activeRecord?.columns ?? []}
+            rows={activeRecord?.rows ?? []}
             running={running}
-            hasExecuted={hasExecuted}
+            hasExecuted={records.length > 0 || running}
           />
-        </Col>
-      </Row>
+        </div>
+      </div>
 
       <DeviceSelectModal
         open={deviceModalOpen}
@@ -120,7 +155,6 @@ export default function MMLConsoleV2() {
         onConfirm={(sns) => {
           setSelectedSns(sns);
           setDeviceModalOpen(false);
-          // 选完设备引导第②步选命令（设计 §3.3 两步流程）
           if (!command) setCommandModalOpen(true);
         }}
       />
@@ -131,7 +165,28 @@ export default function MMLConsoleV2() {
         onCancel={() => setCommandModalOpen(false)}
         onConfirm={(cmd) => {
           setCommand(cmd);
+          // 选命令后置默认配置(标准模式全部路径),让「执行」无需先开③
+          setConfig({ mode: 'standard', checkedPaths: cmd.paramPaths.map((p) => p.path) });
+          setConfigTouched(false);
           setCommandModalOpen(false);
+        }}
+      />
+
+      <ConfigParamsModal
+        open={configModalOpen}
+        command={command}
+        deviceCount={selectedSns.length}
+        onCancel={() => setConfigModalOpen(false)}
+        onConfirm={(req) => {
+          setConfig(req);
+          setConfigTouched(true);
+          setConfigModalOpen(false);
+        }}
+        onConfirmAndExecute={(req) => {
+          setConfig(req);
+          setConfigTouched(true);
+          setConfigModalOpen(false);
+          runExecute(req);
         }}
       />
     </Space>

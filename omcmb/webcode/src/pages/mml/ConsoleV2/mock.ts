@@ -8,9 +8,11 @@ import type {
   CommandItem,
   DeviceItem,
   DeviceStatus,
+  ExecRecord,
   ResultColumn,
   ResultRow,
 } from './types';
+import { isReadOp } from './constants';
 
 const PRODUCTS = ['Baicells Nova-436', 'Baicells Nova-227', 'Comba X1-Pro', 'Baicells pBS3101'];
 const PRODUCT_CLASSES = ['ENB', 'CPE', 'GNB'];
@@ -274,3 +276,32 @@ export function buildResultRows(
     };
   });
 }
+
+// ── mock 历史命令记录种子（设计 §3.10.4-5，决策 2026-06-04=方案 A） ──────────────
+// 模拟「已持久化的历史 MML 任务」，使命令记录面板在首次进入时非空。接后端时由
+// useMMLTasks(GET /mml/tasks) 列表 + useMMLTaskResults 结果替换（见 useConsoleHistory）。
+function seedRecord(id: string, time: string, cmd: CommandItem, deviceCount: number): ExecRecord {
+  const sns = MOCK_DEVICES.slice(0, deviceCount).map((d) => d.sn);
+  const columns = buildColumns(cmd);
+  const read = isReadOp(cmd.operationType);
+  return {
+    id,
+    time,
+    commandName: cmd.commandName,
+    operationType: cmd.operationType,
+    deviceCount,
+    execMeta: {
+      operationType: cmd.operationType,
+      read,
+      label: cmd.commandCode,
+      commandName: cmd.commandName,
+    },
+    columns,
+    rows: buildResultRows(columns, sns, read, cmd.operationType),
+  };
+}
+
+export const MOCK_HISTORY: ExecRecord[] = [
+  seedRecord('seed-2', '09:48:12', MOCK_COMMANDS[6], 8), // LST 查询活动告警
+  seedRecord('seed-1', '09:12:30', MOCK_COMMANDS[0], 12), // LST 查询设备基本信息
+];

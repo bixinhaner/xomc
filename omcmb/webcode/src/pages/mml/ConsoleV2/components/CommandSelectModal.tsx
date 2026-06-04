@@ -86,7 +86,7 @@ export default function CommandSelectModal({
 
   return (
     <Modal
-      title="选择 MML 命令"
+      title="选择命令"
       open={open}
       width={860}
       onCancel={onCancel}
@@ -131,15 +131,24 @@ export default function CommandSelectModal({
               </Space>
               <Text type="secondary" code>{selectedCommand.commandCode}</Text>
               <Paragraph style={{ marginBottom: 4 }}>{selectedCommand.description}</Paragraph>
-              <Text strong>涉及参数路径（{selectedCommand.paramPaths.length} 项）：</Text>
+              <Text strong>参数 PATH（{selectedCommand.paramPaths.length} 项）：</Text>
               <Space direction="vertical" size={4} style={{ width: '100%' }}>
                 {selectedCommand.paramPaths.map((p) => (
-                  <div key={p.path} style={{ fontSize: 12 }}>
-                    <Tag color={p.writable ? 'orange' : 'blue'} style={{ marginInlineEnd: 6 }}>
-                      {p.writable ? '可写' : '只读'}
-                    </Tag>
-                    <Text code style={{ fontSize: 12 }}>{p.path}</Text>
-                    <Text type="secondary"> — {p.label}</Text>
+                  <div
+                    key={p.path}
+                    style={{ display: 'flex', alignItems: 'baseline', gap: 8, fontSize: 12, minWidth: 0 }}
+                  >
+                    {/* PATH 名称固定宽展示,PATH 过长截断 + hover Tooltip 显示完整(§3.10.2) */}
+                    <Text style={{ flex: '0 0 96px' }} ellipsis={{ tooltip: p.label }}>
+                      {p.label}
+                    </Text>
+                    <Text
+                      code
+                      style={{ flex: 1, minWidth: 0, fontSize: 12 }}
+                      ellipsis={{ tooltip: p.path }}
+                    >
+                      {p.path}
+                    </Text>
                   </div>
                 ))}
               </Space>

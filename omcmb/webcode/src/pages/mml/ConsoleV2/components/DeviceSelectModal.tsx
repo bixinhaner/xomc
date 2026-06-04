@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import {
   Badge,
   Button,
+  Checkbox,
   Input,
   Modal,
   Select,
@@ -13,7 +14,7 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import type { DeviceItem, DeviceStatus } from '../types';
 import { MOCK_DEVICES } from '../mock';
-import { DEVICE_MODAL_PAGE_SIZE } from '../constants';
+import { DEVICE_MODAL_PAGE_SIZE, MAX_SELECT_ALL } from '../constants';
 
 const { Text } = Typography;
 
@@ -32,9 +33,10 @@ interface DeviceSelectModalProps {
 }
 
 /**
- * 设备选择弹框（设计 §3.3.1）—— 支持 设备编码(SN) / 产品 / 产品类型 三维 AND 筛选
- * + 表格多选 + 批量粘贴 SN，确定后回填顶部选择条。当前为 mock：数据来自 MOCK_DEVICES，
- * 前端内存过滤/分页（真实接入时改为服务端过滤）。
+ * 设备选择弹框（设计 §3.3.1 + §3.10.1，2026-06-04 修订）—— SN/产品/产品类型 三维 AND 筛选
+ * + 表格多选 + 批量输入。**表头全选 = 选中筛选命中的全部数据（跨页，不限当前页）**，上限
+ * MAX_SELECT_ALL=200。当前为 mock：数据来自 MOCK_DEVICES，前端内存过滤/分页（真实接入时
+ * 改服务端过滤 + GET /devices 取回筛选 SN）。
  */
 export default function DeviceSelectModal({
   open,
@@ -51,8 +53,7 @@ export default function DeviceSelectModal({
   const [pasteText, setPasteText] = useState('');
   const [wasOpen, setWasOpen] = useState(false);
 
-  // 打开时回填当前选择并重置筛选。用 React 官方「prop 变化时在渲染阶段调整 state」模式
-  // （而非 useEffect），避开 ESLint react-hooks/set-state-in-effect。
+  // 打开时恢复上次选择（不自动全选）。渲染阶段调整 state,避开 set-state-in-effect。
   if (open !== wasOpen) {
     setWasOpen(open);
     if (open) {
@@ -64,15 +65,6 @@ export default function DeviceSelectModal({
     }
   }
 
-  const productOptions = useMemo(
-    () => Array.from(new Set(MOCK_DEVICES.map((d) => d.productName))).map((p) => ({ label: p, value: p })),
-    [],
-  );
-  const classOptions = useMemo(
-    () => Array.from(new Set(MOCK_DEVICES.map((d) => d.productClass))).map((c) => ({ label: c, value: c })),
-    [],
-  );
-
   const filtered = useMemo(() => {
     const kw = snKeyword.trim().toLowerCase();
     return MOCK_DEVICES.filter((d) => {
@@ -82,6 +74,25 @@ export default function DeviceSelectModal({
       return true;
     });
   }, [snKeyword, productFilter, classFilter]);
+
+  const overLimit = filtered.length > MAX_SELECT_ALL;
+  // 表头全选目标 = 筛选命中的前 200 台 SN（跨页）。
+  const cappedFilteredSns = useMemo(
+    () => filtered.slice(0, MAX_SELECT_ALL).map((d) => d.sn),
+    [filtered],
+  );
+  const allFilteredSelected =
+    cappedFilteredSns.length > 0 && cappedFilteredSns.every((sn) => selected.includes(sn));
+  const someSelected = selected.length > 0 && !allFilteredSelected;
+
+  const productOptions = useMemo(
+    () => Array.from(new Set(MOCK_DEVICES.map((d) => d.productName))).map((p) => ({ label: p, value: p })),
+    [],
+  );
+  const classOptions = useMemo(
+    () => Array.from(new Set(MOCK_DEVICES.map((d) => d.productClass))).map((c) => ({ label: c, value: c })),
+    [],
+  );
 
   const handlePasteConfirm = () => {
     const sns = pasteText
@@ -97,7 +108,7 @@ export default function DeviceSelectModal({
         matched += 1;
       }
     });
-    setSelected(Array.from(merged));
+    setSelected(Array.from(merged).slice(0, MAX_SELECT_ALL));
     setPasteOpen(false);
     setPasteText('');
     Modal.info({
@@ -125,7 +136,7 @@ export default function DeviceSelectModal({
   return (
     <>
       <Modal
-        title="选择目标设备"
+        title="选择设备"
         open={open}
         width={860}
         onCancel={onCancel}
@@ -172,8 +183,13 @@ export default function DeviceSelectModal({
             <Button onClick={() => setPasteOpen(true)}>批量输入</Button>
           </Space>
 
-          <Space>
+          <Space wrap>
             <Badge status="processing" text={<Text>已选 {selected.length} 台</Text>} />
+            {overLimit && (
+              <Text type="warning" style={{ fontSize: 12 }}>
+                筛选命中 {filtered.length} 台，已超单次执行上限 {MAX_SELECT_ALL} 台，全选仅选中前 {MAX_SELECT_ALL} 台
+              </Text>
+            )}
             {selected.length > 0 && (
               <Button type="link" size="small" onClick={() => setSelected([])}>
                 清空已选
@@ -190,6 +206,14 @@ export default function DeviceSelectModal({
               selectedRowKeys: selected,
               onChange: (keys) => setSelected(keys as string[]),
               preserveSelectedRowKeys: true,
+              // 表头全选接管为「筛选命中的全部数据（跨页,上限 200）」,而非仅当前页。
+              columnTitle: (
+                <Checkbox
+                  checked={allFilteredSelected}
+                  indeterminate={someSelected}
+                  onChange={(e) => setSelected(e.target.checked ? cappedFilteredSns : [])}
+                />
+              ),
             }}
             pagination={{
               current: page,

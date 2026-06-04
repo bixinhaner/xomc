@@ -54,3 +54,9 @@ export const STATUS_META: Record<ExecStatus, { color: string; text: string }> = 
 
 /** 设备弹框服务端分页每页条数（mock 沿用现控制台 50 条上限）。 */
 export const DEVICE_MODAL_PAGE_SIZE = 10;
+
+// 单次执行设备数上限（设计 §3.10.1，2026-06-04 用户决策 200）。
+// 依据：MML 执行无显式上限,但扇出单批 BatchCreateTasks 受 PostgreSQL 65535 bind 参数
+// 约束(~5000 行硬顶),且每设备一个 Connection Request 受 ACS 准入/限流。200 远低于硬顶、
+// ACS 可从容承接,>200 台规模化下发应走脚本任务。「全选满足筛选条件全部」最多选中前 200 台。
+export const MAX_SELECT_ALL = 200;
