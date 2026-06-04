@@ -241,7 +241,8 @@ func (a *Aggregator) evalAndInsertKPIs(
 //   - sum / avg / max 三路 CASE WHEN
 //   - GROUP BY 包含 statis_type 防止同 metric_path 但 statis 不同时合并冲突
 //   - 时间列 time/start_time/end_time 全部由 cron 注入的 w.Start/w.End 决定（桶整对齐）
-//   - object_ldn 用 MIN 取代表值（同 GROUP BY 内业务上应一致）
+//   - object_ldn（小区/PLMN）进 GROUP BY 尾部，基础小区/各 PLMN 各自成行、各自聚合，
+//     不再用 MIN 取代表值拍平（T-A 物化保留小区/PLMN 维度）
 //
 // 目标表 ON CONFLICT 分两种：
 //   - hourly：UNIQUE (oui, sn, metric_path, granularity, end_time, time)
@@ -280,14 +281,14 @@ SELECT
     $2,
     $3,
     NOW(),
-    MIN(m.object_ldn),
+    m.object_ldn,
     NULL::jsonb
 FROM %s m
 WHERE m.metric_type = 'counter'
   AND m.end_time >= $4
   AND m.end_time <  $5
   AND m.statis_type IN ('sum','avg','max','min')
-GROUP BY m.device_oui, m.device_sn, m.metric_path, m.statis_type
+GROUP BY m.device_oui, m.device_sn, m.metric_path, m.statis_type, m.object_ldn
 ON CONFLICT %s DO UPDATE SET
     metric_value = EXCLUDED.metric_value,
     ingest_time  = NOW()`,
@@ -318,22 +319,40 @@ WHERE metric_type = 'counter'
 	return sql, []any{string(w.Granularity), w.End, w.Start}
 }
 
-// buildLoadCountersForDeviceSQL 构造"取某设备本桶各 counter 值" SELECT。
+// buildLoadCountersForDeviceSQL 构造"取某设备本桶各 counter 值"（折回设备级）SELECT。
 //
 // 与 buildListDevicesInBucketSQL 同理：读 target 表必须精确命中本桶
 // （end_time = w.End），不能用半开区间——否则会命中上一桶（其 end_time = 本桶 w.Start）。
 //
+// 【T-A 关键】：T-A 后 target 表每个 metric_path 按 object_ldn 分多行（小区/PLMN 物化），
+// 而 KPI 当前仍是"设备级、不分小区"（per-cell KPI 是 T-B）。因此这里必须把同 metric_path
+// 的多个 object_ldn 行**按 statis_type 路由聚合折回设备级单值**（与 buildCountersSQL 同口径：
+// sum→SUM / avg→AVG / max→MAX / min→MIN），否则多小区设备装载进 map 会互相覆盖、
+// 且无 ORDER BY 结果非确定，KPI 入参会变成"某个随机小区的计数值"而非设备总量。
+//
+// 同 metric_path 下 statis_type 在物化时已固定一致（buildCountersSQL 把 statis_type 进了
+// GROUP BY 但 KPI 取数不分 statis_type），故用 MIN(statis_type) 取该 metric_path 的代表
+// statis_type 路由聚合分支即可。GROUP BY metric_path 保证每指标一行折回设备级。
+//
 // 参数顺序：$1=oui, $2=sn, $3=granularity, $4=bucket_end(=w.End), $5=bucket_start(=w.Start)
 func buildLoadCountersForDeviceSQL(target, oui, sn string, w WindowSpec) (string, []any) {
 	sql := fmt.Sprintf(`
-SELECT metric_path, metric_value
+SELECT metric_path,
+    CASE MIN(statis_type)
+        WHEN 'sum' THEN SUM(metric_value)
+        WHEN 'avg' THEN AVG(metric_value)
+        WHEN 'max' THEN MAX(metric_value)
+        WHEN 'min' THEN MIN(metric_value)
+        ELSE SUM(metric_value)
+    END
 FROM %s
 WHERE device_oui = $1
   AND device_sn  = $2
   AND metric_type = 'counter'
   AND granularity = $3
   AND end_time = $4
-  AND time = $5`, target)
+  AND time = $5
+GROUP BY metric_path`, target)
 	return sql, []any{oui, sn, string(w.Granularity), w.End, w.Start}
 }
 
@@ -367,7 +386,9 @@ func buildKPIInsertSQL(target string, dev deviceKey, w WindowSpec, rows []kpiRow
 		gran := add(string(w.Granularity))
 		bktStart := add(w.Start)
 		bktEnd := add(w.End)
-		core := fmt.Sprintf("(%s, %s, %s, 'kpi', %s, %s, %s, %s, %s, %s, NOW(), NULL, NULL::jsonb)",
+		// object_ldn 收紧为 NOT NULL DEFAULT '' 后不能再写 NULL（否则违反约束）；
+		// KPI 当前仍是"设备级、不分小区"行为（per-cell KPI 是 T-B），故写空串保持现状。
+		core := fmt.Sprintf("(%s, %s, %s, 'kpi', %s, %s, %s, %s, %s, %s, NOW(), '', NULL::jsonb)",
 			oui, sn, path, val, stype, gran, bktStart, bktStart, bktEnd)
 		if withID {
 			core = "(gen_random_uuid(), " + core[1:]
@@ -391,22 +412,26 @@ ON CONFLICT %s DO UPDATE SET
 // ── 表名路由 / 冲突列 ──────────────────────────────────────────────────────
 
 // conflictTargetForTable 返回 ON CONFLICT 的列清单。
-//   - hourly 用 UNIQUE INDEX (oui, sn, metric_path, granularity, end_time, time)
-//   - daily/weekly/monthly 用 PRIMARY KEY (oui, sn, metric_path, granularity, end_time)
+//   - hourly 用 UNIQUE INDEX (oui, sn, metric_path, granularity, end_time, time, object_ldn)
+//   - daily/weekly/monthly 用 PRIMARY KEY (oui, sn, metric_path, granularity, end_time, object_ldn)
 //   - group_hourly 用 UNIQUE (device_group_id, metric_path, granularity, end_time, time)
 //   - group_daily/weekly/monthly 用 PRIMARY KEY (device_group_id, metric_path, granularity, end_time)
+//
+// 设备级四表的冲突列尾部含 object_ldn（小区/PLMN）—— 与迁移 000020 的唯一键改动配套，
+// 让同设备同指标同桶按小区/PLMN 分多行落库、各自 UPSERT。
+// device_group 四表本次不分小区（决策 #1），冲突列保持原样。
 func conflictTargetForTable(target string) string {
 	switch target {
 	case "pm_metrics_hourly":
-		return "(device_oui, device_sn, metric_path, granularity, end_time, time)"
+		return "(device_oui, device_sn, metric_path, granularity, end_time, time, object_ldn)"
 	case "pm_metrics_daily", "pm_metrics_weekly", "pm_metrics_monthly":
-		return "(device_oui, device_sn, metric_path, granularity, end_time)"
+		return "(device_oui, device_sn, metric_path, granularity, end_time, object_ldn)"
 	case "pm_group_metrics_hourly":
 		return "(device_group_id, metric_path, granularity, end_time, time)"
 	case "pm_group_metrics_daily", "pm_group_metrics_weekly", "pm_group_metrics_monthly":
 		return "(device_group_id, metric_path, granularity, end_time)"
 	}
-	return "(device_oui, device_sn, metric_path, granularity, end_time)"
+	return "(device_oui, device_sn, metric_path, granularity, end_time, object_ldn)"
 }
 
 // targetHasIDColumn hourly 表（hypertable 要求 PK 含分区列 time，故保留 id 列）。

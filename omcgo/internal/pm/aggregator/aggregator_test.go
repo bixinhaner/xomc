@@ -38,8 +38,12 @@ func Test_buildCountersSQL_HourlyFromPmMetrics(t *testing.T) {
 	// hourly 目标含 id 列（hypertable）
 	assert.Contains(t, sql, "INSERT INTO pm_metrics_hourly (id, device_oui")
 	assert.Contains(t, sql, "gen_random_uuid()")
-	// hourly 冲突目标含 time 列
-	assert.Contains(t, sql, "ON CONFLICT (device_oui, device_sn, metric_path, granularity, end_time, time)")
+	// hourly 冲突目标含 time 列 + 小区/PLMN（T-A 物化分层）
+	assert.Contains(t, sql, "ON CONFLICT (device_oui, device_sn, metric_path, granularity, end_time, time, object_ldn)")
+	// 小区/PLMN 进 GROUP BY 尾部、且不再用 MIN 取代表值拍平
+	assert.Contains(t, sql, "GROUP BY m.device_oui, m.device_sn, m.metric_path, m.statis_type, m.object_ldn")
+	assert.NotContains(t, sql, "MIN(m.object_ldn)", "小区进分组后不应再 MIN 取代表值")
+	assert.Contains(t, sql, "m.object_ldn,", "object_ldn 应原样带入 SELECT")
 	// source 表名正确
 	assert.Contains(t, sql, "FROM pm_metrics m")
 	// args 顺序：granularity / bucket_start / bucket_end / where_start / where_end
@@ -57,8 +61,11 @@ func Test_buildCountersSQL_DailyFromHourly(t *testing.T) {
 	// daily 目标无 id 列
 	assert.Contains(t, sql, "INSERT INTO pm_metrics_daily (device_oui")
 	assert.NotContains(t, sql, "gen_random_uuid()")
-	// daily 冲突目标无 time 列（PK 是 5 列）
-	assert.Contains(t, sql, "ON CONFLICT (device_oui, device_sn, metric_path, granularity, end_time)")
+	// daily 冲突目标无 time 列，但 PK 尾部含 object_ldn（T-A 物化分层，6 列）
+	assert.Contains(t, sql, "ON CONFLICT (device_oui, device_sn, metric_path, granularity, end_time, object_ldn)")
+	// 小区/PLMN 进 GROUP BY、不再 MIN 拍平
+	assert.Contains(t, sql, "GROUP BY m.device_oui, m.device_sn, m.metric_path, m.statis_type, m.object_ldn")
+	assert.NotContains(t, sql, "MIN(m.object_ldn)")
 	// source = hourly
 	assert.Contains(t, sql, "FROM pm_metrics_hourly m")
 	// granularity 参数
@@ -79,6 +86,61 @@ func Test_buildCountersSQL_GroupHourlyHasGroupIDConflict(t *testing.T) {
 	assert.Equal(t,
 		"(device_group_id, metric_path, granularity, end_time)",
 		conflictTargetForTable("pm_group_metrics_daily"))
+	// device_group 四表本次不分小区（决策 #1）——冲突列绝不含 object_ldn
+	for _, gt := range []string{
+		"pm_group_metrics_hourly", "pm_group_metrics_daily",
+		"pm_group_metrics_weekly", "pm_group_metrics_monthly",
+	} {
+		assert.NotContains(t, conflictTargetForTable(gt), "object_ldn",
+			"group 表冲突列不应含 object_ldn："+gt)
+	}
+}
+
+// 设备级四表的 ON CONFLICT 冲突列尾部都必须含 object_ldn（与迁移 000020 唯一键配套）。
+func Test_conflictTargetForTable_DeviceTablesIncludeObjectLdn(t *testing.T) {
+	assert.Equal(t,
+		"(device_oui, device_sn, metric_path, granularity, end_time, time, object_ldn)",
+		conflictTargetForTable("pm_metrics_hourly"))
+	for _, dt := range []string{"pm_metrics_daily", "pm_metrics_weekly", "pm_metrics_monthly"} {
+		assert.Equal(t,
+			"(device_oui, device_sn, metric_path, granularity, end_time, object_ldn)",
+			conflictTargetForTable(dt), dt)
+	}
+}
+
+// buildKPIInsertSQL：object_ldn 必须写空串 '' 而非 NULL（object_ldn 收紧 NOT NULL 后防约束崩）。
+// 覆盖 hourly（带 id 列）与 daily（不带 id）两种目标表。
+func Test_buildKPIInsertSQL_ObjectLdnIsEmptyStringNotNull(t *testing.T) {
+	w := WindowSpec{
+		Granularity: metrics.GranularityHourly,
+		Start:       time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC),
+		End:         time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),
+	}
+	rows := []kpiRow{{path: "K1", value: 0.8, stype: "pct"}}
+
+	// hourly：带 id 列，VALUES 以 gen_random_uuid() 开头
+	hourlySQL, _ := buildKPIInsertSQL("pm_metrics_hourly", deviceKey{oui: "A", sn: "S1"}, w, rows)
+	assert.Contains(t, hourlySQL, "NOW(), '', NULL::jsonb)",
+		"hourly KPI 行 object_ldn 必须是空串而非 NULL")
+	assert.NotContains(t, hourlySQL, "NOW(), NULL, NULL::jsonb)",
+		"不应再有 object_ldn=NULL 的旧写法")
+	assert.Contains(t, hourlySQL, "gen_random_uuid()")
+	assert.Contains(t, hourlySQL,
+		"ON CONFLICT (device_oui, device_sn, metric_path, granularity, end_time, time, object_ldn)")
+
+	// daily：不带 id 列
+	dailyW := WindowSpec{
+		Granularity: metrics.GranularityDaily,
+		Start:       time.Date(2026, 5, 22, 0, 0, 0, 0, time.UTC),
+		End:         time.Date(2026, 5, 23, 0, 0, 0, 0, time.UTC),
+	}
+	dailySQL, _ := buildKPIInsertSQL("pm_metrics_daily", deviceKey{oui: "A", sn: "S1"}, dailyW, rows)
+	assert.Contains(t, dailySQL, "NOW(), '', NULL::jsonb)",
+		"daily KPI 行 object_ldn 必须是空串而非 NULL")
+	assert.NotContains(t, dailySQL, "NOW(), NULL, NULL::jsonb)")
+	assert.NotContains(t, dailySQL, "gen_random_uuid()", "daily 无 id 列")
+	assert.Contains(t, dailySQL,
+		"ON CONFLICT (device_oui, device_sn, metric_path, granularity, end_time, object_ldn)")
 }
 
 // ---------------------------------------------------------------------------
@@ -436,6 +498,163 @@ func Test_buildLoadCountersForDeviceSQL_PreciseBucketMatch_Daily(t *testing.T) {
 	assert.NotContains(t, sql, "end_time <")
 	assert.Contains(t, sql, "FROM pm_metrics_daily")
 	assert.Equal(t, []any{"A", "S1", "daily", w.End, w.Start}, args)
+}
+
+// ---------------------------------------------------------------------------
+// T-A B1：装载计数器必须按 metric_path 折回设备级（多 object_ldn 行聚合，不被覆盖）
+// ---------------------------------------------------------------------------
+
+// buildLoadCountersForDeviceSQL 在 T-A 后必须 GROUP BY metric_path 并按 statis_type 路由聚合，
+// 否则同 metric_path 的多个 object_ldn（小区/PLMN）行装载进 map 会互相覆盖、结果非确定。
+func Test_buildLoadCountersForDeviceSQL_AggregatesByMetricPath(t *testing.T) {
+	w := WindowSpec{
+		Granularity: metrics.GranularityHourly,
+		Start:       time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC),
+		End:         time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),
+	}
+	sql, _ := buildLoadCountersForDeviceSQL("pm_metrics_hourly", "A", "S1", w)
+
+	assert.Contains(t, sql, "GROUP BY metric_path", "必须按 metric_path 折回设备级")
+	assert.Contains(t, sql, "CASE MIN(statis_type)", "按 statis_type 路由聚合分支")
+	assert.Contains(t, sql, "WHEN 'sum' THEN SUM(metric_value)")
+	assert.Contains(t, sql, "WHEN 'avg' THEN AVG(metric_value)")
+	assert.Contains(t, sql, "WHEN 'max' THEN MAX(metric_value)")
+	assert.Contains(t, sql, "WHEN 'min' THEN MIN(metric_value)")
+	// 不再是裸 SELECT metric_value（会被 map 覆盖）
+	assert.NotContains(t, sql, "SELECT metric_path, metric_value")
+}
+
+// ---------------------------------------------------------------------------
+// T-A B1 行为单测：用"会真做 GROUP BY 聚合"的智能桩证明多小区行折回设备级单值
+// ---------------------------------------------------------------------------
+
+// cellRow 带 object_ldn / statis_type，供 object_ldn-aware 桩按 metric_path 聚合。
+type cellRow struct {
+	oui, sn   string
+	path      string
+	value     float64
+	statis    string
+	objectLdn string
+	endTime   time.Time
+	timeCol   time.Time
+}
+
+// cellAwareDB 复现 T-A 后 target 表：同 metric_path 多 object_ldn 行，
+// loadCountersForDevice 的 SQL（GROUP BY metric_path + CASE MIN(statis_type) 路由聚合）
+// 在桩里如实执行，证明装载到的是聚合值而非"末行覆盖值"。
+type cellAwareDB struct {
+	rows    []cellRow
+	execTag pgconn.CommandTag
+	execArg []any
+}
+
+func (db *cellAwareDB) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	db.execArg = args
+	return db.execTag, nil
+}
+
+func (db *cellAwareDB) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	return errRow{err: errors.New("cellAwareDB.QueryRow unimplemented")}
+}
+
+func (db *cellAwareDB) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	// listDevicesInBucket: args = [granularity, end_time, time]
+	if len(args) == 3 {
+		want := args[1].(time.Time)
+		seen := map[deviceKey]bool{}
+		var out [][]any
+		for _, r := range db.rows {
+			if r.endTime.Equal(want) {
+				k := deviceKey{r.oui, r.sn}
+				if !seen[k] {
+					seen[k] = true
+					out = append(out, []any{r.oui, r.sn})
+				}
+			}
+		}
+		return &fakeRows{rows: out}, nil
+	}
+	// loadCountersForDevice: args = [oui, sn, granularity, end_time, time]
+	// 如实执行 GROUP BY metric_path + 按 statis_type 路由聚合（sum/avg/max/min）。
+	if len(args) == 5 {
+		oui := args[0].(string)
+		sn := args[1].(string)
+		want := args[3].(time.Time)
+		type acc struct {
+			statis string
+			sum    float64
+			cnt    int
+			max    float64
+			min    float64
+		}
+		agg := map[string]*acc{}
+		for _, r := range db.rows {
+			if r.oui != oui || r.sn != sn || !r.endTime.Equal(want) {
+				continue
+			}
+			a := agg[r.path]
+			if a == nil {
+				a = &acc{statis: r.statis, max: r.value, min: r.value}
+				agg[r.path] = a
+			}
+			if r.statis < a.statis { // 模拟 MIN(statis_type)
+				a.statis = r.statis
+			}
+			a.sum += r.value
+			a.cnt++
+			if r.value > a.max {
+				a.max = r.value
+			}
+			if r.value < a.min {
+				a.min = r.value
+			}
+		}
+		var out [][]any
+		for path, a := range agg {
+			var v float64
+			switch a.statis {
+			case "avg":
+				v = a.sum / float64(a.cnt)
+			case "max":
+				v = a.max
+			case "min":
+				v = a.min
+			default: // sum
+				v = a.sum
+			}
+			out = append(out, []any{path, v})
+		}
+		return &fakeRows{rows: out}, nil
+	}
+	return nil, errors.New("cellAwareDB.Query unexpected args len")
+}
+
+// 同 metric_path 两条 object_ldn 行（sum 口径）→ 装载结果必须是两小区之和，而非末行值。
+func Test_AggregateKPIs_MultiCellCounters_FoldBackToDevice(t *testing.T) {
+	curStart := time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC)
+	curEnd := time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC)
+
+	db := &cellAwareDB{
+		execTag: pgconn.NewCommandTag("INSERT 0 1"),
+		rows: []cellRow{
+			// numerator：小区1=30 + 小区2=50 = 80（sum 口径）；若被 map 覆盖只会留某一行 30 或 50
+			{oui: "A", sn: "S1", path: "numerator", value: 30, statis: "sum", objectLdn: "Cell1", endTime: curEnd, timeCol: curStart},
+			{oui: "A", sn: "S1", path: "numerator", value: 50, statis: "sum", objectLdn: "Cell2", endTime: curEnd, timeCol: curStart},
+			// denominator：小区1=60 + 小区2=40 = 100
+			{oui: "A", sn: "S1", path: "denominator", value: 60, statis: "sum", objectLdn: "Cell1", endTime: curEnd, timeCol: curStart},
+			{oui: "A", sn: "S1", path: "denominator", value: 40, statis: "sum", objectLdn: "Cell2", endTime: curEnd, timeCol: curStart},
+		},
+	}
+	kr := &stubKPIRouter{byDevice: map[string]*router.KPIRoute{"S1": avilRateRoute()}}
+	a := New(db, kr, nil)
+	w := WindowSpec{Granularity: metrics.GranularityHourly, Start: curStart, End: curEnd}
+
+	n, err := a.AggregateKPIs(context.Background(), "pm_metrics_hourly", w)
+	require.NoError(t, err)
+	assert.Equal(t, 1, n)
+	require.Len(t, db.execArg, 8)
+	// 设备级 KPI = (30+50) / (60+40) = 0.8；若读侧未聚合（map 覆盖）会得到某随机小区比值
+	assert.Equal(t, float64(0.8), db.execArg[3], "多小区计数必须折回设备级求和后再算 KPI")
 }
 
 // ---------------------------------------------------------------------------
