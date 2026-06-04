@@ -33,13 +33,14 @@ import {
   Tag,
   Typography,
 } from 'antd';
-import { ReloadOutlined, LineChartOutlined } from '@ant-design/icons';
+import { ReloadOutlined, LineChartOutlined, ExportOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import {
   useAggregatedMetricsByDevices,
   useMetricObjectsByDevices,
 } from '@core/hooks/api/usePmQuery';
 import { usePmAdhocList } from '@core/hooks/api/usePmAdhoc';
+import { useCreateKpiExport } from '@core/hooks/api/useKpiExport';
 import type { DeviceType } from '@core/types/indicatorLibrary';
 import type { Granularity } from '@core/types/pmDashboard';
 import DevicePickerModal from '../KPIQuery/components/DevicePickerModal';
@@ -56,6 +57,12 @@ import {
   filterRowsByWeekdayHour,
   previousWindow,
 } from './dashboardFilterUtils';
+import {
+  buildDashboardExportParams,
+  validateDashboardExportSelection,
+  defaultExportTaskName,
+  type DashboardExportSelection,
+} from './kpiExportParams';
 
 // 制式 ↔ 设备类型 ↔ 内置任务 technology 三者映射。
 type Tech = 'lte' | 'nr' | 'gsm';
@@ -243,6 +250,52 @@ export default function DeviceListPane() {
     setCellSel({}); // 设备清空 → 下钻选择重置（全选）。
   };
 
+  // ── 导出（T4 dashboard 来源）：带当前筛选 POST 建任务，不卡页面 ──────────
+  const createExport = useCreateKpiExport();
+
+  // 组装当前筛选快照（与 handleQuery 同口径：设备/指标/粒度/时间）。
+  // 小区/PLMN 下钻白名单本期不带进导出（后端无对应过滤，见 kpiExportParams.ts 文件头注）。
+  const buildExportSelection = (): DashboardExportSelection => {
+    const [start, end] = filter.range;
+    return {
+      technology: tech,
+      deviceSns,
+      metricPaths,
+      granularity,
+      startTime: start.toISOString(),
+      endTime: end.toISOString(),
+    };
+  };
+
+  const handleExport = () => {
+    const sel = buildExportSelection();
+    const missing = validateDashboardExportSelection(sel);
+    if (missing) {
+      message.warning(intl.formatMessage({ id: missing }));
+      return;
+    }
+    createExport.mutate(
+      {
+        sourceType: 'dashboard',
+        params: buildDashboardExportParams(sel),
+        taskName: defaultExportTaskName('dashboard'),
+      },
+      {
+        onSuccess: () => {
+          message.success(intl.formatMessage({ id: 'kpiExport.export.submitted' }));
+        },
+        onError: (e) => {
+          message.error(
+            intl.formatMessage(
+              { id: 'kpiExport.export.submitFailed' },
+              { reason: (e as Error)?.message ?? '' },
+            ),
+          );
+        },
+      },
+    );
+  };
+
   const handleQuery = () => {
     if (deviceSns.length === 0) {
       message.warning(intl.formatMessage({ id: 'perf.dashboard.selectAtLeastOneDevice' }));
@@ -392,6 +445,14 @@ export default function DeviceListPane() {
                 disabled={!submitted}
               >
                 {intl.formatMessage({ id: 'common.refresh' })}
+              </Button>
+              <Button
+                icon={<ExportOutlined />}
+                loading={createExport.isPending}
+                onClick={handleExport}
+                title={intl.formatMessage({ id: 'kpiExport.export.tooltip' })}
+              >
+                {intl.formatMessage({ id: 'kpiExport.export.button' })}
               </Button>
             </Space>
           </div>

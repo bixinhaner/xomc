@@ -1,0 +1,266 @@
+package export
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/omcgo/omcgo/internal/pm/aggregator"
+	"github.com/omcgo/omcgo/internal/pm/metrics"
+)
+
+// batchSize 是流式取数每批行数（设计 §5.4：每批约 5000，绝不一次性把全量读进内存）。
+const batchSize = 5000
+
+// RowSource 是流式取数的统一契约：每次调 Next 返回下一批 ExportRow，
+// done=true 时表示数据已取完。实现内部用 keyset / 批次游标推进，不持有全量行。
+type RowSource interface {
+	Next(ctx context.Context) (rows []ExportRow, done bool, err error)
+}
+
+// PgQuerier 是取数所需的最小 pgxpool 子集（device / adhoc 直查表用），便于单测 stub。
+type PgQuerier = aggregator.PgQuerier
+
+// ── dashboard device 维度：keyset 流式直查 ───────────────────────────────────
+//
+// 对 device 维度（pm_metrics / pm_metrics_hourly 等含 id 列的行级表），按 (time, id) keyset
+// 游标推进分批查库——这是设计 §5.4 指定的"按 time,id 推进、不漏不重"的关键路径，
+// 死判 T2-rowcount-match 走此路。聚合维度（group/product/band/network）无行级 id，走
+// dashboardAggregateSource 的批次游标兜底。
+
+// dashboardDeviceSource 对 device 维度做 (time, id) keyset 流式取数。
+type dashboardDeviceSource struct {
+	db    PgQuerier
+	table string
+	req   aggregator.QueryRequest
+
+	curTime time.Time
+	curID   uuid.UUID
+	started bool
+	done    bool
+}
+
+func newDashboardDeviceSource(db PgQuerier, table string, req aggregator.QueryRequest) *dashboardDeviceSource {
+	return &dashboardDeviceSource{db: db, table: table, req: req}
+}
+
+func (s *dashboardDeviceSource) Next(ctx context.Context) ([]ExportRow, bool, error) {
+	if s.done {
+		return nil, true, nil
+	}
+	sqlStr, args := buildDeviceKeysetSQL(s.table, s.req, s.started, s.curTime, s.curID, batchSize)
+	rows, err := s.db.Query(ctx, sqlStr, args...)
+	if err != nil {
+		return nil, false, fmt.Errorf("export dashboard device query %s: %w", s.table, err)
+	}
+	defer rows.Close()
+
+	out := make([]ExportRow, 0, batchSize)
+	var lastTime time.Time
+	var lastID uuid.UUID
+	n := 0
+	for rows.Next() {
+		var id uuid.UUID
+		var oui, sn, metricPath, metricType, gran string
+		var statis, ldn *string
+		var value float64
+		var tm, st, et time.Time
+		if err := rows.Scan(&id, &oui, &sn, &metricPath, &metricType, &value, &statis, &gran, &tm, &st, &et, &ldn); err != nil {
+			return nil, false, fmt.Errorf("export dashboard device scan %s: %w", s.table, err)
+		}
+		out = append(out, ExportRow{
+			Device:      deviceLabel(oui, sn),
+			CellPLMN:    derefStr(ldn),
+			MetricCode:  metricPath,
+			MetricType:  metricType,
+			Granularity: gran,
+			Time:        tm,
+			StartTime:   st,
+			EndTime:     et,
+			Value:       value,
+			StatisType:  derefStr(statis),
+		})
+		lastTime, lastID = tm, id
+		n++
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, fmt.Errorf("export dashboard device rows %s: %w", s.table, err)
+	}
+
+	s.started = true
+	if n < batchSize {
+		s.done = true
+	} else {
+		s.curTime, s.curID = lastTime, lastID
+	}
+	return out, false, nil
+}
+
+// ── dashboard 聚合维度：批次游标兜底（含 KPI 反算） ─────────────────────────
+//
+// group/product/band/network 维度在 aggregator.Query 内现场 GROUP BY + KPI 反算，无行级 id，
+// 无法做 (time,id) keyset。改用 limit/offset 批次游标分批拉 aggregator.Query（每批 batchSize），
+// 同样不把全量读进内存。聚合行通常远少于 device 行（分组后），批次游标开销可接受。
+
+// dashboardAggregateSource 对聚合维度按 offset 批次游标流式取数。
+type dashboardAggregateSource struct {
+	aggr   *aggregator.Aggregator
+	req    aggregator.QueryRequest
+	offset int
+	done   bool
+}
+
+func newDashboardAggregateSource(aggr *aggregator.Aggregator, req aggregator.QueryRequest) *dashboardAggregateSource {
+	return &dashboardAggregateSource{aggr: aggr, req: req}
+}
+
+func (s *dashboardAggregateSource) Next(ctx context.Context) ([]ExportRow, bool, error) {
+	if s.done {
+		return nil, true, nil
+	}
+	req := s.req
+	req.Limit = batchSize
+	req.Offset = s.offset
+	aggRows, err := s.aggr.Query(ctx, req)
+	if err != nil {
+		return nil, false, fmt.Errorf("export dashboard aggregate query: %w", err)
+	}
+	out := make([]ExportRow, 0, len(aggRows))
+	for i := range aggRows {
+		out = append(out, aggregatorRowToExport(aggRows[i]))
+	}
+	if len(aggRows) < batchSize {
+		s.done = true
+	} else {
+		s.offset += batchSize
+	}
+	return out, false, nil
+}
+
+// aggregatorRowToExport 把 aggregator.Row 映射成 ExportRow（聚合维度的设备标识用 SN/AGGREGATED）。
+func aggregatorRowToExport(r aggregator.Row) ExportRow {
+	device := deviceLabel(r.DeviceOUI, r.DeviceSN)
+	if device == "" && r.DeviceGroupID != uuid.Nil {
+		device = "DeviceGroup=" + r.DeviceGroupID.String()
+	}
+	if device == "" && r.ProductID != uuid.Nil {
+		device = "Product=" + r.ProductID.String()
+	}
+	return ExportRow{
+		Device:      device,
+		CellPLMN:    derefStr(r.ObjectLDN),
+		MetricCode:  r.MetricPath,
+		MetricName:  r.DisplayName,
+		MetricType:  string(r.MetricType),
+		Granularity: string(r.Granularity),
+		Time:        r.Time,
+		StartTime:   r.StartTime,
+		EndTime:     r.EndTime,
+		Value:       r.MetricValue,
+		StatisType:  statisStr(r.StatisType),
+	}
+}
+
+// statisStr 把 *metrics.StatisType 解引用成字符串（nil → 空串）。
+func statisStr(p *metrics.StatisType) string {
+	if p == nil {
+		return ""
+	}
+	return string(*p)
+}
+
+// ── adhoc：keyset 流式直查 pm_adhoc_aggregation_results ───────────────────────
+
+// adhocSource 按 task_id 过滤、(time, id) keyset 流式取 adhoc 结果表。
+type adhocSource struct {
+	db        PgQuerier
+	taskID    uuid.UUID
+	startTime time.Time
+	endTime   time.Time
+
+	curTime time.Time
+	curID   uuid.UUID
+	started bool
+	done    bool
+}
+
+func newAdhocSource(db PgQuerier, taskID uuid.UUID, startTime, endTime time.Time) *adhocSource {
+	return &adhocSource{db: db, taskID: taskID, startTime: startTime, endTime: endTime}
+}
+
+func (s *adhocSource) Next(ctx context.Context) ([]ExportRow, bool, error) {
+	if s.done {
+		return nil, true, nil
+	}
+	sqlStr, args := buildAdhocKeysetSQL(s.taskID, s.startTime, s.endTime, s.started, s.curTime, s.curID, batchSize)
+	rows, err := s.db.Query(ctx, sqlStr, args...)
+	if err != nil {
+		return nil, false, fmt.Errorf("export adhoc query: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]ExportRow, 0, batchSize)
+	var lastTime time.Time
+	var lastID uuid.UUID
+	n := 0
+	for rows.Next() {
+		var id uuid.UUID
+		var oui, sn, metricPath, metricType, gran string
+		var statis, ldn *string
+		var value float64
+		var tm, st, et time.Time
+		if err := rows.Scan(&id, &oui, &sn, &metricPath, &metricType, &value, &statis, &gran, &tm, &st, &et, &ldn); err != nil {
+			return nil, false, fmt.Errorf("export adhoc scan: %w", err)
+		}
+		out = append(out, ExportRow{
+			Device:      deviceLabel(oui, sn),
+			CellPLMN:    derefStr(ldn),
+			MetricCode:  metricPath,
+			MetricType:  metricType,
+			Granularity: gran,
+			Time:        tm,
+			StartTime:   st,
+			EndTime:     et,
+			Value:       value,
+			StatisType:  derefStr(statis),
+		})
+		lastTime, lastID = tm, id
+		n++
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, fmt.Errorf("export adhoc rows: %w", err)
+	}
+
+	s.started = true
+	if n < batchSize {
+		s.done = true
+	} else {
+		s.curTime, s.curID = lastTime, lastID
+	}
+	return out, false, nil
+}
+
+// ── helper ──────────────────────────────────────────────────────────────────
+
+func deviceLabel(oui, sn string) string {
+	switch {
+	case oui != "" && sn != "":
+		return oui + "/" + sn
+	case sn != "":
+		return sn
+	case oui != "":
+		return oui
+	default:
+		return ""
+	}
+}
+
+func derefStr(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
+}
+

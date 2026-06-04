@@ -6,12 +6,14 @@ import (
 	"fmt"
 
 	"github.com/omcgo/omcgo/internal/core/asyncjob"
+	minioinfra "github.com/omcgo/omcgo/internal/core/components/minio"
 	"github.com/omcgo/omcgo/internal/core/dictloader"
 	"github.com/omcgo/omcgo/internal/pm"
 	"github.com/omcgo/omcgo/internal/pm/adhoc"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	pmdashboard "github.com/omcgo/omcgo/internal/pm/dashboard"
+	pmexport "github.com/omcgo/omcgo/internal/pm/export"
 	"github.com/omcgo/omcgo/internal/pm/indicator"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
 	"github.com/omcgo/omcgo/internal/pm/kpi/router"
@@ -88,6 +90,18 @@ func initPMModule(c *Container) error {
 	pmQueryTemplateRepo := querytemplate.NewPgRepository(c.PgPool)
 	pmQueryTemplateHandler := querytemplate.NewHandler(pmQueryTemplateRepo, logger.Named("querytemplate"))
 
+	// KPI-EXPORT T1：KPI 数据导出 REST 入口（建任务落表 + 入队 pm_kpi_export job）。
+	// 下载用 presign client（对外可达 host 签链接）；构造失败降级 nil，下载端点返 503。
+	pmExportRepo := pmexport.NewPgRepository(c.PgPool)
+	pmExportSvc := pmexport.NewService(pmExportRepo, pmAsyncJobRepo)
+	var exportPresigner pmexport.Presigner
+	if presignClient, presignErr := minioinfra.NewPresignClient(c.Cfg.MinIO); presignErr != nil {
+		logger.Warn("create MinIO presign client for KPI export failed; download URLs disabled")
+	} else {
+		exportPresigner = presignClient
+	}
+	pmExportHandler := pmexport.NewHandler(pmExportSvc, exportPresigner, logger.Named("export"))
+
 	enabledRepo := indicator.NewPgEnabledRepository(c.PgPool)
 	templateRelRepo := indicator.NewPgTemplateRelRepository(c.PgPool)
 	custNameRepo := indicator.NewPgCustNameRepository(c.PgPool)
@@ -145,6 +159,7 @@ func initPMModule(c *Container) error {
 		pmAdhocHandler:         pmAdhocHandler,
 		pmDashboardHandler:     pmDashboardHandler,
 		pmQueryTemplateHandler: pmQueryTemplateHandler,
+		pmExportHandler:        pmExportHandler,
 		indicatorHandler:       indicatorHandler,
 		indicatorRESTHandler:   indicatorRESTHandler,
 		indicatorFileHandler:   indicatorFileHandler,
@@ -180,6 +195,7 @@ type pmHandlerDeps struct {
 	pmAdhocHandler         *adhoc.Handler         // T-0164-P7 自定义聚合任务 REST 入口
 	pmDashboardHandler     *pmdashboard.Handler   // T-0164-P6 PM 仪表盘 REST 入口
 	pmQueryTemplateHandler *querytemplate.Handler // T-0174 指标查询模板 REST 入口
+	pmExportHandler        *pmexport.Handler      // KPI-EXPORT T1 KPI 导出 REST 入口
 
 	// Indicator management handler
 	indicatorHandler     *indicator.IndicatorHandler

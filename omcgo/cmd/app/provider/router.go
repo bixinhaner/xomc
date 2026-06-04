@@ -422,6 +422,10 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	if ph.pmQueryTemplateHandler != nil {
 		ph.pmQueryTemplateHandler.RegisterRoutes(permGroup("pm"))
 	}
+	// KPI-EXPORT T1：KPI 导出 REST 路由（建任务/列任务/列文件/下载/删除，同 pm 权限组）
+	if ph.pmExportHandler != nil {
+		ph.pmExportHandler.RegisterRoutes(permGroup("pm"))
+	}
 
 	// ----- Alarm routes → resource "alarms" -----
 	ah := c.alarmHandlerDeps

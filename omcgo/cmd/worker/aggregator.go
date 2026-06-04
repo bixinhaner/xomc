@@ -14,6 +14,7 @@ import (
 	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/core/asyncjob"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
+	pmexport "github.com/omcgo/omcgo/internal/pm/export"
 	"github.com/omcgo/omcgo/internal/pm/kpi/router"
 )
 
@@ -54,6 +55,7 @@ func startPMAggregatorPipeline(
 	w *workerInfra,
 	kpiRouter *router.Router,
 	loc *time.Location,
+	exportBucket string,
 ) {
 	logger := w.Logger.Named("pm-aggregator")
 
@@ -103,6 +105,26 @@ func startPMAggregatorPipeline(
 			zap.String("granularity", string(r.Granularity())))
 	}
 
+	// 2c) 注册 KPI-EXPORT 导出处理器（job_type=pm_kpi_export）。
+	// T2 真生成：载任务 → running → 按 source_type 取数 → 流式写 CSV 直传对象存储 → 回填 succeeded。
+	//   - metricDB = TsPool（PM 指标超表，dashboard device 维度直查 + 指标名解析）
+	//   - adhocDB  = PgPool（pm_adhoc_aggregation_results 直查）
+	//   - aggr 复用上面的 device 级聚合查询入口（dashboard 聚合维度 + KPI 反算）
+	//   - bucket 复用报表桶（设计 §5.6）
+	exportRunner := pmexport.NewRunner(pmexport.RunnerDeps{
+		Repo:     pmexport.NewPgRepository(w.PgPool),
+		Aggr:     aggr,
+		MetricDB: w.TsPool,
+		AdhocDB:  w.PgPool,
+		Uploader: w.MinIO,
+		Bucket:   exportBucket,
+		Logger:   logger,
+	})
+	registry.Register(exportRunner)
+	logger.Info("registered pm kpi export runner (T2)",
+		zap.String("job_type", exportRunner.JobType()),
+		zap.String("bucket", exportBucket))
+
 	// 3) 启动 Sweeper（zombie reset + 心跳监控）
 	// T-0164 收尾 G8-Gap-3：从 sys_configs 读 sweeper_interval / zombie_threshold / heartbeat_interval；
 	// 缺失 / 解析失败 fallback 走 asyncjob 包默认值（与原行为一致）。
@@ -129,6 +151,8 @@ func startPMAggregatorPipeline(
 		jt := r.JobType()
 		go runJobTypeWorker(ctx, registry, jt, logger)
 	}
+	// KPI 导出处理器单独一个 worker goroutine（按需触发，无 cron）。
+	go runJobTypeWorker(ctx, registry, exportRunner.JobType(), logger)
 
 	// 5) 启动 cron 调度器（含启动补跑）
 	startCronScheduler(ctx, jobRepo, cronStateRepo, logger, asyncMetrics, loc)

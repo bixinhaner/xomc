@@ -11,13 +11,16 @@
 
 import { useMemo, useState } from 'react';
 import { useIntl } from 'react-intl';
-import { Alert, Card, Empty, Segmented, Space, Spin, Tag, Typography } from 'antd';
+import { Alert, App, Button, Card, Empty, Segmented, Space, Spin, Tag, Typography } from 'antd';
+import { ExportOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import {
   usePmAdhocDetail,
   usePmAdhocFilterOptions,
   usePmAdhocResults,
 } from '@core/hooks/api/usePmAdhoc';
+import { useCreateKpiExport } from '@core/hooks/api/useKpiExport';
+import { buildAdhocExportParams, defaultExportTaskName } from './kpiExportParams';
 import { buildMetricCharts, filterChartsByMetricPaths } from './taskDashboardUtils';
 import ChartCard from './ChartCard';
 import DashboardFilterBar, { type DashboardFilterValue } from './DashboardFilterBar';
@@ -47,6 +50,7 @@ const GRAN_MSG_IDS: Record<string, string> = {
 
 export default function TaskDashboardPane({ taskId }: Props) {
   const intl = useIntl();
+  const { message } = App.useApp();
   // 粒度短标签：有对应键走语料，无键回退原值（等价旧 GRAN_LABEL[g] ?? g）。
   const granLabel = (g: string) =>
     GRAN_MSG_IDS[g] ? intl.formatMessage({ id: GRAN_MSG_IDS[g] }) : g;
@@ -141,6 +145,35 @@ export default function TaskDashboardPane({ taskId }: Props) {
     return attachCompareSeries(cur, prev, offsetMs, effectiveGran);
   }, [rows, prevRows, taskQuery.data, effectiveGran, filter.compare, offsetMs]);
 
+  // ── 导出（T4 adhoc 来源）：带 task_id + 当前大时间段 POST 建任务 ──────────
+  const createExport = useCreateKpiExport();
+  const handleExport = () => {
+    createExport.mutate(
+      {
+        sourceType: 'adhoc',
+        params: buildAdhocExportParams({
+          taskId,
+          startTime: startISO,
+          endTime: endISO,
+        }),
+        taskName: defaultExportTaskName('adhoc'),
+      },
+      {
+        onSuccess: () => {
+          message.success(intl.formatMessage({ id: 'kpiExport.export.submitted' }));
+        },
+        onError: (e) => {
+          message.error(
+            intl.formatMessage(
+              { id: 'kpiExport.export.submitFailed' },
+              { reason: (e as Error)?.message ?? '' },
+            ),
+          );
+        },
+      },
+    );
+  };
+
   if (taskQuery.isLoading) {
     return (
       <Card>
@@ -166,28 +199,43 @@ export default function TaskDashboardPane({ taskId }: Props) {
   return (
     <div>
       <Card size="small" style={{ marginBottom: 12 }}>
-        <Space size={8} wrap>
-          <Typography.Text strong>{task.name}</Typography.Text>
-          {task.technology && <Tag color="geekblue">{task.technology.toUpperCase()}</Tag>}
-          <Tag color="purple">
-            {task.mode === 'continuous'
-              ? intl.formatMessage({ id: 'perf.dashboard.modeContinuous' })
-              : intl.formatMessage({ id: 'perf.dashboard.modeOneshot' })}
-          </Tag>
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            {intl.formatMessage(
-              { id: 'perf.dashboard.metricCount' },
-              { count: task.metricPaths.length },
+        <Space
+          size={8}
+          wrap
+          style={{ width: '100%', justifyContent: 'space-between' }}
+        >
+          <Space size={8} wrap>
+            <Typography.Text strong>{task.name}</Typography.Text>
+            {task.technology && <Tag color="geekblue">{task.technology.toUpperCase()}</Tag>}
+            <Tag color="purple">
+              {task.mode === 'continuous'
+                ? intl.formatMessage({ id: 'perf.dashboard.modeContinuous' })
+                : intl.formatMessage({ id: 'perf.dashboard.modeOneshot' })}
+            </Tag>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              {intl.formatMessage(
+                { id: 'perf.dashboard.metricCount' },
+                { count: task.metricPaths.length },
+              )}
+            </Typography.Text>
+            {granularities.length > 1 && (
+              <Segmented
+                size="small"
+                value={effectiveGran}
+                onChange={(v) => setActiveGran(v as string)}
+                options={granularities.map((g) => ({ label: granLabel(g), value: g }))}
+              />
             )}
-          </Typography.Text>
-          {granularities.length > 1 && (
-            <Segmented
-              size="small"
-              value={effectiveGran}
-              onChange={(v) => setActiveGran(v as string)}
-              options={granularities.map((g) => ({ label: granLabel(g), value: g }))}
-            />
-          )}
+          </Space>
+          <Button
+            size="small"
+            icon={<ExportOutlined />}
+            loading={createExport.isPending}
+            onClick={handleExport}
+            title={intl.formatMessage({ id: 'kpiExport.export.tooltip' })}
+          >
+            {intl.formatMessage({ id: 'kpiExport.export.button' })}
+          </Button>
         </Space>
       </Card>
 

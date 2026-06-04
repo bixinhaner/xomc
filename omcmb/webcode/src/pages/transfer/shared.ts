@@ -59,6 +59,8 @@ const BUILTIN_CATEGORY_CODES = new Set([
   'station_log', 'config_backup', 'config_restore', 'license_upgrade',
   // F05：MR 测量虚拟分类（不走 UFTE 模板，作为入口聚合按钮跳到 /mr/tasks）
   'mr_measurement',
+  // KPI-EXPORT：KPI 导出虚拟分类（不走 UFTE 模板，内联渲染 KpiExportTasksPanel）
+  'kpi_export',
 ]);
 
 /** 内置 taskType displayName 翻译。非内置 typeCode（用户自定义）原样返回 fallback。 */

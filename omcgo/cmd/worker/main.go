@@ -443,7 +443,12 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	// sweeper + 触发器（hourly @:05 / daily 00:05 / weekly 周一 00:10 / monthly 1日 00:15）。
 	// T-0192：日/周/月桶按业务时区切本地零点，loc 同时穿入窗口计算与 cron 调度。
 	pmLoc := resolvePMTimezone(cfg.PM.Timezone, logger)
-	startPMAggregatorPipeline(context.Background(), w, pmKPIRouter, pmLoc)
+	// KPI 导出文件落地桶：复用报表桶（设计 §5.6）；缺省回退 "reports"。
+	exportBucket := cfg.MinIO.Buckets.Reports
+	if exportBucket == "" {
+		exportBucket = "reports"
+	}
+	startPMAggregatorPipeline(context.Background(), w, pmKPIRouter, pmLoc, exportBucket)
 
 	// T-0164-P7 / G7：自定义聚合任务（oneshot + continuous）。
 	// 复用同一 kpiRouter；4 个 worker 抢 pm_tasks 中 task_subtype='adhoc_aggregation' 的 pending 行；

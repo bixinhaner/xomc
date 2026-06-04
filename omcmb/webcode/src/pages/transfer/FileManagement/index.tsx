@@ -7,9 +7,10 @@ import DeviceLicenseLibrary from '@/pages/backup/DeviceLicenseLibrary';
 import FirmwareUpload from '@/pages/software/FirmwareUpload';
 import MRFilesPage from '@/pages/mr/Files';
 import PMFilesPage from '@/pages/pm/Files';
+import KpiExportLibrary from '@/pages/transfer/KpiExport/KpiExportLibrary';
 import { useT } from '@/hooks/useT';
 
-const VALID_TABS = new Set(['version', 'config', 'license', 'mr', 'pm']);
+const VALID_TABS = new Set(['version', 'config', 'license', 'mr', 'pm', 'kpiExport']);
 
 const PANE_STYLE: React.CSSProperties = { paddingTop: 8 };
 
@@ -97,6 +98,11 @@ export default function FileManagementPage() {
             key: 'pm',
             label: t('ufte.fileManagement.tab.pm'),
             children: <div style={PANE_STYLE}><PMFilesPage embedded /></div>,
+          },
+          {
+            key: 'kpiExport',
+            label: t('ufte.fileManagement.tab.kpiExport'),
+            children: <div style={PANE_STYLE}><KpiExportLibrary /></div>,
           },
         ].filter((item) => !fromUFTE || item.key === activeKey)}
       />

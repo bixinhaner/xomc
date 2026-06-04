@@ -31,6 +31,7 @@ import { useT } from '@/hooks/useT';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import SearchInput from '@/components/SearchInput';
 import MRTasksPanel from '@/pages/mr/Tasks';
+import KpiExportTasksPanel from '@/pages/transfer/KpiExport/KpiExportTasksPanel';
 import {
   useBatchDeleteUfteTasks,
   useCreateUnifiedFileTransferTask,
@@ -180,6 +181,12 @@ export default function FileTransferCenter() {
       {
         category: 'mr_measurement',
         categoryLabel: 'MR 测量', // 通过 localizeBuiltinCategoryLabel 翻译
+        templateCount: 0,
+      },
+      {
+        // KPI-EXPORT：KPI 导出虚拟分类，内联渲染 KpiExportTasksPanel 看导出任务状态。
+        category: 'kpi_export',
+        categoryLabel: 'KPI 导出', // 通过 localizeBuiltinCategoryLabel 翻译
         templateCount: 0,
       },
     ];
@@ -1205,6 +1212,8 @@ export default function FileTransferCenter() {
     <ListPageLayout
       title={t('ufte.page.taskCreate')}
       extra={(
+        // KPI 导出 Tab 不在此建任务（导出入口在仪表盘/任务详情，T4），故隐藏新建按钮。
+        selectedCategory === 'kpi_export' ? null : (
         <Button
           type="primary"
           icon={<PlusOutlined />}
@@ -1224,6 +1233,7 @@ export default function FileTransferCenter() {
         >
           {t('ufte.action.newTask')}
         </Button>
+        )
       )}
     >
       <Space direction="vertical" size={16} style={{ width: '100%' }}>
@@ -1238,13 +1248,15 @@ export default function FileTransferCenter() {
               }))}
               onChange={(key) => setSelectedCategory(key)}
             />
-            {/* MR 测量 Tab 选中时：① 不显示 UFTE 模板子 Tab，② 直接在 Tabs 下方
-                内联渲染 MR 任务管理面板（视觉上就是 Tab 切换内容）。 */}
+            {/* MR 测量 / KPI 导出 Tab 选中时：① 不显示 UFTE 模板子 Tab，② 直接在 Tabs
+                下方内联渲染各自的任务管理面板（视觉上就是 Tab 切换内容）。 */}
             {selectedCategory === 'mr_measurement' ? (
               <MRTasksPanel
                 createOpen={mrCreateOpen}
                 onCreateOpenChange={setMrCreateOpen}
               />
+            ) : selectedCategory === 'kpi_export' ? (
+              <KpiExportTasksPanel />
             ) : (
               <Tabs
                 activeKey={selectedTypeCode}
@@ -1255,8 +1267,8 @@ export default function FileTransferCenter() {
           </Space>
         </Card>
 
-        {/* 下方"任务列表 / 设备列表"区域：MR 测量 Tab 选中时隐藏（MR 已内嵌在上方 Card） */}
-        {selectedCategory !== 'mr_measurement' && (
+        {/* 下方"任务列表 / 设备列表"区域：MR 测量 / KPI 导出 Tab 选中时隐藏（各自面板已内嵌在上方 Card） */}
+        {selectedCategory !== 'mr_measurement' && selectedCategory !== 'kpi_export' && (
         <Card title={t('ufte.card.executionView')}>
           <Tabs
             activeKey={viewMode}
