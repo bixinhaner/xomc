@@ -6,6 +6,7 @@ import React, { useMemo } from 'react';
 import { Card, Button, Space, Typography, Spin, Empty } from 'antd';
 import { LoadingOutlined } from '@ant-design/icons';
 import LineChart from '@/components/Charts/LineChart';
+import type { ThresholdLine } from '@/components/Charts/LineChart';
 import { useT } from '@/hooks/useT';
 import { useThemeToken } from '@/hooks/useThemeToken';
 
@@ -21,12 +22,21 @@ export interface MultiKPIConfig {
 export interface MultiKPITrendChartProps {
   title: string;
   kpis: MultiKPIConfig[];
-  trendDataMap: Record<string, any>;
+  trendDataMap: Record<string, TrendDataValue>;
   height?: number;
   loading?: boolean;
   timeRange?: 'yesterday' | 'last_week'; // 当前选择的时间范围
   onTimeRangeChange?: (range: 'yesterday' | 'last_week') => void; // 时间范围变更回调
   className?: string;
+  /** 阈值线配置（如PRB利用率告警线） */
+  thresholdLines?: ThresholdLine[];
+}
+
+// 数据值类型定义
+interface TrendDataValue {
+  current?: Array<{ time: string; value: number }>;
+  data?: { current?: Array<{ time: string; value: number }> };
+  compare?: Array<{ time: string; value: number }>;
 }
 
 export function MultiKPITrendChart({
@@ -38,11 +48,12 @@ export function MultiKPITrendChart({
   timeRange = 'yesterday',
   onTimeRangeChange,
   className,
+  thresholdLines,
 }: MultiKPITrendChartProps) {
   const t = useT();
   const token = useThemeToken();
 
-  // 转换数据格式给 LineChart 使用
+  // 转换数据格式给 LineChart 使用（包含KPI标签翻译）
   const { xData, series } = useMemo(() => {
     // 辅助函数：从可能的数据结构中提取 current 数组
     // 兼容两种数据格式：
@@ -67,7 +78,7 @@ export function MultiKPITrendChart({
 
     // 提取时间轴数据 - 根据时间范围格式化
     const currentData = getCurrentData(firstValidKPI.key);
-    const xData = currentData.map((d: any) => {
+    const xData = currentData.map((d: { time: string; value: number }) => {
       const date = new Date(d.time);
       if (timeRange === 'last_week') {
         // 上周对比显示日期 (MM/DD)
@@ -78,21 +89,22 @@ export function MultiKPITrendChart({
       }
     });
 
-    // 转换每个 KPI 的数据为 LineChart 格式
+    // 转换每个 KPI 的数据为 LineChart 格式（包含翻译后的label）
     const series = kpis.map(kpi => {
       const kpiCurrentData = getCurrentData(kpi.key);
-      const data = kpiCurrentData.map((d: any) => d.value);
+      const data = kpiCurrentData.map((d: { time: string; value: number }) => d.value);
       return {
-        name: kpi.label,
+        name: t(kpi.label),
         data,
         color: kpi.color,
       };
     });
 
     return { xData, series };
-  }, [kpis, trendDataMap, timeRange]);
+  }, [kpis, trendDataMap, timeRange, t]);
 
   const hasData = xData.length > 0;
+  const hasKPIs = kpis.length > 0;
 
   return (
     <Card
@@ -124,10 +136,14 @@ export function MultiKPITrendChart({
       }
     >
       {loading ? (
-        <div style={{ height: height - 40, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <Spin indicator={<LoadingOutlined spin />} tip={t('common.loading')} />
-        </div>
-      ) : !hasData ? (
+        <Spin
+          indicator={<LoadingOutlined spin />}
+          spinning={loading}
+          style={{ height: height - 40, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        >
+          <div style={{ height: height - 40 }} />
+        </Spin>
+      ) : !hasKPIs || !hasData ? (
         <div style={{ height: height - 40, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('common.noData')} />
         </div>
@@ -141,6 +157,7 @@ export function MultiKPITrendChart({
           smooth
           showLegend
           unit={kpis[0]?.unit}
+          thresholdLines={thresholdLines}
         />
       )}
     </Card>

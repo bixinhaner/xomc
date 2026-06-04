@@ -1,3 +1,12 @@
+/**
+ * Dashboard页面 - v2.0 Panel化设计
+ *
+ * 基于老系统Dashboard重构，支持：
+ * - LTE (eNB): 6个Panel（2×3网格）
+ * - NR (gNB): 2个Panel（1×2布局）
+ * - GSM: 3个Panel（第一行2个，第二行1个占满）
+ */
+
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -7,6 +16,7 @@ import {
   Card,
   Col,
   Row,
+  Segmented,
   Space,
   Spin,
   Typography,
@@ -32,8 +42,10 @@ import {
 import KPICard from '@/components/KPICard';
 import BarChart from '@/components/Charts/BarChart';
 import EmptyState from '@/components/common/EmptyState';
-import { useDashboardData, useDeviceStatusByType, useKPIGroupTrend } from '@core/hooks/api/useDashboard';
-import { MultiKPITrendChart } from '@/components/dashboard';
+import { useDashboardData, useDeviceStatusByType } from '@core/hooks/api/useDashboard';
+import { DashboardKPIModules } from './DashboardKPIModules';
+import type { TechnologyType } from './kpi-config';
+import { TECH_LABELS } from './kpi-config';
 import { useUserStore } from '@core/store/userStore';
 import { useT } from '@/hooks/useT';
 import { useThemeToken } from '@/hooks/useThemeToken';
@@ -44,13 +56,6 @@ import { formatTimeAgo } from '@core/utils/format';
 
 const { Title, Text } = Typography;
 
-const SEVERITY_COLOR: Record<string, string> = {
-  critical: '#F5222D',
-  major: '#FA8C16',
-  minor: '#FADB14',
-  warning: '#1677FF',
-};
-
 // Technology display name mapping
 const TECH_DISPLAY_NAME: Record<string, string> = {
   lte: 'LTE',
@@ -59,14 +64,10 @@ const TECH_DISPLAY_NAME: Record<string, string> = {
 };
 
 // Dashboard feature visibility configuration
-// This is a temporary measure to hide certain modules. Set to true to re-enable.
 const DASHBOARD_CONFIG = {
-  showRunningTasks: false,       // 任务执行中 - Running tasks KPI card
-  showQualityTrend: false,       // 无线质量指标趋势 - Quality KPI trend chart (RRC + E-RAB + Handover)
-  showPRBUtil: false,            // PRB利用率趋势 - PRB utilization trend chart
-  showUETrend: true,             // UE用户数趋势 - UE user trend chart (Phase 2 feature, backend not implemented)
-  showRefreshControls: false,    // 刷新控制栏 - Refresh controls (last update time + refresh button)
-  showDeviceMap: false,          // 设备地图 - Device map (GISMap)
+  showRunningTasks: false,        // 任务执行中
+  showRefreshControls: false,     // 刷新控制栏
+  showDeviceMap: false,           // 设备地图
 } as const;
 
 /** 格式化最后登录时间 */
@@ -107,9 +108,8 @@ export default function DashboardPage() {
   const token = useThemeToken();
   const queryClient = useQueryClient();
 
-  // 各图表独立的时间范围状态：yesterday(昨日对比) 或 last_week(上周对比)
-  const [throughputTimeRange, setThroughputTimeRange] = useState<'yesterday' | 'last_week'>('yesterday');
-  const [ueTimeRange, setUETimeRange] = useState<'yesterday' | 'last_week'>('yesterday');
+  // 制式切换状态 - 默认使用LTE（符合验收标准：LTE 6个Panel作为主要展示）
+  const [technology, setTechnology] = useState<TechnologyType>('lte');
 
   // 刷新提示状态
   const [lastUpdateTime, setLastUpdateTime] = useState<Date>(new Date());
@@ -122,8 +122,8 @@ export default function DashboardPage() {
       setTimeAgoText(formatTimeAgo(lastUpdateTime, t));
     };
 
-    updateTime(); // 立即更新一次
-    const interval = setInterval(updateTime, 10000); // 每10秒更新一次
+    updateTime();
+    const interval = setInterval(updateTime, 10000);
 
     return () => clearInterval(interval);
   }, [lastUpdateTime, t]);
@@ -133,7 +133,6 @@ export default function DashboardPage() {
     if (isRefreshing) return;
     setIsRefreshing(true);
     try {
-      // 刷新所有 dashboard 相关的查询
       await queryClient.invalidateQueries({ queryKey: ['dashboard'] });
       setLastUpdateTime(new Date());
       message.success(t('dashboard.refreshSuccess'));
@@ -141,7 +140,6 @@ export default function DashboardPage() {
       message.error(t('dashboard.refreshFailed'));
       console.error('Dashboard refresh failed:', error);
     } finally {
-      // 延迟重置刷新状态，让用户看到反馈
       setTimeout(() => setIsRefreshing(false), 500);
     }
   }, [queryClient, isRefreshing, t]);
@@ -151,18 +149,6 @@ export default function DashboardPage() {
 
   // 获取设备按技术类型分组的状态数据
   const { data: deviceStatusByTypeData, isLoading: isDeviceStatusLoading } = useDeviceStatusByType();
-
-  // 获取 KPI 趋势数据 - 每个图表独立调用
-  const [throughputData, isThroughputLoading] = useKPIGroupTrend(
-    ['NR_PDCP_RATE_DL', 'NR_PDCP_RATE_UL'],
-    throughputTimeRange
-  );
-
-  // 获取UE趋势数据
-  const [ueTrendData, isUETrendLoading] = useKPIGroupTrend(
-    ['UE_ACTIVE', 'UE_PEAK'],
-    ueTimeRange
-  );
 
   // KPI values — use real data when available, fall back to sensible defaults
   const totalDevices = dashboardData?.summary?.deviceCounts?.total ?? 1284;
@@ -176,11 +162,9 @@ export default function DashboardPage() {
   const activeAlarmsDelta = kpiDeltas['active_alarms'];
   const ueTrendDelta = kpiDeltas['UE_ACTIVE'];
 
-  // UE 当前值 — 优先从 kpiSummary 获取，否则从趋势数据的最新值获取（取整显示）
+  // UE 当前值
   const kpiSummary = dashboardData?.summary?.kpiSummary ?? {};
-  const currentActiveUE = Math.floor(
-    (kpiSummary['UE_ACTIVE'] ?? ueTrendData['UE_ACTIVE']?.current?.slice(-1)[0]?.value) ?? 0
-  );
+  const currentActiveUE = Math.floor(kpiSummary['UE_ACTIVE'] ?? 0);
 
   // Device status bar chart data - 按技术类型分组
   const deviceStatusData = useMemo(() => {
@@ -188,12 +172,10 @@ export default function DashboardPage() {
       return { isEmpty: true, xData: [], series: [] };
     }
 
-    // technology 键作为 X 轴数据，映射为友好显示名称
     const xData = Object.keys(deviceStatusByTypeData).map(
       key => TECH_DISPLAY_NAME[key] || key
     );
 
-    // 提取各状态的数据（保持原始顺序）
     const technologyKeys = Object.keys(deviceStatusByTypeData);
     const onlineData = technologyKeys.map(key => deviceStatusByTypeData[key]?.online ?? 0);
     const offlineData = technologyKeys.map(key => deviceStatusByTypeData[key]?.offline ?? 0);
@@ -209,7 +191,6 @@ export default function DashboardPage() {
   }, [deviceStatusByTypeData, t]);
 
   // Alarm distribution bar chart data - 按告警等级分组统计
-  // 使用 dashboardData.summary.alarmCounts（全部告警）而非 currentAlarmData（仅6条）
   const alarmDistributionData = useMemo(() => {
     const alarmCounts = dashboardData?.summary?.alarmCounts;
 
@@ -217,7 +198,6 @@ export default function DashboardPage() {
       return { isEmpty: true, xData: [], series: [] };
     }
 
-    // 检查是否有任何告警
     const hasAlarms = alarmCounts.critical > 0 || alarmCounts.major > 0 ||
                       alarmCounts.minor > 0 || alarmCounts.warning > 0;
 
@@ -225,7 +205,6 @@ export default function DashboardPage() {
       return { isEmpty: true, xData: [], series: [] };
     }
 
-    // X轴：告警等级（按严重程度顺序）
     const xData = [
       t('alarm.severity.critical'),
       t('alarm.severity.major'),
@@ -233,19 +212,17 @@ export default function DashboardPage() {
       t('alarm.severity.warning'),
     ];
 
-    // 单一系列，每个柱子带独立的颜色（使用 ECharts data 对象格式）
     const data = [
-      { value: alarmCounts.critical, itemStyle: { color: SEVERITY_COLOR.critical } },
-      { value: alarmCounts.major, itemStyle: { color: SEVERITY_COLOR.major } },
-      { value: alarmCounts.minor, itemStyle: { color: SEVERITY_COLOR.minor } },
-      { value: alarmCounts.warning, itemStyle: { color: SEVERITY_COLOR.warning } },
+      { value: alarmCounts.critical, name: t('alarm.severity.critical') },
+      { value: alarmCounts.major, name: t('alarm.severity.major') },
+      { value: alarmCounts.minor, name: t('alarm.severity.minor') },
+      { value: alarmCounts.warning, name: t('alarm.severity.warning') },
     ];
 
     const series = [
       {
         name: t('dashboard.alarmCount'),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        data: data as any[],
+        data: data as Array<{ value: number; name: string }>,
       },
     ];
 
@@ -331,7 +308,6 @@ export default function DashboardPage() {
             onClick={() => void navigate('/alarm/current')}
           />
         </Col>
-        {/* UE用户卡片 - 显示当前活跃UE数 */}
         <Col xs={24} sm={12} lg={6}>
           <KPICard
             title={t('dashboard.activeUE')}
@@ -339,7 +315,7 @@ export default function DashboardPage() {
             icon={<TeamOutlined />}
             iconBgColor="#f6ffed"
             iconColor="#10B981"
-            loading={isUETrendLoading}
+            loading={isLoading}
             trend={ueTrendDelta?.trend ?? 'stable'}
             delta={ueTrendDelta?.changePercent !== undefined ? `${ueTrendDelta.changePercent.toFixed(1)}%` : undefined}
             deltaLabel={ueTrendDelta?.changePercent !== undefined ? t('dashboard.vsLastWeek') : undefined}
@@ -363,43 +339,30 @@ export default function DashboardPage() {
         )}
       </Row>
 
-      {/* Row 2: KPI趋势区（左右各50%） */}
+      {/* 制式切换栏 */}
       <Row gutter={[16, 16]} className="omc-scroll-reveal" data-delay="1">
-        {/* 左侧：上下行速率趋势 */}
-        <Col xs={24} lg={12} style={{ display: 'flex' }}>
-          <MultiKPITrendChart
-            title={t('dashboard.throughputTrend')}
-            kpis={[
-              { key: 'NR_PDCP_RATE_DL', label: t('dashboard.dlThroughput'), color: '#1677FF', unit: t('unit.mbps') },
-              { key: 'NR_PDCP_RATE_UL', label: t('dashboard.ulThroughput'), color: '#10B981', unit: t('unit.mbps') },
-            ]}
-            trendDataMap={throughputData}
-            timeRange={throughputTimeRange}
-            onTimeRangeChange={setThroughputTimeRange}
-            loading={isThroughputLoading}
-            height={280}
-          />
+        <Col span={24}>
+          <Space size="middle" style={{ width: '100%', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Space size="middle">
+              <Text type="secondary">网络制式:</Text>
+              <Segmented
+                value={technology}
+                onChange={(value) => setTechnology(value as TechnologyType)}
+                options={[
+                  { label: TECH_LABELS.lte, value: 'lte' },
+                  { label: TECH_LABELS.nr, value: 'nr' },
+                  { label: TECH_LABELS.gsm, value: 'gsm' },
+                ]}
+              />
+            </Space>
+          </Space>
         </Col>
-        {/* 右侧：UE用户数趋势 (Phase 2 feature - hidden until backend implemented) */}
-        {DASHBOARD_CONFIG.showUETrend && (
-        <Col xs={24} lg={12} style={{ display: 'flex' }}>
-          <MultiKPITrendChart
-            title={t('dashboard.ueTrend')}
-            kpis={[
-              { key: 'UE_ACTIVE', label: t('dashboard.activeUE'), color: '#10B981', unit: t('unit.count') },
-              { key: 'UE_PEAK', label: t('dashboard.peakUE'), color: '#F5222D', unit: t('unit.count') },
-            ]}
-            trendDataMap={ueTrendData}
-            timeRange={ueTimeRange}
-            onTimeRangeChange={setUETimeRange}
-            loading={isUETrendLoading}
-            height={280}
-          />
-        </Col>
-        )}
       </Row>
 
-      {/* Row 3: Device Status + Device Map */}
+      {/* KPI Panel区域 - v2.0 Panel化设计 */}
+      <DashboardKPIModules technology={technology} />
+
+      {/* Row 3: Device Status + Alarm Statistics */}
       <Row gutter={[16, 16]} align="stretch" className="omc-scroll-reveal" data-delay="2">
         <Col xs={24} lg={12} style={{ display: 'flex' }}>
           <TiltCard maxTilt={7} style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -411,9 +374,12 @@ export default function DashboardPage() {
             style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
           >
             {isDeviceStatusLoading ? (
-              <div style={{ height: 260, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <Spin tip={t('common.loading')} />
-              </div>
+              <Spin
+                spinning={isDeviceStatusLoading}
+                style={{ height: 260, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              >
+                <div style={{ height: 260 }} />
+              </Spin>
             ) : deviceStatusData.isEmpty ? (
               <EmptyState description={t('common.noData')} />
             ) : (
@@ -443,9 +409,12 @@ export default function DashboardPage() {
             style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
           >
             {isLoading ? (
-              <div style={{ height: 260, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <Spin tip={t('common.loading')} />
-              </div>
+              <Spin
+                spinning={isLoading}
+                style={{ height: 260, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              >
+                <div style={{ height: 260 }} />
+              </Spin>
             ) : alarmDistributionData.isEmpty ? (
               <EmptyState description={t('alarm.noActiveAlarms')} />
             ) : (
@@ -500,7 +469,6 @@ export default function DashboardPage() {
                   {t('dashboard.lastLogin')} {formatLastLogin(currentUser?.lastLoginTime)}
                 </Text>
               </div>
-              {/* 装饰性分隔线 */}
               <div
                 style={{
                   width: '60%',
@@ -509,7 +477,6 @@ export default function DashboardPage() {
                   marginTop: 8,
                 }}
               />
-              {/* 系统状态指示 */}
               <div
                 style={{
                   width: '100%',

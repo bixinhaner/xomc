@@ -154,25 +154,67 @@ export interface DashboardChartData {
 /**
  * KPI 指标配置
  * 与后端指标库保持一致
+ * 支持 LTE (eNB)、NR (gNB)、GSM 三种制式的完整Panel指标
  */
 const KPI_CONFIG = {
-  // 接入性指标
-  RRC_CONN_SETUP_SR: { base: 98, variance: 2 },      // RRC 建立成功率
-  ERAB_SETUP_SR: { base: 97, variance: 3 },          // E-RAB 建立成功率
+  // ============================================================================
+  // LTE (eNB) 指标 - 6个Panel共17个指标
+  // ============================================================================
 
-  // 移动性指标
-  NR_SA_HO_SR: { base: 96, variance: 4 },            // NR SA 切换成功率
+  // Traffic Panel (4个) - 业务量
+  LTE_PDCP_VOLUME_DL: { base: 450, variance: 80 },    // LTE PDCP 下行流量 (GB)
+  LTE_PDCP_VOLUME_UL: { base: 85, variance: 20 },     // LTE PDCP 上行流量 (GB)
+  LTE_PDCP_RATE_DL: { base: 125, variance: 25 },     // LTE PDCP 下行速率 (Mbps)
+  LTE_PDCP_RATE_UL: { base: 35, variance: 10 },      // LTE PDCP 上行速率 (Mbps)
 
-  // 业务量指标
+  // Availability Panel (1个) - 可用性
+  LTE_CELL_AVAILABLE: { base: 99.5, variance: 0.3 }, // LTE 小区可用率 (%)
+
+  // Utilization Panel (2个) - 利用率
+  LTE_PRB_UTIL_DL: { base: 55, variance: 15 },        // LTE 下行PRB利用率 (%)
+  LTE_PRB_UTIL_UL: { base: 35, variance: 12 },        // LTE 上行PRB利用率 (%)
+
+  // Accessibility Panel (4个) - 接入性
+  WIRELESS_SETUP_SR: { base: 98.5, variance: 1.5 },  // 无线建立成功率 (%)
+  RRC_CONN_SETUP_SR: { base: 98, variance: 2 },      // RRC 建立成功率 (%)
+  ERAB_SETUP_SR: { base: 97, variance: 3 },         // E-RAB 建立成功率 (%)
+  CSFB_SR: { base: 96, variance: 4 },               // CSFB 成功率 (%)
+
+  // Retainability Panel (1个) - 保持性
+  ERAB_DROP_RATE: { base: 0.15, variance: 0.2 },     // E-RAB 掉线率 (%)
+
+  // Mobility Panel (4个) - 移动性
+  HO_INTRA_ENB_OUT_SR: { base: 98, variance: 2 },    // 同基站切换-切出成功率 (%)
+  HO_INTRA_ENB_IN_SR: { base: 98, variance: 2 },     // 同基站切换-切入成功率 (%)
+  HO_INTER_ENB_OUT_SR: { base: 97, variance: 3 },    // 异基站切换-切出成功率 (%)
+  HO_INTER_ENB_IN_SR: { base: 97, variance: 3 },     // 异基站切换-切入成功率 (%)
+
+  // ============================================================================
+  // NR (gNB) 指标 - 2个Panel共6个指标
+  // ============================================================================
+
+  // Traffic Panel (4个)
+  NR_PDCP_VOLUME_DL: { base: 650, variance: 120 },   // NR PDCP 下行流量 (GB)
+  NR_PDCP_VOLUME_UL: { base: 120, variance: 30 },    // NR PDCP 上行流量 (GB)
   NR_PDCP_RATE_DL: { base: 85, variance: 20 },       // NR PDCP 下行速率 (Mbps)
   NR_PDCP_RATE_UL: { base: 35, variance: 10 },       // NR PDCP 上行速率 (Mbps)
 
-  // 资源类指标
+  // Utilization Panel (2个)
   NR_PRB_UTIL_DL: { base: 60, variance: 15 },        // NR PRB 下行利用率 (%)
   NR_PRB_UTIL_UL: { base: 40, variance: 12 },        // NR PRB 上行利用率 (%)
 
-  // 质量类指标
-  CALL_DROP_RATE: { base: 0.1, variance: 0.3 },      // 掉线率 (%)
+  // ============================================================================
+  // GSM (2G) 指标 - 3个Panel共3个指标
+  // ============================================================================
+
+  // Accessibility Panel (1个)
+  GSM_CALL_SETUP_SR: { base: 97, variance: 2.5 },    // GSM 呼叫建立成功率 (%)
+
+  // Retainability Panel (1个)
+  GSM_CALL_DROP_RATE: { base: 0.8, variance: 0.4 },  // GSM 呼叫掉线率 (%)
+
+  // Mobility Panel (1个)
+  GSM_HO_SR: { base: 96, variance: 3 },              // GSM 切换成功率 (%)
 } as const;
 
 /**
@@ -334,7 +376,8 @@ function generateKPITimeSeries(): Record<string, KPITimeSeriesPoint[]> {
   for (const [kpiName, config] of Object.entries(KPI_CONFIG)) {
     // 根据指标类型选择不同的时间粒度
     const intervalMinutes = kpiName.includes('RATE') || kpiName.includes('UTIL') ? 60 : 60;
-    series[kpiName] = generateTimeSeries(7, intervalMinutes, config.base, config.variance);
+    // 生成14天数据以确保包含完整的Today和Yesterday数据
+    series[kpiName] = generateTimeSeries(14, intervalMinutes, config.base, config.variance);
   }
   return series;
 }
@@ -432,6 +475,18 @@ export function generateDashboardChartData(): DashboardChartData {
 let _cachedSummary: DashboardSummary | null = null;
 let _cachedChartData: DashboardChartData | null = null;
 
+/**
+ * 重置缓存，强制重新生成数据
+ * 用于测试不同场景或KPI_CONFIG更新后
+ */
+export function resetDashboardCache(): void {
+  _cachedSummary = null;
+  _cachedChartData = null;
+}
+
+// 立即执行一次缓存重置，确保KPI_CONFIG更新后生成新数据
+resetDashboardCache();
+
 export const mockDashboardSummary: DashboardSummary = (() => {
   if (!_cachedSummary) {
     _cachedSummary = generateDashboardSummary();
@@ -486,15 +541,6 @@ export const mockDashboardWidgets = {
 // ============================================================================
 // 测试辅助函数
 // ============================================================================
-
-/**
- * 重置缓存，强制重新生成数据
- * 用于测试不同场景
- */
-export function resetDashboardCache(): void {
-  _cachedSummary = null;
-  _cachedChartData = null;
-}
 
 /**
  * 生成特定场景的测试数据

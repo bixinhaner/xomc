@@ -3,6 +3,7 @@ const messages: Record<string, string> = {
   // Common actions
   // -------------------------------------------------------------------------
   'common.search':         'Search',
+  'common.notSupported':     'Not Supported',
   'common.query':          'Query',
   'common.reset':          'Reset',
   'common.add':            'Add',
@@ -2212,6 +2213,11 @@ const messages: Record<string, string> = {
   'dashboard.hoSuccRate':        'Handover Success Rate',
   'dashboard.prbUtil':            'PRB Utilization',
   'unit.mbps':                    'Mbps',
+  'dashboard.dlPrbUtil':          'DL PRB Utilization',
+  'dashboard.ulPrbUtil':          'UL PRB Utilization',
+  'dashboard.dlVolume':           'DL Volume',
+  'unit.gb':                      'GB',
+  'dashboard.ulVolume':           'UL Volume',
   'unit.percent':                 '%',
   'unit.count':                   'count',
 
@@ -2270,6 +2276,44 @@ const messages: Record<string, string> = {
   'dashboard.widget.alarmHandleRate':    'Alarm Handle Rate',
   'dashboard.widget.networkAvailability':'Network Availability',
   'dashboard.widget.avgAlarmClearTime':  'Avg Alarm Clear Time',
+
+  // Dashboard Panel - v2.0新增
+  'dashboard.panel.traffic':        'Traffic',
+  'dashboard.panel.availability':   'Availability',
+  'dashboard.panel.utilization':    'Utilization',
+  'dashboard.panel.accessibility':  'Accessibility',
+  'dashboard.panel.retainability':  'Retainability',
+  'dashboard.panel.mobility':       'Mobility',
+
+  // Dashboard KPI指标 - v2.0新增
+  'dashboard.kpi.totalDataVolumeDl':    'Total Data Volume DL',
+  'dashboard.kpi.totalDataVolumeUl':    'Total Data Volume UL',
+  'dashboard.kpi.throughputDl':         'Throughput DL',
+  'dashboard.kpi.throughputUl':         'Throughput UL',
+  'dashboard.kpi.cellAvailable':        'Cell Available',
+  'dashboard.kpi.dlPrbUtilRate':        'DL PRB Utilization Rate',
+  'dashboard.kpi.ulPrbUtilRate':        'UL PRB Utilization Rate',
+  'dashboard.kpi.wirelessSetupSr':      'Wireless Setup Success Rate',
+  'dashboard.kpi.rrcSetupSr':           'RRC Setup Success Rate',
+  'dashboard.kpi.erabSetupSr':          'E-RAB Setup Success Rate',
+  'dashboard.kpi.csfbSr':               'CSFB Success Rate',
+  'dashboard.kpi.erabDropRate':         'E-RAB Drop Rate',
+  'dashboard.kpi.hoIntraEnbOutSr':      'HO Intra-eNB Out SR',
+  'dashboard.kpi.hoIntraEnbInSr':       'HO Intra-eNB In SR',
+  'dashboard.kpi.hoInterEnbOutSr':      'HO Inter-eNB Out SR',
+  'dashboard.kpi.hoInterEnbInSr':       'HO Inter-eNB In SR',
+  'dashboard.kpi.callSetupSr':          'Call Setup Success Rate',
+  'dashboard.kpi.callDropRate':         'Call Drop Rate',
+  'dashboard.kpi.handoverSr':           'Handover Success Rate',
+
+  // Dashboard视图模式 - v2.0新增
+  'dashboard.viewMode.day':    'Day',
+  'dashboard.viewMode.week':   'Week',
+
+  // Dashboard提示信息 - v2.0新增
+  'dashboard.selectTimeRange': 'Please select time range',
+  'dashboard.panelConfigNotFound': 'Panel configuration not found',
+  'dashboard.noKpiConfig':      'No KPI configuration for this technology',
 
   // -------------------------------------------------------------------------
   // Common page labels
@@ -2530,6 +2574,7 @@ const messages: Record<string, string> = {
   // -------------------------------------------------------------------------
   // GIS Map View
   // -------------------------------------------------------------------------
+  'gis.filter.deviceManagement': 'Device Management',
   'gis.filter.deviceStatus': 'Device Status',
   'gis.filter.deviceGroup':  'Device Group',
   'gis.filter.legend':       'Legend',

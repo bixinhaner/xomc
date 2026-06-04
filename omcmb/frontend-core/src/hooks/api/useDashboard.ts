@@ -757,6 +757,7 @@ export function useKPIGroupTrend(
     const currentData = queries[0].data;
     const compareData = queries[1].data;
 
+    // 当查询被禁用或数据未就绪时返回空对象
     if (!currentData || !compareData) {
       return {};
     }

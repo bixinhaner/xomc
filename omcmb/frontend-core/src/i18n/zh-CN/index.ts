@@ -3,6 +3,7 @@ const messages: Record<string, string> = {
   // Common actions
   // -------------------------------------------------------------------------
   'common.search':         '搜索',
+  'common.notSupported':     '暂不支持',
   'common.query':          '查询',
   'common.reset':          '重置',
   'common.add':            '新增',
@@ -2190,6 +2191,10 @@ const messages: Record<string, string> = {
   // -------------------------------------------------------------------------
   'dashboard.totalDevices':      '总设备数',
   'dashboard.onlineDevices':     '在线设备',
+	  'dashboard.dlPrbUtil':          '下行PRB利用率',
+	  'dashboard.ulPrbUtil':          '上行PRB利用率',
+	  'dashboard.dlVolume':           '下行流量',
+	  'dashboard.ulVolume':           '上行流量',
   'dashboard.activeAlarms':      '活跃告警',
   'dashboard.runningTasks':      '任务执行中',
   'dashboard.vsLastWeek':        '较上周',
@@ -2216,6 +2221,9 @@ const messages: Record<string, string> = {
   'dashboard.erabSuccRate':      'E-RAB建立成功率',
   'dashboard.hoSuccRate':        '切换成功率',
   'dashboard.prbUtil':            'PRB利用率',
+  'unit.gb':                      'GB',
+  'unit.mb':                      'MB',
+  'unit.kbps':                    'Kbps',
   'unit.mbps':                    'Mbps',
   'unit.percent':                 '%',
   'unit.count':                   '个',
@@ -2275,6 +2283,51 @@ const messages: Record<string, string> = {
   'dashboard.widget.alarmHandleRate':    '告警处置率',
   'dashboard.widget.networkAvailability':'网络可用性',
   'dashboard.widget.avgAlarmClearTime':  '平均告警清除时间',
+
+  // Dashboard Panel - v2.0新增
+  'dashboard.panel.traffic':        '业务量',
+  'dashboard.panel.availability':   '可用性',
+  'dashboard.panel.throughput':    '吞吐量',
+  'dashboard.panel.utilization':    '利用率',
+  'dashboard.panel.accessibility':  '接入性',
+  'dashboard.panel.retainability':  '保持性',
+  'dashboard.panel.mobility':       '移动性',
+  'dashboard.panel.quality':         '质量',
+
+  // Dashboard KPI指标 - v2.0新增
+  'dashboard.kpi.totalDataVolumeDl':    '总下行数据量',
+  'dashboard.kpi.totalDataVolumeUl':    '总上行数据量',
+  'dashboard.kpi.throughputDl':         '下行吞吐量',
+  'dashboard.kpi.throughputUl':         '上行吞吐量',
+  'dashboard.kpi.pdcpRateDl':       '下行PDCP速率',
+  'dashboard.kpi.cellAvailable':        '小区可用性',
+  'dashboard.kpi.dlPrbUtilRate':        '下行PRB利用率',
+  'dashboard.kpi.ulPrbUtilRate':        '上行PRB利用率',
+  'dashboard.kpi.wirelessSetupSr':      '无线建立成功率',
+  'dashboard.kpi.nrSaHoSr':         'NR SA切换成功率',
+  'dashboard.kpi.intraFreqHoSr':    '同频切换成功率',
+  'dashboard.kpi.interFreqHoSr':    '异频切换成功率',
+  'dashboard.kpi.cqiAvg':           '平均CQI',
+  'dashboard.kpi.rlcLossRate':       'RLC丢包率',
+  'dashboard.kpi.rrcSetupSr':           'RRC建立成功率',
+  'dashboard.kpi.erabSetupSr':          'E-RAB建立成功率',
+  'dashboard.kpi.csfbSr':               'CSFB成功率',
+  'dashboard.kpi.erabDropRate':         'E-RAB掉线率',
+  'dashboard.kpi.hoIntraEnbOutSr':      '同基站切换成功率-切出',
+  'dashboard.kpi.hoIntraEnbInSr':       '同基站切换成功率-切入',
+  'dashboard.kpi.hoInterEnbOutSr':      '异基站切换成功率-切出',
+  'dashboard.kpi.hoInterEnbInSr':       '异基站切换成功率-切入',
+  'dashboard.kpi.callSetupSr':          '呼叫建立成功率',
+  'dashboard.kpi.callDropRate':         '呼叫掉线率',
+  'dashboard.kpi.handoverSr':           '切换成功率',
+
+  // Dashboard视图模式 - v2.0新增
+  'dashboard.viewMode.day':    '天',
+  'dashboard.viewMode.week':   '周',
+
+  // Dashboard提示信息 - v2.0新增
+  'dashboard.selectTimeRange': '请选择时间范围',
+  'dashboard.noKpiConfig':      '该制式暂未配置KPI指标',
 
   // -------------------------------------------------------------------------
   // Common page labels
@@ -2535,6 +2588,7 @@ const messages: Record<string, string> = {
   // -------------------------------------------------------------------------
   // GIS Map View
   // -------------------------------------------------------------------------
+  'gis.filter.deviceManagement': '设备管理',
   'gis.filter.deviceStatus': '设备状态',
   'gis.filter.deviceGroup':  '设备组',
   'gis.filter.legend':       '图例',
