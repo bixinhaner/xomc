@@ -160,7 +160,7 @@ function mapBackendAlarm(ba: BackendAlarm): Alarm {
     eventType: normalizeEventType(ba.event_type || ba.alarm_type),
     dealState,
     eventTime: ba.raised_at,
-    updTime: ba.updated_at,
+    updTime: ba.last_updated_at || ba.updated_at,
     dealUser: ba.acknowledged_by,
     dealTime: ba.acknowledged_at,
     clearTime: ba.cleared_at,

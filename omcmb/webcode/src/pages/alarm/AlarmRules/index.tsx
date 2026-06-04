@@ -1,10 +1,8 @@
 import { useCallback, useMemo, useState } from 'react';
-import { App, Button, Card, Dropdown, Space, Switch, Tag, Typography, message } from 'antd';
-import type { MenuProps } from 'antd';
+import { App, Button, Card, Space, Switch, Tag, Typography, message } from 'antd';
 import {
   CheckCircleOutlined,
   DeleteOutlined,
-  MoreOutlined,
   PlusOutlined,
   StopOutlined,
 } from '@ant-design/icons';
@@ -302,12 +300,9 @@ export default function AlarmRules() {
         key: 'actions',
         title: t('table.operation'),
         dataIndex: 'id',
-        width: 140,
+        width: 180,
         fixed: 'right',
         render: (_val, record) => {
-          const moreItems: MenuProps['items'] = [
-            { key: 'delete', label: t('common.delete'), icon: <DeleteOutlined />, danger: true, disabled: record.enabled || record.isDefault, onClick: () => handleDelete(record) },
-          ];
           return (
             <Space size={4}>
               <Button type="link" size="small" onClick={() => handleView(record)}>
@@ -316,9 +311,15 @@ export default function AlarmRules() {
               <Button type="link" size="small" disabled={record.enabled} onClick={() => handleEdit(record)}>
                 {t('common.edit')}
               </Button>
-              <Dropdown menu={{ items: moreItems }} trigger={['click']}>
-                <Button type="text" size="small" icon={<MoreOutlined />} onClick={(e) => e.stopPropagation()} />
-              </Dropdown>
+              <Button
+                type="link"
+                size="small"
+                danger
+                disabled={record.enabled || record.isDefault}
+                onClick={() => handleDelete(record)}
+              >
+                {t('common.delete')}
+              </Button>
             </Space>
           );
         },

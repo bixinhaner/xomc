@@ -26,7 +26,7 @@ export interface Alarm {
   neType: string;                     // 网元类型 = technology
   equipInfo: string;                  // 网元定位 = device_name(device_sn)
   eventTime: string;                  // 故障时间 = raised_at
-  updTime: string;                    // 更新时间 = updated_at
+  updTime: string;                    // 更新时间 = last_updated_at，缺失时回退 updated_at
   dealState: DealState;               // 告警状态（由 status + ack + clear 推导）
   dealUser?: string;                  // 确认人 = acknowledged_by
   dealTime?: string;                  // 确认时间 = acknowledged_at
