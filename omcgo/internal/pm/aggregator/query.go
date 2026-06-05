@@ -200,6 +200,14 @@ func (a *Aggregator) scanCountSub(ctx context.Context, inner sq.SelectBuilder) (
 	return n, nil
 }
 
+// BackfillDisplayNames 对外暴露：对给定行集合整体回填 DisplayName（按 metric_path 查指标库，
+// 查不到回退编号本身）。供 pm handler 在补占位行后统一回填——占位行可能因「该指标本次无任何
+// 真实行」而取不到名，整体再回填一次让占位行与真实行同口径取名（合成计数器等库里无对应行的
+// 编号仍回退编号本身，行为不变）。
+func (a *Aggregator) BackfillDisplayNames(ctx context.Context, rows []Row) {
+	a.backfillDisplayNames(ctx, rows)
+}
+
 // backfillDisplayNames 给结果行补 DisplayName：
 //   - kpi 行：metric_path 是 K 编号，按编号批量查指标库 cn_name 回填
 //   - counter 行：PM-P2/P3 编号化后 metric_path 是 C 编号，同样按编号查指标库本地化名回填；

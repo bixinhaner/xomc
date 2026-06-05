@@ -302,6 +302,10 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 	// 仅 device 维度（单 OUI+SN）+ metric_paths 非空时启用。
 	if c.Query("fill_empty") == "true" {
 		rows = fillEmptyBuckets(rows, req)
+		// 占位行可能因「该指标本次无任何真实行」而 DisplayName 为空（fillEmptyBuckets 的 nameByPath
+		// 只从真实行收集）；整体按指标库再回填一次，使占位行与真实行同口径取名，避免透视表列头
+		// 退化成裸编号（查不到名的合成计数器仍回退编号本身，行为不变）。
+		h.aggr.BackfillDisplayNames(c.Request.Context(), rows)
 	}
 	// 真实总数：跑一次同过滤的 COUNT，让 total 反映命中真实总数而非本页返回行数
 	// （T-0194 截断诚实提示）。命中 limit 时 total>len(rows)，前端据此提示「已截断」。
