@@ -8,7 +8,7 @@
  * 与 G6 panel 一致的视觉：ECharts Line + 缺采 '-' 断线
  */
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useIntl, type IntlShape } from 'react-intl';
 import { Alert, Button, Card, DatePicker, Empty, Space, Spin, Table, Tabs, Tag, Tooltip, Typography, message } from 'antd';
 import { ExportOutlined } from '@ant-design/icons';
@@ -77,51 +77,68 @@ function buildSeriesByMetric(rows: AdhocResultRow[], granularity: string): Metri
   return out;
 }
 
-// 结果表的列定义：页面表格与导出 Excel 共用同一份，保证列集合 / 列名 / 格式不漂移。
-// toText 给出导出用纯文本（含时间格式化、聚合组文案）；renderCell 仅页面展示需要富渲染时提供。
-interface AdhocCol {
-  header: string;
-  width?: number;
-  toText: (r: AdhocResultRow) => string | number;
-  renderCell?: (r: AdhocResultRow) => ReactNode;
+// 结果表横表透视：把长表（每行一个数据点）摊成横表——同一 (设备 × 小区/PLMN × 时间) 行键凑一行，
+// 每个指标占一列，列名「编号(名·类型)」（与导出 CSV 横表同口径，列名自带中文，顺带解决"指标列显编号"）。
+interface WideMetricCol {
+  metricPath: string;
+  title: string; // 编号(名·类型)
+}
+interface WideResultRow {
+  rowKey: string;
+  deviceSn: string; // 用于 AGGREGATED 富渲染判断
+  deviceLabel: string;
+  cellPlmn: string;
+  time: string;
+  values: Record<string, number>;
 }
 
-function buildAdhocColumns(intl: IntlShape, taskDeviceSns: string[]): AdhocCol[] {
-  const deviceText = (r: AdhocResultRow) =>
-    r.deviceSn === 'AGGREGATED'
-      ? intl.formatMessage({ id: 'perf.adhoc.aggregateGroupUnit' }, { count: taskDeviceSns.length })
-      : r.deviceOui
-        ? `${r.deviceOui}/${r.deviceSn}`
-        : r.deviceSn;
-  return [
-    {
-      header: intl.formatMessage({ id: 'perf.adhoc.colDevice' }),
-      width: 200,
-      toText: deviceText,
-      renderCell: (r) =>
-        r.deviceSn === 'AGGREGATED' ? (
-          <Tooltip title={<pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{taskDeviceSns.join('\n')}</pre>}>
-            <Tag color="purple" style={{ cursor: 'help' }}>
-              {deviceText(r)}
-            </Tag>
-          </Tooltip>
-        ) : (
-          deviceText(r)
-        ),
-    },
-    { header: intl.formatMessage({ id: 'perf.adhoc.colMetric' }), toText: (r) => r.displayName || r.metricPath },
-    { header: intl.formatMessage({ id: 'perf.adhoc.colValue' }), width: 120, toText: (r) => r.metricValue },
-    {
-      header: intl.formatMessage({ id: 'perf.adhoc.colStartTime' }),
-      width: 160,
-      toText: (r) => (r.startTime ? dayjs(r.startTime).format('YYYY-MM-DD HH:mm') : '-'),
-    },
-    {
-      header: intl.formatMessage({ id: 'perf.adhoc.colEndTime' }),
-      width: 160,
-      toText: (r) => (r.endTime ? dayjs(r.endTime).format('YYYY-MM-DD HH:mm') : '-'),
-    },
-  ];
+function deviceLabelOf(r: AdhocResultRow, intl: IntlShape, taskDeviceSns: string[]): string {
+  if (r.deviceSn === 'AGGREGATED') {
+    return intl.formatMessage({ id: 'perf.adhoc.aggregateGroupUnit' }, { count: taskDeviceSns.length });
+  }
+  return r.deviceOui ? `${r.deviceOui}/${r.deviceSn}` : r.deviceSn;
+}
+
+function buildWideTable(
+  rows: AdhocResultRow[],
+  granularity: string,
+  intl: IntlShape,
+  taskDeviceSns: string[],
+): { columns: WideMetricCol[]; data: WideResultRow[] } {
+  const filtered = rows.filter((r) => r.granularity === granularity);
+  // 列集：distinct metricPath（按编号升序），列名「编号(名·类型)」。
+  const colMap = new Map<string, WideMetricCol>();
+  filtered.forEach((r) => {
+    if (!colMap.has(r.metricPath)) {
+      const name = r.displayName || r.metricPath;
+      colMap.set(r.metricPath, { metricPath: r.metricPath, title: `${r.metricPath}(${name}·${r.metricType})` });
+    }
+  });
+  const columns = Array.from(colMap.values()).sort((a, b) => a.metricPath.localeCompare(b.metricPath));
+  // 行键：设备 × 小区/PLMN × 时间。
+  const rowMap = new Map<string, WideResultRow>();
+  filtered.forEach((r) => {
+    const rowKey = `${r.deviceSn}|${r.objectLdn ?? ''}|${r.startTime}`;
+    let wr = rowMap.get(rowKey);
+    if (!wr) {
+      wr = {
+        rowKey,
+        deviceSn: r.deviceSn,
+        deviceLabel: deviceLabelOf(r, intl, taskDeviceSns),
+        cellPlmn: r.objectLdn || '-',
+        time: r.startTime ? dayjs(r.startTime).format('YYYY-MM-DD HH:mm') : '-',
+        values: {},
+      };
+      rowMap.set(rowKey, wr);
+    }
+    wr.values[r.metricPath] = r.metricValue;
+  });
+  const data = Array.from(rowMap.values()).sort((a, b) => {
+    if (a.deviceLabel !== b.deviceLabel) return a.deviceLabel.localeCompare(b.deviceLabel);
+    if (a.cellPlmn !== b.cellPlmn) return a.cellPlmn.localeCompare(b.cellPlmn);
+    return a.time.localeCompare(b.time);
+  });
+  return { columns, data };
 }
 
 export function AdhocResultPanel({ taskId, embedded = false }: Props) {
@@ -310,7 +327,10 @@ function GranularityView({
 }) {
   const intl = useIntl();
   const series = useMemo(() => buildSeriesByMetric(rows, granularity), [rows, granularity]);
-  const cols = useMemo(() => buildAdhocColumns(intl, taskDeviceSns), [intl, taskDeviceSns]);
+  const { columns: metricCols, data: wideData } = useMemo(
+    () => buildWideTable(rows, granularity, intl, taskDeviceSns),
+    [rows, granularity, intl, taskDeviceSns],
+  );
   if (loading) return <Spin />;
   if (series.length === 0) {
     return <Empty description={intl.formatMessage({ id: 'perf.adhoc.emptyGranNoData' }, { gran: granularity })} />;
@@ -335,16 +355,50 @@ function GranularityView({
       <ReactECharts option={option} style={{ height: 240 }} />
       <Table
         size="small"
-        rowKey={(r) => `${r.metricPath}:${r.deviceSn}:${r.startTime}`}
-        dataSource={rows.filter((r) => r.granularity === granularity)}
+        rowKey={(r) => r.rowKey}
+        dataSource={wideData}
         pagination={{ pageSize: 10, size: 'small' }}
         style={{ marginTop: 12 }}
-        columns={cols.map((c) => ({
-          title: c.header,
-          key: c.header,
-          width: c.width,
-          render: (_: unknown, r: AdhocResultRow) => (c.renderCell ? c.renderCell(r) : c.toText(r)),
-        }))}
+        scroll={{ x: 'max-content' }}
+        columns={[
+          {
+            title: intl.formatMessage({ id: 'perf.adhoc.colDevice' }),
+            key: '__device',
+            width: 200,
+            fixed: 'left' as const,
+            render: (_: unknown, r: WideResultRow) =>
+              r.deviceSn === 'AGGREGATED' ? (
+                <Tooltip title={<pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{taskDeviceSns.join('\n')}</pre>}>
+                  <Tag color="purple" style={{ cursor: 'help' }}>
+                    {r.deviceLabel}
+                  </Tag>
+                </Tooltip>
+              ) : (
+                r.deviceLabel
+              ),
+          },
+          {
+            title: intl.formatMessage({ id: 'perf.adhoc.colCellPlmn' }),
+            key: '__cell',
+            width: 160,
+            render: (_: unknown, r: WideResultRow) => r.cellPlmn,
+          },
+          {
+            title: intl.formatMessage({ id: 'perf.adhoc.colStartTime' }),
+            key: '__time',
+            width: 160,
+            render: (_: unknown, r: WideResultRow) => r.time,
+          },
+          ...metricCols.map((c) => ({
+            title: c.title,
+            key: c.metricPath,
+            width: 200,
+            render: (_: unknown, r: WideResultRow) => {
+              const v = r.values[c.metricPath];
+              return v === undefined ? '-' : v;
+            },
+          })),
+        ]}
       />
     </>
   );

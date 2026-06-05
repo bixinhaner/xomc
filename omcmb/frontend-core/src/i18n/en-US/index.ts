@@ -6426,6 +6426,7 @@ const messages: Record<string, string> = {
   // Result panel
   'perf.adhoc.aggregateGroupUnit':       'Aggregation Group · {count} devices',
   'perf.adhoc.colDevice':                'Device',
+  'perf.adhoc.colCellPlmn':              'Cell/PLMN',
   'perf.adhoc.colMetric':                'Metric',
   'perf.adhoc.colValue':                 'Value',
   'perf.adhoc.colStartTime':             'Start Time',

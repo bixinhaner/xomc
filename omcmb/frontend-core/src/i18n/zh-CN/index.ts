@@ -6461,6 +6461,7 @@ const messages: Record<string, string> = {
   // 结果面板
   'perf.adhoc.aggregateGroupUnit':       '聚合组·{count} 台',
   'perf.adhoc.colDevice':                '设备',
+  'perf.adhoc.colCellPlmn':              '小区/PLMN',
   'perf.adhoc.colMetric':                '指标',
   'perf.adhoc.colValue':                 '值',
   'perf.adhoc.colStartTime':             '开始时间',

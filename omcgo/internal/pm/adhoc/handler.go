@@ -740,30 +740,28 @@ func (h *Handler) Results(c *gin.Context) {
 		items = append(items, dto)
 	}
 
-	// 回填 display_name：KPI 行 metric_path 是 K 编号，按编号查指标库取友好名；counter 行 = metric_path。
+	// 回填 display_name：按 metric_path 编号查指标库取友好名——counter 与 kpi 同口径
+	// （counter 编号 is_counter='1' 同样落在 perf_indicators_* 三表，与导出 name_resolver 一致）。
+	// 查不到回退编号本身，保证非空。横表展示列名「编号(名·类型)」依赖此处给出中文名。
 	codeSet := make(map[string]struct{})
 	for i := range items {
-		if items[i].MetricType == "kpi" && items[i].MetricPath != "" {
+		if items[i].MetricPath != "" {
 			codeSet[items[i].MetricPath] = struct{}{}
-		} else {
-			items[i].DisplayName = items[i].MetricPath
 		}
 	}
+	var nameByCode map[string]string
 	if len(codeSet) > 0 {
 		codes := make([]string, 0, len(codeSet))
 		for code := range codeSet {
 			codes = append(codes, code)
 		}
-		nameByCode := h.lookupIndicatorNames(c.Request.Context(), codes)
-		for i := range items {
-			if items[i].MetricType != "kpi" {
-				continue
-			}
-			if name, ok := nameByCode[items[i].MetricPath]; ok && name != "" {
-				items[i].DisplayName = name
-			} else {
-				items[i].DisplayName = items[i].MetricPath
-			}
+		nameByCode = h.lookupIndicatorNames(c.Request.Context(), codes)
+	}
+	for i := range items {
+		if name, ok := nameByCode[items[i].MetricPath]; ok && name != "" {
+			items[i].DisplayName = name
+		} else {
+			items[i].DisplayName = items[i].MetricPath
 		}
 	}
 
