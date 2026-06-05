@@ -6204,6 +6204,8 @@ const messages: Record<string, string> = {
   'perf.dashboard.tabTask':              'Task Dashboard',
   'perf.dashboard.tabDevice':            'Device List',
   'perf.dashboard.taskListTitle':        'Tasks',
+  'perf.dashboard.collapseTaskPane':     'Collapse task pane',
+  'perf.dashboard.expandTaskPane':       'Expand task pane',
   'perf.dashboard.groupBuiltin':         'Built-in',
   'perf.dashboard.groupCustom':          'Custom',
   'perf.dashboard.emptyNoTask':          'No aggregation tasks',

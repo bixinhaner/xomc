@@ -6239,6 +6239,8 @@ const messages: Record<string, string> = {
   'perf.dashboard.tabTask':              '任务仪表盘',
   'perf.dashboard.tabDevice':            '设备列表',
   'perf.dashboard.taskListTitle':        '任务',
+  'perf.dashboard.collapseTaskPane':     '收起任务栏',
+  'perf.dashboard.expandTaskPane':       '展开任务栏',
   'perf.dashboard.groupBuiltin':         '内置',
   'perf.dashboard.groupCustom':          '自建',
   'perf.dashboard.emptyNoTask':          '暂无聚合任务',

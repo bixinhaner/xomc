@@ -9,10 +9,11 @@
  * 组件仍是 DeviceListPane），本页不再承载页签，直接渲染任务仪表盘。
  */
 
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useIntl } from 'react-intl';
-import { Card, Empty, List, Space, Tag, theme } from 'antd';
+import { Button, Card, Empty, List, Space, Tag, theme, Tooltip } from 'antd';
+import { MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons';
 import { usePmAdhocList } from '@core/hooks/api/usePmAdhoc';
 import type { AdhocTask } from '@core/types/pmAdhoc';
 import TaskDashboardPane from './TaskDashboardPane';
@@ -79,11 +80,57 @@ function TaskDashboardTab() {
     setSearchParams({ task: t.id });
   };
 
+  // 任务栏收起状态（仅本页本地状态，刷新后回到展开）。
+  const [collapsed, setCollapsed] = useState(false);
+
   return (
     <div style={{ display: 'flex', gap: 12, height: 'calc(100vh - 190px)' }}>
+      {collapsed ? (
+        <Tooltip title={intl.formatMessage({ id: 'perf.dashboard.expandTaskPane' })} placement="right">
+          <div
+            onClick={() => setCollapsed(false)}
+            style={{
+              width: 36,
+              flexShrink: 0,
+              cursor: 'pointer',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 8,
+              paddingTop: 8,
+              border: `1px solid ${token.colorBorderSecondary}`,
+              borderRadius: token.borderRadiusLG,
+              background: token.colorBgContainer,
+            }}
+          >
+            <MenuUnfoldOutlined style={{ color: token.colorPrimary }} />
+            <span
+              style={{
+                fontSize: 12,
+                color: token.colorTextSecondary,
+                writingMode: 'vertical-rl',
+                letterSpacing: 2,
+              }}
+            >
+              {intl.formatMessage({ id: 'perf.dashboard.taskListTitle' })}
+            </span>
+          </div>
+        </Tooltip>
+      ) : (
       <Card
         size="small"
         title={intl.formatMessage({ id: 'perf.dashboard.taskListTitle' })}
+        extra={
+          <Tooltip title={intl.formatMessage({ id: 'perf.dashboard.collapseTaskPane' })}>
+            <Button
+              type="text"
+              size="small"
+              icon={<MenuFoldOutlined />}
+              onClick={() => setCollapsed(true)}
+              aria-label={intl.formatMessage({ id: 'perf.dashboard.collapseTaskPane' })}
+            />
+          </Tooltip>
+        }
         style={{ width: 240, flexShrink: 0, overflow: 'auto' }}
         styles={{ body: { padding: 8 } }}
         loading={isLoading}
@@ -137,6 +184,7 @@ function TaskDashboardTab() {
           <Empty description={intl.formatMessage({ id: 'perf.dashboard.emptyNoTask' })} />
         )}
       </Card>
+      )}
 
       <div style={{ flex: 1, overflow: 'auto' }}>
         {taskId ? (
