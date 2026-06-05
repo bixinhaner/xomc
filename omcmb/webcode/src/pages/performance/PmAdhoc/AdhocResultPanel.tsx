@@ -8,15 +8,31 @@
  * 与 G6 panel 一致的视觉：ECharts Line + 缺采 '-' 断线
  */
 
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useIntl, type IntlShape } from 'react-intl';
-import { Alert, Button, Card, Empty, Space, Spin, Table, Tabs, Tag, Tooltip, Typography } from 'antd';
-import { FileExcelOutlined } from '@ant-design/icons';
+import { Alert, Button, Card, DatePicker, Empty, Space, Spin, Table, Tabs, Tag, Tooltip, Typography, message } from 'antd';
+import { ExportOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
-import dayjs from 'dayjs';
+import dayjs, { type Dayjs } from 'dayjs';
 import { usePmAdhocDetail, usePmAdhocResults } from '@core/hooks/api/usePmAdhoc';
+import { useCreateKpiExport } from '@core/hooks/api/useKpiExport';
 import type { AdhocResultRow } from '@core/types/pmAdhoc';
-import { exportWorkbook } from '@core/utils/excelExport';
+import { buildAdhocExportParams, defaultExportTaskName } from '../PmDashboard/kpiExportParams';
+
+// 按粒度算默认时窗：覆盖最近 7 天，但粒度粗于"天"时至少 7 个周期。
+// 15min / hourly / daily → 7 天；weekly → 7 周；monthly → 7 月。end 取当前时刻。
+function defaultWindowByGranularity(granularity: string | undefined): [Dayjs, Dayjs] {
+  const end = dayjs();
+  switch (granularity) {
+    case 'weekly':
+      return [end.subtract(7, 'week'), end];
+    case 'monthly':
+      return [end.subtract(7, 'month'), end];
+    default:
+      // 15min / hourly / daily 以及未知粒度都按 7 天
+      return [end.subtract(7, 'day'), end];
+  }
+}
 
 interface Props {
   taskId: string;
@@ -111,7 +127,18 @@ function buildAdhocColumns(intl: IntlShape, taskDeviceSns: string[]): AdhocCol[]
 export function AdhocResultPanel({ taskId, embedded = false }: Props) {
   const intl = useIntl();
   const taskQuery = usePmAdhocDetail(taskId);
-  const { data: resultsResp, isLoading: rowsLoading } = usePmAdhocResults(taskId);
+
+  // 二次时窗筛选：同时驱动「页面展示重查」与「导出取数」。默认按粒度算（见 defaultWindowByGranularity）。
+  // windowTouched=用户手动改过后不再被粒度联动覆盖。
+  const [windowRange, setWindowRange] = useState<[Dayjs, Dayjs]>(() => defaultWindowByGranularity(undefined));
+  const [windowTouched, setWindowTouched] = useState(false);
+  const startISO = windowRange[0].toISOString();
+  const endISO = windowRange[1].toISOString();
+
+  const { data: resultsResp, isLoading: rowsLoading } = usePmAdhocResults(taskId, {
+    startTime: startISO,
+    endTime: endISO,
+  });
   const rows = resultsResp?.rows ?? [];
   const totalRows = resultsResp?.total ?? rows.length;
   // T-0194：真实总数 > 返回行数 = 被 limit 截断，给诚实提示。
@@ -120,6 +147,31 @@ export function AdhocResultPanel({ taskId, embedded = false }: Props) {
   const granularities = useMemo(() => taskQuery.data?.granularities ?? [], [taskQuery.data?.granularities]);
   const [activeGran, setActiveGran] = useState<string | undefined>(undefined);
   const effectiveGran = activeGran ?? granularities[0];
+
+  // 粒度联动默认时窗：粒度就绪/切换时，若用户未手动改过则按当前粒度重设默认时窗。
+  useEffect(() => {
+    if (windowTouched) return;
+    setWindowRange(defaultWindowByGranularity(effectiveGran));
+  }, [effectiveGran, windowTouched]);
+
+  // 导出（KPI-EXPORT adhoc 来源）：建后端异步任务 → 文件传输菜单下载，带当前二次时窗。
+  const createExport = useCreateKpiExport();
+  const handleExport = () => {
+    createExport.mutate(
+      {
+        sourceType: 'adhoc',
+        params: buildAdhocExportParams({ taskId, startTime: startISO, endTime: endISO }),
+        taskName: defaultExportTaskName('adhoc'),
+      },
+      {
+        onSuccess: () => message.success(intl.formatMessage({ id: 'kpiExport.export.submitted' })),
+        onError: (e) =>
+          message.error(
+            intl.formatMessage({ id: 'kpiExport.export.submitFailed' }, { reason: (e as Error)?.message ?? '' }),
+          ),
+      },
+    );
+  };
 
   if (taskQuery.isLoading) return <Spin tip={intl.formatMessage({ id: 'perf.dashboard.loadingTask' })} />;
   if (taskQuery.isError || !taskQuery.data) {
@@ -135,28 +187,9 @@ export function AdhocResultPanel({ taskId, embedded = false }: Props) {
 
   const task = taskQuery.data;
 
-  // G7-Gap-4：导出 adhoc 结果（多 sheet，按粒度分）
-  // 列集合 / 列名 / 时间格式与页面表格 (GranularityView) 共用 buildAdhocColumns，保持一致
-  const handleExportExcel = () => {
-    const cols = buildAdhocColumns(intl, task.deviceSns);
-    const sheets = granularities.map((g) => ({
-      name: g,
-      rows: rows
-        .filter((r) => r.granularity === g)
-        .map((r) => {
-          const row: Record<string, string | number> = {};
-          cols.forEach((c) => {
-            row[c.header] = c.toText(r);
-          });
-          return row;
-        }),
-    }));
-    exportWorkbook(`adhoc_${task.name}_${task.id.slice(0, 8)}`, sheets);
-  };
-
-  // 摘要 + 导出，Card 模式放 extra，嵌入模式单起一行
+  // 摘要 + 时窗筛选 + 导出，Card 模式放 extra，嵌入模式单起一行
   const summary = (
-    <Space size={6}>
+    <Space size={6} wrap>
       <Typography.Text type="secondary" style={{ fontSize: 12 }}>
         {intl.formatMessage(
           { id: 'perf.adhoc.resultSummary' },
@@ -167,13 +200,28 @@ export function AdhocResultPanel({ taskId, embedded = false }: Props) {
           },
         )}
       </Typography.Text>
+      <DatePicker.RangePicker
+        size="small"
+        showTime={{ format: 'HH:mm' }}
+        format="YYYY-MM-DD HH:mm"
+        allowClear={false}
+        value={windowRange}
+        onChange={(v) => {
+          if (v && v[0] && v[1]) {
+            setWindowRange([v[0], v[1]]);
+            setWindowTouched(true);
+          }
+        }}
+      />
       <Button
         size="small"
-        icon={<FileExcelOutlined />}
-        onClick={handleExportExcel}
+        icon={<ExportOutlined />}
+        loading={createExport.isPending}
+        onClick={handleExport}
         disabled={rows.length === 0}
+        title={intl.formatMessage({ id: 'kpiExport.export.tooltip' })}
       >
-        {intl.formatMessage({ id: 'perf.adhoc.exportExcel' })}
+        {intl.formatMessage({ id: 'kpiExport.export.button' })}
       </Button>
     </Space>
   );
