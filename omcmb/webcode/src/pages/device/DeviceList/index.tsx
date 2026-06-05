@@ -952,6 +952,9 @@ export default function DeviceList() {
         title: t('device.alarmLevel'),
         dataIndex: 'alarmLevel',
         width: 100,
+        // 2026-06-04 用户决策:前三列(SN/连接状态/告警级别)固定左侧,横向滚动时
+        // 保持不透明(固定列背景由 DataTable.module.css 的 .ant-table-cell-fix-left 统一处理)。
+        fixed: 'left',
         group: 'common',
         render: (_val, record) => {
           const color = SEVERITY_COLOR[record.alarmLevel] ?? 'default';
