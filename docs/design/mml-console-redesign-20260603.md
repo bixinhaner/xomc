@@ -481,6 +481,55 @@ V2 当前左操作区 `OperationPanel` 只实现了「控制面板（结构化�
 5. **列宽/版面**：固定列增多 + 记录面板占 24%，结果区横向更挤；建议移除故障码独立列、限制动态列数。
 6. **范围控制**：本轮**前端 mock 全量可交付**（列、三态、层级、持久化、清空）；后端「读后核实」「逐 PATH 落库」拆为独立 backlog 任务，按 §3.11.2/3.11.3 决策推进。
 
+#### 3.11.7 收尾微调（2026-06-05，4 项展示优化）
+
+四项纯展示层调整，不动数据契约：
+
+1. **「执行结果」标题带命令名**（§3.11.1 标题行补充）：`ResultTable` 的 Card `title` 在「执行结果」之后追加**当前回看记录的命令名称**（标准模式取 `execMeta.commandName`，裸路径模式回退 `execMeta.label`），形如「执行结果 · 查询设备基本信息」。空态（未执行）仍只显示「执行结果」。
+2. **汇总统计改为「设备总数 / 执行中 / 成功 /（未核实 /未生效）/ 失败」**（§3.11.1 汇总条修订）：**删除「最长用时」**统计项；在「设备总数」之后**新增「执行中」**计数（= `status ∈ {pending, running}` 的设备行数，蓝色 `processing`）。写类仍保留「未核实/未生效」。
+3. **命令记录去掉数量提醒**（§3.10.4 / §3.11.4 面板修订）：移除收缩态历史图标上的**红色数量 Badge**，并移除展开态标题里的 `(N)` 计数文本——命令记录面板不再显示条数。
+4. **配置参数弹框：隐藏「操作类型」文字标签、显示命令名**（§3.10.3 弹框修订）：标准模式头部原「操作类型」标签文字去除，改为顶部显示**命令名称**（`command.commandName`），其下保留操作类型彩 Tag（`LST · 查询`）+ 命令码，信息更聚焦。
+
+### 3.12 后端 API 对接方案（2026-06-05，落地真实数据）
+
+> 在 §3.2~§3.11 前端 mock 全量落地基础上，把 `ConsoleV2/` 的 mock 层替换为真实后端端点。**复用老 console（`mml/Console/`）已验证的结构化执行通道**，不新增后端端点。
+
+#### 3.12.1 端点映射（全部已存在，base `/api/v1`）
+
+| 环节 | 复用 hook / api | 端点 |
+|------|----------------|------|
+| 设备列表 | `deviceApi.getList`（服务端分页/筛选） | `GET /devices?page&page_size&search&product_class` |
+| 命令树 | `useGroupTreeFlat(lang)` | `GET /mml/group-tree?format=flat&lang` |
+| 命令参数 | `useCommandSubFields(commandId, lang, deviceKey)` | `GET /mml/commands/:id/sub-fields` → `SubFieldDef[]` |
+| 命令搜索 | `useSearchCommands(q)` | `GET /mml/commands/search` |
+| 标准执行 | `useExecuteStatementsStructured` | `POST /mml/console/execute-statements-structured` → `MMLTask` |
+| 裸路径执行 | `useExecuteMMLCommand`（legacy） | `POST /mml/execute`（`command_code` + `param_paths`） |
+| 结果（实时） | `useMmlTaskStream(taskIds)`（SSE） | `EventSource /api/v1/events/stream`，事件 `mml_device_frame`/`mml_task_status`/`mml_task_completed` |
+| 结果（落库） | `getTaskById` + `getTaskResults` | `GET /mml/tasks/:id` + `GET /mml/tasks/:id/results` |
+
+**无 results-schema 端点**：结果表格的**列**由前端从「用户所选 path 集合」派生（沿用 `buildColumns`），**单元格值**从 `DeviceTaskResultItem.result.parsedData[path]`（或 SSE `mml_device_frame`）取——与老 console 客户端解析 GPV 一致。
+
+#### 3.12.2 关键决策（2026-06-05 用户确认）
+
+1. **读后核实四态先降级两态**：后端当前不做 read-after-write，真实结果只有 `success`/`failed`。P1–P3 只用真实两态回填，`ExecStatus` 的 `unverified`/`mismatch` 结构**保留**但暂不产生；`§3.11.2` 读后核实拆为后端 backlog（P4）。
+2. **实时结果走 SSE**：复用 `useMmlTaskStream`，`mml_device_frame` 逐设备帧**就地更新** active record 的 `ResultRow`；最终态用 `getTaskResults` 兜底校正。
+3. **裸路径模式接 legacy `/mml/execute`**：`指定参数` Tab 无 `command_id`，走老的 `command_code` + `param_paths` 通道（`useExecuteMMLCommand`），与结构化通道并存。
+4. **分阶段交付**：P1 只读对接 → P2 执行+结果 → P3 命令记录 → P4（后端）读后核实。
+
+#### 3.12.3 类型 / 适配
+
+- `CommandItem.id` 改为**真实 `mml_commands.id`（UUID）**，即结构化执行所需 `commandId`；`paramPaths` 由 `SubFieldDef` 适配（`path=tr069Path`、`label`、`writable=accessType==='READ_WRITE'`）。
+- 新增 `ConsoleV2/adapters.ts`：`mapDeviceToItem`、`mapFlatCommand`、`subFieldsToParamPaths`、`mapResultItemToRow`（真实类型 → v2 view 类型，隔离对接面）。
+- `useConsoleHistory`：`recordStore` 由「内存 Map」改为凭 localStorage 命令 ID 数组拉 `getTaskById` + `getTaskResults`（§3.11.4 契约不变）。
+- `mock.ts` 保留纯函数（`buildColumns`/`buildColumnsFromRawPaths`），删除 `MOCK_DEVICES`/`MOCK_COMMANDS`/`MOCK_HISTORY`/`buildResultRows`。
+
+#### 3.12.4 分阶段文件改动
+
+- **P1 只读**：`DeviceSelectModal`（→`deviceApi.getList` 服务端分页）、`CommandSelectModal`（→`useGroupTreeFlat`+选中拉 `useCommandSubFields`）、`adapters.ts`；`ConfigParamsModal` 沿用 `CommandItem` 无需改。
+- **P2 执行+结果**：`index.tsx`（`runExecute` → `executeStatementsStructured` / `executeMMLCommand`），新增结果订阅（SSE 就地更新 + results 兜底），`mapResultItemToRow`。
+- **P3 命令记录**：`useConsoleHistory` 改凭 ID 现拉真实任务。
+- **P4（后端）**：读后核实四态。
+
 ---
 
 ## 4. 需求映射

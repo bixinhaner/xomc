@@ -106,7 +106,9 @@ export default function ConfigParamsModal({
   ) : (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
       <div>
-        <Text type="secondary">操作类型</Text>
+        <Text strong style={{ fontSize: 14 }}>
+          {command.commandName}
+        </Text>
         <div style={{ marginTop: 6 }}>
           <Tag color={opColor(command.operationType)} style={{ fontSize: 13, padding: '2px 10px' }}>
             {command.operationType} · {opLabel(command.operationType)}

@@ -74,14 +74,15 @@ export default function ResultTable({
 
   const stats = useMemo(() => {
     const total = rows.length;
+    // 「执行中」= 待执行 + 执行中两态的设备行数（§3.11.7 需求②）
+    const inProgress = rows.filter((r) => r.status === 'pending' || r.status === 'running').length;
     const success = rows.filter((r) => r.status === 'success').length;
     const unverified = rows.filter((r) => r.status === 'unverified').length;
     const mismatch = rows.filter((r) => r.status === 'mismatch').length;
     const failed = rows.filter((r) => r.status === 'failed').length;
-    const elapsed = rows.reduce((m, r) => Math.max(m, r.elapsedMs), 0);
     // 「问题行」= RPC 失败 + 核实未生效（mismatch）
     const problem = failed + mismatch;
-    return { total, success, unverified, mismatch, failed, problem, elapsed };
+    return { total, inProgress, success, unverified, mismatch, failed, problem };
   }, [rows]);
 
   // 写类（读后核实）才展示「未核实/未生效」统计；读类只有成功/失败。
@@ -206,21 +207,26 @@ export default function ResultTable({
   return (
     <Card
       title={
-        // 「执行结果」标题 + 汇总统计同一行（设计 §3.11.1 修订，2026-06-05）
+        // 「执行结果」标题 + 当前命令名 + 汇总统计同一行（设计 §3.11.1 / §3.11.7 修订）
         <Space size={20} wrap style={{ rowGap: 4 }}>
-          <span>执行结果</span>
+          <Space size={6}>
+            <span>执行结果</span>
+            {hasExecuted && execMeta && (
+              <Text type="secondary" style={{ fontWeight: 400, fontSize: 14 }}>
+                · {execMeta.commandName ?? execMeta.label}
+              </Text>
+            )}
+          </Space>
           {hasExecuted && (
             <Space size={14} wrap style={{ fontWeight: 400, fontSize: 13 }}>
               <span>
                 设备总数 <b>{stats.total}</b>
               </span>
+              <span style={{ color: '#1677ff' }}>执行中 {stats.inProgress}</span>
               <span style={{ color: '#52c41a' }}>成功 {stats.success}</span>
               {isWrite && <span style={{ color: '#faad14' }}>未核实 {stats.unverified}</span>}
               {isWrite && <span style={{ color: '#ff4d4f' }}>未生效 {stats.mismatch}</span>}
               <span style={{ color: '#ff4d4f' }}>失败 {stats.failed}</span>
-              <span style={{ color: '#8c8c8c' }}>
-                最长用时 {(stats.elapsed / 1000).toFixed(1)}s
-              </span>
             </Space>
           )}
         </Space>

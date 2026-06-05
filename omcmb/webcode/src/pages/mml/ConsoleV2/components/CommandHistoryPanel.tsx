@@ -1,4 +1,4 @@
-import { Badge, Button, Card, Empty, Popconfirm, Space, Tag, Tooltip, Typography } from 'antd';
+import { Button, Card, Empty, Popconfirm, Space, Tag, Tooltip, Typography } from 'antd';
 import {
   DeleteOutlined,
   HistoryOutlined,
@@ -57,9 +57,7 @@ export default function CommandHistoryPanel({
         <Tooltip title="展开命令记录" placement="right">
           <Button type="text" icon={<RightOutlined />} onClick={onToggleCollapsed} />
         </Tooltip>
-        <Badge count={records.length} size="small" offset={[2, 0]}>
-          <HistoryOutlined style={{ fontSize: 18, color: '#8c8c8c' }} />
-        </Badge>
+        <HistoryOutlined style={{ fontSize: 18, color: '#8c8c8c' }} />
         <Text type="secondary" style={{ writingMode: 'vertical-rl', letterSpacing: 4, marginTop: 4 }}>
           命令记录
         </Text>
@@ -74,9 +72,6 @@ export default function CommandHistoryPanel({
         <Space size={6}>
           <HistoryOutlined />
           <span>命令记录</span>
-          <Text type="secondary" style={{ fontWeight: 400 }}>
-            ({records.length})
-          </Text>
         </Space>
       }
       extra={
