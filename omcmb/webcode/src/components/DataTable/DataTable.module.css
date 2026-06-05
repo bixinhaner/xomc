@@ -130,9 +130,16 @@
 :global(.omc-data-table) :global(.row-even) > td:global(.ant-table-cell-fix-right) {
   background-color: var(--color-neutral-50) !important;
 }
+/* 固定列 hover 不透明合成(修复半透明主题横向滚动透出):
+   部分主题的 --color-row-hover 是半透明 rgba(如 rgba(99,102,241,0.04)),直接作固定列
+   背景时,固定列覆盖在滚动列之上 → 鼠标所在行向左滑动会透出下层文字。
+   改为「hover 色叠加在不透明容器底色上」合成不透明背景 —— 与非固定列(上方
+   tr:hover > td 规则,半透明 hover 叠在容器底色上)最终同色,且保证不透明。
+   不透明主题(如 #e6f7ff)下 gradient 本身即不透明,行为不变。 */
 :global(.omc-data-table) :global(.ant-table-tbody > tr:hover) > td:global(.ant-table-cell-fix-left),
 :global(.omc-data-table) :global(.ant-table-tbody > tr:hover) > td:global(.ant-table-cell-fix-right) {
-  background-color: var(--color-row-hover) !important;
+  background-color: var(--color-bg-container) !important;
+  background-image: linear-gradient(var(--color-row-hover), var(--color-row-hover)) !important;
 }
 /* 固定表头单元格同样需不透明(纵向滚动时不被表体透出) */
 :global(.omc-data-table) :global(.ant-table-thead > tr > th.ant-table-cell-fix-left),

@@ -157,9 +157,9 @@ groups:
             表示 worker 清扫器 unlink 残留文件失败,或 DELETE handler 物理备份失败
             触发保守回滚(500 ErrCodeParamModelBackupFailed=2031)。
             可能原因(按概率排序):
-              1. /opt/omc/data/param-mappings-custom/ 磁盘满 — 跑 df -h /opt/omc
-              2. 目录权限被运维误改(不再是 0750 / chown 10001:10001)
-              3. 挂载点变只读(ro remount) — 跑 mount | grep param-mappings-custom
+              1. /opt/omc/data/(外置字典目录,Phase 2 后单目录 param-mappings 等) 磁盘满 — 跑 df -h /opt/omc
+              2. 目录权限被运维误改(chown 10001:10001 /opt/omc/data 未生效)
+              3. 挂载点变只读(ro remount) — 跑 mount | grep /opt/omc/data
               4. 容器内 UID 与 host 不对齐(K8s 部署后常见)
             Action:
               1. ssh 到对应 host,验证 customDir 的 mount / 权限 / 磁盘空间

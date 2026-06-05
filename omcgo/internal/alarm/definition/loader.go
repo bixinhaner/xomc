@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -23,10 +24,10 @@ const LoaderName = "alarm-definition"
 // Loader 实现 dictloader.Loader（T-0098 P1-06）。
 //
 // 加载语义（设计 §3.4）：
-//   1. 扫描 {XMLBaseDir}/{Directory}/*.xml — 文件名（去 .xml）即 ne_type
-//   2. 解析每个 alarmModel.alarms → 校验 severity 字符串属于 4 行种子（P1-04 已写）
-//   3. UPSERT alarm_definitions（按 identifier 唯一）；severity_id 由 severity name → severity_levels lookup 解析
-//   4. 跨文件 identifier 全局唯一性检查（同一 identifier 在不同 ne_type 中冲突时跳过 + ERROR）
+//  1. 扫描 {XMLBaseDir}/{Directory}/*.xml — 文件名（去 .xml）即 ne_type
+//  2. 解析每个 alarmModel.alarms → 校验 severity 字符串属于 4 行种子（P1-04 已写）
+//  3. UPSERT alarm_definitions（按 identifier 唯一）；severity_id 由 severity name → severity_levels lookup 解析
+//  4. 跨文件 identifier 全局唯一性检查（同一 identifier 在不同 ne_type 中冲突时跳过 + ERROR）
 type Loader struct {
 	pool   *pgxpool.Pool
 	cfg    appconfig.AlarmDefinitionLoaderConfig
@@ -37,9 +38,6 @@ type Loader struct {
 func NewLoader(pool *pgxpool.Pool, cfg appconfig.AlarmDefinitionLoaderConfig, baseDir string, logger *zap.Logger) *Loader {
 	if cfg.Directory == "" {
 		cfg.Directory = BuiltinDirSubdir
-	}
-	if cfg.CustomDirectory == "" {
-		cfg.CustomDirectory = CustomDirSubdir
 	}
 	if logger == nil {
 		logger = zap.NewNop()
@@ -57,7 +55,7 @@ func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
 	rep := dictloader.NewReport(LoaderName)
 	defer rep.Finish()
 
-	// T-0180 对标:builtin + custom 双目录合并扫描;同名文件按 CustomOverrides 决定胜负。
+	// 三库 XML 导入重构(2026-06-04 单目录):仅扫 alarm-definitions/,跳过 sidecar。
 	sources, err := l.resolveSources()
 	if err != nil {
 		return rep, err
@@ -97,59 +95,45 @@ func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
 // alarmFileSource 配对一个待加载 XML 的绝对路径与其 loaded_from 列值(含目录前缀)。
 type alarmFileSource struct {
 	AbsPath    string // os.ReadFile 用
-	LoadedFrom string // "alarm-definitions/ENB.xml" 或 "alarm-definitions-custom/MY.xml"
+	LoadedFrom string // "alarm-definitions/ENB.xml"
 }
 
-// resolveSources 合并扫描 builtin（cfg.Directory）与 custom（cfg.CustomDirectory）两目录,
-// 按 basename 去重:CustomOverridesEnabled() 决定同名时谁胜出(默认 custom 胜出)。
-// custom 目录允许不存在(尚无任何上传)。LoadedFrom 始终带目录前缀,供 ClassifySource 判定。
+// resolveSources 扫描单目录 cfg.Directory（alarm-definitions/，builtin + custom XML 同住）,
+// 跳过隐藏文件、非 .xml 文件与 sidecar 标记文件(X.xml.custom)。
+// LoadedFrom 始终带目录前缀,供 ClassifySource / IsDeletable 据 sidecar 判定来源。
+// 按 basename 字典序排序,保证跨文件 identifier first-seen 去重的确定性。
 func (l *Loader) resolveSources() ([]alarmFileSource, error) {
-	byName := make(map[string]alarmFileSource, 16)
-	order := make([]string, 0, 16)
-
-	scan := func(subdir string) error {
-		dir := filepath.Join(l.base, subdir)
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			if os.IsNotExist(err) {
-				return nil // builtin 必有(已 ensure),custom 可缺
-			}
-			return fmt.Errorf("read alarm dir %s: %w", dir, err)
+	dir := filepath.Join(l.base, l.cfg.Directory)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil // 目录可缺(空库 / 本地裸跑),静默返回空
 		}
-		for _, e := range entries {
-			if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
-				continue
-			}
-			if !strings.EqualFold(filepath.Ext(e.Name()), ".xml") {
-				continue
-			}
-			name := e.Name()
-			if _, ok := byName[name]; !ok {
-				order = append(order, name)
-			}
-			byName[name] = alarmFileSource{
-				AbsPath:    filepath.Join(dir, name),
-				LoadedFrom: filepath.ToSlash(filepath.Join(subdir, name)),
-			}
+		return nil, fmt.Errorf("read alarm dir %s: %w", dir, err)
+	}
+
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
 		}
-		return nil
+		// 跳过 sidecar 标记文件(X.xml.custom);其 ext 非 .xml,EqualFold 也会排除,显式跳更清晰。
+		if strings.HasSuffix(e.Name(), CustomMarkerSuffix) {
+			continue
+		}
+		if !strings.EqualFold(filepath.Ext(e.Name()), ".xml") {
+			continue
+		}
+		names = append(names, e.Name())
 	}
+	sort.Strings(names)
 
-	// 后扫描者覆盖先扫描者:customWins → 先 builtin 后 custom;否则相反。
-	first, second := l.cfg.Directory, l.cfg.CustomDirectory
-	if !l.cfg.CustomOverridesEnabled() {
-		first, second = l.cfg.CustomDirectory, l.cfg.Directory
-	}
-	if err := scan(first); err != nil {
-		return nil, err
-	}
-	if err := scan(second); err != nil {
-		return nil, err
-	}
-
-	out := make([]alarmFileSource, 0, len(order))
-	for _, name := range order {
-		out = append(out, byName[name])
+	out := make([]alarmFileSource, 0, len(names))
+	for _, name := range names {
+		out = append(out, alarmFileSource{
+			AbsPath:    filepath.Join(dir, name),
+			LoadedFrom: filepath.ToSlash(filepath.Join(l.cfg.Directory, name)),
+		})
 	}
 	return out, nil
 }
@@ -203,8 +187,7 @@ func batchUpsertAlarms(ctx context.Context, tx pgx.Tx, neType, loadedFrom string
 		ib := sq.StatementBuilder.PlaceholderFormat(sq.Dollar).Insert("alarm_definitions").Columns(
 			"identifier", "ne_type", "cn_name", "en_name",
 			"severity_id", "event_type",
-			"cn_probable_cause", "en_probable_cause",
-			"cn_suggestion", "en_suggestion", "is_show",
+			"cn_probable_cause", "en_probable_cause", "is_show",
 			"loaded_from",
 		)
 		for _, a := range pending {
@@ -224,7 +207,6 @@ func batchUpsertAlarms(ctx context.Context, tx pgx.Tx, neType, loadedFrom string
 				nullIfEmpty(a.CnName), nullIfEmpty(a.EnName),
 				sevID, eventType,
 				nullIfEmpty(a.CnProbableCause), nullIfEmpty(a.EnProbableCause),
-				nullIfEmpty(a.CnSuggestion), nullIfEmpty(a.EnSuggestion),
 				isShow,
 				nullIfEmpty(loadedFrom),
 			)
@@ -238,8 +220,6 @@ func batchUpsertAlarms(ctx context.Context, tx pgx.Tx, neType, loadedFrom string
 		    event_type        = EXCLUDED.event_type,
 		    cn_probable_cause = EXCLUDED.cn_probable_cause,
 		    en_probable_cause = EXCLUDED.en_probable_cause,
-		    cn_suggestion     = EXCLUDED.cn_suggestion,
-		    en_suggestion     = EXCLUDED.en_suggestion,
 		    is_show           = EXCLUDED.is_show,
 		    loaded_from       = EXCLUDED.loaded_from`)
 		sqlStr, args, err := ib.ToSql()

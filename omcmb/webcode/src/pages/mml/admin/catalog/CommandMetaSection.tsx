@@ -10,7 +10,6 @@ import {
   Switch,
   message,
 } from 'antd';
-import { EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useUpdateCommand } from '@core/hooks/api/useMmlAdmin';
 import type { GroupTreeNode, GroupTreeCommand } from '@core/types/mmlConsole';
 import type { MMLOperationType } from '@core/types/mml';
@@ -34,7 +33,6 @@ export interface CommandMetaSectionProps {
   editing: boolean;
   onEditingChange: (editing: boolean) => void;
   onDirtyChange: (dirty: boolean) => void;
-  onDeleteRequest: () => void;
   onSaved?: () => void;
 }
 
@@ -71,7 +69,6 @@ export default function CommandMetaSection({
   editing,
   onEditingChange,
   onDirtyChange,
-  onDeleteRequest,
   onSaved,
 }: CommandMetaSectionProps): React.ReactElement {
   const t = useT();
@@ -200,25 +197,11 @@ export default function CommandMetaSection({
   }
 
   // 显示态
+  // 2026-06-05 用户决策：移除右栏命令「编辑/删除」按钮，与左侧命令树的编辑/删除重复。
+  // 编辑入口统一走左侧命令树（其 editCommand 动作驱动本组件 editing 进入内联编辑表单）。
   return (
     <div style={{ marginBottom: 16 }}>
-      <Space
-        style={{ width: '100%', justifyContent: 'space-between', marginBottom: 12 }}
-        align="start"
-      >
-        <h3 style={{ margin: 0 }}>{command.displayName}</h3>
-        <Space>
-          <Button
-            icon={<EditOutlined />}
-            onClick={() => onEditingChange(true)}
-          >
-            {t('mml.admin.catalog.commands.edit')}
-          </Button>
-          <Button icon={<DeleteOutlined />} danger onClick={onDeleteRequest}>
-            {t('mml.admin.catalog.common.delete')}
-          </Button>
-        </Space>
-      </Space>
+      <h3 style={{ margin: '0 0 12px' }}>{command.displayName}</h3>
       <Descriptions column={2} size="small" bordered>
         <Descriptions.Item label={t('mml.admin.catalog.commands.code')}>
           {command.commandCode}

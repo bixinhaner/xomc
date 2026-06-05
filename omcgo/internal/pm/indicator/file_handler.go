@@ -1,7 +1,9 @@
 package indicator
 
 import (
+	"bytes"
 	"context"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -94,18 +96,13 @@ var allowedFileTechs = map[string]struct{}{
 
 // parseFileTech 从 loaded_from 路径推断 tech(enb/gsm/gnb)。
 //
-// 2026-06-03 用户决策后,文件统一写进 builtin 目录,但历史 custom 路径仍可能残留,
-// 因此两种前缀都需识别:
+// 三库 XML 导入重构(2026-06-04 单目录):所有 XML 同住 indicator-library/ 目录树:
+//   - indicator-library/<tech>/<file>.xml → <tech>(enb/gsm/gnb 三制式子目录)
+//   - indicator-library/GSM.xml           → "gsm"(根级单文件,大小写不敏感)
+//   - indicator-library/GNB.xml           → "gnb"(根级单文件)
 //
-// builtin(BuiltinDirPrefix = "indicator-library/"):
-//   - indicator-library/enb/<file>.xml  → "enb"(ENB 子目录化)
-//   - indicator-library/GSM.xml         → "gsm"(根级单文件,大小写不敏感)
-//   - indicator-library/GNB.xml         → "gnb"(根级单文件)
-//
-// custom(CustomDirPrefix = "indicator-library-custom/",历史残留):
-//   - indicator-library-custom/<tech>/<file>.xml → <tech>
-//
-// 校验:防多级嵌套绕过 + tech 白名单 + 文件名不含 ..(防路径遍历)。
+// 校验:必须以 BuiltinDirSubdir/ 开头 + 防多级嵌套绕过 + tech 白名单 +
+// 文件名不含 ..(防路径遍历)。
 func parseFileTech(loadedFrom string) (string, error) {
 	parts := strings.Split(loadedFrom, "/")
 	for _, p := range parts {
@@ -113,44 +110,30 @@ func parseFileTech(loadedFrom string) (string, error) {
 			return "", fmt.Errorf("invalid path segment in %q", loadedFrom)
 		}
 	}
-	switch {
-	case strings.HasPrefix(loadedFrom, CustomDirPrefix):
-		// indicator-library-custom/<tech>/<file>.xml(三段)
-		if len(parts) != 3 {
-			return "", fmt.Errorf("invalid custom path depth (expected 3 segments, got %d): %q", len(parts), loadedFrom)
-		}
+	prefix := BuiltinDirSubdir + "/"
+	if !strings.HasPrefix(loadedFrom, prefix) {
+		return "", fmt.Errorf("not an indicator XML path: %q (expected %s prefix)", loadedFrom, prefix)
+	}
+	switch len(parts) {
+	case 3:
+		// indicator-library/<tech>/<file>.xml(三制式子目录)
 		tech := parts[1]
 		if _, ok := allowedFileTechs[tech]; !ok {
 			return "", fmt.Errorf("invalid tech segment %q in %q", tech, loadedFrom)
 		}
 		return tech, nil
-
-	case strings.HasPrefix(loadedFrom, BuiltinDirPrefix):
-		switch len(parts) {
-		case 3:
-			// indicator-library/<tech>/<file>.xml(ENB 子目录化)
-			tech := parts[1]
-			if _, ok := allowedFileTechs[tech]; !ok {
-				return "", fmt.Errorf("invalid tech segment %q in %q", tech, loadedFrom)
-			}
-			return tech, nil
-		case 2:
-			// indicator-library/GSM.xml | GNB.xml(根级单文件,文件名决定 tech)
-			switch strings.ToLower(parts[1]) {
-			case "gsm.xml":
-				return "gsm", nil
-			case "gnb.xml":
-				return "gnb", nil
-			default:
-				return "", fmt.Errorf("unrecognized root-level builtin file %q (expected GSM.xml/GNB.xml)", loadedFrom)
-			}
+	case 2:
+		// indicator-library/GSM.xml | GNB.xml(根级单文件,文件名决定 tech)
+		switch strings.ToLower(parts[1]) {
+		case "gsm.xml":
+			return "gsm", nil
+		case "gnb.xml":
+			return "gnb", nil
 		default:
-			return "", fmt.Errorf("invalid builtin path depth (%d segments): %q", len(parts), loadedFrom)
+			return "", fmt.Errorf("unrecognized root-level file %q (expected GSM.xml/GNB.xml)", loadedFrom)
 		}
-
 	default:
-		return "", fmt.Errorf("not an indicator XML path: %q (expected %s or %s prefix)",
-			loadedFrom, BuiltinDirPrefix, CustomDirPrefix)
+		return "", fmt.Errorf("invalid path depth (%d segments): %q", len(parts), loadedFrom)
 	}
 }
 
@@ -247,6 +230,15 @@ func (h *FileHandler) DeleteFile(c *gin.Context) {
 		}
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, dbErr)
 		return
+	}
+
+	// DB 行已删,移除 sidecar 标记(X.xml.custom)。XML 本体已 rename 为 .deleted.<ts> 备份,
+	// sidecar 不再有判定意义;残留会让孤儿 sidecar 累积。ENOENT 容忍(可能从未写过)。
+	if rmErr := os.Remove(absPath + CustomMarkerSuffix); rmErr != nil && !errors.Is(rmErr, fs.ErrNotExist) {
+		h.logger.Warn("remove sidecar marker failed (non-fatal)",
+			zap.String("loaded_from", loadedFrom),
+			zap.String("sidecar", filepath.Base(absPath)+CustomMarkerSuffix),
+			zap.Error(rmErr))
 	}
 
 	// 8. 审计日志 + 响应
@@ -362,25 +354,26 @@ func (h *FileHandler) ListFiles(c *gin.Context) {
 		merged[fg.LoadedFrom] = entry
 	}
 
-	// 合并物理扫描(只关心 custom 侧的 uploaded-but-not-loaded;builtin 不会有未入库的)
-	customSubdir := filepath.Join(CustomDirSubdir, tech)
-	customSrcs, err := scanXMLBasenamesOptional(filepath.Join(h.baseDir, customSubdir))
+	// 合并物理扫描(单目录树 indicator-library/<tech>;补 uploaded-but-not-loaded 文件)。
+	// 三库 XML 导入重构后所有 XML 同住此目录,sidecar 判来源/可删,前端零代码同步。
+	scanSubdir := filepath.Join(BuiltinDirSubdir, tech)
+	diskSrcs, err := scanXMLBasenamesOptional(filepath.Join(h.baseDir, scanSubdir))
 	if err != nil {
 		// 目录扫描失败不阻塞 — DB 行已返,仅 log
-		h.logger.Warn("scan custom subdir failed; returning DB rows only",
-			zap.String("custom_subdir", customSubdir), zap.Error(err))
+		h.logger.Warn("scan tech subdir failed; returning DB rows only",
+			zap.String("subdir", scanSubdir), zap.Error(err))
 	} else {
-		for _, name := range customSrcs {
-			lf := filepath.ToSlash(filepath.Join(customSubdir, name))
+		for _, name := range diskSrcs {
+			lf := filepath.ToSlash(filepath.Join(scanSubdir, name))
 			if existing, ok := merged[lf]; ok {
 				existing.OnDisk = true
 				continue
 			}
-			// uploaded-but-not-loaded:DB 0 行 + 物理文件在
+			// uploaded-but-not-loaded:DB 0 行 + 物理文件在;source/deletable 由 sidecar 判定
 			merged[lf] = &fileEntry{
 				LoadedFrom: lf,
-				Source:     string(SourceCustom),
-				Deletable:  true,
+				Source:     string(ClassifySource(h.baseDir, lf)),
+				Deletable:  IsDeletable(h.baseDir, lf),
 				Count:      0,
 				OnDisk:     true,
 			}
@@ -398,56 +391,48 @@ func (h *FileHandler) ListFiles(c *gin.Context) {
 	response.OK(c, gin.H{"items": out, "tech": tech})
 }
 
-// resolveUploadTarget 计算上传目标的 builtin 目录、目标绝对路径与 loaded_from 相对路径。
+// resolveUploadTarget 计算上传目标的目录、目标绝对路径与 loaded_from 相对路径。
 //
-// 2026-06-03 用户决策:上传直接写 builtin 目录(loader 扫描的同一目录),接受升级丢失:
-//   - ENB → indicator-library/enb/<base>(子目录化,文件名沿用上传名)
-//   - GSM → indicator-library/GSM.xml   (根级单文件,文件名固定为 loader 约定的 GSM.xml)
-//   - GNB → indicator-library/GNB.xml   (根级单文件,文件名固定为 GNB.xml)
+// 三库 XML 导入重构(2026-06-04 单目录):上传按 (name, tech) 落地三制式子目录,
+// 文件名统一为 <name>.xml(不再固定为 GSM.xml/GNB.xml,不覆盖根级出厂单文件):
+//   - ENB → indicator-library/enb/<name>.xml
+//   - GSM → indicator-library/gsm/<name>.xml
+//   - GNB → indicator-library/gnb/<name>.xml
 //
-// 返回:targetDir(MkdirAll 目标)、targetPath(最终文件)、loadedFrom(slash 相对路径)、effectiveBase(锁/备份名)。
-func (h *FileHandler) resolveUploadTarget(tech, base string) (targetDir, targetPath, loadedFrom, effectiveBase string) {
-	switch tech {
-	case "gsm":
-		effectiveBase = "GSM.xml"
-		targetDir = filepath.Join(h.baseDir, BuiltinDirSubdir)
-	case "gnb":
-		effectiveBase = "GNB.xml"
-		targetDir = filepath.Join(h.baseDir, BuiltinDirSubdir)
-	default: // enb
-		effectiveBase = base
-		targetDir = filepath.Join(h.baseDir, BuiltinDirSubdir, "enb")
-	}
-	targetPath = filepath.Join(targetDir, effectiveBase)
+// 返回:targetDir(MkdirAll 目标)、targetPath(最终文件)、loadedFrom(slash 相对路径)。
+func (h *FileHandler) resolveUploadTarget(tech, base string) (targetDir, targetPath, loadedFrom string) {
+	targetDir = filepath.Join(h.baseDir, BuiltinDirSubdir, tech)
+	targetPath = filepath.Join(targetDir, base)
 	rel, _ := filepath.Rel(h.baseDir, targetPath)
 	loadedFrom = filepath.ToSlash(rel)
-	return targetDir, targetPath, loadedFrom, effectiveBase
+	return targetDir, targetPath, loadedFrom
 }
 
-// UploadXML POST /api/v1/indicators/upload-xml?tech=enb|gsm|gnb[&force=true|false]
+// UploadXML POST /api/v1/indicators/upload-xml?tech=enb|gsm|gnb
 //
-// multipart/form-data;字段 file = 上传的 XML 字节流。
+// multipart/form-data;字段 name = 用户指定的唯一名称(不含扩展名),file = XML 字节流。
 //
-// 2026-06-03 用户决策:导入 = 写文件 + destructive 重载(删孤儿)+ 刷新缓存,三步在本端点顺序完成。
+// 三库 XML 导入重构(2026-06-04 D3/D5/D6):单目录 + sidecar;上传 = name + tech +
+// 双唯一性硬拒(无 force)。文件名 = <name>.xml,落地 indicator-library/<tech>/<name>.xml,
+// 同时写 sidecar(<name>.xml.custom)标记为用户上传。上传文件自身的 filename 被忽略。
 //
 // 守门链(顺序敏感,任一失败即 400/409,审计明确拒绝原因):
 //  1. ?tech= 校验在 enb/gsm/gnb
-//  2. file part 必填 + file.Size <= MaxUploadXMLSize
-//  3. 文件名 filepath.Base + uploadFilenamePattern 白名单
+//  2. name 表单字段 → validateUploadFilename(name+".xml") 白名单正则
+//  3. file part 必填 + file.Size <= MaxUploadXMLSize
 //  4. XML 内容 validateUploadXML(body, tech):根 = <indicatorModel> +
 //     platform 必填 + deviceType(若 present)与 tech 一致
-//  5. 目标路径经 pathContainedIn 二次校验不逃逸 builtin 目录
+//  5. 目标路径经 pathContainedIn 二次校验不逃逸目标目录
+//  6. 文件名唯一性:<name>.xml 已在该 tech 子目录 → 409(请改名),不覆盖、不备份
+//  7. 内容主键唯一性(§7.1):XML 的 platform 已在该 tech 的 formula 表 → 409
 //
 // 写入流程(全程 per-filename 锁):
 //  1. MkdirAll targetDir(首次上传场景)
-//  2. 同名检查:存在但无 ?force=true → 409 Conflict
-//  3. 写 tmp 文件 = targetPath + .tmp.<uuid>(原子写第一步)
-//  4. 若 overwrite:原文件 mv 到 .bak.<14位ts>
-//  5. tmp rename → targetPath(原子提交)
-//  6. destructive 重载(PerformReloadWithOrphans:全量 UPSERT + 删孤儿)
-//  7. 重载成功后刷新 indicator 缓存(BumpCacheVersion)
+//  2. 写 tmp 文件 = targetPath + .tmp.<uuid> → 原子 rename 上线
+//  3. 写 sidecar(<name>.xml.custom 空标记);失败回滚 XML → 500
+//  4. destructive 重载(PerformReloadWithOrphans:全量 UPSERT + 删孤儿)+ BumpCacheVersion
 //     重载/缓存失败仅 Warn,Upload 不回滚(用户可重试),响应体反映 reloaded 状态
-//  8. audit log + 200/201 响应 + filename / loaded_from / backup / reloaded / orphans
+//  5. audit log + 201 响应 + filename / loaded_from / platform / reloaded / orphans
 func (h *FileHandler) UploadXML(c *gin.Context) {
 	tech := c.Query("tech")
 	if err := validateUploadTech(tech); err != nil {
@@ -458,7 +443,18 @@ func (h *FileHandler) UploadXML(c *gin.Context) {
 			fmt.Errorf("%w [code=%d]", err, global.ErrCodeIndicatorUploadInvalidTech))
 		return
 	}
-	force := c.Query("force") == "true"
+
+	// name 表单字段(目标文件名 = <name>.xml);上传文件自身的 filename 被忽略。
+	name := strings.TrimSpace(c.PostForm("name"))
+	base := name + ".xml"
+	if err := validateUploadFilename(base); err != nil {
+		h.logger.Info("audit: indicator upload rejected (invalid name)",
+			zap.String("audit_action", "indicator.upload.rejected_invalid_name"),
+			zap.String("name", name))
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			fmt.Errorf("%w [code=%d]", err, global.ErrCodeIndicatorUploadInvalidName))
+		return
+	}
 
 	fh, err := c.FormFile("file")
 	if err != nil {
@@ -474,16 +470,6 @@ func (h *FileHandler) UploadXML(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest,
 			fmt.Errorf("upload size %d exceeds max %d [code=%d]",
 				fh.Size, MaxUploadXMLSize, global.ErrCodeIndicatorUploadTooLarge))
-		return
-	}
-
-	base := filepath.Base(fh.Filename)
-	if err := validateUploadFilename(base); err != nil {
-		h.logger.Info("audit: indicator upload rejected (invalid filename)",
-			zap.String("audit_action", "indicator.upload.rejected_invalid_name"),
-			zap.String("filename", fh.Filename))
-		commonerrors.AbortWithError(c, http.StatusBadRequest,
-			fmt.Errorf("%w [code=%d]", err, global.ErrCodeIndicatorUploadInvalidName))
 		return
 	}
 
@@ -512,79 +498,97 @@ func (h *FileHandler) UploadXML(c *gin.Context) {
 		return
 	}
 
-	// 路径计算(写 builtin 目录)+ 二次防遍历
-	targetDir, targetPath, loadedFrom, effectiveBase := h.resolveUploadTarget(tech, base)
+	// 内容主键(platform)解析 —— 与 Loader xmlIndicatorModel 同口径。
+	platform := parseUploadPlatform(body)
+	if platform == "" {
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			fmt.Errorf("<indicatorModel> platform attribute is empty; cannot enforce content-key uniqueness [code=%d]",
+				global.ErrCodeIndicatorUploadInvalidRoot))
+		return
+	}
+
+	// 路径计算(写目标 tech 子目录)+ 二次防遍历
+	targetDir, targetPath, loadedFrom := h.resolveUploadTarget(tech, base)
 	if !pathContainedIn(targetDir, targetPath) {
 		h.logger.Error("audit: indicator upload rejected (path traversal)",
 			zap.String("audit_action", "indicator.upload.rejected_path_traversal"),
 			zap.String("filename", base),
 			zap.String("target", targetPath))
 		commonerrors.AbortWithError(c, http.StatusBadRequest,
-			fmt.Errorf("computed target path %q escapes builtin dir %q", targetPath, targetDir))
+			fmt.Errorf("computed target path %q escapes dir %q", targetPath, targetDir))
 		return
 	}
 
-	// per-filename 互斥锁(与 DeleteFile 共用);用 effectiveBase 保证 gsm/gnb 单文件串行
-	unlock := h.acquireFileLock(effectiveBase)
+	// per-filename 互斥锁(与 DeleteFile 共用)
+	unlock := h.acquireFileLock(base)
 	defer unlock()
 
 	if err := os.MkdirAll(targetDir, 0o755); err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError,
-			fmt.Errorf("mkdir builtin dir: %w", err))
+			fmt.Errorf("mkdir target dir: %w", err))
 		return
 	}
 
-	// 同名检查
-	_, statErr := os.Stat(targetPath)
-	overwrite := false
-	if statErr == nil {
-		if !force {
-			h.logger.Info("audit: indicator upload conflict (same-name exists)",
-				zap.String("audit_action", "indicator.upload.conflict"),
-				zap.String("filename", base),
-				zap.String("tech", tech))
-			commonerrors.AbortWithError(c, http.StatusConflict,
-				fmt.Errorf("file %q already exists; pass ?force=true to overwrite (will backup to .bak.<ts>)", base))
-			return
-		}
-		overwrite = true
+	// 校验 6: 文件名唯一性 —— <name>.xml 已存在 → 409,不覆盖、不备份(请改名)
+	if _, statErr := os.Stat(targetPath); statErr == nil {
+		h.logger.Info("audit: indicator upload conflict (filename exists)",
+			zap.String("audit_action", "indicator.upload.conflict_name_exists"),
+			zap.String("filename", base),
+			zap.String("tech", tech))
+		commonerrors.AbortWithError(c, http.StatusConflict,
+			fmt.Errorf("filename %q already exists in tech %q; please rename", base, tech))
+		return
 	} else if !errors.Is(statErr, fs.ErrNotExist) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError,
 			fmt.Errorf("stat target: %w", statErr))
 		return
 	}
 
-	// 原子写:tmp.<uuid> → 验完 → rename
+	// 校验 7: 内容主键唯一性 —— XML platform 已在该 tech 的 formula 表 → 409
+	exists, err := h.repo.PlatformExists(c.Request.Context(), tech, platform)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if exists {
+		h.logger.Info("audit: indicator upload conflict (platform exists)",
+			zap.String("audit_action", "indicator.upload.conflict_platform_exists"),
+			zap.String("filename", base),
+			zap.String("platform", platform),
+			zap.String("tech", tech))
+		commonerrors.AbortWithError(c, http.StatusConflict,
+			fmt.Errorf("content key (platform %q) already exists in tech %q; please use a different indicatorModel", platform, tech))
+		return
+	}
+
+	// 原子写:tmp.<uuid> → rename(文件名唯一性已保证 target 不存在)
 	tmpPath := targetPath + ".tmp." + uniqueSuffix()
+	defer os.Remove(tmpPath) // 兜底:rename 成功后 tmp 已不存在,Remove 返 ENOENT 无害
 	if err := os.WriteFile(tmpPath, body, 0o644); err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError,
 			fmt.Errorf("write tmp: %w", err))
 		return
 	}
-	// tmp 写成功后,若 overwrite 走 .bak.<ts>;否则直接 rename
-	var backupPath string
-	if overwrite {
-		backupPath = targetPath + ".bak." + time.Now().Format("20060102150405")
-		if err := os.Rename(targetPath, backupPath); err != nil {
-			_ = os.Remove(tmpPath) // 清 tmp
-			commonerrors.AbortWithError(c, http.StatusInternalServerError,
-				fmt.Errorf("backup existing file: %w", err))
-			return
-		}
-	}
 	if err := os.Rename(tmpPath, targetPath); err != nil {
-		// rollback:把 .bak 复位
-		if backupPath != "" {
-			_ = os.Rename(backupPath, targetPath)
-		}
-		_ = os.Remove(tmpPath)
 		commonerrors.AbortWithError(c, http.StatusInternalServerError,
 			fmt.Errorf("rename tmp to target: %w", err))
 		return
 	}
 
+	// 写 sidecar 标记(<name>.xml.custom 空文件)。失败 → 回滚已写 XML → 500。
+	if err := os.WriteFile(targetPath+CustomMarkerSuffix, nil, 0o640); err != nil {
+		if rmErr := os.Remove(targetPath); rmErr != nil {
+			h.logger.Error("rollback uploaded xml after sidecar write failed; host state inconsistent",
+				zap.String("target_path", targetPath),
+				zap.Error(rmErr))
+		}
+		commonerrors.AbortWithError(c, http.StatusInternalServerError,
+			fmt.Errorf("write sidecar marker: %w", err))
+		return
+	}
+
 	// destructive 重载(全量 UPSERT + 删孤儿)→ 刷新缓存。
-	// 三步在上传端点内顺序完成;重载/缓存失败仅 Warn 不致命(文件已写,用户可重试)。
+	// 重载/缓存失败仅 Warn 不致命(文件已写,用户可重试)。
 	reloadOK := true
 	orphans := map[string]int{}
 	if h.reloader != nil {
@@ -597,40 +601,50 @@ func (h *FileHandler) UploadXML(c *gin.Context) {
 				zap.Error(err))
 		} else {
 			orphans = result.Orphans
-			// 重载成功后刷新 indicator 缓存(跨实例失效)
 			if h.cache != nil {
 				h.cache.BumpCacheVersion(c.Request.Context())
 			}
 		}
 	}
 
-	backupName := ""
-	if backupPath != "" {
-		backupName = filepath.Base(backupPath)
-	}
 	h.logger.Info("audit: indicator file uploaded",
 		zap.String("audit_action", "indicator.upload.success"),
 		zap.String("loaded_from", loadedFrom),
 		zap.String("tech", tech),
-		zap.Bool("overwrite", overwrite),
+		zap.String("platform", platform),
 		zap.Int("body_size", len(body)),
-		zap.Bool("reload_ok", reloadOK),
-		zap.String("backup", backupName))
+		zap.Bool("reload_ok", reloadOK))
 
-	status := http.StatusCreated
-	if overwrite {
-		status = http.StatusOK
-	}
-	response.OKWithStatus(c, status, gin.H{
+	response.OKWithStatus(c, http.StatusCreated, gin.H{
 		"uploaded":    true,
-		"filename":    effectiveBase,
+		"filename":    base,
 		"loaded_from": loadedFrom,
 		"tech":        tech,
-		"overwrite":   overwrite,
-		"backup":      backupName,
+		"platform":    platform,
 		"reloaded":    reloadOK,
 		"orphans":     orphans,
 	})
+}
+
+// parseUploadPlatform 从上传字节流抽 <indicatorModel platform="..."> 的 platform 属性。
+// 与 validateUploadXML 同款 encoding/xml.Decoder Strict 解析(无 XXE);未找到返空。
+func parseUploadPlatform(raw []byte) string {
+	dec := xml.NewDecoder(bytes.NewReader(raw))
+	dec.Strict = true
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return ""
+		}
+		start, ok := tok.(xml.StartElement)
+		if !ok {
+			continue
+		}
+		if start.Name.Local != "indicatorModel" {
+			return ""
+		}
+		return strings.TrimSpace(attrValue(start.Attr, "platform"))
+	}
 }
 
 // readAllLimited 是 io.ReadAll 的限长版本,防 multipart header 声明小但实际 body 大的攻击。
@@ -656,19 +670,22 @@ func uniqueSuffix() string {
 var _ FileRepository = (*PgFileRepository)(nil)
 
 // EnsureBaseDir 是测试与 cmd/app 启动期共用的 helper,
-// 确保上传落地用的 builtin 目录树存在(0755):
-//   - baseDir/indicator-library/      (GSM/GNB 单文件落地处)
+// 确保上传落地用的目录树存在(0755):
 //   - baseDir/indicator-library/enb/  (ENB 多文件落地处,也是 loader 扫描的 ENB 子目录)
+//   - baseDir/indicator-library/gsm/  (GSM custom 上传落地处)
+//   - baseDir/indicator-library/gnb/  (GNB custom 上传落地处)
 //
-// 2026-06-03 用户决策后,上传直接写 builtin 目录,故此处确保 builtin 目录而非 custom。
-// 若镜像层已 COPY builtin XML 则为 no-op。
+// 三库 XML 导入重构(2026-06-04 单目录)后,上传按 (name, tech) 写三制式子目录。
+// 若镜像层已 COPY builtin XML 则部分为 no-op。
 //
 // 不在 RegisterRoutes 路径上调用 — cmd/app 启动期由 provider 显式调用。
 func EnsureBaseDir(ctx context.Context, baseDir string) error {
 	_ = ctx // 预留,目前无 IO 阻塞
-	enbDir := filepath.Join(baseDir, BuiltinDirSubdir, "enb")
-	if err := os.MkdirAll(enbDir, 0o755); err != nil {
-		return fmt.Errorf("ensure builtin enb dir %s: %w", enbDir, err)
+	for _, tech := range []string{"enb", "gsm", "gnb"} {
+		dir := filepath.Join(baseDir, BuiltinDirSubdir, tech)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("ensure indicator %s dir %s: %w", tech, dir, err)
+		}
 	}
 	return nil
 }

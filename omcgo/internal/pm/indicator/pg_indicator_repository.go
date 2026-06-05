@@ -153,7 +153,6 @@ func (r *PgIndicatorRepository) Create(ctx context.Context, dt DeviceType, indic
 		return fmt.Errorf("build insert %s SQL: %w", table, err)
 	}
 
-
 	q := querier(r.db, tx)
 	_, err = q.Exec(ctx, query, args...)
 	if err != nil {
@@ -468,9 +467,9 @@ func (r *PgIndicatorRepository) ListAll(ctx context.Context, filter IndicatorLis
 		items = append(items, *item)
 	}
 	if err := rows.Err(); err != nil {
-				return nil, fmt.Errorf("iterating indicator rows for export: %w", err)
-		}
-		return items, nil
+		return nil, fmt.Errorf("iterating indicator rows for export: %w", err)
+	}
+	return items, nil
 }
 
 // applyIndicatorFilters applies common filter conditions to the query builder.

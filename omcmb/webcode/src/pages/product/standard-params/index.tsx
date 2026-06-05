@@ -39,12 +39,23 @@ export default function StandardParamsPage() {
     { label: 'parameter', value: 'parameter' },
     { label: 'object', value: 'object' },
   ];
+  // 手动搜索:keyword 仅在 onSearch(回车/点击搜索)时应用。
   const [keyword, setKeyword] = useState('');
   const [entryType, setEntryType] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
   const { data, isLoading } = useStandardParams({
     keyword: keyword || undefined,
     entryType: entryType || undefined,
   });
+
+  // 过滤条件变化时回到第一页——渲染期重置,避免 set-state-in-effect。
+  const filterKey = `${keyword}|${entryType}`;
+  const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
+  if (filterKey !== prevFilterKey) {
+    setPrevFilterKey(filterKey);
+    setPage(1);
+  }
   const upsertMut = useUpsertStandard();
   const deleteMut = useDeleteStandard();
 
@@ -123,8 +134,7 @@ export default function StandardParamsPage() {
             <SearchInput
               placeholder={t('product.standardParams.searchPh')}
               allowClear
-              value={keyword}
-              onChange={(e) => setKeyword(e.target.value)}
+              onSearch={(v) => setKeyword(v.trim())}
               style={{ width: 320 }}
               enterButton
             />
@@ -159,7 +169,18 @@ export default function StandardParamsPage() {
           columns={[makeSeqColumn<StandardParam>({ title: t('table.rowNumber'), dataSource: items }), ...columns]}
           dataSource={items}
           size="small"
-          pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (total) => t('common.totalCount', { count: total }) }}
+          pagination={{
+            current: page,
+            pageSize,
+            total: items.length,
+            showSizeChanger: true,
+            pageSizeOptions: ['10', '20', '50', '1000'],
+            showTotal: (n) => t('common.totalCount', { count: n }),
+            onChange: (p, ps) => {
+              setPage(p);
+              if (ps !== pageSize) setPageSize(ps);
+            },
+          }}
         />
         <Modal
           title={editing ? t('product.standardParams.editTitle') : t('product.standardParams.newTitle')}

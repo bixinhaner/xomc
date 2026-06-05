@@ -1,18 +1,23 @@
 #!/bin/bash
-# e2e_param_model_custom.sh — T-0178 自定义 paramModel XML 11 GWT 用例
+# e2e_param_model_custom.sh — 自定义 paramModel XML GWT 用例
 #
-# 覆盖 PRD docs/project/prd/F02-param-model-custom-xml.md §3 的 11 个 GWT:
+# 三库 XML 导入重构(2026-06-04 D3/D5/D6)后契约:
+#   单目录 + sidecar;上传 = name 表单字段 + 双唯一性硬拒(无 force,无覆盖);
+#   删除移除 sidecar。上传文件自身 filename 被忽略,目标 = <name>.xml。
+#
+# GWT 用例:
 #   GWT-1  跨升级持久化              — manual(需 docker 镜像切换,本脚本仅断言文档)
 #   GWT-2  来源字段准确              — automated
 #   GWT-3  内置不可删 + 错误码 2030  — automated
 #   GWT-4  自定义可删 + 物理备份     — automated
-#   GWT-5  Self-healing 同名回退     — automated
-#   GWT-6  同名上传 force=true       — automated
-#   GWT-7  备份失败保守回滚 + 2031   — manual(需 chmod 0500 customDir)
+#   GWT-6a 上传成功(name)           — automated
+#   GWT-6b 同名文件名 → 409          — automated
+#   GWT-6c 内容主键(模型名)重复 → 409 — automated
+#   GWT-7  备份失败保守回滚 + 2031   — manual(需 chmod 0500 目录)
 #   GWT-8  30 天备份清理 cron        — manual(需 worker chronotime 注入)
-#   GWT-9  路径遍历拦截              — automated
+#   GWT-9  非法 name(路径遍历)拦截   — automated
 #   GWT-10 XML 内容校验              — automated
-#   GWT-11 同名占位文件拦截          — automated
+#   GWT-11 保留名拦截                — automated
 #
 # 使用:
 #   bash scripts/e2e_param_model_custom.sh [BASE_URL]
@@ -140,14 +145,7 @@ TMP_DIR=$(mktemp -d -t t0178XXXXXX)
 cleanup_global() {
     # 清理上传残留 + tmp 目录;失败容忍(测试目标已 PASS/FAIL 决定脚本退出码)
     curl -s -X DELETE "$API/param-models/CBQQ" -H "$AUTH" >/dev/null 2>&1 || true
-    # GWT-5 中断残留:若 BLQ 卡在 custom override 状态,删 + reload 恢复 builtin
-    BLQ_SRC=$(curl -s -X GET "$API/param-models/BLQ" -H "$AUTH" 2>/dev/null \
-        | python3 -c "import sys, json; print(json.load(sys.stdin).get('data', {}).get('source', ''))" 2>/dev/null \
-        || echo "")
-    if [ "$BLQ_SRC" = "custom" ]; then
-        curl -s -X DELETE "$API/param-models/BLQ" -H "$AUTH" >/dev/null 2>&1 || true
-        curl -s -X POST "$API/param-models/import-directory?mode=reload" -H "$AUTH" >/dev/null 2>&1 || true
-    fi
+    curl -s -X DELETE "$API/param-models/CBQQ2" -H "$AUTH" >/dev/null 2>&1 || true
     rm -rf "$TMP_DIR"
 }
 trap cleanup_global EXIT
@@ -163,13 +161,13 @@ cat > "$CUSTOM_XML" <<'EOF'
 </paramModel>
 EOF
 
-# 同名覆盖测试用(故意覆盖既有 builtin BLQ — 测 self-healing)
-BLQ_OVERRIDE="$TMP_DIR/BLQ.xml"
-cat > "$BLQ_OVERRIDE" <<'EOF'
+# 内容主键(模型名)重复测试用:文件名不同(CBQQ2.xml),但 paramModel name 仍是 CBQQ
+DUP_MODEL_XML="$TMP_DIR/CBQQ2.xml"
+cat > "$DUP_MODEL_XML" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
-<paramModel name="BLQ">
+<paramModel name="CBQQ">
   <parameters>
-    <param name="Device.X_OVERRIDE.Foo" supported="true" type="string"/>
+    <param name="Device.X_TEST.Bar" supported="true" type="string"/>
   </parameters>
 </paramModel>
 EOF
@@ -184,6 +182,7 @@ echo '<paramModel/>' > "$RESERVED_XML"
 
 # 先清残留
 curl -s -X DELETE "$API/param-models/CBQQ" -H "$AUTH" >/dev/null 2>&1 || true
+curl -s -X DELETE "$API/param-models/CBQQ2" -H "$AUTH" >/dev/null 2>&1 || true
 
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║ GWT-2 — 来源字段准确(List 返 source + deletable)                  ║
@@ -233,76 +232,76 @@ else
 fi
 
 # ╔══════════════════════════════════════════════════════════════════╗
-# ║ GWT-9 — 路径遍历拦截                                              ║
-# ║ (multipart 上传 Filename 字段含 ../ ,后端用 filepath.Base + 正则) ║
+# ║ GWT-9 — 非法 name(路径遍历)拦截                                  ║
+# ║ (name 表单字段含 ../ ,后端 validateUploadFilename 正则拒绝)        ║
 # ╚══════════════════════════════════════════════════════════════════╝
-section "GWT-9 — 路径遍历文件名 → 400"
-claim "POST /upload-xml ../../etc/passwd 文件名被拒绝 400"
+section "GWT-9 — 非法 name(路径遍历)→ 400"
+claim "POST /upload-xml name=../../etc/passwd 被拒绝 400"
 
-# 用 curl --form 'file=@local;filename=../../etc/passwd' 显式造非法 filename
 RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/param-models/upload-xml" \
     -H "$AUTH" \
-    --form "file=@$CUSTOM_XML;filename=../../etc/passwd" 2>/dev/null)
+    --form "name=../../etc/passwd" \
+    --form "file=@$CUSTOM_XML" 2>/dev/null)
 HTTP_CODE=$(echo "$RESP" | tail -1)
-check_status_in "POST /upload-xml(path traversal filename)" "400 403" "$HTTP_CODE"
+check_status_in "POST /upload-xml(path traversal name)" "400 403" "$HTTP_CODE"
 
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║ GWT-10 — XML 内容校验                                             ║
 # ╚══════════════════════════════════════════════════════════════════╝
 section "GWT-10 — 错根元素 XML → 400"
-claim "POST /upload-xml 根元素非 paramModel 被拒 400"
+claim "POST /upload-xml 根元素非 parameterModel 被拒 400"
 
 RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/param-models/upload-xml" \
     -H "$AUTH" \
-    --form "file=@$INVALID_XML;filename=WRONG.xml" 2>/dev/null)
+    --form "name=WRONG" \
+    --form "file=@$INVALID_XML" 2>/dev/null)
 HTTP_CODE=$(echo "$RESP" | tail -1)
 check_status_in "POST /upload-xml(wrong root element)" "400" "$HTTP_CODE"
 
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║ GWT-11 — 保留名拦截                                               ║
 # ╚══════════════════════════════════════════════════════════════════╝
-section "GWT-11 — 保留名 standard-model.xml → 400"
-claim "POST /upload-xml standard-model.xml 被拒 400"
+section "GWT-11 — 保留名 name=standard-model → 400"
+claim "POST /upload-xml name=standard-model 被拒 400"
 
 RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/param-models/upload-xml" \
     -H "$AUTH" \
-    --form "file=@$RESERVED_XML;filename=standard-model.xml" 2>/dev/null)
+    --form "name=standard-model" \
+    --form "file=@$RESERVED_XML" 2>/dev/null)
 HTTP_CODE=$(echo "$RESP" | tail -1)
-check_status_in "POST /upload-xml(reserved filename)" "400" "$HTTP_CODE"
+check_status_in "POST /upload-xml(reserved name)" "400" "$HTTP_CODE"
 
 # ╔══════════════════════════════════════════════════════════════════╗
-# ║ GWT-6 — 同名上传 force=true 链路                                  ║
-# ║ (先上 CBQQ → 200; 再上 CBQQ 无 force → 409; 加 ?force=true → 200) ║
+# ║ GWT-6 — 上传 name 唯一性双校验(无 force,无覆盖)                  ║
+# ║ 6a 首次 name=CBQQ → 200                                          ║
+# ║ 6b 同名文件名 name=CBQQ 再传 → 409(文件名已存在,请改名)           ║
+# ║ 6c 文件名不同 name=CBQQ2 但 XML 模型名仍 CBQQ → 409(内容主键重复)  ║
 # ╚══════════════════════════════════════════════════════════════════╝
-section "GWT-6 — 同名 Upload 409 → force=true → 200 + backup"
+section "GWT-6 — name 双唯一性硬拒(无 force)"
 
-claim "POST /upload-xml CBQQ.xml 首次成功 200"
+claim "POST /upload-xml name=CBQQ 首次成功 200"
 RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/param-models/upload-xml" \
     -H "$AUTH" \
-    --form "file=@$CUSTOM_XML;filename=CBQQ.xml" 2>/dev/null)
+    --form "name=CBQQ" \
+    --form "file=@$CUSTOM_XML" 2>/dev/null)
 HTTP_CODE=$(echo "$RESP" | tail -1)
-check_status "POST /upload-xml(CBQQ.xml first)" "200" "$HTTP_CODE"
+check_status "POST /upload-xml(name=CBQQ first)" "200" "$HTTP_CODE"
 
-claim "POST /upload-xml CBQQ.xml 同名无 force → 409"
+claim "POST /upload-xml name=CBQQ 同名文件名 → 409(请改名)"
 RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/param-models/upload-xml" \
     -H "$AUTH" \
-    --form "file=@$CUSTOM_XML;filename=CBQQ.xml" 2>/dev/null)
+    --form "name=CBQQ" \
+    --form "file=@$CUSTOM_XML" 2>/dev/null)
 HTTP_CODE=$(echo "$RESP" | tail -1)
-check_status "POST /upload-xml(CBQQ.xml same-name, no force)" "409" "$HTTP_CODE"
+check_status "POST /upload-xml(name=CBQQ duplicate filename)" "409" "$HTTP_CODE"
 
-claim "POST /upload-xml?force=true 强制覆盖返 200 + backup 字段"
-RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/param-models/upload-xml?force=true" \
+claim "POST /upload-xml name=CBQQ2 文件名不同但模型名仍 CBQQ → 409(内容主键重复)"
+RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/param-models/upload-xml" \
     -H "$AUTH" \
-    --form "file=@$CUSTOM_XML;filename=CBQQ.xml" 2>/dev/null)
+    --form "name=CBQQ2" \
+    --form "file=@$DUP_MODEL_XML" 2>/dev/null)
 HTTP_CODE=$(echo "$RESP" | tail -1)
-BODY=$(echo "$RESP" | sed '$d')
-check_status "POST /upload-xml?force=true(CBQQ.xml overwrite)" "200" "$HTTP_CODE"
-if [ "$HTTP_CODE" = "200" ]; then
-    HAS_BACKUP=$(echo "$BODY" | jq_py "'YES' if d.get('data', {}).get('backup') else 'NO'" 2>/dev/null || echo "NO")
-    [ "$HAS_BACKUP" = "YES" ] \
-        && pass "response has backup field" \
-        || fail "response missing backup field" "body=$BODY"
-fi
+check_status "POST /upload-xml(name=CBQQ2 dup model name)" "409" "$HTTP_CODE"
 
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║ GWT-4 — 自定义可删 + 物理备份                                     ║
@@ -322,64 +321,23 @@ if [ "$HTTP_CODE" = "200" ]; then
 fi
 
 # ╔══════════════════════════════════════════════════════════════════╗
-# ║ GWT-5 — Self-healing 同名覆盖回退                                 ║
-# ║ 1. 上传 BLQ.xml 覆盖内置 → source 应变 custom                     ║
-# ║ 2. 删除 BLQ → 触发 Reload → source 应回退 builtin(自愈)           ║
-# ║                                                                  ║
-# ║ 注:此场景**修改内置 paramModel 状态**,需要测试环境隔离;          ║
-# ║ 失败容忍设计 — 仅校验 API 返码,不强校验 DB 内部状态。            ║
-# ╚══════════════════════════════════════════════════════════════════╝
-section "GWT-5 — Self-healing 同名覆盖 → 删 custom → 自愈回 builtin"
-claim "上传 BLQ.xml(custom 覆盖 builtin)→ source=custom"
-claim "删除 BLQ(custom)→ Reload → source 回 builtin"
-
-RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/param-models/upload-xml?force=true" \
-    -H "$AUTH" \
-    --form "file=@$BLQ_OVERRIDE;filename=BLQ.xml" 2>/dev/null)
-HTTP_CODE=$(echo "$RESP" | tail -1)
-check_status "POST /upload-xml(BLQ.xml override)" "200" "$HTTP_CODE"
-
-if [ "$HTTP_CODE" = "200" ]; then
-    sleep 1 # 让 Reload 完成
-    RESP=$(curl -s -X GET "$API/param-models/BLQ" -H "$AUTH")
-    SRC=$(echo "$RESP" | jq_py "d.get('data', {}).get('source', '')" 2>/dev/null || echo "")
-    [ "$SRC" = "custom" ] \
-        && pass "GET /param-models/BLQ 显 source=custom 覆盖生效" \
-        || fail "BLQ source != custom after override" "got source=$SRC"
-
-    # 删 custom → 期望 200(因 source=custom 可删)
-    RESP=$(curl -s -w "\n%{http_code}" -X DELETE "$API/param-models/BLQ" -H "$AUTH")
-    HTTP_CODE=$(echo "$RESP" | tail -1)
-    check_status "DELETE /param-models/BLQ(custom override)" "200" "$HTTP_CODE"
-
-    # 触发 reload 让 Loader 从 builtin 重新载入
-    curl -s -X POST "$API/param-models/import-directory?mode=reload" -H "$AUTH" >/dev/null
-    sleep 1
-
-    RESP=$(curl -s -X GET "$API/param-models/BLQ" -H "$AUTH")
-    SRC=$(echo "$RESP" | jq_py "d.get('data', {}).get('source', '')" 2>/dev/null || echo "")
-    [ "$SRC" = "builtin" ] \
-        && pass "self-healing: BLQ source 回 builtin" \
-        || fail "self-healing failed: BLQ source=$SRC after delete+reload"
-fi
-
-# ╔══════════════════════════════════════════════════════════════════╗
 # ║ Manual GWT (require container env)                                ║
 # ╚══════════════════════════════════════════════════════════════════╝
 section "Manual GWT(需容器环境)"
-echo -e "  ${CYAN}[MANUAL]${NC} GWT-1 升级跨升级持久化:模拟 docker compose 重建容器后 CBQQ.xml 应仍在"
-echo -e "    步骤: 上传 CBQQ → docker compose down/up app → GET /param-models 仍含 CBQQ"
-echo -e "  ${CYAN}[MANUAL]${NC} GWT-7 备份失败保守回滚:chmod 0500 /opt/omc/data/param-mappings-custom"
+echo -e "  ${CYAN}[MANUAL]${NC} GWT-1 跨升级持久化:模拟 docker compose 重建容器后 CBQQ.xml 应仍在"
+echo -e "    步骤: 上传 name=CBQQ → docker compose down/up app → GET /param-models 仍含 CBQQ"
+echo -e "  ${CYAN}[MANUAL]${NC} GWT-7 备份失败保守回滚:chmod 0500 .../param-mappings"
 echo -e "    步骤: 上传 X → chmod 0500 dir → DELETE X → 期望 500 + code=2031 + 文件 + DB 行均保留"
-echo -e "  ${CYAN}[MANUAL]${NC} GWT-8 30 天清理 cron:在 worker 容器 touch -t 一个 30 天前的 .deleted 文件"
-echo -e "    步骤: touch -t 202604010300 .../.deleted.20260401030000 → 等 03:00 cron → 文件应被清"
-echo -e "  ${YELLOW}[NOTE]${NC}   这 3 个 GWT 列入 P5 manual,S5 手工验证或写 docker-test 子任务"
+echo -e "  ${CYAN}[MANUAL]${NC} GWT-8 30 天清理 cron + 孤儿 sidecar:在 worker 容器 touch -t 一个 30 天前的 .deleted 文件"
+echo -e "    步骤: touch -t 202604010300 .../.deleted.20260401030000 → 等 03:00 cron → 文件应被清;"
+echo -e "          再造孤儿 X.xml.custom(无 X.xml)→ cron 应清掉 sidecar"
+echo -e "  ${YELLOW}[NOTE]${NC}   这 3 个 GWT 列入 manual,S5 手工验证或写 docker-test 子任务"
 
 # ── Summary ────────────────────────────────────────────────────────────
 echo ""
 echo "════════════════════════════════════════════"
-echo -e "  T-0178 P5 E2E: ${GREEN}$PASS PASS${NC} / ${RED}$FAIL FAIL${NC} / $TOTAL TOTAL"
-echo -e "  Claims: ${CYAN}${CLAIM_COUNT}${NC}(8 automated GWT + 3 manual)"
+echo -e "  param-model custom-XML E2E: ${GREEN}$PASS PASS${NC} / ${RED}$FAIL FAIL${NC} / $TOTAL TOTAL"
+echo -e "  Claims: ${CYAN}${CLAIM_COUNT}${NC}(automated GWT + 3 manual)"
 echo "════════════════════════════════════════════"
 
 if [ "$FAIL" -gt 0 ]; then

@@ -13,8 +13,6 @@ export interface AlarmDefinition {
   eventType?: number | string;
   cnProbableCause?: string;
   enProbableCause?: string;
-  cnSuggestion?: string;
-  enSuggestion?: string;
   description?: string;
   isShow: boolean;
   isUnknown?: boolean;
@@ -60,8 +58,6 @@ export interface CreateAlarmDefinitionInput {
   eventType?: number;
   cnProbableCause?: string;
   enProbableCause?: string;
-  cnSuggestion?: string;
-  enSuggestion?: string;
   description?: string;
   isShow?: boolean;
 }
@@ -76,13 +72,12 @@ export interface UnknownStatsFilter {
 // 告警 XML 来源(后端 source.go::ClassifySource 派生,前端只渲染)。
 export type AlarmSource = 'builtin' | 'custom' | 'unknown';
 
-// 自定义 XML 上传结果(对标 indicator)。
+// 自定义 XML 上传结果(2026-06-04 单目录 + 双唯一性:无 overwrite/backup,新增 neType)。
 export interface AlarmUploadResult {
   uploaded: boolean;
   filename: string;
   loadedFrom: string;
-  overwrite: boolean;
-  backup: string;
+  neType: string;
   reloaded: boolean;
 }
 

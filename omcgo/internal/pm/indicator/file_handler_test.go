@@ -48,6 +48,17 @@ type mockFileRepository struct {
 	orphanErr     error
 	orphanCalls   []string    // 记录每次调用的 tech 序列
 	orphanCutoffs []time.Time // 记录每次 before 时刻
+
+	// 内容主键(platform)唯一性 stub
+	platformExists    bool
+	platformExistsErr error
+}
+
+func (m *mockFileRepository) PlatformExists(ctx context.Context, tech, platform string) (bool, error) {
+	if m.platformExistsErr != nil {
+		return false, m.platformExistsErr
+	}
+	return m.platformExists, nil
 }
 
 func (m *mockFileRepository) CountByLoadedFrom(ctx context.Context, tech, loadedFrom string) (int, error) {
@@ -138,10 +149,11 @@ func newTestRouterWithReloader(t *testing.T, repo FileRepository, reloader Reloa
 	return r
 }
 
-// writeCustomXML 在 baseDir/indicator-library-custom/<tech>/<file>.xml 写入空 indicator XML。
+// writeCustomXML 在 baseDir/indicator-library/<tech>/<file>.xml 写入空 indicator XML
+// + sidecar 标记(三库 XML 导入重构:custom 文件落地同一目录树,sidecar 判来源)。
 func writeCustomXML(t *testing.T, baseDir, tech, name string) string {
 	t.Helper()
-	rel := filepath.Join(CustomDirSubdir, tech, name)
+	rel := filepath.Join(BuiltinDirSubdir, tech, name)
 	abs := filepath.Join(baseDir, rel)
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -158,7 +170,7 @@ func writeCustomXML(t *testing.T, baseDir, tech, name string) string {
 }
 
 // writeBuiltinENBXML 在 baseDir/indicator-library/enb/<file>.xml 写入空 indicator XML
-// (上传现在落地 builtin 目录,同名冲突/覆盖测试需预置 builtin 侧文件)。
+// (无 sidecar = builtin;同名冲突测试需预置)。
 func writeBuiltinENBXML(t *testing.T, baseDir, name string) string {
 	t.Helper()
 	rel := filepath.Join(BuiltinDirSubdir, "enb", name)
@@ -175,7 +187,8 @@ func writeBuiltinENBXML(t *testing.T, baseDir, name string) string {
 
 // ── parseFileTech 表驱动 ─────────────────────────────────────────
 //
-// 2026-06-03 用户决策后,builtin 与 custom 路径都需识别 tech;builtin 不再被拒。
+// 三库 XML 导入重构(2026-06-04 单目录):所有 XML 同住 indicator-library/ 目录树;
+// custom 前缀路径不再存在,带该前缀的路径一律被拒。
 
 func TestParseFileTech(t *testing.T) {
 	cases := []struct {
@@ -184,26 +197,22 @@ func TestParseFileTech(t *testing.T) {
 		wantTech string
 		wantErr  bool
 	}{
-		// builtin(上传现在写这里)
-		{"builtin enb", "indicator-library/enb/ALL.xml", "enb", false},
-		{"builtin gsm root", "indicator-library/GSM.xml", "gsm", false},
-		{"builtin gnb root", "indicator-library/GNB.xml", "gnb", false},
-
-		// custom(历史残留仍可删)
-		{"custom enb", "indicator-library-custom/enb/MY.xml", "enb", false},
-		{"custom gsm", "indicator-library-custom/gsm/X.xml", "gsm", false},
-		{"custom gnb", "indicator-library-custom/gnb/Y.xml", "gnb", false},
+		// 单目录树(enb/gsm/gnb 子目录 + 根级单文件)
+		{"enb subdir", "indicator-library/enb/ALL.xml", "enb", false},
+		{"gsm subdir", "indicator-library/gsm/X.xml", "gsm", false},
+		{"gnb subdir", "indicator-library/gnb/Y.xml", "gnb", false},
+		{"gsm root single file", "indicator-library/GSM.xml", "gsm", false},
+		{"gnb root single file", "indicator-library/GNB.xml", "gnb", false},
 
 		{"empty path rejected", "", "", true},
 		{"wrong prefix rejected", "other/enb/X.xml", "", true},
+		{"custom prefix rejected", "indicator-library-custom/enb/MY.xml", "", true},
 		{"bare filename rejected", "BARE.xml", "", true},
-		{"custom too few segments", "indicator-library-custom/MY.xml", "", true},
-		{"custom too many segments", "indicator-library-custom/enb/sub/MY.xml", "", true},
-		{"custom invalid tech", "indicator-library-custom/lte/MY.xml", "", true},
-		{"builtin unknown root file", "indicator-library/OTHER.xml", "", true},
-		{"builtin invalid tech subdir", "indicator-library/lte/X.xml", "", true},
-		{"traversal in filename", "indicator-library-custom/enb/../etc/passwd", "", true},
-		{"missing filename custom", "indicator-library-custom/enb/", "", true},
+		{"too many segments", "indicator-library/enb/sub/MY.xml", "", true},
+		{"invalid tech subdir", "indicator-library/lte/X.xml", "", true},
+		{"unknown root file", "indicator-library/OTHER.xml", "", true},
+		{"traversal in filename", "indicator-library/enb/../etc/passwd", "", true},
+		{"missing filename", "indicator-library/enb/", "", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -291,7 +300,7 @@ func TestDeleteFile_InvalidTechSegment_400(t *testing.T) {
 func TestDeleteFile_NotFound_404(t *testing.T) {
 	baseDir := t.TempDir()
 	// custom 文件:有 sidecar(过删除守门)但 .xml 已不在 + DB 0 行 → 404
-	scDir := filepath.Join(baseDir, CustomDirSubdir, "enb")
+	scDir := filepath.Join(baseDir, BuiltinDirSubdir, "enb")
 	if err := os.MkdirAll(scDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -301,7 +310,7 @@ func TestDeleteFile_NotFound_404(t *testing.T) {
 	repo := &mockFileRepository{count: 0}
 	r := newTestRouter(t, repo, baseDir)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/indicators/files/indicator-library-custom/enb/NO_FILE.xml", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/indicators/files/indicator-library/enb/NO_FILE.xml", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusNotFound, w.Code)
@@ -354,12 +363,12 @@ func TestDeleteFile_HappyPath_200(t *testing.T) {
 func TestDeleteFile_FileGoneButDBExists_StillDeletes(t *testing.T) {
 	baseDir := t.TempDir()
 	// 写 → 立即外部删除模拟"文件已 gone",DB 仍有 1 行
-	writeCustomXML(t, baseDir, "gsm", "ORPHAN.xml")
-	_ = os.Remove(filepath.Join(baseDir, "indicator-library-custom/gsm/ORPHAN.xml"))
+	loadedFrom := writeCustomXML(t, baseDir, "gsm", "ORPHAN.xml")
+	_ = os.Remove(filepath.Join(baseDir, loadedFrom))
 	repo := &mockFileRepository{count: 1, deleteRows: 1}
 	r := newTestRouter(t, repo, baseDir)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/indicators/files/indicator-library-custom/gsm/ORPHAN.xml", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/indicators/files/"+loadedFrom, nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	// 文件已不在但 DB 残留 → 仍允许清 DB 残留(rename 返 ENOENT 路径走 file_already_gone 分支)
@@ -374,7 +383,7 @@ func TestDeleteFile_BackupFailedReadOnly_500(t *testing.T) {
 	baseDir := t.TempDir()
 	writeCustomXML(t, baseDir, "enb", "RO.xml")
 	// 把父目录置 read-only,让 rename 失败
-	parent := filepath.Join(baseDir, "indicator-library-custom/enb")
+	parent := filepath.Join(baseDir, BuiltinDirSubdir, "enb")
 	if err := os.Chmod(parent, 0o555); err != nil {
 		t.Fatalf("chmod ro: %v", err)
 	}
@@ -383,7 +392,7 @@ func TestDeleteFile_BackupFailedReadOnly_500(t *testing.T) {
 	repo := &mockFileRepository{count: 1, deleteRows: 1}
 	r := newTestRouter(t, repo, baseDir)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/indicators/files/indicator-library-custom/enb/RO.xml", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/indicators/files/indicator-library/enb/RO.xml", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
@@ -476,19 +485,19 @@ func TestSummary_RepoError_500(t *testing.T) {
 
 func TestListFiles_DBAndDiskMerge(t *testing.T) {
 	baseDir := t.TempDir()
-	// 物理:custom/enb/UPLOADED_NOT_LOADED.xml(+sidecar)
+	// 物理:indicator-library/enb/UPLOADED_NOT_LOADED.xml(custom + sidecar,DB 0 行)
 	writeCustomXML(t, baseDir, "enb", "UPLOADED_NOT_LOADED.xml")
 	// LOADED.xml 是 DB-only 行(磁盘无 .xml,OnDisk=false),但来源 custom → 单独写 sidecar 标记。
-	loadedSidecar := filepath.Join(baseDir, CustomDirSubdir, "enb", "LOADED.xml"+CustomMarkerSuffix)
+	loadedSidecar := filepath.Join(baseDir, BuiltinDirSubdir, "enb", "LOADED.xml"+CustomMarkerSuffix)
 	if err := os.WriteFile(loadedSidecar, []byte{}, 0o644); err != nil {
 		t.Fatalf("write LOADED sidecar: %v", err)
 	}
-	// DB:builtin/enb/ALL.xml(123 条)+ custom/enb/LOADED.xml(7 条)
+	// DB:builtin/enb/ALL.xml(123 条,无 sidecar)+ custom/enb/LOADED.xml(7 条,有 sidecar)
 	repo := &mockFileRepository{
 		listByTech: map[string][]FileGroup{
 			"enb": {
 				{LoadedFrom: "indicator-library/enb/ALL.xml", Count: 123},
-				{LoadedFrom: "indicator-library-custom/enb/LOADED.xml", Count: 7},
+				{LoadedFrom: "indicator-library/enb/LOADED.xml", Count: 7},
 			},
 		},
 	}
@@ -516,21 +525,20 @@ func TestListFiles_DBAndDiskMerge(t *testing.T) {
 		byLF[it.LoadedFrom] = it
 	}
 
-	// 1. builtin/ALL — DB 有 + 物理无(没在 baseDir 下) → OnDisk=false
-	// 2026-06-04 用户决策:builtin 内置不可删 → Deletable=false
+	// 1. builtin/ALL — 无 sidecar → builtin 不可删;DB 有 + 物理无 → OnDisk=false
 	if it, ok := byLF["indicator-library/enb/ALL.xml"]; ok {
 		assert.Equal(t, "builtin", it.Source)
 		assert.False(t, it.Deletable)
 		assert.Equal(t, 123, it.Count)
 	}
-	// 2. custom/LOADED — DB 有 + 物理无(测试中没写) → OnDisk=false 但 Source/Deletable 正确
-	if it, ok := byLF["indicator-library-custom/enb/LOADED.xml"]; ok {
+	// 2. custom/LOADED — 有 sidecar → custom 可删;DB 有 + 物理无(.xml 没写) → OnDisk=false
+	if it, ok := byLF["indicator-library/enb/LOADED.xml"]; ok {
 		assert.Equal(t, "custom", it.Source)
 		assert.True(t, it.Deletable)
 		assert.Equal(t, 7, it.Count)
 	}
-	// 3. uploaded-not-loaded — DB 无 + 物理有 → Count=0 OnDisk=true
-	if it, ok := byLF["indicator-library-custom/enb/UPLOADED_NOT_LOADED.xml"]; ok {
+	// 3. uploaded-not-loaded — DB 无 + 物理有(+sidecar) → Count=0 OnDisk=true custom 可删
+	if it, ok := byLF["indicator-library/enb/UPLOADED_NOT_LOADED.xml"]; ok {
 		assert.Equal(t, "custom", it.Source)
 		assert.True(t, it.Deletable)
 		assert.Equal(t, 0, it.Count)
@@ -550,12 +558,16 @@ func TestListFiles_InvalidTech_400(t *testing.T) {
 
 // ── P1.4 UploadXML HTTP 行为 ─────────────────────────────────────────────
 
-// buildMultipart 构造 multipart/form-data,body 含 "file" part 的内容。
-func buildMultipart(t *testing.T, filename string, content []byte) (*bytes.Buffer, string) {
+// buildMultipart 构造 multipart/form-data,body 含 "name" 字段 + "file" part。
+// 三库 XML 导入重构:上传以 name 表单字段定文件名,上传文件自身 filename 被忽略。
+func buildMultipart(t *testing.T, name string, content []byte) (*bytes.Buffer, string) {
 	t.Helper()
 	buf := &bytes.Buffer{}
 	w := multipart.NewWriter(buf)
-	part, err := w.CreateFormFile("file", filename)
+	if name != "" {
+		_ = w.WriteField("name", name)
+	}
+	part, err := w.CreateFormFile("file", "ignored.xml")
 	if err != nil {
 		t.Fatalf("create form file: %v", err)
 	}
@@ -571,84 +583,113 @@ func TestUpload_HappyPath_201(t *testing.T) {
 	r := newTestRouterWithReloader(t, repo, reloader, baseDir)
 
 	xml := []byte(`<indicatorModel platform="MY_PLATFORM" indicatorCount="0"></indicatorModel>`)
-	body, ct := buildMultipart(t, "MY.xml", xml)
+	body, ct := buildMultipart(t, "MY", xml)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/indicators/upload-xml?tech=enb", body)
 	req.Header.Set("Content-Type", ct)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusCreated, w.Code, "body=%s", w.Body.String())
 
-	// 2026-06-03:物理文件写进 builtin 目录 baseDir/indicator-library/enb/MY.xml
+	// 物理文件写进 baseDir/indicator-library/enb/MY.xml
 	target := filepath.Join(baseDir, BuiltinDirSubdir, "enb", "MY.xml")
 	got, err := os.ReadFile(target)
 	assert.NoError(t, err)
 	assert.Equal(t, xml, got)
 
+	// sidecar 标记写入 → custom
+	_, scErr := os.Stat(target + CustomMarkerSuffix)
+	assert.NoError(t, scErr, "sidecar 标记应写入")
+	assert.True(t, IsDeletable(baseDir, "indicator-library/enb/MY.xml"))
+
 	// Reloader 被调一次(destructive 重载内部调 ReloadOne)
 	assert.Equal(t, 1, reloader.calls)
 
-	// 响应体含 loaded_from / overwrite=false
+	// 响应体含 loaded_from / platform
 	var resp struct {
 		Data map[string]any `json:"data"`
 	}
 	_ = json.Unmarshal(w.Body.Bytes(), &resp)
 	assert.Equal(t, "indicator-library/enb/MY.xml", resp.Data["loaded_from"])
-	assert.Equal(t, false, resp.Data["overwrite"])
+	assert.Equal(t, "MY_PLATFORM", resp.Data["platform"])
 	assert.Equal(t, true, resp.Data["reloaded"])
 }
 
-func TestUpload_OverwriteWithBackup_200(t *testing.T) {
+// GSM/GNB 上传落地三制式子目录(gsm/gnb),不再覆盖根级 GSM.xml/GNB.xml。
+func TestUpload_GsmLandsInSubdir_201(t *testing.T) {
 	baseDir := t.TempDir()
-	// 预置同名旧文件(builtin 侧)
-	writeBuiltinENBXML(t, baseDir, "MY.xml")
 	reloader := &stubReloader{}
-	repo := &mockFileRepository{}
-	r := newTestRouterWithReloader(t, repo, reloader, baseDir)
+	r := newTestRouterWithReloader(t, &mockFileRepository{}, reloader, baseDir)
 
-	xml := []byte(`<indicatorModel platform="NEW" indicatorCount="0"></indicatorModel>`)
-	body, ct := buildMultipart(t, "MY.xml", xml)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/indicators/upload-xml?tech=enb&force=true", body)
+	xml := []byte(`<indicatorModel platform="MY_BSC" deviceType="GSM" indicatorCount="0"></indicatorModel>`)
+	body, ct := buildMultipart(t, "MY_GSM", xml)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/indicators/upload-xml?tech=gsm", body)
 	req.Header.Set("Content-Type", ct)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+	assert.Equal(t, http.StatusCreated, w.Code, "body=%s", w.Body.String())
 
-	// 原文件被新内容覆盖
-	got, _ := os.ReadFile(filepath.Join(baseDir, BuiltinDirSubdir, "enb", "MY.xml"))
-	assert.Equal(t, xml, got)
-
-	// 同目录下有 .bak.* 备份
-	entries, _ := os.ReadDir(filepath.Join(baseDir, BuiltinDirSubdir, "enb"))
-	hasBackup := false
-	for _, e := range entries {
-		if strings.Contains(e.Name(), ".bak.") {
-			hasBackup = true
-		}
-	}
-	assert.True(t, hasBackup)
+	// 落地 indicator-library/gsm/MY_GSM.xml,根级 GSM.xml 未被触碰
+	_, err := os.Stat(filepath.Join(baseDir, BuiltinDirSubdir, "gsm", "MY_GSM.xml"))
+	assert.NoError(t, err)
+	_, rootErr := os.Stat(filepath.Join(baseDir, BuiltinDirSubdir, "GSM.xml"))
+	assert.True(t, os.IsNotExist(rootErr), "根级 GSM.xml 不应被上传创建")
 }
 
-func TestUpload_ConflictWithoutForce_409(t *testing.T) {
+// 文件名唯一性:同名 <name>.xml 已存在 → 409,不覆盖。
+func TestUpload_NameConflict_409(t *testing.T) {
 	baseDir := t.TempDir()
 	writeBuiltinENBXML(t, baseDir, "MY.xml")
 	reloader := &stubReloader{}
-	repo := &mockFileRepository{}
-	r := newTestRouterWithReloader(t, repo, reloader, baseDir)
+	r := newTestRouterWithReloader(t, &mockFileRepository{}, reloader, baseDir)
 
 	xml := []byte(`<indicatorModel platform="X" indicatorCount="0"></indicatorModel>`)
-	body, ct := buildMultipart(t, "MY.xml", xml)
+	body, ct := buildMultipart(t, "MY", xml)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/indicators/upload-xml?tech=enb", body)
 	req.Header.Set("Content-Type", ct)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusConflict, w.Code)
+	assert.Equal(t, http.StatusConflict, w.Code, "body=%s", w.Body.String())
 	assert.Equal(t, 0, reloader.calls, "冲突时不触发 Reload")
+}
+
+// 内容主键唯一性:platform 已在该 tech 表 → 409。
+func TestUpload_PlatformConflict_409(t *testing.T) {
+	baseDir := t.TempDir()
+	reloader := &stubReloader{}
+	repo := &mockFileRepository{platformExists: true}
+	r := newTestRouterWithReloader(t, repo, reloader, baseDir)
+
+	xml := []byte(`<indicatorModel platform="DUP" indicatorCount="0"></indicatorModel>`)
+	body, ct := buildMultipart(t, "NEW_NAME", xml)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/indicators/upload-xml?tech=enb", body)
+	req.Header.Set("Content-Type", ct)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusConflict, w.Code, "body=%s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "platform")
+	assert.Equal(t, 0, reloader.calls)
+	// 文件不应落地(平台冲突在写盘前拒绝)
+	_, err := os.Stat(filepath.Join(baseDir, BuiltinDirSubdir, "enb", "NEW_NAME.xml"))
+	assert.True(t, os.IsNotExist(err))
+}
+
+// 缺 name 字段 → 400(name 为空 → ".xml" 不过白名单)。
+func TestUpload_MissingName_400(t *testing.T) {
+	baseDir := t.TempDir()
+	r := newTestRouter(t, &mockFileRepository{}, baseDir)
+	body, ct := buildMultipart(t, "", []byte(`<indicatorModel platform="X"></indicatorModel>`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/indicators/upload-xml?tech=enb", body)
+	req.Header.Set("Content-Type", ct)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), fmt.Sprintf("code=%d", global.ErrCodeIndicatorUploadInvalidName))
 }
 
 func TestUpload_InvalidTech_400(t *testing.T) {
 	baseDir := t.TempDir()
 	r := newTestRouter(t, &mockFileRepository{}, baseDir)
-	body, ct := buildMultipart(t, "MY.xml", []byte(`<indicatorModel platform="X"></indicatorModel>`))
+	body, ct := buildMultipart(t, "MY", []byte(`<indicatorModel platform="X"></indicatorModel>`))
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/indicators/upload-xml?tech=lte", body)
 	req.Header.Set("Content-Type", ct)
 	w := httptest.NewRecorder()
@@ -657,33 +698,24 @@ func TestUpload_InvalidTech_400(t *testing.T) {
 	assert.Contains(t, w.Body.String(), fmt.Sprintf("code=%d", global.ErrCodeIndicatorUploadInvalidTech))
 }
 
-func TestUpload_InvalidFilename_400(t *testing.T) {
+func TestUpload_InvalidName_400(t *testing.T) {
 	baseDir := t.TempDir()
 	r := newTestRouter(t, &mockFileRepository{}, baseDir)
-	// 路径分隔符在文件名 → 被 filepath.Base 简化为最末段 → 但同时校验仍能拦
-	body, ct := buildMultipart(t, "../escape.xml", []byte(`<indicatorModel platform="X"></indicatorModel>`))
+	// name 含点 → <name>.xml = "MY.foo.xml" 多扩展名,被白名单拒
+	body, ct := buildMultipart(t, "MY.foo", []byte(`<indicatorModel platform="X"></indicatorModel>`))
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/indicators/upload-xml?tech=enb", body)
 	req.Header.Set("Content-Type", ct)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
-	// 注:filepath.Base 把 "../escape.xml" → "escape.xml"(合法名)
-	// 这测的是 multi-extension 拒绝路径
-	_ = w
-	// 改测 multi-extension
-	body2, ct2 := buildMultipart(t, "MY.xml.sh", []byte(`<indicatorModel platform="X"></indicatorModel>`))
-	req2 := httptest.NewRequest(http.MethodPost, "/api/v1/indicators/upload-xml?tech=enb", body2)
-	req2.Header.Set("Content-Type", ct2)
-	w2 := httptest.NewRecorder()
-	r.ServeHTTP(w2, req2)
-	assert.Equal(t, http.StatusBadRequest, w2.Code)
-	assert.Contains(t, w2.Body.String(), fmt.Sprintf("code=%d", global.ErrCodeIndicatorUploadInvalidName))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), fmt.Sprintf("code=%d", global.ErrCodeIndicatorUploadInvalidName))
 }
 
 func TestUpload_DeviceTypeMismatch_400(t *testing.T) {
 	baseDir := t.TempDir()
 	r := newTestRouter(t, &mockFileRepository{}, baseDir)
 	// 上传 tech=enb 但 XML 内 deviceType="GSM"
-	body, ct := buildMultipart(t, "MY.xml", []byte(`<indicatorModel platform="X" deviceType="GSM"></indicatorModel>`))
+	body, ct := buildMultipart(t, "MY", []byte(`<indicatorModel platform="X" deviceType="GSM"></indicatorModel>`))
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/indicators/upload-xml?tech=enb", body)
 	req.Header.Set("Content-Type", ct)
 	w := httptest.NewRecorder()
@@ -695,10 +727,10 @@ func TestUpload_DeviceTypeMismatch_400(t *testing.T) {
 func TestUpload_NoFile_400(t *testing.T) {
 	baseDir := t.TempDir()
 	r := newTestRouter(t, &mockFileRepository{}, baseDir)
-	// 空 multipart(无 file part)
+	// 有 name 字段但无 file part
 	buf := &bytes.Buffer{}
 	mw := multipart.NewWriter(buf)
-	_ = mw.WriteField("garbage", "value")
+	_ = mw.WriteField("name", "MY")
 	_ = mw.Close()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/indicators/upload-xml?tech=enb", buf)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
@@ -712,7 +744,7 @@ func TestUpload_ReloadFailedStillSucceeds(t *testing.T) {
 	reloader := &stubReloader{err: errors.New("simulated reload fail")}
 	r := newTestRouterWithReloader(t, &mockFileRepository{}, reloader, baseDir)
 	xml := []byte(`<indicatorModel platform="X" indicatorCount="0"></indicatorModel>`)
-	body, ct := buildMultipart(t, "MY.xml", xml)
+	body, ct := buildMultipart(t, "MY", xml)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/indicators/upload-xml?tech=enb", body)
 	req.Header.Set("Content-Type", ct)
 	w := httptest.NewRecorder()

@@ -6,9 +6,9 @@ import "github.com/prometheus/client_golang/prometheus"
 //
 // 命名约定 alarm_def_registry_* + 接收路径 alarm_unknown_total。
 type registryMetrics struct {
-	lookupTotal   *prometheus.CounterVec // labels: result=hit|miss
-	refreshTotal  *prometheus.CounterVec // labels: result=ok|err
-	unknownTotal  *prometheus.CounterVec // labels: action=dropped|kept_as_unknown
+	lookupTotal  *prometheus.CounterVec // labels: result=hit|miss
+	refreshTotal *prometheus.CounterVec // labels: result=ok|err
+	unknownTotal *prometheus.CounterVec // labels: action=dropped|kept_as_unknown
 }
 
 // NewRegistryMetrics 注册并返回 Registry 与 fallback 路径所用的指标集合。

@@ -251,9 +251,8 @@ if [ "$UNINSTALL" = 1 ]; then
   log "[5/5] 残留(若需要彻底清):"
   log "        · Docker 引擎本身:sudo bash install-docker.sh --uninstall"
   log "        · /etc/systemd/system/omcgo*.service(早期 systemd 单元):sudo systemctl disable --now omcgo*; sudo rm /etc/systemd/system/omcgo*.service"
-  log "        · /opt/omc/data/param-mappings-custom(若不在 $OMC_ROOT 下的 host bind mount):sudo rm -rf"
-  log "        · /opt/omc/data/indicator-library-custom(T-0180 indicator 三制式 host bind mount):sudo rm -rf"
-  log "        · /opt/omc/data/alarm-definitions-custom(告警自定义 XML host bind mount):sudo rm -rf"
+  log "        · 外置字典 data 目录 $OMC_ROOT/data 及其升级快照 $OMC_ROOT/data.bak.* 已随 $OMC_ROOT 一并删除"
+  log "          (若曾把 data 挪到 $OMC_ROOT 之外的自定义路径,需另行 sudo rm -rf)"
   exit 0
 fi
 
@@ -397,48 +396,8 @@ mkdir -p "$OMC_ROOT/releases" "$OMC_ROOT/etc" "$OMC_ROOT/packages" \
          "$OMC_ROOT/run/logs/app"   "$OMC_ROOT/run/logs/acs" \
          "$OMC_ROOT/run/logs/worker" "$OMC_ROOT/run/logs/nginx"
 
-# T-0178: 自定义 paramModel XML 持久化目录(host 主权,与镜像层 builtin XML 物理隔离)
-# 容器内挂载点 = /etc/omcgo/data/param-mappings-custom (compose 已配)
-# 仅首次创建时设权限,升级保留运维已设置 ACL 不动。
-# UID 10001 = Dockerfile.app 内创建的 omcgo 非 root 用户
-if [ ! -d "$OMC_ROOT/data/param-mappings-custom" ]; then
-  log "首次部署：初始化 T-0178 自定义 XML 目录 $OMC_ROOT/data/param-mappings-custom"
-  mkdir -p "$OMC_ROOT/data/param-mappings-custom"
-  chown 10001:10001 "$OMC_ROOT/data/param-mappings-custom" 2>/dev/null \
-    || warn "chown 10001:10001 失败(UID 不存在 host 上属正常);容器内仍以 10001 写入"
-  chmod 0750 "$OMC_ROOT/data/param-mappings-custom"
-else
-  log "$OMC_ROOT/data/param-mappings-custom 已存在,保留运维已设权限不动(T-0178)"
-fi
-
-# T-0180: 自定义 indicator XML 分层目录(host 主权,enb/gsm/gnb 三制式分桶)
-# 容器内挂载点 = /etc/omcgo/data/indicator-library-custom (compose 已配)
-# 与 T-0178 同样仅首次创建时设权限;三个子目录确保 Upload 端点首次写入不报 ENOENT。
-# 应用启动期 EnsureBaseDir 会幂等 mkdir,本步骤是 host 侧前置兜底(权限不能在容器内调)。
-if [ ! -d "$OMC_ROOT/data/indicator-library-custom" ]; then
-  log "首次部署：初始化 T-0180 自定义 indicator XML 目录 $OMC_ROOT/data/indicator-library-custom/{enb,gsm,gnb}"
-  mkdir -p "$OMC_ROOT/data/indicator-library-custom/enb" \
-           "$OMC_ROOT/data/indicator-library-custom/gsm" \
-           "$OMC_ROOT/data/indicator-library-custom/gnb"
-  chown -R 10001:10001 "$OMC_ROOT/data/indicator-library-custom" 2>/dev/null \
-    || warn "chown 10001:10001 失败(UID 不存在 host 上属正常);容器内仍以 10001 写入"
-  chmod -R 0750 "$OMC_ROOT/data/indicator-library-custom"
-else
-  log "$OMC_ROOT/data/indicator-library-custom 已存在,保留运维已设权限不动(T-0180)"
-fi
-
-# 告警库自定义 XML 目录(host 主权,扁平结构 — 与 indicator 三制式子目录不同)
-# 容器内挂载点 = /etc/omcgo/data/alarm-definitions-custom (compose 已配)
-# 应用启动期 EnsureBaseDir 会幂等 mkdir,本步骤是 host 侧前置兜底(权限不能在容器内调)。
-if [ ! -d "$OMC_ROOT/data/alarm-definitions-custom" ]; then
-  log "首次部署：初始化告警自定义 XML 目录 $OMC_ROOT/data/alarm-definitions-custom"
-  mkdir -p "$OMC_ROOT/data/alarm-definitions-custom"
-  chown 10001:10001 "$OMC_ROOT/data/alarm-definitions-custom" 2>/dev/null \
-    || warn "chown 10001:10001 失败(UID 不存在 host 上属正常);容器内仍以 10001 写入"
-  chmod 0750 "$OMC_ROOT/data/alarm-definitions-custom"
-else
-  log "$OMC_ROOT/data/alarm-definitions-custom 已存在,保留运维已设权限不动"
-fi
+# 注:三库导入XML重构 Phase 2 后,custom XML 不再用独立 *-custom 目录(单目录 + sidecar)。
+#     整个 data 目录的播种 / 升级反向合并见下方 RELEASE_DIR 就绪后的「data 外置」步骤。
 
 RELEASE_DIR="$OMC_ROOT/releases/$VERSION"
 if [ -d "$RELEASE_DIR" ] && [ "$(readlink -f "$PKG_ROOT" 2>/dev/null)" != "$(readlink -f "$RELEASE_DIR" 2>/dev/null)" ]; then
@@ -453,6 +412,42 @@ if [ "$(readlink -f "$PKG_ROOT")" != "$(readlink -f "$RELEASE_DIR")" ]; then
   mkdir -p "$RELEASE_DIR"
   cp -a "$PKG_ROOT/." "$RELEASE_DIR/"
 fi
+
+# ── data 外置 + 升级反向合并(三库导入XML重构 Phase 2,D1/D2)───────────────────
+# 模型 B:整个 data 目录外置到 $OMC_ROOT/data,bind-mount(RW)进 app/worker;
+# 镜像不再 COPY data($RELEASE_DIR/data 是本次发版随包的 builtin 基线)。
+#   · 首次部署:播种整包 data → $OMC_ROOT/data(硬依赖 —— 失败则字典为空,中止)。
+#   · 升级    :先快照 $OMC_ROOT/data → .bak.<ts>(回滚点),再"现网赢、新版补充"
+#               反向合并(cp -an no-clobber:仅补现网缺失的 builtin 文件,现网已上传的
+#               自定义 XML + .custom sidecar + 改过的文件一律保留)。
+NEW_DATA="$RELEASE_DIR/data"
+if [ ! -d "$NEW_DATA" ]; then
+  die "交付包缺少 data/ 目录($NEW_DATA);模型 B 硬依赖字典播种,无法继续" 4
+fi
+if [ ! -d "$OMC_ROOT/data" ] || [ -z "$(ls -A "$OMC_ROOT/data" 2>/dev/null)" ]; then
+  log "首次部署：播种 data 基线 → $OMC_ROOT/data"
+  mkdir -p "$OMC_ROOT/data"
+  cp -a "$NEW_DATA/." "$OMC_ROOT/data/" || die "播种 data 失败;字典将为空,中止部署" 4
+else
+  DATA_SNAP="$OMC_ROOT/data.bak.$(date +%Y%m%d%H%M%S)"
+  log "升级：快照现网 data → $DATA_SNAP(回滚用)"
+  cp -a "$OMC_ROOT/data" "$DATA_SNAP" || warn "快照 data 失败(磁盘满?);继续合并但无回滚点"
+  log "升级：反向合并(现网赢、新版补充)新版 builtin → $OMC_ROOT/data"
+  cp -an "$NEW_DATA/." "$OMC_ROOT/data/" || warn "反向合并 data 出现错误;请人工核对 $OMC_ROOT/data"
+fi
+# 容器(UID 10001 = Dockerfile 内 omcgo 非 root 用户)需可写 data:
+# 上传/删除 XML、写 .custom sidecar、worker 清理过期备份与孤儿 sidecar。
+chown -R 10001:10001 "$OMC_ROOT/data" 2>/dev/null \
+  || warn "chown 10001:10001 $OMC_ROOT/data 失败(UID 不存在 host 上属正常);容器内仍以 10001 写入"
+
+# 单目录 + sidecar 后不再使用独立 *-custom 目录;存量目录直接删除(用户决策:不做迁移)。
+# 上面的 data.bak.<ts> 快照已留存原状,需要时可从快照回捞历史自定义 XML。
+for _cdir in param-mappings-custom indicator-library-custom alarm-definitions-custom; do
+  if [ -d "$OMC_ROOT/data/$_cdir" ]; then
+    log "清理废弃 custom 目录:$OMC_ROOT/data/$_cdir(单目录+sidecar 后不再使用)"
+    rm -rf "$OMC_ROOT/data/$_cdir"
+  fi
+done
 
 # 实例配置：首次复制模板；非首次默认保留以保护已改口令
 etc_is_empty=0

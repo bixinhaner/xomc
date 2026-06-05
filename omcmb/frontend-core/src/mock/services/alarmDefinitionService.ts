@@ -75,8 +75,6 @@ export const alarmDefinitionService = {
       eventType: input.eventType,
       cnProbableCause: input.cnProbableCause,
       enProbableCause: input.enProbableCause,
-      cnSuggestion: input.cnSuggestion,
-      enSuggestion: input.enSuggestion,
       isShow: input.isShow ?? true,
       isUnknown: false,
     };
@@ -100,8 +98,6 @@ export const alarmDefinitionService = {
       ...(input.eventType !== undefined && { eventType: input.eventType }),
       ...(input.cnProbableCause !== undefined && { cnProbableCause: input.cnProbableCause }),
       ...(input.enProbableCause !== undefined && { enProbableCause: input.enProbableCause }),
-      ...(input.cnSuggestion !== undefined && { cnSuggestion: input.cnSuggestion }),
-      ...(input.enSuggestion !== undefined && { enSuggestion: input.enSuggestion }),
       ...(input.isShow !== undefined && { isShow: input.isShow }),
     };
     return clone(definitions[idx]);
@@ -149,13 +145,12 @@ export const alarmDefinitionService = {
     return { items: Array.from(grouped.values()).sort((a, b) => a.neType.localeCompare(b.neType)) };
   },
 
-  async uploadXml(file: File, _options: { force?: boolean } = {}): Promise<AlarmUploadResult> {
+  async uploadXml(_file: File, name: string): Promise<AlarmUploadResult> {
     return {
       uploaded: true,
-      filename: file.name,
-      loadedFrom: `alarm-definitions-custom/${file.name}`,
-      overwrite: false,
-      backup: '',
+      filename: `${name}.xml`,
+      loadedFrom: `alarm-definitions/${name}.xml`,
+      neType: name.toUpperCase(),
       reloaded: true,
     };
   },

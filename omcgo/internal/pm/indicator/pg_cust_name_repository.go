@@ -97,7 +97,7 @@ func (r *PgCustNameRepository) ListByOperator(ctx context.Context, operatorCode 
 		items = append(items, &cn)
 	}
 	if err := rows.Err(); err != nil {
-				return nil, fmt.Errorf("iterating cust name rows: %w", err)
-		}
-		return items, nil
+		return nil, fmt.Errorf("iterating cust name rows: %w", err)
+	}
+	return items, nil
 }

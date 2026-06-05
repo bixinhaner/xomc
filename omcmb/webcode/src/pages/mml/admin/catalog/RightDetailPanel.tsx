@@ -19,7 +19,6 @@ export interface RightDetailPanelProps {
   editing: boolean;
   onEditingChange: (editing: boolean) => void;
   onDirtyChange: (dirty: boolean) => void;
-  onDeleteCommand: () => void;
 }
 
 export default function RightDetailPanel({
@@ -30,7 +29,6 @@ export default function RightDetailPanel({
   editing,
   onEditingChange,
   onDirtyChange,
-  onDeleteCommand,
 }: RightDetailPanelProps): React.ReactElement {
   const t = useT();
 
@@ -77,7 +75,6 @@ export default function RightDetailPanel({
         editing={editing}
         onEditingChange={onEditingChange}
         onDirtyChange={onDirtyChange}
-        onDeleteRequest={onDeleteCommand}
       />
       <PathListSection command={command} />
     </div>

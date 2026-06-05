@@ -25,7 +25,16 @@ export default function ModelsTab({ selectedName, onSelect, keyword }: Props) {
   const deleteMut = useDeleteParamModel();
 
   const [editing, setEditing] = useState<ParamModel | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const [form] = Form.useForm<UpdateParamModelInput>();
+
+  // 关键字变化时回到第一页(避免过滤后停留在空页)——渲染期重置,避免 set-state-in-effect。
+  const [prevKeyword, setPrevKeyword] = useState(keyword);
+  if (keyword !== prevKeyword) {
+    setPrevKeyword(keyword);
+    setPage(1);
+  }
 
   const items = useMemo(() => {
     // 2026-05-29 用户决策:前端隐藏"无加载源"(source=unknown)的孤儿模型。
@@ -133,7 +142,18 @@ export default function ModelsTab({ selectedName, onSelect, keyword }: Props) {
         columns={[makeSeqColumn<ParamModel>({ title: t('table.rowNumber'), dataSource: items }), ...columns]}
         dataSource={items}
         size="small"
-        pagination={{ pageSize: 20, showTotal: (total) => t('common.totalCount', { count: total }) }}
+        pagination={{
+          current: page,
+          pageSize,
+          total: items.length,
+          showSizeChanger: true,
+          pageSizeOptions: ['10', '20', '50', '1000'],
+          showTotal: (n) => t('common.totalCount', { count: n }),
+          onChange: (p, ps) => {
+            setPage(p);
+            if (ps !== pageSize) setPageSize(ps);
+          },
+        }}
       />
       <Modal
         title={t('product.paramModel.models.editTitle', { name: editing?.name ?? '' })}

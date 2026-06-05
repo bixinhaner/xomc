@@ -134,8 +134,7 @@ export interface IndicatorUploadResult {
   filename: string;
   loadedFrom: string;
   tech: TechLower;
-  overwrite: boolean;
-  backup: string;     // ".bak.<ts>" 文件名,空串=无备份
+  platform: string;   // 内容主键(<indicatorModel platform="...">)
   reloaded: boolean;  // 同步触发 Loader.Reload 是否成功
 }
 

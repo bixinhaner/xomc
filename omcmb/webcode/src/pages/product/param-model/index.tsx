@@ -11,23 +11,18 @@
  *      - 列表态: [搜索 + 导入 XML 按钮]
  *      - 详情态: 由 MappingsTab 自带头部
  *
- * 2026-06-03 用户决策(三页统一):
- *   - 合并「导入 XML / 重载 XML / 刷新缓存」为单个「导入 XML」按钮(用户选本地 XML
- *     上传到 host /opt/omc/data/param-mappings-custom/,端点 POST /param-models/upload-xml)。
- *   - 后端上传端点内部已自动 destructive 重载(删孤儿)+ 刷新缓存,前端无需再单独调;
- *     旧的 import-directory / cache/refresh 端点已下线,对应 reload/cache 按钮删除。
- *   - 上传前查重:命中已存在文件名 → 弹覆盖确认 → force=true 上传(409 仍作兜底)。
- *
- * 2026-05-29 用户决策(详情态收敛):
- *   - 详情态删除"导入 XML / 重载 XML / 刷新缓存"按钮 — 全局动作,只放列表态
- *   - "返回"按钮 + 模型名下沉到 MappingsTab Card 标题区,与 search/filter/新增映射
- *     合并为单行(避免上下两条 toolbar)
- *   - 详情态彻底不渲染顶部 toolbar Card
+ * 三库 XML 导入重构(2026-06-04 D3/D5/D6):
+ *   - 「导入 XML」改为弹框:必填「名称」文本框(目标文件名 = <名称>.xml)+ 选 XML 文件。
+ *   - 单目录 + sidecar:上传写 param-mappings/<名称>.xml + <名称>.xml.custom 标记。
+ *   - 双唯一性硬拒,无覆盖(无 force):
+ *       · 提交前本地预检查清单是否已有同名 <名称>.xml → 内联报错"名称已存在,请改名"。
+ *       · 后端 409(文件名或 XML 模型名已存在)→ 内联同款改名提示。
+ *   - 后端上传端点内部自动 destructive 重载(删孤儿)+ 刷新缓存,前端无需单独调。
  */
 import { useState } from 'react';
-import { Card, Button, Space, message, Upload, Modal } from 'antd';
-import type { UploadProps } from 'antd';
-import { InboxOutlined } from '@ant-design/icons';
+import { Card, Button, Space, message, Upload, Modal, Input, Form } from 'antd';
+import type { UploadFile } from 'antd';
+import { InboxOutlined, UploadOutlined } from '@ant-design/icons';
 import {
   useParamModelList,
   useUploadParamModelXML,
@@ -38,6 +33,9 @@ import MappingsTab from './MappingsTab';
 import SearchInput from '@/components/SearchInput';
 import { useT } from '@/hooks/useT';
 
+// 名称白名单:与后端 validateUploadFilename 的正则对齐(不含 .xml 扩展名部分)。
+const NAME_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+
 export default function ParamModelPage() {
   const t = useT();
   const [selectedModelName, setSelectedModelName] = useState<string | undefined>();
@@ -46,9 +44,15 @@ export default function ParamModelPage() {
   // 上传前查重数据源:已存在的参数模型清单(按 loadedFrom basename 比对文件名)。
   const { data: modelListData } = useParamModelList();
 
+  // 导入弹框状态
+  const [importOpen, setImportOpen] = useState(false);
+  const [importName, setImportName] = useState('');
+  const [importFile, setImportFile] = useState<File | undefined>();
+  const [nameError, setNameError] = useState<string | undefined>();
+
   const inDetail = Boolean(selectedModelName);
 
-  // 文件名查重:与已存在模型的 loadedFrom basename 大小写不敏感比对。
+  // 文件名查重:与已存在模型的 loadedFrom basename 大小写不敏感比对(预检查)。
   const isDuplicateFile = (fileName: string): boolean => {
     const target = fileName.toLowerCase();
     return (modelListData?.items || []).some((m) => {
@@ -57,63 +61,65 @@ export default function ParamModelPage() {
     });
   };
 
-  // 2026-05-29:"导入 XML" 按钮的 Upload customRequest — 用 antd Upload 触发
-  // multipart 上传到 POST /param-models/upload-xml(host bind mount
-  // /opt/omc/data/param-mappings-custom/,升级不丢);409 同名 → Modal 确认 →
-  // force=true 覆盖(旧文件备份 .bak.<ts>)。文案 / 提示统一走 antd message。
-  const uploadProps: UploadProps = {
-    accept: '.xml',
-    maxCount: 1,
-    showUploadList: false,
-    customRequest: ({ file, onSuccess, onError }) => {
-      const realFile = file as File;
-      // 弹覆盖确认(查重命中 / 后端 409 兜底共用)。
-      const confirmOverride = () =>
-        Modal.confirm({
-          title: t('product.paramModel.overrideTitle'),
-          content: (
-            <div style={{ maxWidth: 360 }}>
-              {t('product.paramModel.overrideContentPre')}<code>{realFile.name}</code>{t('product.paramModel.overrideContentPost')}
-              <br />{t('product.paramModel.reloadHint')}
-            </div>
-          ),
-          okText: t('common.override'),
-          okButtonProps: { danger: true },
-          onOk: () => runUpload(true),
-        });
-      const runUpload = (force: boolean): Promise<void> =>
-        uploadMut
-          .mutateAsync({ file: realFile, force })
-          .then((r) => {
-            message.success(
-              r.overwrite && r.backup
-                ? t('product.paramModel.importOverride', { file: r.filename, backup: r.backup ?? '' })
-                : t('product.paramModel.importSuccess', { file: r.filename }),
-            );
-            onSuccess?.(r);
-          })
-          .catch((e: unknown) => {
-            const ax = e as AxiosError<{ message?: string }>;
-            // 409 → 同名冲突(兜底),弹二次确认走 force=true
-            if (ax.response?.status === 409 && !force) {
-              confirmOverride();
-              onError?.(ax);
-              return;
-            }
-            const msg =
-              ax.response?.data?.message ??
-              (e instanceof Error ? e.message : String(e));
-            message.error(msg);
-            onError?.(ax);
-          });
-      // 上传前查重:文件名已存在 → 先弹覆盖确认;否则直接上传(409 仍作兜底)。
-      if (isDuplicateFile(realFile.name)) {
-        confirmOverride();
-        return;
-      }
-      void runUpload(false);
-    },
+  const resetImport = () => {
+    setImportName('');
+    setImportFile(undefined);
+    setNameError(undefined);
   };
+
+  const closeImport = () => {
+    setImportOpen(false);
+    resetImport();
+  };
+
+  // 名称变更:清掉上一次的内联错误,交给提交时再校验。
+  const onNameChange = (v: string) => {
+    setImportName(v);
+    if (nameError) setNameError(undefined);
+  };
+
+  const submitImport = () => {
+    const name = importName.trim();
+    if (!name) {
+      setNameError(t('product.paramModel.nameRequired'));
+      return;
+    }
+    if (!NAME_PATTERN.test(name)) {
+      setNameError(t('product.paramModel.nameInvalid'));
+      return;
+    }
+    if (!importFile) {
+      message.warning(t('product.paramModel.fileRequired'));
+      return;
+    }
+    // 提交前本地查重:<name>.xml 已存在 → 内联报错,不发请求。
+    if (isDuplicateFile(`${name}.xml`)) {
+      setNameError(t('product.paramModel.nameExists'));
+      return;
+    }
+    uploadMut
+      .mutateAsync({ file: importFile, name })
+      .then((r) => {
+        message.success(t('product.paramModel.importSuccess', { file: r.filename }));
+        closeImport();
+      })
+      .catch((e: unknown) => {
+        const ax = e as AxiosError<{ message?: string }>;
+        // 409 → 文件名或模型名已存在 → 内联改名提示(不覆盖)。
+        if (ax.response?.status === 409) {
+          setNameError(t('product.paramModel.nameExists'));
+          return;
+        }
+        const msg =
+          ax.response?.data?.message ?? (e instanceof Error ? e.message : String(e));
+        message.error(msg);
+      });
+  };
+
+  // antd Upload:仅用于选文件(beforeUpload 拦截自动上传),实际上传走 submitImport。
+  const fileList: UploadFile[] = importFile
+    ? [{ uid: '-1', name: importFile.name, status: 'done' }]
+    : [];
 
   return (
     <div style={{ padding: 16 }}>
@@ -124,19 +130,14 @@ export default function ParamModelPage() {
             <SearchInput
               placeholder={t('product.paramModel.searchPh')}
               allowClear
-              value={keyword}
-              onChange={(e) => setKeyword(e.target.value)}
+              onSearch={(v) => setKeyword(v.trim())}
               style={{ width: 320 }}
               enterButton
             />
             <Space>
-              {/* 「导入 XML」= 用户选本地 XML 上传,落 host /opt/omc/data/param-mappings-custom/;
-                  后端上传端点内部已自动重载 + 刷新缓存。 */}
-              <Upload {...uploadProps}>
-                <Button icon={<InboxOutlined />} loading={uploadMut.isPending}>
-                  {t('common.importXml')}
-                </Button>
-              </Upload>
+              <Button icon={<InboxOutlined />} onClick={() => setImportOpen(true)}>
+                {t('common.importXml')}
+              </Button>
             </Space>
           </Space>
         </Card>
@@ -155,6 +156,49 @@ export default function ParamModelPage() {
           keyword={keyword}
         />
       )}
+
+      {/* 导入 XML 弹框:必填名称 + 选文件;双唯一性硬拒,无覆盖。 */}
+      <Modal
+        title={t('common.importXml')}
+        open={importOpen}
+        onOk={submitImport}
+        onCancel={closeImport}
+        okText={t('common.confirm')}
+        cancelText={t('common.cancel')}
+        confirmLoading={uploadMut.isPending}
+        destroyOnClose
+      >
+        <Form layout="vertical">
+          <Form.Item
+            label={t('product.paramModel.nameLabel')}
+            required
+            validateStatus={nameError ? 'error' : undefined}
+            help={nameError ?? t('product.paramModel.nameHelp')}
+          >
+            <Input
+              value={importName}
+              onChange={(e) => onNameChange(e.target.value)}
+              placeholder={t('product.paramModel.namePlaceholder')}
+              maxLength={64}
+              allowClear
+            />
+          </Form.Item>
+          <Form.Item label={t('product.paramModel.fileLabel')} required>
+            <Upload
+              accept=".xml"
+              maxCount={1}
+              fileList={fileList}
+              beforeUpload={(f) => {
+                setImportFile(f as File);
+                return false; // 阻止 antd 自动上传,文件由 submitImport 提交
+              }}
+              onRemove={() => setImportFile(undefined)}
+            >
+              <Button icon={<UploadOutlined />}>{t('product.paramModel.selectFile')}</Button>
+            </Upload>
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   );
 }

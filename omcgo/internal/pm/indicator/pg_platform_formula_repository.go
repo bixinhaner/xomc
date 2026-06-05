@@ -51,9 +51,9 @@ func (r *PgPlatformFormulaRepository) ListByIndicatorID(ctx context.Context, dt 
 		formulas = append(formulas, f)
 	}
 	if err := rows.Err(); err != nil {
-				return nil, fmt.Errorf("iterating formula rows: %w", err)
-		}
-		return formulas, nil
+		return nil, fmt.Errorf("iterating formula rows: %w", err)
+	}
+	return formulas, nil
 }
 
 func (r *PgPlatformFormulaRepository) BatchCreate(ctx context.Context, dt DeviceType, formulas []*PlatformFormula, tx pgx.Tx) error {

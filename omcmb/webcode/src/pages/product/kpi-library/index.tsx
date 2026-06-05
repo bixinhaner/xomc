@@ -141,8 +141,7 @@ export default function KpiLibraryPage() {
                 <SearchInput
                   placeholder={t('product.kpi.idNameSearchPh')}
                   allowClear
-                  value={detailKeyword}
-                  onChange={(e) => setDetailKeyword(e.target.value)}
+                  onSearch={(v) => setDetailKeyword(v.trim())}
                   style={{ width: 320 }}
                   enterButton
                 />
@@ -164,8 +163,7 @@ export default function KpiLibraryPage() {
               <SearchInput
                 placeholder={t('product.kpi.summary.searchPh')}
                 allowClear
-                value={summaryQuery}
-                onChange={(e) => setSummaryQuery(e.target.value)}
+                onSearch={(v) => setSummaryQuery(v.trim())}
                 style={{ width: 320 }}
                 enterButton
               />

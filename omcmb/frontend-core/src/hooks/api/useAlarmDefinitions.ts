@@ -93,7 +93,7 @@ export function useAlarmSeverityLevels() {
 export function useAlarmUploadXml() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ file, force }: { file: File; force?: boolean }) => api.uploadXml(file, { force }),
+    mutationFn: ({ file, name }: { file: File; name: string }) => api.uploadXml(file, name),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: AD_KEY });
     },

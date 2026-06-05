@@ -82,10 +82,8 @@ type CreateInput struct {
 	EventType       *int
 	CnProbableCause string
 	EnProbableCause string
-	CnSuggestion    string
-	EnSuggestion    string
 	IsShow          bool
-	Description      string
+	Description     string
 }
 
 // UpdateInput 是 Update 入参；nil 字段保留原值。
@@ -97,10 +95,8 @@ type UpdateInput struct {
 	EventType       *int
 	CnProbableCause *string
 	EnProbableCause *string
-	CnSuggestion    *string
-	EnSuggestion    *string
 	IsShow          *bool
-	Description      *string
+	Description     *string
 }
 
 // UnknownAlarmStat 是 unknown-stats 端点的单条结果。

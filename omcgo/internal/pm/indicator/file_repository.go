@@ -44,6 +44,17 @@ type FileRepository interface {
 	// 指标计数。NULL loaded_from(历史数据未回填)归到 ""(由调用方决定如何展示)。
 	ListFilesByTech(ctx context.Context, tech string) ([]FileGroup, error)
 
+	// PlatformExists 报告 rela_platform_indicator_formula_<tech> 中是否已有
+	// platform_name = platform 的行(内容主键唯一性,三库 XML 导入重构 §7.1)。
+	//
+	// 内容主键 = <indicatorModel platform="..."> 的 platform 属性,一个 XML 文件即一个平台。
+	// 上传新文件前以此判定平台是否已被其它文件占用。
+	//
+	// 口径说明(caveat):平台归属按 tech 分表存储(enb/gsm/gnb 各一张 formula 表),
+	// 故此处仅在上传的 tech 表内判重 —— 同名平台跨制式(极罕见)不冲突。这与文件落地
+	// 也按 tech 子目录隔离一致;若要求平台名全局唯一,需 UNION 三表(本切片不采纳)。
+	PlatformExists(ctx context.Context, tech, platform string) (bool, error)
+
 	// DeleteOrphansBefore 删除 perf_indicators_<tech> 中 updated_at < before 的行
 	// 与级联的 rela_platform_indicator_formula_<tech> + enabled_pm_indicators_<tech>。
 	//
@@ -117,6 +128,21 @@ func (r *PgFileRepository) CountByLoadedFrom(ctx context.Context, tech, loadedFr
 		return 0, fmt.Errorf("count perf_indicators_%s by loaded_from: %w", tech, err)
 	}
 	return n, nil
+}
+
+// PlatformExists 实现 FileRepository — 在 rela_platform_indicator_formula_<tech>
+// 内 SELECT EXISTS(platform_name = $1)。tech 经白名单校验后拼表名,platform 参数化绑定。
+func (r *PgFileRepository) PlatformExists(ctx context.Context, tech, platform string) (bool, error) {
+	if err := validateTech(tech); err != nil {
+		return false, err
+	}
+	sqlStr := fmt.Sprintf(
+		`SELECT EXISTS(SELECT 1 FROM rela_platform_indicator_formula_%s WHERE platform_name = $1)`, tech)
+	var exists bool
+	if err := r.pool.QueryRow(ctx, sqlStr, platform).Scan(&exists); err != nil {
+		return false, fmt.Errorf("check platform exists (%s): %w", tech, err)
+	}
+	return exists, nil
 }
 
 // DeleteByLoadedFrom 实现 FileRepository — 单事务三步级联。

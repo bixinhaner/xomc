@@ -40,7 +40,8 @@ const SORT_TAIL = Number.MAX_SAFE_INTEGER;
 export default function ProductsPage() {
   const t = useT();
   const [filter, setFilter] = useState<ProductListFilter>({});
-  const [keyword, setKeyword] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const { data, isLoading } = useProductList(filter);
   const { data: matchOrderData } = useMatchOrder();
 
@@ -205,9 +206,10 @@ export default function ProductsPage() {
             <SearchInput
               placeholder={t('product.products.searchPh')}
               allowClear
-              value={keyword}
-              onChange={(e) => setKeyword(e.target.value)}
-              onSearch={(v) => setFilter((f) => ({ ...f, keyword: v || undefined }))}
+              onSearch={(v) => {
+                setFilter((f) => ({ ...f, keyword: v.trim() || undefined }));
+                setPage(1);
+              }}
               style={{ width: 320 }}
               enterButton
             />
@@ -234,7 +236,18 @@ export default function ProductsPage() {
           loading={isLoading}
           columns={[makeSeqColumn<Product>({ title: t('table.rowNumber'), dataSource: sortedItems }), ...columns]}
           dataSource={sortedItems}
-          pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (total) => t('common.totalCount', { count: total }) }}
+          pagination={{
+            current: page,
+            pageSize,
+            total: sortedItems.length,
+            showSizeChanger: true,
+            pageSizeOptions: ['10', '20', '50', '1000'],
+            showTotal: (n) => t('common.totalCount', { count: n }),
+            onChange: (p, ps) => {
+              setPage(p);
+              if (ps !== pageSize) setPageSize(ps);
+            },
+          }}
           size="small"
         />
       </Card>

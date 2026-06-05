@@ -251,16 +251,15 @@ export const indicatorLibraryService = {
 
   async uploadXml(
     tech: TechLower,
-    file: File,
-    options: { force?: boolean } = {}
+    _file: File,
+    name: string
   ): Promise<IndicatorUploadResult> {
     return {
       uploaded: true,
-      filename: file.name,
-      loadedFrom: `indicator-library-custom/${tech}/${file.name}`,
+      filename: `${name}.xml`,
+      loadedFrom: `indicator-library/${tech}/${name}.xml`,
       tech,
-      overwrite: Boolean(options.force),
-      backup: options.force ? `${file.name}.bak.20260101120000` : '',
+      platform: name,
       reloaded: true,
     };
   },

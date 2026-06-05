@@ -188,25 +188,28 @@ export default function LeftNavTree({
               >
                 {c.displayName}
               </span>
-              <a
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onCommandAction('editCommand', c);
-                }}
-                style={{ fontSize: 12 }}
-                title={t('mml.admin.catalog.commands.edit')}
-              >
-                {t('mml.admin.catalog.common.edit')}
-              </a>
-              <a
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onCommandAction('deleteCommand', c);
-                }}
-                style={{ fontSize: 12, color: '#ff4d4f' }}
-              >
-                {t('mml.admin.catalog.common.delete')}
-              </a>
+              <Tooltip title={t('mml.admin.catalog.commands.edit')}>
+                <a
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onCommandAction('editCommand', c);
+                  }}
+                  style={{ fontSize: 14, display: 'inline-flex' }}
+                >
+                  <EditOutlined />
+                </a>
+              </Tooltip>
+              <Tooltip title={t('mml.admin.catalog.common.delete')}>
+                <a
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onCommandAction('deleteCommand', c);
+                  }}
+                  style={{ fontSize: 14, color: '#ff4d4f', display: 'inline-flex' }}
+                >
+                  <DeleteOutlined />
+                </a>
+              </Tooltip>
             </span>
           ),
           isLeaf: true,

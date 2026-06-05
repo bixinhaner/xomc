@@ -40,17 +40,62 @@ export interface CommandParamPath {
   writable: boolean;
 }
 
-/** 单设备执行状态 */
-export type ExecStatus = 'pending' | 'running' | 'success' | 'failed';
+/**
+ * 单设备执行状态（设计 §3.11.2 读后核实四态 + 调度态）：
+ * - success：写 OK 且读回核实通过 / 读类成功
+ * - unverified：写 OK 但无法核实（只写/重启生效/查询失败），**不判失败**
+ * - mismatch：写 OK 但读回值与预期不符（响应成功实际未生效）
+ * - failed：RPC 本身失败
+ */
+export type ExecStatus = 'pending' | 'running' | 'success' | 'unverified' | 'mismatch' | 'failed';
+
+/** unverified（已下发·未核实）的原因（设计 §3.11.2，列表须明确提示）。 */
+export type UnverifiedReason = 'write-only' | 'reboot-required' | 'query-failed';
+
+/** 写类命令读后核实的逐 path 对比项（预期下发值 vs 读回实际值）。 */
+export interface VerifyItem {
+  path: string;
+  label: string;
+  /** 预期下发值（MOD 为目标值；ADD/RMV 为语义描述） */
+  expected: string;
+  /** 读回实际值；不可读（only-write/reboot）时为空 */
+  actual: string;
+  /** 是否核实一致 */
+  matched: boolean;
+}
+
+/** 逐 PATH 模式下单设备一个 path 的子任务（详情页展示，父任务 = deviceTaskId）。 */
+export interface PathTask {
+  pathIndex: number;
+  path: string;
+  /** 子任务 ID（逐 PATH 真实落地后 = device_tasks.id；mock 为伪 UUID） */
+  subTaskId: string;
+  status: ExecStatus;
+  dispatchedAt: string;
+  respondedAt: string;
+  value: string;
+}
 
 /** 结果表格的一行（= 一台设备） */
 export interface ResultRow {
   deviceSn: string;
+  /** 设备任务 ID（= device_tasks.id；逐 PATH 时为该设备父任务 ID） */
+  deviceTaskId: string;
   status: ExecStatus;
-  /** path -> 值（LST 查询结果 / MOD 回显），失败时为空 */
+  /** path -> 值（LST 查询结果 / 写类读回值），失败/未核实时为空 */
   cells: Record<string, string>;
-  /** 失败故障码（MOD/ADD/RMV 写失败时填充） */
+  /** 失败故障码（RPC 失败时填充） */
   faultCode?: string;
+  /** unverified 原因（status==='unverified' 时） */
+  unverifiedReason?: UnverifiedReason;
+  /** 写类命令读后核实对比（success/mismatch 时填充） */
+  verify?: VerifyItem[];
+  /** 逐 PATH 子任务（详情页展示） */
+  pathTasks?: PathTask[];
+  /** RPC 任务下发时间 HH:mm:ss（= device_tasks.sent_at） */
+  dispatchedAt?: string;
+  /** RPC 任务执行响应时间 HH:mm:ss（= device_tasks.completed_at） */
+  respondedAt?: string;
   /** 原始报文（SSE 文本流备查） */
   raw: string;
   /** 耗时（ms） */
@@ -102,6 +147,8 @@ export interface ExecMeta {
 /** 一次执行命令记录(含结果快照,供「命令记录」列表点击回看)。 */
 export interface ExecRecord {
   id: string;
+  /** 命令 ID（= mml_tasks.id，每次批量执行全局唯一；mock 用 crypto.randomUUID 模拟） */
+  commandId: string;
   /** 执行时间 HH:mm:ss */
   time: string;
   /** 执行的命令名称(标准模式命令名 / 裸路径模式 "裸路径 LST" 等) */

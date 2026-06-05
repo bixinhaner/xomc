@@ -1,5 +1,12 @@
-import { Badge, Button, Card, Empty, Space, Tag, Tooltip, Typography } from 'antd';
-import { HistoryOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons';
+import { Badge, Button, Card, Empty, Popconfirm, Space, Tag, Tooltip, Typography } from 'antd';
+import {
+  DeleteOutlined,
+  HistoryOutlined,
+  LeftOutlined,
+  LinkOutlined,
+  RightOutlined,
+} from '@ant-design/icons';
+import { useNavigate } from 'react-router-dom';
 import type { ExecRecord } from '../types';
 import { opColor } from '../constants';
 
@@ -10,20 +17,25 @@ interface CommandHistoryPanelProps {
   activeId: string | null;
   collapsed: boolean;
   onSelect: (id: string) => void;
+  /** 清空命令记录（清内存列表 + localStorage 的命令 ID 数组，§3.11.4） */
+  onClear: () => void;
   onToggleCollapsed: () => void;
 }
 
 /**
- * 执行命令记录列表（设计 §3.10.4~6）—— 每条含时间 / 命令名(op 彩 Tag) / 设备数。
- * 可靠左收缩(默认收缩为窄条)；点击某条 → 右侧执行结果联动切换(§3.10.5)。
+ * 执行命令记录列表（设计 §3.10.4~6 + §3.11.4）—— 每条含时间 / 命令名(op 彩 Tag) / 设备数 /
+ * 命令 ID 深链任务详情。可靠左收缩(默认收缩为窄条)；点击某条 → 右侧执行结果联动切换(§3.10.5)；
+ * 标题栏「清空」清记录(localStorage 只存命令 ID)。
  */
 export default function CommandHistoryPanel({
   records,
   activeId,
   collapsed,
   onSelect,
+  onClear,
   onToggleCollapsed,
 }: CommandHistoryPanelProps) {
+  const navigate = useNavigate();
   // 收缩态:窄条,仅图标 + 展开按钮 + 记录数徽标。
   if (collapsed) {
     return (
@@ -68,9 +80,29 @@ export default function CommandHistoryPanel({
         </Space>
       }
       extra={
-        <Tooltip title="收起">
-          <Button type="text" size="small" icon={<LeftOutlined />} onClick={onToggleCollapsed} />
-        </Tooltip>
+        <Space size={2}>
+          <Popconfirm
+            title="清空命令记录"
+            description="将清除本地缓存的命令记录列表（不影响服务端任务）。"
+            okText="清空"
+            cancelText="取消"
+            okButtonProps={{ danger: true }}
+            onConfirm={onClear}
+            disabled={records.length === 0}
+          >
+            <Tooltip title="清空命令记录">
+              <Button
+                type="text"
+                size="small"
+                icon={<DeleteOutlined />}
+                disabled={records.length === 0}
+              />
+            </Tooltip>
+          </Popconfirm>
+          <Tooltip title="收起">
+            <Button type="text" size="small" icon={<LeftOutlined />} onClick={onToggleCollapsed} />
+          </Tooltip>
+        </Space>
       }
       style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
       styles={{ body: { flex: 1, minHeight: 0, overflow: 'auto', padding: 8 } }}
@@ -97,9 +129,23 @@ export default function CommandHistoryPanel({
                   <Text type="secondary" style={{ fontSize: 12 }}>
                     {r.time}
                   </Text>
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    {r.deviceCount} 台
-                  </Text>
+                  <Space size={4}>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      {r.deviceCount} 台
+                    </Text>
+                    <Tooltip title="打开任务详情">
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<LinkOutlined />}
+                        style={{ height: 18, width: 18, minWidth: 18 }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigate(`/mml/tasks/${r.commandId}`);
+                        }}
+                      />
+                    </Tooltip>
+                  </Space>
                 </Space>
                 <div style={{ marginTop: 4 }}>
                   <Tag color={opColor(r.operationType)} style={{ marginInlineEnd: 6 }}>

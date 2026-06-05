@@ -473,8 +473,9 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	taskReaper.Start()
 	logger.Info("backup task reaper started")
 
-	// T-0178 P2: parammodel 自定义 XML 备份清理 cron(每天默认 03:00)。
-	// 扫 customDir 下 .deleted.<ts>/.bak.<ts>(> retentionDays 清) + .tmp.<uuid>(> 1h 清)。
+	// parammodel XML 备份清理 cron(每天默认 03:00)。三库 XML 导入重构后扫单目录
+	// param-mappings/ 下 .deleted.<ts>/.bak.<ts>(> retentionDays 清) + .tmp.<uuid>(> 1h 清)
+	// + 孤儿 sidecar(X.xml.custom 而 X.xml 已不在)。
 	startParamModelBackupCleanup(w, cfg, logger)
 
 	// T-0180 P2: indicator 自定义 XML 备份清理 cron(对标 T-0178,同样 03:00 默认)。
@@ -546,18 +547,16 @@ func startPMAdhocExpireCleanup(w *workerInfra, logger *zap.Logger) {
 func startParamModelBackupCleanup(w *workerInfra, cfg *appconfig.WorkerConfig, logger *zap.Logger) {
 	// 解析配置 + 应用默认值
 	pmCfg := cfg.DictLoader.ParamModel
-	customSub := pmCfg.CustomDirectory
-	if customSub == "" {
-		customSub = parammodel.CustomDirSubdir
-	}
-	customDir := filepath.Join(cfg.DictLoader.XMLBaseDir, customSub)
+	// 三库 XML 导入重构:单目录(param-mappings/),builtin + custom XML 同住,
+	// 备份 / 孤儿 sidecar 也都落在此目录。
+	dir := filepath.Join(cfg.DictLoader.XMLBaseDir, parammodel.BuiltinDirSubdir)
 	cronExpr := pmCfg.BackupCleanupCron
 	if cronExpr == "" {
 		cronExpr = parammodel.DefaultBackupCleanupCron
 	}
 
 	metrics := parammodel.NewBackupCleanupMetrics(w.MetricsReg)
-	cleanup := parammodel.NewBackupCleanup(customDir, pmCfg.BackupRetentionDays, metrics, logger)
+	cleanup := parammodel.NewBackupCleanup(dir, pmCfg.BackupRetentionDays, metrics, logger)
 
 	c := cron.New()
 	if _, err := c.AddFunc(cronExpr, func() {
@@ -577,7 +576,7 @@ func startParamModelBackupCleanup(w *workerInfra, cfg *appconfig.WorkerConfig, l
 	}
 	c.Start()
 	logger.Info("parammodel backup cleanup cron started",
-		zap.String("custom_dir", customDir),
+		zap.String("dir", dir),
 		zap.String("cron", cronExpr),
 		zap.Int("retention_days", pmCfg.BackupRetentionDays))
 
@@ -609,18 +608,18 @@ func startParamModelBackupCleanup(w *workerInfra, cfg *appconfig.WorkerConfig, l
 func startIndicatorBackupCleanup(w *workerInfra, cfg *appconfig.WorkerConfig, logger *zap.Logger) {
 	// 解析配置 + 应用默认值
 	indCfg := cfg.DictLoader.Indicator
-	customSub := indCfg.CustomBaseDirectory
-	if customSub == "" {
-		customSub = indicator.CustomDirSubdir
+	baseSub := indCfg.BaseDirectory
+	if baseSub == "" {
+		baseSub = indicator.BuiltinDirSubdir
 	}
-	customDir := filepath.Join(cfg.DictLoader.XMLBaseDir, customSub)
+	baseDir := filepath.Join(cfg.DictLoader.XMLBaseDir, baseSub)
 	cronExpr := indCfg.BackupCleanupCron
 	if cronExpr == "" {
 		cronExpr = indicator.DefaultIndicatorBackupCleanupCron
 	}
 
 	metrics := indicator.NewBackupCleanupMetrics(w.MetricsReg)
-	cleanup := indicator.NewBackupCleanup(customDir, indCfg.BackupRetentionDays, metrics, logger)
+	cleanup := indicator.NewBackupCleanup(baseDir, indCfg.BackupRetentionDays, metrics, logger)
 
 	c := cron.New()
 	if _, err := c.AddFunc(cronExpr, func() {
@@ -640,7 +639,7 @@ func startIndicatorBackupCleanup(w *workerInfra, cfg *appconfig.WorkerConfig, lo
 	}
 	c.Start()
 	logger.Info("indicator backup cleanup cron started",
-		zap.String("custom_dir", customDir),
+		zap.String("base_dir", baseDir),
 		zap.String("cron", cronExpr),
 		zap.Int("retention_days", indCfg.BackupRetentionDays))
 
@@ -661,26 +660,26 @@ func startIndicatorBackupCleanup(w *workerInfra, cfg *appconfig.WorkerConfig, lo
 	}()
 }
 
-// startAlarmBackupCleanup 启动告警库自定义 XML 备份清理 cron(对标 indicator)。
+// startAlarmBackupCleanup 启动告警库自定义 XML 备份清理 cron(三库 XML 导入重构单目录)。
 //
 //   - 注册 cron(默认 "0 3 * * *");无效表达式 fallback 默认值
 //   - 启动期延迟 30s 跑一次 catch-up:防 worker 长期宕机后备份堆积
-//   - customDir 是扁平目录 (.../alarm-definitions-custom),Run() 直接扫单层
+//   - dir 是单目录 (.../alarm-definitions),Run() 扫单层备份 + 孤儿 sidecar
 //   - 单实例假设;横扩需加 PG advisory lock(与 indicator 同,P1 不做)
 func startAlarmBackupCleanup(w *workerInfra, cfg *appconfig.WorkerConfig, logger *zap.Logger) {
 	alarmCfg := cfg.DictLoader.AlarmDefinition
-	customSub := alarmCfg.CustomDirectory
-	if customSub == "" {
-		customSub = definition.CustomDirSubdir
+	sub := alarmCfg.Directory
+	if sub == "" {
+		sub = definition.BuiltinDirSubdir
 	}
-	customDir := filepath.Join(cfg.DictLoader.XMLBaseDir, customSub)
+	dir := filepath.Join(cfg.DictLoader.XMLBaseDir, sub)
 	cronExpr := alarmCfg.BackupCleanupCron
 	if cronExpr == "" {
 		cronExpr = definition.DefaultAlarmBackupCleanupCron
 	}
 
 	metrics := definition.NewBackupCleanupMetrics(w.MetricsReg)
-	cleanup := definition.NewBackupCleanup(customDir, alarmCfg.BackupRetentionDays, metrics, logger)
+	cleanup := definition.NewBackupCleanup(dir, alarmCfg.BackupRetentionDays, metrics, logger)
 
 	c := cron.New()
 	if _, err := c.AddFunc(cronExpr, func() {
@@ -700,7 +699,7 @@ func startAlarmBackupCleanup(w *workerInfra, cfg *appconfig.WorkerConfig, logger
 	}
 	c.Start()
 	logger.Info("alarm backup cleanup cron started",
-		zap.String("custom_dir", customDir),
+		zap.String("dir", dir),
 		zap.String("cron", cronExpr),
 		zap.Int("retention_days", alarmCfg.BackupRetentionDays))
 

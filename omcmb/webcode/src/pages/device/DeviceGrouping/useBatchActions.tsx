@@ -13,11 +13,13 @@ export function useBatchActions(deps: {
   message: ReturnType<typeof AppNS.useApp>['message'];
   t: (id: string, values?: Record<string, string | number>) => string;
   refetch: () => Promise<unknown>;
+  /** 刷新分组树查询（device-groups）—— 回收/删除设备后需同步更新各分组徽标 + 「全部」总数。 */
+  refetchGroups: () => Promise<unknown>;
   deleteDevicesMutation: MutationLike<string[]>;
   setSelectedDeviceIds: React.Dispatch<React.SetStateAction<React.Key[]>>;
   onMoveToGroup: (selectedKeys: React.Key[]) => void;
 }): BatchAction[] {
-  const { modal, message, t, refetch, deleteDevicesMutation, setSelectedDeviceIds, onMoveToGroup } = deps;
+  const { modal, message, t, refetch, refetchGroups, deleteDevicesMutation, setSelectedDeviceIds, onMoveToGroup } = deps;
 
   return useMemo<BatchAction[]>(
     () => [
@@ -53,7 +55,7 @@ export function useBatchActions(deps: {
                 void message.error(t('common.operationFailed'));
               }
               setSelectedDeviceIds([]);
-              await refetch();
+              await Promise.all([refetch(), refetchGroups()]);
             },
           });
         },
@@ -85,12 +87,12 @@ export function useBatchActions(deps: {
                 void message.error(t('common.operationFailed'));
               }
               setSelectedDeviceIds([]);
-              await refetch();
+              await Promise.all([refetch(), refetchGroups()]);
             },
           });
         },
       },
     ],
-    [t, modal, message, refetch, deleteDevicesMutation, setSelectedDeviceIds, onMoveToGroup]
+    [t, modal, message, refetch, refetchGroups, deleteDevicesMutation, setSelectedDeviceIds, onMoveToGroup]
   );
 }

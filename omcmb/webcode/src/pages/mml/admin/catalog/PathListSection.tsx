@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Table, Tag, Tooltip, Button, Space, Modal, Spin, message } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import {
   useAdminSubFieldList,
@@ -122,18 +122,29 @@ export default function PathListSection({
       },
     },
     {
-      title: 'Op',
+      title: t('mml.admin.catalog.common.actions'),
       key: 'op',
       width: 120,
       align: 'center',
       render: (_, sf) => (
-        <Space size={0} split="·">
-          <a onClick={() => setEditTarget(sf)}>
-            {t('mml.admin.catalog.common.edit')}
-          </a>
-          <a onClick={() => handleDelete(sf)} style={{ color: '#ff4d4f' }}>
-            {t('mml.admin.catalog.common.delete')}
-          </a>
+        <Space size={4}>
+          <Tooltip title={t('mml.admin.catalog.common.edit')}>
+            <Button
+              type="text"
+              size="small"
+              icon={<EditOutlined />}
+              onClick={() => setEditTarget(sf)}
+            />
+          </Tooltip>
+          <Tooltip title={t('mml.admin.catalog.common.delete')}>
+            <Button
+              type="text"
+              size="small"
+              danger
+              icon={<DeleteOutlined />}
+              onClick={() => handleDelete(sf)}
+            />
+          </Tooltip>
         </Space>
       ),
     },

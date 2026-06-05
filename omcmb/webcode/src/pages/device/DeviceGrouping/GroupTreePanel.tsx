@@ -32,12 +32,22 @@ export interface GroupTreePanelProps {
   t: (id: string, values?: Record<string, string | number>) => string;
 }
 
+// 计算分组在当前(可能已被搜索过滤的)集合下的设备数:叶子层(无子分组)取自身
+// deviceCount;有子分组则递归取所有子分组之和。搜索态用它让上级分组(及「全部」)
+// 徽标显示「当前搜索命中的子树合计」,而非后端全量 deviceCount。
+function subtreeDeviceCount(group: GroupItem, groups: GroupItem[]): number {
+  const children = groups.filter((g) => g.parentId === group.id);
+  if (children.length === 0) return group.deviceCount;
+  return children.reduce((sum, c) => sum + subtreeDeviceCount(c, groups), 0);
+}
+
 function buildTreeData(
   groups: GroupItem[],
   _selectedId: string | null,
   onContextMenu: (groupId: string) => void,
   t: (id: string, values?: Record<string, string | number>) => string,
-  locale: Locale
+  locale: Locale,
+  isSearching: boolean
 ): DataNode[] {
   const rootGroups = groups.filter((g) => !g.parentId);
   const displayName = (g: GroupItem) => getRecordI18n(g as unknown as Record<string, unknown>, 'name', locale) || g.name;
@@ -152,7 +162,9 @@ function buildTreeData(
               <span className={styles.treeNodeText}>{displayName(group)}</span>
             </span>
           </Tooltip>
-          <span className={styles.groupCountBadge}>{group.deviceCount}</span>
+          <span className={styles.groupCountBadge}>
+            {isSearching ? subtreeDeviceCount(group, groups) : group.deviceCount}
+          </span>
           <span className={styles.treeNodeActions}>
             <Dropdown
               menu={{ items: menuItems }}
@@ -193,9 +205,20 @@ export default function GroupTreePanel({
   const [searchVisible, setSearchVisible] = useState(false);
   const locale = useAppStore((s) => s.locale);
 
+  const isSearching = groupSearchText.trim() !== '';
   const filteredTreeData = useMemo(
-    () => buildTreeData(filteredGroups, selectedGroupId, onContextMenu, t, locale),
-    [filteredGroups, selectedGroupId, onContextMenu, t, locale]
+    () => buildTreeData(filteredGroups, selectedGroupId, onContextMenu, t, locale, isSearching),
+    [filteredGroups, selectedGroupId, onContextMenu, t, locale, isSearching]
+  );
+  // 「全部」徽标:搜索态显示当前命中子树合计(各根分组子树之和),否则后端全量 total。
+  const displayTotal = useMemo(
+    () =>
+      isSearching
+        ? filteredGroups
+            .filter((g) => !g.parentId)
+            .reduce((s, g) => s + subtreeDeviceCount(g, filteredGroups), 0)
+        : total,
+    [isSearching, filteredGroups, total]
   );
 
   return (
@@ -251,7 +274,7 @@ export default function GroupTreePanel({
                     <AppstoreOutlined style={{ marginRight: 6, fontSize: 12, color: 'var(--color-primary-600)' }} />
                     <span className={styles.treeNodeText} style={{ fontWeight: 500 }}>{t('common.all')}</span>
                   </span>
-                  <span className={styles.groupCountBadge}>{total}</span>
+                  <span className={styles.groupCountBadge}>{displayTotal}</span>
                 </div>
               ),
               children: filteredTreeData,

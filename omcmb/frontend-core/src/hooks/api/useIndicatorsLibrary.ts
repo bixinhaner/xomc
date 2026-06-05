@@ -222,12 +222,12 @@ export function useIndicatorFiles(tech: TechLower | undefined) {
   });
 }
 
-// T-0180 P4: 上传自定义 XML;成功后 invalidate summary + files + indicators
+// 上传自定义 XML(三库 XML 导入重构:name 必填,去 force);成功后 invalidate summary + files + indicators
 export function useIndicatorUploadXml() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ tech, file, force }: { tech: TechLower; file: File; force?: boolean }) =>
-      api.uploadXml(tech, file, { force }),
+    mutationFn: ({ tech, file, name }: { tech: TechLower; file: File; name: string }) =>
+      api.uploadXml(tech, file, name),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: IL_KEY });
     },

@@ -144,9 +144,8 @@ export default function IndicatorTab({ deviceType }: Props) {
           <SearchInput
             placeholder={t('product.kpi.idNameSearchPh')}
             allowClear
-            value={keyword}
-            onChange={(e) => {
-              setKeyword(e.target.value);
+            onSearch={(v) => {
+              setKeyword(v.trim());
               setPage(1);
             }}
             style={{ width: 320 }}
@@ -166,7 +165,8 @@ export default function IndicatorTab({ deviceType }: Props) {
           pageSize,
           total: data?.total || 0,
           showSizeChanger: true,
-          showTotal: (total) => t('common.totalCount', { count: total }),
+          pageSizeOptions: ['10', '20', '50', '1000'],
+          showTotal: (n) => t('common.totalCount', { count: n }),
           onChange: (p, ps) => {
             setPage(p);
             setPageSize(ps);

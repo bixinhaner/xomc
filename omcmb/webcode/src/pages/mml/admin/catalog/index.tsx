@@ -335,11 +335,6 @@ export default function MMLAdminCatalog() {
             editing={editing}
             onEditingChange={setEditing}
             onDirtyChange={setDirty}
-            onDeleteCommand={() => {
-              if (selectedCommandCtx) {
-                handleDeleteCommand(selectedCommandCtx.command);
-              }
-            }}
           />
         </div>
       </div>

@@ -57,19 +57,6 @@ func NewLoader(pool *pgxpool.Pool, cfg appconfig.IndicatorLoaderConfig, baseDir 
 	if cfg.GnbFile == "" {
 		cfg.GnbFile = "GNB.xml"
 	}
-	// T-0180 P1.2: 自定义 XML 分层目录默认值(host bind mount /opt/omc/data/indicator-library-custom/{enb,gsm,gnb})
-	if cfg.CustomBaseDirectory == "" {
-		cfg.CustomBaseDirectory = CustomDirSubdir // "indicator-library-custom"
-	}
-	if cfg.CustomEnbSubdir == "" {
-		cfg.CustomEnbSubdir = "enb"
-	}
-	if cfg.CustomGsmSubdir == "" {
-		cfg.CustomGsmSubdir = "gsm"
-	}
-	if cfg.CustomGnbSubdir == "" {
-		cfg.CustomGnbSubdir = "gnb"
-	}
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -117,13 +104,11 @@ func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
 	rep := dictloader.NewReport(LoaderName)
 	defer rep.Finish()
 
-	// T-0180 P1.2: 三制式双目录合并扫描
-	// ENB 多文件双目录合并(同名按 CustomOverrides 决定胜负;默认 custom 胜出)
+	// 三库 XML 导入重构(2026-06-04 单目录):三制式单目录树扫描,sidecar 判来源。
+	// ENB 多文件:indicator-library/enb/*.xml(builtin + custom 同住,sidecar 已跳过)
 	enbSources, err := resolveENBSources(
 		l.base,
 		filepath.Join(l.cfg.BaseDirectory, l.cfg.EnbSubdir),
-		filepath.Join(l.cfg.CustomBaseDirectory, l.cfg.CustomEnbSubdir),
-		l.cfg.CustomOverridesEnabled(),
 	)
 	if err != nil {
 		rep.AddError("enb", "resolve", err)
@@ -131,11 +116,11 @@ func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
 	}
 	enbDocs := l.parseDocs(enbSources, &rep, "" /*platformFallback inferred per-file*/)
 
-	// GSM:builtin 单文件 + custom 子目录多文件(rel 路径不同,不可能撞名)
+	// GSM:根级单文件 GSM.xml + 子目录 indicator-library/gsm/*.xml(custom 落地处)
 	gsmSources, err := resolveSingleTechSources(
 		l.base,
 		filepath.Join(l.cfg.BaseDirectory, l.cfg.GsmFile),
-		filepath.Join(l.cfg.CustomBaseDirectory, l.cfg.CustomGsmSubdir),
+		filepath.Join(l.cfg.BaseDirectory, "gsm"),
 	)
 	if err != nil {
 		rep.AddError("gsm", "resolve", err)
@@ -143,11 +128,11 @@ func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
 	}
 	gsmDocs := l.parseDocs(gsmSources, &rep, "BSC")
 
-	// GNB:同 GSM 结构
+	// GNB:同 GSM 结构(根级 GNB.xml + 子目录 indicator-library/gnb/*.xml)
 	gnbSources, err := resolveSingleTechSources(
 		l.base,
 		filepath.Join(l.cfg.BaseDirectory, l.cfg.GnbFile),
-		filepath.Join(l.cfg.CustomBaseDirectory, l.cfg.CustomGnbSubdir),
+		filepath.Join(l.cfg.BaseDirectory, "gnb"),
 	)
 	if err != nil {
 		rep.AddError("gnb", "resolve", err)

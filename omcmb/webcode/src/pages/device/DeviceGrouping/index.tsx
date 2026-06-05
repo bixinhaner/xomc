@@ -131,13 +131,17 @@ export default function DeviceGrouping() {
 
   const targetGroupOptions = useMemo(
     () =>
-      groups.map((g) => {
-        const parentName = getParentName(g.parentId ?? null);
-        return {
-          label: parentName ? `${parentName} / ${g.name}` : g.name,
-          value: g.id,
-        };
-      }),
+      // 设备只能绑定到「非一级」分组(二级/叶子组);一级分组(root, parentId==null)是容器,
+      // 不作为「移动到分组」的目标 —— 故过滤掉一级分组。
+      groups
+        .filter((g) => g.parentId)
+        .map((g) => {
+          const parentName = getParentName(g.parentId ?? null);
+          return {
+            label: parentName ? `${parentName} / ${g.name}` : g.name,
+            value: g.id,
+          };
+        }),
     [groups, getParentName]
   );
 
@@ -195,6 +199,7 @@ export default function DeviceGrouping() {
     message,
     t,
     refetch,
+    refetchGroups,
     deleteDevicesMutation,
     setSelectedDeviceIds,
     onMoveToGroup: deviceActions.open.move,

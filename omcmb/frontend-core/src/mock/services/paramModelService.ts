@@ -154,39 +154,33 @@ export const paramModelService = {
     return { deleted: 0 };
   },
 
-  // T-0178: mock 上传 — 不真存盘,模拟成功返回。force=true 时设 overwrite=true。
+  // mock 上传(三库 XML 导入重构):传 name + file,不真存盘。
+  // 双唯一性硬拒,无 force —— 文件名或模型名已存在即抛错(模拟 409)。
   async uploadXML(
     file: File,
-    force = false,
-  ): Promise<{ filename: string; size: number; overwrite: boolean; backup?: string }> {
-    const name = file.name;
-    const existing = paramModels.find((p) => p.name.toLowerCase() === name.replace(/\.xml$/i, '').toLowerCase());
-    if (existing && !force) {
-      throw new Error(`file ${name} already exists; use force=true to overwrite`);
+    name: string,
+  ): Promise<{ filename: string; modelName: string; size: number }> {
+    const filename = `${name}.xml`;
+    const lower = name.toLowerCase();
+    const existing = paramModels.find((p) => p.name.toLowerCase() === lower);
+    if (existing) {
+      throw new Error(`name ${filename} already exists; please rename`);
     }
-    const overwrite = Boolean(existing);
-    if (!existing) {
-      paramModels = [
-        ...paramModels,
-        {
-          id: `pm-mock-${Date.now()}`,
-          name: name.replace(/\.xml$/i, ''),
-          totalEntries: 50,
-          totalObjects: 10,
-          totalParams: 40,
-          description: 'Mock 自定义 paramModel(上传成功)',
-          isActive: true,
-          loadedFrom: `param-mappings-custom/${name}`,
-          source: 'custom',
-          deletable: true,
-        },
-      ];
-    }
-    return {
-      filename: name,
-      size: file.size,
-      overwrite,
-      ...(overwrite ? { backup: `${name}.bak.${Date.now()}` } : {}),
-    };
+    paramModels = [
+      ...paramModels,
+      {
+        id: `pm-mock-${Date.now()}`,
+        name,
+        totalEntries: 50,
+        totalObjects: 10,
+        totalParams: 40,
+        description: 'Mock 自定义 paramModel(上传成功)',
+        isActive: true,
+        loadedFrom: `param-mappings/${filename}`,
+        source: 'custom',
+        deletable: true,
+      },
+    ];
+    return { filename, modelName: name, size: file.size };
   },
 };

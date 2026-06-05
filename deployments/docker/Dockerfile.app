@@ -41,10 +41,12 @@ COPY --from=builder /build/migrations /etc/omcgo/migrations
 # datamodels/：mml-catalog/ 启动期由 catalogloader 加载；templates/ 预留。
 # 原 datamodels/seed/ 是 omcgo-seed JSON 种子链路，已下线；保留目录以兼容文档。
 COPY --from=builder /build/datamodels /etc/omcgo/datamodels
-# T-0098 dictloader 启动期加载的 4 域字典 XML（param-mappings / indicator-library /
-# alarm-definitions / products）。config.dev.yaml 用相对路径 xml_base_dir: "data"，
-# entrypoint.sh 把 cwd 切到 /etc/omcgo 让相对路径解析正确。
-COPY --from=builder /build/data /etc/omcgo/data
+# 三库导入XML重构 Phase 2(D1/D2):dictloader 加载的 4 域字典 XML
+# (param-mappings / indicator-library / alarm-definitions / products)所在的整个
+# data 目录【不再 COPY 进镜像】,改为外置 bind-mount(dev 挂源码树 / prod 挂
+# /opt/omc/data,由 deploy.sh 首次播种 + 升级反向合并)。这样运维上传的自定义 XML
+# 及其 .custom sidecar 跟随 host、扛过升级,镜像保持无状态。
+# config.dev.yaml 用相对路径 xml_base_dir: "data",entrypoint.sh 切 cwd 到 /etc/omcgo。
 # Casbin RBAC 模型文件：admin provider 启动期加载 configs/casbin_model.conf
 # （相对路径，由 entrypoint.sh 切到 /etc/omcgo 后解析）。
 # 缺失会导致 NewCasbinAuthorizer 失败 → roleRepo.authorizer == nil →

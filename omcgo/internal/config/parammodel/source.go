@@ -19,24 +19,11 @@ const (
 	SourceUnknown Source = "unknown"
 )
 
-// BuiltinDirPrefix / CustomDirPrefix 是 loaded_from 列的目录前缀约定。
-// Loader 写入时 = filepath.Rel(XMLBaseDir, absPath) | ToSlash,
-// 因此一定以 "param-mappings/" 或 "param-mappings-custom/" 开头。
-//
-// 改前缀只动这里;handler / loader / 前端 DTO 均通过 ClassifySource / IsDeletable
-// 间接判定,不直接 strings.Contains。
-const (
-	BuiltinDirPrefix = "param-mappings/"
-	CustomDirPrefix  = "param-mappings-custom/"
-)
-
-// BuiltinDirSubdir / CustomDirSubdir 是 XMLBaseDir 下的子目录名(不含末尾 /)。
-// Loader 扫描目录、Handler Upload 写入目标路径、deploy.sh 初始化目录均引用这两个常量;
-// 与 *DirPrefix 保持一致(后者多一个 / 用于字符串前缀匹配)。
-const (
-	BuiltinDirSubdir = "param-mappings"        // 镜像层只读 builtin XML 目录
-	CustomDirSubdir  = "param-mappings-custom" // host bind mount 持久化 custom XML 目录
-)
+// BuiltinDirSubdir 是 XMLBaseDir 下唯一的 paramModel XML 子目录名(不含末尾 /)。
+// 三库 XML 导入重构(2026-06-04 D3/D5/D6):取消 builtin/custom 双目录,所有 XML
+// (出厂 + 用户上传)同住此目录;来源由同目录 sidecar(X.xml.custom)判定,见
+// CustomMarkerSuffix。Loader 扫描、Handler Upload 写入、deploy.sh 初始化目录均引用此常量。
+const BuiltinDirSubdir = "param-mappings" // 唯一 paramModel XML 目录(builtin + custom 同住)
 
 // CustomMarkerSuffix 是自定义 XML 的 sidecar 标记后缀。
 // 文件 X.xml 若同目录存在 X.xml.custom(空标记文件)⇒ 该 XML 为用户经 UI 上传的自定义文件。

@@ -41,6 +41,15 @@ export default function SummaryTab({ onSelect, query = '' }: Props) {
   // 编辑描述(按 (制式, 平台) 维度)
   const [editRow, setEditRow] = useState<IndicatorPlatformSummary | null>(null);
   const [draft, setDraft] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+
+  // 搜索词变化时回到第一页——渲染期重置,避免 set-state-in-effect。
+  const [prevQuery, setPrevQuery] = useState(query);
+  if (query !== prevQuery) {
+    setPrevQuery(query);
+    setPage(1);
+  }
 
   // 自动文本兜底:未填自定义描述时展示"制式说明 · 平台 X"。
   const autoDesc = (row: IndicatorPlatformSummary) =>
@@ -134,7 +143,18 @@ export default function SummaryTab({ onSelect, query = '' }: Props) {
         columns={[makeSeqColumn<IndicatorPlatformSummary>({ title: t('table.rowNumber'), dataSource: items }), ...columns]}
         dataSource={items}
         size="small"
-        pagination={false}
+        pagination={{
+          current: page,
+          pageSize,
+          total: items.length,
+          showSizeChanger: true,
+          pageSizeOptions: ['10', '20', '50', '1000'],
+          showTotal: (n) => t('common.totalCount', { count: n }),
+          onChange: (p, ps) => {
+            setPage(p);
+            if (ps !== pageSize) setPageSize(ps);
+          },
+        }}
       />
 
       <Modal

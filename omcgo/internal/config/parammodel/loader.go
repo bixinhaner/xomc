@@ -25,10 +25,10 @@ const LoaderName = "param-model"
 
 // Loader 实现 dictloader.Loader（T-0098 P1-06）。
 //
-// 加载语义（设计 §1.7 + T-0178 §9.1 分层目录）：
-//  1. 扫描 builtin (cfg.Directory) + custom (Loader.customDir) → mergeFileLists
+// 加载语义（设计 §1.7；三库 XML 导入重构 2026-06-04 单目录）：
+//  1. 扫描单目录 cfg.Directory（param-mappings/，builtin + custom XML 同住，跳过 sidecar）
 //     → 每个 XML 一次事务（DELETE param_mappings + UPSERT param_models + 批量 INSERT param_mappings）
-//  2. 加载 StandardModelFile → standard_params 全量重写（仅 builtin 目录）
+//  2. 加载 StandardModelFile → standard_params 全量重写
 //
 // 注意：本 P1-06 baseline 不实现 `{i}` 占位符校验、跨 XML 字段冲突合并（设计 §1.7.1 / §1.9）；
 // 这两项放在 Phase 2 P2-02 ParamRegistry / Intersect。
@@ -37,12 +37,6 @@ type Loader struct {
 	cfg    appconfig.ParamModelLoaderConfig
 	base   string
 	logger *zap.Logger
-
-	// T-0178 分层目录: customDir 是 host bind mount 持久化目录,custom XML 落地处。
-	// 默认值 "param-mappings-custom" 由 NewLoader 注入。后续 appconfig 字段补齐后,
-	// NewLoader 改从 cfg 读;现阶段保持 struct 字段以避免改跨包结构体。
-	customDir       string
-	customOverrides bool
 }
 
 // NewLoader 构造 ParamModel Loader。
@@ -51,10 +45,6 @@ func NewLoader(pool *pgxpool.Pool, cfg appconfig.ParamModelLoaderConfig, baseDir
 	if cfg.Directory == "" {
 		cfg.Directory = "param-mappings"
 	}
-	if cfg.CustomDirectory == "" {
-		// yaml 不写 custom_directory → 走默认值;允许用户改为非默认目录但极少需要
-		cfg.CustomDirectory = CustomDirSubdir
-	}
 	if cfg.StandardModelFile == "" {
 		cfg.StandardModelFile = "standard-model.xml"
 	}
@@ -62,12 +52,10 @@ func NewLoader(pool *pgxpool.Pool, cfg appconfig.ParamModelLoaderConfig, baseDir
 		logger = zap.NewNop()
 	}
 	return &Loader{
-		pool:            pool,
-		cfg:             cfg,
-		base:            baseDir,
-		logger:          logger.Named(LoaderName),
-		customDir:       cfg.CustomDirectory,          // T-0178 host 持久化目录(子路径)
-		customOverrides: cfg.CustomOverridesEnabled(), // T-0178 决策 1: 默认 custom 胜出
+		pool:   pool,
+		cfg:    cfg,
+		base:   baseDir,
+		logger: logger.Named(LoaderName),
 	}
 }
 
@@ -93,12 +81,6 @@ func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
 	defer rep.Finish()
 
 	builtinDir := filepath.Join(l.base, l.cfg.Directory)
-	customSub := l.customDir
-	if customSub == "" {
-		// 直接构造 Loader 字面量(测试 / 未来 cfg 改造)绕过 NewLoader 时的兜底
-		customSub = CustomDirSubdir
-	}
-	customDir := filepath.Join(l.base, customSub)
 
 	reserved := []string{
 		l.cfg.StandardModelFile,
@@ -107,30 +89,10 @@ func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
 		"param-model-routing.xml",
 	}
 
-	// Pass 1: builtin + custom 双目录解析 + 同名合并(T-0178 §9.3)
-	files, shadowedCustom, warnings, err := resolveLoaderFiles(
-		builtinDir, customDir,
-		l.cfg.ParamModelFiles,
-		reserved,
-		l.customOverrides,
-	)
+	// Pass 1: 单目录扫描(builtin + custom XML 同住,sidecar 文件已在 scanXMLFiles 跳过)
+	files, err := resolveLoaderFiles(builtinDir, l.cfg.ParamModelFiles, reserved)
 	if err != nil {
 		return rep, fmt.Errorf("resolve param-model files: %w", err)
-	}
-	for _, w := range warnings {
-		// custom dir 非 ENOENT 异常(权限/类型错误)走 WARN 不阻塞 builtin 加载
-		l.logger.Warn("param-model file resolve warning", zap.String("detail", w))
-	}
-	// T-0178 R-NEW-T0178-8: customOverrides=false 时同名 custom 文件被 builtin 压制
-	// 但 host 上文件还在,运维容易困惑"上传了为何不生效"。启动期 WARN 出清单,
-	// 让 Loki/grep 一查即知;UI 端的提示由后续任务跟进。
-	if !l.customOverrides && len(shadowedCustom) > 0 {
-		l.logger.Warn(
-			"custom param-model XML files are SUPPRESSED by builtin (custom_overrides_builtin=false)",
-			zap.Strings("suppressed_files", shadowedCustom),
-			zap.String("custom_dir", customDir),
-			zap.String("hint", "either delete the shadowed custom files or set custom_overrides_builtin=true to let custom win"),
-		)
 	}
 
 	for _, absPath := range files {
@@ -180,8 +142,8 @@ func (l *Loader) loadParamModelFile(ctx context.Context, path string) (int, erro
 		return 0, fmt.Errorf("paramModel attribute empty in %s", path)
 	}
 
-	// T-0178: loaded_from 写"<dir>/<file>" 相对 base 的 slash 路径
-	// (源代码契约:source.go 的 ClassifySource / IsDeletable 据此判定 builtin/custom)。
+	// loaded_from 写 "param-mappings/<file>" 相对 base 的 slash 路径。
+	// 来源(builtin/custom)由同目录 sidecar(X.xml.custom)判定,见 source.go。
 	// 退化情况(base/path 跨盘等)由 resolveLoadedFrom 兜底为裸 basename。
 	loadedFrom := resolveLoadedFrom(l.base, path)
 	totalObjects := len(doc.Objects)
@@ -755,6 +717,11 @@ func scanXMLFiles(dir string) ([]string, error) {
 		}
 		name := e.Name()
 		if strings.HasPrefix(name, ".") {
+			continue
+		}
+		// 跳过 sidecar 标记文件(X.xml.custom)。其 ext 是 .custom 而非 .xml,
+		// 下面的 EqualFold 过滤已能排除,这里显式 continue 以求清晰 + 安全。
+		if strings.HasSuffix(name, CustomMarkerSuffix) {
 			continue
 		}
 		if !strings.EqualFold(filepath.Ext(name), ".xml") {

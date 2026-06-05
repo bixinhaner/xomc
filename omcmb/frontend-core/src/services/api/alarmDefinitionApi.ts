@@ -24,8 +24,6 @@ interface BackendDefinition {
   event_type?: number | string;
   cn_probable_cause?: string;
   en_probable_cause?: string;
-  cn_suggestion?: string;
-  en_suggestion?: string;
   description?: string;
   is_show: boolean;
   is_unknown?: boolean;
@@ -114,8 +112,6 @@ function mapDef(b: BackendDefinition): AlarmDefinition {
     eventType: normalizeDefinitionEventType(b.event_type),
     cnProbableCause: b.cn_probable_cause,
     enProbableCause: b.en_probable_cause,
-    cnSuggestion: b.cn_suggestion,
-    enSuggestion: b.en_suggestion,
     description: b.description,
     isShow: b.is_show,
     isUnknown: b.is_unknown,
@@ -157,8 +153,6 @@ function defPayload(
   if (input.eventType !== undefined) p.event_type = input.eventType;
   if (input.cnProbableCause !== undefined) p.cn_probable_cause = input.cnProbableCause;
   if (input.enProbableCause !== undefined) p.en_probable_cause = input.enProbableCause;
-  if (input.cnSuggestion !== undefined) p.cn_suggestion = input.cnSuggestion;
-  if (input.enSuggestion !== undefined) p.en_suggestion = input.enSuggestion;
   if (input.description !== undefined) p.description = input.description;
   if (input.isShow !== undefined) p.is_show = input.isShow;
   return p;
@@ -282,31 +276,27 @@ export const alarmDefinitionApi = {
     };
   },
 
-  /** 上传自定义告警 XML(multipart)。同名冲突后端返 409,前端走 force=true 重试覆盖。
-   *  2026-06-03:后端上传端点内部已自动 destructive 重载(删孤儿)+ 刷新缓存,
-   *  旧的 cacheRefresh / importDirectory / reloadDirectory 端点已下线。 */
-  async uploadXml(file: File, options: { force?: boolean } = {}): Promise<AlarmUploadResult> {
+  /** 上传自定义告警 XML(multipart)。name 必填(目标文件名 = <name>.xml)。
+   *  2026-06-04 单目录 + 双唯一性(无 force):文件名 / neType 内容主键任一冲突后端返 409,
+   *  前端内联提示改名。后端上传端点内部已自动 destructive 重载(删孤儿)+ 刷新缓存。 */
+  async uploadXml(file: File, name: string): Promise<AlarmUploadResult> {
     const form = new FormData();
+    form.append('name', name);
     form.append('file', file);
-    const params: Record<string, string> = {};
-    if (options.force) params.force = 'true';
     const { data } = await http.post<{
       uploaded: boolean;
       filename: string;
       loaded_from: string;
-      overwrite: boolean;
-      backup: string;
+      ne_type: string;
       reloaded: boolean;
     }>('/alarm-definitions/upload-xml', form, {
-      params,
       headers: { 'Content-Type': 'multipart/form-data' },
     });
     return {
       uploaded: data.uploaded,
       filename: data.filename,
       loadedFrom: data.loaded_from,
-      overwrite: data.overwrite,
-      backup: data.backup,
+      neType: data.ne_type,
       reloaded: data.reloaded,
     };
   },

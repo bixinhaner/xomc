@@ -98,8 +98,8 @@ func TestValidate_ComplexFormula(t *testing.T) {
 
 func TestValidate_RecursiveKPIExpansion(t *testing.T) {
 	idMap := map[string]string{
-		"C01001":       "C01001",
-		"C01002":       "C01002",
+		"C01001":            "C01001",
+		"C01002":            "C01002",
 		"defaultK900000001": "C01001+C01002",
 	}
 	v := NewFormulaValidator(idMap)

@@ -8,100 +8,64 @@ import (
 	"strings"
 )
 
-// fileSource 是 Loader 扫描合并后的一条文件来源记录。
+// fileSource 是 Loader 扫描后的一条文件来源记录。
 //
 // AbsPath:  绝对路径,Loader 用其 os.ReadFile 解析 XML
-// LoadedFrom: 相对 XMLBaseDir 的 slash 路径(带 builtin/custom 前缀),
+// LoadedFrom: 相对 XMLBaseDir 的 slash 路径,供 ClassifySource / IsDeletable /
 //
-//	供 ClassifySource / IsDeletable / 前端 deletable bool 三方共用
+//	前端 deletable bool 三方共用。来源(builtin/custom)由同目录 sidecar
+//	(X.xml.custom)判定,见 source.go;loaded_from 本身不再带 builtin/custom 目录前缀。
 type fileSource struct {
 	AbsPath    string
 	LoadedFrom string
 }
 
-// resolveENBSources 合并 ENB 子目录双源 XML 文件列表(T-0180 P1.2)。
+// resolveENBSources 扫描 ENB 子目录单源 XML 文件列表。
+//
+// 三库 XML 导入重构(2026-06-04 单目录):取消 builtin/custom 双目录合并,
+// 只扫 indicator-library/enb/*.xml(builtin + custom 同住,sidecar 文件已跳过)。
 //
 // 输入:
-//   - base: 镜像层根目录,etc/omcgo/data
-//   - builtinSubdir: 镜像层 ENB 子目录,如 "indicator-library/enb"
-//   - customSubdir:  host bind mount ENB 子目录,如 "indicator-library-custom/enb"
-//   - customWins:    同名文件冲突时 custom 是否胜出(D1 决策默认 true)
+//   - base:   XMLBaseDir
+//   - enbSubdir: ENB 子目录相对路径,如 "indicator-library/enb"
 //
-// 合并规则:
-//  1. 扫描 builtin 与 custom 各自下的 *.xml(忽略 . 隐藏与子目录)
-//  2. 以 basename 为合并键
-//  3. customWins=true:同名 custom 胜出,builtin 同名被压制
-//     customWins=false:同名 builtin 胜出,custom 同名被压制
-//  4. 输出按 LoadedFrom 字典序稳定排序(便于测试断言 + 日志可重现)
-//
-// LoadedFrom 形如:
-//
-//	"indicator-library/enb/ALL.xml"           (builtin)
-//	"indicator-library-custom/enb/MY.xml"    (custom)
-//
-// 错误处理:builtin 子目录不存在 → 返错(运维操作或镜像问题,需明示);
-//
-//	custom 子目录不存在 → 静默忽略(运维上传前 host 目录为空很正常)。
-func resolveENBSources(base, builtinSubdir, customSubdir string, customWins bool) ([]fileSource, error) {
-	builtinFiles, err := scanXMLBasenames(filepath.Join(base, builtinSubdir))
+// LoadedFrom 形如 "indicator-library/enb/ALL.xml"。
+// 子目录不存在 → 返错(运维操作或镜像问题,需明示)。
+// 输出按 LoadedFrom 字典序稳定排序。
+func resolveENBSources(base, enbSubdir string) ([]fileSource, error) {
+	files, err := scanXMLBasenames(filepath.Join(base, enbSubdir))
 	if err != nil {
-		return nil, fmt.Errorf("scan builtin enb dir %s: %w", builtinSubdir, err)
+		return nil, fmt.Errorf("scan enb dir %s: %w", enbSubdir, err)
 	}
-
-	customFiles, err := scanXMLBasenamesOptional(filepath.Join(base, customSubdir))
-	if err != nil {
-		return nil, fmt.Errorf("scan custom enb dir %s: %w", customSubdir, err)
-	}
-
-	merged := make(map[string]fileSource, len(builtinFiles)+len(customFiles))
-
-	// 1) 先填 builtin 全集
-	for _, name := range builtinFiles {
-		merged[name] = fileSource{
-			AbsPath:    filepath.Join(base, builtinSubdir, name),
-			LoadedFrom: filepath.ToSlash(filepath.Join(builtinSubdir, name)),
-		}
-	}
-
-	// 2) 再叠加 custom(根据 customWins 决定是否覆盖)
-	for _, name := range customFiles {
-		_, dup := merged[name]
-		if dup && !customWins {
-			continue // builtin 胜出,跳过 custom 同名
-		}
-		merged[name] = fileSource{
-			AbsPath:    filepath.Join(base, customSubdir, name),
-			LoadedFrom: filepath.ToSlash(filepath.Join(customSubdir, name)),
-		}
-	}
-
-	// 稳定排序输出(按 LoadedFrom)
-	out := make([]fileSource, 0, len(merged))
-	for _, src := range merged {
-		out = append(out, src)
+	out := make([]fileSource, 0, len(files))
+	for _, name := range files {
+		out = append(out, fileSource{
+			AbsPath:    filepath.Join(base, enbSubdir, name),
+			LoadedFrom: filepath.ToSlash(filepath.Join(enbSubdir, name)),
+		})
 	}
 	sortFileSources(out)
 	return out, nil
 }
 
-// resolveSingleTechSources 合并 GSM/GNB 双源(builtin 单文件 + custom 子目录多文件,T-0180 P1.2)。
+// resolveSingleTechSources 收集 GSM/GNB 单制式 XML 源:
+// 根级单文件(indicator-library/GSM.xml | GNB.xml)+ 同制式子目录多文件
+// (indicator-library/gsm/*.xml | indicator-library/gnb/*.xml)。
+//
+// 三库 XML 导入重构(2026-06-04 单目录):取消 *-custom 目录,custom 上传落地
+// 同制式子目录(gsm/ / gnb/);根级单文件保持出厂随包。两者并存,sidecar 判来源。
 //
 // 输入:
-//   - base:           XMLBaseDir
-//   - builtinFile:    builtin 单文件相对路径,如 "indicator-library/GSM.xml"
-//   - customSubdir:   custom 子目录相对路径,如 "indicator-library-custom/gsm"
+//   - base:        XMLBaseDir
+//   - builtinFile: 根级单文件相对路径,如 "indicator-library/GSM.xml"
+//   - subdir:      同制式子目录相对路径,如 "indicator-library/gsm"
 //
-// 合并规则:
-//  1. 若 builtin 单文件存在 → 加入结果
-//  2. 若 custom 子目录存在 → 全部 *.xml 加入结果
-//  3. 由于 builtin 是 "X.xml" 而 custom 是 "subdir/Y.xml",rel 路径不同,
-//     不可能"同名覆盖" → CustomOverrides 在此函数无意义,故未列入入参
-//
+// 根级单文件不存在 / 子目录不存在均容忍(运维场景:只用其中一侧)。
 // 输出按 LoadedFrom 字典序稳定排序。
-func resolveSingleTechSources(base, builtinFile, customSubdir string) ([]fileSource, error) {
+func resolveSingleTechSources(base, builtinFile, subdir string) ([]fileSource, error) {
 	var out []fileSource
 
-	// builtin 单文件(允许不存在,运维场景:用户只想用 custom)
+	// 根级单文件(允许不存在)
 	builtinAbs := filepath.Join(base, builtinFile)
 	if _, err := os.Stat(builtinAbs); err == nil {
 		out = append(out, fileSource{
@@ -112,15 +76,15 @@ func resolveSingleTechSources(base, builtinFile, customSubdir string) ([]fileSou
 		return nil, fmt.Errorf("stat builtin file %s: %w", builtinFile, err)
 	}
 
-	// custom 子目录(允许不存在,运维未上传时常态)
-	customFiles, err := scanXMLBasenamesOptional(filepath.Join(base, customSubdir))
+	// 同制式子目录(允许不存在,运维未上传时常态)
+	subFiles, err := scanXMLBasenamesOptional(filepath.Join(base, subdir))
 	if err != nil {
-		return nil, fmt.Errorf("scan custom dir %s: %w", customSubdir, err)
+		return nil, fmt.Errorf("scan dir %s: %w", subdir, err)
 	}
-	for _, name := range customFiles {
+	for _, name := range subFiles {
 		out = append(out, fileSource{
-			AbsPath:    filepath.Join(base, customSubdir, name),
-			LoadedFrom: filepath.ToSlash(filepath.Join(customSubdir, name)),
+			AbsPath:    filepath.Join(base, subdir, name),
+			LoadedFrom: filepath.ToSlash(filepath.Join(subdir, name)),
 		})
 	}
 
@@ -129,7 +93,7 @@ func resolveSingleTechSources(base, builtinFile, customSubdir string) ([]fileSou
 }
 
 // scanXMLBasenames 扫指定目录下的 *.xml 文件名(basename,不含路径),
-// 忽略子目录与 . 开头隐藏文件。目录不存在返错。
+// 忽略子目录、. 开头隐藏文件、sidecar 标记文件(X.xml.custom)。目录不存在返错。
 func scanXMLBasenames(dir string) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -138,6 +102,11 @@ func scanXMLBasenames(dir string) ([]string, error) {
 	out := make([]string, 0, len(entries))
 	for _, e := range entries {
 		if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		// 跳过 sidecar 标记文件(X.xml.custom);其 ext 是 .custom 非 .xml,
+		// 下面 EqualFold 已能排除,这里显式 continue 求清晰 + 安全。
+		if strings.HasSuffix(e.Name(), CustomMarkerSuffix) {
 			continue
 		}
 		if !strings.EqualFold(filepath.Ext(e.Name()), ".xml") {
@@ -149,7 +118,7 @@ func scanXMLBasenames(dir string) ([]string, error) {
 }
 
 // scanXMLBasenamesOptional 等同 scanXMLBasenames,但目录不存在静默返空切片。
-// 用于 custom 目录的乐观扫描(运维上传前为空很正常)。
+// 用于同制式子目录的乐观扫描(运维上传前为空很正常)。
 func scanXMLBasenamesOptional(dir string) ([]string, error) {
 	files, err := scanXMLBasenames(dir)
 	if err != nil {

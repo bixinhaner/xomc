@@ -37,8 +37,10 @@ func (r *PgGroupRepository) List(ctx context.Context, dt DeviceType) ([]*Indicat
 // ListByPlatform 列出**有该 platform 公式关联的指标所属**的分组。
 // 用途:product/kpi-library 详情态下拉,只显示当前 platform 实际涉及的分组。
 // 实现:WHERE EXISTS (SELECT 1 FROM perf_indicators_X i WHERE i.group_id = g.id
-//                    AND EXISTS (SELECT 1 FROM rela_platform_indicator_formula_X f
-//                                 WHERE f.indicator_id = i.id AND f.platform_name = $1))
+//
+//	AND EXISTS (SELECT 1 FROM rela_platform_indicator_formula_X f
+//	             WHERE f.indicator_id = i.id AND f.platform_name = $1))
+//
 // platform 空时等价于 List(全量)。
 func (r *PgGroupRepository) ListByPlatform(ctx context.Context, dt DeviceType, platform string) ([]*IndicatorGroup, error) {
 	return r.listInternal(ctx, dt, platform)
@@ -192,7 +194,7 @@ func (r *PgGroupRepository) CountIndicatorsByGroup(ctx context.Context, dt Devic
 	query, args, err := storage.Psql.Select(
 		"g.id", "COALESCE(COUNT(i.id), 0)").
 		From(grpTable + " g").
-		LeftJoin(indTable+" i ON i.group_id = g.id").
+		LeftJoin(indTable + " i ON i.group_id = g.id").
 		GroupBy("g.id").
 		ToSql()
 	if err != nil {

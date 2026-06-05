@@ -33,7 +33,7 @@ import {
   ArrowLeftOutlined,
   CloudUploadOutlined,
   DeleteOutlined,
-  EyeOutlined,
+  EditOutlined,
   PlusOutlined,
 } from '@ant-design/icons';
 import {
@@ -109,6 +109,8 @@ export default function AlarmLibraryPage() {
   // 2026-06-02 用户决策:一级列表恢复"名称"模糊搜索。后端 listNeTypes 不带过滤
   // 参数且数据量小(LTE/GSM/NR 等数行),故在前端按 neType 客户端过滤。
   const [neKeyword, setNeKeyword] = useState('');
+  const [nePage, setNePage] = useState(1);
+  const [nePageSize, setNePageSize] = useState(20);
   const { data: neTypesData, isLoading: isNeTypesLoading } = useAlarmNeTypeStats();
   const neTypesItems = useMemo<AlarmNeTypeStat[]>(() => {
     const all = neTypesData?.items || [];
@@ -306,14 +308,16 @@ export default function AlarmLibraryPage() {
       width: 130,
       render: (_: unknown, row: AlarmDefinition) => (
         <Space>
-          <Button
-            size="small"
-            icon={<EyeOutlined />}
-            onClick={() => {
-              setEditing(row);
-              setDrawerOpen(true);
-            }}
-          />
+          <Tooltip title={t('product.alarm.def.titleEdit')}>
+            <Button
+              size="small"
+              icon={<EditOutlined />}
+              onClick={() => {
+                setEditing(row);
+                setDrawerOpen(true);
+              }}
+            />
+          </Tooltip>
           <Popconfirm
             title={t('product.alarm.confirmDeleteDef', { id: row.identifier })}
             onConfirm={() =>
@@ -352,8 +356,10 @@ export default function AlarmLibraryPage() {
             <SearchInput
               placeholder={t('product.alarm.neSearchPh')}
               allowClear
-              value={neKeyword}
-              onChange={(e) => setNeKeyword(e.target.value)}
+              onSearch={(v) => {
+                setNeKeyword(v.trim());
+                setNePage(1);
+              }}
               style={{ width: 320 }}
               enterButton
             />
@@ -422,6 +428,8 @@ export default function AlarmLibraryPage() {
               pageSize: detailData?.pageSize || 20,
               total: detailData?.total || 0,
               showSizeChanger: true,
+              pageSizeOptions: ['10', '20', '50', '1000'],
+              showTotal: (n) => t('common.totalCount', { count: n }),
               onChange: (page, pageSize) =>
                 setDetailFilter((f) => ({ ...f, page, pageSize })),
             }}
@@ -433,7 +441,18 @@ export default function AlarmLibraryPage() {
             columns={[makeSeqColumn<AlarmNeTypeStat>({ title: t('table.rowNumber'), dataSource: neTypesItems }), ...neTypesColumns]}
             dataSource={neTypesItems}
             size="small"
-            pagination={{ pageSize: 20, showTotal: (total) => t('product.alarm.totalNeTypes', { count: total }) }}
+            pagination={{
+              current: nePage,
+              pageSize: nePageSize,
+              total: neTypesItems.length,
+              showSizeChanger: true,
+              pageSizeOptions: ['10', '20', '50', '1000'],
+              showTotal: (n) => t('product.alarm.totalNeTypes', { count: n }),
+              onChange: (p, ps) => {
+                setNePage(p);
+                if (ps !== nePageSize) setNePageSize(ps);
+              },
+            }}
           />
         )}
       </Card>

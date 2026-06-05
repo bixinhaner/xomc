@@ -350,32 +350,30 @@ export const indicatorLibraryApi = {
     };
   },
 
-  // T-0180 P1.4: multipart 上传自定义 XML
-  // file = File 对象(浏览器 FormData);返回 backend 同结构 UploadXmlResult
+  // multipart 上传自定义 XML(三库 XML 导入重构:name 必填 + 双唯一性硬拒,去 force)
+  // name = 用户指定的唯一名称(不含扩展名);file = File 对象(浏览器 FormData)。
   async uploadXml(
     tech: TechLower,
     file: File,
-    options: { force?: boolean } = {}
+    name: string
   ): Promise<IndicatorUploadResult> {
     const form = new FormData();
+    form.append('name', name);
     form.append('file', file);
-    const params: Record<string, string> = { tech };
-    if (options.force) params.force = 'true';
     const { data } = await http.post<{
       uploaded: boolean;
       filename: string;
       loaded_from: string;
       tech: string;
-      overwrite: boolean;
-      backup: string;
+      platform: string;
       reloaded: boolean;
     }>('/indicators/upload-xml', form, {
-      params,
+      params: { tech },
       // 必须显式声明 multipart/form-data — http.ts axios.create 设了
       // 默认 'Content-Type': 'application/json',不显式覆盖会沿用 JSON
       // 导致 body 被序列化为 "{}" + Gin c.FormFile("file") 返
       // "Content-Type isn't multipart/form-data"(与 paramModelApi.uploadXML / fileApi /
-      // adminApi / softwareApi 等 8 处上传同范式;历史漏掉本处)。
+      // adminApi / softwareApi 等 8 处上传同范式)。
       headers: { 'Content-Type': 'multipart/form-data' },
     });
     return {
@@ -383,8 +381,7 @@ export const indicatorLibraryApi = {
       filename: data.filename,
       loadedFrom: data.loaded_from,
       tech: data.tech as TechLower,
-      overwrite: data.overwrite,
-      backup: data.backup,
+      platform: data.platform,
       reloaded: data.reloaded,
     };
   },

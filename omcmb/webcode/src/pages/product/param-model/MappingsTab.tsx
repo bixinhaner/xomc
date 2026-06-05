@@ -63,8 +63,19 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
 
   // 条目类型筛选(对齐 standard-params 页面):'' = 全部
   const [entryFilter, setEntryFilter] = useState('');
+  // 手动搜索:仅在 onSearch(回车/点击搜索)时应用 keyword。
   const [keyword, setKeyword] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
   const [editing, setEditing] = useState<ParamMapping | null>(null);
+
+  // 过滤条件变化时回到第一页——渲染期重置,避免 set-state-in-effect。
+  const filterKey = `${keyword}|${entryFilter}|${selectedName ?? ''}`;
+  const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
+  if (filterKey !== prevFilterKey) {
+    setPrevFilterKey(filterKey);
+    setPage(1);
+  }
   const [creating, setCreating] = useState(false);
   const [form] = Form.useForm<CreateMappingInput | UpdateMappingInput>();
 
@@ -202,8 +213,7 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
             <SearchInput
               placeholder={t('product.paramModel.pathSearchPh')}
               allowClear
-              value={keyword}
-              onChange={(e) => setKeyword(e.target.value)}
+              onSearch={(v) => setKeyword(v.trim())}
               style={{ width: 320 }}
               enterButton
             />
@@ -235,7 +245,18 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
           columns={[makeSeqColumn<ParamMapping>({ title: t('table.rowNumber'), dataSource: filtered }), ...columns]}
           dataSource={filtered}
           size="small"
-          pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (total) => t('common.totalCount', { count: total }) }}
+          pagination={{
+            current: page,
+            pageSize,
+            total: filtered.length,
+            showSizeChanger: true,
+            pageSizeOptions: ['10', '20', '50', '1000'],
+            showTotal: (n) => t('common.totalCount', { count: n }),
+            onChange: (p, ps) => {
+              setPage(p);
+              if (ps !== pageSize) setPageSize(ps);
+            },
+          }}
         />
       <Modal
         title={editing ? t('product.paramModel.mappings.editTitle') : t('product.paramModel.mappings.newTitle')}

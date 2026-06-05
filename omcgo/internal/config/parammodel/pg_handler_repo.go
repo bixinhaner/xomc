@@ -125,6 +125,19 @@ func (r *PgRepository) DeleteParamModel(ctx context.Context, name string) (bool,
 	return tag.RowsAffected() > 0, nil
 }
 
+// ParamModelNameExists 报告是否已有同名 param_models 行。
+// 用于 Upload 内容主键(模型名)唯一性校验(三库 XML 导入重构 §7.1):
+// 上传必然写一个新文件(文件名唯一已先行强制),故 DB 中已存在同名模型 = 内容主键冲突。
+func (r *PgRepository) ParamModelNameExists(ctx context.Context, name string) (bool, error) {
+	var exists bool
+	if err := r.pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM param_models WHERE name = $1)`, name,
+	).Scan(&exists); err != nil {
+		return false, fmt.Errorf("check param_model name exists %q: %w", name, err)
+	}
+	return exists, nil
+}
+
 // DeleteOrphansSince 删除自 since 以来未被 UPSERT 触及的 param_models 行（孤儿）。
 // 用途：destructive reload — 重载 XML 后，若 DB 中存在不再于 XML 目录中的模型，
 //      它们的 updated_at 不会被 BEFORE UPDATE 触发器更新，可作为孤儿判定标志。

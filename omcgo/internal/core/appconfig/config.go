@@ -166,93 +166,57 @@ type ParamModelLoaderConfig struct {
 	ParamModelFiles   []string `mapstructure:"param_model_files"`   // 9 个白名单（空即扫除已知 routing/products 之外）
 	StandardModelFile string   `mapstructure:"standard_model_file"` // 默认 "standard-model.xml"
 
-	// T-0178 自定义 XML 分层目录(用户上传 paramModel 的持久化目录)
-	CustomDirectory string `mapstructure:"custom_directory"` // 默认 "param-mappings-custom"
-	// CustomOverrides 使用 *bool 三态:
-	//   yaml 不写  → nil  → CustomOverridesEnabled() = true(默认 custom 胜出,用户决策 1)
-	//   yaml true  → 显式 true,等同默认
-	//   yaml false → 显式 false,同名时 builtin 胜出
-	// 避免 Go bool 零值 false 与"默认 true"语义冲突的陷阱(PRD §一)。
-	CustomOverrides *bool `mapstructure:"custom_overrides_builtin"`
+	// 三库 XML 导入重构(2026-06-04 D3/D5/D6):取消 builtin/custom 双目录区分,
+	// 所有 XML(出厂 + 用户上传)同住 Directory(param-mappings/),来源由同目录 sidecar
+	// (X.xml.custom)判定。CustomDirectory / CustomOverrides 已删除。
 
-	// T-0178 worker BackupCleanup cron(PRD §9.6):
+	// worker BackupCleanup cron(PRD §9.6):
 	//   - .deleted.<ts> / .bak.<ts> 文件超过 N 天即清理(默认 30)
 	//   - .tmp.<uuid> 文件超过 1 小时即清理(写盘中断残留)
+	//   - 孤儿 sidecar(X.xml.custom 而 X.xml 已不存在)即清
 	// cron 表达式默认 "0 3 * * *"(每天凌晨 3 点)。
 	BackupRetentionDays int    `mapstructure:"backup_retention_days"`
 	BackupCleanupCron   string `mapstructure:"backup_cleanup_cron"`
 }
 
-// CustomOverridesEnabled 是 Loader 与测试调用方的唯一入口,不直接读 *bool。
-// 改默认值只动这里。
-func (c ParamModelLoaderConfig) CustomOverridesEnabled() bool {
-	return c.CustomOverrides == nil || *c.CustomOverrides
-}
-
-// IndicatorLoaderConfig 控制 KPI 指标库 Loader 行为（T-0098 P1-06；T-0180 加自定义 XML 分层目录）。
-// EnbDirectory 内的所有 *.xml 视为 ENB 平台文件；GsmFile / GnbFile 单文件加载。
-// T-0180 P1.2: 镜像层 builtin 与 host bind mount custom 双目录合并扫描;
-// 同名文件由 CustomOverrides 控制(默认 custom 胜出,与 T-0178 一致)。
+// IndicatorLoaderConfig 控制 KPI 指标库 Loader 行为（T-0098 P1-06）。
+// EnbSubdir 内的所有 *.xml 视为 ENB 平台文件；GsmFile / GnbFile 根级单文件加载，
+// 同制式子目录 gsm/ / gnb/ 内的 *.xml 一并加载。
+//
+// 三库 XML 导入重构(2026-06-04 D3/D5/D6):取消 builtin/custom 双目录区分,
+// 所有 XML(出厂 + 用户上传)同住 BaseDirectory 目录树(enb/gsm/gnb 子目录 +
+// GSM.xml / GNB.xml 根级单文件),来源由同目录 sidecar(X.xml.custom)判定。
+// Custom* / CustomOverrides 已删除。
 type IndicatorLoaderConfig struct {
 	BaseDirectory string `mapstructure:"base_directory"` // 默认 "indicator-library"
 	EnbSubdir     string `mapstructure:"enb_subdir"`     // 默认 "enb"
 	GsmFile       string `mapstructure:"gsm_file"`       // 默认 "GSM.xml"
 	GnbFile       string `mapstructure:"gnb_file"`       // 默认 "GNB.xml"
 
-	// T-0180 自定义 XML 分层目录(用户上传 indicator XML 的持久化目录)
-	CustomBaseDirectory string `mapstructure:"custom_base_directory"` // 默认 "indicator-library-custom"
-	CustomEnbSubdir     string `mapstructure:"custom_enb_subdir"`     // 默认 "enb"
-	CustomGsmSubdir     string `mapstructure:"custom_gsm_subdir"`     // 默认 "gsm"
-	CustomGnbSubdir     string `mapstructure:"custom_gnb_subdir"`     // 默认 "gnb"
-	// CustomOverrides 使用 *bool 三态(与 ParamModelLoaderConfig 同口径):
-	//   yaml 不写  → nil  → CustomOverridesEnabled() = true(默认 custom 胜出,T-0180 决策 D1)
-	//   yaml true  → 显式 true,等同默认
-	//   yaml false → 显式 false,同名时 builtin 胜出
-	CustomOverrides *bool `mapstructure:"custom_overrides"`
-
-	// T-0180 P2 worker BackupCleanup cron(PRD §9.6,对标 T-0178 ParamModel):
+	// worker BackupCleanup cron(PRD §9.6,对标 T-0178 ParamModel):
 	//   - .deleted.<ts> / .bak.<ts> 文件超过 N 天即清理(默认 30)
 	//   - .tmp.<uuid> 文件超过 1 小时即清理(写盘中断残留)
+	//   - 孤儿 sidecar(X.xml.custom 而 X.xml 已不存在)即清
 	// cron 表达式默认 "0 3 * * *"(每天凌晨 3 点;与 ParamModel cron 错峰)。
 	BackupRetentionDays int    `mapstructure:"backup_retention_days"`
 	BackupCleanupCron   string `mapstructure:"backup_cleanup_cron"`
 }
 
-// CustomOverridesEnabled 返回是否启用 custom 胜出语义。
-// nil(yaml 不写) → true 默认 custom 胜出(T-0180 决策 D1,与 T-0178 ParamModel 一致)。
-func (c IndicatorLoaderConfig) CustomOverridesEnabled() bool {
-	if c.CustomOverrides == nil {
-		return true
-	}
-	return *c.CustomOverrides
-}
-
 // AlarmDefinitionLoaderConfig 控制告警库 Loader 行为（T-0098 P1-06）。
-// 扫描 {XMLBaseDir}/{Directory}/，按文件名推断 ne_type（ENB.xml → "ENB"）。
+// 扫描 {XMLBaseDir}/{Directory}/，按 ne_type 推断（XML neType 属性优先，缺省回退文件名）。
 //
-// 严格对标 T-0180 indicator：镜像层 builtin 与 host bind mount custom 双目录合并扫描，
-// 同名文件由 CustomOverrides 控制（默认 custom 胜出）。alarm 目录是扁平结构
-// （每个 ne_type 一个 XML 文件），custom 同样扁平。
+// 三库 XML 导入重构(2026-06-04 D3/D5/D6):取消 builtin/custom 双目录区分，
+// 所有 XML(出厂 + 用户上传)同住 Directory(alarm-definitions/，扁平结构，每个 ne_type 一个
+// XML 文件)，来源由同目录 sidecar(X.xml.custom)判定。CustomDirectory / CustomOverrides 已删除。
 type AlarmDefinitionLoaderConfig struct {
 	Directory string `mapstructure:"directory"` // 默认 "alarm-definitions"
 
-	// CustomDirectory 自定义 XML 持久化目录（用户上传 alarm XML）。
-	CustomDirectory string `mapstructure:"custom_directory"` // 默认 "alarm-definitions-custom"
-	// CustomOverrides 使用 *bool 三态（与 ParamModel / Indicator 同口径）：
-	//   nil（yaml 不写）→ CustomOverridesEnabled()=true（默认 custom 胜出）
-	CustomOverrides *bool `mapstructure:"custom_overrides"`
-
-	// worker BackupCleanup cron（对标 T-0180 indicator）：
+	// worker BackupCleanup cron：
 	//   - .deleted.<ts> / .bak.<ts> 超过 N 天即清理（默认 30）
 	//   - .tmp.<uuid> 超过 1 小时即清理（写盘中断残留）
+	//   - 孤儿 sidecar(X.xml.custom 而 X.xml 已不存在)即清
 	BackupRetentionDays int    `mapstructure:"backup_retention_days"`
 	BackupCleanupCron   string `mapstructure:"backup_cleanup_cron"`
-}
-
-// CustomOverridesEnabled 是 Loader 与测试调用方的唯一入口，不直接读 *bool。
-// nil（yaml 不写）→ true（默认 custom 胜出，与 ParamModel / Indicator 一致）。
-func (c AlarmDefinitionLoaderConfig) CustomOverridesEnabled() bool {
-	return c.CustomOverrides == nil || *c.CustomOverrides
 }
 
 // ProductLoaderConfig 控制产品装配件 Loader 行为（T-0098 P1-06）。

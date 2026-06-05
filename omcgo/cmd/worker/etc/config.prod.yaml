@@ -79,8 +79,7 @@ tracer:
 dict_loader:
   xml_base_dir: "data"
   param_model:
-    directory: "param-mappings"
-    custom_directory: "param-mappings-custom"
+    directory: "param-mappings"        # 单目录(builtin + custom XML 同住,sidecar 判来源)
     backup_retention_days: 30          # .deleted/.bak 保留天数(空→默认 30)
     backup_cleanup_cron: "0 3 * * *"   # 每天凌晨 3 点扫(空→默认同左)
 

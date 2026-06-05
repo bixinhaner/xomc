@@ -1,14 +1,16 @@
 /**
- * AlarmUploadXmlModal — 告警库自定义 XML 上传弹窗(严格对标 kpi-library UploadXmlModal;
- * 告警侧无"目标制式",ne_type 由 XML 内容 / 文件名在加载时推断,故只需选文件)。
+ * AlarmUploadXmlModal — 告警库自定义 XML 上传弹窗(对标 kpi-library UploadXmlModal)。
  *
- * 校验链(后端 file_handler.UploadXML 已守:文件名 + size + <alarmModel> 根);
- * 前端仅做 size/类型提示。
- * 上传前查重(2026-06-03):真正上传前先用 useAlarmNeTypeStats 取已存在的 XML 文件名,
- *   若文件名重复则弹覆盖确认 → force=true 上传;不重复则直接上传(409 仍作兜底)。
+ * 2026-06-04 单目录 + 双唯一性硬拒(无 force):
+ *   - 名称 *      (用户指定的唯一名称,正则 ^[A-Za-z0-9_-]{1,64}$,落地 <name>.xml)
+ *   - XML 文件 *  (根元素必须 <alarmModel>,≤ 1 MiB)
+ *   上传前用 useAlarmNeTypeStats 取已存在的 XML 文件名,若 <name>.xml 重复则内联报错
+ *   "名称已存在,请改名";后端 409 兜底同样内联提示改名(文件名 / neType 内容主键任一冲突)。
+ *
+ * 校验链(后端 file_handler.UploadXML 已守:name 白名单 + size + <alarmModel> 根 + 双唯一性)。
  */
 import { useState } from 'react';
-import { Modal, Form, Upload, message, Button, Space } from 'antd';
+import { Modal, Form, Input, Upload, message, Button, Space } from 'antd';
 import type { UploadFile, UploadProps } from 'antd/es/upload/interface';
 import { InboxOutlined } from '@ant-design/icons';
 import type { AxiosError } from 'axios';
@@ -21,17 +23,22 @@ interface Props {
 }
 
 const MAX_SIZE = 1 * 1024 * 1024; // 1 MiB,与后端 MaxUploadXMLSize 一致
+const NAME_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+
+interface UploadFormValues {
+  name?: string;
+}
 
 export default function AlarmUploadXmlModal({ open, onClose }: Props) {
   const t = useT();
-  const [form] = Form.useForm();
+  const [form] = Form.useForm<UploadFormValues>();
   const [fileList, setFileList] = useState<UploadFile[]>([]);
   const uploadMut = useAlarmUploadXml();
 
-  // 上传前查重数据源:ne-types 聚合行的 loadedFrom basename(大小写不敏感)。
+  // 上传前查重:ne-types 聚合行的 loadedFrom basename(大小写不敏感)对比 <name>.xml。
   const { data: neTypesData } = useAlarmNeTypeStats();
-  const isDuplicate = (fileName: string): boolean => {
-    const target = fileName.toLowerCase();
+  const isDuplicateName = (name: string): boolean => {
+    const target = `${name}.xml`.toLowerCase();
     return (neTypesData?.items || []).some((row) => {
       const base = (row.loadedFrom || '').split('/').pop()?.toLowerCase() ?? '';
       return base === target;
@@ -44,54 +51,35 @@ export default function AlarmUploadXmlModal({ open, onClose }: Props) {
     onClose();
   };
 
-  // 弹覆盖确认(查重命中 / 后端 409 兜底共用),确认后带 force=true 上传。
-  const confirmOverride = (file: File) => {
-    Modal.confirm({
-      title: t('product.alarm.upload.overrideTitle'),
-      content: (
-        <div style={{ maxWidth: 360 }}>
-          {t('product.alarm.upload.overrideContentPre')}<code>{file.name}</code>{t('product.alarm.upload.overrideContentPost')}
-          <br />{t('product.alarm.upload.backupHint')}
-        </div>
-      ),
-      okText: t('common.override'),
-      okButtonProps: { danger: true },
-      onOk: () => doUpload(file, true),
-    });
-  };
-
-  const doUpload = async (file: File, force: boolean) => {
-    try {
-      const r = await uploadMut.mutateAsync({ file, force });
-      message.success(
-        r.overwrite && r.backup
-          ? t('product.alarm.upload.overrideSuccess', { file: r.filename, backup: r.backup })
-          : t('product.alarm.upload.uploadSuccess', { file: r.filename })
-      );
-      handleClose();
-    } catch (e: unknown) {
-      const ax = e as AxiosError<{ msg?: string; message?: string }>;
-      if (ax.response?.status === 409 && !force) {
-        confirmOverride(file);
-        return;
-      }
-      const body = ax.response?.data as { msg?: string; message?: string } | undefined;
-      message.error(body?.msg ?? body?.message ?? (e instanceof Error ? e.message : String(e)));
-    }
-  };
-
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
+    const v = await form.validateFields().catch(() => null);
+    if (!v?.name) return;
     if (fileList.length === 0 || !fileList[0].originFileObj) {
       message.error(t('product.alarm.upload.selectXmlMsg'));
       return;
     }
     const file = fileList[0].originFileObj;
-    // 上传前查重:文件名已存在 → 先弹覆盖确认;否则直接上传(409 仍作兜底)。
-    if (isDuplicate(file.name)) {
-      confirmOverride(file);
+
+    // 上传前查重:文件名已存在 → 内联报错到"名称"字段,提示改名(409 仍作兜底)。
+    if (isDuplicateName(v.name)) {
+      form.setFields([{ name: 'name', errors: [t('product.paramModel.nameExists')] }]);
       return;
     }
-    void doUpload(file, false);
+
+    try {
+      const r = await uploadMut.mutateAsync({ file, name: v.name });
+      message.success(t('product.alarm.upload.uploadSuccess', { file: r.filename }));
+      handleClose();
+    } catch (e: unknown) {
+      const ax = e as AxiosError<{ msg?: string; message?: string }>;
+      // 409 冲突(文件名或 neType 内容主键)→ 内联报错到"名称"字段,提示改名。
+      if (ax.response?.status === 409) {
+        form.setFields([{ name: 'name', errors: [t('product.paramModel.nameExists')] }]);
+        return;
+      }
+      const body = ax.response?.data as { msg?: string; message?: string } | undefined;
+      message.error(body?.msg ?? body?.message ?? (e instanceof Error ? e.message : String(e)));
+    }
   };
 
   const uploadProps: UploadProps = {
@@ -117,7 +105,7 @@ export default function AlarmUploadXmlModal({ open, onClose }: Props) {
       footer={
         <Space>
           <Button onClick={handleClose}>{t('common.cancel')}</Button>
-          <Button type="primary" onClick={handleSubmit} loading={uploadMut.isPending}>
+          <Button type="primary" onClick={() => void handleSubmit()} loading={uploadMut.isPending}>
             {t('common.upload')}
           </Button>
         </Space>
@@ -126,6 +114,16 @@ export default function AlarmUploadXmlModal({ open, onClose }: Props) {
       destroyOnHidden
     >
       <Form form={form} layout="vertical">
+        <Form.Item
+          name="name"
+          label={t('common.name')}
+          rules={[
+            { required: true, message: t('common.nameRequired') },
+            { pattern: NAME_PATTERN, message: t('product.paramModel.nameInvalid') },
+          ]}
+        >
+          <Input placeholder="ENB" maxLength={64} allowClear />
+        </Form.Item>
         <Form.Item label={t('product.alarm.upload.xmlFile')} required>
           <Upload.Dragger {...uploadProps}>
             <p className="ant-upload-drag-icon">

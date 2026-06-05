@@ -19,36 +19,17 @@ const (
 	SourceUnknown Source = "unknown"
 )
 
-// BuiltinDirPrefix / CustomDirPrefix 是 alarm_definitions.loaded_from 列的目录前缀约定。
-// Loader 写入时 = filepath.ToSlash(filepath.Join(subdir, basename)),因此一定以
-// "alarm-definitions/" 或 "alarm-definitions-custom/" 开头。
-//
-// 改前缀只动这里;handler / loader / 前端 DTO 均通过 ClassifySource / IsDeletable
-// 间接判定,不直接 strings.Contains。
-const (
-	BuiltinDirPrefix = "alarm-definitions/"
-	CustomDirPrefix  = "alarm-definitions-custom/"
-)
+// BuiltinDirPrefix 是 alarm_definitions.loaded_from 列的目录前缀约定。
+// 三库 XML 导入重构(2026-06-04 单目录):所有 XML(出厂 + 用户上传)同住
+// alarm-definitions/,Loader 写入 loaded_from = filepath.ToSlash(filepath.Join(subdir, basename)),
+// 因此一定以 "alarm-definitions/" 开头。来源(builtin/custom)由同目录 sidecar
+// (X.xml.custom)判定,见 ClassifySource / IsDeletable。
+const BuiltinDirPrefix = "alarm-definitions/"
 
-// BuiltinDirSubdir / CustomDirSubdir 是 XMLBaseDir 下的子目录名(不含末尾 /)。
-// Loader 扫描目录、Handler Upload 写入目标路径、deploy.sh 初始化目录均引用这两个常量。
-const (
-	BuiltinDirSubdir = "alarm-definitions"        // 镜像层只读 builtin XML 目录(每个 ne_type 一个文件,如 ENB.xml)
-	CustomDirSubdir  = "alarm-definitions-custom" // host bind mount 持久化 custom XML 目录
-)
+// BuiltinDirSubdir 是 XMLBaseDir 下的子目录名(不含末尾 /)。
+// Loader 扫描目录、Handler Upload 写入目标路径、deploy.sh 初始化目录均引用本常量。
+const BuiltinDirSubdir = "alarm-definitions" // 单目录:builtin + custom XML 同住(每个 ne_type 一个文件,如 ENB.xml)
 
-// ClassifySource 根据 alarm_definitions.loaded_from 列值判定物理来源。
-//
-// 输入约定:loaded_from 应为相对 XMLBaseDir 的 slash 路径(Loader 用 filepath.ToSlash
-// 规范化)。
-//
-// 行为:
-//   - 以 CustomDirPrefix 开头 → SourceCustom
-//   - 以 BuiltinDirPrefix 开头 → SourceBuiltin
-//   - 其他(空串 / 裸文件名 / 历史数据)→ SourceUnknown
-//
-// SourceUnknown 包括历史数据(loaded_from 只存 basename 的旧 Loader 写入,migration
-// 回填前的过渡期可能见到)。
 // CustomMarkerSuffix 是自定义 XML 的 sidecar 标记后缀。
 // 文件 X.xml 若同目录存在 X.xml.custom(空标记文件)⇒ 该 XML 为用户经 UI 上传的自定义文件。
 // 标记随文件走 → 扛过 data 反向合并升级 + DB 重建,不依赖目录前缀、不占 DB 列(2026-06-04 设计 D6)。

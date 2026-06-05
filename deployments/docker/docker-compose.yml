@@ -184,14 +184,11 @@ services:
       # 全局 API 密钥共享卷:app 启动期幂等签发 .api-key,worker(omcctl) 只读消费。
       # 详见 omcgo/CLAUDE.md §5.6 全局 API 密钥约定。
       - omcgo-secrets:/var/lib/omcgo/secrets
-      # T-0183: paramModel XML 字典 bind-mount。omcctl sweep-paths --apply
-      # 在 worker 容器写 supported="false",通过 bind mount 反映到宿主源码目录,
-      # 容器重建/重启都不会丢标注;operator 用 git diff 审阅后 commit。
-      - ../../omcgo/data/param-mappings:/etc/omcgo/data/param-mappings
-      # T-0180: builtin indicator XML 镜像层目录 bind-mount(与 T-0183 param-mappings
-      # 同范式)。dev 工作流"上传/移除 XML → 重载 → 验证"写进源码 builtin 目录立刻生效。
-      # 2026-06-03:取消 custom 分层目录,上传统一落 builtin(dev 落源码树)。
-      - ../../omcgo/data/indicator-library:/etc/omcgo/data/indicator-library
+      # 三库导入XML重构 Phase 2(D1/D2):data 不再 COPY 进镜像,整个 omcgo/data
+      # 外置 bind-mount。dev 直接挂源码树 —— 上传/删除 XML + .custom sidecar 立刻
+      # 反映到源码,operator 用 git diff 审阅后 commit;omcctl sweep-paths --apply
+      # 写 supported="false" 同样落源码树。
+      - ../../omcgo/data:/etc/omcgo/data
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       migrate-seed:
@@ -220,12 +217,9 @@ services:
       - ../../run/logs/worker:/run/logs/worker
       # 共享 secrets 卷只读 — omcctl/scripts 默认从此读 .api-key
       - omcgo-secrets:/var/lib/omcgo/secrets:ro
-      # T-0183: XML 字典 rw 挂载 — omcctl sweep-paths --apply 在 worker 容器内直接
-      # 写 supported="false",通过 bind mount 反映到宿主,git diff 审阅后 commit。
-      - ../../omcgo/data/param-mappings:/etc/omcgo/data/param-mappings
-      # T-0180: builtin indicator XML 镜像层目录 bind-mount,与 app 服务保持文件视图一致。
-      # 2026-06-03:取消 custom 分层目录,上传统一落 builtin。
-      - ../../omcgo/data/indicator-library:/etc/omcgo/data/indicator-library
+      # 三库导入XML重构 Phase 2:整个 omcgo/data 外置 bind-mount(与 app 文件视图一致);
+      # omcctl sweep-paths --apply 在 worker 容器内写 supported="false" 反映到源码树。
+      - ../../omcgo/data:/etc/omcgo/data
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       migrate-seed:

@@ -17,7 +17,7 @@ type FormulaValidator struct {
 
 // NewFormulaValidator creates a validator with the given ID→formula mapping.
 func NewFormulaValidator(idMap map[string]string) *FormulaValidator {
-return &FormulaValidator{idMap: idMap}
+	return &FormulaValidator{idMap: idMap}
 }
 
 // ValidationResult holds the outcome of formula validation.
@@ -110,9 +110,9 @@ func (v *FormulaValidator) Validate(arithmetic string) ValidationResult {
 	}
 
 	return ValidationResult{
-		IsValid:      true,
-		IsCounter:    onlyOneToken && singleIndicatorID != "",
-		IndicatorID:  singleIndicatorID,
+		IsValid:     true,
+		IsCounter:   onlyOneToken && singleIndicatorID != "",
+		IndicatorID: singleIndicatorID,
 	}
 }
 

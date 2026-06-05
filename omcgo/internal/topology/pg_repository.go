@@ -251,6 +251,7 @@ func (r *PgDeviceGroupRepository) GetTreeWithCounts(ctx context.Context) ([]Devi
 		LEFT JOIN LATERAL (
 			SELECT COUNT(*) AS count
 			FROM device_group_members dgm
+			JOIN devices d ON d.id = dgm.device_id AND d.deleted_at IS NULL
 			WHERE dgm.group_id = dg.id
 		) device_counts ON true
 		ORDER BY dg.sort_order ASC, dg.name ASC`
@@ -297,11 +298,19 @@ func (r *PgDeviceGroupRepository) ExistsByParentAndName(ctx context.Context, par
 
 // GetStats returns aggregate statistics about groups and device membership.
 func (r *PgDeviceGroupRepository) GetStats(ctx context.Context) (*GroupStats, error) {
+	// device 计数一律排除软删除设备（deleted_at IS NOT NULL）——回收/删除走软删
+	// (device_repository.BatchDelete:UPDATE deleted_at + 删 device_group_members)。
+	// 否则被删设备脱离分组后仍计入「未分组」，与 grouped_devices 的 -1 相抵，「全部」总数不变。
 	const rawSQL = `
 		SELECT
 			(SELECT COUNT(*) FROM device_groups) AS total_groups,
-			(SELECT COUNT(DISTINCT device_id) FROM device_group_members) AS grouped_devices,
-			(SELECT COUNT(*) FROM devices d WHERE NOT EXISTS (
+			(SELECT COUNT(DISTINCT dgm.device_id)
+			   FROM device_group_members dgm
+			   JOIN devices d ON d.id = dgm.device_id
+			  WHERE d.deleted_at IS NULL) AS grouped_devices,
+			(SELECT COUNT(*) FROM devices d
+			  WHERE d.deleted_at IS NULL
+			    AND NOT EXISTS (
 				SELECT 1 FROM device_group_members dgm WHERE dgm.device_id = d.id
 			)) AS ungrouped_devices`
 

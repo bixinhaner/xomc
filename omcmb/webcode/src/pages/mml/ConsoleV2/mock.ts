@@ -9,8 +9,12 @@ import type {
   DeviceItem,
   DeviceStatus,
   ExecRecord,
+  ExecStatus,
+  PathTask,
   ResultColumn,
   ResultRow,
+  UnverifiedReason,
+  VerifyItem,
 } from './types';
 import { isReadOp } from './constants';
 
@@ -148,6 +152,47 @@ function pseudo(seed: number): number {
   return x - Math.floor(x);
 }
 
+/** 确定性伪 UUID（mock 用；真实由后端 device_tasks.id / mml_tasks.id 提供）。 */
+function mockUuid(seed: string): string {
+  let h = 2166136261;
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  const next = (): number => {
+    h ^= h << 13;
+    h ^= h >>> 17;
+    h ^= h << 5;
+    return h >>> 0;
+  };
+  let hex = '';
+  while (hex.length < 32) hex += next().toString(16).padStart(8, '0');
+  hex = hex.slice(0, 32);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+}
+
+/** 确定性时钟 HH:mm:ss（基线 09:12:00 + 设备/阶段偏移），模拟下发/响应时间。 */
+function mockClock(deviceIdx: number, phase: 0 | 1, extra = 0): string {
+  const base = 9 * 3600 + 12 * 60; // 09:12:00
+  const t = base + deviceIdx * 2 + phase * (1 + (deviceIdx % 3)) + extra;
+  const hh = Math.floor(t / 3600) % 24;
+  const mm = Math.floor((t % 3600) / 60);
+  const ss = t % 60;
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${p(hh)}:${p(mm)}:${p(ss)}`;
+}
+
+/** 写类命令的 mock 场景（按设备序号确定性分桶，演示四态）。 */
+type WriteScenario = 'success' | 'mismatch' | 'reboot' | 'write-only';
+function writeScenario(deviceIdx: number): WriteScenario {
+  // deviceIdx % 6 === 5 已在 buildResultRows 判为 RPC failed，这里覆盖 0..4
+  const m = deviceIdx % 6;
+  if (m === 2) return 'mismatch';
+  if (m === 3) return 'reboot';
+  if (m === 4) return 'write-only';
+  return 'success';
+}
+
 function mockValue(path: string, deviceIdx: number, colIdx: number): string {
   const seed = deviceIdx * 7 + colIdx * 13;
   if (path.includes('Manufacturer')) return 'Baicells';
@@ -237,13 +282,36 @@ function faultXml(faultCode: string, sn: string): string {
   );
 }
 
+/** 生成逐 PATH 子任务（详情页展示；父任务 = deviceTaskId，设计 §3.11.3）。 */
+function buildPathTasks(
+  columns: ResultColumn[],
+  sn: string,
+  deviceIdx: number,
+  rowStatus: ExecStatus,
+  cells: Record<string, string>,
+): PathTask[] {
+  return columns.map((col, colIdx) => ({
+    pathIndex: colIdx,
+    path: col.path,
+    subTaskId: mockUuid(`st-${sn}-${colIdx}`),
+    status: rowStatus,
+    dispatchedAt: mockClock(deviceIdx, 0, colIdx),
+    respondedAt: mockClock(deviceIdx, 1, colIdx),
+    value: cells[col.path] ?? '',
+  }));
+}
+
 /**
- * 生成一次执行的 mock 结果行（列驱动，标准/裸路径两模式通用）。约 1/6 设备失败，
- * 用于演示失败行展开 + 状态过滤。`raw` 为格式化前的 CWMP SOAP XML（详情页用 XmlViewer 美化）。
+ * 生成一次执行的 mock 结果行（列驱动，标准/裸路径两模式通用；设计 §3.11.2 读后核实）。
+ *
+ * 状态分布（按设备序号确定性分桶）：约 1/6 设备 RPC 失败(failed)；其余写类按 §3.11.2 演示
+ * success(已核实) / mismatch(未生效) / unverified(只写 · 重启生效)。读类仅 success/failed。
+ * 每行带 deviceTaskId、下发/响应时间、逐 PATH 子任务；写类带核实对比 verify。
+ * `raw` 为格式化前的 CWMP SOAP XML（详情页用 XmlViewer 美化）。
  *
  * @param columns       结果表格动态列（标准模式来自命令勾选项，裸路径模式来自手输路径）
  * @param deviceSns     目标设备
- * @param read          是否「读」类操作（true 填参数值矩阵，false 填 ✓ 状态）
+ * @param read          是否「读」类操作（true 填参数值矩阵；false 写类走读后核实）
  * @param operationType 操作类型（决定写结果 XML 形态）
  */
 export function buildResultRows(
@@ -253,25 +321,84 @@ export function buildResultRows(
   operationType: string,
 ): ResultRow[] {
   return deviceSns.map((sn, deviceIdx) => {
-    const failed = deviceIdx % 6 === 5;
-    const cells: Record<string, string> = {};
-    if (!failed) {
+    const deviceTaskId = mockUuid(`dt-${sn}-${deviceIdx}`);
+    const dispatchedAt = mockClock(deviceIdx, 0);
+    const respondedAt = mockClock(deviceIdx, 1);
+    const elapsedMs = 200 + Math.floor(pseudo(deviceIdx + 1) * 1800);
+    const rpcFailed = deviceIdx % 6 === 5;
+
+    // 共有：RPC 本身失败（读写通用）
+    if (rpcFailed) {
+      const faultCode = FAULT_CODES[deviceIdx % FAULT_CODES.length];
+      return {
+        deviceSn: sn,
+        deviceTaskId,
+        status: 'failed',
+        cells: {},
+        faultCode,
+        dispatchedAt,
+        respondedAt,
+        pathTasks: buildPathTasks(columns, sn, deviceIdx, 'failed', {}),
+        raw: faultXml(faultCode, sn),
+        elapsedMs,
+      };
+    }
+
+    // 读类：参数值矩阵
+    if (read) {
+      const cells: Record<string, string> = {};
       columns.forEach((col, colIdx) => {
-        cells[col.path] = read ? mockValue(col.path, deviceIdx, colIdx) : '✓';
+        cells[col.path] = mockValue(col.path, deviceIdx, colIdx);
+      });
+      return {
+        deviceSn: sn,
+        deviceTaskId,
+        status: 'success',
+        cells,
+        dispatchedAt,
+        respondedAt,
+        pathTasks: buildPathTasks(columns, sn, deviceIdx, 'success', cells),
+        raw: gpvXml(columns, cells, sn),
+        elapsedMs,
+      };
+    }
+
+    // 写类：读后核实（§3.11.2）—— 写 RPC 成功后比对读回值派生四态
+    const scen = writeScenario(deviceIdx);
+    const verify: VerifyItem[] = columns.map((col, colIdx) => {
+      const expected = mockValue(col.path, deviceIdx, colIdx);
+      if (scen === 'mismatch') {
+        return { path: col.path, label: col.label, expected, actual: `${expected}（旧值）`, matched: false };
+      }
+      if (scen === 'reboot' || scen === 'write-only') {
+        return { path: col.path, label: col.label, expected, actual: '', matched: false };
+      }
+      return { path: col.path, label: col.label, expected, actual: expected, matched: true };
+    });
+
+    const status: ExecStatus = scen === 'success' ? 'success' : scen === 'mismatch' ? 'mismatch' : 'unverified';
+    const unverifiedReason: UnverifiedReason | undefined =
+      scen === 'reboot' ? 'reboot-required' : scen === 'write-only' ? 'write-only' : undefined;
+
+    // 可读场景（success/mismatch）单元格回填读回值；不可读（unverified）留空
+    const cells: Record<string, string> = {};
+    if (scen === 'success' || scen === 'mismatch') {
+      verify.forEach((v) => {
+        cells[v.path] = v.actual;
       });
     }
-    const elapsedMs = 200 + Math.floor(pseudo(deviceIdx + 1) * 1800);
-    const faultCode = failed ? FAULT_CODES[deviceIdx % FAULT_CODES.length] : undefined;
+
     return {
       deviceSn: sn,
-      status: failed ? 'failed' : 'success',
+      deviceTaskId,
+      status,
       cells,
-      faultCode,
-      raw: failed
-        ? faultXml(faultCode as string, sn)
-        : read
-          ? gpvXml(columns, cells, sn)
-          : writeXml(operationType, sn),
+      unverifiedReason,
+      verify,
+      dispatchedAt,
+      respondedAt,
+      pathTasks: buildPathTasks(columns, sn, deviceIdx, status, cells),
+      raw: writeXml(operationType, sn),
       elapsedMs,
     };
   });
@@ -286,6 +413,7 @@ function seedRecord(id: string, time: string, cmd: CommandItem, deviceCount: num
   const read = isReadOp(cmd.operationType);
   return {
     id,
+    commandId: mockUuid(`cmd-${id}`),
     time,
     commandName: cmd.commandName,
     operationType: cmd.operationType,

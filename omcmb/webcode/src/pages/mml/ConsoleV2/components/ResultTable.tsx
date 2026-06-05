@@ -7,7 +7,6 @@ import {
   Input,
   Segmented,
   Space,
-  Statistic,
   Table,
   Tag,
   Tooltip,
@@ -20,8 +19,15 @@ import {
   DownOutlined,
   ProfileOutlined,
 } from '@ant-design/icons';
-import type { ExecMeta, ExecStatus, ExportFormat, ResultColumn, ResultRow } from '../types';
-import { STATUS_META } from '../constants';
+import type {
+  ExecMeta,
+  ExecStatus,
+  ExportFormat,
+  ResultColumn,
+  ResultRow,
+  UnverifiedReason,
+} from '../types';
+import { STATUS_META, UNVERIFIED_REASON_TEXT } from '../constants';
 import { exportAll, exportOne } from '../download';
 import ResultDetailModal from './ResultDetailModal';
 
@@ -29,17 +35,24 @@ const { Text } = Typography;
 
 interface ResultTableProps {
   execMeta: ExecMeta | null;
+  /** 当前记录的命令 ID（= mml_tasks.id，传给详情页展示/深链） */
+  commandId: string | null;
   columns: ResultColumn[];
   rows: ResultRow[];
   running: boolean;
   hasExecuted: boolean;
 }
 
-type StatusFilter = 'all' | 'failed';
+type StatusFilter = 'all' | 'problem';
 
-function StatusTag({ status }: { status: ExecStatus }) {
+/** 状态 Tag；unverified 悬浮显示原因（只写/重启生效/查询失败，设计 §3.11.2）。 */
+function StatusTag({ status, reason }: { status: ExecStatus; reason?: UnverifiedReason }) {
   const meta = STATUS_META[status];
-  return <Tag color={meta.color}>{meta.text}</Tag>;
+  const tag = <Tag color={meta.color}>{meta.text}</Tag>;
+  if (status === 'unverified' && reason) {
+    return <Tooltip title={UNVERIFIED_REASON_TEXT[reason]}>{tag}</Tooltip>;
+  }
+  return tag;
 }
 
 /**
@@ -49,6 +62,7 @@ function StatusTag({ status }: { status: ExecStatus }) {
  */
 export default function ResultTable({
   execMeta,
+  commandId,
   columns,
   rows,
   running,
@@ -61,15 +75,22 @@ export default function ResultTable({
   const stats = useMemo(() => {
     const total = rows.length;
     const success = rows.filter((r) => r.status === 'success').length;
+    const unverified = rows.filter((r) => r.status === 'unverified').length;
+    const mismatch = rows.filter((r) => r.status === 'mismatch').length;
     const failed = rows.filter((r) => r.status === 'failed').length;
     const elapsed = rows.reduce((m, r) => Math.max(m, r.elapsedMs), 0);
-    return { total, success, failed, elapsed };
+    // 「问题行」= RPC 失败 + 核实未生效（mismatch）
+    const problem = failed + mismatch;
+    return { total, success, unverified, mismatch, failed, problem, elapsed };
   }, [rows]);
+
+  // 写类（读后核实）才展示「未核实/未生效」统计；读类只有成功/失败。
+  const isWrite = execMeta ? !execMeta.read : false;
 
   const filteredRows = useMemo(() => {
     const kw = snKeyword.trim().toLowerCase();
     return rows.filter((r) => {
-      if (statusFilter === 'failed' && r.status !== 'failed') return false;
+      if (statusFilter === 'problem' && r.status !== 'failed' && r.status !== 'mismatch') return false;
       if (kw && !r.deviceSn.toLowerCase().includes(kw)) return false;
       return true;
     });
@@ -96,9 +117,9 @@ export default function ResultTable({
         title: '状态',
         dataIndex: 'status',
         key: 'status',
-        width: 90,
+        width: 120,
         fixed: 'left',
-        render: (s: ExecStatus) => <StatusTag status={s} />,
+        render: (s: ExecStatus, r) => <StatusTag status={s} reason={r.unverifiedReason} />,
       },
     ];
 
@@ -110,6 +131,18 @@ export default function ResultTable({
       render: (_v, r) => {
         const val = r.cells[c.path];
         if (r.status === 'failed') return <Text type="secondary">-</Text>;
+        // 未核实（只写/重启生效）：无读回值，灰显占位
+        if (r.status === 'unverified') {
+          return (
+            <Tooltip title="未核实，以读回为准时无值">
+              <Text type="secondary">—</Text>
+            </Tooltip>
+          );
+        }
+        // 未生效（写成功但读回不符）：读回值标红
+        if (r.status === 'mismatch') {
+          return val ? <Text type="danger">{val}</Text> : <Text type="secondary">-</Text>;
+        }
         if (val === '✓') return <Tag color="success">✓</Tag>;
         return val ?? <Text type="secondary">-</Text>;
       },
@@ -117,11 +150,22 @@ export default function ResultTable({
 
     const tail: ColumnsType<ResultRow> = [
       {
-        title: '故障码',
-        dataIndex: 'faultCode',
-        key: 'faultCode',
-        width: 150,
-        render: (v?: string) => (v ? <Text type="danger">{v}</Text> : <Text type="secondary">-</Text>),
+        title: '下发时间',
+        dataIndex: 'dispatchedAt',
+        key: 'dispatchedAt',
+        width: 104,
+        fixed: 'right',
+        render: (v?: string) =>
+          v ? <Text style={{ fontSize: 12 }}>{v}</Text> : <Text type="secondary">-</Text>,
+      },
+      {
+        title: '响应时间',
+        dataIndex: 'respondedAt',
+        key: 'respondedAt',
+        width: 104,
+        fixed: 'right',
+        render: (v?: string) =>
+          v ? <Text style={{ fontSize: 12 }}>{v}</Text> : <Text type="secondary">-</Text>,
       },
       {
         title: '操作',
@@ -161,7 +205,26 @@ export default function ResultTable({
 
   return (
     <Card
-      title="执行结果"
+      title={
+        // 「执行结果」标题 + 汇总统计同一行（设计 §3.11.1 修订，2026-06-05）
+        <Space size={20} wrap style={{ rowGap: 4 }}>
+          <span>执行结果</span>
+          {hasExecuted && (
+            <Space size={14} wrap style={{ fontWeight: 400, fontSize: 13 }}>
+              <span>
+                设备总数 <b>{stats.total}</b>
+              </span>
+              <span style={{ color: '#52c41a' }}>成功 {stats.success}</span>
+              {isWrite && <span style={{ color: '#faad14' }}>未核实 {stats.unverified}</span>}
+              {isWrite && <span style={{ color: '#ff4d4f' }}>未生效 {stats.mismatch}</span>}
+              <span style={{ color: '#ff4d4f' }}>失败 {stats.failed}</span>
+              <span style={{ color: '#8c8c8c' }}>
+                最长用时 {(stats.elapsed / 1000).toFixed(1)}s
+              </span>
+            </Space>
+          )}
+        </Space>
+      }
       variant="borderless"
       style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
       styles={{ body: { padding: 16, flex: 1, minHeight: 0, overflow: 'auto' } }}
@@ -181,24 +244,13 @@ export default function ResultTable({
         />
       ) : (
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
-          <Space size={32} wrap>
-            <Statistic title="设备总数" value={stats.total} />
-            <Statistic title="成功" value={stats.success} valueStyle={{ color: '#52c41a' }} />
-            <Statistic title="失败" value={stats.failed} valueStyle={{ color: '#ff4d4f' }} />
-            <Statistic
-              title="最长用时"
-              value={(stats.elapsed / 1000).toFixed(1)}
-              suffix="s"
-            />
-          </Space>
-
           <Space wrap style={{ justifyContent: 'space-between', width: '100%' }}>
             <Segmented<StatusFilter>
               value={statusFilter}
               onChange={(v) => setStatusFilter(v as StatusFilter)}
               options={[
                 { label: '全部', value: 'all' },
-                { label: `仅失败(${stats.failed})`, value: 'failed' },
+                { label: `仅异常(${stats.problem})`, value: 'problem' },
               ]}
             />
             <Input.Search
@@ -227,6 +279,7 @@ export default function ResultTable({
         open={!!viewingRow}
         row={viewingRow}
         execMeta={execMeta}
+        commandId={commandId}
         columns={columns}
         onClose={() => setViewingRow(null)}
       />

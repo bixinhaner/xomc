@@ -47,9 +47,9 @@ func (r *PgEnabledRepository) List(ctx context.Context, dt DeviceType, operatorC
 		ids = append(ids, id)
 	}
 	if err := rows.Err(); err != nil {
-				return nil, fmt.Errorf("iterating enabled indicator rows: %w", err)
-		}
-		return ids, nil
+		return nil, fmt.Errorf("iterating enabled indicator rows: %w", err)
+	}
+	return ids, nil
 }
 
 func (r *PgEnabledRepository) BatchCreate(ctx context.Context, dt DeviceType, operatorCode string, indicatorIDs []string, tx pgx.Tx) error {

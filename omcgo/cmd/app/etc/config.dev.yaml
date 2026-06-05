@@ -191,13 +191,9 @@ dict_loader:
     directory: "param-mappings"
     standard_model_file: "standard-model.xml"
     param_model_files: []        # 空 → Loader 扫除 standard-model.xml/products.xml/旧 routing 之外的 *.xml
-    # T-0178 自定义 XML 分层目录:custom_directory 是 host bind mount 持久化路径,
-    # 与 builtin 的 directory 物理隔离,Loader 启动期合并扫描。
-    # custom_overrides_builtin: 同名时 custom 是否压制 builtin(默认 true);
-    # 设 false 时 builtin 胜出。删 custom 自动回退 builtin 的 self-healing 仅在 true 时生效。
-    custom_directory: "param-mappings-custom"
-    custom_overrides_builtin: true
-    # T-0178 P2: 备份清理(worker 进程消费,app 进程不动 — 双向写入两份 yaml 与代码契约对齐)
+    # 三库 XML 导入重构(2026-06-04):取消 builtin/custom 双目录,所有 XML 同住 directory,
+    # 来源由同目录 sidecar(X.xml.custom)判定。custom_directory / custom_overrides_builtin 已废弃。
+    # 备份清理(worker 进程消费):扫 directory 下 .deleted/.bak/.tmp + 孤儿 sidecar
     backup_retention_days: 30
     backup_cleanup_cron: "0 3 * * *"
   indicator:

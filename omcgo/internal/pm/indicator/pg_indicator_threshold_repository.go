@@ -50,9 +50,9 @@ func (r *PgIndicatorThresholdRepository) ListByIndicatorID(ctx context.Context, 
 		items = append(items, t)
 	}
 	if err := rows.Err(); err != nil {
-				return nil, fmt.Errorf("iterating threshold rows: %w", err)
-		}
-		return items, nil
+		return nil, fmt.Errorf("iterating threshold rows: %w", err)
+	}
+	return items, nil
 }
 
 func (r *PgIndicatorThresholdRepository) ExistsByIndicatorID(ctx context.Context, indicatorID string) (bool, error) {

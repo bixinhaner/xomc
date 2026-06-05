@@ -1,6 +1,7 @@
 package parammodel
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -167,16 +168,65 @@ func TestToModelView_SourceAndDeletable(t *testing.T) {
 	}
 }
 
-// TestCustomDirSubdir_PrefixConsistency 验证 source.go 的常量与 *Prefix 一致。
-// 防御性测试:改 CustomDirSubdir 时 *DirPrefix 必须同步改,否则 Loader 写 loaded_from
-// 的前缀就与 ClassifySource 的判定脱节,Self-healing 链路全断。
-func TestCustomDirSubdir_PrefixConsistency(t *testing.T) {
-	if CustomDirPrefix != CustomDirSubdir+"/" {
-		t.Errorf("CustomDirPrefix %q must be CustomDirSubdir %q + '/'",
-			CustomDirPrefix, CustomDirSubdir)
+// TestValidateUploadFilename_NamePath 验证 name 上传路径(目标 = <name>.xml)
+// 复用同一个 validateUploadFilename 守门(三库 XML 导入重构)。
+func TestValidateUploadFilename_NamePath(t *testing.T) {
+	cases := []struct {
+		name    string
+		input   string // 用户提交的 name(不含扩展名)
+		wantErr bool
+	}{
+		{"basic name", "CBQQ", false},
+		{"underscore", "my_model", false},
+		{"hyphen", "my-model", false},
+		{"empty name", "", true},
+		{"slash in name", "dir/CBQQ", true},
+		{"traversal", "../CBQQ", true},
+		{"reserved products", "products", true},
+		{"chinese", "中文", true},
+		{"too long", strings.Repeat("A", 65), true},
+		{"max ok", strings.Repeat("A", 64), false},
 	}
-	if BuiltinDirPrefix != BuiltinDirSubdir+"/" {
-		t.Errorf("BuiltinDirPrefix %q must be BuiltinDirSubdir %q + '/'",
-			BuiltinDirPrefix, BuiltinDirSubdir)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateUploadFilename(tc.input + ".xml")
+			if (err != nil) != tc.wantErr {
+				t.Errorf("validateUploadFilename(%q+.xml) err=%v, wantErr=%v",
+					tc.input, err, tc.wantErr)
+			}
+		})
+	}
+}
+
+// TestSidecarWriteAndDelete 验证上传写 sidecar / 删除移除 sidecar 的物理契约
+// (用 temp dir,不依赖 DB / HTTP)。
+func TestSidecarWriteAndDelete(t *testing.T) {
+	dir := t.TempDir()
+	xmlPath := filepath.Join(dir, "MyModel.xml")
+	sidecar := xmlPath + CustomMarkerSuffix
+
+	// 写 XML + sidecar(模拟 UploadXML 落地)
+	if err := os.WriteFile(xmlPath, []byte("<parameterModel name=\"MyModel\"/>"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sidecar, nil, 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	// sidecar 存在 → IsCustom / IsDeletable 为 true
+	loadedFrom := resolveLoadedFrom(dir, xmlPath)
+	if !IsCustom(dir, loadedFrom) {
+		t.Fatalf("IsCustom = false after sidecar write, want true")
+	}
+	if !IsDeletable(dir, loadedFrom) {
+		t.Fatalf("IsDeletable = false after sidecar write, want true")
+	}
+
+	// 移除 sidecar(模拟 DeleteModel)→ IsCustom 变 false
+	if err := os.Remove(sidecar); err != nil {
+		t.Fatal(err)
+	}
+	if IsCustom(dir, loadedFrom) {
+		t.Errorf("IsCustom = true after sidecar removed, want false")
 	}
 }

@@ -361,13 +361,14 @@ ratelimit:inform:{device_serial}     — 限流计数器
 
 #### 5.3.1 ParamModel 自定义 XML 分层目录（T-0178）
 
-> **⚠️ 2026-06-03 已变更（用户决策，下方历史描述部分作废）**：
-> 「导入 XML / 重载 XML / 刷新缓存」三功能合并为单个 **「导入 XML」**。
-> - 取消 builtin/custom 目录区分：上传**直接写 builtin 目录** `param-mappings/`（**接受升级丢失**，不再写 `*-custom`）；同名直接覆盖（前端上传前查重 + 覆盖确认，旧文件备份 `.bak.<ts>`）。
-> - 上传端点内部串联 **destructive 重载（删孤儿）+ 刷新缓存**；前端不再单独调用。
-> - 删除 HTTP 端点 `POST /param-models/import-directory`、`POST /param-models/cache/refresh`（底层 reload/cache 逻辑保留，供上传流程内部调用）。
-> - `source.go::IsDeletable` 恒 true（全部可删），前端去掉「来源」列、删除按钮恒可点。
-> 下面 T-0178 关于 custom 分层目录、`IsDeletable` 守门、来源列的描述均为历史背景，**以本注记为准**。
+> **⚠️ 2026-06-04 已定稿（三库导入XML重构，反转 2026-06-03 注记，以本注记为准）**：
+> 模型 = **单目录 + sidecar + 名称唯一 + 双重唯一硬拒 + data 外置 + 升级反向合并**。
+> - **单目录**（取消 `*-custom` 后缀目录）：builtin 与 custom 同住 `param-mappings/`；来源判定靠 **sidecar 标记** `X.xml.custom`（空文件，随文件走，扛过升级合并 + DB 重建）。`source.go::IsCustom/IsDeletable(baseDir, loadedFrom)` 读 sidecar；仅 custom 可删，builtin/unknown → 403。
+> - **上传 = `name` 必填 + 双重唯一硬拒（无 force/覆盖）**：① 文件名 `<name>.xml` 同目录唯一；② 内容主键 `param_models.name` 唯一（解析 `<parameterModel name>` 比对 DB）；命中任一 → 409「请改名」。落盘 `<name>.xml` + 写 sidecar；DELETE 连带删 sidecar。上传端点内仍串联 destructive 重载 + 刷新缓存。
+> - **data 外置（Phase 2，D1/D2）**：整个 `data/` 不进镜像（Dockerfile 去 `COPY data`），bind-mount 进 app/worker（dev 挂源码树；prod 挂 `/opt/omc/data`，deploy.sh 首次播种 + 升级「现网赢、新版补充」`cp -an` 反向合并 + 快照回滚）。
+> - loader 单目录扫描（跳过 `*.custom`）；backup_cleanup 单目录 + 清孤儿 sidecar。
+> 下面 T-0178 关于 custom 分层双目录、dir-prefix 来源判定、force 覆盖的描述均为历史背景，**以本注记为准**。
+> 端到端：Slice A `feat(parammodel) 11886b61`（上传重构）+ `420b08f0`/`110c9bb2`（sidecar 来源判定 + 守门）。
 
 **核心契约**：builtin XML 与 custom XML **物理隔离**两个目录,Loader 启动期合并扫描;后端唯一真值源 + 前端零代码同步规则改动。
 
@@ -422,8 +423,11 @@ Loader.loadParamModelFile
 
 #### 5.3.2 Indicator 自定义 XML 分层目录（T-0180）
 
-> **⚠️ 2026-06-03 已变更（用户决策，下方历史描述部分作废）**：同 5.3.1。
-> 「导入/重载/刷新缓存」合并为单个 **「导入 XML」**；上传**直接写 builtin** `indicator-library/`（ENB→`enb/<name>.xml`，GSM/GNB→根级 `GSM.xml`/`GNB.xml`，**接受升级丢失**）；上传端点内串联 **destructive 重载（`PerformReloadWithOrphans` 删孤儿）+ BumpCacheVersion**；删除 `POST /indicators/import-directory`、`POST /indicators/cache/refresh`；`IsDeletable` 恒 true，前端去「来源」列、全可删。以本注记为准。
+> **⚠️ 2026-06-04 已定稿（三库导入XML重构 Slice B `feat(pm) 54e6c227`，以本注记为准）**：同 5.3.1 单目录+sidecar 范式，indicator 专项差异：
+> - **单目录树** `indicator-library/`：loader 扫 `enb/`、`gsm/`、`gnb/` 三子目录 + 根级 builtin `GSM.xml`/`GNB.xml`，跳过 `*.custom`；取消 `indicator-library-custom` 双目录与 CustomOverrides 合并。
+> - 上传 = `name` 必填 + `?tech=` + 双重唯一硬拒（无 force）：文件名 `<name>.xml` 在该 tech 子目录唯一 + 内容主键 `platform`（`rela_platform_indicator_formula_<tech>`，repo `PlatformExists`，按 tech 分表判重）唯一；命中 → 409。**GSM/GNB 自定义上传改落 `indicator-library/{gsm,gnb}/<name>.xml` 子目录，不再覆盖根级出厂单文件**。写 sidecar；DELETE 连带删 sidecar。
+> - source.go 用 sidecar 判来源/可删；backup_cleanup 单目录树 + 清孤儿 sidecar；data 外置同 5.3.1（Phase 2）。
+> 下面 T-0180 关于 custom 三制式分层双目录、dir-prefix、force 的描述均为历史背景。
 
 **核心契约**:builtin XML 与 custom XML 物理隔离两套目录,Loader 启动期合并扫描;后端唯一真值源 + 前端零代码同步。结构与 T-0178 ParamModel 同范式,**关键差异**:custom 侧三制式子目录化(`enb/gsm/gnb/`)而非扁平。
 
@@ -510,8 +514,11 @@ Loader.parseDocs
 
 #### 5.3.3 Alarm 自定义 XML 分层目录（严格对标 T-0180 indicator）
 
-> **⚠️ 2026-06-03 已变更（用户决策，下方历史描述部分作废）**：同 5.3.1。
-> 「导入/重载/刷新缓存」合并为单个 **「导入 XML」**；上传**直接写 builtin** `alarm-definitions/<name>.xml`（**接受升级丢失**）；上传端点内串联 **destructive 重载（删孤儿 `DeleteOrphansSince`）+ RefreshCache**；删除 `POST /alarm-definitions/import-directory`、`POST /alarm-definitions/cache/refresh`；`IsDeletable` 恒 true，前端去「来源」列、全可删。以本注记为准。
+> **⚠️ 2026-06-04 已定稿（三库导入XML重构 Slice C `feat(alarm) 3fcc1292`，以本注记为准）**：同 5.3.1 单目录+sidecar 范式，alarm 专项差异：
+> - **单目录** `alarm-definitions/`（扁平）：loader `resolveSources` 只扫该目录、跳过 `*.custom`；取消 `alarm-definitions-custom` 双目录与 CustomOverrides 合并。
+> - 上传 = `name` 必填 + 双重唯一硬拒（无 force）：文件名 `<name>.xml` 唯一 + 内容主键 `neType`（取自 `<alarmModel neType>`，缺省回退文件名大写，与 `Loader.loadAlarmFile` 同口径；repo `NeTypeExists`）唯一；命中 → 409。写 sidecar；DELETE 连带删 sidecar。
+> - source.go 用 sidecar 判来源/可删；backup_cleanup 扁平单目录 + 清孤儿 sidecar；data 外置同 5.3.1（Phase 2）。`appconfig` 三库 Custom* 字段全下线（含删除三态契约测试）。
+> 下面关于 custom 扁平双目录、dir-prefix、force 的描述均为历史背景。
 
 **核心契约**:builtin XML 与 custom XML 物理隔离两套目录,Loader 启动期合并扫描;后端唯一真值源 + 前端零代码同步。与 T-0180 indicator 同范式,**关键差异**:告警按 ne_type 组织、custom 目录**扁平**(无 enb/gsm/gnb 子目录);"自定义"对应用户上传的 XML 文件。
 

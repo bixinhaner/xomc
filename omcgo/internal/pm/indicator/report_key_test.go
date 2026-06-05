@@ -62,8 +62,8 @@ func TestIndicatorRowValues_ReportKeyAndEnNameSeparateSlots(t *testing.T) {
 	rec := indicatorRecord{
 		Ind: xmlIndicator{
 			ID:        "K000010001",
-			EnName:    "L.E-RAB.SuccEst.Ratio",      // 展示名
-			ReportKey: "L.E-RAB.SuccEst.Ratio.RAW",  // 上报名,刻意与 enName 不同
+			EnName:    "L.E-RAB.SuccEst.Ratio",     // 展示名
+			ReportKey: "L.E-RAB.SuccEst.Ratio.RAW", // 上报名,刻意与 enName 不同
 		},
 		LoadedFrom: "indicator-library/enb/ALL.xml",
 	}

@@ -15,19 +15,17 @@ import (
 
 // AlarmDefinition 对应 alarm_definitions 表（设计 §3.2.2）。
 type AlarmDefinition struct {
-	ID                uuid.UUID
-	Identifier        string
-	NeType            string
-	CnName            string
-	EnName            string
-	SeverityID        uuid.UUID
-	EventType         *int
-	CnProbableCause   string
-	EnProbableCause   string
-	CnSuggestion      string
-	EnSuggestion      string
-	IsShow            bool
-	Description        string // 用户可编辑的描述/备注（不来自 XML）
+	ID              uuid.UUID
+	Identifier      string
+	NeType          string
+	CnName          string
+	EnName          string
+	SeverityID      uuid.UUID
+	EventType       *int
+	CnProbableCause string
+	EnProbableCause string
+	IsShow          bool
+	Description     string // 用户可编辑的描述/备注（不来自 XML）
 }
 
 // SeverityLevel 对应 alarm_severity_levels 表（设计 §3.2.1，4 行种子由 P1-04 写入）。
@@ -58,7 +56,5 @@ type xmlAlarm struct {
 	EventType       string `xml:"eventType,attr"`
 	CnProbableCause string `xml:"cnProbableCause,attr"`
 	EnProbableCause string `xml:"enProbableCause,attr"`
-	CnSuggestion    string `xml:"cnSuggestion,attr"`
-	EnSuggestion    string `xml:"enSuggestion,attr"`
 	IsShow          string `xml:"isShow,attr"` // "Y" / "N"
 }

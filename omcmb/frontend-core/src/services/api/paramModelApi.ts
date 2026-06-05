@@ -314,26 +314,27 @@ export const paramModelApi = {
     return data;
   },
 
-  // T-0178: 上传自定义 paramModel XML(multipart/form-data, field name "file")。
-  // 2026-06-03:后端上传端点内部已自动 destructive 重载(删孤儿)+ 刷新缓存,
-  // 旧的 cacheRefresh / reloadDirectory(import-directory / cache/refresh 端点)已下线。
-  // force=true 时同名覆盖,旧版本自动备份为 .bak.<ts>;false(默认)同名返 409。
-  // 后端校验:文件名白名单 + 大小 ≤ 1MiB + XML 根元素 = paramModel + 路径包含。
+  // 上传自定义 paramModel XML(multipart/form-data)。
+  // 三库 XML 导入重构(2026-06-04 D3/D5/D6):
+  //   - 表单字段 name(用户指定的唯一名称,不含扩展名)+ file(XML 内容);
+  //     目标文件名 = <name>.xml,上传文件自身的 filename 被忽略。
+  //   - 双唯一性硬拒,无 force:文件名已存在 或 XML 模型名已在 DB → 409。
+  //   - 后端上传端点内部自动 destructive 重载(删孤儿)+ 刷新缓存 + 写 sidecar 标记。
+  //   - 后端校验:name 白名单 + 大小 ≤ 1MiB + XML 根元素 = parameterModel + 路径包含。
   async uploadXML(
     file: File,
-    force = false,
-  ): Promise<{ filename: string; size: number; overwrite: boolean; backup?: string }> {
+    name: string,
+  ): Promise<{ filename: string; modelName: string; size: number }> {
     const fd = new FormData();
+    fd.append('name', name);
     fd.append('file', file);
-    const url = force ? '/param-models/upload-xml?force=true' : '/param-models/upload-xml';
     const { data } = await http.post<{
       filename: string;
+      model_name: string;
       size: number;
-      overwrite: boolean;
-      backup?: string;
-    }>(url, fd, {
+    }>('/param-models/upload-xml', fd, {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
-    return data;
+    return { filename: data.filename, modelName: data.model_name, size: data.size };
   },
 };

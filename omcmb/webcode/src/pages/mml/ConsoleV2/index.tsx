@@ -13,6 +13,14 @@ import { useConsoleHistory } from './useConsoleHistory';
 
 let recordSeq = 1;
 
+/** 每次批量执行的全局唯一命令 ID（mock 用 crypto.randomUUID；真实由后端 mml_tasks.id 返回）。 */
+function makeCommandId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `cmd-${recordSeq}-${Date.now()}`;
+}
+
 /**
  * MML 控制台 V2（设计 docs/design/mml-console-redesign-20260603.md，含 §3.10 二轮完善）。
  *
@@ -30,7 +38,7 @@ export default function MMLConsoleV2() {
   const [configTouched, setConfigTouched] = useState(false);
 
   // 命令记录数据层（方案 A：当前 mock 种子+会话追加，后续切 /mml/tasks，详见 useConsoleHistory）。
-  const { records, activeId, activeRecord, select, append } = useConsoleHistory();
+  const { records, activeId, activeRecord, select, append, clear } = useConsoleHistory();
   const [running, setRunning] = useState(false);
   const [historyCollapsed, setHistoryCollapsed] = useState(true); // 默认收缩(§3.10.4)
 
@@ -82,6 +90,7 @@ export default function MMLConsoleV2() {
       const rows = buildResultRows(nextColumns, selectedSns, meta.read, meta.operationType);
       const rec: ExecRecord = {
         id: `rec-${recordSeq++}`,
+        commandId: makeCommandId(),
         time: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
         commandName: meta.commandName ?? `裸路径 ${opLabel(meta.operationType)}`,
         operationType: meta.operationType,
@@ -123,6 +132,7 @@ export default function MMLConsoleV2() {
             activeId={activeId}
             collapsed
             onSelect={select}
+            onClear={clear}
             onToggleCollapsed={() => setHistoryCollapsed(false)}
           />
         ) : (
@@ -132,6 +142,7 @@ export default function MMLConsoleV2() {
               activeId={activeId}
               collapsed={false}
               onSelect={select}
+              onClear={clear}
               onToggleCollapsed={() => setHistoryCollapsed(true)}
             />
           </div>
@@ -140,6 +151,7 @@ export default function MMLConsoleV2() {
         <div style={{ flex: 1, minWidth: 0 }}>
           <ResultTable
             execMeta={activeRecord?.execMeta ?? null}
+            commandId={activeRecord?.commandId ?? null}
             columns={activeRecord?.columns ?? []}
             rows={activeRecord?.rows ?? []}
             running={running}
