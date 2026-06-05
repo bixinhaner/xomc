@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/internal/alarm/definition"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/pkg/tr069"
@@ -75,6 +76,29 @@ func makeRcvEvent(t *testing.T, payload interface{}) event.Event {
 		Payload:   data,
 		Timestamp: time.Now(),
 	}
+}
+
+type stubAlarmDefRepo struct {
+	defs []definition.ResolvedDefinition
+	err  error
+}
+
+func (r *stubAlarmDefRepo) ListAll(context.Context) ([]definition.ResolvedDefinition, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	return r.defs, nil
+}
+
+func (r *stubAlarmDefRepo) ListSeverityLevels(context.Context) ([]definition.SeverityLevel, error) {
+	return nil, nil
+}
+
+func newTestAlarmDefRegistry(t *testing.T, defs ...definition.ResolvedDefinition) *definition.Registry {
+	t.Helper()
+	registry := definition.NewRegistry(&stubAlarmDefRepo{defs: defs}, nil, zap.NewNop())
+	require.NoError(t, registry.Refresh(context.Background()))
+	return registry
 }
 
 // ---------------------------------------------------------------------------
@@ -251,6 +275,57 @@ func TestHandleAlarmEvent_GenericInformPayloadAlarmInfo(t *testing.T) {
 		assert.Equal(t, model.AlarmMinor, alarm.Severity)
 		require.NotNil(t, alarm.Technology)
 		assert.Equal(t, string(model.TechNR), *alarm.Technology)
+	}
+}
+
+func TestHandleAlarmEvent_GenericInformPayload_OverridesSeverityFromDefinition(t *testing.T) {
+	store := newMockAlarmStore()
+	engine := newTestEngine(store)
+	deviceID := uuid.New()
+	deviceSN := "1202000534228JB0008"
+	registry := newTestAlarmDefRegistry(t, definition.ResolvedDefinition{
+		AlarmDefinition: definition.AlarmDefinition{Identifier: "50003"},
+		SeverityCode:    31001,
+		SeverityName:    "Critical",
+	})
+	receiver := NewAlarmReceiver(engine, nil, zap.NewNop()).
+		WithDeviceReader(&rcvMockDeviceReader{
+			deviceBySN: map[string]*model.Device{
+				deviceSN: {
+					ID:           deviceID,
+					SerialNumber: deviceSN,
+					Carrier:      model.CarrierCMCC,
+					Technology:   model.TechNR,
+					ProductClass: "GNB",
+					DeviceName:   "gNB-8",
+				},
+			},
+		}).
+		WithAlarmDefRegistry(registry, nil)
+
+	payload := informAlarmEventPayload{
+		DeviceID: tr069.DeviceId{
+			ProductClass: "GNB",
+			SerialNumber: deviceSN,
+		},
+		Events:      []string{"101 ALARM"},
+		CurrentTime: time.Date(2026, 6, 5, 9, 0, 0, 0, time.UTC),
+		ParameterList: []tr069.ParameterValueStruct{
+			{Name: "Device.Services.FAPService.1.FAPControl.LTE.AlarmInfo.1.NotificationType", Value: NotificationNewAlarm},
+			{Name: "Device.Services.FAPService.1.FAPControl.LTE.AlarmInfo.1.AlarmIdentifier", Value: "50003"},
+			{Name: "Device.Services.FAPService.1.FAPControl.LTE.AlarmInfo.1.PerceivedSeverity", Value: "Minor"},
+			{Name: "Device.Services.FAPService.1.FAPControl.LTE.AlarmInfo.1.EventType", Value: "equipment"},
+			{Name: "Device.Services.FAPService.1.FAPControl.LTE.AlarmInfo.1.SpecificProblem", Value: "时间同步失败告警"},
+			{Name: "Device.Services.FAPService.1.FAPControl.LTE.AlarmInfo.1.EventTime", Value: "2026-06-05T09:00:00Z"},
+		},
+	}
+
+	err := receiver.handleAlarmEvent(context.Background(), makeRcvEvent(t, payload))
+	require.NoError(t, err)
+
+	require.Len(t, store.active, 1)
+	for _, alarm := range store.active {
+		assert.Equal(t, model.AlarmSeverity(31001), alarm.Severity)
 	}
 }
 

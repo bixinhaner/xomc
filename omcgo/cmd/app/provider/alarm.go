@@ -31,6 +31,9 @@ func initAlarmModule(c *Container) error {
 	// 告警同步处理器
 	alarmDeviceRepo := device.NewPgDeviceRepository(c.PgPool)
 	alarmSyncProcessor := alarm.NewAlarmSyncProcessor(alarmEngine, alarmPgStore, alarmSyncService, c.EventBus, logger).WithDeviceReader(alarmDeviceRepo)
+	if c.AlarmDefRegistry != nil {
+		alarmSyncProcessor = alarmSyncProcessor.WithAlarmDefRegistry(c.AlarmDefRegistry)
+	}
 	if err := alarmSyncProcessor.Start(context.Background()); err != nil {
 		logger.Warn("start alarm sync processor", zap.NamedError("err", err))
 	}
@@ -63,6 +66,7 @@ func initAlarmModule(c *Container) error {
 	// Set shared services
 	c.AlarmPgStore = alarmPgStore
 	c.AlarmEngine = alarmEngine
+	c.AlarmSyncProcessor = alarmSyncProcessor
 
 	// Register module-level health check
 	c.Health.Register("alarm", func(ctx context.Context) error {

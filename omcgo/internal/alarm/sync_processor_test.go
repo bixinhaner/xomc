@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/internal/alarm/definition"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/pkg/tr069"
 	"github.com/stretchr/testify/assert"
@@ -133,4 +134,44 @@ func TestProcessSync_AddsDistinctAlarmsForSameIdentifierWithDifferentAdditionalI
 	}
 	assert.True(t, seen["cell=1"])
 	assert.True(t, seen["cell=2"])
+}
+
+func TestProcessSync_OverridesSeverityFromDefinitionRegistry(t *testing.T) {
+	store := newMockAlarmStore()
+	engine := newTestEngine(store)
+	deviceID := uuid.New()
+	registry := newTestAlarmDefRegistry(t, definition.ResolvedDefinition{
+		AlarmDefinition: definition.AlarmDefinition{Identifier: "70011"},
+		SeverityCode:    31004,
+		SeverityName:    "Warning",
+	})
+	processor := NewAlarmSyncProcessor(engine, store, nil, nil, zap.NewNop()).
+		WithDeviceReader(&rcvMockDeviceReader{
+			deviceBySN: map[string]*model.Device{
+				"SN-SYNC-DEF": {
+					ID:           deviceID,
+					SerialNumber: "SN-SYNC-DEF",
+					Carrier:      model.CarrierCode("cmcc"),
+					Technology:   model.TechLTE,
+				},
+			},
+		}).
+		WithAlarmDefRegistry(registry)
+
+	params := []tr069.ParameterValueStruct{
+		{Name: "Device.FaultMgmt.CurrentAlarm.1.AlarmIdentifier", Value: "70011"},
+		{Name: "Device.FaultMgmt.CurrentAlarm.1.AlarmRaisedTime", Value: "2026-06-05T09:01:00Z"},
+		{Name: "Device.FaultMgmt.CurrentAlarm.1.EventType", Value: "Equipment Alarm"},
+		{Name: "Device.FaultMgmt.CurrentAlarm.1.ProbableCause", Value: "RU RF shutdown for cell"},
+		{Name: "Device.FaultMgmt.CurrentAlarm.1.SpecificProblem", Value: "RU RF shutdown for cell"},
+		{Name: "Device.FaultMgmt.CurrentAlarm.1.PerceivedSeverity", Value: "Critical"},
+	}
+
+	result := processor.processSync(context.Background(), "SN-SYNC-DEF", params)
+	require.Equal(t, 1, result.Added)
+
+	alarm, err := store.GetActiveByDeviceAndIdentifier(context.Background(), "SN-SYNC-DEF", "70011")
+	require.NoError(t, err)
+	require.NotNil(t, alarm)
+	assert.Equal(t, model.AlarmSeverity(31004), alarm.Severity)
 }

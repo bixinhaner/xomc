@@ -100,11 +100,12 @@ func (r *AlarmReceiver) WithDeviceReader(reader deviceReader) *AlarmReceiver {
 	return r
 }
 
-// WithAlarmDefRegistry 启用 T-0098 P2-10 fallback 决策（设计 §3.5）。
+// WithAlarmDefRegistry 注入告警定义 registry。
 //
-// alarmDefReg / productResolver 任一为 nil → 等价于不调用本方法。
+// alarmDefReg 为 nil → 等价于不调用本方法。
+// productResolver 可为 nil：此时仅启用已知告警的 severity 覆盖，不启用 unknown fallback。
 func (r *AlarmReceiver) WithAlarmDefRegistry(alarmDefReg *definition.Registry, productResolver definition.ProductResolver) *AlarmReceiver {
-	if alarmDefReg == nil || productResolver == nil {
+	if alarmDefReg == nil {
 		return r
 	}
 	r.alarmDefRegistry = alarmDefReg
@@ -204,6 +205,11 @@ func (r *AlarmReceiver) processAlarmPayload(ctx context.Context, payload AlarmPa
 	r.backfillDeviceFields(ctx, alarm)
 
 	if notificationType == NotificationChangedAlarm {
+		if err := applyAlarmDefinitionSeverity(ctx, r.alarmDefRegistry, alarm); err != nil {
+			r.logger.Warn("resolve alarm definition severity failed (proceed with source severity)",
+				zap.Error(err),
+				zap.String("alarm_identifier", payload.AlarmIdentifier))
+		}
 		if err := r.engine.UpdateByEvent(ctx, alarm); err != nil {
 			r.logger.Error("update alarm",
 				zap.Error(err),
@@ -538,6 +544,23 @@ func (r *AlarmReceiver) dropUnknown(alarm *model.Alarm, reason string) {
 	)
 }
 
+func applyAlarmDefinitionSeverity(ctx context.Context, alarmDefRegistry *definition.Registry, alarm *model.Alarm) error {
+	if alarmDefRegistry == nil || alarm == nil || alarm.AlarmIdentifier == "" {
+		return nil
+	}
+	rd, err := alarmDefRegistry.Lookup(ctx, alarm.AlarmIdentifier)
+	if err == nil {
+		if rd.SeverityCode != 0 {
+			alarm.Severity = model.AlarmSeverity(rd.SeverityCode)
+		}
+		return nil
+	}
+	if errors.Is(err, definition.ErrUnknownIdentifier) {
+		return nil
+	}
+	return err
+}
+
 func applyUnknownAlarmFallback(
 	ctx context.Context,
 	alarmDefRegistry *definition.Registry,
@@ -547,16 +570,22 @@ func applyUnknownAlarmFallback(
 	alarm *model.Alarm,
 	productClass string,
 ) (bool, error) {
-	if alarmDefRegistry == nil || productResolver == nil {
+	if alarmDefRegistry == nil {
 		return false, nil
 	}
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	if _, err := alarmDefRegistry.Lookup(ctx, alarm.AlarmIdentifier); err == nil {
+	if rd, err := alarmDefRegistry.Lookup(ctx, alarm.AlarmIdentifier); err == nil {
+		if rd.SeverityCode != 0 {
+			alarm.Severity = model.AlarmSeverity(rd.SeverityCode)
+		}
 		return false, nil
 	} else if !errors.Is(err, definition.ErrUnknownIdentifier) {
 		return false, err
+	}
+	if productResolver == nil {
+		return false, nil
 	}
 
 	if productClass == "" {

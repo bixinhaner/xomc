@@ -130,6 +130,7 @@ type Container struct {
 	// AlarmModule 设置
 	AlarmPgStore             *alarm.PgAlarmStore
 	AlarmEngine              *alarm.AlarmEngine
+	AlarmSyncProcessor       *alarm.AlarmSyncProcessor
 	AlarmHistoryRetentionSvc *alarm.HistoryRetentionService
 
 	// PMModule 设置

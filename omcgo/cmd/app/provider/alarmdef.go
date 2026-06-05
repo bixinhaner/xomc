@@ -56,6 +56,9 @@ func initAlarmDefModule(c *Container) error {
 	}
 
 	c.AlarmDefRegistry = registry
+	if c.AlarmSyncProcessor != nil {
+		c.AlarmSyncProcessor.WithAlarmDefRegistry(registry)
+	}
 	c.AlarmDefHandler = handler
 	c.AlarmDefFileHandler = fileHandler
 	logger.Info("alarm-definition module initialized")// 暴露行数到 startup log，便于排障

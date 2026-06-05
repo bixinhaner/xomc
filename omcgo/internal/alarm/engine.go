@@ -59,10 +59,45 @@ func severityLabel(s model.AlarmSeverity) string {
 	return strconv.Itoa(int(s))
 }
 
-func applyIncomingAlarmState(target *model.Alarm, incoming *model.Alarm) {
-	target.RaisedAt = incoming.RaisedAt
+func resolveAlarmBusinessTime(alarm *model.Alarm, fallback time.Time) time.Time {
+	if alarm == nil {
+		return fallback
+	}
+	if !alarm.LastUpdatedAt.IsZero() {
+		return alarm.LastUpdatedAt
+	}
+	if !alarm.RaisedAt.IsZero() {
+		return alarm.RaisedAt
+	}
+	return fallback
+}
+
+func normalizeAlarmOccurrenceFields(alarm *model.Alarm, fallback time.Time) {
+	if alarm.RaisedAt.IsZero() {
+		alarm.RaisedAt = fallback
+	}
+	if alarm.AckCount <= 0 {
+		alarm.AckCount = 1
+	}
+	if alarm.FirstRaisedAt.IsZero() {
+		alarm.FirstRaisedAt = alarm.RaisedAt
+	}
+	if alarm.LastUpdatedAt.IsZero() {
+		alarm.LastUpdatedAt = resolveAlarmBusinessTime(alarm, fallback)
+	}
+}
+
+func applyIncomingAlarmState(target *model.Alarm, incoming *model.Alarm, fallback time.Time) {
+	if target.FirstRaisedAt.IsZero() && !target.RaisedAt.IsZero() {
+		target.FirstRaisedAt = target.RaisedAt
+	}
+	if !incoming.RaisedAt.IsZero() {
+		target.RaisedAt = incoming.RaisedAt
+	}
 	target.Severity = incoming.Severity
 	target.Description = incoming.Description
+	target.AckCount = max(target.AckCount, 1) + 1
+	target.LastUpdatedAt = resolveAlarmBusinessTime(incoming, fallback)
 	if incoming.Status != "" {
 		target.Status = incoming.Status
 		target.AcknowledgedAt = incoming.AcknowledgedAt
@@ -134,7 +169,7 @@ func (e *AlarmEngine) Process(ctx context.Context, alarm *model.Alarm) error {
 				if parseErr == nil {
 					existing, getErr := e.store.GetActiveByID(ctx, existingID)
 					if getErr == nil {
-						applyIncomingAlarmState(existing, alarm)
+						applyIncomingAlarmState(existing, alarm, time.Now())
 					if updateErr := e.store.UpdateActive(ctx, existing); updateErr != nil {
 						return fmt.Errorf("update existing alarm: %w", updateErr)
 					}
@@ -151,7 +186,7 @@ func (e *AlarmEngine) Process(ctx context.Context, alarm *model.Alarm) error {
 	// 3. Also check DB in case Redis missed it
 	existing, err := loadMatchingActiveAlarm(ctx, e.store, alarm)
 	if err == nil && existing != nil {
-		applyIncomingAlarmState(existing, alarm)
+		applyIncomingAlarmState(existing, alarm, time.Now())
 		if updateErr := e.store.UpdateActive(ctx, existing); updateErr != nil {
 			return fmt.Errorf("update existing alarm: %w", updateErr)
 		}
@@ -169,6 +204,7 @@ func (e *AlarmEngine) Process(ctx context.Context, alarm *model.Alarm) error {
 	if alarm.Status == "" {
 		alarm.Status = model.AlarmActive
 	}
+	normalizeAlarmOccurrenceFields(alarm, now)
 	alarm.CreatedAt = now
 	alarm.UpdatedAt = now
 
@@ -392,7 +428,7 @@ func (e *AlarmEngine) archiveAutoClearedAlarm(ctx context.Context, alarm *model.
 // UpdateFromSync updates an existing alarm's attributes during sync without publishing events.
 // Used by the sync processor when remote alarm properties have changed.
 func (e *AlarmEngine) UpdateFromSync(ctx context.Context, alarm *model.Alarm) error {
-	alarm.LastUpdatedAt = time.Now()
+	alarm.LastUpdatedAt = resolveAlarmBusinessTime(alarm, time.Now())
 	if err := e.store.UpdateActive(ctx, alarm); err != nil {
 		return fmt.Errorf("sync update alarm: %w", err)
 	}
@@ -454,7 +490,7 @@ func (e *AlarmEngine) UpdateByEvent(ctx context.Context, alarm *model.Alarm) err
 	existing.Description = alarm.Description
 	existing.EventType = alarm.EventType
 	existing.ProbableCause = alarm.ProbableCause
-	existing.LastUpdatedAt = time.Now()
+	existing.LastUpdatedAt = resolveAlarmBusinessTime(alarm, time.Now())
 	if alarm.AdditionalInfo != nil {
 		if existing.AdditionalInfo == nil {
 			existing.AdditionalInfo = make(map[string]string)

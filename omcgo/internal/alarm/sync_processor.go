@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/internal/alarm/definition"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/pkg/tr069"
@@ -21,6 +22,7 @@ type AlarmSyncProcessor struct {
 	syncService  *AlarmSyncService
 	eventBus     event.EventBus
 	logger       *zap.Logger
+	alarmDefRegistry *definition.Registry
 	deviceReader deviceReader
 }
 
@@ -44,6 +46,12 @@ func NewAlarmSyncProcessor(
 // WithDeviceReader enables device field backfill for alarms created by sync.
 func (p *AlarmSyncProcessor) WithDeviceReader(reader deviceReader) *AlarmSyncProcessor {
 	p.deviceReader = reader
+	return p
+}
+
+// WithAlarmDefRegistry enables severity override from alarm definitions during sync.
+func (p *AlarmSyncProcessor) WithAlarmDefRegistry(alarmDefRegistry *definition.Registry) *AlarmSyncProcessor {
+	p.alarmDefRegistry = alarmDefRegistry
 	return p
 }
 
@@ -154,6 +162,12 @@ func (p *AlarmSyncProcessor) processSync(ctx context.Context, deviceSN string, p
 	remoteAlarms := make([]*model.Alarm, 0, len(tr069Alarms))
 	for i := range tr069Alarms {
 		alarm := tr069Alarms[i].ToModel(deviceID, deviceSN, carrier)
+		if err := applyAlarmDefinitionSeverity(ctx, p.alarmDefRegistry, alarm); err != nil {
+			p.logger.Warn("resolve synced alarm definition severity failed (proceed with source severity)",
+				zap.Error(err),
+				zap.String("device_sn", deviceSN),
+				zap.String("alarm_identifier", alarm.AlarmIdentifier))
+		}
 		if technology != "" {
 			alarm.Technology = &technology
 		}

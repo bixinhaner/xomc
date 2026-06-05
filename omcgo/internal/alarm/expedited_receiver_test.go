@@ -351,6 +351,45 @@ func TestExpeditedEventReceiver_NewAlarm_UnknownFallback(t *testing.T) {
 	}
 }
 
+func TestExpeditedEventReceiver_NewAlarm_OverridesSeverityFromDefinition(t *testing.T) {
+	store := newMockAlarmStore()
+	engine := newTestEngine(store)
+	bus := newMockEventBus()
+	device := newTestDevice()
+	device.ProductClass = "FAP/BU1810"
+	deviceLookup := &mockDeviceLookup{
+		devices: map[string]*model.Device{"SN-TEST": device},
+	}
+	registry := newTestAlarmDefRegistry(t, definition.ResolvedDefinition{
+		AlarmDefinition: definition.AlarmDefinition{Identifier: "70013"},
+		SeverityCode:    31004,
+		SeverityName:    "Warning",
+	})
+	receiver := NewExpeditedEventReceiver(engine, deviceLookup, bus, zap.NewNop()).WithAlarmDefRegistry(registry, nil)
+
+	params := []tr069.ParameterValueStruct{
+		makeParam("Device.FaultMgmt.ExpeditedEvent.10.NotificationType", "NewAlarm"),
+		makeParam("Device.FaultMgmt.ExpeditedEvent.10.AlarmIdentifier", "70013"),
+		makeParam("Device.FaultMgmt.ExpeditedEvent.10.PerceivedSeverity", "Critical"),
+		makeParam("Device.FaultMgmt.ExpeditedEvent.10.ProbableCause", "supported alarm"),
+	}
+
+	payload := ExpeditedEventPayload{
+		DeviceSN:        "SN-TEST",
+		ParameterValues: params,
+	}
+	payloadJSON, _ := json.Marshal(payload)
+	evt := event.Event{ID: "test-7", Subject: event.SubjectDeviceExpeditedAlarm, Payload: payloadJSON}
+
+	err := receiver.handleExpeditedAlarmEvent(context.Background(), evt)
+	require.NoError(t, err)
+	require.Len(t, store.active, 1)
+	for _, a := range store.active {
+		assert.False(t, a.IsUnknown)
+		assert.Equal(t, model.AlarmSeverity(31004), a.Severity)
+	}
+}
+
 func mustParseTime(t *testing.T, s string) time.Time {
 	t.Helper()
 	tm, err := time.Parse(time.RFC3339, s)

@@ -47,9 +47,11 @@ func NewExpeditedEventReceiver(engine *AlarmEngine, deviceLookup DeviceLookup, e
 	}
 }
 
-// WithAlarmDefRegistry 启用 expedited NewAlarm 的 unknown fallback。
+// WithAlarmDefRegistry 注入告警定义 registry。
+//
+// productResolver 可为 nil：此时仅启用已知告警的 severity 覆盖，不启用 unknown fallback。
 func (r *ExpeditedEventReceiver) WithAlarmDefRegistry(alarmDefReg *definition.Registry, productResolver definition.ProductResolver) *ExpeditedEventReceiver {
-	if alarmDefReg == nil || productResolver == nil {
+	if alarmDefReg == nil {
 		return r
 	}
 	r.alarmDefRegistry = alarmDefReg
@@ -141,6 +143,11 @@ func (r *ExpeditedEventReceiver) handleExpeditedAlarmEvent(ctx context.Context, 
 
 		case NotificationChangedAlarm:
 			alarm := exp.ToModel(dev.ID, payload.DeviceSN, dev.Carrier)
+			if err := applyAlarmDefinitionSeverity(ctx, r.alarmDefRegistry, alarm); err != nil {
+				r.logger.Warn("resolve expedited alarm definition severity failed (proceed with source severity)",
+					zap.Error(err),
+					zap.String("alarm_identifier", exp.AlarmIdentifier))
+			}
 			if err := r.engine.UpdateByEvent(ctx, alarm); err != nil {
 				r.logger.Error("process ChangedAlarm",
 					zap.Error(err),

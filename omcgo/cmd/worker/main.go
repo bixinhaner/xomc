@@ -215,6 +215,7 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	if err := alarmDefRegistry.Refresh(context.Background()); err != nil {
 		logger.Warn("alarm-definition registry refresh failed; fallback disabled", zap.Error(err))
 	} else {
+		alarmSyncProcessor = alarmSyncProcessor.WithAlarmDefRegistry(alarmDefRegistry)
 		// T-0164-P1：复用 KPI Router 已构造的 pmProductRegistry，避免
 		// 重复 RegistryMetrics MustRegister 触发 Prometheus duplicate collector panic。
 		alarmReceiver, expeditedReceiver, _ = wireUnknownAlarmFallback(alarmReceiver, expeditedReceiver, alarmDefRegistry, pmProductRegistry)

@@ -140,6 +140,7 @@ func newTestEngine(store AlarmStore) *AlarmEngine {
 func TestProcessNewAlarm(t *testing.T) {
 	store := newMockAlarmStore()
 	engine := newTestEngine(store)
+	raisedAt := time.Now().Add(-5 * time.Minute).UTC().Truncate(time.Second)
 
 	alarm := &model.Alarm{
 		DeviceSN:  "TEST001",
@@ -148,7 +149,7 @@ func TestProcessNewAlarm(t *testing.T) {
 		AlarmIdentifier: "ALM001",
 		AlarmType: "equipment",
 		Severity:  model.AlarmMajor,
-		RaisedAt:  time.Now(),
+		RaisedAt:  raisedAt,
 	}
 
 	err := engine.Process(context.Background(), alarm)
@@ -157,6 +158,9 @@ func TestProcessNewAlarm(t *testing.T) {
 	assert.Len(t, store.active, 1)
 	assert.Equal(t, model.AlarmActive, alarm.Status)
 	assert.NotEqual(t, uuid.Nil, alarm.ID)
+	assert.Equal(t, 1, alarm.AckCount)
+	assert.Equal(t, raisedAt, alarm.FirstRaisedAt)
+	assert.Equal(t, raisedAt, alarm.LastUpdatedAt)
 }
 
 func TestProcessPreservesSourceSeverityWhenCarrierMappingMissing(t *testing.T) {
@@ -191,6 +195,8 @@ func TestProcessDuplicateAlarm(t *testing.T) {
 	store := newMockAlarmStore()
 	engine := newTestEngine(store)
 	ctx := context.Background()
+	firstRaisedAt := time.Now().Add(-10 * time.Minute).UTC().Truncate(time.Second)
+	secondRaisedAt := time.Now().UTC().Truncate(time.Second)
 
 	alarm1 := &model.Alarm{
 		DeviceSN:  "TEST001",
@@ -199,7 +205,7 @@ func TestProcessDuplicateAlarm(t *testing.T) {
 		AlarmIdentifier: "ALM001",
 		AlarmType: "equipment",
 		Severity:  model.AlarmMajor,
-		RaisedAt:  time.Now().Add(-10 * time.Minute),
+		RaisedAt:  firstRaisedAt,
 	}
 	require.NoError(t, engine.Process(ctx, alarm1))
 
@@ -210,7 +216,8 @@ func TestProcessDuplicateAlarm(t *testing.T) {
 		AlarmIdentifier:   "ALM001",
 		AlarmType:   "equipment",
 		Severity:    model.AlarmCritical,
-		RaisedAt:    time.Now(),
+		RaisedAt:    secondRaisedAt,
+		LastUpdatedAt: secondRaisedAt,
 		Description: "updated description",
 	}
 	require.NoError(t, engine.Process(ctx, alarm2))
@@ -222,7 +229,46 @@ func TestProcessDuplicateAlarm(t *testing.T) {
 	for _, a := range store.active {
 		assert.Equal(t, model.AlarmCritical, a.Severity)
 		assert.Equal(t, "updated description", a.Description)
+		assert.Equal(t, 2, a.AckCount)
+		assert.Equal(t, firstRaisedAt, a.FirstRaisedAt)
+		assert.Equal(t, secondRaisedAt, a.LastUpdatedAt)
 	}
+}
+
+func TestUpdateByEvent_UsesDeviceTimestampForLastUpdatedAt(t *testing.T) {
+	store := newMockAlarmStore()
+	engine := newTestEngine(store)
+	ctx := context.Background()
+
+	deviceID := uuid.New()
+	originalRaisedAt := time.Now().Add(-10 * time.Minute).UTC().Truncate(time.Second)
+	changedAt := time.Now().Add(-2 * time.Minute).UTC().Truncate(time.Second)
+	alarm := &model.Alarm{
+		DeviceSN:        "TEST001",
+		DeviceID:        deviceID,
+		Carrier:         model.CarrierCMCC,
+		AlarmIdentifier: "ALM001",
+		Severity:        model.AlarmMajor,
+		Description:     "original description",
+		RaisedAt:        originalRaisedAt,
+	}
+	require.NoError(t, engine.Process(ctx, alarm))
+
+	updated := &model.Alarm{
+		DeviceSN:        "TEST001",
+		DeviceID:        deviceID,
+		Carrier:         model.CarrierCMCC,
+		AlarmIdentifier: "ALM001",
+		Severity:        model.AlarmCritical,
+		Description:     "updated description",
+		LastUpdatedAt:   changedAt,
+	}
+
+	require.NoError(t, engine.UpdateByEvent(ctx, updated))
+
+	existing, err := store.GetActiveByDeviceAndIdentifier(ctx, "TEST001", "ALM001")
+	require.NoError(t, err)
+	assert.Equal(t, changedAt, existing.LastUpdatedAt)
 }
 
 func TestProcessKeepsDistinctActiveAlarmsForSameIdentifierWithDifferentAdditionalInformation(t *testing.T) {
