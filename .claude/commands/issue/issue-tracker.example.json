@@ -1,0 +1,15 @@
+{
+  "platform": "redmine",
+  "base_url": "https://<your-redmine-host>/redmine",
+  "token": "<your-redmine-api-token>",
+  "username": "<your-username>",
+  "default_project": "<your-project-key>",
+  "filters": {
+    "issue_types": ["bug", "defect"],
+    "statuses": ["open", "in_progress", "active", "new"],
+    "assignee": "me"
+  },
+  "log_download_dir": "/tmp/issue-logs",
+  "max_issues": 20,
+  "auto_commit": false
+}
