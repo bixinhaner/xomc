@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { formatEnumDisplayValue, formatLteBandwidthDisplay, LTE_BANDWIDTH_PATH } from '../validators';
+import {
+  BM_RU_RF_SWITCH_PATH,
+  formatEnumDisplayValue,
+  formatLteBandwidthDisplay,
+  LTE_BANDWIDTH_PATH,
+} from '../validators';
 
 describe('LTE bandwidth display formatting', () => {
   it('uses the same LTE enum mapping helper as quick settings', () => {
@@ -17,5 +22,10 @@ describe('LTE bandwidth display formatting', () => {
 
   it('preserves unknown values', () => {
     expect(formatLteBandwidthDisplay('20MHz')).toBe('20MHz');
+  });
+
+  it('maps BM RU RF switch values to on/off labels', () => {
+    expect(formatEnumDisplayValue('1', undefined, BM_RU_RF_SWITCH_PATH)).toBe('开');
+    expect(formatEnumDisplayValue('0', undefined, BM_RU_RF_SWITCH_PATH)).toBe('关');
   });
 });

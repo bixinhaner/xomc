@@ -6,16 +6,23 @@ interface EnumMeta {
 }
 
 export const LTE_BANDWIDTH_PATH = 'Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.DLBandwidth';
+export const BM_RU_RF_SWITCH_PATH = 'Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.X_COM_RadioEnable';
 
 const LTE_BANDWIDTH_ENUM: EnumMeta = {
   values: ['25', '50', '75', '100'],
   labels: ['CELL_BW_25(5M)', 'CELL_BW_50(10M)', 'CELL_BW_75(15M)', 'CELL_BW_100(20M)'],
 };
 
+const BM_RU_RF_SWITCH_ENUM: EnumMeta = {
+  values: ['1', '0'],
+  labels: ['开', '关'],
+};
+
 function resolveEnumFallbackByPath(path?: string): EnumMeta | null {
   if (!path) return null;
   // 仅 DLBandwidth 在 quicksettings XML 中保留为可编辑字段；ULBandwidth 已下线。
   if (path.endsWith('.CellConfig.LTE.RAN.RF.DLBandwidth')) return LTE_BANDWIDTH_ENUM;
+  if (path.endsWith('.CellConfig.LTE.RAN.RF.X_COM_RadioEnable')) return BM_RU_RF_SWITCH_ENUM;
   return null;
 }
 

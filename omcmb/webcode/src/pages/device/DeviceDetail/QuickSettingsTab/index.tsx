@@ -30,6 +30,7 @@ function normalizeQuickSettingsNetworkType(networkType: string): string {
 }
 
 const LTE_NUM_OF_CELLS_PATH = 'Device.Services.FAPService.1.CellConfig.LTE.RAN.CA.PARAMS.NumOfCells';
+const HIDDEN_GROUP_IDS = new Set(['device-time', 'device-sync']);
 
 /**
  * 设备详情「快速设置」tab — T-0138 per-paramModel 架构。
@@ -109,7 +110,7 @@ export default function QuickSettingsTab({ deviceId, networkType }: QuickSetting
     : (bmTechOptions[0] ?? (bmHasGsmGroups && !bmHasLteGroups ? 'GSM' : 'LTE'));
 
   const visibleGroups = useMemo(() => {
-    const groups = data?.groups ?? [];
+    const groups = (data?.groups ?? []).filter((group) => !HIDDEN_GROUP_IDS.has(group.id));
     if (!isENB || !isBM) {
       return groups;
     }
