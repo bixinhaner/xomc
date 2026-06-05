@@ -32,6 +32,10 @@ type mockFileRepository struct {
 
 	neTypeExists    bool
 	neTypeExistsErr error
+
+	// 导入 XML 覆盖调整:neType → 归属文件 stub
+	neTypeLoadedFroms    []string
+	neTypeLoadedFromsErr error
 }
 
 func (m *mockFileRepository) CountByLoadedFrom(ctx context.Context, loadedFrom string) (int, error) {
@@ -55,6 +59,20 @@ func (m *mockFileRepository) NeTypeExists(ctx context.Context, neType string) (b
 		return false, m.neTypeExistsErr
 	}
 	return m.neTypeExists, nil
+}
+
+func (m *mockFileRepository) LoadedFromsByNeType(ctx context.Context, neType string) ([]string, error) {
+	if m.neTypeLoadedFromsErr != nil {
+		return nil, m.neTypeLoadedFromsErr
+	}
+	if m.neTypeLoadedFroms != nil {
+		return m.neTypeLoadedFroms, nil
+	}
+	// 兼容旧 stub:neTypeExists=true 但未配置归属 → 视为有冲突但路径未知
+	if m.neTypeExists {
+		return []string{BuiltinDirPrefix + neType + ".xml"}, nil
+	}
+	return nil, nil
 }
 
 // stubReloader 记录 ReloadOne 调用,可注入失败。
@@ -111,14 +129,12 @@ func writeBuiltinXML(t *testing.T, baseDir, name string) string {
 	return filepath.ToSlash(rel)
 }
 
-// buildMultipart 构造 multipart body:name 字段 + file part(file 自身 filename 被忽略)。
-func buildMultipart(t *testing.T, name string, content []byte) (*bytes.Buffer, string) {
+// buildMultipart 构造 multipart body:仅 file part(名称取自 XML neType 属性,
+// file 自身 filename 被忽略)。
+func buildMultipart(t *testing.T, content []byte) (*bytes.Buffer, string) {
 	t.Helper()
 	buf := &bytes.Buffer{}
 	w := multipart.NewWriter(buf)
-	if name != "" {
-		_ = w.WriteField("name", name)
-	}
 	part, err := w.CreateFormFile("file", "ignored.xml")
 	if err != nil {
 		t.Fatalf("create form file: %v", err)
@@ -154,13 +170,13 @@ func TestValidAlarmFilePath(t *testing.T) {
 // ── parseUploadedNeType ─────────────────────────────────────────────
 
 func TestParseUploadedNeType(t *testing.T) {
-	// XML neType 属性优先
-	nt := parseUploadedNeType([]byte(`<alarmModel neType="GNB"></alarmModel>`), "myfile.xml")
+	// XML neType 属性是唯一来源
+	nt := parseUploadedNeType([]byte(`<alarmModel neType="GNB"></alarmModel>`))
 	assert.Equal(t, "GNB", nt)
 
-	// 缺省回退文件名(去 .xml 大写)
-	nt = parseUploadedNeType([]byte(`<alarmModel></alarmModel>`), "enb.xml")
-	assert.Equal(t, "ENB", nt)
+	// 缺省 → 空(由 handler 拒绝,不再回退文件名)
+	nt = parseUploadedNeType([]byte(`<alarmModel></alarmModel>`))
+	assert.Equal(t, "", nt)
 }
 
 // ── UploadXML ───────────────────────────────────────────────────────
@@ -172,15 +188,15 @@ func TestUpload_HappyPath_201(t *testing.T) {
 	r := newTestRouter(t, repo, reloader, baseDir)
 
 	xml := []byte(`<alarmModel neType="MY_NE"><alarms></alarms></alarmModel>`)
-	body, ct := buildMultipart(t, "MY", xml)
+	body, ct := buildMultipart(t, xml)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/alarm-definitions/upload-xml", body)
 	req.Header.Set("Content-Type", ct)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusCreated, w.Code, "body=%s", w.Body.String())
 
-	// 物理文件写进 baseDir/alarm-definitions/MY.xml
-	target := filepath.Join(baseDir, BuiltinDirSubdir, "MY.xml")
+	// 名称取自 neType:物理文件写进 baseDir/alarm-definitions/MY_NE.xml
+	target := filepath.Join(baseDir, BuiltinDirSubdir, "MY_NE.xml")
 	got, err := os.ReadFile(target)
 	assert.NoError(t, err)
 	assert.Equal(t, xml, got)
@@ -188,7 +204,7 @@ func TestUpload_HappyPath_201(t *testing.T) {
 	// sidecar 标记写入 → custom 可删
 	_, scErr := os.Stat(target + CustomMarkerSuffix)
 	assert.NoError(t, scErr, "sidecar 标记应写入")
-	assert.True(t, IsDeletable(baseDir, "alarm-definitions/MY.xml"))
+	assert.True(t, IsDeletable(baseDir, "alarm-definitions/MY_NE.xml"))
 
 	assert.Equal(t, 1, reloader.calls)
 
@@ -196,25 +212,81 @@ func TestUpload_HappyPath_201(t *testing.T) {
 		Data map[string]any `json:"data"`
 	}
 	_ = json.Unmarshal(w.Body.Bytes(), &resp)
-	assert.Equal(t, "alarm-definitions/MY.xml", resp.Data["loaded_from"])
+	assert.Equal(t, "alarm-definitions/MY_NE.xml", resp.Data["loaded_from"])
 	assert.Equal(t, "MY_NE", resp.Data["ne_type"])
 	assert.Equal(t, true, resp.Data["reloaded"])
 }
 
-// 文件名唯一性:同名 <name>.xml 已存在 → 409,不覆盖、不重载。
+// 文件名重复且无 force → 409 + overwritable 标记,不覆盖、不重载。
 func TestUpload_NameConflict_409(t *testing.T) {
 	baseDir := t.TempDir()
 	writeBuiltinXML(t, baseDir, "MY.xml")
 	reloader := &stubReloader{}
 	r := newTestRouter(t, &mockFileRepository{}, reloader, baseDir)
 
-	body, ct := buildMultipart(t, "MY", []byte(`<alarmModel neType="X"></alarmModel>`))
+	body, ct := buildMultipart(t, []byte(`<alarmModel neType="MY"></alarmModel>`))
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/alarm-definitions/upload-xml", body)
 	req.Header.Set("Content-Type", ct)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusConflict, w.Code, "body=%s", w.Body.String())
+	assert.Contains(t, w.Body.String(), `"overwritable":true`)
 	assert.Equal(t, 0, reloader.calls)
+}
+
+// force=true 覆盖自定义文件:旧文件备份 .bak.<ts>,sidecar 保持(仍 custom 可删)。
+func TestUpload_ForceOverwriteCustom_201(t *testing.T) {
+	baseDir := t.TempDir()
+	loadedFrom := writeCustomXML(t, baseDir, "MY_NE.xml") // 含 sidecar
+	reloader := &stubReloader{}
+	r := newTestRouter(t, &mockFileRepository{neTypeLoadedFroms: []string{loadedFrom}}, reloader, baseDir)
+
+	newXML := []byte(`<alarmModel neType="MY_NE" totalCount="1"><alarms></alarms></alarmModel>`)
+	body, ct := buildMultipart(t, newXML)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/alarm-definitions/upload-xml?force=true", body)
+	req.Header.Set("Content-Type", ct)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusCreated, w.Code, "body=%s", w.Body.String())
+	assert.Contains(t, w.Body.String(), `"overwritten":true`)
+
+	target := filepath.Join(baseDir, loadedFrom)
+	got, err := os.ReadFile(target)
+	assert.NoError(t, err)
+	assert.Equal(t, newXML, got, "覆盖后内容应为新 XML")
+	// 备份存在
+	baks, _ := filepath.Glob(target + ".bak.*")
+	assert.Len(t, baks, 1, "旧文件应备份为 .bak.<ts>")
+	// sidecar 保持 → 仍 custom 可删
+	assert.True(t, IsDeletable(baseDir, loadedFrom))
+	assert.Equal(t, 1, reloader.calls)
+}
+
+// force=true 覆盖内置文件:备份 + 内容替换,但不写 sidecar(保持 builtin,仍不可删)。
+func TestUpload_ForceOverwriteBuiltin_201(t *testing.T) {
+	baseDir := t.TempDir()
+	loadedFrom := writeBuiltinXML(t, baseDir, "ENB.xml") // 无 sidecar
+	reloader := &stubReloader{}
+	r := newTestRouter(t, &mockFileRepository{neTypeLoadedFroms: []string{loadedFrom}}, reloader, baseDir)
+
+	newXML := []byte(`<alarmModel neType="ENB" totalCount="2"><alarms></alarms></alarmModel>`)
+	body, ct := buildMultipart(t, newXML)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/alarm-definitions/upload-xml?force=true", body)
+	req.Header.Set("Content-Type", ct)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusCreated, w.Code, "body=%s", w.Body.String())
+
+	target := filepath.Join(baseDir, loadedFrom)
+	got, err := os.ReadFile(target)
+	assert.NoError(t, err)
+	assert.Equal(t, newXML, got)
+	baks, _ := filepath.Glob(target + ".bak.*")
+	assert.Len(t, baks, 1)
+	// 不写 sidecar → 保持 builtin 身份,仍不可删
+	_, scErr := os.Stat(target + CustomMarkerSuffix)
+	assert.True(t, os.IsNotExist(scErr), "覆盖 builtin 不应写 sidecar")
+	assert.False(t, IsDeletable(baseDir, loadedFrom))
 }
 
 // 内容主键唯一性:neType 已在 DB → 409,文件不落地。
@@ -224,22 +296,23 @@ func TestUpload_NeTypeConflict_409(t *testing.T) {
 	repo := &mockFileRepository{neTypeExists: true}
 	r := newTestRouter(t, repo, reloader, baseDir)
 
-	body, ct := buildMultipart(t, "NEW_NAME", []byte(`<alarmModel neType="DUP"></alarmModel>`))
+	body, ct := buildMultipart(t, []byte(`<alarmModel neType="DUP"></alarmModel>`))
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/alarm-definitions/upload-xml", body)
 	req.Header.Set("Content-Type", ct)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusConflict, w.Code, "body=%s", w.Body.String())
-	assert.Contains(t, w.Body.String(), "ne_type")
+	assert.Contains(t, w.Body.String(), "neType")
 	assert.Equal(t, 0, reloader.calls)
-	_, err := os.Stat(filepath.Join(baseDir, BuiltinDirSubdir, "NEW_NAME.xml"))
+	_, err := os.Stat(filepath.Join(baseDir, BuiltinDirSubdir, "DUP.xml"))
 	assert.True(t, os.IsNotExist(err), "neType 冲突时文件不应落地")
 }
 
-func TestUpload_MissingName_400(t *testing.T) {
+// neType 属性缺失 → 400(名称唯一来源是 XML neType,不再回退文件名)。
+func TestUpload_MissingNeType_400(t *testing.T) {
 	baseDir := t.TempDir()
 	r := newTestRouter(t, &mockFileRepository{}, &stubReloader{}, baseDir)
-	body, ct := buildMultipart(t, "", []byte(`<alarmModel neType="X"></alarmModel>`))
+	body, ct := buildMultipart(t, []byte(`<alarmModel><alarms></alarms></alarmModel>`))
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/alarm-definitions/upload-xml", body)
 	req.Header.Set("Content-Type", ct)
 	w := httptest.NewRecorder()
@@ -251,8 +324,8 @@ func TestUpload_MissingName_400(t *testing.T) {
 func TestUpload_InvalidName_400(t *testing.T) {
 	baseDir := t.TempDir()
 	r := newTestRouter(t, &mockFileRepository{}, &stubReloader{}, baseDir)
-	// name 含点 → <name>.xml = "MY.foo.xml" 多扩展名,被白名单拒
-	body, ct := buildMultipart(t, "MY.foo", []byte(`<alarmModel neType="X"></alarmModel>`))
+	// neType 含点 → 推导文件名 "MY.foo.xml" 多扩展名,被白名单拒
+	body, ct := buildMultipart(t, []byte(`<alarmModel neType="MY.foo"></alarmModel>`))
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/alarm-definitions/upload-xml", body)
 	req.Header.Set("Content-Type", ct)
 	w := httptest.NewRecorder()
@@ -264,7 +337,7 @@ func TestUpload_InvalidName_400(t *testing.T) {
 func TestUpload_InvalidRoot_400(t *testing.T) {
 	baseDir := t.TempDir()
 	r := newTestRouter(t, &mockFileRepository{}, &stubReloader{}, baseDir)
-	body, ct := buildMultipart(t, "MY", []byte(`<indicatorModel platform="X"></indicatorModel>`))
+	body, ct := buildMultipart(t, []byte(`<indicatorModel platform="X"></indicatorModel>`))
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/alarm-definitions/upload-xml", body)
 	req.Header.Set("Content-Type", ct)
 	w := httptest.NewRecorder()
@@ -278,7 +351,7 @@ func TestUpload_NoFile_400(t *testing.T) {
 	r := newTestRouter(t, &mockFileRepository{}, &stubReloader{}, baseDir)
 	buf := &bytes.Buffer{}
 	mw := multipart.NewWriter(buf)
-	_ = mw.WriteField("name", "MY")
+	_ = mw.WriteField("other", "MY")
 	_ = mw.Close()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/alarm-definitions/upload-xml", buf)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
@@ -291,7 +364,7 @@ func TestUpload_ReloadFailedStillSucceeds(t *testing.T) {
 	baseDir := t.TempDir()
 	reloader := &stubReloader{err: errors.New("simulated reload fail")}
 	r := newTestRouter(t, &mockFileRepository{}, reloader, baseDir)
-	body, ct := buildMultipart(t, "MY", []byte(`<alarmModel neType="X"></alarmModel>`))
+	body, ct := buildMultipart(t, []byte(`<alarmModel neType="X"></alarmModel>`))
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/alarm-definitions/upload-xml", body)
 	req.Header.Set("Content-Type", ct)
 	w := httptest.NewRecorder()
@@ -303,6 +376,44 @@ func TestUpload_ReloadFailedStillSucceeds(t *testing.T) {
 	_ = json.Unmarshal(w.Body.Bytes(), &resp)
 	assert.Equal(t, false, resp.Data["reloaded"])
 	assert.Equal(t, 1, reloader.calls)
+}
+
+// ── DownloadFile ────────────────────────────────────────────────────
+
+func TestDownloadFile_OK(t *testing.T) {
+	baseDir := t.TempDir()
+	loadedFrom := writeBuiltinXML(t, baseDir, "ENB.xml")
+	r := newTestRouter(t, &mockFileRepository{}, &stubReloader{}, baseDir)
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/alarm-definitions/file-content?loaded_from="+loadedFrom, nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+	assert.Contains(t, w.Header().Get("Content-Disposition"), "ENB.xml")
+	assert.Contains(t, w.Body.String(), "<alarmModel")
+}
+
+func TestDownloadFile_NotFound_404(t *testing.T) {
+	baseDir := t.TempDir()
+	r := newTestRouter(t, &mockFileRepository{}, &stubReloader{}, baseDir)
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/alarm-definitions/file-content?loaded_from=alarm-definitions/GONE.xml", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestDownloadFile_BadPath_400(t *testing.T) {
+	baseDir := t.TempDir()
+	r := newTestRouter(t, &mockFileRepository{}, &stubReloader{}, baseDir)
+	for _, lf := range []string{"", "other/X.xml", "alarm-definitions/../etc.xml", "alarm-definitions/a/b.xml"} {
+		req := httptest.NewRequest(http.MethodGet,
+			"/api/v1/alarm-definitions/file-content?loaded_from="+lf, nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code, "loaded_from=%q", lf)
+	}
 }
 
 // ── DeleteFile ──────────────────────────────────────────────────────

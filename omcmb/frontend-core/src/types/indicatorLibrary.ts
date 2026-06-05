@@ -116,7 +116,8 @@ export interface IndicatorPlatformSummary {
   platform: string;       // platform_name(rela_platform_indicator_formula_*.platform_name)
   indicators: number;     // 该平台的指标计数
   loadedFrom: string;     // 该平台对应的 XML 文件相对路径(后端 MAX(formula.loaded_from))
-  source: IndicatorSource;// builtin/custom/unknown(后端由 loadedFrom 前缀派生)
+  source: IndicatorSource;// builtin/custom/unknown(后端由 sidecar 派生)
+  deletable: boolean;     // 一级列表删除按钮可见性(后端 IsDeletable;内置置灰,2026-06-05)
   description?: string;   // 按 (tech, platform) 维度的可编辑描述
 }
 
@@ -134,8 +135,9 @@ export interface IndicatorUploadResult {
   filename: string;
   loadedFrom: string;
   tech: TechLower;
-  platform: string;   // 内容主键(<indicatorModel platform="...">)
-  reloaded: boolean;  // 同步触发 Loader.Reload 是否成功
+  platform: string;     // 内容主键(<indicatorModel platform="...">)
+  overwritten: boolean; // force 覆盖了既有文件(旧文件已备份 .bak.<ts>)
+  reloaded: boolean;    // 同步触发 Loader.Reload 是否成功
 }
 
 export interface IndicatorDeleteFileResult {

@@ -303,6 +303,18 @@ const messages: Record<string, string> = {
   'product.matchTester.noMatch':     '进入孤儿设备列表，请到「正则模式」段添加规则',
   'product.matchTester.matched':     '产品匹配',
 
+  // 导入 XML 调整(2026-06-05):取消手填名称,名称取自 XML 根元素属性(三库共用);
+  // 重复允许覆盖,前端二次确认后带 force 重试
+  'product.upload.downloadXml':            '下载 XML',
+  'product.upload.savedAs':                '将保存为:{name}.xml',
+  'product.upload.missingAttr':            '未能从 XML 中读取 {attr} 属性,请检查文件内容',
+  'product.upload.overwriteConfirmTitle':  '同名内容已存在',
+  'product.upload.overwriteConfirmContent':'「{name}」已存在,确认覆盖?原文件将自动备份为 .bak.<时间戳>。',
+  'product.upload.overwriteSuccess':       '已覆盖:{file}',
+  'product.paramModel.nameAutoHint':    '名称自动取自 XML 的 paramModel 属性,文件将保存为 <paramModel>.xml',
+  'product.kpi.upload.nameAutoHint':    '名称自动取自 XML 的 platform 属性,文件将保存为 <platform>.xml。',
+  'product.alarm.upload.nameAutoHint':  '名称自动取自 XML 的 neType 属性,文件将保存为 <neType>.xml。',
+
   // /product/param-model
   'product.paramModel.searchPh':     '搜索 名称 /描述',
   'product.paramModel.nameLabel':       '名称',

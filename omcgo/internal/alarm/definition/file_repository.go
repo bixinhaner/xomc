@@ -19,6 +19,10 @@ type FileRepository interface {
 	// 用于 Upload 内容主键(neType)唯一性校验(三库 XML 导入重构 §7.1):
 	// 一个 ne_type 对应一个 XML 文件,故 DB 中已存在该 ne_type = 内容主键冲突。
 	NeTypeExists(ctx context.Context, neType string) (bool, error)
+	// LoadedFromsByNeType 返回拥有某 ne_type 的去重 loaded_from 列表。
+	// 导入 XML 覆盖调整(2026-06-05):上传遇到重复 neType 时,用它定位"归属文件",
+	// force 覆盖即替换该文件(常态恰好一个;空 loaded_from 行被忽略)。
+	LoadedFromsByNeType(ctx context.Context, neType string) ([]string, error)
 }
 
 // PgFileRepository 是 FileRepository 的 PostgreSQL 实现。
@@ -66,6 +70,25 @@ func (r *PgFileRepository) NeTypeExists(ctx context.Context, neType string) (boo
 		return false, fmt.Errorf("check alarm_definitions ne_type exists %q: %w", neType, err)
 	}
 	return exists, nil
+}
+
+// LoadedFromsByNeType 实现 FileRepository。
+func (r *PgFileRepository) LoadedFromsByNeType(ctx context.Context, neType string) ([]string, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT DISTINCT loaded_from FROM alarm_definitions WHERE ne_type = $1 AND loaded_from <> ''`, neType)
+	if err != nil {
+		return nil, fmt.Errorf("query alarm_definitions loaded_from by ne_type %q: %w", neType, err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var lf string
+		if err := rows.Scan(&lf); err != nil {
+			return nil, fmt.Errorf("scan loaded_from: %w", err)
+		}
+		out = append(out, lf)
+	}
+	return out, rows.Err()
 }
 
 var _ FileRepository = (*PgFileRepository)(nil)

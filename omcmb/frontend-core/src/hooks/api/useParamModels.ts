@@ -161,13 +161,20 @@ export function useDeleteDiscovered() {
   });
 }
 
-// 上传自定义 paramModel XML(三库 XML 导入重构):传 name + file。
-// 双唯一性硬拒,无 force —— 文件名或模型名已存在时后端返 409(前端提示改名)。
+// 下载 XML 原文件(操作列下载图标,builtin / custom 均可)。
+export function useDownloadParamModelXML() {
+  return useMutation({
+    mutationFn: ({ loadedFrom }: { loadedFrom: string }) => api.downloadXml(loadedFrom),
+  });
+}
+
+// 上传自定义 paramModel XML(名称取自 XML paramModel 属性,2026-06-05 取消手填)。
+// 重复允许覆盖:不带 force 重复返 409,前端二次确认后带 force=true 重试。
 // 成功后 invalidate 所有 param-model 查询,新模型立即出现在列表。
 export function useUploadParamModelXML() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ file, name }: { file: File; name: string }) => api.uploadXML(file, name),
+    mutationFn: ({ file, force }: { file: File; force?: boolean }) => api.uploadXML(file, force),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: PM_KEY });
     },

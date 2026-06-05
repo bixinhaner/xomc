@@ -67,8 +67,11 @@ func validateUploadTech(tech string) error {
 //   - 不处理外部实体(Go 标准库默认安全,无 XXE 风险)
 //   - 根元素必须 <indicatorModel>(namespace 不限,与 Loader 对齐)
 //   - 决策 D2:platform 属性必填,非空字符串
-//   - 决策 D2:deviceType 属性若 present 必须(大小写不敏感)匹配 ?tech=
-//     若 absent → 容忍(ENB builtin XML 历史无 deviceType,custom 同样允许省略)
+//   - deviceType 属性:
+//       · 若 present 必须(大小写不敏感)匹配 ?tech=
+//       · 若 absent:仅 ENB 容忍(ENB legacy XML 历史无 deviceType,且 ENB 落地
+//         enb/ 子目录,制式由目录决定);GSM/GNB 必填 —— 2026-06-05 目录调整后
+//         GSM/GNB 上传落地 indicator-library/ 根级,Loader 依赖 deviceType 分类制式
 //
 // 性能:typical indicator XML ≤ 200 KB,完整扫描 ~ms 级。
 func validateUploadXML(raw []byte, tech string) error {
@@ -105,13 +108,16 @@ func validateUploadXML(raw []byte, tech string) error {
 		if strings.TrimSpace(platform) == "" {
 			return fmt.Errorf("<indicatorModel> requires non-empty platform attribute")
 		}
-		// D2: deviceType 若 present 必须匹配 tech(大小写不敏感)
-		if dt := attrValue(start.Attr, "deviceType"); dt != "" {
-			if !strings.EqualFold(dt, tech) {
-				return fmt.Errorf("deviceType=%q does not match upload tech=%q "+
-					"(case-insensitive); upload to /upload-xml?tech=%s instead",
-					dt, tech, strings.ToLower(dt))
-			}
+		// deviceType:present 须匹配 tech;absent 仅 ENB 容忍(GSM/GNB 根级落地需可分类)
+		dt := attrValue(start.Attr, "deviceType")
+		switch {
+		case dt == "" && tech != "enb":
+			return fmt.Errorf("<indicatorModel> requires deviceType attribute for tech=%q "+
+				"(GSM/GNB 上传落地 indicator-library/ 根级,Loader 依赖 deviceType 识别制式)", tech)
+		case dt != "" && !strings.EqualFold(dt, tech):
+			return fmt.Errorf("deviceType=%q does not match upload tech=%q "+
+				"(case-insensitive); upload to /upload-xml?tech=%s instead",
+				dt, tech, strings.ToLower(dt))
 		}
 		rootSeen = true
 	}

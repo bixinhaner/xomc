@@ -303,6 +303,18 @@ const messages: Record<string, string> = {
   'product.matchTester.noMatch':     'Will land in orphan device list; add a rule in the regex section',
   'product.matchTester.matched':     'Product match',
 
+  // Import XML adjustment (2026-06-05): name derived from XML root attribute (shared by 3 libraries);
+  // duplicates may be overwritten after an explicit confirmation (force retry)
+  'product.upload.downloadXml':            'Download XML',
+  'product.upload.savedAs':                'Will be saved as: {name}.xml',
+  'product.upload.missingAttr':            'Could not read the {attr} attribute from the XML; please check the file',
+  'product.upload.overwriteConfirmTitle':  'Already exists',
+  'product.upload.overwriteConfirmContent':'"{name}" already exists. Overwrite it? The original file will be backed up as .bak.<timestamp>.',
+  'product.upload.overwriteSuccess':       'Overwritten: {file}',
+  'product.paramModel.nameAutoHint':    'Name is taken from the XML paramModel attribute; saved as <paramModel>.xml',
+  'product.kpi.upload.nameAutoHint':    'Name is taken from the XML platform attribute; saved as <platform>.xml.',
+  'product.alarm.upload.nameAutoHint':  'Name is taken from the XML neType attribute; saved as <neType>.xml.',
+
   // /product/param-model
   'product.paramModel.searchPh':     'Search name/description',
   'product.paramModel.nameLabel':       'Name',

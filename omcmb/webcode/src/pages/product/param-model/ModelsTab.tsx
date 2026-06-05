@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react';
 import { Card, Table, Tag, Button, Space, Modal, Form, Input, Switch, message, Popconfirm, Tooltip } from 'antd';
-import { EditOutlined, DeleteOutlined } from '@ant-design/icons';
+import { EditOutlined, DeleteOutlined, DownloadOutlined } from '@ant-design/icons';
 import {
   useParamModelList,
   useUpdateParamModel,
   useDeleteParamModel,
+  useDownloadParamModelXML,
 } from '@core/hooks/api/useParamModels';
 import type { ParamModel, UpdateParamModelInput } from '@core/types/paramModel';
 import { makeSeqColumn } from '@/components/Table/seqColumn';
@@ -23,6 +24,7 @@ export default function ModelsTab({ selectedName, onSelect, keyword }: Props) {
   const { data, isLoading } = useParamModelList();
   const updateMut = useUpdateParamModel();
   const deleteMut = useDeleteParamModel();
+  const downloadMut = useDownloadParamModelXML();
 
   const [editing, setEditing] = useState<ParamModel | null>(null);
   const [page, setPage] = useState(1);
@@ -78,9 +80,22 @@ export default function ModelsTab({ selectedName, onSelect, keyword }: Props) {
     { title: t('common.description'), dataIndex: 'description', ellipsis: true },
     {
       title: t('common.action'),
-      width: 160,
+      width: 190,
       render: (_: unknown, row: ParamModel) => (
         <Space>
+          {/* 2026-06-05:下载 XML 原文件(builtin / custom 均可) */}
+          <Tooltip title={t('product.upload.downloadXml')}>
+            <Button
+              size="small"
+              icon={<DownloadOutlined />}
+              disabled={!row.loadedFrom}
+              onClick={() =>
+                downloadMut
+                  .mutateAsync({ loadedFrom: row.loadedFrom })
+                  .catch((e) => message.error((e as Error).message))
+              }
+            />
+          </Tooltip>
           <Button
             size="small"
             icon={<EditOutlined />}

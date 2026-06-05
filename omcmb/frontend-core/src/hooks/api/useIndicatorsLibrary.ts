@@ -222,15 +222,23 @@ export function useIndicatorFiles(tech: TechLower | undefined) {
   });
 }
 
-// 上传自定义 XML(三库 XML 导入重构:name 必填,去 force);成功后 invalidate summary + files + indicators
+// 上传自定义 XML(名称取自 XML platform 属性;force=true 确认覆盖);
+// 成功后 invalidate summary + files + indicators
 export function useIndicatorUploadXml() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ tech, file, name }: { tech: TechLower; file: File; name: string }) =>
-      api.uploadXml(tech, file, name),
+    mutationFn: ({ tech, file, force }: { tech: TechLower; file: File; force?: boolean }) =>
+      api.uploadXml(tech, file, force),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: IL_KEY });
     },
+  });
+}
+
+// 下载 XML 原文件(操作列下载图标,builtin / custom 均可)。
+export function useIndicatorDownloadXml() {
+  return useMutation({
+    mutationFn: ({ loadedFrom }: { loadedFrom: string }) => api.downloadXml(loadedFrom),
   });
 }
 

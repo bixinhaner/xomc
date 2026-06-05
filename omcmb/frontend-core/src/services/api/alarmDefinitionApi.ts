@@ -1,4 +1,5 @@
 import http from '../http';
+import { saveBlob } from '../../utils/saveBlob';
 import type {
   AlarmDefinition,
   AlarmNeTypeStat,
@@ -276,20 +277,22 @@ export const alarmDefinitionApi = {
     };
   },
 
-  /** 上传自定义告警 XML(multipart)。name 必填(目标文件名 = <name>.xml)。
-   *  2026-06-04 单目录 + 双唯一性(无 force):文件名 / neType 内容主键任一冲突后端返 409,
-   *  前端内联提示改名。后端上传端点内部已自动 destructive 重载(删孤儿)+ 刷新缓存。 */
-  async uploadXml(file: File, name: string): Promise<AlarmUploadResult> {
+  /** 上传自定义告警 XML(multipart)。名称取自 XML neType 属性(2026-06-05 取消手填 name)。
+   *  重复允许覆盖(2026-06-05 调整):不带 force 时重复返 409(data.overwritable=true),
+   *  前端弹二次确认后带 force=true 重试 → 覆盖归属文件(旧文件自动备份 .bak.<ts>)。
+   *  后端上传端点内部已自动 destructive 重载(删孤儿)+ 刷新缓存。 */
+  async uploadXml(file: File, force = false): Promise<AlarmUploadResult> {
     const form = new FormData();
-    form.append('name', name);
     form.append('file', file);
     const { data } = await http.post<{
       uploaded: boolean;
       filename: string;
       loaded_from: string;
       ne_type: string;
+      overwritten: boolean;
       reloaded: boolean;
     }>('/alarm-definitions/upload-xml', form, {
+      params: force ? { force: 'true' } : undefined,
       headers: { 'Content-Type': 'multipart/form-data' },
     });
     return {
@@ -297,8 +300,18 @@ export const alarmDefinitionApi = {
       filename: data.filename,
       loadedFrom: data.loaded_from,
       neType: data.ne_type,
+      overwritten: data.overwritten,
       reloaded: data.reloaded,
     };
+  },
+
+  /** 下载告警 XML 原文件(builtin / custom 均可,2026-06-05 操作列下载功能)。 */
+  async downloadXml(loadedFrom: string): Promise<void> {
+    const resp = await http.get('/alarm-definitions/file-content', {
+      params: { loaded_from: loadedFrom },
+      responseType: 'blob',
+    });
+    saveBlob(resp.data as BlobPart, loadedFrom.split('/').pop() || 'alarm.xml');
   },
 
   /** 删除自定义告警 XML(loadedFrom 含 / 须 encodeURIComponent)。仅 custom 可删,内置后端返 403。 */

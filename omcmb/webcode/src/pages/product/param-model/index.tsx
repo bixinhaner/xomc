@@ -11,16 +11,17 @@
  *      - 列表态: [搜索 + 导入 XML 按钮]
  *      - 详情态: 由 MappingsTab 自带头部
  *
- * 三库 XML 导入重构(2026-06-04 D3/D5/D6):
- *   - 「导入 XML」改为弹框:必填「名称」文本框(目标文件名 = <名称>.xml)+ 选 XML 文件。
- *   - 单目录 + sidecar:上传写 param-mappings/<名称>.xml + <名称>.xml.custom 标记。
- *   - 双唯一性硬拒,无覆盖(无 force):
- *       · 提交前本地预检查清单是否已有同名 <名称>.xml → 内联报错"名称已存在,请改名"。
- *       · 后端 409(文件名或 XML 模型名已存在)→ 内联同款改名提示。
+ * 导入 XML 调整(2026-06-05 取消手填名称):
+ *   - 「导入 XML」弹框只选 XML 文件;唯一名称取自 XML <parameterModel paramModel="...">
+ *     属性,文件将保存为 <paramModel>.xml(选文件后即时预览)。
+ *   - 单目录 + sidecar:上传写 param-mappings/<paramModel>.xml(+ .custom 标记,仅新建)。
+ *   - 重复允许覆盖(二次确认):本地预检(清单 name / 文件名比对)或后端 409
+ *     (data.overwritable=true)→ Modal.confirm「已存在,确认覆盖?」→ 确认后带
+ *     force=true 重试,后端覆盖归属文件并自动备份旧文件 .bak.<ts>。
  *   - 后端上传端点内部自动 destructive 重载(删孤儿)+ 刷新缓存,前端无需单独调。
  */
 import { useState } from 'react';
-import { Card, Button, Space, message, Upload, Modal, Input, Form } from 'antd';
+import { Card, Button, Space, message, Upload, Modal, Form, Typography } from 'antd';
 import type { UploadFile } from 'antd';
 import { InboxOutlined, UploadOutlined } from '@ant-design/icons';
 import {
@@ -28,43 +29,43 @@ import {
   useUploadParamModelXML,
 } from '@core/hooks/api/useParamModels';
 import type { AxiosError } from 'axios';
+import { extractXmlRootAttr } from '@core/utils/xmlRootAttr';
 import ModelsTab from './ModelsTab';
 import MappingsTab from './MappingsTab';
 import SearchInput from '@/components/SearchInput';
 import { useT } from '@/hooks/useT';
-
-// 名称白名单:与后端 validateUploadFilename 的正则对齐(不含 .xml 扩展名部分)。
-const NAME_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
 export default function ParamModelPage() {
   const t = useT();
   const [selectedModelName, setSelectedModelName] = useState<string | undefined>();
   const [keyword, setKeyword] = useState('');
   const uploadMut = useUploadParamModelXML();
-  // 上传前查重数据源:已存在的参数模型清单(按 loadedFrom basename 比对文件名)。
+  // 上传前查重数据源:已存在的参数模型清单(按 name / loadedFrom basename 比对)。
   const { data: modelListData } = useParamModelList();
 
   // 导入弹框状态
   const [importOpen, setImportOpen] = useState(false);
-  const [importName, setImportName] = useState('');
   const [importFile, setImportFile] = useState<File | undefined>();
-  const [nameError, setNameError] = useState<string | undefined>();
+  // 选文件后从 XML paramModel 属性提取的名称(将保存为 <paramModel>.xml);null = 未提取到
+  const [derivedName, setDerivedName] = useState<string | null>(null);
+  const [importError, setImportError] = useState<string | undefined>();
 
   const inDetail = Boolean(selectedModelName);
 
-  // 文件名查重:与已存在模型的 loadedFrom basename 大小写不敏感比对(预检查)。
-  const isDuplicateFile = (fileName: string): boolean => {
-    const target = fileName.toLowerCase();
+  // 查重:与已存在模型的 name / loadedFrom basename 大小写不敏感比对(预检查)。
+  const isDuplicate = (name: string): boolean => {
+    const lower = name.toLowerCase();
+    const target = `${lower}.xml`;
     return (modelListData?.items || []).some((m) => {
       const base = (m.loadedFrom || '').split('/').pop()?.toLowerCase() ?? '';
-      return base === target;
+      return base === target || m.name.toLowerCase() === lower;
     });
   };
 
   const resetImport = () => {
-    setImportName('');
     setImportFile(undefined);
-    setNameError(undefined);
+    setDerivedName(null);
+    setImportError(undefined);
   };
 
   const closeImport = () => {
@@ -72,48 +73,60 @@ export default function ParamModelPage() {
     resetImport();
   };
 
-  // 名称变更:清掉上一次的内联错误,交给提交时再校验。
-  const onNameChange = (v: string) => {
-    setImportName(v);
-    if (nameError) setNameError(undefined);
+  // 实际上传(force = 二次确认后的覆盖);成功后关弹窗,失败统一提示。
+  const doUpload = (file: File, force: boolean) => {
+    uploadMut
+      .mutateAsync({ file, force })
+      .then((r) => {
+        message.success(
+          r.overwritten
+            ? t('product.upload.overwriteSuccess', { file: r.filename })
+            : t('product.paramModel.importSuccess', { file: r.filename }),
+        );
+        closeImport();
+      })
+      .catch((e: unknown) => {
+        const ax = e as AxiosError<{ msg?: string; message?: string; data?: { overwritable?: boolean } }>;
+        const body = ax.response?.data;
+        const msg =
+          body?.msg ?? body?.message ?? (e instanceof Error ? e.message : String(e));
+        // 409 + overwritable(本地预检漏判的重复)→ 弹确认覆盖
+        if (!force && ax.response?.status === 409 && body?.data?.overwritable) {
+          confirmOverwrite(derivedName ?? '', () => doUpload(file, true));
+          return;
+        }
+        message.error(msg);
+      });
+  };
+
+  // 覆盖二次确认弹框 —— 确认后才带 force=true 重试。
+  const confirmOverwrite = (name: string, onOk: () => void) => {
+    Modal.confirm({
+      title: t('product.upload.overwriteConfirmTitle'),
+      content: t('product.upload.overwriteConfirmContent', { name }),
+      okText: t('common.confirm'),
+      cancelText: t('common.cancel'),
+      okButtonProps: { danger: true },
+      onOk,
+    });
   };
 
   const submitImport = () => {
-    const name = importName.trim();
-    if (!name) {
-      setNameError(t('product.paramModel.nameRequired'));
-      return;
-    }
-    if (!NAME_PATTERN.test(name)) {
-      setNameError(t('product.paramModel.nameInvalid'));
-      return;
-    }
     if (!importFile) {
       message.warning(t('product.paramModel.fileRequired'));
       return;
     }
-    // 提交前本地查重:<name>.xml 已存在 → 内联报错,不发请求。
-    if (isDuplicateFile(`${name}.xml`)) {
-      setNameError(t('product.paramModel.nameExists'));
+    // paramModel 属性是名称唯一来源 —— 读不到直接拒绝(后端也会 400)。
+    if (!derivedName) {
+      setImportError(t('product.upload.missingAttr', { attr: 'paramModel' }));
       return;
     }
-    uploadMut
-      .mutateAsync({ file: importFile, name })
-      .then((r) => {
-        message.success(t('product.paramModel.importSuccess', { file: r.filename }));
-        closeImport();
-      })
-      .catch((e: unknown) => {
-        const ax = e as AxiosError<{ message?: string }>;
-        // 409 → 文件名或模型名已存在 → 内联改名提示(不覆盖)。
-        if (ax.response?.status === 409) {
-          setNameError(t('product.paramModel.nameExists'));
-          return;
-        }
-        const msg =
-          ax.response?.data?.message ?? (e instanceof Error ? e.message : String(e));
-        message.error(msg);
-      });
+    // 提交前本地查重:模型已存在 → 弹覆盖确认(后端 409 仍是兜底真值源)。
+    if (isDuplicate(derivedName)) {
+      confirmOverwrite(derivedName, () => doUpload(importFile, true));
+      return;
+    }
+    doUpload(importFile, false);
   };
 
   // antd Upload:仅用于选文件(beforeUpload 拦截自动上传),实际上传走 submitImport。
@@ -157,7 +170,7 @@ export default function ParamModelPage() {
         />
       )}
 
-      {/* 导入 XML 弹框:必填名称 + 选文件;双唯一性硬拒,无覆盖。 */}
+      {/* 导入 XML 弹框:仅选文件(名称取自 XML paramModel 属性);双唯一性硬拒,无覆盖。 */}
       <Modal
         title={t('common.importXml')}
         open={importOpen}
@@ -170,32 +183,35 @@ export default function ParamModelPage() {
       >
         <Form layout="vertical">
           <Form.Item
-            label={t('product.paramModel.nameLabel')}
+            label={t('product.paramModel.fileLabel')}
             required
-            validateStatus={nameError ? 'error' : undefined}
-            help={nameError ?? t('product.paramModel.nameHelp')}
+            validateStatus={importError ? 'error' : undefined}
+            help={importError ?? t('product.paramModel.nameAutoHint')}
           >
-            <Input
-              value={importName}
-              onChange={(e) => onNameChange(e.target.value)}
-              placeholder={t('product.paramModel.namePlaceholder')}
-              maxLength={64}
-              allowClear
-            />
-          </Form.Item>
-          <Form.Item label={t('product.paramModel.fileLabel')} required>
             <Upload
               accept=".xml"
               maxCount={1}
               fileList={fileList}
               beforeUpload={(f) => {
                 setImportFile(f as File);
+                setImportError(undefined);
+                // 选文件即抽 paramModel 属性,预览"将保存为 <paramModel>.xml"
+                void extractXmlRootAttr(f as File, 'paramModel').then((n) => setDerivedName(n));
                 return false; // 阻止 antd 自动上传,文件由 submitImport 提交
               }}
-              onRemove={() => setImportFile(undefined)}
+              onRemove={() => {
+                setImportFile(undefined);
+                setDerivedName(null);
+                setImportError(undefined);
+              }}
             >
               <Button icon={<UploadOutlined />}>{t('product.paramModel.selectFile')}</Button>
             </Upload>
+            {derivedName && (
+              <Typography.Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
+                {t('product.upload.savedAs', { name: derivedName })}
+              </Typography.Text>
+            )}
           </Form.Item>
         </Form>
       </Modal>

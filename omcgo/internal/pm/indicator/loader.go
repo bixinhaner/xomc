@@ -116,24 +116,17 @@ func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
 	}
 	enbDocs := l.parseDocs(enbSources, &rep, "" /*platformFallback inferred per-file*/)
 
-	// GSM:根级单文件 GSM.xml + 子目录 indicator-library/gsm/*.xml(custom 落地处)
-	gsmSources, err := resolveSingleTechSources(
-		l.base,
-		filepath.Join(l.cfg.BaseDirectory, l.cfg.GsmFile),
-		filepath.Join(l.cfg.BaseDirectory, "gsm"),
-	)
+	// GSM:indicator-library/ 根级文件(出厂 GSM.xml 按文件名、自定义上传按 XML
+	// deviceType 属性分类)。目录调整(2026-06-05):取消 gsm/ 子目录。
+	gsmSources, err := resolveRootTechSources(l.base, l.cfg.BaseDirectory, "gsm")
 	if err != nil {
 		rep.AddError("gsm", "resolve", err)
 		return rep, fmt.Errorf("resolve gsm sources: %w", err)
 	}
 	gsmDocs := l.parseDocs(gsmSources, &rep, "BSC")
 
-	// GNB:同 GSM 结构(根级 GNB.xml + 子目录 indicator-library/gnb/*.xml)
-	gnbSources, err := resolveSingleTechSources(
-		l.base,
-		filepath.Join(l.cfg.BaseDirectory, l.cfg.GnbFile),
-		filepath.Join(l.cfg.BaseDirectory, "gnb"),
-	)
+	// GNB:同 GSM(根级,deviceType=GNB)
+	gnbSources, err := resolveRootTechSources(l.base, l.cfg.BaseDirectory, "gnb")
 	if err != nil {
 		rep.AddError("gnb", "resolve", err)
 		return rep, fmt.Errorf("resolve gnb sources: %w", err)

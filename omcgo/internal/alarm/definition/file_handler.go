@@ -23,7 +23,7 @@ import (
 
 // FileHandler 提供告警库 XML 文件粒度的上传/删除端点。告警库 XML 管理重构后,
 // "导入 XML / 重载 XML / 刷新缓存"三个功能合并为一个 upload-xml 端点:
-//   - POST   /api/v1/alarm-definitions/upload-xml — name + 双唯一性硬拒(无 force) + 写 sidecar
+//   - POST   /api/v1/alarm-definitions/upload-xml — 名称取自 XML neType 属性 + 双唯一性硬拒(无 force) + 写 sidecar
 //     → destructive 全量重载(删孤儿)→ RefreshCache,顺序完成
 //   - DELETE /api/v1/alarm-definitions/files/{*loadedFrom}  — 删除 XML 文件 + sidecar + DB 行 + RefreshCache
 //
@@ -49,11 +49,42 @@ func NewFileHandler(repo FileRepository, service *Service, reloader Reloader, ba
 
 // RegisterRoutes 挂在 /api/v1 之下;内部使用 /alarm-definitions/... 子路径。
 // gin 的 *loadedFrom 是 catch-all wildcard,承载 "alarm-definitions/MY.xml" 多段相对路径。
+// 下载用 ?loaded_from= query(而非 wildcard path),避免与既有 GET 路由冲突且免编码斜杠。
 func (h *FileHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	g := rg.Group("/alarm-definitions")
 	g.POST("/upload-xml", h.UploadXML)
+	g.GET("/file-content", h.DownloadFile)
 	files := g.Group("/files")
 	files.DELETE("/*loadedFrom", h.DeleteFile)
+}
+
+// DownloadFile GET /api/v1/alarm-definitions/file-content?loaded_from=alarm-definitions/<file>.xml
+//
+// 下载 XML 原文件(2026-06-05 操作列下载功能)。builtin 与 custom 均可下载(只读无守门);
+// 路径校验与 DeleteFile 同口径:validAlarmFilePath + pathContainedIn 双重防遍历。
+func (h *FileHandler) DownloadFile(c *gin.Context) {
+	raw := strings.TrimSpace(c.Query("loaded_from"))
+	loadedFrom := filepath.ToSlash(filepath.Clean(raw))
+	if raw == "" || !validAlarmFilePath(loadedFrom) {
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			fmt.Errorf("invalid loaded_from %q (expected %s<file>.xml)", raw, BuiltinDirPrefix))
+		return
+	}
+	absPath := filepath.Join(h.baseDir, loadedFrom)
+	if !pathContainedIn(filepath.Join(h.baseDir, BuiltinDirSubdir), absPath) {
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			fmt.Errorf("path %q escapes alarm dir", loadedFrom))
+		return
+	}
+	if _, err := os.Stat(absPath); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
+			return
+		}
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, fmt.Errorf("stat xml: %w", err))
+		return
+	}
+	c.FileAttachment(absPath, filepath.Base(absPath))
 }
 
 // acquireFileLock 取/建 per-basename mutex,Upload / Delete 共享,防同名文件并发写半截。
@@ -197,24 +228,29 @@ func (h *FileHandler) DeleteFile(c *gin.Context) {
 	})
 }
 
-// UploadXML POST /api/v1/alarm-definitions/upload-xml
+// UploadXML POST /api/v1/alarm-definitions/upload-xml[?force=true]
 //
-// multipart/form-data;字段 name(必填,用户指定的唯一名称,不含扩展名) + file(XML 字节流)。
-// 目标文件名 = <name>.xml,写进单目录 alarm-definitions/(Loader 扫描的同一目录),
-// 同时写 sidecar(<name>.xml.custom)标记为用户上传。上传文件自身的 filename 被忽略。
+// multipart/form-data;字段 file(XML 字节流)。
 //
-// 设计(2026-06-04 锁定决策 D3/D5/D6):单目录 + sidecar;上传 = name + 双唯一性硬拒(无 force)。
+// 名称取消手填(2026-06-05 导入 XML 调整):唯一名称取自 XML <alarmModel neType="...">
+// 属性,目标文件名 = <neType>.xml,写进单目录 alarm-definitions/(Loader 扫描的同一目录)。
+// 上传文件自身的 filename 被忽略。
+//
+// 重复允许覆盖(2026-06-05 调整,需前端二次确认):
+//   - 重复判定:neType 已在 DB(LoadedFromsByNeType 定位归属文件)或 <neType>.xml 已在盘上
+//   - 无 ?force=true → 409,响应 data.overwritable=true,前端弹确认框
+//   - ?force=true → 覆盖归属文件(原文件先备份 .bak.<ts>,backup_cleanup 周期清理);
+//     覆盖内置文件时保持 builtin 身份(不写 sidecar,仍不可删),覆盖自定义保持 custom
+//
 // 守门链(顺序敏感,任一失败即 400/409):
-//  1. name:validateUploadFilename(name+".xml") 白名单正则
-//  2. 大小:file.Size <= MaxUploadXMLSize (1 MiB)
-//  3. 内容:validateUploadXML 根元素 = <alarmModel>
-//  4. 路径:filepath.Join(builtinDir, <name>.xml) 经 pathContainedIn 二次验证不逃逸
-//     5a. 文件名唯一性:<name>.xml 已存在 → 409(请改名),不覆盖、不备份
-//     5b. 内容主键唯一性(§7.1):XML 推断的 neType 已在 DB(来自其它文件)→ 409
+//  1. 大小:file.Size <= MaxUploadXMLSize (1 MiB)
+//  2. 内容:validateUploadXML 根元素 = <alarmModel>
+//  3. 名称:neType 属性必填;validateUploadFilename(neType+".xml") 白名单正则
+//  4. 路径:目标路径经 pathContainedIn 二次验证不逃逸
+//  5. 重复 + force 判定(见上)
 //
-// neType 推断与 Loader 一致:优先 <alarmModel neType="..."> 属性,缺省回退文件名(去 .xml 大写)。
-// 写入:tmp → rename → 写 sidecar(失败回滚 XML → 500) → destructive 全量重载(删孤儿)→ RefreshCache。
-// 后三步失败只 Warn 不致命(文件已落盘)。
+// 写入:[备份旧文件 →] tmp → rename → sidecar(仅新建)→ destructive 全量重载(删孤儿)
+// → RefreshCache。后两步失败只 Warn 不致命(文件已落盘)。
 func (h *FileHandler) UploadXML(c *gin.Context) {
 	fh, err := c.FormFile("file")
 	if err != nil {
@@ -223,19 +259,7 @@ func (h *FileHandler) UploadXML(c *gin.Context) {
 		return
 	}
 
-	// 校验 1: name 表单字段(目标文件名 = <name>.xml);上传文件自身的 filename 被忽略。
-	name := strings.TrimSpace(c.PostForm("name"))
-	base := name + ".xml"
-	if err := validateUploadFilename(base); err != nil {
-		h.logger.Info("audit: alarm upload rejected (invalid name)",
-			zap.String("audit_action", "alarm.upload.rejected_invalid_name"),
-			zap.String("name", name), zap.String("basename", base))
-		commonerrors.AbortWithError(c, http.StatusBadRequest,
-			fmt.Errorf("%w [code=%d]", err, global.ErrCodeAlarmUploadInvalidName))
-		return
-	}
-
-	// 校验 2: 大小
+	// 校验 1: 大小
 	if fh.Size > MaxUploadXMLSize {
 		h.logger.Info("audit: alarm upload rejected (too large)",
 			zap.String("audit_action", "alarm.upload.rejected_too_large"),
@@ -258,88 +282,144 @@ func (h *FileHandler) UploadXML(c *gin.Context) {
 		return
 	}
 
-	// 校验 3: XML 根元素 = <alarmModel>
+	// 校验 2: XML 根元素 = <alarmModel>
 	if err := validateUploadXML(body); err != nil {
 		h.logger.Info("audit: alarm upload rejected (invalid xml)",
 			zap.String("audit_action", "alarm.upload.rejected_invalid_xml"),
-			zap.String("filename", base), zap.Error(err))
+			zap.String("filename", fh.Filename), zap.Error(err))
 		commonerrors.AbortWithError(c, http.StatusBadRequest,
 			fmt.Errorf("%w [code=%d]", err, global.ErrCodeAlarmUploadInvalidRoot))
 		return
 	}
 
-	// 内容主键(neType)推断 —— 与 Loader.loadAlarmFile 同口径:优先 XML neType 属性,
-	// 缺省回退文件名(去 .xml 大写)。
-	neType := parseUploadedNeType(body, base)
+	// 校验 3: 名称提取 —— 唯一来源 XML <alarmModel neType="..."> 属性(取消手填 name)。
+	// 内容主键与目标文件名同源:neType,与 Loader.loadAlarmFile 同口径。
+	neType := parseUploadedNeType(body)
+	if neType == "" {
+		h.logger.Info("audit: alarm upload rejected (missing neType)",
+			zap.String("audit_action", "alarm.upload.rejected_missing_ne_type"),
+			zap.String("filename", fh.Filename))
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			fmt.Errorf("alarmModel XML 缺少 neType 属性,无法确定名称 [code=%d]",
+				global.ErrCodeAlarmUploadInvalidName))
+		return
+	}
+	base := neType + ".xml"
+	if err := validateUploadFilename(base); err != nil {
+		h.logger.Info("audit: alarm upload rejected (invalid neType-derived name)",
+			zap.String("audit_action", "alarm.upload.rejected_invalid_name"),
+			zap.String("ne_type", neType), zap.String("basename", base))
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			fmt.Errorf("neType「%s」不能作为文件名:%w [code=%d]",
+				neType, err, global.ErrCodeAlarmUploadInvalidName))
+		return
+	}
 
-	// 校验 4: 单目录写入 + 路径不逃逸
+	force := c.Query("force") == "true"
+
+	// 校验 4/5: 定位目标文件 + 重复判定。
+	// 内容主键(neType)已在 DB → 归属文件即覆盖目标;否则落 <neType>.xml,
+	// 盘上已存在(uploaded-but-not-loaded)同样视为重复。
 	builtinDir := filepath.Join(h.baseDir, BuiltinDirSubdir)
 	targetPath := filepath.Join(builtinDir, base)
+	loadedFrom := filepath.ToSlash(filepath.Join(BuiltinDirSubdir, base))
+	conflict := false
+
+	owners, err := h.repo.LoadedFromsByNeType(c.Request.Context(), neType)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if len(owners) > 0 {
+		// 归属路径异常(历史脏数据)时回退派生路径,destructive 重载会清孤儿行
+		conflict = true
+		if validAlarmFilePath(owners[0]) {
+			loadedFrom = owners[0]
+			targetPath = filepath.Join(h.baseDir, loadedFrom)
+		}
+	}
 	if !pathContainedIn(builtinDir, targetPath) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest,
 			fmt.Errorf("computed target path %q escapes builtin dir %q", targetPath, builtinDir))
 		return
 	}
-
-	unlock := h.acquireFileLock(base)
-	defer unlock()
-
-	if err := os.MkdirAll(builtinDir, 0o755); err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, fmt.Errorf("mkdir builtin dir: %w", err))
-		return
-	}
-
-	// 校验 5a: 文件名唯一性 —— <name>.xml 已存在 → 409,不覆盖、不备份(请改名)。
 	if _, statErr := os.Stat(targetPath); statErr == nil {
-		h.logger.Info("audit: alarm upload rejected (filename exists)",
-			zap.String("audit_action", "alarm.upload.rejected_name_exists"),
-			zap.String("filename", base))
-		commonerrors.AbortWithError(c, http.StatusConflict,
-			fmt.Errorf("filename %q already exists; please rename", base))
-		return
+		conflict = true
 	} else if !errors.Is(statErr, fs.ErrNotExist) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, fmt.Errorf("stat target: %w", statErr))
 		return
 	}
 
-	// 校验 5b: 内容主键唯一性 —— 推断的 neType 已在 DB(来自其它文件)→ 409。
-	exists, err := h.repo.NeTypeExists(c.Request.Context(), neType)
-	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
-		return
-	}
-	if exists {
-		h.logger.Info("audit: alarm upload rejected (ne_type exists)",
-			zap.String("audit_action", "alarm.upload.rejected_ne_type_exists"),
-			zap.String("filename", base), zap.String("ne_type", neType))
-		commonerrors.AbortWithError(c, http.StatusConflict,
-			fmt.Errorf("content key (ne_type %q) already exists; please use a different alarmModel", neType))
+	// 重复且未带 force → 409 + overwritable 标记,前端弹二次确认后带 ?force=true 重试。
+	if conflict && !force {
+		h.logger.Info("audit: alarm upload conflict (needs confirm)",
+			zap.String("audit_action", "alarm.upload.conflict_needs_confirm"),
+			zap.String("ne_type", neType), zap.String("loaded_from", loadedFrom))
+		c.AbortWithStatusJSON(http.StatusConflict, gin.H{
+			"ret": 0,
+			"msg": fmt.Sprintf("neType「%s」已存在(%s),确认后可覆盖", neType, loadedFrom),
+			"data": gin.H{
+				"overwritable": true,
+				"ne_type":      neType,
+				"loaded_from":  loadedFrom,
+			},
+		})
 		return
 	}
 
-	// 1. tmp 写入 → 原子 rename 上线(文件名唯一性已保证 target 不存在)。
+	unlock := h.acquireFileLock(filepath.Base(targetPath))
+	defer unlock()
+
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, fmt.Errorf("mkdir builtin dir: %w", err))
+		return
+	}
+
+	// 覆盖场景:先把旧文件备份为 .bak.<ts>(worker backup_cleanup 周期清理)。
+	// 覆盖后保持原 builtin/custom 身份:builtin 不写 sidecar(仍不可删),
+	// custom 的 sidecar 不随 rename 移动、本就在位。
+	overwriting := false
+	backupPath := ""
+	if _, statErr := os.Stat(targetPath); statErr == nil {
+		overwriting = true
+		backupPath = targetPath + ".bak." + time.Now().Format("20060102150405")
+		if err := os.Rename(targetPath, backupPath); err != nil {
+			commonerrors.AbortWithError(c, http.StatusInternalServerError,
+				fmt.Errorf("backup existing xml before overwrite: %w", err))
+			return
+		}
+	}
+
+	// 1. tmp 写入 → 原子 rename 上线;失败回滚备份。
 	tmpPath := targetPath + ".tmp." + uniqueSuffix()
 	defer os.Remove(tmpPath) // 兜底:rename 成功后 tmp 已不存在,Remove 返 ENOENT 无害
-	if err := os.WriteFile(tmpPath, body, 0o644); err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, fmt.Errorf("write tmp: %w", err))
-		return
+	writeErr := os.WriteFile(tmpPath, body, 0o644)
+	if writeErr == nil {
+		writeErr = os.Rename(tmpPath, targetPath)
 	}
-	if err := os.Rename(tmpPath, targetPath); err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, fmt.Errorf("rename tmp to target: %w", err))
-		return
-	}
-
-	// 2. 写 sidecar 标记(<name>.xml.custom 空文件)。失败 → 回滚已写 XML → 500。
-	if err := os.WriteFile(targetPath+CustomMarkerSuffix, nil, 0o644); err != nil {
-		if rmErr := os.Remove(targetPath); rmErr != nil {
-			h.logger.Error("rollback uploaded xml after sidecar write failed; host state inconsistent",
-				zap.String("target_path", targetPath), zap.Error(rmErr))
+	if writeErr != nil {
+		if backupPath != "" {
+			if rbErr := os.Rename(backupPath, targetPath); rbErr != nil {
+				h.logger.Error("rollback backup rename failed; host state inconsistent",
+					zap.String("backup_path", backupPath), zap.Error(rbErr))
+			}
 		}
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, fmt.Errorf("write sidecar marker: %w", err))
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, fmt.Errorf("write target: %w", writeErr))
 		return
 	}
 
-	loadedFrom := filepath.ToSlash(filepath.Join(BuiltinDirSubdir, base))
+	// 2. sidecar 标记(<neType>.xml.custom 空文件):仅"新建"写入(= custom 可删);
+	// 覆盖保持原身份(见上)。失败 → 回滚已写 XML → 500。
+	if !overwriting {
+		if err := os.WriteFile(targetPath+CustomMarkerSuffix, nil, 0o644); err != nil {
+			if rmErr := os.Remove(targetPath); rmErr != nil {
+				h.logger.Error("rollback uploaded xml after sidecar write failed; host state inconsistent",
+					zap.String("target_path", targetPath), zap.Error(rmErr))
+			}
+			commonerrors.AbortWithError(c, http.StatusInternalServerError, fmt.Errorf("write sidecar marker: %w", err))
+			return
+		}
+	}
 
 	// 3. 导入 = 写文件 → destructive 全量重载(删孤儿) → RefreshCache,顺序完成。
 	// 任一后续步骤失败只 Warn 不致命(文件已落盘,DB 最多落后一拍)。
@@ -368,35 +448,41 @@ func (h *FileHandler) UploadXML(c *gin.Context) {
 
 	h.refreshCache(c.Request.Context())
 
+	backupName := ""
+	if backupPath != "" {
+		backupName = filepath.Base(backupPath)
+	}
 	h.logger.Info("audit: alarm file uploaded",
 		zap.String("audit_action", "alarm.upload.success"),
 		zap.String("loaded_from", loadedFrom),
 		zap.String("ne_type", neType),
 		zap.Int("body_size", len(body)),
+		zap.Bool("overwritten", overwriting),
+		zap.String("backup", backupName),
 		zap.Bool("reload_ok", reloadOK),
 		zap.Int64("orphans_deleted", orphansDeleted))
 
 	response.OKWithStatus(c, http.StatusCreated, gin.H{
 		"uploaded":        true,
-		"filename":        base,
+		"filename":        filepath.Base(targetPath),
 		"loaded_from":     loadedFrom,
 		"ne_type":         neType,
+		"overwritten":     overwriting,
+		"backup":          backupName,
 		"reloaded":        reloadOK,
 		"orphans_deleted": orphansDeleted,
 	})
 }
 
-// parseUploadedNeType 推断上传 XML 的 ne_type 内容主键,与 Loader.loadAlarmFile 同口径:
-// 优先 <alarmModel neType="..."> 属性;缺省回退文件名(去 .xml,大写)。
-// 解析失败(已被 validateUploadXML 过 well-formedness,极少触发)同样回退文件名。
-func parseUploadedNeType(raw []byte, base string) string {
+// parseUploadedNeType 提取上传 XML 的 <alarmModel neType="..."> 属性。
+// 2026-06-05 导入 XML 调整:neType 是名称与内容主键的唯一来源(取消手填 name +
+// 文件名回退),缺失 / 解析失败返空,由调用方拒绝(400)。
+func parseUploadedNeType(raw []byte) string {
 	var doc xmlAlarmModel
-	if err := xml.Unmarshal(raw, &doc); err == nil {
-		if nt := strings.TrimSpace(doc.NeType); nt != "" {
-			return nt
-		}
+	if err := xml.Unmarshal(raw, &doc); err != nil {
+		return ""
 	}
-	return strings.ToUpper(strings.TrimSuffix(base, filepath.Ext(base)))
+	return strings.TrimSpace(doc.NeType)
 }
 
 // EnsureBaseDir 确保 baseDir/<BuiltinDirSubdir>/ 目录存在(0755)。启动期由 provider 调用。

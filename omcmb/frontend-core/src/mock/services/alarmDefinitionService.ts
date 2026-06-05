@@ -13,6 +13,8 @@ import {
   mockAlarmSeverityLevels,
   mockUnknownStats,
 } from '../data/alarmDefinition';
+import { extractXmlRootAttr } from '../../utils/xmlRootAttr';
+import { saveBlob } from '../../utils/saveBlob';
 
 let definitions = [...mockAlarmDefinitions];
 
@@ -145,14 +147,24 @@ export const alarmDefinitionService = {
     return { items: Array.from(grouped.values()).sort((a, b) => a.neType.localeCompare(b.neType)) };
   },
 
-  async uploadXml(_file: File, name: string): Promise<AlarmUploadResult> {
+  // mock 上传:名称取自 XML neType 属性(与后端同口径);读不到回退 'CUSTOM'。
+  // force = 二次确认后的覆盖(mock 不真存盘,直接回成功)。
+  async uploadXml(file: File, force = false): Promise<AlarmUploadResult> {
+    const neType = (await extractXmlRootAttr(file, 'neType')) ?? 'CUSTOM';
     return {
       uploaded: true,
-      filename: `${name}.xml`,
-      loadedFrom: `alarm-definitions/${name}.xml`,
-      neType: name.toUpperCase(),
+      filename: `${neType}.xml`,
+      loadedFrom: `alarm-definitions/${neType}.xml`,
+      neType,
+      overwritten: force,
       reloaded: true,
     };
+  },
+
+  // mock 下载:生成占位 XML 触发浏览器另存(无真实文件)。
+  async downloadXml(loadedFrom: string): Promise<void> {
+    const name = loadedFrom.split('/').pop() || 'alarm.xml';
+    saveBlob(`<?xml version="1.0" encoding="UTF-8"?>\n<!-- mock ${name} -->\n<alarmModel neType="${name.replace(/\.xml$/i, '')}"></alarmModel>\n`, name);
   },
 
   async deleteFile(loadedFrom: string): Promise<AlarmDeleteFileResult> {

@@ -130,9 +130,11 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	g := rg.Group("/param-models")
 	// 集中操作（无 :name）
 	g.GET("", h.ListModels)
-	// 导入 XML：name + 双唯一性硬拒(无 force) + 写 sidecar → destructive 重载(全量+删孤儿)
-	// → 刷新缓存，在单端点内顺序完成（合并了旧的 import-directory / cache-refresh）。
+	// 导入 XML:名称取自 XML paramModel 属性 + 重复二次确认覆盖(?force=true)→
+	// destructive 重载(全量+删孤儿)→ 刷新缓存,在单端点内顺序完成。
 	g.POST("/upload-xml", h.UploadXML)
+	// 下载 XML 原文件(?loaded_from= query;静态段优先于下方 /:name 参数路由)
+	g.GET("/file-content", h.DownloadFile)
 	g.POST("/translate", h.Translate)
 	// 标准参数树（位于 /param-models/standard 子路径）
 	g.GET("/standard", h.ListStandard)
@@ -351,21 +353,26 @@ func (h *Handler) DeleteModel(c *gin.Context) {
 
 // UploadXML 导入 paramModel XML —— "导入 XML" 合并端点(三库 XML 导入重构 D3/D5/D6)。
 //
-// POST /api/v1/param-models/upload-xml
+// POST /api/v1/param-models/upload-xml[?force=true]
 // Content-Type: multipart/form-data
-// Fields: name(必填,用户指定的唯一名称,不含扩展名) + file(XML 内容)
+// Fields: file(XML 内容)
 //
-// 设计(2026-06-04 锁定决策):单目录 + sidecar;上传 = name + 双唯一性硬拒(无 force);
-// 文件名 = <name>.xml,直接写 builtin 目录(Loader 扫描的同一目录 param-mappings/),
-// 同时写 sidecar(<name>.xml.custom)标记为用户上传。上传文件自身的 filename 被忽略。
+// 名称取消手填(2026-06-05 导入 XML 调整):唯一名称取自 XML <parameterModel paramModel="...">
+// 属性,文件名 = <paramModel>.xml,直接写 builtin 目录(Loader 扫描的同一目录 param-mappings/)。
+// 上传文件自身的 filename 被忽略。
+//
+// 重复允许覆盖(2026-06-05 调整,需前端二次确认):
+//   - 重复判定:paramModel 名已在 DB(GetParamModelByName 定位归属文件)或 <paramModel>.xml 已在盘上
+//   - 无 ?force=true → 409,响应 data.overwritable=true,前端弹确认框
+//   - ?force=true → 覆盖归属文件(原文件先备份 .bak.<ts>);覆盖内置保持 builtin 身份
+//     (不写 sidecar,仍不可删),覆盖自定义保持 custom
 //
 // 校验链(顺序敏感,任一失败即 400/409,审计明确拒绝原因):
-//  1. name:validateUploadFilename(name+".xml") 白名单正则 + 保留名拦截
-//  2. 大小:file.Size <= MaxUploadXMLSize (1 MiB)
-//  3. 内容:validateUploadXML 根元素 = <parameterModel>
-//  4. 路径:filepath.Join(builtinDir, <name>.xml) 经 pathContainedIn 二次验证不逃逸
-//  5. 文件名唯一性:<name>.xml 已存在 → 409(请改名),不覆盖、不备份
-//  6. 内容主键唯一性(§7.1):XML 的 <parameterModel name="..."> 已在 DB → 409(模型名已存在)
+//  1. 大小:file.Size <= MaxUploadXMLSize (1 MiB)
+//  2. 内容:validateUploadXML 根元素 = <parameterModel>
+//  3. 名称:paramModel 属性必填;validateUploadFilename(<paramModel>+".xml") 白名单正则 + 保留名拦截
+//  4. 路径:目标路径经 pathContainedIn 二次验证不逃逸
+//  5. 重复 + force 判定(见上)
 //
 // 写入流程(全程 per-filename 锁):
 //  1. 确保 builtinDir 存在(MkdirAll,首次上传场景)
@@ -388,20 +395,7 @@ func (h *Handler) UploadXML(c *gin.Context) {
 		return
 	}
 
-	// 校验 1: name 表单字段(目标文件名 = <name>.xml);上传文件自身的 filename 被忽略
-	name := strings.TrimSpace(c.PostForm("name"))
-	base := name + ".xml"
-	if err := validateUploadFilename(base); err != nil {
-		h.logger.Info("audit: upload rejected (invalid name)",
-			zap.String("audit_action", "parammodel.upload.rejected_invalid_name"),
-			zap.String("name", name),
-			zap.String("basename", base),
-			zap.Error(err))
-		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
-		return
-	}
-
-	// 校验 2: 大小
+	// 校验 1: 大小
 	if file.Size <= 0 {
 		commonerrors.AbortWithError(c, http.StatusBadRequest,
 			fmt.Errorf("file size must be positive, got %d", file.Size))
@@ -410,7 +404,7 @@ func (h *Handler) UploadXML(c *gin.Context) {
 	if file.Size > MaxUploadXMLSize {
 		h.logger.Info("audit: upload rejected (size limit)",
 			zap.String("audit_action", "parammodel.upload.rejected_too_large"),
-			zap.String("filename", base),
+			zap.String("filename", file.Filename),
 			zap.Int64("size", file.Size),
 			zap.Int64("limit", MaxUploadXMLSize))
 		commonerrors.AbortWithError(c, http.StatusBadRequest,
@@ -442,14 +436,64 @@ func (h *Handler) UploadXML(c *gin.Context) {
 	if err := validateUploadXML(raw); err != nil {
 		h.logger.Info("audit: upload rejected (invalid xml)",
 			zap.String("audit_action", "parammodel.upload.rejected_invalid_xml"),
-			zap.String("filename", base),
+			zap.String("filename", file.Filename),
 			zap.Error(err))
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 
-	// 校验 4: 路径包含性二次防御
+	// 校验 3: 名称提取 —— 唯一来源 XML <parameterModel paramModel="..."> 属性
+	// (取消手填 name);内容主键与目标文件名同源。真值源 model.go xmlParameterModel。
+	var doc xmlParameterModel
+	if err := xml.Unmarshal(raw, &doc); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			fmt.Errorf("解析 parameterModel XML 失败: %w", err))
+		return
+	}
+	modelName := strings.TrimSpace(doc.ParamModel)
+	if modelName == "" {
+		h.logger.Info("audit: upload rejected (missing paramModel attr)",
+			zap.String("audit_action", "parammodel.upload.rejected_missing_param_model"),
+			zap.String("filename", file.Filename))
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			fmt.Errorf("参数模型 XML 缺少 paramModel 属性,无法确定名称"))
+		return
+	}
+	base := modelName + ".xml"
+	if err := validateUploadFilename(base); err != nil {
+		h.logger.Info("audit: upload rejected (invalid paramModel-derived name)",
+			zap.String("audit_action", "parammodel.upload.rejected_invalid_name"),
+			zap.String("model_name", modelName),
+			zap.String("basename", base),
+			zap.Error(err))
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			fmt.Errorf("paramModel「%s」不能作为文件名:%w", modelName, err))
+		return
+	}
+
+	force := c.Query("force") == "true"
+
+	// 校验 4/5: 定位目标文件 + 重复判定。
+	// 内容主键(paramModel 名)已在 DB → 归属文件即覆盖目标;否则落 <paramModel>.xml,
+	// 盘上已存在(uploaded-but-not-loaded)同样视为重复。
 	targetPath := filepath.Join(h.builtinDir, base)
+	conflict := false
+	existingPM, err := h.repo.GetParamModelByName(c.Request.Context(), modelName)
+	switch {
+	case err == nil:
+		conflict = true
+		if existingPM.LoadedFrom != "" {
+			if p := filepath.Join(h.baseDir, existingPM.LoadedFrom); pathContainedIn(h.builtinDir, p) {
+				targetPath = p
+			}
+			// 归属路径异常(历史脏数据)时回退派生路径,destructive 重载会清孤儿行
+		}
+	case errors.Is(err, ErrNoParamModel):
+		// 无冲突,落派生路径
+	default:
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
 	if !pathContainedIn(h.builtinDir, targetPath) {
 		h.logger.Error("audit: upload rejected (path traversal detected)",
 			zap.String("audit_action", "parammodel.upload.rejected_path_traversal"),
@@ -460,23 +504,32 @@ func (h *Handler) UploadXML(c *gin.Context) {
 			fmt.Errorf("path traversal detected for filename %q", base))
 		return
 	}
-
-	// 校验 5: 内容主键(模型名)解析 —— 真值源 model.go xmlParameterModel。
-	var doc xmlParameterModel
-	if err := xml.Unmarshal(raw, &doc); err != nil {
-		commonerrors.AbortWithError(c, http.StatusBadRequest,
-			fmt.Errorf("parse parameterModel xml: %w", err))
-		return
+	if _, statErr := os.Stat(targetPath); statErr == nil {
+		conflict = true
 	}
-	modelName := strings.TrimSpace(doc.ParamModel)
-	if modelName == "" {
-		commonerrors.AbortWithError(c, http.StatusBadRequest,
-			fmt.Errorf("parameterModel name attribute is empty; cannot enforce content-key uniqueness"))
+
+	// 重复且未带 force → 409 + overwritable 标记,前端弹二次确认后带 ?force=true 重试。
+	loadedFromRel, _ := filepath.Rel(h.baseDir, targetPath)
+	loadedFrom := filepath.ToSlash(loadedFromRel)
+	if conflict && !force {
+		h.logger.Info("audit: upload conflict (needs confirm)",
+			zap.String("audit_action", "parammodel.upload.conflict_needs_confirm"),
+			zap.String("model_name", modelName),
+			zap.String("loaded_from", loadedFrom))
+		c.AbortWithStatusJSON(http.StatusConflict, gin.H{
+			"ret": 0,
+			"msg": fmt.Sprintf("paramModel「%s」已存在(%s),确认后可覆盖", modelName, loadedFrom),
+			"data": gin.H{
+				"overwritable": true,
+				"model_name":   modelName,
+				"loaded_from":  loadedFrom,
+			},
+		})
 		return
 	}
 
 	// per-filename 锁(与 Delete / 单文件 Reload 共用)
-	unlock := h.acquireFileLock(base)
+	unlock := h.acquireFileLock(filepath.Base(targetPath))
 	defer unlock()
 
 	// 确保 builtin 目录存在(首次部署 + 0750 = owner rwx,group rx,others -)
@@ -486,78 +539,116 @@ func (h *Handler) UploadXML(c *gin.Context) {
 		return
 	}
 
-	// 校验 5a: 文件名唯一性 —— <name>.xml 已存在 → 409,不覆盖、不备份(请改名)
+	// 覆盖场景:先把旧文件备份为 .bak.<ts>(worker backup_cleanup 周期清理)。
+	// 覆盖后保持原 builtin/custom 身份:builtin 不写 sidecar(仍不可删),
+	// custom 的 sidecar 不随 rename 移动、本就在位。
+	overwriting := false
+	backupPath := ""
 	if _, statErr := os.Stat(targetPath); statErr == nil {
-		h.logger.Info("audit: upload rejected (filename exists)",
-			zap.String("audit_action", "parammodel.upload.rejected_name_exists"),
-			zap.String("filename", base))
-		commonerrors.AbortWithError(c, http.StatusConflict,
-			fmt.Errorf("filename %q already exists; please rename", base))
-		return
+		overwriting = true
+		backupPath = targetPath + ".bak." + time.Now().Format("20060102150405")
+		if err := os.Rename(targetPath, backupPath); err != nil {
+			commonerrors.AbortWithError(c, http.StatusInternalServerError,
+				fmt.Errorf("backup existing xml before overwrite: %w", err))
+			return
+		}
 	}
 
-	// 校验 5b: 内容主键唯一性 —— XML 模型名已在 DB(来自其它文件)→ 409
-	exists, err := h.repo.ParamModelNameExists(c.Request.Context(), modelName)
-	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
-		return
-	}
-	if exists {
-		h.logger.Info("audit: upload rejected (model-name exists)",
-			zap.String("audit_action", "parammodel.upload.rejected_model_name_exists"),
-			zap.String("filename", base),
-			zap.String("model_name", modelName))
-		commonerrors.AbortWithError(c, http.StatusConflict,
-			fmt.Errorf("content key (model name %q) already exists; please use a different parameterModel", modelName))
-		return
-	}
-
-	// 1. tmp 写入 → 原子 rename 上线(filename 唯一性已保证 target 不存在)
+	// 1. tmp 写入 → 原子 rename 上线;失败回滚备份
 	tmpPath := targetPath + ".tmp." + uuid.New().String()
 	defer os.Remove(tmpPath) // 兜底:rename 成功后 tmp 已不存在,Remove 返 ENOENT 无害
-	if err := os.WriteFile(tmpPath, raw, 0o640); err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError,
-			fmt.Errorf("write tmp file: %w", err))
-		return
+	writeErr := os.WriteFile(tmpPath, raw, 0o640)
+	if writeErr == nil {
+		writeErr = os.Rename(tmpPath, targetPath)
 	}
-	if err := os.Rename(tmpPath, targetPath); err != nil {
+	if writeErr != nil {
+		if backupPath != "" {
+			if rbErr := os.Rename(backupPath, targetPath); rbErr != nil {
+				h.logger.Error("rollback backup rename failed; host state inconsistent",
+					zap.String("backup_path", backupPath), zap.Error(rbErr))
+			}
+		}
 		commonerrors.AbortWithError(c, http.StatusInternalServerError,
-			fmt.Errorf("rename tmp → target: %w", err))
+			fmt.Errorf("write target: %w", writeErr))
 		return
 	}
 
-	// 2. 写 sidecar 标记(<name>.xml.custom 空文件)。失败 → 回滚已写 XML → 500。
-	if err := os.WriteFile(targetPath+CustomMarkerSuffix, nil, 0o640); err != nil {
-		if rmErr := os.Remove(targetPath); rmErr != nil {
-			h.logger.Error("rollback uploaded xml after sidecar write failed; host state inconsistent",
-				zap.String("target_path", targetPath),
-				zap.Error(rmErr))
+	// 2. sidecar 标记(<name>.xml.custom 空文件):仅"新建"写入(= custom 可删);
+	// 覆盖保持原身份(见上)。失败 → 回滚已写 XML → 500。
+	if !overwriting {
+		if err := os.WriteFile(targetPath+CustomMarkerSuffix, nil, 0o640); err != nil {
+			if rmErr := os.Remove(targetPath); rmErr != nil {
+				h.logger.Error("rollback uploaded xml after sidecar write failed; host state inconsistent",
+					zap.String("target_path", targetPath),
+					zap.Error(rmErr))
+			}
+			commonerrors.AbortWithError(c, http.StatusInternalServerError,
+				fmt.Errorf("write sidecar marker: %w", err))
+			return
 		}
-		commonerrors.AbortWithError(c, http.StatusInternalServerError,
-			fmt.Errorf("write sidecar marker: %w", err))
-		return
 	}
 
 	// 3. destructive 重载(全量 + 删孤儿)+ 刷新缓存。
 	//    文件已落地,reload/cache 失败不阻塞 upload 响应,只 Warn;
 	//    响应 reloaded/orphans_deleted 字段反映实际状态,用户可重新导入重试。
-	reloaded, orphansDeleted := h.destructiveReload(c.Request.Context(), "upload:"+base)
+	reloaded, orphansDeleted := h.destructiveReload(c.Request.Context(), "upload:"+filepath.Base(targetPath))
 
+	backupName := ""
+	if backupPath != "" {
+		backupName = filepath.Base(backupPath)
+	}
 	h.logger.Info("audit: param-model uploaded",
 		zap.String("audit_action", "parammodel.upload.success"),
-		zap.String("filename", base),
+		zap.String("filename", filepath.Base(targetPath)),
 		zap.String("model_name", modelName),
 		zap.Int64("size", file.Size),
+		zap.Bool("overwritten", overwriting),
+		zap.String("backup", backupName),
 		zap.Bool("reloaded", reloaded),
 		zap.Int64("orphans_deleted", orphansDeleted))
 
 	response.OK(c, gin.H{
-		"filename":        base,
+		"filename":        filepath.Base(targetPath),
 		"model_name":      modelName,
 		"size":            file.Size,
+		"overwritten":     overwriting,
+		"backup":          backupName,
 		"reloaded":        reloaded,
 		"orphans_deleted": orphansDeleted,
 	})
+}
+
+// DownloadFile GET /api/v1/param-models/file-content?loaded_from=param-mappings/<file>.xml
+//
+// 下载 XML 原文件(2026-06-05 操作列下载功能)。builtin 与 custom 均可下载(只读无守门);
+// 路径校验:两段 param-mappings/<file>.xml + 防遍历 + pathContainedIn 双重防御。
+func (h *Handler) DownloadFile(c *gin.Context) {
+	raw := strings.TrimSpace(c.Query("loaded_from"))
+	loadedFrom := filepath.ToSlash(filepath.Clean(raw))
+	parts := strings.Split(loadedFrom, "/")
+	valid := raw != "" && len(parts) == 2 && parts[0] == BuiltinDirSubdir &&
+		parts[1] != "" && !strings.Contains(parts[1], "..") &&
+		strings.EqualFold(filepath.Ext(parts[1]), ".xml")
+	if !valid {
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			fmt.Errorf("invalid loaded_from %q (expected %s/<file>.xml)", raw, BuiltinDirSubdir))
+		return
+	}
+	absPath := filepath.Join(h.baseDir, loadedFrom)
+	if !pathContainedIn(h.builtinDir, absPath) {
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			fmt.Errorf("path %q escapes param-mappings dir", loadedFrom))
+		return
+	}
+	if _, err := os.Stat(absPath); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
+			return
+		}
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, fmt.Errorf("stat xml: %w", err))
+		return
+	}
+	c.FileAttachment(absPath, filepath.Base(absPath))
 }
 
 // ── Mappings ────────────────────────────────────────────────────────

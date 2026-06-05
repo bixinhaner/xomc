@@ -55,6 +55,11 @@ type FileRepository interface {
 	// 也按 tech 子目录隔离一致;若要求平台名全局唯一,需 UNION 三表(本切片不采纳)。
 	PlatformExists(ctx context.Context, tech, platform string) (bool, error)
 
+	// LoadedFromsByPlatform 返回拥有某 platform 的去重 loaded_from 列表(同 tech 表内)。
+	// 导入 XML 覆盖调整(2026-06-05):上传遇到重复 platform 时,用它定位"归属文件",
+	// force 覆盖即替换该文件(一个平台一个文件,常态恰好一个;空 loaded_from 行被忽略)。
+	LoadedFromsByPlatform(ctx context.Context, tech, platform string) ([]string, error)
+
 	// DeleteOrphansBefore 删除 perf_indicators_<tech> 中 updated_at < before 的行
 	// 与级联的 rela_platform_indicator_formula_<tech> + enabled_pm_indicators_<tech>。
 	//
@@ -81,7 +86,8 @@ type PlatformSummary struct {
 	Platform    string `json:"platform"`    // 平台名(从 rela_platform_indicator_formula_*.platform_name)
 	Indicators  int    `json:"indicators"`  // 该平台的指标计数
 	LoadedFrom  string `json:"loaded_from"` // 该平台对应的 XML 文件相对路径(MAX(formula.loaded_from),一文件一平台故单值)
-	Source      string `json:"source"`      // builtin / custom / unknown(由 LoadedFrom 前缀 ClassifySource 派生)
+	Source      string `json:"source"`      // builtin / custom / unknown(由 sidecar ClassifySource 派生)
+	Deletable   bool   `json:"deletable"`   // 一级列表删除按钮可见性(IsDeletable;内置置灰,2026-06-05)
 	Description string `json:"description"` // 按 (tech, platform) 维度的可编辑描述
 }
 
@@ -143,6 +149,31 @@ func (r *PgFileRepository) PlatformExists(ctx context.Context, tech, platform st
 		return false, fmt.Errorf("check platform exists (%s): %w", tech, err)
 	}
 	return exists, nil
+}
+
+// LoadedFromsByPlatform 实现 FileRepository — 从 rela_platform_indicator_formula_<tech>
+// 取该平台关联的去重 loaded_from(tech 白名单校验后拼表名,platform 参数化绑定)。
+func (r *PgFileRepository) LoadedFromsByPlatform(ctx context.Context, tech, platform string) ([]string, error) {
+	if err := validateTech(tech); err != nil {
+		return nil, err
+	}
+	sqlStr := fmt.Sprintf(
+		`SELECT DISTINCT loaded_from FROM rela_platform_indicator_formula_%s
+		  WHERE platform_name = $1 AND loaded_from <> ''`, tech)
+	rows, err := r.pool.Query(ctx, sqlStr, platform)
+	if err != nil {
+		return nil, fmt.Errorf("query loaded_from by platform (%s): %w", tech, err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var lf string
+		if err := rows.Scan(&lf); err != nil {
+			return nil, fmt.Errorf("scan loaded_from: %w", err)
+		}
+		out = append(out, lf)
+	}
+	return out, rows.Err()
 }
 
 // DeleteByLoadedFrom 实现 FileRepository — 单事务三步级联。

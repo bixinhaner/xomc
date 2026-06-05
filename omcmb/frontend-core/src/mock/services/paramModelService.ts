@@ -12,6 +12,8 @@ import type {
   TranslateResponse,
 } from '../../types/paramModel';
 import { mockParamModels, mockMappings, mockStandardParams } from '../data/paramModel';
+import { extractXmlRootAttr } from '../../utils/xmlRootAttr';
+import { saveBlob } from '../../utils/saveBlob';
 
 let paramModels = [...mockParamModels];
 const mappings: Record<string, ParamMapping[]> = JSON.parse(JSON.stringify(mockMappings));
@@ -154,17 +156,27 @@ export const paramModelService = {
     return { deleted: 0 };
   },
 
-  // mock 上传(三库 XML 导入重构):传 name + file,不真存盘。
-  // 双唯一性硬拒,无 force —— 文件名或模型名已存在即抛错(模拟 409)。
+  // mock 下载:生成占位 XML 触发浏览器另存(无真实文件)。
+  async downloadXml(loadedFrom: string): Promise<void> {
+    const name = loadedFrom.split('/').pop() || 'param-model.xml';
+    saveBlob(`<?xml version="1.0" encoding="UTF-8"?>\n<!-- mock ${name} -->\n<parameterModel paramModel="${name.replace(/\.xml$/i, '')}"></parameterModel>\n`, name);
+  },
+
+  // mock 上传:名称取自 XML paramModel 属性(与后端同口径),不真存盘。
+  // 重复:无 force 抛错(真实端为 409);force=true 覆盖既有条目。
   async uploadXML(
     file: File,
-    name: string,
-  ): Promise<{ filename: string; modelName: string; size: number }> {
+    force = false,
+  ): Promise<{ filename: string; modelName: string; size: number; overwritten: boolean }> {
+    const name = (await extractXmlRootAttr(file, 'paramModel')) ?? 'CUSTOM';
     const filename = `${name}.xml`;
     const lower = name.toLowerCase();
     const existing = paramModels.find((p) => p.name.toLowerCase() === lower);
-    if (existing) {
-      throw new Error(`name ${filename} already exists; please rename`);
+    if (existing && !force) {
+      throw new Error(`paramModel ${name} already exists; confirm overwrite`);
+    }
+    if (existing && force) {
+      return { filename, modelName: name, size: file.size, overwritten: true };
     }
     paramModels = [
       ...paramModels,
@@ -181,6 +193,6 @@ export const paramModelService = {
         deletable: true,
       },
     ];
-    return { filename, modelName: name, size: file.size };
+    return { filename, modelName: name, size: file.size, overwritten: false };
   },
 };

@@ -1,4 +1,5 @@
 import http from '../http';
+import { saveBlob } from '../../utils/saveBlob';
 import type {
   ParamModel,
   ParamMapping,
@@ -314,27 +315,43 @@ export const paramModelApi = {
     return data;
   },
 
+  // 下载参数模型 XML 原文件(builtin / custom 均可,2026-06-05 操作列下载功能)。
+  async downloadXml(loadedFrom: string): Promise<void> {
+    const resp = await http.get('/param-models/file-content', {
+      params: { loaded_from: loadedFrom },
+      responseType: 'blob',
+    });
+    saveBlob(resp.data as BlobPart, loadedFrom.split('/').pop() || 'param-model.xml');
+  },
+
   // 上传自定义 paramModel XML(multipart/form-data)。
-  // 三库 XML 导入重构(2026-06-04 D3/D5/D6):
-  //   - 表单字段 name(用户指定的唯一名称,不含扩展名)+ file(XML 内容);
-  //     目标文件名 = <name>.xml,上传文件自身的 filename 被忽略。
-  //   - 双唯一性硬拒,无 force:文件名已存在 或 XML 模型名已在 DB → 409。
-  //   - 后端上传端点内部自动 destructive 重载(删孤儿)+ 刷新缓存 + 写 sidecar 标记。
-  //   - 后端校验:name 白名单 + 大小 ≤ 1MiB + XML 根元素 = parameterModel + 路径包含。
+  // 导入 XML 调整(2026-06-05 取消手填名称):
+  //   - 仅传 file;名称取自 XML <parameterModel paramModel="..."> 属性,
+  //     目标文件名 = <paramModel>.xml,上传文件自身的 filename 被忽略。
+  //   - 重复允许覆盖:不带 force 时重复返 409(data.overwritable=true),前端弹
+  //     二次确认后带 force=true 重试 → 覆盖归属文件(旧文件自动备份 .bak.<ts>)。
+  //   - 后端上传端点内部自动 destructive 重载(删孤儿)+ 刷新缓存。
+  //   - 后端校验:大小 ≤ 1MiB + XML 根元素 = parameterModel + paramModel 推导文件名白名单 + 路径包含。
   async uploadXML(
     file: File,
-    name: string,
-  ): Promise<{ filename: string; modelName: string; size: number }> {
+    force = false,
+  ): Promise<{ filename: string; modelName: string; size: number; overwritten: boolean }> {
     const fd = new FormData();
-    fd.append('name', name);
     fd.append('file', file);
     const { data } = await http.post<{
       filename: string;
       model_name: string;
       size: number;
+      overwritten: boolean;
     }>('/param-models/upload-xml', fd, {
+      params: force ? { force: 'true' } : undefined,
       headers: { 'Content-Type': 'multipart/form-data' },
     });
-    return { filename: data.filename, modelName: data.model_name, size: data.size };
+    return {
+      filename: data.filename,
+      modelName: data.model_name,
+      size: data.size,
+      overwritten: data.overwritten,
+    };
   },
 };

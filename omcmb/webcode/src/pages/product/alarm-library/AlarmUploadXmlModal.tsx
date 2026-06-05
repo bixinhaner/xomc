@@ -1,20 +1,21 @@
 /**
  * AlarmUploadXmlModal — 告警库自定义 XML 上传弹窗(对标 kpi-library UploadXmlModal)。
  *
- * 2026-06-04 单目录 + 双唯一性硬拒(无 force):
- *   - 名称 *      (用户指定的唯一名称,正则 ^[A-Za-z0-9_-]{1,64}$,落地 <name>.xml)
+ * 导入 XML 调整(2026-06-05 取消手填名称):
  *   - XML 文件 *  (根元素必须 <alarmModel>,≤ 1 MiB)
- *   上传前用 useAlarmNeTypeStats 取已存在的 XML 文件名,若 <name>.xml 重复则内联报错
- *   "名称已存在,请改名";后端 409 兜底同样内联提示改名(文件名 / neType 内容主键任一冲突)。
- *
- * 校验链(后端 file_handler.UploadXML 已守:name 白名单 + size + <alarmModel> 根 + 双唯一性)。
+ *   - 唯一名称取自 XML <alarmModel neType="..."> 属性,文件将保存为 <neType>.xml
+ *     (选文件后即时预览)。
+ *   重复允许覆盖(二次确认):本地预检(useAlarmNeTypeStats 文件名 / neType 比对)
+ *   或后端 409(data.overwritable=true)→ Modal.confirm「已存在,确认覆盖?」→
+ *   确认后带 force=true 重试,后端覆盖归属文件并自动备份旧文件 .bak.<ts>。
  */
 import { useState } from 'react';
-import { Modal, Form, Input, Upload, message, Button, Space } from 'antd';
+import { Modal, Form, Upload, message, Button, Space, Typography } from 'antd';
 import type { UploadFile, UploadProps } from 'antd/es/upload/interface';
 import { InboxOutlined } from '@ant-design/icons';
 import type { AxiosError } from 'axios';
 import { useAlarmUploadXml, useAlarmNeTypeStats } from '@core/hooks/api/useAlarmDefinitions';
+import { extractXmlRootAttr } from '@core/utils/xmlRootAttr';
 import { useT } from '@/hooks/useT';
 
 interface Props {
@@ -23,63 +24,85 @@ interface Props {
 }
 
 const MAX_SIZE = 1 * 1024 * 1024; // 1 MiB,与后端 MaxUploadXMLSize 一致
-const NAME_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
-
-interface UploadFormValues {
-  name?: string;
-}
 
 export default function AlarmUploadXmlModal({ open, onClose }: Props) {
   const t = useT();
-  const [form] = Form.useForm<UploadFormValues>();
   const [fileList, setFileList] = useState<UploadFile[]>([]);
+  // 选文件后从 XML neType 属性提取的名称(将保存为 <neType>.xml);null = 未提取到
+  const [derivedName, setDerivedName] = useState<string | null>(null);
+  const [fileError, setFileError] = useState<string | undefined>();
   const uploadMut = useAlarmUploadXml();
 
-  // 上传前查重:ne-types 聚合行的 loadedFrom basename(大小写不敏感)对比 <name>.xml。
+  // 上传前查重:ne-types 聚合行的 neType / loadedFrom basename(大小写不敏感)对比。
   const { data: neTypesData } = useAlarmNeTypeStats();
-  const isDuplicateName = (name: string): boolean => {
-    const target = `${name}.xml`.toLowerCase();
+  const isDuplicate = (neType: string): boolean => {
+    const target = `${neType}.xml`.toLowerCase();
+    const lower = neType.toLowerCase();
     return (neTypesData?.items || []).some((row) => {
       const base = (row.loadedFrom || '').split('/').pop()?.toLowerCase() ?? '';
-      return base === target;
+      return base === target || row.neType.toLowerCase() === lower;
     });
   };
 
   const handleClose = () => {
-    form.resetFields();
     setFileList([]);
+    setDerivedName(null);
+    setFileError(undefined);
     onClose();
   };
 
+  // 实际上传(force = 二次确认后的覆盖);成功后关弹窗,失败统一 message。
+  const doUpload = async (file: File, force: boolean) => {
+    try {
+      const r = await uploadMut.mutateAsync({ file, force });
+      message.success(
+        r.overwritten
+          ? t('product.upload.overwriteSuccess', { file: r.filename })
+          : t('product.alarm.upload.uploadSuccess', { file: r.filename }),
+      );
+      handleClose();
+    } catch (e: unknown) {
+      const ax = e as AxiosError<{ msg?: string; message?: string; data?: { overwritable?: boolean } }>;
+      const body = ax.response?.data;
+      const msg = body?.msg ?? body?.message ?? (e instanceof Error ? e.message : String(e));
+      // 409 + overwritable(本地预检漏判的重复)→ 弹确认覆盖
+      if (!force && ax.response?.status === 409 && body?.data?.overwritable) {
+        confirmOverwrite(derivedName ?? '', () => void doUpload(file, true));
+        return;
+      }
+      message.error(msg);
+    }
+  };
+
+  // 覆盖二次确认弹框 —— 确认后才带 force=true 重试。
+  const confirmOverwrite = (name: string, onOk: () => void) => {
+    Modal.confirm({
+      title: t('product.upload.overwriteConfirmTitle'),
+      content: t('product.upload.overwriteConfirmContent', { name }),
+      okText: t('common.confirm'),
+      cancelText: t('common.cancel'),
+      okButtonProps: { danger: true },
+      onOk,
+    });
+  };
+
   const handleSubmit = async () => {
-    const v = await form.validateFields().catch(() => null);
-    if (!v?.name) return;
     if (fileList.length === 0 || !fileList[0].originFileObj) {
       message.error(t('product.alarm.upload.selectXmlMsg'));
       return;
     }
-    const file = fileList[0].originFileObj;
-
-    // 上传前查重:文件名已存在 → 内联报错到"名称"字段,提示改名(409 仍作兜底)。
-    if (isDuplicateName(v.name)) {
-      form.setFields([{ name: 'name', errors: [t('product.paramModel.nameExists')] }]);
+    // neType 属性是名称唯一来源 —— 读不到直接拒绝(后端也会 400)
+    if (!derivedName) {
+      setFileError(t('product.upload.missingAttr', { attr: 'neType' }));
       return;
     }
-
-    try {
-      const r = await uploadMut.mutateAsync({ file, name: v.name });
-      message.success(t('product.alarm.upload.uploadSuccess', { file: r.filename }));
-      handleClose();
-    } catch (e: unknown) {
-      const ax = e as AxiosError<{ msg?: string; message?: string }>;
-      // 409 冲突(文件名或 neType 内容主键)→ 内联报错到"名称"字段,提示改名。
-      if (ax.response?.status === 409) {
-        form.setFields([{ name: 'name', errors: [t('product.paramModel.nameExists')] }]);
-        return;
-      }
-      const body = ax.response?.data as { msg?: string; message?: string } | undefined;
-      message.error(body?.msg ?? body?.message ?? (e instanceof Error ? e.message : String(e)));
+    const file = fileList[0].originFileObj;
+    // 上传前查重:neType / 文件名已存在 → 弹覆盖确认(后端 409 仍是兜底真值源)。
+    if (isDuplicate(derivedName)) {
+      confirmOverwrite(derivedName, () => void doUpload(file, true));
+      return;
     }
+    await doUpload(file, false);
   };
 
   const uploadProps: UploadProps = {
@@ -91,10 +114,17 @@ export default function AlarmUploadXmlModal({ open, onClose }: Props) {
         message.error(t('product.alarm.upload.fileTooLarge', { size: (f.size / 1024).toFixed(1) }));
         return Upload.LIST_IGNORE;
       }
+      setFileError(undefined);
+      // 选文件即抽 neType,预览"将保存为 <neType>.xml"。fire-and-forget。
+      void extractXmlRootAttr(f, 'neType').then((nt) => setDerivedName(nt));
       return false; // 阻止 antd 自动上传 — 走 handleSubmit
     },
     onChange: ({ fileList: newList }) => setFileList(newList.slice(-1)),
-    onRemove: () => setFileList([]),
+    onRemove: () => {
+      setFileList([]);
+      setDerivedName(null);
+      setFileError(undefined);
+    },
   };
 
   return (
@@ -113,18 +143,13 @@ export default function AlarmUploadXmlModal({ open, onClose }: Props) {
       width={560}
       destroyOnHidden
     >
-      <Form form={form} layout="vertical">
+      <Form layout="vertical">
         <Form.Item
-          name="name"
-          label={t('common.name')}
-          rules={[
-            { required: true, message: t('common.nameRequired') },
-            { pattern: NAME_PATTERN, message: t('product.paramModel.nameInvalid') },
-          ]}
+          label={t('product.alarm.upload.xmlFile')}
+          required
+          validateStatus={fileError ? 'error' : undefined}
+          help={fileError}
         >
-          <Input placeholder="ENB" maxLength={64} allowClear />
-        </Form.Item>
-        <Form.Item label={t('product.alarm.upload.xmlFile')} required>
           <Upload.Dragger {...uploadProps}>
             <p className="ant-upload-drag-icon">
               <InboxOutlined />
@@ -132,8 +157,15 @@ export default function AlarmUploadXmlModal({ open, onClose }: Props) {
             <p className="ant-upload-text">{t('product.alarm.upload.dropHint')}</p>
             <p className="ant-upload-hint">
               {t('product.alarm.upload.sizeHintPre')}<code>&lt;alarmModel&gt;</code>{t('product.alarm.upload.sizeHintPost')}
+              <br />
+              {t('product.alarm.upload.nameAutoHint')}
             </p>
           </Upload.Dragger>
+          {derivedName && (
+            <Typography.Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
+              {t('product.upload.savedAs', { name: derivedName })}
+            </Typography.Text>
+          )}
         </Form.Item>
       </Form>
     </Modal>

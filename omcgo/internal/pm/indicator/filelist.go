@@ -1,6 +1,7 @@
 package indicator
 
 import (
+	"encoding/xml"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -48,48 +49,92 @@ func resolveENBSources(base, enbSubdir string) ([]fileSource, error) {
 	return out, nil
 }
 
-// resolveSingleTechSources 收集 GSM/GNB 单制式 XML 源:
-// 根级单文件(indicator-library/GSM.xml | GNB.xml)+ 同制式子目录多文件
-// (indicator-library/gsm/*.xml | indicator-library/gnb/*.xml)。
+// ENBSubdirName 是 indicator-library 下唯一的制式子目录名。
+// 目录调整(2026-06-05):仅 ENB 分子目录,GSM/GNB XML(出厂单文件 + 自定义上传)
+// 全部落 indicator-library/ 根级,按文件名 / XML deviceType 属性分类制式。
+const ENBSubdirName = "enb"
+
+// rootBuiltinTechByName 是根级出厂单文件名 → tech 的固定映射(大小写不敏感比对)。
+var rootBuiltinTechByName = map[string]string{
+	"gsm.xml": "gsm",
+	"gnb.xml": "gnb",
+}
+
+// resolveRootTechSources 收集 GSM/GNB 单制式 XML 源:扫描 indicator-library/ 根级
+// *.xml,按 classifyRootIndicatorTech(出厂文件名映射 / XML deviceType 属性)过滤出
+// 属于 tech 的文件。
 //
-// 三库 XML 导入重构(2026-06-04 单目录):取消 *-custom 目录,custom 上传落地
-// 同制式子目录(gsm/ / gnb/);根级单文件保持出厂随包。两者并存,sidecar 判来源。
+// 目录调整(2026-06-05):取消 gsm/、gnb/ 子目录,自定义上传与出厂单文件同住根级,
+// sidecar 判来源。deviceType 缺失 / 不可识别的根级文件不属于任何制式 → 跳过。
 //
 // 输入:
-//   - base:        XMLBaseDir
-//   - builtinFile: 根级单文件相对路径,如 "indicator-library/GSM.xml"
-//   - subdir:      同制式子目录相对路径,如 "indicator-library/gsm"
+//   - base:   XMLBaseDir
+//   - dirRel: 根级目录相对路径,如 "indicator-library"
+//   - tech:   目标制式(gsm / gnb)
 //
-// 根级单文件不存在 / 子目录不存在均容忍(运维场景:只用其中一侧)。
-// 输出按 LoadedFrom 字典序稳定排序。
-func resolveSingleTechSources(base, builtinFile, subdir string) ([]fileSource, error) {
-	var out []fileSource
-
-	// 根级单文件(允许不存在)
-	builtinAbs := filepath.Join(base, builtinFile)
-	if _, err := os.Stat(builtinAbs); err == nil {
-		out = append(out, fileSource{
-			AbsPath:    builtinAbs,
-			LoadedFrom: filepath.ToSlash(builtinFile),
-		})
-	} else if !os.IsNotExist(err) {
-		return nil, fmt.Errorf("stat builtin file %s: %w", builtinFile, err)
-	}
-
-	// 同制式子目录(允许不存在,运维未上传时常态)
-	subFiles, err := scanXMLBasenamesOptional(filepath.Join(base, subdir))
+// 目录不存在容忍(返空);输出按 LoadedFrom 字典序稳定排序。
+func resolveRootTechSources(base, dirRel, tech string) ([]fileSource, error) {
+	files, err := scanXMLBasenamesOptional(filepath.Join(base, dirRel))
 	if err != nil {
-		return nil, fmt.Errorf("scan dir %s: %w", subdir, err)
+		return nil, fmt.Errorf("scan root dir %s: %w", dirRel, err)
 	}
-	for _, name := range subFiles {
+	var out []fileSource
+	for _, name := range files {
+		abs := filepath.Join(base, dirRel, name)
+		if classifyRootIndicatorTech(abs, name) != tech {
+			continue
+		}
 		out = append(out, fileSource{
-			AbsPath:    filepath.Join(base, subdir, name),
-			LoadedFrom: filepath.ToSlash(filepath.Join(subdir, name)),
+			AbsPath:    abs,
+			LoadedFrom: filepath.ToSlash(filepath.Join(dirRel, name)),
 		})
 	}
-
 	sortFileSources(out)
 	return out, nil
+}
+
+// classifyRootIndicatorTech 判定根级 XML 文件归属的制式(gsm / gnb;空 = 不可识别)。
+// 优先出厂文件名固定映射(GSM.xml / GNB.xml,大小写不敏感);
+// 其余文件读 XML <indicatorModel deviceType="..."> 属性(上传守门已要求 GSM/GNB
+// 自定义 XML 必带 deviceType)。读失败 / 属性缺失 / 值不在白名单 → 返空跳过。
+func classifyRootIndicatorTech(absPath, basename string) string {
+	if tech, ok := rootBuiltinTechByName[strings.ToLower(basename)]; ok {
+		return tech
+	}
+	dt, err := fileDeviceType(absPath)
+	if err != nil || dt == "" {
+		return ""
+	}
+	lower := strings.ToLower(dt)
+	if _, ok := allowedFileTechs[lower]; !ok {
+		return ""
+	}
+	return lower
+}
+
+// fileDeviceType 读取 XML 文件根元素 <indicatorModel> 的 deviceType 属性。
+// 流式解析只取第一个 StartElement(typical ≤ 200 KB,且根元素在文件头,~µs 级)。
+func fileDeviceType(absPath string) (string, error) {
+	f, err := os.Open(absPath)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	dec := xml.NewDecoder(f)
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return "", err
+		}
+		start, ok := tok.(xml.StartElement)
+		if !ok {
+			continue
+		}
+		if start.Name.Local != "indicatorModel" {
+			return "", fmt.Errorf("root element is <%s>, not <indicatorModel>", start.Name.Local)
+		}
+		return strings.TrimSpace(attrValue(start.Attr, "deviceType")), nil
+	}
 }
 
 // scanXMLBasenames 扫指定目录下的 *.xml 文件名(basename,不含路径),

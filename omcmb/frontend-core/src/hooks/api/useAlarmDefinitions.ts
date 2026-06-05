@@ -89,14 +89,22 @@ export function useAlarmSeverityLevels() {
   });
 }
 
-// 自定义 XML 上传:成功后 invalidate 所有 alarm-defs 查询(ne-types / list 立即反映新告警)。
+// 自定义 XML 上传(名称取自 XML neType 属性;force=true 确认覆盖):
+// 成功后 invalidate 所有 alarm-defs 查询。
 export function useAlarmUploadXml() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ file, name }: { file: File; name: string }) => api.uploadXml(file, name),
+    mutationFn: ({ file, force }: { file: File; force?: boolean }) => api.uploadXml(file, force),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: AD_KEY });
     },
+  });
+}
+
+// 下载 XML 原文件(操作列下载图标,builtin / custom 均可)。
+export function useAlarmDownloadXml() {
+  return useMutation({
+    mutationFn: ({ loadedFrom }: { loadedFrom: string }) => api.downloadXml(loadedFrom),
   });
 }
 

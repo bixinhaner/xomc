@@ -8,13 +8,15 @@
  *   文件删除仍留在 XMLFilesModal。
  */
 import { useState } from 'react';
-import { Card, Table, Button, Tooltip, message, Input, Modal } from 'antd';
-import { EditOutlined } from '@ant-design/icons';
+import { Card, Table, Button, Space, Tooltip, message, Input, Modal, Popconfirm } from 'antd';
+import { EditOutlined, DownloadOutlined, DeleteOutlined } from '@ant-design/icons';
 import type { AxiosError } from 'axios';
 import type { IndicatorPlatformSummary, TechLower } from '@core/types/indicatorLibrary';
 import {
   useIndicatorSummary,
   useUpdateIndicatorFileDescription,
+  useIndicatorDownloadXml,
+  useIndicatorDeleteFile,
 } from '@core/hooks/api/useIndicatorsLibrary';
 import { makeSeqColumn } from '@/components/Table/seqColumn';
 import { useT } from '@/hooks/useT';
@@ -36,6 +38,8 @@ export default function SummaryTab({ onSelect, query = '' }: Props) {
   const t = useT();
   const { data, isLoading } = useIndicatorSummary();
   const updateDescMut = useUpdateIndicatorFileDescription();
+  const downloadMut = useIndicatorDownloadXml();
+  const deleteFileMut = useIndicatorDeleteFile();
   const allItems = data?.items || [];
 
   // 编辑描述(按 (制式, 平台) 维度)
@@ -119,18 +123,68 @@ export default function SummaryTab({ onSelect, query = '' }: Props) {
     },
     {
       title: t('common.action'),
-      width: 80,
+      width: 150,
       render: (_: unknown, row: IndicatorPlatformSummary) => (
-        <Tooltip title={t('product.kpi.summary.editDescTitle')}>
-          <Button
-            size="small"
-            icon={<EditOutlined />}
-            onClick={() => {
-              setEditRow(row);
-              setDraft(row.description ?? '');
-            }}
-          />
-        </Tooltip>
+        <Space>
+          {/* 2026-06-05:下载 XML 原文件(builtin / custom 均可;无加载源禁用) */}
+          <Tooltip title={t('product.upload.downloadXml')}>
+            <Button
+              size="small"
+              icon={<DownloadOutlined />}
+              disabled={!row.loadedFrom}
+              onClick={() =>
+                downloadMut
+                  .mutateAsync({ loadedFrom: row.loadedFrom })
+                  .catch((e) => message.error((e as Error).message))
+              }
+            />
+          </Tooltip>
+          <Tooltip title={t('product.kpi.summary.editDescTitle')}>
+            <Button
+              size="small"
+              icon={<EditOutlined />}
+              onClick={() => {
+                setEditRow(row);
+                setDraft(row.description ?? '');
+              }}
+            />
+          </Tooltip>
+          {/* 2026-06-05:一级列表删除(对齐 param-model / alarm-library):
+              仅 custom 可删,内置置灰 + Tooltip;真值源 = 后端 deletable。 */}
+          {row.deletable ? (
+            <Popconfirm
+              title={t('product.kpi.xml.delTitle')}
+              description={
+                <div style={{ maxWidth: 280 }}>
+                  {t('product.kpi.xml.deleteBullet1Pre')}<code>.deleted.&lt;ts&gt;</code>{t('product.kpi.xml.deleteBullet1Post')}
+                  <br />
+                  {t('product.kpi.xml.deleteBullet2', { count: row.indicators })}
+                </div>
+              }
+              okText={t('common.delete')}
+              cancelText={t('common.cancel')}
+              okButtonProps={{ danger: true }}
+              onConfirm={() =>
+                deleteFileMut
+                  .mutateAsync(row.loadedFrom)
+                  .then((r) =>
+                    message.success(
+                      r.backup
+                        ? t('product.kpi.xml.deleteSuccessWithBackup', { backup: r.backup })
+                        : t('common.deleted'),
+                    ),
+                  )
+                  .catch((e) => message.error((e as Error).message))
+              }
+            >
+              <Button size="small" danger icon={<DeleteOutlined />} />
+            </Popconfirm>
+          ) : (
+            <Tooltip title={t('common.builtinNoDelete')}>
+              <Button size="small" danger icon={<DeleteOutlined />} disabled />
+            </Tooltip>
+          )}
+        </Space>
       ),
     },
   ];

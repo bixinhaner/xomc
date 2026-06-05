@@ -21,6 +21,8 @@ import {
   mockFormulas,
   mockEnabledIndicators,
 } from '../data/indicatorLibrary';
+import { extractXmlRootAttr } from '../../utils/xmlRootAttr';
+import { saveBlob } from '../../utils/saveBlob';
 
 const indicators: Record<DeviceType, IndicatorInfo[]> = {
   ENB: [...mockIndicators.ENB],
@@ -228,6 +230,7 @@ export const indicatorLibraryService = {
           indicators: count,
           loadedFrom: `indicator-library/${tech}/${platform}.xml`,
           source: 'builtin',
+          deletable: false, // mock 数据均为内置 → 删除按钮置灰
           description: '',
         });
       }
@@ -249,19 +252,30 @@ export const indicatorLibraryService = {
     return { items, tech };
   },
 
-  async uploadXml(
-    tech: TechLower,
-    _file: File,
-    name: string
-  ): Promise<IndicatorUploadResult> {
+  // mock 上传:名称取自 XML platform 属性(与后端同口径);
+  // 落地目录:ENB → enb/ 子目录,GSM/GNB → indicator-library/ 根级。
+  // force = 二次确认后的覆盖(mock 不真存盘,直接回成功)。
+  async uploadXml(tech: TechLower, file: File, force = false): Promise<IndicatorUploadResult> {
+    const platform = (await extractXmlRootAttr(file, 'platform')) ?? 'CUSTOM';
+    const loadedFrom =
+      tech === 'enb'
+        ? `indicator-library/enb/${platform}.xml`
+        : `indicator-library/${platform}.xml`;
     return {
       uploaded: true,
-      filename: `${name}.xml`,
-      loadedFrom: `indicator-library/${tech}/${name}.xml`,
+      filename: `${platform}.xml`,
+      loadedFrom,
       tech,
-      platform: name,
+      platform,
+      overwritten: force,
       reloaded: true,
     };
+  },
+
+  // mock 下载:生成占位 XML 触发浏览器另存(无真实文件)。
+  async downloadXml(loadedFrom: string): Promise<void> {
+    const name = loadedFrom.split('/').pop() || 'indicator.xml';
+    saveBlob(`<?xml version="1.0" encoding="UTF-8"?>\n<!-- mock ${name} -->\n<indicatorModel platform="${name.replace(/\.xml$/i, '')}"></indicatorModel>\n`, name);
   },
 
   async deleteFile(loadedFrom: string): Promise<IndicatorDeleteFileResult> {

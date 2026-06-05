@@ -72,12 +72,13 @@ export interface UnknownStatsFilter {
 // 告警 XML 来源(后端 source.go::ClassifySource 派生,前端只渲染)。
 export type AlarmSource = 'builtin' | 'custom' | 'unknown';
 
-// 自定义 XML 上传结果(2026-06-04 单目录 + 双唯一性:无 overwrite/backup,新增 neType)。
+// 自定义 XML 上传结果(2026-06-05:重复允许 force 覆盖,新增 overwritten)。
 export interface AlarmUploadResult {
   uploaded: boolean;
   filename: string;
   loadedFrom: string;
   neType: string;
+  overwritten: boolean; // force 覆盖了既有文件(旧文件已备份 .bak.<ts>)
   reloaded: boolean;
 }
 

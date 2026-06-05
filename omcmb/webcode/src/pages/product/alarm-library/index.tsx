@@ -33,6 +33,7 @@ import {
   ArrowLeftOutlined,
   CloudUploadOutlined,
   DeleteOutlined,
+  DownloadOutlined,
   EditOutlined,
   PlusOutlined,
 } from '@ant-design/icons';
@@ -41,6 +42,7 @@ import {
   useAlarmNeTypeStats,
   useDeleteAlarmDefinition,
   useAlarmDeleteFile,
+  useAlarmDownloadXml,
 } from '@core/hooks/api/useAlarmDefinitions';
 import type {
   AlarmDefinition,
@@ -157,6 +159,7 @@ export default function AlarmLibraryPage() {
 
   const delMut = useDeleteAlarmDefinition();
   const deleteFileMut = useAlarmDeleteFile();
+  const downloadXmlMut = useAlarmDownloadXml();
 
   // 2026-06-03:严重级别下拉从 severitySourceData(不带 severityCode 过滤的独立查询)排重派生,
   // 选项稳定、不随选中收缩;与表格"严重级别"列口径仍一致(同一 alarm_definitions 数据源)。
@@ -231,40 +234,56 @@ export default function AlarmLibraryPage() {
     },
     {
       // 2026-06-04 用户决策:内置(builtin)不可删 → 仅 custom 可删,内置置灰 + Tooltip。
+      // 2026-06-05:加下载 XML 图标(builtin / custom 均可;手工新增无加载源禁用)。
       title: t('alarmLibrary.col.actions'),
-      width: 80,
-      render: (_: unknown, row: AlarmNeTypeStat) =>
-        row.deletable ? (
-        <Popconfirm
-          title={t('product.alarm.xml.delTitle')}
-          description={
-            <div style={{ maxWidth: 320 }}>
-              {t('product.alarm.xml.deleteBullet1Pre')}<code>.deleted.&lt;ts&gt;</code>{t('product.alarm.xml.deleteBullet1Post')}
-              <br />{t('product.alarm.xml.deleteBullet2', { count: row.total })}
-            </div>
-          }
-          okText={t('common.delete')}
-          okButtonProps={{ danger: true }}
-          onConfirm={() =>
-            deleteFileMut
-              .mutateAsync(row.loadedFrom)
-              .then((r) =>
-                message.success(
-                  r.backup
-                    ? t('product.alarm.xml.deleteSuccessWithBackup', { backup: r.backup })
-                    : t('common.deleted'),
-                ),
-              )
-              .catch((e) => message.error((e as Error).message))
-          }
-        >
-          <Button size="small" danger icon={<DeleteOutlined />} />
-        </Popconfirm>
-        ) : (
-          <Tooltip title={t('common.builtinNoDelete')}>
-            <Button size="small" danger icon={<DeleteOutlined />} disabled />
+      width: 110,
+      render: (_: unknown, row: AlarmNeTypeStat) => (
+        <Space>
+          <Tooltip title={t('product.upload.downloadXml')}>
+            <Button
+              size="small"
+              icon={<DownloadOutlined />}
+              disabled={!row.loadedFrom}
+              onClick={() =>
+                downloadXmlMut
+                  .mutateAsync({ loadedFrom: row.loadedFrom })
+                  .catch((e) => message.error((e as Error).message))
+              }
+            />
           </Tooltip>
-        ),
+          {row.deletable ? (
+          <Popconfirm
+            title={t('product.alarm.xml.delTitle')}
+            description={
+              <div style={{ maxWidth: 320 }}>
+                {t('product.alarm.xml.deleteBullet1Pre')}<code>.deleted.&lt;ts&gt;</code>{t('product.alarm.xml.deleteBullet1Post')}
+                <br />{t('product.alarm.xml.deleteBullet2', { count: row.total })}
+              </div>
+            }
+            okText={t('common.delete')}
+            okButtonProps={{ danger: true }}
+            onConfirm={() =>
+              deleteFileMut
+                .mutateAsync(row.loadedFrom)
+                .then((r) =>
+                  message.success(
+                    r.backup
+                      ? t('product.alarm.xml.deleteSuccessWithBackup', { backup: r.backup })
+                      : t('common.deleted'),
+                  ),
+                )
+                .catch((e) => message.error((e as Error).message))
+            }
+          >
+            <Button size="small" danger icon={<DeleteOutlined />} />
+          </Popconfirm>
+          ) : (
+            <Tooltip title={t('common.builtinNoDelete')}>
+              <Button size="small" danger icon={<DeleteOutlined />} disabled />
+            </Tooltip>
+          )}
+        </Space>
+      ),
     },
   ];
 

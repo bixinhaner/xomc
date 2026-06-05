@@ -1,4 +1,5 @@
 import http from '../http';
+import { saveBlob } from '../../utils/saveBlob';
 import type {
   IndicatorInfo,
   IndicatorListFilter,
@@ -306,6 +307,7 @@ export const indicatorLibraryApi = {
         indicators: number;
         loaded_from?: string;
         source?: string;
+        deletable?: boolean;
         description?: string;
       }>;
     }>('/indicators/summary');
@@ -316,6 +318,7 @@ export const indicatorLibraryApi = {
         indicators: b.indicators,
         loadedFrom: b.loaded_from ?? '',
         source: (b.source ?? 'unknown') as IndicatorPlatformSummary['source'],
+        deletable: b.deletable ?? false,
         description: b.description ?? '',
       })),
     };
@@ -350,15 +353,13 @@ export const indicatorLibraryApi = {
     };
   },
 
-  // multipart 上传自定义 XML(三库 XML 导入重构:name 必填 + 双唯一性硬拒,去 force)
-  // name = 用户指定的唯一名称(不含扩展名);file = File 对象(浏览器 FormData)。
-  async uploadXml(
-    tech: TechLower,
-    file: File,
-    name: string
-  ): Promise<IndicatorUploadResult> {
+  // multipart 上传自定义 XML(2026-06-05 取消手填名称:名称取自 XML platform 属性,
+  // 文件名 = <platform>.xml)。重复允许覆盖:不带 force 时重复返 409
+  // (data.overwritable=true),前端弹二次确认后带 force=true 重试 → 覆盖归属文件
+  // (旧文件自动备份 .bak.<ts>)。
+  // 落地目录:ENB → indicator-library/enb/,GSM/GNB → indicator-library/ 根级。
+  async uploadXml(tech: TechLower, file: File, force = false): Promise<IndicatorUploadResult> {
     const form = new FormData();
-    form.append('name', name);
     form.append('file', file);
     const { data } = await http.post<{
       uploaded: boolean;
@@ -366,9 +367,10 @@ export const indicatorLibraryApi = {
       loaded_from: string;
       tech: string;
       platform: string;
+      overwritten: boolean;
       reloaded: boolean;
     }>('/indicators/upload-xml', form, {
-      params: { tech },
+      params: force ? { tech, force: 'true' } : { tech },
       // 必须显式声明 multipart/form-data — http.ts axios.create 设了
       // 默认 'Content-Type': 'application/json',不显式覆盖会沿用 JSON
       // 导致 body 被序列化为 "{}" + Gin c.FormFile("file") 返
@@ -382,8 +384,18 @@ export const indicatorLibraryApi = {
       loadedFrom: data.loaded_from,
       tech: data.tech as TechLower,
       platform: data.platform,
+      overwritten: data.overwritten,
       reloaded: data.reloaded,
     };
+  },
+
+  // 下载指标 XML 原文件(builtin / custom 均可,2026-06-05 操作列下载功能)
+  async downloadXml(loadedFrom: string): Promise<void> {
+    const resp = await http.get('/indicators/file-content', {
+      params: { loaded_from: loadedFrom },
+      responseType: 'blob',
+    });
+    saveBlob(resp.data as BlobPart, loadedFrom.split('/').pop() || 'indicator.xml');
   },
 
   // T-0180 P1.3: 按 loadedFrom 删自定义 XML(内置返 403);URL path 携带完整 loadedFrom
