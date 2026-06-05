@@ -65,6 +65,7 @@ type WriteRepository interface {
 // ListFilter 控制 ListWithFilter 行为。
 type ListFilter struct {
 	NeType       *string
+	LoadedFrom   *string
 	SeverityCode *int
 	Keyword      *string
 	Page         int

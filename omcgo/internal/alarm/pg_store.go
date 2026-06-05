@@ -107,11 +107,11 @@ func (s *PgAlarmStore) UpdateActive(ctx context.Context, alarm *model.Alarm) err
 	additionalJSON, _ := json.Marshal(alarm.AdditionalInfo)
 	_, err := s.pool.Exec(ctx,
 		`UPDATE alarms_active SET severity=$1, status=$2, raised_at=$3, acknowledged_at=$4,
-			 acknowledged_by=$5, additional_info=$6, updated_at=$7, device_name=$8, technology=$9,
-			 alarm_source=$10, event_type=$11, network_location=$12, explicit_cause=$13,
-			 is_read=$14, ack_count=$15, last_updated_at=$16, probable_cause=$17 WHERE id=$18`,
+			 acknowledged_by=$5, ack_note=$6, additional_info=$7, updated_at=$8, device_name=$9, technology=$10,
+			 alarm_source=$11, event_type=$12, network_location=$13, explicit_cause=$14,
+			 is_read=$15, ack_count=$16, last_updated_at=$17, probable_cause=$18 WHERE id=$19`,
 		alarm.Severity, alarm.Status, alarm.RaisedAt, alarm.AcknowledgedAt,
-		alarm.AcknowledgedBy, additionalJSON, time.Now(),
+		alarm.AcknowledgedBy, alarm.AckNote, additionalJSON, time.Now(),
 		alarm.DeviceName, alarm.Technology,
 		alarm.AlarmSource, alarm.EventType,
 		alarm.NetworkLocation, alarm.ExplicitCause,
@@ -170,6 +170,10 @@ func (s *PgAlarmStore) ListActive(ctx context.Context, filter AlarmFilter) (*mod
 
 func (s *PgAlarmStore) Archive(ctx context.Context, alarm *model.Alarm) error {
 	additionalJSON, _ := json.Marshal(alarm.AdditionalInfo)
+	archiveUpdatedAt := historyUpdatedAt(alarm)
+	if archiveUpdatedAt.IsZero() {
+		archiveUpdatedAt = time.Now()
+	}
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO alarms_history (time, alarm_id, device_id, device_sn, carrier, severity, alarm_type, alarm_identifier, description, status, raised_at, acknowledged_at, cleared_at, device_name, technology, alarm_source, event_type, network_location, explicit_cause, ack_count, acknowledged_by, ack_note, additional_info, updated_at, cleared_by, clear_note, probable_cause)
 			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)`,
@@ -178,7 +182,7 @@ func (s *PgAlarmStore) Archive(ctx context.Context, alarm *model.Alarm) error {
 		alarm.Status, alarm.RaisedAt, alarm.AcknowledgedAt, alarm.ClearedAt,
 		alarm.DeviceName, alarm.Technology, alarm.AlarmSource, alarm.EventType,
 		alarm.NetworkLocation, alarm.ExplicitCause, alarm.AckCount,
-		alarm.AcknowledgedBy, alarm.AckNote, additionalJSON, time.Now(),
+		alarm.AcknowledgedBy, alarm.AckNote, additionalJSON, archiveUpdatedAt,
 		alarm.ClearedBy, alarm.ClearNote,
 		alarm.ProbableCause,
 	)
@@ -186,6 +190,13 @@ func (s *PgAlarmStore) Archive(ctx context.Context, alarm *model.Alarm) error {
 		return fmt.Errorf("insert alarms_history: %w", err)
 	}
 	return nil
+}
+
+func historyUpdatedAt(alarm *model.Alarm) time.Time {
+	if !alarm.LastUpdatedAt.IsZero() {
+		return alarm.LastUpdatedAt
+	}
+	return alarm.UpdatedAt
 }
 
 func (s *PgAlarmStore) ListHistory(ctx context.Context, filter AlarmFilter) (*model.ListResponse[model.Alarm], error) {

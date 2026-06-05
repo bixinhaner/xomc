@@ -12,6 +12,43 @@ import type {
 } from '@core/types/alarmDefinition';
 import { useT } from '@/hooks/useT';
 
+const EVENT_TYPE_OPTIONS = [
+  { value: 30000, labelKey: 'alarm.eventType.communication' },
+  { value: 30001, labelKey: 'alarm.eventType.qualityOfService' },
+  { value: 30002, labelKey: 'alarm.eventType.processingError' },
+  { value: 30003, labelKey: 'alarm.eventType.device' },
+  { value: 30004, labelKey: 'alarm.eventType.environment' },
+  { value: 30006, labelKey: 'alarm.eventType.performance' },
+] as const;
+
+function normalizeEventType(eventType: AlarmDefinition['eventType']): number | undefined {
+  if (eventType === undefined || eventType === null || eventType === '') {
+    return undefined;
+  }
+
+  const value = String(eventType).trim();
+  switch (value) {
+    case 'communication':
+      return 30000;
+    case 'qualityOfService':
+      return 30001;
+    case 'processingError':
+      return 30002;
+    case 'device':
+    case 'equipment':
+      return 30003;
+    case 'environment':
+      return 30004;
+    case 'performance':
+    case 'service':
+      return 30006;
+    default: {
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : undefined;
+    }
+  }
+}
+
 interface Props {
   open: boolean;
   definition: AlarmDefinition | null;
@@ -28,7 +65,7 @@ interface FormValues {
   cnName: string;
   enName: string;
   severityCode: number;
-  eventType: string;
+  eventType?: number;
   cnProbableCause?: string;
   enProbableCause?: string;
   cnSuggestion?: string;
@@ -50,6 +87,14 @@ export default function AlarmDefinitionDrawer({
   const { data: sevData } = useAlarmSeverityLevels();
   const createMut = useCreateAlarmDefinition();
   const updateMut = useUpdateAlarmDefinition();
+  const severityOptions = (sevData?.items || []).map((s) => {
+    const code = Number(s.code);
+    const cn = s.cnName ?? s.name ?? String(code);
+    const en = s.enName ?? s.name ?? '';
+    const label = en && en !== cn ? `${code} - ${cn} / ${en}` : `${code} - ${cn}`;
+    return { label, value: code };
+  });
+  const defaultSeverityCode = severityOptions[severityOptions.length - 1]?.value ?? 4;
 
   useEffect(() => {
     if (!open) return;
@@ -59,8 +104,8 @@ export default function AlarmDefinitionDrawer({
         neType: definition.neType,
         cnName: definition.cnName,
         enName: definition.enName,
-        severityCode: definition.severityCode,
-        eventType: definition.eventType || '',
+        severityCode: Number(definition.severityCode),
+        eventType: normalizeEventType(definition.eventType),
         cnProbableCause: definition.cnProbableCause,
         enProbableCause: definition.enProbableCause,
         cnSuggestion: definition.cnSuggestion,
@@ -72,11 +117,12 @@ export default function AlarmDefinitionDrawer({
       form.resetFields();
       form.setFieldsValue({
         isShow: true,
-        severityCode: 4,
+        severityCode: defaultSeverityCode,
+        eventType: undefined,
         neType: defaultNeType ?? '',
       });
     }
-  }, [open, definition, defaultNeType, form]);
+  }, [open, definition, defaultNeType, defaultSeverityCode, form, sevData]);
 
   const handleSave = async () => {
     try {
@@ -167,18 +213,19 @@ export default function AlarmDefinitionDrawer({
         </Form.Item>
         <Form.Item name="severityCode" label={t('product.alarm.severityLabel')} rules={[{ required: true }]}>
           <Select
-            options={(sevData?.items || []).map((s) => {
-              // 真后端单列 name(Critical/Major/...);mock 双列 cnName/enName。
-              // 渲染时三段优雅 fallback:cnName ?? name ?? code 字符串。
-              const cn = s.cnName ?? s.name ?? String(s.code);
-              const en = s.enName ?? s.name ?? '';
-              const label = en && en !== cn ? `${s.code} - ${cn} / ${en}` : `${s.code} - ${cn}`;
-              return { label, value: s.code };
-            })}
+            key={severityOptions.map((option) => option.value).join(',') || 'severity-loading'}
+            options={severityOptions}
           />
         </Form.Item>
         <Form.Item name="eventType" label={t('product.alarm.def.eventType')}>
-          <Input placeholder="communication / qualityOfService / processingError / ..." />
+          <Select
+            allowClear
+            placeholder={t('product.alarm.def.eventType')}
+            options={EVENT_TYPE_OPTIONS.map((option) => ({
+              label: t(option.labelKey),
+              value: option.value,
+            }))}
+          />
         </Form.Item>
         <Form.Item name="cnProbableCause" label={t('product.alarm.def.cnCause')}>
           <Input.TextArea rows={2} />

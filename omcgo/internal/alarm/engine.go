@@ -67,6 +67,7 @@ func applyIncomingAlarmState(target *model.Alarm, incoming *model.Alarm) {
 		target.Status = incoming.Status
 		target.AcknowledgedAt = incoming.AcknowledgedAt
 		target.AcknowledgedBy = incoming.AcknowledgedBy
+		target.AckNote = incoming.AckNote
 	}
 }
 
@@ -254,6 +255,10 @@ func (e *AlarmEngine) Clear(ctx context.Context, alarmID uuid.UUID) error {
 		return fmt.Errorf("alarm is already cleared")
 	}
 
+	return e.clearActiveAlarm(ctx, alarm)
+}
+
+func (e *AlarmEngine) clearActiveAlarm(ctx context.Context, alarm *model.Alarm) error {
 	now := time.Now()
 	alarm.Status = model.AlarmCleared
 	alarm.ClearedAt = &now
@@ -264,7 +269,7 @@ func (e *AlarmEngine) Clear(ctx context.Context, alarmID uuid.UUID) error {
 	}
 
 	// Remove from active
-	if err := e.store.RemoveActive(ctx, alarmID); err != nil {
+	if err := e.store.RemoveActive(ctx, alarm.ID); err != nil {
 		return fmt.Errorf("remove active alarm: %w", err)
 	}
 
@@ -292,7 +297,7 @@ func (e *AlarmEngine) Clear(ctx context.Context, alarmID uuid.UUID) error {
 	}
 
 	e.logger.Info("alarm cleared",
-		zap.String("alarm_id", alarmID.String()),
+		zap.String("alarm_id", alarm.ID.String()),
 		zap.String("device_sn", alarm.DeviceSN))
 
 	return nil
@@ -308,13 +313,23 @@ func (e *AlarmEngine) AutoClear(ctx context.Context, alarm *model.Alarm) error {
 	if existing == nil {
 		return nil // No active alarm to clear
 	}
-	return e.Clear(ctx, existing.ID)
+	clearedBy := "system"
+	clearNote := "auto-cleared"
+	existing.ClearedBy = &clearedBy
+	existing.ClearNote = &clearNote
+	return e.clearActiveAlarm(ctx, existing)
 }
 
 func (e *AlarmEngine) archiveAutoClearedAlarm(ctx context.Context, alarm *model.Alarm) error {
 	now := time.Now()
-	clearNote := "auto-cleared by filter"
-	clearedBy := "system:auto_filter"
+	clearNote := "auto-cleared by alarm rule"
+	if alarm.ClearNote != nil && *alarm.ClearNote != "" {
+		clearNote = *alarm.ClearNote
+	}
+	clearedBy := "system"
+	if alarm.ClearedBy != nil && *alarm.ClearedBy != "" {
+		clearedBy = *alarm.ClearedBy
+	}
 
 	existing, err := loadMatchingActiveAlarm(ctx, e.store, alarm)
 	if err != nil {

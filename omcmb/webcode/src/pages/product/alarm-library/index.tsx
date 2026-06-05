@@ -59,6 +59,7 @@ import { useT } from '@/hooks/useT';
 // import UnknownStatsModal from './UnknownStatsModal';
 
 const { Text } = Typography;
+const EMPTY_LOADED_FROM = '__empty__';
 
 const SEVERITY_TAG_COLORS: Record<number, string> = {
   1: 'red',
@@ -83,14 +84,23 @@ export default function AlarmLibraryPage() {
 
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedNeType = searchParams.get('neType') || undefined;
+  const selectedLoadedFrom = (() => {
+    const value = searchParams.get('loadedFrom');
+    if (value === null) {
+      return undefined;
+    }
+    return value === EMPTY_LOADED_FROM ? '' : value;
+  })();
   const inDetail = Boolean(selectedNeType);
 
-  const setSelectedNeType = (next: string | undefined) => {
+  const setSelectedNeType = (next: string | undefined, loadedFrom?: string) => {
     const params = new URLSearchParams(searchParams);
     if (next) {
       params.set('neType', next);
+      params.set('loadedFrom', loadedFrom === '' ? EMPTY_LOADED_FROM : (loadedFrom ?? ''));
     } else {
       params.delete('neType');
+      params.delete('loadedFrom');
     }
     setSearchParams(params, { replace: false });
   };
@@ -113,8 +123,12 @@ export default function AlarmLibraryPage() {
     pageSize: 20,
   });
   const detailQueryFilter = useMemo<AlarmDefinitionFilter>(
-    () => (selectedNeType ? { ...detailFilter, neType: selectedNeType } : detailFilter),
-    [detailFilter, selectedNeType]
+    () => (
+      selectedNeType
+        ? { ...detailFilter, neType: selectedNeType, loadedFrom: selectedLoadedFrom }
+        : detailFilter
+    ),
+    [detailFilter, selectedLoadedFrom, selectedNeType]
   );
   const { data: detailData, isLoading: isDetailLoading } = useAlarmDefinitionList(
     inDetail ? detailQueryFilter : { page: 1, pageSize: 1 }
@@ -125,8 +139,8 @@ export default function AlarmLibraryPage() {
   // 否则选项从被过滤后的 detailItems 派生时,选中某级别会让列表收缩到该级别,下拉随之只剩
   // 当前一项,无法直接切换其它级别(必须先清空)。单 ne_type severity 低基数,pageSize 取大值即可全覆盖。
   const severitySourceFilter = useMemo<AlarmDefinitionFilter>(
-    () => ({ neType: selectedNeType, page: 1, pageSize: 200 }),
-    [selectedNeType]
+    () => ({ neType: selectedNeType, loadedFrom: selectedLoadedFrom, page: 1, pageSize: 200 }),
+    [selectedLoadedFrom, selectedNeType]
   );
   const { data: severitySourceData } = useAlarmDefinitionList(
     inDetail ? severitySourceFilter : { page: 1, pageSize: 1 }
@@ -171,7 +185,7 @@ export default function AlarmLibraryPage() {
         <Button
           type="link"
           size="small"
-          onClick={() => setSelectedNeType(row.neType)}
+          onClick={() => setSelectedNeType(row.neType, row.loadedFrom)}
           style={{ padding: 0, fontWeight: 600 }}
         >
           {v}
@@ -186,7 +200,7 @@ export default function AlarmLibraryPage() {
       width: 420,
       ellipsis: true,
       render: (v: string) =>
-        v ? <Tooltip title={v}><code>{v}</code></Tooltip> : <Tag color="warning">{t('alarmLibrary.cell.unfilled')}</Tag>,
+        v ? <Tooltip title={v}><code>{v}</code></Tooltip> : <Tag color="processing">{t('alarmLibrary.cell.manualAdded')}</Tag>,
     },
     { title: t('alarmLibrary.col.totalCount'), dataIndex: 'total', width: 100 },
     {

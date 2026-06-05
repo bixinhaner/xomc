@@ -140,6 +140,13 @@ func (r *PgRepository) ListWithFilter(ctx context.Context, f ListFilter) ([]Reso
 	if f.NeType != nil && *f.NeType != "" {
 		conds = append(conds, sq.Eq{"d.ne_type": *f.NeType})
 	}
+	if f.LoadedFrom != nil {
+		if *f.LoadedFrom == "" {
+			conds = append(conds, sq.Expr("COALESCE(d.loaded_from, '') = ''"))
+		} else {
+			conds = append(conds, sq.Eq{"d.loaded_from": *f.LoadedFrom})
+		}
+	}
 	if f.SeverityCode != nil {
 		conds = append(conds, sq.Eq{"l.code": *f.SeverityCode})
 	}

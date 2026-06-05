@@ -128,6 +128,29 @@ function normalizeEventType(raw: string | undefined): Alarm['eventType'] {
   return EVENT_TYPE_MAP[key] || 'communication';
 }
 
+function hasBusinessTimestamp(value: string | undefined): value is string {
+  if (!value) return false;
+  const normalized = value.trim();
+  if (!normalized || normalized.startsWith('0001-01-01')) {
+    return false;
+  }
+  const parsed = Date.parse(normalized);
+  if (Number.isNaN(parsed)) {
+    return true;
+  }
+  return new Date(parsed).getUTCFullYear() > 1;
+}
+
+function resolveUpdatedAt(ba: BackendAlarm): string {
+  if (hasBusinessTimestamp(ba.last_updated_at)) {
+    return ba.last_updated_at;
+  }
+  if (hasBusinessTimestamp(ba.updated_at)) {
+    return ba.updated_at;
+  }
+  return ba.raised_at;
+}
+
 // ---------------------------------------------------------------------------
 // Mappers
 // ---------------------------------------------------------------------------
@@ -160,7 +183,7 @@ function mapBackendAlarm(ba: BackendAlarm): Alarm {
     eventType: normalizeEventType(ba.event_type || ba.alarm_type),
     dealState,
     eventTime: ba.raised_at,
-    updTime: ba.last_updated_at || ba.updated_at,
+    updTime: resolveUpdatedAt(ba),
     dealUser: ba.acknowledged_by,
     dealTime: ba.acknowledged_at,
     clearTime: ba.cleared_at,

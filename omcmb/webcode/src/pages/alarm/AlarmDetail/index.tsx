@@ -167,9 +167,6 @@ const AlarmDetail: React.FC<AlarmDetailProps> = ({ alarm, open, onClose }) => {
             <Descriptions.Item label={t('alarm.deviceSn')}>
               <Text style={{ fontFamily: 'monospace' }}>{resolvedAlarm.deviceSn || '-'}</Text>
             </Descriptions.Item>
-            <Descriptions.Item label={t('alarm.deviceName')}>
-              {resolvedAlarm.deviceName || '-'}
-            </Descriptions.Item>
             {/* 9. 告警源 */}
             <Descriptions.Item label={t('alarm.neTypeCol')}>
               {formatBaseStationTypeLabel(resolvedAlarm.neType)}

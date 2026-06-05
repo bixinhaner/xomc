@@ -1291,6 +1291,7 @@ const messages: Record<string, string> = {
   'alarmLibrary.col.uiVisible':      'UI 可见',
   'alarmLibrary.col.actions':        '操作',
   'alarmLibrary.cell.unfilled':      '未回填(请重载)',
+  'alarmLibrary.cell.manualAdded':   '手工新增',
   'alarmLibrary.cell.yes':           '是',
   'alarmLibrary.cell.no':            '否',
   // ITU-T X.733 严重级别 — 列头中文化,数据列里的 severityName 仍按后端取

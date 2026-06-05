@@ -10,7 +10,7 @@ export interface AlarmDefinition {
   severityId?: string;
   severityCode: number;
   severityName: string;
-  eventType?: string;
+  eventType?: number | string;
   cnProbableCause?: string;
   enProbableCause?: string;
   cnSuggestion?: string;
@@ -43,6 +43,7 @@ export interface UnknownAlarmStat {
 
 export interface AlarmDefinitionFilter {
   neType?: string;
+  loadedFrom?: string;
   severityCode?: number;
   keyword?: string;
   isUnknown?: boolean;
@@ -56,7 +57,7 @@ export interface CreateAlarmDefinitionInput {
   cnName: string;
   enName: string;
   severityCode: number;
-  eventType?: string;
+  eventType?: number;
   cnProbableCause?: string;
   enProbableCause?: string;
   cnSuggestion?: string;

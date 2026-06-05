@@ -65,6 +65,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 
 type listQuery struct {
 	NeType       string `form:"ne_type"`
+	LoadedFrom   string `form:"loaded_from"`
 	SeverityCode int    `form:"severity_code"`
 	Keyword      string `form:"keyword"`
 	Page         int    `form:"page"`
@@ -151,6 +152,13 @@ func (h *Handler) List(c *gin.Context) {
 	if strings.TrimSpace(q.NeType) != "" {
 		s := strings.TrimSpace(q.NeType)
 		f.NeType = &s
+	}
+	if raw, ok := c.GetQuery("loaded_from"); ok {
+		loadedFrom := strings.TrimSpace(raw)
+		if loadedFrom == "__empty__" {
+			loadedFrom = ""
+		}
+		f.LoadedFrom = &loadedFrom
 	}
 	if q.SeverityCode != 0 {
 		v := q.SeverityCode

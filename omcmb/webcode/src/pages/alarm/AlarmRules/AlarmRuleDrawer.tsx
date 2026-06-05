@@ -484,11 +484,6 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
       ellipsis: true,
     },
     {
-      title: t('device.name'),
-      dataIndex: 'name',
-      ellipsis: true,
-    },
-    {
       title: t('alarm.deviceType'),
       dataIndex: 'deviceType',
       width: 80,

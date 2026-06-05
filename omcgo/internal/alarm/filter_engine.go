@@ -200,8 +200,10 @@ func (e *FilterEngine) executeAction(ctx context.Context, alarm *model.Alarm, ru
 	case FilterActionAutoAcknowledge:
 		alarm.Status = model.AlarmAcknowledged
 		now := time.Now()
+		ackNote := autoAcknowledgeNote(rule)
 		alarm.AcknowledgedAt = &now
 		alarm.AcknowledgedBy = strPtr("system:auto_filter:" + rule.Name)
+		alarm.AckNote = &ackNote
 		e.logger.Info("alarm auto-acknowledged by filter",
 			zap.String("alarm_identifier", alarm.AlarmIdentifier),
 			zap.String("rule_name", rule.Name),
@@ -209,6 +211,9 @@ func (e *FilterEngine) executeAction(ctx context.Context, alarm *model.Alarm, ru
 		return &ProcessResult{Handled: true, Action: FilterActionAutoAcknowledge}, nil
 
 	case FilterActionAutoClear:
+		clearNote := autoClearNote(rule)
+		alarm.ClearedBy = strPtr("system")
+		alarm.ClearNote = &clearNote
 		e.logger.Info("alarm auto-cleared by filter",
 			zap.String("alarm_identifier", alarm.AlarmIdentifier),
 			zap.String("rule_name", rule.Name))
@@ -227,6 +232,23 @@ func (e *FilterEngine) executeAction(ctx context.Context, alarm *model.Alarm, ru
 	default:
 		return &ProcessResult{Handled: false, Action: FilterActionDefault}, nil
 	}
+}
+
+func autoAcknowledgeNote(rule *AlarmFilterRule) string {
+	if desc := strings.TrimSpace(rule.AcknowledgeDesc); desc != "" {
+		return desc
+	}
+	if name := strings.TrimSpace(rule.Name); name != "" {
+		return fmt.Sprintf("auto-acknowledged by alarm rule: %s", name)
+	}
+	return "auto-acknowledged by alarm rule"
+}
+
+func autoClearNote(rule *AlarmFilterRule) string {
+	if name := strings.TrimSpace(rule.Name); name != "" {
+		return fmt.Sprintf("auto-cleared by alarm rule: %s", name)
+	}
+	return "auto-cleared by alarm rule"
 }
 
 // dispatchWebhook 构建 alarm payload 并交给 dispatcher 发送。

@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
 
@@ -202,7 +203,7 @@ func TestProcessAlarm_IgnoreAction(t *testing.T) {
 
 func TestProcessAlarm_AutoAck(t *testing.T) {
 	engine := newTestFilterEngine([]AlarmFilterRule{
-		{FilterType: FilterTypeAlarmIdentifier, AlarmIdentifiers: []string{"CPU_OVERLOAD"}, Action: FilterActionAutoAcknowledge, Name: "auto-ack-cpu"},
+		{FilterType: FilterTypeAlarmIdentifier, AlarmIdentifiers: []string{"CPU_OVERLOAD"}, Action: FilterActionAutoAcknowledge, Name: "auto-ack-cpu", AcknowledgeDesc: "acknowledged by alarm rule"},
 	}, nil)
 	alarm := &model.Alarm{AlarmIdentifier: "CPU_OVERLOAD"}
 	result, err := engine.ProcessAlarm(context.Background(), alarm, uuid.UUID{})
@@ -210,6 +211,8 @@ func TestProcessAlarm_AutoAck(t *testing.T) {
 	assert.True(t, result.Handled)
 	assert.Equal(t, FilterActionAutoAcknowledge, result.Action)
 	assert.Equal(t, model.AlarmAcknowledged, alarm.Status)
+	require.NotNil(t, alarm.AckNote)
+	assert.Equal(t, "acknowledged by alarm rule", *alarm.AckNote)
 }
 
 func TestProcessAlarm_AutoClear(t *testing.T) {
@@ -221,6 +224,10 @@ func TestProcessAlarm_AutoClear(t *testing.T) {
 	assert.NoError(t, err)
 	assert.True(t, result.Handled)
 	assert.Equal(t, FilterActionAutoClear, result.Action)
+	require.NotNil(t, alarm.ClearedBy)
+	assert.Equal(t, "system", *alarm.ClearedBy)
+	require.NotNil(t, alarm.ClearNote)
+	assert.Equal(t, "auto-cleared by alarm rule: auto-clear-gps", *alarm.ClearNote)
 }
 
 // W1.5：notify_webhook 命中规则后应调用 dispatcher，URL/payload 与配置一致。

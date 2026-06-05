@@ -21,7 +21,7 @@ interface BackendDefinition {
   severity_id?: string;
   severity_code: number;
   severity_name: string;
-  event_type?: string;
+  event_type?: number | string;
   cn_probable_cause?: string;
   en_probable_cause?: string;
   cn_suggestion?: string;
@@ -35,7 +35,7 @@ interface BackendDefinition {
 
 interface BackendSeverityLevel {
   id: string;
-  code: number;
+  code: number | string;
   // 后端 SeverityLevel struct 只有单 name 列(DB alarm_severity_levels.name);
   // cn_name/en_name/color_hex 仅 mock 数据用,可选保留兼容。
   name?: string;
@@ -64,6 +64,29 @@ interface BackendNeTypeStat {
   warning_cnt: number;
 }
 
+function normalizeNumericValue(raw: number | string | undefined): number | undefined {
+  if (raw === undefined || raw === null || raw === '') {
+    return undefined;
+  }
+
+  const value = typeof raw === 'number' ? raw : Number(String(raw).trim());
+  return Number.isFinite(value) ? value : undefined;
+}
+
+function normalizeDefinitionEventType(raw: number | string | undefined): number | string | undefined {
+  const numeric = normalizeNumericValue(raw);
+  if (numeric !== undefined) {
+    return numeric;
+  }
+
+  if (raw === undefined || raw === null) {
+    return undefined;
+  }
+
+  const value = String(raw).trim();
+  return value === '' ? undefined : value;
+}
+
 function mapNeTypeStat(b: BackendNeTypeStat): AlarmNeTypeStat {
   return {
     neType: b.ne_type,
@@ -88,7 +111,7 @@ function mapDef(b: BackendDefinition): AlarmDefinition {
     severityId: b.severity_id,
     severityCode: b.severity_code,
     severityName: b.severity_name,
-    eventType: b.event_type,
+    eventType: normalizeDefinitionEventType(b.event_type),
     cnProbableCause: b.cn_probable_cause,
     enProbableCause: b.en_probable_cause,
     cnSuggestion: b.cn_suggestion,
@@ -104,7 +127,7 @@ function mapDef(b: BackendDefinition): AlarmDefinition {
 function mapSeverity(b: BackendSeverityLevel): AlarmSeverityLevel {
   return {
     id: b.id,
-    code: b.code,
+    code: normalizeNumericValue(b.code) ?? 0,
     name: b.name,
     cnName: b.cn_name,
     enName: b.en_name,
@@ -150,6 +173,9 @@ export const alarmDefinitionApi = {
   }> {
     const params: Record<string, unknown> = {};
     if (filter?.neType) params.ne_type = filter.neType;
+    if (filter?.loadedFrom !== undefined) {
+      params.loaded_from = filter.loadedFrom === '' ? '__empty__' : filter.loadedFrom;
+    }
     if (filter?.severityCode !== undefined) params.severity_code = filter.severityCode;
     if (filter?.keyword) params.keyword = filter.keyword;
     if (filter?.isUnknown !== undefined) params.is_unknown = filter.isUnknown;

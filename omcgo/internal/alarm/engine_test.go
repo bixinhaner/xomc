@@ -356,7 +356,9 @@ func TestProcessAutoClearArchivesHistoryWhenNoActiveExists(t *testing.T) {
 	assert.Equal(t, model.AlarmCleared, store.history[0].Status)
 	assert.NotNil(t, store.history[0].ClearedAt)
 	require.NotNil(t, store.history[0].ClearedBy)
-	assert.Equal(t, "system:auto_filter", *store.history[0].ClearedBy)
+	assert.Equal(t, "system", *store.history[0].ClearedBy)
+	require.NotNil(t, store.history[0].ClearNote)
+	assert.Equal(t, "auto-cleared by alarm rule: auto-clear-alm001", *store.history[0].ClearNote)
 }
 
 func TestProcessAutoClearArchivesHistoryWhenStoreReturnsNotFound(t *testing.T) {
@@ -418,6 +420,85 @@ func TestProcessAutoClearArchivesAndRemovesExistingActive(t *testing.T) {
 	assert.Equal(t, existing.ID, store.history[0].ID)
 	assert.Equal(t, model.AlarmCleared, store.history[0].Status)
 	assert.NotNil(t, store.history[0].ClearedAt)
+	require.NotNil(t, store.history[0].ClearedBy)
+	assert.Equal(t, "system", *store.history[0].ClearedBy)
+	require.NotNil(t, store.history[0].ClearNote)
+	assert.Equal(t, "auto-cleared by alarm rule: auto-clear-alm001", *store.history[0].ClearNote)
+}
+
+func TestProcessAutoAcknowledgeStoresAckNoteOnExistingActive(t *testing.T) {
+	store := newMockAlarmStore()
+	engine := newTestEngine(store)
+	ctx := context.Background()
+
+	existing := &model.Alarm{
+		ID:              uuid.New(),
+		DeviceSN:        "TEST001",
+		DeviceID:        uuid.New(),
+		Carrier:         model.CarrierCMCC,
+		AlarmIdentifier: "ALM001",
+		Severity:        model.AlarmMajor,
+		RaisedAt:        time.Now().Add(-time.Minute),
+		Status:          model.AlarmActive,
+	}
+	require.NoError(t, store.SaveActive(ctx, existing))
+
+	engine.SetFilterEngine(newTestFilterEngine([]AlarmFilterRule{
+		{FilterType: FilterTypeAlarmIdentifier, AlarmIdentifiers: []string{"ALM001"}, Action: FilterActionAutoAcknowledge, Name: "auto-ack-alm001", AcknowledgeDesc: "acknowledged by alarm rule"},
+	}, nil))
+
+	incoming := &model.Alarm{
+		DeviceSN:        existing.DeviceSN,
+		DeviceID:        existing.DeviceID,
+		Carrier:         existing.Carrier,
+		AlarmIdentifier: existing.AlarmIdentifier,
+		Severity:        existing.Severity,
+		RaisedAt:        time.Now(),
+	}
+
+	require.NoError(t, engine.Process(ctx, incoming))
+	stored, err := store.GetActiveByID(ctx, existing.ID)
+	require.NoError(t, err)
+	assert.Equal(t, model.AlarmAcknowledged, stored.Status)
+	require.NotNil(t, stored.AcknowledgedBy)
+	assert.Equal(t, "system:auto_filter:auto-ack-alm001", *stored.AcknowledgedBy)
+	require.NotNil(t, stored.AckNote)
+	assert.Equal(t, "acknowledged by alarm rule", *stored.AckNote)
+}
+
+func TestAutoClearPreservesUpdateTimeAndSetsSystemClearUser(t *testing.T) {
+	store := newMockAlarmStore()
+	engine := newTestEngine(store)
+	ctx := context.Background()
+	lastUpdatedAt := time.Now().Add(-2 * time.Minute).UTC().Truncate(time.Second)
+
+	existing := &model.Alarm{
+		ID:              uuid.New(),
+		DeviceSN:        "TEST001",
+		DeviceID:        uuid.New(),
+		Carrier:         model.CarrierCMCC,
+		AlarmIdentifier: "ALM001",
+		Severity:        model.AlarmMajor,
+		RaisedAt:        time.Now().Add(-5 * time.Minute),
+		Status:          model.AlarmActive,
+		LastUpdatedAt:   lastUpdatedAt,
+	}
+	require.NoError(t, store.SaveActive(ctx, existing))
+
+	require.NoError(t, engine.AutoClear(ctx, &model.Alarm{
+		DeviceSN:        existing.DeviceSN,
+		DeviceID:        existing.DeviceID,
+		Carrier:         existing.Carrier,
+		AlarmIdentifier: existing.AlarmIdentifier,
+	}))
+
+	assert.Len(t, store.active, 0)
+	assert.Len(t, store.history, 1)
+	assert.Equal(t, lastUpdatedAt, store.history[0].LastUpdatedAt)
+	require.NotNil(t, store.history[0].ClearedBy)
+	assert.Equal(t, "system", *store.history[0].ClearedBy)
+	require.NotNil(t, store.history[0].ClearNote)
+	assert.Equal(t, "auto-cleared", *store.history[0].ClearNote)
 }
 
 func TestAlarmFullLifecycle(t *testing.T) {

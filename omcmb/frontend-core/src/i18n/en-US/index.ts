@@ -1292,6 +1292,7 @@ const messages: Record<string, string> = {
   'alarmLibrary.col.uiVisible':      'UI Visible',
   'alarmLibrary.col.actions':        'Actions',
   'alarmLibrary.cell.unfilled':      'Not filled (reload XML)',
+  'alarmLibrary.cell.manualAdded':   'Manual Add',
   'alarmLibrary.cell.yes':           'Yes',
   'alarmLibrary.cell.no':            'No',
   // ITU-T X.733 severity levels (standard industry terms, English form retained)
