@@ -6331,6 +6331,13 @@ const messages: Record<string, string> = {
   'perf.adhoc.descDevices':              'Selected Devices',
   'perf.adhoc.descDevicesCount':         '{count} total',
   'perf.adhoc.descMetricsCount':         '{count} total',
+  'perf.adhoc.descScope':                'Aggregation Scope',
+  'perf.adhoc.scopeAllProduct':          'All {tech} products (grouped by product)',
+  'perf.adhoc.scopeAllProductAny':       'All products (grouped by product)',
+  'perf.adhoc.scopeAllDeviceGroup':      'All {tech} device groups (grouped by device group)',
+  'perf.adhoc.scopeAllDeviceGroupAny':   'All device groups (grouped by device group)',
+  'perf.adhoc.scopeAllBand':             'All {tech} bands (grouped by band)',
+  'perf.adhoc.scopeAllBandAny':          'All bands (grouped by band)',
   'perf.adhoc.anyTech':                  'Any Technology',
   // T-0194: builtin task "edit metrics" modal
   'perf.adhoc.editMetricTitle':          'Edit Metrics: {name}',

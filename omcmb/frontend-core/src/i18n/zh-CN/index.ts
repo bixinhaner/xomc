@@ -6366,6 +6366,13 @@ const messages: Record<string, string> = {
   'perf.adhoc.descDevices':              '选定设备',
   'perf.adhoc.descDevicesCount':         '共 {count} 台',
   'perf.adhoc.descMetricsCount':         '共 {count} 个',
+  'perf.adhoc.descScope':                '聚合范围',
+  'perf.adhoc.scopeAllProduct':          '包含全部 {tech} 产品（按产品分组）',
+  'perf.adhoc.scopeAllProductAny':       '包含全部产品（按产品分组）',
+  'perf.adhoc.scopeAllDeviceGroup':      '包含全部 {tech} 设备组（按设备组分组）',
+  'perf.adhoc.scopeAllDeviceGroupAny':   '包含全部设备组（按设备组分组）',
+  'perf.adhoc.scopeAllBand':             '包含全部 {tech} 频段（按频段分组）',
+  'perf.adhoc.scopeAllBandAny':          '包含全部频段（按频段分组）',
   'perf.adhoc.anyTech':                  '不限制式',
   // T-0194：内置任务「编辑指标」弹窗
   'perf.adhoc.editMetricTitle':          '编辑指标：{name}',

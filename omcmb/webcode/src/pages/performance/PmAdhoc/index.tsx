@@ -80,6 +80,25 @@ const TECHNOLOGY_LABEL_KEY: Record<string, string> = {
   gsm: 'perf.adhoc.techGsm',
 };
 
+// 制式短标签（用于「聚合范围」说明句，比「LTE (4G)」更精炼）。
+const TECH_SHORT_LABEL: Record<string, string> = {
+  lte: 'LTE',
+  nr: 'NR',
+  gsm: 'GSM',
+};
+
+// 「聚合范围」说明句语料键：仅产品/设备组/频段三维度是「按制式全量、按维度分组」（无子集可选），
+// 各给一句范围声明（带制式 / 不限制式两版，避免空制式时多余空格）。其余维度不渲染该行
+// （设备/自选设备维度已由「选定设备」行表达，全网无分组）。
+const SCOPE_KEY: Record<string, { withTech: string; anyTech: string }> = {
+  product: { withTech: 'perf.adhoc.scopeAllProduct', anyTech: 'perf.adhoc.scopeAllProductAny' },
+  device_group: {
+    withTech: 'perf.adhoc.scopeAllDeviceGroup',
+    anyTech: 'perf.adhoc.scopeAllDeviceGroupAny',
+  },
+  band: { withTech: 'perf.adhoc.scopeAllBand', anyTech: 'perf.adhoc.scopeAllBandAny' },
+};
+
 function statusLabel(intl: IntlShape, s?: string): string {
   const id = s ? STATUS_LABEL_KEY[s] : undefined;
   return id ? intl.formatMessage({ id }) : (s ?? '');
@@ -455,6 +474,28 @@ export default function PmAdhocPage() {
                       {sn}
                     </Tag>
                   ))}
+                </Descriptions.Item>
+              )}
+              {/* 聚合范围 — 产品/设备组/频段维度是「按制式全量聚合、按维度分组」，无子集可选，
+                  故给一句范围声明（如「包含全部 LTE 产品（按产品分组）」）而非清单。制式见上一行，
+                  此处只在句中点出制式短名；不限制式时用 anyTech 版避免多余空格。 */}
+              {SCOPE_KEY[selectedTask.dimension] && (
+                <Descriptions.Item
+                  label={intl.formatMessage({ id: 'perf.adhoc.descScope' })}
+                  span={2}
+                >
+                  {intl.formatMessage(
+                    {
+                      id: selectedTask.technology
+                        ? SCOPE_KEY[selectedTask.dimension].withTech
+                        : SCOPE_KEY[selectedTask.dimension].anyTech,
+                    },
+                    {
+                      tech: selectedTask.technology
+                        ? TECH_SHORT_LABEL[selectedTask.technology] ?? selectedTask.technology
+                        : '',
+                    },
+                  )}
                 </Descriptions.Item>
               )}
             </Descriptions>
