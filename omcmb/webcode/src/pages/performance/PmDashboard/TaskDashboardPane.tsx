@@ -29,6 +29,7 @@ import {
   ALL_WEEKDAYS,
   attachCompareSeries,
   dimSelectionToParams,
+  extendChartsAxis,
   filterRowsByWeekdayHour,
   previousWindow,
 } from './dashboardFilterUtils';
@@ -133,9 +134,20 @@ export default function TaskDashboardPane({ taskId }: Props) {
     if (!taskQuery.data || !effectiveGran) return [];
     // T-0194：按任务已选指标清单过滤出图（空清单则不过滤，兜底全画），让"指标数 X"与出图数一致。
     const metricPaths = taskQuery.data.metricPaths;
-    const cur = filterChartsByMetricPaths(
-      buildMetricCharts(rows, taskQuery.data.dimension, effectiveGran),
-      metricPaths,
+    // T-AXISFILL：转置出当前图集后立即扩轴（按范围+粒度连续铺刻度、套星期/小时筛选、并集真实桶），
+    // 空刻度补 '-'，再挂周期对比（compare 按毫秒对齐到已扩展的 cur.buckets，prev 不单独扩轴）。
+    const cur = extendChartsAxis(
+      filterChartsByMetricPaths(
+        buildMetricCharts(rows, taskQuery.data.dimension, effectiveGran),
+        metricPaths,
+      ),
+      {
+        rangeStartMs: start.valueOf(),
+        rangeEndMs: end.valueOf(),
+        weekdays: weekdaySet,
+        hours: hourSet,
+        granularity: effectiveGran,
+      },
     );
     if (!filter.compare) return cur;
     const prev = filterChartsByMetricPaths(
@@ -143,7 +155,18 @@ export default function TaskDashboardPane({ taskId }: Props) {
       metricPaths,
     );
     return attachCompareSeries(cur, prev, offsetMs, effectiveGran);
-  }, [rows, prevRows, taskQuery.data, effectiveGran, filter.compare, offsetMs]);
+  }, [
+    rows,
+    prevRows,
+    taskQuery.data,
+    effectiveGran,
+    filter.compare,
+    offsetMs,
+    start,
+    end,
+    weekdaySet,
+    hourSet,
+  ]);
 
   // ── 导出（T4 adhoc 来源）：带 task_id + 当前大时间段 POST 建任务 ──────────
   const createExport = useCreateKpiExport();

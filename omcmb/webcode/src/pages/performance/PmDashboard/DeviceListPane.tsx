@@ -54,6 +54,7 @@ import {
   ALL_HOURS,
   ALL_WEEKDAYS,
   attachCompareSeries,
+  extendChartsAxis,
   filterRowsByWeekdayHour,
   previousWindow,
 } from './dashboardFilterUtils';
@@ -231,7 +232,15 @@ export default function DeviceListPane() {
       wd,
       hr,
     );
-    const cur = buildDeviceMetricCharts(curRows, submitted.granularity);
+    // T-AXISFILL：转置出当前图集后立即扩轴（按 submitted 范围+粒度连续铺刻度、套星期/小时筛选、并集真实桶），
+    // 空刻度补 '-'，再挂周期对比（compare 按毫秒对齐到已扩展的 cur.buckets，prev 不单独扩轴）。
+    const cur = extendChartsAxis(buildDeviceMetricCharts(curRows, submitted.granularity), {
+      rangeStartMs: dayjs(submitted.startTime).valueOf(),
+      rangeEndMs: dayjs(submitted.endTime).valueOf(),
+      weekdays: wd,
+      hours: hr,
+      granularity: submitted.granularity,
+    });
     if (!submitted.compare) return cur;
     const prevRows = filterRowsByWeekdayHour(
       filterRowsByObjectLdns(rawPrevRows, submitted.allowedLdns),
