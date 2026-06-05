@@ -113,20 +113,19 @@ export default function MetricPickerModal({
   const columns = useMemo(
     () => [
       {
-        title: intl.formatMessage({ id: 'perf.picker.colCnName' }),
-        dataIndex: 'cnName',
-        key: 'cn',
-        width: 240,
+        title: intl.formatMessage({ id: 'perf.picker.colCode' }),
+        dataIndex: 'id',
+        key: 'code',
+        width: 220,
         ellipsis: true,
-        render: (n: string, r: IndicatorInfo) => n || <Text type="secondary">{r.enName}</Text>,
+        render: (v: string) => <Text code>{v}</Text>,
       },
       {
-        title: intl.formatMessage({ id: 'perf.picker.colEnPath' }),
-        dataIndex: 'enName',
-        key: 'path',
-        width: 260,
+        title: intl.formatMessage({ id: 'perf.picker.colName' }),
+        key: 'name',
+        width: 280,
         ellipsis: true,
-        render: (n: string) => <Text code>{n}</Text>,
+        render: (_: unknown, r: IndicatorInfo) => metricLabelOf(r, isEn),
       },
       {
         title: intl.formatMessage({ id: 'perf.picker.colType' }),
@@ -136,7 +135,7 @@ export default function MetricPickerModal({
           r.isCounter ? <Tag color="blue">Counter</Tag> : <Tag color="orange">KPI</Tag>,
       },
     ],
-    [intl],
+    [intl, isEn],
   );
 
   const handleSearch = () => {
