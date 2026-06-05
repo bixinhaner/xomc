@@ -6,16 +6,17 @@
  *
  * 仪表盘「导出」与 adhoc 任务详情「导出」各组一份 params(jsonb)，键名 snake_case，
  * 与后端 export 模块的 DashboardParams / AdhocParams 字段一一对齐（internal/pm/export/params.go）：
- *   - dashboard：granularity / dimension / device_sns / metric_paths / metric_type /
- *                technologies / start_time / end_time。
+ *   - dashboard：granularity / dimension / device_sns / metric_paths /
+ *                technologies / start_time / end_time / object_ldns。
  *   - adhoc：task_id（+ 可选 start_time / end_time 二次时窗）。
  *
  * 时间统一用 RFC3339（ISO8601），与后端 time.Parse(time.RFC3339) 对齐。
  *
- * 注：小区/PLMN（object_ldn）白名单本期 OUT-OF-SCOPE——后端 DashboardParams 暂无对应字段、
- * applyDeviceExportFilters 也不按 object_ldn 过滤，故前端不发送该键（发了会被静默丢弃，反而误导）。
- * 仪表盘下钻定格某小区/PLMN 后导出，CSV 仍含所选设备的全部小区/PLMN。
- * 若后续要支持，需后端补 DashboardParams.ObjectLDNs 字段 + 过滤逻辑，再在此回填该键。
+ * A3：不发送 metric_type——仪表盘出图本就不限指标类型（counter 与 ratio/kpi 混选混画），
+ * 导出与出图同口径，由所选 metric_paths 隐含类型，后端 metric_type 为空即不过滤。
+ *
+ * A1：小区/PLMN（object_ldn）下钻白名单——下钻定格某小区/PLMN 后导出时回填 object_ldns，
+ * 后端按白名单只导命中行（空则导该设备全部小区/PLMN，向后兼容）。
  */
 
 /** 仪表盘导出的当前筛选快照（设备列表 Pane 的提交态）。 */
@@ -32,6 +33,8 @@ export interface DashboardExportSelection {
   startTime: string;
   /** 大时间段止（ISO8601）。 */
   endTime: string;
+  /** A1：小区/PLMN 下钻白名单（空/缺席=不过滤，导全部小区/PLMN）。 */
+  objectLdns?: string[];
 }
 
 /** adhoc 导出的当前筛选快照。 */
@@ -46,22 +49,25 @@ export interface AdhocExportSelection {
 /**
  * 组装仪表盘来源的 params(jsonb)。
  * - 维度固定 device（设备列表 Pane 是按设备出图）。
- * - metric_type 固定 counter（设备列表取原始计数器值，与聚合查询同口径）。
- * - 小区/PLMN 白名单本期不发送（后端无对应过滤，见文件头注）。
+ * - A3：不发送 metric_type（与出图同口径，counter/kpi 都导，类型由 metric_paths 隐含）。
+ * - A1：object_ldns 仅在非空时写入（下钻定格的小区/PLMN 白名单；空=导全部）。
  */
 export function buildDashboardExportParams(
   sel: DashboardExportSelection,
 ): Record<string, unknown> {
-  return {
+  const params: Record<string, unknown> = {
     granularity: sel.granularity,
     dimension: 'device',
     device_sns: sel.deviceSns,
     metric_paths: sel.metricPaths,
-    metric_type: 'counter',
     technologies: sel.technology ? [sel.technology] : [],
     start_time: sel.startTime,
     end_time: sel.endTime,
   };
+  if (sel.objectLdns && sel.objectLdns.length > 0) {
+    params.object_ldns = sel.objectLdns;
+  }
+  return params;
 }
 
 /** 组装 adhoc 来源的 params(jsonb)。可选二次时窗仅在非空时写入。 */

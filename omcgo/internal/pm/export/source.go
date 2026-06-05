@@ -32,9 +32,10 @@ type PgQuerier = aggregator.PgQuerier
 
 // dashboardDeviceSource 对 device 维度做 (time, id) keyset 流式取数。
 type dashboardDeviceSource struct {
-	db    PgQuerier
-	table string
-	req   aggregator.QueryRequest
+	db         PgQuerier
+	table      string
+	req        aggregator.QueryRequest
+	objectLDNs []string // A1 小区/PLMN 下钻白名单（空=不过滤）
 
 	curTime time.Time
 	curID   uuid.UUID
@@ -42,15 +43,15 @@ type dashboardDeviceSource struct {
 	done    bool
 }
 
-func newDashboardDeviceSource(db PgQuerier, table string, req aggregator.QueryRequest) *dashboardDeviceSource {
-	return &dashboardDeviceSource{db: db, table: table, req: req}
+func newDashboardDeviceSource(db PgQuerier, table string, req aggregator.QueryRequest, objectLDNs []string) *dashboardDeviceSource {
+	return &dashboardDeviceSource{db: db, table: table, req: req, objectLDNs: objectLDNs}
 }
 
 func (s *dashboardDeviceSource) Next(ctx context.Context) ([]ExportRow, bool, error) {
 	if s.done {
 		return nil, true, nil
 	}
-	sqlStr, args := buildDeviceKeysetSQL(s.table, s.req, s.started, s.curTime, s.curID, batchSize)
+	sqlStr, args := buildDeviceKeysetSQL(s.table, s.req, s.objectLDNs, s.started, s.curTime, s.curID, batchSize)
 	rows, err := s.db.Query(ctx, sqlStr, args...)
 	if err != nil {
 		return nil, false, fmt.Errorf("export dashboard device query %s: %w", s.table, err)
@@ -105,15 +106,21 @@ func (s *dashboardDeviceSource) Next(ctx context.Context) ([]ExportRow, bool, er
 // 同样不把全量读进内存。聚合行通常远少于 device 行（分组后），批次游标开销可接受。
 
 // dashboardAggregateSource 对聚合维度按 offset 批次游标流式取数。
+//
+// objectLDNs 是 A1 小区/PLMN 下钻白名单：device 维度的 daily/weekly/monthly 表无行级 id 走此路，
+// aggregator.Query 不支持 object_ldn 过滤，故取数后按白名单内存裁剪（非空时）。批次游标按原始
+// 行数推进，裁剪只影响输出行、不破坏分页。聚合维度（group/product/network）行 ObjectLDN 为空，
+// 前端也不会对这些维度发白名单，故无影响。
 type dashboardAggregateSource struct {
-	aggr   *aggregator.Aggregator
-	req    aggregator.QueryRequest
-	offset int
-	done   bool
+	aggr       *aggregator.Aggregator
+	req        aggregator.QueryRequest
+	objectLDNs []string
+	offset     int
+	done       bool
 }
 
-func newDashboardAggregateSource(aggr *aggregator.Aggregator, req aggregator.QueryRequest) *dashboardAggregateSource {
-	return &dashboardAggregateSource{aggr: aggr, req: req}
+func newDashboardAggregateSource(aggr *aggregator.Aggregator, req aggregator.QueryRequest, objectLDNs []string) *dashboardAggregateSource {
+	return &dashboardAggregateSource{aggr: aggr, req: req, objectLDNs: objectLDNs}
 }
 
 func (s *dashboardAggregateSource) Next(ctx context.Context) ([]ExportRow, bool, error) {
@@ -127,8 +134,12 @@ func (s *dashboardAggregateSource) Next(ctx context.Context) ([]ExportRow, bool,
 	if err != nil {
 		return nil, false, fmt.Errorf("export dashboard aggregate query: %w", err)
 	}
+	allow := ldnAllowSet(s.objectLDNs)
 	out := make([]ExportRow, 0, len(aggRows))
 	for i := range aggRows {
+		if allow != nil && !allow[derefStr(aggRows[i].ObjectLDN)] {
+			continue // A1：白名单非空时只留命中小区/PLMN 行
+		}
 		out = append(out, aggregatorRowToExport(aggRows[i]))
 	}
 	if len(aggRows) < batchSize {
@@ -262,5 +273,17 @@ func derefStr(p *string) string {
 		return ""
 	}
 	return *p
+}
+
+// ldnAllowSet 把 object_ldn 白名单转成查表集合；空白名单返回 nil（= 不过滤）。
+func ldnAllowSet(ldns []string) map[string]bool {
+	if len(ldns) == 0 {
+		return nil
+	}
+	m := make(map[string]bool, len(ldns))
+	for _, l := range ldns {
+		m[l] = true
+	}
+	return m
 }
 

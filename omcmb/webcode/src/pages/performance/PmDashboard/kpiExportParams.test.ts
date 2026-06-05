@@ -17,14 +17,13 @@ const fullSel: DashboardExportSelection = {
 };
 
 describe('buildDashboardExportParams', () => {
-  it('带上设备/指标/时间/粒度，维度固定 device、类型固定 counter、制式装成数组', () => {
+  it('带上设备/指标/时间/粒度，维度固定 device、制式装成数组', () => {
     const p = buildDashboardExportParams(fullSel);
     expect(p).toMatchObject({
       granularity: 'hourly',
       dimension: 'device',
       device_sns: ['SN1', 'SN2'],
       metric_paths: ['C000170043'],
-      metric_type: 'counter',
       technologies: ['lte'],
       start_time: '2026-06-01T00:00:00.000Z',
       end_time: '2026-06-05T00:00:00.000Z',
@@ -37,8 +36,23 @@ describe('buildDashboardExportParams', () => {
     expect(p.end_time).toBeTruthy();
   });
 
-  it('小区/PLMN 白名单本期 out-of-scope：永不发送 object_ldns 键（后端无对应过滤）', () => {
+  it('A3：不发送 metric_type（与出图同口径，counter/kpi 都导）', () => {
+    expect(buildDashboardExportParams(fullSel)).not.toHaveProperty('metric_type');
+  });
+
+  it('A1：未下钻（objectLdns 缺席/空）时不发送 object_ldns 键', () => {
     expect(buildDashboardExportParams(fullSel)).not.toHaveProperty('object_ldns');
+    expect(buildDashboardExportParams({ ...fullSel, objectLdns: [] })).not.toHaveProperty(
+      'object_ldns',
+    );
+  });
+
+  it('A1：下钻定格小区/PLMN 时回填 object_ldns 白名单', () => {
+    const p = buildDashboardExportParams({
+      ...fullSel,
+      objectLdns: ['Cellid=1,PLMN=00101', 'Cellid=1,PLMN=46068'],
+    });
+    expect(p.object_ldns).toEqual(['Cellid=1,PLMN=00101', 'Cellid=1,PLMN=46068']);
   });
 
   it('制式为空时 technologies 为空数组', () => {

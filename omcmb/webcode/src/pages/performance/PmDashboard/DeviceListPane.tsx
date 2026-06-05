@@ -253,8 +253,8 @@ export default function DeviceListPane() {
   // ── 导出（T4 dashboard 来源）：带当前筛选 POST 建任务，不卡页面 ──────────
   const createExport = useCreateKpiExport();
 
-  // 组装当前筛选快照（与 handleQuery 同口径：设备/指标/粒度/时间）。
-  // 小区/PLMN 下钻白名单本期不带进导出（后端无对应过滤，见 kpiExportParams.ts 文件头注）。
+  // 组装当前筛选快照（与 handleQuery 同口径：设备/指标/粒度/时间/小区下钻白名单）。
+  // A1：下钻定格的小区/PLMN 白名单一并带进导出（复用 handleQuery 的 getEffectiveLdns，空=不过滤）。
   const buildExportSelection = (): DashboardExportSelection => {
     const [start, end] = filter.range;
     return {
@@ -264,6 +264,7 @@ export default function DeviceListPane() {
       granularity,
       startTime: start.toISOString(),
       endTime: end.toISOString(),
+      objectLdns: getEffectiveLdns(cellSel, objectsByDevice),
     };
   };
 

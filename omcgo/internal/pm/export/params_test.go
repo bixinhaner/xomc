@@ -20,9 +20,10 @@ func TestParseDashboardParams_Full(t *testing.T) {
 		"metric_type": "kpi",
 		"technologies": ["lte"],
 		"start_time": "2026-06-01T00:00:00Z",
-		"end_time": "2026-06-02T00:00:00Z"
+		"end_time": "2026-06-02T00:00:00Z",
+		"object_ldns": ["Cellid=1,PLMN=00101"]
 	}`)
-	req, err := parseDashboardParams(raw)
+	req, objectLDNs, err := parseDashboardParams(raw)
 	require.NoError(t, err)
 	assert.Equal(t, metrics.GranularityHourly, req.Granularity)
 	assert.Equal(t, aggregator.DimensionDevice, req.Dimension)
@@ -35,20 +36,30 @@ func TestParseDashboardParams_Full(t *testing.T) {
 	assert.False(t, req.StartTime.IsZero())
 	assert.False(t, req.EndTime.IsZero())
 	assert.Equal(t, 0, req.Limit) // 去 limit 全量
+	// A1：object_ldns 白名单单独返回（QueryRequest 无此字段）。
+	assert.Equal(t, []string{"Cellid=1,PLMN=00101"}, objectLDNs)
+}
+
+// A3：不传 metric_type 时 MetricType 为 nil（不过滤），导出含 counter 与 kpi 两类指标。
+func TestParseDashboardParams_NoMetricType(t *testing.T) {
+	req, objectLDNs, err := parseDashboardParams([]byte(`{"granularity":"15min","dimension":"device","metric_paths":["K001"]}`))
+	require.NoError(t, err)
+	assert.Nil(t, req.MetricType, "未传 metric_type → 不过滤类型")
+	assert.Empty(t, objectLDNs, "未传 object_ldns → 不过滤小区")
 }
 
 func TestParseDashboardParams_MissingGranularity(t *testing.T) {
-	_, err := parseDashboardParams([]byte(`{"dimension":"device"}`))
+	_, _, err := parseDashboardParams([]byte(`{"dimension":"device"}`))
 	require.Error(t, err)
 }
 
 func TestParseDashboardParams_BadJSON(t *testing.T) {
-	_, err := parseDashboardParams([]byte(`not-json`))
+	_, _, err := parseDashboardParams([]byte(`not-json`))
 	require.Error(t, err)
 }
 
 func TestParseDashboardParams_BadGroupID(t *testing.T) {
-	_, err := parseDashboardParams([]byte(`{"granularity":"hourly","dimension":"device_group","device_group_ids":["nope"]}`))
+	_, _, err := parseDashboardParams([]byte(`{"granularity":"hourly","dimension":"device_group","device_group_ids":["nope"]}`))
 	require.Error(t, err)
 }
 

@@ -21,9 +21,9 @@ var deviceSelectCols = []string{
 // 过滤语义与仪表盘聚合查询的 device 维度一致（成对 OUI/SN、metric_paths、metric_type、
 // granularity、时窗、制式）；ORDER BY time, id 配 keyset 游标保证不漏不重。
 // started=false 时取首批（无游标谓词）；之后用 (time, id) > (curTime, curID) 推进。
-func buildDeviceKeysetSQL(table string, req aggregator.QueryRequest, started bool, curTime time.Time, curID uuid.UUID, limit int) (string, []any) {
+func buildDeviceKeysetSQL(table string, req aggregator.QueryRequest, objectLDNs []string, started bool, curTime time.Time, curID uuid.UUID, limit int) (string, []any) {
 	b := storage.Psql.Select(deviceSelectCols...).From(table)
-	b = applyDeviceExportFilters(b, req)
+	b = applyDeviceExportFilters(b, req, objectLDNs)
 	if started {
 		// keyset：(time, id) 严格大于游标。time 列名带引号避免与保留字冲突。
 		b = b.Where(sq.Expr(`("time", id) > (?, ?)`, curTime, curID))
@@ -52,9 +52,10 @@ func buildAdhocKeysetSQL(taskID uuid.UUID, startTime, endTime time.Time, started
 	return q, args
 }
 
-// applyDeviceExportFilters 复刻 aggregator 的 device 维度过滤（成对 OUI/SN + 公共过滤）。
+// applyDeviceExportFilters 复刻 aggregator 的 device 维度过滤（成对 OUI/SN + 公共过滤），
+// 外加 A1 小区/PLMN 下钻白名单 objectLDNs（QueryRequest 无此字段，单独传入）。
 // 与 aggregator.applyDeviceFilters 同语义，独立实现以避免改动其签名（scope 要求只读复用）。
-func applyDeviceExportFilters(b sq.SelectBuilder, req aggregator.QueryRequest) sq.SelectBuilder {
+func applyDeviceExportFilters(b sq.SelectBuilder, req aggregator.QueryRequest, objectLDNs []string) sq.SelectBuilder {
 	if len(req.DeviceOUIs) > 0 && len(req.DeviceSNs) > 0 {
 		n := len(req.DeviceOUIs)
 		if len(req.DeviceSNs) < n {
@@ -72,6 +73,10 @@ func applyDeviceExportFilters(b sq.SelectBuilder, req aggregator.QueryRequest) s
 		b = b.Where(sq.Eq{"device_oui": req.DeviceOUIs})
 	} else if len(req.DeviceSNs) > 0 {
 		b = b.Where(sq.Eq{"device_sn": req.DeviceSNs})
+	}
+	if len(objectLDNs) > 0 {
+		// A1 小区/PLMN 下钻：只取白名单命中的 object_ldn 行（sq.Eq 切片 → IN(...)，等价 = ANY）。
+		b = b.Where(sq.Eq{"object_ldn": objectLDNs})
 	}
 	if len(req.MetricPaths) > 0 {
 		b = b.Where(sq.Eq{"metric_path": req.MetricPaths})

@@ -27,6 +27,9 @@ type DashboardParams struct {
 	Technologies []string `json:"technologies"`
 	StartTime    string   `json:"start_time"`
 	EndTime      string   `json:"end_time"`
+	// ObjectLDNs 是小区/PLMN 下钻白名单（A1）。空 = 不过滤，导该设备全部小区/PLMN；
+	// 非空 = 只导命中行，与仪表盘下钻定格口径一致。device 维度专属（聚合维度无意义）。
+	ObjectLDNs []string `json:"object_ldns"`
 }
 
 // AdhocParams 是 source_type=adhoc 时 params(jsonb) 的字段集。
@@ -36,18 +39,19 @@ type AdhocParams struct {
 	EndTime   string `json:"end_time"`
 }
 
-// parseDashboardParams 把 params(jsonb) 解析成 aggregator.QueryRequest（去 limit/offset）。
+// parseDashboardParams 把 params(jsonb) 解析成 aggregator.QueryRequest（去 limit/offset）
+// 与小区/PLMN 下钻白名单 objectLDNs（A1，QueryRequest 无此字段，单独返回供 export 自身过滤）。
 //
 // 解析失败 / granularity 缺失返错（让任务走 failed 而非产出空文件）。
-func parseDashboardParams(raw []byte) (aggregator.QueryRequest, error) {
+func parseDashboardParams(raw []byte) (aggregator.QueryRequest, []string, error) {
 	var p DashboardParams
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &p); err != nil {
-			return aggregator.QueryRequest{}, fmt.Errorf("parse dashboard export params: %w", err)
+			return aggregator.QueryRequest{}, nil, fmt.Errorf("parse dashboard export params: %w", err)
 		}
 	}
 	if p.Granularity == "" {
-		return aggregator.QueryRequest{}, fmt.Errorf("dashboard export params: granularity is required")
+		return aggregator.QueryRequest{}, nil, fmt.Errorf("dashboard export params: granularity is required")
 	}
 
 	req := aggregator.QueryRequest{
@@ -65,32 +69,32 @@ func parseDashboardParams(raw []byte) (aggregator.QueryRequest, error) {
 	for _, s := range p.DeviceGroupIDs {
 		id, err := uuid.Parse(s)
 		if err != nil {
-			return aggregator.QueryRequest{}, fmt.Errorf("dashboard export params: invalid device_group_id %q: %w", s, err)
+			return aggregator.QueryRequest{}, nil, fmt.Errorf("dashboard export params: invalid device_group_id %q: %w", s, err)
 		}
 		req.DeviceGroupIDs = append(req.DeviceGroupIDs, id)
 	}
 	for _, s := range p.ProductIDs {
 		id, err := uuid.Parse(s)
 		if err != nil {
-			return aggregator.QueryRequest{}, fmt.Errorf("dashboard export params: invalid product_id %q: %w", s, err)
+			return aggregator.QueryRequest{}, nil, fmt.Errorf("dashboard export params: invalid product_id %q: %w", s, err)
 		}
 		req.ProductIDs = append(req.ProductIDs, id)
 	}
 	if p.StartTime != "" {
 		t, err := time.Parse(time.RFC3339, p.StartTime)
 		if err != nil {
-			return aggregator.QueryRequest{}, fmt.Errorf("dashboard export params: invalid start_time %q: %w", p.StartTime, err)
+			return aggregator.QueryRequest{}, nil, fmt.Errorf("dashboard export params: invalid start_time %q: %w", p.StartTime, err)
 		}
 		req.StartTime = t
 	}
 	if p.EndTime != "" {
 		t, err := time.Parse(time.RFC3339, p.EndTime)
 		if err != nil {
-			return aggregator.QueryRequest{}, fmt.Errorf("dashboard export params: invalid end_time %q: %w", p.EndTime, err)
+			return aggregator.QueryRequest{}, nil, fmt.Errorf("dashboard export params: invalid end_time %q: %w", p.EndTime, err)
 		}
 		req.EndTime = t
 	}
-	return req, nil
+	return req, p.ObjectLDNs, nil
 }
 
 // parseAdhocParams 把 params(jsonb) 解析成 adhoc 取数条件。

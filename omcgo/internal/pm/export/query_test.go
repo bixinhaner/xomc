@@ -22,7 +22,7 @@ func TestBuildDeviceKeysetSQL_FirstBatch_NoCursor(t *testing.T) {
 		StartTime:   time.Now().Add(-time.Hour),
 		EndTime:     time.Now(),
 	}
-	q, args := buildDeviceKeysetSQL("pm_metrics_hourly", req, false, time.Time{}, uuid.Nil, 5000)
+	q, args := buildDeviceKeysetSQL("pm_metrics_hourly", req, nil, false, time.Time{}, uuid.Nil, 5000)
 	// 首批无 keyset 游标谓词。
 	assert.NotContains(t, q, `("time", id) >`)
 	// ORDER BY time, id + LIMIT。
@@ -37,7 +37,7 @@ func TestBuildDeviceKeysetSQL_NextBatch_HasCursor(t *testing.T) {
 	req := aggregator.QueryRequest{Granularity: metrics.Granularity15Min}
 	cur := time.Now()
 	id := uuid.New()
-	q, args := buildDeviceKeysetSQL("pm_metrics", req, true, cur, id, 5000)
+	q, args := buildDeviceKeysetSQL("pm_metrics", req, nil, true, cur, id, 5000)
 	assert.Contains(t, q, `("time", id) > (`)
 	// 游标值在 args 中。
 	foundTime, foundID := false, false
@@ -59,11 +59,36 @@ func TestBuildDeviceKeysetSQL_PairedOUISN(t *testing.T) {
 		DeviceOUIs:  []string{"OUI1", "OUI2"},
 		DeviceSNs:   []string{"SN1", "SN2"},
 	}
-	q, _ := buildDeviceKeysetSQL("pm_metrics", req, false, time.Time{}, uuid.Nil, 100)
+	q, _ := buildDeviceKeysetSQL("pm_metrics", req, nil, false, time.Time{}, uuid.Nil, 100)
 	// 成对过滤：OR 连接两组 (oui AND sn)。
 	assert.Contains(t, q, "device_oui")
 	assert.Contains(t, q, "device_sn")
 	assert.Contains(t, q, " OR ")
+}
+
+// A1：传入 object_ldn 白名单时，SQL 带 object_ldn IN(...) 过滤，白名单值进 args。
+func TestBuildDeviceKeysetSQL_ObjectLDNFilter(t *testing.T) {
+	req := aggregator.QueryRequest{Granularity: metrics.Granularity15Min}
+	ldns := []string{"Cellid=1,PLMN=00101", "Cellid=1,PLMN=46068"}
+	q, args := buildDeviceKeysetSQL("pm_metrics", req, ldns, false, time.Time{}, uuid.Nil, 100)
+	assert.Contains(t, q, "object_ldn IN (")
+	foundA, foundB := false, false
+	for _, a := range args {
+		if a == ldns[0] {
+			foundA = true
+		}
+		if a == ldns[1] {
+			foundB = true
+		}
+	}
+	assert.True(t, foundA && foundB, "两个白名单值都进 args")
+}
+
+// A1：空白名单时不加 object_ldn 过滤（向后兼容，导全部小区/PLMN）。
+func TestBuildDeviceKeysetSQL_NoObjectLDNFilter(t *testing.T) {
+	req := aggregator.QueryRequest{Granularity: metrics.Granularity15Min}
+	q, _ := buildDeviceKeysetSQL("pm_metrics", req, nil, false, time.Time{}, uuid.Nil, 100)
+	assert.NotContains(t, q, "object_ldn IN")
 }
 
 func TestBuildAdhocKeysetSQL(t *testing.T) {

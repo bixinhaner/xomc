@@ -166,7 +166,7 @@ func (r *Runner) buildSource(ctx context.Context, task *Task) (RowSource, *nameR
 	loc := appcontext.GetLocale(ctx)
 	switch task.SourceType {
 	case SourceDashboard:
-		req, err := parseDashboardParams(task.Params)
+		req, objectLDNs, err := parseDashboardParams(task.Params)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -181,7 +181,7 @@ func (r *Runner) buildSource(ctx context.Context, task *Task) (RowSource, *nameR
 			}
 			// device 维度的 daily/weekly/monthly 表无行级 id 列，keyset 不可用 → 走聚合批次游标。
 			if tableHasIDColumn(table) {
-				return newDashboardDeviceSource(r.metricDB, table, req),
+				return newDashboardDeviceSource(r.metricDB, table, req, objectLDNs),
 					newNameResolver(r.metricDB, loc), nil
 			}
 		}
@@ -190,7 +190,7 @@ func (r *Runner) buildSource(ctx context.Context, task *Task) (RowSource, *nameR
 			return nil, nil, fmt.Errorf("aggregator not wired for dashboard aggregate export")
 		}
 		// 聚合源已回填 DisplayName，无需再解析名。
-		return newDashboardAggregateSource(r.aggr, req), nil, nil
+		return newDashboardAggregateSource(r.aggr, req, objectLDNs), nil, nil
 
 	case SourceAdhoc:
 		taskID, startTime, endTime, err := parseAdhocParams(task.Params)
