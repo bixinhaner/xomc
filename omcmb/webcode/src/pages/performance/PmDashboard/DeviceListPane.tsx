@@ -63,7 +63,7 @@ import {
   validateDashboardExportSelection,
   defaultExportTaskName,
   type DashboardExportSelection,
-} from './kpiExportParams';
+} from '@core/utils/kpiExportParams';
 
 // 制式 ↔ 设备类型 ↔ 内置任务 technology 三者映射。
 type Tech = 'lte' | 'nr' | 'gsm';

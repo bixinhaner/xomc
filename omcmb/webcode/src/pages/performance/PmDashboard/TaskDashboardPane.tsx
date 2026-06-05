@@ -20,7 +20,7 @@ import {
   usePmAdhocResults,
 } from '@core/hooks/api/usePmAdhoc';
 import { useCreateKpiExport } from '@core/hooks/api/useKpiExport';
-import { buildAdhocExportParams, defaultExportTaskName } from './kpiExportParams';
+import { buildAdhocExportParams, defaultExportTaskName } from '@core/utils/kpiExportParams';
 import { buildMetricCharts, filterChartsByMetricPaths } from './taskDashboardUtils';
 import ChartCard from './ChartCard';
 import DashboardFilterBar, { type DashboardFilterValue } from './DashboardFilterBar';

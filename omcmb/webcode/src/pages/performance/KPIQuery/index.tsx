@@ -55,6 +55,11 @@ import {
   useAggregatedMetricsByDevices,
 } from '@core/hooks/api/usePmQuery';
 import { useUserStore } from '@core/store/userStore';
+import { useCreateKpiExport } from '@core/hooks/api/useKpiExport';
+import {
+  kpiQueryToDashboardSelection,
+  buildDashboardExportParams,
+} from '@core/utils/kpiExportParams';
 import { indicatorLibraryApi } from '@core/services/api/indicatorLibraryApi';
 import type { DeviceType } from '@core/types/indicatorLibrary';
 import type { Granularity } from '@core/types/pmDashboard';
@@ -204,6 +209,7 @@ export default function KPIQuery() {
   const createMut = useCreateQueryTemplate();
   const updateMut = useUpdateQueryTemplate();
   const deleteMut = useDeleteQueryTemplate();
+  const createExport = useCreateKpiExport();
 
   const publicTemplates = useMemo(
     () => (templatesData?.items ?? []).filter((t) => t.visibility === 'public'),
@@ -298,6 +304,25 @@ export default function KPIQuery() {
     }
     setSubmittedPayload(payload);
     setSubmittedRange(range);
+  };
+
+  // 导出取「最近一次实际查询」的快照（submittedPayload/submittedRange），而非表单实时值，
+  // 保证"导出=屏幕所见"。复用 dashboard 异步导出链路：建任务 → 文件管理下载，后端零改。
+  const handleExport = () => {
+    if (!submittedPayload || !submittedRange) return; // 按钮已禁用，双保险
+    const sel = kpiQueryToDashboardSelection(submittedPayload, submittedRange);
+    const ts = dayjs().format('YYYYMMDD_HHmmss');
+    createExport.mutate(
+      {
+        sourceType: 'dashboard',
+        params: buildDashboardExportParams(sel),
+        taskName: `KPI导出_指标查询_${ts}`, // 与仪表盘导出区分，便于任务列表辨识
+      },
+      {
+        onSuccess: () => message.success('导出任务已提交，请到「文件管理」下载'),
+        onError: (e) => message.error(`导出提交失败：${(e as Error)?.message ?? '未知错误'}`),
+      },
+    );
   };
 
   const handleSelectTemplate = async (tpl: QueryTemplate) => {
@@ -656,11 +681,14 @@ export default function KPIQuery() {
                 <Button icon={<SaveOutlined />} onClick={handleOpenSaveModal}>
                   存为模板
                 </Button>
-                <Tooltip title="导出 Excel/CSV — 留作后续阶段实现">
-                  <Button icon={<ExportOutlined />} disabled>
-                    导出
-                  </Button>
-                </Tooltip>
+                <Button
+                  icon={<ExportOutlined />}
+                  onClick={handleExport}
+                  loading={createExport.isPending}
+                  disabled={!submittedPayload || aggFetching}
+                >
+                  导出 CSV
+                </Button>
                 <Button
                   icon={<PlusOutlined />}
                   onClick={() => {

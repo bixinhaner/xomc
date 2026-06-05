@@ -17,7 +17,7 @@ import dayjs, { type Dayjs } from 'dayjs';
 import { usePmAdhocDetail, usePmAdhocResults } from '@core/hooks/api/usePmAdhoc';
 import { useCreateKpiExport } from '@core/hooks/api/useKpiExport';
 import type { AdhocResultRow, AdhocDimension } from '@core/types/pmAdhoc';
-import { buildAdhocExportParams, defaultExportTaskName } from '../PmDashboard/kpiExportParams';
+import { buildAdhocExportParams, defaultExportTaskName } from '@core/utils/kpiExportParams';
 import { adhocIncludesCell, adhocObjectHeaderKey, adhocObjectName, objectKeyOf } from './adhocObjectColumn';
 
 // 按粒度算默认时窗：覆盖最近 7 天，但粒度粗于"天"时至少 7 个周期。

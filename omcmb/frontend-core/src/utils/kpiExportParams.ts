@@ -17,7 +17,12 @@
  *
  * A1：小区/PLMN（object_ldn）下钻白名单——下钻定格某小区/PLMN 后导出时回填 object_ldns，
  * 后端按白名单只导命中行（空则导该设备全部小区/PLMN，向后兼容）。
+ *
+ * 消费方：仪表盘页（DeviceListPane/TaskDashboardPane）、adhoc 结果页（AdhocResultPanel）、
+ * 指标查询页（KPIQuery，复用 kpiQueryToDashboardSelection）。放 frontend-core 供多页/多皮肤共享。
  */
+
+import type { QueryTemplatePayload } from '../types/pmQuery';
 
 /** 仪表盘导出的当前筛选快照（设备列表 Pane 的提交态）。 */
 export interface DashboardExportSelection {
@@ -107,4 +112,27 @@ export function defaultExportTaskName(
   )}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
   const label = source === 'dashboard' ? '仪表盘' : '任务结果';
   return `KPI导出_${label}_${ts}`;
+}
+
+// 设备类型 → 制式（对齐 devices.technology 小写）：eNB=LTE / gNB=NR(5G) / GSM=2G。
+const DEVICE_TYPE_TO_TECH: Record<string, string> = { ENB: 'lte', GNB: 'nr', GSM: 'gsm' };
+
+/**
+ * 指标查询页"最近一次查询快照"→ dashboard 导出筛选。维度固定 device（页面就是按设备查）。
+ * - 不发 object_ldns（指标查询页不做小区下钻，导该设备全部小区/PLMN，与页面一致）。
+ * - 不发 metric_type（与出图同口径，counter/kpi 由 metric_paths 隐含）。
+ *   这两点由 buildDashboardExportParams 天然处理。
+ */
+export function kpiQueryToDashboardSelection(
+  payload: QueryTemplatePayload,
+  range: { start: string; end: string },
+): DashboardExportSelection {
+  return {
+    technology: DEVICE_TYPE_TO_TECH[payload.deviceType ?? 'ENB'] ?? 'lte',
+    deviceSns: payload.deviceSns,
+    metricPaths: payload.metricPaths,
+    granularity: payload.granularity,
+    startTime: range.start,
+    endTime: range.end,
+  };
 }

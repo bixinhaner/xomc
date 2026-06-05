@@ -4,8 +4,10 @@ import {
   buildAdhocExportParams,
   validateDashboardExportSelection,
   defaultExportTaskName,
+  kpiQueryToDashboardSelection,
   type DashboardExportSelection,
-} from './kpiExportParams';
+} from '../kpiExportParams';
+import type { QueryTemplatePayload } from '../../types/pmQuery';
 
 const fullSel: DashboardExportSelection = {
   technology: 'lte',
@@ -107,5 +109,55 @@ describe('defaultExportTaskName', () => {
     const d = new Date(2026, 5, 4, 21, 23, 8); // 2026-06-04 21:23:08 本地
     expect(defaultExportTaskName('dashboard', d)).toBe('KPI导出_仪表盘_20260604_212308');
     expect(defaultExportTaskName('adhoc', d)).toBe('KPI导出_任务结果_20260604_212308');
+  });
+});
+
+describe('kpiQueryToDashboardSelection', () => {
+  const basePayload: QueryTemplatePayload = {
+    deviceSns: ['SN1', 'SN2'],
+    metricPaths: ['K900010043', 'C000170043'],
+    granularity: 'daily',
+    timeRangePreset: 'custom',
+    deviceType: 'ENB',
+  };
+  const range = { start: '2026-06-01T00:00:00.000Z', end: '2026-06-05T00:00:00.000Z' };
+
+  it('设备类型映射制式：ENB→lte / GNB→nr / GSM→gsm，缺省回退 lte', () => {
+    expect(kpiQueryToDashboardSelection(basePayload, range).technology).toBe('lte');
+    expect(
+      kpiQueryToDashboardSelection({ ...basePayload, deviceType: 'GNB' }, range).technology,
+    ).toBe('nr');
+    expect(
+      kpiQueryToDashboardSelection({ ...basePayload, deviceType: 'GSM' }, range).technology,
+    ).toBe('gsm');
+    expect(
+      kpiQueryToDashboardSelection({ ...basePayload, deviceType: undefined }, range).technology,
+    ).toBe('lte');
+  });
+
+  it('设备/指标/粒度/起止时间正确透传', () => {
+    const sel = kpiQueryToDashboardSelection(basePayload, range);
+    expect(sel).toMatchObject({
+      deviceSns: ['SN1', 'SN2'],
+      metricPaths: ['K900010043', 'C000170043'],
+      granularity: 'daily',
+      startTime: range.start,
+      endTime: range.end,
+    });
+  });
+
+  it('经 buildDashboardExportParams 产出 device 维度参数，不含 object_ldns / metric_type', () => {
+    const p = buildDashboardExportParams(kpiQueryToDashboardSelection(basePayload, range));
+    expect(p).toMatchObject({
+      dimension: 'device',
+      device_sns: ['SN1', 'SN2'],
+      metric_paths: ['K900010043', 'C000170043'],
+      technologies: ['lte'],
+      granularity: 'daily',
+      start_time: range.start,
+      end_time: range.end,
+    });
+    expect(p).not.toHaveProperty('object_ldns');
+    expect(p).not.toHaveProperty('metric_type');
   });
 });
