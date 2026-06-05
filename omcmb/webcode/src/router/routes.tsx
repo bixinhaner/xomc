@@ -65,6 +65,8 @@ const PerfTaskConfig     = React.lazy(() => import('@/pages/performance/Performa
 // T-0190 旧拖拽仪表盘编辑器已下线（DashboardEditor 等文件删除），原 PmDashboardEditor lazy 声明移除。
 // T-0164 收尾 G6-Gap-1：左右栏布局 — `/performance?dashboard=:id`
 const PerformanceLayout  = React.lazy(() => import('@/pages/performance/PmDashboard/PerformanceLayout'));
+// 设备性能查看：原性能仪表盘「设备列表」页签拆出的独立子菜单（组件仍是 DeviceListPane）
+const DeviceView         = React.lazy(() => import('@/pages/performance/PmDashboard/DeviceListPane'));
 // T-0164-P7 G7 自定义聚合任务
 const PmAdhocPage        = React.lazy(() => import('@/pages/performance/PmAdhoc'));
 // T-0185 新建向导整页 5 步
@@ -292,6 +294,8 @@ export const routes: RouteObject[] = [
       // T-0164-P6 G6 PM 仪表盘（单 tab "性能查看"）
       // G6-Gap-1 主入口：左右栏布局 + ?dashboard=:id query
       { path: 'performance',                   element: withSuspense(PerformanceLayout) },
+      // 设备性能查看（独立即席查看，不依赖聚合任务）
+      { path: 'performance/device-view',       element: withSuspense(DeviceView) },
       // 旧路由保留兼容（重定向到新左右栏布局，避免历史链接 404）
       { path: 'performance/pm-dashboard',      element: <Navigate to="/performance" replace /> },
       { path: 'performance/pm-dashboard/:id',  element: <Navigate to="/performance" replace /> },

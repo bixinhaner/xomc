@@ -1,24 +1,21 @@
 /**
- * T-0187 性能仪表盘入口页改写：顶部双页签 [任务仪表盘 | 设备列表]。
+ * 性能仪表盘入口页（任务仪表盘）。
  *
- * 路由：`/performance?task=:id`（页签1 选中任务记 URL）。
- *
- * 页签1 · 任务仪表盘：
+ * 路由：`/performance?task=:id`（选中任务记 URL）。
  *   - 左 240px 任务列表（内置区 / 自建区，usePmAdhocList isBuiltin 两次拉取，字段 is_builtin）。
  *   - 右侧 = <TaskDashboardPane taskId={selected} />，选中任务按 N 指标自动出图。
- * 页签2 · 设备列表：<DeviceListPane/>（T-0188 实现，独立即席查看，不依赖聚合任务）。
  *
- * 旧拖拽编辑器 / 仪表盘列表 / KpiCardManager 在本入口不再 import（文件保留，清理见 T-0190）。
+ * 原「设备列表」页签已拆为性能管理独立子菜单「设备性能查看」（路由 /performance/device-view，
+ * 组件仍是 DeviceListPane），本页不再承载页签，直接渲染任务仪表盘。
  */
 
 import { useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useIntl } from 'react-intl';
-import { Card, Empty, List, Space, Tabs, Tag, theme } from 'antd';
+import { Card, Empty, List, Space, Tag, theme } from 'antd';
 import { usePmAdhocList } from '@core/hooks/api/usePmAdhoc';
 import type { AdhocTask } from '@core/types/pmAdhoc';
 import TaskDashboardPane from './TaskDashboardPane';
-import DeviceListPane from './DeviceListPane';
 
 interface TaskGroup {
   key: 'builtin' | 'custom';
@@ -155,22 +152,5 @@ function TaskDashboardTab() {
 }
 
 export default function PerformanceLayout() {
-  const intl = useIntl();
-  return (
-    <Tabs
-      defaultActiveKey="task"
-      items={[
-        {
-          key: 'task',
-          label: intl.formatMessage({ id: 'perf.dashboard.tabTask' }),
-          children: <TaskDashboardTab />,
-        },
-        {
-          key: 'device',
-          label: intl.formatMessage({ id: 'perf.dashboard.tabDevice' }),
-          children: <DeviceListPane />,
-        },
-      ]}
-    />
-  );
+  return <TaskDashboardTab />;
 }

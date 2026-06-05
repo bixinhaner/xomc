@@ -74,6 +74,10 @@ export const componentRegistry: Record<string, ComponentType> = {
   'performance/PerformanceTaskConfig': lazy(
     () => import('@/pages/performance/PerformanceTaskConfig'),
   ),
+  // 设备性能查看（原性能仪表盘「设备列表」页签拆出的独立子菜单）
+  'performance/PmDashboard/DeviceListPane': lazy(
+    () => import('@/pages/performance/PmDashboard/DeviceListPane'),
+  ),
 
   // MML Management
   'mml/Console': lazy(() => import('@/pages/mml/Console')),

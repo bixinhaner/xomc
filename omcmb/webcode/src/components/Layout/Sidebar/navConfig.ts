@@ -99,6 +99,7 @@ export const NAV_CONFIG: NavConfig = [
       // 性能仪表盘对齐 seed/000188 的 route_path=/performance（T-0164 G6 主入口）。
       { key: 'perf-dashboard',  label: 'nav.performance.dashboard',    path: '/performance' },
       { key: 'perf-adhoc',      label: 'nav.performance.adhoc',        path: '/performance/pm-adhoc' },
+      { key: 'perf-device',     label: 'nav.performance.deviceView',   path: '/performance/device-view' },  // 设备性能查看（原仪表盘「设备列表」页签拆出，配套 seed/000025）
       { key: 'perf-query',      label: 'nav.performance.query',        path: '/performance/query' },  // T-0190 隐藏后复显并排末位（用户要求放第三项，配套 seed/000017+000018）
       // { key: 'perf-kpi-std',    label: 'nav.performance.kpiStandard',  path: '/performance/kpi-standard' },  // T-0180 隐藏性能侧指标库（统一到产品中心 KPI 指标库）
       // { key: 'perf-kpi-bs',     label: 'nav.performance.kpiStation',   path: '/performance/kpi-station' },  // 隐藏测量任务管理

@@ -569,6 +569,7 @@ const messages: Record<string, string> = {
   // T-0173 阶段 1：消费类菜单（dashboard / query / adhoc）+ 配置类菜单（kpiStandard / kpiStation）命名重构
   'nav.performance.dashboard':    '性能仪表盘',
   'nav.performance.adhoc':        '自定义聚合',
+  'nav.performance.deviceView':   '设备性能查看',
   'nav.performance.kpiStandard':  '指标库',
   'nav.performance.kpiStation':   '测量任务管理',
   'nav.performance.extraction':   '数据提取',

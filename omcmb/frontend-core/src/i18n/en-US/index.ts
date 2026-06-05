@@ -569,6 +569,7 @@ const messages: Record<string, string> = {
   // T-0173 阶段 1：consumer-first menu naming refactor
   'nav.performance.dashboard':    'Performance Dashboard',
   'nav.performance.adhoc':        'Custom Aggregation',
+  'nav.performance.deviceView':   'Device Performance View',
   'nav.performance.kpiStandard':  'Indicator Library',
   'nav.performance.kpiStation':   'Measurement Task Management',
   'nav.performance.query':        'Metric Query',
