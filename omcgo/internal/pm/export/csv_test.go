@@ -20,7 +20,7 @@ func wideTestCols() []WideColumn {
 
 func TestWideCSVWriter_BOMAndHeader(t *testing.T) {
 	var buf bytes.Buffer
-	cw, err := NewWideCSVWriter(&buf, wideTestCols())
+	cw, err := NewWideCSVWriter(&buf, "设备", true, wideTestCols())
 	require.NoError(t, err)
 	require.NoError(t, cw.Flush())
 
@@ -43,7 +43,7 @@ func TestWideCSVWriter_BOMAndHeader(t *testing.T) {
 // 同一 (设备×小区×时间) 行键、不同指标 → 摊成一行，每指标一列。
 func TestWideCSVWriter_PivotSameKey(t *testing.T) {
 	var buf bytes.Buffer
-	cw, err := NewWideCSVWriter(&buf, wideTestCols())
+	cw, err := NewWideCSVWriter(&buf, "设备", true, wideTestCols())
 	require.NoError(t, err)
 
 	tm := time.Date(2026, 6, 4, 10, 0, 0, 0, time.UTC)
@@ -75,7 +75,7 @@ func TestWideCSVWriter_PivotSameKey(t *testing.T) {
 // 某指标在该行键缺值 → 空单元格。
 func TestWideCSVWriter_MissingMetricEmptyCell(t *testing.T) {
 	var buf bytes.Buffer
-	cw, err := NewWideCSVWriter(&buf, wideTestCols())
+	cw, err := NewWideCSVWriter(&buf, "设备", true, wideTestCols())
 	require.NoError(t, err)
 
 	tm := time.Date(2026, 6, 4, 10, 0, 0, 0, time.UTC)
@@ -93,7 +93,7 @@ func TestWideCSVWriter_MissingMetricEmptyCell(t *testing.T) {
 // 不同时间 → 时间桶切换，各成一横行。
 func TestWideCSVWriter_TimeBucketFlush(t *testing.T) {
 	var buf bytes.Buffer
-	cw, err := NewWideCSVWriter(&buf, wideTestCols())
+	cw, err := NewWideCSVWriter(&buf, "设备", true, wideTestCols())
 	require.NoError(t, err)
 
 	t1 := time.Date(2026, 6, 4, 10, 0, 0, 0, time.UTC)
@@ -109,15 +109,71 @@ func TestWideCSVWriter_TimeBucketFlush(t *testing.T) {
 	require.Len(t, recs, 3) // 表头 + 2 行
 }
 
-// 零列（无指标）：只写固定行键列表头。
+// 零列（无指标）：只写固定行键列表头（device 口径 6 列：设备 小区/PLMN 粒度 时间 时窗起 时窗止）。
 func TestWideCSVWriter_NoColumns(t *testing.T) {
 	var buf bytes.Buffer
-	cw, err := NewWideCSVWriter(&buf, nil)
+	cw, err := NewWideCSVWriter(&buf, "设备", true, nil)
 	require.NoError(t, err)
 	require.NoError(t, cw.Flush())
 	body := strings.TrimPrefix(buf.String(), string(utf8BOM))
 	recs, err := csv.NewReader(strings.NewReader(body)).ReadAll()
 	require.NoError(t, err)
 	require.Len(t, recs, 1)
-	assert.Len(t, recs[0], len(wideFixedHeader))
+	assert.Len(t, recs[0], 6)
+}
+
+// 维度列布局：首列表头随维度变；含/不含小区列两态。
+func TestWideCSVWriter_DimensionLayout(t *testing.T) {
+	cols := []WideColumn{{Code: "C1", Type: "counter", Name: "速率"}}
+
+	// 含小区列（device 口径）。
+	var buf bytes.Buffer
+	w, err := NewWideCSVWriter(&buf, "设备", true, cols)
+	require.NoError(t, err)
+	require.NoError(t, w.Flush())
+	header := firstCSVRow(t, buf.Bytes())
+	assert.Equal(t, []string{"设备", "小区/PLMN", "粒度", "时间", "时窗起", "时窗止", "C1(速率·counter)"}, header)
+
+	// 不含小区列（聚合维度口径）。
+	buf.Reset()
+	w2, err := NewWideCSVWriter(&buf, "设备组", false, cols)
+	require.NoError(t, err)
+	require.NoError(t, w2.Flush())
+	header2 := firstCSVRow(t, buf.Bytes())
+	assert.Equal(t, []string{"设备组", "粒度", "时间", "时窗起", "时窗止", "C1(速率·counter)"}, header2)
+}
+
+// 聚合维度行：includeCell=false 时不输出小区列，CellPLMN 不参与行键、按设备名自然合并。
+func TestWideCSVWriter_AggregateNoCellColumn(t *testing.T) {
+	cols := []WideColumn{{Code: "C1", Type: "counter", Name: "速率"}}
+	var buf bytes.Buffer
+	w, err := NewWideCSVWriter(&buf, "产品", false, cols)
+	require.NoError(t, err)
+	tm := time.Date(2026, 6, 4, 10, 0, 0, 0, time.UTC)
+	// CellPLMN 给值也应被忽略（聚合维度无小区列）。
+	require.NoError(t, w.AddRow(ExportRow{Device: "BLX 产品", CellPLMN: "应忽略", Time: tm, MetricCode: "C1", Value: 7}))
+	require.NoError(t, w.Flush())
+	row := nthCSVRow(t, buf.Bytes(), 1)
+	// 列：产品 | 粒度 | 时间 | 时窗起 | 时窗止 | C1 —— 无小区列。
+	assert.Equal(t, "BLX 产品", row[0])
+	assert.Equal(t, "", row[1]) // 粒度（空）
+	assert.Equal(t, "2026-06-04 10:00:00", row[2])
+	assert.Equal(t, "7", row[5]) // C1 值
+	assert.Len(t, row, 6)
+}
+
+// firstCSVRow 跳过 UTF-8 BOM 后用 encoding/csv 读首行。
+func firstCSVRow(t *testing.T, b []byte) []string {
+	t.Helper()
+	return nthCSVRow(t, b, 0)
+}
+
+// nthCSVRow 跳过 UTF-8 BOM 后用 encoding/csv 读第 n 行（0 基）。
+func nthCSVRow(t *testing.T, b []byte, n int) []string {
+	t.Helper()
+	body := strings.TrimPrefix(string(b), string(utf8BOM))
+	recs, err := csv.NewReader(strings.NewReader(body)).ReadAll()
+	require.NoError(t, err)
+	require.Greater(t, len(recs), n)
+	return recs[n]
 }

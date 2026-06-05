@@ -6452,6 +6452,11 @@ const messages: Record<string, string> = {
   // Result panel
   'perf.adhoc.aggregateGroupUnit':       'Aggregation Group · {count} devices',
   'perf.adhoc.colDevice':                'Device',
+  'perf.adhoc.colObject.deviceGroup':    'Device Group',
+  'perf.adhoc.colObject.product':        'Product',
+  'perf.adhoc.colObject.band':           'Band',
+  'perf.adhoc.colObject.network':        'Network',
+  'perf.adhoc.colObject.aggregateGroup': 'Aggregate Group',
   'perf.adhoc.colCellPlmn':              'Cell/PLMN',
   'perf.adhoc.colMetric':                'Metric',
   'perf.adhoc.colValue':                 'Value',

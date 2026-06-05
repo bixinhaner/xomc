@@ -33,21 +33,33 @@ func buildDeviceKeysetSQL(table string, req aggregator.QueryRequest, objectLDNs 
 	return q, args
 }
 
+// adhocSelectCols 是 adhoc 取数的扩展列序（含 product_id::text 与关联名），与 adhocSource 扫描一一对应。
+// 镜像网页 buildResultsQuery 的关联：LEFT JOIN products / device_groups 把分组键 ID 解析成可读名。
+var adhocSelectCols = []string{
+	"r.id", "r.device_oui", "r.device_sn", "r.metric_path", "r.metric_type", "r.metric_value",
+	"r.statis_type", "r.granularity", "r.time", "r.start_time", "r.end_time", "r.object_ldn",
+	"r.product_id::text AS product_id", "p.product_name", "g.name AS device_group_name",
+}
+
 // buildAdhocKeysetSQL 构造 pm_adhoc_aggregation_results 的 (time, id) keyset 流式查询。
+// LEFT JOIN products / device_groups 一次性把 product 维度的产品名、device_group 维度的设备组名读出，
+// 不破坏流式（单次 SQL 无 N+1）。名缺失返 NULL，由 adhocSource 用 *string 承接（空 → 回退 ID 前 8）。
 func buildAdhocKeysetSQL(taskID uuid.UUID, startTime, endTime time.Time, started bool, curTime time.Time, curID uuid.UUID, limit int) (string, []any) {
-	b := storage.Psql.Select(deviceSelectCols...).
-		From("pm_adhoc_aggregation_results").
-		Where(sq.Eq{"task_id": taskID})
+	b := storage.Psql.Select(adhocSelectCols...).
+		From("pm_adhoc_aggregation_results r").
+		LeftJoin("products p ON p.id = r.product_id").
+		LeftJoin("device_groups g ON ('DeviceGroup=' || g.id::text) = r.object_ldn").
+		Where(sq.Eq{"r.task_id": taskID})
 	if !startTime.IsZero() {
-		b = b.Where(sq.GtOrEq{"time": startTime})
+		b = b.Where(sq.GtOrEq{"r.time": startTime})
 	}
 	if !endTime.IsZero() {
-		b = b.Where(sq.LtOrEq{"time": endTime})
+		b = b.Where(sq.LtOrEq{"r.time": endTime})
 	}
 	if started {
-		b = b.Where(sq.Expr(`("time", id) > (?, ?)`, curTime, curID))
+		b = b.Where(sq.Expr(`("r"."time", r.id) > (?, ?)`, curTime, curID))
 	}
-	b = b.OrderBy(`"time" ASC`, "id ASC").Limit(uint64(limit))
+	b = b.OrderBy(`"r"."time" ASC`, "r.id ASC").Limit(uint64(limit))
 	q, args, _ := b.ToSql()
 	return q, args
 }

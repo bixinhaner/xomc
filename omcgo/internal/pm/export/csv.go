@@ -12,10 +12,6 @@ import (
 // utf8BOM 是 UTF-8 字节顺序标记，写在 CSV 首部让 Excel 双击直接按 UTF-8 解析、中文不乱码。
 var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
 
-// wideFixedHeader 是横表的固定行键列（设计 §5.5 横表版）：每行一个 (设备 × 小区/PLMN × 时间) 行键，
-// 其后跟所选指标各一列。去掉了长表的「指标编号 / 指标名 / 类型 / 值 / 统计方式」——指标改摊成列。
-var wideFixedHeader = []string{"设备", "小区/PLMN", "粒度", "时间", "时窗起", "时窗止"}
-
 // csvTimeLayout CSV 时间列格式：本地可读（与前端展示口径一致，避免 RFC3339 的 T/Z 噪音）。
 const csvTimeLayout = "2006-01-02 15:04:05"
 
@@ -62,27 +58,37 @@ type wideKey struct {
 // 前提：上游 RowSource 按 time 连续返回（device/adhoc 走 (time,id) keyset、aggregate 走 time DESC，
 // 同一 time 的行天然连续，可能跨多个批次但不交错）。
 type WideCSVWriter struct {
-	w        *csv.Writer
-	cols     []WideColumn
-	colIdx   map[string]int // 指标编号 → 列下标
-	rowCount int64          // 已写出的横行数（= 去重 (设备×小区×时间) 行数）
+	w           *csv.Writer
+	cols        []WideColumn
+	colIdx      map[string]int // 指标编号 → 列下标
+	rowCount    int64          // 已写出的横行数（= 去重 (设备×小区×时间) 行数）
+	firstHeader string         // 首列表头（随 adhoc 维度变：设备 / 设备组 / 产品 / 频段 / 全网 / 聚合组）
+	includeCell bool           // 是否含「小区/PLMN」列（仅 device 维度为 true）
+	fixedCount  int            // 固定行键列数（含/不含小区列两态），用于行容量预分配
 
 	// 当前时间桶状态。
-	active                bool
-	bTime, bStart, bEnd   time.Time
-	bGran                 string
-	order                 []wideKey            // 行键首现顺序（flush 前再排序求稳定输出）
-	cells                 map[wideKey][]string // 行键 → 各指标列值（len = len(cols)）
+	active              bool
+	bTime, bStart, bEnd time.Time
+	bGran               string
+	order               []wideKey            // 行键首现顺序（flush 前再排序求稳定输出）
+	cells               map[wideKey][]string // 行键 → 各指标列值（len = len(cols)）
 }
 
 // NewWideCSVWriter 构造 WideCSVWriter 并立即写出 BOM + 表头（固定列 + 指标列）。
-func NewWideCSVWriter(out io.Writer, cols []WideColumn) (*WideCSVWriter, error) {
+// firstColHeader 为首列表头（按 adhoc 维度自适应）；includeCell 控制是否输出「小区/PLMN」列
+// （仅 device 维度为 true，其余聚合维度小区已聚掉、不含此列）。
+func NewWideCSVWriter(out io.Writer, firstColHeader string, includeCell bool, cols []WideColumn) (*WideCSVWriter, error) {
 	if _, err := out.Write(utf8BOM); err != nil {
 		return nil, err
 	}
 	cw := csv.NewWriter(out)
-	header := make([]string, 0, len(wideFixedHeader)+len(cols))
-	header = append(header, wideFixedHeader...)
+	fixed := []string{firstColHeader}
+	if includeCell {
+		fixed = append(fixed, "小区/PLMN")
+	}
+	fixed = append(fixed, "粒度", "时间", "时窗起", "时窗止")
+	header := make([]string, 0, len(fixed)+len(cols))
+	header = append(header, fixed...)
 	idx := make(map[string]int, len(cols))
 	for i, c := range cols {
 		header = append(header, c.header())
@@ -91,7 +97,10 @@ func NewWideCSVWriter(out io.Writer, cols []WideColumn) (*WideCSVWriter, error) 
 	if err := cw.Write(header); err != nil {
 		return nil, err
 	}
-	return &WideCSVWriter{w: cw, cols: cols, colIdx: idx}, nil
+	return &WideCSVWriter{
+		w: cw, cols: cols, colIdx: idx,
+		firstHeader: firstColHeader, includeCell: includeCell, fixedCount: len(fixed),
+	}, nil
 }
 
 // AddRow 把一个数据点喂进当前时间桶；time 变化时先 flush 上一桶。
@@ -132,8 +141,12 @@ func (c *WideCSVWriter) flushBucket() error {
 	startStr := formatTime(c.bStart)
 	endStr := formatTime(c.bEnd)
 	for _, k := range c.order {
-		rec := make([]string, 0, len(wideFixedHeader)+len(c.cols))
-		rec = append(rec, k.device, k.cellPLMN, c.bGran, timeStr, startStr, endStr)
+		rec := make([]string, 0, c.fixedCount+len(c.cols))
+		rec = append(rec, k.device)
+		if c.includeCell {
+			rec = append(rec, k.cellPLMN)
+		}
+		rec = append(rec, c.bGran, timeStr, startStr, endStr)
 		rec = append(rec, c.cells[k]...)
 		if err := c.w.Write(rec); err != nil {
 			return err

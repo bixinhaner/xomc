@@ -16,8 +16,9 @@ import ReactECharts from 'echarts-for-react';
 import dayjs, { type Dayjs } from 'dayjs';
 import { usePmAdhocDetail, usePmAdhocResults } from '@core/hooks/api/usePmAdhoc';
 import { useCreateKpiExport } from '@core/hooks/api/useKpiExport';
-import type { AdhocResultRow } from '@core/types/pmAdhoc';
+import type { AdhocResultRow, AdhocDimension } from '@core/types/pmAdhoc';
 import { buildAdhocExportParams, defaultExportTaskName } from '../PmDashboard/kpiExportParams';
+import { adhocIncludesCell, adhocObjectHeaderKey, adhocObjectName, objectKeyOf } from './adhocObjectColumn';
 
 // 按粒度算默认时窗：覆盖最近 7 天，但粒度粗于"天"时至少 7 个周期。
 // 15min / hourly / daily → 7 天；weekly → 7 周；monthly → 7 月。end 取当前时刻。
@@ -92,18 +93,12 @@ interface WideResultRow {
   values: Record<string, number>;
 }
 
-function deviceLabelOf(r: AdhocResultRow, intl: IntlShape, taskDeviceSns: string[]): string {
-  if (r.deviceSn === 'AGGREGATED') {
-    return intl.formatMessage({ id: 'perf.adhoc.aggregateGroupUnit' }, { count: taskDeviceSns.length });
-  }
-  return r.deviceOui ? `${r.deviceOui}/${r.deviceSn}` : r.deviceSn;
-}
-
 function buildWideTable(
   rows: AdhocResultRow[],
   granularity: string,
   intl: IntlShape,
   taskDeviceSns: string[],
+  dimension: AdhocDimension,
 ): { columns: WideMetricCol[]; data: WideResultRow[] } {
   const filtered = rows.filter((r) => r.granularity === granularity);
   // 列集：distinct metricPath（按编号升序），列名「编号(名·类型)」。
@@ -115,16 +110,18 @@ function buildWideTable(
     }
   });
   const columns = Array.from(colMap.values()).sort((a, b) => a.metricPath.localeCompare(b.metricPath));
-  // 行键：设备 × 小区/PLMN × 时间。
+  // 行键：对象（按维度取分组键）× 小区/PLMN（仅 device 维度有意义）× 时间。
+  // 聚合维度无小区后，行键退化为「对象 × 时间」，避免不同产品/组撞同 deviceSn 而碰撞。
   const rowMap = new Map<string, WideResultRow>();
   filtered.forEach((r) => {
-    const rowKey = `${r.deviceSn}|${r.objectLdn ?? ''}|${r.startTime}`;
+    const cellPart = dimension === 'device' ? (r.objectLdn ?? '') : '';
+    const rowKey = `${objectKeyOf(r, dimension)}|${cellPart}|${r.startTime}`;
     let wr = rowMap.get(rowKey);
     if (!wr) {
       wr = {
         rowKey,
         deviceSn: r.deviceSn,
-        deviceLabel: deviceLabelOf(r, intl, taskDeviceSns),
+        deviceLabel: adhocObjectName(r, dimension, taskDeviceSns, intl),
         cellPlmn: r.objectLdn || '-',
         time: r.startTime ? dayjs(r.startTime).format('YYYY-MM-DD HH:mm') : '-',
         values: {},
@@ -260,6 +257,7 @@ export function AdhocResultPanel({ taskId, embedded = false }: Props) {
               granularity={g}
               loading={rowsLoading}
               taskDeviceSns={task.deviceSns}
+              dimension={task.dimension}
             />
           ),
         }))}
@@ -319,17 +317,19 @@ function GranularityView({
   granularity,
   loading,
   taskDeviceSns,
+  dimension,
 }: {
   rows: AdhocResultRow[];
   granularity: string;
   loading: boolean;
   taskDeviceSns: string[];
+  dimension: AdhocDimension;
 }) {
   const intl = useIntl();
   const series = useMemo(() => buildSeriesByMetric(rows, granularity), [rows, granularity]);
   const { columns: metricCols, data: wideData } = useMemo(
-    () => buildWideTable(rows, granularity, intl, taskDeviceSns),
-    [rows, granularity, intl, taskDeviceSns],
+    () => buildWideTable(rows, granularity, intl, taskDeviceSns, dimension),
+    [rows, granularity, intl, taskDeviceSns, dimension],
   );
   if (loading) return <Spin />;
   if (series.length === 0) {
@@ -362,12 +362,12 @@ function GranularityView({
         scroll={{ x: 'max-content' }}
         columns={[
           {
-            title: intl.formatMessage({ id: 'perf.adhoc.colDevice' }),
-            key: '__device',
+            title: intl.formatMessage({ id: adhocObjectHeaderKey(dimension) }),
+            key: '__object',
             width: 200,
             fixed: 'left' as const,
             render: (_: unknown, r: WideResultRow) =>
-              r.deviceSn === 'AGGREGATED' ? (
+              dimension === 'aggregate_group' && r.deviceSn === 'AGGREGATED' ? (
                 <Tooltip title={<pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{taskDeviceSns.join('\n')}</pre>}>
                   <Tag color="purple" style={{ cursor: 'help' }}>
                     {r.deviceLabel}
@@ -377,12 +377,16 @@ function GranularityView({
                 r.deviceLabel
               ),
           },
-          {
-            title: intl.formatMessage({ id: 'perf.adhoc.colCellPlmn' }),
-            key: '__cell',
-            width: 160,
-            render: (_: unknown, r: WideResultRow) => r.cellPlmn,
-          },
+          ...(adhocIncludesCell(dimension)
+            ? [
+                {
+                  title: intl.formatMessage({ id: 'perf.adhoc.colCellPlmn' }),
+                  key: '__cell',
+                  width: 160,
+                  render: (_: unknown, r: WideResultRow) => r.cellPlmn,
+                },
+              ]
+            : []),
           {
             title: intl.formatMessage({ id: 'perf.adhoc.colStartTime' }),
             key: '__time',

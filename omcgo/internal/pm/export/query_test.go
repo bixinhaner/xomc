@@ -94,11 +94,21 @@ func TestBuildDeviceKeysetSQL_NoObjectLDNFilter(t *testing.T) {
 func TestBuildAdhocKeysetSQL(t *testing.T) {
 	id := uuid.New()
 	q, args := buildAdhocKeysetSQL(id, time.Time{}, time.Time{}, false, time.Time{}, uuid.Nil, 5000)
-	assert.Contains(t, q, "FROM pm_adhoc_aggregation_results")
+	assert.Contains(t, q, "FROM pm_adhoc_aggregation_results r")
 	assert.Contains(t, q, "task_id")
-	assert.Contains(t, q, `ORDER BY "time" ASC, id ASC`)
+	assert.Contains(t, q, `ORDER BY "r"."time" ASC, r.id ASC`)
 	// squirrel sq.Eq 把 uuid 当 driver.Valuer 序列化成字符串 arg；pgx 端两种都接受。
 	assert.Equal(t, id.String(), args[0])
+}
+
+// adhoc 取数镜像网页关联：LEFT JOIN products / device_groups，选出产品名 / 设备组名。
+func TestBuildAdhocKeysetSQL_JoinsNames(t *testing.T) {
+	q, _ := buildAdhocKeysetSQL(uuid.New(), time.Time{}, time.Time{}, false, time.Time{}, uuid.Nil, 5000)
+	assert.Contains(t, q, "LEFT JOIN products")
+	assert.Contains(t, q, "device_groups")
+	assert.Contains(t, q, "product_name")
+	assert.Contains(t, q, "device_group_name")
+	assert.Contains(t, q, "pm_adhoc_aggregation_results")
 }
 
 func TestBuildAdhocKeysetSQL_WithTimeWindow(t *testing.T) {
@@ -106,8 +116,8 @@ func TestBuildAdhocKeysetSQL_WithTimeWindow(t *testing.T) {
 	st := time.Now().Add(-time.Hour)
 	et := time.Now()
 	q, _ := buildAdhocKeysetSQL(id, st, et, false, time.Time{}, uuid.Nil, 100)
-	assert.Contains(t, q, "time >=")
-	assert.Contains(t, q, "time <=")
+	assert.Contains(t, q, "r.time >=")
+	assert.Contains(t, q, "r.time <=")
 }
 
 // 横表列发现：dashboard 源 DISTINCT(metric_path, metric_type)，按 metric_paths + 时窗收口。

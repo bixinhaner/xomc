@@ -6487,6 +6487,11 @@ const messages: Record<string, string> = {
   // 结果面板
   'perf.adhoc.aggregateGroupUnit':       '聚合组·{count} 台',
   'perf.adhoc.colDevice':                '设备',
+  'perf.adhoc.colObject.deviceGroup':    '设备组',
+  'perf.adhoc.colObject.product':        '产品',
+  'perf.adhoc.colObject.band':           '频段',
+  'perf.adhoc.colObject.network':        '全网',
+  'perf.adhoc.colObject.aggregateGroup': '聚合组',
   'perf.adhoc.colCellPlmn':              '小区/PLMN',
   'perf.adhoc.colMetric':                '指标',
   'perf.adhoc.colValue':                 '值',

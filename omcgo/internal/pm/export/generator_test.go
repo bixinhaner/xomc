@@ -21,7 +21,7 @@ func TestStreamCSVToObject_Success(t *testing.T) {
 	cols := []WideColumn{{Code: "K1", Type: "kpi", Name: "K1"}, {Code: "K2", Type: "kpi", Name: "K2"}, {Code: "K3", Type: "kpi", Name: "K3"}}
 
 	// 三设备各一指标、时间同（零值）→ 三个行键摊成三横行。
-	res, err := streamCSVToObject(context.Background(), up, "bkt", "obj.csv", src, cols)
+	res, err := streamCSVToObject(context.Background(), up, "bkt", "obj.csv", src, cols, csvLayout{FirstColHeader: "设备", IncludeCell: true})
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), res.RowCount) // 3 横行
 	assert.Greater(t, res.FileSize, int64(0))
@@ -40,7 +40,7 @@ func TestStreamCSVToObject_Success(t *testing.T) {
 func TestStreamCSVToObject_SourceError_Propagates(t *testing.T) {
 	src := &sliceSource{err: errors.New("query boom")}
 	up := &stubUploader{}
-	_, err := streamCSVToObject(context.Background(), up, "bkt", "obj.csv", src, nil)
+	_, err := streamCSVToObject(context.Background(), up, "bkt", "obj.csv", src, nil, csvLayout{FirstColHeader: "设备", IncludeCell: true})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "query boom")
 }
@@ -48,7 +48,7 @@ func TestStreamCSVToObject_SourceError_Propagates(t *testing.T) {
 func TestStreamCSVToObject_UploadError_Propagates(t *testing.T) {
 	src := &sliceSource{batches: [][]ExportRow{{{Device: "d", MetricCode: "K"}}}}
 	up := &stubUploader{uploadErr: errors.New("upload boom")}
-	_, err := streamCSVToObject(context.Background(), up, "bkt", "obj.csv", src, nil)
+	_, err := streamCSVToObject(context.Background(), up, "bkt", "obj.csv", src, nil, csvLayout{FirstColHeader: "设备", IncludeCell: true})
 	require.Error(t, err)
 }
 
@@ -56,7 +56,7 @@ func TestStreamCSVToObject_EmptySource(t *testing.T) {
 	// 无数据：只写 BOM + 表头，行数 0，仍上传成功（空结果合法）。
 	src := &sliceSource{batches: nil}
 	up := &stubUploader{}
-	res, err := streamCSVToObject(context.Background(), up, "bkt", "obj.csv", src, nil)
+	res, err := streamCSVToObject(context.Background(), up, "bkt", "obj.csv", src, nil, csvLayout{FirstColHeader: "设备", IncludeCell: true})
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), res.RowCount)
 	body := strings.TrimPrefix(string(up.gotBody), string(utf8BOM))
@@ -69,7 +69,7 @@ func TestStreamCSVToObject_EmptySource(t *testing.T) {
 func TestUTF8BOM_Bytes(t *testing.T) {
 	assert.Equal(t, []byte{0xEF, 0xBB, 0xBF}, utf8BOM)
 	var buf bytes.Buffer
-	_, err := NewWideCSVWriter(&buf, nil)
+	_, err := NewWideCSVWriter(&buf, "设备", true, nil)
 	require.NoError(t, err)
 	assert.True(t, bytes.HasPrefix(buf.Bytes(), utf8BOM))
 }

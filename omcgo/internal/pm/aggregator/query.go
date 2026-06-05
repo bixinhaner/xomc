@@ -155,7 +155,8 @@ func (a *Aggregator) Count(ctx context.Context, q QueryRequest) (int, error) {
 	case DimensionAggregateGroup:
 		inner := storage.Psql.Select("1").From(table)
 		inner = applyDeviceFilters(inner, q)
-		inner = inner.GroupBy("metric_path", "granularity", "time", "object_ldn")
+		// 单条聚合：分组键不含 object_ldn（与 queryAggregateGroupTable 一致），保证截断计数口径相符。
+		inner = inner.GroupBy("metric_path", "granularity", "time")
 		return a.scanCountSub(ctx, inner)
 	case DimensionNetwork:
 		inner := storage.Psql.Select("1").From(table)
@@ -260,10 +261,14 @@ SELECT id, %[1]s AS display_name FROM perf_indicators_gsm  WHERE id = ANY($1)`, 
 }
 
 // queryAggregateGroupTable 现场聚合：从 device 维度表 (pm_metrics / pm_metrics_hourly / 等)
-// 按 metric_path + granularity + time + object_ldn GROUP BY，不 GROUP BY device_sn。
+// 按 metric_path + granularity + time GROUP BY（**不含 object_ldn**），不 GROUP BY device_sn。
 // 算子按 statis_type 路由（sum/avg/max/min；pct 报错）。
 //
-// 输出 Row.DeviceSN = "AGGREGATED"，DeviceOUI = ""；MetricValue = 跨设备算子结果。
+// 临时聚合组 = N 台设备当一个逻辑对象出一条合计线：所有设备、所有小区的同指标同时间桶
+// 合成一条（每个 metric_path × granularity × time 一行），不再按小区拆分。
+//
+// 输出 Row.DeviceSN = "AGGREGATED"，DeviceOUI = ""，ObjectLDN = nil（单条聚合，无小区）；
+// MetricValue = 跨设备跨小区算子结果。
 //
 // 与 G5 cron 路径无关：直接查 device 表的已聚合（hourly/daily/...）数据再做 GROUP BY 折叠。
 // 15min 也支持（pm_metrics raw 表本身就是 15min 粒度，GROUP BY 同样规则）。
@@ -292,10 +297,9 @@ func (a *Aggregator) queryAggregateGroupTable(ctx context.Context, table string,
 		"MIN(start_time) AS start_time",
 		"MIN(end_time) AS end_time",
 		"MAX(ingest_time) AS ingest_time",
-		"object_ldn",
 	).From(table)
 	qb = applyDeviceFilters(qb, q)
-	qb = qb.GroupBy("metric_path", "granularity", "time", "object_ldn")
+	qb = qb.GroupBy("metric_path", "granularity", "time")
 	qb = qb.OrderBy("time DESC")
 	if q.Limit > 0 {
 		qb = qb.Limit(uint64(q.Limit))
@@ -316,11 +320,11 @@ func (a *Aggregator) queryAggregateGroupTable(ctx context.Context, table string,
 	var out []Row
 	for rows.Next() {
 		var r Row
-		var statis, ldn *string
+		var statis *string
 		var metricType, granularity string
 		if err := rows.Scan(
 			&r.MetricPath, &metricType, &r.MetricValue,
-			&statis, &granularity, &r.Time, &r.StartTime, &r.EndTime, &r.IngestTime, &ldn,
+			&statis, &granularity, &r.Time, &r.StartTime, &r.EndTime, &r.IngestTime,
 		); err != nil {
 			return nil, fmt.Errorf("aggregator.Query scan %s (aggregate_group): %w", table, err)
 		}
@@ -332,7 +336,7 @@ func (a *Aggregator) queryAggregateGroupTable(ctx context.Context, table string,
 			st := metrics.StatisType(*statis)
 			r.StatisType = &st
 		}
-		r.ObjectLDN = ldn
+		// r.ObjectLDN 保持 nil：单条聚合，无小区
 		out = append(out, r)
 	}
 	return out, rows.Err()

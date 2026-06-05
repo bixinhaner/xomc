@@ -186,11 +186,15 @@ func statisStr(p *metrics.StatisType) string {
 // ── adhoc：keyset 流式直查 pm_adhoc_aggregation_results ───────────────────────
 
 // adhocSource 按 task_id 过滤、(time, id) keyset 流式取 adhoc 结果表。
+// dimension 决定首列对象名的解析口径（设备组名 / 产品名 / 频段 / 全网 / 聚合组）与是否填小区列；
+// deviceCount 为任务圈选设备数，仅 aggregate_group 维度用于"聚合组(N个设备)"标签。
 type adhocSource struct {
-	db        PgQuerier
-	taskID    uuid.UUID
-	startTime time.Time
-	endTime   time.Time
+	db          PgQuerier
+	taskID      uuid.UUID
+	startTime   time.Time
+	endTime     time.Time
+	dimension   string
+	deviceCount int
 
 	curTime time.Time
 	curID   uuid.UUID
@@ -198,8 +202,8 @@ type adhocSource struct {
 	done    bool
 }
 
-func newAdhocSource(db PgQuerier, taskID uuid.UUID, startTime, endTime time.Time) *adhocSource {
-	return &adhocSource{db: db, taskID: taskID, startTime: startTime, endTime: endTime}
+func newAdhocSource(db PgQuerier, taskID uuid.UUID, startTime, endTime time.Time, dimension string, deviceCount int) *adhocSource {
+	return &adhocSource{db: db, taskID: taskID, startTime: startTime, endTime: endTime, dimension: dimension, deviceCount: deviceCount}
 }
 
 func (s *adhocSource) Next(ctx context.Context) ([]ExportRow, bool, error) {
@@ -220,15 +224,25 @@ func (s *adhocSource) Next(ctx context.Context) ([]ExportRow, bool, error) {
 	for rows.Next() {
 		var id uuid.UUID
 		var oui, sn, metricPath, metricType, gran string
-		var statis, ldn *string
+		var statis, ldn, productID, productName, groupName *string
 		var value float64
 		var tm, st, et time.Time
-		if err := rows.Scan(&id, &oui, &sn, &metricPath, &metricType, &value, &statis, &gran, &tm, &st, &et, &ldn); err != nil {
+		// 列序必须与 adhocSelectCols 完全一致：
+		// id, oui, sn, metric_path, metric_type, metric_value, statis_type, granularity,
+		// time, start_time, end_time, object_ldn, product_id, product_name, device_group_name。
+		if err := rows.Scan(&id, &oui, &sn, &metricPath, &metricType, &value, &statis, &gran,
+			&tm, &st, &et, &ldn, &productID, &productName, &groupName); err != nil {
 			return nil, false, fmt.Errorf("export adhoc scan: %w", err)
 		}
+		device := adhocObjectLabel(s.dimension, oui, sn, derefStr(productID), derefStr(productName),
+			derefStr(ldn), derefStr(groupName), s.deviceCount)
+		cell := ""
+		if s.dimension == "device" {
+			cell = derefStr(ldn)
+		}
 		out = append(out, ExportRow{
-			Device:      deviceLabel(oui, sn),
-			CellPLMN:    derefStr(ldn),
+			Device:      device,
+			CellPLMN:    cell,
 			MetricCode:  metricPath,
 			MetricType:  metricType,
 			Granularity: gran,
