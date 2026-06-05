@@ -4,9 +4,9 @@ import "testing"
 
 func TestAdhocFirstColHeader(t *testing.T) {
 	cases := map[string]string{
-		"device": "设备SN", "device_group": "设备组", "product": "产品",
+		"device": "设备 SN", "device_group": "设备组", "product": "产品",
 		"band": "频段", "network": "全网", "aggregate_group": "聚合组",
-		"": "设备SN", "unknown": "设备SN",
+		"": "设备 SN", "unknown": "设备 SN",
 	}
 	for dim, want := range cases {
 		if got := adhocFirstColHeader(dim); got != want {

@@ -20,7 +20,7 @@ func adhocFirstColHeader(dim string) string {
 	case "aggregate_group":
 		return "聚合组"
 	default: // device / 空 / 未知
-		return "设备SN"
+		return "设备 SN"
 	}
 }
 

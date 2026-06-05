@@ -20,7 +20,7 @@ func wideTestCols() []WideColumn {
 
 func TestWideCSVWriter_BOMAndHeader(t *testing.T) {
 	var buf bytes.Buffer
-	cw, err := NewWideCSVWriter(&buf, "设备SN", true, wideTestCols())
+	cw, err := NewWideCSVWriter(&buf, "设备 SN", true, wideTestCols())
 	require.NoError(t, err)
 	require.NoError(t, cw.Flush())
 
@@ -35,7 +35,7 @@ func TestWideCSVWriter_BOMAndHeader(t *testing.T) {
 	firstLine := strings.SplitN(body, "\n", 2)[0]
 	assert.Contains(t, firstLine, "开始时间")
 	assert.Contains(t, firstLine, "结束时间")
-	assert.Contains(t, firstLine, "设备SN")
+	assert.Contains(t, firstLine, "设备 SN")
 	assert.Contains(t, firstLine, "Cell ID")
 	assert.Contains(t, firstLine, "PLMN")
 	assert.Contains(t, firstLine, "上行吞吐")
@@ -50,7 +50,7 @@ func TestWideCSVWriter_BOMAndHeader(t *testing.T) {
 // 同一 (设备×小区×时间) 行键、不同指标 → 摊成一行，每指标一列。
 func TestWideCSVWriter_PivotSameKey(t *testing.T) {
 	var buf bytes.Buffer
-	cw, err := NewWideCSVWriter(&buf, "设备SN", true, wideTestCols())
+	cw, err := NewWideCSVWriter(&buf, "设备 SN", true, wideTestCols())
 	require.NoError(t, err)
 
 	tm := time.Date(2026, 6, 4, 10, 0, 0, 0, time.UTC)
@@ -70,7 +70,7 @@ func TestWideCSVWriter_PivotSameKey(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, recs, 2) // 表头 + 1 横行
 	row := recs[1]
-	// 列序：开始时间 | 结束时间 | 设备SN | Cell ID | PLMN | K001 | C002
+	// 列序：开始时间 | 结束时间 | 设备 SN | Cell ID | PLMN | K001 | C002
 	assert.Equal(t, "2026-06-04 10:00:00", row[0]) // 开始时间（时窗起）
 	assert.Equal(t, "2026-06-04 11:00:00", row[1]) // 结束时间（时窗止）
 	assert.Equal(t, "SN1", row[2])                 // 设备 SN（无 OUI 前缀）
@@ -83,7 +83,7 @@ func TestWideCSVWriter_PivotSameKey(t *testing.T) {
 // 某指标在该行键缺值 → 空单元格。
 func TestWideCSVWriter_MissingMetricEmptyCell(t *testing.T) {
 	var buf bytes.Buffer
-	cw, err := NewWideCSVWriter(&buf, "设备SN", true, wideTestCols())
+	cw, err := NewWideCSVWriter(&buf, "设备 SN", true, wideTestCols())
 	require.NoError(t, err)
 
 	tm := time.Date(2026, 6, 4, 10, 0, 0, 0, time.UTC)
@@ -94,7 +94,7 @@ func TestWideCSVWriter_MissingMetricEmptyCell(t *testing.T) {
 	recs, err := csv.NewReader(strings.NewReader(body)).ReadAll()
 	require.NoError(t, err)
 	row := recs[1]
-	// 列序：开始时间 | 结束时间 | 设备SN | Cell ID | PLMN | K001 | C002
+	// 列序：开始时间 | 结束时间 | 设备 SN | Cell ID | PLMN | K001 | C002
 	assert.Equal(t, "9", row[5]) // K001 有值
 	assert.Equal(t, "", row[6])  // C002 缺值 → 空
 }
@@ -102,7 +102,7 @@ func TestWideCSVWriter_MissingMetricEmptyCell(t *testing.T) {
 // 不同时间 → 时间桶切换，各成一横行。
 func TestWideCSVWriter_TimeBucketFlush(t *testing.T) {
 	var buf bytes.Buffer
-	cw, err := NewWideCSVWriter(&buf, "设备SN", true, wideTestCols())
+	cw, err := NewWideCSVWriter(&buf, "设备 SN", true, wideTestCols())
 	require.NoError(t, err)
 
 	t1 := time.Date(2026, 6, 4, 10, 0, 0, 0, time.UTC)
@@ -118,10 +118,10 @@ func TestWideCSVWriter_TimeBucketFlush(t *testing.T) {
 	require.Len(t, recs, 3) // 表头 + 2 行
 }
 
-// 零列（无指标）：只写固定行键列表头（device 口径 5 列：开始时间 结束时间 设备SN Cell ID PLMN）。
+// 零列（无指标）：只写固定行键列表头（device 口径 5 列：开始时间 结束时间 设备 SN Cell ID PLMN）。
 func TestWideCSVWriter_NoColumns(t *testing.T) {
 	var buf bytes.Buffer
-	cw, err := NewWideCSVWriter(&buf, "设备SN", true, nil)
+	cw, err := NewWideCSVWriter(&buf, "设备 SN", true, nil)
 	require.NoError(t, err)
 	require.NoError(t, cw.Flush())
 	body := strings.TrimPrefix(buf.String(), string(utf8BOM))
@@ -135,13 +135,13 @@ func TestWideCSVWriter_NoColumns(t *testing.T) {
 func TestWideCSVWriter_DimensionLayout(t *testing.T) {
 	cols := []WideColumn{{Code: "C1", Type: "counter", Name: "速率"}}
 
-	// 含小区列（device 口径）：开始时间 | 结束时间 | 设备SN | Cell ID | PLMN | 速率。
+	// 含小区列（device 口径）：开始时间 | 结束时间 | 设备 SN | Cell ID | PLMN | 速率。
 	var buf bytes.Buffer
-	w, err := NewWideCSVWriter(&buf, "设备SN", true, cols)
+	w, err := NewWideCSVWriter(&buf, "设备 SN", true, cols)
 	require.NoError(t, err)
 	require.NoError(t, w.Flush())
 	header := firstCSVRow(t, buf.Bytes())
-	assert.Equal(t, []string{"开始时间", "结束时间", "设备SN", "Cell ID", "PLMN", "速率"}, header)
+	assert.Equal(t, []string{"开始时间", "结束时间", "设备 SN", "Cell ID", "PLMN", "速率"}, header)
 
 	// 不含小区列（聚合维度口径）：开始时间 | 结束时间 | 设备组 | 速率。
 	buf.Reset()

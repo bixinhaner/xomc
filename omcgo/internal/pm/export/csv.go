@@ -78,7 +78,7 @@ type WideCSVWriter struct {
 
 // NewWideCSVWriter 构造 WideCSVWriter 并立即写出 BOM + 表头（固定列 + 指标列）。
 // 列序与页面表格一致：开始时间 / 结束时间 / 设备(对象) / [Cell ID / PLMN] / 指标...
-// firstColHeader 为设备(对象)列表头（按维度自适应：设备SN / 设备组 / 产品 / 频段 / 全网 / 聚合组）；
+// firstColHeader 为设备(对象)列表头（按维度自适应：设备 SN / 设备组 / 产品 / 频段 / 全网 / 聚合组）；
 // includeCell 控制是否输出「Cell ID / PLMN」两列（仅 device 维度为 true，聚合维度小区已聚掉、不含）。
 func NewWideCSVWriter(out io.Writer, firstColHeader string, includeCell bool, cols []WideColumn) (*WideCSVWriter, error) {
 	if _, err := out.Write(utf8BOM); err != nil {
