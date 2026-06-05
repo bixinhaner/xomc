@@ -91,6 +91,7 @@ interface WideResultRow {
   cellPlmn: string;
   technology: string; // device_group 维度从 objectLdn 解析出的制式（lte/nr/gsm 大写）；其它维度空
   time: string;
+  endTime: string;
   values: Record<string, number>;
 }
 
@@ -126,6 +127,7 @@ function buildWideTable(
         cellPlmn: r.objectLdn || '-',
         technology: dimension === 'device_group' ? adhocTechnology(r) : '',
         time: r.startTime ? dayjs(r.startTime).format('YYYY-MM-DD HH:mm') : '-',
+        endTime: r.endTime ? dayjs(r.endTime).format('YYYY-MM-DD HH:mm') : '-',
         values: {},
       };
       rowMap.set(rowKey, wr);
@@ -405,6 +407,12 @@ function GranularityView({
             key: '__time',
             width: 160,
             render: (_: unknown, r: WideResultRow) => r.time,
+          },
+          {
+            title: intl.formatMessage({ id: 'perf.adhoc.colEndTime' }),
+            key: '__endTime',
+            width: 160,
+            render: (_: unknown, r: WideResultRow) => r.endTime,
           },
           ...metricCols.map((c) => ({
             title: c.title,
