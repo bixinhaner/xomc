@@ -20,41 +20,36 @@ func newNameResolver(db PgQuerier, loc appcontext.Locale) *nameResolver {
 	return &nameResolver{db: db, loc: loc, cache: make(map[string]string)}
 }
 
-// resolveBatch 给一批 ExportRow 回填 MetricName（仅当为空时）。
-// 未命中缓存的编号一次性查库；查不到的编号回退用编号本身，保证非空、不乱码。
-func (r *nameResolver) resolveBatch(ctx context.Context, rows []ExportRow) {
+// resolveColumns 把列发现得到的 (编号,类型) 解析成 WideColumn（回填本地化名，回退编号本身），保持入参顺序。
+// 横表表头一次性解析全部指标名，流式阶段不再逐行查名。
+func (r *nameResolver) resolveColumns(ctx context.Context, keys []colKey) []WideColumn {
 	missing := make([]string, 0)
 	seen := make(map[string]struct{})
-	for i := range rows {
-		if rows[i].MetricName != "" {
+	for _, k := range keys {
+		if k.code == "" {
 			continue
 		}
-		code := rows[i].MetricCode
-		if code == "" {
+		if _, ok := r.cache[k.code]; ok {
 			continue
 		}
-		if _, ok := r.cache[code]; ok {
+		if _, ok := seen[k.code]; ok {
 			continue
 		}
-		if _, ok := seen[code]; ok {
-			continue
-		}
-		seen[code] = struct{}{}
-		missing = append(missing, code)
+		seen[k.code] = struct{}{}
+		missing = append(missing, k.code)
 	}
 	if len(missing) > 0 {
 		r.loadNames(ctx, missing)
 	}
-	for i := range rows {
-		if rows[i].MetricName != "" || rows[i].MetricCode == "" {
-			continue
+	out := make([]WideColumn, 0, len(keys))
+	for _, k := range keys {
+		name := r.cache[k.code]
+		if name == "" {
+			name = k.code // 回退编号本身，保证列名非空、不乱码
 		}
-		if name, ok := r.cache[rows[i].MetricCode]; ok && name != "" {
-			rows[i].MetricName = name
-		} else {
-			rows[i].MetricName = rows[i].MetricCode // 回退编号本身
-		}
+		out = append(out, WideColumn{Code: k.code, Type: k.mtype, Name: name})
 	}
+	return out
 }
 
 // loadNames 按编号集合一次查三张指标表，写入缓存；未命中的编号也写回退值入缓存。

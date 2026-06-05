@@ -52,6 +52,38 @@ func buildAdhocKeysetSQL(taskID uuid.UUID, startTime, endTime time.Time, started
 	return q, args
 }
 
+// buildDistinctMetricsSQL 发现 dashboard 源的横表指标列集：DISTINCT(metric_path, metric_type)。
+// 指标的编号/类型与设备/小区无关，故只按 metric_paths（非空时）+ 时窗收口即得列全集（含 counter/kpi 类型）。
+func buildDistinctMetricsSQL(table string, metricPaths []string, start, end time.Time) (string, []any) {
+	b := storage.Psql.Select("DISTINCT metric_path", "metric_type").From(table)
+	if len(metricPaths) > 0 {
+		b = b.Where(sq.Eq{"metric_path": metricPaths})
+	}
+	if !start.IsZero() {
+		b = b.Where(sq.GtOrEq{"time": start})
+	}
+	if !end.IsZero() {
+		b = b.Where(sq.LtOrEq{"time": end})
+	}
+	q, args, _ := b.ToSql()
+	return q, args
+}
+
+// buildAdhocDistinctMetricsSQL 发现 adhoc 源的横表指标列集：按 task_id（+ 可选时窗）DISTINCT(metric_path, metric_type)。
+func buildAdhocDistinctMetricsSQL(taskID uuid.UUID, start, end time.Time) (string, []any) {
+	b := storage.Psql.Select("DISTINCT metric_path", "metric_type").
+		From("pm_adhoc_aggregation_results").
+		Where(sq.Eq{"task_id": taskID})
+	if !start.IsZero() {
+		b = b.Where(sq.GtOrEq{"time": start})
+	}
+	if !end.IsZero() {
+		b = b.Where(sq.LtOrEq{"time": end})
+	}
+	q, args, _ := b.ToSql()
+	return q, args
+}
+
 // applyDeviceExportFilters 复刻 aggregator 的 device 维度过滤（成对 OUI/SN + 公共过滤），
 // 外加 A1 小区/PLMN 下钻白名单 objectLDNs（QueryRequest 无此字段，单独传入）。
 // 与 aggregator.applyDeviceFilters 同语义，独立实现以避免改动其签名（scope 要求只读复用）。

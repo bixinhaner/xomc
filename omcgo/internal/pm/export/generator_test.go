@@ -18,17 +18,19 @@ func TestStreamCSVToObject_Success(t *testing.T) {
 		{{Device: "d2", MetricCode: "K2", Value: 2}, {Device: "d3", MetricCode: "K3", Value: 3}},
 	}}
 	up := &stubUploader{}
+	cols := []WideColumn{{Code: "K1", Type: "kpi", Name: "K1"}, {Code: "K2", Type: "kpi", Name: "K2"}, {Code: "K3", Type: "kpi", Name: "K3"}}
 
-	res, err := streamCSVToObject(context.Background(), up, "bkt", "obj.csv", src, nil)
+	// 三设备各一指标、时间同（零值）→ 三个行键摊成三横行。
+	res, err := streamCSVToObject(context.Background(), up, "bkt", "obj.csv", src, cols)
 	require.NoError(t, err)
-	assert.Equal(t, int64(3), res.RowCount) // 3 数据行
+	assert.Equal(t, int64(3), res.RowCount) // 3 横行
 	assert.Greater(t, res.FileSize, int64(0))
 
 	// 上传体头三字节 BOM。
 	require.GreaterOrEqual(t, len(up.gotBody), 3)
 	assert.Equal(t, []byte{0xEF, 0xBB, 0xBF}, up.gotBody[:3])
 
-	// CSV 解析：表头 + 3 数据行。
+	// CSV 解析：表头 + 3 横行。
 	body := strings.TrimPrefix(string(up.gotBody), string(utf8BOM))
 	recs, err := csv.NewReader(strings.NewReader(body)).ReadAll()
 	require.NoError(t, err)
@@ -67,7 +69,7 @@ func TestStreamCSVToObject_EmptySource(t *testing.T) {
 func TestUTF8BOM_Bytes(t *testing.T) {
 	assert.Equal(t, []byte{0xEF, 0xBB, 0xBF}, utf8BOM)
 	var buf bytes.Buffer
-	_, err := NewCSVWriter(&buf)
+	_, err := NewWideCSVWriter(&buf, nil)
 	require.NoError(t, err)
 	assert.True(t, bytes.HasPrefix(buf.Bytes(), utf8BOM))
 }

@@ -127,12 +127,13 @@ func TestRunner_Run_Success(t *testing.T) {
 	repo := &stubTaskRepo{task: task}
 	up := &stubUploader{}
 	r := NewRunner(RunnerDeps{Repo: repo, Uploader: up, Bucket: "reports"})
-	// 注入 stub 源：2 行数据点。
-	r.buildSourceFn = func(_ context.Context, _ *Task) (RowSource, *nameResolver, error) {
+	// 注入 stub 源：2 个数据点，同设备同时间（零值）→ 横表摊成 1 行、2 指标列。
+	r.buildSourceFn = func(_ context.Context, _ *Task) (RowSource, []WideColumn, error) {
 		return &sliceSource{batches: [][]ExportRow{{
-			{Device: "ABCDEF/SN1", MetricCode: "K001", MetricName: "上行吞吐", Value: 1.5},
-			{Device: "ABCDEF/SN1", MetricCode: "K002", MetricName: "下行吞吐", Value: 2.5},
-		}}}, nil, nil
+				{Device: "ABCDEF/SN1", MetricCode: "K001", Value: 1.5},
+				{Device: "ABCDEF/SN1", MetricCode: "K002", Value: 2.5},
+			}}},
+			[]WideColumn{{Code: "K001", Type: "kpi", Name: "上行吞吐"}, {Code: "K002", Type: "kpi", Name: "下行吞吐"}}, nil
 	}
 
 	payload, _ := BuildJobPayload(task.ID)
@@ -141,7 +142,7 @@ func TestRunner_Run_Success(t *testing.T) {
 	assert.Equal(t, 1, repo.markedRun)
 	require.NotNil(t, repo.succeeded)
 	assert.Equal(t, "reports", repo.succeeded.bucket)
-	assert.Equal(t, int64(2), repo.succeeded.rowN) // 2 数据行（不含表头）
+	assert.Equal(t, int64(1), repo.succeeded.rowN) // 横表：同行键 2 指标摊成 1 横行
 	assert.Greater(t, repo.succeeded.fileSize, int64(0))
 	assert.Equal(t, 0, repo.failedN)
 
@@ -160,7 +161,7 @@ func TestRunner_Run_GenerateError_MarksFailed(t *testing.T) {
 	task := newTestTask(SourceDashboard)
 	repo := &stubTaskRepo{task: task}
 	r := NewRunner(RunnerDeps{Repo: repo, Uploader: &stubUploader{}, Bucket: "reports"})
-	r.buildSourceFn = func(_ context.Context, _ *Task) (RowSource, *nameResolver, error) {
+	r.buildSourceFn = func(_ context.Context, _ *Task) (RowSource, []WideColumn, error) {
 		return &sliceSource{err: errors.New("db read failed")}, nil, nil
 	}
 
@@ -182,7 +183,7 @@ func TestRunner_Run_UploadError_MarksFailed(t *testing.T) {
 	repo := &stubTaskRepo{task: task}
 	up := &stubUploader{uploadErr: errors.New("minio down")}
 	r := NewRunner(RunnerDeps{Repo: repo, Uploader: up, Bucket: "reports"})
-	r.buildSourceFn = func(_ context.Context, _ *Task) (RowSource, *nameResolver, error) {
+	r.buildSourceFn = func(_ context.Context, _ *Task) (RowSource, []WideColumn, error) {
 		return &sliceSource{batches: [][]ExportRow{{{Device: "d", MetricCode: "K1"}}}}, nil, nil
 	}
 	payload, _ := BuildJobPayload(task.ID)
@@ -196,7 +197,7 @@ func TestRunner_Run_MarkFailedAlsoFails_ReturnsError(t *testing.T) {
 	task := newTestTask(SourceDashboard)
 	repo := &stubTaskRepo{task: task, failErr: errors.New("db down")}
 	r := NewRunner(RunnerDeps{Repo: repo, Uploader: &stubUploader{}, Bucket: "reports"})
-	r.buildSourceFn = func(_ context.Context, _ *Task) (RowSource, *nameResolver, error) {
+	r.buildSourceFn = func(_ context.Context, _ *Task) (RowSource, []WideColumn, error) {
 		return &sliceSource{err: errors.New("read error")}, nil, nil
 	}
 	payload, _ := BuildJobPayload(task.ID)
@@ -209,7 +210,7 @@ func TestRunner_Run_NoUploader_MarksFailed(t *testing.T) {
 	task := newTestTask(SourceDashboard)
 	repo := &stubTaskRepo{task: task}
 	r := NewRunner(RunnerDeps{Repo: repo, Bucket: "reports"}) // uploader nil
-	r.buildSourceFn = func(_ context.Context, _ *Task) (RowSource, *nameResolver, error) {
+	r.buildSourceFn = func(_ context.Context, _ *Task) (RowSource, []WideColumn, error) {
 		return &sliceSource{}, nil, nil
 	}
 	payload, _ := BuildJobPayload(task.ID)

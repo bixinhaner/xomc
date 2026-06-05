@@ -20,25 +20,26 @@ type GenerateResult struct {
 	FileSize int64
 }
 
-// streamCSVToObject 把 RowSource 的全部数据点流式写成 CSV、经 io.Pipe 直传对象存储。
+// streamCSVToObject 把 RowSource 的全部数据点流式写成横表 CSV、经 io.Pipe 直传对象存储。
 //
-// 关键：边查边写边传——CSVWriter 写进 pipe 的 writer 端，PutObject 从 reader 端读，
+// 关键：边查边写边传——WideCSVWriter 写进 pipe 的 writer 端，PutObject 从 reader 端读，
 // size=-1 让 SDK 流式上传，全程不把全量行 / 全量文件读进内存（设计 §5.4）。
+// 横表表头列集 cols 在调用前已发现+解析；写入器按时间桶缓冲摊行，内存只占一个时间桶。
 // 取数 / 写 CSV 出错时用 CloseWithError 让 PutObject 端拿到错误并中止上传。
 func streamCSVToObject(
 	ctx context.Context,
 	up Uploader,
 	bucket, object string,
 	src RowSource,
-	resolver *nameResolver,
+	cols []WideColumn,
 ) (GenerateResult, error) {
 	pr, pw := io.Pipe()
 
-	// 写 CSV 的 goroutine：拉源 → 回填名 → 写行 → flush；任何错误 CloseWithError 传给上传端。
+	// 写 CSV 的 goroutine：拉源 → 按时间桶摊横行 → flush；任何错误 CloseWithError 传给上传端。
 	var rowCount int64
 	writeErrCh := make(chan error, 1)
 	go func() {
-		cw, err := NewCSVWriter(pw)
+		cw, err := NewWideCSVWriter(pw, cols)
 		if err != nil {
 			pw.CloseWithError(err)
 			writeErrCh <- err
@@ -51,11 +52,8 @@ func streamCSVToObject(
 				writeErrCh <- err
 				return
 			}
-			if resolver != nil && len(rows) > 0 {
-				resolver.resolveBatch(ctx, rows)
-			}
 			for i := range rows {
-				if werr := cw.WriteRow(rows[i]); werr != nil {
+				if werr := cw.AddRow(rows[i]); werr != nil {
 					pw.CloseWithError(werr)
 					writeErrCh <- werr
 					return

@@ -3,6 +3,7 @@ package export
 import (
 	"context"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -251,6 +252,60 @@ func (s *adhocSource) Next(ctx context.Context) ([]ExportRow, bool, error) {
 		s.curTime, s.curID = lastTime, lastID
 	}
 	return out, false, nil
+}
+
+// ── 横表列发现：DISTINCT(metric_path, metric_type) ────────────────────────────
+//
+// 横表表头必须先于数据写出，列集 = 所选指标全集（含类型）。指标编号/类型与设备/小区无关，
+// 一次轻量 DISTINCT 即得，且类型直接取数据侧 metric_type（真值源，与行一致）。名字由 nameResolver 解析。
+
+// colKey 是列发现阶段的 (编号, 类型) 对，名待解析。
+type colKey struct {
+	code  string
+	mtype string
+}
+
+// discoverMetricColumns 发现 dashboard 源（device / aggregate 维度）的指标列集，按编号升序。
+func discoverMetricColumns(ctx context.Context, db PgQuerier, table string, metricPaths []string, start, end time.Time) ([]colKey, error) {
+	sqlStr, args := buildDistinctMetricsSQL(table, metricPaths, start, end)
+	rows, err := db.Query(ctx, sqlStr, args...)
+	if err != nil {
+		return nil, fmt.Errorf("export discover columns %s: %w", table, err)
+	}
+	defer rows.Close()
+	return scanColKeys(rows)
+}
+
+// discoverAdhocColumns 发现 adhoc 源的指标列集，按编号升序。
+func discoverAdhocColumns(ctx context.Context, db PgQuerier, taskID uuid.UUID, start, end time.Time) ([]colKey, error) {
+	sqlStr, args := buildAdhocDistinctMetricsSQL(taskID, start, end)
+	rows, err := db.Query(ctx, sqlStr, args...)
+	if err != nil {
+		return nil, fmt.Errorf("export discover adhoc columns: %w", err)
+	}
+	defer rows.Close()
+	return scanColKeys(rows)
+}
+
+// scanColKeys 扫 (metric_path, metric_type) 两列 → colKey 切片，按编号升序求稳定列序。
+func scanColKeys(rows interface {
+	Next() bool
+	Scan(dest ...any) error
+	Err() error
+}) ([]colKey, error) {
+	out := make([]colKey, 0)
+	for rows.Next() {
+		var code, mt string
+		if err := rows.Scan(&code, &mt); err != nil {
+			return nil, fmt.Errorf("export scan column key: %w", err)
+		}
+		out = append(out, colKey{code: code, mtype: mt})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("export column rows: %w", err)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].code < out[j].code })
+	return out, nil
 }
 
 // ── helper ──────────────────────────────────────────────────────────────────

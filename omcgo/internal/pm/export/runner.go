@@ -36,7 +36,8 @@ type Runner struct {
 	logger   *zap.Logger
 
 	// buildSourceFn 取数源构造入口；默认 r.buildSource，单测可注入 stub 源绕过 DB。
-	buildSourceFn func(ctx context.Context, task *Task) (RowSource, *nameResolver, error)
+	// 返回取数源 + 横表指标列集（列名已解析），列发现 / 名解析在构造期一次性完成。
+	buildSourceFn func(ctx context.Context, task *Task) (RowSource, []WideColumn, error)
 }
 
 // RunnerDeps 是构造 T2 Runner 的依赖集合。
@@ -148,21 +149,24 @@ func (r *Runner) generate(ctx context.Context, task *Task) (genResult, error) {
 		return genResult{}, fmt.Errorf("export bucket not configured")
 	}
 
-	src, resolver, err := r.buildSourceFn(ctx, task)
+	src, cols, err := r.buildSourceFn(ctx, task)
 	if err != nil {
 		return genResult{}, err
 	}
 
 	object := objectPath(task)
-	out, err := streamCSVToObject(ctx, r.uploader, r.bucket, object, src, resolver)
+	out, err := streamCSVToObject(ctx, r.uploader, r.bucket, object, src, cols)
 	if err != nil {
 		return genResult{}, err
 	}
 	return genResult{filePath: object, fileSize: out.FileSize, rowCount: out.RowCount}, nil
 }
 
-// buildSource 按 source_type 构造取数源 + 指标名解析器。
-func (r *Runner) buildSource(ctx context.Context, task *Task) (RowSource, *nameResolver, error) {
+// buildSource 按 source_type 构造取数源 + 横表指标列集（含已解析列名）。
+//
+// 横表列集在此一次性发现（DISTINCT metric_path/metric_type）+ 解析名（三张指标表 UNION 按 locale），
+// 表头开头即知；流式阶段只摊行不再查名。
+func (r *Runner) buildSource(ctx context.Context, task *Task) (RowSource, []WideColumn, error) {
 	loc := appcontext.GetLocale(ctx)
 	switch task.SourceType {
 	case SourceDashboard:
@@ -174,31 +178,37 @@ func (r *Runner) buildSource(ctx context.Context, task *Task) (RowSource, *nameR
 		if dim == "" {
 			dim = aggregator.DimensionDevice
 		}
-		if dim == aggregator.DimensionDevice {
-			table, terr := aggregator.SelectTable(req.Granularity, aggregator.DimensionDevice)
-			if terr != nil {
-				return nil, nil, terr
-			}
-			// device 维度的 daily/weekly/monthly 表无行级 id 列，keyset 不可用 → 走聚合批次游标。
-			if tableHasIDColumn(table) {
-				return newDashboardDeviceSource(r.metricDB, table, req, objectLDNs),
-					newNameResolver(r.metricDB, loc), nil
-			}
+		table, terr := aggregator.SelectTable(req.Granularity, dim)
+		if terr != nil {
+			return nil, nil, terr
 		}
-		// 聚合维度（group/product/band/network）或无 id 的 device 表：批次游标拉 aggregator.Query。
+		// 发现列集（编号+类型，与设备/小区无关）→ 解析本地化列名。
+		keys, derr := discoverMetricColumns(ctx, r.metricDB, table, req.MetricPaths, req.StartTime, req.EndTime)
+		if derr != nil {
+			return nil, nil, derr
+		}
+		cols := newNameResolver(r.metricDB, loc).resolveColumns(ctx, keys)
+
+		// device 维度且表含行级 id → (time,id) keyset 直查；否则（聚合维度 / 无 id 的 device 表）走聚合批次游标。
+		if dim == aggregator.DimensionDevice && tableHasIDColumn(table) {
+			return newDashboardDeviceSource(r.metricDB, table, req, objectLDNs), cols, nil
+		}
 		if r.aggr == nil {
 			return nil, nil, fmt.Errorf("aggregator not wired for dashboard aggregate export")
 		}
-		// 聚合源已回填 DisplayName，无需再解析名。
-		return newDashboardAggregateSource(r.aggr, req, objectLDNs), nil, nil
+		return newDashboardAggregateSource(r.aggr, req, objectLDNs), cols, nil
 
 	case SourceAdhoc:
 		taskID, startTime, endTime, err := parseAdhocParams(task.Params)
 		if err != nil {
 			return nil, nil, err
 		}
-		return newAdhocSource(r.adhocDB, taskID, startTime, endTime),
-			newNameResolver(r.adhocDB, loc), nil
+		keys, derr := discoverAdhocColumns(ctx, r.adhocDB, taskID, startTime, endTime)
+		if derr != nil {
+			return nil, nil, derr
+		}
+		cols := newNameResolver(r.adhocDB, loc).resolveColumns(ctx, keys)
+		return newAdhocSource(r.adhocDB, taskID, startTime, endTime), cols, nil
 
 	default:
 		return nil, nil, fmt.Errorf("export runner: unsupported source_type %q", task.SourceType)

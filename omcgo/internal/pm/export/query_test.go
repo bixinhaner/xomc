@@ -109,3 +109,35 @@ func TestBuildAdhocKeysetSQL_WithTimeWindow(t *testing.T) {
 	assert.Contains(t, q, "time >=")
 	assert.Contains(t, q, "time <=")
 }
+
+// 横表列发现：dashboard 源 DISTINCT(metric_path, metric_type)，按 metric_paths + 时窗收口。
+func TestBuildDistinctMetricsSQL(t *testing.T) {
+	st := time.Now().Add(-2 * time.Hour)
+	et := time.Now()
+	q, args := buildDistinctMetricsSQL("pm_metrics_hourly", []string{"K001", "C002"}, st, et)
+	assert.Contains(t, q, "DISTINCT metric_path, metric_type")
+	assert.Contains(t, q, "FROM pm_metrics_hourly")
+	assert.Contains(t, q, "metric_path IN (")
+	assert.Contains(t, q, "time >=")
+	assert.Contains(t, q, "time <=")
+	assert.NotEmpty(t, args)
+}
+
+// 空 metric_paths + 空时窗：仅 DISTINCT，无过滤谓词（边界）。
+func TestBuildDistinctMetricsSQL_NoFilters(t *testing.T) {
+	q, args := buildDistinctMetricsSQL("pm_metrics", nil, time.Time{}, time.Time{})
+	assert.Contains(t, q, "DISTINCT metric_path, metric_type")
+	assert.NotContains(t, q, "metric_path IN")
+	assert.NotContains(t, q, "time >=")
+	assert.Empty(t, args)
+}
+
+// adhoc 源列发现：按 task_id（+ 可选时窗）DISTINCT。
+func TestBuildAdhocDistinctMetricsSQL(t *testing.T) {
+	id := uuid.New()
+	q, args := buildAdhocDistinctMetricsSQL(id, time.Time{}, time.Time{})
+	assert.Contains(t, q, "DISTINCT metric_path, metric_type")
+	assert.Contains(t, q, "FROM pm_adhoc_aggregation_results")
+	assert.Contains(t, q, "task_id")
+	assert.Equal(t, id.String(), args[0])
+}
