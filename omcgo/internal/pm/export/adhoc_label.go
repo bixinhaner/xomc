@@ -20,7 +20,7 @@ func adhocFirstColHeader(dim string) string {
 	case "aggregate_group":
 		return "聚合组"
 	default: // device / 空 / 未知
-		return "设备"
+		return "设备SN"
 	}
 }
 
@@ -48,8 +48,8 @@ func adhocObjectLabel(dim, oui, sn, productID, productName, objectLDN, groupName
 		return "全网"
 	case "aggregate_group":
 		return fmt.Sprintf("聚合组(%d个设备)", deviceCount)
-	default: // device
-		return deviceLabel(oui, sn)
+	default: // device：只用 SN，与页面表格「设备 SN」列一致
+		return deviceSNLabel(oui, sn)
 	}
 }
 

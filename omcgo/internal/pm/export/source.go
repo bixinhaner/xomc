@@ -73,7 +73,7 @@ func (s *dashboardDeviceSource) Next(ctx context.Context) ([]ExportRow, bool, er
 			return nil, false, fmt.Errorf("export dashboard device scan %s: %w", s.table, err)
 		}
 		out = append(out, ExportRow{
-			Device:      deviceLabel(oui, sn),
+			Device:      deviceSNLabel(oui, sn),
 			CellPLMN:    derefStr(ldn),
 			MetricCode:  metricPath,
 			MetricType:  metricType,
@@ -151,9 +151,10 @@ func (s *dashboardAggregateSource) Next(ctx context.Context) ([]ExportRow, bool,
 	return out, false, nil
 }
 
-// aggregatorRowToExport 把 aggregator.Row 映射成 ExportRow（聚合维度的设备标识用 SN/AGGREGATED）。
+// aggregatorRowToExport 把 aggregator.Row 映射成 ExportRow。
+// device 维度的设备列只用 SN（与页面一致）；聚合维度 SN 为空，退化设备组 / 产品标识。
 func aggregatorRowToExport(r aggregator.Row) ExportRow {
-	device := deviceLabel(r.DeviceOUI, r.DeviceSN)
+	device := deviceSNLabel(r.DeviceOUI, r.DeviceSN)
 	if device == "" && r.DeviceGroupID != uuid.Nil {
 		device = "DeviceGroup=" + r.DeviceGroupID.String()
 	}
@@ -335,6 +336,15 @@ func deviceLabel(oui, sn string) string {
 	default:
 		return ""
 	}
+}
+
+// deviceSNLabel 设备维度的设备列标识：只用 SN（与页面表格「设备 SN」列一致），
+// SN 缺失时回退 OUI，二者皆空返回空串。
+func deviceSNLabel(oui, sn string) string {
+	if sn != "" {
+		return sn
+	}
+	return oui
 }
 
 func derefStr(p *string) string {

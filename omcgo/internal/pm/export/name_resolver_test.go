@@ -35,9 +35,9 @@ func TestResolveColumns_OrderTypeAndFallback(t *testing.T) {
 	assert.Len(t, cols, 2)
 	assert.Equal(t, WideColumn{Code: "K001", Type: "kpi", Name: "上行吞吐"}, cols[0])
 	assert.Equal(t, WideColumn{Code: "C999", Type: "counter", Name: "C999"}, cols[1])
-	// 列名「编号(名·类型)」。
-	assert.Equal(t, "K001(上行吞吐·kpi)", cols[0].header())
-	assert.Equal(t, "C999(C999·counter)", cols[1].header())
+	// 列名 = 指标友好名（与页面表格一致）；名缺失回退编号。
+	assert.Equal(t, "上行吞吐", cols[0].header())
+	assert.Equal(t, "C999", cols[1].header())
 }
 
 // 空列集：返回空切片，不查库。

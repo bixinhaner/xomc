@@ -123,7 +123,7 @@ func TestAdhocSource_ProductLabel(t *testing.T) {
 	assert.Equal(t, "", rows[0].CellPLMN)
 }
 
-// device 维度：首列 OUI/SN，小区列填 object_ldn。
+// device 维度：首列只用 SN（与页面一致），小区列填 object_ldn 原文（输出时拆 Cell ID/PLMN）。
 func TestAdhocSource_DeviceLabelKeepsCell(t *testing.T) {
 	stub := &adhocStubQuerier{rows: [][]any{
 		adhocRow("OUI1", "SN1", "C1", 1, strptr("Cellid=111"), nil, nil, nil),
@@ -132,7 +132,7 @@ func TestAdhocSource_DeviceLabelKeepsCell(t *testing.T) {
 	rows, _, err := src.Next(context.Background())
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
-	assert.Equal(t, "OUI1/SN1", rows[0].Device)
+	assert.Equal(t, "SN1", rows[0].Device)
 	assert.Equal(t, "Cellid=111", rows[0].CellPLMN, "device 维度保留真实小区")
 }
 

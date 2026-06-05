@@ -171,8 +171,8 @@ func (r *Runner) generate(ctx context.Context, task *Task) (genResult, error) {
 // 表头开头即知；流式阶段只摊行不再查名。
 func (r *Runner) buildSource(ctx context.Context, task *Task) (RowSource, []WideColumn, csvLayout, error) {
 	loc := appcontext.GetLocale(ctx)
-	// dashboard 路径列布局恒为「设备」+ 含小区列（保持现状）。
-	dashboardLayout := csvLayout{FirstColHeader: "设备", IncludeCell: true}
+	// dashboard 路径恒为 device 维度：首列「设备SN」+ 含 Cell ID/PLMN 列（与页面表格一致）。
+	dashboardLayout := csvLayout{FirstColHeader: "设备SN", IncludeCell: true}
 	switch task.SourceType {
 	case SourceDashboard:
 		req, objectLDNs, err := parseDashboardParams(task.Params)

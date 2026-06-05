@@ -2,10 +2,10 @@ package export
 
 import (
 	"encoding/csv"
-	"fmt"
 	"io"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -19,8 +19,8 @@ const csvTimeLayout = "2006-01-02 15:04:05"
 // dashboard 来源由 aggregator.Row 映射；adhoc 来源由结果表行映射。
 // 横表模式下按 (Device, CellPLMN, Time) 行键聚合，每个 MetricCode 摊成一列。
 type ExportRow struct {
-	Device      string // 设备：OUI/SN 或聚合标识（AGGREGATED / 设备组名 等）
-	CellPLMN    string // 小区/PLMN：object_ldn 原文（空 → 空串）
+	Device      string // 设备：device 维度为 SN（与页面一致），聚合维度为对象标识（设备组名 / 产品名 / 全网 等）
+	CellPLMN    string // 小区/PLMN：object_ldn 原文（输出时拆成 Cell ID / PLMN 两列；空 → 空串）
 	MetricCode  string // 指标编号：metric_path（K/C 编号）
 	MetricName  string // 指标名：DisplayName（横表里不进单元格，列名解析另走列发现）
 	MetricType  string // 类型：counter / kpi
@@ -32,16 +32,19 @@ type ExportRow struct {
 	StatisType  string // 统计方式：横表已去除此列，仅保留字段兼容来源映射
 }
 
-// WideColumn 是横表里一个指标列：列名 = 「指标编号(指标名·类型)」（如 K900010015(下行数据业务流量·kpi)）。
+// WideColumn 是横表里一个指标列：列名 = 指标友好名（与页面表格表头一致，如「下行数据业务流量」）。
 type WideColumn struct {
-	Code string // 指标编号 metric_path
-	Type string // counter / kpi
+	Code string // 指标编号 metric_path（仍作单元格取值的列键，不再进表头）
+	Type string // counter / kpi（保留供来源映射，不再进表头）
 	Name string // 本地化指标名（列发现阶段回填，回退编号本身）
 }
 
-// header 返回该指标列的 CSV 列名「编号(名·类型)」。
+// header 返回该指标列的 CSV 列名 = 指标友好名（与页面表格一致），名缺失时回退编号。
 func (c WideColumn) header() string {
-	return fmt.Sprintf("%s(%s·%s)", c.Code, c.Name, c.Type)
+	if c.Name != "" {
+		return c.Name
+	}
+	return c.Code
 }
 
 // wideKey 是横表行键（同一时间桶内唯一标识一行）：设备 + 小区/PLMN。
@@ -69,24 +72,23 @@ type WideCSVWriter struct {
 	// 当前时间桶状态。
 	active              bool
 	bTime, bStart, bEnd time.Time
-	bGran               string
 	order               []wideKey            // 行键首现顺序（flush 前再排序求稳定输出）
 	cells               map[wideKey][]string // 行键 → 各指标列值（len = len(cols)）
 }
 
 // NewWideCSVWriter 构造 WideCSVWriter 并立即写出 BOM + 表头（固定列 + 指标列）。
-// firstColHeader 为首列表头（按 adhoc 维度自适应）；includeCell 控制是否输出「小区/PLMN」列
-// （仅 device 维度为 true，其余聚合维度小区已聚掉、不含此列）。
+// 列序与页面表格一致：开始时间 / 结束时间 / 设备(对象) / [Cell ID / PLMN] / 指标...
+// firstColHeader 为设备(对象)列表头（按维度自适应：设备SN / 设备组 / 产品 / 频段 / 全网 / 聚合组）；
+// includeCell 控制是否输出「Cell ID / PLMN」两列（仅 device 维度为 true，聚合维度小区已聚掉、不含）。
 func NewWideCSVWriter(out io.Writer, firstColHeader string, includeCell bool, cols []WideColumn) (*WideCSVWriter, error) {
 	if _, err := out.Write(utf8BOM); err != nil {
 		return nil, err
 	}
 	cw := csv.NewWriter(out)
-	fixed := []string{firstColHeader}
+	fixed := []string{"开始时间", "结束时间", firstColHeader}
 	if includeCell {
-		fixed = append(fixed, "小区/PLMN")
+		fixed = append(fixed, "Cell ID", "PLMN")
 	}
-	fixed = append(fixed, "粒度", "时间", "时窗起", "时窗止")
 	header := make([]string, 0, len(fixed)+len(cols))
 	header = append(header, fixed...)
 	idx := make(map[string]int, len(cols))
@@ -112,7 +114,7 @@ func (c *WideCSVWriter) AddRow(r ExportRow) error {
 	}
 	if !c.active {
 		c.active = true
-		c.bTime, c.bStart, c.bEnd, c.bGran = r.Time, r.StartTime, r.EndTime, r.Granularity
+		c.bTime, c.bStart, c.bEnd = r.Time, r.StartTime, r.EndTime
 		c.order = nil
 		c.cells = make(map[wideKey][]string)
 	}
@@ -130,6 +132,7 @@ func (c *WideCSVWriter) AddRow(r ExportRow) error {
 }
 
 // flushBucket 把当前时间桶的所有行键按 (设备,小区) 排序后逐行写出，然后清空桶。
+// 列序与表头一致：开始时间 / 结束时间 / 设备(对象) / [Cell ID / PLMN] / 各指标值。
 func (c *WideCSVWriter) flushBucket() error {
 	sort.Slice(c.order, func(i, j int) bool {
 		if c.order[i].device != c.order[j].device {
@@ -137,16 +140,19 @@ func (c *WideCSVWriter) flushBucket() error {
 		}
 		return c.order[i].cellPLMN < c.order[j].cellPLMN
 	})
-	timeStr := formatTime(c.bTime)
+	// 开始时间取时窗起（与页面"开始时间"同口径）；缺失时回退桶时间。
 	startStr := formatTime(c.bStart)
+	if c.bStart.IsZero() {
+		startStr = formatTime(c.bTime)
+	}
 	endStr := formatTime(c.bEnd)
 	for _, k := range c.order {
 		rec := make([]string, 0, c.fixedCount+len(c.cols))
-		rec = append(rec, k.device)
+		rec = append(rec, startStr, endStr, k.device)
 		if c.includeCell {
-			rec = append(rec, k.cellPLMN)
+			cellID, plmn := parseObjectLDN(k.cellPLMN)
+			rec = append(rec, cellID, plmn)
 		}
-		rec = append(rec, c.bGran, timeStr, startStr, endStr)
 		rec = append(rec, c.cells[k]...)
 		if err := c.w.Write(rec); err != nil {
 			return err
@@ -157,6 +163,32 @@ func (c *WideCSVWriter) flushBucket() error {
 	c.order = nil
 	c.cells = nil
 	return nil
+}
+
+// parseObjectLDN 从 object_ldn 原文解析出 Cell ID 与 PLMN（与前端 parseObjectLdn 同口径，大小写不敏感）。
+// 支持 "Cellid=111172245" / "Cellid=111172245,PLMN=46068" / "PLMN=...,Cellid=..."（顺序无关）；空串 → "","" 。
+func parseObjectLDN(ldn string) (cellID, plmn string) {
+	if ldn == "" {
+		return "", ""
+	}
+	for _, kv := range strings.Split(ldn, ",") {
+		idx := strings.Index(kv, "=")
+		if idx < 0 {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(kv[:idx]))
+		val := strings.TrimSpace(kv[idx+1:])
+		if val == "" {
+			continue
+		}
+		switch key {
+		case "cellid":
+			cellID = val
+		case "plmn":
+			plmn = val
+		}
+	}
+	return cellID, plmn
 }
 
 // Flush 刷出最后一个时间桶 + 底层缓冲，返回写入过程中的错误。

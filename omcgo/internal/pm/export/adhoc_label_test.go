@@ -4,9 +4,9 @@ import "testing"
 
 func TestAdhocFirstColHeader(t *testing.T) {
 	cases := map[string]string{
-		"device": "设备", "device_group": "设备组", "product": "产品",
+		"device": "设备SN", "device_group": "设备组", "product": "产品",
 		"band": "频段", "network": "全网", "aggregate_group": "聚合组",
-		"": "设备", "unknown": "设备",
+		"": "设备SN", "unknown": "设备SN",
 	}
 	for dim, want := range cases {
 		if got := adhocFirstColHeader(dim); got != want {
@@ -27,8 +27,8 @@ func TestAdhocIncludesCell(t *testing.T) {
 }
 
 func TestAdhocObjectLabel(t *testing.T) {
-	// device：OUI/SN
-	if got := adhocObjectLabel("device", "OUI1", "SN1", "", "", "", "", 0); got != "OUI1/SN1" {
+	// device：只用 SN（与页面表格「设备 SN」列一致，去掉 OUI 前缀）
+	if got := adhocObjectLabel("device", "OUI1", "SN1", "", "", "", "", 0); got != "SN1" {
 		t.Errorf("device label=%q", got)
 	}
 	// device：仅 SN
