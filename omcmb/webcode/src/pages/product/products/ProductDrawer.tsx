@@ -114,6 +114,9 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
       });
     } else {
       form.resetFields();
+      // 新增默认制式=LTE(最常见的 ENB 基站),使「KPI指标名称」字段默认可见可填,与编辑态对齐;
+      // 该字段仅 ENB/LTE 适用,切到 GSM/NR 会自动隐藏(保留 2026-06-03「平台仅 ENB」决策)。
+      form.setFieldsValue({ tech: 'lte' });
     }
     setActiveTab('basic');
     setNewPattern('');
@@ -310,10 +313,10 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
                   <Form.Item
                     name="paramModelId"
                     label={t('product.products.paramModel')}
+                    rules={[{ required: true, message: t('common.pleaseSelect') }]}
                     extra={t('product.product.drawer.paramModelExtra')}
                   >
                     <Select
-                      allowClear
                       placeholder={t('product.products.paramModelPh')}
                       options={(paramModels?.items || []).map((m) => ({
                         label: t('product.product.drawer.paramModelOption', { name: m.name, count: m.totalParams }),
