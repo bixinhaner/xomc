@@ -114,7 +114,7 @@ export default function PmAdhocWizard() {
       },
       {
         label: intl.formatMessage({ id: 'perf.adhoc.dimDeviceLabel' }),
-        value: 'device',
+        value: 'aggregate_group',
         hint: intl.formatMessage({ id: 'perf.adhoc.dimDeviceHint' }),
       },
     ],
