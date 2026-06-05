@@ -241,8 +241,14 @@ func (s *adhocSource) Next(ctx context.Context) ([]ExportRow, bool, error) {
 		if s.dimension == "device" {
 			cell = derefStr(ldn)
 		}
+		tech := ""
+		if s.dimension == "device_group" {
+			// device_group 维度 object_ldn 形如 'DeviceGroup=<uuid>,Tech=<制式>'，解析出制式供「制式」列。
+			tech = adhocTechnology(derefStr(ldn))
+		}
 		out = append(out, ExportRow{
 			Device:      device,
+			Technology:  tech,
 			CellPLMN:    cell,
 			MetricCode:  metricPath,
 			MetricType:  metricType,

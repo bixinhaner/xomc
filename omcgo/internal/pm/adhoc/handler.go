@@ -519,7 +519,7 @@ SELECT r.id, r.task_id, r.device_oui, r.device_sn, r.product_id, r.metric_path, 
        p.product_name, g.name AS device_group_name
 FROM pm_adhoc_aggregation_results r
 LEFT JOIN products p ON p.id = r.product_id
-LEFT JOIN device_groups g ON ('DeviceGroup=' || g.id::text) = r.object_ldn
+LEFT JOIN device_groups g ON ('DeviceGroup=' || g.id::text) = split_part(r.object_ldn, ',', 1)
 WHERE r.task_id = $1`
 	args := []any{taskID}
 	pos := 2
@@ -824,7 +824,7 @@ ORDER BY p.product_name`, []any{taskID}, true
 		return `
 SELECT DISTINCT r.object_ldn, g.name
 FROM pm_adhoc_aggregation_results r
-LEFT JOIN device_groups g ON ('DeviceGroup=' || g.id::text) = r.object_ldn
+LEFT JOIN device_groups g ON ('DeviceGroup=' || g.id::text) = split_part(r.object_ldn, ',', 1)
 WHERE r.task_id = $1 AND r.object_ldn LIKE 'DeviceGroup=%'
 ORDER BY g.name`, []any{taskID}, true
 	case DimensionBand:

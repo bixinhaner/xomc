@@ -167,7 +167,8 @@ func effectiveCounterPaths(userCounters []string, kpis []kpiMeta) []string {
 // groupKey 由结果行的维度身份键 + 时间桶构成，用于把 counter 行归到「同一组同一桶」再重算 KPI。
 //
 // 各维度身份字段：
-//   - device_group：DeviceGroupID
+//   - device_group：DeviceGroupID + Technology（设备组快表按「组 × 制式」拆行，KPI 必须制式内重算，
+//     否则同组同桶 lte/nr 的 counter 被归一桶 → 分子分母拿了别的制式的 counter → KPI 跨制式混算）
 //   - product：ProductID
 //   - aggregate_group / network：无实体键（DeviceSN 恒为 "AGGREGATED"）
 //   - band：ObjectLDN（'Band=<值>'）
@@ -175,6 +176,7 @@ func effectiveCounterPaths(userCounters []string, kpis []kpiMeta) []string {
 // 时间用 RFC3339Nano 串入键，保证不同桶不混算。
 type groupKey struct {
 	groupID string
+	tech    string
 	product string
 	ldn     string
 	t       string
@@ -187,6 +189,7 @@ func rowGroupKey(r Row) groupKey {
 	}
 	return groupKey{
 		groupID: r.DeviceGroupID.String(),
+		tech:    r.Technology,
 		product: r.ProductID.String(),
 		ldn:     ldn,
 		t:       r.Time.Format(time.RFC3339Nano),

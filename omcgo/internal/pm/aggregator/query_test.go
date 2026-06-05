@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
 
@@ -94,4 +95,52 @@ func Test_SelectTable_BandDimension(t *testing.T) {
 			assert.Equal(t, c.want, got)
 		})
 	}
+}
+
+// ── 制式过滤分流（设备组制式治本 B 方案）─────────────────────────────────────
+//
+// 设备组维度：制式过滤走「直接按 technology 列筛」（快表自带 technology 列），
+// 绝不引用设备维度表才有的 device_oui/device_sn 子查询（旧路径的报错根）。
+func Test_applyGroupFilters_TechnologyDirectColumnFilter(t *testing.T) {
+	q := QueryRequest{
+		Granularity:  metrics.GranularityHourly,
+		MetricPaths:  []string{"C0001"},
+		Technologies: []string{"lte"},
+	}
+	qb := storage.Psql.Select("device_group_id", "technology").From("pm_group_metrics_hourly")
+	sql, args, err := applyGroupFilters(qb, q).ToSql()
+	require.NoError(t, err)
+	// 直接按 technology 列筛
+	assert.Contains(t, sql, "technology IN (")
+	// 绝不走设备编号子查询（设备组快表无 device_oui/device_sn 列，这正是 bug 根因）
+	assert.NotContains(t, sql, "device_oui")
+	assert.NotContains(t, sql, "serial_number")
+	assert.Contains(t, args, "lte") // squirrel sq.Eq 把切片展开为标量占位参数
+}
+
+// 设备维度 / 全网维度：制式过滤仍走「按设备编号子查询 JOIN devices」收口，分流后不受影响。
+func Test_applyCommonFilters_TechnologyDeviceSubquery_Unaffected(t *testing.T) {
+	q := QueryRequest{
+		Granularity:  metrics.GranularityHourly,
+		Technologies: []string{"nr"},
+	}
+	qb := storage.Psql.Select("metric_path").From("pm_metrics_hourly")
+	sql, args, err := applyCommonFilters(qb, q).ToSql()
+	require.NoError(t, err)
+	// 设备维度表仍走设备编号子查询筛制式（保持原样）
+	assert.Contains(t, sql, "(device_oui, device_sn) IN (SELECT oui, serial_number FROM devices WHERE technology = ANY(")
+	// 制式作为整切片传 ANY(?) 占位参数
+	assert.Contains(t, args, []string{"nr"})
+}
+
+// 设备维度（applyDeviceFilters）制式过滤同样走设备编号子查询，分流不破坏既有行为。
+func Test_applyDeviceFilters_TechnologyDeviceSubquery_Unaffected(t *testing.T) {
+	q := QueryRequest{
+		DeviceSNs:    []string{"SN1"},
+		Technologies: []string{"lte"},
+	}
+	qb := storage.Psql.Select("metric_path").From("pm_metrics_hourly")
+	sql, _, err := applyDeviceFilters(qb, q).ToSql()
+	require.NoError(t, err)
+	assert.Contains(t, sql, "(device_oui, device_sn) IN (SELECT oui, serial_number FROM devices WHERE technology = ANY(")
 }

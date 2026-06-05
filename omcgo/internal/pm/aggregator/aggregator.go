@@ -512,12 +512,13 @@ ON CONFLICT %s DO UPDATE SET
 // conflictTargetForTable 返回 ON CONFLICT 的列清单。
 //   - hourly 用 UNIQUE INDEX (oui, sn, metric_path, granularity, end_time, time, object_ldn)
 //   - daily/weekly/monthly 用 PRIMARY KEY (oui, sn, metric_path, granularity, end_time, object_ldn)
-//   - group_hourly 用 UNIQUE (device_group_id, metric_path, granularity, end_time, time)
-//   - group_daily/weekly/monthly 用 PRIMARY KEY (device_group_id, metric_path, granularity, end_time)
+//   - group_hourly 用 UNIQUE (device_group_id, metric_path, granularity, end_time, time, technology)
+//   - group_daily/weekly/monthly 用 PRIMARY KEY (device_group_id, metric_path, granularity, end_time, technology)
 //
 // 设备级四表的冲突列尾部含 object_ldn（小区/PLMN）—— 与迁移 000020 的唯一键改动配套，
 // 让同设备同指标同桶按小区/PLMN 分多行落库、各自 UPSERT。
-// device_group 四表本次不分小区（决策 #1），冲突列保持原样。
+// device_group 四表冲突列尾部含 technology —— 与迁移 000026 的唯一键改动配套（设备组制式治本 B 方案），
+// 让同组同指标同桶按制式分多行落库、各自 UPSERT；列序必须与迁移唯一键逐字一致。
 func conflictTargetForTable(target string) string {
 	switch target {
 	case "pm_metrics_hourly":
@@ -525,9 +526,9 @@ func conflictTargetForTable(target string) string {
 	case "pm_metrics_daily", "pm_metrics_weekly", "pm_metrics_monthly":
 		return "(device_oui, device_sn, metric_path, granularity, end_time, object_ldn)"
 	case "pm_group_metrics_hourly":
-		return "(device_group_id, metric_path, granularity, end_time, time)"
+		return "(device_group_id, metric_path, granularity, end_time, time, technology)"
 	case "pm_group_metrics_daily", "pm_group_metrics_weekly", "pm_group_metrics_monthly":
-		return "(device_group_id, metric_path, granularity, end_time)"
+		return "(device_group_id, metric_path, granularity, end_time, technology)"
 	}
 	return "(device_oui, device_sn, metric_path, granularity, end_time, object_ldn)"
 }

@@ -43,6 +43,10 @@ func TestAdhocObjectLabel(t *testing.T) {
 	if got := adhocObjectLabel("device_group", "", "", "", "", "DeviceGroup=abcdef1234-xxxx", "", 0); got != "abcdef12" {
 		t.Errorf("group fallback=%q", got)
 	}
+	// device_group：object_ldn 带 ,Tech= 后缀时，回退也只取逗号前段剥前缀截 8（B2 修复：不把后缀混进 uuid）
+	if got := adhocObjectLabel("device_group", "", "", "", "", "DeviceGroup=abcdef1234-xxxx,Tech=lte", "", 0); got != "abcdef12" {
+		t.Errorf("group fallback with tech suffix=%q", got)
+	}
 	// product：产品名优先
 	if got := adhocObjectLabel("product", "", "", "11112222-3333-4444", "NR-Pico", "", "", 0); got != "NR-Pico" {
 		t.Errorf("product label=%q", got)
@@ -62,6 +66,25 @@ func TestAdhocObjectLabel(t *testing.T) {
 	// aggregate_group：聚合组(N个设备)
 	if got := adhocObjectLabel("aggregate_group", "", "AGGREGATED", "", "", "", "", 3); got != "聚合组(3个设备)" {
 		t.Errorf("aggregate_group label=%q", got)
+	}
+}
+
+// adhocTechnology 从 device_group 维度 object_ldn 解析制式（设备组制式治本 B 方案），
+// 与前端 adhocObjectColumn.ts 同口径（取 ,Tech= 后段、大写；无段返空）。
+func TestAdhocTechnology(t *testing.T) {
+	cases := map[string]string{
+		"DeviceGroup=11112222-3333-4444-5555-666677778888,Tech=lte": "LTE",
+		"DeviceGroup=11112222-3333-4444-5555-666677778888,Tech=nr":  "NR",
+		"DeviceGroup=11112222-3333-4444-5555-666677778888,Tech=gsm": "GSM",
+		// 老行 / 非设备组维度：无 ,Tech= 段 → 空串（调用方据此不渲染制式列值）
+		"DeviceGroup=11112222-3333-4444-5555-666677778888": "",
+		"Band=42": "",
+		"":        "",
+	}
+	for ldn, want := range cases {
+		if got := adhocTechnology(ldn); got != want {
+			t.Errorf("adhocTechnology(%q)=%q want %q", ldn, got, want)
+		}
 	}
 }
 

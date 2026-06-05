@@ -110,6 +110,34 @@ func TestAdhocSource_DeviceGroupFallback(t *testing.T) {
 	assert.Equal(t, "abcdef12", rows[0].Device)
 }
 
+// device_group 维度：object_ldn 带 ,Tech= 后缀时，ExportRow.Technology 解析出制式（B2 修复）；
+// 组名取 split_part 前段 JOIN 出的 device_group_name，不受 Tech 后缀影响。
+func TestAdhocSource_DeviceGroupTechnology(t *testing.T) {
+	stub := &adhocStubQuerier{rows: [][]any{
+		adhocRow("", "", "C1", 1, strptr("DeviceGroup=abcdef1234-0000,Tech=lte"), nil, nil, strptr("华东A组")),
+		adhocRow("", "", "C1", 2, strptr("DeviceGroup=abcdef1234-0000,Tech=nr"), nil, nil, strptr("华东A组")),
+	}}
+	src := newAdhocSource(stub, uuid.New(), time.Time{}, time.Time{}, "device_group", 0)
+	rows, _, err := src.Next(context.Background())
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	assert.Equal(t, "华东A组", rows[0].Device)
+	assert.Equal(t, "LTE", rows[0].Technology)
+	assert.Equal(t, "NR", rows[1].Technology)
+}
+
+// 非 device_group 维度（device）：Technology 恒空，不渲染制式列。
+func TestAdhocSource_NonDeviceGroupNoTechnology(t *testing.T) {
+	stub := &adhocStubQuerier{rows: [][]any{
+		adhocRow("OUI1", "SN1", "C1", 1, strptr("Cellid=111"), nil, nil, nil),
+	}}
+	src := newAdhocSource(stub, uuid.New(), time.Time{}, time.Time{}, "device", 0)
+	rows, _, err := src.Next(context.Background())
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, "", rows[0].Technology, "device 维度不解析制式")
+}
+
 // product 维度：首列取产品名。
 func TestAdhocSource_ProductLabel(t *testing.T) {
 	stub := &adhocStubQuerier{rows: [][]any{

@@ -36,7 +36,9 @@ func adhocObjectLabel(dim, oui, sn, productID, productName, objectLDN, groupName
 		if groupName != "" {
 			return groupName
 		}
-		return first8(strings.TrimPrefix(objectLDN, "DeviceGroup="))
+		// object_ldn 形如 'DeviceGroup=<uuid>,Tech=<制式>'；先剥逗号前段去掉 ',Tech=' 后缀，再剥前缀截 8 位。
+		head := strings.SplitN(objectLDN, ",", 2)[0]
+		return first8(strings.TrimPrefix(head, "DeviceGroup="))
 	case "product":
 		if productName != "" {
 			return productName
@@ -51,6 +53,22 @@ func adhocObjectLabel(dim, oui, sn, productID, productName, objectLDN, groupName
 	default: // device：只用 SN，与页面表格「设备 SN」列一致
 		return deviceSNLabel(oui, sn)
 	}
+}
+
+// adhocTechnology 从 device_group 维度结果行的 object_ldn 解析制式（设备组制式治本 B 方案）。
+// object_ldn 形如 'DeviceGroup=<uuid>,Tech=<lte|nr|gsm>'；取 ',Tech=' 后段大写呈现，
+// 与前端 adhocTechnology（adhocObjectColumn.ts）同口径。无 Tech 段（老行 / 非设备组维度）返回空串。
+func adhocTechnology(objectLDN string) string {
+	const marker = ",Tech="
+	i := strings.Index(objectLDN, marker)
+	if i < 0 {
+		return ""
+	}
+	v := objectLDN[i+len(marker):]
+	if j := strings.IndexByte(v, ','); j >= 0 {
+		v = v[:j]
+	}
+	return strings.ToUpper(v)
 }
 
 // first8 取字符串前 8 位（命名回退用），不足 8 位原样返回。

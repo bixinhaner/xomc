@@ -109,6 +109,11 @@ func TestBuildAdhocKeysetSQL_JoinsNames(t *testing.T) {
 	assert.Contains(t, q, "product_name")
 	assert.Contains(t, q, "device_group_name")
 	assert.Contains(t, q, "pm_adhoc_aggregation_results")
+	// B1 修复：object_ldn 改带 ',Tech=<制式>' 后缀后，取组名 JOIN 必须剥逗号前段再等值，
+	// 否则等值 JOIN 永不命中 → 导出 CSV 设备组名丢失（回归）。与网页 buildResultsQuery 同口径。
+	assert.Contains(t, q, "split_part(r.object_ldn, ',', 1)")
+	// 旧的等值 JOIN（右侧裸 r.object_ldn）已被 split_part 取代，不应再出现。
+	assert.NotContains(t, q, "= r.object_ldn")
 }
 
 func TestBuildAdhocKeysetSQL_WithTimeWindow(t *testing.T) {

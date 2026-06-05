@@ -30,10 +30,10 @@ func productRow(pid uuid.UUID, path, mtype string, val float64, statis, gran str
 	return []any{pid, path, mtype, val, statis, gran, t, t, t, t}
 }
 
-// groupTableRow 是 queryGroupTable SELECT 的一行：
-// device_group_id, path, type, value, statis, gran, time×4, extra([]byte)。
-func groupTableRow(gid uuid.UUID, path, mtype string, val float64, statis, gran string, t time.Time) []any {
-	return []any{gid, path, mtype, val, statis, gran, t, t, t, t, []byte(nil)}
+// groupTableRow 是 queryGroupTable SELECT 的一行（设备组制式治本 B 方案后带 technology 列）：
+// device_group_id, technology, path, type, value, statis, gran, time×4, extra([]byte)。
+func groupTableRow(gid uuid.UUID, tech, path, mtype string, val float64, statis, gran string, t time.Time) []any {
+	return []any{gid, tech, path, mtype, val, statis, gran, t, t, t, t, []byte(nil)}
 }
 
 // ── 1. 简单 pct 重算正确，且 ≠ 各设备百分比平均 ───────────────────────────────
@@ -190,8 +190,8 @@ func Test_Recompute_DeviceGroupDimension(t *testing.T) {
 				metaRow("K900010002", "pct", "RRC.SuccConnEstab/RRC.AttConnEstab*100"),
 			}},
 			&fakeRows{rows: [][]any{
-				groupTableRow(gid, "RRC.SuccConnEstab", "counter", 100, "sum", "hourly", now),
-				groupTableRow(gid, "RRC.AttConnEstab", "counter", 400, "sum", "hourly", now),
+				groupTableRow(gid, "lte", "RRC.SuccConnEstab", "counter", 100, "sum", "hourly", now),
+				groupTableRow(gid, "lte", "RRC.AttConnEstab", "counter", 400, "sum", "hourly", now),
 			}},
 			&fakeRows{}, // backfill
 		},
@@ -206,7 +206,44 @@ func Test_Recompute_DeviceGroupDimension(t *testing.T) {
 	require.Len(t, rows, 1)
 	assert.Equal(t, "K900010002", rows[0].MetricPath)
 	assert.Equal(t, gid, rows[0].DeviceGroupID, "按 device_group_id 归组透传")
+	assert.Equal(t, "lte", rows[0].Technology, "制式透传到 KPI 行")
 	assert.InDelta(t, 25.0, rows[0].MetricValue, 1e-9)
+}
+
+// 设备组制式治本：同一组内 lte 与 nr 的 counter 不可跨制式混算——KPI 重算分组键含制式，
+// 同组同桶 lte / nr 各出一行 KPI，分子分母只取本制式 counter（lte=100/400=25%，nr=300/600=50%）。
+func Test_Recompute_DeviceGroupTechnology_NoCrossTechMix(t *testing.T) {
+	now := time.Date(2026, 6, 5, 10, 0, 0, 0, time.UTC)
+	gid := uuid.New()
+	db := &recordingDB{
+		results: []pgx.Rows{
+			&fakeRows{rows: [][]any{
+				metaRow("K900010002", "pct", "RRC.SuccConnEstab/RRC.AttConnEstab*100"),
+			}},
+			&fakeRows{rows: [][]any{
+				groupTableRow(gid, "lte", "RRC.SuccConnEstab", "counter", 100, "sum", "hourly", now),
+				groupTableRow(gid, "lte", "RRC.AttConnEstab", "counter", 400, "sum", "hourly", now),
+				groupTableRow(gid, "nr", "RRC.SuccConnEstab", "counter", 300, "sum", "hourly", now),
+				groupTableRow(gid, "nr", "RRC.AttConnEstab", "counter", 600, "sum", "hourly", now),
+			}},
+			&fakeRows{}, // backfill
+		},
+	}
+	a := New(db, nil, nil)
+	rows, err := a.Query(context.Background(), QueryRequest{
+		Granularity: metrics.GranularityHourly,
+		Dimension:   DimensionDeviceGroup,
+		MetricPaths: []string{"K900010002"},
+	})
+	require.NoError(t, err)
+	require.Len(t, rows, 2, "同组 lte/nr 各一行 KPI")
+	byTech := map[string]float64{}
+	for _, r := range rows {
+		assert.Equal(t, gid, r.DeviceGroupID)
+		byTech[r.Technology] = r.MetricValue
+	}
+	assert.InDelta(t, 25.0, byTech["lte"], 1e-9, "lte 100/400=25%")
+	assert.InDelta(t, 50.0, byTech["nr"], 1e-9, "nr 300/600=50%（不被 lte 污染）")
 }
 
 // ── 6. 多组多桶不串算 ───────────────────────────────────────────────────────

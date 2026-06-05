@@ -18,7 +18,7 @@ import { usePmAdhocDetail, usePmAdhocResults } from '@core/hooks/api/usePmAdhoc'
 import { useCreateKpiExport } from '@core/hooks/api/useKpiExport';
 import type { AdhocResultRow, AdhocDimension } from '@core/types/pmAdhoc';
 import { buildAdhocExportParams, defaultExportTaskName } from '@core/utils/kpiExportParams';
-import { adhocIncludesCell, adhocObjectHeaderKey, adhocObjectName, objectKeyOf } from './adhocObjectColumn';
+import { adhocIncludesCell, adhocObjectHeaderKey, adhocObjectName, adhocTechnology, objectKeyOf } from './adhocObjectColumn';
 
 // 按粒度算默认时窗：覆盖最近 7 天，但粒度粗于"天"时至少 7 个周期。
 // 15min / hourly / daily → 7 天；weekly → 7 周；monthly → 7 月。end 取当前时刻。
@@ -89,6 +89,7 @@ interface WideResultRow {
   deviceSn: string; // 用于 AGGREGATED 富渲染判断
   deviceLabel: string;
   cellPlmn: string;
+  technology: string; // device_group 维度从 objectLdn 解析出的制式（lte/nr/gsm 大写）；其它维度空
   time: string;
   values: Record<string, number>;
 }
@@ -123,6 +124,7 @@ function buildWideTable(
         deviceSn: r.deviceSn,
         deviceLabel: adhocObjectName(r, dimension, taskDeviceSns, intl),
         cellPlmn: r.objectLdn || '-',
+        technology: dimension === 'device_group' ? adhocTechnology(r) : '',
         time: r.startTime ? dayjs(r.startTime).format('YYYY-MM-DD HH:mm') : '-',
         values: {},
       };
@@ -377,6 +379,17 @@ function GranularityView({
                 r.deviceLabel
               ),
           },
+          ...(dimension === 'device_group'
+            ? [
+                {
+                  title: intl.formatMessage({ id: 'perf.adhoc.colTechnology' }),
+                  key: '__tech',
+                  width: 100,
+                  render: (_: unknown, r: WideResultRow) =>
+                    r.technology ? <Tag>{r.technology}</Tag> : '-',
+                },
+              ]
+            : []),
           ...(adhocIncludesCell(dimension)
             ? [
                 {

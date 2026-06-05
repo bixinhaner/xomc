@@ -60,7 +60,8 @@ export function adhocObjectName(
 ): string {
   switch (dimension) {
     case 'device_group':
-      return r.deviceGroupName || stripPrefix(r.objectLdn, 'DeviceGroup=').slice(0, 8);
+      // fallback 从 objectLdn 取组 id：剥 'DeviceGroup=' 前缀后再截到逗号前段（去掉 ',Tech=<制式>' 后缀）。
+      return r.deviceGroupName || stripPrefix(r.objectLdn, 'DeviceGroup=').split(',')[0].slice(0, 8);
     case 'product':
       return r.productName || (r.productId ?? '').slice(0, 8);
     case 'band':
@@ -77,4 +78,15 @@ export function adhocObjectName(
 function stripPrefix(s: string | undefined, prefix: string): string {
   const v = s ?? '';
   return v.startsWith(prefix) ? v.slice(prefix.length) : v;
+}
+
+/**
+ * 从 device_group 维度结果行的 objectLdn 解析制式（设备组制式治本 B 方案）。
+ * objectLdn 形如 'DeviceGroup=<uuid>,Tech=<lte|nr|gsm>'；取 ',Tech=' 后段，大写呈现。
+ * 无 Tech 段（老行 / 非设备组维度）返回空串，调用方据此不渲染制式。
+ */
+export function adhocTechnology(r: AdhocResultRow): string {
+  const ldn = r.objectLdn ?? '';
+  const m = ldn.match(/,Tech=([^,]+)/);
+  return m ? m[1].toUpperCase() : '';
 }

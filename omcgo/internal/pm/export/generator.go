@@ -20,11 +20,13 @@ type GenerateResult struct {
 	FileSize int64
 }
 
-// csvLayout 描述横表 CSV 的列布局（按 adhoc 维度自适应）：首列表头 + 是否含「小区/PLMN」列。
-// dashboard 路径恒为「设备」+ 含小区列（保持现状）。
+// csvLayout 描述横表 CSV 的列布局（按 adhoc 维度自适应）：首列表头 + 是否含「制式」列 + 是否含「小区/PLMN」列。
+// dashboard 路径恒为「设备」+ 含小区列、不含制式列（保持现状）；
+// adhoc device_group 维度含制式列（与页面表格一致），device 维度含小区列。
 type csvLayout struct {
-	FirstColHeader string
-	IncludeCell    bool
+	FirstColHeader    string
+	IncludeTechnology bool
+	IncludeCell       bool
 }
 
 // streamCSVToObject 把 RowSource 的全部数据点流式写成横表 CSV、经 io.Pipe 直传对象存储。
@@ -47,7 +49,7 @@ func streamCSVToObject(
 	var rowCount int64
 	writeErrCh := make(chan error, 1)
 	go func() {
-		cw, err := NewWideCSVWriter(pw, layout.FirstColHeader, layout.IncludeCell, cols)
+		cw, err := NewWideCSVWriter(pw, layout.FirstColHeader, layout.IncludeTechnology, layout.IncludeCell, cols)
 		if err != nil {
 			pw.CloseWithError(err)
 			writeErrCh <- err

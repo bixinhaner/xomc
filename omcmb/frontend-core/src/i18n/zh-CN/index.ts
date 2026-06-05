@@ -6493,6 +6493,7 @@ const messages: Record<string, string> = {
   'perf.adhoc.colObject.network':        '全网',
   'perf.adhoc.colObject.aggregateGroup': '聚合组',
   'perf.adhoc.colCellPlmn':              '小区/PLMN',
+  'perf.adhoc.colTechnology':            '制式',
   'perf.adhoc.colMetric':                '指标',
   'perf.adhoc.colValue':                 '值',
   'perf.adhoc.colStartTime':             '开始时间',

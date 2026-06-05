@@ -44,11 +44,13 @@ var adhocSelectCols = []string{
 // buildAdhocKeysetSQL 构造 pm_adhoc_aggregation_results 的 (time, id) keyset 流式查询。
 // LEFT JOIN products / device_groups 一次性把 product 维度的产品名、device_group 维度的设备组名读出，
 // 不破坏流式（单次 SQL 无 N+1）。名缺失返 NULL，由 adhocSource 用 *string 承接（空 → 回退 ID 前 8）。
+// device_group 维度 object_ldn 形如 'DeviceGroup=<uuid>,Tech=<制式>'，故取组名 JOIN 用
+// split_part(object_ldn, ',', 1) 剥逗号前段再等值（与网页 buildResultsQuery 同口径，老行无逗号原样返回）。
 func buildAdhocKeysetSQL(taskID uuid.UUID, startTime, endTime time.Time, started bool, curTime time.Time, curID uuid.UUID, limit int) (string, []any) {
 	b := storage.Psql.Select(adhocSelectCols...).
 		From("pm_adhoc_aggregation_results r").
 		LeftJoin("products p ON p.id = r.product_id").
-		LeftJoin("device_groups g ON ('DeviceGroup=' || g.id::text) = r.object_ldn").
+		LeftJoin("device_groups g ON ('DeviceGroup=' || g.id::text) = split_part(r.object_ldn, ',', 1)").
 		Where(sq.Eq{"r.task_id": taskID})
 	if !startTime.IsZero() {
 		b = b.Where(sq.GtOrEq{"r.time": startTime})

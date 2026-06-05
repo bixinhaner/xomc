@@ -6458,6 +6458,7 @@ const messages: Record<string, string> = {
   'perf.adhoc.colObject.network':        'Network',
   'perf.adhoc.colObject.aggregateGroup': 'Aggregate Group',
   'perf.adhoc.colCellPlmn':              'Cell/PLMN',
+  'perf.adhoc.colTechnology':            'Technology',
   'perf.adhoc.colMetric':                'Metric',
   'perf.adhoc.colValue':                 'Value',
   'perf.adhoc.colStartTime':             'Start Time',

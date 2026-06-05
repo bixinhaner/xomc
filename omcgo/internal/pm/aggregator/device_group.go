@@ -42,7 +42,9 @@ func buildDeviceGroupSQL(deviceTarget, groupTarget string, w WindowSpec) (string
 	conflictTarget := conflictTargetForTable(groupTarget)
 	withID := targetHasIDColumn(groupTarget)
 
-	insertCols := "device_group_id, metric_path, metric_type, metric_value, statis_type, granularity, time, start_time, end_time, ingest_time, extra"
+	// device_group 快表按「组 × 制式 × 指标」拆行（设备组制式治本 B 方案）：
+	// SELECT 带出 d.technology、GROUP BY 加制式、insertCols 加 technology 列、冲突列尾部含 technology。
+	insertCols := "device_group_id, technology, metric_path, metric_type, metric_value, statis_type, granularity, time, start_time, end_time, ingest_time, extra"
 	selectIDExpr := ""
 	if withID {
 		insertCols = "id, " + insertCols
@@ -53,6 +55,7 @@ func buildDeviceGroupSQL(deviceTarget, groupTarget string, w WindowSpec) (string
 INSERT INTO %s (%s)
 SELECT
     %sdgm.group_id,
+    d.technology,
     m.metric_path,
     'counter',
     CASE m.statis_type
@@ -77,7 +80,7 @@ WHERE m.metric_type = 'counter'
   AND m.end_time >= $4
   AND m.end_time <  $5
   AND m.statis_type IN ('sum','avg','max','min')
-GROUP BY dgm.group_id, m.metric_path, m.statis_type
+GROUP BY dgm.group_id, d.technology, m.metric_path, m.statis_type
 ON CONFLICT %s DO UPDATE SET
     metric_value = EXCLUDED.metric_value,
     ingest_time  = NOW()`,

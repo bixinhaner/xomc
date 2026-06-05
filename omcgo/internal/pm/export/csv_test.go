@@ -20,7 +20,7 @@ func wideTestCols() []WideColumn {
 
 func TestWideCSVWriter_BOMAndHeader(t *testing.T) {
 	var buf bytes.Buffer
-	cw, err := NewWideCSVWriter(&buf, "设备 SN", true, wideTestCols())
+	cw, err := NewWideCSVWriter(&buf, "设备 SN", false, true, wideTestCols())
 	require.NoError(t, err)
 	require.NoError(t, cw.Flush())
 
@@ -50,7 +50,7 @@ func TestWideCSVWriter_BOMAndHeader(t *testing.T) {
 // 同一 (设备×小区×时间) 行键、不同指标 → 摊成一行，每指标一列。
 func TestWideCSVWriter_PivotSameKey(t *testing.T) {
 	var buf bytes.Buffer
-	cw, err := NewWideCSVWriter(&buf, "设备 SN", true, wideTestCols())
+	cw, err := NewWideCSVWriter(&buf, "设备 SN", false, true, wideTestCols())
 	require.NoError(t, err)
 
 	tm := time.Date(2026, 6, 4, 10, 0, 0, 0, time.UTC)
@@ -83,7 +83,7 @@ func TestWideCSVWriter_PivotSameKey(t *testing.T) {
 // 某指标在该行键缺值 → 空单元格。
 func TestWideCSVWriter_MissingMetricEmptyCell(t *testing.T) {
 	var buf bytes.Buffer
-	cw, err := NewWideCSVWriter(&buf, "设备 SN", true, wideTestCols())
+	cw, err := NewWideCSVWriter(&buf, "设备 SN", false, true, wideTestCols())
 	require.NoError(t, err)
 
 	tm := time.Date(2026, 6, 4, 10, 0, 0, 0, time.UTC)
@@ -102,7 +102,7 @@ func TestWideCSVWriter_MissingMetricEmptyCell(t *testing.T) {
 // 不同时间 → 时间桶切换，各成一横行。
 func TestWideCSVWriter_TimeBucketFlush(t *testing.T) {
 	var buf bytes.Buffer
-	cw, err := NewWideCSVWriter(&buf, "设备 SN", true, wideTestCols())
+	cw, err := NewWideCSVWriter(&buf, "设备 SN", false, true, wideTestCols())
 	require.NoError(t, err)
 
 	t1 := time.Date(2026, 6, 4, 10, 0, 0, 0, time.UTC)
@@ -121,7 +121,7 @@ func TestWideCSVWriter_TimeBucketFlush(t *testing.T) {
 // 零列（无指标）：只写固定行键列表头（device 口径 5 列：开始时间 结束时间 设备 SN Cell ID PLMN）。
 func TestWideCSVWriter_NoColumns(t *testing.T) {
 	var buf bytes.Buffer
-	cw, err := NewWideCSVWriter(&buf, "设备 SN", true, nil)
+	cw, err := NewWideCSVWriter(&buf, "设备 SN", false, true, nil)
 	require.NoError(t, err)
 	require.NoError(t, cw.Flush())
 	body := strings.TrimPrefix(buf.String(), string(utf8BOM))
@@ -137,7 +137,7 @@ func TestWideCSVWriter_DimensionLayout(t *testing.T) {
 
 	// 含小区列（device 口径）：开始时间 | 结束时间 | 设备 SN | Cell ID | PLMN | 速率。
 	var buf bytes.Buffer
-	w, err := NewWideCSVWriter(&buf, "设备 SN", true, cols)
+	w, err := NewWideCSVWriter(&buf, "设备 SN", false, true, cols)
 	require.NoError(t, err)
 	require.NoError(t, w.Flush())
 	header := firstCSVRow(t, buf.Bytes())
@@ -145,7 +145,7 @@ func TestWideCSVWriter_DimensionLayout(t *testing.T) {
 
 	// 不含小区列（聚合维度口径）：开始时间 | 结束时间 | 设备组 | 速率。
 	buf.Reset()
-	w2, err := NewWideCSVWriter(&buf, "设备组", false, cols)
+	w2, err := NewWideCSVWriter(&buf, "设备组", false, false, cols)
 	require.NoError(t, err)
 	require.NoError(t, w2.Flush())
 	header2 := firstCSVRow(t, buf.Bytes())
@@ -156,7 +156,7 @@ func TestWideCSVWriter_DimensionLayout(t *testing.T) {
 func TestWideCSVWriter_AggregateNoCellColumn(t *testing.T) {
 	cols := []WideColumn{{Code: "C1", Type: "counter", Name: "速率"}}
 	var buf bytes.Buffer
-	w, err := NewWideCSVWriter(&buf, "产品", false, cols)
+	w, err := NewWideCSVWriter(&buf, "产品", false, false, cols)
 	require.NoError(t, err)
 	tm := time.Date(2026, 6, 4, 10, 0, 0, 0, time.UTC)
 	// CellPLMN 给值也应被忽略（聚合维度无小区列）。
@@ -169,6 +169,32 @@ func TestWideCSVWriter_AggregateNoCellColumn(t *testing.T) {
 	assert.Equal(t, "BLX 产品", row[2])
 	assert.Equal(t, "7", row[3]) // C1 值
 	assert.Len(t, row, 4)
+}
+
+// 设备组维度（includeTech=true）：表头在对象列后插「制式」列；同组 lte/nr 凭制式区分成两行（B2 修复）。
+func TestWideCSVWriter_DeviceGroupTechnologyColumn(t *testing.T) {
+	cols := []WideColumn{{Code: "C1", Type: "counter", Name: "速率"}}
+	var buf bytes.Buffer
+	// 设备组维度：含制式列、不含小区列。
+	w, err := NewWideCSVWriter(&buf, "设备组", true, false, cols)
+	require.NoError(t, err)
+
+	tm := time.Date(2026, 6, 4, 10, 0, 0, 0, time.UTC)
+	// 同组（华东A组）同时间桶，lte / nr 两条 → 必须分成两行（靠制式区分行键）。
+	require.NoError(t, w.AddRow(ExportRow{Device: "华东A组", Technology: "NR", Time: tm, StartTime: tm, EndTime: tm.Add(time.Hour), MetricCode: "C1", Value: 50}))
+	require.NoError(t, w.AddRow(ExportRow{Device: "华东A组", Technology: "LTE", Time: tm, StartTime: tm, EndTime: tm.Add(time.Hour), MetricCode: "C1", Value: 20}))
+	require.NoError(t, w.Flush())
+
+	// 表头：开始时间 | 结束时间 | 设备组 | 制式 | 速率。
+	header := firstCSVRow(t, buf.Bytes())
+	assert.Equal(t, []string{"开始时间", "结束时间", "设备组", "制式", "速率"}, header)
+
+	// 排序后 LTE 先于 NR（同组按制式升序）。
+	rowLTE := nthCSVRow(t, buf.Bytes(), 1)
+	assert.Equal(t, []string{"2026-06-04 10:00:00", "2026-06-04 11:00:00", "华东A组", "LTE", "20"}, rowLTE)
+	rowNR := nthCSVRow(t, buf.Bytes(), 2)
+	assert.Equal(t, []string{"2026-06-04 10:00:00", "2026-06-04 11:00:00", "华东A组", "NR", "50"}, rowNR)
+	assert.Equal(t, int64(2), w.RowCount())
 }
 
 // firstCSVRow 跳过 UTF-8 BOM 后用 encoding/csv 读首行。

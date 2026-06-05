@@ -80,19 +80,22 @@ func Test_buildCountersSQL_GroupHourlyHasGroupIDConflict(t *testing.T) {
 	}
 	// device_group 维度的 hourly 表（实际由 device_group.go 的 SQL 构造，此处仅断言 conflict target 切换正确）
 	_ = w
+	// 设备组制式治本 B 方案：冲突列尾部含 technology（与迁移 000026 唯一键逐字一致）。
 	assert.Equal(t,
-		"(device_group_id, metric_path, granularity, end_time, time)",
+		"(device_group_id, metric_path, granularity, end_time, time, technology)",
 		conflictTargetForTable("pm_group_metrics_hourly"))
 	assert.Equal(t,
-		"(device_group_id, metric_path, granularity, end_time)",
+		"(device_group_id, metric_path, granularity, end_time, technology)",
 		conflictTargetForTable("pm_group_metrics_daily"))
-	// device_group 四表本次不分小区（决策 #1）——冲突列绝不含 object_ldn
+	// device_group 四表本次不分小区（决策 #1）——冲突列绝不含 object_ldn；但都必须含 technology
 	for _, gt := range []string{
 		"pm_group_metrics_hourly", "pm_group_metrics_daily",
 		"pm_group_metrics_weekly", "pm_group_metrics_monthly",
 	} {
 		assert.NotContains(t, conflictTargetForTable(gt), "object_ldn",
 			"group 表冲突列不应含 object_ldn："+gt)
+		assert.Contains(t, conflictTargetForTable(gt), "technology",
+			"group 表冲突列必须含 technology："+gt)
 	}
 }
 

@@ -69,7 +69,7 @@ func TestStreamCSVToObject_EmptySource(t *testing.T) {
 func TestUTF8BOM_Bytes(t *testing.T) {
 	assert.Equal(t, []byte{0xEF, 0xBB, 0xBF}, utf8BOM)
 	var buf bytes.Buffer
-	_, err := NewWideCSVWriter(&buf, "设备", true, nil)
+	_, err := NewWideCSVWriter(&buf, "设备", false, true, nil)
 	require.NoError(t, err)
 	assert.True(t, bytes.HasPrefix(buf.Bytes(), utf8BOM))
 }

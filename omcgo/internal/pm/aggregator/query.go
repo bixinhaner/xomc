@@ -60,6 +60,9 @@ type Row struct {
 	DeviceOUI     string              `json:"device_oui,omitempty"`
 	DeviceSN      string              `json:"device_sn,omitempty"`
 	DeviceGroupID uuid.UUID           `json:"device_group_id,omitempty"`
+	// Technology 是 device_group 维度的制式拆分键（lte/nr/gsm）。设备组快表按「组 × 制式」拆行，
+	// queryGroupTable 带出该列；其它维度恒空。
+	Technology    string              `json:"technology,omitempty"`
 	ProductID     uuid.UUID           `json:"product_id,omitempty"` // product 维度填该产品 id
 	MetricPath    string              `json:"metric_path"`
 	// DisplayName 是给前端展示的友好名：KPI 行按 metric_path(=K 编号)回填指标库 cn_name；
@@ -150,7 +153,8 @@ func (a *Aggregator) Count(ctx context.Context, q QueryRequest) (int, error) {
 	case DimensionDeviceGroup:
 		inner := storage.Psql.Select("1").From(table)
 		inner = applyGroupFilters(inner, q)
-		inner = inner.GroupBy("device_group_id", "metric_path", "granularity", "time")
+		// 行粒度按「组 × 制式 × 指标 × 桶」，GroupBy 必须含 technology，否则截断计数偏小。
+		inner = inner.GroupBy("device_group_id", "technology", "metric_path", "granularity", "time")
 		return a.scanCountSub(ctx, inner)
 	case DimensionAggregateGroup:
 		inner := storage.Psql.Select("1").From(table)
@@ -404,9 +408,10 @@ func (a *Aggregator) queryDeviceTable(ctx context.Context, table string, q Query
 }
 
 func (a *Aggregator) queryGroupTable(ctx context.Context, table string, q QueryRequest) ([]Row, error) {
-	// group 表 schema：device_group_id + metric_path/type/value/statis_type/granularity/time/start/end/ingest + extra
+	// group 表 schema：device_group_id + technology + metric_path/type/value/statis_type/granularity/time/start/end/ingest + extra
+	// （设备组制式治本 B 方案：快表按「组 × 制式」拆行，带出 technology 列。）
 	qb := storage.Psql.Select(
-		"device_group_id", "metric_path", "metric_type", "metric_value",
+		"device_group_id", "technology", "metric_path", "metric_type", "metric_value",
 		"statis_type", "granularity", "time", "start_time", "end_time", "ingest_time", "extra",
 	).From(table)
 	qb = applyGroupFilters(qb, q)
@@ -434,7 +439,7 @@ func (a *Aggregator) queryGroupTable(ctx context.Context, table string, q QueryR
 		var metricType, granularity string
 		var extraBytes []byte
 		if err := rows.Scan(
-			&r.DeviceGroupID, &r.MetricPath, &metricType, &r.MetricValue,
+			&r.DeviceGroupID, &r.Technology, &r.MetricPath, &metricType, &r.MetricValue,
 			&statis, &granularity, &r.Time, &r.StartTime, &r.EndTime, &r.IngestTime, &extraBytes,
 		); err != nil {
 			return nil, fmt.Errorf("aggregator.Query scan %s: %w", table, err)
@@ -864,14 +869,26 @@ func applyDeviceFilters(qb sq.SelectBuilder, q QueryRequest) sq.SelectBuilder {
 	return applyCommonFilters(qb, q)
 }
 
+// applyGroupFilters 设备组维度过滤：组 id + 标量过滤 + 制式直接按列筛。
+//
+// 设备组制式治本（B 方案）：设备组快表自带 technology 列（每组每制式一行），制式过滤直接
+// WHERE technology = ANY(?)，**不**走「按设备编号子查询 JOIN devices」那套——快表根本没有
+// device_oui/device_sn 列，旧路径会引用不存在的列报错（本任务修复的根因）。
 func applyGroupFilters(qb sq.SelectBuilder, q QueryRequest) sq.SelectBuilder {
 	if len(q.DeviceGroupIDs) > 0 {
 		qb = qb.Where(sq.Eq{"device_group_id": q.DeviceGroupIDs})
 	}
-	return applyCommonFilters(qb, q)
+	qb = applyScalarFilters(qb, q)
+	if len(q.Technologies) > 0 {
+		qb = qb.Where(sq.Eq{"technology": q.Technologies})
+	}
+	return qb
 }
 
-func applyCommonFilters(qb sq.SelectBuilder, q QueryRequest) sq.SelectBuilder {
+// applyScalarFilters 仅标量过滤（metric_path / metric_type / granularity / time 区间），
+// 不含任何制式过滤——制式过滤按维度分流由调用方各自补（device/network 走设备编号子查询，
+// device_group 走直接列筛）。
+func applyScalarFilters(qb sq.SelectBuilder, q QueryRequest) sq.SelectBuilder {
 	if len(q.MetricPaths) > 0 {
 		qb = qb.Where(sq.Eq{"metric_path": q.MetricPaths})
 	}
@@ -887,6 +904,13 @@ func applyCommonFilters(qb sq.SelectBuilder, q QueryRequest) sq.SelectBuilder {
 	if !q.EndTime.IsZero() {
 		qb = qb.Where(sq.LtOrEq{"time": q.EndTime})
 	}
+	return qb
+}
+
+// applyCommonFilters 设备维度表（device / aggregate_group / network）公共过滤：标量过滤 +
+// 制式过滤走「按设备编号子查询 JOIN devices」收口（这些表行无 technology 列）。
+func applyCommonFilters(qb sq.SelectBuilder, q QueryRequest) sq.SelectBuilder {
+	qb = applyScalarFilters(qb, q)
 	// 制式过滤：限定到指定制式的设备（device 维度表行没有 technology 列，
 	// 用 (device_oui, device_sn) 子查询 JOIN devices 收口，不改 SELECT 列形态）。
 	if len(q.Technologies) > 0 {

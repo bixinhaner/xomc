@@ -20,6 +20,7 @@ const csvTimeLayout = "2006-01-02 15:04:05"
 // 横表模式下按 (Device, CellPLMN, Time) 行键聚合，每个 MetricCode 摊成一列。
 type ExportRow struct {
 	Device      string // 设备：device 维度为 SN（与页面一致），聚合维度为对象标识（设备组名 / 产品名 / 全网 等）
+	Technology  string // 制式：仅 device_group 维度从 object_ldn 解析出（LTE/NR/GSM，大写），其余维度空串
 	CellPLMN    string // 小区/PLMN：object_ldn 原文（输出时拆成 Cell ID / PLMN 两列；空 → 空串）
 	MetricCode  string // 指标编号：metric_path（K/C 编号）
 	MetricName  string // 指标名：DisplayName（横表里不进单元格，列名解析另走列发现）
@@ -47,10 +48,12 @@ func (c WideColumn) header() string {
 	return c.Code
 }
 
-// wideKey 是横表行键（同一时间桶内唯一标识一行）：设备 + 小区/PLMN。
+// wideKey 是横表行键（同一时间桶内唯一标识一行）：设备 + 制式 + 小区/PLMN。
 // 粒度 / 时间 / 时窗起止在同一时间桶内恒定，故不入行键。
+// 制式入行键：device_group 维度下同组 lte/nr 同名同维度，必须靠制式区分成两行（否则被并成一行）。
 type wideKey struct {
 	device   string
+	tech     string
 	cellPLMN string
 }
 
@@ -66,8 +69,9 @@ type WideCSVWriter struct {
 	colIdx      map[string]int // 指标编号 → 列下标
 	rowCount    int64          // 已写出的横行数（= 去重 (设备×小区×时间) 行数）
 	firstHeader string         // 首列表头（随 adhoc 维度变：设备 / 设备组 / 产品 / 频段 / 全网 / 聚合组）
+	includeTech bool           // 是否含「制式」列（仅 device_group 维度为 true）
 	includeCell bool           // 是否含「小区/PLMN」列（仅 device 维度为 true）
-	fixedCount  int            // 固定行键列数（含/不含小区列两态），用于行容量预分配
+	fixedCount  int            // 固定行键列数（含/不含制式列与小区列各态），用于行容量预分配
 
 	// 当前时间桶状态。
 	active              bool
@@ -77,15 +81,19 @@ type WideCSVWriter struct {
 }
 
 // NewWideCSVWriter 构造 WideCSVWriter 并立即写出 BOM + 表头（固定列 + 指标列）。
-// 列序与页面表格一致：开始时间 / 结束时间 / 设备(对象) / [Cell ID / PLMN] / 指标...
+// 列序与页面表格一致：开始时间 / 结束时间 / 设备(对象) / [制式] / [Cell ID / PLMN] / 指标...
 // firstColHeader 为设备(对象)列表头（按维度自适应：设备 SN / 设备组 / 产品 / 频段 / 全网 / 聚合组）；
+// includeTech 控制是否在对象列后输出「制式」列（仅 device_group 维度为 true，与页面表格一致）；
 // includeCell 控制是否输出「Cell ID / PLMN」两列（仅 device 维度为 true，聚合维度小区已聚掉、不含）。
-func NewWideCSVWriter(out io.Writer, firstColHeader string, includeCell bool, cols []WideColumn) (*WideCSVWriter, error) {
+func NewWideCSVWriter(out io.Writer, firstColHeader string, includeTech, includeCell bool, cols []WideColumn) (*WideCSVWriter, error) {
 	if _, err := out.Write(utf8BOM); err != nil {
 		return nil, err
 	}
 	cw := csv.NewWriter(out)
 	fixed := []string{"开始时间", "结束时间", firstColHeader}
+	if includeTech {
+		fixed = append(fixed, "制式")
+	}
 	if includeCell {
 		fixed = append(fixed, "Cell ID", "PLMN")
 	}
@@ -101,7 +109,7 @@ func NewWideCSVWriter(out io.Writer, firstColHeader string, includeCell bool, co
 	}
 	return &WideCSVWriter{
 		w: cw, cols: cols, colIdx: idx,
-		firstHeader: firstColHeader, includeCell: includeCell, fixedCount: len(fixed),
+		firstHeader: firstColHeader, includeTech: includeTech, includeCell: includeCell, fixedCount: len(fixed),
 	}, nil
 }
 
@@ -118,7 +126,7 @@ func (c *WideCSVWriter) AddRow(r ExportRow) error {
 		c.order = nil
 		c.cells = make(map[wideKey][]string)
 	}
-	k := wideKey{device: r.Device, cellPLMN: r.CellPLMN}
+	k := wideKey{device: r.Device, tech: r.Technology, cellPLMN: r.CellPLMN}
 	cells, ok := c.cells[k]
 	if !ok {
 		cells = make([]string, len(c.cols))
@@ -138,6 +146,9 @@ func (c *WideCSVWriter) flushBucket() error {
 		if c.order[i].device != c.order[j].device {
 			return c.order[i].device < c.order[j].device
 		}
+		if c.order[i].tech != c.order[j].tech {
+			return c.order[i].tech < c.order[j].tech
+		}
 		return c.order[i].cellPLMN < c.order[j].cellPLMN
 	})
 	// 开始时间取时窗起（与页面"开始时间"同口径）；缺失时回退桶时间。
@@ -149,6 +160,9 @@ func (c *WideCSVWriter) flushBucket() error {
 	for _, k := range c.order {
 		rec := make([]string, 0, c.fixedCount+len(c.cols))
 		rec = append(rec, startStr, endStr, k.device)
+		if c.includeTech {
+			rec = append(rec, k.tech)
+		}
 		if c.includeCell {
 			cellID, plmn := parseObjectLDN(k.cellPLMN)
 			rec = append(rec, cellID, plmn)

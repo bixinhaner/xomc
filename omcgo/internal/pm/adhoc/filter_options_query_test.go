@@ -33,7 +33,8 @@ func Test_buildFilterOptionsQuery_DeviceGroup(t *testing.T) {
 
 	assert.True(t, supported)
 	assert.Contains(t, q, "SELECT DISTINCT r.object_ldn, g.name")
-	assert.Contains(t, q, "LEFT JOIN device_groups g ON ('DeviceGroup=' || g.id::text) = r.object_ldn")
+	// 设备组制式治本：object_ldn 带 ',Tech=<制式>' 后缀，取组名 JOIN 需 split_part 剥逗号前段。
+	assert.Contains(t, q, "LEFT JOIN device_groups g ON ('DeviceGroup=' || g.id::text) = split_part(r.object_ldn, ',', 1)")
 	assert.Contains(t, q, "r.object_ldn LIKE 'DeviceGroup=%'")
 	assert.NotContains(t, q, "LIMIT")
 	assert.NotContains(t, q, "OFFSET")

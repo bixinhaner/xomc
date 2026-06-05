@@ -134,8 +134,9 @@ func (e *Executor) queryAndConvert(ctx context.Context, task *Task, g metrics.Gr
 		// T-0184：全网维度，现场汇总成一条总线（仅制式过滤）。
 		dim = aggregator.DimensionNetwork
 	case DimensionDeviceGroup:
-		// T-0184：设备组维度，复用 G5 设备组预聚合（pm_group_metrics_*，每组一条）。
-		// DeviceGroupIDs 留空 = 按全部组分组；制式过滤照常透传。
+		// T-0184：设备组维度，复用 G5 设备组预聚合（pm_group_metrics_*）。
+		// 设备组制式治本（B 方案）：快表按「组 × 制式」拆行 → 每组每制式一条；
+		// DeviceGroupIDs 留空 = 按全部组分组；制式过滤在查询侧按 technology 列直接筛（不再走设备编号子查询）。
 		dim = aggregator.DimensionDeviceGroup
 	}
 	var techs []string
@@ -167,8 +168,15 @@ func (e *Executor) queryAndConvert(ctx context.Context, task *Task, g metrics.Gr
 		// T-0184：device_group 维度结果以组 id 为身份键。结果表无独立 device_group_id 列，
 		// 复用 object_ldn 承载（形如 'DeviceGroup=<uuid>'，与 band 维度 'Band=<值>' 同范式），
 		// 不新增迁移列。其它维度透传 aggregator 原 ObjectLDN（device/band 等）。
+		//
+		// 设备组制式治本（B 方案）：设备组结果按「组 × 制式」拆行，把制式也编进 object_ldn
+		// → 'DeviceGroup=<uuid>,Tech=<lte|nr|gsm>'。结果表业务唯一键里 object_ldn 已是分组身份的
+		// 一部分 → 同组不同制式天然落不同行不互相覆盖，结果表零迁移、业务键零改动。
 		if task.Dimension == DimensionDeviceGroup && r.DeviceGroupID != uuid.Nil {
 			s := "DeviceGroup=" + r.DeviceGroupID.String()
+			if r.Technology != "" {
+				s += ",Tech=" + r.Technology
+			}
 			ldn = &s
 		}
 		out = append(out, ResultRow{
