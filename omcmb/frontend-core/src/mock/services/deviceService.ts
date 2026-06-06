@@ -43,6 +43,17 @@ export const deviceService = {
 
     if (params.name) filtered = filterByText(filtered, 'name', params.name);
     if (params.sn) filtered = filterByText(filtered, 'sn', params.sn);
+    // 批量输入：按 SN 列表精确过滤（与后端 ?sn_list= 对齐）。
+    if (params.snList && params.snList.length > 0) {
+      const set = new Set(params.snList);
+      filtered = filtered.filter((d) => set.has(d.sn));
+    }
+    // 实时在线过滤（与后端 ?is_online= 对齐）。
+    if (typeof params.isOnline === 'boolean') {
+      filtered = filtered.filter((d) =>
+        typeof d.isOnline === 'boolean' ? d.isOnline === params.isOnline : (d.connStatus === 'online') === params.isOnline,
+      );
+    }
     if (params.vendor) filtered = filtered.filter((d) => d.vendor === params.vendor);
     if (params.productClass) filtered = filtered.filter((d) => d.productClass === params.productClass);
     if (params.networkType) filtered = filtered.filter((d) => d.networkType === params.networkType);
@@ -115,17 +126,6 @@ export const deviceService = {
   async getBySn(sn: string): Promise<Device | null> {
     await delay(80, 150);
     return devices.find((d) => d.sn === sn) ?? null;
-  },
-
-  /** 批量校验 SN 在线状态——返回入参中「存在且在线」的 SN 子集（去重、保序）。 */
-  async verifyOnlineSns(sns: string[]): Promise<string[]> {
-    await delay(80, 200);
-    const unique = Array.from(new Set(sns.map((s) => s.trim()).filter(Boolean)));
-    return unique.filter((sn) => {
-      const d = devices.find((x) => x.sn === sn);
-      if (!d) return false;
-      return typeof d.isOnline === 'boolean' ? d.isOnline : d.connStatus === 'online';
-    });
   },
 
   async create(data: Omit<Device, 'id' | 'createTime'>): Promise<Device> {

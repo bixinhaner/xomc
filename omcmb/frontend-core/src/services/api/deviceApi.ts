@@ -394,6 +394,8 @@ export const deviceApi = {
     if (params.name) query.search = params.name;
     if (params.searchText) query.search = params.searchText;
     if (params.sn) query.sn = params.sn;
+    // 批量输入：SN 列表 → CSV，对应后端 ?sn_list=（serial_number IN (...)）。
+    if (params.snList && params.snList.length > 0) query.sn_list = params.snList.join(',');
     if (params.vendor) query.oui = params.vendor;
     // productId → product_id（产品装配件 UUID 过滤，下拉来自 /products）
     if (params.productId) query.product_id = params.productId;
@@ -477,27 +479,6 @@ export const deviceApi = {
       pageSize: 1,
     });
     return result.items.length > 0 ? result.items[0] : null;
-  },
-
-  /**
-   * 批量校验 SN 在线状态——返回入参中「存在且在线」的 SN 子集（保持入参顺序、去重）。
-   * 后端无批量 SN 端点，逐 SN 精确匹配（sn 精确 + is_online=true）并发查询；
-   * 任一查询失败按「不在线」处理，避免把无法确认的设备放进执行批次。
-   * 供 MML 控制台「批量输入」过滤离线设备（不受产品/类型/关键字等筛选条件影响）。
-   */
-  async verifyOnlineSns(sns: string[]): Promise<string[]> {
-    const unique = Array.from(new Set(sns.map((s) => s.trim()).filter(Boolean)));
-    const results = await Promise.all(
-      unique.map(async (sn) => {
-        try {
-          const resp = await deviceApi.getList({ sn, isOnline: true, page: 1, pageSize: 1 });
-          return resp.items.length > 0 ? sn : null;
-        } catch {
-          return null;
-        }
-      }),
-    );
-    return results.filter((s): s is string => s !== null);
   },
 
   async create(input: CreateDeviceInput): Promise<Device> {

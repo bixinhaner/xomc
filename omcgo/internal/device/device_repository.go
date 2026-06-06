@@ -33,8 +33,9 @@ type DeviceFilter struct {
 	IsOnline       *bool                   // 三态：nil=不过滤；true=仅在线；false=仅离线
 
 	OUI    *string
-	SN     *string // exact match on serial_number
-	Search *string // fuzzy search across serial_number/site_name/manufacturer/device_name/address
+	SN     *string  // exact match on serial_number
+	SNList []string // exact match on serial_number IN (...)（批量输入：按 SN 列表精确过滤）
+	Search *string  // fuzzy search across serial_number/site_name/manufacturer/device_name/address
 
 	// Group filters
 	GroupID       *uuid.UUID  // filter by specific device group
@@ -44,13 +45,13 @@ type DeviceFilter struct {
 	Manufacturer  *string    // devices.manufacturer exact match
 	ProductID     *uuid.UUID // devices.product_id exact match（T-0098 产品装配件软引用；下拉来自 /products）
 	ProductClass  *string    // devices.product_class exact match
-	RFStatus      *string // device_info.rf_status exact match
-	CellStatus    *string // device_info.cell_status exact match
-	ProjectStatus *string // device_info.project_status exact match
-	GPSStatus     *string // device_info.gps_status exact match
-	AlarmSeverity *string // device_info.alarm_severity exact match
-	LicenseStatus *string // device_info.license_status exact match
-	OpState       *string // "1" = activated (first_online_time NOT NULL), "0" = not activated
+	RFStatus      *string    // device_info.rf_status exact match
+	CellStatus    *string    // device_info.cell_status exact match
+	ProjectStatus *string    // device_info.project_status exact match
+	GPSStatus     *string    // device_info.gps_status exact match
+	AlarmSeverity *string    // device_info.alarm_severity exact match
+	LicenseStatus *string    // device_info.license_status exact match
+	OpState       *string    // "1" = activated (first_online_time NOT NULL), "0" = not activated
 
 	// T-0162 新增 3 个 device list 筛选维度（之前前端下拉空、后端无字段）
 	ModelName *string // devices.model_name exact match (字典 device_model)
@@ -552,6 +553,10 @@ func (r *PgDeviceRepository) List(ctx context.Context, filter DeviceFilter) (*mo
 	if filter.SN != nil && *filter.SN != "" {
 		builder = builder.Where(sq.Eq{"d.serial_number": *filter.SN})
 		countBuilder = countBuilder.Where(sq.Eq{"d.serial_number": *filter.SN})
+	}
+	if len(filter.SNList) > 0 {
+		builder = builder.Where(sq.Eq{"d.serial_number": filter.SNList})
+		countBuilder = countBuilder.Where(sq.Eq{"d.serial_number": filter.SNList})
 	}
 	if filter.Search != nil && *filter.Search != "" {
 		like := "%" + *filter.Search + "%"

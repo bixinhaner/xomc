@@ -543,8 +543,17 @@ func applyDeviceFilters(b sq.SelectBuilder, filter DeviceFilter) sq.SelectBuilde
 	if filter.SN != nil && *filter.SN != "" {
 		b = b.Where(sq.Eq{"d.serial_number": *filter.SN})
 	}
+	if len(filter.SNList) > 0 {
+		// 批量输入：按 SN 列表精确过滤（serial_number IN (...)）。
+		b = b.Where(sq.Eq{"d.serial_number": filter.SNList})
+	}
 	if filter.Manufacturer != nil && *filter.Manufacturer != "" {
 		b = b.Where(sq.Eq{"d.manufacturer": *filter.Manufacturer})
+	}
+	if filter.ProductID != nil {
+		// 产品装配件 UUID 过滤（下拉来自 /products）。之前漏在本函数实现，
+		// 导致 ?product_id= 在 /devices 列表静默失效（List 方法有、此 live 路径无）。
+		b = b.Where(sq.Eq{"d.product_id": *filter.ProductID})
 	}
 	if filter.ProductClass != nil && *filter.ProductClass != "" {
 		b = b.Where(sq.Eq{"d.product_class": SplitCSV(*filter.ProductClass)})

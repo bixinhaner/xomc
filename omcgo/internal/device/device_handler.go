@@ -247,6 +247,10 @@ func (h *Handler) ListDevices(c *gin.Context) {
 	if sn := c.Query("sn"); sn != "" {
 		filter.SN = &sn
 	}
+	if snList := c.Query("sn_list"); snList != "" {
+		// 批量输入：CSV 形式的 SN 列表精确过滤（与 product/class/keyword 等其它筛选条件正交）。
+		filter.SNList = SplitCSV(snList)
+	}
 	if search := c.Query("search"); search != "" {
 		filter.Search = &search
 	}

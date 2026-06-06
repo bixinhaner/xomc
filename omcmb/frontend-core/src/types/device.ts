@@ -285,6 +285,8 @@ export interface DeviceFilter {
   /** 通用搜索文本（覆盖 SN/名称/IP/MAC 等） */
   searchText?: string;
   sn?: string;
+  /** 批量输入：按 SN 列表精确过滤（对应后端 ?sn_list= CSV），与其它筛选条件正交 */
+  snList?: string[];
   vendor?: string;
   productClass?: string;
   networkType?: string;
