@@ -551,8 +551,8 @@ func TestDeviceService_CreateDevice_Success(t *testing.T) {
 		Technology:   model.TechNR,
 		DeviceName:   "SiteA",
 		SiteID:       "SITE-001",
-		Latitude:     31.23,
-		Longitude:    121.47,
+		Latitude:     f64p(31.23),
+		Longitude:    f64p(121.47),
 	}
 
 	device, err := svc.CreateDevice(context.Background(), req)
@@ -600,7 +600,7 @@ func TestDeviceService_UpdateDevice_Success(t *testing.T) {
 				ID:           deviceID,
 				SerialNumber: "SN-UPD",
 				DeviceName:   "OldSite",
-				Latitude:     0.0,
+				Latitude:     f64p(0.0),
 			}, nil
 		},
 		updateFn: func(ctx context.Context, device *model.Device) error {
@@ -622,7 +622,9 @@ func TestDeviceService_UpdateDevice_Success(t *testing.T) {
 	require.NotNil(t, device)
 
 	assert.Equal(t, "NewSite", device.DeviceName)
-	assert.InDelta(t, 39.9, device.Latitude, 0.001)
+	if assert.NotNil(t, device.Latitude) {
+		assert.InDelta(t, 39.9, *device.Latitude, 0.001)
+	}
 	// Unchanged field stays the same
 	assert.Equal(t, "SN-UPD", device.SerialNumber)
 }

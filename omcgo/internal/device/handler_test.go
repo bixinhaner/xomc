@@ -269,8 +269,8 @@ func seedDevice(repo *fakeDeviceRepo, id uuid.UUID, sn string, carrier model.Car
 		Status:       status,
 		DeviceName:   "Site-A",
 		SiteID:       "SITE-001",
-		Latitude:     39.9042,
-		Longitude:    116.4074,
+		Latitude:     f64p(39.9042),
+		Longitude:    f64p(116.4074),
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
@@ -304,8 +304,8 @@ func TestHandler_CreateDevice_Success(t *testing.T) {
 		Technology:   model.TechLTE,
 		DeviceName:   "Site-A",
 		SiteID:       "SITE-001",
-		Latitude:     39.9042,
-		Longitude:    116.4074,
+		Latitude:     f64p(39.9042),
+		Longitude:    f64p(116.4074),
 	}
 
 	w := httptest.NewRecorder()
@@ -433,7 +433,9 @@ func TestHandler_UpdateDevice_Success(t *testing.T) {
 	var resp model.Device
 	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, "Site-B", resp.DeviceName)
-	assert.Equal(t, 31.2304, resp.Latitude)
+	if assert.NotNil(t, resp.Latitude) {
+		assert.Equal(t, 31.2304, *resp.Latitude)
+	}
 	// Unchanged fields should remain the same.
 	assert.Equal(t, "SN-UPD-001", resp.SerialNumber)
 	assert.Equal(t, model.DeviceActive, resp.Status)
@@ -478,6 +480,31 @@ func TestHandler_ListDevices(t *testing.T) {
 	assert.Len(t, resp.Items, 2)
 	assert.Equal(t, 1, resp.Page)
 	assert.Equal(t, 20, resp.PageSize)
+}
+
+// f64p returns a pointer to v (model.Device.Latitude/Longitude are *float64).
+func f64p(v float64) *float64 { return &v }
+
+// TestHandler_ListDevices_ProductIDFilter verifies the new product_id query
+// param is accepted (valid UUID → 200) and rejected when malformed (→ 400).
+func TestHandler_ListDevices_ProductIDFilter(t *testing.T) {
+	h, deviceRepo, _ := newTestHandler()
+	router := setupRouter(h)
+	seedDevice(deviceRepo, uuid.New(), "SN-PID-001", model.CarrierCMCC, model.TechLTE, model.DeviceActive)
+
+	// Valid product_id UUID → 200.
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/devices?page=1&page_size=20&product_id="+uuid.New().String(), nil)
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Malformed product_id → 400.
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet,
+		"/api/v1/devices?page=1&page_size=20&product_id=not-a-uuid", nil)
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 // TestRebootDevice_NotFound_Returns404 verifies that POST /devices/:id/reboot

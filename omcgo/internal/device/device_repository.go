@@ -41,8 +41,9 @@ type DeviceFilter struct {
 	VisibleGroups []uuid.UUID // data permission: restrict to these groups (nil = no restriction)
 
 	// Extended filters (device_info / devices additional fields)
-	Manufacturer  *string // devices.manufacturer exact match
-	ProductClass  *string // devices.product_class exact match
+	Manufacturer  *string    // devices.manufacturer exact match
+	ProductID     *uuid.UUID // devices.product_id exact match（T-0098 产品装配件软引用；下拉来自 /products）
+	ProductClass  *string    // devices.product_class exact match
 	RFStatus      *string // device_info.rf_status exact match
 	CellStatus    *string // device_info.cell_status exact match
 	ProjectStatus *string // device_info.project_status exact match
@@ -557,6 +558,10 @@ func (r *PgDeviceRepository) List(ctx context.Context, filter DeviceFilter) (*mo
 		cond := sq.Or{sq.ILike{"d.serial_number": like}, sq.ILike{"d.site_name": like}}
 		builder = builder.Where(cond)
 		countBuilder = countBuilder.Where(cond)
+	}
+	if filter.ProductID != nil {
+		builder = builder.Where(sq.Eq{"d.product_id": *filter.ProductID})
+		countBuilder = countBuilder.Where(sq.Eq{"d.product_id": *filter.ProductID})
 	}
 	if filter.ProductClass != nil && *filter.ProductClass != "" {
 		builder = builder.Where(sq.Eq{"d.product_class": *filter.ProductClass})

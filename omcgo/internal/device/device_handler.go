@@ -253,6 +253,14 @@ func (h *Handler) ListDevices(c *gin.Context) {
 	if manufacturer := c.Query("manufacturer"); manufacturer != "" {
 		filter.Manufacturer = &manufacturer
 	}
+	if productID := c.Query("product_id"); productID != "" {
+		pid, err := uuid.Parse(productID)
+		if err != nil {
+			commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+			return
+		}
+		filter.ProductID = &pid
+	}
 	if productClass := c.Query("product_class"); productClass != "" {
 		filter.ProductClass = &productClass
 	}
