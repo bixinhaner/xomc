@@ -1253,6 +1253,18 @@ func initMiscModules(c *Container) error {
 	mmlService := mml.NewService(mmlCmdRepo, mmlScriptRepo, mmlTaskRepo, mmlCustomCmdRepo, messageHub, logger)
 	mmlService.SetAuditRepo(mmlAuditRepo)
 	mmlService.SetCmdParamRepo(mmlCmdParamRepo)
+	// 结果 CSV 导出：上传用内部 client（c.MinIO，连 docker 内网 minio:9000），
+	// 下载 URL 用 PresignClient（public_endpoint，浏览器可达）；落 reports bucket 的
+	// mml-results/ 独立目录。任一缺失 → 导出端点返回 503。
+	if c.MinIO != nil {
+		exportSignClient := c.MinIO
+		if pc, perr := minioinfra.NewPresignClient(c.Cfg.MinIO); perr != nil {
+			logger.Warn("create MinIO presign client for mml export failed; using internal endpoint", zap.Error(perr))
+		} else {
+			exportSignClient = pc
+		}
+		mmlService.SetExporter(mml.NewExporter(c.MinIO, exportSignClient, c.Cfg.MinIO.Buckets.Reports, logger))
+	}
 	// T-0090-c：注入 admin RoleRepo 作 RBAC group 派生器，让 ListCustomCommands
 	// 走 group-share 路径（同组管理员可见对方 private 命令）。c.RoleRepo 由 admin
 	// 模块初始化时（router.go misc Depends admin）填入，此处必非 nil。

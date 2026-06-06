@@ -45,6 +45,10 @@ type TaskRepository interface {
 	// 按 created_at 倒序、分页。供脚本详情页 "历史执行" tab 使用
 	// （P4 docs/design/mml-task-flow-design-20260424.md §3.3 C11）。
 	ListByScriptID(ctx context.Context, scriptID uuid.UUID, req model.ListRequest) (*model.ListResponse[MMLTask], error)
+	// UpdateExportAggregate 记录全设备汇总 CSV 的 MinIO object key（mml_tasks.export_object）。
+	UpdateExportAggregate(ctx context.Context, id uuid.UUID, objectKey string, t time.Time) error
+	// UpdateExportDevice 把单设备 CSV 的 object key 合并进 mml_tasks.device_export_objects 映射。
+	UpdateExportDevice(ctx context.Context, id uuid.UUID, deviceSN, objectKey string, t time.Time) error
 }
 
 // CustomCommandRepository provides CRUD operations for user-defined custom commands.

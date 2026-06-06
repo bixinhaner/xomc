@@ -490,6 +490,27 @@ V2 当前左操作区 `OperationPanel` 只实现了「控制面板（结构化�
 3. **命令记录去掉数量提醒**（§3.10.4 / §3.11.4 面板修订）：移除收缩态历史图标上的**红色数量 Badge**，并移除展开态标题里的 `(N)` 计数文本——命令记录面板不再显示条数。
 4. **配置参数弹框：隐藏「操作类型」文字标签、显示命令名**（§3.10.3 弹框修订）：标准模式头部原「操作类型」标签文字去除，改为顶部显示**命令名称**（`command.commandName`），其下保留操作类型彩 Tag（`LST · 查询`）+ 命令码，信息更聚焦。
 
+#### 3.11.8 命令选择弹框：搜索框缩短 + 「指定参数」快捷入口（2026-06-05）
+
+面向「已知裸路径、无需挑命令」的专家用户，在第二步「选择命令」弹框（§3.3.2）顶部增加一个直达裸路径配置的捷径，**跳过命令选择**：
+
+1. **搜索框缩短**：原整行宽 `Input.Search` 改为 `flex:1, maxWidth:420`，与右侧入口排在同一 flex 行。
+2. **「指定参数」链接入口**：搜索框右侧加 `Button type="link"`（`EditOutlined` + `指定参数` + `RightOutlined`，带 Tooltip「跳过命令选择，直接用「指定参数」（裸路径）方式配置并执行」）。
+3. **跳转语义**：点击 → 关闭「选择命令」弹框 → 打开第三步「配置参数」弹框（§3.10.3）并**自动停在「指定参数」标签**（裸路径专家模式）；正常选命令进入配置弹框时仍默认停在「命令参数」标签。
+   - 实现：`CommandSelectModal` 新增 `onGotoRawParams` 回调；`ConfigParamsModal` 新增 `initialMode?: OperationMode`（每次打开按它切换激活 Tab）；`index.tsx` 加 `configMode` 状态——点「指定参数」置 `'raw'`、选命令置 `'standard'`，作为 `initialMode` 透传。
+   - 前置：裸路径执行仍需先在第一步选好设备；下发走 legacy `/mml/execute`（§3.12.2 决策 3）。
+
+#### 3.11.9 设备选择：恢复「产品」筛选（product_id）+ 「产品类型」后置（2026-06-05）
+
+§3.3.1 要求设备弹框按 **SN / 产品 / 产品类型** 三维筛选，但 P1 落地时因「后端无 product 维度过滤」临时**只留了 SN + 产品类型两维**。本次补齐第三维「产品」，恢复设计：
+
+- **「产品」筛选（新增）**：下拉选项来自 `useProductList()`（`GET /products` 全量，返回 `{id,name}[]`）；过滤值 = `devices.product_id`（T-0098 ProductRegistry 路由 productClass 后写入的产品 UUID 软引用）。
+- **「产品类型」筛选（沿用）**：字典 `product_class` 下拉 → `devices.product_class`，**位置后置**到「产品」之后。
+- **顺序**：SN 搜索 → 产品（product_id） → 产品类型（product_class） → 批量输入。三者 AND 组合，全部服务端过滤。
+- **后端改动（device 模块）**：`DeviceFilter` 加 `ProductID *uuid.UUID`；`device_handler.go` List 读 `c.Query("product_id")` 解析 UUID；`device_repository.go` List() 对 `d.product_id` 加 WHERE（builder + countBuilder 同步）。
+- **前端业务层**：`DeviceFilter` 加 `productId?: string`；`deviceApi.getList` 映射 `productId → query.product_id`。
+- **前端 UI（V2 DeviceSelectModal）**：新增「产品」`Select`（选项 = 产品列表），`productFilter` 状态并入 `filterParams`，打开时重置。
+
 ### 3.12 后端 API 对接方案（2026-06-05，落地真实数据）
 
 > 在 §3.2~§3.11 前端 mock 全量落地基础上，把 `ConsoleV2/` 的 mock 层替换为真实后端端点。**复用老 console（`mml/Console/`）已验证的结构化执行通道**，不新增后端端点。
@@ -498,7 +519,8 @@ V2 当前左操作区 `OperationPanel` 只实现了「控制面板（结构化�
 
 | 环节 | 复用 hook / api | 端点 |
 |------|----------------|------|
-| 设备列表 | `deviceApi.getList`（服务端分页/筛选） | `GET /devices?page&page_size&search&product_class` |
+| 设备列表 | `deviceApi.getList`（服务端分页/筛选） | `GET /devices?page&page_size&search&product_id&product_class` |
+| 产品下拉 | `useProductList()`（全量，无分页） | `GET /products` → `{id,name}[]`（产品筛选下拉选项） |
 | 命令树 | `useGroupTreeFlat(lang)` | `GET /mml/group-tree?format=flat&lang` |
 | 命令参数 | `useCommandSubFields(commandId, lang, deviceKey)` | `GET /mml/commands/:id/sub-fields` → `SubFieldDef[]` |
 | 命令搜索 | `useSearchCommands(q)` | `GET /mml/commands/search` |
@@ -523,12 +545,29 @@ V2 当前左操作区 `OperationPanel` 只实现了「控制面板（结构化�
 - `useConsoleHistory`：`recordStore` 由「内存 Map」改为凭 localStorage 命令 ID 数组拉 `getTaskById` + `getTaskResults`（§3.11.4 契约不变）。
 - `mock.ts` 保留纯函数（`buildColumns`/`buildColumnsFromRawPaths`），删除 `MOCK_DEVICES`/`MOCK_COMMANDS`/`MOCK_HISTORY`/`buildResultRows`。
 
-#### 3.12.4 分阶段文件改动
+#### 3.12.4 分阶段文件改动与落地状态
 
-- **P1 只读**：`DeviceSelectModal`（→`deviceApi.getList` 服务端分页）、`CommandSelectModal`（→`useGroupTreeFlat`+选中拉 `useCommandSubFields`）、`adapters.ts`；`ConfigParamsModal` 沿用 `CommandItem` 无需改。
-- **P2 执行+结果**：`index.tsx`（`runExecute` → `executeStatementsStructured` / `executeMMLCommand`），新增结果订阅（SSE 就地更新 + results 兜底），`mapResultItemToRow`。
-- **P3 命令记录**：`useConsoleHistory` 改凭 ID 现拉真实任务。
-- **P4（后端）**：读后核实四态。
+- **P1 只读 ✅ 已落地**：`DeviceSelectModal`（→`useDeviceList` 服务端分页 + `useDictionaryBatch('product_class')`）、`CommandSelectModal`（→`useGroupTree` 拍平二级 + 选中拉 `useCommandSubFields`）、新增 `adapters.ts`（`mapDeviceToItem`/`subFieldsToParamPaths`/`flattenGroupTree`/`mapCommandItem`）；`CommandItem.id` = 真实 `mml_commands.id`。
+- **P2 执行+结果 ✅ 已落地**：`ExecRequest` 扩 `values`/`instance`；`ConfigParamsModal.buildRequest` 带写入值/实例号；`index.tsx.runExecute` → 标准 `executeStatementsStructured`（`buildStructuredStatement`）/ 裸路径 `executeMMLCommand`（`buildRawExecutePayload`）；新增 `useExecStream`（SSE 订阅 `mml_device_frame`/`mml_task_completed`）+ `applyFrameToRow`（先降级 success/failed 两态，GPV 按列回填 cells，exact→leaf 匹配）；完成后落入命令记录（commandId = 真实 task id）。列派生 `buildColumns`/`buildColumnsFromRawPaths` 移入 `adapters.ts`，删除 `mock.ts`。
+- **P3 命令记录跨刷新恢复 ✅ 已落地**：`useConsoleHistory` 去 mock 种子；`recordStore` 承载本会话完整记录；挂载时对 localStorage 中、不在 `recordStore` 的命令 ID 用 `useQueries(getTaskById)` 重建（`mapTaskToRecord`：命令元信息取首条 `commandsDetail` 的 op_type/param_paths，结果行取任务内嵌 `results` 的 success/rawOutput/parsedData，`retry:false`，404 自动剔除）。`getTaskById` 已内嵌 `results`，无需 select 时再拉 `getTaskResults`。
+- **P4 读后核实四态 ⏳ 待后端**：`unverified`/`mismatch` 待后端 read-after-write 支持（§3.11.6 最高风险项）。
+
+> **P2 待运行时核对项**：① GPV 回值键为 privatePath，结果列键为 standardPath，`applyFrameToRow` 用 exact→leaf 两级匹配兜底，translation 较深的厂商私有路径需实测对齐度；② SSE `/events/stream` 依赖 JWT，断线重连沿用 EventSource 默认；③ 裸路径 `/mml/execute` 的 `param_values` 下标须与 `param_paths` 对齐（已保证）。
+
+### 3.13 结果 CSV 导出 → MinIO（2026-06-05，落地需求③下载，✅ 已实现）
+
+补齐 §3.6/§3.7 的「结果下载」缺口。用户决策（2026-06-05）：**只做 CSV；完整参数矩阵；两种文件（单设备 + 全设备汇总）；存 MinIO 独立目录；地址记入 mml_tasks**。
+
+**后端**（`internal/mml/export.go` + 迁移 000026）：
+- **迁移 000026**：`mml_tasks` 加 `export_object TEXT`（汇总 CSV object key）、`device_export_objects JSONB`（{device_sn: object_key} 映射）、`export_generated_at TIMESTAMPTZ`。
+- **存储**：复用 `reports` bucket + **独立目录** `mml-results/{YYYY}/{MM}/{DD}/{taskID}/`；汇总 `aggregate-{id8}.csv`、单设备 `device-{sn}-{id8}.csv`。DB 存 object key，下载时 `PresignedGetObject` 现签 1h URL（项目惯例）。
+- **完整参数矩阵**：列 = 命令查询的 standardPath（取自 `extractPathTranslations`，同时拿到 privatePath）；值 = 解析每台设备 `device_tasks.result.raw_response` 的 GPV（`pkg/soap.DecodeGetParameterValuesResponse`）→ 按 **privatePath → standardPath → 叶子名** 三级对齐回填（比前端更精确，因后端有 privatePath 映射）。汇总=横向矩阵（设备行×参数列）；单设备=纵向（参数路径,读回值）+ 顶部摘要。UTF-8 BOM 让 Excel 正确识别中文。
+- **端点**：`POST /mml/tasks/:id/export`（汇总）、`POST /mml/tasks/:id/devices/:sn/export`（单设备）→ `{object, download_url}`；MinIO 未配置→503。
+- **DI**：`provider/modules.go` 注入内部 client（PutObject）+ PresignClient（签 URL）+ reports bucket。
+
+**前端**：`mmlApi.exportTaskCSV`/`exportTaskDeviceCSV` + `useExportTaskCSV`/`useExportTaskDeviceCSV` hook；`ResultTable`「下载全部 ▸ CSV」与行尾下载改调后端（生成→拿 presigned URL→`window.open` 下载），XLSX/JSON 保留客户端导出。
+
+> **仍未做**（不在本次范围）：真实 XLSX 流、每设备单文件打包 zip、大批量异步走 worker（当前同步生成，单批 ≤200 台 CSV 体量小，足够）。
 
 ---
 

@@ -205,3 +205,25 @@ export function useExecuteStatementsStructured(): ReturnType<
     mutationFn: (req: StructuredExecuteRequest) => mmlApi.executeStatementsStructured(req),
   });
 }
+
+/**
+ * 全设备汇总结果 CSV 导出（落 MinIO，地址记入 mml_tasks）。
+ * 返回 { object, downloadUrl }；调用方拿 downloadUrl 触发浏览器下载。
+ */
+export function useExportTaskCSV(): ReturnType<
+  typeof useMutation<{ object: string; downloadUrl: string }, Error, string>
+> {
+  return useMutation({
+    mutationFn: (taskId: string) => mmlApi.exportTaskCSV(taskId),
+  });
+}
+
+/** 单设备结果 CSV 导出（落 MinIO，地址记入 mml_tasks.device_export_objects）。 */
+export function useExportTaskDeviceCSV(): ReturnType<
+  typeof useMutation<{ object: string; downloadUrl: string }, Error, { taskId: string; deviceSn: string }>
+> {
+  return useMutation({
+    mutationFn: ({ taskId, deviceSn }: { taskId: string; deviceSn: string }) =>
+      mmlApi.exportTaskDeviceCSV(taskId, deviceSn),
+  });
+}

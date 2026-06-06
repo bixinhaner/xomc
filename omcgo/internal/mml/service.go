@@ -42,6 +42,7 @@ type Service struct {
 	deviceTaskResultLister       DeviceTaskResultLister       // 任务记录"查看"modal 的设备级结果（2026-05-23 修）
 	deviceLookup     DeviceLookup // R-8.4 product_class 一致性校验；nil 时跳过（向后兼容）
 	pathTranslator   PathTranslator // R-9.3 per-device standardPath → privatePath 翻译；nil 时跳过
+	exporter         *Exporter      // 结果 CSV 导出（MinIO）；nil 时导出端点返回 503
 	logger           *zap.Logger
 }
 

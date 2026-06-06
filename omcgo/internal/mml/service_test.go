@@ -207,6 +207,14 @@ func (m *mockTaskRepo) ListByScriptID(ctx context.Context, scriptID uuid.UUID, r
 	return model.NewListResponse([]MMLTask{}, 0, req.Page, req.PageSize), nil
 }
 
+func (m *mockTaskRepo) UpdateExportAggregate(ctx context.Context, id uuid.UUID, objectKey string, t time.Time) error {
+	return nil
+}
+
+func (m *mockTaskRepo) UpdateExportDevice(ctx context.Context, id uuid.UUID, deviceSN, objectKey string, t time.Time) error {
+	return nil
+}
+
 type mockCustomCommandRepo struct {
 	createFn       func(ctx context.Context, tmpl *MMLCustomCommand) error
 	getByIDFn      func(ctx context.Context, id uuid.UUID) (*MMLCustomCommand, error)

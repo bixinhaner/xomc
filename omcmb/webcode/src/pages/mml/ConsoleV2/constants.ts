@@ -64,6 +64,12 @@ export const UNVERIFIED_REASON_TEXT: Record<UnverifiedReason, string> = {
 /** 设备弹框服务端分页每页条数（mock 沿用现控制台 50 条上限）。 */
 export const DEVICE_MODAL_PAGE_SIZE = 10;
 
+/**
+ * 「配置参数」弹框 PATH 勾选列表的最大可视高度（约 10 行）。
+ * 超过即出现竖向滚动条；单行路径过长由容器 overflow:auto 触发横向滚动条。
+ */
+export const PATH_LIST_MAX_HEIGHT = 300;
+
 // 单次执行设备数上限（设计 §3.10.1，2026-06-04 用户决策 200）。
 // 依据：MML 执行无显式上限,但扇出单批 BatchCreateTasks 受 PostgreSQL 65535 bind 参数
 // 约束(~5000 行硬顶),且每设备一个 Connection Request 受 ACS 准入/限流。200 远低于硬顶、

@@ -126,6 +126,14 @@ func (m *hTaskRepo) ListByScriptID(ctx context.Context, scriptID uuid.UUID, req 
 	return model.NewListResponse([]MMLTask{}, 0, req.Page, req.PageSize), nil
 }
 
+func (m *hTaskRepo) UpdateExportAggregate(ctx context.Context, id uuid.UUID, objectKey string, t time.Time) error {
+	return nil
+}
+
+func (m *hTaskRepo) UpdateExportDevice(ctx context.Context, id uuid.UUID, deviceSN, objectKey string, t time.Time) error {
+	return nil
+}
+
 type hCustomCommandRepo struct {
 	CreateFn          func(ctx context.Context, tmpl *MMLCustomCommand) error
 	GetByIDFn         func(ctx context.Context, id uuid.UUID) (*MMLCustomCommand, error)

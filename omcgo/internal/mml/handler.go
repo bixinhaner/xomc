@@ -1,6 +1,7 @@
 package mml
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -59,6 +60,8 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	tasks.GET("", h.ListTasks)
 	tasks.GET("/:id", h.GetTask)
 	tasks.GET("/:id/results", h.GetTaskResults)
+	tasks.POST("/:id/export", h.ExportTaskResults)
+	tasks.POST("/:id/devices/:sn/export", h.ExportTaskDeviceResults)
 	tasks.POST("/:id/start", h.StartTask)
 	tasks.POST("/:id/pause", h.PauseTask)
 	tasks.POST("/:id/cancel", h.CancelTask)
@@ -779,6 +782,53 @@ func (h *Handler) GetTaskResults(c *gin.Context) {
 	}
 
 	response.OK(c, result)
+}
+
+// ExportTaskResults handles POST /api/v1/mml/tasks/:id/export —— 生成全设备汇总 CSV
+// 落 MinIO（mml-results/ 目录）、地址记入 mml_tasks.export_object，返回预签名下载 URL。
+func (h *Handler) ExportTaskResults(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+	key, url, err := h.service.ExportTaskResultsCSV(c.Request.Context(), id)
+	if err != nil {
+		h.abortExportError(c, err)
+		return
+	}
+	response.OK(c, gin.H{"object": key, "download_url": url})
+}
+
+// ExportTaskDeviceResults handles POST /api/v1/mml/tasks/:id/devices/:sn/export ——
+// 生成单设备 CSV 落 MinIO、地址记入 mml_tasks.device_export_objects[sn]，返回下载 URL。
+func (h *Handler) ExportTaskDeviceResults(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+	sn := c.Param("sn")
+	key, url, err := h.service.ExportTaskDeviceCSV(c.Request.Context(), id, sn)
+	if err != nil {
+		h.abortExportError(c, err)
+		return
+	}
+	response.OK(c, gin.H{"object": key, "download_url": url})
+}
+
+// abortExportError 把导出错误映射为 HTTP 状态：未配置→503，缺 SN→400，结果不存在→404，其余→按错误类型。
+func (h *Handler) abortExportError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, ErrExporterNotConfigured):
+		commonerrors.AbortWithError(c, http.StatusServiceUnavailable, err)
+	case errors.Is(err, commonInvalidDeviceSN):
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+	case errors.Is(err, commonDeviceResultNotFound):
+		commonerrors.AbortWithError(c, http.StatusNotFound, err)
+	default:
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+	}
 }
 
 // ---- Template handlers ----

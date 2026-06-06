@@ -1,22 +1,24 @@
 import { useCallback, useMemo, useState } from 'react';
+import { useQueries } from '@tanstack/react-query';
+import { mmlApi } from '@core/services/api/mmlApi';
 import type { ExecRecord } from './types';
-import { MOCK_HISTORY } from './mock';
+import { mapTaskToRecord } from './adapters';
 
 /**
- * 命令记录数据层（设计 §3.10.4-5 + §3.11.4；2026-06-05 决策）。
+ * 命令记录数据层（设计 §3.10.4-5 + §3.11.4 + §3.12）。
  *
- * ── 持久化策略（用户决策 2026-06-05）：**localStorage 只存「命令 ID 数组」，凭命令 ID 现拉数据**。
+ * ── 持久化策略：**localStorage 只存「命令 ID 数组」，凭命令 ID 现拉数据**。
  *   不缓存命令名/设备数等摘要，更不缓存结果行快照（天然规避容量；任务被清理→现拉 404 自动剔除）。
  *
- * ── 当前（mock）：
- *   - `recordStore`（模块级 Map<commandId, ExecRecord>）= mock「后端」，初始化注入 MOCK_HISTORY 种子；
- *   - localStorage 仅存命令 ID 数组（有序，最近在前）；进入页面凭 ID 从 recordStore 取记录；
- *   - 会话内 append 的记录写入 recordStore + ID 数组；整页刷新后内存 Map 丢失会话记录属预期，
- *     仅种子可解析（模拟「凭 ID 向后端取数」链路）。
+ * ── 当前（P2 已接真实执行）：
+ *   - `recordStore`（模块级 Map<commandId, ExecRecord>）承载**本会话**已执行命令的完整记录（含结果行）；
+ *     append 时 commandId = 真实 `mml_tasks.id`，同步写入 localStorage 的 ID 数组（最近在前）。
+ *   - 本会话内点击记录可回看完整结果；整页刷新后内存 Map 丢失，记录从列表消失（ID 仍在 localStorage）。
  *
- * ── 接后端 TODO（仅改本 hook 内部，组件层契约不变）：
- *   1. recordStore.get(id) → GET /mml/tasks/:id（摘要）+ 惰性 GET …/results-schema、…/results（结果）。
- *   2. append：执行改走真实 execute-statements 返回 mml_tasks.id 后，把该 ID push 进数组即可。
+ * ── P3 待办（仅改本 hook 内部，组件层契约不变）：
+ *   挂载时对 localStorage 中、不在 recordStore 的命令 ID 调 `GET /mml/tasks/:id` 重建列表摘要，
+ *   `select` 时惰性 `GET /mml/tasks/:id/results` 重建结果行——实现跨刷新历史恢复。
+ *   （需对照运行时任务/结果数据形态校验 taskName 解析与 parsedData 键，故拆为后置任务。）
  */
 export interface ConsoleHistory {
   records: ExecRecord[];
@@ -32,8 +34,8 @@ export interface ConsoleHistory {
 const STORAGE_KEY = 'mml-console-v2-history';
 const MAX_IDS = 50;
 
-// mock「后端」：commandId → ExecRecord。模块初始化注入种子，模拟已持久化的历史任务。
-const recordStore = new Map<string, ExecRecord>(MOCK_HISTORY.map((r) => [r.commandId, r]));
+// 本会话已执行命令：commandId(= mml_tasks.id) → ExecRecord（含结果行）。跨刷新丢失（P3 重建）。
+const recordStore = new Map<string, ExecRecord>();
 
 function readIds(): string[] {
   try {
@@ -54,24 +56,30 @@ function writeIds(ids: string[]): void {
   }
 }
 
-/** 首次进入：无持久化则以种子命令 ID 初始化并落盘（模拟「上次执行记录」）。 */
-function initialIds(): string[] {
-  const persisted = readIds();
-  if (persisted.length > 0) return persisted;
-  const seedIds = MOCK_HISTORY.map((r) => r.commandId);
-  writeIds(seedIds);
-  return seedIds;
-}
-
 export function useConsoleHistory(): ConsoleHistory {
-  const [ids, setIds] = useState<string[]>(initialIds);
+  const [ids, setIds] = useState<string[]>(readIds);
   const [activeId, setActiveId] = useState<string | null>(null);
 
-  // 凭命令 ID 现拉记录（mock：recordStore；真实：GET /mml/tasks/:id）。无法解析的 ID 剔除。
-  const records = useMemo(
-    () => ids.map((id) => recordStore.get(id)).filter((r): r is ExecRecord => !!r),
-    [ids],
-  );
+  // 跨刷新恢复（§3.12.4）：不在本会话 recordStore 的命令 ID 凭 GET /mml/tasks/:id 重建。
+  // 解析不到（404/已清理）的 ID 在 records 合并阶段自动剔除。retry:false 避免删除任务反复重试。
+  const missingIds = useMemo(() => ids.filter((id) => !recordStore.has(id)), [ids]);
+  const queries = useQueries({
+    queries: missingIds.map((id) => ({
+      queryKey: ['mml', 'console-v2', 'task', id],
+      queryFn: () => mmlApi.getTaskById(id),
+      staleTime: 60 * 1000,
+      retry: false,
+    })),
+  });
+  const fetchedById = new Map<string, ExecRecord>();
+  queries.forEach((q, i) => {
+    if (q.data) fetchedById.set(missingIds[i], mapTaskToRecord(q.data));
+  });
+
+  // 合并：本会话完整记录优先，其次拉取重建的记录；解析不到的 ID 剔除。保持 localStorage 顺序。
+  const records = ids
+    .map((id) => recordStore.get(id) ?? fetchedById.get(id) ?? null)
+    .filter((r): r is ExecRecord => !!r);
 
   // 默认选中最新一条（render 阶段派生，避免 effect 改 state）。
   const resolvedActiveId =

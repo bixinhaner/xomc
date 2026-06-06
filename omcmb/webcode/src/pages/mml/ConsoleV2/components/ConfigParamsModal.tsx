@@ -14,9 +14,9 @@ import {
   Tag,
   Typography,
 } from 'antd';
-import { PlayCircleOutlined } from '@ant-design/icons';
+import { LeftOutlined, PlayCircleOutlined } from '@ant-design/icons';
 import type { CommandItem, ExecMode, ExecRequest, OperationMode, RawPathPayload } from '../types';
-import { isReadOp, opColor, opLabel } from '../constants';
+import { isReadOp, opColor, opLabel, PATH_LIST_MAX_HEIGHT } from '../constants';
 import RawPathPanel from './RawPathPanel';
 import { newRawPathRow } from '../rawPathRow';
 
@@ -26,6 +26,13 @@ interface ConfigParamsModalProps {
   open: boolean;
   command: CommandItem | null;
   deviceCount: number;
+  /** 打开时初始激活的标签：'standard'(命令参数) / 'raw'(指定参数)。默认 'standard'。 */
+  initialMode?: OperationMode;
+  /**
+   * 跳回「选择命令」。仅当本弹框由「选择命令」流程跳转而来时由父组件注入，
+   * 注入则在标题处展示「选择命令」入口，便于回去改命令；其它来源（指定参数 / 直接配置）不注入。
+   */
+  onGotoCommand?: () => void;
   onCancel: () => void;
   /** 确定:保存配置(不执行) */
   onConfirm: (req: ExecRequest) => void;
@@ -42,17 +49,27 @@ export default function ConfigParamsModal({
   open,
   command,
   deviceCount,
+  initialMode,
+  onGotoCommand,
   onCancel,
   onConfirm,
   onConfirmAndExecute,
 }: ConfigParamsModalProps) {
   const [mode, setMode] = useState<OperationMode>('standard');
+  const [wasOpen, setWasOpen] = useState(false);
 
   const read = isReadOp(command?.operationType);
   const [checkedPaths, setCheckedPaths] = useState<string[]>([]);
   const [values, setValues] = useState<Record<string, string>>({});
   const [instance, setInstance] = useState<number>(1);
   const [lastCmdId, setLastCmdId] = useState<string | null>(null);
+
+  // 每次打开时按 initialMode 切换激活标签（渲染阶段调整 state，避开 set-state-in-effect）。
+  // 「指定参数」快捷入口打开时 initialMode='raw'，直接落到裸路径标签。
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) setMode(initialMode ?? 'standard');
+  }
 
   const [rawPayload, setRawPayload] = useState<RawPathPayload>({
     operationType: 'LST',
@@ -94,7 +111,15 @@ export default function ConfigParamsModal({
 
   const buildRequest = (): ExecRequest =>
     mode === 'standard'
-      ? { mode: 'standard', checkedPaths }
+      ? {
+          mode: 'standard',
+          checkedPaths,
+          // MOD/ADD 携带写入值；RMV 携带实例号。LST 两者均不消费。
+          ...(command && !isReadOp(command.operationType) && command.operationType !== 'RMV'
+            ? { values }
+            : {}),
+          ...(command?.operationType === 'RMV' ? { instance } : {}),
+        }
       : { mode: 'raw', operationType: rawPayload.operationType, rows: rawPayload.rows };
 
   const standardBody = !command ? (
@@ -105,47 +130,71 @@ export default function ConfigParamsModal({
     />
   ) : (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
-      <div>
-        <Text strong style={{ fontSize: 14 }}>
-          {command.commandName}
-        </Text>
-        <div style={{ marginTop: 6 }}>
-          <Tag color={opColor(command.operationType)} style={{ fontSize: 13, padding: '2px 10px' }}>
-            {command.operationType} · {opLabel(command.operationType)}
-          </Tag>
-          <Text type="secondary" style={{ marginLeft: 8 }} code>
-            {command.commandCode}
+      {/* 写类操作（MOD/ADD/RMV）保留命令身份块；读类（LST/DSP）身份合并进「全选」行（§需求 1）。 */}
+      {!read && (
+        <div>
+          <Text strong style={{ fontSize: 14 }}>
+            {command.commandName}
           </Text>
+          <div style={{ marginTop: 6 }}>
+            <Tag color={opColor(command.operationType)} style={{ fontSize: 13, padding: '2px 10px' }}>
+              {command.operationType} · {opLabel(command.operationType)}
+            </Tag>
+            <Text type="secondary" style={{ marginLeft: 8 }} code>
+              {command.commandCode}
+            </Text>
+          </div>
         </div>
-      </div>
+      )}
 
       <div>
         {read ? (
           <div>
-            <Checkbox
-              indeterminate={checkedPaths.length > 0 && checkedPaths.length < command.paramPaths.length}
-              checked={command.paramPaths.length > 0 && checkedPaths.length === command.paramPaths.length}
-              onChange={(e) =>
-                setCheckedPaths(e.target.checked ? command.paramPaths.map((p) => p.path) : [])
-              }
+            {/* 全选 [操作类型] 命令名称  勾选要查询的参数（§需求 1） */}
+            <Space size={8} wrap style={{ width: '100%' }}>
+              <Checkbox
+                indeterminate={checkedPaths.length > 0 && checkedPaths.length < command.paramPaths.length}
+                checked={command.paramPaths.length > 0 && checkedPaths.length === command.paramPaths.length}
+                onChange={(e) =>
+                  setCheckedPaths(e.target.checked ? command.paramPaths.map((p) => p.path) : [])
+                }
+              >
+                全选
+              </Checkbox>
+              <Tag color={opColor(command.operationType)} style={{ marginInlineEnd: 0 }}>
+                {command.operationType} · {opLabel(command.operationType)}
+              </Tag>
+              <Text strong>{command.commandName}</Text>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                勾选要查询的参数
+              </Text>
+            </Space>
+            {/* PATH 列表固定 10 行高，超出竖向滚动；路径过长横向滚动（§需求 2） */}
+            <div
+              style={{
+                maxHeight: PATH_LIST_MAX_HEIGHT,
+                overflow: 'auto',
+                marginTop: 8,
+                border: '1px solid #f0f0f0',
+                borderRadius: 6,
+                padding: '8px 12px',
+              }}
             >
-              全选
-            </Checkbox>
-            <Text style={{ display: 'block', marginTop: 8, fontSize: 12 }}>勾选要查询的参数：</Text>
-            <Checkbox.Group
-              style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}
-              value={checkedPaths}
-              onChange={(v) => setCheckedPaths(v as string[])}
-            >
-              {command.paramPaths.map((p) => (
-                <Checkbox key={p.path} value={p.path}>
-                  <Text>{p.label}</Text>{' '}
-                  <Text type="secondary" code style={{ fontSize: 11 }}>
-                    {p.path}
-                  </Text>
-                </Checkbox>
-              ))}
-            </Checkbox.Group>
+              <Checkbox.Group
+                style={{ display: 'flex', flexDirection: 'column', gap: 6 }}
+                value={checkedPaths}
+                onChange={(v) => setCheckedPaths(v as string[])}
+              >
+                {command.paramPaths.map((p) => (
+                  <Checkbox key={p.path} value={p.path} style={{ whiteSpace: 'nowrap' }}>
+                    <Text>{p.label}</Text>{' '}
+                    <Text type="secondary" code style={{ fontSize: 11 }}>
+                      {p.path}
+                    </Text>
+                  </Checkbox>
+                ))}
+              </Checkbox.Group>
+            </div>
           </div>
         ) : command.operationType === 'RMV' ? (
           <div>
@@ -188,7 +237,17 @@ export default function ConfigParamsModal({
 
   return (
     <Modal
-      title="配置参数"
+      title={
+        <Space size={8} align="center">
+          <span>配置参数</span>
+          {onGotoCommand && (
+            <Button type="link" size="small" style={{ padding: 0 }} onClick={onGotoCommand}>
+              <LeftOutlined style={{ fontSize: 11 }} />
+              选择命令
+            </Button>
+          )}
+        </Space>
+      }
       open={open}
       width={680}
       onCancel={onCancel}

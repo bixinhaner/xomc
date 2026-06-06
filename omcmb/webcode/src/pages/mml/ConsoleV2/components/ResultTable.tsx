@@ -5,6 +5,7 @@ import {
   Dropdown,
   Empty,
   Input,
+  message,
   Segmented,
   Space,
   Table,
@@ -19,6 +20,7 @@ import {
   DownOutlined,
   ProfileOutlined,
 } from '@ant-design/icons';
+import { useExportTaskCSV, useExportTaskDeviceCSV } from '@core/hooks/api/useMmlConsole';
 import type {
   ExecMeta,
   ExecStatus,
@@ -71,6 +73,42 @@ export default function ResultTable({
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [snKeyword, setSnKeyword] = useState('');
   const [viewingRow, setViewingRow] = useState<ResultRow | null>(null);
+
+  // CSV 导出走后端（落 MinIO + 记入 mml_tasks），拿预签名 URL 触发浏览器下载。
+  const exportCsv = useExportTaskCSV();
+  const exportDeviceCsv = useExportTaskDeviceCSV();
+
+  const handleExportAllCsv = (): void => {
+    if (!commandId) {
+      // 无真实任务 ID（理论不达），回退客户端导出。
+      exportAll('csv', columns, rows, execMeta?.label ?? 'result');
+      return;
+    }
+    exportCsv.mutate(commandId, {
+      onSuccess: ({ downloadUrl }) => {
+        window.open(downloadUrl, '_blank', 'noopener');
+        void message.success('已生成汇总 CSV');
+      },
+      onError: (e) => void message.error(e instanceof Error ? e.message : '导出失败'),
+    });
+  };
+
+  const handleExportDeviceCsv = (deviceSn: string): void => {
+    if (!commandId) {
+      exportOne(columns, rows.find((r) => r.deviceSn === deviceSn)!);
+      return;
+    }
+    exportDeviceCsv.mutate(
+      { taskId: commandId, deviceSn },
+      {
+        onSuccess: ({ downloadUrl }) => {
+          window.open(downloadUrl, '_blank', 'noopener');
+          void message.success(`已生成设备 ${deviceSn} 的 CSV`);
+        },
+        onError: (e) => void message.error(e instanceof Error ? e.message : '导出失败'),
+      },
+    );
+  };
 
   const stats = useMemo(() => {
     const total = rows.length;
@@ -179,12 +217,13 @@ export default function ResultTable({
             <Button type="link" size="small" icon={<ProfileOutlined />} onClick={() => setViewingRow(r)}>
               查看
             </Button>
-            <Tooltip title="下载该设备结果(CSV)">
+            <Tooltip title="下载该设备结果(CSV，存档到 MinIO)">
               <Button
                 type="text"
                 size="small"
                 icon={<DownloadOutlined />}
-                onClick={() => exportOne(columns, r)}
+                loading={exportDeviceCsv.isPending && exportDeviceCsv.variables?.deviceSn === r.deviceSn}
+                onClick={() => handleExportDeviceCsv(r.deviceSn)}
               />
             </Tooltip>
           </Space>
@@ -193,15 +232,24 @@ export default function ResultTable({
     ];
 
     return [...base, ...dynamic, ...tail];
-  }, [columns]);
+    // commandId / 导出 mutation 进依赖：切任务或导出 loading 变化时刷新「操作」列。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [columns, commandId, exportDeviceCsv.isPending, exportDeviceCsv.variables]);
 
   const downloadMenu: MenuProps = {
-    items: (['csv', 'xlsx', 'json'] as ExportFormat[]).map((f) => ({
-      key: f,
-      label: f.toUpperCase(),
-    })),
-    onClick: ({ key }) =>
-      exportAll(key as ExportFormat, columns, rows, execMeta?.label ?? 'result'),
+    items: [
+      { key: 'csv', label: 'CSV（服务器生成，存档到 MinIO）' },
+      { key: 'xlsx', label: 'XLSX（本地）' },
+      { key: 'json', label: 'JSON（本地）' },
+    ],
+    onClick: ({ key }) => {
+      // CSV 走后端：生成 + 落 MinIO + 记入 mml_tasks；XLSX/JSON 仍本地导出。
+      if (key === 'csv') {
+        handleExportAllCsv();
+        return;
+      }
+      exportAll(key as ExportFormat, columns, rows, execMeta?.label ?? 'result');
+    },
   };
 
   return (

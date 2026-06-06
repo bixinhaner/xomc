@@ -304,6 +304,8 @@ export interface DeviceFilter {
   groupId?: string;
   /** 激活状态：'1'=激活，'0'=未激活 */
   opState?: string;
+  /** 产品装配件 UUID（下拉来自 /products），对应后端 ?product_id= → devices.product_id */
+  productId?: string;
   /** 产品型号（如 PM-B4860, QAFA 等），对应后端 product_class */
   productModel?: string;
   /** T-0162: 设备型号（字典 device_model 提供下拉），后端 ?model_name= */

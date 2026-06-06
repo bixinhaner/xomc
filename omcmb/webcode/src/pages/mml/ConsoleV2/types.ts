@@ -130,7 +130,15 @@ export interface RawPathPayload {
 
 /** 执行请求（标准 / 裸路径两模式的判别联合）。 */
 export type ExecRequest =
-  | { mode: 'standard'; checkedPaths: string[] }
+  | {
+      mode: 'standard';
+      /** 勾选的参数路径（= tr069 标准路径，结构化执行的 paths） */
+      checkedPaths: string[];
+      /** MOD/ADD 写入值（key = 路径）；LST/RMV 不消费 */
+      values?: Record<string, string>;
+      /** RMV 删除的实例号 */
+      instance?: number;
+    }
   | { mode: 'raw'; operationType: MMLOperationType; rows: RawPathRow[] };
 
 /** 一次执行的元信息（驱动结果表格列语义 + 「查看」详情的任务信息区）。 */

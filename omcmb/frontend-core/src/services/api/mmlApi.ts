@@ -835,6 +835,33 @@ export const mmlApi = {
     };
   },
 
+  // --- Result CSV export (MinIO) ---
+
+  /**
+   * 生成「全设备汇总」结果 CSV，落 MinIO（reports/mml-results/ 目录），地址记入
+   * mml_tasks.export_object，返回 object key 与浏览器可下载的预签名 URL。
+   */
+  async exportTaskCSV(taskId: string): Promise<{ object: string; downloadUrl: string }> {
+    const { data } = await http.post<{ object: string; download_url: string }>(
+      `/mml/tasks/${taskId}/export`
+    );
+    // http 拦截器已 snake→camel：download_url → downloadUrl
+    const d = data as unknown as { object: string; downloadUrl: string };
+    return { object: d.object, downloadUrl: d.downloadUrl };
+  },
+
+  /** 生成「单设备」结果 CSV，落 MinIO 并记入 mml_tasks.device_export_objects[sn]。 */
+  async exportTaskDeviceCSV(
+    taskId: string,
+    deviceSn: string
+  ): Promise<{ object: string; downloadUrl: string }> {
+    const { data } = await http.post<{ object: string; download_url: string }>(
+      `/mml/tasks/${taskId}/devices/${encodeURIComponent(deviceSn)}/export`
+    );
+    const d = data as unknown as { object: string; downloadUrl: string };
+    return { object: d.object, downloadUrl: d.downloadUrl };
+  },
+
   // --- Dangerous command check ---
 
   async checkDangerous(

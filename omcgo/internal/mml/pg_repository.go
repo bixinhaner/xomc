@@ -1009,6 +1009,48 @@ func (r *PgTaskRepository) UpdateStatus(ctx context.Context, id uuid.UUID, statu
 	return nil
 }
 
+// UpdateExportAggregate 记录全设备汇总 CSV 的 object key 与生成时间。
+func (r *PgTaskRepository) UpdateExportAggregate(ctx context.Context, id uuid.UUID, objectKey string, t time.Time) error {
+	query, args, err := storage.Psql.Update("mml_tasks").
+		Set("export_object", objectKey).
+		Set("export_generated_at", t).
+		Set("updated_at", t).
+		Where(sq.Eq{"id": id}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build update mml_task export SQL: %w", err)
+	}
+	result, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("update mml_task export_object: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return commonerrors.ErrNotFound
+	}
+	return nil
+}
+
+// UpdateExportDevice 把单设备 CSV 的 object key 合并进 device_export_objects（JSONB map）。
+func (r *PgTaskRepository) UpdateExportDevice(ctx context.Context, id uuid.UUID, deviceSN, objectKey string, t time.Time) error {
+	query, args, err := storage.Psql.Update("mml_tasks").
+		Set("device_export_objects", sq.Expr("device_export_objects || jsonb_build_object(?::text, ?::text)", deviceSN, objectKey)).
+		Set("export_generated_at", t).
+		Set("updated_at", t).
+		Where(sq.Eq{"id": id}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build update mml_task device export SQL: %w", err)
+	}
+	result, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("update mml_task device_export_objects: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return commonerrors.ErrNotFound
+	}
+	return nil
+}
+
 func (r *PgTaskRepository) IncrementStats(ctx context.Context, id uuid.UUID, successDelta, failedDelta int) error {
 	builder := storage.Psql.Update("mml_tasks").
 		Set("success_count", sq.Expr("success_count + ?", successDelta)).

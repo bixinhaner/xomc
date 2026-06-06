@@ -117,6 +117,17 @@ export const deviceService = {
     return devices.find((d) => d.sn === sn) ?? null;
   },
 
+  /** 批量校验 SN 在线状态——返回入参中「存在且在线」的 SN 子集（去重、保序）。 */
+  async verifyOnlineSns(sns: string[]): Promise<string[]> {
+    await delay(80, 200);
+    const unique = Array.from(new Set(sns.map((s) => s.trim()).filter(Boolean)));
+    return unique.filter((sn) => {
+      const d = devices.find((x) => x.sn === sn);
+      if (!d) return false;
+      return typeof d.isOnline === 'boolean' ? d.isOnline : d.connStatus === 'online';
+    });
+  },
+
   async create(data: Omit<Device, 'id' | 'createTime'>): Promise<Device> {
     await delay(200, 400);
     const newDevice: Device = {

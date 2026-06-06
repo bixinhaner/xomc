@@ -76,6 +76,16 @@ export function useDeviceBySn(sn: string) {
   });
 }
 
+/**
+ * 批量校验 SN 在线状态，返回入参中「存在且在线」的 SN 子集。
+ * 供 MML 控制台「批量输入」过滤离线设备（不受其他筛选条件影响）。
+ */
+export function useVerifyOnlineSns() {
+  return useMutation({
+    mutationFn: (sns: string[]) => api.verifyOnlineSns(sns),
+  });
+}
+
 export function useDeviceGroups() {
   return useQuery({
     queryKey: ['devices', 'groups'],
