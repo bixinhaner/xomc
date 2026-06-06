@@ -29,21 +29,21 @@ type RoleQuerier interface {
 
 // Service provides business logic for the MML console module.
 type Service struct {
-	cmdRepo          CommandRepository
-	scriptRepo       ScriptRepository
-	taskRepo         TaskRepository
-	customCommandRepo CustomCommandRepository
-	auditRepo        AuditRepository
-	cmdParamRepo     CommandParamRepository
-	fanouter         *Fanouter
-	hub              SSEPublisher
-	roleQuerier      RoleQuerier // optional; nil 时 ListCustomCommands fallback creator-only 过滤
+	cmdRepo                      CommandRepository
+	scriptRepo                   ScriptRepository
+	taskRepo                     TaskRepository
+	customCommandRepo            CustomCommandRepository
+	auditRepo                    AuditRepository
+	cmdParamRepo                 CommandParamRepository
+	fanouter                     *Fanouter
+	hub                          SSEPublisher
+	roleQuerier                  RoleQuerier                  // optional; nil 时 ListCustomCommands fallback creator-only 过滤
 	deviceTaskPathMissAggregator DeviceTaskPathMissAggregator // Stage 3 路径翻译警告字段聚合
 	deviceTaskResultLister       DeviceTaskResultLister       // 任务记录"查看"modal 的设备级结果（2026-05-23 修）
-	deviceLookup     DeviceLookup // R-8.4 product_class 一致性校验；nil 时跳过（向后兼容）
-	pathTranslator   PathTranslator // R-9.3 per-device standardPath → privatePath 翻译；nil 时跳过
-	exporter         *Exporter      // 结果 CSV 导出（MinIO）；nil 时导出端点返回 503
-	logger           *zap.Logger
+	deviceLookup                 DeviceLookup                 // R-8.4 product_class 一致性校验；nil 时跳过（向后兼容）
+	pathTranslator               PathTranslator               // R-9.3 per-device standardPath → privatePath 翻译；nil 时跳过
+	exporter                     *Exporter                    // 结果 CSV 导出（MinIO）；nil 时导出端点返回 503
+	logger                       *zap.Logger
 }
 
 // DeviceLookup 接口复用 fanout.go 已有定义（GetBySerialNumber → *model.Device，
@@ -139,12 +139,12 @@ func NewService(
 	logger *zap.Logger,
 ) *Service {
 	return &Service{
-		cmdRepo:          cmdRepo,
-		scriptRepo:       scriptRepo,
-		taskRepo:         taskRepo,
+		cmdRepo:           cmdRepo,
+		scriptRepo:        scriptRepo,
+		taskRepo:          taskRepo,
 		customCommandRepo: customCommandRepo,
-		hub:              hub,
-		logger:           logger.Named("mml"),
+		hub:               hub,
+		logger:            logger.Named("mml"),
 	}
 }
 
@@ -550,6 +550,9 @@ type ExecuteRequest struct {
 	ParamPaths    []string `json:"param_paths"`
 	ParamValues   []string `json:"param_values"` // 与 ParamPaths 等长，仅 MOD 时使用
 	OperationType string   `json:"operation_type"`
+	// ExecuteMode: ""/"whole"=整体下发(一条 RPC 含全部 path)；"single_path"=逐 PATH
+	// (LST/MOD 拆成每 path 一条 command→每 path 一个 device_task/RPC，path 级成败独立)。
+	ExecuteMode string `json:"execute_mode"`
 
 	// Scheduling
 	ExecuteType ExecuteType `json:"execute_type"`
@@ -763,6 +766,20 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 
 		switch op {
 		case "LST", "DSP":
+			if req.ExecuteMode == "single_path" {
+				// 逐 PATH：每 path 一条 GetParameterValues command → 每 path 一个 device_task/RPC，
+				// path 级成败独立（某 path 9005 不连累其它 path）。
+				for _, p := range paths {
+					commands = append(commands, map[string]interface{}{
+						"command_code":   "RAW " + op,
+						"rpc_method":     "GetParameterValues",
+						"operation_type": op,
+						"param_paths":    []string{p},
+						"param_refs":     []MMLParamRef{{Tr069Path: p, ValueType: "string"}},
+					})
+				}
+				break
+			}
 			synthRefs := make([]MMLParamRef, len(paths))
 			for i, p := range paths {
 				synthRefs[i] = MMLParamRef{Tr069Path: p, ValueType: "string"}
@@ -781,6 +798,20 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 				if strings.TrimSpace(v) == "" {
 					return nil, fmt.Errorf("raw param_paths MOD: param_values[%d] is empty for path %q", i, paths[i])
 				}
+			}
+			if req.ExecuteMode == "single_path" {
+				// 逐 PATH：每 path 一条 SetParameterValues command → path 级成败独立。
+				for i, p := range paths {
+					commands = append(commands, map[string]interface{}{
+						"command_code":   "RAW MOD",
+						"rpc_method":     "SetParameterValues",
+						"operation_type": op,
+						"param_paths":    []string{p},
+						"param_refs":     []MMLParamRef{{ParamCode: p, Tr069Path: p, ValueType: "string"}},
+						"parameters":     map[string]interface{}{p: values[i]},
+					})
+				}
+				break
 			}
 			synthRefs := make([]MMLParamRef, len(paths))
 			formValues := make(map[string]interface{}, len(paths))

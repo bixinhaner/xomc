@@ -93,6 +93,8 @@ export type DeviceResultStatus = 'completed' | 'running' | 'pending';
 
 export interface DeviceTaskResultItem {
   deviceSn: string;
+  /** device_tasks.command_index —— 逐 PATH 模式下定位该条结果属于哪个 path（命令序号） */
+  commandIndex?: number;
   deviceName?: string;
   mmlScript?: string;
   status?: DeviceResultStatus;

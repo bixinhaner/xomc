@@ -247,6 +247,7 @@ func (r *PgSubFieldRepository) ListByCommand(ctx context.Context, commandID uuid
 //   - 仅有 min   → "≥ min"
 //   - 仅有 max   → "≤ max"
 //   - 都为 NULL → 空（前端 AccessTypeTag Tooltip 走"无明确取值范围"兜底文案）
+//
 // 数字内容 zh-CN / en-US 同形，i18n 两 key 同值即可。
 func (r *PgSubFieldRepository) ListEnrichedByCommand(ctx context.Context, commandID uuid.UUID, paramModelID *uuid.UUID) ([]MMLCommandSubFieldEnriched, error) {
 	// 2026-05-27 用户决策(撤销 T-0183): EXISTS 重新加上 `AND pm.is_supported = true`,
@@ -322,6 +323,7 @@ SELECT
     END                                   AS constraint_text_i18n,
     NULL::text                            AS default_value,
     NULL::text                            AS js_regex,
+    sp.min_value                          AS min_value,
     jsonb_build_object(
         'zh-CN', sp.standard_path,
         'en-US', sp.standard_path
@@ -349,7 +351,7 @@ ORDER BY csf.sort_order ASC, csf.mml_code ASC`
 			&e.Tr069Path, &e.ValueType,
 			&e.AccessType, &e.IsObject, &e.SupportsAdd, &e.SupportsDelete,
 			&e.ChangeApplies, &constraintI18n,
-			&e.DefaultValue, &e.JsRegex, &paramNameI18n,
+			&e.DefaultValue, &e.JsRegex, &e.MinValue, &paramNameI18n,
 			&e.Description,
 			&e.IsSupported,
 		); err != nil {

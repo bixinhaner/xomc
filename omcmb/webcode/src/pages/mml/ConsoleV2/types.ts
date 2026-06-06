@@ -28,16 +28,25 @@ export interface CommandItem {
   description: string;
   /** 该命令涉及的参数路径（LST 查询列 / MOD 写入项的来源） */
   paramPaths: CommandParamPath[];
+  /**
+   * ADD/RMV 的目标对象路径（含父级 `.{i}.` 占位符）；增/删对象时实例选择器按其
+   * `.{i}.` 个数渲染。来自命令的 target_object（GroupTreeCommand）。
+   */
+  targetObject?: string;
 }
 
 /** 命令绑定的参数路径 */
 export interface CommandParamPath {
-  /** TR-069 标准路径 */
+  /** TR-069 标准路径（可能含 `.{i}.` 实例占位符） */
   path: string;
   /** 展示用短标签（结果表格列头） */
   label: string;
   /** 是否可写（MOD/ADD 时可填值） */
   writable: boolean;
+  /** 该 path 末级是否为多实例对象（standard_params.entry_type='object'） */
+  isObject: boolean;
+  /** standard_params.min_value：MOD/ADD 填值时该标量参数的默认值 */
+  minValue?: number;
 }
 
 /**
@@ -138,8 +147,17 @@ export type ExecRequest =
       values?: Record<string, string>;
       /** RMV 删除的实例号 */
       instance?: number;
+      /** 父级 `.{i}.` 实例选择器（key=i01/i02…，value=具体实例号，默认 1） */
+      instanceSelectors?: Record<string, string>;
+      /** 下发方式：whole=整体一条 RPC；single-path=逐 PATH 每 path 一条 RPC（成败独立） */
+      execMode?: ExecMode;
     }
-  | { mode: 'raw'; operationType: MMLOperationType; rows: RawPathRow[] };
+  | {
+      mode: 'raw';
+      operationType: MMLOperationType;
+      rows: RawPathRow[];
+      execMode?: ExecMode;
+    };
 
 /** 一次执行的元信息（驱动结果表格列语义 + 「查看」详情的任务信息区）。 */
 export interface ExecMeta {

@@ -357,6 +357,7 @@ function mapTaskResultsStats(
 function mapBackendResult(br: Record<string, unknown>): DeviceTaskResultItem {
   return {
     deviceSn: (br.device_sn as string) || '',
+    commandIndex: typeof br.command_index === 'number' ? (br.command_index as number) : undefined,
     deviceName: (br.device_name as string) || undefined,
     mmlScript: (br.mml_script as string) || (br.command as string) || undefined,
     status: (br.status as DeviceTaskResultItem['status']) || undefined,
@@ -835,6 +836,34 @@ export const mmlApi = {
     };
   },
 
+  /**
+   * 解析 TR-069 path → 友好名（standard_params.description，即「设备模型 path 字典」里的对应名称）。
+   * 供「指定参数」(裸路径)执行的命令记录命名。按 path 精确匹配 standard-params 字典；
+   * 无权限/未命中时该 path 缺省，调用方回退路径叶子名。
+   */
+  async resolveParamNames(paths: string[]): Promise<Record<string, string>> {
+    const uniq = Array.from(new Set(paths.map((p) => p.trim()).filter(Boolean)));
+    const out: Record<string, string> = {};
+    await Promise.all(
+      uniq.map(async (p) => {
+        try {
+          // Search 走 URL 直拼（绕过 http 拦截器的 camelCase→snake_case 改名：后端字段名为
+          // Search，被转成 search 会失效）；page/page_size 已是 snake，可走 params。
+          const { data } = await http.get<
+            BackendListResponse<{ standard_path: string; description: string }>
+          >(`/mml/admin/standard-params?Search=${encodeURIComponent(p)}`, {
+            params: { page: 1, page_size: 20 },
+          });
+          const hit = (data.items || []).find((it) => it.standard_path === p);
+          if (hit?.description) out[p] = hit.description;
+        } catch {
+          /* 无权限/失败 → 跳过；调用方回退叶子名 */
+        }
+      }),
+    );
+    return out;
+  },
+
   // --- Result CSV export (MinIO) ---
 
   /**
@@ -1220,6 +1249,7 @@ function mapSubField(s: BackendSubField): SubFieldDef {
     valueType: s.value_type,
     accessType: s.access_type,
     isObject: s.is_object,
+    minValue: s.min_value ?? undefined,
     supportsAdd: s.supports_add,
     supportsDelete: s.supports_delete,
     changeApplies: s.change_applies,

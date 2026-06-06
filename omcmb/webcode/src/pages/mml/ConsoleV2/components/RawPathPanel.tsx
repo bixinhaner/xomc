@@ -3,6 +3,7 @@ import { MinusOutlined, PlusOutlined } from '@ant-design/icons';
 import type { MMLOperationType } from '@core/types/mml';
 import type { RawPathPayload, RawPathRow } from '../types';
 import { newRawPathRow as newRow } from '../rawPathRow';
+import { rawPathPlaceholder, validateRawPath } from '../rawPathValidate';
 
 const { Text } = Typography;
 
@@ -78,57 +79,65 @@ export default function RawPathPanel({ value, onChange, suggestions }: RawPathPa
       <div>
         <Text type="secondary">参数路径</Text>
         {showValue && <Text type="secondary" style={{ marginLeft: 12 }}>· 参数值</Text>}
+        {/* 提示文案紧跟「参数路径」之后（§需求 2）；ADD/RMV 给出 TR-069 对象路径形态提示（plan A）。 */}
+        <Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 4 }}>
+          ⓘ 裸路径直发，支持 TR-069 参数树路径格式（须填具体实例号，不支持 {'{i}'} 占位符）。
+          {operationType === 'ADD' && ' ADD：路径填到对象表层级、以 . 结尾，末级不带实例号（设备自动分配）。'}
+          {(operationType === 'RMV') && ' RMV：路径须以 .<实例号>. 结尾，指定要删除的实例。'}
+          {showValue && ' MOD 需为每条路径填写参数值。'}
+        </Text>
         <Space direction="vertical" size={8} style={{ width: '100%', marginTop: 8 }}>
-          {rows.map((row, index) => (
-            <div key={row.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-              <span style={{ width: 18, lineHeight: '32px', color: 'rgba(0,0,0,0.45)' }}>
-                {index + 1}.
-              </span>
-              <AutoComplete
-                value={row.path}
-                options={suggestions}
-                onChange={(v) => updatePath(row.id, v)}
-                placeholder="Device.Services.FAPService.{i}..."
-                style={{ flex: showValue ? 2 : 1, minWidth: 0 }}
-                filterOption={(input, option) =>
-                  String(option?.value ?? '').toLowerCase().includes(input.toLowerCase())
-                }
-              />
-              {showValue && (
-                <Input
-                  value={row.value}
-                  onChange={(e) => updateValue(row.id, e.target.value)}
-                  placeholder="请输入参数值"
-                  style={{ flex: 1, minWidth: 0 }}
-                />
-              )}
-              <Button
-                size="small"
-                icon={<PlusOutlined />}
-                onClick={() => addRow(row.id)}
-                disabled={singleRowOnly}
-                title={singleRowOnly ? 'ADD / RMV 单次仅作用一个对象，已锁定单行' : undefined}
-              />
-              <Button
-                size="small"
-                icon={<MinusOutlined />}
-                onClick={() => removeRow(row.id)}
-                disabled={rows.length <= 1}
-              />
-            </div>
-          ))}
+          {rows.map((row, index) => {
+            const pathError = validateRawPath(operationType, row.path);
+            return (
+              <div key={row.id}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                  <span style={{ width: 18, lineHeight: '32px', color: 'rgba(0,0,0,0.45)' }}>
+                    {index + 1}.
+                  </span>
+                  <AutoComplete
+                    value={row.path}
+                    options={suggestions}
+                    onChange={(v) => updatePath(row.id, v)}
+                    placeholder={rawPathPlaceholder(operationType)}
+                    status={pathError ? 'error' : undefined}
+                    style={{ flex: showValue ? 2 : 1, minWidth: 0 }}
+                    filterOption={(input, option) =>
+                      String(option?.value ?? '').toLowerCase().includes(input.toLowerCase())
+                    }
+                  />
+                  {showValue && (
+                    <Input
+                      value={row.value}
+                      onChange={(e) => updateValue(row.id, e.target.value)}
+                      placeholder="请输入参数值"
+                      style={{ flex: 1, minWidth: 0 }}
+                    />
+                  )}
+                  <Button
+                    size="small"
+                    icon={<PlusOutlined />}
+                    onClick={() => addRow(row.id)}
+                    disabled={singleRowOnly}
+                    title={singleRowOnly ? 'ADD / RMV 单次仅作用一个对象，已锁定单行' : undefined}
+                  />
+                  <Button
+                    size="small"
+                    icon={<MinusOutlined />}
+                    onClick={() => removeRow(row.id)}
+                    disabled={rows.length <= 1}
+                  />
+                </div>
+                {pathError && (
+                  <Text type="danger" style={{ display: 'block', fontSize: 12, marginLeft: 26 }}>
+                    {pathError}
+                  </Text>
+                )}
+              </div>
+            );
+          })}
         </Space>
       </div>
-
-      <Text type="secondary" style={{ fontSize: 12 }}>
-        ⓘ 裸路径直发，不经 sub_field 字典校验，支持 TR-069 参数树路径格式。
-        {showValue && ' MOD 需为每条路径填写参数值。'}
-      </Text>
-      {singleRowOnly && (
-        <Text type="warning" style={{ fontSize: 12 }}>
-          ADD / RMV 协议规定单次仅作用于一个对象路径，已锁定为单行。
-        </Text>
-      )}
     </Space>
   );
 }

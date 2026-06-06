@@ -1,12 +1,5 @@
 import { Button, Card, Empty, Popconfirm, Space, Tag, Tooltip, Typography } from 'antd';
-import {
-  DeleteOutlined,
-  HistoryOutlined,
-  LeftOutlined,
-  LinkOutlined,
-  RightOutlined,
-} from '@ant-design/icons';
-import { useNavigate } from 'react-router-dom';
+import { DeleteOutlined, HistoryOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons';
 import type { ExecRecord } from '../types';
 import { opColor } from '../constants';
 
@@ -35,7 +28,6 @@ export default function CommandHistoryPanel({
   onClear,
   onToggleCollapsed,
 }: CommandHistoryPanelProps) {
-  const navigate = useNavigate();
   // 收缩态:窄条,仅图标 + 展开按钮 + 记录数徽标。
   if (collapsed) {
     return (
@@ -124,23 +116,11 @@ export default function CommandHistoryPanel({
                   <Text type="secondary" style={{ fontSize: 12 }}>
                     {r.time}
                   </Text>
-                  <Space size={4}>
-                    <Text type="secondary" style={{ fontSize: 12 }}>
-                      {r.deviceCount} 台
-                    </Text>
-                    <Tooltip title="打开任务详情">
-                      <Button
-                        type="text"
-                        size="small"
-                        icon={<LinkOutlined />}
-                        style={{ height: 18, width: 18, minWidth: 18 }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          navigate(`/mml/tasks/${r.commandId}`);
-                        }}
-                      />
-                    </Tooltip>
-                  </Space>
+                  {/* 不再深链「任务详情」：一条命令记录对应多条「分设备」任务记录，
+                      单 task 详情页无法对应；逐设备详情用结果表格行「查看」。 */}
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {r.deviceCount} 台
+                  </Text>
                 </Space>
                 <div style={{ marginTop: 4 }}>
                   <Tag color={opColor(r.operationType)} style={{ marginInlineEnd: 6 }}>

@@ -86,7 +86,9 @@ export default function SelectionBar({
           size="large"
           icon={<SettingOutlined />}
           type={command && !configSummary ? 'primary' : 'default'}
-          disabled={!command}
+          // 选好设备即可打开「配置参数」：命令参数(需选命令)与指定参数(裸路径,无需命令)
+          // 两种模式都在此弹框内；仅以命令为门会让「指定参数」流程下无法回到本页编辑。
+          disabled={deviceCount === 0}
           onClick={onConfigParams}
         >
           <Space size={6}>

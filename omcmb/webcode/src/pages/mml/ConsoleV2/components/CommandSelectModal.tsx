@@ -5,7 +5,7 @@ import type { DataNode } from 'antd/es/tree';
 import { useGroupTree, useCommandSubFields } from '@core/hooks/api/useMmlConsole';
 import { useI18nText } from '@/hooks/useI18nText';
 import type { CommandItem } from '../types';
-import { opColor } from '../constants';
+import { COMMAND_MODAL_BODY_HEIGHT, opColor } from '../constants';
 import { flattenGroupTree, mapCommandItem, subFieldsToParamPaths } from '../adapters';
 
 const { Text } = Typography;
@@ -78,19 +78,25 @@ export default function CommandSelectModal({
       key: `group:${group}`,
       title: group,
       selectable: false,
-      children: items.map((e) => ({
-        key: e.command.id,
-        title: (
-          <Space size={6}>
-            <Tag color={opColor(e.command.operationType)} style={{ marginInlineEnd: 0 }}>
-              {e.command.operationType}
-            </Tag>
-            <span>{e.command.displayName}</span>
-          </Space>
-        ),
-      })),
+      children: items.map((e) => {
+        // 选中命令名加粗 + 主题色高亮，配合 Tree 选中底色给出明确的点击选中效果（§需求 3）。
+        const isSelected = e.command.id === selectedId;
+        return {
+          key: e.command.id,
+          title: (
+            <Space size={6}>
+              <Tag color={opColor(e.command.operationType)} style={{ marginInlineEnd: 0 }}>
+                {e.command.operationType}
+              </Tag>
+              <span style={{ fontWeight: isSelected ? 600 : undefined, color: isSelected ? '#1677ff' : undefined }}>
+                {e.command.displayName}
+              </span>
+            </Space>
+          ),
+        };
+      }),
     }));
-  }, [filtered]);
+  }, [filtered, selectedId]);
 
   const expandedKeys = useMemo(() => treeData.map((n) => n.key as string), [treeData]);
 
@@ -107,7 +113,18 @@ export default function CommandSelectModal({
 
   return (
     <Modal
-      title="选择命令"
+      title={
+        <Space size={12} align="center">
+          <span>选择命令</span>
+          {/* 「指定参数」入口：跳过命令选择，直接跳到「配置参数」的指定 PATH 模式（§需求 1/5） */}
+          <Tooltip title="跳过命令选择，指定 PATH 执行">
+            <Button type="link" size="small" style={{ padding: 0 }} onClick={onGotoRawParams}>
+              指定参数
+              <RightOutlined style={{ fontSize: 11 }} />
+            </Button>
+          </Tooltip>
+        </Space>
+      }
       open={open}
       width={860}
       onCancel={onCancel}
@@ -117,22 +134,16 @@ export default function CommandSelectModal({
       okButtonProps={{ disabled: !selectedEntry || subFieldsLoading || !subFields }}
       destroyOnHidden
     >
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+      <div style={{ marginBottom: 12 }}>
         <Input.Search
           allowClear
-          placeholder="搜索：命令码 / 名称 / 分组"
-          style={{ flex: 1, maxWidth: 420 }}
+          placeholder="命令分组 / 名称"
+          style={{ width: 240 }}
           value={keyword}
           onChange={(e) => setKeyword(e.target.value)}
         />
-        <Tooltip title="跳过命令选择，直接执行「指定参数」">
-          <Button type="link" onClick={onGotoRawParams}>
-            指定参数
-            <RightOutlined style={{ fontSize: 11 }} />
-          </Button>
-        </Tooltip>
       </div>
-      <div style={{ display: 'flex', gap: 12, height: 380 }}>
+      <div style={{ display: 'flex', gap: 12, height: COMMAND_MODAL_BODY_HEIGHT }}>
         <div style={{ width: '42%', overflow: 'auto', borderRight: '1px solid #f0f0f0', paddingRight: 8 }}>
           {treeLoading ? (
             <div style={{ textAlign: 'center', marginTop: 120 }}>
@@ -156,15 +167,6 @@ export default function CommandSelectModal({
         <div style={{ flex: 1, overflow: 'auto' }}>
           {selectedEntry ? (
             <Space direction="vertical" size={10} style={{ width: '100%' }}>
-              {/* 命令详情头：操作类型缩写(Tag) + 命令名称 */}
-              <Space size={8} wrap>
-                <Tag color={opColor(selectedEntry.command.operationType)} style={{ marginInlineEnd: 0 }}>
-                  {selectedEntry.command.operationType}
-                </Tag>
-                <Text strong style={{ fontSize: 15 }}>
-                  {selectedEntry.command.displayName}
-                </Text>
-              </Space>
               {subFieldsLoading ? (
                 <Spin size="small" />
               ) : (

@@ -105,6 +105,8 @@ export interface BackendSubField {
   constraint_text_i18n: Record<string, string>;
   default_value?: string;
   js_regex?: string;
+  /** standard_params.min_value：MOD/ADD 填值时标量参数默认值（值默认取 min_value）。 */
+  min_value?: number | null;
   default_selected: boolean;
   is_required: boolean;
   sort_order: number;
@@ -246,6 +248,8 @@ export interface SubFieldDef {
   constraintTextI18n: Record<string, string>;
   defaultValue?: string;
   jsRegex?: string;
+  /** standard_params.min_value：MOD/ADD 填值时标量参数默认值（值默认取 min_value）。 */
+  minValue?: number;
   defaultSelected: boolean;
   isRequired: boolean;
   sortOrder: number;

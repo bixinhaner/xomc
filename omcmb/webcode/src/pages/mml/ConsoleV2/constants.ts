@@ -64,11 +64,12 @@ export const UNVERIFIED_REASON_TEXT: Record<UnverifiedReason, string> = {
 /** 设备弹框服务端分页每页条数（mock 沿用现控制台 50 条上限）。 */
 export const DEVICE_MODAL_PAGE_SIZE = 10;
 
-/**
- * 「配置参数」弹框 PATH 勾选列表的最大可视高度（约 10 行）。
- * 超过即出现竖向滚动条；单行路径过长由容器 overflow:auto 触发横向滚动条。
- */
-export const PATH_LIST_MAX_HEIGHT = 300;
+// 三步弹框（选择设备 / 选择命令 / 配置参数）统一固定高度，切换命令/标签页时不抖动，
+// 整体高度参考「选择设备」弹框（其表格 scroll.y=320 + 表头/分页 ≈ 总高基准，不改动作为参照）。
+/** 「选择命令」左右两栏主体高度（含搜索行后总高 ≈「选择设备」）。 */
+export const COMMAND_MODAL_BODY_HEIGHT = 450;
+/** 「配置参数」标签页内容区固定高度，超出竖向滚动（§需求 2），使总高不随命令变化（§需求 1）。 */
+export const CONFIG_TAB_HEIGHT = 330;
 
 // 单次执行设备数上限（设计 §3.10.1，2026-06-04 用户决策 200）。
 // 依据：MML 执行无显式上限,但扇出单批 BatchCreateTasks 受 PostgreSQL 65535 bind 参数

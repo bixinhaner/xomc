@@ -269,9 +269,11 @@ type SubFieldDTO struct {
 	ConstraintTextI18n map[string]string `json:"constraint_text_i18n"`
 	DefaultValue       *string           `json:"default_value,omitempty"`
 	JsRegex            *string           `json:"js_regex,omitempty"`
-	DefaultSelected    bool              `json:"default_selected"`
-	IsRequired         bool              `json:"is_required"`
-	SortOrder          int               `json:"sort_order"`
+	// MinValue 是 standard_params.min_value：MML 控制台 MOD/ADD 填值时标量参数默认值。
+	MinValue        *int64 `json:"min_value,omitempty"`
+	DefaultSelected bool   `json:"default_selected"`
+	IsRequired      bool   `json:"is_required"`
+	SortOrder       int    `json:"sort_order"`
 	// Description 是 TR-181 path 的中文含义说明（来自 standard_params.description）。
 	// 前端 MML 控制台 path 行 tooltip / 行内提示用；可为空。
 	Description string `json:"description,omitempty"`
@@ -285,7 +287,7 @@ type SubFieldDTO struct {
 //     · 孤儿（ProductResolved=false 或 ParamModelID=nil）→ 返空集 []
 //  2. productClass 为空 + deviceKey 非空 → resolveParamModelByDevice
 //     · 孤儿(silent skip:SN 不存在 / dev.ProductClass="" / 孤儿 productClass / 无 paramModel)
-//       → 返空集 []（与分支 1 对齐）
+//     → 返空集 []（与分支 1 对齐）
 //     · 真实错误（DB / 网络）→ log warn 后退化全集（容错，避免硬错误反馈给前端）
 //  3. 两者都空（或 resolver 未装配）→ admin 视图全集
 //
@@ -353,6 +355,7 @@ func (s *ConsoleService) GetCommandSubFields(ctx context.Context, commandID uuid
 			ConstraintText:     pickI18n(e.ConstraintTextI18n, lang, "", "", ""),
 			DefaultValue:       e.DefaultValue,
 			JsRegex:            e.JsRegex,
+			MinValue:           e.MinValue,
 			DefaultSelected:    e.DefaultSelected,
 			IsRequired:         e.IsRequired,
 			SortOrder:          e.SortOrder,
@@ -411,7 +414,7 @@ type ParseRequest struct {
 
 // ParseResponse 是 POST /mml/parse 的响应体。
 type ParseResponse struct {
-	Statements []Statement  `json:"statements"`
+	Statements  []Statement  `json:"statements"`
 	ParseErrors []ParseError `json:"parse_errors"`
 }
 
@@ -468,8 +471,9 @@ func (s *ConsoleService) LookupByLogicalCode(ctx context.Context, op, logicalCod
 }
 
 // deriveLogicalCodeFromCommandCode 从 command_code 派生 logical_code（去 op 前缀）。
-//   "LST_DEVICE_INFO" → "DEVICE_INFO"
-//   "DEVICE_INFO" (无前缀) → "DEVICE_INFO"
+//
+//	"LST_DEVICE_INFO" → "DEVICE_INFO"
+//	"DEVICE_INFO" (无前缀) → "DEVICE_INFO"
 func deriveLogicalCodeFromCommandCode(commandCode, op string) string {
 	prefix := op + "_"
 	if len(commandCode) > len(prefix) && commandCode[:len(prefix)] == prefix {

@@ -169,7 +169,12 @@ export default function ResultTable({
       ellipsis: true,
       render: (_v, r) => {
         const val = r.cells[c.path];
-        if (r.status === 'failed') return <Text type="secondary">-</Text>;
+        if (r.status === 'failed') {
+          // 逐 PATH：失败行仍含成功 path 的读回值与失败 path 的「✗ 失败」标记，逐格呈现；
+          // 整体下发失败（无单格值）回退「-」。
+          if (val === '✗ 失败') return <Text type="danger">{val}</Text>;
+          return val ? <Text>{val}</Text> : <Text type="secondary">-</Text>;
+        }
         // 未核实（只写/重启生效）：无读回值，灰显占位
         if (r.status === 'unverified') {
           return (

@@ -115,6 +115,8 @@ type ExecuteHTTPRequest struct {
 	ParamPaths    []string `json:"param_paths"`
 	ParamValues   []string `json:"param_values"`
 	OperationType string   `json:"operation_type"`
+	// ""/"whole"=整体下发；"single_path"=逐 PATH（LST/MOD 每 path 一条 RPC）
+	ExecuteMode string `json:"execute_mode"`
 }
 
 // CreateTaskHTTPRequest defines the request body for POST /api/v1/mml/tasks
@@ -145,6 +147,7 @@ type CreateTaskHTTPRequest struct {
 	ParamPaths    []string `json:"param_paths"`
 	ParamValues   []string `json:"param_values"`
 	OperationType string   `json:"operation_type"`
+	ExecuteMode   string   `json:"execute_mode"`
 }
 
 // CreateScriptRequest defines the request body for creating an MML script.
@@ -318,6 +321,7 @@ func (h *Handler) runExecute(c *gin.Context, req ExecuteHTTPRequest) {
 		ParamPaths:          req.ParamPaths,
 		ParamValues:         req.ParamValues,
 		OperationType:       req.OperationType,
+		ExecuteMode:         req.ExecuteMode,
 	}
 	if req.ScriptID != "" {
 		execReq.ScriptID = &req.ScriptID

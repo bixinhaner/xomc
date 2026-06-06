@@ -571,6 +571,33 @@ V2 当前左操作区 `OperationPanel` 只实现了「控制面板（结构化�
 
 ---
 
+### 3.14 实例 {i} 与 ADD/RMV 对象增删（2026-06-06，TR-069 语义对齐）
+
+补齐「配置参数」两个标签页对 TR-069 多实例对象的处理，依据 AddObject / DeleteObject 语义：
+
+| 操作 | 末级对象自身 `{i}` | 父级 `{i}` | 说明 |
+|---|---|---|---|
+| ADD = AddObject | **不填**（CPE 分配，回 InstanceNumber） | 必须具体数字 | ObjectName 是对象表路径，`.` 结尾、末级不带实例号 |
+| RMV = DeleteObject | **必须填具体实例号** | 必须具体数字 | ObjectName 以 `.<实例号>.` 结尾 |
+| LST/MOD | 操作已存在实例，须具体 | 必须具体数字 | path 中所有 `.{i}.` 都须替换 |
+
+**plan A — 指定参数（裸路径）标签**（`rawPathValidate.ts` + `RawPathPanel`/`ConfigParamsModal`）：裸路径专家直发，**不重造 `{i}` 选择器**，改为按操作类型校验 + 提示：
+- 一律拒绝 `{i}` 占位符（裸路径不经字典翻译，须填具体实例号）。
+- ADD：path 须以 `.` 结尾、末级不能是纯数字（实例号）；提示「末级不带实例号，设备自动分配」。
+- RMV：path 须以 `.<实例号>.` 结尾；提示「指定要删除的实例」。
+- 校验失败行内红字提示 + 输入框 error 态，且禁用「确定并执行」。
+
+**命令参数（结构化）标签 `{i}` 默认值**（用户决策 2026-06-06）：
+- **实例选择器**：path（LST/MOD）/ targetObject（ADD/RMV）中的父级 `.{i}.` 渲染为实例号输入，**默认每个 1**；前端 `computeInstanceSlots` 按 `.{i}.` 个数 + 前一段对象名生成槽位（key=`i01`/`i02`…，与后端 `substituteInstanceSelectors` 字典序左→右映射对齐），随 `instanceSelectors` 下发。
+- **标量参数值**：MOD/ADD 的「值」默认取 `standard_params.min_value`。
+- 之前 ConsoleV2 结构化通道**不收集** `instance_selectors`，含 `.{i}.` 的命令会在后端 `instance_selectors count mismatch` 失败；本次补齐。
+
+**后端**：运行时 sub-fields 端点（`GET /mml/commands/:id/sub-fields`）的 `SubFieldDTO` / `MMLCommandSubFieldEnriched` 增 `min_value`（取自 `standard_params.min_value`，`ListEnrichedByCommand` SELECT/scan 同步）。`target_object` 复用 GroupTreeCommand 既有字段，前端 `CommandItem.targetObject` 透传。结构化 ADD/RMV/{i} 替换、ADD 复合 `.{NEW}.`、RMV `RmvInstanceIndex` 拼接逻辑（`console_executor.go`）保持不变。
+
+> 单测：`ConsoleV2/__tests__/instanceAndRaw.test.ts` 覆盖 `validateRawPath` 与 `computeInstanceSlots`。
+
+---
+
 ## 4. 需求映射
 
 | 用户需求 | 对应设计 | 后端 |

@@ -78,6 +78,9 @@ type MMLCommandSubFieldEnriched struct {
 	ConstraintTextI18n map[string]string `json:"constraint_text_i18n"`
 	DefaultValue       *string           `json:"default_value,omitempty"`
 	JsRegex            *string           `json:"js_regex,omitempty"`
+	// MinValue 是 standard_params.min_value（数值范围下界）。MML 控制台「命令参数」
+	// 在 MOD/ADD 填值时用作标量参数的默认值（值默认取 min_value）。可为空（无范围约束）。
+	MinValue *int64 `json:"min_value,omitempty"`
 	// ParamNameI18n 是 mml_params.name_i18n（全局默认 label，LabelI18n 为空时兜底）
 	ParamNameI18n map[string]string `json:"param_name_i18n,omitempty"`
 	// Description 是 standard_params.description（TR-181 path 中文含义说明，

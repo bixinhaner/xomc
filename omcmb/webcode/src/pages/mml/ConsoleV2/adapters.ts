@@ -14,14 +14,16 @@ import type {
 } from '@core/types/mmlConsole';
 import type { DeviceTaskResultItem, MMLOperationType, MMLTask } from '@core/types/mml';
 import { parseMmlDeviceTaskResult } from '@core/utils/mmlResultParser';
-import { isReadOp } from './constants';
+import { isReadOp, opLabel } from './constants';
 import type {
   CommandItem,
   CommandParamPath,
   DeviceItem,
   DeviceStatus,
+  ExecMode,
   ExecRecord,
   ExecStatus,
+  PathTask,
   ResultColumn,
   ResultRow,
 } from './types';
@@ -49,6 +51,8 @@ export function subFieldsToParamPaths(subFields: SubFieldDef[]): CommandParamPat
       path: sf.tr069Path,
       label: sf.label || sf.tr069Path.split('.').filter(Boolean).pop() || sf.tr069Path,
       writable: sf.accessType === 'READ_WRITE',
+      isObject: sf.isObject,
+      minValue: sf.minValue,
     }));
 }
 
@@ -83,6 +87,7 @@ export function mapCommandItem(
     operationType: c.operationType,
     description: '',
     paramPaths: subFieldsToParamPaths(subFields),
+    targetObject: c.targetObject,
   };
 }
 
@@ -113,12 +118,43 @@ export function isStructuredOp(op: MMLOperationType): op is ConsoleSupportedOp {
   return SUPPORTED_OPS.has(op);
 }
 
+/**
+ * 提取命令需要用户填写的实例占位符（`.{i}.`）槽位 + 标签（占位符前一段对象名）。
+ * - ADD/RMV：看 targetObject（父级对象路径）。
+ * - LST/MOD：看 paramPaths 中 `.{i}.` 最多的一条（同一命令子字段通常共享对象祖先）。
+ * 槽位 key 为零填充 `i01`/`i02`…（与后端 substituteInstanceSelectors 字典序左→右映射对齐）。
+ */
+export function computeInstanceSlots(command: CommandItem): { key: string; label: string }[] {
+  const isAddRmv = command.operationType === 'ADD' || command.operationType === 'RMV';
+  let source = '';
+  if (isAddRmv) {
+    source = command.targetObject ?? '';
+  } else {
+    const count = (s: string): number => (s.match(/\.\{i\}\./g) ?? []).length;
+    for (const p of command.paramPaths) {
+      if (count(p.path) > count(source)) source = p.path;
+    }
+  }
+  const segs = source.split('.');
+  const slots: { key: string; label: string }[] = [];
+  let n = 0;
+  for (let k = 0; k < segs.length; k++) {
+    // 仅统计前后都有点的 `.{i}.`（与后端 strings.Count(path, ".{i}.") 一致）。
+    if (segs[k] === '{i}' && k > 0 && k < segs.length - 1) {
+      n += 1;
+      slots.push({ key: `i${String(n).padStart(2, '0')}`, label: segs[k - 1] || `实例${n}` });
+    }
+  }
+  return slots;
+}
+
 /** CommandItem + 标准模式 ExecRequest → 结构化执行单条 statement（POST …/execute-statements-structured）。 */
 export function buildStructuredStatement(
   command: CommandItem,
   checkedPaths: string[],
   values?: Record<string, string>,
   instance?: number,
+  instanceSelectors?: Record<string, string>,
 ): StructuredStatement {
   const op = command.operationType as ConsoleSupportedOp;
   const stmt: StructuredStatement = {
@@ -127,6 +163,10 @@ export function buildStructuredStatement(
     commandCode: command.commandCode,
     paths: checkedPaths,
   };
+  // 父级 `.{i}.` 实例选择器（LST/MOD 作用于 path、ADD/RMV 作用于 targetObject）。
+  if (instanceSelectors && Object.keys(instanceSelectors).length > 0) {
+    stmt.instanceSelectors = instanceSelectors;
+  }
   if (op === 'MOD' || op === 'ADD') {
     const checked = new Set(checkedPaths);
     const picked: Record<string, string> = {};
@@ -149,9 +189,17 @@ export function buildRawExecutePayload(
   operationType: MMLOperationType,
   rows: { path: string; value: string }[],
   deviceSns: string[],
+  taskName?: string,
+  execMode: ExecMode = 'whole',
 ): Record<string, unknown> {
   const valid = rows.filter((r) => r.path.trim() !== '');
   const paths = valid.map((r) => r.path.trim());
+  // task_name 用与命令记录一致的名称（req4 对应关系）；调用方未传时回退默认。
+  const name =
+    taskName ??
+    `${operationType} ${paths[0] ?? ''}${
+      deviceSns.length === 1 ? ` ${deviceSns[0]}` : ` 等${deviceSns.length}台`
+    }`;
   return {
     device_sns: deviceSns,
     param_paths: paths,
@@ -159,9 +207,9 @@ export function buildRawExecutePayload(
     param_values: valid.map((r) => r.value ?? ''),
     operation_type: operationType,
     execute_type: 'immediate',
-    task_name: `${operationType} ${paths[0] ?? ''}${
-      deviceSns.length === 1 ? ` ${deviceSns[0]}` : ` 等${deviceSns.length}台`
-    }`,
+    // 逐 PATH：后端把每 path 拆成一条 command（每 path 一个 RPC），path 级成败独立。
+    execute_mode: execMode === 'single-path' ? 'single_path' : 'whole',
+    task_name: name,
   };
 }
 
@@ -202,6 +250,22 @@ export function initialPendingRows(deviceSns: string[]): ResultRow[] {
 
 function leafName(path: string): string {
   return path.split('.').filter(Boolean).pop() ?? path;
+}
+
+/**
+ * 「指定参数」(裸路径)执行的命令记录命名：用执行的 path 命名，优先取设备模型 path 字典里的
+ * 友好名（nameMap，来自 standard_params.description），缺省回退路径叶子名；前缀操作中文标签。
+ * 例：LST `Device.DeviceInfo.SoftwareVersion` → 「查询 软件版本」（无字典命中时「查询 SoftwareVersion」）。
+ */
+export function rawCommandName(
+  op: MMLOperationType,
+  paths: string[],
+  nameMap?: Record<string, string>,
+): string {
+  const first = paths[0] ?? '';
+  const friendly = (nameMap && nameMap[first]) || leafName(first) || first;
+  const suffix = paths.length > 1 ? ` 等${paths.length}项` : '';
+  return `${opLabel(op)} ${friendly}${suffix}`.trim();
 }
 
 function toClock(iso?: string): string | undefined {
@@ -270,14 +334,16 @@ export function mapResultItemToRow(
   const status: ExecStatus = item.result.success ? 'success' : 'failed';
   const cells: Record<string, string> = {};
   if (read && status === 'success' && item.result.parsedData) {
-    const entries = Object.entries(item.result.parsedData).map(
-      ([k, v]) => [k, v == null ? '' : String(v)] as const,
-    );
-    const byPath = new Map(entries);
-    const byLeaf = new Map(entries.map(([k, v]) => [leafName(k), v]));
-    for (const c of columns) {
-      const v = byPath.get(c.path) ?? byLeaf.get(leafName(c.path));
-      if (v != null) cells[c.path] = v;
+    // parsedData 是结果信封 {method, raw_response}，需解析 raw_response 的 GPV 取 name→value
+    // （与 SSE 路径 applyFrameToRow 一致）；早前直接把信封当 name→value 映射导致读回值全空。
+    const parsed = parseMmlDeviceTaskResult(item.result.parsedData);
+    if (parsed?.kind === 'gpv' && parsed.params) {
+      const byPath = new Map(parsed.params.map((p) => [p.name, p.value]));
+      const byLeaf = new Map(parsed.params.map((p) => [leafName(p.name), p.value]));
+      for (const c of columns) {
+        const v = byPath.get(c.path) ?? byLeaf.get(leafName(c.path));
+        if (v != null) cells[c.path] = v;
+      }
     }
   }
   return {
@@ -293,6 +359,62 @@ export function mapResultItemToRow(
 }
 
 /**
+ * 把后端逐条结果合并为「每设备一行」。
+ * - 整体下发：每设备 1 条结果 → 直接 mapResultItemToRow。
+ * - 逐 PATH：每设备 N 条结果（每 path 一条 device_task，command_index 定位 path）→
+ *   合并为一行：成功 path 填读回值，失败 path 单元格标「✗ 失败」，行状态 = 全成功才 success，
+ *   否则 failed；并填 pathTasks 供「查看」详情展示 path 级成败。
+ * columns 按 command_index 顺序（逐 PATH 时 columns[i] 即第 i 条 command 的 path）。
+ */
+export function buildDeviceRows(
+  items: DeviceTaskResultItem[],
+  columns: ResultColumn[],
+  read: boolean,
+): ResultRow[] {
+  const byDevice = new Map<string, DeviceTaskResultItem[]>();
+  for (const it of items) {
+    const arr = byDevice.get(it.deviceSn) ?? [];
+    arr.push(it);
+    byDevice.set(it.deviceSn, arr);
+  }
+  const rows: ResultRow[] = [];
+  for (const [, devItems] of byDevice) {
+    if (devItems.length <= 1) {
+      rows.push(mapResultItemToRow(devItems[0], columns, read));
+      continue;
+    }
+    // 逐 PATH 合并
+    const base = devItems.map((it) => mapResultItemToRow(it, columns, read));
+    const cells: Record<string, string> = Object.assign({}, ...base.map((r) => r.cells));
+    const pathTasks: PathTask[] = [];
+    devItems.forEach((it, i) => {
+      const idx = typeof it.commandIndex === 'number' ? it.commandIndex : i;
+      const path = columns[idx]?.path ?? '';
+      if (base[i].status === 'failed' && path) cells[path] = '✗ 失败';
+      pathTasks.push({
+        pathIndex: idx,
+        path,
+        subTaskId: '',
+        status: base[i].status,
+        dispatchedAt: '',
+        respondedAt: base[i].respondedAt ?? '',
+        value: base[i].status === 'success' ? (base[i].cells[path] ?? '') : (it.failReason ?? '失败'),
+      });
+    });
+    pathTasks.sort((a, b) => a.pathIndex - b.pathIndex);
+    const allOk = base.every((r) => r.status === 'success');
+    rows.push({
+      ...base[0],
+      status: allOk ? 'success' : 'failed',
+      cells,
+      faultCode: allOk ? undefined : '部分 path 失败',
+      pathTasks,
+    });
+  }
+  return rows;
+}
+
+/**
  * 真实任务（GET /mml/tasks/:id）→ ConsoleV2 命令记录（含结果行）。
  *
  * - 命令元信息取首条 `commandsDetail`（op_type + param_paths）；老任务缺 detail 时降级为
@@ -303,10 +425,19 @@ export function mapTaskToRecord(task: MMLTask): ExecRecord {
   const detail = task.commandsDetail?.[0];
   const op = (detail?.operationType ?? 'LST') as MMLOperationType;
   const read = isReadOp(op);
-  const columns = detail?.paramPaths ? buildColumnsFromRawPaths(detail.paramPaths) : [];
-  const commandName = detail?.commandCode ?? task.taskName ?? task.id;
+  // 逐 PATH 任务有多条 command（每 path 一条）→ 列取所有 command 的 path 展平（按 command_index 序，
+  // 与 buildDeviceRows 的 columns[command_index] 定位一致）；整体下发时即首条 command 的全部 path。
+  const allPaths = (task.commandsDetail ?? []).flatMap((c) => c.paramPaths ?? []);
+  const columns = allPaths.length ? buildColumnsFromRawPaths(allPaths) : [];
+  // 裸路径任务（后端 command_code = "RAW LST/MOD/ADD/RMV"）改用执行 path 命名（跨刷新重建时
+  // 无字典异步查询，回退路径叶子名）；结构化命令仍用其 command_code。
+  const rawCode = (detail?.commandCode ?? '').startsWith('RAW') && (detail?.paramPaths?.length ?? 0) > 0;
+  const commandName = rawCode
+    ? rawCommandName(op, detail!.paramPaths!)
+    : (detail?.commandCode ?? task.taskName ?? task.id);
   const items = (task.results ?? []) as unknown as DeviceTaskResultItem[];
-  const rows = items.map((r) => mapResultItemToRow(r, columns, read));
+  // 逐 PATH 任务每设备多条结果 → buildDeviceRows 合并为每设备一行（整体下发时退化为一行/设备）。
+  const rows = buildDeviceRows(items, columns, read);
   return {
     id: task.id,
     commandId: task.id,

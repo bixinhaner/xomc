@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { Badge, Button, Checkbox, Input, Modal, Select, Space, Table, Tag, Typography } from 'antd';
+import { SearchOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
-import { useDeviceList, useVerifyOnlineSns } from '@core/hooks/api/useDevices';
+import { useDeviceList } from '@core/hooks/api/useDevices';
 import { useProductList } from '@core/hooks/api/useProducts';
 import { useDictionaryBatch } from '@core/hooks/api/useSystem';
 import type { DeviceItem, DeviceStatus } from '../types';
@@ -36,15 +37,22 @@ export default function DeviceSelectModal({
   onCancel,
   onConfirm,
 }: DeviceSelectModalProps) {
+  // 草稿态：编辑但未应用（输入 SN / 选产品 / 选产品类型都不实时触发查询，§需求 1）。
   const [snInput, setSnInput] = useState('');
-  const [snKeyword, setSnKeyword] = useState('');
   const [productFilter, setProductFilter] = useState<string | undefined>();
   const [classFilter, setClassFilter] = useState<string | undefined>();
+  // 已应用态：实际驱动查询，仅在点「搜索」时由草稿同步而来。
+  const [snKeyword, setSnKeyword] = useState('');
+  const [productApplied, setProductApplied] = useState<string | undefined>();
+  const [classApplied, setClassApplied] = useState<string | undefined>();
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEVICE_MODAL_PAGE_SIZE);
   const [selected, setSelected] = useState<string[]>([]);
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState('');
   const [wasOpen, setWasOpen] = useState(false);
+  // 批量输入命中的 SN 列表（激活后表格只显示这些 SN 且在线，忽略其它筛选条件）。
+  const [snListFilter, setSnListFilter] = useState<string[]>([]);
 
   // 打开时恢复上次选择（不自动全选）。渲染阶段调整 state，避开 set-state-in-effect。
   if (open !== wasOpen) {
@@ -52,10 +60,14 @@ export default function DeviceSelectModal({
     if (open) {
       setSelected(value);
       setSnInput('');
-      setSnKeyword('');
       setProductFilter(undefined);
       setClassFilter(undefined);
+      setSnKeyword('');
+      setProductApplied(undefined);
+      setClassApplied(undefined);
+      setSnListFilter([]);
       setPage(1);
+      setPageSize(DEVICE_MODAL_PAGE_SIZE);
     }
   }
 
@@ -78,19 +90,23 @@ export default function DeviceSelectModal({
   );
 
   // 设备列表始终只显示在线设备：is_online=true 固定下发，离线设备由后端过滤（§需求 1）。
+  // 批量输入激活时，只按 SN 列表 + 在线过滤，忽略产品/类型/关键字（§需求 2/4）。
   const filterParams = useMemo(
-    () => ({
-      isOnline: true as const,
-      ...(snKeyword ? { searchText: snKeyword } : {}),
-      ...(productFilter ? { productId: productFilter } : {}),
-      ...(classFilter ? { productClass: classFilter } : {}),
-    }),
-    [snKeyword, productFilter, classFilter],
+    () =>
+      snListFilter.length > 0
+        ? { isOnline: true as const, snList: snListFilter }
+        : {
+            isOnline: true as const,
+            ...(snKeyword ? { searchText: snKeyword } : {}),
+            ...(productApplied ? { productId: productApplied } : {}),
+            ...(classApplied ? { productClass: classApplied } : {}),
+          },
+    [snListFilter, snKeyword, productApplied, classApplied],
   );
 
   // 分页表格数据（服务端分页）。
   const { data: pageResp, isFetching } = useDeviceList(
-    { page, pageSize: DEVICE_MODAL_PAGE_SIZE, ...filterParams },
+    { page, pageSize, ...filterParams },
     { enabled: open },
   );
   const rows = useMemo(() => (pageResp?.items ?? []).map(mapDeviceToItem), [pageResp]);
@@ -110,48 +126,39 @@ export default function DeviceSelectModal({
     cappedFilteredSns.length > 0 && cappedFilteredSns.every((sn) => selected.includes(sn));
   const someSelected = selected.length > 0 && !allFilteredSelected;
 
-  // 批量输入：逐 SN 校验在线状态（不受当前筛选条件影响），离线/不存在的 SN 一律剔除（§需求 2）。
-  const verifyOnline = useVerifyOnlineSns();
+  // 点「搜索」才把草稿筛选条件应用到查询（输入/选择不实时触发，§需求 1）。
+  const doSearch = (): void => {
+    setSnKeyword(snInput.trim());
+    setProductApplied(productFilter);
+    setClassApplied(classFilter);
+    setSnListFilter([]); // 普通搜索退出批量输入模式
+    setPage(1);
+  };
 
-  const handlePasteConfirm = async (): Promise<void> => {
+  // 批量输入：清空已选与原有筛选条件，表格只显示输入的 SN 且在线的匹配设备
+  // （后端 sn_list + is_online 过滤；离线/不存在的不展示，§需求 3）。
+  const handlePasteConfirm = (): void => {
     const sns = pasteText
       .split(/[\s,;]+/)
       .map((s) => s.trim())
       .filter(Boolean);
     const uniqueInput = Array.from(new Set(sns));
-    if (uniqueInput.length === 0) {
-      setPasteOpen(false);
-      setPasteText('');
-      return;
-    }
-
-    let onlineSns: string[];
-    try {
-      onlineSns = await verifyOnline.mutateAsync(uniqueInput);
-    } catch {
-      Modal.error({ title: '批量输入失败', content: '校验设备在线状态失败，请重试。' });
-      return;
-    }
-
-    const merged = new Set(selected);
-    onlineSns.forEach((sn) => merged.add(sn));
-    const next = Array.from(merged).slice(0, MAX_SELECT_ALL);
-    const droppedCount = uniqueInput.length - onlineSns.length;
-    setSelected(next);
+    setSnListFilter(uniqueInput);
+    setSelected([]); // 清空选中的数据
+    setSnInput('');
+    setProductFilter(undefined);
+    setClassFilter(undefined);
+    setSnKeyword('');
+    setProductApplied(undefined);
+    setClassApplied(undefined);
+    setPage(1);
     setPasteOpen(false);
     setPasteText('');
-    Modal.info({
-      title: '批量输入结果',
-      content: `识别 ${uniqueInput.length} 个 SN，其中在线 ${onlineSns.length} 个已加入已选列表${
-        droppedCount > 0 ? `，离线/不存在 ${droppedCount} 个已过滤` : ''
-      }（上限 ${MAX_SELECT_ALL} 台，当前共 ${next.length} 台）。`,
-    });
   };
 
+  // 列顺序：SN → 状态 → 产品 → 产品类型（状态前置、去掉设备分组，§需求 3）。
   const columns: ColumnsType<DeviceItem> = [
-    { title: '设备编码(SN)', dataIndex: 'sn', key: 'sn', width: 200, ellipsis: true },
-    { title: '产品', dataIndex: 'productName', key: 'productName', width: 160, ellipsis: true },
-    { title: '产品类型', dataIndex: 'productClass', key: 'productClass', width: 100 },
+    { title: 'SN', dataIndex: 'sn', key: 'sn', width: 220, ellipsis: true },
     {
       title: '状态',
       dataIndex: 'status',
@@ -159,7 +166,8 @@ export default function DeviceSelectModal({
       width: 80,
       render: (s: DeviceStatus) => <Tag color={STATUS_TAG[s].color}>{STATUS_TAG[s].text}</Tag>,
     },
-    { title: '设备分组', dataIndex: 'groupName', key: 'groupName', width: 120, ellipsis: true },
+    { title: '产品', dataIndex: 'productName', key: 'productName', width: 180, ellipsis: true },
+    { title: '产品类型', dataIndex: 'productClass', key: 'productClass', width: 120 },
   ];
 
   return (
@@ -176,17 +184,15 @@ export default function DeviceSelectModal({
         destroyOnHidden
       >
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          {/* 输入 SN / 选产品 / 选产品类型均为草稿，点蓝色「搜索」按钮才触发查询（§需求 1）。 */}
           <Space wrap>
-            <Input.Search
+            <Input
               allowClear
-              placeholder="设备编码：输入 SN 搜索"
-              style={{ width: 240 }}
+              placeholder="输入 SN"
+              style={{ width: 200 }}
               value={snInput}
               onChange={(e) => setSnInput(e.target.value)}
-              onSearch={(v) => {
-                setSnKeyword(v.trim());
-                setPage(1);
-              }}
+              onPressEnter={doSearch}
             />
             <Select
               allowClear
@@ -196,10 +202,7 @@ export default function DeviceSelectModal({
               style={{ width: 200 }}
               options={productOptions}
               value={productFilter}
-              onChange={(v) => {
-                setProductFilter(v);
-                setPage(1);
-              }}
+              onChange={(v) => setProductFilter(v)}
             />
             <Select
               allowClear
@@ -209,16 +212,24 @@ export default function DeviceSelectModal({
               style={{ width: 200 }}
               options={classOptions}
               value={classFilter}
-              onChange={(v) => {
-                setClassFilter(v);
-                setPage(1);
-              }}
+              onChange={(v) => setClassFilter(v)}
             />
+            <Button type="primary" icon={<SearchOutlined />} onClick={doSearch}>
+              搜索
+            </Button>
             <Button onClick={() => setPasteOpen(true)}>批量输入</Button>
           </Space>
 
           <Space wrap>
             <Badge status="processing" text={<Text>已选 {selected.length} 台</Text>} />
+            {snListFilter.length > 0 && (
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                批量输入：{snListFilter.length} 个 SN（仅显示在线）
+                <Button type="link" size="small" onClick={() => setSnListFilter([])}>
+                  清除
+                </Button>
+              </Text>
+            )}
             {overLimit && (
               <Text type="warning" style={{ fontSize: 12 }}>
                 筛选命中 {total} 台，已超单次执行上限 {MAX_SELECT_ALL} 台，全选仅选中前 {MAX_SELECT_ALL} 台
@@ -252,9 +263,15 @@ export default function DeviceSelectModal({
             }}
             pagination={{
               current: page,
-              pageSize: DEVICE_MODAL_PAGE_SIZE,
+              pageSize,
               total,
-              onChange: setPage,
+              showSizeChanger: true,
+              pageSizeOptions: ['10', '20', '50'],
+              // 切页或改每页条数都驱动服务端重新查询（§需求 2）。
+              onChange: (p, ps) => {
+                setPage(p);
+                setPageSize(ps);
+              },
               showTotal: (t) => `共 ${t} 台`,
               size: 'small',
             }}
@@ -268,14 +285,13 @@ export default function DeviceSelectModal({
         open={pasteOpen}
         onCancel={() => setPasteOpen(false)}
         onOk={handlePasteConfirm}
-        confirmLoading={verifyOnline.isPending}
-        okText="识别并加入"
+        okText="确定"
         cancelText="取消"
         destroyOnHidden
       >
         <Input.TextArea
           rows={8}
-          placeholder="每行一个 SN，或用空格 / 逗号 / 分号分隔（仅保留在线设备）"
+          placeholder="每行一个 SN，或用空格 / 逗号 / 分号分隔（仅显示在线设备）"
           value={pasteText}
           onChange={(e) => setPasteText(e.target.value)}
         />
