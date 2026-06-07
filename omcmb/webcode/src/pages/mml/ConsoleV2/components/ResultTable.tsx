@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react';
 import {
   Button,
   Card,
-  Dropdown,
   Empty,
   Input,
   message,
@@ -14,23 +13,18 @@ import {
   Typography,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import type { MenuProps } from 'antd';
-import {
-  DownloadOutlined,
-  DownOutlined,
-  ProfileOutlined,
-} from '@ant-design/icons';
+import { DownloadOutlined, ProfileOutlined } from '@ant-design/icons';
 import { useExportTaskCSV, useExportTaskDeviceCSV } from '@core/hooks/api/useMmlConsole';
+import { useT } from '@/hooks/useT';
 import type {
   ExecMeta,
   ExecStatus,
-  ExportFormat,
   ResultColumn,
   ResultRow,
   UnverifiedReason,
 } from '../types';
 import { STATUS_META, UNVERIFIED_REASON_TEXT } from '../constants';
-import { exportAll, exportOne } from '../download';
+import { exportAll, exportOne, downloadFromUrl } from '../download';
 import ResultDetailModal from './ResultDetailModal';
 
 const { Text } = Typography;
@@ -45,7 +39,7 @@ interface ResultTableProps {
   hasExecuted: boolean;
 }
 
-type StatusFilter = 'all' | 'problem';
+type StatusFilter = 'all' | 'success' | 'failed';
 
 /** 状态 Tag；unverified 悬浮显示原因（只写/重启生效/查询失败，设计 §3.11.2）。 */
 function StatusTag({ status, reason }: { status: ExecStatus; reason?: UnverifiedReason }) {
@@ -70,6 +64,7 @@ export default function ResultTable({
   running,
   hasExecuted,
 }: ResultTableProps) {
+  const t = useT();
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [snKeyword, setSnKeyword] = useState('');
   const [viewingRow, setViewingRow] = useState<ResultRow | null>(null);
@@ -86,8 +81,10 @@ export default function ResultTable({
     }
     exportCsv.mutate(commandId, {
       onSuccess: ({ downloadUrl }) => {
-        window.open(downloadUrl, '_blank', 'noopener');
-        void message.success('已生成汇总 CSV');
+        const name = `${execMeta?.commandName ?? execMeta?.label ?? 'mml-result'}-汇总.csv`;
+        downloadFromUrl(downloadUrl, name)
+          .then(() => void message.success('已下载汇总 CSV'))
+          .catch((e) => void message.error(e instanceof Error ? e.message : '下载失败'));
       },
       onError: (e) => void message.error(e instanceof Error ? e.message : '导出失败'),
     });
@@ -102,8 +99,9 @@ export default function ResultTable({
       { taskId: commandId, deviceSn },
       {
         onSuccess: ({ downloadUrl }) => {
-          window.open(downloadUrl, '_blank', 'noopener');
-          void message.success(`已生成设备 ${deviceSn} 的 CSV`);
+          downloadFromUrl(downloadUrl, `${deviceSn}.csv`)
+            .then(() => void message.success(`已下载设备 ${deviceSn} 的 CSV`))
+            .catch((e) => void message.error(e instanceof Error ? e.message : '下载失败'));
         },
         onError: (e) => void message.error(e instanceof Error ? e.message : '导出失败'),
       },
@@ -129,7 +127,8 @@ export default function ResultTable({
   const filteredRows = useMemo(() => {
     const kw = snKeyword.trim().toLowerCase();
     return rows.filter((r) => {
-      if (statusFilter === 'problem' && r.status !== 'failed' && r.status !== 'mismatch') return false;
+      if (statusFilter === 'success' && r.status !== 'success') return false;
+      if (statusFilter === 'failed' && r.status !== 'failed') return false;
       if (kw && !r.deviceSn.toLowerCase().includes(kw)) return false;
       return true;
     });
@@ -188,7 +187,11 @@ export default function ResultTable({
           return val ? <Text type="danger">{val}</Text> : <Text type="secondary">-</Text>;
         }
         if (val === '✓') return <Tag color="success">✓</Tag>;
-        return val ?? <Text type="secondary">-</Text>;
+        // 成功但读回值为空（设备返回空串/无值）：显示「空」（多语言），区别于「-」（无结果）。
+        if (val === '' || val == null) {
+          return <Text type="secondary">{t('mml.console.emptyValue')}</Text>;
+        }
+        return <Text>{val}</Text>;
       },
     }));
 
@@ -219,10 +222,15 @@ export default function ResultTable({
         align: 'center',
         render: (_v, r) => (
           <Space size={0}>
-            <Button type="link" size="small" icon={<ProfileOutlined />} onClick={() => setViewingRow(r)}>
-              查看
-            </Button>
-            <Tooltip title="下载该设备结果(CSV，存档到 MinIO)">
+            <Tooltip title="查看">
+              <Button
+                type="text"
+                size="small"
+                icon={<ProfileOutlined />}
+                onClick={() => setViewingRow(r)}
+              />
+            </Tooltip>
+            <Tooltip title="下载该设备结果">
               <Button
                 type="text"
                 size="small"
@@ -240,22 +248,6 @@ export default function ResultTable({
     // commandId / 导出 mutation 进依赖：切任务或导出 loading 变化时刷新「操作」列。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [columns, commandId, exportDeviceCsv.isPending, exportDeviceCsv.variables]);
-
-  const downloadMenu: MenuProps = {
-    items: [
-      { key: 'csv', label: 'CSV（服务器生成，存档到 MinIO）' },
-      { key: 'xlsx', label: 'XLSX（本地）' },
-      { key: 'json', label: 'JSON（本地）' },
-    ],
-    onClick: ({ key }) => {
-      // CSV 走后端：生成 + 落 MinIO + 记入 mml_tasks；XLSX/JSON 仍本地导出。
-      if (key === 'csv') {
-        handleExportAllCsv();
-        return;
-      }
-      exportAll(key as ExportFormat, columns, rows, execMeta?.label ?? 'result');
-    },
-  };
 
   return (
     <Card
@@ -288,11 +280,14 @@ export default function ResultTable({
       style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
       styles={{ body: { padding: 16, flex: 1, minHeight: 0, overflow: 'auto' } }}
       extra={
-        <Dropdown menu={downloadMenu} disabled={rows.length === 0}>
-          <Button icon={<DownloadOutlined />}>
-            下载全部 <DownOutlined />
-          </Button>
-        </Dropdown>
+        <Button
+          icon={<DownloadOutlined />}
+          disabled={rows.length === 0}
+          loading={exportCsv.isPending}
+          onClick={handleExportAllCsv}
+        >
+          下载全部
+        </Button>
       }
     >
       {!hasExecuted ? (
@@ -308,8 +303,9 @@ export default function ResultTable({
               value={statusFilter}
               onChange={(v) => setStatusFilter(v as StatusFilter)}
               options={[
-                { label: '全部', value: 'all' },
-                { label: `仅异常(${stats.problem})`, value: 'problem' },
+                { label: `全部(${stats.total})`, value: 'all' },
+                { label: `成功(${stats.success})`, value: 'success' },
+                { label: `失败(${stats.failed})`, value: 'failed' },
               ]}
             />
             <Input.Search

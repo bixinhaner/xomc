@@ -1,8 +1,8 @@
 import { useCallback, useMemo, useState } from 'react';
-import { useQueries } from '@tanstack/react-query';
+import { useQueries, useQuery } from '@tanstack/react-query';
 import { mmlApi } from '@core/services/api/mmlApi';
 import type { ExecRecord } from './types';
-import { mapTaskToRecord } from './adapters';
+import { buildDeviceRows, mapTaskToRecord } from './adapters';
 
 /**
  * 命令记录数据层（设计 §3.10.4-5 + §3.11.4 + §3.12）。
@@ -85,10 +85,34 @@ export function useConsoleHistory(): ConsoleHistory {
   const resolvedActiveId =
     activeId && records.some((r) => r.id === activeId) ? activeId : (records[0]?.id ?? null);
 
-  const activeRecord = useMemo(
+  const baseActiveRecord = useMemo(
     () => records.find((r) => r.id === resolvedActiveId) ?? null,
     [records, resolvedActiveId],
   );
+
+  // 惰性补结果行（§3.12.4 P3）：跨刷新重建的记录只有列、无结果行（getTaskById 不含 per-device
+  // 结果）。当前选中记录若无行，按 commandId 拉 /results 并 buildDeviceRows 合并，使"进入页面默认
+  // 展示最后一条命令的执行结果"成立；本会话已执行的记录（recordStore 有行）不触发。
+  const needResults = !!baseActiveRecord && baseActiveRecord.rows.length === 0;
+  const activeCommandId = baseActiveRecord?.commandId ?? null;
+  const resultsQuery = useQuery({
+    queryKey: ['mml', 'console-v2', 'results', activeCommandId],
+    queryFn: () => mmlApi.getTaskResults(activeCommandId as string, 1, 200),
+    enabled: needResults && !!activeCommandId,
+    staleTime: 60 * 1000,
+    retry: false,
+  });
+
+  const activeRecord = useMemo<ExecRecord | null>(() => {
+    if (!baseActiveRecord) return null;
+    if (baseActiveRecord.rows.length > 0) return baseActiveRecord;
+    const items = resultsQuery.data?.items;
+    if (!items || items.length === 0) return baseActiveRecord;
+    return {
+      ...baseActiveRecord,
+      rows: buildDeviceRows(items, baseActiveRecord.columns, baseActiveRecord.execMeta.read),
+    };
+  }, [baseActiveRecord, resultsQuery.data]);
 
   const append = useCallback((rec: ExecRecord) => {
     recordStore.set(rec.commandId, rec);

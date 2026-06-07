@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Button, Empty, Input, Modal, Space, Spin, Tag, Tooltip, Tree, Typography } from 'antd';
 import { RightOutlined } from '@ant-design/icons';
 import type { DataNode } from 'antd/es/tree';
-import { useGroupTree, useCommandSubFields } from '@core/hooks/api/useMmlConsole';
+import { useGroupTree, useCommandSubFields, useUnsupportedPaths } from '@core/hooks/api/useMmlConsole';
 import { useI18nText } from '@/hooks/useI18nText';
 import type { CommandItem } from '../types';
 import { COMMAND_MODAL_BODY_HEIGHT, opColor } from '../constants';
@@ -17,6 +17,16 @@ interface CommandSelectModalProps {
   onConfirm: (command: CommandItem) => void;
   /** 「指定参数」快捷入口：跳过命令选择，直接进入「配置参数」弹框的「指定参数」标签（裸路径专家模式）。 */
   onGotoRawParams: () => void;
+  /**
+   * 当前已选设备 SN（取首个）。传入后按该设备 product_class → paramModel 过滤参数 PATH，
+   * 设备模型不支持的 path 不再展示（选择命令右侧预览 + 配置参数勾选列表均生效）。
+   */
+  deviceSn?: string;
+  /**
+   * 当前所选产品 ID（设备列表强制同一产品，见 DeviceSelectModal）。用于拉「产品不支持 path
+   * 自学习表」，按命令读/写类型过滤：LST/DSP 隐藏 read 不支持的；MOD/ADD/RMV 隐藏 write 不支持的。
+   */
+  productId?: string;
 }
 
 /**
@@ -31,6 +41,8 @@ export default function CommandSelectModal({
   onCancel,
   onConfirm,
   onGotoRawParams,
+  deviceSn,
+  productId,
 }: CommandSelectModalProps) {
   const { locale } = useI18nText();
   const [keyword, setKeyword] = useState('');
@@ -102,13 +114,36 @@ export default function CommandSelectModal({
 
   const selectedEntry = selectedId ? entryById.get(selectedId) : undefined;
 
-  // 选中命令的参数路径（决定结果列 / 可写项）。命令变更自动重取。
-  const { data: subFields, isFetching: subFieldsLoading } = useCommandSubFields(selectedId, locale);
-  const paramPaths = useMemo(() => subFieldsToParamPaths(subFields ?? []), [subFields]);
+  // 选中命令的参数路径（决定结果列 / 可写项）。命令或所选设备变更自动重取——
+  // 传 deviceSn 后端按该设备 paramModel 过滤掉不支持的 path（§设备模型不支持的 path 不展示）。
+  const { data: subFields, isFetching: subFieldsLoading } = useCommandSubFields(
+    selectedId,
+    locale,
+    deviceSn,
+  );
+
+  // 该产品执行 path 不支持类故障记录的自学习表——再过滤一层，覆盖「模型标 is_supported=true 但
+  // 设备实际不支持」的 path。按命令读/写类型过滤：LST/DSP（读）隐藏 read 不支持的；
+  // MOD/ADD/RMV（写）隐藏 write 不支持的（只读 path 在读类命令仍可见）。
+  const { data: unsupportedPaths } = useUnsupportedPaths(productId);
+  const visibleSubFields = useMemo(() => {
+    const all = subFields ?? [];
+    if (!unsupportedPaths || unsupportedPaths.length === 0) return all;
+    const op = selectedEntry?.command.operationType;
+    const isWrite = op === 'MOD' || op === 'ADD' || op === 'RMV';
+    const hidden = new Set(
+      unsupportedPaths
+        .filter((u) => (isWrite ? u.writeUnsupported : u.readUnsupported))
+        .map((u) => u.path),
+    );
+    return all.filter((sf) => !hidden.has(sf.tr069Path));
+  }, [subFields, unsupportedPaths, selectedEntry]);
+
+  const paramPaths = useMemo(() => subFieldsToParamPaths(visibleSubFields), [visibleSubFields]);
 
   const handleOk = (): void => {
     if (!selectedEntry || !subFields) return;
-    onConfirm(mapCommandItem(selectedEntry.groupName, selectedEntry.command, subFields));
+    onConfirm(mapCommandItem(selectedEntry.groupName, selectedEntry.command, visibleSubFields));
   };
 
   return (

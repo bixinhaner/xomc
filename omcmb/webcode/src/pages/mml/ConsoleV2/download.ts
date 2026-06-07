@@ -18,6 +18,28 @@ function triggerDownload(content: string, filename: string, mime: string): void 
   URL.revokeObjectURL(url);
 }
 
+/**
+ * 从 URL（如 MinIO 预签名）拉取内容并以 Blob 方式触发浏览器下载。
+ * 直接 window.open 预签名 URL 时，因对象无 `Content-Disposition: attachment` 头，浏览器会
+ * 打开空白页/内联预览而非下载；这里 fetch→blob→`<a download>` 强制以指定文件名下载。
+ */
+export async function downloadFromUrl(url: string, filename: string): Promise<void> {
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`下载失败：HTTP ${resp.status}`);
+  const blob = await resp.blob();
+  const objUrl = URL.createObjectURL(blob);
+  try {
+    const a = document.createElement('a');
+    a.href = objUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  } finally {
+    URL.revokeObjectURL(objUrl);
+  }
+}
+
 function csvCell(v: string): string {
   if (/[",\n]/.test(v)) return `"${v.replace(/"/g, '""')}"`;
   return v;

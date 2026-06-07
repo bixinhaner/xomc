@@ -224,6 +224,7 @@ export interface DeviceFramePayload {
   status: string;
   result?: unknown;
   error_message?: string;
+  sent_at?: string;
   completed_at?: string;
 }
 
@@ -318,6 +319,7 @@ export function applyFrameToRow(
     status,
     cells,
     faultCode: frame.error_message || prev.faultCode,
+    dispatchedAt: toClock(frame.sent_at) ?? prev.dispatchedAt,
     respondedAt: toClock(frame.completed_at) ?? prev.respondedAt,
     raw,
   };
@@ -352,6 +354,7 @@ export function mapResultItemToRow(
     status,
     cells,
     faultCode: item.failReason,
+    dispatchedAt: toClock(item.startedAt), // 下发时间 = device_tasks.sent_at（后端透传为 started_at）
     respondedAt: toClock(item.finishedAt),
     raw: item.result.rawOutput ?? '',
     elapsedMs: item.result.executionTime ?? 0,
@@ -396,7 +399,7 @@ export function buildDeviceRows(
         path,
         subTaskId: '',
         status: base[i].status,
-        dispatchedAt: '',
+        dispatchedAt: base[i].dispatchedAt ?? '',
         respondedAt: base[i].respondedAt ?? '',
         value: base[i].status === 'success' ? (base[i].cells[path] ?? '') : (it.failReason ?? '失败'),
       });

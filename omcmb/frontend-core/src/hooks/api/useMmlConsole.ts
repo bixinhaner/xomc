@@ -17,7 +17,7 @@
 
 import { useMutation, useQuery } from '@tanstack/react-query';
 
-import { mmlApi } from '../../services/api/mmlApi';
+import { mmlApi, type UnsupportedPathInfo } from '../../services/api/mmlApi';
 import type {
   GroupTreeNode,
   SubFieldDef,
@@ -88,6 +88,21 @@ export function useCommandSubFields(
     queryFn: () => mmlApi.getCommandSubFields(commandId!, lang, deviceKey),
     staleTime: 30 * 60 * 1000,
     enabled: Boolean(commandId),
+  });
+}
+
+/**
+ * 该产品已记录的「不支持参数 PATH」集合（含读/写标记，执行 path 不支持类故障自学习表）。
+ * 「选择命令 / 配置参数」据此按命令读/写类型过滤。productId 为空时不请求、返回空。
+ */
+export function useUnsupportedPaths(
+  productId?: string,
+): ReturnType<typeof useQuery<UnsupportedPathInfo[]>> {
+  return useQuery({
+    queryKey: ['mml', 'console', 'unsupported-paths', productId ?? ''],
+    queryFn: () => mmlApi.getUnsupportedPaths(productId),
+    staleTime: 5 * 60 * 1000,
+    enabled: Boolean(productId),
   });
 }
 

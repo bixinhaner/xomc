@@ -22,7 +22,8 @@ interface DeviceSelectModalProps {
   /** 当前已选 SN（打开时回填） */
   value: string[];
   onCancel: () => void;
-  onConfirm: (sns: string[]) => void;
+  /** 确认：返回所选 SN + 所选产品 ID（设备列表强制同一产品，productId 用于不支持 path 过滤）。 */
+  onConfirm: (sns: string[], productId: string) => void;
 }
 
 /**
@@ -78,6 +79,13 @@ export default function DeviceSelectModal({
     [productResp],
   );
 
+  // 产品下拉必选 + 默认第一个：产品列表就绪后若未选，渲染阶段同步默认第一个产品（设备列表强制
+  // 同一产品）。沿用本组件 set-state-in-render 的派生态写法（见上方 open!==wasOpen），条件收敛不抖动。
+  if (open && productApplied === undefined && productOptions.length > 0) {
+    setProductFilter(productOptions[0].value);
+    setProductApplied(productOptions[0].value);
+  }
+
   // 产品类型字典（下拉选项）。
   const { data: dicts } = useDictionaryBatch(['product_class']);
   const classOptions = useMemo(
@@ -89,12 +97,15 @@ export default function DeviceSelectModal({
     [dicts],
   );
 
-  // 设备列表始终只显示在线设备：is_online=true 固定下发，离线设备由后端过滤（§需求 1）。
-  // 批量输入激活时，只按 SN 列表 + 在线过滤，忽略产品/类型/关键字（§需求 2/4）。
+  // 设备列表始终只显示在线设备 + 强制同一产品（productId 必带）：批量输入也限定在所选产品内。
   const filterParams = useMemo(
     () =>
       snListFilter.length > 0
-        ? { isOnline: true as const, snList: snListFilter }
+        ? {
+            isOnline: true as const,
+            snList: snListFilter,
+            ...(productApplied ? { productId: productApplied } : {}),
+          }
         : {
             isOnline: true as const,
             ...(snKeyword ? { searchText: snKeyword } : {}),
@@ -135,8 +146,7 @@ export default function DeviceSelectModal({
     setPage(1);
   };
 
-  // 批量输入：清空已选与原有筛选条件，表格只显示输入的 SN 且在线的匹配设备
-  // （后端 sn_list + is_online 过滤；离线/不存在的不展示，§需求 3）。
+  // 批量输入：清空已选与 SN/类型筛选，但**保留所选产品**（设备列表强制同一产品，批量也限定在产品内）。
   const handlePasteConfirm = (): void => {
     const sns = pasteText
       .split(/[\s,;]+/)
@@ -146,10 +156,8 @@ export default function DeviceSelectModal({
     setSnListFilter(uniqueInput);
     setSelected([]); // 清空选中的数据
     setSnInput('');
-    setProductFilter(undefined);
     setClassFilter(undefined);
     setSnKeyword('');
-    setProductApplied(undefined);
     setClassApplied(undefined);
     setPage(1);
     setPasteOpen(false);
@@ -177,7 +185,7 @@ export default function DeviceSelectModal({
         open={open}
         width={860}
         onCancel={onCancel}
-        onOk={() => onConfirm(selected)}
+        onOk={() => onConfirm(selected, productApplied ?? '')}
         okText={`确定（已选 ${selected.length} 台）`}
         cancelText="取消"
         okButtonProps={{ disabled: selected.length === 0 }}
@@ -195,10 +203,9 @@ export default function DeviceSelectModal({
               onPressEnter={doSearch}
             />
             <Select
-              allowClear
               showSearch
               optionFilterProp="label"
-              placeholder="产品：全部"
+              placeholder="产品（必选）"
               style={{ width: 200 }}
               options={productOptions}
               value={productFilter}

@@ -209,7 +209,13 @@ export default function ConfigParamsModal({
           <Tag color={opColor(command.operationType)} style={{ marginInlineEnd: 0 }}>
             {command.operationType} · {opLabel(command.operationType)}
           </Tag>
-          <Text strong>{command.commandName}</Text>
+          <Text strong>
+            {command.commandName}
+            <Text type="secondary" style={{ fontWeight: 400 }}>
+              {' '}
+              ({checkedPaths.length})
+            </Text>
+          </Text>
           <Text type="secondary" style={{ fontSize: 12 }}>
             {read
               ? '勾选要查询的参数'
@@ -364,7 +370,7 @@ export default function ConfigParamsModal({
               value={effectiveExecMode}
               onChange={(e) => setExecMode(e.target.value)}
             >
-              <Radio value="whole">整体下发</Radio>
+              <Radio value="whole">整体执行</Radio>
               <Tooltip
                 title={perPathDisabled ? 'ADD / RMV 为单对象操作，不支持逐 PATH 拆分' : ''}
               >

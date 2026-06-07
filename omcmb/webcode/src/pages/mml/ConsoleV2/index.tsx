@@ -61,6 +61,8 @@ export default function MMLConsoleV2() {
   const [configModalOpen, setConfigModalOpen] = useState(false);
 
   const [selectedSns, setSelectedSns] = useState<string[]>([]);
+  // 所选产品 ID（设备弹框强制同一产品）：用于「选择命令 / 配置参数」按产品拉不支持 path 过滤。
+  const [selectedProductId, setSelectedProductId] = useState<string>('');
   const [command, setCommand] = useState<CommandItem | null>(null);
   const [config, setConfig] = useState<ExecRequest | null>(null);
   const [configTouched, setConfigTouched] = useState(false);
@@ -184,6 +186,12 @@ export default function MMLConsoleV2() {
   const runExecute = async (req: ExecRequest): Promise<void> => {
     if (selectedSns.length === 0) return;
     const deviceCount = selectedSns.length;
+    // 任务名称 = 命令名称 + 设备SN（单设备拼 SN；多设备拼首个 SN + 等N台），便于任务记录区分。
+    const snSuffix =
+      selectedSns.length === 1
+        ? `_${selectedSns[0]}`
+        : `_${selectedSns[0]}等${selectedSns.length}台`;
+    const taskNameWithSn = (base: string): string => `${base}${snSuffix}`;
 
     let columns: ResultColumn[];
     let meta: ExecMeta;
@@ -233,8 +241,8 @@ export default function MMLConsoleV2() {
             deviceSns: selectedSns,
             statements,
             executeType: 'immediate',
-            // task_name 与命令记录名一致，使「命令记录」与「任务记录」对应（req4）。
-            taskName: command.commandName,
+            // task_name = 命令名称 + 设备SN（命令记录仍按命令名展示）。
+            taskName: taskNameWithSn(command.commandName),
           });
           taskId = task.id;
         } else {
@@ -243,7 +251,7 @@ export default function MMLConsoleV2() {
             command.operationType,
             req.checkedPaths.map((p) => ({ path: p, value: req.values?.[p] ?? '' })),
             selectedSns,
-            command.commandName,
+            taskNameWithSn(command.commandName),
           );
           const task = await rawMutation.mutateAsync({ payload });
           taskId = task.id;
@@ -269,7 +277,7 @@ export default function MMLConsoleV2() {
           req.operationType,
           req.rows,
           selectedSns,
-          cmdName,
+          taskNameWithSn(cmdName),
           req.execMode,
         );
         const task = await rawMutation.mutateAsync({ payload });
@@ -358,8 +366,9 @@ export default function MMLConsoleV2() {
         open={deviceModalOpen}
         value={selectedSns}
         onCancel={() => setDeviceModalOpen(false)}
-        onConfirm={(sns) => {
+        onConfirm={(sns, productId) => {
           setSelectedSns(sns);
+          setSelectedProductId(productId);
           setDeviceModalOpen(false);
           if (!command) setCommandModalOpen(true);
         }}
@@ -368,6 +377,8 @@ export default function MMLConsoleV2() {
       <CommandSelectModal
         open={commandModalOpen}
         value={command}
+        deviceSn={selectedSns[0]}
+        productId={selectedProductId}
         onCancel={() => setCommandModalOpen(false)}
         onConfirm={(cmd) => {
           setCommand(cmd);

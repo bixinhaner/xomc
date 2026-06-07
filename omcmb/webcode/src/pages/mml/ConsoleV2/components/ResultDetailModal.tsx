@@ -1,4 +1,4 @@
-import { Alert, Button, Descriptions, Modal, Space, Table, Tag, Typography } from 'antd';
+import { Alert, Button, Descriptions, Modal, Popover, Space, Table, Tag, Typography } from 'antd';
 import { DownloadOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import XmlViewer from '@/components/XmlViewer';
@@ -154,11 +154,24 @@ export default function ResultDetailModal({
       title: '状态',
       dataIndex: 'status',
       key: 'status',
-      width: 110,
+      width: 88,
       render: (s: ExecStatus) => <Tag color={STATUS_META[s].color}>{STATUS_META[s].text}</Tag>,
     },
-    { title: '下发', dataIndex: 'dispatchedAt', key: 'dispatchedAt', width: 88 },
-    { title: '响应', dataIndex: 'respondedAt', key: 'respondedAt', width: 88 },
+    {
+      // 与单设备 CSV 口径统一：逐 path 状态旁展示读回值（成功）/ 故障原因（失败）。
+      title: '读回值 / 故障',
+      dataIndex: 'value',
+      key: 'value',
+      ellipsis: true,
+      render: (v: string) =>
+        v ? (
+          <Text style={{ fontSize: 11, wordBreak: 'break-all' }}>{v}</Text>
+        ) : (
+          <Text type="secondary">-</Text>
+        ),
+    },
+    { title: '下发', dataIndex: 'dispatchedAt', key: 'dispatchedAt', width: 80 },
+    { title: '响应', dataIndex: 'respondedAt', key: 'respondedAt', width: 80 },
   ];
 
   return (
@@ -191,23 +204,8 @@ export default function ResultDetailModal({
               styles={{ label: { width: 96, color: '#595959' } }}
               items={[
                 {
-                  key: 'cmd',
-                  label: '执行命令',
-                  children: (
-                    <Space size={6} wrap>
-                      <Tag color={opColor(execMeta.operationType)} style={{ marginInlineEnd: 0 }}>
-                        {execMeta.operationType} {opLabel(execMeta.operationType)}
-                      </Tag>
-                      {execMeta.commandName && <Text strong>{execMeta.commandName}</Text>}
-                      <Text code style={{ fontSize: 12 }}>
-                        {execMeta.label}
-                      </Text>
-                    </Space>
-                  ),
-                },
-                {
-                  key: 'commandId',
-                  label: '命令 ID',
+                  key: 'taskId',
+                  label: '任务 ID',
                   children: commandId ? (
                     <Text code copyable={{ text: commandId }} style={{ fontSize: 12 }}>
                       {commandId}
@@ -217,12 +215,46 @@ export default function ResultDetailModal({
                   ),
                 },
                 {
-                  key: 'deviceTaskId',
-                  label: '设备任务 ID',
+                  key: 'cmd',
+                  label: '执行命令',
                   children: (
-                    <Text code copyable={{ text: row.deviceTaskId }} style={{ fontSize: 12 }}>
-                      {row.deviceTaskId}
-                    </Text>
+                    <Space size={6} wrap>
+                      <Tag color={opColor(execMeta.operationType)} style={{ marginInlineEnd: 0 }}>
+                        {execMeta.operationType} {opLabel(execMeta.operationType)}
+                      </Tag>
+                      <Text strong>{execMeta.commandName ?? execMeta.label}</Text>
+                      {columns.length > 0 && (
+                        <Popover
+                          trigger="hover"
+                          placement="bottomLeft"
+                          title={`执行 PATH（${columns.length}）`}
+                          content={
+                            <div style={{ maxHeight: 320, overflow: 'auto', maxWidth: 460 }}>
+                              {columns.map((c) => (
+                                <div key={c.key} style={{ marginBottom: 6, lineHeight: 1.4 }}>
+                                  <Text style={{ fontSize: 12 }}>{c.label}</Text>
+                                  <br />
+                                  <Text code style={{ fontSize: 11, wordBreak: 'break-all' }}>
+                                    {c.path}
+                                  </Text>
+                                </div>
+                              ))}
+                            </div>
+                          }
+                        >
+                          <Text
+                            style={{
+                              color: '#1677ff',
+                              cursor: 'pointer',
+                              borderBottom: '1px dashed #1677ff',
+                              fontSize: 12,
+                            }}
+                          >
+                            PATH ({columns.length})
+                          </Text>
+                        </Popover>
+                      )}
+                    </Space>
                   ),
                 },
                 {
@@ -234,19 +266,13 @@ export default function ResultDetailModal({
                   key: 'status',
                   label: '执行状态',
                   children: (
-                    <Space size={12}>
+                    <Space size={12} wrap>
                       <Tag color={STATUS_META[row.status].color}>{STATUS_META[row.status].text}</Tag>
                       <Text type="secondary">用时 {(row.elapsedMs / 1000).toFixed(1)} s</Text>
+                      <Text type="secondary">
+                        下发 / 响应：{row.dispatchedAt ?? '-'} → {row.respondedAt ?? '-'}
+                      </Text>
                     </Space>
-                  ),
-                },
-                {
-                  key: 'time',
-                  label: '下发 / 响应',
-                  children: (
-                    <Text type="secondary">
-                      {row.dispatchedAt ?? '-'} → {row.respondedAt ?? '-'}
-                    </Text>
                   ),
                 },
               ]}

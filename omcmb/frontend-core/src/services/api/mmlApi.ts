@@ -143,6 +143,22 @@ interface BackendMMLPathTranslation {
   translated: boolean;
 }
 
+/** 后端 /mml/unsupported-paths 返回项（axios 可能 camelCase，两种 key 都容忍）。 */
+interface BackendUnsupportedPath {
+  path: string;
+  read_unsupported?: boolean;
+  write_unsupported?: boolean;
+  readUnsupported?: boolean;
+  writeUnsupported?: boolean;
+}
+
+/** 产品某 standardPath 的读 / 写不支持标记（自学习表）。 */
+export interface UnsupportedPathInfo {
+  path: string;
+  readUnsupported: boolean;
+  writeUnsupported: boolean;
+}
+
 interface BackendMMLTaskResultsStats {
   path_translations?: BackendMMLPathTranslation[];
   product_resolved: boolean;
@@ -1066,6 +1082,28 @@ export const mmlApi = {
     );
     const arr = Array.isArray(data) ? data : (data?.sub_fields ?? []);
     return arr.map(mapSubField);
+  },
+
+  /**
+   * GET /mml/unsupported-paths?product_id= —— 该产品已记录的不支持参数 PATH（含读/写标记，
+   * source：MML 执行 path 不支持类故障自学习表）。前端「选择命令 / 配置参数」按命令读/写类型过滤。
+   * 主用 product_id（产品下拉直给）；deviceSn 为兼容兜底（后端反算 product_id）。
+   */
+  async getUnsupportedPaths(productId?: string, deviceSn?: string): Promise<UnsupportedPathInfo[]> {
+    if (!productId && !deviceSn) return [];
+    const params: Record<string, string> = {};
+    if (productId) params.product_id = productId;
+    if (deviceSn) params.device_sn = deviceSn;
+    const { data } = await http.get<{ paths: BackendUnsupportedPath[] } | BackendUnsupportedPath[]>(
+      '/mml/unsupported-paths',
+      { params },
+    );
+    const arr = Array.isArray(data) ? data : (data?.paths ?? []);
+    return arr.map((p) => ({
+      path: p.path,
+      readUnsupported: Boolean(p.read_unsupported ?? p.readUnsupported),
+      writeUnsupported: Boolean(p.write_unsupported ?? p.writeUnsupported),
+    }));
   },
 
   /**
