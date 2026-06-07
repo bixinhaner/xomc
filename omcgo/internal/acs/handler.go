@@ -1119,33 +1119,34 @@ func (h *Handler) handleSOAPFault(w http.ResponseWriter, r *http.Request, body [
 			//      合成 1 个 SPVFault 写入,保持 schema 与 SPV 一致供下游统一消费。
 			//      badPath 为空时不写 result(下游兜底走 ErrorMessage 文本)。
 			finalMsg := combinedFaultMsg
-			var resultBytes json.RawMessage
+			// 失败也保存 CPE 返回的原始 SOAP Fault 报文（raw_response），供前端「查看 → 结果报文」
+			// 展示；param_faults 仍按方法解析出 per-param 详情。service.go 把 result.raw_response
+			// 透传为 raw_output → 前端结果行 raw → XmlViewer。
+			resultMap := map[string]interface{}{}
+			if len(body) > 0 {
+				resultMap["raw_response"] = string(body)
+			}
 			switch taskItem.Method {
 			case "SetParameterValues":
 				if spvFaults := extractSPVFaults(body); len(spvFaults) > 0 {
 					finalMsg = enrichFaultMsgWithSPV(combinedFaultMsg, spvFaults)
-					if rb, mErr := json.Marshal(map[string]interface{}{
-						"param_faults": spvFaults,
-					}); mErr == nil {
-						resultBytes = rb
-					} else {
-						log.Warn("marshal spv_faults for task.result", zap.Error(mErr))
-					}
+					resultMap["param_faults"] = spvFaults
 				}
 			case "GetParameterValues":
 				if badPath != "" && faultCode > 0 {
-					gpvFault := SPVFault{
+					resultMap["param_faults"] = []SPVFault{{
 						ParameterName: badPath,
 						FaultCode:     faultCode,
 						FaultString:   faultMsg,
-					}
-					if rb, mErr := json.Marshal(map[string]interface{}{
-						"param_faults": []SPVFault{gpvFault},
-					}); mErr == nil {
-						resultBytes = rb
-					} else {
-						log.Warn("marshal gpv_fault for task.result", zap.Error(mErr))
-					}
+					}}
+				}
+			}
+			var resultBytes json.RawMessage
+			if len(resultMap) > 0 {
+				if rb, mErr := json.Marshal(resultMap); mErr == nil {
+					resultBytes = rb
+				} else {
+					log.Warn("marshal fault result", zap.Error(mErr))
 				}
 			}
 
@@ -1670,9 +1671,9 @@ func (h *Handler) publishRPCFaultEvent(ctx context.Context, deviceSN string, tas
 		"device_sn":       deviceSN,
 		"method":          taskItem.Method,
 		"command_key":     taskItem.CommandKey,
-		"fault_code":      faultCode,        // 数值：cwmp:FaultCode（标准 CWMP），无则 0
-		"fault_code_text": soapFaultCode,    // 字符串：soap:faultcode（SOAP 1.1 outer，如 "Server.Internal"）
-		"fault_string":    faultMsg,         // 已含 [soapFaultCode] 前缀的人类可读消息
+		"fault_code":      faultCode,     // 数值：cwmp:FaultCode（标准 CWMP），无则 0
+		"fault_code_text": soapFaultCode, // 字符串：soap:faultcode（SOAP 1.1 outer，如 "Server.Internal"）
+		"fault_string":    faultMsg,      // 已含 [soapFaultCode] 前缀的人类可读消息
 	}
 	evt, err := event.NewEvent(subject, payload)
 	if err != nil {
