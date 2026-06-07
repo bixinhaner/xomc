@@ -147,7 +147,6 @@ export default function TaskRecord() {
   );
 
   const columns: DataTableColumn<MMLTask>[] = useMemo(() => [
-    { key: 'taskName', title: t('mml.taskName'), dataIndex: 'taskName', ellipsis: true },
     {
       key: 'taskId',
       title: t('mml.taskId'),
@@ -163,6 +162,7 @@ export default function TaskRecord() {
         </Typography.Text>
       ),
     },
+    { key: 'taskName', title: t('mml.taskName'), dataIndex: 'taskName', ellipsis: true },
     { key: 'creator',  title: t('mml.creator'),  dataIndex: 'creator', width: 100 },
     {
       key: 'executeType',
@@ -266,6 +266,7 @@ export default function TaskRecord() {
         pageSize={pageSize}
         onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
         onRefresh={() => void refetch()}
+        hideToolbar
         scroll={{ x: 1400 }}
       />
 
