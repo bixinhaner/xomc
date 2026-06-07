@@ -296,6 +296,12 @@ func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter
 		builder = builder.Where(sq.Eq{"d.serial_number": *filter.SN})
 		countBuilder = countBuilder.Where(sq.Eq{"d.serial_number": *filter.SN})
 	}
+	// 批量输入：SN 列表精确过滤（serial_number IN (...)）。主列表 inline 路径之前漏了此条件，
+	// 导致 ?sn_list= 在 /devices 列表静默失效（同 product_id 问题）。
+	if len(filter.SNList) > 0 {
+		builder = builder.Where(sq.Eq{"d.serial_number": filter.SNList})
+		countBuilder = countBuilder.Where(sq.Eq{"d.serial_number": filter.SNList})
+	}
 
 	// Apply filters from device_info table
 	if filter.Manufacturer != nil && *filter.Manufacturer != "" {
@@ -306,6 +312,12 @@ func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter
 		vs := SplitCSV(*filter.ProductClass)
 		builder = builder.Where(sq.Eq{"d.product_class": vs})
 		countBuilder = countBuilder.Where(sq.Eq{"d.product_class": vs})
+	}
+	// 产品装配件 UUID 过滤（下拉来自 /products）。主列表 builder/countBuilder 之前漏了此条件
+	// （只在 applyDeviceFilters 子查询里有），导致 ?product_id= 在 /devices 列表静默失效。
+	if filter.ProductID != nil {
+		builder = builder.Where(sq.Eq{"d.product_id": *filter.ProductID})
+		countBuilder = countBuilder.Where(sq.Eq{"d.product_id": *filter.ProductID})
 	}
 	if filter.RFStatus != nil && *filter.RFStatus != "" {
 		builder = builder.Where(sq.Eq{"di.rf_status": *filter.RFStatus})

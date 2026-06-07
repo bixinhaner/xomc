@@ -1822,9 +1822,13 @@ func (r *PgDeviceRepository) FindStaleDevicesAdaptive(ctx context.Context, minSt
 	if limit <= 0 {
 		limit = 1000
 	}
+	// 连接状态检查：凡 is_online=true 但超过 max(2×inform_interval, minStaleSec) 未上报的设备
+	// 一律判离线，不再限定 lifecycle_state=commissioned —— 否则 maintenance 等其它状态的"僵尸
+	// 在线"设备永不离线（本次 4011 假在线里 1500 台即 maintenance）。
+	// last_inform_at IS NULL 的脏数据（从未上报却标在线）由迁移一次性清理；收到 Inform 必写
+	// last_inform_at，故正常在线设备该列非空，离线累计可正确计算。
 	builder := storage.Psql.Select(deviceColumns()...).
 		From("devices d").
-		Where(sq.Eq{"d.lifecycle_state": model.LifecycleCommissioned}).
 		Where(sq.Eq{"d.is_online": true}).
 		Where(notDeleted).
 		Where("d.last_inform_at IS NOT NULL").

@@ -901,9 +901,12 @@ export default function DeviceList() {
     [parseCellValues, getCellSummary]
   );
 
-  const renderActivationStatus = useCallback((cellStatus: string | undefined | null) => {
-    if (!cellStatus || cellStatus === '--') return '-';
-    const isActive = cellStatus === 'normal';
+  // 激活状态 = 设备是否曾首次上线（后端 op_state = DeriveOpStateActivated(first_online_time)：
+  // '1'=激活 / '0'=未激活）。与"在线(实时连接 is_online)""小区状态(cell_status)"是三个不同维度——
+  // 此前误用 cell_status==='normal' 当激活，导致在线设备因小区 inactive 显示未激活。
+  const renderActivationStatus = useCallback((opState: string | undefined | null) => {
+    if (opState == null || opState === '' || opState === 'unknown') return '-';
+    const isActive = opState === '1';
     return <Tag color={isActive ? 'success' : 'error'}>{isActive ? t('status.active') : t('status.inactive')}</Tag>;
   }, [t]);
 
@@ -1051,8 +1054,8 @@ export default function DeviceList() {
         dataIndex: 'opState',
         width: 140,
         group: 'common',
-        // 与详情页保持一致：按小区激活状态聚合，只要任一小区激活就显示激活。
-        render: (_val, record) => renderActivationStatus(record.cellStatus),
+        // 激活状态 = 设备是否曾首次上线（op_state），与在线/小区状态正交。
+        render: (_val, record) => renderActivationStatus(record.opState),
       },
       {
         key: 'offlineDuration',
@@ -1377,11 +1380,10 @@ export default function DeviceList() {
           return v === -1 || v == null ? '--' : String(v);
         }
         case 'opState': {
-          // 激活状态由 cellStatus 聚合得出(与 renderActivationStatus 同口径),
-          // 而非 record.opState 原值 —— 否则导出会得到 "1" 这类内部码而非"激活/未激活"。
-          const cs = record.cellStatus;
-          if (!cs || cs === '--') return '-';
-          return cs === 'normal' ? t('status.active') : t('status.inactive');
+          // 激活状态 = 曾上线(op_state '1'/'0')，映射为"激活/未激活"文本（与列表列同口径）。
+          const os = record.opState;
+          if (os == null || os === '' || os === 'unknown') return '-';
+          return os === '1' ? t('status.active') : t('status.inactive');
         }
         default: {
           const v = dataIndex ? (record as unknown as Record<string, unknown>)[dataIndex] : undefined;

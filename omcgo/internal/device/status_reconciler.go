@@ -25,9 +25,9 @@ const (
 //
 // T-0173 单一收口:替代原来的 HeartbeatMonitor + OfflineDetector 双扫描器。
 //
-//	1) RefreshHeartbeat（ACS Inform 热路径同步调用):写 Redis 心跳 key,TTL = 2×inform_interval。
-//	2) Start/Stop（后台扫描):周期遍历"超过自适应阈值未上报"的在线设备,事务性
-//	   翻转 is_online=false + 累加 cumulative_online_duration + publish device.offline。
+//  1. RefreshHeartbeat（ACS Inform 热路径同步调用):写 Redis 心跳 key,TTL = 2×inform_interval。
+//  2. Start/Stop（后台扫描):周期遍历"超过自适应阈值未上报"的在线设备,事务性
+//     翻转 is_online=false + 累加 cumulative_online_duration + publish device.offline。
 //
 // 设计要点:
 //   - 离线判定**唯一信源**是 PG 的 devices.last_inform_at（durable,重启不丢)。
@@ -86,11 +86,12 @@ func NewDeviceStatusReconciler(
 	logger *zap.Logger,
 ) *DeviceStatusReconciler {
 	return &DeviceStatusReconciler{
-		redis:         redisClient,
-		repo:          repo,
-		eventBus:      eventBus,
-		logger:        logger,
-		checkInterval: 60 * time.Second,
+		redis:    redisClient,
+		repo:     repo,
+		eventBus: eventBus,
+		logger:   logger,
+		// 连接状态检查周期：每 5 分钟扫一轮，把"超阈值未上报"的在线设备翻离线。
+		checkInterval: 5 * time.Minute,
 		minStaleSec:   600,
 		batchSize:     1000,
 	}

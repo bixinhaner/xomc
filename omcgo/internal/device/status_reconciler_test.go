@@ -70,7 +70,7 @@ func TestNewDeviceStatusReconciler_Defaults(t *testing.T) {
 	r, _ := newTestReconciler(t, &mockReconcilerRepo{}, nil)
 
 	require.NotNil(t, r)
-	assert.Equal(t, 60*time.Second, r.checkInterval)
+	assert.Equal(t, 5*time.Minute, r.checkInterval) // 连接状态检查周期：每 5 分钟
 	assert.Equal(t, 600, r.minStaleSec)
 	assert.Equal(t, 1000, r.batchSize)
 }
@@ -236,10 +236,10 @@ func TestSetters_GuardAgainstNonPositive(t *testing.T) {
 	r, _ := newTestReconciler(t, &mockReconcilerRepo{}, nil)
 
 	r.SetCheckInterval(0)
-	assert.Equal(t, 60*time.Second, r.checkInterval, "0 should be ignored")
+	assert.Equal(t, 5*time.Minute, r.checkInterval, "0 should be ignored")
 
 	r.SetCheckInterval(-5 * time.Second)
-	assert.Equal(t, 60*time.Second, r.checkInterval, "negative should be ignored")
+	assert.Equal(t, 5*time.Minute, r.checkInterval, "negative should be ignored")
 
 	r.SetCheckInterval(10 * time.Second)
 	assert.Equal(t, 10*time.Second, r.checkInterval)
