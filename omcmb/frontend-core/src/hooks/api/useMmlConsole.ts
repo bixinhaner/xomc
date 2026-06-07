@@ -226,19 +226,20 @@ export function useExecuteStatementsStructured(): ReturnType<
  * 返回 { object, downloadUrl }；调用方拿 downloadUrl 触发浏览器下载。
  */
 export function useExportTaskCSV(): ReturnType<
-  typeof useMutation<{ object: string; downloadUrl: string }, Error, string>
+  typeof useMutation<Blob, Error, string>
 > {
   return useMutation({
-    mutationFn: (taskId: string) => mmlApi.exportTaskCSV(taskId),
+    // 同源流式下载（GET responseType=blob），调用方拿 Blob 触发浏览器保存。
+    mutationFn: (taskId: string) => mmlApi.downloadTaskCsv(taskId),
   });
 }
 
-/** 单设备结果 CSV 导出（落 MinIO，地址记入 mml_tasks.device_export_objects）。 */
+/** 单设备结果 CSV 同源流式下载（GET，返回 Blob 由调用方保存）。 */
 export function useExportTaskDeviceCSV(): ReturnType<
-  typeof useMutation<{ object: string; downloadUrl: string }, Error, { taskId: string; deviceSn: string }>
+  typeof useMutation<Blob, Error, { taskId: string; deviceSn: string }>
 > {
   return useMutation({
     mutationFn: ({ taskId, deviceSn }: { taskId: string; deviceSn: string }) =>
-      mmlApi.exportTaskDeviceCSV(taskId, deviceSn),
+      mmlApi.downloadTaskDeviceCsv(taskId, deviceSn),
   });
 }

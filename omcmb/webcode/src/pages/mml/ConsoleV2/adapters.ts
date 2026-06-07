@@ -432,12 +432,13 @@ export function mapTaskToRecord(task: MMLTask): ExecRecord {
   // 与 buildDeviceRows 的 columns[command_index] 定位一致）；整体下发时即首条 command 的全部 path。
   const allPaths = (task.commandsDetail ?? []).flatMap((c) => c.paramPaths ?? []);
   const columns = allPaths.length ? buildColumnsFromRawPaths(allPaths) : [];
-  // 裸路径任务（后端 command_code = "RAW LST/MOD/ADD/RMV"）改用执行 path 命名（跨刷新重建时
-  // 无字典异步查询，回退路径叶子名）；结构化命令仍用其 command_code。
+  // 裸路径任务（后端 command_code = "RAW LST/MOD/ADD/RMV"）用执行 path 命名（跨刷新重建时
+  // 无字典异步查询，回退路径叶子名）；结构化命令优先用后端注入的友好命令名（command_name，
+  // 如「列出 设备基本信息」），缺失再回退 command_code → task_name。
   const rawCode = (detail?.commandCode ?? '').startsWith('RAW') && (detail?.paramPaths?.length ?? 0) > 0;
   const commandName = rawCode
     ? rawCommandName(op, detail!.paramPaths!)
-    : (detail?.commandCode ?? task.taskName ?? task.id);
+    : (detail?.commandName ?? detail?.commandCode ?? task.taskName ?? task.id);
   const items = (task.results ?? []) as unknown as DeviceTaskResultItem[];
   // 逐 PATH 任务每设备多条结果 → buildDeviceRows 合并为每设备一行（整体下发时退化为一行/设备）。
   const rows = buildDeviceRows(items, columns, read);

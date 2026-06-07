@@ -183,14 +183,15 @@ export default function MMLConsoleV2() {
     return !!command; // standard(含默认配置)需有命令
   }, [running, selectedSns.length, config, command]);
 
-  const runExecute = async (req: ExecRequest): Promise<void> => {
-    if (selectedSns.length === 0) return;
-    const deviceCount = selectedSns.length;
+  // targetSns 默认全部所选设备；「重新执行」时传 [单个设备 SN] 仅对该设备重跑同一命令。
+  const runExecute = async (req: ExecRequest, targetSns: string[] = selectedSns): Promise<void> => {
+    if (targetSns.length === 0) return;
+    const deviceCount = targetSns.length;
     // 任务名称 = 命令名称 + 设备SN（单设备拼 SN；多设备拼首个 SN + 等N台），便于任务记录区分。
     const snSuffix =
-      selectedSns.length === 1
-        ? `_${selectedSns[0]}`
-        : `_${selectedSns[0]}等${selectedSns.length}台`;
+      targetSns.length === 1
+        ? `_${targetSns[0]}`
+        : `_${targetSns[0]}等${targetSns.length}台`;
     const taskNameWithSn = (base: string): string => `${base}${snSuffix}`;
 
     let columns: ResultColumn[];
@@ -238,7 +239,7 @@ export default function MMLConsoleV2() {
             ];
           }
           const task = await structuredMutation.mutateAsync({
-            deviceSns: selectedSns,
+            deviceSns: targetSns,
             statements,
             executeType: 'immediate',
             // task_name = 命令名称 + 设备SN（命令记录仍按命令名展示）。
@@ -250,7 +251,7 @@ export default function MMLConsoleV2() {
           const payload = buildRawExecutePayload(
             command.operationType,
             req.checkedPaths.map((p) => ({ path: p, value: req.values?.[p] ?? '' })),
-            selectedSns,
+            targetSns,
             taskNameWithSn(command.commandName),
           );
           const task = await rawMutation.mutateAsync({ payload });
@@ -276,7 +277,7 @@ export default function MMLConsoleV2() {
         const payload = buildRawExecutePayload(
           req.operationType,
           req.rows,
-          selectedSns,
+          targetSns,
           taskNameWithSn(cmdName),
           req.execMode,
         );
@@ -294,7 +295,7 @@ export default function MMLConsoleV2() {
       taskId,
       meta,
       columns,
-      rows: initialPendingRows(selectedSns),
+      rows: initialPendingRows(targetSns),
       deviceCount,
     });
     message.success(`已下发执行（任务 ${taskId}）`);
@@ -312,6 +313,38 @@ export default function MMLConsoleV2() {
   const dispCommandId = liveExec ? liveExec.taskId : (activeRecord?.commandId ?? null);
   const dispColumns = liveExec ? liveExec.columns : (activeRecord?.columns ?? []);
   const dispRows = liveExec ? liveExec.rows : (activeRecord?.rows ?? []);
+
+  // 「重新执行」（结果列表逐设备）：仅对该设备重跑同一命令。
+  // 优先用当前命令+配置（刚执行完，含正确写入值）；回看历史记录（无当前命令）时按展示的
+  // 操作类型 + PATH 重建 RAW 执行——读类（LST）适用，写类需重新配置（避免丢失下发值误写）。
+  const handleReexecute = (deviceSn: string): void => {
+    if (running) return;
+    if (command || config) {
+      const req: ExecRequest =
+        config ?? { mode: 'standard', checkedPaths: command?.paramPaths.map((p) => p.path) ?? [] };
+      void runExecute(req, [deviceSn]);
+      return;
+    }
+    const op = dispExecMeta?.operationType;
+    const paths = dispColumns.map((c) => c.path);
+    if (!op || paths.length === 0) {
+      message.warning('无可重新执行的命令');
+      return;
+    }
+    if (!dispExecMeta?.read) {
+      message.warning('写类命令请重新选择命令并配置参数后执行');
+      return;
+    }
+    void runExecute(
+      {
+        mode: 'raw',
+        operationType: op,
+        rows: paths.map((p, i) => ({ id: i, path: p, value: '' })),
+        execMode: 'whole',
+      },
+      [deviceSn],
+    );
+  };
 
   return (
     <Space direction="vertical" size={12} style={{ width: '100%' }}>
@@ -358,6 +391,7 @@ export default function MMLConsoleV2() {
             rows={dispRows}
             running={running}
             hasExecuted={records.length > 0 || running || !!liveExec}
+            onReexecute={handleReexecute}
           />
         </div>
       </div>

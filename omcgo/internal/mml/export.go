@@ -529,26 +529,58 @@ func (s *Service) allDeviceResults(ctx context.Context, taskID uuid.UUID) ([]Dev
 
 // ExportTaskResultsCSV 生成「全设备汇总」CSV，上传 MinIO，并把 object key 记录到 mml_tasks。
 // 返回 object key 与浏览器可下载的预签名 URL。
-func (s *Service) ExportTaskResultsCSV(ctx context.Context, taskID uuid.UUID) (objectKey, downloadURL string, err error) {
-	if !s.exporter.ready() {
-		return "", "", ErrExporterNotConfigured
-	}
+// AggregateCSVBytes 直接生成「全设备汇总」CSV 字节（不落 MinIO），供同源流式下载——
+// 避免 MinIO 预签名 URL（public_endpoint）在跨主机/反代访问时浏览器不可达的问题。
+func (s *Service) AggregateCSVBytes(ctx context.Context, taskID uuid.UUID) ([]byte, error) {
 	task, err := s.taskRepo.GetByID(ctx, taskID)
 	if err != nil {
-		return "", "", fmt.Errorf("get mml task: %w", err)
+		return nil, fmt.Errorf("get mml task: %w", err)
 	}
 	cols := exportColumnsFromTask(task.Commands)
 	read := taskIsRead(task.Commands)
 	rows, err := s.allDeviceResults(ctx, taskID)
 	if err != nil {
-		return "", "", err
+		return nil, err
 	}
-	// 多设备汇总长表：一行 = 设备 × PATH；公共字段只首行、子任务级字段只 device_task 首行、
-	// 整体执行报文不重复、设备间空行（详见 buildLongFormatCSV）。
 	nameMap := s.resolvePathNames(ctx, cols, task.Commands)
-	data, err := buildLongFormatCSV(cols, rows, task.Commands, nameMap, read)
+	return buildLongFormatCSV(cols, rows, task.Commands, nameMap, read)
+}
+
+// DeviceCSVBytes 直接生成「单设备」CSV 字节（不落 MinIO），供同源流式下载。
+func (s *Service) DeviceCSVBytes(ctx context.Context, taskID uuid.UUID, deviceSN string) ([]byte, error) {
+	if deviceSN == "" {
+		return nil, commonInvalidDeviceSN
+	}
+	task, err := s.taskRepo.GetByID(ctx, taskID)
 	if err != nil {
-		return "", "", fmt.Errorf("build csv: %w", err)
+		return nil, fmt.Errorf("get mml task: %w", err)
+	}
+	cols := exportColumnsFromTask(task.Commands)
+	read := taskIsRead(task.Commands)
+	rows, err := s.allDeviceResults(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	var devRows []DeviceTaskResultRowView
+	for i := range rows {
+		if rows[i].DeviceSN == deviceSN {
+			devRows = append(devRows, rows[i])
+		}
+	}
+	if len(devRows) == 0 {
+		return nil, commonDeviceResultNotFound
+	}
+	nameMap := s.resolvePathNames(ctx, cols, task.Commands)
+	return buildDeviceCSVMulti(cols, devRows, task.Commands, nameMap, read)
+}
+
+func (s *Service) ExportTaskResultsCSV(ctx context.Context, taskID uuid.UUID) (objectKey, downloadURL string, err error) {
+	if !s.exporter.ready() {
+		return "", "", ErrExporterNotConfigured
+	}
+	data, err := s.AggregateCSVBytes(ctx, taskID)
+	if err != nil {
+		return "", "", err
 	}
 	now := time.Now().UTC()
 	key := aggregateObjectKey(taskID, now)
@@ -571,33 +603,9 @@ func (s *Service) ExportTaskDeviceCSV(ctx context.Context, taskID uuid.UUID, dev
 	if !s.exporter.ready() {
 		return "", "", ErrExporterNotConfigured
 	}
-	if deviceSN == "" {
-		return "", "", commonInvalidDeviceSN
-	}
-	task, err := s.taskRepo.GetByID(ctx, taskID)
-	if err != nil {
-		return "", "", fmt.Errorf("get mml task: %w", err)
-	}
-	cols := exportColumnsFromTask(task.Commands)
-	read := taskIsRead(task.Commands)
-	rows, err := s.allDeviceResults(ctx, taskID)
+	data, err := s.DeviceCSVBytes(ctx, taskID, deviceSN)
 	if err != nil {
 		return "", "", err
-	}
-	// 收集该设备的全部 device_task（逐 PATH 时每 path 一条），逐 path 呈现状态/值/故障。
-	var devRows []DeviceTaskResultRowView
-	for i := range rows {
-		if rows[i].DeviceSN == deviceSN {
-			devRows = append(devRows, rows[i])
-		}
-	}
-	if len(devRows) == 0 {
-		return "", "", commonDeviceResultNotFound
-	}
-	nameMap := s.resolvePathNames(ctx, cols, task.Commands)
-	data, err := buildDeviceCSVMulti(cols, devRows, task.Commands, nameMap, read)
-	if err != nil {
-		return "", "", fmt.Errorf("build csv: %w", err)
 	}
 	now := time.Now().UTC()
 	key := deviceObjectKey(taskID, deviceSN, now)

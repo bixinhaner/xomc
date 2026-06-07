@@ -13,7 +13,7 @@ import {
   Typography,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { DownloadOutlined, ProfileOutlined } from '@ant-design/icons';
+import { DownloadOutlined, ProfileOutlined, RedoOutlined } from '@ant-design/icons';
 import { useExportTaskCSV, useExportTaskDeviceCSV } from '@core/hooks/api/useMmlConsole';
 import { useT } from '@/hooks/useT';
 import type {
@@ -24,7 +24,7 @@ import type {
   UnverifiedReason,
 } from '../types';
 import { STATUS_META, UNVERIFIED_REASON_TEXT } from '../constants';
-import { exportAll, exportOne, downloadFromUrl } from '../download';
+import { exportAll, exportOne, saveBlob } from '../download';
 import ResultDetailModal from './ResultDetailModal';
 
 const { Text } = Typography;
@@ -37,6 +37,8 @@ interface ResultTableProps {
   rows: ResultRow[];
   running: boolean;
   hasExecuted: boolean;
+  /** 基于设备的「重新执行」回调（仅 console-v2 传入；任务记录-查看为只读不传）。 */
+  onReexecute?: (deviceSn: string) => void;
 }
 
 type StatusFilter = 'all' | 'success' | 'failed';
@@ -63,6 +65,7 @@ export default function ResultTable({
   rows,
   running,
   hasExecuted,
+  onReexecute,
 }: ResultTableProps) {
   const t = useT();
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -79,12 +82,11 @@ export default function ResultTable({
       exportAll('csv', columns, rows, execMeta?.label ?? 'result');
       return;
     }
+    const name = `${execMeta?.commandName ?? execMeta?.label ?? 'mml-result'}-汇总.csv`;
     exportCsv.mutate(commandId, {
-      onSuccess: ({ downloadUrl }) => {
-        const name = `${execMeta?.commandName ?? execMeta?.label ?? 'mml-result'}-汇总.csv`;
-        downloadFromUrl(downloadUrl, name)
-          .then(() => void message.success('已下载汇总 CSV'))
-          .catch((e) => void message.error(e instanceof Error ? e.message : '下载失败'));
+      onSuccess: (blob) => {
+        saveBlob(blob, name);
+        void message.success('已下载汇总 CSV');
       },
       onError: (e) => void message.error(e instanceof Error ? e.message : '导出失败'),
     });
@@ -98,10 +100,9 @@ export default function ResultTable({
     exportDeviceCsv.mutate(
       { taskId: commandId, deviceSn },
       {
-        onSuccess: ({ downloadUrl }) => {
-          downloadFromUrl(downloadUrl, `${deviceSn}.csv`)
-            .then(() => void message.success(`已下载设备 ${deviceSn} 的 CSV`))
-            .catch((e) => void message.error(e instanceof Error ? e.message : '下载失败'));
+        onSuccess: (blob) => {
+          saveBlob(blob, `${deviceSn}.csv`);
+          void message.success(`已下载设备 ${deviceSn} 的 CSV`);
         },
         onError: (e) => void message.error(e instanceof Error ? e.message : '导出失败'),
       },
@@ -239,15 +240,26 @@ export default function ResultTable({
                 onClick={() => handleExportDeviceCsv(r.deviceSn)}
               />
             </Tooltip>
+            {onReexecute && (
+              <Tooltip title="重新执行">
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<RedoOutlined />}
+                  disabled={running}
+                  onClick={() => onReexecute(r.deviceSn)}
+                />
+              </Tooltip>
+            )}
           </Space>
         ),
       },
     ];
 
     return [...base, ...dynamic, ...tail];
-    // commandId / 导出 mutation 进依赖：切任务或导出 loading 变化时刷新「操作」列。
+    // commandId / 导出 mutation / 重新执行回调 / running 进依赖：切任务或对应状态变化时刷新「操作」列。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [columns, commandId, exportDeviceCsv.isPending, exportDeviceCsv.variables]);
+  }, [columns, commandId, exportDeviceCsv.isPending, exportDeviceCsv.variables, onReexecute, running]);
 
   return (
     <Card

@@ -1193,7 +1193,34 @@ func (s *Service) GetTask(ctx context.Context, id uuid.UUID) (*MMLTask, error) {
 			}
 		}
 	}
+	s.enrichCommandNames(ctx, t.Commands)
 	return t, nil
+}
+
+// enrichCommandNames 给任务 commands JSONB 的每条注入友好命令名（command_name，按 command_code
+// 查 mml_commands，同码缓存）。命令记录 / 执行结果重建时显示「列出 设备基本信息」而非 command_code
+// 「LST DEVICE_INFO」。RAW 命令（command_code 不在 mml_commands）查不到→留空，前端回退 path 命名。
+func (s *Service) enrichCommandNames(ctx context.Context, commands []map[string]interface{}) {
+	if len(commands) == 0 {
+		return
+	}
+	cache := make(map[string]string)
+	for _, cmd := range commands {
+		code, _ := cmd["command_code"].(string)
+		if code == "" {
+			continue
+		}
+		name, cached := cache[code]
+		if !cached {
+			if c, err := s.cmdRepo.GetByCode(ctx, code); err == nil && c != nil {
+				name = c.CommandName
+			}
+			cache[code] = name
+		}
+		if name != "" {
+			cmd["command_name"] = name
+		}
+	}
 }
 
 // DeviceTaskPathMissAggregator 提供按 MML task ID 聚合 device_tasks 的

@@ -62,6 +62,9 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	tasks.GET("/:id/results", h.GetTaskResults)
 	tasks.POST("/:id/export", h.ExportTaskResults)
 	tasks.POST("/:id/devices/:sn/export", h.ExportTaskDeviceResults)
+	// 同源流式下载 CSV（替代预签名 MinIO URL，跨主机/反代访问可靠）。
+	tasks.GET("/:id/export/download", h.DownloadTaskResults)
+	tasks.GET("/:id/devices/:sn/export/download", h.DownloadTaskDeviceResults)
 	tasks.POST("/:id/start", h.StartTask)
 	tasks.POST("/:id/pause", h.PauseTask)
 	tasks.POST("/:id/cancel", h.CancelTask)
@@ -819,6 +822,46 @@ func (h *Handler) ExportTaskDeviceResults(c *gin.Context) {
 		return
 	}
 	response.OK(c, gin.H{"object": key, "download_url": url})
+}
+
+// streamCSV 把 CSV 字节以 attachment 形式同源流式下发（不依赖 MinIO 预签名 URL 的浏览器可达性）。
+func (h *Handler) streamCSV(c *gin.Context, data []byte, filename string) {
+	c.Header("Content-Disposition", `attachment; filename="`+filename+`"`)
+	c.Header("Content-Type", "text/csv; charset=utf-8")
+	c.Header("Cache-Control", "no-store")
+	c.Data(http.StatusOK, "text/csv; charset=utf-8", data)
+}
+
+// DownloadTaskResults handles GET /api/v1/mml/tasks/:id/export/download —— 同源流式下载全设备汇总 CSV。
+// 替代「预签名 MinIO URL」方案：浏览器从 app 同源拿数据，跨主机/反代访问也可靠。
+func (h *Handler) DownloadTaskResults(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+	data, err := h.service.AggregateCSVBytes(c.Request.Context(), id)
+	if err != nil {
+		h.abortExportError(c, err)
+		return
+	}
+	h.streamCSV(c, data, "mml-result-"+id.String()[:8]+".csv")
+}
+
+// DownloadTaskDeviceResults handles GET /api/v1/mml/tasks/:id/devices/:sn/export/download —— 同源流式下载单设备 CSV。
+func (h *Handler) DownloadTaskDeviceResults(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+	sn := c.Param("sn")
+	data, err := h.service.DeviceCSVBytes(c.Request.Context(), id, sn)
+	if err != nil {
+		h.abortExportError(c, err)
+		return
+	}
+	h.streamCSV(c, data, sn+".csv")
 }
 
 // abortExportError 把导出错误映射为 HTTP 状态：未配置→503，缺 SN→400，结果不存在→404，其余→按错误类型。

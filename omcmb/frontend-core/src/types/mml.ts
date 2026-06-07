@@ -159,6 +159,8 @@ export type MMLTaskResult = 'success' | 'partial' | 'failed';
  */
 export interface MMLTaskCommandDetail {
   commandCode: string;
+  /** 友好命令名（后端 GetTask 按 command_code 注入；RAW 命令为 undefined）。 */
+  commandName?: string;
   operationType?: MMLOperationType | string;
   paramPaths?: string[];
   /** MOD 操作的下发值；与 paramPaths 同序对应 */

@@ -424,6 +424,8 @@ function mapBackendTask(bt: BackendMMLTask): MMLTask {
     const paramPaths = pathsFromRefs.length > 0 ? pathsFromRefs : pathsFromLegacy;
     return {
       commandCode: typeof c.command_code === 'string' ? c.command_code : JSON.stringify(c),
+      // 后端 GetTask 注入的友好命令名（命令记录 / 执行结果显示「列出 设备基本信息」而非 command_code）。
+      commandName: typeof c.command_name === 'string' ? c.command_name : undefined,
       operationType:
         typeof c.operation_type === 'string'
           ? (c.operation_type as MMLTaskCommandDetail['operationType'])
@@ -905,6 +907,26 @@ export const mmlApi = {
     );
     const d = data as unknown as { object: string; downloadUrl: string };
     return { object: d.object, downloadUrl: d.downloadUrl };
+  },
+
+  /**
+   * 同源流式下载「全设备汇总」CSV（GET，responseType=blob）。
+   * 替代预签名 MinIO URL：浏览器从 app 同源（经 /api 代理）拿数据，跨主机/反代访问也可靠。
+   */
+  async downloadTaskCsv(taskId: string): Promise<Blob> {
+    const { data } = await http.get(`/mml/tasks/${taskId}/export/download`, {
+      responseType: 'blob',
+    });
+    return data as Blob;
+  },
+
+  /** 同源流式下载「单设备」CSV（GET，responseType=blob）。 */
+  async downloadTaskDeviceCsv(taskId: string, deviceSn: string): Promise<Blob> {
+    const { data } = await http.get(
+      `/mml/tasks/${taskId}/devices/${encodeURIComponent(deviceSn)}/export/download`,
+      { responseType: 'blob' }
+    );
+    return data as Blob;
   },
 
   // --- Dangerous command check ---
