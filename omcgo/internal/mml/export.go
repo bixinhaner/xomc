@@ -131,12 +131,12 @@ func taskIsRead(commands []map[string]interface{}) bool {
 
 // exportRow 一台设备一行的导出数据。
 type exportRow struct {
-	sn         string
-	statusText string
-	values     map[string]string // standardPath -> 读回值（读类）
-	faultCode  string
-	faultMsg   string
-	sentAt     string
+	sn          string
+	statusText  string
+	values      map[string]string // standardPath -> 读回值（读类）
+	faultCode   string
+	faultMsg    string
+	sentAt      string
 	completedAt string
 }
 
@@ -232,28 +232,166 @@ func rawResponseOf(result json.RawMessage) string {
 
 const utf8BOM = "\xEF\xBB\xBF"
 
-// buildAggregateCSV 全设备汇总：行=设备，列=序号/设备SN/状态/<参数列…>/故障码/故障信息/下发时间/响应时间。
-func buildAggregateCSV(cols []exportColumn, rows []exportRow) ([]byte, error) {
-	var buf bytes.Buffer
-	buf.WriteString(utf8BOM) // Excel 正确识别中文
-	w := csv.NewWriter(&buf)
-
-	header := []string{"序号", "设备SN", "状态"}
-	for _, c := range cols {
-		header = append(header, c.standard)
+// commandStandardPaths 取 commands[ci] 命令覆盖的 standardPath 列表（逐 PATH 时每命令 1 条）。
+// 优先 param_refs[].tr069_path（standardPath），缺则回退 param_paths。
+func commandStandardPaths(commands []map[string]interface{}, ci int) []string {
+	if ci < 0 || ci >= len(commands) {
+		return nil
 	}
-	header = append(header, "故障码", "故障信息", "下发时间", "响应时间")
-	if err := w.Write(header); err != nil {
+	entry := commands[ci]
+	var out []string
+	if refs, ok := entry["param_refs"].([]interface{}); ok {
+		for _, r := range refs {
+			if m, ok := r.(map[string]interface{}); ok {
+				if p, ok := m["tr069_path"].(string); ok && p != "" {
+					out = append(out, p)
+				}
+			}
+		}
+	}
+	if len(out) == 0 {
+		if pp, ok := entry["param_paths"].([]interface{}); ok {
+			for _, p := range pp {
+				if s, ok := p.(string); ok && s != "" {
+					out = append(out, s)
+				}
+			}
+		}
+	}
+	return out
+}
+
+// commandPathNames 从 commands 的 param_refs 抽 standardPath → 参数名称（param_name_zh）映射。
+func commandPathNames(commands []map[string]interface{}) map[string]string {
+	names := make(map[string]string)
+	for _, entry := range commands {
+		refs, ok := entry["param_refs"].([]interface{})
+		if !ok {
+			continue
+		}
+		for _, r := range refs {
+			m, ok := r.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			path, _ := m["tr069_path"].(string)
+			name, _ := m["param_name_zh"].(string)
+			if path != "" && name != "" {
+				names[path] = name
+			}
+		}
+	}
+	return names
+}
+
+// commandStringField 取 commands[ci] 的字符串字段（command_code / operation_type 等）。
+func commandStringField(commands []map[string]interface{}, ci int, key string) string {
+	if ci < 0 || ci >= len(commands) {
+		return ""
+	}
+	v, _ := commands[ci][key].(string)
+	return v
+}
+
+// execModeLabel 推导执行模式：逐 PATH 拆成 N 条 command（每条 1 path）；整体执行为单条 command。
+func execModeLabel(commands []map[string]interface{}) string {
+	if len(commands) > 1 {
+		return "逐 PATH"
+	}
+	return "整体执行"
+}
+
+// flattenXML 把多行 XML 报文压成一行（空白折叠为单空格），便于放进 CSV 单元格（方式 B）。
+func flattenXML(s string) string {
+	if s == "" {
+		return ""
+	}
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// longFormatHeader 是多设备汇总长表表头。
+var longFormatHeader = []string{
+	"序号", "设备SN", "命令", "操作类型", "执行模式", "子任务ID",
+	"参数路径", "参数名称", "状态", "读回值", "故障码", "故障信息",
+	"下发时间", "响应时间", "结果报文(XML)",
+}
+
+// buildLongFormatCSV 多设备汇总（长表，一行 = 设备 × PATH）：
+//   - 设备级公共字段（序号/设备SN/命令/操作类型/执行模式）只在该设备首行填；
+//   - 子任务级字段（子任务ID/下发/响应/结果报文）只在该 device_task 首行填（整体执行=1 个 RPC→只首行；
+//     逐 PATH=N 个 RPC→各自首行），报文压一行不重复；
+//   - PATH 级字段（参数路径/参数名称/状态/读回值/故障码/故障信息）每行都填；
+//   - 设备之间空一行。
+func buildLongFormatCSV(
+	cols []exportColumn, rows []DeviceTaskResultRowView, commands []map[string]interface{},
+	nameMap map[string]string, read bool,
+) ([]byte, error) {
+	execMode := execModeLabel(commands)
+
+	order := make([]string, 0)
+	groups := make(map[string][]DeviceTaskResultRowView)
+	for i := range rows {
+		sn := rows[i].DeviceSN
+		if _, ok := groups[sn]; !ok {
+			order = append(order, sn)
+		}
+		groups[sn] = append(groups[sn], rows[i])
+	}
+
+	var buf bytes.Buffer
+	buf.WriteString(utf8BOM)
+	w := csv.NewWriter(&buf)
+	if err := w.Write(longFormatHeader); err != nil {
 		return nil, err
 	}
-	for i, r := range rows {
-		rec := []string{strconv.Itoa(i + 1), r.sn, r.statusText}
-		for _, c := range cols {
-			rec = append(rec, r.values[c.standard])
+
+	deviceSeq := 0
+	for di, sn := range order {
+		if di > 0 {
+			if err := w.Write(make([]string, len(longFormatHeader))); err != nil { // 设备间空行
+				return nil, err
+			}
 		}
-		rec = append(rec, r.faultCode, r.faultMsg, r.sentAt, r.completedAt)
-		if err := w.Write(rec); err != nil {
-			return nil, err
+		deviceSeq++
+		firstRowOfDevice := true
+		for _, row := range groups[sn] {
+			er := rowToExport(row, cols, read)
+			status := deviceStatusText(row.Status, row.ErrorCode)
+			faultCode, faultMsg := "", ""
+			if row.ErrorCode != 0 {
+				faultCode = strconv.Itoa(row.ErrorCode)
+				faultMsg = row.ErrorMessage
+			}
+			raw := flattenXML(rawResponseOf(row.Result))
+			paths := commandStandardPaths(commands, row.CommandIndex)
+			firstRowOfTask := true
+			for _, p := range paths {
+				rec := make([]string, len(longFormatHeader))
+				if firstRowOfDevice { // 设备级公共字段：仅设备首行
+					rec[0] = strconv.Itoa(deviceSeq)
+					rec[1] = sn
+					rec[2] = commandStringField(commands, row.CommandIndex, "command_code")
+					rec[3] = commandStringField(commands, row.CommandIndex, "operation_type")
+					rec[4] = execMode
+					firstRowOfDevice = false
+				}
+				if firstRowOfTask { // 子任务级字段：仅该 device_task 首行（整体执行不重复报文）
+					rec[5] = row.DeviceTaskID
+					rec[12] = er.sentAt
+					rec[13] = er.completedAt
+					rec[14] = raw
+					firstRowOfTask = false
+				}
+				rec[6] = p // PATH 级：每行
+				rec[7] = nameMap[p]
+				rec[8] = status
+				rec[9] = er.values[p]
+				rec[10] = faultCode
+				rec[11] = faultMsg
+				if err := w.Write(rec); err != nil {
+					return nil, err
+				}
+			}
 		}
 	}
 	w.Flush()
@@ -263,30 +401,78 @@ func buildAggregateCSV(cols []exportColumn, rows []exportRow) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// buildDeviceCSV 单设备：纵向「参数路径,读回值」表 + 顶部设备/状态摘要。
-func buildDeviceCSV(cols []exportColumn, r exportRow) ([]byte, error) {
+// buildDeviceCSVMulti 单设备结果：顶部设备摘要（公共字段一次）+ 逐 PATH 明细表
+// （参数路径/参数名称/状态/读回值/故障码/故障信息/子任务ID/下发/响应/结果报文）。
+// 子任务级字段只在该 device_task 首行填（整体执行报文只首行、不重复）。
+func buildDeviceCSVMulti(
+	cols []exportColumn, devRows []DeviceTaskResultRowView, commands []map[string]interface{},
+	nameMap map[string]string, read bool,
+) ([]byte, error) {
+	// 设备级状态：全成功=成功 / 全失败=失败 / 混合=部分失败。
+	anySucc, anyFail := false, false
+	for _, row := range devRows {
+		if row.Status == "completed" && row.ErrorCode == 0 {
+			anySucc = true
+		} else {
+			anyFail = true
+		}
+	}
+	devStatus := "成功"
+	switch {
+	case anyFail && anySucc:
+		devStatus = "部分失败"
+	case anyFail:
+		devStatus = "失败"
+	}
+
+	cmdCode := ""
+	opType := ""
+	if len(devRows) > 0 {
+		cmdCode = commandStringField(commands, devRows[0].CommandIndex, "command_code")
+		opType = commandStringField(commands, devRows[0].CommandIndex, "operation_type")
+	}
+
 	var buf bytes.Buffer
 	buf.WriteString(utf8BOM)
 	w := csv.NewWriter(&buf)
-
-	summary := [][]string{
-		{"设备SN", r.sn},
-		{"状态", r.statusText},
-		{"故障码", r.faultCode},
-		{"故障信息", r.faultMsg},
-		{"下发时间", r.sentAt},
-		{"响应时间", r.completedAt},
+	// 顶部设备摘要（公共字段一次）。
+	for _, line := range [][]string{
+		{"设备SN", devRows[0].DeviceSN},
+		{"命令", cmdCode},
+		{"操作类型", opType},
+		{"执行模式", execModeLabel(commands)},
+		{"设备状态", devStatus},
 		{},
-		{"参数路径", "读回值"},
-	}
-	for _, line := range summary {
+		{"参数路径", "参数名称", "状态", "读回值", "故障码", "故障信息", "子任务ID", "下发时间", "响应时间", "结果报文(XML)"},
+	} {
 		if err := w.Write(line); err != nil {
 			return nil, err
 		}
 	}
-	for _, c := range cols {
-		if err := w.Write([]string{c.standard, r.values[c.standard]}); err != nil {
-			return nil, err
+
+	// 逐 PATH 明细：子任务级字段（子任务ID/下发/响应/报文）只在该 device_task 首行填。
+	for _, row := range devRows {
+		er := rowToExport(row, cols, read)
+		status := deviceStatusText(row.Status, row.ErrorCode)
+		faultCode, faultMsg := "", ""
+		if row.ErrorCode != 0 {
+			faultCode = strconv.Itoa(row.ErrorCode)
+			faultMsg = row.ErrorMessage
+		}
+		raw := flattenXML(rawResponseOf(row.Result))
+		firstRowOfTask := true
+		for _, p := range commandStandardPaths(commands, row.CommandIndex) {
+			rec := []string{p, nameMap[p], status, er.values[p], faultCode, faultMsg, "", "", "", ""}
+			if firstRowOfTask {
+				rec[6] = row.DeviceTaskID
+				rec[7] = er.sentAt
+				rec[8] = er.completedAt
+				rec[9] = raw
+				firstRowOfTask = false
+			}
+			if err := w.Write(rec); err != nil {
+				return nil, err
+			}
 		}
 	}
 	w.Flush()
@@ -297,6 +483,34 @@ func buildDeviceCSV(cols []exportColumn, r exportRow) ([]byte, error) {
 }
 
 // ── Service 导出方法 ──────────────────────────────────────────────────────────
+
+// resolvePathNames 解析 standardPath → 友好名（CSV「参数名称」列）。优先 pathNameResolver
+// （standard_params.description）；缺失的 path 回退 commandPathNames（param_refs.param_name_zh，
+// 排除名==path 的冗余值）。
+func (s *Service) resolvePathNames(ctx context.Context, cols []exportColumn, commands []map[string]interface{}) map[string]string {
+	names := make(map[string]string)
+	if s.pathNameResolver != nil && len(cols) > 0 {
+		paths := make([]string, 0, len(cols))
+		for _, c := range cols {
+			paths = append(paths, c.standard)
+		}
+		if m, err := s.pathNameResolver(ctx, paths); err == nil {
+			for k, v := range m {
+				if v != "" {
+					names[k] = v
+				}
+			}
+		} else {
+			s.logger.Warn("resolve path names for csv export", zap.Error(err))
+		}
+	}
+	for path, name := range commandPathNames(commands) {
+		if _, ok := names[path]; !ok && name != "" && name != path {
+			names[path] = name
+		}
+	}
+	return names
+}
 
 // SetExporter 注入结果导出器（provider 装配）。
 func (s *Service) SetExporter(e *Exporter) { s.exporter = e }
@@ -329,11 +543,10 @@ func (s *Service) ExportTaskResultsCSV(ctx context.Context, taskID uuid.UUID) (o
 	if err != nil {
 		return "", "", err
 	}
-	exportRows := make([]exportRow, 0, len(rows))
-	for _, r := range rows {
-		exportRows = append(exportRows, rowToExport(r, cols, read))
-	}
-	data, err := buildAggregateCSV(cols, exportRows)
+	// 多设备汇总长表：一行 = 设备 × PATH；公共字段只首行、子任务级字段只 device_task 首行、
+	// 整体执行报文不重复、设备间空行（详见 buildLongFormatCSV）。
+	nameMap := s.resolvePathNames(ctx, cols, task.Commands)
+	data, err := buildLongFormatCSV(cols, rows, task.Commands, nameMap, read)
 	if err != nil {
 		return "", "", fmt.Errorf("build csv: %w", err)
 	}
@@ -371,17 +584,18 @@ func (s *Service) ExportTaskDeviceCSV(ctx context.Context, taskID uuid.UUID, dev
 	if err != nil {
 		return "", "", err
 	}
-	var matched *DeviceTaskResultRowView
+	// 收集该设备的全部 device_task（逐 PATH 时每 path 一条），逐 path 呈现状态/值/故障。
+	var devRows []DeviceTaskResultRowView
 	for i := range rows {
 		if rows[i].DeviceSN == deviceSN {
-			matched = &rows[i]
-			break
+			devRows = append(devRows, rows[i])
 		}
 	}
-	if matched == nil {
+	if len(devRows) == 0 {
 		return "", "", commonDeviceResultNotFound
 	}
-	data, err := buildDeviceCSV(cols, rowToExport(*matched, cols, read))
+	nameMap := s.resolvePathNames(ctx, cols, task.Commands)
+	data, err := buildDeviceCSVMulti(cols, devRows, task.Commands, nameMap, read)
 	if err != nil {
 		return "", "", fmt.Errorf("build csv: %w", err)
 	}

@@ -43,7 +43,13 @@ type ConsoleService struct {
 	// 退化为原 BuildGroupTree（不过滤）。设计同 resolveParamModelByDevice 通过闭包
 	// 解耦 product / parammodel 包依赖。
 	supportedPathsRepo SupportedPathsRepository
-	logger             *zap.Logger
+
+	// 产品（product_id）不支持 path 自学习表查询 + deviceSN→product_id 解析闭包（兼容旧入参）。
+	// 供 GetUnsupportedPaths 给前端「选择命令 / 配置参数」按读/写过滤展示；nil 时返回空集。
+	unsupportedRepo ProductUnsupportedPathRepository
+	productIDByDev  func(ctx context.Context, deviceKey string) (*uuid.UUID, error)
+
+	logger *zap.Logger
 }
 
 // NewConsoleService 构造 ConsoleService。
@@ -155,6 +161,36 @@ func (s *ConsoleService) SetSearchRepo(repo SearchRepository) {
 // 不注入时 sub_field 端点不按设备过滤（admin 视图等价）。
 func (s *ConsoleService) SetParamModelByDeviceResolver(fn func(ctx context.Context, deviceKey string) (*uuid.UUID, error)) {
 	s.resolveParamModelByDevice = fn
+}
+
+// SetUnsupportedPathsProvider 注入「产品不支持 path 表」查询 + deviceSN→product_id 解析。
+// 不注入时 GetUnsupportedPaths 返回空集（向后兼容）。
+func (s *ConsoleService) SetUnsupportedPathsProvider(
+	repo ProductUnsupportedPathRepository,
+	productIDByDevice func(ctx context.Context, deviceKey string) (*uuid.UUID, error),
+) {
+	s.unsupportedRepo = repo
+	s.productIDByDev = productIDByDevice
+}
+
+// GetUnsupportedPaths 返回某产品已记录的不支持 path（含读/写标记）。
+// productID 优先（前端产品下拉直给，无需由 SN 反算）；为空时用 deviceKey 解析其 product_id。
+// 未装配仓库 / 解析不到 → 空集。
+func (s *ConsoleService) GetUnsupportedPaths(ctx context.Context, productID *uuid.UUID, deviceKey string) ([]UnsupportedPath, error) {
+	if s.unsupportedRepo == nil {
+		return []UnsupportedPath{}, nil
+	}
+	if productID == nil && deviceKey != "" && s.productIDByDev != nil {
+		pid, err := s.productIDByDev(ctx, deviceKey)
+		if err != nil {
+			return nil, fmt.Errorf("resolve product_id for unsupported paths: %w", err)
+		}
+		productID = pid
+	}
+	if productID == nil {
+		return []UnsupportedPath{}, nil
+	}
+	return s.unsupportedRepo.ListByProduct(ctx, *productID)
 }
 
 // SetCmdParamRepo 装配命令参数 enrichment 仓储；理由同 SetFlatTreeRepo。

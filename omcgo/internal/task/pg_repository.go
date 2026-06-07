@@ -461,6 +461,7 @@ WHERE source = 'mml' AND source_id = $1`
 // 改为直接按 source_id 查 device_tasks，可一步把"列表里看见成功/失败但点查
 // 看永远空"修好。
 type DeviceTaskResultRow struct {
+	ID           string // device_tasks.id（CSV 导出「子任务ID」、区分整体/逐 PATH 报文归属）
 	DeviceSN     string
 	Status       string
 	ErrorCode    int
@@ -499,7 +500,7 @@ WHERE source = 'mml' AND source_id = $1`
 	}
 
 	const listQ = `
-SELECT device_sn, status,
+SELECT id, device_sn, status,
        COALESCE(error_code, 0), COALESCE(error_message, ''),
        result, sent_at, completed_at, created_at,
        COALESCE(command_index, 0), COALESCE(device_index, 0)
@@ -518,7 +519,7 @@ LIMIT $2 OFFSET $3`
 		var row DeviceTaskResultRow
 		var raw []byte
 		if err := rows.Scan(
-			&row.DeviceSN, &row.Status,
+			&row.ID, &row.DeviceSN, &row.Status,
 			&row.ErrorCode, &row.ErrorMessage,
 			&raw, &row.SentAt, &row.CompletedAt, &row.CreatedAt,
 			&row.CommandIndex, &row.DeviceIndex,

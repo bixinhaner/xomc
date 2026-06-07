@@ -84,6 +84,8 @@ func (h *ConsoleHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	// gin tree 会把 "search" 当作 :id 路径变量匹配后者，返回 400/404。
 	mml.GET("/commands/search", h.SearchCommands)
 	mml.GET("/commands/:id/sub-fields", h.GetCommandSubFields)
+	// 产品（按设备 product_class）不支持的参数 PATH —— 前端「选择命令 / 配置参数」过滤展示用。
+	mml.GET("/unsupported-paths", h.GetUnsupportedPaths)
 	mml.POST("/render", h.PostRender)
 	mml.POST("/parse", h.PostParse)
 	mml.POST("/execute-statements", h.PostExecuteStatements)
@@ -248,6 +250,36 @@ func (h *ConsoleHandler) GetCommandSubFields(c *gin.Context) {
 		return
 	}
 	response.OK(c, gin.H{"sub_fields": subFields})
+}
+
+// GetUnsupportedPaths 返回某产品已记录的「不支持参数 PATH」列表（含读/写标记）。
+//
+//	GET /api/v1/mml/unsupported-paths?product_id=<uuid>   （前端主用，产品下拉直给）
+//	GET /api/v1/mml/unsupported-paths?device_sn=<sn>      （兼容：后端反算 product_id）
+//
+// 来源：product_unsupported_paths（MML 执行 path 不支持类故障自学习）。前端据此在「选择命令 /
+// 配置参数」按命令读/写类型过滤掉对应 path。
+func (h *ConsoleHandler) GetUnsupportedPaths(c *gin.Context) {
+	deviceSN := strings.TrimSpace(c.Query("device_sn"))
+	var productID *uuid.UUID
+	if pidStr := strings.TrimSpace(c.Query("product_id")); pidStr != "" {
+		pid, err := uuid.Parse(pidStr)
+		if err != nil {
+			response.Fail(c, http.StatusBadRequest, "invalid product_id")
+			return
+		}
+		productID = &pid
+	}
+	paths, err := h.svc.GetUnsupportedPaths(c.Request.Context(), productID, deviceSN)
+	if err != nil {
+		h.logger.Error("get unsupported paths", zap.Error(err), zap.String("device_sn", deviceSN))
+		response.Fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if paths == nil {
+		paths = []UnsupportedPath{}
+	}
+	response.OK(c, gin.H{"paths": paths})
 }
 
 // ============================================================

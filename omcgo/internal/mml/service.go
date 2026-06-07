@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -40,10 +41,17 @@ type Service struct {
 	roleQuerier                  RoleQuerier                  // optional; nil 时 ListCustomCommands fallback creator-only 过滤
 	deviceTaskPathMissAggregator DeviceTaskPathMissAggregator // Stage 3 路径翻译警告字段聚合
 	deviceTaskResultLister       DeviceTaskResultLister       // 任务记录"查看"modal 的设备级结果（2026-05-23 修）
-	deviceLookup                 DeviceLookup                 // R-8.4 product_class 一致性校验；nil 时跳过（向后兼容）
+	deviceLookup                 DeviceLookup                 // 设备 product_class 反查（混类型 per-product 翻译用）；nil 时跳过
 	pathTranslator               PathTranslator               // R-9.3 per-device standardPath → privatePath 翻译；nil 时跳过
 	exporter                     *Exporter                    // 结果 CSV 导出（MinIO）；nil 时导出端点返回 503
-	logger                       *zap.Logger
+	// 参数路径 → 友好名（standard_params.description）解析，CSV「参数名称」列用；nil 时回退 param_refs。
+	pathNameResolver func(ctx context.Context, paths []string) (map[string]string, error)
+	logger           *zap.Logger
+
+	// 按 product_class 缓存 standardPath→privatePath 翻译结果（TTL 1 分钟）。混类型任务
+	// per-product 翻译一次、同 product_class 复用，避免逐设备重复翻译。
+	pcTransCache   map[string]pcTransCacheEntry
+	pcTransCacheMu sync.Mutex
 }
 
 // DeviceLookup 接口复用 fanout.go 已有定义（GetBySerialNumber → *model.Device，
@@ -171,6 +179,11 @@ func (s *Service) SetRoleQuerier(rq RoleQuerier) {
 
 // SetDeviceLookup 注入设备查询适配器，启用 R-8.4 product_class 一致性校验。
 // nil 时跳过（向后兼容）。
+// SetPathNameResolver 注入 standardPath → 友好名解析（standard_params.description），CSV 导出用。
+func (s *Service) SetPathNameResolver(fn func(ctx context.Context, paths []string) (map[string]string, error)) {
+	s.pathNameResolver = fn
+}
+
 func (s *Service) SetDeviceLookup(d DeviceLookup) {
 	s.deviceLookup = d
 }
@@ -972,14 +985,8 @@ func (s *Service) CreateAndFanoutTask(ctx context.Context, task *MMLTask, sequen
 		task.TotalDevices = len(task.DeviceSNs)
 	}
 
-	// R-8.4: device_sns → product_class 一致性校验（DeviceLookup 注入后启用）。
-	// 混类型直接拒绝，避免下游 fanout 后才发现路径不兼容。
-	if err := s.validateDeviceProductClassUniform(ctx, task.DeviceSNs); err != nil {
-		return err
-	}
-
-	// R-9.3: 把 task.Commands 内的 standardPath 按 device.product_class 翻译为 privatePath。
-	// PathTranslator nil 时跳过（向后兼容）；翻译结果写回 task.Commands 的 param_refs / parameters。
+	// 混类型（不同 product_class）不再拒绝（原 R-8.4 已解除）：每个 product_class 翻译一次、
+	// 同类复用（缓存 1 分钟），逐设备实际翻译在 ACS 出队时按各自 product_class 完成（含 fallback）。
 	if err := s.translateTaskPaths(ctx, task); err != nil {
 		return err
 	}
@@ -1223,6 +1230,7 @@ type DeviceTaskResultLister interface {
 // DeviceTaskResultRowView 屏蔽 task 包内部 struct，让 mml 包不反向 import task 包。
 // 字段语义对齐 task.DeviceTaskResultRow；Result 是 device_tasks.result JSONB 原始字节。
 type DeviceTaskResultRowView struct {
+	DeviceTaskID string // device_tasks.id（CSV 导出「子任务ID」）
 	DeviceSN     string
 	Status       string
 	ErrorCode    int

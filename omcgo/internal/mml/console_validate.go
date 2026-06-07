@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/global"
 )
@@ -120,86 +122,128 @@ func (s *Service) validateDeviceProductClassUniform(ctx context.Context, deviceS
 	return &ErrMixedProductClass{Classes: classes}
 }
 
-// translateTaskPaths 实现 R-9.3：把 task.Commands 内 standardPath 翻译为 privatePath。
-//
-// PathTranslator 未注入时跳过（向后兼容）。
-//
-// 翻译输入：
-//   - task.Commands[i]["param_refs"]      []MMLParamRef     LST/MOD/ADD 选中路径
-//   - task.Commands[i]["parameters"]      map[string]any    MOD 值（key=path）
-// 翻译输出：
-//   - 在 param_refs[] 中追加 PrivatePath / Source 字段（供 fanouter 写入 device_task.params）
-//   - 在 parameters 中把 key 替换为 privatePath
-//   - 记录 translation_results 元数据（standard / private / source）供 TerminalPanel 回显
-//
-// 注意：当前实现按 task 维度做"一次翻译"（假设 device_sns 同 product_class，
-// R-8.4 已保证）。如果未来出现同 product_class 不同 software_version，可由 fanouter
-// 在 device 维度再翻译（D27 决策保留弹性）。
-func (s *Service) translateTaskPaths(ctx context.Context, task *MMLTask) error {
-	if s.pathTranslator == nil {
-		return nil
-	}
-	if len(task.DeviceSNs) == 0 || s.deviceLookup == nil {
-		return nil
-	}
+// pcTransCacheTTL 是 per-product_class 翻译结果的缓存有效期（用户决策：1 分钟）。
+const pcTransCacheTTL = time.Minute
 
-	// 取第一个设备的 product_class + software_version（R-8.4 已保证同 product_class）
-	firstDev, err := s.deviceLookup.GetBySerialNumber(ctx, task.DeviceSNs[0])
+// pcTransCacheEntry 缓存某 (product_class, sw, paths) 的成功翻译结果。
+type pcTransCacheEntry struct {
+	outcome *TranslationOutcome
+	expiry  time.Time
+}
+
+// translateForProductCached 按 (product_class, sw, paths) 翻译并缓存（TTL 1 分钟）。
+// 同 product_class（同 sw、同 path 集）在 TTL 内复用，避免逐设备重复翻译。仅缓存成功结果；
+// 失败（orphan / unsupported / IO）不缓存，交由调用方按 uniform/mixed 策略处理。
+func (s *Service) translateForProductCached(
+	ctx context.Context, productClass, sw string, paths []string,
+) (*TranslationOutcome, error) {
+	key := productClass + "|" + sw + "|" + strings.Join(paths, ",")
+	now := time.Now()
+
+	s.pcTransCacheMu.Lock()
+	if e, ok := s.pcTransCache[key]; ok && now.Before(e.expiry) {
+		s.pcTransCacheMu.Unlock()
+		return e.outcome, nil
+	}
+	s.pcTransCacheMu.Unlock()
+
+	outcome, err := s.pathTranslator.TranslateForDevice(ctx, productClass, sw, paths)
 	if err != nil {
-		return fmt.Errorf("lookup device %s for translation: %w", task.DeviceSNs[0], err)
+		return nil, err
 	}
-	if firstDev == nil || firstDev.ProductClass == "" {
-		// 已被 R-8.4 拦住的情况；这里只是双保险
+	if outcome == nil {
+		return nil, fmt.Errorf("translate paths for product_class %s: nil outcome", productClass)
+	}
+
+	s.pcTransCacheMu.Lock()
+	if s.pcTransCache == nil {
+		s.pcTransCache = make(map[string]pcTransCacheEntry)
+	}
+	s.pcTransCache[key] = pcTransCacheEntry{outcome: outcome, expiry: now.Add(pcTransCacheTTL)}
+	s.pcTransCacheMu.Unlock()
+	return outcome, nil
+}
+
+// translateTaskPaths 实现 per-device（按 product_class 去重）的 standardPath → privatePath 预翻译。
+//
+// 解除原 R-8.4「混类型直接拒绝」：device_sns 可含不同 product_class。对每个 distinct product_class
+// 翻译一次（translateForProductCached 缓存复用），用于：① 任务级翻译元数据 / 命令 translation_results
+// 回显；② 单一 product_class 时保留 T-0170 即时 422（orphan / unsupported）预检。
+//
+// 注意：device_tasks 入队存 standardPath，真正逐设备翻译在 ACS 出队时按各自 product_class 完成
+// （含 fallback）。因此混类型下，本预翻译失败的 product_class 不整体 422，交由 ACS 逐设备兜底。
+func (s *Service) translateTaskPaths(ctx context.Context, task *MMLTask) error {
+	if s.pathTranslator == nil || len(task.DeviceSNs) == 0 || s.deviceLookup == nil {
 		return nil
 	}
-	productClass := firstDev.ProductClass
-	softwareVersion := firstDev.FirmwareVersion
-
-	// 收集本次任务待翻译的所有 standardPath
 	standardPaths := collectStandardPaths(task.Commands)
 	if len(standardPaths) == 0 {
 		return nil
 	}
 
-	outcome, err := s.pathTranslator.TranslateForDevice(ctx, productClass, softwareVersion, standardPaths)
-	if err != nil {
-		// T-0168: ErrProductClassUnresolved 已被适配器内部消化为 orphan_passthrough；
-		// 保留 sentinel 检查作为旧适配器实现的向后兼容兜底。
-		var orphanErr *ErrProductClassUnresolved
-		if errors.As(err, &orphanErr) {
-			return err
+	// 解析所有设备的 distinct (product_class, sw)；保持首次出现顺序。
+	type pcKey struct{ pc, sw string }
+	seen := make(map[pcKey]struct{})
+	classes := make([]pcKey, 0, 2)
+	for _, sn := range task.DeviceSNs {
+		dev, err := s.deviceLookup.GetBySerialNumber(ctx, sn)
+		if err != nil || dev == nil || dev.ProductClass == "" {
+			continue
 		}
-		// T-0170: ErrPathUnsupported — product 已识别但单 path 在 paramModel 无映射，
-		// 整 task 拒绝（让 handler 转 422 + 错误信息含具体 path 清单，不让用户等 CPE 9005）。
-		var unsupportedErr *ErrPathUnsupported
-		if errors.As(err, &unsupportedErr) {
-			return err
+		k := pcKey{dev.ProductClass, dev.FirmwareVersion}
+		if _, ok := seen[k]; !ok {
+			seen[k] = struct{}{}
+			classes = append(classes, k)
 		}
-		// Translator 内部错误（Registry IO / DI 失败）→ wrap
-		return fmt.Errorf("translate paths for product_class %s: %w", productClass, err)
 	}
-	if outcome == nil {
-		return fmt.Errorf("translate paths for product_class %s: nil outcome", productClass)
+	if len(classes) == 0 {
+		return nil
+	}
+	mixed := len(classes) > 1
+
+	var firstOutcome *TranslationOutcome
+	for _, c := range classes {
+		outcome, err := s.translateForProductCached(ctx, c.pc, c.sw, standardPaths)
+		if err != nil {
+			if mixed {
+				// 混类型：单个 product_class 预翻译失败（orphan / unsupported / IO）不整体 422，
+				// 交由 ACS 出队逐设备翻译 + fallback。
+				s.logger.Warn("mixed product_class: skip pre-flight translate for one class",
+					zap.String("product_class", c.pc), zap.Error(err))
+				continue
+			}
+			// 单一 product_class：保留原 T-0170 即时 422（orphan / unsupported 透传给 handler）。
+			var orphanErr *ErrProductClassUnresolved
+			var unsupportedErr *ErrPathUnsupported
+			if errors.As(err, &orphanErr) || errors.As(err, &unsupportedErr) {
+				return err
+			}
+			return fmt.Errorf("translate paths for product_class %s: %w", c.pc, err)
+		}
+		if firstOutcome == nil {
+			firstOutcome = outcome
+		}
+	}
+	if firstOutcome == nil {
+		// 混类型且所有 product_class 预翻译都失败：不阻塞，交 ACS 逐设备兜底。
+		return nil
 	}
 
-	// T-0168: 写回任务级翻译元数据，由 PgTaskRepository.Create 持久化到 mml_tasks 4 列。
-	task.ProductResolved = outcome.ProductResolved
-	task.MatchedProductClass = outcome.ProductClass
-	if outcome.ProductResolved && outcome.ProductID != uuid.Nil {
-		id := outcome.ProductID
+	// 任务级翻译元数据（混类型以首个成功 product_class 为代表；逐设备实际翻译见 device_tasks / ACS）。
+	task.ProductResolved = firstOutcome.ProductResolved
+	task.MatchedProductClass = firstOutcome.ProductClass
+	if firstOutcome.ProductResolved && firstOutcome.ProductID != uuid.Nil {
+		id := firstOutcome.ProductID
 		task.MatchedProductID = &id
 	} else {
 		task.MatchedProductID = nil
 	}
-	task.PathTranslationSource = outcome.AggregateSource
+	task.PathTranslationSource = firstOutcome.AggregateSource
 
-	// 构造 standard → privatePath 映射
-	trans := make(map[string]TranslatedPath, len(outcome.Paths))
-	for _, r := range outcome.Paths {
+	trans := make(map[string]TranslatedPath, len(firstOutcome.Paths))
+	for _, r := range firstOutcome.Paths {
 		trans[r.Standard] = r
 	}
-
-	// 写回 task.Commands：在 commands[i] 增加 translation_results 元数据
 	for i := range task.Commands {
 		applyTranslationToCommandEntry(task.Commands[i], trans)
 	}

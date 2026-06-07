@@ -38,6 +38,13 @@ type ResultAggregator struct {
 	// nil → silent skip 整个 auto-learn。
 	paramModelResolver func(ctx context.Context, deviceKey string) (*uuid.UUID, error)
 
+	// unsupportedRepo + productIDResolver：按设备 product_id 记录「path 不支持」到
+	// product_unsupported_paths（自学习表，读/写分别标记），前端「选择命令 / 配置参数」据此过滤。
+	// 与 autoLearnUnsupportedPaths（param_mappings.is_supported，按 param_model）互补——
+	// 本表按 product_id 维度，避免多产品共用 param_model 时互相污染。任一为 nil → 跳过。
+	unsupportedRepo   ProductUnsupportedPathRepository
+	productIDResolver func(ctx context.Context, deviceSN string) (*uuid.UUID, error)
+
 	// deviceStats 注入后，finalizeIfComplete 以"该任务实际派发的 device_tasks
 	// 全部进入终态"为完成判据（而非理论 total=设备数×命令数）。nil（单测）时退回
 	// 旧的理论 total 计数判据，保持向后兼容。详见 finalizeIfComplete。
@@ -76,6 +83,16 @@ func (a *ResultAggregator) SetParamModelResolver(
 	fn func(ctx context.Context, deviceKey string) (*uuid.UUID, error),
 ) {
 	a.paramModelResolver = fn
+}
+
+// SetUnsupportedPathRecorder 注入「按 product_id 记录 path 不支持」的仓库 + deviceSN→product_id
+// 解析闭包。两者均注入后，OnTaskCompleted 在 path 不支持类故障时写入 product_unsupported_paths。
+func (a *ResultAggregator) SetUnsupportedPathRecorder(
+	repo ProductUnsupportedPathRepository,
+	productIDResolver func(ctx context.Context, deviceSN string) (*uuid.UUID, error),
+) {
+	a.unsupportedRepo = repo
+	a.productIDResolver = productIDResolver
 }
 
 // SetDeviceTaskStatsReader 注入 device_tasks 终态聚合器（生产由 *task.PgTaskRepository
@@ -124,6 +141,7 @@ func (a *ResultAggregator) OnTaskCompleted(ctx context.Context, dt *task.Task) {
 	// 被过滤，避免反复触发 atomic SPV 9003 失败把同批次其它 path 一起拖死。
 	if dt.Status == task.TaskStatusFailed {
 		a.autoLearnUnsupportedPaths(ctx, dt)
+		a.recordProductUnsupportedPaths(ctx, dt)
 	}
 
 	a.finalizeIfComplete(ctx, mmlID)
@@ -218,6 +236,94 @@ func (a *ResultAggregator) autoLearnUnsupportedPaths(ctx context.Context, dt *ta
 	}
 }
 
+// recordProductUnsupportedPaths 分析 dt.Result.param_faults 的「path 不支持」类故障，按设备
+// product_id 写入 product_unsupported_paths（自学习表，读/写分别标记）。与 autoLearnUnsupportedPaths
+// 不同：覆盖所有方法（GPV/LST + SPV/MOD）、按 product_id 维度（不污染共用 param_model 的其它产品）。
+//
+// 故障 → 读/写标记（用户决策：读写权限控制）：
+//   - 9005 Invalid Parameter Name（path 不存在）   → read_unsupported=true AND write_unsupported=true
+//   - 9008 Non-writable Parameter（参数只读）       → write_unsupported=true（读仍可用）
+//   - 其它 fault code（9006 类型错 / 9007 值越界等） → 非「不支持」语义，跳过
+//
+// unsupportedRepo / productIDResolver 任一未注入、dt.Result 非 param_faults 形态、解析不到
+// product_id 时均 silent skip。
+func (a *ResultAggregator) recordProductUnsupportedPaths(ctx context.Context, dt *task.Task) {
+	if a.unsupportedRepo == nil || a.productIDResolver == nil || len(dt.Result) == 0 {
+		return
+	}
+
+	var payload spvFaultPayload
+	if err := json.Unmarshal(dt.Result, &payload); err != nil || len(payload.ParamFaults) == 0 {
+		return
+	}
+	// 先扫一遍是否含「不支持」类故障，避免无谓的 product_id 解析查询。
+	hasUnsupported := false
+	for _, f := range payload.ParamFaults {
+		if f.ParameterName != "" && faultMarksUnsupported(f.FaultCode) {
+			hasUnsupported = true
+			break
+		}
+	}
+	if !hasUnsupported {
+		return
+	}
+
+	productID, err := a.productIDResolver(ctx, dt.DeviceSN)
+	if err != nil || productID == nil {
+		a.logger.Debug("skip record unsupported path: cannot resolve product_id",
+			zap.String("device_sn", dt.DeviceSN), zap.Error(err))
+		return
+	}
+
+	recorded := 0
+	for _, f := range payload.ParamFaults {
+		if f.ParameterName == "" {
+			continue
+		}
+		readUnsup, writeUnsup := faultToReadWriteUnsupported(f.FaultCode)
+		if !readUnsup && !writeUnsup {
+			continue
+		}
+		if err := a.unsupportedRepo.Record(ctx, *productID, f.ParameterName, readUnsup, writeUnsup, f.FaultCode, dt.DeviceSN); err != nil {
+			a.logger.Warn("record product unsupported path failed",
+				zap.String("product_id", productID.String()),
+				zap.String("path", f.ParameterName),
+				zap.Error(err))
+			continue
+		}
+		recorded++
+	}
+	if recorded > 0 {
+		a.logger.Info("recorded product unsupported paths",
+			zap.String("device_sn", dt.DeviceSN),
+			zap.String("product_id", productID.String()),
+			zap.String("device_task_id", dt.ID),
+			zap.Int("paths_recorded", recorded),
+		)
+	}
+}
+
+// cwmpFaultNonWritableParameter 9008 = "Attempt to set a non-writable parameter"（参数只读）。
+// 仅影响写（MOD/SPV），读（LST/GPV）仍可用。
+const cwmpFaultNonWritableParameter = 9008
+
+// faultMarksUnsupported 判断 fault code 是否表示「path 不支持」（9005 不存在 / 9008 只读）。
+func faultMarksUnsupported(faultCode int) bool {
+	return faultCode == cwmpFaultInvalidParameterName || faultCode == cwmpFaultNonWritableParameter
+}
+
+// faultToReadWriteUnsupported 把 fault code 映射为读/写不支持标记。
+func faultToReadWriteUnsupported(faultCode int) (readUnsupported, writeUnsupported bool) {
+	switch faultCode {
+	case cwmpFaultInvalidParameterName: // 9005 path 不存在 → 读写都不支持
+		return true, true
+	case cwmpFaultNonWritableParameter: // 9008 只读 → 仅写不支持
+		return false, true
+	default:
+		return false, false
+	}
+}
+
 // publishDeviceFrame emits one SSE frame per device_task terminal state.
 // The frame carries the device's per-RPC outcome (status + result/error)
 // so the UI can render a live "device × step" stream. Failures during
@@ -248,6 +354,9 @@ func (a *ResultAggregator) publishDeviceFrame(ctx context.Context, mmlID uuid.UU
 	}
 	if dt.CompletedAt != nil {
 		payload["completed_at"] = dt.CompletedAt
+	}
+	if dt.SentAt != nil {
+		payload["sent_at"] = dt.SentAt // RPC 下发时间，供前端结果行「下发时间」展示
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {

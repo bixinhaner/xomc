@@ -16,12 +16,12 @@ import (
 	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/backup"
 	"github.com/omcgo/omcgo/internal/bundle"
-	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/config"
 	"github.com/omcgo/omcgo/internal/config/baseline"
 	"github.com/omcgo/omcgo/internal/core/components"
 	minioinfra "github.com/omcgo/omcgo/internal/core/components/minio"
 	"github.com/omcgo/omcgo/internal/core/event"
+	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/reliability"
 	"github.com/omcgo/omcgo/internal/core/reliability/dlq"
 	"github.com/omcgo/omcgo/internal/core/reliability/runner"
@@ -1253,6 +1253,29 @@ func initMiscModules(c *Container) error {
 	mmlService := mml.NewService(mmlCmdRepo, mmlScriptRepo, mmlTaskRepo, mmlCustomCmdRepo, messageHub, logger)
 	mmlService.SetAuditRepo(mmlAuditRepo)
 	mmlService.SetCmdParamRepo(mmlCmdParamRepo)
+	// CSV 导出「参数名称」列：standardPath → standard_params.description（友好名）。
+	mmlService.SetPathNameResolver(func(ctx context.Context, paths []string) (map[string]string, error) {
+		if len(paths) == 0 {
+			return nil, nil
+		}
+		rows, err := c.PgPool.Query(ctx,
+			`SELECT standard_path, COALESCE(description, '') FROM standard_params WHERE standard_path = ANY($1)`, paths)
+		if err != nil {
+			return nil, fmt.Errorf("query standard_params descriptions: %w", err)
+		}
+		defer rows.Close()
+		m := make(map[string]string, len(paths))
+		for rows.Next() {
+			var p, d string
+			if err := rows.Scan(&p, &d); err != nil {
+				return nil, fmt.Errorf("scan standard_params description: %w", err)
+			}
+			if d != "" {
+				m[p] = d
+			}
+		}
+		return m, rows.Err()
+	})
 	// 结果 CSV 导出：上传用内部 client（c.MinIO，连 docker 内网 minio:9000），
 	// 下载 URL 用 PresignClient（public_endpoint，浏览器可达）；落 reports bucket 的
 	// mml-results/ 独立目录。任一缺失 → 导出端点返回 503。
@@ -1367,6 +1390,32 @@ func initMiscModules(c *Container) error {
 		}
 		return mr.Product.ParamModelID, nil
 	})
+
+	// 产品不支持 path 自学习表（migration 000029）：MML path 不支持类故障时按 product_id 录入，
+	// 前端「选择命令 / 配置参数」据此按读/写过滤。deviceSN → product_id 复用 resolveDeviceByKey + ProductRegistry。
+	unsupportedPathRepo := mml.NewPgProductUnsupportedPathRepository(c.PgPool)
+	productIDByDevice := func(ctx context.Context, deviceKey string) (*uuid.UUID, error) {
+		dev, err := resolveDeviceByKey(ctx, c, deviceKey)
+		if err != nil {
+			return nil, fmt.Errorf("resolve device %q: %w", deviceKey, err)
+		}
+		if dev == nil || dev.ProductClass == "" {
+			return nil, nil
+		}
+		mr, err := c.ProductRegistry.MatchProductClass(ctx, dev.ProductClass)
+		if errors.Is(err, product.ErrOrphan) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("match product_class %q for device %q: %w", dev.ProductClass, deviceKey, err)
+		}
+		if mr == nil || mr.Product == nil {
+			return nil, nil
+		}
+		pid := mr.Product.ID
+		return &pid, nil
+	}
+	mmlConsoleSvc.SetUnsupportedPathsProvider(unsupportedPathRepo, productIDByDevice)
 
 	// T-0172: 注入 productClass → SupportedSet 反查（catalog 按产品过滤命令树）。
 	// 方案 X：supported set 仅取 default param_mappings（不掺杂 discovered）；
@@ -1508,6 +1557,8 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 			}
 			return pmID, nil
 		})
+		// path 不支持类故障时按 product_id 录入 product_unsupported_paths（与 console 端查询同源 repo / resolver）。
+		aggregator.SetUnsupportedPathRecorder(unsupportedPathRepo, productIDByDevice)
 		// 让聚合器以"实际 device_tasks 全部终态"判定完成，修复理论 total 因 fanout/
 		// sequencer 跳过而永远到不了导致的任务卡 running（见 ResultAggregator.finalizeIfComplete）。
 		aggregator.SetDeviceTaskStatsReader(task.NewPgTaskRepository(c.PgPool))
@@ -1979,6 +2030,7 @@ func (a *mmlDeviceTaskResultAdapter) ListResultsBySourceID(
 	out := make([]mml.DeviceTaskResultRowView, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, mml.DeviceTaskResultRowView{
+			DeviceTaskID: r.ID,
 			DeviceSN:     r.DeviceSN,
 			Status:       r.Status,
 			ErrorCode:    r.ErrorCode,
