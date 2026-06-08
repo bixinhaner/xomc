@@ -93,9 +93,15 @@ func (s *DeviceGroupService) GetTreeWithCounts(ctx context.Context) ([]DeviceGro
 
 	tree := buildTree(flat)
 	// Propagate L2 device counts up to L1 parents.
+	// 例外：「未分组设备」(DefaultLevel2GroupID) 是系统内置特殊节点，其计数是「全系统未绑定
+	// 任何分组的设备」(NOT EXISTS) 的全局口径，并非父组的真实成员；不并入父组聚合，否则
+	// 「默认设备组」徽标会算上这 2w+ 台，而点进父组只列其直接成员，徽标与列表对不上。
 	for i := range tree {
 		var childTotal int
 		for _, child := range tree[i].Children {
+			if child.ID.String() == global.DefaultLevel2GroupID {
+				continue
+			}
 			childTotal += child.DeviceCount
 		}
 		tree[i].DeviceCount += childTotal
@@ -140,21 +146,21 @@ func (s *DeviceGroupService) CreateGroup(ctx context.Context, req CreateGroupReq
 	}
 
 	group := &DeviceGroup{
-		Name:         req.Name,
+		Name:            req.Name,
 		NameI18n:        req.NameI18n,
 		DescriptionI18n: req.DescriptionI18n,
 		RemarkI18n:      req.RemarkI18n,
-		ParentID:     parentID,
-		Carrier:      carrier(req.Carrier),
-		Remark:       req.Remark,
-		SortOrder:    req.SortOrder,
-		Level:        level,
-		Status:       string(global.GroupStatusActive),
-		CreatedBy:    operator,
-		MatchingMode: MatchingMode(req.MatchingMode),
-		NameRuleList: req.NameRuleList,
-		LACList:      req.LACList,
-		TACList:      req.TACList,
+		ParentID:        parentID,
+		Carrier:         carrier(req.Carrier),
+		Remark:          req.Remark,
+		SortOrder:       req.SortOrder,
+		Level:           level,
+		Status:          string(global.GroupStatusActive),
+		CreatedBy:       operator,
+		MatchingMode:    MatchingMode(req.MatchingMode),
+		NameRuleList:    req.NameRuleList,
+		LACList:         req.LACList,
+		TACList:         req.TACList,
 	}
 
 	if err := s.repo.Create(ctx, group); err != nil {

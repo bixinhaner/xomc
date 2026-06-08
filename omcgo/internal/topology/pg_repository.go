@@ -24,7 +24,7 @@ var groupColumns = []string{
 	"level", "status", "is_default", "remark", "created_by", "updated_by",
 	"created_at", "updated_at",
 	"matching_mode", "name_rule_list", "lac_list", "tac_list",
-	"serial_number_list", // migration 000124
+	"serial_number_list",                           // migration 000124
 	"name_i18n", "description_i18n", "remark_i18n", // migration 000003
 }
 
@@ -142,7 +142,7 @@ func (r *PgDeviceGroupRepository) Update(ctx context.Context, group *DeviceGroup
 		Set("lac_list", nullableIntArray(group.LACList)).
 		Set("tac_list", nullableIntArray(group.TACList)).
 		Set("serial_number_list", nullableStringArray(group.SerialNumberList)).
-		Set("name_i18n", marshalI18n(group.NameI18n)).             // migration 000003 i18n
+		Set("name_i18n", marshalI18n(group.NameI18n)). // migration 000003 i18n
 		Set("description_i18n", marshalI18n(group.DescriptionI18n)).
 		Set("remark_i18n", marshalI18n(group.RemarkI18n)).
 		Where(sq.Eq{"id": group.ID}).
@@ -239,13 +239,24 @@ func (r *PgDeviceGroupRepository) GetTree(ctx context.Context) ([]DeviceGroup, e
 // GetTreeWithCounts returns all groups with device_count populated.
 // Optimized: Uses LATERAL join for efficient counting instead of GROUP BY on entire table.
 func (r *PgDeviceGroupRepository) GetTreeWithCounts(ctx context.Context) ([]DeviceGroup, error) {
+	// 「未分组设备」($1 = DefaultLevel2GroupID）是系统内置组，语义是「整个系统中未绑定任何
+	// 分组的设备」(NOT EXISTS device_group_members)，而非「该组的成员」——和设备列表点进去的
+	// 口径(device_info_pg_repository.ungroupedDevicesWhere)保持一致；其余组仍按成员计数。
+	// 否则徽标按成员数算(未分组设备恒为 0)，与列表数据(23k+)对不上。
 	const rawSQL = `
 		SELECT dg.id, dg.name, dg.parent_id, dg.carrier, dg.description, dg.sort_order,
 		       dg.level, dg.status, dg.is_default, dg.remark, dg.created_by, dg.updated_by,
 		       dg.created_at, dg.updated_at,
 		       dg.matching_mode, dg.name_rule_list, dg.lac_list, dg.tac_list,
 		       dg.serial_number_list,
-		       COALESCE(device_counts.count, 0) AS device_count,
+		       CASE
+		           WHEN dg.id = $1::uuid THEN (
+		               SELECT COUNT(*) FROM devices d
+		               WHERE d.deleted_at IS NULL
+		                 AND NOT EXISTS (SELECT 1 FROM device_group_members m WHERE m.device_id = d.id)
+		           )
+		           ELSE COALESCE(device_counts.count, 0)
+		       END AS device_count,
 		       dg.name_i18n, dg.description_i18n, dg.remark_i18n
 		FROM device_groups dg
 		LEFT JOIN LATERAL (
@@ -256,7 +267,7 @@ func (r *PgDeviceGroupRepository) GetTreeWithCounts(ctx context.Context) ([]Devi
 		) device_counts ON true
 		ORDER BY dg.sort_order ASC, dg.name ASC`
 
-	rows, err := r.pool.Query(ctx, rawSQL)
+	rows, err := r.pool.Query(ctx, rawSQL, global.DefaultLevel2GroupID)
 	if err != nil {
 		return nil, fmt.Errorf("get tree with counts: %w", err)
 	}
