@@ -40,6 +40,75 @@ jobs:
       - name: Lint migration files (strict — 仅同目录撞号 + 缺 goose 标记报错)
         run: bash omcgo/scripts/check-migrations.sh --strict
 
+  # ─────────────────────────────────────────────────────────────
+  # migration-changes：路径过滤门（仅 PR）。只有改了 omcgo/migrations/** 才放行
+  #   下面的 real-run（起 timescaledb + 真跑全套），非迁移 PR 省掉起库/迁移开销。
+  # ─────────────────────────────────────────────────────────────
+  migration-changes:
+    name: Migrations · detect changes
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    timeout-minutes: 2
+    outputs:
+      migrations: ${{ steps.filter.outputs.migrations }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Detect migration changes
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            migrations:
+              - 'omcgo/migrations/**'
+
+  # ─────────────────────────────────────────────────────────────
+  # migration-realrun：全新 timescaledb 库真跑 schema + seed 迁移，拦截
+  #   「旧 seed × 新 schema」不兼容（删/改列、NOT NULL、CHECK、FK 等——静态
+  #   migration-lint 抓不到）。仅 PR + 改了 migrations/** 时跑（path 过滤）。
+  #
+  # 注：本 job 在「未改迁移的 PR」会被 if 跳过（conclusion=skipped）。若设为
+  #   required check，GitHub 把 if 跳过的 job 视作通过（不阻塞）；真正会卡 pending
+  #   的只有「workflow 级 on.paths 跳过」——本处用 job 级过滤刻意规避。
+  # ─────────────────────────────────────────────────────────────
+  migration-realrun:
+    name: Migrations · real run (fresh DB schema + seed)
+    needs: migration-changes
+    if: github.event_name == 'pull_request' && needs.migration-changes.outputs.migrations == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        # 必须带 timescaledb：000001_init_schema CREATE EXTENSION timescaledb + create_hypertable
+        image: timescale/timescaledb:2.25.2-pg16
+        env:
+          POSTGRES_USER: omcgo
+          POSTGRES_PASSWORD: omcgo123
+          POSTGRES_DB: omcgo_seedcheck
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U omcgo -d omcgo_seedcheck"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      DSN: postgres://omcgo:omcgo123@localhost:5432/omcgo_seedcheck?sslmode=disable
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Go 1.25
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+      - name: Build migrate tool
+        working-directory: omcgo
+        run: go build -o /tmp/omcgo-migrate ./cmd/migrate
+      - name: Apply schema migrations (fresh DB)
+        working-directory: omcgo
+        run: /tmp/omcgo-migrate --dsn "$DSN" --path ./migrations up
+      - name: Apply seed migrations (catches 旧 seed × 新 schema)
+        working-directory: omcgo
+        run: /tmp/omcgo-migrate --dsn "$DSN" --table goose_db_version_seed --path ./migrations/seed up
+
   backend-build:
     name: Backend · build + vet
     runs-on: ubuntu-latest
