@@ -5304,7 +5304,8 @@ const messages: Record<string, string> = {
   'mml.console.addPrivateTemplate':          '新增私有命令',
 
   // mml-user-private-template-crud-20260520.md §5.4
-  'mml.template.editTitle':                  '编辑私有模板',
+  'mml.template.editPrivateTitle':           '编辑私有命令',
+  'mml.template.editPublicTitle':            '编辑公有命令',
   'mml.template.action.edit':                '编辑',
   'mml.template.action.delete':              '删除',
   'mml.template.deleteConfirm':              '确认删除模板「{name}」？删除后无法恢复',
@@ -5326,15 +5327,16 @@ const messages: Record<string, string> = {
   'mml.console.modifyValuesRequired':        '请填写修改值（一行一对 key=value）',
   'mml.console.commandDescriptionOptional':  '命令描述（可选）',
   'mml.console.saveAndExecute':              '保存并执行',
-  'mml.console.saveOnly':                    '仅保存',
+  'mml.console.saveOnly':                    '保存',
 
-  // PathPicker（自定义模板的参数路径多选选择器，Bundle D）
-  'mml.console.pathPicker.label':            '参数路径（按 分组 → 命令 → 路径 三级选择，或直接搜索 path / 命令名；可勾选多条 path）',
-  'mml.console.pathPicker.help':             '',
-  'mml.console.pathPicker.searchPlaceholder':   '搜索 path 或命令名（≥1 字符）',
-  'mml.console.pathPicker.groupPlaceholder':    '选择分组',
-  'mml.console.pathPicker.commandPlaceholder':  '选择命令',
-  'mml.console.pathPicker.pathPlaceholder':     '勾选要添加的 path',
+  // PathPicker（自定义命令的参数路径多选选择器）
+  'mml.console.pathPicker.label':            '参数路径（从标准 PATH 列表模糊搜索选择，或手动输入完整 PATH；可添加多条）',
+  'mml.console.pathPicker.modeStandard':     '从标准列表选',
+  'mml.console.pathPicker.modeManual':       '手动输入',
+  'mml.console.pathPicker.searchPlaceholder':   '搜索标准 path 或命令名（≥1 字符）',
+  'mml.console.pathPicker.manualPlaceholder':   '输入完整 PATH，回车或点「添加」',
+  'mml.console.pathPicker.manualAdd':        '添加',
+  'mml.console.pathPicker.required':         '请至少选择或输入一条 PATH',
   'mml.console.pathPicker.empty':            '尚未选择任何 path',
   'mml.console.pathPicker.clearAll':         '全部清空',
 
@@ -5717,7 +5719,7 @@ const messages: Record<string, string> = {
   'mml.console.tab.paramPath':                 'ParameterPath Command',
   'mml.console.commandTree.searchPlaceholder': '搜索命令...',
   'mml.console.commandTree.empty':             '暂无命令',
-  'mml.console.commandTree.customized':        'Customized',
+  'mml.console.commandTree.customized':        '自定义命令',
   'mml.admin.catalog.title':                   'MML 配置管理',
   'mml.admin.catalog.tab.groups':              '分组',
   'mml.admin.catalog.tab.commands':            '命令',
@@ -5836,6 +5838,14 @@ const messages: Record<string, string> = {
   'mml.admin.catalog.empty.selectCommandHint': '或点击分组旁的 [⋯] → 新增命令',
   'mml.admin.catalog.empty.groupSelected':     '已选中分组 {name}（{count} 条命令）',
   'mml.admin.catalog.empty.groupHint':         '请选择具体命令以查看与编辑 path',
+  // mml-console-redesign-20260603：catalog 自定义命令（Customized）详情面板
+  'mml.admin.catalog.customized.privateTemplate': '私有命令',
+  'mml.admin.catalog.customized.publicTemplate':  '公有命令',
+  'mml.admin.catalog.customized.scope':           '可见范围',
+  'mml.admin.catalog.customized.creator':         '创建者',
+  'mml.admin.catalog.customized.parameters':      '修改值参数',
+  'mml.admin.catalog.customized.noParameters':    '无修改值参数',
+  'mml.admin.catalog.customized.noPaths':         '未配置参数路径',
   // 表单 label / 友好校验提示(2026-05-27 测试反馈)
   'mml.admin.catalog.form.groupCode':          '分组编码',
   'mml.admin.catalog.form.groupCodePlaceholder':'例如 BSC_CONFIGURATION',

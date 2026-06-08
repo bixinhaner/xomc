@@ -5276,7 +5276,8 @@ const messages: Record<string, string> = {
   'mml.console.addPrivateTemplate':          'Add Private Command',
 
   // mml-user-private-template-crud-20260520.md §5.4
-  'mml.template.editTitle':                  'Edit Private Template',
+  'mml.template.editPrivateTitle':           'Edit Private Command',
+  'mml.template.editPublicTitle':            'Edit Public Command',
   'mml.template.action.edit':                'Edit',
   'mml.template.action.delete':              'Delete',
   'mml.template.deleteConfirm':              'Delete template "{name}"? This cannot be undone',
@@ -5299,15 +5300,16 @@ const messages: Record<string, string> = {
   'mml.console.modifyValuesRequired':        'Please enter modify values (one key=value per line)',
   'mml.console.commandDescriptionOptional':  'Command description (optional)',
   'mml.console.saveAndExecute':              'Save & Execute',
-  'mml.console.saveOnly':                    'Save Only',
+  'mml.console.saveOnly':                    'Save',
 
-  // PathPicker (multi-select for paramPaths in template form, Bundle D)
-  'mml.console.pathPicker.label':            'Parameter Paths (pick via Group → Command → Path, or search by path / command name; multi-select supported)',
-  'mml.console.pathPicker.help':             '',
-  'mml.console.pathPicker.searchPlaceholder':   'Search path or command name (≥1 char)',
-  'mml.console.pathPicker.groupPlaceholder':    'Select group',
-  'mml.console.pathPicker.commandPlaceholder':  'Select command',
-  'mml.console.pathPicker.pathPlaceholder':     'Tick paths to add',
+  // PathPicker (multi-select for paramPaths in custom command form)
+  'mml.console.pathPicker.label':            'Parameter Paths (search & pick from the standard PATH list, or enter a full PATH manually; multiple allowed)',
+  'mml.console.pathPicker.modeStandard':     'Pick from standard list',
+  'mml.console.pathPicker.modeManual':       'Manual input',
+  'mml.console.pathPicker.searchPlaceholder':   'Search standard path or command name (≥1 char)',
+  'mml.console.pathPicker.manualPlaceholder':   'Enter a full PATH, press Enter or click Add',
+  'mml.console.pathPicker.manualAdd':        'Add',
+  'mml.console.pathPicker.required':         'Select or enter at least one PATH',
   'mml.console.pathPicker.empty':            'No path selected yet',
   'mml.console.pathPicker.clearAll':         'Clear all',
 
@@ -5809,6 +5811,14 @@ const messages: Record<string, string> = {
   'mml.admin.catalog.empty.selectCommandHint': 'Or click [⋯] next to a group → Add Command',
   'mml.admin.catalog.empty.groupSelected':     'Selected group {name} ({count} commands)',
   'mml.admin.catalog.empty.groupHint':         'Select a command to view and edit its paths',
+  // mml-console-redesign-20260603: catalog customized command detail panel
+  'mml.admin.catalog.customized.privateTemplate': 'Private Template',
+  'mml.admin.catalog.customized.publicTemplate':  'Public Template',
+  'mml.admin.catalog.customized.scope':           'Scope',
+  'mml.admin.catalog.customized.creator':         'Creator',
+  'mml.admin.catalog.customized.parameters':      'Modify Values',
+  'mml.admin.catalog.customized.noParameters':    'No modify values',
+  'mml.admin.catalog.customized.noPaths':         'No parameter paths configured',
   // form labels / friendly validation (2026-05-27 feedback)
   'mml.admin.catalog.form.groupCode':          'Group Code',
   'mml.admin.catalog.form.groupCodePlaceholder':'e.g. BSC_CONFIGURATION',

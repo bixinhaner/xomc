@@ -29,6 +29,12 @@ export interface LeftNavTreeProps {
   onExpand: (keys: string[]) => void;
   onGroupAction: (action: GroupAction, group: GroupTreeNode) => void;
   onCommandAction: (action: CommandAction, command: GroupTreeCommand) => void;
+  /**
+   * 追加到分组节点之后的额外顶层节点（mml-console-redesign-20260603：
+   * Customized「自定义命令」子树）。搜索激活时不参与 group 过滤，恒显示在树底部，
+   * 让用户始终能进入 PrivateTemplate / PublicTemplate 增删改。
+   */
+  extraNodes?: TreeDataNode[];
 }
 
 /** 仅返回顶层分组（parentId==null）。已有多层数据保留但不渲染。 */
@@ -75,6 +81,7 @@ export default function LeftNavTree({
   onExpand,
   onGroupAction,
   onCommandAction,
+  extraNodes,
 }: LeftNavTreeProps): React.ReactElement {
   const t = useT();
 
@@ -129,7 +136,7 @@ export default function LeftNavTree({
     [t],
   );
 
-  const treeData = useMemo<TreeDataNode[]>(() => {
+  const groupTreeData = useMemo<TreeDataNode[]>(() => {
     const sortedGroups = [...visibleGroups].sort(
       (a, b) => a.displayOrder - b.displayOrder,
     );
@@ -218,7 +225,13 @@ export default function LeftNavTree({
     });
   }, [visibleGroups, buildGroupMenu, onGroupAction, onCommandAction, t]);
 
-  if (visibleGroups.length === 0) {
+  // Customized 子树恒追加在分组之后；搜索时不参与 group 过滤（始终可达增删改入口）。
+  const treeData = useMemo<TreeDataNode[]>(
+    () => [...groupTreeData, ...(extraNodes ?? [])],
+    [groupTreeData, extraNodes],
+  );
+
+  if (treeData.length === 0) {
     return <Empty description={search.trim() ? 'No match' : undefined} />;
   }
 

@@ -171,7 +171,9 @@ export default function AddTemplateModal({
   };
 
   const titleKey = isEdit
-    ? 'mml.template.editTitle'
+    ? effectiveScope === 'public'
+      ? 'mml.template.editPublicTitle'
+      : 'mml.template.editPrivateTitle'
     : effectiveScope === 'public'
       ? 'mml.console.addPublicTemplate'
       : 'mml.console.addPrivateTemplate';
@@ -227,6 +229,9 @@ export default function AddTemplateModal({
           label={t('mml.console.pathPicker.label')}
           valuePropName="value"
           trigger="onChange"
+          rules={[
+            { required: true, type: 'array', min: 1, message: t('mml.console.pathPicker.required') },
+          ]}
         >
           <PathPicker value={[]} onChange={() => undefined} />
         </Form.Item>

@@ -8,13 +8,18 @@ import {
   Modal,
   message,
 } from 'antd';
+import { AxiosError } from 'axios';
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
+import { useQueryClient } from '@tanstack/react-query';
 import { useGroupTree } from '@core/hooks/api/useMmlConsole';
 import {
   useDeleteGroup,
   useDeleteCommand,
 } from '@core/hooks/api/useMmlAdmin';
+import { useDeleteMMLTemplate } from '@core/hooks/api/useMML';
+import { useUserStore } from '@core/store/userStore';
 import type { GroupTreeNode, GroupTreeCommand } from '@core/types/mmlConsole';
+import type { MMLCustomCommand } from '@core/types/mml';
 import { useT } from '@/hooks/useT';
 import { useI18nText } from '@/hooks/useI18nText';
 import LeftNavTree, {
@@ -22,15 +27,25 @@ import LeftNavTree, {
   type CommandAction,
 } from './LeftNavTree';
 import RightDetailPanel from './RightDetailPanel';
+import CustomCommandDetailPanel from './CustomCommandDetailPanel';
 import GroupEditorModal, { type GroupEditorMode } from './GroupEditorModal';
 import CommandEditorModal from './CommandEditorModal';
+import AddTemplateModal from '../../Console/components/AddTemplateModal';
+// mml-console-redesign-20260603：复用 Console 的 Customized 子树共享模块。
+import {
+  CUSTOM_COMMANDS_QUERY_KEY,
+  buildCustomizedSubtree,
+  parseCustomLeafId,
+  renderCustomLeafLabel,
+  useCustomCommands,
+} from '../../components/customizedSubtree';
 
 // 2026-05-27 mml-admin-catalog-redesign-20260527：移除 Tabs，改成左右两栏。
 // 选中态语义：
 //   selectedKey 形如 "group:<uuid>" 或 "cmd:<uuid>" 或 null
 //   切命令前若处于 editing+dirty 状态弹 Modal.confirm
 
-type SelectionKind = 'group' | 'cmd';
+type SelectionKind = 'group' | 'cmd' | 'custom';
 
 function parseSelection(
   key: string | null,
@@ -38,6 +53,9 @@ function parseSelection(
   if (!key) return null;
   if (key.startsWith('group:')) return { kind: 'group', id: key.slice(6) };
   if (key.startsWith('cmd:')) return { kind: 'cmd', id: key.slice(4) };
+  // Customized 叶子：key 形如 "custom:<uuid>"（排除骨架节点 root / user:* 等）。
+  const customId = parseCustomLeafId(key);
+  if (customId) return { kind: 'custom', id: customId };
   return null;
 }
 
@@ -69,10 +87,26 @@ export default function MMLAdminCatalog() {
   );
   const deleteGroupMut = useDeleteGroup();
   const deleteCommandMut = useDeleteCommand();
+  const queryClient = useQueryClient();
+
+  // Customized「自定义命令」—— 复用 Console 共享模块加载 + 增删改入口。
+  const { commands: customCommands } = useCustomCommands();
+  const deleteTemplateMut = useDeleteMMLTemplate();
+  const currentUsername = useUserStore((s) => s.currentUser?.username ?? '');
+  const isSuperAdmin = useUserStore((s) => Boolean(s.currentUser?.isSuperAdmin));
 
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
   const [search, setSearch] = useState('');
+
+  // Customized「+」/「编辑」打开的 AddTemplateModal 状态。
+  // addScope 非空 = 新增；editingTemplate 非空 = 编辑（scope 由模板自身决定）。
+  const [customAddScope, setCustomAddScope] = useState<'public' | 'private' | null>(
+    null,
+  );
+  const [editingTemplate, setEditingTemplate] = useState<MMLCustomCommand | null>(
+    null,
+  );
 
   // 命令编辑态 + dirty 检测（提供给 CommandMetaSection）
   const [editing, setEditing] = useState(false);
@@ -112,6 +146,49 @@ export default function MMLAdminCatalog() {
     if (selection?.kind !== 'group') return null;
     return findGroup(topGroups, selection.id);
   }, [topGroups, selection]);
+
+  const selectedCustom = useMemo(() => {
+    if (selection?.kind !== 'custom') return null;
+    return customCommands.find((c) => c.id === selection.id) ?? null;
+  }, [customCommands, selection]);
+
+  // 自定义命令删除：成功后失效共享 query key（Console + catalog 同步刷新）。
+  const handleDeleteCustom = useCallback(
+    (cc: MMLCustomCommand) => {
+      deleteTemplateMut.mutate(cc.id, {
+        onSuccess: () => {
+          void queryClient.invalidateQueries({ queryKey: CUSTOM_COMMANDS_QUERY_KEY });
+          message.success(t('mml.template.deleted'));
+          if (selection?.kind === 'custom' && selection.id === cc.id) {
+            setSelectedKey(null);
+          }
+        },
+        onError: (err: unknown) => {
+          if (err instanceof AxiosError && err.response?.status === 403) {
+            message.error(t('mml.template.error.notOwner'));
+            return;
+          }
+          const msg = err instanceof Error ? err.message : String(err ?? 'Unknown');
+          message.error(msg);
+        },
+      });
+    },
+    [deleteTemplateMut, queryClient, selection, t],
+  );
+
+  // Customized 子树：catalog 叶子为可选中纯文本（无行内图标），详情走 RightDetailPanel 右栏。
+  const customizedNode = useMemo(
+    () =>
+      buildCustomizedSubtree({
+        customs: customCommands,
+        t,
+        onAdd: setCustomAddScope,
+        renderLeafTitle: (cc) =>
+          renderCustomLeafLabel(cc.operationType, cc.commandName),
+        leafSelectable: true,
+      }),
+    [customCommands, t],
+  );
 
   // 切换命令前的 dirty 检测
   const handleSelect = useCallback(
@@ -324,18 +401,28 @@ export default function MMLAdminCatalog() {
             onExpand={setExpandedKeys}
             onGroupAction={handleGroupAction}
             onCommandAction={handleCommandAction}
+            extraNodes={[customizedNode]}
           />
         </div>
         <div style={{ flex: 1, overflowY: 'auto' }}>
-          <RightDetailPanel
-            command={selectedCommandCtx?.command}
-            parentGroupId={selectedCommandCtx?.groupId}
-            groupOptions={topGroups}
-            selectedGroup={selectedGroup ?? undefined}
-            editing={editing}
-            onEditingChange={setEditing}
-            onDirtyChange={setDirty}
-          />
+          {selectedCustom ? (
+            <CustomCommandDetailPanel
+              command={selectedCustom}
+              canModify={isSuperAdmin || selectedCustom.creator === currentUsername}
+              onEdit={setEditingTemplate}
+              onDelete={handleDeleteCustom}
+            />
+          ) : (
+            <RightDetailPanel
+              command={selectedCommandCtx?.command}
+              parentGroupId={selectedCommandCtx?.groupId}
+              groupOptions={topGroups}
+              selectedGroup={selectedGroup ?? undefined}
+              editing={editing}
+              onEditingChange={setEditing}
+              onDirtyChange={setDirty}
+            />
+          )}
         </div>
       </div>
 
@@ -361,6 +448,22 @@ export default function MMLAdminCatalog() {
                 : [...prev, `group:${commandEditor.parent!.id}`],
             );
           }
+        }}
+      />
+      {/* Customized：「+」新增 / 「编辑」按钮共用 Console 同款 AddTemplateModal，
+          表单逻辑与 Console 完全一致（满足「详情走右栏、编辑表单复用」的取舍）。 */}
+      <AddTemplateModal
+        open={customAddScope !== null || editingTemplate !== null}
+        scope={
+          customAddScope ?? editingTemplate?.commandScope ?? 'private'
+        }
+        editingTemplate={editingTemplate}
+        onClose={() => {
+          setCustomAddScope(null);
+          setEditingTemplate(null);
+        }}
+        onSuccess={() => {
+          void queryClient.invalidateQueries({ queryKey: CUSTOM_COMMANDS_QUERY_KEY });
         }}
       />
     </Card>
