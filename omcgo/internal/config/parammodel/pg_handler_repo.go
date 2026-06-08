@@ -180,11 +180,12 @@ func (r *PgRepository) CreateMapping(ctx context.Context, paramModelID uuid.UUID
 	if in.EntryType != "object" && in.EntryType != "parameter" {
 		return nil, fmt.Errorf("entry_type must be object|parameter, got %q", in.EntryType)
 	}
+	// T-PMSRC: 管理员经 UI 新增的映射恒为 source='custom'(重载 XML 不覆盖,可删)。
 	const insertSQL = `
 INSERT INTO param_mappings (
     param_model_id, standard_path, private_path, entry_type,
-    access, data_type, change_applies, min_value, max_value, is_storable, is_active
-) VALUES ($1, $2, $3, $4, NULLIF($5,''), NULLIF($6,''), NULLIF($7,''), $8, $9, $10, TRUE)
+    access, data_type, change_applies, min_value, max_value, is_storable, is_active, source
+) VALUES ($1, $2, $3, $4, NULLIF($5,''), NULLIF($6,''), NULLIF($7,''), $8, $9, $10, TRUE, 'custom')
 RETURNING id`
 	var id uuid.UUID
 	if err := r.pool.QueryRow(ctx, insertSQL,
@@ -248,6 +249,9 @@ func (r *PgRepository) UpdateMapping(ctx context.Context, mappingID uuid.UUID, i
 	if !dirty {
 		return r.getMappingByID(ctx, mappingID)
 	}
+	// T-PMSRC（决策 c）：任何编辑都把该行转为 custom 覆盖 → 重载 XML 时保留
+	// (builtin 同 private_path 会被 loader 的 ON CONFLICT DO NOTHING 跳过),使编辑持久。
+	ub = ub.Set("source", "custom")
 	uSQL, uArgs, err := ub.ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build update mapping sql: %w", err)
@@ -263,12 +267,26 @@ func (r *PgRepository) UpdateMapping(ctx context.Context, mappingID uuid.UUID, i
 }
 
 // DeleteMapping 删除单条 mapping。
+// T-PMSRC：只允许删 source='custom';命中 source='builtin'(XML 内置)→ ErrBuiltinMappingNotDeletable;
+// 不存在 → (false, nil)。
 func (r *PgRepository) DeleteMapping(ctx context.Context, mappingID uuid.UUID) (bool, error) {
-	tag, err := r.pool.Exec(ctx, `DELETE FROM param_mappings WHERE id = $1`, mappingID)
+	tag, err := r.pool.Exec(ctx, `DELETE FROM param_mappings WHERE id = $1 AND source = 'custom'`, mappingID)
 	if err != nil {
 		return false, fmt.Errorf("delete mapping %s: %w", mappingID, err)
 	}
-	return tag.RowsAffected() > 0, nil
+	if tag.RowsAffected() > 0 {
+		return true, nil
+	}
+	// 删 0 行：区分"不存在"与"是内置不可删"。
+	var src string
+	err = r.pool.QueryRow(ctx, `SELECT source FROM param_mappings WHERE id = $1`, mappingID).Scan(&src)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("check mapping source %s: %w", mappingID, err)
+	}
+	return false, ErrBuiltinMappingNotDeletable
 }
 
 // ListDiscoveredVersions 列出某产品已有的 swVersion 集合（去重）。
@@ -421,7 +439,7 @@ func (r *PgRepository) DeleteStandardParam(ctx context.Context, standardPath str
 func (r *PgRepository) getMappingByID(ctx context.Context, id uuid.UUID) (*ParamMapping, error) {
 	const q = `SELECT id, param_model_id, standard_path, private_path, entry_type,
 	                 access, data_type, change_applies, min_value, max_value,
-	                 is_storable, is_active, is_supported
+	                 is_storable, is_active, is_supported, source
 	          FROM param_mappings WHERE id = $1`
 	row := r.pool.QueryRow(ctx, q, id)
 	var (
@@ -430,7 +448,7 @@ func (r *PgRepository) getMappingByID(ctx context.Context, id uuid.UUID) (*Param
 	)
 	if err := row.Scan(&m.ID, &m.ParamModelID, &m.StandardPath, &m.PrivatePath, &m.EntryType,
 		&access, &dataType, &changeApplies, &m.MinValue, &m.MaxValue,
-		&m.IsStorable, &m.IsActive, &m.IsSupported); err != nil {
+		&m.IsStorable, &m.IsActive, &m.IsSupported, &m.Source); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNoMapping
 		}

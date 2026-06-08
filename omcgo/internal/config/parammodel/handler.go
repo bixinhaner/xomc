@@ -668,15 +668,23 @@ type mappingView struct {
 	IsActive      bool      `json:"is_active"`
 	IsSupported   bool      `json:"is_supported"`
 	SoftwareVer   *string   `json:"software_version,omitempty"`
+	// T-PMSRC: 行级来源("builtin"/"custom")与可删标志(仅 custom 可删),前端据此渲染来源 Tag + 删除按钮。
+	Source    string `json:"source"`
+	Deletable bool   `json:"deletable"`
 }
 
 func toMappingView(m *ParamMapping) mappingView {
+	source := m.Source
+	if source == "" {
+		source = "builtin" // 兜底:旧数据/未迁移场景按内置处理
+	}
 	return mappingView{
 		ID: m.ID, ParamModelID: m.ParamModelID,
 		StandardPath: m.StandardPath, PrivatePath: m.PrivatePath, EntryType: m.EntryType,
 		Access: m.Access, DataType: m.DataType, ChangeApplies: m.ChangeApplies,
 		MinValue: m.MinValue, MaxValue: m.MaxValue,
 		IsStorable: m.IsStorable, IsActive: m.IsActive, IsSupported: m.IsSupported, SoftwareVer: m.SoftwareVersion,
+		Source: source, Deletable: source == "custom",
 	}
 }
 
@@ -807,6 +815,12 @@ func (h *Handler) DeleteMapping(c *gin.Context) {
 	// 删前查 paramModelID 用于失效
 	mapping, getErr := h.repo.getMappingByID(c.Request.Context(), mappingID)
 	ok, err := h.repo.DeleteMapping(c.Request.Context(), mappingID)
+	// T-PMSRC：内置(source='builtin',来自 XML)映射不可删 → 403
+	if errors.Is(err, ErrBuiltinMappingNotDeletable) {
+		commonerrors.AbortWithError(c, http.StatusForbidden,
+			fmt.Errorf("内置映射不允许删除(来自 XML,只能删除自定义映射)[code=%d]", global.ErrCodeParamMappingBuiltinNotDeletable))
+		return
+	}
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return

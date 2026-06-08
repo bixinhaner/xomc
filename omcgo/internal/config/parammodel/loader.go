@@ -174,8 +174,11 @@ func (l *Loader) loadParamModelFile(ctx context.Context, path string) (int, erro
 		return 0, fmt.Errorf("upsert param_models %q: %w", doc.ParamModel, err)
 	}
 
-	// 重写 param_mappings：先按 model 删旧，再批量插入
-	if _, err := tx.Exec(ctx, "DELETE FROM param_mappings WHERE param_model_id = $1", modelID); err != nil {
+	// 重写 param_mappings：先按 model 删旧 builtin 行，再批量插入。
+	// T-PMSRC：只删 source='builtin'，保留管理员经 UI 维护的 source='custom' 覆盖项,
+	// 实现"重新加载 XML 时不覆盖自定义数据"。custom 与 builtin 同 private_path 时,
+	// batchInsertMappings 的 ON CONFLICT DO NOTHING 让 builtin 跳过 → custom 胜出。
+	if _, err := tx.Exec(ctx, "DELETE FROM param_mappings WHERE param_model_id = $1 AND source = 'builtin'", modelID); err != nil {
 		return 0, fmt.Errorf("clear param_mappings for %q: %w", doc.ParamModel, err)
 	}
 
@@ -556,6 +559,7 @@ func batchInsertMappings(ctx context.Context, tx pgx.Tx, modelID string, entries
 			"enum_values", "enum_labels", // T-0158
 			"mirror_with", // T-0159
 			"is_storable", "is_active", "is_supported",
+			"source", // T-PMSRC：XML 加载行恒为 builtin
 		)
 		for _, e := range entries[i:end] {
 			std := e.StandardPath
@@ -578,8 +582,12 @@ func batchInsertMappings(ctx context.Context, tx pgx.Tx, modelID string, entries
 				!strings.EqualFold(strings.TrimSpace(e.Store), "false"), // 缺省 / 任意非 "false" → true
 				true, // is_active
 				!strings.EqualFold(strings.TrimSpace(e.Supported), "false"), // T-0103: 缺省 / 任意非 "false" → true
+				"builtin", // T-PMSRC source
 			)
 		}
+		// T-PMSRC：同 private_path 已被 custom 覆盖项占用时跳过该 builtin 行(custom 胜出),
+		// 避免撞 uniq_param_mappings_model_private 导致整批回滚 → reload 失败 → app 拒启动。
+		ib = ib.Suffix("ON CONFLICT (param_model_id, private_path) DO NOTHING")
 		sqlStr, args, err := ib.ToSql()
 		if err != nil {
 			return total, fmt.Errorf("build sql param_mappings (%s, batch %d-%d): %w", entryType, i, end, err)

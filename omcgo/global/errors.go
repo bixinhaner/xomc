@@ -55,6 +55,9 @@ const (
 	// ParamModelBackupFailed:         DELETE 物理备份失败,流程已保守回滚 → 500
 	ErrCodeParamModelBuiltinNotDeletable = 2030
 	ErrCodeParamModelBackupFailed        = 2031
+	// T-PMSRC: DELETE /param-models/:name/mappings/:id 命中 source='builtin' 的映射行 → 403
+	// (内置映射来自 XML,不可删;管理员经 UI 新增/编辑后的 source='custom' 行才可删)
+	ErrCodeParamMappingBuiltinNotDeletable = 2032
 
 	// T-0180 Indicator 自定义 XML 分层目录 (2040-2049 段,对标 T-0178 范式)
 	// IndicatorBuiltinNotDeletable: DELETE /indicators/files/{path} 命中内置 XML → 403

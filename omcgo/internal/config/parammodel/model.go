@@ -59,6 +59,9 @@ type ParamMapping struct {
 	IsActive        bool
 	IsSupported     bool    // T-0103 XML supported="false" → false；path-b sync 据此过滤
 	SoftwareVersion *string // 仅 discovered 映射非 nil
+	// T-PMSRC: 行级来源。"builtin"=XML 加载(不可删,重载会重建);"custom"=管理员经 UI
+	// 新增或对 builtin 编辑后转化的覆盖项(可删,重载不覆盖)。
+	Source string
 }
 
 // MappingSource 标记 MappingSet 来源，区分精确的 discovered 与降级的 default（设计 §1.6）。

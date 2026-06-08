@@ -17,6 +17,10 @@ import (
 // 是产品配置错误；ErrNoMapping 表示配置正确但 XML/数据库中无对应记录。
 var ErrNoMapping = errors.New("parammodel: no mapping found")
 
+// ErrBuiltinMappingNotDeletable 表示尝试删除 source='builtin' 的映射(来自 XML,不可删);
+// handler 据此返回 403 + ErrCodeParamMappingBuiltinNotDeletable。
+var ErrBuiltinMappingNotDeletable = errors.New("parammodel: builtin mapping not deletable")
+
 // ErrNoParamModel 表示 product.ParamModelID 为 nil（产品未绑定参数模型）。
 // 通常是 products.xml 漏配或孤儿设备绑定了空 product。
 var ErrNoParamModel = errors.New("parammodel: product has no paramModelID")

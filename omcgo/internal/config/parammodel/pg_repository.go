@@ -30,7 +30,8 @@ func (r *PgRepository) ListMappingsByParamModel(ctx context.Context, paramModelI
 			"min_value", "max_value",
 			"enum_values", "enum_labels", // T-0158
 			"mirror_with", // T-0159
-			"is_storable", "is_active", "is_supported").
+			"is_storable", "is_active", "is_supported",
+			"source"). // T-PMSRC
 		From("param_mappings").
 		Where(sq.Eq{"param_model_id": paramModelID, "is_active": true}).
 		OrderBy("standard_path").
@@ -85,6 +86,7 @@ func scanDefaultMappings(rows pgx.Rows) ([]ParamMapping, error) {
 			&m.EnumValues, &m.EnumLabels, // T-0158
 			&m.MirrorWith, // T-0159
 			&m.IsStorable, &m.IsActive, &m.IsSupported,
+			&m.Source, // T-PMSRC
 		); err != nil {
 			return nil, fmt.Errorf("scan default mapping: %w", err)
 		}
