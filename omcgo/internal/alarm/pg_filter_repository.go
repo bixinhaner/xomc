@@ -18,6 +18,16 @@ type PgAlarmFilterRuleRepository struct {
 	db *pgxpool.Pool
 }
 
+var alarmFilterRuleOrderBy = []string{
+	"priority ASC",
+	"created_at ASC",
+	"id ASC",
+}
+
+func applyAlarmFilterRuleOrdering(query squirrel.SelectBuilder) squirrel.SelectBuilder {
+	return query.OrderBy(alarmFilterRuleOrderBy...)
+}
+
 func NewPgAlarmFilterRuleRepository(db *pgxpool.Pool) *PgAlarmFilterRuleRepository {
 	return &PgAlarmFilterRuleRepository{db: db}
 }
@@ -149,14 +159,13 @@ func (r *PgAlarmFilterRuleRepository) Delete(ctx context.Context, id uuid.UUID) 
 }
 
 func (r *PgAlarmFilterRuleRepository) List(ctx context.Context, filter AlarmFilterRuleFilter) (*model.ListResponse[AlarmFilterRule], error) {
-	query := storage.Psql.
+	query := applyAlarmFilterRuleOrdering(storage.Psql.
 		Select(
 			"id", "name", "filter_type", "alarm_sources", "alarm_identifiers",
 			"device_ids", "device_group_ids", "action", "acknowledge_desc", "webhook_url", "webhook_secret", "email_recipients",
 			"priority", "enabled", "created_by", "created_at", "updated_by", "updated_at",
 		).
-		From("alarm_filters").
-		OrderBy("priority ASC")
+		From("alarm_filters"))
 
 	if filter.FilterType != nil && *filter.FilterType != "" {
 		query = query.Where(squirrel.Eq{"filter_type": *filter.FilterType})
@@ -259,15 +268,14 @@ func (r *PgAlarmFilterRuleRepository) Toggle(ctx context.Context, id uuid.UUID) 
 }
 
 func (r *PgAlarmFilterRuleRepository) ListEnabled(ctx context.Context) ([]AlarmFilterRule, error) {
-	query := storage.Psql.
+	query := applyAlarmFilterRuleOrdering(storage.Psql.
 		Select(
 			"id", "name", "filter_type", "alarm_sources", "alarm_identifiers",
 			"device_ids", "device_group_ids", "action", "acknowledge_desc", "webhook_url", "webhook_secret", "email_recipients",
 			"priority", "enabled", "created_by", "created_at", "updated_by", "updated_at",
 		).
 		From("alarm_filters").
-		Where(squirrel.Eq{"enabled": true}).
-		OrderBy("priority ASC")
+		Where(squirrel.Eq{"enabled": true}))
 
 	sql, args, err := query.ToSql()
 	if err != nil {
