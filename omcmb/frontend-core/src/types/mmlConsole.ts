@@ -204,7 +204,7 @@ export interface GroupTreeCommand {
 /**
  * R-4.1.1 单层 {i} 范围 metadata。
  *
- * 后端契约：omcgo/internal/mml/catalogloader/model.go InstanceRange struct（json tag 已 camelCase）。
+ * 后端契约：mml_commands.instance_range_meta JSONB 的元素结构（json tag 已 camelCase；catalogloader 已下线）。
  * 由 Python 解析器从 cmcc-tdlte-southbound-data-model-v2.3.md 抽取，存 mml_commands.instance_range_meta JSONB。
  *
  * 字段语义：

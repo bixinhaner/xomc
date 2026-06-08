@@ -145,17 +145,6 @@ type DictLoaderConfig struct {
 	AlarmDefinition AlarmDefinitionLoaderConfig `mapstructure:"alarm_definition"`
 	Product         ProductLoaderConfig         `mapstructure:"product"`
 	QuickSettings   QuickSettingsLoaderConfig   `mapstructure:"quick_settings"`
-	MMLCatalog      MMLCatalogLoaderConfig      `mapstructure:"mml_catalog"`
-}
-
-// MMLCatalogLoaderConfig 控制 MML 控制台 v2.3 catalog Loader 行为。
-//
-// 方案：docs/design/mml-console-cmcc-tdlte-v23-adjustment-plan-20260519.md §5/§6.7
-// 扫描 {XMLBaseDir}/{Directory}/*.json，每个文件代表一份 spec catalog（如 v2.3 / v2.4 并存）。
-//
-// 与其他 4 个 dictloader 同级；MML catalog 是 dictloader 模式的第 5 个 Loader。
-type MMLCatalogLoaderConfig struct {
-	Directory string `mapstructure:"directory"` // 默认 "mml-catalog"
 }
 
 // ParamModelLoaderConfig 控制参数模型 Loader 行为（T-0098 P1-06）。

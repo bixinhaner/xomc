@@ -10,7 +10,7 @@ import (
 // ⚠️ 该文件**仅用于提取分组结构**(chapter / group_code / command_zh_name /
 // has_instance / command_code / operation_type),**不是 path 的真值源**。
 // 命令真正引用哪些 path 由 `mml_command_sub_fields` 表 → `standard_params`
-// 决定。详见 catalogloader/loader.go Loader 注释中的"角色与边界"说明。
+// 决定。（catalogloader 已下线删除;mml 命令为 seed-once + DB 单一权威源。）
 //
 // JSON 中 Groups[].Paths[] 与 Commands[].TargetPaths[] 字段是 catalog 生成
 // 阶段写出的冗余元数据(便于审阅),运行时 GPV 不读这两个字段。
@@ -54,7 +54,7 @@ type CatalogJSONPath struct {
 // CatalogJSONCmd 一条派生命令的元数据。
 //
 // TargetPaths 字段:**只是 catalog 生成时的冗余 path 列表**(从同 group 的
-// Paths 抽取),catalogloader 会把它写入 `mml_commands.target_paths` jsonb 列,
+// Paths 抽取),历史上写入 `mml_commands.target_paths` jsonb 列(现由 sub_fields 触发器维护),
 // 但 MML executor 拼 GPV 时不读这两份冗余,而是直接走 `mml_command_sub_fields`
 // JOIN `standard_params`。因此修改 catalog 的 target_paths 不会影响实际 GPV 行为;
 // 增删命令的字段集请改 sub_field 表(或写 seed migration)。
