@@ -34,6 +34,10 @@ func rematchLockKey(userID uuid.UUID) string {
 	return "product:rematch:lock:" + userID.String()
 }
 
+// rematchAllLockKey 是「正则变更后全量重匹配」的全局锁 key（全局唯一，防多次变更并发重匹配；
+// 已在跑则跳过本次，当前任务用最新 registry 兜底）。
+const rematchAllLockKey = "product:rematch-all:lock"
+
 // Handler 暴露 /api/v1/products/* (设计 §4.4)。
 //
 // 写路径完成后调用 Registry.Refresh 同步路由缓存；删除产品时 product_class_patterns
@@ -479,7 +483,7 @@ func (h *Handler) Delete(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	h.refreshAsync(c.Request.Context(), "delete-product")
+	h.refreshAndRematch(c.Request.Context(), "delete-product")
 	response.OK(c, gin.H{"deleted": true, "id": id})
 }
 
@@ -531,7 +535,7 @@ func (h *Handler) CreatePattern(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
-	h.refreshAsync(c.Request.Context(), "create-pattern")
+	h.refreshAndRematch(c.Request.Context(), "create-pattern")
 	response.OKWithStatus(c, http.StatusCreated, pv)
 }
 
@@ -580,7 +584,7 @@ func (h *Handler) UpdatePattern(c *gin.Context) {
 			return
 		}
 	}
-	h.refreshAsync(ctx, "update-pattern")
+	h.refreshAndRematch(ctx, "update-pattern")
 	response.OK(c, pv)
 }
 
@@ -598,7 +602,7 @@ func (h *Handler) DeletePattern(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	h.refreshAsync(c.Request.Context(), "delete-pattern")
+	h.refreshAndRematch(c.Request.Context(), "delete-pattern")
 	response.OK(c, gin.H{"deleted": true, "id": patternID})
 }
 
@@ -629,7 +633,7 @@ func (h *Handler) MovePattern(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
-	h.refreshAsync(c.Request.Context(), "move-pattern")
+	h.refreshAndRematch(c.Request.Context(), "move-pattern")
 	response.OK(c, pv)
 }
 
@@ -861,6 +865,128 @@ func (h *Handler) runRematchAsync(userID uuid.UUID) {
 		zap.String("admin_user_id", userID.String()),
 		zap.Int("scanned", len(orphans)),
 		zap.Int("rebound", rebound))
+}
+
+// ── 正则变更后全量重匹配（异步，避免 API 超时）─────────────────────────────────
+
+// refreshAndRematch 正则写路径统一收口：同步刷新 registry（让后续路由立即用新正则）+ 异步
+// 全量重匹配存量设备 product_id（在独立 goroutine 跑，HTTP 立即返回，避免大表 rematch 超时）。
+func (h *Handler) refreshAndRematch(ctx context.Context, op string) {
+	h.refreshAsync(ctx, op)
+	h.triggerRematchAll(ctx, op)
+}
+
+// triggerRematchAll 抢全局锁后派发后台全量重匹配 goroutine；锁被占用（已有任务在跑）则跳过。
+func (h *Handler) triggerRematchAll(ctx context.Context, op string) {
+	if h.registry == nil {
+		return
+	}
+	acquired, err := h.acquireRematchAllLock(ctx)
+	if err != nil {
+		h.logger.Warn("acquire rematch-all lock failed", zap.String("op", op), zap.Error(err))
+		return
+	}
+	if !acquired {
+		h.logger.Info("rematch-all already running, skip dispatch", zap.String("op", op))
+		return
+	}
+	go h.runRematchAllAsync(op)
+}
+
+func (h *Handler) acquireRematchAllLock(ctx context.Context) (bool, error) {
+	if h.rematchRedis != nil {
+		ok, err := h.rematchRedis.SetNX(ctx, rematchAllLockKey,
+			time.Now().UTC().Format(time.RFC3339), rematchLockTTL).Result()
+		if err != nil {
+			return false, fmt.Errorf("redis SETNX rematch-all lock: %w", err)
+		}
+		return ok, nil
+	}
+	_, loaded := h.inflightRematch.LoadOrStore(rematchAllLockKey, time.Now())
+	return !loaded, nil
+}
+
+func (h *Handler) releaseRematchAllLock() {
+	if h.rematchRedis != nil {
+		if err := h.rematchRedis.Del(context.Background(), rematchAllLockKey).Err(); err != nil {
+			h.logger.Warn("redis DEL rematch-all lock failed (TTL will release)", zap.Error(err))
+		}
+		return
+	}
+	h.inflightRematch.Delete(rematchAllLockKey)
+}
+
+// runRematchAllAsync 全量遍历存量设备，按最新 registry 重算 product_id / param_model_id，
+// 仅在变化时回写（含降级为孤儿）。keyset 分页扛大表；任何错误只记日志不上抛。
+func (h *Handler) runRematchAllAsync(op string) {
+	startedAt := time.Now()
+	defer func() {
+		h.releaseRematchAllLock()
+		h.logger.Info("rematch-all finished",
+			zap.String("op", op), zap.Duration("duration", time.Since(startedAt)))
+	}()
+	defer func() {
+		if p := recover(); p != nil {
+			h.logger.Error("rematch-all panic", zap.String("op", op), zap.Any("panic", p))
+		}
+	}()
+
+	ctx := context.Background()
+	// 兜底再刷一次，确保用最新 patterns（调用方已 Refresh，这里防御）。
+	if err := h.registry.Refresh(ctx); err != nil {
+		h.logger.Warn("rematch-all registry refresh failed", zap.Error(err))
+	}
+
+	const pageSize = 1000
+	const maxPages = 2000 // 200 万设备安全上限，防异常死循环
+	after := uuid.Nil
+	scanned, changed := 0, 0
+	for page := 0; page < maxPages; page++ {
+		devices, err := h.repo.ListDeviceClassesAfter(ctx, after, pageSize)
+		if err != nil {
+			h.logger.Error("rematch-all list devices failed",
+				zap.String("op", op), zap.Int("scanned", scanned), zap.Error(err))
+			return
+		}
+		if len(devices) == 0 {
+			break
+		}
+		for _, d := range devices {
+			after = d.ID
+			scanned++
+			var newPID, newPMID *uuid.UUID
+			if d.ProductClass != "" {
+				if mr, mErr := h.registry.MatchProductClass(ctx, d.ProductClass); mErr == nil && mr != nil && mr.Product != nil {
+					pid := mr.Product.ID
+					newPID = &pid
+					newPMID = mr.Product.ParamModelID
+				}
+			}
+			if sameUUIDPtr(d.ProductID, newPID) {
+				continue
+			}
+			if err := h.repo.SetDeviceProduct(ctx, d.ID, newPID, newPMID); err != nil {
+				h.logger.Warn("rematch-all set device product failed",
+					zap.String("device_id", d.ID.String()), zap.Error(err))
+				continue
+			}
+			changed++
+			h.invalidateDeviceCacheBySN(ctx, d.SerialNumber)
+		}
+		if len(devices) < pageSize {
+			break
+		}
+	}
+	h.logger.Info("rematch-all ok",
+		zap.String("op", op), zap.Int("scanned", scanned), zap.Int("changed", changed))
+}
+
+// sameUUIDPtr 比较两个 *uuid.UUID：都 nil → true；一 nil 一非 nil → false；都非 nil → 值相等。
+func sameUUIDPtr(a, b *uuid.UUID) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
 }
 
 func (h *Handler) BindOrphan(c *gin.Context) {

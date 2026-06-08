@@ -696,6 +696,51 @@ func (r *PgRepository) BindOrphanDevice(ctx context.Context, deviceID, productID
 	return nil
 }
 
+// DeviceClassRow 是「全量设备重匹配」遍历用的最小设备投影：id + SN + product_class +
+// 当前 product_id（孤儿为 nil）。
+type DeviceClassRow struct {
+	ID           uuid.UUID
+	SerialNumber string
+	ProductClass string
+	ProductID    *uuid.UUID
+}
+
+// ListDeviceClassesAfter 以 id 游标分页拉取全部未删除设备（keyset 分页，扛大表）。
+// afterID 传 uuid.Nil 起始；返回空切片表示已遍历完。
+func (r *PgRepository) ListDeviceClassesAfter(ctx context.Context, afterID uuid.UUID, limit int) ([]DeviceClassRow, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT id, serial_number, COALESCE(product_class, ''), product_id
+		 FROM devices
+		 WHERE deleted_at IS NULL AND id > $1
+		 ORDER BY id ASC
+		 LIMIT $2`, afterID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list device classes: %w", err)
+	}
+	defer rows.Close()
+	out := make([]DeviceClassRow, 0, limit)
+	for rows.Next() {
+		var d DeviceClassRow
+		if err := rows.Scan(&d.ID, &d.SerialNumber, &d.ProductClass, &d.ProductID); err != nil {
+			return nil, fmt.Errorf("scan device class: %w", err)
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// SetDeviceProduct 重写设备的 product_id + param_model_id（productID/paramModelID 为 nil 则
+// 置 NULL，即降级为孤儿）。全量重匹配按命中结果回写。
+func (r *PgRepository) SetDeviceProduct(ctx context.Context, deviceID uuid.UUID, productID, paramModelID *uuid.UUID) error {
+	_, err := r.pool.Exec(ctx,
+		`UPDATE devices SET product_id = $1, param_model_id = $2 WHERE id = $3 AND deleted_at IS NULL`,
+		productID, paramModelID, deviceID)
+	if err != nil {
+		return fmt.Errorf("set device product: %w", err)
+	}
+	return nil
+}
+
 // GetProductIDByDeviceID 反查设备当前绑定的 product_id（T-0176-PR-D 已绑定检测）。
 //
 // 返回值约定：
