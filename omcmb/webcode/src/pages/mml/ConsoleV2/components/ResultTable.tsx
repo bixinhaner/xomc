@@ -97,11 +97,13 @@ export default function ResultTable({
       exportOne(columns, rows.find((r) => r.deviceSn === deviceSn)!);
       return;
     }
+    // 文件命名：命令名称 + 设备SN（与「下载全部」的命令名前缀口径一致）。
+    const cmd = execMeta?.commandName ?? execMeta?.label ?? 'mml-result';
     exportDeviceCsv.mutate(
       { taskId: commandId, deviceSn },
       {
         onSuccess: (blob) => {
-          saveBlob(blob, `${deviceSn}.csv`);
+          saveBlob(blob, `${cmd}_${deviceSn}.csv`);
           void message.success(`已下载设备 ${deviceSn} 的 CSV`);
         },
         onError: (e) => void message.error(e instanceof Error ? e.message : '导出失败'),
