@@ -354,6 +354,120 @@ func TestRegistry_Refresh_ClearsAllAndBumpsVersion(t *testing.T) {
 	// 为简化只断 BumpVersion 行为，回 DB 行为另由 Invalidate*Test 覆盖。
 }
 
+// TestRegistry_CrossInstance_MappingEditPropagates 复现并锁定核心缺陷：
+// app(进程 A) 编辑 default 映射后，ACS(进程 B) 必须在不重启的情况下及时下发最新
+// privatePath。两个 Registry 共享同一 Redis（cache_version 通道）+ 同一 DB。
+//
+// 修复前：B 的 L1 sync.Map 短路返回旧映射，本测试在最后一步失败。
+// 修复后：B 的热路径 ensureFresh 检测到版本前进 → 丢 L1 → read-through 拿到新私有 PATH。
+func TestRegistry_CrossInstance_MappingEditPropagates(t *testing.T) {
+	repo := newFakeRepo()
+	pg := newFakeProductGetter()
+	productID := uuid.New()
+	pmID := uuid.New()
+	pg.products[productID] = &product.Product{ID: productID, ParamModelID: &pmID}
+	repo.defaultByModel[pmID] = []ParamMapping{mkMapping("Device.Foo", "Device.OldPriv")}
+
+	client := newMiniRedis(t)
+	appReg := NewRegistry(repo, NewRedisCache(client), pg, NewRegistryMetrics(nil), zap.NewNop())
+	acsReg := NewRegistry(repo, NewRedisCache(client), pg, NewRegistryMetrics(nil), zap.NewNop())
+
+	// ACS 先翻译一次，旧 privatePath 进 ACS 的 L1
+	tr, err := acsReg.Translator(context.Background(), productID, "1.0")
+	require.NoError(t, err)
+	require.Equal(t, "Device.OldPriv", tr.ToPrivate("Device.Foo").Translated)
+
+	// app 侧编辑映射：改 DB 内容 + Invalidate（删 L2 key + BumpVersion 跨进程信号）
+	repo.defaultByModel[pmID] = []ParamMapping{mkMapping("Device.Foo", "Device.NewPriv")}
+	require.NoError(t, appReg.InvalidateParamModel(context.Background(), pmID))
+
+	// ACS 再翻译：必须拿到新私有 PATH
+	tr2, err := acsReg.Translator(context.Background(), productID, "1.0")
+	require.NoError(t, err)
+	assert.Equal(t, "Device.NewPriv", tr2.ToPrivate("Device.Foo").Translated,
+		"ACS 必须在 app 编辑映射后及时下发最新 privatePath（无需重启）")
+}
+
+// TestRegistry_CrossInstance_DiscoveredEditPropagates 同上，覆盖 discovered 映射
+// 与 InvalidateProduct 路径（Intersect 写入 / discovered 版本删除场景）。
+func TestRegistry_CrossInstance_DiscoveredEditPropagates(t *testing.T) {
+	repo := newFakeRepo()
+	pg := newFakeProductGetter()
+	productID := uuid.New()
+	pmID := uuid.New()
+	pg.products[productID] = &product.Product{ID: productID, ParamModelID: &pmID}
+	dk := discoveredKey{productID: productID, swVersion: "1.0"}
+	repo.discoveredByDevice[dk] = []ParamMapping{mkMapping("Device.Bar", "Device.OldDisc")}
+
+	client := newMiniRedis(t)
+	appReg := NewRegistry(repo, NewRedisCache(client), pg, NewRegistryMetrics(nil), zap.NewNop())
+	acsReg := NewRegistry(repo, NewRedisCache(client), pg, NewRegistryMetrics(nil), zap.NewNop())
+
+	tr, err := acsReg.Translator(context.Background(), productID, "1.0")
+	require.NoError(t, err)
+	require.Equal(t, "Device.OldDisc", tr.ToPrivate("Device.Bar").Translated)
+
+	repo.discoveredByDevice[dk] = []ParamMapping{mkMapping("Device.Bar", "Device.NewDisc")}
+	require.NoError(t, appReg.InvalidateProduct(context.Background(), productID, "1.0"))
+
+	tr2, err := acsReg.Translator(context.Background(), productID, "1.0")
+	require.NoError(t, err)
+	assert.Equal(t, "Device.NewDisc", tr2.ToPrivate("Device.Bar").Translated,
+		"ACS 必须在 discovered 映射变更后及时下发最新 privatePath")
+}
+
+// TestRegistry_EnsureFresh_DropsL1OnExternalVersionBump 直接验证热路径版本自检：
+// 外部 BumpVersion（模拟另一进程）后，本 Registry 下次查询丢弃 L1 并回 DB。
+func TestRegistry_EnsureFresh_DropsL1OnExternalVersionBump(t *testing.T) {
+	repo := newFakeRepo()
+	pg := newFakeProductGetter()
+	pmID := uuid.New()
+	repo.defaultByModel[pmID] = []ParamMapping{mkMapping("A", "a")}
+
+	client := newMiniRedis(t)
+	cache := NewRedisCache(client)
+	r := NewRegistry(repo, cache, pg, NewRegistryMetrics(nil), zap.NewNop())
+
+	_, err := r.GetByParamModel(context.Background(), pmID)
+	require.NoError(t, err)
+	require.Equal(t, 1, repo.listDefaultCalls, "首查回 DB 一次")
+
+	// 二次查询 L1 命中，不再回 DB
+	_, _ = r.GetByParamModel(context.Background(), pmID)
+	require.Equal(t, 1, repo.listDefaultCalls)
+
+	// 外部进程 BumpVersion（也使 L2 条目因 schema_version 漂移而失效）
+	_, err = cache.BumpVersion(context.Background())
+	require.NoError(t, err)
+
+	// 下次查询 ensureFresh 丢 L1 → 回 DB 重建
+	_, err = r.GetByParamModel(context.Background(), pmID)
+	require.NoError(t, err)
+	assert.Equal(t, 2, repo.listDefaultCalls, "外部版本前进后应丢 L1 并回 DB")
+}
+
+// TestRegistry_Invalidate_BumpsCacheVersion 锁定"写操作必产生跨进程失效信号"。
+func TestRegistry_Invalidate_BumpsCacheVersion(t *testing.T) {
+	t.Run("InvalidateParamModel", func(t *testing.T) {
+		client := newMiniRedis(t)
+		cache := NewRedisCache(client)
+		r := NewRegistry(newFakeRepo(), cache, newFakeProductGetter(), NewRegistryMetrics(nil), zap.NewNop())
+		require.NoError(t, r.InvalidateParamModel(context.Background(), uuid.New()))
+		v, err := cache.GetVersion(context.Background())
+		require.NoError(t, err)
+		assert.Equal(t, int64(1), v)
+	})
+	t.Run("InvalidateProduct", func(t *testing.T) {
+		client := newMiniRedis(t)
+		cache := NewRedisCache(client)
+		r := NewRegistry(newFakeRepo(), cache, newFakeProductGetter(), NewRegistryMetrics(nil), zap.NewNop())
+		require.NoError(t, r.InvalidateProduct(context.Background(), uuid.New(), "1.0"))
+		v, err := cache.GetVersion(context.Background())
+		require.NoError(t, err)
+		assert.Equal(t, int64(1), v)
+	})
+}
+
 func TestRegistry_NewRegistry_NilDefaults(t *testing.T) {
 	// NewRegistry 应安全接收 nil cache/metrics/logger（退化为 NopCache/匿名 reg/Nop logger）
 	r := NewRegistry(newFakeRepo(), nil, nil, nil, nil)

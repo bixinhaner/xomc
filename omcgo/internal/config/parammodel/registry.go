@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -48,6 +49,11 @@ type Registry struct {
 
 	defaultByModel     sync.Map // map[uuid.UUID][]ParamMapping
 	discoveredByDevice sync.Map // map[discoveredKey][]ParamMapping
+
+	// cacheVersion 是本进程已采纳的 L2 cache_version 快照。
+	// 热路径 ensureFresh 比对它与 Cache.GetVersion()：版本前进即丢弃本进程 L1，
+	// 这是 ACS（独立进程）能"及时"看到 app 侧增删改映射的关键（与 product.Registry 同协议）。
+	cacheVersion atomic.Int64
 }
 
 // NewRegistry 构造一个 Registry。
@@ -84,6 +90,10 @@ func NewRegistry(repo Repository, cache Cache, products productGetter, metrics *
 func (r *Registry) GetByProduct(ctx context.Context, productID uuid.UUID, swVersion string) (*MappingSet, error) {
 	t0 := time.Now()
 	defer func() { r.metrics.lookupDuration.Observe(time.Since(t0).Seconds()) }()
+
+	// 热路径版本自检：别的进程（典型：app 改了映射并 BumpVersion）一旦推进版本，
+	// 这里就丢弃本进程全部 L1，使后续查询 read-through 到最新 L2/DB。
+	r.ensureFresh(ctx)
 
 	if r.products == nil {
 		return nil, ErrProductGetterUnset
@@ -152,6 +162,8 @@ func (r *Registry) GetByParamModel(ctx context.Context, paramModelID uuid.UUID) 
 	t0 := time.Now()
 	defer func() { r.metrics.lookupDuration.Observe(time.Since(t0).Seconds()) }()
 
+	r.ensureFresh(ctx)
+
 	defaults, err := r.loadDefault(ctx, paramModelID)
 	if err != nil {
 		return nil, err
@@ -191,6 +203,8 @@ func (r *Registry) InvalidateProduct(ctx context.Context, productID uuid.UUID, s
 			zap.Error(err))
 		return err
 	}
+	// 跨进程失效信号：让 ACS 等独立进程在热路径 ensureFresh 后丢弃各自 L1。
+	r.bumpVersionLocally(ctx)
 	return nil
 }
 
@@ -204,6 +218,9 @@ func (r *Registry) InvalidateParamModel(ctx context.Context, paramModelID uuid.U
 			zap.Error(err))
 		return err
 	}
+	// 跨进程失效信号（同 InvalidateProduct）：增删改单条映射后，ACS 才能"及时"
+	// 下发最新 privatePath，而非等进程重启。
+	r.bumpVersionLocally(ctx)
 	return nil
 }
 
@@ -212,17 +229,63 @@ func (r *Registry) InvalidateParamModel(ctx context.Context, paramModelID uuid.U
 // 启动期由 Provider 调一次，用于多实例部署下的版本对齐；
 // 运行期偶尔调（如管理 API 触发全局刷新）。
 func (r *Registry) Refresh(ctx context.Context) error {
-	r.defaultByModel.Range(func(k, _ any) bool { r.defaultByModel.Delete(k); return true })
-	r.discoveredByDevice.Range(func(k, _ any) bool { r.discoveredByDevice.Delete(k); return true })
+	r.dropL1()
 
-	if _, err := r.cache.BumpVersion(ctx); err != nil {
+	newVersion, err := r.cache.BumpVersion(ctx)
+	if err != nil {
 		r.logger.Warn("ParamRegistry bump cache version failed (non-fatal)", zap.Error(err))
 		r.metrics.refreshErr()
 		return err
 	}
+	// 采纳自己刚 bump 的版本，避免下次 ensureFresh 把它误判为"别人改的"而冗余重载。
+	r.cacheVersion.Store(newVersion)
 	r.metrics.refreshOK()
-	r.logger.Info("ParamRegistry refreshed")
+	r.logger.Info("ParamRegistry refreshed", zap.Int64("version", newVersion))
 	return nil
+}
+
+// ── 跨进程一致性 ────────────────────────────────────────────────────
+
+// ensureFresh 在热路径入口比对 L2 cache_version 与本进程已采纳版本。
+//
+// 版本前进 → 说明别的进程（典型：app 改了映射并 BumpVersion）已使本进程 L1 过时，
+// 丢弃全部 L1，让后续查询 read-through 到最新 L2/DB。这是 ACS 独立进程能"及时"
+// 看到 app 侧映射增删改的关键 —— 否则 L1 sync.Map 无 TTL、热路径短路返回旧映射，
+// 要等进程重启才更新。与 product.Registry.ensureFresh 同协议。
+//
+// 降级：GetVersion 出错只 WARN 并沿用当前快照——翻译可用性优先于强一致，一次 Redis
+// 抖动不应让 CPE 会话失败。NopCache 下 GetVersion 恒 0，本方法为 no-op（无跨进程介质）。
+func (r *Registry) ensureFresh(ctx context.Context) {
+	version, err := r.cache.GetVersion(ctx)
+	if err != nil {
+		r.logger.Warn("get cache version failed; using current L1 snapshot", zap.Error(err))
+		return
+	}
+	if version == 0 || version == r.cacheVersion.Load() {
+		return
+	}
+	r.dropL1()
+	r.cacheVersion.Store(version)
+	r.logger.Info("ParamRegistry L1 invalidated by cache version change",
+		zap.Int64("new_version", version))
+}
+
+// dropL1 清空两张 L1 sync.Map（default 与 discovered）。
+func (r *Registry) dropL1() {
+	r.defaultByModel.Range(func(k, _ any) bool { r.defaultByModel.Delete(k); return true })
+	r.discoveredByDevice.Range(func(k, _ any) bool { r.discoveredByDevice.Delete(k); return true })
+}
+
+// bumpVersionLocally 递增全局 cache_version 并把新值采纳到本进程，确保本进程不会把
+// 自己刚 bump 的版本当成"别人改的"而在下次 ensureFresh 冗余重载整张 L1。失败仅 WARN：
+// 失效信号丢失最多让远端晚一拍，不阻塞写操作。
+func (r *Registry) bumpVersionLocally(ctx context.Context) {
+	newVersion, err := r.cache.BumpVersion(ctx)
+	if err != nil {
+		r.logger.Warn("bump cache version after invalidate failed (non-fatal)", zap.Error(err))
+		return
+	}
+	r.cacheVersion.Store(newVersion)
 }
 
 // ── 内部缓存路径 ────────────────────────────────────────────────────
