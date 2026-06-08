@@ -308,6 +308,9 @@ services:
     command:
       - "--config.file=/etc/alertmanager/alertmanager.yml"
       - "--storage.path=/alertmanager"
+      # 单实例部署：禁用 HA 集群(gossip mesh)。否则启动时推断不到私有 advertise IP
+      # 会 "unable to initialize gossip mesh" 崩溃重启。空值 = 关闭 HA。
+      - "--cluster.listen-address="
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:9093/-/healthy"]
       interval: 10s
