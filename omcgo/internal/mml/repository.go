@@ -64,6 +64,12 @@ type CustomCommandRepository interface {
 	// 仅在 (owner_user_id, command_name) WHERE command_scope='private' 子集内匹配。
 	// 关联：docs/design/mml-user-private-template-crud-20260520.md §4.2
 	NameExistsForPrivate(ctx context.Context, ownerID uuid.UUID, name string, excludeID *uuid.UUID) (bool, error)
+
+	// NameExistsForPublic 检查公共命名空间内是否已存在该 command_name（全局，跨所有用户）。
+	// excludeID 非空时排除自身（用于 Update 改名场景）。
+	// 仅在 command_scope='public' 子集内匹配——公共命令对所有用户可见，故须全局唯一。
+	// 纯查询防重，公共侧不加 DB 唯一约束。
+	NameExistsForPublic(ctx context.Context, name string, excludeID *uuid.UUID) (bool, error)
 }
 
 // AuditRepository writes MML command execution audit records.

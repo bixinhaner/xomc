@@ -1706,6 +1706,39 @@ func (r *PgCustomCommandRepository) NameExistsForPrivate(
 	return true, nil
 }
 
+// NameExistsForPublic 实现见 CustomCommandRepository 接口注释。
+// 公共命名空间全局唯一（跨所有用户），仅查询防重、不依赖 DB 唯一约束。
+func (r *PgCustomCommandRepository) NameExistsForPublic(
+	ctx context.Context,
+	name string,
+	excludeID *uuid.UUID,
+) (bool, error) {
+	if name == "" {
+		return false, nil
+	}
+	q := storage.Psql.Select("1").
+		From("mml_custom_command").
+		Where(sq.Eq{"command_name": name}).
+		Where(sq.Eq{"command_scope": "public"}).
+		Limit(1)
+	if excludeID != nil && *excludeID != uuid.Nil {
+		q = q.Where(sq.NotEq{"id": *excludeID})
+	}
+	sqlStr, args, err := q.ToSql()
+	if err != nil {
+		return false, fmt.Errorf("build public name-exists SQL: %w", err)
+	}
+	var dummy int
+	scanErr := r.pool.QueryRow(ctx, sqlStr, args...).Scan(&dummy)
+	if scanErr != nil {
+		if scanErr == pgx.ErrNoRows {
+			return false, nil
+		}
+		return false, fmt.Errorf("query public name-exists: %w", scanErr)
+	}
+	return true, nil
+}
+
 
 // ---- Audit Repository ----
 

@@ -284,6 +284,8 @@ func (h *AdminHandler) respondAdminError(c *gin.Context, err error) {
 		response.Fail(c, http.StatusNotFound, err.Error())
 	case errors.Is(err, ErrGroupNotEmpty):
 		response.Fail(c, http.StatusConflict, err.Error())
+	case errors.Is(err, ErrCommandNameDuplicated):
+		response.Fail(c, http.StatusConflict, err.Error())
 	default:
 		h.logger.Error("admin handler internal error", zap.Error(err))
 		response.Fail(c, http.StatusInternalServerError, err.Error())

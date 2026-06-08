@@ -464,6 +464,9 @@ func (s *AdminService) CreateCommand(ctx context.Context, req CreateCommandReq) 
 		CatalogProtected: false,
 	}
 	if err := s.commandRepo.Create(ctx, c); err != nil {
+		if isUniqueViolation(err) {
+			return nil, ErrCommandNameDuplicated
+		}
 		return nil, fmt.Errorf("create command: %w", err)
 	}
 	s.audit.Write(ctx, "mml.catalog.command.created", "command:"+c.ID.String(), map[string]any{
@@ -526,6 +529,9 @@ func (s *AdminService) UpdateCommand(ctx context.Context, getByID func(context.C
 		existing.LogicalNameI18n = *req.LogicalNameI18n
 	}
 	if err := s.commandRepo.Update(ctx, existing); err != nil {
+		if isUniqueViolation(err) {
+			return nil, ErrCommandNameDuplicated
+		}
 		return nil, fmt.Errorf("update command: %w", err)
 	}
 	s.audit.Write(ctx, "mml.catalog.command.updated", "command:"+id.String(), map[string]any{

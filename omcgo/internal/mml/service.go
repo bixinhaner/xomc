@@ -1619,6 +1619,24 @@ func newTemplateNameDuplicatedErr(name string) error {
 	)
 }
 
+// newPublicCommandNameDuplicatedErr 构造 17008 业务错误（→ 409）；公共命令对所有
+// 用户可见，故 command_name 须全局唯一，文案区别于私有模板。
+func newPublicCommandNameDuplicatedErr(name string) error {
+	return commonerrors.NewBusinessError(
+		global.ErrCodeTemplateNameDuplicated,
+		"已存在同名的公共命令，请换个名字",
+		fmt.Errorf("%w: %q", commonerrors.ErrAlreadyExists, name),
+	)
+}
+
+// dupErrForScope 按 scope 选择重名业务错误文案（用于 DB 兜底索引 race 命中时翻译）。
+func dupErrForScope(scope, name string) error {
+	if scope == "public" {
+		return newPublicCommandNameDuplicatedErr(name)
+	}
+	return newTemplateNameDuplicatedErr(name)
+}
+
 // CreateCustomCommand creates a new user-defined custom command.
 //
 // 私有模板用户级唯一性（docs/design/mml-user-private-template-crud-20260520.md §3 D1-D2）：
@@ -1642,7 +1660,22 @@ func (s *Service) CreateCustomCommand(ctx context.Context, cmd *MMLCustomCommand
 		}
 	}
 
+	// 公共命令全局唯一（跨所有用户）——纯查询防重，公共侧不加 DB 约束。
+	if cmd.CommandScope == "public" {
+		exists, err := s.customCommandRepo.NameExistsForPublic(ctx, cmd.CommandName, nil)
+		if err != nil {
+			return nil, fmt.Errorf("check duplicate public name: %w", err)
+		}
+		if exists {
+			return nil, newPublicCommandNameDuplicatedErr(cmd.CommandName)
+		}
+	}
+
 	if err := s.customCommandRepo.Create(ctx, cmd); err != nil {
+		// 并发 race 穿过查询预检后，私有 DB 兜底索引可能抛 23505 → 翻 409。
+		if isUniqueViolation(err) {
+			return nil, dupErrForScope(cmd.CommandScope, cmd.CommandName)
+		}
 		return nil, fmt.Errorf("create mml custom command: %w", err)
 	}
 
@@ -1692,6 +1725,17 @@ func (s *Service) UpdateCustomCommand(
 		}
 	}
 
+	// 公共命令改名时校验全局唯一（排除自身）——纯查询防重。
+	if cmd.CommandScope == "public" && cmd.CommandName != existing.CommandName {
+		exists, dupErr := s.customCommandRepo.NameExistsForPublic(ctx, cmd.CommandName, &id)
+		if dupErr != nil {
+			return nil, fmt.Errorf("check duplicate public name: %w", dupErr)
+		}
+		if exists {
+			return nil, newPublicCommandNameDuplicatedErr(cmd.CommandName)
+		}
+	}
+
 	existing.CommandName = cmd.CommandName
 	existing.CommandCode = cmd.CommandCode
 	existing.OperationType = cmd.OperationType
@@ -1705,6 +1749,10 @@ func (s *Service) UpdateCustomCommand(
 	}
 
 	if err := s.customCommandRepo.Update(ctx, existing); err != nil {
+		// 并发 race 穿过查询预检后，私有 DB 兜底索引可能抛 23505 → 翻 409。
+		if isUniqueViolation(err) {
+			return nil, dupErrForScope(existing.CommandScope, existing.CommandName)
+		}
 		return nil, fmt.Errorf("update mml custom command: %w", err)
 	}
 

@@ -222,6 +222,7 @@ type mockCustomCommandRepo struct {
 	deleteFn       func(ctx context.Context, id uuid.UUID) error
 	listFn         func(ctx context.Context, filter CustomCommandFilter) (*model.ListResponse[MMLCustomCommand], error)
 	nameExistsFn   func(ctx context.Context, ownerID uuid.UUID, name string, excludeID *uuid.UUID) (bool, error)
+	publicNameFn   func(ctx context.Context, name string, excludeID *uuid.UUID) (bool, error)
 }
 
 func (m *mockCustomCommandRepo) Create(ctx context.Context, tmpl *MMLCustomCommand) error {
@@ -262,6 +263,13 @@ func (m *mockCustomCommandRepo) List(ctx context.Context, filter CustomCommandFi
 func (m *mockCustomCommandRepo) NameExistsForPrivate(ctx context.Context, ownerID uuid.UUID, name string, excludeID *uuid.UUID) (bool, error) {
 	if m.nameExistsFn != nil {
 		return m.nameExistsFn(ctx, ownerID, name, excludeID)
+	}
+	return false, nil
+}
+
+func (m *mockCustomCommandRepo) NameExistsForPublic(ctx context.Context, name string, excludeID *uuid.UUID) (bool, error) {
+	if m.publicNameFn != nil {
+		return m.publicNameFn(ctx, name, excludeID)
 	}
 	return false, nil
 }
@@ -1474,13 +1482,21 @@ func TestService_CreateCustomCommand_PrivateNameAcrossOwners_Allowed(t *testing.
 	require.NoError(t, err)
 }
 
-// case 3: public scope 不走唯一性检查
-func TestService_CreateCustomCommand_PublicSameNameAllowed(t *testing.T) {
-	calls := 0
+// case 3: public scope 走全局唯一检查（NameExistsForPublic），无撞名时允许；
+// 不应触发私有命名空间检查 NameExistsForPrivate。
+func TestService_CreateCustomCommand_PublicUniqueName_Allowed(t *testing.T) {
+	privateCalls := 0
+	publicChecked := false
 	repo := &mockCustomCommandRepo{
 		nameExistsFn: func(_ context.Context, _ uuid.UUID, _ string, _ *uuid.UUID) (bool, error) {
-			calls++
+			privateCalls++
 			return true, nil
+		},
+		publicNameFn: func(_ context.Context, name string, excludeID *uuid.UUID) (bool, error) {
+			publicChecked = true
+			assert.Equal(t, "公共重启", name)
+			assert.Nil(t, excludeID, "Create 不排除自身")
+			return false, nil
 		},
 	}
 	svc := newCRUDServiceWithRepo(repo)
@@ -1490,7 +1506,49 @@ func TestService_CreateCustomCommand_PublicSameNameAllowed(t *testing.T) {
 		CommandName: "公共重启", CommandScope: "public", OwnerUserID: &ownerA,
 	})
 	require.NoError(t, err)
-	assert.Zero(t, calls, "public scope 不应触发 NameExistsForPrivate")
+	assert.True(t, publicChecked, "public scope 应走 NameExistsForPublic")
+	assert.Zero(t, privateCalls, "public scope 不应触发 NameExistsForPrivate")
+}
+
+// case 3b: public scope 全局撞名（任意用户已有同名公共命令）→ 409
+func TestService_CreateCustomCommand_PublicNameDuplicate_409(t *testing.T) {
+	repo := &mockCustomCommandRepo{
+		publicNameFn: func(_ context.Context, name string, _ *uuid.UUID) (bool, error) {
+			assert.Equal(t, "公共重启", name)
+			return true, nil
+		},
+	}
+	svc := newCRUDServiceWithRepo(repo)
+
+	ownerA := uuid.New()
+	_, err := svc.CreateCustomCommand(context.Background(), &MMLCustomCommand{
+		CommandName: "公共重启", CommandScope: "public", OwnerUserID: &ownerA,
+	})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, commonerrors.ErrAlreadyExists), "public 撞名应 → 409")
+}
+
+// case 3c: public 改名撞已有公共名 → 409，且排除自身
+func TestService_UpdateCustomCommand_PublicRenameDuplicate_409(t *testing.T) {
+	existing := &MMLCustomCommand{
+		ID: uuid.New(), CommandName: "X", CommandScope: "public", Creator: "alice",
+	}
+	repo := &mockCustomCommandRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*MMLCustomCommand, error) { return existing, nil },
+		publicNameFn: func(_ context.Context, name string, excludeID *uuid.UUID) (bool, error) {
+			assert.Equal(t, "Y", name)
+			require.NotNil(t, excludeID)
+			assert.Equal(t, existing.ID, *excludeID, "Update 改名时必须排除自身")
+			return true, nil
+		},
+	}
+	svc := newCRUDServiceWithRepo(repo)
+
+	// super_admin 绕过 owner 鉴权，专测公共唯一性分支
+	_, err := svc.UpdateCustomCommand(context.Background(), existing.ID,
+		&MMLCustomCommand{CommandName: "Y"}, uuid.New(), "super", true)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, commonerrors.ErrAlreadyExists), "public 改名撞名应 → 409")
 }
 
 // case 4: 非 owner 修改私有模板 → 403

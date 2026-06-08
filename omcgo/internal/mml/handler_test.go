@@ -141,6 +141,7 @@ type hCustomCommandRepo struct {
 	DeleteFn          func(ctx context.Context, id uuid.UUID) error
 	ListFn            func(ctx context.Context, filter CustomCommandFilter) (*model.ListResponse[MMLCustomCommand], error)
 	NameExistsFn      func(ctx context.Context, ownerID uuid.UUID, name string, excludeID *uuid.UUID) (bool, error)
+	PublicNameFn      func(ctx context.Context, name string, excludeID *uuid.UUID) (bool, error)
 }
 
 func (m *hCustomCommandRepo) Create(ctx context.Context, tmpl *MMLCustomCommand) error {
@@ -176,6 +177,12 @@ func (m *hCustomCommandRepo) List(ctx context.Context, filter CustomCommandFilte
 func (m *hCustomCommandRepo) NameExistsForPrivate(ctx context.Context, ownerID uuid.UUID, name string, excludeID *uuid.UUID) (bool, error) {
 	if m.NameExistsFn != nil {
 		return m.NameExistsFn(ctx, ownerID, name, excludeID)
+	}
+	return false, nil
+}
+func (m *hCustomCommandRepo) NameExistsForPublic(ctx context.Context, name string, excludeID *uuid.UUID) (bool, error) {
+	if m.PublicNameFn != nil {
+		return m.PublicNameFn(ctx, name, excludeID)
 	}
 	return false, nil
 }
