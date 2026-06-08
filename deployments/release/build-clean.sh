@@ -17,22 +17,22 @@
 # --dry-run 时同样只列不删。
 #
 # 用法:
-#   ./clean.sh                              # 交互式询问保留数量
-#   ./clean.sh -y                           # 非交互,按 --default-keep
-#   ./clean.sh --default-keep 5             # 默认保留数(交互回车 / -y 使用)
-#   ./clean.sh --keep-project 3 --keep-infra 1
+#   ./build-clean.sh                        # 交互式询问保留数量
+#   ./build-clean.sh -y                     # 非交互,按 --default-keep
+#   ./build-clean.sh --default-keep 5       # 默认保留数(交互回车 / -y 使用)
+#   ./build-clean.sh --keep-project 3 --keep-infra 1
 #                                           # 非交互,显式指定保留数
-#   ./clean.sh --keep-project 0             # 全部清理 project,infra 走默认
-#   ./clean.sh --list                       # 仅列出当前版本(含 mtime / 大小 / 文件数),退出
-#   ./clean.sh --delete-project v1,v2       # 精确删 project 下指定版本(逗号分隔多个)
-#   ./clean.sh --delete-infra v3            # 精确删 infra 下指定版本
-#   ./clean.sh --delete-project v1 --delete-infra v3
+#   ./build-clean.sh --keep-project 0       # 全部清理 project,infra 走默认
+#   ./build-clean.sh --list                 # 仅列出当前版本(含 mtime / 大小 / 文件数),退出
+#   ./build-clean.sh --delete-project v1,v2 # 精确删 project 下指定版本(逗号分隔多个)
+#   ./build-clean.sh --delete-infra v3      # 精确删 infra 下指定版本
+#   ./build-clean.sh --delete-project v1 --delete-infra v3
 #                                           # 两类同时精确删
-#   ./clean.sh --delete-project v1 --dry-run
+#   ./build-clean.sh --delete-project v1 --dry-run
 #                                           # 列要删但不真删
-#   ./clean.sh --dry-run                    # 只列要删的,不实际 rm
-#   ./clean.sh --archive <dir>              # 自定义 archive 目录(测试用)
-#   ./clean.sh -h | --help                  # 本帮助
+#   ./build-clean.sh --dry-run              # 只列要删的,不实际 rm
+#   ./build-clean.sh --archive <dir>        # 自定义 archive 目录(测试用)
+#   ./build-clean.sh -h | --help            # 本帮助
 #
 # 参数:
 #   -y, --yes                  非交互,使用 --default-keep / 显式 keep 值
