@@ -32,11 +32,12 @@ DELETE FROM device_info             WHERE device_id::text LIKE 'a0000000%';
 DELETE FROM device_group_members    WHERE device_id::text LIKE 'a0000000%';
 DELETE FROM devices                 WHERE id::text LIKE 'a0000000%';
 DELETE FROM device_tasks            WHERE device_sn LIKE 'TD-%';
-DELETE FROM upgrade_tasks           WHERE device_id::text LIKE 'a0000000%';
+DELETE FROM upgrade_tasks           WHERE id::text LIKE 'a0000000%';
 DELETE FROM topo_edges              WHERE source_id::text LIKE 'a0000000%' OR target_id::text LIKE 'a0000000%';
 DELETE FROM topo_nodes              WHERE id::text LIKE 'a0000000%';
 DELETE FROM sites                   WHERE id::text LIKE 'a0000000%';
 DELETE FROM ops_tasks               WHERE id::text LIKE 'a0000000%';
+DELETE FROM ops_templates           WHERE id::text LIKE 'a0000000%';
 DELETE FROM ops_command_records     WHERE id::text LIKE 'a0000000%';
 DELETE FROM report_records          WHERE id::text LIKE 'a0000000%';
 DELETE FROM backup_tasks            WHERE id::text LIKE 'a0000000%';
@@ -45,8 +46,7 @@ DELETE FROM firmware_versions       WHERE id::text LIKE 'a0000000%';
 DELETE FROM alarm_rules             WHERE id::text LIKE 'a0000000%';
 DELETE FROM config_baselines        WHERE id::text LIKE 'a0000000%';
 DELETE FROM config_templates        WHERE id::text LIKE 'a0000000%';
-DELETE FROM device_rules            WHERE id::text LIKE 'a0000000%';
-DELETE FROM licenses                WHERE id::text LIKE 'a0000000%';
+-- device_rules / licenses tables removed from schema — DELETEs dropped
 
 -- ============================================================
 -- 1. 设备 (500台: cmcc=200, ctcc=150, cucc=150, lte/nr混合)
@@ -56,7 +56,7 @@ DELETE FROM licenses                WHERE id::text LIKE 'a0000000%';
 --   0xxx=cmcc-lte, 1xxx=cmcc-nr, 2xxx=ctcc-lte, 3xxx=ctcc-nr, 4xxx=cucc-lte, 5xxx=cucc-nr
 
 INSERT INTO devices (id, serial_number, oui, product_class, manufacturer, model_name,
-    carrier, technology, status, firmware_version, ip_address,
+    carrier, technology, lifecycle_state, firmware_version, ip_address,
     connection_request_url, inform_interval, site_name, site_id,
     latitude, longitude, last_inform_at, created_at, updated_at)
 SELECT
@@ -68,7 +68,7 @@ SELECT
     c.model_name,
     c.carrier,
     c.tech,
-    (ARRAY['active','active','active','active','offline','discovered'])[1 + floor(random()*6)::int],
+    (ARRAY['commissioned','commissioned','commissioned','commissioned','registered','discovered'])[1 + floor(random()*6)::int],
     c.fw_ver,
     format('10.%s.%s.%s', (10 + floor(random()*240))::int, (1 + floor(random()*254))::int, (1 + floor(random()*254))::int)::inet,
     NULL,  -- connection_request_url
@@ -131,10 +131,10 @@ INSERT INTO device_info (
     creator, updater, created_at, updated_at)
 SELECT
     format('a0000000-%s-4000-8000-000000000001', lpad(i::text, 4, '0'))::uuid,
-    format('%s-基站-%04d',
+    format('%s-基站-%s',
         CASE WHEN i <= 200 THEN 'CMCC' WHEN i <= 350 THEN 'CTCC' ELSE 'CUCC' END,
-        i),
-    format('中国%s市%s区某某路%d号',
+        lpad(i::text, 4, '0')),
+    format('中国%s市%s区某某路%s号',
         (ARRAY['北京','上海','广州','深圳','杭州','南京','成都','武汉','西安','长沙'])[1 + floor(random()*10)::int],
         (ARRAY['朝阳','浦东','天河','南山','西湖','鼓楼','武侯','洪山','雁塔','岳麓'])[1 + floor(random()*10)::int],
         (1 + floor(random()*200))::int),
@@ -267,22 +267,21 @@ FROM generate_series(1, 25) AS i;
 -- ============================================================
 -- 7. 固件版本 (6条: 3运营商 x 2制式)
 -- ============================================================
-INSERT INTO firmware_versions (id, carrier, product_class, version, file_name, file_size, minio_path, release_notes, status, created_at, updated_at)
+INSERT INTO firmware_versions (id, product_class, version, file_name, file_size, minio_path, release_notes, status, created_at, updated_at)
 VALUES
-    ('a0000000-0001-7000-8000-000000000001', 'cmcc', 'FAP-LTE-100', 'V200R003C10', 'cmcc_lte_v200r003c10.bin', 52428800, 'firmware/cmcc/FAP-LTE-100/V200R003C10/firmware.bin', 'Bug fixes and performance improvements', 'active', NOW(), NOW()),
-    ('a0000000-0002-7000-8000-000000000001', 'cmcc', 'gNB-100', 'V100R018C10', 'cmcc_nr_v100r018c10.bin', 104857600, 'firmware/cmcc/gNB-100/V100R018C10/firmware.bin', 'NR protocol stack update', 'active', NOW(), NOW()),
-    ('a0000000-0003-7000-8000-000000000001', 'ctcc', 'FAP-LTE-200', 'V4.16.30P4', 'ctcc_lte_v4.16.30p4.bin', 45056000, 'firmware/ctcc/FAP-LTE-200/V4.16.30P4/firmware.bin', 'Security patch', 'active', NOW(), NOW()),
-    ('a0000000-0004-7000-8000-000000000001', 'ctcc', 'gNB-200', 'V5.20.10', 'ctcc_nr_v5.20.10.bin', 98304000, 'firmware/ctcc/gNB-200/V5.20.10/firmware.bin', 'Initial NR release', 'active', NOW(), NOW()),
-    ('a0000000-0005-7000-8000-000000000001', 'cucc', 'FAP-LTE-300', 'V3.12.50', 'cucc_lte_v3.12.50.bin', 48000000, 'firmware/cucc/FAP-LTE-300/V3.12.50/firmware.bin', 'Stability improvements', 'active', NOW(), NOW()),
-    ('a0000000-0006-7000-8000-000000000001', 'cucc', 'gNB-300', 'V2.8.20', 'cucc_nr_v2.8.20.bin', 90000000, 'firmware/cucc/gNB-300/V2.8.20/firmware.bin', 'Feature update', 'active', NOW(), NOW());
+    ('a0000000-0001-7000-8000-000000000001', 'FAP-LTE-100', 'V200R003C10', 'cmcc_lte_v200r003c10.bin', 52428800, 'firmware/cmcc/FAP-LTE-100/V200R003C10/firmware.bin', 'Bug fixes and performance improvements', 'active', NOW(), NOW()),
+    ('a0000000-0002-7000-8000-000000000001', 'gNB-100', 'V100R018C10', 'cmcc_nr_v100r018c10.bin', 104857600, 'firmware/cmcc/gNB-100/V100R018C10/firmware.bin', 'NR protocol stack update', 'active', NOW(), NOW()),
+    ('a0000000-0003-7000-8000-000000000001', 'FAP-LTE-200', 'V4.16.30P4', 'ctcc_lte_v4.16.30p4.bin', 45056000, 'firmware/ctcc/FAP-LTE-200/V4.16.30P4/firmware.bin', 'Security patch', 'active', NOW(), NOW()),
+    ('a0000000-0004-7000-8000-000000000001', 'gNB-200', 'V5.20.10', 'ctcc_nr_v5.20.10.bin', 98304000, 'firmware/ctcc/gNB-200/V5.20.10/firmware.bin', 'Initial NR release', 'active', NOW(), NOW()),
+    ('a0000000-0005-7000-8000-000000000001', 'FAP-LTE-300', 'V3.12.50', 'cucc_lte_v3.12.50.bin', 48000000, 'firmware/cucc/FAP-LTE-300/V3.12.50/firmware.bin', 'Stability improvements', 'active', NOW(), NOW()),
+    ('a0000000-0006-7000-8000-000000000001', 'gNB-300', 'V2.8.20', 'cucc_nr_v2.8.20.bin', 90000000, 'firmware/cucc/gNB-300/V2.8.20/firmware.bin', 'Feature update', 'active', NOW(), NOW());
 
 -- ============================================================
 -- 8. 升级任务 (100条)
 -- ============================================================
-INSERT INTO upgrade_tasks (id, device_id, firmware_id, batch_id, status, retry_count, started_at, completed_at, created_at, updated_at)
+INSERT INTO upgrade_tasks (id, firmware_id, status, retry_count, started_at, completed_at, created_at, updated_at)
 SELECT
     format('a0000000-%s-8000-8000-000000000001', lpad(i::text, 4, '0'))::uuid,
-    format('a0000000-%s-4000-8000-000000000001', lpad(i::text, 4, '0'))::uuid,
     (ARRAY[
         'a0000000-0001-7000-8000-000000000001'::uuid,
         'a0000000-0002-7000-8000-000000000001'::uuid,
@@ -291,8 +290,7 @@ SELECT
         'a0000000-0005-7000-8000-000000000001'::uuid,
         'a0000000-0006-7000-8000-000000000001'::uuid
     ])[1 + floor(random()*6)::int],
-    format('a0000000-0001-9000-8000-000000000001', lpad((1 + floor(i/20))::text, 4, '0'))::uuid,
-    (ARRAY['completed','completed','completed','completed','failed','pending'])[1 + floor(random()*6)::int],
+    (ARRAY['ended','ended','ended','ended','suspended','pending'])[1 + floor(random()*6)::int],
     floor(random()*3)::int,
     CASE WHEN random() > 0.2 THEN NOW() - (random() * INTERVAL '14 days')::interval ELSE NULL END,
     CASE WHEN random() > 0.3 THEN NOW() - (random() * INTERVAL '7 days')::interval ELSE NULL END,
@@ -303,7 +301,7 @@ FROM generate_series(1, 100) AS i;
 -- ============================================================
 -- 9. 告警规则 (10条)
 -- ============================================================
-INSERT INTO alarm_rules (id, name, description, alarm_code, severity, condition_type, condition_config, action_type, carrier, enabled, created_at, updated_at)
+INSERT INTO alarm_rules (id, name, description, alarm_identifier, severity, condition_type, condition_config, action_type, carrier, enabled, created_at, updated_at)
 SELECT
     format('a0000000-%s-a000-8000-000000000001', lpad(i::text, 4, '0'))::uuid,
     r.name, r.desc, r.code, r.severity,
@@ -323,7 +321,7 @@ CROSS JOIN LATERAL (
 -- ============================================================
 -- 10. 活动告警 (100条，分布在不同设备)
 -- ============================================================
-INSERT INTO alarms_active (id, device_id, device_sn, carrier, severity, alarm_type, alarm_code, description, status, raised_at, created_at, updated_at)
+INSERT INTO alarms_active (id, device_id, device_sn, carrier, severity, alarm_type, alarm_identifier, description, status, raised_at, created_at, updated_at)
 SELECT
     format('a0000000-%s-b000-8000-000000000001', lpad(i::text, 4, '0'))::uuid,
     format('a0000000-%s-4000-8000-000000000001', lpad(((i-1)*5 + 1)::text, 4, '0'))::uuid,
@@ -349,7 +347,7 @@ CROSS JOIN LATERAL (
 -- ============================================================
 -- 11. 历史告警 (10000条，TimescaleDB 超表)
 -- ============================================================
-INSERT INTO alarms_history (time, alarm_id, device_id, device_sn, carrier, severity, alarm_type, alarm_code, description, status, raised_at, cleared_at)
+INSERT INTO alarms_history (time, alarm_id, device_id, device_sn, carrier, severity, alarm_type, alarm_identifier, description, status, raised_at, cleared_at)
 SELECT
     ts,
     format('a0000000-%s-b100-8000-000000000001', lpad(i::text, 4, '0'))::uuid,
@@ -378,12 +376,13 @@ CROSS JOIN LATERAL (
 -- ============================================================
 -- 12. PM 文件 (200条)
 -- ============================================================
-INSERT INTO pm_files (id, device_id, device_sn, carrier, file_name, file_size, collect_time, minio_path, parsed, parsed_at, record_count, created_at)
+INSERT INTO pm_files (id, device_id, device_sn, carrier, technology, file_name, file_size, collect_time, minio_path, parsed, parsed_at, counter_count, created_at)
 SELECT
     format('a0000000-%s-c000-8000-000000000001', lpad(i::text, 4, '0'))::uuid,
     format('a0000000-%s-4000-8000-000000000001', lpad(((i-1) % 500 + 1)::text, 4, '0'))::uuid,
     'TD-' || c.carrier || '-' || lpad(((i-1) % 500 + 1)::text, 4, '0'),
     c.carrier,
+    c.tech,
     'pm_' || c.carrier || '_' || to_char(t.ts, 'YYYYMMDD_HH24MISS') || '.xml',
     (50000 + floor(random()*200000)::int),
     t.ts,
@@ -401,7 +400,8 @@ CROSS JOIN LATERAL (
         WHEN (i-1) % 500 + 1 <= 200 THEN 'cmcc'
         WHEN (i-1) % 500 + 1 <= 350 THEN 'ctcc'
         ELSE 'cucc'
-    END AS carrier
+    END AS carrier,
+    CASE WHEN ((i-1) % 500 + 1) % 2 = 0 THEN 'nr' ELSE 'lte' END AS tech
 ) c;
 
 -- ============================================================
@@ -458,7 +458,7 @@ CROSS JOIN LATERAL (
     OFFSET floor(random()*11)::int
     LIMIT 1
 ) cn
-ON CONFLICT (device_sn, metric_path, granularity, end_time, time) DO NOTHING;
+ON CONFLICT (device_oui, device_sn, metric_path, granularity, end_time, time, object_ldn) DO NOTHING;
 
 -- ============================================================
 -- 14. KPI 值 → pm_metrics（metric_type='kpi'，20000 条，TimescaleDB hypertable）
@@ -487,7 +487,7 @@ FROM generate_series(1, 20000) AS i
 CROSS JOIN LATERAL (
     SELECT NOW() - (random() * INTERVAL '7 days')::interval AS ts
 ) t
-ON CONFLICT (device_sn, metric_path, granularity, end_time, time) DO NOTHING;
+ON CONFLICT (device_oui, device_sn, metric_path, granularity, end_time, time, object_ldn) DO NOTHING;
 
 -- ============================================================
 -- 15. MR 文件 (100条)
@@ -616,16 +616,16 @@ CROSS JOIN LATERAL (
 -- ============================================================
 -- 21. 配置模板 (10条)
 -- ============================================================
-INSERT INTO config_templates (id, name, description, carrier, technology, oui, product_class, parameter_values, status, version, created_at, updated_at)
+INSERT INTO config_templates (id, name, description, carrier, technology, product_class, template_type, parameters, active, version, created_at, updated_at)
 SELECT
     format('a0000000-%s-1200-8000-000000000001', lpad(i::text, 4, '0'))::uuid,
-    t.name, '自动生成的配置模板', t.carrier, t.tech, NULL, t.product_class,
+    t.name, '自动生成的配置模板', t.carrier, t.tech, t.product_class, 'batch_config',
     jsonb_build_object(
         'Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus', '1',
         'Device.Services.FAPService.1.FAPControl.LTE.Bandwidth', t.bw,
         'Device.Services.FAPService.1.FAPControl.LTE.MaxTxPower', t.power
     ),
-    'active', 1, NOW(), NOW()
+    true, 1, NOW(), NOW()
 FROM (
     VALUES
         (1, 'CMCC-LTE-标准配置', 'cmcc', 'lte', 'FAP-LTE-100', '20', '20'),
@@ -636,8 +636,8 @@ FROM (
         (6, 'CTCC-NR-标准配置', 'ctcc', 'nr', 'gNB-200', '80', '50'),
         (7, 'CUCC-LTE-标准配置', 'cucc', 'lte', 'FAP-LTE-300', '10', '20'),
         (8, 'CUCC-NR-标准配置', 'cucc', 'nr', 'gNB-300', '60', '50'),
-        (9, '通用-LTE-最小配置', NULL, 'lte', NULL, '10', '10'),
-        (10, '通用-NR-最小配置', NULL, 'nr', NULL, '40', '10')
+        (9, '通用-LTE-最小配置', 'cmcc', 'lte', NULL, '10', '10'),
+        (10, '通用-NR-最小配置', 'cmcc', 'nr', NULL, '40', '10')
 ) AS t(i, name, carrier, tech, product_class, bw, power);
 
 -- ============================================================
@@ -660,19 +660,8 @@ SELECT
 FROM generate_series(1, 30) AS i;
 
 -- ============================================================
--- 23. 许可证 (3条)
+-- 23. 许可证 (3条) — REMOVED: licenses table dropped (now system_license / device_licenses)
 -- ============================================================
-INSERT INTO licenses (id, license_name, license_code, product_name, license_type, status, max_devices, used_devices, features, issue_date, expiry_date, licensor, device_type, region, notes, created_at, updated_at)
-VALUES
-    ('a0000000-0001-1400-8000-000000000001', 'OMC企业版-10万', 'LIC-ENT-100K', 'OMC Enterprise', 'subscription', 'active', 100000, 500,
-     '["pm","alarm","mr","northbound","provision","topology"]'::jsonb,
-     NOW() - INTERVAL '6 months', NOW() + INTERVAL '18 months', 'BaiCells', 'smallcell', 'China', '企业版全功能许可', NOW(), NOW()),
-    ('a0000000-0002-1400-8000-000000000001', 'OMC标准版-1万', 'LIC-STD-10K', 'OMC Standard', 'subscription', 'active', 10000, 500,
-     '["pm","alarm","config","topology"]'::jsonb,
-     NOW() - INTERVAL '3 months', NOW() + INTERVAL '9 months', 'BaiCells', 'smallcell', 'China', '标准版基础许可', NOW(), NOW()),
-    ('a0000000-0003-1400-8000-000000000001', 'OMC试用版', 'LIC-TRIAL-500', 'OMC Trial', 'trial', 'active', 500, 0,
-     '["pm","alarm"]'::jsonb,
-     NOW(), NOW() + INTERVAL '30 days', 'BaiCells', 'smallcell', 'China', '试用版30天', NOW(), NOW());
 
 -- ============================================================
 -- 24. Ops 模板 + 任务 (5 + 20)
@@ -713,15 +702,8 @@ SELECT
 FROM generate_series(1, 20) AS i;
 
 -- ============================================================
--- 25. 设备规则 (5条)
+-- 25. 设备规则 (5条) — REMOVED: device_rules table dropped from schema
 -- ============================================================
-INSERT INTO device_rules (id, name, priority, target_group_id, enabled, matching_mode, description, created_at, updated_at)
-VALUES
-    ('a0000000-0001-1700-8000-000000000001', 'CMCC设备自动分组', 1, '00000000-0000-0000-0000-000000000002'::uuid, true, 'deviceName', '按设备名称匹配CMCC设备', NOW(), NOW()),
-    ('a0000000-0002-1700-8000-000000000001', 'CTCC设备自动分组', 2, '00000000-0000-0000-0000-000000000002'::uuid, true, 'deviceName', '按设备名称匹配CTCC设备', NOW(), NOW()),
-    ('a0000000-0003-1700-8000-000000000001', 'CUCC设备自动分组', 3, '00000000-0000-0000-0000-000000000002'::uuid, true, 'deviceName', '按设备名称匹配CUCC设备', NOW(), NOW()),
-    ('a0000000-0004-1700-8000-000000000001', 'TAC区域匹配规则', 4, NULL, false, 'tac', '按TAC区域匹配设备分组', NOW(), NOW()),
-    ('a0000000-0005-1700-8000-000000000001', 'LAC区域匹配规则', 5, NULL, false, 'lac', '按LAC区域匹配设备分组', NOW(), NOW());
 
 COMMIT;
 
@@ -745,5 +727,5 @@ UNION ALL SELECT 'audit_logs', count(*) FROM audit_logs WHERE id::text LIKE 'a00
 UNION ALL SELECT 'system_logs', count(*) FROM system_logs WHERE id::text LIKE 'a0000000%'
 UNION ALL SELECT 'ne_message_logs', count(*) FROM ne_message_logs WHERE device_id::text LIKE 'a0000000%'
 UNION ALL SELECT 'device_tasks', count(*) FROM device_tasks WHERE device_sn LIKE 'TD-%'
-UNION ALL SELECT 'upgrade_tasks', count(*) FROM upgrade_tasks WHERE device_id::text LIKE 'a0000000%'
+UNION ALL SELECT 'upgrade_tasks', count(*) FROM upgrade_tasks WHERE id::text LIKE 'a0000000%'
 ORDER BY 2 DESC;

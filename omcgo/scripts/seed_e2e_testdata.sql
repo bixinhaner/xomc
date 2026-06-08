@@ -18,7 +18,6 @@ DELETE FROM report_definitions WHERE id::text LIKE 'e2e00023%';
 DELETE FROM topo_edges WHERE source_id::text LIKE 'e2e00022%' OR target_id::text LIKE 'e2e00022%';
 DELETE FROM topo_nodes WHERE id::text LIKE 'e2e00022%';
 DELETE FROM sites WHERE id::text LIKE 'e2e00021%';
-DELETE FROM licenses WHERE id::text LIKE 'e2e00020%' OR license_code LIKE 'E2E-%';
 DELETE FROM mr_device_mappings WHERE id::text LIKE 'e2e00019%';
 DELETE FROM ftp_configs WHERE id::text LIKE 'e2e00018%';
 DELETE FROM config_tasks WHERE id::text LIKE 'e2e00016%';
@@ -74,31 +73,31 @@ DELETE FROM devices WHERE serial_number IN ('TEST-SN-001','TEST-SN-002','TEST-SN
 
 INSERT INTO devices (
     id, serial_number, oui, product_class, manufacturer, model_name,
-    carrier, technology, status, firmware_version, ip_address,
+    carrier, technology, lifecycle_state, is_online, firmware_version, ip_address,
     connection_request_url, inform_interval, site_name, site_id,
     latitude, longitude, created_at, updated_at
 ) VALUES
--- Device 1: CMCC LTE, active
+-- Device 1: CMCC LTE, active (commissioned + online)
 (
     'e2e00001-0000-0000-0000-000000000001',
     'TEST-SN-001', '00A0C6', 'FAP-LTE-100', 'Huawei', 'eLTE-230',
-    'cmcc', 'lte', 'active', 'V200R003C10', '10.0.1.101',
+    'cmcc', 'lte', 'commissioned', true, 'V200R003C10', '10.0.1.101',
     'http://10.0.1.101:7547/ConnectionRequest', 300, 'Beijing-Site-01', 'BJ-S01',
     39.9042, 116.4074, NOW() - INTERVAL '30 days', NOW() - INTERVAL '5 minutes'
 ),
--- Device 2: CMCC NR, active
+-- Device 2: CMCC NR, active (commissioned + online)
 (
     'e2e00001-0000-0000-0000-000000000002',
     'TEST-SN-002', '00A0C6', 'gNB-100', 'Huawei', 'AAU5613',
-    'cmcc', 'nr', 'active', 'V100R018C10', '10.0.1.102',
+    'cmcc', 'nr', 'commissioned', true, 'V100R018C10', '10.0.1.102',
     'http://10.0.1.102:7547/ConnectionRequest', 300, 'Beijing-Site-02', 'BJ-S02',
     39.9142, 116.4174, NOW() - INTERVAL '25 days', NOW() - INTERVAL '10 minutes'
 ),
--- Device 3: CTCC LTE, offline
+-- Device 3: CTCC LTE, offline (commissioned but offline)
 (
     'e2e00001-0000-0000-0000-000000000003',
     'TEST-SN-003', '001E4F', 'FAP-LTE-200', 'ZTE', 'ZXSDR-B8200',
-    'ctcc', 'lte', 'offline', 'V4.16.30P4', NULL,
+    'ctcc', 'lte', 'commissioned', false, 'V4.16.30P4', NULL,
     '', 600, 'Shanghai-Site-01', 'SH-S01',
     31.2304, 121.4737, NOW() - INTERVAL '60 days', NOW() - INTERVAL '2 days'
 ),
@@ -106,15 +105,15 @@ INSERT INTO devices (
 (
     'e2e00001-0000-0000-0000-000000000004',
     'TEST-SN-004', '64700E', 'gNB-200', 'Ericsson', 'AIR6488',
-    'cucc', 'nr', 'registered', 'CXP9024418/12_R57A', '10.0.3.201',
+    'cucc', 'nr', 'registered', false, 'CXP9024418/12_R57A', '10.0.3.201',
     'http://10.0.3.201:7547/ConnectionRequest', 300, 'Guangzhou-Site-01', 'GZ-S01',
     23.1291, 113.2644, NOW() - INTERVAL '3 days', NOW() - INTERVAL '3 days'
 ),
--- Device 5: CMCC LTE, maintenance
+-- Device 5: CMCC LTE, maintenance (online)
 (
     'e2e00001-0000-0000-0000-000000000005',
     'TEST-SN-005', '00A0C6', 'FAP-LTE-100', 'Huawei', 'eLTE-230',
-    'cmcc', 'lte', 'maintenance', 'V200R003C10', '10.0.4.101',
+    'cmcc', 'lte', 'maintenance', true, 'V200R003C10', '10.0.4.101',
     'http://10.0.4.101:7547/ConnectionRequest', 300, 'Shenzhen-Site-01', 'SZ-S01',
     22.5431, 114.0579, NOW() - INTERVAL '90 days', NOW() - INTERVAL '1 day'
 );
@@ -124,7 +123,7 @@ INSERT INTO devices (
 -- ============================================================
 
 INSERT INTO alarms_active (
-    id, device_id, device_sn, carrier, severity, alarm_type, alarm_code,
+    id, device_id, device_sn, carrier, severity, alarm_type, alarm_identifier,
     description, status, raised_at, acknowledged_at, acknowledged_by,
     additional_info, created_at, updated_at
 ) VALUES
@@ -248,14 +247,14 @@ INSERT INTO config_templates (
 -- ============================================================
 
 INSERT INTO firmware_versions (
-    id, carrier, product_class, version, file_name, file_size,
+    id, product_class, version, file_name, file_size,
     minio_path, compatible_oui, release_notes, status,
     created_at, updated_at
 ) VALUES
 -- Firmware 1: LTE firmware
 (
     'e2e00004-0000-0000-0000-000000000001',
-    'cmcc', 'FAP-LTE-100', 'V200R003C11',
+    'FAP-LTE-100', 'V200R003C11',
     'eLTE-230_V200R003C11.bin', 52428800,
     'firmware/cmcc/FAP-LTE-100/V200R003C11.bin',
     '["00A0C6"]'::jsonb, 'Bug fixes and stability improvements',
@@ -264,7 +263,7 @@ INSERT INTO firmware_versions (
 -- Firmware 2: NR firmware (has upgrade tasks referencing it)
 (
     'e2e00004-0000-0000-0000-000000000002',
-    'cmcc', 'gNB-100', 'V100R019C10',
+    'gNB-100', 'V100R019C10',
     'AAU5613_V100R019C10.bin', 104857600,
     'firmware/cmcc/gNB-100/V100R019C10.bin',
     '["00A0C6"]'::jsonb, 'New 5G NR features and performance enhancements',
@@ -273,7 +272,7 @@ INSERT INTO firmware_versions (
 -- Firmware 3: standalone (no upgrade tasks, safe to delete)
 (
     'e2e00004-0000-0000-0000-000000000003',
-    'ctcc', 'FAP-LTE-200', 'V4.16.31P1',
+    'FAP-LTE-200', 'V4.16.31P1',
     'ZXSDR-B8200_V4.16.31P1.bin', 31457280,
     'firmware/ctcc/FAP-LTE-200/V4.16.31P1.bin',
     '["001E4F"]'::jsonb, 'Minor patch release',
@@ -285,26 +284,22 @@ INSERT INTO firmware_versions (
 -- ============================================================
 
 INSERT INTO upgrade_tasks (
-    id, device_id, firmware_id, batch_id, status,
+    id, firmware_id, status,
     error_message, retry_count, max_retries,
     started_at, completed_at, created_at, updated_at
 ) VALUES
--- Task 1: completed
+-- Task 1: completed (ended)
 (
     'e2e00005-0000-0000-0000-000000000001',
-    'e2e00001-0000-0000-0000-000000000001',
     'e2e00004-0000-0000-0000-000000000001',
-    'e2e00005-ba00-0000-0000-000000000001',
-    'completed', NULL, 0, 3,
+    'ended', NULL, 0, 3,
     NOW() - INTERVAL '8 days', NOW() - INTERVAL '8 days' + INTERVAL '15 minutes',
     NOW() - INTERVAL '8 days', NOW() - INTERVAL '8 days' + INTERVAL '15 minutes'
 ),
 -- Task 2: pending
 (
     'e2e00005-0000-0000-0000-000000000002',
-    'e2e00001-0000-0000-0000-000000000002',
     'e2e00004-0000-0000-0000-000000000002',
-    'e2e00005-ba00-0000-0000-000000000001',
     'pending', NULL, 0, 3,
     NULL, NULL,
     NOW() - INTERVAL '1 day', NOW() - INTERVAL '1 day'
@@ -429,7 +424,7 @@ INSERT INTO audit_logs (id, user_id, username, action, resource, resource_id, de
 -- ============================================================
 
 -- Sprint 4: Alarm Rules
-INSERT INTO alarm_rules (id, name, description, alarm_code, severity, condition_type, condition_config, action_type, action_config, carrier, technology, enabled, created_at, updated_at)
+INSERT INTO alarm_rules (id, name, description, alarm_identifier, severity, condition_type, condition_config, action_type, action_config, carrier, technology, enabled, created_at, updated_at)
 VALUES
   ('a0000000-0000-0000-0000-000000000001', 'High CPU Alert', 'CPU usage exceeds threshold', 'CPU_HIGH', 1, 'threshold', '{"metric":"cpu_usage","operator":"gt","value":90}', 'notification', '{"channel":"email","recipients":["admin@omc.com"]}', 'cmcc', 'LTE', true, NOW(), NOW()),
   ('a0000000-0000-0000-0000-000000000002', 'Link Down Alert', 'Network link goes down', 'LINK_DOWN', 2, 'event', '{"event_type":"link_status","value":"down"}', 'notification', '{"channel":"sms","recipients":["+8613800138000"]}', 'cmcc', 'NR', true, NOW(), NOW()),
@@ -473,7 +468,7 @@ VALUES
 -- ============================================================
 
 INSERT INTO alarms_active (
-    id, device_id, device_sn, carrier, severity, alarm_type, alarm_code,
+    id, device_id, device_sn, carrier, severity, alarm_type, alarm_identifier,
     description, status, raised_at, acknowledged_at, acknowledged_by,
     additional_info, created_at, updated_at
 ) VALUES
@@ -537,8 +532,8 @@ INSERT INTO managed_files (id, file_name, file_type, file_size, minio_path, stat
 -- 21. MML Scripts (Sprint 8)
 -- ============================================================
 
-INSERT INTO mml_scripts (id, script_name, description, content, device_type, creator, created_at, updated_at) VALUES
-('e2e00013-0000-0000-0000-000000000001', 'Device Health Check', 'Check device status', 'LST DEVPARAM;RST_DEV', 'router', 'admin', NOW(), NOW());
+INSERT INTO mml_scripts (id, script_name, description, content, creator, created_at, updated_at) VALUES
+('e2e00013-0000-0000-0000-000000000001', 'Device Health Check', 'Check device status', 'LST DEVPARAM;RST_DEV', 'admin', NOW(), NOW());
 
 -- ============================================================
 -- 22. PM Tasks (Phase A)
@@ -588,13 +583,8 @@ INSERT INTO mr_device_mappings (id, device_sn, device_name, cell_id, cell_name, 
 ('e2e00019-0000-0000-0000-000000000002', 'TEST-SN-002', 'gNB-BJ-002', 'CELL-002-1', 'Cell-BJ-02-1', false, 30, 200, NOW(), NOW());
 
 -- ============================================================
--- 28. Licenses (Phase C)
+-- 28. Licenses (Phase C) — REMOVED: licenses table dropped (now system_license / device_licenses)
 -- ============================================================
-
-INSERT INTO licenses (id, license_name, license_code, product_name, license_type, status, max_devices, used_devices, features, issue_date, expiry_date, licensor, device_type, region, created_at, updated_at) VALUES
-('e2e00020-0000-0000-0000-000000000001', 'E2E OMC Base License', 'E2E-LIC-001', 'OMC Platform', 'subscription', 'active', 1000, 200, '["device_management","alarm_management"]', NOW() - INTERVAL '365 days', NOW() + INTERVAL '365 days', 'Vendor A', 'FAP-LTE-100', 'North', NOW(), NOW()),
-('e2e00020-0000-0000-0000-000000000002', 'E2E NR Feature License', 'E2E-LIC-002', 'NR Feature Pack', 'perpetual', 'pending', 500, 0, '["nr_support"]', NOW() - INTERVAL '30 days', NULL, 'Vendor B', 'gNB-100', 'East', NOW(), NOW()),
-('e2e00020-0000-0000-0000-000000000003', 'E2E Expired License', 'E2E-LIC-003', 'OMC Advanced', 'subscription', 'expired', 100, 100, '[]', NOW() - INTERVAL '730 days', NOW() - INTERVAL '365 days', 'Vendor C', 'FAP-LTE-200', 'South', NOW(), NOW());
 
 -- ============================================================
 -- 29. Sites (Phase C) — FK → device_groups
@@ -706,8 +696,6 @@ UNION ALL
 SELECT 'ftp_configs', COUNT(*) FROM ftp_configs WHERE id::text LIKE 'e2e00018%'
 UNION ALL
 SELECT 'mr_device_mappings', COUNT(*) FROM mr_device_mappings WHERE id::text LIKE 'e2e00019%'
-UNION ALL
-SELECT 'licenses', COUNT(*) FROM licenses WHERE id::text LIKE 'e2e00020%'
 UNION ALL
 SELECT 'sites', COUNT(*) FROM sites WHERE id::text LIKE 'e2e00021%'
 UNION ALL
