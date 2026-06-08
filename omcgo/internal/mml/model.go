@@ -76,10 +76,11 @@ type MMLCommand struct {
 	CreatedAt       time.Time         `json:"created_at"`
 	Params          []MMLParamRef     `json:"params,omitempty"`
 
-	// T-0123-P0 catalog 元数据（migration 000095 新增）
-	// LogicalCode：去 op 前缀的逻辑命令码（"LST_DEVICE_INFO" → "DEVICE_INFO"）；
-	// 同 logical 不同 op 是命令树叶子同分支
-	LogicalCode      string            `json:"logical_code" db:"logical_code"`
+	// LogicalCode：去 op 前缀的逻辑命令码（"LST DEVICE_INFO" → "DEVICE_INFO"）；
+	// 同 logical 不同 op 是命令树叶子同分支。
+	// 不再持久化为 DB 列（已 DROP）；由代码从 command_code 派生填充
+	// （见 deriveLogicalCodeFromCommandCode）。JSON 契约保持不变。
+	LogicalCode      string            `json:"logical_code"`
 	// LogicalNameI18n：逻辑命令显示名（命令树叶子 label 前缀）
 	// 例：{"en-US":"Device info","zh-CN":"设备信息"} → 叶子 "Device info(LST DEVICE_INFO)"
 	LogicalNameI18n  map[string]string `json:"logical_name_i18n" db:"logical_name_i18n"`

@@ -133,11 +133,12 @@ func writeSectionCommands(b *strings.Builder, rep *DiffReport) {
 	b.WriteString("     WHERE param_version = 'cmcc-td-lte-v2.3'\n")
 	b.WriteString("       AND group_code LIKE 'chapter:%'\n")
 	b.WriteString(")\n")
+	// logical_code 列已 DROP（读时从 command_code 派生），seed 生成不再写该列。
 	b.WriteString("INSERT INTO mml_commands (\n")
 	b.WriteString("    command_name, command_code, category, description,\n")
 	b.WriteString("    rpc_method, operation_type, target_paths, target_object,\n")
 	b.WriteString("    group_id, command_name_i18n,\n")
-	b.WriteString("    logical_code, logical_name_i18n,\n")
+	b.WriteString("    logical_name_i18n,\n")
 	b.WriteString("    source, catalog_protected, help_doc\n")
 	b.WriteString(") VALUES\n")
 
@@ -187,8 +188,7 @@ func writeCommandValueRow(b *strings.Builder, c *SpecCommand) {
 		sqlStr("chapter:"+c.Chapter),
 		sqlStr(string(cmdNameI18n)),
 	)
-	fmt.Fprintf(b, "     %s, %s::jsonb,\n",
-		sqlStr(c.LogicalCode),
+	fmt.Fprintf(b, "     %s::jsonb,\n",
 		sqlStr(string(logicalI18n)),
 	)
 	fmt.Fprintf(b, "     'standard', true, '')")

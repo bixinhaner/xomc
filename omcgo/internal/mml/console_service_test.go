@@ -216,7 +216,7 @@ func TestConsoleService_RenderMML_LST_Success(t *testing.T) {
 	cmdRepo := newFakeCommandRepo()
 	cmdRepo.addCommand(&MMLCommand{
 		ID:            cmdID,
-		CommandCode:   "LST_DEVICE_INFO",
+		CommandCode:   "LST DEVICE_INFO",
 		LogicalCode:   "DEVICE_INFO",
 		OperationType: "LST",
 	})
@@ -241,7 +241,7 @@ func TestConsoleService_RenderMML_LogicalCodeFallback(t *testing.T) {
 	cmdRepo := newFakeCommandRepo()
 	cmdRepo.addCommand(&MMLCommand{
 		ID:            cmdID,
-		CommandCode:   "LST_DEVICE_INFO",
+		CommandCode:   "LST DEVICE_INFO",
 		LogicalCode:   "", // 空 logical_code → 派生
 		OperationType: "LST",
 	})
@@ -252,7 +252,7 @@ func TestConsoleService_RenderMML_LogicalCodeFallback(t *testing.T) {
 		OperationType: "LST",
 	})
 	require.NoError(t, err)
-	// command_code "LST_DEVICE_INFO" 去 op 前缀 "LST_" → "DEVICE_INFO"
+	// command_code "LST DEVICE_INFO" 去 op 前缀 "LST " → "DEVICE_INFO"
 	assert.Equal(t, "LST DEVICE_INFO", got)
 }
 
@@ -277,7 +277,7 @@ func TestConsoleService_ParseMML_WithLookup_ResolvesCommandID(t *testing.T) {
 	cmdRepo := newFakeCommandRepo()
 	cmdRepo.addCommand(&MMLCommand{
 		ID:            cmdID,
-		CommandCode:   "LST_DEVICE_INFO",
+		CommandCode:   "LST DEVICE_INFO",
 		LogicalCode:   "DEVICE_INFO",
 		OperationType: "LST",
 	})
@@ -317,7 +317,7 @@ func TestLookupByLogicalCode_OpPrefixHit(t *testing.T) {
 	cmdRepo := newFakeCommandRepo()
 	cmd := &MMLCommand{
 		ID:            uuid.New(),
-		CommandCode:   "MOD_DEVICE_INFO",
+		CommandCode:   "MOD DEVICE_INFO",
 		LogicalCode:   "DEVICE_INFO",
 		OperationType: "MOD",
 	}
@@ -349,7 +349,7 @@ func TestLookupByLogicalCode_OpMismatch_ReturnsNotFound(t *testing.T) {
 	cmdRepo := newFakeCommandRepo()
 	cmdRepo.addCommand(&MMLCommand{
 		ID:            uuid.New(),
-		CommandCode:   "LST_DEVICE_INFO",
+		CommandCode:   "LST DEVICE_INFO",
 		LogicalCode:   "DEVICE_INFO",
 		OperationType: "LST",
 	})
@@ -440,8 +440,13 @@ func TestBuildDisplayName(t *testing.T) {
 }
 
 func TestDeriveLogicalCodeFromCommandCode(t *testing.T) {
+	// command_code 是 "<OP> <LOGICAL>" 空格分隔 → 去 "OP " 前缀
 	assert.Equal(t, "DEVICE_INFO",
-		deriveLogicalCodeFromCommandCode("LST_DEVICE_INFO", "LST"))
+		deriveLogicalCodeFromCommandCode("LST DEVICE_INFO", "LST"))
+	// op 不匹配前缀但有空格 → 退化取第二段
+	assert.Equal(t, "BAR",
+		deriveLogicalCodeFromCommandCode("FOO BAR", "LST"))
+	// 无空格（admin 创建的裸 command_code）→ 原样返回
 	assert.Equal(t, "ADMIN_CUSTOM",
 		deriveLogicalCodeFromCommandCode("ADMIN_CUSTOM", "LST"))
 }

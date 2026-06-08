@@ -195,7 +195,7 @@ SELECT
     COALESCE(g.path::text, '') AS path_text, g.display_order,
     COALESCE(g.chapter_code, '') AS chapter_code,
     g.source, g.catalog_protected,
-    c.id, c.command_code, c.logical_code, c.logical_name_i18n,
+    c.id, c.command_code, c.logical_name_i18n,
     c.operation_type, c.rpc_method,
     COALESCE(c.require_confirm, false) AS require_confirm,
     c.target_object,
@@ -216,7 +216,7 @@ LEFT JOIN mml_commands c ON c.group_id = g.id
 WHERE g.path IS NOT NULL
   AND (g.group_code LIKE 'chapter:%%' OR g.source = 'admin')
 %s
-ORDER BY g.path, g.display_order, c.operation_type, c.logical_code, c.command_code`
+ORDER BY g.path, g.display_order, c.operation_type, c.command_code`
 
 	var whereParts []string
 	var args []any
@@ -242,7 +242,7 @@ ORDER BY g.path, g.display_order, c.operation_type, c.logical_code, c.command_co
 			&row.GroupID, &row.GroupCode, &row.GroupNameZh, &row.GroupNameEn, &nameI18nBytes,
 			&row.GroupPath, &row.GroupDisplayOrder, &row.GroupChapterCode,
 			&row.GroupSource, &row.GroupCatalogProtected,
-			&row.CommandID, &row.CommandCode, &row.LogicalCode, &cmdLogicalNameI18nBytes,
+			&row.CommandID, &row.CommandCode, &cmdLogicalNameI18nBytes,
 			&row.OperationType, &row.RPCMethod, &row.RequireConfirm, &row.TargetObject,
 			&row.CommandSource, &row.CommandCatalogProtected,
 			&row.CommandInstanceRangeMeta,
@@ -252,6 +252,12 @@ ORDER BY g.path, g.display_order, c.operation_type, c.logical_code, c.command_co
 		}
 		row.GroupNameI18n = parseI18nJSON(nameI18nBytes)
 		row.CommandLogicalNameI18n = parseI18nJSON(cmdLogicalNameI18nBytes)
+		// logical_code 不再持久化为 DB 列（已 DROP）；从 command_code 派生填充。
+		// LEFT JOIN 出的父容器行 command 列全为 NULL → CommandCode 为 nil，跳过派生。
+		if row.CommandCode != nil {
+			derived := deriveLogicalCodeFromCommandCode(*row.CommandCode, strOrEmpty(row.OperationType))
+			row.LogicalCode = &derived
+		}
 		out = append(out, row)
 	}
 	if err := dbRows.Err(); err != nil {

@@ -348,20 +348,21 @@ func upsertDerivedCommands(
 		logicalNameJSON := jsonI18n(c.LogicalNameZh, c.LogicalNameEn)
 
 		var id string
+		// logical_code 列已 DROP（读时从 command_code 派生 "OP "前缀）；不再写入。
 		row := tx.QueryRow(ctx, `
 			INSERT INTO mml_commands (
 				id, command_name, command_code, category, description, rpc_method,
 				operation_type, target_paths, target_object,
 				group_id, command_name_i18n,
-				logical_code, logical_name_i18n,
+				logical_name_i18n,
 				source, catalog_protected,
 				help_doc
 			) VALUES (
 				gen_random_uuid(), $1, $2, $3, $4, $5,
 				$6, $7::jsonb, $8,
 				$9, $10::jsonb,
-				$11, $12::jsonb,
-				$13, true,
+				$11::jsonb,
+				$12, true,
 				''
 			)
 			ON CONFLICT (command_code) DO UPDATE
@@ -374,7 +375,6 @@ func upsertDerivedCommands(
 			    target_object     = EXCLUDED.target_object,
 			    group_id          = EXCLUDED.group_id,
 			    command_name_i18n = EXCLUDED.command_name_i18n,
-			    logical_code      = EXCLUDED.logical_code,
 			    logical_name_i18n = EXCLUDED.logical_name_i18n,
 			    source            = EXCLUDED.source,
 			    catalog_protected = true,
@@ -385,7 +385,7 @@ func upsertDerivedCommands(
 			c.NameZh, c.CommandCode, category, c.NameZh, c.RPCMethod,
 			c.OperationType, targetPathsJSON, targetObject,
 			groupID, nameJSON,
-			c.LogicalCode, logicalNameJSON,
+			logicalNameJSON,
 			SeedImportSource,
 		)
 		if err := row.Scan(&id); err != nil {

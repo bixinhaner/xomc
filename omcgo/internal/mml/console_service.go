@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -472,9 +473,10 @@ func (s *ConsoleService) ParseMML(ctx context.Context, req ParseRequest) (ParseR
 //   - 多命中 → ErrAmbiguousCommand（数据不一致信号）
 func (s *ConsoleService) LookupByLogicalCode(ctx context.Context, op, logicalCode string) (*MMLCommand, []MMLCommandSubField, error) {
 	// CommandRepository 没有 ListByLogicalCode；用 GetByCode 退化 — 但 GetByCode 用
-	// command_code（含 op 前缀）。这里需补：先尝试 GetByCode(op + "_" + logical_code)
-	// 作启发式（mmlstandardloader 命名约定）；将来加 ListByLogicalCode 时切过去。
-	candidate := op + "_" + logicalCode
+	// command_code（含 op 前缀，"<OP> <LOGICAL>" 空格分隔）。这里需补：先尝试
+	// GetByCode(op + " " + logical_code) 作启发式（与真实 command_code 一致）；
+	// 将来加 ListByLogicalCode 时切过去。
+	candidate := op + " " + logicalCode
 	cmd, err := s.commandRepo.GetByCode(ctx, candidate)
 	if err != nil {
 		// not found → 退化尝试 logical_code 直接做 command_code（admin 创建的命令可能这样）
@@ -508,12 +510,23 @@ func (s *ConsoleService) LookupByLogicalCode(ctx context.Context, op, logicalCod
 
 // deriveLogicalCodeFromCommandCode 从 command_code 派生 logical_code（去 op 前缀）。
 //
-//	"LST_DEVICE_INFO" → "DEVICE_INFO"
-//	"DEVICE_INFO" (无前缀) → "DEVICE_INFO"
+// command_code 格式为 "<OP> <LOGICAL>"（空格分隔），如 "LST DEVICE_INFO"；
+// logical_code 即去掉 "OP " 前缀后的部分。
+//
+//	deriveLogicalCodeFromCommandCode("LST DEVICE_INFO", "LST") → "DEVICE_INFO"
+//	deriveLogicalCodeFromCommandCode("FOO BAR", "")            → "BAR"（op 不匹配时退化取第二段）
+//	deriveLogicalCodeFromCommandCode("DEVICE_INFO", "LST")     → "DEVICE_INFO"（无空格时原样返回）
 func deriveLogicalCodeFromCommandCode(commandCode, op string) string {
-	prefix := op + "_"
-	if len(commandCode) > len(prefix) && commandCode[:len(prefix)] == prefix {
-		return commandCode[len(prefix):]
+	if op != "" {
+		prefix := op + " "
+		if len(commandCode) > len(prefix) && commandCode[:len(prefix)] == prefix {
+			return commandCode[len(prefix):]
+		}
 	}
+	// op 不匹配：退化用第一个空格切分取第二段
+	if parts := strings.SplitN(commandCode, " ", 2); len(parts) == 2 {
+		return parts[1]
+	}
+	// 无空格：原样返回 command_code
 	return commandCode
 }

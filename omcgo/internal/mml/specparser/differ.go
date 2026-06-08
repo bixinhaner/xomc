@@ -164,6 +164,23 @@ func groupCodeToLogicalCode(gc string) string {
 	return strings.Join(out, "_")
 }
 
+// deriveLogicalCodeFromCommandCode 从 command_code 派生 logical_code（去 op 前缀）。
+//
+// command_code 格式为 "<OP> <LOGICAL>"（空格分隔），如 "LST DEVICE_INFO"。
+// 与 internal/mml 包同名函数保持一致行为（DB 列 logical_code 已 DROP，读时派生）。
+func deriveLogicalCodeFromCommandCode(commandCode, op string) string {
+	if op != "" {
+		prefix := op + " "
+		if len(commandCode) > len(prefix) && commandCode[:len(prefix)] == prefix {
+			return commandCode[len(prefix):]
+		}
+	}
+	if parts := strings.SplitN(commandCode, " ", 2); len(parts) == 2 {
+		return parts[1]
+	}
+	return commandCode
+}
+
 // camelToSnakeUpper 把 "X2IpAddrMapInfo" → "X2_IP_ADDR_MAP_INFO"。
 //   - 连续大写视为一个词（"IP" / "X2"），但跟着的小写字母拆出（"IpAddr" → "Ip_Addr"）
 //   - 数字粘附前一个字母（"X2" 保留）
@@ -265,8 +282,9 @@ func LoadDBSnapshot(ctx context.Context, pool *pgxpool.Pool, version string) (*D
 	rows.Close()
 
 	// 2. mml_commands (source='standard' for this version chapter scope)
+	// logical_code 不再持久化为 DB 列（已 DROP）；读后从 command_code 派生填充。
 	rows, err = pool.Query(ctx, `
-		SELECT command_code, COALESCE(operation_type,''), COALESCE(logical_code,''),
+		SELECT command_code, COALESCE(operation_type,''),
 		       COALESCE(target_paths::text,'[]'), source
 		  FROM mml_commands
 		 WHERE source = 'standard'`)
@@ -276,10 +294,11 @@ func LoadDBSnapshot(ctx context.Context, pool *pgxpool.Pool, version string) (*D
 	for rows.Next() {
 		var r MMLCommandRow
 		var targetPathsJSON string
-		if err := rows.Scan(&r.CommandCode, &r.OperationType, &r.LogicalCode, &targetPathsJSON, &r.Source); err != nil {
+		if err := rows.Scan(&r.CommandCode, &r.OperationType, &targetPathsJSON, &r.Source); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("scan mml_commands: %w", err)
 		}
+		r.LogicalCode = deriveLogicalCodeFromCommandCode(r.CommandCode, r.OperationType)
 		if targetPathsJSON != "" && targetPathsJSON != "null" {
 			_ = json.Unmarshal([]byte(targetPathsJSON), &r.TargetPaths)
 		}

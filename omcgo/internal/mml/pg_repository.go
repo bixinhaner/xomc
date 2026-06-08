@@ -304,6 +304,9 @@ func scanCommandFields(scan func(...any) error) (*MMLCommand, error) {
 	c.GroupID = groupID
 	c.CommandNameI18n = unmarshalStringMap(nameI18nJSON)
 	c.ConfirmMsgI18n = unmarshalStringMap(confirmMsgI18nJSON)
+	// LogicalCode 不再持久化为 DB 列（已 DROP）；读时从 command_code 派生填充，
+	// 保证 DTO / renderer / executor 拿到的 cmd.LogicalCode 始终有值。
+	c.LogicalCode = deriveLogicalCodeFromCommandCode(c.CommandCode, c.OperationType)
 	return &c, nil
 }
 

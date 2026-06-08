@@ -792,20 +792,21 @@ func (r *PgAdminCommandRepository) Create(ctx context.Context, c *MMLCommand) er
 	if err != nil {
 		return fmt.Errorf("marshal target_paths: %w", err)
 	}
+	// logical_code 不再持久化为 DB 列（已 DROP）；读时从 command_code 派生。
 	const sqlText = `
 INSERT INTO mml_commands (
     id, command_name, command_code, category, description, rpc_method,
     operation_type, help_doc, notes,
     target_paths, target_object, group_id,
     command_name_i18n, require_confirm, confirm_msg_i18n,
-    logical_code, logical_name_i18n, source, catalog_protected
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`
+    logical_name_i18n, source, catalog_protected
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`
 	if _, err := r.pool.Exec(ctx, sqlText,
 		c.ID, c.CommandName, c.CommandCode, c.Category, c.Description, c.RPCMethod,
 		c.OperationType, c.HelpDoc, c.Notes,
 		targetPaths, nullIfEmpty(c.TargetObject), c.GroupID,
 		commandNameI18n, c.RequireConfirm, confirmMsgI18n,
-		nullIfEmpty(c.LogicalCode), logicalNameI18n, c.Source, c.CatalogProtected,
+		logicalNameI18n, c.Source, c.CatalogProtected,
 	); err != nil {
 		return fmt.Errorf("insert command: %w", err)
 	}
@@ -837,14 +838,13 @@ UPDATE mml_commands SET
     command_name_i18n = $9,
     require_confirm   = $10,
     confirm_msg_i18n  = $11,
-    logical_code      = $12,
-    logical_name_i18n = $13
+    logical_name_i18n = $12
 WHERE id = $1`
 	tag, err := r.pool.Exec(ctx, sqlText,
 		c.ID, c.CommandName, c.Category, c.Description, c.HelpDoc, c.Notes,
 		nullIfEmpty(c.TargetObject), c.GroupID,
 		commandNameI18n, c.RequireConfirm, confirmMsgI18n,
-		nullIfEmpty(c.LogicalCode), logicalNameI18n,
+		logicalNameI18n,
 	)
 	if err != nil {
 		return fmt.Errorf("update command: %w", err)

@@ -91,7 +91,6 @@ WITH name_hits AS (
       AND c.source = 'standard'
       AND (
             c.command_code ILIKE $1
-         OR COALESCE(c.logical_code, '') ILIKE $1
          OR COALESCE(c.command_name_i18n->>'zh-CN', c.command_name_i18n->>'zh', '') ILIKE $1
          OR COALESCE(c.command_name_i18n->>'en-US', c.command_name_i18n->>'en', '') ILIKE $1
          OR COALESCE(c.logical_name_i18n->>'zh-CN', c.logical_name_i18n->>'zh', '') ILIKE $1
@@ -117,7 +116,6 @@ matched_ids AS (
 SELECT
     c.id,
     c.command_code,
-    COALESCE(c.logical_code, '')                AS logical_code,
     c.operation_type,
     COALESCE(c.command_name_i18n, '{}'::jsonb)  AS command_name_i18n,
     COALESCE(c.logical_name_i18n, '{}'::jsonb)  AS logical_name_i18n,
@@ -162,7 +160,6 @@ LIMIT $2`
 		if err := rows.Scan(
 			&row.CommandID,
 			&row.CommandCode,
-			&row.LogicalCode,
 			&row.OperationType,
 			&cmdNameI18nBytes,
 			&logNameI18nBytes,
@@ -177,6 +174,8 @@ LIMIT $2`
 		); err != nil {
 			return nil, fmt.Errorf("scan search row: %w", err)
 		}
+		// logical_code 不再持久化为 DB 列（已 DROP）；从 command_code 派生填充。
+		row.LogicalCode = deriveLogicalCodeFromCommandCode(row.CommandCode, row.OperationType)
 		row.LabelI18n = parseI18nMap(cmdNameI18nBytes)
 		row.LogicalI18n = parseI18nMap(logNameI18nBytes)
 		row.GroupNameI18n = parseI18nMap(grpNameI18nBytes)

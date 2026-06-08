@@ -225,13 +225,13 @@ INSERT INTO mml_commands
     (id, command_name, command_code, category, description, rpc_method,
      operation_type, target_paths, group_id,
      command_name_i18n, require_confirm, confirm_msg_i18n,
-     logical_code, logical_name_i18n, source, catalog_protected)
+     logical_name_i18n, source, catalog_protected)
 VALUES
     ($1, $2, $3, 'test', '', 'GetParameterValues',
      'LST', '[]'::jsonb, $4,
      '{}'::jsonb, false, '{}'::jsonb,
-     $5, '{}'::jsonb, 'admin', false)`,
-		id, logicalCode, logicalCode+"_CC_"+fx.suffix, fx.groupID, logicalCode)
+     '{}'::jsonb, 'admin', false)`,
+		id, logicalCode, logicalCode+"_CC_"+fx.suffix, fx.groupID)
 	require.NoError(fx.t, err)
 	fx.cmdIDs = append(fx.cmdIDs, id)
 	return id
