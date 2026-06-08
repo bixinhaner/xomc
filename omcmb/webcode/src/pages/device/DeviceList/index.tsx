@@ -986,6 +986,8 @@ export default function DeviceList() {
           return <Tag color={colorMap[record.networkType] ?? 'default'}>{record.networkType || '-'}</Tag>;
         },
       },
+      // 产品名称（= device.model_name，inform 命中产品后回填 product.Name）显示在产品类型前面。
+      { key: 'deviceModel', title: t('device.productName'), dataIndex: 'deviceModel', width: 120, ellipsis: true, group: 'common' },
       {
         key: 'productClass',
         title: t('device.productClass'),
@@ -1005,7 +1007,6 @@ export default function DeviceList() {
         // 原始 JSP: platformType 字段 — 影响多小区/CA/DC 行为
         render: (_val, record) => record.platformType || '-',
       },
-      { key: 'deviceModel', title: t('device.model'), dataIndex: 'deviceModel', width: 120, ellipsis: true, group: 'common' },
       { key: 'softwareVersion', title: t('device.softwareVersion'), dataIndex: 'softwareVersion', width: 140, ellipsis: true, group: 'common' },
       {
         key: 'ipAddress',
@@ -1133,7 +1134,6 @@ export default function DeviceList() {
           });
         },
       },
-      { key: 'productName', title: t('device.productName'), dataIndex: 'productName', width: 130, hidden: true, group: 'common' },
       { key: 'firmwareVersion', title: t('device.firmwareVersion'), dataIndex: 'firmwareVersion', width: 140, hidden: true, ellipsis: true, group: 'common' },
       {
         key: 'onlineDuration',
