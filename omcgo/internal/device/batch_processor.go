@@ -419,6 +419,8 @@ func (p *BatchInformProcessor) batchUpdateDevices(ctx context.Context, updates [
 		// （cache stale → 这里 UPDATE 仍命中已删行，silent data corruption）
 		// Phase 6 follow-up：加 model_name 列让 Submit 中 applyProductMetadataInline 写入
 		// 的 device.ModelName 真正持久化。SET model_name 不写空字符串覆盖既有非空值。
+		// product_id / param_model_id：按 productClass 命中时回写（随 product_class 变更
+		// 实时重算所属产品）；未命中（$15/$16 为 NULL）则保留既有值，不误清管理员手动绑定 / 孤儿态。
 		query := `UPDATE devices SET
 			oui = $1, product_class = $2, manufacturer = $3,
 			lifecycle_state = $4, is_online = $5, firmware_version = $6,
@@ -426,6 +428,8 @@ func (p *BatchInformProcessor) batchUpdateDevices(ctx context.Context, updates [
 			nat_detected = $9, udp_connection_request_address = $10,
 			last_inform_at = $11, last_inform_events = $12,
 			model_name = CASE WHEN $13::text <> '' THEN $13 ELSE model_name END,
+			product_id = CASE WHEN $15::uuid IS NOT NULL THEN $15 ELSE product_id END,
+			param_model_id = CASE WHEN $15::uuid IS NOT NULL THEN $16 ELSE param_model_id END,
 			updated_at = NOW()
 		WHERE id = $14 AND deleted_at IS NULL`
 
@@ -437,6 +441,7 @@ func (p *BatchInformProcessor) batchUpdateDevices(ctx context.Context, updates [
 			dev.LastInformAt, eventsData,
 			dev.ModelName,
 			dev.ID,
+			dev.ProductID, dev.ParamModelID,
 		)
 	}
 
@@ -701,6 +706,11 @@ func applyProductMetadataInline(ctx context.Context, matcher ProductClassMatcher
 	if matchRes == nil || matchRes.Product == nil {
 		return
 	}
+	// 设备所属产品随 productClass 实时重算：命中后回填 product_id + param_model_id，
+	// 由 flush UPDATE 持久化（新增设备 / product_class 变更都会重新匹配）。
+	pid := matchRes.Product.ID
+	device.ProductID = &pid
+	device.ParamModelID = matchRes.Product.ParamModelID
 	if device.ModelName == "" && matchRes.Product.Name != "" {
 		device.ModelName = matchRes.Product.Name
 	}

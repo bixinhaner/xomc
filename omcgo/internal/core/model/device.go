@@ -25,6 +25,11 @@ type Device struct {
 	Carrier      CarrierCode `json:"carrier" db:"carrier"`
 	Technology   Technology  `json:"technology" db:"technology"`
 	// T-0098 P5-02：DataModelID 字段已删除（devices.data_model_id 列 DROP，路由改由 productClass + ProductRegistry）。
+	// ProductID / ParamModelID：productClass → product 装配件路由结果。Inform 路径
+	// applyProductMetadata 按 productClass 命中后回填，让设备所属产品随 product_class 变更实时重算。
+	// nil = 未命中（孤儿）/ 未在本路径计算，持久化时不覆盖既有值。
+	ProductID    *uuid.UUID `json:"product_id,omitempty" db:"product_id"`
+	ParamModelID *uuid.UUID `json:"param_model_id,omitempty" db:"param_model_id"`
 
 	// T-0162 新字段：业务生命周期（lifecycle_state 列）+ 实时在线（is_online 列）
 	LifecycleState DeviceLifecycle `json:"lifecycle_state" db:"lifecycle_state"`
@@ -55,10 +60,10 @@ type Device struct {
 	LastParamSyncError    *string    `json:"last_param_sync_error,omitempty" db:"last_param_sync_error"`
 	// T-0173: 最近一次离线原因（heartbeat_timeout / manual / reboot / NULL）。
 	// 由 DeviceStatusReconciler 或管理面操作写入；从未离线为 nil。诊断字段。
-	LastOfflineReason *string `json:"last_offline_reason,omitempty" db:"last_offline_reason"`
-	LastBootAt            *time.Time `json:"last_boot_at,omitempty" db:"last_boot_at"`
-	BootCount       int        `json:"boot_count" db:"boot_count"`
-	InformInterval  int        `json:"inform_interval" db:"inform_interval"`
+	LastOfflineReason *string    `json:"last_offline_reason,omitempty" db:"last_offline_reason"`
+	LastBootAt        *time.Time `json:"last_boot_at,omitempty" db:"last_boot_at"`
+	BootCount         int        `json:"boot_count" db:"boot_count"`
+	InformInterval    int        `json:"inform_interval" db:"inform_interval"`
 	// DeviceName 设备名称。DB 物理列名仍为 site_name（历史原因，未做物理迁移），
 	// 故 db tag 与字段名/JSON 不一致——这是有意为之，业务/API 层统一用 device_name。
 	DeviceName    string                 `json:"device_name" db:"site_name"`
