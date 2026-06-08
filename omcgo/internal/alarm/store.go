@@ -14,6 +14,7 @@ type AlarmFilter struct {
 	DeviceSN  *string
 	Carrier   *model.CarrierCode
 	Severity  *model.AlarmSeverity
+	Severities []model.AlarmSeverity
 	Status    *model.AlarmStatus
 	StartTime *time.Time
 	EndTime   *time.Time

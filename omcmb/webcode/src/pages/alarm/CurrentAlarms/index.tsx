@@ -186,7 +186,7 @@ export default function CurrentAlarms() {
         { label: t('alarm.dealState.confirmedUncleared'), value: '1' },
       ],
     },
-    { name: 'timeRange', label: t('alarm.eventTime'), type: 'date-range' },
+    { name: 'timeRange', label: t('alarm.eventTime'), type: 'date-range', showTime: true },
     {
       name: 'unread',
       label: t('alarm.readStatus'),

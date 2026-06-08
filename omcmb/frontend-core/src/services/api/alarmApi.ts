@@ -383,8 +383,12 @@ function buildAlarmQuery(
   };
 
   if (filter.severity) {
-    const sev = Array.isArray(filter.severity) ? filter.severity[0] : filter.severity;
-    if (sev) query.severity = severityStrToNum[sev];
+    const severities = (Array.isArray(filter.severity) ? filter.severity : [filter.severity])
+      .map((severity) => severityStrToNum[severity])
+      .filter((severity): severity is string => Boolean(severity));
+    if (severities.length > 0) {
+      query.severity = severities.join(',');
+    }
   }
   if (filter.eventType) {
     const eventType = Array.isArray(filter.eventType) ? filter.eventType[0] : filter.eventType;

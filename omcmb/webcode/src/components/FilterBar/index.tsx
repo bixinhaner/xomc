@@ -21,6 +21,7 @@ export interface FilterField {
   label: string;
   type: 'input' | 'select' | 'date-range' | 'tree-select' | 'multi-select' | 'number';
   placeholder?: string;
+  showTime?: boolean;
   options?: { label: string; value: string | number }[];
   treeData?: { title: string; value: string; children?: unknown[] }[];
   span?: number;
@@ -235,6 +236,8 @@ const FilterBar: React.FC<FilterBarProps> = ({
         return (
           <RangePicker
             style={{ width: '100%' }}
+            showTime={field.showTime}
+            format={field.showTime ? 'YYYY-MM-DD HH:mm:ss' : undefined}
             placeholder={[t('dateRange.start'), t('dateRange.end')]}
           />
         );

@@ -93,6 +93,22 @@ func TestHandler_ListActive_WithSeverityFilter(t *testing.T) {
 	// The mock store does not filter by severity; it returns all active alarms.
 	// We only verify the handler parsed the query without error (200 OK).
 	assert.Equal(t, http.StatusOK, w.Code)
+	if assert.NotNil(t, store.lastActiveFilter.Severity) {
+		assert.Equal(t, model.AlarmCritical, *store.lastActiveFilter.Severity)
+	}
+	assert.Empty(t, store.lastActiveFilter.Severities)
+}
+
+func TestHandler_ListActive_WithMultipleSeverityFilter(t *testing.T) {
+	_, store, _, router := setupHandlerTest()
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/alarms/active?severity=1,3,1,9", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Nil(t, store.lastActiveFilter.Severity)
+	assert.Equal(t, []model.AlarmSeverity{model.AlarmCritical, model.AlarmMinor}, store.lastActiveFilter.Severities)
 }
 
 func TestHandler_ListActive_InvalidDeviceID(t *testing.T) {
@@ -463,4 +479,13 @@ func TestParseSeverity(t *testing.T) {
 			assert.Equal(t, tc.expected, parseSeverity(tc.input))
 		})
 	}
+}
+
+func TestParseSeverities(t *testing.T) {
+	assert.Equal(
+		t,
+		[]model.AlarmSeverity{model.AlarmCritical, model.AlarmMinor, model.AlarmWarning},
+		parseSeverities("1, 3,4,3,bad"),
+	)
+	assert.Empty(t, parseSeverities("bad"))
 }

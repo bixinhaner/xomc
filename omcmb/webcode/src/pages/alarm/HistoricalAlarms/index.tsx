@@ -151,7 +151,7 @@ export default function HistoricalAlarms() {
         { label: t('alarm.dealState.confirmedCleared'), value: '3' },
       ],
     },
-    { name: 'timeRange', label: t('alarm.eventTime'), type: 'date-range' },
+    { name: 'timeRange', label: t('alarm.eventTime'), type: 'date-range', showTime: true },
   ], [t]);
 
   const queryParams = useMemo(

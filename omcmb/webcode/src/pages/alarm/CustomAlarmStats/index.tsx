@@ -291,7 +291,7 @@ export default function CustomAlarmStats() {
 
   const FILTER_FIELDS: FilterField[] = useMemo(() => [
     { name: 'keyword', label: t('alarm.search'), type: 'input', placeholder: t('alarm.searchPlaceholderNew') },
-    { name: 'timeRange', label: t('alarm.eventTime'), type: 'date-range' },
+    { name: 'timeRange', label: t('alarm.eventTime'), type: 'date-range', showTime: true },
     {
       name: 'eventType',
       label: t('alarm.eventType'),

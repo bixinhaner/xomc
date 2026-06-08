@@ -370,7 +370,9 @@ func applyActiveFilters(qb squirrel.SelectBuilder, f AlarmFilter) squirrel.Selec
 	if f.Carrier != nil {
 		qb = qb.Where(squirrel.Eq{"alarms_active.carrier": *f.Carrier})
 	}
-	if f.Severity != nil {
+	if len(f.Severities) > 0 {
+		qb = qb.Where(squirrel.Eq{"alarms_active.severity": f.Severities})
+	} else if f.Severity != nil {
 		qb = qb.Where(squirrel.Eq{"alarms_active.severity": *f.Severity})
 	}
 	if f.Status != nil {
@@ -431,7 +433,9 @@ func applyHistoryFilters(qb squirrel.SelectBuilder, f AlarmFilter) squirrel.Sele
 	if f.Carrier != nil {
 		qb = qb.Where(squirrel.Eq{"alarms_history.carrier": *f.Carrier})
 	}
-	if f.Severity != nil {
+	if len(f.Severities) > 0 {
+		qb = qb.Where(squirrel.Eq{"alarms_history.severity": f.Severities})
+	} else if f.Severity != nil {
 		qb = qb.Where(squirrel.Eq{"alarms_history.severity": *f.Severity})
 	}
 	if f.StartTime != nil {

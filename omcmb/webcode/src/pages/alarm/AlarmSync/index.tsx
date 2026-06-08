@@ -114,7 +114,7 @@ export default function AlarmSync() {
         { label: t('status.cancelled'), value: 'cancelled' },
       ],
     },
-    { name: 'timeRange', label: t('table.time'), type: 'date-range' },
+    { name: 'timeRange', label: t('table.time'), type: 'date-range', showTime: true },
   ], [t]);
 
   const filteredTasks = useMemo(() => {

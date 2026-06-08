@@ -2,6 +2,7 @@ package alarm
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -91,9 +92,12 @@ func (h *Handler) ListActive(c *gin.Context) {
 		filter.Carrier = &cc
 	}
 	if q.Severity != "" {
-		sev := parseSeverity(q.Severity)
-		if sev != 0 {
-			filter.Severity = &sev
+		severities := parseSeverities(q.Severity)
+		switch len(severities) {
+		case 1:
+			filter.Severity = &severities[0]
+		case 2, 3, 4:
+			filter.Severities = severities
 		}
 	}
 	if q.Status != "" {
@@ -166,9 +170,12 @@ func (h *Handler) ListHistory(c *gin.Context) {
 		filter.Carrier = &cc
 	}
 	if q.Severity != "" {
-		sev := parseSeverity(q.Severity)
-		if sev != 0 {
-			filter.Severity = &sev
+		severities := parseSeverities(q.Severity)
+		switch len(severities) {
+		case 1:
+			filter.Severity = &severities[0]
+		case 2, 3, 4:
+			filter.Severities = severities
 		}
 	}
 	if q.StartTime != "" {
@@ -418,6 +425,24 @@ func parseSeverity(s string) model.AlarmSeverity {
 	default:
 		return 0
 	}
+}
+
+func parseSeverities(raw string) []model.AlarmSeverity {
+	parts := strings.Split(raw, ",")
+	severities := make([]model.AlarmSeverity, 0, len(parts))
+	seen := make(map[model.AlarmSeverity]struct{}, len(parts))
+	for _, part := range parts {
+		severity := parseSeverity(strings.TrimSpace(part))
+		if severity == 0 {
+			continue
+		}
+		if _, exists := seen[severity]; exists {
+			continue
+		}
+		seen[severity] = struct{}{}
+		severities = append(severities, severity)
+	}
+	return severities
 }
 
 // TriggerSync handles POST /alarms/sync/:device_sn.
