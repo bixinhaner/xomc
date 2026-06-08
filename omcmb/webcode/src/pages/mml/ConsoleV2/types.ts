@@ -170,9 +170,14 @@ export interface ExecMeta {
   commandName?: string;
 }
 
+/** 命令记录的执行态：running=已下发执行中(点击执行即插入)，done=已收口(结果就位)。 */
+export type ExecRecordStatus = 'running' | 'done';
+
 /** 一次执行命令记录(含结果快照,供「命令记录」列表点击回看)。 */
 export interface ExecRecord {
   id: string;
+  /** 记录级执行态：点击执行先以 running 插入，完成后原地更新为 done。 */
+  status: ExecRecordStatus;
   /** 命令 ID（= mml_tasks.id，每次批量执行全局唯一；mock 用 crypto.randomUUID 模拟） */
   commandId: string;
   /** 执行时间 HH:mm:ss */

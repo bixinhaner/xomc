@@ -39,9 +39,13 @@ const TERMINAL_TASK_STATUS = new Set(['completed', 'failed', 'expired', 'cancell
 
 let recordSeq = 1;
 
-/** 进行中的一次执行（SSE 帧实时回填 rows，完成后落入命令记录）。 */
+/** 进行中的一次执行（SSE 帧实时回填 rows，完成后原地更新对应命令记录）。 */
 interface LiveExec {
   taskId: string;
+  /** 点击执行时即插入的命令记录 id，完成收口按它原地更新（非新增）。 */
+  recordId: string;
+  /** 下发时间 HH:mm:ss，作为命令记录的展示时间（收口时沿用，不被完成时间覆盖）。 */
+  startTime: string;
   meta: ExecMeta;
   columns: ResultColumn[];
   rows: ResultRow[];
@@ -101,10 +105,13 @@ export default function MMLConsoleV2() {
     if (!rows) return;
     if (finalizedRef.current.has(taskId)) return;
     finalizedRef.current.add(taskId);
+    // 原地更新点击执行时插入的「执行中」记录（同 recordId/commandId → append upsert）：
+    // 沿用下发时间、补齐结果行、记录态置 done。
     append({
-      id: `rec-${recordSeq++}`,
+      id: le.recordId,
+      status: 'done',
       commandId: le.taskId,
-      time: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
+      time: le.startTime,
       commandName: le.meta.commandName ?? `裸路径 ${opLabel(le.meta.operationType)}`,
       operationType: le.meta.operationType,
       deviceCount: le.deviceCount,
@@ -290,14 +297,25 @@ export default function MMLConsoleV2() {
       return;
     }
 
-    // 下发成功：建进行中记录，等 SSE 帧回填。
-    setLiveExec({
-      taskId,
-      meta,
-      columns,
-      rows: initialPendingRows(targetSns),
+    // 下发成功：立即插入一条「执行中」命令记录（点击执行即可见，不必等收口），
+    // SSE 帧实时回填右侧结果；完成后 finalizeFromResults 按同一 recordId/commandId
+    // 原地更新为「已完成」（append 按 commandId upsert，不会重复）。
+    const recordId = `rec-${recordSeq++}`;
+    const startTime = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+    const pendingRows = initialPendingRows(targetSns);
+    append({
+      id: recordId,
+      status: 'running',
+      commandId: taskId,
+      time: startTime,
+      commandName: meta.commandName ?? `裸路径 ${opLabel(meta.operationType)}`,
+      operationType: meta.operationType,
       deviceCount,
+      execMeta: meta,
+      columns,
+      rows: pendingRows,
     });
+    setLiveExec({ taskId, recordId, startTime, meta, columns, rows: pendingRows, deviceCount });
     message.success(`已下发执行（任务 ${taskId}）`);
   };
 

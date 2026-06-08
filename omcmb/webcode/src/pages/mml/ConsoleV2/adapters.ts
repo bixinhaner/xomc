@@ -444,6 +444,8 @@ export function mapTaskToRecord(task: MMLTask): ExecRecord {
   const rows = buildDeviceRows(items, columns, read);
   return {
     id: task.id,
+    // 跨刷新从后端重建的都是已落库的历史任务，记录态视为已完成。
+    status: 'done',
     commandId: task.id,
     time: toClock(task.finishedAt ?? task.createdAt) ?? '',
     commandName,

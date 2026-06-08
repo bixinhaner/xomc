@@ -1,5 +1,11 @@
 import { Button, Card, Empty, Popconfirm, Space, Tag, Tooltip, Typography } from 'antd';
-import { DeleteOutlined, HistoryOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons';
+import {
+  DeleteOutlined,
+  HistoryOutlined,
+  LeftOutlined,
+  RightOutlined,
+  SyncOutlined,
+} from '@ant-design/icons';
 import type { ExecRecord } from '../types';
 import { opColor } from '../constants';
 
@@ -123,6 +129,11 @@ export default function CommandHistoryPanel({
                   </Text>
                 </Space>
                 <div style={{ marginTop: 4 }}>
+                  {r.status === 'running' && (
+                    <Tag color="processing" icon={<SyncOutlined spin />} style={{ marginInlineEnd: 6 }}>
+                      执行中
+                    </Tag>
+                  )}
                   <Tag color={opColor(r.operationType)} style={{ marginInlineEnd: 6 }}>
                     {r.operationType}
                   </Tag>
