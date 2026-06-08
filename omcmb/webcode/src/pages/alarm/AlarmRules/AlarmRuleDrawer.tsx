@@ -11,6 +11,7 @@ import {
   Space,
   Table,
   Tag,
+  Tooltip,
   message,
 } from 'antd';
 import type { TableProps } from 'antd';
@@ -56,6 +57,8 @@ const DEVICE_TYPE_OPTIONS = [
   { label: 'gNB', value: 'gNB' },
   { label: 'GSM', value: 'GSM' },
 ];
+
+const MAX_VISIBLE_SELECTED_ALARMS = 5;
 
 interface AlarmRuleDrawerProps {
   open: boolean;
@@ -432,6 +435,16 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
       .map((alarmIdentifier) => alarmMap.get(alarmIdentifier))
       .filter(isAlarmLibraryItem);
   }, [alarmLibrary, selectedAlarms]);
+
+  const visibleSelectedAlarmItems = useMemo(
+    () => selectedAlarmItems.slice(0, MAX_VISIBLE_SELECTED_ALARMS),
+    [selectedAlarmItems]
+  );
+
+  const hiddenSelectedAlarmItems = useMemo(
+    () => selectedAlarmItems.slice(MAX_VISIBLE_SELECTED_ALARMS),
+    [selectedAlarmItems]
+  );
 
   const handleSubmit = useCallback(async () => {
     // 验证告警必填
@@ -826,7 +839,7 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
                   已选告警标识
                 </div>
                 <Space wrap size={[4, 8]}>
-                  {selectedAlarmItems.map((alarm) => (
+                  {visibleSelectedAlarmItems.map((alarm) => (
                     <Tag
                       key={alarm.alarmIdentifier}
                       closable={!isViewMode}
@@ -838,6 +851,11 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
                       {alarm.alarmIdentifier}
                     </Tag>
                   ))}
+                  {hiddenSelectedAlarmItems.length > 0 && (
+                    <Tooltip title={hiddenSelectedAlarmItems.map((alarm) => alarm.alarmIdentifier).join(', ')}>
+                      <Tag style={{ marginInlineEnd: 0 }}>{`+${hiddenSelectedAlarmItems.length}...`}</Tag>
+                    </Tooltip>
+                  )}
                 </Space>
               </div>
             )}
