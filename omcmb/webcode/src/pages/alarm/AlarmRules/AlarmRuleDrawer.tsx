@@ -224,6 +224,8 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
   const t = useT();
   const [form] = Form.useForm<AlarmRuleFormData>();
   const [loading, setLoading] = useState(false);
+  const [alarmTablePage, setAlarmTablePage] = useState(1);
+  const [alarmTablePageSize, setAlarmTablePageSize] = useState(5);
   const [deviceSelectionMode, setDeviceSelectionMode] = useState<'devices' | 'groups'>('devices');
   const [selectedDevices, setSelectedDevices] = useState<string[]>([]);
   const [selectedGroups, setSelectedGroups] = useState<string[]>([]);
@@ -387,10 +389,16 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
       setSelectedAlarms([]);
       setTimeRange(null);
     }
+    setAlarmTablePage(1);
+    setAlarmTablePageSize(5);
     setAlarmError(null);
     setAlarmFilter({ keyword: '', eventType: undefined, severity: undefined });
     setDeviceFilter({ deviceTypes: [], snKeyword: '' });
   }, [open, rule, form]);
+
+  useEffect(() => {
+    setAlarmTablePage(1);
+  }, [alarmFilter]);
 
   const alarmLibrary = useMemo<AlarmLibraryItem[]>(
     () => (alarmDefinitionData?.items || []).map(mapAlarmDefinitionToLibraryItem),
@@ -840,7 +848,21 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
               rowKey="alarmIdentifier"
               loading={alarmDefinitionLoading}
               size="small"
-              pagination={{ pageSize: 5, size: 'small' }}
+              pagination={{
+                current: alarmTablePage,
+                pageSize: alarmTablePageSize,
+                size: 'small',
+                showSizeChanger: true,
+                pageSizeOptions: ['5', '10', '20', '50', '100'],
+                onChange: (page, size) => {
+                  setAlarmTablePage(page);
+                  setAlarmTablePageSize(size);
+                },
+                onShowSizeChange: (page, size) => {
+                  setAlarmTablePage(page);
+                  setAlarmTablePageSize(size);
+                },
+              }}
               scroll={{ y: 180 }}
             />
             {selectedAlarms.length > 0 && (
