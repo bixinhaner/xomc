@@ -21,6 +21,7 @@
  *   - 后端上传端点内部自动 destructive 重载(删孤儿)+ 刷新缓存,前端无需单独调。
  */
 import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Card, Button, Space, message, Upload, Modal, Form, Typography } from 'antd';
 import type { UploadFile } from 'antd';
 import { InboxOutlined, UploadOutlined } from '@ant-design/icons';
@@ -37,7 +38,18 @@ import { useT } from '@/hooks/useT';
 
 export default function ParamModelPage() {
   const t = useT();
-  const [selectedModelName, setSelectedModelName] = useState<string | undefined>();
+  // drill-down 状态走 URL query(?name=<模型名>),刷新/分享链接保留二级页(参照 kpi-library)。
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selectedModelName = searchParams.get('name') || undefined;
+  const selectModel = (name?: string) => {
+    const params = new URLSearchParams(searchParams);
+    if (name) {
+      params.set('name', name);
+    } else {
+      params.delete('name');
+    }
+    setSearchParams(params, { replace: false });
+  };
   const [keyword, setKeyword] = useState('');
   const uploadMut = useUploadParamModelXML();
   // 上传前查重数据源:已存在的参数模型清单(按 name / loadedFrom basename 比对)。
@@ -160,12 +172,12 @@ export default function ParamModelPage() {
       {inDetail ? (
         <MappingsTab
           selectedName={selectedModelName}
-          onBack={() => setSelectedModelName(undefined)}
+          onBack={() => selectModel(undefined)}
         />
       ) : (
         <ModelsTab
           selectedName={selectedModelName}
-          onSelect={setSelectedModelName}
+          onSelect={selectModel}
           keyword={keyword}
         />
       )}

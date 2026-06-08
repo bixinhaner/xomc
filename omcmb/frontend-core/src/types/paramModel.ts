@@ -35,6 +35,9 @@ export interface ParamMapping {
   isStorable: boolean;
   isActive: boolean;
   softwareVersion?: string;
+  // T-PMSRC: 行级来源。'builtin'=XML 加载(不可删,重载重建);'custom'=管理员经 UI 新增/编辑后的覆盖项(可删,重载保留)。
+  source?: ParamModelSource;
+  deletable?: boolean;
 }
 
 export interface StandardParam {

@@ -11,6 +11,7 @@ import {
   message,
   Popconfirm,
   Tooltip,
+  Tag,
   Empty,
 } from 'antd';
 import {
@@ -22,6 +23,7 @@ import {
 } from '@ant-design/icons';
 import {
   useParamMappings,
+  useStandardParams,
   useCreateMapping,
   useUpdateMapping,
   useDeleteMapping,
@@ -60,6 +62,26 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
   const createMut = useCreateMapping();
   const updateMut = useUpdateMapping();
   const deleteMut = useDeleteMapping();
+
+  // 标准 PATH 下拉数据源(与 product/standard-params 同一接口,全量 <500 条,客户端搜索)。
+  const { data: stdData } = useStandardParams();
+  const stdOptions = useMemo(
+    () => (stdData?.items ?? []).map((s) => ({ label: s.standardPath, value: s.standardPath })),
+    [stdData],
+  );
+  // 选中标准 PATH 时,用其元属性回填表单(entryType/access/dataType/changeApplies/min/max)。
+  const onPickStandard = (path: string) => {
+    const sp = (stdData?.items ?? []).find((s) => s.standardPath === path);
+    if (!sp) return;
+    form.setFieldsValue({
+      entryType: sp.entryType || 'parameter',
+      access: sp.access || 'readWrite',
+      dataType: sp.dataType || 'string',
+      changeApplies: sp.changeApplies || undefined,
+      minValue: sp.minValue,
+      maxValue: sp.maxValue,
+    });
+  };
 
   // 条目类型筛选(对齐 standard-params 页面):'' = 全部
   const [entryFilter, setEntryFilter] = useState('');
@@ -125,6 +147,17 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
     { title: t('product.paramModel.mappings.col.min'), dataIndex: 'minValue', width: 80 },
     { title: t('product.paramModel.mappings.col.max'), dataIndex: 'maxValue', width: 80 },
     {
+      title: t('product.paramModel.mappings.col.source'),
+      dataIndex: 'source',
+      width: 90,
+      render: (s: string) =>
+        s === 'custom' ? (
+          <Tag color="blue">{t('product.paramModel.mappings.source.custom')}</Tag>
+        ) : (
+          <Tag>{t('product.paramModel.mappings.source.builtin')}</Tag>
+        ),
+    },
+    {
       title: t('common.action'),
       width: 120,
       render: (_: unknown, row: ParamMapping) => (
@@ -137,18 +170,25 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
               form.setFieldsValue(row);
             }}
           />
-          <Popconfirm
-            title={t('product.paramModel.mappingDelTitle')}
-            onConfirm={() =>
-              selectedName &&
-              deleteMut
-                .mutateAsync({ name: selectedName, id: row.id })
-                .then(() => message.success(t('common.deleted')))
-                .catch((e) => message.error((e as Error).message))
-            }
-          >
-            <Button size="small" danger icon={<DeleteOutlined />} />
-          </Popconfirm>
+          {/* T-PMSRC：仅 source='custom' 可删;内置(来自 XML)置灰 + Tooltip。 */}
+          {row.deletable ? (
+            <Popconfirm
+              title={t('product.paramModel.mappingDelTitle')}
+              onConfirm={() =>
+                selectedName &&
+                deleteMut
+                  .mutateAsync({ name: selectedName, id: row.id })
+                  .then(() => message.success(t('common.deleted')))
+                  .catch((e) => message.error((e as Error).message))
+              }
+            >
+              <Button size="small" danger icon={<DeleteOutlined />} />
+            </Popconfirm>
+          ) : (
+            <Tooltip title={t('product.paramModel.mappings.builtinNotDeletable')}>
+              <Button size="small" danger icon={<DeleteOutlined />} disabled />
+            </Tooltip>
+          )}
         </Space>
       ),
     },
@@ -272,20 +312,35 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
         destroyOnHidden
       >
         <Form form={form} layout="vertical">
+          {/* 标准 PATH:可搜索下拉,选项来自 standard-params;选中回填元属性。
+              编辑态锁定(后端不允许改 standard_path)。 */}
           <Form.Item
             name="standardPath"
             label={t('product.paramModel.mappings.col.standardPath')}
             rules={[{ required: true, message: t('common.required') }]}
-            extra={t('product.paramModel.mappings.privatePathExtra')}
+            extra={
+              editing
+                ? t('product.paramModel.mappings.standardLockedHint')
+                : t('product.paramModel.mappings.privatePathExtra')
+            }
           >
-            <Input placeholder="Device.Cellular.AccessPoint.{i}.PLMN" />
+            <Select
+              showSearch
+              placeholder={t('product.paramModel.mappings.standardPickPh')}
+              options={stdOptions}
+              optionFilterProp="value"
+              disabled={Boolean(editing)}
+              onChange={(v: string) => onPickStandard(v)}
+            />
           </Form.Item>
+          {/* 私有 PATH:内置映射编辑时锁定(它是 custom 覆盖的锚点,只能改元属性)。 */}
           <Form.Item
             name="privatePath"
             label={t('product.paramModel.mappings.col.privatePath')}
             rules={[{ required: true, message: t('common.required') }]}
+            extra={editing?.source === 'builtin' ? t('product.paramModel.mappings.privateLockedHint') : undefined}
           >
-            <Input placeholder="X_VENDOR_AccessPoint.{i}.PLMNID" />
+            <Input placeholder="X_VENDOR_AccessPoint.{i}.PLMNID" disabled={editing?.source === 'builtin'} />
           </Form.Item>
           <Space style={{ width: '100%' }} size="middle" wrap>
             <Form.Item name="entryType" label={t('product.paramModel.mappings.col.entryType')} rules={[{ required: true }]}>

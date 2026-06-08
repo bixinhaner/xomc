@@ -2,6 +2,7 @@ import http from '../http';
 import { saveBlob } from '../../utils/saveBlob';
 import type {
   ParamModel,
+  ParamModelSource,
   ParamMapping,
   StandardParam,
   DiscoveredVersion,
@@ -47,6 +48,8 @@ interface BackendMapping {
   is_storable: boolean;
   is_active: boolean;
   software_version?: string;
+  source?: string; // T-PMSRC: 'builtin' | 'custom'
+  deletable?: boolean; // T-PMSRC: 仅 custom 可删
 }
 
 interface BackendStandardParam {
@@ -107,6 +110,8 @@ function mapMapping(b: BackendMapping): ParamMapping {
     isStorable: b.is_storable,
     isActive: b.is_active,
     softwareVersion: b.software_version,
+    source: (b.source as ParamModelSource) ?? 'builtin',
+    deletable: b.deletable ?? false,
   };
 }
 
