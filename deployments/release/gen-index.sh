@@ -208,12 +208,12 @@ sudo bash install-docker.sh -h                      # 查看所有参数</pre>
 <b>已装 docker 时</b>:跳过 dockerd 安装,但**仍补装** docker compose V2 + buildx plugin 到 <code>/usr/local/lib/docker/cli-plugins/</code>,解决系统 apt 装的 V1 Python compose 不识别 v3.x 写法问题。</p>
 
 <h3>3.2 卸载 Docker(install-docker.sh --uninstall)</h3>
-<p class="lead">支持彻底卸载:同时清掉 install-docker.sh 装的二进制 <b>和</b> 系统包管理器(apt/yum/dnf)装的 docker。默认 dry-run 安全,需 <code>--no-dry-run</code> 才真删。</p>
+<p class="lead">支持彻底卸载:同时清掉 install-docker.sh 装的二进制 <b>和</b> 系统包管理器(apt/yum/dnf)装的 docker。默认 dry-run 安全,需 <code>--force</code> 才真删。</p>
 <pre>sudo bash install-docker.sh --uninstall                              # dry-run:列要做的 9 步,不实际执行
-sudo bash install-docker.sh --uninstall --no-dry-run                 # 真删 + 删 /var/lib/docker(数据)
-sudo bash install-docker.sh --uninstall --no-dry-run --keep-data     # 真删 dockerd 但保留 /var/lib/docker</pre>
+sudo bash install-docker.sh --uninstall --force                 # 真删 + 删 /var/lib/docker(数据)
+sudo bash install-docker.sh --uninstall --force --keep-data     # 真删 dockerd 但保留 /var/lib/docker</pre>
 <p class="tip"><b>卸载 9 步</b>:① 停所有容器 → ② <code>systemctl disable</code> docker/containerd → ③ 删 install-docker.sh 写的 systemd unit → ④ <code>apt/yum/dnf remove</code> 系统装的 docker.io / docker-ce / docker-compose-plugin / buildx-plugin / containerd.io 等 → ⑤ 删 <code>/usr/local/bin/</code> 下 docker 二进制 → ⑥ 删 <code>/usr/local/lib/docker/cli-plugins/</code> → ⑦ (可选)删 data-root + containerd root 数据目录 → ⑧ 删 <code>/etc/docker/</code> → ⑨ 删 docker 用户组。<br>
-<b>不删 /opt/omc 业务数据</b>。要一并清:先跑 <code>sudo bash deploy.sh --uninstall --no-dry-run</code>,再跑本脚本。</p>
+<b>不删 /opt/omc 业务数据</b>。要一并清:先跑 <code>sudo bash deploy.sh --uninstall --force</code>,再跑本脚本。</p>
 
 <div class="danger">⚠️ 若 <code>docker.service</code> 启动报
 <code>failed to create NAT chain DOCKER: iptables not found</code>,

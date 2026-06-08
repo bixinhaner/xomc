@@ -22,7 +22,7 @@
 #   sudo bash deploy/deploy.sh --infra-dir /opt/omc/infra   # 自定义 infra 目录
 #   sudo bash deploy/deploy.sh --overwrite-etc          # 用新包模板覆盖 /opt/omc/etc
 #   sudo bash deploy/deploy.sh --uninstall              # 卸载 OMC(默认 dry-run,只列要做的)
-#   sudo bash deploy/deploy.sh --uninstall --no-dry-run --keep-data --keep-images
+#   sudo bash deploy/deploy.sh --uninstall --force --keep-data --keep-images
 #                                                       # 真删容器 + /opt/omc,但保留数据卷与业务镜像
 #   sudo bash deploy/deploy.sh -h | --help              # 本帮助
 #
@@ -40,7 +40,7 @@
 #
 #   ── 卸载模式 ─────────────────────────────────────────────────────────────
 #   --uninstall       进入卸载模式(默认 dry-run,仅打印将要做的动作,不实际执行)
-#   --no-dry-run      关闭 dry-run(必须显式加上才会真删,且会再做一次交互确认)
+#   --force           关闭 dry-run(必须显式加上才会真删,且会再做一次交互确认)
 #   --keep-data       不删 docker 数据卷(pgdata/miniodata/redisdata/tempodata/...)
 #   --keep-images     不删 omcgo/* 业务镜像
 #   -h | --help       本帮助
@@ -74,7 +74,7 @@ INFRA_DIR="/opt/omc/infra"
 OMC_ROOT="/opt/omc"
 COMPOSE_PROJECT="omcgo"
 UNINSTALL=0
-NO_DRY_RUN=0
+FORCE=0
 KEEP_DATA=0
 KEEP_IMAGES=0
 
@@ -90,7 +90,7 @@ while [ $# -gt 0 ]; do
     --overwrite-etc)   OVERWRITE_ETC=1; shift ;;
     --yes)             ASSUME_YES=1; shift ;;
     --uninstall)       UNINSTALL=1; shift ;;
-    --no-dry-run)      NO_DRY_RUN=1; shift ;;
+    --force)           FORCE=1; shift ;;
     --keep-data)       KEEP_DATA=1; shift ;;
     --keep-images)     KEEP_IMAGES=1; shift ;;
     -h|--help)         sed -n '3,62p' "$0"; exit 0 ;;
@@ -108,14 +108,14 @@ confirm() {
 }
 
 # =============================================================================
-# 卸载模式 — 在所有 precheck 之前分流;dry-run 默认开,只有 --no-dry-run 真删。
+# 卸载模式 — 在所有 precheck 之前分流;dry-run 默认开,只有 --force 真删。
 # =============================================================================
 if [ "$UNINSTALL" = 1 ]; then
   sep "OMC 卸载模式"
 
   DRY="[dry-run]"
   REAL=0
-  if [ "$NO_DRY_RUN" = 1 ]; then
+  if [ "$FORCE" = 1 ]; then
     REAL=1
     DRY=""
   fi
@@ -198,8 +198,8 @@ if [ "$UNINSTALL" = 1 ]; then
   echo
 
   if [ "$REAL" = 0 ]; then
-    log "[dry-run] 未实际执行任何动作。要真删,加 --no-dry-run 再跑一次:"
-    log "[dry-run]   sudo bash $0 --uninstall --no-dry-run \\"
+    log "[dry-run] 未实际执行任何动作。要真删,加 --force 再跑一次:"
+    log "[dry-run]   sudo bash $0 --uninstall --force \\"
     log "[dry-run]     $([ "$KEEP_DATA" = 1 ]   && echo "--keep-data ")\\"
     log "[dry-run]     $([ "$KEEP_IMAGES" = 1 ] && echo "--keep-images ")"
     exit 0

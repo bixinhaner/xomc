@@ -16,7 +16,7 @@
 #   sudo bash install-docker.sh --no-mirror              # 装完不动 daemon.json，跳过加速
 #   sudo bash install-docker.sh --skip-if-installed      # 已装则静默 0 退出（脚本里调）
 #   sudo bash install-docker.sh --uninstall              # 卸载 docker 引擎(默认 dry-run)
-#   sudo bash install-docker.sh --uninstall --no-dry-run --keep-data
+#   sudo bash install-docker.sh --uninstall --force --keep-data
 #                                                        # 真删 dockerd / 二进制 / systemd unit,但保留 /var/lib/docker
 #   sudo bash install-docker.sh -h | --help              # 本帮助
 #
@@ -37,7 +37,7 @@
 #                         buildx-plugin / containerd.io 等,全自动检测) →
 #                         删 /usr/local/bin docker 二进制 → 删 cli-plugins →
 #                         (可选)删数据目录 → 删 /etc/docker → 删 docker 组
-#   --no-dry-run          关闭 dry-run(必须显式加上才会真删,且会再做一次交互确认)
+#   --force               关闭 dry-run(必须显式加上才会真删,且会再做一次交互确认)
 #   --keep-data           不删 /var/lib/docker / /var/lib/containerd / /home/{docker,containerd}-data
 #   -h | --help           本帮助
 #
@@ -74,7 +74,7 @@ MIRROR=""
 NO_MIRROR=0
 SKIP_IF_INSTALLED=0
 UNINSTALL=0
-NO_DRY_RUN=0
+FORCE=0
 KEEP_DATA=0
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -82,7 +82,7 @@ while [ $# -gt 0 ]; do
     --no-mirror)           NO_MIRROR=1; shift ;;
     --skip-if-installed)   SKIP_IF_INSTALLED=1; shift ;;
     --uninstall)           UNINSTALL=1; shift ;;
-    --no-dry-run)          NO_DRY_RUN=1; shift ;;
+    --force)               FORCE=1; shift ;;
     --keep-data)           KEEP_DATA=1; shift ;;
     -h|--help)             awk 'NR>=3 && /^# ====/ {exit} NR>=3 {print}' "$SELF"; exit 0 ;;
     *)                     die "未知参数：$1（-h 查看用法）" ;;
@@ -113,7 +113,7 @@ if [ "$UNINSTALL" = 1 ]; then
 
   DRY="[dry-run]"
   REAL=0
-  if [ "$NO_DRY_RUN" = 1 ]; then
+  if [ "$FORCE" = 1 ]; then
     REAL=1
     DRY=""
   fi
@@ -199,12 +199,12 @@ if [ "$UNINSTALL" = 1 ]; then
   log "${DRY}9) 删 docker 用户组"
   echo
   log "${DRY}注意:本脚本【不删 /opt/omc 等 OMC 业务数据】,如需一并清理:"
-  log "${DRY}        先跑 sudo bash deploy.sh --uninstall --no-dry-run --keep-data,再跑本脚本"
+  log "${DRY}        先跑 sudo bash deploy.sh --uninstall --force --keep-data,再跑本脚本"
   echo
 
   if [ "$REAL" = 0 ]; then
-    log "[dry-run] 未实际执行任何动作。要真删,加 --no-dry-run 再跑一次:"
-    log "[dry-run]   sudo bash $0 --uninstall --no-dry-run $([ "$KEEP_DATA" = 1 ] && echo "--keep-data")"
+    log "[dry-run] 未实际执行任何动作。要真删,加 --force 再跑一次:"
+    log "[dry-run]   sudo bash $0 --uninstall --force $([ "$KEEP_DATA" = 1 ] && echo "--keep-data")"
     exit 0
   fi
 
@@ -218,7 +218,7 @@ if [ "$UNINSTALL" = 1 ]; then
       *)     log "用户取消,未执行任何操作。"; exit 0 ;;
     esac
   else
-    log "(非交互模式 + --no-dry-run:跳过二次确认,直接执行)"
+    log "(非交互模式 + --force:跳过二次确认,直接执行)"
   fi
 
   cd /tmp
