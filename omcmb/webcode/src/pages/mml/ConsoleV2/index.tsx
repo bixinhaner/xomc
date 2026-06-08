@@ -371,7 +371,7 @@ export default function MMLConsoleV2() {
             onToggleCollapsed={() => setHistoryCollapsed(false)}
           />
         ) : (
-          <div style={{ flex: '0 0 24%', minWidth: 0 }}>
+          <div style={{ flex: '0 0 21.6%', minWidth: 0 }}>
             <CommandHistoryPanel
               records={records}
               activeId={activeId}
