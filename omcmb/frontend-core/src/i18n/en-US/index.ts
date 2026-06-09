@@ -5697,6 +5697,8 @@ const messages: Record<string, string> = {
   'mml.console.commandTree.searchPlaceholder': 'Search command...',
   'mml.console.commandTree.empty':             'No commands',
   'mml.console.commandTree.customized':        'Customized',
+  'mml.console.commandTree.privateTemplate':   'Private Template',
+  'mml.console.commandTree.publicTemplate':    'Public Template',
   'mml.admin.catalog.title':                   'MML Catalog Management',
   'mml.admin.catalog.tab.groups':              'Groups',
   'mml.admin.catalog.tab.commands':            'Commands',

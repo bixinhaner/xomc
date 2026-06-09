@@ -92,8 +92,11 @@ export function renderCustomLeafLabel(
 export interface BuildCustomizedSubtreeOptions {
   customs: MMLCustomCommand[];
   t: (id: string, values?: Record<string, string | number>) => string;
-  /** 「+」按钮点击：打开 AddTemplateModal（private / public）。 */
-  onAdd: (scope: 'public' | 'private') => void;
+  /**
+   * 「+」按钮点击：打开 AddTemplateModal（private / public）。
+   * 不传则不渲染「+」（console-v2「选择命令」只读复用，仅选不增）。
+   */
+  onAdd?: (scope: 'public' | 'private') => void;
   /**
    * 叶子标题渲染器，由调用方决定：
    *   - Console：renderCustomLeafLabel + 行内 ✏️ / 🗑️ 图标
@@ -138,23 +141,25 @@ export function buildCustomizedSubtree(
   });
 
   // 标题尾部「+」：stopPropagation 阻止冒泡触发节点展开 / 选中。
-  const addBtn = (scope: 'public' | 'private') => (
-    <Tooltip
-      title={
-        scope === 'public'
-          ? t('mml.console.addPublicTemplate')
-          : t('mml.console.addPrivateTemplate')
-      }
-    >
-      <PlusOutlined
-        style={{ color: '#1677ff', marginLeft: 6 }}
-        onClick={(e) => {
-          e.stopPropagation();
-          onAdd(scope);
-        }}
-      />
-    </Tooltip>
-  );
+  // onAdd 缺省（只读场景，如 console-v2 选择命令）时返回 null，不渲染「+」。
+  const addBtn = (scope: 'public' | 'private') =>
+    onAdd ? (
+      <Tooltip
+        title={
+          scope === 'public'
+            ? t('mml.console.addPublicTemplate')
+            : t('mml.console.addPrivateTemplate')
+        }
+      >
+        <PlusOutlined
+          style={{ color: '#1677ff', marginLeft: 6 }}
+          onClick={(e) => {
+            e.stopPropagation();
+            onAdd(scope);
+          }}
+        />
+      </Tooltip>
+    ) : null;
 
   const privateChildren: TreeDataNode[] = Array.from(byCreator.entries()).map(
     ([creator, items]) => ({
@@ -186,7 +191,7 @@ export function buildCustomizedSubtree(
       title: (
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
           <FolderOutlined style={{ color: '#fa8c16' }} />
-          PrivateTemplate ({privateGroup.length})
+          {t('mml.console.commandTree.privateTemplate')} ({privateGroup.length})
           {addBtn('private')}
         </span>
       ),
@@ -199,7 +204,7 @@ export function buildCustomizedSubtree(
       title: (
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
           <FolderOutlined style={{ color: '#52c41a' }} />
-          PublicTemplate ({publicGroup.length})
+          {t('mml.console.commandTree.publicTemplate')} ({publicGroup.length})
           {addBtn('public')}
         </span>
       ),

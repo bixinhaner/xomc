@@ -1,30 +1,23 @@
 import { useMemo } from 'react';
-import { Form, Input, Select } from 'antd';
-import type { FormInstance } from 'antd';
+import { Form, Select } from 'antd';
 import { useT } from '@/hooks/useT';
 
-// T-0090 子项 ①：操作类型差异化 — 选 MOD 时显示「修改值入口」TextArea。
-// 抽出为公共组件供 AddTemplateModal 和子任务 d 私有命令页共用，
-// 规避 R-NEW-3（组件抽象不足导致复制粘贴）。
+// 操作类型选择器（供 AddTemplateModal 等「新增/编辑命令定义」表单复用）。
 //
-// 调用方负责在外层 <Form form={form}> 内渲染本组件，并通过 form prop 让
-// 组件读到当前 operationType 用于条件渲染修改值入口。
+// 历史：曾在选 MOD 时附带一个「修改值入口」TextArea（把 K=V 烘焙进 parameters）。
+// 现按需求移除——命令定义阶段只声明参数 PATH，具体修改值在 console 执行时再录入，
+// 故任何操作类型（含 MOD）都不再展示修改值入口。
 
 export interface OperationTypeWithModifyProps {
-  form: FormInstance;
   operationTypeName?: string;
-  modifyValuesName?: string;
   options?: Array<{ label: string; value: string }>;
 }
 
 export default function OperationTypeWithModify({
-  form,
   operationTypeName = 'operationType',
-  modifyValuesName = 'modifyValues',
   options,
 }: OperationTypeWithModifyProps) {
   const t = useT();
-  const selectedType = Form.useWatch(operationTypeName, form);
 
   const defaultOptions = useMemo(
     () => [
@@ -43,33 +36,15 @@ export default function OperationTypeWithModify({
   );
 
   return (
-    <>
-      <Form.Item
-        name={operationTypeName}
-        label={t('mml.console.operationType')}
-        rules={[{ required: true, message: t('mml.console.selectOperationType') }]}
-      >
-        <Select
-          placeholder={t('mml.console.selectOperationType')}
-          options={options ?? defaultOptions}
-        />
-      </Form.Item>
-
-      {selectedType === 'MOD' && (
-        <Form.Item
-          name={modifyValuesName}
-          label={t('mml.console.modifyValuesLabel')}
-          rules={[{ required: true, message: t('mml.console.modifyValuesRequired') }]}
-          extra={t('mml.console.modifyValuesTip')}
-        >
-          <Input.TextArea
-            rows={4}
-            maxLength={1000}
-            placeholder={t('mml.console.modifyValuesPlaceholder')}
-            style={{ fontFamily: "'SFMono-Regular', Consolas, monospace", fontSize: 12 }}
-          />
-        </Form.Item>
-      )}
-    </>
+    <Form.Item
+      name={operationTypeName}
+      label={t('mml.console.operationType')}
+      rules={[{ required: true, message: t('mml.console.selectOperationType') }]}
+    >
+      <Select
+        placeholder={t('mml.console.selectOperationType')}
+        options={options ?? defaultOptions}
+      />
+    </Form.Item>
   );
 }

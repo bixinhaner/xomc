@@ -5724,6 +5724,8 @@ const messages: Record<string, string> = {
   'mml.console.commandTree.searchPlaceholder': '搜索命令...',
   'mml.console.commandTree.empty':             '暂无命令',
   'mml.console.commandTree.customized':        '自定义命令',
+  'mml.console.commandTree.privateTemplate':   '私有模板',
+  'mml.console.commandTree.publicTemplate':    '公有模板',
   'mml.admin.catalog.title':                   'MML 配置管理',
   'mml.admin.catalog.tab.groups':              '分组',
   'mml.admin.catalog.tab.commands':            '命令',

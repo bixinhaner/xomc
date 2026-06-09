@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Button, Empty, Input, Modal, Space, Spin, Tag, Tooltip, Tree, Typography } from 'antd';
+import type { TreeDataNode } from 'antd';
 import { RightOutlined } from '@ant-design/icons';
-import type { DataNode } from 'antd/es/tree';
 import { useGroupTree, useCommandSubFields, useUnsupportedPaths } from '@core/hooks/api/useMmlConsole';
 import type { MMLCustomCommand } from '@core/types/mml';
 import { useI18nText } from '@/hooks/useI18nText';
@@ -9,6 +9,7 @@ import { useT } from '@/hooks/useT';
 import {
   CUSTOM_KEY_PREFIX,
   CUSTOM_ROOT_KEY,
+  buildCustomizedSubtree,
   parseCustomLeafId,
   useCustomCommands,
 } from '../../components/customizedSubtree';
@@ -67,12 +68,15 @@ export default function CommandSelectModal({
   const [keyword, setKeyword] = useState('');
   const [selectedId, setSelectedId] = useState<string | undefined>();
   const [wasOpen, setWasOpen] = useState(false);
+  // §需求 B1：默认所有命令分组折叠。expandedKeys 由用户手动展开累积；搜索时另行整树展开。
+  const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
 
   // 打开时回填（渲染阶段调整 state，避开 set-state-in-effect）。
   if (open !== wasOpen) {
     setWasOpen(open);
     if (open) {
       setKeyword('');
+      setExpandedKeys([]); // 每次打开都重置为全部折叠
       // 自定义命令叶子 key 带 custom: 前缀，回填选中态时需还原前缀，否则匹配不到树节点。
       setSelectedId(value ? (value.isCustom ? `${CUSTOM_KEY_PREFIX}${value.id}` : value.id) : undefined);
     }
@@ -119,14 +123,14 @@ export default function CommandSelectModal({
     );
   }, [customCommands, keyword, customGroupLabel]);
 
-  const treeData: DataNode[] = useMemo(() => {
+  const treeData: TreeDataNode[] = useMemo(() => {
     const byGroup = new Map<string, typeof entries>();
     filtered.forEach((e) => {
       const arr = byGroup.get(e.groupName) ?? [];
       arr.push(e);
       byGroup.set(e.groupName, arr);
     });
-    const groups: DataNode[] = Array.from(byGroup.entries()).map(([group, items]) => ({
+    const groups: TreeDataNode[] = Array.from(byGroup.entries()).map(([group, items]) => ({
       key: `group:${group}`,
       title: group,
       selectable: false,
@@ -149,18 +153,19 @@ export default function CommandSelectModal({
       }),
     }));
 
-    // 自定义命令分组（扁平，全部自定义命令归此一组；只读，无新增/编辑）。
-    if (filteredCustoms.length > 0) {
-      groups.push({
-        key: CUSTOM_ROOT_KEY,
-        title: customGroupLabel,
-        selectable: false,
-        children: filteredCustoms.map((cc) => {
-          const key = `${CUSTOM_KEY_PREFIX}${cc.id}`;
-          const isSelected = key === selectedId;
-          return {
-            key,
-            title: (
+    // §需求 B2：自定义命令子树与 mml/admin/catalog 一致——
+    //   私有模板 > 当前账号 > 私有命令；公有模板 > 公有命令；标签随中英切换。
+    // 复用 buildCustomizedSubtree（不传 onAdd → 只读，无「+」），叶子可选中。
+    // 搜索无自定义命中且无关键字时也保留骨架；纯标准命令搜索时不追加（避免空骨架噪声 + 保留「无匹配」空态）。
+    if (!keyword.trim() || filteredCustoms.length > 0) {
+      groups.push(
+        buildCustomizedSubtree({
+          customs: filteredCustoms,
+          t,
+          leafSelectable: true,
+          renderLeafTitle: (cc) => {
+            const isSelected = `${CUSTOM_KEY_PREFIX}${cc.id}` === selectedId;
+            return (
               <Space size={6}>
                 <Tag color={opColor(cc.operationType)} style={{ marginInlineEnd: 0 }}>
                   {cc.operationType}
@@ -169,15 +174,27 @@ export default function CommandSelectModal({
                   {cc.commandName}
                 </span>
               </Space>
-            ),
-          };
+            );
+          },
         }),
-      });
+      );
     }
     return groups;
-  }, [filtered, filteredCustoms, selectedId, customGroupLabel]);
+  }, [filtered, filteredCustoms, selectedId, keyword, t]);
 
-  const expandedKeys = useMemo(() => treeData.map((n) => n.key as string), [treeData]);
+  // §需求 B1：默认全部折叠（expandedKeys 初始为空）；搜索时整树展开以便看到命中项。
+  const allTreeKeys = useMemo(() => {
+    const out: string[] = [];
+    const walk = (ns: TreeDataNode[]) => {
+      ns.forEach((n) => {
+        out.push(n.key as string);
+        if (n.children) walk(n.children as TreeDataNode[]);
+      });
+    };
+    walk(treeData);
+    return out;
+  }, [treeData]);
+  const effectiveExpandedKeys = keyword.trim() ? allTreeKeys : expandedKeys;
 
   // 选中项可能是标准命令（裸 id）或自定义命令（custom:<id>）。
   const isCustomSelected = selectedId?.startsWith(CUSTOM_KEY_PREFIX) ?? false;
@@ -276,11 +293,12 @@ export default function CommandSelectModal({
             <Tree
               blockNode
               treeData={treeData}
-              expandedKeys={expandedKeys}
+              expandedKeys={effectiveExpandedKeys}
+              onExpand={(keys) => setExpandedKeys(keys as string[])}
               selectedKeys={selectedId ? [selectedId] : []}
               onSelect={(keys) => {
                 const k = keys[0] as string | undefined;
-                // 仅命令叶子可选（分组节点 selectable=false 不会触发，这里再排除前缀兜底）。
+                // 仅命令叶子可选（分组 / 私有公有骨架节点 selectable=false 不会触发，这里再排除前缀兜底）。
                 if (k && !k.startsWith('group:') && k !== CUSTOM_ROOT_KEY) setSelectedId(k);
               }}
             />

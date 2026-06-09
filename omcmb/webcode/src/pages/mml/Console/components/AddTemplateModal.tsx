@@ -20,29 +20,6 @@ interface AddTemplateModalProps {
   onSaveAndExecute?: (template: Omit<MMLCustomCommand, 'id' | 'creator' | 'createdAt' | 'updatedAt'>) => void;
 }
 
-// 把「K=V 一行一对」字符串解析为参数 dict。空行与无 '=' 的行被丢弃。
-function parseModifyValues(text: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  text.split(/\r?\n/).forEach((line) => {
-    const trimmed = line.trim();
-    if (!trimmed) return;
-    const eq = trimmed.indexOf('=');
-    if (eq <= 0) return;
-    const key = trimmed.slice(0, eq).trim();
-    const value = trimmed.slice(eq + 1).trim();
-    if (key) out[key] = value;
-  });
-  return out;
-}
-
-// parameters dict → "K=V" 一行一对（编辑模式回填用，与 parseModifyValues 互逆）
-function serializeModifyValues(parameters: Record<string, unknown> | undefined): string {
-  if (!parameters) return '';
-  return Object.entries(parameters)
-    .map(([k, v]) => `${k}=${String(v ?? '')}`)
-    .join('\n');
-}
-
 // 业务错误码（与 omcgo/global/errors.go 对齐）
 const ERR_CODE_TEMPLATE_NAME_DUPLICATED = 17008;
 
@@ -89,7 +66,6 @@ export default function AddTemplateModal({
         templateName: editingTemplate.commandName,
         commandCode: editingTemplate.commandCode,
         operationType: editingTemplate.operationType,
-        modifyValues: serializeModifyValues(editingTemplate.parameters as Record<string, unknown>),
         description: editingTemplate.description ?? '',
         paramPaths: editingTemplate.paramPaths ?? [],
       });
@@ -121,12 +97,9 @@ export default function AddTemplateModal({
     try {
       const values = await form.validateFields();
 
-      // T-0090 子项 ①：MOD 操作下把「修改值入口」TextArea 内容解析为 parameters dict；
-      // 其它操作类型 parameters 留空。
-      const parameters =
-        values.operationType === 'MOD' && typeof values.modifyValues === 'string'
-          ? parseModifyValues(values.modifyValues)
-          : {};
+      // 命令定义不再录入修改值（已移除「修改值入口」）：新增恒为空，编辑保留既有 parameters
+      // 不被清空（历史命令可能烘焙过值，避免编辑误删）。具体修改值在 console 执行时录入。
+      const parameters = isEdit && editingTemplate ? (editingTemplate.parameters ?? {}) : {};
 
       // T-0090 子项 ②：UI 删 categoryGroup / productClasses / 参数配置 section；
       // productClasses column 已由 T-0090-b 真删；categoryGroup schema 仍 required，
@@ -222,7 +195,7 @@ export default function AddTemplateModal({
           />
         </Form.Item>
 
-        <OperationTypeWithModify form={form} />
+        <OperationTypeWithModify />
 
         <Form.Item
           name="paramPaths"
