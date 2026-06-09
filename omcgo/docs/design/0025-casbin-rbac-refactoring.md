@@ -3,7 +3,7 @@
 > 版本: v1.0
 > 日期: 2026-04-09
 > 状态: 设计中
-> 关联文档: `docs/rbac_complete_design.md`, `docs/rbac_implementation_plan.md`, `files/Back-end/系统管理模块-开发设计方案.md`
+> 关联文档: `docs/archive/reports/rbac_complete_design.md`, `docs/archive/reports/rbac_implementation_plan.md`, `docs/archive/legacy-handoff/Back-end/系统管理模块-开发设计方案.md`
 
 ---
 

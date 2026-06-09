@@ -1,7 +1,7 @@
 # OMC 项目流程控制体系设计（Process Control System）
 
 > **文档日期**：2026-04-20  
-> **背景**：基于 `implementation-completeness-report-20260420.md` 暴露的流程短板（E2E 0 用例、功能卡 70-85%、5 个 P0 无人守），引入 PM/PgM/QA 角色 + 流程制品 + 流水线门控的三层体系。  
+> **背景**：基于 `docs/archive/reports/implementation-completeness-report-20260420.md` 暴露的流程短板（E2E 0 用例、功能卡 70-85%、5 个 P0 无人守），引入 PM/PgM/QA 角色 + 流程制品 + 流水线门控的三层体系。  
 > **定位**：指导性架构文档，实施细节下沉到各专项制品（dod / release-gate / risk-register / prd / milestone / sprint）。
 
 ---

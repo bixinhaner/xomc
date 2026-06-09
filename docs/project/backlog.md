@@ -1,6 +1,11 @@
 # OMC 需求池（Backlog）— 任务状态表
 
-> **性质**：活文档。项目**唯一任务清单**。所有新工作先入池再进流水线。
+> ⛔ **已冻结为历史审计归档（2026-06-09）** —— 本文件**不再是活任务源**。新需求 / 缺陷 / PRD 一律走 **GitHub Issues**（`github.com/569423176-sketch/goomc`，`gh` CLI），约定见 [`docs/agents/issue-tracker.md`](../agents/issue-tracker.md)。
+> 本文件保留为历史归档：dev-pipeline 的 closing-evidence 追溯链（T-NNNN ↔ review-report）仍在此可查，但**不再新增 / 更新任务**。迁移在途细节见 issue-tracker.md。
+>
+> ——以下为冻结时点（2026-06-09）的历史快照，仅供追溯，不代表当前活跃工作——
+
+> **性质**：~~活文档。项目唯一任务清单~~（已冻结，见上）。历史上所有新工作先入池再进流水线。
 > **守护人**：项目经理（`CLAUDE.md §16.11`）+ 产品经理（`§16.10`）+ QA/发布经理（`§16.12`）轮值
 > **设计依据**：`docs/project/dev-pipeline-design-20260420.md §11` L0 Backlog 层
 > **初始化数据**：反向索引自 `docs/project/milestone/2026Q2-to-RC.md` + `risk-register.md` + 近期 commit

@@ -2,7 +2,7 @@
 
 > **性质**：活文档。每 Sprint 回顾时更新；每季度深度复盘。  
 > **守护人**：项目经理（`CLAUDE.md §16.11`）  
-> **初始化依据**：`docs/implementation-completeness-report-20260420.md` 五大 P0 + 次级短板
+> **初始化依据**：`docs/archive/reports/implementation-completeness-report-20260420.md` 五大 P0 + 次级短板
 
 ---
 
