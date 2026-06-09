@@ -21,7 +21,7 @@ import { CONFIG_TAB_HEIGHT, isReadOp, opColor, opLabel } from '../constants';
 import RawPathPanel from './RawPathPanel';
 import { newRawPathRow } from '../rawPathRow';
 import { validateRawPath } from '../rawPathValidate';
-import { computeInstanceSlots } from '../adapters';
+import { computeInstanceSlots, resolveObjectPath } from '../adapters';
 
 const { Text } = Typography;
 
@@ -149,10 +149,13 @@ export default function ConfigParamsModal({
   // 写类操作各自的提醒文案（取代原「写操作将对所有已选设备生效」通用提示，§需求 3）。
   const writeReminder = currentOp ? WRITE_REMINDERS[currentOp] : undefined;
 
-  // §需求 4：标准模式下命令参数为空（读类未勾选 path / MOD·ADD 无可写 path）时不可执行。
-  // RMV 以实例号定位、不依赖勾选 path，故仅要求已选命令。
+  // 标准模式可执行性判定（§需求 3）：
+  //   - ADD/RMV 以「目标对象路径」(target_object)下发 RPC，不依赖参数 PATH → 有 target_object 即可执行；
+  //   - LST/MOD 依赖勾选/可写参数 PATH → checkedPaths 为空时置灰不可执行（保持原行为）。
+  const isAddRmvCmd = command?.operationType === 'ADD' || command?.operationType === 'RMV';
   const standardValid =
-    !!command && (command.operationType === 'RMV' ? true : checkedPaths.length > 0);
+    !!command &&
+    (isAddRmvCmd ? !!(command.targetObject && command.targetObject.trim()) : checkedPaths.length > 0);
   const valid = mode === 'standard' ? standardValid : rawHasPath && rawAllValid;
 
   const buildRequest = (): ExecRequest =>
@@ -228,6 +231,21 @@ export default function ConfigParamsModal({
                 : '填写要下发的参数值'}
           </Text>
         </Space>
+
+        {/* §需求 2：ADD/RMV 无参数 PATH，展示执行 RPC 的「目标对象路径」（{i} 由下方实例号实时替换）。 */}
+        {isAddRmvCmd && command.targetObject && (
+          <div style={{ marginTop: 10 }}>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              目标对象路径（{command.operationType} 下发 {command.operationType === 'ADD' ? 'AddObject' : 'DeleteObject'} 的对象，
+              {instanceSlots.length > 0 ? `{i} 由下方实例号替换` : '无实例占位'}）：
+            </Text>
+            <div style={{ marginTop: 4 }}>
+              <Text code style={{ fontSize: 12, wordBreak: 'break-all' }}>
+                {resolveObjectPath(command.targetObject, instanceSelectors)}
+              </Text>
+            </div>
+          </div>
+        )}
 
         {/* 父级 `.{i}.` 实例选择器：对象实例默认 1，按路径中占位符个数渲染。 */}
         {instanceSlots.length > 0 && (

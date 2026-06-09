@@ -192,6 +192,25 @@ export function computeInstanceSlots(command: CommandItem): { key: string; label
   return slots;
 }
 
+/**
+ * 把 targetObject 里的 `.{i}.` 占位按 instanceSelectors 替换为具体实例号，用于
+ * ADD/RMV 命令「目标对象路径」展示（与 computeInstanceSlots 同序：左→右 i01/i02…，缺省 1）。
+ * 无占位 / 无 targetObject 时原样返回。
+ */
+export function resolveObjectPath(
+  targetObject: string | undefined,
+  instanceSelectors?: Record<string, string>,
+): string {
+  const src = targetObject ?? '';
+  if (!src) return src;
+  let n = 0;
+  return src.replace(/\.\{i\}\./g, () => {
+    n += 1;
+    const v = instanceSelectors?.[`i${String(n).padStart(2, '0')}`] ?? '1';
+    return `.${v}.`;
+  });
+}
+
 /** CommandItem + 标准模式 ExecRequest → 结构化执行单条 statement（POST …/execute-statements-structured）。 */
 export function buildStructuredStatement(
   command: CommandItem,

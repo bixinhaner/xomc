@@ -237,6 +237,16 @@ export default function CommandSelectModal({
   const pathsLoading = isCustomSelected ? false : subFieldsLoading;
   const hasSelection = !!selectedEntry || !!selectedCustom;
 
+  // ADD/RMV 以「目标对象路径」(target_object)下发 RPC(AddObject/DeleteObject)，无参数 PATH；
+  // 仅标准命令带 target_object。有 target_object 即可「确定选择」，不受 paramPaths 为空限制。
+  const selOp = selectedEntry?.command.operationType;
+  const selTargetObject = selectedEntry?.command.targetObject?.trim() ?? '';
+  const isAddRmvWithObject =
+    !isCustomSelected && (selOp === 'ADD' || selOp === 'RMV') && selTargetObject !== '';
+  // §需求 3：LST/MOD 无可执行 PATH → 禁用；ADD/RMV 看 target_object。
+  const okDisabled =
+    !hasSelection || pathsLoading || (isAddRmvWithObject ? false : paramPaths.length === 0);
+
   const handleOk = (): void => {
     if (selectedCustom) {
       // 无可执行 path 不允许确认（§需求 3）；按钮已禁用，这里再兜底。
@@ -244,7 +254,9 @@ export default function CommandSelectModal({
       onConfirm(mapCustomCommandItem(selectedCustom, customGroupLabel, customParamPaths));
       return;
     }
-    if (!selectedEntry || !subFields || paramPaths.length === 0) return;
+    if (!selectedEntry || !subFields) return;
+    // ADD/RMV 以 target_object 执行(允许空 paramPaths)；LST/MOD 需有可执行 PATH。
+    if (!isAddRmvWithObject && paramPaths.length === 0) return;
     onConfirm(mapCommandItem(selectedEntry.groupName, selectedEntry.command, visibleSubFields));
   };
 
@@ -268,8 +280,8 @@ export default function CommandSelectModal({
       onOk={handleOk}
       okText="确定选择"
       cancelText="取消"
-      // §需求 3：选中命令但无可执行 PATH（过滤后为空）时禁用「确定选择」。
-      okButtonProps={{ disabled: !hasSelection || pathsLoading || paramPaths.length === 0 }}
+      // §需求 3：LST/MOD 无可执行 PATH 时禁用「确定选择」；ADD/RMV 看 target_object（§需求 1）。
+      okButtonProps={{ disabled: okDisabled }}
       destroyOnHidden
     >
       <div style={{ marginBottom: 12 }}>
@@ -309,6 +321,18 @@ export default function CommandSelectModal({
             <Space direction="vertical" size={10} style={{ width: '100%' }}>
               {pathsLoading ? (
                 <Spin size="small" />
+              ) : isAddRmvWithObject ? (
+                // §需求 1：ADD/RMV 无参数 PATH，展示执行 RPC 的「目标对象路径」提醒用户。
+                <>
+                  <Text strong>目标对象路径：</Text>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {selOp} 操作以下述对象路径下发 RPC（{selOp === 'ADD' ? 'AddObject' : 'DeleteObject'}），
+                    无需选择参数 PATH；实例号在「配置参数」填写。
+                  </Text>
+                  <Text code style={{ fontSize: 12, wordBreak: 'break-all' }}>
+                    {selTargetObject}
+                  </Text>
+                </>
               ) : (
                 <>
                   <Text strong>参数 PATH（{paramPaths.length} 项）：</Text>

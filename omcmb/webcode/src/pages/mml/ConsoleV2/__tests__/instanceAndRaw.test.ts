@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeInstanceSlots } from '../adapters';
+import { computeInstanceSlots, resolveObjectPath } from '../adapters';
 import { validateRawPath } from '../rawPathValidate';
 import type { CommandItem, CommandParamPath } from '../types';
 import type { MMLOperationType } from '@core/types/mml';
@@ -65,5 +65,29 @@ describe('computeInstanceSlots (命令参数 {i} 槽位)', () => {
 
   it('无 {i} → 空槽位', () => {
     expect(computeInstanceSlots(cmd('LST', [path('Device.DeviceInfo.SoftwareVersion')]))).toHaveLength(0);
+  });
+});
+
+describe('resolveObjectPath (ADD/RMV 目标对象路径展示)', () => {
+  it('按 instanceSelectors 左→右替换 .{i}.（缺省 1）', () => {
+    expect(
+      resolveObjectPath('Device.Services.FAPService.{i}.NeighborList.InterRATCell.GSM.', { i01: '2' }),
+    ).toBe('Device.Services.FAPService.2.NeighborList.InterRATCell.GSM.');
+  });
+
+  it('多个 {i} 按 i01/i02 顺序替换；未提供则用 1', () => {
+    expect(
+      resolveObjectPath('Device.Services.FAPService.{i}.X.{i}.Y.', { i01: '3', i02: '5' }),
+    ).toBe('Device.Services.FAPService.3.X.5.Y.');
+    expect(resolveObjectPath('Device.Services.FAPService.{i}.X.{i}.Y.')).toBe(
+      'Device.Services.FAPService.1.X.1.Y.',
+    );
+  });
+
+  it('无 {i} 占位 / 空串原样返回', () => {
+    const noPlaceholder = 'Device.Services.FAPService.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.';
+    expect(resolveObjectPath(noPlaceholder, { i01: '2' })).toBe(noPlaceholder);
+    expect(resolveObjectPath(undefined)).toBe('');
+    expect(resolveObjectPath('')).toBe('');
   });
 });
