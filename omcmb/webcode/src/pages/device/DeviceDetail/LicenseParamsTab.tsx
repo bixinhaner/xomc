@@ -29,11 +29,12 @@ interface LicenseRow {
   order: number;
   id: string;
   description: string;
+  validityPeriod: string;
   capacity: string;
   remainTime: string;
 }
 
-const licenseItemFieldPattern = /(?:^|\.)(?:LicenseItem|Capacity)\.(\d+)\.(ID|Description|Value|RemainingPeriod|State)$/i;
+const licenseItemFieldPattern = /(?:^|\.)(?:LicenseItem|Capacity)\.(\d+)\.(ID|Description|Value|ValidPeriod|RemainingPeriod|State)$/i;
 
 function buildLicenseRows(items: DeviceLicenseParam[]): LicenseRow[] {
   const rowMap = new Map<string, LicenseRow>();
@@ -50,6 +51,7 @@ function buildLicenseRows(items: DeviceLicenseParam[]): LicenseRow[] {
       order,
       id: '',
       description: '',
+      validityPeriod: '',
       capacity: '',
       remainTime: '',
     };
@@ -66,6 +68,9 @@ function buildLicenseRows(items: DeviceLicenseParam[]): LicenseRow[] {
         if (!row.capacity && item.value) {
           row.capacity = item.value;
         }
+        break;
+      case 'validperiod':
+        row.validityPeriod = item.value || row.validityPeriod;
         break;
       case 'remainingperiod':
         row.remainTime = item.value || row.remainTime;
@@ -142,6 +147,13 @@ export default function LicenseParamsTab({ deviceId }: LicenseParamsTabProps) {
         render: (value: string) => value || '-',
       },
       {
+        title: t('device.licenseParam.col.validityPeriod'),
+        dataIndex: 'validityPeriod',
+        key: 'validityPeriod',
+        width: 180,
+        render: (value: string) => value || '-',
+      },
+      {
         title: t('device.licenseParam.col.capacity'),
         dataIndex: 'capacity',
         key: 'capacity',
@@ -205,7 +217,7 @@ export default function LicenseParamsTab({ deviceId }: LicenseParamsTabProps) {
           loading={listQuery.isLoading}
           size="small"
           pagination={false}
-          scroll={{ x: 980 }}
+          scroll={{ x: 1160 }}
         />
       )}
     </Card>

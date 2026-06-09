@@ -2473,6 +2473,7 @@ const messages: Record<string, string> = {
   'device.licenseParam.title':          'License 参数',
   'device.licenseParam.col.id':         'ID',
   'device.licenseParam.col.description': 'Description',
+  'device.licenseParam.col.validityPeriod': 'Validity Period (Days)',
   'device.licenseParam.col.capacity':   'Capacity',
   'device.licenseParam.col.remainTime': 'Remain Time(unit:day)',
   'device.licenseParam.col.operate':    'Operate',
