@@ -188,7 +188,7 @@ export default function ResultDetailModal({
             disabled={!row}
             onClick={() => row && exportOne(columns, row)}
           >
-            下载该设备结果
+            下载执行结果
           </Button>
           <Button onClick={onClose}>关闭</Button>
         </Space>
