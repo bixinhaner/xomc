@@ -88,3 +88,28 @@ scrape_configs:
           - "otelcol:8888"
         labels:
           service: "otelcol"
+
+  # ── nginx 入口流量（stub_status → nginx-prometheus-exporter）──────────
+  # nginx_connections_active（并发）/ nginx_http_requests_total（rate=QPS）
+  - job_name: "nginx"
+    static_configs:
+      - targets:
+          - "nginx-exporter:9113"
+        labels:
+          service: "nginx"
+
+  # ── 主机资源（node-exporter：CPU / 内存 / 磁盘 / 负载 / 网络）──────────
+  - job_name: "node"
+    static_configs:
+      - targets:
+          - "node-exporter:9100"
+        labels:
+          service: "node"
+
+  # ── 容器资源（cAdvisor：各容器 CPU / 内存 / 网络 / 磁盘）──────────────
+  - job_name: "cadvisor"
+    static_configs:
+      - targets:
+          - "cadvisor:8080"
+        labels:
+          service: "cadvisor"

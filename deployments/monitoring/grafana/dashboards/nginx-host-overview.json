@@ -1,0 +1,136 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "title": "Nginx 活跃连接（并发）",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+      "targets": [
+        {"expr": "sum(nginx_connections_active)", "legendFormat": "active"}
+      ]
+    },
+    {
+      "title": "Nginx QPS（每秒请求）",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+      "targets": [
+        {"expr": "sum(rate(nginx_http_requests_total[1m]))", "legendFormat": "qps"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "reqps"}}
+    },
+    {
+      "title": "主机 CPU 使用率",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+      "targets": [
+        {"expr": "100 - (avg(rate(node_cpu_seconds_total{mode=\"idle\"}[1m])) * 100)", "legendFormat": "cpu"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100}}
+    },
+    {
+      "title": "主机内存使用率",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+      "targets": [
+        {"expr": "(1 - sum(node_memory_MemAvailable_bytes) / sum(node_memory_MemTotal_bytes)) * 100", "legendFormat": "mem"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100}}
+    },
+    {
+      "title": "Nginx 连接状态",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+      "targets": [
+        {"expr": "sum(nginx_connections_active)", "legendFormat": "active"},
+        {"expr": "sum(nginx_connections_reading)", "legendFormat": "reading"},
+        {"expr": "sum(nginx_connections_writing)", "legendFormat": "writing"},
+        {"expr": "sum(nginx_connections_waiting)", "legendFormat": "waiting"}
+      ]
+    },
+    {
+      "title": "Nginx 请求速率 QPS / 新建连接速率",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+      "targets": [
+        {"expr": "sum(rate(nginx_http_requests_total[1m]))", "legendFormat": "requests/s (QPS)"},
+        {"expr": "sum(rate(nginx_connections_accepted[1m]))", "legendFormat": "accepted/s"},
+        {"expr": "sum(rate(nginx_connections_handled[1m]))", "legendFormat": "handled/s"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "reqps"}}
+    },
+    {
+      "title": "主机 CPU 使用率",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+      "targets": [
+        {"expr": "100 - (avg(rate(node_cpu_seconds_total{mode=\"idle\"}[1m])) * 100)", "legendFormat": "cpu used %"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100}}
+    },
+    {
+      "title": "主机内存（已用 / 总量）",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+      "targets": [
+        {"expr": "sum(node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes)", "legendFormat": "used"},
+        {"expr": "sum(node_memory_MemTotal_bytes)", "legendFormat": "total"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "bytes"}}
+    },
+    {
+      "title": "主机磁盘使用率（按挂载点）",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 20},
+      "targets": [
+        {"expr": "100 - (node_filesystem_avail_bytes{fstype!~\"tmpfs|overlay|squashfs\"} / node_filesystem_size_bytes{fstype!~\"tmpfs|overlay|squashfs\"} * 100)", "legendFormat": "{{mountpoint}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100}}
+    },
+    {
+      "title": "容器 CPU（按容器名）",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 20},
+      "targets": [
+        {"expr": "sum by (name) (rate(container_cpu_usage_seconds_total{name!=\"\"}[1m]))", "legendFormat": "{{name}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "percentunit"}}
+    },
+    {
+      "title": "容器内存（按容器名）",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 28},
+      "targets": [
+        {"expr": "sum by (name) (container_memory_working_set_bytes{name!=\"\"})", "legendFormat": "{{name}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "bytes"}}
+    },
+    {
+      "title": "主机系统负载（1m / 5m / 15m）",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 28},
+      "targets": [
+        {"expr": "node_load1", "legendFormat": "load1"},
+        {"expr": "node_load5", "legendFormat": "load5"},
+        {"expr": "node_load15", "legendFormat": "load15"}
+      ]
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["omcgo", "nginx", "host", "container"],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "title": "OMCGo - Nginx 流量 / 主机 / 容器资源",
+  "uid": "omcgo-nginx-host"
+}

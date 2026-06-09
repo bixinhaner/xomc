@@ -199,6 +199,54 @@ services:
     networks:
       - omcgo-net
 
+  # ── nginx 指标：抓 web:8090/stub_status，暴露并发 / QPS（prometheus job=nginx）─
+  # 不 depends_on web（web 在 docker-compose.web.yml，--skip-web 时不存在）：
+  # web 未起时 exporter 仅抓取失败，web 起来后自动恢复，不阻塞监控栈。
+  nginx-exporter:
+    image: ${IMAGE_NGINX_EXPORTER}
+    restart: unless-stopped
+    environment:
+      TZ: "Asia/Shanghai"
+    command: ["--nginx.scrape-uri=http://web:8090/stub_status"]
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+    networks:
+      - omcgo-net
+
+  # ── 主机资源指标：node-exporter（CPU / 内存 / 磁盘 / 负载，job=node :9100）──
+  node-exporter:
+    image: ${IMAGE_NODE_EXPORTER}
+    restart: unless-stopped
+    pid: host
+    command:
+      - "--path.procfs=/host/proc"
+      - "--path.sysfs=/host/sys"
+      - "--path.rootfs=/rootfs"
+      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+      - /etc/localtime:/etc/localtime:ro
+    networks:
+      - omcgo-net
+
+  # ── 容器资源指标：cAdvisor（各容器 CPU / 内存 / 网络 / 磁盘，job=cadvisor :8080）─
+  cadvisor:
+    image: ${IMAGE_CADVISOR}
+    restart: unless-stopped
+    privileged: true
+    devices:
+      - /dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    networks:
+      - omcgo-net
+
 volumes:
   prometheusdata:
   alertmanagerdata:

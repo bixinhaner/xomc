@@ -1,0 +1,201 @@
+# OMC 主机 / 容器 / nginx 入口 告警规则
+#
+# 配套 node-exporter（job=node）、cAdvisor（job=cadvisor）、nginx-prometheus-exporter
+# （job=nginx，抓 web:8090/stub_status）三个采集器（见 docker-compose.monitoring.yml
+# 与 prometheus.yml）。补齐原先缺失的「服务器资源 + 容器资源 + nginx 入口流量」告警。
+#
+# 阈值取保守经验值（资源类 > 90% 持续 10 分钟才告警，避免瞬时毛刺误报）；
+# 压测定标后按实际容量回调，与 infra/connection-pool 告警同一惯例。
+#
+# 指标来源备注：
+#   - node-exporter 以 bind mount 宿主 /proc /sys / 根采集，反映【宿主机】资源；
+#   - cAdvisor 的 ContainerMemoryNearLimit 仅在容器设了 mem limit 时才会触发
+#     （当前 compose 未设 limit → 不会误报，属未来加 limit 后的前瞻规则）；
+#   - nginx stub_status 只有连接/请求总量，没有按状态码拆分；5xx 速率需用 Loki
+#     日志（{service="nginx"} |~ "5[0-9]{2}"）派生，不在本 Prometheus 规则内。
+
+groups:
+  - name: omc.host
+    interval: 30s
+    rules:
+      - alert: HostMetricsAbsent
+        # node-exporter scrape target 宕（容器退出 / 端口不通）→ 宿主资源不可观测。
+        expr: up{job="node"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          domain: omc
+          service: node
+        annotations:
+          summary: "主机指标采集 node-exporter 不可达"
+          description: |
+            job=node 已 2 分钟抓取失败，宿主 CPU/内存/磁盘资源不可观测。
+            Impact: 主机层资源告警全部失效，无法发现服务器过载/磁盘满。
+            Action: docker compose ps node-exporter；查容器日志与挂载（/proc /sys /）。
+
+      - alert: HostCPUHigh
+        expr: 100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 90
+        for: 10m
+        labels:
+          severity: warning
+          domain: omc
+          service: node
+        annotations:
+          summary: "宿主 CPU 使用率持续偏高（> 90%）"
+          description: |
+            {{ $labels.instance }} CPU 使用率 > 90% 已持续 10 分钟。
+            Impact: ACS 会话处理 / KPI 计算等可能排队，p99 时延抖动。
+            Action: 看 cAdvisor 面板定位吃 CPU 的容器；评估扩容或限流（acs 准入控制）。
+
+      - alert: HostMemoryHigh
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 90
+        for: 10m
+        labels:
+          severity: warning
+          domain: omc
+          service: node
+        annotations:
+          summary: "宿主内存使用率持续偏高（> 90%）"
+          description: |
+            {{ $labels.instance }} 内存使用率 > 90% 已持续 10 分钟。
+            Impact: 接近 OOM，内核可能 kill 容器进程（pg/redis/app 任一被杀都是事故）。
+            Action: 看 cAdvisor 容器内存定位泄漏；评估加内存或给容器设 mem limit。
+
+      - alert: HostDiskSpaceLow
+        # 排除 tmpfs/overlay/squashfs 等非持久文件系统，避免误报。
+        expr: |
+          (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs"}
+           / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs"} < 0.10)
+          and (node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs"} > 0)
+        for: 10m
+        labels:
+          severity: warning
+          domain: omc
+          service: node
+        annotations:
+          summary: "宿主磁盘剩余空间不足（< 10%）：{{ $labels.mountpoint }}"
+          description: |
+            挂载点 {{ $labels.mountpoint }} 可用空间 < 10% 已持续 10 分钟。
+            Impact: PM/MR/固件/备份落盘、PG WAL、容器卷写入可能失败。
+            Action: 清理旧 PM/MR/备份与日志；查 docker 卷（pg/minio/loki/tempo）占用。
+
+      - alert: HostDiskSpaceCritical
+        expr: |
+          (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs"}
+           / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs"} < 0.05)
+          and (node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs"} > 0)
+        for: 5m
+        labels:
+          severity: critical
+          domain: omc
+          service: node
+        annotations:
+          summary: "宿主磁盘剩余空间告急（< 5%）：{{ $labels.mountpoint }}"
+          description: |
+            挂载点 {{ $labels.mountpoint }} 可用空间 < 5% 已持续 5 分钟，随时写满。
+            Impact: 数据库写失败 / 文件落盘失败 / 容器异常，可能引发数据损坏。
+            Action: 立即清理；磁盘满前优先保 PG 与 MinIO 数据卷所在分区。
+
+      - alert: HostDiskWillFillSoon
+        # 按近 6h 趋势线性外推：若 4 小时内会写满，且当前已用 > 70%，才告警（双重守门防噪声）。
+        expr: |
+          (predict_linear(node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs"}[6h], 4 * 3600) < 0)
+          and
+          (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs"}
+           / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs"} < 0.30)
+        for: 30m
+        labels:
+          severity: critical
+          domain: omc
+          service: node
+        annotations:
+          summary: "宿主磁盘预计 4 小时内写满：{{ $labels.mountpoint }}"
+          description: |
+            按近 6 小时增长趋势外推，{{ $labels.mountpoint }} 预计 4 小时内耗尽。
+            Impact: 早于实际写满给出处置窗口，避免磁盘满引发的级联故障。
+            Action: 提前扩容 / 清理；定位异常增长来源（PM 采集量？日志暴涨？备份未清理？）。
+
+  - name: omc.container
+    interval: 30s
+    rules:
+      - alert: ContainerMetricsAbsent
+        expr: up{job="cadvisor"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          domain: omc
+          service: cadvisor
+        annotations:
+          summary: "容器指标采集 cAdvisor 不可达"
+          description: |
+            job=cadvisor 已 2 分钟抓取失败，各容器 CPU/内存资源不可观测。
+            Impact: 无法按容器定位资源瓶颈（主机层 node-exporter 仍可用）。
+            Action: docker compose ps cadvisor；查 privileged 与挂载（/var/lib/docker 等）。
+
+      - alert: ContainerMemoryNearLimit
+        # 仅当容器设了 mem limit（spec_memory_limit_bytes 有限值）时才触发；
+        # 当前 compose 未设 limit → 不会误报，属加 limit 后的前瞻规则。
+        expr: |
+          (container_memory_working_set_bytes{name!=""}
+           / container_spec_memory_limit_bytes{name!=""} > 0.90)
+          and (container_spec_memory_limit_bytes{name!=""} > 0)
+        for: 10m
+        labels:
+          severity: warning
+          domain: omc
+          service: cadvisor
+        annotations:
+          summary: "容器内存接近 limit（> 90%）：{{ $labels.name }}"
+          description: |
+            容器 {{ $labels.name }} 内存已用 > 其 mem limit 的 90%，持续 10 分钟。
+            Impact: 触限将被 OOMKill 重启，丢失会话/进行中任务。
+            Action: 查该容器内存泄漏；评估调大 limit 或优化内存占用。
+
+  - name: omc.nginx
+    interval: 30s
+    rules:
+      - alert: NginxExporterDown
+        expr: up{job="nginx"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          domain: omc
+          service: nginx
+        annotations:
+          summary: "nginx-exporter 不可达，入口流量指标中断"
+          description: |
+            job=nginx 已 2 分钟抓取失败，nginx 并发/QPS 指标不可观测。
+            Impact: 看不到入口流量；但 nginx 本身是否可用需另看 NginxUnreachable。
+            Action: docker compose ps nginx-exporter；确认能否抓 web:8090/stub_status。
+
+      - alert: NginxUnreachable
+        # nginx_up=0：exporter 在跑但抓不到 web:8090/stub_status，
+        # 等价于 nginx（web 容器）宕或 8090 监听异常 —— 前端/REST/ACS 入口全断。
+        expr: nginx_up == 0
+        for: 2m
+        labels:
+          severity: critical
+          domain: omc
+          service: nginx
+        annotations:
+          summary: "Nginx 入口网关不可达（stub_status 抓不到）"
+          description: |
+            nginx-exporter 抓 web:8090/stub_status 失败 ≥ 2 分钟，nginx 大概率不可用。
+            Impact: 前端页面、REST API、ACS 南向入口可能全部不可达（整站入口宕）。
+            Action: docker compose ps web；docker compose logs web；查 nginx 配置与 8080/8081 监听。
+
+      - alert: NginxConnectionsHigh
+        # 经验阈值，需压测定标。worker_connections=10240×worker 数（auto=CPU 核），
+        # 高并发 ACS 场景该值可能正常偏高，部署后按实际容量回调。
+        expr: nginx_connections_active > 8000
+        for: 5m
+        labels:
+          severity: warning
+          domain: omc
+          service: nginx
+        annotations:
+          summary: "Nginx 活跃连接数持续偏高（> 8000）"
+          description: |
+            nginx 活跃连接 > 8000 已持续 5 分钟，接近 worker_connections 容量上限。
+            Impact: 再涨会拒绝新连接（设备 Inform / 前端请求失败）。
+            Action: 看是否设备 Inform 洪泛或慢上游堆积；评估扩 ACS 实例 / 调 worker_connections。
