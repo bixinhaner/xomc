@@ -230,6 +230,7 @@ func TestProcessDuplicateAlarm(t *testing.T) {
 		assert.Equal(t, model.AlarmCritical, a.Severity)
 		assert.Equal(t, "updated description", a.Description)
 		assert.Equal(t, 2, a.AckCount)
+		assert.Equal(t, firstRaisedAt, a.RaisedAt)
 		assert.Equal(t, firstRaisedAt, a.FirstRaisedAt)
 		assert.Equal(t, secondRaisedAt, a.LastUpdatedAt)
 	}

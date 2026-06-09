@@ -91,7 +91,7 @@ func applyIncomingAlarmState(target *model.Alarm, incoming *model.Alarm, fallbac
 	if target.FirstRaisedAt.IsZero() && !target.RaisedAt.IsZero() {
 		target.FirstRaisedAt = target.RaisedAt
 	}
-	if !incoming.RaisedAt.IsZero() {
+	if target.RaisedAt.IsZero() && !incoming.RaisedAt.IsZero() {
 		target.RaisedAt = incoming.RaisedAt
 	}
 	target.Severity = incoming.Severity

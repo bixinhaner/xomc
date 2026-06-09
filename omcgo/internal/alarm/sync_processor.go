@@ -203,11 +203,10 @@ func (p *AlarmSyncProcessor) processSync(ctx context.Context, deviceSN string, p
 		localAlarm.AlarmSource = remoteAlarm.AlarmSource
 		localAlarm.EventType = remoteAlarm.EventType
 		localAlarm.ProbableCause = remoteAlarm.ProbableCause
-		if remoteAlarm.RaisedAt.IsZero() {
-			// keep original raised_at
-		} else {
+		if localAlarm.RaisedAt.IsZero() && !remoteAlarm.RaisedAt.IsZero() {
 			localAlarm.RaisedAt = remoteAlarm.RaisedAt
 		}
+		localAlarm.LastUpdatedAt = resolveAlarmBusinessTime(remoteAlarm, time.Now())
 		// Merge additional info
 		for k, v := range remoteAlarm.AdditionalInfo {
 			localAlarm.AdditionalInfo[k] = v

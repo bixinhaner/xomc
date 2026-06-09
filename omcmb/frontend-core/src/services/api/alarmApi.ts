@@ -151,6 +151,13 @@ function resolveUpdatedAt(ba: BackendAlarm): string {
   return ba.raised_at;
 }
 
+function resolveEventTime(ba: BackendAlarm): string {
+  if (hasBusinessTimestamp(ba.first_raised_at)) {
+    return ba.first_raised_at;
+  }
+  return ba.raised_at;
+}
+
 // ---------------------------------------------------------------------------
 // Mappers
 // ---------------------------------------------------------------------------
@@ -169,6 +176,8 @@ function mapBackendAlarm(ba: BackendAlarm): Alarm {
     dealState = '0';
   }
 
+  const eventTime = resolveEventTime(ba);
+
   return {
     id: ba.id,
     alarmIdentifier: ba.alarm_identifier,
@@ -182,7 +191,7 @@ function mapBackendAlarm(ba: BackendAlarm): Alarm {
     equipInfo: ba.device_name ? `${ba.device_name}(${ba.device_sn})` : ba.device_sn,
     eventType: normalizeEventType(ba.event_type || ba.alarm_type),
     dealState,
-    eventTime: ba.raised_at,
+    eventTime,
     updTime: resolveUpdatedAt(ba),
     dealUser: ba.acknowledged_by,
     dealTime: ba.acknowledged_at,
@@ -193,16 +202,16 @@ function mapBackendAlarm(ba: BackendAlarm): Alarm {
     alarmType: ba.status === 'cleared' ? 'history' : 'active',
     alarmCount: ba.ack_count || 1,
     unread: ba.is_read ? '0' : '1',
-    duration: ba.cleared_at && ba.raised_at
+    duration: ba.cleared_at && eventTime
       ? Math.floor(
           (new Date(ba.cleared_at).getTime() -
-            new Date(ba.raised_at).getTime()) /
+            new Date(eventTime).getTime()) /
             60000
         )
       : ba.acknowledged_at
         ? Math.floor(
             (new Date(ba.acknowledged_at).getTime() -
-              new Date(ba.raised_at).getTime()) /
+              new Date(eventTime).getTime()) /
               60000
           )
         : undefined,

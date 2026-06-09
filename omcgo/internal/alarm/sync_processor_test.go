@@ -175,3 +175,58 @@ func TestProcessSync_OverridesSeverityFromDefinitionRegistry(t *testing.T) {
 	require.NotNil(t, alarm)
 	assert.Equal(t, model.AlarmSeverity(31004), alarm.Severity)
 }
+
+func TestProcessSync_PreservesFirstRaisedAtOnUpdate(t *testing.T) {
+	store := newMockAlarmStore()
+	engine := newTestEngine(store)
+	deviceID := uuid.New()
+	processor := NewAlarmSyncProcessor(engine, store, nil, nil, zap.NewNop()).WithDeviceReader(&rcvMockDeviceReader{
+		deviceBySN: map[string]*model.Device{
+			"SN-SYNC-004": {
+				ID:           deviceID,
+				SerialNumber: "SN-SYNC-004",
+				Carrier:      model.CarrierCode("cmcc"),
+				Technology:   model.TechLTE,
+			},
+		},
+	})
+
+	firstRaisedAt := time.Date(2026, 6, 5, 9, 1, 0, 0, time.UTC)
+	updatedRaisedAt := firstRaisedAt.Add(5 * time.Minute)
+	initial := &model.Alarm{
+		ID:              uuid.New(),
+		DeviceID:        deviceID,
+		DeviceSN:        "SN-SYNC-004",
+		Carrier:         model.CarrierCode("cmcc"),
+		AlarmIdentifier: "70011",
+		AlarmType:       "equipment",
+		Severity:        model.AlarmMajor,
+		Status:          model.AlarmActive,
+		RaisedAt:        firstRaisedAt,
+		FirstRaisedAt:   firstRaisedAt,
+		LastUpdatedAt:   firstRaisedAt,
+		AdditionalInfo:  map[string]string{},
+	}
+	store.active[initial.ID] = initial
+
+	params := []tr069.ParameterValueStruct{
+		{Name: "Device.FaultMgmt.CurrentAlarm.1.AlarmIdentifier", Value: "70011"},
+		{Name: "Device.FaultMgmt.CurrentAlarm.1.AlarmRaisedTime", Value: updatedRaisedAt.Format(time.RFC3339)},
+		{Name: "Device.FaultMgmt.CurrentAlarm.1.EventType", Value: "Equipment Alarm"},
+		{Name: "Device.FaultMgmt.CurrentAlarm.1.ProbableCause", Value: "RU RF shutdown for cell"},
+		{Name: "Device.FaultMgmt.CurrentAlarm.1.SpecificProblem", Value: "RU RF shutdown for cell"},
+		{Name: "Device.FaultMgmt.CurrentAlarm.1.PerceivedSeverity", Value: "Critical"},
+	}
+
+	result := processor.processSync(context.Background(), "SN-SYNC-004", params)
+	require.Equal(t, 1, result.Updated)
+	require.Zero(t, result.FailedUpdate)
+
+	alarm, err := store.GetActiveByDeviceAndIdentifier(context.Background(), "SN-SYNC-004", "70011")
+	require.NoError(t, err)
+	require.NotNil(t, alarm)
+	assert.Equal(t, firstRaisedAt, alarm.RaisedAt)
+	assert.Equal(t, firstRaisedAt, alarm.FirstRaisedAt)
+	assert.Equal(t, updatedRaisedAt, alarm.LastUpdatedAt)
+	assert.Equal(t, model.AlarmCritical, alarm.Severity)
+}
