@@ -10,7 +10,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useIntl, type IntlShape } from 'react-intl';
-import { Alert, Button, Card, DatePicker, Empty, Space, Spin, Table, Tabs, Tag, Tooltip, Typography, message } from 'antd';
+import { Alert, Button, Card, DatePicker, Empty, Space, Table, Tabs, Tag, Tooltip, Typography, message } from 'antd';
+import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { ExportOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -191,7 +192,9 @@ export function AdhocResultPanel({ taskId, embedded = false }: Props) {
     );
   };
 
-  if (taskQuery.isLoading) return <Spin tip={intl.formatMessage({ id: 'perf.dashboard.loadingTask' })} />;
+  if (taskQuery.isLoading) return (
+    <LoadingSpinner tip={intl.formatMessage({ id: 'perf.dashboard.loadingTask' })} />
+  );
   if (taskQuery.isError || !taskQuery.data) {
     return (
       <Alert

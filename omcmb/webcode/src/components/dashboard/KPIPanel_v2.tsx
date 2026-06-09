@@ -10,9 +10,8 @@
  */
 
 import React, { useState, useMemo, useCallback } from 'react';
-import { Card, Select, Button, Checkbox, Space, Spin, Empty, Typography, Dropdown, Segmented } from 'antd';
+import { Card, Select, Button, Checkbox, Space, Empty, Typography, Dropdown, Segmented } from 'antd';
 import {
-  LoadingOutlined,
   FullscreenOutlined,
   DownloadOutlined,
   BarChartOutlined,
@@ -24,6 +23,7 @@ import {
   InfoCircleOutlined
 } from '@ant-design/icons';
 import LineChart from '@/components/Charts/LineChart';
+import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { useT } from '@/hooks/useT';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import type {
@@ -471,9 +471,7 @@ export function KPIPanelV2({
       {/* 图表区域 */}
       <div style={{ flex: 1, minHeight: height - 140 }}>
         {isLoading ? (
-          <div style={{ height: height - 140, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Spin indicator={<LoadingOutlined spin />} tip={t('common.loading')} />
-          </div>
+          <LoadingSpinner tip={t('common.loading')} style={{ height: height - 140 }} />
         ) : !hasSelection || !hasData ? (
           <div style={{ height: height - 140, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
             <SmartEmptyState

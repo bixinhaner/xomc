@@ -29,10 +29,10 @@ import {
   Radio,
   Segmented,
   Space,
-  Spin,
   Tag,
   Typography,
 } from 'antd';
+import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { ReloadOutlined, LineChartOutlined, ExportOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import {
@@ -478,7 +478,7 @@ export default function DeviceListPane() {
         </Card>
       ) : isLoading || isFetching || prevFetching ? (
         <Card>
-          <Spin tip={intl.formatMessage({ id: 'common.loading' })} />
+          <LoadingSpinner tip={intl.formatMessage({ id: 'common.loading' })} />
         </Card>
       ) : charts.length === 0 ? (
         <Card>

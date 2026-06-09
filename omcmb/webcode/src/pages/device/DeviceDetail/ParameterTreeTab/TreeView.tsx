@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Tree, Tag, Space, Typography, Spin, Empty, Tooltip, Popconfirm, message } from 'antd';
+import { Tree, Tag, Space, Typography, Empty, Tooltip, Popconfirm, message } from 'antd';
+import { LoadingSpinner } from '@/components/LoadingSpinner';
+import { useT } from '@/hooks/useT';
 import {
   EditOutlined,
   FolderOutlined,
@@ -249,6 +251,7 @@ export default function TreeView({
   loading,
   searchKeyword,
 }: TreeViewProps) {
+  const t = useT();
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
   const addObjectMutation = useAddObject();
   const deleteObjectMutation = useDeleteObject();
@@ -319,17 +322,17 @@ export default function TreeView({
   if (loading) {
     return (
       <div style={{ textAlign: 'center', padding: 48 }}>
-        <Spin tip="加载参数树..." />
+        <LoadingSpinner tip={t('device.parameter.loadingTree')} />
       </div>
     );
   }
 
   if (!treeData || treeData.length === 0) {
-    return <Empty description="暂无参数数据，请先执行参数发现" />;
+    return <Empty description={t('device.parameter.noDataHint')} />;
   }
 
   if (filteredData.length === 0) {
-    return <Empty description="未找到匹配的参数" />;
+    return <Empty description={t('device.parameter.noMatchHint')} />;
   }
 
   return (

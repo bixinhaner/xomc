@@ -3,9 +3,9 @@
  */
 
 import React, { useMemo } from 'react';
-import { Card, Button, Space, Typography, Spin, Empty } from 'antd';
-import { LoadingOutlined } from '@ant-design/icons';
+import { Card, Button, Space, Typography, Empty } from 'antd';
 import LineChart from '@/components/Charts/LineChart';
+import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { useT } from '@/hooks/useT';
 import { useThemeToken } from '@/hooks/useThemeToken';
 
@@ -120,9 +120,7 @@ export function KPITrendChart({
       extra={status ? <Text style={{ fontSize: 12, color: statusColor }}>{statusText}</Text> : null}
     >
       {loading ? (
-        <div style={{ height: height - 40, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <Spin indicator={<LoadingOutlined spin />} tip={t('common.loading')} />
-        </div>
+        <LoadingSpinner tip={t('common.loading')} style={{ height: height - 40 }} />
       ) : !hasData ? (
         <div style={{ height: height - 40, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('common.noData')} />

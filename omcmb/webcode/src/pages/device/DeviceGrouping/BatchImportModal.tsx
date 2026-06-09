@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
-import { Alert, App, Button, List, Modal, Spin, Tag, Typography, Upload } from 'antd';
+import { Alert, App, Button, List, Modal, Tag, Typography, Upload } from 'antd';
+import { LoadingSpinner } from '@/components/LoadingSpinner';
 import type { UploadFile, UploadProps } from 'antd';
 import {
   CheckCircleOutlined,
@@ -430,7 +431,7 @@ export default function BatchImportModal({
 
       {importing ? (
         <div style={{ marginBottom: 16, textAlign: 'center' }}>
-          <Spin tip={t('common.loading')} />
+          <LoadingSpinner tip={t('common.loading')} />
         </div>
       ) : null}
 

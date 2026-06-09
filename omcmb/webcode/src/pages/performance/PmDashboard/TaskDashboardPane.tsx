@@ -11,7 +11,8 @@
 
 import { useMemo, useState } from 'react';
 import { useIntl } from 'react-intl';
-import { Alert, App, Button, Card, Empty, Segmented, Space, Spin, Tag, Typography } from 'antd';
+import { Alert, App, Button, Card, Empty, Segmented, Space, Tag, Typography } from 'antd';
+import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { ExportOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import {
@@ -200,7 +201,7 @@ export default function TaskDashboardPane({ taskId }: Props) {
   if (taskQuery.isLoading) {
     return (
       <Card>
-        <Spin tip={intl.formatMessage({ id: 'perf.dashboard.loadingTask' })} />
+        <LoadingSpinner tip={intl.formatMessage({ id: 'perf.dashboard.loadingTask' })} />
       </Card>
     );
   }
@@ -288,7 +289,7 @@ export default function TaskDashboardPane({ taskId }: Props) {
 
       {rowsLoading || (filter.compare && prevLoading) ? (
         <Card>
-          <Spin tip={intl.formatMessage({ id: 'perf.dashboard.loadingResult' })} />
+          <LoadingSpinner tip={intl.formatMessage({ id: 'perf.dashboard.loadingResult' })} />
         </Card>
       ) : charts.length === 0 ? (
         <Card>

@@ -10,7 +10,6 @@
 // 设计依据：docs/prd/system/menu-dynamic-loading.md §4.3.2 (App 启动流程改造)。
 
 import { useEffect, type ReactNode } from 'react';
-import { Spin } from 'antd';
 
 import { useAppStore } from '@core/store/appStore';
 import { useMenuStore } from '@core/store/menuStore';
@@ -19,6 +18,7 @@ import { useUserMenus } from '@core/hooks/api/useMenus';
 import { useSysConfigsByCategory } from '@core/hooks/api/useSystem';
 
 import { isDynamicMenuEnabled } from './featureFlag';
+import { LoadingSpinner } from '../LoadingSpinner';
 
 interface MenuBootstrapProps {
   children: ReactNode;
@@ -80,7 +80,7 @@ function MenuBootstrapInner({ loaded, children }: { loaded: boolean; children: R
           height: '100vh',
         }}
       >
-        <Spin size="large" tip="加载菜单..." />
+        <LoadingSpinner tip="加载菜单..." size="large" />
       </div>
     );
   }

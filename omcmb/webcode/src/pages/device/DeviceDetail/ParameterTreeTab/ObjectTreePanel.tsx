@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Typography, Spin, Empty, Tooltip, Button, theme } from 'antd';
+import { Typography, Empty, Tooltip, Button, theme } from 'antd';
+import { LoadingSpinner } from '@/components/LoadingSpinner';
 import {
   PlusOutlined,
   DeleteOutlined,
@@ -406,7 +407,7 @@ export default function ObjectTreePanel({
   if (loading) {
     return (
       <div className="tree-panel-empty">
-        <Spin tip="加载参数树..." />
+        <LoadingSpinner tip="加载参数树..." />
       </div>
     );
   }
