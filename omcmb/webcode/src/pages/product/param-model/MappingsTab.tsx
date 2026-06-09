@@ -62,12 +62,28 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
   const createMut = useCreateMapping();
   const updateMut = useUpdateMapping();
   const deleteMut = useDeleteMapping();
+  const [editing, setEditing] = useState<ParamMapping | null>(null);
+
+  // 当前模型已存在的标准 PATH 集合——用于新增态去重(同一标准 PATH 不能重复添加)。
+  const usedStdPaths = useMemo(
+    () => new Set((data?.items ?? []).map((m) => m.standardPath)),
+    [data],
+  );
 
   // 标准 PATH 下拉数据源(与 product/standard-params 同一接口,全量 <500 条,客户端搜索)。
   const { data: stdData } = useStandardParams();
+  // 新增态把已添加的标准 PATH 置灰并标注「已添加」,从源头阻断重复;编辑态整个 Select 已 disabled,不受影响。
   const stdOptions = useMemo(
-    () => (stdData?.items ?? []).map((s) => ({ label: s.standardPath, value: s.standardPath })),
-    [stdData],
+    () =>
+      (stdData?.items ?? []).map((s) => {
+        const used = !editing && usedStdPaths.has(s.standardPath);
+        return {
+          label: used ? `${s.standardPath}（${t('product.paramModel.mappings.stdAdded')}）` : s.standardPath,
+          value: s.standardPath,
+          disabled: used,
+        };
+      }),
+    [stdData, usedStdPaths, editing, t],
   );
   // 选中标准 PATH 时,用其元属性回填表单(entryType/access/dataType/changeApplies/min/max)。
   const onPickStandard = (path: string) => {
@@ -89,7 +105,6 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
   const [keyword, setKeyword] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
-  const [editing, setEditing] = useState<ParamMapping | null>(null);
 
   // 过滤条件变化时回到第一页——渲染期重置,避免 set-state-in-effect。
   const filterKey = `${keyword}|${entryFilter}|${selectedName ?? ''}`;
@@ -317,7 +332,16 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
           <Form.Item
             name="standardPath"
             label={t('product.paramModel.mappings.col.standardPath')}
-            rules={[{ required: true, message: t('common.required') }]}
+            rules={[
+              { required: true, message: t('common.required') },
+              {
+                // 新增态:同一标准 PATH 不能重复添加(编辑态 standard_path 锁定,跳过)。
+                validator: (_, value: string) => {
+                  if (editing || !value || !usedStdPaths.has(value)) return Promise.resolve();
+                  return Promise.reject(new Error(t('product.paramModel.mappings.standardDuplicate')));
+                },
+              },
+            ]}
             extra={
               editing
                 ? t('product.paramModel.mappings.standardLockedHint')
@@ -333,14 +357,15 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
               onChange={(v: string) => onPickStandard(v)}
             />
           </Form.Item>
-          {/* 私有 PATH:内置映射编辑时锁定(它是 custom 覆盖的锚点,只能改元属性)。 */}
+          {/* 私有 PATH:编辑态允许更新(后端 UpdateMapping 支持改 private_path,并把 source 自动转为 custom)。
+              受 (param_model_id, private_path) 唯一约束保护,改成已存在的私有 PATH 后端会返回错误。 */}
           <Form.Item
             name="privatePath"
             label={t('product.paramModel.mappings.col.privatePath')}
             rules={[{ required: true, message: t('common.required') }]}
-            extra={editing?.source === 'builtin' ? t('product.paramModel.mappings.privateLockedHint') : undefined}
+            extra={editing ? t('product.paramModel.mappings.privateEditHint') : undefined}
           >
-            <Input placeholder="X_VENDOR_AccessPoint.{i}.PLMNID" disabled={editing?.source === 'builtin'} />
+            <Input placeholder="X_VENDOR_AccessPoint.{i}.PLMNID" />
           </Form.Item>
           <Space style={{ width: '100%' }} size="middle" wrap>
             <Form.Item name="entryType" label={t('product.paramModel.mappings.col.entryType')} rules={[{ required: true }]}>

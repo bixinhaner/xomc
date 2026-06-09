@@ -140,7 +140,9 @@ func (r *PgRepository) ParamModelNameExists(ctx context.Context, name string) (b
 
 // DeleteOrphansSince 删除自 since 以来未被 UPSERT 触及的 param_models 行（孤儿）。
 // 用途：destructive reload — 重载 XML 后，若 DB 中存在不再于 XML 目录中的模型，
-//      它们的 updated_at 不会被 BEFORE UPDATE 触发器更新，可作为孤儿判定标志。
+//
+//	它们的 updated_at 不会被 BEFORE UPDATE 触发器更新，可作为孤儿判定标志。
+//
 // 副作用：
 //   - param_mappings 通过 FK CASCADE 自动删除
 //   - products.param_model_id 通过 FK SET NULL 置空（产品本身保留）
@@ -179,6 +181,17 @@ func (r *PgRepository) CreateMapping(ctx context.Context, paramModelID uuid.UUID
 	}
 	if in.EntryType != "object" && in.EntryType != "parameter" {
 		return nil, fmt.Errorf("entry_type must be object|parameter, got %q", in.EntryType)
+	}
+	// 同一 paramModel 下 standard_path 不允许重复(库表无此唯一约束,在此应用层守门)。
+	var existing int
+	if err := r.pool.QueryRow(ctx,
+		`SELECT COUNT(1) FROM param_mappings WHERE param_model_id = $1 AND standard_path = $2`,
+		paramModelID, in.StandardPath,
+	).Scan(&existing); err != nil {
+		return nil, fmt.Errorf("check duplicate standard_path: %w", err)
+	}
+	if existing > 0 {
+		return nil, ErrDuplicateStandardPath
 	}
 	// T-PMSRC: 管理员经 UI 新增的映射恒为 source='custom'(重载 XML 不覆盖,可删)。
 	const insertSQL = `
@@ -331,15 +344,17 @@ func (r *PgRepository) DeleteDiscoveredAll(ctx context.Context, productID uuid.U
 
 // ── Standard params CRUD ────────────────────────────────────────────
 
-// ListStandardParams 列出全部 standard_params；keyword 在 standard_path 上做 ILIKE。
+// ListStandardParams 列出全部 standard_params（前端 load-all + 客户端分页，故此处一次性
+// 返回全量）；keyword 在 standard_path 上做 ILIKE。standard_params 是有界参考表（TR069
+// 标准路径，数千量级），不设 LIMIT 上限——此前硬编码 Limit(2000) 在表超过 2000 行后会把
+// 列表截断，导致前端「总条数」恒为 2000、新增的标准 PATH 不显示。
 func (r *PgRepository) ListStandardParams(ctx context.Context, keyword string, entryType string) ([]StandardParam, error) {
 	psql := sq.StatementBuilder.PlaceholderFormat(sq.Dollar)
 	qb := psql.Select("standard_path", "entry_type",
 		"COALESCE(access,'')", "COALESCE(data_type,'')", "COALESCE(change_applies,'')",
 		"min_value", "max_value").
 		From("standard_params").
-		OrderBy("standard_path ASC").
-		Limit(2000)
+		OrderBy("standard_path ASC")
 	if strings.TrimSpace(keyword) != "" {
 		qb = qb.Where(sq.ILike{"standard_path": "%" + strings.TrimSpace(keyword) + "%"})
 	}

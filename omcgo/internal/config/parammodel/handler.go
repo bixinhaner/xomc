@@ -754,6 +754,10 @@ func (h *Handler) CreateMapping(c *gin.Context) {
 		in.IsStorable = *req.IsStorable
 	}
 	created, err := h.repo.CreateMapping(c.Request.Context(), m.ID, in)
+	if errors.Is(err, ErrDuplicateStandardPath) {
+		commonerrors.AbortWithError(c, http.StatusConflict, err)
+		return
+	}
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return

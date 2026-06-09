@@ -25,6 +25,10 @@ var ErrBuiltinMappingNotDeletable = errors.New("parammodel: builtin mapping not 
 // 通常是 products.xml 漏配或孤儿设备绑定了空 product。
 var ErrNoParamModel = errors.New("parammodel: product has no paramModelID")
 
+// ErrDuplicateStandardPath 表示同一 paramModel 下 standard_path 已存在；
+// handler 据此返回 409，防止同一标准 PATH 被重复添加。
+var ErrDuplicateStandardPath = errors.New("parammodel: standard_path already exists in this model")
+
 // ErrProductGetterUnset 在 Registry 未注入 productGetter 但被调用 GetByProduct/Translator 时返回。
 // 仅在测试/降级容器中可能出现；生产 provider 必须注入。
 var ErrProductGetterUnset = errors.New("parammodel: productGetter not configured")
