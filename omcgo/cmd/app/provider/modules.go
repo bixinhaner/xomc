@@ -1353,20 +1353,22 @@ func initMiscModules(c *Container) error {
 	//
 	// 重构（PR-C）：抛弃原"devices LEFT JOIN products"单条 SQL，改走 cache-aware
 	// 分层链路：
-	//   1) deviceKey 解析为 SN (UUID 首先尝试 GetByID 不命中再退 SN)
+	//   1) deviceKey 解析为设备 (UUID 首先尝试 GetByID 不命中再退 SN)
 	//   2) DeviceService.GetBySerialNumber → 享受 DeviceCache L1 命中
-	//   3) device.ProductClass → ProductRegistry.MatchProductClass → product
-	//      (享受 T-0173 的 productClass L1/L2 缓存)
+	//   3) 路由到 product（product_id 优先，product_class 兜底）：
+	//      3a) device.ProductID 非空 → ProductRegistry.GetProductByID → product
+	//          （设备已绑定的产品为权威来源，避免 product_class 正则未覆盖时误判孤儿）
+	//      3b) product_id 为空 / 指向的产品不存在 → device.ProductClass →
+	//          ProductRegistry.MatchProductClass → product（享受 T-0173 productClass 缓存）
 	//   4) product.ParamModelID
 	//
 	// 旧 SQL 的 device.param_model_id 字段已不在 Go model 上（T-0098 后字段下线，
-	// 仅 DB 列残留）；本路径不再读该列，与 lazy bind PR-D 收敛到 product 路由
+	// 仅 DB 列残留）；本路径不读该列，统一经 product 装配件取 ParamModelID，
 	// 单一真值源。
 	//
 	// silent skip 语义（返回 (nil, nil)）：
 	//   - 设备不存在
-	//   - 设备 productClass 空（未上报 inform）
-	//   - 孤儿 productClass（无 product 路由命中）
+	//   - product_id 与 productClass 均无法路由到 product（孤儿）
 	//   - product 装配件未挂 paramModel
 	// 上层（ConsoleService）见 nil 即降级到"全集 sub_field"行为，与原 SQL NULL
 	// 返回路径等价。
@@ -1375,7 +1377,22 @@ func initMiscModules(c *Container) error {
 		if err != nil {
 			return nil, fmt.Errorf("resolve device %q: %w", deviceKey, err)
 		}
-		if dev == nil || dev.ProductClass == "" {
+		if dev == nil {
+			return nil, nil
+		}
+		// 3a) 优先按设备已绑定的 product_id 直接取产品 → paramModel。
+		if dev.ProductID != nil {
+			p, err := c.ProductRegistry.GetProductByID(ctx, *dev.ProductID)
+			if err != nil {
+				return nil, fmt.Errorf("get product %s for device %q: %w", dev.ProductID, deviceKey, err)
+			}
+			if p != nil {
+				return p.ParamModelID, nil
+			}
+			// product_id 指向的产品已不存在（脏数据）→ 落到 3b productClass 兜底。
+		}
+		// 3b) product_id 为空 / 失效 → productClass 正则路由兜底。
+		if dev.ProductClass == "" {
 			return nil, nil
 		}
 		mr, err := c.ProductRegistry.MatchProductClass(ctx, dev.ProductClass)
@@ -1399,7 +1416,15 @@ func initMiscModules(c *Container) error {
 		if err != nil {
 			return nil, fmt.Errorf("resolve device %q: %w", deviceKey, err)
 		}
-		if dev == nil || dev.ProductClass == "" {
+		if dev == nil {
+			return nil, nil
+		}
+		// 优先用设备已绑定的 product_id；为空再按 product_class 正则路由兜底。
+		if dev.ProductID != nil {
+			pid := *dev.ProductID
+			return &pid, nil
+		}
+		if dev.ProductClass == "" {
 			return nil, nil
 		}
 		mr, err := c.ProductRegistry.MatchProductClass(ctx, dev.ProductClass)
