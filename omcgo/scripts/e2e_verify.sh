@@ -102,8 +102,8 @@ encrypt_password() {
     if [ -z "$PUBLIC_KEY_PEM" ]; then
         local pk_resp
         pk_resp=$(curl -s "$API/auth/public-key")
-        PUBLIC_KEY_PEM=$(echo "$pk_resp" | python3 -c "import sys,json; d=json.load(sys.stdin); print((d.get('data') or {}).get('public_key',''))" 2>/dev/null)
-        PUBLIC_KEY_ID=$(echo "$pk_resp" | python3 -c "import sys,json; d=json.load(sys.stdin); print((d.get('data') or {}).get('key_id',''))" 2>/dev/null)
+        PUBLIC_KEY_PEM=$(printf '%s' "$pk_resp" | python3 -c "import sys,json; d=json.load(sys.stdin); print((d.get('data') or {}).get('public_key',''))" 2>/dev/null)
+        PUBLIC_KEY_ID=$(printf '%s' "$pk_resp" | python3 -c "import sys,json; d=json.load(sys.stdin); print((d.get('data') or {}).get('key_id',''))" 2>/dev/null)
         if [ -z "$PUBLIC_KEY_PEM" ] || [ -z "$PUBLIC_KEY_ID" ]; then
             echo "ERROR: failed to fetch /auth/public-key" >&2
             return 1
@@ -136,7 +136,8 @@ check_json_field() {
     local json="$2"
     local field="$3"
     local value
-    value=$(echo "$json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('$field',''))" 2>/dev/null || echo "")
+    # 后端统一响应信封 {data:{...},msg,ret}：业务字段在 data.* 下。顶层找不到则回退 data.<field>。
+    value=$(printf '%s' "$json" | python3 -c "import sys,json; d=json.load(sys.stdin); v=d.get('$field'); v=v if (v is not None and v!='') else (d.get('data') or {}).get('$field',''); print('' if v is None else v)" 2>/dev/null || echo "")
     if [ -n "$value" ] && [ "$value" != "None" ]; then
         pass "$desc (${field}=${value})"
         return 0
@@ -336,6 +337,14 @@ check_status "GET /healthz" "200" "$HTTP_CODE"
 section "2. Authentication — Login"
 # ============================================================
 
+# 预取 RSA 公钥到主作用域：encrypt_password 在 $(...) 命令替换子 shell 中运行，
+# 其对 PUBLIC_KEY_ID/PUBLIC_KEY_PEM 的赋值无法回传父作用域，会导致登录请求 key_id 为空 → 后端无法解密 → 400。
+if [ -z "$PUBLIC_KEY_PEM" ] || [ -z "$PUBLIC_KEY_ID" ]; then
+    _pk_resp=$(curl -s "$API/auth/public-key")
+    PUBLIC_KEY_PEM=$(printf '%s' "$_pk_resp" | python3 -c "import sys,json; print((json.load(sys.stdin).get('data') or {}).get('public_key',''))" 2>/dev/null)
+    PUBLIC_KEY_ID=$(printf '%s' "$_pk_resp" | python3 -c "import sys,json; print((json.load(sys.stdin).get('data') or {}).get('key_id',''))" 2>/dev/null)
+fi
+
 # 2.1 Valid login（密码必须 RSA-OAEP 加密后传 encrypted_password + key_id）
 ENC_ADMIN=$(encrypt_password "admin123")
 RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/auth/login" \
@@ -348,13 +357,14 @@ check_status "POST /auth/login (valid credentials)" "200" "$HTTP_CODE"
 ACCESS_TOKEN=""
 REFRESH_TOKEN=""
 if [ "$HTTP_CODE" = "200" ]; then
-    check_json_field "Login response has access_token" "$BODY" "access_token"
-    check_json_field "Login response has refresh_token" "$BODY" "refresh_token"
-    check_json_field "Login response has expires_at" "$BODY" "expires_at"
-    check_json_field "Login response has token_type" "$BODY" "token_type"
+    # 后端统一响应信封 {data:{...},msg,ret}，token 在 data.* 下，需解包
+    check_json_path "Login response has access_token" "$BODY" "data.access_token"
+    check_json_path "Login response has refresh_token" "$BODY" "data.refresh_token"
+    check_json_path "Login response has expires_at" "$BODY" "data.expires_at"
+    check_json_path "Login response has token_type" "$BODY" "data.token_type"
 
-    ACCESS_TOKEN=$(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null || echo "")
-    REFRESH_TOKEN=$(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('refresh_token',''))" 2>/dev/null || echo "")
+    ACCESS_TOKEN=$(printf '%s' "$BODY" | python3 -c "import sys,json; print((json.load(sys.stdin).get('data') or {}).get('access_token',''))" 2>/dev/null || echo "")
+    REFRESH_TOKEN=$(printf '%s' "$BODY" | python3 -c "import sys,json; print((json.load(sys.stdin).get('data') or {}).get('refresh_token',''))" 2>/dev/null || echo "")
 fi
 
 # 2.2 Invalid password（同样需要加密；后端解密成功 → bcrypt 比对失败 → 401）
