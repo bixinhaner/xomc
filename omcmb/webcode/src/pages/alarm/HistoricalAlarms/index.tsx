@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Badge, Button, Card, Dropdown, Space, Tag, Typography, App } from 'antd';
 import {
   CheckOutlined,
@@ -22,6 +22,7 @@ import { useT } from '@/hooks/useT';
 import type { Alarm, DealState, EventType } from '@core/types/alarm';
 import type { AlarmFilter } from '@core/types/alarm';
 import AlarmDetail from '../AlarmDetail';
+import AutoRefreshDropdown from '../components/AutoRefreshDropdown';
 import ExportModal, { type ExportParams } from '../CurrentAlarms/ExportModal';
 import ConfirmWithNoteModal from '../components/ConfirmWithNoteModal';
 import { BASE_STATION_TYPE_OPTIONS, formatBaseStationTypeLabel } from '../utils/baseStationType';
@@ -90,6 +91,8 @@ export default function HistoricalAlarms() {
   const [exportOpen, setExportOpen] = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
   const [activeQuickFilter, setActiveQuickFilter] = useState<string>('all');
+  const [autoRefresh, setAutoRefresh] = useState(false);
+  const [refreshInterval, setRefreshInterval] = useState(30);
 
   // 确认告警弹窗状态
   const [ackModalOpen, setAckModalOpen] = useState(false);
@@ -165,7 +168,14 @@ export default function HistoricalAlarms() {
     [filterParams, currentPage, pageSize]
   );
 
-  const { data, isLoading, refetch } = useHistoricalAlarms(queryParams as unknown as Parameters<typeof useHistoricalAlarms>[0]);
+  const { data, isLoading, refetch } = useHistoricalAlarms(
+    queryParams as unknown as Parameters<typeof useHistoricalAlarms>[0],
+    {
+      refetchIntervalMs: autoRefresh ? refreshInterval * 1000 : false,
+      refetchIntervalInBackground: autoRefresh,
+      refetchOnWindowFocus: true,
+    }
+  );
   const acknowledgeHistoryAlarms = useAcknowledgeHistoryAlarms();
   const unacknowledgeHistoryAlarms = useUnacknowledgeHistoryAlarms();
   const deleteHistoryAlarms = useDeleteHistoryAlarms();
@@ -173,6 +183,11 @@ export default function HistoricalAlarms() {
 
   const rawAlarms: Alarm[] = useMemo(() => data?.items ?? [], [data]);
   const total = data?.total ?? 0;
+
+  useEffect(() => {
+    if (!autoRefresh) return;
+    void refetch();
+  }, [autoRefresh, refreshInterval, refetch]);
 
   // 未读告警排在最前面
   const alarms = useMemo(
@@ -674,14 +689,22 @@ export default function HistoricalAlarms() {
     <ListPageLayout
       title={t('nav.alarm.history')}
       extra={
-        <Button
-          icon={<ExportOutlined />}
-          onClick={() => {
-            setExportOpen(true);
-          }}
-        >
-          导出
-        </Button>
+        <Space>
+          <AutoRefreshDropdown
+            enabled={autoRefresh}
+            intervalSeconds={refreshInterval}
+            onEnabledChange={setAutoRefresh}
+            onIntervalChange={setRefreshInterval}
+          />
+          <Button
+            icon={<ExportOutlined />}
+            onClick={() => {
+              setExportOpen(true);
+            }}
+          >
+            导出
+          </Button>
+        </Space>
       }
     >
       {/* 统计卡片 - Pill Tabs 风格 */}
@@ -763,6 +786,7 @@ export default function HistoricalAlarms() {
           }}
           batchActions={batchActions}
           onRefresh={() => void refetch()}
+          hideRealtime
           alarmRowStyle={alarmRowStyle as (record: Alarm) => 'critical' | 'major' | 'minor' | 'warning' | null}
           defaultDensity="default"
           showRowNumber

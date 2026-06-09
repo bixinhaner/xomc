@@ -39,11 +39,16 @@ export function useCurrentAlarms(
   });
 }
 
-export function useHistoricalAlarms(params: AlarmFilter & PageRequest) {
+export function useHistoricalAlarms(
+  params: AlarmFilter & PageRequest,
+  options?: AlarmQueryOptions
+) {
   return useQuery({
     queryKey: ['alarms', 'historical', params],
     queryFn: () => api.getHistoricalAlarms(params),
-    refetchOnWindowFocus: true,
+    refetchInterval: options?.refetchIntervalMs ?? false,
+    refetchIntervalInBackground: options?.refetchIntervalInBackground ?? false,
+    refetchOnWindowFocus: options?.refetchOnWindowFocus ?? true,
   });
 }
 

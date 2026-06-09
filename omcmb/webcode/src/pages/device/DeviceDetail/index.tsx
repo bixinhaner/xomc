@@ -49,6 +49,7 @@ import QuickSettingsTab from './QuickSettingsTab';
 import LicenseParamsTab from './LicenseParamsTab';
 import { formatLteBandwidthDisplay } from './QuickSettingsTab/validators';
 import AlarmDetail from '@/pages/alarm/AlarmDetail';
+import AutoRefreshDropdown from '@/pages/alarm/components/AutoRefreshDropdown';
 import ConfirmWithNoteModal from '@/pages/alarm/components/ConfirmWithNoteModal';
 
 const { Title, Text } = Typography;
@@ -1326,18 +1327,32 @@ export default function DeviceDetail() {
   const clearAlarms = useClearAlarms();
   const [alarmPage, setAlarmPage] = useState(1);
   const [alarmPageSize, setAlarmPageSize] = useState(20);
+  const [alarmAutoRefresh, setAlarmAutoRefresh] = useState(false);
+  const [alarmRefreshInterval, setAlarmRefreshInterval] = useState(30);
 
   const alarmParams = useMemo(
     () => ({ deviceSn: sn, page: alarmPage, pageSize: alarmPageSize } as Parameters<typeof useCurrentAlarms>[0]),
     [alarmPage, alarmPageSize, sn]
   );
-  const { data: alarmData, isLoading: alarmsLoading, refetch: refetchAlarms } = useCurrentAlarms(alarmParams);
+  const { data: alarmData, isLoading: alarmsLoading, refetch: refetchAlarms } = useCurrentAlarms(
+    alarmParams,
+    {
+      refetchIntervalMs: alarmAutoRefresh ? alarmRefreshInterval * 1000 : false,
+      refetchIntervalInBackground: alarmAutoRefresh,
+      refetchOnWindowFocus: true,
+    }
+  );
   const alarms: Alarm[] = alarmData?.items ?? [];
 
   useEffect(() => {
     setAlarmPage(1);
     setAlarmPageSize(20);
   }, [sn]);
+
+  useEffect(() => {
+    if (!alarmAutoRefresh) return;
+    void refetchAlarms();
+  }, [alarmAutoRefresh, alarmRefreshInterval, refetchAlarms]);
 
   const handleAlarmPageChange = useCallback((page: number, size: number) => {
     setAlarmPage(page);
@@ -1709,6 +1724,16 @@ export default function DeviceDetail() {
                     currentPage={alarmPage}
                     pageSize={alarmPageSize}
                     onPageChange={handleAlarmPageChange}
+                    extraToolbarRight={(
+                      <AutoRefreshDropdown
+                        enabled={alarmAutoRefresh}
+                        intervalSeconds={alarmRefreshInterval}
+                        onEnabledChange={setAlarmAutoRefresh}
+                        onIntervalChange={setAlarmRefreshInterval}
+                        size="small"
+                      />
+                    )}
+                    hideRealtime
                     showPagination
                     defaultDensity="default"
                     alarmRowStyle={(record) => record.severity as 'critical' | 'major' | 'minor' | 'warning'}

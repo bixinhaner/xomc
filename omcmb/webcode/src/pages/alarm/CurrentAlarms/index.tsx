@@ -7,7 +7,6 @@ import {
   MoreOutlined,
   EyeOutlined,
   MinusCircleOutlined,
-  SyncOutlined,
 } from '@ant-design/icons';
 
 import DataTable from '@/components/DataTable';
@@ -26,6 +25,7 @@ import type { Alarm, DealState, EventType } from '@core/types/alarm';
 import type { AlarmFilter } from '@core/types/alarm';
 import AlarmDetail from '../AlarmDetail';
 import ExportModal, { type ExportParams } from './ExportModal';
+import AutoRefreshDropdown from '../components/AutoRefreshDropdown';
 import ConfirmWithNoteModal from '../components/ConfirmWithNoteModal';
 import { BASE_STATION_TYPE_OPTIONS, formatBaseStationTypeLabel } from '../utils/baseStationType';
 import styles from './CurrentAlarms.module.css';
@@ -122,14 +122,6 @@ export default function CurrentAlarms() {
   // 自动刷新状态
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [refreshInterval, setRefreshInterval] = useState(30);
-
-  // 自动刷新间隔选项（依赖 t）
-  const AUTO_REFRESH_INTERVALS = useMemo(() => [
-    { label: t('common.15seconds'), value: 15 },
-    { label: t('common.30seconds'), value: 30 },
-    { label: t('common.1minute'), value: 60 },
-    { label: t('common.5minutes'), value: 300 },
-  ], [t]);
 
   const SEVERITY_LABEL: Record<string, string> = useMemo(() => ({
     critical: t('alarm.severity.critical'),
@@ -751,37 +743,17 @@ export default function CurrentAlarms() {
     [handleAcknowledge, handleUnacknowledge, handleClear, handleMarkRead, t]
   );
 
-  // 自动刷新下拉菜单
-  const autoRefreshMenuItems = useMemo(() => [
-    {
-      key: 'toggle',
-      label: autoRefresh ? t('alarm.autoRefreshOff') : t('alarm.autoRefreshOn'),
-      icon: <SyncOutlined spin={autoRefresh} />,
-    },
-    ...(autoRefresh ? AUTO_REFRESH_INTERVALS.map((opt) => ({
-      key: `interval-${opt.value}`,
-      label: opt.label,
-    })) : []),
-  ], [autoRefresh, AUTO_REFRESH_INTERVALS, t]);
-
-  const handleAutoRefreshMenuClick = useCallback(({ key }: { key: string }) => {
-    if (key === 'toggle') {
-      setAutoRefresh(!autoRefresh);
-    } else if (key.startsWith('interval-')) {
-      setRefreshInterval(parseInt(key.replace('interval-', ''), 10));
-    }
-  }, [autoRefresh]);
-
   return (
     <ListPageLayout
       title={t('nav.alarm.current')}
       extra={
         <Space>
-          <Dropdown menu={{ items: autoRefreshMenuItems, onClick: handleAutoRefreshMenuClick }}>
-            <Button icon={<SyncOutlined spin={autoRefresh} />} type={autoRefresh ? 'primary' : 'default'}>
-              {autoRefresh ? `${refreshInterval}秒` : '自动刷新'}
-            </Button>
-          </Dropdown>
+          <AutoRefreshDropdown
+            enabled={autoRefresh}
+            intervalSeconds={refreshInterval}
+            onEnabledChange={setAutoRefresh}
+            onIntervalChange={setRefreshInterval}
+          />
           <Button
             icon={<ExportOutlined />}
             onClick={() => {
@@ -881,6 +853,7 @@ export default function CurrentAlarms() {
           }}
           batchActions={batchActions}
           onRefresh={() => void refetch()}
+          hideRealtime
           alarmRowStyle={alarmRowStyle as (record: Alarm) => 'critical' | 'major' | 'minor' | 'warning' | null}
           defaultDensity="default"
           showRowNumber
