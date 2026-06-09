@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Table, Tag, Tooltip, Button, Space, Modal, Spin, message } from 'antd';
+import { Table, Tag, Tooltip, Button, Space, Modal, Spin, Typography, message } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -80,11 +80,16 @@ export default function PathListSection({
       title: t('mml.admin.catalog.subField.standardPath'),
       dataIndex: 'tr069Path',
       key: 'standardPath',
-      ellipsis: { showTitle: true },
       render: (p: string) => (
-        <code style={{ fontSize: 12 }} title={p}>
-          {p}
-        </code>
+        // 标准路径 + 一键复制（复用 antd Typography.copyable，自带剪贴板 + 反馈，tooltip 走 i18n）。
+        <Space size={4} style={{ width: '100%', minWidth: 0 }}>
+          <Typography.Text code style={{ fontSize: 12, flex: 1, minWidth: 0 }} ellipsis={{ tooltip: p }}>
+            {p}
+          </Typography.Text>
+          <Typography.Text
+            copyable={{ text: p, tooltips: [t('common.copy'), t('table.copied')] }}
+          />
+        </Space>
       ),
     },
     {
@@ -94,32 +99,6 @@ export default function PathListSection({
       width: 80,
       align: 'center',
       render: (v: boolean) => (v ? <Tag color="green">✓</Tag> : '-'),
-    },
-    {
-      title: t('mml.admin.catalog.subField.supported'),
-      dataIndex: 'isSupported',
-      key: 'isSupported',
-      width: 130,
-      align: 'center',
-      render: (_v: boolean, sf) => {
-        if (sf.totalModelCount === 0) {
-          return (
-            <Tooltip title={t('mml.admin.catalog.subField.supportedUnknownTip')}>
-              <Tag color="default">
-                {t('mml.admin.catalog.subField.supportedUnknown')}
-              </Tag>
-            </Tooltip>
-          );
-        }
-        const allOk = sf.supportedModelCount === sf.totalModelCount;
-        const noneOk = sf.supportedModelCount === 0;
-        const color = allOk ? 'green' : noneOk ? 'red' : 'orange';
-        return (
-          <Tooltip title={t('mml.admin.catalog.subField.supportedTip')}>
-            <Tag color={color}>{`${sf.supportedModelCount}/${sf.totalModelCount}`}</Tag>
-          </Tooltip>
-        );
-      },
     },
     {
       title: t('mml.admin.catalog.common.actions'),
