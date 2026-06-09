@@ -38,6 +38,12 @@ interface TabState {
   closeAllTabs: () => void;
   closeTabsToRight: (key: string) => void;
   setActiveTab: (key: string) => void;
+  /**
+   * 把当前完整 URL（pathname + search）同步进「激活 tab」的 path，使页面内二级（drill-down，
+   * 走 URL search 参数）状态被记进标签页；切走再切回时 navigate(tab.path) 即可恢复二级状态。
+   * 带同基础路由守卫：仅当 pathname 一致时才更新（避免把别的路由 URL 误写进当前 tab）。
+   */
+  syncActiveTabPath: (fullPath: string) => void;
   moveTab: (fromIndex: number, toIndex: number) => void;
   // Legacy alias
   setActiveKey: (key: string) => void;
@@ -131,6 +137,19 @@ export const useTabStore = create<TabState>()(
 
       setActiveTab: (key) => set({ activeTabKey: key }),
       setActiveKey: (key) => set({ activeTabKey: key }),
+
+      syncActiveTabPath: (fullPath) => {
+        const { tabs, activeTabKey } = get();
+        const idx = tabs.findIndex((t) => t.key === activeTabKey);
+        if (idx === -1) return;
+        const cur = tabs[idx];
+        // 仅在同一基础路由（pathname 相同）内同步 search/二级状态，避免把别的路由 URL 写进当前 tab。
+        if (cur.path.split('?')[0] !== fullPath.split('?')[0]) return;
+        if (cur.path === fullPath) return;
+        const next = tabs.slice();
+        next[idx] = { ...cur, path: fullPath };
+        set({ tabs: next });
+      },
 
       moveTab: (fromIndex, toIndex) => {
         const { tabs } = get();

@@ -1,6 +1,7 @@
 import { useEffect, useCallback } from 'react';
-import { Outlet } from 'react-router-dom';
+import { Outlet, useLocation } from 'react-router-dom';
 import { useAppStore } from '@core/store/appStore';
+import { useTabStore } from '@core/store/tabStore';
 import { useSecuritySettings } from '@core/hooks/api/useSecuritySettings';
 import { useIdleLogout } from '@core/hooks/useIdleLogout';
 import { SIDEBAR_WIDTH, SIDEBAR_COLLAPSED_WIDTH } from '@/theme/tokens';
@@ -24,6 +25,14 @@ export default function AppShell() {
 
   const { isMobile, isTablet } = useResponsive();
   const { isTouchPrimary } = useIsTouchDevice();
+
+  // 全站标签页二级状态保持：URL（pathname + search）变化时同步进激活 tab 的 path，
+  // 使「列表→二级（走 URL search）」状态被记入标签页，切走再切回不丢（系统级修复）。
+  const location = useLocation();
+  const syncActiveTabPath = useTabStore((s) => s.syncActiveTabPath);
+  useEffect(() => {
+    syncActiveTabPath(location.pathname + location.search);
+  }, [location.pathname, location.search, syncActiveTabPath]);
 
   // P2-⑦ 屏幕锁定：监听 sys_configs.security.userSessionExpirationMin。
   // 0 = 禁用；非 0 表示 N 分钟无操作后强制登出。AppShell 仅在登录态渲染，
