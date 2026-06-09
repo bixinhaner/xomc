@@ -1,6 +1,7 @@
 import { MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons';
 import { useAppStore } from '@core/store/appStore';
 import { useT } from '@/hooks/useT';
+import { APP_VERSION } from '@/version';
 import styles from './Sidebar.module.css';
 
 export default function CollapseButton() {
@@ -17,7 +18,7 @@ export default function CollapseButton() {
   return (
     <div className={`${styles.collapseArea}${collapsed ? ` ${styles.collapsedCollapseArea}` : ''}`}>
       {!collapsed && (
-        <span className={styles.version}>v1.0.0</span>
+        <span className={styles.version} title={APP_VERSION}>{APP_VERSION}</span>
       )}
       <button
         className={styles.collapseBtn}

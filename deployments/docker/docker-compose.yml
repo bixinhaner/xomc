@@ -239,6 +239,10 @@ services:
       context: ../..
       dockerfile: deployments/docker/Dockerfile.web
       network: host
+      args:
+        # 本地构建默认空串 → 前端回退 'dev'；可 `APP_VERSION=1.2.3 docker compose build web` 覆盖。
+        # 正式发布版本号由 deployments/release/build-release.sh -v 注入（带时间戳）。
+        APP_VERSION: ${APP_VERSION:-}
     ports:
       - "8081:8081"
       - "8080:8080"

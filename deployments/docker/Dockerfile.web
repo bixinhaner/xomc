@@ -62,6 +62,12 @@ COPY omcmb/frontend-core/ ./frontend-core/
 # 清除可能残留的旧构建产物
 RUN rm -rf webcode/dist
 
+# 应用版本号注入：build-release.sh 通过 --build-arg APP_VERSION=$VERSION 传入
+# （形如 1.0.0-20260522-1530），vite build 读取 VITE_APP_VERSION 内联进产物，
+# 左侧菜单底部据此显示。未传时默认空串 → 前端回退 'dev'。
+ARG APP_VERSION=""
+ENV VITE_APP_VERSION=$APP_VERSION
+
 # 通过 workspace 入口构建 webcode；npm 会自动把 /app/node_modules/.bin
 # 注入到子 workspace 的执行环境，所以不需要手动设置 PATH
 RUN npm run build --workspace webcode

@@ -2,6 +2,7 @@ import { useAppStore } from '@core/store/appStore';
 import { SIDEBAR_WIDTH, SIDEBAR_COLLAPSED_WIDTH } from '@/theme/tokens';
 import NavMenu from './NavMenu';
 import { useT } from '@/hooks/useT';
+import { APP_VERSION } from '@/version';
 import styles from './Sidebar.module.css';
 
 export default function Sidebar() {
@@ -29,7 +30,7 @@ export default function Sidebar() {
       </div>
       {!isTop && (
         <div className={styles.versionArea}>
-          {!collapsed && <span className={styles.version}>v1.0.0</span>}
+          {!collapsed && <span className={styles.version} title={APP_VERSION}>{APP_VERSION}</span>}
         </div>
       )}
     </aside>
