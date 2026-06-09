@@ -219,7 +219,7 @@ export default function MMLConsoleV2() {
           label: command.commandCode,
           commandName: command.commandName,
         };
-        if (isStructuredOp(command.operationType)) {
+        if (!command.isCustom && isStructuredOp(command.operationType)) {
           // 逐 PATH：LST/MOD 多 path 时按列序拆成每 path 一条 statement（后端每 statement 一条
           // command→一个 device_task/RPC，path 级成败独立）。命令序与结果列序一致，便于合并。
           const splittable = command.operationType === 'LST' || command.operationType === 'MOD';
@@ -254,7 +254,8 @@ export default function MMLConsoleV2() {
           });
           taskId = task.id;
         } else {
-          // 非结构化操作（DSP/ACT…）走 legacy 裸路径通道。task_name 用命令名（req4）。
+          // 非结构化操作（DSP/ACT…）与自定义命令（无 command_id）走 legacy 裸路径通道。
+          // 按勾选 path + 用户填值下发；task_name 用命令名（req4）。
           const payload = buildRawExecutePayload(
             command.operationType,
             req.checkedPaths.map((p) => ({ path: p, value: req.values?.[p] ?? '' })),

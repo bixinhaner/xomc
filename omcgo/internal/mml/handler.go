@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -247,14 +248,17 @@ func (h *Handler) Execute(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
-	if req.CommandCode == "" && req.ScriptID == "" && len(req.Commands) == 0 && len(req.ParamPaths) == 0 {
-		h.logger.Warn("mml execute rejected: no command source provided",
+	// §需求 4：命令源全空，或裸路径模式下 param_paths trim 后无任何非空 PATH（无可支持 PATH），
+	// 均无可下发，直接返回执行失败，不创建空任务。
+	if req.CommandCode == "" && req.ScriptID == "" && len(req.Commands) == 0 &&
+		nonEmptyParamPathCount(req.ParamPaths) == 0 {
+		h.logger.Warn("mml execute rejected: no supportable path / command source",
 			zap.String("client_ip", c.ClientIP()),
 			zap.String("task_name", req.TaskName),
 			zap.Strings("device_sns", req.DeviceSNs),
 		)
 		commonerrors.AbortWithError(c, http.StatusBadRequest,
-			fmt.Errorf("one of command_code, script_id, commands, param_paths is required"))
+			fmt.Errorf("no supportable PATH to execute: one of command_code, script_id, commands, non-empty param_paths is required"))
 		return
 	}
 	h.runExecute(c, req)
@@ -273,13 +277,14 @@ func (h *Handler) CreateTask(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
-	if raw.CommandCode == "" && raw.ScriptID == "" && len(raw.Commands) == 0 && len(raw.ParamPaths) == 0 {
-		h.logger.Warn("mml task create rejected: no command source provided",
+	if raw.CommandCode == "" && raw.ScriptID == "" && len(raw.Commands) == 0 &&
+		nonEmptyParamPathCount(raw.ParamPaths) == 0 {
+		h.logger.Warn("mml task create rejected: no supportable path / command source",
 			zap.String("client_ip", c.ClientIP()),
 			zap.String("task_name", raw.TaskName),
 		)
 		commonerrors.AbortWithError(c, http.StatusBadRequest,
-			fmt.Errorf("one of script_id, commands, command_code, param_paths is required"))
+			fmt.Errorf("no supportable PATH to execute: one of script_id, commands, command_code, non-empty param_paths is required"))
 		return
 	}
 	// 两个结构体字段序列与类型一致（仅 binding 标签不同），
@@ -347,6 +352,18 @@ func (h *Handler) runExecute(c *gin.Context, req ExecuteHTTPRequest) {
 	}
 
 	response.OKWithStatus(c, http.StatusCreated, task)
+}
+
+// nonEmptyParamPathCount 统计 trim 后非空的参数路径数量（空白路径不算可执行 PATH）。
+// 用于裸路径执行入口校验「无可支持 PATH」（§需求 4）。
+func nonEmptyParamPathCount(paths []string) int {
+	n := 0
+	for _, p := range paths {
+		if strings.TrimSpace(p) != "" {
+			n++
+		}
+	}
+	return n
 }
 
 // ExecuteGroupHTTPRequest defines the request body for

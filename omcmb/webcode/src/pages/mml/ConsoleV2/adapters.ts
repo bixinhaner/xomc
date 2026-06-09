@@ -12,7 +12,12 @@ import type {
   StructuredStatement,
   SubFieldDef,
 } from '@core/types/mmlConsole';
-import type { DeviceTaskResultItem, MMLOperationType, MMLTask } from '@core/types/mml';
+import type {
+  DeviceTaskResultItem,
+  MMLCustomCommand,
+  MMLOperationType,
+  MMLTask,
+} from '@core/types/mml';
 import { parseMmlDeviceTaskResult } from '@core/utils/mmlResultParser';
 import { isReadOp, opLabel } from './constants';
 import type {
@@ -71,6 +76,45 @@ export function flattenGroupTree(nodes: GroupTreeNode[]): FlatCommandEntry[] {
   };
   nodes.forEach(walk);
   return out;
+}
+
+/**
+ * 自定义命令的 paramPaths(string[]) → CommandParamPath[]。
+ * 自定义命令无 sub_field 元属性：标签取路径叶子名；MOD/ADD 视为可写（用户在配置参数步骤填值），
+ * LST/DSP/RMV 不可写。isObject 未知置 false，无 minValue。
+ */
+export function customCommandParamPaths(cc: MMLCustomCommand): CommandParamPath[] {
+  const writable = cc.operationType === 'MOD' || cc.operationType === 'ADD';
+  return (cc.paramPaths ?? [])
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .map((path) => ({
+      path,
+      label: path.split('.').filter(Boolean).pop() || path,
+      writable,
+      isObject: false,
+    }));
+}
+
+/**
+ * MMLCustomCommand + 已过滤 paramPaths → ConsoleV2 CommandItem。
+ * 标记 isCustom=true：执行时强制走裸路径通道（结构化端点要 command_id，自定义命令没有）。
+ */
+export function mapCustomCommandItem(
+  cc: MMLCustomCommand,
+  groupName: string,
+  paramPaths: CommandParamPath[],
+): CommandItem {
+  return {
+    id: cc.id,
+    groupName,
+    commandCode: cc.commandCode,
+    commandName: cc.commandName,
+    operationType: cc.operationType,
+    description: cc.description ?? '',
+    paramPaths,
+    isCustom: true,
+  };
 }
 
 /** GroupTreeCommand + 已加载 sub-fields → ConsoleV2 CommandItem（id = 真实 mml_commands.id）。 */

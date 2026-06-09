@@ -11,6 +11,11 @@ import { mapDeviceToItem } from '../adapters';
 
 const { Text } = Typography;
 
+// §需求 2：内存级记忆上次选择的产品 + 产品类型（弹框重开沿用，免去重复选择）。
+// 仅模块变量，不落 localStorage —— 浏览器刷新/页面重新打开即清空。
+let lastProductId: string | undefined;
+let lastProductClass: string | undefined;
+
 const STATUS_TAG: Record<DeviceStatus, { color: string; text: string }> = {
   online: { color: 'success', text: '在线' },
   offline: { color: 'default', text: '离线' },
@@ -61,11 +66,12 @@ export default function DeviceSelectModal({
     if (open) {
       setSelected(value);
       setSnInput('');
-      setProductFilter(undefined);
-      setClassFilter(undefined);
+      // §需求 2：沿用上次选择的产品 + 产品类型（无缓存时 product 由下方默认首个逻辑兜底）。
+      setProductFilter(lastProductId);
+      setProductApplied(lastProductId);
+      setClassFilter(lastProductClass);
+      setClassApplied(lastProductClass);
       setSnKeyword('');
-      setProductApplied(undefined);
-      setClassApplied(undefined);
       setSnListFilter([]);
       setPage(1);
       setPageSize(DEVICE_MODAL_PAGE_SIZE);
@@ -185,7 +191,12 @@ export default function DeviceSelectModal({
         open={open}
         width={860}
         onCancel={onCancel}
-        onOk={() => onConfirm(selected, productApplied ?? '')}
+        onOk={() => {
+          // §需求 2：记住本次选择的产品 + 产品类型，下次打开弹框沿用。
+          lastProductId = productApplied;
+          lastProductClass = classApplied;
+          onConfirm(selected, productApplied ?? '');
+        }}
         okText={`确定（已选 ${selected.length} 台）`}
         cancelText="取消"
         okButtonProps={{ disabled: selected.length === 0 }}

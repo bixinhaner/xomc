@@ -149,7 +149,11 @@ export default function ConfigParamsModal({
   // 写类操作各自的提醒文案（取代原「写操作将对所有已选设备生效」通用提示，§需求 3）。
   const writeReminder = currentOp ? WRITE_REMINDERS[currentOp] : undefined;
 
-  const valid = mode === 'standard' ? !!command : rawHasPath && rawAllValid;
+  // §需求 4：标准模式下命令参数为空（读类未勾选 path / MOD·ADD 无可写 path）时不可执行。
+  // RMV 以实例号定位、不依赖勾选 path，故仅要求已选命令。
+  const standardValid =
+    !!command && (command.operationType === 'RMV' ? true : checkedPaths.length > 0);
+  const valid = mode === 'standard' ? standardValid : rawHasPath && rawAllValid;
 
   const buildRequest = (): ExecRequest =>
     mode === 'standard'

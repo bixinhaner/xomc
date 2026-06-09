@@ -3,10 +3,24 @@ import { Button, Empty, Input, Modal, Space, Spin, Tag, Tooltip, Tree, Typograph
 import { RightOutlined } from '@ant-design/icons';
 import type { DataNode } from 'antd/es/tree';
 import { useGroupTree, useCommandSubFields, useUnsupportedPaths } from '@core/hooks/api/useMmlConsole';
+import type { MMLCustomCommand } from '@core/types/mml';
 import { useI18nText } from '@/hooks/useI18nText';
+import { useT } from '@/hooks/useT';
+import {
+  CUSTOM_KEY_PREFIX,
+  CUSTOM_ROOT_KEY,
+  parseCustomLeafId,
+  useCustomCommands,
+} from '../../components/customizedSubtree';
 import type { CommandItem } from '../types';
 import { COMMAND_MODAL_BODY_HEIGHT, opColor } from '../constants';
-import { flattenGroupTree, mapCommandItem, subFieldsToParamPaths } from '../adapters';
+import {
+  customCommandParamPaths,
+  flattenGroupTree,
+  mapCommandItem,
+  mapCustomCommandItem,
+  subFieldsToParamPaths,
+} from '../adapters';
 
 const { Text } = Typography;
 
@@ -34,6 +48,10 @@ interface CommandSelectModalProps {
  * 右侧选中命令预览（操作类型 / 命令码 / 参数 PATH）。
  * 数据来源：`useGroupTree` 拉层级命令树拍平为二级；选中命令后 `useCommandSubFields`
  * 拉该命令的参数路径（决定结果表格列 + 可写项）。
+ *
+ * 自定义命令：`useCustomCommands` 拉管理员自定义命令（mml_custom_command），合并为一个扁平
+ * 「自定义命令(Customized)」分组（只读，无新增/编辑）；选中后不调 sub-fields 端点，直接用
+ * 其 paramPaths 作为参数路径。命令名为单语中文，分组名随 locale 中英切换。
  */
 export default function CommandSelectModal({
   open,
@@ -45,6 +63,7 @@ export default function CommandSelectModal({
   productId,
 }: CommandSelectModalProps) {
   const { locale } = useI18nText();
+  const t = useT();
   const [keyword, setKeyword] = useState('');
   const [selectedId, setSelectedId] = useState<string | undefined>();
   const [wasOpen, setWasOpen] = useState(false);
@@ -54,11 +73,16 @@ export default function CommandSelectModal({
     setWasOpen(open);
     if (open) {
       setKeyword('');
-      setSelectedId(value?.id);
+      // 自定义命令叶子 key 带 custom: 前缀，回填选中态时需还原前缀，否则匹配不到树节点。
+      setSelectedId(value ? (value.isCustom ? `${CUSTOM_KEY_PREFIX}${value.id}` : value.id) : undefined);
     }
   }
 
   const { data: treeNodes, isLoading: treeLoading } = useGroupTree(undefined, locale);
+  const { commands: customCommands } = useCustomCommands();
+
+  // 自定义命令分组名（随 locale 中英切换，复用命令树「自定义命令 / Customized」语料）。
+  const customGroupLabel = t('mml.console.commandTree.customized');
 
   // 拍平为「分组 → 命令」二级，并建 id → 条目索引（取 groupName / GroupTreeCommand）。
   const entries = useMemo(() => flattenGroupTree(treeNodes ?? []), [treeNodes]);
@@ -67,6 +91,11 @@ export default function CommandSelectModal({
     entries.forEach((e) => m.set(e.command.id, e));
     return m;
   }, [entries]);
+  const customById = useMemo(() => {
+    const m = new Map<string, MMLCustomCommand>();
+    customCommands.forEach((cc) => m.set(cc.id, cc));
+    return m;
+  }, [customCommands]);
 
   const filtered = useMemo(() => {
     const kw = keyword.trim().toLowerCase();
@@ -79,6 +108,17 @@ export default function CommandSelectModal({
     );
   }, [entries, keyword]);
 
+  const filteredCustoms = useMemo(() => {
+    const kw = keyword.trim().toLowerCase();
+    if (!kw) return customCommands;
+    return customCommands.filter(
+      (cc) =>
+        cc.commandCode.toLowerCase().includes(kw) ||
+        cc.commandName.toLowerCase().includes(kw) ||
+        customGroupLabel.toLowerCase().includes(kw),
+    );
+  }, [customCommands, keyword, customGroupLabel]);
+
   const treeData: DataNode[] = useMemo(() => {
     const byGroup = new Map<string, typeof entries>();
     filtered.forEach((e) => {
@@ -86,7 +126,7 @@ export default function CommandSelectModal({
       arr.push(e);
       byGroup.set(e.groupName, arr);
     });
-    return Array.from(byGroup.entries()).map(([group, items]) => ({
+    const groups: DataNode[] = Array.from(byGroup.entries()).map(([group, items]) => ({
       key: `group:${group}`,
       title: group,
       selectable: false,
@@ -108,41 +148,86 @@ export default function CommandSelectModal({
         };
       }),
     }));
-  }, [filtered, selectedId]);
+
+    // 自定义命令分组（扁平，全部自定义命令归此一组；只读，无新增/编辑）。
+    if (filteredCustoms.length > 0) {
+      groups.push({
+        key: CUSTOM_ROOT_KEY,
+        title: customGroupLabel,
+        selectable: false,
+        children: filteredCustoms.map((cc) => {
+          const key = `${CUSTOM_KEY_PREFIX}${cc.id}`;
+          const isSelected = key === selectedId;
+          return {
+            key,
+            title: (
+              <Space size={6}>
+                <Tag color={opColor(cc.operationType)} style={{ marginInlineEnd: 0 }}>
+                  {cc.operationType}
+                </Tag>
+                <span style={{ fontWeight: isSelected ? 600 : undefined, color: isSelected ? '#1677ff' : undefined }}>
+                  {cc.commandName}
+                </span>
+              </Space>
+            ),
+          };
+        }),
+      });
+    }
+    return groups;
+  }, [filtered, filteredCustoms, selectedId, customGroupLabel]);
 
   const expandedKeys = useMemo(() => treeData.map((n) => n.key as string), [treeData]);
 
-  const selectedEntry = selectedId ? entryById.get(selectedId) : undefined;
+  // 选中项可能是标准命令（裸 id）或自定义命令（custom:<id>）。
+  const isCustomSelected = selectedId?.startsWith(CUSTOM_KEY_PREFIX) ?? false;
+  const selectedCustomId = isCustomSelected && selectedId ? parseCustomLeafId(selectedId) : null;
+  const selectedCustom = selectedCustomId ? customById.get(selectedCustomId) : undefined;
+  const selectedStandardId = !isCustomSelected ? selectedId : undefined;
+  const selectedEntry = selectedStandardId ? entryById.get(selectedStandardId) : undefined;
 
-  // 选中命令的参数路径（决定结果列 / 可写项）。命令或所选设备变更自动重取——
-  // 传 deviceSn 后端按该设备 paramModel 过滤掉不支持的 path（§设备模型不支持的 path 不展示）。
+  // 标准命令的参数路径（自定义命令时 selectedStandardId 为空，hook 自动不发请求）。
   const { data: subFields, isFetching: subFieldsLoading } = useCommandSubFields(
-    selectedId,
+    selectedStandardId,
     locale,
     deviceSn,
   );
 
-  // 该产品执行 path 不支持类故障记录的自学习表——再过滤一层，覆盖「模型标 is_supported=true 但
-  // 设备实际不支持」的 path。按命令读/写类型过滤：LST/DSP（读）隐藏 read 不支持的；
-  // MOD/ADD/RMV（写）隐藏 write 不支持的（只读 path 在读类命令仍可见）。
+  // 该产品执行 path 不支持类故障记录的自学习表——按命令读/写类型过滤（标准 + 自定义共用）。
   const { data: unsupportedPaths } = useUnsupportedPaths(productId);
-  const visibleSubFields = useMemo(() => {
-    const all = subFields ?? [];
-    if (!unsupportedPaths || unsupportedPaths.length === 0) return all;
-    const op = selectedEntry?.command.operationType;
+  const hiddenPaths = useMemo(() => {
+    if (!unsupportedPaths || unsupportedPaths.length === 0) return new Set<string>();
+    const op = selectedCustom?.operationType ?? selectedEntry?.command.operationType;
     const isWrite = op === 'MOD' || op === 'ADD' || op === 'RMV';
-    const hidden = new Set(
+    return new Set(
       unsupportedPaths
         .filter((u) => (isWrite ? u.writeUnsupported : u.readUnsupported))
         .map((u) => u.path),
     );
-    return all.filter((sf) => !hidden.has(sf.tr069Path));
-  }, [subFields, unsupportedPaths, selectedEntry]);
+  }, [unsupportedPaths, selectedCustom, selectedEntry]);
 
-  const paramPaths = useMemo(() => subFieldsToParamPaths(visibleSubFields), [visibleSubFields]);
+  const visibleSubFields = useMemo(
+    () => (subFields ?? []).filter((sf) => !hiddenPaths.has(sf.tr069Path)),
+    [subFields, hiddenPaths],
+  );
+  const customParamPaths = useMemo(
+    () => (selectedCustom ? customCommandParamPaths(selectedCustom).filter((p) => !hiddenPaths.has(p.path)) : []),
+    [selectedCustom, hiddenPaths],
+  );
+
+  // 统一的「当前选中命令的可执行参数路径」+ 加载态（右侧预览与确定按钮共用）。
+  const paramPaths = isCustomSelected ? customParamPaths : subFieldsToParamPaths(visibleSubFields);
+  const pathsLoading = isCustomSelected ? false : subFieldsLoading;
+  const hasSelection = !!selectedEntry || !!selectedCustom;
 
   const handleOk = (): void => {
-    if (!selectedEntry || !subFields) return;
+    if (selectedCustom) {
+      // 无可执行 path 不允许确认（§需求 3）；按钮已禁用，这里再兜底。
+      if (customParamPaths.length === 0) return;
+      onConfirm(mapCustomCommandItem(selectedCustom, customGroupLabel, customParamPaths));
+      return;
+    }
+    if (!selectedEntry || !subFields || paramPaths.length === 0) return;
     onConfirm(mapCommandItem(selectedEntry.groupName, selectedEntry.command, visibleSubFields));
   };
 
@@ -166,7 +251,8 @@ export default function CommandSelectModal({
       onOk={handleOk}
       okText="确定选择"
       cancelText="取消"
-      okButtonProps={{ disabled: !selectedEntry || subFieldsLoading || !subFields }}
+      // §需求 3：选中命令但无可执行 PATH（过滤后为空）时禁用「确定选择」。
+      okButtonProps={{ disabled: !hasSelection || pathsLoading || paramPaths.length === 0 }}
       destroyOnHidden
     >
       <div style={{ marginBottom: 12 }}>
@@ -194,15 +280,16 @@ export default function CommandSelectModal({
               selectedKeys={selectedId ? [selectedId] : []}
               onSelect={(keys) => {
                 const k = keys[0] as string | undefined;
-                if (k && !k.startsWith('group:')) setSelectedId(k);
+                // 仅命令叶子可选（分组节点 selectable=false 不会触发，这里再排除前缀兜底）。
+                if (k && !k.startsWith('group:') && k !== CUSTOM_ROOT_KEY) setSelectedId(k);
               }}
             />
           )}
         </div>
         <div style={{ flex: 1, overflow: 'auto' }}>
-          {selectedEntry ? (
+          {hasSelection ? (
             <Space direction="vertical" size={10} style={{ width: '100%' }}>
-              {subFieldsLoading ? (
+              {pathsLoading ? (
                 <Spin size="small" />
               ) : (
                 <>

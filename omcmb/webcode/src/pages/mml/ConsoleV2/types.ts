@@ -33,6 +33,12 @@ export interface CommandItem {
    * `.{i}.` 个数渲染。来自命令的 target_object（GroupTreeCommand）。
    */
   targetObject?: string;
+  /**
+   * 是否管理员自定义命令（mml_custom_command）。自定义命令无 mml_commands.id，
+   * 结构化执行端点强制要 command_id，故标记后在执行时统一走 legacy 裸路径通道
+   * （POST /mml/execute，按 paramPaths + 用户填值下发）。
+   */
+  isCustom?: boolean;
 }
 
 /** 命令绑定的参数路径 */
