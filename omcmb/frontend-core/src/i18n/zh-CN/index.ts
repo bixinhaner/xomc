@@ -298,7 +298,7 @@ const messages: Record<string, string> = {
   'product.products.dataTypeLock':   'data_type（禁止覆盖）',
 
   // /product/products/MatchTester
-  'product.matchTester.inputPh':     '输入 productClass 匹配现有规则',
+  'product.matchTester.inputPh':     '输入产品类型匹配现有规则',
   'product.matchTester.matching':    '匹配中…',
   'product.matchTester.noMatch':     '进入孤儿设备列表，请到「正则模式」段添加规则',
   'product.matchTester.matched':     '产品匹配',

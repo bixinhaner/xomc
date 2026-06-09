@@ -298,7 +298,7 @@ const messages: Record<string, string> = {
   'product.products.dataTypeLock':   'data_type (override forbidden)',
 
   // /product/products/MatchTester
-  'product.matchTester.inputPh':     'Enter productClass to match existing rules',
+  'product.matchTester.inputPh':     'Enter product type to match existing rules',
   'product.matchTester.matching':    'Matching…',
   'product.matchTester.noMatch':     'Will land in orphan device list; add a rule in the regex section',
   'product.matchTester.matched':     'Product match',
