@@ -513,7 +513,11 @@ services:
   # ── 容器资源指标：cAdvisor（各容器 CPU / 内存 / 网络 / 磁盘）─────────────
   # prometheus job=cadvisor 抓 :8080/metrics（容器内端口，未发布到宿主）。
   cadvisor:
-    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    # gcr.io 不受 daemon.json registry-mirrors（仅代理 docker.io）覆盖；国内拉取超时时
+    # 用 IMAGE_CADVISOR 覆盖为可达镜像（与 release bundle 同 IMAGE_CADVISOR 变量），如：
+    #   export IMAGE_CADVISOR=gcr.m.daocloud.io/cadvisor/cadvisor:v0.49.1
+    #   或       gcr.nju.edu.cn/cadvisor/cadvisor:v0.49.1
+    image: ${IMAGE_CADVISOR:-gcr.io/cadvisor/cadvisor:v0.49.1}
     restart: unless-stopped
     privileged: true
     devices:
