@@ -1,0 +1,17 @@
+{
+  "name": "omc-skills",
+  "description": "本地包装市场：把 mattpocock/skills 仓库（它只含 .claude-plugin/plugin.json、无 marketplace.json，无法被 `marketplace add` 直接添加）暴露为可安装的 Claude Code 插件。",
+  "owner": {
+    "name": "OMC project"
+  },
+  "plugins": [
+    {
+      "name": "mattpocock-skills",
+      "description": "Matt Pocock 的工程/效率技能集（grill-me、grill-with-docs、tdd、diagnose、triage、to-issues、to-prd、zoom-out、prototype、caveman、handoff、teach、write-a-skill 等 15 个 skill）。",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/mattpocock/skills.git"
+      }
+    }
+  ]
+}

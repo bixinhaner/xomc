@@ -324,5 +324,8 @@
       ".claude",
       "/Users/cb/code/baicells/goomc/.claude"
     ]
+  },
+  "enabledPlugins": {
+    "mattpocock-skills@omc-skills": true
   }
 }

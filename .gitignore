@@ -22,10 +22,11 @@ omcmb/webcode-v2/dist/
 omcmb/webcode-v3/dist/
 omcmb/frontend-core/dist/
 
-# Claude (keep commands/ and settings.json tracked for team sharing)
+# Claude (keep commands/, settings.json, skills-marketplace/ tracked for team sharing)
 .claude/*
 !.claude/commands/
 !.claude/settings.json
+!.claude/skills-marketplace/
 .claude/settings.local.json
 
 # Qoder (AI tool generated files)
