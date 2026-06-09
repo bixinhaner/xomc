@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	httppprof "net/http/pprof"
 	"os"
 	"os/signal"
+	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -242,6 +245,25 @@ func (inf *Infra) startMetrics() {
 	// 两者职责严格分离，与 Kubernetes 探针语义对齐，避免错误重启正在恢复的实例。
 	metricsMux.Handle("/healthz", healthpkg.LivenessHandler())
 	metricsMux.Handle("/readyz", healthpkg.ReadinessHandler(5*time.Second, inf.readinessCheckers()...))
+
+	// net/http/pprof —— 仅在 OMCGO_PPROF 为真时挂到内网 metrics 端口（与 /metrics 同信任
+	// 边界，不暴露在对外业务 API 端口）。默认关闭：商用部署保持干净，排查 CPU/内存时按需
+	// 打开后重启进程即可，无需改业务代码。
+	if pprofEnabled() {
+		registerPprof(metricsMux)
+		inf.Logger.Warn("pprof endpoints ENABLED on metrics port (/debug/pprof/*) —— 仅用于线上排查，排查完请关闭",
+			zap.Int("port", inf.metricsPort))
+		// 竞争剖析（block/mutex）默认仍关：它对热锁有可测开销，会扰动 CPU profile。
+		// 仅在显式 OMCGO_PPROF_CONTENTION 时低速率采样，用于定位锁/连接池争用。
+		if contentionProfilingEnabled() {
+			runtime.SetBlockProfileRate(blockProfileRateNs)
+			runtime.SetMutexProfileFraction(mutexProfileFraction)
+			inf.Logger.Warn("pprof contention profiling ENABLED (block+mutex 采样有开销)",
+				zap.Int("block_rate_ns", blockProfileRateNs),
+				zap.Int("mutex_fraction", mutexProfileFraction))
+		}
+	}
+
 	metricsServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", inf.metricsPort),
 		Handler: metricsMux,
@@ -254,6 +276,35 @@ func (inf *Infra) startMetrics() {
 			inf.Logger.Error("metrics server error", zap.Error(err))
 		}
 	}()
+}
+
+// pprof 竞争剖析采样参数（仅 OMCGO_PPROF_CONTENTION 开启时生效）。
+const (
+	blockProfileRateNs   = 1_000_000 // 平均每阻塞 ~1ms 采样一次，开销可控
+	mutexProfileFraction = 100       // 1/100 互斥竞争事件采样
+)
+
+// registerPprof 把标准 net/http/pprof 处理器挂到给定 mux（CPU/heap/goroutine/allocs/
+// block/mutex/trace）。注意：必须显式注册到自定义 mux —— 包的 init 只注册到
+// http.DefaultServeMux，而本进程不对外服务 DefaultServeMux。
+func registerPprof(mux *http.ServeMux) {
+	mux.HandleFunc("/debug/pprof/", httppprof.Index) // 含 heap/goroutine/allocs/block/mutex 等命名 profile
+	mux.HandleFunc("/debug/pprof/cmdline", httppprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", httppprof.Profile) // CPU profile（?seconds=N）
+	mux.HandleFunc("/debug/pprof/symbol", httppprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", httppprof.Trace)
+}
+
+func pprofEnabled() bool               { return isEnvTruthy(os.Getenv("OMCGO_PPROF")) }
+func contentionProfilingEnabled() bool { return isEnvTruthy(os.Getenv("OMCGO_PPROF_CONTENTION")) }
+
+func isEnvTruthy(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func (inf *Infra) waitForShutdown(errCh <-chan error) error {
