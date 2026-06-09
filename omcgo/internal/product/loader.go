@@ -95,9 +95,10 @@ func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	// 清空 product_class_patterns（FK CASCADE 无需先 DELETE products）
-	if _, err := tx.Exec(ctx, `TRUNCATE product_class_patterns RESTART IDENTITY`); err != nil {
-		return rep, fmt.Errorf("truncate patterns: %w", err)
+	// 只清空内置正则（source='builtin'）；UI 新增的 source='custom' 正则保留，
+	// 从而「重新加载 products.xml 不覆盖管理员自定义路由正则」（对标 param_mappings source）。
+	if _, err := tx.Exec(ctx, `DELETE FROM product_class_patterns WHERE source = 'builtin'`); err != nil {
+		return rep, fmt.Errorf("delete builtin patterns: %w", err)
 	}
 
 	productsLoaded := 0
@@ -192,14 +193,14 @@ func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
 		if len(p.Patterns) > 0 {
 			ib := sq.StatementBuilder.PlaceholderFormat(sq.Dollar).
 				Insert("product_class_patterns").
-				Columns("product_id", "product_class", "sort_order", "is_active")
+				Columns("product_id", "product_class", "sort_order", "is_active", "source")
 			added := 0
 			for _, pat := range p.Patterns {
 				val := strings.TrimSpace(pat.Value)
 				if val == "" {
 					continue
 				}
-				ib = ib.Values(productID, val, pat.GlobalOrder, true)
+				ib = ib.Values(productID, val, pat.GlobalOrder, true, "builtin")
 				added++
 			}
 			if added > 0 {

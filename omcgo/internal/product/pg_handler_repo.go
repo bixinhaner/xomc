@@ -52,14 +52,32 @@ type UpdateProductInput struct {
 	clearParamModelID   bool // true 时强制 set NULL
 }
 
-// PatternView 是带 sort_order/is_active 的 pattern 视图。
+// PatternView 是带 sort_order/is_active/source 的 pattern 视图。
 type PatternView struct {
-	ID           uuid.UUID
-	ProductID    uuid.UUID
-	ProductClass string
-	SortOrder    int
-	IsActive     bool
+	ID           uuid.UUID `json:"id"`
+	ProductID    uuid.UUID `json:"product_id"`
+	ProductClass string    `json:"product_class"`
+	SortOrder    int       `json:"sort_order"`
+	IsActive     bool      `json:"is_active"`
+	// Source 行级来源:builtin(products.xml 重灌覆盖)/ custom(UI 新增,重灌保留)。
+	Source string `json:"source"`
+	// Deletable = Source=='custom';前端据此决定编辑/删除/移动按钮可用性。
+	Deletable bool `json:"deletable"`
 }
+
+// patternSourceCustom / patternSourceBuiltin 是 source 列的两个取值(与 migration CHECK 对齐)。
+const (
+	patternSourceBuiltin = "builtin"
+	patternSourceCustom  = "custom"
+	// customPatternOrderBase 是 custom 正则的 sort_order 起始高位段:远高于 products.xml
+	// 的 globalOrder(当前 1-29),确保 builtin 重灌(DELETE builtin + 按 XML 序批插)时
+	// 与存活的 custom 行不撞 uniq_product_class_patterns_global_order 唯一索引。
+	customPatternOrderBase = 1_000_000
+)
+
+// isCustomPattern 判断一条正则是否为 UI 可编辑/删除/移动的 custom 行。
+// 是 PatternView.Deletable 派生与 handler.guardPatternEditable 守门的唯一真值口径。
+func isCustomPattern(source string) bool { return source == patternSourceCustom }
 
 // MatchOrderRow 是 GET /products/match-order 的单行返回。
 type MatchOrderRow struct {
@@ -69,6 +87,7 @@ type MatchOrderRow struct {
 	ProductClass string    `json:"product_class"`
 	SortOrder    int       `json:"sort_order"`
 	IsActive     bool      `json:"is_active"`
+	Source       string    `json:"source"`
 }
 
 // OrphanDevice 单条孤儿设备。
@@ -189,16 +208,18 @@ RETURNING id`
 	}
 
 	if len(cleanPatterns) > 0 {
+		// UI 建产品时随附的正则一律 source='custom'（落 custom 高位段，重灌保留）。
 		var baseOrder int
 		if err := tx.QueryRow(ctx,
-			`SELECT COALESCE(MAX(sort_order), 0) FROM product_class_patterns WHERE is_active`,
+			`SELECT GREATEST(COALESCE(MAX(sort_order), 0), $1) FROM product_class_patterns WHERE source = 'custom'`,
+			customPatternOrderBase-1,
 		).Scan(&baseOrder); err != nil {
 			return nil, fmt.Errorf("compute base sort_order: %w", err)
 		}
 		for i, pc := range cleanPatterns {
 			if _, err := tx.Exec(ctx,
-				`INSERT INTO product_class_patterns (product_id, product_class, sort_order, is_active)
-				 VALUES ($1, $2, $3, TRUE)`,
+				`INSERT INTO product_class_patterns (product_id, product_class, sort_order, is_active, source)
+				 VALUES ($1, $2, $3, TRUE, 'custom')`,
 				id, pc, baseOrder+i+1,
 			); err != nil {
 				return nil, fmt.Errorf("insert pattern %q: %w", pc, err)
@@ -362,7 +383,8 @@ func (r *PgRepository) ListPatternsAllByProduct(ctx context.Context) (map[uuid.U
 
 // ── Pattern CRUD ────────────────────────────────────────────────────
 
-// CreatePattern 追加正则到全局尾部（sort_order = max+1）。
+// CreatePattern 追加 custom 正则到 custom 高位段尾部（sort_order ≥ customPatternOrderBase）。
+// source 恒为 'custom' → 重灌 products.xml 时保留（loader 只清 builtin）。
 func (r *PgRepository) CreatePattern(ctx context.Context, productID uuid.UUID, productClass string) (*PatternView, error) {
 	productClass = strings.TrimSpace(productClass)
 	if productClass == "" {
@@ -374,17 +396,20 @@ func (r *PgRepository) CreatePattern(ctx context.Context, productID uuid.UUID, p
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// custom 段尾部 +1；无 custom 行时从 customPatternOrderBase 起。
 	var nextOrder int
 	if err := tx.QueryRow(ctx,
-		`SELECT COALESCE(MAX(sort_order), 0) + 1 FROM product_class_patterns WHERE is_active`,
+		`SELECT GREATEST(COALESCE(MAX(sort_order), 0), $1) + 1
+		   FROM product_class_patterns WHERE source = 'custom'`,
+		customPatternOrderBase-1,
 	).Scan(&nextOrder); err != nil {
 		return nil, fmt.Errorf("compute next sort_order: %w", err)
 	}
 
 	var newID uuid.UUID
 	if err := tx.QueryRow(ctx,
-		`INSERT INTO product_class_patterns (product_id, product_class, sort_order, is_active)
-		 VALUES ($1, $2, $3, TRUE) RETURNING id`,
+		`INSERT INTO product_class_patterns (product_id, product_class, sort_order, is_active, source)
+		 VALUES ($1, $2, $3, TRUE, 'custom') RETURNING id`,
 		productID, productClass, nextOrder,
 	).Scan(&newID); err != nil {
 		return nil, fmt.Errorf("insert pattern: %w", err)
@@ -396,6 +421,7 @@ func (r *PgRepository) CreatePattern(ctx context.Context, productID uuid.UUID, p
 	return &PatternView{
 		ID: newID, ProductID: productID, ProductClass: productClass,
 		SortOrder: nextOrder, IsActive: true,
+		Source: patternSourceCustom, Deletable: true,
 	}, nil
 }
 
@@ -475,14 +501,15 @@ func (r *PgRepository) MovePattern(ctx context.Context, patternID uuid.UUID, dir
 		return nil, fmt.Errorf("lock current pattern: %w", err)
 	}
 
+	// 只在 custom 段内换序：builtin 正则只读、顺序由 products.xml 决定，不参与 UI 移动。
 	var neighborQ string
 	if direction == "up" {
 		neighborQ = `SELECT id, sort_order FROM product_class_patterns
-		             WHERE is_active AND sort_order < $1
+		             WHERE is_active AND source = 'custom' AND sort_order < $1
 		             ORDER BY sort_order DESC LIMIT 1 FOR UPDATE`
 	} else {
 		neighborQ = `SELECT id, sort_order FROM product_class_patterns
-		             WHERE is_active AND sort_order > $1
+		             WHERE is_active AND source = 'custom' AND sort_order > $1
 		             ORDER BY sort_order ASC LIMIT 1 FOR UPDATE`
 	}
 	var neighborID uuid.UUID
@@ -518,7 +545,7 @@ func (r *PgRepository) MovePattern(ctx context.Context, patternID uuid.UUID, dir
 
 // ListPatternsByProduct 按 product_id 列出 patterns。
 func (r *PgRepository) ListPatternsByProduct(ctx context.Context, productID uuid.UUID) ([]PatternView, error) {
-	const q = `SELECT id, product_id, product_class, sort_order, is_active
+	const q = `SELECT id, product_id, product_class, sort_order, is_active, source
 	          FROM product_class_patterns WHERE product_id = $1
 	          ORDER BY sort_order ASC`
 	rows, err := r.pool.Query(ctx, q, productID)
@@ -529,9 +556,10 @@ func (r *PgRepository) ListPatternsByProduct(ctx context.Context, productID uuid
 	var out []PatternView
 	for rows.Next() {
 		var p PatternView
-		if err := rows.Scan(&p.ID, &p.ProductID, &p.ProductClass, &p.SortOrder, &p.IsActive); err != nil {
+		if err := rows.Scan(&p.ID, &p.ProductID, &p.ProductClass, &p.SortOrder, &p.IsActive, &p.Source); err != nil {
 			return nil, fmt.Errorf("scan pattern: %w", err)
 		}
+		p.Deletable = isCustomPattern(p.Source)
 		out = append(out, p)
 	}
 	return out, rows.Err()
@@ -539,24 +567,25 @@ func (r *PgRepository) ListPatternsByProduct(ctx context.Context, productID uuid
 
 // GetPatternByID 单条详情。
 func (r *PgRepository) GetPatternByID(ctx context.Context, patternID uuid.UUID) (*PatternView, error) {
-	const q = `SELECT id, product_id, product_class, sort_order, is_active
+	const q = `SELECT id, product_id, product_class, sort_order, is_active, source
 	          FROM product_class_patterns WHERE id = $1`
 	var p PatternView
 	if err := r.pool.QueryRow(ctx, q, patternID).Scan(
-		&p.ID, &p.ProductID, &p.ProductClass, &p.SortOrder, &p.IsActive,
+		&p.ID, &p.ProductID, &p.ProductClass, &p.SortOrder, &p.IsActive, &p.Source,
 	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, fmt.Errorf("pattern %s not found", patternID)
 		}
 		return nil, fmt.Errorf("get pattern: %w", err)
 	}
+	p.Deletable = isCustomPattern(p.Source)
 	return &p, nil
 }
 
 // ListMatchOrder 全局 sort_order 升序的 pattern + 所属产品名（设计 §4.4 match-order）。
 func (r *PgRepository) ListMatchOrder(ctx context.Context) ([]MatchOrderRow, error) {
 	const q = `SELECT pcp.id, pcp.product_id, p.product_name, pcp.product_class,
-	                  pcp.sort_order, pcp.is_active
+	                  pcp.sort_order, pcp.is_active, pcp.source
 	          FROM product_class_patterns pcp
 	          JOIN products p ON p.id = pcp.product_id
 	          WHERE pcp.is_active
@@ -570,7 +599,7 @@ func (r *PgRepository) ListMatchOrder(ctx context.Context) ([]MatchOrderRow, err
 	for rows.Next() {
 		var m MatchOrderRow
 		if err := rows.Scan(&m.PatternID, &m.ProductID, &m.ProductName, &m.ProductClass,
-			&m.SortOrder, &m.IsActive); err != nil {
+			&m.SortOrder, &m.IsActive, &m.Source); err != nil {
 			return nil, fmt.Errorf("scan match-order: %w", err)
 		}
 		out = append(out, m)

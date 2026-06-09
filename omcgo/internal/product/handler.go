@@ -16,6 +16,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/global"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/response"
 )
@@ -539,6 +540,27 @@ func (h *Handler) CreatePattern(c *gin.Context) {
 	response.OKWithStatus(c, http.StatusCreated, pv)
 }
 
+// guardPatternEditable 在改/删/移正则前校验来源：内置(source='builtin',来自
+// products.xml)正则 UI 只读 → 403；不存在 → 404。返回 true 表示可继续(custom 行)。
+func (h *Handler) guardPatternEditable(c *gin.Context, patternID uuid.UUID) bool {
+	pv, err := h.repo.GetPatternByID(c.Request.Context(), patternID)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
+			return false
+		}
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return false
+	}
+	if !isCustomPattern(pv.Source) {
+		commonerrors.AbortWithError(c, http.StatusForbidden,
+			fmt.Errorf("内置正则不允许修改/删除/移动(来自 products.xml,只能改自定义正则)[code=%d]",
+				global.ErrCodeProductPatternBuiltinReadonly))
+		return false
+	}
+	return true
+}
+
 type updatePatternReq struct {
 	ProductClass *string `json:"product_class,omitempty"`
 	IsActive     *bool   `json:"is_active,omitempty"`
@@ -558,6 +580,9 @@ func (h *Handler) UpdatePattern(c *gin.Context) {
 	if req.ProductClass == nil && req.IsActive == nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest,
 			fmt.Errorf("at least one of product_class / is_active is required"))
+		return
+	}
+	if !h.guardPatternEditable(c, patternID) {
 		return
 	}
 	ctx := c.Request.Context()
@@ -594,6 +619,9 @@ func (h *Handler) DeletePattern(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, fmt.Errorf("patternId not a uuid"))
 		return
 	}
+	if !h.guardPatternEditable(c, patternID) {
+		return
+	}
 	if err := h.repo.DeletePattern(c.Request.Context(), patternID); err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
@@ -626,6 +654,9 @@ func (h *Handler) MovePattern(c *gin.Context) {
 	}
 	if direction != "up" && direction != "down" {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, fmt.Errorf("direction must be up|down"))
+		return
+	}
+	if !h.guardPatternEditable(c, patternID) {
 		return
 	}
 	pv, err := h.repo.MovePattern(c.Request.Context(), patternID, direction)

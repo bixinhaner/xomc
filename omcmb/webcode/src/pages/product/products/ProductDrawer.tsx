@@ -13,6 +13,7 @@ import {
   message,
   Typography,
   Tag,
+  Tooltip,
 } from 'antd';
 import { ArrowUpOutlined, ArrowDownOutlined, DeleteOutlined } from '@ant-design/icons';
 import {
@@ -172,6 +173,9 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
 
   const patterns: ProductPattern[] = (detail?.patterns || []).slice().sort((a, b) => a.sortOrder - b.sortOrder);
 
+  // 内置正则（source='builtin'，来自 products.xml）UI 只读：编辑/启停/移动/删除一律置灰。
+  // 仅 custom（UI 新增、重灌保留）可改。后端 guardPatternEditable 同步硬拒（403）。
+  const builtinTip = t('product.products.builtinReadonly');
   const patternColumns = [
     {
       title: 'sort',
@@ -180,82 +184,107 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
       render: (v: number) => <Tag color="blue">{v}</Tag>,
     },
     {
+      title: t('product.products.col.source'),
+      dataIndex: 'source',
+      width: 80,
+      render: (v: string) =>
+        v === 'custom' ? (
+          <Tag color="green">{t('product.products.sourceCustom')}</Tag>
+        ) : (
+          <Tag>{t('product.products.sourceBuiltin')}</Tag>
+        ),
+    },
+    {
       title: t('product.products.col.regex'),
       dataIndex: 'productClass',
-      render: (v: string, row: ProductPattern) => (
-        <Input
-          defaultValue={v}
-          onBlur={(e) => {
-            const next = e.target.value.trim();
-            if (next && next !== v && product) {
-              updPatMut
-                .mutateAsync({ productId: product.id, patternId: row.id, productClass: next })
-                .then(() => message.success(t('common.updated')))
-                .catch((er) => message.error((er as Error).message));
-            }
-          }}
-        />
-      ),
+      render: (v: string, row: ProductPattern) =>
+        row.deletable ? (
+          <Input
+            defaultValue={v}
+            onBlur={(e) => {
+              const next = e.target.value.trim();
+              if (next && next !== v && product) {
+                updPatMut
+                  .mutateAsync({ productId: product.id, patternId: row.id, productClass: next })
+                  .then(() => message.success(t('common.updated')))
+                  .catch((er) => message.error((er as Error).message));
+              }
+            }}
+          />
+        ) : (
+          <Tooltip title={builtinTip}>
+            <Input value={v} readOnly disabled />
+          </Tooltip>
+        ),
     },
     {
       title: t('common.enable'),
       dataIndex: 'isActive',
       width: 70,
       render: (v: boolean, row: ProductPattern) => (
-        <Switch
-          size="small"
-          checked={v}
-          onChange={(checked) => {
-            if (!product) return;
-            updPatMut
-              .mutateAsync({ productId: product.id, patternId: row.id, isActive: checked })
-              .then(() => message.success(checked ? t('common.enabled') : t('common.disabled')))
-              .catch((er) => message.error((er as Error).message));
-          }}
-        />
+        <Tooltip title={row.deletable ? '' : builtinTip}>
+          <Switch
+            size="small"
+            checked={v}
+            disabled={!row.deletable}
+            onChange={(checked) => {
+              if (!product) return;
+              updPatMut
+                .mutateAsync({ productId: product.id, patternId: row.id, isActive: checked })
+                .then(() => message.success(checked ? t('common.enabled') : t('common.disabled')))
+                .catch((er) => message.error((er as Error).message));
+            }}
+          />
+        </Tooltip>
       ),
     },
     {
       title: t('common.action'),
       width: 200,
-      render: (_: unknown, row: ProductPattern) => (
-        <Space>
-          <Button
-            size="small"
-            icon={<ArrowUpOutlined />}
-            disabled={!product}
-            onClick={() =>
-              product &&
-              movPatMut
-                .mutateAsync({ productId: product.id, patternId: row.id, direction: 'up' })
-                .catch((er) => message.error((er as Error).message))
-            }
-          />
-          <Button
-            size="small"
-            icon={<ArrowDownOutlined />}
-            disabled={!product}
-            onClick={() =>
-              product &&
-              movPatMut
-                .mutateAsync({ productId: product.id, patternId: row.id, direction: 'down' })
-                .catch((er) => message.error((er as Error).message))
-            }
-          />
-          <Popconfirm
-            title={t('product.products.delRegexTitle')}
-            onConfirm={() =>
-              product &&
-              delPatMut
-                .mutateAsync({ productId: product.id, patternId: row.id })
-                .then(() => message.success(t('common.deleted')))
-                .catch((er) => message.error((er as Error).message))
-            }
-          >
-            <Button size="small" danger icon={<DeleteOutlined />} disabled={!product} />
-          </Popconfirm>
-        </Space>
-      ),
+      render: (_: unknown, row: ProductPattern) => {
+        const locked = !product || !row.deletable;
+        return (
+          <Tooltip title={!row.deletable ? builtinTip : ''}>
+            <Space>
+              <Button
+                size="small"
+                icon={<ArrowUpOutlined />}
+                disabled={locked}
+                onClick={() =>
+                  product &&
+                  movPatMut
+                    .mutateAsync({ productId: product.id, patternId: row.id, direction: 'up' })
+                    .catch((er) => message.error((er as Error).message))
+                }
+              />
+              <Button
+                size="small"
+                icon={<ArrowDownOutlined />}
+                disabled={locked}
+                onClick={() =>
+                  product &&
+                  movPatMut
+                    .mutateAsync({ productId: product.id, patternId: row.id, direction: 'down' })
+                    .catch((er) => message.error((er as Error).message))
+                }
+              />
+              <Popconfirm
+                title={t('product.products.delRegexTitle')}
+                disabled={locked}
+                onConfirm={() =>
+                  product &&
+                  delPatMut
+                    .mutateAsync({ productId: product.id, patternId: row.id })
+                    .then(() => message.success(t('common.deleted')))
+                    .catch((er) => message.error((er as Error).message))
+                }
+              >
+                <Button size="small" danger icon={<DeleteOutlined />} disabled={locked} />
+              </Popconfirm>
+            </Space>
+          </Tooltip>
+        );
+      },
     },
   ];
 

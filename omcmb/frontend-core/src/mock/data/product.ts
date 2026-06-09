@@ -39,18 +39,18 @@ export const mockProducts: Product[] = [
 
 export const mockPatterns: Record<string, ProductPattern[]> = {
   'p-001': [
-    { id: 'pat-001', productId: 'p-001', productClass: 'PicoCell-LTE-.+', sortOrder: 1, isActive: true },
-    { id: 'pat-002', productId: 'p-001', productClass: 'CombaPico.*', sortOrder: 2, isActive: true },
+    { id: 'pat-001', productId: 'p-001', productClass: 'PicoCell-LTE-.+', sortOrder: 1, isActive: true, source: 'builtin', deletable: false },
+    { id: 'pat-002', productId: 'p-001', productClass: 'CombaPico.*', sortOrder: 1000001, isActive: true, source: 'custom', deletable: true },
   ],
   'p-002': [
-    { id: 'pat-003', productId: 'p-002', productClass: 'MicroCell-NR-.+', sortOrder: 1, isActive: true },
+    { id: 'pat-003', productId: 'p-002', productClass: 'MicroCell-NR-.+', sortOrder: 1, isActive: true, source: 'builtin', deletable: false },
   ],
 };
 
 export const mockMatchOrder: MatchOrderRow[] = [
-  { patternId: 'pat-001', productId: 'p-001', productName: 'PicoCell-LTE-V2', productClass: 'PicoCell-LTE-.+', sortOrder: 1, isActive: true },
-  { patternId: 'pat-002', productId: 'p-001', productName: 'PicoCell-LTE-V2', productClass: 'CombaPico.*', sortOrder: 2, isActive: true },
-  { patternId: 'pat-003', productId: 'p-002', productName: 'MicroCell-NR-Standard', productClass: 'MicroCell-NR-.+', sortOrder: 3, isActive: true },
+  { patternId: 'pat-001', productId: 'p-001', productName: 'PicoCell-LTE-V2', productClass: 'PicoCell-LTE-.+', sortOrder: 1, isActive: true, source: 'builtin' },
+  { patternId: 'pat-002', productId: 'p-001', productName: 'PicoCell-LTE-V2', productClass: 'CombaPico.*', sortOrder: 1000001, isActive: true, source: 'custom' },
+  { patternId: 'pat-003', productId: 'p-002', productName: 'MicroCell-NR-Standard', productClass: 'MicroCell-NR-.+', sortOrder: 3, isActive: true, source: 'builtin' },
 ];
 
 export const mockOrphans: OrphanDevice[] = [

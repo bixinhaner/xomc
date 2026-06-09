@@ -62,8 +62,10 @@ export const productService = {
       id: `pat-${Date.now()}-${idx}`,
       productId: newP.id,
       productClass: pc,
-      sortOrder: idx + 1,
+      sortOrder: 1000001 + idx,
       isActive: true,
+      source: 'custom' as const,
+      deletable: true,
     }));
     return clone(newP);
   },
@@ -106,8 +108,10 @@ export const productService = {
       id: `pat-${Date.now()}`,
       productId,
       productClass,
-      sortOrder: arr.length + 1,
+      sortOrder: 1000001 + arr.length,
       isActive: true,
+      source: 'custom',
+      deletable: true,
     };
     arr.push(newPat);
     patterns[productId] = arr;

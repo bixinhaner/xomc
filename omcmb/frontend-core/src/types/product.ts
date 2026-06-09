@@ -30,12 +30,18 @@ export interface Product {
   patterns: string[]; // active 正则（按 sort_order 升序）；列表页直接展示用
 }
 
+/** 正则来源：builtin=products.xml 内置(UI 只读，重灌覆盖)；custom=UI 新增(重灌保留)。 */
+export type ProductPatternSource = 'builtin' | 'custom';
+
 export interface ProductPattern {
   id: string;
   productId: string;
   productClass: string;
   sortOrder: number;
   isActive: boolean;
+  source: ProductPatternSource;
+  /** deletable=true 仅 custom；前端据此决定编辑/删除/移动按钮可用性。 */
+  deletable: boolean;
 }
 
 export interface MatchOrderRow {
@@ -45,6 +51,7 @@ export interface MatchOrderRow {
   productClass: string;
   sortOrder: number;
   isActive: boolean;
+  source: ProductPatternSource;
 }
 
 export interface OrphanDevice {

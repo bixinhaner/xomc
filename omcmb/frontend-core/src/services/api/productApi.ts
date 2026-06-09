@@ -32,13 +32,15 @@ interface BackendProduct {
   patterns?: string[];
 }
 
-// 后端 PatternView 字段缺 json tag，序列化为 PascalCase
+// 后端 PatternView 带 snake_case json tag（与 BackendProduct/BackendMatchOrderRow 一致）。
 interface BackendPattern {
-  ID: string;
-  ProductID: string;
-  ProductClass: string;
-  SortOrder: number;
-  IsActive: boolean;
+  id: string;
+  product_id: string;
+  product_class: string;
+  sort_order: number;
+  is_active: boolean;
+  source: string;
+  deletable: boolean;
 }
 
 interface BackendMatchOrderRow {
@@ -48,6 +50,7 @@ interface BackendMatchOrderRow {
   product_class: string;
   sort_order: number;
   is_active: boolean;
+  source: string;
 }
 
 interface BackendOrphanDevice {
@@ -84,12 +87,15 @@ function mapBackendProduct(bp: BackendProduct): Product {
 }
 
 function mapBackendPattern(bp: BackendPattern): ProductPattern {
+  const source = bp.source === 'custom' ? 'custom' : 'builtin';
   return {
-    id: bp.ID,
-    productId: bp.ProductID,
-    productClass: bp.ProductClass,
-    sortOrder: bp.SortOrder,
-    isActive: bp.IsActive,
+    id: bp.id,
+    productId: bp.product_id,
+    productClass: bp.product_class,
+    sortOrder: bp.sort_order,
+    isActive: bp.is_active,
+    source,
+    deletable: bp.deletable ?? source === 'custom',
   };
 }
 
@@ -101,6 +107,7 @@ function mapBackendMatchOrder(b: BackendMatchOrderRow): MatchOrderRow {
     productClass: b.product_class,
     sortOrder: b.sort_order,
     isActive: b.is_active,
+    source: b.source === 'custom' ? 'custom' : 'builtin',
   };
 }
 

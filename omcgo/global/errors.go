@@ -13,13 +13,13 @@ const (
 
 // Device Group (1100-1199)
 const (
-	ErrCodeGroupNotFound       = 1101
-	ErrCodeGroupDuplicate      = 1102
-	ErrCodeGroupIsDefault      = 1103
-	ErrCodeGroupLevelInvalid   = 1104
-	ErrCodeGroupParentInvalid  = 1105
-	ErrCodeGroupDeviceOnlyL2   = 1106
-	ErrCodeGroupNameDuplicate  = 1107
+	ErrCodeGroupNotFound      = 1101
+	ErrCodeGroupDuplicate     = 1102
+	ErrCodeGroupIsDefault     = 1103
+	ErrCodeGroupLevelInvalid  = 1104
+	ErrCodeGroupParentInvalid = 1105
+	ErrCodeGroupDeviceOnlyL2  = 1106
+	ErrCodeGroupNameDuplicate = 1107
 )
 
 // Device Registration (1200-1299)
@@ -58,6 +58,10 @@ const (
 	// T-PMSRC: DELETE /param-models/:name/mappings/:id 命中 source='builtin' 的映射行 → 403
 	// (内置映射来自 XML,不可删;管理员经 UI 新增/编辑后的 source='custom' 行才可删)
 	ErrCodeParamMappingBuiltinNotDeletable = 2032
+	// product_class_patterns 行级 builtin/custom 来源(对标 2032)。
+	// PUT/DELETE/move /products/:id/patterns/:pid 命中 source='builtin' 的内置正则 → 403
+	// (内置正则来自 products.xml,UI 只读;管理员经 UI 新增的 source='custom' 行才可改/删/移)
+	ErrCodeProductPatternBuiltinReadonly = 2033
 
 	// T-0180 Indicator 自定义 XML 分层目录 (2040-2049 段,对标 T-0178 范式)
 	// IndicatorBuiltinNotDeletable: DELETE /indicators/files/{path} 命中内置 XML → 403
@@ -104,9 +108,9 @@ const (
 
 // Alarm Management (5000-5999)
 const (
-	ErrCodeAlarmNotFound      = 5001
-	ErrCodeAlarmAlreadyAcked  = 5002
-	ErrCodeAlarmRuleNotFound  = 5003
+	ErrCodeAlarmNotFound       = 5001
+	ErrCodeAlarmAlreadyAcked   = 5002
+	ErrCodeAlarmRuleNotFound   = 5003
 	ErrCodeAlarmAlreadyCleared = 5004
 )
 
