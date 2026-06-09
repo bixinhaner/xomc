@@ -80,6 +80,7 @@ services:
       OMCGO_ENV: ${OMCGO_ENV}
       OMCGO_SERVICE: app
       OMCGO_JWT_SECRET: ${OMCGO_JWT_SECRET}
+      OMC_PUBLIC_HOST: ${OMC_PUBLIC_HOST}   # 本机对外 IP（基站可达），见 deploy/.env
     ports:
       - "127.0.0.1:9091:9091"        # metrics（Prometheus 经 docker network 抓取，外网不暴露）
     volumes:
@@ -112,6 +113,7 @@ services:
       TZ: "Asia/Shanghai"
       OMCGO_ENV: ${OMCGO_ENV}
       OMCGO_SERVICE: acs
+      OMC_PUBLIC_HOST: ${OMC_PUBLIC_HOST}   # 本机对外 IP（基站可达），见 deploy/.env
     ports:
       - "7547:7547"                  # CPE → ACS（HTTP，TR-069 标准端口）
       - "7557:7557"                  # 内部 connection-request 接口
@@ -140,6 +142,7 @@ services:
       TZ: "Asia/Shanghai"
       OMCGO_ENV: ${OMCGO_ENV}
       OMCGO_SERVICE: worker
+      OMC_PUBLIC_HOST: ${OMC_PUBLIC_HOST}   # 本机对外 IP（基站可达）：worker 据此生成 PM 上传 URL，见 deploy/.env
     ports:
       - "127.0.0.1:9092:9092"        # metrics
     volumes:

@@ -356,6 +356,7 @@ bash svc.sh -h                                # 完整帮助</pre>
 <tr><td>MinIO 口令</td><td><code>MINIO_ROOT_PASSWORD=minioadmin</code></td><td><code>minio.secret_key</code></td><td>同上</td></tr>
 <tr><td>JWT 密钥</td><td><code>OMCGO_JWT_SECRET=...</code></td><td><code>jwt.secret</code>（同值）</td><td>必须 ≥ 32 字符；产生：<code>openssl rand -base64 48</code></td></tr>
 <tr><td>Grafana 管理员</td><td><code>GRAFANA_ADMIN_PASSWORD=admin</code></td><td>—</td><td>仅监控栈使用；首次登录 :3030 也会强制提示改口令(宿主 3030 → 容器 3000)</td></tr>
+<tr><td><b>基站可达地址</b></td><td><code>OMC_PUBLIC_HOST=</code>(本机对外 IP)</td><td>—(自动注入 app/acs/worker)</td><td><b>必填</b>:基站回传 PM 文件的上传地址(<code>http://&lt;OMC_PUBLIC_HOST&gt;:7557/...</code>)，不能用 localhost / 127.0.0.1，否则基站传不上来。详见 §9.5</td></tr>
 <tr><td>Web 管理员 admin</td><td>—</td><td>—</td><td>首次登录 <code>http://&lt;IP&gt;:8081</code> 后在「个人中心 → 修改密码」里改，<b>不需改配置文件</b>(注意:8080 是基站 ACS 入口,人不要去登)</td></tr>
 </tbody>
 </table>
@@ -374,6 +375,7 @@ sudo vi /opt/omc/current/deploy/.env
 #     MINIO_ROOT_PASSWORD=       → 刚生成的 MinIO 强口令
 #     GRAFANA_ADMIN_PASSWORD=    → 刚生成的 Grafana 口令
 #     OMCGO_JWT_SECRET=          → 刚生成的 JWT 密钥
+#     OMC_PUBLIC_HOST=           → 本机对外 IP（基站可达，如 172.19.1.132），必填，见 §9.5
 
 # 3) 改 etc/*.prod.yaml（OMC 进程以这里为准连接中间件）
 sudo vi /opt/omc/etc/app.prod.yaml      # db.dsn / tsdb.dsn / minio.* / jwt.secret
@@ -400,6 +402,29 @@ sudo docker compose -p omcgo -f docker-compose.app.yml restart app acs worker
 PGPASSWORD='新口令' psql -h 127.0.0.1 -U omcgo -d omcgo -c 'select 1'
 # OMC 服务全部 OK
 bash /opt/omc/current/deploy/healthcheck.sh</pre>
+
+<h2>🌍 9.5 OMC_PUBLIC_HOST —— 基站可达地址（env 文件必填项）</h2>
+<p class="lead"><code>OMC_PUBLIC_HOST</code> 是本机对外的 IP / 域名（<b>基站侧能访问到的地址</b>）。
+worker 用它拼 PM 文件上传 URL（<code>http://&lt;OMC_PUBLIC_HOST&gt;:7557/smallcell/FileUploadService?...</code>）
+下发给基站；填 localhost / 127.0.0.1 基站将无法回传文件。</p>
+<h3>9.5.1 env 文件在哪、怎么配</h3>
+<ul class="list">
+<li><b>文件位置：</b><code>/opt/omc/current/deploy/.env</code>（即解压出来的交付包 <code>deploy/.env</code>；<code>current</code> 软链指向当前版本目录）</li>
+<li><b>改哪一行：</b>把 <code>OMC_PUBLIC_HOST=</code> 填成本机对外 IP，例如 <code>OMC_PUBLIC_HOST=172.19.1.132</code>（多网卡填基站能路由到的那个；有域名可填域名）</li>
+<li><b>谁读它：</b>compose 把它注入 <code>app</code> / <code>acs</code> / <code>worker</code> 三个容器；容器内配置 <code>worker.prod.yaml</code> 的 <code>upload_url_template</code> 用 <code>\${OMC_PUBLIC_HOST}</code> 展开</li>
+</ul>
+<pre>sudo vi /opt/omc/current/deploy/.env
+#   OMC_PUBLIC_HOST=172.19.1.132          ← 改成本机对外 IP
+
+# 改完重启业务容器使其生效（或重跑 deploy.sh）
+cd /opt/omc/current/deploy
+bash svc.sh restart app acs worker
+
+# 验证容器内已拿到（应回显你填的 IP）
+docker exec omcgo-worker-1 printenv OMC_PUBLIC_HOST</pre>
+<div class="danger">⚠️ <code>deploy/.env</code> 位于<b>每个版本目录内</b>，升级到新版本时<b>不会自动继承</b>（只有 <code>/opt/omc/etc/*.prod.yaml</code> 会被 deploy.sh 保留）。
+每次升级后，请在新版本的 <code>deploy/.env</code> 里<b>重新填写 <code>OMC_PUBLIC_HOST</code> 与各项口令 / JWT</b>，
+或从上一版本目录拷过来：<code>cp /opt/omc/releases/&lt;旧版本&gt;/deploy/.env /opt/omc/current/deploy/.env</code> 后再核对。</div>
 </div>
 
 <div class="tab-content" id="tab-ops">

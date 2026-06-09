@@ -222,6 +222,10 @@ GRAFANA_ADMIN_PASSWORD=admin
 OMCGO_ENV=prod
 # JWT 密钥（app 容器读，生产勿用默认值）
 OMCGO_JWT_SECRET=8f7a9b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6
+# 本机对外 IP / 域名（基站可达地址）——【部署前必填】。app/acs/worker 容器读，
+# worker 据此生成 PM 文件上传 URL 下发给基站；不能用 localhost / 127.0.0.1，
+# 否则基站无法回传文件。示例：OMC_PUBLIC_HOST=172.19.1.132
+OMC_PUBLIC_HOST=
 EOF
 
   # 1.5 运维侧部署文档
@@ -256,6 +260,7 @@ Docker 引擎、compose v2 二进制、基础镜像在【独立的基础设施�
 sha256sum -c checksums.sha256
 \`\`\`
 PostgreSQL / MinIO / JWT / Grafana 默认口令必须在部署时修改（deploy/.env）。
+\`OMC_PUBLIC_HOST\` 必须在部署时填本机对外 IP（基站可达），否则基站无法回传 PM 文件（deploy/.env）。
 EOF
   ( cd "$STAGE" && find . -type f ! -name checksums.sha256 -print0 \
       | sort -z | xargs -0 sha256sum > checksums.sha256 )
