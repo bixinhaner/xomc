@@ -46,6 +46,18 @@ type Infra struct {
 	Health     *HealthChecker
 
 	metricsPort int
+
+	// pprof 开关：由 SetPprof 注入（通常来自 cfg.Metrics.Pprof）；
+	// 与原始短 env OMCGO_PPROF / OMCGO_PPROF_CONTENTION 取或，便于临时强开。
+	pprofEnabled    bool
+	pprofContention bool
+}
+
+// SetPprof 注入 pprof 配置（配置文件驱动）。必须在 ListenAndServe / WaitAndShutdown
+// 之前调用（startMetrics 读取这两个字段）。
+func (inf *Infra) SetPprof(enabled, contention bool) {
+	inf.pprofEnabled = enabled
+	inf.pprofContention = contention
 }
 
 // NewInfra creates a base Infra with logger, graceful shutdown, metrics registry, and health checker.
@@ -249,13 +261,16 @@ func (inf *Infra) startMetrics() {
 	// net/http/pprof —— 仅在 OMCGO_PPROF 为真时挂到内网 metrics 端口（与 /metrics 同信任
 	// 边界，不暴露在对外业务 API 端口）。默认关闭：商用部署保持干净，排查 CPU/内存时按需
 	// 打开后重启进程即可，无需改业务代码。
-	if pprofEnabled() {
+	// 配置文件(cfg.Metrics.Pprof)优先；原始短 env 作为临时强开的兜底。
+	enablePprof := inf.pprofEnabled || isEnvTruthy(os.Getenv("OMCGO_PPROF"))
+	enableContention := inf.pprofContention || isEnvTruthy(os.Getenv("OMCGO_PPROF_CONTENTION"))
+	if enablePprof {
 		registerPprof(metricsMux)
 		inf.Logger.Warn("pprof endpoints ENABLED on metrics port (/debug/pprof/*) —— 仅用于线上排查，排查完请关闭",
 			zap.Int("port", inf.metricsPort))
 		// 竞争剖析（block/mutex）默认仍关：它对热锁有可测开销，会扰动 CPU profile。
-		// 仅在显式 OMCGO_PPROF_CONTENTION 时低速率采样，用于定位锁/连接池争用。
-		if contentionProfilingEnabled() {
+		// 仅在显式开启时低速率采样，用于定位锁/连接池争用。
+		if enableContention {
 			runtime.SetBlockProfileRate(blockProfileRateNs)
 			runtime.SetMutexProfileFraction(mutexProfileFraction)
 			inf.Logger.Warn("pprof contention profiling ENABLED (block+mutex 采样有开销)",
@@ -294,9 +309,6 @@ func registerPprof(mux *http.ServeMux) {
 	mux.HandleFunc("/debug/pprof/symbol", httppprof.Symbol)
 	mux.HandleFunc("/debug/pprof/trace", httppprof.Trace)
 }
-
-func pprofEnabled() bool               { return isEnvTruthy(os.Getenv("OMCGO_PPROF")) }
-func contentionProfilingEnabled() bool { return isEnvTruthy(os.Getenv("OMCGO_PPROF_CONTENTION")) }
 
 func isEnvTruthy(v string) bool {
 	switch strings.ToLower(strings.TrimSpace(v)) {

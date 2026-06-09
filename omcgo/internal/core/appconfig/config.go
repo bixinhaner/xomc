@@ -766,7 +766,18 @@ type BucketConfig struct {
 // 各服务在此端口提供 /metrics 端点，供 Prometheus 采集。
 // 同一端口也提供 /healthz 健康检查接口（由 HealthChecker 驱动）。
 type MetricsConfig struct {
-	Port int `mapstructure:"port"`
+	Port  int         `mapstructure:"port"`
+	Pprof PprofConfig `mapstructure:"pprof"`
+}
+
+// PprofConfig 控制是否在 metrics 端口挂载 net/http/pprof（默认全关）。
+//
+// 与 /metrics 同端口（内网信任边界），仅用于线上性能排查。配置文件即可开关；
+// 因 viper SetEnvPrefix("OMCGO")+AutomaticEnv，等价 env 为
+// OMCGO_METRICS_PPROF_ENABLED / OMCGO_METRICS_PPROF_CONTENTION。
+type PprofConfig struct {
+	Enabled    bool `mapstructure:"enabled"`    // 挂 /debug/pprof/*（CPU/heap/goroutine/trace）
+	Contention bool `mapstructure:"contention"` // 额外开 block/mutex 采样（有开销，定位锁/连接池争用）
 }
 
 // TracerConfig 配置 OpenTelemetry 分布式链路追踪。

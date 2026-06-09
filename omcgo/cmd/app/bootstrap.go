@@ -28,6 +28,8 @@ func initApp(ctx context.Context, cfg *appconfig.AppConfig) (*appInfra, error) {
 	if err != nil {
 		return nil, err
 	}
+	// 配置文件驱动的 pprof 开关（metrics 端口挂 /debug/pprof/*，默认关）。
+	inf.SetPprof(cfg.Metrics.Pprof.Enabled, cfg.Metrics.Pprof.Contention)
 
 	if err := inf.InitTracer(ctx, cfg.Tracer, "omcgo-app"); err != nil {
 		return nil, err
