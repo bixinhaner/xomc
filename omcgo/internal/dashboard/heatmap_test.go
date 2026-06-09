@@ -1,12 +1,9 @@
 package dashboard
 
 import (
-	"context"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // TestGetAlarmHeatmap tests the GetAlarmHeatmap function.
