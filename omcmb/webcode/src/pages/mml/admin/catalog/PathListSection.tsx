@@ -80,16 +80,24 @@ export default function PathListSection({
       title: t('mml.admin.catalog.subField.standardPath'),
       dataIndex: 'tr069Path',
       key: 'standardPath',
+      // 定宽列：超长 path 在列内截断，复制图标固定在右侧同一位置（不被长路径顶飞）。
+      width: 360,
       render: (p: string) => (
-        // 标准路径 + 一键复制（复用 antd Typography.copyable，自带剪贴板 + 反馈，tooltip 走 i18n）。
-        <Space size={4} style={{ width: '100%', minWidth: 0 }}>
-          <Typography.Text code style={{ fontSize: 12, flex: 1, minWidth: 0 }} ellipsis={{ tooltip: p }}>
+        // flex 布局：路径占满剩余宽度并截断(minWidth:0 让其可收缩)，复制图标 flex 不收缩、固定右侧。
+        // 复用 antd Typography.copyable（自带剪贴板 + 反馈，tooltip 走 i18n）。
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
+          <Typography.Text
+            code
+            style={{ fontSize: 12, flex: 1, minWidth: 0 }}
+            ellipsis={{ tooltip: p }}
+          >
             {p}
           </Typography.Text>
           <Typography.Text
+            style={{ flex: '0 0 auto' }}
             copyable={{ text: p, tooltips: [t('common.copy'), t('table.copied')] }}
           />
-        </Space>
+        </div>
       ),
     },
     {
