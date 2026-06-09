@@ -99,28 +99,25 @@
 - 2-3 个 scope → 用主要 scope
 - 超过 3 个 → 省略 scope 或使用最主要的那个
 
-### Step 4.5: 识别关联 Backlog Task（流水线硬门）
+### Step 4.5: 识别关联 GitHub Issue（流程闭环）
 
-**背景**：commit 必须引用 `docs/project/backlog.md` 中的具体 Task，否则流水线脱节。
+**背景**：commit 应引用对应的 GitHub Issue（活任务源，见 `docs/agents/issue-tracker.md`），让 `/ship` 流程可追溯。
 
-按以下顺序推断 `T-NNNN`，首次命中即止：
+按以下顺序推断 `#NN`，首次命中即止：
 
-1. `$ARGUMENTS` 含 `--task=T-NNNN` → 采用
-2. 当前分支名含 `T-NNNN`（如 `feature/T-0007-alarm-email`）→ 采用
-3. `git log -10 --format=%B` 最近 commit 引用过同一 T-NNNN 且本次变更延续其范围 → 采用
-4. `docs/project/backlog.md` 存在 State=`in_dev` 的唯一 Task → 采用并提示用户确认
-5. 以上都无 → **阻塞提交**，输出：
+1. `$ARGUMENTS` 含 `--issue=NN` → 采用
+2. 当前分支名含 `#NN` / `issue-NN`（如 `feat/42-alarm-email`）→ 采用
+3. `git log -10 --format=%B` 最近 commit 引用过同一 `#NN` 且本次变更延续其范围 → 采用
+4. `gh issue list --label ready-for-agent --state open` 恰好一条 → 采用并提示用户确认
+5. 以上都无 → 提示（**不阻塞**，纯流程/工具链提交可无 Issue）：
    ```
-   ❌ 未识别 Backlog Task。请任选：
-     a) 重试：/commit --task=T-NNNN
-     b) 登记新 Task：/dev-pipeline backlog add "<title>" → triage → 再提交
-     c) 快速通道（hotfix/临时修复）：/commit --task=HOTFIX 并在 body 说明原因，S7 补登记
+   未识别关联 Issue。可任选：
+     a) 重试：/commit --issue=NN
+     b) 尚无 Issue：/ship P2（to-prd）或 /to-issues 先登记
+     c) 临时修复：在 body 说明原因，/ship P9 收尾时补 Issue
    ```
 
-获取 T-NNNN 后：
-- 读 `docs/project/backlog.md` 主表验证其存在且 State ∈ {in_dev, in_review, planned}
-- 自动抓取 Task 行的 `Sprint` / `Risk/PRD` 字段供 Step 7 Footer 使用
-- 若 Task.State = `planned` → 同步更新为 `in_dev`（且记入本轮 commit 的 backlog.md diff 中）
+获取 `#NN` 后：`gh issue view NN` 确认其存在且未关闭，供 Step 7 footer 使用。
 
 ### Step 5: 执行代码审查（核心步骤）
 
@@ -176,37 +173,29 @@ Why: [变更原因/背景]
 Impact: [对其他模块或用户的影响，如无则写"无"]
 ```
 
-**Footer（尾部）— 四元组硬约束 + 扩展**：
+**Footer（尾部）— 流程闭环字段**：
 
-> 规则源：`.claude/commands/dev-pipeline.md §D3` + `docs/project/dod.md §流水线闭环`
-
-**五字段硬约束（S6 硬门，缺 Backlog 则阻塞提交）**：
+> 规则源：`docs/project/dod.md §流程闭环` + `.claude/commands/ship.md`
 
 ```
-PRD: <docs/project/prd/F{NN}-*.md>   或   N/A (type=<bugfix|docs|hotfix|proc|refactor>)
-Sprint: sprint-NN                      或   N/A (out-of-sprint hotfix)
-Risk: R-NNN                            或   -（无关联风险）
-Backlog: T-NNNN                        ← 必填，不允许空或 N/A
-Review: <审查报告相对路径>             或   N/A (skipped per §C <type>)
+Issue: Closes #NN              或   N/A (<原因，如 流程/工具链提交无关联 Issue>)
+Review: <审查报告相对路径>     或   N/A (skipped per /ship 快速通道 <type>)
 ```
 
 **可选扩展**：
 
 ```
 [BREAKING CHANGE: <破坏性变更说明>]
-[Related: <功能域编号或 issue，如 F06, #123>]
-[Skip: S0,S1]                          # 快速通道裁剪阶段（见 dev-pipeline §C）
+[Related: <功能域编号或其它 issue，如 F06, #123>]
+[Skip: P1,P2]                  # /ship 快速通道裁剪阶段（见 ship.md §快速通道）
 ```
 
 **字段来源**（Step 4.5 + Step 5 自动填入）：
 
 | 字段 | 来源 |
 |------|------|
-| `PRD` | backlog.md Task 行 `Risk/PRD` 列中 PRD 路径；无则按 Task.Type 填 N/A |
-| `Sprint` | backlog.md Task 行 `Sprint` 列 |
-| `Risk` | backlog.md Task 行 `Risk/PRD` 列中 R-NNN；无则 `-` |
-| `Backlog` | Step 4.5 识别结果 |
-| `Review` | Step 5 生成报告路径；快速通道跳过则 `N/A (skipped per §C <type>)` |
+| `Issue` | Step 4.5 识别结果（`Closes #NN` 合并时自动关闭）；无关联则 `N/A (<原因>)` |
+| `Review` | Step 5 生成报告路径；快速通道跳过则 `N/A (skipped per /ship 快速通道 <type>)` |
 
 ### Step 8: 执行提交
 
@@ -220,13 +209,10 @@ What: <what>
 Why: <why>
 Impact: <impact>
 
-PRD: <docs/project/prd/F{NN}-*.md 或 N/A (type=<...>)>
-Sprint: <sprint-NN 或 N/A (out-of-sprint hotfix)>
-Risk: <R-NNN 或 ->
-Backlog: <T-NNNN>
-Review: <docs/review-report/YYYYMMDD/REVIEW_*.md 或 N/A (skipped per §C <type>)>
+Issue: <Closes #NN 或 N/A (<原因>)>
+Review: <docs/review-report/YYYYMMDD/REVIEW_*.md 或 N/A (skipped per /ship 快速通道 <type>)>
 
-Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -250,17 +236,14 @@ EOF
 feat(device): 实现设备列表分页查询与批量操作
 
 What: 新增 device handler 的 List/BatchDelete 接口，支持按 carrier/technology/status 过滤，squirrel 动态 SQL 构建
-Why: Sprint 1 设备管理基础功能需求，前端设备列表页面需要对接后端接口
+Why: 设备管理基础功能需求，前端设备列表页面需要对接后端接口
 Impact: 新增 GET /api/v1/devices 和 DELETE /api/v1/devices/batch 端点
 
-PRD: docs/project/prd/F06-device-management.md
-Sprint: sprint-01
-Risk: -
-Backlog: T-0042
+Issue: Closes #42
 Review: docs/review-report/20260312/REVIEW_abc1234_watermelon_device.md
 Related: F06
 
-Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
 ```
 
 ---
@@ -272,5 +255,5 @@ Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
 - 每个子仓库独立提交，不要混合 omcgo 和 omcmb 的变更
 - 如果是纯文档变更（`docs` type），审查可以简化，仅检查格式和内容
 - 使用 HEREDOC 传递提交消息以确保格式正确
-- **Footer 硬门**：`Backlog: T-NNNN` 缺失 → 直接拒绝提交，不退化为警告（与 `dev-pipeline §D3/§D4` 一致）
-- **四元组验证**：提交前最后一步，用正则 `^PRD:|^Sprint:|^Risk:|^Backlog:|^Review:` 逐项核对，任一缺失即停
+- **Footer 闭环**：`Issue:` 字段优先填 `Closes #NN`（合并自动关 Issue）；纯流程/工具链提交无 Issue 时填 `N/A (<原因>)`，不阻塞
+- **Review 字段**：审查报告路径或 `N/A (skipped per /ship 快速通道 <type>)`，二选一必填

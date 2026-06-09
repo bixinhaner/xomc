@@ -221,10 +221,10 @@ API / Hook / Store / Types / i18n / Mock 全在 `omcmb/frontend-core/`（多皮�
 ## 9. 开发流程
 
 > **任务源（活）= GitHub Issues**（`github.com/569423176-sketch/goomc`，`gh` CLI）。新需求/缺陷登记到 GitHub Issues，经 triage（`needs-triage` → `ready-for-agent` 等）后拉起开发。
-> `docs/project/backlog.md` 已**冻结为历史审计归档**（保留 dev-pipeline 的 closing-evidence 追溯链，不再新增任务）。
-> ⚠️ 迁移进行中：`/dev-pipeline` 与 BaiBM `issue:*` skill 仍部分依赖 backlog.md，重接到 GitHub Issues 是在途项，详见 `docs/agents/issue-tracker.md`。
+> `docs/project/backlog.md` 已**冻结为历史审计归档**（保留旧 S0–S7 流水线的 closing-evidence 追溯链，不再新增任务）。
+> **全流程编排 = `/ship`**：一键贯穿 对齐→立项→切片→分诊→实现→验证→审查→提交→收尾，**只调度不实现**（委派 grill-with-docs / to-prd / to-issues / triage / tdd / review / commit 等），详见 `.claude/commands/ship.md`。旧 `/dev-pipeline` 与 BaiBM `issue:*` 已下线。
 
-**实施步骤**（流水线 S2–S6 操作性摘要，小改/hotfix 快速通道）：
+**实施步骤**（`/ship` P5–P8 操作性摘要，小改/hotfix 走快速通道）：
 1. **理解** — 研究现有模式，读相关模块 handler/service/repository
 2. **规划** — 复杂功能分解为 3-5 阶段，明确每阶段可交付物
 3. **测试** — 先写测试（后端 `_test.go`、E2E 脚本）
@@ -338,10 +338,11 @@ cd omcmb/webcode && npm run {dev,dev:mock,build,typecheck,lint,test,test:e2e}
 | 后端详细指导 | `omcgo/CLAUDE.md` |
 | 专家角色（审查视角）| `docs/expert-personas.md` |
 | 领域术语表 | `CONTEXT.md` |
-| 开发流水线 Skill / 设计 | `.claude/commands/dev-pipeline.md` · `docs/project/dev-pipeline-design-20260420.md` |
+| 全流程编排 Skill | `.claude/commands/ship.md`（`/ship`，一键贯穿全流程，只调度不实现）|
+| 标准工程套件 | matt-pocock skills：`grill-with-docs` / `to-prd` / `to-issues` / `triage` / `tdd` / `diagnose` / `improve-codebase-architecture` / `handoff`（`/ship` 编排调用）|
 | 任务源（活）| GitHub Issues `github.com/569423176-sketch/goomc`（详见 `docs/agents/issue-tracker.md`）|
-| 历史任务归档 | `docs/project/backlog.md`（已冻结）|
-| 其它 Skill | `.claude/commands/{e2e,acs-stress-test,review,commit}.md` |
+| 历史任务归档 | `docs/project/backlog.md`（已冻结）· 旧流水线设计 `docs/project/dev-pipeline-design-20260420.md` |
+| 项目自有 Skill | `.claude/commands/{e2e,acs-stress-test,review,commit}.md` |
 | 前端多皮肤架构 | `docs/project/frontend-multi-skin-plan-20260422.md` |
 | 消息队列全流程 | `docs/消息队列全流程流转说明书.md` |
 | DoD / Release Gate / 风险登记册 | `docs/project/{dod,release-gate,risk-register}.md` |
@@ -359,7 +360,7 @@ AI 处理不同领域代码时应自动激活对应专家视角审查。**完整
 
 ## Agent skills（matt-pocock 工程技能套件）
 
-> 与本仓库自有 `/dev-pipeline` + Skill 协同。约定文件在 `docs/agents/`。
+> 由 `/ship` 编排器按阶段调用（§9），是本仓的标准工程主干。约定文件在 `docs/agents/`。
 
 - **Issue tracker（任务源）**：Issues / PRDs 走 GitHub Issues（`github.com/569423176-sketch/goomc`，`gh` CLI）——已采纳为活任务源（§9）。详见 `docs/agents/issue-tracker.md`。
 - **Triage labels**：5 个标准 triage 角色标签（`needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix`）。详见 `docs/agents/triage-labels.md`。

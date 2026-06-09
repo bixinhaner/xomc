@@ -21,7 +21,7 @@ OMC（Operations, Management and Control）是面向小基站 / 皮基站 / 微�
 | `deployments/` | 部署清单（docker compose 容器栈 + 监控配置） | [`deployments/docker/README.md`](./deployments/docker/README.md) |
 | `run/` | 本地一键启停脚本（裸进程跑法，备用） | `run/scripts/` |
 | `docs/` | 设计 / 审查 / 流程 / PRD / Sprint / 运维手册 / 协议合规报告 | （见 §⑥） |
-| `.claude/` | Claude Code Skills（`commands/` 内含 dev-pipeline / commit / review / e2e / acs-stress-test）+ settings.json | [`CLAUDE.md`](./CLAUDE.md) |
+| `.claude/` | Claude Code Skills（`commands/` 内含 ship / commit / review / e2e / acs-stress-test）+ matt-pocock 标准套件 + settings.json | [`CLAUDE.md`](./CLAUDE.md) |
 
 ---
 
@@ -84,7 +84,7 @@ bash run/scripts/stop-all.sh     # 停止全部
 ## ⑤ 怎么贡献
 
 - **任务源**：活任务走 **GitHub Issues**（`github.com/569423176-sketch/goomc`，`gh` CLI），约定见 [`docs/agents/issue-tracker.md`](./docs/agents/issue-tracker.md)。`docs/project/backlog.md` 为历史审计归档，不再新增任务。
-- **开发流程**：首选 `/dev-pipeline` 走 S0→S7 七阶段流水线（出队 → 立项 → 规划 → 设计 → 开发 → 验证 → 审查 → 提交 → 收尾），Skill 在 [`.claude/commands/dev-pipeline.md`](./.claude/commands/dev-pipeline.md)。小改 / hotfix 走快速通道。
+- **开发流程**：一键 `/ship` 贯穿全流程（对齐 → 立项 → 切片 → 分诊 → 实现 → 验证 → 审查 → 提交 → 收尾），它只调度、按阶段委派 matt-pocock 标准套件（grill-with-docs / to-prd / to-issues / triage / tdd…）与项目自有 review / commit / e2e，Skill 在 [`.claude/commands/ship.md`](./.claude/commands/ship.md)。小改 / hotfix 走快速通道。
 - **提交规范**：Conventional Commits + 中文描述，scope 对应功能域 / 模块，git 操作边界（不自动 push、`--force`/`--no-verify` 硬禁）见根 [`CLAUDE.md` §8.1](./CLAUDE.md)。提交前过质量关卡：后端 `go build ./... && go test ./...`，前端 `cd omcmb/webcode && npm run typecheck`。
 
 ---
