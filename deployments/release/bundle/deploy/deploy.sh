@@ -62,6 +62,36 @@ warn() { echo -e "\033[1;33m[deploy][警告]\033[0m $*" >&2; }
 die()  { echo -e "\033[1;31m[deploy][错误]\033[0m $*" >&2; exit "${2:-1}"; }
 sep()  { echo -e "\033[1;34m──────────────── $* ────────────────\033[0m"; }
 
+# force_remove_volumes <多行卷名（每行一个）> —— 逐个 docker volume rm -f 强删。
+#
+# 背景：`compose down -v` 的删卷步骤偶发卡死在「Removing …」长时间不返回
+# （卷被残留挂载/进程占用，或 dockerd 删除协程 wedge），导致整个卸载挂住。
+# 故卸载时不给 compose down 传 -v，改由本函数把删卷拿出来可控处理：
+#   1) docker volume rm -f（带 timeout，避免单卷卡死拖垮全流程）
+#   2) 卡住则 lazy-umount 其挂载点释放占用后再重试一次
+# 依赖 timeout(coreutils)；无 timeout 时退化为不带超时直接删。
+force_remove_volumes() {
+  local vols="$1" vol mp TO=""
+  command -v timeout >/dev/null 2>&1 && TO="timeout 30"
+  while IFS= read -r vol; do
+    [ -z "$vol" ] && continue
+    docker volume inspect "$vol" >/dev/null 2>&1 || continue   # 已不存在（可能 down -v 已删）
+    if $TO docker volume rm -f "$vol" >/dev/null 2>&1; then
+      log "        · 已删卷 $vol"
+      continue
+    fi
+    warn "卷 $vol 删不掉，尝试 lazy-umount 其挂载点后重试 ..."
+    mp=$(docker volume inspect -f '{{.Mountpoint}}' "$vol" 2>/dev/null || true)
+    [ -n "$mp" ] && mount | grep -q " $mp " && umount -l "$mp" 2>/dev/null || true
+    if $TO docker volume rm -f "$vol" >/dev/null 2>&1; then
+      log "        · 已删卷 $vol（重试成功）"
+    else
+      warn "卷 $vol 仍删除失败，请手动处理：docker volume rm -f $vol"
+      warn "  （若仍卡，systemctl restart docker 清掉 wedge 的删除协程后再删，或 rm -rf 其挂载点目录）"
+    fi
+  done <<< "$vols"
+}
+
 # ── 参数解析 ────────────────────────────────────────────────────────────
 SKIP_INFRA=0
 SKIP_MIGRATE=0
@@ -219,19 +249,26 @@ if [ "$UNINSTALL" = 1 ]; then
   cd /tmp
 
   # 1) compose down(若 cwd 此前在 deploy/,这里要带 compose 文件绝对路径)
+  #    注意:不给 compose down 传 -v —— compose 删卷步骤偶发卡死在「Removing」会拖垮整个
+  #    卸载。删卷统一交给下面 force_remove_volumes(docker volume rm -f + 超时 + umount 重试)。
   if [ -n "$UN_COMPOSE" ] && [ -d "$DEPLOY_DIR" ]; then
     log "[1/5] $UN_COMPOSE down(stop + remove 容器/网络) ..."
     DOWN_FILES=( -f "$DEPLOY_DIR/docker-compose.infra.yml" -f "$DEPLOY_DIR/docker-compose.app.yml" )
     [ -f "$DEPLOY_DIR/docker-compose.web.yml" ]        && DOWN_FILES+=( -f "$DEPLOY_DIR/docker-compose.web.yml" )
     [ -f "$DEPLOY_DIR/docker-compose.monitoring.yml" ] && DOWN_FILES+=( -f "$DEPLOY_DIR/docker-compose.monitoring.yml" )
     DOWN_ARGS=( down --remove-orphans )
-    [ "$KEEP_DATA" = 0 ] && DOWN_ARGS+=( -v )
     ( cd "$DEPLOY_DIR" && $UN_COMPOSE -p "$COMPOSE_PROJECT" "${DOWN_FILES[@]}" "${DOWN_ARGS[@]}" ) || warn "compose down 报错,继续"
   elif [ -n "$RUNNING_CONTAINERS" ]; then
     log "[1/5] compose 文件丢失,fallback 用 docker rm -f 强删容器 ..."
     echo "$RUNNING_CONTAINERS" | xargs -r docker rm -f >/dev/null 2>&1 || true
-    [ "$KEEP_DATA" = 0 ] && [ -n "$VOLUMES_LIST" ] && echo "$VOLUMES_LIST" | xargs -r docker volume rm >/dev/null 2>&1 || true
     [ -n "$NETWORKS_LIST" ] && echo "$NETWORKS_LIST" | xargs -r docker network rm >/dev/null 2>&1 || true
+  fi
+
+  # 1b) 强删数据卷:docker volume rm -f(带超时 + 卡住时 lazy-umount 后重试)。
+  #     单独成步,避免 compose down -v 卡在删卷把整个卸载挂死。
+  if [ "$KEEP_DATA" = 0 ] && [ -n "$VOLUMES_LIST" ]; then
+    log "[1b/5] 强删数据卷(docker volume rm -f) ..."
+    force_remove_volumes "$VOLUMES_LIST"
   fi
 
   # 2) 业务镜像
