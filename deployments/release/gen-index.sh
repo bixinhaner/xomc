@@ -422,9 +422,10 @@ bash svc.sh restart app acs worker
 
 # 验证容器内已拿到（应回显你填的 IP）
 docker exec omcgo-worker-1 printenv OMC_PUBLIC_HOST</pre>
-<div class="danger">⚠️ <code>deploy/.env</code> 位于<b>每个版本目录内</b>，升级到新版本时<b>不会自动继承</b>（只有 <code>/opt/omc/etc/*.prod.yaml</code> 会被 deploy.sh 保留）。
-每次升级后，请在新版本的 <code>deploy/.env</code> 里<b>重新填写 <code>OMC_PUBLIC_HOST</code> 与各项口令 / JWT</b>，
-或从上一版本目录拷过来：<code>cp /opt/omc/releases/&lt;旧版本&gt;/deploy/.env /opt/omc/current/deploy/.env</code> 后再核对。</div>
+<div class="tip">✅ <b>升级自动继承</b>：<code>deploy.sh</code> 升级时会把上一版 <code>deploy/.env</code> 里的运维自定义值
+（PostgreSQL / MinIO / Grafana 口令、JWT、<code>OMC_PUBLIC_HOST</code>）合并进新包 <code>.env</code>，<b>镜像 tag 仍用新包</b> ——
+所以<b>升级无需重填</b>，仅<b>首次部署</b>需手动填一次。升级日志会打印「.env：已从上一版继承运维自定义值…」。
+如需改值，编辑 <code>/opt/omc/current/deploy/.env</code> 后 <code>bash svc.sh restart app acs worker</code>。</div>
 </div>
 
 <div class="tab-content" id="tab-ops">

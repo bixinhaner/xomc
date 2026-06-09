@@ -92,6 +92,51 @@ force_remove_volumes() {
   done <<< "$vols"
 }
 
+# 升级时 deploy/.env 里【运维自定义】的键 —— 跨版本继承,不被新包默认值覆盖。
+# 【版本相关】键(PROJECT_VERSION / IMAGE_*)不在此列,始终用新包值。
+ENV_PRESERVE_KEYS="POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB MINIO_ROOT_USER MINIO_ROOT_PASSWORD GRAFANA_ADMIN_USER GRAFANA_ADMIN_PASSWORD OMCGO_JWT_SECRET OMC_PUBLIC_HOST"
+
+# merge_env_preserve <prev_env> <new_env>
+# 升级继承:以新包 .env 为基底(拿到新镜像 tag),把上一版 .env 中白名单键的值
+# (口令 / JWT / OMC_PUBLIC_HOST)覆盖进来 —— 解决"升级丢运维配置"(§9.5)。
+# 值含特殊字符(base64 JWT、含 = 的口令等)由 awk 当数据处理,不经 shell 展开,安全。
+# 首次部署(无 prev)直接用新包默认值。
+merge_env_preserve() {
+  local prev="$1" new="$2" tmp
+  [ -f "$new" ] || return 0
+  if [ -z "$prev" ] || [ ! -f "$prev" ]; then
+    log ".env:首次部署(无上一版),使用交付包默认值 —— 记得在 $new 填 OMC_PUBLIC_HOST 与强口令"
+    return 0
+  fi
+  tmp="$(mktemp)" || { warn ".env 合并:mktemp 失败,沿用新包默认值"; return 0; }
+  if awk -v keys="$ENV_PRESERVE_KEYS" '
+      BEGIN { n=split(keys, A, " "); for (i=1;i<=n;i++) want[A[i]]=1 }
+      FNR==NR {                                    # 第一份 = 上一版(prev)
+        if ($0 ~ /^[A-Za-z_][A-Za-z0-9_]*=/) {
+          p=index($0,"="); k=substr($0,1,p-1)
+          if (k in want) { val[k]=substr($0,p+1); have[k]=1 }
+        }
+        next
+      }
+      {                                            # 第二份 = 新包(new,基底)
+        if ($0 ~ /^[A-Za-z_][A-Za-z0-9_]*=/) {
+          p=index($0,"="); k=substr($0,1,p-1)
+          if ((k in want) && (k in have)) { print k"="val[k]; seen[k]=1; next }
+          if (k in want) seen[k]=1
+        }
+        print
+      }
+      END { for (k in have) if (!(k in seen)) print k"="val[k] }
+    ' "$prev" "$new" > "$tmp"; then
+    cat "$tmp" > "$new"        # 覆写内容,保留 new 原 inode / 权限
+    rm -f "$tmp"
+    log ".env:已从上一版继承运维自定义值(口令 / JWT / OMC_PUBLIC_HOST);镜像 tag 用新包。如需改值,编辑 $new 后重启业务容器"
+  else
+    rm -f "$tmp"
+    warn ".env 合并失败,沿用交付包默认值;请手动核对 $new 的 OMC_PUBLIC_HOST 与口令"
+  fi
+}
+
 # ── 参数解析 ────────────────────────────────────────────────────────────
 SKIP_INFRA=0
 SKIP_MIGRATE=0
@@ -436,6 +481,14 @@ mkdir -p "$OMC_ROOT/releases" "$OMC_ROOT/etc" "$OMC_ROOT/packages" \
 # 注:三库导入XML重构 Phase 2 后,custom XML 不再用独立 *-custom 目录(单目录 + sidecar)。
 #     整个 data 目录的播种 / 升级反向合并见下方 RELEASE_DIR 就绪后的「data 外置」步骤。
 
+# 升级前快照当前生效的 deploy/.env,供下方合并继承运维自定义值(口令/JWT/OMC_PUBLIC_HOST)。
+# 必须在可能 mv/覆盖旧版本目录之前抓取 —— current 软链此刻仍指向上一版;首次部署无 current → 空。
+PREV_ENV_SNAPSHOT=""
+if [ -f "$OMC_ROOT/current/deploy/.env" ]; then
+  PREV_ENV_SNAPSHOT="$(mktemp)" || PREV_ENV_SNAPSHOT=""
+  [ -n "$PREV_ENV_SNAPSHOT" ] && { cp "$OMC_ROOT/current/deploy/.env" "$PREV_ENV_SNAPSHOT" 2>/dev/null || PREV_ENV_SNAPSHOT=""; }
+fi
+
 RELEASE_DIR="$OMC_ROOT/releases/$VERSION"
 if [ -d "$RELEASE_DIR" ] && [ "$(readlink -f "$PKG_ROOT" 2>/dev/null)" != "$(readlink -f "$RELEASE_DIR" 2>/dev/null)" ]; then
   warn "已存在版本目录 $RELEASE_DIR，将覆盖（旧文件 → .bak.<时间戳>）"
@@ -449,6 +502,11 @@ if [ "$(readlink -f "$PKG_ROOT")" != "$(readlink -f "$RELEASE_DIR")" ]; then
   mkdir -p "$RELEASE_DIR"
   cp -a "$PKG_ROOT/." "$RELEASE_DIR/"
 fi
+
+# 升级继承:把上一版 .env 的运维自定义值(口令/JWT/OMC_PUBLIC_HOST)合并进新包 .env(§9.5)。
+# 新包仍负责版本相关键(IMAGE_*/PROJECT_VERSION)。首次部署无快照 → 用新包默认。
+merge_env_preserve "$PREV_ENV_SNAPSHOT" "$RELEASE_DIR/deploy/.env"
+[ -n "$PREV_ENV_SNAPSHOT" ] && rm -f "$PREV_ENV_SNAPSHOT" 2>/dev/null || true
 
 # ── data 外置 + 升级反向合并(三库导入XML重构 Phase 2,D1/D2)───────────────────
 # 模型 B:整个 data 目录外置到 $OMC_ROOT/data,bind-mount(RW)进 app/worker;
