@@ -9,16 +9,18 @@
  * - 流畅的动画和交互反馈
  * - 可访问性增强
  */
-import { useState, useMemo, useRef, useEffect } from 'react';
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useIntl } from 'react-intl';
 import { Checkbox, Spin, Empty, Collapse, Input, Tooltip } from 'antd';
 import { SearchOutlined, PlusOutlined, MinusOutlined, CaretDownOutlined } from '@ant-design/icons';
 import GISMap from '@/components/GISMap';
 import { MAP_CONFIG } from '@/components/GISMap/constants';
 import type { GISMapRef } from '@/components/GISMap';
-import type { MapDevice, DeviceGroupNode, DeviceGeo } from '@core/types/map';
+import type { MapDevice, DeviceGroupNode, DeviceGeo, MapViewport } from '@core/types/map';
 import type { Domain } from '@core/types/topology';
 import { useThemeToken } from '@/hooks/useThemeToken';
+// import { useMapDeviceCache } from '@/hooks/useMapDeviceCache'; // 暂未使用
+import { useReactQueryMonitor } from '@/hooks/useReactQueryMonitor';
 import MapStatsPanel from '@/components/GISMap/MapStatsPanel';
 import {
   useDomainTree,
@@ -32,12 +34,14 @@ import './animations.css';
 
 /**
  * 将 DeviceGeo 转换为 MapDevice
+ * 注意：调用前需确保 latitude/longitude 不为 null
  */
 function deviceGeoToMapDevice(device: DeviceGeo): MapDevice {
   return {
     id: device.id,
-    lat: device.latitude,
-    lng: device.longitude,
+    // 非空断言：调用前已过滤 null 值（见 mapDevices 的 filter）
+    lat: device.latitude!,
+    lng: device.longitude!,
     name: device.name,
     status: device.status,
     sn: device.sn,
@@ -113,6 +117,10 @@ export default function GISMapView() {
   const [expandedGroupIds, setExpandedGroupIds] = useState<string[]>([]);
   // 是否已完成初始化（用于控制 API 请求时机）
   const [isInitialized, setIsInitialized] = useState(false);
+  // 地图视口状态（用于动态加载设备）
+  const [mapViewport, setMapViewport] = useState<MapViewport | null>(null);
+  // 搜索结果设备（用于独立显示在地图上）
+  const [searchResultDevice, setSearchResultDevice] = useState<MapDevice | null>(null);
 
   // 状态筛选：在线激活/在线未激活/离线
   const [statusFilter, setStatusFilter] = useState<{
@@ -143,10 +151,93 @@ export default function GISMapView() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchContainerRef = useRef<HTMLDivElement>(null);
 
+  // ========== 缓存机制 ==========
+
+  // 设备数据 LRU 缓存 Hook（保留但暂未集成）
+  //
+  // 设计意图：按视口边界（bounds）缓存设备数据，支持：
+  // - LRU 淘汰策略（最多 10 个视口）
+  // - 5 分钟自动过期
+  // - 跨组件会话共享缓存
+  //
+  // 当前状态：React Query 已提供完善的缓存机制（staleTime: 5分钟）
+  // 其基于完整 queryKey（bounds + groupIds + status + pageSize）的缓存
+  // 已能满足当前性能需求，LRU 缓存优势有限
+  //
+  // 未来场景：如需跨会话共享或更细粒度的 bounds 级别缓存时再集成
+  //
+  // LRU 缓存 Hook（暂未启用，代码注释保留）
+  // const _deviceCache = useMapDeviceCache({
+  //   maxSize: 10,
+  //   ttl: 5 * 60 * 1000, // 5 分钟过期
+  // });
+
+  // React Query 缓存监控（开发环境调试用）
+  const cacheMonitor = useReactQueryMonitor({ interval: 5000 });
+
+  // 开发环境：定期输出缓存统计（便于性能调试）
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'development') {
+      const timer = setInterval(() => {
+        console.log('[ReactQuery Monitor]', {
+          total: cacheMonitor.stats.total,
+          stale: cacheMonitor.stats.stale,
+          inactive: cacheMonitor.stats.inactive,
+          fetching: cacheMonitor.stats.fetching,
+          hitRate: `${cacheMonitor.stats.hitRate.toFixed(1)}%`,
+        });
+      }, 10000); // 每 10 秒输出一次
+      return () => clearInterval(timer);
+    }
+  }, [cacheMonitor.stats]);
+
+  // 用于防抖的定时器
+  const viewportChangeTimerRef = useRef<NodeJS.Timeout | null>(null);
+
   // ========== API Hooks ==========
 
   // 获取设备组树
   const { data: domainTree, isLoading: isLoadingTree } = useDomainTree();
+
+  // ========== 分级显示策略 ==========
+
+  /**
+   * 根据缩放级别获取数据加载策略
+   *
+   * @param zoom - 地图缩放级别
+   * @returns 加载策略配置
+   */
+  const getLoadStrategy = useCallback((zoom: number) => {
+    if (zoom < 8) {
+      // 低缩放级别：显示区域级聚合，数据量小
+      return {
+        aggregate: 'region',
+        pageSize: 500,
+        description: '区域级视图',
+      };
+    } else if (zoom < 12) {
+      // 中缩放级别：显示站点级数据
+      return {
+        aggregate: 'site',
+        pageSize: 2000,
+        description: '站点级视图',
+      };
+    } else if (zoom < 15) {
+      // 高缩放级别：显示详细设备，启用聚合
+      return {
+        aggregate: 'device',
+        pageSize: 5000,
+        description: '设备级视图（聚合）',
+      };
+    } else {
+      // 超高缩放级别：显示所有设备，禁用聚合
+      return {
+        aggregate: 'none',
+        pageSize: 10000,
+        description: '设备级视图（详细）',
+      };
+    }
+  }, []);
 
   // ========== 数据转换 ==========
 
@@ -161,7 +252,7 @@ export default function GISMapView() {
     return new Set(groupTree.flatMap((node) => getAllDescendantIds(node)));
   }, [groupTree]);
 
-  // 获取设备地理数据
+  // 获取设备地理数据（支持视口动态加载和分级显示）
   const filterParams = useMemo(() => {
     const statusList: ('onlineActive' | 'onlineInactive' | 'offline')[] = [
       ...(statusFilter.onlineActive ? ['onlineActive' as const] : []),
@@ -175,6 +266,17 @@ export default function GISMapView() {
     const isAllSelected = selectedGroupIds.length > 0 &&
       selectedGroupIds.length === allGroupIds.size;
 
+    // 根据视口范围生成 bounds 参数
+    let boundsParam: string | undefined;
+    if (mapViewport?.bounds) {
+      const { minLng, maxLng, minLat, maxLat } = mapViewport.bounds;
+      boundsParam = `${minLng},${maxLng},${minLat},${maxLat}`;
+    }
+
+    // 根据缩放级别获取加载策略
+    const currentZoom = mapViewport?.zoom ?? MAP_CONFIG.defaultZoom;
+    const strategy = getLoadStrategy(currentZoom);
+
     return {
       // 选中所有组时传 undefined（返回所有设备，包括未分组的）
       // 只选中部分组时传具体的 groupIds
@@ -183,11 +285,14 @@ export default function GISMapView() {
       // 如果部分被选中，传对应的状态
       // 如果都没选中，传空数组表示不查询任何设备
       status: statusList.length === 3 ? undefined : statusList,
+      // 视口边界参数（用于动态加载可见区域设备）
+      bounds: boundsParam,
       // 只有初始化完成后才启用请求，避免在 selectedGroupIds 为空时发送请求
       enabled: isInitialized,
-      pageSize: 100, // 获取大量数据
+      // 根据缩放级别调整页面大小
+      pageSize: strategy.pageSize,
     };
-  }, [selectedGroupIds, statusFilter, isInitialized, allGroupIds]);
+  }, [selectedGroupIds, statusFilter, isInitialized, allGroupIds, mapViewport, getLoadStrategy]);
 
   const { data: devicesGeoData } = useMapDevicesGeo(filterParams);
 
@@ -200,7 +305,7 @@ export default function GISMapView() {
   const {
     keyword: searchKeyword,
     handleChange: handleSearchInputChange,
-    handleClear: handleSearchClear,
+    handleClear: _handleSearchClear,
     results: searchResults,
     isLoading: isSearching,
     expanded: deviceSearchExpanded,
@@ -211,6 +316,12 @@ export default function GISMapView() {
     debounce: 300,
     autoExpand: true,
   });
+
+  // 清除搜索时同时清除地图上的搜索结果设备
+  const handleSearchClear = useCallback(() => {
+    _handleSearchClear();
+    setSearchResultDevice(null); // 同时清除地图上的高亮设备
+  }, [_handleSearchClear]);
 
   // ========== 数据转换 ==========
 
@@ -907,6 +1018,7 @@ export default function GISMapView() {
         <GISMap
           ref={mapRef}
           devices={mapDevices}
+          searchResultDevice={searchResultDevice}
           height="100%"
           defaultCenter={[26, -13] as [number, number]}
           defaultZoom={MAP_CONFIG.defaultZoom}
@@ -917,6 +1029,44 @@ export default function GISMapView() {
           onMapClick={() => {
             // 点击地图时收起搜索结果面板
             setDeviceSearchExpanded(false);
+            // 不清除搜索结果设备，保留高亮显示
+            // 只有用户重新搜索或手动清除时才移除
+            // setSearchResultDevice(null);
+          }}
+          onViewportChange={(viewport) => {
+            // 视口变化防抖处理（300ms）
+            if (viewportChangeTimerRef.current) {
+              clearTimeout(viewportChangeTimerRef.current);
+            }
+
+            viewportChangeTimerRef.current = setTimeout(() => {
+              // 更新视口状态，触发设备数据重新请求
+              setMapViewport(viewport);
+
+              // 预加载周边区域（扩展 20%）
+              // TODO: 预加载功能框架已就绪，待后端支持批量 bounds 查询时实施
+              // 预期收益：用户拖动地图时，周边区域设备已提前加载，体验更流畅
+              // 预加载代码暂未启用（下方代码注释保留）
+              /*
+              if (viewport.bounds) {
+                const expandFactor = 0.2;
+                const lngRange = (viewport.bounds.maxLng - viewport.bounds.minLng) * expandFactor;
+                const latRange = (viewport.bounds.maxLat - viewport.bounds.minLat) * expandFactor;
+
+                const _preloadBounds = {
+                  minLng: viewport.bounds.minLng - lngRange,
+                  maxLng: viewport.bounds.maxLng + lngRange,
+                  minLat: viewport.bounds.minLat - latRange,
+                  maxLat: viewport.bounds.maxLat + latRange,
+                };
+
+                // TODO: 调用预加载 API 并将结果存入 deviceCache
+                // 1. 检查 deviceCache.has(preloadBoundsKey)
+                // 2. 未命中时调用 API（注意与主视口请求区分，避免竞争）
+                // 3. 缓存结果供后续视口变化时使用
+              }
+              */
+            }, 300);
           }}
         />
 
@@ -1054,7 +1204,8 @@ export default function GISMapView() {
                                 alarmCount: 0,
                                 type: undefined,
                               };
-                              mapRef.current?.highlightAndFlyToWithCard(mapDevice);
+                              // 设置搜索结果设备，让地图组件独立显示
+                              setSearchResultDevice(mapDevice);
                             }}
                           >
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

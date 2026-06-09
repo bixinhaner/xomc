@@ -72,6 +72,7 @@ interface GISMapRef {
  */
 const GISMap = forwardRef<GISMapRef, GISMapProps>(({
   devices = [],
+  searchResultDevice = null,
   height = '100%',
   defaultCenter = MAP_CONFIG.defaultCenter,
   defaultZoom = MAP_CONFIG.defaultZoom,
@@ -149,12 +150,41 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
     },
   });
 
-  // 更新设备数据
+  // 合并主设备列表和搜索结果设备
+  const mergedDevices = useMemo(() => {
+    const baseDevices = devices || [];
+    if (!searchResultDevice) {
+      return baseDevices;
+    }
+    // 使用 Set 优化查找性能（O(n) -> O(1)）
+    // 当前数据量下影响不大，但符合业内性能优化最佳实践
+    const deviceIdSet = new Set(baseDevices.map(d => d.id));
+    const exists = deviceIdSet.has(searchResultDevice.id);
+    if (exists) {
+      return baseDevices;
+    }
+    // 将搜索结果设备添加到列表中
+    return [...baseDevices, searchResultDevice];
+  }, [devices, searchResultDevice]);
+
+  // 更新设备数据（使用合并后的列表）
   useEffect(() => {
     if (isReady) {
-      updateDevices(devices);
+      updateDevices(mergedDevices);
     }
-  }, [isReady, devices, updateDevices]);
+  }, [isReady, mergedDevices, updateDevices]);
+
+  // 当搜索结果设备变化时，自动高亮并定位
+  useEffect(() => {
+    if (searchResultDevice && isReady) {
+      // 延迟执行，确保设备已添加到地图
+      const timer = setTimeout(() => {
+        // 搜索定位时需要飞行到目标位置（skipFlyTo = false）
+        highlightAndSpiderfyIfNeeded(searchResultDevice, false);
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [searchResultDevice, isReady, highlightAndSpiderfyIfNeeded]);
 
   // 元数据加载完成日志（用于调试）
   useEffect(() => {

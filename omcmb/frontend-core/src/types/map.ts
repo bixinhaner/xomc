@@ -283,6 +283,8 @@ export interface DeviceGroupNode {
 export interface GISMapProps {
   /** 设备数据列表 */
   devices?: MapDevice[];
+  /** 搜索结果设备（独立显示，不受主设备列表限制） */
+  searchResultDevice?: MapDevice | null;
   /** 地图高度 */
   height?: string | number;
   /** 默认中心点 [lng, lat] */

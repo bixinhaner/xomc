@@ -1,4 +1,4 @@
-import { useRef, useSyncExternalStore } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 
 interface MousePosition {
   x: number;
@@ -75,11 +75,10 @@ function ensureListener() {
  * Returns { x, y, nx, ny } where nx/ny are normalised to [-1, 1].
  */
 export function useMousePosition(): MousePosition {
-  const initRef = useRef(false);
-  if (!initRef.current) {
-    initRef.current = true;
+  // 初始化监听器（只执行一次）
+  useEffect(() => {
     ensureListener();
-  }
+  }, []);
 
   return useSyncExternalStore(subscribe, getSnapshot, () => DEFAULT);
 }
