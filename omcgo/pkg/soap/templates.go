@@ -303,6 +303,11 @@ const downloadXML = soapEnvelopeOpen +
 	`<FileSize>{{.FileSize}}</FileSize>` +
 	`<TargetFileName>{{.TargetFileName | xmlescape}}</TargetFileName>` +
 	`<DelaySeconds>{{.DelaySeconds}}</DelaySeconds>` +
+	// MD5：CPE 下载后做文件完整性校验的必填字段。三类下行文件的 MD5 来源不同——
+	// 固件升级 / license 在上传入库时算好（fw.MD5Val / lic.MD5），配置文件恢复在
+	// 派发时读 MinIO 文件流现算（RestoreService.computeSourceMD5）。值由上层塞进
+	// Download params 的 md5 字段 → soap.DownloadData.Md5 → 此处渲染。
+	`<Md5>{{.Md5 | xmlescape}}</Md5>` +
 	`<SuccessURL></SuccessURL>` +
 	`<FailureURL></FailureURL>` +
 	`</cwmp:Download>` + soapEnvelopeClose

@@ -200,7 +200,8 @@ func TestDownloadHandler(t *testing.T) {
 			"password": "dlpass",
 			"file_size": 1048576,
 			"target_file_name": "firmware.bin",
-			"delay_seconds": 0
+			"delay_seconds": 0,
+			"md5": "d41d8cd98f00b204e9800998ecf8427e"
 		}`),
 	}
 
@@ -216,6 +217,8 @@ func TestDownloadHandler(t *testing.T) {
 	assert.Contains(t, body, "<Password>dlpass</Password>")
 	assert.Contains(t, body, "<FileSize>1048576</FileSize>")
 	assert.Contains(t, body, "<TargetFileName>firmware.bin</TargetFileName>")
+	// Download 报文必须携带 MD5（params.md5 → soap.DownloadData.Md5 → <Md5>）。
+	assert.Contains(t, body, "<Md5>d41d8cd98f00b204e9800998ecf8427e</Md5>")
 }
 
 // TestDownloadHandler_RuntimeTransferConfigOverride 验证 runtime transfer config
