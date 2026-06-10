@@ -70,12 +70,15 @@ export function useAlarmById(id: string) {
   });
 }
 
+// 告警计数从常驻 Header 触发（每 15s 轮询徽标）。性能（#15）：标签页隐藏时
+// 暂停轮询（refetchIntervalInBackground: false），切回前台 + refetchOnWindowFocus
+// 会立即补刷一次，徽标即时回到最新值，不丢实时性。
 export function useAlarmCount() {
   return useQuery({
     queryKey: ['alarms', 'count'],
     queryFn: () => api.getAlarmCount(),
     refetchInterval: 15000,
-    refetchIntervalInBackground: true,
+    refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
   });
 }

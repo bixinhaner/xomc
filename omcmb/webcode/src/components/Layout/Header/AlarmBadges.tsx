@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAlarmStore } from '@core/store/alarmStore';
 import type { AlarmSeverity } from '@core/store/alarmStore';
@@ -18,7 +19,10 @@ const SEVERITY_CONFIG: SeverityConfig[] = [
   { key: 'warning',  labelKey: 'alarm.severity.warning',  pillClass: styles.alarmPillWarning,  icon: '◆' },
 ];
 
-export default function AlarmBadges() {
+// 性能（#15）：本组件无 props，仅从 alarmStore 选 counts。常驻 Header 会因未读数/
+// 主题/侧栏/响应式等无关原因频繁重渲染——memo 让它在 Header 重渲染时跳过，
+// 只在自身 counts 选择值变化时才更新。
+function AlarmBadges() {
   const counts = useAlarmStore((s) => s.counts);
   const navigate = useNavigate();
   const t = useT();
@@ -44,3 +48,5 @@ export default function AlarmBadges() {
     </div>
   );
 }
+
+export default memo(AlarmBadges);

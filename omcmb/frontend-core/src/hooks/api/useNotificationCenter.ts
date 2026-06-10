@@ -66,6 +66,10 @@ export function useNotificationCenter(opts?: {
  *
  * 设计上轮询 unread-count 单端点（< 100B）比 list 轻量得多，10k 用户 × 0.1 QPS = 1k QPS
  * 可接受；用户点开铃铛时再调 useNotificationCenter 拉列表。
+ *
+ * 性能（#15）：铃铛在所有页面常驻，标签页隐藏时无需继续轮询——
+ * refetchIntervalInBackground: false 让浏览器后台标签暂停轮询定时器，省电省带宽；
+ * 切回前台时 React Query 自动恢复轮询并立即刷新一次。
  */
 export function useNotificationUnreadCount(opts?: { refetchIntervalMs?: number; enabled?: boolean }) {
   const interval = opts?.refetchIntervalMs ?? 10_000;
@@ -73,7 +77,7 @@ export function useNotificationUnreadCount(opts?: { refetchIntervalMs?: number; 
     queryKey: notificationKeys.unreadCount(),
     queryFn: () => api.getUnreadCount(),
     refetchInterval: interval,
-    refetchIntervalInBackground: true,
+    refetchIntervalInBackground: false,
     enabled: opts?.enabled ?? true,
   });
 }
