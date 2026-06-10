@@ -1,7 +1,5 @@
-import { Card, Col, Row, Statistic, Typography, Space, Tooltip, Skeleton, Spin } from 'antd';
+import { Card, Col, Row, Typography, Space, Tooltip, Spin } from 'antd';
 import {
-  ClockCircleOutlined,
-  CheckCircleOutlined,
   InfoCircleOutlined,
   ArrowUpOutlined,
   ArrowDownOutlined,
@@ -10,14 +8,13 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { dashboardApi } from '@core/services/api/dashboardApi';
 import { useT } from '@/hooks/useT';
-import { useCallback, useMemo } from 'react';
-import type { EfficiencyMetrics } from '@core/types/dashboard';
+import { useMemo } from 'react';
 import EmptyState from '@/components/common/EmptyState';
 
 const { Text } = Typography;
 
 // 趋势指示器组件
-function TrendIndicator({ value, prefix = '' }: { value: number; prefix?: string }) {
+function TrendIndicator({ value }: { value: number }) {
   const valueStr = Math.abs(value).toFixed(1);
 
   if (value > 0) {

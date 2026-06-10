@@ -202,7 +202,7 @@ export default function DeviceSelectModal({
         okButtonProps={{ disabled: selected.length === 0 }}
         destroyOnHidden
       >
-        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+        <Space orientation="vertical" size={12} style={{ width: '100%' }}>
           {/* 输入 SN / 选产品 / 选产品类型均为草稿，点蓝色「搜索」按钮才触发查询（§需求 1）。 */}
           <Space wrap>
             <Input

@@ -379,7 +379,7 @@ function MmeIpPlmnTable({ value = [], onChange, disabled = false, locale }: MmeI
   ];
 
   return (
-    <Space direction="vertical" style={{ width: '100%' }} size={8}>
+    <Space orientation="vertical" style={{ width: '100%' }} size={8}>
       <Table<MmeIpPlmnRow>
         size="small"
         rowKey="key"

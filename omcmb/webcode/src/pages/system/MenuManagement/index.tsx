@@ -660,7 +660,7 @@ export default function MenuManagement() {
       </div>
       <Card
         size="small"
-        bordered
+        variant="outlined"
         style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
         styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
       >
@@ -685,7 +685,7 @@ export default function MenuManagement() {
           form.resetFields();
           setSelectedMenu(null);
         }}
-        width={480}
+        size={480}
         footer={
           <div style={{ textAlign: 'right' }}>
             <Button
@@ -930,7 +930,7 @@ export default function MenuManagement() {
           setAddVisible(false);
           addForm.resetFields();
         }}
-        width={480}
+        size={480}
         footer={
           <div style={{ textAlign: 'right' }}>
             <Button

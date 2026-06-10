@@ -110,7 +110,7 @@ export default function UserDropdown() {
               {avatarText}
             </Avatar>
           )}
-          <Space size={2} direction="vertical" style={{ lineHeight: 1 }}>
+          <Space size={2} orientation="vertical" style={{ lineHeight: 1 }}>
             <span className={styles.userName}>{displayName}</span>
           </Space>
           <DownOutlined style={{ fontSize: 10 }} />

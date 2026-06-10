@@ -169,7 +169,7 @@ export default function MetricPickerModal({
       width={820}
       destroyOnHidden
     >
-      <Space direction="vertical" style={{ width: '100%' }} size="middle">
+      <Space orientation="vertical" style={{ width: '100%' }} size="middle">
         <Space>
           {lockDeviceType ? null : (
             <>

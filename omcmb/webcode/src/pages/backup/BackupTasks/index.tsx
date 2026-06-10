@@ -906,7 +906,7 @@ export default function BackupTasks() {
       {activeTab === 'task' ? (
         <Card
           size="small"
-          bordered
+          variant="outlined"
           style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
           styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
         >
@@ -931,7 +931,7 @@ export default function BackupTasks() {
       ) : (
         <Card
           size="small"
-          bordered
+          variant="outlined"
           style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
           styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
         >
@@ -977,7 +977,7 @@ export default function BackupTasks() {
             <Typography.Text strong style={{ fontSize: 13, display: 'block', marginBottom: 12 }}>
               {t('backup.deviceExecution')}
             </Typography.Text>
-            <Space direction="vertical" style={{ width: '100%' }}>
+            <Space orientation="vertical" style={{ width: '100%' }}>
               <Space>
                 {taskDetail.task.successCount > 0 && <Tag color="success">{t('status.success')} {taskDetail.task.successCount}</Tag>}
                 {taskDetail.task.failedCount > 0 && <Tag color="error">{t('status.failed')} {taskDetail.task.failedCount}</Tag>}
@@ -1048,7 +1048,7 @@ export default function BackupTasks() {
       <Drawer
         title={backupDrawerMode === 'scheduled' ? t('backup.scheduledBackup') : t('backup.newBackup')}
         placement="right"
-        width={600}
+        size={600}
         open={!!backupDrawerMode}
         onClose={closeBackupDrawer}
         footer={

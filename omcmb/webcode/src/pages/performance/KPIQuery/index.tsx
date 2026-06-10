@@ -794,7 +794,7 @@ export default function KPIQuery() {
               />
             </Form.Item>
 
-            <Divider orientation="left" style={{ margin: '8px 0 16px' }}>
+            <Divider titlePlacement="left" style={{ margin: '8px 0 16px' }}>
               查询配置
             </Divider>
 

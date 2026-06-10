@@ -163,7 +163,7 @@ function SmartEmptyState({
       <Empty
         image={Empty.PRESENTED_IMAGE_SIMPLE}
         description={
-          <Space direction="vertical" size={4} style={{ textAlign: 'center' }}>
+          <Space orientation="vertical" size={4} style={{ textAlign: 'center' }}>
             <Text>未选择时间范围</Text>
             <Text type="secondary" style={{ fontSize: 12 }}>
               请勾选"今天"或"昨天"以查看 {panelTitle} 数据
@@ -183,7 +183,7 @@ function SmartEmptyState({
     <Empty
       image={Empty.PRESENTED_IMAGE_SIMPLE}
       description={
-        <Space direction="vertical" size={4} style={{ textAlign: 'center' }}>
+        <Space orientation="vertical" size={4} style={{ textAlign: 'center' }}>
           <Text>该时间段暂无数据</Text>
           <Text type="secondary" style={{ fontSize: 12 }}>
             {viewMode === 'day' ? '今日' : '本周'}暂无 {panelTitle} 记录

@@ -100,7 +100,7 @@ function DevicesSupportCards({ devicesSupport }: DevicesSupportCardsProps) {
     <Row gutter={[16, 16]}>
       {entries.map(([deviceType, capacity]) => (
         <Col key={deviceType} xs={12} sm={8} md={6} lg={4}>
-          <Card size="small" bordered>
+          <Card size="small" variant="outlined">
             <Statistic
               title={<span style={{ fontWeight: 600 }}>{deviceType}</span>}
               value={capacity}

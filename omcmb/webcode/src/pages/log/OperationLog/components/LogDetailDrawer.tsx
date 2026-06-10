@@ -29,7 +29,7 @@ export default function LogDetailDrawer({ open, log, onClose }: LogDetailDrawerP
     <Drawer
       title={t('log.detail')}
       placement="right"
-      width={520}
+      size={520}
       open={open}
       onClose={onClose}
       footer={

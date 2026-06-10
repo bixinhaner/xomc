@@ -99,7 +99,7 @@ export function CreateAdhocTaskDrawer({ open, preset, onClose, onCreated }: Prop
   return (
     <Drawer
       title={intl.formatMessage({ id: 'perf.adhoc.wizardTitle' })}
-      width={600}
+      size={600}
       open={open}
       onClose={onClose}
       extra={

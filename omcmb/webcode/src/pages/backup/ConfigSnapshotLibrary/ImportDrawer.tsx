@@ -158,7 +158,7 @@ export default function ImportDrawer({ open, onClose, onSuccess }: Props) {
     <Drawer
       open={open}
       title={t('transfer.fileLib.import.snapshotTitle')}
-      width={620}
+      size={620}
       onClose={handleClose}
       footer={
         <Space style={{ float: 'right' }}>

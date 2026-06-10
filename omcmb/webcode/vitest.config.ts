@@ -41,9 +41,9 @@ export default defineConfig({
     alias: {
       '@': resolve(__dirname, './src'),
       '@core': resolve(__dirname, '../frontend-core/src'),
-      // 让 frontend-core 测试也能解析依赖（webcode 是顶层 node_modules）
-      zustand: resolve(__dirname, './node_modules/zustand'),
-      axios: resolve(__dirname, './node_modules/axios'),
+      // 历史上 zustand/axios 曾硬 alias 到 webcode/node_modules（旧布局依赖嵌套装在
+      // webcode 下，frontend-core 解析不到）。workspace 依赖 hoist 到 omcmb/node_modules
+      // 后该路径不复存在且会反向打断解析，普通 node 解析即可覆盖两侧，故移除。
     },
   },
 })

@@ -52,7 +52,7 @@ export function LoadingSpinner({
   // 如果有子内容，使用嵌套模式
   if (children !== undefined) {
     return (
-      <Spin spinning={spinning} tip={tip || undefined} {...spinProps}>
+      <Spin spinning={spinning} description={tip || undefined} {...spinProps}>
         {children}
       </Spin>
     );
@@ -64,7 +64,7 @@ export function LoadingSpinner({
 
   return (
     <div className={className} style={containerStyle}>
-      <Spin tip={tip || undefined} {...spinProps}>
+      <Spin description={tip || undefined} {...spinProps}>
         <div />
       </Spin>
     </div>
@@ -78,5 +78,5 @@ export function LoadingSpinner({
  * <LoadingSpinner tip="加载中..." style={{ minHeight: 200 }} />
  *
  * // 行内紧凑（替代 CompactLoading）
- * <Spin size="small" tip="加载中..." />
+ * <Spin size="small" description="加载中..." />
  */

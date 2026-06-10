@@ -189,7 +189,7 @@ export default function ParameterEditModal({
       okButtonProps={{ disabled: Boolean(validationError) }}
       destroyOnHidden
     >
-      <Space direction="vertical" style={{ width: '100%' }} size={16}>
+      <Space orientation="vertical" style={{ width: '100%' }} size={16}>
         {changeApplies === 'RebootRequired' && (
           <Alert
             type="warning"

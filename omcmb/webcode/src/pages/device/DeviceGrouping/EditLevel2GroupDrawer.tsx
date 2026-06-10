@@ -80,7 +80,7 @@ export default function EditLevel2GroupDrawer({
       title={t('device.editGroup')}
       open={open}
       onClose={onClose}
-      width={520}
+      size={520}
       destroyOnHidden
       footer={
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>

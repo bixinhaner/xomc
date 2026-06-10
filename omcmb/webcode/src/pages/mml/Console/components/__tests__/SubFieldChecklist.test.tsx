@@ -80,16 +80,18 @@ describe('SubFieldChecklist', () => {
     expect(toggleSubField).toHaveBeenCalledWith('uid-1', 'sf-x');
   });
 
-  it('every row has a unified InfoCircle entry (replaces scattered # / OnReboot tag)', () => {
-    // 用户决策 2026-05-26：每行尾部统一一个 field-info 图标，
-    // OnReboot / 多实例 / access 等细节都在 popover 里。
+  it('LST rows render PATH 名称 without per-row field-info icon (2026-05-28 决策)', () => {
+    // 用户决策 2026-05-28：LST 取消每行"字段详情"图标，PATH 改由名称的 Tooltip 提示；
+    // OnReboot / 多实例 / access 等细节不再以图标入口呈现。
     const fields = [
       sf({ id: 'r', label: 'RebootField', changeApplies: 'OnReboot' }),
       sf({ id: 'n', label: 'Normal', changeApplies: 'Immediate', sortOrder: 1 }),
       sf({ id: 'm', label: 'Multi', tr069Path: 'Device.X.{i}.Y', sortOrder: 2 }),
     ];
     render(<SubFieldChecklist statement={stmt(fields)} />);
-    const icons = screen.getAllByLabelText('field-info');
-    expect(icons).toHaveLength(3);
+    expect(screen.getByText('RebootField')).toBeInTheDocument();
+    expect(screen.getByText('Normal')).toBeInTheDocument();
+    expect(screen.getByText('Multi')).toBeInTheDocument();
+    expect(screen.queryAllByLabelText('field-info')).toHaveLength(0);
   });
 });

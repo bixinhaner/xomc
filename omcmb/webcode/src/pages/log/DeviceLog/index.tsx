@@ -617,7 +617,7 @@ export default function DeviceLog() {
 
       <Card
         size="small"
-        bordered
+        variant="outlined"
         style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
         styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
       >
@@ -644,7 +644,7 @@ export default function DeviceLog() {
       <Drawer
         title={t('log.newLogTask')}
         placement="right"
-        width={500}
+        size={500}
         open={createDrawerVisible}
         onClose={() => setCreateDrawerVisible(false)}
         footer={
@@ -858,7 +858,7 @@ export default function DeviceLog() {
       <Drawer
         title={t('log.taskResult', { code: selectedTask?.deviceCode ?? '' })}
         placement="right"
-        width={700}
+        size={700}
         open={resultDrawerVisible}
         onClose={() => setResultDrawerVisible(false)}
       >

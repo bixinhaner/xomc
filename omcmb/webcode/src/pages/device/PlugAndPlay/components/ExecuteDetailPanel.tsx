@@ -153,7 +153,7 @@ export default function ExecuteDetailPanel({ taskData, onClose }: Props) {
     <Drawer
       title={t('provision.executeDetail')}
       placement="right"
-      width={600}
+      size={600}
       open={true}
       onClose={onClose}
       styles={{ body: { padding: 16 } }}

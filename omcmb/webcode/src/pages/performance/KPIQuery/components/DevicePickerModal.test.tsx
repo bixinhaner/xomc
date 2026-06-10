@@ -8,6 +8,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render } from '@testing-library/react';
 import { App } from 'antd';
+import { IntlProvider } from 'react-intl';
+import { zhCN } from '@core/i18n';
 
 // 捕获 useDeviceList 收到的 params。
 const useDeviceListSpy = vi.fn();
@@ -22,10 +24,13 @@ vi.mock('@core/hooks/api/useDevices', () => ({
 import DevicePickerModal from './DevicePickerModal';
 
 function renderModal(props: Partial<React.ComponentProps<typeof DevicePickerModal>> = {}) {
+  // 组件内用 useIntl 取文案，测试渲染必须套 IntlProvider（真实 zh-CN 语料）。
   return render(
-    <App>
-      <DevicePickerModal open onClose={() => {}} onConfirm={() => {}} {...props} />
-    </App>,
+    <IntlProvider locale="zh-CN" defaultLocale="zh-CN" messages={zhCN}>
+      <App>
+        <DevicePickerModal open onClose={() => {}} onConfirm={() => {}} {...props} />
+      </App>
+    </IntlProvider>,
   );
 }
 

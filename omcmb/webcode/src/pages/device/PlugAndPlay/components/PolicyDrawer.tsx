@@ -105,7 +105,7 @@ export default function PolicyDrawer({ open, mode, policy, onClose, onSubmit }: 
       title={title}
       open={open}
       onClose={onClose}
-      width={600}
+      size={600}
       footer={
         isView ? (
           <Button onClick={onClose}>{t('common.close')}</Button>

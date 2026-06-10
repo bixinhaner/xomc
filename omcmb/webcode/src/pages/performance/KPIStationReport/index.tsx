@@ -331,7 +331,7 @@ export default function KPIMeasurement() {
 
       <Card
         size="small"
-        bordered
+        variant="outlined"
         styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
       >
         <DataTable<MeasurementRow>

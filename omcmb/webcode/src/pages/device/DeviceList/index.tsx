@@ -1657,7 +1657,7 @@ export default function DeviceList() {
               DataTable 自己已接 loading={isLoading},无需外层 Spin。 */}
           <Card
             size="small"
-            bordered
+            variant="outlined"
             style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
             styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
           >
@@ -1695,7 +1695,7 @@ export default function DeviceList() {
       <Drawer
         title={collectDrawerTitle || t('task.collectProgress')}
         placement="right"
-        width={480}
+        size={480}
         open={collectDrawerOpen}
         onClose={() => setCollectDrawerOpen(false)}
         styles={{

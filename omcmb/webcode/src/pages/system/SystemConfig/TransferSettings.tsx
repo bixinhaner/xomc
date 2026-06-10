@@ -133,7 +133,7 @@ export default function TransferSettings({ form }: TransferSettingsProps) {
 				title={<span style={cardTitleStyle}>{t('system.transfer.uploadSection')}</span>}
 				style={{ marginBottom: 16 }}
 			>
-				<Space direction="vertical" style={{ width: '100%' }} size={12}>
+				<Space orientation="vertical" style={{ width: '100%' }} size={12}>
 					<Form.Item
 						name="uploadPath"
 						label={t('system.transfer.uploadPath')}

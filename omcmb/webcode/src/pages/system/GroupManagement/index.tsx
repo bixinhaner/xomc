@@ -298,7 +298,7 @@ export default function GroupManagement() {
           setSelectedRoleIds([]);
           setSelectedUserIds([]);
         }}
-        width={520}
+        size={520}
         footer={
           <div style={{ textAlign: 'right' }}>
             <Button
@@ -367,7 +367,7 @@ export default function GroupManagement() {
           setSelectedRoleIds([]);
           setSelectedUserIds([]);
         }}
-        width={520}
+        size={520}
         footer={
           <div style={{ textAlign: 'right' }}>
             <Button
@@ -431,7 +431,7 @@ export default function GroupManagement() {
         title={t('common.view')}
         open={viewVisible}
         onClose={() => { setViewVisible(false); form.resetFields(); setSelectedGroup(null); }}
-        width={520}
+        size={520}
         footer={
           <div style={{ textAlign: 'right' }}>
             <Button onClick={() => { setViewVisible(false); form.resetFields(); setSelectedGroup(null); }}>

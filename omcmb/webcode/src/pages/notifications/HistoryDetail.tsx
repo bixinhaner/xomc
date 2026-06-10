@@ -36,7 +36,7 @@ export default function HistoryDetail({
     <Drawer
       title={t('notification.history.detail')}
       open={open}
-      width={640}
+      size={640}
       onClose={onClose}
       destroyOnHidden
     >

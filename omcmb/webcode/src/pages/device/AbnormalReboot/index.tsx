@@ -381,7 +381,7 @@ export default function AbnormalReboot() {
 
       <Card
         size="small"
-        bordered
+        variant="outlined"
         style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
         styles={{
           body: {
@@ -424,7 +424,7 @@ export default function AbnormalReboot() {
       <Drawer
         title={t('log.exception.detail.title')}
         placement="right"
-        width={640}
+        size={640}
         open={detailVisible}
         onClose={() => setDetailVisible(false)}
       >

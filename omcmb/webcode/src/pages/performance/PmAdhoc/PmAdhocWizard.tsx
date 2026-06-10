@@ -320,7 +320,7 @@ export default function PmAdhocWizard() {
 
   // ── 各步内容 ──────────────────────────────────────────────────────────────
   const renderStep1 = () => (
-    <Space direction="vertical" size="large" style={{ width: '100%', maxWidth: 560 }}>
+    <Space orientation="vertical" size="large" style={{ width: '100%', maxWidth: 560 }}>
       <div>
         <div style={{ marginBottom: 8, fontWeight: 500 }}>{intl.formatMessage({ id: 'perf.adhoc.fieldTaskName' })}</div>
         <Input
@@ -398,14 +398,14 @@ export default function PmAdhocWizard() {
   const renderStep2 = () => {
     const dimHint = DIMENSION_OPTIONS.find((d) => d.value === dimension)?.hint ?? '';
     return (
-      <Space direction="vertical" size="large" style={{ width: '100%' }}>
+      <Space orientation="vertical" size="large" style={{ width: '100%' }}>
         <div>
           <div style={{ marginBottom: 8, fontWeight: 500 }}>{intl.formatMessage({ id: 'perf.adhoc.fieldDimensionReq' })}</div>
           <Radio.Group
             value={dimension}
             onChange={(e) => setDimension(e.target.value as AdhocDimension)}
           >
-            <Space direction="vertical">
+            <Space orientation="vertical">
               {DIMENSION_OPTIONS.map((d) => (
                 <Radio key={d.value} value={d.value}>
                   {d.label}
@@ -486,7 +486,7 @@ export default function PmAdhocWizard() {
   );
 
   const renderStep3 = () => (
-    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+    <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
       <Alert
         type="info"
         showIcon
@@ -537,7 +537,7 @@ export default function PmAdhocWizard() {
   );
 
   const renderStep4 = () => (
-    <Space direction="vertical" size="large" style={{ width: '100%', maxWidth: 560 }}>
+    <Space orientation="vertical" size="large" style={{ width: '100%', maxWidth: 560 }}>
       <div>
         <div style={{ marginBottom: 8, fontWeight: 500 }}>{intl.formatMessage({ id: 'perf.adhoc.fieldGranReq' })}</div>
         <Radio.Group

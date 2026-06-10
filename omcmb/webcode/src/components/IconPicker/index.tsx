@@ -110,7 +110,7 @@ export default function IconPicker({ value, onChange, disabled, placeholder }: I
       open={disabled ? false : open}
       onOpenChange={handleOpenChange}
       placement="bottomLeft"
-      destroyTooltipOnHide
+      destroyOnHidden
     >
       <Input
         readOnly

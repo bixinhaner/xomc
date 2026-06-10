@@ -198,7 +198,7 @@ export default function DeviceDialogs({
         title={t('device.addDeviceToGroup')}
         open={addDeviceDrawerOpen}
         onClose={onAddDeviceDrawerClose}
-        width={520}
+        size={520}
         destroyOnHidden
         footer={
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>

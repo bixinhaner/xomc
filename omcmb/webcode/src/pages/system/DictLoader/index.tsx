@@ -58,7 +58,7 @@ export default function DictLoaderPage(): JSX.Element {
           : '手工编辑字典 XML(如 paramModel)后,点击对应按钮触发后端重读 + 自动清缓存。omcctl device sweep-paths --apply 已自动完成此动作,无需在此重复操作。'}
       </Text>
 
-      <Space direction="vertical" size={16} style={{ width: '100%' }}>
+      <Space orientation="vertical" size={16} style={{ width: '100%' }}>
         {KNOWN_DICT_LOADERS.map((loader) => {
           const result = lastResult[loader.name];
           const isLoading =

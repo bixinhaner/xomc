@@ -9,7 +9,7 @@
  */
 
 import React, { useState, useMemo, useCallback } from 'react';
-import { Card, Select, Button, Space, Spin, Empty, Typography, Checkbox } from 'antd';
+import { Card, Select, Button, Space, Spin, Empty, Typography } from 'antd';
 import { LoadingOutlined } from '@ant-design/icons';
 import LineChart from '@/components/Charts/LineChart';
 import { useT } from '@/hooks/useT';

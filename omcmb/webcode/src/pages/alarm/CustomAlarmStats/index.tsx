@@ -1096,7 +1096,7 @@ export default function CustomAlarmStats() {
       {/* 列表卡片 */}
       <Card
         size="small"
-        bordered
+        variant="outlined"
         className="custom-alarm-list-card"
         style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}
         styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden', position: 'relative' } }}
@@ -1192,7 +1192,7 @@ export default function CustomAlarmStats() {
         open={addGroupDrawerOpen}
         title={isEditingGroup ? t('alarm.editCustomGroup') : t('alarm.addCustomGroup')}
         placement="right"
-        width={520}
+        size={520}
         onClose={() => setAddGroupDrawerOpen(false)}
         footer={
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
@@ -1234,7 +1234,7 @@ export default function CustomAlarmStats() {
 
           {/* 告警源 - 全选复选框 */}
           <Form.Item label={t('alarm.alarmSource')}>
-            <Space direction="vertical" style={{ width: '100%' }}>
+            <Space orientation="vertical" style={{ width: '100%' }}>
               <Checkbox
                 checked={selectAllENB}
                 onChange={(e) => {

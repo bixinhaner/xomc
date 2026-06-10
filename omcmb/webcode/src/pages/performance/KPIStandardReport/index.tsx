@@ -1312,7 +1312,7 @@ export default function KPIStandardReport() {
           setFormulaSelectedCategory('');
           setFormulaProductClass('');
         }}
-        width={720}
+        size={720}
         destroyOnHidden
         footer={
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
@@ -1728,7 +1728,7 @@ export default function KPIStandardReport() {
           setFormulaSelectedCategory('');
           setFormulaProductClass('');
         }}
-        width={720}
+        size={720}
         destroyOnHidden
         footer={
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>

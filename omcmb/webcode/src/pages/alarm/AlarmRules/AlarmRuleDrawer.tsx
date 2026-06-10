@@ -483,7 +483,7 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
   // 规则名称验证器
   const validateRuleName = useCallback((_: unknown, value: string) => {
     if (!value || !value.trim()) {
-      return Promise.reject(new Error(t('filter.enterField').replace('{label}', t('alarm.ruleName'))));
+      return Promise.reject(new Error(t('filter.enterField', { label: t('alarm.ruleName') })));
     }
     if (value.length > 100) {
       return Promise.reject(new Error(t('alarm.ruleNameMax100')));
@@ -649,7 +649,7 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
       title={title}
       open={open}
       onClose={onClose}
-      width={720}
+      size={720}
       destroyOnHidden
       footer={
         isViewMode ? null : (
@@ -674,7 +674,7 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
           rules={[{ validator: validateRuleName }]}
           validateTrigger="onBlur"
         >
-          <Input placeholder={t('filter.enterField').replace('{label}', t('alarm.ruleName'))} maxLength={100} showCount />
+          <Input placeholder={t('filter.enterField', { label: t('alarm.ruleName') })} maxLength={100} showCount />
         </Form.Item>
 
         <Form.Item
@@ -693,12 +693,12 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
           label={t('alarm.ruleType')}
           rules={[{ required: true }]}
         >
-          <Select options={ruleTypeOptions} placeholder={t('filter.selectField').replace('{label}', t('alarm.ruleType'))} />
+          <Select options={ruleTypeOptions} placeholder={t('filter.selectField', { label: t('alarm.ruleType') })} />
         </Form.Item>
 
         {/* 设备选择方式 */}
         <Form.Item label={t('alarm.deviceSelection')}>
-          <Space direction="vertical" style={{ width: '100%' }} size="small">
+          <Space orientation="vertical" style={{ width: '100%' }} size="small">
             <Radio.Group
               value={deviceSelectionMode}
               onChange={(e) => setDeviceSelectionMode(e.target.value)}
@@ -794,7 +794,7 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
           validateStatus={alarmError ? 'error' : ''}
           help={alarmError}
         >
-          <Space direction="vertical" style={{ width: '100%' }} size="small">
+          <Space orientation="vertical" style={{ width: '100%' }} size="small">
             <Space wrap size="small">
               <Input.Search
                 placeholder={t('alarm.librarySearchPlaceholder')}
