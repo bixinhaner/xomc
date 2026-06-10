@@ -9,7 +9,7 @@
 //
 // 设计依据：docs/prd/system/menu-dynamic-loading.md §4.3.2 (App 启动流程改造)。
 
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, type CSSProperties, type ReactNode } from 'react';
 
 import { useAppStore } from '@core/store/appStore';
 import { useMenuStore } from '@core/store/menuStore';
@@ -17,8 +17,19 @@ import { useUserStore } from '@core/store/userStore';
 import { useUserMenus } from '@core/hooks/api/useMenus';
 import { useSysConfigsByCategory } from '@core/hooks/api/useSystem';
 
+import { useT } from '@/hooks/useT';
+
 import { isDynamicMenuEnabled } from './featureFlag';
 import { LoadingSpinner } from '../LoadingSpinner';
+import EmptyState from '../common/EmptyState';
+
+const FULLSCREEN_CENTER: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: '100vw',
+  height: '100vh',
+};
 
 interface MenuBootstrapProps {
   children: ReactNode;
@@ -59,7 +70,10 @@ function useShowMenuIconBootstrap() {
 
 function MenuBootstrapInner({ loaded, children }: { loaded: boolean; children: ReactNode }) {
   // useQuery 仅在已登录 + 灰度启用时挂载；否则不会无谓发请求。
-  const { isError } = useUserMenus();
+  // refetch 暴露给错误态的「重试」按钮，让操作员能在网络抖动后自行恢复，
+  // 不必刷新整页或重新登录（审计 issue #25：MenuBootstrap 无重试）。
+  const { isError, refetch } = useUserMenus();
+  const t = useT();
   useShowMenuIconBootstrap();
 
   // 阻塞条件改为 `!loaded` 单一判定（不再依赖 isLoading）。
@@ -71,34 +85,27 @@ function MenuBootstrapInner({ loaded, children }: { loaded: boolean; children: R
   // 修复后：只要 menuStore 还没加载完成就一律 spin，避免任何窗口期渲染脏 UI。
   if (!loaded && !isError) {
     return (
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: '100vw',
-          height: '100vh',
-        }}
-      >
-        <LoadingSpinner tip="加载菜单..." size="large" />
+      <div style={FULLSCREEN_CENTER}>
+        <LoadingSpinner tip={t('menu.bootstrap.loading')} size="large" />
       </div>
     );
   }
 
   if (!loaded && isError) {
     return (
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: '100vw',
-          height: '100vh',
-          flexDirection: 'column',
-          gap: 12,
-        }}
-      >
-        <div>菜单加载失败，请刷新或重新登录。</div>
+      <div style={FULLSCREEN_CENTER}>
+        <EmptyState
+          variant="error"
+          title={t('menu.bootstrap.loadFailed')}
+          description={t('menu.bootstrap.loadFailedDesc')}
+          action={{
+            label: t('error.retry'),
+            onClick: () => {
+              void refetch();
+            },
+            type: 'primary',
+          }}
+        />
       </div>
     );
   }

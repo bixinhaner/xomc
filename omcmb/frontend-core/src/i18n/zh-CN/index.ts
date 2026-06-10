@@ -211,6 +211,11 @@ const messages: Record<string, string> = {
   'menu.modal.title':              '菜单管理',
   'menu.showIcon':                 '显示菜单图标',
 
+  // 菜单动态加载启动屏（MenuBootstrap）
+  'menu.bootstrap.loading':        '加载菜单...',
+  'menu.bootstrap.loadFailed':     '菜单加载失败',
+  'menu.bootstrap.loadFailedDesc': '无法获取您的菜单，请重试或重新登录。',
+
   // Form labels
   'menu.form.nameZh':              '菜单名称（中文）',
   'menu.form.name':                '菜单名称',

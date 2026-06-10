@@ -211,6 +211,11 @@ const messages: Record<string, string> = {
   'menu.modal.title':              'Menu Management',
   'menu.showIcon':                 'Show menu icons',
 
+  // Dynamic menu loading splash (MenuBootstrap)
+  'menu.bootstrap.loading':        'Loading menu...',
+  'menu.bootstrap.loadFailed':     'Failed to load menu',
+  'menu.bootstrap.loadFailedDesc': 'Could not retrieve your menu. Please retry or sign in again.',
+
   // Form labels
   'menu.form.nameZh':              'Menu name (Chinese)',
   'menu.form.name':                'Menu name',
