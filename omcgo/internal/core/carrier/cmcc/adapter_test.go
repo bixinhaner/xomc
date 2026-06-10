@@ -165,6 +165,15 @@ func Test_RFControlPath_T0029(t *testing.T) {
 	assert.Equal(t, "", c.RFControlPath(model.Technology("unknown")))
 }
 
+// #17: CMCC 采集全部三类 MR 报告（MRO/MRS/MRE）。
+func Test_SupportsMRType_CMCC_All(t *testing.T) {
+	c := New()
+	assert.True(t, c.SupportsMRType(model.MRTypeMRO))
+	assert.True(t, c.SupportsMRType(model.MRTypeMRS))
+	assert.True(t, c.SupportsMRType(model.MRTypeMRE))
+	assert.False(t, c.SupportsMRType("unknown"), "unknown MR type must be rejected")
+}
+
 func Test_RoundTripParameterMapping(t *testing.T) {
 	c := New()
 	// Pick first key from the internal mapping and round-trip through both directions

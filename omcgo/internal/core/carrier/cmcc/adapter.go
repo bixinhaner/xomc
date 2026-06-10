@@ -120,6 +120,17 @@ func (c *CMCCCarrier) RFControlPath(tech model.Technology) string {
 	}
 }
 
+// SupportsMRType reports whether CMCC collects the given MR type. CMCC supports
+// all three measurement-report types (MRO / MRS / MRE) — #17.
+func (c *CMCCCarrier) SupportsMRType(mrType model.MRType) bool {
+	switch mrType {
+	case model.MRTypeMRO, model.MRTypeMRS, model.MRTypeMRE:
+		return true
+	default:
+		return false
+	}
+}
+
 // alarmSeverityMap maps CMCC alarm codes to standard severity levels.
 var alarmSeverityMap = map[string]model.AlarmSeverity{
 	"CELL_UNAVAILABLE":   model.AlarmCritical,

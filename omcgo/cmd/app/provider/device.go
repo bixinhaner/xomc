@@ -92,7 +92,16 @@ func initDeviceModule(c *Container) error {
 	}
 
 	// InformHandler (subscribes to events)
-	informHandler := device.NewInformHandler(deviceService, c.Carriers, model.CarrierCMCC, logger)
+	// #17: 默认运营商不再硬编码 CMCC，而是经 CarrierRegistry 注入——OUI 解析失败时
+	// 用注册表给出的默认运营商兜底（registry 优先 CMCC，无 CMCC 时取确定性首位）。
+	// registry 为空（理论上不会发生，启动期已注册 cmcc/ctcc/cucc）时退回 CarrierCMCC。
+	defaultCarrier := model.CarrierCMCC
+	if c.Carriers != nil {
+		if dc := c.Carriers.DefaultCarrier(); dc != "" {
+			defaultCarrier = dc
+		}
+	}
+	informHandler := device.NewInformHandler(deviceService, c.Carriers, defaultCarrier, logger)
 	if batchProcessor != nil {
 		// T-0123 / T-0125 batch path：注入 transition publisher，让 batch flush 完成后能
 		// 触发 device.online / device.firmware.changed 事件（与 UpdateFromInform 非 batch

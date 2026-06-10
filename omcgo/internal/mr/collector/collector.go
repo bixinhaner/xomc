@@ -74,6 +74,17 @@ func (c *MRCollector) SetDeviceLookup(d DeviceLookup) {
 	c.devices = d
 }
 
+// SetMRTypeSupport 注入 carrier MR-type 支持判定（可选，#17）。注入后 MRE parser
+// 的 "某运营商是否采集 MRE" 决策由 Carrier 适配器（经 CarrierRegistry）给出，
+// 取代旧的 "if carrier == cucc" 硬编码。不注入则 MREParser 走内置回退表
+// （行为等价，仅 CUCC 不支持 MRE）。
+func (c *MRCollector) SetMRTypeSupport(s parser.MRTypeSupportChecker) {
+	if s == nil {
+		return
+	}
+	c.parsers[MRTypeMRE] = parser.NewMREParser(s)
+}
+
 // Subscribe registers the collector for MR file received events.
 func (c *MRCollector) Subscribe(eventBus event.EventBus) error {
 	_, err := eventBus.QueueSubscribe(

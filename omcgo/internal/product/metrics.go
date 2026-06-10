@@ -12,6 +12,7 @@ type registryMetrics struct {
 	cacheHitTotal      *prometheus.CounterVec // labels: layer=L1|L2|miss（GetProductByID 三级缓存）
 	classCacheHitTotal *prometheus.CounterVec // labels: layer=L1|L2|miss（MatchProductClass 二级缓存，T-0173）
 	refreshTotal       *prometheus.CounterVec // labels: result=ok|err
+	patternSkipTotal   prometheus.Counter     // #17: Refresh 期正则编译失败被跳过的 pattern 数（坏正则可观测）
 }
 
 // NewRegistryMetrics 注册并返回 Registry 用的指标集合。
@@ -55,12 +56,18 @@ func NewRegistryMetrics(reg prometheus.Registerer) *registryMetrics {
 			},
 			[]string{"result"},
 		),
+		patternSkipTotal: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Name: "product_registry_pattern_skip_total",
+				Help: "ProductRegistry patterns skipped during Refresh due to regex compile failure (#17).",
+			},
+		),
 	}
 
 	if reg == nil {
 		reg = prometheus.NewRegistry()
 	}
-	reg.MustRegister(m.matchTotal, m.matchDuration, m.cacheHitTotal, m.classCacheHitTotal, m.refreshTotal)
+	reg.MustRegister(m.matchTotal, m.matchDuration, m.cacheHitTotal, m.classCacheHitTotal, m.refreshTotal, m.patternSkipTotal)
 	return m
 }
 
@@ -77,3 +84,6 @@ func (m *registryMetrics) classCacheHit(layer string) {
 }
 func (m *registryMetrics) refreshOK()  { m.refreshTotal.WithLabelValues("ok").Inc() }
 func (m *registryMetrics) refreshErr() { m.refreshTotal.WithLabelValues("err").Inc() }
+
+// patternSkip 记录一条因正则编译失败被跳过的 pattern（#17：坏正则不再静默吞掉）。
+func (m *registryMetrics) patternSkip() { m.patternSkipTotal.Inc() }

@@ -147,3 +147,12 @@ func Test_RFControlPath_T0029(t *testing.T) {
 	assert.Equal(t, "Device.Services.FAPService.1.FAPControl.NR.AdminState", c.RFControlPath(model.TechNR))
 	assert.Equal(t, "", c.RFControlPath(model.Technology("unknown")))
 }
+
+// #17: CTCC 采集全部三类 MR 报告（MRO/MRS/MRE）。
+func Test_SupportsMRType_CTCC_All(t *testing.T) {
+	c := New()
+	assert.True(t, c.SupportsMRType(model.MRTypeMRO))
+	assert.True(t, c.SupportsMRType(model.MRTypeMRS))
+	assert.True(t, c.SupportsMRType(model.MRTypeMRE))
+	assert.False(t, c.SupportsMRType("unknown"), "unknown MR type must be rejected")
+}

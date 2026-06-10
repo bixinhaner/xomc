@@ -165,3 +165,13 @@ func Test_RFControlPath_T0029(t *testing.T) {
 	assert.Equal(t, "", c.RFControlPath(model.TechLTE), "CUCC NR-only: LTE must return empty path")
 	assert.Equal(t, "", c.RFControlPath(model.Technology("unknown")))
 }
+
+// #17: CUCC 不采集 MRE（终端能力）报告 —— 这一差异从 mr/parser 的硬编码
+// "if carrier == cucc" 下沉到本适配器。MRO/MRS 仍支持。
+func Test_SupportsMRType_CUCC_NoMRE(t *testing.T) {
+	c := New()
+	assert.False(t, c.SupportsMRType(model.MRTypeMRE), "CUCC must not support MRE")
+	assert.True(t, c.SupportsMRType(model.MRTypeMRO), "CUCC supports MRO")
+	assert.True(t, c.SupportsMRType(model.MRTypeMRS), "CUCC supports MRS")
+	assert.False(t, c.SupportsMRType("unknown"), "unknown MR type must be rejected")
+}

@@ -27,6 +27,7 @@ func (testCarrier) AlarmSeverityMapping(string) model.AlarmSeverity             
 func (testCarrier) ValidateParameter(string, string) error                                { return nil }
 func (testCarrier) GetInfoParamMapping(model.Technology) map[string]string                { return nil }
 func (testCarrier) RFControlPath(model.Technology) string                                 { return "" }
+func (testCarrier) SupportsMRType(model.MRType) bool                                      { return true }
 
 type stubDeviceInfoRepo struct {
 	updateSyncFields func(ctx context.Context, deviceID uuid.UUID, fields map[string]interface{}) error

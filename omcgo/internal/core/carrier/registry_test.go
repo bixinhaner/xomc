@@ -14,6 +14,9 @@ type registryMockCarrier struct {
 	code          model.CarrierCode
 	technologies  []model.Technology
 	ouiProductMap map[model.Technology][]OUIProductClassInfo
+	// unsupportedMR lists MR types this mock carrier does NOT support. nil =
+	// supports everything (default for registry tests that don't care).
+	unsupportedMR map[model.MRType]bool
 }
 
 func (m *registryMockCarrier) Code() model.CarrierCode                              { return m.code }
@@ -35,6 +38,9 @@ func (m *registryMockCarrier) AlarmSeverityMapping(_ string) model.AlarmSeverity
 func (m *registryMockCarrier) ValidateParameter(_ string, _ string) error               { return nil }
 func (m *registryMockCarrier) GetInfoParamMapping(_ model.Technology) map[string]string { return nil }
 func (m *registryMockCarrier) RFControlPath(_ model.Technology) string                  { return "" }
+func (m *registryMockCarrier) SupportsMRType(mrType model.MRType) bool {
+	return !m.unsupportedMR[mrType]
+}
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -124,4 +130,61 @@ func TestResolveByOUI_NoMatch(t *testing.T) {
 
 	got := r.ResolveByOUI("FFFFFF")
 	assert.Equal(t, model.CarrierCode(""), got)
+}
+
+// #17: DefaultCarrier 取代 InformHandler 处硬编码的 CarrierCMCC 默认值。
+
+func TestDefaultCarrier_Empty(t *testing.T) {
+	r := NewRegistry()
+	assert.Equal(t, model.CarrierCode(""), r.DefaultCarrier(),
+		"empty registry must return empty default so callers can detect misconfiguration")
+}
+
+func TestDefaultCarrier_PrefersCMCC(t *testing.T) {
+	r := NewRegistry()
+	// 注册顺序故意把 CMCC 放最后，验证默认值与注册顺序/ map 迭代序无关。
+	r.Register(&registryMockCarrier{code: model.CarrierCUCC})
+	r.Register(&registryMockCarrier{code: model.CarrierCTCC})
+	r.Register(&registryMockCarrier{code: model.CarrierCMCC})
+
+	assert.Equal(t, model.CarrierCMCC, r.DefaultCarrier(),
+		"CMCC must win when registered (dominant deployment)")
+}
+
+func TestDefaultCarrier_DeterministicWithoutCMCC(t *testing.T) {
+	r := NewRegistry()
+	r.Register(&registryMockCarrier{code: model.CarrierCUCC})
+	r.Register(&registryMockCarrier{code: model.CarrierCTCC})
+
+	// 无 CMCC 时取字典序最小（ctcc < cucc），且多次调用稳定。
+	first := r.DefaultCarrier()
+	assert.Equal(t, model.CarrierCTCC, first)
+	for i := 0; i < 5; i++ {
+		assert.Equal(t, first, r.DefaultCarrier(), "default must be stable across calls")
+	}
+}
+
+// #17: SupportsMRType 把 "运营商是否采集某 MR 类型" 的判定下沉到 Carrier 适配器。
+
+func TestRegistrySupportsMRType_Delegates(t *testing.T) {
+	r := NewRegistry()
+	r.Register(&registryMockCarrier{
+		code:          model.CarrierCUCC,
+		unsupportedMR: map[model.MRType]bool{model.MRTypeMRE: true},
+	})
+	r.Register(&registryMockCarrier{code: model.CarrierCMCC})
+
+	// CMCC 支持 MRE；CUCC 不支持 MRE 但支持 MRO/MRS。
+	assert.True(t, r.SupportsMRType(model.CarrierCMCC, model.MRTypeMRE))
+	assert.False(t, r.SupportsMRType(model.CarrierCUCC, model.MRTypeMRE))
+	assert.True(t, r.SupportsMRType(model.CarrierCUCC, model.MRTypeMRO))
+	assert.True(t, r.SupportsMRType(model.CarrierCUCC, model.MRTypeMRS))
+}
+
+func TestRegistrySupportsMRType_UnknownCarrierFailsClosed(t *testing.T) {
+	r := NewRegistry()
+	r.Register(&registryMockCarrier{code: model.CarrierCMCC})
+
+	// 未注册的运营商 → false（fail-closed，调用方需当作配置错误处理）。
+	assert.False(t, r.SupportsMRType("unknown_carrier", model.MRTypeMRO))
 }

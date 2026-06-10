@@ -300,6 +300,9 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	// 注入 DeviceLookup：upload handler 直传路径的 mr.file.received payload 不带
 	// device_id，由 collector 按 device_sn 反查（参 internal/acs/upload publishMRFileReceivedEvent）。
 	mrCollector.SetDeviceLookup(device.NewPgDeviceRepository(w.PgPool))
+	// 注入 carrier MR-type 支持判定（#17）：MRE parser 的 "运营商是否采集 MRE" 决策
+	// 走 Carrier 适配器，去除 mr/parser 里的 "if carrier == cucc" 硬编码。
+	mrCollector.SetMRTypeSupport(w.Carriers)
 	if err := mrCollector.Subscribe(w.EventBus); err != nil {
 		logger.Warn("subscribe MR collector", zap.Error(err))
 	}

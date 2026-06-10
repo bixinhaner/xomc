@@ -59,4 +59,14 @@ type Carrier interface {
 	// future carrier-specific divergence (e.g. vendor X.* extensions) plugs
 	// in without touching device-layer code.
 	RFControlPath(tech model.Technology) string
+
+	// SupportsMRType reports whether this carrier supports the given
+	// measurement-report type (model.MRTypeMRO / MRS / MRE).
+	//
+	// #17: introduced to remove the "if carrier == cucc" branch hardcoded in
+	// the MRE parser. CUCC (China Unicom) does not collect MRE (UE capability)
+	// reports, so its adapter returns false for model.MRTypeMRE; CMCC / CTCC
+	// support all three. New carrier-specific MR divergence plugs in here
+	// instead of leaking into mr/parser.
+	SupportsMRType(mrType model.MRType) bool
 }

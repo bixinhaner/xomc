@@ -38,6 +38,17 @@ const (
 // 输入归一（"4G" → "lte"，"5G" → "nr"，"2G" → "gsm"）。
 var NormalizeTechnology = global.NormalizeTechnology
 
+// MRType 标识测量报告文件类型（MRO 覆盖率 / MRS 信令 / MRE 终端能力）。
+// 各运营商对 MR 类型的支持差异通过 carrier.Carrier.SupportsMRType 表达，
+// 业务层禁止再写 "if carrier == cucc" 判断 MRE 是否支持（#17）。
+type MRType = string
+
+const (
+	MRTypeMRO MRType = "mro" // 覆盖率测量报告（Measurement Report - Coverage）
+	MRTypeMRS MRType = "mrs" // 信令测量报告（Measurement Report - Signaling）
+	MRTypeMRE MRType = "mre" // 终端能力测量报告（Measurement Report - Equipment/Terminal）
+)
+
 // DeviceStatus 和 DeviceXxx 常量 — DEPRECATED (T-0162)，P3 整体删除
 type DeviceStatus = global.DeviceStatus
 

@@ -11,18 +11,55 @@ import (
 	"github.com/omcgo/omcgo/internal/core/model"
 )
 
+// MRTypeSupportChecker reports whether a carrier collects a given MR type.
+// Implemented by *carrier.CarrierRegistry; injected so the MRE parser no longer
+// hardcodes "if carrier == cucc" — the carrier divergence lives in the Carrier
+// adapters (#17). Decoupled via this local interface to avoid mr/parser taking a
+// hard dependency on the carrier package.
+type MRTypeSupportChecker interface {
+	// SupportsMRType reports whether the given carrier supports the MR type.
+	// Returns false when the carrier itself is unknown to the registry.
+	SupportsMRType(carrierCode model.CarrierCode, mrType model.MRType) bool
+}
+
 // MREParser parses MRE (Measurement Report - Equipment/Terminal) XML files.
-// MRE contains UE capability information.
-// Note: CUCC (China Unicom) does not support MRE.
-type MREParser struct{}
+// MRE contains UE capability information. Whether a carrier collects MRE is
+// decided by the injected MRTypeSupportChecker (Carrier adapters), not by the
+// parser — e.g. CUCC (China Unicom) does not support MRE.
+type MREParser struct {
+	support MRTypeSupportChecker
+}
 
 // NewMREParser creates a new MRE parser.
-func NewMREParser() *MREParser {
-	return &MREParser{}
+//
+// When support is nil the parser falls back to the built-in carrier-support
+// table (defaultMRESupport) so legacy callers and tests keep working; wiring
+// code should pass the live *carrier.CarrierRegistry to keep the support
+// decision in one place.
+func NewMREParser(support ...MRTypeSupportChecker) *MREParser {
+	var s MRTypeSupportChecker = defaultMRESupport{}
+	if len(support) > 0 && support[0] != nil {
+		s = support[0]
+	}
+	return &MREParser{support: s}
+}
+
+// defaultMRESupport is the fallback support table used when no carrier registry
+// is injected. It mirrors the Carrier adapters: every carrier supports MRE
+// except CUCC. Keeping the rule here (rather than `if carrier == cucc` inline)
+// means there is a single, named place describing the divergence even for the
+// dependency-free fallback path.
+type defaultMRESupport struct{}
+
+func (defaultMRESupport) SupportsMRType(carrierCode model.CarrierCode, mrType model.MRType) bool {
+	if mrType != model.MRTypeMRE {
+		return true
+	}
+	return carrierCode != model.CarrierCUCC
 }
 
 func (p *MREParser) Parse(r io.Reader, carrier model.CarrierCode) (*MRData, error) {
-	if carrier == model.CarrierCUCC {
+	if p.support != nil && !p.support.SupportsMRType(carrier, model.MRTypeMRE) {
 		return nil, ErrNotSupported
 	}
 

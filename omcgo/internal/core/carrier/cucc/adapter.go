@@ -98,6 +98,20 @@ func (c *CUCCCarrier) RFControlPath(tech model.Technology) string {
 	return ""
 }
 
+// SupportsMRType reports whether CUCC collects the given MR type. CUCC (China
+// Unicom) does NOT collect MRE (UE capability) reports, so MRE returns false;
+// MRO / MRS are supported. This replaces the "if carrier == cucc" branch
+// previously hardcoded in mr/parser.MREParser (#17).
+func (c *CUCCCarrier) SupportsMRType(mrType model.MRType) bool {
+	switch mrType {
+	case model.MRTypeMRO, model.MRTypeMRS:
+		return true
+	default:
+		// MRE and any unknown type are unsupported for CUCC.
+		return false
+	}
+}
+
 // alarmSeverityMap maps CUCC alarm codes to standard severity levels.
 var alarmSeverityMap = map[string]model.AlarmSeverity{
 	// Critical alarms

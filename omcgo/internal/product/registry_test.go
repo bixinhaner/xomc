@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -128,6 +129,42 @@ func TestRegistry_Refresh_SkipsBadRegex(t *testing.T) {
 	r := NewRegistry(repo, NopCache{}, NewRegistryMetrics(nil), zap.NewNop())
 	require.NoError(t, r.Refresh(context.Background()))
 	assert.Equal(t, 1, r.PatternCount(), "bad regex must be skipped, not panic")
+}
+
+// #17: 坏正则被跳过时不再静默，必须递增 product_registry_pattern_skip_total。
+func TestRegistry_Refresh_BadRegexIncrementsMetric(t *testing.T) {
+	repo := newFakeRepo()
+	pid := repo.addProduct("good", "v", "enb", "BLQ", "ENB")
+	repo.addPattern(pid, "^OK$", 1)
+	repo.addPattern(pid, "[invalid(", 2) // 坏正则 1
+	repo.addPattern(pid, "(*broken", 3)  // 坏正则 2
+
+	metrics := NewRegistryMetrics(nil)
+	r := NewRegistry(repo, NopCache{}, metrics, zap.NewNop())
+
+	// 刷新前计数应为 0。
+	require.Equal(t, float64(0), testutil.ToFloat64(metrics.patternSkipTotal))
+
+	require.NoError(t, r.Refresh(context.Background()))
+
+	assert.Equal(t, 1, r.PatternCount(), "only the valid pattern survives")
+	assert.Equal(t, float64(2), testutil.ToFloat64(metrics.patternSkipTotal),
+		"both bad regexes must be counted, not silently dropped")
+}
+
+// 全部正则有效时，skip 计数保持 0（成功路径回归）。
+func TestRegistry_Refresh_NoSkipsWhenAllValid(t *testing.T) {
+	repo := newFakeRepo()
+	pid := repo.addProduct("good", "v", "enb", "BLQ", "ENB")
+	repo.addPattern(pid, "^OK$", 1)
+	repo.addPattern(pid, "^QRTB", 2)
+
+	metrics := NewRegistryMetrics(nil)
+	r := NewRegistry(repo, NopCache{}, metrics, zap.NewNop())
+	require.NoError(t, r.Refresh(context.Background()))
+
+	assert.Equal(t, 2, r.PatternCount())
+	assert.Equal(t, float64(0), testutil.ToFloat64(metrics.patternSkipTotal))
 }
 
 func TestRegistry_Refresh_PropagatesRepoError(t *testing.T) {

@@ -235,6 +235,7 @@ func (c *infMockCarrier) AlarmSeverityMapping(_ string) model.AlarmSeverity     
 func (c *infMockCarrier) ValidateParameter(_ string, _ string) error                 { return nil }
 func (c *infMockCarrier) GetInfoParamMapping(_ model.Technology) map[string]string   { return nil }
 func (c *infMockCarrier) RFControlPath(_ model.Technology) string                    { return "" }
+func (c *infMockCarrier) SupportsMRType(_ model.MRType) bool                         { return true }
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -340,6 +341,25 @@ func TestResolveCarrier_NilRegistry(t *testing.T) {
 
 	result := h.resolveCarrier("AABBCC")
 	assert.Equal(t, model.CarrierCUCC, result)
+}
+
+// #17: 默认运营商由 CarrierRegistry.DefaultCarrier() 注入，而非 wiring 处硬编码
+// CarrierCMCC。本测试以注册表派生的默认值构造 handler，验证 OUI 未命中时
+// resolveCarrier 回退到该派生默认值（注册表未注册 CMCC 时不再强行落到 CMCC）。
+func TestResolveCarrier_RegistryDerivedDefault(t *testing.T) {
+	svc := newInfTestDeviceService(&infMockDeviceRepo{}, &infMockParamRepo{})
+	registry := carrier.NewRegistry()
+	// 注册表里没有 CMCC：默认应回退到字典序最小的已注册运营商（ctcc < cucc）。
+	registry.Register(&infMockCarrier{code: model.CarrierCUCC})
+	registry.Register(&infMockCarrier{code: model.CarrierCTCC})
+
+	defaultCarrier := registry.DefaultCarrier()
+	require.Equal(t, model.CarrierCTCC, defaultCarrier,
+		"registry without CMCC must derive a deterministic default, not hardcode CMCC")
+
+	h := NewInformHandler(svc, registry, defaultCarrier, zap.NewNop())
+	assert.Equal(t, model.CarrierCTCC, h.resolveCarrier("UNKNOWN_OUI"),
+		"unresolved OUI must fall back to the registry-derived default carrier")
 }
 
 func TestHandleBootstrap_Success(t *testing.T) {

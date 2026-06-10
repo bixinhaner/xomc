@@ -59,6 +59,45 @@ func (r *CarrierRegistry) All() []Carrier {
 	return result
 }
 
+// DefaultCarrier returns the fallback carrier code used when a device's
+// carrier cannot be resolved from its OUI (see ResolveByOUI).
+//
+// #17: previously the default was a hardcoded model.CarrierCMCC constant at the
+// InformHandler wiring site, coupling device registration to a single carrier.
+// The default is now derived from the registry: CMCC is preferred when
+// registered (matches historical behaviour and is the dominant deployment),
+// otherwise the lexicographically smallest registered carrier code is returned
+// (deterministic across restarts). Empty string means no carrier is registered
+// (callers must treat that as a configuration error).
+func (r *CarrierRegistry) DefaultCarrier() model.CarrierCode {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if _, ok := r.carriers[model.CarrierCMCC]; ok {
+		return model.CarrierCMCC
+	}
+	var chosen model.CarrierCode
+	for code := range r.carriers {
+		if chosen == "" || code < chosen {
+			chosen = code
+		}
+	}
+	return chosen
+}
+
+// SupportsMRType reports whether the carrier identified by code collects the
+// given measurement-report type. Unknown carriers return false so callers fail
+// closed. This lets the registry satisfy the mr/parser MRTypeSupportChecker
+// seam without that package depending on the concrete carrier adapters (#17).
+func (r *CarrierRegistry) SupportsMRType(code model.CarrierCode, mrType model.MRType) bool {
+	r.mu.RLock()
+	c, ok := r.carriers[code]
+	r.mu.RUnlock()
+	if !ok {
+		return false
+	}
+	return c.SupportsMRType(mrType)
+}
+
 // ResolveByOUI attempts to identify the carrier by matching a device OUI
 // against known OUI-ProductClass combinations across all registered carriers.
 // Returns the first matching carrier code, or empty string if no match.

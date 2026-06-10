@@ -118,11 +118,14 @@ func (r *Registry) refresh(ctx context.Context, bumpVersion bool) error {
 	for _, row := range rows {
 		re, err := regexp.Compile(row.ProductClass)
 		if err != nil {
+			// #17: 坏正则不再静默吞掉 —— WARN 日志 + 计数器，便于告警与排障。
+			// 仍跳过该行（避免单条坏正则瘫痪整个 Registry），但留下可观测痕迹。
 			r.logger.Warn("skip pattern: regex compile failed",
 				zap.String("pattern", row.ProductClass),
 				zap.Int("sort_order", row.SortOrder),
 				zap.String("product_id", row.ProductID.String()),
 				zap.Error(err))
+			r.metrics.patternSkip()
 			skipped++
 			continue
 		}
@@ -154,7 +157,13 @@ func (r *Registry) refresh(ctx context.Context, bumpVersion bool) error {
 	}
 
 	r.metrics.refreshOK()
-	r.logger.Info("ProductRegistry refreshed",
+	// #17: 有坏正则被跳过时整体抬到 WARN，确保聚合信息不被 Info 噪声淹没；
+	// 逐条 pattern 的细节已在上面的循环里 WARN + 计数。
+	logRefresh := r.logger.Info
+	if skipped > 0 {
+		logRefresh = r.logger.Warn
+	}
+	logRefresh("ProductRegistry refreshed",
 		zap.Int("patterns_loaded", len(compiled)),
 		zap.Int("patterns_skipped", skipped),
 		zap.Duration("duration", time.Since(t0)))

@@ -112,6 +112,17 @@ func (c *CTCCCarrier) RFControlPath(tech model.Technology) string {
 	}
 }
 
+// SupportsMRType reports whether CTCC collects the given MR type. CTCC supports
+// all three measurement-report types (MRO / MRS / MRE) — #17.
+func (c *CTCCCarrier) SupportsMRType(mrType model.MRType) bool {
+	switch mrType {
+	case model.MRTypeMRO, model.MRTypeMRS, model.MRTypeMRE:
+		return true
+	default:
+		return false
+	}
+}
+
 // alarmSeverityMap maps CTCC alarm codes to standard severity levels.
 // CTCC uses its own alarm code system but maps to the same standard severities.
 var alarmSeverityMap = map[string]model.AlarmSeverity{
