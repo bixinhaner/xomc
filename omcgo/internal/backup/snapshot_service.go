@@ -6,9 +6,11 @@
 // 写入路径有两条：
 //
 //   1. 自动 promote：备份任务完成后 FilePathRecorder 调用 PromoteFromBackup，
-//      把刚落地的 config_backup bucket 文件用 MinIO server-side CopyObject
-//      复制到 config-snapshots bucket，命名统一为 <SN>_CFG.<ext>，
-//      然后 Upsert 表行。原任务文件保留不动。失败不影响主流程。
+//      读 config_backup bucket 的源文件 → 解密(.enc) + 解压(.gz 等) 还原成明文 →
+//      PutObject 写到 config-snapshots bucket，命名统一为 <SN>_CFG.<ext>，
+//      然后 Upsert 表行（MD5=明文哈希）。原任务文件保留不动。失败不影响主流程。
+//      （#61：早期用 server-side CopyObject 换名复制会丢 .enc/.gz 后缀并错配
+//      AEAD AAD，导致加密/压缩场景下快照永久不可用——已改为明文解码管线。）
 //
 //   2. 手动导入：用户上传 multipart 文件，逐项强校验命名 <SN>_CFG.{xml,nv}，
 //      PutObject 到 config-snapshots，然后 Upsert 表行。DB 写失败时补偿删
@@ -26,6 +28,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
@@ -38,15 +42,60 @@ import (
 // SnapshotMover 是 SnapshotService 对 MinIO 的最小依赖。
 //
 // *minio.Client 天然满足：
-//   - CopyObject 用于 PromoteFromBackup（server-side copy）
-//   - PutObject  用于 ImportFromUpload
+//   - PutObject  用于 PromoteFromBackup（写明文快照）与 ImportFromUpload
 //   - RemoveObject 用于补偿 / Delete
 //
 // 测试通过实现该接口注入 fake。
+//
+// 注（#61）：PromoteFromBackup 不再用 server-side CopyObject——那条路径会把
+// 源备份对象（可能压缩 + 信封加密）原样换名复制到快照桶，丢掉 .gz/.enc 后缀
+// 与 AEAD 的 AAD 绑定，导致按快照恢复时下发给 CPE 的是密文/压缩字节、永久不可
+// 用。现改为读源对象 → 解密 → 解压 → 明文 PutObject，故 CopyObject 已从接口移除。
 type SnapshotMover interface {
-	CopyObject(ctx context.Context, dst minio.CopyDestOptions, src minio.CopySrcOptions) (minio.UploadInfo, error)
 	PutObject(ctx context.Context, bucket, objectName string, reader io.Reader, objectSize int64, opts minio.PutObjectOptions) (minio.UploadInfo, error)
 	RemoveObject(ctx context.Context, bucket, objectName string, opts minio.RemoveObjectOptions) error
+}
+
+// SnapshotSourceReader 读取源备份对象的完整字节，供 PromoteFromBackup 解密 +
+// 解压成明文。生产用 *minio.Client 适配（见 modules.go），测试注入 fake。
+// 读取必须设上限（解密/解压前先卡 64MB 量级），避免恶意/异常大对象打爆内存。
+type SnapshotSourceReader interface {
+	ReadObject(ctx context.Context, bucket, object string) ([]byte, error)
+}
+
+// snapshotPromoteMaxBytes 是 promote 解密/解压后明文的字节上限，对齐 acs/upload
+// 与 acs/download 的 64MB 天花板（备份现实 <10MB）。
+const snapshotPromoteMaxBytes = 64 * 1024 * 1024
+
+// minioSnapshotSourceReader 用 *minio.Client 实现 SnapshotSourceReader：
+// GetObject + 带上限的全量读，供 PromoteFromBackup 解码源备份对象。
+type minioSnapshotSourceReader struct {
+	client *minio.Client
+}
+
+// NewMinIOSnapshotSourceReader 构造生产用的源对象读取器（modules.go 注入）。
+func NewMinIOSnapshotSourceReader(client *minio.Client) SnapshotSourceReader {
+	return &minioSnapshotSourceReader{client: client}
+}
+
+func (r *minioSnapshotSourceReader) ReadObject(ctx context.Context, bucket, object string) ([]byte, error) {
+	obj, err := r.client.GetObject(ctx, bucket, object, minio.GetObjectOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("minio GetObject %s/%s: %w", bucket, object, err)
+	}
+	defer obj.Close()
+	// 源对象是"压缩+加密"后的字节，比明文略大——上限取明文天花板 + 1KB 信封开销，
+	// 再多读 1 字节用于判溢出。
+	const maxBytes = snapshotPromoteMaxBytes + 1024
+	data, err := io.ReadAll(io.LimitReader(obj, maxBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read backup object %s/%s: %w", bucket, object, err)
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("backup object %s/%s exceeds %d bytes: %w",
+			bucket, object, maxBytes, ErrEncryptionInputTooLarge)
+	}
+	return data, nil
 }
 
 // SnapshotBackupFileLookup 用于 PromoteFromBackup 找到刚落地的备份文件元数据。
@@ -97,12 +146,29 @@ const (
 
 // SnapshotService 是 ConfigSnapshot 的对外门面。
 type SnapshotService struct {
-	repo            SnapshotRepository
-	mover           SnapshotMover
-	fileLookup      SnapshotBackupFileLookup
-	deviceLookup    SnapshotDeviceLookup
-	bucket          string
-	logger          *zap.Logger
+	repo         SnapshotRepository
+	mover        SnapshotMover
+	fileLookup   SnapshotBackupFileLookup
+	deviceLookup SnapshotDeviceLookup
+	bucket       string
+	logger       *zap.Logger
+
+	// #61 promote 解码管线：源对象读取器 + 可选解密器。
+	// SetPromoteDecoder 注入；未注入时 PromoteFromBackup 返回 ErrPromoteNotConfigured。
+	sourceReader SnapshotSourceReader
+	decryptor    Encryptor
+}
+
+// SetPromoteDecoder 注入 promote 路径的源对象读取器与（可选）解密器（#61）。
+//
+//   - reader 必须非 nil 才能 promote（读源备份对象字节）。
+//   - decryptor 为 nil 时只能 promote 未加密备份；遇到带 .enc 的源对象会拒绝
+//     （拒绝写一个不可解密的坏快照，正是 #61 要消除的失败模式）。
+//
+// 生产在 modules.go 用 *minio.Client 适配 reader + AES-256-GCM Encryptor 注入。
+func (s *SnapshotService) SetPromoteDecoder(reader SnapshotSourceReader, decryptor Encryptor) {
+	s.sourceReader = reader
+	s.decryptor = decryptor
 }
 
 // NewSnapshotService 装配依赖。bucket 留空时回退到 SnapshotBucketDefault。
@@ -150,16 +216,24 @@ var ErrPromoteNotConfigured = errors.New("snapshot promote not configured: fileL
 // PromoteFromBackup 在备份任务完成、文件已落 config_backup bucket 之后被
 // FilePathRecorder 调用。
 //
-// 流程：
+// 流程（#61 改造 —— 由 server-side CopyObject 换名复制，改为解码成明文再写）：
 //   1) 从 backup_restore_file 取该 (sn, task_id) 对应的最新一行得到源 bucket/path
-//   2) 用 backup file 的扩展名规范化目标名 → <SN>_CFG.<ext>
-//   3) MinIO CopyObject server-side 复制到 (snapshotBucket, <SN>_CFG.<ext>)
-//   4) 若 deviceLookup 可用，补 enb_name / product_type
-//   5) Upsert config_snapshots（source=backup, source_task_id）
+//   2) 读源对象完整字节（capped）
+//   3) decodeToPlaintext：按 object_path 后缀解密(.enc) + 解压(.gz/.zst/.lz4/.bz2)
+//      还原成"CPE 实际应拿到的明文配置"，并得到规范扩展名（xml/nv）
+//   4) 以明文计算 MD5、PutObject 写到 (snapshotBucket, <SN>_CFG.<ext>)
+//   5) 若 deviceLookup 可用，补 enb_name / product_type
+//   6) Upsert config_snapshots（source=backup, source_task_id，MD5=明文哈希）
+//
+// 为何不再 CopyObject（#61）：源备份对象在开启压缩/加密时是 .gz/.enc 字节，且
+// AEAD 的 AAD 绑定到源 basename；换名复制会丢后缀（下载侧据后缀决定是否解压/解密）
+// 且 AAD 错配，导致按快照恢复时 CPE 收到的是不可用的密文/压缩流。统一存明文后，
+// 按快照恢复（ACS 下载明文直发）、运维 presigned 下载都拿到可用配置，
+// config_snapshots.MD5 也回归"明文配置指纹"语义（与手动导入 ImportFromUpload 一致）。
 //
 // 行为契约：
 //   - 源文件不存在（fileLookup 返回 0 行）→ 返回 ErrNotFound（FilePathRecorder 降级 warn）
-//   - 目标 CopyObject 失败 → 不写 DB；调用方 metric+warn
+//   - 解码管线未注入 / 读源 / 解密 / 解压 / PutObject 失败 → 不写 DB；调用方 metric+warn
 //   - DB Upsert 失败 → 不补偿删 MinIO（下一次 Promote 会覆盖同 key）
 func (s *SnapshotService) PromoteFromBackup(
 	ctx context.Context, backupTaskID uuid.UUID, deviceSN string,
@@ -168,6 +242,10 @@ func (s *SnapshotService) PromoteFromBackup(
 		return ErrEmptySerialNumber
 	}
 	if s.fileLookup == nil {
+		return ErrPromoteNotConfigured
+	}
+	if s.sourceReader == nil {
+		// 解码管线未注入：拒绝走老的"原样复制"路径（那会产生不可用快照，#61）。
 		return ErrPromoteNotConfigured
 	}
 
@@ -187,28 +265,40 @@ func (s *SnapshotService) PromoteFromBackup(
 		return fmt.Errorf("parse backup_restore_file.object_path: %w", err)
 	}
 
-	dstName, ext, err := NormalizeSnapshotFileName(src.FileName, deviceSN)
+	blob, err := s.sourceReader.ReadObject(ctx, srcBucket, srcPath)
 	if err != nil {
-		return fmt.Errorf("normalize file name (raw=%q): %w", src.FileName, err)
+		return fmt.Errorf("read backup object %s/%s: %w", srcBucket, srcPath, err)
+	}
+
+	plaintext, canonicalName, err := s.decodeToPlaintext(srcPath, blob)
+	if err != nil {
+		return fmt.Errorf("decode backup object %s/%s: %w", srcBucket, srcPath, err)
+	}
+
+	dstName, ext, err := NormalizeSnapshotFileName(canonicalName, deviceSN)
+	if err != nil {
+		return fmt.Errorf("normalize file name (decoded=%q): %w", canonicalName, err)
 	}
 	dstPath := SnapshotObjectPath(deviceSN, ext)
 
-	if _, err := s.mover.CopyObject(ctx,
-		minio.CopyDestOptions{Bucket: s.bucket, Object: dstPath},
-		minio.CopySrcOptions{Bucket: srcBucket, Object: srcPath},
+	if _, err := s.mover.PutObject(ctx,
+		s.bucket, dstPath,
+		bytes.NewReader(plaintext), int64(len(plaintext)),
+		minio.PutObjectOptions{ContentType: contentTypeFor(ext)},
 	); err != nil {
-		return fmt.Errorf("minio CopyObject %s/%s → %s/%s: %w",
-			srcBucket, srcPath, s.bucket, dstPath, err)
+		return fmt.Errorf("minio PutObject snapshot %s/%s: %w", s.bucket, dstPath, err)
 	}
 
+	sum := md5.Sum(plaintext)
+	md5Hex := hex.EncodeToString(sum[:])
 	snap := &ConfigSnapshot{
 		SerialNumber: deviceSN,
 		FileName:     dstName,
 		FileExt:      ext,
 		ObjectBucket: s.bucket,
 		ObjectPath:   dstPath,
-		MD5:          src.MD5,
-		FileSize:     src.FileSize,
+		MD5:          &md5Hex,
+		FileSize:     int64(len(plaintext)),
 		Source:       SnapshotSourceBackup,
 		SourceTaskID: cloneUUIDPtr(backupTaskID),
 	}
@@ -223,8 +313,50 @@ func (s *SnapshotService) PromoteFromBackup(
 		zap.String("task_id", backupTaskID.String()),
 		zap.String("file_name", dstName),
 		zap.String("bucket", s.bucket),
+		zap.Int64("plaintext_size", int64(len(plaintext))),
 	)
 	return nil
+}
+
+// decodeToPlaintext 把存盘的备份对象（可能信封加密 + 压缩）还原为"CPE 实际应
+// 拿到的明文配置字节"，并返回规范文件名（后缀已剥离）。镜像 ACS 下载管线
+// （acs/download/handler.go 的 maybeDecrypt + detectCompression），保证快照桶里
+// 的对象就是恢复时直发 CPE 的字节（#61）。
+//
+//   - 解密：当对象名以解密器扩展名（.enc）结尾时，AAD = 去掉 .enc 后的 basename，
+//     与上传/下载契约完全一致（acs/upload encAAD、acs/download aad）。
+//   - 解压：解密后若仍带 .gz/.zst/.lz4/.bz2 则解压。
+//   - 带 .enc 但未注入解密器 → 报错（拒绝写不可解密的坏快照）。
+func (s *SnapshotService) decodeToPlaintext(srcKey string, blob []byte) (plaintext []byte, canonicalName string, err error) {
+	name := srcKey
+	work := blob
+
+	switch {
+	case s.decryptor != nil && strings.HasSuffix(name, "."+s.decryptor.Extension()):
+		inner := strings.TrimSuffix(name, "."+s.decryptor.Extension())
+		aad := []byte(filepath.Base(inner))
+		pt, derr := s.decryptor.Decrypt(work, aad)
+		if derr != nil {
+			return nil, "", fmt.Errorf("decrypt backup object: %w", derr)
+		}
+		work = pt
+		name = inner
+	case s.decryptor == nil && strings.HasSuffix(name, ".enc"):
+		// 源是加密对象但没有解密器：明确拒绝，而不是把密文当明文写快照。
+		return nil, "", fmt.Errorf("encrypted backup object %q but no decryptor configured: %w",
+			srcKey, ErrEncryptionKeyUnavailable)
+	}
+
+	if format, stripped, ok := stripCompressionSuffix(name); ok {
+		pt, derr := decompress(format, work, snapshotPromoteMaxBytes)
+		if derr != nil {
+			return nil, "", fmt.Errorf("decompress backup object: %w", derr)
+		}
+		work = pt
+		name = stripped
+	}
+
+	return work, filepath.Base(name), nil
 }
 
 // pickBackupFileForTask 在 ListBySerial 的结果中挑选与 backupTaskID 匹配的那行。

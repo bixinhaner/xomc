@@ -725,10 +725,14 @@ func initBackupModule(c *Container) error {
 	// T-0075: wire KeyProvider for PUT-time validation. The same env var is
 	// read on both ACS and App processes — keep them in sync via deployment
 	// config (systemd EnvironmentFile= or k8s ConfigMap).
+	// 捕获到函数作用域：除 policyService 外，#61 的快照 promote 解码管线也需要它
+	// 构造 AES-256-GCM 解密器（解密源备份对象还原明文快照）。
+	var backupKeyProvider backup.KeyProvider
 	if kp, kpErr := backup.NewEnvKeyProvider(); kpErr != nil {
 		logger.Error("backup encryption key invalid; PUT /backup/policy will block AES-256-GCM",
 			zap.Error(kpErr))
 	} else {
+		backupKeyProvider = kp
 		policyService.SetKeyProvider(kp)
 	}
 	backupHandler.SetPolicyService(policyService)
@@ -784,6 +788,24 @@ func initBackupModule(c *Container) error {
 		snapshotRepo, c.MinIO, snapshotFileLookup, c.DeviceRepo,
 		backup.SnapshotBucketDefault, logger,
 	)
+	// #61: promote 解码管线 —— 读源备份对象 + AES-256-GCM 解密器，把(压缩/加密的)
+	// 备份还原成明文写快照（替代会产生不可用快照的 server-side CopyObject）。
+	// 源读取器在 MinIO 注入时才装；解密器仅在 KEK 可用时装（与上传加密算法一致），
+	// 不可用时只能 promote 未加密备份、遇加密源拒绝（不写坏快照）。
+	if c.MinIO != nil {
+		var snapshotDecryptor backup.Encryptor
+		if backupKeyProvider != nil {
+			if enc, encErr := backup.NewEncryptor("AES-256-GCM", backupKeyProvider); encErr != nil {
+				logger.Warn("snapshot promote decryptor unavailable; encrypted backups will not promote",
+					zap.Error(encErr))
+			} else {
+				snapshotDecryptor = enc
+			}
+		}
+		snapshotService.SetPromoteDecoder(
+			backup.NewMinIOSnapshotSourceReader(c.MinIO), snapshotDecryptor,
+		)
+	}
 	// promote hook：备份成功后自动 promote 到 config_snapshots。
 	filePathRecorder.SetSnapshotPromoter(snapshotService)
 	// by-snapshot 恢复模式：每设备取自己最新快照。

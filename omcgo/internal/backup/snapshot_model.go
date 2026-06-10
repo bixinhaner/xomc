@@ -8,8 +8,8 @@
 //
 // 写入入口：
 //   1. 备份链路：FilePathRecorder 写完 backup_restore_file 后调用
-//      SnapshotService.PromoteFromBackup → MinIO server-side copy +
-//      Upsert（规范化命名到 <SN>_CFG.<ext>）
+//      SnapshotService.PromoteFromBackup → 读源对象解密/解压成明文 +
+//      PutObject + Upsert（规范化命名到 <SN>_CFG.<ext>，#61）
 //   2. 手动导入：SnapshotHandler.Import → multipart 校验命名 +
 //      MinIO PutObject + Upsert
 //
