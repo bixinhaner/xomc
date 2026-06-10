@@ -170,6 +170,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "file too large", http.StatusRequestEntityTooLarge)
 		return
 	}
+	// 4.1 纵深防御：ContentLength 可被伪造或缺失（chunked 传输为 -1），仅靠上面的
+	// 头部检查不足。用 MaxBytesReader 在流式读取层强制同一上限，超限时读取返回
+	// 错误并中止上传，防止绕过 ContentLength 的超大上传耗尽内存。
+	if runtimeCfg.MaxFileSize > 0 {
+		r.Body = http.MaxBytesReader(w, r.Body, runtimeCfg.MaxFileSize)
+	}
 
 	// 5. Determine bucket and object path
 	ft := normalizeFileType(fileType)
