@@ -9,9 +9,12 @@
  * 复用：AddTemplateModal（新增 / 编辑公私命令）。
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type UIEventHandler } from 'react';
 import { Empty, Select, Spin, Tag, Tooltip, Typography } from 'antd';
-import { useStandardParamsList } from '@core/hooks/api/useMmlAdmin';
+import {
+  useStandardParamsInfiniteList,
+  flattenStandardParamPages,
+} from '@core/hooks/api/useMmlAdmin';
 import { useT } from '@/hooks/useT';
 
 export interface PathPickerProps {
@@ -45,39 +48,48 @@ export default function PathPicker({
     return () => clearTimeout(id);
   }, [searchText]);
 
-  // 标准 PATH 列表：空查询返回前 50 条（可不输入直接浏览选择），输入则后端 ILIKE 过滤。
-  const { data, isLoading } = useStandardParamsList({ q: debouncedQuery, pageSize: 50 });
+  // 标准 PATH 列表：触底分页 load-more（修 #105：原单页 50 条数据不全）；输入则后端 ILIKE 过滤。
+  const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } =
+    useStandardParamsInfiniteList({ q: debouncedQuery });
 
+  // 候选 = 搜索结果（按 standardPath 去重）− 已选（#106 隐藏已选：选过的不再出现在下拉）。
   const pathOptions = useMemo<Option[]>(() => {
+    const selected = new Set(value);
     const seen = new Set<string>();
     const out: Option[] = [];
-    (data?.items ?? []).forEach((it) => {
-      if (seen.has(it.standardPath)) return;
+    for (const it of flattenStandardParamPages(data?.pages)) {
+      if (selected.has(it.standardPath) || seen.has(it.standardPath)) continue;
       seen.add(it.standardPath);
       out.push({
         value: it.standardPath,
         label: it.description ? `${it.standardPath}  —  ${it.description}` : it.standardPath,
       });
-    });
+    }
     return out;
-  }, [data]);
+  }, [data, value]);
 
-  // 下拉 value = 已选 path ∩ 当前候选；保证候选里命中项带 ✓。其它已选 path 保留在下方 Tag。
-  const selectValue = useMemo(
-    () => value.filter((p) => pathOptions.some((o) => o.value === p)),
-    [value, pathOptions],
-  );
+  // 选中即追加到已选（#105/#106 一词多选：autoClearSearchValue=false 下可从同一关键字
+  // 结果连续选多个；候选已排除已选，故 picked 均为新选）。
   const handleSelectChange = (picked: string[]) => {
-    const optionValues = new Set(pathOptions.map((o) => o.value));
-    const otherPaths = value.filter((p) => !optionValues.has(p));
-    onChange(Array.from(new Set([...otherPaths, ...picked])));
+    onChange(Array.from(new Set([...value, ...picked])));
   };
 
-  // ----- 已选 path 操作 -----
+  // 下拉触底续拉下一页（load-more）。
+  const handlePopupScroll: UIEventHandler<HTMLDivElement> = (e) => {
+    const el = e.currentTarget;
+    if (
+      hasNextPage &&
+      !isFetchingNextPage &&
+      el.scrollHeight - el.scrollTop - el.clientHeight < 32
+    ) {
+      void fetchNextPage();
+    }
+  };
+
+  // ----- 已选 path 操作（逐个 Tag × 删除；#106 已去掉「一键清除」）-----
   const handleRemove = (p: string) => {
     onChange(value.filter((x) => x !== p));
   };
-  const handleClear = () => onChange([]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -91,26 +103,22 @@ export default function PathPicker({
         // 受控搜索词，结合 debounce 把网络请求降到 300ms 后才发
         searchValue={searchText}
         onSearch={setSearchText}
-        // 多选 value = 已选 path ∩ 候选；保证下拉里命中项带 ✓
-        value={selectValue}
+        onPopupScroll={handlePopupScroll}
+        // 一词多选：选中不清搜索框，可从同一关键字结果连续选多个（#105/#106）；
+        // 候选已排除已选（隐藏已选）。Select 自身不留标签（value 置空），已选在下方 Tag 逐个删。
+        autoClearSearchValue={false}
+        value={[]}
         onChange={(picked) => handleSelectChange(picked as string[])}
         // 关闭客户端二次过滤：所有匹配由后端 ILIKE 完成
         filterOption={false}
         disabled={disabled}
         notFoundContent={
-          isLoading ? (
+          isLoading || isFetchingNextPage ? (
             <Spin size="small" />
           ) : debouncedQuery && pathOptions.length === 0 ? (
             <Empty description={false} image={Empty.PRESENTED_IMAGE_SIMPLE} />
           ) : null
         }
-        maxTagCount={0}
-        maxTagPlaceholder={(omitted) =>
-          omitted.length > 0
-            ? `${t('mml.console.pathPicker.searchPlaceholder')} · ${omitted.length}`
-            : null
-        }
-        allowClear
       />
 
       {/* 已选 path 列表 */}
@@ -147,15 +155,6 @@ export default function PathPicker({
                 </Tag>
               </Tooltip>
             ))}
-            {!disabled && (
-              <Typography.Link
-                style={{ fontSize: 11, marginLeft: 4 }}
-                onClick={handleClear}
-                aria-label="clear-all-paths"
-              >
-                {t('mml.console.pathPicker.clearAll')}
-              </Typography.Link>
-            )}
           </>
         )}
       </div>

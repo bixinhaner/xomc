@@ -12,8 +12,17 @@
  * useImportApply) 同步移除。
  */
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 import { mmlAdminApi } from '../../services/api/mmlAdminApi';
+import { STANDARD_PARAMS_PAGE_SIZE } from './standardParamPages';
+// 纯分页辅助从 standardParamPages 提供，这里 re-export 让消费方（StandardParamSelect /
+// PathPicker）仍从 useMmlAdmin 一处导入。
+export { flattenStandardParamPages, STANDARD_PARAMS_PAGE_SIZE } from './standardParamPages';
 import type {
   GroupAdmin,
   CommandAdmin,
@@ -156,6 +165,30 @@ export function useStandardParamsList(params: {
   return useQuery<PageResponse<StandardParamView>>({
     queryKey: [...QK_STANDARD_PARAMS, params],
     queryFn: () => mmlAdminApi.listStandardParams(params),
+    staleTime: 30_000,
+  });
+}
+
+/**
+ * standard_params 无限滚动列表 —— 修 #105：原 `useStandardParamsList` 单页 50 条
+ * 写死，standard_params 总量 ~2000 时下拉数据不全。改用 useInfiniteQuery，下拉触底
+ * 由调用方 `fetchNextPage` 续拉，`flattenStandardParamPages` 拍平 + 去重。
+ * 搜索词（q/entryType）变化即新 queryKey → 自动重置回第 1 页。
+ */
+export function useStandardParamsInfiniteList(params: { q?: string; entryType?: string } = {}) {
+  return useInfiniteQuery({
+    queryKey: [...QK_STANDARD_PARAMS, 'infinite', params],
+    queryFn: ({ pageParam }) =>
+      mmlAdminApi.listStandardParams({
+        ...params,
+        page: pageParam,
+        pageSize: STANDARD_PARAMS_PAGE_SIZE,
+      }),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage, allPages) => {
+      const loaded = allPages.reduce((n, p) => n + p.items.length, 0);
+      return loaded < lastPage.total ? lastPage.page + 1 : undefined;
+    },
     staleTime: 30_000,
   });
 }
