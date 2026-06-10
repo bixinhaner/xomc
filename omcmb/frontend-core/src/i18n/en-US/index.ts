@@ -11,6 +11,7 @@ const messages: Record<string, string> = {
   'common.delete':         'Delete',
   'common.builtinNoDelete': 'Built-in data cannot be deleted',
   'common.export':         'Export',
+  'common.exportUnavailable': 'Export is temporarily unavailable',
   'common.import':         'Import',
   'common.batchImport':    'Batch Import',
   'common.confirm':        'Confirm',

@@ -16,6 +16,8 @@ import Feature from 'ol/Feature';
 import Point from 'ol/geom/Point';
 import LineString from 'ol/geom/LineString';
 import { fromLonLat, toLonLat } from 'ol/proj';
+import { containsCoordinate, buffer as bufferExtent } from 'ol/extent';
+import type { Extent } from 'ol/extent';
 import { defaults as defaultControls } from 'ol/control';
 import { Style, Stroke, Circle, Fill, Text } from 'ol/style';
 import type { StyleLike } from 'ol/style/Style';
@@ -27,6 +29,7 @@ import {
   COLORS,
   DEVICE_STATUS_CONFIG,
   SPIDERFY_CONFIG,
+  VIEWPORT_CULLING,
 } from './constants';
 import {
   clusterStyleFunction,
@@ -215,6 +218,14 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
 
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<Map | null>(null);
+  // 完整设备列表（性能 #15：视口裁剪时只渲染可视范围内的子集，
+  // 其余设备保留在此 ref 中，平移/缩放后按新视口重算）
+  const allDevicesRef = useRef<MapDevice[]>([]);
+  // 视口裁剪函数引用（在 moveend 中调用，避免 bindMapEvents 签名漂移）
+  const cullDevicesRef = useRef<(() => void) | null>(null);
+  // 强制保留渲染的设备 id（如搜索定位目标）：即便落在视口外也始终渲染，
+  // 避免裁剪把搜索高亮的目标点剔除导致定位失败。
+  const pinnedDeviceIdsRef = useRef<Set<string>>(new Set());
   const deviceSourceRef = useRef<VectorSource | null>(null);
   const clusterSourceRef = useRef<Cluster | null>(null);
   const deviceLayerRef = useRef<VectorLayer<VectorSource> | null>(null);
@@ -459,6 +470,16 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
       spiderfyLayerRef.current
     );
 
+    // 视口裁剪重算（性能 #15）：地图平移/缩放结束后，按新视口重新喂点。
+    // 带防抖，避免连续 moveend 频繁重建 feature。
+    let cullTimeout: ReturnType<typeof setTimeout>;
+    mapInstanceRef.current.on('moveend', () => {
+      clearTimeout(cullTimeout);
+      cullTimeout = setTimeout(() => {
+        cullDevicesRef.current?.();
+      }, 150);
+    });
+
     // 延迟设置 isReady，避免在 effect 中同步调用 setState 导致级联渲染
     // 使用 setTimeout 将状态更新推迟到下一个事件循环
     setTimeout(() => setIsReady(true), 0);
@@ -479,14 +500,9 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
     };
   }, [metadataLoading]);
 
-  // 更新设备数据
-  const updateDevices = useCallback((devices: MapDevice[]) => {
+  // 把一组设备渲染进 VectorSource（构造 Point feature 并替换现有数据）
+  const renderDeviceFeatures = useCallback((devices: MapDevice[]) => {
     if (!deviceSourceRef.current) return;
-
-    // 如果当前有 spiderfy 展开，先收起（因为设备数据已变化，展开的内容可能不再有效）
-    if (isSpiderfiedRef.current) {
-      unspiderfy();
-    }
 
     // 清除现有数据
     deviceSourceRef.current.clear();
@@ -502,7 +518,64 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
     });
 
     deviceSourceRef.current.addFeatures(features);
-  }, [unspiderfy]);
+  }, []);
+
+  // 视口裁剪：只渲染当前可视范围（带缓冲）内的设备（性能 #15）
+  // 设备数 <= 阈值时直接全量渲染，保持原有行为。
+  const cullDevicesToViewport = useCallback(() => {
+    const map = mapInstanceRef.current;
+    if (!map || !deviceSourceRef.current) return;
+
+    const all = allDevicesRef.current;
+
+    // 数据量较小：全量渲染，无需裁剪
+    if (all.length <= VIEWPORT_CULLING.enableThreshold) {
+      renderDeviceFeatures(all);
+      return;
+    }
+
+    const size = map.getSize();
+    if (!size) {
+      // 地图尺寸未就绪，保守全量渲染（不丢点）
+      renderDeviceFeatures(all);
+      return;
+    }
+
+    // 计算当前可视 extent 并按缓冲倍数向外扩展（投影坐标 EPSG:3857）
+    const extent = map.getView().calculateExtent(size) as Extent;
+    const bufferX = (extent[2] - extent[0]) * VIEWPORT_CULLING.bufferRatio;
+    const bufferY = (extent[3] - extent[1]) * VIEWPORT_CULLING.bufferRatio;
+    // bufferExtent 取单一边距值，取宽高缓冲的较大者以覆盖两个方向
+    const bufferedExtent = bufferExtent(extent, Math.max(bufferX, bufferY));
+
+    const pinned = pinnedDeviceIdsRef.current;
+    const visible = all.filter(
+      (device) =>
+        pinned.has(device.id) ||
+        containsCoordinate(bufferedExtent, fromLonLat([device.lng, device.lat]))
+    );
+
+    renderDeviceFeatures(visible);
+  }, [renderDeviceFeatures]);
+
+  // 把裁剪函数挂到 ref，供 moveend 监听器调用
+  useEffect(() => {
+    cullDevicesRef.current = cullDevicesToViewport;
+  }, [cullDevicesToViewport]);
+
+  // 更新设备数据
+  const updateDevices = useCallback((devices: MapDevice[]) => {
+    if (!deviceSourceRef.current) return;
+
+    // 如果当前有 spiderfy 展开，先收起（因为设备数据已变化，展开的内容可能不再有效）
+    if (isSpiderfiedRef.current) {
+      unspiderfy();
+    }
+
+    // 保存完整列表，随后按当前视口裁剪渲染
+    allDevicesRef.current = devices;
+    cullDevicesToViewport();
+  }, [unspiderfy, cullDevicesToViewport]);
 
   // 获取当前视图状态
   const getViewport = useCallback((): MapViewport | null => {
@@ -661,6 +734,12 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
       highlightFeatureRef.current.set('rippleWaves', undefined);
       highlightFeatureRef.current = null;
     }
+
+    // 取消搜索定位 pin（性能 #15）：高亮结束后该设备恢复受裁剪约束，
+    // 避免 pin 集合无界增长。下次正常裁剪会按视口决定是否渲染。
+    if (pinnedDeviceIdsRef.current.size > 0) {
+      pinnedDeviceIdsRef.current.clear();
+    }
   }, []);
 
   // 高亮设备（水波纹动画）
@@ -768,6 +847,14 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
   // 高亮设备并在需要时展开聚合（用于搜索定位）
   const highlightAndSpiderfyIfNeeded = useCallback((device: MapDevice, skipFlyTo = false) => {
     if (!mapInstanceRef.current || !clusterSourceRef.current || !spiderfySourceRef.current) return;
+
+    // 性能 #15：把搜索/定位目标 pin 住并立即重算裁剪，
+    // 确保即便目标当前落在视口外，也已渲染进 deviceSource，
+    // 后续聚合查找（clusterSource）才能命中它。
+    if (allDevicesRef.current.length > VIEWPORT_CULLING.enableThreshold) {
+      pinnedDeviceIdsRef.current.add(device.id);
+      cullDevicesToViewport();
+    }
 
     // 递增请求 ID，用于防止竞态条件
     const currentRequestId = ++highlightRequestIdRef.current;
@@ -992,7 +1079,7 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
       // 不需要 zoom 变化，直接执行（但稍作延迟确保状态稳定）
       setTimeout(doHighlightAndSpiderfy, 100);
     }
-  }, [flyTo, clearHighlight, unspiderfy, spiderfy]);
+  }, [flyTo, clearHighlight, unspiderfy, spiderfy, cullDevicesToViewport]);
 
   return {
     mapRef,

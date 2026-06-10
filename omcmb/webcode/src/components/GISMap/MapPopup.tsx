@@ -258,4 +258,6 @@ const MapPopup: React.FC<MapPopupProps> = ({
   );
 };
 
-export default MapPopup;
+// 性能 #15：地图 hover/平移会高频驱动父组件重渲染，props（device/position）
+// 不变时用 memo 跳过卡片重渲染。
+export default React.memo(MapPopup);

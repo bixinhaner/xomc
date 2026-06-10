@@ -110,4 +110,6 @@ const MapControls: React.FC<MapControlsProps> = ({
   );
 };
 
-export default MapControls;
+// 性能 #15：缩放按钮回调来自 useCallback、props 稳定，用 memo 避免随地图
+// 视口状态频繁重渲染。
+export default React.memo(MapControls);

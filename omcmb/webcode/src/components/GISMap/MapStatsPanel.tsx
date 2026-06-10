@@ -367,4 +367,6 @@ const MapStatsPanel: React.FC<MapStatsPanelProps> = ({
   );
 };
 
-export default MapStatsPanel;
+// 性能 #15：stats 由 useMemo 派生、引用稳定，用 memo 避免地图 hover/平移
+// 触发父组件重渲染时一并重算面板。
+export default React.memo(MapStatsPanel);

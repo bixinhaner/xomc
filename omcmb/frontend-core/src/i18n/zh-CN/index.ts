@@ -11,6 +11,7 @@ const messages: Record<string, string> = {
   'common.delete':         '删除',
   'common.builtinNoDelete': '内置数据不允许删除',
   'common.export':         '导出',
+  'common.exportUnavailable': '导出暂不可用',
   'common.import':         '导入',
   'common.batchImport':    '批量导入',
   'common.confirm':        '确认',

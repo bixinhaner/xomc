@@ -31,8 +31,12 @@ export function useCurrentAlarms(
   return useQuery({
     queryKey: ['alarms', 'current', params],
     queryFn: () => api.getCurrentAlarms(params),
+    // 实时页（性能 #15）：比全局 30s staleTime 更短，进入页面/切回前台更快补刷
+    staleTime: 5_000,
     refetchInterval: options?.refetchIntervalMs ?? 30000,
-    refetchIntervalInBackground: options?.refetchIntervalInBackground ?? true,
+    // 性能 #15：默认后台标签暂停轮询，切回前台经 refetchOnWindowFocus 立即补刷，
+    // 不丢实时性。调用方可显式传 true 覆盖（如确需后台常驻轮询的场景）。
+    refetchIntervalInBackground: options?.refetchIntervalInBackground ?? false,
     refetchOnWindowFocus: options?.refetchOnWindowFocus ?? true,
   });
 }
@@ -54,8 +58,10 @@ export function useAlarmList(params: AlarmFilter & PageRequest & { isActive?: bo
   return useQuery({
     queryKey: ['alarms', 'list', params],
     queryFn: () => api.getList(params),
+    staleTime: 5_000,
     refetchInterval: params.isActive !== false ? 30000 : undefined,
-    refetchIntervalInBackground: params.isActive !== false,
+    // 性能 #15：后台标签暂停轮询（不再随 isActive 在后台常驻）
+    refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
   });
 }

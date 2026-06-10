@@ -35,7 +35,9 @@ export function useDeviceTaskStatus(
       if (isDeviceTaskTerminal(status)) return false;
       return intervalMs;
     },
-    // 后台标签页时也保持轮询(用户可能切到通知中心查任务)
-    refetchIntervalInBackground: true,
+    // 性能 #15：后台标签暂停 2s 高频轮询，避免隐藏标签持续打 ACS；
+    // 切回前台经 refetchOnWindowFocus 立即补刷一次，任务状态即时回到最新。
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: true,
   });
 }

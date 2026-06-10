@@ -92,6 +92,30 @@ export const CLUSTER_CONFIG = {
 };
 
 /**
+ * 视口裁剪配置（性能 #15）
+ *
+ * 设备列表分页 pageSize 可达 10000，全量塞进 VectorSource 会让 OpenLayers
+ * 每帧对所有 feature 做聚合/命中检测，渲染耗时 500ms+。视口裁剪只把"当前
+ * 可视范围 + 缓冲边距"内的设备喂给地图，其余设备保留在内存（allDevicesRef）
+ * 不参与渲染；地图平移/缩放（moveend）后按新视口重算。聚合（Cluster）逻辑
+ * 不变——裁剪后的子集仍照常聚合，缩放与平移交互完全保留。
+ */
+export const VIEWPORT_CULLING = {
+  /**
+   * 启用裁剪的设备数量阈值。
+   * 设备数 <= 此值时全量渲染（保持原有行为，避免小数据集额外开销与
+   * "平移露白"边缘情形）；超过才启用视口裁剪。
+   */
+  enableThreshold: 2000,
+  /**
+   * 视口缓冲倍数。按当前可视 extent 的宽/高各向外扩展该比例，
+   * 让平移时边缘设备已预先在视口内，避免可见的"突然出现"。
+   * 0.5 表示左右各扩展半个屏宽、上下各扩展半个屏高。
+   */
+  bufferRatio: 0.5,
+};
+
+/**
  * 告警角标配置
  */
 export const ALARM_BADGE_CONFIG = {
