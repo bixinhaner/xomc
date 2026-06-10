@@ -44,7 +44,8 @@ nats:
 
 db:
   dsn: "postgres://omcgo:omcgo123@172.19.1.73:5432/omcgo?sslmode=disable"
-  max_conns: 20
+  # 连接池核定（#24）：与 prod 对齐，ACS PG 池 20→30。聚合预算见 app/config.prod.yaml。
+  max_conns: 30
   min_conns: 5
   max_conn_lifetime: 30m
   max_conn_idle_time: 5m

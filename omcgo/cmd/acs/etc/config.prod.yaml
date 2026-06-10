@@ -60,7 +60,10 @@ nats:
 db:
   # 【全 docker compose 部署】使用 service 名 postgres（容器间 docker network 解析）
   dsn: "postgres://omcgo:REPLACE_ME_DB_PASSWORD@postgres:5432/omcgo?sslmode=require"  # 生产经 OMCGO_DB_DSN 注入真实 DSN
-  max_conns: 20
+  # 连接池核定（#24）：ACS 承载高并发 CWMP 会话（max_concurrent 10000），PG 池 20→30。
+  # ACS 水平扩展时按副本数累加，逼近 PG max_connections 前必须前置 pgbouncer。
+  # 聚合预算见 app/config.prod.yaml 与 migrations/README.md「连接池核定（#24）」。
+  max_conns: 30
   min_conns: 5
   max_conn_lifetime: 30m
   max_conn_idle_time: 5m

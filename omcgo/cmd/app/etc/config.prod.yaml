@@ -16,7 +16,12 @@ db:
   # 同 project 共享 docker network，进行内部名字解析。如仅起动 host 二进制调试，
   # 可临时改为 127.0.0.1（infra 的 5432 publish 到 127.0.0.1）。
   dsn: "postgres://omcgo:REPLACE_ME_DB_PASSWORD@postgres:5432/omcgo?sslmode=require"  # 生产经 OMCGO_DB_DSN 注入真实 DSN
-  max_conns: 50
+  # 连接池核定（#24）：app 是 REST+gRPC 主负载，PG 池上调 50→60。
+  # 单副本全栈聚合预算：app(PG 60 + TS 40) + acs(PG 30) + worker(PG 25 + TS 25) = 180，
+  # 需 PostgreSQL max_connections ≥ 200（留 superuser/复制余量）。app/acs 横向扩容时
+  # 按副本数线性累加，逼近 PG 上限前必须前置 pgbouncer（transaction pooling）复用连接。
+  # 详见 migrations/README.md「连接池核定（#24）」。
+  max_conns: 60
   min_conns: 10
   max_conn_lifetime: 30m
   max_conn_idle_time: 5m
@@ -27,7 +32,8 @@ db:
 
 tsdb:
   dsn: "postgres://omcgo:REPLACE_ME_DB_PASSWORD@postgres:5432/omcgo?sslmode=require"  # 生产经 OMCGO_TSDB_DSN 注入真实 DSN
-  max_conns: 30
+  # 连接池核定（#24）：PM/KPI/告警历史时序读写，TS 池上调 30→40。
+  max_conns: 40
   min_conns: 5
   max_conn_lifetime: 30m
   max_conn_idle_time: 5m

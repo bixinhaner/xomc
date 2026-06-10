@@ -13,13 +13,68 @@
 
 旧的 277 个迁移文件归档在 `omcgo/migrations.backup-20260531/`（已 gitignore，仅本地保留，可随时回滚）。
 
-## 新增迁移的版本号规则
+## 新增迁移的版本号规则（版本号分配约定 · #24）
 
-- **当前 goose schema 版本 = 1**，下一个新增迁移用 `000002_xxx.sql`
-- **当前 goose seed 版本 = 1**，下一个新增 seed 用 `seed/000002_xxx.sql`
-- 其它规则（连续递增、StatementBegin/End、TimescaleDB 压缩顺序、分区表外键、UUID 校验、Down 完整性、TRUNCATE/FK、自查清单）见 `omcgo/CLAUDE.md` §5.5 数据库迁移规范
+### 两条独立版本序列（边界）
 
-> CLAUDE.md §5.3 和 §5.3.1 中提到的 `migrations/000057`、`000058`、`000063`、`000215`、`000217` 等具体编号在本次合并后**已不存在**，对应能力已并入 `000001_init_schema.sql`，文档中的编号只用作历史溯源参考。
+schema 与 seed 是**两条相互独立的 goose 版本序列**，各自记录在不同的版本表，**不共享号段**：
+
+| 序列 | 目录 | goose 版本表 | 执行服务 |
+|------|------|--------------|----------|
+| schema（DDL）| `migrations/*.sql` | `goose_db_version` | compose `migrate-schema` |
+| seed（DML）| `migrations/seed/*.sql` | `goose_db_version_seed` | compose `migrate-seed` |
+
+因此 `000001` 在两边各出现一次是**正常的**（不是撞号）——`ls ... | sort | uniq -d` 查撞号时必须分目录各查一遍，**不要把两个目录的文件名合并去重**（合并会把 `000001`/`000002` 等误报成重复）。
+
+### 分配规则
+
+- 新增 = 该序列**现有最大号 + 1**，不在两序列间借号、不复用已删号、不回填低位号。
+- 取下一号：
+  ```bash
+  # schema 下一号
+  ls omcgo/migrations/[0-9]*.sql | xargs -n1 basename | sed 's/_.*//' | sort -n | tail -1
+  # seed 下一号
+  ls omcgo/migrations/seed/[0-9]*.sql | xargs -n1 basename | sed 's/_.*//' | sort -n | tail -1
+  ```
+- 同序列内**撞号自查**：
+  ```bash
+  ls omcgo/migrations/[0-9]*.sql      | xargs -n1 basename | sed 's/_.*//' | sort | uniq -d   # 应为空
+  ls omcgo/migrations/seed/[0-9]*.sql | xargs -n1 basename | sed 's/_.*//' | sort | uniq -d   # 应为空
+  ```
+
+### 号段允许有空洞（gap），且空洞不可复用
+
+goose 以 `version_id`（号）为唯一键判定「已应用」。历史上若某号曾被应用又被删档，其号已写入版本表；**复用该号会让 goose 把新内容当作「已应用」而跳过执行**。所以：
+
+- 当前 schema 序列在 `000001..000033` 间存在空洞（如 12–15、22、28、32），seed 序列在 `000001..000032` 间存在空洞（如 21、23、26、27）——这些是被弃用/删档迁移留下的，**属正常现象**。
+- 新增一律用 `max+1`，**绝不**回填这些空洞，也不重排已有文件的号。
+- 因此 CLAUDE.md §4.6 里「连续递增、无跳跃」应理解为「**单调递增、不回填**」：相邻号之间可以有历史遗留空洞，新号只许在最大号之上递增。
+
+其它规则（StatementBegin/End、TimescaleDB 压缩顺序、分区表外键、UUID 校验、Down 完整性、TRUNCATE/FK、自查清单）见 `omcgo/CLAUDE.md` §4.6 数据库迁移规范。
+
+> CLAUDE.md 中提到的 `migrations/000057`、`000058`、`000063`、`000215`、`000217` 等具体编号在本次合并后**已不存在**，对应能力已并入 `000001_init_schema.sql`，文档中的编号只用作历史溯源参考。
+
+## seed baseline 幂等性（#24）
+
+`seed/000001_init_seed.sql` 的全部 public 部署数据 `INSERT`（admin/RBAC/菜单/字典/MML 字典/standard_params 等共 30 条语句）均带 `ON CONFLICT DO NOTHING`，使该 baseline 对**全新库重复前向应用**安全无错（行数稳定、不报唯一键冲突）。
+
+- 采用**无目标** `ON CONFLICT DO NOTHING`（不写 `(col)` 推断列）：这些表多数带不止一个唯一约束（PK + 业务唯一键），重灌的是**逐字段一致的同一行**，无目标形式可对任意唯一约束冲突一并静默跳过，比指定单一仲裁索引更稳。系统/参考型种子取 `DO NOTHING`（不 `DO UPDATE`），避免覆盖运行期可能被合法修改的值。
+- `_timescaledb_catalog.*`（hypertable/bgw_job/dimension/compression_settings 共 4 条 INSERT）**不加** `ON CONFLICT`：它们是 TimescaleDB 内部 catalog，靠文件头尾的 `timescaledb_pre_restore()` / `timescaledb_post_restore()` 括号 + `DISABLE/ENABLE TRIGGER` 还原机制保证一致性，是 pg_dump 还原约定的一部分，人为加 `ON CONFLICT` 反而偏离该约定。
+- 边界：goose **不会重跑已应用版本**，改动已应用的 baseline 只对**全新部署**生效（这正是本次幂等加固的目标场景）；已存量库不受影响、也无需回灌。
+
+## 连接池核定（#24）
+
+三个部署单元连同一套 PostgreSQL/TimescaleDB（同一实例、`db` 走 PG、`tsdb` 走 TimescaleDB 扩展）。各单元 `cmd/*/etc/config.{test,prod}.yaml` 的 `max_conns` 核定如下（**dev/local 保持原值不动，保证本地可用**）：
+
+| 单元 | db（PG）max_conns | tsdb（TS）max_conns | 理由 |
+|------|------------------|---------------------|------|
+| app | 50 → **60** | 30 → **40** | REST + gRPC 主负载，连接需求最高 |
+| acs | 20 → **30** | （无 tsdb 块）| 高并发 CWMP 会话（`session.max_concurrent=10000`）|
+| worker | 20 → **25** | 20 → **25** | PM/MR 文件处理 + KPI 聚合的后台批负载，受 WorkerPool 约束，温和上调 |
+
+**单副本聚合预算**：`app(60+40) + acs(30) + worker(25+25) = 180` 个连接，要求 PostgreSQL `max_connections ≥ 200`（给 superuser / 复制 / 临时连接留余量）。
+
+**横向扩展告警**：app 与 acs 可水平扩展，连接数随副本数**线性累加**（如 app×3 + acs×3 即 300+90）。在逼近 PG `max_connections` 之前，**必须前置 pgbouncer**（`transaction` pooling 模式）做连接复用，把上游成百上千的客户端连接收敛到几十个真实后端连接——这是 100 万级扩展的既定演进项，本次仅做单副本下的保守上调，不引入 pgbouncer 依赖。
 
 ## Goose 包装约定
 

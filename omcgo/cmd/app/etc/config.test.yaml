@@ -13,7 +13,8 @@ server:
 
 db:
   dsn: "postgres://omcgo:omcgo123@172.19.1.73:5432/omcgo?sslmode=disable"
-  max_conns: 50
+  # 连接池核定（#24）：与 prod 对齐，app PG 池 50→60。聚合预算见 prod yaml / migrations/README.md。
+  max_conns: 60
   min_conns: 10
   max_conn_lifetime: 30m
   max_conn_idle_time: 5m
@@ -24,7 +25,8 @@ db:
 
 tsdb:
   dsn: "postgres://omcgo:omcgo123@172.19.1.73:5432/omcgo?sslmode=disable"
-  max_conns: 30
+  # 连接池核定（#24）：与 prod 对齐，app TS 池 30→40。
+  max_conns: 40
   min_conns: 5
   max_conn_lifetime: 30m
   max_conn_idle_time: 5m

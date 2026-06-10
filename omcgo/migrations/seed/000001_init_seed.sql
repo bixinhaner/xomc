@@ -339,7 +339,8 @@ INSERT INTO public.alarm_severity_levels VALUES
 	('361e3cdb-a8fc-4d9f-b339-8940e49f7ea5', 31001, 'Critical', 1, '2026-05-31 11:28:44.576592+08'),
 	('22d75435-0ef0-481d-841c-5b7764bf73dc', 31002, 'Major', 2, '2026-05-31 11:28:44.576592+08'),
 	('8ea92776-f338-4d14-aa56-e8ca6a41fd4a', 31003, 'Minor', 3, '2026-05-31 11:28:44.576592+08'),
-	('ee19b567-b50a-4009-8046-a7f2301e56f3', 31004, 'Warning', 4, '2026-05-31 11:28:44.576592+08');
+	('ee19b567-b50a-4009-8046-a7f2301e56f3', 31004, 'Warning', 4, '2026-05-31 11:28:44.576592+08')
+ON CONFLICT DO NOTHING;
 
 
 ALTER TABLE public.alarm_severity_levels ENABLE TRIGGER ALL;
@@ -850,7 +851,8 @@ INSERT INTO public.api_endpoints VALUES
 	('844e4861-a904-498f-8c84-86f1fe71e723', '/api/v1/config/sync/pull/:deviceId', 'POST', 'POST /api/v1/config/sync/pull/:deviceId', '', 'config', true, '2026-05-31 12:11:47.708998+08', '2026-05-31 12:52:24.018301+08'),
 	('f6b8585f-fd3e-4a3a-b7e0-0bb100f2ceb0', '/api/v1/config/baselines', 'POST', 'POST /api/v1/config/baselines', '', 'config', true, '2026-05-31 12:11:47.70928+08', '2026-05-31 12:52:24.018574+08'),
 	('db35ff42-5bb6-4976-945b-cf1f5488f1c6', '/api/v1/config/tasks', 'POST', 'POST /api/v1/config/tasks', '', 'config', true, '2026-05-31 12:11:47.709474+08', '2026-05-31 12:52:24.018777+08'),
-	('2ccb443b-85d6-41a7-a030-da4720c78d76', '/api/v1/cell/perfmgmt/kpimanage/enableIndicator', 'POST', 'POST /api/v1/cell/perfmgmt/kpimanage/enableIndicator', '', 'cell', true, '2026-05-31 12:11:47.709668+08', '2026-05-31 12:52:24.018983+08');
+	('2ccb443b-85d6-41a7-a030-da4720c78d76', '/api/v1/cell/perfmgmt/kpimanage/enableIndicator', 'POST', 'POST /api/v1/cell/perfmgmt/kpimanage/enableIndicator', '', 'cell', true, '2026-05-31 12:11:47.709668+08', '2026-05-31 12:52:24.018983+08')
+ON CONFLICT DO NOTHING;
 INSERT INTO public.api_endpoints VALUES
 	('5151e508-27cd-41fb-8a12-aba2766b0d1c', '/api/v1/cell/perfmgmt/kpimanage/disableIndicator', 'POST', 'POST /api/v1/cell/perfmgmt/kpimanage/disableIndicator', '', 'cell', true, '2026-05-31 12:11:47.709851+08', '2026-05-31 12:52:24.019221+08'),
 	('13996613-ae25-41af-982f-a7d80f1d1763', '/api/v1/firmware', 'POST', 'POST /api/v1/firmware', '', 'firmware', true, '2026-05-31 12:11:47.710147+08', '2026-05-31 12:52:24.019417+08'),
@@ -1014,7 +1016,8 @@ INSERT INTO public.api_endpoints VALUES
 	('b608eec8-dfcd-41b3-8934-d438f8f93c2b', '/api/v1/mml/admin/commands/:id/sub-fields/:sid', 'DELETE', 'DELETE /api/v1/mml/admin/commands/:id/sub-fields/:sid', '', 'mml', true, '2026-05-31 12:11:47.724983+08', '2026-05-31 12:52:24.030577+08'),
 	('6fabc240-78da-44db-9140-4a2f2f168f30', '/api/v1/admin/sysDictionary/updateSysDictionary', 'PUT', 'PUT /api/v1/admin/sysDictionary/updateSysDictionary', '', 'sysDictionary', true, '2026-05-31 12:11:47.744758+08', '2026-05-31 12:52:24.040643+08'),
 	('ad6ff8c6-7097-41b8-a084-87f9dffdbc36', '/api/v1/products/orphan-devices/:deviceId/bind', 'PUT', 'PUT /api/v1/products/orphan-devices/:deviceId/bind', '', 'products', true, '2026-05-31 12:11:47.74854+08', '2026-05-31 12:52:24.04257+08'),
-	('bc1828b9-5952-46c4-84ab-6768b2d61fca', '/api/v1/upgrade-tasks/:id/suspend', 'PUT', 'PUT /api/v1/upgrade-tasks/:id/suspend', '', 'upgrade-tasks', true, '2026-05-31 12:11:47.757961+08', '2026-05-31 12:52:24.049401+08');
+	('bc1828b9-5952-46c4-84ab-6768b2d61fca', '/api/v1/upgrade-tasks/:id/suspend', 'PUT', 'PUT /api/v1/upgrade-tasks/:id/suspend', '', 'upgrade-tasks', true, '2026-05-31 12:11:47.757961+08', '2026-05-31 12:52:24.049401+08')
+ON CONFLICT DO NOTHING;
 
 
 ALTER TABLE public.api_endpoints ENABLE TRIGGER ALL;
@@ -1027,7 +1030,8 @@ ALTER TABLE public.users DISABLE TRIGGER ALL;
 
 INSERT INTO public.users VALUES
 	('00000000-0000-0000-0000-000000000001', 'system', '!disabled-no-password-login!', 'OMC System Internal', 'system@omcgo.internal', 'active', NULL, 0, NULL, NULL, '2026-05-31 11:28:49.175405+08', '2026-05-31 11:28:49.175405+08', NULL, 'builtIn', NULL, NULL, NULL, NULL, false, NULL),
-	('20000000-0000-0000-0000-000000000001', 'admin', '$2a$10$5feKmwxvoxEyqIo5DaYQNuNcPFWZnRdNytomGLrXDnv0e5MgnEJT6', 'System Admin', NULL, 'active', '2026-05-31 12:19:27.546454+08', 0, NULL, NULL, '2026-05-31 11:28:45.998778+08', '2026-05-31 12:19:27.546688+08', NULL, 'builtIn', NULL, NULL, NULL, NULL, false, NULL);
+	('20000000-0000-0000-0000-000000000001', 'admin', '$2a$10$5feKmwxvoxEyqIo5DaYQNuNcPFWZnRdNytomGLrXDnv0e5MgnEJT6', 'System Admin', NULL, 'active', '2026-05-31 12:19:27.546454+08', 0, NULL, NULL, '2026-05-31 11:28:45.998778+08', '2026-05-31 12:19:27.546688+08', NULL, 'builtIn', NULL, NULL, NULL, NULL, false, NULL)
+ON CONFLICT DO NOTHING;
 
 
 ALTER TABLE public.users ENABLE TRIGGER ALL;
@@ -1040,7 +1044,8 @@ ALTER TABLE public.device_groups DISABLE TRIGGER ALL;
 
 INSERT INTO public.device_groups VALUES
 	('00000000-0000-0000-0000-000000000001', '默认设备组', NULL, NULL, NULL, 0, 'active', '系统默认一级设备组，不可修改删除', true, 1, 'system', NULL, NULL, NULL, NULL, NULL, '2026-05-31 11:28:45.998778+08', '2026-05-31 11:28:45.998778+08', NULL),
-	('00000000-0000-0000-0000-000000000002', '未分组设备', '00000000-0000-0000-0000-000000000001', NULL, NULL, 0, 'active', '系统默认二级设备组，删除组后设备自动归入此组', true, 2, 'system', NULL, NULL, NULL, NULL, NULL, '2026-05-31 11:28:45.998778+08', '2026-05-31 11:28:45.998778+08', NULL);
+	('00000000-0000-0000-0000-000000000002', '未分组设备', '00000000-0000-0000-0000-000000000001', NULL, NULL, 0, 'active', '系统默认二级设备组，删除组后设备自动归入此组', true, 2, 'system', NULL, NULL, NULL, NULL, NULL, '2026-05-31 11:28:45.998778+08', '2026-05-31 11:28:45.998778+08', NULL)
+ON CONFLICT DO NOTHING;
 
 
 ALTER TABLE public.device_groups ENABLE TRIGGER ALL;
@@ -1078,7 +1083,8 @@ INSERT INTO public.indicator_unit VALUES
 	('s', 's', '秒', '2026-05-31 11:28:47.848735+08', '2026-05-31 11:28:47.848735+08'),
 	('seconds', 'seconds', '秒', '2026-05-31 11:28:47.848735+08', '2026-05-31 11:28:47.848735+08'),
 	('time', 'time', '次数', '2026-05-31 11:28:47.848735+08', '2026-05-31 11:28:47.848735+08'),
-	('W', 'W', '瓦特', '2026-05-31 11:28:47.848735+08', '2026-05-31 11:28:47.848735+08');
+	('W', 'W', '瓦特', '2026-05-31 11:28:47.848735+08', '2026-05-31 11:28:47.848735+08')
+ON CONFLICT DO NOTHING;
 
 
 ALTER TABLE public.indicator_unit ENABLE TRIGGER ALL;
@@ -1101,7 +1107,8 @@ INSERT INTO public.kpi_definitions VALUES
 	('30000000-0002-4000-8000-000000000003', 'NR_SA_HO_SR', 'NR SA切换成功率', '(nr_ho_succ / nr_ho_att) * 100', '%', 'mobility', NULL, 'nr', '["nr_ho_succ", "nr_ho_att"]', '2026-05-31 11:28:45.998778+08'),
 	('30000000-0002-4000-8000-000000000004', 'NR_PRB_UTIL_DL', 'NR 下行PRB利用率', '(nr_dl_prb_used / nr_dl_prb_total) * 100', '%', 'utilization', NULL, 'nr', '["nr_dl_prb_used", "nr_dl_prb_total"]', '2026-05-31 11:28:45.998778+08'),
 	('30000000-0002-4000-8000-000000000005', 'NR_CQI_AVG', 'NR 平均CQI', 'AVG(cqi_value)', '', 'quality', NULL, 'nr', '["cqi_value"]', '2026-05-31 11:28:45.998778+08'),
-	('30000000-0002-4000-8000-000000000006', 'NR_RLC_LOSS_RATE', 'NR RLC丢包率', '(rlc_retx_dl / rlc_tx_dl) * 100', '%', 'retainability', NULL, 'nr', '["rlc_retx_dl", "rlc_tx_dl"]', '2026-05-31 11:28:45.998778+08');
+	('30000000-0002-4000-8000-000000000006', 'NR_RLC_LOSS_RATE', 'NR RLC丢包率', '(rlc_retx_dl / rlc_tx_dl) * 100', '%', 'retainability', NULL, 'nr', '["rlc_retx_dl", "rlc_tx_dl"]', '2026-05-31 11:28:45.998778+08')
+ON CONFLICT DO NOTHING;
 
 
 ALTER TABLE public.kpi_definitions ENABLE TRIGGER ALL;
@@ -1333,7 +1340,8 @@ INSERT INTO public.menus VALUES
 	('aaaa0006-1000-0000-0000-000000000003', '版本回退', 'menu', 'software:rollback', 'aaaa0006-0000-0000-0000-000000000001', 3, '/software/rollback', 'software/VersionRollback', 'UndoOutlined', 'show', 'normal', NULL, '2026-05-31 11:28:47.81669+08', NULL, '2026-05-31 11:28:47.81669+08', '{"en-US": "Version Rollback", "zh-CN": "版本回退"}'),
 	('aaaa0098-1000-0000-0000-000000000001', '产品管理', 'menu', 'product:products', 'aaaa0098-0000-0000-0000-000000000001', 4, '/product/products', NULL, 'AppstoreOutlined', 'show', 'normal', NULL, '2026-05-31 11:28:47.896653+08', NULL, '2026-05-31 11:28:48.210268+08', '{"en-US": "Products", "zh-CN": "产品管理"}'),
 	('aaaa0098-1000-0000-0000-000000000002', '参数模型', 'menu', 'product:param-model', 'aaaa0098-0000-0000-0000-000000000001', 1, '/product/param-model', NULL, 'ProjectOutlined', 'show', 'normal', NULL, '2026-05-31 11:28:47.896653+08', NULL, '2026-05-31 11:28:48.210268+08', '{"en-US": "Param Models", "zh-CN": "参数模型"}'),
-	('aaaa0098-1000-0000-0000-000000000006', '标准参数树', 'menu', 'product:standard-params', 'aaaa0098-0000-0000-0000-000000000001', 0, '/product/standard-params', NULL, 'BranchesOutlined', 'show', 'normal', NULL, '2026-05-31 11:28:49.189078+08', NULL, '2026-05-31 11:28:49.190047+08', '{"en-US": "Standard Params", "zh-CN": "标准参数树"}');
+	('aaaa0098-1000-0000-0000-000000000006', '标准参数树', 'menu', 'product:standard-params', 'aaaa0098-0000-0000-0000-000000000001', 0, '/product/standard-params', NULL, 'BranchesOutlined', 'show', 'normal', NULL, '2026-05-31 11:28:49.189078+08', NULL, '2026-05-31 11:28:49.190047+08', '{"en-US": "Standard Params", "zh-CN": "标准参数树"}')
+ON CONFLICT DO NOTHING;
 
 
 ALTER TABLE public.menus ENABLE TRIGGER ALL;
@@ -1349,7 +1357,8 @@ INSERT INTO public.mr_indicators VALUES
 	('aba3a57a-7105-449d-8abc-bd3b21faa90d', 'RSRQ', 'RSRQ', '参考信号接收质量', 'dB', 'coverage', -20, -3, '2026-05-31 11:28:43.273529+08'),
 	('b73f0daa-201f-4879-9294-3c90fd9c90b8', 'SINR', 'SINR', '信干噪比', 'dB', 'quality', -10, 30, '2026-05-31 11:28:43.273529+08'),
 	('0de0c39a-0e36-4657-a9f2-cafa959fafb6', 'TA', 'TA', '时间提前量', '', 'timing', 0, 1282, '2026-05-31 11:28:43.273529+08'),
-	('9a68ba39-d8e2-4902-a04f-00940024b250', 'PHR', 'PHR', '功率余量', 'dB', 'power', -23, 40, '2026-05-31 11:28:43.273529+08');
+	('9a68ba39-d8e2-4902-a04f-00940024b250', 'PHR', 'PHR', '功率余量', 'dB', 'power', -23, 40, '2026-05-31 11:28:43.273529+08')
+ON CONFLICT DO NOTHING;
 
 
 ALTER TABLE public.mr_indicators ENABLE TRIGGER ALL;
@@ -1366,7 +1375,8 @@ INSERT INTO public.ops_templates VALUES
 	('aaaa000a-2000-0000-0000-000000000003', '计划重启', '备份配置 → 重启 → 等待 inform → 校验状态', '维护操作', '["eNB", "gNB"]', '[{"step_no": 1, "step_name": "备份配置", "step_type": "script", "description": "Upload Vendor Config"}, {"command": "REBOOT", "step_no": 2, "step_name": "软重启", "step_type": "mml", "description": "发起 reboot RPC"}, {"step_no": 3, "step_name": "等待 inform", "step_type": "wait", "description": "等设备上线 inform", "wait_seconds": 180}, {"step_no": 4, "step_name": "状态校验", "step_type": "check", "description": "确认状态 = online"}]', 300, 'system', 0, '["重启", "维护"]', '2026-05-31 11:28:47.889281+08', '2026-05-31 11:28:47.889281+08', 'cautious', 1, '[]', NULL, NULL, '[]'),
 	('aaaa000a-2000-0000-0000-000000000004', '设备隔离', '关闭小区 → 通知 EMS 摘流量 → 告警抑制', '故障处置', '["eNB", "gNB"]', '[{"command": "DEACT CELL", "step_no": 1, "step_name": "关闭小区", "step_type": "mml", "description": "AdminState=Locked"}, {"step_no": 2, "step_name": "通知 EMS", "step_type": "notify", "description": "摘流量", "notify_target": "ems"}, {"step_no": 3, "step_name": "告警抑制", "step_type": "script", "description": "30 分钟维护窗口"}]', 180, 'system', 0, '["紧急", "隔离"]', '2026-05-31 11:28:47.889281+08', '2026-05-31 11:28:47.889281+08', 'dangerous', 1, '[]', NULL, NULL, '[]'),
 	('aaaa000a-2000-0000-0000-000000000005', '现场协助包', '取配置 + 取最近 1h 日志 + 取 GPS + 取邻区 + IPPing 测试', '故障处置', '["eNB", "gNB", "CPE"]', '[{"step_no": 1, "step_name": "取当前配置", "step_type": "script", "description": "Upload Config File"}, {"step_no": 2, "step_name": "取近 1h 日志", "step_type": "script", "description": "Upload Log File"}, {"step_no": 3, "step_name": "取 GPS 状态", "step_type": "check", "description": "GPV GPS.*"}, {"step_no": 4, "step_name": "取邻区", "step_type": "check", "description": "GPV NeighborList.*"}, {"step_no": 5, "step_name": "IPPing 测试", "step_type": "script", "description": "IPPingDiagnostics"}]', 240, 'system', 0, '["调试", "支持", "常用"]', '2026-05-31 11:28:47.889281+08', '2026-05-31 11:28:47.889281+08', 'safe', 1, '[]', NULL, NULL, '[]'),
-	('aaaa000a-2000-0000-0000-000000000006', '软重启 SDR', '取告警 → 取 RF 参数 → 软重启 SDR → 验证', '故障处置', '["gNB"]', '[{"step_no": 1, "step_name": "取告警", "step_type": "check", "description": "列出活跃告警"}, {"step_no": 2, "step_name": "取 RF 参数", "step_type": "check", "description": "GPV RF.*"}, {"command": "RST SDR", "step_no": 3, "step_name": "软重启 SDR", "step_type": "mml", "description": "SDR 模块软重启"}, {"step_no": 4, "step_name": "验证", "step_type": "check", "description": "小区状态恢复", "wait_seconds": 30}]', 180, 'system', 0, '["RF", "SDR", "5G"]', '2026-05-31 11:28:47.889281+08', '2026-05-31 11:28:47.889281+08', 'cautious', 1, '[]', NULL, NULL, '[]');
+	('aaaa000a-2000-0000-0000-000000000006', '软重启 SDR', '取告警 → 取 RF 参数 → 软重启 SDR → 验证', '故障处置', '["gNB"]', '[{"step_no": 1, "step_name": "取告警", "step_type": "check", "description": "列出活跃告警"}, {"step_no": 2, "step_name": "取 RF 参数", "step_type": "check", "description": "GPV RF.*"}, {"command": "RST SDR", "step_no": 3, "step_name": "软重启 SDR", "step_type": "mml", "description": "SDR 模块软重启"}, {"step_no": 4, "step_name": "验证", "step_type": "check", "description": "小区状态恢复", "wait_seconds": 30}]', 180, 'system', 0, '["RF", "SDR", "5G"]', '2026-05-31 11:28:47.889281+08', '2026-05-31 11:28:47.889281+08', 'cautious', 1, '[]', NULL, NULL, '[]')
+ON CONFLICT DO NOTHING;
 
 
 ALTER TABLE public.ops_templates ENABLE TRIGGER ALL;
@@ -1380,7 +1390,8 @@ ALTER TABLE public.roles DISABLE TRIGGER ALL;
 INSERT INTO public.roles VALUES
 	('10000000-0000-0000-0000-000000000001', 'admin', 'System administrator with full access', true, '2026-05-31 11:28:45.998778+08', '2026-05-31 11:28:45.998778+08', NULL, NULL, NULL),
 	('10000000-0000-0000-0000-000000000002', 'operator', 'Operator with read/write access to operational resources', false, '2026-05-31 11:28:45.998778+08', '2026-05-31 11:28:45.998778+08', NULL, NULL, NULL),
-	('10000000-0000-0000-0000-000000000003', 'viewer', 'Read-only viewer', false, '2026-05-31 11:28:45.998778+08', '2026-05-31 11:28:45.998778+08', NULL, NULL, NULL);
+	('10000000-0000-0000-0000-000000000003', 'viewer', 'Read-only viewer', false, '2026-05-31 11:28:45.998778+08', '2026-05-31 11:28:45.998778+08', NULL, NULL, NULL)
+ON CONFLICT DO NOTHING;
 
 
 ALTER TABLE public.roles ENABLE TRIGGER ALL;
@@ -1421,7 +1432,8 @@ INSERT INTO public.role_api_permissions VALUES
 	('10000000-0000-0000-0000-000000000002', '50000000-0002-0000-0000-000000000011', '2026-05-31 11:28:48.203084+08'),
 	('10000000-0000-0000-0000-000000000002', '50000000-0002-0000-0000-000000000012', '2026-05-31 11:28:48.203084+08'),
 	('10000000-0000-0000-0000-000000000002', '50000000-0002-0000-0000-000000000013', '2026-05-31 11:28:48.203084+08'),
-	('10000000-0000-0000-0000-000000000002', '50000000-0002-0000-0000-000000000014', '2026-05-31 11:28:48.203084+08');
+	('10000000-0000-0000-0000-000000000002', '50000000-0002-0000-0000-000000000014', '2026-05-31 11:28:48.203084+08')
+ON CONFLICT DO NOTHING;
 
 
 ALTER TABLE public.role_api_permissions ENABLE TRIGGER ALL;
@@ -1434,7 +1446,8 @@ ALTER TABLE public.role_inheritance DISABLE TRIGGER ALL;
 
 INSERT INTO public.role_inheritance VALUES
 	('10000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000002', 'system'),
-	('10000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000003', 'system');
+	('10000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000003', 'system')
+ON CONFLICT DO NOTHING;
 
 
 ALTER TABLE public.role_inheritance ENABLE TRIGGER ALL;
@@ -1909,7 +1922,8 @@ INSERT INTO public.role_menus VALUES
 	('dc047063-4b3c-4537-98a2-6c8d84b13b52', '10000000-0000-0000-0000-000000000003', 'aaaa0002-1000-0000-0000-000000000010', NULL, '2026-05-31 11:28:49.106107+08'),
 	('5c9105e2-e12b-436d-a6df-1335e119e50f', '10000000-0000-0000-0000-000000000003', 'aaaa0002-1000-0000-0000-000000000011', NULL, '2026-05-31 11:28:49.106107+08'),
 	('232f6b1d-f6ca-4c65-8229-11eca188ac54', '10000000-0000-0000-0000-000000000001', 'aaaa000a-1000-0000-0000-000000000007', NULL, '2026-05-31 11:28:49.173409+08'),
-	('d94f6872-0aee-440d-a7ec-a325eeefd761', '10000000-0000-0000-0000-000000000001', 'aaaa0098-1000-0000-0000-000000000006', NULL, '2026-05-31 11:28:49.189078+08');
+	('d94f6872-0aee-440d-a7ec-a325eeefd761', '10000000-0000-0000-0000-000000000001', 'aaaa0098-1000-0000-0000-000000000006', NULL, '2026-05-31 11:28:49.189078+08')
+ON CONFLICT DO NOTHING;
 
 
 ALTER TABLE public.role_menus ENABLE TRIGGER ALL;
@@ -1939,7 +1953,8 @@ INSERT INTO public.sys_configs VALUES
 	('a87d8afe-5d6e-45ac-9351-523b28847eb8', 'pm.adhoc', 'retention_days', '365', 'int', 'PM adhoc 聚合任务结果保留天数（默认 365d）', false, '2026-05-31 11:28:49.106107+08', '2026-05-31 11:28:49.106107+08'),
 	('50d36366-a547-4d98-ad0e-b8c5df6ee66f', 'asyncjob', 'heartbeat_interval_seconds', '30', 'int', '异步任务心跳上报间隔（秒）', false, '2026-05-31 11:28:49.106107+08', '2026-05-31 11:28:49.106107+08'),
 	('dd69f991-9216-49ea-abb3-814de52a630f', 'asyncjob', 'zombie_threshold_seconds', '300', 'int', '心跳超过此值视为僵尸任务（秒）', false, '2026-05-31 11:28:49.106107+08', '2026-05-31 11:28:49.106107+08'),
-	('37c5c520-b837-4650-b3ff-7393d20ed885', 'asyncjob', 'sweeper_interval_seconds', '60', 'int', 'Sweeper 扫描僵尸任务的间隔（秒）', false, '2026-05-31 11:28:49.106107+08', '2026-05-31 11:28:49.106107+08');
+	('37c5c520-b837-4650-b3ff-7393d20ed885', 'asyncjob', 'sweeper_interval_seconds', '60', 'int', 'Sweeper 扫描僵尸任务的间隔（秒）', false, '2026-05-31 11:28:49.106107+08', '2026-05-31 11:28:49.106107+08')
+ON CONFLICT DO NOTHING;
 
 
 ALTER TABLE public.sys_configs ENABLE TRIGGER ALL;
@@ -1964,7 +1979,8 @@ INSERT INTO public.sys_dictionaries VALUES
 	(18, '设备型号', 'device_model', true, 'T-0162: 设备硬件型号，对齐 devices.model_name；初始化从设备表 distinct 灌入', '2026-05-31 11:28:48.213615+08', '2026-05-31 11:28:48.213615+08', NULL),
 	(19, '软件版本', 'software_version', true, 'T-0162: 软件版本号，TR-069 参数 Device.DeviceInfo.SoftwareVersion；初始化从 device_parameters 表 distinct 灌入', '2026-05-31 11:28:48.213615+08', '2026-05-31 11:28:48.213615+08', NULL),
 	(20, '固件版本', 'firmware_version', true, 'T-0162: 固件版本号，对齐 devices.firmware_version；初始化从设备表 distinct 灌入', '2026-05-31 11:28:48.213615+08', '2026-05-31 11:28:48.213615+08', NULL),
-	(21, '产品类型 (productClass)', 'product_class', true, '设备 productClass — 来自 devices.product_class DISTINCT', '2026-05-31 11:28:48.629041+08', '2026-05-31 11:28:48.629041+08', NULL);
+	(21, '产品类型 (productClass)', 'product_class', true, '设备 productClass — 来自 devices.product_class DISTINCT', '2026-05-31 11:28:48.629041+08', '2026-05-31 11:28:48.629041+08', NULL)
+ON CONFLICT DO NOTHING;
 
 
 ALTER TABLE public.sys_dictionaries ENABLE TRIGGER ALL;
@@ -2036,7 +2052,8 @@ INSERT INTO public.sys_dictionary_details VALUES
 	(80, 'FAP/mBS31001/SC', 'FAP/mBS31001/SC', '', true, 0, 21, '2026-05-31 12:37:51.681166+08', '2026-05-31 12:37:51.681166+08', NULL, NULL, 0),
 	(81, 'FAP/MLN/CA', 'FAP/MLN/CA', '', true, 9, 21, '2026-05-31 12:42:16.205375+08', '2026-05-31 12:42:16.205375+08', NULL, NULL, 0),
 	(82, 'FAP/MLN/DC', 'FAP/MLN/DC', '', true, 10, 21, '2026-05-31 12:42:16.205375+08', '2026-05-31 12:42:16.205375+08', NULL, NULL, 0),
-	(83, 'FAP/BSC5GN', 'FAP/BSC5GN', '', true, 11, 21, '2026-05-31 12:42:16.205375+08', '2026-05-31 12:42:16.205375+08', NULL, NULL, 0);
+	(83, 'FAP/BSC5GN', 'FAP/BSC5GN', '', true, 11, 21, '2026-05-31 12:42:16.205375+08', '2026-05-31 12:42:16.205375+08', NULL, NULL, 0)
+ON CONFLICT DO NOTHING;
 
 
 ALTER TABLE public.sys_dictionary_details ENABLE TRIGGER ALL;
@@ -2058,7 +2075,8 @@ INSERT INTO public.ufte_task_types VALUES
 	('CONFIG_BACKUP_XML', 'config_backup', '配置文件备份', '配置文件备份（XML）', '标准平台（BLQ/QLS 等）配置文件备份，TR-069 Upload FileType=10 {OUI} Configuration File。', 'UPLOAD', true, true, '["CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "PRE_VALIDATE", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_TRANSFER_COMPLETE"]', '', 'CODE_CONFIG_BACKUP', '["4G eNB", "5G gNB", "QAFA", "QAFB", "BBU-XSS", "BBU-QSS"]', '10 {OUI} Configuration File', '10 {OUI} Configuration File', false, '', 'backup-{task_id8}-{sn}.xml', 'backup-{task_id8}-{sn}.xml', '', '', '', 0, '/smallcell/FileUploadService?fileType=CONFIGBACKUP_XML&sn={sn}&taskId={taskId}&filename=', 'system', '2026-05-31 11:28:48.208523+08', '2026-05-31 11:28:48.208523+08', NULL, 40),
 	('CONFIG_RESTORE', 'config_restore', '配置文件恢复', '配置文件恢复', '复用现网配置恢复 Download 链路，提供 UFTE 内置的配置文件恢复模板。', 'DOWNLOAD', true, true, '["CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "PRE_VALIDATE", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_TRANSFER_COMPLETE"]', '', 'CODE_CONFIG_RESTORE', '["4G eNB", "5G gNB", "QAFA", "QAFB", "BBU-XSS", "BBU-QSS"]', '10 <OUI> Configuration File', '10 <OUI> Configuration File', false, 'config_backup/{object_path}', '{file_name}', '{file_name}', '', '', '', 0, '/smallcell/FileDownloadService/config_backup/{object_path}', 'system', '2026-05-31 11:28:47.906664+08', '2026-05-31 11:28:48.859473+08', NULL, 50),
 	('CONFIG_BACKUP_NV', 'config_backup', '配置文件备份', '配置文件备份（NV）', 'NV 平台（MLQ/MLN_SC 等）配置文件备份，TR-069 Upload FileType=12 {OUI} Configuration File。', 'UPLOAD', true, true, '["CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "PRE_VALIDATE", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_TRANSFER_COMPLETE"]', '', 'CODE_CONFIG_BACKUP', '["MLQ", "MLN_SC"]', '12 {OUI} Configuration File', '12 {OUI} Configuration File', false, '', 'backup-{task_id8}-{sn}.nv', 'backup-{task_id8}-{sn}.nv', '', '', '', 0, '/smallcell/FileUploadService?fileType=CONFIGBACKUP_NV&sn={sn}&taskId={taskId}&filename=', 'system', '2026-05-31 11:28:48.208523+08', '2026-05-31 11:28:48.208523+08', NULL, 45),
-	('LICENSE_UPGRADE', 'license_upgrade', '设备License升级', '设备License升级', '从 license 库取目标设备的最新一份 license 文件，通过 TR-069 Download RPC 下发到设备。', 'DOWNLOAD', true, true, '["CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "PRE_VALIDATE", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_TRANSFER_COMPLETE"]', '', 'CODE_LICENSE_UPGRADE', '["4G eNB", "5G gNB", "QAFA", "QAFB", "BBU-XSS", "BBU-QSS"]', 'License File', 'License File', false, 'device-licenses/{object_path}', '{file_name}', '{file_name}', '', '', '', 0, '/smallcell/FileDownloadService/device-licenses/{object_path}', 'system', '2026-05-31 11:28:48.860497+08', '2026-05-31 11:28:48.860497+08', NULL, 55);
+	('LICENSE_UPGRADE', 'license_upgrade', '设备License升级', '设备License升级', '从 license 库取目标设备的最新一份 license 文件，通过 TR-069 Download RPC 下发到设备。', 'DOWNLOAD', true, true, '["CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "PRE_VALIDATE", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_TRANSFER_COMPLETE"]', '', 'CODE_LICENSE_UPGRADE', '["4G eNB", "5G gNB", "QAFA", "QAFB", "BBU-XSS", "BBU-QSS"]', 'License File', 'License File', false, 'device-licenses/{object_path}', '{file_name}', '{file_name}', '', '', '', 0, '/smallcell/FileDownloadService/device-licenses/{object_path}', 'system', '2026-05-31 11:28:48.860497+08', '2026-05-31 11:28:48.860497+08', NULL, 55)
+ON CONFLICT DO NOTHING;
 
 
 ALTER TABLE public.ufte_task_types ENABLE TRIGGER ALL;
@@ -2071,7 +2089,8 @@ ALTER TABLE public.user_roles DISABLE TRIGGER ALL;
 
 INSERT INTO public.user_roles VALUES
 	('20000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', true, '2026-05-31 11:28:45.998778+08'),
-	('00000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', true, '2026-05-31 11:28:49.175405+08');
+	('00000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', true, '2026-05-31 11:28:49.175405+08')
+ON CONFLICT DO NOTHING;
 
 
 ALTER TABLE public.user_roles ENABLE TRIGGER ALL;
@@ -2218,7 +2237,8 @@ SELECT pg_catalog.setval('public.sys_task_logs_id_seq', 1, false);
 ALTER TABLE public.mml_param_versions DISABLE TRIGGER ALL;
 
 INSERT INTO public.mml_param_versions VALUES
-	('cmcc-td-lte-v2.3', 'CMCC TD-LTE v2.3 (STANDARD canonical)', 'Single source of truth for v2.3 MML catalog. Normalized to chapter: prefix by seed/000155; duplicate cmcc-lte-v2.3 + empty STANDARD top_* groups removed.', true, false, '2026-05-31 11:28:45.582506+08', '2026-05-31 11:28:48.258248+08', '6602211a-92ad-4154-b0b4-8e10c492a4ea', 'standard', 'a19256f3199e91dd5ba860cdc51817e5df9cf2894f1881ddfe34ec9e492d2c72');
+	('cmcc-td-lte-v2.3', 'CMCC TD-LTE v2.3 (STANDARD canonical)', 'Single source of truth for v2.3 MML catalog. Normalized to chapter: prefix by seed/000155; duplicate cmcc-lte-v2.3 + empty STANDARD top_* groups removed.', true, false, '2026-05-31 11:28:45.582506+08', '2026-05-31 11:28:48.258248+08', '6602211a-92ad-4154-b0b4-8e10c492a4ea', 'standard', 'a19256f3199e91dd5ba860cdc51817e5df9cf2894f1881ddfe34ec9e492d2c72')
+ON CONFLICT DO NOTHING;
 
 
 ALTER TABLE public.mml_param_versions ENABLE TRIGGER ALL;
@@ -2251,7 +2271,8 @@ INSERT INTO public.mml_command_groups VALUES
 	('07a735f3-aeb2-4197-89dc-4942cea0d90f', 'chapter:SX_DEVICE_EXT', 'Device 扩展', 'Device Extension', 'SX_DEVICE_EXT', 'cmcc-td-lte-v2.3', 1101, true, NULL, '2026-05-31 11:28:45.582506+08', '2026-06-02 17:42:45.981852+08', NULL, '{"en": "Device Extension", "en-US": "Device Extension", "zh-CN": "Device 扩展"}', 'extension', false, NULL, NULL, 0, NULL, NULL, '', ''),
 	('9e265501-4a19-4cf4-9757-89c2a3664a70', 'chapter:SX_DEVICEGSM_EXT', 'DeviceGSM 扩展', 'DeviceGSM Extension', 'SX_DEVICEGSM_EXT', 'cmcc-td-lte-v2.3', 1102, true, NULL, '2026-05-31 11:28:45.582506+08', '2026-06-02 17:42:45.981852+08', NULL, '{"en": "DeviceGSM Extension", "en-US": "DeviceGSM Extension", "zh-CN": "DeviceGSM 扩展"}', 'extension', false, NULL, NULL, 0, NULL, NULL, '', ''),
 	('dfd080d3-55f6-4613-a6b8-c8fbc84d23eb', 'chapter:SX_INTERNETGATEWAYDEVICE_EXT', 'InternetGatewayDevice 扩展', 'InternetGatewayDevice Extension', 'SX_INTERNETGATEWAYDEVICE_EXT', 'cmcc-td-lte-v2.3', 1103, true, NULL, '2026-05-31 11:28:45.582506+08', '2026-06-02 17:42:45.981852+08', NULL, '{"en": "InternetGatewayDevice Extension", "en-US": "InternetGatewayDevice Extension", "zh-CN": "InternetGatewayDevice 扩展"}', 'extension', false, NULL, NULL, 0, NULL, NULL, '', ''),
-	('73a36d6f-fac8-418c-ae3e-9e7a44861a24', 'chapter:SX_BOARDCONF_EXT', 'boardconf 扩展', 'boardconf Extension', 'SX_BOARDCONF_EXT', 'cmcc-td-lte-v2.3', 1100, true, NULL, '2026-05-31 11:28:45.582506+08', '2026-06-02 17:42:45.981852+08', NULL, '{"en": "boardconf Extension", "en-US": "boardconf Extension", "zh-CN": "boardconf 扩展"}', 'extension', false, NULL, NULL, 0, NULL, NULL, '', '');
+	('73a36d6f-fac8-418c-ae3e-9e7a44861a24', 'chapter:SX_BOARDCONF_EXT', 'boardconf 扩展', 'boardconf Extension', 'SX_BOARDCONF_EXT', 'cmcc-td-lte-v2.3', 1100, true, NULL, '2026-05-31 11:28:45.582506+08', '2026-06-02 17:42:45.981852+08', NULL, '{"en": "boardconf Extension", "en-US": "boardconf Extension", "zh-CN": "boardconf 扩展"}', 'extension', false, NULL, NULL, 0, NULL, NULL, '', '')
+ON CONFLICT DO NOTHING;
 
 
 ALTER TABLE public.mml_command_groups ENABLE TRIGGER ALL;
@@ -2504,7 +2525,8 @@ INSERT INTO public.mml_commands VALUES
 	('7b121f9f-81bb-40ad-a033-72209df8a440', '修改 以太网接口', 'MOD ETHERNET_INTERFACE', '6', '修改 以太网接口', 'SetParameterValues', '2026-05-31 11:28:48.865343+08', '["Device.Ethernet.Interface.{i}.Enable", "Device.Ethernet.Interface.{i}.UserLabel", "Device.Ethernet.Interface.{i}.MaxBitRate", "Device.Ethernet.Interface.{i}.DuplexMode"]', NULL, 'b55b33d7-3a77-433d-b13c-46a25d0cb272', '{"en": "Modify 以太网接口", "zh": "修改 以太网接口"}', false, '{}', 'MOD', 'ETHERNET_INTERFACE', '{"en": "ETHERNET INTERFACE", "zh": "以太网接口"}', 'standard', true, '{}', '2026-06-02 17:42:45.981852+08', NULL, '[]', '[]', '', ''),
 	('124925bc-cf39-4605-89ca-54cd5dc35ae8', '修改 基站网管连接', 'MOD MANAGEMENT_SERVER', '6', '修改 基站网管连接', 'SetParameterValues', '2026-05-31 11:28:48.258248+08', '["Device.ManagementServer.URL", "Device.ManagementServer.Username", "Device.ManagementServer.Password", "Device.ManagementServer.PeriodicInformEnable", "Device.ManagementServer.PeriodicInformTime", "Device.ManagementServer.PeriodicInformInterval", "Device.ManagementServer.ConnectionRequestUsername", "Device.ManagementServer.ConnectionRequestPassword", "Device.ManagementServer.STUNEnable", "Device.ManagementServer.STUNServerAddress", "Device.ManagementServer.STUNServerPort", "Device.ManagementServer.STUNUsername", "Device.ManagementServer.STUNPassword", "Device.ManagementServer.STUNMaximumKeepAlivePeriod", "Device.ManagementServer.STUNMinimumKeepAlivePeriod"]', NULL, '3ffeaaba-5411-402e-bbe0-df0377adf05e', '{"en": "Modify 基站网管连接", "zh": "修改 基站网管连接"}', false, '{}', 'MOD', 'MANAGEMENT_SERVER', '{"en": "MANAGEMENT SERVER", "zh": "基站网管连接"}', 'standard', true, '{}', '2026-06-02 17:42:45.981852+08', NULL, '[]', '[]', '', ''),
 	('4715ea0d-9ac4-4384-9ea4-e8b9c093eec0', '列出 FAP 载波基本配置', 'LST ', '1', '列出 FAP 载波基本配置', 'GetParameterValues', '2026-05-31 11:28:48.865343+08', '["Device.Services.FAPService.{i}.CellConfig.LTE.RAN.CellRestriction.CellBarred", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.CellEnable.AdminState", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.OpState", "Device.Services.FAPService.{i}.CellConfig.AccessMgmt.LTE.MaxUEsServed", "Device.Services.FAPService.{i}.CellConfig.SysInfoCtrlParam.MultiBandInfoListSIB1", "Device.Services.FAPService.{i}.CellConfig.SysInfoCtrlParam.MultiBandInfoListSIB5", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RouteIndexList", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RuList", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.UserLabel", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.EARFCNDL", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.PhyCellID", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.DLBandwidth", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.ULBandwidth", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.PSCHPowerOffset", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.SSCHPowerOffset", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.PBCHPowerOffset", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.EARFCNUL", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.FreqBandIndicator", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.ReferenceSignalPower", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Common.CellIdentity", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Common.EnbType", "Device.Services.FAPService.{i}.CellConfig.LTE.VoLTEParam.SPSSwitchQCI1Ul", "Device.Services.FAPService.{i}.CellConfig.LTE.CAParam.CASwitchUl", "Device.Services.FAPService.{i}.CellConfig.LTE.CAParam.CASwitchDl", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T300", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T301", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T302", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T304EUTRA", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T304IRAT", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T310", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T311", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T320", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.N310", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.N311"]', NULL, '641903c0-7306-4637-87db-46f36da2466f', '{"en": "FAP Carrier Basic Config", "zh": "列出 FAP 载波基本配置"}', false, '{}', 'LST', '', '{"en": "FAP Carrier Basic Config", "zh": "FAP 载波基本配置"}', 'standard', true, '{}', '2026-06-02 17:42:45.981852+08', NULL, '[]', '[]', '', ''),
-	('d80d7c57-6885-488a-803a-f05fd38f02ff', '修改 FAP 载波基本配置', 'MOD ', '1', '修改 FAP 载波基本配置', 'SetParameterValues', '2026-05-31 11:28:48.865343+08', '["Device.Services.FAPService.{i}.CellConfig.LTE.RAN.CellRestriction.CellBarred", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.CellEnable.AdminState", "Device.Services.FAPService.{i}.CellConfig.SysInfoCtrlParam.MultiBandInfoListSIB1", "Device.Services.FAPService.{i}.CellConfig.SysInfoCtrlParam.MultiBandInfoListSIB5", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RouteIndexList", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RuList", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.UserLabel", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.EARFCNDL", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.PhyCellID", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.DLBandwidth", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.ULBandwidth", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.PSCHPowerOffset", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.SSCHPowerOffset", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.PBCHPowerOffset", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.EARFCNUL", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.FreqBandIndicator", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.ReferenceSignalPower", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Common.CellIdentity", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Common.EnbType", "Device.Services.FAPService.{i}.CellConfig.LTE.VoLTEParam.SPSSwitchQCI1Ul", "Device.Services.FAPService.{i}.CellConfig.LTE.CAParam.CASwitchUl", "Device.Services.FAPService.{i}.CellConfig.LTE.CAParam.CASwitchDl", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T300", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T301", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T302", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T304EUTRA", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T304IRAT", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T310", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T311", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T320", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.N310", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.N311"]', NULL, '641903c0-7306-4637-87db-46f36da2466f', '{"en": "FAP Carrier Basic Config", "zh": "修改 FAP 载波基本配置"}', false, '{}', 'MOD', '', '{"en": "FAP Carrier Basic Config", "zh": "FAP 载波基本配置"}', 'standard', true, '{}', '2026-06-02 17:42:45.981852+08', NULL, '[]', '[]', '', '');
+	('d80d7c57-6885-488a-803a-f05fd38f02ff', '修改 FAP 载波基本配置', 'MOD ', '1', '修改 FAP 载波基本配置', 'SetParameterValues', '2026-05-31 11:28:48.865343+08', '["Device.Services.FAPService.{i}.CellConfig.LTE.RAN.CellRestriction.CellBarred", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.CellEnable.AdminState", "Device.Services.FAPService.{i}.CellConfig.SysInfoCtrlParam.MultiBandInfoListSIB1", "Device.Services.FAPService.{i}.CellConfig.SysInfoCtrlParam.MultiBandInfoListSIB5", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RouteIndexList", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RuList", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.UserLabel", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.EARFCNDL", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.PhyCellID", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.DLBandwidth", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.ULBandwidth", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.PSCHPowerOffset", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.SSCHPowerOffset", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.PBCHPowerOffset", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.EARFCNUL", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.FreqBandIndicator", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.ReferenceSignalPower", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Common.CellIdentity", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Common.EnbType", "Device.Services.FAPService.{i}.CellConfig.LTE.VoLTEParam.SPSSwitchQCI1Ul", "Device.Services.FAPService.{i}.CellConfig.LTE.CAParam.CASwitchUl", "Device.Services.FAPService.{i}.CellConfig.LTE.CAParam.CASwitchDl", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T300", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T301", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T302", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T304EUTRA", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T304IRAT", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T310", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T311", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T320", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.N310", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.N311"]', NULL, '641903c0-7306-4637-87db-46f36da2466f', '{"en": "FAP Carrier Basic Config", "zh": "修改 FAP 载波基本配置"}', false, '{}', 'MOD', '', '{"en": "FAP Carrier Basic Config", "zh": "FAP 载波基本配置"}', 'standard', true, '{}', '2026-06-02 17:42:45.981852+08', NULL, '[]', '[]', '', '')
+ON CONFLICT DO NOTHING;
 
 
 ALTER TABLE public.mml_commands ENABLE TRIGGER ALL;
@@ -3015,7 +3037,8 @@ INSERT INTO public.standard_params VALUES
 	('4774d42f-efa5-49cb-a249-ab3e407ea4bd', 'Device.IP.Interface.{i}.IPv4Address.{i}.DefaultGateway', 'parameter', 'READ_WRITE', 'STRING', 'Immediate', NULL, NULL, '2026-05-31 11:28:47.930253+08', '2026-06-08 14:39:28.327962+08', ''),
 	('e92fef2d-65d7-40e5-a64a-5fd48b1567b6', 'Device.IP.Interface.{i}.IPv4Address.{i}.IPAddress', 'parameter', 'READ_WRITE', 'STRING', 'Immediate', NULL, NULL, '2026-05-31 11:28:47.930253+08', '2026-06-08 14:39:28.327962+08', ''),
 	('0909fe04-7270-4069-beb5-633df38d9e92', 'Device.IP.Interface.{i}.IPv4Address.{i}.SubnetMask', 'parameter', 'READ_WRITE', 'STRING', 'Immediate', NULL, NULL, '2026-05-31 11:28:47.930253+08', '2026-06-08 14:39:28.327962+08', ''),
-	('4777f5a6-d974-4603-93be-e51549292aec', 'Device.IPsec.ESPSupportedEncryptionAlgorithms', 'parameter', 'READ_ONLY', 'STRING', 'Immediate', NULL, NULL, '2026-05-31 11:28:47.930253+08', '2026-06-08 14:39:28.327962+08', 'ESP加密算法');
+	('4777f5a6-d974-4603-93be-e51549292aec', 'Device.IPsec.ESPSupportedEncryptionAlgorithms', 'parameter', 'READ_ONLY', 'STRING', 'Immediate', NULL, NULL, '2026-05-31 11:28:47.930253+08', '2026-06-08 14:39:28.327962+08', 'ESP加密算法')
+ON CONFLICT DO NOTHING;
 INSERT INTO public.standard_params VALUES
 	('82044919-8c55-4797-b077-188cfdcd4538', 'Device.IPsec.Enable', 'parameter', 'READ_WRITE', 'BOOLEAN', 'Immediate', NULL, NULL, '2026-05-31 11:28:47.930253+08', '2026-06-08 14:39:28.327962+08', '开关'),
 	('20378bf9-5b52-4d41-971d-e5f571e918d3', 'Device.IPsec.IKEv2SupportedEncryptionAlgorithms', 'parameter', 'READ_ONLY', 'STRING', 'Immediate', NULL, NULL, '2026-05-31 11:28:47.930253+08', '2026-06-08 14:39:28.327962+08', 'IKE2加密算法'),
@@ -3516,7 +3539,8 @@ INSERT INTO public.standard_params VALUES
 	('0c6114bc-3cec-4c65-9e31-512a7998a72c', 'Device.KeepalivedMgmt.VrrpMgmt.{i}.AdvertInt', 'parameter', 'READ_ONLY', 'U_INT', 'Immediate', NULL, NULL, '2026-05-31 11:28:47.930253+08', '2026-06-08 14:39:28.327962+08', ''),
 	('eee41d00-5e25-4b53-9004-03d0aab220d3', 'Device.Services.FAPService.{i}.AccessMgmt.LTE.HNBName', 'parameter', 'READ_WRITE', 'STRING', 'Immediate', NULL, NULL, '2026-05-31 11:28:47.930253+08', '2026-06-08 14:39:28.327962+08', ''),
 	('b01108e8-397f-4442-bce4-5385a5e2a117', 'Device.Services.FAPService.{i}.CellConfig.LTE.MocnConfigParam.{i}.S1CIp', 'parameter', 'READ_WRITE', 'STRING', 'Immediate', NULL, NULL, '2026-05-31 11:28:47.930253+08', '2026-06-08 14:39:28.327962+08', ''),
-	('d15eedb8-f1ea-4d8f-9d62-679b3ef88382', 'Device.Services.FAPService.{i}.CellConfig.LTE.MultiIpsecConfigParam.{i}.LeftSourceIp', 'parameter', 'READ_WRITE', 'STRING', 'Immediate', NULL, NULL, '2026-05-31 11:28:47.930253+08', '2026-06-08 14:39:28.327962+08', '');
+	('d15eedb8-f1ea-4d8f-9d62-679b3ef88382', 'Device.Services.FAPService.{i}.CellConfig.LTE.MultiIpsecConfigParam.{i}.LeftSourceIp', 'parameter', 'READ_WRITE', 'STRING', 'Immediate', NULL, NULL, '2026-05-31 11:28:47.930253+08', '2026-06-08 14:39:28.327962+08', '')
+ON CONFLICT DO NOTHING;
 INSERT INTO public.standard_params VALUES
 	('98e709be-673c-4086-bd5f-1f79b838642e', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.{i}.QRxLevMin', 'parameter', 'READ_WRITE', 'INT', 'Immediate', NULL, NULL, '2026-05-31 11:28:47.930253+08', '2026-06-08 14:39:28.327962+08', 'UTRAN最低接收电平'),
 	('27d5a9c5-ae75-44c8-928d-f64eb3ec95e9', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IntraFreq.SIntraSearchPR9', 'parameter', 'READ_WRITE', 'U_INT', 'Immediate', NULL, NULL, '2026-05-31 11:28:47.930253+08', '2026-06-08 14:39:28.327962+08', '同频RSRP测量启动门限'),
@@ -4017,7 +4041,8 @@ INSERT INTO public.standard_params VALUES
 	('0dd2fd12-9259-4f89-9d86-28bdb7d40641', 'Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.MmePool.Enable', 'parameter', 'READ_WRITE', 'BOOLEAN', 'Immediate', NULL, NULL, '2026-05-31 11:28:47.930253+08', '2026-06-08 14:39:28.327962+08', ''),
 	('fac13b14-6bd9-4178-a5e2-d8d55b78c3bb', 'Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.MmePool.MmePool1IpsecAddr', 'parameter', 'READ_ONLY', 'STRING', 'Immediate', NULL, NULL, '2026-05-31 11:28:47.930253+08', '2026-06-08 14:39:28.327962+08', ''),
 	('fd5a9a02-53fd-4177-808c-3343e25833ce', 'Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.MmePool.MmePool1List', 'parameter', 'READ_WRITE', 'STRING', 'Immediate', NULL, 256, '2026-05-31 11:28:47.930253+08', '2026-06-08 14:39:28.327962+08', ''),
-	('f3704cb4-941f-4a03-98c7-55a994dece67', 'Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.MmePool.MmePool1Status', 'parameter', 'READ_ONLY', 'STRING', 'Immediate', NULL, NULL, '2026-05-31 11:28:47.930253+08', '2026-06-08 14:39:28.327962+08', '');
+	('f3704cb4-941f-4a03-98c7-55a994dece67', 'Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.MmePool.MmePool1Status', 'parameter', 'READ_ONLY', 'STRING', 'Immediate', NULL, NULL, '2026-05-31 11:28:47.930253+08', '2026-06-08 14:39:28.327962+08', '')
+ON CONFLICT DO NOTHING;
 INSERT INTO public.standard_params VALUES
 	('43ad89a0-f998-4e46-871e-588f60138ec2', 'Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.MmePool.MmePool2IpsecAddr', 'parameter', 'READ_ONLY', 'STRING', 'Immediate', NULL, NULL, '2026-05-31 11:28:47.930253+08', '2026-06-08 14:39:28.327962+08', ''),
 	('0033dd85-c019-440b-a895-1c0141130a37', 'Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Capacity.{i}', 'parameter', 'READ_ONLY', 'STRING', 'Immediate', NULL, NULL, '2026-05-31 11:28:47.930253+08', '2026-06-08 14:39:28.327962+08', ''),
@@ -4518,7 +4543,8 @@ INSERT INTO public.standard_params VALUES
 	('c195f66c-a180-42b7-98da-b5c064b71073', 'Device.Services.FAPService.{i}.FAPControl.NR.DumgrProvLog.DumgrShmSize', 'parameter', 'READ_WRITE', 'STRING', 'Immediate', NULL, NULL, '2026-05-31 11:28:47.930253+08', '2026-06-08 14:39:28.327962+08', ''),
 	('f445c357-028f-4c73-9d6f-fa2eda261f7e', 'Device.Services.FAPService.{i}.FAPControl.NR.F1apDscp.Dscp', 'parameter', 'READ_WRITE', 'STRING', 'Immediate', NULL, NULL, '2026-05-31 11:28:47.930253+08', '2026-06-08 14:39:28.327962+08', ''),
 	('980dfa17-672f-4d6a-9a01-2951d064ebf6', 'Device.Services.FAPService.{i}.FAPControl.NR.F1apDscp.VlanPrio', 'parameter', 'READ_WRITE', 'STRING', 'Immediate', NULL, NULL, '2026-05-31 11:28:47.930253+08', '2026-06-08 14:39:28.327962+08', ''),
-	('c3b04e1a-6a3e-48cf-a09b-1af2f6263049', 'Device.Services.FAPService.{i}.FAPControl.NR.F1apLog.RrcLogLevel', 'parameter', 'READ_WRITE', 'STRING', 'Immediate', NULL, NULL, '2026-05-31 11:28:47.930253+08', '2026-06-08 14:39:28.327962+08', '');
+	('c3b04e1a-6a3e-48cf-a09b-1af2f6263049', 'Device.Services.FAPService.{i}.FAPControl.NR.F1apLog.RrcLogLevel', 'parameter', 'READ_WRITE', 'STRING', 'Immediate', NULL, NULL, '2026-05-31 11:28:47.930253+08', '2026-06-08 14:39:28.327962+08', '')
+ON CONFLICT DO NOTHING;
 INSERT INTO public.standard_params VALUES
 	('106c4cf6-3f51-4839-91a4-7defa23e426d', 'Device.Services.FAPService.{i}.FAPControl.NR.GtpuLog.NguCuf1uLogLevel', 'parameter', 'READ_WRITE', 'STRING', 'Immediate', NULL, NULL, '2026-05-31 11:28:47.930253+08', '2026-06-08 14:39:28.327962+08', ''),
 	('af6caaa2-172d-40f3-98f0-54d6fed2238c', 'Device.Services.FAPService.{i}.FAPControl.NR.LgwFwdCfg.LgwBindName', 'parameter', 'READ_WRITE', 'STRING', 'Immediate', NULL, NULL, '2026-05-31 11:28:47.930253+08', '2026-06-08 14:39:28.327962+08', ''),
@@ -4620,7 +4646,8 @@ INSERT INTO public.standard_params VALUES
 	('703e64d7-4473-42c6-8180-487b6a8674dc', 'DeviceGSM.Cs7Instance.{i}.As.{i}.delAspName', 'parameter', 'READ_ONLY', 'STRING', 'Immediate', NULL, NULL, '2026-05-31 11:28:47.930253+08', '2026-06-08 14:39:28.327962+08', ''),
 	('015ecfc8-1d57-4ba5-bf31-9c2289685da9', 'DeviceGSM.Cs7Instance.{i}.Asp.{i}.LocalIp', 'parameter', 'READ_ONLY', 'STRING', 'Immediate', NULL, NULL, '2026-05-31 11:28:47.930253+08', '2026-06-08 14:39:28.327962+08', ''),
 	('7628a1c0-b36e-4fc2-b64e-24e5726a5a58', 'DeviceGSM.Cs7Instance.{i}.SccpAddr.{i}.Name', 'parameter', 'READ_ONLY', 'STRING', 'Immediate', NULL, NULL, '2026-05-31 11:28:47.930253+08', '2026-06-08 14:39:28.327962+08', ''),
-	('a6f2c2c7-025a-43b2-84ff-804697f56df3', 'DeviceGSM.NriNullAdd', 'parameter', 'READ_ONLY', 'STRING', 'Immediate', NULL, NULL, '2026-05-31 11:28:47.930253+08', '2026-06-08 14:39:28.327962+08', '');
+	('a6f2c2c7-025a-43b2-84ff-804697f56df3', 'DeviceGSM.NriNullAdd', 'parameter', 'READ_ONLY', 'STRING', 'Immediate', NULL, NULL, '2026-05-31 11:28:47.930253+08', '2026-06-08 14:39:28.327962+08', '')
+ON CONFLICT DO NOTHING;
 
 
 ALTER TABLE public.standard_params ENABLE TRIGGER ALL;
@@ -5131,7 +5158,8 @@ INSERT INTO public.mml_command_sub_fields VALUES
 	('0dc96882-e106-4db5-ab70-cfe6f73af241', 'a4098e96-1053-40bb-b120-cd72bfd067fc', 'MAX_UE_PER_UL_SF', '{"en": "MaxUePerUlSf", "zh": "上行单帧最大调度用户数"}', true, true, 16, '2026-05-31 11:28:48.258248+08', '2026-05-31 11:28:48.865343+08', '749943e9-2c23-4e02-984c-afc6f9ddf469', 'RW', NULL, true),
 	('1995b12c-bea7-4b13-b7f5-f996e0886bf7', 'ba7f43c8-9f4e-4762-ba42-feac74ef4167', 'CONFIGURATION_INDEX', '{"en": "ConfigurationIndex", "zh": "PRACH配置索引"}', true, true, 1, '2026-05-31 11:28:48.258248+08', '2026-05-31 11:28:48.865343+08', 'e517de5c-4180-4eb7-8384-5b2174d90579', 'RW', NULL, true),
 	('46567ca2-9dff-468b-9370-eb5c7b2cc999', 'ba7f43c8-9f4e-4762-ba42-feac74ef4167', 'FREQ_OFFSET', '{"en": "FreqOffset", "zh": "PRACH频率偏移"}', true, true, 2, '2026-05-31 11:28:48.258248+08', '2026-05-31 11:28:48.865343+08', 'fc20e644-2750-44d5-8111-8fd5922334b9', 'RW', NULL, true),
-	('d57f1d6c-8c44-4c21-a3da-6df02d5a36b8', 'ba7f43c8-9f4e-4762-ba42-feac74ef4167', 'HIGH_SPEED_FLAG', '{"en": "HighSpeedFlag", "zh": "高速状态标识"}', true, true, 3, '2026-05-31 11:28:48.258248+08', '2026-05-31 11:28:48.865343+08', 'b51de9f0-5c59-4261-aa79-489ea4c792f1', 'RW', NULL, true);
+	('d57f1d6c-8c44-4c21-a3da-6df02d5a36b8', 'ba7f43c8-9f4e-4762-ba42-feac74ef4167', 'HIGH_SPEED_FLAG', '{"en": "HighSpeedFlag", "zh": "高速状态标识"}', true, true, 3, '2026-05-31 11:28:48.258248+08', '2026-05-31 11:28:48.865343+08', 'b51de9f0-5c59-4261-aa79-489ea4c792f1', 'RW', NULL, true)
+ON CONFLICT DO NOTHING;
 INSERT INTO public.mml_command_sub_fields VALUES
 	('a0c682e5-f1dc-40f9-82d7-6d8769829a56', 'ba7f43c8-9f4e-4762-ba42-feac74ef4167', 'ROOT_SEQUENCE_INDEX', '{"en": "RootSequenceIndex", "zh": "逻辑根序列索引"}', true, true, 4, '2026-05-31 11:28:48.258248+08', '2026-05-31 11:28:48.865343+08', 'fbbdc480-21b1-4047-9f42-d4c14445ffc3', 'RW', NULL, true),
 	('a60b8649-b959-4c43-ad98-0d87b1281ffc', 'ba7f43c8-9f4e-4762-ba42-feac74ef4167', 'ZERO_CORRELATION_ZONE_CONFIG', '{"en": "ZeroCorrelationZoneConfig", "zh": "零相关配置"}', true, true, 5, '2026-05-31 11:28:48.258248+08', '2026-05-31 11:28:48.865343+08', '083904a5-8f91-4b3d-b8db-fbb03e804ba2', 'RW', NULL, true),
@@ -5632,7 +5660,8 @@ INSERT INTO public.mml_command_sub_fields VALUES
 	('70613eb6-c645-42a4-9142-e3b7eaada809', 'ed473bc0-7753-4510-a136-b8553bbd7e6e', 'ACTIVATE_TIME', '{"en": "ActivateTime", "zh": "软件激活时间"}', true, true, 2, '2026-05-31 11:28:48.258248+08', '2026-05-31 11:28:49.110699+08', '83e96dae-b8cb-472c-af22-beb8ef54b8d1', 'RW', NULL, false),
 	('50c9397b-fa31-4e74-98ff-081a0d0eb596', 'ed473bc0-7753-4510-a136-b8553bbd7e6e', 'AUTO_ACTIVATE_ENABLE', '{"en": "AutoActivateEnable", "zh": "立即激活目标升级版本使能开关"}', true, true, 1, '2026-05-31 11:28:48.258248+08', '2026-05-31 11:28:49.110699+08', 'dd8f1381-952b-4e26-9776-c11e39b1e0a0', 'RW', NULL, false),
 	('2be47cb4-7d4b-43ff-9b1a-c336198437ba', 'ed473bc0-7753-4510-a136-b8553bbd7e6e', 'SYSTEM_CURRENT_VERSION', '{"en": "SystemCurrentVersion", "zh": "系统当前版本"}', true, false, 4, '2026-05-31 11:28:48.258248+08', '2026-05-31 11:28:49.110699+08', '693d6725-a8d8-4ebf-af19-26a204f7f976', 'RO', NULL, false),
-	('66b988ac-94cc-427f-94ed-cd79c2f0767d', '9a3180a9-466d-45fc-b407-fb4e258f9aed', 'CURRENT_LOCAL_TIME', '{"en": "CurrentLocalTime", "zh": "本地时间"}', true, false, 7, '2026-05-31 11:28:48.258248+08', '2026-05-31 11:28:49.110699+08', '764c229a-4e1e-4171-8297-fb1c869d2cb9', 'RO', NULL, false);
+	('66b988ac-94cc-427f-94ed-cd79c2f0767d', '9a3180a9-466d-45fc-b407-fb4e258f9aed', 'CURRENT_LOCAL_TIME', '{"en": "CurrentLocalTime", "zh": "本地时间"}', true, false, 7, '2026-05-31 11:28:48.258248+08', '2026-05-31 11:28:49.110699+08', '764c229a-4e1e-4171-8297-fb1c869d2cb9', 'RO', NULL, false)
+ON CONFLICT DO NOTHING;
 INSERT INTO public.mml_command_sub_fields VALUES
 	('6bb4e5c3-861e-4f99-af1c-2f6b37f74c9c', '9a3180a9-466d-45fc-b407-fb4e258f9aed', 'NTP_SERVER4', '{"en": "NTPServer4", "zh": "NTP服务器4"}', true, true, 5, '2026-05-31 11:28:48.258248+08', '2026-05-31 11:28:49.110699+08', 'c7cfaf21-63e6-4352-85d6-280a3f6d414b', 'RW', NULL, false),
 	('0ab13ad6-c37d-4c3c-8315-7ed9bfec5460', '9a3180a9-466d-45fc-b407-fb4e258f9aed', 'NTP_SERVER5', '{"en": "NTPServer5", "zh": "NTP服务器5"}', true, true, 6, '2026-05-31 11:28:48.258248+08', '2026-05-31 11:28:49.110699+08', '4713285b-afb8-4b8d-aee1-1ec338c198c2', 'RW', NULL, false),
@@ -5821,7 +5850,8 @@ INSERT INTO public.mml_command_sub_fields VALUES
 	('e8f47414-305f-4fd8-891e-877fc8dfa4ab', 'a923ed36-5338-4310-ac41-fb9fe3d45b11', 'IPAddress', '{"en": "IPv6 地址", "zh": "IPv6 地址"}', true, true, 0, '2026-05-31 11:28:48.258248+08', '2026-05-31 11:28:49.110699+08', '892f5dfd-6307-4f2f-bd03-d4c404c60da7', 'RW', NULL, false),
 	('d4afcbc7-d577-4ac0-8f71-9e89d546d1ad', 'a923ed36-5338-4310-ac41-fb9fe3d45b11', 'Origin', '{"en": "外部IP 来源", "zh": "外部IP 来源"}', true, true, 2, '2026-05-31 11:28:48.258248+08', '2026-05-31 11:28:49.110699+08', 'a7064701-4d3b-46ed-a3f6-ff0c93f05d2b', 'RW', NULL, false),
 	('976b0061-2f1a-449d-bc71-18ef92db7f22', 'a923ed36-5338-4310-ac41-fb9fe3d45b11', 'PortType', '{"en": "端口类型", "zh": "端口类型"}', true, true, 4, '2026-05-31 11:28:48.258248+08', '2026-05-31 11:28:49.110699+08', '14dfdd52-0ac4-4ed3-b46d-4b61e087f2fe', 'RW', NULL, false),
-	('0e60bac5-a0cc-47f6-b91d-5bf0c2defc10', 'a923ed36-5338-4310-ac41-fb9fe3d45b11', 'PrefixLength', '{"en": "前缀长度", "zh": "前缀长度"}', true, true, 1, '2026-05-31 11:28:48.258248+08', '2026-05-31 11:28:49.110699+08', 'cff62a9f-c0c5-4670-811a-5987fba0e6fa', 'RW', NULL, false);
+	('0e60bac5-a0cc-47f6-b91d-5bf0c2defc10', 'a923ed36-5338-4310-ac41-fb9fe3d45b11', 'PrefixLength', '{"en": "前缀长度", "zh": "前缀长度"}', true, true, 1, '2026-05-31 11:28:48.258248+08', '2026-05-31 11:28:49.110699+08', 'cff62a9f-c0c5-4670-811a-5987fba0e6fa', 'RW', NULL, false)
+ON CONFLICT DO NOTHING;
 
 
 ALTER TABLE public.mml_command_sub_fields ENABLE TRIGGER ALL;
