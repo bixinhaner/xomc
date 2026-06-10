@@ -124,12 +124,30 @@ case "$ACTION" in
     ;;
 
   restart)
+    # 一次性迁移 job（run-once，跑完即 Exited）。对已退出容器执行 docker compose
+    # restart 语义不对，且会脱离 depends_on 健康门控在错误时机被强行拉起。
+    ONESHOT_RE='^(migrate-schema|migrate-seed-sql|migrate-seed)$'
     if [ ${#TARGETS[@]} -gt 0 ]; then
-      log "重启服务：${TARGETS[*]}"
-      "${DC[@]}" restart "${TARGETS[@]}"
+      # 指定服务：过滤掉一次性 job
+      FILTERED=()
+      for s in "${TARGETS[@]}"; do
+        if printf '%s' "$s" | grep -qE "$ONESHOT_RE"; then
+          warn "跳过一次性迁移 job：$s（如需重跑用 bash svc.sh start $s）"
+        else
+          FILTERED+=("$s")
+        fi
+      done
+      [ ${#FILTERED[@]} -eq 0 ] && die "重启目标全是一次性 job，已跳过；重跑迁移请用：bash svc.sh start <job>"
+      log "重启服务：${FILTERED[*]}"
+      "${DC[@]}" restart "${FILTERED[@]}"
     else
-      log "重启全栈"
-      "${DC[@]}" restart
+      # 整栈：不用 docker compose restart（它并发重启所有容器、忽略 depends_on、
+      # 对 one-shot job 语义错误——2026-06-10 整栈 restart 即因此撞 OCI fork EOF +
+      # 容器 IP 重排 + nginx 上游失效）。改用 up -d --force-recreate：按 depends_on +
+      # 健康门控有序重建（基础设施 healthy → migrate 幂等重跑 → app/acs/worker → web），
+      # 天然错峰、避免 fork 风暴；nginx 经 resolver 自动重新解析后端 IP。
+      log "重启全栈（按 depends_on 有序重建，经健康门控；迁移 job 幂等重跑）"
+      "${DC[@]}" up -d --force-recreate
     fi
     ;;
 

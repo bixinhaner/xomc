@@ -1,15 +1,17 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
 	"github.com/spf13/cobra"
-	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 func main() {
@@ -79,7 +81,37 @@ func openDB(cmd *cobra.Command) (*sql.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
+
+	// 等待数据库可接受连接再继续。整栈一起重启时，本一次性容器可能早于 postgres
+	// 进程开始接受连接的瞬间启动（即便 depends_on: service_healthy +
+	// network_mode: service:postgres，仍存在 healthy 与端口 listen 之间的竞态窗口），
+	// 不重试就会首连 "connection refused"：轻则刷错误噪声，重则迁移硬失败、阻塞
+	// app/acs/worker 的 depends_on 启动链。退避重试令其优雅等待 DB 就绪。
+	if err := pingWithRetry(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return db, nil
+}
+
+// pingWithRetry 在固定间隔内重试 Ping，直到数据库可连接或耗尽尝试次数。
+func pingWithRetry(db *sql.DB) error {
+	const attempts = 30
+	const interval = time.Second
+
+	var lastErr error
+	for i := 1; i <= attempts; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		err := db.PingContext(ctx)
+		cancel()
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		fmt.Fprintf(os.Stderr, "等待数据库就绪（%d/%d）：%v\n", i, attempts, err)
+		time.Sleep(interval)
+	}
+	return fmt.Errorf("数据库在 %d 次尝试后仍不可连接: %w", attempts, lastErr)
 }
 
 // setupGooseTable configures the goose version table from --table flag or GOOSE_TABLE env var.
