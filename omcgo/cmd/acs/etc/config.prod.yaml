@@ -59,7 +59,7 @@ nats:
 
 db:
   # 【全 docker compose 部署】使用 service 名 postgres（容器间 docker network 解析）
-  dsn: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=require"  # 凭据由 deploy/.env 经 compose 注入 ${POSTGRES_*}，Load() 解析前展开（单一真值源）
+  dsn: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable"  # 凭据由 deploy/.env 经 compose 注入 ${POSTGRES_*}，Load() 解析前展开（单一真值源）
   # 连接池核定（#24）：ACS 承载高并发 CWMP 会话（max_concurrent 10000），PG 池 20→30。
   # ACS 水平扩展时按副本数累加，逼近 PG max_connections 前必须前置 pgbouncer。
   # 聚合预算见 app/config.prod.yaml 与 migrations/README.md「连接池核定（#24）」。
