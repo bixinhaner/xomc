@@ -53,6 +53,7 @@ minio:
 task:
   default_expires_in_seconds: 120
   sweep_interval_seconds: 10
+  reconcile_interval_seconds: 30
 
 # 设备上线时（device.online 事件）自动下发 PM 文件上传配置（KPI 上报参数整理.md 三参数）：
 #   Device.FAP.PerfMgmt.Config.1.Enable = enable_value

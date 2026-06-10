@@ -388,3 +388,26 @@ func TestService_RestorePendingQueuesPublic(t *testing.T) {
 	require.NotNil(t, svc)
 	_ = json.RawMessage("{}") // 防 unused
 }
+
+// ---- #13: 双写中断可观测指标（recordDualWriteFail）----
+
+func TestService_RecordDualWriteFail_IncrementsMetric(t *testing.T) {
+	svc := NewTaskService(nil, nil, zap.NewNop())
+	reg := prometheus.NewRegistry()
+	m := NewTaskMetrics(reg)
+	svc.SetMetrics(m)
+
+	svc.recordDualWriteFail("create_rollback")
+	svc.recordDualWriteFail("sync_terminal")
+	svc.recordDualWriteFail("sync_terminal")
+
+	assert.Equal(t, float64(1), counterValue(t, m.DualWriteFailTotal, "create_rollback"))
+	assert.Equal(t, float64(2), counterValue(t, m.DualWriteFailTotal, "sync_terminal"))
+	assert.Equal(t, float64(0), counterValue(t, m.DualWriteFailTotal, "sync_sent"))
+}
+
+func TestService_RecordDualWriteFail_NilMetricsSafe(t *testing.T) {
+	// metrics 未注入（acs/worker 早期 / 单测）时不得 panic。
+	svc := NewTaskService(nil, nil, zap.NewNop())
+	assert.NotPanics(t, func() { svc.recordDualWriteFail("sync_sent") })
+}

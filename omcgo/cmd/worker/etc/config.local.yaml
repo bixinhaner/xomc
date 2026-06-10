@@ -51,6 +51,7 @@ minio:
 task:
   default_expires_in_seconds: 120
   sweep_interval_seconds: 10
+  reconcile_interval_seconds: 30
 
 # PM 文件上传自动下发配置（local 开发，OMC_PUBLIC_HOST 不设时回退 localhost — 基站不可达）
 pm:

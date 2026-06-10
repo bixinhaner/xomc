@@ -284,9 +284,14 @@ type AppConfig struct {
 // SweepIntervalSeconds: worker 进程 task_sweeper 周期扫描过期 task 的间隔（秒）。
 //
 //	<= 0 时 sweeper 不启动（C2 引入；C1 阶段先建配置项占位）。
+//
+// ReconcileIntervalSeconds: worker 进程 task_reconciler 周期对账 Redis↔PG 状态分叉的间隔（秒，#13）。
+//
+//	<= 0 时 reconciler 不启动。修复 "PG 滞后于 Redis 终态" 的孤儿/陈旧记录。
 type TaskConfig struct {
-	DefaultExpiresInSeconds int `mapstructure:"default_expires_in_seconds"`
-	SweepIntervalSeconds    int `mapstructure:"sweep_interval_seconds"`
+	DefaultExpiresInSeconds  int `mapstructure:"default_expires_in_seconds"`
+	SweepIntervalSeconds     int `mapstructure:"sweep_interval_seconds"`
+	ReconcileIntervalSeconds int `mapstructure:"reconcile_interval_seconds"`
 }
 
 // MRConfig 配置 F05 MR 测量任务（PRD docs/project/prd/F05-mr-task-management.md）。

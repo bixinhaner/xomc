@@ -19,6 +19,7 @@ type workerInfra struct {
 	Carriers     *carrier.CarrierRegistry
 	TaskService  *task.TaskService
 	TaskRepo     *task.PgTaskRepository
+	TaskQueue    *task.RedisTaskQueue
 }
 
 // initWorker initializes all infrastructure for the background worker.
@@ -65,6 +66,7 @@ func initWorker(ctx context.Context, cfg *appconfig.WorkerConfig) (*workerInfra,
 	taskSvc.SetEventBus(inf.EventBus)
 	w.TaskService = taskSvc
 	w.TaskRepo = taskRepo
+	w.TaskQueue = taskQueue
 
 	return w, nil
 }

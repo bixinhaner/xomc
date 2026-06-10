@@ -52,6 +52,7 @@ minio:
 task:
   default_expires_in_seconds: 120
   sweep_interval_seconds: 10
+  reconcile_interval_seconds: 30
 
 # 设备上线时自动下发 PM 文件上传配置（KPI 上报参数整理.md 三参数）。
 # OMC_PUBLIC_HOST 必须在生产环境部署时填本机对外 IP（基站可达），不能用 localhost。

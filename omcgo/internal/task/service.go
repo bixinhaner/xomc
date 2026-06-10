@@ -203,8 +203,15 @@ func (s *TaskService) CreateTask(ctx context.Context, req *CreateTaskRequest) (*
 
 	// 2. 推送到 Redis 队列
 	if err := s.queue.Push(ctx, task); err != nil {
-		// 回滚 PostgreSQL 记录
-		s.repo.Delete(ctx, task.ID)
+		// 回滚 PostgreSQL 记录。回滚失败 → PG 留下 pending 孤儿（#13）：记 error + metric，
+		// 由 RestorePendingQueues（启动期）/ ExpiredSweeper（过期）兜底，不让其静默漂移。
+		if derr := s.repo.Delete(ctx, task.ID); derr != nil {
+			s.recordDualWriteFail("create_rollback")
+			logger.L(ctx).Error("rollback task pg record after enqueue failure",
+				zap.String("task_id", task.ID),
+				zap.NamedError("enqueue_err", err),
+				zap.NamedError("rollback_err", derr))
+		}
 		// T-0157 C6: 同上
 		s.notifyCreateFailure(ctx, task, err)
 		return nil, fmt.Errorf("enqueue task: %w", err)
@@ -321,6 +328,7 @@ func (s *TaskService) MarkTaskSent(ctx context.Context, taskID, cwmpID string) e
 	}
 	if task != nil {
 		if err := s.repo.Update(ctx, task); err != nil {
+			s.recordDualWriteFail("sync_sent")
 			logger.L(ctx).Error("sync task to db", zap.Error(err), zap.String("task_id", taskID))
 		}
 	}
@@ -346,6 +354,7 @@ func (s *TaskService) MarkTaskCompleted(ctx context.Context, taskID string, resu
 	}
 	if task != nil {
 		if err := s.repo.Update(ctx, task); err != nil {
+			s.recordDualWriteFail("sync_terminal")
 			logger.L(ctx).Error("sync task to db", zap.Error(err), zap.String("task_id", taskID))
 		}
 	}
@@ -388,6 +397,7 @@ func (s *TaskService) MarkTaskFailedWithResult(ctx context.Context, taskID strin
 	}
 	if task != nil {
 		if err := s.repo.Update(ctx, task); err != nil {
+			s.recordDualWriteFail("sync_terminal")
 			logger.L(ctx).Error("sync task to db", zap.Error(err), zap.String("task_id", taskID))
 		}
 	}
@@ -446,6 +456,14 @@ func deref(t *time.Time) time.Time {
 		return time.Time{}
 	}
 	return *t
+}
+
+// recordDualWriteFail 在双写中断（写一半失败）时递增可观测指标（#13）。
+// metrics 未注入（单测 / 未调 SetMetrics）时安全跳过。
+func (s *TaskService) recordDualWriteFail(op string) {
+	if s.metrics != nil {
+		s.metrics.DualWriteFailTotal.WithLabelValues(op).Inc()
+	}
 }
 
 // notifyCreateFailure 在 CreateTask 失败路径上调 createFailureNotifier（T-0157 C6）。

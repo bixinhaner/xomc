@@ -406,6 +406,43 @@ func (r *PgTaskRepository) ListExpiredCandidates(ctx context.Context, now time.T
 	return tasks, nil
 }
 
+// ListActiveTasks 列出所有仍处于活跃态(pending/sent)且创建时间早于 olderThan 的任务，
+// 用于 Reconciler 检测 PG 与 Redis 的状态分叉（#13）。
+//
+// olderThan 是一个"宽限阈值"：只挑选创建已足够久的任务，避开正在双写途中的在飞任务
+// （CreateTask / MarkTaskCompleted 等的 PG sync 可能尚未落地），从而不误判正常时序差为分叉。
+// limit > 0 时限制单批数量防 worker 长查询；剩余项下一轮处理。
+func (r *PgTaskRepository) ListActiveTasks(ctx context.Context, olderThan time.Time, limit int) ([]*Task, error) {
+	q := storage.Psql.Select(taskColumns()...).
+		From("device_tasks").
+		Where(sq.Eq{"status": []TaskStatus{TaskStatusPending, TaskStatusSent}}).
+		Where(sq.Lt{"created_at": olderThan}).
+		OrderBy("created_at ASC")
+	if limit > 0 {
+		q = q.Limit(uint64(limit))
+	}
+	query, args, err := q.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build list active query: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query active tasks: %w", err)
+	}
+	defer rows.Close()
+
+	var tasks []*Task
+	for rows.Next() {
+		t, err := r.scanTaskRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, t)
+	}
+	return tasks, nil
+}
+
 // Delete 删除任务
 func (r *PgTaskRepository) Delete(ctx context.Context, id string) error {
 	query, args, err := storage.Psql.Delete("device_tasks").
