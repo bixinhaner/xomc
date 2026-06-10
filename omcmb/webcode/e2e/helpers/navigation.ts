@@ -22,10 +22,12 @@ export async function expectPath(page: Page, expectedPath: string): Promise<void
  * Wait for a page to finish its lazy-load Suspense boundary.
  * This waits for the Ant Design Spin component to disappear.
  */
-export async function waitForPageLoad(page: Page): Promise<void> {
-  // Wait for any Ant Design Spin loaders to disappear
+export async function waitForPageLoad(page: Page, timeout = 15_000): Promise<void> {
+  // Wait for any Ant Design Spin loaders to disappear.
+  // Note: a page may show several spinners at once (e.g. dashboard KPI panels),
+  // so use first()/toHaveCount(0) instead of strict-mode single-element waits.
   const spinner = page.locator('.ant-spin-spinning');
-  if (await spinner.isVisible({ timeout: 2_000 }).catch(() => false)) {
-    await spinner.waitFor({ state: 'hidden', timeout: 15_000 });
+  if (await spinner.first().isVisible({ timeout: 2_000 }).catch(() => false)) {
+    await expect(spinner).toHaveCount(0, { timeout });
   }
 }
