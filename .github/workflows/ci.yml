@@ -36,7 +36,7 @@ jobs:
     timeout-minutes: 3
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Lint migration files (strict — 仅同目录撞号 + 缺 goose 标记报错)
         run: bash omcgo/scripts/check-migrations.sh --strict
 
@@ -53,7 +53,7 @@ jobs:
       migrations: ${{ steps.filter.outputs.migrations }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Detect migration changes
         uses: dorny/paths-filter@v3
         id: filter
@@ -94,7 +94,7 @@ jobs:
       DSN: postgres://omcgo:omcgo123@localhost:5432/omcgo_seedcheck?sslmode=disable
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Setup Go 1.25.11
         uses: actions/setup-go@v5
         with:
@@ -115,7 +115,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Go 1.25.11
         uses: actions/setup-go@v5
@@ -137,7 +137,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node 22
         uses: actions/setup-node@v4
@@ -167,7 +167,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Go 1.25.11
         uses: actions/setup-go@v5
@@ -196,7 +196,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Go 1.25.11
         uses: actions/setup-go@v5
@@ -217,7 +217,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node 22
         uses: actions/setup-node@v4
@@ -262,7 +262,7 @@ jobs:
             dockerfile: deployments/docker/Dockerfile.web
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -332,7 +332,7 @@ jobs:
   #       ports:
   #         - 6379:6379
   #   steps:
-  #     - uses: actions/checkout@v4
+  #     - uses: actions/checkout@v6
   #     - uses: actions/setup-go@v5
   #       with:
   #         go-version: '1.25'
@@ -346,7 +346,7 @@ jobs:
   #   runs-on: ubuntu-latest
   #   timeout-minutes: 10
   #   steps:
-  #     - uses: actions/checkout@v4
+  #     - uses: actions/checkout@v6
   #     - uses: actions/setup-go@v5
   #       with:
   #         go-version: '1.25'
@@ -361,7 +361,7 @@ jobs:
   #   runs-on: ubuntu-latest
   #   timeout-minutes: 10
   #   steps:
-  #     - uses: actions/checkout@v4
+  #     - uses: actions/checkout@v6
   #     - uses: actions/setup-node@v4
   #       with:
   #         node-version: '20'
@@ -377,7 +377,7 @@ jobs:
   #   runs-on: ubuntu-latest
   #   timeout-minutes: 10
   #   steps:
-  #     - uses: actions/checkout@v4
+  #     - uses: actions/checkout@v6
   #     - uses: actions/setup-node@v4
   #       with:
   #         node-version: '20'
