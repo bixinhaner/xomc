@@ -258,24 +258,52 @@ func (s *PgAlarmStore) ListHistory(ctx context.Context, filter AlarmFilter) (*mo
 	return model.NewListResponse(items, total, filter.Page, filter.PageSize), nil
 }
 
+// activeStatsBase 返回带 filter 的 alarms_active 统计基底查询。
+// 与 ListActive 保持同一 LEFT JOIN，使 applyActiveFilters 内的 d.technology 等
+// 跨表条件可用；统计随之按 filter 收窄，而非旧实现的全表扫描。
+func activeStatsBase(filter AlarmFilter) squirrel.SelectBuilder {
+	qb := storage.Psql.Select().From("alarms_active").LeftJoin("devices d ON d.id = alarms_active.device_id")
+	return applyActiveFilters(qb, filter)
+}
+
 func (s *PgAlarmStore) Statistics(ctx context.Context, filter AlarmFilter) (*AlarmStatistics, error) {
 	stats := &AlarmStatistics{BySeverity: make(map[model.AlarmSeverity]int64), ByType: make(map[string]int64)}
 
-	var total int64
-	if err := s.pool.QueryRow(ctx, "SELECT COUNT(*) FROM alarms_active").Scan(&total); err != nil {
+	totalSQL, totalArgs, err := activeStatsBase(filter).Column("COUNT(*)").ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build count active: %w", err)
+	}
+	if err := s.pool.QueryRow(ctx, totalSQL, totalArgs...).Scan(&stats.TotalActive); err != nil {
 		return nil, fmt.Errorf("count active: %w", err)
 	}
-	stats.TotalActive = total
 
-	if err := s.pool.QueryRow(ctx, "SELECT COUNT(*) FROM alarms_active WHERE status = 'active'").Scan(&stats.Unacknowledged); err != nil {
+	unackSQL, unackArgs, err := activeStatsBase(filter).
+		Column("COUNT(*)").
+		Where(squirrel.Eq{"alarms_active.status": "active"}).ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build count unacknowledged: %w", err)
+	}
+	if err := s.pool.QueryRow(ctx, unackSQL, unackArgs...).Scan(&stats.Unacknowledged); err != nil {
 		return nil, fmt.Errorf("count unacknowledged: %w", err)
 	}
 
-	if err := s.pool.QueryRow(ctx, "SELECT COUNT(*) FROM alarms_active WHERE is_read = false").Scan(&stats.Unread); err != nil {
+	unreadSQL, unreadArgs, err := activeStatsBase(filter).
+		Column("COUNT(*)").
+		Where(squirrel.Eq{"alarms_active.is_read": false}).ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build count unread: %w", err)
+	}
+	if err := s.pool.QueryRow(ctx, unreadSQL, unreadArgs...).Scan(&stats.Unread); err != nil {
 		return nil, fmt.Errorf("count unread: %w", err)
 	}
 
-	rows, err := s.pool.Query(ctx, "SELECT severity, COUNT(*) FROM alarms_active GROUP BY severity")
+	sevSQL, sevArgs, err := activeStatsBase(filter).
+		Columns("alarms_active.severity", "COUNT(*)").
+		GroupBy("alarms_active.severity").ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build stats by severity: %w", err)
+	}
+	rows, err := s.pool.Query(ctx, sevSQL, sevArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("stats by severity: %w", err)
 	}
@@ -288,7 +316,14 @@ func (s *PgAlarmStore) Statistics(ctx context.Context, filter AlarmFilter) (*Ala
 		}
 	}
 
-	rows2, err := s.pool.Query(ctx, "SELECT alarm_type, COUNT(*) FROM alarms_active WHERE alarm_type != '' GROUP BY alarm_type")
+	typeSQL, typeArgs, err := activeStatsBase(filter).
+		Columns("alarms_active.alarm_type", "COUNT(*)").
+		Where(squirrel.NotEq{"alarms_active.alarm_type": ""}).
+		GroupBy("alarms_active.alarm_type").ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build stats by type: %w", err)
+	}
+	rows2, err := s.pool.Query(ctx, typeSQL, typeArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("stats by type: %w", err)
 	}
@@ -322,16 +357,32 @@ func activeAlarmSelect() squirrel.SelectBuilder {
 	return storage.Psql.Select(activeColumns...).From("alarms_active").LeftJoin("devices d ON d.id = alarms_active.device_id")
 }
 
+// historyStatsBase 返回带 filter 的 alarms_history 统计基底查询。
+// 与 ListHistory 保持同一 LEFT JOIN，使 applyHistoryFilters 内的 d.technology 等
+// 跨表条件可用；统计随之按 filter 收窄，而非旧实现的全表扫描。
+func historyStatsBase(filter AlarmFilter) squirrel.SelectBuilder {
+	qb := storage.Psql.Select().From("alarms_history").LeftJoin("devices d ON d.id = alarms_history.device_id")
+	return applyHistoryFilters(qb, filter)
+}
+
 func (s *PgAlarmStore) HistoryStatistics(ctx context.Context, filter AlarmFilter) (*AlarmStatistics, error) {
 	stats := &AlarmStatistics{BySeverity: make(map[model.AlarmSeverity]int64), ByType: make(map[string]int64)}
 
-	var total int64
-	if err := s.pool.QueryRow(ctx, "SELECT COUNT(*) FROM alarms_history").Scan(&total); err != nil {
+	totalSQL, totalArgs, err := historyStatsBase(filter).Column("COUNT(*)").ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build count history: %w", err)
+	}
+	if err := s.pool.QueryRow(ctx, totalSQL, totalArgs...).Scan(&stats.TotalActive); err != nil {
 		return nil, fmt.Errorf("count history: %w", err)
 	}
-	stats.TotalActive = total
 
-	rows, err := s.pool.Query(ctx, "SELECT severity, COUNT(*) FROM alarms_history GROUP BY severity")
+	sevSQL, sevArgs, err := historyStatsBase(filter).
+		Columns("alarms_history.severity", "COUNT(*)").
+		GroupBy("alarms_history.severity").ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build stats history by severity: %w", err)
+	}
+	rows, err := s.pool.Query(ctx, sevSQL, sevArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("stats history by severity: %w", err)
 	}
@@ -344,7 +395,14 @@ func (s *PgAlarmStore) HistoryStatistics(ctx context.Context, filter AlarmFilter
 		}
 	}
 
-	rows2, err := s.pool.Query(ctx, "SELECT alarm_type, COUNT(*) FROM alarms_history WHERE alarm_type != '' GROUP BY alarm_type")
+	typeSQL, typeArgs, err := historyStatsBase(filter).
+		Columns("alarms_history.alarm_type", "COUNT(*)").
+		Where(squirrel.NotEq{"alarms_history.alarm_type": ""}).
+		GroupBy("alarms_history.alarm_type").ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build stats history by type: %w", err)
+	}
+	rows2, err := s.pool.Query(ctx, typeSQL, typeArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("stats history by type: %w", err)
 	}
