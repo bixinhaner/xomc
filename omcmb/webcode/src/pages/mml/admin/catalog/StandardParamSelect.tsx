@@ -12,10 +12,13 @@
  * 选中后回调 onChange(value, selectedRecords) —— records 含 standard_params
  * 全字段，调用方可直接用来做 autofill（用户规则 #4）。
  */
-import { useState, useMemo } from 'react';
+import { useState, useMemo, type UIEventHandler } from 'react';
 import { Select, Spin, Typography } from 'antd';
 import type { SelectProps } from 'antd';
-import { useStandardParamsList } from '@core/hooks/api/useMmlAdmin';
+import {
+  useStandardParamsInfiniteList,
+  flattenStandardParamPages,
+} from '@core/hooks/api/useMmlAdmin';
 import type { StandardParamView } from '@core/types/mmlAdmin';
 import { useT } from '@/hooks/useT';
 import { useDebounce } from 'ahooks';
@@ -50,18 +53,30 @@ export default function StandardParamSelect({
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebounce(search, 300);
 
-  const { data, isLoading } = useStandardParamsList({
-    q: debouncedSearch,
-    entryType: entryType || undefined,
-    pageSize: 50,
-  });
+  const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } =
+    useStandardParamsInfiniteList({
+      q: debouncedSearch,
+      entryType: entryType || undefined,
+    });
 
   const items = useMemo(() => {
-    const all = data?.items ?? [];
+    const all = flattenStandardParamPages(data?.pages);
     if (excludeIds.length === 0) return all;
     const excl = new Set(excludeIds);
     return all.filter((it) => !excl.has(it.id));
   }, [data, excludeIds]);
+
+  // 下拉触底续拉下一页（load-more，修 #105：原单页 50 条数据不全）。
+  const handlePopupScroll: UIEventHandler<HTMLDivElement> = (e) => {
+    const el = e.currentTarget;
+    if (
+      hasNextPage &&
+      !isFetchingNextPage &&
+      el.scrollHeight - el.scrollTop - el.clientHeight < 32
+    ) {
+      void fetchNextPage();
+    }
+  };
 
   // 记录 id → 完整 StandardParamView 映射，方便 onChange 回传完整记录给上层 autofill。
   const recordById = useMemo(() => {
@@ -99,13 +114,16 @@ export default function StandardParamSelect({
       value={value}
       onChange={handleChange}
       onSearch={setSearch}
+      onPopupScroll={handlePopupScroll}
       filterOption={false} // 后端已过滤
       showSearch
+      // 一词多选：选中不清空搜索框，可从同一关键字结果里连续选多个（#105/#106）。
+      autoClearSearchValue={false}
       allowClear={allowClear}
       placeholder={placeholder ?? t('mml.admin.catalog.path.searchPlaceholder')}
       disabled={disabled}
       options={options}
-      notFoundContent={isLoading ? <Spin size="small" /> : null}
+      notFoundContent={isLoading || isFetchingNextPage ? <Spin size="small" /> : null}
       style={{ width: '100%' }}
       optionLabelProp="title" // 选中后输入框只显示 path 字符串，避免选 N 条后宽度爆炸
       maxTagCount={multiple ? 3 : undefined}
