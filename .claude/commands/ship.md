@@ -18,7 +18,8 @@
 | 空 | full（默认） | 推断当前阶段，自动向前推进到 P9 开 PR |
 | `status` | 子命令 | 打印 GitHub Issues 看板（按 triage 标签）+ 当前分支阶段 |
 | `audit` | 子命令 | 推断当前阶段、已过门、下一步——**只报告不推进** |
-| `#NN` / `NN` | 入口 | 从指定 GitHub Issue 起步：已 `ready-for-agent` 则直入 P5，否则先回 P4 分诊 |
+| `#NN` | 入口（单 Issue） | 从指定 GitHub Issue 起步：已 `ready-for-agent` 直入 P5，否则先回 P4 分诊（**须带 `#`**） |
+| `N`（裸整数）/ `all` | 批量 | **不指定单子**：自动从 GitHub 拉 `ready-for-agent`（优先级序）取前 N 个（`all`=全部），逐个端到端解决，**每单独立 feature 分支 + 独立 PR**（见 §批量模式） |
 | `P1`..`P9` 或 `align`/`spec`/`slice`/`triage`/`build`/`verify`/`review`/`commit`/`pr` | 单阶段 | 只跑一个阶段（别名↔阶段：align=P1 spec=P2 slice=P3 triage=P4 build=P5 verify=P6 review=P7 commit=P8 pr=P9，`close` 为 `pr` 同义） |
 | `--fast <bugfix\|hotfix\|docs\|refactor>` | 快速通道 | 按 §快速通道裁剪前置阶段，再进入 full |
 
@@ -99,6 +100,27 @@
 
 ---
 
+## §批量模式（`ship N` / `ship all`）— 不指定单子，自动领单
+
+**用途**：一条命令连续清理多个已就绪 Issue。`ship 5` = 自动解决 5 个单；`ship all` = 清空所有 `ready-for-agent`。
+
+**选单**：`gh issue list --label ready-for-agent --state open --json number,title,labels` → 按 `priority: critical → high → medium → low` 排序、同级按 `#` 升序 → 取前 N（`all`=全部）。**只领 `ready-for-agent`**；需 P1–P4（设计 / 分诊）的单不在批量范围，自动略过并在汇总列出。
+
+**逐单循环（默认串行，一次一单）**，对选中的每个 Issue：
+1. `git switch main` 回基线（**不自动 `pull` 远端**，除非用户要求同步）→ `git switch -c <type>/NN-<slug>`（type 取 Issue category）。
+2. 跑该单 P5→P9（实现→验证→审查→提交→**开 PR**），全程过硬门 1–9；按其 category 标签自动选快速通道（同 §快速通道）；触 auth 仍跑 `/security-review`。
+3. P9 开 PR 成功 → 记录 PR 链接 → 回步骤 1 处理下一单。**绝不自动 merge**（PR 铁律）。
+
+**遇阻处理**（不让一个单卡死整批）：硬门不过且 3 次尝试规则耗尽 / 需澄清 / 编译测试无法自愈 → 该单标 `blocked`、`gh issue comment` 记录卡点、**跳过继续下一单**；半成品分支保留供人工接手。
+
+**批量汇总**（结束输出）：N 单逐项结果 ✅ 已开 PR（含链接）/ ⛔ blocked（含原因）/ ⏭️ 略过（非 ready），并给出下一步建议（哪些 PR 待 review、哪些单需人工）。
+
+**并发**：默认串行，避免分支 / 工作树交叉污染；需并行时用 `git worktree` 每单隔离（进阶，非默认）。
+
+**安全闸**：批量仍受全部硬门约束——每单各自独立 PR，**绝不**直推 main、绝不自动 merge。
+
+---
+
 ## §子命令
 
 ### status
@@ -135,7 +157,9 @@
 /ship                 # 一键：从当前状态自动推进到开 PR（在 feature 分支，不碰 main）
 /ship status          # 看 GitHub Issues 看板 + 当前阶段
 /ship audit           # 这分支到哪了？哪些门过了？下一步？
-/ship #42             # 领取 Issue #42（就绪则直入实现，否则先分诊）→ feature 分支 → 开 PR
+/ship #42             # 领取单个 Issue #42（须带 #）→ feature 分支 → 开 PR
+/ship 5               # 不指定单子：自动领 5 个 ready-for-agent 单，逐个解决、各开 PR
+/ship all             # 清空所有 ready-for-agent（每单一分支一 PR）
 /ship --fast bugfix #42   # bugfix 快速通道（仍经 PR 合入，不可裁剪 P9）
 /ship pr              # 只跑 P9：push feature 分支 + gh pr create
 /ship P7              # 只重跑审查阶段
