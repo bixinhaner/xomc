@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"sync"
 	"testing"
 	"time"
 
@@ -613,6 +614,7 @@ func TestSnapshotStandardPaths_BuildsMap(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 type fakeParamSyncWriter struct {
+	mu    sync.Mutex // guards calls：延迟 finalize goroutine 写 / 测试断言读
 	calls []paramSyncWriteCall
 	err   error
 }
@@ -623,8 +625,17 @@ type paramSyncWriteCall struct {
 }
 
 func (f *fakeParamSyncWriter) UpdateLastParamSyncAt(_ context.Context, id uuid.UUID, at time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, paramSyncWriteCall{deviceID: id, at: at})
 	return f.err
+}
+
+// callCount 加锁读取 calls 数量，供 Eventually/Never 等并发断言使用。
+func (f *fakeParamSyncWriter) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.calls)
 }
 
 type fakeDeviceInfoRefresher struct{}
@@ -730,7 +741,7 @@ func TestHandleSyncResultPathB_EmptyFullSyncWaitsForRemainingTasks(t *testing.T)
 	assert.True(t, handled)
 	assert.Equal(t, []string{"SN-empty"}, reader.calls)
 	assert.Never(t, func() bool {
-		return len(writer.calls) > 0
+		return writer.callCount() > 0
 	}, 200*time.Millisecond, 20*time.Millisecond, "empty full-sync response must not finalize while sync-gpv tasks remain open")
 	if mr != nil {
 		_, redisErr := mr.Get(pathBSyncFinalizeDebounceKey(dev.ID))
