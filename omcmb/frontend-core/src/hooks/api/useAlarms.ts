@@ -3,12 +3,10 @@ import type { AlarmFilter } from '../../types/alarm';
 import type { PageRequest } from '../../types/pagination';
 import { alarmService } from '../../mock/services/alarmService';
 import { alarmApi } from '../../services/api/alarmApi';
-import { useMock } from '../../services/apiSwitch';
+import { createApiSwitchWithMock } from '../../services/apiSwitch';
 
 // Real API is the canonical surface; mock is best-effort and adapted at runtime.
-const api: typeof alarmApi = useMock
-  ? (alarmService as unknown as typeof alarmApi)
-  : alarmApi;
+const api = createApiSwitchWithMock(alarmService, alarmApi);
 
 function scheduleAlarmRefresh(queryClient: ReturnType<typeof useQueryClient>) {
   const retryDelays = [3_000, 8_000, 15_000, 30_000];

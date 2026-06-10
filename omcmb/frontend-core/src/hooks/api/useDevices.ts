@@ -3,9 +3,9 @@ import type { DeviceFilter, NameFilterItem } from '../../types/device';
 import type { PageRequest } from '../../types/pagination';
 import { deviceService } from '../../mock/services/deviceService';
 import { deviceApi } from '../../services/api/deviceApi';
-import { createApiSwitch } from '../../services/apiSwitch';
+import { createApiSwitchWithMock } from '../../services/apiSwitch';
 
-const api = createApiSwitch(deviceService as unknown as typeof deviceApi, deviceApi);
+const api = createApiSwitchWithMock(deviceService, deviceApi);
 
 // 创建分组的请求类型
 export interface CreateGroupRequest {

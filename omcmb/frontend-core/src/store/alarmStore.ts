@@ -9,7 +9,6 @@ export type AlarmCounts = AlarmCount;
 
 interface AlarmState {
   counts: AlarmCount;
-  totalActive: number;
   loading: boolean;
 
   setCounts: (counts: Partial<AlarmCount>) => void;
@@ -31,38 +30,37 @@ export const useAlarmStore = create<AlarmState>()((set, get) => ({
     minor: 0,
     warning: 0,
   },
-  totalActive: 0,
   loading: false,
 
   setCounts: (counts) =>
-    set((state) => {
-      const next = { ...state.counts, ...counts };
-      return {
-        counts: next,
-        totalActive: next.critical + next.major + next.minor + next.warning,
-      };
-    }),
+    set((state) => ({ counts: { ...state.counts, ...counts } })),
 
   incrementSeverity: (severity) =>
-    set((state) => {
-      const next = { ...state.counts, [severity]: state.counts[severity] + 1 };
-      return { counts: next, totalActive: state.totalActive + 1 };
-    }),
+    set((state) => ({
+      counts: { ...state.counts, [severity]: state.counts[severity] + 1 },
+    })),
 
   decrementSeverity: (severity) =>
-    set((state) => {
-      const next = {
+    set((state) => ({
+      counts: {
         ...state.counts,
         [severity]: Math.max(0, state.counts[severity] - 1),
-      };
-      return {
-        counts: next,
-        totalActive: Math.max(0, state.totalActive - 1),
-      };
-    }),
+      },
+    })),
 
   incrementCount: (severity) => get().incrementSeverity(severity),
   decrementCount: (severity) => get().decrementSeverity(severity),
 
   setLoading: (loading) => set({ loading }),
 }));
+
+/**
+ * Derived count of active alarms by severity bucket.
+ *
+ * Replaces the previously hand-synced `totalActive` store field (issue #26): a
+ * derived value computed from `counts` so it can never drift out of sync with
+ * the source of truth. Use as a memoised selector:
+ *   const totalActive = useAlarmStore(selectTotalActive);
+ */
+export const selectTotalActive = (state: AlarmState): number =>
+  state.counts.critical + state.counts.major + state.counts.minor + state.counts.warning;

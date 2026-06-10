@@ -10,7 +10,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { useMock } from '../../services/apiSwitch';
+import { createApiSwitchWithMock } from '../../services/apiSwitch';
 import { notificationCenterApi } from '../../services/api/notificationCenterApi';
 import { notificationCenterService } from '../../mock/services/notificationCenterService';
 import type {
@@ -19,7 +19,7 @@ import type {
 } from '../../types/notificationCenter';
 import type { PageResponse } from '../../types/pagination';
 
-const api = useMock ? notificationCenterService : notificationCenterApi;
+const api = createApiSwitchWithMock(notificationCenterService, notificationCenterApi);
 
 /** React Query key 前缀。所有消息中心相关 query 共用，便于一次性 invalidate */
 export const notificationKeys = {

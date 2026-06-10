@@ -56,7 +56,8 @@ export default function LoginPage() {
   const [form] = Form.useForm<LoginFormValues>();
   const navigate = useNavigate();
   const location = useLocation();
-  const { login, setTokenPair } = useUserStore();
+  const login = useUserStore((s) => s.login);
+  const setTokenPair = useUserStore((s) => s.setTokenPair);
 
   // PrivateRoute 把未登录用户从任意路径（含 /403 错误页）弹到 /login 时会把
   // 原 location 塞进 state.from。错误页不是合法的登录返回目的地，直接降级到

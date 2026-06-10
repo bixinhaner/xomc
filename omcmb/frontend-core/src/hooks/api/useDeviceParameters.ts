@@ -3,12 +3,10 @@ import type { ParameterFilter, ParameterUpdateRequest } from '../../types/device
 import type { PageRequest } from '../../types/pagination';
 import { deviceParameterService } from '../../mock/services/deviceParameterService';
 import { deviceParameterApi } from '../../services/api/deviceParameterApi';
-import { useMock } from '../../services/apiSwitch';
+import { createApiSwitchWithMock } from '../../services/apiSwitch';
 
 type ParamApi = typeof deviceParameterApi & { syncConfigFile?: (deviceId: string) => Promise<unknown> };
-const api: ParamApi = useMock
-  ? (deviceParameterService as unknown as ParamApi)
-  : (deviceParameterApi as ParamApi);
+const api = createApiSwitchWithMock<ParamApi>(deviceParameterService, deviceParameterApi);
 
 export function useDeviceParameters(
   deviceId: string,

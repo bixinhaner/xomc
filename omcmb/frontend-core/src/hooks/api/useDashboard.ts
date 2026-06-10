@@ -1,7 +1,7 @@
 import { useQuery, useQueries, useQueryClient } from '@tanstack/react-query';
 import { dashboardService } from '../../mock/services/dashboardService';
 import { dashboardApi } from '../../services/api/dashboardApi';
-import { useMock } from '../../services/apiSwitch';
+import { createApiSwitchWithMock } from '../../services/apiSwitch';
 import type { DashboardSummary, DashboardChartData } from '../../mock/data/dashboard';
 import type {
   TrendComparisonData,
@@ -22,7 +22,7 @@ type KPITimeSeriesParams = {
   end_time: string;
 };
 
-const api = useMock ? dashboardService : dashboardApi;
+const api = createApiSwitchWithMock(dashboardService, dashboardApi);
 
 export interface DashboardDataResponse {
   summary: DashboardSummary;
