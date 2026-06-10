@@ -50,6 +50,20 @@ func runApp(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("JWT secret validation failed: %w", err)
 	}
 
+	// #2: 启动期凭证 guardrail —— 生产环境下检测到默认/占位/已泄露凭证即拒启，
+	// 防止 omcgo123 / minioadmin / dps / REPLACE_ME 等随配置入 git 的密钥被直接
+	// 部署到生产。dev/test 自动跳过。
+	if err := appconfig.GuardProductionSecrets(
+		appconfig.SecretCheck{Field: "db.dsn(password)", Value: cfg.DB.DSN, IsDSN: true},
+		appconfig.SecretCheck{Field: "tsdb.dsn(password)", Value: cfg.TSDB.DSN, IsDSN: true},
+		appconfig.SecretCheck{Field: "minio.access_key", Value: cfg.MinIO.AccessKey},
+		appconfig.SecretCheck{Field: "minio.secret_key", Value: cfg.MinIO.SecretKey},
+		appconfig.SecretCheck{Field: "jwt.secret", Value: cfg.JWT.Secret},
+		appconfig.SecretCheck{Field: "conn_req.shared_secret", Value: cfg.ConnReq.SharedSecret},
+	); err != nil {
+		return fmt.Errorf("生产凭证校验失败: %w", err)
+	}
+
 	app, err := initApp(context.Background(), &cfg)
 	if err != nil {
 		return err

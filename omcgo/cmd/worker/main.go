@@ -72,6 +72,17 @@ func runWorker(cmd *cobra.Command, args []string) error {
 		cfg.Log.OutputPaths = parseStringSlice(outputPaths)
 	}
 
+	// #2: 启动期凭证 guardrail —— 生产环境下检测到默认/占位/已泄露凭证即拒启。
+	// Worker 持有 PG / TSDB / MinIO 凭证；dev/test 自动跳过。
+	if err := appconfig.GuardProductionSecrets(
+		appconfig.SecretCheck{Field: "db.dsn(password)", Value: cfg.DB.DSN, IsDSN: true},
+		appconfig.SecretCheck{Field: "tsdb.dsn(password)", Value: cfg.TSDB.DSN, IsDSN: true},
+		appconfig.SecretCheck{Field: "minio.access_key", Value: cfg.MinIO.AccessKey},
+		appconfig.SecretCheck{Field: "minio.secret_key", Value: cfg.MinIO.SecretKey},
+	); err != nil {
+		return fmt.Errorf("生产凭证校验失败: %w", err)
+	}
+
 	ctx := context.Background()
 	w, err := initWorker(ctx, &cfg)
 	if err != nil {
