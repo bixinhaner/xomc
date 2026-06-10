@@ -292,23 +292,65 @@ func (r *PgTaskRepository) ListOpenByDeviceAndMethods(ctx context.Context, devic
 	return tasks, nil
 }
 
+// defaultPendingBatchLimit 是 ListPendingAllDevices 在调用方未给上界（limit<=0）时
+// 的兜底批大小。百万设备下 device_tasks 的 pending 行可能极多，一次性 SELECT 全量
+// 入内存会 OOM（#11）。RestorePendingQueues 走 ListPendingPage 流式分批恢复，本兜底
+// 仅防御直连本方法且不传上界的旧调用。
+const defaultPendingBatchLimit = 1000
+
+// PendingCursor 是 pending 任务列表的 keyset 游标。零值（CreatedAt 零 + ID 空）
+// 表示从头开始。按 (created_at, id) 升序推进，id 作 created_at 相同的 tiebreaker，
+// 保证翻页不漏不重（OFFSET 在大表上随页深线性变慢，keyset 恒定代价）。
+type PendingCursor struct {
+	CreatedAt time.Time
+	ID        string
+}
+
+// IsZero 报告游标是否为初始（从头扫）。
+func (c PendingCursor) IsZero() bool {
+	return c.ID == "" && c.CreatedAt.IsZero()
+}
+
 // ListPendingAllDevices 列出所有 pending 状态的任务（用于 RestorePendingQueues）。
+//
+// limit<=0 时不再隐式拉全表，而是落 defaultPendingBatchLimit 兜底上界防 OOM（#11）。
+// 大规模恢复请走 ListPendingPage 流式分批，避免整批驻留内存。
 func (r *PgTaskRepository) ListPendingAllDevices(ctx context.Context, limit int) ([]*Task, error) {
+	if limit <= 0 {
+		limit = defaultPendingBatchLimit
+	}
+	return r.ListPendingPage(ctx, PendingCursor{}, limit)
+}
+
+// buildPendingPageSQL 构造 keyset 分页查询 SQL。抽出供单测验证游标谓词，
+// 运行期由 ListPendingPage 调用。
+func buildPendingPageSQL(after PendingCursor, batchSize int) (string, []any, error) {
+	if batchSize <= 0 {
+		batchSize = defaultPendingBatchLimit
+	}
 	q := storage.Psql.Select(taskColumns()...).
 		From("device_tasks").
-		Where(sq.Eq{"status": TaskStatusPending}).
-		OrderBy("created_at ASC")
-	if limit > 0 {
-		q = q.Limit(uint64(limit))
+		Where(sq.Eq{"status": TaskStatusPending})
+	if !after.IsZero() {
+		// keyset：(created_at, id) > (cursor.created_at, cursor.id)，行级元组比较。
+		q = q.Where(sq.Expr("(created_at, id) > (?, ?)", after.CreatedAt, after.ID))
 	}
-	query, args, err := q.ToSql()
+	q = q.OrderBy("created_at ASC", "id ASC").Limit(uint64(batchSize))
+	return q.ToSql()
+}
+
+// ListPendingPage 按 keyset 游标返回一页 pending 任务（按 (created_at, id) 升序）。
+// 返回行数 < batchSize 表示已到末页。调用方用每页最后一条的 (CreatedAt, ID) 构造下一页
+// 游标继续推进，从而流式恢复而不必一次性把全量 pending 任务读入内存（#11）。
+func (r *PgTaskRepository) ListPendingPage(ctx context.Context, after PendingCursor, batchSize int) ([]*Task, error) {
+	query, args, err := buildPendingPageSQL(after, batchSize)
 	if err != nil {
-		return nil, fmt.Errorf("build list pending query: %w", err)
+		return nil, fmt.Errorf("build list pending page query: %w", err)
 	}
 
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("query pending tasks: %w", err)
+		return nil, fmt.Errorf("query pending tasks page: %w", err)
 	}
 	defer rows.Close()
 
@@ -319,6 +361,9 @@ func (r *PgTaskRepository) ListPendingAllDevices(ctx context.Context, limit int)
 			return nil, err
 		}
 		tasks = append(tasks, t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate pending tasks page: %w", err)
 	}
 	return tasks, nil
 }

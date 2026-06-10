@@ -38,6 +38,32 @@ type QueryRequest struct {
 	Offset      int
 }
 
+// LIMIT 边界（防 OOM）：pm_metrics 是时序大表，单次查询若无上界，恶意/误操作的宽时间窗 ×
+// 多设备 × 多 counter 组合可拉出百万行直接灌满进程内存。Query() 在存储层强制收口：
+//
+//   - QueryRequest.Limit <= 0 → 落 DefaultQueryLimit（不再隐式"全表扫"）。
+//   - QueryRequest.Limit > MaxQueryLimit → 收口到 MaxQueryLimit。
+//
+// MaxQueryLimit 取 100000，与既有调用方（QueryAggregated / QueryForKPI / adhoc executor）
+// 的"安全上限"常量一致，不改变这些合法批量路径的行为；仅对未设上界 / 设了超大值的查询兜底。
+// DefaultQueryLimit 取 1000，与 model.ListRequest 的分页 PageSize 上限同档，避免裸调 Query()
+// 误拉全表。分页仍由调用方经 Offset 游标推进（见 PgCounterRepository.Query 等）。
+const (
+	DefaultQueryLimit = 1000
+	MaxQueryLimit     = 100000
+)
+
+// clampLimit 把请求 Limit 收口到 [1, MaxQueryLimit]：<=0 落默认上界，超 Max 截到 Max。
+func clampLimit(limit int) int {
+	if limit <= 0 {
+		return DefaultQueryLimit
+	}
+	if limit > MaxQueryLimit {
+		return MaxQueryLimit
+	}
+	return limit
+}
+
 // PgRepository 是 Repository 的 TimescaleDB 实现。
 type PgRepository struct {
 	pool *pgxpool.Pool
@@ -58,7 +84,7 @@ func (r *PgRepository) Insert(ctx context.Context, m PMMetric) error {
 //	相同 (device_oui, device_sn, metric_path, granularity, end_time, time, object_ldn)
 //	再次写入时更新 metric_value（取新值）+ ingest_time（取 NOW()）。
 //
-// object_ldn 列 NOT NULL DEFAULT ''（migration 000171），nil 在此统一落 ''
+// object_ldn 列 NOT NULL DEFAULT ”（migration 000171），nil 在此统一落 ”
 // 避免 UNIQUE 索引 NULL ≠ NULL 破坏幂等语义；同时让同文件多 cell 同 counter_name
 // 不再因为缺 ldn 维度而撞 ON CONFLICT 二次命中（BUG-6）。
 //
@@ -136,8 +162,10 @@ func buildBatchInsertSQL(ms []PMMetric) (string, []any, error) {
 	return sql, args, nil
 }
 
-// Query 按条件查询。
-func (r *PgRepository) Query(ctx context.Context, q QueryRequest) ([]PMMetric, error) {
+// buildQuerySQL 构造 pm_metrics 查询 SQL。LIMIT 经 clampLimit 强制收口，
+// 保证任何输入（包括 Limit<=0 或超大值）都生成有上界的查询，防 OOM。
+// 抽出供单测验证 LIMIT 边界，运行期由 Query 调用。
+func buildQuerySQL(q QueryRequest) (string, []any, error) {
 	qb := storage.Psql.Select(
 		"id", "device_oui", "device_sn", "metric_path", "metric_type", "metric_value",
 		"statis_type", "granularity", "time", "start_time", "end_time",
@@ -146,15 +174,22 @@ func (r *PgRepository) Query(ctx context.Context, q QueryRequest) ([]PMMetric, e
 
 	qb = applyFilters(qb, q)
 	qb = qb.OrderBy("time DESC")
-	if q.Limit > 0 {
-		qb = qb.Limit(uint64(q.Limit))
-	}
+	qb = qb.Limit(uint64(clampLimit(q.Limit)))
 	if q.Offset > 0 {
 		qb = qb.Offset(uint64(q.Offset))
 	}
 	sql, args, err := qb.ToSql()
 	if err != nil {
-		return nil, fmt.Errorf("build pm_metrics query: %w", err)
+		return "", nil, fmt.Errorf("build pm_metrics query: %w", err)
+	}
+	return sql, args, nil
+}
+
+// Query 按条件查询。
+func (r *PgRepository) Query(ctx context.Context, q QueryRequest) ([]PMMetric, error) {
+	sql, args, err := buildQuerySQL(q)
+	if err != nil {
+		return nil, err
 	}
 	rows, err := r.pool.Query(ctx, sql, args...)
 	if err != nil {

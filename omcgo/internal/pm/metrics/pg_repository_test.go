@@ -128,6 +128,68 @@ func Test_applyFilters_Combined(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// LIMIT 边界（#11）：Query 经 buildQuerySQL 强制收口，防 OOM
+// ---------------------------------------------------------------------------
+
+func Test_clampLimit(t *testing.T) {
+	tests := []struct {
+		name string
+		in   int
+		want int
+	}{
+		{"zero falls back to default", 0, DefaultQueryLimit},
+		{"negative falls back to default", -5, DefaultQueryLimit},
+		{"in range passes through", 500, 500},
+		{"exactly max passes through", MaxQueryLimit, MaxQueryLimit},
+		{"over max clamped to max", MaxQueryLimit + 1, MaxQueryLimit},
+		{"huge clamped to max", 1 << 30, MaxQueryLimit},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, clampLimit(tt.in))
+		})
+	}
+}
+
+// 成功路径：合理 Limit 原样下推。
+func Test_buildQuerySQL_LimitInRange(t *testing.T) {
+	sql, _, err := buildQuerySQL(QueryRequest{Limit: 200})
+	require.NoError(t, err)
+	assert.Contains(t, sql, "LIMIT 200")
+}
+
+// 防 OOM 路径：Limit<=0 不再生成无上界查询，落 DefaultQueryLimit。
+func Test_buildQuerySQL_NoLimit_ForcesDefault(t *testing.T) {
+	sql, _, err := buildQuerySQL(QueryRequest{Limit: 0})
+	require.NoError(t, err)
+	assert.Contains(t, sql, "LIMIT 1000")
+	assert.NotContains(t, sql, "LIMIT 0", "Limit=0 必须落默认上界而非裸全表扫")
+}
+
+// 防 OOM 路径：超大 Limit 被收口到 MaxQueryLimit。
+func Test_buildQuerySQL_OversizedLimit_ClampedToMax(t *testing.T) {
+	sql, _, err := buildQuerySQL(QueryRequest{Limit: 5_000_000})
+	require.NoError(t, err)
+	assert.Contains(t, sql, "LIMIT 100000")
+	assert.NotContains(t, sql, "LIMIT 5000000")
+}
+
+// Offset 与 LIMIT 共存：分页游标仍可推进。
+func Test_buildQuerySQL_WithOffset(t *testing.T) {
+	sql, _, err := buildQuerySQL(QueryRequest{Limit: 100, Offset: 300})
+	require.NoError(t, err)
+	assert.Contains(t, sql, "LIMIT 100")
+	assert.Contains(t, sql, "OFFSET 300")
+}
+
+// 任意 Query 都必须带 LIMIT（即使空过滤），防止裸 Query() 拉全表。
+func Test_buildQuerySQL_EmptyRequest_StillBounded(t *testing.T) {
+	sql, _, err := buildQuerySQL(QueryRequest{})
+	require.NoError(t, err)
+	assert.Contains(t, sql, "LIMIT")
+}
+
+// ---------------------------------------------------------------------------
 // buildBatchInsertSQL：BUG-6 自然键含 object_ldn 回归测试
 // ---------------------------------------------------------------------------
 
@@ -193,7 +255,7 @@ func Test_buildBatchInsertSQL_MultiCell_NoNaturalKeyCollision(t *testing.T) {
 	assert.NotContains(t, sql, "NULL")
 }
 
-// nil ObjectLDN 落参数时统一为 ''（migration 000171 要求 NOT NULL DEFAULT ''）。
+// nil ObjectLDN 落参数时统一为 ”（migration 000171 要求 NOT NULL DEFAULT ”）。
 func Test_buildBatchInsertSQL_NilObjectLDN_FallsBackToEmptyString(t *testing.T) {
 	ms := []PMMetric{metricWithLDN("L.Cell.Avail", "", false)}
 	_, args, err := buildBatchInsertSQL(ms)

@@ -534,6 +534,16 @@ type pendingTaskLister interface {
 	ListPendingAllDevices(ctx context.Context, limit int) ([]*Task, error)
 }
 
+// pendingPageLister 是 keyset 流式分页能力（#11）。生产 PgTaskRepository 实现它，
+// RestorePendingQueues 在调用方未给显式上界（limit<=0）时按页恢复，避免把全量
+// pending 任务一次性读入内存。仅实现 pendingTaskLister 的 mock 退回单批路径。
+type pendingPageLister interface {
+	ListPendingPage(ctx context.Context, after PendingCursor, batchSize int) ([]*Task, error)
+}
+
+// restorePageBatchSize 是流式恢复的每页行数。每页处理完即可被 GC，内存占用恒定。
+const restorePageBatchSize = 1000
+
 // taskEnqueuer 抽象 RestorePendingQueues 依赖的 Redis 队列能力（便于单测 mock）。
 type taskEnqueuer interface {
 	Exists(ctx context.Context, deviceSN, taskID string) (bool, error)
@@ -550,6 +560,10 @@ func (s *TaskService) RestorePendingQueues(ctx context.Context, limit int) (Rest
 }
 
 // restorePendingQueues 是 RestorePendingQueues 的可测试实现，接受小接口。
+//
+// limit<=0 且 lister 支持 keyset 分页（pendingPageLister）时走流式恢复：按 (created_at, id)
+// 游标逐页拉取并灌入 Redis，每页处理完即释放，内存占用恒定，避免百万 pending 任务 OOM（#11）。
+// limit>0（调用方给了显式上界）或 lister 不支持分页时，退回单批 ListPendingAllDevices。
 func restorePendingQueues(
 	ctx context.Context,
 	lister pendingTaskLister,
@@ -557,35 +571,36 @@ func restorePendingQueues(
 	log *zap.Logger,
 	limit int,
 ) (RestoreStats, error) {
-	tasks, err := lister.ListPendingAllDevices(ctx, limit)
-	if err != nil {
-		return RestoreStats{}, fmt.Errorf("list pending tasks: %w", err)
-	}
+	var stats RestoreStats
 
-	stats := RestoreStats{Scanned: len(tasks)}
-	for _, t := range tasks {
-		exists, err := enq.Exists(ctx, t.DeviceSN, t.ID)
+	if pager, ok := lister.(pendingPageLister); ok && limit <= 0 {
+		cursor := PendingCursor{}
+		for {
+			tasks, err := pager.ListPendingPage(ctx, cursor, restorePageBatchSize)
+			if err != nil {
+				return stats, fmt.Errorf("list pending tasks: %w", err)
+			}
+			if len(tasks) == 0 {
+				break
+			}
+			for _, t := range tasks {
+				restoreOnePendingTask(ctx, enq, log, t, &stats)
+			}
+			// 末页：返回行数不足一批，无更多数据。
+			if len(tasks) < restorePageBatchSize {
+				break
+			}
+			last := tasks[len(tasks)-1]
+			cursor = PendingCursor{CreatedAt: last.CreatedAt, ID: last.ID}
+		}
+	} else {
+		tasks, err := lister.ListPendingAllDevices(ctx, limit)
 		if err != nil {
-			log.Warn("check queue existence",
-				zap.String("task_id", t.ID),
-				zap.String("device_sn", t.DeviceSN),
-				zap.Error(err))
-			stats.Failed++
-			continue
+			return stats, fmt.Errorf("list pending tasks: %w", err)
 		}
-		if exists {
-			stats.Skipped++
-			continue
+		for _, t := range tasks {
+			restoreOnePendingTask(ctx, enq, log, t, &stats)
 		}
-		if err := enq.Push(ctx, t); err != nil {
-			log.Warn("push pending task to queue",
-				zap.String("task_id", t.ID),
-				zap.String("device_sn", t.DeviceSN),
-				zap.Error(err))
-			stats.Failed++
-			continue
-		}
-		stats.Pushed++
 	}
 
 	log.Info("restore pending task queues done",
@@ -595,6 +610,40 @@ func restorePendingQueues(
 		zap.Int("failed", stats.Failed))
 
 	return stats, nil
+}
+
+// restoreOnePendingTask 把单条 pending 任务幂等灌入 Redis 队列并累加统计。
+// Redis 中已存在则跳过（多实例并发启动 / Redis 持久化重启都可能导致队列非空）。
+func restoreOnePendingTask(
+	ctx context.Context,
+	enq taskEnqueuer,
+	log *zap.Logger,
+	t *Task,
+	stats *RestoreStats,
+) {
+	stats.Scanned++
+	exists, err := enq.Exists(ctx, t.DeviceSN, t.ID)
+	if err != nil {
+		log.Warn("check queue existence",
+			zap.String("task_id", t.ID),
+			zap.String("device_sn", t.DeviceSN),
+			zap.Error(err))
+		stats.Failed++
+		return
+	}
+	if exists {
+		stats.Skipped++
+		return
+	}
+	if err := enq.Push(ctx, t); err != nil {
+		log.Warn("push pending task to queue",
+			zap.String("task_id", t.ID),
+			zap.String("device_sn", t.DeviceSN),
+			zap.Error(err))
+		stats.Failed++
+		return
+	}
+	stats.Pushed++
 }
 
 // GetTaskStats 获取任务统计
@@ -780,4 +829,3 @@ func SubjectForStatus(status TaskStatus) string {
 }
 
 // TaskHistoryOptions 任务历史查询选项（定义在 model.go）
-

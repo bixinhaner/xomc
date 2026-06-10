@@ -195,6 +195,18 @@ func (r *PgDeviceInfoRepository) GetTopologyAttributes(ctx context.Context, devi
 	return out, nil
 }
 
+// softwareVersionDeviceIDSubquery 构造 software_version 过滤用的 device_id 子查询
+// （供 device list 主查询与 count 查询共用，并便于单测验证 DISTINCT 优化，#11）。
+//
+// 用 SELECT DISTINCT device_id：device_parameters 对同一 device_id 可能存在多行
+// （历史保留 / 多 instance 路径），不去重则 IN (...) 半连接需扫并去重更多行，百万设备
+// 规模下浪费 I/O；DISTINCT 让 PG 先 HashAggregate 收口为唯一 device_id 集合。
+func softwareVersionDeviceIDSubquery(versions []string) sq.SelectBuilder {
+	return sq.Select("DISTINCT device_id").From("device_parameters").
+		Where(sq.Eq{"parameter_path": "Device.DeviceInfo.SoftwareVersion"}).
+		Where(sq.Eq{"parameter_value": versions})
+}
+
 func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter DeviceFilter) (*model.ListResponse[DeviceWithInfo], error) {
 	selectCols := deviceWithInfoSelectColumns()
 	builder := storage.Psql.Select(selectCols...).
@@ -279,12 +291,9 @@ func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter
 		countBuilder = countBuilder.Where(sq.Eq{"d.firmware_version": vs})
 	}
 	// T-0162: software_version 走 device_parameters TR-069 标准路径，不在
-	// device_info 表（与 seed/000137 device_parameters 灌入 distinct 一致）
+	// device_info 表（与 seed/000137 device_parameters 灌入 distinct 一致）。
 	if filter.SoftwareVersion != nil && *filter.SoftwareVersion != "" {
-		vs := SplitCSV(*filter.SoftwareVersion)
-		sub := sq.Select("device_id").From("device_parameters").
-			Where(sq.Eq{"parameter_path": "Device.DeviceInfo.SoftwareVersion"}).
-			Where(sq.Eq{"parameter_value": vs})
+		sub := softwareVersionDeviceIDSubquery(SplitCSV(*filter.SoftwareVersion))
 		builder = builder.Where(sq.Expr("d.id IN (?)", sub))
 		countBuilder = countBuilder.Where(sq.Expr("d.id IN (?)", sub))
 	}
@@ -544,9 +553,7 @@ func applyDeviceFilters(b sq.SelectBuilder, filter DeviceFilter) sq.SelectBuilde
 		b = b.Where(sq.Eq{"d.firmware_version": SplitCSV(*filter.FirmwareVersion)})
 	}
 	if filter.SoftwareVersion != nil && *filter.SoftwareVersion != "" {
-		sub := sq.Select("device_id").From("device_parameters").
-			Where(sq.Eq{"parameter_path": "Device.DeviceInfo.SoftwareVersion"}).
-			Where(sq.Eq{"parameter_value": SplitCSV(*filter.SoftwareVersion)})
+		sub := softwareVersionDeviceIDSubquery(SplitCSV(*filter.SoftwareVersion))
 		b = b.Where(sq.Expr("d.id IN (?)", sub))
 	}
 	if filter.OUI != nil {

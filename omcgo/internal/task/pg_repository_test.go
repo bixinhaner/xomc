@@ -438,3 +438,44 @@ func TestPgRepo_Integration_ListPendingAllDevices(t *testing.T) {
 	require.NoError(t, err)
 	assert.GreaterOrEqual(t, len(all0), 3)
 }
+
+// ---------------------------------------------------------------------------
+// buildPendingPageSQL：keyset 分页 SQL 单测（#11，不依赖 PG）
+// ---------------------------------------------------------------------------
+
+// 首页（零游标）：不带 keyset 谓词，仅 status + ORDER BY + LIMIT。
+func Test_buildPendingPageSQL_FirstPage(t *testing.T) {
+	sql, args, err := buildPendingPageSQL(PendingCursor{}, 500)
+	require.NoError(t, err)
+	assert.Contains(t, sql, "status = $1")
+	assert.Contains(t, sql, "ORDER BY created_at ASC, id ASC")
+	assert.Contains(t, sql, "LIMIT 500")
+	assert.NotContains(t, sql, "(created_at, id) >", "零游标不应带 keyset 谓词")
+	// 仅 status 一个参数（squirrel 以 TaskStatus 原类型入参，pgx 端转 text）。
+	require.Len(t, args, 1)
+	assert.Equal(t, TaskStatusPending, args[0])
+}
+
+// 后续页（非零游标）：带 (created_at, id) > (...) 元组谓词推进（storage.Psql 用 $N 占位）。
+func Test_buildPendingPageSQL_NextPage_Keyset(t *testing.T) {
+	cur := PendingCursor{CreatedAt: time.Date(2026, 6, 10, 1, 0, 0, 0, time.UTC), ID: "abc"}
+	sql, args, err := buildPendingPageSQL(cur, 500)
+	require.NoError(t, err)
+	assert.Contains(t, sql, "(created_at, id) > ($2, $3)")
+	// status + created_at + id = 3 个参数。
+	require.Len(t, args, 3)
+	assert.Equal(t, "abc", args[2])
+}
+
+// batchSize<=0 落默认上界，避免无上界拉全量（#11）。
+func Test_buildPendingPageSQL_ZeroBatch_FallsBackToDefault(t *testing.T) {
+	sql, _, err := buildPendingPageSQL(PendingCursor{}, 0)
+	require.NoError(t, err)
+	assert.Contains(t, sql, fmt.Sprintf("LIMIT %d", defaultPendingBatchLimit))
+}
+
+func Test_PendingCursor_IsZero(t *testing.T) {
+	assert.True(t, PendingCursor{}.IsZero())
+	assert.False(t, PendingCursor{ID: "x"}.IsZero())
+	assert.False(t, PendingCursor{CreatedAt: time.Now()}.IsZero())
+}
