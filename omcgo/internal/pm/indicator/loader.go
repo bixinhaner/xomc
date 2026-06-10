@@ -15,6 +15,7 @@ import (
 
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/dictloader"
+	"github.com/omcgo/omcgo/internal/core/reliability"
 )
 
 // LoaderName 是 dictloader.Registry 中的注册名（T-0098 P1-06）。
@@ -138,7 +139,7 @@ func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
 	if err != nil {
 		return rep, fmt.Errorf("begin tx: %w", err)
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	defer reliability.RollbackTx(ctx, tx, l.logger, "indicator.Loader.run")
 
 	// 3a) units 已下线:指标单位改由数据字典(sys_dictionaries type='indicator_unit')
 	//     统一管理,初始化走 migrations/seed/000007;Loader 不再写 indicator_unit 表。

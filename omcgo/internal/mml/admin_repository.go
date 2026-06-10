@@ -11,7 +11,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/core/reliability"
 	"github.com/omcgo/omcgo/internal/core/storage"
 )
 
@@ -85,12 +87,24 @@ type SubFieldRepository interface {
 
 // PgSubFieldRepository PostgreSQL 实现。
 type PgSubFieldRepository struct {
-	pool *pgxpool.Pool
+	pool   *pgxpool.Pool
+	logger *zap.Logger
 }
 
 // NewPgSubFieldRepository 构造 PgSubFieldRepository。
+//
+// logger 默认为 NopLogger，保持构造签名向后兼容（既有测试不传 logger）；
+// 生产经 WithLogger 注入真实 logger 以观测事务回滚失败（MEDIUM-18）。
 func NewPgSubFieldRepository(pool *pgxpool.Pool) *PgSubFieldRepository {
-	return &PgSubFieldRepository{pool: pool}
+	return &PgSubFieldRepository{pool: pool, logger: zap.NewNop()}
+}
+
+// WithLogger 注入 logger 以记录事务回滚失败，返回自身便于链式调用。
+func (r *PgSubFieldRepository) WithLogger(logger *zap.Logger) *PgSubFieldRepository {
+	if logger != nil {
+		r.logger = logger.Named("mml-subfield-repo")
+	}
+	return r
 }
 
 var _ SubFieldRepository = (*PgSubFieldRepository)(nil)
@@ -492,7 +506,7 @@ func (r *PgSubFieldRepository) BatchCreate(ctx context.Context, items []*MMLComm
 	if err != nil {
 		return fmt.Errorf("begin batch tx: %w", err)
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	defer reliability.RollbackTx(ctx, tx, r.logger, "PgSubFieldRepository.BatchCreate")
 
 	for _, sf := range items {
 		if sf.ID == uuid.Nil {

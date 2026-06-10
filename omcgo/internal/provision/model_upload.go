@@ -35,6 +35,7 @@ type ModelUploadService struct {
 	intersectService *parammodel.IntersectService
 	config           appconfig.ModelUploadConfig
 	logger           *zap.Logger
+	metrics          *Metrics
 }
 
 // NewModelUploadService creates a new ModelUploadService.
@@ -55,6 +56,29 @@ func NewModelUploadService(
 		intersectService: intersect,
 		config:           config,
 		logger:           logger.Named("model-upload"),
+	}
+}
+
+// SetMetrics 注入 provisioning 指标集合，供 discovery_log 状态写库失败计数
+// （HIGH-27）。nil 表示禁用（updateDiscoveryStatus 仍记 warn，仅不打点）。
+func (s *ModelUploadService) SetMetrics(m *Metrics) {
+	s.metrics = m
+}
+
+// updateDiscoveryStatus 统一封装 housekeeping 类 discovery_log 状态写库：
+// 失败时记 warn + 打点（discovery_status_update_errors_total{operation}），但不
+// 阻断主流程（HIGH-27 建议——非关键路径 log+metric，关键路径返回错误由调用方处理）。
+func (s *ModelUploadService) updateDiscoveryStatus(
+	ctx context.Context, logID uuid.UUID, status DiscoveryStatus, msg, operation, deviceSN string,
+) {
+	if err := s.discoveryRepo.UpdateStatus(ctx, logID, status, msg); err != nil {
+		s.metrics.discoveryStatusUpdateErr(operation)
+		s.logger.Warn("failed to update discovery log status",
+			zap.String("device_sn", deviceSN),
+			zap.String("operation", operation),
+			zap.String("log_id", logID.String()),
+			zap.String("target_status", string(status)),
+			zap.Error(err))
 	}
 }
 
@@ -84,7 +108,8 @@ func (s *ModelUploadService) RequestModelUpload(ctx context.Context, dev *model.
 	}
 
 	if prod, ok := s.resolveProduct(ctx, dev); ok && !prod.EnableFileType11 {
-		_ = s.discoveryRepo.UpdateStatus(ctx, log.ID, DiscoveryCompleted, "skipped: enable_filetype11=false")
+		s.updateDiscoveryStatus(ctx, log.ID, DiscoveryCompleted,
+			"skipped: enable_filetype11=false", "skipped_fileupload", dev.SerialNumber)
 		s.logger.Info("model upload skipped per product policy",
 			zap.String("device_sn", dev.SerialNumber),
 			zap.String("product_id", prod.ID.String()),
@@ -118,7 +143,11 @@ func (s *ModelUploadService) RequestModelUpload(ctx context.Context, dev *model.
 		Source:     task.TaskSourceSystem,
 		SourceID:   sourceID,
 	}); err != nil {
-		_ = s.discoveryRepo.UpdateStatus(ctx, log.ID, DiscoveryFailed, err.Error())
+		// 关键路径：CreateTask 失败的错误向上传播给调用方（HIGH-27）。
+		// 写 DiscoveryFailed 是 best-effort 旁路标记，其自身写库失败不应掩盖
+		// 真正的 CreateTask 错误，故用 helper 记 warn+metric 后仍返回原错误。
+		s.updateDiscoveryStatus(ctx, log.ID, DiscoveryFailed, err.Error(),
+			"create_task_failed", dev.SerialNumber)
 		return nil, fmt.Errorf("enqueue Upload command: %w", err)
 	}
 
@@ -180,7 +209,7 @@ func (s *ModelUploadService) HandleModelFileReceived(ctx context.Context, dev *m
 	if err != nil {
 		errMsg := fmt.Sprintf("get object from MinIO: %v", err)
 		if log != nil {
-			_ = s.discoveryRepo.UpdateStatus(ctx, log.ID, DiscoveryFailed, errMsg)
+			s.updateDiscoveryStatus(ctx, log.ID, DiscoveryFailed, errMsg, "minio_get_failed", dev.SerialNumber)
 		}
 		return fmt.Errorf("get object from MinIO %s/%s: %w", payload.MinioBucket, payload.MinioPath, err)
 	}
@@ -190,7 +219,7 @@ func (s *ModelUploadService) HandleModelFileReceived(ctx context.Context, dev *m
 	if err != nil {
 		errMsg := fmt.Sprintf("parse XML: %v", err)
 		if log != nil {
-			_ = s.discoveryRepo.UpdateStatus(ctx, log.ID, DiscoveryFailed, errMsg)
+			s.updateDiscoveryStatus(ctx, log.ID, DiscoveryFailed, errMsg, "parse_xml_failed", dev.SerialNumber)
 		}
 		return fmt.Errorf("parse parameter model XML: %w", err)
 	}
@@ -199,14 +228,14 @@ func (s *ModelUploadService) HandleModelFileReceived(ctx context.Context, dev *m
 	if !ok {
 		errMsg := fmt.Sprintf("cannot resolve product for productClass=%s", dev.ProductClass)
 		if log != nil {
-			_ = s.discoveryRepo.UpdateStatus(ctx, log.ID, DiscoveryFailed, errMsg)
+			s.updateDiscoveryStatus(ctx, log.ID, DiscoveryFailed, errMsg, "product_unresolved", dev.SerialNumber)
 		}
 		return fmt.Errorf("%s", errMsg)
 	}
 	if dev.FirmwareVersion == "" {
 		errMsg := "empty firmware version"
 		if log != nil {
-			_ = s.discoveryRepo.UpdateStatus(ctx, log.ID, DiscoveryFailed, errMsg)
+			s.updateDiscoveryStatus(ctx, log.ID, DiscoveryFailed, errMsg, "empty_firmware", dev.SerialNumber)
 		}
 		return fmt.Errorf("%s", errMsg)
 	}
@@ -214,7 +243,7 @@ func (s *ModelUploadService) HandleModelFileReceived(ctx context.Context, dev *m
 	if s.intersectService == nil {
 		errMsg := "intersect service not configured"
 		if log != nil {
-			_ = s.discoveryRepo.UpdateStatus(ctx, log.ID, DiscoveryFailed, errMsg)
+			s.updateDiscoveryStatus(ctx, log.ID, DiscoveryFailed, errMsg, "intersect_unconfigured", dev.SerialNumber)
 		}
 		return fmt.Errorf("%s", errMsg)
 	}
@@ -227,7 +256,7 @@ func (s *ModelUploadService) HandleModelFileReceived(ctx context.Context, dev *m
 	if err != nil {
 		errMsg := fmt.Sprintf("intersect cpe model: %v", err)
 		if log != nil {
-			_ = s.discoveryRepo.UpdateStatus(ctx, log.ID, DiscoveryFailed, errMsg)
+			s.updateDiscoveryStatus(ctx, log.ID, DiscoveryFailed, errMsg, "intersect_failed", dev.SerialNumber)
 		}
 		return fmt.Errorf("intersect cpe model: %w", err)
 	}

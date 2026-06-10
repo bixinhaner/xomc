@@ -10,9 +10,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.uber.org/zap"
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/reliability"
 	"github.com/omcgo/omcgo/internal/core/storage"
 )
 
@@ -645,12 +647,24 @@ var _ TaskRepository = (*PgTaskRepository)(nil)
 
 // PgTaskRepository is a PostgreSQL implementation of TaskRepository.
 type PgTaskRepository struct {
-	pool *pgxpool.Pool
+	pool   *pgxpool.Pool
+	logger *zap.Logger
 }
 
 // NewPgTaskRepository creates a new PgTaskRepository.
+//
+// logger 默认为 NopLogger，保持构造签名向后兼容；生产经 WithLogger 注入真实
+// logger 以观测事务回滚失败（MEDIUM-18）。
 func NewPgTaskRepository(pool *pgxpool.Pool) *PgTaskRepository {
-	return &PgTaskRepository{pool: pool}
+	return &PgTaskRepository{pool: pool, logger: zap.NewNop()}
+}
+
+// WithLogger 注入 logger 以记录事务回滚失败，返回自身便于链式调用。
+func (r *PgTaskRepository) WithLogger(logger *zap.Logger) *PgTaskRepository {
+	if logger != nil {
+		r.logger = logger.Named("mml-task-repo")
+	}
+	return r
 }
 
 func (r *PgTaskRepository) Create(ctx context.Context, task *MMLTask) error {
@@ -1160,7 +1174,7 @@ func (r *PgTaskRepository) ClaimDueTasks(ctx context.Context, now time.Time, lim
 	if err != nil {
 		return nil, fmt.Errorf("begin claim tx: %w", err)
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	defer reliability.RollbackTx(ctx, tx, r.logger, "PgTaskRepository.ClaimDueTasks")
 
 	// 1) 认领 scheduled（一次性任务）——立刻置 running、清 next_trigger_at。
 	selectSQL := `

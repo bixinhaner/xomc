@@ -127,7 +127,7 @@ func initPMModule(c *Container) error {
 	// 单位定义已迁移到数据字典(seed/000007),units CRUD 下线,不再注入 unit repo。
 	indicatorReloader := &indicatorReloader{reg: c.DictLoaderRegistry}
 	// fileRepo 由 FileHandler 用于上传后的 destructive 重载(删孤儿)
-	indicatorFileRepo := indicator.NewPgFileRepository(c.PgPool)
+	indicatorFileRepo := indicator.NewPgFileRepository(c.PgPool, logger)
 	// 2026-06-03 用户决策:import-directory / cache/refresh 端点已下线,RESTHandler 只保留行级 CRUD
 	indicatorRESTHandler := indicator.NewRESTHandler(
 		indicatorSvc, platformFormulaRepo, logger.Named("indicator-rest"),

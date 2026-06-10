@@ -157,8 +157,15 @@ func (h *Handler) startSessionReaper(interval, maxAge time.Duration) {
 
 // reapOrphanedSession 清理孤儿设备会话。
 // 从 Redis 加载会话（如果仍存在），调用 completeSession 释放资源并触发 postSessionWake。
+//
+// MEDIUM-17：使用带 5s 超时的 ctx（不用裸 context.Background()）。reaper 在后台
+// goroutine 运行，进程优雅关机时 GracefulShutdown 已开始计时；若用无限期
+// Background ctx，sessionStore.GetByID / completeSession 中的 Redis 操作可能在
+// Redis 慢/不可达时无限阻塞，拖住关机并占住会话槽位回收。5s deadline 对齐
+// postSessionWake 里已有的 5s 模式（Redis 正常路径毫秒级完成，不受影响）。
 func (h *Handler) reapOrphanedSession(entry *deviceSessionEntry, reason string) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
 	// 尝试从 Redis 加载会话，获取完整会话数据用于 completeSession。
 	session, err := h.sessionStore.GetByID(ctx, entry.SessionID)

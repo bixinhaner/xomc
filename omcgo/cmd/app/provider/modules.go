@@ -560,6 +560,9 @@ func initProvisionModule(c *Container) error {
 		c.Carriers, c.TaskSvc, c.EventBus, c.Cfg.Provision, logger,
 	)
 	provisionEngine.SetDeduper(c.Deduper)
+	// HIGH-27 / MEDIUM-19：provisioning 指标（discovery_log 状态写库失败、Redis 节流失败）。
+	provisionMetrics := provision.NewMetrics(c.MetricsReg)
+	provisionEngine.SetMetrics(provisionMetrics)
 	// T-0123: 注入 Redis 客户端供 device.online 节流（provision:online_sync:{deviceID} TTL=60s）+
 	// Path B 同步 reason 标签（provision:syncreason:{deviceID} TTL=10min）。
 	provisionEngine.SetRedisClient(c.Redis)
@@ -579,6 +582,7 @@ func initProvisionModule(c *Container) error {
 			c.ProductRegistry, c.ParamIntersect,
 			c.Cfg.Provision.ModelUpload, logger,
 		)
+		modelUploadSvc.SetMetrics(provisionMetrics)
 		provisionEngine.SetModelUploadService(modelUploadSvc)
 		logger.Info("model upload service enabled",
 			zap.String("upload_url", c.Cfg.Provision.ModelUpload.UploadURL))
@@ -1246,7 +1250,7 @@ func initMiscModules(c *Container) error {
 	// MML Console module
 	mmlCmdRepo := mml.NewPgCommandRepository(c.PgPool)
 	mmlScriptRepo := mml.NewPgScriptRepository(c.PgPool)
-	mmlTaskRepo := mml.NewPgTaskRepository(c.PgPool)
+	mmlTaskRepo := mml.NewPgTaskRepository(c.PgPool).WithLogger(logger)
 	mmlCustomCmdRepo := mml.NewPgCustomCommandRepository(c.PgPool)
 	mmlAuditRepo := mml.NewPgAuditRepository(c.PgPool)
 	mmlCmdParamRepo := mml.NewPgCommandParamRepository(c.PgPool)
@@ -1321,7 +1325,7 @@ func initMiscModules(c *Container) error {
 	// T-0123-P0：catalog 管理 admin 端点（mml_admin api_group）。
 	// catalog_protected 守护 / sentinel error → HTTP 403/404/409 翻译。
 	// mml_params 表已下线，AdminParamRepository / XMLImportService 已随之移除。
-	mmlSubFieldRepo := mml.NewPgSubFieldRepository(c.PgPool)
+	mmlSubFieldRepo := mml.NewPgSubFieldRepository(c.PgPool).WithLogger(logger)
 	mmlAdminGroupRepo := mml.NewPgAdminGroupRepository(c.PgPool)
 	mmlAdminCmdRepo := mml.NewPgAdminCommandRepository(c.PgPool)
 	mmlStandardParamRepo := mml.NewPgStandardParamRepository(c.PgPool)

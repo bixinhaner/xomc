@@ -18,6 +18,7 @@ import (
 
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/dictloader"
+	"github.com/omcgo/omcgo/internal/core/reliability"
 )
 
 // LoaderName 是 dictloader.Registry 中的注册名（也用于日志域）。
@@ -157,7 +158,7 @@ func (l *Loader) loadParamModelFile(ctx context.Context, path string) (int, erro
 	if err != nil {
 		return 0, fmt.Errorf("begin tx: %w", err)
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	defer reliability.RollbackTx(ctx, tx, l.logger, "loadParamModelFile")
 
 	// UPSERT param_models（按 name 唯一）
 	const upsertModel = `INSERT INTO param_models (name, total_entries, total_objects, total_params, is_active, loaded_from)
@@ -615,7 +616,7 @@ func (l *Loader) loadStandardModelFile(ctx context.Context, path string) (int, e
 	if err != nil {
 		return 0, fmt.Errorf("begin tx: %w", err)
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	defer reliability.RollbackTx(ctx, tx, l.logger, "loadStandardModelFile")
 
 	// TRUNCATE 不行：mml_command_sub_fields.standard_path_id 反向 FK 引用
 	// standard_params（migration 000113），即使 ON DELETE RESTRICT 也会被

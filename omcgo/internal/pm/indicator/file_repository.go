@@ -6,6 +6,9 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.uber.org/zap"
+
+	"github.com/omcgo/omcgo/internal/core/reliability"
 )
 
 // FileRepository 抽象 T-0180 P1.3+ XML 文件层级的 DB 操作。
@@ -100,11 +103,15 @@ type FileGroup struct {
 
 // PgFileRepository 是 FileRepository 的 PostgreSQL 实现。
 type PgFileRepository struct {
-	pool *pgxpool.Pool
+	pool   *pgxpool.Pool
+	logger *zap.Logger
 }
 
-func NewPgFileRepository(pool *pgxpool.Pool) *PgFileRepository {
-	return &PgFileRepository{pool: pool}
+func NewPgFileRepository(pool *pgxpool.Pool, logger *zap.Logger) *PgFileRepository {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+	return &PgFileRepository{pool: pool, logger: logger.Named("indicator-file-repo")}
 }
 
 // allowedTech 是 DeleteByLoadedFrom / CountByLoadedFrom 接受的合法 tech 值集合。
@@ -191,7 +198,7 @@ func (r *PgFileRepository) DeleteByLoadedFrom(ctx context.Context, tech, loadedF
 	if err != nil {
 		return 0, fmt.Errorf("begin tx: %w", err)
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	defer reliability.RollbackTx(ctx, tx, r.logger, "PgFileRepository.DeleteByLoadedFrom")
 
 	formulaSQL := fmt.Sprintf(`
 DELETE FROM rela_platform_indicator_formula_%s
@@ -296,7 +303,7 @@ func (r *PgFileRepository) DeleteOrphansBefore(ctx context.Context, tech string,
 	if err != nil {
 		return 0, fmt.Errorf("begin tx: %w", err)
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	defer reliability.RollbackTx(ctx, tx, r.logger, "PgFileRepository.DeleteOrphansBefore")
 
 	formulaSQL := fmt.Sprintf(`
 DELETE FROM rela_platform_indicator_formula_%s

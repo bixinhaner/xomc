@@ -11,6 +11,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/carrier"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/reliability"
 	"github.com/omcgo/omcgo/internal/core/tracing"
 	"github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/internal/product"
@@ -64,6 +65,7 @@ type ProvisioningEngine struct {
 	// 见 §C C2 修复路径）。T-0176-PR-D 注入。
 	deviceCache deviceCacheInvalidator
 	redisClient redis.UniversalClient
+	metrics     *Metrics
 	config      appconfig.ProvisionConfig
 	logger      *zap.Logger
 }
@@ -105,6 +107,54 @@ func (e *ProvisioningEngine) SetSyncService(svc *SyncService) {
 // nil 表示禁用 token bucket 节流（仍可正常处理事件，幂等性由下游 GPV/UPSERT 保证）。
 func (e *ProvisioningEngine) SetRedisClient(client redis.UniversalClient) {
 	e.redisClient = client
+}
+
+// SetMetrics 注入 provisioning 指标集合，供 Redis 节流失败计数（MEDIUM-19）。
+// nil 表示禁用打点（节流逻辑不变，仅不暴露失败计数）。
+func (e *ProvisioningEngine) SetMetrics(m *Metrics) {
+	e.metrics = m
+}
+
+// throttleSetNX 在节流路径执行 Redis SetNX，带短重试（MEDIUM-19）。
+//
+// 语义保持 fail-open：返回 (acquired, throttleAvailable)。
+//   - throttleAvailable=false（重试耗尽仍失败）→ 调用方放行（继续同步），但运维可
+//     从 provision_redis_throttle_failures_total{operation} 与 error 日志看到"节流
+//     已失效，重复同步可能发生"，Redis 故障 >5min 应告警；
+//   - acquired=false 且 throttleAvailable=true → 命中已有 token，调用方应跳过（节流）。
+//
+// 重试用 reliability.Retry（指数退退）抹平 Redis 抖动型瞬时故障——抖动期内重试
+// 通常即可拿到 token，避免直接 fail-open 放过重复 device.online 触发 GPV 风暴。
+// 整体重试时间窗用 1.5s 上限封顶，不拖慢事件处理热路径。
+func (e *ProvisioningEngine) throttleSetNX(
+	ctx context.Context, key, operation string, ttl time.Duration,
+) (acquired bool, throttleAvailable bool) {
+	if e.redisClient == nil {
+		return true, false
+	}
+
+	retryCtx, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
+	defer cancel()
+
+	cfg := reliability.RetryConfig{MaxAttempts: 3, BaseDelay: 100 * time.Millisecond, MaxDelay: 500 * time.Millisecond}
+	err := reliability.Retry(retryCtx, cfg, func(c context.Context) error {
+		ok, e2 := e.redisClient.SetNX(c, key, "1", ttl).Result()
+		if e2 != nil {
+			return e2
+		}
+		acquired = ok
+		return nil
+	})
+	if err != nil {
+		// 重试耗尽：fail-open（节流失效，放行），但打点 + Error 日志让运维可见。
+		e.metrics.redisThrottleFailure(operation)
+		e.logger.Error("redis throttling disabled, duplicates possible",
+			zap.String("operation", operation),
+			zap.String("key", key),
+			zap.Error(err))
+		return true, false
+	}
+	return acquired, true
 }
 
 // SetDeduper enables idempotent event handling for the provisioning engine.
@@ -316,16 +366,12 @@ func (e *ProvisioningEngine) HandleDeviceOnline(ctx context.Context, evt device.
 	)
 	defer span.End()
 
-	// Token bucket 节流：60s 内重复 device.online 跳过
+	// Token bucket 节流：60s 内重复 device.online 跳过。
+	// MEDIUM-19：SetNX 带短重试抹平 Redis 抖动；重试耗尽仍 fail-open（放行+打点）。
 	if e.redisClient != nil {
 		key := fmt.Sprintf("provision:online_sync:%s", evt.DeviceID.String())
-		acquired, err := e.redisClient.SetNX(ctx, key, "1", 60*time.Second).Result()
-		if err != nil {
-			// Redis 失败不阻断主流程：log warn 后继续（容忍 Redis 抖动期间允许重复同步）
-			e.logger.Warn("device.online token bucket SetNX failed",
-				zap.String("device_id", evt.DeviceID.String()),
-				zap.Error(err))
-		} else if !acquired {
+		acquired, _ := e.throttleSetNX(ctx, key, "device_online", 60*time.Second)
+		if !acquired {
 			e.logger.Debug("device.online throttled by token bucket",
 				zap.String("device_id", evt.DeviceID.String()),
 				zap.String("serial_number", evt.SerialNumber))
@@ -401,16 +447,12 @@ func (e *ProvisioningEngine) HandleFirmwareChanged(ctx context.Context, evt devi
 	)
 	defer span.End()
 
-	// 1. Redis 串行锁：防短时间内重复 firmware Inform 引发并发交集
+	// 1. Redis 串行锁：防短时间内重复 firmware Inform 引发并发交集。
+	// MEDIUM-19：SetNX 带短重试抹平 Redis 抖动；重试耗尽仍 fail-open（放行+打点）。
 	if e.redisClient != nil {
 		lockKey := fmt.Sprintf("provision:firmware_handling:%s", evt.DeviceID.String())
-		acquired, err := e.redisClient.SetNX(ctx, lockKey, "1", 10*time.Minute).Result()
-		if err != nil {
-			// Redis 失败不阻断：log warn 后继续推进（容忍 Redis 抖动）
-			e.logger.Warn("firmware.changed lock SetNX failed",
-				zap.String("device_id", evt.DeviceID.String()),
-				zap.Error(err))
-		} else if !acquired {
+		acquired, _ := e.throttleSetNX(ctx, lockKey, "firmware_changed", 10*time.Minute)
+		if !acquired {
 			e.logger.Debug("firmware handling already in progress, skip",
 				zap.String("device_id", evt.DeviceID.String()),
 				zap.String("serial_number", evt.SerialNumber))
