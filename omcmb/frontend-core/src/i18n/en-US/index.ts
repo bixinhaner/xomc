@@ -6579,6 +6579,63 @@ const messages: Record<string, string> = {
   'product.standardParams.col.changeApplies': 'Change Applies',
   'product.standardParams.col.min': 'Min',
   'product.standardParams.col.max': 'Max',
+
+  // -------------------------------------------------------------------------
+  // Batch input device SN (BatchInput component)
+  // -------------------------------------------------------------------------
+  'batchInput.title':            'Batch Input Device SN',
+  'batchInput.placeholder':      'Enter SN, one per line or separated by semicolon/space\ne.g.:\nSN000001\nSN000002;SN000003\nSN000004 SN000005',
+  'batchInput.hint':             'One SN per line, or separate with semicolons or spaces. Duplicates are removed automatically.',
+  'batchInput.hintMax':          ' Up to {max}.',
+  'batchInput.invalidFormat':    'Invalid SN format',
+  'batchInput.invalidList':      'The following {count} SN(s) {message}: {samples}',
+  'batchInput.exceedMax':        'A maximum of {max} SN(s) is supported, currently {current} entered',
+  'batchInput.emptyInput':       'Please enter at least one SN',
+  'batchInput.parseResult':      'Parsed result: ',
+  'batchInput.moreCount':        '+{count}',
+  'batchInput.totalCount':       '{count} total',
+  'batchInput.dedupSuffix':      ' (deduplicated, {origin} original)',
+
+  // -------------------------------------------------------------------------
+  // Device selector (DeviceSelector component + three tabs)
+  // -------------------------------------------------------------------------
+  'deviceSelector.title':            'Select Devices',
+  'deviceSelector.selected':         'Selected {count}',
+  'deviceSelector.unselected':       'Unselected {count}',
+  'deviceSelector.maxHint':          '(up to {max})',
+  'deviceSelector.clearSelected':    'Clear Selection',
+  'deviceSelector.tabByElement':     'By Element',
+  'deviceSelector.tabByClass':       'By Classification',
+  'deviceSelector.tabByTemplate':    'By Template',
+  'deviceSelector.searchPlaceholder':'Search by device name, SN, model...',
+  'deviceSelector.totalUnit':        '{count} total',
+  'deviceSelector.dim.region':       'Region',
+  'deviceSelector.dim.subnet':       'Subnet',
+  'deviceSelector.dim.networkType':  'Network Type',
+  'deviceSelector.dim.productClass': 'Product Class',
+  'deviceSelector.dim.vendor':       'Vendor',
+  'deviceSelector.dim.connStatus':   'Connection Status',
+  'deviceSelector.dim.engStatus':    'Engineering Status',
+  'deviceSelector.dim.site':         'Site',
+  'deviceSelector.matchedDevices':   'Matched Devices',
+  'deviceSelector.unit':             '',
+  'deviceSelector.addToSelected':    'Add to Selection',
+  'deviceSelector.tpl.allOnline':        'All Online Devices',
+  'deviceSelector.tpl.allOnlineDesc':    'All devices currently online',
+  'deviceSelector.tpl.allEnb':           'All eNB Devices',
+  'deviceSelector.tpl.allEnbDesc':       'Base stations with LTE network type',
+  'deviceSelector.tpl.allGnb':           'All gNB Devices',
+  'deviceSelector.tpl.allGnbDesc':       'Base stations with NR network type',
+  'deviceSelector.tpl.alarmDevices':     'Devices with Alarms',
+  'deviceSelector.tpl.alarmDevicesDesc': 'Devices with active alarms',
+  'deviceSelector.tpl.unmanaged':        'Unmanaged Devices',
+  'deviceSelector.tpl.unmanagedDesc':    'Devices in unmanaged or pre-managed state',
+  'deviceSelector.tpl.typeAll':          'All',
+  'deviceSelector.tpl.colName':          'Template Name',
+  'deviceSelector.tpl.colDeviceType':    'Device Type',
+  'deviceSelector.tpl.selectedTag':      'Selected',
+  'deviceSelector.tpl.apply':            'Apply',
+  'deviceSelector.tpl.hint':             'Select a preset template to quickly add devices. After applying, review and adjust under "Selected Devices".',
 };
 
 export default messages;

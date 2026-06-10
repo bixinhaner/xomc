@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Alert, Modal, Space, Tag, Typography } from 'antd';
 import { useThemeToken } from '@/hooks/useThemeToken';
+import { useT } from '@/hooks/useT';
 
 export interface BatchInputProps {
   visible: boolean;
@@ -12,20 +13,22 @@ export interface BatchInputProps {
   maxCount?: number;
 }
 
-const DEFAULT_PLACEHOLDER = '输入SN，每行一个或用分号/空格分隔\n例如：\nSN000001\nSN000002;SN000003\nSN000004 SN000005';
-
 const BatchInput: React.FC<BatchInputProps> = ({
   visible,
   onOk,
   onCancel,
-  title = '批量输入设备SN',
+  title,
   validateFn,
-  validationMessage = 'SN格式不正确',
+  validationMessage,
   maxCount,
 }) => {
+  const t = useT();
   const [inputText, setInputText] = useState('');
   const [error, setError] = useState<string | null>(null);
   const token = useThemeToken();
+
+  const resolvedTitle = title ?? t('batchInput.title');
+  const resolvedValidationMessage = validationMessage ?? t('batchInput.invalidFormat');
 
   const parseInput = (text: string): string[] => {
     return text
@@ -40,15 +43,22 @@ const BatchInput: React.FC<BatchInputProps> = ({
 
   const handleOk = () => {
     if (invalid.length > 0) {
-      setError(`以下${invalid.length}个SN${validationMessage}：${invalid.slice(0, 5).join(', ')}${invalid.length > 5 ? '...' : ''}`);
+      const samples = `${invalid.slice(0, 5).join(', ')}${invalid.length > 5 ? '...' : ''}`;
+      setError(
+        t('batchInput.invalidList', {
+          count: invalid.length,
+          message: resolvedValidationMessage,
+          samples,
+        }),
+      );
       return;
     }
     if (maxCount && unique.length > maxCount) {
-      setError(`最多支持 ${maxCount} 个SN，当前输入 ${unique.length} 个`);
+      setError(t('batchInput.exceedMax', { max: maxCount, current: unique.length }));
       return;
     }
     if (unique.length === 0) {
-      setError('请至少输入一个SN');
+      setError(t('batchInput.emptyInput'));
       return;
     }
     setError(null);
@@ -64,19 +74,19 @@ const BatchInput: React.FC<BatchInputProps> = ({
 
   return (
     <Modal
-      title={title}
+      title={resolvedTitle}
       open={visible}
       onOk={handleOk}
       onCancel={handleCancel}
-      okText="确认"
-      cancelText="取消"
+      okText={t('common.confirm')}
+      cancelText={t('common.cancel')}
       destroyOnHidden
       width={520}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-          每行一个SN，或使用分号、空格分隔。重复项将自动去重。
-          {maxCount && ` 最多 ${maxCount} 个。`}
+          {t('batchInput.hint')}
+          {maxCount && t('batchInput.hintMax', { max: maxCount })}
         </Typography.Text>
 
         <textarea
@@ -85,7 +95,7 @@ const BatchInput: React.FC<BatchInputProps> = ({
             setInputText(e.target.value);
             setError(null);
           }}
-          placeholder={DEFAULT_PLACEHOLDER}
+          placeholder={t('batchInput.placeholder')}
           rows={8}
           style={{
             width: '100%',
@@ -120,7 +130,7 @@ const BatchInput: React.FC<BatchInputProps> = ({
           <div>
             <Space wrap>
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                解析结果：
+                {t('batchInput.parseResult')}
               </Typography.Text>
               {unique.slice(0, 10).map((sn) => (
                 <Tag
@@ -132,11 +142,12 @@ const BatchInput: React.FC<BatchInputProps> = ({
                 </Tag>
               ))}
               {unique.length > 10 && (
-                <Tag style={{ fontSize: 12 }}>+{unique.length - 10} 个</Tag>
+                <Tag style={{ fontSize: 12 }}>{t('batchInput.moreCount', { count: unique.length - 10 })}</Tag>
               )}
             </Space>
             <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
-              共 {unique.length} 个{parsed.length !== unique.length ? `（去重后，原始 ${parsed.length} 个）` : ''}
+              {t('batchInput.totalCount', { count: unique.length })}
+              {parsed.length !== unique.length ? t('batchInput.dedupSuffix', { origin: parsed.length }) : ''}
             </Typography.Text>
           </div>
         )}

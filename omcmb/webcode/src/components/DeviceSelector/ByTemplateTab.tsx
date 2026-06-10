@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Button, Table, Tag, Typography } from 'antd';
 import type { TableProps } from 'antd';
+import { useT } from '@/hooks/useT';
 
 interface DeviceTemplate {
   id: string;
@@ -16,47 +17,48 @@ interface ByTemplateTabProps {
   onSelectionChange: (sns: string[]) => void;
 }
 
-// Predefined templates (in production these would come from API)
-const PRESET_TEMPLATES: DeviceTemplate[] = [
+// Predefined template definitions (in production these would come from API).
+// Display labels resolved via i18n inside the component; deviceType holds either
+// a literal product label (eNB/gNB) or an i18n key for the generic "All" type.
+interface PresetTemplateDef {
+  id: string;
+  nameKey: string;
+  descKey: string;
+  /** When set, deviceType is resolved via this i18n key; otherwise deviceTypeLiteral is shown. */
+  deviceTypeKey?: string;
+  deviceTypeLiteral?: string;
+}
+
+const PRESET_TEMPLATE_DEFS: PresetTemplateDef[] = [
   {
     id: 'tpl_all_online',
-    name: '所有在线设备',
-    description: '当前连接状态为在线的所有设备',
-    deviceType: '全部',
-    count: 0,
-    sns: [],
+    nameKey: 'deviceSelector.tpl.allOnline',
+    descKey: 'deviceSelector.tpl.allOnlineDesc',
+    deviceTypeKey: 'deviceSelector.tpl.typeAll',
   },
   {
     id: 'tpl_all_enb',
-    name: '所有 eNB 设备',
-    description: '网络类型为 LTE 的基站设备',
-    deviceType: 'eNB',
-    count: 0,
-    sns: [],
+    nameKey: 'deviceSelector.tpl.allEnb',
+    descKey: 'deviceSelector.tpl.allEnbDesc',
+    deviceTypeLiteral: 'eNB',
   },
   {
     id: 'tpl_all_gnb',
-    name: '所有 gNB 设备',
-    description: '网络类型为 NR 的基站设备',
-    deviceType: 'gNB',
-    count: 0,
-    sns: [],
+    nameKey: 'deviceSelector.tpl.allGnb',
+    descKey: 'deviceSelector.tpl.allGnbDesc',
+    deviceTypeLiteral: 'gNB',
   },
   {
     id: 'tpl_alarm_devices',
-    name: '有告警设备',
-    description: '当前存在活跃告警的设备',
-    deviceType: '全部',
-    count: 0,
-    sns: [],
+    nameKey: 'deviceSelector.tpl.alarmDevices',
+    descKey: 'deviceSelector.tpl.alarmDevicesDesc',
+    deviceTypeKey: 'deviceSelector.tpl.typeAll',
   },
   {
     id: 'tpl_unmanaged',
-    name: '未纳管设备',
-    description: '管理状态为未纳管或预纳管的设备',
-    deviceType: '全部',
-    count: 0,
-    sns: [],
+    nameKey: 'deviceSelector.tpl.unmanaged',
+    descKey: 'deviceSelector.tpl.unmanagedDesc',
+    deviceTypeKey: 'deviceSelector.tpl.typeAll',
   },
 ];
 
@@ -64,7 +66,21 @@ const ByTemplateTab: React.FC<ByTemplateTabProps> = ({
   selectedSns,
   onSelectionChange,
 }) => {
+  const t = useT();
   const [selectedTemplateId, setSelectedTemplateId] = React.useState<string | null>(null);
+
+  const presetTemplates: DeviceTemplate[] = useMemo(
+    () =>
+      PRESET_TEMPLATE_DEFS.map((def) => ({
+        id: def.id,
+        name: t(def.nameKey),
+        description: t(def.descKey),
+        deviceType: def.deviceTypeKey ? t(def.deviceTypeKey) : def.deviceTypeLiteral ?? '',
+        count: 0,
+        sns: [],
+      })),
+    [t],
+  );
 
   const handleApply = (template: DeviceTemplate) => {
     setSelectedTemplateId(template.id);
@@ -76,7 +92,7 @@ const ByTemplateTab: React.FC<ByTemplateTabProps> = ({
 
   const columns: TableProps<DeviceTemplate>['columns'] = [
     {
-      title: '模板名称',
+      title: t('deviceSelector.tpl.colName'),
       dataIndex: 'name',
       key: 'name',
       render: (v: string, record) => (
@@ -84,26 +100,26 @@ const ByTemplateTab: React.FC<ByTemplateTabProps> = ({
           <Typography.Text strong>{v}</Typography.Text>
           {selectedTemplateId === record.id && (
             <Tag color="blue" style={{ marginLeft: 8 }}>
-              已选
+              {t('deviceSelector.tpl.selectedTag')}
             </Tag>
           )}
         </span>
       ),
     },
     {
-      title: '描述',
+      title: t('common.description'),
       dataIndex: 'description',
       key: 'description',
       ellipsis: true,
     },
     {
-      title: '设备类型',
+      title: t('deviceSelector.tpl.colDeviceType'),
       dataIndex: 'deviceType',
       key: 'deviceType',
       width: 100,
     },
     {
-      title: '操作',
+      title: t('common.operation'),
       key: 'action',
       width: 100,
       render: (_: unknown, record) => (
@@ -112,7 +128,7 @@ const ByTemplateTab: React.FC<ByTemplateTabProps> = ({
           size="small"
           onClick={() => handleApply(record)}
         >
-          应用
+          {t('deviceSelector.tpl.apply')}
         </Button>
       ),
     },
@@ -121,12 +137,12 @@ const ByTemplateTab: React.FC<ByTemplateTabProps> = ({
   return (
     <div>
       <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 12, fontSize: 13 }}>
-        选择预设模板快速添加设备。应用后可在「已选设备」中查看和调整。
+        {t('deviceSelector.tpl.hint')}
       </Typography.Text>
       <Table<DeviceTemplate>
         rowKey="id"
         columns={columns}
-        dataSource={PRESET_TEMPLATES}
+        dataSource={presetTemplates}
         size="small"
         pagination={false}
         onRow={(record) => ({

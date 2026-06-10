@@ -7,6 +7,7 @@ import PieChart, { type PieDataItem } from '@/components/Charts/PieChart';
 import BarChart from '@/components/Charts/BarChart';
 import LineChart from '@/components/Charts/LineChart';
 import EmptyState from '@/components/common/EmptyState';
+import ErrorBoundary from '@/components/common/ErrorBoundary';
 import { useAlarmCount } from '@core/hooks/api/useAlarms';
 import { useAlarmTrend, useTopAlarmDevices } from '@core/hooks/api/useDashboard';
 import { useT } from '@/hooks/useT';
@@ -62,10 +63,14 @@ function generateDayLabels(count: number): string[] {
 // 告警级别分布图组件
 function AlarmDistributionChart({
   alarmCount,
+  isError,
+  onRetry,
   t,
   onDrillDown,
 }: {
   alarmCount: ReturnType<typeof useAlarmCount>['data'];
+  isError?: boolean;
+  onRetry?: () => void;
   t: (key: string) => string;
   onDrillDown?: (severity: string) => void;
 }) {
@@ -89,6 +94,22 @@ function AlarmDistributionChart({
       onDrillDown(item.severity);
     }
   }, [onDrillDown]);
+
+  if (isError) {
+    return (
+      <Card
+        title={<span style={{ fontSize: 14, fontWeight: 500 }}>{t('alarm.stats.distribution')}</span>}
+        size="small"
+        styles={{ body: { padding: '16px', height: '280px', display: 'flex', alignItems: 'center', justifyContent: 'center' } }}
+      >
+        <EmptyState
+          variant="error"
+          style={{ padding: '20px 0' }}
+          action={onRetry ? { label: t('error.retry'), onClick: onRetry } : undefined}
+        />
+      </Card>
+    );
+  }
 
   if (totalCount === 0) {
     return (
@@ -123,10 +144,14 @@ function AlarmDistributionChart({
 // 告警趋势图组件
 function AlarmTrendChart({
   trendData,
+  isError,
+  onRetry,
   days,
   t,
 }: {
   trendData: ReturnType<typeof useAlarmTrend>['data'];
+  isError?: boolean;
+  onRetry?: () => void;
   days: number;
   t: (key: string) => string;
 }) {
@@ -165,6 +190,23 @@ function AlarmTrendChart({
     ];
   }, [trendData, t]);
 
+  // 数据层错误优先于空态：钩子已全部声明在前，此处 early-return 不违反 rules-of-hooks。
+  if (isError) {
+    return (
+      <Card
+        title={<span style={{ fontSize: 14, fontWeight: 500 }}>{t('alarm.stats.trend')}</span>}
+        size="small"
+        styles={{ body: { padding: '16px', height: '280px', display: 'flex', alignItems: 'center', justifyContent: 'center' } }}
+      >
+        <EmptyState
+          variant="error"
+          style={{ padding: '20px 0' }}
+          action={onRetry ? { label: t('error.retry'), onClick: onRetry } : undefined}
+        />
+      </Card>
+    );
+  }
+
   if (!hasData) {
     return (
       <Card
@@ -200,10 +242,14 @@ function AlarmTrendChart({
 // 高频告警设备排行图组件
 function TopAlarmDevicesChart({
   devicesData,
+  isError,
+  onRetry,
   t,
   onDrillDown,
 }: {
   devicesData: ReturnType<typeof useTopAlarmDevices>['data'];
+  isError?: boolean;
+  onRetry?: () => void;
   t: (key: string) => string;
   onDrillDown?: (deviceSN: string) => void;
 }) {
@@ -240,6 +286,22 @@ function TopAlarmDevicesChart({
       onDrillDown(topDevices[index].deviceSN!);
     }
   }, [onDrillDown, topDevices]);
+
+  if (isError) {
+    return (
+      <Card
+        title={<span style={{ fontSize: 14, fontWeight: 500 }}>{t('alarm.stats.topDevices')}</span>}
+        size="small"
+        styles={{ body: { padding: '16px', height: '280px', display: 'flex', alignItems: 'center', justifyContent: 'center' } }}
+      >
+        <EmptyState
+          variant="error"
+          style={{ padding: '20px 0' }}
+          action={onRetry ? { label: t('error.retry'), onClick: onRetry } : undefined}
+        />
+      </Card>
+    );
+  }
 
   if (!topDevices || topDevices.length === 0) {
     return (
@@ -377,9 +439,9 @@ export default function AlarmStatistics() {
   }, [filters]);
 
   // 数据hooks
-  const { data: alarmCount, refetch: refetchCount } = useAlarmCount();
-  const { data: trendData, refetch: refetchTrend } = useAlarmTrend(days);
-  const { data: devicesData, refetch: refetchDevices } = useTopAlarmDevices();
+  const { data: alarmCount, isError: countError, refetch: refetchCount } = useAlarmCount();
+  const { data: trendData, isError: trendError, refetch: refetchTrend } = useAlarmTrend(days);
+  const { data: devicesData, isError: devicesError, refetch: refetchDevices } = useTopAlarmDevices();
 
   // 手动刷新
   const handleRefresh = useCallback(async () => {
@@ -498,39 +560,52 @@ export default function AlarmStatistics() {
         </Space>
       </div>
 
-      {/* 图表区域 */}
-      <Spin spinning={isRefreshing} tip={t('common.loading')} size="large">
-        <Row gutter={[16, 16]}>
-          {/* 第零行：告警效率指标 */}
-          <Col xs={24}>
-            <EfficiencyCard />
-          </Col>
+      {/* 图表区域。细粒度 ErrorBoundary 兜住任一图表渲染异常，不连累整页白屏；
+          数据层错误（isError）则在各卡片内显示错误空态 + 重试。 */}
+      <ErrorBoundary onRetry={handleRefresh}>
+        <Spin spinning={isRefreshing} tip={t('common.loading')} size="large">
+          <Row gutter={[16, 16]}>
+            {/* 第零行：告警效率指标 */}
+            <Col xs={24}>
+              <EfficiencyCard />
+            </Col>
 
-          {/* 第一行：告警级别分布 + 告警热度图 */}
-          <Col xs={24} lg={12}>
-            <AlarmDistributionChart
-              alarmCount={alarmCount}
-              t={t}
-              onDrillDown={(severity) => handleDrillDown(severity)}
-            />
-          </Col>
-          <Col xs={24} lg={12}>
-            <AlarmHeatmap />
-          </Col>
+            {/* 第一行：告警级别分布 + 告警热度图 */}
+            <Col xs={24} lg={12}>
+              <AlarmDistributionChart
+                alarmCount={alarmCount}
+                isError={countError}
+                onRetry={() => void refetchCount()}
+                t={t}
+                onDrillDown={(severity) => handleDrillDown(severity)}
+              />
+            </Col>
+            <Col xs={24} lg={12}>
+              <AlarmHeatmap />
+            </Col>
 
-          {/* 第二行：告警趋势 + 高频告警设备 */}
-          <Col xs={24} lg={12}>
-            <AlarmTrendChart trendData={trendData} days={days} t={t} />
-          </Col>
-          <Col xs={24} lg={12}>
-            <TopAlarmDevicesChart
-              devicesData={devicesData}
-              t={t}
-              onDrillDown={(deviceSN) => handleDrillDown(undefined, deviceSN)}
-            />
-          </Col>
-        </Row>
-      </Spin>
+            {/* 第二行：告警趋势 + 高频告警设备 */}
+            <Col xs={24} lg={12}>
+              <AlarmTrendChart
+                trendData={trendData}
+                isError={trendError}
+                onRetry={() => void refetchTrend()}
+                days={days}
+                t={t}
+              />
+            </Col>
+            <Col xs={24} lg={12}>
+              <TopAlarmDevicesChart
+                devicesData={devicesData}
+                isError={devicesError}
+                onRetry={() => void refetchDevices()}
+                t={t}
+                onDrillDown={(deviceSN) => handleDrillDown(undefined, deviceSN)}
+              />
+            </Col>
+          </Row>
+        </Spin>
+      </ErrorBoundary>
     </div>
   );
 }

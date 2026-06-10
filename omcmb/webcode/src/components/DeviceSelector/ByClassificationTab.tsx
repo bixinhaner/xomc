@@ -3,10 +3,12 @@ import { Button, Col, Row, Tree, Typography } from 'antd';
 import type { DataNode } from 'antd/es/tree';
 import type { Device } from '@core/types/device';
 import { useThemeToken } from '@/hooks/useThemeToken';
+import { useT } from '@/hooks/useT';
 
 interface Dimension {
   key: string;
-  label: string;
+  /** i18n key for the dimension label, resolved at render via useT. */
+  labelKey: string;
   getTree: (devices: Device[]) => DataNode[];
   filterDevices: (devices: Device[], selectedKeys: string[]) => Device[];
 }
@@ -27,10 +29,13 @@ const buildTree = (
     isLeaf: true,
   }));
 
+// Translator type for tree-node titles whose labels are enumerable (status dimensions).
+type Translator = (id: string) => string;
+
 const DIMENSIONS: Dimension[] = [
   {
     key: 'region',
-    label: '行政区域',
+    labelKey: 'deviceSelector.dim.region',
     getTree: (devices) =>
       buildTree(
         devices.map((d) => d.region),
@@ -43,7 +48,7 @@ const DIMENSIONS: Dimension[] = [
   },
   {
     key: 'subnet',
-    label: '子网',
+    labelKey: 'deviceSelector.dim.subnet',
     getTree: (devices) =>
       buildTree(
         devices.map((d) => d.subnet),
@@ -56,7 +61,7 @@ const DIMENSIONS: Dimension[] = [
   },
   {
     key: 'networkType',
-    label: '网络类型',
+    labelKey: 'deviceSelector.dim.networkType',
     getTree: (devices) =>
       buildTree(
         devices.map((d) => d.networkType),
@@ -69,7 +74,7 @@ const DIMENSIONS: Dimension[] = [
   },
   {
     key: 'productClass',
-    label: '产品类型',
+    labelKey: 'deviceSelector.dim.productClass',
     getTree: (devices) =>
       buildTree(
         devices.map((d) => d.productClass),
@@ -82,7 +87,7 @@ const DIMENSIONS: Dimension[] = [
   },
   {
     key: 'vendor',
-    label: '厂商',
+    labelKey: 'deviceSelector.dim.vendor',
     getTree: (devices) =>
       buildTree(
         devices.map((d) => d.vendor),
@@ -95,11 +100,9 @@ const DIMENSIONS: Dimension[] = [
   },
   {
     key: 'connStatus',
-    label: '连接状态',
-    getTree: () => [
-      { key: 'connStatus__online', title: '在线', isLeaf: true },
-      { key: 'connStatus__offline', title: '离线', isLeaf: true },
-    ],
+    labelKey: 'deviceSelector.dim.connStatus',
+    // getTree resolved with translator inside component (STATUS_TREE_BUILDERS).
+    getTree: () => [],
     filterDevices: (devices, keys) => {
       const statuses = keys.map((k) => k.replace('connStatus__', ''));
       return devices.filter((d) => statuses.includes(d.connStatus));
@@ -107,12 +110,9 @@ const DIMENSIONS: Dimension[] = [
   },
   {
     key: 'engStatus',
-    label: '工程状态',
-    getTree: () => [
-      { key: 'engStatus__commissioned', title: '已开通', isLeaf: true },
-      { key: 'engStatus__uncommissioned', title: '未开通', isLeaf: true },
-      { key: 'engStatus__decommissioned', title: '已退网', isLeaf: true },
-    ],
+    labelKey: 'deviceSelector.dim.engStatus',
+    // getTree resolved with translator inside component (STATUS_TREE_BUILDERS).
+    getTree: () => [],
     filterDevices: (devices, keys) => {
       const statuses = keys.map((k) => k.replace('engStatus__', ''));
       return devices.filter((d) => statuses.includes(d.engStatus));
@@ -120,7 +120,7 @@ const DIMENSIONS: Dimension[] = [
   },
   {
     key: 'site',
-    label: '站点',
+    labelKey: 'deviceSelector.dim.site',
     getTree: (devices) =>
       buildTree(
         devices.map((d) => d.site),
@@ -133,17 +133,32 @@ const DIMENSIONS: Dimension[] = [
   },
 ];
 
+// Status dimensions have a fixed enum of leaves whose titles need translation.
+const STATUS_TREE_BUILDERS: Record<string, (t: Translator) => DataNode[]> = {
+  connStatus: (t) => [
+    { key: 'connStatus__online', title: t('device.online'), isLeaf: true },
+    { key: 'connStatus__offline', title: t('device.offline'), isLeaf: true },
+  ],
+  engStatus: (t) => [
+    { key: 'engStatus__commissioned', title: t('device.engStatus.commissioned'), isLeaf: true },
+    { key: 'engStatus__uncommissioned', title: t('device.engStatus.uncommissioned'), isLeaf: true },
+    { key: 'engStatus__decommissioned', title: t('device.engStatus.decommissioned'), isLeaf: true },
+  ],
+};
+
 const ByClassificationTab: React.FC<ByClassificationTabProps> = ({
   devices,
   selectedSns,
   onSelectionChange,
 }) => {
+  const t = useT();
   const [activeDimension, setActiveDimension] = useState<string>('region');
   const [checkedKeys, setCheckedKeys] = useState<string[]>([]);
   const token = useThemeToken();
 
   const dimension = DIMENSIONS.find((d) => d.key === activeDimension) ?? DIMENSIONS[0];
-  const treeData = dimension.getTree(devices);
+  const statusTreeBuilder = STATUS_TREE_BUILDERS[dimension.key];
+  const treeData = statusTreeBuilder ? statusTreeBuilder(t) : dimension.getTree(devices);
   const filteredDevices = dimension.filterDevices(devices, checkedKeys);
 
   const handleApply = () => {
@@ -182,7 +197,7 @@ const ByClassificationTab: React.FC<ByClassificationTabProps> = ({
                 fontSize: 13,
               }}
             >
-              {dim.label}
+              {t(dim.labelKey)}
             </button>
           ))}
         </div>
@@ -228,13 +243,13 @@ const ByClassificationTab: React.FC<ByClassificationTabProps> = ({
           }}
         >
           <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-            符合条件的设备
+            {t('deviceSelector.matchedDevices')}
           </Typography.Text>
           <Typography.Text strong style={{ fontSize: 32, color: token.colorPrimary }}>
             {filteredDevices.length}
           </Typography.Text>
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            台
+            {t('deviceSelector.unit')}
           </Typography.Text>
           <Button
             type="primary"
@@ -242,7 +257,7 @@ const ByClassificationTab: React.FC<ByClassificationTabProps> = ({
             disabled={filteredDevices.length === 0}
             onClick={handleApply}
           >
-            添加到已选
+            {t('deviceSelector.addToSelected')}
           </Button>
         </div>
       </Col>

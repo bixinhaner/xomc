@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Card, Row, Col } from 'antd';
+import ErrorBoundary from '@/components/common/ErrorBoundary';
 import { DeviceTree, CommandTree, RightPanel, BatchSnModal } from './components';
 import StepBar from './components/StepBar';
 import { useDeviceSelection } from './hooks';
@@ -47,34 +48,42 @@ export default function MMLConsole() {
       <StepBar current={current} />
       {/* 2026-05-27 用户决策:把更多空间留给"终端输出 + 操作面板",大屏(xl ≥ 1200)
           下三栏从 6/8/10 调整为 5/7/12。lg 及更窄屏幕维持 6/8/10 不挤压设备/命令列表。 */}
+      {/* 三栏各自用 ErrorBoundary 包裹：任一面板（设备树 / 命令树 / 操作终端）
+          数据获取或渲染异常时只影响该栏，其余两栏仍可用，避免整页崩溃。 */}
       <Row gutter={12} style={{ marginTop: 12 }}>
         <Col xs={24} lg={6} xl={5}>
-          <DeviceTree
-            selectedDevices={dev.selectedDevices}
-            filteredDevices={dev.filteredDevices}
-            paginatedDevices={dev.paginatedDevices}
-            searchText={dev.searchText}
-            productClassFilter={dev.productClassFilter}
-            currentPage={dev.currentPage}
-            isAllSelected={dev.isAllSelected}
-            isIndeterminate={dev.isIndeterminate}
-            totalFiltered={dev.totalFiltered}
-            totalPages={dev.totalPages}
-            onSearchChange={dev.setSearchText}
-            onFilterChange={dev.setProductClassFilter}
-            onPageChange={dev.setCurrentPage}
-            onToggleDevice={dev.toggleDevice}
-            onToggleSelectAll={dev.toggleSelectAll}
-            onRemoveDevice={dev.removeDevice}
-            onClearSelection={dev.clearSelection}
-            onBatchInput={() => setBatchModalOpen(true)}
-          />
+          <ErrorBoundary>
+            <DeviceTree
+              selectedDevices={dev.selectedDevices}
+              filteredDevices={dev.filteredDevices}
+              paginatedDevices={dev.paginatedDevices}
+              searchText={dev.searchText}
+              productClassFilter={dev.productClassFilter}
+              currentPage={dev.currentPage}
+              isAllSelected={dev.isAllSelected}
+              isIndeterminate={dev.isIndeterminate}
+              totalFiltered={dev.totalFiltered}
+              totalPages={dev.totalPages}
+              onSearchChange={dev.setSearchText}
+              onFilterChange={dev.setProductClassFilter}
+              onPageChange={dev.setCurrentPage}
+              onToggleDevice={dev.toggleDevice}
+              onToggleSelectAll={dev.toggleSelectAll}
+              onRemoveDevice={dev.removeDevice}
+              onClearSelection={dev.clearSelection}
+              onBatchInput={() => setBatchModalOpen(true)}
+            />
+          </ErrorBoundary>
         </Col>
         <Col xs={24} lg={8} xl={7}>
-          <CommandTree />
+          <ErrorBoundary>
+            <CommandTree />
+          </ErrorBoundary>
         </Col>
         <Col xs={24} lg={10} xl={12}>
-          <RightPanel />
+          <ErrorBoundary>
+            <RightPanel />
+          </ErrorBoundary>
         </Col>
       </Row>
       <BatchSnModal

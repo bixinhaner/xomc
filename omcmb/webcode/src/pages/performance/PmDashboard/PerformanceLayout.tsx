@@ -16,6 +16,8 @@ import { Button, Card, Empty, List, Space, Tag, theme, Tooltip } from 'antd';
 import { MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons';
 import { usePmAdhocList } from '@core/hooks/api/usePmAdhoc';
 import type { AdhocTask } from '@core/types/pmAdhoc';
+import EmptyState from '@/components/common/EmptyState';
+import ErrorBoundary from '@/components/common/ErrorBoundary';
 import TaskDashboardPane from './TaskDashboardPane';
 
 interface TaskGroup {
@@ -32,13 +34,20 @@ function TaskDashboardTab() {
   const { token } = theme.useToken();
 
   // 内置区 / 自建区两次独立拉取（字段 is_builtin），与 PmAdhoc 列表同源口径。
-  const { data: builtinTasks = [], isLoading: builtinLoading } = usePmAdhocList({
-    isBuiltin: true,
-  });
-  const { data: customTasks = [], isLoading: customLoading } = usePmAdhocList({
-    isBuiltin: false,
-  });
+  const {
+    data: builtinTasks = [],
+    isLoading: builtinLoading,
+    isError: builtinError,
+    refetch: refetchBuiltin,
+  } = usePmAdhocList({ isBuiltin: true });
+  const {
+    data: customTasks = [],
+    isLoading: customLoading,
+    isError: customError,
+    refetch: refetchCustom,
+  } = usePmAdhocList({ isBuiltin: false });
   const isLoading = builtinLoading || customLoading;
+  const isError = builtinError || customError;
 
   const groups: TaskGroup[] = useMemo(
     () => [
@@ -135,7 +144,20 @@ function TaskDashboardTab() {
         styles={{ body: { padding: 8 } }}
         loading={isLoading}
       >
-        {groups.map((g) =>
+        {isError && (
+          <EmptyState
+            variant="error"
+            style={{ padding: '24px 0' }}
+            action={{
+              label: intl.formatMessage({ id: 'error.retry' }),
+              onClick: () => {
+                void refetchBuiltin();
+                void refetchCustom();
+              },
+            }}
+          />
+        )}
+        {!isError && groups.map((g) =>
           g.items.length === 0 ? null : (
             <div key={g.key} style={{ marginBottom: 12 }}>
               <div style={{ fontSize: 12, color: '#888', marginBottom: 4, paddingLeft: 4 }}>
@@ -180,7 +202,7 @@ function TaskDashboardTab() {
             </div>
           ),
         )}
-        {allTasks.length === 0 && !isLoading && (
+        {allTasks.length === 0 && !isLoading && !isError && (
           <Empty description={intl.formatMessage({ id: 'perf.dashboard.emptyNoTask' })} />
         )}
       </Card>
@@ -188,7 +210,10 @@ function TaskDashboardTab() {
 
       <div style={{ flex: 1, overflow: 'auto' }}>
         {taskId ? (
-          <TaskDashboardPane taskId={taskId} />
+          // 细粒度 ErrorBoundary：单个任务图表渲染异常时只影响右侧面板，左侧任务列表仍可切换。
+          <ErrorBoundary key={taskId}>
+            <TaskDashboardPane taskId={taskId} />
+          </ErrorBoundary>
         ) : (
           <Card>
             <Empty description={intl.formatMessage({ id: 'perf.dashboard.emptySelectTask' })} />

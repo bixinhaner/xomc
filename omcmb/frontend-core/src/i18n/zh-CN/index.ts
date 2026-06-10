@@ -6614,6 +6614,63 @@ const messages: Record<string, string> = {
   'product.standardParams.col.changeApplies': '生效方式',
   'product.standardParams.col.min': '最小值',
   'product.standardParams.col.max': '最大值',
+
+  // -------------------------------------------------------------------------
+  // 批量输入设备 SN（BatchInput 组件）
+  // -------------------------------------------------------------------------
+  'batchInput.title':            '批量输入设备SN',
+  'batchInput.placeholder':      '输入SN，每行一个或用分号/空格分隔\n例如：\nSN000001\nSN000002;SN000003\nSN000004 SN000005',
+  'batchInput.hint':             '每行一个SN，或使用分号、空格分隔。重复项将自动去重。',
+  'batchInput.hintMax':          ' 最多 {max} 个。',
+  'batchInput.invalidFormat':    'SN格式不正确',
+  'batchInput.invalidList':      '以下{count}个SN{message}：{samples}',
+  'batchInput.exceedMax':        '最多支持 {max} 个SN，当前输入 {current} 个',
+  'batchInput.emptyInput':       '请至少输入一个SN',
+  'batchInput.parseResult':      '解析结果：',
+  'batchInput.moreCount':        '+{count} 个',
+  'batchInput.totalCount':       '共 {count} 个',
+  'batchInput.dedupSuffix':      '（去重后，原始 {origin} 个）',
+
+  // -------------------------------------------------------------------------
+  // 选择设备（DeviceSelector 组件 + 三个页签）
+  // -------------------------------------------------------------------------
+  'deviceSelector.title':            '选择设备',
+  'deviceSelector.selected':         '已选 {count}',
+  'deviceSelector.unselected':       '未选 {count}',
+  'deviceSelector.maxHint':          '(最多可选 {max} 台)',
+  'deviceSelector.clearSelected':    '清空已选',
+  'deviceSelector.tabByElement':     '按网元',
+  'deviceSelector.tabByClass':       '按分类',
+  'deviceSelector.tabByTemplate':    '按模板',
+  'deviceSelector.searchPlaceholder':'搜索设备名称、SN、型号...',
+  'deviceSelector.totalUnit':        '共 {count} 台',
+  'deviceSelector.dim.region':       '行政区域',
+  'deviceSelector.dim.subnet':       '子网',
+  'deviceSelector.dim.networkType':  '网络类型',
+  'deviceSelector.dim.productClass': '产品类型',
+  'deviceSelector.dim.vendor':       '厂商',
+  'deviceSelector.dim.connStatus':   '连接状态',
+  'deviceSelector.dim.engStatus':    '工程状态',
+  'deviceSelector.dim.site':         '站点',
+  'deviceSelector.matchedDevices':   '符合条件的设备',
+  'deviceSelector.unit':             '台',
+  'deviceSelector.addToSelected':    '添加到已选',
+  'deviceSelector.tpl.allOnline':        '所有在线设备',
+  'deviceSelector.tpl.allOnlineDesc':    '当前连接状态为在线的所有设备',
+  'deviceSelector.tpl.allEnb':           '所有 eNB 设备',
+  'deviceSelector.tpl.allEnbDesc':       '网络类型为 LTE 的基站设备',
+  'deviceSelector.tpl.allGnb':           '所有 gNB 设备',
+  'deviceSelector.tpl.allGnbDesc':       '网络类型为 NR 的基站设备',
+  'deviceSelector.tpl.alarmDevices':     '有告警设备',
+  'deviceSelector.tpl.alarmDevicesDesc': '当前存在活跃告警的设备',
+  'deviceSelector.tpl.unmanaged':        '未纳管设备',
+  'deviceSelector.tpl.unmanagedDesc':    '管理状态为未纳管或预纳管的设备',
+  'deviceSelector.tpl.typeAll':          '全部',
+  'deviceSelector.tpl.colName':          '模板名称',
+  'deviceSelector.tpl.colDeviceType':    '设备类型',
+  'deviceSelector.tpl.selectedTag':      '已选',
+  'deviceSelector.tpl.apply':            '应用',
+  'deviceSelector.tpl.hint':             '选择预设模板快速添加设备。应用后可在「已选设备」中查看和调整。',
 };
 
 export default messages;

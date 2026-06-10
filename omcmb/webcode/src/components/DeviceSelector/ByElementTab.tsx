@@ -4,6 +4,7 @@ import type { TableProps } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import type { Device } from '@core/types/device';
 import { useThemeToken } from '@/hooks/useThemeToken';
+import { useT } from '@/hooks/useT';
 
 interface ByElementTabProps {
   devices: Device[];
@@ -18,6 +19,7 @@ const ByElementTab: React.FC<ByElementTabProps> = ({
   onSelectionChange,
   max,
 }) => {
+  const t = useT();
   const [searchText, setSearchText] = useState('');
   const token = useThemeToken();
 
@@ -34,7 +36,7 @@ const ByElementTab: React.FC<ByElementTabProps> = ({
 
   const columns: TableProps<Device>['columns'] = [
     {
-      title: '设备名称',
+      title: t('device.name'),
       dataIndex: 'name',
       key: 'name',
       ellipsis: true,
@@ -50,25 +52,25 @@ const ByElementTab: React.FC<ByElementTabProps> = ({
       ),
     },
     {
-      title: '型号',
+      title: t('device.model'),
       dataIndex: 'deviceModel',
       key: 'deviceModel',
       width: 120,
     },
     {
-      title: '类型',
+      title: t('device.productClass'),
       dataIndex: 'productClass',
       key: 'productClass',
       width: 100,
     },
     {
-      title: '状态',
+      title: t('common.status'),
       dataIndex: 'connStatus',
       key: 'connStatus',
       width: 80,
       render: (v: string) => (
         <Tag color={v === 'online' ? 'success' : 'default'}>
-          {v === 'online' ? '在线' : '离线'}
+          {v === 'online' ? t('device.online') : t('device.offline')}
         </Tag>
       ),
     },
@@ -89,7 +91,7 @@ const ByElementTab: React.FC<ByElementTabProps> = ({
   return (
     <div>
       <Input
-        placeholder="搜索设备名称、SN、型号..."
+        placeholder={t('deviceSelector.searchPlaceholder')}
         prefix={<SearchOutlined style={{ color: token.colorTextDisabled }} />}
         value={searchText}
         onChange={(e) => setSearchText(e.target.value)}
@@ -102,7 +104,7 @@ const ByElementTab: React.FC<ByElementTabProps> = ({
         dataSource={filtered}
         rowSelection={rowSelection}
         size="small"
-        pagination={{ pageSize: 10, showTotal: (t) => `共 ${t} 台` }}
+        pagination={{ pageSize: 10, showTotal: (total) => t('deviceSelector.totalUnit', { count: total }) }}
         scroll={{ y: 300 }}
       />
     </div>

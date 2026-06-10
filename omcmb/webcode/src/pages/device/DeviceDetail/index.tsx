@@ -33,6 +33,7 @@ import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import LineChart from '@/components/Charts/LineChart';
 import StatusIndicator from '@/components/StatusIndicator';
+import ErrorBoundary from '@/components/common/ErrorBoundary';
 import { useSyncStatus } from '@core/hooks/api/useDeviceParameters';
 import { useDeviceBySn, useSyncDeviceParams } from '@core/hooks/api/useDevices';
 import { useQuickSettingsGroups } from '@core/hooks/api/useQuickSettings';
@@ -1690,7 +1691,13 @@ export default function DeviceDetail() {
             {
               key: 'parameters',
               label: t('device.parameterTree'),
-              children: <ParameterTreeTab deviceId={device.id} />,
+              // 细粒度 ErrorBoundary：参数树独立拉取大量数据，渲染异常时仅此页签降级，
+              // 不连累设备头部与其他页签。
+              children: (
+                <ErrorBoundary>
+                  <ParameterTreeTab deviceId={device.id} />
+                </ErrorBoundary>
+              ),
             },
             ...(showQuickSettingsTab
               ? [{
@@ -1699,7 +1706,11 @@ export default function DeviceDetail() {
                   // 保活：用户在此 tab 改参数后看到"入队成功 / 基站应答"Tag,
                   // 切到其他内部 tab 再切回时必须保留反馈状态(state 在子组件 useState 中)。
                   forceRender: true,
-                  children: <QuickSettingsTab deviceId={device.id} networkType={device.networkType} />,
+                  children: (
+                    <ErrorBoundary>
+                      <QuickSettingsTab deviceId={device.id} networkType={device.networkType} />
+                    </ErrorBoundary>
+                  ),
                 }]
               : []),
             {
@@ -1744,7 +1755,11 @@ export default function DeviceDetail() {
             {
               key: 'performance',
               label: 'KPI',
-              children: <KPITabContent device={displayDevice} t={t} />,
+              children: (
+                <ErrorBoundary>
+                  <KPITabContent device={displayDevice} t={t} />
+                </ErrorBoundary>
+              ),
             },
             {
               key: 'license',
@@ -1752,7 +1767,9 @@ export default function DeviceDetail() {
               forceRender: true,
               children: (
                 <div style={{ padding: '0 0 16px' }}>
-                  <LicenseParamsTab deviceId={device.id} />
+                  <ErrorBoundary>
+                    <LicenseParamsTab deviceId={device.id} />
+                  </ErrorBoundary>
                 </div>
               ),
             },

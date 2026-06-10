@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Button, Modal, Space, Tabs, Tag, Typography } from 'antd';
 import type { Device } from '@core/types/device';
+import { useT } from '@/hooks/useT';
 import ByElementTab from './ByElementTab';
 import ByClassificationTab from './ByClassificationTab';
 import ByTemplateTab from './ByTemplateTab';
@@ -25,6 +26,7 @@ const DeviceSelector: React.FC<DeviceSelectorProps> = ({
   defaultSelected = [],
   devices = MOCK_DEVICES,
 }) => {
+  const t = useT();
   const [selectedSns, setSelectedSns] = useState<string[]>(defaultSelected);
   const [activeTab, setActiveTab] = useState('by-element');
 
@@ -46,7 +48,7 @@ const DeviceSelector: React.FC<DeviceSelectorProps> = ({
     () => [
       {
         key: 'by-element',
-        label: '按网元',
+        label: t('deviceSelector.tabByElement'),
         children: (
           <ByElementTab
             devices={devices}
@@ -58,7 +60,7 @@ const DeviceSelector: React.FC<DeviceSelectorProps> = ({
       },
       {
         key: 'by-classification',
-        label: '按分类',
+        label: t('deviceSelector.tabByClass'),
         children: (
           <ByClassificationTab
             devices={devices}
@@ -69,7 +71,7 @@ const DeviceSelector: React.FC<DeviceSelectorProps> = ({
       },
       {
         key: 'by-template',
-        label: '按模板',
+        label: t('deviceSelector.tabByTemplate'),
         children: (
           <ByTemplateTab
             selectedSns={selectedSns}
@@ -78,18 +80,18 @@ const DeviceSelector: React.FC<DeviceSelectorProps> = ({
         ),
       },
     ],
-    [devices, selectedSns, max]
+    [devices, selectedSns, max, t]
   );
 
   return (
     <Modal
-      title="选择设备"
+      title={t('deviceSelector.title')}
       open={visible}
       onOk={handleOk}
       onCancel={handleCancel}
       width={960}
-      okText="确认"
-      cancelText="取消"
+      okText={t('common.confirm')}
+      cancelText={t('common.cancel')}
       destroyOnHidden
       styles={{ body: { padding: '12px 24px' } }}
     >
@@ -106,14 +108,14 @@ const DeviceSelector: React.FC<DeviceSelectorProps> = ({
       >
         <Space>
           <Tag color="blue" style={{ fontSize: 13, padding: '2px 8px' }}>
-            已选 {selectedCount}
+            {t('deviceSelector.selected', { count: selectedCount })}
           </Tag>
           <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-            未选 {unselectedCount}
+            {t('deviceSelector.unselected', { count: unselectedCount })}
           </Typography.Text>
           {max && (
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              (最多可选 {max} 台)
+              {t('deviceSelector.maxHint', { max })}
             </Typography.Text>
           )}
         </Space>
@@ -125,7 +127,7 @@ const DeviceSelector: React.FC<DeviceSelectorProps> = ({
             onClick={() => setSelectedSns([])}
             style={{ marginLeft: 'auto' }}
           >
-            清空已选
+            {t('deviceSelector.clearSelected')}
           </Button>
         )}
       </div>
