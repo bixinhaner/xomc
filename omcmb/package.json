@@ -24,6 +24,9 @@
   "comment:overrides": "#3 前端安全加固：把存在已知 CVE 的传递依赖钉到已修复版本（业务代码未直接引用这些包，均经 pro-components / ahooks / react-router-dom / openlayers 间接引入）。xlsx 的修复版仅在 SheetJS CDN 发布、npm 公共 registry 最高 0.18.5，无法经 overrides 修复，见 PR 遗留项。",
   "overrides": {
     "axios": "^1.17.0",
+    "react-grid-layout": {
+      "react-resizable": "^4.0.1"
+    },
     "path-to-regexp": "^8.4.2",
     "lodash": "^4.18.1",
     "lodash-es": "^4.18.1",
