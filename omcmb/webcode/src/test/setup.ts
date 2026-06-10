@@ -48,3 +48,14 @@ Object.defineProperty(globalThis, 'matchMedia', {
     configurable: true,
   })
 }
+
+// antd 6 的 TextArea/自适应组件经 @rc-component/resize-observer 使用 ResizeObserver,
+// jsdom 未实现,提供 no-op stub(仅测试环境,浏览器原生支持)。
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  class ResizeObserverStub {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  globalThis.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver
+}

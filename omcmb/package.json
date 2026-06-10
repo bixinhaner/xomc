@@ -21,9 +21,6 @@
     "globals": "^17.6.0",
     "typescript-eslint": "^8.48.0"
   },
-  "dependencies": {
-    "@ant-design/v5-patch-for-react-19": "^1.0.3"
-  },
   "comment:overrides": "#3 前端安全加固：把存在已知 CVE 的传递依赖钉到已修复版本（业务代码未直接引用这些包，均经 pro-components / ahooks / react-router-dom / openlayers 间接引入）。xlsx 的修复版仅在 SheetJS CDN 发布、npm 公共 registry 最高 0.18.5，无法经 overrides 修复，见 PR 遗留项。",
   "overrides": {
     "axios": "^1.17.0",
