@@ -5,13 +5,8 @@ import { routes } from './routes';
  * Application router instance.
  * Use with <RouterProvider router={router} /> in App.tsx.
  */
-const router = createBrowserRouter(routes, {
-  future: {
-    v7_normalizeFormMethod: true,
-    // @ts-expect-error - v7_startTransition is supported in 6.30+ but types may lag
-    v7_startTransition: true,
-  },
-});
+// react-router v7:原 v6 的 v7_* future flags 已成为默认行为,future 块随升级移除。
+const router = createBrowserRouter(routes);
 
 export default router;
 export { routes };

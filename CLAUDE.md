@@ -103,13 +103,13 @@ ln -s "$(pwd)/omcmb/webcode/node_modules" \
 | 组件 | 选型 |
 |------|------|
 | 框架 | React 19 + TypeScript（严格模式）|
-| 构建 | Vite 7 |
+| 构建 | Vite 8（rolldown）|
 | UI 库 | Ant Design 5 + @ant-design/pro-components |
 | 状态管理 | Zustand 5（`frontend-core/src/store/`）|
 | 数据请求 | React Query v5（`frontend-core/src/hooks/api/`）|
 | HTTP 客户端 | Axios（`frontend-core/src/services/http.ts`，自动 camelCase ↔ snake_case）|
 | 图表 / 地图 | ECharts 6 + echarts-for-react / OpenLayers |
-| 国际化 / 路由 | react-intl 8（`frontend-core/src/i18n/`）/ react-router-dom 6 |
+| 国际化 / 路由 | react-intl 10（`frontend-core/src/i18n/`）/ react-router-dom 7 |
 | 测试 | Vitest + Testing Library + Playwright |
 
 ---

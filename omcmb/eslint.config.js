@@ -29,6 +29,11 @@ export default defineConfig([
     languageOptions: {
       ecmaVersion: 2020,
       globals: globals.browser,
+      // eslint 10 + typescript-eslint:workspace 内存在多个 tsconfig 候选时
+      // 必须显式指定根目录,否则所有文件报 "No tsconfigRootDir was set"。
+      parserOptions: {
+        tsconfigRootDir: import.meta.dirname,
+      },
     },
     rules: {
       // 关闭默认的 no-unused-vars，换成 unused-imports plugin 的可自动修复版本
@@ -60,6 +65,9 @@ export default defineConfig([
       'react-hooks/static-components': 'warn',
       'react-hooks/component-hook-factories': 'warn',
       'react-hooks/unsupported-syntax': 'warn',
+      'react-hooks/use-memo': 'warn',
+      // - eslint 10 新增 recommended 规则:死赋值是代码异味提示,非正确性问题
+      'no-useless-assignment': 'warn',
       // - Fast Refresh 体验建议：文件混合导出组件和非组件时 HMR 不够稳
       'react-refresh/only-export-components': 'warn',
     },
