@@ -1165,14 +1165,29 @@ func initNorthboundModule(c *Container) error {
 	logger := c.Logger.Named("northbound")
 
 	pushEngine := push.NewEngine(c.Cfg.Northbound.PushTargets, logger)
+
+	// Outbox 投递模式：构造 PG outbox repo 并注入 Engine（必须在 Subscribe 之前——
+	// Subscribe 按 outboxRepo 是否存在选择 EnqueueEvent / 直发 handleEvent）。
+	outboxRepo := push.NewPgOutboxRepository(c.PgPool, logger)
+	pushEngine.SetOutboxRepo(outboxRepo)
+
 	if err := pushEngine.Subscribe(c.EventBus); err != nil {
 		logger.Warn("subscribe push engine", zap.Error(err))
 	}
 	c.GS.Register("push-engine", 1, func(ctx context.Context) error { return pushEngine.Close() })
 
+	// Outbox 后台投递 worker：轮询 northbound_outbox 待投递条目，按 target 重试，
+	// 耗尽重试落 dead 状态，供死信队列端点（GET/POST /push/deadletter*）消费。
+	outboxWorker := push.NewOutboxWorker(pushEngine, outboxRepo, logger)
+	outboxWorker.Start()
+	c.GS.Register("northbound-outbox-worker", 1, func(ctx context.Context) error { return outboxWorker.Close() })
+
 	syncService := nbsync.NewService(c.DeviceRepo, c.AlarmPgStore, c.PMCounterRepo, c.PMKPIRepo, c.ParamRepo, logger)
 	nbService := northbound.NewNorthboundService(c.AlarmPgStore, c.PMCounterRepo, c.PMKPIRepo, c.ParamRepo, pushEngine, syncService, logger)
 	nbRouter := northbound.NewRouter(nbService)
+	// 死信队列端点（GET /push/deadletter、POST /push/deadletter/:id/replay）
+	// 依赖 outbox repo；不注入则恒 503 "outbox not configured"。
+	nbRouter.SetOutboxRepo(outboxRepo)
 
 	// 主备 OSS 服务器配置 + 切换（system/config 北向设置页消费）。
 	// 配置面与数据面分离：nbService 管数据导出 / 推送 / 同步；ServerService 管

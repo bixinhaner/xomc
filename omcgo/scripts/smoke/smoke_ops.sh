@@ -232,10 +232,8 @@ AUDIT_TOTAL=$(jget total)
 if [ -n "$AUDIT_TOTAL" ] && [ "$AUDIT_TOTAL" -ge 1 ] 2>/dev/null; then
     pass "维护窗口创建已留审计痕迹 (total=${AUDIT_TOTAL})"
 else
-    # 实测 2026-06-10：ops_audit_logs.target_type varchar(16) 容不下
-    # 'maintenance_window'（18 字符）→ INSERT 22001 静默失败（service 仅 Warn），
-    # 维护窗口创建/审批的审计留痕全部丢失。修复后本分支自动恢复为 pass。
-    known_bug "维护窗口创建审计留痕缺失" "ops_audit_logs.target_type varchar(16) < 'maintenance_window'(18 字符)，插入 22001 被静默吞掉，审计链路断"
+    # #124 已修（迁移 000035 放宽 target_type 至 varchar(64)），转回硬断言。
+    fail "维护窗口创建已留审计痕迹" "audit-logs 未查到 op_type=maintenance_window_create 记录 (total=${AUDIT_TOTAL:-空})"
 fi
 
 # ---------------------------------------------------------------------------

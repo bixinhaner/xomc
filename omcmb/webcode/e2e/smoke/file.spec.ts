@@ -2,13 +2,17 @@ import { test, expect } from '@playwright/test';
 import { expectPageRenders, smokeLogin } from './helpers';
 
 /**
- * 文件传输与管理域冒烟（真实后端）：四个页面渲染不崩 + 关键骨架元素可见。
+ * 文件传输与管理域冒烟（真实后端）：五个页面渲染不崩 + 关键骨架元素可见。
  *
  * 选择器依据：
  *   - /transfer/center  → src/pages/transfer/FileTransferCenter/index.tsx
  *       标题 ufte.page.taskCreate（任务创建 / Task Management）、
  *       执行视图卡片 ufte.card.executionView（执行视图 / Execution View）、
  *       分类 Tabs（后端 ufte_task_types 驱动 + 虚拟 MR/KPI Tab）、任务列表表格。
+ *   - /transfer/file-management → src/pages/transfer/FileManagement/index.tsx
+ *       六个 Tab：版本文件（ufte.fileManagement.tab.version，默认）/ 配置文件 /
+ *       License 文件 / MR 文件 / PM 文件 / KPI 导出；
+ *       默认 version Tab 内嵌 FirmwareUpload（embedded）含 DataTable。
  *   - /file/user-files  → src/pages/file/UserFiles/index.tsx
  *       标题 nav.file.userFiles（用户文件 / User Files）、
  *       Tabs：用户文件 + 固件上传（nav.software.firmware）、DataTable。
@@ -39,15 +43,42 @@ test.describe('文件传输与管理冒烟（真实后端）', { tag: '@smoke' }
       page.locator('.ant-tabs-tab').filter({ hasText: /5G升级|5G Upgrade/ }).first(),
     ).toBeVisible();
 
-    // 已知前端竞态（见 issues）：首屏 task-types 未返回前 selectedCategory 被置为
-    // 虚拟 'mr_measurement'，数据到达后不回退 → 默认 Tab 落在「MR 测量」，执行视图
-    // 卡片被隐藏。切到真实分类「配置文件备份」验证执行视图正常渲染。
-    await page.locator('.ant-tabs-tab').filter({ hasText: /配置文件备份|Config Backup/ }).first().click();
+    // #127 回归：task-types 返回后默认 Tab 必须落在首个真实分类（虚拟 MR 测量 /
+    // KPI 导出固定在末位，不得抢占默认选中），执行视图卡片随之直接可见，无需手动切 Tab。
+    await expect(
+      page.locator('.ant-tabs-tab-active').filter({ hasText: /MR 测量|MR Measurement|KPI 导出|KPI Export/ }),
+    ).toHaveCount(0);
+    await expect(
+      page.locator('.ant-tabs').first().locator('.ant-tabs-tab').first(),
+    ).toHaveClass(/ant-tabs-tab-active/);
     await expect(
       page.locator('.ant-card-head-title').filter({ hasText: /执行视图|Execution View/ }),
     ).toBeVisible();
 
     // 任务列表表格骨架（空表也有表头）
+    await expect(page.locator('.ant-table').first()).toBeVisible();
+  });
+
+  test('/transfer/file-management 文件管理渲染，六 Tab 与版本文件表格可见', async ({ page }) => {
+    await expectPageRenders(page, '/transfer/file-management');
+
+    // 六个文件库 Tab（ufte.fileManagement.tab.*），抽查首尾 + 中间各一
+    await expect(
+      page.locator('.ant-tabs-tab').filter({ hasText: /版本文件|Firmware Files/ }).first(),
+    ).toBeVisible();
+    await expect(
+      page.locator('.ant-tabs-tab').filter({ hasText: /License 文件|License Files/ }).first(),
+    ).toBeVisible();
+    await expect(
+      page.locator('.ant-tabs-tab').filter({ hasText: /KPI 导出|KPI Export/ }).first(),
+    ).toBeVisible();
+
+    // 直链（无 ?tab= 参数）默认选中 version Tab
+    await expect(
+      page.locator('.ant-tabs-tab-active').filter({ hasText: /版本文件|Firmware Files/ }).first(),
+    ).toBeVisible();
+
+    // 默认 Tab 内嵌 FirmwareUpload 的固件列表表格骨架（空表也有表头）
     await expect(page.locator('.ant-table').first()).toBeVisible();
   });
 

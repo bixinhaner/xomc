@@ -28,7 +28,8 @@
 #   - sysDictionary 列表返回 data{list,total}；batch 参数名是 **codes**（routes.json 注释写
 #     ?types= 已过时）；明细列表嵌 model.ListRequest，必须显式 page/page_size 否则 binding 400。
 #   - admin/logs/* 同样嵌 ListRequest，必须显式 page/page_size；返回 data{items,total,...}；
-#     注意 Create{Login,Oper,Task}Log 全仓零调用 → 三表无写入方，列表恒空（known_bug）。
+#     登录日志已接通写入（#122：auth Login 成功/失败异步写 sys_login_logs，硬断言非空）；
+#     oper/task 日志写入链路仍未接通（#122 遗留），列表可为空。
 #   - system-license：未配置时 GET → 404 + biz_code 12113（语义"未配置"非路由缺失）；
 #     POST body {"raw_content":...}，解析失败 → 400 + 12111。
 #
@@ -208,12 +209,10 @@ req GET "/api/v1/admin/logs/login?page=1&page_size=10"
 check_ret_ok "登录日志可查"
 check_list_or_empty "登录日志 data.items" "data.items"
 check_field "登录日志含 total 字段" "data.total"
-# 后端缺陷：CreateLoginLog/CreateOperLog/CreateTaskLog 在全仓无任何调用方
-# （grep 全仓只有 internal/admin/sys_log.go 的接口+实现），登录成功也不落
-# sys_login_logs，三个日志端点永远为空。修复后改回 check_list_nonempty。
-if [ "$(jlen data.items)" -eq 0 ]; then
-    known_bug "登录日志在成功登录后仍为空" "sys_login_logs 无写入方：CreateLoginLog 零调用（auth 登录流只写 audit_logs）"
-fi
+# #122 已修复：auth Login 成功/失败路径异步写 sys_login_logs（auth_handler 调
+# CreateLoginLog）。本套件登录频繁，登录日志可硬断言非空。
+# oper/task 日志写入链路仍未接通（#122 遗留），下方维持 check_list_or_empty。
+check_list_nonempty "登录日志在成功登录后非空（#122）" "data.items"
 
 req GET "/api/v1/admin/logs/login?page=1&page_size=10&username=admin"
 check_ret_ok "登录日志按 username=admin 过滤"

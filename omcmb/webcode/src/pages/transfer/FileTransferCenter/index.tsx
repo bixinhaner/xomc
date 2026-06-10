@@ -76,6 +76,7 @@ import {
   renderEllipsisCell,
   renderTaskStatus,
 } from '../shared.render';
+import { resolveAutoSelectedCategory } from './categorySelection';
 import type { TransferStepId } from '@core/types/unifiedFileTransfer';
 
 const { Text, Title } = Typography;
@@ -195,6 +196,10 @@ export default function FileTransferCenter() {
   // 设备列表批量"日志收集"自动跳到 station_log + RUNTIME_LOG_COLLECT tab）。
   const [urlSearchParams] = useSearchParams();
   const [selectedCategory, setSelectedCategory] = useState(() => urlSearchParams.get('category') ?? '');
+  // #127：标记 selectedCategory 是否来自用户主动选择（点击 Tab / URL deep link）。
+  // 首屏 task-types 未返回时 categories 只含虚拟分类，自动选中会落在 'mr_measurement'；
+  // 真实分类到达后仅当用户没主动选过时才回退，不覆盖用户选择。
+  const categoryManuallyPickedRef = useRef(Boolean(urlSearchParams.get('category')));
   const [selectedTypeCode, setSelectedTypeCode] = useState(() => urlSearchParams.get('typeCode') ?? '');
   const [taskPage, setTaskPage] = useState(1);
   const [taskPageSize, setTaskPageSize] = useState(10);
@@ -705,12 +710,12 @@ export default function FileTransferCenter() {
   };
 
   useEffect(() => {
-    if (categories.length === 0) {
-      setSelectedCategory('');
-      return;
-    }
-    if (!categories.some((item) => item.category === selectedCategory)) {
-      setSelectedCategory(categories[0].category);
+    const next = resolveAutoSelectedCategory(categories, selectedCategory, categoryManuallyPickedRef.current);
+    if (next !== null) {
+      // 此 effect 产生的都是自动兜底选择（含 #127 虚拟分类→首个真实分类回退），
+      // 清掉手选标记，保证后续真实分类到达时仍可继续回退。
+      categoryManuallyPickedRef.current = false;
+      setSelectedCategory(next);
     }
   }, [categories, selectedCategory]);
 
@@ -1246,7 +1251,11 @@ export default function FileTransferCenter() {
                 key: item.category,
                 label: localizeBuiltinCategoryLabel(item.category, item.categoryLabel, t),
               }))}
-              onChange={(key) => setSelectedCategory(key)}
+              onChange={(key) => {
+                // 用户手动点选分类 Tab：标记手选，#127 的自动回退不再覆盖
+                categoryManuallyPickedRef.current = true;
+                setSelectedCategory(key);
+              }}
             />
             {/* MR 测量 / KPI 导出 Tab 选中时：① 不显示 UFTE 模板子 Tab，② 直接在 Tabs
                 下方内联渲染各自的任务管理面板（视觉上就是 Tab 切换内容）。 */}

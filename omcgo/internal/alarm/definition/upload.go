@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Upload XML 处理共享常量与校验器(严格对标 T-0180 indicator/upload.go;告警侧为
@@ -17,6 +18,21 @@ import (
 
 // MaxUploadXMLSize 单文件上限 1 MiB。生产 alarm XML 单 ne_type ≤ ~200KB,给余量。
 const MaxUploadXMLSize int64 = 1 << 20
+
+// MaxNeTypeLen 与 alarm_definitions.ne_type varchar(16) 对齐(migrations/000001)。
+// 超长 neType 不在守门链拒绝的话,Loader 重载该文件事务必失败,形成
+// "上传 201 但 0 行入库"的静默失败(#123)。
+const MaxNeTypeLen = 16
+
+// validateUploadNeType 校验文件内容里的 neType 长度 ≤ MaxNeTypeLen(varchar 按字符计,
+// 用 rune 数)。空值由调用方先行拒绝,这里只管超长。
+func validateUploadNeType(neType string) error {
+	if n := utf8.RuneCountInString(neType); n > MaxNeTypeLen {
+		return fmt.Errorf("neType %q length %d exceeds max %d (alarm_definitions.ne_type is varchar(%d))",
+			neType, n, MaxNeTypeLen, MaxNeTypeLen)
+	}
+	return nil
+}
 
 // uploadFilenamePattern 限制文件名为 [A-Za-z0-9_-] + ".xml",长度 1-64。
 // 拒绝路径分隔符 / 点开头 / 空白 / 多扩展名 / 超长名(防遍历 / dotfile / 混淆 / DoS)。

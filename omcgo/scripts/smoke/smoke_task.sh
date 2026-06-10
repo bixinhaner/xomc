@@ -16,10 +16,10 @@
 #   6. purge（destructive）：仅测未认证负路径；真实执行无校验负路径
 #      （非法 retention_days 静默回退默认 30 天并真执行），按危险禁区跳过
 #
-# 已知后端 bug（known_bug 标注，修复后改回正常断言）：
-#   - DELETE /devices/tasks/:task_id 成功取消但返回 500：service.go CancelTask 里
-#     metrics CompletedTotal.WithLabelValues("expired") 只传 1 个 label（定义为
-#     {source,status} 2 个）触发 panic → recovery 中间件 500；取消状态实际已生效。
+# 历史 known_bug（已修复转硬断言）：
+#   - #116 DELETE /devices/tasks/:task_id 成功取消但返回 500：CancelTask 里
+#     CompletedTotal 只传 1 个 label 触发 panic → 500。已修复（service.go
+#     recordCompletion 补齐 source/status 双标签），取消任务硬断言 2xx + ret=1。
 #
 # 用法：bash smoke_task.sh [BASE_URL]   （默认 http://localhost:8081）
 # =============================================================================
@@ -30,23 +30,16 @@ source "$SCRIPT_DIR/lib.sh"
 smoke_init "统一任务队列" "$@"
 smoke_login
 
-# cancel_task_tolerant TASK_ID "desc" —— DELETE 取消任务。
-# 2xx+ret=1 正常 pass；HTTP 500 但状态确已置 cancelled → known_bug（CancelTask
-# metrics label 数不匹配 panic，见文件头注释）；其余情况 fail。
-cancel_task_tolerant() {
-    local tid="$1" desc="$2" code
+# cancel_task TASK_ID "desc" —— DELETE 取消任务，硬断言 2xx + ret=1。
+# （#116 已修复：原 CancelTask metrics label 数不匹配 panic→500 的容忍分支已移除）
+cancel_task() {
+    local tid="$1" desc="$2"
     req DELETE "/api/v1/devices/tasks/$tid"
     if [[ "$HTTP_CODE" == 2* ]] && [ "$(jget ret)" = "1" ]; then
         pass "$desc → $HTTP_CODE ret=1"
         return 0
     fi
-    code="$HTTP_CODE"
-    req GET "/api/v1/devices/tasks/$tid"
-    if [ "$(jget data.status)" = "cancelled" ]; then
-        known_bug "${desc}：HTTP ${code} 但状态已置 cancelled" "CancelTask 内 CompletedTotal.WithLabelValues(\"expired\") 缺 source label 触发 panic→500，取消逻辑本身已生效（internal/task/service.go metrics 调用）"
-        return 0
-    fi
-    fail "$desc" "HTTP ${code} 且任务状态未变为 cancelled（实际 '$(jget data.status)'）"
+    fail "$desc" "期望 2xx + ret=1，实际 HTTP ${HTTP_CODE} ret=$(jget ret) body: $(printf '%s' "$BODY" | head -c 200)"
     return 1
 }
 
@@ -148,7 +141,7 @@ if [ -n "$TASK_ID" ]; then
     check_count_ge "stats by_status.pending ≥ 1" "data.by_status.pending" 1
     check_count_ge "stats queue_length ≥ 1" "data.queue_length" 1
 
-    cancel_task_tolerant "$TASK_ID" "取消任务（闭环还原）"
+    cancel_task "$TASK_ID" "取消任务（闭环还原）"
 
     req GET "/api/v1/devices/tasks/$TASK_ID"
     check_ret_ok "取消后任务详情仍可查"
@@ -182,7 +175,7 @@ if [ -n "$TASK_ID" ]; then
             fail "retry 后任务回到 pending 状态" "实际 status='${RETRY_STATUS}'"
         fi
 
-        cancel_task_tolerant "$TASK_ID" "再次取消 retry 重入队的任务（清理还原）"
+        cancel_task "$TASK_ID" "再次取消 retry 重入队的任务（清理还原）"
 
         req GET "/api/v1/devices/tasks/pending?device_sn=$TASK_SN"
         RETRY_LEFT=$(jlen data.tasks)

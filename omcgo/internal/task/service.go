@@ -401,10 +401,7 @@ func (s *TaskService) MarkTaskCompleted(ctx context.Context, taskID string, resu
 		}
 	}
 
-	if s.metrics != nil {
-		s.metrics.CompletedTotal.WithLabelValues("success").Inc()
-		s.metrics.PendingTotal.Dec()
-	}
+	s.recordCompletion(task, TaskStatusCompleted)
 
 	logger.L(ctx).Info("task completed",
 		zap.String("task_id", taskID),
@@ -444,10 +441,7 @@ func (s *TaskService) MarkTaskFailedWithResult(ctx context.Context, taskID strin
 		}
 	}
 
-	if s.metrics != nil {
-		s.metrics.CompletedTotal.WithLabelValues("failed").Inc()
-		s.metrics.PendingTotal.Dec()
-	}
+	s.recordCompletion(task, TaskStatusFailed)
 
 	logger.L(ctx).Info("task failed",
 		zap.String("task_id", taskID),
@@ -481,10 +475,7 @@ func (s *TaskService) ExpireTask(ctx context.Context, task *Task) error {
 			zap.String("task_id", task.ID),
 			zap.Error(err))
 	}
-	if s.metrics != nil {
-		s.metrics.CompletedTotal.WithLabelValues("expired").Inc()
-		s.metrics.PendingTotal.Dec()
-	}
+	s.recordCompletion(task, TaskStatusExpired)
 	s.logger.Info("task expired by sweeper",
 		zap.String("task_id", task.ID),
 		zap.String("device_sn", task.DeviceSN),
@@ -498,6 +489,23 @@ func deref(t *time.Time) time.Time {
 		return time.Time{}
 	}
 	return *t
+}
+
+// recordCompletion 在任务进入终态时按 (source, status) 递增 CompletedTotal 并递减
+// PendingTotal（issue #116）。CompletedTotal 是 {source, status} 双标签 CounterVec
+// （与 CompletionRouter.Dispatch 的用法对齐），少传任一标签会 panic
+// "inconsistent label cardinality"——曾导致 ExpiredSweeper 每 10s panic 整个 worker。
+// task 为 nil 时 source 记空串兜底；metrics 未注入（单测 / 未调 SetMetrics）时安全跳过。
+func (s *TaskService) recordCompletion(task *Task, status TaskStatus) {
+	if s.metrics == nil {
+		return
+	}
+	var source TaskSource
+	if task != nil {
+		source = task.Source
+	}
+	s.metrics.CompletedTotal.WithLabelValues(string(source), string(status)).Inc()
+	s.metrics.PendingTotal.Dec()
 }
 
 // recordDualWriteFail 在双写中断（写一半失败）时递增可观测指标（#13）。
@@ -554,10 +562,7 @@ func (s *TaskService) CancelTask(ctx context.Context, taskID string) error {
 		return fmt.Errorf("update cancelled task: %w", err)
 	}
 
-	if s.metrics != nil {
-		s.metrics.CompletedTotal.WithLabelValues("expired").Inc()
-		s.metrics.PendingTotal.Dec()
-	}
+	s.recordCompletion(task, TaskStatusCancelled)
 
 	logger.L(ctx).Info("task cancelled", zap.String("task_id", taskID))
 

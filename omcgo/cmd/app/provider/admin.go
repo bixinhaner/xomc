@@ -194,6 +194,7 @@ func initAdminModule(c *Container) error {
 	// Log module
 	logRepo := admin.NewPgLogRepository(c.PgPool)
 	logHandler := admin.NewLogHandler(logRepo)
+	adminHandler.SetLogRepository(logRepo) // #122：登录成功/失败写 sys_login_logs
 
 	// API Endpoint module
 	apiEndpointRepo := admin.NewPgApiEndpointRepository(c.PgPool)
