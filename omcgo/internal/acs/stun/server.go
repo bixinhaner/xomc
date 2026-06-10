@@ -52,6 +52,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 
 // Server is the STUN UDP server that listens for device address discovery packets.
 type Server struct {
+	connMu    sync.Mutex // guards conn: Start 写 / Stop 与 worker goroutine 读跨 goroutine
 	conn      *net.UDPConn
 	processor *Processor
 	store     *Store
@@ -106,7 +107,7 @@ func (s *Server) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("listen stun udp: %w", err)
 	}
-	s.conn = conn
+	s.setConn(conn)
 
 	s.logger.Info("STUN UDP server started",
 		zap.String("addr", s.config.ListenAddr),
@@ -136,13 +137,37 @@ func (s *Server) Stop() error {
 	s.logger.Info("STUN UDP server stopping")
 	close(s.done)
 
-	if s.conn != nil {
-		s.conn.Close() // this will unblock ReadFromUDP calls
+	if conn := s.getConn(); conn != nil {
+		conn.Close() // this will unblock ReadFromUDP calls
 	}
 
 	s.wg.Wait()
 	s.logger.Info("STUN UDP server stopped")
 	return nil
+}
+
+// setConn stores the UDP connection under the conn mutex.
+func (s *Server) setConn(conn *net.UDPConn) {
+	s.connMu.Lock()
+	defer s.connMu.Unlock()
+	s.conn = conn
+}
+
+// getConn returns the UDP connection under the conn mutex.
+func (s *Server) getConn() *net.UDPConn {
+	s.connMu.Lock()
+	defer s.connMu.Unlock()
+	return s.conn
+}
+
+// LocalAddr returns the local address the server is listening on,
+// or nil if the server has not started listening yet.
+func (s *Server) LocalAddr() net.Addr {
+	conn := s.getConn()
+	if conn == nil {
+		return nil
+	}
+	return conn.LocalAddr()
 }
 
 // Store returns the server's address store for external use.
@@ -154,6 +179,10 @@ func (s *Server) Store() *Store {
 func (s *Server) readLoop(workerID int) {
 	defer s.wg.Done()
 
+	// 经锁取一次 conn 快照：worker 在 Start 设置 conn 之后创建，
+	// 此处必非 nil；后续读写走本地变量，与 Stop 的读取共用同一把锁同步。
+	conn := s.getConn()
+
 	buf := make([]byte, s.config.BufferSize)
 	for {
 		select {
@@ -162,7 +191,7 @@ func (s *Server) readLoop(workerID int) {
 		default:
 		}
 
-		n, addr, err := s.conn.ReadFromUDP(buf)
+		n, addr, err := conn.ReadFromUDP(buf)
 		if err != nil {
 			select {
 			case <-s.done:
@@ -197,7 +226,7 @@ func (s *Server) readLoop(workerID int) {
 
 		// Send response if there is one
 		if resp != nil {
-			if _, err := s.conn.WriteToUDP(resp, addr); err != nil {
+			if _, err := conn.WriteToUDP(resp, addr); err != nil {
 				s.logger.Warn("stun write error",
 					zap.String("dst", addr.String()),
 					zap.Error(err))

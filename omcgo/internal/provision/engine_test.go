@@ -1169,7 +1169,7 @@ func TestHandleGPVResponse_EmptySyncGPVStillFinalizesPathB(t *testing.T) {
 	err = h.engine.handleGPVResponse(context.Background(), evt)
 	require.NoError(t, err)
 	require.Eventually(t, func() bool {
-		return len(writer.calls) == 1
+		return writer.callCount() == 1
 	}, time.Second, 20*time.Millisecond, "empty sync-gpv response should still finalize Path B after debounce")
 	_, redisErr := rdb.Get(context.Background(), pathBSyncPendingBatchesKey(deviceID)).Result()
 	assert.Error(t, redisErr, "pending batch key should be cleared after final empty sync-gpv response")

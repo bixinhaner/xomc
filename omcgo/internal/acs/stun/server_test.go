@@ -11,6 +11,20 @@ import (
 	"go.uber.org/zap"
 )
 
+// waitForServerAddr polls the synchronized LocalAddr accessor until the
+// UDP listener is ready, avoiding unsynchronized reads of srv.conn.
+func waitForServerAddr(t *testing.T, srv *Server) *net.UDPAddr {
+	t.Helper()
+	var addr net.Addr
+	require.Eventually(t, func() bool {
+		addr = srv.LocalAddr()
+		return addr != nil
+	}, 2*time.Second, 10*time.Millisecond, "server should start listening")
+	udpAddr, ok := addr.(*net.UDPAddr)
+	require.True(t, ok, "local addr should be *net.UDPAddr")
+	return udpAddr
+}
+
 func TestServer_StartStop(t *testing.T) {
 	store := NewStore(nil, zap.NewNop())
 	cfg := Config{
@@ -52,10 +66,9 @@ func TestServer_Integration_STUNBindingRequest(t *testing.T) {
 	go func() {
 		errCh <- srv.Start(ctx)
 	}()
-	time.Sleep(50 * time.Millisecond)
 
-	// Get the actual listening address
-	serverAddr := srv.conn.LocalAddr().(*net.UDPAddr)
+	// Get the actual listening address (wait until the listener is ready)
+	serverAddr := waitForServerAddr(t, srv)
 
 	// Send a STUN Binding Request from a client
 	clientConn, err := net.DialUDP("udp", nil, serverAddr)
@@ -106,9 +119,8 @@ func TestServer_Integration_NonStandardENB(t *testing.T) {
 	go func() {
 		errCh <- srv.Start(ctx)
 	}()
-	time.Sleep(50 * time.Millisecond)
 
-	serverAddr := srv.conn.LocalAddr().(*net.UDPAddr)
+	serverAddr := waitForServerAddr(t, srv)
 
 	// Send eNB SN as non-standard packet
 	clientConn, err := net.DialUDP("udp", nil, serverAddr)
@@ -133,6 +145,17 @@ func TestServer_Integration_NonStandardENB(t *testing.T) {
 	// Cleanup
 	cancel()
 	srv.Stop()
+}
+
+func TestServer_StopWithoutStart(t *testing.T) {
+	store := NewStore(nil, zap.NewNop())
+	srv := NewServer(Config{ListenAddr: "127.0.0.1:0"}, store, zap.NewNop())
+
+	// conn 尚未建立（nil），Stop 应安全返回不 panic
+	assert.Nil(t, srv.LocalAddr())
+	assert.NotPanics(t, func() {
+		assert.NoError(t, srv.Stop())
+	})
 }
 
 func TestServer_DefaultConfig(t *testing.T) {

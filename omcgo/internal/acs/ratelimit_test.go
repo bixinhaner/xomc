@@ -3,6 +3,7 @@ package acs
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -220,4 +221,52 @@ func TestDeviceRateLimiter_ConcurrentAccess(t *testing.T) {
 	// 不 panic，且 DeviceCount 合理
 	count := rl.DeviceCount()
 	assert.True(t, count > 0 && count <= 26, "device count should be between 1 and 26, got %d", count)
+}
+
+// 并发首次访问同一新设备：PeekOrAdd 的原子语义保证只建一个 limiter，
+// 放行总数不得超过 burst（旧实现 Get-miss-then-Add 覆盖会导致 burst 泄漏）。
+func TestDeviceRateLimiter_ConcurrentNewDevice_SingleLimiter(t *testing.T) {
+	// perMinute=1 → 1/60 token/s，测试毫秒级窗口内 refill 可忽略
+	rl := newTestRateLimiter(1, 5, 100)
+
+	var allowed atomic.Int32
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			if rl.Allow("dev-fresh-concurrent") {
+				allowed.Add(1)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	assert.Equal(t, int32(5), allowed.Load(),
+		"only burst (5) requests should pass for a brand-new device under concurrent first access")
+	assert.Equal(t, 1, rl.DeviceCount())
+}
+
+// 并发 Allow 写 lastAccess + 后台 cleanup 读 lastAccess：
+// atomic.Int64 保证无字段级 data race（-race 下验证）。
+func TestDeviceRateLimiter_ConcurrentAllowAndCleanup(t *testing.T) {
+	rl := newTestRateLimiter(6000, 100, 1000)
+	rl.StartCleanup(time.Millisecond, time.Millisecond)
+	defer rl.Stop()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			sn := fmt.Sprintf("dev-cleanup-%02d", id%5)
+			for j := 0; j < 200; j++ {
+				rl.Allow(sn)
+			}
+		}(i)
+	}
+	wg.Wait()
 }
