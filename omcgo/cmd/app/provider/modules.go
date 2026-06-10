@@ -766,6 +766,8 @@ func initBackupModule(c *Container) error {
 	restoreService := backup.NewRestoreService(
 		restoreRepo, c.DeviceRepo, c.TaskSvc, c.MinIO, restoreMetrics, logger,
 	)
+	// 配置文件恢复在下发时读 MinIO 文件流现算 Download MD5（Download 报文必填字段）。
+	restoreService.SetObjectReader(backup.NewMinIOObjectReader(c.MinIO))
 	// T-0079: enable by-task-id restore mode + subscribe FilePathRecorder to
 	// `backup.file.received` events so backup_tasks.file_path is populated
 	// after CPE finishes uploading. Both wire onto the same RestoreMetrics.

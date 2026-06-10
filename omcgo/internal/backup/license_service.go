@@ -358,6 +358,12 @@ func (s *LicenseService) DispatchLicenseUpgradeBySN(
 		}
 		downloadURL := lic.ObjectBucket + "/" + lic.ObjectPath
 		targetFileName := pathpkg.Base(lic.ObjectPath)
+		// MD5 在 license 上传入库时已算好（md5.Sum(item.Content) → device_licenses.md5），
+		// 这里读回塞进 Download params，供 CPE 下载后做完整性校验（Download 报文必填）。
+		licMD5 := ""
+		if lic.MD5 != nil {
+			licMD5 = *lic.MD5
+		}
 		params, mErr := json.Marshal(map[string]interface{}{
 			// FileType = "License File"——TR-069 私有 license 文件下行格式。
 			// 不同于配置恢复的 "10 <OUI> Configuration File"，license 这边
@@ -366,6 +372,7 @@ func (s *LicenseService) DispatchLicenseUpgradeBySN(
 			"file_type":        "License File",
 			"url":              downloadURL,
 			"target_file_name": targetFileName,
+			"md5":              licMD5,
 		})
 		if mErr != nil {
 			return uuid.Nil, nil, nil, fmt.Errorf("marshal Download params for %s: %w", sn, mErr)

@@ -13,9 +13,12 @@ package backup
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	pathpkg "path"
 	"strings"
 	"time"
@@ -55,6 +58,30 @@ type MinIOStater interface {
 	StatObject(ctx context.Context, bucket, object string, opts minio.StatObjectOptions) (minio.ObjectInfo, error)
 }
 
+// RestoreObjectReader abstracts streaming an object's bytes so RestoreService
+// can compute the Download MD5 at dispatch time by reading the file content.
+// 需求：配置文件恢复在下发时读取文件流现算 MD5（区别于固件/license 的上传期 MD5）。
+// *minio.Object 实现 io.ReadCloser，NewMinIOObjectReader 包装真实 client；
+// 测试注入返回 bytes 的 fake。
+type RestoreObjectReader interface {
+	GetObjectStream(ctx context.Context, bucket, object string) (io.ReadCloser, error)
+}
+
+// minioObjectReader adapts *minio.Client to RestoreObjectReader.
+type minioObjectReader struct{ c *minio.Client }
+
+// NewMinIOObjectReader wraps a *minio.Client so RestoreService can stream
+// objects for MD5 computation. Wired in cmd/app/provider/modules.go.
+func NewMinIOObjectReader(c *minio.Client) RestoreObjectReader { return minioObjectReader{c: c} }
+
+func (r minioObjectReader) GetObjectStream(ctx context.Context, bucket, object string) (io.ReadCloser, error) {
+	obj, err := r.c.GetObject(ctx, bucket, object, minio.GetObjectOptions{})
+	if err != nil {
+		return nil, err
+	}
+	return obj, nil
+}
+
 // BackupTaskFinder is the narrow contract RestoreService needs to fetch the
 // originating backup_task for `restore_by_task_id` mode (T-0079). The full
 // TaskRepository satisfies it; declared narrow here to keep test mocks small.
@@ -88,6 +115,10 @@ type RestoreService struct {
 	backupTaskFinder BackupTaskFinder
 	// T-0164 B5: optional — when wired enables POST /backup/restore/by-snapshot.
 	snapshotLookup SnapshotLookup
+	// objReader: optional — streams source object bytes to compute the Download
+	// MD5 at dispatch time. nil → MD5 is left empty (unit tests that don't wire
+	// it still pass); wired with the real *minio.Client in production.
+	objReader RestoreObjectReader
 }
 
 // NewRestoreService wires the dependencies. metrics may be nil (Record* nil-safe).
@@ -118,6 +149,31 @@ func (s *RestoreService) SetBackupTaskFinder(finder BackupTaskFinder) {
 // SetSnapshotLookup enables the by-snapshot restore mode (T-0164 B5).
 func (s *RestoreService) SetSnapshotLookup(lookup SnapshotLookup) {
 	s.snapshotLookup = lookup
+}
+
+// SetObjectReader wires the source-object streamer used to compute the Download
+// MD5 at dispatch time (配置文件恢复读流现算 MD5). Pass nil to disable (MD5 empty).
+func (s *RestoreService) SetObjectReader(r RestoreObjectReader) {
+	s.objReader = r
+}
+
+// computeSourceMD5 streams the source object and returns its lowercase-hex MD5.
+// 这是"配置文件恢复在下发时读取文件流计算 MD5"的实现点。objReader 未注入时返回
+// 空串（不报错），让未装配该依赖的单元测试照常通过；生产路径已在 modules.go 注入。
+func (s *RestoreService) computeSourceMD5(ctx context.Context, bucket, object string) (string, error) {
+	if s.objReader == nil {
+		return "", nil
+	}
+	rc, err := s.objReader.GetObjectStream(ctx, bucket, object)
+	if err != nil {
+		return "", fmt.Errorf("open %s/%s for md5: %w", bucket, object, err)
+	}
+	defer rc.Close()
+	h := md5.New()
+	if _, err := io.Copy(h, rc); err != nil {
+		return "", fmt.Errorf("read %s/%s for md5: %w", bucket, object, err)
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // CreateRestoreRequest is the API request body validated and persisted.
@@ -153,6 +209,14 @@ func (s *RestoreService) Create(ctx context.Context, req *CreateRestoreRequest, 
 			}
 			return nil, fmt.Errorf("stat source object: %w", err)
 		}
+	}
+
+	// 配置文件恢复：下发时读取源文件流现算 MD5（Download 报文必填，供 CPE 下载后校验）。
+	// 放在建 restore_task 行之前 → md5 失败不留孤儿行。同一份文件发给所有目标设备，
+	// 故循环外只算一次。
+	srcMD5, md5Err := s.computeSourceMD5(ctx, req.Bucket, req.ObjectPath)
+	if md5Err != nil {
+		return nil, fmt.Errorf("compute restore source md5: %w", md5Err)
 	}
 
 	now := time.Now()
@@ -193,6 +257,7 @@ func (s *RestoreService) Create(ctx context.Context, req *CreateRestoreRequest, 
 			"file_type":        s.buildRestoreFileType(dev.SerialNumber, dev.OUI),
 			"url":              restoreURL,
 			"target_file_name": pathpkg.Base(req.ObjectPath),
+			"md5":              srcMD5,
 		})
 		if err != nil {
 			// json.Marshal of a map[string]any with primitive values cannot
@@ -436,10 +501,20 @@ func (s *RestoreService) CreateBySnapshot(
 		}
 		restoreURL := snap.ObjectBucket + "/" + snap.ObjectPath
 		targetFileName := pathpkg.Base(snap.ObjectPath)
+		// 下发时读该设备快照文件流现算 MD5（Download 报文必填）。每设备文件不同，
+		// 故循环内逐个算；算失败跳过该设备，避免下发缺 MD5 的 Download。
+		snapMD5, md5Err := s.computeSourceMD5(ctx, snap.ObjectBucket, snap.ObjectPath)
+		if md5Err != nil {
+			skipped = append(skipped, sn)
+			s.logger.Warn("compute snapshot md5 failed; skipping",
+				zap.String("device_sn", sn), zap.Error(md5Err))
+			continue
+		}
 		params, mErr := json.Marshal(map[string]interface{}{
 			"file_type":        s.buildRestoreFileType(dev.SerialNumber, dev.OUI),
 			"url":              restoreURL,
 			"target_file_name": targetFileName,
+			"md5":              snapMD5,
 		})
 		if mErr != nil {
 			return nil, fmt.Errorf("marshal Download params for %s: %w", sn, mErr)

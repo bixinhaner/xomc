@@ -1,9 +1,13 @@
 package backup
 
 import (
+	"bytes"
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"testing"
 	"time"
 
@@ -105,6 +109,20 @@ func (f *fakeStater) StatObject(_ context.Context, _ string, _ string, _ minio.S
 	return minio.ObjectInfo{Size: 1024}, nil
 }
 
+// fakeObjReader satisfies RestoreObjectReader: returns fixed bytes (or an error)
+// so tests can assert the Download MD5 computed from the streamed content.
+type fakeObjReader struct {
+	content []byte
+	err     error
+}
+
+func (f *fakeObjReader) GetObjectStream(_ context.Context, _, _ string) (io.ReadCloser, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return io.NopCloser(bytes.NewReader(f.content)), nil
+}
+
 // --- tests ---
 
 func newSvc(t *testing.T, knownSNs []string, statExists bool) (*RestoreService, *mockRestoreRepo, *fakeEnqueuer) {
@@ -143,6 +161,44 @@ func TestCreate_validRequest_fanOut(t *testing.T) {
 		assert.Contains(t, string(req.Params), `"file_type":"10 48BF74 Configuration File"`)
 		assert.Contains(t, string(req.Params), `"url":"config_backup/backup/2026/04/29/cfg.xml.gz"`)
 	}
+}
+
+// TestCreate_computesMD5FromStream 验证配置文件恢复在下发时读取源文件流现算 MD5
+// 并写入 Download params（Download 报文必填）。同一份文件发给多设备 → 同一 MD5。
+func TestCreate_computesMD5FromStream(t *testing.T) {
+	svc, _, enq := newSvc(t, []string{"SN001", "SN002"}, true)
+	content := []byte("restore-config-stream-bytes-甲乙丙")
+	sum := md5.Sum(content)
+	wantMD5 := hex.EncodeToString(sum[:])
+	svc.SetObjectReader(&fakeObjReader{content: content})
+
+	_, err := svc.Create(context.Background(), &CreateRestoreRequest{
+		Bucket:          CanonicalRestoreBucket,
+		ObjectPath:      "backup/2026/04/29/cfg.xml.gz",
+		TargetDeviceSNs: []string{"SN001", "SN002"},
+	}, "alice")
+	require.NoError(t, err)
+	require.Len(t, enq.requests, 2)
+	for _, req := range enq.requests {
+		assert.Contains(t, string(req.Params), `"md5":"`+wantMD5+`"`,
+			"配置恢复 Download 必须携带下发时读流现算的 MD5")
+	}
+}
+
+// TestCreate_md5ReadError_failsBeforeRowCreated 验证 MD5 计算失败时在建
+// restore_task 行之前返回错误，不留孤儿行、不下发缺 MD5 的 Download。
+func TestCreate_md5ReadError_failsBeforeRowCreated(t *testing.T) {
+	svc, repo, enq := newSvc(t, []string{"SN001"}, true)
+	svc.SetObjectReader(&fakeObjReader{err: errors.New("minio unreachable")})
+
+	_, err := svc.Create(context.Background(), &CreateRestoreRequest{
+		Bucket:          CanonicalRestoreBucket,
+		ObjectPath:      "backup/2026/04/29/cfg.xml.gz",
+		TargetDeviceSNs: []string{"SN001"},
+	}, "alice")
+	require.Error(t, err)
+	assert.Empty(t, repo.created, "md5 失败应在建 restore_task 行前返回，不留孤儿行")
+	assert.Empty(t, enq.requests, "md5 失败不应下发任何 Download")
 }
 
 func TestCreate_unknownDevice_skippedNoted(t *testing.T) {
