@@ -1558,6 +1558,62 @@ func (s *SoftwareService) UpdateFirmwareMetadata(ctx context.Context, fw *Firmwa
 	return s.firmwareRepo.Update(ctx, fw)
 }
 
+// ---------------------------------------------------------------------------
+// Read-through service methods (#18 分层收敛)
+//
+// Handler 层不再直连 Repository / SQL 池：所有读路径经 Service 转发到
+// Repository，统一在 Service 层留出权限检查 / 缓存策略的挂载点（handler →
+// service → repository）。这些方法对返回值不做加工，保持行为不变。
+// ---------------------------------------------------------------------------
+
+// ListFirmware 列出固件版本（分页/过滤）。
+func (s *SoftwareService) ListFirmware(ctx context.Context, filter FirmwareFilter) (*model.ListResponse[FirmwareVersion], error) {
+	return s.firmwareRepo.List(ctx, filter)
+}
+
+// GetFirmware 按 ID 取单个固件版本元数据。
+func (s *SoftwareService) GetFirmware(ctx context.Context, id uuid.UUID) (*FirmwareVersion, error) {
+	return s.firmwareRepo.GetByID(ctx, id)
+}
+
+// ToggleFirmwareRecommend 翻转固件的"推荐"标记并持久化（读-改-写原子收敛到 Service）。
+func (s *SoftwareService) ToggleFirmwareRecommend(ctx context.Context, id uuid.UUID) (*FirmwareVersion, error) {
+	fw, err := s.firmwareRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get firmware for recommend toggle: %w", err)
+	}
+	fw.Recommend = !fw.Recommend
+	if err := s.firmwareRepo.Update(ctx, fw); err != nil {
+		return nil, fmt.Errorf("update firmware recommend: %w", err)
+	}
+	return fw, nil
+}
+
+// ListUpgradeTasks 列出升级主任务（分页/过滤）。
+func (s *SoftwareService) ListUpgradeTasks(ctx context.Context, filter UpgradeTaskFilter) (*model.ListResponse[UpgradeTask], error) {
+	return s.taskRepo.List(ctx, filter)
+}
+
+// GetUpgradeTask 按 ID 取单个升级主任务。
+func (s *SoftwareService) GetUpgradeTask(ctx context.Context, id uuid.UUID) (*UpgradeTask, error) {
+	return s.taskRepo.GetByID(ctx, id)
+}
+
+// ListSubTasksByTaskID 列出某主任务下的子任务（分页/过滤）。
+func (s *SoftwareService) ListSubTasksByTaskID(ctx context.Context, taskID uuid.UUID, filter SubTaskFilter) (*model.ListResponse[UpgradeSubTaskWithTaskName], error) {
+	return s.subTaskRepo.ListByTaskID(ctx, taskID, filter)
+}
+
+// ListAllSubTasks 跨主任务列出子任务（分页/过滤）。
+func (s *SoftwareService) ListAllSubTasks(ctx context.Context, filter AllSubTaskFilter) (*model.ListResponse[UpgradeSubTaskWithTaskName], error) {
+	return s.subTaskRepo.ListAll(ctx, filter)
+}
+
+// GetSubTask 按 ID 取单个升级子任务。
+func (s *SoftwareService) GetSubTask(ctx context.Context, id uuid.UUID) (*UpgradeSubTask, error) {
+	return s.subTaskRepo.GetByID(ctx, id)
+}
+
 // Subscribe registers all event subscriptions for the software service.
 //
 // 每个 subject 用独立 queue 名（durable consumer name），避免 "subject does

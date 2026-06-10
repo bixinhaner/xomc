@@ -18,22 +18,20 @@ import (
 )
 
 // Handler provides REST API endpoints for software/firmware management.
+//
+// #18 分层收敛：Handler 只依赖 Service，不再持有/直连 Repository。所有读写
+// 都经 SoftwareService（handler → service → repository），便于在 Service 层
+// 集中挂权限检查 / 缓存策略。
 type Handler struct {
-	service      *SoftwareService
-	firmwareRepo FirmwareRepository
-	taskRepo     TaskRepository
-	subTaskRepo  SubTaskRepository
-	logger       *zap.Logger
+	service *SoftwareService
+	logger  *zap.Logger
 }
 
 // NewHandler creates a new software Handler.
-func NewHandler(service *SoftwareService, firmwareRepo FirmwareRepository, taskRepo TaskRepository, subTaskRepo SubTaskRepository, logger *zap.Logger) *Handler {
+func NewHandler(service *SoftwareService, logger *zap.Logger) *Handler {
 	return &Handler{
-		service:      service,
-		firmwareRepo: firmwareRepo,
-		taskRepo:     taskRepo,
-		subTaskRepo:  subTaskRepo,
-		logger:       logger.Named("software-handler"),
+		service: service,
+		logger:  logger.Named("software-handler"),
 	}
 }
 
@@ -77,7 +75,7 @@ func (h *Handler) ListFirmware(c *gin.Context) {
 		return
 	}
 
-	result, err := h.firmwareRepo.List(c.Request.Context(), filter)
+	result, err := h.service.ListFirmware(c.Request.Context(), filter)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
@@ -132,7 +130,7 @@ func (h *Handler) GetFirmware(c *gin.Context) {
 		return
 	}
 
-	fw, err := h.firmwareRepo.GetByID(c.Request.Context(), id)
+	fw, err := h.service.GetFirmware(c.Request.Context(), id)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
@@ -161,14 +159,8 @@ func (h *Handler) ToggleFirmwareRecommend(c *gin.Context) {
 		return
 	}
 
-	fw, err := h.firmwareRepo.GetByID(c.Request.Context(), id)
+	fw, err := h.service.ToggleFirmwareRecommend(c.Request.Context(), id)
 	if err != nil {
-		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
-		return
-	}
-
-	fw.Recommend = !fw.Recommend
-	if err := h.firmwareRepo.Update(c.Request.Context(), fw); err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
@@ -183,7 +175,7 @@ func (h *Handler) DownloadFirmware(c *gin.Context) {
 	}
 
 	// Fetch firmware metadata for filename
-	fw, err := h.firmwareRepo.GetByID(c.Request.Context(), id)
+	fw, err := h.service.GetFirmware(c.Request.Context(), id)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
@@ -209,7 +201,7 @@ func (h *Handler) UpdateFirmware(c *gin.Context) {
 		return
 	}
 
-	fw, err := h.firmwareRepo.GetByID(c.Request.Context(), id)
+	fw, err := h.service.GetFirmware(c.Request.Context(), id)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
@@ -253,7 +245,7 @@ func (h *Handler) ListUpgradeTasks(c *gin.Context) {
 		return
 	}
 
-	result, err := h.taskRepo.List(c.Request.Context(), filter)
+	result, err := h.service.ListUpgradeTasks(c.Request.Context(), filter)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
@@ -268,7 +260,7 @@ func (h *Handler) GetUpgradeTask(c *gin.Context) {
 		return
 	}
 
-	task, err := h.taskRepo.GetByID(c.Request.Context(), id)
+	task, err := h.service.GetUpgradeTask(c.Request.Context(), id)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
@@ -404,7 +396,7 @@ func (h *Handler) ListSubTasks(c *gin.Context) {
 	}
 	filter.TaskID = taskID
 
-	result, err := h.subTaskRepo.ListByTaskID(c.Request.Context(), taskID, filter)
+	result, err := h.service.ListSubTasksByTaskID(c.Request.Context(), taskID, filter)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
@@ -419,7 +411,7 @@ func (h *Handler) ListAllSubTasks(c *gin.Context) {
 		return
 	}
 
-	result, err := h.subTaskRepo.ListAll(c.Request.Context(), filter)
+	result, err := h.service.ListAllSubTasks(c.Request.Context(), filter)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
@@ -434,7 +426,7 @@ func (h *Handler) GetSubTask(c *gin.Context) {
 		return
 	}
 
-	task, err := h.subTaskRepo.GetByID(c.Request.Context(), id)
+	task, err := h.service.GetSubTask(c.Request.Context(), id)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return

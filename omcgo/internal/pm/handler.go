@@ -1,7 +1,6 @@
 package pm
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -26,14 +25,16 @@ import (
 
 // Handler provides REST API endpoints for PM data.
 type Handler struct {
-	counterRepo   counter.CounterRepository
-	kpiRepo       kpi.KPIRepository
-	kpiEngine     *kpi.KPIEngine
-	taskRepo      TaskRepository
-	fileStore     PMFileStore
-	minioClient   *minio.Client
-	pmBucket      string
-	pool          *pgxpool.Pool                 // T-0164-P3 fix: 反查 devices 拿 (oui, sn) 给 KPIEngine
+	counterRepo counter.CounterRepository
+	kpiRepo     kpi.KPIRepository
+	kpiEngine   *kpi.KPIEngine
+	taskRepo    TaskRepository
+	fileStore   PMFileStore
+	minioClient *minio.Client
+	pmBucket    string
+	// deviceQuery 收敛 #18：Handler 原先直连 SQL 池（h.pool）反查 devices /
+	// 读 pm_metrics，现统一经 DeviceQueryService（handler → service → repository）。
+	deviceQuery   DeviceQueryService
 	indicatorRepo indicator.IndicatorRepository // T-0164-P1：/pm/kpi/definitions 数据源（替代旧 carrier KPIDefinitions 列表）
 	aggr          *aggregator.Aggregator        // T-0164-P5 / G5：按粒度路由聚合表查询（hourly/daily/weekly/monthly + device_group）
 	asyncJobRepo  asyncjob.Repository           // T-0164 收尾 G5-Gap-2：手动重算入口入队 async_jobs
@@ -56,6 +57,9 @@ func (h *Handler) WithAsyncJobRepo(repo asyncjob.Repository) *Handler {
 }
 
 // NewHandler creates a new PM handler.
+//
+// pool 仅用于构造 DeviceQueryService（#18 收敛后 Handler 不直接持有连接池）；
+// 测试可传 nil（不触达 devices / pm_metrics 端点时无需真实池）。
 func NewHandler(counterRepo counter.CounterRepository, kpiRepo kpi.KPIRepository, kpiEngine *kpi.KPIEngine, taskRepo TaskRepository, fileStore PMFileStore, minioClient *minio.Client, pmBucket string, pool *pgxpool.Pool, indicatorRepo indicator.IndicatorRepository, logger *zap.Logger) *Handler {
 	return &Handler{
 		counterRepo:   counterRepo,
@@ -65,22 +69,10 @@ func NewHandler(counterRepo counter.CounterRepository, kpiRepo kpi.KPIRepository
 		fileStore:     fileStore,
 		minioClient:   minioClient,
 		pmBucket:      pmBucket,
-		pool:          pool,
+		deviceQuery:   NewDeviceQueryService(pool),
 		indicatorRepo: indicatorRepo,
 		logger:        logger,
 	}
-}
-
-// lookupDeviceOUISN 反查 devices 表的 (oui, serial_number) 双键（T-0164-P3 fix）。
-func (h *Handler) lookupDeviceOUISN(ctx context.Context, deviceID uuid.UUID) (string, string, error) {
-	var oui, sn string
-	err := h.pool.QueryRow(ctx,
-		`SELECT oui, serial_number FROM devices WHERE id = $1`, deviceID,
-	).Scan(&oui, &sn)
-	if err != nil {
-		return "", "", fmt.Errorf("lookup device oui+sn: %w", err)
-	}
-	return oui, sn, nil
 }
 
 // SetMetrics attaches Prometheus metrics to the handler.
@@ -682,7 +674,7 @@ func (h *Handler) CalculateKPI(c *gin.Context) {
 		return
 	}
 
-	oui, sn, err := h.lookupDeviceOUISN(c.Request.Context(), deviceID)
+	oui, sn, err := h.deviceQuery.LookupDeviceOUISN(c.Request.Context(), deviceID)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return

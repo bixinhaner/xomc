@@ -1,0 +1,112 @@
+package pm
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/omcgo/omcgo/internal/pm/metrics"
+)
+
+// #18 分层收敛：把 PM Handler 原先直连 SQL 池（h.pool）的两处查询收敛到
+// Service 层（handler → service → repository）。Handler 不再持有
+// *pgxpool.Pool；跨模块读 devices 表、读 pm_metrics 明细都经此 Service，
+// 便于后续在单点挂权限检查 / 缓存策略。行为保持不变（SQL 与原实现逐字一致）。
+
+// MetricObject 是设备在 pm_metrics 里出现过的一个 distinct 小区/PLMN 项。
+type MetricObject struct {
+	ObjectLDN string // 原始字符串
+	CellID    string // 解析出的小区号（友好名用）
+	PLMN      string // 解析出的 PLMN（友好名用）
+}
+
+// DeviceQueryService 封装 PM 模块对 devices / pm_metrics 的只读查询。
+//
+// 接口优先：Handler 依赖此接口而非具体 *pgxpool.Pool，便于测试替身与未来
+// 切换数据源（例如改走 Device 模块的公开接口）时不动 Handler。
+type DeviceQueryService interface {
+	// LookupDeviceOUISN 反查 devices 表的 (oui, serial_number) 双键。
+	// 给 KPIEngine.CalculateAndStore 提供设备主键（原 T-0164-P3 fix）。
+	LookupDeviceOUISN(ctx context.Context, deviceID uuid.UUID) (oui, sn string, err error)
+
+	// ListMetricObjects 列出一批设备在最细原始表 pm_metrics 里实际出现过的
+	// distinct object_ldn（按 technology 可选过滤），每项解析出 cell_id / plmn。
+	ListMetricObjects(ctx context.Context, deviceSNs, technologies []string) ([]MetricObject, error)
+}
+
+// pgDeviceQueryService 是 DeviceQueryService 的 PostgreSQL/TimescaleDB 实现。
+type pgDeviceQueryService struct {
+	pool *pgxpool.Pool
+}
+
+// NewDeviceQueryService 用时序库连接池构造 PM 设备/指标只读查询服务。
+func NewDeviceQueryService(pool *pgxpool.Pool) DeviceQueryService {
+	return &pgDeviceQueryService{pool: pool}
+}
+
+// LookupDeviceOUISN 反查 devices 表的 (oui, serial_number) 双键。
+func (s *pgDeviceQueryService) LookupDeviceOUISN(ctx context.Context, deviceID uuid.UUID) (string, string, error) {
+	var oui, sn string
+	err := s.pool.QueryRow(ctx,
+		`SELECT oui, serial_number FROM devices WHERE id = $1`, deviceID,
+	).Scan(&oui, &sn)
+	if err != nil {
+		return "", "", fmt.Errorf("lookup device oui+sn: %w", err)
+	}
+	return oui, sn, nil
+}
+
+// ListMetricObjects 查询设备小区/PLMN 清单。
+func (s *pgDeviceQueryService) ListMetricObjects(ctx context.Context, deviceSNs, technologies []string) ([]MetricObject, error) {
+	q, args := buildObjectsQuery(deviceSNs, technologies)
+	rows, err := s.pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query metric objects: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]MetricObject, 0)
+	for rows.Next() {
+		var ldn string
+		if err := rows.Scan(&ldn); err != nil {
+			return nil, fmt.Errorf("scan object_ldn: %w", err)
+		}
+		cellID, plmn := parseObjectLDN(ldn)
+		items = append(items, MetricObject{ObjectLDN: ldn, CellID: cellID, PLMN: plmn})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate metric objects: %w", err)
+	}
+	return items, nil
+}
+
+// buildObjectsQuery 纯函数：拼"列设备小区/PLMN"查询 SQL + 占位参数。
+//
+//   - $1 = device_sns（TEXT[]）
+//   - 制式过滤（technologies 非空时）照 applyCommonFilters 范式：
+//     (device_oui, device_sn) IN (SELECT oui, serial_number FROM devices WHERE technology = ANY($2))
+//
+// 抽出便于单测断言（device 过滤 + 制式过滤 + distinct）。
+func buildObjectsQuery(deviceSNs, technologies []string) (string, []any) {
+	q := `SELECT DISTINCT object_ldn
+FROM pm_metrics
+WHERE device_sn = ANY($1)
+  AND object_ldn <> ''`
+	args := []any{deviceSNs}
+	if len(technologies) > 0 {
+		q += `
+  AND (device_oui, device_sn) IN (SELECT oui, serial_number FROM devices WHERE technology = ANY($2))`
+		args = append(args, technologies)
+	}
+	q += `
+ORDER BY object_ldn`
+	return q, args
+}
+
+// parseObjectLDN 从原始 object_ldn 拆出 cell_id / plmn（缺段则留空）。
+// 委托给 metrics.ParseObjectLDN 单一真值源（与 aggregator KPI 跨层级配对同口径），不另造解析。
+func parseObjectLDN(ldn string) (cellID, plmn string) {
+	return metrics.ParseObjectLDN(ldn)
+}

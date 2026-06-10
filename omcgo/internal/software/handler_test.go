@@ -154,8 +154,14 @@ func (m *swHSubTaskRepo) DeleteByTaskID(_ context.Context, _ uuid.UUID) error { 
 func swHSetupRouter(fwRepo FirmwareRepository, taskRepo TaskRepository) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	svc := &SoftwareService{firmwareRepo: fwRepo, logger: zap.NewNop()}
-	h := NewHandler(svc, fwRepo, taskRepo, &swHSubTaskRepo{}, zap.NewNop())
+	// #18 后 Handler 经 Service 读 Repository，所以 mock repo 注入 Service。
+	svc := &SoftwareService{
+		firmwareRepo: fwRepo,
+		taskRepo:     taskRepo,
+		subTaskRepo:  &swHSubTaskRepo{},
+		logger:       zap.NewNop(),
+	}
+	h := NewHandler(svc, zap.NewNop())
 	h.RegisterRoutes(r.Group(""))
 	return r
 }
@@ -298,4 +304,70 @@ func TestSwHandler_GetUpgradeTask_NotFound(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+// TestSwHandler_ToggleFirmwareRecommend_Success 验证 #18 后"读-改-写"翻转推荐
+// 标记的链路经 Service（handler → service → repository），且行为不变：拿到
+// recommend=false 的固件，PUT 后翻转为 true 并落库。
+func TestSwHandler_ToggleFirmwareRecommend_Success(t *testing.T) {
+	id := uuid.New()
+	updated := false
+	fwRepo := &swHFirmwareRepo{
+		getByIDFn: func(_ context.Context, gotID uuid.UUID) (*FirmwareVersion, error) {
+			fw := swHSampleFirmware(gotID)
+			fw.Recommend = false
+			return fw, nil
+		},
+		updateFn: func(_ context.Context, fw *FirmwareVersion) error {
+			assert.True(t, fw.Recommend, "recommend should be flipped to true before persist")
+			updated = true
+			return nil
+		},
+	}
+	router := swHSetupRouter(fwRepo, &swHTaskRepo{})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPut, "/firmware/"+id.String()+"/recommend", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.True(t, updated, "service should persist the toggled firmware via repo")
+	var resp FirmwareVersion
+	response.DecodeData(t, w.Body, &resp)
+	assert.True(t, resp.Recommend)
+}
+
+// TestSwHandler_ToggleFirmwareRecommend_NotFound 失败路径：固件不存在时返回 404，
+// 且不触发 Update（读-改-写在 Service 内短路）。
+func TestSwHandler_ToggleFirmwareRecommend_NotFound(t *testing.T) {
+	updated := false
+	fwRepo := &swHFirmwareRepo{
+		updateFn: func(_ context.Context, _ *FirmwareVersion) error {
+			updated = true
+			return nil
+		},
+	}
+	router := swHSetupRouter(fwRepo, &swHTaskRepo{})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPut, "/firmware/"+uuid.New().String()+"/recommend", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.False(t, updated, "update must not run when firmware lookup fails")
+}
+
+// TestSwHandler_ListSubTasks_RoutesThroughService 验证子任务列表读路径经 Service
+// 注入的 subTaskRepo（#18 收敛后 handler 不再持有 subTaskRepo）。
+func TestSwHandler_ListAllSubTasks_OK(t *testing.T) {
+	router := swHSetupRouter(&swHFirmwareRepo{}, &swHTaskRepo{})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/upgrade-sub-tasks?page=1&page_size=20", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var resp model.ListResponse[UpgradeSubTaskWithTaskName]
+	response.DecodeData(t, w.Body, &resp)
+	assert.Equal(t, int64(0), resp.Total)
 }

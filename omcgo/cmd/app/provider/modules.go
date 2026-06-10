@@ -318,7 +318,7 @@ func initSoftwareModule(c *Container) error {
 	}
 	c.miscDeps.canaryMonitor = canaryMonitor
 
-	softwareHandler := software.NewHandler(softwareService, firmwareRepo, taskRepo, subTaskRepo, logger)
+	softwareHandler := software.NewHandler(softwareService, logger)
 
 	c.miscDeps.softwareHandler = softwareHandler
 	c.miscDeps.softwareService = softwareService
