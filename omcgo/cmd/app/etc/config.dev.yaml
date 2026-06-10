@@ -132,9 +132,13 @@ upgrade:
 #   实际 CPE 应答落在 5-60 秒区间，120s 给慢响应留两倍缓冲又不让用户傻等。
 # sweep_interval_seconds：worker 进程内 task_sweeper 周期扫描间隔（C2 引入），
 #   过期 task 标记 expired 并 publish task.expired 事件供消息中心订阅器消费。
+# wake_concurrency：wakeDevice 异步 Connection Request 唤醒的并发上界（issue #12）。
+#   防 10 万 Inform 风暴 / 批量任务下唤醒 goroutine 无界暴涨 OOM。
+#   <=0 走内置安全默认 256；满载时多余唤醒被背压丢弃（设备下个 periodic inform 自愈）。
 task:
   default_expires_in_seconds: 120
   sweep_interval_seconds: 10
+  wake_concurrency: 256
 
 # F05 MR 测量任务（详见 docs/project/prd/F05-mr-task-management.md）
 # 字段语义参 internal/core/appconfig/config.go MRConfig 注释

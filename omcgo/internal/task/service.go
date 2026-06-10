@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/omcgo/omcgo/internal/core/components/logger"
@@ -12,7 +13,20 @@ import (
 	"github.com/omcgo/omcgo/internal/core/tracing"
 	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
+	"golang.org/x/sync/semaphore"
 )
+
+// defaultWakeConcurrency 是 wakeDevice 异步唤醒并发上界的安全默认值。
+//
+// 问题（issue #12）：原 wakeDevice 每次 CreateTask / BatchCreateTasks 去重设备都
+// 无界 `go func()`，10 万 Inform 风暴 + 批量任务下 goroutine 暴涨 → 峰值 OOM，
+// 与连接池耗尽互相放大级联。
+//
+// 取值权衡：唤醒是 fire-and-forget（失败仅 log，设备下个 periodic inform 会自愈），
+// 不在任务创建关键路径上。256 给批量唤醒留足并行度（远高于单设备 Connection Request
+// 的网络往返耗时所需），又把峰值 goroutine + 出站连接钉在常数级，避免发散。
+// 生产可经 SetWakeConcurrency 调整。
+const defaultWakeConcurrency = 256
 
 // ErrQueueFull is returned by CreateTask when a device's pending-task queue has
 // reached its configured depth cap. It is a backpressure signal (issue #7): an
@@ -65,6 +79,14 @@ type TaskService struct {
 	// repo.Create / queue.Push 失败时调用，让消息中心 100% 覆盖用户操作。
 	// nil = 未注入（如 acs/worker 进程不调 CreateTask，无需注入）。
 	createFailureNotifier CreateFailureNotifier
+
+	// issue #12 — wakeDevice 异步唤醒的有界并发控制。
+	// wakeSem 限制同时在飞的唤醒 goroutine 数（背压：满载时 TryAcquire 失败即丢弃，
+	// 不阻塞 CreateTask 关键路径——设备下个 periodic inform 会自愈）。
+	// 经 wakeSemOnce 懒初始化，使既有 `&TaskService{...}` 字面量构造（含单测）零改动仍受保护。
+	wakeSem         *semaphore.Weighted
+	wakeSemOnce     sync.Once
+	wakeConcurrency int // <=0 用 defaultWakeConcurrency
 
 	// maxQueueDepth: issue #7 — 每设备 pending 队列深度上限（背压）。
 	// 0 表示不限制（向后兼容历史行为）；生产由 SetMaxQueueDepth 注入。
@@ -122,6 +144,26 @@ func (s *TaskService) Metrics() *TaskMetrics {
 func (s *TaskService) SetConnectionRequester(dl DeviceLookup, cr ConnectionRequestSender) {
 	s.deviceLookup = dl
 	s.connReq = cr
+}
+
+// SetWakeConcurrency 配置 wakeDevice 异步唤醒的并发上界（issue #12）。
+// <=0 时回退到 defaultWakeConcurrency。须在首次 wakeDevice 调用前设置
+// （信号量懒初始化只读一次本值）。仅 cmd/app/bootstrap.go 在装配期调用。
+func (s *TaskService) SetWakeConcurrency(n int) {
+	s.wakeConcurrency = n
+}
+
+// wakeSemaphore 懒初始化并返回唤醒并发信号量。
+// 用 sync.Once 保证多 goroutine 首次并发 wakeDevice 时只建一个信号量。
+func (s *TaskService) wakeSemaphore() *semaphore.Weighted {
+	s.wakeSemOnce.Do(func() {
+		limit := s.wakeConcurrency
+		if limit <= 0 {
+			limit = defaultWakeConcurrency
+		}
+		s.wakeSem = semaphore.NewWeighted(int64(limit))
+	})
+	return s.wakeSem
 }
 
 // AddCompletionCallback registers a callback invoked when tasks reach terminal states.
@@ -782,12 +824,29 @@ func (s *TaskService) PurgeOldTasks(ctx context.Context, retentionDays int) (int
 
 // wakeDevice sends a Connection Request to wake the device asynchronously.
 // This is fire-and-forget: errors are logged but do not block task creation.
+//
+// issue #12：派生的 goroutine 受 wakeSemaphore 有界并发控制。满载时 TryAcquire
+// 失败即丢弃本次唤醒（不阻塞调用方关键路径，也不无界堆积 goroutine）——唤醒本就
+// 是 best-effort，被丢弃的设备会在下一个 periodic inform 周期自行重连。这把峰值
+// goroutine 数 + 出站 Connection Request 连接钉在常数级，防 10 万风暴下发散 OOM。
 func (s *TaskService) wakeDevice(deviceSN string) {
 	if s.deviceLookup == nil || s.connReq == nil {
 		return
 	}
 
+	sem := s.wakeSemaphore()
+	if !sem.TryAcquire(1) {
+		// 背压：在飞唤醒已达上界，丢弃本次（设备下个 periodic inform 自愈）。
+		if s.metrics != nil {
+			s.metrics.WakeDropped.Inc()
+		}
+		s.logger.Warn("wake device dropped: concurrency limit reached",
+			zap.String("device_sn", deviceSN))
+		return
+	}
+
 	go func() {
+		defer sem.Release(1)
 		ctx := context.Background()
 		httpURL, err := s.deviceLookup.GetConnectionRequestURL(ctx, deviceSN)
 		if err != nil {

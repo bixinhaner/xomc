@@ -10,10 +10,14 @@ import "github.com/prometheus/client_golang/prometheus"
 //   - NoHandlerTotal 记录 CompletionRouter 未匹配 source 的次数，帮助排查
 //     漏注册问题
 type TaskMetrics struct {
-	PendingTotal     prometheus.Gauge
-	CompletedTotal   *prometheus.CounterVec
-	DurationSeconds  *prometheus.HistogramVec
-	NoHandlerTotal   *prometheus.CounterVec
+	PendingTotal    prometheus.Gauge
+	CompletedTotal  *prometheus.CounterVec
+	DurationSeconds *prometheus.HistogramVec
+	NoHandlerTotal  *prometheus.CounterVec
+
+	// WakeDropped 记录 wakeDevice 因并发上界（背压）被丢弃的唤醒次数（issue #12）。
+	// 持续增长说明唤醒并发上界偏低 / Connection Request 后端变慢，需调 wake_concurrency。
+	WakeDropped prometheus.Counter
 
 	// ReconcileTotal 记录 Reconciler 检测/修复的 Redis↔PG 状态分叉次数（#13）。
 	// outcome 标签：
@@ -50,6 +54,10 @@ func NewTaskMetrics(reg prometheus.Registerer) *TaskMetrics {
 			Name: "completion_no_handler_total",
 			Help: "CompletionRouter received task events whose source has no registered handler",
 		}, []string{"source"}),
+		WakeDropped: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "omc_task_wake_dropped_total",
+			Help: "Connection Request wake-ups dropped due to concurrency limit (backpressure)",
+		}),
 		ReconcileTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "task_reconcile_total",
 			Help: "Redis↔PG task state divergences detected/repaired by the reconciler, by outcome",
@@ -65,6 +73,7 @@ func NewTaskMetrics(reg prometheus.Registerer) *TaskMetrics {
 		m.CompletedTotal,
 		m.DurationSeconds,
 		m.NoHandlerTotal,
+		m.WakeDropped,
 		m.ReconcileTotal,
 		m.DualWriteFailTotal,
 	)

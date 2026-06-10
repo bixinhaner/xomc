@@ -285,12 +285,19 @@ type AppConfig struct {
 //
 //	<= 0 时 sweeper 不启动（C2 引入；C1 阶段先建配置项占位）。
 //
+// WakeConcurrency: wakeDevice 异步 Connection Request 唤醒的并发上界（issue #12）。
+//
+//	防 10 万 Inform 风暴 / 批量任务下唤醒 goroutine 无界暴涨 → 峰值 OOM。
+//	<= 0 时 TaskService 回退到内置安全默认（defaultWakeConcurrency=256）。
+//	满载时多余唤醒被背压丢弃（设备下个 periodic inform 自愈），不阻塞 CreateTask。
+//
 // ReconcileIntervalSeconds: worker 进程 task_reconciler 周期对账 Redis↔PG 状态分叉的间隔（秒，#13）。
 //
 //	<= 0 时 reconciler 不启动。修复 "PG 滞后于 Redis 终态" 的孤儿/陈旧记录。
 type TaskConfig struct {
 	DefaultExpiresInSeconds  int `mapstructure:"default_expires_in_seconds"`
 	SweepIntervalSeconds     int `mapstructure:"sweep_interval_seconds"`
+	WakeConcurrency          int `mapstructure:"wake_concurrency"`
 	ReconcileIntervalSeconds int `mapstructure:"reconcile_interval_seconds"`
 }
 

@@ -67,6 +67,9 @@ func initApp(ctx context.Context, cfg *appconfig.AppConfig) (*appInfra, error) {
 	app.TaskSvc = task.NewTaskService(taskQueue, taskRepo, inf.Logger)
 	// T-0157 C1: 注入默认超时兜底（详见 appconfig.TaskConfig 注释）
 	app.TaskSvc.SetDefaultExpiresIn(cfg.Task.DefaultExpiresInSeconds)
+	// issue #12: 注入 wakeDevice 唤醒并发上界（<=0 走内置安全默认），
+	// 防 10 万 Inform 风暴下唤醒 goroutine 无界暴涨 OOM。
+	app.TaskSvc.SetWakeConcurrency(cfg.Task.WakeConcurrency)
 	// T-0157 C5: 注入 EventBus —— 没有它 CreateTask 末尾 publish task.created
 	// 会因 eventBus==nil 静默跳过，notification subscriber 永远收不到事件。
 	app.TaskSvc.SetEventBus(inf.EventBus)
