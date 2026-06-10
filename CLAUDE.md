@@ -52,7 +52,6 @@ omc/                                # 根仓库（单一 git）
 ├── omcmb/                          # 前端（子目录，随主仓库追踪）
 │   ├── frontend-core/              #   共享业务层（services/api · hooks/api · store · types · i18n · mock），vite alias `@core`
 │   ├── webcode/                    #   主皮肤 UI 壳（pages/components/router/providers）
-│   ├── webcode-v2/ webcode-v3/     #   多皮肤候选（详见 docs/project/frontend-multi-skin-plan-20260422.md）
 │   └── （OMC/ jx/ 广研院/ original-omc/ design/ analysis/ — 历史/参考资产，非构建产物，见 docs/README.md）
 ├── deployments/                    # 部署清单（docker compose、监控）；deployments/docker/README.md 有端口表
 ├── run/                            # 本地一键启停脚本（裸进程跑法）
@@ -178,7 +177,7 @@ ln -s "$(pwd)/omcmb/webcode/node_modules" \
 
 ### 前端（业务层 vs UI 壳分离）
 
-API / Hook / Store / Types / i18n / Mock 全在 `omcmb/frontend-core/`（多皮肤共享）；页面 / 组件 / 路由在 `omcmb/webcode/`（及 v2/v3）。import 形如 `import { authApi } from '@core/services/api/authApi'`。
+API / Hook / Store / Types / i18n / Mock 全在 `omcmb/frontend-core/`；页面 / 组件 / 路由在 `omcmb/webcode/`。import 形如 `import { authApi } from '@core/services/api/authApi'`。
 
 | 路径 | 说明 |
 |------|------|
@@ -214,7 +213,7 @@ API / Hook / Store / Types / i18n / Mock 全在 `omcmb/frontend-core/`（多皮�
 
 ### 8.3 React/TypeScript 前端规范
 
-代码归属：API/Hook/Store/Types/i18n/Mock → `frontend-core/`，页面/组件/路由 → `webcode*/` · 禁 `any`（后端响应 `BackendXxx` → `mapBackendXxx` → `Xxx`）· 跨包引用走 `@core/...`，禁相对路径越级 · 用户可见文本走 `react-intl` · 改 `frontend-core/` 的类型/Mock/Store 形态时评估对 v2/v3 三皮肤的编译影响。
+代码归属：API/Hook/Store/Types/i18n/Mock → `frontend-core/`，页面/组件/路由 → `webcode*/` · 禁 `any`（后端响应 `BackendXxx` → `mapBackendXxx` → `Xxx`）· 跨包引用走 `@core/...`，禁相对路径越级 · 用户可见文本走 `react-intl` · （多皮肤候选 v2/v3 已于 2026-06-10 移除）。
 
 ---
 
@@ -343,7 +342,7 @@ cd omcmb/webcode && npm run {dev,dev:mock,build,typecheck,lint,test,test:e2e}
 | 任务源（活）| GitHub Issues `github.com/569423176-sketch/goomc`（详见 `docs/agents/issue-tracker.md`）|
 | 历史任务归档 | `docs/project/backlog.md`（已冻结）· 旧流水线设计 `docs/project/dev-pipeline-design-20260420.md` |
 | 项目自有 Skill | `.claude/commands/{e2e,acs-stress-test,review,commit}.md` |
-| 前端多皮肤架构 | `docs/project/frontend-multi-skin-plan-20260422.md` |
+| 前端多皮肤架构（历史,v2/v3 已移除） | `docs/project/frontend-multi-skin-plan-20260422.md` |
 | 消息队列全流程 | `docs/消息队列全流程流转说明书.md` |
 | DoD / Release Gate / 风险登记册 | `docs/project/{dod,release-gate,risk-register}.md` |
 | 部署 / 可观测性 / Runbook | `deployments/docker/README.md` · `docs/operations/` · `docs/runbook/` |

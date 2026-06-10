@@ -6,7 +6,7 @@ import unusedImports from 'eslint-plugin-unused-imports'
 import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
-// Workspace-level ESLint 配置：覆盖 webcode/ + frontend-core/（以及未来 webcode-vN/）。
+// Workspace-level ESLint 配置：覆盖 webcode/ + frontend-core/。
 // webcode/eslint.config.js 仍然保留，供在 webcode/ 子目录下单独跑 lint。
 export default defineConfig([
   globalIgnores([

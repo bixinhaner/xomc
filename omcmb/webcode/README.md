@@ -14,8 +14,6 @@ OMC（运营商小基站 TR-069/CWMP 无线网管）的前端主皮肤 UI 壳。
 omcmb/
 ├── frontend-core/        # 业务层（多皮肤共享）：services/api · hooks/api · store · types · i18n · mock · utils
 ├── webcode/              # 主皮肤（本目录，Ant Design 5，日常开发以此为主）
-├── webcode-v2/           # 候选皮肤 v2（shadcn/ui + Tailwind，:3002）
-└── webcode-v3/           # 候选皮肤 v3
 ```
 
 `frontend-core/` 是 npm workspace 成员（包名 `@omc/frontend-core`），但日常通过路径别名 `@core/*` 直接消费源码，无需 build，HMR 跨包生效。
@@ -32,7 +30,6 @@ omcmb/
 | **API / Hook 模式** | 一模块一文件：`frontend-core/src/services/api/xxxApi.ts` 导出服务对象；`frontend-core/src/hooks/api/useXxx.ts` 内部 `useMock ? mockService : realApi`。 |
 | **查询键层级化** | `['domain', 'action', params]`，如 `['devices', 'list', params]`。 |
 | **i18n** | 用户可见文本走 `react-intl`，语料进 `frontend-core/src/i18n/`（zh-CN / en-US），禁止散落硬编码中文。 |
-| **多皮肤影响评估** | 改动 `frontend-core/` 的类型 / Mock 形态 / Store 时，必须确认 `webcode-v2/`、`webcode-v3/` 仍能编译（三皮肤共享同一业务层）。 |
 
 ---
 

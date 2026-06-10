@@ -4,17 +4,13 @@
   "type": "module",
   "workspaces": [
     "frontend-core",
-    "webcode",
-    "webcode-v2",
-    "webcode-v3"
+    "webcode"
   ],
-  "description": "OMC 前端 workspace 根：frontend-core (共享业务层) + webcode (v1 经典皮肤) + webcode-v2 (shadcn 极简皮肤) + webcode-v3 (STARFORGE 沉浸式 HUD 皮肤)",
+  "description": "OMC 前端 workspace 根：frontend-core (共享业务层) + webcode (主皮肤)。多皮肤候选 webcode-v2/v3 已于 2026-06-10 移除(暂不需要,历史见 git / docs/project/frontend-multi-skin-plan-20260422.md)",
   "scripts": {
-    "lint": "eslint webcode/src webcode-v2/src webcode-v3/src frontend-core/src",
-    "lint:fix": "eslint webcode/src webcode-v2/src webcode-v3/src frontend-core/src --fix",
-    "typecheck": "npm run typecheck --workspace webcode",
-    "typecheck:v3": "npm run typecheck --workspace webcode-v3",
-    "dev:v3": "npm run dev --workspace webcode-v3"
+    "lint": "eslint webcode/src frontend-core/src",
+    "lint:fix": "eslint webcode/src frontend-core/src --fix",
+    "typecheck": "npm run typecheck --workspace webcode"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

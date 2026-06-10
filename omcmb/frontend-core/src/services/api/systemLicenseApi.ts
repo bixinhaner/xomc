@@ -10,7 +10,7 @@
 //   GET  /api/v1/system-license/history  → PageResponse<SystemLicenseHistory>
 //
 // 老 multi-license API（Import/Activate/Revoke/Logs/Export）仍在 licenseApi.ts
-// 上提供给 webcode-v2 等老 UI 壳，Step 5 一并下线。
+// 上提供给已移除的老 UI 壳，Step 5 一并下线。
 import http from '../http';
 import type { PageRequest, PageResponse } from '../../types/pagination';
 

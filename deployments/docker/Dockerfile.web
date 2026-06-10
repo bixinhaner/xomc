@@ -30,8 +30,6 @@ COPY omcmb/package.json omcmb/package-lock.json ./
 # "workspace not found" 拒绝安装
 COPY omcmb/frontend-core/package.json ./frontend-core/
 COPY omcmb/webcode/package.json       ./webcode/
-COPY omcmb/webcode-v2/package.json    ./webcode-v2/
-COPY omcmb/webcode-v3/package.json    ./webcode-v3/
 
 # --include=dev：进一步兜底强制安装 devDependencies（即使 NODE_ENV 意外被改）
 # --legacy-peer-deps：跳过 peer dependency 版本冲突检查
@@ -54,7 +52,7 @@ WORKDIR /app
 COPY --from=deps /app/ ./
 
 # 覆盖源码：webcode（构建目标）+ frontend-core（@core alias 依赖源）
-# webcode-v2/v3 不参与本次构建，跳过
+# 多皮肤候选 webcode-v2/v3 已移除
 # .dockerignore 已排除 node_modules / dist，不会污染 deps 装出来的 node_modules
 COPY omcmb/webcode/       ./webcode/
 COPY omcmb/frontend-core/ ./frontend-core/

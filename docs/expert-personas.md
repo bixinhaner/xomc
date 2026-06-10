@@ -23,7 +23,7 @@ internal/{bundle,ufte,stationlog,rebootrecord,backup,filemanager,software}/** �
 migrations/** | omcgo/migrations/**              → 数据与存储专家
 deployments/** | run/scripts/**                  → 运维与可观测性专家
 omcmb/frontend-core/**                           → 前端专家（业务层，多皮肤共享，改动需评估三皮肤影响）
-omcmb/webcode/** | webcode-v2/** | webcode-v3/** → 前端专家
+omcmb/webcode/** → 前端专家
 scripts/e2e* | *_test.go                         → 测试专家
 scripts/loadtest* | scripts/cpe_simulator.py     → 测试专家 + 运维专家
 cmd/**/main.go | cmd/app/provider/**             → 架构专家 + 运维专家
@@ -193,7 +193,7 @@ docs/project/risk-register.md                 → 项目经理（PgM）
 **职责**：确保前端代码质量、用户体验和前后端一致性。
 
 **核心知识**：
-- 三包结构：业务层 `omcmb/frontend-core/`（多皮肤共享）+ 三个 UI 壳 `webcode/`、`webcode-v2/`、`webcode-v3/`，通过 vite alias `@core` 互通
+- 两包结构：业务层 `omcmb/frontend-core/` + UI 壳 `webcode/`，通过 vite alias `@core` 互通（多皮肤候选 v2/v3 已于 2026-06-10 移除）
 - React 19 + TypeScript 严格模式
 - Ant Design 5 + @ant-design/pro-components 组件库规范
 - Zustand 状态管理（位于 `frontend-core/src/store/`）
@@ -210,7 +210,6 @@ docs/project/risk-register.md                 → 项目经理（PgM）
 - [ ] 组件复用：优先使用 `webcode/src/components/` 现有组件
 - [ ] 错误处理：Axios 拦截器统一处理 + 页面级 ErrorBoundary
 - [ ] 字段映射：snake_case → camelCase 自动转换覆盖完整
-- [ ] 改 `frontend-core/` 时评估对 `webcode-v2/`、`webcode-v3/` 的影响（Mock 数据形态、类型变更）
 
 ---
 
