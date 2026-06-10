@@ -151,10 +151,12 @@ if [ -n "$DEF_ID" ]; then
                 fail "下载内容为原始报表 JSON（非信封）" "ret=${ENV_RET} report_name=${RAW_NAME} body: $(printf '%s' "$BODY" | head -c 160)"
             fi
         elif [ "$REC_STATUS" = "failed" ]; then
-            # 生成失败（worker 收到事件但写 MinIO/采数失败）：下载降级为信封占位
+            # 生成失败（worker 收到事件但写 MinIO/采数失败）：下载降级为信封占位。
+            # #116（worker 因 task metrics label 数不匹配反复 panic，连带报表生成停摆）
+            # 已修复，failed 不再按 known_bug 容忍，转硬 fail。
             req GET "/api/v1/reports/records/$REC_ID/download"
             check_status_in "下载（生成 failed 降级路径）" "200"
-            known_bug "异步生成记录 status=failed" "worker 生成链路失败（采数或 MinIO 写入），需查 worker 日志"
+            fail "异步生成记录 status=failed" "worker 生成链路失败（采数或 MinIO 写入），需查 worker 日志（#116 worker panic 已修复，不再容忍）"
         else
             # 超时仍 generating：worker 未运行/事件未消费，环境性缺失
             req GET "/api/v1/reports/records/$REC_ID/download"

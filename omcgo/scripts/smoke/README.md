@@ -35,6 +35,7 @@ ACS 域额外：`OMC_ACS_URL`（默认 http://localhost:7557）。
 | smoke_pm.sh | F03 性能管理 | counters/metrics/kpi 三层查询、KPI 定义、门限/仪表盘/导出闭环、指标库 |
 | smoke_mr.sh | F05 测量报告 | MR 文件/数据/指标、映射 toggle 闭环、测量任务 |
 | smoke_software.sh | F06 固件升级 | 固件上传→推荐→删除闭环、升级任务校验负路径 |
+| smoke_ufte.sh | F06 统一文件任务引擎 | overview/任务类型治理闭环、任务建(不启动)→列表→删/批删闭环、设备与候选列表、CSV 导出、start 红线不调用 |
 | smoke_backup.sh | F06 配置备份 | 任务/计划/FTP/策略、快照、restore 校验负路径、规范别名路由 |
 | smoke_dashboard.sh | F06 仪表盘 | summary 及全部图表端点、widgets 读写还原 |
 | smoke_ops.sh | F06 运维工具 | 模板闭环、任务/诊断/下载/维护窗口/playbook、RPC 校验负路径 |

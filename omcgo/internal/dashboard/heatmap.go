@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/omcgo/omcgo/internal/core/model"
 	"go.uber.org/zap"
 )
 
@@ -109,6 +110,8 @@ func (s *Service) GetAlarmHeatmapBySeverity(ctx context.Context, days int, sever
 // queryHeatmapBySeverityMap executes the heatmap query and returns data grouped by severity.
 // 执行热度图查询并按严重程度分组返回数据
 func (s *Service) queryHeatmapBySeverityMap(ctx context.Context, days int, severity string) (map[string]*HeatmapData, error) {
+	// alarms_history.severity 是 smallint（1=critical..4=warning），过滤参数必须用整型语义：
+	// 空字符串用 0 哨兵表示不过滤，避免 text 与 smallint 直接比较（SQLSTATE 42883）。
 	query := `
 		SELECT
 			severity,
@@ -117,12 +120,12 @@ func (s *Service) queryHeatmapBySeverityMap(ctx context.Context, days int, sever
 			COUNT(*) as alarm_count
 		FROM alarms_history
 		WHERE raised_at > NOW() - INTERVAL '1 day' * $1
-			AND ($2 = '' OR severity = $2)
+			AND ($2 = 0 OR severity = $2)
 		GROUP BY severity, day_of_week, hour_of_day
 		ORDER BY severity, day_of_week, hour_of_day
 	`
 
-	rows, err := s.pgPool.Query(ctx, query, days, severity)
+	rows, err := s.pgPool.Query(ctx, query, days, severityFilterValue(severity))
 	if err != nil {
 		s.logger.Error("failed to query alarm heatmap by severity", zap.Error(err))
 		return nil, fmt.Errorf("query alarm heatmap by severity: %w", err)
@@ -149,13 +152,16 @@ func (s *Service) scanHeatmapBySeverity(rows interface{}) (map[string]*HeatmapDa
 	heatmapBySeverity := make(map[string]*HeatmapData)
 
 	for scanner.Next() {
-		var sev string
+		var sevValue int
 		var dayOfWeek, hourOfDay int
 		var alarmCount int64
-		if err := scanner.Scan(&sev, &dayOfWeek, &hourOfDay, &alarmCount); err != nil {
+		if err := scanner.Scan(&sevValue, &dayOfWeek, &hourOfDay, &alarmCount); err != nil {
 			s.logger.Warn("failed to scan heatmap severity row", zap.Error(err))
 			continue
 		}
+
+		// severity 列是 smallint，转为标签字符串作 map key，与请求侧过滤参数对齐
+		sev := severityToLabel(model.AlarmSeverity(sevValue))
 
 		// 初始化该严重程度的数据结构（如果尚未存在）
 		if _, exists := heatmapBySeverity[sev]; !exists {
@@ -201,6 +207,16 @@ func (s *Service) selectHeatmapResult(heatmapBySeverity map[string]*HeatmapData,
 
 	// 没有任何数据
 	return createEmptyAlarmHeatmapBySeverity("all")
+}
+
+// severityFilterValue converts the optional severity label from the query string
+// to the smallint filter value used in SQL; empty means no filter (0 sentinel).
+// 把请求侧的 severity 标签转为 SQL 过滤用的整型值；空串=不过滤（0 哨兵）
+func severityFilterValue(severity string) int {
+	if severity == "" {
+		return 0
+	}
+	return severityFromLabel(severity)
 }
 
 // initializeEmptyHeatmap creates an empty heatmap structure with 7 days and 24 hours.

@@ -5,13 +5,15 @@
 # 覆盖（/tmp/smoke_routes.json: pm + pmdash + indicator 三域）：
 #   - counters / counters/aggregated / metrics/aggregated / metrics/objects 读链路
 #   - kpi / kpi/definitions 读 + kpi/calculate 幂等触发（小时间窗）
-#   - pm/tasks（GET 已知 500 bug → known_bug；POST 仅负路径）
+#   - pm/tasks（GET 列表硬断言；POST 仅负路径）
 #   - pm/files + files/devices + 下载 + batch-delete 仅参数校验负路径
 #   - aggregation/recompute 幂等触发
 #   - thresholds / dashboards(+panel) / query-templates / adhoc / exports CRUD 闭环
 #   - user-preferences/dashboard 读
 #   - 指标库：legacy POST（ENB/GNB 组树、分页列表、生效指标）、REST /indicators
 #     系列（super_admin）、enable/disable 可逆闭环、upload-xml 仅负路径
+#   - 自定义指标 + 平台公式 CRUD 闭环（PR #99 回归）：POST/GET/PUT/DELETE
+#     /indicators + /indicators/:id/formulas upsert/删除；builtin 删除仅负路径
 #
 # 红线：不向任何设备下发 reboot/升级/SPV 等指令；kpi/calculate 与 recompute
 # 均为服务端幂等计算，不触达基站。
@@ -96,15 +98,10 @@ req POST "/api/v1/pm/kpi/calculate" '{}'
 check_ret_fail "kpi/calculate 空 body 被参数校验拒绝"
 
 # ───────────────────────────────────────────────────────────────────────────
-section "3. PM 采集任务（GET 已知 500 bug）"
+section "3. PM 采集任务"
 # ───────────────────────────────────────────────────────────────────────────
 req GET "/api/v1/pm/tasks"
-PM_TASKS_RET=$(jget ret)
-if [[ "$HTTP_CODE" == 2* ]] && [ "$PM_TASKS_RET" = "1" ]; then
-    pass "PM 采集任务列表可查 → $HTTP_CODE ret=1（已知 bug 已修复，可移除 known_bug 分支）"
-else
-    known_bug "GET /api/v1/pm/tasks 列表 500" "HTTP ${HTTP_CODE}: $(printf '%s' "$BODY" | head -c 160)"
-fi
+check_ret_ok "PM 采集任务列表可查（#118 已修复：creator NULL 经 COALESCE 兜底）"
 
 # 任务创建无配套 DELETE 路由（不可逆），只测参数校验负路径
 req POST "/api/v1/pm/tasks" '{}'
@@ -381,7 +378,143 @@ req POST "/api/v1/indicators/upload-xml" '{}'
 check_ret_fail "upload-xml 无 multipart 文件被拒绝"
 
 # ───────────────────────────────────────────────────────────────────────────
-section "14. 指标启用/禁用可逆闭环（operator=default）"
+section "14. 自定义指标 + 平台公式 CRUD 闭环（REST · PR #99 回归）"
+# ───────────────────────────────────────────────────────────────────────────
+# 红线：写操作只针对 ${SMOKE_TAG} 自建 custom 指标（is_build_in=0），结束前删除；
+# builtin 指标只做"删除被拒"负路径，绝不真删/真改。
+
+# 准备：取 builtin 分组 id（自定义指标挂靠）+ 一个计数器 id（公式引用）
+req GET "/api/v1/indicator-groups?deviceType=enb"
+GRP_ID=$(jget data.items.0.id)
+
+req GET "/api/v1/indicators?deviceType=enb&isCounter=1&page=1&pageSize=1"
+check_ret_ok "REST 指标列表可按 isCounter=1 过滤"
+CTR_ID=$(jget data.items.0.id)
+
+if [ -z "$GRP_ID" ]; then
+    skip "自定义指标 CRUD 闭环" "未取到指标分组 id"
+else
+    # 主闭环不带 arithmetic：带公式创建当前被后端误拒（见本 section 末 known_bug 探针）
+    req POST "/api/v1/indicators?deviceType=enb" "{\"device_type\":\"ENB\",\"en_name\":\"${SMOKE_TAG}_kpi\",\"cn_name\":\"冒烟自定义指标\",\"en_description\":\"smoke custom kpi\",\"group_id\":\"${GRP_ID}\",\"data_type\":\"float\",\"operator_code\":\"default\"}"
+    check_status "自定义指标创建（#99 路径）" 201
+    CUST_IND_ID=$(jget data.id)
+    check_field "创建返回指标 id" "data.id"
+    IS_BUILTIN=$(jget data.is_build_in)
+    if [ "$IS_BUILTIN" = "0" ]; then
+        pass "新建指标为 custom（is_build_in=0）"
+    else
+        fail "新建指标为 custom（is_build_in=0）" "实际 is_build_in='${IS_BUILTIN}'"
+    fi
+
+    if [ -n "$CUST_IND_ID" ]; then
+        req GET "/api/v1/indicators/${CUST_IND_ID}?deviceType=enb"
+        check_ret_ok "自定义指标详情可查"
+        EN_NAME=$(jget data.en_name)
+        if [ "$EN_NAME" = "${SMOKE_TAG}_kpi" ]; then
+            pass "详情 en_name 回读一致"
+        else
+            fail "详情 en_name 回读一致" "期望 ${SMOKE_TAG}_kpi，实际 '${EN_NAME}'"
+        fi
+
+        req PUT "/api/v1/indicators/${CUST_IND_ID}?deviceType=enb" '{"cn_name":"冒烟自定义指标-改","en_description":"smoke updated"}'
+        check_ret_ok "自定义指标更新成功"
+        UPD_DESC=$(jget data.en_description)
+        if [ "$UPD_DESC" = "smoke updated" ]; then
+            pass "更新响应 en_description 回读一致"
+        else
+            fail "更新响应 en_description 回读一致" "期望 'smoke updated'，实际 '${UPD_DESC}'"
+        fi
+
+        # ── 平台公式 CRUD（PR #99 修复路径：自定义公式增删改）──
+        PLAT="${SMOKE_TAG}plat"
+        FORMULA_V1="${CTR_ID:-C1}+100"
+        FORMULA_V2="(${CTR_ID:-C1})*100"
+
+        req POST "/api/v1/indicators/${CUST_IND_ID}/formulas?deviceType=enb" "{\"platform\":\"${PLAT}\",\"formula\":\"${FORMULA_V1}\"}"
+        check_status "平台公式添加" 201
+
+        req GET "/api/v1/indicators/${CUST_IND_ID}/formulas?deviceType=enb"
+        check_ret_ok "公式列表可查"
+        check_list_nonempty "公式列表含新增平台公式" "data.items"
+
+        req GET "/api/v1/indicators/${CUST_IND_ID}/formulas/${PLAT}?deviceType=enb"
+        check_ret_ok "按平台名查公式可查"
+        F_VAL=$(jget data.formula)
+        if [ "$F_VAL" = "$FORMULA_V1" ]; then
+            pass "公式内容回读一致"
+        else
+            fail "公式内容回读一致" "期望 '${FORMULA_V1}'，实际 '${F_VAL}'"
+        fi
+
+        # 同平台重写 = upsert，不得产生重复行
+        req POST "/api/v1/indicators/${CUST_IND_ID}/formulas?deviceType=enb" "{\"platform\":\"${PLAT}\",\"formula\":\"${FORMULA_V2}\"}"
+        check_status "同平台公式重写（upsert）" 201
+
+        req GET "/api/v1/indicators/${CUST_IND_ID}/formulas?deviceType=enb"
+        F_TOTAL=$(jget data.total)
+        if [ "$F_TOTAL" = "1" ]; then
+            pass "同平台 upsert 不产生重复行（total=1）"
+        else
+            fail "同平台 upsert 不产生重复行（total=1）" "实际 total='${F_TOTAL}'"
+        fi
+
+        req DELETE "/api/v1/indicators/${CUST_IND_ID}/formulas/${PLAT}?deviceType=enb"
+        check_ret_ok "平台公式删除成功"
+
+        req GET "/api/v1/indicators/${CUST_IND_ID}/formulas/${PLAT}?deviceType=enb"
+        check_ret_fail "已删公式再查返回 404"
+
+        # ── 收尾：删除自建 custom 指标（仅限 is_build_in=0）──
+        req DELETE "/api/v1/indicators/${CUST_IND_ID}?deviceType=enb"
+        check_ret_ok "自定义指标删除成功（自清理）"
+
+        req GET "/api/v1/indicators/${CUST_IND_ID}?deviceType=enb"
+        check_ret_fail "已删指标再查返回 404"
+    else
+        skip "自定义指标 详情/更新/公式/删除" "创建未返回 id，闭环中断"
+    fi
+
+    req POST "/api/v1/indicators?deviceType=enb" '{}'
+    check_ret_fail "指标创建空 body 被拒绝（缺 en_name/cn_name/group_id）"
+
+    req POST "/api/v1/indicators?deviceType=enb" "{\"device_type\":\"ENB\",\"en_name\":\"${SMOKE_TAG}_bad\",\"cn_name\":\"x\",\"group_id\":\"${GRP_ID}\",\"arithmetic\":\"NOT_AN_ID+1\"}"
+    check_ret_fail "非法 arithmetic 被 FormulaValidator 拒绝"
+
+    # 带公式创建探针：合法公式引用真实 builtin 计数器，理应 201。
+    # 现状：indicator loader 只建 default 占位组、1408 条指标的 group_id 全部
+    # 悬空（不在 indicator_group_enb），buildIDMap 按"组→组内指标"遍历恒为空
+    # → FormulaValidator 把所有合法公式一律误拒 400 "Expression is invalid"。
+    # 修复后本探针自动转 PASS（known_bug → pass + 清理断言）。
+    if [ -n "$CTR_ID" ]; then
+        req POST "/api/v1/indicators?deviceType=enb" "{\"device_type\":\"ENB\",\"en_name\":\"${SMOKE_TAG}_arith\",\"cn_name\":\"冒烟公式指标\",\"group_id\":\"${GRP_ID}\",\"arithmetic\":\"${CTR_ID}*100\"}"
+        if [ "$HTTP_CODE" = "201" ]; then
+            pass "带公式创建自定义指标（引用 builtin 计数器 ${CTR_ID}）→ 201"
+            ARITH_ID=$(jget data.id)
+            if [ -n "$ARITH_ID" ]; then
+                req DELETE "/api/v1/indicators/${ARITH_ID}?deviceType=enb"
+                check_ret_ok "带公式指标删除成功（自清理）"
+            fi
+        else
+            known_bug "带公式创建自定义指标（引用 builtin 计数器 ${CTR_ID}）" "buildIDMap 依赖组→指标遍历，loader 只建 default 占位组致 idMap 恒空，合法公式被误拒（HTTP ${HTTP_CODE}：$(jget msg)）"
+        fi
+    else
+        skip "带公式创建自定义指标探针" "未取到 builtin 计数器 id"
+    fi
+fi
+
+# builtin 删除红线：仅当首条确认是 builtin 才发 DELETE（预期被拒，绝不真删）
+req GET "/api/v1/indicators?deviceType=enb&page=1&pageSize=1"
+BI_ID=$(jget data.items.0.id)
+BI_FLAG=$(jget data.items.0.is_build_in)
+if [ -n "$BI_ID" ] && [ "$BI_FLAG" = "1" ]; then
+    req DELETE "/api/v1/indicators/${BI_ID}?deviceType=enb"
+    check_ret_fail "builtin 指标删除被拒绝（红线保护）"
+else
+    skip "builtin 指标删除负路径" "首条指标非 builtin，避免误删跳过"
+fi
+
+# ───────────────────────────────────────────────────────────────────────────
+section "15. 指标启用/禁用可逆闭环（operator=default）"
 # ───────────────────────────────────────────────────────────────────────────
 req GET "/api/v1/enabled-indicators?deviceType=enb&operatorCode=default"
 check_ret_ok "ENB 启用指标集可读"

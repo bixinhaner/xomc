@@ -8,7 +8,7 @@
 #   GET    /api/v1/northbound/push/targets/:id/circuit     熔断器状态
 #   POST   /api/v1/northbound/push/targets/:id/circuit/reset 复位熔断（仅对自建目标）
 #   DELETE /api/v1/northbound/push/targets/:id             删除推送目标（闭环清理）
-#   GET    /api/v1/northbound/push/deadletter              死信队列（outbox 未装配时 503）
+#   GET    /api/v1/northbound/push/deadletter              死信队列（outbox 已装配，硬断言 200）
 #   POST   /api/v1/northbound/push/deadletter/:id/replay   死信重放（仅负路径）
 #   GET    /api/v1/northbound/sync/full                    全量同步（per-endpoint 限流，容忍 429）
 #   GET    /api/v1/northbound/sync/incremental             增量同步（since 必填 RFC3339；限流）
@@ -116,17 +116,14 @@ check_ret_fail "复位不存在目标熔断器被拒"
 # ---------------------------------------------------------------------------
 section "死信队列（GET /push/deadletter，POST /:id/replay 负路径）"
 # ---------------------------------------------------------------------------
+# outbox 已装配（#121 修复）：死信队列必须 200 + 列表形状（空列表合法）
 req GET "/api/v1/northbound/push/deadletter?limit=20&offset=0"
-if [ "$HTTP_CODE" = "200" ]; then
-    check_ret_ok "死信队列可查"
-    check_list_or_empty "死信列表 items 形状" "data.items"
-elif [ "$HTTP_CODE" = "503" ]; then
-    known_bug "死信队列读（outbox 未装配）" "GET /push/deadletter → 503 'outbox not configured'：Router 支持 SetOutboxRepo 但 provider/modules.go 从未注入 OutboxRepository，DLQ 端点恒 503"
-else
-    fail "死信队列读" "期望 200/503，实际 HTTP ${HTTP_CODE}，body: $(printf '%s' "$BODY" | head -c 200)"
-fi
+check_status "死信队列读（outbox 已装配）" 200
+check_ret_ok "死信队列可查"
+check_list_or_empty "死信列表 items 形状" "data.items"
+check_field "死信列表带 total" "data.total"
 
-# 重放只测负路径（outbox 未配置 503 / 非法 uuid 400 均为被拒）
+# 重放只测负路径（非法 uuid 400 / 不存在死信 404 均为被拒）
 req POST "/api/v1/northbound/push/deadletter/not-a-uuid/replay"
 check_ret_fail "非法 uuid 死信重放被拒"
 req POST "/api/v1/northbound/push/deadletter/00000000-dead-beef-0000-000000000000/replay"

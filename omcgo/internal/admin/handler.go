@@ -53,6 +53,7 @@ type Handler struct {
 	apiEndpointService *ApiEndpointService
 	loginCipher        *loginpwd.Cipher // 必填：登录类接口密码 RSA-OAEP 解密
 	allowPlaintextPwd  bool             // T-0120：允许明文密码 fallback（非 secure context 部署用，默认 false）
+	logRepo            LogRepository    // #122：登录成功/失败写 sys_login_logs（nil 安全，未注入则跳过）
 	ginRoutes          gin.RoutesInfo   // set after router registration
 	logger             *zap.Logger
 	loginLimiter       sync.Map // map[string]*ipLimiterEntry
@@ -104,6 +105,12 @@ func (h *Handler) SetPermissionService(ps *PermissionService) {
 // SetApiEndpointService sets the API endpoint service.
 func (h *Handler) SetApiEndpointService(svc *ApiEndpointService) {
 	h.apiEndpointService = svc
+}
+
+// SetLogRepository 注入系统日志仓库（#122）。
+// 注入后 Login 成功/失败路径异步写 sys_login_logs；nil 安全 — 未注入时跳过。
+func (h *Handler) SetLogRepository(repo LogRepository) {
+	h.logRepo = repo
 }
 
 // SetLoginCipher 注入登录类接口的密码加密 cipher。

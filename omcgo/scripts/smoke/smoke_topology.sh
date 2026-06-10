@@ -74,15 +74,14 @@ if [ -n "$L2_ID" ]; then
     if [ "$v" = "${L2_NAME}-renamed" ]; then pass "改名后名称回读一致"
     else fail "改名后名称回读一致" "期望 ${L2_NAME}-renamed，实际 '$v'"; fi
 
-    # 后端 bug：BatchSort 的 CASE WHEN 参数未显式 ::int 转型，PG 推断 $N 为 text，
-    # 任何合法 payload 都 500（SQLSTATE 42804，pg_repository.go::BatchSort）。
-    # 修复后此分支自动恢复为 pass。
-    req PUT "/api/v1/device-groups/sort" "{\"items\":[{\"id\":\"$L2_ID\",\"sort_order\":9}]}"
-    if [ "$(jget ret)" = "1" ]; then
-        pass "批量排序(PUT /device-groups/sort) → $HTTP_CODE ret=1"
-    else
-        known_bug "批量排序(PUT /device-groups/sort)" "HTTP ${HTTP_CODE}：CASE WHEN 绑定参数缺 ::int 转型 → SQLSTATE 42804（internal/topology/pg_repository.go BatchSort）"
-    fi
+    # 批量排序正路径：借自建 L1/L2 两个临时分组（结束删除），覆盖多分支 CASE WHEN。
+    # 回归 #120：占位符缺 ::int/::uuid 转型时 PG 推断为 text → SQLSTATE 42804 恒 500。
+    req PUT "/api/v1/device-groups/sort" "{\"items\":[{\"id\":\"$L1_ID\",\"sort_order\":8},{\"id\":\"$L2_ID\",\"sort_order\":9}]}"
+    check_ret_ok "批量排序(PUT /device-groups/sort)"
+    req GET "/api/v1/device-groups/$L2_ID"
+    v=$(jget data.sort_order)
+    if [ "$v" = "9" ]; then pass "排序后 L2 sort_order 回读=9"
+    else fail "排序后 L2 sort_order 回读=9" "实际 '$v'"; fi
 else
     skip "L2 查询/改名/排序" "L2 创建失败"
 fi

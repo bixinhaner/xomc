@@ -639,7 +639,24 @@ func (r *PgDeviceGroupRepository) BatchSort(ctx context.Context, items []BatchSo
 		return 0, nil
 	}
 
-	// Build: UPDATE device_groups SET sort_order = CASE WHEN id=$1 THEN $2 WHEN id=$3 THEN $4 ... END WHERE id IN ($1,$3,...)
+	rawSQL, args := buildBatchSortSQL(items)
+
+	tag, err := r.pool.Exec(ctx, rawSQL, args...)
+	if err != nil {
+		return 0, fmt.Errorf("batch sort groups: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+// buildBatchSortSQL builds:
+//
+//	UPDATE device_groups SET sort_order = CASE WHEN id = $1::uuid THEN $2::int ... END
+//	WHERE id IN ($1::uuid, $3::uuid, ...)
+//
+// Placeholders carry explicit casts: without them PG infers the bare CASE
+// branch ($N) as text and rejects the assignment to the integer sort_order
+// column with SQLSTATE 42804.
+func buildBatchSortSQL(items []BatchSortItem) (string, []interface{}) {
 	args := make([]interface{}, 0, len(items)*2)
 	caseParts := make([]string, 0, len(items))
 	inParts := make([]string, 0, len(items))
@@ -647,20 +664,15 @@ func (r *PgDeviceGroupRepository) BatchSort(ctx context.Context, items []BatchSo
 	for i, item := range items {
 		idxID := i*2 + 1
 		idxVal := i*2 + 2
-		caseParts = append(caseParts, fmt.Sprintf("WHEN id = $%d THEN $%d", idxID, idxVal))
-		inParts = append(inParts, fmt.Sprintf("$%d", idxID))
+		caseParts = append(caseParts, fmt.Sprintf("WHEN id = $%d::uuid THEN $%d::int", idxID, idxVal))
+		inParts = append(inParts, fmt.Sprintf("$%d::uuid", idxID))
 		args = append(args, item.ID, item.SortOrder)
 	}
 
 	rawSQL := "UPDATE device_groups SET sort_order = CASE " +
 		joinStrings(caseParts, " ") +
 		" END WHERE id IN (" + joinStrings(inParts, ", ") + ")"
-
-	tag, err := r.pool.Exec(ctx, rawSQL, args...)
-	if err != nil {
-		return 0, fmt.Errorf("batch sort groups: %w", err)
-	}
-	return tag.RowsAffected(), nil
+	return rawSQL, args
 }
 
 // pgxExecutor abstracts pgxpool.Pool and pgx.Tx for Exec/Query operations.

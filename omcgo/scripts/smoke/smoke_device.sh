@@ -7,7 +7,9 @@
 #   2. 统计 stats / product-classes / enums（builtin 字典强断言）
 #   3. 地图 geo / geo/stats / search
 #   4. CSV 导出（非信封，只断言 HTTP 200）
-#   5. 预注册设备全闭环：建 → 查 → 改 → 软删进回收站 → 回收站可见 →
+#   5. 预注册设备全闭环：建 → 查 → 改 → 激活状态可逆写对（registered 直接
+#      deactivate 被状态机拒 → activate → deactivate → activate 还原，逐步
+#      GET 详情校验 status）→ 软删进回收站 → 回收站可见 →
 #      restore 恢复 → 再删 → recycle/permanent 永久删 → 404 验证
 #   6. device-registrations 预登记闭环（建 → 列表过滤 → 删）
 #   7. column-configs 用户列配置（默认列读取 + SMOKE_TAG pageKey 写读还原）
@@ -82,13 +84,9 @@ check_ret_ok "地图设备搜索（无命中关键字返回空列表）"
 req GET "/api/v1/devices/search?keyword=x"
 check_ret_ok "地图搜索 keyword 过短返回空列表（200）"
 
-# 命中坐标为 NULL 的设备时 repository 扫描崩 500（真实后端 bug，已实测）
+# #117 已修复：命中 NULL 坐标设备时 repository 改可空扫描，搜索不再 500
 req GET "/api/v1/devices/search?keyword=SM&limit=5"
-if [ "$HTTP_CODE" = "200" ]; then
-    pass "地图设备搜索 keyword 命中真实设备 → 200"
-else
-    known_bug "地图设备搜索命中 NULL 坐标设备返回 500" "GET /devices/search?keyword=SM → HTTP ${HTTP_CODE}，msg=scan search result: can't scan into dest[5] (col: latitude): cannot scan NULL into *float64"
-fi
+check_ret_ok "地图设备搜索 keyword 命中真实设备（含 NULL 坐标设备，#117）"
 
 # ---------------------------------------------------------------------------
 section "设备导出 CSV"
@@ -161,6 +159,65 @@ if [ -n "$INFO_HIT" ]; then
 else
     skip "已注册设备 info 视图" "栈内无 inform 注册的真实设备（device_info 仅 inform 路径创建，预注册设备无 info 行）"
 fi
+
+# ---------------------------------------------------------------------------
+section "激活状态可逆写对：deactivate ↔ activate"
+# ---------------------------------------------------------------------------
+# 路由：PUT /devices/:id/activate|deactivate（device_info_handler.go RegisterRoutes）。
+# 语义（state_machine.go validTransitions，T-0162 shim）：
+#   activate   = TransitionStatus → active（lifecycle=commissioned + is_online=true）
+#   deactivate = TransitionStatus → maintenance（lifecycle=maintenance + is_online=false）
+# 预注册设备初始 status=registered：registered→maintenance 不在状态机白名单 → 直接
+# deactivate 是 400（设计行为，非 bug）；registered→active 合法。
+# 故可逆写对走：先断言 registered 直接 deactivate 被拒 → activate → deactivate →
+# activate 还原，每步 GET 详情校验 status 字段。
+if [ -n "$DEV_ID" ]; then
+    req PUT "/api/v1/devices/$DEV_ID/deactivate"
+    check_ret_fail "预注册设备直接 deactivate 被状态机拒绝（registered→maintenance 非法，400）"
+
+    req PUT "/api/v1/devices/$DEV_ID/activate"
+    check_ret_ok "激活预注册设备（registered→active）"
+
+    req GET "/api/v1/devices/$DEV_ID"
+    DEV_STATUS=$(jget data.status)
+    if [ "$HTTP_CODE" = "200" ] && [ "$DEV_STATUS" = "active" ]; then
+        pass "激活后详情 status=active（lifecycle_state=$(jget data.lifecycle_state) is_online=$(jget data.is_online)）"
+    else
+        fail "激活后详情 status=active" "HTTP ${HTTP_CODE}，status='${DEV_STATUS}'"
+    fi
+
+    req PUT "/api/v1/devices/$DEV_ID/deactivate"
+    check_ret_ok "停用已激活设备（active→maintenance）"
+
+    req GET "/api/v1/devices/$DEV_ID"
+    DEV_STATUS=$(jget data.status)
+    if [ "$HTTP_CODE" = "200" ] && [ "$DEV_STATUS" = "maintenance" ]; then
+        pass "停用后详情 status=maintenance（lifecycle_state=$(jget data.lifecycle_state) is_online=$(jget data.is_online)）"
+    else
+        fail "停用后详情 status=maintenance" "HTTP ${HTTP_CODE}，status='${DEV_STATUS}'"
+    fi
+
+    req PUT "/api/v1/devices/$DEV_ID/activate"
+    check_ret_ok "重新激活还原（maintenance→active）"
+
+    req GET "/api/v1/devices/$DEV_ID"
+    DEV_STATUS=$(jget data.status)
+    if [ "$HTTP_CODE" = "200" ] && [ "$DEV_STATUS" = "active" ]; then
+        pass "还原后详情 status=active（可逆写对闭环）"
+    else
+        fail "还原后详情 status=active" "HTTP ${HTTP_CODE}，status='${DEV_STATUS}'"
+    fi
+else
+    skip "激活状态可逆写对（deactivate↔activate）" "前置创建设备失败，无可操作实体"
+fi
+
+req PUT "/api/v1/devices/not-a-uuid/activate"
+check_ret_fail "激活非法 id 被拒绝（400）"
+
+# GHOST_ID 定义在后面的危险操作 section，此处自备一个不存在的合法 uuid
+GHOST_ID_ACT="deadbeef-dead-4ead-8ead-deadbeefdead"
+req PUT "/api/v1/devices/$GHOST_ID_ACT/activate"
+check_ret_fail "激活不存在设备被拒绝（400 device not found）"
 
 # ---------------------------------------------------------------------------
 section "回收站闭环：软删 → 可见 → 恢复 → 永久删"

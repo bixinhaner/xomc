@@ -14,10 +14,13 @@ import (
 	"github.com/omcgo/omcgo/internal/core/storage"
 )
 
+// pmTaskColumns 是 List 查询的 SELECT 列。creator 列在表中可空（系统任务无创建人），
+// 而 PerformanceTask.Creator 是不可空 string，用 COALESCE 兜底为空串避免扫描 NULL 失败（#118）。
+// time_range 同样可空，但扫进 json.RawMessage（[]byte）可承载 NULL，无需处理。
 var pmTaskColumns = []string{
 	"id", "task_name", "task_type", "device_sns", "kpi_codes",
 	"granularity", "time_range", "status", "progress",
-	"creator", "created_at", "updated_at",
+	"COALESCE(creator, '') AS creator", "created_at", "updated_at",
 }
 
 var _ TaskRepository = (*PgTaskRepository)(nil)

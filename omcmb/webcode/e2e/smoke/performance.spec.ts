@@ -17,6 +17,14 @@ import { expectPageRenders, smokeLogin } from './helpers';
  *   - /performance/files    → pages/performance/PerformanceFiles/index.tsx
  *       页面标题 nav.performance.files（性能文件 / Performance Files）、
  *       FilterBar（.ant-form）+ DataTable（.ant-table）。
+ *   - /performance/pm-adhoc → pages/performance/PmAdhoc/index.tsx
+ *       两张 Card：perf.adhoc.cardBuiltin（内置聚合任务 / Built-in Aggregation Tasks）
+ *       + perf.adhoc.cardCustom（自建聚合任务 / Custom Aggregation Tasks）、
+ *       自建区「新建任务 / New Task」按钮（perf.adhoc.btnNewTask）、任务 Table 骨架。
+ *   - /performance/device-view → pages/performance/PmDashboard/DeviceListPane.tsx
+ *       条件区 Form：制式 Segmented（LTE/NR/GSM）+「出图 / Plot」按钮
+ *       （perf.dashboard.btnPlot）；未出图时空态文案 perf.dashboard.emptyPickConditions
+ *       （选择制式…/ Select technology…）——初始 UI 状态，非业务数据。
  */
 test.describe('性能管理冒烟（真实后端）', { tag: '@smoke' }, () => {
   test.beforeEach(async ({ page }) => {
@@ -72,5 +80,47 @@ test.describe('性能管理冒烟（真实后端）', { tag: '@smoke' }, () => {
     // FilterBar（Form）+ DataTable 骨架
     await expect(page.locator('main .ant-form').first()).toBeVisible();
     await expect(page.locator('main .ant-table').first()).toBeVisible();
+  });
+
+  test('/performance/pm-adhoc 自定义聚合渲染，内置/自建任务卡片与新建按钮可见', async ({ page }) => {
+    await expectPageRenders(page, '/performance/pm-adhoc');
+
+    // 两张分区 Card 标题（perf.adhoc.cardBuiltin / cardCustom）
+    await expect(
+      page
+        .locator('.ant-card-head-title')
+        .filter({ hasText: /内置聚合任务|Built-in Aggregation Tasks/ }),
+    ).toBeVisible();
+    await expect(
+      page
+        .locator('.ant-card-head-title')
+        .filter({ hasText: /自建聚合任务|Custom Aggregation Tasks/ }),
+    ).toBeVisible();
+
+    // 自建区「新建任务」按钮（perf.adhoc.btnNewTask）+ 任务表骨架（空表也有表头）
+    await expect(
+      page.locator('main').getByRole('button', { name: /新建任务|New Task/ }),
+    ).toBeVisible();
+    await expect(page.locator('main .ant-table').first()).toBeVisible();
+  });
+
+  test('/performance/device-view 设备性能查看渲染，制式切换/出图按钮/空态提示可见', async ({ page }) => {
+    await expectPageRenders(page, '/performance/device-view');
+
+    // 条件区：制式 Segmented（LTE/NR/GSM，perf.dashboard.fieldTech）
+    await expect(page.locator('main .ant-segmented').first()).toBeVisible();
+    await expect(
+      page.locator('main .ant-segmented-item').filter({ hasText: 'LTE' }).first(),
+    ).toBeVisible();
+
+    // 「出图」按钮（perf.dashboard.btnPlot）
+    await expect(
+      page.locator('main').getByRole('button', { name: /出图|Plot/ }).first(),
+    ).toBeVisible();
+
+    // 初始未出图：空态引导文案（perf.dashboard.emptyPickConditions，UI 状态非业务数据）
+    await expect(
+      page.locator('main').getByText(/选择制式|Select technology/).first(),
+    ).toBeVisible();
   });
 });

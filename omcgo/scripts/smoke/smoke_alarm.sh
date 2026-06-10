@@ -354,7 +354,7 @@ API_DEF_TOTAL=$(jget "data.total")
 if [ -n "$API_DEF_TOTAL" ] && [ "$API_DEF_TOTAL" -gt 0 ] 2>/dev/null; then
     skip "upload-xml 上传闭环" "栈上存在 ${API_DEF_TOTAL} 条 API 自建定义(loaded_from 为空)，上传会触发孤儿清理删掉它们"
 else
-    # ne_type 列是 varchar(16)：超长会让 Loader UPSERT 整文件失败（reload 仅 Warn）。
+    # ne_type 列是 varchar(16)：超长 neType 会被上传守门 400 拒绝（#123 修复后硬校验）。
     # 取 SMOKE_TAG 的时间戳段拼 "SMK" 前缀，恰好 ≤16 字符且每次运行唯一。
     NE_SMK="SMK${SMOKE_TAG:3:13}"
     SMK_XML="$SMOKE_TMPDIR/${NE_SMK}.xml"
@@ -399,6 +399,20 @@ BAD_XML="$SMOKE_TMPDIR/bad.xml"
 printf 'not an xml at all' > "$BAD_XML"
 req_upload "/api/v1/alarm-definitions/upload-xml" "file=@$BAD_XML"
 check_ret_fail "上传非法 XML 被拒绝"
+
+# 上传负路径：neType 超长（>16，ne_type 列 varchar(16)）→ 400 守门拒绝。
+# #123 修复回归：此前会 201 假成功（reload 失败仅 Warn）但 0 行入库。
+# 守门在落盘/重载之前拒绝，不触发孤儿清理，可不受上方守护限制独立执行。
+LONG_NE="SMK${SMOKE_TAG:3:13}LONG"
+LONG_XML="$SMOKE_TMPDIR/long_ne.xml"
+cat > "$LONG_XML" <<XMLEOF
+<?xml version="1.0" encoding="UTF-8"?>
+<alarmModel neType="${LONG_NE}" deviceType="9" totalCount="0">
+    <alarms></alarms>
+</alarmModel>
+XMLEOF
+req_upload "/api/v1/alarm-definitions/upload-xml" "file=@$LONG_XML"
+check_status "上传超长 neType(>16 字符) 返回 400" 400
 
 # ---------------------------------------------------------------------------
 section "super_admin 403 边界（普通用户访问定义库）"

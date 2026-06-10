@@ -19,7 +19,7 @@ BASE_URL="${1:-${OMC_BASE_URL:-http://localhost:8081}}"
 # 执行顺序：先认证/南向链路（其余域的会话与设备数据来源），再各业务域
 SUITES=(
     auth acs device topology config product alarm pm mr
-    software backup dashboard ops report mml filemanager logs
+    software ufte backup dashboard ops report mml filemanager logs
     admin system task notification northbound provision interop nedirect
 )
 

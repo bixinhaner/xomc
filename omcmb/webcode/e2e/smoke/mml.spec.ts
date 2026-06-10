@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { expectPageRenders, smokeLogin } from './helpers';
 
 /**
- * MML 控制台域冒烟：四个页面在真实后端下正常渲染。
+ * MML 控制台域冒烟：五个页面在真实后端下正常渲染。
  *
  * 路由依据 src/router/routes.tsx（mml/console 是侧边栏主入口 nav.mml.console，
  * mml/console-v2 为重设计版独立路由，mml/commands 在导航中隐藏但路由仍在）：
@@ -16,6 +16,8 @@ import { expectPageRenders, smokeLogin } from './helpers';
  *                       + 右侧命令表(.ant-table) + 头部 nav.mml.commands（命令树）
  *   - /mml/task-records src/pages/mml/TaskRecord   ListPageLayout 标题 nav.mml.taskRecord（任务记录）
  *                       + FilterBar(.ant-form，mml.taskName 任务名称) + DataTable(.ant-table)
+ *   - /mml/script       src/pages/mml/ScriptTask   ListPageLayout 标题 nav.mml.script（脚本任务，
+ *                       读 mml_scripts）+ 新增脚本按钮(mml.newScript) + DataTable(.ant-table)
  *
  * 仅做"没崩 + 骨架在"级断言，不断言具体业务数据（真实栈数据稀疏，空表也有表头）。
  * 文案默认 zh-CN，正则兼容 en-US。
@@ -72,6 +74,20 @@ test.describe('MML控制台冒烟（真实后端）', { tag: '@smoke' }, () => {
     // 筛选栏表单（任务名称/类型/状态/结果）+ 任务表格骨架（空表也有表头）
     await expect(page.locator('.ant-form').first()).toBeVisible();
     await expect(page.getByText(/任务名称|Task Name/).first()).toBeVisible();
+    await expect(page.locator('.ant-table').first()).toBeVisible();
+  });
+
+  test('/mml/script 脚本任务（脚本库列表）渲染', async ({ page }) => {
+    await expectPageRenders(page, '/mml/script');
+
+    // 页面标题 nav.mml.script（heading 角色，避开同名侧边栏菜单项）
+    await expect(
+      page.getByRole('heading', { name: /脚本任务|Script Task/ }),
+    ).toBeVisible();
+    // 头部"新增脚本"按钮（mml.newScript）+ 脚本表格骨架（空表也有表头）
+    await expect(
+      page.getByRole('button', { name: /新增脚本|New Script/ }),
+    ).toBeVisible();
     await expect(page.locator('.ant-table').first()).toBeVisible();
   });
 });

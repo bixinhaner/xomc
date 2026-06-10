@@ -158,23 +158,13 @@ check_ret_fail "热度图 days=366 越界被拒绝"
 req GET "/api/v1/dashboard/alarm-heatmap?days=0"
 check_ret_fail "热度图 days=0 被拒绝"
 
-# 已知后端 bug：alarms_history.severity 是 smallint，queryHeatmapBySeverityMap
-# （internal/dashboard/heatmap.go）SQL 里 `$2 = '' OR severity = $2` 与 text 比较
-# → SQLSTATE 42883 (operator does not exist: smallint = text)，任何调用都 500。
-# 修复后下面两个分支会自动回到正常 check_ret_ok 断言。
+# #119 已修复：severity 过滤参数改整型语义（空串=0 哨兵），smallint=text 不再出现
 req GET "/api/v1/dashboard/alarm-heatmap-by-severity"
-if [ "$HTTP_CODE" = "500" ]; then
-    known_bug "按严重程度热度图可查" "500 SQLSTATE 42883 smallint=text（heatmap.go queryHeatmapBySeverityMap，severity 列 smallint 与 text 参数直接比较）"
-else
-    check_ret_ok "按严重程度热度图可查"
-fi
+check_ret_ok "按严重程度热度图可查"
+check_field "按严重程度热度图含 severity" "data.severity"
 
 req GET "/api/v1/dashboard/alarm-heatmap-by-severity?days=7&severity=critical"
-if [ "$HTTP_CODE" = "500" ]; then
-    known_bug "按严重程度热度图(severity=critical)可查" "同上：500 SQLSTATE 42883 smallint=text"
-else
-    check_ret_ok "按严重程度热度图(severity=critical)可查"
-fi
+check_ret_ok "按严重程度热度图(severity=critical)可查"
 
 req GET "/api/v1/dashboard/alarm-heatmap-by-severity?days=999"
 check_ret_fail "按严重程度热度图 days=999 越界被拒绝"

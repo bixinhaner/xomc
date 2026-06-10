@@ -20,6 +20,16 @@ import { waitForPageLoad } from '../helpers/navigation';
  *   - /device/detail/<SN> → src/pages/device/DeviceDetail/index.tsx（头部 Card：
  *                       common.back=返回/Back + SN 文本；Tabs：common.detail=详情/Detail、
  *                       device.parameterTree=参数树/Parameter Tree）
+ *   - /device/plug-and-play → src/pages/device/PlugAndPlay/index.tsx（F09 开站入口；
+ *                       页头 provision.plugAndPlay=即插即用/Plug and Play + common.add=新增/Add，
+ *                       区块标题 provision.policyList=策略列表/Policy List、
+ *                       provision.executeStatus=执行状态/Execution Status，双 .ant-table）
+ *   - /device/abnormal-reboot → src/pages/device/AbnormalReboot/index.tsx（重启记录统一列表，
+ *                       事件日志/异常重启已合并为单列表无 Tabs；标题
+ *                       page.rebootRecords.title=重启记录/Reboot Records，FilterBar 占位
+ *                       log.exception.devCodeNameIp=请输入设备编码\/名称\/IP / Enter device code\/name\/IP，
+ *                       工具栏 log.event.statistics=统计/Statistics + log.export=导出/Export；
+ *                       旧路径 /log/exception 由路由 Navigate 跳转到此）
  *
  * 真实栈数据稀疏：不断言任何具体业务数据，列表空表也有表头（.ant-table 可见即可）。
  */
@@ -73,6 +83,41 @@ test.describe('设备管理冒烟（真实后端）', { tag: '@smoke' }, () => {
 
     // 回收站表格骨架（空表也有表头）
     await expect(page.locator('.ant-table').first()).toBeVisible();
+  });
+
+  test('/device/plug-and-play 即插即用：策略列表 + 执行状态 + 新增按钮', async ({ page }) => {
+    await expectPageRenders(page, '/device/plug-and-play');
+
+    // 页头「新增」按钮（ListPageLayout extra，新建策略入口）
+    await expect(page.getByRole('button', { name: /新增|Add/ }).first()).toBeVisible();
+
+    // 上下两个区块标题：策略列表 / 执行状态
+    const main = page.locator('main');
+    await expect(main.getByText(/策略列表|Policy List/).first()).toBeVisible();
+    await expect(main.getByText(/执行状态|Execution Status/).first()).toBeVisible();
+
+    // 策略表 + 任务表 双表格骨架
+    await expect(page.locator('.ant-table').first()).toBeVisible();
+  });
+
+  test('/device/abnormal-reboot 重启记录：筛选栏 + 统计/导出按钮 + 旧路径跳转', async ({ page }) => {
+    await expectPageRenders(page, '/device/abnormal-reboot');
+
+    // FilterBar：设备编码/名称/IP 搜索框
+    await expect(
+      page.getByPlaceholder(/请输入设备编码|Enter device code/).first(),
+    ).toBeVisible();
+
+    // 工具栏：统计（按设备聚合弹窗入口）+ 导出 按钮
+    await expect(page.getByRole('button', { name: /统计|Statistics/ }).first()).toBeVisible();
+    await expect(page.getByRole('button', { name: /导出|Export/ }).first()).toBeVisible();
+
+    // 重启记录表格骨架（真实后端数据可空，空表也有表头）
+    await expect(page.locator('.ant-table').first()).toBeVisible();
+
+    // 旧路径 /log/exception 兼容跳转（路由级 Navigate replace）
+    await page.goto('/log/exception');
+    await expect(page).toHaveURL(/\/device\/abnormal-reboot/);
   });
 
   test('/device/detail/<SN> 设备详情：从列表第一行进入，头部与 Tabs 渲染', async ({ page }) => {
