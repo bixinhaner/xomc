@@ -56,7 +56,7 @@ sep()  { echo -e "\033[1;34m──────────────── $* 
 
 # 升级时 deploy/.env 里【运维自定义】的键 —— 跨版本继承,不被新包默认值覆盖。
 # 【版本相关】键(PROJECT_VERSION / IMAGE_*)不在此列,始终用新包值。
-ENV_PRESERVE_KEYS="POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB MINIO_ROOT_USER MINIO_ROOT_PASSWORD GRAFANA_ADMIN_USER GRAFANA_ADMIN_PASSWORD OMCGO_JWT_SECRET OMC_PUBLIC_HOST"
+ENV_PRESERVE_KEYS="POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB MINIO_ROOT_USER MINIO_ROOT_PASSWORD GRAFANA_ADMIN_USER GRAFANA_ADMIN_PASSWORD OMCGO_JWT_SECRET OMC_SHARED_SECRET OMC_PUBLIC_HOST"
 
 # merge_env_preserve <prev_env> <new_env>
 # 升级继承:以新包 .env 为基底(拿到新镜像 tag),把上一版 .env 中白名单键的值
@@ -458,10 +458,10 @@ sep "5/9 默认口令安全检查"
 # ENV_FILE 已在 Step 4 定义并 source，这里仅做存在性兜底
 [ -f "$ENV_FILE" ] || die "缺 $ENV_FILE（由 build-release.sh 生成）" 1
 
-if grep -qE '^(POSTGRES_PASSWORD=omcgo123|MINIO_ROOT_PASSWORD=minioadmin|GRAFANA_ADMIN_PASSWORD=admin)$' "$ENV_FILE"; then
-  warn "检测到 deploy/.env 含默认口令（POSTGRES_PASSWORD=omcgo123 / MINIO_ROOT_PASSWORD=minioadmin / GRAFANA_ADMIN_PASSWORD=admin）"
+if grep -qE '^(POSTGRES_PASSWORD=omcgo123|MINIO_ROOT_PASSWORD=minioadmin|GRAFANA_ADMIN_PASSWORD=admin|OMC_SHARED_SECRET=dps)$' "$ENV_FILE"; then
+  warn "检测到 deploy/.env 含默认口令（POSTGRES_PASSWORD=omcgo123 / MINIO_ROOT_PASSWORD=minioadmin / GRAFANA_ADMIN_PASSWORD=admin / OMC_SHARED_SECRET=dps）"
   warn "  → 生产环境务必改强口令：vi $ENV_FILE"
-  warn "  → 同时 $OMC_ROOT/etc/*.prod.yaml 内 dsn / minio 配置需保持一致"
+  warn "  → etc/*.prod.yaml 用 \${VAR} 引用 .env，无需手改；生产凭证校验(GuardProductionSecrets)会拒绝默认值启动"
   confirm "已知风险，继续部署？" || die "用户取消，请先改口令" 1
 fi
 

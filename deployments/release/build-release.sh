@@ -225,6 +225,9 @@ GRAFANA_ADMIN_PASSWORD=admin
 OMCGO_ENV=prod
 # JWT 密钥（app 容器读，生产勿用默认值）
 OMCGO_JWT_SECRET=8f7a9b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6
+# TR-069 ConnReq/STUN 共享密钥（app/acs 容器读）——【部署前必改为强随机串】。
+# 默认值 dps 会被生产凭证校验拒绝启动（GuardProductionSecrets）。生成：openssl rand -hex 24
+OMC_SHARED_SECRET=dps
 # 本机对外 IP / 域名（基站可达地址）——【部署前必填】。app/acs/worker 容器读，
 # worker 据此生成 PM 文件上传 URL 下发给基站；不能用 localhost / 127.0.0.1，
 # 否则基站无法回传文件。示例：OMC_PUBLIC_HOST=172.19.1.132

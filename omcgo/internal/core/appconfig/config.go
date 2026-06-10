@@ -9,6 +9,7 @@ package appconfig
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -892,18 +893,59 @@ type ProtocolLogConfig struct {
 	Rotation    RotationConfig `mapstructure:"rotation"`      // 轮转配置（复用 RotationConfig）
 }
 
-// Load 从 YAML 配置文件加载配置，并支持通过环境变量覆盖（前缀 OMCGO_，"."替换为"_"）。
-// 例如 OMCGO_SERVER_PORT=8080 会覆盖 server.port 字段。
+// ExpandEnv 展开配置文本中的 ${VAR} 与 ${VAR:-default} 占位符，值取自进程环境变量。
+//
+// 统一在 Load 时对整份 YAML 生效：密码 / DSN / 密钥等敏感值与 OMC_PUBLIC_HOST 等
+// 部署期变量，均由 deploy/.env 经 docker-compose 注入容器环境，配置文件只写 ${VAR}
+// 引用——实现「.env 单一真值源 + 部署期自动导入」。语义对齐 shell / docker-compose：
+//   - ${VAR}            取 env，未设则展开为空串
+//   - ${VAR:-default}   取 env，未设或为空则用 default
+//
+// 注意：未设且无默认值的占位符展开为空串，交由 GuardProductionSecrets（命中已知弱
+// 默认 / 空密码场景）与各字段 Validate 在生产环境拦截，本函数本身不做合法性判断。
+func ExpandEnv(s string) string {
+	return os.Expand(s, func(key string) string {
+		if idx := strings.Index(key, ":-"); idx >= 0 {
+			if v := os.Getenv(key[:idx]); v != "" {
+				return v
+			}
+			return key[idx+2:]
+		}
+		return os.Getenv(key)
+	})
+}
+
+// readExpandedConfig 读取 YAML 文件、对整份内容做 ${VAR} 环境变量展开，再交给 viper
+// 解析。替代 viper.SetConfigFile + ReadInConfig：viper 直接读文件不会做插值，必须
+// 先 ExpandEnv 再以 reader 喂入。configType 由扩展名推断（OMC 全为 yaml）。
+func readExpandedConfig(v *viper.Viper, path string) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read config file %s: %w", path, err)
+	}
+	if ext := strings.TrimPrefix(filepath.Ext(path), "."); ext != "" {
+		v.SetConfigType(ext)
+	} else {
+		v.SetConfigType("yaml")
+	}
+	if err := v.ReadConfig(strings.NewReader(ExpandEnv(string(raw)))); err != nil {
+		return fmt.Errorf("parse config file %s: %w", path, err)
+	}
+	return nil
+}
+
+// Load 从 YAML 配置文件加载配置。配置文件中的 ${VAR} / ${VAR:-default} 由 ExpandEnv
+// 在解析前从环境变量展开（.env 单一真值源）；此外仍支持 viper 的 OMCGO_ 前缀整值覆盖
+// （"."替换为"_"），如 OMCGO_SERVER_PORT=8080 覆盖 server.port，作为运维临时开关层。
 // 各微服务入口直接调用，如：appconfig.Load("etc/config.dev.yaml", &cfg)
 func Load(path string, target interface{}) error {
 	v := viper.New()
-	v.SetConfigFile(path)
 	v.SetEnvPrefix("OMCGO")
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
 
-	if err := v.ReadInConfig(); err != nil {
-		return fmt.Errorf("read config file %s: %w", path, err)
+	if err := readExpandedConfig(v, path); err != nil {
+		return err
 	}
 
 	if err := v.Unmarshal(target); err != nil {
@@ -927,13 +969,12 @@ func Load(path string, target interface{}) error {
 // This is useful for Docker deployments where config values need to be set via env vars.
 func LoadWithEnvOverride(path string, target interface{}, envOverrides map[string]string) error {
 	v := viper.New()
-	v.SetConfigFile(path)
 	v.SetEnvPrefix("OMCGO")
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
 
-	if err := v.ReadInConfig(); err != nil {
-		return fmt.Errorf("read config file %s: %w", path, err)
+	if err := readExpandedConfig(v, path); err != nil {
+		return err
 	}
 
 	// Apply environment variable overrides

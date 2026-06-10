@@ -15,7 +15,7 @@ db:
   # 【全 docker compose 部署】使用 service 名 postgres；app 容器与 postgres 容器
   # 同 project 共享 docker network，进行内部名字解析。如仅起动 host 二进制调试，
   # 可临时改为 127.0.0.1（infra 的 5432 publish 到 127.0.0.1）。
-  dsn: "postgres://omcgo:REPLACE_ME_DB_PASSWORD@postgres:5432/omcgo?sslmode=require"  # 生产经 OMCGO_DB_DSN 注入真实 DSN
+  dsn: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=require"  # 凭据由 deploy/.env 经 compose 注入 ${POSTGRES_*}，Load() 解析前展开（单一真值源）
   # 连接池核定（#24）：app 是 REST+gRPC 主负载，PG 池上调 50→60。
   # 单副本全栈聚合预算：app(PG 60 + TS 40) + acs(PG 30) + worker(PG 25 + TS 25) = 180，
   # 需 PostgreSQL max_connections ≥ 200（留 superuser/复制余量）。app/acs 横向扩容时
@@ -31,7 +31,7 @@ db:
   log_sql_slow_threshold: 1000
 
 tsdb:
-  dsn: "postgres://omcgo:REPLACE_ME_DB_PASSWORD@postgres:5432/omcgo?sslmode=require"  # 生产经 OMCGO_TSDB_DSN 注入真实 DSN
+  dsn: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=require"  # 同 db，复用 ${POSTGRES_*}（TimescaleDB 与 PG 同实例）
   # 连接池核定（#24）：PM/KPI/告警历史时序读写，TS 池上调 30→40。
   max_conns: 40
   min_conns: 5
@@ -56,8 +56,8 @@ nats:
 
 minio:
   endpoint: "minio:9000"
-  access_key: "REPLACE_ME_MINIO_ACCESS_KEY"  # 经 OMCGO_MINIO_ACCESS_KEY 注入
-  secret_key: "REPLACE_ME_MINIO_SECRET_KEY"  # 经 OMCGO_MINIO_SECRET_KEY 注入
+  access_key: "${MINIO_ROOT_USER}"    # 由 deploy/.env 注入 ${MINIO_ROOT_USER}
+  secret_key: "${MINIO_ROOT_PASSWORD}"  # 由 deploy/.env 注入 ${MINIO_ROOT_PASSWORD}
   use_ssl: false
   buckets:
     pm_files: "pm-files"
@@ -71,10 +71,10 @@ minio:
 
 conn_req:
   server_addr: "acs:7547"
-  shared_secret: "REPLACE_ME_SHARED_SECRET"  # 经 OMCGO_CONN_REQ_SHARED_SECRET 注入
+  shared_secret: "${OMC_SHARED_SECRET}"  # TR-069 ConnReq/STUN 共享密钥，由 deploy/.env 注入 ${OMC_SHARED_SECRET}
 
 jwt:
-  secret: "REPLACE_ME_JWT_SECRET_AT_LEAST_32_CHARS_LONG"  # 经 OMCGO_JWT_SECRET 注入
+  secret: "${OMCGO_JWT_SECRET}"  # ≥32 字符，由 deploy/.env 注入 ${OMCGO_JWT_SECRET}
   access_token_ttl: 30m
   refresh_token_ttl: 168h
 

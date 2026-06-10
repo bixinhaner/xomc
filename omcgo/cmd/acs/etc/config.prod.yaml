@@ -37,7 +37,7 @@ stun:
   worker_size: 4
   buffer_size: 2048
   cache_ttl: 30m
-  shared_secret: "REPLACE_ME_SHARED_SECRET"  # 经 OMCGO_STUN_SHARED_SECRET 注入
+  shared_secret: "${OMC_SHARED_SECRET}"  # TR-069 ConnReq/STUN 共享密钥，由 deploy/.env 注入 ${OMC_SHARED_SECRET}（与 app conn_req 同值）
 
 post_session_wake:
   enabled: true
@@ -59,7 +59,7 @@ nats:
 
 db:
   # 【全 docker compose 部署】使用 service 名 postgres（容器间 docker network 解析）
-  dsn: "postgres://omcgo:REPLACE_ME_DB_PASSWORD@postgres:5432/omcgo?sslmode=require"  # 生产经 OMCGO_DB_DSN 注入真实 DSN
+  dsn: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=require"  # 凭据由 deploy/.env 经 compose 注入 ${POSTGRES_*}，Load() 解析前展开（单一真值源）
   # 连接池核定（#24）：ACS 承载高并发 CWMP 会话（max_concurrent 10000），PG 池 20→30。
   # ACS 水平扩展时按副本数累加，逼近 PG max_connections 前必须前置 pgbouncer。
   # 聚合预算见 app/config.prod.yaml 与 migrations/README.md「连接池核定（#24）」。
@@ -71,8 +71,8 @@ db:
 
 minio:
   endpoint: "minio:9000"
-  access_key: "REPLACE_ME_MINIO_ACCESS_KEY"  # 经 OMCGO_MINIO_ACCESS_KEY 注入
-  secret_key: "REPLACE_ME_MINIO_SECRET_KEY"  # 经 OMCGO_MINIO_SECRET_KEY 注入
+  access_key: "${MINIO_ROOT_USER}"    # 由 deploy/.env 注入 ${MINIO_ROOT_USER}
+  secret_key: "${MINIO_ROOT_PASSWORD}"  # 由 deploy/.env 注入 ${MINIO_ROOT_PASSWORD}
   use_ssl: false
   buckets:
     pm_files: "pm-files"
