@@ -55,7 +55,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
       - name: Detect migration changes
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@v4
         id: filter
         with:
           filters: |
