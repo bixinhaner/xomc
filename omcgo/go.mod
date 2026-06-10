@@ -33,7 +33,7 @@ require (
 	go.opentelemetry.io/otel/sdk v1.41.0
 	go.opentelemetry.io/otel/trace v1.44.0
 	go.uber.org/mock v0.6.0
-	go.uber.org/zap v1.21.0
+	go.uber.org/zap v1.28.0
 	golang.org/x/crypto v0.53.0
 	golang.org/x/sync v0.21.0
 	golang.org/x/time v0.15.0
@@ -42,7 +42,6 @@ require (
 )
 
 require (
-	github.com/benbjohnson/clock v1.1.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bmatcuk/doublestar/v4 v4.6.1 // indirect
 	github.com/bytedance/gopkg v0.1.3 // indirect
