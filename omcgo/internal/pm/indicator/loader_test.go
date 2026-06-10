@@ -114,3 +114,33 @@ func TestAggregateEnabledOR_DefaultEnabledTreatedAsTrue(t *testing.T) {
 	got := aggregateEnabledOR(docs)
 	assert.True(t, got["D"])
 }
+
+// #98：reload 重灌 builtin 公式时，已被用户自定义公式覆盖的 (平台, 指标) 必须跳过，
+// 避免与保留下来的自定义行重复 / 覆盖用户意图。
+func TestExcludeCustomOverridden(t *testing.T) {
+	formulas := []formulaRow{
+		{PlatformName: "P1", IndicatorID: "I1", Formula: "a", LoadedFrom: "x.xml"},
+		{PlatformName: "P1", IndicatorID: "I2", Formula: "b", LoadedFrom: "x.xml"},
+		{PlatformName: "P2", IndicatorID: "I1", Formula: "c", LoadedFrom: "y.xml"},
+	}
+
+	// 无自定义键 → 原样返回
+	assert.Len(t, excludeCustomOverridden(formulas, nil), 3)
+
+	// 自定义覆盖 P1/I1 → 丢弃该 builtin 行，保留其余两条；
+	// (平台,指标) 是联合键，P2/I1 不同键不应被误删。
+	custom := map[formulaKey]struct{}{{platform: "P1", indicator: "I1"}: {}}
+	got := excludeCustomOverridden(formulas, custom)
+	assert.Len(t, got, 2)
+	hasP1I1, hasP2I1 := false, false
+	for _, f := range got {
+		if f.PlatformName == "P1" && f.IndicatorID == "I1" {
+			hasP1I1 = true
+		}
+		if f.PlatformName == "P2" && f.IndicatorID == "I1" {
+			hasP2I1 = true
+		}
+	}
+	assert.False(t, hasP1I1, "被自定义覆盖的 P1/I1 不应重插")
+	assert.True(t, hasP2I1, "P2/I1 是不同键，不应被 P1/I1 的覆盖误删")
+}
