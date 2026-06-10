@@ -19,13 +19,14 @@ const maxDeliveries = 5
 // QueueSubscribe 使用 Durable Consumer，各实例彺负载均衡，适用于多实例水平扩展。
 // 事件处理失败后指数退退重新投递（最多 5 次），超出后终止该消息防止无限重试。
 type NATSEventBus struct {
-	conn   *nats.Conn
-	js     nats.JetStreamContext
-	subs   []*nats.Subscription
-	mu     sync.Mutex
-	logger *zap.Logger
-	ctx    context.Context
-	cancel context.CancelFunc
+	conn    *nats.Conn
+	js      nats.JetStreamContext
+	subs    []*nats.Subscription
+	mu      sync.Mutex
+	logger  *zap.Logger
+	metrics *EventBusMetrics // issue #20：投递结果指标；nil 时（单进程/单测）静默 no-op。
+	ctx     context.Context
+	cancel  context.CancelFunc
 }
 
 // NewNATSEventBus creates an EventBus backed by NATS JetStream.
@@ -38,6 +39,13 @@ func NewNATSEventBus(conn *nats.Conn, js nats.JetStreamContext, logger *zap.Logg
 		ctx:    ctx,
 		cancel: cancel,
 	}
+}
+
+// SetMetrics attaches delivery-outcome metrics (issue #20). Call before any
+// Subscribe so wrapHandler observes them; nil-safe — when unset, the bus keeps
+// the legacy log-only behaviour.
+func (b *NATSEventBus) SetMetrics(m *EventBusMetrics) {
+	b.metrics = m
 }
 
 func (b *NATSEventBus) Publish(ctx context.Context, subject string, evt Event) error {
@@ -107,7 +115,9 @@ func (b *NATSEventBus) wrapHandler(handler EventHandler) nats.MsgHandler {
 		evt, parseErr := decodeEventBytes(msg.Data)
 		if parseErr != nil {
 			b.logger.Error("unmarshal event", zap.Error(parseErr))
-			// Permanent parse error — terminate to avoid infinite retry
+			// Permanent parse error — terminate to avoid infinite retry.
+			// subject 用 msg.Subject（已解出 evt 之前），保证 dropped 指标有 subject 维度。
+			b.metrics.inc(msg.Subject, deliveryOutcomeDropped)
 			_ = msg.Term()
 			return
 		}
@@ -121,14 +131,19 @@ func (b *NATSEventBus) wrapHandler(handler EventHandler) nats.MsgHandler {
 		decision := decideAck(handlerErr, deliveries, maxDeliveries)
 		switch decision.action {
 		case ackActionAck:
+			b.metrics.inc(evt.Subject, deliveryOutcomeAck)
 			_ = msg.Ack()
 		case ackActionTerm:
+			// 达到 maxDeliveries 后 Term 终止：消息被永久丢弃。此前只有 ERROR 日志，
+			// 无指标 → max-retries 终止"静默"。补 terminated 指标使其可告警。
+			b.metrics.inc(evt.Subject, deliveryOutcomeTerminated)
 			b.logger.Error("handle event (terminating)",
 				zap.String("subject", evt.Subject),
 				zap.Uint64("delivery", deliveries),
 				zap.Error(handlerErr))
 			_ = msg.Term()
 		case ackActionNak:
+			b.metrics.inc(evt.Subject, deliveryOutcomeNak)
 			b.logger.Error("handle event (retrying)",
 				zap.String("subject", evt.Subject),
 				zap.Uint64("delivery", deliveries),

@@ -130,6 +130,43 @@ func Test_ReconcileOnce_RepairsPGStaleVsRedisTerminal(t *testing.T) {
 	assert.Equal(t, float64(2), counterValue(t, metrics.ReconcileTotal, "repaired"))
 }
 
+// issue #20：分叉检出应记 stale-detection counter + recovery-action counter，
+// 活跃任务积压应反映到 backlog gauge。
+func Test_ReconcileOnce_LifecycleMetrics(t *testing.T) {
+	lister := &fakeActiveLister{active: []*Task{
+		pgActiveTask("t1", "SN1", TaskStatusPending), // 分叉（Redis 已 completed）
+		pgActiveTask("t2", "SN2", TaskStatusSent),    // 无分叉（Redis 仍 sent）
+		pgActiveTask("t3", "SN3", TaskStatusPending), // 分叉（Redis 已 failed）
+	}}
+	reader := &fakeQueueReader{byID: map[string]*Task{
+		"t1": redisTerminalTask("t1", "SN1", TaskStatusCompleted),
+		"t2": pgActiveTask("t2", "SN2", TaskStatusSent),
+		"t3": redisTerminalTask("t3", "SN3", TaskStatusFailed),
+	}}
+	repairer := &fakeRepairer{}
+	metrics := NewTaskMetrics(prometheus.NewRegistry())
+	rc := NewReconciler(lister, reader, repairer, metrics, 0, 0, 0, zap.NewNop())
+
+	stats, err := rc.ReconcileOnce(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 3, stats.Scanned)
+	assert.Equal(t, 2, stats.Repaired)
+
+	// backlog gauge = 本轮扫描到的活跃任务数。
+	m := &dto.Metric{}
+	require.NoError(t, metrics.BacklogTotal.Write(m))
+	assert.Equal(t, float64(3), m.GetGauge().GetValue(), "backlog gauge 应为扫描到的活跃任务数")
+
+	// stale-detection counter = 检出分叉的任务数（2 条）。
+	sm := &dto.Metric{}
+	require.NoError(t, metrics.StaleDetectedTotal.Write(sm))
+	assert.Equal(t, float64(2), sm.GetCounter().GetValue(), "应检出 2 条分叉")
+
+	// recovery-action counter（reconcile_repair）= 成功修复数（2 条）。
+	assert.Equal(t, float64(2),
+		counterValue(t, metrics.RecoveryActionTotal, RecoveryActionReconcileRepair))
+}
+
 func Test_ReconcileOnce_NoDivergence_WhenRedisStillActive(t *testing.T) {
 	// Redis 也还是 pending/sent → 无分叉，不修复（正常在飞任务）。
 	lister := &fakeActiveLister{active: []*Task{

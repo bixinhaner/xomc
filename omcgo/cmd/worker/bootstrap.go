@@ -16,10 +16,14 @@ import (
 // workerInfra extends components.Infra with worker-specific dependencies.
 type workerInfra struct {
 	*components.Infra
-	Carriers     *carrier.CarrierRegistry
-	TaskService  *task.TaskService
-	TaskRepo     *task.PgTaskRepository
-	TaskQueue    *task.RedisTaskQueue
+	Carriers    *carrier.CarrierRegistry
+	TaskService *task.TaskService
+	TaskRepo    *task.PgTaskRepository
+	TaskQueue   *task.RedisTaskQueue
+	// TaskMetrics 在 initWorker 内构造并挂到 TaskService，registerSubscribers / reconciler
+	// 复用同一实例（避免重复 MustRegister 触发 Prometheus duplicate collector panic）。
+	// 在 RestorePendingQueues 之前就绪，确保启动期 recovery 动作能被记到指标。
+	TaskMetrics *task.TaskMetrics
 }
 
 // initWorker initializes all infrastructure for the background worker.
@@ -64,9 +68,15 @@ func initWorker(ctx context.Context, cfg *appconfig.WorkerConfig) (*workerInfra,
 	// 进度卡 pending 直到下游 reaper 兜底（甚至永久卡住）。app 那边
 	// cmd/app/bootstrap.go:70 已设；这里补上同款注入。
 	taskSvc.SetEventBus(inf.EventBus)
+	// issue #20：任务指标在这里就构造并注入 —— 必须早于 runWorker 里的
+	// RestorePendingQueues，否则启动期 recovery 动作（restore_pending）打点时
+	// metrics 还是 nil。reconciler / 双写中断指标复用同一实例。
+	taskMetrics := task.NewTaskMetrics(inf.MetricsReg)
+	taskSvc.SetMetrics(taskMetrics)
 	w.TaskService = taskSvc
 	w.TaskRepo = taskRepo
 	w.TaskQueue = taskQueue
+	w.TaskMetrics = taskMetrics
 
 	return w, nil
 }

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -17,6 +18,10 @@ func TestNewTaskMetrics_Registered(t *testing.T) {
 	assert.NotNil(t, m.CompletedTotal)
 	assert.NotNil(t, m.DurationSeconds)
 	assert.NotNil(t, m.NoHandlerTotal)
+	// issue #20 新增
+	assert.NotNil(t, m.BacklogTotal)
+	assert.NotNil(t, m.StaleDetectedTotal)
+	assert.NotNil(t, m.RecoveryActionTotal)
 
 	// 确认指标真的注册了
 	families, err := reg.Gather()
@@ -26,8 +31,9 @@ func TestNewTaskMetrics_Registered(t *testing.T) {
 		names[f.GetName()] = true
 	}
 	// CounterVec/HistogramVec 在没有 observation 的情况下不会被 Gather 返回
-	// 但 Gauge 会，所以至少 PendingTotal 出现
+	// 但 Gauge 会，所以 PendingTotal / BacklogTotal 一定出现
 	assert.True(t, names["omc_tasks_pending_total"], "PendingTotal gauge should be registered")
+	assert.True(t, names["omc_tasks_backlog_total"], "BacklogTotal gauge should be registered")
 }
 
 func TestNewTaskMetrics_CounterIncrements(t *testing.T) {
@@ -42,4 +48,24 @@ func TestNewTaskMetrics_CounterIncrements(t *testing.T) {
 	families, err := reg.Gather()
 	require.NoError(t, err)
 	require.NotEmpty(t, families)
+}
+
+// issue #20：backlog gauge / stale-detection counter / recovery-action counter
+// 的读写行为（用 testutil 直接断言值）。
+func TestTaskMetrics_LifecycleObservability(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := NewTaskMetrics(reg)
+
+	m.BacklogTotal.Set(42)
+	m.StaleDetectedTotal.Inc()
+	m.StaleDetectedTotal.Inc()
+	m.RecoveryActionTotal.WithLabelValues(RecoveryActionRestorePending).Add(3)
+	m.RecoveryActionTotal.WithLabelValues(RecoveryActionReconcileRepair).Inc()
+
+	assert.Equal(t, float64(42), testutil.ToFloat64(m.BacklogTotal))
+	assert.Equal(t, float64(2), testutil.ToFloat64(m.StaleDetectedTotal))
+	assert.Equal(t, float64(3),
+		testutil.ToFloat64(m.RecoveryActionTotal.WithLabelValues(RecoveryActionRestorePending)))
+	assert.Equal(t, float64(1),
+		testutil.ToFloat64(m.RecoveryActionTotal.WithLabelValues(RecoveryActionReconcileRepair)))
 }

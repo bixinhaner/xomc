@@ -16,6 +16,13 @@ type PMMetrics struct {
 	// 与存储层 omc_pm_late_arrival_total（按批次计）互补：本指标按 PM 文件计，
 	// 标签 carrier × technology 便于定位哪类设备频繁补传历史数据。
 	LateArrivalFilesTotal *prometheus.CounterVec
+
+	// issue #20: PM 文件解析后被指标库白名单丢弃的孤儿 counter 数。
+	// 此前 collector 仅 log Info「filtered orphan counters」，无可观测信号——厂家
+	// 上报名漂移 / 指标库未注册导致大批 counter 被静默丢弃时是运维盲区。reason 标签：
+	//   - "whitelist_miss" 命中白名单但 report_key 未注册（厂家上报名不在指标库）
+	// 持续增长说明某产品的指标库注册缺失或厂家上报名变更，需补库或纠正 report_key。
+	DroppedCountersTotal *prometheus.CounterVec
 }
 
 // NewPMMetrics creates and registers PM metrics.
@@ -39,8 +46,12 @@ func NewPMMetrics(reg prometheus.Registerer) *PMMetrics {
 			Name: "omc_pm_late_arrival_files_total",
 			Help: "PM files skipped because late-arriving data hit a compressed TimescaleDB chunk (UPSERT unsupported).",
 		}, []string{"carrier", "technology"}),
+		DroppedCountersTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "omc_pm_dropped_counters_total",
+			Help: "PM counters dropped after parsing, by reason (e.g. whitelist_miss = report_key not registered in indicator library).",
+		}, []string{"carrier", "technology", "reason"}),
 	}
 
-	reg.MustRegister(m.FilesProcessedTotal, m.ProcessingDurationSecs, m.ReportDelaySeconds, m.LateArrivalFilesTotal)
+	reg.MustRegister(m.FilesProcessedTotal, m.ProcessingDurationSecs, m.ReportDelaySeconds, m.LateArrivalFilesTotal, m.DroppedCountersTotal)
 	return m
 }

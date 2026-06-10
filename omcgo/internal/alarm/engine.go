@@ -12,6 +12,8 @@ import (
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/tracing"
+	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
 )
 
@@ -107,7 +109,20 @@ func applyIncomingAlarmState(target *model.Alarm, incoming *model.Alarm, fallbac
 }
 
 // Process handles an incoming alarm: maps severity, deduplicates, and persists.
-func (e *AlarmEngine) Process(ctx context.Context, alarm *model.Alarm) error {
+func (e *AlarmEngine) Process(ctx context.Context, alarm *model.Alarm) (err error) {
+	// issue #20：告警 raise 路径补 span。卡顿/延迟告警（dedup 查 Redis、落库、发事件
+	// 任一环节慢）此前在 trace 上不可见；named return + defer 统一把任一分支的错误
+	// 记到 span，无需改每个 return。tracing no-op 时零开销。
+	ctx, span := tracing.StartSpan(ctx, tracing.AlarmTracerName, "Alarm Process",
+		attribute.String("alarm.device_sn", alarm.DeviceSN),
+		attribute.String("alarm.identifier", alarm.AlarmIdentifier),
+		attribute.String("alarm.carrier", string(alarm.Carrier)),
+	)
+	defer func() {
+		tracing.RecordError(span, err)
+		span.End()
+	}()
+
 	// 0. Apply user-defined filter rules (W2 T-0011 接生产路径)
 	//    ignore     → 直接返回，不入库
 	//    auto_clear → 直接返回，不入库（设备-发起的清除走 AutoClear 路径）
@@ -170,10 +185,10 @@ func (e *AlarmEngine) Process(ctx context.Context, alarm *model.Alarm) error {
 					existing, getErr := e.store.GetActiveByID(ctx, existingID)
 					if getErr == nil {
 						applyIncomingAlarmState(existing, alarm, time.Now())
-					if updateErr := e.store.UpdateActive(ctx, existing); updateErr != nil {
-						return fmt.Errorf("update existing alarm: %w", updateErr)
-					}
-					e.logger.Debug("deduplicated alarm updated",
+						if updateErr := e.store.UpdateActive(ctx, existing); updateErr != nil {
+							return fmt.Errorf("update existing alarm: %w", updateErr)
+						}
+						e.logger.Debug("deduplicated alarm updated",
 							zap.String("device_sn", alarm.DeviceSN),
 							zap.String("alarm_identifier", alarm.AlarmIdentifier))
 						return nil
@@ -441,7 +456,17 @@ func (e *AlarmEngine) UpdateFromSync(ctx context.Context, alarm *model.Alarm) er
 
 // ClearBySync clears an alarm during sync (device no longer reports it) without publishing events.
 // The sync processor will publish a batch event after processing all diffs.
-func (e *AlarmEngine) ClearBySync(ctx context.Context, alarm *model.Alarm) error {
+func (e *AlarmEngine) ClearBySync(ctx context.Context, alarm *model.Alarm) (err error) {
+	// issue #20：告警 clear 路径补 span，让"该清未清"的延迟清除（archive/remove 慢）可定位。
+	ctx, span := tracing.StartSpan(ctx, tracing.AlarmTracerName, "Alarm ClearBySync",
+		attribute.String("alarm.device_sn", alarm.DeviceSN),
+		attribute.String("alarm.identifier", alarm.AlarmIdentifier),
+	)
+	defer func() {
+		tracing.RecordError(span, err)
+		span.End()
+	}()
+
 	now := time.Now()
 	alarm.Status = model.AlarmCleared
 	alarm.ClearedAt = &now

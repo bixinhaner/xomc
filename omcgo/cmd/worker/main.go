@@ -296,13 +296,12 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 
 	// #13: 任务状态对账器 — 周期对账 Redis（运行时真相源）与 PG（持久化权威源）的分叉。
 	// 修复 "PG 滞后于 Redis 终态" 的孤儿/陈旧记录（双写 sync 失败被吞 → PG 永远 pending/sent，
-	// Redis TTL 过期后成永久孤儿）。把 TaskMetrics 挂到 worker 的 TaskService，使其写路径的
-	// 双写中断指标（task_dual_write_fail_total）也在 worker 暴露；reconciler 共享同一 metric。
-	taskMetrics := task.NewTaskMetrics(w.MetricsReg)
-	w.TaskService.SetMetrics(taskMetrics)
+	// Redis TTL 过期后成永久孤儿）。TaskMetrics 已在 initWorker 构造并挂到 TaskService
+	// （issue #20：早于 RestorePendingQueues 才能记到启动期 recovery 动作），reconciler
+	// 复用同一 metric 实例，避免重复 MustRegister 触发 Prometheus duplicate collector panic。
 	if cfg.Task.ReconcileIntervalSeconds > 0 {
 		reconciler := task.NewReconciler(
-			w.TaskRepo, w.TaskQueue, w.TaskRepo, taskMetrics,
+			w.TaskRepo, w.TaskQueue, w.TaskRepo, w.TaskMetrics,
 			time.Duration(cfg.Task.ReconcileIntervalSeconds)*time.Second,
 			0, // grace 默认 60s
 			0, // batchSize 默认 100

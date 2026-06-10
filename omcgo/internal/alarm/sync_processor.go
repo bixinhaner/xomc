@@ -10,20 +10,22 @@ import (
 	"github.com/omcgo/omcgo/internal/alarm/definition"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/tracing"
 	"github.com/omcgo/omcgo/pkg/tr069"
+	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
 )
 
 // AlarmSyncProcessor subscribes to GPV response events, parses TR-069 alarm parameters,
 // computes a three-way diff against local active alarms, and applies changes.
 type AlarmSyncProcessor struct {
-	engine       *AlarmEngine
-	store        AlarmStore
-	syncService  *AlarmSyncService
-	eventBus     event.EventBus
-	logger       *zap.Logger
+	engine           *AlarmEngine
+	store            AlarmStore
+	syncService      *AlarmSyncService
+	eventBus         event.EventBus
+	logger           *zap.Logger
 	alarmDefRegistry *definition.Registry
-	deviceReader deviceReader
+	deviceReader     deviceReader
 }
 
 // NewAlarmSyncProcessor creates a new AlarmSyncProcessor.
@@ -135,6 +137,15 @@ func (p *AlarmSyncProcessor) handleGPVResponse(ctx context.Context, evt event.Ev
 
 // processSync executes the full sync pipeline: parse → diff → apply.
 func (p *AlarmSyncProcessor) processSync(ctx context.Context, deviceSN string, params []tr069.ParameterValueStruct) *SyncResult {
+	// issue #20：告警同步 diff-apply 整链补 span。一次 GPV 响应可能触发多条 add/update/
+	// clear，整体卡顿（store 慢 / 大批 diff）此前不可观测；逐条 engine.Process/ClearBySync
+	// 各自带子 span，在此根 span 下形成调用树，便于定位"告警同步迟迟不收敛"。
+	ctx, span := tracing.StartSpan(ctx, tracing.AlarmTracerName, "Alarm processSync",
+		attribute.String("alarm.device_sn", deviceSN),
+		attribute.Int("alarm.param_count", len(params)),
+	)
+	defer span.End()
+
 	result := &SyncResult{
 		DeviceSN: deviceSN,
 		SyncedAt: time.Now(),

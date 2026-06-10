@@ -32,6 +32,26 @@ type TaskMetrics struct {
 	//   - "sync_terminal"   MarkTaskCompleted/Failed PG.Update 失败 → PG 滞后于 Redis 终态
 	//   - "sync_sent"       MarkTaskSent PG.Update 失败 → PG 滞后于 Redis sent
 	DualWriteFailTotal *prometheus.CounterVec
+
+	// --- issue #20: 任务生命周期可观测 ---
+
+	// BacklogTotal 是周期扫描观测到的活跃态(pending/sent)任务积压绝对快照。
+	// 与 PendingTotal（增量计数，随 enqueue/complete 加减、可能因双写中断漂移）互补：
+	// 本指标由 Reconciler 每轮用 PG 实查的活跃任务数 Set，是不会漂移的权威背压信号。
+	// 持续走高说明派发跟不上入队（CPE 不上线 / Connection Request 失败 / 下发变慢）。
+	BacklogTotal prometheus.Gauge
+
+	// StaleDetectedTotal 记录检测到的"PG 活跃态 vs Redis 终态"分叉任务数（陈旧 PG 行）。
+	// 与 ReconcileTotal{repaired/repair_failed}（修复结果）区分：本指标按"检出即计"，
+	// 即便后续修复失败也先计入，反映分叉发生频率本身；持续 >0 说明双写 sync 路径
+	// 有非瞬态故障，是 reconcile 修复动作的上游信号。
+	StaleDetectedTotal prometheus.Counter
+
+	// RecoveryActionTotal 记录各类恢复动作执行次数，按 action 标签：
+	//   - "restore_pending"  worker 启动期 RestorePendingQueues 把 PG pending 重灌 Redis
+	//   - "reconcile_repair" Reconciler 把 PG 滞后态同步到 Redis 终态
+	// 让"系统自愈了多少次"可观测——平时应为 0/低频，突增说明上游有故障在被兜底掩盖。
+	RecoveryActionTotal *prometheus.CounterVec
 }
 
 // NewTaskMetrics creates and registers task metrics.
@@ -66,6 +86,18 @@ func NewTaskMetrics(reg prometheus.Registerer) *TaskMetrics {
 			Name: "task_dual_write_fail_total",
 			Help: "Redis↔PG dual-write interruptions (one side failed), by operation",
 		}, []string{"op"}),
+		BacklogTotal: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "omc_tasks_backlog_total",
+			Help: "Active (pending/sent) task backlog observed by the latest reconcile scan (authoritative snapshot, does not drift).",
+		}),
+		StaleDetectedTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "omc_tasks_stale_detected_total",
+			Help: "Tasks detected stale (PG active vs Redis terminal divergence), counted at detection regardless of repair outcome.",
+		}),
+		RecoveryActionTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "omc_tasks_recovery_action_total",
+			Help: "Self-healing recovery actions executed, by action (restore_pending/reconcile_repair).",
+		}, []string{"action"}),
 	}
 
 	reg.MustRegister(
@@ -76,6 +108,15 @@ func NewTaskMetrics(reg prometheus.Registerer) *TaskMetrics {
 		m.WakeDropped,
 		m.ReconcileTotal,
 		m.DualWriteFailTotal,
+		m.BacklogTotal,
+		m.StaleDetectedTotal,
+		m.RecoveryActionTotal,
 	)
 	return m
 }
+
+// Recovery action 标签常量，避免散落字符串。
+const (
+	RecoveryActionRestorePending  = "restore_pending"
+	RecoveryActionReconcileRepair = "reconcile_repair"
+)

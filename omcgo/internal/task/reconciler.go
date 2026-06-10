@@ -144,6 +144,12 @@ func (r *Reconciler) ReconcileOnce(ctx context.Context) (ReconcileStats, error) 
 	}
 
 	stats := ReconcileStats{Scanned: len(tasks)}
+	// issue #20：本轮观测到的活跃任务积压绝对快照（不漂移的权威背压信号）。
+	// 注意：受 grace + batchSize 限制，这是"超过 grace 仍活跃且本批可见"的下界，
+	// 足以驱动"积压持续走高"告警；精确全量统计成本更高，按需再加。
+	if r.metrics != nil {
+		r.metrics.BacklogTotal.Set(float64(len(tasks)))
+	}
 	for _, t := range tasks {
 		if t == nil {
 			continue
@@ -165,8 +171,14 @@ func (r *Reconciler) ReconcileOnce(ctx context.Context) (ReconcileStats, error) 
 			continue
 		}
 
-		// 分叉确认：PG 活跃态 vs Redis 终态。把 Redis 终态同步回 PG。
-		// 复制终态字段到 PG 侧对象后 Update —— 直接用 live（已是终态完整对象）回写。
+		// 分叉确认：PG 活跃态 vs Redis 终态。先按"检出即计"记 stale 指标
+		// （即便随后修复失败也已计入，反映分叉发生频率本身）。
+		if r.metrics != nil {
+			r.metrics.StaleDetectedTotal.Inc()
+		}
+
+		// 把 Redis 终态同步回 PG。复制终态字段到 PG 侧对象后 Update ——
+		// 直接用 live（已是终态完整对象）回写。
 		if err := r.repairer.Update(ctx, live); err != nil {
 			stats.RepairFailed++
 			if r.metrics != nil {
@@ -184,6 +196,7 @@ func (r *Reconciler) ReconcileOnce(ctx context.Context) (ReconcileStats, error) 
 		stats.Repaired++
 		if r.metrics != nil {
 			r.metrics.ReconcileTotal.WithLabelValues("repaired").Inc()
+			r.metrics.RecoveryActionTotal.WithLabelValues(RecoveryActionReconcileRepair).Inc()
 		}
 		r.logger.Info("reconcile: repaired pg state divergence",
 			zap.String("task_id", t.ID),

@@ -19,6 +19,10 @@ const (
 	ProvisionTracerName = "github.com/omcgo/omcgo/provision"
 	TaskTracerName      = "github.com/omcgo/omcgo/task"
 	MRTaskTracerName    = "github.com/omcgo/omcgo/mr/task"
+	// issue #20: 业务关键路径补 span —— PM 文件处理、告警增删、事件总线投递。
+	PMTracerName    = "github.com/omcgo/omcgo/pm"
+	AlarmTracerName = "github.com/omcgo/omcgo/alarm"
+	EventTracerName = "github.com/omcgo/omcgo/event"
 )
 
 // StartSpan creates a new span with the given tracer name, span name, and optional attributes.

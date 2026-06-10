@@ -5,11 +5,14 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/pm"
 )
 
 // T-0164 G1 BUG-6 真根因复盘 / 方案 D：filterByWhitelist 行为单测。
@@ -56,7 +59,7 @@ func TestFilterByWhitelist_DropsOrphans_RewritesToIndicatorID(t *testing.T) {
 		"RRC.AttConn":  {IndicatorID: "C000010002", StatisType: "sum"},
 	}})
 	in := sample("L.Cell.Avail", "MR.RIPPRB", "RRC.AttConn", "MR.RECEIVEDIPOWER")
-	out := c.filterByWhitelist(context.Background(), "SN-1", in)
+	out := c.filterByWhitelist(context.Background(), "SN-1", "cmcc", "lte", in)
 	// 命中后 CounterName 已是编号（不再是上报名）。
 	assert.ElementsMatch(t, []string{"C000010001", "C000010002"}, names(out))
 	statisByID := map[string]string{}
@@ -80,7 +83,7 @@ func TestFilterByWhitelist_MatchesByReportKeyNotEnName(t *testing.T) {
 		"E-RAB建立成功率(原始)": {IndicatorID: "C999999999", StatisType: "avg"},
 	}})
 	in := sample(reportKey) // PM 文件上报的是 report_key
-	out := c.filterByWhitelist(context.Background(), "SN-1", in)
+	out := c.filterByWhitelist(context.Background(), "SN-1", "cmcc", "lte", in)
 	require.Len(t, out, 1)
 	assert.Equal(t, "C000060216", out[0].CounterName, "应按 report_key 命中并改写为对应编号")
 	assert.Equal(t, "sum", out[0].StatisType)
@@ -92,7 +95,7 @@ func TestFilterByWhitelist_UnmatchedReportKey_Dropped(t *testing.T) {
 		"L.Cell.Avail": {IndicatorID: "C000010001", StatisType: "avg"},
 	}})
 	in := sample("L.Cell.Avail", "WILD.Counter")
-	out := c.filterByWhitelist(context.Background(), "SN-1", in)
+	out := c.filterByWhitelist(context.Background(), "SN-1", "cmcc", "lte", in)
 	require.Len(t, out, 1)
 	assert.Equal(t, "C000010001", out[0].CounterName)
 }
@@ -101,7 +104,7 @@ func TestFilterByWhitelist_UnmatchedReportKey_Dropped(t *testing.T) {
 func TestFilterByWhitelist_NilWhitelist_NoFilter(t *testing.T) {
 	c := collectorWithWhitelist(nil)
 	in := sample("anything", "MR.RIPPRB")
-	out := c.filterByWhitelist(context.Background(), "SN-1", in)
+	out := c.filterByWhitelist(context.Background(), "SN-1", "cmcc", "lte", in)
 	require.Len(t, out, 2)
 }
 
@@ -109,7 +112,7 @@ func TestFilterByWhitelist_NilWhitelist_NoFilter(t *testing.T) {
 func TestFilterByWhitelist_LookupError_NoFilter(t *testing.T) {
 	c := collectorWithWhitelist(&fakeWhitelist{err: errors.New("router orphan")})
 	in := sample("L.Cell.Avail", "MR.RIPPRB")
-	out := c.filterByWhitelist(context.Background(), "SN-1", in)
+	out := c.filterByWhitelist(context.Background(), "SN-1", "cmcc", "lte", in)
 	require.Len(t, out, 2, "lookup 失败必须 fail-open，避免误删全部")
 }
 
@@ -117,7 +120,7 @@ func TestFilterByWhitelist_LookupError_NoFilter(t *testing.T) {
 func TestFilterByWhitelist_EmptyWhitelist_NoFilter(t *testing.T) {
 	c := collectorWithWhitelist(&fakeWhitelist{set: map[string]CounterMeta{}})
 	in := sample("any", "thing")
-	out := c.filterByWhitelist(context.Background(), "SN-1", in)
+	out := c.filterByWhitelist(context.Background(), "SN-1", "cmcc", "lte", in)
 	require.Len(t, out, 2, "空白名单 fail-open，防止误删全部")
 }
 
@@ -125,7 +128,7 @@ func TestFilterByWhitelist_EmptyWhitelist_NoFilter(t *testing.T) {
 func TestFilterByWhitelist_EmptyCounters_Noop(t *testing.T) {
 	called := false
 	c := collectorWithWhitelist(&trackingWhitelist{onCall: func() { called = true }})
-	out := c.filterByWhitelist(context.Background(), "SN-1", nil)
+	out := c.filterByWhitelist(context.Background(), "SN-1", "cmcc", "lte", nil)
 	assert.Nil(t, out)
 	assert.False(t, called, "空 counters 不应触发 LookupCounters")
 }
@@ -145,10 +148,28 @@ func TestFilterByWhitelist_BUG6_BaicellsOrphans(t *testing.T) {
 	}
 	in = append(in, model.PMCounter{CounterName: "RRC.AttConnEstab", CellID: "Cell1"})
 
-	out := c.filterByWhitelist(context.Background(), "SN-1", in)
+	out := c.filterByWhitelist(context.Background(), "SN-1", "cmcc", "lte", in)
 	require.Len(t, out, 1)
 	// PM-P2：命中后 CounterName 已改写成编号。
 	assert.Equal(t, "C000010099", out[0].CounterName)
+}
+
+// issue #20：被丢弃的孤儿 counter 数应记入 omc_pm_dropped_counters_total
+// （reason=whitelist_miss），让"上报名漂移导致大批 counter 被静默丢弃"可告警。
+func TestFilterByWhitelist_DroppedCountersMetric(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	c := collectorWithWhitelist(&fakeWhitelist{set: map[string]CounterMeta{
+		"L.Cell.Avail": {IndicatorID: "C000010001", StatisType: "avg"},
+	}})
+	c.SetMetrics(pm.NewPMMetrics(reg))
+
+	// 命中 1 个，丢弃 2 个孤儿。
+	in := sample("L.Cell.Avail", "MR.RIPPRB", "MR.RECEIVEDIPOWER")
+	out := c.filterByWhitelist(context.Background(), "SN-1", "cmcc", "lte", in)
+	require.Len(t, out, 1)
+
+	got := testutil.ToFloat64(c.metrics.DroppedCountersTotal.WithLabelValues("cmcc", "lte", "whitelist_miss"))
+	assert.Equal(t, float64(2), got, "应记录 2 个被丢弃的孤儿 counter")
 }
 
 type trackingWhitelist struct {

@@ -201,7 +201,11 @@ func (inf *Infra) readinessCheckers() []healthpkg.Checker {
 // CreateEventBus 创建基于 NATS JetStream 的 EventBus，并注册优雅关机回调。
 // 必须在 ConnectNATS 之后调用，结果存入 Infra.EventBus。
 func (inf *Infra) CreateEventBus() {
-	inf.EventBus = event.NewNATSEventBus(inf.NATS.Conn, inf.NATS.JS, inf.Logger)
+	bus := event.NewNATSEventBus(inf.NATS.Conn, inf.NATS.JS, inf.Logger)
+	// issue #20：注入投递结果指标（ack/nak/terminated/dropped），让 max-retries 终止
+	// 与解析丢弃不再静默；所有进程（app/acs/worker）经此统一入口都自动带上。
+	bus.SetMetrics(event.NewEventBusMetrics(inf.MetricsReg))
+	inf.EventBus = bus
 	inf.GS.Register("eventbus", 2, func(ctx context.Context) error { return inf.EventBus.Close() })
 }
 

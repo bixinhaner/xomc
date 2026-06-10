@@ -12,10 +12,12 @@ import (
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/reliability/runner"
+	"github.com/omcgo/omcgo/internal/core/tracing"
 	"github.com/omcgo/omcgo/internal/pm"
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
+	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
 )
 
@@ -168,10 +170,20 @@ func (c *PMCollector) Subscribe(bus event.EventBus) error {
 func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) error {
 	startTime := time.Now()
 
+	// issue #20: 给 PM 文件处理热路径补 span，让 PM 处理慢/卡（下载、解析、批量入库、
+	// KPI 反算）在 trace 上可定位；tracing 全局 no-op 时零开销（StartSpan 安全）。
+	ctx, span := tracing.StartSpan(ctx, tracing.PMTracerName, "PM HandleFileReceived")
+	defer span.End()
+
 	var payload FileReceivedPayload
 	if err := evt.DecodePayload(&payload); err != nil {
+		tracing.RecordError(span, err)
 		return fmt.Errorf("decode payload: %w", err)
 	}
+	span.SetAttributes(
+		attribute.String("pm.device_sn", payload.DeviceSN),
+		attribute.String("pm.minio_path", payload.MinIOPath),
+	)
 	c.logger.Info("processing PM file",
 		zap.String("path", payload.MinIOPath),
 		zap.String("device_sn", payload.DeviceSN),
@@ -223,9 +235,11 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 			c.metrics.FilesProcessedTotal.WithLabelValues("failed").Inc()
 			c.metrics.ProcessingDurationSecs.Observe(time.Since(startTime).Seconds())
 		}
+		tracing.RecordError(span, err)
 		return fmt.Errorf("parse pm xml: %w", err)
 	}
 
+	span.SetAttributes(attribute.Int("pm.parsed_counters", len(content.Counters)))
 	c.logger.Info("parsed PM file", zap.Int("counters", len(content.Counters)))
 
 	// G4-Gap-1: 上报延迟 = ingest_time - end_time。仅在两值齐全且 end_time 非 zero 时记录；
@@ -244,7 +258,7 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 	// 厂家 PM 文件可能含未注册 counter（如 Baicells `MR.RIPPRB` × 53 PRB 索引把序号
 	// 编码在 measType.p 而不是 Name 里），落库会撞 pm_metrics 自然键。
 	// 过滤逻辑 fail-open：lookup 失败 / 空白名单时跳过过滤，保留原行为。
-	content.Counters = c.filterByWhitelist(ctx, payload.DeviceSN, content.Counters)
+	content.Counters = c.filterByWhitelist(ctx, payload.DeviceSN, payload.Carrier, payload.Technology, content.Counters)
 
 	if err := c.counterRepo.BatchInsert(ctx, content.Counters); err != nil {
 		// issue #14 迟到数据降级：补传命中 TimescaleDB 压缩 chunk（> compression 阈值）时
@@ -263,12 +277,14 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 				c.metrics.FilesProcessedTotal.WithLabelValues("late_arrival").Inc()
 				c.metrics.ProcessingDurationSecs.Observe(time.Since(startTime).Seconds())
 			}
+			span.SetAttributes(attribute.String("pm.outcome", "late_arrival"))
 			return nil
 		}
 		if c.metrics != nil {
 			c.metrics.FilesProcessedTotal.WithLabelValues("failed").Inc()
 			c.metrics.ProcessingDurationSecs.Observe(time.Since(startTime).Seconds())
 		}
+		tracing.RecordError(span, err)
 		return fmt.Errorf("batch insert counters: %w", err)
 	}
 
@@ -355,7 +371,11 @@ func applyPayloadIdentity(counters []model.PMCounter, oui, sn string) {
 
 // filterByWhitelist 用产品指标库白名单过滤 counter（T-0164 G1 BUG-6 方案 D）。
 // fail-open：whitelist 未注入 / 查询失败 / 空集合 → 返回原 counters 不过滤。
-func (c *PMCollector) filterByWhitelist(ctx context.Context, deviceSN string, counters []model.PMCounter) []model.PMCounter {
+//
+// issue #20：被丢弃的孤儿 counter 数除 log 外，额外记 omc_pm_dropped_counters_total
+// （reason=whitelist_miss，标签带 carrier × technology），让"厂家上报名漂移导致大批
+// counter 被静默丢弃"成为可告警的可观测信号，而非只在 worker 日志里翻 grep。
+func (c *PMCollector) filterByWhitelist(ctx context.Context, deviceSN, carrier, technology string, counters []model.PMCounter) []model.PMCounter {
 	if c.counterWhitelist == nil || len(counters) == 0 {
 		return counters
 	}
@@ -385,6 +405,9 @@ func (c *PMCollector) filterByWhitelist(ctx context.Context, deviceSN string, co
 		}
 	}
 	if dropped > 0 {
+		if c.metrics != nil {
+			c.metrics.DroppedCountersTotal.WithLabelValues(carrier, technology, "whitelist_miss").Add(float64(dropped))
+		}
 		c.logger.Info("filtered orphan counters not in indicator library",
 			zap.String("device_sn", deviceSN),
 			zap.Int("kept", len(kept)),

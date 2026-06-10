@@ -310,6 +310,16 @@ services:
         reservations:
           cpus: "0.5"
           memory: 384m
+    # issue #20: worker 进程经 components.Infra 在 metrics 端口(:9092)暴露
+    # /healthz(liveness,恒 200)与 /readyz(readiness,聚合 PG/TSDB/Redis/NATS/MinIO 依赖检查)。
+    # 用 /readyz 作容器健康判据：NATS 不可用 = 订阅器断连即 503,容器被标 unhealthy。
+    # start_period 给足启动期(字典加载 + 启动 catch-up 30s 缓冲)。
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9092/readyz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
     depends_on:
       migrate-seed:
         condition: service_completed_successfully

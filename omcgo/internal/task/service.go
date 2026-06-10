@@ -660,7 +660,13 @@ type taskEnqueuer interface {
 // 只处理 pending 状态：sent 状态任务已在 CPE 在途，重新入队会引起重复下发，
 // 由设备重连时的 RecoverPendingTasks 按 sent_at 陈旧阈值走正常恢复路径。
 func (s *TaskService) RestorePendingQueues(ctx context.Context, limit int) (RestoreStats, error) {
-	return restorePendingQueues(ctx, s.repo, s.queue, s.logger, limit)
+	stats, err := restorePendingQueues(ctx, s.repo, s.queue, s.logger, limit)
+	// issue #20：把启动期实际重灌进 Redis 的 pending 任务数记为 recovery 动作。
+	// 突增说明上一次停机时有大量 pending 未被消费 / 双写漂移被此处兜底。
+	if s.metrics != nil && stats.Pushed > 0 {
+		s.metrics.RecoveryActionTotal.WithLabelValues(RecoveryActionRestorePending).Add(float64(stats.Pushed))
+	}
+	return stats, err
 }
 
 // restorePendingQueues 是 RestorePendingQueues 的可测试实现，接受小接口。
