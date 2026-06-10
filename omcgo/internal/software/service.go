@@ -3,6 +3,7 @@ package software
 import (
 	"context"
 	"crypto/md5"
+	"crypto/sha256"
 	"encoding/hex"
 	stderrors "errors"
 	"fmt"
@@ -93,6 +94,21 @@ func (s *SoftwareService) SetRollbackMetrics(m *RollbackMetrics) {
 	s.rollbackMetrics = m
 }
 
+// SetFirmwareVerifier 注入固件下发前的完整性 / 签名校验器（issue #8），透传给 executor。
+// 传 nil 退化为默认 HashOnlyVerifier，校验永不被绕过。
+func (s *SoftwareService) SetFirmwareVerifier(v FirmwareVerifier) {
+	if s.executor != nil {
+		s.executor.SetFirmwareVerifier(v)
+	}
+}
+
+// SetFirmwareMetrics 注入固件校验 Prometheus 指标（issue #8），透传给 executor（nil-safe）。
+func (s *SoftwareService) SetFirmwareMetrics(m *FirmwareMetrics) {
+	if s.executor != nil {
+		s.executor.SetFirmwareMetrics(m)
+	}
+}
+
 // NewSoftwareService creates a new SoftwareService.
 func NewSoftwareService(
 	firmwareRepo FirmwareRepository,
@@ -147,8 +163,11 @@ func (s *SoftwareService) UploadFirmware(ctx context.Context, fw *FirmwareVersio
 	}
 	objectPath := storage.FirmwarePath(category, fw.ProductClass, fw.Version, fw.FileName)
 
-	hash := md5.New()
-	teeReader := io.TeeReader(file, hash)
+	// 单次串流同时算 MD5（向后兼容旧列）与 SHA-256（issue #8 新完整性根）。
+	// io.MultiWriter 让 TeeReader 把字节同时喂给两个 hasher，避免二次读文件。
+	md5Hash := md5.New()
+	sha256Hash := sha256.New()
+	teeReader := io.TeeReader(file, io.MultiWriter(md5Hash, sha256Hash))
 
 	_, err := s.minioClient.PutObject(ctx, s.firmwareBkt, objectPath, teeReader, fileSize, minio.PutObjectOptions{
 		ContentType: "application/octet-stream",
@@ -159,7 +178,8 @@ func (s *SoftwareService) UploadFirmware(ctx context.Context, fw *FirmwareVersio
 
 	fw.MinIOPath = objectPath
 	fw.FileSize = fileSize
-	fw.MD5Val = hex.EncodeToString(hash.Sum(nil))
+	fw.MD5Val = hex.EncodeToString(md5Hash.Sum(nil))
+	fw.SHA256Val = hex.EncodeToString(sha256Hash.Sum(nil))
 	if fw.Status == "" {
 		fw.Status = "active"
 	}

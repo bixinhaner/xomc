@@ -533,6 +533,11 @@ type UpgradeConfig struct {
 	// Upload RPC 参数中的目标 URL 构造。示例：http://localhost:8080
 	// 若为空，日志采集任务的 Upload RPC 将缺少目标 URL，设备将无法上传文件。
 	ACSUploadBaseURL string `mapstructure:"acs_upload_base_url"`
+	// RequireFirmwareSignature 控制固件下发前是否强制要求厂商签名（issue #8）。
+	// 默认 false：仅对"带签名"的固件强制验签，未签名固件放行（向后兼容现网存量未签名
+	// 固件，不破坏 happy-path）。置 true：未签名固件直接拒绝下发——待厂商签名供应链
+	// 全量铺开后再切换。完整性校验（SHA-256 / MD5 回退）始终强制，不受本开关影响。
+	RequireFirmwareSignature bool `mapstructure:"require_firmware_signature"`
 }
 
 // TopologyConfig 配置拓扑管理模块（F06）的设备同步行为。

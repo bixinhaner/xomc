@@ -125,6 +125,10 @@ upgrade:
   # 需与 ACS 服务 upload.base_url 一致（CPE 可访问的地址）。
   # Docker 环境通常通过 nginx 网关代理，配置网关地址；本地开发配置本机地址。
   acs_upload_base_url: "http://localhost:8080"
+  # 固件下发前是否强制要求厂商签名（issue #8）。默认 false：仅对带签名固件验签，
+  # 未签名固件放行（向后兼容现网存量未签名固件）。置 true：未签名固件直接拒绝下发，
+  # 待厂商签名供应链全量铺开后再切换。完整性校验（SHA-256 / MD5 回退）始终强制，与本开关无关。
+  require_firmware_signature: false
 
 # Task 默认行为（T-0157 C1 引入）。
 # default_expires_in_seconds：CreateTask 调用方未显式传 ExpiresIn 时使用的默认超时秒数。

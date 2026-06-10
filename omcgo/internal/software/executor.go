@@ -45,6 +45,12 @@ type UpgradeExecutor struct {
 	// 日志采集（如 FAULT_LOG_COLLECT）下发 paramName 前必须翻译，否则不同
 	// param_model 的设备会拒收。nil 退化为 passthrough。
 	pathTranslator ParamPathTranslator
+	// verifier 在固件 Download 下发前做完整性 / 签名校验（issue #8）。构造期默认
+	// HashOnlyVerifier（强制固件具备 SHA-256 或回退 MD5 的完整性根）；DI 可经
+	// SetFirmwareVerifier 换成 SignatureVerifier 叠加厂商验签。永不为 nil。
+	verifier FirmwareVerifier
+	// firmwareMetrics 记录校验 pass/fail/legacy_md5；nil-safe。
+	firmwareMetrics *FirmwareMetrics
 }
 
 // LogCollectResumer 接口承载 LogCollect 类子任务"设备上线即重试"的能力。
@@ -153,8 +159,24 @@ func NewUpgradeExecutor(
 		redis:        redisClient,
 		eventBus:     eventBus,
 		adapter:      NewDefaultUpgradeAdapter(),
-		logger:       logger.Named("upgrade-executor"),
+		// 默认强制完整性校验（issue #8）；DI 可经 SetFirmwareVerifier 升级为带签名校验。
+		verifier: NewHashOnlyVerifier(),
+		logger:   logger.Named("upgrade-executor"),
 	}
+}
+
+// SetFirmwareVerifier 替换固件下发前的完整性 / 签名校验器（issue #8）。
+// 传 nil 退化为默认 HashOnlyVerifier，保证 verifier 永不为空、校验永不被绕过。
+func (e *UpgradeExecutor) SetFirmwareVerifier(v FirmwareVerifier) {
+	if v == nil {
+		v = NewHashOnlyVerifier()
+	}
+	e.verifier = v
+}
+
+// SetFirmwareMetrics 注入固件校验 Prometheus 指标（nil-safe）。
+func (e *UpgradeExecutor) SetFirmwareMetrics(m *FirmwareMetrics) {
+	e.firmwareMetrics = m
 }
 
 // ExecuteOne runs the upgrade flow for a single sub-task.
@@ -163,6 +185,13 @@ func (e *UpgradeExecutor) ExecuteOne(ctx context.Context, subTask *UpgradeSubTas
 	dev, err := e.deviceRepo.GetByID(ctx, subTask.DeviceID)
 	if err != nil {
 		e.failSubTask(ctx, subTask, "Upgrade can not be started, device not found.", FailureDeviceNotFound)
+		return
+	}
+
+	// Step 0: 固件完整性 / 签名校验（issue #8）——必须在派发 Download 命令之前。
+	// 校验失败绝不静默放行：标 sub_task 失败 + 记 metric + 打日志，不下发。
+	// 放在锁 / 命令推送之前，失败时无需释放任何已占资源。
+	if err := e.verifyFirmware(subTask, fw, dev.SerialNumber); err != nil {
 		return
 	}
 
@@ -655,8 +684,8 @@ func (e *UpgradeExecutor) ExecuteOneSetParamCollect(ctx context.Context, subTask
 	// {sn} 用设备序列号。{fileName} 留空让设备自己决定上传名（与现网 Upload 链路一致）。
 	uploadBaseURL := e.resolveUploadBaseURL(ctx)
 	resolvedPath := resolveTemplate(transportPath, map[string]string{
-		"id":  subTask.TaskID.String(),
-		"sn":  dev.SerialNumber,
+		"id": subTask.TaskID.String(),
+		"sn": dev.SerialNumber,
 	})
 	if uploadBaseURL == "" {
 		e.logger.Warn("upload base URL is empty for set-param collect; CPE will receive path-only URL and likely reject",
@@ -1134,6 +1163,7 @@ func extractParamValue(params []map[string]interface{}, nameSuffix string) strin
 //   - device.inform.periodic（ACS publish）→ `device_id.SerialNumber` 嵌套对象
 //   - device.online（device 模块 publish）→ 顶层 `serial_number`
 //   - 旧 / 测试代码 → 顶层 `device_sn`
+//
 // 详见 docs/project/backup-display-fix-20260520.md F12。
 func (e *UpgradeExecutor) HandleDeviceOnline(ctx context.Context, evt event.Event) error {
 	var payload struct {
@@ -1258,6 +1288,52 @@ func (e *UpgradeExecutor) acquireDeviceLock(ctx context.Context, deviceSN string
 func (e *UpgradeExecutor) releaseDeviceLock(ctx context.Context, deviceSN string) {
 	key := fmt.Sprintf("software:upgrade:active:%s", deviceSN)
 	e.redis.Del(ctx, key)
+}
+
+// verifyFirmware 在 Download 下发前对固件做完整性 / 签名校验（issue #8）。
+// 通过 → 返回 nil（顺带记 pass / legacy_md5 指标 + 降级 warn）；失败 → 标 sub_task
+// 失败 + 记 fail 指标 + error 日志并返回非 nil，调用方据此中止下发，绝不静默放行。
+func (e *UpgradeExecutor) verifyFirmware(subTask *UpgradeSubTask, fw *FirmwareVersion, deviceSN string) error {
+	v := e.verifier
+	if v == nil {
+		// 防御：构造期已默认 HashOnlyVerifier，理论上不为 nil。兜底避免校验被绕过。
+		v = NewHashOnlyVerifier()
+	}
+	if err := v.Verify(fw); err != nil {
+		code := VerificationFailureCode(err)
+		e.firmwareMetrics.RecordFail(code)
+		fwID := ""
+		fwVersion := ""
+		if fw != nil {
+			fwID = fw.ID.String()
+			fwVersion = fw.Version
+		}
+		e.logger.Error("firmware verification failed, aborting download dispatch",
+			zap.String("sub_task_id", subTask.ID.String()),
+			zap.String("device_sn", deviceSN),
+			zap.String("firmware_id", fwID),
+			zap.String("firmware_version", fwVersion),
+			zap.String("failure_code", string(code)),
+			zap.Error(err))
+		e.failSubTask(context.Background(), subTask,
+			fmt.Sprintf("Upgrade can not be started, firmware verification failed: %v", err), code)
+		return err
+	}
+
+	legacy := IsLegacyMD5Only(fw)
+	e.firmwareMetrics.RecordPass(legacy)
+	if legacy {
+		// 仅 MD5 的存量固件：放行但提示运营尽快补 SHA-256 / 重新上传。
+		fwID := ""
+		if fw != nil {
+			fwID = fw.ID.String()
+		}
+		e.logger.Warn("firmware passed verification on legacy MD5 fallback (no sha256); consider re-uploading to compute sha256",
+			zap.String("sub_task_id", subTask.ID.String()),
+			zap.String("device_sn", deviceSN),
+			zap.String("firmware_id", fwID))
+	}
+	return nil
 }
 
 func (e *UpgradeExecutor) failSubTask(ctx context.Context, subTask *UpgradeSubTask, reason string, code FailureCode) {

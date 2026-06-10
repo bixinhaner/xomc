@@ -310,6 +310,17 @@ func initSoftwareModule(c *Container) error {
 	// so the auto-rollback path emits counters on first fire.
 	rollbackMetrics := software.NewRollbackMetrics(c.MetricsReg)
 	softwareService.SetRollbackMetrics(rollbackMetrics)
+
+	// 固件下发前完整性 / 签名校验（issue #8）。完整性校验（SHA-256，存量回退 MD5）始终
+	// 强制；签名校验为脚手架：仅对带签名固件验签，是否对未签名固件硬拒由
+	// upgrade.require_firmware_signature 控制（默认 false，不破坏现网未签名固件 happy-path）。
+	// verifyFn 暂传 nil（厂商 PKI / 公钥装载 / 密钥轮换 / 吊销是独立子系统，尚未落地）——
+	// 此情形下带签名固件会被拒绝下发（不假装验过），未签名固件按上述开关处理。
+	firmwareMetrics := software.NewFirmwareMetrics(c.MetricsReg)
+	softwareService.SetFirmwareMetrics(firmwareMetrics)
+	softwareService.SetFirmwareVerifier(
+		software.NewSignatureVerifier(software.NewHashOnlyVerifier(), c.Cfg.Upgrade.RequireFirmwareSignature, nil),
+	)
 	canaryMonitor := software.NewCanaryMonitor(taskRepo, canaryMetrics, logger)
 	// Wire SoftwareService as the auto-rollback trigger. Default RollbackOnFailure
 	// is false; the trigger only fires when a canary task explicitly opted in.

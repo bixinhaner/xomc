@@ -21,6 +21,8 @@ var firmwareColumns = []string{
 	"file_type", "minio_path", "compatible_oui", "md5_val", "recommend",
 	"uploader", "manufacturer", "release_notes", "description", "status",
 	"created_at", "updated_at",
+	// issue #8: SHA-256 完整性摘要 + 厂商签名脚手架列（均可空，存量旧行为 NULL）。
+	"sha256_val", "signature", "signature_alg", "public_key_id",
 }
 
 var _ FirmwareRepository = (*PgFirmwareRepository)(nil)
@@ -39,6 +41,7 @@ func scanFirmware(row pgx.Row) (*FirmwareVersion, error) {
 	var fw FirmwareVersion
 	var ouiJSON []byte
 	var md5Val, uploader, manufacturer, description sqlNilString
+	var sha256Val, signature, signatureAlg, publicKeyID sqlNilString
 	var recommend sqlNilBool
 	var createdAt, updatedAt time.Time
 
@@ -48,6 +51,7 @@ func scanFirmware(row pgx.Row) (*FirmwareVersion, error) {
 		&ouiJSON, &md5Val, &recommend, &uploader,
 		&manufacturer, &fw.ReleaseNotes, &description, &fw.Status,
 		&createdAt, &updatedAt,
+		&sha256Val, &signature, &signatureAlg, &publicKeyID,
 	)
 	if err != nil {
 		return nil, err
@@ -56,6 +60,10 @@ func scanFirmware(row pgx.Row) (*FirmwareVersion, error) {
 		_ = json.Unmarshal(ouiJSON, &fw.CompatibleOUI)
 	}
 	fw.MD5Val = md5Val.string
+	fw.SHA256Val = sha256Val.string
+	fw.Signature = signature.string
+	fw.SignatureAlg = signatureAlg.string
+	fw.PublicKeyID = publicKeyID.string
 	fw.Recommend = recommend.bool
 	fw.Uploader = uploader.string
 	fw.Manufacturer = manufacturer.string
@@ -71,10 +79,15 @@ func (r *PgFirmwareRepository) Create(ctx context.Context, fw *FirmwareVersion) 
 	query, args, err := storage.Psql.Insert("firmware_versions").
 		Columns("product_class", "version", "file_name", "file_size",
 			"file_type", "minio_path", "compatible_oui", "md5_val", "recommend",
-			"uploader", "manufacturer", "release_notes", "description", "status").
+			"uploader", "manufacturer", "release_notes", "description", "status",
+			"sha256_val", "signature", "signature_alg", "public_key_id").
 		Values(fw.ProductClass, fw.Version, fw.FileName, fw.FileSize,
 			fw.FileType, fw.MinIOPath, ouiJSON, fw.MD5Val, fw.Recommend,
-			fw.Uploader, fw.Manufacturer, fw.ReleaseNotes, fw.Description, fw.Status).
+			fw.Uploader, fw.Manufacturer, fw.ReleaseNotes, fw.Description, fw.Status,
+			// 空字符串落 NULL：保持"无可用 SHA-256 / 无签名"语义清晰，
+			// 校验侧据 NULL 决定是否回退 MD5 / 跳过验签。
+			emptyToNil(fw.SHA256Val), emptyToNil(fw.Signature),
+			emptyToNil(fw.SignatureAlg), emptyToNil(fw.PublicKeyID)).
 		Suffix("RETURNING " + joinColumns(firmwareColumns)).
 		ToSql()
 	if err != nil {
@@ -230,6 +243,7 @@ func scanFirmwareRow(rows pgx.Rows) (*FirmwareVersion, error) {
 	var fw FirmwareVersion
 	var ouiJSON []byte
 	var md5Val, uploader, manufacturer, description sqlNilString
+	var sha256Val, signature, signatureAlg, publicKeyID sqlNilString
 	var recommend sqlNilBool
 	var createdAt, updatedAt time.Time
 
@@ -239,6 +253,7 @@ func scanFirmwareRow(rows pgx.Rows) (*FirmwareVersion, error) {
 		&ouiJSON, &md5Val, &recommend, &uploader,
 		&manufacturer, &fw.ReleaseNotes, &description, &fw.Status,
 		&createdAt, &updatedAt,
+		&sha256Val, &signature, &signatureAlg, &publicKeyID,
 	)
 	if err != nil {
 		return nil, err
@@ -247,6 +262,10 @@ func scanFirmwareRow(rows pgx.Rows) (*FirmwareVersion, error) {
 		_ = json.Unmarshal(ouiJSON, &fw.CompatibleOUI)
 	}
 	fw.MD5Val = md5Val.string
+	fw.SHA256Val = sha256Val.string
+	fw.Signature = signature.string
+	fw.SignatureAlg = signatureAlg.string
+	fw.PublicKeyID = publicKeyID.string
 	fw.Recommend = recommend.bool
 	fw.Uploader = uploader.string
 	fw.Manufacturer = manufacturer.string
@@ -254,6 +273,17 @@ func scanFirmwareRow(rows pgx.Rows) (*FirmwareVersion, error) {
 	fw.CreatedAt = JSONTime(createdAt)
 	fw.UpdatedAt = JSONTime(updatedAt)
 	return &fw, nil
+}
+
+// emptyToNil maps an empty string to a nil *string so the column is stored as
+// SQL NULL rather than an empty string. Used for the nullable integrity /
+// signature columns (issue #8) where NULL carries the "absent" meaning the
+// verifier relies on.
+func emptyToNil(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
 
 func joinColumns(cols []string) string {

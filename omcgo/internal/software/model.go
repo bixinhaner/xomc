@@ -56,6 +56,10 @@ const (
 	// Stage: command push
 	FailureCommandPush FailureCode = "COMMAND_PUSH_FAILED" // system — failed to enqueue Download command
 
+	// Stage: integrity / signature verification (issue #8) — runs before Download dispatch
+	FailureIntegrityCheck FailureCode = "INTEGRITY_CHECK_FAILED" // system — firmware lacks a usable integrity hash
+	FailureSignatureCheck FailureCode = "SIGNATURE_CHECK_FAILED" // system — vendor signature verification failed
+
 	// Stage: download
 	FailureDownloadTimeout FailureCode = "DOWNLOAD_TIMEOUT"    // timeout — download progress timed out
 	FailureDownloadFile    FailureCode = "DOWNLOAD_FILE_ERROR" // system — firmware file not found
@@ -97,9 +101,10 @@ const (
 )
 
 // CreateStatus 标记任务的"创建意图"，与 TaskStatus 正交：
-//   · CreateStatusActive  — 立即执行 / 挂起待手动 Resume（旧默认）
-//   · CreateStatusSuspend — 保留位，未使用
-//   · CreateStatusTiming  — 定时执行；调度器到点把 status pending → in_progress
+//
+//	· CreateStatusActive  — 立即执行 / 挂起待手动 Resume（旧默认）
+//	· CreateStatusSuspend — 保留位，未使用
+//	· CreateStatusTiming  — 定时执行；调度器到点把 status pending → in_progress
 //
 // 三态决策表（status × create_status × scheduled_at）：
 //
@@ -131,23 +136,33 @@ const (
 
 // FirmwareVersion represents a firmware image stored in MinIO.
 type FirmwareVersion struct {
-	ID            uuid.UUID  `json:"id"`
-	ProductClass  string     `json:"product_class"`
-	Version       string     `json:"version"`
-	FileName      string     `json:"file_name"`
-	FileSize      int64      `json:"file_size"`
-	FileType      FileType   `json:"file_type"`
-	MinIOPath     string     `json:"minio_path"`
-	CompatibleOUI []string   `json:"compatible_oui"`
-	MD5Val        string     `json:"md5_val"`
-	Recommend     bool       `json:"recommend"`
-	Uploader      string     `json:"uploader"`
-	Manufacturer  string     `json:"manufacturer"`
-	ReleaseNotes  string     `json:"release_notes"`
-	Description   string     `json:"description"`
-	Status        string     `json:"status"`
-	CreatedAt     model.Time `json:"created_at"`
-	UpdatedAt     model.Time `json:"updated_at"`
+	ID            uuid.UUID `json:"id"`
+	ProductClass  string    `json:"product_class"`
+	Version       string    `json:"version"`
+	FileName      string    `json:"file_name"`
+	FileSize      int64     `json:"file_size"`
+	FileType      FileType  `json:"file_type"`
+	MinIOPath     string    `json:"minio_path"`
+	CompatibleOUI []string  `json:"compatible_oui"`
+	MD5Val        string    `json:"md5_val"`
+	// SHA256Val 是上传时计算的 SHA-256 完整性摘要（hex）。新上传必填；存量旧行为空，
+	// 校验时回退到 MD5Val（见 verifier.go HashOnlyVerifier）。
+	SHA256Val string `json:"sha256_val,omitempty"`
+	// Signature 是厂商对固件的数字签名（base64）。可空：空 = 无签名固件，验签跳过
+	// （向后兼容现网未签名固件）。非空时由 SignatureVerifier 在下发前强制校验。
+	Signature string `json:"signature,omitempty"`
+	// SignatureAlg 标识 Signature 的签名算法（如 rsa-pss-sha256）。仅 Signature 非空时有意义。
+	SignatureAlg string `json:"signature_alg,omitempty"`
+	// PublicKeyID 标识验签所用厂商公钥（key id / 指纹），便于密钥轮换与吊销时定位公钥。
+	PublicKeyID  string     `json:"public_key_id,omitempty"`
+	Recommend    bool       `json:"recommend"`
+	Uploader     string     `json:"uploader"`
+	Manufacturer string     `json:"manufacturer"`
+	ReleaseNotes string     `json:"release_notes"`
+	Description  string     `json:"description"`
+	Status       string     `json:"status"`
+	CreatedAt    model.Time `json:"created_at"`
+	UpdatedAt    model.Time `json:"updated_at"`
 }
 
 // UpgradeTask represents a main upgrade task (upgrade_tasks table).
