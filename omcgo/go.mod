@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/Masterminds/squirrel v1.5.4
-	github.com/alicebob/miniredis/v2 v2.37.0
+	github.com/alicebob/miniredis/v2 v2.38.0
 	github.com/beevik/etree v1.6.0
 	github.com/casbin/casbin/v2 v2.135.0
 	github.com/doug-martin/goqu/v9 v9.19.0
