@@ -195,6 +195,74 @@ func TestStore_NilRedis(t *testing.T) {
 	assert.NotNil(t, got)
 }
 
+func TestStore_MaxEntries_RejectsNewSerialWhenFull(t *testing.T) {
+	store, _ := newTestStore(t)
+	ctx := context.Background()
+	store.SetMaxEntries(2)
+
+	require.NoError(t, store.Set(ctx, "A", &StunInfo{IP: "1.1.1.1", Port: 1, UpdatedAt: time.Now()}))
+	require.NoError(t, store.Set(ctx, "B", &StunInfo{IP: "2.2.2.2", Port: 2, UpdatedAt: time.Now()}))
+
+	// A third distinct serial must be rejected (backpressure, not unbounded growth).
+	err := store.Set(ctx, "C", &StunInfo{IP: "3.3.3.3", Port: 3, UpdatedAt: time.Now()})
+	require.ErrorIs(t, err, ErrStoreFull)
+	assert.Equal(t, 2, store.Size())
+
+	got, _ := store.Get(ctx, "C")
+	assert.Nil(t, got, "rejected serial must not be stored in L1")
+}
+
+func TestStore_MaxEntries_KnownSerialAlwaysRefreshes(t *testing.T) {
+	store, _ := newTestStore(t)
+	ctx := context.Background()
+	store.SetMaxEntries(1)
+
+	require.NoError(t, store.Set(ctx, "A", &StunInfo{IP: "1.1.1.1", Port: 1, UpdatedAt: time.Now()}))
+	// Updating the same serial at capacity must succeed (steady state not blocked).
+	require.NoError(t, store.Set(ctx, "A", &StunInfo{IP: "9.9.9.9", Port: 9, UpdatedAt: time.Now()}))
+
+	got, _ := store.Get(ctx, "A")
+	require.NotNil(t, got)
+	assert.Equal(t, "9.9.9.9", got.IP)
+}
+
+func TestStore_MaxEntries_EvictsExpiredToMakeRoom(t *testing.T) {
+	store, _ := newTestStore(t)
+	ctx := context.Background()
+	store.SetTTL(1 * time.Second)
+	store.SetMaxEntries(2)
+
+	// Fill with one expired + one fresh entry.
+	require.NoError(t, store.Set(ctx, "OLD", &StunInfo{IP: "1.1.1.1", Port: 1, UpdatedAt: time.Now().Add(-2 * time.Second)}))
+	require.NoError(t, store.Set(ctx, "FRESH", &StunInfo{IP: "2.2.2.2", Port: 2, UpdatedAt: time.Now()}))
+
+	// New serial at capacity: inline eviction of the expired OLD entry makes
+	// room → succeeds. Size (L1) stays at the cap.
+	require.NoError(t, store.Set(ctx, "NEW", &StunInfo{IP: "3.3.3.3", Port: 3, UpdatedAt: time.Now()}))
+	assert.Equal(t, 2, store.Size())
+
+	// OLD must be gone from L1 (eviction is L1-only; L2/Redis entries expire via
+	// their own TTL, so we assert on the in-process map directly, not Get()).
+	store.mu.RLock()
+	_, oldInL1 := store.local["OLD"]
+	_, newInL1 := store.local["NEW"]
+	store.mu.RUnlock()
+	assert.False(t, oldInL1, "expired entry should have been evicted from L1")
+	assert.True(t, newInL1, "new entry should be present in L1")
+}
+
+func TestStore_MaxEntries_ZeroDisablesCap(t *testing.T) {
+	store, _ := newTestStore(t)
+	ctx := context.Background()
+	store.SetMaxEntries(0) // unlimited
+
+	for i := 0; i < 5; i++ {
+		require.NoError(t, store.Set(ctx, string(rune('A'+i)),
+			&StunInfo{IP: "1.1.1.1", Port: i, UpdatedAt: time.Now()}))
+	}
+	assert.Equal(t, 5, store.Size())
+}
+
 func TestStunInfo_UDPAddr(t *testing.T) {
 	info := &StunInfo{IP: "10.0.0.1", Port: 3478}
 	addr := info.UDPAddr()

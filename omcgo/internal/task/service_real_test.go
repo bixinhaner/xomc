@@ -42,6 +42,67 @@ func TestService_NewTaskService(t *testing.T) {
 	assert.NotNil(t, svc.logger)
 }
 
+// TestService_CreateTask_QueueFull_Backpressure：每设备 pending 队列达到深度上限时，
+// CreateTask 应在落库前返回 ErrQueueFull（背压，issue #7），且不触达 repo（此处 repo=nil，
+// 若误触达会 panic，反向证明拒绝发生在 repo 之前）。
+func TestService_CreateTask_QueueFull_Backpressure(t *testing.T) {
+	svc, _, q := newServiceWithMiniRedis(t)
+	ctx := context.Background()
+	const sn = "SN-FLOOD"
+
+	svc.SetMaxQueueDepth(3)
+
+	// 预填队列到上限（直接 Push，绕过 CreateTask）。
+	for i := 0; i < 3; i++ {
+		task := NewTask(makeReq(sn, "GetParameterValues"))
+		require.NoError(t, q.Push(ctx, task))
+	}
+
+	depth, err := q.Len(ctx, sn)
+	require.NoError(t, err)
+	require.Equal(t, int64(3), depth)
+
+	// 第 4 个必须被拒绝。
+	got, err := svc.CreateTask(ctx, makeReq(sn, "GetParameterValues"))
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrQueueFull)
+	assert.Nil(t, got)
+
+	// 队列深度不变（拒绝未入队）。
+	depth, err = q.Len(ctx, sn)
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), depth)
+}
+
+// TestService_CreateTask_QueueFull_OtherDeviceUnaffected：上限是按设备隔离的，
+// 一个设备占满不应影响另一个设备。
+func TestService_CreateTask_QueueFull_OtherDeviceUnaffected(t *testing.T) {
+	svc, _, q := newServiceWithMiniRedis(t)
+	ctx := context.Background()
+	svc.SetMaxQueueDepth(1)
+
+	require.NoError(t, q.Push(ctx, NewTask(makeReq("SN-A", "GetParameterValues"))))
+
+	// SN-A 已满 → 拒绝。
+	_, err := svc.CreateTask(ctx, makeReq("SN-A", "GetParameterValues"))
+	assert.ErrorIs(t, err, ErrQueueFull)
+
+	// SN-B 队列为空 → 深度检查应通过（此处 repo=nil，通过后会在 repo.Create 处 panic，
+	// 故用 recover 断言"确实越过了深度检查"）。
+	depthB, err := q.Len(ctx, "SN-B")
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), depthB, "SN-B 队列不受 SN-A 占满影响")
+}
+
+func TestService_SetMaxQueueDepth_ClampsNegative(t *testing.T) {
+	svc := NewTaskService(nil, nil, zap.NewNop())
+	svc.SetMaxQueueDepth(-5)
+	assert.Equal(t, 0, svc.maxQueueDepth, "负值收敛为 0（禁用上限）")
+
+	svc.SetMaxQueueDepth(50)
+	assert.Equal(t, 50, svc.maxQueueDepth)
+}
+
 func TestService_SettersAndGetters(t *testing.T) {
 	svc := NewTaskService(nil, nil, zap.NewNop())
 

@@ -3,6 +3,7 @@ package task
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -12,6 +13,19 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
 )
+
+// ErrQueueFull is returned by CreateTask when a device's pending-task queue has
+// reached its configured depth cap. It is a backpressure signal (issue #7): an
+// untrusted / offline device must not let its queue grow without bound and
+// exhaust Redis/PostgreSQL. Callers should surface this as a 429-style refusal,
+// not a 500.
+var ErrQueueFull = errors.New("device task queue at capacity")
+
+// defaultMaxQueueDepth caps the number of pending tasks per device. It is
+// generous enough for legitimate batch operations (sweep / template apply) yet
+// bounds runaway growth toward an unreachable device. 0 (unset) disables the
+// cap; production wiring sets it via SetMaxQueueDepth.
+const defaultMaxQueueDepth = 1000
 
 // DeviceLookup retrieves a device's Connection Request URL by serial number.
 type DeviceLookup interface {
@@ -51,6 +65,10 @@ type TaskService struct {
 	// repo.Create / queue.Push 失败时调用，让消息中心 100% 覆盖用户操作。
 	// nil = 未注入（如 acs/worker 进程不调 CreateTask，无需注入）。
 	createFailureNotifier CreateFailureNotifier
+
+	// maxQueueDepth: issue #7 — 每设备 pending 队列深度上限（背压）。
+	// 0 表示不限制（向后兼容历史行为）；生产由 SetMaxQueueDepth 注入。
+	maxQueueDepth int
 }
 
 // CreateFailureNotifier 在 CreateTask 入队失败时被调用，把失败信息写入消息中心。
@@ -61,9 +79,10 @@ type CreateFailureNotifier func(ctx context.Context, task *Task, errMsg string)
 // NewTaskService 创建任务服务
 func NewTaskService(queue *RedisTaskQueue, repo *PgTaskRepository, log *zap.Logger) *TaskService {
 	return &TaskService{
-		queue:  queue,
-		repo:   repo,
-		logger: log,
+		queue:         queue,
+		repo:          repo,
+		logger:        log,
+		maxQueueDepth: defaultMaxQueueDepth, // issue #7: 默认开启每设备队列背压，可经 SetMaxQueueDepth 调整
 	}
 }
 
@@ -124,6 +143,15 @@ func (s *TaskService) SetCreateFailureNotifier(fn CreateFailureNotifier) {
 	s.createFailureNotifier = fn
 }
 
+// SetMaxQueueDepth 配置每设备 pending 队列深度上限（issue #7 背压）。
+// n <= 0 表示禁用上限（向后兼容历史行为）。命中上限时 CreateTask 返回 ErrQueueFull。
+func (s *TaskService) SetMaxQueueDepth(n int) {
+	if n < 0 {
+		n = 0
+	}
+	s.maxQueueDepth = n
+}
+
 // SetDefaultExpiresIn 配置 CreateTask 的默认超时兜底秒数（T-0157 C1）。
 // 仅当 CreateTaskRequest.ExpiresIn == 0 时生效；调用方显式传 0 等价于声明"永不超时"
 // 但本兜底仍会覆盖（如需真正永不超时，调用方需显式传一个极大值如 86400）。
@@ -142,6 +170,22 @@ func (s *TaskService) CreateTask(ctx context.Context, req *CreateTaskRequest) (*
 		attribute.String("task.method", req.Method),
 	)
 	defer span.End()
+
+	// issue #7: 每设备 pending 队列深度背压 —— 防止面向不可达 / 不可信设备的任务
+	// 无界堆积耗尽 Redis/PG。命中上限直接拒绝（不落库、不入队），调用方按 429 处理。
+	if s.maxQueueDepth > 0 {
+		depth, err := s.queue.Len(ctx, req.DeviceSN)
+		if err != nil {
+			return nil, fmt.Errorf("check queue depth: %w", err)
+		}
+		if depth >= int64(s.maxQueueDepth) {
+			logger.L(ctx).Warn("device task queue at capacity, rejecting new task",
+				zap.String("device_sn", req.DeviceSN),
+				zap.Int64("depth", depth),
+				zap.Int("max_depth", s.maxQueueDepth))
+			return nil, fmt.Errorf("device %s: %w", req.DeviceSN, ErrQueueFull)
+		}
+	}
 
 	// T-0157 C1: 兜底默认超时（调用方未传 → 用配置默认；保留显式覆盖能力）
 	if req.ExpiresIn == 0 && s.defaultExpiresIn > 0 {

@@ -220,6 +220,57 @@ func TestMaybeCaptureTrace_FirstDispatch(t *testing.T) {
 	assert.Equal(t, "GetParameterValues", msgs[1].RPCMethod)
 }
 
+// fixtureSPVWithPasswordXML：CPE 上报含密码的 SetParameterValues / GPVResponse。
+// 模拟 issue #7 的核心风险：协议报文里携带 CPE 明文密码，落 trace 库必须脱敏。
+const fixtureSPVWithPasswordXML = `<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+               xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soap:Header><cwmp:ID soap:mustUnderstand="1">cwmp-9</cwmp:ID></soap:Header>
+  <soap:Body>
+    <cwmp:SetParameterValues>
+      <ParameterList soap:arrayType="cwmp:ParameterValueStruct[2]">
+        <ParameterValueStruct>
+          <Name>Device.ManagementServer.Password</Name>
+          <Value>SuperSecretCpePassword</Value>
+        </ParameterValueStruct>
+        <ParameterValueStruct>
+          <Name>Device.ManagementServer.Username</Name>
+          <Value>acs-user</Value>
+        </ParameterValueStruct>
+      </ParameterList>
+    </cwmp:SetParameterValues>
+  </soap:Body>
+</soap:Envelope>`
+
+// TestMaybeCaptureTrace_RedactsCredentials：落盘前 trace 报文里的 CPE 凭证必须脱敏，
+// 同时 PayloadSizeBytes 仍记录原始报文长度（用于诊断报文体积，不受脱敏影响）。
+func TestMaybeCaptureTrace_RedactsCredentials(t *testing.T) {
+	sink := &stubTraceSink{}
+	deviceSN := "SN-CRED"
+	taskID := uuid.New()
+	h := newTraceTestHandler(t, deviceSN, taskID, sink)
+
+	entry := &rpclog.LogEntry{
+		DeviceSN:  deviceSN,
+		Method:    "SetParameterValues",
+		SessionID: "sess-cred",
+		CwmpID:    "cwmp-9",
+	}
+	h.maybeCaptureTrace(entry, 200, fixtureSPVWithPasswordXML, fixtureInformResponseXML)
+
+	msgs := sink.snapshot()
+	require.Len(t, msgs, 2)
+
+	in := msgs[0]
+	assert.Equal(t, trace.DirectionIn, in.Direction)
+	assert.NotContains(t, in.PayloadInline, "SuperSecretCpePassword",
+		"CPE 明文密码必须在落盘前脱敏（等保合规）")
+	assert.Contains(t, in.PayloadInline, "acs-user",
+		"非敏感参数（用户名）应原样保留，便于诊断")
+	assert.Equal(t, len(fixtureSPVWithPasswordXML), in.PayloadSizeBytes,
+		"PayloadSizeBytes 记录原始报文长度，脱敏不应改变它")
+}
+
 // TestMaybeCaptureTrace_NotInWhitelist：设备不在白名单，不应产生任何消息。
 func TestMaybeCaptureTrace_NotInWhitelist(t *testing.T) {
 	sink := &stubTraceSink{}

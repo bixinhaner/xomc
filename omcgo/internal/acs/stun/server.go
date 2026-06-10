@@ -14,12 +14,13 @@ import (
 
 // Config holds STUN UDP server settings.
 type Config struct {
-	Enabled      bool          `mapstructure:"enabled"`
-	ListenAddr   string        `mapstructure:"listen_addr"`    // e.g. ":3478"
-	WorkerSize   int           `mapstructure:"worker_size"`    // number of reader goroutines
-	BufferSize   int           `mapstructure:"buffer_size"`    // UDP read buffer size in bytes
-	CacheTTL     time.Duration `mapstructure:"cache_ttl"`      // STUN address cache TTL
-	SharedSecret string        `mapstructure:"shared_secret"`  // HMAC-SHA1 secret for CPE UDP CR
+	Enabled         bool          `mapstructure:"enabled"`
+	ListenAddr      string        `mapstructure:"listen_addr"`       // e.g. ":3478"
+	WorkerSize      int           `mapstructure:"worker_size"`       // number of reader goroutines
+	BufferSize      int           `mapstructure:"buffer_size"`       // UDP read buffer size in bytes
+	MaxStoreEntries int           `mapstructure:"max_store_entries"` // L1 address-cache entry cap (0 = default)
+	CacheTTL        time.Duration `mapstructure:"cache_ttl"`         // STUN address cache TTL
+	SharedSecret    string        `mapstructure:"shared_secret"`     // HMAC-SHA1 secret for CPE UDP CR
 }
 
 // Metrics holds Prometheus metrics for the STUN server.
@@ -74,6 +75,9 @@ func NewServer(cfg Config, store *Store, logger *zap.Logger) *Server {
 	}
 	if cfg.CacheTTL > 0 {
 		store.SetTTL(cfg.CacheTTL)
+	}
+	if cfg.MaxStoreEntries > 0 {
+		store.SetMaxEntries(cfg.MaxStoreEntries)
 	}
 
 	return &Server{

@@ -2,6 +2,7 @@ package stun
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
@@ -16,6 +17,18 @@ import (
 
 // Default TTL for cached STUN address entries.
 const defaultTTL = 30 * time.Minute
+
+// defaultMaxEntries caps the in-process L1 STUN address map so a UDP flood with
+// spoofed device serials cannot grow it without bound (DoS / memory exhaustion,
+// issue #7). 100K matches the project's baseline device scale (root CLAUDE.md
+// §1); operators expecting more set a higher cap via Server config.
+const defaultMaxEntries = 100_000
+
+// ErrStoreFull is returned by Set when the L1 cache has reached its entry cap
+// and the entry is for a new device serial. Existing serials are always allowed
+// to refresh, so steady-state operation is never blocked — only unbounded
+// growth from unknown sources is rejected (backpressure).
+var ErrStoreFull = errors.New("stun store at capacity")
 
 // StunInfo holds a device's public (NAT-mapped) address discovered via STUN.
 type StunInfo struct {
@@ -36,20 +49,22 @@ func (s *StunInfo) UDPAddr() *net.UDPAddr {
 //   - L1: in-process memory (sync.RWMutex + map) for hot-path lookups
 //   - L2: Redis for cross-instance sharing
 type Store struct {
-	mu     sync.RWMutex
-	local  map[string]*StunInfo // key = device serial number
-	rdb    redis.UniversalClient
-	ttl    time.Duration
-	logger *zap.Logger
+	mu         sync.RWMutex
+	local      map[string]*StunInfo // key = device serial number
+	rdb        redis.UniversalClient
+	ttl        time.Duration
+	maxEntries int // L1 cap; 0 means unlimited (not recommended in production)
+	logger     *zap.Logger
 }
 
 // NewStore creates a new STUN address store.
 func NewStore(rdb redis.UniversalClient, logger *zap.Logger) *Store {
 	return &Store{
-		local:  make(map[string]*StunInfo),
-		rdb:    rdb,
-		ttl:    defaultTTL,
-		logger: logger,
+		local:      make(map[string]*StunInfo),
+		rdb:        rdb,
+		ttl:        defaultTTL,
+		maxEntries: defaultMaxEntries,
+		logger:     logger,
 	}
 }
 
@@ -58,10 +73,39 @@ func (s *Store) SetTTL(ttl time.Duration) {
 	s.ttl = ttl
 }
 
+// SetMaxEntries overrides the L1 cache entry cap. A value <= 0 disables the cap
+// (unbounded growth — not recommended; provided only for tests / special
+// deployments). Larger fleets should raise this above the device count.
+func (s *Store) SetMaxEntries(n int) {
+	s.mu.Lock()
+	s.maxEntries = n
+	s.mu.Unlock()
+}
+
 // Set stores a device's STUN address in both L1 and L2 cache.
+//
+// To bound L1 memory under a UDP flood (issue #7) the map size is capped at
+// maxEntries. An update to an already-known serial always succeeds (steady
+// state is never blocked); a *new* serial is rejected with ErrStoreFull once
+// the cap is hit, after a best-effort sweep of TTL-expired entries. On rejection
+// neither L1 nor L2 is written.
 func (s *Store) Set(ctx context.Context, deviceSN string, info *StunInfo) error {
 	// L1: memory
 	s.mu.Lock()
+	if _, known := s.local[deviceSN]; !known && s.maxEntries > 0 && len(s.local) >= s.maxEntries {
+		// At capacity for a new serial: try to make room by dropping expired
+		// entries inline, then re-check.
+		s.evictExpiredLocked()
+		if len(s.local) >= s.maxEntries {
+			s.mu.Unlock()
+			if s.logger != nil {
+				s.logger.Warn("stun store at capacity, rejecting new device address",
+					zap.String("device_sn", deviceSN),
+					zap.Int("max_entries", s.maxEntries))
+			}
+			return ErrStoreFull
+		}
+	}
 	s.local[deviceSN] = info
 	s.mu.Unlock()
 
@@ -176,7 +220,12 @@ func (s *Store) Size() int {
 func (s *Store) CleanExpired() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.evictExpiredLocked()
+}
 
+// evictExpiredLocked removes TTL-expired entries from the L1 map and returns the
+// count removed. Caller must hold s.mu (write lock).
+func (s *Store) evictExpiredLocked() int {
 	now := time.Now()
 	cleaned := 0
 	for sn, info := range s.local {

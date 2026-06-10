@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/omcgo/omcgo/internal/acs/rpclog"
+	"github.com/omcgo/omcgo/internal/core/redact"
 	"github.com/omcgo/omcgo/internal/trace"
 	"github.com/omcgo/omcgo/pkg/soap"
 )
@@ -97,8 +98,14 @@ func firstNonEmpty(a, b string) string {
 	return b
 }
 
-// truncateForInline M1 阶段：超过 MaxInlinePayloadBytes 直接尾截断（M2 改为外置 MinIO）。
+// truncateForInline 落盘前处理 trace 报文 inline 体：
+//  1. 先对 CPE 凭证/敏感参数走 core/redact 强制脱敏（等保合规：协议日志禁止存明文设备密码）；
+//     脱敏在截断之前，保证靠近截断边界的密码也被掩码。
+//  2. M1 阶段：超过 MaxInlinePayloadBytes 直接尾截断（M2 改为外置 MinIO）。
+//
+// redact.RedactXML 对非法 XML / 空串原样返回，不影响诊断旁路。
 func truncateForInline(xml string) string {
+	xml = redact.RedactXML(xml)
 	if len(xml) <= trace.MaxInlinePayloadBytes {
 		return xml
 	}
