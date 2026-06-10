@@ -64,5 +64,8 @@ func (r *TokenRevoker) IsRevoked(ctx context.Context, userID uuid.UUID, issuedAt
 		}
 		return false, fmt.Errorf("get revocation: %w", err)
 	}
-	return issuedAt < val, nil
+	// 用 <= 而非 <：撤销时间戳与 token.iat 同为秒级 Unix 时间，二者相等时
+	// （撤销与签发落在同一秒）必须判定为已撤销，否则存在最长 1 秒的绕过窗口
+	// ——攻击者在撤销发生的同一秒内签发/使用的 token 不应再被接受（issue #6）。
+	return issuedAt <= val, nil
 }

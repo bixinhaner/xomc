@@ -386,7 +386,7 @@ func (s *AdminService) CreateUser(ctx context.Context, req CreateUserRequest) (*
 		return nil, fmt.Errorf("%w: %w", err, commonerrors.ErrInvalidInput)
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	hash, err := hashSecret([]byte(req.Password))
 	if err != nil {
 		return nil, fmt.Errorf("hash password: %w", err)
 	}
@@ -524,7 +524,7 @@ func (s *AdminService) CopyUser(ctx context.Context, sourceID uuid.UUID) (*User,
 	if err != nil {
 		return nil, "", fmt.Errorf("generate temp password: %w", err)
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(tempPwd), bcrypt.DefaultCost)
+	hash, err := hashSecret([]byte(tempPwd))
 	if err != nil {
 		return nil, "", fmt.Errorf("hash temp password: %w", err)
 	}
@@ -782,7 +782,7 @@ func (s *AdminService) ResetPassword(ctx context.Context, id uuid.UUID, newPassw
 	if err := ValidatePassword(newPassword, PasswordPolicySnapshotFromSecurityPolicy(policy)); err != nil {
 		return fmt.Errorf("%w: %w", err, commonerrors.ErrInvalidInput)
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	hash, err := hashSecret([]byte(newPassword))
 	if err != nil {
 		return fmt.Errorf("hash password: %w", err)
 	}
@@ -1408,7 +1408,7 @@ func (s *AdminService) ChangePassword(ctx context.Context, userID uuid.UUID, req
 		return fmt.Errorf("%w: %w", err, commonerrors.ErrInvalidInput)
 	}
 
-	newHash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	newHash, err := hashSecret([]byte(req.NewPassword))
 	if err != nil {
 		return fmt.Errorf("hash new password: %w", err)
 	}

@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
 	"time"
@@ -45,7 +46,7 @@ func (s *APIKeyService) Create(ctx context.Context, userID uuid.UUID, req Create
 	plainKey := apiKeyPrefix + hex.EncodeToString(rawBytes)
 	keyPrefixStr := plainKey[:8] // "omk_" + first 4 hex chars
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(plainKey), bcrypt.DefaultCost)
+	hash, err := hashSecret([]byte(plainKey))
 	if err != nil {
 		return nil, fmt.Errorf("hash key: %w", err)
 	}
@@ -95,6 +96,10 @@ func (s *APIKeyService) Create(ctx context.Context, userID uuid.UUID, req Create
 }
 
 // Validate checks a raw API key string and returns the associated APIKey if valid.
+//
+// 安全（issue #6）：候选遍历不在首个匹配处短路 return，而是把所有同前缀候选都跑完
+// bcrypt 比较，并用 crypto/subtle 常量时间方式累积命中结果。这样响应耗时不随
+// "命中位置 / 是否命中" 变化（消除时序侧信道，无法据此推断命中的是哪一条或共有几条）。
 func (s *APIKeyService) Validate(ctx context.Context, rawKey string) (*APIKey, error) {
 	if len(rawKey) < 8 {
 		return nil, fmt.Errorf("invalid api key format")
@@ -106,21 +111,40 @@ func (s *APIKeyService) Validate(ctx context.Context, rawKey string) (*APIKey, e
 		return nil, fmt.Errorf("lookup api key: %w", err)
 	}
 
-	for _, k := range candidates {
-		if err := bcrypt.CompareHashAndPassword([]byte(k.KeyHash), []byte(rawKey)); err == nil {
-			// Key matched — check expiration
-			if k.ExpiresAt != nil && time.Now().After(*k.ExpiresAt) {
-				return nil, fmt.Errorf("api key expired")
-			}
-			// Update last used (fire and forget)
-			go func() {
-				_ = s.repo.UpdateLastUsed(context.Background(), k.ID)
-			}()
-			return k, nil
-		}
+	matched := selectMatchingAPIKey(candidates, rawKey)
+	if matched == nil {
+		return nil, fmt.Errorf("invalid api key")
 	}
 
-	return nil, fmt.Errorf("invalid api key")
+	// 命中后再做过期判断与 last_used 更新（耗时与是否命中无关，这两步本就只在命中时发生）。
+	if matched.ExpiresAt != nil && time.Now().After(*matched.ExpiresAt) {
+		return nil, fmt.Errorf("api key expired")
+	}
+	// Update last used (fire and forget)
+	go func(id uuid.UUID) {
+		_ = s.repo.UpdateLastUsed(context.Background(), id)
+	}(matched.ID)
+	return matched, nil
+}
+
+// selectMatchingAPIKey 从同前缀候选里挑出与 rawKey 匹配的那一条，无匹配返回 nil。
+//
+// 安全（issue #6）：遍历不在首个命中处短路，对每个候选都执行一次 bcrypt 比较，
+// 并用 subtle.ConstantTimeCompare 把 0/1 命中标志折叠为不分支的选择。这样总耗时
+// 只与候选数量有关，不随"命中位置 / 是否命中"变化，消除时序侧信道。
+// 抽成纯函数便于在无 DB 环境下直接单测匹配行为。
+func selectMatchingAPIKey(candidates []*APIKey, rawKey string) *APIKey {
+	var matched *APIKey
+	for _, k := range candidates {
+		hit := 0
+		if bcrypt.CompareHashAndPassword([]byte(k.KeyHash), []byte(rawKey)) == nil {
+			hit = 1
+		}
+		if subtle.ConstantTimeCompare([]byte{byte(hit)}, []byte{1}) == 1 {
+			matched = k
+		}
+	}
+	return matched
 }
 
 // List returns all API keys for a user.
