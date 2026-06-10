@@ -657,3 +657,54 @@ ls -la /etc/localtime
 # Linux 宿主机若无 /etc/localtime，可手动链接
 sudo ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
 ```
+
+---
+
+## 14. 资源限制与优雅关闭
+
+为防止单个容器内存泄漏 / 突发负载耗尽宿主机资源拖垮整栈，所有服务在
+`docker-compose.yml`（dev）与交付包 `deployments/release/bundle/deploy/docker-compose.{infra,app,monitoring,web}.yml`（prod）
+中均声明了 `deploy.resources.limits / reservations`（Compose-spec 字段，`docker compose up`
+直接生效），有状态服务与应用进程另配 `stop_grace_period` 保证优雅退出窗口。
+
+> 端口表与基础资源建议见本文件 §2 / §3；此处只补「每服务限额 + 优雅关闭窗口」的取舍依据。
+
+### 14.1 资源限额一览（dev 与 prod 同值）
+
+| 服务 | CPU limit | mem limit | CPU reserve | mem reserve | 说明 |
+|------|-----------|-----------|-------------|-------------|------|
+| postgres | 2 | 2g | 0.5 | 512m | 数据面主库，TimescaleDB 聚合 / WAL 缓冲需较大内存 |
+| redis | 1 | 512m | 0.25 | 256m | 会话 / 队列 / 缓存，纯内存 |
+| nats | 1 | 512m | 0.25 | 256m | JetStream 消息，store 落盘 |
+| minio | 1 | 1g | 0.25 | 512m | 对象存储，multipart 缓冲 |
+| app | 2 | 1g | 0.5 | 512m | REST + gRPC 主进程 |
+| acs | 2 | 1g | 0.5 | 512m | TR-069 长连接，高并发会话 |
+| worker | 1.5 | 768m | 0.5 | 384m | PM/MR 文件处理、KPI 计算 |
+| web (nginx) | 1 | 512m | 0.25 | 128m | 静态资源 + 反代 |
+| prometheus | 1 | 1g | 0.25 | 256m | TSDB 15d 保留 |
+| grafana | 1 | 512m | 0.25 | 256m | 可视化 |
+| loki / tempo / otelcol | 1 | 512m | 0.25 | 256m | 日志 / trace 存储与转发 |
+| alertmanager | 0.5 | 512m | 0.25 | 256m | 告警路由 |
+| migrate-schema / migrate-seed | 1 | 512m | 0.25 | 128m | 一次性任务，限额防失控 |
+| nats/nginx-exporter · node-exporter | 0.25 | 128m | 0.05 | 32m | 轻量 exporter |
+| cadvisor | 0.5 | 256m | 0.1 | 64m | 容器指标采集 |
+
+> 以上为「单机全栈 dev / 小规模 prod」基线，宿主机建议 ≥ 8 GB 内存。10 万→100 万基站
+> 扩展时按实际压测调高 app/acs/postgres 上限，或拆分独立宿主机。
+
+### 14.2 优雅关闭窗口（stop_grace_period）
+
+`stop_grace_period` = docker 发出 `SIGTERM` 到强制 `SIGKILL` 之间的等待时长。配置原则：
+
+- **app / acs / worker = 30s**：与 Go 端 `shutdown_timeout`（见 `cmd/*/etc/config.*.yaml`，默认 `30s`）
+  对齐。进程收到 `SIGTERM` 后由 `internal/core/components/shutdown.go` 的 `GracefulShutdown`
+  按优先级（HTTP→NATS→Redis→DB→MinIO）依次关闭，内部超时 30s；docker 给足同等窗口，
+  确保在被 `SIGKILL` 前能跑完优雅关闭，不丢在途请求 / 任务。
+- **postgres = 60s**：留足 checkpoint flush + WAL 落盘，避免被强杀截断触发下次启动 recovery。
+- **redis / nats / minio / prometheus / loki / tempo = 30s**：各自完成 AOF/JetStream/对象/
+  TSDB-WAL/chunk 落盘。
+- **一次性任务（migrate-*）与无状态 exporter**：自行退出 / 无落盘，不单独配 `stop_grace_period`
+  （沿用 docker 默认 10s）。
+
+> 若调整 Go 端 `shutdown_timeout`，必须同步调整 app/acs/worker 的 `stop_grace_period`，
+> 两者错配会导致优雅关闭被 docker 提前 `SIGKILL` 打断。

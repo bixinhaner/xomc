@@ -25,6 +25,16 @@ services:
       nofile:
         soft: 20480
         hard: 40960
+    # nginx 优雅停机（quit 信号 drain 在途连接）窗口
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512m
+        reservations:
+          cpus: "0.25"
+          memory: 128m
     volumes:
       # 镜像内已含 nginx 配置；这里挂载允许运维就地改而不重打镜像（可选）
       - ./nginx.conf:/etc/nginx/nginx.conf:ro

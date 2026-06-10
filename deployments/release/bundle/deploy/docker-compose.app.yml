@@ -34,6 +34,15 @@ services:
       - "--path"
       - "/etc/omcgo/migrations"
       - "up"
+    # 一次性迁移任务：限额防失控，无需 stop_grace_period（自行退出）
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512m
+        reservations:
+          cpus: "0.25"
+          memory: 128m
     volumes:
       - /etc/localtime:/etc/localtime:ro
     depends_on:
@@ -61,6 +70,15 @@ services:
       - "--path"
       - "/etc/omcgo/migrations/seed"
       - "up"
+    # 一次性 seed 任务：限额防失控，无需 stop_grace_period（自行退出）
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512m
+        reservations:
+          cpus: "0.25"
+          memory: 128m
     volumes:
       - /etc/localtime:/etc/localtime:ro
     depends_on:
@@ -75,6 +93,16 @@ services:
   app:
     image: ${IMAGE_APP}
     restart: unless-stopped
+    # 与 Go 端 shutdown_timeout(30s) 对齐：留足 GracefulShutdown 关 HTTP/gRPC/连接池
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1g
+        reservations:
+          cpus: "0.5"
+          memory: 512m
     environment:
       TZ: "Asia/Shanghai"
       OMCGO_ENV: ${OMCGO_ENV}
@@ -109,6 +137,16 @@ services:
   acs:
     image: ${IMAGE_ACS}
     restart: unless-stopped
+    # 与 Go 端 shutdown_timeout(30s) 对齐
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1g
+        reservations:
+          cpus: "0.5"
+          memory: 512m
     environment:
       TZ: "Asia/Shanghai"
       OMCGO_ENV: ${OMCGO_ENV}
@@ -138,6 +176,16 @@ services:
   worker:
     image: ${IMAGE_WORKER}
     restart: unless-stopped
+    # 与 Go 端 shutdown_timeout(30s) 对齐
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 768m
+        reservations:
+          cpus: "0.5"
+          memory: 384m
     environment:
       TZ: "Asia/Shanghai"
       OMCGO_ENV: ${OMCGO_ENV}

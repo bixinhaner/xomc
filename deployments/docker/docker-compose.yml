@@ -37,6 +37,17 @@ services:
       - pgdata:/var/lib/postgresql/data
       - /etc/localtime:/etc/localtime:ro
     command: ["postgres", "-c", "timezone=Asia/Shanghai", "-c", "log_timezone=Asia/Shanghai"]
+    # 有状态服务给足 60s 优雅退出窗口：checkpoint flush + WAL 落盘，避免被 SIGKILL
+    # 截断导致 recovery（详见 README §13 资源与优雅关闭）。
+    stop_grace_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2g
+        reservations:
+          cpus: "0.5"
+          memory: 512m
     # TimescaleDB 冷启动期间会重启一次让 shared_preload_libraries 生效;
     # `pg_isready -U omcgo` 默认走 Unix socket,socket 可能先 ready 但 TCP
     # 监听还在内部 restart 周期 → 下游 migrate-schema 撞 connection refused。
@@ -59,6 +70,16 @@ services:
     volumes:
       - redisdata:/data
       - /etc/localtime:/etc/localtime:ro
+    # AOF rewrite/fsync 落盘窗口
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512m
+        reservations:
+          cpus: "0.25"
+          memory: 256m
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -76,6 +97,16 @@ services:
     volumes:
       - natsdata:/data
       - /etc/localtime:/etc/localtime:ro
+    # JetStream store 落盘窗口
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512m
+        reservations:
+          cpus: "0.25"
+          memory: 256m
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
       interval: 5s
@@ -97,6 +128,16 @@ services:
       - miniodata:/data
       - /etc/localtime:/etc/localtime:ro
     command: server /data --console-address ":9001"
+    # 进行中的 multipart upload / 元数据落盘窗口
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1g
+        reservations:
+          cpus: "0.25"
+          memory: 512m
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 5s
@@ -121,6 +162,15 @@ services:
       postgres:
         condition: service_healthy
     restart: on-failure:3
+    # 一次性迁移任务：限额防失控，无需 stop_grace_period（自行退出）
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512m
+        reservations:
+          cpus: "0.25"
+          memory: 128m
 
   migrate-seed:
     build:
@@ -141,6 +191,15 @@ services:
       migrate-schema:
         condition: service_completed_successfully
     restart: on-failure:3
+    # 一次性 seed 任务：限额防失控，无需 stop_grace_period（自行退出）
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512m
+        reservations:
+          cpus: "0.25"
+          memory: 128m
 
   acs:
     build:
@@ -155,6 +214,16 @@ services:
     volumes:
       - ../../run/logs/acs:/run/logs/acs
       - /etc/localtime:/etc/localtime:ro
+    # 与 Go 端 shutdown_timeout(30s) 对齐：留足 GracefulShutdown 关 HTTP/会话/连接池
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1g
+        reservations:
+          cpus: "0.5"
+          memory: 512m
     depends_on:
       migrate-seed:
         condition: service_completed_successfully
@@ -190,6 +259,16 @@ services:
       # 写 supported="false" 同样落源码树。
       - ../../omcgo/data:/etc/omcgo/data
       - /etc/localtime:/etc/localtime:ro
+    # 与 Go 端 shutdown_timeout(30s) 对齐
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1g
+        reservations:
+          cpus: "0.5"
+          memory: 512m
     depends_on:
       migrate-seed:
         condition: service_completed_successfully
@@ -221,6 +300,16 @@ services:
       # omcctl sweep-paths --apply 在 worker 容器内写 supported="false" 反映到源码树。
       - ../../omcgo/data:/etc/omcgo/data
       - /etc/localtime:/etc/localtime:ro
+    # 与 Go 端 shutdown_timeout(30s) 对齐
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 768m
+        reservations:
+          cpus: "0.5"
+          memory: 384m
     depends_on:
       migrate-seed:
         condition: service_completed_successfully
@@ -253,6 +342,16 @@ services:
       nofile:
         soft: 20480
         hard: 40960
+    # nginx 优雅停机（quit 信号 drain 在途连接）窗口
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512m
+        reservations:
+          cpus: "0.25"
+          memory: 128m
     volumes:
       - ../../run/logs/nginx:/var/log/nginx
       - ../../../tiles:/usr/share/nginx/tiles:ro
@@ -292,6 +391,16 @@ services:
       - "--web.enable-lifecycle"
       # T-0155 Phase 2b: 接收 otelcol prometheusremotewrite 推送的 pg/redis 指标
       - "--web.enable-remote-write-receiver"
+    # TSDB head WAL 落盘窗口
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1g
+        reservations:
+          cpus: "0.25"
+          memory: 256m
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
       interval: 10s
@@ -315,6 +424,14 @@ services:
       # 单实例部署：禁用 HA 集群(gossip mesh)。否则启动时推断不到私有 advertise IP
       # 会 "unable to initialize gossip mesh" 崩溃重启。空值 = 关闭 HA。
       - "--cluster.listen-address="
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512m
+        reservations:
+          cpus: "0.25"
+          memory: 256m
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:9093/-/healthy"]
       interval: 10s
@@ -341,6 +458,14 @@ services:
       - ../monitoring/grafana/dashboards:/etc/grafana/dashboards:ro
       - grafanadata:/var/lib/grafana
       - /etc/localtime:/etc/localtime:ro
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512m
+        reservations:
+          cpus: "0.25"
+          memory: 256m
     depends_on:
       prometheus:
         condition: service_healthy
@@ -386,6 +511,16 @@ services:
       - lokidata:/loki
       - /etc/localtime:/etc/localtime:ro
     command: ["-config.file=/etc/loki/loki-config.yml"]
+    # chunk flush 落盘窗口
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512m
+        reservations:
+          cpus: "0.25"
+          memory: 256m
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:3100/ready"]
       interval: 10s
@@ -424,6 +559,14 @@ services:
       - ../../run/logs:/run/logs:ro
       - /etc/localtime:/etc/localtime:ro
     command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512m
+        reservations:
+          cpus: "0.25"
+          memory: 256m
     # 不配 healthcheck：otelcol-contrib 是 distroless 镜像（无 shell/wget/curl/nc），
     # CMD healthcheck 无可执行物。otelcol 是无状态转发器，crash 后 app SDK 端
     # 自带 retry 缓冲（见 internal/core/components/tracer.go WithBatcher），
@@ -454,6 +597,16 @@ services:
       - tempodata:/var/tempo
       - /etc/localtime:/etc/localtime:ro
     command: ["-config.file=/etc/tempo/tempo.yaml"]
+    # trace block flush 落盘窗口
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512m
+        reservations:
+          cpus: "0.25"
+          memory: 256m
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:3200/ready"]
       interval: 10s
@@ -477,6 +630,14 @@ services:
     command: ["-varz", "-jsz=all", "-connz", "http://nats:8222"]
     volumes:
       - /etc/localtime:/etc/localtime:ro
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128m
+        reservations:
+          cpus: "0.05"
+          memory: 32m
     depends_on:
       nats:
         condition: service_healthy
@@ -492,6 +653,14 @@ services:
     command: ["--nginx.scrape-uri=http://web:8090/stub_status"]
     volumes:
       - /etc/localtime:/etc/localtime:ro
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128m
+        reservations:
+          cpus: "0.05"
+          memory: 32m
 
   # ── 主机资源指标：node-exporter（CPU / 内存 / 磁盘 / 负载）──────────────
   # 挂宿主 /proc /sys / 根，prometheus job=node 抓 :9100。
@@ -509,6 +678,14 @@ services:
       - /sys:/host/sys:ro
       - /:/rootfs:ro
       - /etc/localtime:/etc/localtime:ro
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128m
+        reservations:
+          cpus: "0.05"
+          memory: 32m
 
   # ── 容器资源指标：cAdvisor（各容器 CPU / 内存 / 网络 / 磁盘）─────────────
   # prometheus job=cadvisor 抓 :8080/metrics（容器内端口，未发布到宿主）。
@@ -528,6 +705,14 @@ services:
       - /sys:/sys:ro
       - /var/lib/docker/:/var/lib/docker:ro
       - /dev/disk/:/dev/disk:ro
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256m
+        reservations:
+          cpus: "0.1"
+          memory: 64m
 
 volumes:
   pgdata:
