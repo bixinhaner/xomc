@@ -280,7 +280,7 @@ jobs:
             GOPROXY=https://proxy.golang.org,direct
 
       - name: Trivy 漏洞扫描（HIGH/CRITICAL 阻塞）
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ matrix.image }}:scan
           format: table
@@ -291,7 +291,7 @@ jobs:
 
       - name: 生成 CycloneDX SBOM
         if: always()
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ matrix.image }}:scan
           format: cyclonedx
