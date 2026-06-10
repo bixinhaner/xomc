@@ -137,8 +137,10 @@ func Setup(r *gin.Engine, c *Container) error {
 		Init:    func() error { return initDashboardModule(c) },
 	})
 	graph.Add(components.ModuleInitializer{
-		Name:    "northbound",
-		Depends: []string{"alarm", "pm"},
+		Name: "northbound",
+		// 依赖 device + admin：northbound 数据导出要复用 DeviceService（按 SN/ID 校验设备归属）
+		// 与 PermissionService（解析用户可见设备组）做多租户隔离，二者必须先就绪。
+		Depends: []string{"alarm", "pm", "device", "admin"},
 		Init:    func() error { return initNorthboundModule(c) },
 	})
 	graph.Add(components.ModuleInitializer{

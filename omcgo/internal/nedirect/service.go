@@ -51,6 +51,9 @@ func NewService(
 
 // Connect establishes a new NE direct session between a user and a device.
 // If the user already has an active session to this device, it returns the existing one.
+//
+// 安全：会话归属（userID/username）来自调用方传入的「已认证身份」，而非请求体 ——
+// handler 负责用 ctx 内 Principal 覆盖请求体里的 user_id/username，杜绝伪造身份建会话。
 func (s *Service) Connect(ctx context.Context, deviceSN, userID, username string) (*Session, error) {
 	// Verify device exists
 	dev, err := s.deviceService.GetBySerialNumber(ctx, deviceSN)
@@ -106,11 +109,43 @@ func (s *Service) Connect(ctx context.Context, deviceSN, userID, username string
 	return session, nil
 }
 
+// ErrSessionOwnership 表示调用方试图操作不属于自己的会话（IDOR 越权）。
+// 映射为 HTTP 403/404，避免泄露会话是否存在。
+var ErrSessionOwnership = fmt.Errorf("session ownership denied: %w", commonerrors.ErrForbidden)
+
+// authorizeSessionOwnership 校验 principal 是否有权操作指定会话（IDOR 守卫）。
+//
+// 规则：
+//   - principal 为 nil（未注入鉴权，dev/test 退化）→ 放行；
+//   - 超管 → 放行（可操作任意会话）；
+//   - 否则 session.UserID 必须等于 principal.UserID，否则视为越权（ErrSessionOwnership）。
+//
+// 商用级要求：网元直连会话承载对基站的 CLI/MML 下发能力，必须确保操作人只能
+// 操作自己建立的会话，杜绝凭 session_id 横向越权。
+func authorizeSessionOwnership(principal *Principal, session *Session) error {
+	if principal == nil {
+		return nil
+	}
+	if principal.IsSuperAdmin {
+		return nil
+	}
+	if session.UserID != principal.UserID.String() {
+		return ErrSessionOwnership
+	}
+	return nil
+}
+
 // Disconnect closes an active NE direct session.
-func (s *Service) Disconnect(ctx context.Context, sessionID uuid.UUID) error {
+//
+// principal 非 nil 时执行 IDOR 归属校验：非超管只能断开自己建立的会话。
+func (s *Service) Disconnect(ctx context.Context, principal *Principal, sessionID uuid.UUID) error {
 	session, err := s.sessionRepo.GetByID(ctx, sessionID)
 	if err != nil {
 		return fmt.Errorf("get session: %w", err)
+	}
+
+	if err := authorizeSessionOwnership(principal, session); err != nil {
+		return err
 	}
 
 	if session.Status != SessionActive {
@@ -144,7 +179,15 @@ func (s *Service) GetSession(ctx context.Context, id uuid.UUID) (*Session, error
 }
 
 // ListSessions returns a paginated list of NE direct sessions.
-func (s *Service) ListSessions(ctx context.Context, filter SessionFilter) (*model.ListResponse[Session], error) {
+//
+// principal 非 nil 且非超管时，强制把 UserID 过滤收紧为调用方自己 —— 防止越权
+// 枚举他人会话（即便请求显式传了其它 user_id，也会被覆盖）。超管 / principal=nil
+// （dev/test）不收紧。
+func (s *Service) ListSessions(ctx context.Context, principal *Principal, filter SessionFilter) (*model.ListResponse[Session], error) {
+	if principal != nil && !principal.IsSuperAdmin {
+		uid := principal.UserID.String()
+		filter.UserID = &uid
+	}
 	return s.sessionRepo.List(ctx, filter)
 }
 
@@ -163,10 +206,16 @@ func (s *Service) CloseExpiredSessions(ctx context.Context) (int64, error) {
 // ---- Command execution ----
 
 // SendCommand sends a CLI/MML command through a NE direct session.
-func (s *Service) SendCommand(ctx context.Context, sessionID uuid.UUID, commandStr string) (*Command, error) {
+//
+// principal 非 nil 时执行 IDOR 归属校验：非超管只能向自己建立的会话下发命令。
+func (s *Service) SendCommand(ctx context.Context, principal *Principal, sessionID uuid.UUID, commandStr string) (*Command, error) {
 	session, err := s.sessionRepo.GetByID(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("get session: %w", err)
+	}
+
+	if err := authorizeSessionOwnership(principal, session); err != nil {
+		return nil, err
 	}
 
 	if session.Status != SessionActive {

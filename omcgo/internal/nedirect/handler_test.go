@@ -45,7 +45,7 @@ func setupHandler(
 	commandRepo := &mockCommandRepo{}
 
 	svc := NewService(sessionRepo, commandRepo, deviceService, alarmEngine, eventBus, zap.NewNop())
-	handler := NewHandler(svc, zap.NewNop())
+	handler := NewHandler(svc, nil, zap.NewNop())
 
 	return handler, eventBus
 }
@@ -67,7 +67,7 @@ func setupHandlerWithSession(
 	deviceService := device.NewDeviceService(deviceRepo, paramRepo, nil, nil, zap.NewNop())
 
 	svc := NewService(sessionRepo, commandRepo, deviceService, alarmEngine, eventBus, zap.NewNop())
-	handler := NewHandler(svc, zap.NewNop())
+	handler := NewHandler(svc, nil, zap.NewNop())
 
 	return handler, eventBus
 }

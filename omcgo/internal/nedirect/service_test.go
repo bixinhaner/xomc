@@ -450,7 +450,7 @@ func TestService_Disconnect_Success(t *testing.T) {
 
 	svc, eventBus := newTestService(sessionRepo, &mockCommandRepo{}, nil)
 
-	err := svc.Disconnect(context.Background(), sessionID)
+	err := svc.Disconnect(context.Background(), nil, sessionID)
 
 	require.NoError(t, err)
 	assert.Equal(t, SessionDisconnected, activeSession.Status)
@@ -476,7 +476,7 @@ func TestService_Disconnect_AlreadyDisconnected(t *testing.T) {
 
 	svc, eventBus := newTestService(sessionRepo, &mockCommandRepo{}, nil)
 
-	err := svc.Disconnect(context.Background(), sessionID)
+	err := svc.Disconnect(context.Background(), nil, sessionID)
 
 	require.NoError(t, err)
 	assert.Empty(t, eventBus.published) // No event for already disconnected
@@ -503,7 +503,7 @@ func TestService_SendCommand_Success(t *testing.T) {
 
 	svc, eventBus := newTestService(sessionRepo, &mockCommandRepo{}, nil)
 
-	cmd, err := svc.SendCommand(context.Background(), sessionID, "DSP CELLINFO;")
+	cmd, err := svc.SendCommand(context.Background(), nil, sessionID, "DSP CELLINFO;")
 
 	require.NoError(t, err)
 	require.NotNil(t, cmd)
@@ -532,7 +532,7 @@ func TestService_SendCommand_InactiveSession(t *testing.T) {
 
 	svc, _ := newTestService(sessionRepo, &mockCommandRepo{}, nil)
 
-	cmd, err := svc.SendCommand(context.Background(), sessionID, "DSP CELLINFO;")
+	cmd, err := svc.SendCommand(context.Background(), nil, sessionID, "DSP CELLINFO;")
 
 	require.Error(t, err)
 	assert.Nil(t, cmd)
@@ -716,7 +716,7 @@ func TestService_ListSessions(t *testing.T) {
 
 	svc, _ := newTestService(sessionRepo, &mockCommandRepo{}, nil)
 
-	result, err := svc.ListSessions(context.Background(), SessionFilter{})
+	result, err := svc.ListSessions(context.Background(), nil, SessionFilter{})
 
 	require.NoError(t, err)
 	assert.Equal(t, expected, result)

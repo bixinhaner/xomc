@@ -232,6 +232,20 @@ func (KeyBuilder) SSEPending(userID string) string {
 	return fmt.Sprintf("sse:pending:%s", userID)
 }
 
+// ===== 外部接口限流（北向 / 网元直连）=====
+
+// RateLimitFixedWindow 返回一个固定窗口限流计数器键。scope 标识限流维度
+// （如 "nb:endpoint"、"ne:device"），key 为该维度内的具体标识（端点名 / 设备 SN），
+// window 为窗口起始秒（unix / windowSeconds 后取整，由调用方传入）。
+// 采用 INCR + EXPIRE 的固定窗口算法，跨实例共享（Redis 后端），适合北向/网元直连
+// 这类低频外部接口的防滥用，无需 token bucket 的平滑性。
+func (KeyBuilder) RateLimitFixedWindow(scope, key string, window int64) string {
+	return fmt.Sprintf("%s%s:%s:%d", rateLimitFixedWindowPrefix, scope, key, window)
+}
+
+// RateLimitFixedWindowPrefix 固定窗口限流键前缀（供扫描 / 审计）。
+func (KeyBuilder) RateLimitFixedWindowPrefix() string { return rateLimitFixedWindowPrefix }
+
 // ---------------------------------------------------------------------------
 // private constants（对外不暴露；所有公共 API 均从本文件拼装）
 // ---------------------------------------------------------------------------
@@ -277,4 +291,7 @@ const (
 	authFailedPrefix        = "auth:failed:"
 	permVisibleGroupsPrefix = "perm:visible_groups:"
 	casbinPolicyChannel     = "casbin:policy:reload"
+
+	// 外部接口限流（北向 / 网元直连固定窗口计数器）
+	rateLimitFixedWindowPrefix = "ratelimit:fw:"
 )

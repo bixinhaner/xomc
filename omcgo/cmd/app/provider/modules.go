@@ -22,6 +22,7 @@ import (
 	minioinfra "github.com/omcgo/omcgo/internal/core/components/minio"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/ratelimit"
 	"github.com/omcgo/omcgo/internal/core/reliability"
 	"github.com/omcgo/omcgo/internal/core/reliability/dlq"
 	"github.com/omcgo/omcgo/internal/core/reliability/runner"
@@ -1154,10 +1155,44 @@ func initNorthboundModule(c *Container) error {
 		logger.Warn("initial active target refresh failed", zap.Error(err))
 	}
 
+	// 多租户数据隔离 + per-endpoint 限流（审计缺口收口）。
+	// PermService / DeviceService 由 admin / device 模块先行装配（见 ModuleGraph 依赖）。
+	if c.PermService != nil && c.DeviceService != nil {
+		scoper := northbound.NewScoper(
+			c.PermService,
+			c.DeviceService,
+			northboundSNResolver{svc: c.DeviceService},
+		)
+		nbRouter.SetScoper(scoper)
+		logger.Info("northbound multi-tenant scoper wired")
+	} else {
+		logger.Warn("northbound scoper not wired (perm/device service missing); exports run unscoped")
+	}
+	// per-endpoint 固定窗口限流（每分钟阈值，缺省 300）。
+	nbRouter.SetRateLimiter(ratelimit.NewFixedWindowLimiter(
+		c.Redis, "nb:endpoint", int64(c.Cfg.Northbound.EndpointRateLimit()), time.Minute))
+
 	c.miscDeps.nbRouter = nbRouter
 
 	logger.Info("northbound/OSS module initialized")
 	return nil
+}
+
+// northboundSNResolver 把 device.DeviceService.GetBySerialNumber 适配成
+// northbound.DeviceSNResolver（SN → deviceID）。
+type northboundSNResolver struct {
+	svc *device.DeviceService
+}
+
+func (r northboundSNResolver) ResolveDeviceID(ctx context.Context, sn string) (uuid.UUID, bool, error) {
+	dev, err := r.svc.GetBySerialNumber(ctx, sn)
+	if err != nil {
+		return uuid.Nil, false, err
+	}
+	if dev == nil {
+		return uuid.Nil, false, nil
+	}
+	return dev.ID, true, nil
 }
 
 // initInteropModule 初始化 F10 互操作测试模块。
@@ -1766,7 +1801,9 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 		neSessionRepo := nedirect.NewPgSessionRepository(c.PgPool)
 		neCommandRepo := nedirect.NewPgCommandRepository(c.PgPool)
 		neService := nedirect.NewService(neSessionRepo, neCommandRepo, c.DeviceService, c.AlarmEngine, c.EventBus, logger)
-		neHandler := nedirect.NewHandler(neService, logger)
+		// 安全中间件：强制 JWT/API-Key 认证 + per-endpoint/per-device Redis 限流 + 审计日志。
+		neMiddleware := buildNEDirectMiddleware(c, logger)
+		neHandler := nedirect.NewHandler(neService, neMiddleware, logger)
 		neServer := nedirect.NewServer(c.Cfg.NEDirect, neHandler, logger)
 		if err := neServer.Start(); err != nil {
 			logger.Error("ne-direct server start failed", zap.Error(err))

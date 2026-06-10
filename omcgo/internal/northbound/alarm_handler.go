@@ -16,6 +16,7 @@ import (
 type AlarmHandler struct {
 	svc    *NorthboundService
 	logger *zap.Logger
+	scoper *Scoper // 多租户隔离；nil 时退化为不隔离（由 Router.SetScoper 注入）
 }
 
 // NewAlarmHandler creates a new AlarmHandler.
@@ -28,10 +29,31 @@ func NewAlarmHandler(svc *NorthboundService, logger *zap.Logger) *AlarmHandler {
 
 // ExportAlarms handles alarm data export for northbound consumers.
 func (h *AlarmHandler) ExportAlarms(c *gin.Context) {
+	// 过滤参数白名单：先窥探原始 JSON，拒绝未知字段（fail-closed）。
+	raw, ok := peekJSONBody(c)
+	if !ok {
+		response.Fail(c, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if bad := unknownJSONFields(raw, allowedAlarmExportParams); len(bad) > 0 {
+		response.Fail(c, http.StatusBadRequest, "unknown filter fields: "+joinFields(bad))
+		return
+	}
+
 	var req ExportAlarmRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
+	}
+
+	// 多租户隔离：非超管必须把导出限定到一个具体设备（device_sn），并校验其归属。
+	if h.scoper != nil {
+		if !h.scoper.RequireDeviceScope(c, req.DeviceSN != "") {
+			return
+		}
+		if req.DeviceSN != "" && !h.scoper.AuthorizeDeviceBySN(c, req.DeviceSN) {
+			return
+		}
 	}
 
 	filter := alarm.AlarmFilter{
@@ -73,6 +95,11 @@ func (h *AlarmHandler) ExportAlarms(c *gin.Context) {
 
 // ListActiveAlarms returns all active alarms for northbound sync.
 func (h *AlarmHandler) ListActiveAlarms(c *gin.Context) {
+	// 全量活跃告警同步无设备维度过滤：非超管不得跨租户拉取全量 → 403。
+	if h.scoper != nil && !h.scoper.RequireDeviceScope(c, false) {
+		return
+	}
+
 	listReq := model.DefaultListRequest()
 	if err := c.ShouldBindQuery(&listReq); err != nil {
 		response.Fail(c, http.StatusBadRequest, err.Error())

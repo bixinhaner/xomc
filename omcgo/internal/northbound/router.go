@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/internal/core/ratelimit"
 	"github.com/omcgo/omcgo/internal/core/reliability"
 	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/omcgo/omcgo/internal/northbound/push"
@@ -20,6 +21,8 @@ type Router struct {
 	configHandler *ConfigHandler
 	serverHandler *ServerHandler        // 主备服务器配置 + 切换（system/config 北向设置）
 	outboxRepo    push.OutboxRepository // may be nil if outbox is not configured
+	scoper        *Scoper               // 多租户数据隔离；nil 时退化为不隔离（dev/test）
+	rateLimiter   *ratelimit.FixedWindowLimiter // per-endpoint 限流；nil 时不限流
 }
 
 // NewRouter creates a new northbound Router.
@@ -46,6 +49,42 @@ func (r *Router) SetOutboxRepo(repo push.OutboxRepository) {
 	r.outboxRepo = repo
 }
 
+// SetScoper 注入多租户数据权限 Scoper（在 provider 装配 PermService + DeviceService 后调用）。
+// 同时下传给 PM/alarm/config 子 handler，使按设备维度的导出走同一套隔离。
+func (r *Router) SetScoper(s *Scoper) {
+	r.scoper = s
+	r.pmHandler.scoper = s
+	r.alarmHandler.scoper = s
+	r.configHandler.scoper = s
+}
+
+// SetRateLimiter 注入 per-endpoint Redis 固定窗口限流器。
+func (r *Router) SetRateLimiter(l *ratelimit.FixedWindowLimiter) {
+	r.rateLimiter = l
+}
+
+// rateLimit 返回一个按端点名限流的 Gin 中间件。endpoint 为限流 key（端点标识）。
+// limiter 未注入时为 no-op。超限返回 429。
+func (r *Router) rateLimit(endpoint string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if r.rateLimiter == nil {
+			c.Next()
+			return
+		}
+		allowed, _, err := r.rateLimiter.Allow(c.Request.Context(), endpoint)
+		if err != nil {
+			// fail-open：Redis 抖动不拒外部接口，仅靠日志暴露。
+			c.Next()
+			return
+		}
+		if !allowed {
+			response.Fail(c, http.StatusTooManyRequests, "too many requests, please retry later")
+			return
+		}
+		c.Next()
+	}
+}
+
 // RegisterRoutes registers northbound API routes on the given router group.
 func (r *Router) RegisterRoutes(rg *gin.RouterGroup) {
 	nb := rg.Group("/northbound")
@@ -63,14 +102,14 @@ func (r *Router) RegisterRoutes(rg *gin.RouterGroup) {
 		nb.GET("/push/deadletter", r.listDeadLetters)
 		nb.POST("/push/deadletter/:id/replay", r.replayDeadLetter)
 
-		// Sync endpoints
-		nb.GET("/sync/full", r.fullSync)
-		nb.GET("/sync/incremental", r.incrementalSync)
+		// Sync endpoints（per-endpoint 限流：同步是重查询，限速防滥用）
+		nb.GET("/sync/full", r.rateLimit("nb:sync:full"), r.fullSync)
+		nb.GET("/sync/incremental", r.rateLimit("nb:sync:incremental"), r.incrementalSync)
 
-		// Export endpoints
-		nb.POST("/export/pm", r.pmHandler.ExportPM)
-		nb.POST("/export/alarms", r.alarmHandler.ExportAlarms)
-		nb.GET("/export/config/:deviceId", r.configHandler.ExportConfig)
+		// Export endpoints（per-endpoint 限流）
+		nb.POST("/export/pm", r.rateLimit("nb:export:pm"), r.pmHandler.ExportPM)
+		nb.POST("/export/alarms", r.rateLimit("nb:export:alarms"), r.alarmHandler.ExportAlarms)
+		nb.GET("/export/config/:deviceId", r.rateLimit("nb:export:config"), r.configHandler.ExportConfig)
 
 		// 主备服务器配置 + 切换（system/config 北向设置）。
 		// 仅在 SetServerService 注入后挂载，未注入时这三条端点 404，避免 nil deref。
@@ -195,6 +234,16 @@ func (r *Router) replayDeadLetter(c *gin.Context) {
 }
 
 func (r *Router) fullSync(c *gin.Context) {
+	// 过滤参数白名单：拒绝未知 query 参数。
+	if bad := unknownFilterParams(c.Request.URL.Query(), allowedSyncParams); len(bad) > 0 {
+		response.Fail(c, http.StatusBadRequest, "unknown filter params: "+joinFields(bad))
+		return
+	}
+	// 全量同步无设备维度：非超管不得跨租户拉取全量 → 403。
+	if r.scoper != nil && !r.scoper.RequireDeviceScope(c, false) {
+		return
+	}
+
 	dataType := c.DefaultQuery("data_type", "device")
 	result, err := r.svc.SyncService().FullSync(c.Request.Context(), dataType)
 	if err != nil {
@@ -205,6 +254,16 @@ func (r *Router) fullSync(c *gin.Context) {
 }
 
 func (r *Router) incrementalSync(c *gin.Context) {
+	// 过滤参数白名单：拒绝未知 query 参数。
+	if bad := unknownFilterParams(c.Request.URL.Query(), allowedSyncParams); len(bad) > 0 {
+		response.Fail(c, http.StatusBadRequest, "unknown filter params: "+joinFields(bad))
+		return
+	}
+	// 增量同步无设备维度：非超管不得跨租户拉取全量 → 403。
+	if r.scoper != nil && !r.scoper.RequireDeviceScope(c, false) {
+		return
+	}
+
 	dataType := c.DefaultQuery("data_type", "alarm")
 	sinceStr := c.Query("since")
 	if sinceStr == "" {

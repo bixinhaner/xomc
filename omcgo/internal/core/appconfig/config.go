@@ -442,6 +442,16 @@ type LoginCryptoConfig struct {
 // 每个 PushTarget 独立配置 URL、鉴权方式、推送格式和数据类型。
 type NorthboundConfig struct {
 	PushTargets []PushTargetConfig `mapstructure:"push_targets"`
+	// RateLimitPerEndpoint 北向导出/同步端点每分钟最大请求数；<=0 时取默认 300。
+	RateLimitPerEndpoint int `mapstructure:"rate_limit_per_endpoint"`
+}
+
+// EndpointRateLimit 返回北向 per-endpoint 限流阈值（每分钟），缺省回落到 300。
+func (c NorthboundConfig) EndpointRateLimit() int {
+	if c.RateLimitPerEndpoint <= 0 {
+		return 300
+	}
+	return c.RateLimitPerEndpoint
 }
 
 // PushTargetConfig 定义单个北向推送目标（OSS 端点）。
@@ -463,10 +473,34 @@ type PushTargetConfig struct {
 
 // NEDirectConfig 配置 NE Direct（网元直联）连接，当前仅 CMCC 使用。
 // 部分运营商要求网管平台通过专用协议直连基站，绕过 TR-069 通道下发指令。
+//
+// 安全：NE Direct 是面向运维管理员的内部接口，默认关闭（Enabled=false）。
+// 启用后所有端点强制 JWT/API-Key 认证 + per-endpoint/per-device 固定窗口限流 +
+// 审计日志（见 internal/nedirect/middleware.go）。
 type NEDirectConfig struct {
 	Enabled bool   `mapstructure:"enabled"`
 	Host    string `mapstructure:"host"`
 	Port    int    `mapstructure:"port"`
+	// RateLimitPerEndpoint 每个端点每分钟最大请求数；<=0 时取默认 600。
+	RateLimitPerEndpoint int `mapstructure:"rate_limit_per_endpoint"`
+	// RateLimitPerDevice 每个设备每分钟最大请求数；<=0 时取默认 120。
+	RateLimitPerDevice int `mapstructure:"rate_limit_per_device"`
+}
+
+// EndpointRateLimit 返回端点级限流阈值（每分钟），缺省回落到 600。
+func (c NEDirectConfig) EndpointRateLimit() int {
+	if c.RateLimitPerEndpoint <= 0 {
+		return 600
+	}
+	return c.RateLimitPerEndpoint
+}
+
+// DeviceRateLimit 返回设备级限流阈值（每分钟），缺省回落到 120。
+func (c NEDirectConfig) DeviceRateLimit() int {
+	if c.RateLimitPerDevice <= 0 {
+		return 120
+	}
+	return c.RateLimitPerDevice
 }
 
 // ProvisionConfig 配置自动开站引擎。
