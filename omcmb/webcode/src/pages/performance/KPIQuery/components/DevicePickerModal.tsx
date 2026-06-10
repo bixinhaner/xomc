@@ -135,7 +135,7 @@ export default function DevicePickerModal({
         width={900}
         destroyOnHidden
       >
-        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+        <Space orientation="vertical" style={{ width: '100%' }} size="middle">
           <Space>
             <Input
               placeholder={intl.formatMessage({ id: 'perf.picker.searchDevicePlaceholder' })}

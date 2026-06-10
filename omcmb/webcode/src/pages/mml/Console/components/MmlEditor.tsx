@@ -105,7 +105,7 @@ export default function MmlEditor({ onExecuted }: MmlEditorProps) {
           style={{ flex: 1, fontFamily: 'monospace' }}
           spellCheck={false}
         />
-        <Space direction="vertical">
+        <Space orientation="vertical">
           <Button type="primary" onClick={handleDoClick} loading={executeMutation.isPending}>
             {t('mml.console.editor.execute')}
           </Button>

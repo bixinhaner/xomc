@@ -363,7 +363,7 @@ export default function PmAdhocPage() {
   };
 
   return (
-    <Space direction="vertical" size="large" style={{ width: '100%' }}>
+    <Space orientation="vertical" size="large" style={{ width: '100%' }}>
       <Card
         title={intl.formatMessage({ id: 'perf.adhoc.cardBuiltin' })}
         size="small"
@@ -417,7 +417,7 @@ export default function PmAdhocPage() {
             ? intl.formatMessage({ id: 'perf.adhoc.detailTitle' }, { name: selectedTask.name })
             : intl.formatMessage({ id: 'perf.adhoc.detailTitleDefault' })
         }
-        width={920}
+        size={920}
         open={Boolean(selectedTask)}
         onClose={() => setSelectedTask(null)}
         destroyOnClose

@@ -76,7 +76,7 @@ export default function UICustomSettings({
       size="small"
       initialValues={initialValues ?? UI_CUSTOM_DEFAULTS}
     >
-      <Divider orientation="left" plain>
+      <Divider titlePlacement="left" plain>
         {t('system.ui.imageUpload')}
       </Divider>
 

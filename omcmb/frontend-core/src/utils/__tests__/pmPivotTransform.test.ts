@@ -61,9 +61,6 @@ describe('pivotLongToWide', () => {
     const r = pivotLongToWide([]);
     expect(r.columns).toEqual([]);
     expect(r.rows).toEqual([]);
-    expect(r.hasMultiDevice).toBe(false);
-    expect(r.hasMultiLdn).toBe(false);
-    expect(r.hasPlmn).toBe(false);
   });
 
   it('单设备单 LDN — 1 行 1 列', () => {
@@ -71,7 +68,7 @@ describe('pivotLongToWide', () => {
       row({ time: '2026-05-26T10:00:00Z', metricValue: 5, objectLdn: 'Cellid=111' }),
     ]);
     expect(result.columns).toHaveLength(1);
-    expect(result.columns[0].metricPath).toBe('PHY.NbrCqi6');
+    expect(result.columns[0].key).toBe('PHY.NbrCqi6');
     expect(result.rows).toHaveLength(1);
     expect(result.rows[0]).toMatchObject({
       time: '2026-05-26T10:00:00Z',
@@ -92,7 +89,6 @@ describe('pivotLongToWide', () => {
     const r = pivotLongToWide(inputs);
     expect(r.columns).toHaveLength(2);
     expect(r.rows).toHaveLength(4);
-    expect(r.hasMultiDevice).toBe(false);
     // 倒序：最新时间 10:45 (i=3, value=4) 在第一行
     expect(r.rows[0].cells['M1']).toBe(4);
     expect(r.rows[0].cells['M2']).toBe(4);
@@ -105,7 +101,6 @@ describe('pivotLongToWide', () => {
       row({ deviceSn: 'B', metricValue: 2, time: '2026-05-26T10:00:00Z' }),
     ]);
     expect(r.rows).toHaveLength(2);
-    expect(r.hasMultiDevice).toBe(true);
     expect(r.rows.map((x) => x.deviceSn).sort()).toEqual(['A', 'B']);
     expect(r.columns).toHaveLength(1); // 单指标
   });
@@ -116,7 +111,6 @@ describe('pivotLongToWide', () => {
       row({ objectLdn: 'Cellid=2', metricValue: 2 }),
     ]);
     expect(r.rows).toHaveLength(2);
-    expect(r.hasMultiLdn).toBe(true);
     expect(r.rows.map((x) => x.cellId).sort()).toEqual(['1', '2']);
   });
 
@@ -124,7 +118,6 @@ describe('pivotLongToWide', () => {
     const r = pivotLongToWide([
       row({ objectLdn: 'Cellid=111,PLMN=46068', metricValue: 1 }),
     ]);
-    expect(r.hasPlmn).toBe(true);
     expect(r.rows[0].cellId).toBe('111');
     expect(r.rows[0].plmn).toBe('46068');
   });

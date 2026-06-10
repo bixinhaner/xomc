@@ -191,7 +191,7 @@ export default function ParamModelPage() {
         okText={t('common.confirm')}
         cancelText={t('common.cancel')}
         confirmLoading={uploadMut.isPending}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form layout="vertical">
           <Form.Item

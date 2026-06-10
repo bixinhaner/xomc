@@ -366,7 +366,7 @@ export default function MMLConsoleV2() {
   };
 
   return (
-    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+    <Space orientation="vertical" size={12} style={{ width: '100%' }}>
       <SelectionBar
         deviceCount={selectedSns.length}
         command={command}

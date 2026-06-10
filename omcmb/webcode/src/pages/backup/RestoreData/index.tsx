@@ -187,7 +187,7 @@ export default function RestoreData() {
       const detail =
         err instanceof Error ? err.message : String(err ?? 'unknown');
       message.error(
-        t('backup.restore.submitFailed').replace('{error}', detail)
+        t('backup.restore.submitFailed', { error: detail })
       );
     }
   };
@@ -236,7 +236,7 @@ export default function RestoreData() {
       <Drawer
         title={t('backup.restore.create')}
         placement="right"
-        width={520}
+        size={520}
         open={drawerOpen}
         onClose={() => {
           setDrawerOpen(false);

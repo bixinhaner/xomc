@@ -1,19 +1,14 @@
-import { Card, Radio, Space, Typography, Tooltip, Spin } from 'antd';
+import { Card, Radio, Space, Tooltip, Spin } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import { dashboardApi } from '@core/services/api/dashboardApi';
 import { useT } from '@/hooks/useT';
-import { useThemeToken } from '@/hooks/useThemeToken';
 import { useMemo, useState } from 'react';
 import ReactECharts from 'echarts-for-react';
-import type { HeatmapData } from '@core/types/dashboard';
 import { InfoCircleOutlined } from '@ant-design/icons';
 import EmptyState from '@/components/common/EmptyState';
 
-const { Text } = Typography;
-
 // 星期标签
 const DAY_LABELS_ZH = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
-const DAY_LABELS_EN = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const HOUR_LABELS = Array.from({ length: 24 }, (_, i) => `${i}:00`);
 
 // 颜色主题 - 告警密度从低到高
@@ -21,7 +16,6 @@ const HEATMAP_COLORS = ['#e0f3f8', '#abd9e9', '#74add1', '#4575b4', '#313695'];
 
 export default function AlarmHeatmap() {
   const t = useT();
-  const token = useThemeToken();
   const [days, setDays] = useState(30);
 
   const { data: heatmapData, isLoading } = useQuery({
@@ -139,7 +133,7 @@ export default function AlarmHeatmap() {
         },
       ],
     };
-  }, [heatmapData, t, dayLabels]);
+  }, [heatmapData, dayLabels]);
 
   return (
     <Card

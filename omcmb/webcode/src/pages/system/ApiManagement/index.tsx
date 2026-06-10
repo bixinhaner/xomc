@@ -366,7 +366,7 @@ export default function ApiManagement() {
 
       <Card
         size="small"
-        bordered
+        variant="outlined"
         style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
         styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
       >
@@ -395,7 +395,7 @@ export default function ApiManagement() {
         title={editingEndpoint ? t('api.editEndpoint') : t('api.addEndpoint')}
         open={drawerVisible}
         onClose={() => setDrawerVisible(false)}
-        width={520}
+        size={520}
         footer={
           <Space style={{ justifyContent: 'flex-end', display: 'flex' }}>
             <Button onClick={() => setDrawerVisible(false)}>{t('common.cancel')}</Button>

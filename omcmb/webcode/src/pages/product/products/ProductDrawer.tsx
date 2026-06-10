@@ -292,7 +292,7 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
     <Drawer
       title={isEdit ? t('product.product.drawer.editTitle', { name: product?.name ?? '' }) : t('product.product.drawer.createTitle')}
       placement="right"
-      width={720}
+      size={720}
       open={open}
       onClose={onClose}
       destroyOnHidden

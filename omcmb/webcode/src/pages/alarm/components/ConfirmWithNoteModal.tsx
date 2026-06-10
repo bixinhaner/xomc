@@ -71,7 +71,7 @@ export default function ConfirmWithNoteModal({
       confirmLoading={loading}
       destroyOnHidden
     >
-      <Space direction="vertical" style={{ width: '100%' }} size="middle">
+      <Space orientation="vertical" style={{ width: '100%' }} size="middle">
         <Text>{message}</Text>
         <div>
           <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>

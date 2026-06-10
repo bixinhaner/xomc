@@ -447,7 +447,7 @@ export default function FirmwareUpload({ embedded = false }: FirmwareUploadProps
       {/* 文件列表 */}
       <Card
         size="small"
-        bordered
+        variant="outlined"
         style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
         styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
       >
@@ -483,7 +483,7 @@ export default function FirmwareUpload({ embedded = false }: FirmwareUploadProps
           importMode === 'view' ? t('software.firmware.fileInfo') : t('software.firmware.modifyFile')
         }
         placement="right"
-        width={400}
+        size={400}
         open={importDrawerVisible}
         onClose={handleCloseImportDrawer}
         footer={

@@ -244,7 +244,7 @@ export default function NorthboundManagement() {
 
   const syncTab = (
     <Card>
-      <Space direction="vertical" size={16} style={{ width: '100%' }}>
+      <Space orientation="vertical" size={16} style={{ width: '100%' }}>
         <div>
           Trigger full or incremental data synchronization to northbound/OSS systems.
           Full sync exports all data of the selected type. Incremental sync exports

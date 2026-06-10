@@ -34,7 +34,7 @@ export default function AddGroupDrawer({ open, form, groups, onOk, onCancel, t }
       title={t('device.addGroup')}
       open={open}
       onClose={onCancel}
-      width={520}
+      size={520}
       destroyOnHidden
       footer={
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>

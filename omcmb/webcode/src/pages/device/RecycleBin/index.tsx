@@ -314,7 +314,7 @@ export default function RecycleBin() {
 
       <Card
         size="small"
-        bordered
+        variant="outlined"
         style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
         styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
       >

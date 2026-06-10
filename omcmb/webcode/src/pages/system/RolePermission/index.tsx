@@ -1151,7 +1151,7 @@ export default function RoleManagement() {
                   options={PRODUCT_TYPE_OPTIONS}
                   placeholder={t('role.productClass')}
                 />
-                <Divider type="vertical" style={{ height: 20, margin: 0 }} />
+                <Divider orientation="vertical" style={{ height: 20, margin: 0 }} />
                 <Checkbox
                   checked={isAllSelected}
                   indeterminate={isIndeterminate}
@@ -1352,7 +1352,7 @@ export default function RoleManagement() {
       </div>
       <Card
         size="small"
-        bordered
+        variant="outlined"
         style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
         styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
       >
@@ -1391,7 +1391,7 @@ export default function RoleManagement() {
         title={t('common.add')}
         open={createVisible}
         onClose={handleCloseCreate}
-        width={800}
+        size={800}
         footer={
           <div style={{ textAlign: 'right' }}>
             <Button style={{ marginRight: 8 }} onClick={handleCloseCreate}>
@@ -1450,7 +1450,7 @@ export default function RoleManagement() {
         title={t('common.edit')}
         open={editVisible}
         onClose={handleCloseEdit}
-        width={600}
+        size={600}
         footer={
           <div style={{ textAlign: 'right' }}>
             <Button style={{ marginRight: 8 }} onClick={handleCloseEdit}>
@@ -1530,7 +1530,7 @@ export default function RoleManagement() {
         title={t('common.view')}
         open={viewVisible}
         onClose={handleCloseView}
-        width={600}
+        size={600}
         footer={
           <div style={{ textAlign: 'right' }}>
             <Button onClick={handleCloseView}>

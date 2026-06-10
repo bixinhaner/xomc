@@ -394,7 +394,7 @@ export default function DomainManagement() {
             justifyContent: 'space-between',
             background: '#fafafa'
           }}>
-            <Space direction="vertical" size={0}>
+            <Space orientation="vertical" size={0}>
               <Typography.Text strong style={{ fontSize: 15 }}>
                 {t('nav.topology.domain')} - {selectedDomain.name}
               </Typography.Text>

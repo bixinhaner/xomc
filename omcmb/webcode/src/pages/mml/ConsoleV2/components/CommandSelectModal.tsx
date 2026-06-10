@@ -318,7 +318,7 @@ export default function CommandSelectModal({
         </div>
         <div style={{ flex: 1, overflow: 'auto' }}>
           {hasSelection ? (
-            <Space direction="vertical" size={10} style={{ width: '100%' }}>
+            <Space orientation="vertical" size={10} style={{ width: '100%' }}>
               {pathsLoading ? (
                 <Spin size="small" />
               ) : isAddRmvWithObject ? (
@@ -339,7 +339,7 @@ export default function CommandSelectModal({
                   {paramPaths.length === 0 ? (
                     <Text type="secondary">该命令无可展示的参数路径</Text>
                   ) : (
-                    <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                    <Space orientation="vertical" size={4} style={{ width: '100%' }}>
                       {paramPaths.map((p) => (
                         <div
                           key={p.path}

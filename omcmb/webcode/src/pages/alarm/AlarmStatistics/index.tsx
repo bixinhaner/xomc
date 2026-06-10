@@ -563,7 +563,7 @@ export default function AlarmStatistics() {
       {/* 图表区域。细粒度 ErrorBoundary 兜住任一图表渲染异常，不连累整页白屏；
           数据层错误（isError）则在各卡片内显示错误空态 + 重试。 */}
       <ErrorBoundary onRetry={handleRefresh}>
-        <Spin spinning={isRefreshing} tip={t('common.loading')} size="large">
+        <Spin spinning={isRefreshing} description={t('common.loading')} size="large">
           <Row gutter={[16, 16]}>
             {/* 第零行：告警效率指标 */}
             <Col xs={24}>

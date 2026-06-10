@@ -965,7 +965,7 @@ export default function UpgradePlan() {
       {activeTab === 'task' ? (
         <Card
           size="small"
-          bordered
+          variant="outlined"
           style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
           styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
         >
@@ -988,7 +988,7 @@ export default function UpgradePlan() {
         // Device list tab - all sub-tasks across all tasks
         <Card
           size="small"
-          bordered
+          variant="outlined"
           style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
           styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
         >
@@ -1049,7 +1049,7 @@ export default function UpgradePlan() {
               showIcon
               icon={!batchInputPreview.mixedTypes.includes(drawerProductClass) ? <WarningOutlined /> : undefined}
               message={
-                <Space direction="vertical" size="small">
+                <Space orientation="vertical" size="small">
                   <span>
                     {t('software.upgrade.matchedDevices', { count: batchInputPreview.matched.length })}
                     {batchInputPreview.mixedTypes.includes(drawerProductClass) && (
@@ -1150,7 +1150,7 @@ export default function UpgradePlan() {
       <Drawer
         title={t('software.upgrade.batchUpgrade')}
         placement="right"
-        width={600}
+        size={600}
         open={upgradeDrawerVisible}
         onClose={() => setUpgradeDrawerVisible(false)}
         footer={
@@ -1346,7 +1346,7 @@ export default function UpgradePlan() {
 
           {/* Task config */}
           <Form.Item label={t('software.upgrade.taskConfig') ?? '任务配置'}>
-            <Space direction="vertical" style={{ width: '100%' }}>
+            <Space orientation="vertical" style={{ width: '100%' }}>
               <Checkbox
                 checked={retryOffline}
                 onChange={(e) => setRetryOffline(e.target.checked)}
@@ -1373,7 +1373,7 @@ export default function UpgradePlan() {
       <Drawer
         title={t('software.upgrade.taskDetail') ?? '任务详情'}
         placement="right"
-        width={720}
+        size={720}
         open={!!taskDetailRecord}
         onClose={() => { setTaskDetailRecord(null); setSelectedTaskId(''); }}
         footer={null}
@@ -1430,7 +1430,7 @@ export default function UpgradePlan() {
                     <div style={{ marginTop: 8, color: '#666' }}>{t('software.upgrade.totalProgress') ?? '总体进度'}</div>
                   </div>
                   <div style={{ flex: 1 }}>
-                    <Space direction="vertical" style={{ width: '100%' }}>
+                    <Space orientation="vertical" style={{ width: '100%' }}>
                       <div>
                         <Tag color="success">{t('status.success')}</Tag>
                         <span>{resultStats.completed} {t('software.upgrade.units') ?? '台'}</span>
@@ -1453,7 +1453,7 @@ export default function UpgradePlan() {
                       </div>
                     </Space>
                   </div>
-                  <Divider type="vertical" style={{ height: 120 }} />
+                  <Divider orientation="vertical" style={{ height: 120 }} />
                   <div style={{ textAlign: 'center' }}>
                     <div style={{ fontSize: 32, fontWeight: 'bold', color: '#1890ff' }}>{totalDevices}</div>
                     <div style={{ color: '#666' }}>{t('software.upgrade.deviceTotal')}</div>

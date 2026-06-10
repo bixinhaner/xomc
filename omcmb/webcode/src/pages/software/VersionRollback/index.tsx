@@ -754,7 +754,7 @@ export default function VersionRollback() {
       {activeTab === 'task' ? (
         <Card
           size="small"
-          bordered
+          variant="outlined"
           style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
           styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
         >
@@ -777,7 +777,7 @@ export default function VersionRollback() {
         // Device list tab - all sub-tasks across all rollback tasks
         <Card
           size="small"
-          bordered
+          variant="outlined"
           style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
           styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
         >
@@ -838,7 +838,7 @@ export default function VersionRollback() {
               showIcon
               icon={!batchInputPreview.mixedTypes.includes(drawerProductClass) ? <WarningOutlined /> : undefined}
               message={
-                <Space direction="vertical" size="small">
+                <Space orientation="vertical" size="small">
                   <span>
                     {t('software.upgrade.matchedDevices', { count: batchInputPreview.matched.length })}
                     {batchInputPreview.mixedTypes.includes(drawerProductClass) && (
@@ -939,7 +939,7 @@ export default function VersionRollback() {
       <Drawer
         title={t('software.rollback.batchRollback')}
         placement="right"
-        width={600}
+        size={600}
         open={upgradeDrawerVisible}
         onClose={() => setUpgradeDrawerVisible(false)}
         footer={
@@ -1098,7 +1098,7 @@ export default function VersionRollback() {
       <Drawer
         title={t('software.upgrade.taskDetail')}
         placement="right"
-        width={720}
+        size={720}
         open={!!taskDetailRecord}
         onClose={() => { setTaskDetailRecord(null); setSelectedTaskId(''); }}
         footer={null}
@@ -1153,7 +1153,7 @@ export default function VersionRollback() {
                     <div style={{ marginTop: 8, color: '#666' }}>{t('software.upgrade.overallProgress')}</div>
                   </div>
                   <div style={{ flex: 1 }}>
-                    <Space direction="vertical" style={{ width: '100%' }}>
+                    <Space orientation="vertical" style={{ width: '100%' }}>
                       <div>
                         <Tag color="success">{t('status.success')}</Tag>
                         <span>{resultStats.completed} {t('common.devices')}</span>
@@ -1176,7 +1176,7 @@ export default function VersionRollback() {
                       </div>
                     </Space>
                   </div>
-                  <Divider type="vertical" style={{ height: 120 }} />
+                  <Divider orientation="vertical" style={{ height: 120 }} />
                   <div style={{ textAlign: 'center' }}>
                     <div style={{ fontSize: 32, fontWeight: 'bold', color: '#1890ff' }}>{totalDevices}</div>
                     <div style={{ color: '#666' }}>{t('software.upgrade.deviceTotal')}</div>

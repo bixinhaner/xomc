@@ -595,7 +595,7 @@ export default function AddDrawer({ open, onClose, onSubmit, loading, mode = 'ad
       title={mode === 'edit' ? t('commission.editTask') : t('commission.addTask')}
       open={open}
       onClose={handleClose}
-      width={640}
+      size={640}
       destroyOnHidden
       footer={
         <div style={{ textAlign: 'right' }}>

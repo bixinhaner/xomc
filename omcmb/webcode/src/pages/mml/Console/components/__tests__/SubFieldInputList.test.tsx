@@ -121,13 +121,15 @@ describe('SubFieldInputList', () => {
     expect(toggleSubField).toHaveBeenCalledWith('uid-mod', 'r');
   });
 
-  it('constraintText renders inside AccessTypeTag', () => {
+  it('constraintText 收进 field-info popover（2026-06-02 决策移除 AccessTypeTag）', async () => {
     const fields = [
       sf({ id: 'c', label: 'Constrained', constraintText: '1..100' }),
     ];
     render(<SubFieldInputList statement={modStmt(fields)} />);
-    // 用户决策 2026-05-22：取值范围合并到访问类型 Tag（读写 <type> <range>），
-    // 不再渲染输入框下方独立的 hint 行。
-    expect(screen.getByText(/1\.\.100/)).toBeInTheDocument();
+    // 用户决策 2026-06-02：移除"读写 <TYPE>"AccessTypeTag，取值范围并入每行尾部
+    // field-info 图标的 popover（trigger 含 click）。默认不直接渲染独立 hint 行。
+    expect(screen.queryByText(/1\.\.100/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('field-info'));
+    expect(await screen.findByText(/1\.\.100/)).toBeInTheDocument();
   });
 });

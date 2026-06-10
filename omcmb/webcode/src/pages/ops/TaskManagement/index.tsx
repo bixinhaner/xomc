@@ -345,7 +345,7 @@ export default function TaskManagement() {
         title={selectedTask ? `任务详情 — ${selectedTask.taskName}` : '任务详情'}
         open={detailVisible}
         onClose={() => setDetailVisible(false)}
-        width={600}
+        size={600}
       >
         {selectedTask && (
           <Descriptions bordered column={2} size="small">

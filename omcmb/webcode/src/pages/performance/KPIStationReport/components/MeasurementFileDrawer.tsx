@@ -182,7 +182,7 @@ export default function MeasurementFileDrawer({ open, device, onClose }: Measure
     <Drawer
       title={`${t('perf.measurement.fileList')} - ${device.serialNumber}`}
       placement="right"
-      width={720}
+      size={720}
       open={open}
       onClose={() => {
         setSelectedRowKeys([]);

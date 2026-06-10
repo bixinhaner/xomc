@@ -301,7 +301,7 @@ export default function Templates() {
         title={selectedTemplate ? `${t('ops.templateDetail')} — ${selectedTemplate.templateName}` : t('ops.templateDetail')}
         open={detailVisible}
         onClose={() => setDetailVisible(false)}
-        width={680}
+        size={680}
       >
         {selectedTemplate && (
           <>
@@ -340,7 +340,7 @@ export default function Templates() {
               {t('ops.executionSteps', { count: String(selectedTemplate.steps.length) })}
             </div>
             <Steps
-              direction="vertical"
+              orientation="vertical"
               size="small"
               items={selectedTemplate.steps.map((step) => ({
                 title: (

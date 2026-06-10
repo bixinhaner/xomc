@@ -256,7 +256,7 @@ export default function ScriptTaskDrawer({
       title={t('mml.newMmlTask')}
       open={open}
       onClose={onClose}
-      width={560}
+      size={560}
       destroyOnHidden
       footer={
         <div style={{ textAlign: 'right' }}>
@@ -334,7 +334,7 @@ export default function ScriptTaskDrawer({
             name="fileName"
             style={{ marginLeft: 12 }}
           >
-            <Space direction="vertical" style={{ width: '100%' }}>
+            <Space orientation="vertical" style={{ width: '100%' }}>
               <Space>
                 <Upload
                   accept=".txt"

@@ -1348,7 +1348,7 @@ export default function AddPolicyPage() {
           setCurrentConfig(null);
           configForm.resetFields();
         }}
-        width={720}
+        size={720}
         destroyOnHidden
       >
         <Form form={configForm} layout="vertical" disabled={configDetailMode === 'view'} style={{ paddingBottom: 60 }}>
@@ -1401,7 +1401,7 @@ export default function AddPolicyPage() {
                     ]} />
                   </Form.Item>
                 </div>
-                <Divider orientation="left" style={{ margin: '12px 0 16px' }}>{t('provision.mmeList')}</Divider>
+                <Divider titlePlacement="left" style={{ margin: '12px 0 16px' }}>{t('provision.mmeList')}</Divider>
                 <Form.List name="mmeList">
                   {(fields, { add, remove }) => (
                     <>
@@ -1484,7 +1484,7 @@ export default function AddPolicyPage() {
                     <Input style={{ width: '100%' }} />
                   </Form.Item>
                 </div>
-                <Divider orientation="left" style={{ margin: '12px 0 16px' }}>{t('provision.ipsecTunnelList')}</Divider>
+                <Divider titlePlacement="left" style={{ margin: '12px 0 16px' }}>{t('provision.ipsecTunnelList')}</Divider>
                 <Form.List name="ipsecList">
                   {(fields, { add, remove }) => (
                     <>
@@ -1533,7 +1533,7 @@ export default function AddPolicyPage() {
                               <Input style={{ width: '100%' }} />
                             </Form.Item>
                           </div>
-                          <Divider orientation="left" style={{ margin: '8px 0 12px', fontSize: 12 }}>IKE</Divider>
+                          <Divider titlePlacement="left" style={{ margin: '8px 0 12px', fontSize: 12 }}>IKE</Divider>
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
                             <Form.Item {...restField} name={[name, 'IKE_ENCRYPTION']} label="IKE Encryption" style={{ flex: '1 1 200px' }}>
                               <Select options={ENCRYPTION_OPTIONS} />
@@ -1548,7 +1548,7 @@ export default function AddPolicyPage() {
                               <Input style={{ width: '100%' }} placeholder="e.g. 8h" />
                             </Form.Item>
                           </div>
-                          <Divider orientation="left" style={{ margin: '8px 0 12px', fontSize: 12 }}>ESP</Divider>
+                          <Divider titlePlacement="left" style={{ margin: '8px 0 12px', fontSize: 12 }}>ESP</Divider>
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
                             <Form.Item {...restField} name={[name, 'ESP_ENCRYPTION']} label="ESP Encryption" style={{ flex: '1 1 200px' }}>
                               <Select options={ENCRYPTION_OPTIONS} />
@@ -1563,7 +1563,7 @@ export default function AddPolicyPage() {
                               <Input style={{ width: '100%' }} placeholder="e.g. 1h" />
                             </Form.Item>
                           </div>
-                          <Divider orientation="left" style={{ margin: '8px 0 12px', fontSize: 12 }}>DPD / Rekey</Divider>
+                          <Divider titlePlacement="left" style={{ margin: '8px 0 12px', fontSize: 12 }}>DPD / Rekey</Divider>
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
                             <Form.Item {...restField} name={[name, 'REKEYMARGIN']} label="Rekey Margin" style={{ flex: '1 1 200px' }}>
                               <Input style={{ width: '100%' }} placeholder="e.g. 9m" />
@@ -1735,7 +1735,7 @@ export default function AddPolicyPage() {
                     <InputNumber style={{ width: '100%' }} min={0} max={255} />
                   </Form.Item>
                 </div>
-                <Divider orientation="left" style={{ margin: '16px 0 12px', fontSize: 12 }}>Radio Config</Divider>
+                <Divider titlePlacement="left" style={{ margin: '16px 0 12px', fontSize: 12 }}>Radio Config</Divider>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
                   <Form.Item name="pci" label="PCI" tooltip={`${t('provision.integer')}, ${t('provision.range')}: 0~1007`} style={{ flex: '1 1 200px' }}>
                     <InputNumber style={{ width: '100%' }} min={0} max={1007} />
@@ -1789,7 +1789,7 @@ export default function AddPolicyPage() {
                     <InputNumber style={{ width: '100%' }} />
                   </Form.Item>
                 </div>
-                <Divider orientation="left" style={{ margin: '16px 0 12px', fontSize: 12 }}>Slice Config</Divider>
+                <Divider titlePlacement="left" style={{ margin: '16px 0 12px', fontSize: 12 }}>Slice Config</Divider>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
                   <Form.Item name="sliceSst" label={t('provision.sliceSst')} style={{ flex: '1 1 200px' }}>
                     <InputNumber style={{ width: '100%' }} />

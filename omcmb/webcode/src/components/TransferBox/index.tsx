@@ -263,7 +263,7 @@ const TransferBox: React.FC<TransferBoxProps> = ({
           flexShrink: 0,
         }}
       >
-        <Space direction="vertical" size={6}>
+        <Space orientation="vertical" size={6}>
           <Button
             icon={<DoubleRightOutlined />}
             size="small"

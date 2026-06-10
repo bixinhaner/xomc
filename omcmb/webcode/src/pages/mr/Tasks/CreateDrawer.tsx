@@ -248,7 +248,7 @@ export default function CreateDrawer({ open, onClose, onCreated }: CreateDrawerP
   return (
     <Drawer
       title={t('mrTask.create.title')}
-      width={780}
+      size={780}
       open={open}
       onClose={handleClose}
       destroyOnHidden
@@ -285,7 +285,7 @@ export default function CreateDrawer({ open, onClose, onCreated }: CreateDrawerP
           <Input placeholder={t('mrTask.field.taskNamePlaceholder')} maxLength={128} />
         </Form.Item>
 
-        <Divider orientation="left">{t('mrTask.create.section.params')}</Divider>
+        <Divider titlePlacement="left">{t('mrTask.create.section.params')}</Divider>
         <Form.Item name="measureType" label={t('mrTask.field.measureType')}>
           {/* MRS/MRE/MRO 强制选中（文档 §3.1）— disabled 防止用户取消勾选；
               MDT 自由选填（不强制）。 */}
@@ -369,7 +369,7 @@ export default function CreateDrawer({ open, onClose, onCreated }: CreateDrawerP
         </Form.Item>
 
         <Form.Item label={t('mrTask.create.section.targetDevice')} required style={{ marginBottom: 0 }}>
-          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Space orientation="vertical" size={12} style={{ width: '100%' }}>
             <Space>
               <Input.Search
                 placeholder={t('mrTask.placeholder.deviceSearch')}
@@ -437,7 +437,7 @@ export default function CreateDrawer({ open, onClose, onCreated }: CreateDrawerP
         cancelText={t('common.cancel')}
         destroyOnHidden
       >
-        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+        <Space orientation="vertical" size={8} style={{ width: '100%' }}>
           <Text type="secondary">{t('mrTask.batchSN.hint')}</Text>
           <Input.TextArea
             rows={10}

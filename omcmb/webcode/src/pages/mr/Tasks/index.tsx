@@ -266,7 +266,7 @@ export default function MRTasksPanel(props: MRTasksPanelProps = {}) {
   const total = data?.total ?? 0;
 
   return (
-    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+    <Space orientation="vertical" size={12} style={{ width: '100%' }}>
       {/* 非受控模式（standalone）显示自己的标题 + 新建按钮；
           受控模式（嵌入 FileTransferCenter）由 parent 的顶部 New Task 按钮接管。 */}
       {!isControlled && (
@@ -295,7 +295,7 @@ export default function MRTasksPanel(props: MRTasksPanelProps = {}) {
       />
       <Card
         size="small"
-        bordered
+        variant="outlined"
         styles={{ body: { padding: 0 } }}
       >
         <DataTable

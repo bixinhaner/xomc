@@ -39,7 +39,7 @@ const StatisticsPanel: React.FC<StatisticsPanelProps> = ({
         <React.Fragment key={`${item.label}-${index}`}>
           {index > 0 && (
             <Divider
-              type="vertical"
+              orientation="vertical"
               style={{ height: 'auto', margin: '4px 0' }}
             />
           )}

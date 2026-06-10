@@ -685,7 +685,7 @@ export default function UserManagement() {
       </div>
       <Card
         size="small"
-        bordered
+        variant="outlined"
         style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
         styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
       >
@@ -751,7 +751,7 @@ export default function UserManagement() {
           setCreateVisible(false);
           form.resetFields();
         }}
-        width={520}
+        size={520}
         footer={
           <div style={{ textAlign: 'right' }}>
             <Button
@@ -871,7 +871,7 @@ export default function UserManagement() {
           form.resetFields();
           setSelectedUser(null);
         }}
-        width={520}
+        size={520}
         footer={
           <div style={{ textAlign: 'right' }}>
             <Button
@@ -953,7 +953,7 @@ export default function UserManagement() {
           form.resetFields();
           setSelectedUser(null);
         }}
-        width={520}
+        size={520}
         footer={
           <div style={{ textAlign: 'right' }}>
             <Button onClick={() => {

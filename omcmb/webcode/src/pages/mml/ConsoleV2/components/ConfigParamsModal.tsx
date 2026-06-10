@@ -198,7 +198,7 @@ export default function ConfigParamsModal({
       style={{ marginTop: 32 }}
     />
   ) : (
-    <Space direction="vertical" size={16} style={{ width: '100%' }}>
+    <Space orientation="vertical" size={16} style={{ width: '100%' }}>
       <div>
         {/* 统一头部（所有操作类型同一布局，参考 LST）：全选(仅读类) + 操作类型 + 命令名称 + 操作提示。 */}
         <Space size={8} wrap style={{ width: '100%' }}>
@@ -301,7 +301,7 @@ export default function ConfigParamsModal({
             />
           </div>
         ) : (
-          <Space direction="vertical" size={10} style={{ width: '100%', marginTop: 8 }}>
+          <Space orientation="vertical" size={10} style={{ width: '100%', marginTop: 8 }}>
             {writablePaths.map((p) => (
               <div key={p.path} style={{ whiteSpace: 'nowrap' }}>
                 <Text>{p.label}</Text>{' '}
@@ -384,7 +384,7 @@ export default function ConfigParamsModal({
 
       <Divider style={{ margin: '4px 0 12px' }} />
 
-      <Space direction="vertical" size={12} style={{ width: '100%' }}>
+      <Space orientation="vertical" size={12} style={{ width: '100%' }}>
         <div>
           <Text type="secondary">执行模式</Text>
           <div style={{ marginTop: 6 }}>

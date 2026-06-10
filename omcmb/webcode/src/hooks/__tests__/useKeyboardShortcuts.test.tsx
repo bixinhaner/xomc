@@ -9,8 +9,12 @@ let currentTabState: {
   setActiveKey: ReturnType<typeof vi.fn>;
 };
 
+// hook 在按键时刻经 useTabStore.getState() 读取最新状态（不订阅渲染），
+// 所以 mock 既要可作为 hook 调用，也要带 getState 静态方法。
 vi.mock('@core/store/tabStore', () => ({
-  useTabStore: () => currentTabState,
+  useTabStore: Object.assign(() => currentTabState, {
+    getState: () => currentTabState,
+  }),
 }));
 
 beforeEach(() => {
