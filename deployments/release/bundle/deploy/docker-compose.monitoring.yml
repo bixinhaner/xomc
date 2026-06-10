@@ -1,7 +1,7 @@
 # OMC 监控栈 —— 内网离线部署用（prometheus / alertmanager / grafana / loki /
 # tempo / otelcol / nats-exporter）
 #
-# 与 docker-compose.{infra,app,web}.yml 共用同一 docker compose project（deploy.sh
+# 与 docker-compose.{infra,app,web}.yml 共用同一 docker compose project（install.sh
 # 用 `-p omcgo -f ... -f docker-compose.monitoring.yml ...` 一次性拉起），走
 # docker network 内 service 名互联（从 app/acs/worker 容器的 OTel SDK 连
 # otelcol:4317；prometheus 从各容器 :9091/:9090/:9092 抓 metrics）。

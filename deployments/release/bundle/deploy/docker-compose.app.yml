@@ -1,9 +1,9 @@
 # OMC 业务容器 —— 内网离线部署用（migrate / seed / app / acs / worker）
 #
 # 镜像 tag 来自同目录 .env（由 build-release.sh 依 release.conf 生成）；交付包
-# 内 images/business-images-<版本>-<架构>.tar 由 deploy.sh 一次性 docker load。
+# 内 images/business-images-<版本>-<架构>.tar 由 install.sh 一次性 docker load。
 #
-# 与 docker-compose.infra.yml 共用同一个 docker compose project（deploy.sh 用
+# 与 docker-compose.infra.yml 共用同一个 docker compose project（install.sh 用
 # `-p omcgo -f docker-compose.infra.yml -f docker-compose.app.yml ...` 拉起），
 # 走 docker network 内部 service 名互联（postgres / redis / nats / minio / acs）。
 #
@@ -117,7 +117,7 @@ services:
       # 日志卷（promtail / otelcol filelog 同样路径采集）
       - /opt/omc/run/logs/app:/run/logs/app
       # 三库导入XML重构 Phase 2(D1/D2):整个 data 目录外置到宿主 /opt/omc/data,
-      # bind-mount(RW)进容器;镜像不再 COPY data。deploy.sh 首次播种随包 builtin 基线,
+      # bind-mount(RW)进容器;镜像不再 COPY data。install.sh 首次播种随包 builtin 基线,
       # 升级"现网赢、新版补充"反向合并 —— 运维上传的自定义 XML + .custom sidecar 不丢。
       - /opt/omc/data:/etc/omcgo/data
       - /etc/localtime:/etc/localtime:ro

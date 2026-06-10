@@ -18,9 +18,9 @@
 #   --skip-web                          # 不操作 web compose
 #   --skip-monitoring                   # 不操作 monitoring compose
 #
-# 工作目录：脚本须从「含 docker-compose.*.yml 的 deploy/ 目录」运行（与 deploy.sh
+# 工作目录：脚本须从「含 docker-compose.*.yml 的 deploy/ 目录」运行（与 install.sh
 # 同目录）；自动按存在性把 4 个 compose file 拼入命令。compose 项目名固定 omcgo
-# （与 deploy.sh 一致）。
+# （与 install.sh 一致）。
 #
 # 不需要 root 权限（除非 docker daemon 需要 sudo）。
 # =============================================================================

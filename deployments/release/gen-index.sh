@@ -213,7 +213,7 @@ sudo bash install-docker.sh -h                      # 查看所有参数</pre>
 sudo bash install-docker.sh --uninstall --force                 # 真删 + 删 /var/lib/docker(数据)
 sudo bash install-docker.sh --uninstall --force --keep-data     # 真删 dockerd 但保留 /var/lib/docker</pre>
 <p class="tip"><b>卸载 9 步</b>:① 停所有容器 → ② <code>systemctl disable</code> docker/containerd → ③ 删 install-docker.sh 写的 systemd unit → ④ <code>apt/yum/dnf remove</code> 系统装的 docker.io / docker-ce / docker-compose-plugin / buildx-plugin / containerd.io 等 → ⑤ 删 <code>/usr/local/bin/</code> 下 docker 二进制 → ⑥ 删 <code>/usr/local/lib/docker/cli-plugins/</code> → ⑦ (可选)删 data-root + containerd root 数据目录 → ⑧ 删 <code>/etc/docker/</code> → ⑨ 删 docker 用户组。<br>
-<b>不删 /opt/omc 业务数据</b>。要一并清:先跑 <code>sudo bash deploy.sh --uninstall --force</code>,再跑本脚本。</p>
+<b>不删 /opt/omc 业务数据</b>。要一并清:先跑 <code>sudo bash uninstall.sh --purge --force</code>(卸载默认保留数据,--purge 才连数据一并清),再跑本脚本。</p>
 
 <div class="danger">⚠️ 若 <code>docker.service</code> 启动报
 <code>failed to create NAT chain DOCKER: iptables not found</code>,
@@ -235,35 +235,35 @@ sudo bash setup-mirrors.sh --remove                 # 全部取消，回归官�
 </p>
 
 <h2>🚚 5. 一键部署 OMC</h2>
-<p class="lead">所有场景都使用 <code>deploy.sh</code>，脚本会自动检测已有镜像并智能跳过重复加载。</p>
+<p class="lead">所有场景都使用 <code>install.sh</code>，脚本会自动检测已有镜像并智能跳过重复加载。</p>
 
 <h3>场景 A：首次部署（全新服务器）</h3>
 <pre>cd /opt/omc/releases/omc-&lt;test|release&gt;-&lt;版本&gt;-&lt;架构&gt;
-sudo bash deploy/deploy.sh</pre>
+sudo bash deploy/install.sh</pre>
 <p class="lead">全量执行：load 所有镜像 → 建目录 → 启动基础设施 → migrate/seed → 启动全栈。</p>
 
 <h3>场景 B：升级业务版本（最常用）</h3>
 <pre>cd /opt/omc/releases/omc-&lt;test|release&gt;-&lt;新版本&gt;-&lt;架构&gt;
-sudo bash deploy/deploy.sh --skip-infra</pre>
+sudo bash deploy/install.sh --skip-infra</pre>
 <p class="lead">跳过基础设施镜像加载，仅加载新业务镜像 → 执行新迁移 → 重建业务容器（app/acs/worker/web），基础设施容器保持运行不受影响。</p>
 
 <h3>场景 C：重复部署同版本（修复/重启）</h3>
 <pre>cd /opt/omc/releases/omc-&lt;test|release&gt;-&lt;当前版本&gt;-&lt;架构&gt;
-sudo bash deploy/deploy.sh</pre>
+sudo bash deploy/install.sh</pre>
 <p class="lead">脚本检测到所有镜像已存在 → 自动跳过 load → 重启容器 → 重跑 migrate（幂等）→ 健康检查。适用于服务异常需要完整重启的场景。</p>
 
 <h3>其他参数</h3>
-<pre>sudo bash deploy/deploy.sh --check-only             # 仅检查环境，不动手
-sudo bash deploy/deploy.sh --skip-migrate            # 不跑 migrate / seed
-sudo bash deploy/deploy.sh --skip-monitoring         # 不起监控栈
-sudo bash deploy/deploy.sh -h                        # 查看所有参数</pre>
+<pre>sudo bash deploy/install.sh --check-only             # 仅检查环境，不动手
+sudo bash deploy/install.sh --skip-migrate            # 不跑 migrate / seed
+sudo bash deploy/install.sh --skip-monitoring         # 不起监控栈
+sudo bash deploy/install.sh -h                        # 查看所有参数</pre>
 
-<p class="tip">deploy.sh 自动：环境检查 → 目录布局 → 智能 load 镜像（已有则跳过并重启）→ 默认口令检查 → 启动 infra → 等就绪 → migrate → seed → <code>docker compose up -d</code> 全栈 → 健康检查。<b>全 docker compose 部署，宿主机不再放业务二进制。</b></p>
+<p class="tip">install.sh 自动：环境检查 → 目录布局 → 智能 load 镜像（已有则跳过并重启）→ 默认口令检查 → 启动 infra → 等就绪 → migrate → seed → <code>docker compose up -d</code> 全栈 → 健康检查。<b>全 docker compose 部署，宿主机不再放业务二进制。</b></p>
 <div class="danger">⚠️ 生产环境首次部署前请编辑 <code>/opt/omc/current/deploy/.env</code> 与 <code>/opt/omc/etc/*.prod.yaml</code>，改 <b>PostgreSQL / MinIO / Grafana / JWT</b> 默认口令为强口令。</div>
 
 <h3>5.4 svc.sh — 日常服务控制(部署完成后用)</h3>
-<p class="lead">部署完成后,用 <code>svc.sh</code> 做日常启停 / 重启 / 查日志,无须再跑 deploy.sh。
-脚本必须从 <code>/opt/omc/current/deploy/</code>(含 4 个 compose 文件那层)运行,自动按存在性拼 4 个 compose 文件,compose project 名固定 <code>omcgo</code>(与 deploy.sh 一致)。
+<p class="lead">部署完成后,用 <code>svc.sh</code> 做日常启停 / 重启 / 查日志,无须再跑 install.sh。
+脚本必须从 <code>/opt/omc/current/deploy/</code>(含 4 个 compose 文件那层)运行,自动按存在性拼 4 个 compose 文件,compose project 名固定 <code>omcgo</code>(与 install.sh 一致)。
 不需要 root(除非 docker daemon 本身需 sudo)。</p>
 
 <pre>cd /opt/omc/current/deploy
@@ -361,7 +361,7 @@ bash svc.sh -h                                # 完整帮助</pre>
 </tbody>
 </table>
 
-<h3>9.2 修改步骤（首次部署、<code>deploy.sh</code> 起 infra 之前）</h3>
+<h3>9.2 修改步骤（首次部署、<code>install.sh</code> 起 infra 之前）</h3>
 <pre># 1) 生成强口令（示例）
 openssl rand -base64 24    # PostgreSQL 口令
 openssl rand -base64 24    # MinIO 口令
@@ -383,7 +383,7 @@ sudo vi /opt/omc/etc/acs.prod.yaml      # db.dsn / minio.* （按需）
 sudo vi /opt/omc/etc/worker.prod.yaml   # db.dsn / minio.* （按需）
 
 # 4) 一键部署（自动 load 镜像 + up 全栈）
-sudo bash /opt/omc/current/deploy/deploy.sh</pre>
+sudo bash /opt/omc/current/deploy/install.sh</pre>
 
 <div class="danger">⚠️ <b>volume 已创建后改口令无效</b>：PostgreSQL / MinIO 只在首次创建 <code>pgdata</code> / <code>miniodata</code> volume 时读取环境变量。若发现初始口令错了，需重应。</div>
 
@@ -416,13 +416,13 @@ worker 用它拼 PM 文件上传 URL（<code>http://&lt;OMC_PUBLIC_HOST&gt;:7557
 <pre>sudo vi /opt/omc/current/deploy/.env
 #   OMC_PUBLIC_HOST=172.19.1.132          ← 改成本机对外 IP
 
-# 改完重启业务容器使其生效（或重跑 deploy.sh）
+# 改完重启业务容器使其生效（或重跑 install.sh）
 cd /opt/omc/current/deploy
 bash svc.sh restart app acs worker
 
 # 验证容器内已拿到（应回显你填的 IP）
 docker exec omcgo-worker-1 printenv OMC_PUBLIC_HOST</pre>
-<div class="tip">✅ <b>升级自动继承</b>：<code>deploy.sh</code> 升级时会把上一版 <code>deploy/.env</code> 里的运维自定义值
+<div class="tip">✅ <b>升级自动继承</b>：<code>install.sh</code> 升级时会把上一版 <code>deploy/.env</code> 里的运维自定义值
 （PostgreSQL / MinIO / Grafana 口令、JWT、<code>OMC_PUBLIC_HOST</code>）合并进新包 <code>.env</code>，<b>镜像 tag 仍用新包</b> ——
 所以<b>升级无需重填</b>，仅<b>首次部署</b>需手动填一次。升级日志会打印「.env：已从上一版继承运维自定义值…」。
 如需改值，编辑 <code>/opt/omc/current/deploy/.env</code> 后 <code>bash svc.sh restart app acs worker</code>。</div>
@@ -479,13 +479,12 @@ docker compose -p omcgo exec postgres psql -U omcgo -d omcgo</pre>
 <li>容器日志：<code>docker logs &lt;容器名&gt; --tail 200</code></li>
 <li>重跑健康检查：<code>bash /opt/omc/current/deploy/healthcheck.sh</code></li>
 <li>停止全栈：<code>cd /opt/omc/current/deploy && docker compose -p omcgo -f docker-compose.infra.yml -f docker-compose.app.yml -f docker-compose.web.yml -f docker-compose.monitoring.yml down</code></li>
-<li>查看脚本帮助：<code>bash &lt;脚本&gt; -h</code>（install-docker.sh / setup-mirrors.sh / deploy.sh / healthcheck.sh 均支持）</li>
+<li>查看脚本帮助：<code>bash &lt;脚本&gt; -h</code>（install-docker.sh / setup-mirrors.sh / install.sh / uninstall.sh / healthcheck.sh 均支持）</li>
 <li>Docker 装好却起不来报 <code>iptables not found</code>：最小化系统漏装 iptables，跑 <code>sudo apt install -y iptables nftables bridge-utils</code>（Ubuntu/Debian）或 <code>sudo yum install -y iptables nftables bridge-utils</code>（RHEL 系），再 <code>sudo systemctl start docker</code>。</li>
-<li>打包机 <code>build-images.sh</code> 拉 <code>gcr.io/cadvisor/cadvisor</code> 超时（或本机 <code>docker compose up</code> 同样卡 cadvisor）：<code>daemon.json</code> 的 <code>registry-mirrors</code> <b>仅代理 Docker Hub（docker.io）</b>，对 <code>gcr.io</code>（Google）无效，于是直连超时。先从国内 gcr 代理拉好并打回 gcr.io 标签即可（<code>build-images.sh</code> 命中 <code>&lt;镜像&gt;-amd64-saved</code> 缓存 tag 会跳过 pull）：<pre>docker pull --platform linux/amd64 gcr.m.daocloud.io/cadvisor/cadvisor:v0.49.1
-# 给 build-images.sh 用（缓存 tag，命中即跳 pull）：
-docker tag gcr.m.daocloud.io/cadvisor/cadvisor:v0.49.1 gcr.io/cadvisor/cadvisor:v0.49.1-amd64-saved
-# 本机直接 docker compose up 用（原始 tag）：
-docker tag gcr.m.daocloud.io/cadvisor/cadvisor:v0.49.1 gcr.io/cadvisor/cadvisor:v0.49.1</pre>daocloud 拉不动可换南大镜像 <code>gcr.nju.edu.cn/cadvisor/cadvisor:v0.49.1</code>。</li>
+<li>打包机 <code>build-images.sh</code> 拉 <code>gcr.io/cadvisor/cadvisor</code> 超时（或本机 <code>docker compose up</code> 同样卡 cadvisor）：<code>daemon.json</code> 的 <code>registry-mirrors</code> <b>仅代理 Docker Hub（docker.io）</b>，对 <code>gcr.io</code>（Google）无效，直连超时。<b>首选</b>用环境变量覆盖为国内 gcr 代理（<code>build-images.sh</code> / <code>build-release.sh</code> / 本机 compose 均支持）：<pre>export IMAGE_CADVISOR=gcr.m.daocloud.io/cadvisor/cadvisor:v0.49.1   # 或 gcr.nju.edu.cn/...
+bash build-images.sh        # 打包；本机起栈则 docker compose ... up -d --build</pre>旧版（release.conf 未支持覆盖）退而预拉好打成缓存 tag 让其跳过 pull：<pre>docker pull --platform linux/amd64 gcr.m.daocloud.io/cadvisor/cadvisor:v0.49.1
+docker tag gcr.m.daocloud.io/cadvisor/cadvisor:v0.49.1 gcr.io/cadvisor/cadvisor:v0.49.1-amd64-saved  # build-images.sh 命中缓存跳 pull
+docker tag gcr.m.daocloud.io/cadvisor/cadvisor:v0.49.1 gcr.io/cadvisor/cadvisor:v0.49.1              # 本机 compose 直接用</pre></li>
 <li>完整运维手册：见随项目包附带 <code>docs/OMC内网离线部署手册（运维侧）.md</code></li>
 </ul>
 </div>

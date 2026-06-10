@@ -17,7 +17,7 @@
 # 项目版本号（与基础设施版本独立，最终格式统一为 X.Y.Z-YYYYMMDD-HHMM）：
 #   不带 -v  → 自动生成：<RELEASE_BASE_VERSION>-<构建时间戳>
 #   带  -v   → 指定基础版本：<X.Y.Z>-<构建时间戳>（指定的版本号会自动追加时间戳，
-#              保证镜像 tag 永远唯一，使 deploy.sh 的 images_exist 智能跳过逻辑安全）
+#              保证镜像 tag 永远唯一，使 install.sh 的 images_exist 智能跳过逻辑安全）
 #   例： ./build-release.sh -v 1.0.0   →  1.0.0-20260522-1530
 #
 # 产物：archive/project/<版本>/omc-<渠道>-<版本>-<架构>.tar.<压缩>（+ .sha256）

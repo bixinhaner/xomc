@@ -27,7 +27,7 @@
 #                         其它任意 URL 请单独运行 ../setup-mirrors.sh 后手编 daemon.json
 #   --no-mirror           装完不引导加速、不动 daemon.json（用户后期可单独运行
 #                         ../setup-mirrors.sh）
-#   --skip-if-installed   已检测到 docker 时静默 0 退出（deploy.sh 调用时用）
+#   --skip-if-installed   已检测到 docker 时静默 0 退出（install.sh 调用时用）
 #
 #   ── 卸载模式 ─────────────────────────────────────────────────────────────
 #   --uninstall           进入卸载模式(默认 dry-run,仅打印将要做的动作,不实际执行)
@@ -47,7 +47,7 @@
 #     docker      → /home/docker-data        （写入 /etc/docker/daemon.json）
 #     containerd  → /home/containerd-data   （写入 containerd.service ExecStart --root）
 #   适用 baicells 等紧凑 /var 分区场景（避免装完一拉镜像就撑爆 /var）。
-#   非交互（stdin 非 TTY，例如被 deploy.sh 调起）：自动按 Y 切换。
+#   非交互（stdin 非 TTY，例如被 install.sh 调起）：自动按 Y 切换。
 #
 # 行为：
 #   1. 校验 root + 本目录有且仅一个 docker-*.tgz
@@ -199,7 +199,7 @@ if [ "$UNINSTALL" = 1 ]; then
   log "${DRY}9) 删 docker 用户组"
   echo
   log "${DRY}注意:本脚本【不删 /opt/omc 等 OMC 业务数据】,如需一并清理:"
-  log "${DRY}        先跑 sudo bash deploy.sh --uninstall --force --keep-data,再跑本脚本"
+  log "${DRY}        先跑 sudo bash uninstall.sh --force,再跑本脚本"
   echo
 
   if [ "$REAL" = 0 ]; then
@@ -293,7 +293,7 @@ if [ "$UNINSTALL" = 1 ]; then
   echo
   log "Docker 卸载完成。"
   log "残留(若需要彻底清):"
-  log "  · OMC 业务数据 /opt/omc/(若用 deploy.sh --uninstall 时 --keep-data 保留过)"
+  log "  · OMC 业务数据 /opt/omc/(若用 uninstall.sh 保留过(默认保留数据))"
   log "  · /home/{docker,containerd}-data 自定义数据路径(若用户改过)"
   exit 0
 fi
@@ -302,7 +302,7 @@ fi
 # 2026-05-29 改：docker 已装的环境(尤其 apt 装 docker.io + docker-compose 老仓
 # 库),Compose 是 Python V1,无法解析 compose v3.x 语法。这里把"已装跳过"拆为
 # 两档:
-#   - --skip-if-installed (deploy.sh 内部探测用):docker 已装就完全 exit 0
+#   - --skip-if-installed (install.sh 内部探测用):docker 已装就完全 exit 0
 #   - 默认(运维直跑):跳过 dockerd/containerd 二进制 + systemd unit 安装,
 #                     但**继续**走到下面的 cli-plugins 安装(docker-compose V2
 #                     plugin + docker-buildx),保证 `docker compose` 可用。
@@ -410,7 +410,7 @@ fi  # ← end "if [ \"$SKIP_DOCKERD\" = 0 ]" 包住数据目录选择 + 解压�
 # docker-compose`),不识别 compose v3 写法,部署 OMC 时报
 # "Unsupported config option for services/networks/volumes"。
 # 在 /usr/local/lib/docker/cli-plugins/ 下放 V2 binary 后,`docker compose`
-# (带空格)即可走 V2,deploy.sh 的检测会优先用它。
+# (带空格)即可走 V2,install.sh 的检测会优先用它。
 if [ -f docker-compose ]; then
   install -d /usr/local/lib/docker/cli-plugins
   install -m 0755 docker-compose /usr/local/lib/docker/cli-plugins/docker-compose
@@ -586,6 +586,6 @@ log "  · containerd root   ：${CONTAINERD_ROOT_DISPLAY}"
 log "  · 校验：docker info | grep -E 'Docker Root Dir|Containerd'"
 echo
 log "全部完成。下一步建议："
-log "  · 一键部署 OMC：    sudo bash ../deploy/deploy.sh"
+log "  · 一键部署 OMC：    sudo bash ../deploy/install.sh"
 log "  · 重新选择加速器：  sudo bash ../setup-mirrors.sh"
 log "  · 看当前加速配置：  bash ../setup-mirrors.sh --show"

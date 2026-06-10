@@ -4,7 +4,7 @@
 # 依 release.conf 生成，与 docker save 的镜像一致，勿手改成不一致的值）。
 #
 # 【全 docker compose 部署】：业务容器（app / acs / worker / web）与本文件中
-# 的基础服务同处一个 docker compose project（deploy.sh -p omcgo 拉起），
+# 的基础服务同处一个 docker compose project（install.sh -p omcgo 拉起），
 # 走 docker network 内部 service 名互联（postgres / redis / nats / minio）。
 #
 # 【端口绑定策略】2026-05-29 用户决策：基础服务对内网开放(0.0.0.0)而非仅
