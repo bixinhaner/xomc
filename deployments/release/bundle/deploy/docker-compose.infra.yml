@@ -47,7 +47,10 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     ports:
       - "5432:5432"                        # 内网开放(0.0.0.0),供其它服务器直连
-    command: ["postgres", "-c", "timezone=Asia/Shanghai", "-c", "log_timezone=Asia/Shanghai"]
+    # max_connections=300：app(db60+tsdb40)+worker(db25+tsdb25)+acs(db30) 池上限合计 ~180，
+    # 远超 PG 默认 100，最后启动的 acs 会 "too many clients already" 崩溃。给到 300 覆盖
+    # 全部池 + exporter + 手动 psql + 余量。多副本横扩前应前置 pgbouncer（见 app.prod.yaml）。
+    command: ["postgres", "-c", "timezone=Asia/Shanghai", "-c", "log_timezone=Asia/Shanghai", "-c", "max_connections=300"]
     # 有状态服务给足 60s：checkpoint flush + WAL 落盘，避免被 SIGKILL 截断触发 recovery。
     stop_grace_period: 60s
     deploy:
