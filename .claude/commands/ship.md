@@ -1,9 +1,11 @@
 # /ship — 全流程编排器（One-Click Ship）
 
-> **唯一职责：控制流程。** 一键从「一个想法 / 一个 GitHub Issue」贯穿到「本地提交 + 关闭 Issue」。
+> **唯一职责：控制流程。** 一键从「一个想法 / 一个 GitHub Issue」贯穿到「feature 分支提交 + 开 PR 待合入」。
 > 本 skill **只做调度 + 门控 + 委派**，自身**不实现**任何 PRD 模板 / 审查清单 / 测试逻辑 / 提交细节——那些归各子技能。
 > 取代已下线的 `/dev-pipeline`（其 OMC 硬门精华已折叠进 §硬门；S0–S7 完整 rationale 见归档 `docs/project/dev-pipeline-design-20260420.md`）。
 > **任务源 = GitHub Issues**（`gh` CLI，详见 `docs/agents/issue-tracker.md`）。
+
+> 🔒 **铁律（不可绕过，最高优先级）：一切合入经 PR。** `/ship` **永不**直接 `commit` / `merge` / `push` 到 `main` / `master`；P5 起始终在 feature 分支（`<type>/NN-<slug>`）工作，P9 经 `gh pr create` 开 PR。**合入 main 由 review 通过后进行，ship 自身不 merge、不直推 main。** `--force` / force-push 改写共享分支永禁（settings.json 已 deny）。任一环节直接动 main = 流程失败，立即停下纠正。
 
 ---
 
@@ -13,11 +15,12 @@
 
 | 参数 | 模式 | 说明 |
 |------|------|------|
-| 空 | full（默认） | 推断当前阶段，自动向前推进到 P9 收尾 |
+| 空 | full（默认） | 推断当前阶段，自动向前推进到 P9 开 PR |
 | `status` | 子命令 | 打印 GitHub Issues 看板（按 triage 标签）+ 当前分支阶段 |
 | `audit` | 子命令 | 推断当前阶段、已过门、下一步——**只报告不推进** |
-| `#NN` / `NN` | 入口 | 从指定 GitHub Issue 起步：已 `ready-for-agent` 则直入 P5，否则先回 P4 分诊 |
-| `P1`..`P9` 或 `align`/`spec`/`slice`/`triage`/`build`/`verify`/`review`/`commit`/`close` | 单阶段 | 只跑一个阶段（别名↔阶段：align=P1 spec=P2 slice=P3 triage=P4 build=P5 verify=P6 review=P7 commit=P8 close=P9） |
+| `#NN` | 入口（单 Issue） | 从指定 GitHub Issue 起步：已 `ready-for-agent` 直入 P5，否则先回 P4 分诊（**须带 `#`**） |
+| `N`（裸整数）/ `all` | 批量 | **不指定单子**：自动从 GitHub 拉 `ready-for-agent`（优先级序）取前 N 个（`all`=全部），逐个端到端解决，**每单独立 feature 分支 + 独立 PR**（见 §批量模式） |
+| `P1`..`P9` 或 `align`/`spec`/`slice`/`triage`/`build`/`verify`/`review`/`commit`/`pr` | 单阶段 | 只跑一个阶段（别名↔阶段：align=P1 spec=P2 slice=P3 triage=P4 build=P5 verify=P6 review=P7 commit=P8 pr=P9，`close` 为 `pr` 同义） |
 | `--fast <bugfix\|hotfix\|docs\|refactor>` | 快速通道 | 按 §快速通道裁剪前置阶段，再进入 full |
 
 ---
@@ -27,17 +30,19 @@
 每进入一个阶段先 echo：`─── P<N> <名称> ───  委派: /<skill>  硬门: <list>`。
 门未过 → **停下、报告、等修复**；修复后 `/ship P<N>` 重跑该阶段。
 
+**分支铁律**：进入 P5 前若 `git branch --show-current` ∈ {`main`,`master`} → 先 `git switch -c <type>/NN-<slug>`（type 取 Issue category：feat/fix/refactor/docs/chore）。P5–P9 全程在该 feature 分支，**绝不**在 main 上 commit/merge；最终经 P9 的 PR 合入（见 §硬门 9）。
+
 | 阶段 | 委派技能 | 入口条件 | 硬门（过则推进） | HITL |
 |------|---------|---------|----------------|------|
 | **P1 对齐** | `/grill-with-docs` | 需求模糊 / 跨模块 / 有架构取舍 | 决策树各分支已定；`CONTEXT.md`/`docs/adr/` 同步 | ✋ 逐问确认 |
 | **P2 立项** | `/to-prd` | 已对齐，需求成形 | PRD 发布为 GitHub Issue + 打 `ready-for-agent`（to-prd 自带，不再重复分诊） | ✋ 确认 seam |
 | **P3 切片** | `/to-issues` | PRD 含 > 1 个垂直切片 | 切片为可独立领取的**子 Issue**（tracer-bullet），依赖序发布 | ✋ 确认粒度/依赖 |
 | **P4 分诊** | `/triage` | **仅 P3 拆出的子 Issue** 未就绪 | 每子 Issue 恰好一个 category + 一个 state 标签；`ready-for-agent` 附 agent brief | ✋ 维护者拍板 |
-| **P5 实现** | `/tdd`（卡死时 `/diagnose`） | 有 `ready-for-agent` 的 Issue | 见 §硬门 1–3（go build / go test / typecheck 退出码） | — AFK |
+| **P5 实现** | `/tdd`（卡死时 `/diagnose`） | 有 `ready-for-agent` 的 Issue（**先确保在 feature 分支，非 main**） | 见 §硬门 1–3、9（go build / go test / typecheck 退出码；分支非 main） | — AFK |
 | **P6 验证** | `/e2e`、`/acs-stress-test`、`/verify` 或 `/run` | P5 门全绿 | 见 §硬门 4–5（E/R≥1、迁移双向演练） | — AFK |
 | **P7 审查** | `/review`（触 auth 追加 `/security-review`）+ `/simplify` | P6 done | 见 §硬门 6–7（审查报告无 CRITICAL）；DoD 逐项勾选（`docs/project/dod.md`） | — AFK |
 | **P8 提交** | `/commit` | P7 done | 见 §硬门 8；commit 成功；footer `Closes #NN` | — AFK |
-| **P9 收尾** | （内联）+ 卡续时 `/handoff` | P8 done | 评论/关闭 Issue 引用 commit hash；输出「本地已提交（hash），未推送」；给下一 Issue 建议 | — AFK |
+| **P9 交付·PR** | （内联 `gh`）+ 卡续时 `/handoff` | P8 done | 见 §硬门 9；`git push -u origin <feature分支>` + `gh pr create`（body 含 `Closes #NN`）；输出 PR 链接；**不直接合 main**，合入待 review；给下一 Issue 建议 | ✋ 合并经 review |
 
 > **不重复分诊**：P2 的 PRD Issue 已带 `ready-for-agent`（`/to-prd` 自带），P4 只 triage P3 拆出的子 Issue。**单切片 PRD**（不满足 P3 入口）从 P2 直接跳 P5，跳过 P3/P4。
 > **专家视角**：每阶段按**改动文件路径**自动叠加 `docs/expert-personas.md` 的对应专家（如触 `internal/acs/`→TR-069，`migrations/`→数据，`omcmb/`→前端）。本 skill 不重述清单，只提醒激活。
@@ -71,8 +76,9 @@
 6. 〔质量·P7〕审查报告含 CRITICAL → 不过。CRITICAL 清单**归 `/review`**，含：`if carrier == "cmcc|ctcc|cucc"` 硬编码、字符串拼接 SQL、裸 `panic`、公共接口新增 `any`/`interface{}`、删测试 / 降安全等
 7. 〔质量·P7〕触 `internal/admin/` 或 `middleware/auth*` 未跑 `/security-review` → 不过
 8. 〔机械·P8〕`git commit --no-verify` → settings.json 已 deny，硬失败；pre-commit 失败修根因，不 `--amend`，新开一笔
+9. 〔机械·P9〕**PR 铁律**：开 PR 前 `git branch --show-current` ∉ {`main`,`master`}（否则先建 `<type>/NN-<slug>` 并把提交移过去）；P9 出口 = `gh pr create` 返回 PR URL；**严禁** `git merge` / `git push` 直推 `main`、严禁 `--force`（settings.json deny）；PR 合入由 review 通过后进行，**ship 不自动 merge**
 
-无对应改动的门标 `N/A`（如无新端点则 E/R = N/A）。门 1–3→P5、4–5→P6、6–7→P7、8→P8，无孤儿门。
+无对应改动的门标 `N/A`（如无新端点则 E/R = N/A）。门 1–3→P5、4–5→P6、6–7→P7、8→P8、9→P9，无孤儿门。
 
 ---
 
@@ -90,6 +96,28 @@
 
 裁剪的阶段必须在 P8 commit body 的 `Skip: P1,P2,...` 字段记录。
 > refactor「行为不变」**不豁免硬门 6**：若触及 `migrations/` 仍须过迁移双向演练。
+> **P9（PR）任何快速通道都不可裁剪**：hotfix / docs 一律经 PR 合入，紧急时在 PR 上加急 review，但**绝不直推 main**。
+
+---
+
+## §批量模式（`ship N` / `ship all`）— 不指定单子，自动领单
+
+**用途**：一条命令连续清理多个已就绪 Issue。`ship 5` = 自动解决 5 个单；`ship all` = 清空所有 `ready-for-agent`。
+
+**选单**：`gh issue list --label ready-for-agent --state open --json number,title,labels` → 按 `priority: critical → high → medium → low` 排序、同级按 `#` 升序 → 取前 N（`all`=全部）。**只领 `ready-for-agent`**；需 P1–P4（设计 / 分诊）的单不在批量范围，自动略过并在汇总列出。
+
+**逐单循环（默认串行，一次一单）**，对选中的每个 Issue：
+1. `git switch main` 回基线（**不自动 `pull` 远端**，除非用户要求同步）→ `git switch -c <type>/NN-<slug>`（type 取 Issue category）。
+2. 跑该单 P5→P9（实现→验证→审查→提交→**开 PR**），全程过硬门 1–9；按其 category 标签自动选快速通道（同 §快速通道）；触 auth 仍跑 `/security-review`。
+3. P9 开 PR 成功 → 记录 PR 链接 → 回步骤 1 处理下一单。**绝不自动 merge**（PR 铁律）。
+
+**遇阻处理**（不让一个单卡死整批）：硬门不过且 3 次尝试规则耗尽 / 需澄清 / 编译测试无法自愈 → 该单标 `blocked`、`gh issue comment` 记录卡点、**跳过继续下一单**；半成品分支保留供人工接手。
+
+**批量汇总**（结束输出）：N 单逐项结果 ✅ 已开 PR（含链接）/ ⛔ blocked（含原因）/ ⏭️ 略过（非 ready），并给出下一步建议（哪些 PR 待 review、哪些单需人工）。
+
+**并发**：默认串行，避免分支 / 工作树交叉污染；需并行时用 `git worktree` 每单隔离（进阶，非默认）。
+
+**安全闸**：批量仍受全部硬门约束——每单各自独立 PR，**绝不**直推 main、绝不自动 merge。
 
 ---
 
@@ -126,10 +154,13 @@
 ## 常见场景
 
 ```
-/ship                 # 一键：从当前状态自动推进到收尾
+/ship                 # 一键：从当前状态自动推进到开 PR（在 feature 分支，不碰 main）
 /ship status          # 看 GitHub Issues 看板 + 当前阶段
 /ship audit           # 这分支到哪了？哪些门过了？下一步？
-/ship #42             # 领取 Issue #42（就绪则直入实现，否则先分诊）→ 收尾
-/ship --fast bugfix #42   # bugfix 快速通道
+/ship #42             # 领取单个 Issue #42（须带 #）→ feature 分支 → 开 PR
+/ship 5               # 不指定单子：自动领 5 个 ready-for-agent 单，逐个解决、各开 PR
+/ship all             # 清空所有 ready-for-agent（每单一分支一 PR）
+/ship --fast bugfix #42   # bugfix 快速通道（仍经 PR 合入，不可裁剪 P9）
+/ship pr              # 只跑 P9：push feature 分支 + gh pr create
 /ship P7              # 只重跑审查阶段
 ```
