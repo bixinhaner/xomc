@@ -5314,10 +5314,10 @@ const messages: Record<string, string> = {
   'mml.console.saveOnly':                    'Save',
 
   // PathPicker (multi-select for paramPaths in custom command form)
-  'mml.console.pathPicker.label':            'Parameter Paths (search & pick from the standard PATH list, or enter a full PATH manually; multiple allowed)',
+  'mml.console.pathPicker.label':            'Parameter Paths (search or pick from the standard PATH list; multiple allowed)',
   'mml.console.pathPicker.modeStandard':     'Pick from standard list',
   'mml.console.pathPicker.modeManual':       'Manual input',
-  'mml.console.pathPicker.searchPlaceholder':   'Search standard path or command name (≥1 char)',
+  'mml.console.pathPicker.searchPlaceholder':   'Search or select a standard PATH',
   'mml.console.pathPicker.manualPlaceholder':   'Enter a full PATH, press Enter or click Add',
   'mml.console.pathPicker.manualAdd':        'Add',
   'mml.console.pathPicker.required':         'Select or enter at least one PATH',

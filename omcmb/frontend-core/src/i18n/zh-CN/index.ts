@@ -5341,10 +5341,10 @@ const messages: Record<string, string> = {
   'mml.console.saveOnly':                    '保存',
 
   // PathPicker（自定义命令的参数路径多选选择器）
-  'mml.console.pathPicker.label':            '参数路径（从标准 PATH 列表模糊搜索选择，或手动输入完整 PATH；可添加多条）',
+  'mml.console.pathPicker.label':            '参数路径（从标准 PATH 列表搜索或选择；可添加多条）',
   'mml.console.pathPicker.modeStandard':     '从标准列表选',
   'mml.console.pathPicker.modeManual':       '手动输入',
-  'mml.console.pathPicker.searchPlaceholder':   '搜索标准 path 或命令名（≥1 字符）',
+  'mml.console.pathPicker.searchPlaceholder':   '搜索标准 PATH 或选择标准 PATH',
   'mml.console.pathPicker.manualPlaceholder':   '输入完整 PATH，回车或点「添加」',
   'mml.console.pathPicker.manualAdd':        '添加',
   'mml.console.pathPicker.required':         '请至少选择或输入一条 PATH',
