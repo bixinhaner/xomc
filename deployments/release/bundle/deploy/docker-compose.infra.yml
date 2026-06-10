@@ -76,14 +76,18 @@ services:
       TZ: "Asia/Shanghai"
     ports:
       - "6379:6379"                        # 内网开放(0.0.0.0),供其它服务器直连
-    command: redis-server --appendonly yes
+    # maxmemory 2gb + allkeys-lru：Redis 无上限增长会撞 cgroup 触发 OOM。曾因数据集 2.36GB
+    # 远超 512m 限额，启动 load 即被 kill → 死循环、永不 healthy，拖垮 app/acs/worker。设
+    # maxmemory 上限 + LRU 淘汰（队列/会话等丢失可从 PG 双写或重新上报恢复）；容器 limit 抬到
+    # 3g（> maxmemory，给 AOF rewrite 的 fork COW 留余量）。
+    command: redis-server --appendonly yes --maxmemory 2gb --maxmemory-policy allkeys-lru
     # AOF rewrite/fsync 落盘窗口
     stop_grace_period: 30s
     deploy:
       resources:
         limits:
           cpus: "1"
-          memory: 512m
+          memory: 3g
         reservations:
           cpus: "0.25"
           memory: 256m
