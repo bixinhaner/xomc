@@ -205,12 +205,9 @@ func TestRollbackRequestJSON(t *testing.T) {
 func TestHandler_UpgradeTaskEndpoints(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	// Verify routes are registered by creating a handler and registering routes
-	taskRepo := &swHTaskRepoStub{}
-	subTaskRepo := &swHSubTaskRepoStub{}
-	fwRepo := &swHFirmwareRepoStub{}
-
-	h := software.NewHandler(nil, fwRepo, taskRepo, subTaskRepo, zap.NewNop())
+	// #18 分层整改后 software.NewHandler 仅收 (service, logger)；本用例只验证路由
+	// 注册，RegisterRoutes 不触达 service（handler 方法仅在请求期 deref），故传 nil。
+	h := software.NewHandler(nil, zap.NewNop())
 	r := gin.New()
 	h.RegisterRoutes(r.Group(""))
 
