@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"bufio"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -11,6 +12,14 @@ import (
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/model"
 )
+
+// parseReadBufferSize 是包在传入 io.Reader 外的 bufio 缓冲上限（64 KiB）。
+//
+// PM 文件经 MinIO 对象流（GetObject 返回的 *minio.Object）逐块到达。xml.Decoder 本身是
+// 流式的（按 token 增量解析，不会先把整个文件读进内存），但底层 reader 若每次只回几字节
+// 会放大 syscall 次数。固定 64 KiB bufio 把读放大到顺序大块、内存占用恒定（与文件大小无关），
+// 既保住流式解析的低峰值内存，又减少 IO 往返。改成 io.Reader 入参后大文件不再整文件驻留。
+const parseReadBufferSize = 64 * 1024
 
 // PMFileContent holds the parsed content of a PM XML file.
 //
@@ -30,11 +39,11 @@ import (
 // G3 合表为 pm_metrics 后，三字段将写入新表 start_time / end_time / ingest_time 列（NOT NULL）。
 type PMFileContent struct {
 	DeviceSN      string
-	CollectTime   time.Time         // 兼容：沿用 granPeriod.endTime
-	FileBeginTime time.Time         // G4: fileHeader/measCollec/@beginTime
-	FileEndTime   time.Time         // G4: fileFooter/measCollec/@endTime
-	IngestTime    time.Time         // G4: Parse 完成时刻（OMC 时钟）
-	Granularity   int               // minutes
+	CollectTime   time.Time // 兼容：沿用 granPeriod.endTime
+	FileBeginTime time.Time // G4: fileHeader/measCollec/@beginTime
+	FileEndTime   time.Time // G4: fileFooter/measCollec/@endTime
+	IngestTime    time.Time // G4: Parse 完成时刻（OMC 时钟）
+	Granularity   int       // minutes
 	Counters      []model.PMCounter
 }
 
@@ -48,10 +57,10 @@ func NewPMXMLParser() *PMXMLParser {
 
 // XML structures for 3GPP 32.435 PM file format.
 type xmlMeasInfo struct {
-	MeasInfoId string           `xml:"measInfoId,attr"`
-	GranPeriod xmlGranPeriod    `xml:"granPeriod"`
-	MeasTypes  []xmlMeasType    `xml:"measType"`
-	MeasValues []xmlMeasValue   `xml:"measValue"`
+	MeasInfoId string         `xml:"measInfoId,attr"`
+	GranPeriod xmlGranPeriod  `xml:"granPeriod"`
+	MeasTypes  []xmlMeasType  `xml:"measType"`
+	MeasValues []xmlMeasValue `xml:"measValue"`
 }
 
 type xmlGranPeriod struct {
@@ -65,8 +74,8 @@ type xmlMeasType struct {
 }
 
 type xmlMeasValue struct {
-	MeasObjLdn string  `xml:"measObjLdn,attr"`
-	Results    []xmlR  `xml:"r"`
+	MeasObjLdn string `xml:"measObjLdn,attr"`
+	Results    []xmlR `xml:"r"`
 }
 
 type xmlR struct {
@@ -98,8 +107,13 @@ type xmlCollecAttrs struct {
 }
 
 // Parse parses a PM XML file from the given reader.
+//
+// 流式解析（issue #14）：用 xml.Decoder 按 token 增量消费 r，绝不把整个文件读进内存；
+// 外面再包一层固定 64 KiB bufio 让底层 reader（MinIO 对象流）的小块读聚成顺序大块，
+// 峰值内存与文件大小解耦。只有最终产出的 Counters 切片随文件内容线性增长（BatchInsert
+// 契约要求一次拿到全部 counter），这是必要的而非可避免的驻留。
 func (p *PMXMLParser) Parse(r io.Reader, deviceID uuid.UUID) (*PMFileContent, error) {
-	decoder := xml.NewDecoder(r)
+	decoder := xml.NewDecoder(bufio.NewReaderSize(r, parseReadBufferSize))
 
 	content := &PMFileContent{}
 	var inMeasData bool
@@ -194,9 +208,9 @@ func (p *PMXMLParser) Parse(r io.Reader, deviceID uuid.UUID) (*PMFileContent, er
 						continue
 					}
 					content.Counters = append(content.Counters, model.PMCounter{
-						Time:         collectTime,
-						DeviceID:     deviceID,
-						DeviceSN:     content.DeviceSN, // T-0164-P3: TR-069 SN（parser 从 managedElement.LocalDn 解析）
+						Time:     collectTime,
+						DeviceID: deviceID,
+						DeviceSN: content.DeviceSN, // T-0164-P3: TR-069 SN（parser 从 managedElement.LocalDn 解析）
 						// OUI 由 collector 在 BatchInsert 前从 payload 统一填充（parser 不解析 OUI）
 						CellID:       cellID,
 						CounterGroup: counterGroup,

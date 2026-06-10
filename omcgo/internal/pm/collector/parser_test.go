@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -9,6 +10,25 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// oneByteReader 每次只回 1 字节，模拟最碎的流式输入（MinIO 对象流极端情况），
+// 用于验证流式解析对任意分块边界都产出一致结果（issue #14）。
+type oneByteReader struct {
+	data []byte
+	pos  int
+}
+
+func (r *oneByteReader) Read(p []byte) (int, error) {
+	if r.pos >= len(r.data) {
+		return 0, io.EOF
+	}
+	if len(p) == 0 {
+		return 0, nil
+	}
+	p[0] = r.data[r.pos]
+	r.pos++
+	return 1, nil
+}
 
 func TestPMXMLParser_Parse(t *testing.T) {
 	testDeviceID := uuid.New()
@@ -269,6 +289,69 @@ func TestParseDuration(t *testing.T) {
 			got := parseDuration(tt.input)
 			assert.Equal(t, tt.wantSecs, got)
 		})
+	}
+}
+
+// ==================== issue #14: 流式分块解析一致性 ====================
+
+const parityXML = `<?xml version="1.0" encoding="UTF-8"?>
+<measCollecFile>
+  <fileHeader dnPrefix="DC=cmcc" vendorName="TestVendor">
+    <measCollec beginTime="2026-05-22T10:00:00+08:00"/>
+  </fileHeader>
+  <measData>
+    <managedElement localDn="SubNetwork=1,MeContext=eNB001" swVersion="V1.0"/>
+    <measInfo measInfoId="PM_Counters">
+      <granPeriod duration="PT900S" endTime="2026-05-22T10:15:00+08:00"/>
+      <measType p="1">rrc_conn_setup_att</measType>
+      <measType p="2">rrc_conn_setup_succ</measType>
+      <measValue measObjLdn="CellId=Cell1">
+        <r p="1">1000</r>
+        <r p="2">950</r>
+      </measValue>
+      <measValue measObjLdn="CellId=Cell2">
+        <r p="1">500</r>
+        <r p="2">490</r>
+      </measValue>
+    </measInfo>
+  </measData>
+  <fileFooter>
+    <measCollec endTime="2026-05-22T10:15:00+08:00"/>
+  </fileFooter>
+</measCollecFile>`
+
+// TestPMXMLParser_StreamingParity 验证：把同一份 XML 经"整串 reader"与"每次 1 字节
+// 的碎块 reader"分别解析，产出的 counters / 设备 SN / 粒度 / 三时间字段完全一致。
+// 证明 issue #14 的 bufio 流式化没有改变解析语义（输出 = 改造前）。
+func TestPMXMLParser_StreamingParity(t *testing.T) {
+	deviceID := uuid.New()
+	parser := NewPMXMLParser()
+
+	whole, err := parser.Parse(strings.NewReader(parityXML), deviceID)
+	require.NoError(t, err)
+	require.NotNil(t, whole)
+
+	chunked, err := parser.Parse(&oneByteReader{data: []byte(parityXML)}, deviceID)
+	require.NoError(t, err)
+	require.NotNil(t, chunked)
+
+	assert.Equal(t, whole.DeviceSN, chunked.DeviceSN)
+	assert.Equal(t, whole.Granularity, chunked.Granularity)
+	assert.True(t, whole.CollectTime.Equal(chunked.CollectTime), "CollectTime 应一致")
+	assert.True(t, whole.FileBeginTime.Equal(chunked.FileBeginTime), "FileBeginTime 应一致")
+	assert.True(t, whole.FileEndTime.Equal(chunked.FileEndTime), "FileEndTime 应一致")
+	require.Equal(t, len(whole.Counters), len(chunked.Counters), "counter 数应一致")
+
+	// 逐 (cell, name) → value 比对，顺序无关。
+	type ck struct{ cell, name string }
+	wm := make(map[ck]float64, len(whole.Counters))
+	for _, c := range whole.Counters {
+		wm[ck{c.CellID, c.CounterName}] = c.CounterValue
+	}
+	for _, c := range chunked.Counters {
+		v, ok := wm[ck{c.CellID, c.CounterName}]
+		require.True(t, ok, "碎块解析多出 counter %s/%s", c.CellID, c.CounterName)
+		assert.Equal(t, v, c.CounterValue, "counter %s/%s 值不一致", c.CellID, c.CounterName)
 	}
 }
 

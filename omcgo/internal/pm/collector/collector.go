@@ -2,6 +2,7 @@ package collector
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/omcgo/omcgo/internal/pm"
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
+	"github.com/omcgo/omcgo/internal/pm/metrics"
 	"go.uber.org/zap"
 )
 
@@ -114,7 +116,7 @@ func NewPMCollector(
 		minioClient: minioClient, bucket: bucket, parser: parser,
 		counterRepo: counterRepo, kpiEngine: kpiEngine,
 		fileStore: fileStore,
-		eventBus: eventBus, logger: logger,
+		eventBus:  eventBus, logger: logger,
 	}
 }
 
@@ -245,6 +247,24 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 	content.Counters = c.filterByWhitelist(ctx, payload.DeviceSN, content.Counters)
 
 	if err := c.counterRepo.BatchInsert(ctx, content.Counters); err != nil {
+		// issue #14 迟到数据降级：补传命中 TimescaleDB 压缩 chunk（> compression 阈值）时
+		// ON CONFLICT 不被支持，存储层把它归为 ErrLateArrival。这是预期的业务约束而非系统
+		// 故障 —— 不能让历史补传把整批数据反复重试灌进 DLQ 阻塞实时 PM。降级为：log WARN +
+		// 记 metric + 当作已处理跳过（return nil），让该文件正常 ack。
+		// 专用迟到数据表（late-arrivals staging，可后续回灌解压 chunk）属更大设计，记入遗留。
+		if errors.Is(err, metrics.ErrLateArrival) {
+			c.logger.Warn("PM file skipped: late-arriving data hit compressed chunk (UPSERT unsupported)",
+				zap.String("path", payload.MinIOPath),
+				zap.String("device_sn", payload.DeviceSN),
+				zap.Int("counters", len(content.Counters)),
+				zap.Error(err))
+			if c.metrics != nil {
+				c.metrics.LateArrivalFilesTotal.WithLabelValues(payload.Carrier, payload.Technology).Inc()
+				c.metrics.FilesProcessedTotal.WithLabelValues("late_arrival").Inc()
+				c.metrics.ProcessingDurationSecs.Observe(time.Since(startTime).Seconds())
+			}
+			return nil
+		}
 		if c.metrics != nil {
 			c.metrics.FilesProcessedTotal.WithLabelValues("failed").Inc()
 			c.metrics.ProcessingDurationSecs.Observe(time.Since(startTime).Seconds())

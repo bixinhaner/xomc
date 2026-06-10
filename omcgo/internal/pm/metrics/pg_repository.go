@@ -3,14 +3,40 @@ package metrics
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/omcgo/omcgo/internal/core/storage"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 )
+
+// SQLSTATE 分类（不引入 pgerrcode 依赖，直接用裸码常量）：
+//   - sqlstateFeatureNotSupported（0A000）：TimescaleDB 对压缩 chunk 的 INSERT ... ON CONFLICT
+//     抛 "invalid ON CONFLICT clause ... on compressed chunk"，归 feature_not_supported 类。
+const sqlstateFeatureNotSupported = "0A000"
+
+// ErrLateArrival 标记一次因 TimescaleDB 压缩 chunk 不允许 UPSERT 而被拒绝的迟到补传写入
+// （PM 文件 end_time 落在 > compression 阈值的旧 chunk 上）。
+//
+// 降级语义（issue #14）：BatchInsert 命中此错误时不再硬失败把整批数据丢进 retry/DLQ，
+// 而是 wrap 成本 sentinel 返回，由上层（collector）log WARN + 跳过，保证实时 PM 不被
+// 历史补传阻塞。专用的迟到数据表（late-arrivals staging）是更大的设计，记入遗留。
+var ErrLateArrival = errors.New("pm_metrics: late-arriving data hit compressed chunk (UPSERT not supported)")
+
+// lateArrivalTotal 迟到补传命中压缩 chunk 被降级跳过的计数（issue #14）。
+// 包级注册（DefaultRegisterer）：BatchInsert 在 pm/metrics 层即可观测，无需把 *pm.PMMetrics
+// 反向注入仓库层（会造成 pm → pm/metrics 的反向依赖环）。
+var lateArrivalTotal = promauto.NewCounter(prometheus.CounterOpts{
+	Name: "omc_pm_late_arrival_total",
+	Help: "Total PM metric batches skipped because late-arriving data hit a compressed TimescaleDB chunk (UPSERT unsupported).",
+})
 
 // Repository 是 pm_metrics 的统一持久层接口。
 //
@@ -79,29 +105,145 @@ func (r *PgRepository) Insert(ctx context.Context, m PMMetric) error {
 	return r.BatchInsert(ctx, []PMMetric{m})
 }
 
-// BatchInsert 批量插入。使用自然键 ON CONFLICT DO UPDATE 实现补传幂等：
+// pmMetricsColumns 是 pm_metrics 的写入列序（COPY 与 INSERT 共用，顺序必须与
+// buildRows / buildBatchInsertSQL 一致）。
+var pmMetricsColumns = []string{
+	"id", "device_oui", "device_sn", "metric_path", "metric_type", "metric_value",
+	"statis_type", "granularity", "time", "start_time", "end_time",
+	"ingest_time", "object_ldn", "extra",
+}
+
+// batchInsertThreshold 是切换到 COPY 暂存表路径的批量阈值。
 //
-//	相同 (device_oui, device_sn, metric_path, granularity, end_time, time, object_ldn)
-//	再次写入时更新 metric_value（取新值）+ ingest_time（取 NOW()）。
+// 小批量（单文件 KPI 计算、补单条）走原 VALUES 多行 INSERT —— 一次 round-trip、
+// 直接带 ON CONFLICT、无建表开销，对几行到几十行最快。大批量（PM 文件解析后的
+// 几百~几千条 counter）走 COPY 暂存表 + INSERT...SELECT...ON CONFLICT —— COPY 二进制
+// 协议批量灌库远快于把成千上万个占位符塞进单条 VALUES（旧实现随行数线性膨胀 SQL 文本
+// 与参数数组，本质 O(n) 文本拼接 + 单条巨型语句解析）。
+//
+// 阈值取 50：低于此用 VALUES 省去建表两条额外语句；高于此 COPY 的吞吐优势盖过建表开销。
+const batchInsertThreshold = 50
+
+// BatchInsert 批量插入。两条路径共享同一套自然键 ON CONFLICT DO UPDATE 补传幂等语义：
+//
+//		相同 (device_oui, device_sn, metric_path, granularity, end_time, time, object_ldn)
+//		再次写入时更新 metric_value（取新值）+ ingest_time（取 NOW()）。
+//
+//	  - 小批量（< batchInsertThreshold）：VALUES 多行 INSERT，直接带 ON CONFLICT 子句。
+//	  - 大批量（>= batchInsertThreshold）：COPY 进会话级 TEMP 暂存表，再
+//	    INSERT ... SELECT ... ON CONFLICT 一次性 upsert（issue #14）。
+//	    COPY 不支持 ON CONFLICT，故用 TEMP 表两段式既拿 COPY 吞吐又不丢补传幂等。
 //
 // object_ldn 列 NOT NULL DEFAULT ”（migration 000171），nil 在此统一落 ”
 // 避免 UNIQUE 索引 NULL ≠ NULL 破坏幂等语义；同时让同文件多 cell 同 counter_name
 // 不再因为缺 ldn 维度而撞 ON CONFLICT 二次命中（BUG-6）。
 //
-// 注意 TimescaleDB 压缩 chunk 不允许 UPSERT；本逻辑假设新写入只命中 7d 内的未压缩 chunk。
-// 补传 > 7d 旧数据将报错（业务约束：补传窗口受限于 retention/compression policy）。
+// TimescaleDB 压缩 chunk 不允许 ON CONFLICT：补传 end_time 落在 > compression 阈值的旧
+// chunk 时 PG 抛 SQLSTATE 0A000。两条路径都把该错误识别为 ErrLateArrival，记 metric +
+// 返回 sentinel（issue #14 降级），由 collector log WARN + 跳过，实时 PM 不被历史补传阻塞。
 func (r *PgRepository) BatchInsert(ctx context.Context, ms []PMMetric) error {
 	if len(ms) == 0 {
 		return nil
 	}
+	if len(ms) >= batchInsertThreshold {
+		return r.batchInsertCopy(ctx, ms)
+	}
+	return r.batchInsertValues(ctx, ms)
+}
+
+// batchInsertValues 走 VALUES 多行 INSERT（小批量路径）。
+func (r *PgRepository) batchInsertValues(ctx context.Context, ms []PMMetric) error {
 	sql, args, err := buildBatchInsertSQL(ms)
 	if err != nil {
 		return err
 	}
 	if _, err := r.pool.Exec(ctx, sql, args...); err != nil {
-		return fmt.Errorf("insert pm_metrics: %w", err)
+		return classifyInsertError(err)
 	}
 	return nil
+}
+
+// batchInsertCopy 走 COPY 暂存表 + INSERT...SELECT...ON CONFLICT（大批量路径，issue #14）。
+//
+// 步骤（同一连接 / 事务内，保证 TEMP 表可见且 ON COMMIT DROP 自动清理）：
+//  1. CREATE TEMP TABLE ... LIKE pm_metrics（仅列定义，不含约束 / 索引，COPY 不被 ON CONFLICT 限制）
+//  2. CopyFrom 二进制批量灌入暂存表
+//  3. INSERT INTO pm_metrics SELECT * FROM 暂存表 ON CONFLICT (...) DO UPDATE（拿幂等）
+//  4. COMMIT（ON COMMIT DROP 清掉暂存表）
+func (r *PgRepository) batchInsertCopy(ctx context.Context, ms []PMMetric) error {
+	rows, err := buildRows(ms)
+	if err != nil {
+		return err
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin pm_metrics copy tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	// LIKE 仅复制列定义（不含 DEFAULTS / 约束 / 索引）：暂存表是纯缓冲区，
+	// id / ingest_time / object_ldn 等已在 buildRows 里落好值，无需表级 DEFAULT。
+	// ON COMMIT DROP 保证事务结束自动回收，不污染连接后续复用。
+	if _, err := tx.Exec(ctx,
+		`CREATE TEMP TABLE pm_metrics_copy_buf (LIKE pm_metrics) ON COMMIT DROP`,
+	); err != nil {
+		return fmt.Errorf("create pm_metrics temp buffer: %w", err)
+	}
+
+	if _, err := tx.CopyFrom(ctx,
+		pgx.Identifier{"pm_metrics_copy_buf"},
+		pmMetricsColumns,
+		pgx.CopyFromRows(rows),
+	); err != nil {
+		return fmt.Errorf("copy pm_metrics buffer: %w", err)
+	}
+
+	upsertSQL := `INSERT INTO pm_metrics (` + joinCols(pmMetricsColumns) + `) ` +
+		`SELECT ` + joinCols(pmMetricsColumns) + ` FROM pm_metrics_copy_buf ` +
+		pmMetricsUpsertSuffix
+	if _, err := tx.Exec(ctx, upsertSQL); err != nil {
+		return classifyInsertError(err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return classifyInsertError(err)
+	}
+	return nil
+}
+
+// joinCols 把列名用逗号拼成 SQL 列清单（列名是包内常量，非用户输入，无注入风险）。
+func joinCols(cols []string) string {
+	out := ""
+	for i, c := range cols {
+		if i > 0 {
+			out += ", "
+		}
+		out += c
+	}
+	return out
+}
+
+// classifyInsertError 把 pm_metrics 写入错误归类：
+//   - TimescaleDB 压缩 chunk 拒绝 ON CONFLICT（SQLSTATE 0A000）→ 记迟到数据 metric +
+//     返回 ErrLateArrival（issue #14 降级，上层跳过而非进 DLQ）。
+//   - 其余错误原样 wrap。
+func classifyInsertError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if isLateArrivalError(err) {
+		lateArrivalTotal.Inc()
+		return fmt.Errorf("%w: %v", ErrLateArrival, err)
+	}
+	return fmt.Errorf("insert pm_metrics: %w", err)
+}
+
+// isLateArrivalError 判断 err 是否为"补传命中压缩 chunk"。
+// TimescaleDB 对压缩 chunk 的 INSERT ... ON CONFLICT 抛 feature_not_supported（0A000）。
+func isLateArrivalError(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == sqlstateFeatureNotSupported
 }
 
 // pmMetricsUpsertSuffix 自然键 ON CONFLICT 子句。
@@ -109,50 +251,71 @@ func (r *PgRepository) BatchInsert(ctx context.Context, ms []PMMetric) error {
 const pmMetricsUpsertSuffix = "ON CONFLICT (device_oui, device_sn, metric_path, granularity, end_time, time, object_ldn) " +
 	"DO UPDATE SET metric_value = EXCLUDED.metric_value, ingest_time = NOW()"
 
-// buildBatchInsertSQL 构造 pm_metrics 批量 INSERT SQL（含 ON CONFLICT 子句）。
-// 抽出供单测使用，运行期由 BatchInsert 调用。
-func buildBatchInsertSQL(ms []PMMetric) (string, []any, error) {
-	ib := storage.Psql.Insert("pm_metrics").Columns(
-		"id", "device_oui", "device_sn", "metric_path", "metric_type", "metric_value",
-		"statis_type", "granularity", "time", "start_time", "end_time",
-		"ingest_time", "object_ldn", "extra",
-	)
+// metricRowValues 把单条 PMMetric 归一化为与 pmMetricsColumns 等长、等序的列值数组。
+// 落值规则（id 缺省生成 / ingest 缺省 NOW / time 缺省取 end_time / object_ldn nil → ” /
+// extra map → JSONB bytes）在 VALUES INSERT 与 COPY 两条路径间共享，保证两路写出的行
+// 完全一致。
+func metricRowValues(m PMMetric) ([]any, error) {
+	id := m.ID
+	if id == uuid.Nil {
+		id = uuid.New()
+	}
+	ingest := m.IngestTime
+	if ingest.IsZero() {
+		ingest = time.Now()
+	}
+	t := m.Time
+	if t.IsZero() {
+		t = m.EndTime
+	}
+	var statis interface{}
+	if m.StatisType != nil {
+		statis = string(*m.StatisType)
+	}
+	// object_ldn 列 NOT NULL DEFAULT ''（migration 000171）：
+	// nil/空指针统一落 ''，与 UNIQUE 索引语义一致。
+	ldn := ""
+	if m.ObjectLDN != nil {
+		ldn = *m.ObjectLDN
+	}
+	var extra interface{}
+	if len(m.Extra) > 0 {
+		b, err := json.Marshal(m.Extra)
+		if err != nil {
+			return nil, fmt.Errorf("marshal pm_metrics extra: %w", err)
+		}
+		extra = b
+	}
+	return []any{
+		id, m.DeviceOUI, m.DeviceSN, m.MetricPath, string(m.MetricType), m.MetricValue,
+		statis, string(m.Granularity), t, m.StartTime, m.EndTime,
+		ingest, ldn, extra,
+	}, nil
+}
+
+// buildRows 把 PMMetric 切片转为 COPY 用的二维行数组（列序 = pmMetricsColumns）。
+func buildRows(ms []PMMetric) ([][]any, error) {
+	rows := make([][]any, 0, len(ms))
 	for _, m := range ms {
-		id := m.ID
-		if id == uuid.Nil {
-			id = uuid.New()
+		vals, err := metricRowValues(m)
+		if err != nil {
+			return nil, err
 		}
-		ingest := m.IngestTime
-		if ingest.IsZero() {
-			ingest = time.Now()
+		rows = append(rows, vals)
+	}
+	return rows, nil
+}
+
+// buildBatchInsertSQL 构造 pm_metrics 批量 INSERT SQL（含 ON CONFLICT 子句）。
+// 抽出供单测使用，运行期由 batchInsertValues 调用（小批量路径）。
+func buildBatchInsertSQL(ms []PMMetric) (string, []any, error) {
+	ib := storage.Psql.Insert("pm_metrics").Columns(pmMetricsColumns...)
+	for _, m := range ms {
+		vals, err := metricRowValues(m)
+		if err != nil {
+			return "", nil, err
 		}
-		t := m.Time
-		if t.IsZero() {
-			t = m.EndTime
-		}
-		var statis interface{}
-		if m.StatisType != nil {
-			statis = string(*m.StatisType)
-		}
-		// object_ldn 列 NOT NULL DEFAULT ''（migration 000171）：
-		// nil/空指针统一落 ''，与 UNIQUE 索引语义一致。
-		ldn := ""
-		if m.ObjectLDN != nil {
-			ldn = *m.ObjectLDN
-		}
-		var extra interface{}
-		if len(m.Extra) > 0 {
-			b, err := json.Marshal(m.Extra)
-			if err != nil {
-				return "", nil, fmt.Errorf("marshal pm_metrics extra: %w", err)
-			}
-			extra = b
-		}
-		ib = ib.Values(
-			id, m.DeviceOUI, m.DeviceSN, m.MetricPath, string(m.MetricType), m.MetricValue,
-			statis, string(m.Granularity), t, m.StartTime, m.EndTime,
-			ingest, ldn, extra,
-		)
+		ib = ib.Values(vals...)
 	}
 	ib = ib.Suffix(pmMetricsUpsertSuffix)
 	sql, args, err := ib.ToSql()

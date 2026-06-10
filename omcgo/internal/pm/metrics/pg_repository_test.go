@@ -1,10 +1,13 @@
 package metrics
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -283,4 +286,120 @@ func Test_Constants_Stable(t *testing.T) {
 	assert.Equal(t, "daily", string(GranularityDaily))
 	assert.Equal(t, "weekly", string(GranularityWeekly))
 	assert.Equal(t, "monthly", string(GranularityMonthly))
+}
+
+// ---------------------------------------------------------------------------
+// issue #14: COPY 路径行值与 VALUES INSERT 参数等价（数据写出一致性）
+// ---------------------------------------------------------------------------
+
+// buildRows（COPY 路径）每行的列值必须与 buildBatchInsertSQL（VALUES 路径）拆出的
+// per-row 参数逐列一致 —— 两条路径写出的数据完全相同，只是传输方式不同。
+// id / ingest_time 含随机 / 时钟默认值，单独按位置比对其余确定列。
+func Test_buildRows_ParityWith_buildBatchInsertSQL(t *testing.T) {
+	ms := []PMMetric{
+		metricWithLDN("L.Cell.Avail", "cell-1", true),
+		metricWithLDN("L.Cell.Drop", "cell-2", true),
+		metricWithLDN("L.Cell.Att", "", false), // ObjectLDN nil → ''
+	}
+
+	rows, err := buildRows(ms)
+	require.NoError(t, err)
+	require.Len(t, rows, len(ms))
+
+	_, args, err := buildBatchInsertSQL(ms)
+	require.NoError(t, err)
+	const cols = 14
+	require.Len(t, args, cols*len(ms))
+
+	// 列序：id, oui, sn, path, type, value, statis, gran, time, start, end, ingest, ldn, extra
+	// 索引 0(id) 与 11(ingest_time) 是默认值列（uuid.New / time.Now），不参与确定性比对。
+	for i := range ms {
+		rowVals := rows[i]
+		valuesArgs := args[i*cols : (i+1)*cols]
+		require.Len(t, rowVals, cols)
+		for col := 0; col < cols; col++ {
+			if col == 0 || col == 11 {
+				continue // id / ingest_time 默认值列
+			}
+			assert.EqualValues(t, valuesArgs[col], rowVals[col],
+				"row %d col %d 必须 COPY 与 VALUES 一致", i, col)
+		}
+		// object_ldn（列 12）必须为非 NULL 字符串（含 nil→'' 兜底）。
+		_, ok := rowVals[12].(string)
+		assert.True(t, ok, "object_ldn 必须落字符串而非 nil")
+	}
+}
+
+// buildRows 对 ObjectLDN nil 也落空字符串（与 VALUES 路径、UNIQUE 索引语义一致）。
+func Test_buildRows_NilObjectLDN_EmptyString(t *testing.T) {
+	rows, err := buildRows([]PMMetric{metricWithLDN("L.Cell.Avail", "", false)})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, "", rows[0][12], "ObjectLDN=nil 必须落空字符串")
+}
+
+// 列序常量稳定性：pmMetricsColumns 必须与 buildBatchInsertSQL 的 14 列一致，
+// 否则 COPY 写入列错位。
+func Test_pmMetricsColumns_Count(t *testing.T) {
+	require.Len(t, pmMetricsColumns, 14)
+	assert.Equal(t, "id", pmMetricsColumns[0])
+	assert.Equal(t, "object_ldn", pmMetricsColumns[12])
+	assert.Equal(t, "extra", pmMetricsColumns[13])
+}
+
+// joinCols 生成无前后逗号的列清单。
+func Test_joinCols(t *testing.T) {
+	assert.Equal(t, "a, b, c", joinCols([]string{"a", "b", "c"}))
+	assert.Equal(t, "x", joinCols([]string{"x"}))
+	assert.Equal(t, "", joinCols(nil))
+}
+
+// ---------------------------------------------------------------------------
+// issue #14: 迟到数据降级 — 压缩 chunk 错误分类
+// ---------------------------------------------------------------------------
+
+// 0A000（feature_not_supported，TimescaleDB 压缩 chunk 拒 ON CONFLICT）→ 识别为迟到数据。
+func Test_isLateArrivalError_CompressedChunk(t *testing.T) {
+	err := &pgconn.PgError{Code: sqlstateFeatureNotSupported, Message: "invalid ON CONFLICT clause on compressed chunk"}
+	assert.True(t, isLateArrivalError(err))
+	// errors.As 透过 wrap 也应命中。
+	assert.True(t, isLateArrivalError(fmt.Errorf("exec failed: %w", err)))
+}
+
+// 非压缩类 PG 错误（如 unique_violation 23505）不被误判为迟到数据。
+func Test_isLateArrivalError_OtherPgError(t *testing.T) {
+	err := &pgconn.PgError{Code: "23505", Message: "duplicate key"}
+	assert.False(t, isLateArrivalError(err))
+}
+
+// 普通非 PG 错误不被误判。
+func Test_isLateArrivalError_PlainError(t *testing.T) {
+	assert.False(t, isLateArrivalError(errors.New("connection refused")))
+	assert.False(t, isLateArrivalError(nil))
+}
+
+// classifyInsertError：压缩 chunk → 包成 ErrLateArrival（errors.Is 可识别）。
+func Test_classifyInsertError_LateArrival_WrapsSentinel(t *testing.T) {
+	pgErr := &pgconn.PgError{Code: sqlstateFeatureNotSupported, Message: "compressed chunk"}
+	got := classifyInsertError(pgErr)
+	require.Error(t, got)
+	assert.True(t, errors.Is(got, ErrLateArrival), "迟到数据错误必须 wrap ErrLateArrival 供上层 errors.Is 识别")
+}
+
+// classifyInsertError：其他错误不被误判为 ErrLateArrival，但仍被 wrap。
+func Test_classifyInsertError_OtherError_NotLateArrival(t *testing.T) {
+	got := classifyInsertError(errors.New("boom"))
+	require.Error(t, got)
+	assert.False(t, errors.Is(got, ErrLateArrival))
+	assert.Contains(t, got.Error(), "insert pm_metrics")
+}
+
+// classifyInsertError(nil) == nil（成功路径不构造错误）。
+func Test_classifyInsertError_Nil(t *testing.T) {
+	assert.NoError(t, classifyInsertError(nil))
+}
+
+// 批量阈值常量稳定（防误改导致小批量也走建表开销 / 大批量回退慢路径）。
+func Test_batchInsertThreshold_Stable(t *testing.T) {
+	assert.Equal(t, 50, batchInsertThreshold)
 }

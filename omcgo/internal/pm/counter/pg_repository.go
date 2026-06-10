@@ -26,6 +26,7 @@ import (
 //   - BatchInsert：上游 PMCounter.OUI / DeviceSN 已由 collector 填充，wrapper 直接用
 //   - Query / QueryForKPI：handler 仍按 device_id(uuid) 接收，wrapper 反查 devices 表
 //     拿 (oui, serial_number) 后再查 pm_metrics；开销一次/请求可接受
+//
 // 全系统级切换见 docs/project/plan-T-0165-system-wide-oui-sn-migration.md。
 type PgCounterRepository struct {
 	pool        *pgxpool.Pool

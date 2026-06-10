@@ -1,13 +1,35 @@
 package counter
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/pm/metrics"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+// fakeMetricsRepo 让 BatchInsert 返回预置错误，验证 wrapper 错误透传（issue #14）。
+type fakeMetricsRepo struct {
+	batchErr error
+	gotCount int
+}
+
+func (f *fakeMetricsRepo) Insert(ctx context.Context, m metrics.PMMetric) error { return nil }
+func (f *fakeMetricsRepo) BatchInsert(ctx context.Context, ms []metrics.PMMetric) error {
+	f.gotCount = len(ms)
+	return f.batchErr
+}
+func (f *fakeMetricsRepo) Query(ctx context.Context, q metrics.QueryRequest) ([]metrics.PMMetric, error) {
+	return nil, nil
+}
+func (f *fakeMetricsRepo) Count(ctx context.Context, q metrics.QueryRequest) (int64, error) {
+	return 0, nil
+}
 
 // CounterFilter 与 ListRequest 集成
 func Test_CounterFilter_WithListRequest(t *testing.T) {
@@ -119,4 +141,26 @@ func Test_counterRoundTrip_PreservesCoreFields(t *testing.T) {
 	assert.Equal(t, "PRB.UlAvailProcMeas", got.CounterName)
 	assert.Equal(t, 7.5, got.CounterValue)
 	assert.Equal(t, 15, got.Granularity)
+}
+
+// issue #14: ErrLateArrival 必须穿透 PgCounterRepository.BatchInsert 包装层不被改写，
+// 这样上层 collector 的 errors.Is(err, metrics.ErrLateArrival) 才能识别并降级跳过。
+func Test_BatchInsert_PropagatesLateArrivalSentinel(t *testing.T) {
+	fake := &fakeMetricsRepo{batchErr: metrics.ErrLateArrival}
+	repo := &PgCounterRepository{metricsRepo: fake}
+
+	err := repo.BatchInsert(context.Background(), []model.PMCounter{
+		{OUI: "48BF74", DeviceSN: "SN1", CounterName: "c1", CounterValue: 1, Granularity: 15, Time: time.Now()},
+	})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, metrics.ErrLateArrival), "迟到数据 sentinel 必须穿透 wrapper")
+	assert.Equal(t, 1, fake.gotCount, "counter 应转换为 1 条 metric 下传")
+}
+
+// 空切片不调用下游、不报错（保持既有快速返回行为）。
+func Test_BatchInsert_EmptyNoop(t *testing.T) {
+	fake := &fakeMetricsRepo{batchErr: errors.New("should not be called")}
+	repo := &PgCounterRepository{metricsRepo: fake}
+	require.NoError(t, repo.BatchInsert(context.Background(), nil))
+	assert.Equal(t, 0, fake.gotCount)
 }
