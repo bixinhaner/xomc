@@ -12,12 +12,19 @@ import (
 
 // DeviceInfoHandler provides HTTP handlers for device extended info management.
 type DeviceInfoHandler struct {
-	service *DeviceService
+	service     *DeviceService
+	permService VisibleGroupsResolver
 }
 
 // NewDeviceInfoHandler creates a new device info REST API handler.
 func NewDeviceInfoHandler(service *DeviceService) *DeviceInfoHandler {
 	return &DeviceInfoHandler{service: service}
+}
+
+// SetPermissionService wires the data permission service for per-device
+// group-membership (IDOR) checks on by-ID read endpoints.
+func (h *DeviceInfoHandler) SetPermissionService(ps VisibleGroupsResolver) {
+	h.permService = ps
 }
 
 // RegisterRoutes registers device info routes on the given router group.
@@ -41,6 +48,10 @@ func (h *DeviceInfoHandler) GetDeviceInfo(c *gin.Context) {
 		return
 	}
 
+	if !authorizeDeviceAccess(c, h.service, h.permService, id) {
+		return
+	}
+
 	info, err := h.service.GetDeviceInfo(c.Request.Context(), id)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
@@ -60,6 +71,10 @@ func (h *DeviceInfoHandler) GetDeviceDetail(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	if !authorizeDeviceAccess(c, h.service, h.permService, id) {
 		return
 	}
 

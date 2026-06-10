@@ -41,6 +41,8 @@ func initDeviceModule(c *Container) error {
 	deviceService := device.NewDeviceService(deviceRepo, paramRepo, reconciler, c.EventBus, logger)
 	deviceService.SetDeviceCache(deviceCache)
 	deviceService.SetDeviceInfoRepo(deviceInfoRepo)
+	// IDOR 防护：按 ID 直读端点据此判定调用者对设备所属设备组的归属。
+	deviceService.SetDeviceGroupReader(device.NewPgDeviceGroupReader(c.PgPool))
 	deviceService.SetTaskService(c.TaskSvc)
 	deviceService.SetCarrierRegistry(c.Carriers) // T-0029: RF control path lookup
 	// Phase 6 (设计文档 §4.3): productClass → product 装配件回填 device.model_name。

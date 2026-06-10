@@ -350,6 +350,7 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	deviceHandler.RegisterRoutes(permGroup("devices"))
 
 	deviceInfoHandler := device.NewDeviceInfoHandler(c.DeviceService)
+	deviceInfoHandler.SetPermissionService(c.PermService)
 	deviceInfoHandler.RegisterRoutes(permGroup("devices"))
 
 	regHandler := device.NewRegistrationHandler(dh.regService)
@@ -366,6 +367,7 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 
 	// T-0098 P5-01：dmRegistry 已删除，直接注入 ParamRegistry / ProductRegistry。
 	paramTreeHandler := device.NewParameterTreeHandler(c.DeviceService, c.ParamRepo, c.ParamRegistry, c.ProductRegistry, c.Logger)
+	paramTreeHandler.SetPermissionService(c.PermService)
 	paramTreeHandler.RegisterRoutes(permGroup("devices"))
 
 	// T-0179 + T-0183: devsweep HTTP 端点已下线 — omcctl device sweep-paths

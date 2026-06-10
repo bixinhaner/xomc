@@ -34,7 +34,14 @@ type ParameterTreeHandler struct {
 	paramRepo       DeviceParameterRepository
 	paramRegistry   *parammodel.Registry
 	productRegistry *product.Registry
+	permService     VisibleGroupsResolver
 	logger          *zap.Logger
+}
+
+// SetPermissionService wires the data permission service for per-device
+// group-membership (IDOR) checks on by-ID parameter read endpoints.
+func (h *ParameterTreeHandler) SetPermissionService(ps VisibleGroupsResolver) {
+	h.permService = ps
 }
 
 // NewParameterTreeHandler creates a new parameter tree handler.
@@ -231,6 +238,10 @@ func (h *ParameterTreeHandler) GetParameterTree(c *gin.Context) {
 		return
 	}
 
+	if !authorizeDeviceAccess(c, h.deviceService, h.permService, id) {
+		return
+	}
+
 	dev, err := h.deviceService.GetDevice(c.Request.Context(), id)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
@@ -277,6 +288,10 @@ func (h *ParameterTreeHandler) SearchParameters(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	if !authorizeDeviceAccess(c, h.deviceService, h.permService, id) {
 		return
 	}
 
@@ -431,6 +446,10 @@ func (h *ParameterTreeHandler) GetSyncStatus(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	if !authorizeDeviceAccess(c, h.deviceService, h.permService, id) {
 		return
 	}
 
@@ -739,6 +758,10 @@ func (h *ParameterTreeHandler) GetDirectChildren(c *gin.Context) {
 		return
 	}
 
+	if !authorizeDeviceAccess(c, h.deviceService, h.permService, id) {
+		return
+	}
+
 	pathPrefix := c.Query("path_prefix")
 	if pathPrefix == "" {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, fmt.Errorf("path_prefix is required"))
@@ -850,6 +873,10 @@ func (h *ParameterTreeHandler) GetParameterSchema(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	if !authorizeDeviceAccess(c, h.deviceService, h.permService, id) {
 		return
 	}
 

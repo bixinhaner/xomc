@@ -29,6 +29,40 @@ type Handler struct {
 	permService VisibleGroupsResolver
 }
 
+// authorizeDeviceAccess 是所有"按 ID 直读"设备端点共享的越权（IDOR）守卫。
+//
+// 流程：从 gin ctx 取 userID + isSuperAdmin → permService.GetUserVisibleGroupIDs
+// 解析可见设备组 → DeviceService.AuthorizeDeviceGroupAccess 判定该设备是否在
+// 可见集合内。返回 true 表示放行；返回 false 表示已 abort（403/500），caller 应直接 return。
+//
+// nil-safe：permService 为 nil（dev/test 未注入数据权限）→ 放行，保持与
+// ListDevices 同样的退化语义（数据权限未配置时不拦截）。
+func authorizeDeviceAccess(c *gin.Context, svc *DeviceService, permService VisibleGroupsResolver, deviceID uuid.UUID) bool {
+	if permService == nil {
+		return true
+	}
+	userIDVal, _ := c.Get(admin.CtxKeyUserID)
+	uid, ok := userIDVal.(uuid.UUID)
+	if !ok {
+		// 已过鉴权中间件却拿不到 user_id：按拒绝处理，不泄露设备数据。
+		commonerrors.AbortWithError(c, http.StatusForbidden, commonerrors.ErrForbidden)
+		return false
+	}
+	isSuperVal, _ := c.Get(admin.CtxKeyIsSuperAdmin)
+	isSuper, _ := isSuperVal.(bool)
+
+	visibleGroups, err := permService.GetUserVisibleGroupIDs(c.Request.Context(), uid, isSuper)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return false
+	}
+	if authErr := svc.AuthorizeDeviceGroupAccess(c.Request.Context(), deviceID, visibleGroups); authErr != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(authErr), authErr)
+		return false
+	}
+	return true
+}
+
 // NewHandler creates a new device REST API handler.
 func NewHandler(service *DeviceService) *Handler {
 	return &Handler{service: service}
@@ -331,6 +365,10 @@ func (h *Handler) GetDevice(c *gin.Context) {
 		return
 	}
 
+	if !authorizeDeviceAccess(c, h.service, h.permService, id) {
+		return
+	}
+
 	// 走 GetDeviceWithInfo（JOIN device_info）：详情页与列表的 op_state（激活
 	// 状态）及 rf/mme/sync/小区等扩展字段口径一致，避免详情返回裸 Device。
 	device, err := h.service.GetDeviceWithInfo(c.Request.Context(), id)
@@ -351,6 +389,10 @@ func (h *Handler) GetDeviceParameters(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	if !authorizeDeviceAccess(c, h.service, h.permService, id) {
 		return
 	}
 

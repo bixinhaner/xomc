@@ -51,6 +51,7 @@ type DeviceService struct {
 	bootEventRecorder BootEventRecorder        // 普通 1 BOOT 事件日志写入（nil = 禁用）
 	productMatcher    ProductClassMatcher      // Phase 6 ModelName 回填（nil = 禁用）
 	productBinder     ProductBinder            // T-0176-PR-D：CreateDevice inline match 后写回 product_id（nil = 禁用）
+	groupReader       DeviceGroupReader        // 越权校验：读设备组归属（nil = 退化为不校验，见 AuthorizeDeviceGroupAccess）
 	logger            *zap.Logger
 }
 
@@ -123,6 +124,13 @@ func (s *DeviceService) SetStunAddressUpdater(u StunAddressUpdater) {
 // SetDeviceCache sets the Redis device cache for fast serial number lookups.
 func (s *DeviceService) SetDeviceCache(c *DeviceCache) {
 	s.cache = c
+}
+
+// SetDeviceGroupReader wires the per-device group membership reader used by
+// AuthorizeDeviceGroupAccess for IDOR protection on by-ID read endpoints.
+// nil-safe: when unset, authorization checks degrade to allow (dev/test).
+func (s *DeviceService) SetDeviceGroupReader(r DeviceGroupReader) {
+	s.groupReader = r
 }
 
 // SetDeviceInfoRepo sets the device info repository for extended info management.
