@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM golang:1.25-alpine AS builder
+FROM golang:1.25.11-alpine AS builder
 
 # 国内环境加速 apk 源（dl-cdn.alpinelinux.org 国内常被墙），可通过 --build-arg
 # APK_MIRROR=dl-cdn.alpinelinux.org 切回官方源。
@@ -22,7 +22,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 # ---
 
-FROM alpine:3.19
+FROM alpine:3.21
 
 ARG APK_MIRROR=mirrors.aliyun.com
 RUN sed -i "s|dl-cdn.alpinelinux.org|${APK_MIRROR}|g" /etc/apk/repositories

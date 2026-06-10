@@ -1,0 +1,60 @@
+# Dependabot — 自动依赖安全更新（Epic #27 / issue #66）
+# 配套阻断式 security-govulncheck / security-npm-audit：新 CVE 披露后自动开 PR，
+# 避免依赖 pin 落后于 vuln DB 导致 main 被动变红、靠人工发现手改版本。
+version: 2
+updates:
+  # Go 后端依赖
+  - package-ecosystem: gomod
+    directory: /omcgo
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    labels:
+      - dependencies
+      - security
+    commit-message:
+      prefix: "build(deps)"
+    groups:
+      golang-x:
+        patterns:
+          - "golang.org/x/*"
+
+  # 前端依赖（主皮肤）
+  - package-ecosystem: npm
+    directory: /omcmb/webcode
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    labels:
+      - dependencies
+      - security
+    commit-message:
+      prefix: "build(deps)"
+
+  # 前端共享业务层
+  - package-ecosystem: npm
+    directory: /omcmb/frontend-core
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    labels:
+      - dependencies
+      - security
+    commit-message:
+      prefix: "build(deps)"
+
+  # GitHub Actions（CI 工作流自身的 action 版本）
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - ci
+    commit-message:
+      prefix: "ci(deps)"
