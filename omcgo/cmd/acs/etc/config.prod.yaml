@@ -37,7 +37,7 @@ stun:
   worker_size: 4
   buffer_size: 2048
   cache_ttl: 30m
-  shared_secret: "dps"
+  shared_secret: "REPLACE_ME_SHARED_SECRET"  # 经 OMCGO_STUN_SHARED_SECRET 注入
 
 post_session_wake:
   enabled: true
@@ -59,7 +59,7 @@ nats:
 
 db:
   # 【全 docker compose 部署】使用 service 名 postgres（容器间 docker network 解析）
-  dsn: "postgres://omcgo:omcgo123@postgres:5432/omcgo?sslmode=disable"
+  dsn: "postgres://omcgo:REPLACE_ME_DB_PASSWORD@postgres:5432/omcgo?sslmode=require"  # 生产经 OMCGO_DB_DSN 注入真实 DSN
   max_conns: 20
   min_conns: 5
   max_conn_lifetime: 30m
@@ -68,8 +68,8 @@ db:
 
 minio:
   endpoint: "minio:9000"
-  access_key: "minioadmin"
-  secret_key: "minioadmin"
+  access_key: "REPLACE_ME_MINIO_ACCESS_KEY"  # 经 OMCGO_MINIO_ACCESS_KEY 注入
+  secret_key: "REPLACE_ME_MINIO_SECRET_KEY"  # 经 OMCGO_MINIO_SECRET_KEY 注入
   use_ssl: false
   buckets:
     pm_files: "pm-files"

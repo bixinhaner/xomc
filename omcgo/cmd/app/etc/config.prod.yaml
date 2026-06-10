@@ -15,7 +15,7 @@ db:
   # 【全 docker compose 部署】使用 service 名 postgres；app 容器与 postgres 容器
   # 同 project 共享 docker network，进行内部名字解析。如仅起动 host 二进制调试，
   # 可临时改为 127.0.0.1（infra 的 5432 publish 到 127.0.0.1）。
-  dsn: "postgres://omcgo:omcgo123@postgres:5432/omcgo?sslmode=disable"
+  dsn: "postgres://omcgo:REPLACE_ME_DB_PASSWORD@postgres:5432/omcgo?sslmode=require"  # 生产经 OMCGO_DB_DSN 注入真实 DSN
   max_conns: 50
   min_conns: 10
   max_conn_lifetime: 30m
@@ -26,7 +26,7 @@ db:
   log_sql_slow_threshold: 1000
 
 tsdb:
-  dsn: "postgres://omcgo:omcgo123@postgres:5432/omcgo?sslmode=disable"
+  dsn: "postgres://omcgo:REPLACE_ME_DB_PASSWORD@postgres:5432/omcgo?sslmode=require"  # 生产经 OMCGO_TSDB_DSN 注入真实 DSN
   max_conns: 30
   min_conns: 5
   max_conn_lifetime: 30m
@@ -50,8 +50,8 @@ nats:
 
 minio:
   endpoint: "minio:9000"
-  access_key: "minioadmin"
-  secret_key: "minioadmin"
+  access_key: "REPLACE_ME_MINIO_ACCESS_KEY"  # 经 OMCGO_MINIO_ACCESS_KEY 注入
+  secret_key: "REPLACE_ME_MINIO_SECRET_KEY"  # 经 OMCGO_MINIO_SECRET_KEY 注入
   use_ssl: false
   buckets:
     pm_files: "pm-files"
@@ -65,10 +65,10 @@ minio:
 
 conn_req:
   server_addr: "acs:7547"
-  shared_secret: "dps"
+  shared_secret: "REPLACE_ME_SHARED_SECRET"  # 经 OMCGO_CONN_REQ_SHARED_SECRET 注入
 
 jwt:
-  secret: "omcgo-prod-jwt-secret-key-minimum-32-characters!!"
+  secret: "REPLACE_ME_JWT_SECRET_AT_LEAST_32_CHARS_LONG"  # 经 OMCGO_JWT_SECRET 注入
   access_token_ttl: 30m
   refresh_token_ttl: 168h
 

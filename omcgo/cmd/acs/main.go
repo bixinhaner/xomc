@@ -65,6 +65,17 @@ func runACS(cmd *cobra.Command, args []string) error {
 		cfg.Log.OutputPaths = parseStringSlice(outputPaths)
 	}
 
+	// #2: 启动期凭证 guardrail —— 生产环境下检测到默认/占位/已泄露凭证即拒启。
+	// ACS 持有 PG / MinIO / STUN 共享密钥；dev/test 自动跳过。
+	if err := appconfig.GuardProductionSecrets(
+		appconfig.SecretCheck{Field: "db.dsn(password)", Value: cfg.DB.DSN, IsDSN: true},
+		appconfig.SecretCheck{Field: "minio.access_key", Value: cfg.MinIO.AccessKey},
+		appconfig.SecretCheck{Field: "minio.secret_key", Value: cfg.MinIO.SecretKey},
+		appconfig.SecretCheck{Field: "stun.shared_secret", Value: cfg.STUN.SharedSecret},
+	); err != nil {
+		return fmt.Errorf("生产凭证校验失败: %w", err)
+	}
+
 	inf, err := initACS(context.Background(), &cfg)
 	if err != nil {
 		return err
