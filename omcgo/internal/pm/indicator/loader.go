@@ -28,12 +28,12 @@ const defaultGroupID = "default"
 // Loader 实现 dictloader.Loader（T-0098 P1-06）。
 //
 // 加载语义（设计 §2.6 + 实施计划 §1.2 注："{enabled} / 多文件 OR 合并 / operator_code 桶刷新" 在 P2-09 增强）：
-//   1. 扫描 enb/*.xml + GSM.xml + GNB.xml
-//   2. （单位已下线）指标单位改由数据字典 type='indicator_unit' 管理，初始化走
-//      migrations/seed/000007；Loader 不再写 indicator_unit 表
-//   3. 插入 indicator_group_{enb,gsm,gnb} 占位 group（id="default"，satisfy NOT NULL FK）
-//   4. UPSERT perf_indicators_{enb,gsm,gnb}（按 id 唯一）
-//   5. 重写 rela_platform_indicator_formula_{enb,gsm,gnb} — 每 (platform_name, indicator_id) 一行
+//  1. 扫描 enb/*.xml + GSM.xml + GNB.xml
+//  2. （单位已下线）指标单位改由数据字典 type='indicator_unit' 管理，初始化走
+//     migrations/seed/000007；Loader 不再写 indicator_unit 表
+//  3. 插入 indicator_group_{enb,gsm,gnb} 占位 group（id="default"，satisfy NOT NULL FK）
+//  4. UPSERT perf_indicators_{enb,gsm,gnb}（按 id 唯一）
+//  5. 重写 rela_platform_indicator_formula_{enb,gsm,gnb} — 每 (platform_name, indicator_id) 一行
 //
 // 不在 P1-06 范围（P2-09 接力）：
 //   - enabled 属性 OR 合并语义（多文件取 OR）→ enabled_pm_indicators_* 写入
@@ -85,20 +85,20 @@ type xmlIndicatorModel struct {
 }
 
 type xmlIndicator struct {
-	ID              string `xml:"id,attr"`
-	EnName          string `xml:"enName,attr"`
-	ReportKey       string `xml:"reportKey,attr"`
-	CnName          string `xml:"cnName,attr"`
-	IsBuildIn       string `xml:"isBuildIn,attr"`  // "1" / "0"
-	IsCounter       string `xml:"isCounter,attr"`  // "1" / "0"
-	DataType        string `xml:"dataType,attr"`
-	UnitID          string `xml:"unitId,attr"`
-	StatisType      string `xml:"statisType,attr"`
-	Arithmetic      string `xml:"arithmetic,attr"`
-	IndicatorLevel  string `xml:"indicatorLevel,attr"` // ENB/GSM only
-	Formula         string `xml:"formula,attr"`
-	Enabled         string `xml:"enabled,attr"`        // 缺省视 "true"（P2-09 接力 OR 合并）
-	GroupID         string `xml:"groupId,attr"`        // 功能集 group_id；缺省回退 default 占位组
+	ID             string `xml:"id,attr"`
+	EnName         string `xml:"enName,attr"`
+	ReportKey      string `xml:"reportKey,attr"`
+	CnName         string `xml:"cnName,attr"`
+	IsBuildIn      string `xml:"isBuildIn,attr"` // "1" / "0"
+	IsCounter      string `xml:"isCounter,attr"` // "1" / "0"
+	DataType       string `xml:"dataType,attr"`
+	UnitID         string `xml:"unitId,attr"`
+	StatisType     string `xml:"statisType,attr"`
+	Arithmetic     string `xml:"arithmetic,attr"`
+	IndicatorLevel string `xml:"indicatorLevel,attr"` // ENB/GSM only
+	Formula        string `xml:"formula,attr"`
+	Enabled        string `xml:"enabled,attr"` // 缺省视 "true"（P2-09 接力 OR 合并）
+	GroupID        string `xml:"groupId,attr"` // 功能集 group_id；缺省回退 default 占位组
 }
 
 func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
@@ -315,7 +315,6 @@ type formulaRow struct {
 	LoadedFrom string
 }
 
-
 func ensureDefaultGroups(ctx context.Context, tx pgx.Tx) error {
 	for _, dt := range []string{"enb", "gsm", "gnb"} {
 		table := "indicator_group_" + dt
@@ -439,22 +438,78 @@ func flushIndicators(ctx context.Context, tx pgx.Tx, table string, batch []indic
 	return nil
 }
 
-// rewriteFormulas: TRUNCATE then batch INSERT — formula 每次 reload 全量重写（设计 §2.6 加载流程）
-func rewriteFormulas(ctx context.Context, tx pgx.Tx, table string, formulas []formulaRow) (int, error) {
-	if _, err := tx.Exec(ctx, fmt.Sprintf("TRUNCATE %s RESTART IDENTITY", table)); err != nil {
-		return 0, fmt.Errorf("truncate %s: %w", table, err)
+// formulaKey 标识一条公式归属的 (平台, 指标)，用于 reload 时判断该键是否已被
+// 用户自定义公式覆盖。
+type formulaKey struct {
+	platform  string
+	indicator string
+}
+
+// excludeCustomOverridden 过滤掉 (platform, indicator) 已存在自定义公式的 builtin 公式。
+// 自定义公式（loaded_from IS NULL，经 UI 编辑写入）优先：reload 重灌 builtin 时跳过
+// 这些键，避免与保留下来的自定义行重复，并尊重用户「编辑即替换」的意图（#98）。
+func excludeCustomOverridden(formulas []formulaRow, customKeys map[formulaKey]struct{}) []formulaRow {
+	if len(customKeys) == 0 {
+		return formulas
 	}
-	if len(formulas) == 0 {
+	kept := make([]formulaRow, 0, len(formulas))
+	for _, f := range formulas {
+		if _, overridden := customKeys[formulaKey{f.PlatformName, f.IndicatorID}]; overridden {
+			continue
+		}
+		kept = append(kept, f)
+	}
+	return kept
+}
+
+// selectCustomFormulaKeys 读取表中自定义公式（loaded_from IS NULL = UI 写入）的
+// (平台, 指标) 集合，供 reload 保留自定义行 + builtin 去重。
+func selectCustomFormulaKeys(ctx context.Context, tx pgx.Tx, table string) (map[formulaKey]struct{}, error) {
+	rows, err := tx.Query(ctx, fmt.Sprintf(
+		"SELECT DISTINCT platform_name, indicator_id FROM %s WHERE loaded_from IS NULL", table))
+	if err != nil {
+		return nil, fmt.Errorf("select custom keys %s: %w", table, err)
+	}
+	defer rows.Close()
+	keys := make(map[formulaKey]struct{})
+	for rows.Next() {
+		var k formulaKey
+		if err := rows.Scan(&k.platform, &k.indicator); err != nil {
+			return nil, fmt.Errorf("scan custom key %s: %w", table, err)
+		}
+		keys[k] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate custom keys %s: %w", table, err)
+	}
+	return keys, nil
+}
+
+// rewriteFormulas: 只重写 builtin 公式（loaded_from 非空），保留用户经 UI 编辑写入的
+// 自定义公式（loaded_from IS NULL）。修复 #98：原实现 TRUNCATE 整表会连带清空自定义
+// 公式。自定义公式优先——builtin 重插时跳过已被自定义覆盖的 (平台, 指标)。
+func rewriteFormulas(ctx context.Context, tx pgx.Tx, table string, formulas []formulaRow) (int, error) {
+	// 先读自定义公式键（loaded_from IS NULL），用于保留自定义行 + builtin 去重。
+	customKeys, err := selectCustomFormulaKeys(ctx, tx, table)
+	if err != nil {
+		return 0, err
+	}
+	// 只删 builtin 行（loaded_from 非空），保留自定义行。
+	if _, err := tx.Exec(ctx, fmt.Sprintf("DELETE FROM %s WHERE loaded_from IS NOT NULL", table)); err != nil {
+		return 0, fmt.Errorf("delete builtin %s: %w", table, err)
+	}
+	toInsert := excludeCustomOverridden(formulas, customKeys)
+	if len(toInsert) == 0 {
 		return 0, nil
 	}
 	const chunkSize = 200
-	for i := 0; i < len(formulas); i += chunkSize {
+	for i := 0; i < len(toInsert); i += chunkSize {
 		end := i + chunkSize
-		if end > len(formulas) {
-			end = len(formulas)
+		if end > len(toInsert) {
+			end = len(toInsert)
 		}
 		ib := sq.StatementBuilder.PlaceholderFormat(sq.Dollar).Insert(table).Columns("platform_name", "indicator_id", "formula", "loaded_from")
-		for _, f := range formulas[i:end] {
+		for _, f := range toInsert[i:end] {
 			ib = ib.Values(f.PlatformName, f.IndicatorID, f.Formula, f.LoadedFrom)
 		}
 		sqlStr, args, err := ib.ToSql()
@@ -465,7 +520,7 @@ func rewriteFormulas(ctx context.Context, tx pgx.Tx, table string, formulas []fo
 			return 0, fmt.Errorf("insert %s: %w", table, err)
 		}
 	}
-	return len(formulas), nil
+	return len(toInsert), nil
 }
 
 // aggregateEnabledOR 计算 indicator_id → 有效 enabled 标志（多文件 OR 合并；设计 §2.6 / P2-09）。
@@ -510,8 +565,8 @@ func parseEnabledFlag(s string) bool {
 // refreshDefaultEnabledBucket 仅刷新 operator_code='default' 桶；不动其他 operator。
 //
 // 实现：
-//   1. INSERT enabled=true 集合（ON CONFLICT DO NOTHING）
-//   2. DELETE enabled=false 集合 WHERE operator_code='default' AND indicator_id IN (...)
+//  1. INSERT enabled=true 集合（ON CONFLICT DO NOTHING）
+//  2. DELETE enabled=false 集合 WHERE operator_code='default' AND indicator_id IN (...)
 //
 // 返回 (insertedOrDeletedRows, err)。
 //
