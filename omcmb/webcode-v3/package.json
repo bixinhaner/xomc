@@ -15,7 +15,7 @@
   "dependencies": {
     "@omc/frontend-core": "*",
     "@tanstack/react-query": "^5.90.21",
-    "axios": "^1.13.6",
+    "axios": "^1.17.0",
     "clsx": "^2.1.1",
     "dayjs": "^1.11.19",
     "lucide-react": "^0.468.0",
