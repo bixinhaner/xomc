@@ -24,17 +24,23 @@ const REMEMBER_KEY = 'omc-remember-credentials';
 // 若不过滤，登录成功后会回到 /403，用户体感"admin 登录后被踢到 403"。
 const FROM_PATH_BLOCKLIST = new Set<string>(['/403', '/404', '/login']);
 
-function getRemembered(): { username: string; password: string } | null {
+// 安全（#3）：只记住用户名，**绝不**把明文密码写入 localStorage。
+// localStorage 任何 XSS 脚本可读，持久化明文密码 = 一次低级 XSS 即泄露管理员凭证。
+// 旧版本可能写过 {username, password}，这里只读 username，旧 password 字段被忽略；
+// 用户下次勾选记住时会以 username-only 覆盖旧值。
+function getRememberedUsername(): string | null {
   try {
     const raw = localStorage.getItem(REMEMBER_KEY);
-    return raw ? JSON.parse(raw) : null;
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { username?: unknown };
+    return typeof parsed.username === 'string' ? parsed.username : null;
   } catch {
     return null;
   }
 }
 
-function setRemembered(username: string, password: string) {
-  localStorage.setItem(REMEMBER_KEY, JSON.stringify({ username, password }));
+function setRememberedUsername(username: string) {
+  localStorage.setItem(REMEMBER_KEY, JSON.stringify({ username }));
 }
 
 function clearRemembered() {
@@ -65,13 +71,12 @@ export default function LoginPage() {
   const usernameAutocomplete = publicSettings?.preventBrowserAutofill ? 'off' : 'username';
   const passwordAutocomplete = publicSettings?.preventBrowserAutofill ? 'new-password' : 'current-password';
 
-  // 页面加载时填充记住的凭据
+  // 页面加载时仅回填记住的用户名（密码不再持久化，需用户每次输入）。
   useEffect(() => {
-    const saved = getRemembered();
-    if (saved) {
+    const username = getRememberedUsername();
+    if (username) {
       form.setFieldsValue({
-        username: saved.username,
-        password: saved.password,
+        username,
         remember: true,
       });
     }
@@ -153,9 +158,9 @@ export default function LoginPage() {
   const handleSubmit = async (values: LoginFormValues) => {
     setLoading(true);
     try {
-      // 记住/清除密码
+      // 记住/清除用户名（不再持久化密码）
       if (values.remember) {
-        setRemembered(values.username, values.password);
+        setRememberedUsername(values.username);
       } else {
         clearRemembered();
       }
