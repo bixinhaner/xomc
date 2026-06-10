@@ -617,6 +617,11 @@ type ACSServerConfig struct {
 	ReadTimeout  time.Duration `mapstructure:"read_timeout"`
 	WriteTimeout time.Duration `mapstructure:"write_timeout"`
 	IdleTimeout  time.Duration `mapstructure:"idle_timeout"`
+	// MaxRequestBodySize 限制入站 TR-069 SOAP 请求体字节数，防止恶意/故障 CPE
+	// 发送超大 POST 导致 ACS 进程 OOM（南向接口无认证即可触达）。0 表示用默认 50MB。
+	MaxRequestBodySize int64 `mapstructure:"max_request_body_size"`
+	// MaxHeaderBytes 限制 HTTP 请求头总字节数。0 表示用默认 1MB（http.DefaultMaxHeaderBytes）。
+	MaxHeaderBytes int `mapstructure:"max_header_bytes"`
 }
 
 // AppServerConfig 配置 App 服务的 HTTP/gRPC 监听参数。

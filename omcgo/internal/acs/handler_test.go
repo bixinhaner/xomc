@@ -262,6 +262,40 @@ func TestServeHTTP_NonPOST_Returns405(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Tests: Request body size limit (#1 — 防止超大 POST 导致 ACS OOM)
+// ---------------------------------------------------------------------------
+
+// 失败路径：请求体超过 maxRequestBodySize 上限时，应在读取阶段被 MaxBytesReader
+// 拦截并返回 413，而不是把整个 body 读入内存。
+func TestServeHTTP_BodyExceedsLimit_Returns413(t *testing.T) {
+	h := newTestACSHandler()
+	h.maxRequestBodySize = 1024 // 1KB，便于用小 body 触发上限
+
+	oversized := strings.Repeat("A", 4096) // 4KB > 1KB 上限
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(oversized))
+	h.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusRequestEntityTooLarge, w.Code,
+		"body exceeding max_request_body_size must be rejected with 413")
+}
+
+// 成功路径：请求体在上限内时，不应因大小被拒（内容非法 SOAP 会走到 400，
+// 但绝不能是 413）。
+func TestServeHTTP_BodyWithinLimit_NotRejectedAsTooLarge(t *testing.T) {
+	h := newTestACSHandler()
+	h.maxRequestBodySize = 1 << 20 // 1MB
+
+	body := strings.Repeat("A", 4096) // 4KB < 1MB 上限
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(body))
+	h.ServeHTTP(w, req)
+
+	assert.NotEqual(t, http.StatusRequestEntityTooLarge, w.Code,
+		"body within limit must not be rejected as too large")
+}
+
+// ---------------------------------------------------------------------------
 // Tests: Empty body
 // ---------------------------------------------------------------------------
 

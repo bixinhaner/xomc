@@ -6,6 +6,7 @@ import (
 	cryptorand "crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -91,6 +92,9 @@ type Handler struct {
 	// nil 表示协议日志关闭。
 	protocolLogger *zap.Logger
 	maxBodySize    int // 协议日志 XML 截断阈值（0=不截断）
+	// maxRequestBodySize 限制入站 SOAP 请求体字节数，防止超大 POST 导致 OOM。
+	// 0 表示用 defaultMaxRequestBodySize。
+	maxRequestBodySize int64
 	// T-0137 / M1: TR069 报文跟踪 — 命中白名单时旁路投递 capture，热路径开销 < 1ms。
 	// 两个字段都为 nil 表示跟踪关闭（默认）。
 	traceWhitelist *trace.WhitelistCache
@@ -191,6 +195,11 @@ func (h *Handler) reapOrphanedSession(entry *deviceSessionEntry, reason string) 
 	}
 }
 
+// defaultMaxRequestBodySize 是入站 SOAP 请求体的默认上限（50MB），
+// 在未配置 server.max_request_body_size 时生效。50MB 足以覆盖最大的
+// Inform/GetParameterValuesResponse，同时挡住恶意/故障 CPE 的多 GB POST。
+const defaultMaxRequestBodySize int64 = 50 << 20 // 50 MiB
+
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 生成或传播请求 ID
 	requestID := r.Header.Get(middleware.RequestIDHeader)
@@ -218,9 +227,24 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 限制入站请求体大小，防止恶意/故障 CPE 发送超大 POST 导致 ACS 进程 OOM。
+	// 南向接口互联网可达且 Inform 为首条消息（无认证），必须在读取前设上限。
+	maxBody := h.maxRequestBodySize
+	if maxBody <= 0 {
+		maxBody = defaultMaxRequestBodySize
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxBody)
+
 	// 读取请求体
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			log.Warn("request body exceeds limit, rejecting",
+				zap.Int64("limit_bytes", maxBody))
+			http.Error(w, "Request Entity Too Large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		log.Error("read request body", zap.Error(err))
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return

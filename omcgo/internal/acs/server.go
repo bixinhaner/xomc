@@ -90,6 +90,7 @@ func NewACSServer(cfg appconfig.ACSConfig, deps ServerDeps) *ACSServer {
 		stunStore:               deps.StunStore,
 		protocolLogger:          deps.ProtocolLogger,
 		maxBodySize:             deps.MaxBodySize,
+		maxRequestBodySize:      cfg.Server.MaxRequestBodySize,
 		traceWhitelist:          deps.TraceWhitelist,
 		traceService:            deps.TraceService,
 		pathTranslator:          deps.PathTranslator,
@@ -133,13 +134,21 @@ func NewACSServer(cfg appconfig.ACSConfig, deps ServerDeps) *ACSServer {
 	}
 	deps.RateLimiter.StartCleanup(cleanupInterval, cleanupTimeout)
 
+	// MaxHeaderBytes 限制 HTTP 头部总大小，挡住超大头部攻击；未配置时回退到
+	// stdlib 默认 1MB（http.DefaultMaxHeaderBytes）。
+	maxHeaderBytes := cfg.Server.MaxHeaderBytes
+	if maxHeaderBytes <= 0 {
+		maxHeaderBytes = http.DefaultMaxHeaderBytes
+	}
+
 	return &ACSServer{
 		httpServer: &http.Server{
-			Addr:         fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
-			Handler:      mux,
-			ReadTimeout:  cfg.Server.ReadTimeout,
-			WriteTimeout: cfg.Server.WriteTimeout,
-			IdleTimeout:  cfg.Server.IdleTimeout,
+			Addr:           fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
+			Handler:        mux,
+			ReadTimeout:    cfg.Server.ReadTimeout,
+			WriteTimeout:   cfg.Server.WriteTimeout,
+			IdleTimeout:    cfg.Server.IdleTimeout,
+			MaxHeaderBytes: maxHeaderBytes,
 		},
 		handler: h,
 		config:  cfg.Server,
