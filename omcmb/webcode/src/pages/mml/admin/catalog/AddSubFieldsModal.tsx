@@ -11,8 +11,9 @@
  * 与现有 CreateSubField 区别：原 endpoint 一次只建一条且需手工填全部字段；
  * batch 端点按 standard_params 元数据自动派生，让维护人员减少 90% 重复劳动。
  */
-import { useState, useMemo, useEffect } from 'react';
-import { Modal, Table, Input, Form, Space, Tag, message } from 'antd';
+import { useState, useEffect } from 'react';
+import { Modal, Table, Input, Form, Space, Tag, Button, Tooltip, message } from 'antd';
+import { DeleteOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import StandardParamSelect from './StandardParamSelect';
 import type { StandardParamView } from '@core/types/mmlAdmin';
@@ -20,7 +21,7 @@ import {
   useBatchCreateSubFields,
 } from '@core/hooks/api/useMmlAdmin';
 import { useT } from '@/hooks/useT';
-import { deriveLabel } from './deriveLabel';
+import { type PreviewRow, appendRows, removeRow, computeExcludeIds } from './subFieldRows';
 
 export interface AddSubFieldsModalProps {
   open: boolean;
@@ -29,42 +30,6 @@ export interface AddSubFieldsModalProps {
   existingPathIds?: string[];
   onClose: () => void;
   onSuccess?: () => void;
-}
-
-interface PreviewRow {
-  paramId: string;
-  standardPath: string;
-  description: string;
-  /** autofill：path 末段 UPPER_SNAKE */
-  mmlCode: string;
-  /** 单值显示名（去多语言）；提交仍只传 standardPathIds，由后端派生。 */
-  label: string;
-  access: string;
-  dataType: string;
-}
-
-/** 把 standard_path 末段转成 UPPER_SNAKE_CASE。与后端 derivePathLeafCode 同算法。 */
-function deriveMmlCode(path: string): string {
-  const idx = path.lastIndexOf('.');
-  const leaf = idx >= 0 ? path.slice(idx + 1) : path;
-  let out = '';
-  let prevLower = false;
-  for (let i = 0; i < leaf.length; i++) {
-    const ch = leaf[i];
-    const isUpper = ch >= 'A' && ch <= 'Z';
-    const isLower = ch >= 'a' && ch <= 'z';
-    const isDigit = ch >= '0' && ch <= '9';
-    if (i > 0 && prevLower && isUpper) out += '_';
-    if (ch === '_' || ch === '-') {
-      out += '_';
-    } else if (isUpper || isDigit) {
-      out += ch;
-    } else if (isLower) {
-      out += ch.toUpperCase();
-    }
-    prevLower = isLower;
-  }
-  return out;
 }
 
 export default function AddSubFieldsModal({
@@ -83,33 +48,11 @@ export default function AddSubFieldsModal({
     if (!open) setRows([]);
   }, [open]);
 
-  const handleSelectionChange = (_: string | string[], records: StandardParamView[]) => {
-    // 维护现有 rows 中已有的用户编辑值（按 paramId 索引），仅追加新增的
-    setRows((prev) => {
-      const prevMap = new Map(prev.map((r) => [r.paramId, r]));
-      const next: PreviewRow[] = [];
-      for (const sp of records) {
-        const existing = prevMap.get(sp.id);
-        if (existing) {
-          next.push(existing);
-          continue;
-        }
-        const mmlCode = deriveMmlCode(sp.standardPath);
-        next.push({
-          paramId: sp.id,
-          standardPath: sp.standardPath,
-          description: sp.description,
-          mmlCode,
-          label: sp.description || deriveLabel(sp.standardPath) || mmlCode,
-          access: sp.access,
-          dataType: sp.dataType,
-        });
-      }
-      return next;
-    });
+  // 选中即入表（规则2：连续添加）。Select 自身不保留标签，rows 是唯一真值源；
+  // 移除走表格行内删除按钮（规则3），下拉只展示未选项（规则1，见 computeExcludeIds）。
+  const handlePick = (_: string | string[], records: StandardParamView[]) => {
+    setRows((prev) => appendRows(prev, records));
   };
-
-  const selectedIds = useMemo(() => rows.map((r) => r.paramId), [rows]);
 
   const columns: ColumnsType<PreviewRow> = [
     {
@@ -160,6 +103,24 @@ export default function AddSubFieldsModal({
         <Tag color={v === 'READ_WRITE' ? 'blue' : 'default'}>{v || '-'}</Tag>
       ),
     },
+    {
+      // 规则3：逐行单独删除（替代下拉一键清除 allowClear）
+      title: t('mml.admin.catalog.common.actions'),
+      key: 'op',
+      width: 64,
+      align: 'center',
+      render: (_: unknown, row: PreviewRow) => (
+        <Tooltip title={t('mml.admin.catalog.common.delete')}>
+          <Button
+            type="text"
+            size="small"
+            danger
+            icon={<DeleteOutlined />}
+            onClick={() => setRows((p) => removeRow(p, row.paramId))}
+          />
+        </Tooltip>
+      ),
+    },
   ];
 
   const handleOk = async () => {
@@ -200,9 +161,10 @@ export default function AddSubFieldsModal({
         <Form.Item label={t('mml.admin.catalog.path.select')} required>
           <StandardParamSelect
             multiple
-            value={selectedIds}
-            onChange={handleSelectionChange}
-            excludeIds={existingPathIds}
+            value={[]}
+            onChange={handlePick}
+            excludeIds={computeExcludeIds(existingPathIds, rows)}
+            allowClear={false}
           />
         </Form.Item>
         <Table<PreviewRow>

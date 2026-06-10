@@ -32,6 +32,8 @@ export interface StandardParamSelectProps {
   disabled?: boolean;
   /** 排除已选 path ID（避免同命令下重复绑定）。可选。 */
   excludeIds?: string[];
+  /** 是否显示「一键清除」X。默认 true；批量添加场景传 false，改由列表逐行删除。 */
+  allowClear?: boolean;
 }
 
 export default function StandardParamSelect({
@@ -42,6 +44,7 @@ export default function StandardParamSelect({
   placeholder,
   disabled,
   excludeIds = [],
+  allowClear = true,
 }: StandardParamSelectProps) {
   const t = useT();
   const [search, setSearch] = useState('');
@@ -98,7 +101,7 @@ export default function StandardParamSelect({
       onSearch={setSearch}
       filterOption={false} // 后端已过滤
       showSearch
-      allowClear
+      allowClear={allowClear}
       placeholder={placeholder ?? t('mml.admin.catalog.path.searchPlaceholder')}
       disabled={disabled}
       options={options}
