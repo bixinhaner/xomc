@@ -10,6 +10,7 @@ import (
 
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/events"
+	"github.com/omcgo/omcgo/internal/task"
 )
 
 // Service provides business logic for notification management.
@@ -93,9 +94,12 @@ func (s *Service) DeleteAllByUser(ctx context.Context, userID string) (int64, er
 }
 
 // StaleTaskLookup 抽象 task 表查询，便于单测 mock。
-// 实现端 = task.PgTaskRepository.GetByID 的包装（避免 notification → task 直接依赖）。
+// 实现端 = task.PgTaskRepository 的包装。
 type StaleTaskLookup interface {
 	LookupTaskStatus(ctx context.Context, taskID string) (status string, errMsg string, found bool, err error)
+	// LookupTaskStatuses 批量反查多个 task 的状态（#16 消除 SyncStaleByUser 的 N+1）。
+	// 返回 map 仅含仍存在的 taskID；缺失的 taskID（已被清理）由调用方按 not-found 处理。
+	LookupTaskStatuses(ctx context.Context, taskIDs []string) (map[string]task.TaskStatusInfo, error)
 }
 
 // SetStaleTaskLookup 注入 task 状态查询器（T-0157 stale sync）。
@@ -116,16 +120,33 @@ func (s *Service) SyncStaleByUser(ctx context.Context, userID string) (int, erro
 	if err != nil {
 		return 0, fmt.Errorf("list stale: %w", err)
 	}
+
+	// 批量反查 task 状态：先收集所有非空 dedup_key（=task_id），一条 IN 查询取回所有状态，
+	// 替代原先逐 notification 调用 LookupTaskStatus 的 N+1（#16）。
+	taskIDs := make([]string, 0, len(stale))
+	seen := make(map[string]struct{}, len(stale))
+	for _, n := range stale {
+		if n.DedupKey == nil || *n.DedupKey == "" {
+			continue
+		}
+		if _, dup := seen[*n.DedupKey]; dup {
+			continue
+		}
+		seen[*n.DedupKey] = struct{}{}
+		taskIDs = append(taskIDs, *n.DedupKey)
+	}
+	statuses, err := s.staleTask.LookupTaskStatuses(ctx, taskIDs)
+	if err != nil {
+		return 0, fmt.Errorf("lookup task statuses for stale sync: %w", err)
+	}
+
 	updated := 0
 	for _, n := range stale {
 		if n.DedupKey == nil || *n.DedupKey == "" {
 			continue
 		}
-		status, errMsg, found, err := s.staleTask.LookupTaskStatus(ctx, *n.DedupKey)
-		if err != nil {
-			s.logger.Warn("lookup task for stale sync", zap.String("task_id", *n.DedupKey), zap.Error(err))
-			continue
-		}
+		info, found := statuses[*n.DedupKey]
+		status, errMsg := info.Status, info.ErrorMsg
 		if !found {
 			// task 已被 PurgeOldTasks 清掉但消息仍在 → 标 expired（视为运行期超时无人收尾）
 			if err := s.repo.UpdateStatusByID(ctx, n.ID, StatusExpired, PriorityHigh,

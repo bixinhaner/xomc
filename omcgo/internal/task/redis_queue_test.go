@@ -3,6 +3,7 @@ package task
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"testing"
 	"time"
 
@@ -400,6 +401,68 @@ func TestRedisQueue_GetStaleSentTasks_EmptyQueue(t *testing.T) {
 	stales, err := q.GetStaleSentTasks(context.Background(), "SN-EMPTY", "5m")
 	require.NoError(t, err)
 	assert.Empty(t, stales)
+}
+
+// TestRedisQueue_GetStaleSentTasks_MissingDetail 覆盖 #16 批量 pipeline 的部分 key 缺失分支：
+// 队列里有任务 ID，但其详情 Hash 已被删（TTL 过期），pipeline 单条返回 redis.Nil，
+// 应跳过该条而非整体失败，其余陈旧任务仍正常返回。
+func TestRedisQueue_GetStaleSentTasks_MissingDetail(t *testing.T) {
+	q, m := newRedisQueueWithMini(t)
+	ctx := context.Background()
+
+	stale := time.Now().Add(-10 * time.Minute)
+
+	good := newTaskForQueue("t-good", "SN-MISS", "Reboot")
+	good.Status = TaskStatusSent
+	good.SentAt = &stale
+
+	ghost := newTaskForQueue("t-ghost", "SN-MISS", "Reboot")
+	ghost.Status = TaskStatusSent
+	ghost.SentAt = &stale
+
+	require.NoError(t, q.Push(ctx, good))
+	require.NoError(t, q.Push(ctx, ghost))
+
+	// 手动删除 ghost 的详情 Hash，模拟详情 TTL 过期但队列 member 还在。
+	m.Del(q.taskKey("t-ghost"))
+
+	stales, err := q.GetStaleSentTasks(ctx, "SN-MISS", "5m")
+	require.NoError(t, err)
+	require.Len(t, stales, 1)
+	assert.Equal(t, "t-good", stales[0].ID)
+}
+
+// TestRedisQueue_GetStaleSentTasks_BatchMany 多任务下批量取回正确性：
+// 混合 stale-sent / fresh-sent / pending，仅返回超阈值的 sent 任务。
+func TestRedisQueue_GetStaleSentTasks_BatchMany(t *testing.T) {
+	q, _ := newRedisQueueWithMini(t)
+	ctx := context.Background()
+
+	stale := time.Now().Add(-10 * time.Minute)
+	fresh := time.Now().Add(-1 * time.Minute)
+
+	for i := 0; i < 5; i++ {
+		st := newTaskForQueue("stale-"+strconv.Itoa(i), "SN-MANY", "Reboot")
+		st.Status = TaskStatusSent
+		st.SentAt = &stale
+		require.NoError(t, q.Push(ctx, st))
+
+		fr := newTaskForQueue("fresh-"+strconv.Itoa(i), "SN-MANY", "Reboot")
+		fr.Status = TaskStatusSent
+		fr.SentAt = &fresh
+		require.NoError(t, q.Push(ctx, fr))
+
+		pd := newTaskForQueue("pend-"+strconv.Itoa(i), "SN-MANY", "Reboot")
+		require.NoError(t, q.Push(ctx, pd))
+	}
+
+	stales, err := q.GetStaleSentTasks(ctx, "SN-MANY", "5m")
+	require.NoError(t, err)
+	require.Len(t, stales, 5)
+	for _, tk := range stales {
+		assert.Equal(t, TaskStatusSent, tk.Status)
+		assert.True(t, tk.SentAt.Before(time.Now().Add(-5*time.Minute)))
+	}
 }
 
 func TestRedisQueue_GetQueueLengths(t *testing.T) {

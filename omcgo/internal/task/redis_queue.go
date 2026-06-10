@@ -263,20 +263,42 @@ func (q *RedisTaskQueue) GetStaleSentTasks(ctx context.Context, deviceSN string,
 	if err != nil {
 		return nil, fmt.Errorf("zrange: %w", err)
 	}
+	if len(taskIDs) == 0 {
+		return nil, nil
+	}
+
+	// 批量取任务详情：用单次 pipeline 把 N 个 HGET 合并为一个 RTT，
+	// 替代原先逐 ID 调用 GetByID 的 N+1 往返（消除 #16 报告的 1 ZRANGE + N HGET）。
+	pipe := q.client.Pipeline()
+	cmds := make([]*redis.StringCmd, len(taskIDs))
+	for i, taskID := range taskIDs {
+		cmds[i] = pipe.HGet(ctx, q.taskKey(taskID), "data")
+	}
+	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
+		// redis.Nil 表示部分 key 缺失（任务详情已 TTL 过期），属正常情况，逐条处理；
+		// 其它错误才视为失败。
+		return nil, fmt.Errorf("pipeline hget: %w", err)
+	}
 
 	var staleTasks []*Task
 	staleThreshold := time.Now().Add(-duration)
 
-	for _, taskID := range taskIDs {
-		task, err := q.GetByID(ctx, taskID)
+	for _, cmd := range cmds {
+		taskData, err := cmd.Result()
 		if err != nil {
+			// key 缺失 / 单条读取失败：跳过（与原逐条 GetByID 容错语义一致）。
+			continue
+		}
+
+		var task Task
+		if err := json.Unmarshal([]byte(taskData), &task); err != nil {
 			continue
 		}
 
 		// 检查是否是 sent 状态且超过阈值时间
-		if task != nil && task.Status == TaskStatusSent && task.SentAt != nil {
+		if task.Status == TaskStatusSent && task.SentAt != nil {
 			if task.SentAt.Before(staleThreshold) {
-				staleTasks = append(staleTasks, task)
+				staleTasks = append(staleTasks, &task)
 			}
 		}
 	}

@@ -120,6 +120,51 @@ func (r *PgTaskRepository) GetByID(ctx context.Context, id string) (*Task, error
 	return r.scanTask(ctx, query, args...)
 }
 
+// TaskStatusRow 是 LookupStatusesByIDs 的轻量返回（只取 stale sync 反查需要的字段，
+// 不扫描整行 task，避免 N 次 GetByID 全列扫描）。
+type TaskStatusRow struct {
+	ID           string
+	Status       TaskStatus
+	ErrorMessage string
+}
+
+// LookupStatusesByIDs 批量反查多个 task 的当前状态（#16 消除 notification stale sync 的 N+1）。
+// 一条 WHERE id = ANY(...) 查询替代逐 ID 的 GetByID；结果按 id 去重映射，缺失的 id 不在返回 map 中。
+// ids 为空时直接返回空 map，不打 DB。
+func (r *PgTaskRepository) LookupStatusesByIDs(ctx context.Context, ids []string) (map[string]TaskStatusRow, error) {
+	out := make(map[string]TaskStatusRow, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+
+	query, args, err := storage.Psql.Select("id", "status", "error_message").
+		From("device_tasks").
+		Where(sq.Eq{"id": ids}).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build lookup statuses query: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query task statuses: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var row TaskStatusRow
+		if err := rows.Scan(&row.ID, &row.Status, &row.ErrorMessage); err != nil {
+			return nil, fmt.Errorf("scan task status: %w", err)
+		}
+		out[row.ID] = row
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate task statuses: %w", err)
+	}
+
+	return out, nil
+}
+
 // GetByCWMPID 根据 CWMP ID 获取任务
 func (r *PgTaskRepository) GetByCWMPID(ctx context.Context, cwmpID string) (*Task, error) {
 	query, args, err := storage.Psql.Select(taskColumns()...).

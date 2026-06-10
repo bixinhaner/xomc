@@ -877,6 +877,32 @@ func (l *StaleNotificationLookup) LookupTaskStatus(ctx context.Context, taskID s
 	return string(t.Status), t.ErrorMessage, true, nil
 }
 
+// TaskStatusInfo 是 stale sync 批量反查的去包装结果（只含 status / error message）。
+// 定义在 task 包：notification 已单向依赖 task，可直接引用；反向（task→notification）禁止，
+// 故不能把该类型放 notification 包，否则 LookupTaskStatuses 适配器会引入 import cycle。
+type TaskStatusInfo struct {
+	Status   string
+	ErrorMsg string
+}
+
+// LookupTaskStatuses 批量反查多个 task 的状态（#16 消除 stale sync N+1）。
+// 一条 IN 查询替代逐 ID 的 LookupTaskStatus；返回 map 只含存在的 taskID，
+// 缺失的 taskID（已被清理）由调用方按 not-found 处理。
+func (l *StaleNotificationLookup) LookupTaskStatuses(ctx context.Context, taskIDs []string) (map[string]TaskStatusInfo, error) {
+	rows, err := l.repo.LookupStatusesByIDs(ctx, taskIDs)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]TaskStatusInfo, len(rows))
+	for id, row := range rows {
+		out[id] = TaskStatusInfo{
+			Status:   string(row.Status),
+			ErrorMsg: row.ErrorMessage,
+		}
+	}
+	return out, nil
+}
+
 // SubjectForStatus maps a terminal TaskStatus to its event subject.
 // Returns "" for non-terminal statuses so callers can skip publishing.
 func SubjectForStatus(status TaskStatus) string {
