@@ -525,7 +525,6 @@ const getStationFields = (t: ReturnType<typeof useT>, networkType: string): Fiel
     { key: 'productClass', label: t('device.productClass'), render: (d) => d.productClass || '-' },
     { key: 'deviceModel', label: t('device.model'), render: (d) => d.deviceModel || '-' },
     { key: 'softwareVersion', label: t('device.softwareVersion'), render: (d) => <Text style={{ fontFamily: 'monospace' }}>{d.softwareVersion || '-'}</Text> },
-    { key: 'firmwareVersion', label: t('device.firmwareVersion'), render: (d) => <Text style={{ fontFamily: 'monospace' }}>{d.firmwareVersion || '-'}</Text> },
     { key: 'macAddress', label: t('device.macAddress'), render: (d) => <Text style={{ fontFamily: 'monospace' }}>{d.macAddress || '-'}</Text> },
     { key: 'groupName', label: t('device.groupName'), render: (d) => d.groupName || '-' },
     { key: 'ipAddress', label: t('device.ipAddress'), render: (d) => <Text style={{ fontFamily: 'monospace' }}>{d.ipAddress || '-'}</Text> },

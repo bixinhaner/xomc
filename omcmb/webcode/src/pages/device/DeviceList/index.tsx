@@ -60,6 +60,18 @@ const exportDeviceApi = createApiSwitch(deviceService as unknown as typeof devic
 // DataTable tableId,导出时据此读取"列设置"localStorage(须与 <DataTable tableId> 一致)。
 const DEVICE_LIST_TABLE_ID = 'device-list-table';
 
+// 筛选下拉框 name → 表格列 key 映射:列设置隐藏该列时,对应筛选下拉一并隐藏
+// (用户决策 2026-06-09)。searchText 无对应列、不入表 → 始终显示。
+const FILTER_COLUMN_MAP: Record<string, string> = {
+  isOnline: 'connStatus',
+  opState: 'opState',
+  networkType: 'networkType',
+  productModel: 'productClass',
+  modelName: 'deviceModel',
+  softwareVersion: 'softwareVersion',
+  groupId: 'groupName',
+};
+
 /**
  * 格式化离线时长为可读字符串
  * @param days 离线天数
@@ -148,7 +160,6 @@ const URL_ARRAY_FIELDS = new Set<string>([
   'productModel',
   'modelName',
   'softwareVersion',
-  'firmwareVersion',
   'groupId',
 ]);
 
@@ -391,7 +402,6 @@ export default function DeviceList() {
   const productClassDict = batchDicts?.['product_class'];
   const deviceModelDict = batchDicts?.['device_model'];
   const softwareVersionDict = batchDicts?.['software_version'];
-  const firmwareVersionDict = batchDicts?.['firmware_version'];
 
   const dictToOptions = useCallback(
     (dict: { sysDictionaryDetails?: { label: string; value: string }[] } | undefined) =>
@@ -449,7 +459,7 @@ export default function DeviceList() {
     // 后端仍保留供详情页与统计 by_lifecycle 使用。
     {
       name: 'isOnline',
-      label: t('device.isOnline'),
+      label: t('device.connStatus'),
       type: 'select',
       width: 160,
       options: dictToOptions(isOnlineDict),
@@ -495,13 +505,6 @@ export default function DeviceList() {
       width: 160,
       options: dictToOptions(softwareVersionDict),
     },
-    {
-      name: 'firmwareVersion',
-      label: t('device.firmwareVersion'),
-      type: 'multi-select',
-      width: 160,
-      options: dictToOptions(firmwareVersionDict),
-    },
     // R4 + R6b: groupId 接入 useDeviceGroups
     // width:400 与第一行 searchText 输入框对齐——分组名称长度普遍超过 160（含层级
     // "Region A / Subgroup B" 形式），160 时多选 chip 被截断成 "...""，体验差。
@@ -520,7 +523,6 @@ export default function DeviceList() {
     productClassDict,
     deviceModelDict,
     softwareVersionDict,
-    firmwareVersionDict,
     groupOptions,
     dictToOptions,
   ]);
@@ -534,6 +536,18 @@ export default function DeviceList() {
           : f
       ),
     [FILTER_FIELDS, t]
+  );
+
+  // 列设置隐藏某列 → 对应搜索下拉框一并隐藏(FILTER_COLUMN_MAP 映射;searchText 无映射,始终显示)。
+  // hiddenColumnKeys 由 <DataTable onHiddenColumnsChange> 在列设置变化时抬上来。
+  const [hiddenColumnKeys, setHiddenColumnKeys] = useState<string[]>([]);
+  const visibleFilterFields = useMemo(
+    () =>
+      filterFields.filter((f) => {
+        const colKey = FILTER_COLUMN_MAP[f.name];
+        return !colKey || !hiddenColumnKeys.includes(colKey);
+      }),
+    [filterFields, hiddenColumnKeys]
   );
 
   // 统计面板 — 基于筛选条件的全量统计（由后端 stats 字段返回，非当前页）
@@ -1134,7 +1148,6 @@ export default function DeviceList() {
           });
         },
       },
-      { key: 'firmwareVersion', title: t('device.firmwareVersion'), dataIndex: 'firmwareVersion', width: 140, hidden: true, ellipsis: true, group: 'common' },
       {
         key: 'onlineDuration',
         title: t('device.onlineDuration'),
@@ -1144,7 +1157,7 @@ export default function DeviceList() {
         group: 'common',
         render: (_val, record) => fmtDuration(record.onlineDuration),
       },
-      { key: 'upTime', title: t('device.upTime'), dataIndex: 'upTime', width: 120, hidden: true, group: 'common' },
+      { key: 'upTime', title: t('device.upTime'), dataIndex: 'upTime', width: 120, hidden: true, group: 'common', render: (_val, record) => fmtDuration(record.upTime) },
       {
         key: 'firstOnlineTime',
         title: t('device.firstOnlineTime'),
@@ -1172,7 +1185,7 @@ export default function DeviceList() {
         group: 'common',
         render: (_val, record) => fmtTime(record.lastOnlineTime),
       },
-      { key: 'siteName', title: t('device.siteName'), dataIndex: 'deviceName', width: 130, hidden: true, ellipsis: true, group: 'common' },
+      { key: 'siteName', title: t('device.cellName'), dataIndex: 'cellId', width: 130, hidden: true, ellipsis: true, group: 'common' },
       { key: 'remark', title: t('device.remark'), dataIndex: 'remark', width: 185, hidden: true, ellipsis: true, group: 'common', headerRender: remarkHeaderRender },
       {
         key: 'longitude',
@@ -1625,7 +1638,7 @@ export default function DeviceList() {
         <ListPageLayout>
           <FilterBar
             filterId="device-list"
-            fields={filterFields}
+            fields={visibleFilterFields}
             onSearch={handleSearch}
             onReset={handleReset}
             collapsedRows={1}
@@ -1651,6 +1664,7 @@ export default function DeviceList() {
             <DataTable<Device>
               tableId="device-list-table"
               columns={columns}
+              onHiddenColumnsChange={setHiddenColumnKeys}
               dataSource={devices}
               loading={isLoading}
               rowKey="id"

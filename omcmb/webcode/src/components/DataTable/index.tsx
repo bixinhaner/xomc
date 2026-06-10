@@ -48,6 +48,8 @@ export interface DataTableProps<T> {
   selectable?: boolean;
   selectedRowKeys?: React.Key[];
   onSelectionChange?: (keys: React.Key[], rows: T[]) => void;
+  /** 列设置隐藏列变化时回调:把当前隐藏列 key 抬给父组件(device list 据此联动隐藏对应筛选下拉)。 */
+  onHiddenColumnsChange?: (hiddenKeys: string[]) => void;
   total?: number;
   pageSize?: number;
   currentPage?: number;
@@ -141,6 +143,7 @@ function DataTable<T>(
     rowNumberTitle,
     autoFitHeight = false,
     onRealtimeRefreshChange,
+    onHiddenColumnsChange,
   } = props;
 
   const t = useT();
@@ -449,7 +452,7 @@ function DataTable<T>(
           batchActions={batchActions}
           onRefresh={onRefresh}
           onExport={onExport}
-          onColumnVisibilityChange={setHiddenKeys}
+          onColumnVisibilityChange={(keys) => { setHiddenKeys(keys); onHiddenColumnsChange?.(keys); }}
           onColumnOrderChange={setColumnOrder}
           onRefreshLockChange={onRealtimeRefreshChange}
           density={density}

@@ -1082,6 +1082,7 @@ const messages: Record<string, string> = {
 
   // Monitor page extended fields (Cell)
   'device.cellId':              'Cell ID',
+  'device.cellName':            'Cell Name',
   'device.subframeAssignment':  'Subframe Assignment',
   'device.specialSubframe':     'Special Subframe',
   'device.rootIndex':           'Root Index',
