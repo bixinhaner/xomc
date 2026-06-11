@@ -611,6 +611,14 @@ type WorkerConfig struct {
 	// durable consumer "pm-workers" 由 JetStream 负载均衡，吃满 worker 多核。<=0 时 worker 启动期
 	// 回退到 GOMAXPROCS（即容器 CPU 配额），上限 16。建议设为 worker CPU 核数。
 	PMConsumerConcurrency int `mapstructure:"pm_consumer_concurrency"`
+	// PMAsyncCommit：PM 指标大批量写是否对本事务关掉 WAL 同步落盘（synchronous_commit=off）。
+	// PM 数据可从 MinIO 原文件重建，关掉后提交不阻塞 fsync、显著提吞吐（崩溃最多丢已提交未刷盘的
+	// 最后几 ms 行）。默认 false（durable）；写吞吐瓶颈场景置 true。
+	PMAsyncCommit bool `mapstructure:"pm_async_commit"`
+	// PMKPIWindowFromDB：KPI 计算是否从 DB 回读 counter（true）还是用内存刚解析的 counter 直接算
+	// （false，默认，省每文件一次全量回读 SELECT）。仅当部署存在"同一窗口拆成多文件上报、需跨文件
+	// 聚合 KPI"时才置 true。
+	PMKPIWindowFromDB bool `mapstructure:"pm_kpi_window_from_db"`
 	DictLoader      DictLoaderConfig `mapstructure:"dict_loader"` // T-0178: worker BackupCleanup 需读 XMLBaseDir + ParamModel 子配置
 	Metrics         MetricsConfig    `mapstructure:"metrics"`
 	Tracer          TracerConfig     `mapstructure:"tracer"`

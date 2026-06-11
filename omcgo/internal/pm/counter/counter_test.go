@@ -85,6 +85,36 @@ func Test_groupCountersByCell_EmptyCellIDSumsAll(t *testing.T) {
 	assert.Equal(t, 33.0, out[""]["A"], "\"\" 桶 = 全部行求和（10+20+3），无重复累加")
 }
 
+// 等价性：GroupParsedCountersByCell(内存 PMCounter) 与 groupCountersByCell(DB PMMetric)
+// 对同一份数据产出完全相同的分桶——保证免回读快路径与回读路径语义一致。
+func Test_GroupParsedCountersByCell_EqualsDBGrouping(t *testing.T) {
+	// 同一份逻辑数据的两种表示：内存 PMCounter vs DB PMMetric。
+	counters := []model.PMCounter{
+		{CellID: "cell-1", CounterName: "A", CounterValue: 10},
+		{CellID: "cell-1", CounterName: "A", CounterValue: 5}, // 同 (cell,name) 求和
+		{CellID: "cell-1", CounterName: "B", CounterValue: 7},
+		{CellID: "cell-2", CounterName: "A", CounterValue: 100},
+		{CellID: "", CounterName: "A", CounterValue: 3}, // 无 cell 行
+	}
+	ms := make([]metrics.PMMetric, len(counters))
+	for i, c := range counters {
+		ldn := c.CellID
+		ms[i] = metrics.PMMetric{ObjectLDN: &ldn, MetricPath: c.CounterName, MetricValue: c.CounterValue}
+	}
+	cellIDs := []string{"cell-1", "cell-2", ""}
+
+	fromMem := GroupParsedCountersByCell(counters, cellIDs, 900)
+	fromDB := groupCountersByCell(ms, cellIDs, 900)
+	assert.Equal(t, fromDB, fromMem, "内存分桶须与 DB 分桶逐桶相等")
+
+	// 抽查关键值，避免两者同错。
+	assert.Equal(t, 15.0, fromMem["cell-1"]["A"])
+	assert.Equal(t, 7.0, fromMem["cell-1"]["B"])
+	assert.Equal(t, 100.0, fromMem["cell-2"]["A"])
+	assert.Equal(t, 118.0, fromMem[""]["A"], "\"\" 桶=全部 A 行求和 10+5+100+3")
+	assert.Equal(t, 900.0, fromMem["cell-1"]["period_seconds"])
+}
+
 // CounterFilter 与 ListRequest 集成
 func Test_CounterFilter_WithListRequest(t *testing.T) {
 	filter := CounterFilter{

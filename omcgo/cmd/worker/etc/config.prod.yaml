@@ -56,6 +56,13 @@ minio:
 # <=0 回退 GOMAXPROCS（容器 CPU 配额），上限 16；按 worker CPU 核数设置。
 pm_consumer_concurrency: 0
 
+# PM 指标大批量写关掉 WAL 同步落盘（synchronous_commit=off）换吞吐：PM 数据可从 MinIO 重建。
+# 默认 false（durable）；写吞吐瓶颈下置 true。
+pm_async_commit: false
+
+# KPI 计算取数：false=内存 counter 直接算（默认，省每文件回读）；true=DB 回读（同窗多文件部署）。
+pm_kpi_window_from_db: false
+
 # T-0157 C2: 任务过期扫描器配置
 task:
   default_expires_in_seconds: 120

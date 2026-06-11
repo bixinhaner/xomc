@@ -106,6 +106,7 @@ type PMCollector struct {
 	deviceLookup     DeviceLookup
 	counterWhitelist CounterWhitelist
 	concurrency      int
+	kpiWindowFromDB  bool
 	logger           *zap.Logger
 }
 
@@ -165,6 +166,14 @@ func (c *PMCollector) SetCounterWhitelist(w CounterWhitelist) {
 // 均无可变共享状态，并发调用安全。
 func (c *PMCollector) SetConcurrency(n int) {
 	c.concurrency = n
+}
+
+// SetKPIWindowFromDB 选择 KPI 计算的取数路径：
+//   - false（默认，快）：用本文件刚解析的内存 counter 直接算 KPI（免每文件一次全量回读 SELECT）。
+//   - true：算 KPI 前从 pm_metrics 按 15min 窗回读 counter 再算——会跨"同设备同窗多文件"
+//     （拆包/补传）聚合。仅当部署存在同一窗口拆成多文件上报、且需跨文件聚合 KPI 时才开。
+func (c *PMCollector) SetKPIWindowFromDB(v bool) {
+	c.kpiWindowFromDB = v
 }
 
 // Subscribe registers the collector to listen for PM file received events.
@@ -334,14 +343,21 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 		}
 	}
 
-	// Calculate KPIs — 批量算全文件所有 cell（route 查一次 + counter 一次查全 + KPI 一次批量写），
-	// 替代旧"每 cell 一次 CalculateAndStore"的 N 次扇出（GSM 真机 256 cell/文件是入库主瓶颈）。
+	// Calculate KPIs — 默认走"内存 counter 直接算"快路径（免每文件一次全量回读 SELECT）；
+	// content.Counters 此处已过白名单、CounterName 已编号化，正是 KPI 公式所需。
+	// 仅当 SetKPIWindowFromDB(true)（同窗多文件需跨文件聚合）才回退到回读路径。
 	if c.kpiEngine != nil {
-		cellIDs := extractUniqueCellIDs(content.Counters)
 		carrier := model.CarrierCode(payload.Carrier)
 		tech := model.Technology(payload.Technology)
-		if _, err := c.kpiEngine.CalculateCellsAndStore(ctx, deviceID, payload.DeviceOUI, payload.DeviceSN, cellIDs, content.CollectTime, carrier, tech); err != nil {
-			c.logger.Warn("calculate kpi (cells)", zap.Int("cells", len(cellIDs)), zap.Error(err))
+		if c.kpiWindowFromDB {
+			cellIDs := extractUniqueCellIDs(content.Counters)
+			if _, err := c.kpiEngine.CalculateCellsAndStore(ctx, deviceID, payload.DeviceOUI, payload.DeviceSN, cellIDs, content.CollectTime, carrier, tech); err != nil {
+				c.logger.Warn("calculate kpi (db window)", zap.Int("cells", len(cellIDs)), zap.Error(err))
+			}
+		} else {
+			if _, err := c.kpiEngine.CalculateAndStoreFromCounters(ctx, deviceID, payload.DeviceOUI, payload.DeviceSN, content.Counters, content.CollectTime, carrier, tech); err != nil {
+				c.logger.Warn("calculate kpi (in-memory)", zap.Int("counters", len(content.Counters)), zap.Error(err))
+			}
 		}
 	}
 
