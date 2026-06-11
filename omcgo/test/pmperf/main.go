@@ -29,6 +29,8 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -41,6 +43,7 @@ type config struct {
 	mode          string
 	baseURL       string
 	rats          string
+	mix           string
 	templates     string
 	concurrency   int
 	devices       int
@@ -119,8 +122,9 @@ func parseFlags() config {
 	var c config
 	flag.StringVar(&c.mode, "mode", "run", "run（注入+上传+验证）| seed（仅注入）| cleanup（清库+清 NATS）| purge（仅清 NATS PM 流）")
 	flag.StringVar(&c.baseURL, "url", "http://localhost:7557", "ACS 上传端点 base URL（直连 ACS :7557 或经 nginx :8080）")
-	flag.StringVar(&c.rats, "rats", "lte,nr,gsm", "压测制式（逗号分隔）：lte|nr|gsm，并发/设备数在其间拆分")
-	flag.StringVar(&c.templates, "templates", "", "可选：每个 RAT 一个外部真机模板 XML（数量须等于 -rats）；留空=用内置真机样本（-synth 可切指标库合成法）")
+	flag.StringVar(&c.rats, "rats", "lte,nr,gsm", "压测制式（逗号分隔）：lte|nr|gsm，并发/设备数在其间均分")
+	flag.StringVar(&c.mix, "mix", "", "按制式显式指定设备数（真实占比，GSM 通常很少）：如 \"lte=300,nr=270,gsm=30\"。设置后覆盖 -rats/-devices，制式与顺序取自此处，每制式文件=设备×buckets，并发按设备占比拆分")
+	flag.StringVar(&c.templates, "templates", "", "可选：每个 RAT 一个外部真机模板 XML（数量须等于 RAT 数）；留空=用内置真机样本（-synth 可切指标库合成法）")
 	flag.IntVar(&c.concurrency, "concurrency", 100, "总并发上传数（在飞请求上限），按 -rats 拆分；建议 200–10000")
 	flag.IntVar(&c.devices, "devices", 9999, "注入的设备总数，按 -rats 拆分（默认每制式 3333）")
 	flag.IntVar(&c.files, "files", 0, "总上传文件数；0=各制式 devices×buckets（每设备每时间窗一份）")
@@ -152,16 +156,12 @@ func parseFlags() config {
 func runSeed(ctx context.Context, cfg config) {
 	pool := mustDB(ctx, cfg)
 	defer pool.Close()
-	for _, rat := range splitCSV(cfg.rats) {
-		prof, ok := builtinProfiles[rat]
-		if !ok {
-			fatal("未知 RAT %q", rat)
-		}
-		n := perRat(cfg.devices, cfg.rats, rat)
-		fmt.Printf("注入 %s 设备 %d 个（productClass=%s, %s/%s）…\n", rat, n, prof.productClass, cfg.carrier, prof.tech)
-		ins, err := seedDevices(ctx, pool, cfg.snPrefix, rat, n, cfg.oui, cfg.carrier, prof.tech, prof.productClass)
+	for _, p := range resolveRatPlan(cfg) {
+		prof := builtinProfiles[p.rat] // resolveRatPlan/parseMix 已校验 RAT 合法
+		fmt.Printf("注入 %s 设备 %d 个（productClass=%s, %s/%s）…\n", p.rat, p.devices, prof.productClass, cfg.carrier, prof.tech)
+		ins, err := seedDevices(ctx, pool, cfg.snPrefix, p.rat, p.devices, cfg.oui, cfg.carrier, prof.tech, prof.productClass)
 		if err != nil {
-			fatal("注入 %s 失败: %v", rat, err)
+			fatal("注入 %s 失败: %v", p.rat, err)
 		}
 		fmt.Printf("  新增 %d 个\n", ins)
 	}
@@ -194,11 +194,11 @@ func runPurge(cfg config) {
 // ---------- run ----------
 
 func runLoad(ctx context.Context, cfg config) {
-	ratList := splitCSV(cfg.rats)
-	if len(ratList) == 0 {
-		fatal("未指定 -rats")
+	plans := resolveRatPlan(cfg)
+	if len(plans) == 0 {
+		fatal("未指定 -rats / -mix")
 	}
-	runs := buildRatRuns(cfg, ratList)
+	runs := buildRatRuns(cfg, plans)
 	wins := buildBuckets(cfg.buckets, time.Duration(runs[0].gen.granSecondsVal())*time.Second)
 
 	printRunHeader(cfg, runs, wins)
@@ -251,27 +251,27 @@ func runLoad(ctx context.Context, cfg config) {
 	}
 }
 
-func buildRatRuns(cfg config, ratList []string) []*ratRun {
-	n := len(ratList)
-	devs := splitN(cfg.devices, n)
-	concs := splitN(cfg.concurrency, n)
+func buildRatRuns(cfg config, plans []ratPlan) []*ratRun {
+	n := len(plans)
+	// -files（总数，可选）按各制式设备占比拆分；未设则每制式 = 设备×buckets。
 	var fileSplit []int
 	if cfg.files > 0 {
-		fileSplit = splitN(cfg.files, n)
+		totalDev := 0
+		for _, p := range plans {
+			totalDev += p.devices
+		}
+		fileSplit = splitByWeight(cfg.files, plans, totalDev)
 	}
 	var tmpls []string
 	if cfg.templates != "" {
 		tmpls = splitCSV(cfg.templates)
 		if len(tmpls) != n {
-			fatal("模板模式：-templates 数量(%d) 必须等于 -rats 数量(%d)", len(tmpls), n)
+			fatal("模板模式：-templates 数量(%d) 必须等于制式数量(%d)", len(tmpls), n)
 		}
 	}
 	runs := make([]*ratRun, n)
-	for i, rat := range ratList {
-		prof, ok := builtinProfiles[rat]
-		if !ok {
-			fatal("未知 RAT %q（可选 lte|nr|gsm）", rat)
-		}
+	for i, p := range plans {
+		prof := builtinProfiles[p.rat] // resolveRatPlan/parseMix 已校验 RAT 合法
 		var g fileGen
 		var err error
 		switch {
@@ -285,17 +285,17 @@ func buildRatRuns(cfg config, ratList []string) []*ratRun {
 			g, err = loadLibGen(prof, prof.indicatorRel, cfg.oui, 900)
 		}
 		if err != nil {
-			fatal("构建 %s 生成器失败: %v", rat, err)
+			fatal("构建 %s 生成器失败: %v", p.rat, err)
 		}
 		genKind := "指标库合成"
 		if _, isTmpl := g.(*generator); isTmpl {
 			genKind = "真机样本:" + g.label()
 		}
-		dev := devs[i]
+		dev := p.devices
 		if dev < 1 {
 			dev = 1
 		}
-		conc := concs[i]
+		conc := p.conc
 		if conc < 1 {
 			conc = 1
 		}
@@ -556,16 +556,83 @@ func splitN(total, n int) []int {
 	return out
 }
 
-// perRat 返回某 RAT 在按 ratsCSV 拆分 total 后分到的份额（用于 seed 模式）。
-func perRat(total int, ratsCSV, rat string) int {
-	list := splitCSV(ratsCSV)
-	parts := splitN(total, len(list))
-	for i, r := range list {
-		if r == rat {
-			return parts[i]
+// ratPlan 是一个制式的设备/并发计划，由 resolveRatPlan 统一产出，供 run / seed 共用，
+// 保证两条路径对设备数的理解一致。
+type ratPlan struct {
+	rat     string
+	devices int
+	conc    int
+}
+
+// resolveRatPlan 解析压测的制式计划：
+//   - 设了 -mix（如 "lte=300,nr=270,gsm=30"）：制式与顺序取自 mix，设备数按 mix 显式给定
+//     （真实占比，GSM 通常远少于 4G/5G）；总并发 cfg.concurrency 按各制式设备占比拆分。
+//   - 未设 -mix：回退旧行为——制式取 -rats，设备数/并发数在制式间均分（splitN）。
+func resolveRatPlan(cfg config) []ratPlan {
+	if mix := parseMix(cfg.mix); len(mix) > 0 {
+		totalDev := 0
+		for _, m := range mix {
+			totalDev += m.devices
+		}
+		concs := splitByWeight(cfg.concurrency, mix, totalDev)
+		out := make([]ratPlan, len(mix))
+		for i, m := range mix {
+			out[i] = ratPlan{rat: m.rat, devices: m.devices, conc: concs[i]}
+		}
+		return out
+	}
+	rats := splitCSV(cfg.rats)
+	devs := splitN(cfg.devices, len(rats))
+	concs := splitN(cfg.concurrency, len(rats))
+	out := make([]ratPlan, len(rats))
+	for i, r := range rats {
+		out[i] = ratPlan{rat: r, devices: devs[i], conc: concs[i]}
+	}
+	return out
+}
+
+// parseMix 解析 -mix "lte=300,nr=270,gsm=30" → 有序 [(rat,devices)]。空串 → nil（未启用）。
+func parseMix(s string) []ratPlan {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	var out []ratPlan
+	for _, p := range splitCSV(s) {
+		kv := strings.SplitN(p, "=", 2)
+		if len(kv) != 2 {
+			fatal("非法 -mix 项 %q，应形如 lte=300", p)
+		}
+		rat := strings.TrimSpace(kv[0])
+		if _, ok := builtinProfiles[rat]; !ok {
+			fatal("-mix 未知 RAT %q（可选 lte|nr|gsm）", rat)
+		}
+		n, err := strconv.Atoi(strings.TrimSpace(kv[1]))
+		if err != nil || n < 0 {
+			fatal("-mix 项 %q 设备数非法", p)
+		}
+		out = append(out, ratPlan{rat: rat, devices: n})
+	}
+	return out
+}
+
+// splitByWeight 把 total 按各项 devices 占比拆分（余数给最大权重项），用于按设备占比分配并发。
+func splitByWeight(total int, items []ratPlan, weightSum int) []int {
+	out := make([]int, len(items))
+	if weightSum <= 0 {
+		return splitN(total, len(items))
+	}
+	assigned, maxIdx, maxW := 0, 0, -1
+	for i, m := range items {
+		out[i] = total * m.devices / weightSum
+		assigned += out[i]
+		if m.devices > maxW {
+			maxW, maxIdx = m.devices, i
 		}
 	}
-	return 0
+	if rem := total - assigned; rem > 0 {
+		out[maxIdx] += rem
+	}
+	return out
 }
 
 func splitCSV(s string) []string {
