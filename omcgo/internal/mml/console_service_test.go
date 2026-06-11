@@ -457,22 +457,36 @@ func TestPickI18n_LangHit(t *testing.T) {
 	assert.Equal(t, "EN", pickI18n(m, "en-US", "", "", ""))
 }
 
-func TestPickI18n_ShortKeyFallbackSameFamily(t *testing.T) {
-	// seed/000002 mml_i18n_en.sql 写入的是短 key 'en'/'zh',前端约定长 key 'en-US'/'zh-CN'。
-	// 同语言族短/长形态必须互相 fallback,否则英文模式过早降级到 zh-CN(中文)。
-	shortKey := map[string]string{"zh": "中", "en": "EN"}
-	assert.Equal(t, "EN", pickI18n(shortKey, "en-US", "", "", ""), "en-US should match short 'en' before falling back to zh")
-	assert.Equal(t, "中", pickI18n(shortKey, "zh-CN", "", "", ""), "zh-CN should match short 'zh'")
-
+func TestPickI18n_LongKeyOnly(t *testing.T) {
+	// issue #67 §5：i18n 键已 seed/000039 统一为长码（短键 zh/en 迁移为 zh-CN/en-US），
+	// pickI18n 删除短/长兼容分支，只认长码。
 	longKey := map[string]string{"zh-CN": "中长", "en-US": "ENLong"}
-	assert.Equal(t, "ENLong", pickI18n(longKey, "en", "", "", ""), "en should match long 'en-US' if short missing")
-	assert.Equal(t, "中长", pickI18n(longKey, "zh", "", "", ""), "zh should match long 'zh-CN' if short missing")
+	assert.Equal(t, "ENLong", pickI18n(longKey, "en-US", "", "", ""))
+	assert.Equal(t, "中长", pickI18n(longKey, "zh-CN", "", "", ""))
 
-	// 同语言族都没有时才跨族 fallback (zh > en)
-	onlyEn := map[string]string{"en": "ENOnly"}
-	assert.Equal(t, "ENOnly", pickI18n(onlyEn, "zh-CN", "", "", ""), "zh-CN with no zh/zh-CN should fallback to en")
-	onlyZh := map[string]string{"zh": "ZhOnly"}
-	assert.Equal(t, "ZhOnly", pickI18n(onlyZh, "en-US", "", "", ""), "en-US with no en/en-US should fallback to zh")
+	// 跨语言族 fallback：请求语言缺失 → zh-CN 优先（系统主语言），再 en-US。
+	onlyEn := map[string]string{"en-US": "ENOnly"}
+	assert.Equal(t, "ENOnly", pickI18n(onlyEn, "zh-CN", "", "", ""), "zh-CN 无 zh-CN 键时回退 en-US")
+	onlyZh := map[string]string{"zh-CN": "ZhOnly"}
+	assert.Equal(t, "ZhOnly", pickI18n(onlyZh, "en-US", "", "", ""), "en-US 无 en-US 键时回退 zh-CN")
+}
+
+func TestPickI18n_NoChineseResidueForEnglish(t *testing.T) {
+	// 英文 locale 命中 en-US 时必须返回英文，绝不漏出中文（issue #67 §6 验收要点）。
+	m := map[string]string{"zh-CN": "查询设备信息", "en-US": "Query Device Info"}
+	got := pickI18n(m, "en-US", "", "", "")
+	assert.Equal(t, "Query Device Info", got)
+	assert.False(t, containsHan(got), "英文 locale 的 DisplayName 不应含中文残留")
+}
+
+// containsHan 判断字符串是否含 CJK 统一表意文字（中文残留检测）。
+func containsHan(s string) bool {
+	for _, r := range s {
+		if r >= 0x4E00 && r <= 0x9FFF {
+			return true
+		}
+	}
+	return false
 }
 
 func TestPickI18n_FallbackChain(t *testing.T) {

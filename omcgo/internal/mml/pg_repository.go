@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
@@ -12,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 
+	appcontext "github.com/omcgo/omcgo/internal/core/context"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/reliability"
@@ -1830,35 +1832,55 @@ func NewPgCommandParamRepository(pool *pgxpool.Pool) *PgCommandParamRepository {
 	return &PgCommandParamRepository{pool: pool}
 }
 
-// paramRefSelectExpr 是 ListByCommandID / ListByCommandIDs 共享的 SELECT
+// paramRefSelectExpr 构造 ListByCommandID / ListByCommandIDs 共享的 SELECT
 // 列表达式（不含 command_id 与 FROM/WHERE）；保持两个 query 字段顺序一致，
 // Scan 才能复用同一序列。
+//
+// issue #67：param_name_zh 列原先硬编码取 label_i18n->>'zh-CN'，命令执行表单参数名
+// 始终中文。改为按请求 locale 取键，并多级 COALESCE 回退（请求语言列 → zh-CN → en-US →
+// standard_path），保证英文 locale 下表单参数名本地化、且字典缺该语言时不留空。
+// lang 形如 "zh-CN"/"en-US"（长码，与 i18n JSONB 键统一后一致）。
 //
 // 字段映射（standard_params + sub_field → MMLParamRef）：
 //
 //	ID            ← csf.id              sub_field 行 id
 //	ParamCode     ← csf.mml_code        命令上下文 code（BuildTR069Params MOD 用作 form values key）
-//	ParamNameZh   ← label_i18n.zh-CN 或回退 standard_path
+//	ParamNameZh   ← label_i18n[lang] 多级回退 standard_path
 //	Tr069Path     ← sp.standard_path    Fanouter 翻译为 privatePath 下发
 //	ValueType     ← lower(sp.data_type)
 //	IsWritable    ← sp.access = 'READ_WRITE'
 //	DefaultValue  ← ''                  standard_params 无此字段
 //	JsRegex       ← ''                  standard_params 无此字段
 //	ValueConstraint ← '{}'              standard_params 仅提供 min/max，BuildTR069Params 暂不消费
-const paramRefSelectExpr = `csf.id,
+func paramRefSelectExpr(lang string) string {
+	// 主键名固定 param_name_zh（沿用既有 Scan 目标字段，避免改 MMLParamRef 结构与下游）。
+	// requested → zh-CN → en-US → standard_path 四级回退，NULLIF 排除空串键。
+	return `csf.id,
        csf.mml_code,
-       COALESCE(csf.label_i18n->>'zh-CN', sp.standard_path) AS param_name_zh,
+       COALESCE(NULLIF(csf.label_i18n->>` + quoteSQLLiteral(lang) + `, ''),
+                NULLIF(csf.label_i18n->>'zh-CN', ''),
+                NULLIF(csf.label_i18n->>'en-US', ''),
+                sp.standard_path) AS param_name_zh,
        sp.standard_path AS tr069_path,
        lower(COALESCE(sp.data_type, 'string'))    AS value_type,
        (sp.access = 'READ_WRITE')                  AS is_writable,
        ''::text                                    AS default_value,
        ''::text                                    AS js_regex,
        '{}'::jsonb                                 AS value_constraint`
+}
+
+// quoteSQLLiteral 把 locale 码安全嵌入 JSONB ->> 键。locale 取值受
+// appcontext.ParseAcceptLanguage 约束为 zh-CN/en-US 两枚白名单常量，不含用户输入；
+// 单引号转义仅作纵深防御，杜绝拼接注入面。
+func quoteSQLLiteral(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+}
 
 func (r *PgCommandParamRepository) ListByCommandID(ctx context.Context, commandID uuid.UUID) ([]MMLParamRef, error) {
+	lang := string(appcontext.GetLocale(ctx))
 	// UNIQUE(command_id, standard_path_id)（migration 000113）保证同命令下
 	// 每个 standardPath 只有一行，无需 ROW_NUMBER 去重。
-	query := `SELECT ` + paramRefSelectExpr + `
+	query := `SELECT ` + paramRefSelectExpr(lang) + `
 FROM mml_command_sub_fields csf
 JOIN standard_params sp ON sp.id = csf.standard_path_id
 WHERE csf.command_id = $1
@@ -1894,7 +1916,8 @@ func (r *PgCommandParamRepository) ListByCommandIDs(ctx context.Context, command
 		return result, nil
 	}
 
-	query := `SELECT csf.command_id, ` + paramRefSelectExpr + `
+	lang := string(appcontext.GetLocale(ctx))
+	query := `SELECT csf.command_id, ` + paramRefSelectExpr(lang) + `
 FROM mml_command_sub_fields csf
 JOIN standard_params sp ON sp.id = csf.standard_path_id
 WHERE csf.command_id = ANY($1)

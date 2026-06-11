@@ -452,39 +452,18 @@ func stableSort[T any](s []T, less func(a, b T) bool) {
 // ============================================================
 
 // pickI18n 按 lang 选 i18n 值；未命中时按 fallback 顺序回退。
+//
+// issue #67 §5：i18n JSONB 键已经 seed/000039 统一为长码 zh-CN / en-US（短键 zh/en 已迁移），
+// 故此处只认长码，删除原先的短/长兼容分支。跨语言族兜底顺序：请求语言 → zh-CN（系统主语言）
+// → en-US → 调用方传入的 fallback。
 func pickI18n(m map[string]string, lang, fallbackZh, fallbackEn, fallbackCode string) string {
 	if v, ok := m[lang]; ok && v != "" {
 		return v
 	}
-	// seed/000152 注入的 i18n key 是 'zh' / 'en'（短码），而 API/前端约定用 'zh-CN' / 'en-US'。
-	// 优先尝试同语言族的短/长替代形态(en-US ↔ en, zh-CN ↔ zh),否则会过早 fallback 到 zh,
-	// 让英文模式始终看不到 seed 翻译。
-	if strings.HasPrefix(lang, "en") {
-		if v, ok := m["en"]; ok && v != "" {
-			return v
-		}
-		if v, ok := m["en-US"]; ok && v != "" {
-			return v
-		}
-	} else if strings.HasPrefix(lang, "zh") {
-		if v, ok := m["zh"]; ok && v != "" {
-			return v
-		}
-		if v, ok := m["zh-CN"]; ok && v != "" {
-			return v
-		}
-	}
-	// 跨语言族兜底:zh 优先(系统主语言),再 en,最后 legacy fallback
 	if v, ok := m["zh-CN"]; ok && v != "" {
 		return v
 	}
-	if v, ok := m["zh"]; ok && v != "" {
-		return v
-	}
 	if v, ok := m["en-US"]; ok && v != "" {
-		return v
-	}
-	if v, ok := m["en"]; ok && v != "" {
 		return v
 	}
 	if fallbackZh != "" {

@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	appcontext "github.com/omcgo/omcgo/internal/core/context"
 	"github.com/omcgo/omcgo/internal/core/response"
 )
 
@@ -168,7 +169,7 @@ func (h *ConsoleHandler) GetGroupTree(c *gin.Context) {
 		response.OK(c, FlatGroupTreeResponse{Groups: groups})
 		return
 	}
-	lang := normalizeLang(q.Lang)
+	lang := resolveLang(c, q.Lang)
 	productClass := strings.TrimSpace(q.ProductClass)
 	tree, err := h.svc.BuildGroupTreeFiltered(c.Request.Context(), q.Root, lang, productClass)
 	if err != nil {
@@ -198,7 +199,7 @@ func (h *ConsoleHandler) GetGroupTree(c *gin.Context) {
 //   - 500 — DB 查询错
 func (h *ConsoleHandler) SearchCommands(c *gin.Context) {
 	q := strings.TrimSpace(c.Query("q"))
-	lang := normalizeLang(c.Query("lang"))
+	lang := resolveLang(c, c.Query("lang"))
 	limit := 50
 	if v := c.Query("limit"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 200 {
@@ -237,7 +238,7 @@ func (h *ConsoleHandler) GetCommandSubFields(c *gin.Context) {
 	if !ok {
 		return
 	}
-	lang := normalizeLang(c.Query("lang"))
+	lang := resolveLang(c, c.Query("lang"))
 	productClass := strings.TrimSpace(c.Query("product_class"))
 	deviceKey := strings.TrimSpace(c.Query("device_sn"))
 	if deviceKey == "" {
@@ -468,4 +469,16 @@ func normalizeLang(lang string) string {
 		return "en-US"
 	}
 	return "zh-CN"
+}
+
+// resolveLang 统一 MML console 的语言来源（issue #67 §5）：
+//   - 显式 ?lang= 非空 → 作为覆盖，规范化后返回（保留前端按需切换语言能力）；
+//   - 缺省 → 读 Accept-Language 注入的 ctx locale（与 PM 一致），未识别再回退 zh-CN。
+//
+// 这样未带 ?lang= 时仍能按浏览器/前端注入的 Accept-Language 本地化，不再硬退中文。
+func resolveLang(c *gin.Context, rawLang string) string {
+	if strings.TrimSpace(rawLang) != "" {
+		return normalizeLang(rawLang)
+	}
+	return string(appcontext.GetLocale(c.Request.Context()))
 }

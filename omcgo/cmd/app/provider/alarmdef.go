@@ -59,6 +59,11 @@ func initAlarmDefModule(c *Container) error {
 	if c.AlarmSyncProcessor != nil {
 		c.AlarmSyncProcessor.WithAlarmDefRegistry(registry)
 	}
+	// issue #67：alarm 模块先于本模块装配 FilterEngine 时 lookup 尚为 nil，此处回填，
+	// 使入站告警 enrichFromLibrary 能按 locale 取字典本地化名/可能原因。
+	if c.AlarmFilterEngine != nil {
+		c.AlarmFilterEngine.SetAlarmDefLookup(registry)
+	}
 	c.AlarmDefHandler = handler
 	c.AlarmDefFileHandler = fileHandler
 	logger.Info("alarm-definition module initialized")// 暴露行数到 startup log，便于排障

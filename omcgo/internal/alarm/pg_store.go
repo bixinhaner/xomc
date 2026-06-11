@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	appcontext "github.com/omcgo/omcgo/internal/core/context"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/storage"
@@ -134,7 +135,7 @@ func (s *PgAlarmStore) RemoveActive(ctx context.Context, id uuid.UUID) error {
 }
 
 func (s *PgAlarmStore) ListActive(ctx context.Context, filter AlarmFilter) (*model.ListResponse[model.Alarm], error) {
-	qb := activeAlarmSelect()
+	qb := activeAlarmListSelect(appcontext.GetLocale(ctx))
 	countQb := storage.Psql.Select("COUNT(*)").From("alarms_active").LeftJoin("devices d ON d.id = alarms_active.device_id")
 
 	qb = applyActiveFilters(qb, filter)
@@ -200,16 +201,22 @@ func historyUpdatedAt(alarm *model.Alarm) time.Time {
 }
 
 func (s *PgAlarmStore) ListHistory(ctx context.Context, filter AlarmFilter) (*model.ListResponse[model.Alarm], error) {
+	// issue #67：description 列改为按请求 locale 取 alarm_definitions 本地化名，字典未命中
+	// 退回设备上报原文（COALESCE 兜底）；其余列与列表 scan 顺序保持不变。
 	qb := storage.Psql.Select(
 		"alarms_history.time", "alarms_history.alarm_id", "alarms_history.device_id", "alarms_history.device_sn", "alarms_history.carrier", "alarms_history.severity",
-		"alarms_history.alarm_type", "alarms_history.alarm_identifier", "alarms_history.description", "alarms_history.status", "alarms_history.raised_at",
+		"alarms_history.alarm_type", "alarms_history.alarm_identifier",
+		localizedAlarmNameExpr(appcontext.GetLocale(ctx), "alarms_history"),
+		"alarms_history.status", "alarms_history.raised_at",
 		"alarms_history.acknowledged_at", "alarms_history.cleared_at", "alarms_history.acknowledged_by", "alarms_history.ack_note",
 		"alarms_history.additional_info",
 		"alarms_history.device_name", "COALESCE(alarms_history.technology, d.technology) AS technology", "alarms_history.alarm_source", "alarms_history.event_type",
 		"alarms_history.ack_count", "alarms_history.updated_at",
 		"alarms_history.cleared_by", "alarms_history.clear_note",
 		"alarms_history.probable_cause",
-	).From("alarms_history").LeftJoin("devices d ON d.id = alarms_history.device_id")
+	).From("alarms_history").
+		LeftJoin("devices d ON d.id = alarms_history.device_id").
+		LeftJoin("alarm_definitions ad ON ad.identifier = alarms_history.alarm_identifier")
 	countQb := storage.Psql.Select("COUNT(*)").From("alarms_history").LeftJoin("devices d ON d.id = alarms_history.device_id")
 
 	qb = applyHistoryFilters(qb, filter)
@@ -355,6 +362,39 @@ var activeColumns = []string{
 
 func activeAlarmSelect() squirrel.SelectBuilder {
 	return storage.Psql.Select(activeColumns...).From("alarms_active").LeftJoin("devices d ON d.id = alarms_active.device_id")
+}
+
+// localizedAlarmNameExpr 返回列表查询里 description 列的 locale 化表达式（issue #67）。
+//
+// 按请求 locale 在 alarm_definitions.en_name / cn_name 间取名，并 COALESCE 回退到设备上报
+// 的 <table>.description——字典未命中（LEFT JOIN 为 NULL）或字典对应语言列为空时不留空白。
+//   - en-US：COALESCE(NULLIF(ad.en_name,''), ad.cn_name, <table>.description)
+//   - 其它（含 zh-CN/缺省）：COALESCE(NULLIF(ad.cn_name,''), ad.en_name, <table>.description)
+// 别名固定为 description，使列表 scan 顺序与既有 scanAlarmRow / ListHistory 解码完全一致。
+func localizedAlarmNameExpr(loc appcontext.Locale, table string) string {
+	descCol := table + ".description"
+	if loc == appcontext.LocaleEN {
+		return fmt.Sprintf("COALESCE(NULLIF(ad.en_name, ''), NULLIF(ad.cn_name, ''), %s) AS description", descCol)
+	}
+	return fmt.Sprintf("COALESCE(NULLIF(ad.cn_name, ''), NULLIF(ad.en_name, ''), %s) AS description", descCol)
+}
+
+// activeAlarmListSelect 构建活跃告警**列表**查询，description 列按 locale 取字典本地化名
+// （issue #67）。与 activeAlarmSelect（详情/GetByID 用，列表外保持原文）区别仅在 description
+// 列与多一个 alarm_definitions LEFT JOIN，scan 顺序不变（仍走 scanAlarmRow）。
+func activeAlarmListSelect(loc appcontext.Locale) squirrel.SelectBuilder {
+	cols := make([]string, len(activeColumns))
+	copy(cols, activeColumns)
+	for i, c := range cols {
+		if c == "alarms_active.description" {
+			cols[i] = localizedAlarmNameExpr(loc, "alarms_active")
+			break
+		}
+	}
+	return storage.Psql.Select(cols...).
+		From("alarms_active").
+		LeftJoin("devices d ON d.id = alarms_active.device_id").
+		LeftJoin("alarm_definitions ad ON ad.identifier = alarms_active.alarm_identifier")
 }
 
 // historyStatsBase 返回带 filter 的 alarms_history 统计基底查询。

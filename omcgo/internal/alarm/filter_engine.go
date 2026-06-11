@@ -9,9 +9,18 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/internal/alarm/definition"
+	appcontext "github.com/omcgo/omcgo/internal/core/context"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"go.uber.org/zap"
 )
+
+// alarmDefLookup 抽象 enrichFromLibrary 所需的告警字典只读查询。
+// 由 *definition.Registry 满足；抽成接口便于 filter_engine 单测注入 stub，
+// 并避免 FilterEngine 依赖 Registry 的全部生命周期方法（Refresh/Count…）。
+type alarmDefLookup interface {
+	Lookup(ctx context.Context, identifier string) (*definition.ResolvedDefinition, error)
+}
 
 // FilterEngine 告警过滤引擎，根据告警过滤规则处理入站告警。
 type FilterEngine struct {
@@ -20,6 +29,7 @@ type FilterEngine struct {
 	dispatcher      WebhookDispatcher
 	deadLetterRepo  DeadLetterRepository
 	deviceGroupResolver DeviceGroupResolver
+	alarmDefs       alarmDefLookup
 	metrics         *WebhookMetrics
 	emailDispatcher EmailDispatcher
 	logger          *zap.Logger
@@ -72,6 +82,15 @@ func (e *FilterEngine) SetEmailDispatcher(dispatcher EmailDispatcher) {
 // resolver == nil means device_group rules fail closed instead of matching all alarms.
 func (e *FilterEngine) SetDeviceGroupResolver(resolver DeviceGroupResolver) {
 	e.deviceGroupResolver = resolver
+}
+
+// SetAlarmDefLookup 注入告警字典只读查询（issue #67 运行期 i18n）。
+//
+// 用 setter 与 deviceGroupResolver 同理：AlarmDefRegistry 在 DI 容器里晚于
+// NewFilterEngine 装配（依赖 dictloader 启动期 Refresh），且测试可零改保持兼容。
+// lookup == nil 时 enrichFromLibrary 静默跳过补全（保留设备上报原文，零回归）。
+func (e *FilterEngine) SetAlarmDefLookup(lookup alarmDefLookup) {
+	e.alarmDefs = lookup
 }
 
 // ProcessResult 过滤处理结果。
@@ -409,10 +428,58 @@ func buildWebhookPayload(alarm *model.Alarm) webhookPayload {
 	return p
 }
 
-// enrichFromLibrary 从告警字典（alarm_definitions）补充告警信息。
-// T-0098-P5-06：旧 alarm_libraries 已 DROP，后续接入 alarm_definitions Registry。
+// enrichFromLibrary 从告警字典（alarm_definitions）按请求 locale 补全告警信息（issue #67）。
+//
+// 补全规则（以 ctx locale 选 cn/en 列，COALESCE(NULLIF(en,''),cn) 退化）：
+//   - Description（告警名）：字典命中则用字典本地化名覆盖；命中失败（unknown identifier）
+//     保留设备上报原文，绝不置空。
+//   - ProbableCause（可能原因）：设备未上报时用字典本地化 probable_cause 补；设备已上报则尊重原文。
+//
+// 设计取舍：写入侧（落库时）按当时 locale 冻结 Description，保证 webhook/邮件/历史归档拿到
+// 已本地化的名称；活跃/历史**列表**展示则在 pg_store 查询侧再 JOIN alarm_definitions 按
+// 请求 locale 取名（见 localizedAlarmNameExpr），使语言切换即时生效、且反映字典后续编辑。
 func (e *FilterEngine) enrichFromLibrary(ctx context.Context, alarm *model.Alarm) {
-	if (alarm.ProbableCause != nil && *alarm.ProbableCause != "") && (alarm.AlarmSource != nil && *alarm.AlarmSource != "") {
+	if e.alarmDefs == nil || alarm == nil || alarm.AlarmIdentifier == "" {
 		return
 	}
+
+	rd, err := e.alarmDefs.Lookup(ctx, alarm.AlarmIdentifier)
+	if err != nil {
+		// unknown identifier 或查询错误：保留设备上报原文，不阻断处理。
+		if !errors.Is(err, definition.ErrUnknownIdentifier) {
+			e.logger.Warn("alarm definition lookup failed during enrich",
+				zap.String("alarm_identifier", alarm.AlarmIdentifier),
+				zap.Error(err))
+		}
+		return
+	}
+
+	loc := appcontext.GetLocale(ctx)
+
+	if name := localizedName(loc, rd.CnName, rd.EnName); name != "" {
+		alarm.Description = name
+	}
+
+	if alarm.ProbableCause == nil || *alarm.ProbableCause == "" {
+		if cause := localizedName(loc, rd.CnProbableCause, rd.EnProbableCause); cause != "" {
+			alarm.ProbableCause = &cause
+		}
+	}
+}
+
+// localizedName 按 locale 在中/英文之间取值，并做 COALESCE(NULLIF(en,''),cn) 式退化：
+//   - en-US：优先英文，英文空则回退中文；
+//   - 其它（含 zh-CN / 缺省）：优先中文，中文空则回退英文。
+// 两者皆空返回空串，调用方据此决定是否保留原文。
+func localizedName(loc appcontext.Locale, cn, en string) string {
+	if loc == appcontext.LocaleEN {
+		if en != "" {
+			return en
+		}
+		return cn
+	}
+	if cn != "" {
+		return cn
+	}
+	return en
 }
