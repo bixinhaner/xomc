@@ -156,8 +156,9 @@ export default function CommandMode() {
         />
       </div>
       {/* antd6 List 已废弃：改用 Flex 纵向容器 + map，条目沿用原内联样式，
-          并补 List split 默认的底部分隔线（末条不画）。 */}
-      <div style={{ flex: 1, overflow: 'auto' }}>
+          并补 List split 默认的底部分隔线（末条不画）。
+          data-testid 给冒烟用例一个稳定 hook（迁移后不再有 .ant-list 类）。 */}
+      <div style={{ flex: 1, overflow: 'auto' }} data-testid="config-command-list">
         <Flex vertical>
           {filteredCommands.map((cmd, idx) => (
             <div
