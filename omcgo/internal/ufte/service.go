@@ -1341,7 +1341,14 @@ func (s *Service) mapDeviceItem(
 			result = "failure"
 		}
 	}
-	lastReport := time.Time(subTask.UpdatedAt)
+	// 上报时间只在文件真正上报成功（终态 ended）时才填——issue #195。
+	// 子任务一生成 / 中间状态流转都会刷新 sub_task.updated_at，但那不是
+	// "文件上报成功"的时刻，直接拿 updated_at 会在任务刚创建时就显示一个
+	// 误导性时间。未到成功终态时留零值，formatTime 渲染为空。
+	var lastReport time.Time
+	if status == "ended" {
+		lastReport = time.Time(subTask.UpdatedAt)
+	}
 	// 完成态 LogCollect 类（备份等）且注入了下载回调时，拉取 1h presigned GET URL。
 	// 用 targetFile（设备实际上传文件名，从 fileLanded 反查得到）做 lookup key——
 	// 设备厂商命名不可预测，预渲染模板名匹配不上 MinIO 对象路径。
