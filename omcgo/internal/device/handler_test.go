@@ -25,6 +25,11 @@ import (
 type fakeDeviceRepo struct {
 	devices map[uuid.UUID]*model.Device
 	bySN    map[string]*model.Device
+
+	// #64 GIS 数据权限测试捕获位：记录最近一次 geo 查询收到的可见分组。
+	geoListVisible   []uuid.UUID
+	geoStatsVisible  []uuid.UUID
+	geoSearchVisible []uuid.UUID
 }
 
 func newFakeDeviceRepo() *fakeDeviceRepo {
@@ -133,13 +138,16 @@ func (m *fakeDeviceRepo) CountByStatus(ctx context.Context, carrier *model.Carri
 func (m *fakeDeviceRepo) ListActiveByLastInform(_ context.Context, _ *time.Time, _ *uuid.UUID, _ int) ([]model.Device, error) {
 	return nil, nil
 }
-func (m *fakeDeviceRepo) ListGeo(_ context.Context, _ GeoDeviceFilter) ([]GeoDevice, int64, error) {
+func (m *fakeDeviceRepo) ListGeo(_ context.Context, f GeoDeviceFilter) ([]GeoDevice, int64, error) {
+	m.geoListVisible = f.VisibleGroups
 	return nil, 0, nil
 }
-func (m *fakeDeviceRepo) GetGeoStats(_ context.Context, _ []string) (*GeoStats, error) {
+func (m *fakeDeviceRepo) GetGeoStats(_ context.Context, _ []string, visibleGroups []uuid.UUID) (*GeoStats, error) {
+	m.geoStatsVisible = visibleGroups
 	return &GeoStats{}, nil
 }
-func (m *fakeDeviceRepo) SearchDevices(_ context.Context, _ string, _ int) ([]GeoDevice, error) {
+func (m *fakeDeviceRepo) SearchDevices(_ context.Context, _ string, _ int, visibleGroups []uuid.UUID) ([]GeoDevice, error) {
+	m.geoSearchVisible = visibleGroups
 	return nil, nil
 }
 func (m *fakeDeviceRepo) FindStaleDevices(_ context.Context, _ time.Time, _ int) ([]*model.Device, error) {

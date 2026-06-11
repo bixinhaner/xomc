@@ -218,12 +218,13 @@ func metricToKPIValue(m metrics.PMMetric) model.KPIValue {
 func (r *PgKPIRepository) kpiFilterToMetricsQuery(ctx context.Context, filter KPIFilter) (metrics.QueryRequest, error) {
 	mt := metrics.MetricTypeKPI
 	q := metrics.QueryRequest{
-		MetricType:  &mt,
+		MetricType: &mt,
 		// Don't hardcode granularity - let the caller specify or query all granularities
 		// This fixes the issue where Dashboard KPI data (hourly granularity) was not being returned
 		// because the query was filtering for 15min granularity only
-		StartTime:   filter.StartTime,
-		EndTime:     filter.EndTime,
+		StartTime:     filter.StartTime,
+		EndTime:       filter.EndTime,
+		VisibleGroups: filter.VisibleGroups, // #64 设备组数据权限透传
 	}
 	if filter.DeviceID != nil {
 		oui, sn, err := r.lookupDeviceOUISN(ctx, *filter.DeviceID)

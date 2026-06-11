@@ -34,6 +34,11 @@ type DeviceQueryService interface {
 	// ListMetricObjects 列出一批设备在最细原始表 pm_metrics 里实际出现过的
 	// distinct object_ldn（按 technology 可选过滤），每项解析出 cell_id / plmn。
 	ListMetricObjects(ctx context.Context, deviceSNs, technologies []string) ([]MetricObject, error)
+
+	// DeviceGroupIDs 读取单个设备所属的设备组 id 列表（device_group_members）。
+	// #64：PM handler 在请求显式带 device_id 时预检其是否落在调用者可见分组内，
+	// 复用本服务的连接池，避免反向 import device 模块。
+	DeviceGroupIDs(ctx context.Context, deviceID uuid.UUID) ([]uuid.UUID, error)
 }
 
 // pgDeviceQueryService 是 DeviceQueryService 的 PostgreSQL/TimescaleDB 实现。
@@ -56,6 +61,30 @@ func (s *pgDeviceQueryService) LookupDeviceOUISN(ctx context.Context, deviceID u
 		return "", "", fmt.Errorf("lookup device oui+sn: %w", err)
 	}
 	return oui, sn, nil
+}
+
+// DeviceGroupIDs 读取设备所属分组 id 列表（device_group_members）。设备未分组返回空切片。
+func (s *pgDeviceQueryService) DeviceGroupIDs(ctx context.Context, deviceID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT group_id FROM device_group_members WHERE device_id = $1`, deviceID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query device group ids: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan group_id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate device group ids: %w", err)
+	}
+	return ids, nil
 }
 
 // ListMetricObjects 查询设备小区/PLMN 清单。

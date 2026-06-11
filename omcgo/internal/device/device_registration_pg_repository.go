@@ -11,9 +11,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/omcgo/omcgo/global"
+	"github.com/omcgo/omcgo/internal/authz"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
-	"github.com/omcgo/omcgo/global"
 	"github.com/omcgo/omcgo/internal/core/storage"
 )
 
@@ -149,6 +150,10 @@ func (r *PgRegistrationRepository) List(ctx context.Context, filter Registration
 		builder = builder.Where(sq.Eq{"carrier": string(*filter.Carrier)})
 		countBuilder = countBuilder.Where(sq.Eq{"carrier": string(*filter.Carrier)})
 	}
+	// #64 设备组数据权限：预注册表自带 group_id，按可见分组三态收口（nil 超管不过滤 /
+	// [] WHERE FALSE / [g...] group_id IN(...)）。group_id IS NULL 行对非超管天然不命中被排除。
+	builder = authz.ApplyGroupVisibilityFilter(builder, "group_id", filter.VisibleGroups)
+	countBuilder = authz.ApplyGroupVisibilityFilter(countBuilder, "group_id", filter.VisibleGroups)
 
 	countQuery, countArgs, _ := countBuilder.ToSql()
 	var total int64

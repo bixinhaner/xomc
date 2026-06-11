@@ -218,10 +218,11 @@ func metricToCounter(m metrics.PMMetric) model.PMCounter {
 func (r *PgCounterRepository) counterFilterToMetricsQuery(ctx context.Context, filter CounterFilter) (metrics.QueryRequest, error) {
 	mt := metrics.MetricTypeCounter
 	q := metrics.QueryRequest{
-		MetricType:  &mt,
-		Granularity: metrics.Granularity15Min,
-		StartTime:   filter.StartTime,
-		EndTime:     filter.EndTime,
+		MetricType:    &mt,
+		Granularity:   metrics.Granularity15Min,
+		StartTime:     filter.StartTime,
+		EndTime:       filter.EndTime,
+		VisibleGroups: filter.VisibleGroups, // #64 设备组数据权限透传
 	}
 	if filter.DeviceID != nil {
 		oui, sn, err := r.lookupDeviceOUISN(ctx, *filter.DeviceID)

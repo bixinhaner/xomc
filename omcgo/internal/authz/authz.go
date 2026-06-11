@@ -158,3 +158,73 @@ func ApplyDeviceVisibilityFilter(b sq.SelectBuilder, deviceIDColumn string, visi
 		Where(sq.Eq{"group_id": visibleGroups})
 	return b.Where(sq.Expr(deviceIDColumn+" IN (?)", sub))
 }
+
+// ApplyDeviceSNVisibilityFilter 是 ApplyDeviceVisibilityFilter 的「按设备序列号」变体，
+// 用于 PM 时序表（pm_metrics / pm_metrics_hourly / …）这类**不持有 device_id UUID 列、
+// 而以 device_sn 为设备键**的表（TR-069 标准 (oui, sn) 双键）。
+//
+// snColumn 是驱动表上持有设备序列号的限定列名（如 "device_sn"）。两层相关子查询把可见分组
+// → device_id → devices.serial_number 映射，避免在 PM 大表上 JOIN device_group_members ×
+// devices 造成行翻倍。三态契约与 ApplyDeviceVisibilityFilter 一致：
+//
+//	nil       → 不过滤（超管）
+//	[]        → WHERE FALSE（fail-closed）
+//	[g1,...]  → WHERE snColumn IN (SELECT serial_number FROM devices
+//	                               WHERE id IN (SELECT device_id FROM device_group_members
+//	                                            WHERE group_id IN (...)))
+func ApplyDeviceSNVisibilityFilter(b sq.SelectBuilder, snColumn string, visibleGroups []uuid.UUID) sq.SelectBuilder {
+	if visibleGroups == nil {
+		return b
+	}
+	if len(visibleGroups) == 0 {
+		return b.Where(sq.Expr("FALSE"))
+	}
+	sub := sq.Select("serial_number").
+		From("devices").
+		Where(sq.Expr("id IN (?)",
+			sq.Select("device_id").
+				From("device_group_members").
+				Where(sq.Eq{"group_id": visibleGroups})))
+	return b.Where(sq.Expr(snColumn+" IN (?)", sub))
+}
+
+// ApplyGroupVisibilityFilter 给设备组维度表（pm_group_metrics_* 等以 device_group_id 为键的表）
+// 施加三态 fail-closed 过滤：把结果行限定到 visibleGroups 内的设备组。
+//
+// groupIDColumn 是驱动表上持有设备组 UUID 的限定列名（如 "device_group_id"）。
+//
+//	nil       → 不过滤（超管）
+//	[]        → WHERE FALSE（fail-closed）
+//	[g1,...]  → WHERE groupIDColumn IN (g1, ...)
+//
+// 与按设备过滤不同，这里直接对组 id 取交（请求侧若已带 device_group_id 过滤，二者叠加即交集）。
+func ApplyGroupVisibilityFilter(b sq.SelectBuilder, groupIDColumn string, visibleGroups []uuid.UUID) sq.SelectBuilder {
+	if visibleGroups == nil {
+		return b
+	}
+	if len(visibleGroups) == 0 {
+		return b.Where(sq.Expr("FALSE"))
+	}
+	return b.Where(sq.Eq{groupIDColumn: visibleGroups})
+}
+
+// VisibleSNSubquerySQL 返回「可见分组 → 设备序列号」子查询的裸 SQL 片段与参数，
+// 供 product / band / network 维度等**手拼 SQL（带 CTE/JOIN，无 squirrel builder）**的聚合路径
+// 复用同一收口逻辑。返回的 SQL 形如：
+//
+//	device_sn IN (SELECT serial_number FROM devices WHERE id IN (
+//	    SELECT device_id FROM device_group_members WHERE group_id = ANY($N)))
+//
+// 调用方负责把 placeholder（用传入的 paramRef，如 "$3"）与 args 拼进自己的 WHERE。
+// nil → 返回 ("", nil)（不过滤）；[] → 返回 ("FALSE", nil)（fail-closed）。
+func VisibleSNSubquerySQL(snColumn, paramRef string, visibleGroups []uuid.UUID) (string, []uuid.UUID) {
+	if visibleGroups == nil {
+		return "", nil
+	}
+	if len(visibleGroups) == 0 {
+		return "FALSE", nil
+	}
+	sql := snColumn + " IN (SELECT serial_number FROM devices WHERE id IN (" +
+		"SELECT device_id FROM device_group_members WHERE group_id = ANY(" + paramRef + ")))"
+	return sql, visibleGroups
+}

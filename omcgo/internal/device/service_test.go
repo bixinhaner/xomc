@@ -122,10 +122,10 @@ func (m *mockDeviceRepo) ListActiveByLastInform(_ context.Context, _ *time.Time,
 func (m *mockDeviceRepo) ListGeo(_ context.Context, _ GeoDeviceFilter) ([]GeoDevice, int64, error) {
 	return nil, 0, nil
 }
-func (m *mockDeviceRepo) GetGeoStats(_ context.Context, _ []string) (*GeoStats, error) {
+func (m *mockDeviceRepo) GetGeoStats(_ context.Context, _ []string, _ []uuid.UUID) (*GeoStats, error) {
 	return &GeoStats{}, nil
 }
-func (m *mockDeviceRepo) SearchDevices(_ context.Context, _ string, _ int) ([]GeoDevice, error) {
+func (m *mockDeviceRepo) SearchDevices(_ context.Context, _ string, _ int, _ []uuid.UUID) ([]GeoDevice, error) {
 	return nil, nil
 }
 func (m *mockDeviceRepo) ListStaleForParamSync(_ context.Context, _ time.Time, _ int) ([]*model.Device, error) {
