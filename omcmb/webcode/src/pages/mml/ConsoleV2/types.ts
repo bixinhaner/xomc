@@ -89,6 +89,8 @@ export interface PathTask {
   dispatchedAt: string;
   respondedAt: string;
   value: string;
+  /** #196：操作类型 MOD（下发）/ LST（回读），用于「PATH 列表」前后对比；纯逐 PATH 场景不填 */
+  opType?: 'MOD' | 'LST' | string;
 }
 
 /** 结果表格的一行（= 一台设备） */

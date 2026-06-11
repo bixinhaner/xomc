@@ -127,8 +127,22 @@ export default function ResultDetailModal({
     },
   ];
 
-  // 逐 PATH 子任务表（§3.11.3：父任务 = 设备任务 ID，每 path 一子任务）
+  // PATH 列表（#196：MOD 下发 + LST 回读前后对比，操作类型区分）
   const pathTaskColumns: ColumnsType<PathTask> = [
+    {
+      title: '操作类型',
+      dataIndex: 'opType',
+      key: 'opType',
+      width: 96,
+      render: (v?: string) =>
+        v === 'MOD' ? (
+          <Tag color="blue">MOD 下发</Tag>
+        ) : v === 'LST' ? (
+          <Tag color="green">LST 回读</Tag>
+        ) : (
+          <Text type="secondary">-</Text>
+        ),
+    },
     {
       title: 'PATH',
       dataIndex: 'path',
@@ -164,8 +178,8 @@ export default function ResultDetailModal({
       render: (s: ExecStatus) => <Tag color={STATUS_META[s].color}>{STATUS_META[s].text}</Tag>,
     },
     {
-      // 与单设备 CSV 口径统一：逐 path 状态旁展示读回值（成功）/ 故障原因（失败）。
-      title: '读回值 / 故障',
+      // PATH 列表：MOD 行显下发值、LST 行显回读值；失败时显故障原因。
+      title: '值（下发 / 回读）',
       dataIndex: 'value',
       key: 'value',
       ellipsis: true,
@@ -365,11 +379,11 @@ export default function ResultDetailModal({
             </div>
           )}
 
-          {/* 逐 PATH 子任务（§3.11.3：父任务 = 设备任务 ID） */}
+          {/* PATH 列表（#196：MOD 下发 + LST 回读前后对比） */}
           {row.pathTasks && row.pathTasks.length > 0 && (
             <div>
               <Text strong style={{ fontSize: 13 }}>
-                逐 PATH 子任务（父任务 = 设备任务 ID）
+                PATH 列表
               </Text>
               <div style={{ marginTop: 6 }}>
                 <Table<PathTask>
