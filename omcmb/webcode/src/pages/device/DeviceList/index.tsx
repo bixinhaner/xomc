@@ -24,6 +24,7 @@ import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useDeviceList, useBatchRebootDevices, useDeviceGroups } from '@core/hooks/api/useDevices';
 import { useProductList } from '@core/hooks/api/useProducts';
 import { useDictionaryBatch } from '@core/hooks/api/useSystem';
+import { resolveNetworkTypeLabel } from '@core/utils/networkType';
 import { useAlarmCount, useTriggerAlarmSync } from '@core/hooks/api/useAlarms';
 import { useCreateUnifiedFileTransferTask } from '@core/hooks/api/useUnifiedFileTransfer';
 import { useDownloadStationLog } from '@core/hooks/api/useStationLog';
@@ -1016,7 +1017,10 @@ export default function DeviceList() {
         group: 'common',
         render: (_val, record) => {
           const colorMap: Record<string, string> = { eNB: 'blue', gNB: 'green', GSM: 'orange' };
-          return <Tag color={colorMap[record.networkType] ?? 'default'}>{record.networkType || '-'}</Tag>;
+          // issue #223: 列文案与「基站制式」筛选下拉同源——走 network_type 字典
+          // value→label 映射（与回收站统一），不再直接显示原始 eNB/gNB。
+          const label = resolveNetworkTypeLabel(record.networkType, networkTypeDict?.sysDictionaryDetails);
+          return <Tag color={colorMap[record.networkType] ?? 'default'}>{label}</Tag>;
         },
       },
       // 产品名称（= device.model_name，inform 命中产品后回填 product.Name）显示在产品类型前面。
@@ -1365,7 +1369,7 @@ export default function DeviceList() {
       },
 
     ],
-    [navigate, t, fmtTime, fmtDuration, fmtStatus, renderMultiCellStatus, renderActivationStatus, remarkHeaderRender, message, downloadStationLog, mapConnStatus, getSeverityLabel]
+    [navigate, t, fmtTime, fmtDuration, fmtStatus, renderMultiCellStatus, renderActivationStatus, remarkHeaderRender, message, downloadStationLog, mapConnStatus, getSeverityLabel, networkTypeDict?.sysDictionaryDetails]
   );
 
   // ─── 列表导出(用户决策 2026-06-02) ──────────────────────────────────────
