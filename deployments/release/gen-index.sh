@@ -234,8 +234,23 @@ sudo bash setup-mirrors.sh --remove                 # 全部取消，回归官�
 每项 <code>official</code> = 不设置（走该工具官方源）。
 </p>
 
+<h2>📊 4.5 部署前：资源规划（plan-resources.sh — 可选但强烈推荐）</h2>
+<p class="lead">在跑 <code>install.sh</code> <b>之前</b>，先按目标服务器的<b>空闲资源</b>规划各容器的 CPU / 内存限额，生成 <code>deploy/resources.env</code>。
+不跑也能部署（回退到 compose 内置默认值），但<b>共享服务器</b>或<b>大/小配置差异大</b>时强烈建议跑：脚本以 <code>MemAvailable</code> 为基准并扣除其它项目已占用 / 预留，避免超分压垮别的业务，也避免大机闲置或小机静默 OOM。</p>
+<pre>cd /opt/omc/current/deploy
+
+bash plan-resources.sh --dry-run          # 只预览规划，不写文件（先看数字是否合理）
+bash plan-resources.sh                     # 探测主机 + 计算 + 写 resources.env
+bash plan-resources.sh --skip-monitoring   # 不部署监控栈时，降低最低配门槛
+bash plan-resources.sh --tier medium       # 手动指定档位（默认按空闲内存自动判定 small/medium/large）
+bash plan-resources.sh --assume-dedicated  # 本机 OMC 独占时，不扣其它容器预留
+bash plan-resources.sh -h                  # 全部参数</pre>
+<p class="tip">脚本做三件事：① 探测 CPU / 内存 / 负载 / 其它容器占用；② 算「空闲预算」；③ <b>floor-first</b> 分配（每组件先发 100k 基线下限，剩余按权重分到上限）并<b>联动派生</b> <code>GOMEMLIMIT</code> / Postgres <code>shared_buffers·max_connections</code> / Redis <code>maxmemory</code>，写入带注释的 <code>resources.env</code>。主机低于最低配会<b>清晰报错并给建议最低配</b>（全栈约 ≥24 GiB，<code>--skip-monitoring</code> 约 16 GiB）。算法与档位详见交付包内 <code>deploy/RESOURCE-PLANNING.md</code>。</p>
+<div class="tip">生成后请<b>检视 / 按需微调</b> <code>resources.env</code>，务必遵守文件头注释的约束：<code>GOMEMLIMIT &lt; *_MEM</code>、<code>REDIS_MEM ≥ REDIS_MAXMEMORY + 1GiB</code>、<code>PG_MAX_CONNECTIONS ≥ Go 端连接池总和（当前 180）</code>。<br>
+下游消费：<code>install.sh</code> 与 <code>svc.sh</code> 均以 <code>--env-file resources.env</code> 读取本文件，compose 用 <code>${VAR:-默认}</code> 套入限额。改完 <code>resources.env</code> 后跑 <code>bash svc.sh restart</code> 即按新限额有序重建生效。</div>
+
 <h2>🚚 5. 一键部署 OMC</h2>
-<p class="lead">所有场景都使用 <code>install.sh</code>，脚本会自动检测已有镜像并智能跳过重复加载。</p>
+<p class="lead">所有场景都使用 <code>install.sh</code>，脚本会自动检测已有镜像并智能跳过重复加载；若同目录存在 <code>resources.env</code>（见 4.5），自动以 <code>--env-file</code> 套用其资源限额，否则用 compose 内置默认值。</p>
 
 <h3>场景 A：首次部署（全新服务器）</h3>
 <pre>cd /opt/omc/releases/omc-&lt;test|release&gt;-&lt;版本&gt;-&lt;架构&gt;
@@ -289,6 +304,7 @@ bash svc.sh status --skip-web                # 不算 web compose
 bash svc.sh -h                                # 完整帮助</pre>
 <p class="tip">常用服务名:<code>app</code> / <code>acs</code> / <code>worker</code> / <code>web</code>(业务);<code>postgres</code> / <code>redis</code> / <code>nats</code> / <code>minio</code>(基础设施);<code>prometheus</code> / <code>alertmanager</code> / <code>grafana</code> / <code>loki</code> / <code>tempo</code> / <code>otelcol</code>(监控栈)。<br>
 要看完整 compose ps 列表(全 17 个容器),直接跑 <code>bash svc.sh status</code>。</p>
+<div class="tip">📊 <b>资源限额</b>:<code>svc.sh</code> 与 <code>install.sh</code> 一样会读取同目录 <code>resources.env</code>(见 4.5)。改完该文件后,<code>bash svc.sh restart</code> 会按新限额有序重建容器(经 depends_on + 健康门控),无需重跑 install.sh。无 <code>resources.env</code> 时用 compose 内置默认值,行为不变。</div>
 
 <h2>✅ 6. 验证部署</h2>
 <pre>bash /opt/omc/current/deploy/healthcheck.sh</pre>

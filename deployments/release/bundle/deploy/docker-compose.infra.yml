@@ -47,17 +47,38 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     ports:
       - "5432:5432"                        # 内网开放(0.0.0.0),供其它服务器直连
-    # max_connections=300：app(db60+tsdb40)+worker(db25+tsdb25)+acs(db30) 池上限合计 ~180，
-    # 远超 PG 默认 100，最后启动的 acs 会 "too many clients already" 崩溃。给到 300 覆盖
-    # 全部池 + exporter + 手动 psql + 余量。多副本横扩前应前置 pgbouncer（见 app.prod.yaml）。
-    command: ["postgres", "-c", "timezone=Asia/Shanghai", "-c", "log_timezone=Asia/Shanghai", "-c", "max_connections=300"]
+    # 调优参数由 resources.env 注入（plan-resources.sh 据 POSTGRES_MEM 联动派生）；缺省 = 历史等价值。
+    # max_connections 缺省 300（= main #131 的修复）：app(db60+tsdb40)+worker(db25+tsdb25)+acs(db30)
+    # 池上限合计 ~180，远超 PG 默认 100，否则最后启动的 acs 报 "too many clients already" 崩溃；
+    # 300 覆盖全部池 + exporter + 手动 psql + 余量。其余 -c 缺省取 PG 原生默认值。
+    # 注意：增大 max_connections 必须同步增大 POSTGRES_MEM（每连接 ~8-10MB），否则 PG 自身 OOM；
+    # 多副本横扩前应前置 pgbouncer（见 app.prod.yaml）。
+    command:
+      - "postgres"
+      - "-c"
+      - "timezone=Asia/Shanghai"
+      - "-c"
+      - "log_timezone=Asia/Shanghai"
+      - "-c"
+      - "max_connections=${PG_MAX_CONNECTIONS:-300}"
+      - "-c"
+      - "shared_buffers=${PG_SHARED_BUFFERS:-128MB}"
+      - "-c"
+      - "effective_cache_size=${PG_EFFECTIVE_CACHE_SIZE:-4GB}"
+      - "-c"
+      - "work_mem=${PG_WORK_MEM:-4MB}"
+      - "-c"
+      - "maintenance_work_mem=${PG_MAINTENANCE_WORK_MEM:-64MB}"
+      - "-c"
+      - "max_wal_size=${PG_MAX_WAL_SIZE:-1GB}"
     # 有状态服务给足 60s：checkpoint flush + WAL 落盘，避免被 SIGKILL 截断触发 recovery。
     stop_grace_period: 60s
     deploy:
       resources:
         limits:
-          cpus: "2"
-          memory: 2g
+          # resources.env 注入；缺省 = 历史字面量。与上方 -c 调优同源（plan-resources.sh）。
+          cpus: "${POSTGRES_CPUS:-2}"
+          memory: "${POSTGRES_MEM:-2g}"
         reservations:
           cpus: "0.5"
           memory: 512m
@@ -83,14 +104,16 @@ services:
     # 远超 512m 限额，启动 load 即被 kill → 死循环、永不 healthy，拖垮 app/acs/worker。设
     # maxmemory 上限 + LRU 淘汰（队列/会话等丢失可从 PG 双写或重新上报恢复）；容器 limit 抬到
     # 3g（> maxmemory，给 AOF rewrite 的 fork COW 留余量）。
-    command: redis-server --appendonly yes --maxmemory 2gb --maxmemory-policy allkeys-lru
+    # maxmemory / 淘汰策略由 resources.env 注入；缺省 = 历史值（2gb / allkeys-lru）。
+    # 约束：limits.memory 须 ≥ maxmemory + 1GiB（AOF rewrite 的 fork COW 余量）。
+    command: redis-server --appendonly yes --maxmemory ${REDIS_MAXMEMORY:-2gb} --maxmemory-policy ${REDIS_MAXMEMORY_POLICY:-allkeys-lru}
     # AOF rewrite/fsync 落盘窗口
     stop_grace_period: 30s
     deploy:
       resources:
         limits:
-          cpus: "1"
-          memory: 3g
+          cpus: "${REDIS_CPUS:-1}"
+          memory: "${REDIS_MEM:-3g}"
         reservations:
           cpus: "0.25"
           memory: 256m
@@ -119,8 +142,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1"
-          memory: 512m
+          cpus: "${NATS_CPUS:-1}"
+          memory: "${NATS_MEM:-512m}"
         reservations:
           cpus: "0.25"
           memory: 256m
@@ -153,8 +176,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1"
-          memory: 1g
+          cpus: "${MINIO_CPUS:-1}"
+          memory: "${MINIO_MEM:-1g}"
         reservations:
           cpus: "0.25"
           memory: 512m

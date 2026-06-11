@@ -94,7 +94,14 @@ fi
 
 [ ${#COMPOSE_FILES[@]} -eq 0 ] && die "当前目录未发现 docker-compose.*.yml（应在 deploy/ 目录运行）"
 
-DC=( $COMPOSE -p "$COMPOSE_PROJECT" "${COMPOSE_FILES[@]}" )
+# 资源限额：compose 经 --env-file 读取 resources.env(plan-resources.sh 生成)。改完
+# resources.env 后 svc.sh restart 即按新限额重建。一旦显式传任一 --env-file，compose
+# 不再自动加载 ./.env，故 .env 也必须显式传(无则退化为今天行为)。
+ENV_FILES=()
+[ -f .env ]          && ENV_FILES+=( --env-file .env )
+[ -f resources.env ] && ENV_FILES+=( --env-file resources.env )
+
+DC=( $COMPOSE -p "$COMPOSE_PROJECT" "${ENV_FILES[@]}" "${COMPOSE_FILES[@]}" )
 
 # 行为分派
 case "$ACTION" in
