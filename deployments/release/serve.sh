@@ -149,7 +149,7 @@ run_http_server() {
   local port="$1"
   cd "$ARCHIVE"
   exec python3 - "$port" <<'PYEOF'
-import os, sys, http.server, socketserver
+import os, sys, http.server
 PORT = int(sys.argv[1])
 DOWNLOAD_EXTS = ('.tar.xz', '.tar.gz', '.tar.zst', '.tgz', '.sha256')
 
@@ -158,6 +158,11 @@ def _is_download(url_path):
     return any(p.endswith(e) for e in DOWNLOAD_EXTS)
 
 class DownloadHandler(http.server.SimpleHTTPRequestHandler):
+    # 连接级 socket 超时（#209）：慢/半开客户端（连上不读）最多占一条线程，
+    # 到点 socket 操作抛 timeout 自动释放，整服务不再被一条僵死连接拖垮。
+    # StreamRequestHandler.setup() 据此对连接 settimeout(self.timeout)。
+    timeout = 120
+
     def guess_type(self, path):
         if any(path.endswith(e) for e in DOWNLOAD_EXTS):
             return 'application/octet-stream'
@@ -175,9 +180,15 @@ class DownloadHandler(http.server.SimpleHTTPRequestHandler):
             pass
         super().end_headers()
 
-socketserver.TCPServer.allow_reuse_address = True
-with socketserver.TCPServer(('', PORT), DownloadHandler) as srv:
-    print(f'Serving HTTP on 0.0.0.0 port {PORT} ...', flush=True)
+# 多线程下载服务（#209）：每请求一线程，一次大/慢的 omc-*.tar.xz 下载不再独占唯一 worker、
+# 把 index.html 与其它下载全部排队拖死（单线程 TCPServer 的老问题，重启才恢复）。
+class ThreadingServer(http.server.ThreadingHTTPServer):
+    daemon_threads = True          # 进程退出不被在传下载线程阻塞
+    allow_reuse_address = True     # 重启立即重新 bind，不卡 TIME_WAIT
+    request_queue_size = 128       # 加大 listen backlog，突发并发不被 connection refused
+
+with ThreadingServer(('', PORT), DownloadHandler) as srv:
+    print(f'Serving HTTP on 0.0.0.0 port {PORT} (threading) ...', flush=True)
     srv.serve_forever()
 PYEOF
 }

@@ -237,14 +237,17 @@ sudo bash setup-mirrors.sh --remove                 # 全部取消，回归官�
 <h2>📊 4.5 部署前：资源规划（plan-resources.sh — 可选但强烈推荐）</h2>
 <p class="lead">在跑 <code>install.sh</code> <b>之前</b>，先按目标服务器的<b>空闲资源</b>规划各容器的 CPU / 内存限额，生成 <code>deploy/resources.env</code>。
 不跑也能部署（回退到 compose 内置默认值），但<b>共享服务器</b>或<b>大/小配置差异大</b>时强烈建议跑：脚本以 <code>MemAvailable</code> 为基准并扣除其它项目已占用 / 预留，避免超分压垮别的业务，也避免大机闲置或小机静默 OOM。</p>
-<pre>cd /opt/omc/current/deploy
+<p><b>🆕 首次部署</b>（全新服务器）：在<b>解压出的交付包目录</b>跑（此时 <code>/opt/omc/current</code> 软链尚未创建——它由 install.sh 部署时才建，故首次<b>不能</b> <code>cd current/deploy</code>）：</p>
+<pre>cd /opt/omc/releases/omc-&lt;test|release&gt;-&lt;版本&gt;-&lt;架构&gt;      # 与下方 install.sh 同目录
 
-bash plan-resources.sh --dry-run          # 只预览规划，不写文件（先看数字是否合理）
-bash plan-resources.sh                     # 探测主机 + 计算 + 写 resources.env
-bash plan-resources.sh --skip-monitoring   # 不部署监控栈时，降低最低配门槛
-bash plan-resources.sh --tier medium       # 手动指定档位（默认按空闲内存自动判定 small/medium/large）
-bash plan-resources.sh --assume-dedicated  # 本机 OMC 独占时，不扣其它容器预留
-bash plan-resources.sh -h                  # 全部参数</pre>
+bash deploy/plan-resources.sh --dry-run          # 只预览规划，不写文件（先看数字是否合理）
+bash deploy/plan-resources.sh                     # 探测主机 + 计算 + 写 deploy/resources.env
+bash deploy/plan-resources.sh --skip-monitoring   # 不部署监控栈时，降低最低配门槛
+bash deploy/plan-resources.sh --tier medium       # 手动指定档位（默认按空闲内存自动判定 small/medium/large）
+bash deploy/plan-resources.sh --assume-dedicated  # 本机 OMC 独占时，不扣其它容器预留
+bash deploy/plan-resources.sh -h                  # 全部参数</pre>
+<p class="tip">随后 <code>sudo bash deploy/install.sh</code> 会把包内 <code>deploy/resources.env</code> 一并带入部署（拷进 <code>current/deploy/</code>）。不跑 plan-resources.sh 则用 compose 内置默认限额。</p>
+<p><b>⬆️ 升级部署</b>：<code>resources.env</code> 由 install.sh <b>自动从上一版继承</b>（<code>current/deploy/resources.env</code> 或 <code>etc/resources.env.saved</code>），<b>通常无需重跑</b>。仅当目标主机资源变化需<b>重新规划</b>时，在<b>新版本包目录</b>跑 <code>bash deploy/plan-resources.sh</code>（会覆盖继承值）。</p>
 <p class="tip">脚本做三件事：① 探测 CPU / 内存 / 负载 / 其它容器占用；② 算「空闲预算」；③ <b>floor-first</b> 分配（每组件先发 100k 基线下限，剩余按权重分到上限）并<b>联动派生</b> <code>GOMEMLIMIT</code> / Postgres <code>shared_buffers·max_connections</code> / Redis <code>maxmemory</code>，写入带注释的 <code>resources.env</code>。主机低于最低配会<b>清晰报错并给建议最低配</b>（全栈约 ≥24 GiB，<code>--skip-monitoring</code> 约 16 GiB）。算法与档位详见交付包内 <code>deploy/RESOURCE-PLANNING.md</code>。</p>
 <div class="tip">生成后请<b>检视 / 按需微调</b> <code>resources.env</code>，务必遵守文件头注释的约束：<code>GOMEMLIMIT &lt; *_MEM</code>、<code>REDIS_MEM ≥ REDIS_MAXMEMORY + 1GiB</code>、<code>PG_MAX_CONNECTIONS ≥ Go 端连接池总和（当前 180）</code>。<br>
 下游消费：<code>install.sh</code> 与 <code>svc.sh</code> 均以 <code>--env-file resources.env</code> 读取本文件，compose 用 <code>${VAR:-默认}</code> 套入限额。改完 <code>resources.env</code> 后跑 <code>bash svc.sh restart</code> 即按新限额有序重建生效。</div>
@@ -274,7 +277,7 @@ sudo bash deploy/install.sh --skip-monitoring         # 不起监控栈
 sudo bash deploy/install.sh -h                        # 查看所有参数</pre>
 
 <p class="tip">install.sh 自动：环境检查 → 目录布局 → 智能 load 镜像（已有则跳过并重启）→ 默认口令检查 → 启动 infra → 等就绪 → migrate → seed → <code>docker compose up -d</code> 全栈 → 健康检查。<b>全 docker compose 部署，宿主机不再放业务二进制。</b></p>
-<div class="danger">⚠️ 生产环境首次部署前请编辑 <code>/opt/omc/current/deploy/.env</code> 与 <code>/opt/omc/etc/*.prod.yaml</code>，改 <b>PostgreSQL / MinIO / Grafana / JWT</b> 默认口令为强口令。</div>
+<div class="danger">🔐 凭证（#175 治本后）：首次安装 <code>install.sh</code> <b>自动生成强随机凭证</b>（PostgreSQL / MinIO / Grafana / JWT / TR-069 共享密钥）→ <code>/opt/omc/etc/secrets.env</code>（<code>600</code>/root；uninstall 保留、<code>--purge</code> 删，与数据卷同生命周期），<b>无需手工改默认口令</b>。MinIO / Grafana 登录口令在该文件，请<b>妥善备份</b>；轮换步骤见交付包 <code>deploy/secrets-lib.sh</code> 注释。<br>首次部署仍需手工填的只有 <code>OMC_PUBLIC_HOST</code>（基站可达 IP，见 §9.5）——在解压包的 <code>deploy/.env</code> 里填（此时 <code>current/deploy</code> 尚不存在）。</div>
 
 <h3>5.4 svc.sh — 日常服务控制(部署完成后用)</h3>
 <p class="lead">部署完成后,用 <code>svc.sh</code> 做日常启停 / 重启 / 查日志,无须再跑 install.sh。
