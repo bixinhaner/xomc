@@ -31,6 +31,7 @@ import type { StandardParam, UpsertStandardInput } from '@core/types/paramModel'
 import { makeSeqColumn } from '@/components/Table/seqColumn';
 import SearchInput from '@/components/SearchInput';
 import { useT } from '@/hooks/useT';
+import { nextPageOnPaginationChange } from './pagination';
 
 export default function StandardParamsPage() {
   const t = useT();
@@ -177,8 +178,11 @@ export default function StandardParamsPage() {
             pageSizeOptions: ['10', '20', '50', '1000'],
             showTotal: (n) => t('common.totalCount', { count: n }),
             onChange: (p, ps) => {
-              setPage(p);
-              if (ps !== pageSize) setPageSize(ps);
+              // 改每页条数时回到第 1 页重新切片(issue #190:约 2000 条标准参数树,
+              // 改 pageSize 后若停留在原页码会出现切片不刷新)。仅翻页时按目标页码走。
+              const next = nextPageOnPaginationChange(p, ps, pageSize);
+              if (next.sizeChanged) setPageSize(next.pageSize);
+              setPage(next.page);
             },
           }}
         />
