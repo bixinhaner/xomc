@@ -35,7 +35,7 @@ type generator struct {
 	origBodySN  string // 模板里 managedElement localDn 内的 SN（可能为空）
 	oui         string // 文件名里用的厂商 OUI 段
 	granSeconds int    // 粒度秒数（PT900S → 900）
-	counters    int    // 模板内 measType 数（报告用）
+	counters    int    // 模板单文件的 <r p=> 数据点数 = 入库 pm_metrics 行数（measType × 小区数；报告用）
 	rewriteBody bool   // 是否改写 body 内 localDn 的 SN（默认 true，纯属保真，?sn= 才是权威源）
 }
 
@@ -77,7 +77,7 @@ func loadGenerator(path, oui string, rewriteBody bool) (*generator, error) {
 		origBodySN:  extractLocalDnSN(raw),
 		oui:         oui,
 		granSeconds: gran,
-		counters:    strings.Count(raw, "<measType "),
+		counters:    strings.Count(raw, "<r p=\""),
 		rewriteBody: rewriteBody,
 	}
 	return g, nil

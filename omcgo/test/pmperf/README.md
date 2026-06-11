@@ -5,9 +5,19 @@
 1. **文件存储**：设备直传 PM 文件 → ACS 流式落 MinIO（`pm-files` 桶）。
 2. **KPI 解析入库**：worker 解析 3GPP 32.435 XML → 批量写 `pm_metrics`（counter）→ 按平台反算 KPI（`metric_type='kpi'`）。
 
-支持 **4G/5G/GSM 三制式同时压**、**总并发在三者间拆分**。默认用**指标库驱动合成法**：按各平台
-（BLQ/BaiBNQ/BSC）内置指标库 (`data/indicator-library/`) 的全部源 counter（`isCounter=1` 的 `reportKey`）
-生成文件 —— **覆盖全部内置指标**，且单文件无重名 counter（避开 `pm_metrics` 自然键冲突 SQLSTATE 21000）。
+支持 **4G/5G/GSM 三制式同时压**、**总并发在三者间拆分**。
+
+**两种文件来源**：
+
+- **默认 = 内置真机样本模板法**：三制式各内置一份真机 PM 文件（4G 117KB / 5G 257KB / GSM 402KB，见
+  `profiles.go` 的 `templateRel`），每份压测文件**只改时间窗 + SN，内容原样透传** —— 保真上报真机文件的
+  大小与结构（行/文件：4G≈1672、5G≈3606、GSM≈12032）。真机文件含重名 counter（4G `MR.RIPPRB`/
+  `MR.RECEIVEDIPOWER`、5G `RRC.RedirectToLTE`），靠 `product_class` 路由的**白名单丢弃孤儿 counter**，
+  不会撞 `pm_metrics` 自然键（SQLSTATE 21000）—— **前提是 seed 的 `product_class` 正确命中** `products.xml`。
+- **`-synth` = 指标库驱动合成法**：按各平台（BLQ/BaiBNQ/BSC）内置指标库 (`data/indicator-library/`) 的全部源
+  counter（`isCounter=1` 的 `reportKey`）合成文件 —— **覆盖全部内置指标**、单小区、单文件无重名 counter。
+  适合「把所有内置 KPI 指标都压到」的覆盖性验证（文件小，不代表真机体量）。
+- **`-templates a.xml,b.xml,...`**：用外部真机文件覆盖（每个 RAT 一个，数量须等于 `-rats`）。
 
 ## 链路（直传，不走 AutonomousTransferComplete）
 
@@ -79,8 +89,11 @@ bin/kpiperf -rats nr -concurrency 1000 -devices 5000 -buckets 8 -db "$DB" -nats 
 # ⑤ 只压文件存储（不连库、不验证入库；不注入设备时入库会失败，仅看存储能力）
 bin/kpiperf -rats lte,nr,gsm -concurrency 1000 -devices 3000 -no-db
 
-# ⑥ 用真机模板代替合成（每个 RAT 一个模板；4G 真机含重名 counter，需 productClass 命中才不撞自然键）
-bin/kpiperf -rats lte,nr -templates 'test/pmperf/A20260611.0815...05000.xml,test/pmperf/A20260611.0900...04259.xml' -db "$DB" -nats "$NATS"
+# ⑥ 切回指标库合成法（覆盖全部内置指标；默认是内置真机样本，此处用 -synth 切换）
+bin/kpiperf -rats lte,nr,gsm -concurrency 100 -devices 3000 -synth -db "$DB" -nats "$NATS"
+
+# ⑥' 用外部真机文件覆盖内置样本（每个 RAT 一个，数量须等于 -rats）
+bin/kpiperf -rats lte,nr -templates 'path/to/4g.xml,path/to/5g.xml' -db "$DB" -nats "$NATS"
 
 # ⑦ 跑完顺手清理
 bin/kpiperf -rats lte,nr,gsm -concurrency 100 -devices 3000 -db "$DB" -nats "$NATS" -cleanup-after
@@ -136,7 +149,8 @@ DELETE FROM devices    WHERE serial_number LIKE 'KPILT-%';
 | `-devices` | `9999` | 设备总数，按 `-rats` 拆分 |
 | `-files` | `0` | 总文件数；0=各制式 devices×buckets |
 | `-buckets` | `1` | 15min 时间窗个数（扩大唯一行空间） |
-| `-templates` | 空 | 每 RAT 一个真机模板；留空=指标库合成（覆盖全部内置指标） |
+| `-templates` | 空 | 每 RAT 一个外部真机模板；留空=用内置真机样本 |
+| `-synth` | `false` | 强制指标库合成（覆盖全部内置指标）替代内置真机样本 |
 | `-sn-prefix` | `KPILT` | 测试设备 SN 前缀（清理按此 LIKE） |
 | `-oui`/`-carrier` | `48BF74`/`cmcc` | 设备 OUI / 运营商（分区键）|
 | `-db` | `…@localhost:5432/omcgo` | PostgreSQL DSN（本机用 15432）|

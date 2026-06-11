@@ -1,9 +1,9 @@
 // Command kpiperf 是 KPI(PM) 文件上传压测工具：模拟大量小基站向 ACS 直传 3GPP 32.435
 // 性能文件，压测「文件存储（ACS→MinIO）」与「KPI 解析入库（worker→pm_metrics + KPI 反算）」。
 //
-// 支持 4G/5G/GSM 三制式同时压、并发可在三者间拆分；默认用「指标库驱动」合成法，按各平台
-// （BLQ/BaiBNQ/BSC）内置指标库的全部源 counter 生成文件，覆盖所有内置指标，且单文件无重名
-// counter（避开 pm_metrics 自然键冲突 SQLSTATE 21000）。
+// 支持 4G/5G/GSM 三制式同时压、并发可在三者间拆分；默认用「内置真机样本」模板法（仅改时间+SN，
+// 不动内容，保真上报真机文件的大小与结构）。-synth 可切回「指标库驱动」合成法，按各平台
+// （BLQ/BaiBNQ/BSC）内置指标库的全部源 counter 生成文件，覆盖所有内置指标。
 //
 // 链路（直传，不走 AutonomousTransferComplete）：
 //
@@ -63,6 +63,7 @@ type config struct {
 	jsonOut       bool
 	rewriteBodySN bool
 	insecure      bool
+	synth         bool
 }
 
 type bucketWindow struct {
@@ -74,6 +75,7 @@ type bucketWindow struct {
 type ratRun struct {
 	prof    ratProfile
 	gen     fileGen
+	genKind string
 	devices int
 	files   int
 	conc    int
@@ -118,7 +120,7 @@ func parseFlags() config {
 	flag.StringVar(&c.mode, "mode", "run", "run（注入+上传+验证）| seed（仅注入）| cleanup（清库+清 NATS）| purge（仅清 NATS PM 流）")
 	flag.StringVar(&c.baseURL, "url", "http://localhost:7557", "ACS 上传端点 base URL（直连 ACS :7557 或经 nginx :8080）")
 	flag.StringVar(&c.rats, "rats", "lte,nr,gsm", "压测制式（逗号分隔）：lte|nr|gsm，并发/设备数在其间拆分")
-	flag.StringVar(&c.templates, "templates", "", "可选：每个 RAT 一个真机模板 XML（数量须等于 -rats）；留空=指标库合成法（覆盖全部内置指标）")
+	flag.StringVar(&c.templates, "templates", "", "可选：每个 RAT 一个外部真机模板 XML（数量须等于 -rats）；留空=用内置真机样本（-synth 可切指标库合成法）")
 	flag.IntVar(&c.concurrency, "concurrency", 100, "总并发上传数（在飞请求上限），按 -rats 拆分；建议 200–10000")
 	flag.IntVar(&c.devices, "devices", 9999, "注入的设备总数，按 -rats 拆分（默认每制式 3333）")
 	flag.IntVar(&c.files, "files", 0, "总上传文件数；0=各制式 devices×buckets（每设备每时间窗一份）")
@@ -140,6 +142,7 @@ func parseFlags() config {
 	flag.BoolVar(&c.jsonOut, "json", false, "JSON 输出")
 	flag.BoolVar(&c.rewriteBodySN, "rewrite-body-sn", true, "模板模式下改写 body 内 localDn SN（合成法无需）")
 	flag.BoolVar(&c.insecure, "insecure", false, "https 时跳过 TLS 校验")
+	flag.BoolVar(&c.synth, "synth", false, "强制用指标库合成法（覆盖全部内置指标）替代内置真机样本；默认用真机样本")
 	flag.Parse()
 	return c
 }
@@ -271,13 +274,22 @@ func buildRatRuns(cfg config, ratList []string) []*ratRun {
 		}
 		var g fileGen
 		var err error
-		if len(tmpls) > 0 {
+		switch {
+		case len(tmpls) > 0: // 显式 -templates 覆盖全部 RAT
 			g, err = loadGenerator(tmpls[i], cfg.oui, cfg.rewriteBodySN)
-		} else {
+		case cfg.synth: // -synth 强制指标库合成（覆盖全部内置指标）
+			g, err = loadLibGen(prof, prof.indicatorRel, cfg.oui, 900)
+		case prof.templateRel != "": // 默认：该 RAT 内置真机样本（仅改时间+SN，不动内容）
+			g, err = loadGenerator(prof.templateRel, cfg.oui, cfg.rewriteBodySN)
+		default: // 无内置样本时回退合成
 			g, err = loadLibGen(prof, prof.indicatorRel, cfg.oui, 900)
 		}
 		if err != nil {
 			fatal("构建 %s 生成器失败: %v", rat, err)
+		}
+		genKind := "指标库合成"
+		if _, isTmpl := g.(*generator); isTmpl {
+			genKind = "真机样本:" + g.label()
 		}
 		dev := devs[i]
 		if dev < 1 {
@@ -291,7 +303,7 @@ func buildRatRuns(cfg config, ratList []string) []*ratRun {
 		if fileSplit != nil {
 			files = fileSplit[i]
 		}
-		runs[i] = &ratRun{prof: prof, gen: g, devices: dev, conc: conc, files: files}
+		runs[i] = &ratRun{prof: prof, gen: g, genKind: genKind, devices: dev, conc: conc, files: files}
 	}
 	return runs
 }
@@ -576,15 +588,18 @@ func fatal(format string, a ...any) {
 func printRunHeader(cfg config, runs []*ratRun, wins []bucketWindow) {
 	fmt.Println("==================== KPI 上传压测 ====================")
 	fmt.Printf("端点    : %s/smallcell/FileUploadService?fileType=%s\n", cfg.baseURL, cfg.fileType)
-	mode := "指标库合成（覆盖全部内置指标）"
-	if cfg.templates != "" {
-		mode = "真机模板"
+	mode := "内置真机样本（仅改时间+SN，不动内容）"
+	switch {
+	case cfg.templates != "":
+		mode = "外部真机模板（-templates）"
+	case cfg.synth:
+		mode = "指标库合成（-synth，覆盖全部内置指标）"
 	}
 	fmt.Printf("生成方式: %s\n", mode)
 	fmt.Printf("总并发  : %d   设备总数: %d   时间窗: %d 个\n", cfg.concurrency, cfg.devices, cfg.buckets)
 	for _, r := range runs {
-		fmt.Printf("  [%-3s] 平台 %-8s 并发 %-5d 设备 %-6d 文件 %-7d counter/文件 %d\n",
-			r.prof.rat, r.gen.label(), r.conc, r.devices, r.files, r.gen.counterCount())
+		fmt.Printf("  [%-3s] 平台 %-8s 并发 %-5d 设备 %-6d 文件 %-7d 行/文件 %-6d %s\n",
+			r.prof.rat, r.prof.platform, r.conc, r.devices, r.files, r.gen.counterCount(), r.genKind)
 	}
 	fmt.Printf("时间窗  : %s … %s\n", fmtTime(wins[len(wins)-1].begin), fmtTime(wins[0].end))
 	fmt.Println("=====================================================")
