@@ -13,7 +13,9 @@ import {
   Tooltip,
   Tag,
   Empty,
+  Typography,
 } from 'antd';
+import type { ColumnsType } from 'antd/es/table';
 import {
   ArrowLeftOutlined,
   ExclamationCircleFilled,
@@ -30,8 +32,35 @@ import {
 } from '@core/hooks/api/useParamModels';
 import type { ParamMapping, CreateMappingInput, UpdateMappingInput } from '@core/types/paramModel';
 import { makeSeqColumn } from '@/components/Table/seqColumn';
+import {
+  useResizableColumns,
+  ResizableColumnsStyle,
+} from '@/components/Table/resizableColumns';
 import SearchInput from '@/components/SearchInput';
 import { useT } from '@/hooks/useT';
+
+// 长 TR069 PATH 单元格（#214）：列宽放不下时——悬浮 tooltip 看完整路径 + 一键复制；
+// 配合可拖拽列宽（useResizableColumns），三管齐下确保完整路径可见/可取。
+function PathCell({ value, prefix }: { value: string; prefix?: React.ReactNode }) {
+  const t = useT();
+  if (!value) return <>-</>;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
+      {prefix}
+      <Tooltip title={value} placement="topLeft">
+        <span
+          style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}
+        >
+          {value}
+        </span>
+      </Tooltip>
+      <Typography.Text
+        copyable={{ text: value, tooltips: [t('common.copy'), t('table.copied')] }}
+        style={{ flex: 'none' }}
+      />
+    </div>
+  );
+}
 
 interface Props {
   selectedName?: string;
@@ -133,28 +162,37 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
     return list;
   }, [data, entryFilter, keyword]);
 
-  const columns = [
+  const columns: ColumnsType<ParamMapping> = [
     {
       title: t('product.paramModel.mappings.col.standardPath'),
       dataIndex: 'standardPath',
-      ellipsis: true,
+      key: 'standardPath',
+      width: 280, // #214：长 TR069 路径——给默认宽 + 可拖宽（useResizableColumns）+ PathCell tooltip/复制
       render: (v: string, row: ParamMapping) => {
         const stdCount = countPlaceholder(v);
         const privCount = countPlaceholder(row.privatePath);
         const mismatch = stdCount !== privCount;
         return (
-          <Space>
-            {mismatch && (
-              <Tooltip title={t('product.paramModel.mappings.placeholderMismatch', { std: stdCount, priv: privCount })}>
-                <ExclamationCircleFilled style={{ color: '#ff4d4f' }} />
-              </Tooltip>
-            )}
-            <span>{v}</span>
-          </Space>
+          <PathCell
+            value={v}
+            prefix={
+              mismatch ? (
+                <Tooltip title={t('product.paramModel.mappings.placeholderMismatch', { std: stdCount, priv: privCount })}>
+                  <ExclamationCircleFilled style={{ color: '#ff4d4f', flex: 'none' }} />
+                </Tooltip>
+              ) : undefined
+            }
+          />
         );
       },
     },
-    { title: t('product.paramModel.mappings.col.privatePath'), dataIndex: 'privatePath', ellipsis: true },
+    {
+      title: t('product.paramModel.mappings.col.privatePath'),
+      dataIndex: 'privatePath',
+      key: 'privatePath',
+      width: 280, // #214：同上
+      render: (v: string) => <PathCell value={v} />,
+    },
     { title: t('product.paramModel.mappings.col.entryType'), dataIndex: 'entryType', width: 90 },
     { title: t('product.paramModel.mappings.col.access'), dataIndex: 'access', width: 110 },
     { title: t('product.paramModel.mappings.col.dataType'), dataIndex: 'dataType', width: 100 },
@@ -208,6 +246,18 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
       ),
     },
   ];
+
+  // #214：把全部列接入「可拖拽列宽」（带 width 的列可拖；标准/私有 PATH 默认 280，可拖宽看全长路径，
+  // 列宽按浏览器持久化）。必须在任何条件 return 之前调用（Hooks 规则）。
+  const allColumns: ColumnsType<ParamMapping> = [
+    makeSeqColumn<ParamMapping>({ title: t('table.rowNumber'), dataSource: filtered }),
+    ...columns,
+  ];
+  const {
+    columns: resizableColumns,
+    components: resizableComponents,
+    tableClassName,
+  } = useResizableColumns<ParamMapping>(allColumns, { storageKey: 'parammodel-mappings-colwidth' });
 
   const handleSave = async () => {
     if (!selectedName) return;
@@ -294,10 +344,15 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
         </Space>
       </Card>
       <Card size="small">
+        <ResizableColumnsStyle scope={tableClassName} />
         <Table<ParamMapping>
           rowKey="id"
+          className={tableClassName}
           loading={isLoading}
-          columns={[makeSeqColumn<ParamMapping>({ title: t('table.rowNumber'), dataSource: filtered }), ...columns]}
+          columns={resizableColumns}
+          components={resizableComponents}
+          tableLayout="fixed"
+          scroll={{ x: 'max-content' }}
           dataSource={filtered}
           size="small"
           pagination={{
