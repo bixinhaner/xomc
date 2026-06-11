@@ -71,6 +71,12 @@ func (m *mockRestoreRepo) FindByIDPrefix(_ context.Context, _ string, _ int) ([]
 func (m *mockRestoreRepo) MarkComplete(_ context.Context, _ uuid.UUID, _ RestoreStatus, _ int16, _ time.Time, _ string) error {
 	return nil
 }
+func (m *mockRestoreRepo) MarkDownloaded(_ context.Context, _ uuid.UUID, _ time.Time) error {
+	return nil
+}
+func (m *mockRestoreRepo) MarkVerified(_ context.Context, _ uuid.UUID, _ RestoreStatus, _ int16, _ string, _ RestoreVerificationMethod, _ time.Time, _ string) error {
+	return nil
+}
 
 // fakeDeviceLookup satisfies the DeviceLookup interface restored to the
 // service. Narrow interface = small mock.

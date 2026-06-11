@@ -25,6 +25,7 @@ var snapshotColumns = []string{
 	"file_size",
 	"source",
 	"source_task_id",
+	"source_version",
 	"update_by",
 	"update_time",
 	"created_at",
@@ -69,12 +70,12 @@ func (r *PgSnapshotRepository) Upsert(ctx context.Context, snap *ConfigSnapshot)
 		Columns(
 			"serial_number", "enb_name", "product_type",
 			"file_name", "file_ext", "object_bucket", "object_path",
-			"md5", "file_size", "source", "source_task_id", "update_by",
+			"md5", "file_size", "source", "source_task_id", "source_version", "update_by",
 		).
 		Values(
 			snap.SerialNumber, snap.EnbName, snap.ProductType,
 			snap.FileName, snap.FileExt, snap.ObjectBucket, snap.ObjectPath,
-			snap.MD5, snap.FileSize, string(snap.Source), snap.SourceTaskID, snap.UpdateBy,
+			snap.MD5, snap.FileSize, string(snap.Source), snap.SourceTaskID, snap.SourceVersion, snap.UpdateBy,
 		).
 		Suffix(`ON CONFLICT (serial_number) DO UPDATE SET
 			enb_name       = EXCLUDED.enb_name,
@@ -87,6 +88,7 @@ func (r *PgSnapshotRepository) Upsert(ctx context.Context, snap *ConfigSnapshot)
 			file_size      = EXCLUDED.file_size,
 			source         = EXCLUDED.source,
 			source_task_id = EXCLUDED.source_task_id,
+			source_version = COALESCE(EXCLUDED.source_version, config_snapshots.source_version),
 			update_by      = COALESCE(EXCLUDED.update_by, config_snapshots.update_by),
 			update_time    = NOW(),
 			updated_at     = NOW()
@@ -308,7 +310,7 @@ func scanSnapshot(row pgx.Row) (*ConfigSnapshot, error) {
 	if err := row.Scan(
 		&s.SerialNumber, &s.EnbName, &s.ProductType,
 		&s.FileName, &s.FileExt, &s.ObjectBucket, &s.ObjectPath,
-		&s.MD5, &s.FileSize, &source, &s.SourceTaskID, &s.UpdateBy,
+		&s.MD5, &s.FileSize, &source, &s.SourceTaskID, &s.SourceVersion, &s.UpdateBy,
 		&s.UpdateTime, &s.CreatedAt, &s.UpdatedAt,
 	); err != nil {
 		return nil, err
@@ -323,7 +325,7 @@ func scanSnapshotRow(rows pgx.Rows) (*ConfigSnapshot, error) {
 	if err := rows.Scan(
 		&s.SerialNumber, &s.EnbName, &s.ProductType,
 		&s.FileName, &s.FileExt, &s.ObjectBucket, &s.ObjectPath,
-		&s.MD5, &s.FileSize, &source, &s.SourceTaskID, &s.UpdateBy,
+		&s.MD5, &s.FileSize, &source, &s.SourceTaskID, &s.SourceVersion, &s.UpdateBy,
 		&s.UpdateTime, &s.CreatedAt, &s.UpdatedAt,
 	); err != nil {
 		return nil, err

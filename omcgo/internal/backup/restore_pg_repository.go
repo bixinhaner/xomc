@@ -35,6 +35,20 @@ type RestoreTaskRepository interface {
 	// Download. errMsg is appended only on failure (success path keeps any
 	// pre-existing skipped-devices note from UpdateErrorMessage intact).
 	MarkComplete(ctx context.Context, id uuid.UUID, status RestoreStatus, result int16, completedAt time.Time, errMsg string) error
+
+	// MarkDownloaded transitions a restore_task into the `downloaded`
+	// intermediate state (#70): CPE acknowledged the Download (FaultCode==0) but
+	// active integrity verification hasn't run / passed yet. Idempotent; only
+	// advances from non-terminal rows. downloadedAt records the transition time.
+	MarkDownloaded(ctx context.Context, id uuid.UUID, downloadedAt time.Time) error
+
+	// MarkVerified writes the verification outcome (#70). On match it flips the
+	// row to `completed` and stores the observed hash + method + verified_at; on
+	// mismatch it flips to `failed` and appends errMsg. verifiedHash/method may
+	// be empty when no verifier ran (default path keeps the row in `downloaded`
+	// — callers pass that case to MarkDownloaded, not here).
+	MarkVerified(ctx context.Context, id uuid.UUID, status RestoreStatus, result int16,
+		verifiedHash string, method RestoreVerificationMethod, verifiedAt time.Time, errMsg string) error
 }
 
 // RestoreFilter mirrors TaskFilter but for the restore_tasks table.
@@ -49,6 +63,9 @@ var restoreColumns = []string{
 	"started_at", "completed_at", "created_at", "updated_at", "created_by",
 	// M1 alignment columns.
 	"task_seq", "task_name", "task_result", "operator_code", "create_user",
+	// #70 active-verification columns (migration 000036).
+	"expected_hash", "hash_algo", "verified_hash", "verification_method",
+	"verified_at", "downloaded_at", "source_version",
 }
 
 // PgRestoreTaskRepository is the PostgreSQL implementation of RestoreTaskRepository.
@@ -72,11 +89,13 @@ func (r *PgRestoreTaskRepository) Create(ctx context.Context, task *RestoreTask)
 		Columns("source_bucket", "source_object_path", "target_device_sns",
 			"status", "progress", "error_message",
 			"started_at", "completed_at", "created_by",
-			"task_name", "task_result", "operator_code", "create_user").
+			"task_name", "task_result", "operator_code", "create_user",
+			"expected_hash", "hash_algo", "source_version").
 		Values(task.SourceBucket, task.SourceObjectPath, snsJSON,
 			task.Status, task.Progress, task.ErrorMessage,
 			task.StartedAt, task.CompletedAt, task.CreatedBy,
-			task.TaskName, task.TaskResult, task.OperatorCode, task.CreateUser).
+			task.TaskName, task.TaskResult, task.OperatorCode, task.CreateUser,
+			task.ExpectedHash, task.HashAlgo, task.SourceVersion).
 		Suffix("RETURNING " + joinColumns(restoreColumns)).
 		ToSql()
 	if err != nil {
@@ -168,13 +187,26 @@ func (r *PgRestoreTaskRepository) UpdateErrorMessage(ctx context.Context, id uui
 func scanRestoreTask(row pgx.Row) (*RestoreTask, error) {
 	var t RestoreTask
 	var snsJSON []byte
+	// hash_algo / verification_method 是字符串列，scan 进中转 *string 再转回自定义
+	// 类型（pgx 不直接扫进 *RestoreHashAlgo / *RestoreVerificationMethod）。
+	var hashAlgo, verifyMethod *string
 	if err := row.Scan(
 		&t.ID, &t.SourceBucket, &t.SourceObjectPath, &snsJSON,
 		&t.Status, &t.Progress, &t.ErrorMessage,
 		&t.StartedAt, &t.CompletedAt, &t.CreatedAt, &t.UpdatedAt, &t.CreatedBy,
 		&t.TaskSeq, &t.TaskName, &t.TaskResult, &t.OperatorCode, &t.CreateUser,
+		&t.ExpectedHash, &hashAlgo, &t.VerifiedHash, &verifyMethod,
+		&t.VerifiedAt, &t.DownloadedAt, &t.SourceVersion,
 	); err != nil {
 		return nil, err
+	}
+	if hashAlgo != nil {
+		a := RestoreHashAlgo(*hashAlgo)
+		t.HashAlgo = &a
+	}
+	if verifyMethod != nil {
+		m := RestoreVerificationMethod(*verifyMethod)
+		t.VerificationMethod = &m
 	}
 	if len(snsJSON) > 0 {
 		if err := json.Unmarshal(snsJSON, &t.TargetDeviceSNs); err != nil {
@@ -244,6 +276,65 @@ func (r *PgRestoreTaskRepository) MarkComplete(
 	tag, err := r.pool.Exec(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("mark restore_task complete: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("restore_task %s: %w", id, commonerrors.ErrNotFound)
+	}
+	return nil
+}
+
+// MarkDownloaded — see RestoreTaskRepository interface. Transitions a row into
+// the `downloaded` intermediate state (#70). Only advances rows still in
+// pending/running so a later MarkVerified (completed/failed) is never clobbered
+// by a duplicate/late TransferComplete. RowsAffected()==0 is NOT an error here:
+// it just means the row already moved past `downloaded` (idempotent no-op).
+func (r *PgRestoreTaskRepository) MarkDownloaded(
+	ctx context.Context, id uuid.UUID, downloadedAt time.Time,
+) error {
+	query, args, err := storage.Psql.Update("restore_tasks").
+		Set("status", RestoreDownloaded).
+		Set("downloaded_at", downloadedAt).
+		Where(sq.Eq{"id": id}).
+		Where(sq.Eq{"status": []RestoreStatus{RestorePending, RestoreRunning}}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build mark restore_task downloaded SQL: %w", err)
+	}
+	if _, err := r.pool.Exec(ctx, query, args...); err != nil {
+		return fmt.Errorf("mark restore_task downloaded: %w", err)
+	}
+	return nil
+}
+
+// MarkVerified — see RestoreTaskRepository interface. Writes the active
+// verification outcome and the terminal status (completed on match, failed on
+// mismatch) plus verified_hash / verification_method / verified_at. errMsg is
+// persisted only on failure (preserves any skipped-devices note on success).
+func (r *PgRestoreTaskRepository) MarkVerified(
+	ctx context.Context, id uuid.UUID, status RestoreStatus, result int16,
+	verifiedHash string, method RestoreVerificationMethod, verifiedAt time.Time, errMsg string,
+) error {
+	upd := storage.Psql.Update("restore_tasks").
+		Set("status", status).
+		Set("task_result", result).
+		Set("verification_method", string(method)).
+		Set("verified_at", verifiedAt).
+		Set("completed_at", verifiedAt).
+		Set("progress", 100).
+		Where(sq.Eq{"id": id})
+	if verifiedHash != "" {
+		upd = upd.Set("verified_hash", verifiedHash)
+	}
+	if status == RestoreFailed && errMsg != "" {
+		upd = upd.Set("error_message", errMsg)
+	}
+	query, args, err := upd.ToSql()
+	if err != nil {
+		return fmt.Errorf("build mark restore_task verified SQL: %w", err)
+	}
+	tag, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("mark restore_task verified: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return fmt.Errorf("restore_task %s: %w", id, commonerrors.ErrNotFound)

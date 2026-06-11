@@ -768,6 +768,11 @@ func initBackupModule(c *Container) error {
 	)
 	// 配置文件恢复在下发时读 MinIO 文件流现算 Download MD5（Download 报文必填字段）。
 	restoreService.SetObjectReader(backup.NewMinIOObjectReader(c.MinIO))
+	// #70 task 3：跨版本检查（快照来源版本 vs 目标设备当前固件版本）。默认 warn+audit
+	// 策略，不阻断；audit sink 暂传 nil（仅 warn 日志），后续可注入 ops_audit_logs 适配器。
+	restoreService.SetCrossVersionChecker(
+		backup.NewCrossVersionChecker(backup.CrossVersionWarnAudit, nil, logger),
+	)
 	// T-0079: enable by-task-id restore mode + subscribe FilePathRecorder to
 	// `backup.file.received` events so backup_tasks.file_path is populated
 	// after CPE finishes uploading. Both wire onto the same RestoreMetrics.
