@@ -449,10 +449,18 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	// M2: TransferCompleteRouter — 订阅 device.inform.transfer_complete，按 CommandKey 回写 backup/restore_tasks 终态
 	restoreRepo := backup.NewPgRestoreTaskRepository(w.PgPool)
 	tcRouter := backup.NewTransferCompleteRouter(backupTaskRepo, restoreRepo, nil, logger)
+	// #70：恢复 Download 成功后走主动完整性校验编排（downloaded → 回读校验 →
+	// completed/failed）。verifier 是 device-dependent hook，当前未接 ACS GPV 回读，
+	// 故传 nil —— 安全默认（DefaultVerificationConfig）下恢复停在 downloaded 中间态、
+	// 不谎报 completed。接入设备回读后只需注入 RestoreVerifier 即可激活完整闭环。
+	restoreVerifyOrch := backup.NewRestoreVerificationOrchestrator(
+		restoreRepo, nil /*verifier: device-dependent, not yet wired*/, backup.DefaultVerificationConfig(), nil, logger,
+	)
+	tcRouter.SetRestoreVerificationOrchestrator(restoreVerifyOrch)
 	if err := tcRouter.Subscribe(w.EventBus); err != nil {
 		logger.Warn("subscribe backup transfer-complete router", zap.Error(err))
 	}
-	logger.Info("backup transfer-complete router started")
+	logger.Info("backup transfer-complete router started (active restore verification: downloaded→verify; no device verifier wired → stays downloaded)")
 
 	// PM 设备上线自动下发 PM 上传配置（KPI 上报参数整理.md 三参数）
 	// 仅在 cfg.PM.AutoSetupOnOnline=true 时启用；test 环境默认关闭防止干扰压测

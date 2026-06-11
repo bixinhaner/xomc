@@ -119,6 +119,11 @@ type RestoreService struct {
 	// MD5 at dispatch time. nil → MD5 is left empty (unit tests that don't wire
 	// it still pass); wired with the real *minio.Client in production.
 	objReader RestoreObjectReader
+	// crossVersion: optional (#70 task 3) — before dispatch, compares the restore
+	// source's config version against each target device's current firmware
+	// version and warns/audits/blocks per strategy. nil → cross-version check
+	// skipped (legacy behavior).
+	crossVersion *CrossVersionChecker
 }
 
 // NewRestoreService wires the dependencies. metrics may be nil (Record* nil-safe).
@@ -155,6 +160,12 @@ func (s *RestoreService) SetSnapshotLookup(lookup SnapshotLookup) {
 // MD5 at dispatch time (配置文件恢复读流现算 MD5). Pass nil to disable (MD5 empty).
 func (s *RestoreService) SetObjectReader(r RestoreObjectReader) {
 	s.objReader = r
+}
+
+// SetCrossVersionChecker wires the cross-version schema check (#70 task 3).
+// Pass nil to disable.
+func (s *RestoreService) SetCrossVersionChecker(c *CrossVersionChecker) {
+	s.crossVersion = c
 }
 
 // computeSourceMD5 streams the source object and returns its lowercase-hex MD5.
@@ -268,6 +279,15 @@ func (s *RestoreService) Create(ctx context.Context, req *CreateRestoreRequest, 
 		Status:           RestorePending,
 		Progress:         0,
 		StartedAt:        &now,
+	}
+	// #70：记录期望指纹（下发文件的 MD5，与 Download 报文里发给 CPE 的同一值），
+	// 供恢复完成后主动校验比对。空串（objReader 未注入）时不记，校验编排器据此停
+	// 在 downloaded（无从比对）。
+	if srcMD5 != "" {
+		eh := srcMD5
+		algo := RestoreHashMD5
+		created.ExpectedHash = &eh
+		created.HashAlgo = &algo
 	}
 	if createdBy != "" {
 		cb := createdBy
@@ -507,6 +527,20 @@ func (s *RestoreService) CreateBySnapshot(
 		Progress:         0,
 		StartedAt:        &now,
 	}
+	// #70：单行聚合模型下取首个目标设备的快照明文指纹（config_snapshots.md5，#61
+	// 后为明文配置指纹语义）作为期望指纹基线，供恢复后主动校验比对；同时记录该快照的
+	// 来源版本（source_version）供跨版本审计追溯。
+	if first, ok := snaps[req.TargetDeviceSNs[0]]; ok {
+		if first.MD5 != nil && *first.MD5 != "" {
+			eh := *first.MD5
+			algo := RestoreHashMD5
+			created.ExpectedHash = &eh
+			created.HashAlgo = &algo
+		}
+		if sv := snapshotSourceVersion(first); sv != "" {
+			created.SourceVersion = &sv
+		}
+	}
 	if createdBy != "" {
 		cb := createdBy
 		created.CreatedBy = &cb
@@ -539,6 +573,22 @@ func (s *RestoreService) CreateBySnapshot(
 			s.logger.Warn("device not found for restore_by_snapshot; skipping",
 				zap.String("device_sn", sn), zap.Error(dErr))
 			continue
+		}
+		// #70 task 3：跨版本检查。比对快照来源配置版本与目标设备当前固件版本，
+		// 按策略 warn+audit / block / allow 处置。Block 命中则跳过该设备。
+		// 源版本取自快照（snapshotSourceVersion，当前数据未持久化捕获版本→空→不可比
+		// →不告警），目标取设备当前 FirmwareVersion。检查器为 nil 时整体跳过。
+		if s.crossVersion != nil {
+			cv := s.crossVersion.Check(ctx, created.ID.String(), sn,
+				snapshotSourceVersion(snap), dev.FirmwareVersion)
+			if cv.Blocked {
+				skipped = append(skipped, sn)
+				s.logger.Warn("restore blocked by cross-version policy; skipping",
+					zap.String("device_sn", sn),
+					zap.String("source_version", cv.SourceVersion),
+					zap.String("target_version", cv.TargetVersion))
+				continue
+			}
 		}
 		restoreURL := snap.ObjectBucket + "/" + snap.ObjectPath
 		targetFileName := pathpkg.Base(snap.ObjectPath)
