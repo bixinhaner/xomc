@@ -54,7 +54,18 @@ warn() { echo -e "\033[1;33m[install][警告]\033[0m $*" >&2; }
 die()  { echo -e "\033[1;31m[install][错误]\033[0m $*" >&2; exit "${2:-1}"; }
 sep()  { echo -e "\033[1;34m──────────────── $* ────────────────\033[0m"; }
 
+# 凭证治本（#175）纯函数库（rand_hex / secrets_get_val / secrets_is_default_value /
+# secrets_generate_to / secrets_import_to / secrets_apply_to_env），随包同目录交付。
+if [ -f "$DEPLOY_DIR/secrets-lib.sh" ]; then
+  . "$DEPLOY_DIR/secrets-lib.sh"
+else
+  die "缺 $DEPLOY_DIR/secrets-lib.sh（凭证生成库，由 build-release.sh 随包发布）" 1
+fi
+
 # 升级时 deploy/.env 里【运维自定义】的键 —— 跨版本继承,不被新包默认值覆盖。
+# 注：6 个密钥键虽仍在此列（升级时把上一版有效凭证带进新 .env，供 ensure_secrets 首迁导入），
+# 但密钥的【唯一权威源】是 etc/secrets.env —— ensure_secrets 在 source/起 infra 前用它覆盖 .env，
+# 故 .env.saved 即便被某次默认口令安装写脏，也不再污染密钥（secrets.env 一经生成永不重生成）。
 # 【版本相关】键(PROJECT_VERSION / IMAGE_*)不在此列,始终用新包值。
 ENV_PRESERVE_KEYS="POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB MINIO_ROOT_USER MINIO_ROOT_PASSWORD GRAFANA_ADMIN_USER GRAFANA_ADMIN_PASSWORD OMCGO_JWT_SECRET OMC_SHARED_SECRET OMC_PUBLIC_HOST"
 
@@ -98,6 +109,9 @@ merge_env_preserve() {
     warn ".env 合并失败,沿用交付包默认值;请手动核对 $new 的 OMC_PUBLIC_HOST 与口令"
   fi
 }
+
+# ensure_secrets() 定义在 secrets-lib.sh（依赖 log/warn/docker/OMC_ROOT/COMPOSE_PROJECT，
+# 上面已 source；这些变量在调用点 Step 4 之前均已就绪）。
 
 # ── 参数解析 ────────────────────────────────────────────────────────────
 SKIP_INFRA=0
@@ -426,6 +440,10 @@ log "current → $RELEASE_DIR"
 cp -f "$RELEASE_DIR/deploy/.env" "$OMC_ROOT/etc/.env.saved" 2>/dev/null || true
 # resources.env 同样落 etc/ 快照,供 uninstall→reinstall 继承(与 .env.saved 对称)。
 [ -f "$RELEASE_DIR/deploy/resources.env" ] && cp -f "$RELEASE_DIR/deploy/resources.env" "$OMC_ROOT/etc/resources.env.saved" 2>/dev/null || true
+
+# 凭证就位（#175）：必须在下方 Step 4 `source .env`（把 .env 导入 shell 环境，compose 取值
+# 优先 shell env）与 Step 7 起 infra 之前执行，否则容器仍拿到 REPLACE_ME/默认值。
+ensure_secrets
 
 # 检查一组镜像是否全部已在本地
 # 用法：images_exist IMAGE1 IMAGE2 ...

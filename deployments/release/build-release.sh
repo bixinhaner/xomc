@@ -212,22 +212,23 @@ IMAGE_NATS_EXPORTER=$IMAGE_NATS_EXPORTER
 IMAGE_NGINX_EXPORTER=$IMAGE_NGINX_EXPORTER
 IMAGE_NODE_EXPORTER=$IMAGE_NODE_EXPORTER
 IMAGE_CADVISOR=$IMAGE_CADVISOR
-# 数据库 / 对象存储 / Grafana 默认口令——【部署前必改为强口令】
-# 与 /opt/omc/etc/*.prod.yaml 中的 dsn / minio.access_key / minio.secret_key 保持一致
+# 密钥键不再发默认值（#175 凭证治本）：install.sh 首次安装用 ensure_secrets 自动生成强随机，
+# 存到 etc/secrets.env（uninstall 保留、--purge 删），并在起容器前覆盖回本文件。占位 REPLACE_ME
+# 被生产凭证校验（GuardProductionSecrets）识别；正常流程下 ensure_secrets 已替换为强随机。
+# 非密钥的固定用户名 POSTGRES_USER / POSTGRES_DB / GRAFANA_ADMIN_USER 保留。
 POSTGRES_USER=omcgo
-POSTGRES_PASSWORD=omcgo123
+POSTGRES_PASSWORD=REPLACE_ME
 POSTGRES_DB=omcgo
-MINIO_ROOT_USER=minioadmin
-MINIO_ROOT_PASSWORD=minioadmin
+MINIO_ROOT_USER=REPLACE_ME
+MINIO_ROOT_PASSWORD=REPLACE_ME
 GRAFANA_ADMIN_USER=admin
-GRAFANA_ADMIN_PASSWORD=admin
+GRAFANA_ADMIN_PASSWORD=REPLACE_ME
 # OMC 运行环境（容器内 entrypoint.sh 读）
 OMCGO_ENV=prod
-# JWT 密钥（app 容器读，生产勿用默认值）
-OMCGO_JWT_SECRET=8f7a9b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6
-# TR-069 ConnReq/STUN 共享密钥（app/acs 容器读）——【部署前必改为强随机串】。
-# 默认值 dps 会被生产凭证校验拒绝启动（GuardProductionSecrets）。生成：openssl rand -hex 24
-OMC_SHARED_SECRET=dps
+# JWT 密钥（app 容器读）—— 由 install.sh ensure_secrets 自动生成（#175）
+OMCGO_JWT_SECRET=REPLACE_ME
+# TR-069 ConnReq/STUN 共享密钥（app/acs 容器读）—— 由 install.sh ensure_secrets 自动生成（#175）
+OMC_SHARED_SECRET=REPLACE_ME
 # 本机对外 IP / 域名（基站可达地址）——【部署前必填】。app/acs/worker 容器读，
 # worker 据此生成 PM 文件上传 URL 下发给基站；不能用 localhost / 127.0.0.1，
 # 否则基站无法回传文件。示例：OMC_PUBLIC_HOST=172.19.1.132
