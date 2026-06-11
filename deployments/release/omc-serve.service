@@ -31,7 +31,9 @@ WorkingDirectory=/opt/omc/release
 ExecStart=/opt/omc/release/serve.sh -p 8000
 
 # ── 生命周期 ────────────────────────────────────────────────────────────
-Restart=on-failure
+# Restart=always（#209）：进程若真崩/被杀一律拉起；不依赖退出码，兜底单线程僵死之外的异常。
+# （根因—单线程被大/慢下载占死—已在 serve.sh 改 ThreadingHTTPServer + 连接超时治本。）
+Restart=always
 RestartSec=3s
 KillSignal=SIGTERM
 TimeoutStopSec=10s
