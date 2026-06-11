@@ -32,9 +32,9 @@
 #     ?types= 已过时）；明细列表嵌 model.ListRequest，必须显式 page/page_size 否则 binding 400。
 #   - sysDictionary CRUD（GVA 风格 createSysDictionary/updateSysDictionary/deleteSysDictionary）：
 #     Create body{name+type 必填,desc,status}→ data{id,...}；Update body{id 必填(int64),name/desc/...}；
-#     Delete 走 query ?id=<int64>（非 body）。删/改不存在 id → 仓库返 ErrNotFound，但 handler 硬编码
-#     http.StatusInternalServerError（未走 HTTPStatusFromError），故为 500+ret=0（与 sysConfig 同款；
-#     check_ret_fail 容忍 5xx/ret=0）。id 缺失/非数字 → 400+biz_code 7。
+#     Delete 走 query ?id=<int64>（非 body）。删/改不存在 id → 仓库返 ErrNotFound，handler 经
+#     HTTPStatusFromError 映射 404（issue #145 D 修复，2026-06；此前硬编码 500 已纠正）。
+#     id 缺失/非数字 → 400+biz_code 7。
 #   - dictload/reload?name=：超级管理员维护端点，幂等重载单 Loader（重 UPSERT 同一 builtin XML，
 #     不增删行内容、errors:null），故可测成功路径；reload alarm-definition 返回
 #     data{loader,rows_affected,files_loaded,errors}，ret=1。未知 loader → 500「unknown loader」+ret=0，
@@ -239,13 +239,15 @@ check_ret_fail "创建缺 name/type 被拒（binding required）"
 req PUT "/api/v1/admin/sysDictionary/updateSysDictionary" "{\"desc\":\"缺 id\"}"
 check_ret_fail "更新缺 id 被拒（binding required）"
 req PUT "/api/v1/admin/sysDictionary/updateSysDictionary" "{\"id\":99999999,\"desc\":\"x\"}"
-check_ret_fail "更新不存在 id 被拒（ErrNotFound→500/ret=0）"
+# issue #145 D 修复后硬断言：不存在记录走 HTTPStatusFromError 映射 404（不再 500）。
+check_status "更新不存在 id → 404（ErrNotFound 映射）" 404
 req DELETE "/api/v1/admin/sysDictionary/deleteSysDictionary"
 check_ret_fail "删除缺 id 参数被拒"
 req DELETE "/api/v1/admin/sysDictionary/deleteSysDictionary?id=not-a-num"
 check_ret_fail "删除非数字 id 被拒"
 req DELETE "/api/v1/admin/sysDictionary/deleteSysDictionary?id=99999999"
-check_ret_fail "删除不存在 id 被拒（ErrNotFound→500/ret=0）"
+# issue #145 D 修复后硬断言：不存在记录走 HTTPStatusFromError 映射 404（不再 500）。
+check_status "删除不存在 id → 404（ErrNotFound 映射）" 404
 
 # ---------------------------------------------------------------------------
 section "字典明细（/admin/sysDictionaryDetail getSysDictionaryDetailList）"
@@ -265,6 +267,101 @@ fi
 # 负路径：binding min=1
 req GET "/api/v1/admin/sysDictionaryDetail/getSysDictionaryDetailList?page=0&page_size=10"
 check_ret_fail "字典明细 page=0 被拒（binding min=1）"
+
+# ---------------------------------------------------------------------------
+section "字典明细 CRUD 闭环（建 ${SMOKE_TAG} 父字典 + 明细项 → 查 → 改 → 删，GVA 风格）"
+# ---------------------------------------------------------------------------
+# 明细项必须挂在父字典下（CreateDictionaryDetail 先 GetByID 校验父字典存在 → 7003）。
+# 为不污染 builtin 种子字典，先自建一条 ${SMOKE_TAG}_det 父字典，挂明细，闭环末尾连带清理。
+# 字段口径见 internal/admin/dictionary_model.go：CreateDictionaryDetailRequest
+#   label+value+sysDictionaryId 三者 binding:"required"；extend/status/sort 可选。
+DET_DICT_ID=""
+req POST "/api/v1/admin/sysDictionary/createSysDictionary" \
+    "{\"name\":\"冒烟明细父字典${SMOKE_TAG}\",\"type\":\"${SMOKE_TAG}_det\",\"desc\":\"冒烟明细闭环父字典\"}"
+check_ret_ok "创建明细闭环用父字典"
+DET_DICT_ID=$(jget data.id)
+
+DET_ID=""
+if [ -n "$DET_DICT_ID" ]; then
+    # 建明细项（manual origin，level=0；sysDictionaryId 必填）
+    req POST "/api/v1/admin/sysDictionaryDetail/createSysDictionaryDetail" \
+        "{\"label\":\"冒烟项${SMOKE_TAG}\",\"value\":\"${SMOKE_TAG}_v1\",\"extend\":\"e1\",\"sysDictionaryId\":${DET_DICT_ID},\"sort\":1}"
+    check_ret_ok "创建冒烟字典明细项"
+    check_field "创建明细返回 id" "data.id"
+    DET_ID=$(jget data.id)
+    L=$(jget data.label)
+    if [ "$L" = "冒烟项${SMOKE_TAG}" ]; then pass "自建明细 label 回读一致"
+    else fail "自建明细 label 回读一致" "实际 '$L'"; fi
+else
+    skip "字典明细 CRUD 闭环" "父字典创建未返回 id，无法继续闭环"
+fi
+
+if [ -n "$DET_ID" ]; then
+    # findSysDictionaryDetail 按 id 回查（确认落库）
+    req GET "/api/v1/admin/sysDictionaryDetail/findSysDictionaryDetail?id=${DET_ID}"
+    check_ret_ok "按 id 查询自建明细"
+    V=$(jget data.value)
+    if [ "$V" = "${SMOKE_TAG}_v1" ]; then pass "自建明细 value 回读一致 (${SMOKE_TAG}_v1)"
+    else fail "自建明细 value 回读一致" "期望 ${SMOKE_TAG}_v1，实际 '$V'"; fi
+
+    # updateSysDictionaryDetail：改 label/value（PUT body 必带 id）
+    req PUT "/api/v1/admin/sysDictionaryDetail/updateSysDictionaryDetail" \
+        "{\"id\":${DET_ID},\"label\":\"冒烟项改${SMOKE_TAG}\",\"value\":\"${SMOKE_TAG}_v2\"}"
+    check_ret_ok "更新自建明细 label/value"
+    V=$(jget data.value)
+    if [ "$V" = "${SMOKE_TAG}_v2" ]; then pass "更新后明细 value=${SMOKE_TAG}_v2 已生效"
+    else fail "更新后明细 value 已生效" "实际 '$V'"; fi
+
+    # 列表回查：按父字典过滤应能命中自建明细
+    req GET "/api/v1/admin/sysDictionaryDetail/getSysDictionaryDetailList?page=1&page_size=10&sysDictionaryId=${DET_DICT_ID}"
+    check_ret_ok "按父字典回查自建明细列表"
+    check_count_ge "父字典下明细 total≥1" "data.total" 1
+
+    # deleteSysDictionaryDetail：删（DELETE 走 query ?id=，非 body）
+    req DELETE "/api/v1/admin/sysDictionaryDetail/deleteSysDictionaryDetail?id=${DET_ID}"
+    check_ret_ok "删除自建明细项"
+
+    # 闭环校验：删后 findSysDictionaryDetail 不再命中（软删，仓库返 ErrNotFound→404，#145-D find 补漏后硬断言）
+    req GET "/api/v1/admin/sysDictionaryDetail/findSysDictionaryDetail?id=${DET_ID}"
+    check_status "删除后自建明细不可再查（软删生效，精确 404）" 404
+else
+    skip "字典明细 改/查/删闭环" "明细创建未返回 id，无法继续闭环"
+fi
+
+# 负路径：必填字段 / 父字典不存在 / 非法/不存在 id
+req POST "/api/v1/admin/sysDictionaryDetail/createSysDictionaryDetail" \
+    "{\"value\":\"${SMOKE_TAG}_nolabel\",\"sysDictionaryId\":${DET_DICT_ID:-1}}"
+check_ret_fail "创建明细缺 label 被拒（binding required）"
+req POST "/api/v1/admin/sysDictionaryDetail/createSysDictionaryDetail" \
+    "{\"label\":\"孤儿项\",\"value\":\"x\"}"
+check_ret_fail "创建明细缺 sysDictionaryId 被拒（binding required）"
+req POST "/api/v1/admin/sysDictionaryDetail/createSysDictionaryDetail" \
+    "{\"label\":\"挂不存在父\",\"value\":\"x\",\"sysDictionaryId\":99999999}"
+check_ret_fail "创建明细挂不存在父字典被拒（7003 parent dictionary not found）"
+req GET "/api/v1/admin/sysDictionaryDetail/findSysDictionaryDetail"
+check_ret_fail "查询明细缺 id 参数被拒"
+req GET "/api/v1/admin/sysDictionaryDetail/findSysDictionaryDetail?id=not-a-num"
+check_ret_fail "查询明细非数字 id 被拒"
+req PUT "/api/v1/admin/sysDictionaryDetail/updateSysDictionaryDetail" "{\"label\":\"缺 id\"}"
+check_ret_fail "更新明细缺 id 被拒（binding required）"
+req PUT "/api/v1/admin/sysDictionaryDetail/updateSysDictionaryDetail" "{\"id\":99999999,\"label\":\"x\"}"
+# 不存在记录：GetByID 返 ErrNotFound(%w 包裹) → HTTPStatusFromError(errors.Is) 映射 404。
+check_status "更新不存在明细 id → 404（ErrNotFound 映射）" 404
+req DELETE "/api/v1/admin/sysDictionaryDetail/deleteSysDictionaryDetail"
+check_ret_fail "删除明细缺 id 参数被拒"
+req DELETE "/api/v1/admin/sysDictionaryDetail/deleteSysDictionaryDetail?id=not-a-num"
+check_ret_fail "删除明细非数字 id 被拒"
+req DELETE "/api/v1/admin/sysDictionaryDetail/deleteSysDictionaryDetail?id=99999999"
+# 软删 0 行 → ErrNotFound → HTTPStatusFromError 映射 404（与 sysDictionary 同范式）。
+check_status "删除不存在明细 id → 404（ErrNotFound 映射）" 404
+
+# 清理：删掉明细闭环用父字典（软删，连带不留残）
+if [ -n "$DET_DICT_ID" ]; then
+    req DELETE "/api/v1/admin/sysDictionary/deleteSysDictionary?id=${DET_DICT_ID}"
+    check_ret_ok "清理明细闭环用父字典"
+else
+    skip "清理明细闭环用父字典" "父字典未获取到 id"
+fi
 
 # ---------------------------------------------------------------------------
 section "系统日志（/admin/logs/{login,operation,task}）"

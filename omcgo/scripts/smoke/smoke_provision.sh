@@ -5,12 +5,12 @@
 # 覆盖（/tmp/smoke_routes.json key=provision 全部 4 条路由）：
 #   GET  /api/v1/provisioning/tasks        列表（含 status / device_id 过滤 + 非法参数负路径）
 #   GET  /api/v1/provisioning/tasks/:id    详情（取列表第一条；非法 UUID / 不存在 ID 负路径）
-#   POST /api/v1/provisioning/tasks        destructive → 只测参数校验负路径（缺必填/非法格式/不存在设备）
-#   POST /api/v1/provisioning/tasks/:id/retry  destructive → 只测负路径（不存在 ID / 非法 UUID / 非 failed 状态）
+#   POST /api/v1/provisioning/tasks        destructive → 只测参数校验负路径（缺必填/非法格式/不存在设备 → 404）
+#   POST /api/v1/provisioning/tasks/:id/retry  destructive → 只测负路径（不存在 ID / 非法 UUID）
 #
 # 红线遵守：绝不对真实设备触发开站下发——POST 仅用不存在的 device_id（UUID 格式合法
-# 但设备不存在，引擎事件驱动无轮询，不会产生任何下发）；retry 仅打不存在 ID 与
-# 该“孤儿任务”（status=discovered，非 failed 被状态机守卫拒绝），不碰列表里的真实任务。
+# 但设备不存在；issue #126 第10项修复后 handler 入库前预检 device 存在性 → 直接 404，
+# 既不下发也不建任何任务）；retry 仅打不存在 ID / 非法 UUID，不碰列表里的真实任务。
 #
 # 用法：bash smoke_provision.sh [BASE_URL]   （默认 http://localhost:8081）
 # =============================================================================
@@ -102,16 +102,11 @@ check_status "device_id 非 UUID HTTP 400" 400
 req POST "/api/v1/provisioning/tasks" '{"device_id":'
 check_ret_fail "非法 JSON body 被拒绝"
 
-# 不存在的设备 ID：期望被拒绝，实测后端不校验设备存在性直接 201 建任务
-# （孤儿任务无 SN 不会触发任何下发，超时 reaper 15 分钟后置 failed，无害）
-ORPHAN_ID=""
+# 不存在的设备 ID：handler 入库前预检 device 存在性，不存在 → 404，不建孤儿任务
+# （issue #126 第10项已修复：provisioning_tasks 对 device_id 无外键，需 handler 兜底）
 req POST "/api/v1/provisioning/tasks" "{\"device_id\":\"$NO_SUCH_ID\"}"
-if [ "$HTTP_CODE" = "201" ] && [ "$(jget ret)" = "1" ]; then
-    ORPHAN_ID=$(jget data.id)
-    known_bug "不存在设备 ID 建任务未被拒绝" "POST 返回 201 ret=1 建出孤儿任务（id=${ORPHAN_ID}），handler 未校验 device 存在性"
-else
-    check_ret_fail "不存在设备 ID 建任务被拒绝（后端已修复存在性校验）"
-fi
+check_ret_fail "不存在设备 ID 建任务被拒绝（设备存在性预检）"
+check_status "不存在设备 ID HTTP 404" 404
 
 # ---------------------------------------------------------------------------
 section "重试只测负路径（POST /provisioning/tasks/:id/retry，destructive 禁真发）"
@@ -126,14 +121,9 @@ req POST "/api/v1/provisioning/tasks/not-a-uuid/retry"
 check_ret_fail "retry 非法 UUID 被拒绝"
 check_status "retry 非法 UUID HTTP 400" 400
 
-# 状态机守卫：非 failed 状态任务不可 retry（仅用本次自建的孤儿任务，
-# status=discovered 且设备不存在，绝不触达真实任务/设备）
-if [ -n "$ORPHAN_ID" ]; then
-    req POST "/api/v1/provisioning/tasks/$ORPHAN_ID/retry"
-    check_ret_fail "retry 非 failed 状态任务被状态机守卫拒绝"
-    check_status "retry 非 failed 状态 HTTP 400" 400
-else
-    skip "retry 非 failed 状态守卫" "未建出孤儿任务（后端已校验设备存在性），无安全可用的非 failed 任务"
-fi
+# 状态机守卫：非 failed 状态任务不可 retry。issue #126 第10项修复后建任务需
+# 设备存在，无法再用不存在设备自建孤儿任务做安全样本；列表里的真实任务 destructive
+# 禁触达 → 跳过此守卫断言（由带真实 failed 任务的环境或单测 state_machine_test 兜底）。
+skip "retry 非 failed 状态守卫" "设备存在性预检后无法安全自建非 failed 任务；destructive 禁触达真实任务"
 
 smoke_summary

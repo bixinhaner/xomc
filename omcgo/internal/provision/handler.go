@@ -1,24 +1,42 @@
 package provision
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/response"
 )
 
+// deviceExistenceChecker is the minimal read-only dependency the handler needs
+// to verify that a device exists before creating a provisioning task for it.
+// In production it is satisfied by *device.DeviceService.GetDevice; tests inject
+// a stub. GetDevice returns (nil, nil) when the device is absent.
+type deviceExistenceChecker interface {
+	GetDevice(ctx context.Context, id uuid.UUID) (*model.Device, error)
+}
+
 // Handler provides HTTP handlers for provisioning REST API.
 type Handler struct {
-	repo   ProvisioningTaskRepository
-	engine *ProvisioningEngine
+	repo          ProvisioningTaskRepository
+	engine        *ProvisioningEngine
+	deviceChecker deviceExistenceChecker
 }
 
 // NewHandler creates a new provisioning REST API handler.
 func NewHandler(repo ProvisioningTaskRepository, engine *ProvisioningEngine) *Handler {
 	return &Handler{repo: repo, engine: engine}
+}
+
+// SetDeviceChecker wires the read-only device existence checker used by Create
+// to reject provisioning tasks for non-existent devices (returns 404 instead of
+// silently creating an orphan task). When nil the precheck is skipped.
+func (h *Handler) SetDeviceChecker(c deviceExistenceChecker) {
+	h.deviceChecker = c
 }
 
 // RegisterRoutes registers provisioning routes on the given router group.
@@ -90,6 +108,22 @@ func (h *Handler) Create(c *gin.Context) {
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, "invalid device_id")
 		return
+	}
+
+	// Existence precheck: provisioning_tasks has no FK on device_id, so a
+	// well-formed-but-unknown UUID would otherwise create an orphan task that
+	// the 15-minute reaper later fails. Reject up front with 404 (issue #126
+	// item 10). GetDevice returns (nil, nil) for an absent device.
+	if h.deviceChecker != nil {
+		dev, derr := h.deviceChecker.GetDevice(c.Request.Context(), deviceID)
+		if derr != nil {
+			commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(derr), derr)
+			return
+		}
+		if dev == nil {
+			commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
+			return
+		}
 	}
 
 	task := NewProvisioningTask(deviceID)

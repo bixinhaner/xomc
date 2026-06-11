@@ -11,8 +11,9 @@
 #      wakeDevice 对未知 SN 设备查找失败即放弃（仅 warn 日志），不会发出任何
 #      Connection Request；该 SN 永不 inform，任务只入队不下发，建后立即取消。
 #      绝不向任何真实/模拟设备 SN 下发 CWMP 指令。
-#   5. retry：双分支容忍（后端 CanRetry 只看次数不看状态，已取消任务 retry 会
-#      重新入队 → 立即再次取消还原；若后端改为拒绝则按拒绝 pass）+ 不存在任务负路径
+#   5. retry：硬断言已取消(cancelled)任务 retry 被拒绝（4xx）+ 任务保持 cancelled
+#      不被复活 + pending 队列仍为空（#126 第8项修复后 CanManualRetry 限定
+#      failed/expired 才可主动 retry）+ 不存在任务负路径
 #   6. purge（destructive）：仅测未认证负路径；真实执行无校验负路径
 #      （非法 retention_days 静默回退默认 30 天并真执行），按危险禁区跳过
 #
@@ -25,6 +26,12 @@
 #     "task not found: <id>"，永不匹配落入 500。已修复（service 改用哨兵
 #     ErrTaskNotFound 包装 core ErrNotFound + handler errors.Is 判定 →
 #     HTTPStatusFromError 映射 404），不存在任务取消硬断言 404。
+#   - #126(8) POST /devices/tasks/:task_id/retry 对 cancelled/completed 任务
+#     返回 200 复活回 pending：model.go CanRetry() 只看 retry_count<max_retries
+#     不校验状态。已修复（新增 CanManualRetry 限定 failed/expired 终态失败类才可
+#     主动 retry，handler 改用之），已取消任务 retry 硬断言 4xx + 状态保持
+#     cancelled。同项第2点：CreateTaskRequest.MaxRetries 改 *int，显式 0 表"禁止
+#     重试"不再被静默改回默认 3。
 #
 # 用法：bash smoke_task.sh [BASE_URL]   （默认 http://localhost:8081）
 # =============================================================================
@@ -165,32 +172,32 @@ if [ -n "$TASK_ID" ]; then
         fail "取消后 pending 队列清空" "HTTP $HTTP_CODE，pending 仍有 $PENDING_LEFT 条"
     fi
 
-    # retry 双分支：当前后端 CanRetry 只看 retry_count<max_retries 不看状态，
-    # 已取消任务 retry 会 200 重新入队（SN 不存在，仍只入队不下发）→ 立即再取消还原；
-    # 若后端日后改为拒绝已取消任务（4xx/ret=0）也按预期 pass。
+    # #126 第8项已修复：CanManualRetry 限定 failed/expired 终态失败类才可主动 retry，
+    # cancelled/completed/pending/sent 一律拒绝（避免把已取消/已完成任务"复活"回 pending）。
+    # 此处 TASK_ID 已是 cancelled → retry 必被拒（4xx），硬断言之；任务保持 cancelled 不变。
     req POST "/api/v1/devices/tasks/$TASK_ID/retry"
-    if [[ "$HTTP_CODE" == 2* ]] && [ "$(jget ret)" = "1" ]; then
-        pass "retry 已取消任务重新入队（当前实现 CanRetry 不校验状态）→ $HTTP_CODE"
-
-        req GET "/api/v1/devices/tasks/$TASK_ID"
-        RETRY_STATUS=$(jget data.status)
-        if [ "$RETRY_STATUS" = "pending" ]; then
-            pass "retry 后任务回到 pending 状态"
-        else
-            fail "retry 后任务回到 pending 状态" "实际 status='${RETRY_STATUS}'"
-        fi
-
-        cancel_task "$TASK_ID" "再次取消 retry 重入队的任务（清理还原）"
-
-        req GET "/api/v1/devices/tasks/pending?device_sn=$TASK_SN"
-        RETRY_LEFT=$(jlen data.tasks)
-        if [ "$HTTP_CODE" = "200" ] && [ "$RETRY_LEFT" -eq 0 ]; then
-            pass "闭环结束 pending 队列清空（剩 0 条）"
-        else
-            fail "闭环结束 pending 队列清空" "HTTP $HTTP_CODE，pending 仍有 $RETRY_LEFT 条"
-        fi
+    if [[ "$HTTP_CODE" == 4* ]]; then
+        pass "retry 已取消任务被拒绝（CanManualRetry 状态校验）→ $HTTP_CODE"
     else
-        pass "retry 已取消任务被拒绝（后端已加状态校验）→ $HTTP_CODE ret=$(jget ret)"
+        fail "retry 已取消任务应被拒绝（4xx）" "实际 HTTP ${HTTP_CODE} ret=$(jget ret) body: $(printf '%s' "$BODY" | head -c 200)"
+    fi
+
+    # 拒绝后任务状态应仍为 cancelled（未被复活）
+    req GET "/api/v1/devices/tasks/$TASK_ID"
+    RETRY_STATUS=$(jget data.status)
+    if [ "$RETRY_STATUS" = "cancelled" ]; then
+        pass "retry 被拒后任务仍为 cancelled（未复活）"
+    else
+        fail "retry 被拒后任务仍为 cancelled" "实际 status='${RETRY_STATUS}'"
+    fi
+
+    # 已取消任务被拒绝 retry，pending 队列应保持为空（无复活入队）
+    req GET "/api/v1/devices/tasks/pending?device_sn=$TASK_SN"
+    RETRY_LEFT=$(jlen data.tasks)
+    if [ "$HTTP_CODE" = "200" ] && [ "$RETRY_LEFT" -eq 0 ]; then
+        pass "retry 被拒后 pending 队列仍为空（剩 0 条）"
+    else
+        fail "retry 被拒后 pending 队列仍为空" "HTTP $HTTP_CODE，pending 仍有 $RETRY_LEFT 条"
     fi
 else
     skip "自建任务详情可查" "创建未返回 id，闭环无法继续"
@@ -198,7 +205,7 @@ else
     skip "pending 队列可见新任务" "同上"
     skip "自建 SN 的 stats 断言" "同上"
     skip "取消任务闭环" "同上"
-    skip "retry 双分支闭环" "同上"
+    skip "retry 已取消任务被拒闭环" "同上"
 fi
 
 # ---------------------------------------------------------------------------

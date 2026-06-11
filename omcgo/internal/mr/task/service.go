@@ -234,6 +234,11 @@ func (s *service) Delete(ctx context.Context, taskID uuid.UUID) error {
 }
 
 func (s *service) ListProgress(ctx context.Context, filter ProgressListFilter) (*model.ListResponse[Progress], error) {
+	// 先校验任务存在性：不存在的 task_id 应返回 404（ErrNotFound），与
+	// Get/Stop/Delete 的行为一致，而非返回 200 空列表（issue #126 第 5 项）。
+	if _, err := s.repo.GetTask(ctx, filter.TaskID); err != nil {
+		return nil, err
+	}
 	resp, err := s.repo.ListProgress(ctx, filter)
 	if err != nil {
 		return nil, fmt.Errorf("list mr progress: %w", err)

@@ -33,12 +33,13 @@ func newServiceWithPG(t *testing.T) (*TaskService, *miniredis.Miniredis, *RedisT
 
 // makeReq 创建一个 SourceID 为有效 UUID 的 CreateTaskRequest。
 func makeReq(sn, method string) *CreateTaskRequest {
+	mr := 3
 	return &CreateTaskRequest{
 		DeviceSN:    sn,
 		Method:      method,
 		Params:      json.RawMessage("{}"),
 		Priority:    5,
-		MaxRetries:  3,
+		MaxRetries:  &mr,
 		Source:      TaskSourceAPI,
 		Description: "test task",
 		SourceID:    generateUUID(),

@@ -171,6 +171,7 @@ func (h *Handler) ListCounters(c *gin.Context) {
 
 func (h *Handler) ListAggregatedCounters(c *gin.Context) {
 	var q counterQuery
+	q.ListRequest = model.DefaultListRequest()
 	if err := c.ShouldBindQuery(&q); err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return

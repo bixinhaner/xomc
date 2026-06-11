@@ -14,10 +14,11 @@
 #   9. ops/commands/rpc        只测校验负路径【红线：不真发 RPC】
 #  10. ops/break-glass         status 只读 + activate 校验负路径【红线：不真激活/不触 deactivate】
 #
-# 注意（信封漂移，实测 2026-06-10）：
+# 信封一致性（#126 第6项已修，2026-06-11）：
 #   - 基础端点 templates/tasks/command-records 走统一信封 {ret,msg,data}；
 #   - 扩展端点 diagnostics/downloads/audit-logs/maintenance-windows/playbooks/
-#     break-glass/commands 成功响应为裸 JSON（无信封），断言用 check_status+check_field。
+#     break-glass/commands 成功响应同样走统一信封，业务数据在 data.* 下；
+#     断言统一用 check_ret_ok + data.* 取值（不再宽容裸 JSON）。
 # =============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -85,7 +86,7 @@ req GET "/api/v1/ops/tasks/$NIL_UUID"
 check_ret_fail "不存在任务详情被拒（404）"
 
 req GET "/api/v1/ops/tasks/$NIL_UUID/executions"
-check_status "不存在任务的执行明细返回空列表" 200
+check_ret_ok "不存在任务的执行明细返回空列表（信封）"
 
 req POST "/api/v1/ops/tasks" '{"creator":"smoke"}'
 check_ret_fail "缺 task_name 建任务被拒"
@@ -119,11 +120,11 @@ check_ret_fail "缺 command_text 创建命令记录被拒"
 section "4. 诊断 ops/diagnostics — 列表 + 校验负路径（不触发真实诊断）"
 # ---------------------------------------------------------------------------
 req GET "/api/v1/ops/diagnostics?page=1&page_size=10"
-check_status "诊断列表可查（裸 JSON 无信封）" 200
-check_field "诊断列表 total 字段" "total"
+check_ret_ok "诊断列表可查（信封）"
+check_field "诊断列表 data.total 字段" "data.total"
 
 req GET "/api/v1/ops/diagnostics?device_sn=SMK-NONE&diag_type=ip_ping&status=pending"
-check_status "诊断列表条件过滤可查" 200
+check_ret_ok "诊断列表条件过滤可查"
 
 req GET "/api/v1/ops/diagnostics/not-a-uuid"
 check_ret_fail "非法 UUID 诊断详情被拒"
@@ -149,8 +150,8 @@ skip "diagnostics/inspection 触发" "POST 即真实触发全网巡检（无参�
 section "5. 诊断下载 ops/downloads — 列表 + 校验负路径"
 # ---------------------------------------------------------------------------
 req GET "/api/v1/ops/downloads?page=1&page_size=10"
-check_status "下载列表可查（裸 JSON 无信封）" 200
-check_field "下载列表 total 字段" "total"
+check_ret_ok "下载列表可查（信封）"
+check_field "下载列表 data.total 字段" "data.total"
 
 req GET "/api/v1/ops/downloads/$NIL_UUID"
 check_ret_fail "不存在下载详情被拒（404）"
@@ -165,11 +166,11 @@ check_ret_fail "collect 空 content_types 被拒"
 section "6. 维护窗口 ops/maintenance-windows — 未来窗口创建 + 四眼审批守卫"
 # ---------------------------------------------------------------------------
 req GET "/api/v1/ops/maintenance-windows?page=1&page_size=10"
-check_status "维护窗口列表可查（裸 JSON 无信封）" 200
-check_field "维护窗口列表 total 字段" "total"
+check_ret_ok "维护窗口列表可查（信封）"
+check_field "维护窗口列表 data.total 字段" "data.total"
 
 req GET "/api/v1/ops/maintenance-windows/active"
-check_status "active 维护窗口列表可查" 200
+check_ret_ok "active 维护窗口列表可查"
 
 # 未来 +1 天的 1 小时窗口；scope 指向不存在设备、抑制/暂停开关全 false，零业务影响
 MW_START=$(python3 -c "import datetime;print((datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(days=1)).strftime('%Y-%m-%dT%H:%M:%SZ'))")
@@ -177,14 +178,14 @@ MW_END=$(python3 -c "import datetime;print((datetime.datetime.now(datetime.timez
 MW_NAME="${SMOKE_TAG}-mw"
 
 req POST "/api/v1/ops/maintenance-windows" "{\"name\":\"${MW_NAME}\",\"scope_type\":\"device\",\"scope_ids\":[\"SMK-MW-NODEVICE\"],\"start_at\":\"${MW_START}\",\"end_at\":\"${MW_END}\",\"suppress_alarms\":false,\"pause_provision\":false,\"allow_dangerous\":false,\"reason\":\"smoke 冒烟自建未来窗口\"}"
-check_status "创建未来维护窗口（201 裸 JSON）" 201
-check_field "窗口返回 id" "id"
-MW_ID=$(jget id)
+check_ret_ok "创建未来维护窗口（201 + 信封）"
+check_field "窗口返回 data.id" "data.id"
+MW_ID=$(jget data.id)
 
 if [ -n "$MW_ID" ]; then
     req GET "/api/v1/ops/maintenance-windows/$MW_ID"
-    check_status "窗口详情可查" 200
-    MW_GOT_NAME=$(jget name)
+    check_ret_ok "窗口详情可查"
+    MW_GOT_NAME=$(jget data.name)
     if [ "$MW_GOT_NAME" = "$MW_NAME" ]; then
         pass "窗口详情 name 回显一致"
     else
@@ -192,14 +193,14 @@ if [ -n "$MW_ID" ]; then
     fi
 
     req GET "/api/v1/ops/maintenance-windows?page=1&page_size=10"
-    check_count_ge "窗口列表 total ≥ 1（含自建窗口）" "total" 1
+    check_count_ge "窗口列表 total ≥ 1（含自建窗口）" "data.total" 1
 
     # 创建者 == 审批者 → 四眼原则拒绝自审批（这是正确行为的负路径断言）
     req POST "/api/v1/ops/maintenance-windows/$MW_ID/approve"
     check_ret_fail "自审批被四眼原则拒绝"
 
     req GET "/api/v1/ops/maintenance-windows/$MW_ID"
-    MW_STATUS=$(jget status)
+    MW_STATUS=$(jget data.status)
     if [ "$MW_STATUS" = "planned" ]; then
         pass "自审批被拒后窗口仍为 planned"
     else
@@ -222,13 +223,13 @@ check_ret_fail "缺 name/start_at/end_at 被拒"
 section "7. 运维审计 ops/audit-logs — 列表 + 操作留痕"
 # ---------------------------------------------------------------------------
 req GET "/api/v1/ops/audit-logs?page=1&page_size=10"
-check_status "运维审计列表可查（裸 JSON 无信封）" 200
-check_field "审计列表 total 字段" "total"
+check_ret_ok "运维审计列表可查（信封）"
+check_field "审计列表 data.total 字段" "data.total"
 
 # 上方维护窗口创建应同步写一条 op_type=maintenance_window_create 审计
 req GET "/api/v1/ops/audit-logs?op_type=maintenance_window_create&page=1&page_size=10"
-check_status "审计留痕过滤查询可用" 200
-AUDIT_TOTAL=$(jget total)
+check_ret_ok "审计留痕过滤查询可用"
+AUDIT_TOTAL=$(jget data.total)
 if [ -n "$AUDIT_TOTAL" ] && [ "$AUDIT_TOTAL" -ge 1 ] 2>/dev/null; then
     pass "维护窗口创建已留审计痕迹 (total=${AUDIT_TOTAL})"
 else
@@ -240,15 +241,15 @@ fi
 section "8. 知识库 ops/playbooks — 列表 + match + 校验负路径"
 # ---------------------------------------------------------------------------
 req GET "/api/v1/ops/playbooks?page=1&page_size=10"
-check_status "playbook 列表可查（裸 JSON 无信封）" 200
-check_field "playbook 列表 total 字段" "total"
+check_ret_ok "playbook 列表可查（信封）"
+check_field "playbook 列表 data.total 字段" "data.total"
 
 req GET "/api/v1/ops/playbooks?keyword=smoke&page=1&page_size=10"
-check_status "playbook 关键词过滤可查" 200
+check_ret_ok "playbook 关键词过滤可查"
 
 req POST "/api/v1/ops/playbooks/match" '{"alarm_code":"SMK-NO-ALARM"}'
-check_status "playbook 按告警码匹配查询" 200
-check_field "match 返回 total 字段" "total"
+check_ret_ok "playbook 按告警码匹配查询"
+check_field "match 返回 data.total 字段" "data.total"
 
 req POST "/api/v1/ops/playbooks/match" '{}'
 check_ret_fail "match 缺 alarm_code 被拒"
@@ -281,10 +282,10 @@ section "10. 紧急通道 ops/break-glass — status 只读 + activate 校验负
 # deactivate 无 body/无参数校验、恒 200，没有可构造的负路径，且属同一紧急通道，整体不触碰。
 
 req GET "/api/v1/ops/break-glass/status"
-check_status "break-glass 状态可查（裸 JSON 无信封）" 200
-check_field "status 返回 active 字段" "active"
+check_ret_ok "break-glass 状态可查（信封）"
+check_field "status 返回 data.active 字段" "data.active"
 # 基线：冒烟开跑时当前 admin 不应处于 break-glass 激活态（否则脏环境，下方负路径仍安全）
-BG_ACTIVE_BEFORE=$(jget active)
+BG_ACTIVE_BEFORE=$(jget data.active)
 
 req POST "/api/v1/ops/break-glass/activate" '{}'
 check_ret_fail "activate 缺 ticket_id+reason 被拒（绑定失败，未激活）"
@@ -302,7 +303,7 @@ check_ret_fail "activate 畸形 JSON 被拒（未激活）"
 
 # 红线核验：连发四次 activate 负路径后，status 必须仍未激活——证明无任何一次真实授权
 req GET "/api/v1/ops/break-glass/status"
-BG_ACTIVE_AFTER=$(jget active)
+BG_ACTIVE_AFTER=$(jget data.active)
 if [ "$BG_ACTIVE_AFTER" = "$BG_ACTIVE_BEFORE" ] && [ "$BG_ACTIVE_AFTER" != "true" ] && [ "$BG_ACTIVE_AFTER" != "True" ]; then
     pass "activate 负路径全程未触发真实激活（status active 仍为 ${BG_ACTIVE_AFTER}）"
 else

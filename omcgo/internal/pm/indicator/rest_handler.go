@@ -275,7 +275,7 @@ func (h *RESTHandler) CreateGroup(c *gin.Context) {
 	req.DeviceType = string(dt)
 	g, err := h.svc.CreateGroup(c.Request.Context(), &req)
 	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
 	response.OKWithStatus(c, http.StatusCreated, g)

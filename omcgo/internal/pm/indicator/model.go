@@ -180,7 +180,10 @@ type IndicatorGroupTreeRequest struct {
 }
 
 type CreateGroupRequest struct {
-	DeviceType   string `json:"device_type" binding:"required,oneof=ENB GSM GNB"`
+	// DeviceType 在 REST/GNB 入口由 query/路由单一注入，bind 后覆盖；
+	// 故此处不可 binding:required（校验早于覆盖会误拒），改 omitempty 仅做枚举校验。
+	// 真正的空值/非法值由 service.CreateGroup → ParseDeviceType 兜底（映射 400 ErrInvalidInput）。
+	DeviceType   string `json:"device_type" binding:"omitempty,oneof=ENB GSM GNB"`
 	EnName       string `json:"en_name"`
 	CnName       string `json:"cn_name"`
 	ParentID     string `json:"parent_id" binding:"required"`

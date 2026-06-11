@@ -1278,7 +1278,12 @@ func initMiscModules(c *Container) error {
 	if c.SyncSvc != nil {
 		gpvBatcher = c.SyncSvc
 	}
-	c.miscDeps.syncHandler = config.NewSyncHandler(c.TaskSvc, gpvBatcher, logger)
+	// 设备存在性预检：push/pull 入队前按 SN 查 device 表，不存在返回 404，避免孤儿任务（issue #126 第3项）。
+	var syncDeviceChk config.DeviceExistenceChecker
+	if c.DeviceRepo != nil {
+		syncDeviceChk = &syncDeviceChecker{repo: c.DeviceRepo}
+	}
+	c.miscDeps.syncHandler = config.NewSyncHandler(c.TaskSvc, gpvBatcher, syncDeviceChk, logger)
 
 	// File Manager module
 	fileRepo := filemanager.NewPgFileRepository(c.PgPool)
@@ -2079,6 +2084,20 @@ type miscDeps struct {
 	// T-0137 / M1: TR069 报文跟踪 handler（app 侧仅管 CRUD，capture flusher 在 ACS 侧）
 	traceHandler *trace.Handler
 	traceService *trace.Service
+}
+
+// syncDeviceChecker adapts device.DeviceReader to config.DeviceExistenceChecker.
+// GetBySerialNumber 返回 (nil,nil) 表示设备不存在；据此映射 push/pull 入队前的 404 预检。
+type syncDeviceChecker struct {
+	repo device.DeviceReader
+}
+
+func (a *syncDeviceChecker) ExistsBySerialNumber(ctx context.Context, sn string) (bool, error) {
+	dev, err := a.repo.GetBySerialNumber(ctx, sn)
+	if err != nil {
+		return false, fmt.Errorf("lookup device %s: %w", sn, err)
+	}
+	return dev != nil, nil
 }
 
 // taskDeviceLookup adapts device.DeviceReader to task.DeviceLookup.

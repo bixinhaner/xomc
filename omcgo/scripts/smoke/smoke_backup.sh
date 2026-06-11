@@ -251,15 +251,12 @@ req POST "/api/v1/backup/restore" "{\"bucket\":\"firmware\",\"object_path\":\"x.
 check_ret_fail "restore 非法 bucket（只允许 config_backup）被拒"
 
 req POST "/api/v1/backup/restore" "{\"bucket\":\"config_backup\",\"object_path\":\"smoke/${SMOKE_TAG}-none.xml\",\"target_device_sns\":[\"${NOPE_SN}\"]}"
-# 期望：源对象不存在 → 404。活栈实际返回 500「The specified bucket is not valid.」
-# 根因：CanonicalRestoreBucket="config_backup" 含下划线，违反 S3/MinIO 桶命名规则，
-# StatObject 返回 InvalidBucketName；translateMinIONotFound 只翻 NoSuchKey/NoSuchBucket，
-# 漏了 InvalidBucketName → 落 default 500。详见 suspectedBugs。修复后改回 check_status 404。
-if [ "$HTTP_CODE" = "404" ]; then
-    check_status "restore 源对象不存在 → 精确 404（#125-backup 修复后硬断言）" 404
-else
-    known_bug "restore 源对象不存在应 404" "实际 HTTP ${HTTP_CODE}：config_backup 桶名含下划线→MinIO InvalidBucketName→translateMinIONotFound 漏翻→500，未映射 404"
-fi
+# 期望：源对象不存在 → 精确 404。#145-B 修复后硬断言。
+# 历史根因：CanonicalRestoreBucket="config_backup" 含下划线违反 S3/MinIO 桶命名，
+# StatObject 返回 InvalidBucketName；translateMinIONotFound 原只翻 NoSuchKey/NoSuchBucket，
+# 漏了 InvalidBucketName → 落 default 500。修复已把 InvalidBucketName/XMinioInvalidObjectName
+# 纳入 minioNotFoundCodes → 翻译为 ErrNotFound → handler 映射 404。
+check_status "restore 源对象不存在 → 精确 404（#145-B 修复后硬断言）" 404
 
 req POST "/api/v1/backup/restore/by-task-id" '{}'
 check_ret_fail "restore/by-task-id 缺必填字段被拒"

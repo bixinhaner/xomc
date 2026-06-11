@@ -40,9 +40,11 @@ func (h *SSEHandler) RegisterRoutes(rg *gin.RouterGroup) {
 // Stream handles the SSE connection lifecycle:
 //  1. Authenticate via JWT token (query param or Authorization header)
 //  2. Subscribe to the user's message channel
-//  3. Replay missed messages if Last-Event-ID is present
-//  4. Stream events with 30s keepalive
-//  5. Unsubscribe on disconnect
+//  3. Set SSE headers
+//  4. Immediately commit the 200 header + flush a `:connected` comment frame
+//     so EventSource onopen fires without waiting for the first event/keepalive
+//  5. Replay missed messages if Last-Event-ID is present
+//  6. Stream events with 30s keepalive (unsubscribe on disconnect)
 func (h *SSEHandler) Stream(c *gin.Context) {
 	// Step 1: Authenticate
 	username, err := h.authenticate(c)
@@ -92,12 +94,22 @@ func (h *SSEHandler) Stream(c *gin.Context) {
 		}
 	}
 
-	// Step 4: Replay missed messages if Last-Event-ID present
+	// Step 4: 立即提交 200 响应头并发出 `:connected` 注释帧后 flush。
+	// 否则在首个业务事件 / 30s keepalive 到达前，客户端收不到任何字节：
+	//   - 浏览器 EventSource 的 onopen 最长延迟 30s；
+	//   - 中间代理 / LB 可能按首字节超时切断这条 SSE 长连接。
+	// SSE 注释帧（以 ':' 开头）会被规范的 EventSource 实现忽略，仅用于探活/保活，
+	// 既能立刻冲刷响应头，又不会被当作一条事件投递给业务回调。
+	c.Status(http.StatusOK)
+	fmt.Fprint(c.Writer, ":connected\n\n")
+	flusher.Flush()
+
+	// Step 5: Replay missed messages if Last-Event-ID present
 	if lastEventID := c.GetHeader("Last-Event-ID"); lastEventID != "" {
 		h.replayMessages(c, username, lastEventID, flusher)
 	}
 
-	// Step 5: Stream loop with keepalive
+	// Step 6: Stream loop with keepalive
 	keepalive := time.NewTicker(30 * time.Second)
 	defer keepalive.Stop()
 

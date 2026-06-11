@@ -231,7 +231,8 @@ func (h *Handler) ListProgress(c *gin.Context) {
 	}
 	resp, err := h.svc.ListProgress(c.Request.Context(), filter)
 	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		// 不存在的 task_id → 404（与 Get/Stop/Delete 一致，issue #126 第 5 项）。
+		h.writeServiceError(c, err)
 		return
 	}
 	response.OK(c, resp)

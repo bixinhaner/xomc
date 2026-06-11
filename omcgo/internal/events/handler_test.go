@@ -117,6 +117,29 @@ func TestSSEHandler_Stream_AuthorizationHeader_Path(t *testing.T) {
 	assert.Equal(t, "no-cache", w.Header().Get("Cache-Control"))
 }
 
+func TestSSEHandler_Stream_FlushesConnectedFrameImmediately(t *testing.T) {
+	h, _, _, jwt := newHandlerForTest(t)
+	r := gin.New()
+	h.RegisterRoutes(r.Group("/"))
+
+	token := mintAccessToken(t, jwt, "frank")
+
+	// Cancel well before the 30s keepalive and without publishing any message:
+	// the `:connected` comment frame must already be in the body, proving the
+	// header + first byte are flushed immediately on subscribe (issue #126.9).
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	req := httptest.NewRequest(http.MethodGet, "/events/stream?token="+token, nil).WithContext(ctx)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Header().Get("Content-Type"), "text/event-stream")
+	assert.Contains(t, w.Body.String(), ":connected\n\n", "expected immediate :connected SSE comment frame")
+	assert.True(t, w.Flushed, "expected response writer to be flushed before first event")
+}
+
 func TestSSEHandler_Stream_DeliversPublishedMessage(t *testing.T) {
 	h, hub, _, jwt := newHandlerForTest(t)
 	r := gin.New()

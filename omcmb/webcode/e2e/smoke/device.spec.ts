@@ -30,6 +30,14 @@ import { waitForPageLoad } from '../helpers/navigation';
  *                       log.exception.devCodeNameIp=请输入设备编码\/名称\/IP / Enter device code\/name\/IP，
  *                       工具栏 log.event.statistics=统计/Statistics + log.export=导出/Export；
  *                       旧路径 /log/exception 由路由 Navigate 跳转到此）
+ *   - /device/monitor → src/pages/device/OnlineMonitoring/index.tsx（卡片网格，非表格！
+ *                       页头 Title nav.device.monitor=在线监控/Online Monitor + WifiOutlined；
+ *                       筛选区：search Input 占位 common.placeholder=请输入/Please enter、
+ *                       刷新按钮 common.refresh=刷新/Refresh、合计 table.total=合计/Total；
+ *                       设备以 Card 网格渲染，空数据落 common.noData=暂无数据/No Data，不断言 .ant-table）
+ *   - /device/ne → src/pages/device/NEManagement/index.tsx（ListPageLayout 网元列表，
+ *                       标题 nav.device.ne=网元管理/NE Management，extra 刷新 common.refresh +
+ *                       新增 common.add=新增/Add；FilterBar=.ant-form + DataTable=.ant-table）
  *
  * 真实栈数据稀疏：不断言任何具体业务数据，列表空表也有表头（.ant-table 可见即可）。
  */
@@ -152,5 +160,43 @@ test.describe('设备管理冒烟（真实后端）', { tag: '@smoke' }, () => {
     await expect(
       page.locator('.ant-tabs-tab').filter({ hasText: /参数树|Parameter Tree/ }).first(),
     ).toBeVisible();
+  });
+
+  test('/device/monitor 在线监控：页头标题 + 筛选搜索框 + 刷新按钮（卡片网格非表格）', async ({ page }) => {
+    await expectPageRenders(page, '/device/monitor');
+
+    const main = page.locator('main');
+
+    // 页头 Title「在线监控」（侧边栏菜单同名，收窄到 main 取首个）
+    await expect(main.getByText(/在线监控|Online Monitor/).first()).toBeVisible();
+
+    // 筛选区搜索框（占位「请输入」）
+    await expect(
+      main.getByPlaceholder(/请输入|Please enter/).first(),
+    ).toBeVisible();
+
+    // 刷新按钮（图标 + 文案）
+    await expect(
+      main.getByRole('button', { name: /刷新|Refresh/ }).first(),
+    ).toBeVisible();
+
+    // 合计标签（设备网格头部统计；本页是 Card 网格，不断言 .ant-table）
+    await expect(main.getByText(/合计|Total/).first()).toBeVisible();
+  });
+
+  test('/device/ne 网元管理：页头标题 + 新增按钮 + 筛选栏 + 表格骨架', async ({ page }) => {
+    await expectPageRenders(page, '/device/ne');
+
+    const main = page.locator('main');
+
+    // ListPageLayout 标题「网元管理」（侧边栏菜单同名，收窄到 main 取首个）
+    await expect(main.getByText(/网元管理|NE Management/).first()).toBeVisible();
+
+    // extra 工具栏：新增按钮
+    await expect(main.getByRole('button', { name: /新增|Add/ }).first()).toBeVisible();
+
+    // FilterBar 筛选表单 + DataTable 表格骨架（真实后端数据可空，空表也有表头）
+    await expect(page.locator('.ant-form').first()).toBeVisible();
+    await expect(page.locator('.ant-table').first()).toBeVisible();
   });
 });

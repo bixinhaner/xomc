@@ -29,6 +29,22 @@ import { expectPageRenders, smokeLogin } from './helpers';
  *       条件区 Form：制式 Segmented（LTE/NR/GSM）+「出图 / Plot」按钮
  *       （perf.dashboard.btnPlot）；未出图时空态文案 perf.dashboard.emptyPickConditions
  *       （选择制式…/ Select technology…）——初始 UI 状态，非业务数据。
+ *   - /performance/threshold → pages/performance/ThresholdConfig/index.tsx
+ *       ListPageLayout 标题 nav.performance.threshold（门限配置 / Threshold Config，<h4>）、
+ *       右上「新增 / Add」按钮（common.add）、门限 DataTable（.ant-table）骨架。
+ *   - /performance/kpi-station → pages/performance/KPIStationReport/index.tsx
+ *       ListPageLayout 标题 nav.performance.kpiStation（测量任务管理 / Measurement Task
+ *       Management，<h4>）、FilterBar（.ant-form）+ 测量维护 DataTable（.ant-table）骨架。
+ *   - /performance/charts → pages/performance/PerformanceCharts/index.tsx
+ *       ListPageLayout 标题 nav.performance.charts（性能图表 / Performance Charts，<h4>）、
+ *       FilterBar（.ant-form）+ KPI 快选按钮 kpi.rrcSetupSuccessRate（RRC建立成功率 /
+ *       RRC Setup Success Rate）。
+ *   - /performance/task-config → pages/performance/PerformanceTaskConfig/index.tsx
+ *       ListPageLayout 标题 nav.performance.taskConfig（任务配置 / Task Config，<h4>）、
+ *       右上「新增 / Add」按钮（common.add）、采集任务 DataTable（.ant-table）骨架。
+ *
+ * 注：threshold/charts/kpi-station/task-config 四项菜单在 navConfig.ts 已注释隐藏，
+ * 仅保留直链路由；页面标题 <h4> 不与侧边栏菜单项撞文案，但仍统一收窄到 main 取 .first()。
  */
 test.describe('性能管理冒烟（真实后端）', { tag: '@smoke' }, () => {
   test.beforeEach(async ({ page }) => {
@@ -145,5 +161,75 @@ test.describe('性能管理冒烟（真实后端）', { tag: '@smoke' }, () => {
     await expect(
       page.locator('main').getByText(/选择制式|Select technology/).first(),
     ).toBeVisible();
+  });
+
+  test('/performance/threshold 门限配置渲染，标题/新增按钮/门限表格可见', async ({ page }) => {
+    await expectPageRenders(page, '/performance/threshold');
+
+    // ListPageLayout 页面标题 <h4>（nav.performance.threshold）
+    await expect(
+      page.locator('main').getByRole('heading', { name: /门限配置|Threshold Config/ }).first(),
+    ).toBeVisible();
+
+    // 右上「新增」按钮（common.add；PlusOutlined 图标使无障碍名为「plus 新增」，故不锚定）
+    await expect(
+      page.locator('main').getByRole('button', { name: /新增|Add/ }).first(),
+    ).toBeVisible();
+
+    // 门限 DataTable 骨架（空表也有表头）
+    await expect(page.locator('main .ant-table').first()).toBeVisible();
+  });
+
+  test('/performance/kpi-station 测量任务管理渲染，标题/过滤栏/测量表格可见', async ({ page }) => {
+    await expectPageRenders(page, '/performance/kpi-station');
+
+    // ListPageLayout 页面标题 <h4>（nav.performance.kpiStation）
+    await expect(
+      page
+        .locator('main')
+        .getByRole('heading', { name: /测量任务管理|Measurement Task Management/ })
+        .first(),
+    ).toBeVisible();
+
+    // FilterBar（Form）+ 测量维护 DataTable 骨架
+    await expect(page.locator('main .ant-form').first()).toBeVisible();
+    await expect(page.locator('main .ant-table').first()).toBeVisible();
+  });
+
+  test('/performance/charts 性能图表渲染，标题/过滤栏/KPI 快选按钮可见', async ({ page }) => {
+    await expectPageRenders(page, '/performance/charts');
+
+    // ListPageLayout 页面标题 <h4>（nav.performance.charts）
+    await expect(
+      page.locator('main').getByRole('heading', { name: /性能图表|Performance Charts/ }).first(),
+    ).toBeVisible();
+
+    // FilterBar（Form）骨架
+    await expect(page.locator('main .ant-form').first()).toBeVisible();
+
+    // KPI 快选按钮区：RRC建立成功率（kpi.rrcSetupSuccessRate）按钮
+    await expect(
+      page
+        .locator('main')
+        .getByRole('button', { name: /RRC建立成功率|RRC Setup Success Rate/ })
+        .first(),
+    ).toBeVisible();
+  });
+
+  test('/performance/task-config 采集任务配置渲染，标题/新增按钮/任务表格可见', async ({ page }) => {
+    await expectPageRenders(page, '/performance/task-config');
+
+    // ListPageLayout 页面标题 <h4>（nav.performance.taskConfig）
+    await expect(
+      page.locator('main').getByRole('heading', { name: /任务配置|Task Config/ }).first(),
+    ).toBeVisible();
+
+    // 右上「新增」按钮（common.add；PlusOutlined 图标使无障碍名为「plus 新增」，故不锚定）
+    await expect(
+      page.locator('main').getByRole('button', { name: /新增|Add/ }).first(),
+    ).toBeVisible();
+
+    // 采集任务 DataTable 骨架（空表也有表头）
+    await expect(page.locator('main .ant-table').first()).toBeVisible();
   });
 });
