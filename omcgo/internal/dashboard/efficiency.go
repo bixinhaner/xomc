@@ -118,7 +118,7 @@ func (s *Service) getEfficiencyTrend(ctx context.Context, severity string) ([]Da
 			COALESCE(AVG(EXTRACT(EPOCH FROM (acknowledged_at - raised_at)) / 60)
 				FILTER (WHERE acknowledged_at IS NOT NULL), 0) as avg_ack_minutes,
 			COALESCE(AVG(EXTRACT(EPOCH FROM (cleared_at - raised_at)) / 60)
-				FILTER (WHERE cleared_at IS NOT NULL), 0) as avg_resolve_minutes
+				FILTER (WHERE cleared_at IS NOT NULL AND cleared_at >= raised_at), 0) as avg_resolve_minutes
 		FROM alarms_history
 		WHERE raised_at > NOW() - INTERVAL '7 days'
 			AND severity = $1
@@ -172,8 +172,9 @@ func (s *Service) GetOverallEfficiencyMetrics(ctx context.Context) (*EfficiencyM
 			COALESCE(AVG(EXTRACT(EPOCH FROM (acknowledged_at - raised_at)) / 60)
 				FILTER (WHERE acknowledged_at IS NOT NULL), 0) as avg_acknowledge_minutes,
 			-- MTTR: 平均解决时间（分钟），使用原始时间差计算
+			-- 排除时间倒挂的脏数据（cleared_at < raised_at），避免负值拉低平均
 			COALESCE(AVG(EXTRACT(EPOCH FROM (cleared_at - raised_at)) / 60)
-				FILTER (WHERE cleared_at IS NOT NULL), 0) as avg_resolve_minutes,
+				FILTER (WHERE cleared_at IS NOT NULL AND cleared_at >= raised_at), 0) as avg_resolve_minutes,
 			-- 确认率（百分比）
 			ROUND(100.0 * COUNT(*) FILTER (WHERE acknowledged_at IS NOT NULL) /
 				NULLIF(COUNT(*), 0), 2) as acknowledge_rate,
@@ -218,7 +219,7 @@ func (s *Service) getOverallEfficiencyTrend(ctx context.Context) ([]DailyEfficie
 			COALESCE(AVG(EXTRACT(EPOCH FROM (acknowledged_at - raised_at)) / 60)
 				FILTER (WHERE acknowledged_at IS NOT NULL), 0) as avg_ack_minutes,
 			COALESCE(AVG(EXTRACT(EPOCH FROM (cleared_at - raised_at)) / 60)
-				FILTER (WHERE cleared_at IS NOT NULL), 0) as avg_resolve_minutes
+				FILTER (WHERE cleared_at IS NOT NULL AND cleared_at >= raised_at), 0) as avg_resolve_minutes
 		FROM alarms_history
 		WHERE raised_at > NOW() - INTERVAL '7 days'
 		GROUP BY DATE(raised_at)
