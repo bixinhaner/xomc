@@ -180,14 +180,16 @@ func TestInvalidatePermCacheByRole(t *testing.T) {
 		"InvalidatePermCacheByRole 应对每个用户调 1 次（共 %d 次）", len(userIDs))
 }
 
-// TestInvalidatePermCache_DeleteRole 断言：DeleteRole 成功后该角色下用户全部失效。
+// TestInvalidatePermCache_DeleteRole 断言：无用户引用的角色删除成功后，删除前查得的用户列表
+// （此处为空）逐一失效。issue #191 后，仍有用户引用的角色已被 in-use 拦截删除，故"删除成功"
+// 仅发生在无用户引用时，此时失效循环 0 次。仍有用户引用→被拦截的路径由
+// TestDeleteRole_InUseBlocked 覆盖。
 func TestInvalidatePermCache_DeleteRole(t *testing.T) {
 	roleID := uuid.New()
-	userIDs := []uuid.UUID{uuid.New(), uuid.New(), uuid.New()}
 
 	roleRepo := &mockRoleRepo{
 		listUserIDsByRoleFn: func(_ context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
-			return userIDs, nil
+			return nil, nil // 无用户引用 → 允许删除
 		},
 		deleteFn: func(_ context.Context, _ uuid.UUID) error { return nil },
 	}
@@ -196,8 +198,8 @@ func TestInvalidatePermCache_DeleteRole(t *testing.T) {
 	svc.SetPermissionInvalidator(inv)
 
 	require.NoError(t, svc.DeleteRole(context.Background(), roleID))
-	assert.Equal(t, len(userIDs), inv.callCount(),
-		"DeleteRole 应对每个用户调 InvalidateUserCache 1 次（共 %d 次）", len(userIDs))
+	assert.Equal(t, 0, inv.callCount(),
+		"无用户引用时删除成功，失效循环 0 次")
 }
 
 // TestInvalidatePermCache_SetRoleMenus 断言：SetRoleMenus 成功后该角色下用户全部失效。

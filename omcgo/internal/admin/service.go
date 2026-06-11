@@ -956,6 +956,12 @@ func (s *AdminService) DeleteRole(ctx context.Context, id uuid.UUID) error {
 		s.logger.Warn("list users by role before delete failed",
 			zap.String("role_id", id.String()), zap.Error(err))
 	}
+	// 引用检查：仍有用户引用该角色时拦截删除，返回 in-use(7008) 业务错误
+	// （经 HTTPStatusFromError → 409 Conflict）。放在内置角色保护之后、repo.Delete 之前。
+	if len(userIDs) > 0 {
+		return commonerrors.NewBusinessError(
+			commonerrors.ErrCodeRoleInUse, "role still in use", commonerrors.ErrAlreadyExists)
+	}
 	if err := s.roleRepo.Delete(ctx, id); err != nil {
 		return err
 	}
