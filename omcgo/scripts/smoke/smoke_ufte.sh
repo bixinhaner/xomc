@@ -216,12 +216,11 @@ if [ -n "$UF_TASK_ID" ]; then
         *) fail "挂起建任务后状态未进入执行" "实际 status=${TASK_STATUS}（疑似被派发）" ;;
     esac
     CREATED_MODE=$(jget data.executionMode)
+    # #138 已修复：applyScheduleMode 挂起分支统一落 TaskSuspended，回显必为 suspended。
     if [ "$CREATED_MODE" = "suspended" ]; then
         pass "创建回显 executionMode=suspended"
-    elif [ "$CREATED_MODE" = "immediate" ]; then
-        known_bug "创建回显 executionMode=suspended" "请求 executionMode=suspended 回显 immediate —— software.applyScheduleMode 挂起分支落 status=pending+create_status=active，ufte.executionModeForTask 只认 TaskSuspended，挂起语义在列表不可见（CONFIG_RESTORE placeholder 同模式落 TaskSuspended，两链路表示不一致）"
     else
-        fail "创建回显 executionMode=suspended" "实际 executionMode=${CREATED_MODE}"
+        fail "创建回显 executionMode=suspended" "实际 executionMode=${CREATED_MODE}（#138 回归：挂起回显应为 suspended）"
     fi
 
     # 列表可见（keyword 过滤命中自建任务）
@@ -285,11 +284,15 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-section "危险端点负路径【红线：start 绝不调用，连负路径都不打】"
+section "危险端点负路径【红线：start 只测参数校验，绝不发合法调用】"
 # ---------------------------------------------------------------------------
-# PUT /ufte/tasks/:id/start 会向设备真实下发文件任务（备份/日志采集/恢复），
-# 按路由清单 destructive 注记整端点跳过；以下只打 suspend/terminate/retry/delete
-# 的不存在 ID 与非法 UUID。
+# PUT /ufte/tasks/:id/start 会向设备真实下发文件任务（备份/日志采集/恢复）。
+# 红线：绝不对任何真实任务 ID 调用 start。但以下两种输入在 handler/service 早段
+# 即被拒绝，对设备零触达，可安全验证参数校验：
+#   · 非法 UUID → handler.parseTaskID 在调 service 前 return 400（未进 service）
+#   · 不存在 ID → service.StartTask 第一步 taskRepo.GetByID 命中 ErrNotFound 即
+#     return（service.go:310 早 return，从不进入任何 Resume*/dispatch 派发分支）
+# suspend/terminate/retry/delete 同理：service 首行 GetByID 失败即返回，零派发。
 
 # 任务创建参数校验（在建任何任务之前即被拒绝，不落库不触设备）
 req POST "/api/v1/ufte/tasks" "{}"
@@ -318,22 +321,65 @@ check_status "任务列表不存在 typeCode → 400" "400"
 req GET "/api/v1/ufte/device-candidates?page=1&page_size=10&typeCode=NOT_EXIST_${SMOKE_TAG}"
 check_status "候选设备不存在 typeCode → 400" "400"
 
-# 生命周期端点：非法 UUID / 不存在 ID
+# 生命周期端点全覆盖：非法 UUID（handler 层 400）/ 不存在 ID（service GetByID 404）。
+# 每个 destructive 端点都先打非法 UUID 再打不存在 ID，确认两层校验都在派发前生效。
+
+# start【destructive 红线】：只测参数校验，两路输入都在任何派发之前被拦——非法
+# UUID 在 handler.parseTaskID return 400（未进 service）；不存在 ID 在 service
+# StartTask 首行 GetByID 命中 ErrNotFound return 404（service.go:310，从不触达设备）。
+req PUT "/api/v1/ufte/tasks/not-a-uuid/start"
+check_status "启动任务非法 UUID → 400（handler 拦截，未进 service）" "400"
+req PUT "/api/v1/ufte/tasks/$NOID/start"
+check_status "启动不存在任务 → 404（GetByID 早返，零派发）" "404"
+
+# suspend
 req PUT "/api/v1/ufte/tasks/not-a-uuid/suspend"
-check_status "挂起任务非法 UUID 拒绝" "400"
+check_status "挂起任务非法 UUID → 400" "400"
 req PUT "/api/v1/ufte/tasks/$NOID/suspend"
 check_status "挂起不存在任务 → 404" "404"
 
+# terminate
+req PUT "/api/v1/ufte/tasks/not-a-uuid/terminate"
+check_status "终止任务非法 UUID → 400" "400"
 req PUT "/api/v1/ufte/tasks/$NOID/terminate"
 check_status "终止不存在任务 → 404" "404"
 
+# retry（POST 入口）
+req POST "/api/v1/ufte/tasks/not-a-uuid/retry"
+check_status "重试任务非法 UUID → 400" "400"
 req POST "/api/v1/ufte/tasks/$NOID/retry"
 check_status "重试不存在任务 → 404" "404"
 
+# delete（单条，DELETE 入口）
+req DELETE "/api/v1/ufte/tasks/not-a-uuid"
+check_status "删除任务非法 UUID → 400" "400"
 req DELETE "/api/v1/ufte/tasks/$NOID"
 check_status "删除不存在任务 → 404" "404"
 
+# batch-delete 非法 body 三连：空数组 / 缺字段 / 类型不符——均 handler ShouldBindJSON
+# 或 binding:"required,min=1" 拦截，整批被 400 拒绝，不进任何删除循环。
 req POST "/api/v1/ufte/tasks/batch-delete" "{\"task_ids\":[]}"
-check_ret_fail "批量删除空数组被拒绝"
+check_ret_fail "批量删除空数组被拒绝（min=1）"
+req POST "/api/v1/ufte/tasks/batch-delete" "{}"
+check_ret_fail "批量删除缺 task_ids 字段被拒绝（required）"
+req POST "/api/v1/ufte/tasks/batch-delete" "{\"task_ids\":\"not-an-array\"}"
+check_ret_fail "批量删除 task_ids 非数组被拒绝（类型不符）"
+
+# batch-delete 全为不存在 ID：body 合法 → 受理 200 ret=1，但每条进 failed[] 明细
+# （单条 GetByID 失败不影响信封；succeeded 为空）。验证部分失败形状，不删任何真实任务。
+req POST "/api/v1/ufte/tasks/batch-delete" "{\"task_ids\":[\"$NOID\"]}"
+check_ret_ok "批量删除全不存在 ID：信封受理（200 ret=1）"
+BD_NF_FAIL=$(jget data.failed.0.task_id)
+if [ "$BD_NF_FAIL" = "$NOID" ]; then
+    pass "不存在 ID 进入 failed 明细（succeeded 为空，单条失败不破坏信封）"
+else
+    fail "不存在 ID 进入 failed 明细" "failed.0.task_id=${BD_NF_FAIL}"
+fi
+BD_NF_OK=$(jlen data.succeeded)
+if [ "$BD_NF_OK" = "0" ]; then
+    pass "全不存在 ID 时 succeeded 为空（未误删任何记录）"
+else
+    fail "全不存在 ID 时 succeeded 为空" "succeeded 共 ${BD_NF_OK} 条（疑似误删）"
+fi
 
 smoke_summary

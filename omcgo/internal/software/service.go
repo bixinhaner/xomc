@@ -821,7 +821,12 @@ func applyScheduleMode(task *UpgradeTask, mode scheduleMode, scheduledAt *time.T
 			task.ScheduledAt = &t
 		}
 	case scheduleModeSuspended:
-		task.Status = TaskPending
+		// 挂起统一用 TaskSuspended（与 CreatePlaceholderTrackingTask 的挂起分支一致）。
+		// 历史上这里落 TaskPending+active，导致 ufte/executionModeForTask（只认
+		// TaskSuspended）把挂起任务回显成 "immediate"。Resume{Upgrade,Collect} 均同时
+		// 接受 TaskSuspended 与 TaskPending，调度器只命中 create_status=timing，故改用
+		// TaskSuspended 不影响 start/resume/scheduler 链路。
+		task.Status = TaskSuspended
 		task.CreateStatus = CreateStatusActive
 		task.ScheduledAt = nil
 	default: // immediate — Create 之后由调用方推到 in_progress

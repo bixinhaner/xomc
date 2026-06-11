@@ -338,6 +338,9 @@ req GET "/api/v1/mml/admin/commands?page=1&page_size=10"
 check_ret_ok "admin 命令列表可查"
 check_list_nonempty "admin 命令非空（builtin catalog）" "data.items"
 ADMIN_CMD_ID=$(jget "data.items.0.id")
+# 既有命令的 group_id 是合法 FK（已挂在真实 param_version 下的分组）；自建命令复用它，
+# 避开第 2 轮刚修的 param_version FK 422 路径（命令本身无 param_version 字段，FK 仅 group_id）。
+ADMIN_CMD_GROUP_ID=$(jget "data.items.0.group_id")
 if [ -n "$ADMIN_CMD_ID" ]; then
     req GET "/api/v1/mml/admin/commands/$ADMIN_CMD_ID"
     check_ret_ok "admin 命令详情可查"
@@ -372,9 +375,122 @@ else
     skip "admin 分组闭环" "既有分组未带 param_version，无合法 FK 值可用"
 fi
 
-# 创建分组负路径：不存在的 param_version → 应被拒绝（当前后端 FK violation 翻 500）
+# 创建分组负路径：不存在的 param_version → FK violation(23503) 翻业务级 422，
+# 不外泄裸 SQL 约束名（issue #125-mml 问题 1 已修复，精确断言 422）
 req POST "/api/v1/mml/admin/groups" "{\"group_code\":\"${SMOKE_TAG}_badgrp\",\"param_version\":\"smoke-no-such-version\"}"
-check_ret_fail "创建分组不存在 param_version 被拒绝"
+check_status "创建分组不存在 param_version 被拒绝（422）" 422
+case "$BODY" in
+    *"foreign key constraint"*|*"23503"*|*"_fkey"*)
+        fail "param_version 错误不外泄裸 SQL" "body 含 SQL 约束细节: $(printf '%s' "$BODY" | head -c 160)" ;;
+    *) pass "param_version 错误不外泄裸 SQL（无约束名/SQLSTATE）" ;;
+esac
+
+# ---------------------------------------------------------------------------
+section "admin/commands CRUD 闭环（建→改→sub-field→删，admin 来源可删）"
+# ---------------------------------------------------------------------------
+# 自建 admin 来源命令（source=admin, catalog_protected=false → 可删）。command_code
+# 全局唯一带 $SMOKE_TAG 自隔离；group_id 复用既有合法 FK（见上方 ADMIN_CMD_GROUP_ID 注释）。
+A_CMD_NAME="${SMOKE_TAG} admcmd"
+A_CMD_CODE="LST SMK_${SMOKE_TAG}"
+A_LOGICAL="SMK_${SMOKE_TAG}"
+if [ -n "$ADMIN_CMD_GROUP_ID" ]; then
+    A_CMD_BODY="{\"command_name\":\"$A_CMD_NAME\",\"command_code\":\"$A_CMD_CODE\",\"operation_type\":\"LST\",\"group_id\":\"$ADMIN_CMD_GROUP_ID\",\"logical_code\":\"$A_LOGICAL\",\"category\":\"query\",\"description\":\"smoke 自建命令\"}"
+else
+    # 既有命令无 group_id 时退化为不挂分组（group_id 可空）
+    A_CMD_BODY="{\"command_name\":\"$A_CMD_NAME\",\"command_code\":\"$A_CMD_CODE\",\"operation_type\":\"LST\",\"logical_code\":\"$A_LOGICAL\",\"category\":\"query\",\"description\":\"smoke 自建命令\"}"
+fi
+req POST "/api/v1/mml/admin/commands" "$A_CMD_BODY"
+check_ret_ok "创建 admin 命令（${A_CMD_CODE}）"
+A_CMD_ID=$(jget "data.id")
+check_field "新命令返回 id" "data.id"
+A_CMD_SOURCE=$(jget "data.source")
+if [ "$A_CMD_SOURCE" = "admin" ]; then
+    pass "新命令 source=admin（可删，不动 builtin catalog）"
+else
+    fail "新命令 source=admin" "实际 source='$A_CMD_SOURCE'"
+fi
+
+if [ -n "$A_CMD_ID" ]; then
+    req GET "/api/v1/mml/admin/commands/$A_CMD_ID"
+    check_ret_ok "新命令详情可查"
+    check_field "命令 command_code 回显" "data.command_code"
+
+    # PATCH 改 description（command_code/operation_type 为锁定字段，不改）
+    req PATCH "/api/v1/mml/admin/commands/$A_CMD_ID" "{\"description\":\"smoke 更新描述\"}"
+    check_ret_ok "更新 admin 命令（description）"
+    A_DESC=$(jget "data.description")
+    if [ "$A_DESC" = "smoke 更新描述" ]; then
+        pass "命令更新生效（description 回读一致）"
+    else
+        fail "命令更新生效" "期望 'smoke 更新描述'，实际 '$A_DESC'"
+    fi
+
+    # sub-field 闭环：取一个真实 standard_param 的 id 作为 param_id，挂一条 sub-field 再删
+    req GET "/api/v1/mml/admin/standard-params?page=1&page_size=1"
+    SP_PARAM_ID=$(jget "data.items.0.id")
+    if [ -n "$SP_PARAM_ID" ]; then
+        req POST "/api/v1/mml/admin/commands/$A_CMD_ID/sub-fields" "{\"param_id\":\"$SP_PARAM_ID\",\"mml_code\":\"SMK_FIELD\",\"sort_order\":1}"
+        check_ret_ok "命令挂载 sub-field"
+        A_SF_ID=$(jget "data.id")
+        check_field "新 sub-field 返回 id" "data.id"
+        if [ -n "$A_SF_ID" ]; then
+            req PATCH "/api/v1/mml/admin/commands/$A_CMD_ID/sub-fields/$A_SF_ID" "{\"mml_code\":\"SMK_FIELD2\"}"
+            check_ret_ok "更新 sub-field（mml_code）"
+            req DELETE "/api/v1/mml/admin/commands/$A_CMD_ID/sub-fields/$A_SF_ID"
+            check_ret_ok "删除 sub-field（闭环清理）"
+        else
+            skip "sub-field 改/删" "sub-field 创建未返回 id"
+        fi
+    else
+        skip "命令 sub-field 闭环" "standard-params 未返回 id"
+    fi
+
+    # DELETE 自建命令（闭环清理）
+    req DELETE "/api/v1/mml/admin/commands/$A_CMD_ID"
+    check_ret_ok "删除自建 admin 命令（闭环清理）"
+
+    # 删除后 GET：后端实际返 ret=0（被拒绝）；HTTP 应为 404，当前命中 commonerrors.ErrNotFound
+    # 不被 IsErrNotFound 识别（admin sentinel 与 commonerrors.ErrNotFound 不互通），翻成 500。
+    # check_ret_fail 容忍 4xx/5xx+ret=0 → 不破套件；HTTP 码偏差用 known_bug 记录。
+    req GET "/api/v1/mml/admin/commands/$A_CMD_ID"
+    check_ret_fail "删除后命令详情应被拒绝（not-found）"
+    if [ "$HTTP_CODE" = "404" ]; then
+        pass "删除后命令详情 → 404（正确语义）"
+    else
+        known_bug "删除后命令详情 HTTP 码" "期望 404，实际 ${HTTP_CODE}（admin GetByID 返 commonerrors.ErrNotFound，未被 IsErrNotFound 识别 → 默认 500，但 ret=0）"
+    fi
+else
+    skip "admin 命令 CRUD 后续步骤" "命令创建未返回 id"
+fi
+
+# 创建命令负路径：缺必填 command_code/operation_type → 400（binding required）
+req POST "/api/v1/mml/admin/commands" "{\"command_name\":\"${SMOKE_TAG}-badcmd\"}"
+check_ret_fail "创建命令缺必填字段被拒绝"
+
+# 创建命令负路径：非法 operation_type → 400（binding oneof=LST MOD ADD RMV）
+req POST "/api/v1/mml/admin/commands" "{\"command_name\":\"${SMOKE_TAG}-badop\",\"command_code\":\"DROP X\",\"operation_type\":\"DROP\"}"
+check_ret_fail "创建命令非法 operation_type 被拒绝"
+
+# PATCH/DELETE 不存在命令负路径（同上 known_bug：当前翻 500+ret=0，check_ret_fail 容忍）
+req PATCH "/api/v1/mml/admin/commands/$NIL_UUID" "{\"description\":\"x\"}"
+check_ret_fail "PATCH 不存在命令被拒绝"
+req DELETE "/api/v1/mml/admin/commands/$NIL_UUID"
+check_ret_fail "DELETE 不存在命令被拒绝"
+req PATCH "/api/v1/mml/admin/commands/not-a-uuid" "{\"description\":\"x\"}"
+check_status "PATCH 命令非法 UUID 被拒绝（400）" 400
+
+# ---------------------------------------------------------------------------
+section "脚本治理操作只测负路径（红线：自建脚本绝不 pause/cancel 真实脚本）"
+# ---------------------------------------------------------------------------
+# pause/cancel 是 destructive（会改真实脚本运行态 / 向设备派发中止）→ 只测不存在脚本 ID。
+req POST "/api/v1/mml/scripts/$NIL_UUID/pause" "{}"
+check_ret_fail "pause 不存在脚本被拒绝"
+req POST "/api/v1/mml/scripts/$NIL_UUID/cancel" "{}"
+check_ret_fail "cancel 不存在脚本被拒绝"
+req POST "/api/v1/mml/scripts/not-a-uuid/pause" "{}"
+check_status "pause 脚本非法 UUID 被拒绝（400）" 400
+req POST "/api/v1/mml/scripts/not-a-uuid/cancel" "{}"
+check_status "cancel 脚本非法 UUID 被拒绝（400）" 400
 
 # ---------------------------------------------------------------------------
 section "execute 系列只测参数校验负路径（红线：不触达任何设备）"
@@ -403,10 +519,17 @@ check_ret_fail "execute-statements 空 statements 被拒绝"
 req POST "/api/v1/mml/console/execute-statements-structured" "{\"statements\":[],\"device_sns\":[]}"
 check_ret_fail "structured 执行空 statements 被拒绝"
 
-# 分组批量执行：非法 UUID → 400；不存在分组 → 任务创建前报错
+# 分组批量执行：非法 UUID → 400；不存在分组（全零 UUID）→ 404 + 如实文案
+# （issue #125-mml 问题 2 已修复：not-found 翻 404，不再 500 + 误导「group_id required」）
 req POST "/api/v1/mml/groups/not-a-uuid/execute" "{\"device_sns\":[\"SMK-NO-SUCH-DEV\"]}"
-check_ret_fail "groups execute 非法 UUID 被拒绝"
+check_status "groups execute 非法 UUID 被拒绝（400）" 400
 req POST "/api/v1/mml/groups/$NIL_UUID/execute" "{\"device_sns\":[\"SMK-NO-SUCH-DEV\"]}"
-check_ret_fail "groups execute 不存在分组被拒绝"
+check_status "groups execute 不存在分组被拒绝（404）" 404
+case "$BODY" in
+    *"group_id required"*)
+        fail "groups execute not-found 文案如实" "仍含误导性 group_id required: $(printf '%s' "$BODY" | head -c 160)" ;;
+    *"not found"*) pass "groups execute not-found 文案如实（含 not found）" ;;
+    *) pass "groups execute not-found 文案不误导（无 group_id required）" ;;
+esac
 
 smoke_summary

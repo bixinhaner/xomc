@@ -131,6 +131,11 @@ func (s *AdminService) CreateGroup(ctx context.Context, req CreateGroupReq) (*Co
 		CatalogProtected: false,
 	}
 	if err := s.groupRepo.Create(ctx, g); err != nil {
+		// param_version 是外键（mml_param_groups_param_version_fkey）；引用不存在的
+		// 版本号会触发 FK violation(23503)。翻成业务级 422，避免裸 500 + 泄露 SQL 约束名。
+		if isForeignKeyViolation(err) {
+			return nil, ErrGroupParamVersionNotFound
+		}
 		return nil, fmt.Errorf("create group: %w", err)
 	}
 	s.audit.Write(ctx, "mml.catalog.group.created", "group:"+g.ID.String(), map[string]any{

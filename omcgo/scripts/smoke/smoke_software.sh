@@ -217,4 +217,67 @@ check_status "终止不存在任务 → 404" "404"
 req DELETE "/api/v1/upgrade-tasks/$NOID"
 check_ret_fail "删除不存在升级任务被拒绝"
 
+# ---------------------------------------------------------------------------
+section "升级任务管理负路径【红线：destructive 端点只测参数校验，绝不真发】"
+# ---------------------------------------------------------------------------
+# 所有 lifecycle / canary 端点 service 第一步即 GetByID/GetCanaryFields，
+# 不存在的任务 ID → ErrNotFound(404)，在任何状态机推进/设备下发之前就返回，
+# 永远触达不到真实 SN。非法 UUID 在 handler uuid.Parse 即 400。
+# 即便是合法 canary 调用也按红线一律不发，只打不存在 ID 与非法 UUID 两条负路径。
+
+# --- PUT /upgrade-tasks/:id/suspend（挂起，会停在途子任务，destructive）---
+req PUT "/api/v1/upgrade-tasks/not-a-uuid/suspend"
+check_status "挂起任务非法 UUID 拒绝" "400"
+req PUT "/api/v1/upgrade-tasks/$NOID/suspend"
+check_status "挂起不存在任务 → 404（GetByID 即拒，不触达设备）" "404"
+
+# --- PUT /upgrade-tasks/:id/resume（恢复执行，会向设备续发下载/重启，destructive）---
+req PUT "/api/v1/upgrade-tasks/not-a-uuid/resume"
+check_status "恢复任务非法 UUID 拒绝" "400"
+req PUT "/api/v1/upgrade-tasks/$NOID/resume"
+check_status "恢复不存在任务 → 404（GetByID 即拒，不触达设备）" "404"
+
+# --- POST /upgrade-tasks/:id/retry（重试已结束任务，会重新下发，destructive）---
+req POST "/api/v1/upgrade-tasks/not-a-uuid/retry"
+check_status "重试任务非法 UUID 拒绝" "400"
+req POST "/api/v1/upgrade-tasks/$NOID/retry"
+check_status "重试不存在任务 → 404（GetByID 即拒，不触达设备）" "404"
+
+# --- POST /upgrade-tasks/:id/advance（推进灰度到下一阶段，会扩大下发面，destructive）---
+req POST "/api/v1/upgrade-tasks/not-a-uuid/advance"
+check_status "推进灰度非法 UUID 拒绝" "400"
+req POST "/api/v1/upgrade-tasks/$NOID/advance"
+check_status "推进不存在任务灰度 → 404（GetCanaryFields 即拒，不触达设备）" "404"
+
+# --- POST /upgrade-tasks/:id/pause-canary（暂停灰度推进，destructive 控制面）---
+req POST "/api/v1/upgrade-tasks/not-a-uuid/pause-canary"
+check_status "暂停灰度非法 UUID 拒绝" "400"
+req POST "/api/v1/upgrade-tasks/$NOID/pause-canary"
+check_status "暂停不存在任务灰度 → 404（GetCanaryFields 即拒）" "404"
+
+# --- POST /upgrade-tasks/:id/resume-canary（恢复灰度推进，destructive 控制面）---
+req POST "/api/v1/upgrade-tasks/not-a-uuid/resume-canary"
+check_status "恢复灰度非法 UUID 拒绝" "400"
+req POST "/api/v1/upgrade-tasks/$NOID/resume-canary"
+check_status "恢复不存在任务灰度 → 404（GetCanaryFields 即拒）" "404"
+
+# --- POST /upgrade-tasks/:id/abort-canary（中止剩余灰度阶段，destructive 控制面）---
+req POST "/api/v1/upgrade-tasks/not-a-uuid/abort-canary"
+check_status "中止灰度非法 UUID 拒绝" "400"
+req POST "/api/v1/upgrade-tasks/$NOID/abort-canary"
+check_status "中止不存在任务灰度 → 404（GetCanaryFields 即拒）" "404"
+
+# --- POST /upgrade-tasks/rollback（回退到旧固件，会向真实设备下发，destructive）---
+# 注意：rollback 实路由是 POST /upgrade-tasks/rollback（按 device_ids body），
+# 无 per-id 路由；形状合法即会建任务下发，故只测空/缺字段 body 的 binding 负路径，
+# 绝不构造合法 device_ids。
+req POST "/api/v1/upgrade-tasks/rollback" "{}"
+check_ret_fail "回退任务空 body 被绑定校验拒绝（device_ids/task_name/create_user required）"
+req POST "/api/v1/upgrade-tasks/rollback" \
+    "{\"task_name\":\"${SMOKE_TAG}-rb-neg\",\"create_user\":\"smoke\"}"
+check_ret_fail "回退任务缺 device_ids 被拒绝（不构造合法设备，不下发）"
+req POST "/api/v1/upgrade-tasks/rollback" \
+    "{\"device_ids\":[],\"task_name\":\"${SMOKE_TAG}-rb-neg\",\"create_user\":\"smoke\"}"
+check_ret_fail "回退任务空 device_ids 数组被 min=1 校验拒绝"
+
 smoke_summary

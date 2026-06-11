@@ -2,6 +2,7 @@ package stationlog
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/core/appconfig"
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/device"
@@ -307,4 +309,81 @@ func TestHandleLogFileReceived_InsertsWhenNoDetectedRecord(t *testing.T) {
 	row := faultRepo.rows[0]
 	assert.Equal(t, FaultRecordStatusFileReceived, row.RecordStatus)
 	assert.Equal(t, "abnormalLog_SN-ORPHAN.tar.gz", row.FileName)
+}
+
+// TestServiceDelete_NotFoundMapsToSentinel 锁定 #125 修复：Delete 对格式合法但
+// 不存在的 UUID 必须返回 wrap 了 commonerrors.ErrNotFound 的哨兵错误，使 handler
+// 能映射到 404 而非 500。运行日志 / 故障日志两张表分别覆盖。
+func TestServiceDelete_NotFoundMapsToSentinel(t *testing.T) {
+	cases := []struct {
+		name    string
+		logType LogType
+	}{
+		{"running", LogTypeRunning},
+		{"fault", LogTypeFault},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, _, _ := newTestService()
+			err := svc.Delete(context.Background(), uuid.New(), tc.logType)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, commonerrors.ErrNotFound)
+		})
+	}
+}
+
+// TestServiceDelete_ExistingRowNoSentinel 成功路径：已存在记录删除返回 nil，
+// 不应误报 NotFound。
+func TestServiceDelete_ExistingRowNoSentinel(t *testing.T) {
+	svc, _, faultRepo := newTestService()
+	require.NoError(t, svc.RecordAbnormalReboot(context.Background(), device.AbnormalRebootSnapshot{
+		DeviceID:       uuid.New(),
+		DeviceSN:       "SN-DEL-OK",
+		HaltMainReason: "halt_reboot",
+		DetectedAt:     time.Now(),
+	}))
+	id := faultRepo.rows[0].ID
+
+	err := svc.Delete(context.Background(), id, LogTypeFault)
+	require.NoError(t, err)
+	assert.False(t, errors.Is(err, commonerrors.ErrNotFound))
+	assert.True(t, faultRepo.rows[0].IsDeleted)
+}
+
+// TestServiceDownloadURL_NotFoundMapsToSentinel 锁定 #125 修复：DownloadURL 对
+// 不存在 UUID 返回 wrap ErrNotFound 的哨兵错误（handler 映射 404）。
+func TestServiceDownloadURL_NotFoundMapsToSentinel(t *testing.T) {
+	cases := []struct {
+		name    string
+		logType LogType
+	}{
+		{"running", LogTypeRunning},
+		{"fault", LogTypeFault},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, _, _ := newTestService()
+			_, err := svc.DownloadURL(context.Background(), uuid.New(), tc.logType)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, commonerrors.ErrNotFound)
+		})
+	}
+}
+
+// TestServiceDownloadURL_DeletedMapsToSentinel 已软删的记录下载也按 NotFound 语义
+// 返回（资源已不可用），handler 映射 404 而非 500。
+func TestServiceDownloadURL_DeletedMapsToSentinel(t *testing.T) {
+	svc, _, faultRepo := newTestService()
+	require.NoError(t, svc.RecordAbnormalReboot(context.Background(), device.AbnormalRebootSnapshot{
+		DeviceID:       uuid.New(),
+		DeviceSN:       "SN-DL-DELETED",
+		HaltMainReason: "halt_reboot",
+		DetectedAt:     time.Now(),
+	}))
+	id := faultRepo.rows[0].ID
+	faultRepo.rows[0].IsDeleted = true
+
+	_, err := svc.DownloadURL(context.Background(), id, LogTypeFault)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, commonerrors.ErrNotFound)
 }

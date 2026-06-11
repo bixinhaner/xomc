@@ -27,14 +27,26 @@ func NewTokenRevoker(rdb redis.UniversalClient, refreshTTL time.Duration) *Token
 	return &TokenRevoker{rdb: rdb, ttl: refreshTTL}
 }
 
-// Revoke 把当前时间写入用户撤销 key；之前签发的所有 token 在中间件下次校验时会被拒绝。
+// Revoke 把"撤销时间戳"写入用户撤销 key；之前签发的所有 token 在中间件下次校验时会被拒绝。
 // rdb 为 nil 时静默成功（便于测试 / 降级运行）。
+//
+// 时间戳取 now（秒），配合 IsRevoked 的严格小于 `issuedAt < val` 比较，实现：
+//   - 撤销时刻之前签发的 token（iat < now）→ 判为已撤销 ✓（管理员强制下线生效）
+//   - 与撤销同一秒签发的 token（iat == now）→ `now < now` 为假 → 不被撤销 ✓（单点登录保命）
+//
+// 「同秒不踢」语义为单点登录（service.go Login）保命：单点登录先写撤销时间戳、再签发
+// 新 token，两步常落在同一秒（iat == 撤销秒）。用严格小于即可让新 token 不被自己刚写的
+// 撤销记录误判（issue #139）。相比早期「now-1 + <=」方案，本方案不把撤销边界额外前移
+// 一整秒——后者会让「撤销前 0~1 秒内签发」的 token 一并漏踢，导致管理员 force-logout 在
+// 紧凑场景下失效（issue #141）。秒级时间戳仍无法区分「同秒内撤销前/后签发」，但漏踢窗口
+// 收窄为「与撤销严格同秒」这一极罕见情形，且随后即自然过期。
 func (r *TokenRevoker) Revoke(ctx context.Context, userID uuid.UUID) error {
 	if r == nil || r.rdb == nil {
 		return nil
 	}
 	key := tokenRevokerKeyPrefix + userID.String()
-	if err := r.rdb.Set(ctx, key, time.Now().Unix(), r.ttl).Err(); err != nil {
+	revokedAt := time.Now().Unix()
+	if err := r.rdb.Set(ctx, key, revokedAt, r.ttl).Err(); err != nil {
 		return fmt.Errorf("set revocation: %w", err)
 	}
 	return nil
@@ -64,8 +76,9 @@ func (r *TokenRevoker) IsRevoked(ctx context.Context, userID uuid.UUID, issuedAt
 		}
 		return false, fmt.Errorf("get revocation: %w", err)
 	}
-	// 用 <= 而非 <：撤销时间戳与 token.iat 同为秒级 Unix 时间，二者相等时
-	// （撤销与签发落在同一秒）必须判定为已撤销，否则存在最长 1 秒的绕过窗口
-	// ——攻击者在撤销发生的同一秒内签发/使用的 token 不应再被接受（issue #6）。
-	return issuedAt <= val, nil
+	// 用严格小于：撤销时间戳 val = 撤销时刻 now（见 Revoke）。撤销前签发的 token
+	// （iat < now）被踢——管理员 force-logout 对跨秒签发的旧 token 生效（issue #141）；
+	// 与撤销同一秒签发的新 token（iat == now，单点登录新 token 典型情形）`now < now`
+	// 为假 → 不被自己踢，消除登录后首请求 401（issue #139）。
+	return issuedAt < val, nil
 }

@@ -10,6 +10,9 @@
 #   - DELETE /api/v1/admin/sysConfig/:id                  删除（清理冒烟自建键）
 #   - POST   /api/v1/admin/sysConfig/batch                按 category 批量 upsert
 #   - GET    /api/v1/admin/sysDictionary/getSysDictionaryList   字典列表（data.list/total）
+#   - POST   /api/v1/admin/sysDictionary/createSysDictionary    创建自定义字典（闭环后删除）
+#   - PUT    /api/v1/admin/sysDictionary/updateSysDictionary    更新 name/desc/status
+#   - DELETE /api/v1/admin/sysDictionary/deleteSysDictionary?id= 软删（清理冒烟自建字典）
 #   - GET    /api/v1/admin/sysDictionary/batch?codes=     批量取字典（注意参数名是 codes 非 types）
 #   - GET    /api/v1/admin/sysDictionaryDetail/getSysDictionaryDetailList  字典明细列表
 #   - GET    /api/v1/admin/logs/{login,operation,task}    登录/操作/任务日志
@@ -18,7 +21,7 @@
 #   - GET    /api/v1/system-license/history               许可替换历史
 #   - POST   /api/v1/system-license                       destructive — 只测无效内容校验负路径
 #   - POST   /api/v1/admin/uploads/ui-asset               只测非法 kind 负路径（无删除端点，真传会残留 MinIO）
-#   - POST   /api/v1/admin/dictload/reload                SKIP（热重载有全局影响，见脚本内注释）
+#   - POST   /api/v1/admin/dictload/reload?name=alarm-definition  字典热重载（幂等成功路径，见脚本内说明）
 #
 # 后端契约（internal/admin/{sys_config*,dictionary_*,sys_log_handler,ui_asset_handler}.go、
 #           internal/license/system_license_handler.go、internal/core/components/sysinfo.go）：
@@ -27,6 +30,15 @@
 #     不存在 → handler 统一 500 + ret=0（AbortWithError 透传 service 错误）。
 #   - sysDictionary 列表返回 data{list,total}；batch 参数名是 **codes**（routes.json 注释写
 #     ?types= 已过时）；明细列表嵌 model.ListRequest，必须显式 page/page_size 否则 binding 400。
+#   - sysDictionary CRUD（GVA 风格 createSysDictionary/updateSysDictionary/deleteSysDictionary）：
+#     Create body{name+type 必填,desc,status}→ data{id,...}；Update body{id 必填(int64),name/desc/...}；
+#     Delete 走 query ?id=<int64>（非 body）。删/改不存在 id → 仓库返 ErrNotFound，但 handler 硬编码
+#     http.StatusInternalServerError（未走 HTTPStatusFromError），故为 500+ret=0（与 sysConfig 同款；
+#     check_ret_fail 容忍 5xx/ret=0）。id 缺失/非数字 → 400+biz_code 7。
+#   - dictload/reload?name=：超级管理员维护端点，幂等重载单 Loader（重 UPSERT 同一 builtin XML，
+#     不增删行内容、errors:null），故可测成功路径；reload alarm-definition 返回
+#     data{loader,rows_affected,files_loaded,errors}，ret=1。未知 loader → 500「unknown loader」+ret=0，
+#     缺 name → 400。本套件只发一次 alarm-definition reload（幂等、对并行 smoke_alarm 无破坏性）。
 #   - admin/logs/* 同样嵌 ListRequest，必须显式 page/page_size；返回 data{items,total,...}；
 #     登录日志已接通写入（#122：auth Login 成功/失败异步写 sys_login_logs，硬断言非空）；
 #     oper/task 日志写入链路仍未接通（#122 遗留），列表可为空。
@@ -184,6 +196,58 @@ req GET "/api/v1/admin/sysDictionary/batch"
 check_ret_fail "batch 缺 codes 参数被拒"
 
 # ---------------------------------------------------------------------------
+section "字典治理 CRUD 闭环（建 ${SMOKE_TAG} 自定义字典 → 改 → 删，GVA 风格）"
+# ---------------------------------------------------------------------------
+# 自建一条 type=${SMOKE_TAG} 的纯手工字典（不绑数据源），全程不碰 builtin 种子。
+req POST "/api/v1/admin/sysDictionary/createSysDictionary" \
+    "{\"name\":\"冒烟字典${SMOKE_TAG}\",\"type\":\"${SMOKE_TAG}\",\"desc\":\"冒烟自建字典\"}"
+check_ret_ok "创建冒烟自定义字典"
+check_field "创建返回字典 id" "data.id"
+DICT_NEW_ID=$(jget data.id)
+T=$(jget data.type)
+if [ "$T" = "$SMOKE_TAG" ]; then pass "自建字典 type 回读一致 (${SMOKE_TAG})"
+else fail "自建字典 type 回读一致" "期望 ${SMOKE_TAG}，实际 '$T'"; fi
+
+if [ -n "$DICT_NEW_ID" ]; then
+    # findSysDictionary 按 type 回查（确认确实落库）
+    req GET "/api/v1/admin/sysDictionary/findSysDictionary?type=${SMOKE_TAG}"
+    check_ret_ok "按 type 回查自建字典"
+    check_field "回查命中自建字典 name" "data.name"
+
+    # 更新 desc/status（PUT body 必带 id）
+    req PUT "/api/v1/admin/sysDictionary/updateSysDictionary" \
+        "{\"id\":${DICT_NEW_ID},\"desc\":\"冒烟更新\",\"status\":false}"
+    check_ret_ok "更新自建字典 desc/status"
+    D=$(jget data.desc)
+    if [ "$D" = "冒烟更新" ]; then pass "更新后 desc 已生效（冒烟更新）"
+    else fail "更新后 desc 已生效" "实际 '$D'"; fi
+
+    # 删除（DELETE 走 query ?id=，非 body）
+    req DELETE "/api/v1/admin/sysDictionary/deleteSysDictionary?id=${DICT_NEW_ID}"
+    check_ret_ok "删除冒烟自建字典"
+
+    # 闭环校验：删后 findSysDictionary 不再命中（软删，仓库返 ErrNotFound→500/ret=0）
+    req GET "/api/v1/admin/sysDictionary/findSysDictionary?type=${SMOKE_TAG}"
+    check_ret_fail "删除后自建字典不可再查（软删生效，无残留）"
+else
+    skip "字典治理 CRUD 改/删闭环" "创建未返回 id，无法继续闭环"
+fi
+
+# 负路径：必填字段 / 非法 id（绝不删 builtin 字典，全程负参数）
+req POST "/api/v1/admin/sysDictionary/createSysDictionary" "{\"desc\":\"缺 name+type\"}"
+check_ret_fail "创建缺 name/type 被拒（binding required）"
+req PUT "/api/v1/admin/sysDictionary/updateSysDictionary" "{\"desc\":\"缺 id\"}"
+check_ret_fail "更新缺 id 被拒（binding required）"
+req PUT "/api/v1/admin/sysDictionary/updateSysDictionary" "{\"id\":99999999,\"desc\":\"x\"}"
+check_ret_fail "更新不存在 id 被拒（ErrNotFound→500/ret=0）"
+req DELETE "/api/v1/admin/sysDictionary/deleteSysDictionary"
+check_ret_fail "删除缺 id 参数被拒"
+req DELETE "/api/v1/admin/sysDictionary/deleteSysDictionary?id=not-a-num"
+check_ret_fail "删除非数字 id 被拒"
+req DELETE "/api/v1/admin/sysDictionary/deleteSysDictionary?id=99999999"
+check_ret_fail "删除不存在 id 被拒（ErrNotFound→500/ret=0）"
+
+# ---------------------------------------------------------------------------
 section "字典明细（/admin/sysDictionaryDetail getSysDictionaryDetailList）"
 # ---------------------------------------------------------------------------
 req GET "/api/v1/admin/sysDictionaryDetail/getSysDictionaryDetailList?page=1&page_size=10"
@@ -264,14 +328,33 @@ req POST "/api/v1/system-license" "{}"
 check_ret_fail "空 raw_content 被拒"
 
 # ---------------------------------------------------------------------------
-section "UI 资产上传 / 字典热重载（负路径 + SKIP）"
+section "UI 资产上传（负路径，无删除端点 → 不真传）"
 # ---------------------------------------------------------------------------
 # ui-asset：handler 无 DELETE 端点，真传 PNG 会在 MinIO 留下孤儿对象 → 只测非法 kind 负路径
 req_upload "/api/v1/admin/uploads/ui-asset" "kind=bogus_${SMOKE_TAG}"
 check_ret_fail "ui-asset 非法 kind 被拒（白名单 login_bg/logo_small/logo_large）"
 skip "ui-asset 真实上传闭环" "无删除端点，上传后 MinIO 对象无法清理（internal/admin/ui_asset_handler.go 仅 Upload/Serve）"
 
-# dictload/reload：会热重载全进程字典 Registry（param-model/indicator/alarm 等），全局影响，不在冒烟触发
-skip "dictload 热重载（POST /admin/dictload/reload）" "热重载影响全进程字典状态（super_admin 维护操作），冒烟不触发"
+# ---------------------------------------------------------------------------
+section "字典热重载（POST /admin/dictload/reload，幂等成功路径）"
+# ---------------------------------------------------------------------------
+# 热重载是 super_admin 维护端点，对 alarm-definition Loader 而言是「重 UPSERT 同一 builtin
+# XML」——不增删行内容、不破坏数据（errors:null），故选择测成功路径而非只验鉴权。
+# 仅发一次 alarm-definition reload：幂等，对并行运行的 smoke_alarm 套件无破坏性
+# （param-model reload 才会清 Redis L2，alarm 走自身缓存策略，这里不触碰）。
+req POST "/api/v1/admin/dictload/reload?name=alarm-definition"
+check_ret_ok "alarm-definition 字典热重载（幂等成功）"
+check_field "reload 返回 loader=alarm-definition" "data.loader"
+check_count_ge "reload 返回 rows_affected≥1" "data.rows_affected" 1
+ERRS=$(jget data.errors)
+if [ -z "$ERRS" ] || [ "$ERRS" = "None" ] || [ "$ERRS" = "null" ] || [ "$ERRS" = "[]" ]; then
+    pass "reload 无错误（errors 为空）"
+else fail "reload 无错误" "errors='$ERRS'"; fi
+
+# 负路径：未知 loader / 缺 name
+req POST "/api/v1/admin/dictload/reload?name=bogus-loader-${SMOKE_TAG}"
+check_ret_fail "未知 loader 名被拒（unknown loader）"
+req POST "/api/v1/admin/dictload/reload"
+check_ret_fail "缺 name 参数被拒"
 
 smoke_summary

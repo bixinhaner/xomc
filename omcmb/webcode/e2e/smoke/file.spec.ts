@@ -21,6 +21,12 @@ import { expectPageRenders, smokeLogin } from './helpers';
  *   - /file/device-files → src/pages/file/DeviceFiles/index.tsx
  *       标题 nav.file.deviceFiles（设备文件 / Device Files）、
  *       Tabs：配置文件采集（nav.file.configRetrieval）+ 日志采集（nav.file.logRetrieval）。
+ *   - /transfer/template-management → src/pages/transfer/TemplateDefinitionManagement/index.tsx
+ *       admin 守卫页（withAdminRole，admin 凭据可入）；
+ *       标题 ufte.page.templateManagement（传输模板管理 / Transfer Template Management）、
+ *       新增按钮 ufte.action.newCustomTemplate（新增自定义模板 / New Custom Template）、
+ *       业务分类 Tabs（ufte.page.templateConfig）+ 内置/自定义模板两张卡片
+ *       （ufte.template.builtInGroup / ufte.template.customGroup）。
  *
  * 真实栈数据稀疏：只断言容器/标题/表格骨架，不断言具体业务数据。
  */
@@ -131,5 +137,28 @@ test.describe('文件传输与管理冒烟（真实后端）', { tag: '@smoke' }
 
     // 默认 Tab（配置文件采集）下的文件表格
     await expect(page.locator('.ant-table').first()).toBeVisible();
+  });
+
+  test('/transfer/template-management 传输模板管理渲染，新增按钮与内置/自定义卡片可见', async ({ page }) => {
+    // admin 守卫页（withAdminRole），admin 凭据可入，不会重定向 /403
+    await expectPageRenders(page, '/transfer/template-management');
+
+    // 页面标题（ListPageLayout title；侧边菜单文案为"模板配置"，与此不同名，仍取 main 内首个以防万一）
+    await expect(
+      page.locator('main').getByText(/传输模板管理|Transfer Template Management/).first(),
+    ).toBeVisible();
+
+    // 右上角新增自定义模板按钮（ufte.action.newCustomTemplate）
+    await expect(
+      page.getByRole('button', { name: /新增自定义模板|New Custom Template/ }),
+    ).toBeVisible();
+
+    // 内置模板 / 自定义模板两张卡片（ufte.template.builtInGroup / customGroup），用卡片标题定位
+    await expect(
+      page.locator('.ant-card-head-title').filter({ hasText: /内置模板|Built-in Templates/ }).first(),
+    ).toBeVisible();
+    await expect(
+      page.locator('.ant-card-head-title').filter({ hasText: /自定义模板|Custom Templates/ }).first(),
+    ).toBeVisible();
   });
 });

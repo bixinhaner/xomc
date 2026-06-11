@@ -14,3 +14,11 @@ func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
+
+// isForeignKeyViolation 判断 err 是否为 PostgreSQL foreign_key_violation（SQLSTATE 23503）。
+// 用于把外键约束失败（如 mml_command_groups.param_version 引用不存在的 param_version）
+// 翻译成业务级 422，避免裸 500 + 泄露 SQL 约束名 / SQLSTATE。
+func isForeignKeyViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23503"
+}

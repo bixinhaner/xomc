@@ -127,7 +127,7 @@ func (h *Handler) Download(c *gin.Context) {
 	url, err := h.svc.DownloadURL(c.Request.Context(), id, logType)
 	if err != nil {
 		h.logger.Error("generate download url", zap.String("id", id.String()), zap.Error(err))
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
 
@@ -156,7 +156,7 @@ func (h *Handler) Delete(c *gin.Context) {
 
 	if err := h.svc.Delete(c.Request.Context(), id, logType); err != nil {
 		h.logger.Error("delete station log file", zap.String("id", id.String()), zap.Error(err))
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
 	response.OK(c, gin.H{"status": "deleted"})
@@ -292,7 +292,7 @@ func (h *Handler) DeleteAbnormalReboot(c *gin.Context) {
 	// file_received 走完整的 MinIO 清理 + 标记。
 	if err := h.svc.Delete(c.Request.Context(), id, LogTypeFault); err != nil {
 		h.logger.Error("delete abnormal reboot record", zap.String("id", id.String()), zap.Error(err))
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
 	response.OK(c, gin.H{"status": "deleted"})
@@ -336,7 +336,7 @@ func (h *Handler) DownloadAbnormalReboot(c *gin.Context) {
 	if err != nil {
 		h.logger.Error("generate abnormal reboot download url",
 			zap.String("id", id.String()), zap.Error(err))
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
 

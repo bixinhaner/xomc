@@ -9,12 +9,21 @@
 #   - param-models 列表(builtin 非空)/:name 详情/:name mappings/standard 树/file-content
 #   - translate 双向翻译（真实 builtin mapping：standardPath → privatePath → 回翻一致）
 #   - standard 参数治理闭环、custom mapping 闭环（builtin 模型上增删 custom 行）
+#   - param-model PUT 元信息治理（自建 custom 模型改 description/is_active 回读一致）
+#   - upload-xml 闭环（构造最小合法 parameterModel XML，name 唯一带 ${SMOKE_TAG}：
+#     上传 → 列表/详情可见(source=custom, deletable=true) → PUT 改元信息 → DELETE 清理）
+#   - upload-xml 负路径（缺 file 400 / 缺 paramModel 名 400 / 根元素非法 400）
 #   - builtin 删除守门（param-model 403 / 产品 403 / builtin pattern 403 / builtin mapping 403）
 #   - discovered 视图 + destructive 端点负路径（仅参数校验，绝不真删）
 #   - 权限边界：未认证 401 + 普通角色(viewer) 403
 #
-# 注意：upload-xml 跳过（需构造合法 parameterModel XML，?force=true 是 destructive
-#       全量重载，风险大于收益）。
+# 红线说明：
+#   - upload-xml 正路径用「全新唯一名 + 不带 ?force」——新模型上传后 destructiveReload
+#     全量重载磁盘上仍在的全部 builtin XML（UPSERT 触 updated_at），DeleteOrphansSince
+#     只删未被触及的孤儿行，故 orphans_deleted=0、不伤任何 builtin（已实测验证）；
+#     绝不带 ?force=true（覆盖既有文件，真 destructive），绝不上传与 builtin 同名的 XML。
+#   - PUT 元信息只打自建 custom 模型（删除即完全回滚）；builtin PUT 虽无守门（会改
+#     builtin 的 description/is_active），但为保持 builtin 纯净不去触碰，仅 notes 说明。
 # =============================================================================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
@@ -49,6 +58,7 @@ MAPPING_ID=""
 VIEWER_ROLE_ID=""
 SMK_USER_ID=""
 VIEWER_TOKEN=""
+PM_UPLOAD_NAME=""
 
 # ═══════════════════════════════════════════════════════════════════════════
 section "1. 产品列表与枚举字典（builtin products.xml 装配）"
@@ -132,17 +142,11 @@ else
     skip "match 命中（builtin 字面正则）" "match-order 中未找到可还原成 product_class 的字面正则"
 fi
 
-# 已知后端 bug：registry.MatchProductClass 未命中返回 ErrOrphan（registry.go:238），
-# 但 Handler.Match（handler.go:683）把所有 err 当 500，mr==nil 的 matched=false 分支不可达。
-# 修复后此处应改回 check_ret_ok + matched=false 断言。
+# #125-product 修复：registry.MatchProductClass 未命中返回 ErrOrphan（registry.go），
+# Handler.Match 现把 ErrOrphan 识别为「未命中」→ 200 + matched=false（不再当 500）。
 req GET "/api/v1/products/match?productClass=SMK-NOMATCH-${SMOKE_TAG}"
-if [[ "$HTTP_CODE" == 2* ]] && [ "$(jget data.matched)" = "False" ]; then
-    pass "match 未命中返回 matched=false（bug 已修复）"
-elif [ "$HTTP_CODE" = "500" ]; then
-    known_bug "match 未命中应返回 200 matched=false" "ErrOrphan 未被 handler 识别按 500 抛出：$(jget msg)"
-else
-    fail "match 未命中查询" "期望 200+matched=false 或已知 500，实际 HTTP $HTTP_CODE body: $(printf '%s' "$BODY" | head -c 160)"
-fi
+check_ret_ok "match 未命中查询返回 200（productClass 无匹配）"
+assert_eq "未命中返回 matched=false" "$(jget data.matched)" "False"
 
 req GET "/api/v1/products/match"
 check_ret_fail "match 缺 productClass 参数被拒"
@@ -415,7 +419,7 @@ else
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════
-section "9. builtin 删除守门 + upload-xml"
+section "9. builtin 删除守门 + upload-xml 闭环 + PUT 元信息治理"
 # ═══════════════════════════════════════════════════════════════════════════
 if [ -n "$PM_NAME" ]; then
     req DELETE "/api/v1/param-models/$PM_NAME"
@@ -426,7 +430,79 @@ fi
 req DELETE "/api/v1/param-models/no-such-model-${SMOKE_TAG}"
 check_status "删除不存在参数模型 404" 404
 
-skip "upload-xml 导入" "需构造合法 parameterModel XML 且 ?force=true 为 destructive 全量重载，风险大于收益"
+# ── PUT/:name 非法 id 负路径（不存在的模型改元信息 → 404）──────────────────
+req PUT "/api/v1/param-models/no-such-model-${SMOKE_TAG}" "{\"description\":\"smoke-noop\"}"
+check_status "更新不存在参数模型 404" 404
+
+# ── upload-xml 负路径（destructive 端点之前，先验参数校验红线）─────────────
+#    a) 缺 file multipart 字段 → 400
+req_upload "/api/v1/param-models/upload-xml" "notfile=ignored"
+check_ret_fail "upload-xml 缺 file 字段被拒"
+
+#    b) XML 缺 paramModel 属性（取不到唯一名）→ 400
+PM_NONAME_XML="$SMOKE_TMPDIR/pm_noname.xml"
+cat > "$PM_NONAME_XML" <<'PMNOXML'
+<?xml version="1.0" encoding="UTF-8"?>
+<parameterModel totalEntries="0"><parameters></parameters></parameterModel>
+PMNOXML
+req_upload "/api/v1/param-models/upload-xml" "file=@${PM_NONAME_XML};type=text/xml"
+check_ret_fail "upload-xml 缺 paramModel 名被拒"
+
+#    c) 根元素非 <parameterModel> → 400
+PM_BADROOT_XML="$SMOKE_TMPDIR/pm_badroot.xml"
+cat > "$PM_BADROOT_XML" <<'PMBADXML'
+<?xml version="1.0" encoding="UTF-8"?>
+<wrongRoot paramModel="smk-bad"></wrongRoot>
+PMBADXML
+req_upload "/api/v1/param-models/upload-xml" "file=@${PM_BADROOT_XML};type=text/xml"
+check_ret_fail "upload-xml 根元素非法被拒"
+
+# ── upload-xml 正路径（全新唯一名 + 不带 ?force，安全非破坏）──────────────
+#    模型名仅含 [a-z0-9]（SMOKE_TAG 形态）+ 前缀，满足文件名白名单 [A-Za-z0-9_-]{1,64}。
+PM_UPLOAD_NAME="smkpm${SMOKE_TAG}"
+PM_UPLOAD_XML="$SMOKE_TMPDIR/${PM_UPLOAD_NAME}.xml"
+cat > "$PM_UPLOAD_XML" <<PMUPXML
+<?xml version="1.0" encoding="UTF-8"?>
+<parameterModel paramModel="${PM_UPLOAD_NAME}" totalEntries="1">
+    <parameters>
+        <param name="Device.DeviceInfo.SerialNumber" standardPath="Device.DeviceInfo.SerialNumber" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+    </parameters>
+</parameterModel>
+PMUPXML
+
+req_upload "/api/v1/param-models/upload-xml" "file=@${PM_UPLOAD_XML};type=text/xml"
+check_ret_ok "upload-xml 上传最小合法 parameterModel（全新唯一名）"
+# 红线复核：全新名上传绝不删任何既有 builtin（orphans_deleted 必须为 0）
+assert_eq "上传未覆盖既有文件 overwritten=false" "$(jget data.overwritten)" "False"
+assert_eq "上传未误删任何模型 orphans_deleted=0" "$(jget data.orphans_deleted)" "0"
+
+if [ "$(jget data.model_name)" = "$PM_UPLOAD_NAME" ]; then
+    # 列表 / 详情可见，且判定为 custom 可删
+    req GET "/api/v1/param-models/$PM_UPLOAD_NAME"
+    check_ret_ok "上传后参数模型详情可查"
+    assert_eq "上传模型 name 回读一致" "$(jget data.name)" "$PM_UPLOAD_NAME"
+    assert_eq "上传模型 source=custom" "$(jget data.source)" "custom"
+    assert_eq "上传 custom 模型 deletable=true" "$(jget data.deletable)" "True"
+
+    # PUT/:name 元信息治理（自建 custom 模型，删除即完全回滚）
+    req PUT "/api/v1/param-models/$PM_UPLOAD_NAME" "{\"description\":\"smk governed ${SMOKE_TAG}\",\"is_active\":false}"
+    check_ret_ok "PUT 更新自建参数模型元信息（description + is_active）"
+    assert_eq "description 更新生效" "$(jget data.description)" "smk governed ${SMOKE_TAG}"
+    assert_eq "is_active 更新生效" "$(jget data.is_active)" "False"
+
+    req PUT "/api/v1/param-models/$PM_UPLOAD_NAME" "{\"is_active\":true}"
+    check_ret_ok "PUT 恢复 is_active=true（部分字段更新）"
+    assert_eq "is_active 恢复生效" "$(jget data.is_active)" "True"
+
+    # 清理：删除自建 custom 模型（连带 sidecar + DB 行 + XML 备份）
+    req DELETE "/api/v1/param-models/$PM_UPLOAD_NAME"
+    check_ret_ok "删除自建 custom 参数模型（清理）"
+    req GET "/api/v1/param-models/$PM_UPLOAD_NAME"
+    check_status "删除后参数模型 404" 404
+    PM_UPLOAD_NAME=""
+else
+    skip "upload-xml 闭环后续（详情/PUT/删除）" "上传未回读到 model_name"
+fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 section "10. discovered 视图 + destructive 负路径"
@@ -522,6 +598,10 @@ fi
 if [ -n "$SMK_STD" ]; then
     req DELETE "/api/v1/param-models/standard/$SMK_STD"
     echo "  [cleanup] 残留 standard 参数 $SMK_STD → HTTP $HTTP_CODE"
+fi
+if [ -n "$PM_UPLOAD_NAME" ]; then
+    req DELETE "/api/v1/param-models/$PM_UPLOAD_NAME"
+    echo "  [cleanup] 残留自建参数模型 $PM_UPLOAD_NAME → HTTP $HTTP_CODE"
 fi
 if [ -n "$SMK_USER_ID" ]; then
     req DELETE "/api/v1/admin/users/$SMK_USER_ID"

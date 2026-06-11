@@ -294,6 +294,43 @@ func newTestService(cmdRepo *mockCommandRepo, scriptRepo *mockScriptRepo, taskRe
 	return NewService(cmdRepo, scriptRepo, taskRepo, &mockCustomCommandRepo{}, nil, zap.NewNop())
 }
 
+// --- Tests: ExecuteGroup not-found（issue #125-mml 问题 2）---
+
+// TestService_ExecuteGroup_NilGroupID_NotFound：全零 UUID 应翻 commonerrors.ErrNotFound
+// （→ 404），且文案不再是误导性的「group_id required」。
+func TestService_ExecuteGroup_NilGroupID_NotFound(t *testing.T) {
+	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, &mockTaskRepo{})
+
+	_, err := svc.ExecuteGroup(context.Background(), ExecuteGroupRequest{
+		GroupID:   uuid.Nil,
+		DeviceSNs: []string{"SMK-NO-SUCH-DEV"},
+	})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, commonerrors.ErrNotFound),
+		"nil group 应 wrap ErrNotFound（→404），got %v", err)
+	assert.NotContains(t, err.Error(), "group_id required",
+		"不得保留误导性的 group_id required 文案")
+}
+
+// TestService_ExecuteGroup_UnknownGroup_NotFound：随机 UUID 但 group 下无命令时,
+// 同归 not-found（Service 无独立 group 仓储）→ wrap ErrNotFound（404），非裸 500。
+func TestService_ExecuteGroup_UnknownGroup_NotFound(t *testing.T) {
+	cmdRepo := &mockCommandRepo{
+		listByGroupIDFn: func(_ context.Context, _ uuid.UUID) ([]MMLCommand, error) {
+			return []MMLCommand{}, nil
+		},
+	}
+	svc := newTestService(cmdRepo, &mockScriptRepo{}, &mockTaskRepo{})
+
+	_, err := svc.ExecuteGroup(context.Background(), ExecuteGroupRequest{
+		GroupID:   uuid.New(),
+		DeviceSNs: []string{"SMK-NO-SUCH-DEV"},
+	})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, commonerrors.ErrNotFound),
+		"unknown group 应 wrap ErrNotFound（→404），got %v", err)
+}
+
 // --- Tests: ListCommands ---
 
 func TestService_ListCommands(t *testing.T) {

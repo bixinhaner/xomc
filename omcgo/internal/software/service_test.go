@@ -884,6 +884,78 @@ func TestModelConstants_TaskResult(t *testing.T) {
 	assert.Equal(t, TaskResult("terminated"), TaskResultTerminated)
 }
 
+// TestApplyScheduleMode_StatusMatrix 锁死三种调度模式投射到 UpgradeTask 的
+// Status/CreateStatus/ScheduledAt。重点：挂起分支必须落 TaskSuspended（#138）——
+// 历史 bug 落 TaskPending+active 导致 ufte/executionModeForTask 把挂起任务回显成
+// "immediate"。统一为 TaskSuspended 后与 CreatePlaceholderTrackingTask 挂起分支一致，
+// 且 executionModeForTask(TaskSuspended, active) → "suspended"。
+func TestApplyScheduleMode_StatusMatrix(t *testing.T) {
+	schedAt := time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC)
+
+	tests := []struct {
+		name             string
+		mode             scheduleMode
+		scheduledAt      *time.Time
+		wantStatus       TaskStatus
+		wantCreateStatus string
+		wantScheduledSet bool
+	}{
+		{
+			name:             "suspended falls to TaskSuspended (not TaskPending)",
+			mode:             scheduleModeSuspended,
+			wantStatus:       TaskSuspended,
+			wantCreateStatus: CreateStatusActive,
+			wantScheduledSet: false,
+		},
+		{
+			name:             "scheduled keeps TaskPending+timing and persists scheduled_at",
+			mode:             scheduleModeScheduled,
+			scheduledAt:      &schedAt,
+			wantStatus:       TaskPending,
+			wantCreateStatus: CreateStatusTiming,
+			wantScheduledSet: true,
+		},
+		{
+			name:             "immediate keeps create_status active and clears scheduled_at",
+			mode:             scheduleModeImmediate,
+			wantStatus:       "", // immediate 不改 Status，由调用方推到 in_progress
+			wantCreateStatus: CreateStatusActive,
+			wantScheduledSet: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			task := &UpgradeTask{}
+			applyScheduleMode(task, tc.mode, tc.scheduledAt)
+
+			assert.Equal(t, tc.wantStatus, task.Status)
+			assert.Equal(t, tc.wantCreateStatus, task.CreateStatus)
+			if tc.wantScheduledSet {
+				require.NotNil(t, task.ScheduledAt)
+			} else {
+				assert.Nil(t, task.ScheduledAt)
+			}
+		})
+	}
+}
+
+// TestApplyScheduleMode_SuspendedMatchesPlaceholder 守护两条挂起链路的一致性：
+// applyScheduleMode（BatchCollect/BatchUpgrade/RollbackDevices）与
+// CreatePlaceholderTrackingTask（CONFIG_RESTORE/LICENSE_UPGRADE）挂起后主任务
+// Status 必须同为 TaskSuspended。
+func TestApplyScheduleMode_SuspendedMatchesPlaceholder(t *testing.T) {
+	// applyScheduleMode 挂起分支
+	viaSchedule := &UpgradeTask{}
+	applyScheduleMode(viaSchedule, scheduleModeSuspended, nil)
+
+	// CreatePlaceholderTrackingTask 挂起分支用的 initialStatus（见 service.go:433）
+	const placeholderSuspendedStatus = TaskSuspended
+
+	assert.Equal(t, placeholderSuspendedStatus, viaSchedule.Status,
+		"两条挂起链路的主任务 Status 必须一致，否则 ufte 回显会分叉")
+}
+
 // ---------------------------------------------------------------------------
 // Rollback tests
 // ---------------------------------------------------------------------------

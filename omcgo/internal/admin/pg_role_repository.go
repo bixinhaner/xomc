@@ -318,9 +318,25 @@ func (r *PgRoleRepository) populateDeviceGroupIDs(ctx context.Context, roles []R
 }
 
 func (r *PgRoleRepository) ListWithPagination(ctx context.Context, filter RoleFilter) (*model.ListResponse[Role], error) {
-	// Count query
+	// Build filter conditions first so COUNT 与数据查询共用同一套 WHERE，
+	// 避免 total 落到无过滤全量（issue #135）。
+	where := sq.And{}
+	if filter.Name != nil && *filter.Name != "" {
+		where = append(where, sq.Expr("name ILIKE ?", ilikePattern(*filter.Name)))
+	}
+	// Search 模糊匹配 name 或 description（form:"search"，此前被完全忽略，issue #135）。
+	if filter.Search != nil && *filter.Search != "" {
+		pat := ilikePattern(*filter.Search)
+		where = append(where, sq.Or{
+			sq.Expr("name ILIKE ?", pat),
+			sq.Expr("description ILIKE ?", pat),
+		})
+	}
+
+	// Count query — 带与数据查询一致的过滤条件
 	countQuery, countArgs, err := storage.Psql.Select("COUNT(*)").
 		From("roles").
+		Where(where).
 		ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build count roles SQL: %w", err)
@@ -329,12 +345,6 @@ func (r *PgRoleRepository) ListWithPagination(ctx context.Context, filter RoleFi
 	var total int64
 	if err := r.pool.QueryRow(ctx, countQuery, countArgs...).Scan(&total); err != nil {
 		return nil, fmt.Errorf("count roles: %w", err)
-	}
-
-	// Build filter conditions
-	where := sq.And{}
-	if filter.Name != nil && *filter.Name != "" {
-		where = append(where, sq.Expr("name ILIKE ?", ilikePattern(*filter.Name)))
 	}
 
 	offset := filter.Offset()

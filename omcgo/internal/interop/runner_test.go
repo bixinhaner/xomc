@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"testing"
 	"time"
 
@@ -365,6 +366,65 @@ func TestRunAll_DeviceNotFound(t *testing.T) {
 	_, err := runner.RunAll(context.Background(), "NONEXISTENT")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "lookup device")
+}
+
+// nilDeviceRepo mimics the production PgDeviceRepository, which returns
+// (nil, nil) — not an error — when a lookup misses (pgx.ErrNoRows folded to
+// nil,nil in scanDevice). This is the exact shape that previously caused the
+// runner / validator to fall through to a misleading 500.
+type nilDeviceRepo struct{ mockDeviceRepo }
+
+func newNilDeviceRepo() *nilDeviceRepo {
+	return &nilDeviceRepo{mockDeviceRepo: mockDeviceRepo{devices: make(map[string]*model.Device)}}
+}
+
+func (m *nilDeviceRepo) GetByID(_ context.Context, _ uuid.UUID) (*model.Device, error) {
+	return nil, nil
+}
+func (m *nilDeviceRepo) GetBySerialNumber(_ context.Context, _ string) (*model.Device, error) {
+	return nil, nil
+}
+
+// TestRunner_DeviceNotFound_MapsToNotFound is the #125 regression: when the
+// repo returns (nil, nil) for an unknown device, RunAll / RunByCategory must
+// wrap commonerrors.ErrNotFound so the handler's HTTPStatusFromError yields a
+// 404 instead of a default 500.
+func TestRunner_DeviceNotFound_MapsToNotFound(t *testing.T) {
+	paramRepo := newMockParamRepo()
+	cmdQ := newMockCmdQueue()
+
+	tests := []struct {
+		name string
+		run  func(r *ConformanceTestRunner) error
+	}{
+		{
+			name: "RunAll",
+			run: func(r *ConformanceTestRunner) error {
+				_, err := r.RunAll(context.Background(), "MISSING-SN")
+				return err
+			},
+		},
+		{
+			name: "RunByCategory",
+			run: func(r *ConformanceTestRunner) error {
+				_, err := r.RunByCategory(context.Background(), "MISSING-SN", CategoryProtocol)
+				return err
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runner := NewConformanceTestRunner(newNilDeviceRepo(), paramRepo, nil, nil, cmdQ, zap.NewNop())
+			runner.RegisterCases(testProtocolCases())
+
+			err := tt.run(runner)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, commonerrors.ErrNotFound,
+				"device-not-found must wrap ErrNotFound so handler maps 404")
+			assert.Equal(t, http.StatusNotFound, commonerrors.HTTPStatusFromError(err))
+		})
+	}
 }
 
 func TestRunAll_ProtocolFailsOnEmptyField(t *testing.T) {

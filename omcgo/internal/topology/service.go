@@ -493,7 +493,10 @@ func (s *DeviceGroupService) CheckDelete(ctx context.Context, id uuid.UUID) (*Ch
 func (s *DeviceGroupService) MoveDevices(ctx context.Context, req MoveDevicesRequest) (int64, error) {
 	targetID, err := uuid.Parse(req.TargetGroupID)
 	if err != nil {
-		return 0, commonerrors.NewBusinessError(global.ErrCodeGroupParentInvalid, "invalid target_group_id", err)
+		// 参数校验类错误（非法 UUID）须映射 400：包 ErrInvalidInput sentinel，
+		// 使 HTTPStatusFromError 经 errors.Is 落到 StatusBadRequest 而非 default 500。
+		return 0, commonerrors.NewBusinessError(global.ErrCodeGroupParentInvalid, "invalid target_group_id",
+			fmt.Errorf("%w: %v", commonerrors.ErrInvalidInput, err))
 	}
 
 	// 验证目标分组存在
@@ -504,7 +507,9 @@ func (s *DeviceGroupService) MoveDevices(ctx context.Context, req MoveDevicesReq
 
 	deviceIDs, err := parseUUIDs(req.DeviceIDs)
 	if err != nil {
-		return 0, commonerrors.NewBusinessError(global.ErrCodeDeviceInvalidInput, "invalid device_id", err)
+		// 同上：非法 device_id UUID 是参数校验类错误，须映射 400。
+		return 0, commonerrors.NewBusinessError(global.ErrCodeDeviceInvalidInput, "invalid device_id",
+			fmt.Errorf("%w: %v", commonerrors.ErrInvalidInput, err))
 	}
 
 	return s.repo.MoveDevices(ctx, deviceIDs, targetID)
