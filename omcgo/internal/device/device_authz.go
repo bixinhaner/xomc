@@ -7,7 +7,7 @@ import (
 	sq "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/authz"
 	"github.com/omcgo/omcgo/internal/core/storage"
 )
 
@@ -77,33 +77,7 @@ func (r *PgDeviceGroupReader) GetDeviceGroupIDs(ctx context.Context, deviceID uu
 // 生产路由始终注入 reader + permService）。返回 nil 表示放行；ErrForbidden 表示
 // 越权（handler 映射为 403）。设备是否存在由调用方上层另行判定（本方法不查 devices 表）。
 func (s *DeviceService) AuthorizeDeviceGroupAccess(ctx context.Context, deviceID uuid.UUID, visibleGroups []uuid.UUID) error {
-	// 超管：visibleGroups 为 nil（PermissionService 对 source='builtIn' 返 nil）。
-	if visibleGroups == nil {
-		return nil
-	}
-	// reader 未注入（dev/test）：无法判定归属，退化为不拦截。
-	if s.groupReader == nil {
-		return nil
-	}
-	// 无任何分组权限 → 一律拒绝。
-	if len(visibleGroups) == 0 {
-		return commonerrors.ErrForbidden
-	}
-
-	deviceGroups, err := s.groupReader.GetDeviceGroupIDs(ctx, deviceID)
-	if err != nil {
-		return fmt.Errorf("authorize device group access: %w", err)
-	}
-
-	visible := make(map[uuid.UUID]struct{}, len(visibleGroups))
-	for _, gid := range visibleGroups {
-		visible[gid] = struct{}{}
-	}
-	for _, gid := range deviceGroups {
-		if _, ok := visible[gid]; ok {
-			return nil
-		}
-	}
-	// 设备未分组（deviceGroups 为空）或所有分组都不在可见集合 → 越权。
-	return commonerrors.ErrForbidden
+	// #64 统一强制层：委派给 authz 包的唯一实现，避免按设备归属校验逻辑在 device/
+	// alarm/pm/ufte/interop/software 等多处各自复刻导致语义漂移。
+	return authz.AuthorizeDeviceAccess(ctx, s.groupReader, deviceID, visibleGroups)
 }

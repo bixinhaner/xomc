@@ -1,0 +1,160 @@
+// Package authz 是设备组数据权限（租户隔离）的**统一强制层**。
+//
+// 背景：v1.0 把租户边界从「users.carrier + RequireCarrier 中间件」迁到「设备分组
+// 可见性（VisibleGroups）」，由 admin.PermissionService.GetUserVisibleGroupIDs 从
+// 认证主体派生。迁移初期只有 device 主列表/单读/topology 三处消费，alarm/pm/GIS/
+// 预注册及 ufte/bundle/stationlog/eventlog/rebootrecord/interop 等 HTTP 暴露面在
+// service/repository 层完全没有消费点 → 跨设备组水平越权（#63/#64）+ 升级/回退可越权
+// 写（#59）。
+//
+// 本包把「ctx → 可见分组解析」与「按设备 ID 的归属校验」收口为单一机制，所有模块统一
+// 消费，避免各造一套导致语义漂移。可见分组三态契约（与 device_info_pg_repository.go
+// 的 fail-closed 范式一致，超管旁路锚定 device_authz.go）：
+//
+//	nil            → 超管（PermissionService 对 source='builtIn' 返 nil）：不过滤，可见全部。
+//	[]uuid.UUID{}  → 已认证但无任何分组权限：fail-closed（空集）。
+//	[g1, g2, ...]  → 仅限这些分组下的设备。
+package authz
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+
+	sq "github.com/Masterminds/squirrel"
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/internal/admin"
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+)
+
+// VisibleGroupsResolver 从主体身份（userID + isSuperAdmin）解析可见设备组。
+// 由 admin.PermissionService 实现。返回切片遵循本包顶部的三态契约。
+type VisibleGroupsResolver interface {
+	GetUserVisibleGroupIDs(ctx context.Context, userID uuid.UUID, isSuperAdmin bool) ([]uuid.UUID, error)
+}
+
+// GroupReader 读取单个设备的设备组归属（device_group_members）。
+// 由 device.PgDeviceGroupReader 实现——此处用结构化接口，不反向 import device。
+type GroupReader interface {
+	GetDeviceGroupIDs(ctx context.Context, deviceID uuid.UUID) ([]uuid.UUID, error)
+}
+
+// Resolver 从 gin 请求上下文解析调用者的可见设备组，是所有 HTTP 模块的统一入口。
+type Resolver struct {
+	perm VisibleGroupsResolver
+}
+
+// NewResolver 构造 Resolver。perm 为 nil 时退化为不强制（dev/test）。
+func NewResolver(perm VisibleGroupsResolver) *Resolver { return &Resolver{perm: perm} }
+
+// Enabled 报告数据权限强制是否已装配（perm != nil）。
+// perm == nil 对应 dev/test 退化（不强制），与 device 既有 nil-safe 语义一致；
+// 生产路由始终注入 perm。
+func (r *Resolver) Enabled() bool { return r != nil && r.perm != nil }
+
+// FromContext 解析 gin ctx 中主体的可见设备组。
+//
+// 成功返回 (groups, true)；任一失败（拿不到 user_id / perm 报错）会 abort c
+// （403/500）并返回 (nil, false)，调用方在 ok==false 时必须立即 return。
+//
+// 未装配强制（perm == nil）时返回 (nil, true)，即「超管等价、不限制」，保持既有
+// dev/test 退化行为；生产装配始终注入 perm。
+func (r *Resolver) FromContext(c *gin.Context) (groups []uuid.UUID, ok bool) {
+	if !r.Enabled() {
+		return nil, true
+	}
+	userIDVal, _ := c.Get(admin.CtxKeyUserID)
+	uid, isUUID := userIDVal.(uuid.UUID)
+	if !isUUID {
+		// 已过鉴权中间件却拿不到 user_id：按拒绝处理，不泄露数据。
+		commonerrors.AbortWithError(c, http.StatusForbidden, commonerrors.ErrForbidden)
+		return nil, false
+	}
+	isSuperVal, _ := c.Get(admin.CtxKeyIsSuperAdmin)
+	isSuper, _ := isSuperVal.(bool)
+
+	groups, err := r.perm.GetUserVisibleGroupIDs(c.Request.Context(), uid, isSuper)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return nil, false
+	}
+	return groups, true
+}
+
+// AuthorizeDeviceAccess 是「按设备 ID」校验的**唯一**规范实现，被设备按 ID 直读以及
+// 各类破坏性按设备写（固件升级/回退、ufte、interop、基站/事件日志按 ID 操作）统一复用。
+//
+//	visibleGroups == nil   → 超管：放行。
+//	reader == nil          → dev/test 退化：放行（nil-safe）。
+//	len(visibleGroups)==0  → 无任何分组权限：ErrForbidden。
+//	否则                   → 设备分组与 visibleGroups 有交集才放行，否则 ErrForbidden。
+//
+// 设备是否存在由调用方上层另行判定（本函数不查 devices 表）。
+func AuthorizeDeviceAccess(ctx context.Context, reader GroupReader, deviceID uuid.UUID, visibleGroups []uuid.UUID) error {
+	if visibleGroups == nil {
+		return nil
+	}
+	if reader == nil {
+		return nil
+	}
+	if len(visibleGroups) == 0 {
+		return commonerrors.ErrForbidden
+	}
+	deviceGroups, err := reader.GetDeviceGroupIDs(ctx, deviceID)
+	if err != nil {
+		return fmt.Errorf("authorize device group access: %w", err)
+	}
+	visible := make(map[uuid.UUID]struct{}, len(visibleGroups))
+	for _, gid := range visibleGroups {
+		visible[gid] = struct{}{}
+	}
+	for _, gid := range deviceGroups {
+		if _, ok := visible[gid]; ok {
+			return nil
+		}
+	}
+	// 设备未分组或所有分组都不在可见集合 → 越权。
+	return commonerrors.ErrForbidden
+}
+
+// AuthorizeDevicesAccess 对一批 deviceID 逐个做归属校验，任一越权即返回该错误（fail-fast）。
+// 用于批量升级/回退/ufte 等：只要请求体里混入域外设备即整批拒绝。
+func AuthorizeDevicesAccess(ctx context.Context, reader GroupReader, visibleGroups []uuid.UUID, deviceIDs ...uuid.UUID) error {
+	if visibleGroups == nil || reader == nil {
+		return nil
+	}
+	if len(visibleGroups) == 0 {
+		return commonerrors.ErrForbidden
+	}
+	for _, id := range deviceIDs {
+		if err := AuthorizeDeviceAccess(ctx, reader, id, visibleGroups); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ApplyDeviceVisibilityFilter 给一个 squirrel SelectBuilder 施加规范的三态 fail-closed
+// 设备组过滤，把结果行限定到 visibleGroups 下的设备。
+//
+// deviceIDColumn 是驱动表上持有设备 UUID 的限定列名（如 "alarms_active.device_id"）。
+// 用相关子查询而非 JOIN device_group_members，避免设备属多组时行翻倍：
+//
+//	nil       → 不过滤（超管）
+//	[]        → WHERE FALSE（fail-closed）
+//	[g1,...]  → WHERE deviceIDColumn IN (SELECT device_id FROM device_group_members WHERE group_id IN (...))
+func ApplyDeviceVisibilityFilter(b sq.SelectBuilder, deviceIDColumn string, visibleGroups []uuid.UUID) sq.SelectBuilder {
+	if visibleGroups == nil {
+		return b
+	}
+	if len(visibleGroups) == 0 {
+		return b.Where(sq.Expr("FALSE"))
+	}
+	// 子查询用默认 Question(?) 占位符（非 storage.Psql 的 Dollar）：被外层 Sqlizer
+	// 内嵌时占位符随顶层 builder 统一重排为 $N，避免与外层已有 WHERE 的 $N 撞号。
+	sub := sq.Select("device_id").
+		From("device_group_members").
+		Where(sq.Eq{"group_id": visibleGroups})
+	return b.Where(sq.Expr(deviceIDColumn+" IN (?)", sub))
+}

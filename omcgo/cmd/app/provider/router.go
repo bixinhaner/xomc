@@ -442,6 +442,7 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	// ----- Alarm routes → resource "alarms" -----
 	ah := c.alarmHandlerDeps
 	alarmHandler := alarm.NewHandler(c.AlarmEngine, ah.alarmPgStore, ah.alarmSyncService, c.Logger)
+	alarmHandler.SetPermissionService(c.PermService) // #64 设备组可见性数据权限
 	alarmHandler.RegisterRoutes(permGroup("alarms"))
 
 	// T-0098-P5-06：旧 /alarms/alarm-libraries 路由已下线，治理走 /alarms/alarm-definitions（super_admin）。

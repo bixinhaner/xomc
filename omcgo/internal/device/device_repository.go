@@ -485,7 +485,14 @@ func (r *PgDeviceRepository) List(ctx context.Context, filter DeviceFilter) (*mo
 	}
 
 	// VisibleGroups filter - data permission restriction
-	if len(filter.VisibleGroups) > 0 {
+	// #64 fail-open 收口：对齐 device_info_pg_repository.go 的三态 fail-closed 语义。
+	//   nil         → 超管，不过滤
+	//   []（非 nil）  → 非超管且无任何可见分组，短路空集（此前 len>0 判断会 fail-open 返全量）
+	//   [g1, ...]   → 限定到这些分组
+	if filter.VisibleGroups != nil && len(filter.VisibleGroups) == 0 {
+		builder = builder.Where("FALSE")
+		countBuilder = countBuilder.Where("FALSE")
+	} else if len(filter.VisibleGroups) > 0 {
 		if filter.GroupID == nil {
 			// Only add JOIN if not already added by GroupID
 			builder = builder.Join("device_group_members dgm2 ON d.id = dgm2.device_id")
