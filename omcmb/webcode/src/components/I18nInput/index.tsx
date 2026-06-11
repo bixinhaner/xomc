@@ -1,5 +1,6 @@
 import { Form, Input } from 'antd';
 import type { Rule } from 'antd/es/form';
+import { AddonInput } from '@/components/common/InputAddon';
 import { useT } from '@/hooks/useT';
 
 /**
@@ -60,20 +61,34 @@ export function I18nInput({
   const body = (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       <Form.Item name={[name, 'zh-CN']} noStyle rules={zhRules}>
-        <InputComp
-          {...inputCommonProps}
-          placeholder={placeholder?.zh ?? t('i18nInput.placeholderZh')}
-          addonBefore={textarea ? undefined : '中'}
-          prefix={textarea ? '中' : undefined}
-        />
+        {textarea ? (
+          <InputComp
+            {...inputCommonProps}
+            placeholder={placeholder?.zh ?? t('i18nInput.placeholderZh')}
+            prefix="中"
+          />
+        ) : (
+          <AddonInput
+            addonBefore="中"
+            maxLength={maxLength}
+            placeholder={placeholder?.zh ?? t('i18nInput.placeholderZh')}
+          />
+        )}
       </Form.Item>
       <Form.Item name={[name, 'en-US']} noStyle rules={enRules}>
-        <InputComp
-          {...inputCommonProps}
-          placeholder={placeholder?.en ?? t('i18nInput.placeholderEn')}
-          addonBefore={textarea ? undefined : 'EN'}
-          prefix={textarea ? 'EN' : undefined}
-        />
+        {textarea ? (
+          <InputComp
+            {...inputCommonProps}
+            placeholder={placeholder?.en ?? t('i18nInput.placeholderEn')}
+            prefix="EN"
+          />
+        ) : (
+          <AddonInput
+            addonBefore="EN"
+            maxLength={maxLength}
+            placeholder={placeholder?.en ?? t('i18nInput.placeholderEn')}
+          />
+        )}
       </Form.Item>
     </div>
   );

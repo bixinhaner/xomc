@@ -12,7 +12,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useIntl } from 'react-intl';
-import { Button, Card, Empty, List, Space, Tag, theme, Tooltip } from 'antd';
+import { Button, Card, Empty, Flex, Space, Tag, theme, Tooltip } from 'antd';
 import { MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons';
 import { usePmAdhocList } from '@core/hooks/api/usePmAdhoc';
 import type { AdhocTask } from '@core/types/pmAdhoc';
@@ -164,13 +164,14 @@ function TaskDashboardTab() {
                 <Tag color={g.color}>{g.title}</Tag>
                 <span style={{ marginLeft: 4 }}>{g.items.length}</span>
               </div>
-              <List
-                size="small"
-                dataSource={g.items}
-                renderItem={(t) => {
+              {/* antd6 List 已废弃：用 Flex 纵向容器 + map 复刻条目，沿用原内联样式，
+                  补 List split 默认的底部分隔线（组内末条不画）。 */}
+              <Flex vertical>
+                {g.items.map((t, idx) => {
                   const active = t.id === taskId;
                   return (
-                    <List.Item
+                    <div
+                      key={t.id}
                       onClick={() => handleSelect(t)}
                       style={{
                         cursor: 'pointer',
@@ -178,6 +179,7 @@ function TaskDashboardTab() {
                         background: active ? token.controlItemBgActive : undefined,
                         color: active ? token.colorPrimary : undefined,
                         borderRadius: 4,
+                        borderBottom: idx === g.items.length - 1 ? 'none' : `1px solid ${token.colorSplit}`,
                       }}
                     >
                       <Space size={4} style={{ width: '100%' }}>
@@ -195,10 +197,10 @@ function TaskDashboardTab() {
                           {t.name}
                         </span>
                       </Space>
-                    </List.Item>
+                    </div>
                   );
-                }}
-              />
+                })}
+              </Flex>
             </div>
           ),
         )}

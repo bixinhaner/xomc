@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Button, Descriptions, Form, Input, InputNumber, List, Select, Typography, message } from 'antd';
+import { Button, Descriptions, Flex, Form, Input, InputNumber, Select, Typography, message } from 'antd';
 import { PlayCircleOutlined, SaveOutlined, SearchOutlined } from '@ant-design/icons';
 import CommandConsoleLayout from '@/components/Layout/CommandConsoleLayout';
 import TerminalOutput from '@/components/TerminalOutput';
@@ -155,16 +155,18 @@ export default function CommandMode() {
           onChange={(val) => setSelectedCategory(val ?? '')}
         />
       </div>
+      {/* antd6 List 已废弃：改用 Flex 纵向容器 + map，条目沿用原内联样式，
+          并补 List split 默认的底部分隔线（末条不画）。 */}
       <div style={{ flex: 1, overflow: 'auto' }}>
-        <List
-          size="small"
-          dataSource={filteredCommands}
-          renderItem={(cmd) => (
-            <List.Item
+        <Flex vertical>
+          {filteredCommands.map((cmd, idx) => (
+            <div
+              key={cmd.id}
               style={{
                 cursor: 'pointer',
                 background: selectedCommand?.id === cmd.id ? '#e6f4ff' : 'transparent',
                 padding: '6px 12px',
+                borderBottom: idx === filteredCommands.length - 1 ? 'none' : '1px solid #f0f0f0',
               }}
               onClick={() => { setSelectedCommand(cmd); paramForm.resetFields(); }}
             >
@@ -172,9 +174,9 @@ export default function CommandMode() {
                 <div style={{ fontSize: 12, fontWeight: 500 }}>{cmd.commandName}</div>
                 <div style={{ fontSize: 11, color: '#8c8c8c', fontFamily: 'monospace' }}>{cmd.commandCode}</div>
               </div>
-            </List.Item>
-          )}
-        />
+            </div>
+          ))}
+        </Flex>
       </div>
     </div>
   );

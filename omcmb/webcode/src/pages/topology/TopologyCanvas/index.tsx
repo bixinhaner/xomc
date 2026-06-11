@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Button, Card, Col, Input, List, Row, Select, Space, Statistic, Tag, Tooltip, Typography, message } from 'antd';
+import { Button, Card, Col, Flex, Input, Pagination, Row, Select, Space, Statistic, Tag, Tooltip, Typography, message } from 'antd';
 import {
   SearchOutlined,
   ZoomInOutlined,
@@ -80,10 +80,23 @@ export default function TopologyCanvasPage() {
     [edges, filteredNodes],
   );
 
-  // 侧边栏分页：使用 key 让 List 内部状态在筛选变化时重置
+  // 侧边栏分页：antd6 List 已废弃，改用受控的 Pagination + 手动切片复刻原 List
+  // 的内置分页（pageSize 50 / 不显示 size 切换 / showTotal）。原先靠 key 重置
+  // List 内部页码，现把「当前筛选键 + 页码」放进同一份 state，筛选键变化时在渲染中
+  // 同步归 1（React 推荐的"渲染期按依赖调整 state"模式，避免 effect 内 setState）。
+  const SIDEBAR_PAGE_SIZE = 50;
   const sidebarListKey = useMemo(
     () => `sidebar-${searchValue}-${nodeTypeFilter}-${statusFilter}`,
     [searchValue, nodeTypeFilter, statusFilter],
+  );
+  const [sidebarPaging, setSidebarPaging] = useState({ key: sidebarListKey, page: 1 });
+  const sidebarPage = sidebarPaging.key === sidebarListKey ? sidebarPaging.page : 1;
+  if (sidebarPaging.key !== sidebarListKey) {
+    setSidebarPaging({ key: sidebarListKey, page: 1 });
+  }
+  const pagedNodes = useMemo(
+    () => filteredNodes.slice((sidebarPage - 1) * SIDEBAR_PAGE_SIZE, sidebarPage * SIDEBAR_PAGE_SIZE),
+    [filteredNodes, sidebarPage],
   );
 
   // 获取所有节点类型（用于筛选器选项）
@@ -144,24 +157,18 @@ export default function TopologyCanvasPage() {
         </Typography.Text>
       </div>
 
-      {/* Node list */}
+      {/* Node list —— antd6 List 已废弃：用 Flex 纵向容器 + map 复刻条目（条目自带
+          padding，仅补 List split 默认的底部分隔线），分页改受控 Pagination。 */}
       <div style={{ flex: 1, overflow: 'auto' }}>
-        <List
-          key={sidebarListKey}
-          size="small"
-          dataSource={filteredNodes}
-          pagination={{
-            pageSize: 50,
-            size: 'small',
-            showSizeChanger: false,
-            showTotal: (total) => `${t('table.total')}: ${total}`,
-          }}
-          renderItem={(node) => (
-            <List.Item
+        <Flex vertical>
+          {pagedNodes.map((node, idx) => (
+            <div
+              key={node.id}
               style={{
                 cursor: 'pointer',
                 background: highlightedNodeId === node.id ? '#e6f4ff' : 'transparent',
                 padding: '5px 12px',
+                borderBottom: idx === pagedNodes.length - 1 ? 'none' : '1px solid #f0f0f0',
               }}
               onClick={() => {
                 const targetNode = nodes.find(n => n.id === node.id);
@@ -183,9 +190,22 @@ export default function TopologyCanvasPage() {
                   {node.deviceSn && <span style={{ fontSize: 10, color: '#8c8c8c', fontFamily: 'monospace' }}>{node.deviceSn}</span>}
                 </div>
               </div>
-            </List.Item>
-          )}
-        />
+            </div>
+          ))}
+        </Flex>
+        {filteredNodes.length > 0 && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '10px 12px' }}>
+            <Pagination
+              size="small"
+              current={sidebarPage}
+              pageSize={SIDEBAR_PAGE_SIZE}
+              total={filteredNodes.length}
+              showSizeChanger={false}
+              showTotal={(total) => `${t('table.total')}: ${total}`}
+              onChange={(page) => setSidebarPaging({ key: sidebarListKey, page })}
+            />
+          </div>
+        )}
       </div>
     </div>
   );
