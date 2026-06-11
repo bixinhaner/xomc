@@ -17,13 +17,16 @@ cd "$OMCGO_DIR"
 
 PREFIX="${SN_PREFIX:-KPILT}"
 DSN="${DB_DSN:-postgres://omcgo:omcgo123@localhost:5432/omcgo?sslmode=disable}"
+NATS="${NATS_URL:-nats://localhost:4222}"
 
-echo "→ 清理 SN 前缀 '${PREFIX}' 的测试设备与 KPI 数据"
-echo "  DB: ${DSN}"
+echo "→ 清理 SN 前缀 '${PREFIX}' 的测试设备与 KPI 数据 + 清空 NATS PM 流"
+echo "  DB:   ${DSN}"
+echo "  NATS: ${NATS}"
 
 # 优先用已编译的 bin/kpiperf，没有则 go run（首次会编译，稍慢）。
+# cleanup 模式删 devices/pm_files/pm_metrics(含 KPI)/dead_letters + 清空 NATS PM 流。
 if [[ -x "$OMCGO_DIR/bin/kpiperf" ]]; then
-  "$OMCGO_DIR/bin/kpiperf" -mode cleanup -sn-prefix "$PREFIX" -db "$DSN" "$@"
+  "$OMCGO_DIR/bin/kpiperf" -mode cleanup -sn-prefix "$PREFIX" -db "$DSN" -nats "$NATS" "$@"
 else
-  go run ./test/pmperf -mode cleanup -sn-prefix "$PREFIX" -db "$DSN" "$@"
+  go run ./test/pmperf -mode cleanup -sn-prefix "$PREFIX" -db "$DSN" -nats "$NATS" "$@"
 fi

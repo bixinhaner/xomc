@@ -35,8 +35,13 @@ type generator struct {
 	origBodySN  string // 模板里 managedElement localDn 内的 SN（可能为空）
 	oui         string // 文件名里用的厂商 OUI 段
 	granSeconds int    // 粒度秒数（PT900S → 900）
+	counters    int    // 模板内 measType 数（报告用）
 	rewriteBody bool   // 是否改写 body 内 localDn 的 SN（默认 true，纯属保真，?sn= 才是权威源）
 }
+
+func (g *generator) label() string       { return g.name }
+func (g *generator) counterCount() int   { return g.counters }
+func (g *generator) granSecondsVal() int { return g.granSeconds }
 
 // loadGenerator 读取模板并抽取需要被替换的锚点。
 func loadGenerator(path, oui string, rewriteBody bool) (*generator, error) {
@@ -72,6 +77,7 @@ func loadGenerator(path, oui string, rewriteBody bool) (*generator, error) {
 		origBodySN:  extractLocalDnSN(raw),
 		oui:         oui,
 		granSeconds: gran,
+		counters:    strings.Count(raw, "<measType "),
 		rewriteBody: rewriteBody,
 	}
 	return g, nil

@@ -1,80 +1,104 @@
-# kpiperf — KPI(PM) 文件上传压测工具
+# kpiperf — KPI(PM) 文件上传压测工具（4G/5G/GSM）
 
 压测 OMC **KPI/PM 模块两段能力**：
 
 1. **文件存储**：设备直传 PM 文件 → ACS 流式落 MinIO（`pm-files` 桶）。
-2. **KPI 解析入库**：worker 订阅 `pm.file.received` → 下载 → 解析 3GPP 32.435 XML → 批量写 `pm_metrics`（counter）→ 反算 KPI（`metric_type='kpi'` 行）。
+2. **KPI 解析入库**：worker 解析 3GPP 32.435 XML → 批量写 `pm_metrics`（counter）→ 按平台反算 KPI（`metric_type='kpi'`）。
 
-工具用本目录两个真机样本（4G eNodeB + 5G gNB）作模板，按 `(SN, KPI 时间窗)` 批量生成并发上传，支持 **200–10000 并发**可指定。
+支持 **4G/5G/GSM 三制式同时压**、**总并发在三者间拆分**。默认用**指标库驱动合成法**：按各平台
+（BLQ/BaiBNQ/BSC）内置指标库 (`data/indicator-library/`) 的全部源 counter（`isCounter=1` 的 `reportKey`）
+生成文件 —— **覆盖全部内置指标**，且单文件无重名 counter（避开 `pm_metrics` 自然键冲突 SQLSTATE 21000）。
 
-## 链路（直传路径，不走 AutonomousTransferComplete）
+## 链路（直传，不走 AutonomousTransferComplete）
 
 ```
-kpiperf ──PUT /smallcell/FileUploadService?fileType=4&sn=<SN>&filename=<name>──▶ ACS:7557
-                                                          │ 流式落 MinIO(pm-files)
-                                                          │ 发 pm.file.received（瘦 payload，仅 device_sn）
-                                                          ▼
-worker: resolveDevice(按 SN 查 devices 表) → 解析 XML → BatchInsert pm_metrics → KPI 反算
+kpiperf ──PUT /smallcell/FileUploadService?fileType=4&sn=&filename=──▶ ACS:7557
+   ACS 落 MinIO(pm-files) + 发 pm.file.received（瘦 payload，仅 device_sn）
+   worker: resolveDevice(按 SN 查 devices) → 解析 → 写 pm_metrics(counter)
+           → 路由 product_class→平台 → 反算 KPI(metric_type=kpi)
 ```
 
-> **关键**：worker 的 `resolveDevice` 对**未注入的 SN 会报错并重试进 DLQ**——文件存储那一段对任意 SN 都成立，但**解析入库必须先注入测试设备**（`internal/pm/collector/collector.go` 的 `GetBySerialNumber` 命中 `devices` 表才放行）。设备身份以 URL `?sn=` 为准（`applyPayloadIdentity` 覆盖 XML 内解析出的 SN），所以 body 内 `localDn` 改不改都不影响路由。
+## ⚠️ 关键前置：设备必须「带 productClass、在上传前」注入
 
-## 前置条件
+worker 的 KPIRouter 按 `device_sn` 缓存路由结果（**含“未匹配”的负缓存**）。若设备首次被处理时
+`product_class` 为空 / 不匹配任何 `products.xml` pattern：
 
-- OMC 容器栈已起（`docker compose ... up -d`）：ACS `:7557`、PostgreSQL `:5432`、worker metrics `:9092`、MinIO/NATS 正常。
-- 文件描述符上限够高（高并发必须）：`ulimit -n 65535`。
-- 内存：峰值约 `并发数 × 单文件大小`（样本 4G≈120KB / 5G≈260KB）。1 万并发跑 5G 模板峰值 ~2.6GB，按需下调并发或只用 4G 模板。
+- **算不出 KPI**（路由不到 indicator platform）；
+- counter 白名单为空 → fail-open → **放过重名 counter 撞自然键（SQLSTATE 21000）→ 整文件失败进 DLQ**。
+
+本工具 `run`/`seed` 默认在上传前注入设备并带上每制式正确的 `product_class`：
+
+| RAT | tech | product_class | 命中 pattern | 平台 | indicator 库 |
+|-----|------|---------------|--------------|------|--------------|
+| lte | lte  | `FAP/BAIBLQ/SC` | `^FAP/BAIBLQ/SC$` | BLQ    | `enb/BLQ.xml`（1031 源 counter / 63 派生 KPI）|
+| nr  | nr   | `FAP/BSCNR`     | `FAP/\w*BSC\w+`   | BaiBNQ | `GNB.xml`（217 / 67）|
+| gsm | gsm  | `FAP/PGSM`      | `^FAP/PGSM$`      | BSC    | `GSM.xml`（45 / 26）|
+
+> 复用已被「无 productClass」处理过的 SN 会命中 worker 负缓存而永远算不出 KPI；本工具每制式用
+> 独立 SN 段（`KPILT-LTE-* / KPILT-NR-* / KPILT-GSM-*`）并默认先注入，规避该坑。换批请先 cleanup。
+
+## 本机端口（boss 栈占了标准端口，OMC 做了偏移）
+
+| 服务 | 本机端口 | 传入参数 |
+|------|---------|---------|
+| ACS 上传 | 7557 | `-url http://localhost:7557` |
+| PostgreSQL | **15432** | `-db postgres://omcgo:omcgo123@localhost:15432/omcgo?sslmode=disable` |
+| NATS | **14222** | `-nats nats://localhost:14222` |
+| worker metrics | 9092 | `-worker-metrics http://localhost:9092/metrics` |
+| 前端(性能管理) | **18081** | 浏览器 `http://localhost:18081` |
+
+> 工具内置默认是「标准端口」（5432/4222），本机务必按上表覆盖 `-db`/`-nats`。
 
 ## 构建
 
 ```bash
 cd omcgo
-go build -o bin/kpiperf ./test/pmperf      # 或直接 go run ./test/pmperf <flags>
-ulimit -n 65535
+go build -o bin/kpiperf ./test/pmperf
+ulimit -n 65535            # 高并发必须
 ```
 
-## 快速上手
-
-所有命令在 `omcgo/` 目录下执行（模板默认路径相对该目录）。
+## 快速上手（在 omcgo/ 下；下面已带本机端口覆盖）
 
 ```bash
-# ① 仅注入 1 万个测试设备（cmcc/lte，SN=KPILT-0000001…）
-bin/kpiperf -mode seed -devices 10000
+DB='postgres://omcgo:omcgo123@localhost:15432/omcgo?sslmode=disable'
+NATS='nats://localhost:14222'
 
-# ② 标准跑：注入 1 万设备 + 1 万文件（每设备一份）+ 并发 500 + 入库验证
-bin/kpiperf -concurrency 500 -devices 10000
+# ① 4G/5G/GSM 一起压，100 并发拆 34/33/33，3000 设备（每制式 1000），覆盖全部内置指标
+bin/kpiperf -rats lte,nr,gsm -concurrency 100 -devices 3000 -db "$DB" -nats "$NATS"
 
-# ③ 拉满并发到 1 万
+# ② 只注入 1 万设备（不上传）
+bin/kpiperf -mode seed -rats lte,nr,gsm -devices 9999 -db "$DB"
+
+# ③ 拉满到 1 万并发（只 4G/5G）
 ulimit -n 65535
-bin/kpiperf -concurrency 10000 -devices 10000
+bin/kpiperf -rats lte,nr -concurrency 10000 -devices 10000 -db "$DB" -nats "$NATS"
 
-# ④ 时长模式：持续 2 分钟，1000 并发，5000 设备 × 20 个时间窗（扩大唯一行空间，多量入库）
-bin/kpiperf -duration 2m -concurrency 1000 -devices 5000 -buckets 20
+# ④ 单制式、多时间窗增量（5000 设备 × 8 窗 = 4 万文件）
+bin/kpiperf -rats nr -concurrency 1000 -devices 5000 -buckets 8 -db "$DB" -nats "$NATS"
 
-# ⑤ 只压文件存储（不连库、不验证入库）
-bin/kpiperf -no-db -concurrency 1000 -devices 2000
+# ⑤ 只压文件存储（不连库、不验证入库；不注入设备时入库会失败，仅看存储能力）
+bin/kpiperf -rats lte,nr,gsm -concurrency 1000 -devices 3000 -no-db
 
-# ⑥ 只用 4G 模板（省内存），JSON 输出
-bin/kpiperf -concurrency 2000 -devices 5000 -json \
-  -templates 'test/pmperf/A20260611.0815+0800-0830+0800_48BF74.120299024119AA05000.xml'
+# ⑥ 用真机模板代替合成（每个 RAT 一个模板；4G 真机含重名 counter，需 productClass 命中才不撞自然键）
+bin/kpiperf -rats lte,nr -templates 'test/pmperf/A20260611.0815...05000.xml,test/pmperf/A20260611.0900...04259.xml' -db "$DB" -nats "$NATS"
 
 # ⑦ 跑完顺手清理
-bin/kpiperf -concurrency 500 -devices 10000 -cleanup-after
+bin/kpiperf -rats lte,nr,gsm -concurrency 100 -devices 3000 -db "$DB" -nats "$NATS" -cleanup-after
 ```
 
-## 一键清理
+## 一键清理（清设备 + KPI 数据 + NATS PM 流）
 
-测试设备与 KPI 数据全部带 SN 前缀（默认 `KPILT-`），一条命令清干净：
+测试设备与 KPI 数据全部带 SN 前缀（默认 `KPILT-`）：
 
 ```bash
-bash test/pmperf/cleanup.sh                 # 默认前缀 KPILT
-SN_PREFIX=FOO bash test/pmperf/cleanup.sh   # 自定义前缀
-# 等价于：
-bin/kpiperf -mode cleanup -sn-prefix KPILT
+DB_DSN='postgres://omcgo:omcgo123@localhost:15432/omcgo?sslmode=disable' \
+NATS_URL='nats://localhost:14222' \
+bash test/pmperf/cleanup.sh
+# 等价：bin/kpiperf -mode cleanup -sn-prefix KPILT -db "$DB" -nats "$NATS"
 ```
 
-清理会按 `device_sn / serial_number LIKE 'KPILT-%'` 删除 `pm_metrics`、`pm_files`、`devices` 三张表。
-手工兜底 SQL（容器内 `docker compose exec -T postgres psql -U omcgo -d omcgo`）：
+清理删除 `pm_metrics`（含 KPI）、`pm_files`、`devices`、`dead_letters`（按前缀），并清空 NATS `PM` 流。
+单独清 NATS：`bin/kpiperf -mode purge -nats "$NATS"`。手工兜底 SQL：
 
 ```sql
 DELETE FROM pm_metrics WHERE device_sn LIKE 'KPILT-%';
@@ -82,49 +106,53 @@ DELETE FROM pm_files   WHERE device_sn LIKE 'KPILT-%';
 DELETE FROM devices    WHERE serial_number LIKE 'KPILT-%';
 ```
 
+> 若 worker 已积压大量失败重投（如曾用无 productClass 的设备压测），`cleanup`/`purge` 清空 PM 流后，
+> 建议 `docker restart omc-worker-1` 丢弃 worker 进程内的重试队列，给干净起点。
+
+## 看图（性能管理页面）
+
+入库后浏览器开 `http://localhost:18081` → 性能管理 → **设备视图**，选一个 `KPILT-LTE/NR/GSM-*` 设备 +
+指标，时间范围「最近 7 天」即可看到曲线（KPI 行 `metric_type='kpi'`，`metric_path` 为 K 开头的指标 id）。
+任务看板（默认页）需要内置/自定义 adhoc 任务命中对应平台指标。
+
 ## 报告解读
 
-- **阶段一 文件存储**：上传成功率、墙钟、吞吐（文件/s、MB/s）、时延 p50/p90/p95/p99/max、HTTP 状态码分布。
-- **阶段二 解析入库**：等待入库收敛后给出新解析文件数（`pm_files.parsed` 增量）、新增 `pm_metrics` 行数、入库吞吐（文件/s、行/s），以及 worker Prometheus 增量（成功/失败/迟到文件、丢弃 counter、单文件处理均值、上报延迟均值）。
+- **阶段一 文件存储**：每制式 + 合计的上传成功率、墙钟、吞吐（文件/s、MB/s）、p50/p99 时延、状态码。
+- **阶段二 解析入库**：等待入库收敛后给出解析文件数、新增 `pm_metrics` 行（counter + KPI 分列）、
+  入库吞吐（文件/s、行/s）、每制式新增 counter/KPI 行，以及 worker Prometheus 增量
+  （成功/失败/迟到文件、丢弃 counter、单文件处理均值、上报延迟均值）。
 
-入库文件数 < 上传成功数时常见原因：设备未注入（SN 未命中）、迟到数据落进 TimescaleDB 压缩 chunk 被跳过（late_arrival）、worker 落后或进了 DLQ。
+> 「上报延迟均值」很大是因为压测把时间窗设在最近的已完成 15min 窗（end_time 在当前时刻之前若干分钟），
+> 不是真实问题。入库文件数 < 上传成功数时查 worker 日志/指标（设备未注入 / 迟到压缩 chunk / DLQ）。
 
 ## 参数
 
 | 参数 | 默认 | 说明 |
 |------|------|------|
-| `-mode` | `run` | `run`(注入+上传+验证) / `seed`(仅注入) / `cleanup`(仅清理) |
-| `-url` | `http://localhost:7557` | ACS 上传端点 base（或经 nginx `:8080`） |
-| `-templates` | 本目录两个样本 | 逗号分隔模板，多个则按文件序轮转（4G/5G 混压） |
-| `-concurrency` | `200` | 最大在飞上传数（200–10000） |
-| `-devices` | `10000` | 不同设备 SN 数（run 模式默认注入这么多） |
-| `-files` | `0` | 总文件数；0 = `devices×buckets`（每设备每窗一份） |
-| `-duration` | `0` | 按时长持续压测（>0 忽略 `-files`） |
-| `-buckets` | `1` | 15min KPI 时间窗个数（向最近完成窗回溯铺开） |
+| `-mode` | `run` | `run`/`seed`/`cleanup`(清库+清 NATS)/`purge`(仅清 NATS PM 流) |
+| `-rats` | `lte,nr,gsm` | 压测制式，逗号分隔；并发/设备数在其间拆分 |
+| `-url` | `http://localhost:7557` | ACS 上传端点 |
+| `-concurrency` | `100` | 总并发（在飞上限），按 `-rats` 拆分 |
+| `-devices` | `9999` | 设备总数，按 `-rats` 拆分 |
+| `-files` | `0` | 总文件数；0=各制式 devices×buckets |
+| `-buckets` | `1` | 15min 时间窗个数（扩大唯一行空间） |
+| `-templates` | 空 | 每 RAT 一个真机模板；留空=指标库合成（覆盖全部内置指标） |
 | `-sn-prefix` | `KPILT` | 测试设备 SN 前缀（清理按此 LIKE） |
-| `-oui` | `48BF74` | 设备 OUI（6 hex） |
-| `-carrier` | `cmcc` | `cmcc`/`ctcc`/`cucc`/`other`（devices 分区键） |
-| `-tech` | `lte` | `lte`/`nr`/`gsm` |
-| `-product-class` | `空` | 设备 product_class（填了才便于 KPI 路由；留空 counter 仍入库） |
-| `-filetype` | `4` | 上传 fileType（PM=4） |
-| `-username`/`-password` | 空 | 上传端点 Basic Auth（默认无鉴权） |
-| `-db` | `…localhost:5432/omcgo` | PostgreSQL DSN（注入/验证/清理） |
-| `-no-db` | `false` | 跳过注入与入库验证，仅压文件存储 |
-| `-seed` | `true` | run 模式上传前注入设备 |
-| `-cleanup-after` | `false` | run 模式结束后一键清理 |
-| `-worker-metrics` | `http://localhost:9092/metrics` | worker Prometheus（抓 PM 解析指标增量） |
-| `-drain` | `120s` | 上传后等待入库收敛的最长时长 |
+| `-oui`/`-carrier` | `48BF74`/`cmcc` | 设备 OUI / 运营商（分区键）|
+| `-db` | `…@localhost:5432/omcgo` | PostgreSQL DSN（本机用 15432）|
+| `-nats` | `nats://localhost:4222` | NATS URL（本机用 14222）|
+| `-no-db` | `false` | 跳过注入与入库验证，仅压存储 |
+| `-seed` | `true` | run 前注入设备（带 productClass）|
+| `-cleanup-after` | `false` | run 结束后一键清理 |
+| `-worker-metrics` | `http://localhost:9092/metrics` | worker Prometheus |
+| `-drain` | `120s` | 上传后等待入库收敛最长时长 |
 | `-timeout` | `30s` | 单次上传 HTTP 超时 |
 | `-json` | `false` | JSON 输出 |
-| `-rewrite-body-sn` | `true` | 改写 body 内 `localDn` 的 SN（保真，不影响路由） |
-| `-insecure` | `false` | https 时跳过 TLS 校验 |
+| `-insecure` | `false` | https 跳过 TLS 校验 |
 
-## 文件生成的改写点
+## 实测基线（本机，2026-06-11）
 
-每份文件相对模板只改身份与时间，保留运营商真机的全部 measType / 命名空间 / 结构：
-
-- **SN**：URL `?sn=`（权威）+ 文件名 `{OUI}.{SN}` 段 + body `managedElement localDn`（`-rewrite-body-sn`）。
-- **KPI 时间**：`fileHeader/measCollec@beginTime`、各 `measInfo/granPeriod@endTime`、`fileFooter/measCollec@endTime` 统一替换为分配到的 15min 时间窗（默认最近一个已完成窗口）。
-- **文件名**：`A{date}.{start}+0800-{end}+0800_{OUI}.{SN}__{seq}.xml`，`seq` 保证全局唯一，避免同日 MinIO 路径互相覆盖。
-
-`pm_metrics` 自然键含 `device_sn + end_time + time + object_ldn`，因此不同 SN 必产生不同行；同 `(SN,时间窗)` 重复上传则触发 UPSERT（行数不增，但仍走完整解析入库）。`-buckets` 越大、每设备可铺的唯一时间窗越多。
+100 并发拆 34/33/33，3 制式各 1000 设备 / 1000 文件：
+- 存储：3000 文件 100% 成功，墙钟 **4.9s**，**606 文件/s、22 MB/s**，p99 ~400ms。
+- 入库：全部解析，新增 **144 万行**（counter 129 万 + KPI 15.5 万），0 失败/0 丢弃，约 **50s 收敛**
+  （~60 文件/s、~2.9 万行/s），单文件处理均 12.6ms。
