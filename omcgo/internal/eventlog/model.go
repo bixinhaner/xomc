@@ -48,12 +48,15 @@ type DeviceRebootStat struct {
 
 // Filter 查询过滤条件
 type Filter struct {
-	DeviceSN   string
-	EventType  string
-	StartTime  *time.Time
-	EndTime    *time.Time
-	Page       int
-	PageSize   int
+	DeviceSN  string
+	EventType string
+	StartTime *time.Time
+	EndTime   *time.Time
+	Page      int
+	PageSize  int
+	// VisibleGroups 是 #63 设备组可见性强制层注入的可见分组集合（三态契约见 authz 包）：
+	// nil=超管不过滤，[]=无权限空集 fail-closed，[ids]=限定。仓库层按 device_id 列收窄。
+	VisibleGroups []uuid.UUID
 }
 
 func (f Filter) Offset() int {

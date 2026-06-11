@@ -1,6 +1,10 @@
 package rebootrecord
 
-import "time"
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
 
 // RebootType 重启类型过滤维度。
 //
@@ -56,6 +60,10 @@ type Filter struct {
 	EndTime    *time.Time
 	Page       int
 	PageSize   int
+	// VisibleGroups 是 #63 设备组可见性强制层注入的可见分组集合（三态契约见 authz 包）：
+	// nil=超管不过滤，[]=无权限空集 fail-closed，[ids]=限定。UNION 两半各按 device_id
+	// 关联 device_group_members 收窄（device_id 为 NULL 的记录对非超管不可见）。
+	VisibleGroups []uuid.UUID
 }
 
 func (f Filter) Offset() int {

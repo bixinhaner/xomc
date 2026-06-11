@@ -144,7 +144,7 @@ func TestValidateDevice_NoRegistry(t *testing.T) {
 	dev := newTestDevice()
 	v, _, _ := newDirectValidator(t, dev, nil)
 
-	_, err := v.ValidateDevice(context.Background(), dev.ID, dev.Carrier, dev.Technology)
+	_, err := v.ValidateDevice(context.Background(), dev.ID, dev.Carrier, dev.Technology, nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "param registry not configured")
 }
@@ -158,7 +158,7 @@ func TestValidateDevice_NoRegistry(t *testing.T) {
 func TestValidateDevice_DeviceNotFound(t *testing.T) {
 	v := NewDataModelValidator(nil, nil, newMockParamRepo(), newNilDeviceRepo(), zap.NewNop())
 
-	_, err := v.ValidateDevice(context.Background(), uuid.New(), model.CarrierCMCC, model.TechLTE)
+	_, err := v.ValidateDevice(context.Background(), uuid.New(), model.CarrierCMCC, model.TechLTE, nil)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, commonerrors.ErrNotFound,
 		"missing device must wrap ErrNotFound so handler maps 404")

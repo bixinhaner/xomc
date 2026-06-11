@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/authz"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	coremodel "github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/device"
@@ -66,6 +67,60 @@ type Service struct {
 	// nil → LICENSE_UPGRADE 任务创建返回 not configured。
 	// 由 backup.LicenseService 满足；wiring 在 cmd/app/provider/modules.go。
 	licenseUpgradeDispatcher LicenseUpgradeDispatcher
+
+	// groupReader 是 #63 设备组可见性强制层的按设备归属读取器（device_group_members）。
+	// 由 device.NewPgDeviceGroupReader 满足；nil 表示 dev/test 退化（authz 包 nil-safe，
+	// 不降低生产安全：生产路由始终注入 reader）。CreateTask 对 req.DeviceIDs 整批校验、
+	// 各操作端点对「任务关联设备」反查后校验，统一委派 authz 包，避免越权语义在此复刻。
+	groupReader authz.GroupReader
+}
+
+// SetGroupReader 注入设备组归属读取器（#63 租户隔离强制层）。生产装配必注入；
+// 不注入则 authz 退化为不强制（与 device/alarm nil-safe 语义一致）。
+func (s *Service) SetGroupReader(reader authz.GroupReader) {
+	s.groupReader = reader
+}
+
+// authorizeDevices 对一批设备 ID 做归属校验（CreateTask 用）。任一越权整批拒绝。
+func (s *Service) authorizeDevices(ctx context.Context, visibleGroups []uuid.UUID, deviceIDs ...uuid.UUID) error {
+	return authz.AuthorizeDevicesAccess(ctx, s.groupReader, visibleGroups, deviceIDs...)
+}
+
+// authorizeTaskDevices 反查任务关联设备（从 upgrade_sub_tasks 的 device_id）后逐个
+// 校验归属，用于 Start/Suspend/Terminate/Delete/Retry 等按任务操作的端点。
+//
+//	visibleGroups == nil      → 超管：直接放行，不查 sub_tasks。
+//	groupReader == nil        → dev/test 退化：放行（authz nil-safe）。
+//	任务无任何子任务设备       → 无可越权对象，放行（删一个空壳任务不构成跨租户读写）。
+//	任一子任务设备越权         → 整体拒绝（ErrForbidden）。
+func (s *Service) authorizeTaskDevices(ctx context.Context, taskID uuid.UUID, visibleGroups []uuid.UUID) error {
+	if visibleGroups == nil || s.groupReader == nil {
+		return nil
+	}
+	if s.subTaskRepo == nil {
+		return nil
+	}
+	page, err := s.subTaskRepo.ListByTaskID(ctx, taskID, software.SubTaskFilter{})
+	if err != nil {
+		return fmt.Errorf("list sub_tasks for task authz: %w", err)
+	}
+	seen := make(map[uuid.UUID]struct{}, len(page.Items))
+	ids := make([]uuid.UUID, 0, len(page.Items))
+	for i := range page.Items {
+		did := page.Items[i].DeviceID
+		if did == uuid.Nil {
+			continue
+		}
+		if _, ok := seen[did]; ok {
+			continue
+		}
+		seen[did] = struct{}{}
+		ids = append(ids, did)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	return authz.AuthorizeDevicesAccess(ctx, s.groupReader, visibleGroups, ids...)
 }
 
 // SnapshotConfigRestoreDispatcher 是 UFTE 对 backup.RestoreService.CreateBySnapshot
@@ -303,7 +358,11 @@ func (s *Service) UpdateTaskType(ctx context.Context, typeCode string, req TaskT
 	return &updated, nil
 }
 
-func (s *Service) StartTask(ctx context.Context, taskID uuid.UUID) error {
+func (s *Service) StartTask(ctx context.Context, taskID uuid.UUID, visibleGroups []uuid.UUID) error {
+	// #63 租户隔离：操作任务前先反查任务关联设备并校验归属，拒绝跨租户操作。
+	if err := s.authorizeTaskDevices(ctx, taskID, visibleGroups); err != nil {
+		return err
+	}
 	// For log-collect / config-backup tasks (Upload RPC), ResumeUpgrade can't
 	// resolve the transport path because it isn't stored on the task row.
 	// Look it up from the UFTE catalog and call ResumeCollect instead.
@@ -441,15 +500,24 @@ func (s *Service) ResumeLogCollectSubTask(ctx context.Context, subTask *software
 	return nil
 }
 
-func (s *Service) SuspendTask(ctx context.Context, taskID uuid.UUID) error {
+func (s *Service) SuspendTask(ctx context.Context, taskID uuid.UUID, visibleGroups []uuid.UUID) error {
+	if err := s.authorizeTaskDevices(ctx, taskID, visibleGroups); err != nil {
+		return err
+	}
 	return s.softwareService.SuspendUpgrade(ctx, taskID)
 }
 
-func (s *Service) TerminateTask(ctx context.Context, taskID uuid.UUID) error {
+func (s *Service) TerminateTask(ctx context.Context, taskID uuid.UUID, visibleGroups []uuid.UUID) error {
+	if err := s.authorizeTaskDevices(ctx, taskID, visibleGroups); err != nil {
+		return err
+	}
 	return s.softwareService.TerminateUpgrade(ctx, taskID)
 }
 
-func (s *Service) DeleteTask(ctx context.Context, taskID uuid.UUID) error {
+func (s *Service) DeleteTask(ctx context.Context, taskID uuid.UUID, visibleGroups []uuid.UUID) error {
+	if err := s.authorizeTaskDevices(ctx, taskID, visibleGroups); err != nil {
+		return err
+	}
 	return s.softwareService.DeleteUpgrade(ctx, taskID)
 }
 
@@ -462,10 +530,18 @@ type BatchDeleteTaskResult struct {
 
 // BatchDeleteTasks 逐条调 DeleteTask；单条失败不影响其它（如运行中任务、已不存在等）。
 // 返回每条详细结果，前端据此提示"成功 X 个，失败 Y 个：xxx"。
-func (s *Service) BatchDeleteTasks(ctx context.Context, taskIDs []uuid.UUID) []BatchDeleteTaskResult {
+// #63 租户隔离：逐条先校验任务关联设备归属，越权的那条标记失败（不阻断其它条），
+// 与"单条失败不影响整体"的既有语义一致。
+func (s *Service) BatchDeleteTasks(ctx context.Context, taskIDs []uuid.UUID, visibleGroups []uuid.UUID) []BatchDeleteTaskResult {
 	results := make([]BatchDeleteTaskResult, 0, len(taskIDs))
 	for _, id := range taskIDs {
 		r := BatchDeleteTaskResult{TaskID: id, Success: true}
+		if err := s.authorizeTaskDevices(ctx, id, visibleGroups); err != nil {
+			r.Success = false
+			r.Error = err.Error()
+			results = append(results, r)
+			continue
+		}
 		if err := s.softwareService.DeleteUpgrade(ctx, id); err != nil {
 			r.Success = false
 			r.Error = err.Error()
@@ -475,7 +551,10 @@ func (s *Service) BatchDeleteTasks(ctx context.Context, taskIDs []uuid.UUID) []B
 	return results
 }
 
-func (s *Service) RetryTask(ctx context.Context, taskID uuid.UUID) error {
+func (s *Service) RetryTask(ctx context.Context, taskID uuid.UUID, visibleGroups []uuid.UUID) error {
+	if err := s.authorizeTaskDevices(ctx, taskID, visibleGroups); err != nil {
+		return err
+	}
 	return s.softwareService.RetryUpgrade(ctx, taskID)
 }
 
@@ -497,7 +576,7 @@ func (s *Service) DeleteTaskType(ctx context.Context, typeCode string) error {
 	return nil
 }
 
-func (s *Service) CreateTask(ctx context.Context, req CreateTaskRequest, createUser string) (*Task, error) {
+func (s *Service) CreateTask(ctx context.Context, req CreateTaskRequest, createUser string, visibleGroups []uuid.UUID) (*Task, error) {
 	catalog, err := s.loadTaskTypeCatalog(ctx)
 	if err != nil {
 		return nil, err
@@ -508,6 +587,11 @@ func (s *Service) CreateTask(ctx context.Context, req CreateTaskRequest, createU
 	}
 	if len(req.DeviceIDs) == 0 {
 		return nil, fmt.Errorf("%w: device_ids is required", commonerrors.ErrInvalidInput)
+	}
+	// #63 租户隔离：派发任何文件传输任务前，整批校验目标设备归属当前调用者可见
+	// 设备组；只要混入域外设备即整批拒绝（ErrForbidden → handler 映射 403）。
+	if err := s.authorizeDevices(ctx, visibleGroups, req.DeviceIDs...); err != nil {
+		return nil, err
 	}
 
 	// 解析 scheduled 模式的目标时间：仅在 ExecutionMode="scheduled" 且字符串非空时解析；

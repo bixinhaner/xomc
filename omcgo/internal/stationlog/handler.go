@@ -10,14 +10,16 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/authz"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // Handler 日志采集文件的 HTTP 处理器
 type Handler struct {
-	svc    *Service
-	logger *zap.Logger
+	svc      *Service
+	resolver *authz.Resolver
+	logger   *zap.Logger
 }
 
 func NewHandler(svc *Service, logger *zap.Logger) *Handler {
@@ -25,6 +27,12 @@ func NewHandler(svc *Service, logger *zap.Logger) *Handler {
 		svc:    svc,
 		logger: logger.Named("stationlog-handler"),
 	}
+}
+
+// SetPermissionService 注入数据权限解析器（#63 设备组可见性强制层）。未注入时
+// FromContext 走 nil-safe 退化（不过滤），与 device/alarm 模块语义一致。
+func (h *Handler) SetPermissionService(perm authz.VisibleGroupsResolver) {
+	h.resolver = authz.NewResolver(perm)
 }
 
 // RegisterRoutes 注册路由到指定 RouterGroup。
@@ -92,6 +100,12 @@ func (h *Handler) List(c *gin.Context) {
 		}
 	}
 
+	groups, ok := h.resolver.FromContext(c)
+	if !ok {
+		return
+	}
+	filter.VisibleGroups = groups
+
 	items, total, err := h.svc.List(c.Request.Context(), filter)
 	if err != nil {
 		h.logger.Error("list station log files", zap.Error(err))
@@ -124,7 +138,12 @@ func (h *Handler) Download(c *gin.Context) {
 
 	logType := logTypeFromQuery(c, LogTypeRunning)
 
-	url, err := h.svc.DownloadURL(c.Request.Context(), id, logType)
+	groups, ok := h.resolver.FromContext(c)
+	if !ok {
+		return
+	}
+
+	url, err := h.svc.DownloadURL(c.Request.Context(), id, logType, groups)
 	if err != nil {
 		h.logger.Error("generate download url", zap.String("id", id.String()), zap.Error(err))
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
@@ -154,7 +173,12 @@ func (h *Handler) Delete(c *gin.Context) {
 
 	logType := logTypeFromQuery(c, LogTypeRunning)
 
-	if err := h.svc.Delete(c.Request.Context(), id, logType); err != nil {
+	groups, ok := h.resolver.FromContext(c)
+	if !ok {
+		return
+	}
+
+	if err := h.svc.Delete(c.Request.Context(), id, logType, groups); err != nil {
 		h.logger.Error("delete station log file", zap.String("id", id.String()), zap.Error(err))
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
@@ -262,10 +286,14 @@ func (h *Handler) GetAbnormalReboot(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
 		return
 	}
-	item, err := h.svc.GetByID(c.Request.Context(), id, LogTypeFault)
+	groups, ok := h.resolver.FromContext(c)
+	if !ok {
+		return
+	}
+	item, err := h.svc.GetByID(c.Request.Context(), id, LogTypeFault, groups)
 	if err != nil {
 		h.logger.Error("get abnormal reboot record", zap.String("id", id.String()), zap.Error(err))
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
 	if item == nil {
@@ -288,9 +316,13 @@ func (h *Handler) DeleteAbnormalReboot(c *gin.Context) {
 		return
 	}
 
+	groups, ok := h.resolver.FromContext(c)
+	if !ok {
+		return
+	}
 	// 不论 detected 占位还是 file_received，都允许删除：detected 只做软删 + 标记，
 	// file_received 走完整的 MinIO 清理 + 标记。
-	if err := h.svc.Delete(c.Request.Context(), id, LogTypeFault); err != nil {
+	if err := h.svc.Delete(c.Request.Context(), id, LogTypeFault, groups); err != nil {
 		h.logger.Error("delete abnormal reboot record", zap.String("id", id.String()), zap.Error(err))
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
@@ -313,10 +345,14 @@ func (h *Handler) DownloadAbnormalReboot(c *gin.Context) {
 		return
 	}
 
+	groups, ok := h.resolver.FromContext(c)
+	if !ok {
+		return
+	}
 	// 先取一遍记录，提前拦截 detected 状态（避免落到 minio presign 才报错）
-	item, err := h.svc.GetByID(c.Request.Context(), id, LogTypeFault)
+	item, err := h.svc.GetByID(c.Request.Context(), id, LogTypeFault, groups)
 	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
 	if item == nil {
@@ -332,7 +368,7 @@ func (h *Handler) DownloadAbnormalReboot(c *gin.Context) {
 		return
 	}
 
-	url, err := h.svc.DownloadURL(c.Request.Context(), id, LogTypeFault)
+	url, err := h.svc.DownloadURL(c.Request.Context(), id, LogTypeFault, groups)
 	if err != nil {
 		h.logger.Error("generate abnormal reboot download url",
 			zap.String("id", id.String()), zap.Error(err))

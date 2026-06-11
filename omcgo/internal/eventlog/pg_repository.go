@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/omcgo/omcgo/internal/authz"
 	"github.com/omcgo/omcgo/internal/core/storage"
 )
 
@@ -101,6 +102,9 @@ func (r *PgRepository) List(ctx context.Context, filter Filter) ([]*EventLog, in
 		base = base.Where(sq.LtOrEq{"occurred_at": *filter.EndTime})
 		countBase = countBase.Where(sq.LtOrEq{"occurred_at": *filter.EndTime})
 	}
+	// #63 设备组可见性 fail-closed 过滤（device_id 为 NULL 的记录对非超管不可见）。
+	base = authz.ApplyDeviceVisibilityFilter(base, "device_id", filter.VisibleGroups)
+	countBase = authz.ApplyDeviceVisibilityFilter(countBase, "device_id", filter.VisibleGroups)
 
 	countQuery, countArgs, err := countBase.ToSql()
 	if err != nil {
@@ -159,6 +163,8 @@ func (r *PgRepository) StatByDevice(ctx context.Context, filter Filter) ([]*Devi
 	if filter.EndTime != nil {
 		base = base.Where(sq.LtOrEq{"occurred_at": *filter.EndTime})
 	}
+	// #63 设备组可见性 fail-closed 过滤（聚合前按 device_id 收窄）。
+	base = authz.ApplyDeviceVisibilityFilter(base, "device_id", filter.VisibleGroups)
 
 	query, args, err := base.
 		GroupBy("device_sn").

@@ -29,12 +29,12 @@ func (m *mockCaseRunner) ListTestCases() map[TestCategory][]TestCase {
 	return m.cases
 }
 
-func (m *mockCaseRunner) RunAll(_ context.Context, deviceSN string) ([]TestResult, error) {
+func (m *mockCaseRunner) RunAll(_ context.Context, deviceSN string, _ []uuid.UUID) ([]TestResult, error) {
 	m.calls = append(m.calls, "all:"+deviceSN)
 	return m.allResults, m.allErr
 }
 
-func (m *mockCaseRunner) RunByCategory(_ context.Context, deviceSN string, cat TestCategory) ([]TestResult, error) {
+func (m *mockCaseRunner) RunByCategory(_ context.Context, deviceSN string, cat TestCategory, _ []uuid.UUID) ([]TestResult, error) {
 	m.calls = append(m.calls, "cat:"+string(cat)+":"+deviceSN)
 	if err, ok := m.byCatErr[cat]; ok {
 		return nil, err
@@ -48,7 +48,7 @@ type mockValidator struct {
 	calls  int
 }
 
-func (m *mockValidator) ValidateDevice(_ context.Context, _ uuid.UUID, _ model.CarrierCode, _ model.Technology) (*ValidationReport, error) {
+func (m *mockValidator) ValidateDevice(_ context.Context, _ uuid.UUID, _ model.CarrierCode, _ model.Technology, _ []uuid.UUID) (*ValidationReport, error) {
 	m.calls++
 	return m.report, m.err
 }
@@ -79,7 +79,7 @@ func TestService_RunCases_AllCategories(t *testing.T) {
 	}
 	svc := NewService(runner, nil, zap.NewNop())
 
-	summary, err := svc.RunCases(context.Background(), "SN-1", nil)
+	summary, err := svc.RunCases(context.Background(), "SN-1", nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "SN-1", summary.DeviceSN)
 	assert.Equal(t, 3, summary.Total)
@@ -98,7 +98,7 @@ func TestService_RunCases_SpecificCategories(t *testing.T) {
 	}
 	svc := NewService(runner, nil, zap.NewNop())
 
-	summary, err := svc.RunCases(context.Background(), "SN-2", []TestCategory{CategoryProtocol, CategoryDataModel})
+	summary, err := svc.RunCases(context.Background(), "SN-2", []TestCategory{CategoryProtocol, CategoryDataModel}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, 3, summary.Total)
 	assert.Equal(t, 2, summary.Passed)
@@ -112,7 +112,7 @@ func TestService_RunCases_InvalidCategoryShortCircuits(t *testing.T) {
 	runner := &mockCaseRunner{}
 	svc := NewService(runner, nil, zap.NewNop())
 
-	_, err := svc.RunCases(context.Background(), "SN-3", []TestCategory{"bogus"})
+	_, err := svc.RunCases(context.Background(), "SN-3", []TestCategory{"bogus"}, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid test category")
 	// Runner must NOT have been touched if validation fails up front.
@@ -121,7 +121,7 @@ func TestService_RunCases_InvalidCategoryShortCircuits(t *testing.T) {
 
 func TestService_RunCases_EmptyDeviceSN(t *testing.T) {
 	svc := NewService(&mockCaseRunner{}, nil, zap.NewNop())
-	_, err := svc.RunCases(context.Background(), "", nil)
+	_, err := svc.RunCases(context.Background(), "", nil, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "device_sn is required")
 }
@@ -130,7 +130,7 @@ func TestService_RunCases_RunnerError(t *testing.T) {
 	runner := &mockCaseRunner{allErr: errors.New("device offline")}
 	svc := NewService(runner, nil, zap.NewNop())
 
-	_, err := svc.RunCases(context.Background(), "SN-4", nil)
+	_, err := svc.RunCases(context.Background(), "SN-4", nil, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "device offline")
 }
@@ -143,7 +143,7 @@ func TestService_RunByCategory(t *testing.T) {
 	}
 	svc := NewService(runner, nil, zap.NewNop())
 
-	summary, err := svc.RunByCategory(context.Background(), "SN-5", CategoryRPC)
+	summary, err := svc.RunByCategory(context.Background(), "SN-5", CategoryRPC, nil)
 	require.NoError(t, err)
 	assert.Equal(t, 2, summary.Total)
 	assert.Equal(t, 2, summary.Passed)
@@ -152,7 +152,7 @@ func TestService_RunByCategory(t *testing.T) {
 
 func TestService_RunByCategory_InvalidCategory(t *testing.T) {
 	svc := NewService(&mockCaseRunner{}, nil, zap.NewNop())
-	_, err := svc.RunByCategory(context.Background(), "SN-6", "nonsense")
+	_, err := svc.RunByCategory(context.Background(), "SN-6", "nonsense", nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid test category")
 }
@@ -163,7 +163,7 @@ func TestService_ValidateDevice_Success(t *testing.T) {
 	}}
 	svc := NewService(nil, val, zap.NewNop())
 
-	report, err := svc.ValidateDevice(context.Background(), uuid.New(), model.CarrierCMCC, model.TechLTE)
+	report, err := svc.ValidateDevice(context.Background(), uuid.New(), model.CarrierCMCC, model.TechLTE, nil)
 	require.NoError(t, err)
 	require.NotNil(t, report)
 	assert.Equal(t, "SN-7", report.DeviceSN)
@@ -174,7 +174,7 @@ func TestService_ValidateDevice_InvalidCarrier(t *testing.T) {
 	val := &mockValidator{}
 	svc := NewService(nil, val, zap.NewNop())
 
-	_, err := svc.ValidateDevice(context.Background(), uuid.New(), model.CarrierCode("xxxx"), model.TechLTE)
+	_, err := svc.ValidateDevice(context.Background(), uuid.New(), model.CarrierCode("xxxx"), model.TechLTE, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid carrier")
 	assert.Equal(t, 0, val.calls, "validator must not be called when input is invalid")
@@ -184,7 +184,7 @@ func TestService_ValidateDevice_ValidatorError(t *testing.T) {
 	val := &mockValidator{err: errors.New("data model not found")}
 	svc := NewService(nil, val, zap.NewNop())
 
-	_, err := svc.ValidateDevice(context.Background(), uuid.New(), model.CarrierCMCC, model.TechNR)
+	_, err := svc.ValidateDevice(context.Background(), uuid.New(), model.CarrierCMCC, model.TechNR, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "data model not found")
 }
@@ -207,11 +207,11 @@ func TestService_NilDependenciesGuarded(t *testing.T) {
 	cases := svc.ListCases(context.Background())
 	assert.Empty(t, cases)
 
-	_, err := svc.RunCases(context.Background(), "SN-Z", nil)
+	_, err := svc.RunCases(context.Background(), "SN-Z", nil, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "case runner not configured")
 
-	_, err = svc.ValidateDevice(context.Background(), uuid.New(), model.CarrierCMCC, model.TechLTE)
+	_, err = svc.ValidateDevice(context.Background(), uuid.New(), model.CarrierCMCC, model.TechLTE, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "model validator not configured")
 }

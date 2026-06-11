@@ -46,7 +46,7 @@ func readZipEntries(t *testing.T, buf *bytes.Buffer) map[string]string {
 func TestWriteZipTo_NoSourceRegistered(t *testing.T) {
 	svc := newService()
 	var buf bytes.Buffer
-	n, err := svc.WriteZipTo(context.Background(), ModuleFirmware, []string{"id-1"}, &buf)
+	n, err := svc.WriteZipTo(context.Background(), ModuleFirmware, []string{"id-1"}, nil, &buf)
 	assert.Equal(t, 0, n)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
@@ -61,7 +61,7 @@ func TestWriteZipTo_EmptyTargetIDs(t *testing.T) {
 		return nil, nil
 	})
 	var buf bytes.Buffer
-	n, err := svc.WriteZipTo(context.Background(), ModuleMR, nil, &buf)
+	n, err := svc.WriteZipTo(context.Background(), ModuleMR, nil, nil, &buf)
 	assert.Equal(t, 0, n)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
@@ -77,7 +77,7 @@ func TestWriteZipTo_SourceError(t *testing.T) {
 		return nil, sentinel
 	})
 	var buf bytes.Buffer
-	n, err := svc.WriteZipTo(context.Background(), ModuleFirmware, []string{"id-1"}, &buf)
+	n, err := svc.WriteZipTo(context.Background(), ModuleFirmware, []string{"id-1"}, nil, &buf)
 	assert.Equal(t, 0, n)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, sentinel)
@@ -92,7 +92,7 @@ func TestWriteZipTo_ZeroFiles(t *testing.T) {
 		return []BundleFile{}, nil
 	})
 	var buf bytes.Buffer
-	n, err := svc.WriteZipTo(context.Background(), ModuleMR, []string{"SN-001"}, &buf)
+	n, err := svc.WriteZipTo(context.Background(), ModuleMR, []string{"SN-001"}, nil, &buf)
 	assert.Equal(t, 0, n)
 	assert.NoError(t, err)
 	assert.Zero(t, buf.Len(), "0 文件不应写出任何 zip 字节")
@@ -110,7 +110,7 @@ func TestWriteZipTo_ObjectErrorWritesPlaceholder(t *testing.T) {
 	})
 
 	var buf bytes.Buffer
-	n, err := svc.WriteZipTo(context.Background(), ModuleMR, []string{"SN-001"}, &buf)
+	n, err := svc.WriteZipTo(context.Background(), ModuleMR, []string{"SN-001"}, nil, &buf)
 	require.NoError(t, err, "单对象失败不应让整批 5xx")
 	assert.Equal(t, 0, n, "失败对象不计入写入数")
 
@@ -131,7 +131,7 @@ func TestWriteZipTo_AllObjectsFail(t *testing.T) {
 		}, nil
 	})
 	var buf bytes.Buffer
-	n, err := svc.WriteZipTo(context.Background(), ModuleFirmware, []string{"a", "b"}, &buf)
+	n, err := svc.WriteZipTo(context.Background(), ModuleFirmware, []string{"a", "b"}, nil, &buf)
 	require.NoError(t, err)
 	assert.Equal(t, 0, n)
 
@@ -154,7 +154,7 @@ func TestRegister_Overwrite(t *testing.T) {
 		return nil, errors.New("second")
 	})
 	var buf bytes.Buffer
-	_, err := svc.WriteZipTo(context.Background(), ModuleMR, []string{"x"}, &buf)
+	_, err := svc.WriteZipTo(context.Background(), ModuleMR, []string{"x"}, nil, &buf)
 	require.Error(t, err)
 	assert.Equal(t, "second", called, "后注册的 Source 应生效")
 }

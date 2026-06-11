@@ -12,13 +12,15 @@ import (
 
 	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/admin/audit"
+	"github.com/omcgo/omcgo/internal/authz"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 type Handler struct {
-	service *Service
-	logger  *zap.Logger
+	service  *Service
+	resolver *authz.Resolver
+	logger   *zap.Logger
 }
 
 func NewHandler(service *Service, logger *zap.Logger) *Handler {
@@ -26,6 +28,12 @@ func NewHandler(service *Service, logger *zap.Logger) *Handler {
 		service: service,
 		logger:  logger.Named("ufte-handler"),
 	}
+}
+
+// SetPermissionService 注入数据权限解析器（#63 设备组可见性强制层）。未注入时
+// FromContext 走 nil-safe 退化（不过滤），与 device/alarm 模块语义一致。
+func (h *Handler) SetPermissionService(perm authz.VisibleGroupsResolver) {
+	h.resolver = authz.NewResolver(perm)
 }
 
 func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
@@ -124,8 +132,12 @@ func (h *Handler) CreateTask(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
+	visibleGroups, ok := h.resolver.FromContext(c)
+	if !ok {
+		return
+	}
 	creator := currentUsername(c)
-	task, err := h.service.CreateTask(c.Request.Context(), req, creator)
+	task, err := h.service.CreateTask(c.Request.Context(), req, creator, visibleGroups)
 
 	entry := admin.AuditContextFromGin(c)
 	entry.Action = audit.ActionUpgrade
@@ -331,12 +343,25 @@ func (h *Handler) parseTaskID(c *gin.Context) (uuid.UUID, bool) {
 	return id, true
 }
 
-func (h *Handler) StartTask(c *gin.Context) {
+// resolveTaskOp 解析 task id + 调用者可见设备组；二者任一失败已 abort，返回 false。
+func (h *Handler) resolveTaskOp(c *gin.Context) (uuid.UUID, []uuid.UUID, bool) {
 	id, ok := h.parseTaskID(c)
+	if !ok {
+		return uuid.Nil, nil, false
+	}
+	visibleGroups, ok := h.resolver.FromContext(c)
+	if !ok {
+		return uuid.Nil, nil, false
+	}
+	return id, visibleGroups, true
+}
+
+func (h *Handler) StartTask(c *gin.Context) {
+	id, visibleGroups, ok := h.resolveTaskOp(c)
 	if !ok {
 		return
 	}
-	if err := h.service.StartTask(c.Request.Context(), id); err != nil {
+	if err := h.service.StartTask(c.Request.Context(), id, visibleGroups); err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
@@ -344,11 +369,11 @@ func (h *Handler) StartTask(c *gin.Context) {
 }
 
 func (h *Handler) SuspendTask(c *gin.Context) {
-	id, ok := h.parseTaskID(c)
+	id, visibleGroups, ok := h.resolveTaskOp(c)
 	if !ok {
 		return
 	}
-	if err := h.service.SuspendTask(c.Request.Context(), id); err != nil {
+	if err := h.service.SuspendTask(c.Request.Context(), id, visibleGroups); err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
@@ -356,11 +381,11 @@ func (h *Handler) SuspendTask(c *gin.Context) {
 }
 
 func (h *Handler) TerminateTask(c *gin.Context) {
-	id, ok := h.parseTaskID(c)
+	id, visibleGroups, ok := h.resolveTaskOp(c)
 	if !ok {
 		return
 	}
-	if err := h.service.TerminateTask(c.Request.Context(), id); err != nil {
+	if err := h.service.TerminateTask(c.Request.Context(), id, visibleGroups); err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
@@ -368,11 +393,11 @@ func (h *Handler) TerminateTask(c *gin.Context) {
 }
 
 func (h *Handler) DeleteTask(c *gin.Context) {
-	id, ok := h.parseTaskID(c)
+	id, visibleGroups, ok := h.resolveTaskOp(c)
 	if !ok {
 		return
 	}
-	if err := h.service.DeleteTask(c.Request.Context(), id); err != nil {
+	if err := h.service.DeleteTask(c.Request.Context(), id, visibleGroups); err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
@@ -403,6 +428,10 @@ func (h *Handler) BatchDeleteTasks(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
+	visibleGroups, ok := h.resolver.FromContext(c)
+	if !ok {
+		return
+	}
 	ids := make([]uuid.UUID, 0, len(req.TaskIDs))
 	invalidIDs := make([]BatchDeleteTaskFailureItem, 0)
 	for _, raw := range req.TaskIDs {
@@ -415,7 +444,7 @@ func (h *Handler) BatchDeleteTasks(c *gin.Context) {
 		}
 		ids = append(ids, id)
 	}
-	results := h.service.BatchDeleteTasks(c.Request.Context(), ids)
+	results := h.service.BatchDeleteTasks(c.Request.Context(), ids, visibleGroups)
 	resp := BatchDeleteTasksResponse{
 		Succeeded: make([]string, 0, len(results)),
 		Failed:    invalidIDs, // 先把 uuid 解析失败的塞进去
@@ -433,11 +462,11 @@ func (h *Handler) BatchDeleteTasks(c *gin.Context) {
 }
 
 func (h *Handler) RetryTask(c *gin.Context) {
-	id, ok := h.parseTaskID(c)
+	id, visibleGroups, ok := h.resolveTaskOp(c)
 	if !ok {
 		return
 	}
-	if err := h.service.RetryTask(c.Request.Context(), id); err != nil {
+	if err := h.service.RetryTask(c.Request.Context(), id, visibleGroups); err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}

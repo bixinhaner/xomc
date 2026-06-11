@@ -8,6 +8,9 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/google/uuid"
+
+	"github.com/omcgo/omcgo/internal/authz"
 	"github.com/omcgo/omcgo/internal/config/parammodel"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
@@ -30,6 +33,15 @@ type ConformanceTestRunner struct {
 	productRegistry *product.Registry
 	taskSvc         task.Enqueuer
 	logger          *zap.Logger
+	// groupReader 是 #63 设备组可见性强制层的按设备归属读取器；RunAll/RunByCategory
+	// 解析出目标设备后、执行任何（可能含破坏性 RPC-006/008/009）测试步骤前校验归属。
+	// nil → dev/test 退化放行（authz nil-safe）。
+	groupReader authz.GroupReader
+}
+
+// SetGroupReader 注入设备组归属读取器（#63 租户隔离强制层）。
+func (r *ConformanceTestRunner) SetGroupReader(reader authz.GroupReader) {
+	r.groupReader = reader
 }
 
 // NewConformanceTestRunner creates a runner pre-loaded with test cases.
@@ -128,13 +140,17 @@ func shouldRunForDevice(tc TestCase, dev *model.Device) bool {
 
 // RunAll executes every registered test case against the specified device,
 // honouring per-case TargetDeviceModels filters (T-0116).
-func (r *ConformanceTestRunner) RunAll(ctx context.Context, deviceSN string) ([]TestResult, error) {
+func (r *ConformanceTestRunner) RunAll(ctx context.Context, deviceSN string, visibleGroups []uuid.UUID) ([]TestResult, error) {
 	dev, err := r.deviceRepo.GetBySerialNumber(ctx, deviceSN)
 	if err != nil {
 		return nil, fmt.Errorf("lookup device %s: %w", deviceSN, err)
 	}
 	if dev == nil {
 		return nil, fmt.Errorf("device not found: %s: %w", deviceSN, commonerrors.ErrNotFound)
+	}
+	// #63 租户隔离：执行任何（可能破坏性）测试前校验设备归属，越权 → ErrForbidden（403）。
+	if err := authz.AuthorizeDeviceAccess(ctx, r.groupReader, dev.ID, visibleGroups); err != nil {
+		return nil, err
 	}
 
 	var results []TestResult
@@ -156,7 +172,7 @@ func (r *ConformanceTestRunner) RunAll(ctx context.Context, deviceSN string) ([]
 
 // RunByCategory executes test cases in the given category against the device,
 // honouring per-case TargetDeviceModels filters (T-0116).
-func (r *ConformanceTestRunner) RunByCategory(ctx context.Context, deviceSN string, category TestCategory) ([]TestResult, error) {
+func (r *ConformanceTestRunner) RunByCategory(ctx context.Context, deviceSN string, category TestCategory, visibleGroups []uuid.UUID) ([]TestResult, error) {
 	if !category.IsValid() {
 		return nil, fmt.Errorf("invalid test category: %s", category)
 	}
@@ -167,6 +183,10 @@ func (r *ConformanceTestRunner) RunByCategory(ctx context.Context, deviceSN stri
 	}
 	if dev == nil {
 		return nil, fmt.Errorf("device not found: %s: %w", deviceSN, commonerrors.ErrNotFound)
+	}
+	// #63 租户隔离：执行任何（可能破坏性）测试前校验设备归属，越权 → ErrForbidden（403）。
+	if err := authz.AuthorizeDeviceAccess(ctx, r.groupReader, dev.ID, visibleGroups); err != nil {
+		return nil, err
 	}
 
 	cases, ok := r.cases[category]
