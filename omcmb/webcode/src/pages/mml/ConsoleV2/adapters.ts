@@ -17,6 +17,7 @@ import type {
   MMLCustomCommand,
   MMLOperationType,
   MMLTask,
+  MMLTaskCommandDetail,
 } from '@core/types/mml';
 import { parseMmlDeviceTaskResult } from '@core/utils/mmlResultParser';
 import { isReadOp, opLabel } from './constants';
@@ -31,6 +32,7 @@ import type {
   PathTask,
   ResultColumn,
   ResultRow,
+  VerifyItem,
 } from './types';
 
 /** 真实设备 → 设备弹框行视图。 */
@@ -480,6 +482,80 @@ export function buildDeviceRows(
   return rows;
 }
 
+const upperOp = (d?: MMLTaskCommandDetail): string => (d?.operationType ?? '').toString().toUpperCase();
+
+/**
+ * #196：MOD 自动回读复合（SetParameterValues 下发 + GetParameterValues 回读）→ 每设备一行。
+ * 把「下发值（命令 paramValues）」与「回读值（回读 LST 结果）」按 path 关联成 verify 对比，
+ * 并分别保留 MOD 下发响应报文（raw）与回读 LST 响应报文（readbackRaw）。
+ */
+function buildMODReadbackRows(
+  items: DeviceTaskResultItem[],
+  details: MMLTaskCommandDetail[],
+  setValues: Record<string, string>,
+  columns: ResultColumn[],
+): ResultRow[] {
+  const opOf = (ci?: number): string => (ci != null ? upperOp(details[ci]) : '');
+  const labelOf = (path: string): string => columns.find((c) => c.path === path)?.label ?? leafName(path);
+
+  const byDevice = new Map<string, DeviceTaskResultItem[]>();
+  for (const it of items) {
+    const arr = byDevice.get(it.deviceSn) ?? [];
+    arr.push(it);
+    byDevice.set(it.deviceSn, arr);
+  }
+
+  const rows: ResultRow[] = [];
+  for (const [deviceSn, devItems] of byDevice) {
+    const modItems = devItems.filter((it) => opOf(it.commandIndex) === 'MOD');
+    const lstItem = devItems.find((it) => opOf(it.commandIndex) === 'LST');
+
+    // 回读值：解析回读 LST（GetParameterValues）→ path / leaf -> value
+    const readback = new Map<string, string>();
+    if (lstItem?.result?.success && lstItem.result.parsedData) {
+      const parsed = parseMmlDeviceTaskResult(lstItem.result.parsedData);
+      if (parsed?.kind === 'gpv' && parsed.params) {
+        for (const p of parsed.params) {
+          readback.set(p.name, p.value);
+          readback.set(leafName(p.name), p.value);
+        }
+      }
+    }
+    const hasReadback = readback.size > 0;
+    const modOk = modItems.length > 0 && modItems.every((it) => it.result?.success);
+
+    const verify: VerifyItem[] = Object.keys(setValues).map((path) => {
+      const expected = setValues[path];
+      const actual = readback.get(path) ?? readback.get(leafName(path)) ?? '';
+      return { path, label: labelOf(path), expected, actual, matched: hasReadback && actual === expected };
+    });
+    const cells: Record<string, string> = {};
+    for (const v of verify) if (v.actual) cells[v.path] = v.actual;
+
+    let status: ExecStatus = 'success';
+    if (!modOk) status = 'failed';
+    else if (!hasReadback) status = 'unverified';
+    else if (verify.some((v) => !v.matched)) status = 'mismatch';
+
+    const firstMod = modItems[0];
+    rows.push({
+      deviceSn,
+      deviceTaskId: '',
+      status,
+      cells,
+      faultCode: modOk ? undefined : (firstMod?.failReason ?? '下发失败'),
+      unverifiedReason: status === 'unverified' ? 'query-failed' : undefined,
+      verify,
+      dispatchedAt: toClock(firstMod?.startedAt),
+      respondedAt: toClock(lstItem?.finishedAt ?? firstMod?.finishedAt),
+      raw: firstMod?.result?.rawOutput ?? '',
+      readbackRaw: lstItem?.result?.rawOutput ?? '',
+      elapsedMs: (firstMod?.result?.executionTime ?? 0) + (lstItem?.result?.executionTime ?? 0),
+    });
+  }
+  return rows;
+}
+
 /**
  * 真实任务（GET /mml/tasks/:id）→ ConsoleV2 命令记录（含结果行）。
  *
@@ -491,6 +567,40 @@ export function mapTaskToRecord(task: MMLTask): ExecRecord {
   const detail = task.commandsDetail?.[0];
   const op = (detail?.operationType ?? 'LST') as MMLOperationType;
   const read = isReadOp(op);
+
+  // #196：MOD 自动回读复合（首命令 MOD + 追加回读 LST）→ 专用「下发 vs 回读」关联视图。
+  const details = task.commandsDetail ?? [];
+  const isMODReadback =
+    details.length >= 2 &&
+    upperOp(details[0]) === 'MOD' &&
+    details.some((d, i) => i > 0 && upperOp(d) === 'LST');
+  if (isMODReadback) {
+    // 下发值：path -> value（取所有 MOD 命令的 paramPaths/paramValues，同序对应）
+    const setValues: Record<string, string> = {};
+    for (const d of details) {
+      if (upperOp(d) !== 'MOD') continue;
+      (d.paramPaths ?? []).forEach((p, i) => {
+        setValues[p] = String((d.paramValues?.[i] ?? '') as unknown);
+      });
+    }
+    const cols = buildColumnsFromRawPaths(Object.keys(setValues)); // Object.keys 去重 → 不再 PATH(2)
+    const rawCode0 = (detail?.commandCode ?? '').startsWith('RAW');
+    const name = rawCode0
+      ? rawCommandName('MOD' as MMLOperationType, Object.keys(setValues))
+      : (detail?.commandName ?? detail?.commandCode ?? task.taskName ?? task.id);
+    return {
+      id: task.id,
+      status: 'done',
+      commandId: task.id,
+      time: toClock(task.finishedAt ?? task.createdAt) ?? '',
+      commandName: name,
+      operationType: 'MOD' as MMLOperationType,
+      deviceCount: task.totalDevices || task.deviceSns.length,
+      execMeta: { operationType: 'MOD' as MMLOperationType, read: false, label: name, commandName: name },
+      columns: cols,
+      rows: buildMODReadbackRows((task.results ?? []) as unknown as DeviceTaskResultItem[], details, setValues, cols),
+    };
+  }
   // 逐 PATH 任务有多条 command（每 path 一条）→ 列取所有 command 的 path 展平（按 command_index 序，
   // 与 buildDeviceRows 的 columns[command_index] 定位一致）；整体下发时即首条 command 的全部 path。
   const allPaths = (task.commandsDetail ?? []).flatMap((c) => c.paramPaths ?? []);

@@ -111,8 +111,10 @@ export interface ResultRow {
   dispatchedAt?: string;
   /** RPC 任务执行响应时间 HH:mm:ss（= device_tasks.completed_at） */
   respondedAt?: string;
-  /** 原始报文（SSE 文本流备查） */
+  /** 原始报文（SSE 文本流备查；MOD 回读复合时 = MOD 下发响应报文） */
   raw: string;
+  /** #196：MOD 回读复合时的回读 LST 响应报文（GetParameterValuesResponse），用于详情页第二个报文页签 */
+  readbackRaw?: string;
   /** 耗时（ms） */
   elapsedMs: number;
 }

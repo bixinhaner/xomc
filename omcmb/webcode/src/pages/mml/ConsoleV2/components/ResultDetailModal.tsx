@@ -1,4 +1,4 @@
-import { Alert, Button, Descriptions, Modal, Popover, Space, Table, Tag, Typography } from 'antd';
+import { Alert, Button, Descriptions, Modal, Popover, Space, Table, Tabs, Tag, Typography } from 'antd';
 import { DownloadOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import XmlViewer from '@/components/XmlViewer';
@@ -144,11 +144,17 @@ export default function ResultDetailModal({
       dataIndex: 'subTaskId',
       key: 'subTaskId',
       width: 200,
-      render: (v: string) => (
-        <Text code copyable={{ text: v }} style={{ fontSize: 11 }}>
-          {v.slice(0, 8)}…
-        </Text>
-      ),
+      // #196 修复：subTaskId 可能为空（无真实 device_task id），空值时不渲染坏掉的复制按钮。
+      render: (v: string) =>
+        v ? (
+          <Text code copyable={{ text: v }} style={{ fontSize: 11 }}>
+            {v.slice(0, 8)}…
+          </Text>
+        ) : (
+          <Text type="secondary" style={{ fontSize: 11 }}>
+            -
+          </Text>
+        ),
     },
     {
       title: '状态',
@@ -230,15 +236,30 @@ export default function ResultDetailModal({
                           title={`执行 PATH（${columns.length}）`}
                           content={
                             <div style={{ maxHeight: 320, overflow: 'auto', maxWidth: 460 }}>
-                              {columns.map((c) => (
-                                <div key={c.key} style={{ marginBottom: 6, lineHeight: 1.4 }}>
-                                  <Text style={{ fontSize: 12 }}>{c.label}</Text>
-                                  <br />
-                                  <Text code style={{ fontSize: 11, wordBreak: 'break-all' }}>
-                                    {c.path}
-                                  </Text>
-                                </div>
-                              ))}
+                              {columns.map((c) => {
+                                // #196：MOD 显示该 path 的下发值（取自 verify.expected）
+                                const setVal = row?.verify?.find((v) => v.path === c.path)?.expected;
+                                return (
+                                  <div key={c.key} style={{ marginBottom: 6, lineHeight: 1.4 }}>
+                                    <Text style={{ fontSize: 12 }}>{c.label}</Text>
+                                    <br />
+                                    <Text code style={{ fontSize: 11, wordBreak: 'break-all' }}>
+                                      {c.path}
+                                    </Text>
+                                    {setVal != null && setVal !== '' && (
+                                      <>
+                                        <br />
+                                        <Text type="secondary" style={{ fontSize: 11 }}>
+                                          下发值：
+                                        </Text>
+                                        <Text style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>
+                                          {setVal}
+                                        </Text>
+                                      </>
+                                    )}
+                                  </div>
+                                );
+                              })}
                             </div>
                           }
                         >
@@ -363,13 +384,27 @@ export default function ResultDetailModal({
             </div>
           )}
 
-          {/* 结果报文：格式化 XML */}
+          {/* 结果报文：格式化 XML。#196：MOD 回读复合时分「MOD 响应 / 回读 LST 响应」两个页签。 */}
           <div>
             <Text strong style={{ fontSize: 13 }}>
               结果报文（格式化 XML）
             </Text>
             <div style={{ marginTop: 6 }}>
-              <XmlViewer xml={row.raw} maxHeight={300} />
+              {row.readbackRaw ? (
+                <Tabs
+                  size="small"
+                  items={[
+                    { key: 'mod', label: 'MOD 响应', children: <XmlViewer xml={row.raw} maxHeight={280} /> },
+                    {
+                      key: 'lst',
+                      label: '回读 LST 响应',
+                      children: <XmlViewer xml={row.readbackRaw} maxHeight={280} />,
+                    },
+                  ]}
+                />
+              ) : (
+                <XmlViewer xml={row.raw} maxHeight={300} />
+              )}
             </div>
           </div>
         </Space>
