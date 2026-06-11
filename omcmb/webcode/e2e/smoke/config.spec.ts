@@ -180,8 +180,8 @@ test.describe('配置管理冒烟（真实后端）', { tag: '@smoke' }, () => {
     await expect(
       page.locator('main').getByText(/命令树|Command Tree/).first(),
     ).toBeVisible();
-    // 命令列表骨架（回落 mock 也有命令项）
-    await expect(page.locator('main .ant-list').first()).toBeVisible();
+    // 命令列表骨架（回落 mock 也有命令项）。#142 antd6 迁移后 List→Flex，按稳定 data-testid 定位。
+    await expect(page.locator('main [data-testid="config-command-list"]').first()).toBeVisible();
     // 右侧结果终端面板标题（table.result：结果/Result）
     await expect(
       page.locator('main').getByText(/结果|Result/).first(),
