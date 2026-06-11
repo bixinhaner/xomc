@@ -13,6 +13,14 @@
 #   6. 配置快照：列表/过滤/不存在 SN 404、validate-sns 只读校验、
 #      batch-delete 只测参数校验负路径
 #   7. 设备 License 库：同快照结构的读 + validate-sns + batch-delete 负路径
+#   7c. 快照/License 库导入写闭环（multipart，字段名 "files"）：
+#      - 负路径：缺 file（无 "files" 字段）→ 400 ret=0
+#      - 负路径：非法文件名（不符 <SN>_CFG.{xml,nv} / <SN>.lic）→ 200 ret=1
+#        但落 failed 列表 error_code=INVALID_FILE_NAME（handler 设计：单文件失败
+#        不影响整批，逐项结构化失败，HTTP 仍 200）
+#      - 正路径：自建一台 SMOKE_TAG 设备（避免 Upsert 覆盖真实设备已有快照）
+#        → 构造最小合法导入文件（content 仅需非空）→ import succeeded
+#        → batch-get / validate-sns 能查到 → DELETE 清理快照+License → 删设备
 #   8. restore 系列【红线】只测参数校验负路径，绝不真实下发恢复
 #   9. 运营商规范别名（M4）/task/enb/config/backupRestore/*：
 #      - 只读查询：queryTaskList / queryCellInfos / queryTaskDeviceList（空结果容忍）
@@ -240,6 +248,120 @@ check_list_nonempty "License validate-sns 不存在 SN 报 missing" "data.missin
 
 req POST "/api/v1/backup/device-licenses/batch-delete" '{}'
 check_ret_fail "License batch-delete 缺 serial_numbers 被拒（不执行真删）"
+
+# ---------------------------------------------------------------------------
+section "7c. 快照/License 库导入写闭环（multipart files 字段；自建设备避免覆盖真实快照）"
+# ---------------------------------------------------------------------------
+# 导入端点 Upsert 语义：直接对真实设备 SN 导入会覆盖其已有快照/License，删除时
+# 又会连带删掉本来存在的条目。为彻底隔离副作用，先自建一台 SMOKE_TAG 设备，
+# 所有导入针对它，结束前删快照+License+设备三层清理。
+IMPORT_DEV_SN="${SMOKE_TAG}-IMP-DEV"
+IMPORT_DEV_ID=""
+
+# --- 负路径（无需设备，先测参数校验，handler 设计见文件头注释）---
+# 缺 file：multipart 无 "files" 字段 → handler "no files uploaded" → 400 ret=0
+req_upload "/api/v1/backup/config-snapshots/import" "noise=irrelevant"
+check_ret_fail "快照导入缺 file（无 files 字段）被拒"
+
+req_upload "/api/v1/backup/device-licenses/import" "noise=irrelevant"
+check_ret_fail "License 导入缺 file（无 files 字段）被拒"
+
+# 非法文件名：handler 逐项结构化失败，整批 HTTP 仍 200 ret=1，落 failed 列表。
+# 这是设计行为（批量导入单文件失败不拖垮整批），用 check_ret_ok + failed 断言验证。
+BAD_SNAP="$SMOKE_TMPDIR/badname-not-cfg.txt"
+printf 'irrelevant-content' > "$BAD_SNAP"
+req_upload "/api/v1/backup/config-snapshots/import" "files=@${BAD_SNAP}"
+check_ret_ok "快照导入非法文件名整批受理（200，逐项失败）"
+check_field "非法快照文件名落 failed.0.error_code=INVALID_FILE_NAME" "data.failed.0.error_code"
+
+BAD_LIC="$SMOKE_TMPDIR/badname-not-lic.txt"
+printf 'irrelevant-content' > "$BAD_LIC"
+req_upload "/api/v1/backup/device-licenses/import" "files=@${BAD_LIC}"
+check_ret_ok "License 导入非法文件名整批受理（200，逐项失败）"
+check_field "非法 License 文件名落 failed.0.error_code=INVALID_FILE_NAME" "data.failed.0.error_code"
+
+# 合法文件名但设备不存在：error_code=UNKNOWN_DEVICE（后端强校验 SN 在 devices 表）。
+NOPE_SNAP="$SMOKE_TMPDIR/${NOPE_SN}_CFG.xml"
+printf '<config>smoke</config>' > "$NOPE_SNAP"
+req_upload "/api/v1/backup/config-snapshots/import" "files=@${NOPE_SNAP}"
+check_ret_ok "快照导入合法名+未知设备整批受理（200）"
+UNKNOWN_CODE=$(jget data.failed.0.error_code)
+if [ "$UNKNOWN_CODE" = "UNKNOWN_DEVICE" ]; then
+    pass "未知设备快照落 failed error_code=UNKNOWN_DEVICE"
+else
+    fail "未知设备快照 error_code 校验" "期望 UNKNOWN_DEVICE，实际 '${UNKNOWN_CODE}'"
+fi
+
+# --- 正路径：自建设备 → 导入 → 验证查得到 → 清理 ---
+req POST "/api/v1/devices" "{\"serial_number\":\"${IMPORT_DEV_SN}\",\"oui\":\"00A0C6\",\"product_class\":\"FAP-LTE-100\",\"manufacturer\":\"SmokeVendor\",\"carrier\":\"cmcc\",\"technology\":\"lte\",\"device_name\":\"${SMOKE_TAG}-imp-dev\"}"
+check_ret_ok "自建导入用设备（SN=${IMPORT_DEV_SN}）"
+IMPORT_DEV_ID=$(jget data.id)
+
+if [ -n "$IMPORT_DEV_ID" ]; then
+    # 快照导入正路径：最小合法文件 <SN>_CFG.xml（content 仅需非空）
+    OK_SNAP="$SMOKE_TMPDIR/${IMPORT_DEV_SN}_CFG.xml"
+    printf '<config>smoke-import</config>' > "$OK_SNAP"
+    req_upload "/api/v1/backup/config-snapshots/import" "files=@${OK_SNAP}"
+    check_ret_ok "快照导入正路径（自建设备，合法 <SN>_CFG.xml）"
+    SNAP_OK=$(jget data.succeeded.0)
+    if [ "$SNAP_OK" = "$IMPORT_DEV_SN" ]; then
+        pass "快照导入 succeeded 回显 SN (${SNAP_OK})"
+    else
+        fail "快照导入 succeeded 回显 SN" "期望 ${IMPORT_DEV_SN}，实际 '${SNAP_OK}'，body: $(printf '%s' "$BODY" | head -c 200)"
+    fi
+
+    # 验证导入后查得到：batch-get found + GET /:sn 200 + 列表过滤可见
+    req POST "/api/v1/backup/config-snapshots/batch-get" "{\"serial_numbers\":[\"${IMPORT_DEV_SN}\"]}"
+    check_ret_ok "导入后 batch-get 查快照"
+    check_field "batch-get found 含导入的 SN" "data.found.${IMPORT_DEV_SN}.serial_number"
+
+    req GET "/api/v1/backup/config-snapshots/${IMPORT_DEV_SN}"
+    check_ret_ok "导入后 GET /:sn 查快照详情"
+    check_field "快照详情 object_path 回显" "data.object_path"
+
+    req POST "/api/v1/backup/config-snapshots/validate-sns" "{\"serial_numbers\":[\"${IMPORT_DEV_SN}\"]}"
+    check_ret_ok "导入后 validate-sns 设备 SN 存在"
+    check_list_nonempty "validate-sns existing 含导入设备 SN" "data.existing"
+
+    # License 导入正路径：最小合法文件 <SN>.lic（可带 description 表单字段）
+    OK_LIC="$SMOKE_TMPDIR/${IMPORT_DEV_SN}.lic"
+    printf 'license-blob-smoke' > "$OK_LIC"
+    req_upload "/api/v1/backup/device-licenses/import" "files=@${OK_LIC}" "description=${SMOKE_TAG}-lic-import"
+    check_ret_ok "License 导入正路径（自建设备，合法 <SN>.lic + description）"
+    LIC_OK=$(jget data.succeeded.0)
+    if [ "$LIC_OK" = "$IMPORT_DEV_SN" ]; then
+        pass "License 导入 succeeded 回显 SN (${LIC_OK})"
+    else
+        fail "License 导入 succeeded 回显 SN" "期望 ${IMPORT_DEV_SN}，实际 '${LIC_OK}'，body: $(printf '%s' "$BODY" | head -c 200)"
+    fi
+
+    req POST "/api/v1/backup/device-licenses/batch-get" "{\"serial_numbers\":[\"${IMPORT_DEV_SN}\"]}"
+    check_ret_ok "导入后 batch-get 查 License"
+    check_field "batch-get found 含导入的 License SN" "data.found.${IMPORT_DEV_SN}.serial_number"
+    check_field "License description 回显写入值" "data.found.${IMPORT_DEV_SN}.description"
+
+    req GET "/api/v1/backup/device-licenses/${IMPORT_DEV_SN}"
+    check_ret_ok "导入后 GET /:sn 查 License 详情"
+
+    # --- 清理：删快照 → 删 License → 验证删除生效 → 软删设备 → 回收站永久删 ---
+    req DELETE "/api/v1/backup/config-snapshots/${IMPORT_DEV_SN}"
+    check_ret_ok "清理：删除导入的快照"
+    req GET "/api/v1/backup/config-snapshots/${IMPORT_DEV_SN}"
+    check_status "删除后快照查不到 → 404" 404
+
+    req DELETE "/api/v1/backup/device-licenses/${IMPORT_DEV_SN}"
+    check_ret_ok "清理：删除导入的 License"
+    req GET "/api/v1/backup/device-licenses/${IMPORT_DEV_SN}"
+    check_status "删除后 License 查不到 → 404" 404
+
+    # 软删设备 → 进回收站 → 永久删（彻底清理，不留 SMOKE_TAG 残留）
+    req DELETE "/api/v1/devices/${IMPORT_DEV_ID}"
+    check_ret_ok "清理：软删导入用设备（进回收站）"
+    req DELETE "/api/v1/devices/recycle/permanent" "{\"ids\":[\"${IMPORT_DEV_ID}\"]}"
+    check_ret_ok "清理：回收站永久删除导入用设备"
+else
+    skip "快照/License 导入正路径闭环" "自建设备未返回 id，无法继续闭环"
+fi
 
 # ---------------------------------------------------------------------------
 section "8. 恢复 restore【红线：只测参数校验负路径，绝不真实下发恢复】"

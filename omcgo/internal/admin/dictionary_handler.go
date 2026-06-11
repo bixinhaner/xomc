@@ -278,7 +278,9 @@ func (h *DictionaryHandler) RefreshSource(c *gin.Context) {
 	}
 	resp, err := h.service.RefreshDictionarySource(c.Request.Context(), id)
 	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		// not-found（字典不存在）→404、无源绑定/参数类业务错→400，经 HTTPStatusFromError 映射，
+		// 与同 handler 的 PreviewSource/update/delete 一致（#145-D 范式补漏 refreshSource）。
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
 	response.OKWithMsg(c, resp, "刷新成功")
