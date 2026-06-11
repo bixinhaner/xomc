@@ -199,4 +199,98 @@ test.describe('设备管理冒烟（真实后端）', { tag: '@smoke' }, () => {
     await expect(page.locator('.ant-form').first()).toBeVisible();
     await expect(page.locator('.ant-table').first()).toBeVisible();
   });
+
+  // —— smoke round 5 追加：device 域剩余固定路由（列表/表单/向导页）——
+
+  test('/device/register 设备注册向导：标题 + Steps 步骤条 + 返回/下一步按钮', async ({ page }) => {
+    await expectPageRenders(page, '/device/register');
+
+    const main = page.locator('main');
+
+    // ListPageLayout 标题「设备注册」（侧边栏菜单同名，收窄到 main 取首个）
+    await expect(main.getByText(/设备注册|Device Registration/).first()).toBeVisible();
+
+    // 三步向导 Steps（基础信息 / IP地址 / 提交）
+    await expect(page.locator('.ant-steps').first()).toBeVisible();
+
+    // extra 返回按钮 + 第一步「下一步」按钮
+    await expect(main.getByRole('button', { name: /返回|Back/ }).first()).toBeVisible();
+    await expect(main.getByRole('button', { name: /下一步|Next/ }).first()).toBeVisible();
+  });
+
+  test('/device/commission 开通管理：新增按钮 + 筛选栏 + 表格骨架', async ({ page }) => {
+    await expectPageRenders(page, '/device/commission');
+
+    const main = page.locator('main');
+
+    // ListPageLayout extra 新增按钮（侧边栏菜单同名「开通管理」，按钮用 role 定位）
+    await expect(main.getByRole('button', { name: /新增|Add/ }).first()).toBeVisible();
+
+    // FilterBar 筛选表单 + DataTable 表格骨架（页面内置 mock 数据，空表也有表头）
+    await expect(page.locator('.ant-form').first()).toBeVisible();
+    await expect(page.locator('.ant-table').first()).toBeVisible();
+  });
+
+  test('/device/handover 交接管理：新增按钮 + 筛选栏 + 表格骨架', async ({ page }) => {
+    await expectPageRenders(page, '/device/handover');
+
+    const main = page.locator('main');
+
+    // ListPageLayout 标题「交接管理」（侧边栏同名，收窄到 main 取首个）
+    await expect(main.getByText(/交接管理|Handover Management/).first()).toBeVisible();
+
+    // extra 新增按钮
+    await expect(main.getByRole('button', { name: /新增|Add/ }).first()).toBeVisible();
+
+    // FilterBar 筛选表单 + DataTable 表格骨架
+    await expect(page.locator('.ant-form').first()).toBeVisible();
+    await expect(page.locator('.ant-table').first()).toBeVisible();
+  });
+
+  test('/device/stats 资源统计：页头标题 + 汇总统计卡 + 分类饼图卡', async ({ page }) => {
+    await expectPageRenders(page, '/device/stats');
+
+    const main = page.locator('main');
+
+    // 页头 Title「资源统计」（侧边栏菜单同名，收窄到 main 取首个）
+    await expect(main.getByText(/资源统计|Resource Statistics/).first()).toBeVisible();
+
+    // 汇总区四张 Statistic 卡（总数等）；本页为 Card + 图表网格，不断言 .ant-table
+    await expect(page.locator('.ant-statistic').first()).toBeVisible();
+
+    // 分类卡标题「产品类型」（饼图卡），证明图表区块渲染
+    await expect(main.getByText(/产品类型|Product Type/).first()).toBeVisible();
+  });
+
+  test('/device/import 导入导出：导入卡 + 导出卡 + 上传拖拽区', async ({ page }) => {
+    await expectPageRenders(page, '/device/import');
+
+    const main = page.locator('main');
+
+    // ListPageLayout 标题「导入导出」（侧边栏同名，收窄到 main 取首个）
+    await expect(main.getByText(/导入导出|Import & Export/).first()).toBeVisible();
+
+    // 上传拖拽区（antd Upload Dragger）
+    await expect(page.locator('.ant-upload-drag').first()).toBeVisible();
+
+    // 导出卡上的「导出」按钮
+    await expect(main.getByRole('button', { name: /导出|Export/ }).first()).toBeVisible();
+  });
+
+  test('/device/plug-and-play/add 新增即插即用策略：页头标题 + 基础信息卡 + 返回/确定', async ({ page }) => {
+    await expectPageRenders(page, '/device/plug-and-play/add');
+
+    const main = page.locator('main');
+
+    // 页头标题「新增 Policy / Add Policy」
+    await expect(main.getByText(/新增\s*Policy|Add\s*Policy/).first()).toBeVisible();
+
+    // 基础信息卡（Card 标题 common.basicInfo）
+    await expect(main.getByText(/基础信息|Basic Info/).first()).toBeVisible();
+
+    // 表单骨架 + 页头「取消」按钮（非查看模式才渲染 取消/确认 一组；
+    // antd 对纯两字 CJK 按钮会插入字间空格，故 "取 消" 用 \s* 容错）
+    await expect(page.locator('.ant-form').first()).toBeVisible();
+    await expect(main.getByRole('button', { name: /取\s*消|Cancel/ }).first()).toBeVisible();
+  });
 });
