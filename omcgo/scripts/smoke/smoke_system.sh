@@ -14,6 +14,9 @@
 #   - PUT    /api/v1/admin/sysDictionary/updateSysDictionary    更新 name/desc/status
 #   - DELETE /api/v1/admin/sysDictionary/deleteSysDictionary?id= 软删（清理冒烟自建字典）
 #   - GET    /api/v1/admin/sysDictionary/batch?codes=     批量取字典（注意参数名是 codes 非 types）
+#   - GET    /api/v1/admin/sysDictionary/sources               数据源白名单（T-0182，data.sources）
+#   - GET    /api/v1/admin/sysDictionary/sources/preview       数据源预览（table/label/value 三参 required）
+#   - POST   /api/v1/admin/sysDictionary/refreshSource?id=     单字典热刷新（只测负路径，绝不真发同步）
 #   - GET    /api/v1/admin/sysDictionaryDetail/getSysDictionaryDetailList  字典明细列表
 #   - GET    /api/v1/admin/logs/{login,operation,task}    登录/操作/任务日志
 #   - GET    /api/v1/system/info                          版本/运行信息（断言 version）
@@ -361,6 +364,84 @@ if [ -n "$DET_DICT_ID" ]; then
     check_ret_ok "清理明细闭环用父字典"
 else
     skip "清理明细闭环用父字典" "父字典未获取到 id"
+fi
+
+# ---------------------------------------------------------------------------
+section "字典外部数据源（/admin/sysDictionary/{sources,sources/preview,refreshSource}，T-0182）"
+# ---------------------------------------------------------------------------
+# T-0182：字典可绑定白名单业务表（devices/products/...）做 (label,value) 自动同步。
+# 数据源白名单是 embed sources.yaml（internal/admin/dictsource/sources.yaml），
+# 启动期 LoadDictSourceRegistry 加载、注入 SyncEngine（admin.go），故本套件按"已启用"测：
+#   - GET  sources           列白名单表+字段 → data.sources 数组（builtin yaml 必非空）
+#   - GET  sources/preview   dry-run 取前 N 条 (label,value)+总数 → data.rows/data.total，
+#                            table/label/value 三者 binding required；非白名单表/字段 → 400(7021/7022)
+#   - POST refreshSource?id= 手动触发单字典同步（幂等，只测负路径：缺 id / 非数字 / 不存在 id /
+#                            已存在但未绑数据源），绝不对真实绑定字典发同步（避免改 details 表）。
+# 契约见 internal/admin/dictionary_handler.go(ListSources/PreviewSource/RefreshSource)
+#         + dictionary_service.go(469-524) + dictionary_source.go(错误码 7020-7023)。
+
+# 列数据源白名单（feature 启用时 200 ret=1；禁用时 service 返 7023 → 走 known_bug 兜底）
+req GET "/api/v1/admin/sysDictionary/sources"
+SRC_RET=$(jget ret)
+if [[ "$HTTP_CODE" == 2* ]] && [ "$SRC_RET" = "1" ]; then
+    check_list_or_empty "数据源白名单可列出（data.sources）" "data.sources"
+    check_field "数据源首条含 table 字段" "data.sources.0.table"
+    check_field "数据源首条含 fields 数组" "data.sources.0.fields"
+    # 取首张表 + 其首/次字段供 preview 用（来自 builtin yaml，稳定可解析）
+    SRC_TABLE=$(jget data.sources.0.table)
+    SRC_LABEL=$(jget data.sources.0.fields.0.column)
+    SRC_VALUE=$(jget data.sources.0.fields.1.column)
+    [ -z "$SRC_VALUE" ] && SRC_VALUE="$SRC_LABEL"
+else
+    # 数据源功能未启用（LoadDictSourceRegistry 失败 → sourceRegistry nil → 7023）。
+    # 不当失败：是部署态差异而非回归，标 known_bug 并回退到默认白名单表跑 preview 负路径。
+    known_bug "数据源白名单列出" "GET sources 返 HTTP $HTTP_CODE ret=$SRC_RET（疑数据源功能未启用 7023）"
+    SRC_TABLE="devices"; SRC_LABEL="serial_number"; SRC_VALUE="product_class"
+fi
+
+# 预览（dry-run）：白名单首表 + 首两字段 → 200 ret=1，rows 可空（容忍稀疏种子）
+req GET "/api/v1/admin/sysDictionary/sources/preview?table=${SRC_TABLE}&label=${SRC_LABEL}&value=${SRC_VALUE}&limit=5"
+PRV_RET=$(jget ret)
+if [[ "$HTTP_CODE" == 2* ]] && [ "$PRV_RET" = "1" ]; then
+    check_list_or_empty "数据源预览可执行（${SRC_TABLE}.${SRC_LABEL}/${SRC_VALUE} → data.rows）" "data.rows"
+    check_field "预览返回 total 字段" "data.total"
+elif [ "$SRC_RET" != "1" ]; then
+    # sources 已 known_bug（功能禁用），preview 同链路必然一致禁用，呼应标注不计失败。
+    known_bug "数据源预览执行" "preview 返 HTTP $HTTP_CODE ret=$PRV_RET（数据源功能未启用）"
+else
+    fail "数据源预览可执行" "期望 2xx+ret=1，实际 HTTP $HTTP_CODE ret=$PRV_RET，body: $(printf '%s' "$BODY" | head -c 200)"
+fi
+
+# 负路径：preview 三参 binding required（缺参 → 400），非白名单表/字段 → 400(7021/7022)
+req GET "/api/v1/admin/sysDictionary/sources/preview"
+check_ret_fail "预览缺 table/label/value 三参被拒（binding required）"
+req GET "/api/v1/admin/sysDictionary/sources/preview?table=sys_login_logs&label=username&value=ip&limit=3"
+check_ret_fail "预览非白名单表被拒（敏感表不在 sources.yaml → 7021）"
+req GET "/api/v1/admin/sysDictionary/sources/preview?table=${SRC_TABLE}&label=__no_such_col_${SMOKE_TAG}&value=${SRC_VALUE}&limit=3"
+check_ret_fail "预览非白名单字段被拒（7022 source_label_field not in whitelist）"
+
+# refreshSource 负路径红线：只测参数/状态校验，绝不对真实绑定字典发同步（避免改 details 表）。
+req POST "/api/v1/admin/sysDictionary/refreshSource"
+check_ret_fail "热刷新缺 id 参数被拒（biz_code 7）"
+req POST "/api/v1/admin/sysDictionary/refreshSource?id=not-a-num"
+check_ret_fail "热刷新非数字 id 被拒（biz_code 7）"
+req POST "/api/v1/admin/sysDictionary/refreshSource?id=99999999"
+# 不存在 id：service 包 ErrNotFound，handler 经 HTTPStatusFromError 映射 404（#145-D 补漏 refreshSource）。
+check_status "热刷新不存在 id 被拒（精确 404）" 404
+# 已存在但未绑数据源的字典（builtin 种子如 id=1 gender）：service 返 7020 包 ErrInvalidInput，
+# handler 映射 400（用户正常操作刷未绑源字典应拿参数校验错而非 5xx）。
+req GET "/api/v1/admin/sysDictionary/getSysDictionaryList"
+NB_DICT_ID=$(jget data.list.0.id)
+if [ -n "$NB_DICT_ID" ]; then
+    req POST "/api/v1/admin/sysDictionary/refreshSource?id=${NB_DICT_ID}"
+    NB_BIZ=$(jget biz_code)
+    if [ "$HTTP_CODE" = "400" ] && [ "$NB_BIZ" = "7020" ]; then
+        pass "热刷新未绑源字典被拒（精确 400 + biz_code 7020）"
+    else
+        fail "热刷新未绑源字典被拒" "期望 HTTP 400 + biz_code 7020，实际 HTTP $HTTP_CODE biz_code=$NB_BIZ"
+    fi
+else
+    skip "热刷新未绑源字典负路径" "字典列表未返回 id"
 fi
 
 # ---------------------------------------------------------------------------

@@ -43,6 +43,13 @@ import { expectPageRenders, smokeLogin } from './helpers';
  *       首个 loader 标签「参数模型字典 / Param Model Dictionary」。
  *       注：route 未挂 requireSuperAdmin 守卫（仅后端 reload 端点限超管），
  *       故页面 render 不应被 /403 拦截；admin 可正常渲染。
+ *   - /system/ui-custom → src/pages/system/UICustomization/index.tsx
+ *       ListPageLayout（标题 nav.system.uiCustom，en-US 缺该 key 故标题在
+ *       英文 locale 回落成原始 key，不作标题断言）+ UICustomSettings 表单：
+ *       「图片上传 / Image Upload」Divider + 三张图片上传卡（.ant-upload-drag
+ *       拖拽区，断言 first）+ 底部「保存 / Save」按钮（common.save）。
+ *       注：三张卡标题（登录背景/Logo小图/Logo大图）与上传占位「点击或拖拽上传 /
+ *       Click or drag to upload」均双语；预览缩略图仅在字段有值时渲染，不作断言。
  *
  * 不断言具体业务数据（真实栈数据稀疏）；列表页 .ant-table 空表也有表头。
  */
@@ -178,5 +185,16 @@ test.describe('系统管理冒烟（真实后端）', { tag: '@smoke' }, () => {
     ).toBeVisible();
     // 每张卡一个「重新加载 / Reload」按钮
     await expect(page.getByRole('button', { name: /重新加载|Reload/ }).first()).toBeVisible();
+  });
+
+  test('/system/ui-custom 界面定制渲染，图片上传分区 + 上传拖拽区 + 保存按钮可见', async ({ page }) => {
+    await expectPageRenders(page, '/system/ui-custom');
+
+    // 图片上传分区 Divider（system.ui.imageUpload 图片上传 / Image Upload）
+    await expect(page.getByText(/图片上传|Image Upload/).first()).toBeVisible({ timeout: 30_000 });
+    // 三张图片上传卡的拖拽区（antd Upload.Dragger 稳定 class .ant-upload-drag），取 first
+    await expect(page.locator('.ant-upload-drag').first()).toBeVisible({ timeout: 30_000 });
+    // 底部保存按钮（common.save 保存 / Save）
+    await expect(page.getByRole('button', { name: /保存|Save/ }).first()).toBeVisible();
   });
 });

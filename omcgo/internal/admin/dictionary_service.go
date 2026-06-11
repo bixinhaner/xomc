@@ -507,8 +507,9 @@ func (s *DictionaryService) RefreshDictionarySource(ctx context.Context, dictID 
 		return nil, fmt.Errorf("get dictionary for refresh: %w", err)
 	}
 	if dict.SourceTable == nil {
+		// 用户对未绑源字典点刷新属参数类业务错——包 ErrInvalidInput 使 handler 映射 400 而非 500。
 		return nil, commonerrors.NewBusinessError(errCodeSourcePartialFields,
-			"dictionary has no source binding", nil)
+			"dictionary has no source binding", commonerrors.ErrInvalidInput)
 	}
 	res, err := s.runSyncOneStrict(ctx, dict)
 	if err != nil {

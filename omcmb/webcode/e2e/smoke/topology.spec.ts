@@ -18,6 +18,15 @@ import { expectPageRenders, smokeLogin } from './helpers';
  *       纯前端静态设置表单（无后端依赖）：ListPageLayout 标题 nav.topology.settings（拓扑设置，
  *       与侧边栏菜单同名 → 收窄到 main 断言）+ 提示文案 topology.settings.hint（页面唯一）
  *       + antd Collapse 分组（.ant-collapse，布局算法/交互设置等）+ 保存按钮 common.save。
+ *   - /topology/canvas   → src/pages/Topology/TopologyCanvas/index.tsx
+ *       MapPageLayout（左面板 + 右画布全屏）：左面板搜索标题 common.search（搜索）；
+ *       右侧拓扑图用 components/TopologyCanvas 的 <svg>（始终渲染，空态把"暂无拓扑数据"文本
+ *       画在 svg 内 → 不依赖真实节点数据）+ 底部布局选择器 topology.settings.layoutAlgorithm
+ *       （布局算法，始终渲染，不在 statistics 条件块内 → 稳定锚点）。参考 gis-map 断容器/svg。
+ *   - /topology/legend   → src/pages/Topology/LegendSystem/index.tsx
+ *       纯前端静态图例（无后端依赖）：ListPageLayout 标题 nav.topology.legend（图例管理，
+ *       与侧边栏菜单同名 → 收窄到 main）+ antd Card 分组（.ant-card）+ 卡片标题"设备类型图标"
+ *       （硬编码中文，无 en-US 变体 → 不写双语正则）。
  */
 test.describe('拓扑管理冒烟（真实后端）', { tag: '@smoke' }, () => {
   test.beforeEach(async ({ page }) => {
@@ -84,5 +93,35 @@ test.describe('拓扑管理冒烟（真实后端）', { tag: '@smoke' }, () => {
 
     // 保存按钮（common.save）
     await expect(page.getByRole('button', { name: /保存|Save/ }).first()).toBeVisible();
+  });
+
+  test('/topology/canvas 渲染，搜索面板 / 拓扑图 svg / 布局选择器可见', async ({ page }) => {
+    await expectPageRenders(page, '/topology/canvas');
+
+    // 左侧面板搜索标题（common.search）——与输入框 placeholder 同文案，取 first
+    await expect(page.getByText(/搜索|Search/).first()).toBeVisible();
+
+    // 拓扑图 svg 容器（components/TopologyCanvas 始终渲染 svg，空态文本画在 svg 内）
+    await expect(page.locator('main svg').first()).toBeVisible({ timeout: 30_000 });
+
+    // 底部布局选择器标签（topology.settings.layoutAlgorithm：布局算法，始终渲染）
+    await expect(
+      page.getByText(/布局算法|Layout Algorithm/).first(),
+    ).toBeVisible();
+  });
+
+  test('/topology/legend 渲染，标题 / 图例卡片 / 卡片分组可见', async ({ page }) => {
+    await expectPageRenders(page, '/topology/legend');
+
+    // 页面标题（nav.topology.legend：图例管理）——与侧边栏菜单同名，收窄到 main
+    await expect(
+      page.locator('main').getByText(/图例管理|Legend System/).first(),
+    ).toBeVisible();
+
+    // antd Card 图例分组骨架已渲染
+    await expect(page.locator('.ant-card').first()).toBeVisible();
+
+    // 卡片标题（硬编码中文，无双语）——页面唯一锚点
+    await expect(page.getByText('设备类型图标').first()).toBeVisible();
   });
 });

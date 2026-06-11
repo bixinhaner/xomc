@@ -133,4 +133,58 @@ test.describe('配置管理冒烟（真实后端）', { tag: '@smoke' }, () => {
     // 小区列表表格骨架
     await expect(page.locator('main .ant-table').first()).toBeVisible();
   });
+
+  test('/config/northbound 北向管理：标题 + Tabs + 推送目标表格渲染', async ({ page }) => {
+    await expectPageRenders(page, '/config/northbound');
+
+    // ListPageLayout 标题（硬编码英文字面量 "Northbound/OSS Management"，无对应 i18n key）
+    await expect(
+      page.locator('main').getByText('Northbound/OSS Management').first(),
+    ).toBeVisible();
+    // Push Targets / Data Sync 选项卡骨架
+    await expect(page.locator('main .ant-tabs').first()).toBeVisible();
+    // 推送目标表格骨架（默认 Push Targets 选项卡，空数据也有表头）
+    await expect(page.locator('main .ant-table').first()).toBeVisible();
+  });
+
+  test('/config/common 通用配置：标题 + 折叠面板 + 配置表单渲染', async ({ page }) => {
+    await expectPageRenders(page, '/config/common');
+
+    // ListPageLayout 标题（nav.config.common）；侧栏同名菜单收窄 main 取 .first()
+    await expect(
+      page.locator('main').getByText(/公共配置|Common Config/).first(),
+    ).toBeVisible();
+    // 系统/网络/安全三段折叠面板
+    await expect(page.locator('main .ant-collapse').first()).toBeVisible();
+    // 配置表单骨架
+    await expect(page.locator('main .ant-form').first()).toBeVisible();
+  });
+
+  test('/config/batch-class 按设备类批量：分类树 + 参数表格渲染', async ({ page }) => {
+    await expectPageRenders(page, '/config/batch-class');
+
+    // TreeListPageLayout 主区标题（nav.config.batchClass）；侧栏同名菜单收窄 main 取 .first()
+    await expect(
+      page.locator('main').getByText(/批量参数分类|Batch Param Class/).first(),
+    ).toBeVisible();
+    // 左侧分类树
+    await expect(page.locator('main .ant-tree').first()).toBeVisible();
+    // 参数表格骨架（回落 mock 也有数据，空表亦有表头）
+    await expect(page.locator('main .ant-table').first()).toBeVisible();
+  });
+
+  test('/config/command-mode 命令模式：命令树面板 + 命令列表 + 结果面板渲染', async ({ page }) => {
+    await expectPageRenders(page, '/config/command-mode');
+
+    // 左侧命令树面板标题（nav.mml.commands：命令树/Command Tree）
+    await expect(
+      page.locator('main').getByText(/命令树|Command Tree/).first(),
+    ).toBeVisible();
+    // 命令列表骨架（回落 mock 也有命令项）
+    await expect(page.locator('main .ant-list').first()).toBeVisible();
+    // 右侧结果终端面板标题（table.result：结果/Result）
+    await expect(
+      page.locator('main').getByText(/结果|Result/).first(),
+    ).toBeVisible();
+  });
 });

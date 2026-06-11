@@ -4,7 +4,8 @@
 #
 # 覆盖：
 #   - 消息列表 / 未读数 / 过滤参数（is_read、type、分页校验负路径）
-#   - 单条标记已读（有消息才做；绝不调 read-all，避免污染用户未读状态）
+#   - 单条标记已读（有消息才做）
+#   - 全部标记已读（read-all，幂等）→ unread-count 归零（活栈稀疏，幂等可接受）
 #   - sync-stale 卡死消息修正（幂等 POST 两次）
 #   - 通知模板 CRUD 闭环（建 → 查 → 改 → 过滤列表 → 删 → 404 回查）
 #   - 通知发送历史（列表 / 过滤 / 详情 / 非法 ID 负路径）
@@ -56,6 +57,28 @@ fi
 
 req PUT "/api/v1/notifications/not-a-uuid/read"
 check_ret_fail "非法 ID 标记已读被拒绝"
+
+# ---------------------------------------------------------------------------
+# 2b. 全部标记已读（read-all，幂等）
+#     注意：这会改 admin 自己的通知已读状态。活栈通知本就稀疏，且操作幂等，
+#     可接受。调用后 unread-count 必须归零；再调一次仍 ret=1（幂等可重入）。
+# ---------------------------------------------------------------------------
+section "全部标记已读（read-all，幂等）"
+
+req PUT "/api/v1/notifications/read-all"
+check_ret_ok "PUT read-all 标记全部已读"
+
+req GET "/api/v1/notifications/unread-count"
+check_ret_ok "read-all 后未读数可查"
+UNREAD_AFTER=$(jget data.count)
+if [ "$UNREAD_AFTER" = "0" ]; then
+    pass "read-all 后未读数归零（count=${UNREAD_AFTER}）"
+else
+    fail "read-all 后未读数归零" "期望 count=0，实际 '${UNREAD_AFTER}'"
+fi
+
+req PUT "/api/v1/notifications/read-all"
+check_ret_ok "PUT read-all 再次调用（幂等可重入）"
 
 # ---------------------------------------------------------------------------
 # 3. sync-stale 卡死消息修正（幂等）
