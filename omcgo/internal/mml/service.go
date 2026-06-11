@@ -828,22 +828,26 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 						"parameters":     map[string]interface{}{p: values[i]},
 					})
 				}
-				break
+			} else {
+				synthRefs := make([]MMLParamRef, len(paths))
+				formValues := make(map[string]interface{}, len(paths))
+				for i, p := range paths {
+					synthRefs[i] = MMLParamRef{ParamCode: p, Tr069Path: p, ValueType: "string"}
+					formValues[p] = values[i]
+				}
+				commands = append(commands, map[string]interface{}{
+					"command_code":   "RAW MOD",
+					"rpc_method":     "SetParameterValues",
+					"operation_type": op,
+					"param_paths":    paths,
+					"param_refs":     synthRefs,
+					"parameters":     formValues,
+				})
 			}
-			synthRefs := make([]MMLParamRef, len(paths))
-			formValues := make(map[string]interface{}, len(paths))
-			for i, p := range paths {
-				synthRefs[i] = MMLParamRef{ParamCode: p, Tr069Path: p, ValueType: "string"}
-				formValues[p] = values[i]
-			}
-			commands = append(commands, map[string]interface{}{
-				"command_code":   "RAW MOD",
-				"rpc_method":     "SetParameterValues",
-				"operation_type": op,
-				"param_paths":    paths,
-				"param_refs":     synthRefs,
-				"parameters":     formValues,
-			})
+			// #196：MOD 后自动追加一条 LST 回读，核实基站是否真的改成功（自定义 / 指定参数 PATH
+			// 通道，与结构化通道 buildStatementCommandEntries 的 MOD 回读对齐）。回读经 Sequencer
+			// 在 SPV 完成后顺序执行（下方 fanout 检测到 lst_after_mod 即启用 sequential 模式）。
+			commands = append(commands, buildRawReadbackLSTCommand(paths))
 		case "ADD":
 			// TR-069 AddObject 单次仅作用于 ONE object_name，多 path 在协议层
 			// 没有"批量"语义。前端已锁单行，这里再做一次防御以拒绝来自脚本/
@@ -945,7 +949,13 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 	// Fan-out to device_tasks only for immediate execution.
 	// scheduled/periodic 由 Scheduler 唤醒；suspended 需用户显式 StartTask。
 	if task.Status == TaskPending && task.ExecuteType == ExecuteImmediate && s.fanouter != nil {
+		// #196：含 MOD 回读复合(lst_after_mod)时必须顺序执行，确保 LST 在 SPV 之后回读到新值；
+		// 否则并发扇出可能让 LST 早于 SPV 生效，读回旧值。save/set/restore 与 CreateAndFanoutTask 一致。
+		sequential := commandsNeedSequential(commands)
+		prev := s.fanouter.sequentialMode
+		s.fanouter.SetSequentialMode(sequential)
 		created, err := s.fanouter.Fanout(ctx, task)
+		s.fanouter.SetSequentialMode(prev)
 		if err != nil {
 			s.logger.Error("fanout mml task failed", zap.Error(err))
 		} else if created > 0 {
@@ -962,6 +972,35 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 	}
 
 	return task, nil
+}
+
+// buildRawReadbackLSTCommand 构造 #196 raw/自定义命令通道里 MOD 之后的「回读 LST」命令
+// （GetParameterValues），读回刚下发的 paths，核实基站是否真的改成功。compound_phase
+// 标记 lst_after_mod，供前端关联展示 + fanout 据此启用顺序执行。
+func buildRawReadbackLSTCommand(paths []string) map[string]interface{} {
+	refs := make([]MMLParamRef, len(paths))
+	for i, p := range paths {
+		refs[i] = MMLParamRef{Tr069Path: p, ValueType: "string"}
+	}
+	return map[string]interface{}{
+		"command_code":   "RAW LST",
+		"rpc_method":     "GetParameterValues",
+		"operation_type": "LST",
+		"param_paths":    paths,
+		"param_refs":     refs,
+		"compound_phase": "lst_after_mod",
+	}
+}
+
+// commandsNeedSequential 判断 commands 是否含需顺序执行的复合（#196 MOD 回读 lst_after_mod）。
+// 命中则 fanout 启用 sequential，保证回读 LST 在 SPV 之后执行（读到生效后的新值）。
+func commandsNeedSequential(commands []map[string]interface{}) bool {
+	for _, c := range commands {
+		if ph, _ := c["compound_phase"].(string); ph == "lst_after_mod" {
+			return true
+		}
+	}
+	return false
 }
 
 // CreateAndFanoutTask 是 ConsoleService.ExecuteStatements 的桥接入口（T-0123-P1 S3-D2）。
