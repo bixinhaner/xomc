@@ -109,3 +109,113 @@ func TestApplyDeviceVisibilityFilter(t *testing.T) {
 		}
 	})
 }
+
+func TestApplyDeviceSNVisibilityFilter(t *testing.T) {
+	g1, g2 := uuid.New(), uuid.New()
+
+	t.Run("nil 不过滤", func(t *testing.T) {
+		sql, args, err := ApplyDeviceSNVisibilityFilter(
+			storage.Psql.Select("*").From("pm_metrics"), "device_sn", nil).ToSql()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(sql, "devices") || len(args) != 0 {
+			t.Fatalf("nil visibleGroups should not filter: sql=%q args=%v", sql, args)
+		}
+	})
+
+	t.Run("空集 fail-closed", func(t *testing.T) {
+		sql, _, err := ApplyDeviceSNVisibilityFilter(
+			storage.Psql.Select("*").From("pm_metrics"), "device_sn", []uuid.UUID{}).ToSql()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(sql, "FALSE") {
+			t.Fatalf("empty visibleGroups should be WHERE FALSE: sql=%q", sql)
+		}
+	})
+
+	t.Run("两层子查询 device_sn → devices → 组成员", func(t *testing.T) {
+		sql, args, err := ApplyDeviceSNVisibilityFilter(
+			storage.Psql.Select("*").From("pm_metrics"), "device_sn", []uuid.UUID{g1, g2}).ToSql()
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := "device_sn IN (SELECT serial_number FROM devices WHERE id IN (SELECT device_id FROM device_group_members WHERE group_id IN ($1,$2)))"
+		if !strings.Contains(sql, want) {
+			t.Fatalf("unexpected sn subquery sql: %q", sql)
+		}
+		if len(args) != 2 {
+			t.Fatalf("expected 2 args (g1,g2), got %v", args)
+		}
+	})
+}
+
+func TestApplyGroupVisibilityFilter(t *testing.T) {
+	g1, g2 := uuid.New(), uuid.New()
+
+	t.Run("nil 不过滤", func(t *testing.T) {
+		sql, args, err := ApplyGroupVisibilityFilter(
+			storage.Psql.Select("*").From("pm_group_metrics_hourly"), "device_group_id", nil).ToSql()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(sql, "device_group_id") || len(args) != 0 {
+			t.Fatalf("nil visibleGroups should not filter: sql=%q args=%v", sql, args)
+		}
+	})
+
+	t.Run("空集 fail-closed", func(t *testing.T) {
+		sql, _, err := ApplyGroupVisibilityFilter(
+			storage.Psql.Select("*").From("pm_group_metrics_hourly"), "device_group_id", []uuid.UUID{}).ToSql()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(sql, "FALSE") {
+			t.Fatalf("empty visibleGroups should be WHERE FALSE: sql=%q", sql)
+		}
+	})
+
+	t.Run("组 id 直接取交", func(t *testing.T) {
+		sql, args, err := ApplyGroupVisibilityFilter(
+			storage.Psql.Select("*").From("pm_group_metrics_hourly"), "device_group_id", []uuid.UUID{g1, g2}).ToSql()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(sql, "device_group_id IN ($1,$2)") {
+			t.Fatalf("unexpected group filter sql: %q", sql)
+		}
+		if len(args) != 2 {
+			t.Fatalf("expected 2 args (g1,g2), got %v", args)
+		}
+	})
+}
+
+func TestVisibleSNSubquerySQL(t *testing.T) {
+	g1, g2 := uuid.New(), uuid.New()
+
+	t.Run("nil 不过滤", func(t *testing.T) {
+		sql, groups := VisibleSNSubquerySQL("m.device_sn", "$3", nil)
+		if sql != "" || groups != nil {
+			t.Fatalf("nil should yield empty sql/groups, got sql=%q groups=%v", sql, groups)
+		}
+	})
+
+	t.Run("空集 fail-closed", func(t *testing.T) {
+		sql, groups := VisibleSNSubquerySQL("m.device_sn", "$3", []uuid.UUID{})
+		if sql != "FALSE" || groups != nil {
+			t.Fatalf("empty should yield FALSE/nil, got sql=%q groups=%v", sql, groups)
+		}
+	})
+
+	t.Run("带 paramRef 的裸 SQL 片段", func(t *testing.T) {
+		sql, groups := VisibleSNSubquerySQL("m.device_sn", "$3", []uuid.UUID{g1, g2})
+		want := "m.device_sn IN (SELECT serial_number FROM devices WHERE id IN (SELECT device_id FROM device_group_members WHERE group_id = ANY($3)))"
+		if sql != want {
+			t.Fatalf("unexpected sql: %q", sql)
+		}
+		if len(groups) != 2 {
+			t.Fatalf("expected 2 groups returned, got %v", groups)
+		}
+	})
+}

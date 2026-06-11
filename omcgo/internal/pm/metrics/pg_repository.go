@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/omcgo/omcgo/internal/authz"
 	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -60,8 +61,12 @@ type QueryRequest struct {
 	Granularity Granularity // 必填 — 客户端按粒度查询（'15min' / 'hourly' / ...）
 	StartTime   time.Time
 	EndTime     time.Time
-	Limit       int
-	Offset      int
+	// VisibleGroups 是 #64 设备组数据权限的三态可见分组（nil=超管不过滤 / []=fail-closed 空集 /
+	// [g...]=仅这些组下设备）。pm_metrics 以 device_sn 为设备键，过滤经
+	// authz.ApplyDeviceSNVisibilityFilter 收口（device_sn → devices.id → device_group_members）。
+	VisibleGroups []uuid.UUID
+	Limit         int
+	Offset        int
 }
 
 // LIMIT 边界（防 OOM）：pm_metrics 是时序大表，单次查询若无上界，恶意/误操作的宽时间窗 ×
@@ -443,6 +448,9 @@ func applyFilters(qb squirrel.SelectBuilder, q QueryRequest) squirrel.SelectBuil
 	if !q.EndTime.IsZero() {
 		qb = qb.Where(squirrel.LtOrEq{"time": q.EndTime})
 	}
+	// #64 设备组数据权限：pm_metrics 以 device_sn 为设备键，按可见分组 fail-closed 收口。
+	// nil（超管）不过滤；[] 直接 WHERE FALSE；[g...] 经 device_sn → devices → 组成员子查询限定。
+	qb = authz.ApplyDeviceSNVisibilityFilter(qb, "device_sn", q.VisibleGroups)
 	return qb
 }
 

@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/authz"
 	appcontext "github.com/omcgo/omcgo/internal/core/context"
 	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
@@ -46,8 +47,13 @@ type QueryRequest struct {
 	Technologies []string
 	StartTime    time.Time
 	EndTime      time.Time
-	Limit        int
-	Offset       int
+	// VisibleGroups 是 #64 设备组数据权限的三态可见分组（nil=超管不过滤 / []=fail-closed 空集 /
+	// [g...]=仅这些组）。device/aggregate_group/network/product/band 维度按 device_sn 收口
+	// （authz.ApplyDeviceSNVisibilityFilter / VisibleSNSubquerySQL）；device_group 维度直接对
+	// device_group_id 取交（authz.ApplyGroupVisibilityFilter）。handler 解析调用者身份后注入。
+	VisibleGroups []uuid.UUID
+	Limit         int
+	Offset        int
 }
 
 // Row 是 Aggregator.Query 的输出行。device 维度填 DeviceOUI/DeviceSN/ObjectLDN；
@@ -516,6 +522,8 @@ func (a *Aggregator) queryProductTable(ctx context.Context, table string, q Quer
 	if len(q.Technologies) > 0 {
 		where = append(where, fmt.Sprintf("d.technology = ANY(%s)", add(q.Technologies)))
 	}
+	// #64 设备组数据权限：JOIN devices 后按 m.device_sn 收口到可见分组（fail-closed）。
+	where = appendVisibleSNWhere(where, "m.device_sn", q.VisibleGroups, add)
 
 	whereSQL := ""
 	for i, w := range where {
@@ -745,6 +753,8 @@ func (a *Aggregator) queryBandTable(ctx context.Context, table string, q QueryRe
 	if len(q.Technologies) > 0 {
 		where = append(where, fmt.Sprintf("d.technology = ANY(%s)", add(q.Technologies)))
 	}
+	// #64 设备组数据权限：JOIN devices 后按 m.device_sn 收口到可见分组（fail-closed）。
+	where = appendVisibleSNWhere(where, "m.device_sn", q.VisibleGroups, add)
 	whereSQL := ""
 	for i, w := range where {
 		if i == 0 {
@@ -832,6 +842,25 @@ ORDER BY m.time DESC%s`,
 	return out, rows.Err()
 }
 
+// appendVisibleSNWhere 把 #64 设备组可见性的 device_sn 收口条件追加到手拼 SQL 的 where 切片里
+// （product / band 维度走带 CTE/JOIN 的字符串 SQL，无 squirrel builder）。add 是各自闭包：
+// 追加一个位置参数并返回其 $N 占位符。三态：
+//
+//	nil       → 不追加（超管不过滤）
+//	[]        → 追加 "FALSE"（fail-closed，无参数）
+//	[g...]    → 追加 "m.device_sn IN (... = ANY($N))" 并 add(groups) 注册参数
+func appendVisibleSNWhere(where []string, snColumn string, visibleGroups []uuid.UUID, add func(any) string) []string {
+	if visibleGroups == nil {
+		return where
+	}
+	if len(visibleGroups) == 0 {
+		return append(where, "FALSE")
+	}
+	ref := add(visibleGroups)
+	sql, _ := authz.VisibleSNSubquerySQL(snColumn, ref, visibleGroups)
+	return append(where, sql)
+}
+
 // joinOr 把多个 LIKE 条件用 OR 连接成 "(a OR b OR ...)" 的括号体（去掉外层括号，由调用方加）。
 func joinOr(conds []string) string {
 	out := ""
@@ -882,6 +911,8 @@ func applyGroupFilters(qb sq.SelectBuilder, q QueryRequest) sq.SelectBuilder {
 	if len(q.Technologies) > 0 {
 		qb = qb.Where(sq.Eq{"technology": q.Technologies})
 	}
+	// #64 设备组数据权限：group 维度快表以 device_group_id 为键，直接对可见分组取交（fail-closed）。
+	qb = authz.ApplyGroupVisibilityFilter(qb, "device_group_id", q.VisibleGroups)
 	return qb
 }
 
@@ -919,6 +950,9 @@ func applyCommonFilters(qb sq.SelectBuilder, q QueryRequest) sq.SelectBuilder {
 			q.Technologies,
 		)
 	}
+	// #64 设备组数据权限：device 维度表（device / aggregate_group / network）以 device_sn 为
+	// 设备键，按可见分组 fail-closed 收口（nil 超管不过滤 / [] WHERE FALSE / [g...] 子查询限定）。
+	qb = authz.ApplyDeviceSNVisibilityFilter(qb, "device_sn", q.VisibleGroups)
 	return qb
 }
 

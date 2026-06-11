@@ -14,12 +14,42 @@ import (
 
 // RegistrationHandler provides HTTP endpoints for device pre-registration.
 type RegistrationHandler struct {
-	service *RegistrationService
+	service     *RegistrationService
+	permService VisibleGroupsResolver // #64 设备组数据权限：预注册列表按调用者可见分组过滤
 }
 
 // NewRegistrationHandler creates a new RegistrationHandler.
 func NewRegistrationHandler(service *RegistrationService) *RegistrationHandler {
 	return &RegistrationHandler{service: service}
+}
+
+// SetPermissionService 注入数据权限解析器（#64 统一强制层）。未注入时退化为不过滤
+// （dev/test），与 device / alarm 模块语义一致。
+func (h *RegistrationHandler) SetPermissionService(ps VisibleGroupsResolver) {
+	h.permService = ps
+}
+
+// resolveVisibleGroups 解析调用者可见设备组（三态：nil 超管 / [] 无权限 / [g...] 限定）。
+// 返回 ok=false 表示解析失败已 abort（403/500），调用方应立即 return。
+// permService 为 nil（dev/test）→ 返回 (nil, true) 不过滤。
+func (h *RegistrationHandler) resolveVisibleGroups(c *gin.Context) (groups []uuid.UUID, ok bool) {
+	if h.permService == nil {
+		return nil, true
+	}
+	userID, _ := c.Get(admin.CtxKeyUserID)
+	uid, isUUID := userID.(uuid.UUID)
+	if !isUUID {
+		commonerrors.AbortWithError(c, http.StatusForbidden, commonerrors.ErrForbidden)
+		return nil, false
+	}
+	isSuperVal, _ := c.Get(admin.CtxKeyIsSuperAdmin)
+	isSuper, _ := isSuperVal.(bool)
+	visibleGroups, err := h.permService.GetUserVisibleGroupIDs(c.Request.Context(), uid, isSuper)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return nil, false
+	}
+	return visibleGroups, true
 }
 
 // RegisterRoutes registers device registration routes.
@@ -78,6 +108,13 @@ func (h *RegistrationHandler) ListRegistrations(c *gin.Context) {
 		cc := model.CarrierCode(carrier)
 		filter.Carrier = &cc
 	}
+
+	// #64 设备组数据权限：预注册列表只露调用者可见分组内的条目（未分组对非超管不可见）。
+	visibleGroups, ok := h.resolveVisibleGroups(c)
+	if !ok {
+		return
+	}
+	filter.VisibleGroups = visibleGroups
 
 	result, err := h.service.List(c.Request.Context(), filter)
 	if err != nil {

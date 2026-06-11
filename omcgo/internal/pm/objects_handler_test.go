@@ -19,6 +19,7 @@ import (
 type fakeDeviceQuery struct {
 	lookupFn func(ctx context.Context, deviceID uuid.UUID) (string, string, error)
 	listFn   func(ctx context.Context, deviceSNs, technologies []string) ([]MetricObject, error)
+	groupsFn func(ctx context.Context, deviceID uuid.UUID) ([]uuid.UUID, error)
 }
 
 func (f *fakeDeviceQuery) LookupDeviceOUISN(ctx context.Context, deviceID uuid.UUID) (string, string, error) {
@@ -31,6 +32,13 @@ func (f *fakeDeviceQuery) LookupDeviceOUISN(ctx context.Context, deviceID uuid.U
 func (f *fakeDeviceQuery) ListMetricObjects(ctx context.Context, deviceSNs, technologies []string) ([]MetricObject, error) {
 	if f.listFn != nil {
 		return f.listFn(ctx, deviceSNs, technologies)
+	}
+	return nil, nil
+}
+
+func (f *fakeDeviceQuery) DeviceGroupIDs(ctx context.Context, deviceID uuid.UUID) ([]uuid.UUID, error) {
+	if f.groupsFn != nil {
+		return f.groupsFn(ctx, deviceID)
 	}
 	return nil, nil
 }

@@ -359,6 +359,7 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	deviceInfoHandler.RegisterRoutes(permGroup("devices"))
 
 	regHandler := device.NewRegistrationHandler(dh.regService)
+	regHandler.SetPermissionService(c.PermService) // #64 设备组可见性数据权限
 	regHandler.RegisterRoutes(permGroup("devices"))
 
 	columnConfigRepo := device.NewPgColumnConfigRepository(c.PgPool)
@@ -421,6 +422,7 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 		WithAggregator(ph.pmAggregator).
 		WithAsyncJobRepo(ph.pmAsyncJobRepo)
 	pmHandler.SetMetrics(pm.NewPMMetrics(c.MetricsReg))
+	pmHandler.SetPermissionService(c.PermService) // #64 设备组可见性数据权限
 	pmHandler.RegisterRoutes(permGroup("pm"))
 	// T-0164-P7 / G7：adhoc 自定义聚合任务 REST 路由（同 pm 权限组）
 	if ph.pmAdhocHandler != nil {

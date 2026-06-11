@@ -1877,18 +1877,21 @@ func (s *DeviceService) BatchRebootDevices(ctx context.Context, ids []uuid.UUID)
 }
 
 // ListGeo returns devices with geographic coordinates for map display.
+// filter.VisibleGroups 携带 #64 设备组数据权限，由 handler 解析调用者身份后注入。
 func (s *DeviceService) ListGeo(ctx context.Context, filter GeoDeviceFilter) ([]GeoDevice, int64, error) {
 	return s.deviceRepo.ListGeo(ctx, filter)
 }
 
 // GetGeoStats returns device statistics for map display.
-func (s *DeviceService) GetGeoStats(ctx context.Context, groupIDs []string) (*GeoStats, error) {
-	return s.deviceRepo.GetGeoStats(ctx, groupIDs)
+// visibleGroups 携带 #64 设备组数据权限（nil 超管 / [] fail-closed / [g...] 限定）。
+func (s *DeviceService) GetGeoStats(ctx context.Context, groupIDs []string, visibleGroups []uuid.UUID) (*GeoStats, error) {
+	return s.deviceRepo.GetGeoStats(ctx, groupIDs, visibleGroups)
 }
 
 // SearchDevices searches devices by keyword for map display.
-func (s *DeviceService) SearchDevices(ctx context.Context, keyword string, limit int) ([]GeoDevice, error) {
-	return s.deviceRepo.SearchDevices(ctx, keyword, limit)
+// visibleGroups 携带 #64 设备组数据权限（nil 超管 / [] fail-closed / [g...] 限定）。
+func (s *DeviceService) SearchDevices(ctx context.Context, keyword string, limit int, visibleGroups []uuid.UUID) ([]GeoDevice, error) {
+	return s.deviceRepo.SearchDevices(ctx, keyword, limit, visibleGroups)
 }
 
 // ===== Recycle Bin Operations =====
