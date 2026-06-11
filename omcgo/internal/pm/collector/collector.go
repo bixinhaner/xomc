@@ -19,6 +19,7 @@ import (
 	"github.com/omcgo/omcgo/internal/pm/kpi"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 )
 
@@ -85,6 +86,14 @@ type CounterWhitelist interface {
 	LookupCounters(ctx context.Context, deviceSN string) (map[string]CounterMeta, error)
 }
 
+// CopyIngestor 是 copy-direct 写路径（copy 模式）的最小接口：把一个 PM 文件的全部 metric 行
+// （counter + KPI）与 pm_files 幂等标记在单事务里 plain COPY 原子入库（去掉每行自然键 UPSERT
+// 的写 CPU 大头，幂等下沉到每文件一次 pm_files 唯一约束）。由 metrics.PgRepository 实现
+// （CopyIngest）。注入后 collector 走 copy 模式，否则保持默认 counterRepo UPSERT 写路径。
+type CopyIngestor interface {
+	CopyIngest(ctx context.Context, marker metrics.FileMarker, counters []model.PMCounter, kpis []model.KPIValue) (ingested bool, err error)
+}
+
 // PMCollector handles PM file processing: download from MinIO, parse XML, store counters.
 //
 // The optional runner.Wrapper field enables retry + DLQ instrumentation: when
@@ -105,6 +114,7 @@ type PMCollector struct {
 	runner           runner.Wrapper
 	deviceLookup     DeviceLookup
 	counterWhitelist CounterWhitelist
+	copyIngestor     CopyIngestor
 	concurrency      int
 	kpiWindowFromDB  bool
 	logger           *zap.Logger
@@ -152,6 +162,13 @@ func (c *PMCollector) SetDeviceLookup(lookup DeviceLookup) {
 // counter。Nil-safe — 未设置时 collector 不过滤，行为退化到注入前。
 func (c *PMCollector) SetCounterWhitelist(w CounterWhitelist) {
 	c.counterWhitelist = w
+}
+
+// SetCopyIngestor 注入 copy-direct 写路径，启用 copy 模式（pm_files 标记 + 全部 metric 行单事务
+// plain COPY 原子入库，见 CopyIngestor / handleFileReceived 写路径分流）。Nil-safe — 未注入时
+// collector 保持默认 counterRepo UPSERT 写路径。由 worker 按 pm_write_mode=copy 注入。
+func (c *PMCollector) SetCopyIngestor(ci CopyIngestor) {
+	c.copyIngestor = ci
 }
 
 // SetConcurrency 设置 PM 文件入库的进程内并发订阅数。
@@ -249,10 +266,12 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 		}
 	}
 
-	// Save file metadata to pm_files table before parsing
+	// Save file metadata to pm_files table before parsing.
+	// copy 模式跳过：CopyIngest 在同一事务里写 pm_files 标记（文件级幂等的单一来源），
+	// 此处再预存一行会与 marker 冲突/抢占幂等语义，故仅默认（UPSERT）模式才预存。
+	now := time.Now()
 	var fileID uuid.UUID
-	if c.fileStore != nil {
-		now := time.Now()
+	if c.fileStore != nil && c.copyIngestor == nil {
 		pmFile := &pm.PMFileInfo{
 			DeviceID:    deviceID,
 			DeviceSN:    payload.DeviceSN,
@@ -301,6 +320,13 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 	// 编码在 measType.p 而不是 Name 里），落库会撞 pm_metrics 自然键。
 	// 过滤逻辑 fail-open：lookup 失败 / 空白名单时跳过过滤，保留原行为。
 	content.Counters = c.filterByWhitelist(ctx, payload.DeviceSN, payload.Carrier, payload.Technology, content.Counters)
+
+	// 写路径分流：copy 模式（激进）—— pm_files 标记 + 全部 metric 行（counter + 内存算出的 KPI）
+	// 在单事务里 plain COPY 原子入库，幂等下沉到每文件一次（pm_files 唯一约束），去掉每行自然键
+	// UPSERT 的写 CPU 大头。copyIngestor 未注入时走下方默认 counterRepo UPSERT + KPI 单独落库。
+	if c.copyIngestor != nil {
+		return c.ingestViaCopy(ctx, span, startTime, now, fileSize, deviceID, &payload, content)
+	}
 
 	if err := c.counterRepo.BatchInsert(ctx, content.Counters); err != nil {
 		// issue #14 迟到数据降级：补传命中 TimescaleDB 压缩 chunk（> compression 阈值）时
@@ -365,6 +391,86 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 		"minio_path": payload.MinIOPath, "device_id": payload.DeviceID, "counter_count": len(content.Counters),
 	})
 	if err == nil {
+		_ = c.eventBus.Publish(ctx, event.SubjectPMFileParsed, parsedEvt)
+	}
+	return nil
+}
+
+// ingestViaCopy 是 copy 模式的写收尾：用内存 counter 算出 KPI（只算不写），把 counter + KPI +
+// pm_files 幂等标记交给 CopyIngest 在单事务里 plain COPY 原子入库。与默认路径相比省掉：
+//   - counter 的自然键 ON CONFLICT DO UPDATE（每行索引探测 + 更新）；
+//   - KPI 单独一次 BatchInsert（又一趟 COPY 暂存表 + UPSERT）；
+//   - pm_files 预存 + UpdateFileParsed 两次额外写（marker 一次写定 parsed/counter_count）。
+// 返回 nil 让该文件 ack（含 marker 冲突=已入库的幂等跳过与迟到压缩 chunk 降级）。
+func (c *PMCollector) ingestViaCopy(
+	ctx context.Context, span trace.Span, startTime, now time.Time, fileSize int64,
+	deviceID uuid.UUID, payload *FileReceivedPayload, content *PMFileContent,
+) error {
+	// KPI：用本文件已过白名单、已编号化的内存 counter 直接算，不落库（随 counter 一起 COPY）。
+	var kpis []model.KPIValue
+	if c.kpiEngine != nil {
+		ks, kerr := c.kpiEngine.CalculateFromCounters(ctx, deviceID, payload.DeviceOUI, payload.DeviceSN,
+			content.Counters, content.CollectTime, model.CarrierCode(payload.Carrier), model.Technology(payload.Technology))
+		if kerr != nil {
+			c.logger.Warn("calculate kpi (copy mode)", zap.Int("counters", len(content.Counters)), zap.Error(kerr))
+		} else {
+			kpis = ks
+		}
+	}
+
+	marker := metrics.FileMarker{
+		DeviceID:     deviceID,
+		DeviceSN:     payload.DeviceSN,
+		Carrier:      payload.Carrier,
+		Technology:   payload.Technology,
+		FileName:     path.Base(payload.MinIOPath),
+		FileSize:     fileSize,
+		CollectTime:  now,
+		MinioPath:    payload.MinIOPath,
+		CounterCount: len(content.Counters),
+	}
+	ingested, err := c.copyIngestor.CopyIngest(ctx, marker, content.Counters, kpis)
+	if err != nil {
+		// 迟到补传命中压缩 chunk：与默认路径一致降级（log WARN + 记 metric + 跳过 ack），
+		// 不让历史补传反复重试灌 DLQ 阻塞实时 PM。
+		if errors.Is(err, metrics.ErrLateArrival) {
+			c.logger.Warn("PM file skipped: late-arriving data hit compressed chunk (copy mode)",
+				zap.String("path", payload.MinIOPath), zap.String("device_sn", payload.DeviceSN), zap.Error(err))
+			if c.metrics != nil {
+				c.metrics.LateArrivalFilesTotal.WithLabelValues(payload.Carrier, payload.Technology).Inc()
+				c.metrics.FilesProcessedTotal.WithLabelValues("late_arrival").Inc()
+				c.metrics.ProcessingDurationSecs.Observe(time.Since(startTime).Seconds())
+			}
+			span.SetAttributes(attribute.String("pm.outcome", "late_arrival"))
+			return nil
+		}
+		if c.metrics != nil {
+			c.metrics.FilesProcessedTotal.WithLabelValues("failed").Inc()
+			c.metrics.ProcessingDurationSecs.Observe(time.Since(startTime).Seconds())
+		}
+		tracing.RecordError(span, err)
+		return fmt.Errorf("copy ingest pm file: %w", err)
+	}
+
+	if !ingested {
+		// marker 冲突：该文件已入库（NATS 重投 / 并发已写）→ 当作成功跳过，正常 ack。
+		c.logger.Info("PM file already ingested (marker conflict), skip",
+			zap.String("path", payload.MinIOPath), zap.String("device_sn", payload.DeviceSN))
+	}
+	if c.metrics != nil {
+		c.metrics.FilesProcessedTotal.WithLabelValues("success").Inc()
+		c.metrics.ProcessingDurationSecs.Observe(time.Since(startTime).Seconds())
+	}
+	span.SetAttributes(
+		attribute.Int("pm.parsed_counters", len(content.Counters)),
+		attribute.Int("pm.kpi_rows", len(kpis)),
+		attribute.Bool("pm.copy_mode", true),
+	)
+
+	parsedEvt, perr := event.NewEvent(event.SubjectPMFileParsed, map[string]interface{}{
+		"minio_path": payload.MinIOPath, "device_id": payload.DeviceID, "counter_count": len(content.Counters),
+	})
+	if perr == nil {
 		_ = c.eventBus.Publish(ctx, event.SubjectPMFileParsed, parsedEvt)
 	}
 	return nil

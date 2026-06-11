@@ -260,49 +260,12 @@ func groupRowsByCell(rows []counterRow, cellIDs []string, period float64) map[st
 // --- 字段转换辅助 ---
 
 // counterToMetric 把 model.PMCounter（业务键 OUI+SN）转 metrics.PMMetric。
-// 上游 collector 已填 c.OUI 和 c.DeviceSN，这里直接拿。
+//
+// 转换实现已上移到 metrics 包（metrics.MetricFromCounter），让 counter.BatchInsert（UPSERT 路径）
+// 与 metrics.CopyIngest（copy-direct 路径）共用同一份字段映射，杜绝两路写出的行漂移。
+// 本薄包装仅保留以最小化调用点改动。
 func counterToMetric(c model.PMCounter) metrics.PMMetric {
-	extra := map[string]any{}
-	if c.CounterGroup != "" {
-		extra["counter_group"] = c.CounterGroup
-	}
-	if c.Granularity > 0 {
-		extra["granularity_minutes"] = c.Granularity
-	}
-	if c.DeviceID != uuid.Nil {
-		extra["device_id"] = c.DeviceID.String()
-	}
-	var ldn *string
-	if c.CellID != "" {
-		v := c.CellID
-		ldn = &v
-	}
-	endTime := c.Time
-	startTime := endTime
-	if c.Granularity > 0 {
-		startTime = endTime.Add(-time.Duration(c.Granularity) * time.Minute)
-	}
-	m := metrics.PMMetric{
-		DeviceOUI:   c.OUI,
-		DeviceSN:    c.DeviceSN,
-		MetricPath:  c.CounterName,
-		MetricType:  metrics.MetricTypeCounter,
-		MetricValue: c.CounterValue,
-		Granularity: metrics.Granularity15Min,
-		Time:        endTime,
-		StartTime:   startTime,
-		EndTime:     endTime,
-		ObjectLDN:   ldn,
-		Extra:       extra,
-	}
-	// T-0164-G6 收尾 BUG-A：counter 的 statis_type 由 collector.filterByWhitelist
-	// 从 indicator 元数据填到 PMCounter.StatisType，这里透传给 pm_metrics.statis_type
-	// 列，驱动 G5 aggregator CASE WHEN m.statis_type 路由 SUM/AVG/MAX。
-	if c.StatisType != "" {
-		st := metrics.StatisType(c.StatisType)
-		m.StatisType = &st
-	}
-	return m
+	return metrics.MetricFromCounter(c)
 }
 
 // metricToCounter 反向：PMMetric → PMCounter。
