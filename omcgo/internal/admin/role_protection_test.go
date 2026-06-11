@@ -71,6 +71,55 @@ func TestDeleteRole_CustomRoleAllowed(t *testing.T) {
 	assert.True(t, deleteCalled, "自建角色删除应透传到 repo.Delete")
 }
 
+// TestDeleteRole_InUseBlocked 覆盖 issue #191：自建角色仍有用户引用时，删除必须被拦截，
+// 返回 BusinessError(7008) 包 ErrAlreadyExists → HTTPStatusFromError 映射 409 Conflict，
+// 且不得调用 repo.Delete（避免遗留用户 RBAC 失效）。
+func TestDeleteRole_InUseBlocked(t *testing.T) {
+	customID := uuid.New()
+	deleteCalled := false
+	roleRepo := &mockRoleRepo{
+		listUserIDsByRoleFn: func(_ context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
+			return []uuid.UUID{uuid.New(), uuid.New()}, nil // 仍有用户引用
+		},
+		deleteFn: func(_ context.Context, _ uuid.UUID) error {
+			deleteCalled = true
+			return nil
+		},
+	}
+	svc := newTestService(&mockUserRepo{}, roleRepo, &mockAuditRepo{})
+
+	err := svc.DeleteRole(context.Background(), customID)
+	require.Error(t, err, "仍有用户引用的角色删除必须被拦截")
+
+	assert.Equal(t, 409, commonerrors.HTTPStatusFromError(err),
+		"in-use 应映射 409 Conflict")
+	var bizErr *commonerrors.BusinessError
+	require.True(t, errors.As(err, &bizErr), "应为 BusinessError")
+	assert.Equal(t, commonerrors.ErrCodeRoleInUse, bizErr.Code, "biz_code 应为 7008")
+	assert.False(t, deleteCalled, "拦截应在调 repo.Delete 之前短路")
+}
+
+// TestDeleteRole_NotInUseAllowed 失败路径对照：无用户引用的自建角色删除应正常透传到 repo。
+func TestDeleteRole_NotInUseAllowed(t *testing.T) {
+	customID := uuid.New()
+	deleteCalled := false
+	roleRepo := &mockRoleRepo{
+		listUserIDsByRoleFn: func(_ context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
+			return nil, nil // 无用户引用
+		},
+		deleteFn: func(_ context.Context, id uuid.UUID) error {
+			deleteCalled = true
+			assert.Equal(t, customID, id)
+			return nil
+		},
+	}
+	svc := newTestService(&mockUserRepo{}, roleRepo, &mockAuditRepo{})
+
+	err := svc.DeleteRole(context.Background(), customID)
+	require.NoError(t, err)
+	assert.True(t, deleteCalled, "无引用角色删除应透传到 repo.Delete")
+}
+
 // TestIsBuiltInRole 单测白名单判定本身（含一个反例）。
 func TestIsBuiltInRole(t *testing.T) {
 	assert.True(t, isBuiltInRole(uuid.MustParse(builtinAdminRoleID)))
