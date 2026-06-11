@@ -41,6 +41,63 @@ export interface CreateProvisioningTaskRequest {
   deviceId: string;
 }
 
+/**
+ * UI 状态码（即插即用「执行状态」列表使用的简化状态机）：
+ * 0-成功 1-失败 2-执行中 3-未执行 4-跳过。
+ * 后端 ProvisioningState（discovered/identifying/matching/configuring/verifying/
+ * discovering/syncing/completed/failed）映射到此简化态。
+ */
+export type ProvisioningTaskStatusCode = '0' | '1' | '2' | '3' | '4';
+
+/**
+ * 即插即用「执行状态」表的视图模型。后端 ProvisioningTask 字段较少
+ * （无 productClass/policyName/executeType/licenseFile 等业务列），缺失字段在
+ * mapTaskToExecuteView 中以空串占位，避免页面渲染崩溃。
+ */
+export interface ProvisioningExecuteView {
+  taskId: string;
+  deviceId: string;
+  status: ProvisioningTaskStatusCode;
+  startTime: string;
+  endTime: string;
+  /** 「Step N/M」形式的进度，由 currentStep/totalSteps 派生。 */
+  executeProcedure: string;
+  failureReason: string;
+  retryCount: number;
+  maxRetries: number;
+}
+
+/** 后端生命周期状态 → UI 简化状态码。 */
+export function provisioningStatusCode(status: string): ProvisioningTaskStatusCode {
+  switch (status) {
+    case 'completed':
+      return '0';
+    case 'failed':
+      return '1';
+    default:
+      // discovered / identifying / matching / configuring / verifying /
+      // discovering / syncing —— 均视为「执行中」。
+      return '2';
+  }
+}
+
+/** 后端 ProvisioningTask → 即插即用执行状态视图模型。 */
+export function mapTaskToExecuteView(t: ProvisioningTask): ProvisioningExecuteView {
+  const procedure =
+    t.totalSteps > 0 ? `${t.currentStep}/${t.totalSteps}` : '';
+  return {
+    taskId: t.id,
+    deviceId: t.deviceId,
+    status: provisioningStatusCode(t.status),
+    startTime: t.startedAt ?? '',
+    endTime: t.completedAt ?? '',
+    executeProcedure: procedure,
+    failureReason: t.errorMessage,
+    retryCount: t.retryCount,
+    maxRetries: t.maxRetries,
+  };
+}
+
 // --- Mapping functions ---
 
 function mapBackendTask(t: BackendProvisioningTask): ProvisioningTask {

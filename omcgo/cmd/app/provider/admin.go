@@ -209,6 +209,7 @@ func initAdminModule(c *Container) error {
 		sysConfigHandler: sysConfigHandler,
 		uiAssetHandler:   uiAssetHandler,
 		logHandler:       logHandler,
+		logRepo:          logRepo, // #122：OperLogger 中间件写 sys_oper_logs
 		pubKeyHandler:    pubKeyHandler,
 		jwtService:       jwtService,
 		tokenRevoker:     tokenRevoker,
@@ -247,6 +248,7 @@ type adminHandlerDeps struct {
 	sysConfigHandler *admin.SysConfigHandler
 	uiAssetHandler   *admin.UIAssetHandler
 	logHandler       *admin.LogHandler
+	logRepo          admin.LogRepository // #122：OperLogger 中间件写 sys_oper_logs
 	pubKeyHandler    *loginpwd.PublicKeyHandler
 	jwtService       *admin.JWTService
 	tokenRevoker     *admin.TokenRevoker

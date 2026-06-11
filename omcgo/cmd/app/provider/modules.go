@@ -1686,6 +1686,12 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 			// 也注册自己的 TaskSourceOps 聚合器。CompletionRouter.Register 是 mutex-safe，
 			// 允许 bridge.Subscribe 之后再追加 handler — 启动序无 race（pre-traffic 阶段）。
 			c.miscDeps.completionRouter = task.NewCompletionRouter(logger)
+			// #122：source 无关的终态观察者，把每个终态任务写入 sys_task_logs。
+			// 必须在 per-source handler 之前用 RegisterObserver 注册，覆盖全部 source。
+			if c.adminHandlerDeps != nil && c.adminHandlerDeps.logRepo != nil {
+				c.miscDeps.completionRouter.RegisterObserver(
+					newTaskLogObserver(c.adminHandlerDeps.logRepo, logger))
+			}
 			// 顺序关键：Sequencer 必须先注册——某行完成时它先把下一行 device_task 入队，
 			// 聚合器随后判定"无在途"才不会在顺序链中途误判完成（见 finalizeIfComplete 注释）。
 			c.miscDeps.completionRouter.Register(task.TaskSourceMML, sequencer) // Sprint B Q-V3-3
@@ -1705,6 +1711,11 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 			}
 		} else {
 			// 单进程部署（单测/无 NATS）下退化为同进程回调。
+			// #122：任务日志观察者同样以回调形式兜底，覆盖单进程终态。
+			if c.adminHandlerDeps != nil && c.adminHandlerDeps.logRepo != nil {
+				c.miscDeps.taskSvc.AddCompletionCallback(
+					newTaskLogObserver(c.adminHandlerDeps.logRepo, logger))
+			}
 			// 顺序同上：Sequencer 先注册，聚合器后注册（见 finalizeIfComplete 注释）。
 			c.miscDeps.taskSvc.AddCompletionCallback(sequencer) // Sprint B Q-V3-3
 			c.miscDeps.taskSvc.AddCompletionCallback(aggregator)

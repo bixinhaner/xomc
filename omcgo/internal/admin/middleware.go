@@ -467,3 +467,109 @@ func AuditLogger(auditRepo AuditRepository) gin.HandlerFunc {
 		}()
 	}
 }
+
+// OperLogger 返回一个 Gin 中间件，把管理面的写操作（POST/PUT/PATCH/DELETE）
+// 记录到 sys_oper_logs（#122）。
+//
+// 与 AuditLogger（合规审计 audit_logs）并行：本表支撑 /admin/logs/operation
+// 视图，字段更贴近 GVA 风格（method/path/操作人/IP/UA/状态码/耗时）。两者刻意
+// 并存而非合并——audit_logs 是不可变合规链，sys_oper_logs 是可分页查询的运维视图。
+//
+// 写入策略与 recordLoginLog 对齐：fire-and-forget goroutine + context.Background，
+// 写失败仅 Warn 不阻塞请求；logRepo 为 nil 时整体降级为 no-op。
+//
+// 记录范围：仅写操作。GET/HEAD/OPTIONS 读端点与高频健康检查不记录，避免
+// sys_oper_logs 被读流量淹没。失败请求（状态码 >=400）也记录一条 status=false，
+// 便于排查越权 / 校验失败的操作尝试。
+func OperLogger(logRepo OperLogWriter, logger *zap.Logger) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		start := time.Now()
+		c.Next()
+
+		if logRepo == nil {
+			return
+		}
+
+		// 只记录写操作；读端点（GET/HEAD/OPTIONS）与健康检查不入库。
+		method := c.Request.Method
+		switch method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
+			return
+		}
+
+		// 未认证（无 username）请求一般已被前置 auth 中间件 Abort，
+		// 此处再兜底跳过——无操作人主体的写操作不计入操作日志。
+		usernameVal, _ := c.Get(CtxKeyUsername)
+		username, _ := usernameVal.(string)
+		if username == "" {
+			return
+		}
+
+		var userID *uuid.UUID
+		if uid, exists := c.Get(CtxKeyUserID); exists {
+			if id, ok := uid.(uuid.UUID); ok {
+				userID = &id
+			}
+		}
+
+		status := c.Writer.Status()
+		req := CreateOperLogRequest{
+			UserID:    userID,
+			Username:  username,
+			Action:    method,
+			Module:    operModuleFromPath(c.FullPath()),
+			Target:    c.FullPath(),
+			Detail:    method + " " + c.Request.URL.Path,
+			IPAddress: c.ClientIP(),
+			UserAgent: c.Request.UserAgent(),
+			Status:    status < 400,
+			CostMs:    int(time.Since(start).Milliseconds()),
+		}
+		if status >= 400 {
+			req.ErrorMsg = http.StatusText(status)
+		}
+
+		// Fire and forget — 操作日志写入不阻塞响应；用 background context
+		// 避免 HTTP 请求结束后 ctx 被取消。
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := logRepo.CreateOperLog(ctx, req); err != nil {
+				logger.Warn("failed to write operation log",
+					zap.String("username", username),
+					zap.String("method", method),
+					zap.String("path", req.Target),
+					zap.Error(err))
+			}
+		}()
+	}
+}
+
+// OperLogWriter 是 OperLogger 中间件依赖的最小写入接口（LogRepository 的子集）。
+// 独立定义而非直接用 LogRepository，是为了让中间件只暴露它真正需要的能力，
+// 也便于单测注入轻量 mock。
+type OperLogWriter interface {
+	CreateOperLog(ctx context.Context, req CreateOperLogRequest) error
+}
+
+// operModuleFromPath 从受保护路由的 FullPath（形如 /api/v1/devices/:id）粗提
+// 出业务模块名（devices/alarms/...），供 sys_oper_logs.module 列分组筛选。
+// 取 /api/v1/ 之后的第一段；无法识别时回退 "system"。
+func operModuleFromPath(fullPath string) string {
+	const prefix = "/api/v1/"
+	rest := fullPath
+	if idx := strings.Index(fullPath, prefix); idx >= 0 {
+		rest = fullPath[idx+len(prefix):]
+	}
+	rest = strings.TrimPrefix(rest, "/")
+	if rest == "" {
+		return "system"
+	}
+	if slash := strings.IndexByte(rest, '/'); slash >= 0 {
+		rest = rest[:slash]
+	}
+	if rest == "" {
+		return "system"
+	}
+	return rest
+}

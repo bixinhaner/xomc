@@ -20,7 +20,7 @@
 | #119 | 告警热力图 smallint=text 500 | ✅ 已修 |
 | #120 | 分组排序 CASE 类型 500 | ✅ 已修 |
 | #121 | 北向死信队列 503（未装配）| ✅ 已修 |
-| #122 | admin 三类系统日志无写入方 | ⚠️ 部分（登录日志已接通，oper/task 遗留）|
+| #122 | admin 三类系统日志无写入方 | ✅ 已修（第6轮：登录日志 + OperLogger 中间件操作日志 + CompletionRouter observer 任务日志,live 实测三类均非空）|
 | #123 | 告警定义 upload-xml 静默失败 | ✅ 已修 |
 | #124 | ops_audit_logs target_type 超长 | ✅ 已修（迁移 000035）|
 | #125 | 错误映射批次 10 项 500→4xx | ✅ 已修（第2轮）|
@@ -33,7 +33,7 @@
 | #139/#143 | token 强制下线秒级边界 | ✅ 已修（now+严格小于）|
 | #145 | 补全新发现 5 项错误映射 + find/refreshSource 补漏 | ✅ 已修（第3/4轮）|
 | #137 | 测试栈 role_menus 恢复 | ⏸️ 运维待办（恢复 SQL 留人工执行）|
-| #140 | 前端 plug-and-play 纯 mock 未接线 | ⏸️ enhancement（前端接线）|
+| #140 | 前端 plug-and-play 纯 mock 未接线 | ⚠️ 部分（第6轮：执行任务列表接真实 provision API list/create/retry;策略管理因后端无 /policies 端点暂留前端配置态）|
 
 **累计修复 30+ 真实后端/前端缺陷**；所有冒烟脚本的 `known_bug` 探针均已 flip 为硬断言
 （后端 known_bug 计数清零）。trace `payload_size_bytes` 口径偏差经核实为有意设计（wontfix）。

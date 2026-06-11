@@ -451,22 +451,30 @@ req GET "/api/v1/admin/logs/login?page=1&page_size=10"
 check_ret_ok "登录日志可查"
 check_list_or_empty "登录日志 data.items" "data.items"
 check_field "登录日志含 total 字段" "data.total"
-# #122 已修复：auth Login 成功/失败路径异步写 sys_login_logs（auth_handler 调
-# CreateLoginLog）。本套件登录频繁，登录日志可硬断言非空。
-# oper/task 日志写入链路仍未接通（#122 遗留），下方维持 check_list_or_empty。
+# #122 三类系统日志写入方均已接通：
+#   - 登录日志：auth Login 成功/失败异步写 sys_login_logs（auth_handler.recordLoginLog）
+#   - 操作日志：admin.OperLogger 中间件记所有受保护写请求（POST/PUT/DELETE）→ sys_oper_logs
+#   - 任务日志：CompletionRouter observer 记 completed/failed/expired 终态 → sys_task_logs
 check_list_nonempty "登录日志在成功登录后非空（#122）" "data.items"
 
 req GET "/api/v1/admin/logs/login?page=1&page_size=10&username=admin"
 check_ret_ok "登录日志按 username=admin 过滤"
 
+# 操作日志：本脚本到此已发生大量写请求（字典/数据源 CRUD），OperLogger 必已记录 → 硬断言非空。
 req GET "/api/v1/admin/logs/operation?page=1&page_size=10"
 check_ret_ok "操作日志可查"
-check_list_or_empty "操作日志 data.items" "data.items"
+check_list_nonempty "操作日志在写操作后非空（#122 OperLogger 中间件）" "data.items"
 check_field "操作日志含 total 字段" "data.total"
 
+# 任务日志：写入方已接通并经 live 实测验证（expired 任务走 task.failed→observer→sys_task_logs）。
+# 但终态产生依赖 ExpiredSweeper（每 10s）/CWMP 回调时序，快速冒烟不保证本次 run 有终态任务，
+# 故维持 check_list_or_empty（不引入 sweeper 时序 flaky）；写入链路正确性由 cmd/app/provider
+# task_log_observer_test.go + internal/task completion_router_test.go 单测硬保证。
+# 注：手动 cancel 是唯一不广播终态的路径（cancelled 无 NATS subject，避免误触发失败通知），
+# 故 cancel 不进任务日志属设计取舍，非缺陷。
 req GET "/api/v1/admin/logs/task?page=1&page_size=10"
 check_ret_ok "任务日志可查"
-check_list_or_empty "任务日志 data.items" "data.items"
+check_list_or_empty "任务日志 data.items（写入方已接通,终态依赖 sweeper 时序）" "data.items"
 check_field "任务日志含 total 字段" "data.total"
 
 # 负路径：binding min=1（嵌 model.ListRequest，page 必填）
