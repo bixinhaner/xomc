@@ -280,6 +280,70 @@ func TestBuildEntries_ADD_WithValues_NoSubFieldMatch_OnlyAddObject(t *testing.T)
 	require.Len(t, entries, 1, "无 sub_field 匹配 → 仅 AddObject")
 }
 
+// ============================================================
+// #196 MOD 回读复合：buildStatementCommandEntries
+// ============================================================
+
+// TestBuildEntries_MOD_WithValues_CompoundReadbackLST — MOD with values 触发 2 entries：
+// SetParameterValues（下发）+ GetParameterValues（回读核实下发的 PATH，根治 SPV 不回值导致的结果显示空）。
+func TestBuildEntries_MOD_WithValues_CompoundReadbackLST(t *testing.T) {
+	sfID := uuid.New()
+	otherID := uuid.New()
+	cmd := &MMLCommand{
+		ID:            uuid.New(),
+		CommandCode:   "MOD_KPI",
+		OperationType: "MOD",
+		Params: []MMLParamRef{
+			{ID: sfID, ParamCode: "KPI_URL", Tr069Path: "Device.X_KPI.ReportURL"},
+			{ID: otherID, ParamCode: "OTHER", Tr069Path: "Device.X_KPI.Other"},
+		},
+	}
+	subFields := []MMLCommandSubField{
+		{ID: sfID, MMLCode: "KPI_URL"},
+		{ID: otherID, MMLCode: "OTHER"},
+	}
+	// 仅下发 KPI_URL（OTHER 未填）
+	stmt := Statement{
+		OperationType: "MOD",
+		Values:        map[string]string{"KPI_URL": "http://1.2.3.4/kpi"},
+	}
+	entries, err := buildStatementCommandEntries(stmt, cmd, subFields)
+	require.NoError(t, err)
+	require.Len(t, entries, 2, "MOD with values → SPV + 回读 LST")
+
+	// 第 1 entry: SetParameterValues 下发
+	assert.Equal(t, "SetParameterValues", entries[0]["rpc_method"])
+	assert.Equal(t, "MOD", entries[0]["operation_type"])
+	assert.Equal(t, "http://1.2.3.4/kpi", entries[0]["parameters"].(map[string]interface{})["KPI_URL"])
+
+	// 第 2 entry: GetParameterValues 回读，且**只回读本次实际下发的 PATH**（KPI_URL，不含未填的 OTHER）
+	assert.Equal(t, "GetParameterValues", entries[1]["rpc_method"])
+	assert.Equal(t, "LST", entries[1]["operation_type"])
+	assert.Equal(t, "lst_after_mod", entries[1]["compound_phase"])
+	refs := entries[1]["param_refs"].([]MMLParamRef)
+	require.Len(t, refs, 1, "回读仅含已下发的 KPI_URL")
+	assert.Equal(t, "KPI_URL", refs[0].ParamCode)
+	assert.Equal(t, "Device.X_KPI.ReportURL", refs[0].Tr069Path)
+}
+
+// TestBuildEntries_MOD_NoSubFieldMatch_OnlySPV — MOD values keys 不命中 subFields →
+// 无可回读 → 仅 SPV（防御性回退，不追加空 LST）。
+func TestBuildEntries_MOD_NoSubFieldMatch_OnlySPV(t *testing.T) {
+	cmd := &MMLCommand{
+		ID:            uuid.New(),
+		CommandCode:   "MOD_X",
+		OperationType: "MOD",
+	}
+	stmt := Statement{
+		OperationType: "MOD",
+		Values:        map[string]string{"NonExistent": "v"},
+	}
+	entries, err := buildStatementCommandEntries(stmt, cmd, nil)
+	require.NoError(t, err)
+	require.Len(t, entries, 1, "无 sub_field 匹配 → 仅 SPV，不追加回读 LST")
+	assert.Equal(t, "SetParameterValues", entries[0]["rpc_method"])
+}
+
 // TestSubstituteInstanceSelectorsForADDCompound — 三种 path/selectors 组合
 func TestSubstituteInstanceSelectorsForADDCompound(t *testing.T) {
 	cases := []struct {

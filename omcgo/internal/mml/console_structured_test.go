@@ -240,12 +240,20 @@ func TestExecuteStructured_DelegatesToExecuteStatements(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, task)
 	require.NotNil(t, creator.captured)
-	require.Len(t, creator.captured.Commands, 1)
+	// #196：MOD with values → 2 commands（SPV 下发 + GPV 回读核实下发的 PATH）
+	require.Len(t, creator.captured.Commands, 2)
 	entry := creator.captured.Commands[0]
 	assert.Equal(t, "SetParameterValues", entry["rpc_method"])
 	params := entry["parameters"].(map[string]interface{})
 	// 校验 values key 已经从 standardPath 翻译为 MMLCode
 	assert.Equal(t, "10.0.0.1", params["ADDR"])
+	// 第 2 条：回读 LST，compound_phase 标记，且只回读本次下发的 ADDR（不含未填的 MASK/ENBL）
+	readback := creator.captured.Commands[1]
+	assert.Equal(t, "GetParameterValues", readback["rpc_method"])
+	assert.Equal(t, "lst_after_mod", readback["compound_phase"])
+	rRefs := readback["param_refs"].([]MMLParamRef)
+	require.Len(t, rRefs, 1)
+	assert.Equal(t, "ADDR", rRefs[0].ParamCode)
 }
 
 // 2026-05-22 防回归：模拟 PgCommandRepository.GetByID 返回 cmd.Params=nil 的
