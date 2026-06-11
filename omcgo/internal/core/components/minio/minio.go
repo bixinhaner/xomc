@@ -7,8 +7,15 @@ import (
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	"github.com/minio/minio-go/v7/pkg/lifecycle"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 )
+
+// rawFileRetentionDays 是 PM/MR 原始文件桶（pm-files / mr-files）的自动过期天数（#169）。
+// KPI/聚合结果落 PG/TimescaleDB；原始 XML 仅供回溯/重算，14 天后由 MinIO ILM 自动过期删除，
+// 防「设备数 × 每天文件数 × 保留期」把盘单调撑满。其它桶（firmware/config_backup/logs 等）
+// 内容需持久，不设此策略。
+const rawFileRetentionDays = 14
 
 // NewMinIOClient creates a new MinIO client for internal traffic
 // (后端 ↔ MinIO，走 cfg.Endpoint，通常是 docker 内网名 / k8s service)。
@@ -81,6 +88,37 @@ func EnsureBuckets(ctx context.Context, client *minio.Client, cfg appconfig.Buck
 				return fmt.Errorf("create bucket %s: %w", bucket, err)
 			}
 		}
+	}
+
+	// #169：原始文件桶（pm-files / mr-files）设 14 天过期，防 PM/MR 文件把盘单调塞满；幂等。
+	// 其它桶内容需持久，不设。失败由调用方降级为 warn（infra.go），不阻塞启动。
+	for _, b := range []string{cfg.PMFiles, cfg.MRFiles} {
+		if err := ensureRawFileLifecycle(ctx, client, b); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// rawFileLifecycleConfig 构造原始文件桶的 N 天过期 ILM 配置（纯函数，便于单测）。
+func rawFileLifecycleConfig() *lifecycle.Configuration {
+	lc := lifecycle.NewConfiguration()
+	lc.Rules = []lifecycle.Rule{{
+		ID:         fmt.Sprintf("omc-raw-expire-%dd", rawFileRetentionDays),
+		Status:     "Enabled",
+		RuleFilter: lifecycle.Filter{Prefix: ""}, // 空前缀 = 整桶所有对象
+		Expiration: lifecycle.Expiration{Days: lifecycle.ExpirationDays(rawFileRetentionDays)},
+	}}
+	return lc
+}
+
+// ensureRawFileLifecycle 幂等设置原始文件桶的过期生命周期（重设覆盖）。bucket 为空跳过。
+func ensureRawFileLifecycle(ctx context.Context, client *minio.Client, bucket string) error {
+	if bucket == "" {
+		return nil
+	}
+	if err := client.SetBucketLifecycle(ctx, bucket, rawFileLifecycleConfig()); err != nil {
+		return fmt.Errorf("set lifecycle on bucket %s: %w", bucket, err)
 	}
 	return nil
 }
