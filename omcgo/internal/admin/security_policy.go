@@ -85,7 +85,11 @@ const (
 	defaultVerifyEnable     = false
 
 	defaultIPLimitWindow = 1 * time.Minute
-	defaultIPLimitCount  = 5
+	// IP 限流阈值刻意设得明显高于账号锁定阈值（defaultLockThreshold=10），
+	// 避免 IP 闸门先于账号锁定触发把同 IP 的同事连坐拉黑（issue #220）。
+	// 企业内网常态是整个团队共用同一出口 IP，故"一人偶尔输错"不应殃及全队；
+	// 真正的短时撞库（几十上百次）仍会撞上这道闸门被拦。
+	defaultIPLimitCount  = 30
 	defaultIPLockMinutes = 30 * time.Minute
 
 	defaultAllowConcurrent = true // 默认允许多端，避免上线后用户误踢

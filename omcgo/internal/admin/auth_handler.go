@@ -32,8 +32,13 @@ func (h *Handler) Login(c *gin.Context) {
 				zap.Duration("retry_after", remaining),
 			)
 			c.Header("Retry-After", fmt.Sprintf("%.0f", remaining.Seconds()))
+			// issue #220：IP 闸门文案与"账号锁定"文案刻意拆开。这里发的是
+			// "来源网络被整体限流"——同 IP 的其他同事撞上的应是这条，而非账号锁定，
+			// 避免被误解为"B 账号被 A 的账号锁定串号挡住"。
 			commonerrors.AbortWithError(c, http.StatusTooManyRequests,
-				fmt.Errorf("ip locked: retry after %s", remaining.Round(time.Second)))
+				commonerrors.NewBusinessError(7014,
+					fmt.Sprintf("当前网络访问过于频繁，请于 %s 后重试", remaining.Round(time.Second)),
+					ErrIPLocked))
 			return
 		}
 	} else {
