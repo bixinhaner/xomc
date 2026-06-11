@@ -293,6 +293,17 @@ elif [ -f "$OMC_ROOT/etc/.env.saved" ]; then
   [ -n "$PREV_ENV_SNAPSHOT" ] && { cp "$OMC_ROOT/etc/.env.saved" "$PREV_ENV_SNAPSHOT" 2>/dev/null || PREV_ENV_SNAPSHOT=""; }
 fi
 
+# resources.env(plan-resources.sh 生成的资源限额,operator 独有,不随交付包)同样快照:
+# 它是独立文件、无包内默认值可合并,故整文件继承(而非走 ENV_PRESERVE_KEYS 键级合并)。
+PREV_RESOURCES_SNAPSHOT=""
+if [ -f "$OMC_ROOT/current/deploy/resources.env" ]; then
+  PREV_RESOURCES_SNAPSHOT="$(mktemp)" || PREV_RESOURCES_SNAPSHOT=""
+  [ -n "$PREV_RESOURCES_SNAPSHOT" ] && { cp "$OMC_ROOT/current/deploy/resources.env" "$PREV_RESOURCES_SNAPSHOT" 2>/dev/null || PREV_RESOURCES_SNAPSHOT=""; }
+elif [ -f "$OMC_ROOT/etc/resources.env.saved" ]; then
+  PREV_RESOURCES_SNAPSHOT="$(mktemp)" || PREV_RESOURCES_SNAPSHOT=""
+  [ -n "$PREV_RESOURCES_SNAPSHOT" ] && { cp "$OMC_ROOT/etc/resources.env.saved" "$PREV_RESOURCES_SNAPSHOT" 2>/dev/null || PREV_RESOURCES_SNAPSHOT=""; }
+fi
+
 RELEASE_DIR="$OMC_ROOT/releases/$VERSION"
 if [ -d "$RELEASE_DIR" ] && [ "$(readlink -f "$PKG_ROOT" 2>/dev/null)" != "$(readlink -f "$RELEASE_DIR" 2>/dev/null)" ]; then
   warn "已存在版本目录 $RELEASE_DIR，将覆盖（旧文件 → .bak.<时间戳>）"
@@ -311,6 +322,14 @@ fi
 # 新包仍负责版本相关键(IMAGE_*/PROJECT_VERSION)。首次部署无快照 → 用新包默认。
 merge_env_preserve "$PREV_ENV_SNAPSHOT" "$RELEASE_DIR/deploy/.env"
 [ -n "$PREV_ENV_SNAPSHOT" ] && rm -f "$PREV_ENV_SNAPSHOT" 2>/dev/null || true
+
+# 资源限额 resources.env 整文件继承到新 release(交付包不含此文件,故仅在上一版存在时拷入)。
+if [ -n "$PREV_RESOURCES_SNAPSHOT" ] && [ ! -f "$RELEASE_DIR/deploy/resources.env" ]; then
+  cp "$PREV_RESOURCES_SNAPSHOT" "$RELEASE_DIR/deploy/resources.env" 2>/dev/null \
+    && log "resources.env:已从上一版继承资源限额(plan-resources.sh 调优值不丢)" \
+    || warn "resources.env:继承失败,请手动核对 $RELEASE_DIR/deploy/resources.env"
+fi
+[ -n "$PREV_RESOURCES_SNAPSHOT" ] && rm -f "$PREV_RESOURCES_SNAPSHOT" 2>/dev/null || true
 
 # ── data 外置 + 升级反向合并(三库导入XML重构 Phase 2,D1/D2)───────────────────
 # 模型 B:整个 data 目录外置到 $OMC_ROOT/data,bind-mount(RW)进 app/worker;
@@ -387,6 +406,8 @@ log "current → $RELEASE_DIR"
 # 凭据落点 $OMC_ROOT/etc/.env.saved：留给 uninstall.sh 删 release 后、下次 install 继承用。
 # 始终用当前生效 .env 刷新,保证与正在使用的数据卷口令一致。
 cp -f "$RELEASE_DIR/deploy/.env" "$OMC_ROOT/etc/.env.saved" 2>/dev/null || true
+# resources.env 同样落 etc/ 快照,供 uninstall→reinstall 继承(与 .env.saved 对称)。
+[ -f "$RELEASE_DIR/deploy/resources.env" ] && cp -f "$RELEASE_DIR/deploy/resources.env" "$OMC_ROOT/etc/resources.env.saved" 2>/dev/null || true
 
 # 检查一组镜像是否全部已在本地
 # 用法：images_exist IMAGE1 IMAGE2 ...
@@ -472,11 +493,22 @@ sep "6/9 组装 docker compose 命令"
 
 cd "$OMC_ROOT/current/deploy"
 
+# 资源限额：compose 经 --env-file 读取 resources.env(plan-resources.sh 生成)。
+# 注意：一旦显式传任一 --env-file，compose 不再自动加载 ./.env，故 .env 也必须显式传。
+ENV_FILES=()
+[ -f .env ] && ENV_FILES+=( --env-file .env )
+if [ -f resources.env ]; then
+  ENV_FILES+=( --env-file resources.env )
+  log "已检出 resources.env → 按其资源限额部署（plan-resources.sh 生成）"
+else
+  log "未检出 resources.env → 用 compose 内置默认限额（如需按主机空闲资源规划，部署前先跑：bash plan-resources.sh）"
+fi
+
 COMPOSE_FILES=( -f docker-compose.infra.yml -f docker-compose.app.yml )
 [ "$SKIP_WEB" = 0 ]        && COMPOSE_FILES+=( -f docker-compose.web.yml )
 [ "$SKIP_MONITORING" = 0 ] && COMPOSE_FILES+=( -f docker-compose.monitoring.yml )
 
-DC=( $COMPOSE -p "$COMPOSE_PROJECT" "${COMPOSE_FILES[@]}" )
+DC=( $COMPOSE -p "$COMPOSE_PROJECT" "${ENV_FILES[@]}" "${COMPOSE_FILES[@]}" )
 log "compose 命令：${DC[*]}"
 
 # =============================================================================

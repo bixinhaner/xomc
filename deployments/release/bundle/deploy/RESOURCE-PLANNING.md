@@ -141,13 +141,17 @@ OMC_PROBE_CPU=32 OMC_PROBE_MEM_TOTAL_MIB=65536 OMC_PROBE_MEM_AVAIL_MIB=61440 \
 
 ---
 
-## 6. Phase 2 接线计划（待本方案确认后实施）
+## 6. Phase 2 接线（✅ 已实施）
 
-本次**只交付脚本 + 方案**，以下改动暂不做，列出供评审：
+> 已落地为可运行代码（`docker compose config` 双向验证：无 resources.env 渲染 = 历史值、零告警；
+> 有 resources.env 各旋钮按文件覆盖）。下列为实现要点。
 
-1. **compose 模板化**：4 个 yml 的 `cpus/memory` 及 redis `--maxmemory`、postgres `-c` 调优、
-   Go `GOMEMLIMIT/GOMAXPROCS` 全改为 `${VAR:-<当前字面量>}`。
-   **默认值 = 今天的字面量**，所以未跑 plan-resources.sh 的旧部署**逐字节不变**。
+1. **compose 模板化**（✅）：4 个 yml 的 `cpus/memory` 及 redis `--maxmemory/--maxmemory-policy`、
+   postgres `-c` 调优、Go `GOMEMLIMIT/GOMAXPROCS` 全改为 `${VAR:-<默认>}`。
+   **默认 = 历史等价值**（新增旋钮取无害缺省：`GOMEMLIMIT=off`、`GOMAXPROCS=`空、PG `-c` 取 PG 原生默认、
+   redis 仍 `2gb/allkeys-lru`），未跑 plan-resources.sh 的部署**行为不变**。
+   > 注：本次模板化只接管「机制」，Step 0 的「修正默认值」（GOMEMLIMIT 实际取值、PG 调大、redis
+   > volatile-lru）走 resources.env 注入；要让**不跑脚本**的部署也默认享有修正，是单独的 Step 0 改动。
    ```yaml
    # 例：docker-compose.app.yml
    app:
@@ -181,7 +185,10 @@ OMC_PROBE_CPU=32 OMC_PROBE_MEM_TOTAL_MIB=65536 OMC_PROBE_MEM_AVAIL_MIB=61440 \
    ```
    这样 `svc.sh start` / `svc.sh restart`（内部 `up -d --force-recreate`）/ `svc.sh up`
    都会按 `resources.env` 的新限额重建容器。无 `resources.env` 时退化为今天的行为（仅 `.env`）。
-4. **升级存活**：`resources.env` 的键加入 install.sh `ENV_PRESERVE_KEYS`，调优值不被升级覆盖。
+4. **升级存活**（✅，实现略有调整）：`resources.env` 是 operator 独有、**不随交付包**的独立文件，
+   故用**整文件继承**而非 `ENV_PRESERVE_KEYS` 键级合并（后者只作用于 `.env`）。install.sh 在升级时
+   快照上一版 `resources.env`（或 `etc/resources.env.saved` 兜底）→ 拷入新 release 的 `deploy/` →
+   切 current 软链后再落 `etc/resources.env.saved`，与 `.env.saved` 完全对称。
 5. **生效命令（需求 ⑥）**：改完 `resources.env` 后任选其一——
    ```bash
    bash svc.sh restart                  # 推荐：按 depends_on 有序重建，经健康门控
