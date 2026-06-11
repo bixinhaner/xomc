@@ -395,7 +395,8 @@ func indicatorInsertRow(rec indicatorRecord, isGnb bool) []interface{} {
 	}
 	row := []interface{}{
 		ind.ID, enName, cnName, groupID,
-		nullIfEmpty(ind.DataType), nullIfEmpty(ind.UnitID), isBuiltIn, isCounter,
+		// issue #67 §4：XML dataType 中英混杂枚举 → 受控码（int/real/float）后落库。
+		nullIfEmpty(normalizeDataType(ind.DataType)), nullIfEmpty(ind.UnitID), isBuiltIn, isCounter,
 		nullIfEmpty(ind.Arithmetic), nullIfEmpty(ind.StatisType),
 		nullIfEmpty(rec.LoadedFrom), nullIfEmpty(ind.ReportKey),
 	}

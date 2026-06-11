@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	appcontext "github.com/omcgo/omcgo/internal/core/context"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/response"
@@ -147,6 +148,10 @@ func (h *RESTHandler) ListIndicators(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
+	// issue #67 §4：按请求 locale 把 data_type 受控码映射为 i18n 标签（不改 data_type 码本身）。
+	if resp != nil {
+		fillDataTypeLabels(resp.Items, appcontext.GetLocale(c.Request.Context()))
+	}
 	response.OK(c, resp)
 }
 
@@ -180,6 +185,8 @@ func (h *RESTHandler) GetIndicator(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
 		return
 	}
+	// issue #67 §4：详情同样按 locale 填 data_type i18n 标签。
+	fillDataTypeLabel(ind, appcontext.GetLocale(c.Request.Context()))
 	response.OK(c, ind)
 }
 

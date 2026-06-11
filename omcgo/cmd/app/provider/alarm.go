@@ -58,6 +58,13 @@ func initAlarmModule(c *Container) error {
 	emailDispatcher := alarm.NewSMTPEmailDispatcher(emailCfg, logger.Named("email"), emailMetrics)
 	filterEngine.SetEmailDispatcher(emailDispatcher)
 
+	// issue #67：告警字典在 alarmdef 模块（Depends=dictload）才装配，晚于本模块。
+	// 沿用 AlarmSyncProcessor 的后置注入约定——若此刻 Registry 已就绪先注入，
+	// 否则交由 initAlarmDefModule 在构造 Registry 后回填（见 alarmdef.go）。
+	if c.AlarmDefRegistry != nil {
+		filterEngine.SetAlarmDefLookup(c.AlarmDefRegistry)
+	}
+
 	alarmEngine.SetFilterEngine(filterEngine)
 
 	// 数据权限检查器
@@ -67,6 +74,7 @@ func initAlarmModule(c *Container) error {
 	c.AlarmPgStore = alarmPgStore
 	c.AlarmEngine = alarmEngine
 	c.AlarmSyncProcessor = alarmSyncProcessor
+	c.AlarmFilterEngine = filterEngine
 
 	// Register module-level health check
 	c.Health.Register("alarm", func(ctx context.Context) error {

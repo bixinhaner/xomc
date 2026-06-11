@@ -89,6 +89,9 @@ type PerfIndicator struct {
 	GroupID           string    `json:"group_id"`
 	OperatorCode      *string   `json:"operator_code,omitempty"`
 	DataType          *string   `json:"data_type,omitempty"`
+	// DataTypeLabel 是 data_type 受控码（int/real/float）按请求 locale 映射出的 i18n
+	// 显示标签（issue #67 §4）；由 handler 输出侧填充，落库/过滤仍用 DataType 码。
+	DataTypeLabel     *string   `json:"data_type_label,omitempty"`
 	UnitID            *string   `json:"unit_id,omitempty"`
 	Updator           *string   `json:"updator,omitempty"`
 	IsBuildIn         string    `json:"is_build_in"`

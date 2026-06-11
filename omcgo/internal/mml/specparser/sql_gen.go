@@ -165,8 +165,10 @@ func writeSectionCommands(b *strings.Builder, rep *DiffReport) {
 func writeCommandValueRow(b *strings.Builder, c *SpecCommand) {
 	zhName := opZhPrefix(c.OperationType) + " " + c.CommandZhName
 	enName := opEnPrefix(c.OperationType) + " " + c.CommandZhName
-	cmdNameI18n, _ := json.Marshal(map[string]string{"en": enName, "zh": zhName})
-	logicalI18n, _ := json.Marshal(map[string]string{"en": c.CommandZhName, "zh": c.CommandZhName})
+	// issue #67 §5：i18n 键统一长码 zh-CN/en-US（与 seed/000039、pickI18n 对齐），
+	// 不再写短键 zh/en，避免 catalog 再导入时回灌短键。
+	cmdNameI18n, _ := json.Marshal(map[string]string{"en-US": enName, "zh-CN": zhName})
+	logicalI18n, _ := json.Marshal(map[string]string{"en-US": c.CommandZhName, "zh-CN": c.CommandZhName})
 
 	targetPathsJSON, _ := json.Marshal(c.TargetPaths)
 	targetObj := "NULL"
@@ -215,7 +217,9 @@ func writeSectionSubFields(b *strings.Builder, rep *DiffReport) {
 	})
 
 	for _, l := range links {
-		labelI18n, _ := json.Marshal(map[string]string{"en": l.ParamName, "zh": l.ChineseName})
+		// issue #67 §2/§5：长码键，且把 en 用 ParamName(英文优先)，缺失时不再硬塞中文——
+		// 由 seed/000038 的 standard_path 叶子兜底逻辑负责回填英文标签。
+		labelI18n, _ := json.Marshal(map[string]string{"en-US": l.ParamName, "zh-CN": l.ChineseName})
 		fmt.Fprintf(b, "INSERT INTO mml_command_sub_fields (command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)\n")
 		fmt.Fprintf(b, "SELECT c.id, p.id, %s, %s::jsonb, true, false, %d\n",
 			sqlStr(l.MmlCode), sqlStr(string(labelI18n)), l.SortOrder)
