@@ -52,9 +52,10 @@ type AlarmFilterRule struct {
 
 // AlarmFilterRuleFilter 过滤规则查询过滤
 type AlarmFilterRuleFilter struct {
-	FilterType *string
+	FilterTypes []string
 	Action     *string
 	Enabled    *bool
+	Keyword    *string
 	model.ListRequest
 }
 

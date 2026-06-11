@@ -81,7 +81,9 @@ interface BackendAlarmRule {
   acknowledge_desc: string;
   priority: number;
   enabled: boolean;
+  created_by?: string;
   created_at: string;
+  updated_by?: string;
   updated_at: string;
 }
 
@@ -286,6 +288,7 @@ function mapBackendAlarmRule(br: BackendAlarmRule): AlarmRule {
     ruleType: br.action,
     severity: 'warning' as Alarm['severity'],
     enabled: br.enabled,
+    userCode: br.updated_by || br.created_by || undefined,
     conditions,
     actions,
     createTime: br.created_at,
@@ -552,11 +555,25 @@ export const alarmApi = {
 
   // -- Alarm filter rules ---------------------------------------------------
 
-  async getRules(params: PageRequest): Promise<PageResponse<AlarmRule>> {
+  async getRules(
+    params: PageRequest & { keyword?: string; filterType?: string[]; action?: string; enabled?: string }
+  ): Promise<PageResponse<AlarmRule>> {
     const query: Record<string, unknown> = {
       page: params.page,
       pageSize: params.pageSize,
     };
+    if (params.keyword) {
+      query.keyword = params.keyword;
+    }
+      if (params.filterType && params.filterType.length > 0) {
+        query.filter_type = params.filterType.join(',');
+    }
+    if (params.action) {
+      query.action = params.action;
+    }
+    if (params.enabled) {
+      query.enabled = params.enabled;
+    }
     const { data } = await http.get<BackendListResponse<BackendAlarmRule>>(
       '/alarms/alarm-filters',
       { params: query }

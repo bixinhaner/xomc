@@ -14,6 +14,7 @@ import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useAlarmRules, useCreateAlarmRule, useDeleteAlarmRules, useUpdateAlarmRule } from '@core/hooks/api/useAlarms';
 import { useT } from '@/hooks/useT';
 import type { AlarmRule, AlarmRuleCondition, AlarmRuleAction } from '@core/types/alarm';
+import type { PageRequest } from '@core/types/pagination';
 import AlarmRuleDrawer, { type AlarmRuleFormData } from './AlarmRuleDrawer';
 
 const { Text } = Typography;
@@ -27,21 +28,34 @@ const RULE_TYPE_CONFIG: Record<string, { label: string; color: string }> = {
 };
 
 type DrawerMode = 'add' | 'edit' | 'view';
+type AlarmRuleListParams = PageRequest & {
+  keyword?: string;
+  filterType?: string[];
+  action?: string;
+  enabled?: string;
+};
 
-function getRuleFilterDimension(rule: AlarmRule, t: (key: string, values?: Record<string, unknown>) => string): string {
+function getRuleFilterDimensions(rule: AlarmRule, t: (key: string, values?: Record<string, unknown>) => string): string[] {
+  const dimensions: string[] = [];
+
   if (rule.conditions.some((condition) => condition.field === 'alarm_identifier')) {
-    return t('alarm.ruleFilterType.alarmIdentifier');
+    dimensions.push(t('alarm.ruleFilterType.alarmIdentifier'));
   }
   if (rule.conditions.some((condition) => condition.field === 'alarm_source')) {
-    return t('alarm.ruleFilterType.alarmSource');
+    dimensions.push(t('alarm.ruleFilterType.alarmSource'));
   }
   if (rule.conditions.some((condition) => condition.field === 'device_group_id')) {
-    return t('alarm.ruleFilterType.deviceGroup');
+    dimensions.push(t('alarm.ruleFilterType.deviceGroup'));
   }
   if (rule.conditions.some((condition) => condition.field === 'device_id')) {
-    return t('alarm.ruleFilterType.device');
+    dimensions.push(t('alarm.ruleFilterType.device'));
   }
-  return rule.isDefault ? t('alarm.defaultRule') : '-';
+
+  if (dimensions.length === 0 && rule.isDefault) {
+    return [t('alarm.defaultRule')];
+  }
+
+  return dimensions;
 }
 
 export default function AlarmRules() {
@@ -60,14 +74,65 @@ export default function AlarmRules() {
 
   const FILTER_FIELDS: FilterField[] = useMemo(() => [
     {
-      name: 'searchText',
+      name: 'keyword',
       label: t('alarm.ruleName'),
       type: 'input',
-      placeholder: t('alarm.searchPlaceholder'),
+      placeholder: t('alarm.ruleSearchPlaceholder'),
+    },
+    {
+      name: 'filterType',
+      label: t('alarm.ruleFilterType'),
+      type: 'multi-select',
+      options: [
+        { label: t('alarm.ruleFilterType.alarmIdentifier'), value: 'alarm_identifier' },
+        { label: t('alarm.ruleFilterType.alarmSource'), value: 'alarm_source' },
+        { label: t('alarm.ruleFilterType.deviceGroup'), value: 'device_group' },
+        { label: t('alarm.ruleFilterType.device'), value: 'device' },
+      ],
+      minWidth: 120,
+    },
+    {
+      name: 'action',
+      label: t('alarm.ruleType'),
+      type: 'select',
+      options: [
+        { label: t('alarm.ruleType.forbidReport'), value: 'ignore' },
+        { label: t('alarm.ruleType.autoConfirm'), value: 'auto_acknowledge' },
+        { label: t('alarm.ruleType.autoClear'), value: 'auto_clear' },
+      ],
+      minWidth: 120,
+    },
+    {
+      name: 'enabled',
+      label: t('alarm.ruleEffectiveStatus'),
+      type: 'select',
+      options: [
+        { label: t('common.enable'), value: 'true' },
+        { label: t('common.disable'), value: 'false' },
+      ],
+      minWidth: 120,
     },
   ], [t]);
 
-  const queryParams = useMemo(() => ({ ...filterParams, page: currentPage, pageSize }), [filterParams, currentPage, pageSize]);
+  const queryParams = useMemo<AlarmRuleListParams>(() => {
+    const keyword = typeof filterParams.keyword === 'string' ? filterParams.keyword.trim() : '';
+    const filterType = Array.isArray(filterParams.filterType)
+      ? filterParams.filterType.map((item) => String(item)).filter((item) => item.length > 0)
+      : [];
+    const action = typeof filterParams.action === 'string' ? filterParams.action : '';
+    const enabled = filterParams.enabled === 'true' || filterParams.enabled === 'false'
+      ? String(filterParams.enabled)
+      : '';
+
+    return {
+      page: currentPage,
+      pageSize,
+      ...(keyword ? { keyword } : {}),
+      ...(filterType.length > 0 ? { filterType } : {}),
+      ...(action ? { action } : {}),
+      ...(enabled ? { enabled } : {}),
+    };
+  }, [filterParams.action, filterParams.enabled, filterParams.filterType, filterParams.keyword, currentPage, pageSize]);
 
   const { data, isLoading, refetch } = useAlarmRules(queryParams);
   const deleteRules = useDeleteAlarmRules();
@@ -326,7 +391,7 @@ export default function AlarmRules() {
       },
       {
         key: 'status',
-        title: t('alarm.status'),
+        title: t('alarm.ruleEffectiveStatus'),
         dataIndex: 'enabled',
         width: 100,
         render: (_val, record) => (
@@ -354,10 +419,20 @@ export default function AlarmRules() {
       {
         key: 'filterType',
         title: t('alarm.ruleFilterType'),
-        width: 120,
+        width: 240,
         render: (_val: unknown, record) => {
-          const dimension = getRuleFilterDimension(record, t);
-          return <Text type={dimension === '-' ? 'secondary' : undefined}>{dimension}</Text>;
+          const dimensions = getRuleFilterDimensions(record, t);
+          if (dimensions.length === 0) {
+            return <Text type="secondary">-</Text>;
+          }
+
+          return (
+            <Space size={[4, 4]} wrap>
+              {dimensions.map((dimension) => (
+                <Tag key={`${record.id}-${dimension}`}>{dimension}</Tag>
+              ))}
+            </Space>
+          );
         },
       },
       {
@@ -408,7 +483,6 @@ export default function AlarmRules() {
   return (
     <ListPageLayout
       title={t('nav.alarm.rules')}
-      subtitle={t('alarm.rulesDesc')}
       extra={
         <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
           {t('common.add')}
