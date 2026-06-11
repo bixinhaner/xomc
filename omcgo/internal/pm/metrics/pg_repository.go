@@ -137,23 +137,23 @@ const batchInsertThreshold = 50
 // 该进程的 PM 写）。仅作用于 COPY 大批量路径的事务，不影响小批量 VALUES 与其它写。
 var BulkAsyncCommit = false
 
-// BatchInsert 批量插入。两条路径共享同一套自然键 ON CONFLICT DO UPDATE 补传幂等语义：
+// BatchInsert 批量插入 —— plain INSERT，不带 ON CONFLICT（migration 000042 删 uq_pm_metrics_natural
+// 后无唯一索引可冲突）。
 //
-//		相同 (device_oui, device_sn, metric_path, granularity, end_time, time, object_ldn)
-//		再次写入时更新 metric_value（取新值）+ ingest_time（取 NOW()）。
+// 幂等语义已外移：
+//   - 正常入库走 copy-direct 写模式（CopyIngest，每文件一次 pm_files 唯一约束 + 文件内 last-wins
+//     去重），不经本方法；
+//   - admin KPI 重算（kpi.CalculateAndStore）在调用本方法前 scoped DELETE 旧窗口行，保证重算幂等。
+// 故本方法只需把行高吞吐灌库：
+//   - 小批量（< batchInsertThreshold）：VALUES 多行 INSERT，一次 round-trip。
+//   - 大批量（>= batchInsertThreshold）：CopyFrom 二进制协议直灌 pm_metrics（不再需要 TEMP 暂存
+//     表 + INSERT...SELECT —— 那是为了在 COPY 上套 ON CONFLICT，去掉幂等后可直接 COPY，更快）。
 //
-//	  - 小批量（< batchInsertThreshold）：VALUES 多行 INSERT，直接带 ON CONFLICT 子句。
-//	  - 大批量（>= batchInsertThreshold）：COPY 进会话级 TEMP 暂存表，再
-//	    INSERT ... SELECT ... ON CONFLICT 一次性 upsert（issue #14）。
-//	    COPY 不支持 ON CONFLICT，故用 TEMP 表两段式既拿 COPY 吞吐又不丢补传幂等。
+// object_ldn 列 NOT NULL DEFAULT ''（migration 000171），nil 在 buildRows 统一落 ''。
 //
-// object_ldn 列 NOT NULL DEFAULT ”（migration 000171），nil 在此统一落 ”
-// 避免 UNIQUE 索引 NULL ≠ NULL 破坏幂等语义；同时让同文件多 cell 同 counter_name
-// 不再因为缺 ldn 维度而撞 ON CONFLICT 二次命中（BUG-6）。
-//
-// TimescaleDB 压缩 chunk 不允许 ON CONFLICT：补传 end_time 落在 > compression 阈值的旧
-// chunk 时 PG 抛 SQLSTATE 0A000。两条路径都把该错误识别为 ErrLateArrival，记 metric +
-// 返回 sentinel（issue #14 降级），由 collector log WARN + 跳过，实时 PM 不被历史补传阻塞。
+// 附带：去掉 ON CONFLICT 后，写入 TimescaleDB 压缩 chunk 不再抛 SQLSTATE 0A000（那是 ON CONFLICT
+// on compressed chunk 专有约束），迟到补传写压缩 chunk 不再被降级跳过（issue #14 写侧约束解除）。
+// classifyInsertError 仍保留以兜底其它潜在错误归类。
 func (r *PgRepository) BatchInsert(ctx context.Context, ms []PMMetric) error {
 	if len(ms) == 0 {
 		return nil
@@ -164,7 +164,7 @@ func (r *PgRepository) BatchInsert(ctx context.Context, ms []PMMetric) error {
 	return r.batchInsertValues(ctx, ms)
 }
 
-// batchInsertValues 走 VALUES 多行 INSERT（小批量路径）。
+// batchInsertValues 走 VALUES 多行 INSERT（小批量路径，plain INSERT 无 ON CONFLICT）。
 func (r *PgRepository) batchInsertValues(ctx context.Context, ms []PMMetric) error {
 	sql, args, err := buildBatchInsertSQL(ms)
 	if err != nil {
@@ -176,13 +176,11 @@ func (r *PgRepository) batchInsertValues(ctx context.Context, ms []PMMetric) err
 	return nil
 }
 
-// batchInsertCopy 走 COPY 暂存表 + INSERT...SELECT...ON CONFLICT（大批量路径，issue #14）。
+// batchInsertCopy 走 CopyFrom 二进制协议直灌 pm_metrics（大批量路径）。
 //
-// 步骤（同一连接 / 事务内，保证 TEMP 表可见且 ON COMMIT DROP 自动清理）：
-//  1. CREATE TEMP TABLE ... LIKE pm_metrics（仅列定义，不含约束 / 索引，COPY 不被 ON CONFLICT 限制）
-//  2. CopyFrom 二进制批量灌入暂存表
-//  3. INSERT INTO pm_metrics SELECT * FROM 暂存表 ON CONFLICT (...) DO UPDATE（拿幂等）
-//  4. COMMIT（ON COMMIT DROP 清掉暂存表）
+// migration 000042 删自然键唯一索引后无需 ON CONFLICT，故省掉旧实现的 TEMP 暂存表 +
+// INSERT...SELECT 两段式（那只是为了在不支持 ON CONFLICT 的 COPY 上拿幂等），直接 COPY 进
+// pm_metrics —— 与 CopyIngest 的写法一致，更少一次全量数据搬运。
 func (r *PgRepository) batchInsertCopy(ctx context.Context, ms []PMMetric) error {
 	rows, err := buildRows(ms)
 	if err != nil {
@@ -204,27 +202,11 @@ func (r *PgRepository) batchInsertCopy(ctx context.Context, ms []PMMetric) error
 		}
 	}
 
-	// LIKE 仅复制列定义（不含 DEFAULTS / 约束 / 索引）：暂存表是纯缓冲区，
-	// id / ingest_time / object_ldn 等已在 buildRows 里落好值，无需表级 DEFAULT。
-	// ON COMMIT DROP 保证事务结束自动回收，不污染连接后续复用。
-	if _, err := tx.Exec(ctx,
-		`CREATE TEMP TABLE pm_metrics_copy_buf (LIKE pm_metrics) ON COMMIT DROP`,
-	); err != nil {
-		return fmt.Errorf("create pm_metrics temp buffer: %w", err)
-	}
-
 	if _, err := tx.CopyFrom(ctx,
-		pgx.Identifier{"pm_metrics_copy_buf"},
+		pgx.Identifier{"pm_metrics"},
 		pmMetricsColumns,
 		pgx.CopyFromRows(rows),
 	); err != nil {
-		return fmt.Errorf("copy pm_metrics buffer: %w", err)
-	}
-
-	upsertSQL := `INSERT INTO pm_metrics (` + joinCols(pmMetricsColumns) + `) ` +
-		`SELECT ` + joinCols(pmMetricsColumns) + ` FROM pm_metrics_copy_buf ` +
-		pmMetricsUpsertSuffix
-	if _, err := tx.Exec(ctx, upsertSQL); err != nil {
 		return classifyInsertError(err)
 	}
 
@@ -234,16 +216,31 @@ func (r *PgRepository) batchInsertCopy(ctx context.Context, ms []PMMetric) error
 	return nil
 }
 
-// joinCols 把列名用逗号拼成 SQL 列清单（列名是包内常量，非用户输入，无注入风险）。
-func joinCols(cols []string) string {
-	out := ""
-	for i, c := range cols {
-		if i > 0 {
-			out += ", "
-		}
-		out += c
+// InsertRowsTx 在调用方给定的事务内 plain INSERT 一批 PMMetric（小批量 VALUES / 大批量 CopyFrom），
+// 与 BatchInsert 同写出语义但不自建事务——供需要把 DELETE+INSERT 收进单个原子事务的"替换"路径
+// 复用（如 KPI 重算 ReplaceForRecompute：同 tx 内先删旧窗口行再插新行，保证原子替换）。
+func InsertRowsTx(ctx context.Context, tx pgx.Tx, ms []PMMetric) error {
+	if len(ms) == 0 {
+		return nil
 	}
-	return out
+	rows, err := buildRows(ms)
+	if err != nil {
+		return err
+	}
+	if len(ms) >= batchInsertThreshold {
+		if _, err := tx.CopyFrom(ctx, pgx.Identifier{"pm_metrics"}, pmMetricsColumns, pgx.CopyFromRows(rows)); err != nil {
+			return classifyInsertError(err)
+		}
+		return nil
+	}
+	sql, args, err := buildBatchInsertSQL(ms)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, sql, args...); err != nil {
+		return classifyInsertError(err)
+	}
+	return nil
 }
 
 // classifyInsertError 把 pm_metrics 写入错误归类：
@@ -267,11 +264,6 @@ func isLateArrivalError(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == sqlstateFeatureNotSupported
 }
-
-// pmMetricsUpsertSuffix 自然键 ON CONFLICT 子句。
-// 列顺序与 migration 000171 中 uq_pm_metrics_natural 一致（不一致 PG 会按列集合匹配，但保持顺序便于人读）。
-const pmMetricsUpsertSuffix = "ON CONFLICT (device_oui, device_sn, metric_path, granularity, end_time, time, object_ldn) " +
-	"DO UPDATE SET metric_value = EXCLUDED.metric_value, ingest_time = NOW()"
 
 // metricRowValues 把单条 PMMetric 归一化为与 pmMetricsColumns 等长、等序的列值数组。
 // 落值规则（id 缺省生成 / ingest 缺省 NOW / time 缺省取 end_time / object_ldn nil → ” /
@@ -328,8 +320,8 @@ func buildRows(ms []PMMetric) ([][]any, error) {
 	return rows, nil
 }
 
-// buildBatchInsertSQL 构造 pm_metrics 批量 INSERT SQL（含 ON CONFLICT 子句）。
-// 抽出供单测使用，运行期由 batchInsertValues 调用（小批量路径）。
+// buildBatchInsertSQL 构造 pm_metrics 批量 plain INSERT SQL（migration 000042 删唯一索引后无
+// ON CONFLICT 子句）。抽出供单测使用，运行期由 batchInsertValues 调用（小批量路径）。
 func buildBatchInsertSQL(ms []PMMetric) (string, []any, error) {
 	ib := storage.Psql.Insert("pm_metrics").Columns(pmMetricsColumns...)
 	for _, m := range ms {
@@ -339,7 +331,6 @@ func buildBatchInsertSQL(ms []PMMetric) (string, []any, error) {
 		}
 		ib = ib.Values(vals...)
 	}
-	ib = ib.Suffix(pmMetricsUpsertSuffix)
 	sql, args, err := ib.ToSql()
 	if err != nil {
 		return "", nil, fmt.Errorf("build pm_metrics insert: %w", err)

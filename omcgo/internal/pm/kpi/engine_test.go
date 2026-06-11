@@ -54,9 +54,17 @@ func (m *mockCounterRepo) QueryForKPICells(ctx context.Context, deviceID uuid.UU
 	return nil, nil
 }
 
-type mockKPIRepo struct{ insertedValues []model.KPIValue }
+type mockKPIRepo struct {
+	insertedValues []model.KPIValue
+	replaceCalls   int
+}
 
 func (m *mockKPIRepo) BatchInsert(_ context.Context, values []model.KPIValue) error {
+	m.insertedValues = append(m.insertedValues, values...)
+	return nil
+}
+func (m *mockKPIRepo) ReplaceForRecompute(_ context.Context, _, _, _ string, _ time.Time, values []model.KPIValue) error {
+	m.replaceCalls++
 	m.insertedValues = append(m.insertedValues, values...)
 	return nil
 }
@@ -199,6 +207,8 @@ func TestKPIEngine_CalculateAndStore_PersistsResults(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, values)
 	assert.Equal(t, len(values), len(kpiRepo.insertedValues))
+	// 重算幂等：必须经一次原子 ReplaceForRecompute（单事务删旧+插新），替代已删的自然键 UPSERT。
+	assert.Equal(t, 1, kpiRepo.replaceCalls, "CalculateAndStore 应调一次 ReplaceForRecompute 原子替换")
 }
 
 // CalculateCellsAndStore：批量算多 cell —— route 只查一次、counter 一次查全（按 cell 分桶）、

@@ -248,16 +248,15 @@ func metricWithLDN(path, ldn string, setLDN bool) PMMetric {
 	return m
 }
 
-// BUG-6 回归：ON CONFLICT 子句必须含 object_ldn 列，否则同 PM 文件多 cell 同 counter_name
-// 会撞自然键二次命中触发 SQLSTATE 21000。
-func Test_buildBatchInsertSQL_ON_CONFLICT_Includes_ObjectLDN(t *testing.T) {
+// migration 000042 删 uq_pm_metrics_natural 后 BatchInsert 改 plain INSERT：SQL 不得再含
+// ON CONFLICT（无唯一索引可冲突，幂等已外移到 CopyIngest marker / RecomputeKPIs scoped DELETE）。
+func Test_buildBatchInsertSQL_PlainInsert_NoOnConflict(t *testing.T) {
 	ms := []PMMetric{metricWithLDN("L.Cell.Avail", "cell-1", true)}
 	sql, _, err := buildBatchInsertSQL(ms)
 	require.NoError(t, err)
-	assert.Contains(t, sql,
-		"ON CONFLICT (device_oui, device_sn, metric_path, granularity, end_time, time, object_ldn)",
-		"自然键必须含 object_ldn（BUG-6 回归）")
-	assert.Contains(t, sql, "DO UPDATE SET metric_value = EXCLUDED.metric_value")
+	assert.NotContains(t, sql, "ON CONFLICT", "plain INSERT 不应再带 ON CONFLICT 子句")
+	assert.NotContains(t, sql, "DO UPDATE", "plain INSERT 不应再带 DO UPDATE")
+	assert.Contains(t, sql, "INSERT INTO pm_metrics", "仍是 INSERT INTO pm_metrics")
 }
 
 // BUG-6 回归：同 device+path+time 跨多个 cell（不同 object_ldn）在 SQL 参数中
@@ -375,13 +374,6 @@ func Test_pmMetricsColumns_Count(t *testing.T) {
 	assert.Equal(t, "id", pmMetricsColumns[0])
 	assert.Equal(t, "object_ldn", pmMetricsColumns[12])
 	assert.Equal(t, "extra", pmMetricsColumns[13])
-}
-
-// joinCols 生成无前后逗号的列清单。
-func Test_joinCols(t *testing.T) {
-	assert.Equal(t, "a, b, c", joinCols([]string{"a", "b", "c"}))
-	assert.Equal(t, "x", joinCols([]string{"x"}))
-	assert.Equal(t, "", joinCols(nil))
 }
 
 // ---------------------------------------------------------------------------

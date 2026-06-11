@@ -62,11 +62,6 @@ pm_async_commit: true
 # true=从 DB 按 15min 窗回读再算（仅"同窗拆多文件需跨文件聚合"部署才需要）。
 pm_kpi_window_from_db: false
 
-# PM 入库写模式：copy=激进 plain COPY 原子入库（pm_files 标记 + 全部 metric 行单事务 COPY，
-# 去掉每行自然键 UPSERT 的写 CPU 大头，幂等下沉到每文件一次）；upsert=默认自然键 UPSERT 幂等。
-# dev 默认 copy 压写吞吐；同窗多文件需跨文件聚合幂等的部署应用 upsert。
-pm_write_mode: copy
-
 # T-0157 C2: 任务过期扫描器配置（worker 进程消费）。
 # default_expires_in_seconds 在 worker 不使用（CreateTask 在 app 端兜底），保留占位让两端一致。
 task:

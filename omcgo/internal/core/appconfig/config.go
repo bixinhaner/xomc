@@ -619,15 +619,6 @@ type WorkerConfig struct {
 	// （false，默认，省每文件一次全量回读 SELECT）。仅当部署存在"同一窗口拆成多文件上报、需跨文件
 	// 聚合 KPI"时才置 true。
 	PMKPIWindowFromDB bool `mapstructure:"pm_kpi_window_from_db"`
-	// PMWriteMode：PM 文件入库的写路径模式。
-	//   - "copy"（激进，写吞吐最高）：pm_files 标记 + 全部 metric 行（counter + KPI）在单事务里
-	//     plain COPY 原子入库，幂等下沉到每文件一次（pm_files 唯一约束），去掉每行自然键 UPSERT 的
-	//     写 CPU 大头。代价：放弃"同窗多文件跨文件聚合幂等"（同设备同窗多文件需各自唯一 file_name），
-	//     文件内重复自然键由内存 last-wins 折叠。
-	//   - "upsert" / ""（默认，durable）：counterRepo 自然键 ON CONFLICT DO UPDATE + KPI 单独落库，
-	//     跨文件补传幂等。
-	// 仅影响 worker PM collector 写路径；admin RecomputeKPIs 等仍走 UPSERT（不受此开关影响）。
-	PMWriteMode string `mapstructure:"pm_write_mode"`
 	DictLoader      DictLoaderConfig `mapstructure:"dict_loader"` // T-0178: worker BackupCleanup 需读 XMLBaseDir + ParamModel 子配置
 	Metrics         MetricsConfig    `mapstructure:"metrics"`
 	Tracer          TracerConfig     `mapstructure:"tracer"`
