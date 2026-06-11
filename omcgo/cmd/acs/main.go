@@ -13,6 +13,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/omcgo/omcgo/internal/acs"
+	"github.com/omcgo/omcgo/internal/acs/auth"
 	"github.com/omcgo/omcgo/internal/acs/connreq"
 	"github.com/omcgo/omcgo/internal/acs/download"
 	"github.com/omcgo/omcgo/internal/acs/rpc"
@@ -126,6 +127,26 @@ func runACS(cmd *cobra.Command, args []string) error {
 		requestIDPrefix,
 		cfg.EnableTestTaskInjection,
 	)
+
+	// issue #65（Option B）— ACS 横扩去进程态：把 4 类会话副作用状态接到共享 Redis，
+	// 使 ACS 在多实例无亲和（nginx/k8s 无需 sticky session）部署下不漂移/泄漏/失败。
+	// ACS 已硬依赖 Redis（会话/任务/STUN 均在 Redis），这里保持一致。
+	if inf.Redis != nil {
+		// 1) 准入计数 → 全局 Redis sorted set（TTL 自愈丢失的 Release）。
+		deps.Admission = acs.NewRedisAdmissionController(inf.Redis, cfg.Session.MaxConcurrent, inf.Logger)
+		// 2) 设备当前活跃会话指针 → Redis（跨实例孤儿会话清理）。TTL 取会话超时 + 余量。
+		deviceSessionTTL := cfg.Session.Timeout + 5*time.Minute
+		deps.DeviceSessionStore = acs.NewRedisDeviceSessionStore(inf.Redis, deviceSessionTTL)
+		// 3) ConnectionRequestURL → Redis 共享存储（镜像 STUN store，跨实例 HTTP 唤醒回退）。
+		deps.ConnReqURLStore = acs.NewRedisConnReqURLStore(inf.Redis, 0)
+		// 4) Digest nonce → Redis（SETEX + GETDEL，跨实例 Challenge/Authenticate 不丢 nonce）。
+		deps.Authenticator = auth.NewAuthenticatorWithRedis(cfg.Auth.Mode, cfg.Auth.Username, cfg.Auth.Password, inf.Redis)
+		inf.Logger.Info("ACS stateless redis state enabled (issue #65 option B)",
+			zap.Int64("max_concurrent", cfg.Session.MaxConcurrent),
+			zap.Duration("device_session_ttl", deviceSessionTTL))
+	} else {
+		inf.Logger.Warn("ACS redis unavailable; falling back to per-instance in-process session state (single-instance only)")
+	}
 
 	// 装配 /readyz 依赖检查器：仅勾选实际连接成功的基础设施，避免在精简部署
 	// （未配 PG/MinIO）下误报。检查列表与 components.HealthChecker.Register 同源，

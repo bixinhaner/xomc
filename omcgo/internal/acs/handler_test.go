@@ -127,7 +127,7 @@ func newTestACSHandlerWithDeps(store SessionStore, bus event.EventBus) *Handler 
 	metrics := NewACSMetrics(reg)
 	return &Handler{
 		sessionStore:  store,
-			taskService:   newAcsHTaskService(),
+		taskService:   newAcsHTaskService(),
 		eventBus:      bus,
 		authenticator: &auth.NoopAuthenticator{},
 		rpcDispatcher: rpc.NewDispatcher(),
@@ -326,7 +326,7 @@ func TestServeHTTP_EmptyBody_WithSession_NoCommands_CompletesSession(t *testing.
 		CWMPId:    "test-cwmp-id",
 	}
 	store.CreateWithID(context.Background(), sessionID, session)
-	h.admission.Acquire()
+	h.admission.Acquire(context.Background(), sessionID)
 	h.metrics.ActiveSessions.Inc()
 
 	w := httptest.NewRecorder()
@@ -345,7 +345,7 @@ func TestServeHTTP_EmptyBody_WithSession_HasCommand_SendsRPC(t *testing.T) {
 	taskSvc := newAcsHTaskService()
 	bus := &acsHEventBus{}
 	h := newTestACSHandlerWithDeps(store, bus)
-		h.taskService = taskSvc
+	h.taskService = taskSvc
 
 	deviceSN := "TEST-SN-CMD"
 	sessionID := "test-session-id-002"
@@ -358,7 +358,7 @@ func TestServeHTTP_EmptyBody_WithSession_HasCommand_SendsRPC(t *testing.T) {
 		CWMPId:    "cmd-cwmp-id",
 	}
 	store.CreateWithID(context.Background(), sessionID, session)
-	h.admission.Acquire()
+	h.admission.Acquire(context.Background(), sessionID)
 	h.metrics.ActiveSessions.Inc()
 
 	// Queue a GetParameterValues command.
@@ -536,7 +536,7 @@ func TestServeHTTP_Inform_AdmissionDenied_Returns503(t *testing.T) {
 	h := newTestACSHandler()
 	// Set max sessions to 1 and fill it.
 	h.admission = NewAdmissionController(1)
-	h.admission.Acquire()
+	h.admission.Acquire(context.Background(), "preexisting-session")
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(acsHInformPeriodicXML))
@@ -567,7 +567,7 @@ func TestServeHTTP_RPCResponse_CompletesSessionWhenNoMoreCommands(t *testing.T) 
 		CWMPId:    "100001",
 	}
 	store.CreateWithID(context.Background(), sessionID, session)
-	h.admission.Acquire()
+	h.admission.Acquire(context.Background(), sessionID)
 	h.metrics.ActiveSessions.Inc()
 
 	w := httptest.NewRecorder()
@@ -591,7 +591,7 @@ func TestServeHTTP_RPCResponse_ChainsNextCommand(t *testing.T) {
 	taskSvc := newAcsHTaskService()
 	bus := &acsHEventBus{}
 	h := newTestACSHandlerWithDeps(store, bus)
-		h.taskService = taskSvc
+	h.taskService = taskSvc
 
 	deviceSN := "TEST-SN-001"
 	sessionID := "test-session-id-004"
@@ -605,7 +605,7 @@ func TestServeHTTP_RPCResponse_ChainsNextCommand(t *testing.T) {
 		CWMPId:    "100001",
 	}
 	store.CreateWithID(context.Background(), sessionID, session)
-	h.admission.Acquire()
+	h.admission.Acquire(context.Background(), sessionID)
 	h.metrics.ActiveSessions.Inc()
 	// Queue another task to be dispatched after the RPC response.
 	taskSvc.addTask(&task.Task{
@@ -693,7 +693,7 @@ func TestCompleteSession_ReleasesResources(t *testing.T) {
 	}
 
 	h.metrics.ActiveSessions.Inc()
-	h.admission.Acquire()
+	h.admission.Acquire(context.Background(), "session-complete")
 
 	session := &Session{
 		ID:        "session-complete",
@@ -707,14 +707,17 @@ func TestCompleteSession_ReleasesResources(t *testing.T) {
 	h.completeSession(context.Background(), session)
 
 	assert.Equal(t, StateComplete, session.State)
-	assert.Equal(t, int64(0), h.admission.Current())
+	assert.Equal(t, int64(0), h.admission.Current(context.Background()))
 
 	// 验证 Session 已从存储中删除
 	sByID, _ := store.GetByID(context.Background(), "session-complete")
 	assert.Nil(t, sByID)
 }
 
-func TestCompleteSession_NilSession_StillReleasesResources(t *testing.T) {
+// issue #65（Option B）契约变更：completeSession(nil) 不再释放准入槽位 —— 没有
+// sessionID 无法配对释放，残留槽位由准入 sorted set 的 TTL 过期分自愈回收。这里验证
+// nil session 仍递减 ActiveSessions 指标，但 admission 槽位保持不变（等 TTL 回收）。
+func TestCompleteSession_NilSession_DoesNotReleaseAdmissionSlot(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	metrics := NewACSMetrics(reg)
 
@@ -725,11 +728,12 @@ func TestCompleteSession_NilSession_StillReleasesResources(t *testing.T) {
 		logger:       zap.NewNop(),
 	}
 
-	h.admission.Acquire()
+	h.admission.Acquire(context.Background(), "orphan-no-session")
 
 	h.completeSession(context.Background(), nil)
 
-	assert.Equal(t, int64(0), h.admission.Current())
+	// 槽位不被 nil-session 释放（由 TTL 回收）。
+	assert.Equal(t, int64(1), h.admission.Current(context.Background()))
 }
 
 // ---------------------------------------------------------------------------
@@ -989,7 +993,7 @@ func TestTaskQueue_ProcessMultipleRPCMethods(t *testing.T) {
 	metrics := NewACSMetrics(reg)
 	h := &Handler{
 		sessionStore:  store,
-		taskService:   taskSvc,         // new task service
+		taskService:   taskSvc, // new task service
 		eventBus:      bus,
 		authenticator: &auth.NoopAuthenticator{},
 		rpcDispatcher: rpc.NewDispatcher(),

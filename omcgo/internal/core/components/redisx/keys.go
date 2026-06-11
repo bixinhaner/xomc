@@ -42,16 +42,46 @@ func (KeyBuilder) ACSHeartbeat(deviceSN string) string { return acsHeartbeatPref
 func (KeyBuilder) ACSHeartbeatPrefix() string { return acsHeartbeatPrefix }
 
 // ACSConnReqPending Connection Request 去重键（30s TTL）。
-func (KeyBuilder) ACSConnReqPending(deviceSN string) string { return acsConnReqPendingPrefix + deviceSN }
+func (KeyBuilder) ACSConnReqPending(deviceSN string) string {
+	return acsConnReqPendingPrefix + deviceSN
+}
 
 // ACSContinuousWake 连续唤醒计数器（反抖动 / 抑制重复 CR）。
-func (KeyBuilder) ACSContinuousWake(deviceSN string) string { return acsContinuousWakePrefix + deviceSN }
+func (KeyBuilder) ACSContinuousWake(deviceSN string) string {
+	return acsContinuousWakePrefix + deviceSN
+}
 
 // ACSSTUN 按设备 SN 维护 UDP Connection Request 的 STUN 地址。
 func (KeyBuilder) ACSSTUN(deviceSN string) string { return acsSTUNPrefix + deviceSN }
 
 // ACSSTUNPrefix STUN 地址键前缀。
 func (KeyBuilder) ACSSTUNPrefix() string { return acsSTUNPrefix }
+
+// ACSAdmissionSlots 全局准入控制 Sorted Set（member=sessionID, score=过期 unix 秒）。
+// 跨实例共享，使全局并发会话上限真正成为全局而非每实例 N×max。槽位带 TTL 过期分，
+// 丢失的 Release 由 ZREMRANGEBYSCORE 自愈回收。issue #65（Option B）。
+func (KeyBuilder) ACSAdmissionSlots() string { return acsAdmissionSlotsKey }
+
+// ACSDeviceSession 设备当前活跃会话指针（值=sessionID，TTL）。跨实例孤儿会话
+// 检测：新 Inform 落在任一实例都能读到设备上一个 sessionID 并跨实例清理。
+func (KeyBuilder) ACSDeviceSession(deviceSN string) string { return acsDeviceSessionPrefix + deviceSN }
+
+// ACSDeviceSessionPrefix 设备会话指针键前缀，供扫描/迁移使用。
+func (KeyBuilder) ACSDeviceSessionPrefix() string { return acsDeviceSessionPrefix }
+
+// ACSConnReqURL 设备 Inform 上报的 ConnectionRequestURL（HTTP 唤醒回退用，TTL）。
+// 镜像 ACSSTUN：会话后续唤可在非 Inform 实例读到该 URL，避免跨实例缓存丢失。
+func (KeyBuilder) ACSConnReqURL(deviceSN string) string { return acsConnReqURLPrefix + deviceSN }
+
+// ACSConnReqURLPrefix ConnectionRequestURL 键前缀。
+func (KeyBuilder) ACSConnReqURLPrefix() string { return acsConnReqURLPrefix }
+
+// ACSAuthNonce HTTP Digest 一次性 nonce（SETEX + GETDEL，TTL）。跨实例共享，
+// 使 Challenge 与 Authenticate 可落在不同实例而不丢 nonce。
+func (KeyBuilder) ACSAuthNonce(nonce string) string { return acsAuthNoncePrefix + nonce }
+
+// ACSAuthNoncePrefix nonce 键前缀。
+func (KeyBuilder) ACSAuthNoncePrefix() string { return acsAuthNoncePrefix }
 
 // ===== ACS: 统一任务队列（taskq / task / cwmp2task） =====
 
@@ -191,7 +221,9 @@ func (KeyBuilder) RebootAbnormal(deviceSN string) string {
 func (KeyBuilder) DeviceSN(deviceSN string) string { return deviceSNPrefix + deviceSN }
 
 // ProvisionSyncPlan 两阶段 sync plan 状态（Redis STRING + TTL）。
-func (KeyBuilder) ProvisionSyncPlan(deviceSN string) string { return provisionSyncPlanPrefix + deviceSN }
+func (KeyBuilder) ProvisionSyncPlan(deviceSN string) string {
+	return provisionSyncPlanPrefix + deviceSN
+}
 
 // ProvisionSyncPlanPrefix sync plan 键前缀。
 func (KeyBuilder) ProvisionSyncPlanPrefix() string { return provisionSyncPlanPrefix }
@@ -260,6 +292,11 @@ const (
 	acsTaskQueuePrefix      = "acs:taskq:"
 	acsTaskDetailPrefix     = "acs:task:"
 	acsCWMP2TaskPrefix      = "acs:cwmp2task:"
+	// issue #65（Option B）— ACS 横扩去进程态：准入槽位 / 设备会话指针 / CR URL / nonce
+	acsAdmissionSlotsKey   = "acs:admission:slots"
+	acsDeviceSessionPrefix = "acs:device:session:"
+	acsConnReqURLPrefix    = "acs:connreq:url:"
+	acsAuthNoncePrefix     = "acs:auth:nonce:"
 
 	// datamodel
 	datamodelCacheVersionKey = "datamodel:cache_version"
@@ -278,9 +315,9 @@ const (
 	paramModelCacheVersionKey  = "parammodel:cache_version"
 
 	// kpi-route (T-0164-P1 KPI 路由)
-	kpiRouteByProductPrefix  = "kpi-route:product:"
-	kpiRoutePattern          = "kpi-route:*"
-	kpiRouteCacheVersionKey  = "kpi-route:cache_version"
+	kpiRouteByProductPrefix = "kpi-route:product:"
+	kpiRoutePattern         = "kpi-route:*"
+	kpiRouteCacheVersionKey = "kpi-route:cache_version"
 
 	// device / provision / upload
 	deviceSNPrefix          = "device:sn:"
