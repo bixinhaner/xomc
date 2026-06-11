@@ -23,8 +23,10 @@ import type { Alarm, DealState, EventType } from '@core/types/alarm';
 import type { AlarmFilter } from '@core/types/alarm';
 import AlarmDetail from '../AlarmDetail';
 import AutoRefreshDropdown from '../components/AutoRefreshDropdown';
-import ExportModal, { type ExportParams } from '../CurrentAlarms/ExportModal';
+import ExportModal from '../CurrentAlarms/ExportModal';
 import ConfirmWithNoteModal from '../components/ConfirmWithNoteModal';
+import { useAlarmListExport } from '../hooks/useAlarmListExport';
+import { buildAlarmExportFieldDefinitions, type AlarmExportFieldKey } from '../utils/alarmExportFields';
 import { BASE_STATION_TYPE_OPTIONS, formatBaseStationTypeLabel } from '../utils/baseStationType';
 import styles from './HistoricalAlarms.module.css';
 
@@ -88,8 +90,6 @@ export default function HistoricalAlarms() {
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [detailAlarm, setDetailAlarm] = useState<Alarm | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
-  const [exportOpen, setExportOpen] = useState(false);
-  const [exportLoading, setExportLoading] = useState(false);
   const [activeQuickFilter, setActiveQuickFilter] = useState<string>('all');
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [refreshInterval, setRefreshInterval] = useState(30);
@@ -105,6 +105,10 @@ export default function HistoricalAlarms() {
     minor: t('alarm.severity.minor'),
     warning: t('alarm.severity.warning'),
   }), [t]);
+
+  const exportFields = useMemo(() => buildAlarmExportFieldDefinitions(t), [t]);
+  const exportFieldOptions = useMemo(() => exportFields.map(({ key, label }) => ({ key, label })), [exportFields]);
+  const defaultExportFieldKeys = useMemo(() => exportFields.map(({ key }) => key), [exportFields]);
 
   const FILTER_FIELDS: FilterField[] = useMemo(() => [
     { name: 'deviceSn', label: t('alarm.deviceSn'), type: 'input', placeholder: t('alarm.searchSnPlaceholder'), width: 180 },
@@ -379,36 +383,11 @@ export default function HistoricalAlarms() {
     return alarmsForExport;
   }, []);
 
-  const downloadAlarmCsv = useCallback((items: Alarm[]) => {
-    const headers = [
-      t('alarm.alarmId'),
-      t('alarm.alarmIdentifier'),
-      t('alarm.severity'),
-      t('alarm.possibleCause'),
-      t('alarm.equipInfo'),
-      t('alarm.eventType'),
-      t('alarm.dealState'),
-      t('alarm.eventTime'),
-      t('alarm.updTime'),
-      t('alarm.dealUser'),
-      t('alarm.dealTime'),
-      t('alarm.dealMemo'),
-    ];
-
-    const rows = items.map((alarm) => [
-      alarm.id,
-      alarm.alarmIdentifier,
-      SEVERITY_LABEL[alarm.severity] ?? alarm.severity,
-      alarm.alarmName,
-      alarm.equipInfo,
-      t(EVENT_TYPE_CONFIG[alarm.eventType] || 'common.unknown'),
-      t(DEAL_STATE_CONFIG[alarm.dealState]?.label || 'common.unknown'),
-      alarm.eventTime,
-      alarm.updTime,
-      alarm.dealUser || '',
-      alarm.dealTime || '',
-      alarm.dealMemo || '',
-    ]);
+  const downloadAlarmCsv = useCallback((items: Alarm[], fieldKeys: AlarmExportFieldKey[]) => {
+    const selectedFieldSet = new Set(fieldKeys);
+    const selectedFields = exportFields.filter((field) => selectedFieldSet.has(field.key));
+    const headers = selectedFields.map((field) => field.label);
+    const rows = items.map((alarm) => selectedFields.map((field) => field.getValue(alarm)));
 
     const csv = [headers, ...rows]
       .map((row) => row.map((cell) => escapeCsvCell(cell)).join(','))
@@ -416,64 +395,48 @@ export default function HistoricalAlarms() {
 
     const datePart = new Date().toISOString().slice(0, 10);
     triggerCsvDownload(csv, `historical-alarms-${datePart}.csv`);
-  }, [t, SEVERITY_LABEL]);
+  }, [exportFields]);
 
-  // 导出告警
-  const handleExport = useCallback(
-    async (params: ExportParams) => {
-      setExportLoading(true);
-      message.open({ key: 'history-alarm-export', type: 'loading', content: t('common.exportInProgress'), duration: 0 });
-      try {
-        if (params.deviceGroupIds.length === 0) {
-          message.open({ key: 'history-alarm-export', type: 'warning', content: t('export.selectDeviceGroup') });
-          return;
-        }
+  const {
+    clearSelection,
+    exportLoading,
+    exportOpen,
+    handleExportConfirm,
+    handleExportTrigger,
+    handleSelectAllFiltered,
+    selectAllLoading,
+    setExportOpen,
+  } = useAlarmListExport({
+    exportMessageKey: 'history-alarm-export',
+    filterParams,
+    selectedRowKeys,
+    setSelectedRowKeys,
+    fetchAllAlarmsForExport: fetchAllHistoricalAlarmsForExport,
+    fetchDeviceSnsByGroups,
+    downloadAlarmCsv,
+    message,
+    t,
+  });
 
-        const selectedIdSet = new Set(selectedRowKeys.map((key) => String(key)));
-        const effectiveFilter: AlarmFilter = params.timeRange
-          ? { ...filterParams, timeRange: params.timeRange }
-          : filterParams;
-
-        const allowedDeviceSns = await fetchDeviceSnsByGroups(params.deviceGroupIds);
-        if (allowedDeviceSns.size === 0) {
-          message.open({ key: 'history-alarm-export', type: 'warning', content: t('common.noDataToExport') });
-          return;
-        }
-
-        const alarmsForExport = await fetchAllHistoricalAlarmsForExport(effectiveFilter);
-        const filteredAlarms = alarmsForExport.filter((alarm) => allowedDeviceSns.has(alarm.deviceSn));
-        const exportItems = selectedIdSet.size > 0
-          ? filteredAlarms.filter((alarm) => selectedIdSet.has(alarm.id))
-          : filteredAlarms;
-
-        if (exportItems.length === 0) {
-          message.open({ key: 'history-alarm-export', type: 'warning', content: t('common.noDataToExport') });
-          return;
-        }
-
-        downloadAlarmCsv(exportItems);
-        message.open({
-          key: 'history-alarm-export',
-          type: 'success',
-          content: t('common.exportSuccess', { count: exportItems.length }),
-        });
-        setExportOpen(false);
-      } catch {
-        message.open({ key: 'history-alarm-export', type: 'error', content: t('common.exportFailed') });
-      } finally {
-        setExportLoading(false);
-      }
-    },
-    [
-      downloadAlarmCsv,
-      fetchAllHistoricalAlarmsForExport,
-      fetchDeviceSnsByGroups,
-      filterParams,
-      message,
-      selectedRowKeys,
-      t,
-    ]
-  );
+  const selectionActions = useMemo(() => (
+    <Space size={8}>
+      {total > 0 && (
+        <Button
+          size="small"
+          loading={selectAllLoading}
+          disabled={selectedRowKeys.length === total}
+          onClick={() => { void handleSelectAllFiltered(); }}
+        >
+          {t('alarm.selectAllFiltered', { count: total })}
+        </Button>
+      )}
+      {selectedRowKeys.length > 0 && (
+        <Button size="small" onClick={clearSelection}>
+          {t('common.unselectAll')}
+        </Button>
+      )}
+    </Space>
+  ), [clearSelection, handleSelectAllFiltered, selectAllLoading, selectedRowKeys.length, t, total]);
 
   // 打开告警详情
   const handleShowDetail = useCallback((alarm: Alarm) => {
@@ -698,9 +661,8 @@ export default function HistoricalAlarms() {
           />
           <Button
             icon={<ExportOutlined />}
-            onClick={() => {
-              setExportOpen(true);
-            }}
+            loading={exportLoading}
+            onClick={() => { void handleExportTrigger(); }}
           >
             导出
           </Button>
@@ -764,7 +726,7 @@ export default function HistoricalAlarms() {
       {/* 列表卡片 */}
       <Card
         size="small"
-        bordered
+        variant="outlined"
         style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
         styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
       >
@@ -777,6 +739,7 @@ export default function HistoricalAlarms() {
           selectable
           selectedRowKeys={selectedRowKeys}
           onSelectionChange={(keys) => setSelectedRowKeys(keys)}
+          preserveSelectedRowKeys
           total={total}
           pageSize={pageSize}
           currentPage={currentPage}
@@ -789,6 +752,7 @@ export default function HistoricalAlarms() {
           hideRealtime
           alarmRowStyle={alarmRowStyle as (record: Alarm) => 'critical' | 'major' | 'minor' | 'warning' | null}
           defaultDensity="default"
+          extraToolbarAfterBatch={selectionActions}
           showRowNumber
           rowNumberTitle={t('common.rowNumber')}
           scroll={{ y: 'calc(100vh - 450px)' }}
@@ -804,8 +768,12 @@ export default function HistoricalAlarms() {
       <ExportModal
         open={exportOpen}
         onClose={() => setExportOpen(false)}
-        onConfirm={handleExport}
+        onConfirm={handleExportConfirm}
         confirmLoading={exportLoading}
+        fieldOptions={exportFieldOptions}
+        defaultFieldKeys={defaultExportFieldKeys}
+        hasSelectedRows={selectedRowKeys.length > 0}
+        selectedRowCount={selectedRowKeys.length}
       />
 
       <ConfirmWithNoteModal

@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/config/parammodel"
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/internal/product"
@@ -133,7 +134,7 @@ func (r *ConformanceTestRunner) RunAll(ctx context.Context, deviceSN string) ([]
 		return nil, fmt.Errorf("lookup device %s: %w", deviceSN, err)
 	}
 	if dev == nil {
-		return nil, fmt.Errorf("device not found: %s", deviceSN)
+		return nil, fmt.Errorf("device not found: %s: %w", deviceSN, commonerrors.ErrNotFound)
 	}
 
 	var results []TestResult
@@ -165,7 +166,7 @@ func (r *ConformanceTestRunner) RunByCategory(ctx context.Context, deviceSN stri
 		return nil, fmt.Errorf("lookup device %s: %w", deviceSN, err)
 	}
 	if dev == nil {
-		return nil, fmt.Errorf("device not found: %s", deviceSN)
+		return nil, fmt.Errorf("device not found: %s: %w", deviceSN, commonerrors.ErrNotFound)
 	}
 
 	cases, ok := r.cases[category]

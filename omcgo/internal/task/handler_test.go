@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -126,7 +127,9 @@ func (th *testHandler) cancelTask(c *gin.Context) {
 
 	err := th.ts.CancelTask(c.Request.Context(), taskID)
 	if err != nil {
-		if err.Error() == fmt.Sprintf("task not found: %s", taskID) {
+		// 镜像生产 handler.CancelTask（#125）：用哨兵 errors.Is 判定 not-found，
+		// 不再做易碎的精确字符串比对。
+		if stderrors.Is(err, ErrTaskNotFound) {
 			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{
 				"code":    http.StatusNotFound,
 				"message": "Not Found",

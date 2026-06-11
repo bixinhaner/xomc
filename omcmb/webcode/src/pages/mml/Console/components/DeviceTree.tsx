@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from 'react';
-import { Button, Checkbox, Input, List, Pagination, Select, Space, Tag, Typography } from 'antd';
+import { Button, Checkbox, Input, Pagination, Select, Space, Tag, Typography } from 'antd';
 import { SearchOutlined, UserAddOutlined, DeleteOutlined } from '@ant-design/icons';
 import type { ConsoleDevice } from '../types';
 import { STATUS_COLORS } from '../types';
@@ -195,69 +195,67 @@ export default function DeviceTree({
           background: token.colorBgContainer,
         }}
       >
-        <List
-          size="small"
-          dataSource={paginatedDevices}
-          renderItem={(device) => {
-            const isSelected = selectedDevices.some((d) => d.sn === device.sn);
-            return (
-              <List.Item
-                style={{
-                  cursor: 'pointer',
-                  background: isSelected ? token.colorPrimaryBg : 'transparent',
-                  padding: '6px 8px 6px 12px',
-                  borderLeft: isSelected ? `3px solid ${token.colorPrimary}` : '3px solid transparent',
-                  transition: 'all 0.15s ease',
-                }}
-                onClick={() => onToggleDevice(device, !isSelected)}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%' }}>
-                  <Checkbox
-                    checked={isSelected}
-                    onChange={(e) => onToggleDevice(device, e.target.checked)}
-                    onClick={(e) => e.stopPropagation()}
-                  />
+        {paginatedDevices.map((device) => {
+          const isSelected = selectedDevices.some((d) => d.sn === device.sn);
+          return (
+            <div
+              key={device.sn}
+              style={{
+                cursor: 'pointer',
+                background: isSelected ? token.colorPrimaryBg : 'transparent',
+                padding: '6px 8px 6px 12px',
+                borderLeft: isSelected ? `3px solid ${token.colorPrimary}` : '3px solid transparent',
+                borderBottom: `1px solid ${token.colorSplit}`,
+                transition: 'all 0.15s ease',
+              }}
+              onClick={() => onToggleDevice(device, !isSelected)}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%' }}>
+                <Checkbox
+                  checked={isSelected}
+                  onChange={(e) => onToggleDevice(device, e.target.checked)}
+                  onClick={(e) => e.stopPropagation()}
+                />
+                <div
+                  style={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: '50%',
+                    background: STATUS_COLORS[device.status] ?? '#d9d9d9',
+                    boxShadow: `0 0 4px ${STATUS_COLORS[device.status] ?? '#d9d9d9'}`,
+                  }}
+                />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 500, fontSize: 12 }}>{device.sn}</div>
                   <div
                     style={{
-                      width: 8,
-                      height: 8,
-                      borderRadius: '50%',
-                      background: STATUS_COLORS[device.status] ?? '#d9d9d9',
-                      boxShadow: `0 0 4px ${STATUS_COLORS[device.status] ?? '#d9d9d9'}`,
-                    }}
-                  />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 500, fontSize: 12 }}>{device.sn}</div>
-                    <div
-                      style={{
-                        fontSize: 10,
-                        color: token.colorTextSecondary,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {device.name}
-                    </div>
-                  </div>
-                  <Tag
-                    style={{
-                      fontSize: 9,
-                      margin: 0,
-                      marginLeft: 'auto',
-                      background: token.colorBgLayout,
-                      border: 'none',
-                      borderRadius: 4,
-                      flexShrink: 0,
+                      fontSize: 10,
+                      color: token.colorTextSecondary,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
                     }}
                   >
-                    {device.type}
-                  </Tag>
+                    {device.name}
+                  </div>
                 </div>
-              </List.Item>
-            );
-          }}
-        />
+                <Tag
+                  style={{
+                    fontSize: 9,
+                    margin: 0,
+                    marginLeft: 'auto',
+                    background: token.colorBgLayout,
+                    border: 'none',
+                    borderRadius: 4,
+                    flexShrink: 0,
+                  }}
+                >
+                  {device.type}
+                </Tag>
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       {/* 分页 */}

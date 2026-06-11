@@ -47,9 +47,12 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     ports:
       - "5432:5432"                        # 内网开放(0.0.0.0),供其它服务器直连
-    # 调优参数由 resources.env 注入（plan-resources.sh 据 POSTGRES_MEM 联动派生）；
-    # 缺省 = PG 原生默认值，未跑 plan-resources.sh 行为不变。注意：增大 max_connections
-    # 必须同步增大 POSTGRES_MEM（每连接 ~8-10MB），否则 PG 自身 OOM。
+    # 调优参数由 resources.env 注入（plan-resources.sh 据 POSTGRES_MEM 联动派生）；缺省 = 历史等价值。
+    # max_connections 缺省 300（= main #131 的修复）：app(db60+tsdb40)+worker(db25+tsdb25)+acs(db30)
+    # 池上限合计 ~180，远超 PG 默认 100，否则最后启动的 acs 报 "too many clients already" 崩溃；
+    # 300 覆盖全部池 + exporter + 手动 psql + 余量。其余 -c 缺省取 PG 原生默认值。
+    # 注意：增大 max_connections 必须同步增大 POSTGRES_MEM（每连接 ~8-10MB），否则 PG 自身 OOM；
+    # 多副本横扩前应前置 pgbouncer（见 app.prod.yaml）。
     command:
       - "postgres"
       - "-c"
@@ -57,7 +60,7 @@ services:
       - "-c"
       - "log_timezone=Asia/Shanghai"
       - "-c"
-      - "max_connections=${PG_MAX_CONNECTIONS:-100}"
+      - "max_connections=${PG_MAX_CONNECTIONS:-300}"
       - "-c"
       - "shared_buffers=${PG_SHARED_BUFFERS:-128MB}"
       - "-c"

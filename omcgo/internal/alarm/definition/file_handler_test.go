@@ -360,7 +360,59 @@ func TestUpload_NoFile_400(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-func TestUpload_ReloadFailedStillSucceeds(t *testing.T) {
+// ── neType 长度守门(#123:ne_type 列 varchar(16),超长曾导致 201 假成功 0 行入库) ──
+
+func TestValidateUploadNeType(t *testing.T) {
+	cases := []struct {
+		name    string
+		neType  string
+		wantErr bool
+	}{
+		{"短名通过", "ENB", false},
+		{"恰好 16 字符通过", strings.Repeat("A", 16), false},
+		{"17 字符拒绝", strings.Repeat("A", 17), true},
+		{"issue #123 实例 21 字符拒绝", "SMKsmk178109434922378", true},
+		{"多字节按 rune 计:16 个汉字通过", strings.Repeat("基", 16), false},
+		{"多字节按 rune 计:17 个汉字拒绝", strings.Repeat("基", 17), true},
+		{"空值放行(由调用方先拒)", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateUploadNeType(tc.neType)
+			if tc.wantErr {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), "16")
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+// 超长 neType(>16) → 400 + 明确错误消息,文件不落地,不触发 reload。
+func TestUpload_NeTypeTooLong_400(t *testing.T) {
+	baseDir := t.TempDir()
+	reloader := &stubReloader{}
+	r := newTestRouter(t, &mockFileRepository{}, reloader, baseDir)
+
+	const longNeType = "SMKsmk178109434922378" // 21 字符,issue #123 复现实例
+	body, ct := buildMultipart(t, []byte(`<alarmModel neType="`+longNeType+`"><alarms></alarms></alarmModel>`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/alarm-definitions/upload-xml", body)
+	req.Header.Set("Content-Type", ct)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code, "body=%s", w.Body.String())
+	assert.Contains(t, w.Body.String(), fmt.Sprintf("code=%d", global.ErrCodeAlarmUploadInvalidName))
+	assert.Contains(t, w.Body.String(), "16", "错误消息应说明长度上限")
+	assert.Equal(t, 0, reloader.calls)
+	_, err := os.Stat(filepath.Join(baseDir, BuiltinDirSubdir, longNeType+".xml"))
+	assert.True(t, os.IsNotExist(err), "超长 neType 时文件不应落地")
+}
+
+// ── 重载失败回滚(#123:此前只 Warn 仍报 201+reloaded:true,形成静默失败) ──
+
+// 新建上传 + 重载失败 → 500,落盘 XML 与 sidecar 一并回滚(不留半成品)。
+func TestUpload_ReloadFailed_NewFile_500_RollsBack(t *testing.T) {
 	baseDir := t.TempDir()
 	reloader := &stubReloader{err: errors.New("simulated reload fail")}
 	r := newTestRouter(t, &mockFileRepository{}, reloader, baseDir)
@@ -369,13 +421,43 @@ func TestUpload_ReloadFailedStillSucceeds(t *testing.T) {
 	req.Header.Set("Content-Type", ct)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusCreated, w.Code)
-	var resp struct {
-		Data map[string]any `json:"data"`
-	}
-	_ = json.Unmarshal(w.Body.Bytes(), &resp)
-	assert.Equal(t, false, resp.Data["reloaded"])
+	assert.Equal(t, http.StatusInternalServerError, w.Code, "body=%s", w.Body.String())
 	assert.Equal(t, 1, reloader.calls)
+
+	target := filepath.Join(baseDir, BuiltinDirSubdir, "X.xml")
+	_, statErr := os.Stat(target)
+	assert.True(t, os.IsNotExist(statErr), "重载失败后落盘 XML 应回滚删除")
+	_, scErr := os.Stat(target + CustomMarkerSuffix)
+	assert.True(t, os.IsNotExist(scErr), "重载失败后 sidecar 应回滚删除")
+}
+
+// force 覆盖 + 重载失败 → 500,.bak 备份还原回原位(旧内容保留,无 .bak 残留)。
+func TestUpload_ReloadFailed_Overwrite_500_RestoresBackup(t *testing.T) {
+	baseDir := t.TempDir()
+	loadedFrom := writeCustomXML(t, baseDir, "MY_NE.xml") // 旧文件 + sidecar
+	target := filepath.Join(baseDir, loadedFrom)
+	oldXML, err := os.ReadFile(target)
+	assert.NoError(t, err)
+
+	reloader := &stubReloader{err: errors.New("simulated reload fail")}
+	r := newTestRouter(t, &mockFileRepository{neTypeLoadedFroms: []string{loadedFrom}}, reloader, baseDir)
+
+	newXML := []byte(`<alarmModel neType="MY_NE" totalCount="1"><alarms></alarms></alarmModel>`)
+	body, ct := buildMultipart(t, newXML)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/alarm-definitions/upload-xml?force=true", body)
+	req.Header.Set("Content-Type", ct)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusInternalServerError, w.Code, "body=%s", w.Body.String())
+	assert.Equal(t, 1, reloader.calls)
+
+	got, err := os.ReadFile(target)
+	assert.NoError(t, err, "重载失败后原文件应还原")
+	assert.Equal(t, oldXML, got, "重载失败后应还原旧内容而非新 XML")
+	baks, _ := filepath.Glob(target + ".bak.*")
+	assert.Empty(t, baks, "备份应 rename 回原位,不残留 .bak")
+	// sidecar 本就在位(覆盖 custom 不动 sidecar),仍 custom 可删
+	assert.True(t, IsDeletable(baseDir, loadedFrom))
 }
 
 // ── DownloadFile ────────────────────────────────────────────────────

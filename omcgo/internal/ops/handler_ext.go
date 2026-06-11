@@ -148,7 +148,7 @@ func (h *ExtHandler) DiagPing(c *gin.Context) {
 		response.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusAccepted, d)
+	response.OKWithStatus(c, http.StatusAccepted, d)
 }
 
 func (h *ExtHandler) DiagTraceroute(c *gin.Context) {
@@ -162,7 +162,7 @@ func (h *ExtHandler) DiagTraceroute(c *gin.Context) {
 		response.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusAccepted, d)
+	response.OKWithStatus(c, http.StatusAccepted, d)
 }
 
 func (h *ExtHandler) DiagThroughput(c *gin.Context) {
@@ -176,7 +176,7 @@ func (h *ExtHandler) DiagThroughput(c *gin.Context) {
 		response.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusAccepted, d)
+	response.OKWithStatus(c, http.StatusAccepted, d)
 }
 
 func (h *ExtHandler) ListDiagnostics(c *gin.Context) {
@@ -194,7 +194,7 @@ func (h *ExtHandler) ListDiagnostics(c *gin.Context) {
 		response.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	response.OK(c, resp)
 }
 
 func (h *ExtHandler) GetDiagnostic(c *gin.Context) {
@@ -212,7 +212,7 @@ func (h *ExtHandler) GetDiagnostic(c *gin.Context) {
 		response.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, d)
+	response.OK(c, d)
 }
 
 func (h *ExtHandler) RunInspection(c *gin.Context) {
@@ -227,7 +227,7 @@ func (h *ExtHandler) RunInspection(c *gin.Context) {
 		response.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusAccepted, gin.H{"status": "triggered", "scope": req.Scope})
+	response.OKWithStatus(c, http.StatusAccepted, gin.H{"status": "triggered", "scope": req.Scope})
 }
 
 // ============================================================
@@ -245,7 +245,7 @@ func (h *ExtHandler) CollectDownload(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	c.JSON(http.StatusAccepted, gin.H{"items": items})
+	response.OKWithStatus(c, http.StatusAccepted, gin.H{"items": items})
 }
 
 func (h *ExtHandler) ListDownloads(c *gin.Context) {
@@ -263,7 +263,7 @@ func (h *ExtHandler) ListDownloads(c *gin.Context) {
 		response.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	response.OK(c, resp)
 }
 
 func (h *ExtHandler) GetDownload(c *gin.Context) {
@@ -281,7 +281,7 @@ func (h *ExtHandler) GetDownload(c *gin.Context) {
 		response.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, d)
+	response.OK(c, d)
 }
 
 // ============================================================
@@ -323,7 +323,7 @@ func (h *ExtHandler) ListAuditLogs(c *gin.Context) {
 		response.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	response.OK(c, resp)
 }
 
 // ============================================================
@@ -342,7 +342,7 @@ func (h *ExtHandler) CreateMaintenanceWindow(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	c.JSON(http.StatusCreated, w)
+	response.OKWithStatus(c, http.StatusCreated, w)
 }
 
 func (h *ExtHandler) ListMaintenanceWindows(c *gin.Context) {
@@ -356,7 +356,7 @@ func (h *ExtHandler) ListMaintenanceWindows(c *gin.Context) {
 		response.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	response.OK(c, resp)
 }
 
 func (h *ExtHandler) ListActiveMaintenanceWindows(c *gin.Context) {
@@ -365,7 +365,7 @@ func (h *ExtHandler) ListActiveMaintenanceWindows(c *gin.Context) {
 		response.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"items": items, "total": len(items)})
+	response.OK(c, gin.H{"items": items, "total": len(items)})
 }
 
 func (h *ExtHandler) GetMaintenanceWindow(c *gin.Context) {
@@ -383,7 +383,7 @@ func (h *ExtHandler) GetMaintenanceWindow(c *gin.Context) {
 		response.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, w)
+	response.OK(c, w)
 }
 
 func (h *ExtHandler) ApproveMaintenanceWindow(c *gin.Context) {
@@ -401,7 +401,7 @@ func (h *ExtHandler) ApproveMaintenanceWindow(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "approved"})
+	response.OK(c, gin.H{"status": "approved"})
 }
 
 // ============================================================
@@ -418,7 +418,7 @@ func (h *ExtHandler) ListPlaybooks(c *gin.Context) {
 		response.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	response.OK(c, resp)
 }
 
 func (h *ExtHandler) CreatePlaybook(c *gin.Context) {
@@ -432,7 +432,7 @@ func (h *ExtHandler) CreatePlaybook(c *gin.Context) {
 		response.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusCreated, out)
+	response.OKWithStatus(c, http.StatusCreated, out)
 }
 
 func (h *ExtHandler) MatchPlaybook(c *gin.Context) {
@@ -446,7 +446,7 @@ func (h *ExtHandler) MatchPlaybook(c *gin.Context) {
 		response.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"items": items, "total": len(items)})
+	response.OK(c, gin.H{"items": items, "total": len(items)})
 }
 
 // ============================================================
@@ -463,7 +463,7 @@ func (h *ExtHandler) RunTask(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "running"})
+	response.OK(c, gin.H{"status": "running"})
 }
 
 func (h *ExtHandler) ListTaskExecutions(c *gin.Context) {
@@ -483,7 +483,7 @@ func (h *ExtHandler) ListTaskExecutions(c *gin.Context) {
 		response.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	response.OK(c, resp)
 }
 
 func (h *ExtHandler) ApproveTask(c *gin.Context) {
@@ -506,7 +506,7 @@ func (h *ExtHandler) ApproveTask(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	response.OK(c, gin.H{"status": "ok"})
 }
 
 // TaskEventsSSE SSE 推送任务进度（T-0102）。
@@ -642,7 +642,7 @@ func (h *ExtHandler) ExecuteRPC(c *gin.Context) {
 		go h.runRPCAsync(created.ID)
 	}
 
-	c.JSON(http.StatusAccepted, gin.H{
+	response.OKWithStatus(c, http.StatusAccepted, gin.H{
 		"task_id":           created.ID,
 		"status":            created.Status,
 		"risk_level":        overallRisk,
@@ -710,7 +710,7 @@ func (h *ExtHandler) ActivateBreakGlass(c *gin.Context) {
 		response.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "activated", "expires_in_seconds": 1800})
+	response.OK(c, gin.H{"status": "activated", "expires_in_seconds": 1800})
 }
 
 func (h *ExtHandler) DeactivateBreakGlass(c *gin.Context) {
@@ -720,16 +720,16 @@ func (h *ExtHandler) DeactivateBreakGlass(c *gin.Context) {
 		return
 	}
 	h.breakGlassSvc.Deactivate(c.Request.Context(), *userID)
-	c.JSON(http.StatusOK, gin.H{"status": "deactivated"})
+	response.OK(c, gin.H{"status": "deactivated"})
 }
 
 func (h *ExtHandler) BreakGlassStatus(c *gin.Context) {
 	userID := currentUserID(c)
 	if userID == nil {
-		c.JSON(http.StatusOK, gin.H{"active": false})
+		response.OK(c, gin.H{"active": false})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"active": h.breakGlassSvc.IsActive(*userID)})
+	response.OK(c, gin.H{"active": h.breakGlassSvc.IsActive(*userID)})
 }
 
 // ============================================================

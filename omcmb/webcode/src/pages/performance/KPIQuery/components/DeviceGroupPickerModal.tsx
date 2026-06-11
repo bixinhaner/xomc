@@ -81,7 +81,7 @@ export default function DeviceGroupPickerModal({
       width={760}
       destroyOnHidden
     >
-      <Space direction="vertical" style={{ width: '100%' }} size="middle">
+      <Space orientation="vertical" style={{ width: '100%' }} size="middle">
         <Input
           placeholder="按设备组名 搜索"
           prefix={<SearchOutlined />}

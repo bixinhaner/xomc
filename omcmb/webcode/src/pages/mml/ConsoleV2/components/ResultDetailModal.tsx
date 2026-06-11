@@ -195,7 +195,7 @@ export default function ResultDetailModal({
       }
     >
       {row && execMeta && (
-        <Space direction="vertical" size={14} style={{ width: '100%' }}>
+        <Space orientation="vertical" size={14} style={{ width: '100%' }}>
           {/* 任务信息 */}
           <div style={{ padding: 12, background: '#fafafa', border: '1px solid #f0f0f0', borderRadius: 6 }}>
             <Descriptions

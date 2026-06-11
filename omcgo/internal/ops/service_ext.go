@@ -33,10 +33,15 @@ func NewAuditLogService(repo AuditLogRepository, logger *zap.Logger) *AuditLogSe
 }
 
 // Log 异步式写一条审计（失败仅 warn 不阻塞业务）。
+//
+// 注（#124）：曾因 ops_audit_logs.target_type varchar(16) 容不下
+// 'maintenance_window'（18 字符）导致 INSERT 22001 在此被静默吞掉、审计留痕丢失；
+// 根因已由迁移 000035 放宽至 varchar(64) 修复，此处保留非阻塞语义。
 func (s *AuditLogService) Log(ctx context.Context, l *OpsAuditLog) {
 	if err := s.repo.Create(ctx, l); err != nil {
 		s.logger.Warn("ops audit log failed",
 			zap.String("op_type", l.OpType),
+			zap.String("target_type", l.TargetType),
 			zap.String("target_id", l.TargetID),
 			zap.Error(err))
 	}

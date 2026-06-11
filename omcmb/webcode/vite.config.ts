@@ -23,7 +23,8 @@ export default defineConfig(({ mode }) => {
     port: 3000,
     proxy: {
       '/api': {
-        target: 'http://localhost:8081',
+        // 后端代理目标（通过环境变量配置，冒烟测试等场景可指向其他端口）
+        target: env.VITE_API_PROXY_TARGET || 'http://localhost:8081',
         changeOrigin: true,
       },
       // 离线地图元数据代理（必须在 /tiles 前面，与 /tiles 同源）

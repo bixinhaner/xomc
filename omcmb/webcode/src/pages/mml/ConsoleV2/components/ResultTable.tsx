@@ -311,7 +311,7 @@ export default function ResultTable({
           style={{ marginTop: 80 }}
         />
       ) : (
-        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+        <Space orientation="vertical" size={12} style={{ width: '100%' }}>
           <Space wrap style={{ justifyContent: 'space-between', width: '100%' }}>
             <Segmented<StatusFilter>
               value={statusFilter}

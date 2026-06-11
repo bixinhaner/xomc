@@ -34,7 +34,7 @@ export function TransferTemplateCard({
         height: '100%',
       }}
     >
-      <Space direction="vertical" size={8} style={{ width: '100%' }}>
+      <Space orientation="vertical" size={8} style={{ width: '100%' }}>
         <Space wrap>
           <Text strong>{displayName}</Text>
           <Tag color={taskType.builtIn ? 'blue' : 'gold'}>{taskType.builtIn ? t('ufte.tag.builtIn') : t('ufte.tag.custom')}</Tag>

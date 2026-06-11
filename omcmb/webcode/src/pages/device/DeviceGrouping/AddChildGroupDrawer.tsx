@@ -53,7 +53,7 @@ export default function AddChildGroupDrawer({
       title={t('device.addChildGroup')}
       open={open}
       onClose={onClose}
-      width={520}
+      size={520}
       destroyOnHidden
       footer={
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>

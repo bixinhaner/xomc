@@ -103,7 +103,7 @@ export default function CommandHistoryPanel({
       {records.length === 0 ? (
         <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无执行记录" style={{ marginTop: 48 }} />
       ) : (
-        <Space direction="vertical" size={6} style={{ width: '100%' }}>
+        <Space orientation="vertical" size={6} style={{ width: '100%' }}>
           {records.map((r) => {
             const active = r.id === activeId;
             return (

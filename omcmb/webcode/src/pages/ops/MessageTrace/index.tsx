@@ -411,7 +411,7 @@ export default function MessageTrace() {
         title={drawerTask?.deviceSn}
         open={Boolean(drawerTask)}
         onClose={() => setDrawerTask(null)}
-        width={960}
+        size={960}
         destroyOnHidden
       >
         {drawerTask && (
@@ -495,7 +495,7 @@ function ExportProgressModal({ jobId, onClose, t }: ExportProgressModalProps) {
         <Typography.Paragraph>{t('trace.export.running')}</Typography.Paragraph>
       )}
       {job?.status === 'done' && (
-        <Space direction="vertical">
+        <Space orientation="vertical">
           <Typography.Paragraph type="success">
             {t('trace.export.done')} — {job.messageCount} {t('trace.column.messageCount')}
           </Typography.Paragraph>
@@ -538,7 +538,7 @@ function MessageDetail({ msg, t }: MessageDetailProps) {
   const payload = useMemo(() => prettyXML(rawPayload), [rawPayload]);
   const errorMsg = error instanceof Error ? error.message : null;
   return (
-    <Space direction="vertical" style={{ width: '100%' }} size="small">
+    <Space orientation="vertical" style={{ width: '100%' }} size="small">
       <div>
         <Tag color={DIRECTION_COLOR[msg.direction]}>
           {t(`trace.message.direction.${msg.direction}` as never)}

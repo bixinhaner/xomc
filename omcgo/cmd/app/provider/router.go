@@ -324,6 +324,9 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	v1.Use(admin.RequireAuthWithAPIKey(ad.jwtService, ad.apiKeySvc, ad.userRepo, ad.roleRepo, ad.tokenRevoker))
 	// v1.0：admin.RequireCarrier() 已删除（users.carrier 已移除，详见 docs/prd/system/users.md §11.11）
 	v1.Use(admin.AuditLogger(ad.auditRepo))
+	// #122：OperLogger 写 sys_oper_logs（管理面写操作的可分页运维视图，
+	// 与 audit_logs 合规链并存）。fire-and-forget，写失败仅 Warn 不阻塞请求。
+	v1.Use(admin.OperLogger(ad.logRepo, c.Logger.Named("oper-log")))
 
 	// Protected auth routes (no permission check)
 	v1.GET("/auth/me", ad.adminHandler.Me)
@@ -399,6 +402,11 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 
 	// ----- Provisioning routes → resource "config" -----
 	provisionHandler := provision.NewHandler(md.provisionRepo, md.provisionEngine)
+	// issue #126 item 10: 建任务前预检设备存在性，避免 device_id 合法但不存在
+	// 时落库孤儿任务（provisioning_tasks 对 device_id 无外键）。
+	if c.DeviceService != nil {
+		provisionHandler.SetDeviceChecker(c.DeviceService)
+	}
 	provisionHandler.RegisterRoutes(permGroup("config"))
 
 	// ----- Topology routes → resource "devices" -----

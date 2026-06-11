@@ -124,7 +124,7 @@ export default function IndicatorDrawer({ open, deviceType, indicator, enabled, 
     <Drawer
       title={indicator ? t('product.kpi.indicatorDetailFull', { id: indicator.id, name: indicator.cnName || indicator.name }) : t('product.kpi.indicatorDetail')}
       placement="right"
-      width={760}
+      size={760}
       open={open}
       onClose={onClose}
       destroyOnHidden

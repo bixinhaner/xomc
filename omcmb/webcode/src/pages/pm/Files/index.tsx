@@ -262,7 +262,7 @@ export default function PMFilesPage({ embedded }: Props) {
   return (
     <Card
       size="small"
-      bordered
+      variant="outlined"
       style={{ flex: 1, display: 'flex', flexDirection: 'column' }}
       styles={{ body: { display: 'flex', flexDirection: 'column', flex: 1 } }}
     >

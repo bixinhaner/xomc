@@ -1,6 +1,7 @@
 package acs
 
 import (
+	"sync/atomic"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -8,10 +9,22 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// DeviceEntry 包装 limiter 和最后访问时间，用于 TTL 清理
+// DeviceEntry 包装 limiter 和最后访问时间，用于 TTL 清理。
+// lastAccess 以 UnixNano 存于 atomic.Int64：entry 指针被所有 ACS 请求
+// goroutine 与后台 cleanup 协程共享，普通字段在 LRU 内部锁之外读写会产生 data race。
 type DeviceEntry struct {
 	limiter    *rate.Limiter
-	lastAccess time.Time
+	lastAccess atomic.Int64 // UnixNano
+}
+
+// touch 更新最后访问时间为当前时刻。
+func (e *DeviceEntry) touch() {
+	e.lastAccess.Store(time.Now().UnixNano())
+}
+
+// lastAccessTime 返回最后访问时间。
+func (e *DeviceEntry) lastAccessTime() time.Time {
+	return time.Unix(0, e.lastAccess.Load())
 }
 
 // DeviceRateLimiter 基于 token bucket 的设备级限流器。
@@ -43,7 +56,7 @@ func NewDeviceRateLimiter(perMinute, burst, maxDevices int, logger *zap.Logger) 
 		if logger != nil {
 			logger.Debug("rate limiter evicted device",
 				zap.String("device_sn", key),
-				zap.Time("last_access", value.lastAccess))
+				zap.Time("last_access", value.lastAccessTime()))
 		}
 	})
 
@@ -57,21 +70,26 @@ func NewDeviceRateLimiter(perMinute, burst, maxDevices int, logger *zap.Logger) 
 }
 
 // Allow 检查设备是否允许通过限流。
-// Get 自动将设备提升到 LRU 队首；新设备 Add 时容量满则 O(1) 淘汰队尾。
+// Get 自动将设备提升到 LRU 队首；新设备经 PeekOrAdd 原子插入（LoadOrStore 语义），
+// 两个 goroutine 同时遇到新设备时保证只保留一个 limiter，避免 Get-miss-then-Add
+// 的覆盖导致已消费 token 被丢弃（burst 泄漏）。容量满时 O(1) 淘汰队尾。
 func (rl *DeviceRateLimiter) Allow(deviceSN string) bool {
-
 	if entry, ok := rl.cache.Get(deviceSN); ok {
-		entry.lastAccess = time.Now()
+		entry.touch()
 		return entry.limiter.Allow()
-
 	}
-	//新设备
-	entry := &DeviceEntry{
-		limiter:    rate.NewLimiter(rl.limit, rl.burst),
-		lastAccess: time.Now(),
-	}
-	rl.cache.Add(deviceSN, entry)
 
+	// 新设备：PeekOrAdd 在 LRU 内部锁中完成 check-and-add，
+	// 若并发竞争中已有其他 goroutine 插入，则复用已存在的 entry。
+	entry := &DeviceEntry{limiter: rate.NewLimiter(rl.limit, rl.burst)}
+	entry.touch()
+	if previous, ok, _ := rl.cache.PeekOrAdd(deviceSN, entry); ok {
+		// 竞争失败：丢弃本地新建的 entry，使用已存在的；
+		// PeekOrAdd 不提升 recency，补一次 Get 维持 LRU 访问顺序。
+		previous.touch()
+		rl.cache.Get(deviceSN)
+		return previous.limiter.Allow()
+	}
 	return entry.limiter.Allow()
 }
 
@@ -112,7 +130,7 @@ func (rl *DeviceRateLimiter) cleanup(timeout time.Duration) {
 		if !ok {
 			continue
 		}
-		if now.Sub(entry.lastAccess) > timeout {
+		if now.Sub(entry.lastAccessTime()) > timeout {
 			rl.cache.Remove(key)
 			evicted++
 		} else {

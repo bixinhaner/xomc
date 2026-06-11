@@ -10,6 +10,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 )
 
@@ -89,7 +90,9 @@ func (s *IndicatorManagementService) GetGroupList(ctx context.Context, dt Device
 func (s *IndicatorManagementService) CreateGroup(ctx context.Context, req *CreateGroupRequest) (*IndicatorGroup, error) {
 	dt, err := ParseDeviceType(req.DeviceType)
 	if err != nil {
-		return nil, fmt.Errorf("parse device type: %w", err)
+		// 空值/非法 device_type → 400（而非裸 error 落 500）。
+		// REST/GNB 入口由 query/路由注入；indicatormg 入口靠 body 传入，此处统一兜底。
+		return nil, fmt.Errorf("parse device type: %w: %v", commonerrors.ErrInvalidInput, err)
 	}
 
 	id := generateGroupID()
@@ -429,32 +432,26 @@ func (s *IndicatorManagementService) UpdateCounterName(ctx context.Context, dt D
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+// buildIDMap builds the ID→formula map used by FormulaValidator to recognise
+// which tokens in a user formula are legal indicator/counter references.
+//
+// 历史 bug（#134）：原实现先 groupRepo.List 取分组再 GetIDsByGroupID 收集指标。
+// 但 indicator Loader 设计上只建 default 占位组、指标的 group_id 直接取 XML
+// groupId 从不回写组表 → 全新栈上组表恒空 → idMap 恒空 → 校验器误拒一切引用
+// 真实计数器（如 C000200015）的合法公式（400 Expression is invalid）。
+//
+// 修复：直接 ListAll 拉该 deviceType 表（perf_indicators_<enb/gnb/gsm>）下全部
+// 指标构建 idMap，绕开组表。平台维度由 dt.IndicatorTable() 物理分表保证正确：
+// ENB 公式只对照 ENB 指标表、GNB 只对照 GNB 表。不按 operator_code 过滤，确保
+// 任意运营商写入的自定义 KPI（K90000* 递归展开依赖）都在 map 里可见。
 func (s *IndicatorManagementService) buildIDMap(ctx context.Context, dt DeviceType) (map[string]string, error) {
-	groups, err := s.groupRepo.List(ctx, dt)
+	items, err := s.indicatorRepo.ListAll(ctx, IndicatorListFilter{DeviceType: string(dt)})
 	if err != nil {
 		return nil, err
 	}
 
-	var allIDs []string
-	for _, g := range groups {
-		ids, err := s.indicatorRepo.GetIDsByGroupID(ctx, dt, g.ID)
-		if err != nil {
-			return nil, err
-		}
-		allIDs = append(allIDs, ids...)
-	}
-
-	if len(allIDs) == 0 {
-		return map[string]string{}, nil
-	}
-
-	indicators, err := s.indicatorRepo.ListByIDs(ctx, dt, allIDs)
-	if err != nil {
-		return nil, err
-	}
-
-	idMap := make(map[string]string, len(indicators))
-	for _, ind := range indicators {
+	idMap := make(map[string]string, len(items))
+	for _, ind := range items {
 		arithmetic := ""
 		if ind.Arithmetic != nil {
 			arithmetic = *ind.Arithmetic

@@ -9,7 +9,7 @@ import {
   DeleteOutlined,
   ScanOutlined,
   RedoOutlined,
-  PlayCircleOutlined,
+  ReloadOutlined,
   MoreOutlined,
   CheckCircleOutlined,
   CloseCircleOutlined,
@@ -21,6 +21,15 @@ import DataTable from '@/components/DataTable';
 import type { DataTableColumn, BatchAction } from '@/components/DataTable';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useT } from '@/hooks/useT';
+import {
+  useProvisioningTasks,
+  useRetryProvisioningTask,
+} from '@core/hooks/api/useProvisioning';
+import {
+  mapTaskToExecuteView,
+  type ProvisioningExecuteView,
+  type ProvisioningTaskStatusCode,
+} from '@core/services/api/provisionApi';
 import styles from './index.module.css';
 import DetectDialog from './components/DetectDialog';
 import ExecuteDetailPanel from './components/ExecuteDetailPanel';
@@ -30,7 +39,6 @@ const { Text } = Typography;
 
 // Types
 type ExecuteType = '0' | '1'; // 0-auto, 1-manual
-type TaskStatus = '0' | '1' | '2' | '3' | '4'; // 0-success, 1-fail, 2-running, 3-pending, 4-skip
 
 interface Policy {
   policyId: string;
@@ -46,23 +54,6 @@ interface Policy {
   updateTime: string;
 }
 
-interface ExecuteTask {
-  taskId: string;
-  serialNumber: string;
-  productClass: string;
-  policyName: string;
-  executeType: ExecuteType;
-  startTime: string;
-  endTime: string;
-  executeProcedure: string;
-  status: TaskStatus;
-  failureReason: string;
-  policyId: string;
-  originalVersion: string;
-  targetVersion: string;
-  licenseFile: string;
-}
-
 // Product types
 const PRODUCT_TYPES = [
   { label: 'QAFA', value: 'QAFA' },
@@ -72,7 +63,10 @@ const PRODUCT_TYPES = [
   { label: 'CPE-B200', value: 'CPE-B200' },
 ];
 
-// Mock data - combined policies
+// 策略管理（自动开通策略）目前**没有后端端点**——provision 域后端（F09）只暴露
+// /api/v1/provisioning/tasks（任务列表/详情/创建/重试），无 policies 资源。
+// 因此策略列表仍为前端配置态（增删改/开关只改本地 state），等后端补 policies API 后再接线。
+// 见 issue #140：本次只接线「执行状态」任务列表为真实 API。
 const MOCK_POLICIES: Policy[] = [
   {
     policyId: 'pnp-1',
@@ -139,336 +133,48 @@ const MOCK_POLICIES: Policy[] = [
     createTime: '2026-03-18 09:30:00',
     updateTime: '2026-04-02 10:00:00',
   },
-  {
-    policyId: 'pnp-6',
-    policyName: 'CPE-B200手动升级策略',
-    productClass: 'CPE-B200',
-    executeType: '1',
-    selfStartEnable: '0',
-    upgradeEnable: '1',
-    targetVersion: ['V2.0.0'],
-    licenseEnable: '0',
-    selfConfigEnable: '0',
-    createTime: '2026-03-22 14:00:00',
-    updateTime: '2026-03-28 16:00:00',
-  },
-  {
-    policyId: 'pnp-7',
-    policyName: 'QAFA参数自配置策略',
-    productClass: 'QAFA',
-    executeType: '0',
-    selfStartEnable: '1',
-    upgradeEnable: '0',
-    targetVersion: [],
-    licenseEnable: '0',
-    selfConfigEnable: '1',
-    createTime: '2026-04-03 11:00:00',
-    updateTime: '2026-04-03 11:00:00',
-  },
-  {
-    policyId: 'pnp-8',
-    policyName: 'QAFB自动开通策略',
-    productClass: 'QAFB',
-    executeType: '0',
-    selfStartEnable: '1',
-    upgradeEnable: '1',
-    targetVersion: ['V2.3.0'],
-    licenseEnable: '1',
-    selfConfigEnable: '1',
-    createTime: '2026-04-05 08:30:00',
-    updateTime: '2026-04-06 09:00:00',
-  },
-  {
-    policyId: 'pnp-9',
-    policyName: 'CPE-A100 License更新策略',
-    productClass: 'CPE-A100',
-    executeType: '0',
-    selfStartEnable: '1',
-    upgradeEnable: '0',
-    targetVersion: [],
-    licenseEnable: '1',
-    selfConfigEnable: '0',
-    createTime: '2026-04-08 10:00:00',
-    updateTime: '2026-04-08 10:00:00',
-  },
-  {
-    policyId: 'pnp-10',
-    policyName: 'QAFC手动升级策略',
-    productClass: 'QAFC',
-    executeType: '1',
-    selfStartEnable: '0',
-    upgradeEnable: '1',
-    targetVersion: ['V3.1.0'],
-    licenseEnable: '0',
-    selfConfigEnable: '1',
-    createTime: '2026-04-10 13:00:00',
-    updateTime: '2026-04-10 13:00:00',
-  },
 ];
 
-// Mock data - combined tasks
-const MOCK_TASKS: ExecuteTask[] = [
-  {
-    taskId: 'task-1',
-    serialNumber: 'ENB00001',
-    productClass: 'QAFA',
-    policyName: 'QAFA自动开通策略',
-    executeType: '0',
-    startTime: '2026-04-07 10:00:00',
-    endTime: '2026-04-07 10:15:00',
-    executeProcedure: 'software_upgrade > license > self_config',
-    status: '0',
-    failureReason: '',
-    policyId: 'pnp-1',
-    originalVersion: 'V2.0.0',
-    targetVersion: 'V2.1.0',
-    licenseFile: 'license_ENB00001.dat',
-  },
-  {
-    taskId: 'task-2',
-    serialNumber: 'ENB00002',
-    productClass: 'QAFA',
-    policyName: 'QAFA自动开通策略',
-    executeType: '0',
-    startTime: '2026-04-07 10:00:00',
-    endTime: '2026-04-07 10:20:00',
-    executeProcedure: 'software_upgrade > license',
-    status: '1',
-    failureReason: 'license_download_failed',
-    policyId: 'pnp-1',
-    originalVersion: 'V2.0.0',
-    targetVersion: 'V2.1.0',
-    licenseFile: 'license_ENB00002.dat',
-  },
-  {
-    taskId: 'task-3',
-    serialNumber: 'ENB00003',
-    productClass: 'QAFB',
-    policyName: 'QAFB手动升级策略',
-    executeType: '1',
-    startTime: '',
-    endTime: '',
-    executeProcedure: 'waiting',
-    status: '3',
-    failureReason: '',
-    policyId: 'pnp-2',
-    originalVersion: 'V2.1.0',
-    targetVersion: 'V2.2.0',
-    licenseFile: '',
-  },
-  {
-    taskId: 'task-4',
-    serialNumber: 'ENB00004',
-    productClass: 'QAFA',
-    policyName: 'QAFA自动开通策略',
-    executeType: '0',
-    startTime: '2026-04-07 10:30:00',
-    endTime: '',
-    executeProcedure: 'software_upgrade_running',
-    status: '2',
-    failureReason: '',
-    policyId: 'pnp-1',
-    originalVersion: 'V2.0.0',
-    targetVersion: 'V2.1.0',
-    licenseFile: '',
-  },
-  {
-    taskId: 'task-5',
-    serialNumber: 'ENB00005',
-    productClass: 'QAFA',
-    policyName: 'QAFA自动开通策略',
-    executeType: '0',
-    startTime: '2026-04-07 09:00:00',
-    endTime: '2026-04-07 09:10:00',
-    executeProcedure: 'skipped_latest',
-    status: '4',
-    failureReason: '',
-    policyId: 'pnp-1',
-    originalVersion: 'V2.1.0',
-    targetVersion: 'V2.1.0',
-    licenseFile: '',
-  },
-  {
-    taskId: 'task-6',
-    serialNumber: 'CPE00001',
-    productClass: 'CPE-A100',
-    policyName: 'CPE自动开通策略',
-    executeType: '0',
-    startTime: '2026-04-07 10:00:00',
-    endTime: '2026-04-07 10:10:00',
-    executeProcedure: 'software_upgrade > self_config',
-    status: '0',
-    failureReason: '',
-    policyId: 'pnp-4',
-    originalVersion: 'V1.4.0',
-    targetVersion: 'V1.5.0',
-    licenseFile: '',
-  },
-  {
-    taskId: 'task-7',
-    serialNumber: 'CPE00002',
-    productClass: 'CPE-A100',
-    policyName: 'CPE自动开通策略',
-    executeType: '0',
-    startTime: '2026-04-07 10:05:00',
-    endTime: '',
-    executeProcedure: 'self_config_running',
-    status: '2',
-    failureReason: '',
-    policyId: 'pnp-4',
-    originalVersion: 'V1.5.0',
-    targetVersion: 'V1.5.0',
-    licenseFile: '',
-  },
-  {
-    taskId: 'task-8',
-    serialNumber: 'ENB00006',
-    productClass: 'QAFA',
-    policyName: 'License更新策略',
-    executeType: '0',
-    startTime: '2026-04-07 11:00:00',
-    endTime: '2026-04-07 11:08:00',
-    executeProcedure: 'license',
-    status: '0',
-    failureReason: '',
-    policyId: 'pnp-3',
-    originalVersion: '',
-    targetVersion: '',
-    licenseFile: 'license_QAFA_2026Q2.dat',
-  },
-  {
-    taskId: 'task-9',
-    serialNumber: 'ENB00007',
-    productClass: 'QAFB',
-    policyName: 'QAFB手动升级策略',
-    executeType: '1',
-    startTime: '',
-    endTime: '',
-    executeProcedure: 'waiting',
-    status: '3',
-    failureReason: '',
-    policyId: 'pnp-2',
-    originalVersion: 'V2.1.0',
-    targetVersion: 'V2.2.0',
-    licenseFile: '',
-  },
-  {
-    taskId: 'task-10',
-    serialNumber: 'ENB00008',
-    productClass: 'QAFA',
-    policyName: 'QAFA自动开通策略',
-    executeType: '0',
-    startTime: '2026-04-07 09:30:00',
-    endTime: '2026-04-07 09:45:00',
-    executeProcedure: 'software_upgrade > license > self_config',
-    status: '0',
-    failureReason: '',
-    policyId: 'pnp-1',
-    originalVersion: 'V2.0.0',
-    targetVersion: 'V2.1.0',
-    licenseFile: 'license_ENB00008.dat',
-  },
-  {
-    taskId: 'task-11',
-    serialNumber: 'CPE00003',
-    productClass: 'CPE-B200',
-    policyName: 'CPE自动开通策略',
-    executeType: '0',
-    startTime: '2026-04-07 08:30:00',
-    endTime: '2026-04-07 08:35:00',
-    executeProcedure: 'software_upgrade',
-    status: '1',
-    failureReason: 'license_download_failed',
-    policyId: 'pnp-4',
-    originalVersion: 'V1.3.0',
-    targetVersion: 'V1.5.0',
-    licenseFile: '',
-  },
-  {
-    taskId: 'task-12',
-    serialNumber: 'ENB00009',
-    productClass: 'QAFA',
-    policyName: 'License更新策略',
-    executeType: '0',
-    startTime: '2026-04-07 14:00:00',
-    endTime: '',
-    executeProcedure: 'license',
-    status: '2',
-    failureReason: '',
-    policyId: 'pnp-3',
-    originalVersion: '',
-    targetVersion: '',
-    licenseFile: 'license_QAFA_2026Q2_v2.dat',
-  },
-  {
-    taskId: 'task-13',
-    serialNumber: 'ENB00010',
-    productClass: 'QAFB',
-    policyName: 'QAFB手动升级策略',
-    executeType: '1',
-    startTime: '2026-04-07 13:00:00',
-    endTime: '2026-04-07 13:20:00',
-    executeProcedure: 'software_upgrade > self_config',
-    status: '0',
-    failureReason: '',
-    policyId: 'pnp-2',
-    originalVersion: 'V2.0.0',
-    targetVersion: 'V2.2.0',
-    licenseFile: '',
-  },
-  {
-    taskId: 'task-14',
-    serialNumber: 'CPE00004',
-    productClass: 'CPE-A100',
-    policyName: 'CPE自动开通策略',
-    executeType: '0',
-    startTime: '2026-04-07 07:50:00',
-    endTime: '2026-04-07 07:55:00',
-    executeProcedure: 'software_upgrade > self_config',
-    status: '4',
-    failureReason: '',
-    policyId: 'pnp-4',
-    originalVersion: 'V1.5.0',
-    targetVersion: 'V1.5.0',
-    licenseFile: '',
-  },
-  {
-    taskId: 'task-15',
-    serialNumber: 'ENB00011',
-    productClass: 'QAFA',
-    policyName: 'QAFA自动开通策略',
-    executeType: '0',
-    startTime: '2026-04-07 11:30:00',
-    endTime: '2026-04-07 11:50:00',
-    executeProcedure: 'software_upgrade > license > self_config',
-    status: '1',
-    failureReason: 'license_download_failed',
-    policyId: 'pnp-1',
-    originalVersion: 'V2.0.0',
-    targetVersion: 'V2.1.0',
-    licenseFile: 'license_ENB00011.dat',
-  },
-];
+const PAGE_SIZE = 10;
 
 export default function PlugAndPlay() {
   const t = useT();
   const navigate = useNavigate();
   const { message } = App.useApp();
 
-  // State
+  // Policy state (front-end config-only, no backend endpoint yet — see comment above)
   const [policies, setPolicies] = useState<Policy[]>(MOCK_POLICIES);
-  const [tasks, setTasks] = useState<ExecuteTask[]>(MOCK_TASKS);
 
   // Policy filter state
   const [policyProductClass, setPolicyProductClass] = useState<string>('');
   const [policySearchText, setPolicySearchText] = useState('');
 
-  // Task filter state
+  // Task filter state (执行状态 — real provisioning/tasks API)
   const [taskStatus, setTaskStatus] = useState<string>('');
   const [taskSearchText, setTaskSearchText] = useState('');
-  const [taskTab, setTaskTab] = useState<string>('0');
   const [taskPage, setTaskPage] = useState(1);
-  const [taskPageSize, setTaskPageSize] = useState(10);
+  const [taskPageSize, setTaskPageSize] = useState(PAGE_SIZE);
+
+  // Map UI status code → backend lifecycle filter. Only the terminal states map
+  // 1:1; the page's "running" bucket spans several backend states, so it is
+  // filtered client-side rather than passed to the API.
+  const backendStatusFilter = useMemo(() => {
+    if (taskStatus === '0') return 'completed';
+    if (taskStatus === '1') return 'failed';
+    return undefined;
+  }, [taskStatus]);
+
+  const {
+    data: taskData,
+    isLoading: tasksLoading,
+    refetch: refetchTasks,
+  } = useProvisioningTasks({
+    page: taskPage,
+    pageSize: taskPageSize,
+    status: backendStatusFilter,
+  });
+
+  const retryTaskMutation = useRetryProvisioningTask();
 
   // Dialog state
   const [detectDialogOpen, setDetectDialogOpen] = useState(false);
@@ -478,7 +184,9 @@ export default function PlugAndPlay() {
   const [batchRetryOpen, setBatchRetryOpen] = useState(false);
 
   // Status config
-  const STATUS_CONFIG = useMemo(() => ({
+  const STATUS_CONFIG = useMemo<
+    Record<ProvisioningTaskStatusCode, { label: string; color: string; icon: React.ReactNode }>
+  >(() => ({
     '0': { label: t('status.success'), color: 'success', icon: <CheckCircleOutlined /> },
     '1': { label: t('status.failed'), color: 'error', icon: <CloseCircleOutlined /> },
     '2': { label: t('status.running'), color: 'processing', icon: <LoadingOutlined /> },
@@ -486,25 +194,7 @@ export default function PlugAndPlay() {
     '4': { label: t('provision.skipped'), color: 'warning', icon: <ForwardOutlined /> },
   }), [t]);
 
-  // Translate execute procedure codes
-  const translateProcedure = useCallback((procedure: string | undefined | null) => {
-    if (!procedure || typeof procedure !== 'string') return '-';
-    const procedureMap: Record<string, string> = {
-      'software_upgrade': t('provision.softwareUpgrade'),
-      'license': t('provision.license'),
-      'self_config': t('provision.selfConfig'),
-      'software_upgrade_running': t('provision.softwareUpgradeRunning'),
-      'self_config_running': t('provision.selfConfigRunning'),
-      'waiting': t('provision.waitingExecute'),
-      'skipped_latest': t('provision.skippedLatestVersion'),
-    };
-    return procedure
-      .split(/ > |,/)
-      .map(step => procedureMap[step.trim()] || step)
-      .join(' > ');
-  }, [t]);
-
-  // Translate failure reason codes
+  // Translate failure reason codes (backend may send raw error strings)
   const translateFailureReason = useCallback((reason: string | undefined | null) => {
     if (!reason || typeof reason !== 'string') return '-';
     const reasonMap: Record<string, string> = {
@@ -513,7 +203,7 @@ export default function PlugAndPlay() {
     return reasonMap[reason] || reason;
   }, [t]);
 
-  // Handlers - Policy
+  // Handlers - Policy (local config state only — no backend policies API yet)
   const handlePolicyMenuClick = useCallback((key: string, record: Policy) => {
     switch (key) {
       case 'info':
@@ -541,25 +231,15 @@ export default function PlugAndPlay() {
     message.success(t('common.success'));
   }, [message, t]);
 
-  // Handlers - Task
-  const handleRetryTask = useCallback((record: ExecuteTask) => {
-    setTasks(prev => prev.map(item =>
-      item.taskId === record.taskId ? { ...item, status: '2', startTime: new Date().toISOString(), endTime: '' } : item
-    ));
-    message.success(t('common.success'));
-  }, [message, t]);
-
-  const handleStartTask = useCallback((record: ExecuteTask) => {
-    setTasks(prev => prev.map(item =>
-      item.taskId === record.taskId ? { ...item, status: '2', startTime: new Date().toISOString() } : item
-    ));
-    message.success(t('common.commandSent'));
-  }, [message, t]);
-
-  const handleDeleteTask = useCallback((record: ExecuteTask) => {
-    setTasks(prev => prev.filter(item => item.taskId !== record.taskId));
-    message.success(t('common.deleteSuccess'));
-  }, [message, t]);
+  // Handlers - Task (real API)
+  const handleRetryTask = useCallback(async (record: ProvisioningExecuteView) => {
+    try {
+      await retryTaskMutation.mutateAsync(record.taskId);
+      message.success(t('common.success'));
+    } catch {
+      message.error(t('common.operationFailed'));
+    }
+  }, [retryTaskMutation, message, t]);
 
   const handleAddPolicy = useCallback(() => {
     navigate('/device/plug-and-play/add');
@@ -569,6 +249,10 @@ export default function PlugAndPlay() {
     setDetectDialogOpen(false);
     message.success(t('provision.detectSuccess'));
   }, [message, t]);
+
+  const handleRefreshTasks = useCallback(() => {
+    void refetchTasks();
+  }, [refetchTasks]);
 
   // Policy columns
   const policyColumns: DataTableColumn<Policy>[] = useMemo(() => [
@@ -689,165 +373,102 @@ export default function PlugAndPlay() {
     },
   ], [t, handlePolicyMenuClick, handlePolicySwitch]);
 
-  // Task columns - dynamic based on taskTab
-  const taskColumns: DataTableColumn<ExecuteTask>[] = useMemo(() => {
-    const commonColumns: DataTableColumn<ExecuteTask>[] = [
-      {
-        key: 'actions',
-        title: '',
-        width: 100,
-        fixed: 'right',
-        render: (_, record) => {
-          const items: MenuProps['items'] = [
-            ['0', '1', '4'].includes(record.status) ? {
-              key: 'retry',
-              label: t('provision.retry'),
-              icon: <RedoOutlined />,
-              onClick: () => handleRetryTask(record),
-            } : null,
-            record.executeType === '1' && record.status === '3' ? {
-              key: 'execute',
-              label: t('common.execute'),
-              icon: <PlayCircleOutlined />,
-              onClick: () => handleStartTask(record),
-            } : null,
-            ['0', '1', '3', '4'].includes(record.status) ? {
-              key: 'delete',
-              label: t('common.delete'),
-              icon: <DeleteOutlined />,
-              danger: true,
-              onClick: () => handleDeleteTask(record),
-            } : null,
-          ].filter(Boolean) as NonNullable<MenuProps['items']>;
+  // Task columns — driven by real ProvisioningTask shape
+  const taskColumns: DataTableColumn<ProvisioningExecuteView>[] = useMemo(() => [
+    {
+      key: 'actions',
+      title: '',
+      width: 100,
+      fixed: 'right',
+      render: (_, record) => {
+        const items: MenuProps['items'] = [
+          // Backend only allows retrying failed tasks (handler.go Retry).
+          record.status === '1' ? {
+            key: 'retry',
+            label: t('provision.retry'),
+            icon: <RedoOutlined />,
+            onClick: () => { void handleRetryTask(record); },
+          } : null,
+        ].filter(Boolean) as NonNullable<MenuProps['items']>;
 
-          return (
-            <Space size={4}>
-              <Button type="link" size="small" onClick={() => setDetailTaskId(record.taskId)}>
-                {t('common.detail')}
-              </Button>
-              {items && items.length > 0 && (
-                <Dropdown menu={{ items }} trigger={['click']}>
-                  <Button type="text" size="small" icon={<MoreOutlined />} onClick={(e) => e.stopPropagation()} />
-                </Dropdown>
-              )}
-            </Space>
-          );
-        },
+        return (
+          <Space size={4}>
+            <Button type="link" size="small" onClick={() => setDetailTaskId(record.taskId)}>
+              {t('common.detail')}
+            </Button>
+            {items && items.length > 0 && (
+              <Dropdown menu={{ items }} trigger={['click']}>
+                <Button type="text" size="small" icon={<MoreOutlined />} onClick={(e) => e.stopPropagation()} />
+              </Dropdown>
+            )}
+          </Space>
+        );
       },
-      {
-        key: 'serialNumber',
-        title: t('provision.deviceCode'),
-        dataIndex: 'serialNumber',
-        width: 140,
-        mono: true,
+    },
+    {
+      key: 'deviceId',
+      title: t('provision.deviceId'),
+      dataIndex: 'deviceId',
+      width: 280,
+      mono: true,
+      ellipsis: true,
+    },
+    {
+      key: 'status',
+      title: t('table.status'),
+      dataIndex: 'status',
+      width: 110,
+      render: (raw: unknown) => {
+        const val = raw as ProvisioningTaskStatusCode;
+        const cfg = STATUS_CONFIG[val] ?? STATUS_CONFIG['2'];
+        return <Tag color={cfg.color} icon={cfg.icon}>{cfg.label}</Tag>;
       },
-      {
-        key: 'productClass',
-        title: t('provision.productClass'),
-        dataIndex: 'productClass',
-        width: 100,
+    },
+    {
+      key: 'executeProcedure',
+      title: t('provision.stepProgress'),
+      dataIndex: 'executeProcedure',
+      width: 120,
+      render: (val: unknown) => (val as string) || '-',
+    },
+    {
+      key: 'startTime',
+      title: t('provision.startTime'),
+      dataIndex: 'startTime',
+      width: 170,
+      render: (val: unknown) => {
+        const s = val as string;
+        return s ? new Date(s).toLocaleString('zh-CN') : '-';
       },
-      {
-        key: 'policyName',
-        title: t('provision.policyName'),
-        dataIndex: 'policyName',
-        width: 160,
-        ellipsis: true,
+    },
+    {
+      key: 'endTime',
+      title: t('provision.endTime'),
+      dataIndex: 'endTime',
+      width: 170,
+      render: (val: unknown) => {
+        const s = val as string;
+        return s ? new Date(s).toLocaleString('zh-CN') : '-';
       },
-      {
-        key: 'executeType',
-        title: t('provision.executeType'),
-        dataIndex: 'executeType',
-        width: 100,
-        render: (val) => (
-          <Tag color={val === '0' ? 'green' : 'blue'}>
-            {val === '0' ? t('provision.autoExecute') : t('provision.manualExecute')}
-          </Tag>
-        ),
-      },
-      {
-        key: 'startTime',
-        title: t('provision.startTime'),
-        dataIndex: 'startTime',
-        width: 150,
-      },
-      {
-        key: 'endTime',
-        title: t('provision.endTime'),
-        dataIndex: 'endTime',
-        width: 150,
-      },
-    ];
+    },
+    {
+      key: 'retryCount',
+      title: t('provision.retry'),
+      dataIndex: 'retryCount',
+      width: 90,
+      render: (_: unknown, record) => `${record.retryCount}/${record.maxRetries}`,
+    },
+    {
+      key: 'failureReason',
+      title: t('provision.failureReason'),
+      dataIndex: 'failureReason',
+      width: 200,
+      ellipsis: true,
+      render: (val: unknown) => translateFailureReason(val as string),
+    },
+  ], [t, STATUS_CONFIG, translateFailureReason, handleRetryTask]);
 
-    // Tab-specific columns
-    const tabSpecificColumns: DataTableColumn<ExecuteTask>[] = (() => {
-      switch (taskTab) {
-        case '0': // All Tasks - show progress
-          return [{
-            key: 'executeProcedure',
-            title: t('provision.progress'),
-            dataIndex: 'executeProcedure',
-            width: 200,
-            ellipsis: true,
-            render: (val: unknown) => translateProcedure(val as string),
-          }];
-        case '1': // Software Upgrade - show original/target version
-          return [
-            {
-              key: 'originalVersion',
-              title: t('provision.originalVersion'),
-              dataIndex: 'originalVersion',
-              width: 120,
-              render: (val: unknown) => (val as string) || '-',
-            },
-            {
-              key: 'targetVersion',
-              title: t('provision.targetVersion'),
-              dataIndex: 'targetVersion',
-              width: 120,
-              render: (val: unknown) => (val as string) || '-',
-            },
-          ];
-        case '2': // License - show license file
-          return [{
-            key: 'licenseFile',
-            title: t('provision.licenseFile'),
-            dataIndex: 'licenseFile',
-            width: 200,
-            ellipsis: true,
-            render: (val: unknown) => (val as string) || '-',
-          }];
-        default: // Self Config - no extra columns
-          return [];
-      }
-    })();
-
-    const tailColumns: DataTableColumn<ExecuteTask>[] = [
-      {
-        key: 'status',
-        title: t('table.status'),
-        dataIndex: 'status',
-        width: 90,
-        render: (raw: unknown) => {
-          const val = raw as TaskStatus;
-          const cfg = STATUS_CONFIG[val];
-          return <Tag color={cfg.color} icon={cfg.icon}>{cfg.label}</Tag>;
-        },
-      },
-      {
-        key: 'failureReason',
-        title: t('provision.failureReason'),
-        dataIndex: 'failureReason',
-        width: 200,
-        ellipsis: true,
-        render: (val: unknown) => translateFailureReason(val as string),
-      },
-    ];
-
-    return [...commonColumns, ...tabSpecificColumns, ...tailColumns];
-  }, [t, taskTab, STATUS_CONFIG, translateProcedure, translateFailureReason, handleRetryTask, handleStartTask, handleDeleteTask]);
-
-  // Filtered policies
+  // Filtered policies (local config state)
   const filteredPolicies = useMemo(() => {
     let result = policies;
     if (policyProductClass) {
@@ -864,36 +485,32 @@ export default function PlugAndPlay() {
     return result;
   }, [policies, policyProductClass, policySearchText]);
 
-  // Filtered tasks
+  // Tasks from real API → view model. Status '2'/'3'/'4' are filtered
+  // client-side (the API only maps the terminal completed/failed states).
+  const allTasks = useMemo<ProvisioningExecuteView[]>(
+    () => (taskData?.items ?? []).map(mapTaskToExecuteView),
+    [taskData]
+  );
+
   const filteredTasks = useMemo(() => {
-    let result = tasks;
-    // Filter by tab (using symbolic codes)
-    if (taskTab === '1') {
-      result = result.filter(t => t.executeProcedure.includes('software_upgrade'));
-    } else if (taskTab === '2') {
-      result = result.filter(t => t.executeProcedure.includes('license'));
-    } else if (taskTab === '3') {
-      result = result.filter(t => t.executeProcedure.includes('self_config'));
+    let result = allTasks;
+    if (taskStatus && taskStatus !== '0' && taskStatus !== '1') {
+      // running / pending / skipped — backend has no exact filter, narrow locally
+      result = result.filter(item => item.status === taskStatus);
     }
-    // Filter by status
-    if (taskStatus) {
-      result = result.filter(t => t.status === taskStatus);
-    }
-    // Filter by search text
     if (taskSearchText) {
       const search = taskSearchText.toLowerCase();
-      result = result.filter(t =>
-        t.serialNumber.toLowerCase().includes(search) ||
-        t.policyName.toLowerCase().includes(search)
-      );
+      result = result.filter(item => item.deviceId.toLowerCase().includes(search));
     }
     return result;
-  }, [tasks, taskTab, taskStatus, taskSearchText]);
+  }, [allTasks, taskStatus, taskSearchText]);
 
-  const successCount = useMemo(() => filteredTasks.filter(t => t.status === '0').length, [filteredTasks]);
-  const failCount = useMemo(() => filteredTasks.filter(t => t.status === '1').length, [filteredTasks]);
+  const successCount = useMemo(() => allTasks.filter(item => item.status === '0').length, [allTasks]);
+  const failCount = useMemo(() => allTasks.filter(item => item.status === '1').length, [allTasks]);
 
-  // Batch actions for task table (like RecycleBin)
+  const totalTasks = taskData?.total ?? filteredTasks.length;
+
+  // Batch actions for task table
   const taskBatchActions: BatchAction[] = useMemo(() => [
     {
       key: 'batch-retry',
@@ -906,6 +523,11 @@ export default function PlugAndPlay() {
     },
   ], [t]);
 
+  const detailTask = useMemo(
+    () => filteredTasks.find(item => item.taskId === detailTaskId),
+    [filteredTasks, detailTaskId]
+  );
+
   return (
     <ListPageLayout
       title={t('provision.plugAndPlay')}
@@ -916,7 +538,7 @@ export default function PlugAndPlay() {
       }
     >
       <div className="plug-and-play-container" style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {/* Policy List Section */}
+        {/* Policy List Section (front-end config state — no backend policies API yet, see issue #140) */}
         <Card
           size="small"
           styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column' } }}
@@ -961,33 +583,17 @@ export default function PlugAndPlay() {
           </div>
         </Card>
 
-        {/* Execute Status Section */}
+        {/* Execute Status Section (real provisioning/tasks API) */}
         <Card
           size="small"
           styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column' } }}
           style={{ flex: 1, minHeight: 0 }}
         >
-        {/* 执行状态标题 + 计数 + 任务类型筛选 */}
+        {/* 执行状态标题 + 成功/失败计数 */}
         <div className={styles.cardHeader}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
             <Space size={16}>
               <Text className={styles.cardHeaderTitle}>{t('provision.executeStatus')}</Text>
-              <div className={styles.pillTabs}>
-                {[
-                  { key: '0', label: t('provision.allTasks') },
-                  { key: '1', label: t('provision.softwareUpgrade') },
-                  { key: '2', label: t('provision.license') },
-                  { key: '3', label: t('provision.selfConfig') },
-                ].map(item => (
-                  <span
-                    key={item.key}
-                    className={`${styles.pillTab} ${taskTab === item.key ? styles.pillTabActive : styles.pillTabInactive}`}
-                    onClick={() => { setTaskTab(item.key); setTaskPage(1); }}
-                  >
-                    {item.label}
-                  </span>
-                ))}
-              </div>
             </Space>
             <Space size={12}>
               <div className={`${styles.statsBadge} ${styles.statsSuccess}`}>
@@ -1004,22 +610,23 @@ export default function PlugAndPlay() {
 
         {/* Task table with filters in toolbar */}
         <div style={{ flex: 1, minHeight: 0 }}>
-          <DataTable<ExecuteTask>
+          <DataTable<ProvisioningExecuteView>
             tableId="task-table"
             columns={taskColumns}
             dataSource={filteredTasks}
             rowKey="taskId"
-            total={filteredTasks.length}
+            loading={tasksLoading}
+            total={totalTasks}
             currentPage={taskPage}
             pageSize={taskPageSize}
             onPageChange={(p, s) => { setTaskPage(p); setTaskPageSize(s); }}
             defaultDensity="default"
             showRowNumber
             rowNumberTitle={t('table.rowNumber')}
-            selectable={taskTab === '0'}
+            selectable
             selectedRowKeys={selectedTaskIds}
             onSelectionChange={(keys) => setSelectedTaskIds(keys as string[])}
-            batchActions={taskTab === '0' ? taskBatchActions : undefined}
+            batchActions={taskBatchActions}
             scroll={{ x: 'max-content', y: 220 }}
             extraToolbarRight={
               <Space>
@@ -1028,23 +635,24 @@ export default function PlugAndPlay() {
                   value={taskStatus || undefined}
                   onChange={(value) => { setTaskStatus(value || ''); setTaskPage(1); }}
                   allowClear
-                  style={{ width: 100 }}
+                  style={{ width: 110 }}
                   options={[
                     { label: t('status.success'), value: '0' },
                     { label: t('status.failed'), value: '1' },
                     { label: t('status.running'), value: '2' },
-                    { label: t('provision.pending'), value: '3' },
-                    { label: t('provision.skipped'), value: '4' },
                   ]}
                 />
                 <Input
-                  placeholder={t('provision.searchPlaceholder')}
+                  placeholder={t('provision.searchDeviceCode')}
                   prefix={<SearchOutlined />}
                   value={taskSearchText}
                   onChange={(e) => { setTaskSearchText(e.target.value); setTaskPage(1); }}
-                  style={{ width: 180 }}
+                  style={{ width: 200 }}
                   allowClear
                 />
+                <Button icon={<ReloadOutlined />} onClick={handleRefreshTasks}>
+                  {t('common.refresh')}
+                </Button>
               </Space>
             }
           />
@@ -1064,7 +672,13 @@ export default function PlugAndPlay() {
       {detailTaskId && (
         <ExecuteDetailPanel
           taskId={detailTaskId}
-          taskData={tasks.find(t => t.taskId === detailTaskId)}
+          taskData={detailTask ? {
+            status: detailTask.status,
+            executeProcedure: detailTask.executeProcedure,
+            failureReason: detailTask.failureReason,
+            startTime: detailTask.startTime,
+            endTime: detailTask.endTime,
+          } : undefined}
           onClose={() => setDetailTaskId(null)}
         />
       )}
@@ -1074,11 +688,22 @@ export default function PlugAndPlay() {
         open={batchRetryOpen}
         taskCount={selectedTaskIds.length}
         onClose={() => setBatchRetryOpen(false)}
-        onConfirm={(includeSuccess) => {
-          console.log('Batch retry:', selectedTaskIds, 'includeSuccess:', includeSuccess);
+        onConfirm={async (_includeSuccess) => {
+          // Backend only allows retrying failed tasks; retry each selected failed task.
+          const failedIds = filteredTasks
+            .filter(item => selectedTaskIds.includes(item.taskId) && item.status === '1')
+            .map(item => item.taskId);
+          const results = await Promise.allSettled(
+            failedIds.map(id => retryTaskMutation.mutateAsync(id))
+          );
+          const ok = results.filter(r => r.status === 'fulfilled').length;
           setBatchRetryOpen(false);
           setSelectedTaskIds([]);
-          message.success(t('common.success'));
+          if (ok > 0) {
+            message.success(t('provision.addedDevices', { count: ok }));
+          } else {
+            message.warning(t('provision.cannotRetryHint'));
+          }
         }}
       />
     </ListPageLayout>

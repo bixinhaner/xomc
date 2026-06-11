@@ -194,6 +194,7 @@ func initAdminModule(c *Container) error {
 	// Log module
 	logRepo := admin.NewPgLogRepository(c.PgPool)
 	logHandler := admin.NewLogHandler(logRepo)
+	adminHandler.SetLogRepository(logRepo) // #122：登录成功/失败写 sys_login_logs
 
 	// API Endpoint module
 	apiEndpointRepo := admin.NewPgApiEndpointRepository(c.PgPool)
@@ -208,6 +209,7 @@ func initAdminModule(c *Container) error {
 		sysConfigHandler: sysConfigHandler,
 		uiAssetHandler:   uiAssetHandler,
 		logHandler:       logHandler,
+		logRepo:          logRepo, // #122：OperLogger 中间件写 sys_oper_logs
 		pubKeyHandler:    pubKeyHandler,
 		jwtService:       jwtService,
 		tokenRevoker:     tokenRevoker,
@@ -246,6 +248,7 @@ type adminHandlerDeps struct {
 	sysConfigHandler *admin.SysConfigHandler
 	uiAssetHandler   *admin.UIAssetHandler
 	logHandler       *admin.LogHandler
+	logRepo          admin.LogRepository // #122：OperLogger 中间件写 sys_oper_logs
 	pubKeyHandler    *loginpwd.PublicKeyHandler
 	jwtService       *admin.JWTService
 	tokenRevoker     *admin.TokenRevoker

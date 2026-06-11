@@ -80,7 +80,7 @@ const AlarmDetail: React.FC<AlarmDetailProps> = ({ alarm, open, onClose }) => {
 
   if (!resolvedAlarm) {
     return (
-      <Drawer title={t('alarm.detail')} open={open} onClose={onClose} width={600}>
+      <Drawer title={t('alarm.detail')} open={open} onClose={onClose} size={600}>
         <div style={{ padding: '40px 0', textAlign: 'center', color: '#8c8c8c' }}>
           {t('common.noData')}
         </div>
@@ -262,7 +262,7 @@ const AlarmDetail: React.FC<AlarmDetailProps> = ({ alarm, open, onClose }) => {
             </Descriptions.Item>
             <Descriptions.Item label={t('alarm.additionalInfo')}>
               {additionalInformation || additionalInfoEntries.length > 0 ? (
-                <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                <Space orientation="vertical" size={4} style={{ width: '100%' }}>
                   {additionalInformation ? <Paragraph style={{ margin: 0 }}>{additionalInformation}</Paragraph> : null}
                   {additionalInfoEntries.map(([key, value]) => (
                     <div key={key} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>

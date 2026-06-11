@@ -178,7 +178,7 @@ export default function CommandManagement() {
         title={selectedRecord ? `${t('ops.commandDetail')} — ${selectedRecord.commandText}` : t('ops.commandDetail')}
         open={detailVisible}
         onClose={() => setDetailVisible(false)}
-        width={680}
+        size={680}
       >
         {selectedRecord && detailData && (
           <div>

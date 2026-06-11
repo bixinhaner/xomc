@@ -1165,14 +1165,29 @@ func initNorthboundModule(c *Container) error {
 	logger := c.Logger.Named("northbound")
 
 	pushEngine := push.NewEngine(c.Cfg.Northbound.PushTargets, logger)
+
+	// Outbox 投递模式：构造 PG outbox repo 并注入 Engine（必须在 Subscribe 之前——
+	// Subscribe 按 outboxRepo 是否存在选择 EnqueueEvent / 直发 handleEvent）。
+	outboxRepo := push.NewPgOutboxRepository(c.PgPool, logger)
+	pushEngine.SetOutboxRepo(outboxRepo)
+
 	if err := pushEngine.Subscribe(c.EventBus); err != nil {
 		logger.Warn("subscribe push engine", zap.Error(err))
 	}
 	c.GS.Register("push-engine", 1, func(ctx context.Context) error { return pushEngine.Close() })
 
+	// Outbox 后台投递 worker：轮询 northbound_outbox 待投递条目，按 target 重试，
+	// 耗尽重试落 dead 状态，供死信队列端点（GET/POST /push/deadletter*）消费。
+	outboxWorker := push.NewOutboxWorker(pushEngine, outboxRepo, logger)
+	outboxWorker.Start()
+	c.GS.Register("northbound-outbox-worker", 1, func(ctx context.Context) error { return outboxWorker.Close() })
+
 	syncService := nbsync.NewService(c.DeviceRepo, c.AlarmPgStore, c.PMCounterRepo, c.PMKPIRepo, c.ParamRepo, logger)
 	nbService := northbound.NewNorthboundService(c.AlarmPgStore, c.PMCounterRepo, c.PMKPIRepo, c.ParamRepo, pushEngine, syncService, logger)
 	nbRouter := northbound.NewRouter(nbService)
+	// 死信队列端点（GET /push/deadletter、POST /push/deadletter/:id/replay）
+	// 依赖 outbox repo；不注入则恒 503 "outbox not configured"。
+	nbRouter.SetOutboxRepo(outboxRepo)
 
 	// 主备 OSS 服务器配置 + 切换（system/config 北向设置页消费）。
 	// 配置面与数据面分离：nbService 管数据导出 / 推送 / 同步；ServerService 管
@@ -1263,7 +1278,12 @@ func initMiscModules(c *Container) error {
 	if c.SyncSvc != nil {
 		gpvBatcher = c.SyncSvc
 	}
-	c.miscDeps.syncHandler = config.NewSyncHandler(c.TaskSvc, gpvBatcher, logger)
+	// 设备存在性预检：push/pull 入队前按 SN 查 device 表，不存在返回 404，避免孤儿任务（issue #126 第3项）。
+	var syncDeviceChk config.DeviceExistenceChecker
+	if c.DeviceRepo != nil {
+		syncDeviceChk = &syncDeviceChecker{repo: c.DeviceRepo}
+	}
+	c.miscDeps.syncHandler = config.NewSyncHandler(c.TaskSvc, gpvBatcher, syncDeviceChk, logger)
 
 	// File Manager module
 	fileRepo := filemanager.NewPgFileRepository(c.PgPool)
@@ -1666,6 +1686,12 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 			// 也注册自己的 TaskSourceOps 聚合器。CompletionRouter.Register 是 mutex-safe，
 			// 允许 bridge.Subscribe 之后再追加 handler — 启动序无 race（pre-traffic 阶段）。
 			c.miscDeps.completionRouter = task.NewCompletionRouter(logger)
+			// #122：source 无关的终态观察者，把每个终态任务写入 sys_task_logs。
+			// 必须在 per-source handler 之前用 RegisterObserver 注册，覆盖全部 source。
+			if c.adminHandlerDeps != nil && c.adminHandlerDeps.logRepo != nil {
+				c.miscDeps.completionRouter.RegisterObserver(
+					newTaskLogObserver(c.adminHandlerDeps.logRepo, logger))
+			}
 			// 顺序关键：Sequencer 必须先注册——某行完成时它先把下一行 device_task 入队，
 			// 聚合器随后判定"无在途"才不会在顺序链中途误判完成（见 finalizeIfComplete 注释）。
 			c.miscDeps.completionRouter.Register(task.TaskSourceMML, sequencer) // Sprint B Q-V3-3
@@ -1685,6 +1711,11 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 			}
 		} else {
 			// 单进程部署（单测/无 NATS）下退化为同进程回调。
+			// #122：任务日志观察者同样以回调形式兜底，覆盖单进程终态。
+			if c.adminHandlerDeps != nil && c.adminHandlerDeps.logRepo != nil {
+				c.miscDeps.taskSvc.AddCompletionCallback(
+					newTaskLogObserver(c.adminHandlerDeps.logRepo, logger))
+			}
 			// 顺序同上：Sequencer 先注册，聚合器后注册（见 finalizeIfComplete 注释）。
 			c.miscDeps.taskSvc.AddCompletionCallback(sequencer) // Sprint B Q-V3-3
 			c.miscDeps.taskSvc.AddCompletionCallback(aggregator)
@@ -2064,6 +2095,20 @@ type miscDeps struct {
 	// T-0137 / M1: TR069 报文跟踪 handler（app 侧仅管 CRUD，capture flusher 在 ACS 侧）
 	traceHandler *trace.Handler
 	traceService *trace.Service
+}
+
+// syncDeviceChecker adapts device.DeviceReader to config.DeviceExistenceChecker.
+// GetBySerialNumber 返回 (nil,nil) 表示设备不存在；据此映射 push/pull 入队前的 404 预检。
+type syncDeviceChecker struct {
+	repo device.DeviceReader
+}
+
+func (a *syncDeviceChecker) ExistsBySerialNumber(ctx context.Context, sn string) (bool, error) {
+	dev, err := a.repo.GetBySerialNumber(ctx, sn)
+	if err != nil {
+		return false, fmt.Errorf("lookup device %s: %w", sn, err)
+	}
+	return dev != nil, nil
 }
 
 // taskDeviceLookup adapts device.DeviceReader to task.DeviceLookup.

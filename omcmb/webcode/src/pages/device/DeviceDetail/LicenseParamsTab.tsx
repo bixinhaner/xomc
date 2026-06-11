@@ -182,7 +182,7 @@ export default function LicenseParamsTab({ deviceId }: LicenseParamsTabProps) {
 
   return (
     <Card
-      bordered={false}
+      variant="borderless"
       title={t('device.licenseParam.title')}
       extra={
         <Button

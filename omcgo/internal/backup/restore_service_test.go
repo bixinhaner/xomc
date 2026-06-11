@@ -100,10 +100,16 @@ func (f *fakeEnqueuer) CreateTask(_ context.Context, req *devtask.CreateTaskRequ
 
 type fakeStater struct {
 	exists bool
+	// statErr（可选）覆盖 !exists 时返回的默认 NoSuchKey 错误，用于模拟其它
+	// MinIO 错误码（如 InvalidBucketName）。仅在 exists==false 时生效。
+	statErr error
 }
 
 func (f *fakeStater) StatObject(_ context.Context, _ string, _ string, _ minio.StatObjectOptions) (minio.ObjectInfo, error) {
 	if !f.exists {
+		if f.statErr != nil {
+			return minio.ObjectInfo{}, f.statErr
+		}
 		return minio.ObjectInfo{}, minio.ErrorResponse{Code: "NoSuchKey"}
 	}
 	return minio.ObjectInfo{Size: 1024}, nil
@@ -111,17 +117,29 @@ func (f *fakeStater) StatObject(_ context.Context, _ string, _ string, _ minio.S
 
 // fakeObjReader satisfies RestoreObjectReader: returns fixed bytes (or an error)
 // so tests can assert the Download MD5 computed from the streamed content.
+//
+// readErr（可选）模拟 minio-go 的真实行为：GetObject 不立即报错，缺失对象的错误
+// 在首次 Read 时才暴露 —— 此时 GetObjectStream 成功返回 reader，但 io.Copy 失败。
 type fakeObjReader struct {
 	content []byte
 	err     error
+	readErr error
 }
 
 func (f *fakeObjReader) GetObjectStream(_ context.Context, _, _ string) (io.ReadCloser, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
+	if f.readErr != nil {
+		return io.NopCloser(errReader{err: f.readErr}), nil
+	}
 	return io.NopCloser(bytes.NewReader(f.content)), nil
 }
+
+// errReader 总在 Read 时返回固定错误，模拟 minio-go 对象不存在时 Read 才暴露的错误。
+type errReader struct{ err error }
+
+func (r errReader) Read(_ []byte) (int, error) { return 0, r.err }
 
 // --- tests ---
 
@@ -250,6 +268,155 @@ func TestCreate_objectNotFound(t *testing.T) {
 	}, "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, commonerrors.ErrNotFound))
+}
+
+// TestCreate_statInvalidBucketName 复现 issue #145-B：CanonicalRestoreBucket
+// ="config_backup" 含下划线违反 S3 桶命名，minio-go 在 StatObject 阶段返
+// InvalidBucketName（"The specified bucket is not valid."）。修复前
+// translateMinIONotFound 漏识别 → 落 default 500；修复后翻译为 ErrNotFound →
+// handler 映射 404，且不外泄裸 SDK 错误消息。
+func TestCreate_statInvalidBucketName(t *testing.T) {
+	svc, repo, enq := newSvc(t, []string{"SN001"}, false)
+	// 覆盖默认 NoSuchKey，模拟桶名非法时 minio-go 的客户端校验拒绝。
+	svc.stater = &fakeStater{exists: false, statErr: minio.ErrorResponse{
+		Code:    "InvalidBucketName",
+		Message: "The specified bucket is not valid.",
+	}}
+
+	_, err := svc.Create(context.Background(), &CreateRestoreRequest{
+		Bucket:          CanonicalRestoreBucket,
+		ObjectPath:      "backup/missing.xml.gz",
+		TargetDeviceSNs: []string{"SN001"},
+	}, "")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, commonerrors.ErrNotFound),
+		"InvalidBucketName 必须翻译为 ErrNotFound → 404，而非 default 500")
+	assert.NotContains(t, err.Error(), "bucket is not valid",
+		"不外泄裸 SDK 错误消息")
+	assert.Empty(t, repo.created, "NotFound 应在建 restore_task 行之前返回，不留孤儿行")
+	assert.Empty(t, enq.requests, "源桶非法时不应下发任何 Download")
+}
+
+// newSvcNilStater 构造 stater 未注入的 service（复现 #125-backup 触发条件：
+// stater 为 nil → 跳过 StatObject 存在性预检 → 缺失对象落到 computeSourceMD5）。
+func newSvcNilStater(t *testing.T, knownSNs []string) (*RestoreService, *mockRestoreRepo, *fakeEnqueuer) {
+	t.Helper()
+	known := map[string]bool{}
+	for _, sn := range knownSNs {
+		known[sn] = true
+	}
+	repo := &mockRestoreRepo{}
+	enq := &fakeEnqueuer{}
+	devRepo := &fakeDeviceLookup{knownSNs: known}
+	// stater 显式传 nil → 预检被跳过，由 computeSourceMD5 的 GetObject 兜底翻译。
+	svc := NewRestoreService(repo, devRepo, enq, nil, NewRestoreMetrics(nil), zap.NewNop())
+	return svc, repo, enq
+}
+
+// TestCreate_staterNil_objectNotFound_onStreamOpen 复现 #125-backup：stater 未注入时
+// 跳过存在性预检，缺失对象在 GetObjectStream 阶段暴露 MinIO NoSuchKey →
+// computeSourceMD5 兜底翻译为 ErrNotFound（handler 映射 404，而非 default 500）。
+func TestCreate_staterNil_objectNotFound_onStreamOpen(t *testing.T) {
+	svc, repo, enq := newSvcNilStater(t, []string{"SN001"})
+	svc.SetObjectReader(&fakeObjReader{err: minio.ErrorResponse{Code: "NoSuchKey"}})
+
+	_, err := svc.Create(context.Background(), &CreateRestoreRequest{
+		Bucket:          CanonicalRestoreBucket,
+		ObjectPath:      "backup/missing.xml.gz",
+		TargetDeviceSNs: []string{"SN001"},
+	}, "")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, commonerrors.ErrNotFound),
+		"stater 未注入时缺失源对象必须翻译为 ErrNotFound → 404")
+	assert.Empty(t, repo.created, "NotFound 应在建 restore_task 行之前返回，不留孤儿行")
+	assert.Empty(t, enq.requests, "缺失源对象不应下发任何 Download")
+}
+
+// TestCreate_staterNil_objectNotFound_onRead 复现 minio-go 真实行为：GetObject
+// 不立即报错，缺失对象的 NoSuchKey 在首次 Read 时才暴露 → io.Copy 失败 →
+// computeSourceMD5 兜底翻译为 ErrNotFound。
+func TestCreate_staterNil_objectNotFound_onRead(t *testing.T) {
+	svc, repo, _ := newSvcNilStater(t, []string{"SN001"})
+	svc.SetObjectReader(&fakeObjReader{readErr: minio.ErrorResponse{Code: "NoSuchKey"}})
+
+	_, err := svc.Create(context.Background(), &CreateRestoreRequest{
+		Bucket:          CanonicalRestoreBucket,
+		ObjectPath:      "backup/missing.xml.gz",
+		TargetDeviceSNs: []string{"SN001"},
+	}, "")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, commonerrors.ErrNotFound),
+		"Read 阶段暴露的 NoSuchKey 也必须翻译为 ErrNotFound → 404")
+	assert.Empty(t, repo.created)
+}
+
+// TestCreate_staterNil_noSuchBucket_translated 验证 NoSuchBucket 同样翻译为 404。
+func TestCreate_staterNil_noSuchBucket_translated(t *testing.T) {
+	svc, _, _ := newSvcNilStater(t, []string{"SN001"})
+	svc.SetObjectReader(&fakeObjReader{err: minio.ErrorResponse{Code: "NoSuchBucket"}})
+
+	_, err := svc.Create(context.Background(), &CreateRestoreRequest{
+		Bucket:          CanonicalRestoreBucket,
+		ObjectPath:      "backup/missing.xml.gz",
+		TargetDeviceSNs: []string{"SN001"},
+	}, "")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, commonerrors.ErrNotFound))
+}
+
+// TestCreate_staterNil_genericMinIOError_notTranslated 验证非 NotFound 的 MinIO
+// 错误（如 AccessDenied）不被误翻译为 404 —— 仍走 default 500 路径（internal error）。
+func TestCreate_staterNil_genericMinIOError_notTranslated(t *testing.T) {
+	svc, _, _ := newSvcNilStater(t, []string{"SN001"})
+	svc.SetObjectReader(&fakeObjReader{err: minio.ErrorResponse{Code: "AccessDenied"}})
+
+	_, err := svc.Create(context.Background(), &CreateRestoreRequest{
+		Bucket:          CanonicalRestoreBucket,
+		ObjectPath:      "backup/forbidden.xml.gz",
+		TargetDeviceSNs: []string{"SN001"},
+	}, "")
+	require.Error(t, err)
+	assert.False(t, errors.Is(err, commonerrors.ErrNotFound),
+		"非 NotFound 的 MinIO 错误不得被误翻译为 404")
+}
+
+// TestTranslateMinIONotFound_table 直接覆盖错误翻译函数：NoSuchKey/NoSuchBucket
+// 及客户端命名校验拒绝 InvalidBucketName/XMinioInvalidObjectName → ErrNotFound 且
+// 不外泄裸 SDK 细节；其它错误 → nil（调用方按内部错误处理）。
+// InvalidBucketName 用例对应 issue #145-B：CanonicalRestoreBucket="config_backup"
+// 含下划线违反 S3 桶命名，StatObject 返 InvalidBucketName，须翻译为 404 而非 500。
+func TestTranslateMinIONotFound_table(t *testing.T) {
+	cases := []struct {
+		name    string
+		err     error
+		wantNF  bool
+		wantNil bool
+	}{
+		{"nil error", nil, false, true},
+		{"NoSuchKey", minio.ErrorResponse{Code: "NoSuchKey"}, true, false},
+		{"NoSuchBucket", minio.ErrorResponse{Code: "NoSuchBucket"}, true, false},
+		{"InvalidBucketName", minio.ErrorResponse{Code: "InvalidBucketName", Message: "The specified bucket is not valid."}, true, false},
+		{"XMinioInvalidObjectName", minio.ErrorResponse{Code: "XMinioInvalidObjectName"}, true, false},
+		{"AccessDenied", minio.ErrorResponse{Code: "AccessDenied"}, false, true},
+		{"plain error", errors.New("connection refused"), false, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := translateMinIONotFound("config_backup", "backup/x.xml", tc.err)
+			if tc.wantNil {
+				assert.Nil(t, got)
+				return
+			}
+			require.NotNil(t, got)
+			assert.Equal(t, tc.wantNF, errors.Is(got, commonerrors.ErrNotFound))
+			// 不外泄裸 SDK 错误码 / 消息：只保留 bucket/object 路径上下文。
+			assert.NotContains(t, got.Error(), "NoSuchKey")
+			assert.NotContains(t, got.Error(), "NoSuchBucket")
+			assert.NotContains(t, got.Error(), "InvalidBucketName")
+			assert.NotContains(t, got.Error(), "bucket is not valid")
+			assert.Contains(t, got.Error(), "config_backup/backup/x.xml")
+		})
+	}
 }
 
 func TestCreate_nilRequest(t *testing.T) {

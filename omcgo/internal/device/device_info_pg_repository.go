@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/omcgo/omcgo/global"
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/storage"
 )
@@ -145,7 +146,9 @@ func (r *PgDeviceInfoRepository) UpdateManualFields(ctx context.Context, deviceI
 		return fmt.Errorf("update device_info manual fields: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("device_info not found for device %s", deviceID)
+		// 设备不存在或尚无 device_info 行（首次 sync 之前）——返回 sentinel
+		// ErrNotFound,由 handler 经 HTTPStatusFromError 映射 404（issue #145 A 项）。
+		return fmt.Errorf("device_info not found for device %s: %w", deviceID, commonerrors.ErrNotFound)
 	}
 	return nil
 }

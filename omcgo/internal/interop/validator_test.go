@@ -2,12 +2,15 @@ package interop
 
 import (
 	"context"
+	"net/http"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 )
 
@@ -144,4 +147,22 @@ func TestValidateDevice_NoRegistry(t *testing.T) {
 	_, err := v.ValidateDevice(context.Background(), dev.ID, dev.Carrier, dev.Technology)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "param registry not configured")
+}
+
+// TestValidateDevice_DeviceNotFound is the #125 regression: deviceRepo.GetByID
+// returns (nil, nil) for an unknown-but-well-formed UUID (production
+// PgDeviceRepository folds pgx.ErrNoRows to nil,nil). ValidateDevice must
+// short-circuit with an ErrNotFound-wrapped error so the handler yields 404,
+// rather than falling into resolveExpectedParams and surfacing the misleading
+// "device productClass missing" as a 500.
+func TestValidateDevice_DeviceNotFound(t *testing.T) {
+	v := NewDataModelValidator(nil, nil, newMockParamRepo(), newNilDeviceRepo(), zap.NewNop())
+
+	_, err := v.ValidateDevice(context.Background(), uuid.New(), model.CarrierCMCC, model.TechLTE)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, commonerrors.ErrNotFound,
+		"missing device must wrap ErrNotFound so handler maps 404")
+	assert.Equal(t, http.StatusNotFound, commonerrors.HTTPStatusFromError(err))
+	assert.NotContains(t, err.Error(), "productClass missing",
+		"must not surface the misleading downstream error")
 }

@@ -126,7 +126,7 @@ export default function DeviceFilesDrawer({ open, device, onClose }: Props) {
       title={device ? t('pm.deviceFilesTitle', { sn: device.deviceSn }) : ''}
       open={open}
       onClose={onClose}
-      width={920}
+      size={920}
       destroyOnHidden
       extra={
         <Button

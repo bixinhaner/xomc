@@ -978,6 +978,70 @@ func scanDeviceRow(rows pgx.Rows) (*model.Device, error) {
 	return &d, nil
 }
 
+// scanGeoDeviceRow 扫描一行 geo 查询结果（ListGeo / SearchDevices 共用，列顺序
+// 与两处 SELECT 严格一致）。
+//
+// #117: devices.latitude / longitude 列可空（double precision 无 NOT NULL），
+// SearchDevices 不带 IS NOT NULL 过滤，命中 NULL 坐标设备时直接扫进
+// float64 会报 "cannot scan NULL into *float64" 导致整个搜索 500。
+// 统一扫进 *float64 再判空赋值：NULL 坐标回零值，响应字段类型保持不变。
+func scanGeoDeviceRow(row scannable) (GeoDevice, error) {
+	var d GeoDevice
+	var lifecycle model.DeviceLifecycle
+	var isOnline bool
+	var latitude, longitude *float64 // #117: 坐标列可空
+	var groupID *uuid.UUID
+	var groupName, address, deviceType *string
+	var alarmCount int
+	var ipAddress, mac, pci, deviceName string // COALESCE 保证非 NULL
+
+	err := row.Scan(
+		&d.ID, &d.SerialNumber, &d.Name,
+		&lifecycle, &isOnline, // T-0162: 替代 &d.Status
+		&latitude, &longitude, &groupID, &groupName,
+		&address, &alarmCount, &deviceType,
+		&ipAddress, &mac, &pci, &deviceName,
+	)
+	if err != nil {
+		return GeoDevice{}, err
+	}
+	// T-0162: 派生 Status 给老消费方
+	d.Status = DeriveStatusFromLifecycle(lifecycle, isOnline)
+
+	if latitude != nil {
+		d.Latitude = *latitude
+	}
+	if longitude != nil {
+		d.Longitude = *longitude
+	}
+	d.GroupID = groupID
+	if groupName != nil {
+		d.GroupName = *groupName
+	}
+	if address != nil {
+		d.Address = *address
+	}
+	if deviceType != nil {
+		d.Type = *deviceType
+	}
+	d.AlarmCount = alarmCount
+
+	// 搜索 4 个字段：空字符串转为 nil
+	if ipAddress != "" {
+		d.IPAddress = &ipAddress
+	}
+	if mac != "" {
+		d.MAC = &mac
+	}
+	if pci != "" {
+		d.PCI = &pci
+	}
+	if deviceName != "" {
+		d.DeviceName = &deviceName
+	}
+	return d, nil
+}
+
 // ListGeo returns devices with geographic coordinates for map display.
 func (r *PgDeviceRepository) ListGeo(ctx context.Context, filter GeoDeviceFilter) ([]GeoDevice, int64, error) {
 	// T-0162: SELECT 改用 lifecycle_state + is_online，scan 后派生 Status 给老
@@ -1102,53 +1166,10 @@ func (r *PgDeviceRepository) ListGeo(ctx context.Context, filter GeoDeviceFilter
 
 	var devices []GeoDevice
 	for rows.Next() {
-		var d GeoDevice
-		var lifecycle model.DeviceLifecycle
-		var isOnline bool
-		var groupID *uuid.UUID
-		var groupName, address, deviceType *string
-		var alarmCount int
-		var ipAddress, mac, pci, deviceName string // COALESCE 保证非 NULL
-
-		err := rows.Scan(
-			&d.ID, &d.SerialNumber, &d.Name,
-			&lifecycle, &isOnline, // T-0162: 替代 &d.Status
-			&d.Latitude, &d.Longitude, &groupID, &groupName,
-			&address, &alarmCount, &deviceType,
-			&ipAddress, &mac, &pci, &deviceName, // 新增 4 个字段
-		)
+		d, err := scanGeoDeviceRow(rows)
 		if err != nil {
 			return nil, 0, fmt.Errorf("scan geo device: %w", err)
 		}
-		// T-0162: 派生 Status 给老消费方
-		d.Status = DeriveStatusFromLifecycle(lifecycle, isOnline)
-
-		d.GroupID = groupID
-		if groupName != nil {
-			d.GroupName = *groupName
-		}
-		if address != nil {
-			d.Address = *address
-		}
-		if deviceType != nil {
-			d.Type = *deviceType
-		}
-		d.AlarmCount = alarmCount
-
-		// 新增 4 个字段：空字符串转为 nil
-		if ipAddress != "" {
-			d.IPAddress = &ipAddress
-		}
-		if mac != "" {
-			d.MAC = &mac
-		}
-		if pci != "" {
-			d.PCI = &pci
-		}
-		if deviceName != "" {
-			d.DeviceName = &deviceName
-		}
-
 		devices = append(devices, d)
 	}
 
@@ -1291,53 +1312,12 @@ func (r *PgDeviceRepository) SearchDevices(ctx context.Context, keyword string, 
 
 	var devices []GeoDevice
 	for rows.Next() {
-		var d GeoDevice
-		var groupID *uuid.UUID
-		var groupName, address, deviceType *string
-		var alarmCount int
-		var ipAddress, mac, pci, deviceName string // COALESCE 保证非 NULL
-
-		var lifecycle model.DeviceLifecycle
-		var isOnline bool
-		err := rows.Scan(
-			&d.ID, &d.SerialNumber, &d.Name,
-			&lifecycle, &isOnline, // T-0162: 替代 &d.Status
-			&d.Latitude, &d.Longitude, &groupID, &groupName,
-			&address, &alarmCount, &deviceType,
-			&ipAddress, &mac, &pci, &deviceName, // 新增 4 个字段
-		)
+		// #117: SearchDevices 无 latitude/longitude IS NOT NULL 过滤（搜索按
+		// 关键字命中，不要求设备已有坐标），扫描必须容忍 NULL 坐标。
+		d, err := scanGeoDeviceRow(rows)
 		if err != nil {
 			return nil, fmt.Errorf("scan search result: %w", err)
 		}
-		// T-0162: 派生 Status 给老消费方
-		d.Status = DeriveStatusFromLifecycle(lifecycle, isOnline)
-
-		d.GroupID = groupID
-		if groupName != nil {
-			d.GroupName = *groupName
-		}
-		if address != nil {
-			d.Address = *address
-		}
-		if deviceType != nil {
-			d.Type = *deviceType
-		}
-		d.AlarmCount = alarmCount
-
-		// 新增 4 个字段：空字符串转为 nil
-		if ipAddress != "" {
-			d.IPAddress = &ipAddress
-		}
-		if mac != "" {
-			d.MAC = &mac
-		}
-		if pci != "" {
-			d.PCI = &pci
-		}
-		if deviceName != "" {
-			d.DeviceName = &deviceName
-		}
-
 		devices = append(devices, d)
 	}
 

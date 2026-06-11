@@ -245,12 +245,14 @@ func (h *FileHandler) DeleteFile(c *gin.Context) {
 // 守门链(顺序敏感,任一失败即 400/409):
 //  1. 大小:file.Size <= MaxUploadXMLSize (1 MiB)
 //  2. 内容:validateUploadXML 根元素 = <alarmModel>
-//  3. 名称:neType 属性必填;validateUploadFilename(neType+".xml") 白名单正则
+//  3. 名称:neType 属性必填;长度 ≤ MaxNeTypeLen(ne_type 列 varchar(16),#123);
+//     validateUploadFilename(neType+".xml") 白名单正则
 //  4. 路径:目标路径经 pathContainedIn 二次验证不逃逸
 //  5. 重复 + force 判定(见上)
 //
 // 写入:[备份旧文件 →] tmp → rename → sidecar(仅新建)→ destructive 全量重载(删孤儿)
-// → RefreshCache。后两步失败只 Warn 不致命(文件已落盘)。
+// → RefreshCache。重载失败 → 回滚落盘文件 + sidecar 并返 500(#123,不留"文件在盘上
+// 但 DB 0 行"的半成品);孤儿清理 / RefreshCache 失败只 Warn 不致命。
 func (h *FileHandler) UploadXML(c *gin.Context) {
 	fh, err := c.FormFile("file")
 	if err != nil {
@@ -302,6 +304,17 @@ func (h *FileHandler) UploadXML(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest,
 			fmt.Errorf("alarmModel XML 缺少 neType 属性,无法确定名称 [code=%d]",
 				global.ErrCodeAlarmUploadInvalidName))
+		return
+	}
+	// 校验 3.1: neType 长度 ≤ MaxNeTypeLen(=ne_type 列 varchar(16))。不前置拒绝的话,
+	// Loader 重载该文件事务必失败,形成"201 假成功但 0 行入库"的静默失败(#123)。
+	if err := validateUploadNeType(neType); err != nil {
+		h.logger.Info("audit: alarm upload rejected (neType too long)",
+			zap.String("audit_action", "alarm.upload.rejected_ne_type_too_long"),
+			zap.String("ne_type", neType))
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			fmt.Errorf("neType「%s」超长:长度不能超过 %d 字符(数据库 ne_type 列为 varchar(%d)):%w [code=%d]",
+				neType, MaxNeTypeLen, MaxNeTypeLen, err, global.ErrCodeAlarmUploadInvalidName))
 		return
 	}
 	base := neType + ".xml"
@@ -422,20 +435,39 @@ func (h *FileHandler) UploadXML(c *gin.Context) {
 	}
 
 	// 3. 导入 = 写文件 → destructive 全量重载(删孤儿) → RefreshCache,顺序完成。
-	// 任一后续步骤失败只 Warn 不致命(文件已落盘,DB 最多落后一拍)。
+	// 重载失败必须让上传请求失败并回滚落盘文件 + sidecar(不留半成品),否则形成
+	// "201 假成功但 0 行入库"的静默失败(#123);仅孤儿清理 / RefreshCache 失败 Warn 不致命。
 	startedAt := time.Now()
-	reloadOK := true
 	if h.reloader != nil {
 		if err := h.reloader.ReloadOne(c.Request.Context(), LoaderName); err != nil {
-			reloadOK = false
-			h.logger.Warn("audit: alarm upload reload failed (file written, DB not refreshed)",
+			// 回滚落盘状态:覆盖场景还原 .bak 备份(rename 原子覆盖回原位);
+			// 新建场景删除已写 XML 与 sidecar 标记。
+			if overwriting {
+				if rbErr := os.Rename(backupPath, targetPath); rbErr != nil {
+					h.logger.Error("rollback backup rename after reload failure failed; host state inconsistent",
+						zap.String("backup_path", backupPath), zap.String("target_path", targetPath), zap.Error(rbErr))
+				}
+			} else {
+				if rmErr := os.Remove(targetPath); rmErr != nil && !errors.Is(rmErr, fs.ErrNotExist) {
+					h.logger.Error("rollback uploaded xml after reload failure failed; host state inconsistent",
+						zap.String("target_path", targetPath), zap.Error(rmErr))
+				}
+				if rmErr := os.Remove(targetPath + CustomMarkerSuffix); rmErr != nil && !errors.Is(rmErr, fs.ErrNotExist) {
+					h.logger.Error("rollback sidecar marker after reload failure failed",
+						zap.String("sidecar", filepath.Base(targetPath)+CustomMarkerSuffix), zap.Error(rmErr))
+				}
+			}
+			h.logger.Error("audit: alarm upload reload failed; uploaded file rolled back",
 				zap.String("audit_action", "alarm.upload.reload_failed"),
-				zap.String("loaded_from", loadedFrom), zap.Error(err))
+				zap.String("loaded_from", loadedFrom), zap.Bool("overwritten", overwriting), zap.Error(err))
+			commonerrors.AbortWithError(c, http.StatusInternalServerError,
+				fmt.Errorf("重载告警定义失败,已回滚上传文件(neType=%s): %w", neType, err))
+			return
 		}
 	}
 
 	var orphansDeleted int64
-	if reloadOK && h.service != nil {
+	if h.service != nil {
 		n, err := h.service.DeleteOrphansSince(c.Request.Context(), startedAt)
 		if err != nil {
 			h.logger.Warn("audit: alarm upload orphan cleanup failed (reload ok, orphans kept)",
@@ -459,7 +491,6 @@ func (h *FileHandler) UploadXML(c *gin.Context) {
 		zap.Int("body_size", len(body)),
 		zap.Bool("overwritten", overwriting),
 		zap.String("backup", backupName),
-		zap.Bool("reload_ok", reloadOK),
 		zap.Int64("orphans_deleted", orphansDeleted))
 
 	response.OKWithStatus(c, http.StatusCreated, gin.H{
@@ -469,7 +500,7 @@ func (h *FileHandler) UploadXML(c *gin.Context) {
 		"ne_type":         neType,
 		"overwritten":     overwriting,
 		"backup":          backupName,
-		"reloaded":        reloadOK,
+		"reloaded":        true, // 重载失败已在上方 500 返回,走到这里必为 true(字段保留兼容前端)
 		"orphans_deleted": orphansDeleted,
 	})
 }

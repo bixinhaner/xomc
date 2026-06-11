@@ -80,7 +80,7 @@ export default function DetailDrawer({ taskId, onClose }: DetailDrawerProps) {
   return (
     <Drawer
       title={t('mrTask.detail.title')}
-      width={760}
+      size={760}
       open={Boolean(taskId)}
       onClose={onClose}
       destroyOnHidden

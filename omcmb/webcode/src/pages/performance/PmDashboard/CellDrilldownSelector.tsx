@@ -67,7 +67,7 @@ export default function CellDrilldownSelector({
           description={intl.formatMessage({ id: 'perf.drilldown.noCells' })}
         />
       ) : (
-        <Space direction="vertical" size={4} style={{ width: '100%' }}>
+        <Space orientation="vertical" size={4} style={{ width: '100%' }}>
           <Checkbox
             checked={allChecked}
             indeterminate={indeterminate}
@@ -104,7 +104,7 @@ export default function CellDrilldownSelector({
   });
 
   return (
-    <Space direction="vertical" size="small" style={{ width: '100%' }}>
+    <Space orientation="vertical" size="small" style={{ width: '100%' }}>
       <Alert type="info" showIcon message={intl.formatMessage({ id: 'perf.drilldown.hint' })} />
       <Collapse items={items} />
     </Space>

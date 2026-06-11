@@ -68,7 +68,7 @@ export default function FileManagementPage() {
       <Tabs
         activeKey={activeKey}
         onChange={handleTabChange}
-        destroyInactiveTabPane
+        destroyOnHidden
         tabBarStyle={{ marginBottom: 16 }}
         // fromUFTE 时只显示当前 tab —— 用户是从某个具体任务类型（升级 / 配置恢复 /
         // license 升级）的"打开 XX 文件管理"按钮跳过来的，其它 tab 露出反而会

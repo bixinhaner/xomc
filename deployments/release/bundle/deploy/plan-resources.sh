@@ -173,14 +173,14 @@ log "  CPU 空闲预算  : ${C_G}${C_B}${IDLE_CPU} 核${C_0}  = ${HOST_CPU} − 
 #   app          768    1536        10           非设备量驱动，最先让出预算
 #   acs         1024    2048        15           TR-069 最热堆；1M 走横向多副本
 #   worker      1024    2048        25           PM/MR 解析最吃内存；1M 走横向
-#   postgres    5120   16384        25           须容 max_connections=200(180池+余)
+#   postgres    7168   16384        25           须容 max_connections=300(180池+exporter+余,与 main #131 对齐)
 #   redis       3072    8192        15           appendonly，限额需≥1.5×maxmemory
 #   nats         512    2048         5
 #   minio       1024    2048         5
 #   web          512     512         0           静态+反代，固定
 # 监控栈（固定块，不纵向伸缩，但计入预算）：~4224 MiB
 COMP_NAMES=(app acs worker postgres redis nats minio web)
-COMP_FLOOR=(768 1024 1024 5120 3072 512 1024 512)
+COMP_FLOOR=(768 1024 1024 7168 3072 512 1024 512)
 COMP_CEIL=(1536 2048 2048 16384 8192 2048 2048 512)
 COMP_WEIGHT=(10 15 25 25 15 5 5 0)
 
@@ -252,8 +252,9 @@ APP_GOMAXPROCS="$(awk -v c="$CPU_app" 'BEGIN{printf "%d", (c<1)?1:int(c)}')"
 ACS_GOMAXPROCS="$(awk -v c="$CPU_acs" 'BEGIN{printf "%d", int(c)}')"
 WORKER_GOMAXPROCS="$(awk -v c="$CPU_worker" 'BEGIN{printf "%d", int(c)}')"
 
-# Postgres：max_connections 须覆盖 Go 端连接池总和 180（app 60+40 / acs 30 / worker 25+25）+ 余量
-PG_MAXCONN=200
+# Postgres：max_connections 须覆盖 Go 端连接池总和 180（app 60+40 / acs 30 / worker 25+25）
+# + exporter + 手动 psql + 余量；与 main #131 的发布默认对齐取 300。
+PG_MAXCONN=300
 PG_SHARED_BUFFERS=$(mul_pct "$PG_MEM" 25)          # 25%（留 OS page cache 给 Timescale 解压）
 PG_EFFECTIVE_CACHE=$(mul_pct "$PG_MEM" 70)         # 70% 规划器提示
 PG_WORK_MEM=$([ "$PG_MEM" -ge 8192 ] && echo 16 || { [ "$PG_MEM" -ge 6144 ] && echo 8 || echo 4; })

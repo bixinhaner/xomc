@@ -59,7 +59,7 @@ export default function WizardPageLayout({
         }}
       >
         <Steps
-          direction="vertical"
+          orientation="vertical"
           current={currentStep}
           size="small"
           items={steps.map((step) => ({

@@ -605,19 +605,23 @@ type ExecuteGroupRequest struct {
 //
 // 失败语义：group 不存在或下无命令 → error；devices 为空 → error。
 func (s *Service) ExecuteGroup(ctx context.Context, req ExecuteGroupRequest) (*MMLTask, error) {
+	// 全零 UUID 是合法 UUID 格式但绝不对应任何真实 group —— 等同「group 不存在」，
+	// 翻 404 而非误导性的「group_id required」（参数其实已由 URL path 提供）。
 	if req.GroupID == uuid.Nil {
-		return nil, fmt.Errorf("group_id required")
+		return nil, fmt.Errorf("group %s not found: %w", req.GroupID, commonerrors.ErrNotFound)
 	}
 	if len(req.DeviceSNs) == 0 {
-		return nil, fmt.Errorf("device_sns must be non-empty")
+		return nil, fmt.Errorf("device_sns must be non-empty: %w", commonerrors.ErrInvalidInput)
 	}
 
 	cmds, err := s.cmdRepo.ListByGroupID(ctx, req.GroupID)
 	if err != nil {
 		return nil, fmt.Errorf("list commands by group %s: %w", req.GroupID, err)
 	}
+	// group 不存在或下无任何命令 —— Service 无独立 group 仓储,二者同归「group 不可执行」,
+	// 翻 404 而非裸 500。真实 group 必带命令(catalog 字典/admin 建组语义)。
 	if len(cmds) == 0 {
-		return nil, fmt.Errorf("group %s has no commands", req.GroupID)
+		return nil, fmt.Errorf("group %s not found or has no commands: %w", req.GroupID, commonerrors.ErrNotFound)
 	}
 
 	// 过滤 operation_type（如指定）

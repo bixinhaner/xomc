@@ -12,7 +12,7 @@ export default function Downloads() {
           image={<DownloadOutlined style={{ fontSize: 64, color: 'var(--color-primary-300)' }} />}
           imageStyle={{ height: 80 }}
           description={
-            <Space direction="vertical" align="center" size={12}>
+            <Space orientation="vertical" align="center" size={12}>
               <Title level={4} style={{ marginBottom: 0 }}>
                 运维下载子系统实施中
               </Title>

@@ -24,10 +24,21 @@ vi.mock('@core/hooks/api/useIndicatorsLibrary', () => {
 });
 
 import MetricPickerModal from './MetricPickerModal';
+import { IntlProvider } from 'react-intl';
+import { zhCN } from '@core/i18n';
+
+// 组件内用 useIntl 取文案，测试渲染必须套 IntlProvider（真实 zh-CN 语料）。
+function wrapIntl(node: React.ReactElement) {
+  return (
+    <IntlProvider locale="zh-CN" defaultLocale="zh-CN" messages={zhCN}>
+      {node}
+    </IntlProvider>
+  );
+}
 
 function renderModal(props: Partial<React.ComponentProps<typeof MetricPickerModal>> = {}) {
   return render(
-    <MetricPickerModal open onClose={() => {}} onConfirm={() => {}} {...props} />,
+    wrapIntl(<MetricPickerModal open onClose={() => {}} onConfirm={() => {}} {...props} />),
   );
 }
 
@@ -55,15 +66,15 @@ describe('MetricPickerModal 制式锁定', () => {
   // 这是首版单测（每次全新挂载）验不出、被运行栈 playwright 抓出的盲区。
   it('锁定态：关闭后以新制式重开，取数按最新 initialDeviceType 切换（修组件常驻不重挂载）', () => {
     const { rerender } = render(
-      <MetricPickerModal open onClose={() => {}} onConfirm={() => {}} lockDeviceType initialDeviceType="ENB" />,
+      wrapIntl(<MetricPickerModal open onClose={() => {}} onConfirm={() => {}} lockDeviceType initialDeviceType="ENB" />),
     );
     expect(useIndicatorListSpy.mock.calls.at(-1)?.[0]).toBe('ENB');
     // 关闭（不卸载组件）→ 换制式 → 重开
     rerender(
-      <MetricPickerModal open={false} onClose={() => {}} onConfirm={() => {}} lockDeviceType initialDeviceType="GNB" />,
+      wrapIntl(<MetricPickerModal open={false} onClose={() => {}} onConfirm={() => {}} lockDeviceType initialDeviceType="GNB" />),
     );
     rerender(
-      <MetricPickerModal open onClose={() => {}} onConfirm={() => {}} lockDeviceType initialDeviceType="GNB" />,
+      wrapIntl(<MetricPickerModal open onClose={() => {}} onConfirm={() => {}} lockDeviceType initialDeviceType="GNB" />),
     );
     expect(useIndicatorListSpy.mock.calls.at(-1)?.[0]).toBe('GNB');
   });

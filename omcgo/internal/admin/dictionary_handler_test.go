@@ -1,8 +1,10 @@
 package admin
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -54,7 +56,9 @@ func (r *mockDictRepository) Delete(ctx context.Context, id int64) error {
 			return nil
 		}
 	}
-	return commonerrors.NewBusinessError(7002, "dictionary not found", nil)
+	// 镜像 PgDictionaryRepository.Delete:不存在记录返 sentinel ErrNotFound,
+	// 以便 handler 经 HTTPStatusFromError 映射 404(issue #145 D)。
+	return commonerrors.ErrNotFound
 }
 
 func (r *mockDictRepository) List(ctx context.Context) ([]Dictionary, error) {
@@ -71,16 +75,23 @@ func (r *mockDictRepository) GetByID(ctx context.Context, id int64) (*Dictionary
 			return dict, nil
 		}
 	}
-	return nil, commonerrors.NewBusinessError(7002, "dictionary not found", nil)
+	// 镜像 PgDictionaryRepository.GetByID:不存在返 sentinel ErrNotFound。
+	// UpdateDictionary 先 GetByID,经 %w 包装后仍被 HTTPStatusFromError 识别为 404。
+	return nil, commonerrors.ErrNotFound
 }
 
 type mockDictDetailRepository struct {
 	details []DictionaryDetail
+	// notFound 中的 id 让 Delete/GetByID 返回 sentinel ErrNotFound,
+	// 镜像 PgDictionaryDetailRepository 对不存在记录的行为(issue #145 D)。
+	// 默认空 → 保持「永远命中」的旧行为,不影响既有用例。
+	notFound map[int64]bool
 }
 
 func newMockDictDetailRepository() *mockDictDetailRepository {
 	return &mockDictDetailRepository{
-		details: make([]DictionaryDetail, 0),
+		details:  make([]DictionaryDetail, 0),
+		notFound: make(map[int64]bool),
 	}
 }
 
@@ -98,10 +109,16 @@ func (r *mockDictDetailRepository) Update(ctx context.Context, detail *Dictionar
 }
 
 func (r *mockDictDetailRepository) Delete(ctx context.Context, id int64) error {
+	if r.notFound[id] {
+		return commonerrors.ErrNotFound
+	}
 	return nil
 }
 
 func (r *mockDictDetailRepository) GetByID(ctx context.Context, id int64) (*DictionaryDetail, error) {
+	if r.notFound[id] {
+		return nil, commonerrors.ErrNotFound
+	}
 	return &DictionaryDetail{ID: id}, nil
 }
 
@@ -231,6 +248,103 @@ func TestBatchGetDicts(t *testing.T) {
 			}
 		})
 	}
+}
+
+// =============================================================
+// 错误映射回归 — issue #145 D:不存在记录的 DELETE/PUT 应返 404 而非 500
+// =============================================================
+//
+// 修复前 dictionary_handler.go 对 service error 硬编码
+// AbortWithError(c, http.StatusInternalServerError, err),即便 repo 返
+// commonerrors.ErrNotFound 也落 500。修复改走 HTTPStatusFromError 映射。
+
+func newDictTestRouter() (*gin.Engine, *mockDictRepository, *mockDictDetailRepository) {
+	gin.SetMode(gin.TestMode)
+	dictRepo := newMockDictRepository()
+	detailRepo := newMockDictDetailRepository()
+	service := NewDictionaryService(dictRepo, detailRepo)
+	handler := NewDictionaryHandler(service)
+	router := gin.New()
+	handler.RegisterRoutes(router.Group("/admin"))
+	return router, dictRepo, detailRepo
+}
+
+func TestDictionaryHandler_NotFoundMapsTo404(t *testing.T) {
+	tests := []struct {
+		name   string
+		method string
+		// path 为完整 URL(含 query);body 非空则作为 JSON 请求体。
+		path string
+		body string
+		// setup 可向 mock 仓库注入「不存在 id」语义;nil 表示沿用空仓库
+		// (此时所有 id 天然不存在)。
+		setup func(dictRepo *mockDictRepository, detailRepo *mockDictDetailRepository)
+	}{
+		{
+			name:   "DELETE 不存在字典 → 404",
+			method: http.MethodDelete,
+			path:   "/admin/sysDictionary/deleteSysDictionary?id=99999",
+		},
+		{
+			name:   "PUT 不存在字典 → 404",
+			method: http.MethodPut,
+			path:   "/admin/sysDictionary/updateSysDictionary",
+			body:   `{"id":99999,"name":"x"}`,
+		},
+		{
+			name:   "DELETE 不存在字典明细 → 404",
+			method: http.MethodDelete,
+			path:   "/admin/sysDictionaryDetail/deleteSysDictionaryDetail?id=99999",
+			setup: func(_ *mockDictRepository, detailRepo *mockDictDetailRepository) {
+				detailRepo.notFound[99999] = true
+			},
+		},
+		{
+			name:   "PUT 不存在字典明细 → 404",
+			method: http.MethodPut,
+			path:   "/admin/sysDictionaryDetail/updateSysDictionaryDetail",
+			body:   `{"id":99999,"label":"x"}`,
+			setup: func(_ *mockDictRepository, detailRepo *mockDictDetailRepository) {
+				detailRepo.notFound[99999] = true
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			router, dictRepo, detailRepo := newDictTestRouter()
+			if tt.setup != nil {
+				tt.setup(dictRepo, detailRepo)
+			}
+
+			var bodyReader io.Reader
+			if tt.body != "" {
+				bodyReader = bytes.NewBufferString(tt.body)
+			}
+			req := httptest.NewRequest(tt.method, tt.path, bodyReader)
+			if tt.body != "" {
+				req.Header.Set("Content-Type", "application/json")
+			}
+			w := httptest.NewRecorder()
+
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusNotFound, w.Code,
+				"不存在记录应返回 404,body=%s", w.Body.String())
+		})
+	}
+}
+
+// TestDictionaryHandler_DeleteSuccess 确认正常删除仍返 200(防止把成功路径误映射)。
+func TestDictionaryHandler_DeleteSuccess(t *testing.T) {
+	router, dictRepo, _ := newDictTestRouter()
+	dictRepo.dicts["gender"] = &Dictionary{ID: 42, Type: "gender", Name: "性别"}
+
+	req := httptest.NewRequest(http.MethodDelete, "/admin/sysDictionary/deleteSysDictionary?id=42", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code, "存在记录删除应返回 200,body=%s", w.Body.String())
 }
 
 // =============================================================

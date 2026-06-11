@@ -22,6 +22,7 @@ import (
 type CompletionRouter struct {
 	mu             sync.RWMutex
 	handlers       map[TaskSource][]TaskCompletionCallback
+	observers      []TaskCompletionCallback
 	unknownHandler TaskCompletionCallback
 	logger         *zap.Logger
 	metrics        *TaskMetrics
@@ -64,6 +65,21 @@ func (r *CompletionRouter) SetUnknownHandler(h TaskCompletionCallback) {
 	r.unknownHandler = h
 }
 
+// RegisterObserver 注册一个 source 无关的终态观察者：每个被 Dispatch 的终态
+// 任务（无论 source、无论是否命中 per-source handler）都会回调一次。
+//
+// 与 Register（按 source 路由到业务聚合器）的区别：observer 是横切关注点，
+// 用于"对所有终态任务都要做的事"，如 #122 把终态写入 sys_task_logs。observer
+// 永远在 per-source handler 之前调用，且同样受 safeCall 的 panic 隔离保护。
+func (r *CompletionRouter) RegisterObserver(observer TaskCompletionCallback) {
+	if observer == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.observers = append(r.observers, observer)
+}
+
 // Dispatch 把一个 device_task 终态按 source 分发。
 // handler 执行过程中的 panic 会被 recover 并记录，保证其它订阅不受影响。
 // 同时按 source/status 累计 Prometheus 指标（metrics 已注入时生效）。
@@ -73,6 +89,7 @@ func (r *CompletionRouter) Dispatch(ctx context.Context, t *Task) {
 	}
 	r.mu.RLock()
 	handlers, ok := r.handlers[t.Source]
+	observers := r.observers
 	unknown := r.unknownHandler
 	metrics := r.metrics
 	r.mu.RUnlock()
@@ -82,6 +99,12 @@ func (r *CompletionRouter) Dispatch(ctx context.Context, t *Task) {
 		if t.SentAt != nil && !t.SentAt.IsZero() && t.CompletedAt != nil && !t.CompletedAt.IsZero() {
 			metrics.DurationSeconds.WithLabelValues(string(t.Source)).Observe(t.CompletedAt.Sub(*t.SentAt).Seconds())
 		}
+	}
+
+	// source 无关的横切观察者先跑（#122 终态写 sys_task_logs 等），
+	// 与 per-source 路由结果无关，且不影响 NoHandlerTotal 计数语义。
+	for _, obs := range observers {
+		r.safeCall(ctx, obs, t)
 	}
 
 	if !ok || len(handlers) == 0 {

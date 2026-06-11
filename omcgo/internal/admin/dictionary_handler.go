@@ -77,7 +77,7 @@ func (h *DictionaryHandler) DeleteDictionary(c *gin.Context) {
 	}
 
 	if err := h.service.DeleteDictionary(c.Request.Context(), id); err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
 
@@ -94,7 +94,7 @@ func (h *DictionaryHandler) UpdateDictionary(c *gin.Context) {
 
 	result, err := h.service.UpdateDictionary(c.Request.Context(), req)
 	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
 
@@ -111,7 +111,8 @@ func (h *DictionaryHandler) FindDictionary(c *gin.Context) {
 
 	result, err := h.service.GetDictionaryByType(c.Request.Context(), dictType)
 	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		// not-found（如字典类型不存在）经 HTTPStatusFromError 映射 404，与 update/delete 一致（#145-D 补漏）。
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
 
@@ -167,7 +168,7 @@ func (h *DictionaryHandler) DeleteDictionaryDetail(c *gin.Context) {
 	}
 
 	if err := h.service.DeleteDictionaryDetail(c.Request.Context(), id); err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
 
@@ -184,7 +185,7 @@ func (h *DictionaryHandler) UpdateDictionaryDetail(c *gin.Context) {
 
 	result, err := h.service.UpdateDictionaryDetail(c.Request.Context(), req)
 	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
 
@@ -207,7 +208,8 @@ func (h *DictionaryHandler) FindDictionaryDetail(c *gin.Context) {
 
 	result, err := h.service.GetDictionaryDetail(c.Request.Context(), id)
 	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		// not-found（含软删/不存在 id）经 HTTPStatusFromError 映射 404，与 update/delete 一致（#145-D 补漏）。
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
 
@@ -276,7 +278,9 @@ func (h *DictionaryHandler) RefreshSource(c *gin.Context) {
 	}
 	resp, err := h.service.RefreshDictionarySource(c.Request.Context(), id)
 	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		// not-found（字典不存在）→404、无源绑定/参数类业务错→400，经 HTTPStatusFromError 映射，
+		// 与同 handler 的 PreviewSource/update/delete 一致（#145-D 范式补漏 refreshSource）。
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
 	response.OKWithMsg(c, resp, "刷新成功")

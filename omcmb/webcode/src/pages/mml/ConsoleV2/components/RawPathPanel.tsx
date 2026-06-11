@@ -62,7 +62,7 @@ export default function RawPathPanel({ value, onChange, suggestions }: RawPathPa
   };
 
   return (
-    <Space direction="vertical" size={14} style={{ width: '100%' }}>
+    <Space orientation="vertical" size={14} style={{ width: '100%' }}>
       <div>
         <Text type="secondary">操作类型</Text>
         <Select<MMLOperationType>
@@ -86,7 +86,7 @@ export default function RawPathPanel({ value, onChange, suggestions }: RawPathPa
           {(operationType === 'RMV') && ' RMV：路径须以 .<实例号>. 结尾，指定要删除的实例。'}
           {showValue && ' MOD 需为每条路径填写参数值。'}
         </Text>
-        <Space direction="vertical" size={8} style={{ width: '100%', marginTop: 8 }}>
+        <Space orientation="vertical" size={8} style={{ width: '100%', marginTop: 8 }}>
           {rows.map((row, index) => {
             const pathError = validateRawPath(operationType, row.path);
             return (

@@ -189,10 +189,10 @@ func TestService_Create_ValidationErrors(t *testing.T) {
 
 func TestService_Stop_StateTransitions(t *testing.T) {
 	tests := []struct {
-		name        string
-		from        TaskStatus
-		wantErr     bool
-		wantToState TaskStatus
+		name         string
+		from         TaskStatus
+		wantErr      bool
+		wantToState  TaskStatus
 		wantConflict bool
 	}{
 		{name: "waitting → termination", from: StatusWaiting, wantToState: StatusTermination},
@@ -262,15 +262,35 @@ func TestService_Delete_OnlyAllowedFromTerminalStates(t *testing.T) {
 	}
 }
 
+// issue #126 第 5 项：ListProgress 对不存在的 task_id 应返回 ErrNotFound（→ 404），
+// 与 Get/Stop/Delete 一致，而非 200 空列表。
+func TestService_ListProgress_NotFoundReturnsNotFound(t *testing.T) {
+	svc, _ := newTestService()
+	_, err := svc.ListProgress(context.Background(), ProgressListFilter{TaskID: uuid.New()})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, commonerrors.ErrNotFound),
+		"expected ErrNotFound for missing task, got %T", err)
+}
+
+// ListProgress 对存在的任务正常返回（不误判为 NotFound）。
+func TestService_ListProgress_ExistingTaskSucceeds(t *testing.T) {
+	svc, repo := newTestService()
+	id := uuid.New()
+	repo.tasks[id] = &Task{TaskID: id, TaskName: "t", TaskStatus: StatusWaiting}
+	resp, err := svc.ListProgress(context.Background(), ProgressListFilter{TaskID: id})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+}
+
 func TestUploadPeriodSeconds(t *testing.T) {
 	cases := map[string]struct {
 		input string
 		want  int
 		ok    bool
 	}{
-		"15min": {"15", 900, true},
-		"30min": {"30", 1800, true},
-		"60min": {"60", 3600, true},
+		"15min":   {"15", 900, true},
+		"30min":   {"30", 1800, true},
+		"60min":   {"60", 3600, true},
 		"invalid": {"45", 0, false},
 	}
 	for name, c := range cases {

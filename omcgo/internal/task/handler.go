@@ -1,6 +1,7 @@
 package task
 
 import (
+	stderrors "errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -181,7 +182,7 @@ func (h *Handler) CancelTask(c *gin.Context) {
 			zap.Error(err),
 			zap.String("task_id", taskID))
 
-		if err.Error() == "task not found" {
+		if stderrors.Is(err, ErrTaskNotFound) {
 			errors.AbortWithError(c, http.StatusNotFound, errors.ErrNotFound)
 			return
 		}
@@ -284,9 +285,11 @@ func (h *Handler) RetryTask(c *gin.Context) {
 		return
 	}
 
-	// 检查是否可以重试
-	if !task.CanRetry() {
-		response.Fail(c, http.StatusBadRequest, "task cannot be retried: exceeded max retries")
+	// 检查是否可主动重试：仅 failed/expired 终态失败类且重试预算未耗尽可 retry；
+	// cancelled/completed/pending/sent 一律拒绝（4xx），不把非失败任务"复活"回 pending。
+	if !task.CanManualRetry() {
+		response.Fail(c, http.StatusBadRequest,
+			"task cannot be retried: only failed/expired tasks within retry budget can retry, current status="+string(task.Status))
 		return
 	}
 

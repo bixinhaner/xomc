@@ -109,7 +109,7 @@ export default function AggregationTrigger() {
             status="success"
             title="任务已入队"
             subTitle={
-              <Space direction="vertical" size={4} style={{ textAlign: 'left' }}>
+              <Space orientation="vertical" size={4} style={{ textAlign: 'left' }}>
                 <div>
                   <Text strong>job_id: </Text>
                   <Text copyable code>{lastJobId}</Text>

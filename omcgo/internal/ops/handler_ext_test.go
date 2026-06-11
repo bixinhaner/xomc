@@ -121,6 +121,24 @@ func setupExtRouter(h *ExtHandler) *gin.Engine {
 	return r
 }
 
+// decodeEnvelopeData unmarshals a standard {ret,msg,data} success envelope and
+// returns the inner data node as a map. ExecuteRPC's success path now goes
+// through response.OKWithStatus (issue #126 item 6), so the wire payload is
+// wrapped — the business fields live under data.
+func decodeEnvelopeData(t *testing.T, body []byte) map[string]interface{} {
+	t.Helper()
+	var env struct {
+		Ret  int                    `json:"ret"`
+		Msg  string                 `json:"msg"`
+		Data map[string]interface{} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(body, &env))
+	assert.Equal(t, 1, env.Ret, "success envelope must carry ret=1")
+	assert.Equal(t, "ok", env.Msg)
+	require.NotNil(t, env.Data, "data node must be present")
+	return env.Data
+}
+
 // =============================================================================
 // V1 — single-device safe RPC (get_param) auto-dispatches + returns task_id
 // =============================================================================
@@ -138,8 +156,7 @@ func TestExecuteRPC_V1_SingleDevice_SafeAutoDispatch(t *testing.T) {
 
 	assert.Equal(t, http.StatusAccepted, w.Code)
 
-	var resp map[string]interface{}
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	resp := decodeEnvelopeData(t, w.Body.Bytes())
 	assert.NotEmpty(t, resp["task_id"], "must return DB-assigned task id")
 	assert.Equal(t, false, resp["approval_required"], "L1 safe action should not require approval")
 	assert.Equal(t, string(RiskSafe), resp["risk_level"])
@@ -183,8 +200,7 @@ func TestExecuteRPC_V2_FactoryReset_RequiresApproval(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusAccepted, w.Code)
-	var resp map[string]interface{}
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	resp := decodeEnvelopeData(t, w.Body.Bytes())
 	assert.Equal(t, true, resp["approval_required"], "L3 dangerous action must gate on approval")
 	assert.Equal(t, string(RiskDangerous), resp["risk_level"])
 
@@ -223,8 +239,7 @@ func TestExecuteRPC_V3_BatchReboot_RiskEscalation(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusAccepted, w.Code)
-	var resp map[string]interface{}
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	resp := decodeEnvelopeData(t, w.Body.Bytes())
 	assert.Equal(t, string(RiskCautious), resp["risk_level"], "11 devices + reboot → cautious")
 	assert.Equal(t, false, resp["approval_required"], "cautious does not require approval")
 
@@ -259,8 +274,7 @@ func TestExecuteRPC_V4_LargeBatch_DangerousEscalation(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
 
-	var resp map[string]interface{}
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	resp := decodeEnvelopeData(t, w.Body.Bytes())
 	assert.Equal(t, string(RiskDangerous), resp["risk_level"])
 	assert.Equal(t, true, resp["approval_required"])
 
@@ -341,6 +355,46 @@ func TestExecuteRPC_V7_SSEEnqueuedEvent(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("SSE enqueued event not delivered within 1s")
 	}
+}
+
+// =============================================================================
+// Issue #126 item 6 — ext endpoints must emit the standard {ret,msg,data}
+// envelope on success (previously bare JSON via c.JSON).
+//
+// BreakGlassStatus needs no service when no user is identified: it returns
+// {active:false}. After the fix that payload must live under data, wrapped by
+// response.OK. This guards the whole ext success-path family against a
+// regression back to bare c.JSON.
+// =============================================================================
+func TestBreakGlassStatus_EnvelopeWrapped(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := &ExtHandler{logger: zap.NewNop().Named("ops.ext")}
+
+	r := gin.New()
+	r.GET("/api/v1/ops/break-glass/status", h.BreakGlassStatus)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/ops/break-glass/status", nil)
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var env struct {
+		Ret  int                    `json:"ret"`
+		Msg  string                 `json:"msg"`
+		Data map[string]interface{} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &env))
+	assert.Equal(t, 1, env.Ret, "success must carry ret=1, not bare JSON")
+	assert.Equal(t, "ok", env.Msg)
+	require.NotNil(t, env.Data, "business payload must live under data")
+	assert.Equal(t, false, env.Data["active"], "active flag preserved under data")
+
+	// And the active flag must NOT leak at the top level (bare-JSON regression).
+	var top map[string]interface{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &top))
+	_, leaked := top["active"]
+	assert.False(t, leaked, "active must not appear at top level once enveloped")
 }
 
 // Compile-time guard: stubAuditRepo wasn't enough on its own; ensure the

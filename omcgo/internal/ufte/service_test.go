@@ -320,3 +320,59 @@ func TestService_DeleteTaskType_DeletesCustomTypeOnly(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, commonerrors.ErrForbidden)
 }
+
+// TestExecutionModeForTask_SuspendedEcho 守护 #138：挂起任务必须回显 "suspended"。
+// 统一挂起表示后，applyScheduleMode 与 CreatePlaceholderTrackingTask 两条链路的挂起
+// 主任务都落 software.TaskSuspended + create_status=active，回显必须是 "suspended"
+// 而非历史 bug 的 "immediate"。
+func TestExecutionModeForTask_SuspendedEcho(t *testing.T) {
+	tests := []struct {
+		name         string
+		status       software.TaskStatus
+		createStatus string
+		want         string
+	}{
+		{
+			name:         "suspended task echoes suspended (#138)",
+			status:       software.TaskSuspended,
+			createStatus: software.CreateStatusActive,
+			want:         "suspended",
+		},
+		{
+			name:         "timing wins regardless of status",
+			status:       software.TaskPending,
+			createStatus: software.CreateStatusTiming,
+			want:         "scheduled",
+		},
+		{
+			name:         "timing wins even after scheduler flips status to in_progress",
+			status:       software.TaskInProgress,
+			createStatus: software.CreateStatusTiming,
+			want:         "scheduled",
+		},
+		{
+			name:         "in_progress active is immediate",
+			status:       software.TaskInProgress,
+			createStatus: software.CreateStatusActive,
+			want:         "immediate",
+		},
+		{
+			name:         "pending active is immediate (transient pre-dispatch)",
+			status:       software.TaskPending,
+			createStatus: software.CreateStatusActive,
+			want:         "immediate",
+		},
+		{
+			name:         "ended active is immediate",
+			status:       software.TaskEnded,
+			createStatus: software.CreateStatusActive,
+			want:         "immediate",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, executionModeForTask(tc.status, tc.createStatus))
+		})
+	}
+}

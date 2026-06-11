@@ -39,7 +39,6 @@ export interface KPITrendChartProps {
 export function KPITrendChart({
   title,
   unit,
-  value = 0,
   status,
   height = 220,
   loading = false,

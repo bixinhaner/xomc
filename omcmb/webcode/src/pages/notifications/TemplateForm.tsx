@@ -134,7 +134,7 @@ export default function TemplateForm({
         isEdit ? t('notification.template.edit') : t('notification.template.create')
       }
       open={open}
-      width={600}
+      size={600}
       onClose={onClose}
       destroyOnHidden
       footer={

@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 )
 
@@ -131,6 +132,11 @@ func (s *AdminService) CreateGroup(ctx context.Context, req CreateGroupReq) (*Co
 		CatalogProtected: false,
 	}
 	if err := s.groupRepo.Create(ctx, g); err != nil {
+		// param_version 是外键（mml_param_groups_param_version_fkey）；引用不存在的
+		// 版本号会触发 FK violation(23503)。翻成业务级 422，避免裸 500 + 泄露 SQL 约束名。
+		if isForeignKeyViolation(err) {
+			return nil, ErrGroupParamVersionNotFound
+		}
 		return nil, fmt.Errorf("create group: %w", err)
 	}
 	s.audit.Write(ctx, "mml.catalog.group.created", "group:"+g.ID.String(), map[string]any{
@@ -665,10 +671,16 @@ func (s *AdminService) DeleteSubField(ctx context.Context, id uuid.UUID) error {
 // Helpers
 // ============================================================
 
-// IsErrNotFound 工具方法：判定 err 是否任一 admin sentinel "not found"。
+// IsErrNotFound 工具方法：判定 err 是否任一 admin "not found" sentinel。
 // handler 据此翻 HTTP 404。
+//
+// 除 admin 三个本地 sentinel 外，还纳入 commonerrors.ErrNotFound：admin commands 的
+// commandLookup 绑定到共享的 PgCommandRepository.GetByID，其 not-found 返回的是
+// commonerrors.ErrNotFound（而非 mml 本地 ErrCommandNotFound）。不纳入会让
+// GET/PATCH/DELETE /mml/admin/commands/:id 对不存在 ID 落 500 分支（issue #145 E 项）。
 func IsErrNotFound(err error) bool {
 	return errors.Is(err, ErrSubFieldNotFound) ||
 		errors.Is(err, ErrGroupNotFound) ||
-		errors.Is(err, ErrCommandNotFound)
+		errors.Is(err, ErrCommandNotFound) ||
+		errors.Is(err, commonerrors.ErrNotFound)
 }

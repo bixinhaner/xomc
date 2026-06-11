@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -64,6 +65,7 @@ func (h *Handler) Login(c *gin.Context) {
 	if h.loginGuard != nil && h.captcha != nil && h.loginGuard.RequiresCaptcha(ctx, req.Username) {
 		if req.CaptchaID == "" || req.CaptchaAnswer == "" {
 			h.recordAuthAuditLog(auditActionLoginFailed, req.Username, nil, clientIP, userAgent, "captcha_required")
+			h.recordLoginLog(req.Username, clientIP, userAgent, false, "captcha_required")
 			c.AbortWithStatusJSON(http.StatusPreconditionRequired, gin.H{
 				"ret":  0,
 				"msg":  "captcha required due to multiple failed attempts",
@@ -74,6 +76,7 @@ func (h *Handler) Login(c *gin.Context) {
 		}
 		if !h.captcha.Verify(ctx, req.CaptchaID, req.CaptchaAnswer) {
 			h.recordAuthAuditLog(auditActionLoginFailed, req.Username, nil, clientIP, userAgent, "captcha_invalid")
+			h.recordLoginLog(req.Username, clientIP, userAgent, false, "captcha_invalid")
 			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
 				"ret":  0,
 				"msg":  "invalid captcha answer",
@@ -109,6 +112,7 @@ func (h *Handler) Login(c *gin.Context) {
 			)
 			// 对外仅以 401 暴露失败原因，不区分"密钥错"/"重放"/"过期"，避免给攻击者反馈。
 			h.recordAuthAuditLog(auditActionLoginFailed, req.Username, nil, clientIP, userAgent, "decrypt_failed")
+			h.recordLoginLog(req.Username, clientIP, userAgent, false, "decrypt_failed")
 			commonerrors.AbortWithError(c, http.StatusUnauthorized,
 				commonerrors.NewBusinessError(7003, "登录凭据无效，请重试", err))
 			return
@@ -120,6 +124,7 @@ func (h *Handler) Login(c *gin.Context) {
 				zap.String("ip", clientIP),
 			)
 			h.recordAuthAuditLog(auditActionLoginFailed, req.Username, nil, clientIP, userAgent, "plaintext_disabled")
+			h.recordLoginLog(req.Username, clientIP, userAgent, false, "plaintext_disabled")
 			commonerrors.AbortWithError(c, http.StatusBadRequest,
 				commonerrors.NewBusinessError(7004, "明文密码登录已禁用，请使用 HTTPS 或 localhost 访问", nil))
 			return
@@ -151,6 +156,7 @@ func (h *Handler) Login(c *gin.Context) {
 		// directly through the AuditRepository. Avoid double-emission via
 		// audit.LogAsync; both paths share the same repo.
 		h.recordAuthAuditLog(auditActionLoginFailed, req.Username, nil, clientIP, userAgent, reason)
+		h.recordLoginLog(req.Username, clientIP, userAgent, false, reason)
 
 		if h.loginGuard != nil {
 			count, _ := h.loginGuard.RecordFailure(ctx, req.Username)
@@ -201,6 +207,7 @@ func (h *Handler) Login(c *gin.Context) {
 	// W3.G.2 ActionLogin / category 1 of 5: see comment in failure branch.
 	// T-0120：plaintext 路径在 reason 标记 plaintext_login 供合规追溯。
 	h.recordAuthAuditLog(auditActionLoginSuccess, req.Username, nil, clientIP, userAgent, pwdSourceReason)
+	h.recordLoginLog(req.Username, clientIP, userAgent, true, pwdSourceReason)
 
 	response.OK(c, tokenPair)
 }
@@ -281,7 +288,10 @@ func (h *Handler) SwitchRole(c *gin.Context) {
 
 	tokenPair, err := h.service.SwitchRole(c.Request.Context(), userID, req.RoleID)
 	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		// 业务校验拒绝（角色未分配 → BusinessError 包 ErrForbidden）映射 403，
+		// not-found 映射 404，而非一律 500。
+		status := commonerrors.HTTPStatusFromError(err)
+		commonerrors.AbortWithError(c, status, err)
 		return
 	}
 
@@ -347,6 +357,81 @@ func (h *Handler) recordAuthAuditLog(action, username string, userID *uuid.UUID,
 			)
 		}
 	}()
+}
+
+// recordLoginLog 异步写一条 sys_login_logs 登录日志（#122）。
+//
+// 与 recordAuthAuditLog（合规审计 audit_logs）并行：本表支撑
+// /admin/logs/login 视图。写失败仅 Warn，绝不阻塞登录流；
+// logRepo 未注入（nil）时为 no-op。
+func (h *Handler) recordLoginLog(username, ip, userAgent string, success bool, message string) {
+	if h.logRepo == nil {
+		return
+	}
+	browser, osName := parseUserAgent(userAgent)
+
+	// Fire and forget — 用 background context 避免 HTTP 请求结束后被取消
+	go func() {
+		err := h.logRepo.CreateLoginLog(context.Background(), CreateLoginLogRequest{
+			Username:  username,
+			IPAddress: ip,
+			Browser:   browser,
+			OS:        osName,
+			Status:    success,
+			Message:   message,
+		})
+		if err != nil {
+			h.logger.Warn("failed to write login log",
+				zap.String("username", username),
+				zap.Bool("success", success),
+				zap.Error(err),
+			)
+		}
+	}()
+}
+
+// parseUserAgent 从 User-Agent 头提取粗粒度的浏览器与操作系统名，
+// 供 sys_login_logs 的 browser/os 列展示。刻意用轻量子串匹配而非完整
+// UA 解析库；未识别的 agent（脚本/SDK）回退保留 UA 前缀，信息不丢失。
+// 匹配顺序敏感：Edge UA 含 Chrome、Chrome UA 含 Safari、Android UA 含 Linux。
+func parseUserAgent(ua string) (browser, osName string) {
+	const maxRawUALen = 64
+
+	switch {
+	case strings.Contains(ua, "Edg/"):
+		browser = "Edge"
+	case strings.Contains(ua, "OPR/"):
+		browser = "Opera"
+	case strings.Contains(ua, "Chrome/"):
+		browser = "Chrome"
+	case strings.Contains(ua, "Firefox/"):
+		browser = "Firefox"
+	case strings.Contains(ua, "Safari/"):
+		browser = "Safari"
+	case ua == "":
+		browser = "unknown"
+	default:
+		browser = ua
+		if len(browser) > maxRawUALen {
+			browser = browser[:maxRawUALen]
+		}
+	}
+
+	switch {
+	case strings.Contains(ua, "Windows"):
+		osName = "Windows"
+	case strings.Contains(ua, "Android"):
+		osName = "Android"
+	case strings.Contains(ua, "iPhone"), strings.Contains(ua, "iPad"):
+		osName = "iOS"
+	case strings.Contains(ua, "Mac OS X"), strings.Contains(ua, "Macintosh"):
+		osName = "macOS"
+	case strings.Contains(ua, "Linux"):
+		osName = "Linux"
+	default:
+		osName = "unknown"
+	}
+	return browser, osName
 }
 
 // classifyLoginFailure maps internal login errors to human-readable failure reasons.

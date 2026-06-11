@@ -24,21 +24,53 @@ type GPVBatcher interface {
 	EnqueueGPVBatches(ctx context.Context, deviceSN string, paramPaths []string, sourceID string) ([]string, error)
 }
 
+// DeviceExistenceChecker 是 push/pull 入队前做设备存在性预检的窄接口
+// （避免 config → device 强耦合，DI 时按接口注入 device.DeviceRepository）。
+// ExistsBySerialNumber 返回 (true,nil) 表示设备存在；(false,nil) 表示不存在；
+// err != nil 表示查库失败（与"不存在"区分，前者映射 500、后者 404）。
+type DeviceExistenceChecker interface {
+	ExistsBySerialNumber(ctx context.Context, sn string) (bool, error)
+}
+
 // SyncHandler provides HTTP endpoints for configuration parameter sync operations.
 type SyncHandler struct {
 	taskSvc    task.Enqueuer
 	gpvBatcher GPVBatcher
+	deviceChk  DeviceExistenceChecker
 	logger     *zap.Logger
 }
 
 // NewSyncHandler creates a new SyncHandler.
 // gpvBatcher 可为 nil（AutoSync 未启用时）；nil 时 PullConfig 降级为单 task 不拆批。
-func NewSyncHandler(taskSvc task.Enqueuer, gpvBatcher GPVBatcher, logger *zap.Logger) *SyncHandler {
+// deviceChk 可为 nil（向后兼容/未注入时跳过存在性预检）；非 nil 时 push/pull 入队前校验设备存在。
+func NewSyncHandler(taskSvc task.Enqueuer, gpvBatcher GPVBatcher, deviceChk DeviceExistenceChecker, logger *zap.Logger) *SyncHandler {
 	return &SyncHandler{
 		taskSvc:    taskSvc,
 		gpvBatcher: gpvBatcher,
+		deviceChk:  deviceChk,
 		logger:     logger.Named("config-sync"),
 	}
+}
+
+// ensureDeviceExists 在入队前预检设备存在性（按 SN）。
+// 返回 true 表示放行；返回 false 表示已写出错误响应，调用方应直接 return。
+// deviceChk 未注入时放行（向后兼容，不阻断既有调用方）。
+func (h *SyncHandler) ensureDeviceExists(c *gin.Context, deviceSN string) bool {
+	if h.deviceChk == nil {
+		return true
+	}
+	exists, err := h.deviceChk.ExistsBySerialNumber(c.Request.Context(), deviceSN)
+	if err != nil {
+		logger.L(c.Request.Context()).Error("check device existence",
+			zap.String("device_id", deviceSN), zap.Error(err))
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, commonerrors.ErrInternal)
+		return false
+	}
+	if !exists {
+		commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
+		return false
+	}
+	return true
 }
 
 // PushConfigRequest is the input for pushing configuration parameters to a device.
@@ -85,6 +117,11 @@ func (h *SyncHandler) PushConfig(c *gin.Context) {
 	var req PushConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	// 设备存在性预检：不存在则 404，避免合法 body 入队产生孤儿任务（issue #126 第3项）。
+	if !h.ensureDeviceExists(c, deviceID) {
 		return
 	}
 
@@ -142,6 +179,11 @@ func (h *SyncHandler) PullConfig(c *gin.Context) {
 	var req PullConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	// 设备存在性预检：不存在则 404，避免合法 body 入队产生孤儿任务（issue #126 第3项）。
+	if !h.ensureDeviceExists(c, deviceID) {
 		return
 	}
 

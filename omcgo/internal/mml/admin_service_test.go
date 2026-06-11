@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -273,6 +274,48 @@ func TestAdminService_CreateGroup_AuditEmitted(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, audit.calls, 1)
 	assert.Equal(t, "mml.catalog.group.created", audit.calls[0].Op)
+}
+
+// TestAdminService_CreateGroup_FKViolationTranslated 覆盖 issue #125-mml 问题 1：
+// param_version 引用不存在时，repo 返回 PostgreSQL FK violation(23503)。
+// service 必须翻成 ErrGroupParamVersionNotFound（→ handler 422），
+// 不得把裸 SQL 约束名 / SQLSTATE 外泄。
+func TestAdminService_CreateGroup_FKViolationTranslated(t *testing.T) {
+	svc, gRepo, _, _, audit := newAdminTestService()
+	// 模拟 mml_command_groups.param_version 外键约束失败（pgx 原始错误,
+	// repo 会以 %w 包装,errors.As 仍能命中）。
+	gRepo.createErr = &pgconn.PgError{
+		Code:           "23503",
+		Message:        `insert or update on table "mml_command_groups" violates foreign key constraint "mml_param_groups_param_version_fkey"`,
+		ConstraintName: "mml_param_groups_param_version_fkey",
+	}
+
+	_, err := svc.CreateGroup(context.Background(), CreateGroupReq{
+		GroupCode: "SMK_GRP", ParamVersion: "no-such-version",
+	})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrGroupParamVersionNotFound),
+		"want ErrGroupParamVersionNotFound, got %v", err)
+	// 错误消息不得外泄裸 SQL 约束名 / SQLSTATE。
+	assert.NotContains(t, err.Error(), "foreign key constraint")
+	assert.NotContains(t, err.Error(), "23503")
+	assert.NotContains(t, err.Error(), "mml_param_groups_param_version_fkey")
+	// 失败路径不应写审计。
+	assert.Empty(t, audit.calls)
+}
+
+// TestAdminService_CreateGroup_GenericErrStill500 控制组：非 FK 的通用 repo 错误
+// 仍按内部错误（默认 500 路径）原样包装,不误判为 422。
+func TestAdminService_CreateGroup_GenericErrStill500(t *testing.T) {
+	svc, gRepo, _, _, _ := newAdminTestService()
+	gRepo.createErr = errors.New("connection refused")
+
+	_, err := svc.CreateGroup(context.Background(), CreateGroupReq{
+		GroupCode: "SMK_GRP", ParamVersion: "STANDARD",
+	})
+	require.Error(t, err)
+	assert.False(t, errors.Is(err, ErrGroupParamVersionNotFound),
+		"generic error must not be misclassified as param_version not found")
 }
 
 // ============================================================

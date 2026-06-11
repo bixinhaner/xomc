@@ -59,6 +59,7 @@ func (s *AlarmSyncService) TriggerSync(ctx context.Context, deviceSN string) err
 
 	// Create GPV task to query CurrentAlarm parameters
 	params := json.RawMessage(`{"names":["Device.FaultMgmt.CurrentAlarm."]}`)
+	maxRetries := 2 // CreateTaskRequest.MaxRetries 为 *int（区分未设置/显式 0）
 	_, err = s.taskService.CreateTask(ctx, &task.CreateTaskRequest{
 		DeviceSN:    deviceSN,
 		Method:      "GetParameterValues",
@@ -67,7 +68,7 @@ func (s *AlarmSyncService) TriggerSync(ctx context.Context, deviceSN string) err
 		CreatorID:   uuid.Nil.String(),
 		Description: "alarm sync: query device current alarms",
 		Priority:    5,
-		MaxRetries:  2,
+		MaxRetries:  &maxRetries,
 		ExpiresIn:   600, // 10 minutes
 	})
 	if err != nil {

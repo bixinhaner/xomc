@@ -120,9 +120,9 @@ export default function BuiltinMetricEditModal({ task, open, onClose }: Props) {
       onOk={handleOk}
       confirmLoading={updateMut.isPending}
       width={820}
-      destroyOnClose
+      destroyOnHidden
     >
-      <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
         <Alert
           type="info"
           showIcon

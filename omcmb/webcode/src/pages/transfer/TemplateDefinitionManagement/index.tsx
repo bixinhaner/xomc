@@ -259,11 +259,11 @@ export default function TemplateDefinitionManagement() {
         <Empty description={emptyDescription} image={Empty.PRESENTED_IMAGE_SIMPLE} />
       ) : (
         <div style={{ maxHeight: 460, overflowY: 'auto', overflowX: 'hidden', paddingRight: 4 }}>
-          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Space orientation="vertical" size={12} style={{ width: '100%' }}>
             {items.map((taskType) => {
               const active = selectedType?.typeCode === taskType.typeCode;
               return (
-                <Space key={taskType.typeCode} direction="vertical" size={8} style={{ width: '100%' }}>
+                <Space key={taskType.typeCode} orientation="vertical" size={8} style={{ width: '100%' }}>
                   <div onClick={() => setSelectedTypeCode(taskType.typeCode)} role="presentation" style={{ cursor: 'pointer' }}>
                     <TransferTemplateCard taskType={taskType} active={active} />
                   </div>
@@ -304,9 +304,9 @@ export default function TemplateDefinitionManagement() {
         </Button>
       )}
     >
-      <Space direction="vertical" size={16} style={{ width: '100%' }}>
+      <Space orientation="vertical" size={16} style={{ width: '100%' }}>
         <Card>
-          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Space orientation="vertical" size={12} style={{ width: '100%' }}>
             <Title level={4} style={{ margin: 0 }}>{t('ufte.page.templateConfig')}</Title>
             <Tabs
               activeKey={selectedCategory}
@@ -339,7 +339,7 @@ export default function TemplateDefinitionManagement() {
 
       <Drawer
         title={detailType ? t('ufte.drawer.templateDetailWithName', { name: localizeBuiltinTypeName(detailType.typeCode, detailType.displayName, t) }) : t('ufte.drawer.templateDetail')}
-        width={560}
+        size={560}
         open={detailDrawerOpen}
         onClose={() => setDetailDrawerOpen(false)}
         destroyOnHidden
@@ -366,7 +366,7 @@ export default function TemplateDefinitionManagement() {
         ) : null}
       >
         {detailType ? (
-          <Space direction="vertical" size={16} style={{ width: '100%' }}>
+          <Space orientation="vertical" size={16} style={{ width: '100%' }}>
             <Descriptions column={2} size="small" bordered>
               <Descriptions.Item label={t('ufte.template.businessView')}>{localizeBuiltinCategoryLabel(detailType.category, detailType.categoryLabel, t)}</Descriptions.Item>
               <Descriptions.Item label={t('ufte.template.typeCode')}>{detailType.typeCode}</Descriptions.Item>
@@ -405,7 +405,7 @@ export default function TemplateDefinitionManagement() {
 
       <Drawer
         title={editingType ? t('ufte.drawer.editTemplateWithName', { name: localizeBuiltinTypeName(editingType.typeCode, editingType.displayName, t) }) : t('ufte.drawer.newCustomTemplate')}
-        width={520}
+        size={520}
         open={typeDrawerOpen}
         onClose={() => {
           setTypeDrawerOpen(false);
