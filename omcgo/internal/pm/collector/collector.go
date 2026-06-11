@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"path"
 	"time"
 
@@ -204,13 +205,23 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 	}
 	defer obj.Close()
 
+	// #168：单文件体积上限，防超大/异常文件单次全量入内存 OOM。Stat 给确切大小，超限直接拒
+	// （交 retry/DLQ 包装器）；fileSize 同时复用给下方 pm_files 元数据。
+	var fileSize int64
+	if stat, statErr := obj.Stat(); statErr == nil {
+		fileSize = stat.Size
+		if err := ensurePMFileSize(fileSize); err != nil {
+			c.logger.Warn("PM file rejected: oversized",
+				zap.String("path", payload.MinIOPath),
+				zap.Int64("size", fileSize),
+				zap.Int64("limit", maxPMFileBytes))
+			return err
+		}
+	}
+
 	// Save file metadata to pm_files table before parsing
 	var fileID uuid.UUID
 	if c.fileStore != nil {
-		var fileSize int64
-		if stat, statErr := obj.Stat(); statErr == nil {
-			fileSize = stat.Size
-		}
 		now := time.Now()
 		pmFile := &pm.PMFileInfo{
 			DeviceID:    deviceID,
@@ -229,7 +240,8 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 		}
 	}
 
-	content, err := c.parser.Parse(obj, deviceID)
+	// io.LimitReader 兜底：Stat 不可用/谎报时,解析最多读 maxPMFileBytes,截断 → 解析报错被捕获。
+	content, err := c.parser.Parse(io.LimitReader(obj, maxPMFileBytes), deviceID)
 	if err != nil {
 		if c.metrics != nil {
 			c.metrics.FilesProcessedTotal.WithLabelValues("failed").Inc()

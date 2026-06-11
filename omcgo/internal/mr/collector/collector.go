@@ -3,6 +3,7 @@ package collector
 import (
 	"context"
 	"fmt"
+	"io"
 	"path/filepath"
 	"time"
 
@@ -177,6 +178,17 @@ func (c *MRCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 	}
 	defer obj.Close()
 
+	// #168：单文件体积上限，防超大/异常文件单次全量入内存 OOM。Stat 给确切大小，超限直接拒。
+	if stat, statErr := obj.Stat(); statErr == nil {
+		if err := ensureMRFileSize(stat.Size); err != nil {
+			c.logger.Warn("MR file rejected: oversized",
+				zap.String("file", payload.FileName),
+				zap.Int64("size", stat.Size),
+				zap.Int64("limit", maxMRFileBytes))
+			return err
+		}
+	}
+
 	// Parse
 	p, ok := c.parsers[mrType]
 	if !ok {
@@ -184,7 +196,8 @@ func (c *MRCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 	}
 
 	carrierCode := model.CarrierCode(carrier)
-	data, err := p.Parse(obj, carrierCode)
+	// io.LimitReader 兜底：Stat 不可用/谎报时,解析最多读 maxMRFileBytes,截断 → 解析报错被捕获。
+	data, err := p.Parse(io.LimitReader(obj, maxMRFileBytes), carrierCode)
 	if err != nil {
 		c.logger.Warn("parse MR file",
 			zap.Error(err),

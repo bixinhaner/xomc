@@ -12,8 +12,10 @@ import (
 )
 
 const (
-	taskDetailTTL  = 24 * time.Hour // 任务详情 TTL
-	cwmpMappingTTL = 24 * time.Hour // CWMP 映射 TTL
+	// #168：24h→4h，与命令实际生命周期匹配，抑制 Redis 工作集增长（2.36G 撑爆事故的增长真因
+	// 之一就是 24h 任务态累积）。被淘汰/过期的任务态以 PG 双写为权威源，可重建。
+	taskDetailTTL  = 4 * time.Hour // 任务详情 TTL
+	cwmpMappingTTL = 4 * time.Hour // CWMP ID → Task ID 映射 TTL
 )
 
 // RedisTaskQueue 实现 TaskQueue 接口
