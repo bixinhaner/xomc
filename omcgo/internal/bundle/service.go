@@ -9,11 +9,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
 	"go.uber.org/zap"
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 )
+
+// MaxBatchTargets 是单次批量下载允许的目标数上限（ids / serial_numbers 合计）。
+// 超过 → 400。防止超大请求拖垮 MinIO 拉取与 zip 流（#63 加固，亦缓解 DoS）。
+const MaxBatchTargets = 1000
 
 // Service —— 同步流式打包。
 //
@@ -25,10 +30,11 @@ import (
 // 不需要表、不需要 presign、不需要轮询。大批量（GB 级）走 nginx proxy_read_timeout
 // 调长即可。
 type Service struct {
-	minio   *minio.Client
-	logger  *zap.Logger
-	sources map[Module]Source
-	mu      sync.RWMutex
+	minio    *minio.Client
+	logger   *zap.Logger
+	sources  map[Module]Source
+	snReader SNVisibilityReader
+	mu       sync.RWMutex
 }
 
 func NewService(minioClient *minio.Client, logger *zap.Logger) *Service {
@@ -40,6 +46,24 @@ func NewService(minioClient *minio.Client, logger *zap.Logger) *Service {
 		logger:  logger.Named("bundle"),
 		sources: make(map[Module]Source, 4),
 	}
+}
+
+// SetSNVisibilityReader 注入设备序列号可见性判定器（#63 设备组可见性强制层）。
+// 不注入则 WriteZipTo 退化为不过滤（dev/test），与 device/alarm nil-safe 语义一致。
+func (s *Service) SetSNVisibilityReader(reader SNVisibilityReader) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.snReader = reader
+}
+
+// snKeyedModules 是 targetIDs 直接为 serial_number 的模块集合；这些可在调用 Source
+// 之前就把入参 SN 过滤到可见集合。其余模块（firmware 全局制品；mr_files/pm_files 是
+// 文件 ID）入口拿不到 SN，由 WriteZipTo 在 Source 返回后按 BundleFile.DeviceSN 后置剔除。
+var snKeyedModules = map[Module]struct{}{
+	ModuleConfigSnapshot: {},
+	ModuleDeviceLicense:  {},
+	ModuleMR:             {},
+	ModulePM:             {},
 }
 
 // Register 给某模块装配 Source 闭包。
@@ -56,9 +80,15 @@ func (s *Service) Register(module Module, source Source) {
 // 中断时返回。
 //
 // 返回 (写入的文件数, error)。0 文件 + 无 err 时 caller 应当 4xx（让用户知道没东西可下）。
-func (s *Service) WriteZipTo(ctx context.Context, module Module, targetIDs []string, w io.Writer) (int, error) {
+//
+// visibleGroups 是 #63 设备组可见性强制层从调用者身份解析的可见分组集合（三态契约见
+// authz 包）：nil=超管不过滤，[]=无权限空集，[ids]=限定。SN-keyed 模块在调 Source 前
+// 把入参 SN 收窄到可见集合；文件 ID 模块（mr_files/pm_files）由 Source 返回后按
+// BundleFile.DeviceSN 后置剔除域外设备文件。firmware 镜像无 DeviceSN，是全局制品，不过滤。
+func (s *Service) WriteZipTo(ctx context.Context, module Module, targetIDs []string, visibleGroups []uuid.UUID, w io.Writer) (int, error) {
 	s.mu.RLock()
 	source, ok := s.sources[module]
+	snReader := s.snReader
 	s.mu.RUnlock()
 	if !ok {
 		return 0, fmt.Errorf("no source registered for module %s: %w", module, commonerrors.ErrInvalidInput)
@@ -66,10 +96,31 @@ func (s *Service) WriteZipTo(ctx context.Context, module Module, targetIDs []str
 	if len(targetIDs) == 0 {
 		return 0, fmt.Errorf("target_ids empty: %w", commonerrors.ErrInvalidInput)
 	}
+
+	// SN-keyed 模块：调 Source 前先把 targetIDs（=SN 列表）收窄到可见集合。
+	if _, snKeyed := snKeyedModules[module]; snKeyed {
+		kept, fErr := filterVisibleSNs(ctx, snReader, visibleGroups, targetIDs)
+		if fErr != nil {
+			return 0, fmt.Errorf("filter visible serial numbers: %w", fErr)
+		}
+		if len(kept) == 0 {
+			// 全部目标都不在可见组 → 无可下内容（caller 据 0 文件回 4xx）。
+			return 0, nil
+		}
+		targetIDs = kept
+	}
+
 	files, err := source(ctx, targetIDs)
 	if err != nil {
 		return 0, fmt.Errorf("resolve files: %w", err)
 	}
+
+	// 文件 ID 模块：Source 已把每个文件的归属 SN 填到 BundleFile.DeviceSN，
+	// 这里按可见性后置剔除（DeviceSN 为空的条目——如 firmware——不参与过滤直接保留）。
+	if files, err = s.filterFilesByVisibleSN(ctx, snReader, visibleGroups, files); err != nil {
+		return 0, fmt.Errorf("filter files by visible serial numbers: %w", err)
+	}
+
 	if len(files) == 0 {
 		return 0, nil
 	}
@@ -100,6 +151,44 @@ func (s *Service) WriteZipTo(ctx context.Context, module Module, targetIDs []str
 		}
 	}
 	return writtenCount, nil
+}
+
+// filterFilesByVisibleSN 按 BundleFile.DeviceSN 把 Source 返回的文件剔除到可见集合。
+// DeviceSN 为空的条目（如 firmware 全局制品）不参与过滤，直接保留。
+// reader == nil（dev/test）或 visibleGroups == nil（超管）→ 原样返回。
+func (s *Service) filterFilesByVisibleSN(ctx context.Context, reader SNVisibilityReader, visibleGroups []uuid.UUID, files []BundleFile) ([]BundleFile, error) {
+	if reader == nil || visibleGroups == nil {
+		return files, nil
+	}
+	// 收集需要判定的 SN（去重）。
+	snSet := make(map[string]struct{})
+	for i := range files {
+		if files[i].DeviceSN != "" {
+			snSet[files[i].DeviceSN] = struct{}{}
+		}
+	}
+	if len(snSet) == 0 {
+		return files, nil // 全是无归属设备的全局制品。
+	}
+	sns := make([]string, 0, len(snSet))
+	for sn := range snSet {
+		sns = append(sns, sn)
+	}
+	visible, err := reader.VisibleSerialNumbers(ctx, visibleGroups, sns)
+	if err != nil {
+		return nil, err
+	}
+	kept := make([]BundleFile, 0, len(files))
+	for _, f := range files {
+		if f.DeviceSN == "" {
+			kept = append(kept, f) // 全局制品保留。
+			continue
+		}
+		if _, ok := visible[f.DeviceSN]; ok {
+			kept = append(kept, f)
+		}
+	}
+	return kept, nil
 }
 
 // chunkSize 是单文件流式拷贝的批大小。每 chunk 写完会 flush 一次底层

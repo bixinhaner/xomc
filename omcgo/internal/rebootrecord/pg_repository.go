@@ -69,6 +69,24 @@ func buildUnion(f Filter) (string, []interface{}) {
 		faultWhere = append(faultWhere, c.fault)
 	}
 
+	// #63 设备组可见性 fail-closed 过滤（三态契约见 authz 包）：
+	//   nil       → 超管：不加条件。
+	//   []        → 无权限：两半各加 FALSE（空集）。
+	//   [g1,...]  → 两半各按 device_id 关联 device_group_members 子查询收窄；
+	//               device_id 为 NULL 的记录不在子查询结果内，自然被排除（fail-closed）。
+	if f.VisibleGroups != nil {
+		if len(f.VisibleGroups) == 0 {
+			eventWhere = append(eventWhere, "FALSE")
+			faultWhere = append(faultWhere, "FALSE")
+		} else {
+			args = append(args, f.VisibleGroups)
+			ph := fmt.Sprintf("$%d", len(args))
+			vis := "device_id IN (SELECT device_id FROM device_group_members WHERE group_id = ANY(" + ph + "))"
+			eventWhere = append(eventWhere, vis)
+			faultWhere = append(faultWhere, vis)
+		}
+	}
+
 	eventSelect := `SELECT id::text AS id, 'event' AS source, false AS is_abnormal, device_sn,
 		COALESCE(device_name, '') AS device_name, COALESCE(device_type, '') AS device_type,
 		COALESCE(operate_ip, '') AS operate_ip, COALESCE(software_version, '') AS software_version,

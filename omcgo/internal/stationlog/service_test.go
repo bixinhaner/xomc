@@ -325,7 +325,7 @@ func TestServiceDelete_NotFoundMapsToSentinel(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			svc, _, _ := newTestService()
-			err := svc.Delete(context.Background(), uuid.New(), tc.logType)
+			err := svc.Delete(context.Background(), uuid.New(), tc.logType, nil)
 			require.Error(t, err)
 			assert.ErrorIs(t, err, commonerrors.ErrNotFound)
 		})
@@ -344,10 +344,28 @@ func TestServiceDelete_ExistingRowNoSentinel(t *testing.T) {
 	}))
 	id := faultRepo.rows[0].ID
 
-	err := svc.Delete(context.Background(), id, LogTypeFault)
+	err := svc.Delete(context.Background(), id, LogTypeFault, nil)
 	require.NoError(t, err)
 	assert.False(t, errors.Is(err, commonerrors.ErrNotFound))
 	assert.True(t, faultRepo.rows[0].IsDeleted)
+}
+
+// TestServiceDelete_AlreadyDeletedMapsToConflict 锁定 finding 5/6：对已软删记录再次
+// 删除返回 wrap commonerrors.ErrAlreadyExists（handler 映射 409），而非静默 200 / 重复删 MinIO。
+func TestServiceDelete_AlreadyDeletedMapsToConflict(t *testing.T) {
+	svc, _, faultRepo := newTestService()
+	require.NoError(t, svc.RecordAbnormalReboot(context.Background(), device.AbnormalRebootSnapshot{
+		DeviceID:       uuid.New(),
+		DeviceSN:       "SN-DEL-TWICE",
+		HaltMainReason: "halt_reboot",
+		DetectedAt:     time.Now(),
+	}))
+	id := faultRepo.rows[0].ID
+	faultRepo.rows[0].IsDeleted = true
+
+	err := svc.Delete(context.Background(), id, LogTypeFault, nil)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, commonerrors.ErrAlreadyExists)
 }
 
 // TestServiceDownloadURL_NotFoundMapsToSentinel 锁定 #125 修复：DownloadURL 对
@@ -363,16 +381,16 @@ func TestServiceDownloadURL_NotFoundMapsToSentinel(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			svc, _, _ := newTestService()
-			_, err := svc.DownloadURL(context.Background(), uuid.New(), tc.logType)
+			_, err := svc.DownloadURL(context.Background(), uuid.New(), tc.logType, nil)
 			require.Error(t, err)
 			assert.ErrorIs(t, err, commonerrors.ErrNotFound)
 		})
 	}
 }
 
-// TestServiceDownloadURL_DeletedMapsToSentinel 已软删的记录下载也按 NotFound 语义
-// 返回（资源已不可用），handler 映射 404 而非 500。
-func TestServiceDownloadURL_DeletedMapsToSentinel(t *testing.T) {
+// TestServiceDownloadURL_DeletedMapsToConflict 已软删的记录下载按冲突态返回
+// commonerrors.ErrAlreadyExists（finding 5/6：handler 映射 409，区别于"从不存在" 404）。
+func TestServiceDownloadURL_DeletedMapsToConflict(t *testing.T) {
 	svc, _, faultRepo := newTestService()
 	require.NoError(t, svc.RecordAbnormalReboot(context.Background(), device.AbnormalRebootSnapshot{
 		DeviceID:       uuid.New(),
@@ -383,7 +401,7 @@ func TestServiceDownloadURL_DeletedMapsToSentinel(t *testing.T) {
 	id := faultRepo.rows[0].ID
 	faultRepo.rows[0].IsDeleted = true
 
-	_, err := svc.DownloadURL(context.Background(), id, LogTypeFault)
+	_, err := svc.DownloadURL(context.Background(), id, LogTypeFault, nil)
 	require.Error(t, err)
-	assert.ErrorIs(t, err, commonerrors.ErrNotFound)
+	assert.ErrorIs(t, err, commonerrors.ErrAlreadyExists)
 }

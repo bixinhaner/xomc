@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/authz"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/response"
@@ -19,6 +20,7 @@ import (
 type Handler struct {
 	runner    *ConformanceTestRunner
 	validator *DataModelValidator
+	resolver  *authz.Resolver
 	logger    *zap.Logger
 }
 
@@ -29,6 +31,12 @@ func NewHandler(runner *ConformanceTestRunner, validator *DataModelValidator, lo
 		validator: validator,
 		logger:    logger.Named("interop-handler"),
 	}
+}
+
+// SetPermissionService 注入数据权限解析器（#63 设备组可见性强制层）。未注入时
+// FromContext 走 nil-safe 退化（不过滤），与 device/alarm 模块语义一致。
+func (h *Handler) SetPermissionService(perm authz.VisibleGroupsResolver) {
+	h.resolver = authz.NewResolver(perm)
 }
 
 // RegisterRoutes registers interop testing routes on the router group.
@@ -59,11 +67,16 @@ func (h *Handler) RunTests(c *gin.Context) {
 		return
 	}
 
+	visibleGroups, ok := h.resolver.FromContext(c)
+	if !ok {
+		return
+	}
+
 	var results []TestResult
 	var err error
 
 	if len(req.Categories) == 0 {
-		results, err = h.runner.RunAll(c.Request.Context(), req.DeviceSN)
+		results, err = h.runner.RunAll(c.Request.Context(), req.DeviceSN, visibleGroups)
 	} else {
 		for _, cat := range req.Categories {
 			if !cat.IsValid() {
@@ -71,7 +84,7 @@ func (h *Handler) RunTests(c *gin.Context) {
 					commonerrors.NewBusinessError(10001, "invalid test category: "+string(cat), commonerrors.ErrInvalidInput))
 				return
 			}
-			catResults, catErr := h.runner.RunByCategory(c.Request.Context(), req.DeviceSN, cat)
+			catResults, catErr := h.runner.RunByCategory(c.Request.Context(), req.DeviceSN, cat, visibleGroups)
 			if catErr != nil {
 				err = catErr
 				break
@@ -118,7 +131,12 @@ func (h *Handler) RunByCategory(c *gin.Context) {
 		return
 	}
 
-	results, err := h.runner.RunByCategory(c.Request.Context(), req.DeviceSN, category)
+	visibleGroups, ok := h.resolver.FromContext(c)
+	if !ok {
+		return
+	}
+
+	results, err := h.runner.RunByCategory(c.Request.Context(), req.DeviceSN, category, visibleGroups)
 	if err != nil {
 		status := commonerrors.HTTPStatusFromError(err)
 		commonerrors.AbortWithError(c, status, err)
@@ -146,9 +164,9 @@ func (h *Handler) RunByCategory(c *gin.Context) {
 // runs the requested categories (all categories if Categories is empty) and
 // returns the flat result slice. Returns ErrInvalidInput-wrapped error if a
 // requested category is unknown.
-func (h *Handler) executeRunRequest(ctx context.Context, req *RunTestsRequest) ([]TestResult, error) {
+func (h *Handler) executeRunRequest(ctx context.Context, req *RunTestsRequest, visibleGroups []uuid.UUID) ([]TestResult, error) {
 	if len(req.Categories) == 0 {
-		return h.runner.RunAll(ctx, req.DeviceSN)
+		return h.runner.RunAll(ctx, req.DeviceSN, visibleGroups)
 	}
 
 	var results []TestResult
@@ -156,7 +174,7 @@ func (h *Handler) executeRunRequest(ctx context.Context, req *RunTestsRequest) (
 		if !cat.IsValid() {
 			return nil, commonerrors.NewBusinessError(10001, "invalid test category: "+string(cat), commonerrors.ErrInvalidInput)
 		}
-		catResults, err := h.runner.RunByCategory(ctx, req.DeviceSN, cat)
+		catResults, err := h.runner.RunByCategory(ctx, req.DeviceSN, cat, visibleGroups)
 		if err != nil {
 			return nil, err
 		}
@@ -187,7 +205,12 @@ func (h *Handler) ExportReport(c *gin.Context) {
 		return
 	}
 
-	results, err := h.executeRunRequest(c.Request.Context(), &req)
+	visibleGroups, ok := h.resolver.FromContext(c)
+	if !ok {
+		return
+	}
+
+	results, err := h.executeRunRequest(c.Request.Context(), &req, visibleGroups)
 	if err != nil {
 		status := commonerrors.HTTPStatusFromError(err)
 		commonerrors.AbortWithError(c, status, err)
@@ -235,7 +258,12 @@ func (h *Handler) ValidateDevice(c *gin.Context) {
 		return
 	}
 
-	report, err := h.validator.ValidateDevice(c.Request.Context(), deviceID, carrier, tech)
+	visibleGroups, ok := h.resolver.FromContext(c)
+	if !ok {
+		return
+	}
+
+	report, err := h.validator.ValidateDevice(c.Request.Context(), deviceID, carrier, tech, visibleGroups)
 	if err != nil {
 		status := commonerrors.HTTPStatusFromError(err)
 		commonerrors.AbortWithError(c, status, err)

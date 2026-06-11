@@ -33,6 +33,11 @@ type BundleFile struct {
 	Bucket     string
 	ObjectPath string
 	EntryName  string
+	// DeviceSN 是该文件归属设备的序列号；#63 设备组可见性强制层用它对「按文件 ID
+	// 勾选下载」（mr_files / pm_files）的结果做归属过滤——这两类 targetIDs 是文件 ID，
+	// 入口无法预先按 SN 过滤，只能在文件解析出 SN 后由 WriteZipTo 后置剔除域外设备。
+	// 留空表示该文件不归属任何设备（如 firmware 镜像是全局制品，不参与设备组过滤）。
+	DeviceSN string
 }
 
 // Source —— 模块特定的"按 targetIDs 列出物理文件"。Service 启动时各模块注册,

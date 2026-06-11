@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/omcgo/omcgo/internal/authz"
 	"github.com/omcgo/omcgo/internal/core/storage"
 )
 
@@ -221,6 +222,9 @@ func (r *PgRepository) List(ctx context.Context, filter LogFileFilter) ([]*LogFi
 		base = base.Where(sq.LtOrEq{"collected_at": *filter.EndTime})
 		countBase = countBase.Where(sq.LtOrEq{"collected_at": *filter.EndTime})
 	}
+	// #63 设备组可见性 fail-closed 过滤（device_id 为 NULL 的未关联记录对非超管不可见）。
+	base = authz.ApplyDeviceVisibilityFilter(base, "device_id", filter.VisibleGroups)
+	countBase = authz.ApplyDeviceVisibilityFilter(countBase, "device_id", filter.VisibleGroups)
 
 	countQuery, countArgs, err := countBase.ToSql()
 	if err != nil {

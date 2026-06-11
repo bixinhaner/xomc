@@ -11,6 +11,7 @@ import (
 
 	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/alarm"
+	"github.com/omcgo/omcgo/internal/authz"
 	"github.com/omcgo/omcgo/internal/bundle"
 	"github.com/omcgo/omcgo/internal/config/template"
 	"github.com/omcgo/omcgo/internal/core/components"
@@ -522,12 +523,14 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 
 	// ----- Software routes → resource "firmware" -----
 	md.softwareHandler.RegisterRoutes(permGroup("firmware"))
+	md.ufteHandler.SetPermissionService(c.PermService) // #63 设备组可见性数据权限
 	md.ufteHandler.RegisterRoutes(permGroup("firmware"))
 
 	// ----- Task routes → resource "devices" -----
 	md.taskHandler.RegisterRoutes(permGroup("devices"))
 
 	// ----- Interop routes → resource "interop" -----
+	md.interopHandler.SetPermissionService(c.PermService) // #63 设备组可见性数据权限
 	md.interopHandler.RegisterRoutes(permGroup("interop"))
 
 	// ----- Backup routes → resource "devices" -----
@@ -537,40 +540,45 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	// 每个模块 POST /<module>/batch-download 挂在各自资源下,鉴权独立。
 	// handler 直接流 zip 到 response writer,浏览器一次下载。
 	if md.bundleSvc != nil {
+		// #63 设备组可见性：批量下载共用一个 Resolver，handler 内按调用者可见组过滤。
+		bundleResolver := authz.NewResolver(c.PermService)
 		permGroup("firmware").POST("/firmware/batch-download",
-			bundle.NewBatchDownloadHandler(md.bundleSvc, bundle.ModuleFirmware))
+			bundle.NewBatchDownloadHandler(md.bundleSvc, bundle.ModuleFirmware, bundleResolver))
 
 		bkGrp := permGroup("devices")
 		bkGrp.POST("/backup/config-snapshots/batch-download",
-			bundle.NewBatchDownloadHandler(md.bundleSvc, bundle.ModuleConfigSnapshot))
+			bundle.NewBatchDownloadHandler(md.bundleSvc, bundle.ModuleConfigSnapshot, bundleResolver))
 		bkGrp.POST("/backup/device-licenses/batch-download",
-			bundle.NewBatchDownloadHandler(md.bundleSvc, bundle.ModuleDeviceLicense))
+			bundle.NewBatchDownloadHandler(md.bundleSvc, bundle.ModuleDeviceLicense, bundleResolver))
 
 		permGroup("pm").POST("/mr/files/batch-download",
-			bundle.NewBatchDownloadHandler(md.bundleSvc, bundle.ModuleMR))
+			bundle.NewBatchDownloadHandler(md.bundleSvc, bundle.ModuleMR, bundleResolver))
 		// 按 file_id 粒度打包(DeviceFilesDrawer 抽屉用,跟按设备整盘下载语义不同)。
 		permGroup("pm").POST("/mr/files/by-id/batch-download",
-			bundle.NewBatchDownloadHandler(md.bundleSvc, bundle.ModuleMRFiles))
+			bundle.NewBatchDownloadHandler(md.bundleSvc, bundle.ModuleMRFiles, bundleResolver))
 
 		// PM 批量下载（按设备 SN / 按 file_id），跟 MR 同构。
 		permGroup("pm").POST("/pm/files/batch-download",
-			bundle.NewBatchDownloadHandler(md.bundleSvc, bundle.ModulePM))
+			bundle.NewBatchDownloadHandler(md.bundleSvc, bundle.ModulePM, bundleResolver))
 		permGroup("pm").POST("/pm/files/by-id/batch-download",
-			bundle.NewBatchDownloadHandler(md.bundleSvc, bundle.ModulePMFiles))
+			bundle.NewBatchDownloadHandler(md.bundleSvc, bundle.ModulePMFiles, bundleResolver))
 	}
 
 	// ----- Station Log routes → resource "devices" -----
 	if md.stationlogHandler != nil {
+		md.stationlogHandler.SetPermissionService(c.PermService) // #63 设备组可见性数据权限
 		md.stationlogHandler.RegisterRoutes(permGroup("devices"))
 	}
 
 	// ----- EventLog routes → resource "devices" -----
 	if md.eventlogHandler != nil {
+		md.eventlogHandler.SetPermissionService(c.PermService) // #63 设备组可见性数据权限
 		md.eventlogHandler.RegisterRoutes(permGroup("devices"))
 	}
 
 	// ----- RebootRecord routes（统一重启记录）→ resource "devices" -----
 	if md.rebootrecordHandler != nil {
+		md.rebootrecordHandler.SetPermissionService(c.PermService) // #63 设备组可见性数据权限
 		md.rebootrecordHandler.RegisterRoutes(permGroup("devices"))
 	}
 

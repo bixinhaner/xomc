@@ -352,6 +352,8 @@ func initUFTEModule(c *Container) error {
 		c.DeviceRepo,
 		logger,
 	)
+	// #63 租户隔离：注入设备组归属读取器，CreateTask / 各操作端点按设备可见性强制。
+	service.SetGroupReader(device.NewPgDeviceGroupReader(c.PgPool))
 	// 设备候选过滤的 productClass → tech 精确识别走 ProductRegistry，避免
 	// FAP/BSC7041C243 这种"非 5G/GNB 关键字命名但实际是 5G 产品"被关键字模糊
 	// 匹配漏选。Registry 缺失 → matchesTaskTypeScope 关键字兜底。
@@ -551,7 +553,9 @@ func initUFTEModule(c *Container) error {
 	// 不经过本回调。
 	if c.miscDeps.taskScheduler != nil {
 		c.miscDeps.taskScheduler.SetCollectTrigger(func(ctx context.Context, taskID uuid.UUID) error {
-			return service.StartTask(ctx, taskID)
+			// scheduler 是进程内可信触发（任务创建时已校验过设备归属），传 nil 等价
+			// 超管不再二次按租户限制（#63 设备组可见性只约束 HTTP 暴露面）。
+			return service.StartTask(ctx, taskID, nil)
 		})
 		logger.Info("task scheduler collect trigger wired to ufte.Service.StartTask")
 	}
@@ -861,6 +865,9 @@ func initBackupModule(c *Container) error {
 	// 不存中间产物 / 不签 presigned URL / 不轮询 — 比异步方案干净得多。
 	if c.MinIO != nil {
 		bundleSvc := bundle.NewService(c.MinIO, logger)
+		// #63 设备组可见性：批量下载按调用者可见设备组过滤（SN-keyed 模块入口预过滤，
+		// 文件 ID 模块按 BundleFile.DeviceSN 后置剔除）。
+		bundleSvc.SetSNVisibilityReader(bundle.NewPgSNVisibilityReader(c.PgPool))
 
 		// Source #1 firmware: targetIDs = firmware_versions.id (UUID 字符串)。
 		// 重建一个轻量 repo 避免依赖 initSoftwareModule 内的局部变量(那里
@@ -974,6 +981,7 @@ func initBackupModule(c *Container) error {
 					Bucket:     mrBucket,
 					ObjectPath: f.MinioPath,
 					EntryName:  prefix + "/" + f.DeviceSN + "/" + f.FileName,
+					DeviceSN:   f.DeviceSN, // #63 供 WriteZipTo 按可见性后置剔除
 				})
 			}
 			return out, nil
@@ -1031,6 +1039,7 @@ func initBackupModule(c *Container) error {
 					Bucket:     pmBucket,
 					ObjectPath: f.MinioPath,
 					EntryName:  prefix + "/" + f.DeviceSN + "/" + f.FileName,
+					DeviceSN:   f.DeviceSN, // #63 供 WriteZipTo 按可见性后置剔除
 				})
 			}
 			return out, nil
@@ -1099,6 +1108,8 @@ func initStationLogModule(c *Container) error {
 	runningRepo := stationlog.NewPgRunningRepository(c.PgPool)
 	faultRepo := stationlog.NewPgFaultRepository(c.PgPool)
 	svc := stationlog.NewService(runningRepo, faultRepo, c.DeviceService, c.MinIO, c.Cfg.MinIO.Buckets, logger)
+	// #63 租户隔离：注入设备组归属读取器，按记录归属设备校验下载 / 删除 / 详情。
+	svc.SetGroupReader(device.NewPgDeviceGroupReader(c.PgPool))
 
 	// 订阅 SubjectLogFileReceived 事件，将上传的日志文件入库
 	if c.EventBus != nil {
@@ -1128,6 +1139,8 @@ func initEventLogModule(c *Container) error {
 
 	repo := eventlog.NewPgRepository(c.PgPool)
 	svc := eventlog.NewService(repo, logger)
+	// #63 租户隔离：注入设备组归属读取器，按记录归属设备校验详情读取。
+	svc.SetGroupReader(device.NewPgDeviceGroupReader(c.PgPool))
 
 	c.miscDeps.eventlogHandler = eventlog.NewHandler(svc, logger)
 
@@ -1262,6 +1275,10 @@ func initInteropModule(c *Container) error {
 	testRunner.RegisterCases(cases.InformCases())
 	testRunner.RegisterCases(cases.FaultInjectCases())
 	dmValidator := interop.NewDataModelValidator(c.ParamRegistry, c.ProductRegistry, c.ParamRepo, c.DeviceRepo, logger)
+	// #63 租户隔离：注入设备组归属读取器，run / validate 执行（可能含破坏性 RPC）前按设备校验。
+	interopGroupReader := device.NewPgDeviceGroupReader(c.PgPool)
+	testRunner.SetGroupReader(interopGroupReader)
+	dmValidator.SetGroupReader(interopGroupReader)
 	interopHandler := interop.NewHandler(testRunner, dmValidator, logger)
 
 	c.miscDeps.interopHandler = interopHandler

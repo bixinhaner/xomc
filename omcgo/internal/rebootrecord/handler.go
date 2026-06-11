@@ -9,17 +9,25 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/authz"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 type Handler struct {
-	svc    *Service
-	logger *zap.Logger
+	svc      *Service
+	resolver *authz.Resolver
+	logger   *zap.Logger
 }
 
 func NewHandler(svc *Service, logger *zap.Logger) *Handler {
 	return &Handler{svc: svc, logger: logger.Named("rebootrecord-handler")}
+}
+
+// SetPermissionService 注入数据权限解析器（#63 设备组可见性强制层）。未注入时
+// FromContext 走 nil-safe 退化（不过滤），与 device/alarm 模块语义一致。
+func (h *Handler) SetPermissionService(perm authz.VisibleGroupsResolver) {
+	h.resolver = authz.NewResolver(perm)
 }
 
 // RegisterRoutes 挂载于 /api/v1 下：
@@ -76,6 +84,11 @@ func parseFilter(c *gin.Context) Filter {
 // @Param page_size   query int    false "每页 默认 20"
 func (h *Handler) List(c *gin.Context) {
 	f := parseFilter(c)
+	groups, ok := h.resolver.FromContext(c)
+	if !ok {
+		return
+	}
+	f.VisibleGroups = groups
 	items, total, err := h.svc.List(c.Request.Context(), f)
 	if err != nil {
 		h.logger.Error("list reboot records", zap.Error(err))
@@ -96,6 +109,12 @@ func (h *Handler) Statistics(c *gin.Context) {
 	f := parseFilter(c)
 	f.Page = 1
 	f.PageSize = 0 // 统计不分页
+
+	groups, ok := h.resolver.FromContext(c)
+	if !ok {
+		return
+	}
+	f.VisibleGroups = groups
 
 	items, err := h.svc.StatByDevice(c.Request.Context(), f)
 	if err != nil {

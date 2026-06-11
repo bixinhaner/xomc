@@ -9,6 +9,7 @@ import (
 	"github.com/minio/minio-go/v7"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/authz"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/event"
@@ -35,6 +36,31 @@ type Service struct {
 	minioClient  *minio.Client
 	buckets      appconfig.BucketConfig
 	logger       *zap.Logger
+	// groupReader 是 #63 设备组可见性强制层的按设备归属读取器；GetByID/DownloadURL/
+	// Delete 在拿到记录后用它校验记录归属设备是否在调用者可见组内。nil → dev/test 退化
+	// 放行（authz nil-safe）。
+	groupReader authz.GroupReader
+}
+
+// SetGroupReader 注入设备组归属读取器（#63 租户隔离强制层）。
+func (s *Service) SetGroupReader(reader authz.GroupReader) {
+	s.groupReader = reader
+}
+
+// authorizeRecord 校验一条日志记录的归属设备是否在调用者可见组内。
+//
+//	visibleGroups == nil   → 超管：放行。
+//	groupReader == nil     → dev/test 退化：放行。
+//	记录 device_id 为空     → 未关联设备：非超管不可见 → ErrForbidden（fail-closed）。
+//	否则                   → 委派 authz.AuthorizeDeviceAccess 判交集。
+func (s *Service) authorizeRecord(ctx context.Context, f *LogFile, visibleGroups []uuid.UUID) error {
+	if visibleGroups == nil || s.groupReader == nil {
+		return nil
+	}
+	if f.DeviceID == nil {
+		return commonerrors.ErrForbidden
+	}
+	return authz.AuthorizeDeviceAccess(ctx, s.groupReader, *f.DeviceID, visibleGroups)
 }
 
 func NewService(
@@ -237,8 +263,19 @@ func (s *Service) List(ctx context.Context, filter LogFileFilter) ([]*LogFile, i
 }
 
 // GetByID 按 ID 获取日志文件记录，需指定 logType 以确定查哪张表。
-func (s *Service) GetByID(ctx context.Context, id uuid.UUID, logType LogType) (*LogFile, error) {
-	return s.repoFor(logType).GetByID(ctx, id)
+// #63：拿到记录后按 visibleGroups 校验归属（记录存在但越权 → ErrForbidden）。
+func (s *Service) GetByID(ctx context.Context, id uuid.UUID, logType LogType, visibleGroups []uuid.UUID) (*LogFile, error) {
+	f, err := s.repoFor(logType).GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if f == nil {
+		return nil, nil
+	}
+	if authzErr := s.authorizeRecord(ctx, f, visibleGroups); authzErr != nil {
+		return nil, authzErr
+	}
+	return f, nil
 }
 
 // LatestByDevice 获取指定设备最近一次采集的某类型日志文件。
@@ -248,7 +285,10 @@ func (s *Service) LatestByDevice(ctx context.Context, deviceID uuid.UUID, logTyp
 
 // DownloadURL 为指定日志文件生成 MinIO 预签名下载 URL（有效期 1 小时）。
 // logType 用于路由到正确的表。
-func (s *Service) DownloadURL(ctx context.Context, id uuid.UUID, logType LogType) (string, error) {
+//
+// 错误语义（finding 5/6）：记录不存在 → ErrNotFound（handler 映射 404）；记录已删除
+// → ErrAlreadyExists（409，资源处于"已删除"冲突态，不再可下载）。#63：越权 → ErrForbidden。
+func (s *Service) DownloadURL(ctx context.Context, id uuid.UUID, logType LogType, visibleGroups []uuid.UUID) (string, error) {
 	f, err := s.repoFor(logType).GetByID(ctx, id)
 	if err != nil {
 		return "", fmt.Errorf("get log file: %w", err)
@@ -256,8 +296,11 @@ func (s *Service) DownloadURL(ctx context.Context, id uuid.UUID, logType LogType
 	if f == nil {
 		return "", fmt.Errorf("log file not found: %w", commonerrors.ErrNotFound)
 	}
+	if authzErr := s.authorizeRecord(ctx, f, visibleGroups); authzErr != nil {
+		return "", authzErr
+	}
 	if f.IsDeleted {
-		return "", fmt.Errorf("log file has been deleted: %w", commonerrors.ErrNotFound)
+		return "", fmt.Errorf("log file has been deleted: %w", commonerrors.ErrAlreadyExists)
 	}
 
 	presignedURL, err := s.minioClient.PresignedGetObject(ctx, f.Bucket, f.ObjectPath, time.Hour, nil)
@@ -269,7 +312,10 @@ func (s *Service) DownloadURL(ctx context.Context, id uuid.UUID, logType LogType
 
 // Delete 删除日志文件（MinIO 文件 + 标记 is_deleted）。
 // logType 用于路由到正确的表。
-func (s *Service) Delete(ctx context.Context, id uuid.UUID, logType LogType) error {
+//
+// 错误语义（finding 5/6）：记录不存在 → ErrNotFound（404）；记录已删除 →
+// ErrAlreadyExists（409，幂等冲突态，避免重复删 MinIO + 误返 200）。#63：越权 → ErrForbidden。
+func (s *Service) Delete(ctx context.Context, id uuid.UUID, logType LogType, visibleGroups []uuid.UUID) error {
 	repo := s.repoFor(logType)
 	f, err := repo.GetByID(ctx, id)
 	if err != nil {
@@ -278,14 +324,18 @@ func (s *Service) Delete(ctx context.Context, id uuid.UUID, logType LogType) err
 	if f == nil {
 		return fmt.Errorf("log file not found: %w", commonerrors.ErrNotFound)
 	}
+	if authzErr := s.authorizeRecord(ctx, f, visibleGroups); authzErr != nil {
+		return authzErr
+	}
+	if f.IsDeleted {
+		return fmt.Errorf("log file already deleted: %w", commonerrors.ErrAlreadyExists)
+	}
 
-	if !f.IsDeleted {
-		if removeErr := s.minioClient.RemoveObject(ctx, f.Bucket, f.ObjectPath, minio.RemoveObjectOptions{}); removeErr != nil {
-			s.logger.Warn("remove log file from minio",
-				zap.String("id", id.String()),
-				zap.Error(removeErr),
-			)
-		}
+	if removeErr := s.minioClient.RemoveObject(ctx, f.Bucket, f.ObjectPath, minio.RemoveObjectOptions{}); removeErr != nil {
+		s.logger.Warn("remove log file from minio",
+			zap.String("id", id.String()),
+			zap.Error(removeErr),
+		)
 	}
 	return repo.MarkDeleted(ctx, id)
 }

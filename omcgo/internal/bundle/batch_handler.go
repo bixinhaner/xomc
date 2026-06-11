@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/authz"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 )
 
@@ -26,7 +27,7 @@ type BatchDownloadRequest struct {
 // 注意：响应必须 keep-alive,nginx proxy_read_timeout 要够大(我们 default.conf
 // 已经 60s,大批量 GB 级 zip 可能需要 5min+,handler 先 Flush 0 字节让 nginx
 // 不超时,后续 chunk 持续 keepalive)。
-func NewBatchDownloadHandler(svc *Service, module Module) gin.HandlerFunc {
+func NewBatchDownloadHandler(svc *Service, module Module, resolver *authz.Resolver) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req BatchDownloadRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -40,6 +41,17 @@ func NewBatchDownloadHandler(svc *Service, module Module) gin.HandlerFunc {
 		if len(targets) == 0 {
 			commonerrors.AbortWithError(c, http.StatusBadRequest,
 				fmt.Errorf("empty target list (ids / serial_numbers)"))
+			return
+		}
+		// #63 目标数上限：超大请求直接 400，避免拖垮 MinIO 拉取与 zip 流。
+		if len(targets) > MaxBatchTargets {
+			commonerrors.AbortWithError(c, http.StatusBadRequest,
+				fmt.Errorf("%w: too many targets %d (max %d)", commonerrors.ErrInvalidInput, len(targets), MaxBatchTargets))
+			return
+		}
+		// #63 设备组可见性：解析调用者可见设备组；解析失败已 abort（403/500），直接 return。
+		visibleGroups, ok := resolver.FromContext(c)
+		if !ok {
 			return
 		}
 
@@ -57,7 +69,7 @@ func NewBatchDownloadHandler(svc *Service, module Module) gin.HandlerFunc {
 			f.Flush()
 		}
 
-		count, err := svc.WriteZipTo(c.Request.Context(), module, targets, c.Writer)
+		count, err := svc.WriteZipTo(c.Request.Context(), module, targets, visibleGroups, c.Writer)
 		if err != nil {
 			// 已经 WriteHeader 了,这里只能记日志,后续浏览器下载到的 zip 不完整
 			svc.logger.Warn("batch download stream failed",
