@@ -22,6 +22,7 @@ import StatisticsPanel from '@/components/StatisticsPanel';
 import StatusIndicator from '@/components/StatusIndicator';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useDeviceList, useBatchRebootDevices, useDeviceGroups } from '@core/hooks/api/useDevices';
+import { useProductList } from '@core/hooks/api/useProducts';
 import { useDictionaryBatch } from '@core/hooks/api/useSystem';
 import { useAlarmCount, useTriggerAlarmSync } from '@core/hooks/api/useAlarms';
 import { useCreateUnifiedFileTransferTask } from '@core/hooks/api/useUnifiedFileTransfer';
@@ -66,6 +67,7 @@ const FILTER_COLUMN_MAP: Record<string, string> = {
   isOnline: 'connStatus',
   opState: 'opState',
   networkType: 'networkType',
+  productId: 'deviceModel',
   productModel: 'productClass',
   modelName: 'deviceModel',
   softwareVersion: 'softwareVersion',
@@ -409,6 +411,14 @@ export default function DeviceList() {
     [],
   );
 
+  // 产品名称下拉：选项来自 /products（label=产品名称，value=产品 UUID → devices.product_id）。
+  // 与「产品类型」(product_class 字典) 不同，此处按产品装配件主键过滤。
+  const { data: productListResp } = useProductList();
+  const productOptions = useMemo(
+    () => (productListResp?.items ?? []).map((p) => ({ label: p.name, value: p.id })),
+    [productListResp],
+  );
+
   // 性能优化：SEVERITY_LABEL 改为函数调用，移除 useMemo
   // 仅 5 个字符串映射，计算开销可忽略，避免依赖 t 函数导致频繁重建
   const getSeverityLabel = useCallback((severity: string): string => {
@@ -478,6 +488,14 @@ export default function DeviceList() {
       width: 160,
       options: dictToOptions(networkTypeDict),
     },
+    // 产品名称（按 devices.product_id 过滤，下拉来自 /products，value=产品 UUID）——置于产品类型之前。
+    {
+      name: 'productId',
+      label: t('device.productName'),
+      type: 'select',
+      width: 160,
+      options: productOptions,
+    },
     {
       name: 'productModel',
       label: t('device.productClass'),
@@ -517,6 +535,7 @@ export default function DeviceList() {
     },
   ], [
     t,
+    productOptions,
     isOnlineDict,
     opStateDict,
     networkTypeDict,
