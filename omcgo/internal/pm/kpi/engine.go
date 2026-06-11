@@ -254,11 +254,40 @@ func (e *KPIEngine) CalculateAndStoreFromCounters(
 	carrierCode model.CarrierCode,
 	tech model.Technology,
 ) (int, error) {
+	all, err := e.CalculateFromCounters(ctx, deviceID, oui, deviceSN, counters, collectTime, carrierCode, tech)
+	if err != nil {
+		return 0, err
+	}
+	if len(all) == 0 {
+		return 0, nil
+	}
+	if err := e.kpiRepo.BatchInsert(ctx, all); err != nil {
+		return 0, fmt.Errorf("store kpi values: %w", err)
+	}
+	return len(all), nil
+}
+
+// CalculateFromCounters 是 CalculateAndStoreFromCounters 的"只算不写"内核：用内存刚解析、已过
+// 白名单的 counter 算出 KPIValue 切片返回，不落库。供 copy-direct 写路径（collector copy 模式）
+// 把 counter 与 KPI 在同一个 CopyIngest 事务里一次性 COPY——避免 KPI 单独走一次 UPSERT 写。
+//
+// 等价性见 CalculateAndStoreFromCounters：分桶用 counter.GroupParsedCountersByCell（与
+// QueryForKPICells 共享 groupRowsByCell），求值用 evaluateRoute（与所有路径共享）。route 不可用
+// （产品未匹配等）静默 skip 返回 nil。
+func (e *KPIEngine) CalculateFromCounters(
+	ctx context.Context,
+	deviceID uuid.UUID,
+	oui, deviceSN string,
+	counters []model.PMCounter,
+	collectTime time.Time,
+	carrierCode model.CarrierCode,
+	tech model.Technology,
+) ([]model.KPIValue, error) {
 	if e.router == nil {
-		return 0, errors.New("kpi.Engine.CalculateAndStoreFromCounters: router not configured")
+		return nil, errors.New("kpi.Engine.CalculateFromCounters: router not configured")
 	}
 	if len(counters) == 0 {
-		return 0, nil
+		return nil, nil
 	}
 
 	route, err := e.router.LookupByDevice(ctx, deviceSN)
@@ -267,12 +296,12 @@ func (e *KPIEngine) CalculateAndStoreFromCounters(
 			e.logger.Warn("kpi route unavailable; skip device",
 				zap.String("device_sn", deviceSN),
 				zap.Error(err))
-			return 0, nil
+			return nil, nil
 		}
-		return 0, fmt.Errorf("kpi route lookup for %q: %w", deviceSN, err)
+		return nil, fmt.Errorf("kpi route lookup for %q: %w", deviceSN, err)
 	}
 	if route == nil || len(route.KPIs) == 0 {
-		return 0, nil
+		return nil, nil
 	}
 
 	cellIDs := uniqueCellIDsFromCounters(counters)
@@ -284,13 +313,7 @@ func (e *KPIEngine) CalculateAndStoreFromCounters(
 	for _, cellID := range cellIDs {
 		all = append(all, e.evaluateRoute(route, perCell[cellID], deviceID, oui, deviceSN, cellID, collectTime, carrierCode, tech)...)
 	}
-	if len(all) == 0 {
-		return 0, nil
-	}
-	if err := e.kpiRepo.BatchInsert(ctx, all); err != nil {
-		return 0, fmt.Errorf("store kpi values: %w", err)
-	}
-	return len(all), nil
+	return all, nil
 }
 
 // uniqueCellIDsFromCounters 去重收集内存 counter 切片里出现的 CellID（保持首次出现顺序）。

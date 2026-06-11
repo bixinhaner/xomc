@@ -153,36 +153,11 @@ func nilIfEmpty(s string) *string {
 // --- 字段转换辅助 ---
 
 // kpiValueToMetric: KPIValue → PMMetric。
-// 上游 KPIEngine 已填 v.OUI / v.DeviceSN（TR-069 标准双键）。
+//
+// 转换实现已上移到 metrics 包（metrics.MetricFromKPIValue），让 kpi.BatchInsert（UPSERT 路径）
+// 与 metrics.CopyIngest（copy-direct 路径）共用同一份字段映射，杜绝两路写出的行漂移。
 func kpiValueToMetric(v model.KPIValue) metrics.PMMetric {
-	extra := map[string]any{}
-	if v.Carrier != "" {
-		extra["carrier"] = string(v.Carrier)
-	}
-	if v.Technology != "" {
-		extra["technology"] = string(v.Technology)
-	}
-	if v.DeviceID != uuid.Nil {
-		extra["device_id"] = v.DeviceID.String()
-	}
-	var ldn *string
-	if v.CellID != "" {
-		s := v.CellID
-		ldn = &s
-	}
-	return metrics.PMMetric{
-		DeviceOUI:   v.OUI,
-		DeviceSN:    v.DeviceSN,
-		MetricPath:  v.IndicatorID,
-		MetricType:  metrics.MetricTypeKPI,
-		MetricValue: v.KPIValue,
-		Granularity: metrics.Granularity15Min,
-		Time:        v.Time,
-		StartTime:   v.Time,
-		EndTime:     v.Time,
-		ObjectLDN:   ldn,
-		Extra:       extra,
-	}
+	return metrics.MetricFromKPIValue(v)
 }
 
 func metricToKPIValue(m metrics.PMMetric) model.KPIValue {

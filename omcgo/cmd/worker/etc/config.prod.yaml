@@ -63,6 +63,11 @@ pm_async_commit: false
 # KPI 计算取数：false=内存 counter 直接算（默认，省每文件回读）；true=DB 回读（同窗多文件部署）。
 pm_kpi_window_from_db: false
 
+# PM 入库写模式：copy=激进 plain COPY 原子入库（去自然键 UPSERT 写 CPU，幂等下沉到每文件一次）；
+# upsert=默认自然键 UPSERT 跨文件补传幂等。prod 默认 upsert（durable），写吞吐瓶颈且确认无"同窗多
+# 文件需跨文件聚合"后再切 copy。
+pm_write_mode: upsert
+
 # T-0157 C2: 任务过期扫描器配置
 task:
   default_expires_in_seconds: 120

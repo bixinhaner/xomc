@@ -197,13 +197,22 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	// PM 指标大批量写异步提交（synchronous_commit=off）：PM 数据可从 MinIO 重建，换写吞吐。
 	pmmetrics.BulkAsyncCommit = cfg.PMAsyncCommit
 
+	// 写模式：copy=激进 plain COPY 原子入库（pm_files 标记 + counter + KPI 单事务 COPY，去掉每行
+	// 自然键 UPSERT 的写 CPU 大头）；其它值（含默认空）=保持 counterRepo UPSERT 路径。仅注入 copy
+	// 路径，不改 admin RecomputeKPIs 等仍走 UPSERT 的旁路。
+	pmWriteMode := strings.ToLower(strings.TrimSpace(cfg.PMWriteMode))
+	if pmWriteMode == "copy" {
+		pmCollector.SetCopyIngestor(pmmetrics.NewPgRepository(w.PgPool))
+	}
+
 	if err := pmCollector.Subscribe(w.EventBus); err != nil {
 		logger.Warn("subscribe PM collector", zap.Error(err))
 	}
 	logger.Info("PM collector started with retry+DLQ runner",
 		zap.Int("pm_consumer_concurrency", pmConcurrency),
 		zap.Bool("pm_async_commit", cfg.PMAsyncCommit),
-		zap.Bool("pm_kpi_window_from_db", cfg.PMKPIWindowFromDB))
+		zap.Bool("pm_kpi_window_from_db", cfg.PMKPIWindowFromDB),
+		zap.String("pm_write_mode", pmWriteMode))
 
 	// Alarm Receiver + Sync
 	alarmPgStore := alarm.NewPgAlarmStore(w.PgPool, w.TsPool)
