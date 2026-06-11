@@ -50,6 +50,7 @@ export interface DataTableProps<T> {
   onSelectionChange?: (keys: React.Key[], rows: T[]) => void;
   /** 列设置隐藏列变化时回调:把当前隐藏列 key 抬给父组件(device list 据此联动隐藏对应筛选下拉)。 */
   onHiddenColumnsChange?: (hiddenKeys: string[]) => void;
+  preserveSelectedRowKeys?: boolean;
   total?: number;
   pageSize?: number;
   currentPage?: number;
@@ -117,6 +118,7 @@ function DataTable<T>(
     selectable = false,
     selectedRowKeys: controlledSelectedKeys,
     onSelectionChange,
+    preserveSelectedRowKeys = false,
     total,
     pageSize = 20,
     currentPage = 1,
@@ -376,7 +378,7 @@ function DataTable<T>(
   const rowSelection: TableProps<T>['rowSelection'] = (selectable || showRowNumber)
     ? {
         fixed: true,
-        ...(selectable ? { selectedRowKeys, onChange: handleSelectionChange } : {}),
+        ...(selectable ? { selectedRowKeys, onChange: handleSelectionChange, preserveSelectedRowKeys } : {}),
         columnWidth: showRowNumber ? (selectable ? 90 : 60) : 40,
         renderCell: (_checked, _record, index, originNode) => {
           const rowNumber = (currentPage - 1) * pageSize + (index ?? 0) + 1;
