@@ -182,6 +182,14 @@ func (e *UpgradeExecutor) SetFirmwareMetrics(m *FirmwareMetrics) {
 // ExecuteOne runs the upgrade flow for a single sub-task.
 // Flow: Step 1 (online check) → Step 2 (send Download cmd) → Step 3 (monitor download) → wait for events.
 func (e *UpgradeExecutor) ExecuteOne(ctx context.Context, subTask *UpgradeSubTask, fw *FirmwareVersion, isKeepConfig bool, downloadFileType string) {
+	// #59 Problem 3 紧急叫停（第一道）：ctx 已被取消（任务被 Suspend/Terminate/阈值暂停）
+	// 时整批 goroutine 还没轮到执行就提前退出，绝不下发。ctx.Err() 非阻塞，比 select 更直白。
+	if ctx.Err() != nil {
+		e.logger.Info("upgrade dispatch skipped: execution canceled before start",
+			zap.String("sub_task_id", subTask.ID.String()))
+		return
+	}
+
 	dev, err := e.deviceRepo.GetByID(ctx, subTask.DeviceID)
 	if err != nil {
 		e.failSubTask(ctx, subTask, "Upgrade can not be started, device not found.", FailureDeviceNotFound)
@@ -231,6 +239,22 @@ func (e *UpgradeExecutor) ExecuteOne(ctx context.Context, subTask *UpgradeSubTas
 	subTask.OriVersion = dev.FirmwareVersion
 	if err := e.subTaskRepo.Update(ctx, subTask); err != nil {
 		e.logger.Error("update sub-task device info", zap.Error(err))
+	}
+
+	// #59 Problem 3 紧急叫停（第二道，权威）：拿到设备锁、即将构造并下发 Download 之前，
+	// 回库复查 sub_task 与 parent task 的最新状态。SuspendUpgrade 只改 DB 不动在飞
+	// goroutine（历史 bug），而本 goroutine 可能在 cancel 之前就越过了第一道 ctx 检查、
+	// 卡在 30s connReq / 锁竞争上；等它继续往下时 cancel 信号或 DB 暂停状态可能已经写入。
+	// 这道 DB 复查是兜底防线：只要子任务已被挂起 / 终止，或父任务已挂起，就释放锁并退出，
+	// 不再 enqueue Download。也再看一次 ctx.Err()，覆盖锁后才发生的 cancel。
+	if e.shouldAbortDispatch(ctx, subTask) {
+		// 用 detached ctx 释放锁：此刻 ctx 很可能已被急停 cancel，带它调 Redis Del 会
+		// 因 context canceled 失败、把设备锁留到 1h TTL 才过期，挡住后续重试。
+		e.releaseDeviceLock(context.Background(), dev.SerialNumber)
+		e.logger.Info("upgrade dispatch aborted: sub-task suspended/terminated before download",
+			zap.String("sub_task_id", subTask.ID.String()),
+			zap.String("device_sn", dev.SerialNumber))
+		return
 	}
 
 	// Step 2: Build and push Download command
@@ -1274,6 +1298,38 @@ func (e *UpgradeExecutor) HandleDeviceOnline(ctx context.Context, evt event.Even
 		}
 	}()
 	return nil
+}
+
+// shouldAbortDispatch 在派发 Download 之前做最后一道急停复查（#59 Problem 3）。返回 true
+// 表示必须中止下发。三个判据，任一命中即中止：
+//  1. ctx 已取消（任务被 Suspend/Terminate/canary 阈值暂停触发 cancelReg.cancel）。
+//  2. sub_task 回库最新状态已是 Suspended 或 terminal（completed/failed/terminated）——
+//     覆盖「SuspendUpgrade 只改 DB、cancel 漏掉了卡在锁/connReq 上的本 goroutine」的竞态。
+//  3. parent task 已 Suspended/ended——整任务级急停，子任务行可能还没翻状态时也要拦住。
+//
+// 读 DB 失败时按「不中止」处理（fail-open）：宁可多发一次也不要因为一次瞬时读错就漏发，
+// 与既有 acquireDeviceLock 出错也继续下发的保守取向一致；真正的权威终态仍由后续 reaper /
+// 状态机兜底。读到的状态用 GetByID（routing repo 已按表分流）。
+func (e *UpgradeExecutor) shouldAbortDispatch(ctx context.Context, subTask *UpgradeSubTask) bool {
+	if ctx.Err() != nil {
+		return true
+	}
+	current, err := e.subTaskRepo.GetByID(ctx, subTask.ID)
+	if err != nil {
+		e.logger.Warn("pre-dispatch sub-task re-check failed, proceeding",
+			zap.String("sub_task_id", subTask.ID.String()), zap.Error(err))
+		return false
+	}
+	if current.Status == UpgradeSuspended || IsUpgradeTerminal(current.Status) {
+		return true
+	}
+	parent, err := e.taskRepo.GetByID(ctx, subTask.TaskID)
+	if err != nil {
+		e.logger.Warn("pre-dispatch parent task re-check failed, proceeding",
+			zap.String("task_id", subTask.TaskID.String()), zap.Error(err))
+		return false
+	}
+	return parent.Status == TaskSuspended || parent.Status == TaskEnded
 }
 
 func (e *UpgradeExecutor) acquireDeviceLock(ctx context.Context, deviceSN string, taskID uuid.UUID) (bool, error) {

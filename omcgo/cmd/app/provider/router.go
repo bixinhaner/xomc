@@ -519,6 +519,7 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	}
 
 	// ----- Software routes → resource "firmware" -----
+	md.softwareHandler.SetPermissionService(c.PermService) // #59 升级/回退创建逐设备归属校验
 	md.softwareHandler.RegisterRoutes(permGroup("firmware"))
 	md.ufteHandler.RegisterRoutes(permGroup("firmware"))
 

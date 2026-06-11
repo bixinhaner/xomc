@@ -325,6 +325,13 @@ type RollbackRequest struct {
 	Reason           string     `json:"reason,omitempty"`
 	Source           string     `json:"source,omitempty"`
 	TargetFirmwareID *uuid.UUID `json:"target_firmware_id,omitempty"`
+
+	// Force 显式允许降级回退（#59 Problem 4 防降级守卫）。默认 false：当回退目标版本
+	// 比设备当前版本更旧（降级，可能回到含已知漏洞的旧镜像）时，整批拒绝并要求显式
+	// 确认。Force=true 表示运维已知情并批准降级。仅作用于「带 TargetFirmwareID 的显式
+	// 目标版本回退」——回退到设备自身旧 bank（不指定 target）天然就是回旧版本，是回退
+	// 的本意，不受此守卫约束。
+	Force bool `json:"force,omitempty"`
 }
 
 // BatchActionRequest is the JSON body for batch actions (suspend/resume/terminate).

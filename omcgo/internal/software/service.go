@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/omcgo/omcgo/internal/acs/connreq"
 	"github.com/omcgo/omcgo/internal/acs/transfercfg"
+	"github.com/omcgo/omcgo/internal/authz"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
@@ -73,6 +75,35 @@ type SoftwareService struct {
 	// backup_restore_file 元数据。由 cmd/app/provider/modules.go 用 backup.FileRepository
 	// + MinIO 客户端装配。未注入时仅删 upgrade_tasks/upgrade_sub_tasks（向后兼容）。
 	taskFileCleaner func(ctx context.Context, taskID uuid.UUID) error
+	// cancelReg 把每个执行中的主任务映射到可取消的 context（#59 Problem 3 紧急叫停）。
+	// SuspendUpgrade / TerminateUpgrade / canary 阈值自动暂停在改 DB status 之外，
+	// 额外 cancel 对应任务的执行 context，让在飞的子任务 goroutine 在派发 Download 前
+	// 提前退出。详见 stop_control.go。
+	cancelReg *taskCancelRegistry
+	// groupReader 是 #59 Problem 4「按设备归属校验」的统一强制层接入点（与 device /
+	// alarm 模块共用 internal/authz）。未注入时退化为不校验（dev/test），与既有
+	// nil-safe 语义一致；生产路由经 SetDeviceGroupReader 注入。可见分组的解析在 handler
+	// （持 gin ctx），service 这层只按已解析的 visibleGroups 做逐设备归属判定。
+	groupReader authz.GroupReader
+}
+
+// SetDeviceGroupReader 注入设备组读取器（#59 Problem 4 / #64 统一强制层），供
+// AuthorizeDevicesAccess 对升级 / 回退请求体里的 DeviceIDs 做逐设备归属校验。
+// 未注入时 AuthorizeDevicesAccess 退化为不校验（dev/test），与 device 模块语义一致。
+func (s *SoftwareService) SetDeviceGroupReader(reader authz.GroupReader) {
+	s.groupReader = reader
+}
+
+// AuthorizeDevicesAccess 对一批 deviceID 逐个做设备组归属校验（#59 Problem 4）。
+// visibleGroups 由 handler 从 gin ctx 经 authz.Resolver 解析后传入，三态语义见 authz 包：
+//
+//	nil       → 超管：放行。
+//	[]        → 无任何分组权限：ErrForbidden（fail-closed）。
+//	[g1,...]  → 任一设备不在可见分组内即整批 ErrForbidden（fail-fast，防请求体混入域外设备）。
+//
+// groupReader 未注入（dev/test）→ 放行（nil-safe）。委派给 authz 包唯一实现，避免语义漂移。
+func (s *SoftwareService) AuthorizeDevicesAccess(ctx context.Context, visibleGroups []uuid.UUID, deviceIDs ...uuid.UUID) error {
+	return authz.AuthorizeDevicesAccess(ctx, s.groupReader, visibleGroups, deviceIDs...)
 }
 
 // SetTaskFileCleaner 注入"任务删除时清理 MinIO 对象 + backup_restore_file 元数据"的回调。
@@ -136,6 +167,7 @@ func NewSoftwareService(
 		redis:        redisClient,
 		adapter:      NewDefaultUpgradeAdapter(),
 		logger:       logger.Named("software"),
+		cancelReg:    newTaskCancelRegistry(),
 	}
 
 	s.executor = NewUpgradeExecutor(
@@ -836,15 +868,23 @@ func applyScheduleMode(task *UpgradeTask, mode scheduleMode, scheduledAt *time.T
 }
 
 // startExecution launches goroutines to execute upgrade sub-tasks with bounded concurrency.
+//
+// #59 Problem 3 紧急叫停：每批 goroutine 不再用脱钩的 context.Background()，而是从注册表
+// 派生一个绑定到本主任务的可取消 execCtx。SuspendUpgrade / TerminateUpgrade / canary
+// 阈值自动暂停调用 cancelReg.cancel(taskID) 时，在飞 goroutine 在 ExecuteOne 顶部 / 锁后
+// 派发前的 ctx.Done 检查处提前退出，不再下发 Download。监管 goroutine 等齐所有子任务
+// goroutine 后清理注册表项并 cancel（释放 context 资源）。
 func (s *SoftwareService) startExecution(mainTask *UpgradeTask, subTasks []*UpgradeSubTask, fw *FirmwareVersion, concurrency int) {
 	if concurrency < 1 {
 		concurrency = 5
 	}
 	isKeepConfig := mainTask.IsKeepConfig
+	execCtx, done := s.launchControlledExecution(mainTask.ID, len(subTasks))
 	sem := make(chan struct{}, concurrency)
 	for i := range subTasks {
 		sem <- struct{}{}
 		go func(st *UpgradeSubTask) {
+			defer done()
 			defer func() { <-sem }()
 			defer func() {
 				if r := recover(); r != nil {
@@ -853,18 +893,23 @@ func (s *SoftwareService) startExecution(mainTask *UpgradeTask, subTasks []*Upgr
 						zap.Any("recover", r))
 				}
 			}()
-			s.executor.ExecuteOne(context.Background(), st, fw, isKeepConfig, mainTask.DownloadFileType)
+			s.executor.ExecuteOne(execCtx, st, fw, isKeepConfig, mainTask.DownloadFileType)
 		}(subTasks[i])
 	}
 }
 
 // startRollbackExecution launches goroutines to execute rollback sub-tasks with bounded concurrency.
-func (s *SoftwareService) startRollbackExecution(subTasks []*UpgradeSubTask) {
+//
+// 与 startExecution 同款 #59 紧急叫停接线：execCtx 绑定本回退主任务，cancel 后在飞
+// goroutine 在 RollbackOne 内的 ctx.Done 检查处提前退出。
+func (s *SoftwareService) startRollbackExecution(taskID uuid.UUID, subTasks []*UpgradeSubTask) {
 	concurrency := 5
+	execCtx, done := s.launchControlledExecution(taskID, len(subTasks))
 	sem := make(chan struct{}, concurrency)
 	for i := range subTasks {
 		sem <- struct{}{}
 		go func(st *UpgradeSubTask) {
+			defer done()
 			defer func() { <-sem }()
 			defer func() {
 				if r := recover(); r != nil {
@@ -874,7 +919,12 @@ func (s *SoftwareService) startRollbackExecution(subTasks []*UpgradeSubTask) {
 				}
 			}()
 
-			dev, err := s.deviceRepo.GetByID(context.Background(), st.DeviceID)
+			// 派发前先看急停信号：cancel 后整批不再触发回退 SPV/GPV。
+			if execCtx.Err() != nil {
+				return
+			}
+
+			dev, err := s.deviceRepo.GetByID(execCtx, st.DeviceID)
 			if err != nil {
 				s.rollbackExec.FailRollbackSubTask(context.Background(), st, fmt.Sprintf("device not found: %v", err), FailureDeviceNotFound)
 				return
@@ -887,9 +937,32 @@ func (s *SoftwareService) startRollbackExecution(subTasks []*UpgradeSubTask) {
 
 			// 4G 走两阶段（GPV ROLLBACK_ENABLE → SPV ROLLBACK_CONTROL）；5G 直接 SPV。
 			// 路径与值统一在 RollbackExecutor 内部经 adapter + Translator 决定。
-			s.rollbackExec.RollbackOne(context.Background(), st, dev, tech)
+			s.rollbackExec.RollbackOne(execCtx, st, dev, tech)
 		}(subTasks[i])
 	}
+}
+
+// launchControlledExecution 为一批执行 goroutine 派生绑定到 taskID 的可取消 execCtx，
+// 并返回每个 goroutine 收尾时调用的 done 回调。done 用原子计数（n 个子任务 goroutine）
+// 在最后一个收尾时 remove 注册表项 + cancel 释放 context 资源。n==0（空批）时立即清理。
+//
+// 派生用 context.Background() 作父 ctx（而非请求 ctx）：执行 goroutine 的生命周期独立于
+// 触发它的 HTTP 请求——请求早就返回了，下载 / 回退要在后台继续，只受急停 cancel 约束。
+func (s *SoftwareService) launchControlledExecution(taskID uuid.UUID, n int) (context.Context, func()) {
+	execCtx, cancel := s.cancelReg.derive(context.Background(), taskID)
+	if n <= 0 {
+		s.cancelReg.remove(taskID)
+		cancel()
+		return execCtx, func() {}
+	}
+	var remaining int64 = int64(n)
+	done := func() {
+		if atomic.AddInt64(&remaining, -1) == 0 {
+			s.cancelReg.remove(taskID)
+			cancel()
+		}
+	}
+	return execCtx, done
 }
 
 // HandleTransferComplete advances the upgrade state machine when a device reports transfer complete.
@@ -1099,6 +1172,13 @@ func (s *SoftwareService) SuspendUpgrade(ctx context.Context, taskID uuid.UUID) 
 		return commonerrors.NewBusinessError(8003, fmt.Sprintf("cannot suspend task in %s state", task.Status), commonerrors.ErrInvalidInput)
 	}
 
+	// #59 Problem 3 紧急叫停：先取消本任务的执行 context，让在飞的子任务 goroutine
+	// 在派发 Download 前提前退出。必须在改 DB status 之前/同步进行——单纯改 status
+	// 拦不住已经持有旧 context.Background() 的 goroutine（历史 bug）。
+	if s.cancelReg != nil {
+		s.cancelReg.cancel(taskID)
+	}
+
 	if err := s.taskRepo.UpdateStatus(ctx, taskID, TaskSuspended, ""); err != nil {
 		return fmt.Errorf("suspend main task: %w", err)
 	}
@@ -1169,7 +1249,7 @@ func (s *SoftwareService) ResumeUpgrade(ctx context.Context, taskID uuid.UUID) e
 	}
 
 	if task.TaskType == TaskTypeRollback {
-		s.startRollbackExecution(subTasks)
+		s.startRollbackExecution(taskID, subTasks)
 	} else {
 		var fw *FirmwareVersion
 		if task.FirmwareID != nil {
@@ -1197,6 +1277,11 @@ func (s *SoftwareService) TerminateUpgrade(ctx context.Context, taskID uuid.UUID
 
 	if task.Status == TaskEnded {
 		return commonerrors.NewBusinessError(8005, "task already ended", commonerrors.ErrInvalidInput)
+	}
+
+	// #59 Problem 3：终止同样要先掐断在飞 goroutine（与 SuspendUpgrade 同理）。
+	if s.cancelReg != nil {
+		s.cancelReg.cancel(taskID)
 	}
 
 	for page := 1; ; page++ {
@@ -1339,6 +1424,30 @@ func (s *SoftwareService) RetryUpgrade(ctx context.Context, taskID uuid.UUID) er
 	return nil
 }
 
+// downgradeDevice 是 firstDowngradeDevice 的轻量返回结构（仅供日志 / 错误信息），
+// 不暴露完整设备模型。
+type downgradeDevice struct {
+	id      string
+	current string
+}
+
+// firstDowngradeDevice 扫描 deviceIDs，返回第一个「回退到 targetVersion 构成降级」的设备
+// （#59 Problem 4 防降级守卫）。blocked=true 时 dev 携带该设备 id + 当前版本供错误信息。
+// 取不到设备 / 当前版本为空 / 版本无法可靠比较 → 跳过该设备（不视为降级），见 version.go。
+func (s *SoftwareService) firstDowngradeDevice(ctx context.Context, deviceIDs []uuid.UUID, targetVersion string) (bool, downgradeDevice) {
+	for _, id := range deviceIDs {
+		dev, err := s.deviceRepo.GetByID(ctx, id)
+		if err != nil {
+			// 设备查不到由后续 sub_task 执行阶段失败兜底；守卫阶段不阻断。
+			continue
+		}
+		if isDowngrade(dev.FirmwareVersion, targetVersion) {
+			return true, downgradeDevice{id: id.String(), current: dev.FirmwareVersion}
+		}
+	}
+	return false, downgradeDevice{}
+}
+
 // RollbackDevices creates a rollback task for the specified devices.
 // Per-device technology detection determines 4G/5G-specific parameters.
 //
@@ -1370,6 +1479,25 @@ func (s *SoftwareService) RollbackDevices(ctx context.Context, req RollbackReque
 	if len(req.DeviceIDs) > 0 {
 		if dev, err := s.deviceRepo.GetByID(ctx, req.DeviceIDs[0]); err == nil {
 			productClass = dev.ProductClass
+		}
+	}
+
+	// #59 Problem 4 回退防降级守卫：仅对「显式指定 TargetFirmwareID 的回退」生效。
+	// 若目标版本比某设备当前版本更旧（降级，可能回到含已知漏洞的旧镜像），默认整批拒绝，
+	// 要求 Force=true 显式确认。canary 自动回退（source=canary_failure）是已促升设备的
+	// 受控降级，且不带 OMC 侧目标版本时走设备自身旧 bank，不在此守卫范围。版本无法可靠
+	// 比较时放行（见 version.go isDowngrade，fail-open on guard，授权另有 fail-closed）。
+	if targetVersion != "" && !req.Force {
+		if blocked, dev := s.firstDowngradeDevice(ctx, req.DeviceIDs, targetVersion); blocked {
+			s.logger.Warn("rollback blocked: downgrade without force",
+				zap.String("target_version", targetVersion),
+				zap.String("device_id", dev.id),
+				zap.String("device_current_version", dev.current))
+			return nil, commonerrors.NewBusinessError(
+				8012,
+				fmt.Sprintf("回退目标版本 %s 比设备当前版本 %s 更旧（降级），如确需降级请显式传 force=true", targetVersion, dev.current),
+				commonerrors.ErrInvalidInput,
+			)
 		}
 	}
 
@@ -1459,7 +1587,7 @@ func (s *SoftwareService) RollbackDevices(ctx context.Context, req RollbackReque
 	// rollbacks that actually entered execution (not just creation attempts).
 	recordMetrics()
 
-	s.startRollbackExecution(subTasks)
+	s.startRollbackExecution(mainTask.ID, subTasks)
 
 	s.logger.Info("rollback task created",
 		zap.String("task_id", mainTask.ID.String()),

@@ -325,10 +325,17 @@ func initSoftwareModule(c *Container) error {
 	// Wire SoftwareService as the auto-rollback trigger. Default RollbackOnFailure
 	// is false; the trigger only fires when a canary task explicitly opted in.
 	canaryMonitor.SetRollbackTrigger(softwareService)
+	// #59 Problem 3：装配阈值越限止血回调——越限时真正 SuspendUpgrade（取消执行
+	// context + 翻 sub_task 状态），让待派发 / 在飞设备停止收 Download，而非仅标 StageStatus。
+	canaryMonitor.SetSuspender(softwareService)
 	if err := canaryMonitor.Start(context.Background()); err != nil {
 		logger.Warn("start canary monitor", zap.Error(err))
 	}
 	c.miscDeps.canaryMonitor = canaryMonitor
+
+	// #59 Problem 4：注入设备组读取器，供升级 / 回退创建链路逐设备归属校验
+	// （handler 经 SetPermissionService 解析 visibleGroups，service 用此 reader 判定）。
+	softwareService.SetDeviceGroupReader(device.NewPgDeviceGroupReader(c.PgPool))
 
 	softwareHandler := software.NewHandler(softwareService, logger)
 
