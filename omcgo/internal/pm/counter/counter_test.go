@@ -31,6 +31,60 @@ func (f *fakeMetricsRepo) Count(ctx context.Context, q metrics.QueryRequest) (in
 	return 0, nil
 }
 
+func ldn(s string) *string { return &s }
+
+// groupCountersByCell 等价性：单次查询按 cell 分桶 == 逐 cell QueryForKPI 过滤求和。
+func Test_groupCountersByCell_PerCellSums(t *testing.T) {
+	ms := []metrics.PMMetric{
+		{ObjectLDN: ldn("cell-1"), MetricPath: "A", MetricValue: 10},
+		{ObjectLDN: ldn("cell-1"), MetricPath: "A", MetricValue: 5}, // 同 cell 同 counter 累加
+		{ObjectLDN: ldn("cell-1"), MetricPath: "B", MetricValue: 7},
+		{ObjectLDN: ldn("cell-2"), MetricPath: "A", MetricValue: 100},
+		{ObjectLDN: ldn("cell-3"), MetricPath: "A", MetricValue: 999}, // cell-3 未请求 → 丢弃
+	}
+	out := groupCountersByCell(ms, []string{"cell-1", "cell-2"}, 900)
+
+	assert.Equal(t, 15.0, out["cell-1"]["A"])
+	assert.Equal(t, 7.0, out["cell-1"]["B"])
+	assert.Equal(t, 100.0, out["cell-2"]["A"])
+	assert.Equal(t, 900.0, out["cell-1"]["period_seconds"], "period 注入每个请求 cell")
+	assert.Equal(t, 900.0, out["cell-2"]["period_seconds"])
+	_, has3 := out["cell-3"]
+	assert.False(t, has3, "未请求的 cell 不应出现")
+}
+
+// 请求的 cell 没有任何 counter 行时，仍得到只含 period_seconds 的桶（与旧空结果一致）。
+func Test_groupCountersByCell_EmptyCellKeepsPeriod(t *testing.T) {
+	out := groupCountersByCell(nil, []string{"cell-x"}, 900)
+	require.NotNil(t, out["cell-x"])
+	assert.Equal(t, 900.0, out["cell-x"]["period_seconds"])
+	_, hasA := out["cell-x"]["A"]
+	assert.False(t, hasA)
+}
+
+// period<=0 时不注入 period_seconds（复刻旧 duration>0 守卫）。
+func Test_groupCountersByCell_NoPeriodWhenZero(t *testing.T) {
+	out := groupCountersByCell([]metrics.PMMetric{
+		{ObjectLDN: ldn("cell-1"), MetricPath: "A", MetricValue: 3},
+	}, []string{"cell-1"}, 0)
+	assert.Equal(t, 3.0, out["cell-1"]["A"])
+	_, hasPeriod := out["cell-1"]["period_seconds"]
+	assert.False(t, hasPeriod)
+}
+
+// cellID=="" 的历史语义：跨全部行求和（含真实 cell 行 + 无 cell 行），且 ldn=="" 的行不被重复累加。
+func Test_groupCountersByCell_EmptyCellIDSumsAll(t *testing.T) {
+	ms := []metrics.PMMetric{
+		{ObjectLDN: ldn("cell-1"), MetricPath: "A", MetricValue: 10},
+		{ObjectLDN: ldn("cell-2"), MetricPath: "A", MetricValue: 20},
+		{ObjectLDN: nil, MetricPath: "A", MetricValue: 3}, // 无 cell 行
+	}
+	// 同时请求真实 cell 与 ""：真实 cell 只拿自己的行，"" 拿全部行之和。
+	out := groupCountersByCell(ms, []string{"cell-1", ""}, 900)
+	assert.Equal(t, 10.0, out["cell-1"]["A"], "真实 cell 只累加自身行")
+	assert.Equal(t, 33.0, out[""]["A"], "\"\" 桶 = 全部行求和（10+20+3），无重复累加")
+}
+
 // CounterFilter 与 ListRequest 集成
 func Test_CounterFilter_WithListRequest(t *testing.T) {
 	filter := CounterFilter{

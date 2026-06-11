@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -179,10 +180,21 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	pmRunner := runner.NewRunner("pm", reliability.DefaultRetryConfig(), dlqRepo, w.EventBus, runnerMetrics, logger)
 	pmCollector.SetRunner(pmRunner)
 
+	// PM 入库进程内并发：NATS push 订阅 async 回调单 goroutine 串行（单订阅只用 ~1 核）。
+	// 配 N 个订阅共享 durable consumer 吃满 worker 多核。<=0 回退 GOMAXPROCS（容器 CPU 配额），上限 16。
+	pmConcurrency := cfg.PMConsumerConcurrency
+	if pmConcurrency <= 0 {
+		pmConcurrency = runtime.GOMAXPROCS(0)
+	}
+	if pmConcurrency > 16 {
+		pmConcurrency = 16
+	}
+	pmCollector.SetConcurrency(pmConcurrency)
+
 	if err := pmCollector.Subscribe(w.EventBus); err != nil {
 		logger.Warn("subscribe PM collector", zap.Error(err))
 	}
-	logger.Info("PM collector started with retry+DLQ runner")
+	logger.Info("PM collector started with retry+DLQ runner", zap.Int("pm_consumer_concurrency", pmConcurrency))
 
 	// Alarm Receiver + Sync
 	alarmPgStore := alarm.NewPgAlarmStore(w.PgPool, w.TsPool)

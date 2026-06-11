@@ -47,6 +47,9 @@ func (m *pmHCounterRepo) QueryAggregated(ctx context.Context, filter counter.Cou
 func (m *pmHCounterRepo) QueryForKPI(_ context.Context, _ uuid.UUID, _ string, _ []string, _, _ time.Time) (map[string]float64, error) {
 	return nil, nil
 }
+func (m *pmHCounterRepo) QueryForKPICells(_ context.Context, _ uuid.UUID, _ []string, _ []string, _, _ time.Time) (map[string]map[string]float64, error) {
+	return nil, nil
+}
 
 type pmHKPIRepo struct {
 	queryFn func(ctx context.Context, filter kpi.KPIFilter) (*model.ListResponse[model.KPIValue], error)

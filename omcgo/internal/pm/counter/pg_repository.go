@@ -132,6 +132,96 @@ func (r *PgCounterRepository) QueryForKPI(ctx context.Context, deviceID uuid.UUI
 	return result, nil
 }
 
+// QueryForKPICells 批量版 QueryForKPI：一次 metrics 查询拿全设备时间窗内的 counter 行，
+// 按请求的 cellIDs 分组返回 cellID → (counter_name → SUM)。
+//
+// 性能动机：旧路径对一个 256-cell 文件会调 256 次 QueryForKPI，每次 (a) 反查一次 devices
+// 表拿 (oui,sn)，(b) metrics.Query 不带 cellID 过滤把整设备 256 cell 的行全捞回再内存里
+// 只留 1 cell —— O(cell²) 数据传输 + 256 次 device 反查。本方法把它压成 1 次 device 反查 +
+// 1 次 metrics 查询 + 内存按 cell 分桶。
+//
+// 等价性（与逐 cell QueryForKPI 严格一致，便于安全替换）：
+//   - 非空 cellID："X" 桶只累加 ObjectLDN=="X" 的行（对应旧 `m.ObjectLDN==cellID` 过滤）。
+//   - 空 cellID "": 历史 QueryForKPI 在 cellID=="" 时不做过滤 = 跨全部 cell 求和，这里
+//     用 wantAll 复刻（"" 桶累加全部行，含真实 cell 行与无 cell 行），避免与非空桶重复累加。
+//   - period_seconds：旧实现在 duration>0 时给每个返回 map 注入，这里对每个请求 cell 同样注入
+//     （即便该 cell 无 counter 行，也得到 {period_seconds}，与旧"空结果仍带 period"行为一致）。
+func (r *PgCounterRepository) QueryForKPICells(ctx context.Context, deviceID uuid.UUID, cellIDs []string, counterNames []string, startTime, endTime time.Time) (map[string]map[string]float64, error) {
+	if len(counterNames) == 0 || len(cellIDs) == 0 {
+		return nil, nil
+	}
+	oui, sn, err := r.lookupDeviceOUISN(ctx, deviceID)
+	if err != nil {
+		return nil, err
+	}
+	mt := metrics.MetricTypeCounter
+	q := metrics.QueryRequest{
+		DeviceOUIs:  []string{oui},
+		DeviceSNs:   []string{sn},
+		MetricPaths: counterNames,
+		MetricType:  &mt,
+		Granularity: metrics.Granularity15Min,
+		StartTime:   startTime,
+		EndTime:     endTime,
+		Limit:       100000,
+	}
+	ms, err := r.metricsRepo.Query(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("query counters for kpi (cells): %w", err)
+	}
+	var period float64
+	if duration := endTime.Sub(startTime); duration > 0 {
+		period = duration.Seconds()
+	}
+	return groupCountersByCell(ms, cellIDs, period), nil
+}
+
+// groupCountersByCell 把一次查询返回的 counter 行按请求的 cellIDs 分桶求和，复刻逐 cell
+// QueryForKPI 的语义（提纯成无 DB 依赖的纯函数，便于单测等价性）：
+//   - 非空 cellID "X"：只累加 ObjectLDN=="X" 的行；
+//   - 空 cellID ""：历史 QueryForKPI 在 cellID=="" 时不过滤 = 跨全部行求和，用 wantAll 复刻
+//     （"" 桶累加全部行，并对 ldn=="" 的行只走 "" 桶一次，避免与非空桶分支重复累加）；
+//   - period>0 时给每个请求 cell 注入 period_seconds（即便该 cell 无行，也得到 {period_seconds}）。
+func groupCountersByCell(ms []metrics.PMMetric, cellIDs []string, period float64) map[string]map[string]float64 {
+	cellSet := make(map[string]struct{}, len(cellIDs))
+	wantAll := false
+	for _, c := range cellIDs {
+		cellSet[c] = struct{}{}
+		if c == "" {
+			wantAll = true
+		}
+	}
+	out := make(map[string]map[string]float64, len(cellIDs))
+	bucket := func(cell string) map[string]float64 {
+		cm := out[cell]
+		if cm == nil {
+			cm = make(map[string]float64)
+			out[cell] = cm
+		}
+		return cm
+	}
+	for _, m := range ms {
+		ldn := ""
+		if m.ObjectLDN != nil {
+			ldn = *m.ObjectLDN
+		}
+		if ldn != "" {
+			if _, ok := cellSet[ldn]; ok {
+				bucket(ldn)[m.MetricPath] += m.MetricValue
+			}
+		}
+		if wantAll {
+			bucket("")[m.MetricPath] += m.MetricValue
+		}
+	}
+	if period > 0 {
+		for _, c := range cellIDs {
+			bucket(c)["period_seconds"] = period
+		}
+	}
+	return out
+}
+
 // --- 字段转换辅助 ---
 
 // counterToMetric 把 model.PMCounter（业务键 OUI+SN）转 metrics.PMMetric。

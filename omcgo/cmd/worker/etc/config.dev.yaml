@@ -48,6 +48,12 @@ minio:
     ui_assets: "ui-assets"
     trace_bulk: "trace-bulk"
 
+# PM 文件入库消费者的进程内并发订阅数（pm.file.received → 解析入库）。
+# NATS push 订阅 async 回调单 goroutine 串行（单订阅只用 ~1 核）；N 个订阅共享 durable
+# consumer "pm-workers" 由 JetStream 负载均衡，吃满 worker 多核。<=0 回退 GOMAXPROCS（容器
+# CPU 配额），上限 16。worker 容器配 4 核，故设 4。
+pm_consumer_concurrency: 4
+
 # T-0157 C2: 任务过期扫描器配置（worker 进程消费）。
 # default_expires_in_seconds 在 worker 不使用（CreateTask 在 app 端兜底），保留占位让两端一致。
 task:
