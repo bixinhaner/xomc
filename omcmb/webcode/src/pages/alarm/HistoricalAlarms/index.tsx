@@ -28,6 +28,7 @@ import ConfirmWithNoteModal from '../components/ConfirmWithNoteModal';
 import { useAlarmListExport } from '../hooks/useAlarmListExport';
 import { buildAlarmExportFieldDefinitions, type AlarmExportFieldKey } from '../utils/alarmExportFields';
 import { BASE_STATION_TYPE_OPTIONS, formatBaseStationTypeLabel } from '../utils/baseStationType';
+import { renderSnWithTooltip } from '../utils/snTooltip';
 import styles from './HistoricalAlarms.module.css';
 
 const { Text } = Typography;
@@ -500,12 +501,11 @@ export default function HistoricalAlarms() {
         title: t('alarm.deviceSn'),
         dataIndex: 'deviceSn',
         width: 160,
-        render: (val: unknown, record) => (
-          <Space size={4}>
-            {record.unread === '1' && <Badge status="error" style={{ marginLeft: -4 }} />}
-            <span>{String(val ?? '')}</span>
-          </Space>
-        ),
+        render: (val: unknown, record) =>
+          renderSnWithTooltip(
+            val,
+            record.unread === '1' ? <Badge status="error" /> : undefined,
+          ),
       },
       {
         key: 'neType',
