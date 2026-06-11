@@ -13,26 +13,17 @@ import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useT } from '@/hooks/useT';
 import { useRecycleBinList, useRestoreDevices, usePermanentDeleteDevices } from '@core/hooks/api/useDevices';
 import { useDomainTree } from '@core/hooks/api/useTopology';
+import { useDictionaryBatch } from '@core/hooks/api/useSystem';
+import { resolveNetworkTypeLabel } from '@core/utils/networkType';
 import type { Device } from '@core/types/device';
 import ImportModal from './ImportModal';
 
-// 设备类型
-type DeviceType = 'eNB' | 'gNB' | 'CPE';
-
-// 设备类型颜色映射
-const DEVICE_TYPE_COLOR: Record<DeviceType, string> = {
+// 基站制式 Tag 颜色映射（与设备列表一致，按 networkType 原始值取色）
+const NETWORK_TYPE_COLOR: Record<string, string> = {
   eNB: 'blue',
   gNB: 'green',
-  CPE: 'orange',
+  GSM: 'orange',
 };
-
-// 根据 product_class 推断设备类型
-function inferDeviceType(productClass: string): DeviceType {
-  const pc = productClass.toLowerCase();
-  if (pc.includes('gnb') || pc.includes('5g')) return 'gNB';
-  if (pc.includes('enb') || pc.includes('lte')) return 'eNB';
-  return 'CPE';
-}
 
 // 计算离线天数
 function calcOfflineDays(lastInformTime: string, deletedAt: string): number {
@@ -58,6 +49,11 @@ export default function RecycleBin() {
 
   // 获取设备分组树（使用树形结构避免重复数据）
   const { data: domains } = useDomainTree();
+
+  // issue #223: 基站制式列与设备列表 / 筛选下拉同源——走 network_type 字典
+  // value→label 映射，不再用 product_class 启发式推导。
+  const { data: batchDicts } = useDictionaryBatch(['network_type']);
+  const networkTypeDetails = batchDicts?.['network_type']?.sysDictionaryDetails;
 
   // 构建设备分组选项（只显示L2分组，带完整路径）
   const deviceGroupOptions: { id: string; name: string; fullName: string }[] = useMemo(() => {
@@ -133,7 +129,6 @@ export default function RecycleBin() {
     if (!data?.items) return [];
     return data.items.map((device: Device) => ({
       ...device,
-      deviceType: inferDeviceType(device.productClass),
       offlineDays: calcOfflineDays(device.lastOnlineTime, device.deletedAt || ''),
       moveTime: device.deletedAt || '',
       move_author: device.deletedBy || 'system',
@@ -223,7 +218,7 @@ export default function RecycleBin() {
   );
 
   // 列定义
-  const columns: DataTableColumn<Device & { deviceType: DeviceType; offlineDays: number; moveTime: string; move_author: string }>[] = useMemo(
+  const columns: DataTableColumn<Device & { offlineDays: number; moveTime: string; move_author: string }>[] = useMemo(
     () => [
       {
         key: 'serial_number',
@@ -234,13 +229,16 @@ export default function RecycleBin() {
         copyable: true,
       },
       {
-        key: 'deviceType',
+        key: 'networkType',
         title: t('device.radioMode'),
-        dataIndex: 'deviceType',
+        dataIndex: 'networkType',
         width: 100,
-        render: (v) => (
-          <Tag color={DEVICE_TYPE_COLOR[v as DeviceType] || 'default'}>{String(v)}</Tag>
-        ),
+        render: (_v, record) => {
+          const label = resolveNetworkTypeLabel(record.networkType, networkTypeDetails);
+          return (
+            <Tag color={NETWORK_TYPE_COLOR[record.networkType] || 'default'}>{label}</Tag>
+          );
+        },
       },
       { key: 'host_name', title: t('device.hostName'), dataIndex: 'hostName', width: 140, ellipsis: true },
       {
@@ -264,7 +262,7 @@ export default function RecycleBin() {
       { key: 'moveTime', title: t('recycle.moveTime'), dataIndex: 'moveTime', width: 160 },
       { key: 'move_author', title: t('recycle.account'), dataIndex: 'move_author', width: 90 },
     ],
-    [t]
+    [t, networkTypeDetails]
   );
 
   // 批量操作
@@ -318,7 +316,7 @@ export default function RecycleBin() {
         style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
         styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
       >
-        <DataTable<Device & { deviceType: DeviceType; offlineDays: number; moveTime: string; move_author: string }>
+        <DataTable<Device & { offlineDays: number; moveTime: string; move_author: string }>
           tableId="recycle-bin-table"
           columns={columns}
           dataSource={tableData}
