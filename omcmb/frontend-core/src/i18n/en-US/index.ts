@@ -3346,6 +3346,8 @@ const messages: Record<string, string> = {
   'provision.enabled':                'Enabled',
   'provision.targetVersion':          'Target Version',
   'provision.deviceCode':             'Device Code',
+  'provision.deviceId':               'Device ID',
+  'provision.stepProgress':           'Step Progress',
   'provision.deviceGroup':            'Device Group',
   'provision.hostName':               'HostName',
   'provision.version':                'Version',

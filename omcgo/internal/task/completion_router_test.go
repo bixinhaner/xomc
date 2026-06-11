@@ -86,3 +86,51 @@ func Test_CompletionRouter_NilTaskNoop(t *testing.T) {
 	r.Dispatch(context.Background(), nil)
 	assert.Empty(t, h.got)
 }
+
+// #122：source 无关观察者应对每个终态任务都触发，无论 source、无论是否命中
+// per-source handler（验证 sys_task_logs 写入链路覆盖全部来源）。
+func Test_CompletionRouter_ObserverFiresForEverySource(t *testing.T) {
+	logger := zap.NewNop()
+	r := NewCompletionRouter(logger)
+
+	obs := &recordingHandler{}
+	r.RegisterObserver(obs)
+
+	// 一个有 per-source handler，一个无（走 unknown）——observer 两个都应收到。
+	mml := &recordingHandler{}
+	r.Register(TaskSourceMML, mml)
+
+	r.Dispatch(context.Background(), &Task{ID: "o1", Source: TaskSourceMML, SourceID: "x"})
+	r.Dispatch(context.Background(), &Task{ID: "o2", Source: TaskSourceAPI, SourceID: "y"})
+
+	assert.Len(t, obs.got, 2, "observer 对每个 source 的终态任务都触发")
+	assert.Equal(t, "o1", obs.got[0].ID)
+	assert.Equal(t, "o2", obs.got[1].ID)
+	assert.Len(t, mml.got, 1, "per-source handler 仍只收自己 source 的任务")
+}
+
+// observer panic 必须被隔离，不得阻断 per-source handler。
+func Test_CompletionRouter_ObserverPanicIsolated(t *testing.T) {
+	logger := zap.NewNop()
+	r := NewCompletionRouter(logger)
+
+	r.RegisterObserver(panickingHandler{})
+	safe := &recordingHandler{}
+	r.Register(TaskSourceMML, safe)
+
+	assert.NotPanics(t, func() {
+		r.Dispatch(context.Background(), &Task{ID: "o3", Source: TaskSourceMML, SourceID: "x"})
+	})
+	assert.Len(t, safe.got, 1, "observer panic 不应阻断 per-source handler")
+}
+
+// 传 nil observer 应被忽略，不得在 Dispatch 时 panic。
+func Test_CompletionRouter_RegisterNilObserverIgnored(t *testing.T) {
+	logger := zap.NewNop()
+	r := NewCompletionRouter(logger)
+	r.RegisterObserver(nil)
+
+	assert.NotPanics(t, func() {
+		r.Dispatch(context.Background(), &Task{ID: "o4", Source: TaskSourceAPI, SourceID: "z"})
+	})
+}

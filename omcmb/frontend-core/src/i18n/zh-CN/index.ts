@@ -3373,6 +3373,8 @@ const messages: Record<string, string> = {
   'provision.enabled':                '是否启用',
   'provision.targetVersion':          '目标版本',
   'provision.deviceCode':             '设备编码',
+  'provision.deviceId':               '设备ID',
+  'provision.stepProgress':           '步骤进度',
   'provision.deviceGroup':            '设备组',
   'provision.hostName':               '名称(HostName)',
   'provision.version':                '版本号',
