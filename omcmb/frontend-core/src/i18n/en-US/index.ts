@@ -2454,6 +2454,8 @@ const messages: Record<string, string> = {
   'export.last7Days':           'Last 7 Days',
   'export.last30Days':          'Last 30 Days',
   'export.selectedCount':       '{count} device groups selected',
+  'export.selectedFieldCount':  '{count} fields selected',
+  'export.selectedAlarmCount':  '{count} alarms are selected and will be exported directly',
 
   // -------------------------------------------------------------------------
   // FilterBar — search & filter labels
@@ -5428,6 +5430,10 @@ const messages: Record<string, string> = {
   'alarm.addGroupBtn':                        'Add',
   'alarm.searchGroup':                        'Search groups',
   'alarm.export':                             'Export',
+  'alarm.selectAllFiltered':                  'Select all filtered results ({count})',
+  'alarm.selectAllFilteredLoading':           'Selecting all filtered results...',
+  'alarm.selectAllFilteredSuccess':           'Selected all filtered results ({count})',
+  'alarm.selectAllFilteredFailed':            'Failed to select all filtered results',
   'alarm.stat.total':                         'Total',
   'alarm.stat.activeAlarm':                   'Active Alarms',
   'alarm.stat.historicalAlarm':               'Historical Alarms',

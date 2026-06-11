@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { DatePicker, Modal, Spin, Tree, Typography } from 'antd';
+import { Checkbox, DatePicker, Modal, Spin, Tree, Typography } from 'antd';
 import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
 import { FolderOutlined } from '@ant-design/icons';
@@ -7,6 +7,7 @@ import type { DataNode, TreeProps } from 'antd/es/tree';
 import { useT } from '@/hooks/useT';
 import { useDeviceGroups } from '@core/hooks/api/useDevices';
 import type { DeviceGroup } from '@core/types/device';
+import type { AlarmExportFieldKey } from '../utils/alarmExportFields';
 
 const { RangePicker } = DatePicker;
 const { Text } = Typography;
@@ -14,6 +15,12 @@ const { Text } = Typography;
 export interface ExportParams {
   deviceGroupIds: string[];
   timeRange?: [string, string];
+  fieldKeys: AlarmExportFieldKey[];
+}
+
+interface ExportFieldOption {
+  key: AlarmExportFieldKey;
+  label: string;
 }
 
 interface ExportModalProps {
@@ -21,6 +28,10 @@ interface ExportModalProps {
   onClose: () => void;
   onConfirm: (params: ExportParams) => void;
   confirmLoading?: boolean;
+  fieldOptions: ExportFieldOption[];
+  defaultFieldKeys: AlarmExportFieldKey[];
+  hasSelectedRows?: boolean;
+  selectedRowCount?: number;
 }
 
 // 构建树形数据，支持 checkable（T-0136: checkedKeys 由调用方传入但本函数不直接消费，
@@ -61,20 +72,31 @@ function getAllGroupIds(groups: DeviceGroup[]): string[] {
   return groups.map((g) => g.id);
 }
 
-export default function ExportModal({ open, onClose, onConfirm, confirmLoading }: ExportModalProps) {
+export default function ExportModal({
+  open,
+  onClose,
+  onConfirm,
+  confirmLoading,
+  fieldOptions,
+  defaultFieldKeys,
+  hasSelectedRows = false,
+  selectedRowCount = 0,
+}: ExportModalProps) {
   const t = useT();
   const { data: groupsData, isLoading: groupsLoading } = useDeviceGroups();
   const deviceGroups = groupsData?.groups ?? [];
   const [checkedKeys, setCheckedKeys] = useState<string[]>([]);
   const [timeRange, setTimeRange] = useState<[Dayjs, Dayjs] | null>(null);
+  const [checkedFieldKeys, setCheckedFieldKeys] = useState<AlarmExportFieldKey[]>(defaultFieldKeys);
 
   // 重置状态
   useEffect(() => {
-    if (!open) {
+    if (open) {
       setCheckedKeys([]);
       setTimeRange(null);
+      setCheckedFieldKeys(defaultFieldKeys);
     }
-  }, [open]);
+  }, [defaultFieldKeys, open]);
 
   const handleCheck: TreeProps['onCheck'] = useCallback((checked: React.Key[] | { checked: React.Key[]; halfChecked: React.Key[] }, _info: unknown) => {
     // checked 可能是字符串数组或 { checked: string[], halfChecked: string[] }
@@ -89,14 +111,16 @@ export default function ExportModal({ open, onClose, onConfirm, confirmLoading }
     onConfirm({
       deviceGroupIds: checkedKeys,
       timeRange: timeRange ? [timeRange[0].toISOString(), timeRange[1].toISOString()] : undefined,
+      fieldKeys: checkedFieldKeys,
     });
-  }, [onConfirm, checkedKeys, timeRange]);
+  }, [checkedFieldKeys, checkedKeys, onConfirm, timeRange]);
 
   const handleCancel = useCallback(() => {
     setCheckedKeys([]);
     setTimeRange(null);
+    setCheckedFieldKeys(defaultFieldKeys);
     onClose();
-  }, [onClose]);
+  }, [defaultFieldKeys, onClose]);
 
   const treeData = useMemo(
     () => buildTreeData(deviceGroups, checkedKeys),
@@ -106,6 +130,8 @@ export default function ExportModal({ open, onClose, onConfirm, confirmLoading }
   // 全选/取消全选
   const allGroupIds = useMemo(() => getAllGroupIds(deviceGroups), [deviceGroups]);
   const isAllChecked = deviceGroups.length > 0 && checkedKeys.length === allGroupIds.length;
+  const isAllFieldsChecked = fieldOptions.length > 0 && checkedFieldKeys.length === fieldOptions.length;
+  const isFieldIndeterminate = checkedFieldKeys.length > 0 && checkedFieldKeys.length < fieldOptions.length;
 
   const handleCheckAll = useCallback((checked: boolean) => {
     if (checked) {
@@ -114,6 +140,14 @@ export default function ExportModal({ open, onClose, onConfirm, confirmLoading }
       setCheckedKeys([]);
     }
   }, [allGroupIds]);
+
+  const handleCheckAllFields = useCallback((checked: boolean) => {
+    if (checked) {
+      setCheckedFieldKeys(defaultFieldKeys);
+    } else {
+      setCheckedFieldKeys([]);
+    }
+  }, [defaultFieldKeys]);
 
   return (
     <Modal
@@ -124,12 +158,95 @@ export default function ExportModal({ open, onClose, onConfirm, confirmLoading }
       okText={t('export.startExport')}
       cancelText={t('common.cancel')}
       confirmLoading={confirmLoading}
-      okButtonProps={{ disabled: checkedKeys.length === 0 || groupsLoading }}
+      okButtonProps={{ disabled: checkedFieldKeys.length === 0 || (!hasSelectedRows && (checkedKeys.length === 0 || groupsLoading)) }}
       width={600}
       destroyOnHidden
     >
-      {/* 1. 设备组选择 - 树形结构 */}
-      <div style={{ marginBottom: 16 }}>
+      {hasSelectedRows ? (
+        <div style={{ marginBottom: 16, color: '#666', fontSize: 12 }}>
+          {t('export.selectedAlarmCount', { count: selectedRowCount })}
+        </div>
+      ) : (
+        <>
+          {/* 1. 设备组选择 - 树形结构 */}
+          <div style={{ marginBottom: 16 }}>
+            <div
+              style={{
+                marginBottom: 8,
+                fontWeight: 'bold',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
+            >
+              <span>{t('export.selectDeviceGroup')}</span>
+              <span
+                style={{
+                  fontSize: 12,
+                  color: '#1677ff',
+                  cursor: 'pointer',
+                  fontWeight: 'normal',
+                }}
+                onClick={() => handleCheckAll(!isAllChecked)}
+              >
+                {isAllChecked ? t('common.unselectAll') : t('common.selectAll')}
+              </span>
+            </div>
+            <Spin spinning={groupsLoading}>
+              <div
+                style={{
+                  border: '1px solid #d9d9d9',
+                  borderRadius: 6,
+                  padding: 8,
+                  maxHeight: 280,
+                  overflowY: 'auto',
+                  background: '#fafafa',
+                }}
+              >
+                {deviceGroups.length === 0 && !groupsLoading ? (
+                  <div style={{ color: '#999', textAlign: 'center', padding: 20 }}>
+                    {t('common.noData')}
+                  </div>
+                ) : (
+                  <Tree
+                    checkable
+                    checkedKeys={checkedKeys}
+                    onCheck={handleCheck}
+                    treeData={treeData}
+                    defaultExpandAll
+                    style={{ fontSize: 13, background: 'transparent' }}
+                  />
+                )}
+              </div>
+            </Spin>
+            <div style={{ marginTop: 4, color: '#666', fontSize: 12 }}>
+              {t('export.selectedCount', { count: checkedKeys.length })}
+            </div>
+          </div>
+
+          {/* 2. 故障时间段 */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ marginBottom: 8, fontWeight: 'bold' }}>{t('export.timeRange')}</div>
+            <RangePicker
+              showTime
+              value={timeRange}
+              onChange={(dates) => setTimeRange(dates as [Dayjs, Dayjs] | null)}
+              style={{ width: '100%' }}
+              placeholder={[t('export.startTime'), t('export.endTime')]}
+              ranges={{
+                [t('export.today')]: [dayjs().startOf('day'), dayjs().endOf('day')],
+                [t('export.thisWeek')]: [dayjs().startOf('week'), dayjs().endOf('week')],
+                [t('export.thisMonth')]: [dayjs().startOf('month'), dayjs().endOf('month')],
+                [t('export.last7Days')]: [dayjs().subtract(7, 'days').startOf('day'), dayjs().endOf('day')],
+                [t('export.last30Days')]: [dayjs().subtract(30, 'days').startOf('day'), dayjs().endOf('day')],
+              }}
+            />
+          </div>
+        </>
+      )}
+
+      {/* 3. 字段选择 */}
+      <div>
         <div
           style={{
             marginBottom: 8,
@@ -137,70 +254,49 @@ export default function ExportModal({ open, onClose, onConfirm, confirmLoading }
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
+            gap: 12,
           }}
         >
-          <span>{t('export.selectDeviceGroup')}</span>
-          <span
-            style={{
-              fontSize: 12,
-              color: '#1677ff',
-              cursor: 'pointer',
-              fontWeight: 'normal',
-            }}
-            onClick={() => handleCheckAll(!isAllChecked)}
+          <span>{t('export.selectFields')}</span>
+          <Checkbox
+            checked={isAllFieldsChecked}
+            indeterminate={isFieldIndeterminate}
+            onChange={(event) => handleCheckAllFields(event.target.checked)}
           >
-            {isAllChecked ? t('common.unselectAll') : t('common.selectAll')}
-          </span>
+            {t('common.selectAll')}
+          </Checkbox>
         </div>
-        <Spin spinning={groupsLoading}>
-          <div
-            style={{
-              border: '1px solid #d9d9d9',
-              borderRadius: 6,
-              padding: 8,
-              maxHeight: 280,
-              overflowY: 'auto',
-              background: '#fafafa',
-            }}
-          >
-            {deviceGroups.length === 0 && !groupsLoading ? (
-              <div style={{ color: '#999', textAlign: 'center', padding: 20 }}>
-                {t('common.noData')}
-              </div>
-            ) : (
-              <Tree
-                checkable
-                checkedKeys={checkedKeys}
-                onCheck={handleCheck}
-                treeData={treeData}
-                defaultExpandAll
-                style={{ fontSize: 13, background: 'transparent' }}
-              />
-            )}
-          </div>
-        </Spin>
-        <div style={{ marginTop: 4, color: '#666', fontSize: 12 }}>
-          {t('export.selectedCount', { count: checkedKeys.length })}
-        </div>
-      </div>
-
-      {/* 2. 故障时间段 */}
-      <div>
-        <div style={{ marginBottom: 8, fontWeight: 'bold' }}>{t('export.timeRange')}</div>
-        <RangePicker
-          showTime
-          value={timeRange}
-          onChange={(dates) => setTimeRange(dates as [Dayjs, Dayjs] | null)}
-          style={{ width: '100%' }}
-          placeholder={[t('export.startTime'), t('export.endTime')]}
-          ranges={{
-            [t('export.today')]: [dayjs().startOf('day'), dayjs().endOf('day')],
-            [t('export.thisWeek')]: [dayjs().startOf('week'), dayjs().endOf('week')],
-            [t('export.thisMonth')]: [dayjs().startOf('month'), dayjs().endOf('month')],
-            [t('export.last7Days')]: [dayjs().subtract(7, 'days').startOf('day'), dayjs().endOf('day')],
-            [t('export.last30Days')]: [dayjs().subtract(30, 'days').startOf('day'), dayjs().endOf('day')],
+        <div
+          style={{
+            border: '1px solid #d9d9d9',
+            borderRadius: 6,
+            padding: 12,
+            background: '#fafafa',
           }}
-        />
+        >
+          <Checkbox.Group
+            value={checkedFieldKeys}
+            onChange={(values) => setCheckedFieldKeys(values as AlarmExportFieldKey[])}
+            style={{ width: '100%' }}
+          >
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                gap: 8,
+              }}
+            >
+              {fieldOptions.map((field) => (
+                <Checkbox key={field.key} value={field.key}>
+                  {field.label}
+                </Checkbox>
+              ))}
+            </div>
+          </Checkbox.Group>
+        </div>
+        <div style={{ marginTop: 4, color: '#666', fontSize: 12 }}>
+          {t('export.selectedFieldCount', { count: checkedFieldKeys.length })}
+        </div>
       </div>
     </Modal>
   );

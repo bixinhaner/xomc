@@ -2468,6 +2468,8 @@ const messages: Record<string, string> = {
   'export.last7Days':           '最近7天',
   'export.last30Days':          '最近30天',
   'export.selectedCount':       '已选择 {count} 个设备组',
+  'export.selectedFieldCount':  '已选择 {count} 个字段',
+  'export.selectedAlarmCount':  '当前已勾选 {count} 条告警，将直接导出这些告警',
 
   // -------------------------------------------------------------------------
   // FilterBar — search & filter labels
@@ -5455,6 +5457,10 @@ const messages: Record<string, string> = {
   'alarm.addGroupBtn':                        '添加',
   'alarm.searchGroup':                        '搜索分组',
   'alarm.export':                             '导出',
+  'alarm.selectAllFiltered':                  '全选当前筛选结果（{count} 条）',
+  'alarm.selectAllFilteredLoading':           '正在选择当前筛选结果...',
+  'alarm.selectAllFilteredSuccess':           '已选择当前筛选结果，共 {count} 条',
+  'alarm.selectAllFilteredFailed':            '全选当前筛选结果失败',
   'alarm.stat.total':                         '总数',
   'alarm.stat.activeAlarm':                   '当前告警',
   'alarm.stat.historicalAlarm':               '历史告警',
