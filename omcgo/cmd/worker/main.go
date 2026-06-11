@@ -35,6 +35,7 @@ import (
 	"github.com/omcgo/omcgo/internal/pm/indicator"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
 	"github.com/omcgo/omcgo/internal/pm/kpi/router"
+	pmmetrics "github.com/omcgo/omcgo/internal/pm/metrics"
 	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/internal/report"
 	"github.com/omcgo/omcgo/internal/task"
@@ -191,10 +192,18 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	}
 	pmCollector.SetConcurrency(pmConcurrency)
 
+	// KPI 取数路径：默认用内存 counter 直接算（免每文件一次全量回读）；同窗多文件部署可切回回读。
+	pmCollector.SetKPIWindowFromDB(cfg.PMKPIWindowFromDB)
+	// PM 指标大批量写异步提交（synchronous_commit=off）：PM 数据可从 MinIO 重建，换写吞吐。
+	pmmetrics.BulkAsyncCommit = cfg.PMAsyncCommit
+
 	if err := pmCollector.Subscribe(w.EventBus); err != nil {
 		logger.Warn("subscribe PM collector", zap.Error(err))
 	}
-	logger.Info("PM collector started with retry+DLQ runner", zap.Int("pm_consumer_concurrency", pmConcurrency))
+	logger.Info("PM collector started with retry+DLQ runner",
+		zap.Int("pm_consumer_concurrency", pmConcurrency),
+		zap.Bool("pm_async_commit", cfg.PMAsyncCommit),
+		zap.Bool("pm_kpi_window_from_db", cfg.PMKPIWindowFromDB))
 
 	// Alarm Receiver + Sync
 	alarmPgStore := alarm.NewPgAlarmStore(w.PgPool, w.TsPool)

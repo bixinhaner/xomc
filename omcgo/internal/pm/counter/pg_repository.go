@@ -182,7 +182,46 @@ func (r *PgCounterRepository) QueryForKPICells(ctx context.Context, deviceID uui
 //   - 空 cellID ""：历史 QueryForKPI 在 cellID=="" 时不过滤 = 跨全部行求和，用 wantAll 复刻
 //     （"" 桶累加全部行，并对 ldn=="" 的行只走 "" 桶一次，避免与非空桶分支重复累加）；
 //   - period>0 时给每个请求 cell 注入 period_seconds（即便该 cell 无行，也得到 {period_seconds}）。
+// counterRow 是分桶的最小输入三元组：cell + counter 名 + 值。DB 行（metrics.PMMetric）与
+// 内存解析行（model.PMCounter）都归一成它，使两条路径共用同一套分桶逻辑、杜绝语义漂移。
+type counterRow struct {
+	cell  string
+	name  string
+	value float64
+}
+
 func groupCountersByCell(ms []metrics.PMMetric, cellIDs []string, period float64) map[string]map[string]float64 {
+	rows := make([]counterRow, 0, len(ms))
+	for _, m := range ms {
+		ldn := ""
+		if m.ObjectLDN != nil {
+			ldn = *m.ObjectLDN
+		}
+		rows = append(rows, counterRow{cell: ldn, name: m.MetricPath, value: m.MetricValue})
+	}
+	return groupRowsByCell(rows, cellIDs, period)
+}
+
+// GroupParsedCountersByCell 是 groupCountersByCell 的内存版：直接对 collector 刚解析、已过
+// 白名单（CounterName 已编号化为 IndicatorID）的 PMCounter 切片分桶，语义与 QueryForKPICells
+// 对同一文件严格一致（共用 groupRowsByCell），供 KPIEngine 免 DB 回读直接算 KPI。
+//   - PMCounter.CounterName 对应 metric_path（编号），CounterValue 对应值，CellID 对应 object_ldn。
+//   - 同一文件内同 (cell, name) 多行求和——与 QueryForKPICells 的 SUM 一致（正常一窗一文件
+//     时每 (cell,name) 仅一行，sum=值）。
+func GroupParsedCountersByCell(counters []model.PMCounter, cellIDs []string, period float64) map[string]map[string]float64 {
+	rows := make([]counterRow, 0, len(counters))
+	for _, c := range counters {
+		rows = append(rows, counterRow{cell: c.CellID, name: c.CounterName, value: c.CounterValue})
+	}
+	return groupRowsByCell(rows, cellIDs, period)
+}
+
+// groupRowsByCell 把 counterRow 按请求 cellIDs 分桶求和，复刻逐 cell QueryForKPI 语义：
+//   - 非空 cellID "X"：只累加 cell=="X" 的行；
+//   - 空 cellID ""：历史不过滤 = 跨全部行求和，用 wantAll 复刻（"" 桶累加全部行，cell=="" 的
+//     行只走 "" 桶一次，避免与非空桶分支重复累加）；
+//   - period>0 时给每个请求 cell 注入 period_seconds（即便该 cell 无行也得 {period_seconds}）。
+func groupRowsByCell(rows []counterRow, cellIDs []string, period float64) map[string]map[string]float64 {
 	cellSet := make(map[string]struct{}, len(cellIDs))
 	wantAll := false
 	for _, c := range cellIDs {
@@ -200,18 +239,14 @@ func groupCountersByCell(ms []metrics.PMMetric, cellIDs []string, period float64
 		}
 		return cm
 	}
-	for _, m := range ms {
-		ldn := ""
-		if m.ObjectLDN != nil {
-			ldn = *m.ObjectLDN
-		}
-		if ldn != "" {
-			if _, ok := cellSet[ldn]; ok {
-				bucket(ldn)[m.MetricPath] += m.MetricValue
+	for _, r := range rows {
+		if r.cell != "" {
+			if _, ok := cellSet[r.cell]; ok {
+				bucket(r.cell)[r.name] += r.value
 			}
 		}
 		if wantAll {
-			bucket("")[m.MetricPath] += m.MetricValue
+			bucket("")[r.name] += r.value
 		}
 	}
 	if period > 0 {

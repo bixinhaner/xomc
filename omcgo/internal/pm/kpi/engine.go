@@ -234,6 +234,80 @@ func (e *KPIEngine) CalculateCellsAndStore(
 	return len(all), nil
 }
 
+// CalculateAndStoreFromCounters 是 CalculateCellsAndStore 的"免 DB 回读"快路径：直接用
+// collector 刚解析、已过白名单（CounterName 已编号化为 IndicatorID）的内存 counter 算 KPI，
+// 省掉每文件一次把 counter 全量回读出来的 SELECT（PG 写瓶颈下这次回读与写竞争同一 chunk）。
+//
+// 等价性：counter 编号（CounterName=IndicatorID）与公式依赖（route.KPIs[].Dependencies）、
+// 落库 metric_path 同源，故内存 counter 携带 KPI 公式所需的全部标识。分桶用与 QueryForKPICells
+// 同一套 counter.GroupParsedCountersByCell（共享 groupRowsByCell），对"一窗一文件"严格等价。
+//
+// 与回读路径的唯一差异：回读按时间窗在库里 SUM，会跨"同设备同窗多文件"（拆包/补传）聚合；
+// 本路径只算本文件。正常一窗一文件无差异；需跨文件聚合的部署可经配置切回 CalculateCellsAndStore。
+// 返回写入的 KPIValue 行数。
+func (e *KPIEngine) CalculateAndStoreFromCounters(
+	ctx context.Context,
+	deviceID uuid.UUID,
+	oui, deviceSN string,
+	counters []model.PMCounter,
+	collectTime time.Time,
+	carrierCode model.CarrierCode,
+	tech model.Technology,
+) (int, error) {
+	if e.router == nil {
+		return 0, errors.New("kpi.Engine.CalculateAndStoreFromCounters: router not configured")
+	}
+	if len(counters) == 0 {
+		return 0, nil
+	}
+
+	route, err := e.router.LookupByDevice(ctx, deviceSN)
+	if err != nil {
+		if errors.Is(err, router.ErrProductNotMatched) || errors.Is(err, router.ErrInvalidProductMetadata) {
+			e.logger.Warn("kpi route unavailable; skip device",
+				zap.String("device_sn", deviceSN),
+				zap.Error(err))
+			return 0, nil
+		}
+		return 0, fmt.Errorf("kpi route lookup for %q: %w", deviceSN, err)
+	}
+	if route == nil || len(route.KPIs) == 0 {
+		return 0, nil
+	}
+
+	cellIDs := uniqueCellIDsFromCounters(counters)
+	startTime := collectTime.Add(-15 * time.Minute)
+	period := collectTime.Sub(startTime).Seconds()
+	perCell := counter.GroupParsedCountersByCell(counters, cellIDs, period)
+
+	all := make([]model.KPIValue, 0, len(cellIDs)*len(route.KPIs))
+	for _, cellID := range cellIDs {
+		all = append(all, e.evaluateRoute(route, perCell[cellID], deviceID, oui, deviceSN, cellID, collectTime, carrierCode, tech)...)
+	}
+	if len(all) == 0 {
+		return 0, nil
+	}
+	if err := e.kpiRepo.BatchInsert(ctx, all); err != nil {
+		return 0, fmt.Errorf("store kpi values: %w", err)
+	}
+	return len(all), nil
+}
+
+// uniqueCellIDsFromCounters 去重收集内存 counter 切片里出现的 CellID（保持首次出现顺序）。
+func uniqueCellIDsFromCounters(counters []model.PMCounter) []string {
+	seen := make(map[string]struct{}, len(counters))
+	out := make([]string, 0)
+	for i := range counters {
+		cid := counters[i].CellID
+		if _, dup := seen[cid]; dup {
+			continue
+		}
+		seen[cid] = struct{}{}
+		out = append(out, cid)
+	}
+	return out
+}
+
 // uniqueCounterDeps 去重收集 route.KPIs 中所有公式依赖的 counter 名。
 func uniqueCounterDeps(kpis []router.KPIDef) []string {
 	seen := make(map[string]struct{})

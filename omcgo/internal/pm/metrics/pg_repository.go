@@ -129,6 +129,14 @@ var pmMetricsColumns = []string{
 // 阈值取 50：低于此用 VALUES 省去建表两条额外语句；高于此 COPY 的吞吐优势盖过建表开销。
 const batchInsertThreshold = 50
 
+// BulkAsyncCommit 控制大批量 COPY 路径是否对本事务 SET LOCAL synchronous_commit = off。
+//
+// PM 指标（counter / KPI）原文件留在 MinIO 可重建，关掉 WAL 同步落盘等待能显著提吞吐
+// （崩溃最多丢"已提交但未刷盘"的最后几 ms PM 行，对 15min 粒度统计数据可接受）。
+// 默认 false（durable，安全）；由 worker 按 pm_async_commit=true 显式开启（进程级，仅影响
+// 该进程的 PM 写）。仅作用于 COPY 大批量路径的事务，不影响小批量 VALUES 与其它写。
+var BulkAsyncCommit = false
+
 // BatchInsert 批量插入。两条路径共享同一套自然键 ON CONFLICT DO UPDATE 补传幂等语义：
 //
 //		相同 (device_oui, device_sn, metric_path, granularity, end_time, time, object_ldn)
@@ -186,6 +194,15 @@ func (r *PgRepository) batchInsertCopy(ctx context.Context, ms []PMMetric) error
 		return fmt.Errorf("begin pm_metrics copy tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+
+	// PM 写吞吐优化：PM 指标可从 MinIO 原文件重建，故关掉本事务的 WAL 同步落盘等待，
+	// 提交不再阻塞在 fsync 上（崩溃最多丢已提交未刷盘的最后几 ms 行）。SET LOCAL 只作用本
+	// 事务，不污染连接后续复用。默认关闭（BulkAsyncCommit=false），worker 显式开启。
+	if BulkAsyncCommit {
+		if _, err := tx.Exec(ctx, "SET LOCAL synchronous_commit = off"); err != nil {
+			return fmt.Errorf("set local synchronous_commit: %w", err)
+		}
+	}
 
 	// LIKE 仅复制列定义（不含 DEFAULTS / 约束 / 索引）：暂存表是纯缓冲区，
 	// id / ingest_time / object_ldn 等已在 buildRows 里落好值，无需表级 DEFAULT。

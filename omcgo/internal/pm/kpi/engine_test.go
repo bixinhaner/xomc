@@ -249,6 +249,69 @@ func TestKPIEngine_CalculateCellsAndStore_BatchesAllCells(t *testing.T) {
 	assert.InDelta(t, 0.50, byCell["cell-3"], 0.001)
 }
 
+// 等价性：CalculateAndStoreFromCounters（内存 counter 直接算）与 CalculateCellsAndStore
+// （DB 回读再算）对同一份单文件数据产出完全一致的 KPI——保证免回读快路径安全替换。
+func TestKPIEngine_FromCounters_EqualsDBPath(t *testing.T) {
+	deviceID := uuid.New()
+	collectTime := time.Now()
+	// 内存 counter（已编号化，名字即公式依赖）。
+	counters := []model.PMCounter{
+		{CellID: "cell-1", CounterName: "RRC_Conn_Succ", CounterValue: 950},
+		{CellID: "cell-1", CounterName: "RRC_Conn_Att", CounterValue: 1000}, // 0.95
+		{CellID: "cell-2", CounterName: "RRC_Conn_Succ", CounterValue: 800},
+		{CellID: "cell-2", CounterName: "RRC_Conn_Att", CounterValue: 1000}, // 0.80
+	}
+	// DB 回读路径的 mock：返回与上面 counters 等价的分桶。
+	dbPerCell := map[string]map[string]float64{
+		"cell-1": {"RRC_Conn_Succ": 950, "RRC_Conn_Att": 1000, "period_seconds": 900},
+		"cell-2": {"RRC_Conn_Succ": 800, "RRC_Conn_Att": 1000, "period_seconds": 900},
+	}
+	newEngine := func(kr *mockKPIRepo) *KPIEngine {
+		cr := &mockCounterRepo{
+			queryForKPICellsFunc: func(context.Context, uuid.UUID, []string, []string, time.Time, time.Time) (map[string]map[string]float64, error) {
+				return dbPerCell, nil
+			},
+		}
+		return NewKPIEngine(cr, kr, &stubRouter{route: sampleRoute()}, zap.NewNop())
+	}
+
+	dbRepo := &mockKPIRepo{}
+	nDB, err := newEngine(dbRepo).CalculateCellsAndStore(
+		context.Background(), deviceID, "00A0C6", "SN-1",
+		[]string{"cell-1", "cell-2"}, collectTime, model.CarrierCMCC, model.TechLTE)
+	require.NoError(t, err)
+
+	memRepo := &mockKPIRepo{}
+	nMem, err := newEngine(memRepo).CalculateAndStoreFromCounters(
+		context.Background(), deviceID, "00A0C6", "SN-1",
+		counters, collectTime, model.CarrierCMCC, model.TechLTE)
+	require.NoError(t, err)
+
+	assert.Equal(t, nDB, nMem, "两路写入行数应一致")
+	require.Len(t, memRepo.insertedValues, len(dbRepo.insertedValues))
+	dbByCell := map[string]float64{}
+	for _, v := range dbRepo.insertedValues {
+		dbByCell[v.CellID] = v.KPIValue
+	}
+	for _, v := range memRepo.insertedValues {
+		assert.InDelta(t, dbByCell[v.CellID], v.KPIValue, 1e-9, "cell %s 两路 KPI 值应一致", v.CellID)
+	}
+	assert.InDelta(t, 0.95, dbByCell["cell-1"], 1e-9)
+	assert.InDelta(t, 0.80, dbByCell["cell-2"], 1e-9)
+}
+
+// 空 counters → 直接返回 0，不查 route、不落库。
+func TestKPIEngine_CalculateAndStoreFromCounters_Empty(t *testing.T) {
+	kpiRepo := &mockKPIRepo{}
+	engine := NewKPIEngine(&mockCounterRepo{}, kpiRepo, &stubRouter{route: sampleRoute()}, zap.NewNop())
+	n, err := engine.CalculateAndStoreFromCounters(
+		context.Background(), uuid.New(), "00A0C6", "SN-1", nil, time.Now(),
+		model.CarrierCMCC, model.TechLTE)
+	require.NoError(t, err)
+	assert.Zero(t, n)
+	assert.Empty(t, kpiRepo.insertedValues)
+}
+
 // 空 cellIDs → 直接返回 0，不查 route、不落库。
 func TestKPIEngine_CalculateCellsAndStore_EmptyCells(t *testing.T) {
 	kpiRepo := &mockKPIRepo{}

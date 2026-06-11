@@ -54,6 +54,14 @@ minio:
 # CPU 配额），上限 16。worker 容器配 4 核，故设 4。
 pm_consumer_concurrency: 4
 
+# PM 指标大批量写关掉 WAL 同步落盘（synchronous_commit=off）换吞吐：PM 数据可从 MinIO 重建，
+# 崩溃最多丢已提交未刷盘的最后几 ms 行，可接受。默认 false（durable），写瓶颈下开。
+pm_async_commit: true
+
+# KPI 计算取数路径：false=用内存刚解析的 counter 直接算（默认，省每文件一次全量回读 SELECT）；
+# true=从 DB 按 15min 窗回读再算（仅"同窗拆多文件需跨文件聚合"部署才需要）。
+pm_kpi_window_from_db: false
+
 # T-0157 C2: 任务过期扫描器配置（worker 进程消费）。
 # default_expires_in_seconds 在 worker 不使用（CreateTask 在 app 端兜底），保留占位让两端一致。
 task:
