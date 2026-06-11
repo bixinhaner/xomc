@@ -33,6 +33,7 @@ import {
   message,
 } from 'antd';
 import dayjs from 'dayjs';
+import { InputAddon } from '@/components/common/InputAddon';
 import { useCreatePmAdhoc, useUpdatePmAdhoc, usePmAdhocDetail } from '@core/hooks/api/usePmAdhoc';
 import { useDeviceList } from '@core/hooks/api/useDevices';
 import { useMetricObjectsByDevices } from '@core/hooks/api/usePmQuery';
@@ -375,16 +376,18 @@ export default function PmAdhocWizard() {
       {mode === 'oneshot' && (
         <div>
           <div style={{ marginBottom: 8, fontWeight: 500 }}>{intl.formatMessage({ id: 'perf.adhoc.fieldExpireDays' })}</div>
-          {/* T-0194 编辑模式：过期天数锁定只读（建后不可改，提交不发该字段） */}
-          <Input
-            type="number"
-            min={1}
-            style={{ width: 160 }}
-            value={expireDays}
-            disabled={isEdit}
-            onChange={(e) => setExpireDays(Number(e.target.value) || 60)}
-            addonAfter={intl.formatMessage({ id: 'perf.adhoc.daySuffix' })}
-          />
+          {/* T-0194 编辑模式：过期天数锁定只读（建后不可改，提交不发该字段）。
+              antd6 addonAfter 已废弃：Space.Compact + InputAddon 复刻天数后缀盒子。 */}
+          <Space.Compact style={{ width: 160 }}>
+            <Input
+              type="number"
+              min={1}
+              value={expireDays}
+              disabled={isEdit}
+              onChange={(e) => setExpireDays(Number(e.target.value) || 60)}
+            />
+            <InputAddon>{intl.formatMessage({ id: 'perf.adhoc.daySuffix' })}</InputAddon>
+          </Space.Compact>
           {isEdit && (
             <div style={{ marginTop: 6, color: '#999', fontSize: 12 }}>
               {intl.formatMessage({ id: 'perf.adhoc.editLockedExpire' })}

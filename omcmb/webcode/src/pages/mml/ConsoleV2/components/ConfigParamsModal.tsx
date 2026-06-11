@@ -16,6 +16,7 @@ import {
   Typography,
 } from 'antd';
 import { PlayCircleOutlined, RightOutlined } from '@ant-design/icons';
+import { InputAddon } from '@/components/common/InputAddon';
 import type { CommandItem, ExecMode, ExecRequest, OperationMode, RawPathPayload } from '../types';
 import { CONFIG_TAB_HEIGHT, isReadOp, opColor, opLabel } from '../constants';
 import RawPathPanel from './RawPathPanel';
@@ -291,14 +292,17 @@ export default function ConfigParamsModal({
             ))}
           </Checkbox.Group>
         ) : command.operationType === 'RMV' ? (
+          // antd6 addonBefore 已废弃：改用 Space.Compact + InputAddon 复刻前缀盒子。
           <div style={{ marginTop: 8 }}>
-            <InputNumber
-              min={1}
-              value={instance}
-              onChange={(v) => setInstance(v ?? 1)}
-              addonBefore="实例号"
-              style={{ width: 180 }}
-            />
+            <Space.Compact style={{ width: 180 }}>
+              <InputAddon>实例号</InputAddon>
+              <InputNumber
+                min={1}
+                value={instance}
+                onChange={(v) => setInstance(v ?? 1)}
+                style={{ width: '100%' }}
+              />
+            </Space.Compact>
           </div>
         ) : (
           <Space orientation="vertical" size={10} style={{ width: '100%', marginTop: 8 }}>

@@ -14,7 +14,7 @@
 
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button, Empty, List, Spin, theme, Tooltip, Typography, message } from 'antd';
+import { Button, Empty, Flex, Spin, theme, Tooltip, Typography, message } from 'antd';
 import {
   CheckCircleFilled,
   ClockCircleFilled,
@@ -129,12 +129,19 @@ export default function NotificationCenter({ onClose }: Props) {
         ) : items.length === 0 ? (
           <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无消息" style={{ padding: 32 }} />
         ) : (
-          <List
-            dataSource={items}
-            renderItem={(item) => (
-              <NotificationItem item={item} onClick={() => void handleItemClick(item)} />
-            )}
-          />
+          // antd6 List 已废弃：改用 Flex 纵向容器 + map，逐条沿用原 NotificationItem
+          // 标记（item 间分隔线下沉到 NotificationItem 内的 borderBottom，与原 List
+          // 默认 split 视觉一致）。
+          <Flex vertical>
+            {items.map((item, idx) => (
+              <NotificationItem
+                key={item.id}
+                item={item}
+                last={idx === items.length - 1}
+                onClick={() => void handleItemClick(item)}
+              />
+            ))}
+          </Flex>
         )}
       </div>
     </div>
@@ -147,10 +154,12 @@ export default function NotificationCenter({ onClose }: Props) {
 
 interface ItemProps {
   item: NotificationCenterItem;
+  /** 是否末条 —— 末条不画底部分隔线（复刻原 List split 默认行为） */
+  last: boolean;
   onClick: () => void;
 }
 
-function NotificationItem({ item, onClick }: ItemProps) {
+function NotificationItem({ item, last, onClick }: ItemProps) {
   const { token } = theme.useToken();
   const ui = toUiState(item.status);
   const { icon, color } = uiVisuals(ui);
@@ -163,14 +172,17 @@ function NotificationItem({ item, onClick }: ItemProps) {
   //   已读：colorFillTertiary 底（比 quaternary 沉一档，对比更强）+ 标题 type=secondary
   //         + 整行 opacity 0.55 让用户一眼区分
   // 不再硬编码颜色，避免暗模式背景仍为白、字体被覆盖看不见。
+  // antd6 List.Item 随 List 一并废弃：用 div 复刻，原内联样式照搬，并补一条底部
+  // 分隔线还原 List split 默认（末条不画）。
   return (
-    <List.Item
+    <div
       onClick={onClick}
       style={{
         cursor: 'pointer',
         padding: '12px 12px 12px 14px',
         position: 'relative',
         borderLeft: item.isRead ? 'none' : `4px solid ${token.colorPrimary}`,
+        borderBottom: last ? 'none' : `1px solid ${token.colorSplit}`,
         background: item.isRead ? token.colorFillTertiary : token.colorBgElevated,
         opacity: item.isRead ? 0.55 : 1,
       }}
@@ -220,7 +232,7 @@ function NotificationItem({ item, onClick }: ItemProps) {
           </Tooltip>
         </div>
       </div>
-    </List.Item>
+    </div>
   );
 }
 

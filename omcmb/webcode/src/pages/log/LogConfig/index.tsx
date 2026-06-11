@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Button, InputNumber, Progress, Table, message } from 'antd';
+import { Button, Progress, Table, message } from 'antd';
+import { AddonInputNumber } from '@/components/common/InputAddon';
 import type { ColumnsType } from 'antd/es/table';
 import { SaveOutlined } from '@ant-design/icons';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
@@ -86,12 +87,15 @@ export default function LogConfig() {
       render: (_: unknown, record: LogConfigRow) => {
         if (record.editing) {
           return (
-            <InputNumber
+            // antd6 addonAfter 已废弃：改用 AddonInputNumber（Space.Compact + InputAddon）
+            // 复刻"天"后缀盒子，value/onChange 仍由调用方直接受控。
+            <AddonInputNumber
+              addonAfter="天"
+              compactStyle={{ width: 140 }}
               value={record.editValue}
               min={1}
               max={180}
-              addonAfter="天"
-              style={{ width: 140 }}
+              style={{ width: '100%' }}
               onChange={(val) => {
                 if (val !== null) {
                   setConfigs((prev) => prev.map((c) => c.id === record.id ? { ...c, editValue: val } : c));
