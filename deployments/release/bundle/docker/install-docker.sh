@@ -102,6 +102,59 @@ DOCKER_BIP="${DOCKER_BIP:-173.17.0.1/16}"
 DOCKER_ADDR_POOL_BASE="${DOCKER_ADDR_POOL_BASE:-173.19.0.0/16}"
 DOCKER_ADDR_POOL_SIZE="${DOCKER_ADDR_POOL_SIZE:-24}"
 
+# ── assert_docker_network：幂等断言 docker0 网段(bip)+ 自动池(#155)──────────────
+# docker0 的 bip 由 /etc/docker/daemon.json 控制(compose 管不到 docker0)。历史 bug:bip 只
+# 在"全新装 dockerd"分支写,docker 已装即整段跳过、--skip-if-installed 更直接 exit 0 →
+# 一旦 daemon.json 被引擎升级覆盖 / 清空 / 手改丢失,docker0 回落默认 172.17 撞公司内网,
+# 且后续部署不修复、静默回退。本函数让每次部署都断言 bip:已正确→不动不重启;漂移→写
+# daemon.json(python3 merge 保其它键)+ (docker 在跑时)重启使 docker0 生效。
+assert_docker_network() {
+  local DAEMON_JSON=/etc/docker/daemon.json cur_bip=""
+  if ! command -v python3 >/dev/null 2>&1; then
+    warn "未装 python3,无法 merge daemon.json 网段。请手动设 bip=${DOCKER_BIP} + default-address-pools=${DOCKER_ADDR_POOL_BASE}(/${DOCKER_ADDR_POOL_SIZE})"
+    return 0
+  fi
+  mkdir -p /etc/docker
+  if [ -f "$DAEMON_JSON" ] && [ -s "$DAEMON_JSON" ]; then
+    cur_bip="$(python3 -c "import json
+try: print(json.load(open('$DAEMON_JSON')).get('bip',''))
+except Exception: print('')" 2>/dev/null || true)"
+  fi
+  if [ "$cur_bip" = "$DOCKER_BIP" ]; then
+    log "docker0 网段已是 bip=${DOCKER_BIP}，无需改动"
+    return 0
+  fi
+  [ -n "$cur_bip" ] && log "docker0 bip 漂移(当前 '${cur_bip}' ≠ 约定 '${DOCKER_BIP}')，重新断言"
+  [ -f "$DAEMON_JSON" ] && cp -a "$DAEMON_JSON" "$DAEMON_JSON.bak.$(date +%Y%m%d%H%M%S)" || true
+  # best-effort：写失败只 warn 不中止部署(本函数在每次部署的 precheck 都会跑,set -e 下
+  # 裸 python3 失败会拖垮整个部署)。失败时 docker0 维持原状,与历史行为一致。
+  if ! python3 - "$DAEMON_JSON" "$DOCKER_BIP" "$DOCKER_ADDR_POOL_BASE" "$DOCKER_ADDR_POOL_SIZE" <<'PYEOF'
+import json, os, sys
+p, bip, pool_base, pool_size = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
+data = {}
+if os.path.exists(p) and os.path.getsize(p) > 0:
+    try: data = json.load(open(p))
+    except json.JSONDecodeError: data = {}
+data['bip'] = bip
+data['default-address-pools'] = [{'base': pool_base, 'size': pool_size}]
+with open(p, 'w') as f:
+    json.dump(data, f, indent=2, ensure_ascii=False); f.write('\n')
+PYEOF
+  then
+    warn "写 ${DAEMON_JSON} 网段失败,docker0 bip 未更新(请手动设 bip=${DOCKER_BIP})"
+    return 0
+  fi
+  log "已写入 ${DAEMON_JSON}：bip=${DOCKER_BIP}, default-address-pools=${DOCKER_ADDR_POOL_BASE}(/${DOCKER_ADDR_POOL_SIZE})"
+  # docker 在运行 → 重启使 docker0 新 bip 生效(全新装时 docker 尚未起,交给后面的
+  # systemctl enable --now)。omcgo-net 锁 173.18 不受 bip 影响;仅 bip 实际漂移时才重启,
+  # 稳态零打扰(业务容器会随 docker 重启而重启)。
+  if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet docker 2>/dev/null; then
+    log "bip 变更且 docker 在运行,重启 docker 使 docker0 生效(业务容器会随之重启)..."
+    systemctl daemon-reload
+    systemctl restart docker || warn "docker 重启失败,请手动 systemctl restart docker 使 bip 生效"
+  fi
+}
+
 cd "$(dirname "$SELF")"
 
 [ "$(id -u)" = 0 ] || die "请以 root 执行（sudo bash $0 ...）"
@@ -309,7 +362,8 @@ fi
 SKIP_DOCKERD=0
 if command -v docker >/dev/null 2>&1; then
   if [ "$SKIP_IF_INSTALLED" = 1 ]; then
-    log "已检测到 Docker：$(docker --version)，跳过（--skip-if-installed）"
+    log "已检测到 Docker：$(docker --version)，跳过安装；仍断言 docker0 网段（--skip-if-installed）"
+    assert_docker_network   # #155：即便不装 docker,也每次部署断言 docker0 bip,防 172.17 回落
     exit 0
   fi
   log "已检测到 Docker：$(docker --version)，跳过 dockerd/containerd 二进制与 systemd unit 安装"
@@ -504,35 +558,9 @@ PYEOF
   log "已写入 ${DAEMON_JSON}：data-root = ${DATA_ROOT}"
 fi
 
-# ── docker 网段写入 daemon.json（bip + default-address-pools）────────────
-# 始终执行(网段规划是公司内网硬性约定,不像 data-root/mirror 是可选项):
-# 把 docker0 与自动分配池从默认的 172.17/172.18… 移到 173.x,避开公司 172 内网。
-# 用 python3 merge,保留 data-root / registry-mirrors 等其它键。
-DAEMON_JSON=/etc/docker/daemon.json
-mkdir -p /etc/docker
-if command -v python3 >/dev/null 2>&1; then
-  [ -f "$DAEMON_JSON" ] && cp -a "$DAEMON_JSON" "$DAEMON_JSON.bak.$(date +%Y%m%d%H%M%S)"
-  python3 - "$DAEMON_JSON" "$DOCKER_BIP" "$DOCKER_ADDR_POOL_BASE" "$DOCKER_ADDR_POOL_SIZE" <<'PYEOF'
-import json, os, sys
-p, bip, pool_base, pool_size = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
-data = {}
-if os.path.exists(p) and os.path.getsize(p) > 0:
-    try:
-        data = json.load(open(p))
-    except json.JSONDecodeError:
-        data = {}
-data['bip'] = bip
-data['default-address-pools'] = [{'base': pool_base, 'size': pool_size}]
-with open(p, 'w') as f:
-    json.dump(data, f, indent=2, ensure_ascii=False)
-    f.write('\n')
-PYEOF
-  log "已写入 ${DAEMON_JSON}：bip=${DOCKER_BIP}, default-address-pools=${DOCKER_ADDR_POOL_BASE}(/${DOCKER_ADDR_POOL_SIZE})"
-else
-  warn "未装 python3,无法安全 merge daemon.json 网段配置。请手动在 $DAEMON_JSON 加：
-        \"bip\": \"${DOCKER_BIP}\",
-        \"default-address-pools\": [{\"base\": \"${DOCKER_ADDR_POOL_BASE}\", \"size\": ${DOCKER_ADDR_POOL_SIZE}}]"
-fi
+# ── docker0 网段断言(bip + 自动池)── 抽到 assert_docker_network(#155)。全新装路径:
+# 此刻 docker 尚未 enable --now,函数只写 daemon.json、不重启,随后 systemctl 启动即带 bip。
+assert_docker_network
 
 # ── 启用并启动（开机自启）────────────────────────────────────────────────
 getent group docker >/dev/null 2>&1 || groupadd docker
@@ -546,6 +574,10 @@ docker version
 log "Docker 安装完成。"
 
 fi  # ← end "if [ \"$SKIP_DOCKERD\" = 0 ]" 包住 systemd unit + daemon.json + systemctl 启动
+
+# docker 已装(SKIP_DOCKERD=1,运维直跑未带 --skip-if-installed):上面全新装段被整段跳过,
+# 这里补断言 docker0 网段,确保 bip 漂移(回落 172.17)也能被每次部署修复(#155)。
+[ "$SKIP_DOCKERD" = 1 ] && assert_docker_network
 
 # ── 加速镜像配置 ────────────────────────────────────────────────────────
 if [ "$NO_MIRROR" = 1 ]; then

@@ -77,9 +77,9 @@
       <pattern globalOrder="7">^FAP/BU1810$</pattern>
     </patterns>
   </product>
-  <!-- ============ 7. BSC 网关 ============ -->
-  <product name="BSC 网关" vendor="Baicells" tech="2G" radioModes="">
-    <description>Baicells BSC；皮基站 GSM 网关</description>
+  <!-- ============ 7. BSC 产品 ============ -->
+  <product name="BSC 产品" vendor="Baicells" tech="2G" radioModes="">
+    <description>Baicells BSC 产品</description>
     <paramModel>BSC</paramModel>
     <enableFileType11>true</enableFileType11>
     <deviceAttrsOverride access="false" min_value="false" max_value="false" change_applies="false" data_type="false" />
