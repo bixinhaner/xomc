@@ -333,6 +333,24 @@ else
   cp -a "$OMC_ROOT/data" "$DATA_SNAP" || warn "快照 data 失败(磁盘满?);继续合并但无回滚点"
   log "升级：反向合并(现网赢、新版补充)新版 builtin → $OMC_ROOT/data"
   cp -an "$NEW_DATA/." "$OMC_ROOT/data/" || warn "反向合并 data 出现错误;请人工核对 $OMC_ROOT/data"
+  # builtin 刷新(#154):cp -an 只补缺失、不更新已存在文件 → 内置字典(如 BSC 网关→BSC 产品
+  # 改名)升级不生效,且 dictloader 会用过时 host XML 把旧值 UPSERT 回来。这里对新包 builtin
+  # 文件做差异覆盖:host 无对应 .custom sidecar(=运维未自定义)且内容有变 → 用新版覆盖;
+  # 有 .custom(运维上传/改过)一律保留。sidecar 约定见 internal/*/source.go::CustomMarkerSuffix。
+  _refreshed=0
+  while IFS= read -r -d '' _nf; do
+    _rel="${_nf#"$NEW_DATA"/}"
+    case "$_rel" in *.custom) continue ;; esac           # 新包不应含 sidecar,防御性跳过
+    [ -f "$OMC_ROOT/data/$_rel.custom" ] && continue       # 运维自定义,保留不覆盖
+    if [ -f "$OMC_ROOT/data/$_rel" ] && ! cmp -s "$_nf" "$OMC_ROOT/data/$_rel"; then
+      if cp -a "$_nf" "$OMC_ROOT/data/$_rel"; then
+        log "  · 刷新 builtin 字典:$_rel"; _refreshed=$((_refreshed + 1))
+      else
+        warn "  · 刷新 builtin 失败:$_rel(请人工核对)"
+      fi
+    fi
+  done < <(find "$NEW_DATA" -type f -print0)
+  [ "$_refreshed" -gt 0 ] && log "升级:刷新 $_refreshed 个 builtin 字典文件(运维自定义 .custom 已保留)"
 fi
 # 容器(UID 10001 = Dockerfile 内 omcgo 非 root 用户)需可写 data:
 # 上传/删除 XML、写 .custom sidecar、worker 清理过期备份与孤儿 sidecar。
