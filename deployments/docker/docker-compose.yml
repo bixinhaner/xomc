@@ -39,22 +39,23 @@ services:
     # max_connections=300：app(db60+tsdb40)+worker(db25+tsdb25)+acs(db30) 池上限合计 ~180，
     # 远超 PG 默认 100，最后启动的 acs 会 "too many clients already" 崩溃。给到 300 覆盖
     # 全部池 + exporter + 手动 psql + 余量。多副本横扩前应前置 pgbouncer（见 app.prod.yaml）。
-    # 内存参数（12GB VM 档，详见 docs/operations/OMC内存分配与容量规划-20260611.md）：显式覆盖
-    # TimescaleDB 镜像 timescaledb-tune 的自调——它按 VM 总量(而非容器 cap)调，会把 shared_buffers
-    # 顶到 ~容器74% 且 effective_cache_size 超 cap → 濒 OOM + 误导规划器。这里按 4g 容器钉死：
-    # shared_buffers=1g(25%) / effective_cache_size=2.5g / work_mem=12m(KPI 在线聚合不溢盘) /
-    # maintenance_work_mem=512m / max_wal_size=2g。硬约束：cap(4g) >= shared_buffers+maintenance。
+    # 内存参数（PM 写吞吐优化档：cpus=8 / cap=10g；显式覆盖 timescaledb-tune 的按-VM 误调）。
+    # ⚠️ Docker VM 总量 ~11.67g 与 boss 栈共享：cap 设 10g 仅作上限，PG 实际内存配置保持适度
+    # （shared_buffers=3g 而非顶满），避免 PG 真占满 10g 把共享 VM/boss 容器挤 OOM。
+    # shared_buffers=3g / effective_cache_size=7g(仅规划器提示，不实占) / work_mem=16m /
+    # maintenance_work_mem=1g / max_wal_size=4g（写突发少 checkpoint）/ checkpoint_completion_target=0.9
+    # （摊平 checkpoint I/O）。硬约束：cap(10g) >= shared_buffers(3g)+maintenance(1g)。
     command: ["postgres", "-c", "timezone=Asia/Shanghai", "-c", "log_timezone=Asia/Shanghai", "-c", "max_connections=300",
-              "-c", "shared_buffers=1GB", "-c", "effective_cache_size=2560MB", "-c", "work_mem=12MB",
-              "-c", "maintenance_work_mem=512MB", "-c", "max_wal_size=2GB"]
+              "-c", "shared_buffers=3GB", "-c", "effective_cache_size=7GB", "-c", "work_mem=16MB",
+              "-c", "maintenance_work_mem=1GB", "-c", "max_wal_size=4GB", "-c", "checkpoint_completion_target=0.9"]
     # 有状态服务给足 60s 优雅退出窗口：checkpoint flush + WAL 落盘，避免被 SIGKILL
     # 截断导致 recovery（详见 README §13 资源与优雅关闭）。
     stop_grace_period: 60s
     deploy:
       resources:
         limits:
-          cpus: "3"
-          memory: 4g
+          cpus: "8"
+          memory: 10g
         reservations:
           cpus: "0.5"
           memory: 1g
