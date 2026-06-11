@@ -135,6 +135,8 @@ type MenuRepository interface {
 }
 
 // ApiEndpointRepository defines the persistence interface for API endpoints.
+//
+//go:generate go run go.uber.org/mock/mockgen -destination=mock_api_endpoint_repository_test.go -package=admin . ApiEndpointRepository
 type ApiEndpointRepository interface {
 	Create(ctx context.Context, ep *ApiEndpointDB) error
 	GetByID(ctx context.Context, id uuid.UUID) (*ApiEndpointDB, error)
