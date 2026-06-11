@@ -156,6 +156,9 @@ func (m *mockCounterRepo) QueryAggregated(ctx context.Context, filter counter.Co
 func (m *mockCounterRepo) QueryForKPI(ctx context.Context, deviceID uuid.UUID, cellID string, counterNames []string, startTime, endTime time.Time) (map[string]float64, error) {
 	return nil, nil
 }
+func (m *mockCounterRepo) QueryForKPICells(ctx context.Context, deviceID uuid.UUID, cellIDs []string, counterNames []string, startTime, endTime time.Time) (map[string]map[string]float64, error) {
+	return nil, nil
+}
 
 type mockKPIRepo struct{}
 

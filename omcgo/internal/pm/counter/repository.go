@@ -42,4 +42,10 @@ type CounterRepository interface {
 	Query(ctx context.Context, filter CounterFilter) (*model.ListResponse[model.PMCounter], error)
 	QueryAggregated(ctx context.Context, filter CounterFilter) ([]AggregatedCounter, error)
 	QueryForKPI(ctx context.Context, deviceID uuid.UUID, cellID string, counterNames []string, startTime, endTime time.Time) (map[string]float64, error)
+	// QueryForKPICells 是 QueryForKPI 的批量版本：一次查询拿到设备在时间窗内的全部
+	// counter 行，再按 cellID 分组返回 cellID → (counter_name → SUM)。语义与对每个
+	// cellID 各调一次 QueryForKPI 完全等价（含 cellID=="" 表示"跨全部 cell 求和"的
+	// 历史约定、period_seconds 注入），但把单文件 N(=cell 数) 次"全设备扫描+逐 cell
+	// 内存过滤"塌缩成 1 次查询，消除 O(cell²) 的数据传输与 N 次 device 反查。
+	QueryForKPICells(ctx context.Context, deviceID uuid.UUID, cellIDs []string, counterNames []string, startTime, endTime time.Time) (map[string]map[string]float64, error)
 }

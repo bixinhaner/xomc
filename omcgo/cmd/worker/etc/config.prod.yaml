@@ -51,6 +51,11 @@ minio:
     exchange: "omc-exchange"
     ui_assets: "ui-assets"
 
+# PM 文件入库消费者的进程内并发订阅数（pm.file.received → 解析入库）。
+# 共享 durable consumer "pm-workers" 由 JetStream 负载均衡，吃满 worker 多核。
+# <=0 回退 GOMAXPROCS（容器 CPU 配额），上限 16；按 worker CPU 核数设置。
+pm_consumer_concurrency: 0
+
 # T-0157 C2: 任务过期扫描器配置
 task:
   default_expires_in_seconds: 120

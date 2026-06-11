@@ -105,6 +105,7 @@ type PMCollector struct {
 	runner           runner.Wrapper
 	deviceLookup     DeviceLookup
 	counterWhitelist CounterWhitelist
+	concurrency      int
 	logger           *zap.Logger
 }
 
@@ -152,18 +153,38 @@ func (c *PMCollector) SetCounterWhitelist(w CounterWhitelist) {
 	c.counterWhitelist = w
 }
 
+// SetConcurrency 设置 PM 文件入库的进程内并发订阅数。
+//
+// 动机：NATS push 订阅的 async 回调由 nats.go 单 goroutine 串行投递，单订阅只能用 ~1 核。
+// 这里对同一 subject(pm.file.received)+queue(pm-workers, durable) 发起 N 个 QueueSubscribe，
+// 它们共享同一个 server-side durable consumer，JetStream 在 N 个订阅间负载均衡（核对
+// nats.go@v1.52.0：queue 分支不触发 "consumer already bound"，每条消息的 ack 仍绑定其
+// 自身 *nats.Msg，at-least-once / 重试语义不变），从而吃满 worker 多核。
+//
+// n<=1（或未设置）→ 退化为单订阅，保持旧行为。处理逻辑 handleFileReceived 与 runner.Wrap
+// 均无可变共享状态，并发调用安全。
+func (c *PMCollector) SetConcurrency(n int) {
+	c.concurrency = n
+}
+
 // Subscribe registers the collector to listen for PM file received events.
 func (c *PMCollector) Subscribe(bus event.EventBus) error {
 	handler := c.handleFileReceived
 	if c.runner != nil {
 		handler = c.runner.Wrap(event.SubjectPMFileReceived, c.handleFileReceived)
 	}
-	_, err := bus.QueueSubscribe(event.SubjectPMFileReceived, "pm-workers", handler)
-	if err != nil {
-		return fmt.Errorf("subscribe pm.file.received: %w", err)
+	n := c.concurrency
+	if n < 1 {
+		n = 1
+	}
+	for i := 0; i < n; i++ {
+		if _, err := bus.QueueSubscribe(event.SubjectPMFileReceived, "pm-workers", handler); err != nil {
+			return fmt.Errorf("subscribe pm.file.received (sub %d/%d): %w", i+1, n, err)
+		}
 	}
 	c.logger.Info("PM collector subscribed to pm.file.received",
 		zap.Bool("retry_dlq_wrapped", c.runner != nil),
+		zap.Int("concurrency", n),
 	)
 	return nil
 }
@@ -313,15 +334,14 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 		}
 	}
 
-	// Calculate KPIs
+	// Calculate KPIs — 批量算全文件所有 cell（route 查一次 + counter 一次查全 + KPI 一次批量写），
+	// 替代旧"每 cell 一次 CalculateAndStore"的 N 次扇出（GSM 真机 256 cell/文件是入库主瓶颈）。
 	if c.kpiEngine != nil {
 		cellIDs := extractUniqueCellIDs(content.Counters)
 		carrier := model.CarrierCode(payload.Carrier)
 		tech := model.Technology(payload.Technology)
-		for _, cellID := range cellIDs {
-			if _, err := c.kpiEngine.CalculateAndStore(ctx, deviceID, payload.DeviceOUI, payload.DeviceSN, cellID, content.CollectTime, carrier, tech); err != nil {
-				c.logger.Warn("calculate kpi", zap.String("cell_id", cellID), zap.Error(err))
-			}
+		if _, err := c.kpiEngine.CalculateCellsAndStore(ctx, deviceID, payload.DeviceOUI, payload.DeviceSN, cellIDs, content.CollectTime, carrier, tech); err != nil {
+			c.logger.Warn("calculate kpi (cells)", zap.Int("cells", len(cellIDs)), zap.Error(err))
 		}
 	}
 

@@ -606,6 +606,11 @@ type WorkerConfig struct {
 	MinIO           MinIOConfig      `mapstructure:"minio"`
 	Task            TaskConfig       `mapstructure:"task"`        // T-0157 C2: 任务过期扫描器配置
 	PM              PMConfig         `mapstructure:"pm"`          // 设备上线时自动下发 PM 上传配置
+	// PMConsumerConcurrency 是 PM 文件入库消费者的进程内并发订阅数（pm.file.received → 解析入库）。
+	// NATS push 订阅 async 回调由 nats.go 单 goroutine 串行投递，单订阅只用 ~1 核；N 个订阅共享同一
+	// durable consumer "pm-workers" 由 JetStream 负载均衡，吃满 worker 多核。<=0 时 worker 启动期
+	// 回退到 GOMAXPROCS（即容器 CPU 配额），上限 16。建议设为 worker CPU 核数。
+	PMConsumerConcurrency int `mapstructure:"pm_consumer_concurrency"`
 	DictLoader      DictLoaderConfig `mapstructure:"dict_loader"` // T-0178: worker BackupCleanup 需读 XMLBaseDir + ParamModel 子配置
 	Metrics         MetricsConfig    `mapstructure:"metrics"`
 	Tracer          TracerConfig     `mapstructure:"tracer"`

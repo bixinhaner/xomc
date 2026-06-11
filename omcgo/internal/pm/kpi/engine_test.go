@@ -18,7 +18,8 @@ import (
 // ── 测试夹具：mock 依赖 ──────────────────────────────────────────────
 
 type mockCounterRepo struct {
-	queryForKPIFunc func(ctx context.Context, deviceID uuid.UUID, cellID string, counterNames []string, startTime, endTime time.Time) (map[string]float64, error)
+	queryForKPIFunc      func(ctx context.Context, deviceID uuid.UUID, cellID string, counterNames []string, startTime, endTime time.Time) (map[string]float64, error)
+	queryForKPICellsFunc func(ctx context.Context, deviceID uuid.UUID, cellIDs []string, counterNames []string, startTime, endTime time.Time) (map[string]map[string]float64, error)
 }
 
 func (m *mockCounterRepo) BatchInsert(_ context.Context, _ []model.PMCounter) error { return nil }
@@ -31,6 +32,24 @@ func (m *mockCounterRepo) QueryAggregated(_ context.Context, _ counter.CounterFi
 func (m *mockCounterRepo) QueryForKPI(ctx context.Context, deviceID uuid.UUID, cellID string, counterNames []string, startTime, endTime time.Time) (map[string]float64, error) {
 	if m.queryForKPIFunc != nil {
 		return m.queryForKPIFunc(ctx, deviceID, cellID, counterNames, startTime, endTime)
+	}
+	return nil, nil
+}
+func (m *mockCounterRepo) QueryForKPICells(ctx context.Context, deviceID uuid.UUID, cellIDs []string, counterNames []string, startTime, endTime time.Time) (map[string]map[string]float64, error) {
+	if m.queryForKPICellsFunc != nil {
+		return m.queryForKPICellsFunc(ctx, deviceID, cellIDs, counterNames, startTime, endTime)
+	}
+	// 默认：复用 queryForKPIFunc 对每个 cell 取值，方便仅设置单 cell 行为的旧测试复用。
+	if m.queryForKPIFunc != nil {
+		out := make(map[string]map[string]float64, len(cellIDs))
+		for _, c := range cellIDs {
+			v, err := m.queryForKPIFunc(ctx, deviceID, c, counterNames, startTime, endTime)
+			if err != nil {
+				return nil, err
+			}
+			out[c] = v
+		}
+		return out, nil
 	}
 	return nil, nil
 }
@@ -180,6 +199,78 @@ func TestKPIEngine_CalculateAndStore_PersistsResults(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, values)
 	assert.Equal(t, len(values), len(kpiRepo.insertedValues))
+}
+
+// CalculateCellsAndStore：批量算多 cell —— route 只查一次、counter 一次查全（按 cell 分桶）、
+// 所有 cell 的 KPIValue 一次性 BatchInsert，且每个 cell 落到正确 CellID。
+func TestKPIEngine_CalculateCellsAndStore_BatchesAllCells(t *testing.T) {
+	var routeLookups, cellsQueries int
+	perCell := map[string]map[string]float64{
+		"cell-1": {"RRC_Conn_Succ": 950, "RRC_Conn_Att": 1000}, // 0.95
+		"cell-2": {"RRC_Conn_Succ": 800, "RRC_Conn_Att": 1000}, // 0.80
+		"cell-3": {"RRC_Conn_Succ": 500, "RRC_Conn_Att": 1000}, // 0.50
+	}
+	counterRepo := &mockCounterRepo{
+		queryForKPIFunc: func(context.Context, uuid.UUID, string, []string, time.Time, time.Time) (map[string]float64, error) {
+			t.Fatal("批量路径不应逐 cell 调 QueryForKPI")
+			return nil, nil
+		},
+		queryForKPICellsFunc: func(_ context.Context, _ uuid.UUID, cellIDs, names []string, _, _ time.Time) (map[string]map[string]float64, error) {
+			cellsQueries++
+			assert.ElementsMatch(t, []string{"RRC_Conn_Succ", "RRC_Conn_Att"}, names)
+			assert.ElementsMatch(t, []string{"cell-1", "cell-2", "cell-3"}, cellIDs)
+			return perCell, nil
+		},
+	}
+	kpiRepo := &mockKPIRepo{}
+	rt := &stubRouter{route: sampleRoute()}
+	engine := NewKPIEngine(counterRepo, kpiRepo, &countingRouter{inner: rt, n: &routeLookups}, zap.NewNop())
+
+	n, err := engine.CalculateCellsAndStore(
+		context.Background(),
+		uuid.New(), "00A0C6", "SN-001",
+		[]string{"cell-1", "cell-2", "cell-3"},
+		time.Now(),
+		model.CarrierCMCC, model.TechLTE,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, 1, routeLookups, "route 应只查一次（hoist 出 cell 循环）")
+	assert.Equal(t, 1, cellsQueries, "counter 应一次查全部 cell")
+	assert.Equal(t, 3, n, "3 个 cell × 1 KPI = 3 行")
+	require.Len(t, kpiRepo.insertedValues, 3, "应一次性批量落 3 行")
+
+	byCell := map[string]float64{}
+	for _, v := range kpiRepo.insertedValues {
+		assert.Equal(t, "RRC_Succ_Rate", v.KPIName)
+		byCell[v.CellID] = v.KPIValue
+	}
+	assert.InDelta(t, 0.95, byCell["cell-1"], 0.001)
+	assert.InDelta(t, 0.80, byCell["cell-2"], 0.001)
+	assert.InDelta(t, 0.50, byCell["cell-3"], 0.001)
+}
+
+// 空 cellIDs → 直接返回 0，不查 route、不落库。
+func TestKPIEngine_CalculateCellsAndStore_EmptyCells(t *testing.T) {
+	kpiRepo := &mockKPIRepo{}
+	engine := NewKPIEngine(&mockCounterRepo{}, kpiRepo, &stubRouter{route: sampleRoute()}, zap.NewNop())
+	n, err := engine.CalculateCellsAndStore(
+		context.Background(), uuid.New(), "00A0C6", "SN-001", nil, time.Now(),
+		model.CarrierCMCC, model.TechLTE,
+	)
+	require.NoError(t, err)
+	assert.Zero(t, n)
+	assert.Empty(t, kpiRepo.insertedValues)
+}
+
+// countingRouter 包装一个 KPIRouter 统计 LookupByDevice 调用次数（验证 route hoist）。
+type countingRouter struct {
+	inner KPIRouter
+	n     *int
+}
+
+func (c *countingRouter) LookupByDevice(ctx context.Context, sn string) (*router.KPIRoute, error) {
+	*c.n++
+	return c.inner.LookupByDevice(ctx, sn)
 }
 
 // router 透传非 sentinel 错误 → engine 透传给调用方（让上游决定重试 / 记账）。
