@@ -6,7 +6,8 @@
 #   保留所有持久化数据与凭据，使下次 install.sh 能直接复用现有 DB / MinIO：
 #     · 保留：所有数据卷（pgdata/miniodata/redisdata/natsdata + 监控各卷）
 #     · 保留：$OMC_ROOT/data（UI 上传的自定义参数模型/指标/告警 XML + 升级快照）
-#     · 保留：$OMC_ROOT/etc（实例配置）+ 凭据快照 $OMC_ROOT/etc/.env.saved
+#     · 保留：$OMC_ROOT/etc（实例配置）+ 凭据快照 .env.saved + 主凭据 secrets.env（#175，
+#             密钥唯一权威源；与数据卷同生命周期：默认保留 → reinstall 沿用同套口令连得上旧卷）
 #             （口令 / JWT / OMC_PUBLIC_HOST —— install.sh 重装时据此继承，
 #              避免新口令与旧数据卷不匹配连不上 DB）
 #     · 删除：容器 / docker 网络 / omcgo/* 业务镜像 / 代码运行目录
