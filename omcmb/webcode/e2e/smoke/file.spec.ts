@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { expectPageRenders, smokeLogin } from './helpers';
 
 /**
- * 文件传输与管理域冒烟（真实后端）：五个页面渲染不崩 + 关键骨架元素可见。
+ * 文件传输与管理域冒烟（真实后端）：各页面渲染不崩 + 关键骨架元素可见。
  *
  * 选择器依据：
  *   - /transfer/center  → src/pages/transfer/FileTransferCenter/index.tsx
@@ -21,6 +21,10 @@ import { expectPageRenders, smokeLogin } from './helpers';
  *   - /file/device-files → src/pages/file/DeviceFiles/index.tsx
  *       标题 nav.file.deviceFiles（设备文件 / Device Files）、
  *       Tabs：配置文件采集（nav.file.configRetrieval）+ 日志采集（nav.file.logRetrieval）。
+ *   - /file/{config-distribution,log-retrieval,perf-retrieval,mr-retrieval}
+ *       → src/pages/file/{ConfigDistribution,LogRetrieval,PerfRetrieval,MRRetrieval}/index.tsx
+ *       同构 TreeListPageLayout：左侧设备树（.ant-tree + 按类型/按子网… 树 Tab）+
+ *       右侧已选网元统计行（table.total 合计/Total）与网元/结果两张 DataTable。
  *   - /transfer/template-management → src/pages/transfer/TemplateDefinitionManagement/index.tsx
  *       admin 守卫页（withAdminRole，admin 凭据可入）；
  *       标题 ufte.page.templateManagement（传输模板管理 / Transfer Template Management）、
@@ -160,5 +164,66 @@ test.describe('文件传输与管理冒烟（真实后端）', { tag: '@smoke' }
     await expect(
       page.locator('.ant-card-head-title').filter({ hasText: /自定义模板|Custom Templates/ }).first(),
     ).toBeVisible();
+  });
+
+  // ── 文件检索四 Tab（同构 TreeListPageLayout：左侧设备树 + 右侧已选网元/结果两张表）──
+  // 四页结构与 /file/config-retrieval 一致：treeTabs 标签为硬编码中文（按类型/按子网…），
+  // 右侧统计行用 table.total（合计 / Total）与 table.result（结果 / Result），两张 DataTable。
+  // 真实栈数据稀疏：只断言设备树 + 树 Tab + 统计行 + 表格骨架，不断言具体业务数据。
+
+  test('/file/config-distribution 配置分发渲染，设备树与结果表格可见', async ({ page }) => {
+    await expectPageRenders(page, '/file/config-distribution');
+
+    // 左侧设备树（TreeListPageLayout tree 面板，含 按类型/按子网 等 Tab）
+    await expect(page.locator('.ant-tree').first()).toBeVisible();
+    await expect(
+      page.locator('.ant-tabs-tab').filter({ hasText: /按类型/ }).first(),
+    ).toBeVisible();
+
+    // 右侧：已选网元统计行（table.total：合计 / Total）+ 网元/结果两张表
+    await expect(page.locator('main').getByText(/合计|Total/).first()).toBeVisible();
+    await expect(page.locator('.ant-table').first()).toBeVisible();
+  });
+
+  test('/file/log-retrieval 日志检索渲染，设备树与结果表格可见', async ({ page }) => {
+    await expectPageRenders(page, '/file/log-retrieval');
+
+    // 左侧设备树 + 按类型 Tab
+    await expect(page.locator('.ant-tree').first()).toBeVisible();
+    await expect(
+      page.locator('.ant-tabs-tab').filter({ hasText: /按类型/ }).first(),
+    ).toBeVisible();
+
+    // 右侧统计行（table.total）+ 表格骨架
+    await expect(page.locator('main').getByText(/合计|Total/).first()).toBeVisible();
+    await expect(page.locator('.ant-table').first()).toBeVisible();
+  });
+
+  test('/file/perf-retrieval 性能检索渲染，设备树与结果表格可见', async ({ page }) => {
+    await expectPageRenders(page, '/file/perf-retrieval');
+
+    // 左侧设备树 + 按类型 Tab
+    await expect(page.locator('.ant-tree').first()).toBeVisible();
+    await expect(
+      page.locator('.ant-tabs-tab').filter({ hasText: /按类型/ }).first(),
+    ).toBeVisible();
+
+    // 右侧统计行（table.total）+ 表格骨架
+    await expect(page.locator('main').getByText(/合计|Total/).first()).toBeVisible();
+    await expect(page.locator('.ant-table').first()).toBeVisible();
+  });
+
+  test('/file/mr-retrieval MR 检索渲染，设备树与结果表格可见', async ({ page }) => {
+    await expectPageRenders(page, '/file/mr-retrieval');
+
+    // 左侧设备树 + 按类型 Tab
+    await expect(page.locator('.ant-tree').first()).toBeVisible();
+    await expect(
+      page.locator('.ant-tabs-tab').filter({ hasText: /按类型/ }).first(),
+    ).toBeVisible();
+
+    // 右侧统计行（table.total）+ 表格骨架
+    await expect(page.locator('main').getByText(/合计|Total/).first()).toBeVisible();
+    await expect(page.locator('.ant-table').first()).toBeVisible();
   });
 });

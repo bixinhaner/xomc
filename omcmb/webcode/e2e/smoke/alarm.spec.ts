@@ -16,6 +16,12 @@ import { navigateTo, waitForPageLoad } from '../helpers/navigation';
  *                         只断言卡片标题）
  *   - /alarm/rules      → src/pages/alarm/AlarmRules（title = nav.alarm.rules
  *                         「告警规则 / Alarm Rules」+ DataTable(.ant-table)）
+ *   - /alarm/sync       → src/pages/alarm/AlarmSync（ListPageLayout title = nav.alarm.sync
+ *                         「告警同步 / Alarm Sync」+ DataTable(.ant-table)；标题与侧边栏菜单
+ *                         同名，取 first）
+ *   - /alarm/custom-stats → src/pages/alarm/CustomAlarmStats（TreeListPageLayout：左侧树面板
+ *                         标题 alarm.customAlarmGroup「自定义告警分组 / Custom Alarm Groups」
+ *                         + 右侧 DataTable(.ant-table)；树面板标题仅出现在页面主体，不撞菜单）
  *
  * 不断言具体业务数据（真实栈数据稀疏）；空表也有表头，.ant-table 可见即可。
  */
@@ -74,6 +80,26 @@ test.describe('告警管理冒烟（真实后端）', { tag: '@smoke' }, () => {
     await expect(
       page.getByText(/配置告警过滤规则|Configure alarm filtering rules/).first(),
     ).toBeVisible();
+    await expect(page.locator('.ant-table').first()).toBeVisible();
+  });
+
+  test('/alarm/sync 告警同步任务列表渲染', async ({ page }) => {
+    await expectPageRenders(page, '/alarm/sync');
+
+    // 页面标题（侧边栏菜单同名，取 first）
+    await expect(page.getByText(/告警同步|Alarm Sync/).first()).toBeVisible();
+    // 同步任务列表表格骨架（空表也有表头）
+    await expect(page.locator('.ant-table').first()).toBeVisible();
+  });
+
+  test('/alarm/custom-stats 自定义统计（树+表）渲染', async ({ page }) => {
+    await expectPageRenders(page, '/alarm/custom-stats');
+
+    // 左侧自定义告警分组树面板标题（仅页面主体出现，不撞侧边栏菜单）
+    await expect(
+      page.getByText(/自定义告警分组|Custom Alarm Groups/).first(),
+    ).toBeVisible();
+    // 右侧告警列表表格骨架（空表也有表头）
     await expect(page.locator('.ant-table').first()).toBeVisible();
   });
 });

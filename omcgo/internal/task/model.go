@@ -84,8 +84,10 @@ type CreateTaskRequest struct {
 	Method      string          `json:"method" binding:"required"`
 	Params      json.RawMessage `json:"params"`
 	Priority    int             `json:"priority"`
-	ExpiresIn   int             `json:"expires_in"`   // 过期时间（秒）
-	MaxRetries  int             `json:"max_retries"`  // 最大重试次数
+	ExpiresIn   int             `json:"expires_in"`  // 过期时间（秒）
+	// MaxRetries 用指针区分"未设置"（nil → 默认 3）与"显式 0"（禁止重试）。
+	// 旧实现用 int + (>0) 判定，无法表达"调用方显式要 0 次重试"，0 被静默改回 3。
+	MaxRetries  *int            `json:"max_retries"` // 最大重试次数（nil=默认 3，0=禁止重试）
 	Source      TaskSource      `json:"source"`
 	CreatorID   string          `json:"creator_id"`
 	Description string          `json:"description"`
@@ -149,8 +151,14 @@ func NewTask(req *CreateTaskRequest) *Task {
 	if task.Priority <= 0 {
 		task.Priority = 10
 	}
-	if req.MaxRetries > 0 {
-		task.MaxRetries = req.MaxRetries
+	// nil → 保留默认 3；非 nil → 采纳调用方显式值（含显式 0 = 禁止重试）。
+	// 负值无意义，钳到 0。
+	if req.MaxRetries != nil {
+		mr := *req.MaxRetries
+		if mr < 0 {
+			mr = 0
+		}
+		task.MaxRetries = mr
 	}
 	if req.ExpiresIn > 0 {
 		expiresAt := now.Add(time.Duration(req.ExpiresIn) * time.Second)
@@ -171,9 +179,27 @@ func (t *Task) IsExpired() bool {
 	return time.Now().After(*t.ExpiresAt)
 }
 
-// CanRetry 检查任务是否可以重试
+// CanRetry 检查任务重试预算是否未耗尽（仅看次数，不看状态）。
+//
+// 用于 RecoverPendingTasks 对僵死 sent 任务的恢复决策：sent 任务并非"终态可重试"，
+// 而是在途任务的恢复，故此处只校验 retry_count<max_retries。用户主动 retry 端点
+// 的状态校验走 CanManualRetry。
 func (t *Task) CanRetry() bool {
 	return t.RetryCount < t.MaxRetries
+}
+
+// CanManualRetry 检查任务是否可被用户主动 retry（POST /:task_id/retry）。
+//
+// 仅终态失败类（failed/expired）可重试；cancelled/completed 为终态成功/人工终结，
+// pending/sent 仍在途，均不可主动 retry（否则会把已取消/已完成任务"复活"回 pending）。
+// 同时仍需满足重试预算（retry_count<max_retries），显式 max_retries=0 即禁止重试。
+func (t *Task) CanManualRetry() bool {
+	switch t.Status {
+	case TaskStatusFailed, TaskStatusExpired:
+		return t.CanRetry()
+	default:
+		return false
+	}
 }
 
 // MarkSent 标记任务已发送

@@ -110,7 +110,9 @@ func (h *DeviceInfoHandler) UpdateDeviceInfo(c *gin.Context) {
 	updaterStr, _ := updater.(string)
 
 	if err := h.service.UpdateDeviceInfo(c.Request.Context(), id, req, updaterStr); err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		// 设备不存在 / 无 device_info 行 → repo 返 ErrNotFound → 映射 404；
+		// 其余内部错误仍走 500（issue #145 A 项）。
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
 

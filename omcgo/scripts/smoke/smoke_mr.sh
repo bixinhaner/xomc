@@ -177,7 +177,7 @@ else
     req GET "/api/v1/mr/tasks/${NIL_UUID}"
     check_status "不存在任务详情返回 404" 404
     req GET "/api/v1/mr/tasks/${NIL_UUID}/progress"
-    check_status_in "不存在任务进度返回 200/404" "200 404"
+    check_status "不存在任务进度返回 404" 404
 fi
 
 # 【红线】POST /mr/tasks 会向设备下发测量任务 —— 只测参数校验负路径，绝不真建

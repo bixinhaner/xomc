@@ -8,7 +8,7 @@
 #   - sync-stale 卡死消息修正（幂等 POST 两次）
 #   - 通知模板 CRUD 闭环（建 → 查 → 改 → 过滤列表 → 删 → 404 回查）
 #   - 通知发送历史（列表 / 过滤 / 详情 / 非法 ID 负路径）
-#   - SSE /api/v1/events/stream 建连（无 token 401 + 带 token 收 200 头/任意字节）
+#   - SSE /api/v1/events/stream 建连（无 token 401 + 带 token 4s 内立即收 200 头 + :connected 首帧）
 #   - Alertmanager webhook 免 JWT 入口（空告警 / 单条告警 / 非法 payload）
 #   - 破坏性端点（DELETE 全清 / 单删）只测负路径，绝不真清
 #
@@ -138,29 +138,28 @@ check_ret_fail "非法历史 ID 被拒绝"
 
 # ---------------------------------------------------------------------------
 # 6. SSE 事件流建连
-#    后端不主动 flush 响应头：首字节最早是 30s keepalive 注释，或 hub 侧关连接
-#    （实测 ~18s 收到 200 头）。故 max-time 给 35s；收到 200 头或任意字节即 PASS，
-#    curl 超时退出码 28 属预期（长连接未断开）。
+#    修复 #126.9 后：Subscribe 成功即 WriteHeader(200)+Flush 一帧 `:connected`
+#    注释帧，浏览器 EventSource onopen 立刻触发，中间代理不再按首字节超时切断。
+#    故硬断言「短时间（4s）内必须收到 200 头且首字节含 `:connected` 注释帧」；
+#    curl 超时退出码 28 属预期（长连接保持未断）。
 # ---------------------------------------------------------------------------
 section "SSE 事件流（/api/v1/events/stream）"
 
 req_noauth GET "/api/v1/events/stream"
 check_status "SSE 无 token 建连被拒绝" 401
 
-echo "  （SSE 建连等待首字节，最长 35s —— 首字节为 30s keepalive 或 hub 关连接）"
+echo "  （SSE 建连后应在 4s 内立即收到首字节 :connected 注释帧）"
 SSE_OUT="$SMOKE_TMPDIR/sse_body.txt"
 : > "$SSE_OUT"
-SSE_CODE=$(curl --max-time 35 -s -N -o "$SSE_OUT" -w "%{http_code}" \
+SSE_CODE=$(curl --max-time 4 -s -N -o "$SSE_OUT" -w "%{http_code}" \
     -H "Authorization: Bearer $TOKEN" -H "Accept: text/event-stream" \
     "$API/events/stream" 2>/dev/null)
 SSE_RC=$?
 SSE_BYTES=$(wc -c < "$SSE_OUT" 2>/dev/null | tr -d ' ')
-if [ "$SSE_CODE" = "200" ]; then
-    pass "SSE 带 token 建连成功（HTTP=200 bytes=${SSE_BYTES} curl_rc=${SSE_RC}）"
-elif [ "${SSE_BYTES:-0}" -gt 0 ] 2>/dev/null; then
-    pass "SSE 带 token 建连收到数据（HTTP=${SSE_CODE} bytes=${SSE_BYTES} curl_rc=${SSE_RC}）"
+if [ "$SSE_CODE" = "200" ] && grep -q ':connected' "$SSE_OUT" 2>/dev/null; then
+    pass "SSE 带 token 建连立即收到首帧（HTTP=200 bytes=${SSE_BYTES} :connected curl_rc=${SSE_RC}）"
 else
-    fail "SSE 带 token 建连" "35s 内既无 200 头也未收到任何字节（HTTP=${SSE_CODE} curl_rc=${SSE_RC}）"
+    fail "SSE 带 token 建连首字节" "4s 内未收到 200 头 + :connected 首帧（HTTP=${SSE_CODE} bytes=${SSE_BYTES} curl_rc=${SSE_RC}）"
 fi
 
 # ---------------------------------------------------------------------------

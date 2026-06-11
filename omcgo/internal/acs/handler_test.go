@@ -957,6 +957,10 @@ func (m *acsHTaskService) RecoverPendingTasks(ctx context.Context, deviceSN stri
 func (m *acsHTaskService) CreateTask(ctx context.Context, req *task.CreateTaskRequest) (*task.Task, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	maxRetries := 3 // CreateTaskRequest.MaxRetries 为 *int：nil → 默认 3
+	if req.MaxRetries != nil {
+		maxRetries = *req.MaxRetries
+	}
 	t := &task.Task{
 		ID:          fmt.Sprintf("task-%d", len(m.tasks)+1),
 		DeviceSN:    req.DeviceSN,
@@ -964,7 +968,7 @@ func (m *acsHTaskService) CreateTask(ctx context.Context, req *task.CreateTaskRe
 		Params:      req.Params,
 		Priority:    req.Priority,
 		Status:      task.TaskStatusPending,
-		MaxRetries:  req.MaxRetries,
+		MaxRetries:  maxRetries,
 		CreatedAt:   time.Now(),
 		Source:      req.Source,
 		CreatorID:   req.CreatorID,

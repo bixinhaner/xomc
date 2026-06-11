@@ -15,6 +15,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 )
 
 // ============================================================
@@ -72,6 +74,59 @@ func TestAdminHandler_CreateGroup_FKViolation_Maps422NoLeak(t *testing.T) {
 	assert.NotContains(t, respBody, "mml_param_groups_param_version_fkey")
 	assert.True(t, strings.Contains(respBody, "param_version"),
 		"响应应如实告知 param_version 不存在，实际 %s", respBody)
+}
+
+// notFoundCommandReader 模拟生产装配：commandLookup 绑定到共享的
+// PgCommandRepository.GetByID，其 not-found 返回 commonerrors.ErrNotFound（裸 sentinel，
+// 而非 mml 本地 ErrCommandNotFound）。issue #145 E 项的回归靶子。
+type notFoundCommandReader struct{}
+
+func (notFoundCommandReader) GetByID(_ context.Context, _ uuid.UUID) (*MMLCommand, error) {
+	return nil, commonerrors.ErrNotFound
+}
+
+// TestAdminHandler_Commands_NotFound_Maps404 覆盖 GET/PATCH/DELETE
+// /mml/admin/commands/:id 对不存在 ID：commandLookup 返回 commonerrors.ErrNotFound
+// 时，必须映射 404（而非历史 500），且响应体不外泄裸 SQL / SQLSTATE。
+func TestAdminHandler_Commands_NotFound_Maps404(t *testing.T) {
+	missingID := uuid.New()
+
+	cases := []struct {
+		name   string
+		method string
+		body   string
+	}{
+		{"GET", http.MethodGet, ""},
+		{"PATCH", http.MethodPatch, `{"description":"x"}`},
+		{"DELETE", http.MethodDelete, ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, _, _, _, _ := newAdminTestService()
+			h := NewAdminHandler(svc, notFoundCommandReader{}, zap.NewNop())
+			router := setupAdminRouter(h)
+
+			var reqBody *bytes.Reader
+			if tc.body != "" {
+				reqBody = bytes.NewReader([]byte(tc.body))
+			} else {
+				reqBody = bytes.NewReader(nil)
+			}
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(tc.method, "/api/v1/mml/admin/commands/"+missingID.String(), reqBody)
+			r.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(w, r)
+
+			assert.Equal(t, http.StatusNotFound, w.Code,
+				"%s 不存在 command 应映射 404，实际 %d body=%s", tc.method, w.Code, w.Body.String())
+
+			respBody := w.Body.String()
+			assert.NotContains(t, respBody, "pgx", "响应不得外泄底层驱动细节: %s", respBody)
+			assert.NotContains(t, respBody, "SELECT", "响应不得外泄裸 SQL: %s", respBody)
+			assert.NotContains(t, respBody, "no rows", "响应不得外泄 pgx.ErrNoRows 文案: %s", respBody)
+		})
+	}
 }
 
 func TestAdminHandler_CreateGroup_Happy_201(t *testing.T) {

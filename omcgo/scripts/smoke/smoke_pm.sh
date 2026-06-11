@@ -60,9 +60,10 @@ section "1. counters / metrics 三层读链路"
 req GET "/api/v1/pm/counters"
 check_list_or_empty "原始计数器列表可查（默认近 24h 窗）" "data.items"
 
-# 注意：此端点未预填 DefaultListRequest，page/page_size 必须显式传（同 admin/users 绑定类）
-req GET "/api/v1/pm/counters/aggregated?page=1&page_size=20"
-check_list_or_empty "计数器聚合视图可查" "data.items"
+# issue #126 第4项已修：ListAggregatedCounters 绑定前预填 DefaultListRequest（对齐 ListCounters），
+# 故不带 page/page_size 也应 200（该端点本身不消费分页字段）。下面故意不带分页参数硬断言验证修复。
+req GET "/api/v1/pm/counters/aggregated"
+check_list_or_empty "计数器聚合视图可查（不带分页参数，#126 第4项修复后硬断言）" "data.items"
 
 req GET "/api/v1/pm/metrics/aggregated?granularity=hourly&start_time=${TWO_HOURS_AGO}&end_time=${NOW}"
 check_list_or_empty "metrics 按 hourly 粒度聚合可查" "data.items"
@@ -644,15 +645,16 @@ section "17. indicator-groups REST CRUD 闭环（自建 ${SMOKE_TAG} 组→改�
 # ───────────────────────────────────────────────────────────────────────────
 # 红线：写操作只针对 ${SMOKE_TAG} 自建分组（is_build_in=0），结束前删除；
 # 自建组挂在 builtin default 组下（parent_id），不触碰任何 builtin 分组。
-# 注：REST CreateGroup 虽从 query 取 deviceType，但 body 绑定 CreateGroupRequest
-# 的 device_type 仍标 binding:"required"，故 body 也须带 device_type（见 suspectedBugs）。
+# 注：REST CreateGroup 从 query 取 deviceType 为单一来源（issue #145-C 已修：
+# CreateGroupRequest.device_type 去掉 binding:"required" 改 omitempty，query 注入足够）。
+# 故下面 body 故意不带 device_type，仅靠 ?deviceType=enb 即应 201（硬断言验证修复）。
 req GET "/api/v1/indicator-groups?deviceType=enb"
 check_ret_ok "REST 指标分组树可查（取 parent 候选）"
 GRP_PARENT=$(jget data.items.0.id)
 [ -z "$GRP_PARENT" ] && GRP_PARENT="default"
 
-req POST "/api/v1/indicator-groups?deviceType=enb" "{\"device_type\":\"ENB\",\"en_name\":\"${SMOKE_TAG}-grp\",\"cn_name\":\"冒烟自定义分组\",\"parent_id\":\"${GRP_PARENT}\",\"operator_code\":\"default\"}"
-check_status "自定义分组创建" 201
+req POST "/api/v1/indicator-groups?deviceType=enb" "{\"en_name\":\"${SMOKE_TAG}-grp\",\"cn_name\":\"冒烟自定义分组\",\"parent_id\":\"${GRP_PARENT}\",\"operator_code\":\"default\"}"
+check_status "自定义分组创建（仅 query 注入 deviceType，body 不带 device_type；#145-C 修复后硬断言）" 201
 NEW_GRP_ID=$(jget data.id)
 check_field "分组创建返回 id" "data.id"
 GRP_IS_BUILTIN=$(jget data.is_build_in)

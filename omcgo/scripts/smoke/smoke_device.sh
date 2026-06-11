@@ -219,18 +219,37 @@ fi
 req PUT "/api/v1/devices/not-a-uuid/info" '{"remark":"x"}'
 check_ret_fail "更新 info 非法 id 被拒绝（400）"
 
-# PUT /info 负路径：不存在设备 / 无 device_info 行 → 当前后端 500（应为 404）
-# UpdateManualFields 是裸 UPDATE，RowsAffected==0 即报错且 handler 统一映射 500，
-# 既不校验 device 是否存在、也不区分"行不存在"与真实 DB 故障。标 known_bug。
+# PUT /info 负路径：不存在设备 / 无 device_info 行 → 404（issue #145 A 已修复）
+# UpdateManualFields RowsAffected==0 返回 sentinel ErrNotFound，handler 经
+# HTTPStatusFromError 映射 404。
 GHOST_ID_INFO="deadbeef-dead-4ead-8ead-deadbeefdead"
 req PUT "/api/v1/devices/$GHOST_ID_INFO/info" '{"remark":"x"}'
-if [[ "$HTTP_CODE" == 404 ]]; then
-    pass "更新不存在设备 info 被拒绝（404）"
-elif [[ "$HTTP_CODE" == 5* ]]; then
-    known_bug "更新不存在设备 info 返回 ${HTTP_CODE} 而非 404" "PUT /devices/:id/info 对无 device_info 行的设备 → HTTP ${HTTP_CODE}，msg=device_info not found（UpdateManualFields 裸 UPDATE RowsAffected=0 报错 → handler 无脑映射 500；既不先查 device 存在性也不区分 not-found 与 DB 故障）"
+check_status "更新不存在设备 info 被拒绝（404）" 404
+
+# ---------------------------------------------------------------------------
+section "License 参数 Tab（读 + refresh 红线只测负路径）"
+# ---------------------------------------------------------------------------
+# 路由（license_params_handler.go）：
+#   GET  /devices/:id/license-params         → ListLicenseParams（200 + {items,total}）
+#   POST /devices/:id/license-params/refresh → 触发 GPV 下发拉新值（红线）
+# GET：在真实设备上读 license 子树参数；设备从未上报 LICENSE 子树时 items=[]（仍 200，
+#   前端空态）→ 用 check_list_or_empty 容忍稀疏种子。
+# refresh：service.TriggerLicenseRefresh 先 GetByID，device==nil → ErrCodeDeviceNotFound
+#   (404)，在任何 collectLicensePrefixes / StartSync(GPV 下发) 之前返回；非法 id 在
+#   handler uuid.Parse 阶段即 400。两条负路径均在下发前被拦截，绝不向真实设备发 GPV。
+if [ -n "$EXIST_DEV_ID" ]; then
+    req GET "/api/v1/devices/$EXIST_DEV_ID/license-params"
+    check_list_or_empty "License 参数列表可查（空列表容忍稀疏种子）" "data.items"
 else
-    fail "更新不存在设备 info 负路径" "期望 404 或 5xx(known bug)，实际 HTTP ${HTTP_CODE}"
+    skip "License 参数列表可查" "列表无真实设备，无 id 可读"
 fi
+
+# refresh 红线：只测负路径，绝不向真实设备发 GPV
+req POST "/api/v1/devices/not-a-uuid/license-params/refresh"
+check_ret_fail "License refresh 非法 id 被拒绝（handler uuid.Parse 400，不下发 GPV）"
+
+req POST "/api/v1/devices/$GHOST_ID_INFO/license-params/refresh"
+check_status "License refresh 不存在设备被拒绝（GetByID 拦截于 GPV 下发前，404）" 404
 
 # ---------------------------------------------------------------------------
 section "激活状态可逆写对：deactivate ↔ activate"
@@ -341,9 +360,9 @@ section "device-registrations 预登记闭环"
 req GET "/api/v1/device-registrations?page=1&page_size=10"
 check_ret_ok "预登记列表可查"
 
-# DB 列 device_registrations.group_id 为 NOT NULL，但 handler 把 group_id 当可选
-# （CreateRegistrationRequest 无 required tag）→ 不传时 500 而非 400，属后端契约 bug。
-# 闭环改为自备分组 id（device-groups/tree builtin 设备域分组），并把缺 group_id 标 known_bug。
+# DB 列 device_registrations.group_id 为 NOT NULL，CreateRegistrationRequest.GroupID
+# 已加 binding:required（issue #126 第 2 项），缺参在绑定阶段即 400。
+# 正向闭环自备分组 id（device-groups/tree builtin 设备域分组）；缺 group_id 负路径见下方硬断言。
 req GET "/api/v1/device-groups/tree"
 GROUP_ID=$(jget data.items.0.id)
 
@@ -373,13 +392,10 @@ fi
 req POST "/api/v1/device-registrations" "{\"serial_number\":\"${SMOKE_TAG}-REG2\"}"
 check_ret_fail "预登记缺 carrier 必填字段被拒绝（400）"
 
-# 缺 group_id：handler 放行（可选字段）但 DB NOT NULL → 500，期望应是 400 参数校验
+# 缺 group_id：CreateRegistrationRequest.GroupID 加 binding:required，缺参在绑定阶段
+# 返回 400 参数校验，而非落库触发 DB NOT NULL 约束炸 500（issue #126 第 2 项已修复）。
 req POST "/api/v1/device-registrations" "{\"serial_number\":\"${SMOKE_TAG}-REG3\",\"carrier\":\"cmcc\"}"
-if [[ "$HTTP_CODE" == 4* ]]; then
-    pass "预登记缺 group_id 被参数校验拒绝（400）"
-else
-    known_bug "预登记缺 group_id 返回 500 而非 400" "POST /device-registrations 不带 group_id → HTTP ${HTTP_CODE}，msg=insert registration: null value in column group_id violates not-null constraint（handler 未加 required 校验，DB NOT NULL 兜底炸 500）"
-fi
+check_status "预登记缺 group_id 被参数校验拒绝（400）" 400
 
 # ---------------------------------------------------------------------------
 section "column-configs 用户列配置"

@@ -449,16 +449,10 @@ if [ -n "$A_CMD_ID" ]; then
     req DELETE "/api/v1/mml/admin/commands/$A_CMD_ID"
     check_ret_ok "删除自建 admin 命令（闭环清理）"
 
-    # 删除后 GET：后端实际返 ret=0（被拒绝）；HTTP 应为 404，当前命中 commonerrors.ErrNotFound
-    # 不被 IsErrNotFound 识别（admin sentinel 与 commonerrors.ErrNotFound 不互通），翻成 500。
-    # check_ret_fail 容忍 4xx/5xx+ret=0 → 不破套件；HTTP 码偏差用 known_bug 记录。
+    # 删除后 GET：not-found 应翻 404（issue #145 E 已修：IsErrNotFound 纳入
+    # commonerrors.ErrNotFound，admin commands GetByID 的裸 sentinel 不再落 500）。
     req GET "/api/v1/mml/admin/commands/$A_CMD_ID"
-    check_ret_fail "删除后命令详情应被拒绝（not-found）"
-    if [ "$HTTP_CODE" = "404" ]; then
-        pass "删除后命令详情 → 404（正确语义）"
-    else
-        known_bug "删除后命令详情 HTTP 码" "期望 404，实际 ${HTTP_CODE}（admin GetByID 返 commonerrors.ErrNotFound，未被 IsErrNotFound 识别 → 默认 500，但 ret=0）"
-    fi
+    check_status "删除后命令详情应 404（not-found）" 404
 else
     skip "admin 命令 CRUD 后续步骤" "命令创建未返回 id"
 fi
@@ -471,11 +465,11 @@ check_ret_fail "创建命令缺必填字段被拒绝"
 req POST "/api/v1/mml/admin/commands" "{\"command_name\":\"${SMOKE_TAG}-badop\",\"command_code\":\"DROP X\",\"operation_type\":\"DROP\"}"
 check_ret_fail "创建命令非法 operation_type 被拒绝"
 
-# PATCH/DELETE 不存在命令负路径（同上 known_bug：当前翻 500+ret=0，check_ret_fail 容忍）
+# PATCH/DELETE 不存在命令负路径（issue #145 E 已修：not-found 翻 404，不再 500）
 req PATCH "/api/v1/mml/admin/commands/$NIL_UUID" "{\"description\":\"x\"}"
-check_ret_fail "PATCH 不存在命令被拒绝"
+check_status "PATCH 不存在命令应 404" 404
 req DELETE "/api/v1/mml/admin/commands/$NIL_UUID"
-check_ret_fail "DELETE 不存在命令被拒绝"
+check_status "DELETE 不存在命令应 404" 404
 req PATCH "/api/v1/mml/admin/commands/not-a-uuid" "{\"description\":\"x\"}"
 check_status "PATCH 命令非法 UUID 被拒绝（400）" 400
 

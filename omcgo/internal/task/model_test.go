@@ -114,13 +114,14 @@ func Test_NewTask_DefaultValues(t *testing.T) {
 }
 
 func Test_NewTask_CustomValues(t *testing.T) {
+	maxRetries := 5
 	req := &CreateTaskRequest{
 		DeviceSN:    "SN002",
 		Method:      "SetParameterValues",
 		Params:      json.RawMessage(`{}`),
 		Priority:    5,
 		ExpiresIn:   3600,
-		MaxRetries:  5,
+		MaxRetries:  &maxRetries,
 		Source:      TaskSourceScheduler,
 		CreatorID:   "user-123",
 		Description: "test task",
@@ -158,6 +159,52 @@ func Test_NewTask_NegativePriority(t *testing.T) {
 
 	task := NewTask(req)
 	assert.Equal(t, 10, task.Priority, "negative priority should default to 10")
+}
+
+// Test_NewTask_MaxRetries 覆盖 #126 第8项第2点：max_retries 用指针区分
+// "未设置"（nil → 默认 3）与"显式 0"（禁止重试），不再把显式 0 静默改回 3。
+func Test_NewTask_MaxRetries(t *testing.T) {
+	zero := 0
+	five := 5
+	neg := -2
+
+	tests := []struct {
+		name     string
+		maxRet   *int
+		expected int
+	}{
+		{"未设置(nil) → 默认 3", nil, 3},
+		{"显式 0 → 禁止重试(保留 0,不回退默认)", &zero, 0},
+		{"显式 5 → 采纳调用方值", &five, 5},
+		{"负值 → 钳到 0", &neg, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			task := NewTask(&CreateTaskRequest{
+				DeviceSN:   "SN001",
+				Method:     "Reboot",
+				MaxRetries: tt.maxRet,
+			})
+			assert.Equal(t, tt.expected, task.MaxRetries)
+		})
+	}
+}
+
+// Test_NewTask_ExplicitZeroMaxRetries_NoRetry 端到端验证：显式 max_retries=0
+// 建出的任务在 failed 终态下也不能再被主动 retry（预算为 0）。
+func Test_NewTask_ExplicitZeroMaxRetries_NoRetry(t *testing.T) {
+	zero := 0
+	task := NewTask(&CreateTaskRequest{
+		DeviceSN:   "SN001",
+		Method:     "Reboot",
+		MaxRetries: &zero,
+	})
+	require.Equal(t, 0, task.MaxRetries)
+
+	task.MarkFailed(9001, "boom") // 进入 failed 终态
+	assert.False(t, task.CanManualRetry(),
+		"显式 max_retries=0 的失败任务预算耗尽，不可主动 retry")
 }
 
 func Test_Task_IsExpired(t *testing.T) {
@@ -198,6 +245,55 @@ func Test_Task_CanRetry(t *testing.T) {
 			task := &Task{RetryCount: tt.retryCount, MaxRetries: tt.maxRetries}
 			assert.Equal(t, tt.expected, task.CanRetry())
 		})
+	}
+}
+
+// Test_Task_CanManualRetry 覆盖 #126 第8项第1点：用户主动 retry 仅 failed/expired
+// 终态失败类可重试；cancelled/completed/pending/sent 一律不可（避免把已取消/已完成
+// 任务"复活"回 pending），且仍需满足重试预算。
+func Test_Task_CanManualRetry(t *testing.T) {
+	tests := []struct {
+		name       string
+		status     TaskStatus
+		retryCount int
+		maxRetries int
+		expected   bool
+	}{
+		// 可重试：失败类终态 + 预算未耗尽
+		{"failed 预算内 → 可", TaskStatusFailed, 0, 3, true},
+		{"failed 预算边界内 → 可", TaskStatusFailed, 2, 3, true},
+		{"expired 预算内 → 可", TaskStatusExpired, 1, 3, true},
+		// 不可重试：失败类但预算耗尽
+		{"failed 预算耗尽 → 否", TaskStatusFailed, 3, 3, false},
+		{"failed 显式 0 预算 → 否", TaskStatusFailed, 0, 0, false},
+		{"expired 预算耗尽 → 否", TaskStatusExpired, 3, 3, false},
+		// 不可重试：非失败类终态（核心修复点——不复活已取消/已完成）
+		{"cancelled → 否(不复活已取消)", TaskStatusCancelled, 0, 3, false},
+		{"completed → 否(不复活已完成)", TaskStatusCompleted, 0, 3, false},
+		// 不可重试：仍在途
+		{"pending → 否(仍在途)", TaskStatusPending, 0, 3, false},
+		{"sent → 否(仍在途,恢复走 RecoverPendingTasks)", TaskStatusSent, 0, 3, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			task := &Task{Status: tt.status, RetryCount: tt.retryCount, MaxRetries: tt.maxRetries}
+			assert.Equal(t, tt.expected, task.CanManualRetry())
+		})
+	}
+}
+
+// Test_Task_CanRetry_IgnoresStatus 固化设计边界：CanRetry 是预算检查（只看次数），
+// 不看状态——RecoverPendingTasks 据此恢复僵死 sent 任务。状态校验是 CanManualRetry
+// 的职责，两者不可混用。
+func Test_Task_CanRetry_IgnoresStatus(t *testing.T) {
+	for _, st := range []TaskStatus{
+		TaskStatusPending, TaskStatusSent, TaskStatusCompleted,
+		TaskStatusFailed, TaskStatusExpired, TaskStatusCancelled,
+	} {
+		task := &Task{Status: st, RetryCount: 0, MaxRetries: 3}
+		assert.True(t, task.CanRetry(),
+			"CanRetry 只看预算不看状态，status=%s 预算未耗尽应为 true", st)
 	}
 }
 

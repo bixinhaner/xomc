@@ -188,16 +188,29 @@ func (s *RestoreService) computeSourceMD5(ctx context.Context, bucket, object st
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// translateMinIONotFound 把 MinIO 的 NoSuchKey/NoSuchBucket 错误翻译为
+// minioNotFoundCodes 是被视为"源桶/对象不存在或不可能存在"的 MinIO/S3 错误码集合。
+// NoSuchKey/NoSuchBucket 是服务端"不存在"；InvalidBucketName/XMinioInvalidObjectName
+// 是 minio-go 客户端在发请求前对桶名/对象名做 S3 命名校验时直接返回的拒绝
+// （例如 CanonicalRestoreBucket="config_backup" 含下划线违反 S3 桶命名 → StatObject
+// 返 InvalidBucketName）。这类名字下不可能存在合法对象，语义上等同"源不存在"，
+// 故一并翻译为 404 而非 500，避免把内部命名细节当服务器错误外泄给运维。
+var minioNotFoundCodes = map[string]struct{}{
+	"NoSuchKey":               {},
+	"NoSuchBucket":            {},
+	"InvalidBucketName":       {},
+	"XMinioInvalidObjectName": {},
+}
+
+// translateMinIONotFound 把 MinIO 的"桶/对象不存在或不可能存在"类错误翻译为
 // commonerrors.ErrNotFound（不外泄裸 SDK 错误细节给客户端，仅保留 bucket/object
-// 路径上下文）；其它错误返回 nil（让调用方按内部错误处理）。与 policy_monitor.go
-// 的 isObjectNotFound 同款判定，避免 if 字符串硬编码。
+// 路径上下文）；其它错误返回 nil（让调用方按内部错误处理）。判定集合见
+// minioNotFoundCodes，避免 if 字符串硬编码。
 func translateMinIONotFound(bucket, object string, err error) error {
 	if err == nil {
 		return nil
 	}
 	resp := minio.ToErrorResponse(err)
-	if resp.Code == "NoSuchKey" || resp.Code == "NoSuchBucket" {
+	if _, ok := minioNotFoundCodes[resp.Code]; ok {
 		return fmt.Errorf("source object %s/%s: %w", bucket, object, commonerrors.ErrNotFound)
 	}
 	return nil

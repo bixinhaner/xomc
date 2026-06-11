@@ -217,7 +217,7 @@ req GET "/api/v1/config/neighbors"
 check_list_or_empty "邻区列表可查" "data.items"
 
 # ---------------------------------------------------------------------------
-section "配置同步通道（push/pull 只测参数校验，status 走真实设备）"
+section "配置同步通道（push/pull 校验参数 + 设备存在性，status 走真实设备）"
 # ---------------------------------------------------------------------------
 # push：不存在设备 + 空参数 body → binding min=1 拒绝（零下发）
 req POST "/api/v1/config/sync/push/no-such-dev-${SMOKE_TAG}" '{"parameters":[]}'
@@ -229,6 +229,13 @@ check_ret_fail "push 配置缺 parameters 字段被拒绝"
 # pull：缺 parameter_names → 400（零下发）
 req POST "/api/v1/config/sync/pull/no-such-dev-${SMOKE_TAG}" '{}'
 check_ret_fail "pull 配置缺 parameter_names 字段被拒绝"
+
+# issue #126 第3项：合法 body + 不存在设备 → 404（设备存在性预检，零入队，不产生孤儿任务）
+req POST "/api/v1/config/sync/push/no-such-dev-${SMOKE_TAG}" '{"parameters":[{"name":"Device.ManagementServer.PeriodicInformInterval","value":"300","type":"int"}]}'
+check_status "push 不存在设备返回 404（不产生孤儿任务）" 404
+
+req POST "/api/v1/config/sync/pull/no-such-dev-${SMOKE_TAG}" '{"parameter_names":["Device.DeviceInfo.ModelName"]}'
+check_status "pull 不存在设备返回 404（不产生孤儿任务）" 404
 
 # status：任务队列按设备 SN 键控（handler 将 :deviceId 直接作 DeviceSN 查队列长度）
 if [ -n "$DEVICE_SN" ]; then

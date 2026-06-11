@@ -187,6 +187,16 @@ if [ "$ACS_OK" = "1" ]; then
         # 4.6 payload 读链路（XML 直出，不走信封）。
         # 注意：捕获含 Empty POST / 204 边界报文（payload_size_bytes=0 属正常），
         # 必须挑一条 payload_size_bytes>0 的报文（如 Inform）再取报文体。
+        #
+        # 口径说明（issue #126 第1项，wontfix）：
+        # payload_size_bytes 与 GET .../payload 返回体字节数本就不相等，属有意设计，
+        # 二者度量不同：
+        #   - payload_size_bytes = 原始上线报文字节数 len(reqXML/respXML)（落库时记，
+        #     用于流量/体积诊断，不受脱敏与存储变换影响；见 acs/trace_capture.go +
+        #     acs/trace_capture_test.go "记录原始报文长度"）。
+        #   - 返回体 = 入库 inline（truncateForInline → redact.RedactXML 脱敏 + Go
+        #     encoding/xml 编解码往返）后的字节，XML 转义/命名空间归一会改变长度。
+        # 故下方只断言"非空"，仅报告两个字节数供参考，不做相等断言（相等断言是错的）。
         MSG_ID=""
         MSG_SIZE=0
         n=$(jlen data.items)

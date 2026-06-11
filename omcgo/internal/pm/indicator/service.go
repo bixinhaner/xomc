@@ -10,6 +10,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 )
 
@@ -89,7 +90,9 @@ func (s *IndicatorManagementService) GetGroupList(ctx context.Context, dt Device
 func (s *IndicatorManagementService) CreateGroup(ctx context.Context, req *CreateGroupRequest) (*IndicatorGroup, error) {
 	dt, err := ParseDeviceType(req.DeviceType)
 	if err != nil {
-		return nil, fmt.Errorf("parse device type: %w", err)
+		// 空值/非法 device_type → 400（而非裸 error 落 500）。
+		// REST/GNB 入口由 query/路由注入；indicatormg 入口靠 body 传入，此处统一兜底。
+		return nil, fmt.Errorf("parse device type: %w: %v", commonerrors.ErrInvalidInput, err)
 	}
 
 	id := generateGroupID()

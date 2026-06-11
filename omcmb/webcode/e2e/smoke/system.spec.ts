@@ -25,6 +25,24 @@ import { expectPageRenders, smokeLogin } from './helpers';
  *       左右双栏：dictionary.listTitle（字典列表 / Dictionary List）
  *       + dictionary.detailTitle（字典详细内容 / Dictionary Details）；
  *       未选中字典时右侧是 Empty，不断言 .ant-table
+ *   - /system/groups → src/pages/system/GroupManagement/index.tsx
+ *       无页面标题（2026-06-03 决策移除），FilterBar 用 group.groupName
+ *       （组名 / Group Name）作 placeholder + label + 表格列头，取 first；
+ *       新增按钮 + .ant-table（空表也有表头）
+ *   - /system/device-class → src/pages/system/DeviceClassification/index.tsx
+ *       TreeListPageLayout：左树面板标题 nav.system.deviceClass
+ *       （设备分类 / Device Classification）+ 树节点硬编码中文「全部设备」
+ *       （不随 locale 切换）+ 右侧 .ant-table（mock 数据，必有行）
+ *   - /system/dashboard → src/pages/system/SystemDashboard/index.tsx
+ *       纯 div（无 ListPageLayout），顶部 4 张 Statistic 卡（.ant-statistic）
+ *       + CPU/Memory/Disk 三张仪表盘卡（GaugeChart=ECharts，title 文案
+ *       system.dashboard.cpu 在中英文均为「CPU」，断言 .ant-card 含 CPU）
+ *   - /system/dict-loader → src/pages/system/DictLoader/index.tsx
+ *       ListPageLayout title「字典 Loader 重载 / Dictionary Loader Reload」；
+ *       KNOWN_DICT_LOADERS 5 张卡（每张一个「重新加载 / Reload」按钮）+
+ *       首个 loader 标签「参数模型字典 / Param Model Dictionary」。
+ *       注：route 未挂 requireSuperAdmin 守卫（仅后端 reload 端点限超管），
+ *       故页面 render 不应被 /403 拦截；admin 可正常渲染。
  *
  * 不断言具体业务数据（真实栈数据稀疏）；列表页 .ant-table 空表也有表头。
  */
@@ -114,5 +132,51 @@ test.describe('系统管理冒烟（真实后端）', { tag: '@smoke' }, () => {
     ).toBeVisible();
     // 右栏：字典详细内容标题（未选中字典时表格区域是 Empty，不断言表格）
     await expect(page.getByText(/字典详细内容|Dictionary Details/).first()).toBeVisible();
+  });
+
+  test('/system/groups 用户组管理渲染，筛选条 + 新增按钮 + 表格骨架可见', async ({ page }) => {
+    await expectPageRenders(page, '/system/groups');
+
+    // FilterBar：组名筛选输入框（placeholder=group.groupName 组名 / Group Name）
+    await expect(page.getByPlaceholder(/组名|Group Name/).first()).toBeVisible();
+    // 顶部操作按钮（新增 / Add）
+    await expect(page.getByRole('button', { name: /新增|Add/ }).first()).toBeVisible();
+    // 用户组列表表格骨架（空表也有表头）
+    await expect(page.locator('.ant-table').first()).toBeVisible({ timeout: 30_000 });
+  });
+
+  test('/system/device-class 设备分类渲染，左树面板 + 树节点 + 表格骨架可见', async ({ page }) => {
+    await expectPageRenders(page, '/system/device-class');
+
+    // 左树面板标题（nav.system.deviceClass 设备分类 / Device Classification）
+    await expect(page.getByText(/设备分类|Device Classification/).first()).toBeVisible();
+    // 树根节点（硬编码中文「全部设备」，不随 locale 切换；撞侧边栏取 first）
+    await expect(page.getByText(/全部设备/).first()).toBeVisible();
+    // 右侧分类设备表格骨架
+    await expect(page.locator('.ant-table').first()).toBeVisible({ timeout: 30_000 });
+  });
+
+  test('/system/dashboard 系统仪表盘渲染，统计卡 + CPU 仪表盘卡可见', async ({ page }) => {
+    await expectPageRenders(page, '/system/dashboard');
+
+    // 顶部 KPI 统计卡（antd Statistic）
+    await expect(page.locator('.ant-statistic').first()).toBeVisible({ timeout: 30_000 });
+    // CPU 仪表盘卡（system.dashboard.cpu 中英文均为「CPU」，收窄到 main 避免侧栏命中）
+    await expect(
+      page.locator('main').locator('.ant-card-head-title').filter({ hasText: /CPU/ }).first(),
+    ).toBeVisible();
+  });
+
+  test('/system/dict-loader 字典加载器渲染，页面标题 + Loader 卡 + 重载按钮可见', async ({ page }) => {
+    await expectPageRenders(page, '/system/dict-loader');
+
+    // ListPageLayout 标题（字典 Loader 重载 / Dictionary Loader Reload）
+    await expect(page.getByText(/字典 Loader 重载|Dictionary Loader Reload/).first()).toBeVisible();
+    // 首个 Loader 标签（参数模型字典 / Param Model Dictionary）
+    await expect(
+      page.getByText(/参数模型字典|Param Model Dictionary/).first(),
+    ).toBeVisible();
+    // 每张卡一个「重新加载 / Reload」按钮
+    await expect(page.getByRole('button', { name: /重新加载|Reload/ }).first()).toBeVisible();
   });
 });

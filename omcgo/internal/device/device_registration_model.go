@@ -10,29 +10,31 @@ import (
 
 // DeviceRegistration represents a pre-registered device entry.
 type DeviceRegistration struct {
-	ID           uuid.UUID                  `json:"id"`
-	SerialNumber string                     `json:"serial_number"`
-	GroupID      *uuid.UUID                 `json:"group_id,omitempty"`
-	Carrier      model.CarrierCode          `json:"carrier"`
-	SiteName     string                     `json:"site_name,omitempty"`
-	Longitude    *float64                   `json:"longitude,omitempty"`
-	Latitude     *float64                   `json:"latitude,omitempty"`
-	Status       global.RegistrationStatus  `json:"status"`
-	Remark       string                     `json:"remark,omitempty"`
-	CreatedBy    string                     `json:"created_by,omitempty"`
-	CreatedAt    time.Time                  `json:"created_at"`
-	UpdatedAt    time.Time                  `json:"updated_at"`
+	ID           uuid.UUID                 `json:"id"`
+	SerialNumber string                    `json:"serial_number"`
+	GroupID      *uuid.UUID                `json:"group_id,omitempty"`
+	Carrier      model.CarrierCode         `json:"carrier"`
+	SiteName     string                    `json:"site_name,omitempty"`
+	Longitude    *float64                  `json:"longitude,omitempty"`
+	Latitude     *float64                  `json:"latitude,omitempty"`
+	Status       global.RegistrationStatus `json:"status"`
+	Remark       string                    `json:"remark,omitempty"`
+	CreatedBy    string                    `json:"created_by,omitempty"`
+	CreatedAt    time.Time                 `json:"created_at"`
+	UpdatedAt    time.Time                 `json:"updated_at"`
 }
 
 // CreateRegistrationRequest is the input for pre-registering a device.
+// GroupID 必填：device_registrations.group_id 在 DB 层为 NOT NULL 约束，
+// 缺参应在绑定阶段返回 400，而非落库触发 23502 炸 500（issue #126 第 2 项）。
 type CreateRegistrationRequest struct {
-	SerialNumber string  `json:"serial_number" binding:"required"`
-	GroupID      string  `json:"group_id"`
-	Carrier      string  `json:"carrier" binding:"required"`
-	SiteName     string  `json:"site_name"`
+	SerialNumber string   `json:"serial_number" binding:"required"`
+	GroupID      string   `json:"group_id" binding:"required"`
+	Carrier      string   `json:"carrier" binding:"required"`
+	SiteName     string   `json:"site_name"`
 	Longitude    *float64 `json:"longitude"`
 	Latitude     *float64 `json:"latitude"`
-	Remark       string  `json:"remark"`
+	Remark       string   `json:"remark"`
 }
 
 // RegistrationFilter provides filtering options for listing registrations.
@@ -45,8 +47,8 @@ type RegistrationFilter struct {
 
 // ImportResult describes the outcome of a batch import.
 type ImportResult struct {
-	Total    int      `json:"total"`
-	Success  int      `json:"success"`
-	Failed   int      `json:"failed"`
-	Errors   []string `json:"errors,omitempty"`
+	Total   int      `json:"total"`
+	Success int      `json:"success"`
+	Failed  int      `json:"failed"`
+	Errors  []string `json:"errors,omitempty"`
 }

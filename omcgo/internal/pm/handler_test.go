@@ -209,6 +209,32 @@ func TestHandler_ListAggregatedCounters(t *testing.T) {
 	assert.Equal(t, float64(5000), body.Items[0].SumValue)
 }
 
+// TestHandler_ListAggregatedCounters_NoPagination 回归 issue#126 第4项：
+// 不带 page/page_size 时不应 400（Page min 校验失败），应与 ListCounters 一致
+// 预填 DefaultListRequest 后正常 200。该端点本身不消费分页字段。
+func TestHandler_ListAggregatedCounters_NoPagination(t *testing.T) {
+	cr := &pmHCounterRepo{
+		queryAggregatedFn: func(_ context.Context, _ counter.CounterFilter) ([]counter.AggregatedCounter, error) {
+			return []counter.AggregatedCounter{
+				{CounterName: "rrc_conn_setup_att", SumValue: 5000, AvgValue: 1000},
+			}, nil
+		},
+	}
+	router := pmHSetupRouter(cr, &pmHKPIRepo{}, pmHNewEngine(), &pmHTaskRepo{})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/pm/counters/aggregated", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var body struct {
+		Items []counter.AggregatedCounter `json:"items"`
+	}
+	response.DecodeData(t, w.Body, &body)
+	require.Len(t, body.Items, 1)
+	assert.Equal(t, float64(5000), body.Items[0].SumValue)
+}
+
 func TestHandler_ListKPIValues(t *testing.T) {
 	kr := &pmHKPIRepo{
 		queryFn: func(_ context.Context, _ kpi.KPIFilter) (*model.ListResponse[model.KPIValue], error) {
