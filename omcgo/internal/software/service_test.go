@@ -1164,6 +1164,11 @@ func TestService_RollbackDevices_TargetFirmwareMatrix(t *testing.T) {
 				CreateUser:       "admin",
 				Source:           tt.source,
 				TargetFirmwareID: tt.targetID,
+				// #59 Problem 4：本矩阵的目标版本（V2.5.7/V1.9.0）相对设备当前 V3.0.0 是
+				// 降级，新防降级守卫默认会拦。这里测的是 DestVersion/target 的字段透传，
+				// 非降级策略本身，故显式 Force=true 绕过守卫（降级守卫单测见 version_test.go
+				// 与 TestService_RollbackDevices_DowngradeGuard）。
+				Force: true,
 			}
 			_, err := svc.RollbackDevices(context.Background(), req)
 			if tt.expectErr {

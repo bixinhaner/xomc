@@ -13,6 +13,7 @@ import (
 
 	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/admin/audit"
+	"github.com/omcgo/omcgo/internal/authz"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/response"
 )
@@ -23,8 +24,9 @@ import (
 // 都经 SoftwareService（handler → service → repository），便于在 Service 层
 // 集中挂权限检查 / 缓存策略。
 type Handler struct {
-	service *SoftwareService
-	logger  *zap.Logger
+	service  *SoftwareService
+	resolver *authz.Resolver // #59 Problem 4：从 gin ctx 解析调用者可见设备组
+	logger   *zap.Logger
 }
 
 // NewHandler creates a new software Handler.
@@ -33,6 +35,39 @@ func NewHandler(service *SoftwareService, logger *zap.Logger) *Handler {
 		service: service,
 		logger:  logger.Named("software-handler"),
 	}
+}
+
+// SetPermissionService 注入数据权限解析器（#59 Problem 4 / #64 统一强制层），使升级 /
+// 回退创建端点按调用者可见设备组对请求体里的 DeviceIDs 做逐设备归属校验。未注入时
+// h.resolver 为 nil，FromContext 走 nil-safe 退化（不强制），与 device / alarm 一致。
+func (h *Handler) SetPermissionService(perm authz.VisibleGroupsResolver) {
+	h.resolver = authz.NewResolver(perm)
+}
+
+// authorizeDeviceIDs 解析调用者可见设备组并对 deviceIDs 逐个做归属校验（#59 Problem 4）。
+// 返回 false 表示已 abort（403/500），调用方应立即 return。h.resolver 为 nil 时
+// FromContext 返回 (nil, true)，AuthorizeDevicesAccess 据三态契约对 nil 放行（dev/test 退化）。
+func (h *Handler) authorizeDeviceIDs(c *gin.Context, deviceIDs []uuid.UUID) bool {
+	groups, ok := h.resolver.FromContext(c)
+	if !ok {
+		return false
+	}
+	if err := h.service.AuthorizeDevicesAccess(c.Request.Context(), groups, deviceIDs...); err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return false
+	}
+	return true
+}
+
+// auditUpgradeDenied 记一条「越权被拒」的失败审计（#59 Problem 4）。在 authorizeDeviceIDs
+// 返回 false 后调用，确保跨租户写尝试留痕。action / resourceType 由调用方传入区分升级 / 回退。
+func (h *Handler) auditUpgradeDenied(c *gin.Context, action, resourceType string) {
+	entry := admin.AuditContextFromGin(c)
+	entry.Action = action
+	entry.ResourceType = resourceType
+	entry.Success = false
+	entry.ErrorMessage = "forbidden: device out of caller's visible groups"
+	audit.LogAsync(entry)
 }
 
 // RegisterRoutes registers firmware and upgrade task routes.
@@ -275,6 +310,14 @@ func (h *Handler) CreateUpgradeTask(c *gin.Context) {
 		return
 	}
 
+	// #59 Problem 4：逐设备归属校验——低权用户不得升级其可见设备组之外的设备
+	// （跨租户写）。任一 DeviceID 越界即整批 403。在调 service 之前拦截，避免越权
+	// 任务落库。审计记一条失败的 ActionUpgrade。
+	if !h.authorizeDeviceIDs(c, req.DeviceIDs) {
+		h.auditUpgradeDenied(c, audit.ActionUpgrade, audit.ResourceUpgradeTask)
+		return
+	}
+
 	task, err := h.service.BatchUpgrade(c.Request.Context(), req)
 
 	// Cross-module audit: ActionUpgrade / category 3 of 5 (W3.G.2).
@@ -371,6 +414,13 @@ func (h *Handler) CreateRollback(c *gin.Context) {
 	var req RollbackRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	// #59 Problem 4：逐设备归属校验——回退是破坏性写（可把设备降级到旧镜像），
+	// 同样不得跨可见设备组。任一 DeviceID 越界即整批 403 + 审计。
+	if !h.authorizeDeviceIDs(c, req.DeviceIDs) {
+		h.auditUpgradeDenied(c, audit.ActionUpgrade, audit.ResourceUpgradeTask)
 		return
 	}
 
