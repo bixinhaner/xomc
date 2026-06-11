@@ -15,7 +15,6 @@ import (
 	"github.com/omcgo/omcgo/internal/core/reliability/runner"
 	"github.com/omcgo/omcgo/internal/core/tracing"
 	"github.com/omcgo/omcgo/internal/pm"
-	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 	"go.opentelemetry.io/otel/attribute"
@@ -106,7 +105,6 @@ type PMCollector struct {
 	minioClient      *minio.Client
 	bucket           string
 	parser           *PMXMLParser
-	counterRepo      counter.CounterRepository
 	kpiEngine        *kpi.KPIEngine
 	fileStore        pm.PMFileStore
 	eventBus         event.EventBus
@@ -116,20 +114,19 @@ type PMCollector struct {
 	counterWhitelist CounterWhitelist
 	copyIngestor     CopyIngestor
 	concurrency      int
-	kpiWindowFromDB  bool
 	logger           *zap.Logger
 }
 
 // NewPMCollector creates a new PM collector.
 func NewPMCollector(
 	minioClient *minio.Client, bucket string, parser *PMXMLParser,
-	counterRepo counter.CounterRepository, kpiEngine *kpi.KPIEngine,
+	kpiEngine *kpi.KPIEngine,
 	fileStore pm.PMFileStore,
 	eventBus event.EventBus, logger *zap.Logger,
 ) *PMCollector {
 	return &PMCollector{
 		minioClient: minioClient, bucket: bucket, parser: parser,
-		counterRepo: counterRepo, kpiEngine: kpiEngine,
+		kpiEngine: kpiEngine,
 		fileStore: fileStore,
 		eventBus:  eventBus, logger: logger,
 	}
@@ -164,9 +161,10 @@ func (c *PMCollector) SetCounterWhitelist(w CounterWhitelist) {
 	c.counterWhitelist = w
 }
 
-// SetCopyIngestor 注入 copy-direct 写路径，启用 copy 模式（pm_files 标记 + 全部 metric 行单事务
-// plain COPY 原子入库，见 CopyIngestor / handleFileReceived 写路径分流）。Nil-safe — 未注入时
-// collector 保持默认 counterRepo UPSERT 写路径。由 worker 按 pm_write_mode=copy 注入。
+// SetCopyIngestor 注入 copy-direct 写路径（pm_files 标记 + 全部 metric 行单事务 plain COPY 原子
+// 入库，见 CopyIngestor / handleFileReceived）。worker 启动期总是注入它——migration 000042 删
+// uq_pm_metrics_natural 后 copy 是唯一写路径；未注入时 handleFileReceived fail-fast 返错（仅可能
+// 出现在不写库的单测）。
 func (c *PMCollector) SetCopyIngestor(ci CopyIngestor) {
 	c.copyIngestor = ci
 }
@@ -183,14 +181,6 @@ func (c *PMCollector) SetCopyIngestor(ci CopyIngestor) {
 // 均无可变共享状态，并发调用安全。
 func (c *PMCollector) SetConcurrency(n int) {
 	c.concurrency = n
-}
-
-// SetKPIWindowFromDB 选择 KPI 计算的取数路径：
-//   - false（默认，快）：用本文件刚解析的内存 counter 直接算 KPI（免每文件一次全量回读 SELECT）。
-//   - true：算 KPI 前从 pm_metrics 按 15min 窗回读 counter 再算——会跨"同设备同窗多文件"
-//     （拆包/补传）聚合。仅当部署存在同一窗口拆成多文件上报、且需跨文件聚合 KPI 时才开。
-func (c *PMCollector) SetKPIWindowFromDB(v bool) {
-	c.kpiWindowFromDB = v
 }
 
 // Subscribe registers the collector to listen for PM file received events.
@@ -266,28 +256,9 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 		}
 	}
 
-	// Save file metadata to pm_files table before parsing.
-	// copy 模式跳过：CopyIngest 在同一事务里写 pm_files 标记（文件级幂等的单一来源），
-	// 此处再预存一行会与 marker 冲突/抢占幂等语义，故仅默认（UPSERT）模式才预存。
+	// pm_files 元数据由 copy 写路径的 CopyIngest 在入库事务里一并写入（文件级幂等的单一锚点），
+	// 不在解析前预存。now 作为 marker 的 collect_time 透传给 ingestViaCopy。
 	now := time.Now()
-	var fileID uuid.UUID
-	if c.fileStore != nil && c.copyIngestor == nil {
-		pmFile := &pm.PMFileInfo{
-			DeviceID:    deviceID,
-			DeviceSN:    payload.DeviceSN,
-			Carrier:     payload.Carrier,
-			Technology:  payload.Technology,
-			FileName:    path.Base(payload.MinIOPath),
-			FileSize:    fileSize,
-			CollectTime: now,
-			MinioPath:   payload.MinIOPath,
-		}
-		if err := c.fileStore.SaveFile(ctx, pmFile); err != nil {
-			c.logger.Warn("save PM file metadata", zap.Error(err))
-		} else {
-			fileID = pmFile.ID
-		}
-	}
 
 	// io.LimitReader 兜底：Stat 不可用/谎报时,解析最多读 maxPMFileBytes,截断 → 解析报错被捕获。
 	content, err := c.parser.Parse(io.LimitReader(obj, maxPMFileBytes), deviceID)
@@ -321,79 +292,13 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 	// 过滤逻辑 fail-open：lookup 失败 / 空白名单时跳过过滤，保留原行为。
 	content.Counters = c.filterByWhitelist(ctx, payload.DeviceSN, payload.Carrier, payload.Technology, content.Counters)
 
-	// 写路径分流：copy 模式（激进）—— pm_files 标记 + 全部 metric 行（counter + 内存算出的 KPI）
-	// 在单事务里 plain COPY 原子入库，幂等下沉到每文件一次（pm_files 唯一约束），去掉每行自然键
-	// UPSERT 的写 CPU 大头。copyIngestor 未注入时走下方默认 counterRepo UPSERT + KPI 单独落库。
-	if c.copyIngestor != nil {
-		return c.ingestViaCopy(ctx, span, startTime, now, fileSize, deviceID, &payload, content)
+	// PM 入库统一走 copy-direct 原子写路径（pm_files 标记 + counter + 内存算出的 KPI 单事务 plain
+	// COPY，见 ingestViaCopy / metrics.CopyIngest）。worker 启动期总是注入 copyIngestor；未注入仅见
+	// 于不写库的单测，这里 fail-fast 而非退回已退役的非幂等 UPSERT 旁路。
+	if c.copyIngestor == nil {
+		return fmt.Errorf("pm collector: copy ingestor not wired (copy is the sole write path)")
 	}
-
-	if err := c.counterRepo.BatchInsert(ctx, content.Counters); err != nil {
-		// issue #14 迟到数据降级：补传命中 TimescaleDB 压缩 chunk（> compression 阈值）时
-		// ON CONFLICT 不被支持，存储层把它归为 ErrLateArrival。这是预期的业务约束而非系统
-		// 故障 —— 不能让历史补传把整批数据反复重试灌进 DLQ 阻塞实时 PM。降级为：log WARN +
-		// 记 metric + 当作已处理跳过（return nil），让该文件正常 ack。
-		// 专用迟到数据表（late-arrivals staging，可后续回灌解压 chunk）属更大设计，记入遗留。
-		if errors.Is(err, metrics.ErrLateArrival) {
-			c.logger.Warn("PM file skipped: late-arriving data hit compressed chunk (UPSERT unsupported)",
-				zap.String("path", payload.MinIOPath),
-				zap.String("device_sn", payload.DeviceSN),
-				zap.Int("counters", len(content.Counters)),
-				zap.Error(err))
-			if c.metrics != nil {
-				c.metrics.LateArrivalFilesTotal.WithLabelValues(payload.Carrier, payload.Technology).Inc()
-				c.metrics.FilesProcessedTotal.WithLabelValues("late_arrival").Inc()
-				c.metrics.ProcessingDurationSecs.Observe(time.Since(startTime).Seconds())
-			}
-			span.SetAttributes(attribute.String("pm.outcome", "late_arrival"))
-			return nil
-		}
-		if c.metrics != nil {
-			c.metrics.FilesProcessedTotal.WithLabelValues("failed").Inc()
-			c.metrics.ProcessingDurationSecs.Observe(time.Since(startTime).Seconds())
-		}
-		tracing.RecordError(span, err)
-		return fmt.Errorf("batch insert counters: %w", err)
-	}
-
-	// Record success metrics
-	if c.metrics != nil {
-		c.metrics.FilesProcessedTotal.WithLabelValues("success").Inc()
-		c.metrics.ProcessingDurationSecs.Observe(time.Since(startTime).Seconds())
-	}
-
-	// Update file parsed status
-	if c.fileStore != nil && fileID != uuid.Nil {
-		if err := c.fileStore.UpdateFileParsed(ctx, fileID, len(content.Counters)); err != nil {
-			c.logger.Warn("update PM file parsed status", zap.Error(err))
-		}
-	}
-
-	// Calculate KPIs — 默认走"内存 counter 直接算"快路径（免每文件一次全量回读 SELECT）；
-	// content.Counters 此处已过白名单、CounterName 已编号化，正是 KPI 公式所需。
-	// 仅当 SetKPIWindowFromDB(true)（同窗多文件需跨文件聚合）才回退到回读路径。
-	if c.kpiEngine != nil {
-		carrier := model.CarrierCode(payload.Carrier)
-		tech := model.Technology(payload.Technology)
-		if c.kpiWindowFromDB {
-			cellIDs := extractUniqueCellIDs(content.Counters)
-			if _, err := c.kpiEngine.CalculateCellsAndStore(ctx, deviceID, payload.DeviceOUI, payload.DeviceSN, cellIDs, content.CollectTime, carrier, tech); err != nil {
-				c.logger.Warn("calculate kpi (db window)", zap.Int("cells", len(cellIDs)), zap.Error(err))
-			}
-		} else {
-			if _, err := c.kpiEngine.CalculateAndStoreFromCounters(ctx, deviceID, payload.DeviceOUI, payload.DeviceSN, content.Counters, content.CollectTime, carrier, tech); err != nil {
-				c.logger.Warn("calculate kpi (in-memory)", zap.Int("counters", len(content.Counters)), zap.Error(err))
-			}
-		}
-	}
-
-	parsedEvt, err := event.NewEvent(event.SubjectPMFileParsed, map[string]interface{}{
-		"minio_path": payload.MinIOPath, "device_id": payload.DeviceID, "counter_count": len(content.Counters),
-	})
-	if err == nil {
-		_ = c.eventBus.Publish(ctx, event.SubjectPMFileParsed, parsedEvt)
-	}
-	return nil
+	return c.ingestViaCopy(ctx, span, startTime, now, fileSize, deviceID, &payload, content)
 }
 
 // ingestViaCopy 是 copy 模式的写收尾：用内存 counter 算出 KPI（只算不写），把 counter + KPI +
@@ -571,14 +476,3 @@ func (c *PMCollector) filterByWhitelist(ctx context.Context, deviceSN, carrier, 
 	return kept
 }
 
-func extractUniqueCellIDs(counters []model.PMCounter) []string {
-	seen := make(map[string]struct{})
-	var result []string
-	for _, c := range counters {
-		if _, ok := seen[c.CellID]; !ok {
-			seen[c.CellID] = struct{}{}
-			result = append(result, c.CellID)
-		}
-	}
-	return result
-}

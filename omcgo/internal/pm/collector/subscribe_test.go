@@ -32,7 +32,7 @@ type noopSub struct{}
 func (noopSub) Unsubscribe() error { return nil }
 
 func newTestCollector() *PMCollector {
-	return NewPMCollector(nil, "", nil, nil, nil, nil, nil, zap.NewNop())
+	return NewPMCollector(nil, "", nil, nil, nil, nil, zap.NewNop())
 }
 
 // 默认（未设并发）退化为单订阅，沿用旧行为。

@@ -56,6 +56,9 @@ type pmHKPIRepo struct {
 }
 
 func (m *pmHKPIRepo) BatchInsert(_ context.Context, _ []model.KPIValue) error { return nil }
+func (m *pmHKPIRepo) ReplaceForRecompute(_ context.Context, _, _, _ string, _ time.Time, _ []model.KPIValue) error {
+	return nil
+}
 func (m *pmHKPIRepo) Query(ctx context.Context, filter kpi.KPIFilter) (*model.ListResponse[model.KPIValue], error) {
 	if m.queryFn != nil {
 		return m.queryFn(ctx, filter)

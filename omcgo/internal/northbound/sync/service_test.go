@@ -163,6 +163,9 @@ func (m *mockCounterRepo) QueryForKPICells(ctx context.Context, deviceID uuid.UU
 type mockKPIRepo struct{}
 
 func (m *mockKPIRepo) BatchInsert(ctx context.Context, values []model.KPIValue) error { return nil }
+func (m *mockKPIRepo) ReplaceForRecompute(_ context.Context, _, _, _ string, _ time.Time, _ []model.KPIValue) error {
+	return nil
+}
 func (m *mockKPIRepo) Query(ctx context.Context, filter kpi.KPIFilter) (*model.ListResponse[model.KPIValue], error) {
 	return model.NewListResponse([]model.KPIValue{}, 0, 1, 100), nil
 }

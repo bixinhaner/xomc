@@ -158,10 +158,11 @@ func (e *KPIEngine) CalculateAndStore(
 	if err != nil {
 		return nil, err
 	}
-	if len(results) > 0 {
-		if err := e.kpiRepo.BatchInsert(ctx, results); err != nil {
-			return nil, fmt.Errorf("store kpi values: %w", err)
-		}
+	// 重算幂等（migration 000042 删唯一索引后无 ON CONFLICT DO UPDATE 兜底）：原子替换该
+	// (设备, cell, 15min 窗口) 的 KPI 行——单事务 advisory 锁 + DELETE 旧 + INSERT 新，保证重复/
+	// 并发调用不留重复行、且插失败时旧值不丢。即便本次算出 0 条也执行（删旧后该窗口可能不再有 KPI）。
+	if err := e.kpiRepo.ReplaceForRecompute(ctx, oui, deviceSN, cellID, collectTime, results); err != nil {
+		return nil, fmt.Errorf("replace kpi for recompute: %w", err)
 	}
 	return results, nil
 }

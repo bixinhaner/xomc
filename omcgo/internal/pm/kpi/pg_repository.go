@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
@@ -44,6 +45,51 @@ func (r *PgKPIRepository) BatchInsert(ctx context.Context, values []model.KPIVal
 		ms = append(ms, kpiValueToMetric(v))
 	}
 	return r.metricsRepo.BatchInsert(ctx, ms)
+}
+
+// ReplaceForRecompute 原子替换 (oui, sn, cellID, 15min 窗口 end_time) 的 KPI 行：单事务内
+// advisory 锁串行化 → DELETE 旧行 → INSERT 新行 → 提交。替代旧自然键 ON CONFLICT DO UPDATE 的
+// 原子"后写覆盖"（migration 000042 删唯一索引后）。
+//   - 原子：DELETE 与 INSERT 同事务，INSERT 失败整体回滚，旧 KPI 行不丢（修复非原子崩溃窗口）。
+//   - 并发安全：pg_advisory_xact_lock 按 (oui,sn,cellID,end_time) 串行化同范围并发重算，杜绝两次
+//     重算交错（各自 DELETE 后各自 INSERT）产生重复行。锁随事务结束自动释放。
+// scope DELETE 限定单设备单窗口，走 idx_pm_metrics_device_time 定位，删唯一索引后依然高效。
+// object_ldn 列 NOT NULL DEFAULT ''，cellID="" 对应 object_ldn=''（与写入侧 nil→'' 一致）。
+func (r *PgKPIRepository) ReplaceForRecompute(ctx context.Context, oui, deviceSN, cellID string, endTime time.Time, values []model.KPIValue) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin kpi recompute tx (sn=%s cell=%s): %w", deviceSN, cellID, err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	// 同范围并发重算串行化：advisory xact 锁键 = (oui|sn|cell|窗口) 的 64 位哈希（hashtextextended）。
+	lockKey := oui + "\x00" + deviceSN + "\x00" + cellID + "\x00" + endTime.UTC().Format(time.RFC3339Nano)
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, lockKey); err != nil {
+		return fmt.Errorf("acquire recompute lock (sn=%s cell=%s): %w", deviceSN, cellID, err)
+	}
+
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM pm_metrics
+		 WHERE device_oui = $1 AND device_sn = $2 AND object_ldn = $3
+		   AND metric_type = 'kpi' AND granularity = '15min' AND end_time = $4`,
+		oui, deviceSN, cellID, endTime); err != nil {
+		return fmt.Errorf("delete kpi for recompute (sn=%s cell=%s): %w", deviceSN, cellID, err)
+	}
+
+	if len(values) > 0 {
+		ms := make([]metrics.PMMetric, 0, len(values))
+		for _, v := range values {
+			ms = append(ms, metrics.MetricFromKPIValue(v))
+		}
+		if err := metrics.InsertRowsTx(ctx, tx, ms); err != nil {
+			return fmt.Errorf("insert recomputed kpi (sn=%s cell=%s): %w", deviceSN, cellID, err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit kpi recompute (sn=%s cell=%s): %w", deviceSN, cellID, err)
+	}
+	return nil
 }
 
 func (r *PgKPIRepository) Query(ctx context.Context, filter KPIFilter) (*model.ListResponse[model.KPIValue], error) {

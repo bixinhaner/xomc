@@ -159,7 +159,7 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	kpiEngine := kpi.NewKPIEngine(counterRepo, kpiRepo, pmKPIRouter, logger)
 	pmParser := collector.NewPMXMLParser()
 	pmFileStore := pm.NewPgPMFileStore(w.PgPool)
-	pmCollector := collector.NewPMCollector(w.MinIO, cfg.MinIO.Buckets.PMFiles, pmParser, counterRepo, kpiEngine, pmFileStore, w.EventBus, logger)
+	pmCollector := collector.NewPMCollector(w.MinIO, cfg.MinIO.Buckets.PMFiles, pmParser, kpiEngine, pmFileStore, w.EventBus, logger)
 	pmMetrics := pm.NewPMMetrics(w.MetricsReg)
 	pmCollector.SetMetrics(pmMetrics)
 	// T-0164 G1 真机闭环：acs.upload.Handler 发的瘦 payload 只带 device_sn，
@@ -192,17 +192,20 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	}
 	pmCollector.SetConcurrency(pmConcurrency)
 
-	// KPI 取数路径：默认用内存 counter 直接算（免每文件一次全量回读）；同窗多文件部署可切回回读。
-	pmCollector.SetKPIWindowFromDB(cfg.PMKPIWindowFromDB)
 	// PM 指标大批量写异步提交（synchronous_commit=off）：PM 数据可从 MinIO 重建，换写吞吐。
+	// 注意：仅作用于 metrics.batchInsertCopy 等旁路；copy-direct 主路径 CopyIngest 刻意忽略它以保证
+	// pm_files 幂等锚点 durable 落盘（见 copy_ingest.go）。
 	pmmetrics.BulkAsyncCommit = cfg.PMAsyncCommit
 
-	// 写模式：copy=激进 plain COPY 原子入库（pm_files 标记 + counter + KPI 单事务 COPY，去掉每行
-	// 自然键 UPSERT 的写 CPU 大头）；其它值（含默认空）=保持 counterRepo UPSERT 路径。仅注入 copy
-	// 路径，不改 admin RecomputeKPIs 等仍走 UPSERT 的旁路。
-	pmWriteMode := strings.ToLower(strings.TrimSpace(cfg.PMWriteMode))
-	if pmWriteMode == "copy" {
-		pmCollector.SetCopyIngestor(pmmetrics.NewPgRepository(w.PgPool))
+	// PM 入库统一走 copy-direct 写模式：单事务 plain COPY 原子入库（pm_files 标记 + counter + 内存
+	// 算出的 KPI），幂等下沉到每文件一次 pm_files 唯一约束 + 文件内 last-wins 去重。migration 000042
+	// 删 uq_pm_metrics_natural 后无索引可供 ON CONFLICT，upsert 写模式已退役，copy 是唯一写路径。
+	pmCollector.SetCopyIngestor(pmmetrics.NewPgRepository(w.PgPool))
+
+	// copy 是唯一写路径，KPI 恒用当前文件内存 counter 计算（CalculateFromCounters）；
+	// pm_kpi_window_from_db 的 DB 回读分支已随非 copy 旁路退役。仍配 true 时明确告警，避免运营误以为生效。
+	if cfg.PMKPIWindowFromDB {
+		logger.Warn("pm_kpi_window_from_db=true is ignored: copy is the sole PM write mode; KPIs are computed from the current file's in-memory counters")
 	}
 
 	if err := pmCollector.Subscribe(w.EventBus); err != nil {
@@ -211,8 +214,7 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	logger.Info("PM collector started with retry+DLQ runner",
 		zap.Int("pm_consumer_concurrency", pmConcurrency),
 		zap.Bool("pm_async_commit", cfg.PMAsyncCommit),
-		zap.Bool("pm_kpi_window_from_db", cfg.PMKPIWindowFromDB),
-		zap.String("pm_write_mode", pmWriteMode))
+		zap.String("pm_write_mode", "copy"))
 
 	// Alarm Receiver + Sync
 	alarmPgStore := alarm.NewPgAlarmStore(w.PgPool, w.TsPool)
