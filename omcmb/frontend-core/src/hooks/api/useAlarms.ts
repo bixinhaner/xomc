@@ -94,7 +94,9 @@ export function useHistoryAlarmCount() {
   });
 }
 
-export function useAlarmRules(params: PageRequest) {
+export function useAlarmRules(
+  params: PageRequest & { keyword?: string; filterType?: string[]; action?: string; enabled?: string }
+) {
   return useQuery({
     queryKey: ['alarms', 'rules', params],
     queryFn: () => api.getRules(params),

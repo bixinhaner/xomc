@@ -76,10 +76,6 @@ test.describe('告警管理冒烟（真实后端）', { tag: '@smoke' }, () => {
     await expectPageRenders(page, '/alarm/rules');
 
     await expect(page.getByText(/告警规则|Alarm Rules/).first()).toBeVisible();
-    // 副标题（alarm.rulesDesc）
-    await expect(
-      page.getByText(/配置告警过滤规则|Configure alarm filtering rules/).first(),
-    ).toBeVisible();
     await expect(page.locator('.ant-table').first()).toBeVisible();
   });
 

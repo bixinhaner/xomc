@@ -2,9 +2,12 @@ package alarm
 
 import (
 	"net/http"
+	"slices"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/internal/admin"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/response"
@@ -36,7 +39,28 @@ type filterRuleQuery struct {
 	FilterType string `form:"filter_type"`
 	Action     string `form:"action"`
 	Enabled    string `form:"enabled"`
+	Keyword    string `form:"keyword"`
 	model.ListRequest
+}
+
+func getOperator(c *gin.Context) string {
+	if v, ok := c.Get(admin.CtxKeyUsername); ok {
+		return v.(string)
+	}
+	return ""
+}
+
+func splitCSVQuery(value string) []string {
+	parts := strings.Split(value, ",")
+	items := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed == "" || slices.Contains(items, trimmed) {
+			continue
+		}
+		items = append(items, trimmed)
+	}
+	return items
 }
 
 func (h *FilterHandler) List(c *gin.Context) {
@@ -48,7 +72,7 @@ func (h *FilterHandler) List(c *gin.Context) {
 	}
 	filter := AlarmFilterRuleFilter{ListRequest: q.ListRequest}
 	if q.FilterType != "" {
-		filter.FilterType = &q.FilterType
+		filter.FilterTypes = splitCSVQuery(q.FilterType)
 	}
 	if q.Action != "" {
 		filter.Action = &q.Action
@@ -56,6 +80,10 @@ func (h *FilterHandler) List(c *gin.Context) {
 	if q.Enabled != "" {
 		enabled := q.Enabled == "true"
 		filter.Enabled = &enabled
+	}
+	if strings.TrimSpace(q.Keyword) != "" {
+		keyword := strings.TrimSpace(q.Keyword)
+		filter.Keyword = &keyword
 	}
 
 	result, err := h.repo.List(c.Request.Context(), filter)
@@ -100,6 +128,10 @@ func (h *FilterHandler) Create(c *gin.Context) {
 		WebhookSecret:   req.WebhookSecret,
 		Priority:        req.Priority,
 		Enabled:         true,
+	}
+	if operator := getOperator(c); operator != "" {
+		rule.CreatedBy = operator
+		rule.UpdatedBy = operator
 	}
 	if req.Enabled != nil {
 		rule.Enabled = *req.Enabled
@@ -176,6 +208,9 @@ func (h *FilterHandler) Update(c *gin.Context) {
 	if req.Enabled != nil {
 		rule.Enabled = *req.Enabled
 	}
+	if operator := getOperator(c); operator != "" {
+		rule.UpdatedBy = operator
+	}
 
 	if err := h.repo.Update(c.Request.Context(), rule); err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
@@ -203,7 +238,16 @@ func (h *FilterHandler) Toggle(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
 		return
 	}
-	if err := h.repo.Toggle(c.Request.Context(), id); err != nil {
+	rule, err := h.repo.GetByID(c.Request.Context(), id)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
+		return
+	}
+	rule.Enabled = !rule.Enabled
+	if operator := getOperator(c); operator != "" {
+		rule.UpdatedBy = operator
+	}
+	if err := h.repo.Update(c.Request.Context(), rule); err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}

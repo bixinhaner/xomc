@@ -3,6 +3,7 @@ package alarm
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -26,6 +27,70 @@ var alarmFilterRuleOrderBy = []string{
 
 func applyAlarmFilterRuleOrdering(query squirrel.SelectBuilder) squirrel.SelectBuilder {
 	return query.OrderBy(alarmFilterRuleOrderBy...)
+}
+
+func buildAlarmFilterRuleDimensionExpr(filterType string) squirrel.Sqlizer {
+	switch filterType {
+	case FilterTypeAlarmIdentifier:
+		return squirrel.Expr("cardinality(alarm_identifiers) > 0")
+	case FilterTypeAlarmSource:
+		return squirrel.Expr("cardinality(alarm_sources) > 0")
+	case FilterTypeDeviceGroup:
+		return squirrel.Expr("cardinality(device_group_ids) > 0")
+	case FilterTypeDevice:
+		return squirrel.Expr("cardinality(device_ids) > 0")
+	default:
+		return nil
+	}
+}
+
+func applyAlarmFilterRuleFilters(query squirrel.SelectBuilder, filter AlarmFilterRuleFilter) squirrel.SelectBuilder {
+	if len(filter.FilterTypes) > 0 {
+		dimensionFilters := squirrel.Or{}
+		seen := make(map[string]struct{}, len(filter.FilterTypes))
+		for _, filterType := range filter.FilterTypes {
+			trimmed := strings.TrimSpace(filterType)
+			if trimmed == "" {
+				continue
+			}
+			if _, exists := seen[trimmed]; exists {
+				continue
+			}
+			seen[trimmed] = struct{}{}
+			if expr := buildAlarmFilterRuleDimensionExpr(trimmed); expr != nil {
+				dimensionFilters = append(dimensionFilters, expr)
+			}
+		}
+		if len(dimensionFilters) > 0 {
+			query = query.Where(dimensionFilters)
+		}
+	}
+	if filter.Action != nil && *filter.Action != "" {
+		query = query.Where(squirrel.Eq{"action": *filter.Action})
+	}
+	if filter.Enabled != nil {
+		query = query.Where(squirrel.Eq{"enabled": *filter.Enabled})
+	}
+	if filter.Keyword != nil {
+		keyword := strings.TrimSpace(*filter.Keyword)
+		if keyword != "" {
+			like := "%" + keyword + "%"
+			query = query.Where(squirrel.Or{
+				squirrel.ILike{"name": like},
+				squirrel.ILike{"created_by": like},
+				squirrel.ILike{"updated_by": like},
+				squirrel.ILike{"filter_type": like},
+				squirrel.ILike{"action": like},
+				squirrel.Expr("array_to_string(alarm_identifiers, ',') ILIKE ?", like),
+				squirrel.Expr("array_to_string(alarm_sources, ',') ILIKE ?", like),
+				squirrel.Expr("array_to_string(device_ids, ',') ILIKE ?", like),
+				squirrel.Expr("array_to_string(device_group_ids, ',') ILIKE ?", like),
+				squirrel.Expr("EXISTS (SELECT 1 FROM devices d WHERE d.id = ANY(alarm_filters.device_ids) AND d.serial_number ILIKE ?)", like),
+			})
+		}
+	}
+
+	return query
 }
 
 func NewPgAlarmFilterRuleRepository(db *pgxpool.Pool) *PgAlarmFilterRuleRepository {
@@ -159,23 +224,13 @@ func (r *PgAlarmFilterRuleRepository) Delete(ctx context.Context, id uuid.UUID) 
 }
 
 func (r *PgAlarmFilterRuleRepository) List(ctx context.Context, filter AlarmFilterRuleFilter) (*model.ListResponse[AlarmFilterRule], error) {
-	query := applyAlarmFilterRuleOrdering(storage.Psql.
+	query := applyAlarmFilterRuleFilters(applyAlarmFilterRuleOrdering(storage.Psql.
 		Select(
 			"id", "name", "filter_type", "alarm_sources", "alarm_identifiers",
 			"device_ids", "device_group_ids", "action", "acknowledge_desc", "webhook_url", "webhook_secret", "email_recipients",
 			"priority", "enabled", "created_by", "created_at", "updated_by", "updated_at",
 		).
-		From("alarm_filters"))
-
-	if filter.FilterType != nil && *filter.FilterType != "" {
-		query = query.Where(squirrel.Eq{"filter_type": *filter.FilterType})
-	}
-	if filter.Action != nil && *filter.Action != "" {
-		query = query.Where(squirrel.Eq{"action": *filter.Action})
-	}
-	if filter.Enabled != nil {
-		query = query.Where(squirrel.Eq{"enabled": *filter.Enabled})
-	}
+		From("alarm_filters")), filter)
 
 	if filter.Page > 0 && filter.PageSize > 0 {
 		offset := (filter.Page - 1) * filter.PageSize
@@ -213,16 +268,7 @@ func (r *PgAlarmFilterRuleRepository) List(ctx context.Context, filter AlarmFilt
 
 	var total int64
 	if filter.Page > 0 && filter.PageSize > 0 {
-		countQuery := storage.Psql.Select("COUNT(*)").From("alarm_filters")
-		if filter.FilterType != nil && *filter.FilterType != "" {
-			countQuery = countQuery.Where(squirrel.Eq{"filter_type": *filter.FilterType})
-		}
-		if filter.Action != nil && *filter.Action != "" {
-			countQuery = countQuery.Where(squirrel.Eq{"action": *filter.Action})
-		}
-		if filter.Enabled != nil {
-			countQuery = countQuery.Where(squirrel.Eq{"enabled": *filter.Enabled})
-		}
+		countQuery := applyAlarmFilterRuleFilters(storage.Psql.Select("COUNT(*)").From("alarm_filters"), filter)
 
 		countSql, countArgs, err := countQuery.ToSql()
 		if err != nil {
