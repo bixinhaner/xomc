@@ -3791,10 +3791,17 @@ const messages: Record<string, string> = {
 
   // System - Device Settings
   'system.device.informPeriod':              'Device Inform Period',
-  'system.device.detectEnbInformPeriod':     'Detect eNB Inform period mismatch on device startup',
-  'system.device.thenAutoAdjust':            'seconds, auto-adjust',
+  'system.device.informGroup.baseStation':   'Base Station',
+  'system.device.informGroup.cpe':           'CPE',
+  // ① Auto-adjust: make it clear it adjusts TO N seconds (prefix + input + suffix)
+  'system.device.adjustEnbPrefix':           'On device startup, if base station Inform period mismatches, auto-adjust to',
+  'system.device.adjustCpePrefix':           'On device startup, if CPE Inform period mismatches, auto-adjust to',
+  'system.device.adjustSuffix':              'seconds',
   'system.device.ifSystemIn':                'If system does not receive heartbeat for',
   'system.device.noHeartbeatThenOffline':    'seconds, show device as offline',
+  // Legacy keys kept to avoid breaking other references
+  'system.device.detectEnbInformPeriod':     'Detect base station Inform period mismatch on device startup',
+  'system.device.thenAutoAdjust':            'seconds, auto-adjust',
   'system.device.detectCpeInformPeriod':     'Detect CPE Inform period mismatch on device startup',
   'system.device.deviceNameSync':            'Device Name Sync',
   'system.device.checkAndSetDeviceName':     'Check and sync device name with LMT.',

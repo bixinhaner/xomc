@@ -3818,10 +3818,17 @@ const messages: Record<string, string> = {
 
   // System - Device Settings
   'system.device.informPeriod':              '设备Inform周期',
-  'system.device.detectEnbInformPeriod':     'OMC在设备启动时，检测eNB Inform周期不符合',
-  'system.device.thenAutoAdjust':            '秒，则自动调整',
+  'system.device.informGroup.baseStation':   '基站类',
+  'system.device.informGroup.cpe':           'CPE 类',
+  // ① 自动调整：文案明确"启动时若不符则自动调整到 N 秒"（前缀 + 输入框 + 后缀）
+  'system.device.adjustEnbPrefix':           'OMC在设备启动时，若基站 Inform 周期不符，则自动调整到',
+  'system.device.adjustCpePrefix':           'OMC在设备启动时，若 CPE Inform 周期不符，则自动调整到',
+  'system.device.adjustSuffix':              '秒',
   'system.device.ifSystemIn':                '如果系统在',
   'system.device.noHeartbeatThenOffline':    '秒内没有收到设备心跳消息，则显示设备状态为离线',
+  // 旧键保留（避免其它处引用断裂）
+  'system.device.detectEnbInformPeriod':     'OMC在设备启动时，检测基站 Inform周期不符合',
+  'system.device.thenAutoAdjust':            '秒，则自动调整',
   'system.device.detectCpeInformPeriod':     'OMC在设备启动时，检测CPE Inform周期不符合',
   'system.device.deviceNameSync':            '设备名称同步',
   'system.device.checkAndSetDeviceName':     '检查并设置网管上的设备名称与LMT上设备名称一致。',
