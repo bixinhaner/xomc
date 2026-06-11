@@ -43,6 +43,10 @@ type TransferCompleteRouter struct {
 	restoreRepo RestoreTaskRepository
 	metrics     *RestoreMetrics // 复用，避免再引入新 metrics 类型；nil-safe
 	logger      *zap.Logger
+	// verifyOrch（#70，可空）：恢复 Download 成功后走主动完整性校验编排
+	// （downloaded → verify → completed/failed）。未注入时退化为旧行为
+	// （FaultCode==0 直接 MarkComplete(completed)），保持向后兼容。
+	verifyOrch *RestoreVerificationOrchestrator
 }
 
 // NewTransferCompleteRouter 构造路由器。metrics 可为 nil。
@@ -58,6 +62,12 @@ func NewTransferCompleteRouter(
 		metrics:     metrics,
 		logger:      logger.Named("backup-tc-router"),
 	}
+}
+
+// SetRestoreVerificationOrchestrator 装配 #70 主动校验编排器（恢复成功分支用）。
+// 传 nil 关闭（回到旧"下载成功即完成"行为）。
+func (r *TransferCompleteRouter) SetRestoreVerificationOrchestrator(o *RestoreVerificationOrchestrator) {
+	r.verifyOrch = o
 }
 
 // Subscribe 注册到 EventBus。使用专属 queue 名以免与 software 模块冲突
@@ -184,21 +194,33 @@ func (r *TransferCompleteRouter) markRestore(
 		r.recordOutcome("skipped_already_terminal")
 		return nil
 	}
-	status := RestoreCompleted
-	result := int16(TaskResultSuccess)
+
+	// 失败分支（CPE 回报 FaultCode != 0）：下载本身就没成，无需主动校验，直接判 failed。
 	if !success {
-		status = RestoreFailed
-		result = int16(TaskResultFailed)
+		if err := r.restoreRepo.MarkComplete(ctx, target.ID, RestoreFailed, int16(TaskResultFailed), completedAt, errMsg); err != nil {
+			r.recordOutcome("error")
+			return fmt.Errorf("mark restore_task %s failed: %w", target.ID, err)
+		}
+		r.recordOutcome("restore_" + string(RestoreFailed))
+		r.logger.Info("restore_task TransferComplete writeback (download fault)",
+			zap.String("task_id", target.ID.String()),
+			zap.String("status", string(RestoreFailed)))
+		return nil
 	}
-	if err := r.restoreRepo.MarkComplete(ctx, target.ID, status, result, completedAt, errMsg); err != nil {
+
+	// 成功分支（#70）：CPE 回报下载成功 ≠ 配置真正生效。若装配了主动校验编排器，
+	// 走 downloaded → 回读校验 → completed/failed；否则退化为旧行为（直接 completed）。
+	if r.verifyOrch != nil {
+		return r.verifyOrch.HandleDownloaded(ctx, target, completedAt)
+	}
+	if err := r.restoreRepo.MarkComplete(ctx, target.ID, RestoreCompleted, int16(TaskResultSuccess), completedAt, ""); err != nil {
 		r.recordOutcome("error")
 		return fmt.Errorf("mark restore_task %s complete: %w", target.ID, err)
 	}
-	r.recordOutcome("restore_" + string(status))
-	r.logger.Info("restore_task TransferComplete writeback",
+	r.recordOutcome("restore_" + string(RestoreCompleted))
+	r.logger.Info("restore_task TransferComplete writeback (no active verifier; legacy complete)",
 		zap.String("task_id", target.ID.String()),
-		zap.String("status", string(status)),
-		zap.Int16("task_result", result))
+		zap.String("status", string(RestoreCompleted)))
 	return nil
 }
 

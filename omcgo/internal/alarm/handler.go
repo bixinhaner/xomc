@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/internal/authz"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/response"
@@ -18,12 +19,31 @@ type Handler struct {
 	engine      *AlarmEngine
 	store       AlarmStore
 	syncService *AlarmSyncService
+	resolver    *authz.Resolver
 	logger      *zap.Logger
 }
 
 // NewHandler creates a new alarm handler.
 func NewHandler(engine *AlarmEngine, store AlarmStore, syncService *AlarmSyncService, logger *zap.Logger) *Handler {
 	return &Handler{engine: engine, store: store, syncService: syncService, logger: logger}
+}
+
+// SetPermissionService 注入数据权限解析器（#64 统一强制层），使告警读链路按调用者
+// 可见设备组过滤。未注入时退化为不过滤（dev/test），与 device 模块语义一致。
+func (h *Handler) SetPermissionService(perm authz.VisibleGroupsResolver) {
+	h.resolver = authz.NewResolver(perm)
+}
+
+// applyVisibleGroups 解析调用者可见设备组并写入 filter.VisibleGroups。
+// 返回 false 表示解析失败已 abort（403/500），调用方应立即 return。
+// h.resolver 为 nil 时 FromContext 走 nil-safe 退化路径，返回 (nil, true) 不过滤。
+func (h *Handler) applyVisibleGroups(c *gin.Context, filter *AlarmFilter) bool {
+	groups, ok := h.resolver.FromContext(c)
+	if !ok {
+		return false
+	}
+	filter.VisibleGroups = groups
+	return true
 }
 
 // RegisterRoutes registers alarm API routes.
@@ -138,6 +158,9 @@ func (h *Handler) ListActive(c *gin.Context) {
 		filter.Keyword = &q.Keyword
 	}
 
+	if !h.applyVisibleGroups(c, &filter) {
+		return
+	}
 	result, err := h.store.ListActive(c.Request.Context(), filter)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
@@ -204,6 +227,9 @@ func (h *Handler) ListHistory(c *gin.Context) {
 		filter.Keyword = &q.Keyword
 	}
 
+	if !h.applyVisibleGroups(c, &filter) {
+		return
+	}
 	result, err := h.store.ListHistory(c.Request.Context(), filter)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
@@ -270,6 +296,9 @@ func (h *Handler) Statistics(c *gin.Context) {
 		id, _ := uuid.Parse(deviceID)
 		filter.DeviceID = &id
 	}
+	if !h.applyVisibleGroups(c, &filter) {
+		return
+	}
 	stats, err := h.store.Statistics(c.Request.Context(), filter)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
@@ -279,7 +308,11 @@ func (h *Handler) Statistics(c *gin.Context) {
 }
 
 func (h *Handler) HistoryStatistics(c *gin.Context) {
-	stats, err := h.store.HistoryStatistics(c.Request.Context(), AlarmFilter{})
+	filter := AlarmFilter{}
+	if !h.applyVisibleGroups(c, &filter) {
+		return
+	}
+	stats, err := h.store.HistoryStatistics(c.Request.Context(), filter)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return

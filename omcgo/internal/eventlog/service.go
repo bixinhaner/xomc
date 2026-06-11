@@ -9,6 +9,8 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/authz"
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/device"
 )
 
@@ -24,10 +26,18 @@ import (
 type Service struct {
 	repo   Repository
 	logger *zap.Logger
+	// groupReader 是 #63 设备组可见性强制层的按设备归属读取器；GetByID 拿到记录后用它
+	// 校验记录归属设备是否在调用者可见组内。nil → dev/test 退化放行（authz nil-safe）。
+	groupReader authz.GroupReader
 }
 
 func NewService(repo Repository, logger *zap.Logger) *Service {
 	return &Service{repo: repo, logger: logger.Named("eventlog")}
+}
+
+// SetGroupReader 注入设备组归属读取器（#63 租户隔离强制层）。
+func (s *Service) SetGroupReader(reader authz.GroupReader) {
+	s.groupReader = reader
 }
 
 // RecordBootEvent 实现 device.BootEventRecorder 接口：把一次普通 1 BOOT 写入 event_logs。
@@ -84,8 +94,24 @@ func (s *Service) List(ctx context.Context, filter Filter) ([]*EventLog, int64, 
 }
 
 // GetByID 按 ID 获取单条事件日志。
-func (s *Service) GetByID(ctx context.Context, id uuid.UUID) (*EventLog, error) {
-	return s.repo.GetByID(ctx, id)
+// #63：拿到记录后按 visibleGroups 校验归属（记录存在但越权 → ErrForbidden）。
+func (s *Service) GetByID(ctx context.Context, id uuid.UUID, visibleGroups []uuid.UUID) (*EventLog, error) {
+	e, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if e == nil {
+		return nil, nil
+	}
+	if visibleGroups != nil && s.groupReader != nil {
+		if e.DeviceID == nil {
+			return nil, commonerrors.ErrForbidden
+		}
+		if authzErr := authz.AuthorizeDeviceAccess(ctx, s.groupReader, *e.DeviceID, visibleGroups); authzErr != nil {
+			return nil, authzErr
+		}
+	}
+	return e, nil
 }
 
 // StatByDevice 按设备聚合事件日志重启次数（跟随过滤条件，不分页）。

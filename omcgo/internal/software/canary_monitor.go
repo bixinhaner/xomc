@@ -43,10 +43,19 @@ type canaryRollbackTrigger interface {
 	TriggerCanaryFailureRollback(ctx context.Context, taskID uuid.UUID, reason string) error
 }
 
+// canarySuspender 是「阈值自动暂停真正止血」（#59 Problem 3）的窄契约：阈值越限时，
+// 除了把 canary StageStatus 标 Paused，还必须真正掐断在飞 / 待派发的子任务下发。
+// 由 SoftwareService.SuspendUpgrade 实现（取消执行 context + 翻 sub_task 状态）。
+// 可选：nil 时退化为旧行为（只标 StageStatus，不止血）——但生产装配始终注入。
+type canarySuspender interface {
+	SuspendUpgrade(ctx context.Context, taskID uuid.UUID) error
+}
+
 // CanaryMonitor periodically checks failure rates and auto-advance windows.
 type CanaryMonitor struct {
 	repo            canaryRepoView
 	rollbackTrigger canaryRollbackTrigger // optional; nil = auto-rollback disabled
+	suspender       canarySuspender       // optional; nil = threshold pause won't halt dispatch (#59)
 	metrics         *CanaryMetrics
 	logger          *zap.Logger
 
@@ -70,6 +79,13 @@ func NewCanaryMonitor(repo canaryRepoView, metrics *CanaryMetrics, logger *zap.L
 // Safe to call once at startup before Start().
 func (m *CanaryMonitor) SetRollbackTrigger(t canaryRollbackTrigger) {
 	m.rollbackTrigger = t
+}
+
+// SetSuspender wires the threshold-pause止血 callback（#59 Problem 3）。nil 退化为旧
+// 行为（阈值越限只标 StageStatus，不真正掐断下发）。生产装配始终注入 SoftwareService。
+// Safe to call once at startup before Start().
+func (m *CanaryMonitor) SetSuspender(s canarySuspender) {
+	m.suspender = s
 }
 
 // Start launches the cron schedule (every 1 min).
@@ -176,6 +192,22 @@ func (m *CanaryMonitor) evaluateOne(ctx context.Context, id uuid.UUID) error {
 		)
 		if err := m.repo.UpdateCanaryFields(ctx, id, fields); err != nil {
 			return err
+		}
+
+		// #59 Problem 3 紧急叫停：阈值越限不能只标 StageStatus=Paused（历史 bug——那只是
+		// 让 canary 阶段进度停下，待派发 / 在飞的子任务照样继续下发 Download）。这里真正
+		// 调 SuspendUpgrade 取消执行 context + 把 active sub_task 翻 Suspended，止住下发。
+		// best-effort：失败仅 error 日志，不阻断——StageStatus 已落 Paused，且后续 rollback
+		// （若 opt-in）独立运行；运维仍可手动 Suspend/Terminate 兜底。
+		if m.suspender != nil {
+			if err := m.suspender.SuspendUpgrade(ctx, id); err != nil {
+				m.logger.Error("canary threshold auto-suspend failed",
+					zap.String("task_id", id.String()),
+					zap.Error(err))
+			} else {
+				m.logger.Warn("canary threshold auto-suspend applied (dispatch halted)",
+					zap.String("task_id", id.String()))
+			}
 		}
 
 		// T-0021 auto-rollback (opt-in only). Pause already happened above —

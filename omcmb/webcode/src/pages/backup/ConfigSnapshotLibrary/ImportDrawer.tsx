@@ -12,10 +12,11 @@
  *   - 后端 ValidateImportFileName 权威校验（不可绕过）
  */
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Drawer, Empty, List, Space, Tag, Typography, Upload, message } from 'antd';
+import { Alert, Button, Drawer, Empty, Space, Tag, Typography, Upload, message } from 'antd';
 import {
   InboxOutlined, FileDoneOutlined, ExclamationCircleOutlined, DeleteOutlined, LoadingOutlined,
 } from '@ant-design/icons';
+import { MetaList, MetaListItem } from '@/components/common/MetaListItem';
 import { useT } from '@/hooks/useT';
 import {
   useImportConfigSnapshots,
@@ -251,6 +252,8 @@ export default function ImportDrawer({ open, onClose, onSuccess }: Props) {
             description={t('transfer.fileLib.import.empty')}
           />
         ) : (
+          // antd6 List/List.Item.Meta 已废弃：用 MetaList + MetaListItem 等价复刻
+          // （avatar + title/description + 右侧 actions），视觉与原 size=small 列表一致。
           <div
             style={{
               maxHeight: 420,
@@ -259,17 +262,49 @@ export default function ImportDrawer({ open, onClose, onSuccess }: Props) {
               borderRadius: 6,
             }}
           >
-          <List
-            size="small"
-            split
-            dataSource={files}
-            style={{ background: '#fff' }}
-            renderItem={(f) => {
+          <MetaList style={{ background: '#fff' }}>
+            {files.map((f, idx) => {
               const bad = isFileBad(f);
               const pending = f.snKnown === 'pending';
               return (
-                <List.Item
+                <MetaListItem
+                  key={f.fileName}
+                  last={idx === files.length - 1}
                   style={bad ? { background: '#fff1f0' } : undefined}
+                  avatar={
+                    pending ? <LoadingOutlined style={{ color: '#1677ff', fontSize: 18 }} />
+                      : bad ? <ExclamationCircleOutlined style={{ color: '#ff4d4f', fontSize: 18 }} />
+                      : <FileDoneOutlined style={{ color: '#52c41a', fontSize: 18 }} />
+                  }
+                  title={(
+                    <Space size={6} wrap>
+                      <span style={{ fontFamily: 'monospace', color: bad ? '#ff4d4f' : undefined }}>
+                        {f.fileName}
+                      </span>
+                      {f.valid && f.serialNumber && (
+                        <Tag color={f.snKnown === 'missing' ? 'red' : 'blue'}>
+                          SN: {f.serialNumber}
+                        </Tag>
+                      )}
+                      {f.valid && f.ext && <Tag color="geekblue">{f.ext.toUpperCase()}</Tag>}
+                      {f.snKnown === 'existing' && <Tag color="green">{t('transfer.fileLib.import.deviceRegistered')}</Tag>}
+                      {f.snKnown === 'missing' && <Tag color="red">{t('transfer.fileLib.import.deviceMissing')}</Tag>}
+                      {pending && <Tag color="processing">{t('transfer.fileLib.import.deviceChecking')}</Tag>}
+                    </Space>
+                  )}
+                  description={(
+                    !f.valid ? (
+                      <Typography.Text type="danger">{f.reason}</Typography.Text>
+                    ) : f.snKnown === 'missing' ? (
+                      <Typography.Text type="danger">
+                        {t('transfer.fileLib.import.snNotFound', { sn: f.serialNumber ?? '' })}
+                      </Typography.Text>
+                    ) : (
+                      <Typography.Text type="secondary">
+                        {(f.rawFile.size / 1024).toFixed(1)} KB
+                      </Typography.Text>
+                    )
+                  )}
                   actions={[
                     <Button
                       key="rm"
@@ -282,47 +317,10 @@ export default function ImportDrawer({ open, onClose, onSuccess }: Props) {
                       {t('transfer.fileLib.import.remove')}
                     </Button>,
                   ]}
-                >
-                  <List.Item.Meta
-                    avatar={
-                      pending ? <LoadingOutlined style={{ color: '#1677ff', fontSize: 18 }} />
-                        : bad ? <ExclamationCircleOutlined style={{ color: '#ff4d4f', fontSize: 18 }} />
-                        : <FileDoneOutlined style={{ color: '#52c41a', fontSize: 18 }} />
-                    }
-                    title={(
-                      <Space size={6} wrap>
-                        <span style={{ fontFamily: 'monospace', color: bad ? '#ff4d4f' : undefined }}>
-                          {f.fileName}
-                        </span>
-                        {f.valid && f.serialNumber && (
-                          <Tag color={f.snKnown === 'missing' ? 'red' : 'blue'}>
-                            SN: {f.serialNumber}
-                          </Tag>
-                        )}
-                        {f.valid && f.ext && <Tag color="geekblue">{f.ext.toUpperCase()}</Tag>}
-                        {f.snKnown === 'existing' && <Tag color="green">{t('transfer.fileLib.import.deviceRegistered')}</Tag>}
-                        {f.snKnown === 'missing' && <Tag color="red">{t('transfer.fileLib.import.deviceMissing')}</Tag>}
-                        {pending && <Tag color="processing">{t('transfer.fileLib.import.deviceChecking')}</Tag>}
-                      </Space>
-                    )}
-                    description={(
-                      !f.valid ? (
-                        <Typography.Text type="danger">{f.reason}</Typography.Text>
-                      ) : f.snKnown === 'missing' ? (
-                        <Typography.Text type="danger">
-                          {t('transfer.fileLib.import.snNotFound', { sn: f.serialNumber ?? '' })}
-                        </Typography.Text>
-                      ) : (
-                        <Typography.Text type="secondary">
-                          {(f.rawFile.size / 1024).toFixed(1)} KB
-                        </Typography.Text>
-                      )
-                    )}
-                  />
-                </List.Item>
+                />
               );
-            }}
-          />
+            })}
+          </MetaList>
           </div>
         )}
       </div>
@@ -336,30 +334,30 @@ export default function ImportDrawer({ open, onClose, onSuccess }: Props) {
             message={t('transfer.fileLib.import.resultSummary', { succeeded: submitResult.succeeded.length, failed: submitResult.failed.length })}
           />
           {submitResult.failed.length > 0 && (
-            <List
+            // antd6 List 已废弃：MetaList(bordered+header) + MetaListItem 等价复刻。
+            <MetaList
+              bordered
+              header={<Typography.Text strong>{t('transfer.fileLib.import.failureDetails')}</Typography.Text>}
               style={{
                 marginTop: 8,
                 maxHeight: 280,
                 overflowY: 'auto',
               }}
-              size="small"
-              bordered
-              header={<Typography.Text strong>{t('transfer.fileLib.import.failureDetails')}</Typography.Text>}
-              dataSource={submitResult.failed}
-              renderItem={(f) => (
-                <List.Item>
-                  <List.Item.Meta
-                    title={(
-                      <Space size={6}>
-                        <span style={{ fontFamily: 'monospace' }}>{f.fileName}</span>
-                        <Tag color="red">{f.errorCode}</Tag>
-                      </Space>
-                    )}
-                    description={<Typography.Text type="danger">{f.message}</Typography.Text>}
-                  />
-                </List.Item>
-              )}
-            />
+            >
+              {submitResult.failed.map((f, idx) => (
+                <MetaListItem
+                  key={f.fileName}
+                  last={idx === submitResult.failed.length - 1}
+                  title={(
+                    <Space size={6}>
+                      <span style={{ fontFamily: 'monospace' }}>{f.fileName}</span>
+                      <Tag color="red">{f.errorCode}</Tag>
+                    </Space>
+                  )}
+                  description={<Typography.Text type="danger">{f.message}</Typography.Text>}
+                />
+              ))}
+            </MetaList>
           )}
         </div>
       )}

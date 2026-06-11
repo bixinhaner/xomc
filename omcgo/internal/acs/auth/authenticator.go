@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/md5"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -8,10 +9,10 @@ import (
 	"hash"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 )
 
 // digestAlgorithm represents a supported Digest Auth hash algorithm.
@@ -68,39 +69,32 @@ func (a *BasicAuthenticator) Challenge(w http.ResponseWriter) {
 const nonceTTL = 5 * time.Minute
 
 // DigestAuthenticator implements HTTP Digest authentication.
+//
+// nonce 的存取委托给 NonceStore（issue #65 Option B）：单实例 / 测试用进程内实现，
+// 多实例横扩用 Redis 实现，使 Challenge 与 Authenticate 可落在不同实例。
 type DigestAuthenticator struct {
 	Username string
 	Password string
 	realm    string
-	mu       sync.Mutex
-	nonces   map[string]time.Time
+	nonces   NonceStore
 }
 
-// NewDigestAuthenticator creates a Digest auth handler.
+// NewDigestAuthenticator creates a Digest auth handler with an in-process nonce store.
+// 用于单实例部署 / 测试；多实例横扩请用 NewDigestAuthenticatorWithStore 注入 Redis store。
 func NewDigestAuthenticator(username, password string) *DigestAuthenticator {
-	da := &DigestAuthenticator{
+	return NewDigestAuthenticatorWithStore(username, password, NewMemoryNonceStore(nonceTTL))
+}
+
+// NewDigestAuthenticatorWithStore creates a Digest auth handler with a custom NonceStore.
+func NewDigestAuthenticatorWithStore(username, password string, store NonceStore) *DigestAuthenticator {
+	if store == nil {
+		store = NewMemoryNonceStore(nonceTTL)
+	}
+	return &DigestAuthenticator{
 		Username: username,
 		Password: password,
 		realm:    "ACS",
-		nonces:   make(map[string]time.Time),
-	}
-	go da.cleanupLoop()
-	return da
-}
-
-// cleanupLoop periodically removes expired nonces.
-func (a *DigestAuthenticator) cleanupLoop() {
-	ticker := time.NewTicker(1 * time.Minute)
-	defer ticker.Stop()
-	for range ticker.C {
-		a.mu.Lock()
-		now := time.Now()
-		for nonce, created := range a.nonces {
-			if now.Sub(created) > nonceTTL {
-				delete(a.nonces, nonce)
-			}
-		}
-		a.mu.Unlock()
+		nonces:   store,
 	}
 }
 
@@ -119,14 +113,8 @@ func (a *DigestAuthenticator) Authenticate(r *http.Request) (*DeviceIdentity, er
 	cnonce := params["cnonce"]
 	qop := params["qop"]
 
-	a.mu.Lock()
-	created, exists := a.nonces[nonce]
-	if exists {
-		delete(a.nonces, nonce)
-	}
-	a.mu.Unlock()
-
-	if !exists || time.Since(created) > nonceTTL {
+	// 原子消费 nonce（一次性）：命中即有效，未命中表示不存在 / 已过期 / 已被用过。
+	if !a.nonces.Consume(r.Context(), nonce) {
 		return nil, fmt.Errorf("invalid or expired nonce")
 	}
 
@@ -154,9 +142,9 @@ func (a *DigestAuthenticator) Authenticate(r *http.Request) (*DeviceIdentity, er
 
 func (a *DigestAuthenticator) Challenge(w http.ResponseWriter) {
 	nonce := uuid.New().String()
-	a.mu.Lock()
-	a.nonces[nonce] = time.Now()
-	a.mu.Unlock()
+	// Challenge 不在 http.Request 上下文中（仅 ResponseWriter），用 Background。
+	// nonce 写入是亚毫秒级 Redis SET，不阻塞响应。
+	a.nonces.Store(context.Background(), nonce)
 	// Offer SHA-256 (preferred) and MD5 (fallback) per RFC 7616.
 	// Each algorithm gets its own WWW-Authenticate header so the CPE can pick one.
 	w.Header().Add("WWW-Authenticate",
@@ -210,11 +198,22 @@ func parseDigestAuth(s string) map[string]string {
 }
 
 // NewAuthenticator creates an authenticator based on the configured mode.
+// 使用进程内 nonce store（单实例 / 测试）。多实例横扩用 NewAuthenticatorWithRedis。
 func NewAuthenticator(mode, username, password string) DeviceAuthenticator {
+	return NewAuthenticatorWithRedis(mode, username, password, nil)
+}
+
+// NewAuthenticatorWithRedis creates an authenticator, using a Redis-backed nonce
+// store for the digest mode when rdb != nil（issue #65 Option B：多实例横扩共享 nonce）。
+// rdb == nil 时退化为进程内 nonce store，单实例行为不变。
+func NewAuthenticatorWithRedis(mode, username, password string, rdb redis.UniversalClient) DeviceAuthenticator {
 	switch mode {
 	case "basic":
 		return &BasicAuthenticator{Username: username, Password: password}
 	case "digest":
+		if rdb != nil {
+			return NewDigestAuthenticatorWithStore(username, password, NewRedisNonceStore(rdb, nonceTTL))
+		}
 		return NewDigestAuthenticator(username, password)
 	default:
 		return &NoopAuthenticator{}

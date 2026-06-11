@@ -53,15 +53,6 @@ type connSessionEntry struct {
 	CreatedAt time.Time
 }
 
-// deviceSessionEntry 跟踪设备的活跃会话。
-// 用于检测和清理孤儿会话：当新 Inform 到达但前一个会话尚未完成时
-// （如 CPE 未响应 RPC、会话中途重启、或周期上报定时器触发），清理旧会话。
-type deviceSessionEntry struct {
-	SessionID string
-	DeviceSN  string
-	CreatedAt time.Time
-}
-
 // Handler 处理 TR069/CWMP HTTP 请求。
 type Handler struct {
 	sessionStore            SessionStore
@@ -70,7 +61,7 @@ type Handler struct {
 	authenticator           auth.DeviceAuthenticator
 	rpcDispatcher           *rpc.Dispatcher
 	rateLimiter             *DeviceRateLimiter
-	admission               *AdmissionController
+	admission               AdmissionController
 	metrics                 *ACSMetrics
 	logger                  *zap.Logger
 	requestIDPrefix         string                    // 请求 ID 前缀，如 "acs"
@@ -87,7 +78,10 @@ type Handler struct {
 	postSessionWakeCfg appconfig.PostSessionWakeConfig
 	redisClient        redis.Cmdable // 用于连续唤醒计数器
 	stunStore          *stun.Store   // 缓存 Inform 中的设备 STUN 地址
-	connReqURLCache    sync.Map      // deviceSN → ConnectionRequestURL（来自 Inform）
+	// connReqURLStore 共享存储设备的 ConnectionRequestURL（issue #65 Option B：取代进程内
+	// sync.Map）。nil 时退化为不缓存 CR URL —— postSessionWake 的 HTTP 回退拿到空 URL，
+	// 行为等价于改造前缓存 miss（STUN 设备不受影响）。
+	connReqURLStore ConnReqURLStore
 	// protocolLogger 独立的协议交互日志器，记录完整的原始 XML 请求/响应到专用文件。
 	// nil 表示协议日志关闭。
 	protocolLogger *zap.Logger
@@ -105,9 +99,11 @@ type Handler struct {
 	// connSessions 映射 HTTP RemoteAddr → connSessionEntry，用于连接级会话追踪。
 	// 条目在会话完成时或由后台清理器清除。
 	connSessions sync.Map
-	// deviceSessions 映射 deviceSN → *deviceSessionEntry，用于设备级会话追踪。
-	// 用于检测孤儿会话：当新 Inform 到达时，同一设备的已有会话会通过 completeSession() 清理。
-	deviceSessions sync.Map
+	// deviceSessionStore 共享存储设备 → 当前活跃 sessionID 指针（issue #65 Option B：
+	// 取代进程内 deviceSessions sync.Map）。用于跨实例孤儿会话检测：新 Inform 落在任一
+	// 实例都能读到设备上一个 sessionID 并清理。nil 时退化为不做跨实例孤儿检测（单实例
+	// 仍由 SessionStore TTL + 准入槽位 TTL 兜底，不泄漏）。
+	deviceSessionStore DeviceSessionStore
 }
 
 // sessionRPCLimitReached 判断会话是否已达到单会话 RPC 上限。
@@ -115,23 +111,26 @@ func (h *Handler) sessionRPCLimitReached(session *Session) bool {
 	return h.maxRPCPerSession > 0 && session.RPCCount >= h.maxRPCPerSession
 }
 
-// startSessionReaper 启动一个后台 goroutine，定期清理
-// connSessions 和 deviceSessions 映射表中的过期会话。
-// 对于 connSessions：释放准入槽位（admission slots）并减少指标计数。
-// 对于 deviceSessions：从 Redis 加载孤立会话，调用 completeSession()
-// （如果队列中仍有剩余命令，该调用会触发 postSessionWake），然后执行清理工作。
+// startSessionReaper 启动一个后台 goroutine，定期清理 connSessions 中的过期连接级会话。
+//
+// issue #65（Option B）后设备级孤儿会话不再靠本地映射 + reaper 清理：
+//   - 跨实例孤儿检测改在 handleInform 通过 deviceSessionStore.Swap 完成（新 Inform 落在
+//     任一实例都能读到并清理设备上一个会话）；
+//   - 准入槽位泄漏由准入 sorted set 的 TTL 过期分自愈回收（admitScript 的 ZREMRANGEBYSCORE）；
+//   - 会话数据由 SessionStore 的 Redis TTL（5min）自动过期。
+//
+// 连接级 connSessions 当前没有写入方（历史遗留 sync.Map），这里保留循环作为防御，
+// 实际为 no-op；释放准入槽位需 sessionID，连接级条目无 sessionID，故只更新指标。
 func (h *Handler) startSessionReaper(interval, maxAge time.Duration) {
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for range ticker.C {
 			now := time.Now()
-			// 清理过期的连接级会话。
 			h.connSessions.Range(func(key, value interface{}) bool {
 				entry := value.(connSessionEntry)
 				if now.Sub(entry.CreatedAt) > maxAge {
 					h.connSessions.Delete(key)
-					h.admission.Release()
 					h.metrics.ActiveSessions.Dec()
 					h.metrics.SessionDuration.Observe(now.Sub(entry.CreatedAt).Seconds())
 					h.logger.Warn("reaped stale conn session",
@@ -141,63 +140,48 @@ func (h *Handler) startSessionReaper(interval, maxAge time.Duration) {
 				}
 				return true
 			})
-			// 清理过期的设备级会话（孤儿会话）。
-			// 这是安全网：处理因 CPE 未响应 RPC 或会话中途重启而未完成的会话。
-			h.deviceSessions.Range(func(key, value interface{}) bool {
-				entry := value.(*deviceSessionEntry)
-				if now.Sub(entry.CreatedAt) > maxAge {
-					h.deviceSessions.Delete(key)
-					h.reapOrphanedSession(entry, "reaper")
-				}
-				return true
-			})
 		}
 	}()
 }
 
-// reapOrphanedSession 清理孤儿设备会话。
-// 从 Redis 加载会话（如果仍存在），调用 completeSession 释放资源并触发 postSessionWake。
+// reapOrphanedSession 清理孤儿设备会话（跨实例）：从共享 SessionStore 加载会话，
+// 若仍存在则 completeSession 释放资源并触发 postSessionWake；若已 TTL 过期则只释放
+// 准入槽位、更新指标并仍触发 postSessionWake（队列可能仍有命令）。
 //
-// MEDIUM-17：使用带 5s 超时的 ctx（不用裸 context.Background()）。reaper 在后台
-// goroutine 运行，进程优雅关机时 GracefulShutdown 已开始计时；若用无限期
-// Background ctx，sessionStore.GetByID / completeSession 中的 Redis 操作可能在
-// Redis 慢/不可达时无限阻塞，拖住关机并占住会话槽位回收。5s deadline 对齐
-// postSessionWake 里已有的 5s 模式（Redis 正常路径毫秒级完成，不受影响）。
-func (h *Handler) reapOrphanedSession(entry *deviceSessionEntry, reason string) {
+// MEDIUM-17：使用带 5s 超时的 ctx（不用裸 context.Background()），避免 Redis 慢/不可达
+// 时无限阻塞、拖住优雅关机。5s 对齐 postSessionWake 里已有的 5s 模式。
+func (h *Handler) reapOrphanedSession(deviceSN, sessionID, reason string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// 尝试从 Redis 加载会话，获取完整会话数据用于 completeSession。
-	session, err := h.sessionStore.GetByID(ctx, entry.SessionID)
+	// 尝试从共享 SessionStore 加载会话，获取完整会话数据用于 completeSession。
+	session, err := h.sessionStore.GetByID(ctx, sessionID)
 	if err != nil {
 		h.logger.Warn("reap orphaned session: failed to load from store",
-			zap.String("device_sn", entry.DeviceSN),
-			zap.String("session_id", entry.SessionID),
+			zap.String("device_sn", deviceSN),
+			zap.String("session_id", sessionID),
 			zap.String("reason", reason),
 			zap.Error(err))
 	}
 
 	if session != nil {
 		h.logger.Info("reap orphaned session: completing",
-			zap.String("device_sn", entry.DeviceSN),
-			zap.String("session_id", entry.SessionID),
+			zap.String("device_sn", deviceSN),
+			zap.String("session_id", sessionID),
 			zap.String("old_state", string(session.State)),
-			zap.Duration("age", time.Since(entry.CreatedAt)),
 			zap.String("reason", reason))
 		h.completeSession(ctx, session)
 	} else {
-		// 会话已在 Redis 中过期（TTL）。仍需释放准入槽位和更新指标。
+		// 会话已在共享存储中过期（TTL）。仍需释放该 sessionID 的准入槽位和更新指标。
 		h.logger.Info("reap orphaned session: session expired in store, releasing resources",
-			zap.String("device_sn", entry.DeviceSN),
-			zap.String("session_id", entry.SessionID),
-			zap.Duration("age", time.Since(entry.CreatedAt)),
+			zap.String("device_sn", deviceSN),
+			zap.String("session_id", sessionID),
 			zap.String("reason", reason))
-		h.admission.Release()
+		h.admission.Release(ctx, sessionID)
 		h.metrics.ActiveSessions.Dec()
-		h.metrics.SessionDuration.Observe(time.Since(entry.CreatedAt).Seconds())
 		// 仍触发 postSessionWake —— 即使会话已消失，设备队列中可能仍有待执行命令。
-		if h.connReqSender != nil && h.postSessionWakeCfg.Enabled && entry.DeviceSN != "" {
-			go h.postSessionWake(entry.DeviceSN)
+		if h.connReqSender != nil && h.postSessionWakeCfg.Enabled && deviceSN != "" {
+			go h.postSessionWake(deviceSN)
 		}
 	}
 }
@@ -397,21 +381,6 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 		return
 	}
 
-	// 清理该设备的孤儿会话（如果存在）。
-	// 当 CPE 在前一个会话仍挂起时发送新 Inform（如 CPE 未响应 RPC、重启或周期上报定时器触发），
-	// 旧会话永远不会完成。在此检测并清理，以：
-	// 1) 释放旧的准入槽位（防止槽位泄漏）
-	// 2) 触发 postSessionWake 处理队列中剩余命令
-	// 3) 保持 ActiveSessions 指标准确
-	if old, loaded := h.deviceSessions.LoadAndDelete(deviceSN); loaded {
-		oldEntry := old.(*deviceSessionEntry)
-		log.Info("cleaning orphaned session before new Inform",
-			zap.String("device_sn", deviceSN),
-			zap.String("old_session_id", oldEntry.SessionID),
-			zap.Duration("old_session_age", time.Since(oldEntry.CreatedAt)))
-		h.reapOrphanedSession(oldEntry, "new_inform")
-	}
-
 	// 僵死任务恢复（docs/消息队列全流程流转说明书.md §4.3.2）。
 	// CPE 重连即视为"在线信号"——把该设备上 status=sent 且 sent_at>5min 的任务
 	// 按 CanRetry() 重置 pending 重入队 / 或标记 failed；否则这些任务会因
@@ -424,11 +393,34 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 			zap.Error(err))
 	}
 
-	// 准入控制 —— 槽位持有直到会话完成（通过 completeSession）或后台清理器回收。
-	if !h.admission.Acquire() {
+	// 预生成新会话 ID —— 准入槽位以 sessionID 为成员（issue #65 Option B），
+	// 使 Acquire/Release 跨实例严格配对。
+	sessionID := generateSessionID()
+
+	// 准入控制 —— 全局 Redis 槽位，持有直到会话完成（completeSession）或 TTL 自愈回收。
+	// 在孤儿清理之前申请：若全局已满直接拒绝，不动设备会话指针，避免误清理后又被拒。
+	if !h.admission.Acquire(r.Context(), sessionID) {
 		log.Warn("admission denied", zap.String("device_sn", deviceSN))
 		http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
 		return
+	}
+
+	// 跨实例孤儿会话清理：把设备当前会话指针原子换成新 sessionID，拿回被顶替的旧 sessionID。
+	// 当 CPE 在前一个会话仍挂起时发送新 Inform（CPE 未响应 RPC、重启或周期上报定时器触发），
+	// 旧会话永不完成。新 Inform 落在任一实例都能读到旧 sessionID 并跨实例清理，以：
+	// 1) 释放旧的准入槽位（防止槽位泄漏）2) 触发 postSessionWake 处理剩余命令 3) 指标准确。
+	if h.deviceSessionStore != nil {
+		oldSessionID, swapErr := h.deviceSessionStore.Swap(r.Context(), deviceSN, sessionID)
+		if swapErr != nil {
+			log.Warn("device session swap failed (non-blocking)",
+				zap.String("device_sn", deviceSN), zap.Error(swapErr))
+		} else if oldSessionID != "" {
+			log.Info("cleaning orphaned session before new Inform",
+				zap.String("device_sn", deviceSN),
+				zap.String("old_session_id", oldSessionID),
+				zap.String("new_session_id", sessionID))
+			h.reapOrphanedSession(deviceSN, oldSessionID, "new_inform")
+		}
 	}
 
 	// 跟踪活跃会话 —— 将由 completeSession() 或清理器递减。
@@ -465,15 +457,22 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 			}
 		}
 		if strings.HasSuffix(p.Name, ".ConnectionRequestURL") && p.Value != "" {
-			h.connReqURLCache.Store(deviceSN, p.Value)
-			log.Debug("cached ConnectionRequestURL from Inform",
-				zap.String("device_sn", deviceSN),
-				zap.String("cr_url", p.Value))
+			if h.connReqURLStore != nil {
+				if err := h.connReqURLStore.Set(ctx, deviceSN, p.Value); err != nil {
+					log.Warn("cache ConnectionRequestURL from Inform",
+						zap.String("device_sn", deviceSN),
+						zap.String("cr_url", p.Value),
+						zap.Error(err))
+				} else {
+					log.Debug("cached ConnectionRequestURL from Inform",
+						zap.String("device_sn", deviceSN),
+						zap.String("cr_url", p.Value))
+				}
+			}
 		}
 	}
 
-	// 使用新 Session ID 创建/更新会话
-	sessionID := generateSessionID()
+	// 使用上面预生成的 Session ID 创建会话（准入槽位与设备会话指针已绑定该 ID）。
 	session := &Session{
 		ID:           sessionID,
 		DeviceSN:     deviceSN,
@@ -489,13 +488,7 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 	if err := h.sessionStore.CreateWithID(r.Context(), sessionID, session); err != nil {
 		log.Error("create session by id", zap.Error(err), zap.String("device_sn", deviceSN))
 	}
-
-	// 注册设备 → 会话映射，用于孤儿会话检测。
-	h.deviceSessions.Store(deviceSN, &deviceSessionEntry{
-		SessionID: sessionID,
-		DeviceSN:  deviceSN,
-		CreatedAt: time.Now(),
-	})
+	// 设备 → 会话指针已由上面的 deviceSessionStore.Swap 设置（用于跨实例孤儿会话检测）。
 
 	// 协议日志元数据
 	if entry := rpclog.EntryFromContext(r.Context()); entry != nil {
@@ -911,15 +904,16 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 // completeSession 完成 TR069 会话，释放所有相关资源。
 // 根据 Session.ID 删除 Redis 中的会话数据。
 func (h *Handler) completeSession(ctx context.Context, session *Session) {
-	// 释放准入槽位
-	h.admission.Release()
-
 	// 递减活跃会话计数
 	h.metrics.ActiveSessions.Dec()
 
 	if session == nil {
+		// 无会话上下文 → 无 sessionID，准入槽位无法配对释放（由 TTL 自愈回收）。
 		return
 	}
+
+	// 释放该 sessionID 的准入槽位（issue #65 Option B：槽位以 sessionID 为成员，配对释放）。
+	h.admission.Release(ctx, session.ID)
 
 	// 记录会话时长指标
 	duration := time.Since(session.StartedAt).Seconds()
@@ -934,13 +928,14 @@ func (h *Handler) completeSession(ctx context.Context, session *Session) {
 		h.sessionStore.DeleteByID(ctx, session.ID)
 	}
 
-	// 清除设备→会话映射。仅当映射的 SessionID 与当前 session 一致时才删除，
-	// 避免误删已被新 Inform 覆盖的映射。
-	if session.DeviceSN != "" && session.ID != "" {
-		if v, ok := h.deviceSessions.Load(session.DeviceSN); ok {
-			if entry := v.(*deviceSessionEntry); entry.SessionID == session.ID {
-				h.deviceSessions.Delete(session.DeviceSN)
-			}
+	// 清除设备→会话指针。CAS 删除：仅当共享存储中的指针仍等于当前 session.ID 时才删除，
+	// 避免误删已被新 Inform 覆盖的指针（issue #65 Option B）。
+	if h.deviceSessionStore != nil && session.DeviceSN != "" && session.ID != "" {
+		if err := h.deviceSessionStore.CompareAndDelete(ctx, session.DeviceSN, session.ID); err != nil {
+			h.logger.Warn("clear device session pointer failed (non-blocking)",
+				zap.String("device_sn", session.DeviceSN),
+				zap.String("session_id", session.ID),
+				zap.Error(err))
 		}
 	}
 
@@ -1028,16 +1023,21 @@ func (h *Handler) postSessionWake(deviceSN string) {
 		return
 	}
 
-	// 发送 Connection Request。
-	// 查找缓存的 ConnectionRequestURL 作为 HTTP 回退。
-	var httpURL string
-	if v, ok := h.connReqURLCache.Load(deviceSN); ok {
-		httpURL, _ = v.(string)
-	}
-
 	// 使用短超时，避免在不可达设备上阻塞。
 	crCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
+
+	// 从共享存储读取设备 ConnectionRequestURL 作为 HTTP 回退（issue #65 Option B：
+	// 取代进程内缓存，使非 Inform 实例上的续唤也能拿到 URL；纯 HTTP-CR 设备不再 miss）。
+	var httpURL string
+	if h.connReqURLStore != nil {
+		if u, err := h.connReqURLStore.Get(crCtx, deviceSN); err != nil {
+			h.logger.Warn("post-session wake: load connreq url failed",
+				zap.String("device_sn", deviceSN), zap.Error(err))
+		} else {
+			httpURL = u
+		}
+	}
 
 	if err := h.connReqSender.Send(crCtx, deviceSN, httpURL); err != nil {
 		h.logger.Warn("post-session wake: CR failed",

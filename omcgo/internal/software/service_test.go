@@ -220,10 +220,10 @@ func (m *svcMockDeviceRepo) ListActiveByLastInform(_ context.Context, _ *time.Ti
 func (m *svcMockDeviceRepo) ListGeo(_ context.Context, _ device.GeoDeviceFilter) ([]device.GeoDevice, int64, error) {
 	return nil, 0, nil
 }
-func (m *svcMockDeviceRepo) GetGeoStats(_ context.Context, _ []string) (*device.GeoStats, error) {
+func (m *svcMockDeviceRepo) GetGeoStats(_ context.Context, _ []string, _ []uuid.UUID) (*device.GeoStats, error) {
 	return &device.GeoStats{}, nil
 }
-func (m *svcMockDeviceRepo) SearchDevices(_ context.Context, _ string, _ int) ([]device.GeoDevice, error) {
+func (m *svcMockDeviceRepo) SearchDevices(_ context.Context, _ string, _ int, _ []uuid.UUID) ([]device.GeoDevice, error) {
 	return nil, nil
 }
 func (m *svcMockDeviceRepo) BatchDelete(_ context.Context, _ []uuid.UUID, _ string) (int64, error) {
@@ -1164,6 +1164,11 @@ func TestService_RollbackDevices_TargetFirmwareMatrix(t *testing.T) {
 				CreateUser:       "admin",
 				Source:           tt.source,
 				TargetFirmwareID: tt.targetID,
+				// #59 Problem 4：本矩阵的目标版本（V2.5.7/V1.9.0）相对设备当前 V3.0.0 是
+				// 降级，新防降级守卫默认会拦。这里测的是 DestVersion/target 的字段透传，
+				// 非降级策略本身，故显式 Force=true 绕过守卫（降级守卫单测见 version_test.go
+				// 与 TestService_RollbackDevices_DowngradeGuard）。
+				Force: true,
 			}
 			_, err := svc.RollbackDevices(context.Background(), req)
 			if tt.expectErr {

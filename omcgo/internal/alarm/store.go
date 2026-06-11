@@ -31,6 +31,8 @@ type AlarmFilter struct {
 	// 数据权限
 	DeviceIDs      []uuid.UUID        `form:"-"`
 	Technologies   []string           `form:"-"`
+	// VisibleGroups #64 设备组可见性过滤（fail-closed 三态：nil=超管不限 / 空非nil=无权限空集 / 非空=限定）。
+	VisibleGroups  []uuid.UUID        `form:"-"`
 }
 
 // AlarmStatistics contains aggregated alarm metrics.

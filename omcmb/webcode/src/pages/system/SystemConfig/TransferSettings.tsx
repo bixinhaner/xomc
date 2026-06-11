@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
-import { Card, Form, Input, InputNumber, Space, Typography } from 'antd';
+import { Card, Form, Input, Space, Typography } from 'antd';
+import { AddonInput, AddonInputNumber } from '@/components/common/InputAddon';
 import { useT } from '@/hooks/useT';
 
 interface TransferSettingsProps {
@@ -113,7 +114,9 @@ export default function TransferSettings({ form }: TransferSettingsProps) {
 						},
 					]}
 				>
-					<Input addonBefore={FIXED_PROTOCOL} addonAfter={`:${FIXED_PORT}`} placeholder={DEFAULT_HOST} />
+					{/* antd6 addonBefore/addonAfter 已废弃：受控 AddonInput（Space.Compact +
+					    InputAddon）复刻 http:// 前缀 + :8080 后缀盒子，保留 Form.Item 受控绑定。 */}
+					<AddonInput addonBefore={FIXED_PROTOCOL} addonAfter={`:${FIXED_PORT}`} placeholder={DEFAULT_HOST} />
 				</Form.Item>
 
 				{/* 设备最终拿到的完整地址预览（只读） */}
@@ -146,7 +149,8 @@ export default function TransferSettings({ form }: TransferSettingsProps) {
 						label={t('system.transfer.uploadMaxFileSize')}
 						extra={t('system.transfer.uploadMaxFileSizeHelp')}
 					>
-						<InputNumber min={0} precision={0} style={{ width: '100%' }} addonAfter="bytes" />
+						{/* antd6 addonAfter 已废弃：受控 AddonInputNumber 复刻 "bytes" 后缀盒子。 */}
+						<AddonInputNumber addonAfter="bytes" min={0} precision={0} style={{ width: '100%' }} />
 					</Form.Item>
 				</Space>
 			</Card>

@@ -17,14 +17,14 @@ import (
 // inject mocks in unit tests without coupling to the concrete runner type.
 type CaseRunner interface {
 	ListTestCases() map[TestCategory][]TestCase
-	RunAll(ctx context.Context, deviceSN string) ([]TestResult, error)
-	RunByCategory(ctx context.Context, deviceSN string, category TestCategory) ([]TestResult, error)
+	RunAll(ctx context.Context, deviceSN string, visibleGroups []uuid.UUID) ([]TestResult, error)
+	RunByCategory(ctx context.Context, deviceSN string, category TestCategory, visibleGroups []uuid.UUID) ([]TestResult, error)
 }
 
 // ModelValidator abstracts the data-model validation surface. DataModelValidator
 // satisfies this interface.
 type ModelValidator interface {
-	ValidateDevice(ctx context.Context, deviceID uuid.UUID, carrier model.CarrierCode, tech model.Technology) (*ValidationReport, error)
+	ValidateDevice(ctx context.Context, deviceID uuid.UUID, carrier model.CarrierCode, tech model.Technology, visibleGroups []uuid.UUID) (*ValidationReport, error)
 }
 
 // InteropService is the high-level facade that the rest of the application
@@ -38,11 +38,13 @@ type ModelValidator interface {
 //   - RunByCategory executes a single category (validates the category first).
 //   - ValidateDevice produces a data-model conformance report.
 //   - Summarize collapses a list of TestResult into a RunSummary.
+// 所有按设备执行的方法都透传 visibleGroups（#63 设备组可见性强制层三态契约见 authz 包），
+// 由底层 runner / validator 在解析设备后做归属校验。
 type InteropService interface {
 	ListCases(ctx context.Context) map[TestCategory][]TestCase
-	RunCases(ctx context.Context, deviceSN string, categories []TestCategory) (RunSummary, error)
-	RunByCategory(ctx context.Context, deviceSN string, category TestCategory) (RunSummary, error)
-	ValidateDevice(ctx context.Context, deviceID uuid.UUID, carrier model.CarrierCode, tech model.Technology) (*ValidationReport, error)
+	RunCases(ctx context.Context, deviceSN string, categories []TestCategory, visibleGroups []uuid.UUID) (RunSummary, error)
+	RunByCategory(ctx context.Context, deviceSN string, category TestCategory, visibleGroups []uuid.UUID) (RunSummary, error)
+	ValidateDevice(ctx context.Context, deviceID uuid.UUID, carrier model.CarrierCode, tech model.Technology, visibleGroups []uuid.UUID) (*ValidationReport, error)
 }
 
 // RunSummary aggregates the outcome of a multi-case run.
@@ -90,7 +92,7 @@ func (s *service) ListCases(_ context.Context) map[TestCategory][]TestCase {
 
 // RunCases executes the requested categories (or all when empty) and returns
 // an aggregated summary.
-func (s *service) RunCases(ctx context.Context, deviceSN string, categories []TestCategory) (RunSummary, error) {
+func (s *service) RunCases(ctx context.Context, deviceSN string, categories []TestCategory, visibleGroups []uuid.UUID) (RunSummary, error) {
 	if deviceSN == "" {
 		return RunSummary{}, fmt.Errorf("interop: device_sn is required")
 	}
@@ -100,7 +102,7 @@ func (s *service) RunCases(ctx context.Context, deviceSN string, categories []Te
 
 	var results []TestResult
 	if len(categories) == 0 {
-		all, err := s.runner.RunAll(ctx, deviceSN)
+		all, err := s.runner.RunAll(ctx, deviceSN, visibleGroups)
 		if err != nil {
 			return RunSummary{}, fmt.Errorf("run all interop cases: %w", err)
 		}
@@ -113,7 +115,7 @@ func (s *service) RunCases(ctx context.Context, deviceSN string, categories []Te
 			}
 		}
 		for _, cat := range categories {
-			catResults, err := s.runner.RunByCategory(ctx, deviceSN, cat)
+			catResults, err := s.runner.RunByCategory(ctx, deviceSN, cat, visibleGroups)
 			if err != nil {
 				return RunSummary{}, fmt.Errorf("run interop category %s: %w", cat, err)
 			}
@@ -132,7 +134,7 @@ func (s *service) RunCases(ctx context.Context, deviceSN string, categories []Te
 }
 
 // RunByCategory executes a single category against a device.
-func (s *service) RunByCategory(ctx context.Context, deviceSN string, category TestCategory) (RunSummary, error) {
+func (s *service) RunByCategory(ctx context.Context, deviceSN string, category TestCategory, visibleGroups []uuid.UUID) (RunSummary, error) {
 	if deviceSN == "" {
 		return RunSummary{}, fmt.Errorf("interop: device_sn is required")
 	}
@@ -143,7 +145,7 @@ func (s *service) RunByCategory(ctx context.Context, deviceSN string, category T
 		return RunSummary{}, fmt.Errorf("interop: case runner not configured")
 	}
 
-	results, err := s.runner.RunByCategory(ctx, deviceSN, category)
+	results, err := s.runner.RunByCategory(ctx, deviceSN, category, visibleGroups)
 	if err != nil {
 		return RunSummary{}, fmt.Errorf("run interop category %s: %w", category, err)
 	}
@@ -151,7 +153,7 @@ func (s *service) RunByCategory(ctx context.Context, deviceSN string, category T
 }
 
 // ValidateDevice forwards to the underlying ModelValidator.
-func (s *service) ValidateDevice(ctx context.Context, deviceID uuid.UUID, carrier model.CarrierCode, tech model.Technology) (*ValidationReport, error) {
+func (s *service) ValidateDevice(ctx context.Context, deviceID uuid.UUID, carrier model.CarrierCode, tech model.Technology, visibleGroups []uuid.UUID) (*ValidationReport, error) {
 	if s.validator == nil {
 		return nil, fmt.Errorf("interop: model validator not configured")
 	}
@@ -161,7 +163,7 @@ func (s *service) ValidateDevice(ctx context.Context, deviceID uuid.UUID, carrie
 	if !tech.IsValid() {
 		return nil, fmt.Errorf("interop: invalid technology %q", tech)
 	}
-	report, err := s.validator.ValidateDevice(ctx, deviceID, carrier, tech)
+	report, err := s.validator.ValidateDevice(ctx, deviceID, carrier, tech, visibleGroups)
 	if err != nil {
 		return nil, fmt.Errorf("validate device %s: %w", deviceID, err)
 	}

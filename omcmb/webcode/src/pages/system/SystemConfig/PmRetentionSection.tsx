@@ -9,11 +9,12 @@
 // 早上挂载步骤：在 index.tsx 适当位置加 `<PmRetentionSection />` 即可。
 
 import { useEffect, useMemo, useState } from 'react';
-import { Button, Card, Form, InputNumber, message, Space, Spin } from 'antd';
+import { Button, Card, Form, message, Space, Spin } from 'antd';
 import {
   useSysConfigsByCategory,
   useBatchUpdateSysConfigs,
 } from '@core/hooks/api/useSystem';
+import { AddonInputNumber } from '@/components/common/InputAddon';
 import { useT } from '@/hooks/useT';
 
 // 与后端 internal/pm/retention/policies.go 的 PolicyKey 严格对齐。
@@ -142,12 +143,15 @@ export default function PmRetentionSection() {
               ]}
               style={{ marginBottom: 12, maxWidth: 320 }}
             >
-              <InputNumber
+              {/* antd6 addonAfter 已废弃：改用受控 AddonInputNumber（Space.Compact +
+                  InputAddon）复刻"天"后缀盒子，保留 Form.Item 受控绑定。 */}
+              <AddonInputNumber
+                addonAfter={t('pmRetention.unit.days')}
+                compactStyle={{ width: 'auto' }}
                 min={MIN_DAYS}
                 max={MAX_DAYS}
                 step={1}
                 style={{ width: 200 }}
-                addonAfter={t('pmRetention.unit.days')}
               />
             </Form.Item>
           ))}

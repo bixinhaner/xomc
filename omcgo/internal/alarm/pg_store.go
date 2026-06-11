@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/omcgo/omcgo/internal/authz"
 	appcontext "github.com/omcgo/omcgo/internal/core/context"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
@@ -518,6 +519,8 @@ func applyActiveFilters(qb squirrel.SelectBuilder, f AlarmFilter) squirrel.Selec
 	if len(f.DeviceIDs) > 0 {
 		qb = qb.Where(squirrel.Eq{"alarms_active.device_id": f.DeviceIDs})
 	}
+	// #64 设备组可见性 fail-closed 过滤（统一强制层）。
+	qb = authz.ApplyDeviceVisibilityFilter(qb, "alarms_active.device_id", f.VisibleGroups)
 	return qb
 }
 
@@ -556,6 +559,8 @@ func applyHistoryFilters(qb squirrel.SelectBuilder, f AlarmFilter) squirrel.Sele
 			squirrel.Like{"alarms_history.description": kw},
 		})
 	}
+	// #64 设备组可见性 fail-closed 过滤（统一强制层）。
+	qb = authz.ApplyDeviceVisibilityFilter(qb, "alarms_history.device_id", f.VisibleGroups)
 	return qb
 }
 

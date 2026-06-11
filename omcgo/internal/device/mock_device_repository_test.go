@@ -205,18 +205,18 @@ func (mr *MockDeviceRepositoryMockRecorder) GetBySerialNumber(ctx, sn any) *gomo
 }
 
 // GetGeoStats mocks base method.
-func (m *MockDeviceRepository) GetGeoStats(ctx context.Context, groupIDs []string) (*GeoStats, error) {
+func (m *MockDeviceRepository) GetGeoStats(ctx context.Context, groupIDs []string, visibleGroups []uuid.UUID) (*GeoStats, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetGeoStats", ctx, groupIDs)
+	ret := m.ctrl.Call(m, "GetGeoStats", ctx, groupIDs, visibleGroups)
 	ret0, _ := ret[0].(*GeoStats)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // GetGeoStats indicates an expected call of GetGeoStats.
-func (mr *MockDeviceRepositoryMockRecorder) GetGeoStats(ctx, groupIDs any) *gomock.Call {
+func (mr *MockDeviceRepositoryMockRecorder) GetGeoStats(ctx, groupIDs, visibleGroups any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetGeoStats", reflect.TypeOf((*MockDeviceRepository)(nil).GetGeoStats), ctx, groupIDs)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetGeoStats", reflect.TypeOf((*MockDeviceRepository)(nil).GetGeoStats), ctx, groupIDs, visibleGroups)
 }
 
 // List mocks base method.
@@ -311,18 +311,18 @@ func (mr *MockDeviceRepositoryMockRecorder) RestoreDevices(ctx, ids any) *gomock
 }
 
 // SearchDevices mocks base method.
-func (m *MockDeviceRepository) SearchDevices(ctx context.Context, keyword string, limit int) ([]GeoDevice, error) {
+func (m *MockDeviceRepository) SearchDevices(ctx context.Context, keyword string, limit int, visibleGroups []uuid.UUID) ([]GeoDevice, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "SearchDevices", ctx, keyword, limit)
+	ret := m.ctrl.Call(m, "SearchDevices", ctx, keyword, limit, visibleGroups)
 	ret0, _ := ret[0].([]GeoDevice)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // SearchDevices indicates an expected call of SearchDevices.
-func (mr *MockDeviceRepositoryMockRecorder) SearchDevices(ctx, keyword, limit any) *gomock.Call {
+func (mr *MockDeviceRepositoryMockRecorder) SearchDevices(ctx, keyword, limit, visibleGroups any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SearchDevices", reflect.TypeOf((*MockDeviceRepository)(nil).SearchDevices), ctx, keyword, limit)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SearchDevices", reflect.TypeOf((*MockDeviceRepository)(nil).SearchDevices), ctx, keyword, limit, visibleGroups)
 }
 
 // Update mocks base method.

@@ -32,25 +32,31 @@ type ACSServer struct {
 
 // ServerDeps holds the dependencies for the ACS server.
 type ServerDeps struct {
-	SessionStore            SessionStore
-	TaskService             *task.TaskService
-	EventBus                event.EventBus
-	Authenticator           auth.DeviceAuthenticator
-	RPCDispatcher           *rpc.Dispatcher
-	RateLimiter             *DeviceRateLimiter
-	Admission               *AdmissionController
-	Metrics                 *ACSMetrics
-	UploadHandler           *upload.Handler                 // CPE file upload handler (supports query params and path-based token)
-	UploadConfig            *appconfig.UploadConfig         // upload server configuration for generating upload URLs
-	DownloadHandler         *download.Handler               // CPE file download handler (MinIO → CPE proxy)
-	DownloadConfig          *appconfig.DownloadConfig       // download server configuration for generating download URLs
-	TransferConfigProvider  transfercfg.Provider            // runtime-overridable transfer endpoint settings
-	ConnReqSender           ConnectionRequester             // post-session wake: send CR when queue not empty
-	PostSessionWakeCfg      appconfig.PostSessionWakeConfig // post-session wake configuration
-	RedisClient             redis.Cmdable               // Redis client for continuous wake counter
-	StunStore               *stun.Store                 // STUN address cache (shared with STUN server)
-	ProtocolLogger          *zap.Logger                 // dedicated logger for protocol XML (nil = disabled)
-	MaxBodySize             int                         // XML truncation threshold for protocol log (0 = no truncation)
+	SessionStore  SessionStore
+	TaskService   *task.TaskService
+	EventBus      event.EventBus
+	Authenticator auth.DeviceAuthenticator
+	RPCDispatcher *rpc.Dispatcher
+	RateLimiter   *DeviceRateLimiter
+	Admission     AdmissionController
+	Metrics       *ACSMetrics
+	// DeviceSessionStore 跨实例设备→会话指针存储（issue #65 Option B）。nil 时退化为
+	// 不做跨实例孤儿会话检测（单实例由 SessionStore TTL + 准入槽位 TTL 兜底）。
+	DeviceSessionStore DeviceSessionStore
+	// ConnReqURLStore 跨实例 ConnectionRequestURL 共享存储（issue #65 Option B）。
+	// nil 时 postSessionWake 的 HTTP 回退拿到空 URL（等价改造前缓存 miss，STUN 设备不受影响）。
+	ConnReqURLStore        ConnReqURLStore
+	UploadHandler          *upload.Handler                 // CPE file upload handler (supports query params and path-based token)
+	UploadConfig           *appconfig.UploadConfig         // upload server configuration for generating upload URLs
+	DownloadHandler        *download.Handler               // CPE file download handler (MinIO → CPE proxy)
+	DownloadConfig         *appconfig.DownloadConfig       // download server configuration for generating download URLs
+	TransferConfigProvider transfercfg.Provider            // runtime-overridable transfer endpoint settings
+	ConnReqSender          ConnectionRequester             // post-session wake: send CR when queue not empty
+	PostSessionWakeCfg     appconfig.PostSessionWakeConfig // post-session wake configuration
+	RedisClient            redis.Cmdable                   // Redis client for continuous wake counter
+	StunStore              *stun.Store                     // STUN address cache (shared with STUN server)
+	ProtocolLogger         *zap.Logger                     // dedicated logger for protocol XML (nil = disabled)
+	MaxBodySize            int                             // XML truncation threshold for protocol log (0 = no truncation)
 	// T-0137 / M1: TR069 报文跟踪。两个都为 nil 表示跟踪关闭。
 	TraceWhitelist *trace.WhitelistCache
 	TraceService   *trace.Service
@@ -76,6 +82,8 @@ func NewACSServer(cfg appconfig.ACSConfig, deps ServerDeps) *ACSServer {
 		rpcDispatcher:           deps.RPCDispatcher,
 		rateLimiter:             deps.RateLimiter,
 		admission:               deps.Admission,
+		deviceSessionStore:      deps.DeviceSessionStore,
+		connReqURLStore:         deps.ConnReqURLStore,
 		metrics:                 deps.Metrics,
 		logger:                  deps.Logger,
 		requestIDPrefix:         deps.RequestIDPrefix,

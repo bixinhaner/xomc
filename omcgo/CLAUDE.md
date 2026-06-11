@@ -148,6 +148,10 @@ acs:task:{taskID}                    — 任务详情 Hash（TTL 24h）
 acs:cwmp2task:{hash}                 — CWMP ID → Task ID 映射（TTL 24h）
 acs:heartbeat:{device_serial}        — 心跳时间戳（TTL = 2×inform_interval）
 acs:connreq:pending:{device_serial}  — Connection Request 去重（TTL 30 秒）
+acs:admission:slots                  — 全局准入 Sorted Set（member=sessionID, score=过期 unix 秒；TTL 自愈丢失的 Release）（issue #65 Option B）
+acs:device:session:{device_serial}   — 设备当前活跃 sessionID 指针（STRING+TTL，跨实例孤儿会话清理）（issue #65 Option B）
+acs:connreq:url:{device_serial}      — Inform 上报的 ConnectionRequestURL（STRING+TTL，HTTP 唤醒回退，镜像 acs:stun）（issue #65 Option B）
+acs:auth:nonce:{nonce}               — Digest 一次性 nonce（SETEX 写 + GETDEL 消费，TTL 5min）（issue #65 Option B）
 parammodel:default:{paramModelID}                  — ParamRegistry default mapping 缓存（TTL 24h）
 parammodel:discovered:{productID}:{swVersion}      — ParamRegistry discovered mapping 缓存（TTL 1h）
 product:byProductClass:{productClass}              — ProductRegistry 路由结果缓存（TTL 1h）
@@ -157,6 +161,8 @@ ratelimit:inform:{device_serial}     — 限流计数器
 ```
 
 **流量控制**：每设备限流器（`rate.Limiter`）防 Inform 洪泛；全局准入控制器（`AdmissionController`）限并发会话数；PM/MR 文件处理用 WorkerPool 控并发。
+
+> **ACS 横扩去进程态（issue #65 / ADR 0005）**：ACS 4 类会话副作用状态（准入计数 / 设备孤儿会话指针 / ConnectionRequestURL / Digest nonce）已从进程内 sync.Map/atomic 迁到共享 Redis（键见上表 4 条 issue #65 标注）。`AdmissionController`/`DeviceSessionStore`/`ConnReqURLStore`/`auth.NonceStore` 均接口优先 + local/redis 双实现；`cmd/acs/main.go` 在 `inf.Redis != nil` 时注入 Redis 实现。准入用 Sorted Set + 单条 Lua（Acquire/Release 以 sessionID 配对，TTL 自愈），故全局上限真正全局、Challenge/Authenticate 可跨实例、孤儿会话任意实例可清理。**nginx/k8s 不再需要会话亲和（sticky session）**。准入 Redis 错误 fail-closed（503）。
 
 ### 4.3 参数模型字典（T-0098）
 

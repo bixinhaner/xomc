@@ -606,8 +606,8 @@ func (s *SnapshotService) BatchDelete(
 // 5) helpers
 // ─────────────────────────────────────────────────────────────────────────
 
-// applyDeviceFields 在 Upsert 之前把 enb_name / product_type 填进快照行。
-// deviceLookup=nil 或查询失败时静默跳过 —— 这两个列允许为 NULL。
+// applyDeviceFields 在 Upsert 之前把 enb_name / product_type / source_version
+// 填进快照行。deviceLookup=nil 或查询失败时静默跳过 —— 这些列允许为 NULL。
 func (s *SnapshotService) applyDeviceFields(ctx context.Context, snap *ConfigSnapshot, sn string) {
 	if s.deviceLookup == nil {
 		return
@@ -623,6 +623,11 @@ func (s *SnapshotService) applyDeviceFields(ctx context.Context, snap *ConfigSna
 	if dev.ProductClass != "" {
 		pc := dev.ProductClass
 		snap.ProductType = &pc
+	}
+	// #70：记录快照捕获时的设备软件版本，作为后续按快照恢复的跨版本检查源版本。
+	if dev.FirmwareVersion != "" {
+		fw := dev.FirmwareVersion
+		snap.SourceVersion = &fw
 	}
 }
 

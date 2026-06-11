@@ -42,6 +42,11 @@ type RegistrationFilter struct {
 	Status       *global.RegistrationStatus
 	SerialNumber *string
 	Carrier      *model.CarrierCode
+	// VisibleGroups 是 #64 设备组数据权限的三态可见分组（nil=超管不过滤 / []=fail-closed 空集 /
+	// [g...]=仅这些组）。预注册表自带 group_id 列，过滤经 authz.ApplyGroupVisibilityFilter
+	// 直接对 group_id 取交；group_id IS NULL（待上线未分组）天然只对超管（nil）可见，对非超管
+	// 不命中 IN 条件被排除，符合「未分组仅超管/默认组可见，不对所有人可见」的判定。
+	VisibleGroups []uuid.UUID
 	model.ListRequest
 }
 

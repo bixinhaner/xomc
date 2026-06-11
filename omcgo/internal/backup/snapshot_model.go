@@ -68,10 +68,13 @@ type ConfigSnapshot struct {
 	FileSize     int64          `json:"file_size"`
 	Source       SnapshotSource `json:"source"`
 	SourceTaskID *uuid.UUID     `json:"source_task_id,omitempty"`
-	UpdateBy     *string        `json:"update_by,omitempty"`
-	UpdateTime   time.Time      `json:"update_time"`
-	CreatedAt    time.Time      `json:"created_at"`
-	UpdatedAt    time.Time      `json:"updated_at"`
+	// SourceVersion（#70）：快照捕获时的设备软件版本，供按快照恢复时与目标设备
+	// 当前固件版本做跨版本检查。可空（存量 / 未知来源）。
+	SourceVersion *string   `json:"source_version,omitempty"`
+	UpdateBy      *string   `json:"update_by,omitempty"`
+	UpdateTime    time.Time `json:"update_time"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // SnapshotFilter 列表查询条件。

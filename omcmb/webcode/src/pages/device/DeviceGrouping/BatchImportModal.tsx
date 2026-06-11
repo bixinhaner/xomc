@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { Alert, App, Button, List, Modal, Tag, Typography, Upload } from 'antd';
+import { Alert, App, Button, Flex, Modal, Tag, theme, Typography, Upload } from 'antd';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import type { UploadFile, UploadProps } from 'antd';
 import {
@@ -174,6 +174,7 @@ export default function BatchImportModal({
   // 弹窗根本不渲染（参 commit 7f250967 T-0161）。用户看到的现象就是"选完文件
   // 没反应、导入按钮不亮、也没有任何报错"。统一改走 App.useApp().message。
   const { message } = App.useApp();
+  const { token } = theme.useToken();
   const [fileList, setFileList] = useState<UploadFile[]>([]);
   const [parsed, setParsed] = useState<ParsedCsv | null>(null);
   const [importing, setImporting] = useState(false);
@@ -376,20 +377,32 @@ export default function BatchImportModal({
       <Paragraph style={{ marginBottom: 6, fontSize: 13 }} strong>
         {t('device.batchImport.errorListTitle')}
       </Paragraph>
-      <List
-        size="small"
-        bordered
-        dataSource={visibleErrors}
-        renderItem={(item) => (
-          <List.Item style={{ fontSize: 12 }}>
+      {/* antd6 List 已废弃：用带边框的 Flex 容器复刻 size=small + bordered 外观
+          （外框 + 圆角 + 条目间分隔线 + 小号内边距，取自主题 token 保持一致）。 */}
+      <Flex
+        vertical
+        style={{
+          border: `1px solid ${token.colorBorder}`,
+          borderRadius: token.borderRadiusLG,
+        }}
+      >
+        {visibleErrors.map((item, idx) => (
+          <div
+            key={`${item.row}-${item.sn ?? ''}-${idx}`}
+            style={{
+              fontSize: 12,
+              padding: `${token.paddingContentVerticalSM}px ${token.paddingContentHorizontal}px`,
+              borderBottom: idx === visibleErrors.length - 1 ? 'none' : `1px solid ${token.colorSplit}`,
+            }}
+          >
             <Text type="danger" style={{ marginRight: 8 }}>
               #{item.row}
             </Text>
             {item.sn ? <Tag style={{ marginRight: 8 }}>{item.sn}</Tag> : null}
             <Text>{item.reason}</Text>
-          </List.Item>
-        )}
-      />
+          </div>
+        ))}
+      </Flex>
       {hiddenErrorCount > 0 ? (
         <Text type="secondary" style={{ fontSize: 12, marginTop: 4, display: 'block' }}>
           {t('device.batchImport.errorListMore', { n: hiddenErrorCount })}

@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/authz"
 	"github.com/omcgo/omcgo/internal/config/parammodel"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
@@ -26,6 +27,14 @@ type DataModelValidator struct {
 	paramRepo       device.DeviceParameterRepository
 	deviceRepo      device.DeviceRepository
 	logger          *zap.Logger
+	// groupReader 是 #63 设备组可见性强制层的按设备归属读取器；ValidateDevice 解析出
+	// 设备后、比对参数前校验归属。nil → dev/test 退化放行（authz nil-safe）。
+	groupReader authz.GroupReader
+}
+
+// SetGroupReader 注入设备组归属读取器（#63 租户隔离强制层）。
+func (v *DataModelValidator) SetGroupReader(reader authz.GroupReader) {
+	v.groupReader = reader
 }
 
 // NewDataModelValidator creates a new DataModelValidator.
@@ -98,6 +107,7 @@ func (v *DataModelValidator) ValidateDevice(
 	deviceID uuid.UUID,
 	_ model.CarrierCode,
 	_ model.Technology,
+	visibleGroups []uuid.UUID,
 ) (*ValidationReport, error) {
 	dev, err := v.deviceRepo.GetByID(ctx, deviceID)
 	if err != nil {
@@ -105,6 +115,10 @@ func (v *DataModelValidator) ValidateDevice(
 	}
 	if dev == nil {
 		return nil, fmt.Errorf("device not found: %s: %w", deviceID, commonerrors.ErrNotFound)
+	}
+	// #63 租户隔离：校验设备归属，越权 → ErrForbidden（403）。
+	if err := authz.AuthorizeDeviceAccess(ctx, v.groupReader, dev.ID, visibleGroups); err != nil {
+		return nil, err
 	}
 
 	expected, source, fwVersion, err := v.resolveExpectedParams(ctx, dev)

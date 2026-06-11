@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/device"
 )
 
@@ -188,8 +189,59 @@ func TestList_Error(t *testing.T) {
 func TestGetByID_Error(t *testing.T) {
 	sentinel := errors.New("not found")
 	svc := newService(&fakeRepo{getByIDErr: sentinel})
-	_, err := svc.GetByID(context.Background(), uuid.New())
+	_, err := svc.GetByID(context.Background(), uuid.New(), nil)
 	assert.ErrorIs(t, err, sentinel)
+}
+
+// fakeGroupReader 用固定 设备→分组 映射模拟 authz.GroupReader。
+type fakeGroupReader struct{ groups []uuid.UUID }
+
+func (f fakeGroupReader) GetDeviceGroupIDs(_ context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
+	return f.groups, nil
+}
+
+// #63 GetByID 按记录归属设备校验可见性。
+func TestGetByID_VisibilityAuthz(t *testing.T) {
+	gVisible, gOther := uuid.New(), uuid.New()
+	devID := uuid.New()
+
+	t.Run("超管 nil 放行", func(t *testing.T) {
+		svc := newService(&fakeRepo{getByIDValue: &EventLog{ID: uuid.New(), DeviceID: &devID}})
+		svc.SetGroupReader(fakeGroupReader{groups: []uuid.UUID{gOther}})
+		got, err := svc.GetByID(context.Background(), uuid.New(), nil)
+		require.NoError(t, err)
+		require.NotNil(t, got)
+	})
+
+	t.Run("可见组有交集放行", func(t *testing.T) {
+		svc := newService(&fakeRepo{getByIDValue: &EventLog{ID: uuid.New(), DeviceID: &devID}})
+		svc.SetGroupReader(fakeGroupReader{groups: []uuid.UUID{gVisible}})
+		got, err := svc.GetByID(context.Background(), uuid.New(), []uuid.UUID{gVisible})
+		require.NoError(t, err)
+		require.NotNil(t, got)
+	})
+
+	t.Run("无交集越权拒绝", func(t *testing.T) {
+		svc := newService(&fakeRepo{getByIDValue: &EventLog{ID: uuid.New(), DeviceID: &devID}})
+		svc.SetGroupReader(fakeGroupReader{groups: []uuid.UUID{gOther}})
+		_, err := svc.GetByID(context.Background(), uuid.New(), []uuid.UUID{gVisible})
+		assert.ErrorIs(t, err, commonerrors.ErrForbidden)
+	})
+
+	t.Run("未关联设备记录对非超管不可见", func(t *testing.T) {
+		svc := newService(&fakeRepo{getByIDValue: &EventLog{ID: uuid.New(), DeviceID: nil}})
+		svc.SetGroupReader(fakeGroupReader{groups: nil})
+		_, err := svc.GetByID(context.Background(), uuid.New(), []uuid.UUID{gVisible})
+		assert.ErrorIs(t, err, commonerrors.ErrForbidden)
+	})
+
+	t.Run("记录不存在返回 nil 不触发授权", func(t *testing.T) {
+		svc := newService(&fakeRepo{getByIDValue: nil})
+		svc.SetGroupReader(fakeGroupReader{groups: nil})
+		got, err := svc.GetByID(context.Background(), uuid.New(), []uuid.UUID{gVisible})
+		require.NoError(t, err)
+		assert.Nil(t, got)
+	})
 }
 
 func TestStatByDevice_Error(t *testing.T) {

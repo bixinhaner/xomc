@@ -30,8 +30,9 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1"
-          memory: 512m
+          # resources.env 注入；缺省 = 历史字面量（plan-resources.sh 生成 WEB_CPUS/WEB_MEM）。
+          cpus: "${WEB_CPUS:-1}"
+          memory: "${WEB_MEM:-512m}"
         reservations:
           cpus: "0.25"
           memory: 128m

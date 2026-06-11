@@ -17,6 +17,9 @@ type KPIFilter struct {
 	Technology *model.Technology
 	StartTime  time.Time
 	EndTime    time.Time
+	// VisibleGroups 是 #64 设备组数据权限的三态可见分组（nil=超管 / []=fail-closed / [g...]=限定）。
+	// handler 解析调用者身份后注入，仓库层透传到 metrics.QueryRequest 按 device_sn 收口。
+	VisibleGroups []uuid.UUID
 	model.ListRequest
 }
 

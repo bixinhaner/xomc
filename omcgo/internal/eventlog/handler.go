@@ -10,17 +10,25 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/authz"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 type Handler struct {
-	svc    *Service
-	logger *zap.Logger
+	svc      *Service
+	resolver *authz.Resolver
+	logger   *zap.Logger
 }
 
 func NewHandler(svc *Service, logger *zap.Logger) *Handler {
 	return &Handler{svc: svc, logger: logger.Named("eventlog-handler")}
+}
+
+// SetPermissionService 注入数据权限解析器（#63 设备组可见性强制层）。未注入时
+// FromContext 走 nil-safe 退化（不过滤），与 device/alarm 模块语义一致。
+func (h *Handler) SetPermissionService(perm authz.VisibleGroupsResolver) {
+	h.resolver = authz.NewResolver(perm)
 }
 
 // RegisterRoutes 挂载于 /api/v1 下：
@@ -73,6 +81,12 @@ func (h *Handler) List(c *gin.Context) {
 		}
 	}
 
+	groups, ok := h.resolver.FromContext(c)
+	if !ok {
+		return
+	}
+	filter.VisibleGroups = groups
+
 	items, total, err := h.svc.List(c.Request.Context(), filter)
 	if err != nil {
 		h.logger.Error("list event logs", zap.Error(err))
@@ -113,6 +127,12 @@ func (h *Handler) Statistics(c *gin.Context) {
 		}
 	}
 
+	groups, ok := h.resolver.FromContext(c)
+	if !ok {
+		return
+	}
+	filter.VisibleGroups = groups
+
 	items, err := h.svc.StatByDevice(c.Request.Context(), filter)
 	if err != nil {
 		h.logger.Error("stat event logs by device", zap.Error(err))
@@ -132,9 +152,13 @@ func (h *Handler) Get(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
 		return
 	}
-	item, err := h.svc.GetByID(c.Request.Context(), id)
+	groups, ok := h.resolver.FromContext(c)
+	if !ok {
+		return
+	}
+	item, err := h.svc.GetByID(c.Request.Context(), id, groups)
 	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
 	if item == nil {

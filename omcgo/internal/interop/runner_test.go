@@ -81,10 +81,10 @@ func (m *mockDeviceRepo) ListActiveByLastInform(_ context.Context, _ *time.Time,
 func (m *mockDeviceRepo) ListGeo(_ context.Context, _ device.GeoDeviceFilter) ([]device.GeoDevice, int64, error) {
 	return nil, 0, nil
 }
-func (m *mockDeviceRepo) GetGeoStats(_ context.Context, _ []string) (*device.GeoStats, error) {
+func (m *mockDeviceRepo) GetGeoStats(_ context.Context, _ []string, _ []uuid.UUID) (*device.GeoStats, error) {
 	return &device.GeoStats{}, nil
 }
-func (m *mockDeviceRepo) SearchDevices(_ context.Context, _ string, _ int) ([]device.GeoDevice, error) {
+func (m *mockDeviceRepo) SearchDevices(_ context.Context, _ string, _ int, _ []uuid.UUID) ([]device.GeoDevice, error) {
 	return nil, nil
 }
 func (m *mockDeviceRepo) BatchDelete(_ context.Context, _ []uuid.UUID, _ string) (int64, error) {
@@ -294,7 +294,7 @@ func TestRunAll_ProtocolAndRPC(t *testing.T) {
 	cmdQ := newMockCmdQueue()
 	runner := newTestRunner(devRepo, paramRepo, cmdQ)
 
-	results, err := runner.RunAll(context.Background(), dev.SerialNumber)
+	results, err := runner.RunAll(context.Background(), dev.SerialNumber, nil)
 	require.NoError(t, err)
 	assert.NotEmpty(t, results)
 
@@ -313,7 +313,7 @@ func TestRunByCategory_Protocol(t *testing.T) {
 	cmdQ := newMockCmdQueue()
 	runner := newTestRunner(devRepo, paramRepo, cmdQ)
 
-	results, err := runner.RunByCategory(context.Background(), dev.SerialNumber, CategoryProtocol)
+	results, err := runner.RunByCategory(context.Background(), dev.SerialNumber, CategoryProtocol, nil)
 	require.NoError(t, err)
 	assert.Len(t, results, 3)
 
@@ -330,7 +330,7 @@ func TestRunByCategory_RPC(t *testing.T) {
 	cmdQ := newMockCmdQueue()
 	runner := newTestRunner(devRepo, paramRepo, cmdQ)
 
-	results, err := runner.RunByCategory(context.Background(), dev.SerialNumber, CategoryRPC)
+	results, err := runner.RunByCategory(context.Background(), dev.SerialNumber, CategoryRPC, nil)
 	require.NoError(t, err)
 	assert.Len(t, results, 9)
 
@@ -352,7 +352,7 @@ func TestRunByCategory_InvalidCategory(t *testing.T) {
 	cmdQ := newMockCmdQueue()
 	runner := newTestRunner(devRepo, paramRepo, cmdQ)
 
-	_, err := runner.RunByCategory(context.Background(), "TEST-SN-001", TestCategory("invalid"))
+	_, err := runner.RunByCategory(context.Background(), "TEST-SN-001", TestCategory("invalid"), nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid test category")
 }
@@ -363,7 +363,7 @@ func TestRunAll_DeviceNotFound(t *testing.T) {
 	cmdQ := newMockCmdQueue()
 	runner := newTestRunner(devRepo, paramRepo, cmdQ)
 
-	_, err := runner.RunAll(context.Background(), "NONEXISTENT")
+	_, err := runner.RunAll(context.Background(), "NONEXISTENT", nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "lookup device")
 }
@@ -400,14 +400,14 @@ func TestRunner_DeviceNotFound_MapsToNotFound(t *testing.T) {
 		{
 			name: "RunAll",
 			run: func(r *ConformanceTestRunner) error {
-				_, err := r.RunAll(context.Background(), "MISSING-SN")
+				_, err := r.RunAll(context.Background(), "MISSING-SN", nil)
 				return err
 			},
 		},
 		{
 			name: "RunByCategory",
 			run: func(r *ConformanceTestRunner) error {
-				_, err := r.RunByCategory(context.Background(), "MISSING-SN", CategoryProtocol)
+				_, err := r.RunByCategory(context.Background(), "MISSING-SN", CategoryProtocol, nil)
 				return err
 			},
 		},
@@ -435,7 +435,7 @@ func TestRunAll_ProtocolFailsOnEmptyField(t *testing.T) {
 	cmdQ := newMockCmdQueue()
 	runner := newTestRunner(devRepo, paramRepo, cmdQ)
 
-	results, err := runner.RunAll(context.Background(), dev.SerialNumber)
+	results, err := runner.RunAll(context.Background(), dev.SerialNumber, nil)
 	require.NoError(t, err)
 
 	// Find the PROTO-001 result (Inform Required Fields) - should fail due to empty OUI.
@@ -536,7 +536,7 @@ func TestRunTestCase_NegativePath_ExpectedFailureObserved(t *testing.T) {
 	}
 	runner.RegisterCases([]TestCase{negCase})
 
-	results, err := runner.RunByCategory(context.Background(), "TEST-SN-001", CategoryProtocol)
+	results, err := runner.RunByCategory(context.Background(), "TEST-SN-001", CategoryProtocol, nil)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 
@@ -566,7 +566,7 @@ func TestRunTestCase_NegativePath_UnexpectedPassFails(t *testing.T) {
 	}
 	runner.RegisterCases([]TestCase{negCase})
 
-	results, err := runner.RunByCategory(context.Background(), "TEST-SN-001", CategoryProtocol)
+	results, err := runner.RunByCategory(context.Background(), "TEST-SN-001", CategoryProtocol, nil)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 
@@ -586,7 +586,7 @@ func TestRunTestCase_DefaultPassSemanticsUnchanged(t *testing.T) {
 	runner := NewConformanceTestRunner(devRepo, paramRepo, nil, nil, cmdQ, logger)
 	runner.RegisterCases(testProtocolCases())
 
-	results, err := runner.RunByCategory(context.Background(), "TEST-SN-001", CategoryProtocol)
+	results, err := runner.RunByCategory(context.Background(), "TEST-SN-001", CategoryProtocol, nil)
 	require.NoError(t, err)
 	require.Len(t, results, 3)
 	for _, r := range results {
@@ -631,7 +631,7 @@ func TestRunner_FiltersByDeviceModel(t *testing.T) {
 				},
 			})
 
-			results, err := runner.RunByCategory(context.Background(), "TEST-SN-001", CategoryProtocol)
+			results, err := runner.RunByCategory(context.Background(), "TEST-SN-001", CategoryProtocol, nil)
 			require.NoError(t, err)
 			assert.Len(t, results, tt.runnerExpectCount, "unexpected result count for %s", tt.name)
 			if tt.expectExecuted {
@@ -663,7 +663,7 @@ func TestRunner_FiltersByDeviceModel_RunAll(t *testing.T) {
 		},
 	})
 
-	results, err := runner.RunAll(context.Background(), "TEST-SN-001")
+	results, err := runner.RunAll(context.Background(), "TEST-SN-001", nil)
 	require.NoError(t, err)
 	require.Len(t, results, 1, "only universal case should execute (scoped one filtered out)")
 	assert.Equal(t, "UNIV-001", results[0].TestCaseID)
