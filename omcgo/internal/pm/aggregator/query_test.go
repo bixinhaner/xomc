@@ -1,8 +1,10 @@
 package aggregator
 
 import (
+	"strconv"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -143,4 +145,116 @@ func Test_applyDeviceFilters_TechnologyDeviceSubquery_Unaffected(t *testing.T) {
 	sql, _, err := applyDeviceFilters(qb, q).ToSql()
 	require.NoError(t, err)
 	assert.Contains(t, sql, "(device_oui, device_sn) IN (SELECT oui, serial_number FROM devices WHERE technology = ANY(")
+}
+
+// #64 设备维度可见分组：applyCommonFilters 按 device_sn 两层子查询 fail-closed 收口。
+func Test_applyCommonFilters_VisibleGroups_ThreeWay(t *testing.T) {
+	g1, g2 := uuid.New(), uuid.New()
+
+	t.Run("nil 超管不过滤", func(t *testing.T) {
+		qb := storage.Psql.Select("metric_path").From("pm_metrics_hourly")
+		sql, _, err := applyCommonFilters(qb, QueryRequest{}).ToSql()
+		require.NoError(t, err)
+		assert.NotContains(t, sql, "serial_number")
+	})
+
+	t.Run("空集 fail-closed", func(t *testing.T) {
+		qb := storage.Psql.Select("metric_path").From("pm_metrics_hourly")
+		sql, _, err := applyCommonFilters(qb, QueryRequest{VisibleGroups: []uuid.UUID{}}).ToSql()
+		require.NoError(t, err)
+		assert.Contains(t, sql, "FALSE")
+	})
+
+	t.Run("限定到可见分组下设备", func(t *testing.T) {
+		qb := storage.Psql.Select("metric_path").From("pm_metrics_hourly")
+		sql, args, err := applyCommonFilters(qb, QueryRequest{VisibleGroups: []uuid.UUID{g1, g2}}).ToSql()
+		require.NoError(t, err)
+		assert.Contains(t, sql, "device_sn IN (SELECT serial_number FROM devices WHERE id IN (SELECT device_id FROM device_group_members WHERE group_id IN (")
+		assert.Contains(t, args, g1)
+		assert.Contains(t, args, g2)
+	})
+}
+
+// #64 设备组维度可见分组：applyGroupFilters 直接对 device_group_id 取交（fail-closed）。
+func Test_applyGroupFilters_VisibleGroups_ThreeWay(t *testing.T) {
+	g1 := uuid.New()
+
+	t.Run("nil 超管不过滤", func(t *testing.T) {
+		qb := storage.Psql.Select("device_group_id").From("pm_group_metrics_hourly")
+		sql, _, err := applyGroupFilters(qb, QueryRequest{}).ToSql()
+		require.NoError(t, err)
+		assert.NotContains(t, sql, "device_group_id IN")
+	})
+
+	t.Run("空集 fail-closed", func(t *testing.T) {
+		qb := storage.Psql.Select("device_group_id").From("pm_group_metrics_hourly")
+		sql, _, err := applyGroupFilters(qb, QueryRequest{VisibleGroups: []uuid.UUID{}}).ToSql()
+		require.NoError(t, err)
+		assert.Contains(t, sql, "FALSE")
+	})
+
+	t.Run("限定到可见分组", func(t *testing.T) {
+		qb := storage.Psql.Select("device_group_id").From("pm_group_metrics_hourly")
+		sql, args, err := applyGroupFilters(qb, QueryRequest{VisibleGroups: []uuid.UUID{g1}}).ToSql()
+		require.NoError(t, err)
+		assert.Contains(t, sql, "device_group_id IN (")
+		assert.Contains(t, args, g1)
+	})
+}
+
+// #64 product/band 维度手拼 SQL：appendVisibleSNWhere 把可见分组收口条件与位置参数同步拼入。
+func Test_appendVisibleSNWhere_ThreeWay(t *testing.T) {
+	g1, g2 := uuid.New(), uuid.New()
+
+	// add 闭包模拟 product/band 的位置参数注册：返回 $N 并收集 args。
+	newAdd := func(args *[]any, pos *int) func(any) string {
+		return func(v any) string {
+			*args = append(*args, v)
+			p := "$" + strconv.Itoa(*pos)
+			*pos++
+			return p
+		}
+	}
+
+	t.Run("nil 不追加", func(t *testing.T) {
+		args := []any{}
+		pos := 1
+		where := appendVisibleSNWhere(nil, "m.device_sn", nil, newAdd(&args, &pos))
+		assert.Empty(t, where)
+		assert.Empty(t, args)
+	})
+
+	t.Run("空集追加 FALSE 无参数", func(t *testing.T) {
+		args := []any{}
+		pos := 1
+		where := appendVisibleSNWhere(nil, "m.device_sn", []uuid.UUID{}, newAdd(&args, &pos))
+		require.Len(t, where, 1)
+		assert.Equal(t, "FALSE", where[0])
+		assert.Empty(t, args)
+	})
+
+	t.Run("限定追加子查询并注册参数", func(t *testing.T) {
+		args := []any{}
+		pos := 3 // 模拟前面已有 2 个参数
+		where := appendVisibleSNWhere(nil, "m.device_sn", []uuid.UUID{g1, g2}, newAdd(&args, &pos))
+		require.Len(t, where, 1)
+		assert.Equal(t, "m.device_sn IN (SELECT serial_number FROM devices WHERE id IN (SELECT device_id FROM device_group_members WHERE group_id = ANY($3)))", where[0])
+		require.Len(t, args, 1)
+		assert.Equal(t, []uuid.UUID{g1, g2}, args[0], "可见分组作为单个 ANY 数组参数注册")
+	})
+}
+
+// #64 设备组维度可见分组 × 请求侧 device_group_id 双 WHERE 叠加 = 交集（请求他组返空）。
+func Test_applyGroupFilters_RequestedGroupIntersectsVisible(t *testing.T) {
+	visible := uuid.New()
+	requested := uuid.New() // 请求一个不在可见集合里的组
+	qb := storage.Psql.Select("device_group_id").From("pm_group_metrics_hourly")
+	_, args, err := applyGroupFilters(qb, QueryRequest{
+		DeviceGroupIDs: []uuid.UUID{requested},
+		VisibleGroups:  []uuid.UUID{visible},
+	}).ToSql()
+	require.NoError(t, err)
+	// 两个独立 WHERE：device_group_id = requested AND device_group_id IN (visible)，AND 叠加即交集（空）。
+	assert.Contains(t, args, requested)
+	assert.Contains(t, args, visible)
 }

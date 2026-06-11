@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/stretchr/testify/assert"
@@ -33,6 +34,35 @@ func Test_applyFilters_DeviceSNs_IN(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, sql, "device_sn IN")
 	assert.Len(t, args, 2)
+}
+
+// #64 设备组数据权限：applyFilters 按 device_sn 两层子查询 fail-closed 收口。
+func Test_applyFilters_VisibleGroups_ThreeWay(t *testing.T) {
+	g1, g2 := uuid.New(), uuid.New()
+
+	t.Run("nil 超管不过滤", func(t *testing.T) {
+		qb := storage.Psql.Select("*").From("pm_metrics")
+		sql, args, err := applyFilters(qb, QueryRequest{VisibleGroups: nil}).ToSql()
+		require.NoError(t, err)
+		assert.Equal(t, "SELECT * FROM pm_metrics", sql)
+		assert.Empty(t, args)
+	})
+
+	t.Run("空集 fail-closed", func(t *testing.T) {
+		qb := storage.Psql.Select("*").From("pm_metrics")
+		sql, _, err := applyFilters(qb, QueryRequest{VisibleGroups: []uuid.UUID{}}).ToSql()
+		require.NoError(t, err)
+		assert.Contains(t, sql, "FALSE")
+	})
+
+	t.Run("限定到可见分组下设备（sn 两层子查询）", func(t *testing.T) {
+		qb := storage.Psql.Select("*").From("pm_metrics")
+		sql, args, err := applyFilters(qb, QueryRequest{VisibleGroups: []uuid.UUID{g1, g2}}).ToSql()
+		require.NoError(t, err)
+		assert.Contains(t, sql, "device_sn IN (SELECT serial_number FROM devices WHERE id IN (SELECT device_id FROM device_group_members WHERE group_id IN (")
+		assert.Contains(t, args, g1)
+		assert.Contains(t, args, g2)
+	})
 }
 
 func Test_applyFilters_DeviceOUIs_IN(t *testing.T) {

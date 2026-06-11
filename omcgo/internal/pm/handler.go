@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/minio/minio-go/v7"
+	"github.com/omcgo/omcgo/internal/authz"
 	"github.com/omcgo/omcgo/internal/core/asyncjob"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
@@ -38,8 +39,64 @@ type Handler struct {
 	indicatorRepo indicator.IndicatorRepository // T-0164-P1：/pm/kpi/definitions 数据源（替代旧 carrier KPIDefinitions 列表）
 	aggr          *aggregator.Aggregator        // T-0164-P5 / G5：按粒度路由聚合表查询（hourly/daily/weekly/monthly + device_group）
 	asyncJobRepo  asyncjob.Repository           // T-0164 收尾 G5-Gap-2：手动重算入口入队 async_jobs
+	resolver      *authz.Resolver               // #64 设备组数据权限：PM 读链路按调用者可见分组过滤
 	metrics       *PMMetrics
 	logger        *zap.Logger
+}
+
+// SetPermissionService 注入数据权限解析器（#64 统一强制层），使 PM 读链路按调用者可见设备组
+// 过滤。未注入时退化为不过滤（dev/test），与 alarm / device 模块语义一致。
+func (h *Handler) SetPermissionService(perm authz.VisibleGroupsResolver) {
+	h.resolver = authz.NewResolver(perm)
+}
+
+// resolveVisibleGroups 解析调用者可见设备组（三态：nil 超管 / [] 无权限 / [g...] 限定）。
+// 返回 ok=false 表示解析失败已 abort（403/500），调用方应立即 return。
+// h.resolver 为 nil 时 FromContext 走 nil-safe 退化路径，返回 (nil, true) 不过滤。
+func (h *Handler) resolveVisibleGroups(c *gin.Context) (groups []uuid.UUID, ok bool) {
+	return h.resolver.FromContext(c)
+}
+
+// requestedDeviceInScope 在请求带 device_id 时预检其是否在可见分组内。
+// visibleGroups==nil（超管）放行；[] 直接拒；否则查该设备的分组与可见集合是否有交集。
+// 复用 deviceQuery 的连接池查 device_group_members，避免 PM handler 反向 import device。
+// 返回 (inScope, ok)：ok=false 表示已 abort（解析/查询失败）；inScope=false 表示越权（调用方应 403/空）。
+func (h *Handler) requestedDeviceInScope(c *gin.Context, deviceID uuid.UUID, visibleGroups []uuid.UUID) (inScope bool, ok bool) {
+	if visibleGroups == nil {
+		return true, true // 超管
+	}
+	if len(visibleGroups) == 0 {
+		return false, true // 无任何分组权限
+	}
+	groupIDs, err := h.deviceQuery.DeviceGroupIDs(c.Request.Context(), deviceID)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return false, false
+	}
+	visible := make(map[uuid.UUID]struct{}, len(visibleGroups))
+	for _, g := range visibleGroups {
+		visible[g] = struct{}{}
+	}
+	for _, g := range groupIDs {
+		if _, in := visible[g]; in {
+			return true, true
+		}
+	}
+	return false, true
+}
+
+// groupInVisible 判定显式 device_group_id 是否在可见集合内（三态）：
+// visibleGroups==nil（超管）恒真；[] 恒假；否则成员判定。
+func groupInVisible(groupID uuid.UUID, visibleGroups []uuid.UUID) bool {
+	if visibleGroups == nil {
+		return true
+	}
+	for _, g := range visibleGroups {
+		if g == groupID {
+			return true
+		}
+	}
+	return false
 }
 
 // WithAggregator 注入 G5 聚合查询入口（可选；nil 时退回老路径）。
@@ -123,10 +180,24 @@ func (h *Handler) ListCounters(c *gin.Context) {
 		return
 	}
 	filter := counter.CounterFilter{ListRequest: q.ListRequest}
+	visibleGroups, ok := h.resolveVisibleGroups(c)
+	if !ok {
+		return
+	}
+	filter.VisibleGroups = visibleGroups
 	if q.DeviceID != "" {
 		id, err := uuid.Parse(q.DeviceID)
 		if err != nil {
 			response.Fail(c, http.StatusBadRequest, "invalid device_id")
+			return
+		}
+		// #64：显式 device_id 越权直接 403，避免泄露"设备存在但无权"信号。
+		inScope, ok := h.requestedDeviceInScope(c, id, visibleGroups)
+		if !ok {
+			return
+		}
+		if !inScope {
+			commonerrors.AbortWithError(c, http.StatusForbidden, commonerrors.ErrForbidden)
 			return
 		}
 		filter.DeviceID = &id
@@ -177,8 +248,25 @@ func (h *Handler) ListAggregatedCounters(c *gin.Context) {
 		return
 	}
 	filter := counter.CounterFilter{}
+	visibleGroups, ok := h.resolveVisibleGroups(c)
+	if !ok {
+		return
+	}
+	filter.VisibleGroups = visibleGroups
 	if q.DeviceID != "" {
-		id, _ := uuid.Parse(q.DeviceID)
+		id, err := uuid.Parse(q.DeviceID)
+		if err != nil {
+			response.Fail(c, http.StatusBadRequest, "invalid device_id")
+			return
+		}
+		inScope, ok := h.requestedDeviceInScope(c, id, visibleGroups)
+		if !ok {
+			return
+		}
+		if !inScope {
+			commonerrors.AbortWithError(c, http.StatusForbidden, commonerrors.ErrForbidden)
+			return
+		}
 		filter.DeviceID = &id
 	}
 	if q.CellID != "" {
@@ -231,6 +319,14 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 	dim := aggregator.Dimension(c.Query("dimension"))
 	req := aggregator.QueryRequest{Granularity: gran, Dimension: dim}
 
+	// #64 设备组数据权限：解析调用者可见分组，注入聚合查询（各维度在仓库层按 device_sn /
+	// device_group_id 三态 fail-closed 收口）。
+	visibleGroups, ok := h.resolveVisibleGroups(c)
+	if !ok {
+		return
+	}
+	req.VisibleGroups = visibleGroups
+
 	if v := c.Query("device_oui"); v != "" {
 		req.DeviceOUIs = []string{v}
 	}
@@ -241,6 +337,11 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 		id, err := uuid.Parse(v)
 		if err != nil {
 			response.Fail(c, http.StatusBadRequest, "invalid device_group_id")
+			return
+		}
+		// #64：显式 device_group_id 不在可见集合内直接 403（超管 visibleGroups==nil 放行）。
+		if !groupInVisible(id, visibleGroups) {
+			commonerrors.AbortWithError(c, http.StatusForbidden, commonerrors.ErrForbidden)
 			return
 		}
 		req.DeviceGroupIDs = []uuid.UUID{id}
@@ -503,8 +604,25 @@ func (h *Handler) ListKPIValues(c *gin.Context) {
 		return
 	}
 	filter := kpi.KPIFilter{ListRequest: q.ListRequest}
+	visibleGroups, ok := h.resolveVisibleGroups(c)
+	if !ok {
+		return
+	}
+	filter.VisibleGroups = visibleGroups
 	if q.DeviceID != "" {
-		id, _ := uuid.Parse(q.DeviceID)
+		id, err := uuid.Parse(q.DeviceID)
+		if err != nil {
+			response.Fail(c, http.StatusBadRequest, "invalid device_id")
+			return
+		}
+		inScope, ok := h.requestedDeviceInScope(c, id, visibleGroups)
+		if !ok {
+			return
+		}
+		if !inScope {
+			commonerrors.AbortWithError(c, http.StatusForbidden, commonerrors.ErrForbidden)
+			return
+		}
 		filter.DeviceID = &id
 	}
 	if q.CellID != "" {

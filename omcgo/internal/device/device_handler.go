@@ -73,6 +73,32 @@ func (h *Handler) SetPermissionService(ps VisibleGroupsResolver) {
 	h.permService = ps
 }
 
+// resolveVisibleGroups 解析调用者可见设备组（三态：nil 超管 / [] 无权限 / [g...] 限定）。
+// 返回 ok=false 表示解析失败已 abort（403/500），调用方应立即 return。
+//
+// permService 为 nil（dev/test 未注入数据权限）→ 返回 (nil, true)，与既有 nil-safe 语义一致
+// （ListDevices 旧的内联逻辑同口径）。#64：GIS / 列表读链路统一经此入口。
+func (h *Handler) resolveVisibleGroups(c *gin.Context) (groups []uuid.UUID, ok bool) {
+	if h.permService == nil {
+		return nil, true
+	}
+	userID, _ := c.Get(admin.CtxKeyUserID)
+	uid, isUUID := userID.(uuid.UUID)
+	if !isUUID {
+		// 已过鉴权中间件却拿不到 user_id：按拒绝处理，不泄露数据。
+		commonerrors.AbortWithError(c, http.StatusForbidden, commonerrors.ErrForbidden)
+		return nil, false
+	}
+	isSuperVal, _ := c.Get(admin.CtxKeyIsSuperAdmin)
+	isSuper, _ := isSuperVal.(bool)
+	visibleGroups, err := h.permService.GetUserVisibleGroupIDs(c.Request.Context(), uid, isSuper)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return nil, false
+	}
+	return visibleGroups, true
+}
+
 // RegisterRoutes registers device routes on the given router group.
 func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	devices := rg.Group("/devices")
@@ -513,6 +539,13 @@ func (h *Handler) ListGeo(c *gin.Context) {
 		filter.PageSize = 10000
 	}
 
+	// #64 设备组数据权限：限定到调用者可见分组（三态 fail-closed 在仓库层施加）。
+	visibleGroups, ok := h.resolveVisibleGroups(c)
+	if !ok {
+		return
+	}
+	filter.VisibleGroups = visibleGroups
+
 	devices, total, err := h.service.ListGeo(c.Request.Context(), filter)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
@@ -535,7 +568,13 @@ func (h *Handler) GetGeoStats(c *gin.Context) {
 		groupIDs = strings.Split(groupIDsStr, ",")
 	}
 
-	stats, err := h.service.GetGeoStats(c.Request.Context(), groupIDs)
+	// #64 设备组数据权限：统计只覆盖调用者可见分组（三态 fail-closed 在仓库层施加）。
+	visibleGroups, ok := h.resolveVisibleGroups(c)
+	if !ok {
+		return
+	}
+
+	stats, err := h.service.GetGeoStats(c.Request.Context(), groupIDs, visibleGroups)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
@@ -588,7 +627,13 @@ func (h *Handler) SearchDevices(c *gin.Context) {
 		limit = 100
 	}
 
-	devices, err := h.service.SearchDevices(c.Request.Context(), keyword, limit)
+	// #64 设备组数据权限：搜索结果限定到调用者可见分组（三态 fail-closed 在仓库层施加）。
+	visibleGroups, ok := h.resolveVisibleGroups(c)
+	if !ok {
+		return
+	}
+
+	devices, err := h.service.SearchDevices(c.Request.Context(), keyword, limit, visibleGroups)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return

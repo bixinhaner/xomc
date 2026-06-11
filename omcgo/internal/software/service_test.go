@@ -220,10 +220,10 @@ func (m *svcMockDeviceRepo) ListActiveByLastInform(_ context.Context, _ *time.Ti
 func (m *svcMockDeviceRepo) ListGeo(_ context.Context, _ device.GeoDeviceFilter) ([]device.GeoDevice, int64, error) {
 	return nil, 0, nil
 }
-func (m *svcMockDeviceRepo) GetGeoStats(_ context.Context, _ []string) (*device.GeoStats, error) {
+func (m *svcMockDeviceRepo) GetGeoStats(_ context.Context, _ []string, _ []uuid.UUID) (*device.GeoStats, error) {
 	return &device.GeoStats{}, nil
 }
-func (m *svcMockDeviceRepo) SearchDevices(_ context.Context, _ string, _ int) ([]device.GeoDevice, error) {
+func (m *svcMockDeviceRepo) SearchDevices(_ context.Context, _ string, _ int, _ []uuid.UUID) ([]device.GeoDevice, error) {
 	return nil, nil
 }
 func (m *svcMockDeviceRepo) BatchDelete(_ context.Context, _ []uuid.UUID, _ string) (int64, error) {
