@@ -288,7 +288,10 @@ func (h *Handler) SwitchRole(c *gin.Context) {
 
 	tokenPair, err := h.service.SwitchRole(c.Request.Context(), userID, req.RoleID)
 	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		// 业务校验拒绝（角色未分配 → BusinessError 包 ErrForbidden）映射 403，
+		// not-found 映射 404，而非一律 500。
+		status := commonerrors.HTTPStatusFromError(err)
+		commonerrors.AbortWithError(c, status, err)
 		return
 	}
 

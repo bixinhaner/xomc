@@ -20,6 +20,11 @@
 #   - #116 DELETE /devices/tasks/:task_id 成功取消但返回 500：CancelTask 里
 #     CompletedTotal 只传 1 个 label 触发 panic → 500。已修复（service.go
 #     recordCompletion 补齐 source/status 双标签），取消任务硬断言 2xx + ret=1。
+#   - #125 DELETE /devices/tasks/:task_id 对不存在 ID 返回 500：handler 用
+#     err.Error()=="task not found" 精确比对，但 service 返回带 id 后缀的
+#     "task not found: <id>"，永不匹配落入 500。已修复（service 改用哨兵
+#     ErrTaskNotFound 包装 core ErrNotFound + handler errors.Is 判定 →
+#     HTTPStatusFromError 映射 404），不存在任务取消硬断言 404。
 #
 # 用法：bash smoke_task.sh [BASE_URL]   （默认 http://localhost:8081）
 # =============================================================================
@@ -222,11 +227,10 @@ check_ret_fail "创建任务缺 device_sn 查询参数被拒绝（400）"
 req POST "/api/v1/devices/tasks/batch?device_sn=$TASK_SN" '{"not":"an-array"}'
 check_ret_fail "批量创建非数组 body 被拒绝（400）"
 
-# 注：当前实际返回 500 而非 404（handler 用 err.Error()=="task not found" 精确比对，
-# 但 service 返回 "task not found: <id>" 带 id 后缀，匹配不上落入 500 分支）——
-# 仍是被拒绝（check_ret_fail 通过），状态码语义问题已记录为可疑 bug。
+# #125 已修复：service 改用哨兵 ErrTaskNotFound（包装 core ErrNotFound），handler
+# 用 errors.Is 判定后经 HTTPStatusFromError 映射 → 不存在任务 DELETE 硬断言 404。
 req DELETE "/api/v1/devices/tasks/$GHOST_ID"
-check_ret_fail "取消不存在任务被拒绝"
+check_status "取消不存在任务返回 404" 404
 
 req POST "/api/v1/devices/tasks/$GHOST_ID/retry"
 check_ret_fail "retry 不存在任务被拒绝（404）"

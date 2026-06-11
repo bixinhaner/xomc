@@ -28,11 +28,12 @@ import (
 //
 // RBAC：路由组上层中间件（Casbin）通过 api_endpoints + role_api_permissions 自动鉴权（§M.4.2）。
 // 错误翻译：
-//   - ErrCatalogProtected   → 403 Forbidden
-//   - IsErrNotFound         → 404 Not Found
-//   - ErrGroupNotEmpty      → 409 Conflict
-//   - bind 错误              → 400 Bad Request
-//   - 其余                   → 500 Internal Server Error
+//   - ErrCatalogProtected            → 403 Forbidden
+//   - IsErrNotFound                  → 404 Not Found
+//   - ErrGroupNotEmpty               → 409 Conflict
+//   - ErrGroupParamVersionNotFound   → 422 Unprocessable Entity（param_version FK 不存在）
+//   - bind 错误                       → 400 Bad Request
+//   - 其余                            → 500 Internal Server Error
 // ============================================================
 
 // commandLookup 是 AdminService.Update/DeleteCommand 所需的命令读取函数签名。
@@ -286,6 +287,9 @@ func (h *AdminHandler) respondAdminError(c *gin.Context, err error) {
 		response.Fail(c, http.StatusConflict, err.Error())
 	case errors.Is(err, ErrCommandNameDuplicated):
 		response.Fail(c, http.StatusConflict, err.Error())
+	case errors.Is(err, ErrGroupParamVersionNotFound):
+		// param_version 外键引用不存在（FK violation 已在 service 层翻译）→ 422。
+		response.Fail(c, http.StatusUnprocessableEntity, err.Error())
 	default:
 		h.logger.Error("admin handler internal error", zap.Error(err))
 		response.Fail(c, http.StatusInternalServerError, err.Error())

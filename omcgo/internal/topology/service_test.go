@@ -3,12 +3,16 @@ package topology
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+
+	"github.com/omcgo/omcgo/global"
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 )
 
 // --- Mock Repository ---
@@ -337,4 +341,73 @@ func TestBuildTree_MultipleRootsWithChildren(t *testing.T) {
 	assert.Equal(t, root2, result[1].ID)
 	require.Len(t, result[1].Children, 1, "Root 2 should have 1 child")
 	assert.Equal(t, child2a, result[1].Children[0].ID)
+}
+
+// --- Tests: Service.MoveDevices error mapping (#125-topology) ---
+
+// 回归 #125：非 UUID 的 target_group_id / device_id 是参数校验类错误，
+// 必须能经 HTTPStatusFromError 映射成 400，而不是落到 default 500。
+func TestDeviceGroupService_MoveDevices_InvalidInputMapsTo400(t *testing.T) {
+	validUUID := uuid.New().String()
+
+	tests := []struct {
+		name        string
+		req         MoveDevicesRequest
+		wantBizCode int
+		wantHTTP    int
+	}{
+		{
+			name:        "non-UUID target_group_id → 400",
+			req:         MoveDevicesRequest{TargetGroupID: "not-a-uuid", DeviceIDs: []string{validUUID}},
+			wantBizCode: global.ErrCodeGroupParentInvalid,
+			wantHTTP:    http.StatusBadRequest,
+		},
+		{
+			name:        "non-UUID device_id → 400",
+			req:         MoveDevicesRequest{TargetGroupID: validUUID, DeviceIDs: []string{"bad-device-id"}},
+			wantBizCode: global.ErrCodeDeviceInvalidInput,
+			wantHTTP:    http.StatusBadRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := newTestGroupService(&mockGroupRepo{})
+
+			affected, err := svc.MoveDevices(context.Background(), tt.req)
+			require.Error(t, err)
+			assert.Zero(t, affected)
+
+			// service 层错误类型断言：是 BusinessError，带正确 biz_code，
+			// 且 Unwrap 链命中 ErrInvalidInput sentinel。
+			var bErr *commonerrors.BusinessError
+			require.True(t, errors.As(err, &bErr), "must be a *BusinessError")
+			assert.Equal(t, tt.wantBizCode, bErr.Code)
+			assert.True(t, errors.Is(err, commonerrors.ErrInvalidInput),
+				"error chain must wrap ErrInvalidInput so HTTPStatusFromError maps 400")
+
+			// 端到端语义：handler 调用的 HTTPStatusFromError 必须给 400，不是 500。
+			assert.Equal(t, tt.wantHTTP, commonerrors.HTTPStatusFromError(err))
+
+			// 不得外泄裸 SQL（参数校验在 repo 之前，message 应是可读文案）。
+			assert.NotContains(t, bErr.Message, "SQLSTATE")
+		})
+	}
+}
+
+// happy-path 守卫：合法 UUID 不应触发上述 400 分支。
+func TestDeviceGroupService_MoveDevices_ValidInputSucceeds(t *testing.T) {
+	svc := newTestGroupService(&mockGroupRepo{
+		getByIDFn: func(_ context.Context, id uuid.UUID) (*DeviceGroup, error) {
+			return &DeviceGroup{ID: id, Name: "target"}, nil
+		},
+		// MoveDevices 默认返回 (0, nil)；这里覆写表达"实际搬动了 N 台"。
+	})
+
+	affected, err := svc.MoveDevices(context.Background(), MoveDevicesRequest{
+		TargetGroupID: uuid.New().String(),
+		DeviceIDs:     []string{uuid.New().String(), uuid.New().String()},
+	})
+	require.NoError(t, err)
+	assert.Zero(t, affected) // mock MoveDevices 返回 0
 }

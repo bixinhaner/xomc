@@ -108,7 +108,7 @@ check_ret_fail "基站日志非法 ID 下载被拒"
 req DELETE "/api/v1/station-logs/not-a-uuid"
 check_ret_fail "基站日志非法 ID 删除被拒"
 req DELETE "/api/v1/station-logs/${NOEXIST_ID}"
-check_ret_fail "基站日志不存在 ID 删除被拒"
+check_status "基站日志不存在 ID 删除 → 404" 404
 
 # ---------------------------------------------------------------------------
 section "异常重启记录列表 + 详情（/device-abnormal-reboots）"
@@ -163,7 +163,7 @@ check_status "异常重启不存在 ID 下载 → 404" 404
 req DELETE "/api/v1/device-abnormal-reboots/not-a-uuid"
 check_ret_fail "异常重启记录非法 ID 删除被拒"
 req DELETE "/api/v1/device-abnormal-reboots/${NOEXIST_ID}"
-check_ret_fail "异常重启记录不存在 ID 删除被拒"
+check_status "异常重启记录不存在 ID 删除 → 404" 404
 
 # ---------------------------------------------------------------------------
 section "统一重启记录列表 + 统计（/reboot-records，两张互斥表合成）"

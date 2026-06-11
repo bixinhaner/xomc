@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/omcgo/omcgo/internal/core/components/logger"
+	coreerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/tracing"
 	"go.opentelemetry.io/otel/attribute"
@@ -34,6 +35,14 @@ const defaultWakeConcurrency = 256
 // exhaust Redis/PostgreSQL. Callers should surface this as a 429-style refusal,
 // not a 500.
 var ErrQueueFull = errors.New("device task queue at capacity")
+
+// ErrTaskNotFound is returned when a task ID does not resolve to an existing
+// task (e.g. cancelling / marking a non-existent task). It wraps the core
+// errors.ErrNotFound sentinel so that handlers mapping via
+// coreerrors.HTTPStatusFromError surface it as HTTP 404 rather than 500, while
+// errors.Is(err, ErrTaskNotFound) keeps a task-scoped check at call sites. The
+// message deliberately carries no SQL / storage detail.
+var ErrTaskNotFound = fmt.Errorf("task not found: %w", coreerrors.ErrNotFound)
 
 // defaultMaxQueueDepth caps the number of pending tasks per device. It is
 // generous enough for legitimate batch operations (sweep / template apply) yet
@@ -539,7 +548,7 @@ func (s *TaskService) CancelTask(ctx context.Context, taskID string) error {
 		return fmt.Errorf("get task for cancel: %w", err)
 	}
 	if task == nil {
-		return fmt.Errorf("task not found: %s", taskID)
+		return ErrTaskNotFound
 	}
 
 	// 只能取消 pending 状态的任务

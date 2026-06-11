@@ -10,13 +10,16 @@
 #   - aggregation/recompute 幂等触发
 #   - thresholds / dashboards(+panel) / query-templates / adhoc / exports CRUD 闭环
 #   - user-preferences/dashboard 读
-#   - 指标库：legacy POST（ENB/GNB 组树、分页列表、生效指标）、REST /indicators
-#     系列（super_admin）、enable/disable 可逆闭环、upload-xml 仅负路径
+#   - 指标库：legacy POST（ENB/GNB 组树、分页列表、生效指标、组列表/指标详情/
+#     组详情只读）、REST /indicators 系列（super_admin）、enable/disable 可逆闭环、
+#     enabled-indicators PUT 可逆、upload-xml 仅负路径
 #   - 自定义指标 + 平台公式 CRUD 闭环（PR #99 回归）：POST/GET/PUT/DELETE
 #     /indicators + /indicators/:id/formulas upsert/删除；builtin 删除仅负路径
+#   - indicator-groups REST CRUD 闭环（自建 ${SMOKE_TAG} 组→改→删，super_admin）
 #
 # 红线：不向任何设备下发 reboot/升级/SPV 等指令；kpi/calculate 与 recompute
-# 均为服务端幂等计算，不触达基站。
+# 均为服务端幂等计算，不触达基站。指标库写路径只针对 ${SMOKE_TAG} 自建实体，
+# enabled-indicators PUT 改完即还原，绝不真改 builtin。
 # =============================================================================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
@@ -344,6 +347,37 @@ check_field "指标首条带 id" "data.items.0.id"
 req POST "/api/v1/pm/indicatormg/getEffectiveIndicators" '{"device_type":"ENB","operator_code":"default"}'
 check_ret_ok "ENB 生效指标集可查"
 
+# 组列表（扁平 data 列表，不分页）；取一个组 id 供下方组详情引用
+req POST "/api/v1/pm/indicatormg/getIndicatorGroupList" '{"device_type":"ENB"}'
+check_ret_ok "ENB 指标组列表可查（legacy POST 只读）"
+check_list_nonempty "ENB 组列表非空（至少含 default 占位组）" "data"
+GRP_LEGACY_ID=$(jget data.0.id)
+
+# 指标详情：引用 section 12 已取到的真实指标 id（IND_ID）
+if [ -n "$IND_ID" ]; then
+    req POST "/api/v1/pm/indicatormg/getIndicatorInfo" "{\"device_type\":\"ENB\",\"id\":\"${IND_ID}\"}"
+    check_ret_ok "ENB 指标详情可查（legacy POST，id=${IND_ID}）"
+    check_field "指标详情回显 id" "data.id"
+    check_field "指标详情带英文名" "data.en_name"
+else
+    skip "ENB 指标详情（legacy POST）" "分页列表未取到指标 id"
+fi
+
+# 组详情：引用上面组列表取到的组 id
+if [ -n "$GRP_LEGACY_ID" ]; then
+    req POST "/api/v1/pm/indicatormg/getIndicatorGroupInfo" "{\"device_type\":\"ENB\",\"id\":\"${GRP_LEGACY_ID}\"}"
+    check_ret_ok "ENB 指标组详情可查（legacy POST，id=${GRP_LEGACY_ID}）"
+    check_field "组详情回显 id" "data.id"
+else
+    skip "ENB 指标组详情（legacy POST）" "组列表未取到组 id"
+fi
+
+req POST "/api/v1/pm/indicatormg/getIndicatorInfo" '{"device_type":"ENB"}'
+check_ret_fail "指标详情缺 id 被拒绝"
+
+req POST "/api/v1/pm/indicatormg/getIndicatorGroupInfo" '{"device_type":"ENB","id":"smk-no-such-group"}'
+check_ret_fail "组详情查不存在 id 返回 404"
+
 req POST "/api/v1/pm/indicatormg/getIndicatorGroupTree" '{"device_type":"BAD"}'
 check_ret_fail "非法 device_type 被拒绝"
 
@@ -394,7 +428,7 @@ CTR_ID=$(jget data.items.0.id)
 if [ -z "$GRP_ID" ]; then
     skip "自定义指标 CRUD 闭环" "未取到指标分组 id"
 else
-    # 主闭环不带 arithmetic：带公式创建当前被后端误拒（见本 section 末 known_bug 探针）
+    # 主闭环不带 arithmetic（聚焦非公式 CRUD）；带公式闭环见本 section 末专项探针（#134 修复后硬断言）
     req POST "/api/v1/indicators?deviceType=enb" "{\"device_type\":\"ENB\",\"en_name\":\"${SMOKE_TAG}_kpi\",\"cn_name\":\"冒烟自定义指标\",\"en_description\":\"smoke custom kpi\",\"group_id\":\"${GRP_ID}\",\"data_type\":\"float\",\"operator_code\":\"default\"}"
     check_status "自定义指标创建（#99 路径）" 201
     CUST_IND_ID=$(jget data.id)
@@ -480,22 +514,20 @@ else
     req POST "/api/v1/indicators?deviceType=enb" "{\"device_type\":\"ENB\",\"en_name\":\"${SMOKE_TAG}_bad\",\"cn_name\":\"x\",\"group_id\":\"${GRP_ID}\",\"arithmetic\":\"NOT_AN_ID+1\"}"
     check_ret_fail "非法 arithmetic 被 FormulaValidator 拒绝"
 
-    # 带公式创建探针：合法公式引用真实 builtin 计数器，理应 201。
-    # 现状：indicator loader 只建 default 占位组、1408 条指标的 group_id 全部
-    # 悬空（不在 indicator_group_enb），buildIDMap 按"组→组内指标"遍历恒为空
-    # → FormulaValidator 把所有合法公式一律误拒 400 "Expression is invalid"。
-    # 修复后本探针自动转 PASS（known_bug → pass + 清理断言）。
+    # 带公式创建闭环（#134 修复后硬断言）：合法公式引用真实 builtin 计数器 → 201。
+    # 历史 bug：buildIDMap 按"组→组内指标"遍历，但 loader 只建 default 占位组、
+    # 指标 group_id 全部悬空 → idMap 恒空 → FormulaValidator 误拒一切合法公式
+    # （400 "Expression is invalid"）。修复（#134）：buildIDMap 改为直接 ListAll
+    # 该 deviceType 全部指标构建 idMap，绕开组表。建→201→自清理应全通。
     if [ -n "$CTR_ID" ]; then
         req POST "/api/v1/indicators?deviceType=enb" "{\"device_type\":\"ENB\",\"en_name\":\"${SMOKE_TAG}_arith\",\"cn_name\":\"冒烟公式指标\",\"group_id\":\"${GRP_ID}\",\"arithmetic\":\"${CTR_ID}*100\"}"
-        if [ "$HTTP_CODE" = "201" ]; then
-            pass "带公式创建自定义指标（引用 builtin 计数器 ${CTR_ID}）→ 201"
-            ARITH_ID=$(jget data.id)
-            if [ -n "$ARITH_ID" ]; then
-                req DELETE "/api/v1/indicators/${ARITH_ID}?deviceType=enb"
-                check_ret_ok "带公式指标删除成功（自清理）"
-            fi
+        check_status "带公式创建自定义指标（引用 builtin 计数器 ${CTR_ID}）→ 201" 201
+        ARITH_ID=$(jget data.id)
+        if [ -n "$ARITH_ID" ]; then
+            req DELETE "/api/v1/indicators/${ARITH_ID}?deviceType=enb"
+            check_ret_ok "带公式指标删除成功（自清理）"
         else
-            known_bug "带公式创建自定义指标（引用 builtin 计数器 ${CTR_ID}）" "buildIDMap 依赖组→指标遍历，loader 只建 default 占位组致 idMap 恒空，合法公式被误拒（HTTP ${HTTP_CODE}：$(jget msg)）"
+            fail "带公式指标返回 id（供自清理）" "创建未返回 data.id"
         fi
     else
         skip "带公式创建自定义指标探针" "未取到 builtin 计数器 id"
@@ -556,5 +588,115 @@ if [ -n "$IND_ID" ]; then
 else
     skip "指标启用/禁用闭环" "指标分页列表未取到指标 id"
 fi
+
+# ───────────────────────────────────────────────────────────────────────────
+section "16. enabled-indicators REST PUT 可逆闭环（GET 留底 → PUT 设置 → 还原）"
+# ───────────────────────────────────────────────────────────────────────────
+# REST PUT /enabled-indicators 与 section 15 的 legacy enableIndicator 同语义，
+# 但走 RESTful 入口（body {indicator_ids, enable}）。先 GET 留底当前启用态，
+# PUT 翻转后按留底还原，确保零净副作用。
+req GET "/api/v1/enabled-indicators?deviceType=enb&operatorCode=default"
+check_ret_ok "REST 启用指标集可读（GET 留底）"
+REST_ORIG_ENABLED=$(jget data.items)
+
+if [ -n "$IND_ID" ]; then
+    REST_WAS_ENABLED=0
+    printf '%s' "$REST_ORIG_ENABLED" | grep -F "\"${IND_ID}\"" >/dev/null 2>&1 && REST_WAS_ENABLED=1
+
+    if [ "$REST_WAS_ENABLED" = "1" ]; then
+        # 原本已启用 → PUT 禁用验证可逆，再还原启用
+        req PUT "/api/v1/enabled-indicators?deviceType=enb&operatorCode=default" "{\"indicator_ids\":[\"${IND_ID}\"],\"enable\":false}"
+        check_ret_ok "REST PUT 禁用指标成功（id=${IND_ID}）"
+        req GET "/api/v1/enabled-indicators?deviceType=enb&operatorCode=default"
+        if printf '%s' "$(jget data.items)" | grep -F "\"${IND_ID}\"" >/dev/null 2>&1; then
+            fail "REST PUT 禁用后移出生效集" "id=${IND_ID} 仍在 enabled-indicators"
+        else
+            pass "REST PUT 禁用后移出生效集"
+        fi
+        req PUT "/api/v1/enabled-indicators?deviceType=enb&operatorCode=default" "{\"indicator_ids\":[\"${IND_ID}\"],\"enable\":true}"
+        check_ret_ok "REST PUT 还原原本启用态"
+    else
+        # 原本未启用 → PUT 启用验证可逆，再还原禁用
+        req PUT "/api/v1/enabled-indicators?deviceType=enb&operatorCode=default" "{\"indicator_ids\":[\"${IND_ID}\"],\"enable\":true}"
+        check_ret_ok "REST PUT 启用指标成功（id=${IND_ID}）"
+        req GET "/api/v1/enabled-indicators?deviceType=enb&operatorCode=default"
+        if printf '%s' "$(jget data.items)" | grep -F "\"${IND_ID}\"" >/dev/null 2>&1; then
+            pass "REST PUT 启用后出现在生效集"
+        else
+            fail "REST PUT 启用后出现在生效集" "id=${IND_ID} 不在 enabled-indicators"
+        fi
+        req PUT "/api/v1/enabled-indicators?deviceType=enb&operatorCode=default" "{\"indicator_ids\":[\"${IND_ID}\"],\"enable\":false}"
+        check_ret_ok "REST PUT 还原原本禁用态"
+    fi
+else
+    skip "enabled-indicators REST PUT 可逆闭环" "未取到指标 id"
+fi
+
+# 负路径：缺 indicator_ids（binding:"required"）→ 400
+req PUT "/api/v1/enabled-indicators?deviceType=enb&operatorCode=default" '{"enable":true}'
+check_ret_fail "REST PUT 缺 indicator_ids 被拒绝"
+
+req PUT "/api/v1/enabled-indicators" "{\"indicator_ids\":[\"${IND_ID:-C1}\"],\"enable\":true}"
+check_ret_fail "REST PUT 缺 deviceType 被拒绝"
+
+# ───────────────────────────────────────────────────────────────────────────
+section "17. indicator-groups REST CRUD 闭环（自建 ${SMOKE_TAG} 组→改→删）"
+# ───────────────────────────────────────────────────────────────────────────
+# 红线：写操作只针对 ${SMOKE_TAG} 自建分组（is_build_in=0），结束前删除；
+# 自建组挂在 builtin default 组下（parent_id），不触碰任何 builtin 分组。
+# 注：REST CreateGroup 虽从 query 取 deviceType，但 body 绑定 CreateGroupRequest
+# 的 device_type 仍标 binding:"required"，故 body 也须带 device_type（见 suspectedBugs）。
+req GET "/api/v1/indicator-groups?deviceType=enb"
+check_ret_ok "REST 指标分组树可查（取 parent 候选）"
+GRP_PARENT=$(jget data.items.0.id)
+[ -z "$GRP_PARENT" ] && GRP_PARENT="default"
+
+req POST "/api/v1/indicator-groups?deviceType=enb" "{\"device_type\":\"ENB\",\"en_name\":\"${SMOKE_TAG}-grp\",\"cn_name\":\"冒烟自定义分组\",\"parent_id\":\"${GRP_PARENT}\",\"operator_code\":\"default\"}"
+check_status "自定义分组创建" 201
+NEW_GRP_ID=$(jget data.id)
+check_field "分组创建返回 id" "data.id"
+GRP_IS_BUILTIN=$(jget data.is_build_in)
+if [ "$GRP_IS_BUILTIN" = "0" ]; then
+    pass "新建分组为 custom（is_build_in=0）"
+else
+    fail "新建分组为 custom（is_build_in=0）" "实际 is_build_in='${GRP_IS_BUILTIN}'"
+fi
+
+if [ -n "$NEW_GRP_ID" ]; then
+    req PUT "/api/v1/indicator-groups/${NEW_GRP_ID}?deviceType=enb" "{\"en_name\":\"${SMOKE_TAG}-grp-v2\",\"cn_name\":\"冒烟分组-改\"}"
+    check_ret_ok "自定义分组更新成功"
+    GRP_NEW_NAME=$(jget data.en_name)
+    if [ "$GRP_NEW_NAME" = "${SMOKE_TAG}-grp-v2" ]; then
+        pass "更新响应 en_name 回读一致"
+    else
+        fail "更新响应 en_name 回读一致" "期望 ${SMOKE_TAG}-grp-v2，实际 '${GRP_NEW_NAME}'"
+    fi
+
+    req DELETE "/api/v1/indicator-groups/${NEW_GRP_ID}?deviceType=enb"
+    check_ret_ok "自定义分组删除成功（自清理）"
+    DEL_FLAG=$(jget data.deleted)
+    if [ "$DEL_FLAG" = "True" ] || [ "$DEL_FLAG" = "true" ]; then
+        pass "删除响应 deleted=true"
+    else
+        fail "删除响应 deleted=true" "实际 deleted='${DEL_FLAG}'"
+    fi
+
+    # 删后再查分组树确认不复现（按名字过滤）
+    req GET "/api/v1/indicator-groups?deviceType=enb"
+    if printf '%s' "$BODY" | grep -F "${SMOKE_TAG}-grp" >/dev/null 2>&1; then
+        fail "已删分组不再出现在分组树" "分组树仍含 ${SMOKE_TAG}-grp"
+    else
+        pass "已删分组不再出现在分组树"
+    fi
+else
+    skip "自定义分组 更新/删除" "创建未返回 id，闭环中断"
+fi
+
+# 负路径
+req POST "/api/v1/indicator-groups?deviceType=enb" "{\"device_type\":\"ENB\",\"en_name\":\"${SMOKE_TAG}-bad\"}"
+check_ret_fail "分组创建缺 parent_id 被拒绝"
+
+req POST "/api/v1/indicator-groups?deviceType=LTE" "{\"device_type\":\"ENB\",\"en_name\":\"${SMOKE_TAG}-bad\",\"parent_id\":\"${GRP_PARENT}\"}"
+check_ret_fail "分组创建非法 deviceType=LTE 被拒绝"
 
 smoke_summary

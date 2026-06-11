@@ -14,6 +14,10 @@ import { expectPageRenders, smokeLogin } from './helpers';
  *   - /topology/site     → src/pages/Topology/SiteManagement/index.tsx
  *       ListPageLayout 标题 nav.topology.site（站点管理）+ FilterBar 表单（.ant-form）
  *       + DataTable（.ant-table，真实栈数据稀疏，空表也有表头）。
+ *   - /topology/settings → src/pages/Topology/TopologySettings/index.tsx
+ *       纯前端静态设置表单（无后端依赖）：ListPageLayout 标题 nav.topology.settings（拓扑设置，
+ *       与侧边栏菜单同名 → 收窄到 main 断言）+ 提示文案 topology.settings.hint（页面唯一）
+ *       + antd Collapse 分组（.ant-collapse，布局算法/交互设置等）+ 保存按钮 common.save。
  */
 test.describe('拓扑管理冒烟（真实后端）', { tag: '@smoke' }, () => {
   test.beforeEach(async ({ page }) => {
@@ -60,5 +64,25 @@ test.describe('拓扑管理冒烟（真实后端）', { tag: '@smoke' }, () => {
 
     // 新增按钮
     await expect(page.getByRole('button', { name: /新增|Add/ }).first()).toBeVisible();
+  });
+
+  test('/topology/settings 渲染，标题 / 提示文案 / 设置分组可见', async ({ page }) => {
+    await expectPageRenders(page, '/topology/settings');
+
+    // 页面标题（nav.topology.settings：拓扑设置）——与侧边栏菜单同名，收窄到 main
+    await expect(
+      page.locator('main').getByText(/拓扑设置|Topology Settings/).first(),
+    ).toBeVisible();
+
+    // 页面唯一提示文案（topology.settings.hint）
+    await expect(
+      page.getByText(/将影响拓扑图的显示效果|affect the topology display/).first(),
+    ).toBeVisible();
+
+    // antd Collapse 设置分组骨架已渲染
+    await expect(page.locator('.ant-collapse').first()).toBeVisible();
+
+    // 保存按钮（common.save）
+    await expect(page.getByRole('button', { name: /保存|Save/ }).first()).toBeVisible();
   });
 });

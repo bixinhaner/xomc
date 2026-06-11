@@ -21,6 +21,10 @@ import { expectPageRenders, smokeLogin } from './helpers';
  *       两张 Card：perf.adhoc.cardBuiltin（内置聚合任务 / Built-in Aggregation Tasks）
  *       + perf.adhoc.cardCustom（自建聚合任务 / Custom Aggregation Tasks）、
  *       自建区「新建任务 / New Task」按钮（perf.adhoc.btnNewTask）、任务 Table 骨架。
+ *   - /performance/pm-adhoc/new → pages/performance/PmAdhoc/PmAdhocWizard.tsx
+ *       整页 5 步向导外壳 Card 标题 perf.adhoc.wizardTitle
+ *       （新建自定义聚合任务 / New Custom Aggregation Task）、横向 Steps（.ant-steps）、
+ *       第1步基本信息：任务名输入 + 「下一步 / Next」按钮（perf.adhoc.btnNext）。
  *   - /performance/device-view → pages/performance/PmDashboard/DeviceListPane.tsx
  *       条件区 Form：制式 Segmented（LTE/NR/GSM）+「出图 / Plot」按钮
  *       （perf.dashboard.btnPlot）；未出图时空态文案 perf.dashboard.emptyPickConditions
@@ -102,6 +106,25 @@ test.describe('性能管理冒烟（真实后端）', { tag: '@smoke' }, () => {
       page.locator('main').getByRole('button', { name: /新建任务|New Task/ }),
     ).toBeVisible();
     await expect(page.locator('main .ant-table').first()).toBeVisible();
+  });
+
+  test('/performance/pm-adhoc/new 新建向导渲染，向导标题/步骤条/下一步按钮可见', async ({ page }) => {
+    await expectPageRenders(page, '/performance/pm-adhoc/new');
+
+    // 整页向导外壳 Card 标题（perf.adhoc.wizardTitle）
+    await expect(
+      page
+        .locator('.ant-card-head-title')
+        .filter({ hasText: /新建自定义聚合任务|New Custom Aggregation Task/ }),
+    ).toBeVisible();
+
+    // 横向 5 步 Steps 步骤条骨架
+    await expect(page.locator('main .ant-steps').first()).toBeVisible();
+
+    // 「下一步」按钮（perf.adhoc.btnNext，向导底部导航）
+    await expect(
+      page.locator('main').getByRole('button', { name: /^(下一步|Next)$/ }),
+    ).toBeVisible();
   });
 
   test('/performance/device-view 设备性能查看渲染，制式切换/出图按钮/空态提示可见', async ({ page }) => {

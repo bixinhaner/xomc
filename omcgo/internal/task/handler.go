@@ -1,6 +1,7 @@
 package task
 
 import (
+	stderrors "errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -181,7 +182,7 @@ func (h *Handler) CancelTask(c *gin.Context) {
 			zap.Error(err),
 			zap.String("task_id", taskID))
 
-		if err.Error() == "task not found" {
+		if stderrors.Is(err, ErrTaskNotFound) {
 			errors.AbortWithError(c, http.StatusNotFound, errors.ErrNotFound)
 			return
 		}

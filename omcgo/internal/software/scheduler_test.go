@@ -64,13 +64,14 @@ func TestApplyScheduleMode(t *testing.T) {
 		require.NotNil(t, task.ScheduledAt)
 		assert.True(t, time.Time(*task.ScheduledAt).Equal(at))
 	})
-	t.Run("suspended 模式清空 scheduled_at", func(t *testing.T) {
+	t.Run("suspended 模式落 TaskSuspended 并清空 scheduled_at", func(t *testing.T) {
 		at := time.Date(2026, 6, 1, 8, 30, 0, 0, time.UTC)
 		mt := model.Time(at)
 		task := &UpgradeTask{ScheduledAt: &mt}
 		applyScheduleMode(task, scheduleModeSuspended, nil)
 
-		assert.Equal(t, TaskPending, task.Status)
+		// #138：挂起统一落 TaskSuspended（历史 bug 落 TaskPending，导致 ufte 回显 immediate）。
+		assert.Equal(t, TaskSuspended, task.Status)
 		assert.Equal(t, CreateStatusActive, task.CreateStatus)
 		assert.Nil(t, task.ScheduledAt)
 	})

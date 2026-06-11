@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/core/appconfig"
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/device"
@@ -253,10 +254,10 @@ func (s *Service) DownloadURL(ctx context.Context, id uuid.UUID, logType LogType
 		return "", fmt.Errorf("get log file: %w", err)
 	}
 	if f == nil {
-		return "", fmt.Errorf("log file not found")
+		return "", fmt.Errorf("log file not found: %w", commonerrors.ErrNotFound)
 	}
 	if f.IsDeleted {
-		return "", fmt.Errorf("log file has been deleted")
+		return "", fmt.Errorf("log file has been deleted: %w", commonerrors.ErrNotFound)
 	}
 
 	presignedURL, err := s.minioClient.PresignedGetObject(ctx, f.Bucket, f.ObjectPath, time.Hour, nil)
@@ -275,7 +276,7 @@ func (s *Service) Delete(ctx context.Context, id uuid.UUID, logType LogType) err
 		return fmt.Errorf("get log file: %w", err)
 	}
 	if f == nil {
-		return fmt.Errorf("log file not found")
+		return fmt.Errorf("log file not found: %w", commonerrors.ErrNotFound)
 	}
 
 	if !f.IsDeleted {

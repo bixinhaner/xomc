@@ -2,9 +2,16 @@ import { test, expect } from '@playwright/test';
 import { expectPageRenders, smokeLogin } from './helpers';
 
 /**
- * 系统管理域冒烟（真实后端）：5 个页面渲染不崩 + 关键骨架元素可见。
+ * 系统管理域冒烟（真实后端）：7 个页面渲染不崩 + 关键骨架元素可见。
  *
  * 选择器依据：
+ *   - /system/operation-log → src/pages/system/OperationLog/index.tsx
+ *       （re-export src/pages/log/OperationLog/index.tsx）四类日志 Tabs
+ *       （log.operationLog 操作日志 / Operation Log 等 4 个 tab）+ 导出按钮
+ *       （common.export 导出 / Export）+ .ant-table（空表也有表头）
+ *   - /system/api-management → src/pages/system/ApiManagement/index.tsx
+ *       FilterBar + 工具栏按钮（同步 / Sync、批量删除 / Batch Delete、新增 / Add）
+ *       + .ant-table；注意 api.name 文案是「简介 / Summary」非「名称」
  *   - /system/users  → src/pages/system/UserManagement/index.tsx
  *       无页面标题（2026-06-03 决策移除），断言 FilterBar 标签
  *       user.userName（用户名称 / Username）+ 新增按钮 + .ant-table
@@ -24,6 +31,34 @@ import { expectPageRenders, smokeLogin } from './helpers';
 test.describe('系统管理冒烟（真实后端）', { tag: '@smoke' }, () => {
   test.beforeEach(async ({ page }) => {
     await smokeLogin(page);
+  });
+
+  test('/system/operation-log 操作日志渲染，日志 Tabs + 导出按钮 + 表格骨架可见', async ({ page }) => {
+    await expectPageRenders(page, '/system/operation-log');
+
+    // 四类日志 Tabs 容器
+    await expect(page.locator('.ant-tabs').first()).toBeVisible({ timeout: 30_000 });
+    await expect(
+      page.locator('.ant-tabs-tab').filter({ hasText: /操作日志|Operation Log/ }).first(),
+    ).toBeVisible();
+    await expect(
+      page.locator('.ant-tabs-tab').filter({ hasText: /安全日志|Security Log/ }).first(),
+    ).toBeVisible();
+    // 导出按钮（common.export 导出 / Export）
+    await expect(page.getByRole('button', { name: /导出|Export/ }).first()).toBeVisible();
+    // 日志列表表格骨架（空表也有表头）
+    await expect(page.locator('.ant-table').first()).toBeVisible({ timeout: 30_000 });
+  });
+
+  test('/system/api-management API 管理渲染，工具栏按钮 + 表格骨架可见', async ({ page }) => {
+    await expectPageRenders(page, '/system/api-management');
+
+    // 工具栏按钮（同步 / Sync、批量删除 / Batch Delete、新增 / Add）
+    await expect(page.getByRole('button', { name: /同步|Sync/ }).first()).toBeVisible();
+    await expect(page.getByRole('button', { name: /批量删除|Batch Delete/ }).first()).toBeVisible();
+    await expect(page.getByRole('button', { name: /新增|Add/ }).first()).toBeVisible();
+    // API 端点列表表格骨架（空表也有表头）
+    await expect(page.locator('.ant-table').first()).toBeVisible({ timeout: 30_000 });
   });
 
   test('/system/users 用户管理渲染，筛选条 + 表格骨架可见', async ({ page }) => {

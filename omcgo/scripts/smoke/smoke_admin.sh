@@ -72,12 +72,16 @@ check_field "角色首条含 id" "data.items.0.id"
 req GET "/api/v1/admin/roles/all"
 check_list_nonempty "GET /admin/roles/all 不分页下拉非空" "data"
 
-# 已知问题探针（只读）：roles 列表 search 参数被后端忽略 —— 用一个必然不存在的
-# search 值查询，若返回 0 条说明过滤已修复（自动转正常断言）
+# roles 列表 search 过滤已修复（issue #135：pg_role_repository.ListWithPagination
+# 现接入 RoleFilter.Search 到 name/description ILIKE，且 COUNT 与数据查询共用同一
+# WHERE）。用一个必然不存在的 search 值查询，应返回 0 条且 total=0（硬断言）。
 req GET "/api/v1/admin/roles?page=1&page_size=100&search=${SMOKE_TAG}-no-such-role"
 RN_SEARCH=$(jlen data.items)
-if [ "$RN_SEARCH" = "0" ]; then pass "GET /admin/roles?search= 过滤生效（返回 0 条）"
-else known_bug "GET /admin/roles?search= 过滤生效" "search 被忽略返回全量 ${RN_SEARCH} 条（pg_role_repository.ListWithPagination 未使用 RoleFilter.Search，且 count 查询不带任何过滤条件）"; fi
+RN_TOTAL=$(jget data.total)
+if [ "$RN_SEARCH" = "0" ]; then pass "GET /admin/roles?search= 过滤生效（不存在值返回 0 条）"
+else fail "GET /admin/roles?search= 过滤生效（不存在值返回 0 条）" "search 应过滤返回 0 条，实际 ${RN_SEARCH} 条"; fi
+if [ "$RN_TOTAL" = "0" ]; then pass "GET /admin/roles?search= COUNT 同步过滤（total=0）"
+else fail "GET /admin/roles?search= COUNT 同步过滤（total=0）" "COUNT 应同步过滤，total 应为 0，实际 ${RN_TOTAL}"; fi
 
 req GET "/api/v1/admin/menus?page=1&page_size=50"
 check_list_nonempty "GET /admin/menus 菜单列表非空（内置菜单）" "data.items"
@@ -231,7 +235,12 @@ if [ -n "$PWD_UID" ]; then
     if [ -n "$U_TOKEN2" ]; then pass "改密后新密码登录成功"
     else fail "改密后新密码登录成功" "login 未返回 access_token"; fi
 
-    # 6) force-logout 强退自建用户：其已签发 token 立即失效（撤销时间戳含同秒 <=）
+    # 6) force-logout 强退自建用户：撤销时刻之前签发的 token 立即失效（token_revoker
+    #    秒级精度，#139/#141：撤销戳取 now + IsRevoked 严格小于，强退对早于强退秒签发的
+    #    token 生效、同秒签发的新 token 不被踢）。冒烟自建用户登录到强退常压在同一秒内，
+    #    sleep 1 让旧 token 确定性早于强退秒——模拟真实场景（token 签发后过一会才被强退），
+    #    断言测的是 force-logout 的真实跨秒契约，而非秒级同秒边界。
+    sleep 1
     req POST "/api/v1/admin/users/force-logout" "{\"user_ids\":[\"$PWD_UID\"]}"
     check_ret_ok "POST /admin/users/force-logout 强退自建用户"
     check_field "强退返回 revoked 计数" "data.revoked"
@@ -275,6 +284,15 @@ req POST "/api/v1/admin/roles" "{\"name\":\"${SMOKE_TAG}-role\",\"description\":
 check_ret_ok "POST /admin/roles 创建角色 ${SMOKE_TAG}-role"
 check_field "创建返回角色 id" "data.id"
 ROLE_ID=$(jget data.id)
+
+# 正向 search 过滤断言（issue #135）：按刚建角色名精确 search，应只命中这 1 条且 total=1。
+req GET "/api/v1/admin/roles?page=1&page_size=100&search=${SMOKE_TAG}-role"
+RS_ITEMS=$(jlen data.items)
+RS_TOTAL=$(jget data.total)
+if [ "$RS_ITEMS" = "1" ]; then pass "GET /admin/roles?search=自建角色名 命中 1 条"
+else fail "GET /admin/roles?search=自建角色名 命中 1 条" "应命中 1 条，实际 ${RS_ITEMS} 条（search 过滤未生效？）"; fi
+if [ "$RS_TOTAL" = "1" ]; then pass "GET /admin/roles?search= COUNT 同步过滤（total=1）"
+else fail "GET /admin/roles?search= COUNT 同步过滤（total=1）" "COUNT 应同步过滤 total=1，实际 ${RS_TOTAL}"; fi
 
 if [ -n "$ROLE_ID" ]; then
     req GET "/api/v1/admin/roles/$ROLE_ID"
@@ -388,6 +406,128 @@ req POST "/api/v1/admin/roles" "{}"
 check_ret_fail "POST /admin/roles 缺 name 被拒"
 req POST "/api/v1/admin/roles/$NIL_UUID/copy"
 check_ret_fail "POST /admin/roles/<不存在ID>/copy 被拒"
+
+# ---------------------------------------------------------------------------
+section "菜单 CRUD 闭环（POST 自建→GET→PUT 改→DELETE 删，绝不动内置菜单）"
+# ---------------------------------------------------------------------------
+# CreateMenuRequest 必填 name/type/permission_key（menu_handler.go::CreateMenu）。
+# 全程仅作用于 ${SMOKE_TAG} 前缀的自建菜单：permission_key 带 tag 保证不撞内置项，
+# DELETE 只传自建菜单自身 id（DeleteMenus 接受 body {ids:[...]}，按 id 精确删）。
+SMK_MENU_NAME="${SMOKE_TAG}menu"
+SMK_MENU_PK="smoke:${SMOKE_TAG}:view"
+req POST "/api/v1/admin/menus" "{\"name\":\"$SMK_MENU_NAME\",\"type\":\"menu\",\"permission_key\":\"$SMK_MENU_PK\",\"route_path\":\"/smoke/${SMOKE_TAG}\",\"sort_order\":9001,\"show_status\":\"hide\"}"
+check_ret_ok "POST /admin/menus 创建自建菜单 ${SMK_MENU_NAME}"
+check_field "创建返回菜单 id" "data.id"
+MENU_NEW_ID=$(jget data.id)
+MV=$(jget data.permission_key)
+if [ "$MV" = "$SMK_MENU_PK" ]; then pass "创建回显 permission_key 一致 ($MV)"
+else fail "创建回显 permission_key 一致" "期望 ${SMK_MENU_PK}，实际 ${MV}"; fi
+
+if [ -n "$MENU_NEW_ID" ]; then
+    req GET "/api/v1/admin/menus/$MENU_NEW_ID"
+    check_ret_ok "GET /admin/menus/:id 自建菜单详情可查"
+    MN=$(jget data.name)
+    if [ "$MN" = "$SMK_MENU_NAME" ]; then pass "详情 name 回读一致 ($MN)"
+    else fail "详情 name 回读一致" "期望 ${SMK_MENU_NAME}，实际 ${MN}"; fi
+
+    # PUT 改 name + sort_order（UpdateMenuRequest 指针字段，仅传需变更项）；
+    # UpdateMenu 返回 {success:true}，故改后用 GET 回读校验。
+    req PUT "/api/v1/admin/menus/$MENU_NEW_ID" "{\"name\":\"${SMK_MENU_NAME}-upd\",\"sort_order\":9002}"
+    check_ret_ok "PUT /admin/menus/:id 修改自建菜单"
+    req GET "/api/v1/admin/menus/$MENU_NEW_ID"
+    MN=$(jget data.name)
+    MS=$(jget data.sort_order)
+    if [ "$MN" = "${SMK_MENU_NAME}-upd" ]; then pass "菜单 name 已更新 ($MN)"
+    else fail "菜单 name 已更新" "期望 ${SMK_MENU_NAME}-upd，实际 ${MN}"; fi
+    if [ "$MS" = "9002" ]; then pass "菜单 sort_order 已更新 (=$MS)"
+    else fail "菜单 sort_order 已更新" "期望 9002，实际 ${MS}"; fi
+
+    # DELETE 仅删自建菜单（body {ids:[自建id]}），绝不触达内置菜单
+    req DELETE "/api/v1/admin/menus" "{\"ids\":[\"$MENU_NEW_ID\"]}"
+    check_ret_ok "DELETE /admin/menus 删除自建菜单（仅传自建 id）"
+    req GET "/api/v1/admin/menus/$MENU_NEW_ID"
+    check_ret_fail "删除后 GET 菜单详情应 404"
+else
+    skip "菜单详情/改/删链" "菜单创建失败，无 id 可用"
+fi
+
+# 菜单域负路径（不触达内置菜单）
+req POST "/api/v1/admin/menus" "{\"name\":\"${SMOKE_TAG}nopk\",\"type\":\"menu\"}"
+check_ret_fail "POST /admin/menus 缺 permission_key 被拒（binding required）"
+req GET "/api/v1/admin/menus/not-a-uuid"
+check_ret_fail "GET /admin/menus/<非法UUID> 被拒"
+req PUT "/api/v1/admin/menus/$NIL_UUID" "{\"name\":\"${SMOKE_TAG}x\"}"
+check_ret_fail "PUT /admin/menus/<不存在ID> 被拒"
+
+# ---------------------------------------------------------------------------
+section "用户角色分配闭环（建用户+角色→POST 分配→GET 校验→DELETE 移除）"
+# ---------------------------------------------------------------------------
+# 自建一个用户 + 一个角色，走 POST /admin/users/:id/roles 分配（AssignRoleRequest
+# 仅 role_id），GET /admin/users/:id 回读 data.roles 含该角色 id，再 DELETE
+# /admin/users/:id/roles/:roleId 移除并回读为空。全程仅作用于自建实体。
+RA_USER="${SMOKE_TAG}rauser"
+ENC_RA=$(encrypt_password "Smk@Pass123")
+req POST "/api/v1/admin/users" "{\"username\":\"$RA_USER\",\"encrypted_password\":\"$ENC_RA\",\"key_id\":\"$PUBLIC_KEY_ID\",\"display_name\":\"冒烟角色分配用户\",\"description\":\"smoke ${SMOKE_TAG}\"}"
+check_ret_ok "POST /admin/users 创建角色分配用户 ${RA_USER}"
+RA_UID=$(jget data.id)
+
+req POST "/api/v1/admin/roles" "{\"name\":\"${SMOKE_TAG}-rarole\",\"description\":\"冒烟角色分配角色\"}"
+check_ret_ok "POST /admin/roles 创建角色分配角色"
+RA_RID=$(jget data.id)
+
+# 在 data.roles 列表中按 id 查找下标（找不到输出空），bash 3.2 兼容
+find_role_idx_by_id() {
+    local target="$1" n i v
+    n=$(jlen data.roles)
+    i=0
+    while [ "$i" -lt "$n" ]; do
+        v=$(jget "data.roles.$i.id")
+        if [ "$v" = "$target" ]; then echo "$i"; return 0; fi
+        i=$((i + 1))
+    done
+    echo ""
+}
+
+if [ -n "$RA_UID" ] && [ -n "$RA_RID" ]; then
+    req POST "/api/v1/admin/users/$RA_UID/roles" "{\"role_id\":\"$RA_RID\"}"
+    check_ret_ok "POST /admin/users/:id/roles 给自建用户分配角色"
+
+    req GET "/api/v1/admin/users/$RA_UID"
+    check_ret_ok "GET /admin/users/:id 分配后用户详情可查"
+    RIDX=$(find_role_idx_by_id "$RA_RID")
+    if [ -n "$RIDX" ]; then pass "用户 roles 含已分配角色 (data.roles.$RIDX)"
+    else fail "用户 roles 含已分配角色" "role_id=${RA_RID} 未出现在 data.roles"; fi
+
+    req DELETE "/api/v1/admin/users/$RA_UID/roles/$RA_RID"
+    check_ret_ok "DELETE /admin/users/:id/roles/:roleId 移除角色"
+
+    req GET "/api/v1/admin/users/$RA_UID"
+    RIDX=$(find_role_idx_by_id "$RA_RID")
+    if [ -z "$RIDX" ]; then pass "移除后用户 roles 不再含该角色"
+    else fail "移除后用户 roles 不再含该角色" "role_id=${RA_RID} 仍在 data.roles.$RIDX"; fi
+else
+    skip "用户角色分配闭环" "用户或角色创建失败，无 id 可用"
+fi
+
+# 用户角色分配负路径（不触达内置用户/角色）
+if [ -n "$RA_UID" ]; then
+    req POST "/api/v1/admin/users/$RA_UID/roles" "{\"role_id\":\"$NIL_UUID\"}"
+    check_ret_fail "POST /admin/users/:id/roles 分配不存在角色被拒"
+    req POST "/api/v1/admin/users/$RA_UID/roles" "{}"
+    check_ret_fail "POST /admin/users/:id/roles 缺 role_id 被拒"
+fi
+req POST "/api/v1/admin/users/not-a-uuid/roles" "{\"role_id\":\"$NIL_UUID\"}"
+check_ret_fail "POST /admin/users/<非法UUID>/roles 被拒"
+
+# 清理：移除自建用户 + 自建角色
+if [ -n "$RA_UID" ]; then
+    req DELETE "/api/v1/admin/users/$RA_UID"
+    check_ret_ok "DELETE 角色分配用户（清理）"
+fi
+if [ -n "$RA_RID" ]; then
+    req DELETE "/api/v1/admin/roles/$RA_RID"
+    check_ret_ok "DELETE 角色分配角色（清理）"
+fi
 
 # ---------------------------------------------------------------------------
 section "API Key 闭环（签发→列表→吊销）"

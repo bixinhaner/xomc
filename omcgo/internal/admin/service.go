@@ -57,6 +57,22 @@ var (
 	ErrLDAPPasswordExternal = fmt.Errorf("LDAP user password is managed externally: %w", commonerrors.ErrAlreadyExists)
 )
 
+// builtInRoleIDs 固定内置角色 UUID 白名单（admin / operator / viewer）。
+// 删除保护的兜底口径：即便某环境 roles.is_system 标记被错误改写（issue #136 的
+// operator/viewer 历史误标 false），这三个内置角色仍不可删除。与 seed/000036
+// 把 is_system 收紧为 true 形成双重保护（白名单 + is_system 双重判定）。
+var builtInRoleIDs = map[uuid.UUID]struct{}{
+	uuid.MustParse("10000000-0000-0000-0000-000000000001"): {}, // admin
+	uuid.MustParse("10000000-0000-0000-0000-000000000002"): {}, // operator
+	uuid.MustParse("10000000-0000-0000-0000-000000000003"): {}, // viewer
+}
+
+// isBuiltInRole 判定给定角色 ID 是否为固定内置角色。
+func isBuiltInRole(id uuid.UUID) bool {
+	_, ok := builtInRoleIDs[id]
+	return ok
+}
+
 // PermissionInvalidator 抽象 PermissionService 的失效操作，便于注入与测试。
 // 详见 PRD docs/prd/system/users.md §10 DoD「数据权限缓存一致性」。
 type PermissionInvalidator interface {
@@ -236,8 +252,9 @@ func (s *AdminService) Login(ctx context.Context, username, password string) (*T
 	// ⑩ 单点登录（sys_configs security.isOnlyOneUserLoginEnable）：
 	//   FE 字段语义为"允许多端并发登录"，true=允许多端 / false=单点登录。
 	//   policy.AllowConcurrent=false 时，新登录前先把该用户所有现存 token 标
-	//   记为撤销（写 redis revokedAt=now）。新 token iat>=now，IsRevoked 用
-	//   严格 < 比较，新 token 不会被自己踢；旧 token iat<now 一定被踢。
+	//   记为撤销（写 redis revokedAt=now-1，见 TokenRevoker.Revoke）。新 token
+	//   iat==now，IsRevoked 用 `iat<=revokedAt` 比较即 `now<=now-1` 为假 → 新 token
+	//   不会被自己踢；旧 token iat<=now-1 一定被踢（issue #139）。
 	//   Revoker / Policy 任一未注入则跳过（fail-safe — 不阻塞登录）。
 	if s.policy != nil && s.revoker != nil {
 		if !s.policy.Get(ctx).AllowConcurrent {
@@ -929,6 +946,11 @@ func (s *AdminService) UpdateRole(ctx context.Context, id uuid.UUID, req UpdateR
 // PRD roles.md §10 DoD：删除前先取该角色用户列表（之后 user_roles 由 ON DELETE CASCADE
 // 自动清空），删库成功后再逐一失效这些用户的权限缓存。
 func (s *AdminService) DeleteRole(ctx context.Context, id uuid.UUID) error {
+	// 固定内置 UUID 白名单兜底：admin/operator/viewer 三个内置角色一律不可删除，
+	// 即便 is_system 标记在某环境被错误改写也拦得住（issue #136 双重保护）。
+	if isBuiltInRole(id) {
+		return commonerrors.ErrForbidden
+	}
 	userIDs, err := s.roleRepo.ListUserIDsByRole(ctx, id)
 	if err != nil {
 		s.logger.Warn("list users by role before delete failed",

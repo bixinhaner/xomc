@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/config/parammodel"
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/internal/product"
@@ -101,6 +102,9 @@ func (v *DataModelValidator) ValidateDevice(
 	dev, err := v.deviceRepo.GetByID(ctx, deviceID)
 	if err != nil {
 		return nil, fmt.Errorf("get device %s: %w", deviceID, err)
+	}
+	if dev == nil {
+		return nil, fmt.Errorf("device not found: %s: %w", deviceID, commonerrors.ErrNotFound)
 	}
 
 	expected, source, fwVersion, err := v.resolveExpectedParams(ctx, dev)

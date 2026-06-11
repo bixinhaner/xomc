@@ -681,6 +681,15 @@ func (h *Handler) Match(c *gin.Context) {
 		return
 	}
 	mr, err := h.registry.MatchProductClass(c.Request.Context(), productClass)
+	// ErrOrphan 不是错误：productClass 未命中任何 active pattern 是正常查询结果，
+	// 返回 200 + matched=false（与 mr==nil 兜底分支同义）。其余 err 才是真正的 5xx。
+	if errors.Is(err, ErrOrphan) {
+		response.OK(c, gin.H{
+			"matched":       false,
+			"product_class": productClass,
+		})
+		return
+	}
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return

@@ -14,7 +14,10 @@
 #      batch-delete 只测参数校验负路径
 #   7. 设备 License 库：同快照结构的读 + validate-sns + batch-delete 负路径
 #   8. restore 系列【红线】只测参数校验负路径，绝不真实下发恢复
-#   9. 运营商规范别名 POST /task/enb/config/backupRestore/queryTaskList
+#   9. 运营商规范别名（M4）/task/enb/config/backupRestore/*：
+#      - 只读查询：queryTaskList / queryCellInfos / queryTaskDeviceList（空结果容忍）
+#      - 写类红线（addBackupRestoreTask / terminateTask / single/importFile）
+#        只测参数校验负路径，绝不真实下发任务/恢复
 #
 # 注：FTP test 端点 handler 永远 response.OK 包装探测结果（success=false 表示
 #     连不通），tester 未注入时也是 200 stub —— 2xx 受理或 4xx/5xx 都算可达。
@@ -248,7 +251,15 @@ req POST "/api/v1/backup/restore" "{\"bucket\":\"firmware\",\"object_path\":\"x.
 check_ret_fail "restore 非法 bucket（只允许 config_backup）被拒"
 
 req POST "/api/v1/backup/restore" "{\"bucket\":\"config_backup\",\"object_path\":\"smoke/${SMOKE_TAG}-none.xml\",\"target_device_sns\":[\"${NOPE_SN}\"]}"
-check_ret_fail "restore 源对象不存在被拒（404）"
+# 期望：源对象不存在 → 404。活栈实际返回 500「The specified bucket is not valid.」
+# 根因：CanonicalRestoreBucket="config_backup" 含下划线，违反 S3/MinIO 桶命名规则，
+# StatObject 返回 InvalidBucketName；translateMinIONotFound 只翻 NoSuchKey/NoSuchBucket，
+# 漏了 InvalidBucketName → 落 default 500。详见 suspectedBugs。修复后改回 check_status 404。
+if [ "$HTTP_CODE" = "404" ]; then
+    check_status "restore 源对象不存在 → 精确 404（#125-backup 修复后硬断言）" 404
+else
+    known_bug "restore 源对象不存在应 404" "实际 HTTP ${HTTP_CODE}：config_backup 桶名含下划线→MinIO InvalidBucketName→translateMinIONotFound 漏翻→500，未映射 404"
+fi
 
 req POST "/api/v1/backup/restore/by-task-id" '{}'
 check_ret_fail "restore/by-task-id 缺必填字段被拒"
@@ -269,7 +280,7 @@ req GET "/api/v1/backup/restore-tasks/${NOPE_UUID}"
 check_status "查不存在恢复任务 → 404" 404
 
 # ---------------------------------------------------------------------------
-section "9. 运营商规范别名（M4）POST /task/enb/config/backupRestore/queryTaskList"
+section "9a. 规范别名 只读查询：queryTaskList / queryCellInfos / queryTaskDeviceList"
 # ---------------------------------------------------------------------------
 # body 为 ListTasksAliasRequest（嵌入 model.ListRequest，无 json tag，
 # encoding/json 按字段名大小写不敏感匹配 Page/PageSize；空 body 走默认分页）
@@ -279,5 +290,64 @@ check_list_or_empty "queryTaskList 返回任务列表" "data.items"
 
 req POST "/api/v1/task/enb/config/backupRestore/queryTaskList" '{}'
 check_ret_ok "规范别名 queryTaskList 空 body 走默认分页"
+
+# queryCellInfos：按运营商/产品类型/关键字过滤基站列表，分页返回（只读，data.items）。
+# deviceReader 在 modules.go 已注入（SetDeviceReader）；未注入时 handler 返回 503。
+req POST "/api/v1/task/enb/config/backupRestore/queryCellInfos" '{}'
+check_ret_ok "规范别名 queryCellInfos 可达（空 body 走默认分页）"
+check_list_or_empty "queryCellInfos 返回基站列表" "data.items"
+
+req POST "/api/v1/task/enb/config/backupRestore/queryCellInfos" '{"Page":1,"PageSize":5,"operator_code":"CMCC","product_type":"NOPE-PRODUCT","search":"NOPE-KEYWORD"}'
+check_ret_ok "queryCellInfos 带 operator_code/product_type/search 过滤可查"
+check_list_or_empty "queryCellInfos 过滤后列表（无命中容忍空）" "data.items"
+
+# queryTaskDeviceList：按 task_id 列出目标设备视图（task body 必填 → uuid → GetTask）。
+# 负路径：缺 task_id / 非法 uuid / 不存在任务（不触达任何设备执行）。
+req POST "/api/v1/task/enb/config/backupRestore/queryTaskDeviceList" '{}'
+check_ret_fail "queryTaskDeviceList 缺 task_id 被拒"
+
+req POST "/api/v1/task/enb/config/backupRestore/queryTaskDeviceList" '{"task_id":"not-a-uuid"}'
+check_ret_fail "queryTaskDeviceList 非法 task_id 格式被拒"
+
+req POST "/api/v1/task/enb/config/backupRestore/queryTaskDeviceList" "{\"task_id\":\"${NOPE_UUID}\"}"
+check_status "queryTaskDeviceList 查不存在任务 → 404" 404
+
+# 正向只读：用 §2 自建并已清理的任务无法复用，改用 queryTaskList 取一条现存任务 id（若有）
+req POST "/api/v1/task/enb/config/backupRestore/queryTaskList" '{"Page":1,"PageSize":1}'
+EXIST_TASK_ID=$(jget data.items.0.id)
+if [ -n "$EXIST_TASK_ID" ]; then
+    req POST "/api/v1/task/enb/config/backupRestore/queryTaskDeviceList" "{\"task_id\":\"${EXIST_TASK_ID}\"}"
+    check_ret_ok "queryTaskDeviceList 现存任务只读查询（device 视图）"
+    check_field "queryTaskDeviceList 回显 task_id" "data.task_id"
+else
+    skip "queryTaskDeviceList 现存任务正向查询" "活栈无现存备份任务可用"
+fi
+
+# ---------------------------------------------------------------------------
+section "9b. 规范别名 写类【红线】只测参数校验负路径，绝不真实下发任务/恢复"
+# ---------------------------------------------------------------------------
+# addBackupRestoreTask 别名 = CreateTask（与 POST /backup/tasks 同 handler）。
+# 只测缺必填被拒，绝不用真实 SN 自建任务（避免误触发 executor 真备份）。
+req POST "/api/v1/task/enb/config/backupRestore/addBackupRestoreTask" '{}'
+check_ret_fail "addBackupRestoreTask 缺必填 task_type/target_type 被拒"
+
+# terminateTask 别名 = CancelTask（从 POST body 读 task_id）。
+# 只测缺字段 / 非法 uuid / 不存在任务被拒，绝不取消任何真实运行中任务。
+req POST "/api/v1/task/enb/config/backupRestore/terminateTask" '{}'
+check_ret_fail "terminateTask 缺 task_id 被拒"
+
+req POST "/api/v1/task/enb/config/backupRestore/terminateTask" '{"task_id":"not-a-uuid"}'
+check_ret_fail "terminateTask 非法 task_id 格式被拒"
+
+req POST "/api/v1/task/enb/config/backupRestore/terminateTask" "{\"task_id\":\"${NOPE_UUID}\"}"
+check_status "terminateTask 终止不存在任务 → 404" 404
+
+# single/importFile 别名 = CreateRestore（配置恢复下发红线）。
+# 只测缺必填 / 非法 bucket 被拒，绝不真实下发恢复到任何设备。
+req POST "/api/v1/task/enb/config/backupRestore/single/importFile" '{}'
+check_ret_fail "single/importFile 缺必填 bucket/object_path/target_device_sns 被拒"
+
+req POST "/api/v1/task/enb/config/backupRestore/single/importFile" "{\"bucket\":\"firmware\",\"object_path\":\"x.xml\",\"target_device_sns\":[\"${NOPE_SN}\"]}"
+check_ret_fail "single/importFile 非法 bucket（只允许 config_backup）被拒"
 
 smoke_summary

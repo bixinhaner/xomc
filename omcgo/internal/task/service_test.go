@@ -306,7 +306,9 @@ func (ts *testableTaskService) CancelTask(ctx context.Context, taskID string) er
 		return err
 	}
 	if task == nil {
-		return fmt.Errorf("task not found: %s", taskID)
+		// 与生产 TaskService.CancelTask 保持一致：返回哨兵错误，便于
+		// errors.Is(err, ErrTaskNotFound) 判定 + handler 映射 404。
+		return ErrTaskNotFound
 	}
 	if task.Status != TaskStatusPending {
 		return fmt.Errorf("cannot cancel task with status: %s", task.Status)

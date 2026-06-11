@@ -12,7 +12,7 @@
 #   7. ops/audit-logs          列表 + 维护窗口创建留痕断言
 #   8. ops/playbooks           列表 + match + 校验负路径
 #   9. ops/commands/rpc        只测校验负路径【红线：不真发 RPC】
-#  10. ops/break-glass/status  只读
+#  10. ops/break-glass         status 只读 + activate 校验负路径【红线：不真激活/不触 deactivate】
 #
 # 注意（信封漂移，实测 2026-06-10）：
 #   - 基础端点 templates/tasks/command-records 走统一信封 {ret,msg,data}；
@@ -271,11 +271,43 @@ req POST "/api/v1/ops/commands/rpc" '{"action":"smk_invalid_action","device_sn":
 check_ret_fail "RPC 不支持的 action 被拒"
 
 # ---------------------------------------------------------------------------
-section "10. 紧急通道 ops/break-glass — 只读 status"
+section "10. 紧急通道 ops/break-glass — status 只读 + activate 校验负路径【红线：不真激活】"
 # ---------------------------------------------------------------------------
+# 红线说明：break-glass activate 是紧急权限通道，绑定成功即授予该用户 30 分钟越权访问窗口
+# （service_ext.go BreakGlassService.Activate：写 active map + 落 break_glass_activate 危险审计）。
+# 正路径会真实授权，绝对不测；只测 activate 参数绑定失败的负路径——
+# BreakGlassRequest{ticket_id,reason} 两字段均 binding:"required"，缺字段/畸形 body 会在
+# ShouldBindJSON 阶段以 HTTP 400 "invalid payload" 被拒，发生在任何授权逻辑之前（实测 2026-06-11）。
+# deactivate 无 body/无参数校验、恒 200，没有可构造的负路径，且属同一紧急通道，整体不触碰。
+
 req GET "/api/v1/ops/break-glass/status"
-check_status "break-glass 状态可查" 200
+check_status "break-glass 状态可查（裸 JSON 无信封）" 200
 check_field "status 返回 active 字段" "active"
-# activate/deactivate 为紧急通道，按要求不触碰
+# 基线：冒烟开跑时当前 admin 不应处于 break-glass 激活态（否则脏环境，下方负路径仍安全）
+BG_ACTIVE_BEFORE=$(jget active)
+
+req POST "/api/v1/ops/break-glass/activate" '{}'
+check_ret_fail "activate 缺 ticket_id+reason 被拒（绑定失败，未激活）"
+check_status "activate 缺必填字段 → 400" 400
+
+req POST "/api/v1/ops/break-glass/activate" '{"reason":"smoke 仅理由缺工单号"}'
+check_ret_fail "activate 缺 ticket_id 被拒（未激活）"
+
+req POST "/api/v1/ops/break-glass/activate" '{"ticket_id":"SMK-TICKET-ONLY"}'
+check_ret_fail "activate 缺 reason 被拒（未激活）"
+
+# 畸形 JSON 同样在绑定阶段 400，不触达授权
+req POST "/api/v1/ops/break-glass/activate" '{"ticket_id":'
+check_ret_fail "activate 畸形 JSON 被拒（未激活）"
+
+# 红线核验：连发四次 activate 负路径后，status 必须仍未激活——证明无任何一次真实授权
+req GET "/api/v1/ops/break-glass/status"
+BG_ACTIVE_AFTER=$(jget active)
+if [ "$BG_ACTIVE_AFTER" = "$BG_ACTIVE_BEFORE" ] && [ "$BG_ACTIVE_AFTER" != "true" ] && [ "$BG_ACTIVE_AFTER" != "True" ]; then
+    pass "activate 负路径全程未触发真实激活（status active 仍为 ${BG_ACTIVE_AFTER}）"
+else
+    fail "activate 负路径全程未触发真实激活" "status active 由 '${BG_ACTIVE_BEFORE}' 变为 '${BG_ACTIVE_AFTER}'（疑似负路径误激活）"
+fi
+# deactivate：紧急通道、无参数校验、恒 200 无负路径，按红线整体不触碰（不调用）
 
 smoke_summary

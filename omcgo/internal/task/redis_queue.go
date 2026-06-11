@@ -323,7 +323,7 @@ func (q *RedisTaskQueue) MarkTaskSent(ctx context.Context, taskID, cwmpID string
 		return err
 	}
 	if task == nil {
-		return fmt.Errorf("task not found: %s", taskID)
+		return ErrTaskNotFound
 	}
 
 	// 更新任务状态
@@ -347,7 +347,7 @@ func (q *RedisTaskQueue) MarkTaskCompleted(ctx context.Context, taskID string, r
 		return err
 	}
 	if task == nil {
-		return fmt.Errorf("task not found: %s", taskID)
+		return ErrTaskNotFound
 	}
 
 	task.MarkCompleted(result)
@@ -379,7 +379,7 @@ func (q *RedisTaskQueue) MarkTaskFailedWithResult(ctx context.Context, taskID st
 		return err
 	}
 	if task == nil {
-		return fmt.Errorf("task not found: %s", taskID)
+		return ErrTaskNotFound
 	}
 
 	task.MarkFailedWithResult(errorCode, errorMsg, result)

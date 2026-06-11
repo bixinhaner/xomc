@@ -951,6 +951,10 @@ var (
 	// ErrCommandNameDuplicated 当目录命令 command_name/command_code 撞 DB 唯一约束时返回；
 	// handler 翻 HTTP 409，避免裸 500 + 泄露约束名。
 	ErrCommandNameDuplicated = errors.New("mml: command name or code already exists")
+	// ErrGroupParamVersionNotFound 当创建/更新 group 引用了不存在的 param_version
+	// （外键 mml_param_groups_param_version_fkey, SQLSTATE 23503）时返回；
+	// handler 翻 HTTP 422，避免裸 500 + 泄露 SQL 约束名 / SQLSTATE。
+	ErrGroupParamVersionNotFound = errors.New("mml: param_version does not exist")
 
 	// ErrCatalogProtected 当尝试修改/删除 catalog_protected=true 的 row 关键字段时返回。
 	// service 层 catalog_protected 守护逻辑使用；handler 翻 HTTP 403。

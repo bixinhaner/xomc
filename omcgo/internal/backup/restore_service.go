@@ -160,20 +160,47 @@ func (s *RestoreService) SetObjectReader(r RestoreObjectReader) {
 // computeSourceMD5 streams the source object and returns its lowercase-hex MD5.
 // 这是"配置文件恢复在下发时读取文件流计算 MD5"的实现点。objReader 未注入时返回
 // 空串（不报错），让未装配该依赖的单元测试照常通过；生产路径已在 modules.go 注入。
+//
+// 兜底翻译：当 stater 存在性预检被跳过（s.stater 为 nil 或预检漏判）时，缺失对象
+// 会在此处的 GetObject 流上首次 Read 时暴露为 MinIO NoSuchKey/NoSuchBucket。把它
+// 翻译为 commonerrors.ErrNotFound，让 handler 映射 404 而非 default 500。
 func (s *RestoreService) computeSourceMD5(ctx context.Context, bucket, object string) (string, error) {
 	if s.objReader == nil {
 		return "", nil
 	}
 	rc, err := s.objReader.GetObjectStream(ctx, bucket, object)
 	if err != nil {
+		if nfErr := translateMinIONotFound(bucket, object, err); nfErr != nil {
+			return "", nfErr
+		}
 		return "", fmt.Errorf("open %s/%s for md5: %w", bucket, object, err)
 	}
 	defer rc.Close()
 	h := md5.New()
+	// minio-go 的 GetObject 不立即发请求；对象/桶不存在的错误在首次 Read 时才暴露，
+	// 故 NotFound 翻译要兜在 io.Copy 的返回上（不止 GetObjectStream 的返回）。
 	if _, err := io.Copy(h, rc); err != nil {
+		if nfErr := translateMinIONotFound(bucket, object, err); nfErr != nil {
+			return "", nfErr
+		}
 		return "", fmt.Errorf("read %s/%s for md5: %w", bucket, object, err)
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// translateMinIONotFound 把 MinIO 的 NoSuchKey/NoSuchBucket 错误翻译为
+// commonerrors.ErrNotFound（不外泄裸 SDK 错误细节给客户端，仅保留 bucket/object
+// 路径上下文）；其它错误返回 nil（让调用方按内部错误处理）。与 policy_monitor.go
+// 的 isObjectNotFound 同款判定，避免 if 字符串硬编码。
+func translateMinIONotFound(bucket, object string, err error) error {
+	if err == nil {
+		return nil
+	}
+	resp := minio.ToErrorResponse(err)
+	if resp.Code == "NoSuchKey" || resp.Code == "NoSuchBucket" {
+		return fmt.Errorf("source object %s/%s: %w", bucket, object, commonerrors.ErrNotFound)
+	}
+	return nil
 }
 
 // CreateRestoreRequest is the API request body validated and persisted.
@@ -199,13 +226,14 @@ func (s *RestoreService) Create(ctx context.Context, req *CreateRestoreRequest, 
 	}
 
 	// Verify the source object exists before fanning out (avoids creating a
-	// restore_task with N device tasks pointing at a 404 URL).
+	// restore_task with N device tasks pointing at a 404 URL). 当 stater 未注入
+	// 时（DI 漏装或 typed-nil），这里跳过，由 computeSourceMD5 的 GetObject 兜底
+	// 翻译 NotFound → 404，不会落到 default 500。
 	if s.stater != nil {
 		if _, err := s.stater.StatObject(ctx, req.Bucket, req.ObjectPath, minio.StatObjectOptions{}); err != nil {
-			errResp := minio.ToErrorResponse(err)
-			if errResp.Code == "NoSuchKey" || errResp.Code == "NoSuchBucket" {
+			if nfErr := translateMinIONotFound(req.Bucket, req.ObjectPath, err); nfErr != nil {
 				s.metrics.RecordRequest("rejected_object_not_found")
-				return nil, fmt.Errorf("source object %s/%s: %w", req.Bucket, req.ObjectPath, commonerrors.ErrNotFound)
+				return nil, nfErr
 			}
 			return nil, fmt.Errorf("stat source object: %w", err)
 		}

@@ -200,8 +200,9 @@ else
 fi
 
 # move-devices 负路径（不依赖设备）
+# #125-topology 修复后：非法 UUID 的 target_group_id 为参数校验类错误，精确返回 400（不再落 500）。
 req POST "/api/v1/device-groups/move-devices" "{\"device_ids\":[\"$NOEXIST_ID\"],\"target_group_id\":\"not-a-uuid\"}"
-check_ret_fail "move-devices 非法 target_group_id 被拒绝"
+check_status "move-devices 非法 target_group_id 返回 400" 400
 
 # ---------------------------------------------------------------------------
 section "分组删除链（check-delete → DELETE → 验证 404）"

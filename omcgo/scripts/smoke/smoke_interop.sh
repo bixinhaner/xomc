@@ -48,11 +48,8 @@ req POST "/api/v1/interop/run" "{\"device_sn\":\"${NOSN}\",\"categories\":[\"bog
 check_status "非法 category → 400" 400
 
 req POST "/api/v1/interop/run" "{\"device_sn\":\"${NOSN}\"}"
-check_ret_fail "不存在设备 SN 被拒绝"
-RUN_NF_CODE="$HTTP_CODE"
-if [ "$RUN_NF_CODE" = "500" ]; then
-    known_bug "run 不存在设备返回 500 而非 404" "runner.RunAll 的 device not found 用裸 fmt.Errorf，未 wrap commonerrors.ErrNotFound，HTTPStatusFromError 落默认 500"
-fi
+# #125-interop fixed: runner.RunAll device-not-found 现 wrap commonerrors.ErrNotFound → 404
+check_status "run 不存在设备 SN → 404" 404
 
 # ---------------------------------------------------------------------------
 section "run/:category 按分类执行（负路径）"
@@ -64,7 +61,8 @@ req POST "/api/v1/interop/run/protocol" '{}'
 check_ret_fail "protocol 分类缺 device_sn 被拒绝"
 
 req POST "/api/v1/interop/run/protocol" "{\"device_sn\":\"${NOSN}\"}"
-check_ret_fail "protocol 分类不存在设备被拒绝"
+# #125-interop fixed: runner.RunByCategory device-not-found 现 wrap commonerrors.ErrNotFound → 404
+check_status "protocol 分类不存在设备 → 404" 404
 
 # ---------------------------------------------------------------------------
 section "run/report 报告导出（格式校验 + 负路径）"
@@ -92,10 +90,7 @@ req POST "/api/v1/interop/validate/${NOUUID}?carrier=cmcc"
 check_status "缺 tech → 400" 400
 
 req POST "/api/v1/interop/validate/${NOUUID}?carrier=cmcc&tech=lte"
-check_ret_fail "不存在设备的 validate 被拒绝"
-VAL_NF_CODE="$HTTP_CODE"
-if [ "$VAL_NF_CODE" = "500" ]; then
-    known_bug "validate 不存在设备返回 500 而非 404" "GetByID 未命中返回 (nil,nil)，validator.resolveExpectedParams 报 'device productClass missing' 裸错误 → 默认 500，且报错语义误导"
-fi
+# #125-interop fixed: validator.ValidateDevice 先判 dev==nil 返回 ErrNotFound → 404（不再误报 500/productClass missing）
+check_status "不存在设备的 validate → 404" 404
 
 smoke_summary

@@ -11,10 +11,15 @@
 #      deactivate 被状态机拒 → activate → deactivate → activate 还原，逐步
 #      GET 详情校验 status）→ 软删进回收站 → 回收站可见 →
 #      restore 恢复 → 再删 → recycle/permanent 永久删 → 404 验证
+#   5b. PUT /:id/info 元信息可逆写闭环：在有 device_info 行的真实设备上备份原值 →
+#      改 remark/address/project_status → GET 校验回显 → 单字段增量更新（验证部分
+#      更新语义）→ 还原原值。元数据本地改，非 SPV/重启，可逆安全。
 #   6. device-registrations 预登记闭环（建 → 列表过滤 → 删）
 #   7. column-configs 用户列配置（默认列读取 + SMOKE_TAG pageKey 写读还原）
 #   8. 危险操作只测参数校验负路径：reboot / batch-reboot / batch 删 /
-#      recycle restore/permanent 非法 body —— 绝不向真实设备下发指令
+#      recycle restore/permanent / rf-switch 射频开关 / batch-import 非法 body
+#      —— 绝不向真实设备下发指令（rf-switch ghost uuid 在 service 层 GetByID
+#      拦截于下发前；batch-import 不存在 SN 走行级失败回执，不新建不下发）
 #
 # 用法：bash smoke_device.sh [BASE_URL]   （默认 http://localhost:8081）
 # =============================================================================
@@ -156,8 +161,75 @@ fi
 if [ -n "$INFO_HIT" ]; then
     req GET "/api/v1/devices/$INFO_HIT/info"
     check_ret_ok "已注册设备 info 视图（SN=${INFO_SN}）"
+
+    # ---- 元信息可逆写闭环：备份原值 → 改 info → GET 校验 → 还原 ----
+    # PUT /devices/:id/info 改的是 device_info 运维标识字段（device_info_update.go
+    # UpdateDeviceInfoRequest）：device_name/address/remark/project_status/height。
+    # 全部本地元数据，不触达真实基站（非 SPV/重启），可逆安全。只在有 device_info
+    # 行的真实设备上跑（预注册设备无 info 行，UPDATE RowsAffected=0 → 500，见下方负路径）。
+    ORIG_REMARK=$(jget data.remark)
+    ORIG_ADDR=$(jget data.address)
+    ORIG_PROJ=$(jget data.project_status)
+    NEW_REMARK="${SMOKE_TAG}-remark"
+    NEW_ADDR="${SMOKE_TAG}-addr"
+
+    req PUT "/api/v1/devices/$INFO_HIT/info" "{\"remark\":\"$NEW_REMARK\",\"address\":\"$NEW_ADDR\",\"project_status\":\"operating\"}"
+    check_ret_ok "更新设备 info 元信息（remark/address/project_status）"
+
+    req GET "/api/v1/devices/$INFO_HIT/info"
+    INFO_REMARK=$(jget data.remark)
+    INFO_ADDR=$(jget data.address)
+    INFO_PROJ=$(jget data.project_status)
+    if [ "$HTTP_CODE" = "200" ] && [ "$INFO_REMARK" = "$NEW_REMARK" ] && [ "$INFO_ADDR" = "$NEW_ADDR" ] && [ "$INFO_PROJ" = "operating" ]; then
+        pass "GET /info 回显改后元信息（remark=${INFO_REMARK} address=${INFO_ADDR} project_status=${INFO_PROJ}）"
+    else
+        fail "GET /info 回显改后元信息" "HTTP ${HTTP_CODE}，remark='${INFO_REMARK}' address='${INFO_ADDR}' project_status='${INFO_PROJ}'"
+    fi
+
+    # 单字段增量更新：只改 remark，address 应保持上一步的值不被清空
+    req PUT "/api/v1/devices/$INFO_HIT/info" "{\"remark\":\"${SMOKE_TAG}-remark2\"}"
+    check_ret_ok "单字段增量更新 remark（不动其它字段）"
+    req GET "/api/v1/devices/$INFO_HIT/info"
+    if [ "$(jget data.remark)" = "${SMOKE_TAG}-remark2" ] && [ "$(jget data.address)" = "$NEW_ADDR" ]; then
+        pass "增量更新只改 remark，address 保持不变（部分更新语义正确）"
+    else
+        fail "增量更新部分语义" "remark='$(jget data.remark)' address='$(jget data.address)'（期望 address 保持 ${NEW_ADDR}）"
+    fi
+
+    # 还原原值（空值用空串还原，闭环不留痕）
+    req PUT "/api/v1/devices/$INFO_HIT/info" "{\"remark\":\"$ORIG_REMARK\",\"address\":\"$ORIG_ADDR\",\"project_status\":\"$ORIG_PROJ\"}"
+    check_ret_ok "还原 info 元信息原值（闭环清理）"
+    req GET "/api/v1/devices/$INFO_HIT/info"
+    if [ "$(jget data.remark)" = "$ORIG_REMARK" ] && [ "$(jget data.address)" = "$ORIG_ADDR" ]; then
+        pass "还原后 GET /info 回到原始值（remark/address 复原）"
+    else
+        fail "还原后 GET /info 回到原始值" "remark='$(jget data.remark)' address='$(jget data.address)'（期望 remark='${ORIG_REMARK}' address='${ORIG_ADDR}'）"
+    fi
 else
     skip "已注册设备 info 视图" "栈内无 inform 注册的真实设备（device_info 仅 inform 路径创建，预注册设备无 info 行）"
+    skip "更新设备 info 元信息" "同上：无 device_info 行的设备 PUT /info 会 500，跳过可逆写闭环"
+    skip "GET /info 回显改后元信息" "同上"
+    skip "单字段增量更新 remark" "同上"
+    skip "增量更新只改 remark，address 保持不变" "同上"
+    skip "还原 info 元信息原值" "同上"
+    skip "还原后 GET /info 回到原始值" "同上"
+fi
+
+# PUT /info 负路径：非法 id → 400（handler uuid.Parse 兜底）
+req PUT "/api/v1/devices/not-a-uuid/info" '{"remark":"x"}'
+check_ret_fail "更新 info 非法 id 被拒绝（400）"
+
+# PUT /info 负路径：不存在设备 / 无 device_info 行 → 当前后端 500（应为 404）
+# UpdateManualFields 是裸 UPDATE，RowsAffected==0 即报错且 handler 统一映射 500，
+# 既不校验 device 是否存在、也不区分"行不存在"与真实 DB 故障。标 known_bug。
+GHOST_ID_INFO="deadbeef-dead-4ead-8ead-deadbeefdead"
+req PUT "/api/v1/devices/$GHOST_ID_INFO/info" '{"remark":"x"}'
+if [[ "$HTTP_CODE" == 404 ]]; then
+    pass "更新不存在设备 info 被拒绝（404）"
+elif [[ "$HTTP_CODE" == 5* ]]; then
+    known_bug "更新不存在设备 info 返回 ${HTTP_CODE} 而非 404" "PUT /devices/:id/info 对无 device_info 行的设备 → HTTP ${HTTP_CODE}，msg=device_info not found（UpdateManualFields 裸 UPDATE RowsAffected=0 报错 → handler 无脑映射 500；既不先查 device 存在性也不区分 not-found 与 DB 故障）"
+else
+    fail "更新不存在设备 info 负路径" "期望 404 或 5xx(known bug)，实际 HTTP ${HTTP_CODE}"
 fi
 
 # ---------------------------------------------------------------------------
@@ -345,8 +417,35 @@ check_ret_fail "批量重启空 ids 被拒绝（400）"
 req POST "/api/v1/devices/batch-reboot" '{"ids":["not-a-uuid"]}'
 check_ret_fail "批量重启非法 uuid 被拒绝（400）"
 
+# rf-switch 射频开关：红线下发类，只测负路径（绝不向真实设备开/关射频）。
+# service.SetRFSwitch 先 GetByID 查设备存在性，device==nil → ErrNotFound(404)，
+# 在任何 CreateTask / connreq 下发之前返回，故 ghost uuid 安全不触达基站。
+req PUT "/api/v1/devices/not-a-uuid/rf-switch" '{"enabled":false}'
+check_ret_fail "射频开关非法 id 被拒绝（400）"
+
+req PUT "/api/v1/devices/$GHOST_ID/rf-switch" '{"enabled":false}'
+check_ret_fail "射频开关不存在设备被拒绝（404，下发前已被拦截）"
+
+req PUT "/api/v1/devices/$GHOST_ID/rf-switch" 'not-json'
+check_ret_fail "射频开关非法 body 被拒绝（400）"
+
+# batch-import 批量导入：只更新已存在设备的名称/备注，不新建、不向基站下发。
+# 空/缺 devices 数组 → binding 校验 400；不存在 SN → 行级失败回执（非红线）。
+req POST "/api/v1/devices/batch-import" '{"devices":[]}'
+check_ret_fail "批量导入空 devices 数组被拒绝（min=1 校验 400）"
+
+req POST "/api/v1/devices/batch-import" '{}'
+check_ret_fail "批量导入缺 devices 字段被拒绝（required 校验 400）"
+
+req POST "/api/v1/devices/batch-import" "{\"devices\":[{\"serial_number\":\"${SMOKE_TAG}-noexist\",\"device_name\":\"x\"}]}"
+check_ret_ok "批量导入受理（不存在 SN 走行级失败回执，不新建）"
+check_count_ge "批量导入不存在 SN 计入 failed ≥ 1" "data.failed" 1
+
 req DELETE "/api/v1/devices/batch" '{"ids":[]}'
 check_ret_fail "批量删除空 ids 被拒绝（400）"
+
+req DELETE "/api/v1/devices/batch" '{"ids":["not-a-uuid"]}'
+check_ret_fail "批量删除非法 uuid 被拒绝（400）"
 
 req PATCH "/api/v1/devices/recycle/restore" '{}'
 check_ret_fail "回收站恢复缺 ids 被拒绝（400）"

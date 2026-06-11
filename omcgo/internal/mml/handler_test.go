@@ -380,6 +380,62 @@ func TestHandler_Execute(t *testing.T) {
 	assert.Equal(t, []string{"SN-001", "SN-002"}, resp.DeviceSNs)
 }
 
+// TestHandler_ExecuteGroup_NotFound 覆盖 issue #125-mml 问题 2：
+// POST /mml/groups/:id/execute 对不存在的 group 应返回 404 + 如实文案，
+// 而非旧的 500 + 误导性「group_id required」。两条路径：
+//   - 全零 UUID（合法格式但绝不对应真实 group）
+//   - 随机 UUID 但 group 下无任何命令（Service 无独立 group 仓储,同归 not-found）
+func TestHandler_ExecuteGroup_NotFound(t *testing.T) {
+	cases := []struct {
+		name    string
+		groupID string
+		// listFn 控制 ListByGroupID 返回（仅随机 UUID 用例触达）。
+		listFn func(ctx context.Context, groupID uuid.UUID) ([]MMLCommand, error)
+	}{
+		{
+			name:    "nil uuid",
+			groupID: uuid.Nil.String(),
+			listFn:  func(_ context.Context, _ uuid.UUID) ([]MMLCommand, error) { return nil, nil },
+		},
+		{
+			name:    "unknown group has no commands",
+			groupID: uuid.New().String(),
+			listFn:  func(_ context.Context, _ uuid.UUID) ([]MMLCommand, error) { return []MMLCommand{}, nil },
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmdRepo := &hCmdRepo{ListByGroupIDFn: tc.listFn}
+			scriptRepo := &hScriptRepo{}
+			taskRepo := &hTaskRepo{}
+
+			logger := zap.NewNop()
+			svc := NewService(cmdRepo, scriptRepo, taskRepo, &hCustomCommandRepo{}, nil, logger)
+			h := NewHandler(svc, logger)
+			router := setupMMLRouter(h)
+
+			body := ExecuteGroupHTTPRequest{DeviceSNs: []string{"SMK-NO-SUCH-DEV"}}
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodPost,
+				"/api/v1/mml/groups/"+tc.groupID+"/execute",
+				bytes.NewReader(mustMarshalMML(t, body)))
+			r.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(w, r)
+
+			// 精确 404（非 500）。
+			assert.Equal(t, http.StatusNotFound, w.Code,
+				"not-found group 应映射 404，实际 %d body=%s", w.Code, w.Body.String())
+			// 文案如实：含 not found，不得误导为缺参 group_id required。
+			respBody := w.Body.String()
+			assert.Contains(t, respBody, "not found",
+				"文案应如实告知 group not found，实际 %s", respBody)
+			assert.NotContains(t, respBody, "group_id required",
+				"不得保留误导性的 group_id required 文案")
+		})
+	}
+}
+
 func TestHandler_ListScripts(t *testing.T) {
 	now := time.Now()
 	scriptID := uuid.New()
