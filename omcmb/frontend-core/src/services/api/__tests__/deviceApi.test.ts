@@ -106,6 +106,25 @@ describe('deviceApi.getList — filter → query 映射', () => {
     expect(out.stats.online_count).toBe(1);
   });
 
+  it('映射后的 Device 不含 platformType（#177：该字段及关联逻辑已移除）', async () => {
+    getMock.mockResolvedValue({
+      data: {
+        // 即便后端仍回 platform_type，映射也不再透传到前端 Device
+        items: [backendDevice({ platform_type: 'CPE_436Q' })],
+        total: 1,
+        page: 1,
+        page_size: 20,
+        total_pages: 1,
+      },
+    });
+    const out = await deviceApi.getList({ page: 1, pageSize: 20 });
+    const d = out.items[0];
+    expect('platformType' in d).toBe(false);
+    // 其它正常字段仍在，证明不是整体映射坏掉
+    expect(d.sn).toBe('SN001');
+    expect(d.productClass).toBe('PC100');
+  });
+
   it('stats 缺省时用当前页 items 估算（向下兼容兜底）', async () => {
     getMock.mockResolvedValue({
       data: {
