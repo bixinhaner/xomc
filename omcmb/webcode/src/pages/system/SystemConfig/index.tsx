@@ -23,11 +23,8 @@ import {
   useSysConfigsByCategory,
   useBatchUpdateSysConfigs,
 } from '@core/hooks/api/useSystem';
-import type {
-  BatchUpdateSysConfigItem,
-  SysConfigItem,
-  SysConfigValueType,
-} from '@core/types/system';
+import type { SysConfigValueType } from '@core/types/system';
+import { buildBatchItems } from './sysConfigSerialize';
 
 // 设置子页签类型（v1.0：移除 sas / ldap，参 omgo/docs/prd/system/config.md）
 type SettingsTab = 'basic' | 'security' | 'device' | 'notify' | 'storage' | 'omc' | 'acs_transfer' | 'northbound' | 'pm_retention';
@@ -73,22 +70,6 @@ function decodeValue(raw: string, type: SysConfigValueType | undefined): unknown
     default:
       return raw;
   }
-}
-
-function encodeValue(v: unknown): { value: string; valueType: SysConfigValueType } {
-  if (v === null || v === undefined) return { value: '', valueType: 'string' };
-  if (typeof v === 'boolean') return { value: v ? 'true' : 'false', valueType: 'bool' };
-  if (typeof v === 'number') {
-    return { value: String(v), valueType: Number.isInteger(v) ? 'int' : 'float' };
-  }
-  if (typeof v === 'object') {
-    try {
-      return { value: JSON.stringify(v), valueType: 'json' };
-    } catch {
-      return { value: '', valueType: 'string' };
-    }
-  }
-  return { value: String(v), valueType: 'string' };
 }
 
 export default function SystemConfig() {
@@ -141,29 +122,6 @@ export default function SystemConfig() {
     form.setFieldsValue(fields);
   }, [activeTab, configList, formMap]);
 
-  // 把 form 里所有字段（含未在 configList 中的新增 key）打包成批量 upsert items。
-  // value_type 优先沿用后端已记录的 valueType，否则按 JS 运行期类型推断。
-  const buildBatchItems = useCallback(
-    (formValues: Record<string, unknown>, existing: SysConfigItem[] | undefined): BatchUpdateSysConfigItem[] => {
-      const existingMap = new Map<string, SysConfigItem>();
-      for (const it of existing || []) existingMap.set(it.key, it);
-
-      const items: BatchUpdateSysConfigItem[] = [];
-      for (const [key, raw] of Object.entries(formValues)) {
-        const enc = encodeValue(raw);
-        const dbType = existingMap.get(key)?.valueType;
-        items.push({
-          key,
-          value: enc.value,
-          // 已存在的 key：保留 DB 中的 value_type；新 key：用编码推断的 type。
-          value_type: dbType ?? enc.valueType,
-        });
-      }
-      return items;
-    },
-    [],
-  );
-
   const batchUpdate = useBatchUpdateSysConfigs();
 
   // 保存当前设置
@@ -190,7 +148,7 @@ export default function SystemConfig() {
       const msg = err instanceof Error ? err.message : '保存失败';
       void message.error(msg);
     }
-  }, [activeTab, formMap, configList, buildBatchItems, batchUpdate, t]);
+  }, [activeTab, formMap, configList, batchUpdate, t]);
 
   // 渲染设置内容
   const renderSettingsContent = () => {
