@@ -22,11 +22,12 @@ import (
 // ---------------------------------------------------------------------------
 
 type mockReconcilerRepo struct {
-	findFn func(ctx context.Context, minStaleSec int, limit int) ([]*model.Device, error)
+	findFn func(ctx context.Context, enbThresholdSec, cpeThresholdSec, limit int) ([]*model.Device, error)
 	markFn func(ctx context.Context, deviceID uuid.UUID, reason string, now time.Time) (bool, error)
 
 	// 记录调用,用于断言。
 	markCalls []markCall
+	findCalls []findCall
 }
 
 type markCall struct {
@@ -35,11 +36,18 @@ type markCall struct {
 	Now      time.Time
 }
 
-func (m *mockReconcilerRepo) FindStaleDevicesAdaptive(ctx context.Context, minStaleSec, limit int) ([]*model.Device, error) {
+type findCall struct {
+	ENBThresholdSec int
+	CPEThresholdSec int
+	Limit           int
+}
+
+func (m *mockReconcilerRepo) FindStaleDevicesByClass(ctx context.Context, enbThresholdSec, cpeThresholdSec, limit int) ([]*model.Device, error) {
+	m.findCalls = append(m.findCalls, findCall{ENBThresholdSec: enbThresholdSec, CPEThresholdSec: cpeThresholdSec, Limit: limit})
 	if m.findFn == nil {
 		return nil, nil
 	}
-	return m.findFn(ctx, minStaleSec, limit)
+	return m.findFn(ctx, enbThresholdSec, cpeThresholdSec, limit)
 }
 
 func (m *mockReconcilerRepo) MarkOfflineWithAccounting(ctx context.Context, deviceID uuid.UUID, reason string, now time.Time) (bool, error) {
@@ -70,9 +78,10 @@ func TestNewDeviceStatusReconciler_Defaults(t *testing.T) {
 	r, _ := newTestReconciler(t, &mockReconcilerRepo{}, nil)
 
 	require.NotNil(t, r)
-	assert.Equal(t, 5*time.Minute, r.checkInterval) // 连接状态检查周期：每 5 分钟
-	assert.Equal(t, 600, r.minStaleSec)
+	// issue #203：checkInterval=0 表示按配置阈值动态计算（不再固定 5min）。
+	assert.Equal(t, time.Duration(0), r.checkInterval)
 	assert.Equal(t, 1000, r.batchSize)
+	assert.Nil(t, r.thresholdLookup, "默认未注入阈值 lookup")
 }
 
 func TestRefreshHeartbeat_TTLFromInterval(t *testing.T) {
@@ -111,7 +120,7 @@ func TestDetect_MarksStaleDevicesOffline(t *testing.T) {
 		Technology:   model.TechLTE,
 	}
 	repo := &mockReconcilerRepo{
-		findFn: func(_ context.Context, _ int, _ int) ([]*model.Device, error) {
+		findFn: func(_ context.Context, _ int, _ int, _ int) ([]*model.Device, error) {
 			return []*model.Device{stale}, nil
 		},
 	}
@@ -126,7 +135,7 @@ func TestDetect_MarksStaleDevicesOffline(t *testing.T) {
 
 func TestDetect_NoStaleDevicesIsNoOp(t *testing.T) {
 	repo := &mockReconcilerRepo{
-		findFn: func(_ context.Context, _ int, _ int) ([]*model.Device, error) {
+		findFn: func(_ context.Context, _ int, _ int, _ int) ([]*model.Device, error) {
 			return nil, nil
 		},
 	}
@@ -138,7 +147,7 @@ func TestDetect_NoStaleDevicesIsNoOp(t *testing.T) {
 
 func TestDetect_RepoErrorIsLoggedNotPanic(t *testing.T) {
 	repo := &mockReconcilerRepo{
-		findFn: func(_ context.Context, _ int, _ int) ([]*model.Device, error) {
+		findFn: func(_ context.Context, _ int, _ int, _ int) ([]*model.Device, error) {
 			return nil, errors.New("db down")
 		},
 	}
@@ -235,24 +244,136 @@ func TestStartStop_StopBeforeStartIsNoop(t *testing.T) {
 func TestSetters_GuardAgainstNonPositive(t *testing.T) {
 	r, _ := newTestReconciler(t, &mockReconcilerRepo{}, nil)
 
+	// 默认 checkInterval=0（动态）。
 	r.SetCheckInterval(0)
-	assert.Equal(t, 5*time.Minute, r.checkInterval, "0 should be ignored")
+	assert.Equal(t, time.Duration(0), r.checkInterval, "0 should be ignored")
 
 	r.SetCheckInterval(-5 * time.Second)
-	assert.Equal(t, 5*time.Minute, r.checkInterval, "negative should be ignored")
+	assert.Equal(t, time.Duration(0), r.checkInterval, "negative should be ignored")
 
 	r.SetCheckInterval(10 * time.Second)
 	assert.Equal(t, 10*time.Second, r.checkInterval)
-
-	r.SetMinStaleSec(0)
-	assert.Equal(t, 600, r.minStaleSec)
-
-	r.SetMinStaleSec(300)
-	assert.Equal(t, 300, r.minStaleSec)
 
 	r.SetBatchSize(0)
 	assert.Equal(t, 1000, r.batchSize)
 
 	r.SetBatchSize(50)
 	assert.Equal(t, 50, r.batchSize)
+}
+
+// ---------------------------------------------------------------------------
+// issue #203：离线阈值实时配置 + 判离线规则 + 扫描周期计算
+// ---------------------------------------------------------------------------
+
+// 判离线规则——成功路径：配置阈值传给仓库,过期设备被翻离线。
+func TestDetect_AppliesConfiguredThresholds(t *testing.T) {
+	stale := &model.Device{ID: uuid.New(), SerialNumber: "SN-CFG", Carrier: model.CarrierCMCC, Technology: model.TechLTE}
+	repo := &mockReconcilerRepo{
+		findFn: func(_ context.Context, enb, cpe, _ int) ([]*model.Device, error) {
+			// 断言对账器把配置阈值如实下传给仓库。
+			assert.Equal(t, 100, enb)
+			assert.Equal(t, 600, cpe)
+			return []*model.Device{stale}, nil
+		},
+	}
+	r, _ := newTestReconciler(t, repo, nil)
+	r.SetThresholdLookup(func(_ context.Context, _, key string) (string, bool) {
+		switch key {
+		case offlineConfigKeyENB:
+			return "100", true
+		case offlineConfigKeyCPE:
+			return "600", true
+		}
+		return "", false
+	})
+
+	r.detect(context.Background())
+
+	require.Len(t, repo.findCalls, 1)
+	assert.Equal(t, 100, repo.findCalls[0].ENBThresholdSec)
+	assert.Equal(t, 600, repo.findCalls[0].CPEThresholdSec)
+	require.Len(t, repo.markCalls, 1, "过期设备应被判离线")
+	assert.Equal(t, stale.ID, repo.markCalls[0].DeviceID)
+}
+
+// 判离线规则——失败路径：lookup 返回非法值/缺失时退化到默认阈值,且无设备过期则不翻离线。
+func TestDetect_FallsBackToDefaultsAndNoFalsePositive(t *testing.T) {
+	repo := &mockReconcilerRepo{
+		findFn: func(_ context.Context, _, _, _ int) ([]*model.Device, error) {
+			return nil, nil // 无过期设备
+		},
+	}
+	r, _ := newTestReconciler(t, repo, nil)
+	// 非法值（非数字）+ 缺失 key → 全退默认 100 / 600。
+	r.SetThresholdLookup(func(_ context.Context, _, key string) (string, bool) {
+		if key == offlineConfigKeyENB {
+			return "not-a-number", true
+		}
+		return "", false // cpeTimeout 缺失
+	})
+
+	r.detect(context.Background())
+
+	require.Len(t, repo.findCalls, 1)
+	assert.Equal(t, defaultENBOfflineSec, repo.findCalls[0].ENBThresholdSec, "非法值退默认 100")
+	assert.Equal(t, defaultCPEOfflineSec, repo.findCalls[0].CPEThresholdSec, "缺失退默认 600")
+	assert.Empty(t, repo.markCalls, "无过期设备不应误判离线")
+}
+
+// 对账器读配置值——改配置后下一轮用新值（无缓存,每轮实时读）。
+func TestDetect_ReadsLatestConfigEachPass(t *testing.T) {
+	repo := &mockReconcilerRepo{
+		findFn: func(_ context.Context, _, _, _ int) ([]*model.Device, error) { return nil, nil },
+	}
+	r, _ := newTestReconciler(t, repo, nil)
+
+	enbVal := "100"
+	r.SetThresholdLookup(func(_ context.Context, _, key string) (string, bool) {
+		if key == offlineConfigKeyENB {
+			return enbVal, true
+		}
+		return "600", true
+	})
+
+	r.detect(context.Background())
+	require.Len(t, repo.findCalls, 1)
+	assert.Equal(t, 100, repo.findCalls[0].ENBThresholdSec)
+
+	// 模拟用户在 UI 把基站阈值改小到 30s。
+	enbVal = "30"
+	r.detect(context.Background())
+	require.Len(t, repo.findCalls, 2)
+	assert.Equal(t, 30, repo.findCalls[1].ENBThresholdSec, "下一轮应读到新配置值")
+}
+
+// 扫描周期 = min(min(阈值)/2, 60s)：阈值 100 → 50s；阈值 600 → 60s（封顶）。
+func TestScanIntervalFor(t *testing.T) {
+	cases := []struct {
+		name string
+		th   OfflineThresholds
+		want time.Duration
+	}{
+		{"阈值100→50s", OfflineThresholds{ENBSec: 100, CPESec: 100}, 50 * time.Second},
+		{"阈值600→60s封顶", OfflineThresholds{ENBSec: 600, CPESec: 600}, 60 * time.Second},
+		{"取较小者的一半", OfflineThresholds{ENBSec: 100, CPESec: 600}, 50 * time.Second},
+		{"极小阈值钳到1s下限", OfflineThresholds{ENBSec: 1, CPESec: 1}, time.Second},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, scanIntervalFor(c.th))
+		})
+	}
+}
+
+// nextScanInterval：显式 SetCheckInterval 优先于动态计算。
+func TestNextScanInterval_ExplicitOverridesDynamic(t *testing.T) {
+	r, _ := newTestReconciler(t, &mockReconcilerRepo{}, nil)
+	th := OfflineThresholds{ENBSec: 100, CPESec: 600}
+
+	// 未设固定值：动态 = 50s。
+	assert.Equal(t, 50*time.Second, r.nextScanInterval(th))
+
+	// 设固定值后优先固定值。
+	r.SetCheckInterval(5 * time.Second)
+	assert.Equal(t, 5*time.Second, r.nextScanInterval(th))
 }

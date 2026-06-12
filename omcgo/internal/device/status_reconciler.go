@@ -42,9 +42,14 @@ type DeviceStatusReconciler struct {
 	eventBus event.EventBus
 	logger   *zap.Logger
 
+	// issue #203：离线阈值实时配置读取（category=device, key=enbTimeout/cpeTimeout）。
+	// nil 时退化到默认阈值（基站 100s / CPE 600s）。每轮扫描读最新值，改配置下一轮即生效。
+	thresholdLookup OfflineThresholdLookup
+
 	// 行为参数（默认值见 NewDeviceStatusReconciler;SetXxx 用于测试）。
-	checkInterval time.Duration // 扫描周期;默认 60s
-	minStaleSec   int           // 离线阈值下限（秒);默认 600 (10 分钟)
+	// issue #203：checkInterval 不再固定，每轮按 min(阈值/2, 60s) 动态计算；
+	// 此字段保留为 SetCheckInterval 显式覆盖时的固定值（>0 时优先于动态计算）。
+	checkInterval time.Duration // 显式覆盖扫描周期;0=按配置阈值动态算
 	batchSize     int           // 单轮最大处理设备数;默认 1000
 
 	// goroutine 生命周期。
@@ -56,9 +61,9 @@ type DeviceStatusReconciler struct {
 //
 // 故意定义在消费侧:全仓 11 个手写 mockDeviceRepo 都不必新增桩方法,只有
 // status_reconciler_test.go 需要 mock 本接口。*PgDeviceRepository 自动满足
-// (FindStaleDevicesAdaptive / MarkOfflineWithAccounting 见 device_repository.go)。
+// (FindStaleDevicesByClass / MarkOfflineWithAccounting 见 device_repository.go)。
 type statusReconcilerRepo interface {
-	FindStaleDevicesAdaptive(ctx context.Context, minStaleSec int, limit int) ([]*model.Device, error)
+	FindStaleDevicesByClass(ctx context.Context, enbThresholdSec, cpeThresholdSec, limit int) ([]*model.Device, error)
 	MarkOfflineWithAccounting(ctx context.Context, deviceID uuid.UUID, reason string, now time.Time) (bool, error)
 }
 
@@ -90,11 +95,31 @@ func NewDeviceStatusReconciler(
 		repo:     repo,
 		eventBus: eventBus,
 		logger:   logger,
-		// 连接状态检查周期：每 5 分钟扫一轮，把"超阈值未上报"的在线设备翻离线。
-		checkInterval: 5 * time.Minute,
-		minStaleSec:   600,
+		// issue #203：checkInterval=0 表示不固定，每轮按 min(配置阈值/2, 60s) 动态算。
+		// thresholdLookup 由 wiring 层经 SetThresholdLookup 注入；未注入则用默认阈值。
+		checkInterval: 0,
 		batchSize:     1000,
 	}
+}
+
+// SetThresholdLookup 注入离线阈值的 sys_configs 读取器（issue #203）。
+// 仅在 wiring 阶段调用，nil 安全（不注入则全程用默认阈值 100/600）。
+func (r *DeviceStatusReconciler) SetThresholdLookup(lookup OfflineThresholdLookup) {
+	r.thresholdLookup = lookup
+}
+
+// currentThresholds 读取本轮扫描使用的两类离线阈值（每轮实时读，改配置即生效）。
+func (r *DeviceStatusReconciler) currentThresholds(ctx context.Context) OfflineThresholds {
+	return resolveOfflineThresholds(ctx, r.thresholdLookup)
+}
+
+// nextScanInterval 返回下一轮扫描周期。SetCheckInterval 显式覆盖（>0）时用固定值，
+// 否则按 min(配置阈值/2, 60s) 动态计算（issue #203）。
+func (r *DeviceStatusReconciler) nextScanInterval(th OfflineThresholds) time.Duration {
+	if r.checkInterval > 0 {
+		return r.checkInterval
+	}
+	return scanIntervalFor(th)
 }
 
 // RefreshHeartbeat 写 / 续 Redis 心跳 key,由 ACS Inform 处理路径每次同步调用。
@@ -130,9 +155,11 @@ func (r *DeviceStatusReconciler) Start() {
 	r.wg.Add(1)
 	go r.loop(ctx)
 
+	th := r.currentThresholds(ctx)
 	r.logger.Info("device status reconciler started",
-		zap.Duration("check_interval", r.checkInterval),
-		zap.Int("min_stale_sec", r.minStaleSec),
+		zap.Duration("scan_interval", r.nextScanInterval(th)),
+		zap.Int("enb_threshold_sec", th.ENBSec),
+		zap.Int("cpe_threshold_sec", th.CPESec),
 		zap.Int("batch_size", r.batchSize),
 	)
 }
@@ -147,37 +174,41 @@ func (r *DeviceStatusReconciler) Stop() {
 }
 
 // loop 是扫描器主循环。首次 tick 立即执行一次（与旧 OfflineDetector 行为对齐),
-// 之后按 checkInterval 周期。
+// 之后按动态周期 = min(配置阈值/2, 60s) 重排 timer（issue #203：阈值改小后
+// 扫描频率随之加快，下一轮即按新配置判离线）。
 func (r *DeviceStatusReconciler) loop(ctx context.Context) {
 	defer r.wg.Done()
 
-	ticker := time.NewTicker(r.checkInterval)
-	defer ticker.Stop()
+	// 首次立即扫,不等第一个 tick；同时拿到本轮阈值用于排下一次 timer。
+	th := r.detect(ctx)
 
-	// 首次立即扫,不等第一个 tick。
-	r.detect(ctx)
+	timer := time.NewTimer(r.nextScanInterval(th))
+	defer timer.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			r.logger.Info("device status reconciler stopped")
 			return
-		case <-ticker.C:
-			r.detect(ctx)
+		case <-timer.C:
+			th = r.detect(ctx)
+			timer.Reset(r.nextScanInterval(th))
 		}
 	}
 }
 
-// detect 执行一轮扫描:找过期设备,逐个标记离线。
-func (r *DeviceStatusReconciler) detect(ctx context.Context) {
+// detect 执行一轮扫描:读最新阈值,找过期设备,逐个标记离线。
+// 返回本轮使用的阈值,供 loop 计算下一次扫描周期。
+func (r *DeviceStatusReconciler) detect(ctx context.Context) OfflineThresholds {
 	start := time.Now()
-	devices, err := r.repo.FindStaleDevicesAdaptive(ctx, r.minStaleSec, r.batchSize)
+	th := r.currentThresholds(ctx)
+	devices, err := r.repo.FindStaleDevicesByClass(ctx, th.ENBSec, th.CPESec, r.batchSize)
 	if err != nil {
 		r.logger.Error("find stale devices failed", zap.Error(err))
-		return
+		return th
 	}
 	if len(devices) == 0 {
-		return
+		return th
 	}
 
 	r.logger.Info("detected stale devices", zap.Int("count", len(devices)))
@@ -207,6 +238,7 @@ func (r *DeviceStatusReconciler) detect(ctx context.Context) {
 		zap.Int("failures", failureCount),
 		zap.Duration("elapsed", time.Since(start)),
 	)
+	return th
 }
 
 // markOffline 把单台设备从 online→offline,并发布事件（仅在真翻转时)。
@@ -254,17 +286,11 @@ func (r *DeviceStatusReconciler) markOffline(ctx context.Context, device *model.
 	return true, nil
 }
 
-// SetCheckInterval 覆盖扫描周期（仅用于测试或运行时调优）。
+// SetCheckInterval 显式覆盖扫描周期（仅用于测试或运行时调优）。
+// 设为 >0 后优先于按阈值动态计算的周期；0 不生效（保持动态）。
 func (r *DeviceStatusReconciler) SetCheckInterval(d time.Duration) {
 	if d > 0 {
 		r.checkInterval = d
-	}
-}
-
-// SetMinStaleSec 覆盖离线阈值下限（仅用于测试或运行时调优）。
-func (r *DeviceStatusReconciler) SetMinStaleSec(sec int) {
-	if sec > 0 {
-		r.minStaleSec = sec
 	}
 }
 

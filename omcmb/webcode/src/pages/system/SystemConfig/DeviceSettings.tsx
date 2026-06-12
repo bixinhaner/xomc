@@ -22,7 +22,7 @@ export default function DeviceSettings({ form }: DeviceSettingsProps) {
       enbTimeout: 100,
       cpeInformPeriodAdjustEnable: false,
       cpeInformPeriod: 60,
-      cpeTimeout: 300,
+      cpeTimeout: 600,
       nameSettingEnable: true,
       prompt: false,
       accessContralEnable: false,
