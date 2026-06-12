@@ -57,6 +57,33 @@ export interface LineChartProps {
 const LINE_STYLES: Array<'solid' | 'dashed' | 'dotted'> = ['solid', 'dashed', 'dotted'];
 const SYMBOL_SHAPES: Array<'circle' | 'triangle' | 'diamond' | 'rect' | 'roundRect'> = ['circle', 'triangle', 'diamond', 'rect', 'roundRect'];
 
+/**
+ * tooltip 智能定位：把提示框放到鼠标所在象限的「对角」，避免盖住悬浮的数据点/曲线/图例。
+ * 多设备图提示框可能很高（多行 + 内部滚动），固定跟随光标会遮挡其它设备曲线，故按光标位置左右/上下避让。
+ * point = 鼠标坐标 [x, y]；size.viewSize = 图表容器尺寸；size.contentSize = 提示框尺寸。
+ * 返回的坐标已自行 clamp 在容器内，配合 confine 不会溢出。
+ */
+export function computeTooltipPosition(
+  point: [number, number],
+  size: { contentSize: [number, number]; viewSize: [number, number] },
+): [number, number] {
+  const [pointerX, pointerY] = point;
+  const [boxW, boxH] = size.contentSize;
+  const [viewW, viewH] = size.viewSize;
+  const margin = 12;
+
+  // 水平：光标在左半区 → 提示框靠右；在右半区 → 靠左。让框始终落在光标对侧，不压住光标处的曲线。
+  let x = pointerX < viewW / 2 ? viewW - boxW - margin : margin;
+  // 垂直：光标在上半区 → 提示框沉到下方；在下半区 → 浮到上方。上方留出图例空间。
+  let y = pointerY < viewH / 2 ? viewH - boxH - margin : margin;
+
+  // clamp 进容器，避免负值或越界（小图表时 boxH 可能大于可用空间，优先顶对齐）。
+  x = Math.max(margin, Math.min(x, Math.max(margin, viewW - boxW - margin)));
+  y = Math.max(margin, Math.min(y, Math.max(margin, viewH - boxH - margin)));
+
+  return [x, y];
+}
+
 const LineChart: React.FC<LineChartProps> = ({
   title,
   xData,
@@ -136,6 +163,14 @@ const LineChart: React.FC<LineChartProps> = ({
         confine: true,
         appendToBody: true,
         className: 'chart-tooltip',
+        // 智能避让：提示框放到光标对角，避免盖住曲线/图例/其它设备数据（issue #202）。
+        position: (
+          point: [number, number],
+          _params: unknown,
+          _dom: unknown,
+          _rect: unknown,
+          size: { contentSize: [number, number]; viewSize: [number, number] },
+        ) => computeTooltipPosition(point, size),
         formatter: (params: unknown) => {
           const items = params as Array<{ marker: string; seriesName: string; value: unknown; axisValue: string; dataIndex: number }>;
           if (!Array.isArray(items) || items.length === 0) return '';
