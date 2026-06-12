@@ -114,6 +114,13 @@ download:
 
 metrics:
   port: 9090
+  # pprof 性能剖析（默认关）。排查 CPU/内存时改 enabled: true 并重启 acs，
+  # 即可访问容器内 :9090（宿主 :9095）/debug/pprof/*，例如：
+  #   go tool pprof -seconds=30 http://<host>:9095/debug/pprof/profile
+  # 等价环境变量：OMCGO_METRICS_PPROF_ENABLED=true（或临时强开 OMCGO_PPROF=1）。排查完改回 false。
+  pprof:
+    enabled: false
+    contention: false   # 额外开 block/mutex 采样（有开销，定位锁/连接池争用时才开）
 
 tracer:
   enabled: true
@@ -137,8 +144,12 @@ log:
 
 protocol_log:
   enabled: true
+  # issue #218：level 控制每报文全量 XML 记录的级别。
+  #   warn（默认）= 抓包记录抑制，稳态零 CPU 开销（不做整段 XML 的 zap 编码），报文跟踪不受影响；
+  #   info/debug  = 恢复全量抓包（排障/互操作测试时显式开），落盘体积大。
+  level: "warn"
   file_path: "/run/logs/acs/protocol.log"
-  max_body_size: 0     # XML 截断阈值 bytes，0=不截断
+  max_body_size: 4096  # XML 截断阈值 bytes（issue #218：默认非 0，避免整段多 KB XML 进编码）；0/缺省回退 4096
   rotation:
     enabled: true
     max_size_mb: 50    # 协议日志文件较大

@@ -32,6 +32,9 @@ func initWorker(ctx context.Context, cfg *appconfig.WorkerConfig) (*workerInfra,
 	if err != nil {
 		return nil, err
 	}
+	// 配置文件驱动的 pprof 开关（metrics 端口挂 /debug/pprof/*，默认关）。issue #218：
+	// 便于对 worker 做 30s CPU profile 实测确认 PM 入库热点（次因）。
+	inf.SetPprof(cfg.Metrics.Pprof.Enabled, cfg.Metrics.Pprof.Contention)
 
 	if err := inf.InitTracer(ctx, cfg.Tracer, "omcgo-worker"); err != nil {
 		return nil, err

@@ -13,6 +13,9 @@ func initACS(ctx context.Context, cfg *appconfig.ACSConfig) (*components.Infra, 
 	if err != nil {
 		return nil, err
 	}
+	// 配置文件驱动的 pprof 开关（metrics 端口挂 /debug/pprof/*，默认关）。issue #218：
+	// 便于对 ACS 做 30s CPU profile 实测确认协议日志热点。
+	inf.SetPprof(cfg.Metrics.Pprof.Enabled, cfg.Metrics.Pprof.Contention)
 
 	if err := inf.InitTracer(ctx, cfg.Tracer, "omcgo-acs"); err != nil {
 		return nil, err

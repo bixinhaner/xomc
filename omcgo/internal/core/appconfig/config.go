@@ -901,8 +901,15 @@ type RotationConfig struct {
 // When enabled, a dedicated log file records the complete raw SOAP/XML
 // for every ACS-CPE HTTP request/response exchange.
 type ProtocolLogConfig struct {
-	Enabled     bool           `mapstructure:"enabled"`       // 总开关
-	FilePath    string         `mapstructure:"file_path"`     // 日志文件路径，如 /run/logs/acs/protocol.log
+	Enabled  bool   `mapstructure:"enabled"`   // 总开关
+	FilePath string `mapstructure:"file_path"` // 日志文件路径，如 /run/logs/acs/protocol.log
+	// Level 控制每条 RPC 全量 XML 记录的日志级别（issue #218 治本）。
+	//   - "" / "warn"（默认）：抓包记录抑制 —— 每报文不做整段 XML 的 zap JSON 编码，
+	//     稳态零开销（高 CPU 回归的主因热点即此整段编码）。报文跟踪(trace)不受影响。
+	//   - "info" / "debug"：恢复全量抓包 —— 每个 CPE↔ACS 请求/响应完整 SOAP XML 落盘，
+	//     排障/互操作测试时显式开启。
+	// 合法值：debug / info / warn / error（大小写不敏感），非法值回退 warn。
+	Level       string         `mapstructure:"level"`
 	MaxBodySize int            `mapstructure:"max_body_size"` // XML 截断阈值 bytes，0=不截断
 	Rotation    RotationConfig `mapstructure:"rotation"`      // 轮转配置（复用 RotationConfig）
 }

@@ -113,6 +113,12 @@ download:
 
 metrics:
   port: 9090
+  # pprof 性能剖析（默认关）。线上排查 CPU/内存时改 enabled: true 并重启 acs，
+  # 即可访问 :9090/debug/pprof/*（go tool pprof -seconds=30 ...）。排查完务必改回 false。
+  # 等价环境变量：OMCGO_METRICS_PPROF_ENABLED=true（或临时强开 OMCGO_PPROF=1）。
+  pprof:
+    enabled: false
+    contention: false   # 额外开 block/mutex 采样（有开销，定位锁/连接池争用时才开）
 
 tracer:
   enabled: true
@@ -138,8 +144,11 @@ protocol_log:
   # 生产默认关闭 — TR-069 SOAP 报文含 CPE 凭据敏感字段，等保/安全审计要求不长期落盘。
   # 排障时由 admin 显式开启（建议同步加限时计划任务关闭，避免遗忘）。
   enabled: false
+  # issue #218：临时开启抓包时，level 仍默认 warn（抑制每报文整段 XML 编码）；
+  # 需逐报文全量 XML 时再调 info/debug。max_body_size 默认非 0 截断（0/缺省回退 4096）。
+  level: "warn"
   file_path: "/run/logs/acs/protocol.log"
-  max_body_size: 0
+  max_body_size: 4096
   rotation:
     # rotation 配置在 enabled=false 时不生效；保留供 admin 临时启用时使用。
     # T-0134 切 compactor 模式：与主 acs.log 一致，自动 gzip 压缩 + max_age 删旧。

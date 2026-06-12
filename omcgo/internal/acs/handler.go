@@ -35,6 +35,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 // ConnectionRequester 发送 Connection Request 唤醒设备。
@@ -242,8 +243,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	// 协议日志：用 ResponseCapturer 包装 ResponseWriter，捕获响应字节
-	if h.protocolLogger != nil {
+	// 协议日志 / 报文跟踪：用 ResponseCapturer 包装 ResponseWriter，捕获响应字节。
+	//
+	// issue #218（高 CPU 回归治本）：
+	//   - 仅当协议日志器存在 *或* 报文跟踪启用时才包装 capturer 并注册 defer，
+	//     避免无人消费时白白缓冲整段响应。
+	//   - 每报文全量 XML 的 zap JSON 编码（旧热点）改由协议日志级别短路：协议日志器
+	//     默认按 warn 级构建（cmd/acs 侧），下面的 .Info("rpc", ...) 在核心层被丢弃，
+	//     **不做整段 XML 的 string 拷贝 + JSON 编码**，稳态零开销；排障调 level=info 即恢复。
+	//   - 报文跟踪(trace)与协议日志解耦：trace 命中白名单的捕获不受日志级别影响，照常旁路落库。
+	if h.protocolLogger != nil || h.traceWhitelist != nil {
 		capturer := rpclog.NewResponseCapturer(w)
 		w = capturer
 		logEntry := &rpclog.LogEntry{StartTime: time.Now()}
@@ -251,31 +260,50 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(ctx)
 
 		defer func() {
-			reqXML := string(body)
-			respXML := string(capturer.Body())
-			if h.maxBodySize > 0 {
-				if len(reqXML) > h.maxBodySize {
-					reqXML = reqXML[:h.maxBodySize] + "...(truncated)"
-				}
-				if len(respXML) > h.maxBodySize {
-					respXML = respXML[:h.maxBodySize] + "...(truncated)"
-				}
-			}
-			h.protocolLogger.Info("rpc",
-				zap.String("session_id", logEntry.SessionID),
-				zap.String("device_sn", logEntry.DeviceSN),
-				zap.Int("sequence", logEntry.Sequence),
-				zap.String("method", logEntry.Method),
-				zap.String("task_id", logEntry.TaskID),
-				zap.String("cwmp_id", logEntry.CwmpID),
-				zap.Int("http_status", capturer.StatusCode()),
-				zap.Int("duration_ms", int(time.Since(logEntry.StartTime).Milliseconds())),
-				zap.String("request_xml", reqXML),
-				zap.String("response_xml", respXML),
-			)
+			// 全量 XML 记录开销大，仅在协议日志器真正会落该级别时才构建并编码。
+			logFullXML := h.protocolLogger != nil &&
+				h.protocolLogger.Core().Enabled(zapcore.InfoLevel)
 
-			// T-0137 / M1: 命中跟踪白名单则旁路落库
-			h.maybeCaptureTrace(logEntry, capturer.StatusCode(), reqXML, respXML)
+			// trace 命中检查很轻（白名单 map 查），且需要 XML body；与全量日志相互独立。
+			// 两者都不需要时直接跳过整段拷贝/编码。
+			if !logFullXML && (h.traceWhitelist == nil || h.traceService == nil) {
+				return
+			}
+
+			// 原始未截断 XML：trace 捕获必须拿到全量报文（基站 GPV 响应轻易 >4KB），
+			// protocol_log.max_body_size 仅约束协议日志落盘，绝不污染 trace 保真度（修 #296）。
+			// trace 内部 truncateForInline 按自己的 32KB 阈值处理，与协议日志阈值解耦。
+			reqXMLRaw := string(body)
+			respXMLRaw := string(capturer.Body())
+
+			if logFullXML {
+				// 仅在协议日志真正落 info 级时才构建截断串，保证默认 warn 级零额外开销。
+				reqXML, respXML := reqXMLRaw, respXMLRaw
+				if h.maxBodySize > 0 {
+					if len(reqXML) > h.maxBodySize {
+						reqXML = reqXML[:h.maxBodySize] + "...(truncated)"
+					}
+					if len(respXML) > h.maxBodySize {
+						respXML = respXML[:h.maxBodySize] + "...(truncated)"
+					}
+				}
+				h.protocolLogger.Info("rpc",
+					zap.String("session_id", logEntry.SessionID),
+					zap.String("device_sn", logEntry.DeviceSN),
+					zap.Int("sequence", logEntry.Sequence),
+					zap.String("method", logEntry.Method),
+					zap.String("task_id", logEntry.TaskID),
+					zap.String("cwmp_id", logEntry.CwmpID),
+					zap.Int("http_status", capturer.StatusCode()),
+					zap.Int("duration_ms", int(time.Since(logEntry.StartTime).Milliseconds())),
+					zap.String("request_xml", reqXML),
+					zap.String("response_xml", respXML),
+				)
+			}
+
+			// T-0137 / M1: 命中跟踪白名单则旁路落库（不依赖协议日志级别）。
+			// 传未截断原始 XML，trace 自行按 32KB 阈值处理。
+			h.maybeCaptureTrace(logEntry, capturer.StatusCode(), reqXMLRaw, respXMLRaw)
 		}()
 	}
 

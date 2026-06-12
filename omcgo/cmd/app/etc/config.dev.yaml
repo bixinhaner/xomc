@@ -244,6 +244,12 @@ notification:
 
 metrics:
   port: 9091
+  # pprof 性能剖析（默认关）。排查 CPU/内存时改 enabled: true 并重启 app，
+  # 即可访问 :9091/debug/pprof/*（go tool pprof -seconds=30 ...）。排查完改回 false。
+  # 等价环境变量：OMCGO_METRICS_PPROF_ENABLED=true（或临时强开 OMCGO_PPROF=1）。
+  pprof:
+    enabled: false
+    contention: false   # 额外开 block/mutex 采样（有开销，定位锁/连接池争用时才开）
 
 tracer:
   enabled: true

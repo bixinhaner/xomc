@@ -307,10 +307,18 @@ func runACS(cmd *cobra.Command, args []string) error {
 			inf.Logger.Error("failed to create protocol logger", zap.Error(err))
 		} else {
 			deps.ProtocolLogger = protocolLogger
-			deps.MaxBodySize = cfg.ProtocolLog.MaxBodySize
+			// issue #218：max_body_size 默认非 0 截断 —— 即便全量抓包开启，单条 XML 也
+			// 被截到 defaultProtocolLogMaxBodySize（4096B），避免整段多 KB XML 进 zap 编码。
+			// 配置显式给正数则尊重；0/缺省 → 走默认截断（不再"不截断"）。
+			maxBodySize := cfg.ProtocolLog.MaxBodySize
+			if maxBodySize <= 0 {
+				maxBodySize = defaultProtocolLogMaxBodySize
+			}
+			deps.MaxBodySize = maxBodySize
 			inf.Logger.Info("protocol logging enabled",
 				zap.String("file_path", cfg.ProtocolLog.FilePath),
-				zap.Int("max_body_size", cfg.ProtocolLog.MaxBodySize))
+				zap.String("level", parseProtocolLogLevel(cfg.ProtocolLog.Level).String()),
+				zap.Int("max_body_size", maxBodySize))
 		}
 	}
 
@@ -487,6 +495,11 @@ func (s *acsConnReqSender) Send(ctx context.Context, deviceSN, httpURL string) e
 	return s.dispatcher.Send(ctx, deviceSN, httpURL, "", s.isENB)
 }
 
+// defaultProtocolLogMaxBodySize 是 protocol_log.max_body_size 缺省（0/未配）时的回退截断
+// 阈值（bytes）。issue #218：默认不再"整段不截断"，把单条 SOAP XML 截到 4KB，配合
+// level 默认 warn 抑制每报文编码，保证稳态零开销；排障可显式调大或调 level=info。
+const defaultProtocolLogMaxBodySize = 4096
+
 // newProtocolLogger creates a dedicated zap logger for ACS protocol interaction logging.
 // It writes structured JSON to a separate file with its own rotation settings.
 //
@@ -515,13 +528,29 @@ func newProtocolLogger(cfg appconfig.ProtocolLogConfig) (*zap.Logger, error) {
 	encoderCfg.TimeKey = "timestamp"
 	encoderCfg.EncodeTime = zapcore.ISO8601TimeEncoder
 
+	// issue #218：协议日志核心按配置级别构建。默认（空/warn）使每条 RPC 的全量 XML
+	// 记录（.Info("rpc", ...)）在核心层被短路，**不做整段 XML 的 zap JSON 编码**——
+	// 这是新版本高 CPU 回归的主因热点。排障时把 level 调到 info/debug 即恢复全量抓包。
 	core := zapcore.NewCore(
 		zapcore.NewJSONEncoder(encoderCfg),
 		zapcore.AddSync(writer),
-		zap.InfoLevel,
+		parseProtocolLogLevel(cfg.Level),
 	)
 
 	return zap.New(core), nil
+}
+
+// parseProtocolLogLevel 解析 protocol_log.level 为 zapcore.Level。
+// 空串或非法值回退 Warn（默认抑制每报文全量 XML 编码，稳态零开销）。
+func parseProtocolLogLevel(s string) zapcore.Level {
+	if strings.TrimSpace(s) == "" {
+		return zapcore.WarnLevel
+	}
+	var lvl zapcore.Level
+	if err := lvl.UnmarshalText([]byte(strings.ToLower(strings.TrimSpace(s)))); err != nil {
+		return zapcore.WarnLevel
+	}
+	return lvl
 }
 
 // parseStringSlice parses a comma-separated string into a slice.

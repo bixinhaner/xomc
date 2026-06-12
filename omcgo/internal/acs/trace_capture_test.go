@@ -473,3 +473,72 @@ func TestServeHTTP_PassiveCapture_AdmissionDenied_ExactCaptureCount(t *testing.T
 	assert.Equal(t, http.StatusServiceUnavailable, out.HTTPStatus,
 		"出向消息应承载准入拒绝的 503 状态码")
 }
+
+// buildOversizedInformXML 构造一条合法可解析、但 body 体积远超协议日志 maxBodySize(4096)
+// 的周期 Inform：在 CommandKey 内填充一大段良性字符（不含 XML 元字符，保证可解析），
+// 总长落在 4096 与 trace.MaxInlinePayloadBytes(32KB) 之间——既触发协议日志截断，
+// 又不触发 trace 自身的 32KB 截断，正好隔离 #296 的回归点。
+func buildOversizedInformXML(t *testing.T, padBytes int) string {
+	t.Helper()
+	pad := strings.Repeat("A", padBytes)
+	xml := strings.Replace(acsHInformPeriodicXML,
+		"<CommandKey></CommandKey>",
+		"<CommandKey>"+pad+"</CommandKey>", 1)
+	require.NotEqual(t, acsHInformPeriodicXML, xml, "填充必须真实改写了 CommandKey")
+	return xml
+}
+
+// TestServeHTTP_PassiveCapture_TraceNotTruncatedByProtocolLogMaxBodySize：
+// #296 回归 —— 协议日志 protocol_log.max_body_size(默认 4096) 截断绝不能污染报文跟踪保真度。
+// handler.go defer 块过去把按 maxBodySize 截断后的 reqXML/respXML 同时喂给协议日志和
+// maybeCaptureTrace，使命中白名单的 trace payload 被静默截到 4KB（基站 GPV 响应轻易超 4KB），
+// 回归 #290 的抓包保真。修法：trace 收原始未截断 XML，截断只用于协议日志落盘。
+//
+// 本测试构造一条 ~5KB 的合法 Inform（> maxBodySize 4096，< trace 32KB 阈值），
+// 设 maxBodySize=4096 跑 ServeHTTP，断言捕获的 IN 报文：
+//   - PayloadSizeBytes == 原始 body 全长（不是被截到 4096+len("...(truncated)")）；
+//   - PayloadInline 不含协议日志截断标记（trace 自身 32KB 阈值未触发，故根本不该有截断）。
+func TestServeHTTP_PassiveCapture_TraceNotTruncatedByProtocolLogMaxBodySize(t *testing.T) {
+	const maxBodySize = 4096
+	// 填充 ~5KB，确保整段 body 显著超过 maxBodySize 但仍远小于 trace 32KB 阈值。
+	informXML := buildOversizedInformXML(t, 5000)
+	require.Greater(t, len(informXML), maxBodySize,
+		"测试前提：Inform body 必须超过协议日志截断阈值")
+	require.Less(t, len(informXML), trace.MaxInlinePayloadBytes,
+		"测试前提：Inform body 必须小于 trace 自身 32KB 阈值，否则无法隔离 #296")
+
+	sink := &stubTraceSink{}
+	h := newPassiveCaptureHandler(t, sink, acsHInformPeriodicSN, 1000)
+	h.maxBodySize = maxBodySize // 开启协议日志截断（默认 4096）
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(informXML))
+	req.RemoteAddr = "10.0.0.14:5000"
+	h.ServeHTTP(w, req)
+
+	msgs := sink.snapshot()
+	require.NotEmpty(t, msgs, "起跟踪设备的超大 Inform 必须被捕获")
+
+	var in *trace.Message
+	for _, m := range msgs {
+		if m.Direction == trace.DirectionIn && m.RPCMethod == "Inform" {
+			in = m
+			break
+		}
+	}
+	require.NotNil(t, in, "捕获结果里应含入向 Inform")
+
+	// 核心断言：trace 拿到的是原始全长 body，未被协议日志 maxBodySize 截断。
+	assert.Equal(t, len(informXML), in.PayloadSizeBytes,
+		"trace IN 报文长度必须等于原始 body 全长，不得被 protocol_log.max_body_size 截断 (#296)")
+	// 截断后长度（maxBodySize + 标记）是 bug 的特征值，必须不等于它。
+	assert.NotEqual(t, maxBodySize+len("...(truncated)"), in.PayloadSizeBytes,
+		"trace IN 报文长度不得退化为协议日志截断长度")
+	// body 在 trace 32KB 阈值内，PayloadInline 不该出现任何截断标记。
+	// （PayloadInline 经 RedactXML 编解码往返，字节长度可能微变，故不钉死精确长度，
+	//  只断言"未被协议日志 4KB 截断"——长度必须远超 maxBodySize 且无截断标记。）
+	assert.NotContains(t, in.PayloadInline, "...(truncated)",
+		"未达 trace 32KB 阈值时 PayloadInline 不应含任何截断标记（更不能被协议日志截断污染）")
+	assert.Greater(t, len(in.PayloadInline), maxBodySize,
+		"PayloadInline 长度必须远超协议日志截断阈值，证明承载的是全量而非 4KB 截断体")
+}
