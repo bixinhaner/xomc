@@ -78,6 +78,11 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	templates.PUT("/:id", h.UpdateTemplate)
 	templates.DELETE("/:id", h.DeleteTemplate)
 	templates.POST("/:id/clone", h.CloneTemplate)
+	// issue #115 调整3（A1）：自定义命令 PATH 关联管理（增删改查）。
+	templates.GET("/:id/paths", h.ListTemplatePaths)
+	templates.POST("/:id/paths/batch", h.BatchAddTemplatePaths)
+	templates.PATCH("/:id/paths/:pathId", h.UpdateTemplatePath)
+	templates.DELETE("/:id/paths/:pathId", h.DeleteTemplatePath)
 
 	// Sprint B Q-V3-1：mml_command_groups 批量执行。group 下的全部命令
 	// 一键展开为一个 mml_task，fanout + sequencer 自动串行下发。
@@ -1143,6 +1148,138 @@ func (h *Handler) CloneTemplate(c *gin.Context) {
 	}
 
 	response.OKWithStatus(c, http.StatusCreated, cloned)
+}
+
+// ============================================================
+// issue #115 调整3（A1）：自定义命令 PATH 关联管理端点
+// ============================================================
+
+// BatchAddTemplatePathsRequest 是 POST /templates/:id/paths/batch 的请求体。
+type BatchAddTemplatePathsRequest struct {
+	StandardPathIDs []uuid.UUID `json:"standard_path_ids" binding:"required,min=1,max=200"`
+}
+
+// UpdateTemplatePathRequest 是 PATCH /templates/:id/paths/:pathId 的请求体。
+// 指针字段语义：nil = 不改该字段。
+type UpdateTemplatePathRequest struct {
+	DefaultSelected *bool `json:"default_selected"`
+	SortOrder       *int  `json:"sort_order"`
+}
+
+// ListTemplatePaths handles GET /api/v1/mml/templates/:id/paths.
+// 列出自定义命令的 path 关联（JOIN standard_params 富化）。读操作经端点级 RBAC 收敛。
+func (h *Handler) ListTemplatePaths(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+	paths, err := h.service.ListCustomCommandPaths(c.Request.Context(), id)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+	response.OK(c, gin.H{"items": paths})
+}
+
+// BatchAddTemplatePaths handles POST /api/v1/mml/templates/:id/paths/batch.
+// 批量追加 path（owner/super 才能写）。已关联的 path 静默跳过。
+func (h *Handler) BatchAddTemplatePaths(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+	var req BatchAddTemplatePathsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+	userIDPtr := extractUserID(c)
+	if userIDPtr == nil {
+		commonerrors.AbortWithError(c, http.StatusUnauthorized, commonerrors.ErrUnauthorized)
+		return
+	}
+	creator, _ := c.Get("username")
+	creatorStr, _ := creator.(string)
+	isSuper := extractIsSuperAdmin(c)
+
+	created, err := h.service.BatchAddCustomCommandPaths(
+		c.Request.Context(), id, req.StandardPathIDs, *userIDPtr, creatorStr, isSuper,
+	)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+	response.OKWithStatus(c, http.StatusCreated, gin.H{"items": created})
+}
+
+// UpdateTemplatePath handles PATCH /api/v1/mml/templates/:id/paths/:pathId.
+// 改单条关联的 default_selected / sort_order（owner/super 才能写）。
+func (h *Handler) UpdateTemplatePath(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+	pathID, err := uuid.Parse(c.Param("pathId"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+	var req UpdateTemplatePathRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+	userIDPtr := extractUserID(c)
+	if userIDPtr == nil {
+		commonerrors.AbortWithError(c, http.StatusUnauthorized, commonerrors.ErrUnauthorized)
+		return
+	}
+	creator, _ := c.Get("username")
+	creatorStr, _ := creator.(string)
+	isSuper := extractIsSuperAdmin(c)
+
+	updated, err := h.service.UpdateCustomCommandPath(
+		c.Request.Context(), id, pathID, req.DefaultSelected, req.SortOrder, *userIDPtr, creatorStr, isSuper,
+	)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+	response.OK(c, updated)
+}
+
+// DeleteTemplatePath handles DELETE /api/v1/mml/templates/:id/paths/:pathId.
+// 删单条关联（owner/super 才能写）。
+func (h *Handler) DeleteTemplatePath(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+	pathID, err := uuid.Parse(c.Param("pathId"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+	userIDPtr := extractUserID(c)
+	if userIDPtr == nil {
+		commonerrors.AbortWithError(c, http.StatusUnauthorized, commonerrors.ErrUnauthorized)
+		return
+	}
+	creator, _ := c.Get("username")
+	creatorStr, _ := creator.(string)
+	isSuper := extractIsSuperAdmin(c)
+
+	if err := h.service.DeleteCustomCommandPath(
+		c.Request.Context(), id, pathID, *userIDPtr, creatorStr, isSuper,
+	); err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+	response.OK(c, nil)
 }
 
 // parseInt is a helper to parse an int from a string.
