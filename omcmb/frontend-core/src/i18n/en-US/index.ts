@@ -2629,6 +2629,8 @@ const messages: Record<string, string> = {
   'gis.search.notFound': 'No matching devices found',
   'gis.search.tryOther': 'Please try other keywords',
   'gis.search.resultsCount': 'Found {count} result(s)',
+  'gis.search.noCoordTag': 'No coordinates',
+  'gis.search.noCoordToast': 'This device has no latitude/longitude and cannot be located on the map',
   'gis.loading': 'Loading device data...',
   'gis.legend.deviceCluster': 'Device Cluster',
   'gis.legend.alarmCount': 'Alarm Count',
