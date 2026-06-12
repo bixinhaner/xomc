@@ -18,7 +18,7 @@ interface BackendAlarm {
   device_id: string;
   device_sn: string;
   carrier: string;
-  severity: number; // 1=Critical, 2=Major, 3=Minor, 4=Warning
+  severity: number; // 1..4 or legacy 31001..31004
   alarm_type: string;
   alarm_identifier: string;
   description: string;
@@ -93,9 +93,13 @@ interface BackendAlarmRule {
 
 const severityNumToStr: Record<number, string> = {
   1: 'critical',
+  31001: 'critical',
   2: 'major',
+  31002: 'major',
   3: 'minor',
+  31003: 'minor',
   4: 'warning',
+  31004: 'warning',
 };
 
 const severityStrToNum: Record<string, string> = {

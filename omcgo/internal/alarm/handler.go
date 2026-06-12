@@ -449,11 +449,19 @@ func parseSeverity(s string) model.AlarmSeverity {
 	switch s {
 	case "1":
 		return model.AlarmCritical
+	case "31001":
+		return model.AlarmCritical
 	case "2":
+		return model.AlarmMajor
+	case "31002":
 		return model.AlarmMajor
 	case "3":
 		return model.AlarmMinor
+	case "31003":
+		return model.AlarmMinor
 	case "4":
+		return model.AlarmWarning
+	case "31004":
 		return model.AlarmWarning
 	default:
 		return 0

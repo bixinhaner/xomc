@@ -79,9 +79,31 @@ func TestHistoryStatsBaseWithFilterAppendsWhere(t *testing.T) {
 	assert.Contains(t, sql, "alarms_history.carrier")
 	assert.Contains(t, sql, "alarms_history.severity")
 	assert.ElementsMatch(t,
-		[]interface{}{model.CarrierCUCC, model.AlarmCritical, model.AlarmMajor},
+		[]interface{}{model.CarrierCUCC, model.AlarmCritical, model.AlarmSeverity(31001), model.AlarmMajor, model.AlarmSeverity(31002)},
 		args,
 	)
+}
+
+func TestActiveStatsBaseSeverityFilterIncludesLegacySeverityCodes(t *testing.T) {
+	filter := AlarmFilter{Severity: severityPtr(model.AlarmWarning)}
+
+	sql, args, err := activeStatsBase(filter).Column("COUNT(*)").ToSql()
+	require.NoError(t, err)
+
+	assert.Contains(t, sql, "alarms_active.severity")
+	assert.ElementsMatch(t, []interface{}{model.AlarmWarning, model.AlarmSeverity(31004)}, args)
+}
+
+func TestCanonicalAlarmSeverityNormalizesLegacyCodes(t *testing.T) {
+	assert.Equal(t, model.AlarmCritical, canonicalAlarmSeverity(model.AlarmSeverity(31001)))
+	assert.Equal(t, model.AlarmMajor, canonicalAlarmSeverity(model.AlarmSeverity(31002)))
+	assert.Equal(t, model.AlarmMinor, canonicalAlarmSeverity(model.AlarmSeverity(31003)))
+	assert.Equal(t, model.AlarmWarning, canonicalAlarmSeverity(model.AlarmSeverity(31004)))
+	assert.Equal(t, model.AlarmWarning, canonicalAlarmSeverity(model.AlarmWarning))
+}
+
+func severityPtr(severity model.AlarmSeverity) *model.AlarmSeverity {
+	return &severity
 }
 
 // 守护回归：旧实现 by-type 统计排除空 alarm_type，新实现保持该语义。

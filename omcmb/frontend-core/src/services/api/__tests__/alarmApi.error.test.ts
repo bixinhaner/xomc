@@ -93,6 +93,31 @@ describe('alarmApi — 畸形载荷兜底（type drift / field missing）', () =
     expect(out.items[0].severity).toBe('warning');
   });
 
+  it('legacy severity 码 31001..31004 映射到正确级别（不再全部兜底 warning）', async () => {
+    getMock.mockResolvedValue({
+      data: {
+        items: [
+          backendAlarm({ id: 'al-critical', severity: 31001 }),
+          backendAlarm({ id: 'al-major', severity: 31002 }),
+          backendAlarm({ id: 'al-minor', severity: 31003 }),
+          backendAlarm({ id: 'al-warning', severity: 31004 }),
+        ],
+        total: 4,
+        page: 1,
+        page_size: 20,
+        total_pages: 1,
+      },
+    });
+
+    const out = await alarmApi.getCurrentAlarms({ page: 1, pageSize: 20 });
+    expect(out.items.map((item) => item.severity)).toEqual([
+      'critical',
+      'major',
+      'minor',
+      'warning',
+    ]);
+  });
+
   it('items 缺失（null）→ 空列表（不崩）', async () => {
     getMock.mockResolvedValue({ data: { total: 0, page: 1, page_size: 20, total_pages: 0 } });
     const out = await alarmApi.getCurrentAlarms({ page: 1, pageSize: 20 });

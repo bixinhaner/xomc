@@ -320,7 +320,7 @@ func (s *PgAlarmStore) Statistics(ctx context.Context, filter AlarmFilter) (*Ala
 		var sev model.AlarmSeverity
 		var cnt int64
 		if err := rows.Scan(&sev, &cnt); err == nil {
-			stats.BySeverity[sev] = cnt
+			stats.BySeverity[canonicalAlarmSeverity(sev)] += cnt
 		}
 	}
 
@@ -434,7 +434,7 @@ func (s *PgAlarmStore) HistoryStatistics(ctx context.Context, filter AlarmFilter
 		var sev model.AlarmSeverity
 		var cnt int64
 		if err := rows.Scan(&sev, &cnt); err == nil {
-			stats.BySeverity[sev] = cnt
+			stats.BySeverity[canonicalAlarmSeverity(sev)] += cnt
 		}
 	}
 
@@ -472,9 +472,9 @@ func applyActiveFilters(qb squirrel.SelectBuilder, f AlarmFilter) squirrel.Selec
 		qb = qb.Where(squirrel.Eq{"alarms_active.carrier": *f.Carrier})
 	}
 	if len(f.Severities) > 0 {
-		qb = qb.Where(squirrel.Eq{"alarms_active.severity": f.Severities})
+		qb = qb.Where(squirrel.Eq{"alarms_active.severity": expandSeverityAliases(f.Severities)})
 	} else if f.Severity != nil {
-		qb = qb.Where(squirrel.Eq{"alarms_active.severity": *f.Severity})
+		qb = qb.Where(squirrel.Eq{"alarms_active.severity": severityAliases(*f.Severity)})
 	}
 	if f.Status != nil {
 		qb = qb.Where(squirrel.Eq{"alarms_active.status": *f.Status})
@@ -537,9 +537,9 @@ func applyHistoryFilters(qb squirrel.SelectBuilder, f AlarmFilter) squirrel.Sele
 		qb = qb.Where(squirrel.Eq{"alarms_history.carrier": *f.Carrier})
 	}
 	if len(f.Severities) > 0 {
-		qb = qb.Where(squirrel.Eq{"alarms_history.severity": f.Severities})
+		qb = qb.Where(squirrel.Eq{"alarms_history.severity": expandSeverityAliases(f.Severities)})
 	} else if f.Severity != nil {
-		qb = qb.Where(squirrel.Eq{"alarms_history.severity": *f.Severity})
+		qb = qb.Where(squirrel.Eq{"alarms_history.severity": severityAliases(*f.Severity)})
 	}
 	if f.StartTime != nil {
 		qb = qb.Where(squirrel.GtOrEq{"alarms_history.time": *f.StartTime})
@@ -612,6 +612,51 @@ func normalizedTechnologyExpr(column string, values []string) squirrel.Sqlizer {
 		return exprs[0]
 	}
 	return exprs
+}
+
+func canonicalAlarmSeverity(severity model.AlarmSeverity) model.AlarmSeverity {
+	switch severity {
+	case 31001:
+		return model.AlarmCritical
+	case 31002:
+		return model.AlarmMajor
+	case 31003:
+		return model.AlarmMinor
+	case 31004:
+		return model.AlarmWarning
+	default:
+		return severity
+	}
+}
+
+func severityAliases(severity model.AlarmSeverity) []model.AlarmSeverity {
+	switch canonicalAlarmSeverity(severity) {
+	case model.AlarmCritical:
+		return []model.AlarmSeverity{model.AlarmCritical, 31001}
+	case model.AlarmMajor:
+		return []model.AlarmSeverity{model.AlarmMajor, 31002}
+	case model.AlarmMinor:
+		return []model.AlarmSeverity{model.AlarmMinor, 31003}
+	case model.AlarmWarning:
+		return []model.AlarmSeverity{model.AlarmWarning, 31004}
+	default:
+		return []model.AlarmSeverity{severity}
+	}
+}
+
+func expandSeverityAliases(severities []model.AlarmSeverity) []model.AlarmSeverity {
+	expanded := make([]model.AlarmSeverity, 0, len(severities)*2)
+	seen := make(map[model.AlarmSeverity]struct{}, len(severities)*2)
+	for _, severity := range severities {
+		for _, alias := range severityAliases(severity) {
+			if _, exists := seen[alias]; exists {
+				continue
+			}
+			seen[alias] = struct{}{}
+			expanded = append(expanded, alias)
+		}
+	}
+	return expanded
 }
 
 func normalizedTechnologyAliases(raw string) []string {

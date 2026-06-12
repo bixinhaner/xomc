@@ -467,9 +467,13 @@ func TestParseSeverity(t *testing.T) {
 		expected model.AlarmSeverity
 	}{
 		{"1", model.AlarmCritical},
+		{"31001", model.AlarmCritical},
 		{"2", model.AlarmMajor},
+		{"31002", model.AlarmMajor},
 		{"3", model.AlarmMinor},
+		{"31003", model.AlarmMinor},
 		{"4", model.AlarmWarning},
+		{"31004", model.AlarmWarning},
 		{"0", 0},
 		{"", 0},
 		{"unknown", 0},
@@ -485,7 +489,7 @@ func TestParseSeverities(t *testing.T) {
 	assert.Equal(
 		t,
 		[]model.AlarmSeverity{model.AlarmCritical, model.AlarmMinor, model.AlarmWarning},
-		parseSeverities("1, 3,4,3,bad"),
+		parseSeverities("1, 31001, 3, 31003,4,31004,3,bad"),
 	)
 	assert.Empty(t, parseSeverities("bad"))
 }
