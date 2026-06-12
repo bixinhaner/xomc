@@ -14,6 +14,7 @@ package tsdbsync
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -131,37 +132,76 @@ func (r *SyncRunner) runTable(ctx context.Context, dimTable string, fn func(cont
 	r.logger.Debug("shadow-dim table synced", zap.String("table", dimTable), zap.Int64("rows", n))
 }
 
-// syncFullMirror 全列镜像：SELECT * 从源表读，按 rows.FieldDescriptions() 取列名，
-// 在 dst 单事务内 TRUNCATE + CopyFrom 同名 dst 表。
+// syncFullMirror 镜像同步：以【dst 影子表的列】为准，只从源表 SELECT dst 拥有的列，
+// 在 dst 单事务内 TRUNCATE + CopyFrom。
 //
-// 前提：dst 影子表列名是源表列名的超集（同名）。CopyFrom 按列名定位，列顺序无关。
+// 为何按【src ∩ dst 列交集】而非 SELECT *：影子表 DDL 取自某次基线，与源表当前 schema 会双向漂移：
+//   - 源表新增列（增量迁移）：如 perf_indicators.report_key / products.is_builtin / alarm_definitions.description
+//     —— 这些不在影子表也不被时序库查询用到；
+//   - 源表删除列：如 000025 删了 alarm_definitions 的 cn_suggestion/en_suggestion，但影子表 DDL 仍留着。
+// 任一方向的不一致都会让"按单边列 SELECT+COPY"整表失败。取交集 → 只同步两边都有的列，对 schema
+// 漂移完全免疫；时序库查询所需列（id/cn_name/en_name/identifier 等）始终在交集内。
 // 适用：device_group_member_dim / product_dim / alarm_definition_dim / perf_indicators_*。
 func (r *SyncRunner) syncFullMirror(ctx context.Context, srcTable, dstTable string) (int64, error) {
-	rows, err := r.src.Query(ctx, fmt.Sprintf("SELECT * FROM %s", srcTable))
+	dstCols, err := tableColumns(ctx, r.dst, dstTable)
 	if err != nil {
-		return 0, fmt.Errorf("query src %s: %w", srcTable, err)
+		return 0, fmt.Errorf("introspect dst %s: %w", dstTable, err)
+	}
+	srcCols, err := tableColumns(ctx, r.src, srcTable)
+	if err != nil {
+		return 0, fmt.Errorf("introspect src %s: %w", srcTable, err)
+	}
+	cols := intersectCols(dstCols, srcCols) // 保持 dst ordinal 顺序
+	if len(cols) == 0 {
+		return 0, fmt.Errorf("no common columns between src %s and dst %s", srcTable, dstTable)
+	}
+	quoted := make([]string, len(cols))
+	for i, c := range cols {
+		quoted[i] = pgx.Identifier{c}.Sanitize()
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(quoted, ", "), srcTable)
+	data, err := r.collectRows(ctx, q, len(cols))
+	if err != nil {
+		return 0, fmt.Errorf("mirror %s→%s: %w", srcTable, dstTable, err)
+	}
+	return r.truncateAndCopy(ctx, dstTable, cols, data)
+}
+
+// tableColumns 返回某库某表的列名（public schema，按 ordinal 顺序）。
+func tableColumns(ctx context.Context, pool *pgxpool.Pool, table string) ([]string, error) {
+	rows, err := pool.Query(ctx,
+		`SELECT column_name FROM information_schema.columns
+		 WHERE table_schema = 'public' AND table_name = $1
+		 ORDER BY ordinal_position`, table)
+	if err != nil {
+		return nil, err
 	}
 	defer rows.Close()
 
-	fds := rows.FieldDescriptions()
-	cols := make([]string, len(fds))
-	for i, fd := range fds {
-		cols[i] = string(fd.Name)
-	}
-
-	data := make([][]any, 0, 256)
+	var cols []string
 	for rows.Next() {
-		vals, verr := rows.Values()
-		if verr != nil {
-			return 0, fmt.Errorf("read row %s: %w", srcTable, verr)
+		var c string
+		if err := rows.Scan(&c); err != nil {
+			return nil, err
 		}
-		data = append(data, vals)
+		cols = append(cols, c)
 	}
-	if err := rows.Err(); err != nil {
-		return 0, fmt.Errorf("iter src %s: %w", srcTable, err)
-	}
+	return cols, rows.Err()
+}
 
-	return r.truncateAndCopy(ctx, dstTable, cols, data)
+// intersectCols 返回 a、b 的列名交集，保持 a（dst）的顺序。
+func intersectCols(a, b []string) []string {
+	set := make(map[string]struct{}, len(b))
+	for _, c := range b {
+		set[c] = struct{}{}
+	}
+	out := make([]string, 0, len(a))
+	for _, c := range a {
+		if _, ok := set[c]; ok {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // syncDeviceDim 同步 device_dim（显式列子集，含软删行让 JOIN 行为与 devices 一致）。
