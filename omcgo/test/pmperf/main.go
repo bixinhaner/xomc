@@ -56,6 +56,7 @@ type config struct {
 	username      string
 	password      string
 	dsn           string
+	tsdbDSN       string
 	natsURL       string
 	noDB          bool
 	seed          bool
@@ -135,7 +136,8 @@ func parseFlags() config {
 	flag.StringVar(&c.fileType, "filetype", "4", "上传 fileType（PM=4）")
 	flag.StringVar(&c.username, "username", "", "上传端点 Basic Auth 用户名（默认无鉴权）")
 	flag.StringVar(&c.password, "password", "", "上传端点 Basic Auth 密码")
-	flag.StringVar(&c.dsn, "db", "postgres://omcgo:omcgo123@localhost:5432/omcgo?sslmode=disable", "PostgreSQL DSN（注入/验证/清理）")
+	flag.StringVar(&c.dsn, "db", "postgres://omcgo:omcgo123@localhost:5432/omcgo?sslmode=disable", "主库 PostgreSQL DSN（devices 注入 / dead_letters 清理）")
+	flag.StringVar(&c.tsdbDSN, "tsdb", "", "时序库 DSN（KPI/时序库物理分离后 pm_metrics/pm_files 在此；留空=与 -db 同库，兼容未分离部署）")
 	flag.StringVar(&c.natsURL, "nats", "nats://localhost:4222", "NATS URL（cleanup/purge 清 PM 流用）")
 	flag.BoolVar(&c.noDB, "no-db", false, "跳过注入与入库验证，仅压文件存储")
 	flag.BoolVar(&c.seed, "seed", true, "run 模式上传前注入设备（带 productClass）")
@@ -170,8 +172,12 @@ func runSeed(ctx context.Context, cfg config) {
 func runCleanup(ctx context.Context, cfg config) {
 	pool := mustDB(ctx, cfg)
 	defer pool.Close()
+	tsPool := mustTSDB(ctx, cfg, pool)
+	if tsPool != pool {
+		defer tsPool.Close()
+	}
 	fmt.Printf("清理测试数据（SN 前缀 %s）…\n", cfg.snPrefix)
-	r, err := cleanupAll(ctx, pool, cfg.snPrefix)
+	r, err := cleanupAll(ctx, pool, tsPool, cfg.snPrefix)
 	if err != nil {
 		fatal("清理失败: %v", err)
 	}
@@ -203,11 +209,15 @@ func runLoad(ctx context.Context, cfg config) {
 
 	printRunHeader(cfg, runs, wins)
 
-	var pool *pgxpool.Pool
+	var pool, tsPool *pgxpool.Pool
 	var baseAll dbCounts
 	if !cfg.noDB {
 		pool = mustDB(ctx, cfg)
 		defer pool.Close()
+		tsPool = mustTSDB(ctx, cfg, pool) // pm_metrics/pm_files 走时序库（分离后）
+		if tsPool != pool {
+			defer tsPool.Close()
+		}
 		if cfg.seed {
 			for _, r := range runs {
 				ins, err := seedDevices(ctx, pool, cfg.snPrefix, r.prof.rat, r.devices, cfg.oui, cfg.carrier, r.prof.tech, r.prof.productClass)
@@ -218,11 +228,11 @@ func runLoad(ctx context.Context, cfg config) {
 			}
 		}
 		var err error
-		if baseAll, err = queryDBCounts(ctx, pool, cfg.snPrefix); err != nil {
+		if baseAll, err = queryDBCounts(ctx, tsPool, cfg.snPrefix); err != nil {
 			fatal("读取基线失败: %v", err)
 		}
 		for _, r := range runs {
-			r.baseCnt, r.baseKpi = queryKPIByRat(ctx, pool, cfg.snPrefix, r.prof.rat)
+			r.baseCnt, r.baseKpi = queryKPIByRat(ctx, tsPool, cfg.snPrefix, r.prof.rat)
 		}
 	} else {
 		fmt.Println("-no-db：跳过注入与入库验证，仅压文件存储")
@@ -234,7 +244,7 @@ func runLoad(ctx context.Context, cfg config) {
 
 	var ing *ingestReport
 	if !cfg.noDB && ctx.Err() == nil {
-		ing = drainAndVerify(ctx, cfg, pool, runs, baseAll, basePM)
+		ing = drainAndVerify(ctx, cfg, tsPool, runs, baseAll, basePM)
 		printIngestReport(cfg, runs, ing)
 	}
 	if cfg.jsonOut {
@@ -242,7 +252,7 @@ func runLoad(ctx context.Context, cfg config) {
 	}
 	if cfg.cleanupAfter && pool != nil {
 		fmt.Println("\n按 -cleanup-after 清理…")
-		if r, err := cleanupAll(context.Background(), pool, cfg.snPrefix); err == nil {
+		if r, err := cleanupAll(context.Background(), pool, tsPool, cfg.snPrefix); err == nil {
 			fmt.Printf("  删除 pm_metrics %d、pm_files %d、devices %d 行\n", r.metrics, r.files, r.devices)
 		}
 		if n, err := purgePMStream(cfg.natsURL); err == nil {
@@ -513,6 +523,20 @@ func mustDB(ctx context.Context, cfg config) *pgxpool.Pool {
 	pool, err := connectDB(ctx, cfg.dsn)
 	if err != nil {
 		fatal("连接数据库失败（%s）: %v", cfg.dsn, err)
+	}
+	return pool
+}
+
+// mustTSDB 返回承载 pm_metrics/pm_files 的时序库连接池。KPI/时序库物理分离后这些表在
+// 独立实例（-tsdb）；未设 -tsdb（或与 -db 同 DSN）则复用主库连接（兼容未分离部署）。
+// 返回值若 != mainPool，调用方需负责 Close。
+func mustTSDB(ctx context.Context, cfg config, mainPool *pgxpool.Pool) *pgxpool.Pool {
+	if cfg.tsdbDSN == "" || cfg.tsdbDSN == cfg.dsn {
+		return mainPool
+	}
+	pool, err := connectDB(ctx, cfg.tsdbDSN)
+	if err != nil {
+		fatal("连接时序库失败（%s）: %v", cfg.tsdbDSN, err)
 	}
 	return pool
 }

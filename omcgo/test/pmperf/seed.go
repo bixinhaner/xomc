@@ -127,11 +127,13 @@ type cleanupResult struct {
 
 // cleanupAll 一键清除测试数据：pm_metrics（含 KPI 行）、pm_files、devices、dead_letters
 // （按 SN 前缀 / payload 命中）。pm_metrics 无外键，删除顺序无要求。
-func cleanupAll(ctx context.Context, pool *pgxpool.Pool, prefix string) (cleanupResult, error) {
+// KPI/时序库物理分离后 pm_metrics/pm_files 在时序库（tsPool），devices/dead_letters 在主库
+// （mainPool）；未分离部署时两者指向同一池。
+func cleanupAll(ctx context.Context, mainPool, tsPool *pgxpool.Pool, prefix string) (cleanupResult, error) {
 	var r cleanupResult
 	pat := snPattern(prefix)
 
-	exec := func(sql string, arg string) (int64, error) {
+	exec := func(pool *pgxpool.Pool, sql string, arg string) (int64, error) {
 		cctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 		defer cancel()
 		tag, err := pool.Exec(cctx, sql, arg)
@@ -142,17 +144,17 @@ func cleanupAll(ctx context.Context, pool *pgxpool.Pool, prefix string) (cleanup
 	}
 
 	var err error
-	if r.metrics, err = exec(`DELETE FROM pm_metrics WHERE device_sn LIKE $1`, pat); err != nil {
+	if r.metrics, err = exec(tsPool, `DELETE FROM pm_metrics WHERE device_sn LIKE $1`, pat); err != nil {
 		return r, fmt.Errorf("delete pm_metrics: %w", err)
 	}
-	if r.files, err = exec(`DELETE FROM pm_files WHERE device_sn LIKE $1`, pat); err != nil {
+	if r.files, err = exec(tsPool, `DELETE FROM pm_files WHERE device_sn LIKE $1`, pat); err != nil {
 		return r, fmt.Errorf("delete pm_files: %w", err)
 	}
-	if r.devices, err = exec(`DELETE FROM devices WHERE serial_number LIKE $1`, pat); err != nil {
+	if r.devices, err = exec(mainPool, `DELETE FROM devices WHERE serial_number LIKE $1`, pat); err != nil {
 		return r, fmt.Errorf("delete devices: %w", err)
 	}
 	// dead_letters 里测试文件的失败记录（payload 含 device_sn）。best-effort：表/列不符时忽略。
-	if n, derr := exec(`DELETE FROM dead_letters WHERE payload::text LIKE $1`, "%"+prefix+"-%"); derr == nil {
+	if n, derr := exec(mainPool, `DELETE FROM dead_letters WHERE payload::text LIKE $1`, "%"+prefix+"-%"); derr == nil {
 		r.dlq = n
 	}
 	return r, nil
