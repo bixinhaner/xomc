@@ -377,3 +377,124 @@ func TestNextScanInterval_ExplicitOverridesDynamic(t *testing.T) {
 	r.SetCheckInterval(5 * time.Second)
 	assert.Equal(t, 5*time.Second, r.nextScanInterval(th))
 }
+
+// ---------------------------------------------------------------------------
+// issue #203：离线阈值 / limit 的 guard 默认值（DB-free 纯函数）
+//
+// 任务点：FindStaleDevicesByClass 的 guard 默认值须被尊重（enb<=0→100,
+// cpe<=0→600, limit<=0→1000）。enb/cpe 的钳制在 resolveOfflineThresholds
+// （offline_threshold.go）这一纯函数里发生；limit 默认值由 reconciler 的
+// batchSize（默认 1000，SetBatchSize 拒非正数）经 FindStaleDevicesByClass 第三参
+// 端到端传入。下方分别直测纯函数与端到端下传。
+// ---------------------------------------------------------------------------
+
+// resolveOfflineThresholds 在 lookup=nil / 缺失 / 非数字 / 非正数时一律退默认
+// （enb=100, cpe=600）——guard 默认值的纯函数源头。
+func TestResolveOfflineThresholds_GuardDefaults(t *testing.T) {
+	tests := []struct {
+		name    string
+		lookup  OfflineThresholdLookup
+		wantENB int
+		wantCPE int
+	}{
+		{
+			name:    "nil lookup → 全退默认 100/600",
+			lookup:  nil,
+			wantENB: defaultENBOfflineSec,
+			wantCPE: defaultCPEOfflineSec,
+		},
+		{
+			name: "key 缺失（found=false）→ 退默认",
+			lookup: func(_ context.Context, _, _ string) (string, bool) {
+				return "", false
+			},
+			wantENB: defaultENBOfflineSec,
+			wantCPE: defaultCPEOfflineSec,
+		},
+		{
+			name: "非数字值 → 退默认",
+			lookup: func(_ context.Context, _, _ string) (string, bool) {
+				return "not-a-number", true
+			},
+			wantENB: defaultENBOfflineSec,
+			wantCPE: defaultCPEOfflineSec,
+		},
+		{
+			name: "0（非正数）→ 退默认",
+			lookup: func(_ context.Context, _, _ string) (string, bool) {
+				return "0", true
+			},
+			wantENB: defaultENBOfflineSec,
+			wantCPE: defaultCPEOfflineSec,
+		},
+		{
+			name: "负数 → 退默认",
+			lookup: func(_ context.Context, _, _ string) (string, bool) {
+				return "-30", true
+			},
+			wantENB: defaultENBOfflineSec,
+			wantCPE: defaultCPEOfflineSec,
+		},
+		{
+			name: "合法正数 → 采用配置值（非默认）",
+			lookup: func(_ context.Context, _, key string) (string, bool) {
+				if key == offlineConfigKeyENB {
+					return "45", true
+				}
+				return "300", true
+			},
+			wantENB: 45,
+			wantCPE: 300,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			th := resolveOfflineThresholds(context.Background(), tt.lookup)
+			assert.Equal(t, tt.wantENB, th.ENBSec)
+			assert.Equal(t, tt.wantCPE, th.CPESec)
+		})
+	}
+}
+
+// 默认常量本身就是 100/600——FindStaleDevicesByClass 的 guard 默认值同源。
+func TestOfflineDefaultConstants(t *testing.T) {
+	assert.Equal(t, 100, defaultENBOfflineSec, "enb 默认阈值 100")
+	assert.Equal(t, 600, defaultCPEOfflineSec, "cpe 默认阈值 600")
+}
+
+// 端到端：未注入 lookup 时，一轮扫描下传给仓库的阈值是默认 100/600，limit 是默认
+// 1000（reconciler batchSize 默认值）——三个 guard 默认值在 detect→Find 链路上兑现。
+func TestDetect_GuardDefaultsHonoredEndToEnd(t *testing.T) {
+	repo := &mockReconcilerRepo{
+		findFn: func(_ context.Context, _, _, _ int) ([]*model.Device, error) { return nil, nil },
+	}
+	r, _ := newTestReconciler(t, repo, nil) // 不注入 thresholdLookup → 默认阈值
+
+	r.detect(context.Background())
+
+	require.Len(t, repo.findCalls, 1)
+	assert.Equal(t, 100, repo.findCalls[0].ENBThresholdSec, "enb 默认 100")
+	assert.Equal(t, 600, repo.findCalls[0].CPEThresholdSec, "cpe 默认 600")
+	assert.Equal(t, 1000, repo.findCalls[0].Limit, "limit 默认 1000（batchSize 默认值）")
+}
+
+// limit guard：SetBatchSize 拒绝非正数（0 / 负数），batchSize 保持 1000，下传 limit 仍 1000。
+func TestDetect_BatchSizeGuardKeepsLimitDefault(t *testing.T) {
+	repo := &mockReconcilerRepo{
+		findFn: func(_ context.Context, _, _, _ int) ([]*model.Device, error) { return nil, nil },
+	}
+	r, _ := newTestReconciler(t, repo, nil)
+
+	r.SetBatchSize(0)    // 非正数被 guard 拒绝
+	r.SetBatchSize(-100) // 负数同样被拒
+	r.detect(context.Background())
+
+	require.Len(t, repo.findCalls, 1)
+	assert.Equal(t, 1000, repo.findCalls[0].Limit, "非正数 batchSize 被拒，limit 保持默认 1000")
+
+	// 合法正数生效后下传新 limit。
+	r.SetBatchSize(250)
+	r.detect(context.Background())
+	require.Len(t, repo.findCalls, 2)
+	assert.Equal(t, 250, repo.findCalls[1].Limit, "合法 batchSize 端到端下传为 limit")
+}
