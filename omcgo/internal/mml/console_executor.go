@@ -190,7 +190,58 @@ func buildStatementCommandEntries(stmt Statement, cmd *MMLCommand, subFields []M
 			return []map[string]interface{}{base, spv}, nil
 		}
 	}
+	// #196 复合：MOD with values 后自动追加 LST 回读，核实基站是否真的改成功。
+	// SPV 响应按 TR069 规范不含参数值，是"KPI URL 等结果显示空"的根因；追加一条
+	// GetParameterValues 把设备实际值读回。Sequencer 在 MOD task 完成后顺序入队本 LST
+	// （prev=SPV / next=GPV 不触发 R-4.3 的 .{NEW}. 替换分支，无需 Sequencer 改动）。
+	if op == "MOD" && len(stmt.Values) > 0 {
+		lst, err := buildMODReadbackLSTEntry(stmt, cmd, subFields)
+		if err != nil {
+			return nil, fmt.Errorf("MOD readback LST: %w", err)
+		}
+		// lst 可能为 nil（防御性：stmt.Values 全无命中 sub_field）— 此时不追加
+		if lst != nil {
+			return []map[string]interface{}{base, lst}, nil
+		}
+	}
 	return []map[string]interface{}{base}, nil
+}
+
+// buildMODReadbackLSTEntry 构造 #196「MOD 后自动 LST 回读核实」的第 2 行 GetParameterValues entry。
+//
+// 只回读本条 MOD 实际下发（stmt.Values 命中）的 PATH，让前端拿到设备真实值核实是否改成功
+// （根治 SPV 不回值导致的"结果显示空"）。与 ADD 复合不同：无新实例，**无 .{i}/.{NEW} 占位**，
+// 沿用 MOD 自身的 instance_selectors 把外层 .{i}. 替换为具体实例号。
+//
+// 返回 nil 表示无可回读 PATH（stmt.Values 全无命中 sub_field）→ 不追加，仅保留 SPV。
+func buildMODReadbackLSTEntry(stmt Statement, cmd *MMLCommand, subFields []MMLCommandSubField) (map[string]interface{}, error) {
+	// 仅回读本次实际下发（stmt.Values 命中）的 sub_fields
+	ids := make([]uuid.UUID, 0, len(stmt.Values))
+	for _, sf := range subFields {
+		if _, ok := stmt.Values[sf.MMLCode]; ok {
+			ids = append(ids, sf.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	refs := buildLSTParamRefs(ids, subFields, cmd.Params)
+	if len(refs) == 0 {
+		return nil, nil
+	}
+	if err := applyInstanceSelectorsToRefs(refs, stmt.InstanceSelectors); err != nil {
+		return nil, err
+	}
+	return map[string]interface{}{
+		"command_code":   cmd.CommandCode,
+		"operation_type": "LST", // GPV 语义；回读核实，audit 通过 compound_phase 关联识别
+		"command_id":     cmd.ID.String(),
+		"logical_code":   stmt.LogicalCode,
+		"rpc_method":     "GetParameterValues",
+		"param_refs":     refs,
+		// 标记复合阶段，便于 Sequencer / 前端 / audit 识别这是 MOD 的回读 LST
+		"compound_phase": "lst_after_mod",
+	}, nil
 }
 
 // buildADDCompoundSpvEntry 构造 §R-4.3 复合流程的第 2 行 SetParameterValues entry。
