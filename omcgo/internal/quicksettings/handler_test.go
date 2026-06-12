@@ -162,6 +162,25 @@ func TestHandler_GetGroups_DeviceNotFound_404(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
+// TestHandler_GetGroups_EmptyDevice_404 锁 issue #180 回归:
+// 设备查询带「排除已删除」过滤,软删/不存在的设备查出来是 (nil, nil)。
+// 修复前代码紧接着解引用 device.ProductClass 触发空指针 panic → 兜成 500,前端拿 500 即空白。
+// 断言:查到空设备返回 404 而非 500/panic。
+func TestHandler_GetGroups_EmptyDevice_404(t *testing.T) {
+	deviceID := uuid.New()
+	h := NewHandler(
+		NewRegistry(),
+		&mockDeviceLookup{device: nil, err: nil}, // 软删/不存在:返回 (nil, nil)
+		&mockProductMatcher{},
+		&mockPMNameLookup{},
+	)
+	r := setupRouter(h)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/quicksettings/groups?device_id="+deviceID.String(), nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
 func TestHandler_GetGroups_ProductClassUnmatched_404(t *testing.T) {
 	deviceID := uuid.New()
 	h := NewHandler(
