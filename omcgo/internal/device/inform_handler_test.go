@@ -30,6 +30,7 @@ type infMockDeviceRepo struct {
 	updateLastInformFn  func(ctx context.Context, sn string, at time.Time, events []string) error
 	recordBootFn        func(ctx context.Context, sn string, at time.Time) (int, error)
 	countByStatusFn     func(ctx context.Context, carrier *model.CarrierCode) (map[model.DeviceStatus]int64, error)
+	updateOnlineFn      func(ctx context.Context, id uuid.UUID, isOnline bool) error
 }
 
 func (m *infMockDeviceRepo) Create(ctx context.Context, device *model.Device) error {
@@ -84,7 +85,10 @@ func (m *infMockDeviceRepo) UpdateLifecycle(_ context.Context, _ uuid.UUID, _ mo
 	return nil
 }
 
-func (m *infMockDeviceRepo) UpdateOnlineStatus(_ context.Context, _ uuid.UUID, _ bool) error {
+func (m *infMockDeviceRepo) UpdateOnlineStatus(ctx context.Context, id uuid.UUID, isOnline bool) error {
+	if m.updateOnlineFn != nil {
+		return m.updateOnlineFn(ctx, id, isOnline)
+	}
 	return nil
 }
 func (m *infMockDeviceRepo) UpdateLastInform(ctx context.Context, sn string, at time.Time, events []string) error {
@@ -554,6 +558,179 @@ func TestHandleRebootComplete_AutoRegisterWhenMissing(t *testing.T) {
 	err = h.handleRebootComplete(context.Background(), evt)
 	require.NoError(t, err)
 	assert.True(t, created, "expected auto-register to call Create")
+}
+
+// infMockBootEventRecorder 记录 RecordBootEvent 被调用次数与最后一次快照，
+// 供 issue #212 死判用例断言 "写一条重启记录"。
+type infMockBootEventRecorder struct {
+	calls []BootEventSnapshot
+}
+
+func (m *infMockBootEventRecorder) RecordBootEvent(_ context.Context, snap BootEventSnapshot) error {
+	m.calls = append(m.calls, snap)
+	return nil
+}
+
+// issue #212 死判：设备初始在线，收到 BOOT（1 BOOT）时必须无条件强制走出
+// "下线 → 上线" 翻转（先发 device.offline，再发 device.online），且写一条重启记录。
+//
+// 与被动超时离线探测彻底解耦：本用例从不触发任何心跳超时，设备一直显示在线，
+// 仅凭 BOOT 信号就应驱动翻转 —— 验证 "当前仍显示在线" 不再挡住翻转。
+func TestHandleRebootComplete_OnlineDevice_ForcesOfflineThenOnlineFlip(t *testing.T) {
+	deviceID := uuid.New()
+	// stateful 在线标记：ForceBootStateFlip 写 false 后，后续 GetBySerialNumber
+	// 必须反映出离线，UpdateFromInform 才能判定 oldStatus==Offline → 发 device.online。
+	online := true
+	var forcedOfflineCalled bool
+
+	deviceRepo := &infMockDeviceRepo{
+		getBySerialNumberFn: func(_ context.Context, sn string) (*model.Device, error) {
+			status := model.DeviceActive
+			if !online {
+				status = model.DeviceOffline
+			}
+			return &model.Device{
+				ID:             deviceID,
+				SerialNumber:   sn,
+				OUI:            "AABBCC",
+				Carrier:        model.CarrierCMCC,
+				Technology:     model.TechLTE,
+				Status:         status,
+				LifecycleState: model.LifecycleCommissioned,
+				IsOnline:       online,
+				InformInterval: 300,
+			}, nil
+		},
+		updateOnlineFn: func(_ context.Context, _ uuid.UUID, isOnline bool) error {
+			if !isOnline {
+				forcedOfflineCalled = true
+				online = false
+			} else {
+				online = true
+			}
+			return nil
+		},
+		updateFn: func(_ context.Context, _ *model.Device) error { return nil },
+		recordBootFn: func(_ context.Context, _ string, _ time.Time) (int, error) {
+			return 5, nil
+		},
+	}
+
+	bus := event.NewChannelEventBus(16, zap.NewNop())
+	offlineCh := make(chan event.Event, 1)
+	onlineCh := make(chan event.Event, 1)
+	_, subErr := bus.Subscribe(event.SubjectDeviceOffline, func(_ context.Context, evt event.Event) error {
+		offlineCh <- evt
+		return nil
+	})
+	require.NoError(t, subErr)
+	_, subErr = bus.Subscribe(event.SubjectDeviceOnline, func(_ context.Context, evt event.Event) error {
+		onlineCh <- evt
+		return nil
+	})
+	require.NoError(t, subErr)
+
+	rec := &infMockBootEventRecorder{}
+	svc := NewDeviceService(deviceRepo, &infMockParamRepo{}, nil, bus, zap.NewNop())
+	svc.SetBootEventRecorder(rec)
+	h := NewInformHandler(svc, nil, model.CarrierCMCC, zap.NewNop())
+
+	payload := sampleInformPayload("SN-212-FLIP-001")
+	payload.Events = []string{tr069.EventBoot} // 1 BOOT，无 HaltReason → 正常重启
+	evt, err := event.NewEvent(event.SubjectDeviceRebootComplete, payload)
+	require.NoError(t, err)
+
+	err = h.handleRebootComplete(context.Background(), evt)
+	require.NoError(t, err)
+
+	// 1) 强制置离线被调用（即便设备初始在线）
+	assert.True(t, forcedOfflineCalled, "BOOT 必须无条件先把设备强制置离线")
+
+	// 2) device.offline 事件已发（"下线" 半程可见），reason=reboot 区分被动超时
+	select {
+	case got := <-offlineCh:
+		assert.Equal(t, event.SubjectDeviceOffline, got.Subject)
+		var p DeviceOfflineEvent
+		require.NoError(t, got.DecodePayload(&p))
+		assert.Equal(t, OfflineReasonReboot, p.Reason,
+			"BOOT 驱动的离线 reason 应为 reboot，与超时离线 heartbeat_timeout 区分")
+	case <-time.After(time.Second):
+		t.Fatal("expected device.offline event, got none")
+	}
+
+	// 3) device.online 事件已发（"上线" 半程走出，触发 PM 配置重发）
+	select {
+	case got := <-onlineCh:
+		assert.Equal(t, event.SubjectDeviceOnline, got.Subject)
+		var p DeviceOnlineEvent
+		require.NoError(t, got.DecodePayload(&p))
+		assert.Equal(t, "SN-212-FLIP-001", p.SerialNumber)
+	case <-time.After(time.Second):
+		t.Fatal("expected device.online event after forced flip, got none")
+	}
+
+	// 4) 写了一条重启记录
+	require.Len(t, rec.calls, 1, "BOOT 必须写一条重启记录")
+	assert.Equal(t, "SN-212-FLIP-001", rec.calls[0].DeviceSN)
+	assert.Equal(t, 5, rec.calls[0].BootCount)
+}
+
+// 对照（非 BOOT 不强制翻转）：纯 PERIODIC 心跳走 handlePeriodic，不应触发
+// ForceBootStateFlip / device.offline，也不写重启记录 —— 强制翻转只属 BOOT 路径。
+func TestHandlePeriodic_NoForcedFlipNoRebootRecord(t *testing.T) {
+	deviceID := uuid.New()
+	var forcedOfflineCalled bool
+	deviceRepo := &infMockDeviceRepo{
+		getBySerialNumberFn: func(_ context.Context, sn string) (*model.Device, error) {
+			return &model.Device{
+				ID:             deviceID,
+				SerialNumber:   sn,
+				OUI:            "AABBCC",
+				Carrier:        model.CarrierCMCC,
+				Status:         model.DeviceActive,
+				LifecycleState: model.LifecycleCommissioned,
+				IsOnline:       true,
+				InformInterval: 300,
+			}, nil
+		},
+		updateOnlineFn: func(_ context.Context, _ uuid.UUID, isOnline bool) error {
+			if !isOnline {
+				forcedOfflineCalled = true
+			}
+			return nil
+		},
+		updateFn: func(_ context.Context, _ *model.Device) error { return nil },
+	}
+
+	bus := event.NewChannelEventBus(16, zap.NewNop())
+	offlineCh := make(chan event.Event, 1)
+	_, subErr := bus.Subscribe(event.SubjectDeviceOffline, func(_ context.Context, evt event.Event) error {
+		offlineCh <- evt
+		return nil
+	})
+	require.NoError(t, subErr)
+
+	rec := &infMockBootEventRecorder{}
+	svc := NewDeviceService(deviceRepo, &infMockParamRepo{}, nil, bus, zap.NewNop())
+	svc.SetBootEventRecorder(rec)
+	h := NewInformHandler(svc, nil, model.CarrierCMCC, zap.NewNop())
+
+	payload := sampleInformPayload("SN-212-PERIODIC-001")
+	payload.Events = []string{"2 PERIODIC"}
+	evt, err := event.NewEvent(event.SubjectDevicePeriodic, payload)
+	require.NoError(t, err)
+
+	err = h.handlePeriodic(context.Background(), evt)
+	require.NoError(t, err)
+
+	assert.False(t, forcedOfflineCalled, "PERIODIC 不应触发强制置离线")
+	assert.Empty(t, rec.calls, "PERIODIC 不应写重启记录")
+	select {
+	case <-offlineCh:
+		t.Fatal("PERIODIC 不应发 device.offline 事件")
+	case <-time.After(150 * time.Millisecond):
+		// expected: no offline event
+	}
 }
 
 func TestHandlePeriodic_Success(t *testing.T) {

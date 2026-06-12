@@ -209,6 +209,14 @@ func (h *InformHandler) handleRebootComplete(ctx context.Context, evt event.Even
 		// kick off Path B/C (auto-sync / model upload).
 		h.service.PublishDeviceRegistered(ctx, device)
 	} else {
+		// issue #212：收到 BOOT 即无条件强制驱动一次 "下线 → 上线" 翻转。
+		// 先把设备显式置离线（即便当前显示在线），再由紧随其后的 UpdateFromInform
+		// 把它带回在线 —— 这样 oldStatus==Offline 成立、device.online 必然发出，
+		// OMC 上才会如实走出 "下线 → 上线" 过程。与被动超时离线探测彻底解耦：
+		// 不读心跳超时链路、不被 "当前仍显示在线" 挡住。ForceBootStateFlip 内部对
+		// 已离线设备幂等、且只翻转 is_online 不动 lifecycle。
+		h.service.ForceBootStateFlip(ctx, device)
+
 		updated, updErr := h.service.UpdateFromInform(ctx, inform)
 		if updErr != nil {
 			h.logger.Error("handleRebootComplete: UpdateFromInform failed",
