@@ -1,4 +1,4 @@
-import { Form, InputNumber, Checkbox, Select, Card, Space, Typography } from 'antd';
+import { Form, InputNumber, Checkbox, Select, Card, Space, Typography, Divider } from 'antd';
 import { useT } from '@/hooks/useT';
 
 const { Option } = Select;
@@ -42,17 +42,21 @@ export default function DeviceSettings({ form }: DeviceSettingsProps) {
       periodicSyncMaxConcurrent: 10,
       periodicSyncStaggerWindowMinutes: 0,
     }}>
-      {/* 设备Inform周期 */}
+      {/* 设备Inform周期 —— 按"基站类 / CPE 类"分组排版（issue #238） */}
       <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.device.informPeriod')}</span>} style={{ marginBottom: 16 }}>
+        {/* 基站类（覆盖 2G/4G/5G，统称"基站"，不再硬编码 eNB） */}
+        <Typography.Text strong style={{ display: 'block', marginBottom: 12 }}>
+          {t('system.device.informGroup.baseStation')}
+        </Typography.Text>
         <div style={settingRowStyle}>
           <Space wrap>
             <Form.Item name="enbInformPeriodAdjustEnable" valuePropName="checked" noStyle>
-              <Checkbox>{t('system.device.detectEnbInformPeriod')}</Checkbox>
+              <Checkbox>{t('system.device.adjustEnbPrefix')}</Checkbox>
             </Form.Item>
             <Form.Item name="enbInformPeriod" noStyle>
               <InputNumber min={60} max={3600} style={{ width: 70 }} />
             </Form.Item>
-            <span>{t('system.device.thenAutoAdjust')}</span>
+            <span>{t('system.device.adjustSuffix')}</span>
           </Space>
         </div>
         <div style={settingRowStyle}>
@@ -66,15 +70,22 @@ export default function DeviceSettings({ form }: DeviceSettingsProps) {
             <span>{t('system.device.noHeartbeatThenOffline')}</span>
           </Space>
         </div>
+
+        <Divider style={{ margin: '12px 0' }} />
+
+        {/* CPE 类 */}
+        <Typography.Text strong style={{ display: 'block', marginBottom: 12 }}>
+          {t('system.device.informGroup.cpe')}
+        </Typography.Text>
         <div style={settingRowStyle}>
           <Space wrap>
             <Form.Item name="cpeInformPeriodAdjustEnable" valuePropName="checked" noStyle>
-              <Checkbox>{t('system.device.detectCpeInformPeriod')}</Checkbox>
+              <Checkbox>{t('system.device.adjustCpePrefix')}</Checkbox>
             </Form.Item>
             <Form.Item name="cpeInformPeriod" noStyle>
               <InputNumber min={60} max={3600} style={{ width: 70 }} />
             </Form.Item>
-            <span>{t('system.device.thenAutoAdjust')}</span>
+            <span>{t('system.device.adjustSuffix')}</span>
           </Space>
         </div>
         <div style={settingRowStyle}>
