@@ -73,7 +73,7 @@ func (l *Loader) Reload(ctx context.Context) (dictloader.Report, error)   { retu
 // xmlIndicatorModel 解析 indicator 单文件 XML（设计 §2.6）。
 //
 // LoadedFrom 是 T-0180 P1.2 在 Loader 内存中追加的来源标记(xml:"-" 不参与 XML 解析),
-// 形如 "indicator-library/enb/ALL.xml" 或 "indicator-library-custom/enb/MY.xml",
+// 形如 "indicator-library/enb/ALL.xml"(单目录 + sidecar:builtin/custom 同住,custom 旁有 .custom 标记),
 // 由 resolveENBSources / resolveSingleTechSources 在文件扫描阶段写入,
 // 由 flattenDocsByDeviceType 透传到 indicatorRecord 最终落 perf_indicators_*.loaded_from 列。
 type xmlIndicatorModel struct {

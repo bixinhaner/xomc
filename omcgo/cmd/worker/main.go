@@ -678,8 +678,8 @@ func startParamModelBackupCleanup(w *workerInfra, cfg *appconfig.WorkerConfig, l
 //   - 注册 cron(默认 "0 3 * * *");无效表达式 fallback 默认值
 //   - 启动期延迟 30s 跑一次 catch-up:防 worker 长期宕机后备份堆积
 //   - 单实例假设;横扩需加 PG advisory lock(P1 不做)
-//   - customDir 是三制式子目录的根 (.../indicator-library-custom),
-//     Run() 遍历 enb/gsm/gnb 各自的子目录
+//   - 备份扫描根 = indicator-library 单目录(BuiltinDirSubdir;单目录 + sidecar 后
+//     builtin/custom 同住),Run() 遍历 enb/gsm/gnb 各自的子目录
 func startIndicatorBackupCleanup(w *workerInfra, cfg *appconfig.WorkerConfig, logger *zap.Logger) {
 	// 解析配置 + 应用默认值
 	indCfg := cfg.DictLoader.Indicator
