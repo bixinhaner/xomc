@@ -23,6 +23,8 @@ import { createApiSwitch } from '@core/services/apiSwitch';
 import { useT } from '@/hooks/useT';
 import type { Alarm, DealState, EventType } from '@core/types/alarm';
 import type { AlarmFilter } from '@core/types/alarm';
+import type { AlarmSeverity } from '@core/types/common';
+import { useSearchParams } from 'react-router-dom';
 import AlarmDetail from '../AlarmDetail';
 import ExportModal from './ExportModal';
 import AutoRefreshDropdown from '../components/AutoRefreshDropdown';
@@ -97,12 +99,59 @@ function triggerCsvDownload(content: string, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+const VALID_SEVERITIES: AlarmSeverity[] = ['critical', 'major', 'minor', 'warning'];
+
+// 从统计页钻取 URL 解析出列表筛选条件与表单初始值。
+// 注意字段名差异：URL 用 deviceSN，列表/后端用 deviceSn；时间用 startTime/endTime，列表用 timeRange。
+function parseDrillDownParams(search: URLSearchParams): {
+  filter: AlarmFilter;
+  formValues: Record<string, unknown>;
+} {
+  const filter: AlarmFilter = {};
+  const formValues: Record<string, unknown> = {};
+
+  const deviceSN = search.get('deviceSN') ?? search.get('deviceSn');
+  if (deviceSN) {
+    filter.deviceSn = deviceSN;
+    formValues.deviceSn = deviceSN;
+  }
+
+  const severity = search.get('severity');
+  if (severity && VALID_SEVERITIES.includes(severity as AlarmSeverity)) {
+    filter.severity = [severity as AlarmSeverity];
+    formValues.severity = [severity];
+  }
+
+  const eventType = search.get('eventType');
+  if (eventType) {
+    filter.eventType = eventType as AlarmFilter['eventType'];
+    formValues.eventType = eventType;
+  }
+
+  const startTime = search.get('startTime');
+  const endTime = search.get('endTime');
+  if (startTime && endTime) {
+    filter.timeRange = [startTime, endTime];
+    formValues.timeRange = [startTime, endTime];
+  }
+
+  return { filter, formValues };
+}
+
 export default function CurrentAlarms() {
   const t = useT();
   const { modal, message } = App.useApp();
+  const [searchParams] = useSearchParams();
+  // 仅在挂载时解析一次钻取参数，作为筛选初始值（后续用户操作不再受 URL 影响）
+  const drillDown = useMemo(() => parseDrillDownParams(searchParams), []); // eslint-disable-line react-hooks/exhaustive-deps
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
-  const [filterParams, setFilterParams] = useState<AlarmFilter>({});
+  const [filterParams, setFilterParams] = useState<AlarmFilter>(() => drillDown.filter);
+  // 有钻取参数时把表单初始值传给 FilterBar（无则传 undefined，保留 sessionStorage 恢复行为）
+  const drillDownInitialValues = useMemo(
+    () => (Object.keys(drillDown.formValues).length > 0 ? drillDown.formValues : undefined),
+    [drillDown]
+  );
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [detailAlarm, setDetailAlarm] = useState<Alarm | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -789,6 +838,7 @@ export default function CurrentAlarms() {
         onSearch={handleSearch}
         onReset={handleReset}
         collapsedRows={2}
+        initialValues={drillDownInitialValues}
       />
 
       {/* 列表卡片 */}

@@ -476,13 +476,32 @@ export default function AlarmStatistics() {
     }
   };
 
-  // 钻取到告警详情
+  // 钻取到告警详情：带上点击对象 + 统计页当前全量上下文（时间范围等）
   const handleDrillDown = useCallback((severity?: string, deviceSN?: string) => {
     const params = new URLSearchParams();
     if (severity) params.set('severity', severity);
     if (deviceSN) params.set('deviceSN', deviceSN);
+
+    // 把统计页当前时间范围一并带入，让列表与图表口径一致
+    let start: Dayjs | null = null;
+    let end: Dayjs | null = null;
+    if (filters.timeRange === 'custom' && filters.customStartDate && filters.customEndDate) {
+      start = filters.customStartDate;
+      end = filters.customEndDate;
+    } else if (filters.timeRange === '7days') {
+      end = dayjs();
+      start = end.subtract(6, 'day').startOf('day');
+    } else if (filters.timeRange === '30days') {
+      end = dayjs();
+      start = end.subtract(29, 'day').startOf('day');
+    }
+    if (start && end) {
+      params.set('startTime', start.toISOString());
+      params.set('endTime', end.toISOString());
+    }
+
     navigate(`/alarm/current?${params.toString()}`);
-  }, [navigate]);
+  }, [navigate, filters]);
 
 
   return (
