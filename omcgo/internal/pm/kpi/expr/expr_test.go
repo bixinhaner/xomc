@@ -1,6 +1,7 @@
 package expr
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -86,4 +87,33 @@ func TestParse_NumbersStillWork(t *testing.T) {
 	got, err := f.Evaluate(map[string]float64{"a": 2})
 	require.NoError(t, err)
 	assert.InDelta(t, 103.0, got, 0.0001)
+}
+
+// TestEvaluate_TypedMissingCounter 验证 counter 缺失返回可经 errors.As 识别的
+// *MissingCounterError，并携带缺失的 counter 名（可观测性日志据此采样具体缺哪个 counter）。
+func TestEvaluate_TypedMissingCounter(t *testing.T) {
+	f, err := Parse("a / b * 100")
+	require.NoError(t, err)
+	_, evalErr := f.Evaluate(map[string]float64{"a": 95}) // b 缺失
+	require.Error(t, evalErr)
+
+	var missing *MissingCounterError
+	require.True(t, errors.As(evalErr, &missing), "缺失 counter 应是 *MissingCounterError")
+	assert.Equal(t, "b", missing.Counter, "携带缺失的 counter 名")
+	assert.Contains(t, evalErr.Error(), "counter not found: b", "Error() 文案保持向后兼容")
+	assert.False(t, errors.Is(evalErr, ErrDivByZero), "缺失 counter 不应被误判为除零")
+}
+
+// TestEvaluate_TypedDivByZero 验证分母为 0 返回可经 errors.Is 识别的哨兵 ErrDivByZero，
+// 与 counter 缺失两类跳过原因可被上层日志分别归类。
+func TestEvaluate_TypedDivByZero(t *testing.T) {
+	f, err := Parse("a / b")
+	require.NoError(t, err)
+	_, evalErr := f.Evaluate(map[string]float64{"a": 100, "b": 0})
+	require.Error(t, evalErr)
+
+	assert.True(t, errors.Is(evalErr, ErrDivByZero), "除零应是哨兵 ErrDivByZero")
+	assert.Contains(t, evalErr.Error(), "division by zero", "Error() 文案保持向后兼容")
+	var missing *MissingCounterError
+	assert.False(t, errors.As(evalErr, &missing), "除零不应被误判为 counter 缺失")
 }

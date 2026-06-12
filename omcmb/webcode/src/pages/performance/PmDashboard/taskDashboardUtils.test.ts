@@ -216,6 +216,40 @@ describe('buildMetricCharts — 转置', () => {
   });
 });
 
+describe('buildMetricCharts — #194 设备组 legend 固定全集（缺指标留断点不丢组）', () => {
+  // 任务覆盖两个设备组：上行流量(M_TRAFFIC)两组都有；E-RAB掉线率(M_ERAB)只有 GA 有（GB 分母 counter 缺失被后端跳过）。
+  // 期望：M_ERAB 图也要列出 GA、GB 两条 legend，GB 全为 '-'（断点），不能整组消失。
+  const groupRows: AdhocResultRow[] = [
+    row({ metricPath: 'M_TRAFFIC', objectLdn: 'DeviceGroup=GA', deviceGroupName: '华东', startTime: 't0', metricValue: 10 }),
+    row({ metricPath: 'M_TRAFFIC', objectLdn: 'DeviceGroup=GB', deviceGroupName: '华南', startTime: 't0', metricValue: 20 }),
+    row({ metricPath: 'M_ERAB', objectLdn: 'DeviceGroup=GA', deviceGroupName: '华东', startTime: 't0', metricValue: 0.5 }),
+    // M_ERAB 没有 GB 行（GB 该指标被后端跳过）
+  ];
+
+  it('device_group：某指标缺某组 → 该图仍含全集 legend，缺组留 \'-\' 断点', () => {
+    const charts = buildMetricCharts(groupRows, 'device_group', 'hourly');
+    const erab = charts.find((c) => c.metricPath === 'M_ERAB')!;
+    const keys = erab.series.map((s) => s.key).sort();
+    expect(keys).toEqual(['DeviceGroup=GA', 'DeviceGroup=GB']);
+    const byKey = Object.fromEntries(erab.series.map((s) => [s.key, s]));
+    expect(byKey['DeviceGroup=GA'].values).toEqual([0.5]);
+    // GB 在 M_ERAB 缺数据 → 全 '-'（断点），不是 0 假点
+    expect(byKey['DeviceGroup=GB'].values).toEqual(['-']);
+    // 名字沿用别的指标里解析到的组名（华南），不退化成 uuid
+    expect(byKey['DeviceGroup=GB'].name).toBe('设备组 华南');
+  });
+
+  it('device 维度不套全集：缺设备的指标 legend 不补该设备（设备真无数据有意义）', () => {
+    const rows = [
+      row({ metricPath: 'M1', deviceSn: 'SN-A', startTime: 't0', metricValue: 1 }),
+      row({ metricPath: 'M2', deviceSn: 'SN-B', startTime: 't0', metricValue: 2 }),
+    ];
+    const charts = buildMetricCharts(rows, 'device', 'hourly');
+    const m1 = charts.find((c) => c.metricPath === 'M1')!;
+    expect(m1.series.map((s) => s.key)).toEqual(['SN-A']); // 不含 SN-B
+  });
+});
+
 describe('filterChartsByMetricPaths — T-0194 按任务已选指标过滤出图', () => {
   const rows: AdhocResultRow[] = [
     row({ metricPath: 'K1', deviceSn: 'SN-A' }),

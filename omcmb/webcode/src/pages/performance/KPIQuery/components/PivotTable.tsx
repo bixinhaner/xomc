@@ -21,6 +21,12 @@ const { Text } = Typography;
 interface PivotTableProps {
   rows: AggregatedRow[];
   loading?: boolean;
+  /**
+   * 空结果时的提示文案。缺省走通用「暂无数据，请选择查询条件后点击查询」。
+   * gNB 查空时调用方传更明确文案（区分「未注册厂商指标库」与「时间窗内无采样」），
+   * 见 #201：5G 真机样本厂商错配导致 KPI 算不出、后端返回 items=null 的盲点。
+   */
+  emptyDescription?: React.ReactNode;
 }
 
 // 固定 5 列默认宽度（开始时间 / 结束时间 / 设备 SN / Cell ID / PLMN）
@@ -99,7 +105,7 @@ function ResizableTitle({ width, onResize, ...restProps }: ResizableTitleProps) 
   );
 }
 
-export default function PivotTable({ rows, loading }: PivotTableProps) {
+export default function PivotTable({ rows, loading, emptyDescription }: PivotTableProps) {
   const pivoted = useMemo(() => pivotLongToWide(rows), [rows]);
 
   const userId = useUserStore((s) => s.currentUser?.id);
@@ -209,7 +215,11 @@ export default function PivotTable({ rows, loading }: PivotTableProps) {
   if (!loading && pivoted.rows.length === 0) {
     return (
       <Empty
-        description={<Text type="secondary">暂无数据，请选择查询条件后点击"查询"</Text>}
+        description={
+          emptyDescription ?? (
+            <Text type="secondary">暂无数据，请选择查询条件后点击"查询"</Text>
+          )
+        }
         style={{ padding: '60px 0' }}
       />
     );

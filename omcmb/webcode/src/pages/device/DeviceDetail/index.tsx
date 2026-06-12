@@ -1058,7 +1058,14 @@ function KPITabContent({ device, t }: KPITabContentProps) {
                   }}>
                     <Empty
                       image={Empty.PRESENTED_IMAGE_SIMPLE}
-                      description={t('common.noData')}
+                      // gNB(5G/NR) 查空时给更明确文案（#187/#201）：5G 真机样本厂商错配会让
+                      // KPI 算不出、该设备无 KPI 行，泛化「暂无数据」无法区分「指标库未注册」
+                      // 与「时段无采样」。其它制式保持通用文案。
+                      description={
+                        technology === 'nr'
+                          ? '该设备暂无可用 KPI 数据，请确认厂商指标库已注册'
+                          : t('common.noData')
+                      }
                     />
                   </div>
                 ) : (

@@ -6,11 +6,26 @@
 package expr
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"unicode"
 )
+
+// ErrDivByZero 是公式求值时分母为 0 的哨兵错误。
+// 调用方可用 errors.Is 区分「除零」与「counter 缺失」两类跳过原因（可观测性日志按因归类）。
+var ErrDivByZero = errors.New("division by zero")
+
+// MissingCounterError 表示公式依赖的某个 counter 在求值时缺失。
+// 携带缺失的 counter 名，便于上层日志采样具体是哪个 counter 没上报。
+type MissingCounterError struct {
+	Counter string
+}
+
+func (e *MissingCounterError) Error() string {
+	return "counter not found: " + e.Counter
+}
 
 // Formula represents a parsed KPI calculation formula.
 type Formula struct {
@@ -31,7 +46,7 @@ type identNode struct{ name string }
 func (n *identNode) eval(counters map[string]float64) (float64, error) {
 	v, ok := counters[n.name]
 	if !ok {
-		return 0, fmt.Errorf("counter not found: %s", n.name)
+		return 0, &MissingCounterError{Counter: n.name}
 	}
 	return v, nil
 }
@@ -60,7 +75,7 @@ func (n *binaryNode) eval(counters map[string]float64) (float64, error) {
 		return l * r, nil
 	case '/':
 		if r == 0 {
-			return 0, fmt.Errorf("division by zero")
+			return 0, ErrDivByZero
 		}
 		return l / r, nil
 	default:

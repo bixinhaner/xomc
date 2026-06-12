@@ -9,6 +9,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
@@ -422,6 +425,79 @@ func Test_Recompute_RawCounterPlusDerivedKPI_Mixed(t *testing.T) {
 	assert.Equal(t, []string{"K000010002"}, kpiPaths, "派生 KPI 重算行")
 	assert.InDelta(t, 31.0, valByPath["C000060216"], 1e-9)
 	assert.InDelta(t, 25.0, valByPath["K000010002"], 1e-9)
+}
+
+// ── 可观测性（#194）：device_group 重算跳过某组某指标时记结构化 debug 日志 ──────────
+//
+// 一个设备组分母 counter 缺失（RRC.AttConnEstab 桶里没有）→ 该组该 KPI 整条被跳过、不产假 0
+//（既有语义不变），但应记一条聚合日志含 group_id + metric + reason=missing:<counter>，
+// 便于现场把「该组真没数据」与「某组没上报该 counter」分离，也解释前端 legend 该组消失。
+func Test_Recompute_DeviceGroup_SkipLogged(t *testing.T) {
+	now := time.Date(2026, 6, 8, 10, 0, 0, 0, time.UTC)
+	gid := uuid.New()
+	db := &recordingDB{
+		results: []pgx.Rows{
+			&fakeRows{rows: [][]any{
+				metaRow("K900010002", "pct", "RRC.SuccConnEstab/RRC.AttConnEstab*100"),
+			}},
+			&fakeRows{rows: [][]any{
+				// 只有分子 SuccConnEstab，分母 AttConnEstab 缺 → 该组该 KPI 跳过。
+				groupTableRow(gid, "lte", "RRC.SuccConnEstab", "counter", 100, "sum", "hourly", now),
+			}},
+			&fakeRows{}, // backfill
+		},
+	}
+	obsCore, logs := observer.New(zapcore.DebugLevel)
+	a := New(db, nil, zap.New(obsCore))
+	rows, err := a.Query(context.Background(), QueryRequest{
+		Granularity: metrics.GranularityHourly,
+		Dimension:   DimensionDeviceGroup,
+		MetricPaths: []string{"K900010002"},
+	})
+	require.NoError(t, err)
+	assert.Empty(t, rows, "分母缺失该组该 KPI 跳过，不产假 0（既有语义不变）")
+
+	entries := logs.FilterMessage("device-group KPI recompute skipped buckets").All()
+	require.Len(t, entries, 1, "应记一条聚合跳过日志")
+	fields := entries[0].ContextMap()
+	assert.EqualValues(t, 1, fields["skipped_total"])
+	// observer ContextMap 把 zap.Strings 还原成 []interface{}。
+	detailsRaw, ok := fields["details"].([]interface{})
+	require.True(t, ok, "details 应为切片")
+	require.Len(t, detailsRaw, 1)
+	detail := detailsRaw[0].(string)
+	assert.Contains(t, detail, "K900010002", "含被跳过的指标编号")
+	assert.Contains(t, detail, "missing:RRC.AttConnEstab", "reason 标明缺失的 counter")
+	assert.Contains(t, detail, "group="+gid.String(), "采样含 group_id 便于定位")
+}
+
+// 全部组都算得出时不应产生跳过日志（避免噪声）。
+func Test_Recompute_DeviceGroup_NoSkipLogWhenAllComputed(t *testing.T) {
+	now := time.Date(2026, 6, 8, 10, 0, 0, 0, time.UTC)
+	gid := uuid.New()
+	db := &recordingDB{
+		results: []pgx.Rows{
+			&fakeRows{rows: [][]any{
+				metaRow("K900010002", "pct", "RRC.SuccConnEstab/RRC.AttConnEstab*100"),
+			}},
+			&fakeRows{rows: [][]any{
+				groupTableRow(gid, "lte", "RRC.SuccConnEstab", "counter", 100, "sum", "hourly", now),
+				groupTableRow(gid, "lte", "RRC.AttConnEstab", "counter", 400, "sum", "hourly", now),
+			}},
+			&fakeRows{}, // backfill
+		},
+	}
+	obsCore, logs := observer.New(zapcore.DebugLevel)
+	a := New(db, nil, zap.New(obsCore))
+	rows, err := a.Query(context.Background(), QueryRequest{
+		Granularity: metrics.GranularityHourly,
+		Dimension:   DimensionDeviceGroup,
+		MetricPaths: []string{"K900010002"},
+	})
+	require.NoError(t, err)
+	require.Len(t, rows, 1, "该组该 KPI 算得出")
+	assert.Empty(t, logs.FilterMessage("device-group KPI recompute skipped buckets").All(),
+		"无跳过则不记日志")
 }
 
 // ── 纯函数：effectiveCounterPaths 去重并合并 deps ───────────────────────────

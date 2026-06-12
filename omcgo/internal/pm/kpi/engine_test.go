@@ -13,6 +13,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 // ── 测试夹具：mock 依赖 ──────────────────────────────────────────────
@@ -358,6 +360,73 @@ func TestKPIEngine_Calculate_PropagatesRouterError(t *testing.T) {
 		model.CarrierCMCC, model.TechLTE,
 	)
 	require.ErrorIs(t, err, wantErr)
+}
+
+// 可观测性（#201/#187/#182）：counter 缺失导致 KPI 被静默跳过时，应记一条聚合 debug 日志，
+// 含 device_sn / 被跳过数 / 缺失 counter 采样名——让"算不出"不再无声盲点。
+func TestKPIEngine_Calculate_LogsSkippedKPIs(t *testing.T) {
+	route := &router.KPIRoute{
+		ProductID:         uuid.New(),
+		IndicatorPlatform: "BLQ-LTE-V1",
+		KPIs: []router.KPIDef{
+			{Name: "RRC_Succ_Rate", Formula: "RRC_Conn_Succ / RRC_Conn_Att", Dependencies: []string{"RRC_Conn_Succ", "RRC_Conn_Att"}},
+			{Name: "ERAB_Succ_Rate", Formula: "ERAB_Succ / ERAB_Att", Dependencies: []string{"ERAB_Succ", "ERAB_Att"}},
+		},
+	}
+	counterRepo := &mockCounterRepo{
+		queryForKPIFunc: func(context.Context, uuid.UUID, string, []string, time.Time, time.Time) (map[string]float64, error) {
+			// 只回 RRC，ERAB 分子分母全缺 → ERAB 被跳过（missing counter）。
+			return map[string]float64{"RRC_Conn_Succ": 950, "RRC_Conn_Att": 1000}, nil
+		},
+	}
+	obsCore, logs := observer.New(zapcore.DebugLevel)
+	engine := NewKPIEngine(counterRepo, &mockKPIRepo{}, &stubRouter{route: route}, zap.New(obsCore))
+
+	values, err := engine.Calculate(
+		context.Background(),
+		uuid.New(), "00A0C6", "SN-SKIP", "cell-1",
+		time.Now().Add(-15*time.Minute), time.Now(),
+		model.CarrierCMCC, model.TechLTE,
+	)
+	require.NoError(t, err)
+	require.Len(t, values, 1, "只有 RRC 算得出")
+
+	entries := logs.FilterMessage("kpi skipped during evaluation").All()
+	require.Len(t, entries, 1, "应记一条聚合跳过日志")
+	fields := entries[0].ContextMap()
+	assert.Equal(t, "SN-SKIP", fields["device_sn"])
+	assert.EqualValues(t, 1, fields["skipped_total"], "1 个 KPI（ERAB）被跳过")
+	assert.EqualValues(t, 1, fields["skipped_missing_counter"], "因 counter 缺失跳过")
+	assert.EqualValues(t, 0, fields["skipped_div_zero"])
+	// observer ContextMap 把 zap.Strings 还原成 []interface{}，逐项转回 string 比对。
+	sample, ok := fields["missing_counter_sample"].([]interface{})
+	require.True(t, ok, "missing_counter_sample 应为切片")
+	sampleStrs := make([]string, len(sample))
+	for i, v := range sample {
+		sampleStrs[i] = v.(string)
+	}
+	assert.Contains(t, sampleStrs, "ERAB_Succ", "采样含首个缺失 counter 名")
+}
+
+// 全部 KPI 都算得出时不应产生跳过日志（避免无意义噪声）。
+func TestKPIEngine_Calculate_NoSkipLogWhenAllComputed(t *testing.T) {
+	counterRepo := &mockCounterRepo{
+		queryForKPIFunc: func(context.Context, uuid.UUID, string, []string, time.Time, time.Time) (map[string]float64, error) {
+			return map[string]float64{"RRC_Conn_Succ": 950, "RRC_Conn_Att": 1000}, nil
+		},
+	}
+	obsCore, logs := observer.New(zapcore.DebugLevel)
+	engine := NewKPIEngine(counterRepo, &mockKPIRepo{}, &stubRouter{route: sampleRoute()}, zap.New(obsCore))
+
+	values, err := engine.Calculate(
+		context.Background(),
+		uuid.New(), "00A0C6", "SN-OK", "cell-1",
+		time.Now().Add(-15*time.Minute), time.Now(),
+		model.CarrierCMCC, model.TechLTE,
+	)
+	require.NoError(t, err)
+	require.Len(t, values, 1)
+	assert.Empty(t, logs.FilterMessage("kpi skipped during evaluation").All(), "无跳过则不记日志")
 }
 
 // 空路由（router 返空 KPIs）→ 直接返 nil + nil，不调 counterRepo。

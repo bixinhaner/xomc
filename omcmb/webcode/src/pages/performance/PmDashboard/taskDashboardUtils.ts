@@ -185,17 +185,51 @@ export function buildMetricCharts(
     pts.set(r.startTime, r.metricValue);
   });
 
+  // #194：legend 固定全集——某指标公式分母 counter 缺失 / 为 0 时该 (组×桶) 整条被后端跳过
+  // （不产假 0，逐点语义正确），但前端若仅按本指标返回行的 distinct key 渲染 legend，会让那条线
+  // 整组消失，造成「上行流量两组、E-RAB掉线率只剩一组」的错觉。
+  // 治法：对「实体身份即 legend」的维度（device_group/product/band/aggregate_group），把任务本批
+  // 结果里所有指标出现过的系列键并成全集，每张图都按全集铺 legend；本指标缺的桶留 '-'（断点，
+  // connectNulls=false 自然断开），绝不补 0 假点。network（单线）/device（缺设备=该设备真无数据，
+  // legend 缺失有意义）不套全集，保持原行为。
+  const fixedLegendDims: AdhocDimension[] = [
+    'device_group',
+    'product',
+    'band',
+    'aggregate_group',
+  ];
+  const useFixedLegend = fixedLegendDims.includes(dimension);
+
+  // 全局系列全集（跨指标，按首次出现序），key → 展示名。
+  const globalOrder: string[] = [];
+  const globalName = new Map<string, string>();
+  if (useFixedLegend) {
+    metricOrder.forEach((metricPath) => {
+      const m = byMetric.get(metricPath)!;
+      m.seriesOrder.forEach((key) => {
+        if (!globalName.has(key)) {
+          globalOrder.push(key);
+          globalName.set(key, m.seriesName.get(key) ?? key);
+        }
+      });
+    });
+  }
+
   return metricOrder.map((metricPath) => {
     const m = byMetric.get(metricPath)!;
     const buckets = Array.from(m.buckets).sort();
     const bucketEnds = buckets.map((b) => m.ends.get(b) ?? '');
-    const series: MetricSeries[] = m.seriesOrder.map((key) => {
-      const pts = m.points.get(key)!;
+    // 本图系列键 = 全集（固定 legend 维度）或本指标自身键（其它维度）。
+    const seriesKeys = useFixedLegend ? globalOrder : m.seriesOrder;
+    const series: MetricSeries[] = seriesKeys.map((key) => {
+      const pts = m.points.get(key);
       const values: MetricSeriesValue[] = buckets.map((b) => {
-        const v = pts.get(b);
+        const v = pts?.get(b);
         return v === undefined ? '-' : v;
       });
-      return { key, name: m.seriesName.get(key) ?? key, values };
+      // 名字优先取本指标解析名，缺则取全局解析名（该组在别的指标里出现过），再回退 key。
+      const name = m.seriesName.get(key) ?? globalName.get(key) ?? key;
+      return { key, name, values };
     });
     return { metricPath, displayName: m.displayName, buckets, bucketEnds, series };
   });

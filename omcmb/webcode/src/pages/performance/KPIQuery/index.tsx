@@ -719,7 +719,20 @@ export default function KPIQuery() {
         ) : null}
 
         <Card size="small" title={<span><TableOutlined /> 查询结果</span>}>
-          <PivotTable rows={aggregatedRows} loading={aggLoading || aggFetching} />
+          <PivotTable
+            rows={aggregatedRows}
+            loading={aggLoading || aggFetching}
+            // gNB 查空时给更明确的引导（#201）：5G 真机样本厂商错配会让 KPI 算不出、
+            // 后端返回 items=null，泛化「暂无数据」无法区分「指标库未注册」与「时段无采样」。
+            // 仅在已发起查询（submittedPayload 存在）且制式=gNB 时替换文案。
+            emptyDescription={
+              submittedPayload?.deviceType === 'GNB' ? (
+                <Text type="secondary">
+                  该设备暂无可用 KPI 数据，请确认厂商指标库已注册（5G/gNB 指标依赖对应厂商指标库）
+                </Text>
+              ) : undefined
+            }
+          />
         </Card>
 
         <DevicePickerModal

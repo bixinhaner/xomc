@@ -11,8 +11,13 @@ import (
 
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/pm/counter"
+	"github.com/omcgo/omcgo/internal/pm/kpi/expr"
 	"github.com/omcgo/omcgo/internal/pm/kpi/router"
 )
+
+// skippedKPISampleLimit 限定每次 evaluateRoute 聚合日志里采样的缺失 counter 名条数，
+// 避免一台设备全制式 counter 缺失（如厂商库错配）时日志被几百个名字刷爆。
+const skippedKPISampleLimit = 5
 
 // KPIRouter 抽象 router.Router，方便单元测试 mock。
 type KPIRouter interface {
@@ -113,9 +118,17 @@ func (e *KPIEngine) evaluateRoute(
 	tech model.Technology,
 ) []model.KPIValue {
 	results := make([]model.KPIValue, 0, len(route.KPIs))
+	// 可观测性（#201/#187/#182 静默盲点）：counter 缺失 / 除零导致整条 KPI 被跳过本是
+	// 「设计内行为」，但在厂商指标库错配（如 QILIN 样本路由到 Baicells 库、counter 命中仅 ~6%）
+	// 时会让大量 5G KPI 静默丢弃、前端只见「暂无数据」却无从判因。此处按 (设备, cell) 聚合统计
+	// 被跳过的 KPI 数 + 采样缺失 counter 名，每次求值整批记一条日志（避免每条 KPI 刷屏）。
+	var skippedMissing, skippedDivZero, skippedParse int
+	missingSample := make([]string, 0, skippedKPISampleLimit)
+	seenMissing := make(map[string]struct{})
 	for _, k := range route.KPIs {
 		parsed, err := ParseFormula(k.Formula)
 		if err != nil {
+			skippedParse++
 			e.logger.Warn("skip kpi with invalid formula",
 				zap.String("kpi", k.Name),
 				zap.String("formula", k.Formula),
@@ -124,7 +137,18 @@ func (e *KPIEngine) evaluateRoute(
 		}
 		value, err := parsed.Evaluate(counterValues)
 		if err != nil {
-			// counter 缺失 / 除零 → 跳过这条 KPI；不向上抛错。
+			// counter 缺失 / 除零 → 跳过这条 KPI；不向上抛错。按因分类计数供聚合日志归因。
+			var missing *expr.MissingCounterError
+			switch {
+			case errors.As(err, &missing):
+				skippedMissing++
+				if _, dup := seenMissing[missing.Counter]; !dup && len(missingSample) < skippedKPISampleLimit {
+					seenMissing[missing.Counter] = struct{}{}
+					missingSample = append(missingSample, missing.Counter)
+				}
+			case errors.Is(err, expr.ErrDivByZero):
+				skippedDivZero++
+			}
 			continue
 		}
 		results = append(results, model.KPIValue{
@@ -139,6 +163,20 @@ func (e *KPIEngine) evaluateRoute(
 			Carrier:     carrierCode,
 			Technology:  tech,
 		})
+	}
+	if total := skippedMissing + skippedDivZero + skippedParse; total > 0 {
+		// debug 级：正常运行也可能零星缺 counter，避免在生产 warn 级刷屏；缺失占比高（厂商库错配）
+		// 时运维可临时调 debug 看 missing_counter_sample 定位是哪批 counter 没上报/未注册。
+		e.logger.Debug("kpi skipped during evaluation",
+			zap.String("device_sn", deviceSN),
+			zap.String("cell_id", cellID),
+			zap.String("technology", string(tech)),
+			zap.Int("kpi_total", len(route.KPIs)),
+			zap.Int("skipped_total", total),
+			zap.Int("skipped_missing_counter", skippedMissing),
+			zap.Int("skipped_div_zero", skippedDivZero),
+			zap.Int("skipped_invalid_formula", skippedParse),
+			zap.Strings("missing_counter_sample", missingSample))
 	}
 	return results
 }

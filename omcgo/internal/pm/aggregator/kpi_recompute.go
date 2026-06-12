@@ -19,6 +19,9 @@ package aggregator
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"sort"
 	"time"
 
 	"go.uber.org/zap"
@@ -182,6 +185,12 @@ type groupKey struct {
 	t       string
 }
 
+// skipKey 标识一类被跳过的重算：哪个指标 + 因何跳过（供可观测性按因聚合）。
+type skipKey struct {
+	metric string
+	reason string // "missing:<counter>" | "divzero" | "parse" | "eval"
+}
+
 func rowGroupKey(r Row) groupKey {
 	ldn := ""
 	if r.ObjectLDN != nil {
@@ -208,7 +217,13 @@ func rowGroupKey(r Row) groupKey {
 //
 // 返回：用户请求且无元数据的 counter 行 + 原始计数透传行 + 派生 KPI 重算行
 //（仅为重算引入、用户没主动请求的 deps counter 行被剔除）。
-func recomputeKPIs(counterRows []Row, kpis []kpiMeta, userCounters []string) []Row {
+//
+// 可观测性（#194）：某 (组×制式×桶) 分母 counter 缺失 / 为 0 导致整条 KPI 被跳过本是设计内
+// 「不产假 0」语义，但前端 legend 按返回行 distinct object_ldn 渲染 → 该组该指标整条曲线消失，
+// 现象上像「丢组」。这里把被跳过的 (group_id, metric, reason) 按 reason 聚合后记一条 debug 日志，
+// 便于现场判定是「该组真没数据」还是「某组设备没上报该 counter」，把数据问题与代码问题分离。
+// 改为 *Aggregator 方法仅为拿到 a.logger，重算逻辑本身未变。
+func (a *Aggregator) recomputeKPIs(counterRows []Row, kpis []kpiMeta, userCounters []string) []Row {
 	// 1. 按 (维度键, 桶) 归拢 counter 值 + 记录每个键的代表行（透传维度身份 / 时间字段）。
 	type bucket struct {
 		values map[string]float64
@@ -253,6 +268,16 @@ func recomputeKPIs(counterRows []Row, kpis []kpiMeta, userCounters []string) []R
 	if len(derived) == 0 {
 		return out
 	}
+	// 按 (metric, reason) 聚合被跳过的桶数 + 采样首个 group_id，整批一次日志（避免每桶刷屏）。
+	skips := make(map[skipKey]int)
+	skipSampleGroup := make(map[skipKey]string)
+	recordSkip := func(metric, reason, groupID string) {
+		k := skipKey{metric: metric, reason: reason}
+		if _, seen := skips[k]; !seen {
+			skipSampleGroup[k] = groupID
+		}
+		skips[k]++
+	}
 	seenBucket := make(map[groupKey]struct{})
 	for _, r := range counterRows {
 		k := rowGroupKey(r)
@@ -264,11 +289,21 @@ func recomputeKPIs(counterRows []Row, kpis []kpiMeta, userCounters []string) []R
 		for _, km := range derived {
 			f, err := expr.Parse(km.formula)
 			if err != nil {
+				recordSkip(km.code, "parse", k.groupID)
 				continue
 			}
 			val, err := f.Evaluate(b.values)
 			if err != nil {
-				// 除零 / counter 缺失 → 跳过该桶该 KPI，不产假 0。
+				// 除零 / counter 缺失 → 跳过该桶该 KPI，不产假 0。按因归类供可观测性聚合。
+				var missing *expr.MissingCounterError
+				switch {
+				case errors.As(err, &missing):
+					recordSkip(km.code, "missing:"+missing.Counter, k.groupID)
+				case errors.Is(err, expr.ErrDivByZero):
+					recordSkip(km.code, "divzero", k.groupID)
+				default:
+					recordSkip(km.code, "eval", k.groupID)
+				}
 				continue
 			}
 			kr := b.sample
@@ -286,7 +321,27 @@ func recomputeKPIs(counterRows []Row, kpis []kpiMeta, userCounters []string) []R
 			out = append(out, kr)
 		}
 	}
+	a.logRecomputeSkips(skips, skipSampleGroup)
 	return out
+}
+
+// logRecomputeSkips 把 recomputeKPIs 累积的「被跳过 (metric, reason)」聚合记一条 debug 日志。
+// 拆成独立方法便于阅读 / 后续可改埋点。零跳过时不打印。
+func (a *Aggregator) logRecomputeSkips(skips map[skipKey]int, sampleGroup map[skipKey]string) {
+	if len(skips) == 0 {
+		return
+	}
+	details := make([]string, 0, len(skips))
+	total := 0
+	for k, n := range skips {
+		total += n
+		details = append(details, fmt.Sprintf("%s|%s×%d(group=%s)", k.metric, k.reason, n, sampleGroup[k]))
+	}
+	sort.Strings(details) // 稳定输出便于比对
+	a.logger.Debug("device-group KPI recompute skipped buckets",
+		zap.Int("skipped_total", total),
+		zap.Int("distinct_metric_reason", len(skips)),
+		zap.Strings("details", details))
 }
 
 // queryWithKPIRecompute 在组维度下做「KPI 公式重算」：解析请求 → 改查 effective counter →
@@ -318,7 +373,7 @@ func (a *Aggregator) queryWithKPIRecompute(
 	if err != nil {
 		return nil, err
 	}
-	return recomputeKPIs(counterRows, kpis, userCounters), nil
+	return a.recomputeKPIs(counterRows, kpis, userCounters), nil
 }
 
 // counterMetricType 返回 metric_type='counter' 过滤值的指针（重算只聚 counter 行）。
