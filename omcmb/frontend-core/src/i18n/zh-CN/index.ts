@@ -5832,6 +5832,10 @@ const messages: Record<string, string> = {
   'mml.console.commandTree.customized':        '自定义命令',
   'mml.console.commandTree.privateTemplate':   '私有模板',
   'mml.console.commandTree.publicTemplate':    '公有模板',
+  // #197：命令叶子制式标识 Tag——区分 2/4/5G 同名命令（如移动性参数）
+  'mml.console.commandTree.rat.lte':           '4G',
+  'mml.console.commandTree.rat.nr':            '5G',
+  'mml.console.commandTree.rat.gsm':           '2G',
   'mml.admin.catalog.title':                   'MML 配置管理',
   'mml.admin.catalog.tab.groups':              '分组',
   'mml.admin.catalog.tab.commands':            '命令',

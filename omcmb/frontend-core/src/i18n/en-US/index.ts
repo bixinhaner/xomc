@@ -5805,6 +5805,10 @@ const messages: Record<string, string> = {
   'mml.console.commandTree.customized':        'Customized',
   'mml.console.commandTree.privateTemplate':   'Private Template',
   'mml.console.commandTree.publicTemplate':    'Public Template',
+  // #197: RAT tag on command leaf — distinguishes same-named 2/4/5G commands (e.g. mobility params)
+  'mml.console.commandTree.rat.lte':           '4G',
+  'mml.console.commandTree.rat.nr':            '5G',
+  'mml.console.commandTree.rat.gsm':           '2G',
   'mml.admin.catalog.title':                   'MML Catalog Management',
   'mml.admin.catalog.tab.groups':              'Groups',
   'mml.admin.catalog.tab.commands':            'Commands',

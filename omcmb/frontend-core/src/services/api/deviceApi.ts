@@ -80,6 +80,10 @@ interface BackendDevice {
   bandwidth?: string;
   dl_earfcn?: string;
   ul_earfcn?: string;
+  // #177: 列表 List DTO 不输出 dl_earfcn（恒空），真实下行频点源是
+  // device_info.freq_point（详情页 DeviceDetail/index.tsx:411 已用 freq_point）。
+  // 列表 mapper 让 dlEarfcn 兜底到 freq_point，与详情页口径统一。
+  freq_point?: string;
   network_model?: string;
   // T-XXX (Phase 5): transmit_power 后端 numeric (NUMERIC(8,2))；
   // tx_power 是旧字段名,保留兼容,mapper 优先读 transmit_power。
@@ -283,7 +287,9 @@ function mapBackendDevice(bd: BackendDevice): Device {
     rootIndex: bd.root_index || '',
     siteId: bd.site_id || '',
     bandwidth: bd.bandwidth || '',
-    dlEarfcn: bd.dl_earfcn || '',
+    // #177: dl_earfcn 在 List DTO 不输出（恒空），兜底到 freq_point，
+    // 与详情页 DeviceDetail/index.tsx:411 (info.freqPoint || device.dlEarfcn) 口径统一。
+    dlEarfcn: bd.dl_earfcn || bd.freq_point || '',
     ulEarfcn: bd.ul_earfcn || '',
     networkModel: bd.network_model || '',
     // T-XXX (Phase 5)：transmit_power 是后端实际字段 (NUMERIC 转 number)

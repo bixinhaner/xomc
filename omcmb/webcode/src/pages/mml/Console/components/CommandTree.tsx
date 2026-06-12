@@ -46,6 +46,43 @@ const OP_TAG_COLOR: Record<string, string> = {
   RMV: 'red',
 };
 
+// #197：制式（RAT）标识——2/4/5G 同名命令（典型为小区移动性参数）在控制台字面名
+// 相同难区分。制式由命令的 TR-181 路径段唯一确定（`.LTE.RAN.`/`EUTRA` = 4G、
+// `.NR.RAN.` = 5G、`GERAN`/`GSM` = 2G）。前端仅做展示层标识：从命令已有字段
+// （targetObject 为 ADD/RMV 全路径；commandCode/logicalCode 含对象 token）推断制式，
+// 在叶子加一枚制式 Tag。数据名不动、不补 seed（NR 全量命令补齐属数据梳理另立单）。
+type Rat = 'LTE' | 'NR' | 'GSM';
+
+const RAT_TAG_COLOR: Record<Rat, string> = {
+  LTE: 'geekblue',
+  NR: 'purple',
+  GSM: 'gold',
+};
+
+const RAT_I18N_KEY: Record<Rat, string> = {
+  LTE: 'mml.console.commandTree.rat.lte',
+  NR: 'mml.console.commandTree.rat.nr',
+  GSM: 'mml.console.commandTree.rat.gsm',
+};
+
+/**
+ * 从命令的 TR-181 信号推断制式（RAT）。返回 null 表示无法确定（不渲染 Tag，避免误标）。
+ *
+ * 判据优先级（与 standard-model.xml 路径子树一致，分析见 #197）：
+ *   - `.NR.RAN.` / 独立 `NR` token（如 INTER_RAT_CELL_NR）→ NR（5G）
+ *   - `GERAN` / `GSM` token → GSM（2G，仅以 LTE 的 InterRATCell.GSM 邻区形式出现）
+ *   - `.LTE.RAN.` / `EUTRA` token → LTE（4G）
+ * 注：当前 seed 仅 LTE 自身命令 + IRAT-NR/GSM 邻区；NR 自身移动性命令补齐后会自动正确标识。
+ */
+function deriveRat(cmd: GroupTreeCommand): Rat | null {
+  // targetObject（ADD/RMV）携带完整 TR-181 对象路径，最权威；其次用命令码 token。
+  const hay = `${cmd.targetObject ?? ''} ${cmd.commandCode} ${cmd.logicalCode}`.toUpperCase();
+  if (/\bNR\b|\.NR\.RAN\.|_NR\b|NRARFCN|NR_RAN/.test(hay)) return 'NR';
+  if (/GERAN|\bGSM\b/.test(hay)) return 'GSM';
+  if (/\.LTE\.RAN\.|EUTRA|\bLTE\b/.test(hay)) return 'LTE';
+  return null;
+}
+
 // stripOpSuffix / chapterSortKey 已拆到 ./commandTreeUtils.ts；下方 import 复用。
 import { chapterSortKey, stripOpSuffix } from './commandTreeUtils';
 
@@ -71,16 +108,24 @@ function renderOpLeafTitle(
   op: MMLOperationType,
   displayName: string,
   cmd?: GroupTreeCommand,
+  t?: (id: string, values?: Record<string, string | number>) => string,
 ): ReactNode {
   const color = OP_TAG_COLOR[op] ?? 'default';
   const showPathCount =
     cmd?.supportedPathCount != null && (op === 'LST' || op === 'MOD');
+  // #197：标准命令叶子按推断出的制式加一枚 RAT Tag（自定义命令无 TR-181 路径，不标）。
+  const rat = cmd && t ? deriveRat(cmd) : null;
 
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
       <Tag color={color} style={{ marginRight: 0, fontSize: 10, padding: '0 4px' }}>
         {op}
       </Tag>
+      {rat && t && (
+        <Tag color={RAT_TAG_COLOR[rat]} style={{ marginRight: 0, fontSize: 10, padding: '0 4px' }}>
+          {t(RAT_I18N_KEY[rat])}
+        </Tag>
+      )}
       <CodeOutlined />
       {stripOpSuffix(displayName)}
       {showPathCount && (
@@ -119,8 +164,12 @@ function collectAllCommands(group: GroupTreeNode): GroupTreeCommand[] {
   return out;
 }
 
-/** 把命令叶子列表转 antd TreeDataNode（统一 OP 排序）。 */
-function commandsToLeafNodes(cmds: GroupTreeCommand[]): TreeDataNode[] {
+/** 把命令叶子列表转 antd TreeDataNode（统一 OP 排序）。
+ * t：#197 用于渲染制式 Tag 的 i18n 译者（透传到 renderOpLeafTitle）。 */
+function commandsToLeafNodes(
+  cmds: GroupTreeCommand[],
+  t: (id: string, values?: Record<string, string | number>) => string,
+): TreeDataNode[] {
   return [...cmds]
     // R-2: 命令叶子按 (op_type, displayName) 双键排序，让同一对象的不同 op
     // 相邻显示（LST 设备信息 / MOD 设备信息 / ADD 设备信息 / RMV 设备信息）。
@@ -133,7 +182,7 @@ function commandsToLeafNodes(cmds: GroupTreeCommand[]): TreeDataNode[] {
     })
     .map<TreeDataNode>((c) => ({
       key: `${CMD_KEY_PREFIX}${c.id}`,
-      title: renderOpLeafTitle(c.operationType, c.displayName, c),
+      title: renderOpLeafTitle(c.operationType, c.displayName, c, t),
       isLeaf: true,
     }));
 }
@@ -144,7 +193,10 @@ function isChapterNode(g: GroupTreeNode): boolean {
 }
 
 /** 将单个 group 节点（含其所有平铺命令）转为 antd TreeDataNode。 */
-function groupToTreeDataNode(g: GroupTreeNode): TreeDataNode {
+function groupToTreeDataNode(
+  g: GroupTreeNode,
+  t: (id: string, values?: Record<string, string | number>) => string,
+): TreeDataNode {
   return {
     key: `${GROUP_KEY_PREFIX}${g.id}`,
     title: (
@@ -154,7 +206,7 @@ function groupToTreeDataNode(g: GroupTreeNode): TreeDataNode {
       </span>
     ),
     selectable: false,
-    children: commandsToLeafNodes(collectAllCommands(g)),
+    children: commandsToLeafNodes(collectAllCommands(g), t),
   };
 }
 
@@ -164,11 +216,14 @@ function groupToTreeDataNode(g: GroupTreeNode): TreeDataNode {
  * 不再有任何子分组（`g.children` 在 v2 永远为空）。早期 v1 视图遗留的 `g.children`
  * 仍兼容渲染（如老 catalog 没下线干净），让命令叶子和 sub-group 共存于章节下。
  */
-function chapterToTreeDataNode(g: GroupTreeNode): TreeDataNode {
+function chapterToTreeDataNode(
+  g: GroupTreeNode,
+  t: (id: string, values?: Record<string, string | number>) => string,
+): TreeDataNode {
   // 章节节点 key 仍走 GROUP_KEY_PREFIX + id（章节合成 id 也是 UUID，与 group 同空间
   // 不冲突；handleSelect 通过 isLeaf=false + selectable:false 防止误触发命令加载）
-  const directCmdLeaves = commandsToLeafNodes(g.commands ?? []);
-  const subGroupNodes = (g.children ?? []).map((child) => groupToTreeDataNode(child));
+  const directCmdLeaves = commandsToLeafNodes(g.commands ?? [], t);
+  const subGroupNodes = (g.children ?? []).map((child) => groupToTreeDataNode(child, t));
   return {
     key: `${GROUP_KEY_PREFIX}${g.id}`,
     title: (
@@ -188,7 +243,10 @@ function chapterToTreeDataNode(g: GroupTreeNode): TreeDataNode {
  * - 普通 group → groupToTreeDataNode（含命令叶子）
  * - 老 catalog 空 chapter 的 group 后端未包装，仍保持顶层
  */
-function buildTreeData(nodes: GroupTreeNode[]): TreeDataNode[] {
+function buildTreeData(
+  nodes: GroupTreeNode[],
+  t: (id: string, values?: Record<string, string | number>) => string,
+): TreeDataNode[] {
   // 后端已按 chapter 排好序，前端再做一次防御性排序（按 chapterCode + displayOrder）
   const sorted = [...nodes].sort((a, b) => {
     const ac = chapterSortKey(a.chapterCode);
@@ -198,7 +256,7 @@ function buildTreeData(nodes: GroupTreeNode[]): TreeDataNode[] {
   });
 
   return sorted.map((g) =>
-    isChapterNode(g) ? chapterToTreeDataNode(g) : groupToTreeDataNode(g),
+    isChapterNode(g) ? chapterToTreeDataNode(g, t) : groupToTreeDataNode(g, t),
   );
 }
 
@@ -430,7 +488,7 @@ export default function CommandTree({ lang }: CommandTreeProps) {
   );
 
   const treeData = useMemo(() => {
-    const groups = buildTreeData(tree);
+    const groups = buildTreeData(tree, t);
     const customRoot = buildCustomizedSubtree({
       customs: customCommands,
       t,
