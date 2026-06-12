@@ -24,17 +24,18 @@ function parseEventData<T>(raw: string): T | null {
 }
 
 /**
- * 订阅指定 taskId 的执行结果帧。taskId 为 null 时保持连接但不分发（防御早 mount）。
- * 用 ref 保存最新 taskId / handlers，避免它们变化时重建 EventSource（频繁重连会丢事件）。
+ * 订阅一组在途 taskId 的执行结果帧（#217 多条命令并发在途）。空集合时保持连接但不分发。
+ * 用 ref 保存最新 taskId 集合 / handlers，避免它们变化时重建 EventSource（频繁重连会丢事件）。
+ * 单一全用户 channel 透传所有任务的帧，listener 内按 frame.task_id 是否在订阅集合内决定分发。
  */
-export function useExecStream(taskId: string | null, handlers: ExecStreamHandlers): void {
+export function useExecStream(taskIds: ReadonlySet<string>, handlers: ExecStreamHandlers): void {
   const accessToken = useUserStore((s) => s.accessToken);
-  // ref 让长连接 listener 读到最新 taskId / handlers，而不重建 EventSource。
-  const taskIdRef = useRef(taskId);
+  // ref 让长连接 listener 读到最新 taskId 集合 / handlers，而不重建 EventSource。
+  const taskIdsRef = useRef(taskIds);
   const handlersRef = useRef(handlers);
   useEffect(() => {
-    taskIdRef.current = taskId;
-  }, [taskId]);
+    taskIdsRef.current = taskIds;
+  }, [taskIds]);
   useEffect(() => {
     handlersRef.current = handlers;
   }, [handlers]);
@@ -55,12 +56,12 @@ export function useExecStream(taskId: string | null, handlers: ExecStreamHandler
 
     const onDeviceFrame = (ev: MessageEvent<string>): void => {
       const frame = parseEventData<DeviceFramePayload>(ev.data);
-      if (!frame || !taskIdRef.current || frame.task_id !== taskIdRef.current) return;
+      if (!frame || !taskIdsRef.current.has(frame.task_id)) return;
       handlersRef.current.onFrame(frame);
     };
     const onTaskCompleted = (ev: MessageEvent<string>): void => {
       const frame = parseEventData<TaskCompletedPayload>(ev.data);
-      if (!frame || !taskIdRef.current || frame.task_id !== taskIdRef.current) return;
+      if (!frame || !taskIdsRef.current.has(frame.task_id)) return;
       handlersRef.current.onCompleted(frame);
     };
 

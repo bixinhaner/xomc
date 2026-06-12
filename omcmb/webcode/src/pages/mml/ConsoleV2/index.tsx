@@ -80,25 +80,28 @@ export default function MMLConsoleV2() {
   const [configMode, setConfigMode] = useState<OperationMode>('standard');
 
   // 命令记录数据层（P3 接后端；当前凭内存 + localStorage 命令 ID，详见 useConsoleHistory）。
-  const { records, activeId, activeRecord, select, append, clear } = useConsoleHistory();
-  const [running, setRunning] = useState(false);
+  const { records, activeId, activeRecord, select, append, update, clear } = useConsoleHistory();
+  // #217：dispatching 仅遮挡「下发 mutateAsync」那几百毫秒的 HTTP 往返（避免重复点击同一次下发），
+  // 不再绑死整个任务执行期——下发成功插入命令记录后立即解锁，允许并发发起第二条命令。
+  const [dispatching, setDispatching] = useState(false);
   const [historyCollapsed, setHistoryCollapsed] = useState(true); // 默认收缩(§3.10.4)
 
-  // 进行中的执行（实时结果）。用 ref 让 SSE 完成回调读到最新值。
-  const [liveExec, setLiveExec] = useState<LiveExec | null>(null);
-  const liveExecRef = useRef<LiveExec | null>(null);
+  // #217：多条命令并发在途。taskId → 进行中的执行（SSE 帧实时回填各自记录行）。
+  // 用 ref 让 SSE 帧/完成回调与轮询兜底读到最新 Map，而不进 effect 依赖（避免重建订阅/重启轮询）。
+  const [liveExecs, setLiveExecs] = useState<Map<string, LiveExec>>(() => new Map());
+  const liveExecsRef = useRef<Map<string, LiveExec>>(liveExecs);
   // 已收口的 taskId（防 SSE 完成与轮询兜底双路径重复落记录）。
   const finalizedRef = useRef<Set<string>>(new Set());
   useEffect(() => {
-    liveExecRef.current = liveExec;
-  }, [liveExec]);
+    liveExecsRef.current = liveExecs;
+  }, [liveExecs]);
 
   // 统一收口：拉 /results → buildDeviceRows（逐 PATH 合并）→ 落命令记录。
   // SSE 完成帧（handleCompleted）与轮询兜底都走这里，确保结果不取自被逐帧覆盖的 SSE 行。
   const finalizeFromResults = async (taskId: string): Promise<void> => {
     if (finalizedRef.current.has(taskId)) return;
-    const le = liveExecRef.current;
-    if (!le || le.taskId !== taskId) return;
+    const le = liveExecsRef.current.get(taskId);
+    if (!le) return;
     let rows: ResultRow[] | null = null;
     try {
       // MOD 复合（下发 + 回读 LST）每设备 2 条 device_task，pageSize 预留回读条目空间。
@@ -120,9 +123,10 @@ export default function MMLConsoleV2() {
     if (!rows) return;
     if (finalizedRef.current.has(taskId)) return;
     finalizedRef.current.add(taskId);
-    // 原地更新点击执行时插入的「执行中」记录（同 recordId/commandId → append upsert）：
-    // 沿用下发时间、补齐结果行、记录态置 done。
-    append({
+    // 原地更新点击执行时插入的「执行中」记录（同 recordId/commandId）：沿用下发时间、补齐
+    // 结果行、记录态置 done。#217：用 update 不抢占用户当前选中焦点——后台并发任务收口时，
+    // 若用户正看着另一条记录，不被强行切走（与下发时 append 主动选中新命令的语义区分）。
+    update({
       id: le.recordId,
       status: 'done',
       commandId: le.taskId,
@@ -135,53 +139,79 @@ export default function MMLConsoleV2() {
       rows,
       setValues: le.setValues,
     });
-    setRunning(false);
-    setLiveExec(null);
+    // 该任务收口完成：从在途 Map 移除（其余并发任务不受影响）。
+    setLiveExecs((prev) => {
+      if (!prev.has(taskId)) return prev;
+      const next = new Map(prev);
+      next.delete(taskId);
+      return next;
+    });
   };
 
   const structuredMutation = useExecuteStatementsStructured();
   const rawMutation = useExecuteMMLCommand();
 
-  // ── SSE 实时回填（设计 §3.12.2）──────────────────────────────────────────────
+  // ── SSE 实时回填（设计 §3.12.2 + #217 多任务并发）────────────────────────────
+  // 按 frame.task_id 路由到对应在途执行：更新其 rows，并把进行中的命令记录原地 upsert
+  // （同 recordId/commandId），使「命令记录里选中哪条就看哪条」的结果区实时回填该记录行。
   const handleFrame = (frame: DeviceFramePayload): void => {
-    setLiveExec((prev) =>
-      prev
-        ? {
-            ...prev,
-            rows: prev.rows.map((r) =>
-              r.deviceSn === frame.device_sn
-                ? applyFrameToRow(r, frame, prev.columns, prev.meta.read)
-                : r,
-            ),
-          }
-        : prev,
-    );
-  };
-  const handleCompleted = (_frame: TaskCompletedPayload): void => {
-    const le = liveExecRef.current;
-    setRunning(false);
+    const le = liveExecsRef.current.get(frame.task_id);
     if (!le) return;
-    // 收口走 /results（逐 PATH 合并），不取被逐帧覆盖的 SSE 行。
-    void finalizeFromResults(le.taskId);
+    const rows = le.rows.map((r) =>
+      r.deviceSn === frame.device_sn ? applyFrameToRow(r, frame, le.columns, le.meta.read) : r,
+    );
+    const updated: LiveExec = { ...le, rows };
+    setLiveExecs((prev) => {
+      if (!prev.has(frame.task_id)) return prev;
+      const next = new Map(prev);
+      next.set(frame.task_id, updated);
+      return next;
+    });
+    // 把实时帧回填到对应命令记录行（仍为 running，收口前不落最终结果）。用 update 不抢占
+    // 用户当前选中记录的焦点——并发任务的帧只刷新各自记录行，选中哪条看哪条。
+    update({
+      id: le.recordId,
+      status: 'running',
+      commandId: le.taskId,
+      time: le.startTime,
+      commandName: le.meta.commandName ?? `裸路径 ${opLabel(le.meta.operationType)}`,
+      operationType: le.meta.operationType,
+      deviceCount: le.deviceCount,
+      execMeta: le.meta,
+      columns: le.columns,
+      rows,
+    });
   };
-  useExecStream(liveExec?.taskId ?? null, { onFrame: handleFrame, onCompleted: handleCompleted });
+  const handleCompleted = (frame: TaskCompletedPayload): void => {
+    // 收口走 /results（逐 PATH 合并），不取被逐帧覆盖的 SSE 行；按帧 task_id 各自收口。
+    void finalizeFromResults(frame.task_id);
+  };
+  const liveTaskIds = useMemo(() => new Set(liveExecs.keys()), [liveExecs]);
+  useExecStream(liveTaskIds, { onFrame: handleFrame, onCompleted: handleCompleted });
 
   // 轮询兜底（健壮性）：SSE 帧可能因同用户多会话被踢/网络抖动/重连而丢失，导致结果
   // 长期停在「执行中」。运行期周期性查后端任务状态，到达终态时直接拉 /results 重建
   // 结果行并落入命令记录——使结果呈现不依赖 SSE 实时帧（与 SSE 完成路径等价）。
+  // #217：遍历所有在途 taskId 各查一次，并发任务各自独立收口。
+  const hasLive = liveExecs.size > 0;
   useEffect(() => {
-    const taskId = liveExec?.taskId;
-    if (!taskId) return;
+    if (!hasLive) return;
     let cancelled = false;
     const tick = async (): Promise<void> => {
-      try {
-        const task = await mmlApi.getTaskById(taskId);
-        if (cancelled || !task || !TERMINAL_TASK_STATUS.has(task.status)) return;
-        // 与 SSE 完成路径共用收口（/results → buildDeviceRows），由 finalizedRef 去重。
-        await finalizeFromResults(taskId);
-      } catch {
-        /* 忽略，下个 tick 再试 */
-      }
+      const taskIds = Array.from(liveExecsRef.current.keys());
+      await Promise.all(
+        taskIds.map(async (taskId) => {
+          if (finalizedRef.current.has(taskId)) return;
+          try {
+            const task = await mmlApi.getTaskById(taskId);
+            if (cancelled || !task || !TERMINAL_TASK_STATUS.has(task.status)) return;
+            // 与 SSE 完成路径共用收口（/results → buildDeviceRows），由 finalizedRef 去重。
+            await finalizeFromResults(taskId);
+          } catch {
+            /* 忽略，下个 tick 再试 */
+          }
+        }),
+      );
     };
     const timer = setInterval(() => void tick(), 4000);
     return () => {
@@ -190,7 +220,7 @@ export default function MMLConsoleV2() {
     };
     // finalizeFromResults 仅读 ref + 稳定 setter，无需进依赖（进依赖会每渲染重启轮询）。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [liveExec?.taskId, append]);
+  }, [hasLive]);
 
   // 配置摘要(顶部条③显示)。未手动配置时不显示(走默认全部)。
   const configSummary = useMemo(() => {
@@ -200,11 +230,14 @@ export default function MMLConsoleV2() {
     return `指定参数 · ${n} PATH · ${config.operationType}`;
   }, [config, configTouched]);
 
+  // #217：执行按钮可用性只看「选齐设备 + 命令/raw 路径」，不再因上一条命令未到达终态而禁用。
+  // dispatching 仅遮挡当前一次下发的 HTTP 往返（见 SelectionBar 的 loading / disabled），
+  // 允许在第一条仍「执行中」时并发发起第二条命令。
   const canExecute = useMemo(() => {
-    if (running || selectedSns.length === 0) return false;
+    if (dispatching || selectedSns.length === 0) return false;
     if (config?.mode === 'raw') return config.rows.some((r) => r.path.trim() !== '');
     return !!command; // standard(含默认配置)需有命令
-  }, [running, selectedSns.length, config, command]);
+  }, [dispatching, selectedSns.length, config, command]);
 
   // targetSns 默认全部所选设备；「重新执行」时传 [单个设备 SN] 仅对该设备重跑同一命令。
   const runExecute = async (req: ExecRequest, targetSns: string[] = selectedSns): Promise<void> => {
@@ -224,10 +257,10 @@ export default function MMLConsoleV2() {
     let setValues: Record<string, string> | undefined;
 
     try {
-      setRunning(true);
+      setDispatching(true);
       if (req.mode === 'standard') {
         if (!command) {
-          setRunning(false);
+          setDispatching(false);
           return;
         }
         columns = buildColumns(command, req.checkedPaths);
@@ -297,7 +330,7 @@ export default function MMLConsoleV2() {
       } else {
         const paths = req.rows.map((r) => r.path.trim()).filter(Boolean);
         if (paths.length === 0) {
-          setRunning(false);
+          setDispatching(false);
           return;
         }
         columns = buildColumnsFromRawPaths(paths);
@@ -330,14 +363,15 @@ export default function MMLConsoleV2() {
         taskId = task.id;
       }
     } catch (e) {
-      setRunning(false);
+      setDispatching(false);
       message.error(e instanceof Error ? e.message : '执行下发失败');
       return;
     }
 
     // 下发成功：立即插入一条「执行中」命令记录（点击执行即可见，不必等收口），
     // SSE 帧实时回填右侧结果；完成后 finalizeFromResults 按同一 recordId/commandId
-    // 原地更新为「已完成」（append 按 commandId upsert，不会重复）。
+    // 原地更新为「已完成」（append 按 commandId upsert，不会重复）。append 会把该记录置为当前
+    // （activeId），结果区随之切到这条新下发的命令。
     const recordId = `rec-${recordSeq++}`;
     const startTime = new Date().toLocaleTimeString('zh-CN', { hour12: false });
     const pendingRows = initialPendingRows(targetSns);
@@ -353,7 +387,23 @@ export default function MMLConsoleV2() {
       columns,
       rows: pendingRows,
     });
-    setLiveExec({ taskId, recordId, startTime, meta, columns, rows: pendingRows, deviceCount, setValues });
+    // #217：加入在途 Map（不覆盖其它并发任务），SSE 帧按 task_id 路由回填各自记录行。
+    setLiveExecs((prev) => {
+      const next = new Map(prev);
+      next.set(taskId, {
+        taskId,
+        recordId,
+        startTime,
+        meta,
+        columns,
+        rows: pendingRows,
+        deviceCount,
+        setValues,
+      });
+      return next;
+    });
+    // #217：下发完成即解锁执行按钮，允许在本条仍「执行中」时并发发起下一条命令。
+    setDispatching(false);
     message.success(`已下发执行（任务 ${taskId}）`);
   };
 
@@ -364,17 +414,22 @@ export default function MMLConsoleV2() {
     void runExecute(req);
   };
 
-  // 展示数据：进行中显示 liveExec，否则显示命令记录选中项。
-  const dispExecMeta = liveExec ? liveExec.meta : (activeRecord?.execMeta ?? null);
-  const dispCommandId = liveExec ? liveExec.taskId : (activeRecord?.commandId ?? null);
-  const dispColumns = liveExec ? liveExec.columns : (activeRecord?.columns ?? []);
-  const dispRows = liveExec ? liveExec.rows : (activeRecord?.rows ?? []);
+  // #217：结果区以命令记录选中项（activeRecord）为唯一展示入口——并发多任务在途时，
+  // 各 liveExec 的 SSE 帧只把实时结果回填到各自的命令记录行（handleFrame 内 append upsert），
+  // 不再由「最近一次 liveExec」抢占结果区，避免多任务下结果跳变；点哪条记录看哪条的结果。
+  const dispExecMeta = activeRecord?.execMeta ?? null;
+  const dispCommandId = activeRecord?.commandId ?? null;
+  const dispColumns = activeRecord?.columns ?? [];
+  const dispRows = activeRecord?.rows ?? [];
+  // 选中记录是否仍在途（其 taskId 仍在在途 Map）：驱动结果表格 loading 与「重新执行」禁用。
+  const activeRunning = !!activeRecord && liveExecs.has(activeRecord.commandId);
 
   // 「重新执行」（结果列表逐设备）：仅对该设备重跑同一命令。
   // 优先用当前命令+配置（刚执行完，含正确写入值）；回看历史记录（无当前命令）时按展示的
   // 操作类型 + PATH 重建 RAW 执行——读类（LST）适用，写类需重新配置（避免丢失下发值误写）。
   const handleReexecute = (deviceSn: string): void => {
-    if (running) return;
+    // 选中记录仍在途时不重发（避免对同一在途任务重复下发）；其它命令在途不影响本条重发。
+    if (activeRunning) return;
     if (command || config) {
       const req: ExecRequest =
         config ?? { mode: 'standard', checkedPaths: command?.paramPaths.map((p) => p.path) ?? [] };
@@ -408,7 +463,7 @@ export default function MMLConsoleV2() {
         deviceCount={selectedSns.length}
         command={command}
         configSummary={configSummary}
-        running={running}
+        running={dispatching}
         canExecute={canExecute}
         onPickDevices={() => setDeviceModalOpen(true)}
         onPickCommand={() => setCommandModalOpen(true)}
@@ -445,8 +500,8 @@ export default function MMLConsoleV2() {
             commandId={dispCommandId}
             columns={dispColumns}
             rows={dispRows}
-            running={running}
-            hasExecuted={records.length > 0 || running || !!liveExec}
+            running={activeRunning}
+            hasExecuted={records.length > 0 || dispatching}
             onReexecute={handleReexecute}
           />
         </div>

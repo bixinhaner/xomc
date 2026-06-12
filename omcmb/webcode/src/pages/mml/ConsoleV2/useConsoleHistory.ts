@@ -27,6 +27,12 @@ export interface ConsoleHistory {
   select: (id: string) => void;
   /** 追加一条新执行记录并置为当前（mock 阶段用；真实接入后由 refetch 取代）。 */
   append: (rec: ExecRecord) => void;
+  /**
+   * #217：原地更新已存在记录的内容（不改 activeId、不重排列表）。
+   * SSE 帧实时回填各在途任务记录行时用——无论该记录是否当前选中，都不抢占用户的选中焦点。
+   * 记录不存在（已被清空/未 append）时静默忽略。
+   */
+  update: (rec: ExecRecord) => void;
   /** 清空命令记录（内存列表 + localStorage 的命令 ID 数组）。 */
   clear: () => void;
 }
@@ -127,6 +133,15 @@ export function useConsoleHistory(): ConsoleHistory {
     setActiveId(rec.id);
   }, []);
 
+  // #217：原地更新已 append 记录的内容（不改 activeId / 不重排）。SSE 帧回填各在途任务行时用，
+  // 避免非选中任务的帧 setActiveId 抢占用户当前查看的记录。需触发渲染让选中记录的结果区刷新。
+  const [, forceRerender] = useState(0);
+  const update = useCallback((rec: ExecRecord) => {
+    if (!recordStore.has(rec.commandId)) return;
+    recordStore.set(rec.commandId, rec);
+    forceRerender((n) => n + 1);
+  }, []);
+
   const select = useCallback((id: string) => setActiveId(id), []);
 
   const clear = useCallback(() => {
@@ -135,5 +150,5 @@ export function useConsoleHistory(): ConsoleHistory {
     setActiveId(null);
   }, []);
 
-  return { records, activeId: resolvedActiveId, activeRecord, select, append, clear };
+  return { records, activeId: resolvedActiveId, activeRecord, select, append, update, clear };
 }
