@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -219,6 +220,38 @@ func (b *TransferBridge) handleAutonomousTransferComplete(ctx context.Context, e
 			zap.String("device_sn", payload.DeviceSN),
 			zap.String("path", objectPath))
 
+	case tr069.FileTypeRunningLog, tr069.FileTypeFaultLog:
+		// #178/#222：自主传输上传运行日志/故障日志此前落进 default 分支被静默丢弃，
+		// 从不发「日志文件已接收」事件 → station_log_files 永不写库 → 前端列表查空、
+		// 提示「没有文件 / 暂无运行日志」。这里补上事件发布，与 ACS 直传路径
+		// （acs/upload/handler.go publishLogFileReceivedEvent）发同一 SubjectLogFileReceived，
+		// stationlog.Service 订阅后创建记录。两条上传路径互斥（ACS 直传 vs CPE 自主传输），
+		// 同一文件只经其一，不会双发重复入库。
+		taskID8, deviceSN := parseLogFilename(fileName)
+		if deviceSN == "" {
+			deviceSN = payload.DeviceSN
+		}
+		logPayload := map[string]interface{}{
+			"bucket":      bucket,
+			"object_path": objectPath,
+			"file_name":   fileName,
+			"file_type":   string(ft),
+			"file_size":   fileSize,
+			"task_id8":    taskID8,
+			"device_sn":   deviceSN,
+		}
+		logEvt, err := event.NewEvent(event.SubjectLogFileReceived, logPayload)
+		if err != nil {
+			return fmt.Errorf("create log.file.received event: %w", err)
+		}
+		if err := b.eventBus.Publish(ctx, event.SubjectLogFileReceived, logEvt); err != nil {
+			return fmt.Errorf("publish log.file.received: %w", err)
+		}
+		b.logger.Info("published log.file.received",
+			zap.String("device_sn", deviceSN),
+			zap.String("file_type", string(ft)),
+			zap.String("path", objectPath))
+
 	default:
 		b.logger.Info("log file stored, no downstream event",
 			zap.String("device_sn", payload.DeviceSN),
@@ -247,17 +280,42 @@ func classifyFileType(fileType, fileName string) tr069.FileType {
 		return tr069.FileTypePatch
 	case ft == "9":
 		return tr069.FileTypePCAP
+	// #178/#222：故障日志（FileType "8"）此前落进 default→RunningLog，类型误分类；
+	// 显式归到 FaultLog，与 ACS 直传路径 fileTypeToLogType("8")→fault 对齐。
+	case ft == "8":
+		return tr069.FileTypeFaultLog
+	// 运行日志（FileType "6"）显式归位，避免依赖 default 兜底。
+	case ft == "6":
+		return tr069.FileTypeRunningLog
 	case strings.Contains(fn, "MRO") || strings.Contains(fn, "MRS") || strings.Contains(fn, "MRE"):
 		return tr069.FileTypeMR
 	case strings.Contains(fn, "PM") || strings.Contains(fn, "COUNTER"):
 		return tr069.FileTypePM
 	case strings.Contains(fn, "DATAMODEL") || strings.Contains(fn, "PARAMETERMODEL"):
 		return tr069.FileTypeDataModel
+	case strings.HasPrefix(fn, "FAULT-") || strings.Contains(fn, "FAULTLOG"):
+		return tr069.FileTypeFaultLog
 	case ft == "3" || strings.Contains(ft, "LOG"):
 		return tr069.FileTypeRunningLog
 	default:
 		return tr069.FileTypeRunningLog
 	}
+}
+
+// logFilenameRe 匹配 executor 生成的日志文件名（与 acs/upload/handler.go 一致）：
+//
+//	运行日志：runtime-{taskID8}-{deviceSN}.tar.gz
+//	故障日志：fault-{taskID8}-{deviceSN}.tar.gz
+var logFilenameRe = regexp.MustCompile(`^(?:runtime|fault)-([0-9a-f]{8})-(.+)\.tar\.gz$`)
+
+// parseLogFilename 从日志文件名解析 (taskID8, deviceSN)。
+// 文件名不匹配（如临时上传）时返回 ("", "")，调用方回退到 payload.DeviceSN。
+func parseLogFilename(filename string) (taskID8, deviceSN string) {
+	m := logFilenameRe.FindStringSubmatch(filename)
+	if len(m) >= 3 {
+		return m[1], m[2]
+	}
+	return "", ""
 }
 
 // downloadAndStore fetches the file from the given URL and stores it in MinIO.
