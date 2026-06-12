@@ -3,6 +3,7 @@ package counter
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -117,6 +118,11 @@ func (r *PgCounterRepository) QueryForKPI(ctx context.Context, deviceID uuid.UUI
 	if err != nil {
 		return nil, fmt.Errorf("query counters for kpi: %w", err)
 	}
+	// #208 同窗口多文件去重：删 uq_pm_metrics_natural（#256）后，同设备同 15min 窗口但文件名
+	// 不同的两份 counter（真机补传换名 / 厂商按 measInfo 拆文件 / 重复上报）会各落一行。读侧若
+	// 直接 SUM 会把两份重复计入 → 重算 KPI 翻倍（~2x）。先按自然键折叠保留最新入库一条，使 SUM
+	// 不双计（与 aggregator 展示层 DISTINCT ON ... ingest_time DESC 同款 last-wins 语义）。
+	ms = dedupeCountersByNaturalKey(ms)
 	result := make(map[string]float64, len(counterNames))
 	for _, m := range ms {
 		if cellID != "" {
@@ -169,6 +175,9 @@ func (r *PgCounterRepository) QueryForKPICells(ctx context.Context, deviceID uui
 	if err != nil {
 		return nil, fmt.Errorf("query counters for kpi (cells): %w", err)
 	}
+	// #208 同窗口多文件去重（见 QueryForKPI 注释）：分桶 SUM 前先按自然键折叠保留最新入库一条，
+	// 避免同设备同窗多文件名 counter 被双计致 KPI 翻倍。
+	ms = dedupeCountersByNaturalKey(ms)
 	var period float64
 	if duration := endTime.Sub(startTime); duration > 0 {
 		period = duration.Seconds()
@@ -188,6 +197,54 @@ type counterRow struct {
 	cell  string
 	name  string
 	value float64
+}
+
+// dedupeCountersByNaturalKey 把 DB 读回的 counter 行按自然键折叠成一条，保留 ingest_time 最新
+// 的那条（last-wins），供 KPI 读侧 SUM 前去重。
+//
+// 动机（#208）：删 uq_pm_metrics_natural（#256）后，同设备同 15min 窗口但文件名不同的两个 PM
+// 文件（真机补传换名 / 厂商按 measInfo 拆文件 / 重复上报）会各自落一行同自然键 counter。KPI 计算
+// 读路径（QueryForKPI / QueryForKPICells）直接 SUM 会把两份重复计入 → 重算出的单条 KPI 翻倍（~2x）。
+//
+// 自然键与展示层 aggregator DISTINCT ON 一致：(device_oui, device_sn, metric_path, granularity,
+// time, object_ldn)；保留 ingest_time 最新一条 = 保留最后入库文件（与 buildDeviceTableSQL 的
+// `ingest_time DESC` 及前端 kpiSeries last-wins 同款语义）。
+//
+// 注意：去重发生在「跨文件」层面（同自然键多行=多文件重复落库），与 groupRowsByCell 的「同 (cell,
+// name) 文件内多行求和」职责正交——本函数不折叠 time/end_time 不同的合法多行，只折叠完全同自然键
+// 的重复落库行，故不改变单文件正常聚合语义。
+func dedupeCountersByNaturalKey(ms []metrics.PMMetric) []metrics.PMMetric {
+	if len(ms) <= 1 {
+		return ms
+	}
+	idx := make(map[string]int, len(ms))
+	out := make([]metrics.PMMetric, 0, len(ms))
+	for _, m := range ms {
+		ldn := ""
+		if m.ObjectLDN != nil {
+			ldn = *m.ObjectLDN
+		}
+		// time 缺省取 end_time（与 metrics 写侧 dedupeByNaturalKey 落值规则一致）。
+		t := m.Time
+		if t.IsZero() {
+			t = m.EndTime
+		}
+		key := strings.Join([]string{
+			m.DeviceOUI, m.DeviceSN, m.MetricPath, string(m.Granularity),
+			t.Format(time.RFC3339Nano), ldn,
+		}, "\x00")
+		if i, ok := idx[key]; ok {
+			// 同自然键已见过：保留 ingest_time 更新（更晚入库）的一条。IngestTime 相等或更早则保留原条
+			// （稳定性：相等时保留先出现的，配合 metrics.Query 的 time DESC 排序结果可预期）。
+			if m.IngestTime.After(out[i].IngestTime) {
+				out[i] = m
+			}
+			continue
+		}
+		idx[key] = len(out)
+		out = append(out, m)
+	}
+	return out
 }
 
 func groupCountersByCell(ms []metrics.PMMetric, cellIDs []string, period float64) map[string]map[string]float64 {

@@ -115,6 +115,110 @@ func Test_GroupParsedCountersByCell_EqualsDBGrouping(t *testing.T) {
 	assert.Equal(t, 900.0, fromMem["cell-1"]["period_seconds"])
 }
 
+// --- #208 同窗口多文件 counter 去重（KPI 读侧 SUM 不翻倍）---
+
+// 构造同一个 device 维度 KPI 行的两份来源：同设备同 15min 窗口、同 metric_path/cell，但来自
+// 两个不同文件（不同 ingest_time、不同行 id）。删 uq_pm_metrics_natural（#256）后两份都落库，
+// KPI 读侧若直接 SUM 会翻倍（~2x）。dedupeCountersByNaturalKey 须把它们折叠成 ingest_time 最新
+// 的一条，使后续 SUM 等于「单文件值」，不双计。
+func Test_dedupeCountersByNaturalKey_SameWindowTwoFiles_NoDouble(t *testing.T) {
+	win := time.Date(2026, 6, 13, 10, 15, 0, 0, time.UTC)
+	older := win.Add(30 * time.Second)  // 文件 1 入库时刻
+	newer := win.Add(120 * time.Second) // 文件 2（补传换名）入库时刻，更晚
+	mk := func(val float64, ingest time.Time) metrics.PMMetric {
+		return metrics.PMMetric{
+			ID:          uuid.New(), // 不同文件 = 不同行 id
+			DeviceOUI:   "00A0C9",
+			DeviceSN:    "SN-1",
+			MetricPath:  "A",
+			Granularity: metrics.Granularity15Min,
+			Time:        win,
+			EndTime:     win,
+			IngestTime:  ingest,
+			ObjectLDN:   ldn("cell-1"),
+			MetricValue: val,
+		}
+	}
+	// 文件 1 报 A=100，文件 2（补传，值修正/相同）报 A=100。两行同自然键。
+	ms := []metrics.PMMetric{mk(100, older), mk(100, newer)}
+
+	deduped := dedupeCountersByNaturalKey(ms)
+	require.Len(t, deduped, 1, "同自然键两份须折叠成一条")
+	assert.Equal(t, 100.0, deduped[0].MetricValue, "保留值（last-wins），不相加")
+	assert.Equal(t, newer, deduped[0].IngestTime, "保留 ingest_time 最新一条（最后入库文件）")
+
+	// 模拟 QueryForKPI 的 SUM 行为（dedup 后逐行累加），断言不翻倍。
+	var sum float64
+	for _, m := range deduped {
+		sum += m.MetricValue
+	}
+	assert.Equal(t, 100.0, sum, "KPI 读侧 SUM 等于单文件值，不是 200（翻倍）")
+
+	// 反证：不去重直接 SUM 会翻倍——锁住「去重确实在防翻倍」。
+	var rawSum float64
+	for _, m := range ms {
+		rawSum += m.MetricValue
+	}
+	assert.Equal(t, 200.0, rawSum, "未去重时直接 SUM 翻倍（回归基线）")
+}
+
+// last-wins 取值：两份不同值时保留 ingest_time 最新一条的值（不是相加，也不是保留旧值）。
+func Test_dedupeCountersByNaturalKey_LastWinsByIngestTime(t *testing.T) {
+	win := time.Date(2026, 6, 13, 10, 15, 0, 0, time.UTC)
+	mk := func(val float64, ingest time.Time) metrics.PMMetric {
+		return metrics.PMMetric{
+			DeviceOUI: "00A0C9", DeviceSN: "SN-1", MetricPath: "A",
+			Granularity: metrics.Granularity15Min, Time: win, EndTime: win,
+			IngestTime: ingest, ObjectLDN: ldn("cell-1"), MetricValue: val,
+		}
+	}
+	t0 := win.Add(10 * time.Second)
+	t1 := win.Add(20 * time.Second)
+	// 乱序：先给更晚 ingest 的修正值，再给更早的旧值，验证与切片顺序无关、只看 ingest_time。
+	deduped := dedupeCountersByNaturalKey([]metrics.PMMetric{mk(42, t1), mk(7, t0)})
+	require.Len(t, deduped, 1)
+	assert.Equal(t, 42.0, deduped[0].MetricValue, "保留 ingest_time 最新（t1=42），与出现顺序无关")
+}
+
+// 不同自然键不折叠：同设备同窗但不同 cell / 不同 metric_path 是合法独立行，必须各自保留。
+func Test_dedupeCountersByNaturalKey_DistinctKeysKept(t *testing.T) {
+	win := time.Date(2026, 6, 13, 10, 15, 0, 0, time.UTC)
+	base := metrics.PMMetric{
+		DeviceOUI: "00A0C9", DeviceSN: "SN-1", Granularity: metrics.Granularity15Min,
+		Time: win, EndTime: win, IngestTime: win,
+	}
+	mkA := base
+	mkA.MetricPath, mkA.ObjectLDN, mkA.MetricValue = "A", ldn("cell-1"), 10
+	mkB := base
+	mkB.MetricPath, mkB.ObjectLDN, mkB.MetricValue = "B", ldn("cell-1"), 20 // 不同 metric_path
+	mkC := base
+	mkC.MetricPath, mkC.ObjectLDN, mkC.MetricValue = "A", ldn("cell-2"), 30 // 不同 cell
+	deduped := dedupeCountersByNaturalKey([]metrics.PMMetric{mkA, mkB, mkC})
+	assert.Len(t, deduped, 3, "三条不同自然键全保留，不误折叠")
+}
+
+// 端到端等价：dedup → groupCountersByCell（QueryForKPICells 的 SUM 路径）对「两文件重复行」产出
+// 与「单文件」完全一致的分桶，证明翻倍在分桶 SUM 这一层也被消除。
+func Test_dedupeThenGroup_TwoFilesEqualsSingle(t *testing.T) {
+	win := time.Date(2026, 6, 13, 10, 15, 0, 0, time.UTC)
+	row := func(val float64, ingest time.Time) metrics.PMMetric {
+		return metrics.PMMetric{
+			DeviceOUI: "00A0C9", DeviceSN: "SN-1", MetricPath: "A",
+			Granularity: metrics.Granularity15Min, Time: win, EndTime: win,
+			IngestTime: ingest, ObjectLDN: ldn("cell-1"), MetricValue: val,
+		}
+	}
+	single := []metrics.PMMetric{row(100, win)}
+	twoFiles := []metrics.PMMetric{row(100, win.Add(10 * time.Second)), row(100, win.Add(60 * time.Second))}
+
+	gotSingle := groupCountersByCell(dedupeCountersByNaturalKey(single), []string{"cell-1"}, 900)
+	gotTwo := groupCountersByCell(dedupeCountersByNaturalKey(twoFiles), []string{"cell-1"}, 900)
+
+	assert.Equal(t, 100.0, gotSingle["cell-1"]["A"])
+	assert.Equal(t, gotSingle, gotTwo, "去重后两文件与单文件分桶结果须完全一致（KPI 不翻倍）")
+	assert.Equal(t, 100.0, gotTwo["cell-1"]["A"], "两文件重复行求和仍为单文件值 100，不是 200")
+}
+
 // CounterFilter 与 ListRequest 集成
 func Test_CounterFilter_WithListRequest(t *testing.T) {
 	filter := CounterFilter{

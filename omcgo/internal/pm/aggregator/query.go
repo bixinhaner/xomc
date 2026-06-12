@@ -360,12 +360,31 @@ func (a *Aggregator) queryAggregateGroupTable(ctx context.Context, table string,
 	return out, rows.Err()
 }
 
-func (a *Aggregator) queryDeviceTable(ctx context.Context, table string, q QueryRequest) ([]Row, error) {
-	qb := storage.Psql.Select(
-		"device_oui", "device_sn", "metric_path", "metric_type", "metric_value",
-		"statis_type", "granularity", "time", "start_time", "end_time", "ingest_time", "object_ldn", "extra",
-	).From(table)
-	qb = applyDeviceFilters(qb, q)
+// deviceTableColumns 是 device 维度直读 pm_metrics 的列集（内外层 SELECT 共用，避免漂移）。
+var deviceTableColumns = []string{
+	"device_oui", "device_sn", "metric_path", "metric_type", "metric_value",
+	"statis_type", "granularity", "time", "start_time", "end_time", "ingest_time", "object_ldn", "extra",
+}
+
+// buildDeviceTableSQL 构造 device 维度直读 pm_metrics 的去重查询（纯函数，便于单测）。
+//
+// 同窗口多文件去重（#208 数值偏差）：删 uq_pm_metrics_natural（#256）后，同设备同 15min 窗口但
+// 文件名不同的两个 PM 文件（真机补传换名 / 厂商按 measInfo 拆文件 / 重复上报）会各自落一行，
+// device 维度直读不去重时被前端 SUM/重复渲染成翻倍值。这里在 device 维度 SELECT 用 DISTINCT ON
+// 折叠同键行、保留 ingest_time 最新一条（保留最后入库文件，与前端 kpiSeries last-wins 一致）。
+// DISTINCT ON 要求 ORDER BY 前缀与去重键一致，故内层按去重键 + ingest_time DESC 排序，外层再包
+// 一层恢复原有「time DESC + Limit/Offset」语义。WHERE/参数绑定（applyDeviceFilters）全部留在内层、
+// 保持不变。
+func buildDeviceTableSQL(table string, q QueryRequest) (string, []any, error) {
+	inner := storage.Psql.Select(deviceTableColumns...).
+		Options(`DISTINCT ON (device_oui, device_sn, metric_path, granularity, "time", object_ldn)`).
+		From(table)
+	inner = applyDeviceFilters(inner, q)
+	inner = inner.OrderBy(
+		"device_oui", "device_sn", "metric_path", "granularity", `"time"`, "object_ldn", "ingest_time DESC",
+	)
+
+	qb := storage.Psql.Select(deviceTableColumns...).FromSelect(inner, "d")
 	qb = qb.OrderBy("time DESC")
 	if q.Limit > 0 {
 		qb = qb.Limit(uint64(q.Limit))
@@ -373,7 +392,11 @@ func (a *Aggregator) queryDeviceTable(ctx context.Context, table string, q Query
 	if q.Offset > 0 {
 		qb = qb.Offset(uint64(q.Offset))
 	}
-	sqlStr, args, err := qb.ToSql()
+	return qb.ToSql()
+}
+
+func (a *Aggregator) queryDeviceTable(ctx context.Context, table string, q QueryRequest) ([]Row, error) {
+	sqlStr, args, err := buildDeviceTableSQL(table, q)
 	if err != nil {
 		return nil, fmt.Errorf("aggregator.Query build %s: %w", table, err)
 	}

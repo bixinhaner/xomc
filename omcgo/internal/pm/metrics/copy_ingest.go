@@ -77,7 +77,18 @@ func MetricFromCounter(c model.PMCounter) PMMetric {
 	return m
 }
 
+// granularity15MinDuration 是 Granularity15Min（"15min" 桶）对应的窗口时长。
+// KPIValue 由 KPI 引擎在 15min 窗口收尾时构造（engine 全程 collectTime.Add(-15*time.Minute)
+// 假设 15min 粒度），core/model.KPIValue 只携带窗口止点 Time、无独立 Start/End，故窗口起点在
+// 本入库层按粒度推导补齐，与 MetricFromCounter 的 start = end - granularity 口径一致。
+const granularity15MinDuration = 15 * time.Minute
+
 // MetricFromKPIValue 把 model.KPIValue 转 PMMetric（从 kpi 包上移，写两路共用）。
+//
+// KPIValue 仅有窗口止点 Time（= 引擎 collectTime = granPeriod.endTime），无独立窗口起点。
+// 历史上 start/end 都写成 v.Time，致 pm_metrics.start_time == end_time，前端悬浮框「开始/结束」
+// 显示同一时刻（#199 / #208 打点起止相同子项）。这里把 StartTime 推导为 EndTime - 15min，给出
+// 完整 15min 区间，与 MetricFromCounter 的 start = end - granularity 口径对齐。
 func MetricFromKPIValue(v model.KPIValue) PMMetric {
 	extra := map[string]any{}
 	if v.Carrier != "" {
@@ -94,6 +105,8 @@ func MetricFromKPIValue(v model.KPIValue) PMMetric {
 		s := v.CellID
 		ldn = &s
 	}
+	endTime := v.Time
+	startTime := endTime.Add(-granularity15MinDuration)
 	return PMMetric{
 		DeviceOUI:   v.OUI,
 		DeviceSN:    v.DeviceSN,
@@ -101,9 +114,9 @@ func MetricFromKPIValue(v model.KPIValue) PMMetric {
 		MetricType:  MetricTypeKPI,
 		MetricValue: v.KPIValue,
 		Granularity: Granularity15Min,
-		Time:        v.Time,
-		StartTime:   v.Time,
-		EndTime:     v.Time,
+		Time:        endTime,
+		StartTime:   startTime,
+		EndTime:     endTime,
 		ObjectLDN:   ldn,
 		Extra:       extra,
 	}

@@ -51,6 +51,47 @@ func Test_SelectTable_EmptyDimDefaultsDevice(t *testing.T) {
 	assert.Equal(t, "pm_metrics_hourly", got)
 }
 
+// #208 同窗口多文件去重：device 维度直读必须用 DISTINCT ON 折叠同键、保留 ingest_time 最新一条，
+// 否则同设备同窗口的两个不同文件名 PM 文件各落一行被前端 SUM 成翻倍值。
+func Test_buildDeviceTableSQL_DistinctOnDedupLatestIngest(t *testing.T) {
+	sql, args, err := buildDeviceTableSQL("pm_metrics", QueryRequest{
+		DeviceOUIs: []string{"0019C0"},
+		DeviceSNs:  []string{"SN-1"},
+		Limit:      100,
+		Offset:     0,
+	})
+	require.NoError(t, err)
+
+	// 内层去重：DISTINCT ON 键 + ingest_time DESC 选最新文件。
+	assert.Contains(t, sql, `DISTINCT ON (device_oui, device_sn, metric_path, granularity, "time", object_ldn)`)
+	assert.Contains(t, sql, `ORDER BY device_oui, device_sn, metric_path, granularity, "time", object_ldn, ingest_time DESC`)
+	// 外层包子查询恢复 time DESC + Limit 语义。
+	assert.Contains(t, sql, "FROM (SELECT DISTINCT ON")
+	assert.Contains(t, sql, ") AS d ORDER BY time DESC")
+	assert.Contains(t, sql, "LIMIT 100")
+	// WHERE / 参数绑定不变：device 过滤参数仍在。
+	assert.Contains(t, args, "0019C0")
+	assert.Contains(t, args, "SN-1")
+}
+
+// 单设备单文件场景（无重复）不应被去重逻辑改变行为：SQL 仍是同一套去重查询，
+// 单文件下 DISTINCT ON 对每个唯一键只有一行，结果零变化。
+func Test_buildDeviceTableSQL_PreservesWhereFilters(t *testing.T) {
+	mt := metrics.MetricTypeKPI
+	sql, _, err := buildDeviceTableSQL("pm_metrics", QueryRequest{
+		DeviceSNs:   []string{"SN-1"},
+		MetricPaths: []string{"K900010015"},
+		MetricType:  &mt,
+		Granularity: metrics.Granularity15Min,
+	})
+	require.NoError(t, err)
+	// 过滤条件全部落在内层子查询里。
+	assert.Contains(t, sql, "device_sn IN")
+	assert.Contains(t, sql, "metric_path IN")
+	assert.Contains(t, sql, "metric_type =")
+	assert.Contains(t, sql, "granularity =")
+}
+
 func Test_SelectTable_UnknownGranularity(t *testing.T) {
 	_, err := SelectTable(metrics.Granularity("xyz"), DimensionDevice)
 	assert.Error(t, err)

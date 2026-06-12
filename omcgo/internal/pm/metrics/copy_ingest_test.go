@@ -2,10 +2,65 @@ package metrics
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/omcgo/omcgo/internal/core/model"
 )
+
+// MetricFromKPIValue 必须给 KPI 行补出完整 15min 窗口（start = end - 15min），否则
+// pm_metrics.start_time == end_time，前端悬浮框「开始/结束」显示同一时刻（#199 / #208）。
+
+func Test_MetricFromKPIValue_StartIsEndMinus15Min(t *testing.T) {
+	end := time.Date(2026, 6, 13, 10, 15, 0, 0, time.UTC)
+	v := model.KPIValue{
+		Time:        end,
+		OUI:         "0019C0",
+		DeviceSN:    "SN-1",
+		CellID:      "cell-1",
+		IndicatorID: "K900010015",
+		KPIValue:    42.5,
+	}
+
+	m := MetricFromKPIValue(v)
+
+	assert.Equal(t, MetricTypeKPI, m.MetricType)
+	assert.Equal(t, end, m.EndTime, "EndTime 仍为窗口止点 v.Time")
+	assert.Equal(t, end, m.Time, "Time 仍为窗口止点 v.Time")
+	assert.Equal(t, end.Add(-15*time.Minute), m.StartTime, "StartTime 推导为 end - 15min")
+	assert.NotEqual(t, m.StartTime, m.EndTime, "start 必须严格早于 end，杜绝起止相同")
+	require.NotNil(t, m.ObjectLDN)
+	assert.Equal(t, "cell-1", *m.ObjectLDN)
+}
+
+func Test_MetricFromKPIValue_NoCellID_LdnNil(t *testing.T) {
+	// 失败/边界路径：无小区（CellID 空）时 ObjectLDN 必须为 nil，窗口推导仍成立。
+	end := time.Date(2026, 6, 13, 10, 15, 0, 0, time.UTC)
+	m := MetricFromKPIValue(model.KPIValue{Time: end, IndicatorID: "K1"})
+
+	assert.Nil(t, m.ObjectLDN, "无 CellID 时 object_ldn 为 nil")
+	assert.Equal(t, end.Add(-15*time.Minute), m.StartTime)
+	assert.Equal(t, end, m.EndTime)
+}
+
+func Test_MetricFromCounter_StartWindow_NoRegression(t *testing.T) {
+	// counter 行起止本就正确（start = end - granularity），确保未被 KPI 改动波及。
+	end := time.Date(2026, 6, 13, 10, 15, 0, 0, time.UTC)
+
+	withGran := MetricFromCounter(model.PMCounter{
+		Time: end, CounterName: "C1", CounterValue: 7, Granularity: 15,
+	})
+	assert.Equal(t, MetricTypeCounter, withGran.MetricType)
+	assert.Equal(t, end.Add(-15*time.Minute), withGran.StartTime, "granularity>0 时 start = end - granularity")
+	assert.Equal(t, end, withGran.EndTime)
+
+	// granularity=0（未知粒度）时退回 start == end，保持既有行为。
+	noGran := MetricFromCounter(model.PMCounter{Time: end, CounterName: "C1", CounterValue: 7})
+	assert.Equal(t, end, noGran.StartTime, "granularity=0 时 start 退回 end（不推导窗口）")
+	assert.Equal(t, end, noGran.EndTime)
+}
 
 // dedupeByNaturalKey 是 copy 模式（plain COPY 无 ON CONFLICT）的文件内幂等闸：撞 uq_pm_metrics_natural
 // 的重复行必须先在内存折叠成一行（last-wins），否则整批 COPY 失败。以下用例锁住其语义。
