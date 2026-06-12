@@ -176,9 +176,12 @@ rotate_pg() {
   pguser="$(secrets_get_val POSTGRES_USER "$ENV_FILE")"; pguser="${pguser:-omcgo}"
   pgdb="$(secrets_get_val POSTGRES_DB "$ENV_FILE")";     pgdb="${pgdb:-omcgo}"
   log "PostgreSQL：容器内 ALTER ROLE 改卷内口令（本地 socket trust，:'pw' 参数化防注入）..."
-  # -v pw=NEW + :'pw'：psql 对变量值做安全单引号转义，避免 SQL 注入；ON_ERROR_STOP 失败即非零退出。
-  docker exec "$cname" psql -U "$pguser" -d "$pgdb" -v ON_ERROR_STOP=1 \
-    -v pw="$new" -c 'ALTER ROLE "'"$pguser"'" WITH PASSWORD :'"'"'pw'"'"';' \
+  # 关键：psql 的 :'pw' 变量插值只在 stdin/脚本模式生效；用 -c 传 SQL 时【不展开】，
+  # 会把字面 :'pw' 原样发给服务端 → `syntax error at or near ":"`（pg16 实测），PG 改密全程失败。
+  # 故必须走 printf 管道喂 stdin。-v pw=NEW + :'pw'：psql 对变量值做安全单引号转义防注入；
+  # ON_ERROR_STOP 失败即非零退出。docker exec 需带 -i 才能接收 stdin。
+  printf 'ALTER ROLE "%s" WITH PASSWORD :%spw%s;\n' "$pguser" "'" "'" \
+    | docker exec -i "$cname" psql -U "$pguser" -d "$pgdb" -v ON_ERROR_STOP=1 -v pw="$new" \
     || die "ALTER ROLE 失败——未改 secrets.env/.env，DB 口令保持原值"
   set_secret_key POSTGRES_PASSWORD "$new"
   build_dc
