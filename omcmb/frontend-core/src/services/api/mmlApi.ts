@@ -433,6 +433,11 @@ function mapBackendTask(bt: BackendMMLTask): MMLTask {
           : undefined,
       paramPaths: paramPaths.length > 0 ? paramPaths : undefined,
       paramValues: Array.isArray(c.param_values) ? (c.param_values as unknown[]) : undefined,
+      // 裸路径/自定义 MOD 把下发值存于 parameters（path→value map），非 param_values 数组。
+      parameters:
+        c.parameters && typeof c.parameters === 'object'
+          ? (c.parameters as Record<string, unknown>)
+          : undefined,
     };
   });
 

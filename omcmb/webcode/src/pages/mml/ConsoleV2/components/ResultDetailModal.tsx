@@ -134,10 +134,10 @@ export default function ResultDetailModal({
     },
   ];
 
-  // PATH 列表（#196：MOD 下发 + LST 回读前后对比，操作类型区分）
+  // PATH 列表（#196：MOD 下发 + LST 回读前后对比）。列序：类型 | 子任务 ID | 状态 | PATH | PATH 值。
   const pathTaskColumns: ColumnsType<PathTask> = [
     {
-      title: '操作类型',
+      title: '类型',
       dataIndex: 'opType',
       key: 'opType',
       width: 96,
@@ -151,20 +151,10 @@ export default function ResultDetailModal({
         ),
     },
     {
-      title: 'PATH',
-      dataIndex: 'path',
-      key: 'path',
-      render: (v: string) => (
-        <Text code style={{ fontSize: 11, wordBreak: 'break-all' }}>
-          {v}
-        </Text>
-      ),
-    },
-    {
       title: '子任务 ID',
       dataIndex: 'subTaskId',
       key: 'subTaskId',
-      width: 96,
+      width: 88,
       align: 'center',
       // #196：不直接显示冗长 ID，仅提供「复制」按钮（点击复制完整 device_task id）；无 ID 时占位 -。
       render: (v: string) =>
@@ -182,24 +172,38 @@ export default function ResultDetailModal({
       title: '状态',
       dataIndex: 'status',
       key: 'status',
-      width: 88,
+      width: 80,
       render: (s: ExecStatus) => <Tag color={STATUS_META[s].color}>{STATUS_META[s].text}</Tag>,
     },
     {
-      // PATH 列表：MOD 行显下发值、LST 行显回读值；失败时显故障原因。
-      title: '值（下发 / 回读）',
+      title: 'PATH',
+      dataIndex: 'path',
+      key: 'path',
+      render: (v: string) => (
+        <Text code style={{ fontSize: 11, wordBreak: 'break-all' }}>
+          {v}
+        </Text>
+      ),
+    },
+    {
+      // MOD 行显下发值、LST 行显回读值；失败时显故障原因。值可能很长 → 截断 + 悬停看全 + 复制。
+      title: 'PATH 值',
       dataIndex: 'value',
       key: 'value',
-      ellipsis: true,
+      width: 220,
       render: (v: string) =>
         v ? (
-          <Text style={{ fontSize: 11, wordBreak: 'break-all' }}>{v}</Text>
+          <Text
+            copyable={{ text: v, tooltips: ['复制', '已复制'] }}
+            ellipsis={{ tooltip: v }}
+            style={{ fontSize: 11, maxWidth: 180 }}
+          >
+            {v}
+          </Text>
         ) : (
           <Text type="secondary">-</Text>
         ),
     },
-    { title: '下发', dataIndex: 'dispatchedAt', key: 'dispatchedAt', width: 80 },
-    { title: '响应', dataIndex: 'respondedAt', key: 'respondedAt', width: 80 },
   ];
 
   return (

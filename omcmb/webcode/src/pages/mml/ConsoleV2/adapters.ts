@@ -614,7 +614,9 @@ export function mapTaskToRecord(task: MMLTask): ExecRecord {
     for (const d of details) {
       if (upperOp(d) !== 'MOD') continue;
       (d.paramPaths ?? []).forEach((p, i) => {
-        setValues[p] = String((d.paramValues?.[i] ?? '') as unknown);
+        // 裸路径/自定义 MOD 的下发值在 parameters[path]，结构化命令在 paramValues[i]；优先数组，缺则回退 map。
+        const v = d.paramValues?.[i] ?? d.parameters?.[p];
+        setValues[p] = v != null ? String(v as unknown) : '';
       });
     }
     const cols = buildColumnsFromRawPaths(Object.keys(setValues)); // Object.keys 去重 → 不再 PATH(2)

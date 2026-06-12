@@ -167,6 +167,11 @@ export interface MMLTaskCommandDetail {
   paramPaths?: string[];
   /** MOD 操作的下发值；与 paramPaths 同序对应 */
   paramValues?: unknown[];
+  /**
+   * MOD 下发值的 path→value 映射（裸路径/自定义命令通道存于此，而非 paramValues 数组）；
+   * 取下发值时优先 paramValues[i]，缺则回退 parameters[path]。
+   */
+  parameters?: Record<string, unknown>;
 }
 
 export interface MMLTask {
