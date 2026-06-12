@@ -50,13 +50,6 @@ export default function ResultDetailModal({
       }))
     : [];
 
-  // #196：MOD 下发值（path→value）取自 PATH 列表的 MOD 行，供「执行 PATH」弹层显示下发值。
-  const modSetValues = new Map<string, string>(
-    (row?.pathTasks ?? [])
-      .filter((t) => t.opType === 'MOD' && t.value)
-      .map((t) => [t.path, t.value]),
-  );
-
   const paramColumns: ColumnsType<ParsedParam> = [
     {
       title: '参数路径',
@@ -261,31 +254,17 @@ export default function ResultDetailModal({
                           placement="bottomLeft"
                           title={`执行 PATH（${columns.length}）`}
                           content={
+                            // MOD 与 LST 同一样式：仅展示标签 + PATH（MOD 下发值在下方「PATH 列表」展示，不在此重复）。
                             <div style={{ maxHeight: 320, overflow: 'auto', maxWidth: 460 }}>
-                              {columns.map((c) => {
-                                // #196：MOD 显示该 path 的下发值（取自 PATH 列表 MOD 行）
-                                const setVal = modSetValues.get(c.path);
-                                return (
-                                  <div key={c.key} style={{ marginBottom: 6, lineHeight: 1.4 }}>
-                                    <Text style={{ fontSize: 12 }}>{c.label}</Text>
-                                    <br />
-                                    <Text code style={{ fontSize: 11, wordBreak: 'break-all' }}>
-                                      {c.path}
-                                    </Text>
-                                    {setVal != null && setVal !== '' && (
-                                      <>
-                                        <br />
-                                        <Text type="secondary" style={{ fontSize: 11 }}>
-                                          下发值：
-                                        </Text>
-                                        <Text style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>
-                                          {setVal}
-                                        </Text>
-                                      </>
-                                    )}
-                                  </div>
-                                );
-                              })}
+                              {columns.map((c) => (
+                                <div key={c.key} style={{ marginBottom: 6, lineHeight: 1.4 }}>
+                                  <Text style={{ fontSize: 12 }}>{c.label}</Text>
+                                  <br />
+                                  <Text code style={{ fontSize: 11, wordBreak: 'break-all' }}>
+                                    {c.path}
+                                  </Text>
+                                </div>
+                              ))}
                             </div>
                           }
                         >
