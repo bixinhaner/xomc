@@ -1,6 +1,10 @@
 package acs
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -282,4 +286,80 @@ func TestMaybeCaptureTrace_NotInWhitelist(t *testing.T) {
 	h.maybeCaptureTrace(entry, 200, fixtureInformXML, fixtureInformResponseXML)
 
 	assert.Empty(t, sink.snapshot())
+}
+
+// ---------------------------------------------------------------------------
+// issue #186 端到端被动抓回归：起跟踪后，设备自发周期 Inform（无主动呼叫、
+// 甚至会话被准入拒绝）也必须落进跟踪结果。
+// ---------------------------------------------------------------------------
+
+// newPassiveCaptureHandler 构造一个能跑 ServeHTTP 全链路的 handler，并把指定 SN 加入
+// 跟踪白名单、挂上 protocolLogger（capture 旁路只在 protocolLogger != nil 时触发）。
+// admissionSlots=1 且预占 1 槽 → 周期 Inform 会在 line 402 准入拒绝提前返回，
+// 用来证明被动抓不依赖会话是否建成。
+func newPassiveCaptureHandler(t *testing.T, sink *stubTraceSink, whitelistSN string, admissionSlots int64) *Handler {
+	t.Helper()
+	h := newTestACSHandlerWithDeps(newAcsHSessionStore(), &acsHEventBus{})
+	wl := trace.NewWhitelistCache(nil, trace.DefaultWhitelistConfig(), zap.NewNop())
+	if whitelistSN != "" {
+		wl.Add(whitelistSN, uuid.New())
+	}
+	h.traceWhitelist = wl
+	h.traceService = sink
+	h.protocolLogger = zap.NewNop() // 必须非 nil，否则 capture 旁路 defer 不注册
+	h.admission = NewAdmissionController(admissionSlots)
+	return h
+}
+
+// acsHInformPeriodicSN 是 acsHInformPeriodicXML 里的 SerialNumber，复用以保持单一事实源。
+const acsHInformPeriodicSN = "TEST-SN-002"
+
+// TestServeHTTP_PassiveCapture_PeriodicInform_CapturedEvenWhenAdmissionDenied：
+// 死判 passive-capture 的回归 —— 设备在跟踪窗口内自发周期 Inform，即便准入已满、
+// 会话根本没建成（403/503 提前返回），网管收到的这条 Inform 仍必须被捕获。
+// 这把"是否抓到报文"与"主动呼叫/会话是否建成"解耦（issue #186 核心修复）。
+func TestServeHTTP_PassiveCapture_PeriodicInform_CapturedEvenWhenAdmissionDenied(t *testing.T) {
+	sink := &stubTraceSink{}
+	h := newPassiveCaptureHandler(t, sink, acsHInformPeriodicSN, 1)
+	// 预占满唯一准入槽 → 后续周期 Inform 必被准入拒绝，handleInform 在建会话前提前返回。
+	require.True(t, h.admission.Acquire(context.Background(), "pre-occupied-session"))
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(acsHInformPeriodicXML))
+	req.RemoteAddr = "10.0.0.9:5000"
+	h.ServeHTTP(w, req)
+
+	// 准入被拒 → 503，确认确实走了"会话没建成"的提前返回路径。
+	require.Equal(t, http.StatusServiceUnavailable, w.Code,
+		"准入已满，周期 Inform 应被拒绝（证明走的是无会话的提前返回路径）")
+
+	msgs := sink.snapshot()
+	require.NotEmpty(t, msgs, "起跟踪后设备自发周期 Inform 即便会话没建成也必须被捕获（issue #186）")
+
+	// 至少有一条 IN 方向且 RPC 方法为 Inform。
+	var capturedInform bool
+	for _, m := range msgs {
+		if m.Direction == trace.DirectionIn && m.RPCMethod == "Inform" {
+			capturedInform = true
+			assert.Equal(t, acsHInformPeriodicSN, m.DeviceSN)
+		}
+	}
+	assert.True(t, capturedInform, "捕获结果里应含 RPC 方法=Inform 的入向报文")
+}
+
+// TestServeHTTP_PassiveCapture_NotWhitelisted_ZeroCaptured：死判 window-filter 反向 ——
+// 未起跟踪（SN 不在白名单）时发同样的周期 Inform，捕获条数必须为 0，
+// 证明是按设备过滤而非无差别全抓。
+func TestServeHTTP_PassiveCapture_NotWhitelisted_ZeroCaptured(t *testing.T) {
+	sink := &stubTraceSink{}
+	// 白名单为空（whitelistSN=""）→ TEST-SN-002 未起跟踪；准入充足，走正常成功路径。
+	h := newPassiveCaptureHandler(t, sink, "", 1000)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(acsHInformPeriodicXML))
+	req.RemoteAddr = "10.0.0.10:5000"
+	h.ServeHTTP(w, req)
+
+	assert.Equal(t, 0, len(sink.snapshot()),
+		"未起跟踪的设备周期 Inform 不应被捕获（按设备+窗口过滤，非无差别全抓）")
 }

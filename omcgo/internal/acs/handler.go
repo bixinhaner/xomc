@@ -363,6 +363,18 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 		attribute.String("acs.cwmp_id", cwmpID),
 	)
 
+	// 报文跟踪被动抓（issue #186）：一旦解析出 SN 就立刻把 SN/方法/CwmpID 写入
+	// protocolLogger 的 LogEntry，使 ServeHTTP 中的 maybeCaptureTrace 旁路在 SN 命中
+	// 跟踪白名单时一定能落库——即使本次周期 Inform 随后被限流（377）或准入拒绝（402）
+	// 提前返回、根本没建立会话。这把"是否抓到报文"从"主动呼叫/会话是否建成"解耦：
+	// NAT 后设备网管呼不到，但只要设备自己周期上报 Inform，网管收到即抓。
+	// 注意：下游成功路径在 line ~494 会再次写同样的字段（带 SessionID/Sequence），是幂等覆盖。
+	if entry := rpclog.EntryFromContext(r.Context()); entry != nil {
+		entry.DeviceSN = deviceSN
+		entry.Method = "Inform"
+		entry.CwmpID = cwmpID
+	}
+
 	// 记录解析后的 Inform 详情
 	log.Info("ACS parsed Inform",
 		zap.String("remote_addr", r.RemoteAddr),
