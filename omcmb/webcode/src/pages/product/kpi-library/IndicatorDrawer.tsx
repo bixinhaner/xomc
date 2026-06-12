@@ -140,7 +140,11 @@ export default function IndicatorDrawer({ open, deviceType, indicator, enabled, 
             <Descriptions.Item label={t('common.enName')}>{indicator.enName || '—'}</Descriptions.Item>
             <Descriptions.Item label={t('product.kpi.indicator.group')}>{indicator.groupName || indicator.groupId || '—'}</Descriptions.Item>
             <Descriptions.Item label={t('common.unit')}>{indicator.unit || '—'}</Descriptions.Item>
-            <Descriptions.Item label={t('product.kpi.indicator.counterType')}>{indicator.counterType || '—'}</Descriptions.Item>
+            {/* #193:计数器类型只对原始计数器(isCounter)有意义 — 派生 KPI 在 XML 无
+                dataType,落库 data_type=NULL,恒"—"会误导,故对 KPI 型隐藏该字段。 */}
+            {indicator.isCounter && (
+              <Descriptions.Item label={t('product.kpi.indicator.counterType')}>{indicator.counterType || '—'}</Descriptions.Item>
+            )}
             <Descriptions.Item label={t('product.kpi.indicator.level')}>{indicator.indicatorLevel || '—'}</Descriptions.Item>
             <Descriptions.Item label={t('product.kpi.indicator.enabledTag')} span={2}>
               {enabled ? <Tag color="success">{t('product.kpi.indicator.enabledTag')}</Tag> : <Tag>{t('product.kpi.indicator.disabledTag')}</Tag>}

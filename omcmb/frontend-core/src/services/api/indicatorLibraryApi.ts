@@ -25,9 +25,13 @@ interface BackendIndicator {
   en_name?: string;
   group_id?: string;
   group_name?: string;
-  counter_type?: string;
+  // #193：后端 PerfIndicator 实际下发 data_type（受控码 int/real/float）+
+  // data_type_label（按 locale 本地化的"整数/实数/浮点数"，#161/#67 §4 由 handler 填充）。
+  // 旧前端读 counter_type/unit 两个后端从不存在的字段，故详情恒显"—"。
+  data_type?: string;
+  data_type_label?: string;
   indicator_level?: string;
-  unit?: string;
+  unit_id?: string;
   description?: string;
   // 后端实际下发字符串 '0' / '1'（非布尔）；需归一化，否则 JS 里非空字符串 '0' 也是真值。
   is_counter?: boolean | number | string;
@@ -70,9 +74,13 @@ function mapIndicator(b: BackendIndicator, deviceType: DeviceType): IndicatorInf
     enName: b.en_name,
     groupId: b.group_id,
     groupName: b.group_name,
-    counterType: b.counter_type,
+    // #193：优先本地化标签，回退原始受控码；counter 型才有值，派生 KPI 型为 undefined
+    // （XML 无 dataType → data_type=NULL），抽屉据 isCounter 决定是否展示该字段。
+    counterType: b.data_type_label ?? b.data_type,
     indicatorLevel: b.indicator_level,
-    unit: b.unit,
+    // #193：详情接口当前只回原始 unit_id 码（%/ppm/number），先显示原始码消除"—"；
+    // 本地化（百分比/百万分比/个）为后续 UX 增强（需后端 +unit_label 字段）。
+    unit: b.unit_id,
     description: b.description,
     // 归一化：后端发 '0'/'1' 字符串（与 indicatorApi.ts 一致），不能直接当布尔用
     isCounter: b.is_counter === true || b.is_counter === 1 || b.is_counter === '1' || b.is_counter === 'true',
