@@ -45,6 +45,16 @@ sources:
       - { column: ne_type,          display: "网元类型",   type: string }
       - { column: event_type,       display: "事件类型",   type: string }
 
+  # #241 新增产品「KPI指标名称」下拉源:KPI 平台(eNB)。
+  # 平台名权威来源是公式表 rela_platform_indicator_formula_{enb|gsm|gnb}.platform_name
+  # (perf_indicators_* 本身不存平台维度,见 internal/product/pg_repository.go:89-90)。
+  # 与 product 下拉现有口径(FetchIndicatorPlatformsByDeviceType / ListIndicatorPlatforms)一致;
+  # 本期仅 enb(与 ProductDrawer isENB 一致),gnb/gsm 留后续。
+  - table: rela_platform_indicator_formula_enb
+    display_name: "KPI 平台公式(eNB)"
+    fields:
+      - { column: platform_name,    display: "平台名",     type: string }
+
   - table: device_groups
     display_name: "设备组"
     fields:

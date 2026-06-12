@@ -44,22 +44,30 @@ type CacheRefresher interface {
 // 2026-06-03 用户决策:取消 builtin/custom 区分,上传直接写 builtin 目录(loader 扫描的同一目录),
 // 接受升级丢失;导入 = 写文件 + destructive 重载(删孤儿)+ 刷新缓存三步在上传端点内顺序完成。
 type FileHandler struct {
-	repo      FileRepository
-	reloader  Reloader       // Upload/Delete 后同步触发 Loader.Reload(可为 nil → 跳过)
-	cache     CacheRefresher // Upload 重载成功后刷新 indicator 缓存(可为 nil → 跳过)
-	baseDir   string         // XMLBaseDir,等于 dictloader.XMLBaseDir(e.g. /etc/omcgo/data)
-	fileLocks sync.Map       // map[basename(string)]*sync.Mutex
-	logger    *zap.Logger
+	repo          FileRepository
+	reloader      Reloader            // Upload/Delete 后同步触发 Loader.Reload(可为 nil → 跳过)
+	cache         CacheRefresher      // Upload 重载成功后刷新 indicator 缓存(可为 nil → 跳过)
+	dictRefresher DictSourceRefresher // #241: 导入成功后刷绑定字典(可为 nil → 跳过)
+	baseDir       string              // XMLBaseDir,等于 dictloader.XMLBaseDir(e.g. /etc/omcgo/data)
+	fileLocks     sync.Map            // map[basename(string)]*sync.Mutex
+	logger        *zap.Logger
+}
+
+// DictSourceRefresher 在导入 XML 成功后按 source_table 刷新绑定字典(T-0182 / #241)。
+// best-effort:刷新失败不阻断导入(daily cron 兜底)。可为 nil(未接入时整段跳过)。
+type DictSourceRefresher interface {
+	RefreshSourceBoundByTable(ctx context.Context, sourceTable string) (int, error)
 }
 
 // NewFileHandler 构造 FileHandler;
 // baseDir 必须为 Loader 用的同一 XMLBaseDir,否则 loadedFrom 相对路径无法 join 到正确绝对路径。
 // reloader / cache 可为 nil — 此时 Upload 成功后只 audit log,不触发 Reload / 缓存刷新(测试场景常用)。
-func NewFileHandler(repo FileRepository, reloader Reloader, cache CacheRefresher, baseDir string, logger *zap.Logger) *FileHandler {
+// dictRefresher 可为 nil(未接入数据字典数据源时);非 nil 时 enb 导入成功后刷 rela_platform_indicator_formula_enb 绑定字典。
+func NewFileHandler(repo FileRepository, reloader Reloader, cache CacheRefresher, dictRefresher DictSourceRefresher, baseDir string, logger *zap.Logger) *FileHandler {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &FileHandler{repo: repo, reloader: reloader, cache: cache, baseDir: baseDir, logger: logger.Named("indicator.file")}
+	return &FileHandler{repo: repo, reloader: reloader, cache: cache, dictRefresher: dictRefresher, baseDir: baseDir, logger: logger.Named("indicator.file")}
 }
 
 // RegisterRoutes 挂在 /api/v1 之下;内部使用 /indicators/... 多个子路径。
@@ -741,6 +749,11 @@ func (h *FileHandler) UploadXML(c *gin.Context) {
 			if h.cache != nil {
 				h.cache.BumpCacheVersion(c.Request.Context())
 			}
+			// #241:导入成功落库后,按本次上传的 deviceType 刷新对应平台公式表绑定字典。
+			// 平台名权威来源是 rela_platform_indicator_formula_<tech>.platform_name(perf_indicators_*
+			// 不存平台维度),KPI XML 导入会写该公式表(见 file_repository 的 orphan 删除/冲突检测)。
+			// 本期仅 enb→kpi_platform_enb;gnb/gsm 无绑定字典则 0 命中,安全 no-op。best-effort,失败只 Warn。
+			h.refreshBoundDict(c.Request.Context(), "rela_platform_indicator_formula_"+tech)
 		}
 	}
 
@@ -769,6 +782,24 @@ func (h *FileHandler) UploadXML(c *gin.Context) {
 		"reloaded":    reloadOK,
 		"orphans":     orphans,
 	})
+}
+
+// refreshBoundDict 在导入成功后刷新绑定 sourceTable 的数据字典(T-0182 / #241)。
+// best-effort:未接入(dictRefresher==nil)或刷新失败均只记日志,不影响导入响应。
+func (h *FileHandler) refreshBoundDict(ctx context.Context, sourceTable string) {
+	if h.dictRefresher == nil {
+		return
+	}
+	n, err := h.dictRefresher.RefreshSourceBoundByTable(ctx, sourceTable)
+	if err != nil {
+		h.logger.Warn("post-upload bound dictionary refresh failed",
+			zap.String("source_table", sourceTable), zap.Error(err))
+		return
+	}
+	if n > 0 {
+		h.logger.Info("post-upload bound dictionary refreshed",
+			zap.String("source_table", sourceTable), zap.Int("dicts", n))
+	}
 }
 
 // parseUploadPlatform 从上传字节流抽 <indicatorModel platform="..."> 的 platform 属性。

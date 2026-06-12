@@ -83,13 +83,14 @@ func (o *optInt64) Ptr() *int64 {
 // fileLocks 提供 per-filename 进程内互斥(Upload + Delete + ReloadOne 三方共用,
 // 避免同名文件并发写入竞态)。
 type Handler struct {
-	repo       *PgRepository
-	registry   *Registry
-	reloader   Reloader
-	logger     *zap.Logger
-	baseDir    string
-	builtinDir string   // absolute path = filepath.Join(baseDir, BuiltinDirSubdir)
-	fileLocks  sync.Map // map[basename]*sync.Mutex
+	repo          *PgRepository
+	registry      *Registry
+	reloader      Reloader
+	dictRefresher DictSourceRefresher
+	logger        *zap.Logger
+	baseDir       string
+	builtinDir    string   // absolute path = filepath.Join(baseDir, BuiltinDirSubdir)
+	fileLocks     sync.Map // map[basename]*sync.Mutex
 }
 
 // Reloader 抽象 dictloader.Registry.ReloadOne — 让 handler 不强依赖 dictloader 包。
@@ -97,19 +98,27 @@ type Reloader interface {
 	ReloadOne(ctx context.Context, name string) error
 }
 
+// DictSourceRefresher 在导入 XML 成功后按 source_table 刷新绑定字典(T-0182 / #241)。
+// best-effort:刷新失败不阻断导入(daily cron 兜底)。可为 nil(未接入时整段跳过)。
+type DictSourceRefresher interface {
+	RefreshSourceBoundByTable(ctx context.Context, sourceTable string) (int, error)
+}
+
 // NewHandler 构造 Handler；reloader 可为 nil（导入 XML 时 destructiveReload 跳过重载，
 // 只写文件，仅 Warn）。baseDir 来自 DictLoaderConfig.XMLBaseDir,用于 XML 物理删除/上传定位。
-func NewHandler(repo *PgRepository, registry *Registry, reloader Reloader, baseDir string, logger *zap.Logger) *Handler {
+// dictRefresher 可为 nil(未接入数据字典数据源时);非 nil 时导入成功后刷新 param_models 绑定字典。
+func NewHandler(repo *PgRepository, registry *Registry, reloader Reloader, dictRefresher DictSourceRefresher, baseDir string, logger *zap.Logger) *Handler {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
 	return &Handler{
-		repo:       repo,
-		registry:   registry,
-		reloader:   reloader,
-		baseDir:    baseDir,
-		builtinDir: filepath.Join(baseDir, BuiltinDirSubdir),
-		logger:     logger.Named("parammodel.handler"),
+		repo:          repo,
+		registry:      registry,
+		reloader:      reloader,
+		dictRefresher: dictRefresher,
+		baseDir:       baseDir,
+		builtinDir:    filepath.Join(baseDir, BuiltinDirSubdir),
+		logger:        logger.Named("parammodel.handler"),
 	}
 }
 
@@ -592,6 +601,13 @@ func (h *Handler) UploadXML(c *gin.Context) {
 	//    文件已落地,reload/cache 失败不阻塞 upload 响应,只 Warn;
 	//    响应 reloaded/orphans_deleted 字段反映实际状态,用户可重新导入重试。
 	reloaded, orphansDeleted := h.destructiveReload(c.Request.Context(), "upload:"+filepath.Base(targetPath))
+
+	// #241:导入成功落库后,主动刷新绑定 param_models 的字典(param_model_name),
+	// 使「新增产品 → 参数模型名称」下拉即时出现新模型(无需等 daily cron / 手动刷新)。
+	// 仅在重载真正落库(reloaded)后刷新,与 indicator/alarm 两库口径一致;best-effort,失败只 Warn。
+	if reloaded {
+		h.refreshBoundDict(c.Request.Context(), "param_models")
+	}
 
 	backupName := ""
 	if backupPath != "" {
@@ -1147,6 +1163,24 @@ func (h *Handler) destructiveReload(ctx context.Context, reason string) (reloade
 		}
 	}
 	return reloaded, orphansDeleted
+}
+
+// refreshBoundDict 在导入成功后刷新绑定 sourceTable 的数据字典(T-0182 / #241)。
+// best-effort:未接入(dictRefresher==nil)或刷新失败均只记日志,不影响导入响应。
+func (h *Handler) refreshBoundDict(ctx context.Context, sourceTable string) {
+	if h.dictRefresher == nil {
+		return
+	}
+	n, err := h.dictRefresher.RefreshSourceBoundByTable(ctx, sourceTable)
+	if err != nil {
+		h.logger.Warn("post-upload bound dictionary refresh failed",
+			zap.String("source_table", sourceTable), zap.Error(err))
+		return
+	}
+	if n > 0 {
+		h.logger.Info("post-upload bound dictionary refreshed",
+			zap.String("source_table", sourceTable), zap.Int("dicts", n))
+	}
 }
 
 // ── helpers ─────────────────────────────────────────────────────────

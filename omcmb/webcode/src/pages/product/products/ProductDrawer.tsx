@@ -24,10 +24,10 @@ import {
   useUpdatePattern,
   useDeletePattern,
   useMovePattern,
-  useIndicatorPlatforms,
-  useAlarmNeTypes,
 } from '@core/hooks/api/useProducts';
-import { useParamModelList } from '@core/hooks/api/useParamModels';
+// #241：三个下拉(参数模型/KPI平台/告警neType)改字典数据源绑定(T-0182),由字典机制统一刷新,
+// 不再各下拉各搞一套 query key。与设备列表 network_type/product_class 同范式。
+import { useDictionary } from '@core/hooks/api/useSystem';
 import type {
   Product,
   ProductPattern,
@@ -50,9 +50,17 @@ interface FormValues {
   vendor: string;
   tech: string;
   description: string;
-  paramModelId?: string;
+  // #241：参数模型下拉改字典驱动后,提交值 = param_models.name(后端按名反查 id);字段随之改名。
+  paramModelName?: string;
   indicatorPlatform: string;
   alarmNeType: string;
+}
+
+// #241：把字典明细映射为 antd Select options(label/value 同名值)。与设备列表 toOptions 同款。
+function toDictOptions(
+  dict: { sysDictionaryDetails?: { label: string; value: string }[] } | null | undefined,
+): { label: string; value: string }[] {
+  return (dict?.sysDictionaryDetails ?? []).map((d) => ({ label: d.label, value: d.value }));
 }
 
 const TECH_OPTIONS = [
@@ -85,14 +93,16 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
   const [pendingPatterns, setPendingPatterns] = useState<string[]>([]);
 
   const { data: detail } = useProductDetail(isEdit ? product?.id : undefined);
-  const { data: paramModels } = useParamModelList();
+
+  // #241：三个下拉数据源改字典(T-0182 绑定来源字段,字典机制统一刷新 — 三库导入后自动刷新 + 每日 cron 兜底)。
+  const { data: paramModelDict } = useDictionary('param_model_name');
+  const { data: kpiPlatformDict } = useDictionary('kpi_platform_enb');
+  const { data: alarmNeTypeDict } = useDictionary('alarm_ne_type');
 
   // 指标设备类型由制式派生(不再单独编辑);ENB(lte) 才需要选指标平台
   const tech = Form.useWatch('tech', form);
   const indicatorDeviceType = TECH_TO_DEVTYPE[tech || ''] || '';
   const isENB = indicatorDeviceType === 'enb';
-  const { data: indicatorPlatforms } = useIndicatorPlatforms(isENB ? indicatorDeviceType : undefined);
-  const { data: alarmNeTypes } = useAlarmNeTypes();
 
   const createMut = useCreateProduct();
   const updateMut = useUpdateProduct();
@@ -109,7 +119,8 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
         vendor: product.vendor,
         tech: product.tech,
         description: product.description,
-        paramModelId: product.paramModelId,
+        // #241：编辑回填用后端反查的 paramModelName(字典 value=name);后端再按名反查 id。
+        paramModelName: product.paramModelName,
         indicatorPlatform: product.indicatorPlatform,
         alarmNeType: product.alarmNeType,
       });
@@ -140,8 +151,9 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
           enableFiletype11: product.enableFiletype11,
           enableUnknownAlarm: product.enableUnknownAlarm,
           deviceAttrsOverride: product.deviceAttrsOverride ?? DEFAULT_OVERRIDE,
-          paramModelId: v.paramModelId,
-          clearParamModel: !v.paramModelId,
+          // #241：提交字典 value(param_models.name);后端按名反查 param_model_id。未选则清空软引用。
+          paramModelName: v.paramModelName,
+          clearParamModel: !v.paramModelName,
         };
         await updateMut.mutateAsync({ id: product.id, input });
         message.success(t('common.saved'));
@@ -158,7 +170,8 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
           enableFiletype11: true,
           enableUnknownAlarm: false,
           deviceAttrsOverride: DEFAULT_OVERRIDE,
-          paramModelId: v.paramModelId,
+          // #241：提交字典 value(param_models.name);后端按名反查 param_model_id。
+          paramModelName: v.paramModelName,
           patterns: pendingPatterns.length > 0 ? pendingPatterns : undefined,
         };
         await createMut.mutateAsync(input);
@@ -340,19 +353,16 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
                     />
                   </Form.Item>
                   <Form.Item
-                    name="paramModelId"
+                    name="paramModelName"
                     label={t('product.products.paramModel')}
                     rules={[{ required: true, message: t('common.pleaseSelect') }]}
-                    extra={t('product.product.drawer.paramModelExtra')}
                   >
                     <Select
                       placeholder={t('product.products.paramModelPh')}
-                      options={(paramModels?.items || []).map((m) => ({
-                        label: t('product.product.drawer.paramModelOption', { name: m.name, count: m.totalParams }),
-                        value: m.id,
-                      }))}
+                      options={toDictOptions(paramModelDict)}
                       showSearch
                       optionFilterProp="label"
+                      notFoundContent={paramModelDict ? t('product.product.drawer.notFoundParamModels') : t('common.loading')}
                     />
                   </Form.Item>
                   {isENB && (
@@ -360,24 +370,23 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
                       name="indicatorPlatform"
                       label={t('product.products.indicatorPlatform')}
                       rules={[{ required: true, message: t('product.product.drawer.indicatorPlatformRequired') }]}
-                      extra={t('product.product.drawer.indicatorPlatformExtraLong')}
                     >
                       <Select
                         placeholder={t('product.products.indicatorPlatformPh')}
-                        options={(indicatorPlatforms || []).map((p) => ({ label: p, value: p }))}
+                        options={toDictOptions(kpiPlatformDict)}
                         showSearch
                         optionFilterProp="label"
-                        notFoundContent={indicatorPlatforms ? t('product.product.drawer.notFoundPlatforms') : t('common.loading')}
+                        notFoundContent={kpiPlatformDict ? t('product.product.drawer.notFoundPlatforms') : t('common.loading')}
                       />
                     </Form.Item>
                   )}
                   <Form.Item name="alarmNeType" label={t('product.products.alarmNeType')} rules={[{ required: true }]}>
                     <Select
                       placeholder={t('product.products.alarmNeTypePh')}
-                      options={(alarmNeTypes || []).map((n) => ({ label: n, value: n }))}
+                      options={toDictOptions(alarmNeTypeDict)}
                       showSearch
                       optionFilterProp="label"
-                      notFoundContent={alarmNeTypes ? t('product.product.drawer.notFoundAlarms') : t('common.loading')}
+                      notFoundContent={alarmNeTypeDict ? t('product.product.drawer.notFoundAlarms') : t('common.loading')}
                     />
                   </Form.Item>
                 </>

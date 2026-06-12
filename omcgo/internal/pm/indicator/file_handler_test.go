@@ -164,8 +164,8 @@ func newTestRouterWithReloader(t *testing.T, repo FileRepository, reloader Reloa
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	rg := r.Group("/api/v1")
-	// cache 传 nil:测试不验证缓存刷新(BumpCacheVersion 走 service+redis,单测无 redis)
-	h := NewFileHandler(repo, reloader, nil, baseDir, zap.NewNop())
+	// cache / dictRefresher 传 nil:测试不验证缓存刷新与字典刷新(均走 service+redis/DB,单测无)
+	h := NewFileHandler(repo, reloader, nil, nil, baseDir, zap.NewNop())
 	h.RegisterRoutes(rg)
 	return r
 }

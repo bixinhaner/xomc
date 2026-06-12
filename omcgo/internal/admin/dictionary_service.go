@@ -535,6 +535,37 @@ func (s *DictionaryService) SyncSourceBoundAll(ctx context.Context) (ok, failed 
 	return s.syncEngine.SyncAll(ctx, s.listSourceBoundForSync)
 }
 
+// RefreshSourceBoundByTable 是「三库导入 XML 后自动刷新」入口(T-0182 / #241)。
+// 找到所有绑定 sourceTable 的源绑定字典,逐个宽容同步(runSyncOne:失败只写
+// last_refresh_* + 日志,不返错)——导入主流程不应因字典刷新失败而失败,daily cron 兜底。
+// 返回尝试刷新的字典数;引擎未启用(无白名单)或该表无绑定字典时返 (0, nil),均非错误。
+func (s *DictionaryService) RefreshSourceBoundByTable(ctx context.Context, sourceTable string) (int, error) {
+	if s.syncEngine == nil {
+		return 0, nil
+	}
+	dicts, err := s.dictRepo.ListSourceBound(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("list source-bound dicts for %q: %w", sourceTable, err)
+	}
+	matched := dictsMatchingSourceTable(dicts, sourceTable)
+	for i := range matched {
+		s.runSyncOne(ctx, &matched[i])
+	}
+	return len(matched), nil
+}
+
+// dictsMatchingSourceTable 从源绑定字典集合中筛出绑定 sourceTable 的字典。
+// 抽成纯函数便于单测筛选逻辑(忽略未绑定的手工字典与异表项)。
+func dictsMatchingSourceTable(dicts []Dictionary, sourceTable string) []Dictionary {
+	var out []Dictionary
+	for i := range dicts {
+		if dicts[i].SourceTable != nil && *dicts[i].SourceTable == sourceTable {
+			out = append(out, dicts[i])
+		}
+	}
+	return out
+}
+
 // listSourceBoundForSync 把 DB Dictionary 行映射为 dictsource.SyncDict(SyncEngine 接口形状)。
 func (s *DictionaryService) listSourceBoundForSync(ctx context.Context) ([]dictsource.SyncDict, error) {
 	dicts, err := s.dictRepo.ListSourceBound(ctx)

@@ -50,7 +50,8 @@ func initAlarmDefModule(c *Container) error {
 	// (RefreshCache + DeleteOrphansSince)与 reloader(ReloadOne)。上传统一写进 builtin
 	// 目录,启动期确保该目录存在。
 	fileRepo := alarmdef.NewPgFileRepository(c.PgPool)
-	fileHandler := alarmdef.NewFileHandler(fileRepo, service, reloader, c.Cfg.DictLoader.XMLBaseDir, logger)
+	// #241: 传入 c.DictService,导入后刷 alarm_ne_type 绑定字典(alarmdef 模块 Depends "admin" 保证非 nil)
+	fileHandler := alarmdef.NewFileHandler(fileRepo, service, reloader, c.DictService, c.Cfg.DictLoader.XMLBaseDir, logger)
 	if err := alarmdef.EnsureBaseDir(c.Cfg.DictLoader.XMLBaseDir); err != nil {
 		logger.Warn("ensure alarm builtin dir failed; uploads may fail until dir exists", zap.Error(err))
 	}

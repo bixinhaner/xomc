@@ -106,6 +106,7 @@ type Container struct {
 	PermService    *admin.PermissionService
 	SysConfigSvc   *admin.SysConfigService // 提供 RegisterSavedHook 给其他模块挂 cache invalidate
 	SecurityPolicy *admin.SecurityPolicy   // 让其他模块可注册 InvalidateCache hook
+	DictService    *admin.DictionaryService // #241：三库导入 XML 后按 source_table 刷新绑定字典（依赖 admin 模块先初始化）
 
 	// DeviceModule 设置
 	DeviceService  *device.DeviceService
