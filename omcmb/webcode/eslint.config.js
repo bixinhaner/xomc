@@ -54,4 +54,45 @@ export default defineConfig([
       ],
     },
   },
+  // ── i18n 防腐 guard（#226）──────────────────────────────────────────────
+  // 禁止在 UI 层（.tsx 页面/组件）出现中文字符串字面量 / JSX 文本 / 模板串，
+  // 强制所有用户可见文案走 react-intl（t('...') / formatMessage），从结构上
+  // 阻止「硬编码文案不随语言切换」这类回归（#226 的根因是缺少这道闸）。
+  //
+  // 阶段化推进：当前以 'warn' 起步——只对新增代码冒提示，不阻断在跑的特性流；
+  // 待 Phase 2/3 把存量 ~650 处高信号文案迁完、清零告警后，本规则翻 'error'
+  // （连同 CI gate），届时任何新硬编码中文都会直接失败。
+  //
+  // 作用域只限 .tsx（UI 层）；i18n 词典本身、测试夹具、mock 演示数据按设计豁免
+  // （value 枚举常量 / 演示数组不是用户切语言时看到的可翻译文案）。
+  {
+    files: ['src/**/*.tsx'],
+    ignores: [
+      'src/**/*.test.tsx',
+      'src/**/__tests__/**',
+      'src/**/*.stories.tsx',
+      'src/mock/**',
+      'src/**/mock/**',
+    ],
+    rules: {
+      'no-restricted-syntax': [
+        'warn',
+        {
+          selector: 'Literal[value=/[\\u4e00-\\u9fff]/]',
+          message:
+            '禁止硬编码中文字符串字面量：用户可见文案请走 react-intl，t(\'module.key\') / formatMessage（i18n guard #226）。',
+        },
+        {
+          selector: 'JSXText[value=/[\\u4e00-\\u9fff]/]',
+          message:
+            '禁止在 JSX 中硬编码中文文本：请改为 {t(\'module.key\')}（i18n guard #226）。',
+        },
+        {
+          selector: 'TemplateElement[value.cooked=/[\\u4e00-\\u9fff]/]',
+          message:
+            '禁止在模板字符串里硬编码中文：请用带插值的 ICU message，t(\'module.key\', { ... })（i18n guard #226）。',
+        },
+      ],
+    },
+  },
 ])

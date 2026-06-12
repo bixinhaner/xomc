@@ -26,6 +26,7 @@ import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import 'dayjs/locale/zh-cn';
 
+import { useT } from '@/hooks/useT';
 import {
   useNotificationCenter,
   useMarkNotificationRead,
@@ -49,6 +50,7 @@ interface Props {
 
 export default function NotificationCenter({ onClose }: Props) {
   const navigate = useNavigate();
+  const t = useT();
   const { token } = theme.useToken();
   const listQuery = useNotificationCenter({ page: 1, pageSize: 20 });
   const markRead = useMarkNotificationRead();
@@ -77,9 +79,9 @@ export default function NotificationCenter({ onClose }: Props) {
     setBusy(true);
     try {
       await markAllRead.mutateAsync();
-      message.success({ content: '已全部标记为已读', duration: 2 });
+      message.success({ content: t('notificationCenter.markAllReadSuccess'), duration: 2 });
     } catch (e) {
-      message.error({ content: '标记失败：' + String(e), duration: 4 });
+      message.error({ content: t('notificationCenter.markAllReadFailed', { error: String(e) }), duration: 4 });
     } finally {
       setBusy(false);
     }
@@ -89,9 +91,9 @@ export default function NotificationCenter({ onClose }: Props) {
     setBusy(true);
     try {
       const n = await clearAll.mutateAsync();
-      message.success({ content: `已清空 ${n} 条消息`, duration: 2 });
+      message.success({ content: t('notificationCenter.clearSuccess', { count: n }), duration: 2 });
     } catch (e) {
-      message.error({ content: '清空失败：' + String(e), duration: 4 });
+      message.error({ content: t('notificationCenter.clearFailed', { error: String(e) }), duration: 4 });
     } finally {
       setBusy(false);
     }
@@ -109,13 +111,13 @@ export default function NotificationCenter({ onClose }: Props) {
           alignItems: 'center',
         }}
       >
-        <Text strong>消息中心</Text>
+        <Text strong>{t('notificationCenter.title')}</Text>
         <div>
           <Button type="link" size="small" onClick={handleMarkAllRead} disabled={busy || items.length === 0}>
-            全部已读
+            {t('notificationCenter.markAllRead')}
           </Button>
           <Button type="link" size="small" danger onClick={handleClearAll} disabled={busy || items.length === 0}>
-            清空
+            {t('notificationCenter.clear')}
           </Button>
         </div>
       </div>
@@ -127,7 +129,7 @@ export default function NotificationCenter({ onClose }: Props) {
             <Spin />
           </div>
         ) : items.length === 0 ? (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无消息" style={{ padding: 32 }} />
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('notificationCenter.empty')} style={{ padding: 32 }} />
         ) : (
           // antd6 List 已废弃：改用 Flex 纵向容器 + map，逐条沿用原 NotificationItem
           // 标记（item 间分隔线下沉到 NotificationItem 内的 borderBottom，与原 List
@@ -139,6 +141,7 @@ export default function NotificationCenter({ onClose }: Props) {
                 item={item}
                 last={idx === items.length - 1}
                 onClick={() => void handleItemClick(item)}
+                unreadLabel={t('notificationCenter.unread')}
               />
             ))}
           </Flex>
@@ -157,9 +160,11 @@ interface ItemProps {
   /** 是否末条 —— 末条不画底部分隔线（复刻原 List split 默认行为） */
   last: boolean;
   onClick: () => void;
+  /** 未读小圆点的 aria-label（由父组件经 i18n 传入，#226） */
+  unreadLabel: string;
 }
 
-function NotificationItem({ item, last, onClick }: ItemProps) {
+function NotificationItem({ item, last, onClick, unreadLabel }: ItemProps) {
   const { token } = theme.useToken();
   const ui = toUiState(item.status);
   const { icon, color } = uiVisuals(ui);
@@ -208,7 +213,7 @@ function NotificationItem({ item, last, onClick }: ItemProps) {
                   marginLeft: 6,
                   verticalAlign: 'middle',
                 }}
-                aria-label="未读"
+                aria-label={unreadLabel}
               />
             )}
           </Text>

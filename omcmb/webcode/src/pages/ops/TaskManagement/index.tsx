@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { Button, Dropdown, Tag, Space, Progress, Modal, Form, Input, Select, message, Descriptions, Drawer, Tooltip } from 'antd';
 import type { MenuProps } from 'antd';
 import { PlusOutlined, PlayCircleOutlined, PauseCircleOutlined, StopOutlined, MoreOutlined } from '@ant-design/icons';
@@ -17,14 +17,16 @@ import {
   useCancelOpsTask,
 } from '@core/hooks/api/useOpsTools';
 import { usePermission } from '@core/hooks/usePermission';
+import { useT } from '@/hooks/useT';
 
-const STATUS_OPTIONS: ReadonlyArray<{ value: OpsTask['status']; labelZh: string }> = [
-  { value: 'pending', labelZh: '待执行' },
-  { value: 'running', labelZh: '运行中' },
-  { value: 'paused', labelZh: '已暂停' },
-  { value: 'success', labelZh: '已完成' },
-  { value: 'failed', labelZh: '失败' },
-  { value: 'cancelled', labelZh: '已取消' },
+// 状态值集合保持为常量（value 是与后端契约，不翻译）；显示标签在 render 时经 t() 派生（#226）。
+const STATUS_VALUES: ReadonlyArray<OpsTask['status']> = [
+  'pending',
+  'running',
+  'paused',
+  'success',
+  'failed',
+  'cancelled',
 ];
 
 const statusColorMap: Record<OpsTask['status'], string> = {
@@ -36,30 +38,28 @@ const statusColorMap: Record<OpsTask['status'], string> = {
   cancelled: 'default',
 };
 
-const statusLabelMap: Record<OpsTask['status'], string> = {
-  pending: '待执行',
-  running: '运行中',
-  paused: '已暂停',
-  success: '已完成',
-  failed: '失败',
-  cancelled: '已取消',
-};
-
-const filterFields: FilterField[] = [
-  { name: 'keyword', label: '任务名称', type: 'input', placeholder: '请输入任务名称' },
-  {
-    name: 'status',
-    label: '状态',
-    type: 'select',
-    options: STATUS_OPTIONS.map((o) => ({ label: o.labelZh, value: o.value })),
-  },
-  { name: 'creator', label: '创建者', type: 'input', placeholder: '请输入创建者' },
-];
-
 export default function TaskManagement() {
+  const t = useT();
   const canCreate = usePermission('ops:task:create');
   const canCancel = usePermission('ops:task:cancel');
   const canControl = usePermission('ops:task:control');
+
+  // 状态值 → 已翻译标签（切语言即时生效，#226）
+  const statusLabel = useCallback((s: OpsTask['status']) => t(`ops.task.status.${s}`), [t]);
+
+  const filterFields: FilterField[] = useMemo(
+    () => [
+      { name: 'keyword', label: t('ops.task.colName'), type: 'input', placeholder: t('ops.task.namePlaceholder') },
+      {
+        name: 'status',
+        label: t('ops.task.colStatus'),
+        type: 'select',
+        options: STATUS_VALUES.map((v) => ({ label: statusLabel(v), value: v })),
+      },
+      { name: 'creator', label: t('ops.task.colCreator'), type: 'input', placeholder: t('ops.task.creatorPlaceholder') },
+    ],
+    [t, statusLabel],
+  );
 
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
@@ -88,7 +88,7 @@ export default function TaskManagement() {
   );
   const templates = templatesData?.items ?? [];
   const templateNameMap = useMemo(
-    () => Object.fromEntries(templates.map((t) => [t.id, t.templateName])),
+    () => Object.fromEntries(templates.map((tpl) => [tpl.id, tpl.templateName])),
     [templates],
   );
 
@@ -114,11 +114,11 @@ export default function TaskManagement() {
         },
         {
           onSuccess: () => {
-            void message.success('任务创建成功');
+            void message.success(t('ops.task.createSuccess'));
             setCreateVisible(false);
             form.resetFields();
           },
-          onError: () => void message.error('任务创建失败'),
+          onError: () => void message.error(t('ops.task.createFailed')),
         },
       );
     });
@@ -126,37 +126,37 @@ export default function TaskManagement() {
 
   const handlePause = (id: string) => {
     pauseTask.mutate(id, {
-      onSuccess: () => void message.success('任务已暂停'),
-      onError: () => void message.error('操作失败'),
+      onSuccess: () => void message.success(t('ops.task.paused')),
+      onError: () => void message.error(t('ops.task.opFailed')),
     });
   };
 
   const handleResume = (id: string) => {
     resumeTask.mutate(id, {
-      onSuccess: () => void message.success('任务继续执行'),
-      onError: () => void message.error('操作失败'),
+      onSuccess: () => void message.success(t('ops.task.resumed')),
+      onError: () => void message.error(t('ops.task.opFailed')),
     });
   };
 
   const handleCancel = (id: string) => {
     Modal.confirm({
-      title: '确认取消',
-      content: '取消后任务无法恢复，是否确认？',
+      title: t('ops.task.cancelConfirmTitle'),
+      content: t('ops.task.cancelConfirmContent'),
       okType: 'danger',
       onOk: () =>
         cancelTask.mutateAsync(id).then(
-          () => message.success('任务已取消'),
-          () => message.error('操作失败'),
+          () => message.success(t('ops.task.cancelled')),
+          () => message.error(t('ops.task.opFailed')),
         ),
     });
   };
 
   const columns: DataTableColumn<OpsTask & Record<string, unknown>>[] = useMemo(
     () => [
-      { key: 'taskName', title: '任务名称', dataIndex: 'taskName', ellipsis: true, width: 220 },
+      { key: 'taskName', title: t('ops.task.colName'), dataIndex: 'taskName', ellipsis: true, width: 220 },
       {
         key: 'templateId',
-        title: '使用模板',
+        title: t('ops.task.colTemplate'),
         dataIndex: 'templateId',
         width: 160,
         ellipsis: true,
@@ -165,39 +165,40 @@ export default function TaskManagement() {
       },
       {
         key: 'totalCount',
-        title: '设备数',
+        title: t('ops.task.colDeviceCount'),
         dataIndex: 'totalCount',
         width: 80,
-        render: (val) => `${String(val)} 台`,
+        render: (val) => t('ops.task.deviceCountUnit', { count: String(val) }),
       },
       {
         key: 'status',
-        title: '状态',
+        title: t('ops.task.colStatus'),
         dataIndex: 'status',
         width: 100,
         render: (val) => {
           const s = val as OpsTask['status'];
-          return <Tag color={statusColorMap[s]}>{statusLabelMap[s]}</Tag>;
+          return <Tag color={statusColorMap[s]}>{statusLabel(s)}</Tag>;
         },
       },
       {
         key: 'progress',
-        title: '进度',
+        title: t('ops.task.colProgress'),
         dataIndex: 'progress',
         width: 160,
         render: (val, record) => {
-          const t = record as OpsTask;
+          const task = record as OpsTask;
           const pct = Number(val);
           return (
             <div>
               <Progress
                 percent={pct}
                 size="small"
-                status={t.status === 'failed' ? 'exception' : t.status === 'running' ? 'active' : undefined}
+                status={task.status === 'failed' ? 'exception' : task.status === 'running' ? 'active' : undefined}
               />
               <span style={{ fontSize: 11, color: '#999' }}>
-                步骤 {t.currentStep}/{t.totalSteps}
-                {t.status === 'success' && ` · 成功 ${t.successCount} 失败 ${t.failCount}`}
+                {t('ops.task.stepProgress', { current: task.currentStep, total: task.totalSteps })}
+                {task.status === 'success' &&
+                  ` · ${t('ops.task.successFail', { success: task.successCount, fail: task.failCount })}`}
               </span>
             </div>
           );
@@ -205,36 +206,36 @@ export default function TaskManagement() {
       },
       {
         key: 'createdAt',
-        title: '创建时间',
+        title: t('ops.task.colCreatedAt'),
         dataIndex: 'createdAt',
         width: 160,
         render: (val) => new Date(String(val)).toLocaleString('zh-CN'),
       },
-      { key: 'creator', title: '创建者', dataIndex: 'creator', width: 90 },
+      { key: 'creator', title: t('ops.task.colCreator'), dataIndex: 'creator', width: 90 },
       {
         key: 'actions',
-        title: '操作',
+        title: t('ops.task.colActions'),
         dataIndex: 'id',
         width: 110,
         fixed: 'right',
         render: (_, record) => {
-          const t = record as OpsTask;
+          const task = record as OpsTask;
           const moreItems: MenuProps['items'] = [
-            ...(t.status === 'running' && canControl
-              ? [{ key: 'pause', label: '暂停', icon: <PauseCircleOutlined />, onClick: () => handlePause(t.id) }]
+            ...(task.status === 'running' && canControl
+              ? [{ key: 'pause', label: t('ops.task.pause'), icon: <PauseCircleOutlined />, onClick: () => handlePause(task.id) }]
               : []),
-            ...((t.status === 'paused' || t.status === 'pending') && canControl
-              ? [{ key: 'resume', label: '继续', icon: <PlayCircleOutlined />, onClick: () => handleResume(t.id) }]
+            ...((task.status === 'paused' || task.status === 'pending') && canControl
+              ? [{ key: 'resume', label: t('ops.task.resume'), icon: <PlayCircleOutlined />, onClick: () => handleResume(task.id) }]
               : []),
-            ...((t.status === 'running' || t.status === 'paused' || t.status === 'pending') && canCancel
+            ...((task.status === 'running' || task.status === 'paused' || task.status === 'pending') && canCancel
               ? [
                   { type: 'divider' as const },
                   {
                     key: 'cancel',
-                    label: '取消',
+                    label: t('ops.task.cancel'),
                     icon: <StopOutlined />,
                     danger: true,
-                    onClick: () => handleCancel(t.id),
+                    onClick: () => handleCancel(task.id),
                   },
                 ]
               : []),
@@ -245,11 +246,11 @@ export default function TaskManagement() {
                 type="link"
                 size="small"
                 onClick={() => {
-                  setSelectedTask(t);
+                  setSelectedTask(task);
                   setDetailVisible(true);
                 }}
               >
-                详情
+                {t('ops.task.detail')}
               </Button>
               {moreItems.length > 0 && (
                 <Dropdown menu={{ items: moreItems }} trigger={['click']}>
@@ -262,17 +263,17 @@ export default function TaskManagement() {
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [templateNameMap, canCancel, canControl],
+    [templateNameMap, canCancel, canControl, t, statusLabel],
   );
 
   return (
     <ListPageLayout
-      title="任务管理"
-      subtitle="管理运维自动化任务（注：执行引擎尚未实施，参 PRD F06-ops-management §12 T-0101）"
+      title={t('ops.task.title')}
+      subtitle={t('ops.task.subtitle')}
       extra={
-        <Tooltip title={canCreate ? '' : '无权限：请联系管理员申请「任务新建」权限'}>
+        <Tooltip title={canCreate ? '' : t('ops.task.createNoPermission')}>
           <Button type="primary" icon={<PlusOutlined />} disabled={!canCreate} onClick={() => setCreateVisible(true)}>
-            新建任务
+            {t('ops.task.create')}
           </Button>
         </Tooltip>
       }
@@ -309,13 +310,13 @@ export default function TaskManagement() {
         onRefresh={() => void refetch()}
         scroll={{ x: 1200 }}
         alarmRowStyle={(record) => {
-          const t = record as OpsTask;
-          return t.status === 'failed' ? 'major' : null;
+          const task = record as OpsTask;
+          return task.status === 'failed' ? 'major' : null;
         }}
       />
 
       <Modal
-        title="新建运维任务"
+        title={t('ops.task.createModalTitle')}
         open={createVisible}
         onOk={handleCreate}
         onCancel={() => {
@@ -326,80 +327,80 @@ export default function TaskManagement() {
         width={540}
       >
         <Form form={form} layout="vertical">
-          <Form.Item name="taskName" label="任务名称" rules={[{ required: true }]}>
-            <Input placeholder="请输入任务名称" />
+          <Form.Item name="taskName" label={t('ops.task.colName')} rules={[{ required: true }]}>
+            <Input placeholder={t('ops.task.namePlaceholder')} />
           </Form.Item>
-          <Form.Item name="templateId" label="使用模板" rules={[{ required: true }]}>
+          <Form.Item name="templateId" label={t('ops.task.colTemplate')} rules={[{ required: true }]}>
             <Select
-              placeholder="请选择运维模板"
-              options={templates.map((t) => ({ label: `${t.templateName} (${t.category})`, value: t.id }))}
+              placeholder={t('ops.task.templatePlaceholder')}
+              options={templates.map((tpl) => ({ label: `${tpl.templateName} (${tpl.category})`, value: tpl.id }))}
             />
           </Form.Item>
-          <Form.Item name="deviceSns" label="目标设备SN（每行一个）" rules={[{ required: true }]}>
+          <Form.Item name="deviceSns" label={t('ops.task.targetDevices')} rules={[{ required: true }]}>
             <Input.TextArea rows={5} placeholder={'ENB00001\nENB00002\nGNB00001'} style={{ fontFamily: 'monospace' }} />
           </Form.Item>
         </Form>
       </Modal>
 
       <Drawer
-        title={selectedTask ? `任务详情 — ${selectedTask.taskName}` : '任务详情'}
+        title={selectedTask ? `${t('ops.task.detailTitle')} — ${selectedTask.taskName}` : t('ops.task.detailTitle')}
         open={detailVisible}
         onClose={() => setDetailVisible(false)}
         size={600}
       >
         {selectedTask && (
           <Descriptions bordered column={2} size="small">
-            <Descriptions.Item label="任务名称" span={2}>
+            <Descriptions.Item label={t('ops.task.colName')} span={2}>
               {selectedTask.taskName}
             </Descriptions.Item>
-            <Descriptions.Item label="使用模板" span={2}>
+            <Descriptions.Item label={t('ops.task.colTemplate')} span={2}>
               {selectedTask.templateId ? templateNameMap[selectedTask.templateId] ?? selectedTask.templateId : '—'}
             </Descriptions.Item>
-            <Descriptions.Item label="状态">
-              <Tag color={statusColorMap[selectedTask.status]}>{statusLabelMap[selectedTask.status]}</Tag>
+            <Descriptions.Item label={t('ops.task.colStatus')}>
+              <Tag color={statusColorMap[selectedTask.status]}>{statusLabel(selectedTask.status)}</Tag>
             </Descriptions.Item>
-            <Descriptions.Item label="进度">
+            <Descriptions.Item label={t('ops.task.colProgress')}>
               <Progress
                 percent={selectedTask.progress}
                 size="small"
                 status={selectedTask.status === 'failed' ? 'exception' : selectedTask.status === 'running' ? 'active' : undefined}
               />
             </Descriptions.Item>
-            <Descriptions.Item label="当前步骤">
+            <Descriptions.Item label={t('ops.task.currentStep')}>
               {selectedTask.currentStep} / {selectedTask.totalSteps}
             </Descriptions.Item>
-            <Descriptions.Item label="设备总数">{selectedTask.totalCount} 台</Descriptions.Item>
-            <Descriptions.Item label="成功">
-              <span style={{ color: '#52c41a', fontWeight: 600 }}>{selectedTask.successCount} 台</span>
+            <Descriptions.Item label={t('ops.task.totalCount')}>{t('ops.task.deviceCountUnit', { count: selectedTask.totalCount })}</Descriptions.Item>
+            <Descriptions.Item label={t('ops.task.success')}>
+              <span style={{ color: '#52c41a', fontWeight: 600 }}>{t('ops.task.deviceCountUnit', { count: selectedTask.successCount })}</span>
             </Descriptions.Item>
-            <Descriptions.Item label="失败">
+            <Descriptions.Item label={t('ops.task.fail')}>
               <span
                 style={{
                   color: selectedTask.failCount > 0 ? '#ff4d4f' : '#999',
                   fontWeight: selectedTask.failCount > 0 ? 600 : 400,
                 }}
               >
-                {selectedTask.failCount} 台
+                {t('ops.task.deviceCountUnit', { count: selectedTask.failCount })}
               </span>
             </Descriptions.Item>
-            <Descriptions.Item label="创建者">{selectedTask.creator}</Descriptions.Item>
-            <Descriptions.Item label="创建时间">{new Date(selectedTask.createdAt).toLocaleString('zh-CN')}</Descriptions.Item>
+            <Descriptions.Item label={t('ops.task.colCreator')}>{selectedTask.creator}</Descriptions.Item>
+            <Descriptions.Item label={t('ops.task.colCreatedAt')}>{new Date(selectedTask.createdAt).toLocaleString('zh-CN')}</Descriptions.Item>
             {selectedTask.startedAt && (
-              <Descriptions.Item label="开始时间">
+              <Descriptions.Item label={t('ops.task.startedAt')}>
                 {new Date(selectedTask.startedAt).toLocaleString('zh-CN')}
               </Descriptions.Item>
             )}
             {selectedTask.completedAt && (
-              <Descriptions.Item label="完成时间">
+              <Descriptions.Item label={t('ops.task.completedAt')}>
                 {new Date(selectedTask.completedAt).toLocaleString('zh-CN')}
               </Descriptions.Item>
             )}
             {selectedTask.message && (
-              <Descriptions.Item label="消息" span={2}>
+              <Descriptions.Item label={t('ops.task.message')} span={2}>
                 {selectedTask.message}
               </Descriptions.Item>
             )}
-            <Descriptions.Item label="目标设备SN" span={2}>
+            <Descriptions.Item label={t('ops.task.targetDevices')} span={2}>
               <div style={{ fontFamily: 'monospace', fontSize: 12, maxHeight: 120, overflowY: 'auto' }}>
                 {selectedTask.deviceSns.join(', ')}
               </div>

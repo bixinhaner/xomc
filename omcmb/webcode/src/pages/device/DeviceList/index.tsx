@@ -75,82 +75,60 @@ const FILTER_COLUMN_MAP: Record<string, string> = {
   groupId: 'groupName',
 };
 
+// i18n 翻译函数签名（与 useT 返回值一致）：t(id, values?) → 已格式化字符串。
+// 离线时长格式化抽离为纯文本核心 offlineDurationText，render 版仅在外面套 <Tag>，
+// 避免文案口径在两处漂移（#226：原先硬编码 `${years}年` 等不随语言切换）。
+type TFn = (id: string, values?: Record<string, string | number>) => string;
+
 /**
- * 格式化离线时长为可读字符串
+ * 离线时长的纯文本版(导出 + 渲染共用)——文案全部走 i18n，切语言即时生效。
+ * @param t 翻译函数（来自 useT）
  * @param days 离线天数
  * @param hours 剩余小时数 (0-23)
  * @param minutes 剩余分钟数 (0-59)
  */
-function formatOfflineDuration(days?: number, hours?: number, minutes?: number): React.ReactNode {
+function offlineDurationText(t: TFn, days?: number, hours?: number, minutes?: number): string {
   if (days === undefined || days === null) return '-';
-
-  // 超过1年
   if (days >= 365) {
     const years = Math.floor(days / 365);
     const remainDays = days % 365;
-    return (
-      <Tag color="red">
-        {remainDays > 0 ? `${years}年${remainDays}天` : `${years}年`}
-      </Tag>
-    );
+    return remainDays > 0
+      ? t('device.duration.yearsDays', { years, days: remainDays })
+      : t('device.duration.years', { years });
   }
-
-  // 超过1月
   if (days >= 30) {
     const months = Math.floor(days / 30);
     const remainDays = days % 30;
-    return (
-      <Tag color="orange">
-        {remainDays > 0 ? `${months}个月${remainDays}天` : `${months}个月`}
-      </Tag>
-    );
+    return remainDays > 0
+      ? t('device.duration.monthsDays', { months, days: remainDays })
+      : t('device.duration.months', { months });
   }
-
-  // 超过1天
   if (days > 0) {
-    return (
-      <Tag color={days >= 7 ? 'orange' : 'gold'}>
-        {hours && hours > 0 ? `${days}天${hours}小时` : `${days}天`}
-      </Tag>
-    );
+    return hours && hours > 0
+      ? t('device.duration.daysHours', { days, hours })
+      : t('device.duration.days', { days });
   }
-
-  // 超过1小时
   if (hours && hours > 0) {
-    return (
-      <Tag color="gold">
-        {minutes && minutes > 0 ? `${hours}小时${minutes}分钟` : `${hours}小时`}
-      </Tag>
-    );
+    return minutes && minutes > 0
+      ? t('device.duration.hoursMinutes', { hours, minutes })
+      : t('device.duration.hours', { hours });
   }
-
-  // 不足1小时
-  if (minutes && minutes > 0) {
-    return <Tag color="default">{`${minutes}分钟`}</Tag>;
-  }
-
-  // 不足1分钟
-  return <Tag color="default">{'<1分钟'}</Tag>;
+  if (minutes && minutes > 0) return t('device.duration.minutes', { minutes });
+  return t('device.duration.lessThanMinute');
 }
 
-// 离线时长的纯文本版(导出用)——与 formatOfflineDuration 的文案口径保持一致,
-// 但去掉 <Tag> 包装,便于写入 CSV/XLSX 单元格。
-function offlineDurationText(days?: number, hours?: number, minutes?: number): string {
+/**
+ * 离线时长渲染版：在纯文本基础上套配色 <Tag>。颜色阈值与文本口径解耦。
+ */
+function formatOfflineDuration(t: TFn, days?: number, hours?: number, minutes?: number): React.ReactNode {
   if (days === undefined || days === null) return '-';
-  if (days >= 365) {
-    const years = Math.floor(days / 365);
-    const remainDays = days % 365;
-    return remainDays > 0 ? `${years}年${remainDays}天` : `${years}年`;
-  }
-  if (days >= 30) {
-    const months = Math.floor(days / 30);
-    const remainDays = days % 30;
-    return remainDays > 0 ? `${months}个月${remainDays}天` : `${months}个月`;
-  }
-  if (days > 0) return hours && hours > 0 ? `${days}天${hours}小时` : `${days}天`;
-  if (hours && hours > 0) return minutes && minutes > 0 ? `${hours}小时${minutes}分钟` : `${hours}小时`;
-  if (minutes && minutes > 0) return `${minutes}分钟`;
-  return '<1分钟';
+  const text = offlineDurationText(t, days, hours, minutes);
+  let color = 'default';
+  if (days >= 365) color = 'red';
+  else if (days >= 30) color = 'orange';
+  else if (days > 0) color = days >= 7 ? 'orange' : 'gold';
+  else if (hours && hours > 0) color = 'gold';
+  return <Tag color={color}>{text}</Tag>;
 }
 
 // 哪些 filter 字段在 URL 里以 CSV 形式编码、需要解析回数组（与 FILTER_FIELDS
@@ -1040,6 +1018,7 @@ export default function DeviceList() {
           // 仅离线设备显示
           if (record.connStatus !== 'offline') return '-';
           return formatOfflineDuration(
+            t,
             record.offlineDays,
             record.offlineHours,
             record.offlineMinutes
@@ -1346,7 +1325,7 @@ export default function DeviceList() {
           return fmtDuration(record.onlineDuration);
         case 'offlineDuration':
           return record.connStatus === 'offline'
-            ? offlineDurationText(record.offlineDays, record.offlineHours, record.offlineMinutes)
+            ? offlineDurationText(t, record.offlineDays, record.offlineHours, record.offlineMinutes)
             : '-';
         case 'halobFlag':
           return record.halobFlag == null
