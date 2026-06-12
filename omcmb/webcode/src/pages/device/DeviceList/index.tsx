@@ -44,6 +44,7 @@ import { useUserStore } from '@core/store/userStore';
 import { useAppStore } from '@core/store/appStore';
 import { buildDefaultUfteTaskName } from '@/pages/transfer/shared';
 import dayjs from 'dayjs';
+import { buildBatchTaskTypeMap, batchActionHasDetail } from './deviceBatchTask';
 import type { Device } from '@core/types/device';
 
 const { Link } = Typography;
@@ -633,12 +634,8 @@ export default function DeviceList() {
           // 获取选中设备的详细信息
           const selectedDevices = devices.filter((d) => ids.includes(d.id));
 
-          // 任务类型映射
-          const taskTypeMap: Record<string, string> = {
-            'batch-reboot': t('common.batchReboot'),
-            'batch-log-collect': t('device.action.logCollect'),
-            'batch-alarm-sync': t('device.action.alarmSync'),
-          };
+          // 任务类型映射（抽到 deviceBatchTask.ts 便于单测，不含已移除的 tr069-collect）
+          const taskTypeMap = buildBatchTaskTypeMap(t);
 
           const newTasks: LocalTask[] = selectedDevices.map((device, index) => ({
             id: `${actionKey}-${device.sn}-${Date.now()}-${index}`,
@@ -647,7 +644,7 @@ export default function DeviceList() {
             type: taskTypeMap[actionKey ?? ''] || actionLabel,
             status: 'pending' as TaskStatus,
             progress: 0,
-            hasDetail: actionKey === 'batch-log-collect', // 只有收集操作才有详情
+            hasDetail: batchActionHasDetail(actionKey), // 只有日志采集才有详情
           }));
 
           // 日志采集：UFTE 创建 RUNTIME_LOG_COLLECT 任务后自动跳转到「文件传输 →
