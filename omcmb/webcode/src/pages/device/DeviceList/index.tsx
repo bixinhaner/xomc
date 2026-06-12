@@ -6,7 +6,6 @@ import {
   AlertOutlined,
   CheckOutlined,
   CloseOutlined,
-  CloudDownloadOutlined,
   EditOutlined,
   ExportOutlined,
   EyeOutlined,
@@ -45,6 +44,7 @@ import { useUserStore } from '@core/store/userStore';
 import { useAppStore } from '@core/store/appStore';
 import { buildDefaultUfteTaskName } from '@/pages/transfer/shared';
 import dayjs from 'dayjs';
+import { buildBatchTaskTypeMap, batchActionHasDetail } from './deviceBatchTask';
 import type { Device } from '@core/types/device';
 
 const { Link } = Typography;
@@ -634,13 +634,8 @@ export default function DeviceList() {
           // 获取选中设备的详细信息
           const selectedDevices = devices.filter((d) => ids.includes(d.id));
 
-          // 任务类型映射
-          const taskTypeMap: Record<string, string> = {
-            'batch-reboot': t('common.batchReboot'),
-            'batch-tr069-collect': t('device.action.tr069Collect'),
-            'batch-log-collect': t('device.action.logCollect'),
-            'batch-alarm-sync': t('device.action.alarmSync'),
-          };
+          // 任务类型映射（抽到 deviceBatchTask.ts 便于单测，不含已移除的 tr069-collect）
+          const taskTypeMap = buildBatchTaskTypeMap(t);
 
           const newTasks: LocalTask[] = selectedDevices.map((device, index) => ({
             id: `${actionKey}-${device.sn}-${Date.now()}-${index}`,
@@ -649,7 +644,7 @@ export default function DeviceList() {
             type: taskTypeMap[actionKey ?? ''] || actionLabel,
             status: 'pending' as TaskStatus,
             progress: 0,
-            hasDetail: actionKey === 'batch-tr069-collect' || actionKey === 'batch-log-collect', // 只有收集操作才有详情
+            hasDetail: batchActionHasDetail(actionKey), // 只有日志采集才有详情
           }));
 
           // 日志采集：UFTE 创建 RUNTIME_LOG_COLLECT 任务后自动跳转到「文件传输 →
@@ -684,58 +679,8 @@ export default function DeviceList() {
             return;
           }
 
-          // 判断是否为收集操作（使用抽屉）
-          const isCollectAction = actionKey === 'batch-tr069-collect';
-
-          if (isCollectAction) {
-            // 收集操作：使用右侧抽屉
-            setCollectDrawerTitle(t('task.collectProgress')); // 收集进度
-            setCollectTasks(newTasks);
-            setCollectDrawerOpen(true);
-
-            // 模拟任务进度
-            newTasks.forEach((task, index) => {
-              setTimeout(() => {
-                setCollectTasks((prev) => prev.map((item) =>
-                  item.id === task.id ? { ...item, status: 'running', progress: 10 } : item
-                ));
-
-                const progressInterval = setInterval(() => {
-                  setCollectTasks((prev) => prev.map((item) => {
-                    if (item.id !== task.id) return item;
-                    if (item.progress >= 100) {
-                      clearInterval(progressInterval);
-                      return item;
-                    }
-                    const randomProgress = Math.random() * 15 + 10;
-                    return { ...item, progress: Math.min(item.progress + randomProgress, 90) };
-                  }));
-                }, 200);
-
-                const completeTime = 3000 + Math.random() * 2000;
-
-                setTimeout(() => {
-                  clearInterval(progressInterval);
-                  const success = Math.random() > 0.1;
-                  // 生成模拟日志内容
-                  const timestamp = new Date().toISOString();
-                  const logContent = success
-                    ? `[${timestamp}] INFO: ${t('task.log.start')}\n[${timestamp}] INFO: ${t('task.log.connect')} ${task.sn}\n[${timestamp}] INFO: ${t('task.log.getDeviceInfo')}\n[${timestamp}] INFO: ${t('task.log.collectConfig')}\n[${timestamp}] INFO: ${t('task.log.collectPerf')}\n[${timestamp}] INFO: ${t('task.log.collectComplete', { count: 156 })}\n[${timestamp}] INFO: ${t('task.log.success')}`
-                    : `[${timestamp}] ERROR: ${t('task.log.start')}\n[${timestamp}] INFO: ${t('task.log.connect')} ${task.sn}\n[${timestamp}] ERROR: ${t('task.log.timeout')}\n[${timestamp}] ERROR: ${t('task.log.failed')}`;
-                  setCollectTasks((prev) => prev.map((item) =>
-                    item.id === task.id ? {
-                      ...item,
-                      status: success ? 'success' : 'failed',
-                      progress: 100,
-                      message: success ? t('task.status.completed') : t('common.failed'),
-                      logContent,
-                    } : item
-                  ));
-                }, completeTime);
-              }, index * 200);
-            });
-          } else {
-            // 同步/重启操作：也使用右侧抽屉
+          {
+            // 同步/重启操作：使用右侧抽屉（TR069 抓包入口已移除，#179）
             setCollectDrawerTitle(t('task.taskProgress')); // 任务进度
             setCollectTasks(newTasks);
             setCollectDrawerOpen(true);
@@ -1512,12 +1457,8 @@ export default function DeviceList() {
       icon: <ReloadOutlined />,
       onClick: (keys) => handleBatchAction(t('common.batchReboot'), keys, 'batch-reboot'),
     },
-    {
-      key: 'batch-tr069-collect',
-      label: t('device.action.tr069Collect'),
-      icon: <CloudDownloadOutlined />,
-      onClick: (keys) => handleBatchAction(t('device.action.tr069Collect'), keys, 'batch-tr069-collect'),
-    },
+    // batch-tr069-collect 批量按钮已移除（#179）：按需抓包统一以「运维管理 - TR069
+    // 报文跟踪」菜单为唯一入口；设备页该入口冗余且对 NAT 后设备主动呼叫超时易误触失败。
     {
       key: 'batch-log-collect',
       label: t('device.action.logCollect'),
