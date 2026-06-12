@@ -1,4 +1,4 @@
-import { Alert, Button, Descriptions, Modal, Popover, Space, Table, Tag, Typography } from 'antd';
+import { Alert, Button, Descriptions, Modal, Popover, Space, Table, Tabs, Tag, Typography } from 'antd';
 import { DownloadOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import XmlViewer from '@/components/XmlViewer';
@@ -127,8 +127,47 @@ export default function ResultDetailModal({
     },
   ];
 
-  // 逐 PATH 子任务表（§3.11.3：父任务 = 设备任务 ID，每 path 一子任务）
+  // PATH 列表（#196：MOD 下发 + LST 回读前后对比）。列序：类型 | 子任务 ID | 状态 | PATH | PATH 值。
   const pathTaskColumns: ColumnsType<PathTask> = [
+    {
+      title: '类型',
+      dataIndex: 'opType',
+      key: 'opType',
+      width: 96,
+      render: (v?: string) =>
+        v === 'MOD' ? (
+          <Tag color="blue">MOD 下发</Tag>
+        ) : v === 'LST' ? (
+          <Tag color="green">LST 回读</Tag>
+        ) : (
+          <Text type="secondary">-</Text>
+        ),
+    },
+    {
+      title: '子任务 ID',
+      dataIndex: 'subTaskId',
+      key: 'subTaskId',
+      width: 88,
+      align: 'center',
+      // #196：不直接显示冗长 ID，仅提供「复制」按钮（点击复制完整 device_task id）；无 ID 时占位 -。
+      render: (v: string) =>
+        v ? (
+          <Text copyable={{ text: v, tooltips: ['复制子任务 ID', '已复制'] }} style={{ fontSize: 12 }}>
+            复制
+          </Text>
+        ) : (
+          <Text type="secondary" style={{ fontSize: 11 }}>
+            -
+          </Text>
+        ),
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      key: 'status',
+      width: 80,
+      render: (s: ExecStatus) => <Tag color={STATUS_META[s].color}>{STATUS_META[s].text}</Tag>,
+    },
     {
       title: 'PATH',
       dataIndex: 'path',
@@ -140,38 +179,24 @@ export default function ResultDetailModal({
       ),
     },
     {
-      title: '子任务 ID',
-      dataIndex: 'subTaskId',
-      key: 'subTaskId',
-      width: 200,
-      render: (v: string) => (
-        <Text code copyable={{ text: v }} style={{ fontSize: 11 }}>
-          {v.slice(0, 8)}…
-        </Text>
-      ),
-    },
-    {
-      title: '状态',
-      dataIndex: 'status',
-      key: 'status',
-      width: 88,
-      render: (s: ExecStatus) => <Tag color={STATUS_META[s].color}>{STATUS_META[s].text}</Tag>,
-    },
-    {
-      // 与单设备 CSV 口径统一：逐 path 状态旁展示读回值（成功）/ 故障原因（失败）。
-      title: '读回值 / 故障',
+      // MOD 行显下发值、LST 行显回读值；失败时显故障原因。值可能很长 → 截断 + 悬停看全 + 复制。
+      title: 'PATH 值',
       dataIndex: 'value',
       key: 'value',
-      ellipsis: true,
+      width: 220,
       render: (v: string) =>
         v ? (
-          <Text style={{ fontSize: 11, wordBreak: 'break-all' }}>{v}</Text>
+          <Text
+            copyable={{ text: v, tooltips: ['复制', '已复制'] }}
+            ellipsis={{ tooltip: v }}
+            style={{ fontSize: 11, maxWidth: 180 }}
+          >
+            {v}
+          </Text>
         ) : (
           <Text type="secondary">-</Text>
         ),
     },
-    { title: '下发', dataIndex: 'dispatchedAt', key: 'dispatchedAt', width: 80 },
-    { title: '响应', dataIndex: 'respondedAt', key: 'respondedAt', width: 80 },
   ];
 
   return (
@@ -229,6 +254,7 @@ export default function ResultDetailModal({
                           placement="bottomLeft"
                           title={`执行 PATH（${columns.length}）`}
                           content={
+                            // MOD 与 LST 同一样式：仅展示标签 + PATH（MOD 下发值在下方「PATH 列表」展示，不在此重复）。
                             <div style={{ maxHeight: 320, overflow: 'auto', maxWidth: 460 }}>
                               {columns.map((c) => (
                                 <div key={c.key} style={{ marginBottom: 6, lineHeight: 1.4 }}>
@@ -344,16 +370,16 @@ export default function ResultDetailModal({
             </div>
           )}
 
-          {/* 逐 PATH 子任务（§3.11.3：父任务 = 设备任务 ID） */}
+          {/* PATH 列表（#196：MOD 下发 + LST 回读前后对比） */}
           {row.pathTasks && row.pathTasks.length > 0 && (
             <div>
               <Text strong style={{ fontSize: 13 }}>
-                逐 PATH 子任务（父任务 = 设备任务 ID）
+                PATH 列表
               </Text>
               <div style={{ marginTop: 6 }}>
                 <Table<PathTask>
                   size="small"
-                  rowKey="subTaskId"
+                  rowKey={(t) => `${t.opType ?? ''}-${t.pathIndex}-${t.path}`}
                   columns={pathTaskColumns}
                   dataSource={row.pathTasks}
                   pagination={false}
@@ -363,13 +389,27 @@ export default function ResultDetailModal({
             </div>
           )}
 
-          {/* 结果报文：格式化 XML */}
+          {/* 结果报文：格式化 XML。#196：MOD 回读复合时分「MOD 响应 / 回读 LST 响应」两个页签。 */}
           <div>
             <Text strong style={{ fontSize: 13 }}>
               结果报文（格式化 XML）
             </Text>
             <div style={{ marginTop: 6 }}>
-              <XmlViewer xml={row.raw} maxHeight={300} />
+              {row.readbackRaw ? (
+                <Tabs
+                  size="small"
+                  items={[
+                    { key: 'mod', label: 'MOD 响应', children: <XmlViewer xml={row.raw} maxHeight={280} /> },
+                    {
+                      key: 'lst',
+                      label: '回读 LST 响应',
+                      children: <XmlViewer xml={row.readbackRaw} maxHeight={280} />,
+                    },
+                  ]}
+                />
+              ) : (
+                <XmlViewer xml={row.raw} maxHeight={300} />
+              )}
             </div>
           </div>
         </Space>

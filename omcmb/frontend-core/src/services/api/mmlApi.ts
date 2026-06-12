@@ -373,6 +373,7 @@ function mapTaskResultsStats(
 function mapBackendResult(br: Record<string, unknown>): DeviceTaskResultItem {
   return {
     deviceSn: (br.device_sn as string) || '',
+    deviceTaskId: (br.device_task_id as string) || undefined,
     commandIndex: typeof br.command_index === 'number' ? (br.command_index as number) : undefined,
     deviceName: (br.device_name as string) || undefined,
     mmlScript: (br.mml_script as string) || (br.command as string) || undefined,
@@ -432,6 +433,11 @@ function mapBackendTask(bt: BackendMMLTask): MMLTask {
           : undefined,
       paramPaths: paramPaths.length > 0 ? paramPaths : undefined,
       paramValues: Array.isArray(c.param_values) ? (c.param_values as unknown[]) : undefined,
+      // 裸路径/自定义 MOD 把下发值存于 parameters（path→value map），非 param_values 数组。
+      parameters:
+        c.parameters && typeof c.parameters === 'object'
+          ? (c.parameters as Record<string, unknown>)
+          : undefined,
     };
   });
 

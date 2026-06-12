@@ -93,6 +93,8 @@ export type DeviceResultStatus = 'completed' | 'running' | 'pending';
 
 export interface DeviceTaskResultItem {
   deviceSn: string;
+  /** device_tasks.id —— 子任务 ID（每条 RPC 一个；详情页「PATH 列表」复制用） */
+  deviceTaskId?: string;
   /** device_tasks.command_index —— 逐 PATH 模式下定位该条结果属于哪个 path（命令序号） */
   commandIndex?: number;
   deviceName?: string;
@@ -165,6 +167,11 @@ export interface MMLTaskCommandDetail {
   paramPaths?: string[];
   /** MOD 操作的下发值；与 paramPaths 同序对应 */
   paramValues?: unknown[];
+  /**
+   * MOD 下发值的 path→value 映射（裸路径/自定义命令通道存于此，而非 paramValues 数组）；
+   * 取下发值时优先 paramValues[i]，缺则回退 parameters[path]。
+   */
+  parameters?: Record<string, unknown>;
 }
 
 export interface MMLTask {

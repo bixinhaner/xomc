@@ -344,6 +344,30 @@ func TestBuildEntries_MOD_NoSubFieldMatch_OnlySPV(t *testing.T) {
 	assert.Equal(t, "SetParameterValues", entries[0]["rpc_method"])
 }
 
+// TestBuildRawReadbackLSTCommand — #196 raw/自定义命令通道 MOD 回读命令构造（GetParameterValues）。
+func TestBuildRawReadbackLSTCommand(t *testing.T) {
+	paths := []string{"Device.FAP.PerfMgmt.Config.1.URL", "Device.X.Y"}
+	cmd := buildRawReadbackLSTCommand(paths)
+	assert.Equal(t, "GetParameterValues", cmd["rpc_method"])
+	assert.Equal(t, "LST", cmd["operation_type"])
+	assert.Equal(t, "lst_after_mod", cmd["compound_phase"])
+	assert.Equal(t, paths, cmd["param_paths"])
+	refs := cmd["param_refs"].([]MMLParamRef)
+	require.Len(t, refs, 2)
+	assert.Equal(t, "Device.FAP.PerfMgmt.Config.1.URL", refs[0].Tr069Path)
+}
+
+// TestCommandsNeedSequential — 含 lst_after_mod 复合 → 需顺序执行（保证回读 LST 在 SPV 之后）。
+func TestCommandsNeedSequential(t *testing.T) {
+	assert.False(t, commandsNeedSequential([]map[string]interface{}{
+		{"rpc_method": "SetParameterValues"},
+	}), "纯 SPV 不需顺序")
+	assert.True(t, commandsNeedSequential([]map[string]interface{}{
+		{"rpc_method": "SetParameterValues"},
+		{"rpc_method": "GetParameterValues", "compound_phase": "lst_after_mod"},
+	}), "SPV + 回读 LST → 需顺序")
+}
+
 // TestSubstituteInstanceSelectorsForADDCompound — 三种 path/selectors 组合
 func TestSubstituteInstanceSelectorsForADDCompound(t *testing.T) {
 	cases := []struct {

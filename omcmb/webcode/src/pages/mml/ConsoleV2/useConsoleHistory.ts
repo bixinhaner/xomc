@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { mmlApi } from '@core/services/api/mmlApi';
 import type { ExecRecord } from './types';
-import { buildDeviceRows, mapTaskToRecord } from './adapters';
+import { buildDeviceRows, buildMODReadbackRows, mapTaskToRecord } from './adapters';
 
 /**
  * 命令记录数据层（设计 §3.10.4-5 + §3.11.4 + §3.12）。
@@ -108,10 +108,13 @@ export function useConsoleHistory(): ConsoleHistory {
     if (baseActiveRecord.rows.length > 0) return baseActiveRecord;
     const items = resultsQuery.data?.items;
     if (!items || items.length === 0) return baseActiveRecord;
-    return {
-      ...baseActiveRecord,
-      rows: buildDeviceRows(items, baseActiveRecord.columns, baseActiveRecord.execMeta.read),
-    };
+    // #196：MOD 自动回读复合 → 走「下发 vs 回读」关联视图（操作类型 / 前后对比 / 双报文），
+    // 与实时收口、历史摘要同一构建函数；其余命令按逐 PATH 合并。
+    const rows =
+      baseActiveRecord.execMeta.operationType === 'MOD' && baseActiveRecord.setValues
+        ? buildMODReadbackRows(items, baseActiveRecord.setValues)
+        : buildDeviceRows(items, baseActiveRecord.columns, baseActiveRecord.execMeta.read);
+    return { ...baseActiveRecord, rows };
   }, [baseActiveRecord, resultsQuery.data]);
 
   const append = useCallback((rec: ExecRecord) => {

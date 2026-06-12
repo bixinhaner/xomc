@@ -89,6 +89,8 @@ export interface PathTask {
   dispatchedAt: string;
   respondedAt: string;
   value: string;
+  /** #196：操作类型 MOD（下发）/ LST（回读），用于「PATH 列表」前后对比；纯逐 PATH 场景不填 */
+  opType?: 'MOD' | 'LST' | string;
 }
 
 /** 结果表格的一行（= 一台设备） */
@@ -111,8 +113,10 @@ export interface ResultRow {
   dispatchedAt?: string;
   /** RPC 任务执行响应时间 HH:mm:ss（= device_tasks.completed_at） */
   respondedAt?: string;
-  /** 原始报文（SSE 文本流备查） */
+  /** 原始报文（SSE 文本流备查；MOD 回读复合时 = MOD 下发响应报文） */
   raw: string;
+  /** #196：MOD 回读复合时的回读 LST 响应报文（GetParameterValuesResponse），用于详情页第二个报文页签 */
+  readbackRaw?: string;
   /** 耗时（ms） */
   elapsedMs: number;
 }
@@ -196,6 +200,11 @@ export interface ExecRecord {
   execMeta: ExecMeta;
   columns: ResultColumn[];
   rows: ResultRow[];
+  /**
+   * #196：MOD 下发值 path→value。MOD 命令后端自动追加回读 LST（compound）；跨刷新惰性补结果行时
+   * 据此走 buildMODReadbackRows 关联「下发 vs 回读」（而非逐 PATH 合并）。非 MOD 复合为空。
+   */
+  setValues?: Record<string, string>;
 }
 
 /** 导出格式 */
