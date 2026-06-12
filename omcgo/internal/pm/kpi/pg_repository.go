@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"time"
 
 	"github.com/Masterminds/squirrel"
@@ -62,9 +63,14 @@ func (r *PgKPIRepository) ReplaceForRecompute(ctx context.Context, oui, deviceSN
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	// 同范围并发重算串行化：advisory xact 锁键 = (oui|sn|cell|窗口) 的 64 位哈希（hashtextextended）。
-	lockKey := oui + "\x00" + deviceSN + "\x00" + cellID + "\x00" + endTime.UTC().Format(time.RFC3339Nano)
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, lockKey); err != nil {
+	// 同范围并发重算串行化：advisory xact 锁键 = (oui|sn|cell|窗口) 的 64 位哈希。
+	// 必须在 Go 侧哈希后传 int64 给 pg_advisory_xact_lock —— 不能把含 \x00 分隔符的锁键当
+	// text 参数交给 PG 的 hashtextextended，否则 PG 拒收 NUL 字节：
+	// invalid byte sequence for encoding "UTF8": 0x00 (SQLSTATE 22021)（device 级 cell="" 时必现）。
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(oui + "\x00" + deviceSN + "\x00" + cellID + "\x00" + endTime.UTC().Format(time.RFC3339Nano)))
+	lockKey := int64(h.Sum64())
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, lockKey); err != nil {
 		return fmt.Errorf("acquire recompute lock (sn=%s cell=%s): %w", deviceSN, cellID, err)
 	}
 
