@@ -71,9 +71,9 @@ func Test_GroupRunner_Run_CallsAggregateDeviceGroup(t *testing.T) {
 	assert.Equal(t, "pm_metrics_hourly", resultMap["device_target"])
 	assert.Equal(t, "pm_group_metrics_hourly", resultMap["group_target"])
 
-	// 底层 Exec SQL 应是 device_group 聚合（含 JOIN device_group_members）
+	// 底层 Exec SQL 应是 device_group 聚合（含 JOIN device_group_member_dim 影子表）
 	assert.Contains(t, db.execSQL, "INSERT INTO pm_group_metrics_hourly")
-	assert.Contains(t, db.execSQL, "JOIN device_group_members")
+	assert.Contains(t, db.execSQL, "JOIN device_group_member_dim")
 }
 
 func Test_GroupRunner_Run_RejectsMissingPayload(t *testing.T) {

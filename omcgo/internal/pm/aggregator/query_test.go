@@ -129,8 +129,8 @@ func Test_applyCommonFilters_TechnologyDeviceSubquery_Unaffected(t *testing.T) {
 	qb := storage.Psql.Select("metric_path").From("pm_metrics_hourly")
 	sql, args, err := applyCommonFilters(qb, q).ToSql()
 	require.NoError(t, err)
-	// 设备维度表仍走设备编号子查询筛制式（保持原样）
-	assert.Contains(t, sql, "(device_oui, device_sn) IN (SELECT oui, serial_number FROM devices WHERE technology = ANY(")
+	// 设备维度表仍走设备编号子查询筛制式（跨库分离后改读本库影子表 device_dim）
+	assert.Contains(t, sql, "(device_oui, device_sn) IN (SELECT oui, serial_number FROM device_dim WHERE technology = ANY(")
 	// 制式作为整切片传 ANY(?) 占位参数
 	assert.Contains(t, args, []string{"nr"})
 }
@@ -144,7 +144,7 @@ func Test_applyDeviceFilters_TechnologyDeviceSubquery_Unaffected(t *testing.T) {
 	qb := storage.Psql.Select("metric_path").From("pm_metrics_hourly")
 	sql, _, err := applyDeviceFilters(qb, q).ToSql()
 	require.NoError(t, err)
-	assert.Contains(t, sql, "(device_oui, device_sn) IN (SELECT oui, serial_number FROM devices WHERE technology = ANY(")
+	assert.Contains(t, sql, "(device_oui, device_sn) IN (SELECT oui, serial_number FROM device_dim WHERE technology = ANY(")
 }
 
 // #64 设备维度可见分组：applyCommonFilters 按 device_sn 两层子查询 fail-closed 收口。

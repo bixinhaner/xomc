@@ -165,6 +165,8 @@ func validACSConfig() ACSConfig {
 		Session: SessionConfig{Timeout: 5 * time.Minute, MaxConcurrent: 5000},
 		Auth:    AuthConfig{Mode: "digest"},
 		DB:      PostgresConfig{DSN: "postgres://user:pass@localhost:5432/omcgo", MaxConns: 10},
+		// KPI/时序库物理分离：ACS 写 trace_messages（已迁时序库），tsdb 池现为必填。
+		TSDB:    PostgresConfig{DSN: "postgres://user:pass@localhost:5433/omcgo_ts", MaxConns: 5},
 		Redis:   RedisConfig{Addrs: []string{"localhost:6379"}},
 		Log:     LogConfig{Level: "info", Format: "json"},
 		Metrics: MetricsConfig{Port: 9091},

@@ -2,29 +2,64 @@
 
 迁移工具：[`pressly/goose/v3`](https://github.com/pressly/goose)。版本号记录在数据库 `goose_db_version`（DDL）和 `goose_db_version_seed`（DML）两个表中，由 `cmd/migrate` 包装执行。
 
-## 当前状态：consolidated baseline（2026-05-31）
+## 当前状态：consolidated baseline（2026-06-12，KPI/时序库物理分离后重新合并）
 
-历史上累积了 **185 个 schema 迁移 + 92 个 seed 迁移**（版本号从 000001 一路跳到 000219），版本号断层、命名风格不一、累积 SQL 体量大。本次重置后只有两个 baseline 文件：
+KPI/时序库物理分离落地后，对**三条流各做一次干净的 consolidated baseline**（把分离引入的全部增量折叠进基线，作全新部署使用，不背历史版本号包袱）。现在**每条流各一个 baseline 文件，共 3 个**：
 
-| 文件 | 大小 | 说明 |
-|------|------|------|
-| `000001_init_schema.sql` | ~580 KB | 全量表结构（206 张 public 表、6 个扩展、73 个触发器、若干函数、7 个 TimescaleDB hypertable + 5 个压缩策略） |
-| `seed/000001_init_seed.sql` | ~17 MB | 全量种子数据（admin/角色/菜单/权限 + MML 字典 + standard_params + seed devices + zambia 2000 devices + 学习到的 param mappings + indicator definitions + license/northbound 默认） |
+| 文件 | 目标库 | 说明 |
+|------|--------|------|
+| `000001_init_schema.sql` | 主库（PgPool）| 全量业务表结构（195 张 public 表 + pgcrypto/uuid-ossp/pg_trgm/ltree 等扩展 + 触发器/函数）。**纯 PostgreSQL 16，不含 timescaledb、无任何超表**——由全量迁移后的库 `pg_dump --schema-only` 生成（函数块已包 goose `StatementBegin/End`）。 |
+| `seed/000001_init_seed.sql` | 主库（PgPool）| 全量内置参考数据（admin/角色/菜单/权限 + 字典 + sys_configs + standard_params…）。由干净 schema+seed 库 `pg_dump --data-only --inserts` 生成（**不含运行期 dictloader 加载的 perf_indicators 等**）。 |
+| `tsdb/000001_tsdb_schema.sql` | 时序库（TsPool / postgres-tsdb）| 见下「双流」。 |
 
-旧的 277 个迁移文件归档在 `omcgo/migrations.backup-20260531/`（已 gitignore，仅本地保留，可随时回滚）。
+> 验证：三流在全新双实例 `goose up` 全绿；consolidated 主库 schema/seed 与「分离前多文件迁移」逐表行数完全一致（195 表 diff=0）。主库镜像随之从 `timescale/timescaledb` 改为 `postgres:16-alpine`。
+
+## 双流：主库（main）+ 时序库（tsdb）物理分离
+
+> KPI/时序库物理分离后，迁移分两条物理目标库的流，互不交叉。
+
+OMC 现在跑**两个 PostgreSQL/TimescaleDB 实例**：
+
+- **主库**（`postgres` / PgPool，镜像 `postgres:16-alpine`）—— 业务数据（devices、RBAC、config、products、device_groups、alarm_definitions、`alarms`[当前告警]、pm_tasks、pm_summary、mr_files…）。**纯 PostgreSQL 16，无 timescaledb 扩展、无任何超表**（分离后主库不再需要）。
+- **时序库**（`postgres-tsdb` / TsPool）—— 14 张时序/PM 表（`pm_metrics`+4 rollup、`pm_group_metrics_*` 4、`pm_adhoc_aggregation_results`、`alarms_history`、`mr_records`、`trace_messages`、`pm_files`）+ 6 张「影子维度表」（`device_dim`/`device_group_member_dim`/`cell_band_dim`/`product_dim`/`device_group_dim`/`alarm_definition_dim`，由 worker `tsdbsync` 从主库同步，供本库 JOIN 替代跨库 JOIN）+ 1 个告警效率物化视图 `alarm_efficiency_metrics`。
+
+| 流 | 目录 | 版本表 | compose 服务 | DSN |
+|----|------|--------|--------------|-----|
+| 主库 schema | `migrations/*.sql` | `goose_db_version` | `migrate-schema` | `postgres` |
+| 主库 seed | `migrations/seed/*.sql` | `goose_db_version_seed` | `migrate-seed` | `postgres` |
+| 时序库 schema | `migrations/tsdb/*.sql` | `goose_db_version_tsdb` | `migrate-tsdb-schema` | `postgres-tsdb` |
+
+要点：
+
+1. **主库 `000001_init_schema.sql`**（consolidated）—— 纯业务 schema，**不含上述 14 张时序表、不含 timescaledb 扩展**。由分离后的全量迁移库 `pg_dump` 生成并折叠了分离引入的全部 schema 增量，故已无 `SELECT 1;` 空操作残留。
+2. **主库 `seed/000001_init_seed.sql`**（consolidated）—— 纯内置参考数据，**不含 `_timescaledb_catalog` 注册块、不含 kpi_definitions（已随表迁时序库）、不含运行期 dictloader 数据**。由干净 schema+seed 库 `--data-only --inserts` 生成。
+3. **时序库 `tsdb/000001_tsdb_schema.sql`** 用**显式 DDL** 还原 14 张表的**最终形态**（= 主库 000001 原定义叠加上述增量净效果）+ 显式 `create_hypertable`（**`pm_metrics` chunk 间隔 `INTERVAL '4 hours'`，修 B0**；其余还原自原 seed catalog 的 `dimension.interval_length`）+ 压缩策略（原 5 张）+ 保留策略（原 7 张）+ 6 张影子维度表 + `alarm_efficiency_metrics` matview（含支持 `REFRESH CONCURRENTLY` 的唯一索引）。不再依赖 seed 的 pg_restore catalog 注入。
+
+各超表的 chunk/压缩/保留参数（还原自原 seed `_timescaledb_catalog`）：
+
+| 超表 | chunk 间隔 | compress_after | drop_after（retention）|
+|------|-----------|----------------|------------------------|
+| `pm_metrics` | **4 hours**（修 B0；原 seed 为 1 day）| 7 days | 30 days |
+| `pm_metrics_hourly` | 7 days | 14 days | 180 days |
+| `pm_group_metrics_hourly` | 7 days | 14 days | 180 days |
+| `pm_adhoc_aggregation_results` | 30 days | 90 days | 365 days |
+| `mr_records` | 1 day | 7 days | 90 days |
+| `alarms_history` | 7 days | （无压缩）| 365 days |
+| `trace_messages`（按 `captured_at` 分区）| 1 day | （无压缩）| 3 days |
 
 ## 新增迁移的版本号规则（版本号分配约定 · #24）
 
-### 两条独立版本序列（边界）
+### 三条独立版本序列（边界）
 
-schema 与 seed 是**两条相互独立的 goose 版本序列**，各自记录在不同的版本表，**不共享号段**：
+schema、seed 与 tsdb 是**三条相互独立的 goose 版本序列**，各自记录在不同的版本表，**不共享号段**：
 
-| 序列 | 目录 | goose 版本表 | 执行服务 |
-|------|------|--------------|----------|
-| schema（DDL）| `migrations/*.sql` | `goose_db_version` | compose `migrate-schema` |
-| seed（DML）| `migrations/seed/*.sql` | `goose_db_version_seed` | compose `migrate-seed` |
+| 序列 | 目录 | goose 版本表 | 执行服务 | 目标库 |
+|------|------|--------------|----------|--------|
+| schema（DDL）| `migrations/*.sql` | `goose_db_version` | compose `migrate-schema` | 主库（PgPool）|
+| seed（DML）| `migrations/seed/*.sql` | `goose_db_version_seed` | compose `migrate-seed` | 主库（PgPool）|
+| tsdb（时序 DDL）| `migrations/tsdb/*.sql` | `goose_db_version_tsdb` | compose `migrate-tsdb-schema` | 时序库（TsPool / postgres-tsdb）|
 
-因此 `000001` 在两边各出现一次是**正常的**（不是撞号）——`ls ... | sort | uniq -d` 查撞号时必须分目录各查一遍，**不要把两个目录的文件名合并去重**（合并会把 `000001`/`000002` 等误报成重复）。
+因此 `000001` 在三处各出现一次是**正常的**（不是撞号）——`ls ... | sort | uniq -d` 查撞号时必须分目录各查一遍，**不要把目录的文件名合并去重**（合并会把 `000001`/`000002` 等误报成重复）。
 
 ### 分配规则
 

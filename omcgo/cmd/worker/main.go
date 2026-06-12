@@ -41,6 +41,7 @@ import (
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/internal/trace"
 	"github.com/omcgo/omcgo/internal/transfer"
+	"github.com/omcgo/omcgo/internal/tsdbsync"
 	"github.com/robfig/cron/v3"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
@@ -158,7 +159,8 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 
 	kpiEngine := kpi.NewKPIEngine(counterRepo, kpiRepo, pmKPIRouter, logger)
 	pmParser := collector.NewPMXMLParser()
-	pmFileStore := pm.NewPgPMFileStore(w.PgPool)
+	// KPI/时序库物理分离：pm_files 已迁时序库（与 pm_metrics 同库保 copy_ingest 原子性），文件存储走 TsPool。
+	pmFileStore := pm.NewPgPMFileStore(w.TsPool)
 	pmCollector := collector.NewPMCollector(w.MinIO, cfg.MinIO.Buckets.PMFiles, pmParser, kpiEngine, pmFileStore, w.EventBus, logger)
 	pmMetrics := pm.NewPMMetrics(w.MetricsReg)
 	pmCollector.SetMetrics(pmMetrics)
@@ -200,7 +202,8 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	// PM 入库统一走 copy-direct 写模式：单事务 plain COPY 原子入库（pm_files 标记 + counter + 内存
 	// 算出的 KPI），幂等下沉到每文件一次 pm_files 唯一约束 + 文件内 last-wins 去重。migration 000042
 	// 删 uq_pm_metrics_natural 后无索引可供 ON CONFLICT，upsert 写模式已退役，copy 是唯一写路径。
-	pmCollector.SetCopyIngestor(pmmetrics.NewPgRepository(w.PgPool))
+	// KPI/时序库物理分离：pm_metrics + pm_files 同在时序库（TsPool），单事务 copy 原子入库。
+	pmCollector.SetCopyIngestor(pmmetrics.NewPgRepository(w.TsPool))
 
 	// copy 是唯一写路径，KPI 恒用当前文件内存 counter 计算（CalculateFromCounters）；
 	// pm_kpi_window_from_db 的 DB 回读分支已随非 copy 旁路退役。仍配 true 时明确告警，避免运营误以为生效。
@@ -416,7 +419,8 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	// T-0137 / M2: TR069 报文跟踪 capture 消费者 + 超时巡检 + purge 处理。
 	// JetStream WorkQueuePolicy 群组消费 trace.message.captured，批量去抖动后写 trace_messages。
 	// 多 worker 实例靠 QueueSubscribe 自动负载均衡互不重复。
-	traceRepo := trace.NewPgRepository(w.PgPool)
+	// KPI/时序库物理分离：trace_messages 已迁时序库（TsPool），retention 超表。
+	traceRepo := trace.NewPgRepository(w.TsPool)
 	var traceBulk *trace.BulkStore
 	if w.MinIO != nil && cfg.MinIO.Buckets.TraceBulk != "" {
 		traceBulk = trace.NewBulkStore(w.MinIO, cfg.MinIO.Buckets.TraceBulk)
@@ -569,6 +573,24 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	// 删 mode='oneshot' 且 is_builtin=false 且 created_at < now()-expire_days 天 的任务定义行；
 	// 只删 pm_tasks 行,绝不碰结果表 pm_adhoc_aggregation_results(两层口径分离,设计 §2.3)。
 	startPMAdhocExpireCleanup(w, logger)
+
+	// KPI/时序库物理分离：worker 把主库维度表周期刷入时序库影子维度表，
+	// 供 PM/告警时序查询本库 JOIN（device_dim / cell_band_dim / product_dim 等），
+	// 替代跨库 JOIN。仅 worker 跑同步，app 只读影子表。默认 60s 周期。
+	// 用可取消 ctx + GS 钩子接入优雅关机（ctx.Done 时 Run 退出循环）。
+	if w.TsPool != nil {
+		syncCtx, syncCancel := context.WithCancel(context.Background())
+		syncRunner := tsdbsync.NewSyncRunner(w.PgPool, w.TsPool, tsdbsync.DefaultInterval, logger)
+		go syncRunner.Run(syncCtx)
+		w.GS.Register("tsdb-shadow-dim-sync", 5, func(ctx context.Context) error {
+			syncCancel()
+			return nil
+		})
+		logger.Info("tsdb shadow-dim sync started",
+			zap.Duration("interval", tsdbsync.DefaultInterval))
+	} else {
+		logger.Warn("tsdb shadow-dim sync disabled: TsPool not connected")
+	}
 }
 
 // startPMAdhocExpireCleanup 启动 T-0184 adhoc 过期任务定义清理 cron。

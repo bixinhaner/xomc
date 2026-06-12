@@ -62,7 +62,8 @@ func TestHistoryStatsBaseEmptyFilterHasNoWhere(t *testing.T) {
 
 	assert.NotContains(t, strings.ToUpper(sql), "WHERE", "空 filter 不应产生 WHERE 子句")
 	assert.Empty(t, args)
-	assert.Contains(t, sql, "LEFT JOIN devices d ON d.id = alarms_history.device_id")
+	// alarms_history 已迁时序库，JOIN 改本库影子表 device_dim（KPI/时序库物理分离）。
+	assert.Contains(t, sql, "LEFT JOIN device_dim d ON d.id = alarms_history.device_id")
 }
 
 func TestHistoryStatsBaseWithFilterAppendsWhere(t *testing.T) {

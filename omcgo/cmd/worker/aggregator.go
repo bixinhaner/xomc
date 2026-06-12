@@ -107,18 +107,21 @@ func startPMAggregatorPipeline(
 
 	// 2c) 注册 KPI-EXPORT 导出处理器（job_type=pm_kpi_export）。
 	// T2 真生成：载任务 → running → 按 source_type 取数 → 流式写 CSV 直传对象存储 → 回填 succeeded。
-	//   - metricDB = TsPool（PM 指标超表，dashboard device 维度直查 + 指标名解析）
-	//   - adhocDB  = PgPool（pm_adhoc_aggregation_results 直查）
+	// KPI/时序库物理分离后池路由：
+	//   - metricDB   = TsPool（PM 指标超表 pm_metrics*，dashboard device 维度直查 + 指标名解析）
+	//   - adhocDB    = TsPool（pm_adhoc_aggregation_results 已迁时序库，直查 + 指标名解析）
+	//   - taskMetaDB = PgPool（pm_tasks 留主库，loadAdhocDimension 取 adhoc 任务维度/设备数）
 	//   - aggr 复用上面的 device 级聚合查询入口（dashboard 聚合维度 + KPI 反算）
 	//   - bucket 复用报表桶（设计 §5.6）
 	exportRunner := pmexport.NewRunner(pmexport.RunnerDeps{
-		Repo:     pmexport.NewPgRepository(w.PgPool),
-		Aggr:     aggr,
-		MetricDB: w.TsPool,
-		AdhocDB:  w.PgPool,
-		Uploader: w.MinIO,
-		Bucket:   exportBucket,
-		Logger:   logger,
+		Repo:       pmexport.NewPgRepository(w.PgPool),
+		Aggr:       aggr,
+		MetricDB:   w.TsPool,
+		AdhocDB:    w.TsPool,
+		TaskMetaDB: w.PgPool,
+		Uploader:   w.MinIO,
+		Bucket:     exportBucket,
+		Logger:     logger,
 	})
 	registry.Register(exportRunner)
 	logger.Info("registered pm kpi export runner (T2)",

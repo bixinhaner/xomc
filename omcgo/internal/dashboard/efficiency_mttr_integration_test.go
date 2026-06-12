@@ -34,8 +34,11 @@ func setupMTTRTestService(t *testing.T) *Service {
 	}
 	t.Cleanup(pool.Close)
 
+	// KPI/时序库分离后效率指标查询走 tsPool；单 DSN 集成测试里 alarms_history
+	// 与业务表同库，两池都指向同一连接即可保持测试语义。
 	return &Service{
 		pgPool: pool,
+		tsPool: pool,
 		logger: zap.NewNop(),
 	}
 }

@@ -12,8 +12,8 @@ import (
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
 
-// SQL 文本断言：device_group 维度聚合 SQL 必须 JOIN devices + device_group_members，
-// SELECT 列 + ON CONFLICT 含 device_group_id。
+// SQL 文本断言：device_group 维度聚合 SQL 必须 JOIN device_dim + device_group_member_dim
+// （KPI/时序库物理分离后用本库影子表），SELECT 列 + ON CONFLICT 含 device_group_id。
 
 func Test_buildDeviceGroupSQL_HourlyGroupTableHasIDAndJoins(t *testing.T) {
 	w := WindowSpec{
@@ -23,9 +23,9 @@ func Test_buildDeviceGroupSQL_HourlyGroupTableHasIDAndJoins(t *testing.T) {
 	}
 	sql, args := buildDeviceGroupSQL("pm_metrics_hourly", "pm_group_metrics_hourly", w)
 
-	// 双 JOIN
-	assert.Contains(t, sql, "JOIN devices d")
-	assert.Contains(t, sql, "JOIN device_group_members dgm")
+	// 双 JOIN（影子表）
+	assert.Contains(t, sql, "JOIN device_dim d")
+	assert.Contains(t, sql, "JOIN device_group_member_dim dgm")
 	assert.Contains(t, sql, "ON d.oui = m.device_oui AND d.serial_number = m.device_sn")
 	assert.Contains(t, sql, "ON dgm.device_id = d.id")
 
@@ -75,6 +75,6 @@ func Test_AggregateDeviceGroup_PassesThroughToExec(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 2, n)
 	assert.Contains(t, db.execSQL, "INSERT INTO pm_group_metrics_hourly")
-	assert.Contains(t, db.execSQL, "JOIN device_group_members dgm")
+	assert.Contains(t, db.execSQL, "JOIN device_group_member_dim dgm")
 	assert.Equal(t, []any{"hourly", w.Start, w.End, w.Start, w.End}, db.execArgs)
 }

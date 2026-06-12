@@ -62,6 +62,39 @@ receivers:
       postgresql.index.scans:
         enabled: false
 
+  # ─── Metrics: PostgreSQL（时序库实例 postgres-tsdb / TsPool）────────
+  # KPI/时序库物理分离后第二个 PG 实例。指标名与主库 receiver 完全相同
+  # （pg_* 别名），若不加区分 label 会与主库的同 series 碰撞成 Prometheus
+  # "duplicate sample for timestamp"（HTTP 400）。本 receiver 走独立的
+  # metrics/tsdb pipeline，由 resource/metrics_tsdb 打 instance=postgres-tsdb
+  # 区分（主库由 resource/metrics 打 instance=postgres）。
+  postgresql/tsdb:
+    endpoint: postgres-tsdb:5432
+    transport: tcp
+    username: omcgo
+    password: omcgo123
+    databases: [omcgo]
+    collection_interval: 30s
+    tls:
+      insecure: true
+    metrics:
+      postgresql.database.locks:
+        enabled: true
+      postgresql.deadlocks:
+        enabled: true
+      postgresql.sequential_scans:
+        enabled: true
+      postgresql.wal.age:
+        enabled: true
+      postgresql.wal.lag:
+        enabled: true
+      postgresql.wal.delay:
+        enabled: true
+      postgresql.index.size:
+        enabled: false
+      postgresql.index.scans:
+        enabled: false
+
   # ─── Metrics: Redis ───────────────────────────────────────────────
   redis:
     endpoint: redis:6379
@@ -183,12 +216,32 @@ processors:
         value: omcgo-dev
         action: upsert
 
-  # metrics 流加 service / cluster label，与原 exporter 标签对齐
+  # metrics 流加 service / cluster label，与原 exporter 标签对齐。
   resource/metrics:
     attributes:
       - key: cluster
         value: omcgo-dev
         action: upsert
+
+  # transform/pg_instance_main：给主库 postgres 的 pg_* 指标补 DATAPOINT
+  # 属性 instance=postgres。必须设在 datapoint 维度而非 resource —— 因为
+  # prometheusremotewrite 默认只把 semconv 标准 resource attrs 转 label，
+  # 其余 resource attrs 全丢（同 transform/promote_pg_resource 的处理）；
+  # datapoint attribute 则会被无条件转成 label。
+  transform/pg_instance_main:
+    metric_statements:
+      - context: datapoint
+        statements:
+          - set(attributes["instance"], "postgres")
+
+  # transform/pg_instance_tsdb：给时序库 postgres-tsdb 的 pg_* 指标补
+  # DATAPOINT 属性 instance=postgres-tsdb，与主库区分防 "duplicate sample
+  # for timestamp"（两实例同名 series 碰撞 → Prometheus HTTP 400）。
+  transform/pg_instance_tsdb:
+    metric_statements:
+      - context: datapoint
+        statements:
+          - set(attributes["instance"], "postgres-tsdb")
 
   # transform/promote_resource：把 receiver 设置在 RESOURCE 维度的 PG 维度
   # 属性（database / table / index）下沉为 DATAPOINT 属性。
@@ -337,9 +390,23 @@ service:
       processors: [memory_limiter, batch, resource/traces]
       exporters: [otlp/tempo]
 
+    # Redis 指标：单独管道，不打 pg instance label。
     metrics:
-      receivers: [postgresql, redis]
-      processors: [memory_limiter, transform/promote_pg_resource, metricstransform, resource/metrics, batch]
+      receivers: [redis]
+      processors: [memory_limiter, metricstransform, resource/metrics, batch]
+      exporters: [prometheusremotewrite]
+
+    # 主库 postgres 指标：promote pg resource → datapoint，补 instance=postgres。
+    metrics/pg:
+      receivers: [postgresql]
+      processors: [memory_limiter, transform/promote_pg_resource, transform/pg_instance_main, metricstransform, resource/metrics, batch]
+      exporters: [prometheusremotewrite]
+
+    # 时序库 postgres-tsdb 指标：同主库管道但 instance=postgres-tsdb 区分，
+    # 防两实例同名 series 碰撞（duplicate sample for timestamp）。
+    metrics/tsdb:
+      receivers: [postgresql/tsdb]
+      processors: [memory_limiter, transform/promote_pg_resource, transform/pg_instance_tsdb, metricstransform, resource/metrics, batch]
       exporters: [prometheusremotewrite]
 
     # Logs pipeline（Phase 3 — Promtail 下线后由本管道承担）

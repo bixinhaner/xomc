@@ -17,7 +17,7 @@ func Test_buildFilterOptionsQuery_Product(t *testing.T) {
 
 	assert.True(t, supported)
 	assert.Contains(t, q, "SELECT DISTINCT r.product_id, p.product_name")
-	assert.Contains(t, q, "LEFT JOIN products p ON p.id = r.product_id")
+	assert.Contains(t, q, "LEFT JOIN product_dim p ON p.id = r.product_id")
 	assert.Contains(t, q, "WHERE r.task_id = $1")
 	assert.Contains(t, q, "r.product_id IS NOT NULL")
 	// 验收 4：选项不被结果上限截断 —— SQL 不含 LIMIT/OFFSET
@@ -34,7 +34,7 @@ func Test_buildFilterOptionsQuery_DeviceGroup(t *testing.T) {
 	assert.True(t, supported)
 	assert.Contains(t, q, "SELECT DISTINCT r.object_ldn, g.name")
 	// 设备组制式治本：object_ldn 带 ',Tech=<制式>' 后缀，取组名 JOIN 需 split_part 剥逗号前段。
-	assert.Contains(t, q, "LEFT JOIN device_groups g ON ('DeviceGroup=' || g.id::text) = split_part(r.object_ldn, ',', 1)")
+	assert.Contains(t, q, "LEFT JOIN device_group_dim g ON ('DeviceGroup=' || g.id::text) = split_part(r.object_ldn, ',', 1)")
 	assert.Contains(t, q, "r.object_ldn LIKE 'DeviceGroup=%'")
 	assert.NotContains(t, q, "LIMIT")
 	assert.NotContains(t, q, "OFFSET")

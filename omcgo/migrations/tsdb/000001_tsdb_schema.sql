@@ -1,0 +1,764 @@
+-- +goose Up
+-- =====================================================================================
+-- TimescaleDB 时序库 schema baseline（KPI/时序库物理分离，goose 版本表 goose_db_version_tsdb）
+--
+-- 本文件建立第二个 TimescaleDB 实例（TsPool / postgres-tsdb）的全部时序对象，承载 14 张
+-- 从主库迁出的表（§契约 1A）+ 6 张影子维度表（§契约 1B，从主库同步供本库 JOIN）+ 1 个
+-- 告警效率物化视图（原在 seed，建在 alarms_history 上）。
+--
+-- 14 张表的「最终形态」= 主库 000001 原始定义 叠加 这些增量的净效果：
+--   - pm_metrics：去掉随机 uuid 主键 pm_metrics_pkey（000044）+ 去掉自然键唯一索引
+--     uq_pm_metrics_natural（000042）+ 去掉 idx_pm_metrics_ingest_time / idx_pm_metrics_object_ldn
+--     （000043）+ 带 insert-triggered autovacuum reloptions（000044）；chunk 间隔 4 小时（000045，修 B0）。
+--   - pm_metrics_{hourly,daily,weekly,monthly}：object_ldn 收紧 NOT NULL DEFAULT ''、键尾追加
+--     object_ldn（000020）。
+--   - pm_group_metrics_{hourly,daily,weekly,monthly}：带 technology NOT NULL 列、键尾追加 technology（000026）。
+--   - pm_adhoc_aggregation_results：带可空 product_id 列（000005）+ 业务去重唯一索引
+--     uq_pm_adhoc_results_business（000018）。
+--
+-- 超表 chunk 间隔 / 压缩 / 保留参数还原自 seed 的 _timescaledb_catalog（dimension.interval_length /
+-- bgw_job policy_compression/policy_retention / compression_settings），µs→人类可读换算见各处注释。
+-- =====================================================================================
+
+CREATE EXTENSION IF NOT EXISTS timescaledb;
+
+-- =====================================================================================
+-- 1. 14 张时序/PM 表（最终形态）
+-- =====================================================================================
+
+-- ── alarms_history（超表：time 7d chunk，retention 365d，无压缩）─────────────────────
+CREATE TABLE public.alarms_history (
+    "time" timestamp with time zone NOT NULL,
+    alarm_id uuid NOT NULL,
+    device_id uuid NOT NULL,
+    device_sn character varying(64) NOT NULL,
+    carrier character varying(4) NOT NULL,
+    severity smallint NOT NULL,
+    alarm_type character varying(64),
+    alarm_identifier character varying(64) NOT NULL,
+    description text,
+    status character varying(16) NOT NULL,
+    raised_at timestamp with time zone NOT NULL,
+    acknowledged_at timestamp with time zone,
+    cleared_at timestamp with time zone,
+    device_name character varying(128),
+    technology character varying(16),
+    alarm_source character varying(64),
+    event_type character varying(64),
+    network_location text,
+    explicit_cause text,
+    ack_count integer DEFAULT 0 NOT NULL,
+    acknowledged_by character varying(128),
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    ack_note text DEFAULT ''::text,
+    cleared_by character varying(128),
+    clear_note text DEFAULT ''::text,
+    probable_cause text DEFAULT ''::text NOT NULL,
+    additional_info jsonb DEFAULT '{}'::jsonb
+);
+
+-- ── mr_records（超表：time 1d chunk，compress 7d，retention 90d）──────────────────────
+CREATE TABLE public.mr_records (
+    "time" timestamp with time zone NOT NULL,
+    file_id uuid NOT NULL,
+    device_id uuid NOT NULL,
+    cell_id character varying(32) DEFAULT ''::character varying NOT NULL,
+    mr_type character varying(8) NOT NULL,
+    measurement_data jsonb DEFAULT '{}'::jsonb NOT NULL
+);
+
+-- ── trace_messages（超表：captured_at 1d chunk，retention 3d，无压缩）──────────────────
+CREATE TABLE public.trace_messages (
+    captured_at timestamp with time zone NOT NULL,
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    task_id uuid NOT NULL,
+    device_sn character varying(64) NOT NULL,
+    direction character varying(8) NOT NULL,
+    rpc_method character varying(64),
+    cwmp_id character varying(64),
+    session_id character varying(64),
+    http_status smallint,
+    payload_size_bytes integer DEFAULT 0 NOT NULL,
+    payload_inline text,
+    payload_object_key character varying(512),
+    CONSTRAINT trace_messages_direction_check CHECK (((direction)::text = ANY ((ARRAY['in'::character varying, 'out'::character varying])::text[])))
+);
+
+-- ── pm_files（普通表；pm_metrics 同库保住 copy_ingest 单事务原子性）────────────────────
+CREATE TABLE public.pm_files (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    device_id uuid NOT NULL,
+    device_sn character varying(128) NOT NULL,
+    carrier character varying(16) NOT NULL,
+    technology character varying(16) NOT NULL,
+    file_name character varying(512) NOT NULL,
+    file_size bigint DEFAULT 0,
+    collect_time timestamp with time zone,
+    minio_path character varying(1024) NOT NULL,
+    parsed boolean DEFAULT false,
+    parsed_at timestamp with time zone,
+    counter_count integer DEFAULT 0,
+    created_at timestamp with time zone DEFAULT now(),
+    CONSTRAINT pm_files_pkey PRIMARY KEY (id),
+    CONSTRAINT uq_pm_files_device_filename UNIQUE (device_sn, file_name)
+);
+CREATE INDEX idx_pm_files_created ON public.pm_files USING btree (created_at DESC);
+CREATE INDEX idx_pm_files_device ON public.pm_files USING btree (device_id);
+
+-- ── pm_metrics（超表：time 4h chunk[修 B0]，compress 7d，retention 30d；无主键/无自然唯一）──
+-- 最终形态：无 pm_metrics_pkey（000044）、无 uq_pm_metrics_natural（000042）、无 ingest_time/
+-- object_ldn 索引（000043）；带 insert-triggered autovacuum reloptions（000044）。
+CREATE TABLE public.pm_metrics (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    device_oui text NOT NULL,
+    device_sn text NOT NULL,
+    metric_path text NOT NULL,
+    metric_type text NOT NULL,
+    metric_value double precision NOT NULL,
+    statis_type text,
+    granularity text NOT NULL,
+    "time" timestamp with time zone NOT NULL,
+    start_time timestamp with time zone NOT NULL,
+    end_time timestamp with time zone NOT NULL,
+    ingest_time timestamp with time zone DEFAULT now() NOT NULL,
+    object_ldn text DEFAULT ''::text NOT NULL,
+    extra jsonb,
+    CONSTRAINT pm_metrics_granularity_check CHECK ((granularity = ANY (ARRAY['15min'::text, 'hourly'::text, 'daily'::text, 'weekly'::text, 'monthly'::text]))),
+    CONSTRAINT pm_metrics_metric_type_check CHECK ((metric_type = ANY (ARRAY['counter'::text, 'kpi'::text]))),
+    CONSTRAINT pm_metrics_statis_type_check CHECK (((statis_type IS NULL) OR (statis_type = ANY (ARRAY['sum'::text, 'avg'::text, 'max'::text, 'min'::text, 'pct'::text]))))
+);
+-- 读路径索引（device_time / path_time / time）；保留，均不依赖已删的主键/自然唯一索引。
+CREATE INDEX idx_pm_metrics_device_time ON public.pm_metrics USING btree (device_oui, device_sn, "time" DESC);
+CREATE INDEX idx_pm_metrics_path_time ON public.pm_metrics USING btree (metric_path, "time" DESC);
+CREATE INDEX pm_metrics_time_idx ON public.pm_metrics USING btree ("time" DESC);
+
+-- ── pm_metrics_hourly（超表：time 7d chunk，compress 14d，retention 180d；pkey(id,time)）──
+-- 最终形态：object_ldn NOT NULL DEFAULT ''；自然唯一索引尾部含 object_ldn（000020）。
+CREATE TABLE public.pm_metrics_hourly (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    device_oui text NOT NULL,
+    device_sn text NOT NULL,
+    metric_path text NOT NULL,
+    metric_type text NOT NULL,
+    metric_value double precision NOT NULL,
+    statis_type text,
+    granularity text NOT NULL,
+    "time" timestamp with time zone NOT NULL,
+    start_time timestamp with time zone NOT NULL,
+    end_time timestamp with time zone NOT NULL,
+    ingest_time timestamp with time zone DEFAULT now() NOT NULL,
+    object_ldn text DEFAULT ''::text NOT NULL,
+    extra jsonb,
+    CONSTRAINT pm_metrics_hourly_pkey PRIMARY KEY (id, "time"),
+    CONSTRAINT pm_metrics_hourly_granularity_check CHECK ((granularity = ANY (ARRAY['15min'::text, 'hourly'::text, 'daily'::text, 'weekly'::text, 'monthly'::text]))),
+    CONSTRAINT pm_metrics_hourly_metric_type_check CHECK ((metric_type = ANY (ARRAY['counter'::text, 'kpi'::text]))),
+    CONSTRAINT pm_metrics_hourly_statis_type_check CHECK (((statis_type IS NULL) OR (statis_type = ANY (ARRAY['sum'::text, 'avg'::text, 'max'::text, 'min'::text, 'pct'::text]))))
+);
+CREATE INDEX idx_pm_metrics_hourly_device_time ON public.pm_metrics_hourly USING btree (device_oui, device_sn, "time" DESC);
+CREATE INDEX idx_pm_metrics_hourly_object_ldn ON public.pm_metrics_hourly USING btree (object_ldn) WHERE (object_ldn IS NOT NULL);
+CREATE INDEX idx_pm_metrics_hourly_path_time ON public.pm_metrics_hourly USING btree (metric_path, "time" DESC);
+CREATE INDEX pm_metrics_hourly_time_idx ON public.pm_metrics_hourly USING btree ("time" DESC);
+CREATE UNIQUE INDEX uq_pm_metrics_hourly_natural ON public.pm_metrics_hourly USING btree (device_oui, device_sn, metric_path, granularity, end_time, "time", object_ldn);
+
+-- ── pm_metrics_daily（普通表；最终形态：object_ldn NOT NULL DEFAULT ''，pkey 尾含 object_ldn）──
+CREATE TABLE public.pm_metrics_daily (
+    device_oui text NOT NULL,
+    device_sn text NOT NULL,
+    metric_path text NOT NULL,
+    metric_type text NOT NULL,
+    metric_value double precision NOT NULL,
+    statis_type text,
+    granularity text NOT NULL,
+    "time" timestamp with time zone NOT NULL,
+    start_time timestamp with time zone NOT NULL,
+    end_time timestamp with time zone NOT NULL,
+    ingest_time timestamp with time zone DEFAULT now() NOT NULL,
+    object_ldn text DEFAULT ''::text NOT NULL,
+    extra jsonb,
+    CONSTRAINT pm_metrics_daily_pkey PRIMARY KEY (device_oui, device_sn, metric_path, granularity, end_time, object_ldn),
+    CONSTRAINT pm_metrics_daily_granularity_check CHECK ((granularity = ANY (ARRAY['15min'::text, 'hourly'::text, 'daily'::text, 'weekly'::text, 'monthly'::text]))),
+    CONSTRAINT pm_metrics_daily_metric_type_check CHECK ((metric_type = ANY (ARRAY['counter'::text, 'kpi'::text]))),
+    CONSTRAINT pm_metrics_daily_statis_type_check CHECK (((statis_type IS NULL) OR (statis_type = ANY (ARRAY['sum'::text, 'avg'::text, 'max'::text, 'min'::text, 'pct'::text]))))
+);
+CREATE INDEX idx_pm_metrics_daily_device_time ON public.pm_metrics_daily USING btree (device_oui, device_sn, end_time DESC);
+CREATE INDEX idx_pm_metrics_daily_object_ldn ON public.pm_metrics_daily USING btree (object_ldn) WHERE (object_ldn IS NOT NULL);
+CREATE INDEX idx_pm_metrics_daily_path_time ON public.pm_metrics_daily USING btree (metric_path, end_time DESC);
+
+-- ── pm_metrics_weekly（普通表；同 daily 最终形态）────────────────────────────────────
+CREATE TABLE public.pm_metrics_weekly (
+    device_oui text NOT NULL,
+    device_sn text NOT NULL,
+    metric_path text NOT NULL,
+    metric_type text NOT NULL,
+    metric_value double precision NOT NULL,
+    statis_type text,
+    granularity text NOT NULL,
+    "time" timestamp with time zone NOT NULL,
+    start_time timestamp with time zone NOT NULL,
+    end_time timestamp with time zone NOT NULL,
+    ingest_time timestamp with time zone DEFAULT now() NOT NULL,
+    object_ldn text DEFAULT ''::text NOT NULL,
+    extra jsonb,
+    CONSTRAINT pm_metrics_weekly_pkey PRIMARY KEY (device_oui, device_sn, metric_path, granularity, end_time, object_ldn),
+    CONSTRAINT pm_metrics_weekly_granularity_check CHECK ((granularity = ANY (ARRAY['15min'::text, 'hourly'::text, 'daily'::text, 'weekly'::text, 'monthly'::text]))),
+    CONSTRAINT pm_metrics_weekly_metric_type_check CHECK ((metric_type = ANY (ARRAY['counter'::text, 'kpi'::text]))),
+    CONSTRAINT pm_metrics_weekly_statis_type_check CHECK (((statis_type IS NULL) OR (statis_type = ANY (ARRAY['sum'::text, 'avg'::text, 'max'::text, 'min'::text, 'pct'::text]))))
+);
+CREATE INDEX idx_pm_metrics_weekly_device_time ON public.pm_metrics_weekly USING btree (device_oui, device_sn, end_time DESC);
+CREATE INDEX idx_pm_metrics_weekly_object_ldn ON public.pm_metrics_weekly USING btree (object_ldn) WHERE (object_ldn IS NOT NULL);
+CREATE INDEX idx_pm_metrics_weekly_path_time ON public.pm_metrics_weekly USING btree (metric_path, end_time DESC);
+
+-- ── pm_metrics_monthly（普通表；同 daily 最终形态）───────────────────────────────────
+CREATE TABLE public.pm_metrics_monthly (
+    device_oui text NOT NULL,
+    device_sn text NOT NULL,
+    metric_path text NOT NULL,
+    metric_type text NOT NULL,
+    metric_value double precision NOT NULL,
+    statis_type text,
+    granularity text NOT NULL,
+    "time" timestamp with time zone NOT NULL,
+    start_time timestamp with time zone NOT NULL,
+    end_time timestamp with time zone NOT NULL,
+    ingest_time timestamp with time zone DEFAULT now() NOT NULL,
+    object_ldn text DEFAULT ''::text NOT NULL,
+    extra jsonb,
+    CONSTRAINT pm_metrics_monthly_pkey PRIMARY KEY (device_oui, device_sn, metric_path, granularity, end_time, object_ldn),
+    CONSTRAINT pm_metrics_monthly_granularity_check CHECK ((granularity = ANY (ARRAY['15min'::text, 'hourly'::text, 'daily'::text, 'weekly'::text, 'monthly'::text]))),
+    CONSTRAINT pm_metrics_monthly_metric_type_check CHECK ((metric_type = ANY (ARRAY['counter'::text, 'kpi'::text]))),
+    CONSTRAINT pm_metrics_monthly_statis_type_check CHECK (((statis_type IS NULL) OR (statis_type = ANY (ARRAY['sum'::text, 'avg'::text, 'max'::text, 'min'::text, 'pct'::text]))))
+);
+CREATE INDEX idx_pm_metrics_monthly_device_time ON public.pm_metrics_monthly USING btree (device_oui, device_sn, end_time DESC);
+CREATE INDEX idx_pm_metrics_monthly_object_ldn ON public.pm_metrics_monthly USING btree (object_ldn) WHERE (object_ldn IS NOT NULL);
+CREATE INDEX idx_pm_metrics_monthly_path_time ON public.pm_metrics_monthly USING btree (metric_path, end_time DESC);
+
+-- ── pm_group_metrics_hourly（超表：time 7d chunk，compress 14d，retention 180d；pkey(id,time)）──
+-- 最终形态：带 technology varchar(3) NOT NULL；自然唯一索引尾部含 technology（000026）。
+CREATE TABLE public.pm_group_metrics_hourly (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    device_group_id uuid NOT NULL,
+    metric_path text NOT NULL,
+    metric_type text NOT NULL,
+    metric_value double precision NOT NULL,
+    statis_type text,
+    granularity text NOT NULL,
+    "time" timestamp with time zone NOT NULL,
+    start_time timestamp with time zone NOT NULL,
+    end_time timestamp with time zone NOT NULL,
+    ingest_time timestamp with time zone DEFAULT now() NOT NULL,
+    extra jsonb,
+    technology varchar(3) NOT NULL,
+    CONSTRAINT pm_group_metrics_hourly_pkey PRIMARY KEY (id, "time"),
+    CONSTRAINT pm_group_metrics_hourly_granularity_check CHECK ((granularity = ANY (ARRAY['15min'::text, 'hourly'::text, 'daily'::text, 'weekly'::text, 'monthly'::text]))),
+    CONSTRAINT pm_group_metrics_hourly_metric_type_check CHECK ((metric_type = ANY (ARRAY['counter'::text, 'kpi'::text]))),
+    CONSTRAINT pm_group_metrics_hourly_statis_type_check CHECK (((statis_type IS NULL) OR (statis_type = ANY (ARRAY['sum'::text, 'avg'::text, 'max'::text, 'min'::text, 'pct'::text]))))
+);
+CREATE INDEX idx_pm_group_metrics_hourly_group_time ON public.pm_group_metrics_hourly USING btree (device_group_id, "time" DESC);
+CREATE INDEX idx_pm_group_metrics_hourly_path_time ON public.pm_group_metrics_hourly USING btree (metric_path, "time" DESC);
+CREATE INDEX pm_group_metrics_hourly_time_idx ON public.pm_group_metrics_hourly USING btree ("time" DESC);
+CREATE UNIQUE INDEX uq_pm_group_metrics_hourly_natural ON public.pm_group_metrics_hourly USING btree (device_group_id, metric_path, granularity, end_time, "time", technology);
+
+-- ── pm_group_metrics_daily（普通表；最终形态：technology NOT NULL，pkey 尾含 technology）──
+CREATE TABLE public.pm_group_metrics_daily (
+    device_group_id uuid NOT NULL,
+    metric_path text NOT NULL,
+    metric_type text NOT NULL,
+    metric_value double precision NOT NULL,
+    statis_type text,
+    granularity text NOT NULL,
+    "time" timestamp with time zone NOT NULL,
+    start_time timestamp with time zone NOT NULL,
+    end_time timestamp with time zone NOT NULL,
+    ingest_time timestamp with time zone DEFAULT now() NOT NULL,
+    extra jsonb,
+    technology varchar(3) NOT NULL,
+    CONSTRAINT pm_group_metrics_daily_pkey PRIMARY KEY (device_group_id, metric_path, granularity, end_time, technology),
+    CONSTRAINT pm_group_metrics_daily_granularity_check CHECK ((granularity = ANY (ARRAY['15min'::text, 'hourly'::text, 'daily'::text, 'weekly'::text, 'monthly'::text]))),
+    CONSTRAINT pm_group_metrics_daily_metric_type_check CHECK ((metric_type = ANY (ARRAY['counter'::text, 'kpi'::text]))),
+    CONSTRAINT pm_group_metrics_daily_statis_type_check CHECK (((statis_type IS NULL) OR (statis_type = ANY (ARRAY['sum'::text, 'avg'::text, 'max'::text, 'min'::text, 'pct'::text]))))
+);
+CREATE INDEX idx_pm_group_metrics_daily_group_time ON public.pm_group_metrics_daily USING btree (device_group_id, end_time DESC);
+CREATE INDEX idx_pm_group_metrics_daily_path_time ON public.pm_group_metrics_daily USING btree (metric_path, end_time DESC);
+
+-- ── pm_group_metrics_weekly（普通表；同 daily 最终形态）──────────────────────────────
+CREATE TABLE public.pm_group_metrics_weekly (
+    device_group_id uuid NOT NULL,
+    metric_path text NOT NULL,
+    metric_type text NOT NULL,
+    metric_value double precision NOT NULL,
+    statis_type text,
+    granularity text NOT NULL,
+    "time" timestamp with time zone NOT NULL,
+    start_time timestamp with time zone NOT NULL,
+    end_time timestamp with time zone NOT NULL,
+    ingest_time timestamp with time zone DEFAULT now() NOT NULL,
+    extra jsonb,
+    technology varchar(3) NOT NULL,
+    CONSTRAINT pm_group_metrics_weekly_pkey PRIMARY KEY (device_group_id, metric_path, granularity, end_time, technology),
+    CONSTRAINT pm_group_metrics_weekly_granularity_check CHECK ((granularity = ANY (ARRAY['15min'::text, 'hourly'::text, 'daily'::text, 'weekly'::text, 'monthly'::text]))),
+    CONSTRAINT pm_group_metrics_weekly_metric_type_check CHECK ((metric_type = ANY (ARRAY['counter'::text, 'kpi'::text]))),
+    CONSTRAINT pm_group_metrics_weekly_statis_type_check CHECK (((statis_type IS NULL) OR (statis_type = ANY (ARRAY['sum'::text, 'avg'::text, 'max'::text, 'min'::text, 'pct'::text]))))
+);
+CREATE INDEX idx_pm_group_metrics_weekly_group_time ON public.pm_group_metrics_weekly USING btree (device_group_id, end_time DESC);
+CREATE INDEX idx_pm_group_metrics_weekly_path_time ON public.pm_group_metrics_weekly USING btree (metric_path, end_time DESC);
+
+-- ── pm_group_metrics_monthly（普通表；同 daily 最终形态）─────────────────────────────
+CREATE TABLE public.pm_group_metrics_monthly (
+    device_group_id uuid NOT NULL,
+    metric_path text NOT NULL,
+    metric_type text NOT NULL,
+    metric_value double precision NOT NULL,
+    statis_type text,
+    granularity text NOT NULL,
+    "time" timestamp with time zone NOT NULL,
+    start_time timestamp with time zone NOT NULL,
+    end_time timestamp with time zone NOT NULL,
+    ingest_time timestamp with time zone DEFAULT now() NOT NULL,
+    extra jsonb,
+    technology varchar(3) NOT NULL,
+    CONSTRAINT pm_group_metrics_monthly_pkey PRIMARY KEY (device_group_id, metric_path, granularity, end_time, technology),
+    CONSTRAINT pm_group_metrics_monthly_granularity_check CHECK ((granularity = ANY (ARRAY['15min'::text, 'hourly'::text, 'daily'::text, 'weekly'::text, 'monthly'::text]))),
+    CONSTRAINT pm_group_metrics_monthly_metric_type_check CHECK ((metric_type = ANY (ARRAY['counter'::text, 'kpi'::text]))),
+    CONSTRAINT pm_group_metrics_monthly_statis_type_check CHECK (((statis_type IS NULL) OR (statis_type = ANY (ARRAY['sum'::text, 'avg'::text, 'max'::text, 'min'::text, 'pct'::text]))))
+);
+CREATE INDEX idx_pm_group_metrics_monthly_group_time ON public.pm_group_metrics_monthly USING btree (device_group_id, end_time DESC);
+CREATE INDEX idx_pm_group_metrics_monthly_path_time ON public.pm_group_metrics_monthly USING btree (metric_path, end_time DESC);
+
+-- ── pm_adhoc_aggregation_results（超表：time 30d chunk，compress 90d，retention 365d；pkey(id,time)）──
+-- 最终形态：带可空 product_id（000005）+ 业务去重唯一索引 uq_pm_adhoc_results_business（000018）。
+CREATE TABLE public.pm_adhoc_aggregation_results (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    task_id uuid NOT NULL,
+    device_oui text NOT NULL,
+    device_sn text NOT NULL,
+    metric_path text NOT NULL,
+    metric_type text NOT NULL,
+    metric_value double precision NOT NULL,
+    statis_type text,
+    granularity text NOT NULL,
+    "time" timestamp with time zone NOT NULL,
+    start_time timestamp with time zone NOT NULL,
+    end_time timestamp with time zone NOT NULL,
+    ingest_time timestamp with time zone DEFAULT now() NOT NULL,
+    object_ldn text,
+    extra jsonb,
+    product_id uuid,
+    CONSTRAINT pm_adhoc_aggregation_results_pkey PRIMARY KEY (id, "time"),
+    CONSTRAINT pm_adhoc_aggregation_results_granularity_check CHECK ((granularity = ANY (ARRAY['15min'::text, 'hourly'::text, 'daily'::text, 'weekly'::text, 'monthly'::text]))),
+    CONSTRAINT pm_adhoc_aggregation_results_metric_type_check CHECK ((metric_type = ANY (ARRAY['counter'::text, 'kpi'::text]))),
+    CONSTRAINT pm_adhoc_aggregation_results_statis_type_check CHECK (((statis_type IS NULL) OR (statis_type = ANY (ARRAY['sum'::text, 'avg'::text, 'max'::text, 'min'::text, 'pct'::text]))))
+);
+CREATE INDEX idx_pm_adhoc_results_device ON public.pm_adhoc_aggregation_results USING btree (device_oui, device_sn, "time" DESC);
+CREATE INDEX idx_pm_adhoc_results_task_time ON public.pm_adhoc_aggregation_results USING btree (task_id, "time" DESC);
+CREATE INDEX pm_adhoc_aggregation_results_time_idx ON public.pm_adhoc_aggregation_results USING btree ("time" DESC);
+-- 业务去重唯一索引（表达式文本须与 InsertResults 的 ON CONFLICT 目标逐字一致，见 internal/pm/adhoc）。
+CREATE UNIQUE INDEX uq_pm_adhoc_results_business
+    ON public.pm_adhoc_aggregation_results (
+        task_id, granularity, metric_path,
+        COALESCE(device_oui, ''), COALESCE(device_sn, ''),
+        COALESCE(product_id::text, ''), COALESCE(object_ldn, ''),
+        "time"
+    );
+
+-- pm_metrics insert-triggered autovacuum reloptions（000044：抬高阈值让单 chunk 突发入库期不频繁触发）。
+ALTER TABLE public.pm_metrics SET (
+    autovacuum_vacuum_insert_scale_factor = 0,
+    autovacuum_vacuum_insert_threshold = 5000000,
+    autovacuum_analyze_scale_factor = 0,
+    autovacuum_analyze_threshold = 5000000
+);
+
+-- =====================================================================================
+-- 2. 超表化（7 张）+ 压缩（5 张）+ 保留（7 张）
+--    chunk 间隔 / compress_after / drop_after 还原自 seed 的 _timescaledb_catalog。
+-- =====================================================================================
+
+-- ── create_hypertable（dimension.interval_length µs → 人类可读）────────────────────
+-- alarms_history: 604800000000 µs = 7 days; col "time"
+SELECT create_hypertable('public.alarms_history', by_range('time', INTERVAL '7 days'), if_not_exists => TRUE, migrate_data => TRUE);
+-- mr_records: 86400000000 µs = 1 day; col "time"
+SELECT create_hypertable('public.mr_records', by_range('time', INTERVAL '1 day'), if_not_exists => TRUE, migrate_data => TRUE);
+-- trace_messages: 86400000000 µs = 1 day; col captured_at
+SELECT create_hypertable('public.trace_messages', by_range('captured_at', INTERVAL '1 day'), if_not_exists => TRUE, migrate_data => TRUE);
+-- pm_metrics: seed 原为 86400000000 µs = 1 day，但 000045 已改 4 hours（修 B0）→ 这里直接以 4 hours 建表。
+SELECT create_hypertable('public.pm_metrics', by_range('time', INTERVAL '4 hours'), if_not_exists => TRUE, migrate_data => TRUE);
+-- pm_metrics_hourly: 604800000000 µs = 7 days; col "time"
+SELECT create_hypertable('public.pm_metrics_hourly', by_range('time', INTERVAL '7 days'), if_not_exists => TRUE, migrate_data => TRUE);
+-- pm_group_metrics_hourly: 604800000000 µs = 7 days; col "time"
+SELECT create_hypertable('public.pm_group_metrics_hourly', by_range('time', INTERVAL '7 days'), if_not_exists => TRUE, migrate_data => TRUE);
+-- pm_adhoc_aggregation_results: 2592000000000 µs = 30 days; col "time"
+SELECT create_hypertable('public.pm_adhoc_aggregation_results', by_range('time', INTERVAL '30 days'), if_not_exists => TRUE, migrate_data => TRUE);
+
+-- ── 压缩（columnstore）：原 5 张（mr_records / pm_metrics / pm_metrics_hourly /
+--    pm_group_metrics_hourly / pm_adhoc_aggregation_results）。
+--    segmentby 还原自 seed compression_settings；orderby 默认走 time 列（DESC）。
+--    ⚠ 压缩 SET 必须先于 add_compression_policy（CLAUDE.md §4.6 TimescaleDB 压缩顺序）。
+ALTER TABLE public.mr_records SET (timescaledb.compress, timescaledb.compress_segmentby = 'device_id,file_id,mr_type');
+ALTER TABLE public.pm_metrics SET (timescaledb.compress, timescaledb.compress_segmentby = 'device_oui,device_sn,metric_type,granularity');
+ALTER TABLE public.pm_metrics_hourly SET (timescaledb.compress, timescaledb.compress_segmentby = 'device_oui,device_sn,metric_type,granularity');
+ALTER TABLE public.pm_group_metrics_hourly SET (timescaledb.compress, timescaledb.compress_segmentby = 'device_group_id,metric_type,granularity');
+ALTER TABLE public.pm_adhoc_aggregation_results SET (timescaledb.compress, timescaledb.compress_segmentby = 'task_id,device_oui,device_sn,metric_type');
+
+-- compress_after 还原自 seed bgw_job policy_compression：
+--   mr_records 7d / pm_metrics 7d / pm_metrics_hourly 14d / pm_group_metrics_hourly 14d / pm_adhoc 90d
+SELECT add_compression_policy('public.mr_records', INTERVAL '7 days');
+SELECT add_compression_policy('public.pm_metrics', INTERVAL '7 days');
+SELECT add_compression_policy('public.pm_metrics_hourly', INTERVAL '14 days');
+SELECT add_compression_policy('public.pm_group_metrics_hourly', INTERVAL '14 days');
+SELECT add_compression_policy('public.pm_adhoc_aggregation_results', INTERVAL '90 days');
+
+-- ── 保留：原 7 张。drop_after 还原自 seed bgw_job policy_retention：
+--   alarms_history 365d / mr_records 90d / trace_messages 3d / pm_metrics 30d /
+--   pm_metrics_hourly 180d / pm_group_metrics_hourly 180d / pm_adhoc 365d
+SELECT add_retention_policy('public.alarms_history', INTERVAL '365 days');
+SELECT add_retention_policy('public.mr_records', INTERVAL '90 days');
+SELECT add_retention_policy('public.trace_messages', INTERVAL '3 days');
+SELECT add_retention_policy('public.pm_metrics', INTERVAL '30 days');
+SELECT add_retention_policy('public.pm_metrics_hourly', INTERVAL '180 days');
+SELECT add_retention_policy('public.pm_group_metrics_hourly', INTERVAL '180 days');
+SELECT add_retention_policy('public.pm_adhoc_aggregation_results', INTERVAL '365 days');
+
+-- =====================================================================================
+-- 3. 影子维度表（§契约 1B；从主库同步，供本库 JOIN 替代跨库 JOIN）
+--    带主键供 UPSERT；JOIN 键加索引。worker 的 tsdbsync 同步任务定期刷入（见 internal/tsdbsync）。
+--    说明：device_dim 是「主库 devices 的列子集」（§1B 指定列）；cell_band_dim 是【派生表】
+--    （主库无 cell_band 表，原 band 查询用 CTE，现由同步任务从 device_parameters 派生 device_id/cell_id/band）；
+--    其余 4 张（product_dim/device_group_dim/device_group_member_dim/alarm_definition_dim）是源表全列镜像。
+-- =====================================================================================
+
+-- device_dim ← devices（列子集：id, oui, serial_number, product_id, technology, site_name, product_class, deleted_at）
+CREATE TABLE public.device_dim (
+    id uuid NOT NULL,
+    oui character varying(6),
+    serial_number character varying(64),
+    product_id uuid,
+    technology character varying(3),
+    site_name character varying(128),
+    product_class character varying(64),
+    deleted_at timestamp with time zone,
+    CONSTRAINT device_dim_pkey PRIMARY KEY (id)
+);
+CREATE INDEX idx_device_dim_oui_sn ON public.device_dim USING btree (oui, serial_number);
+CREATE INDEX idx_device_dim_product ON public.device_dim USING btree (product_id);
+
+-- device_group_member_dim ← device_group_members（全列镜像：group_id, device_id, added_at, source_type）
+CREATE TABLE public.device_group_member_dim (
+    group_id uuid NOT NULL,
+    device_id uuid NOT NULL,
+    added_at timestamp with time zone,
+    source_type character varying(16),
+    CONSTRAINT device_group_member_dim_pkey PRIMARY KEY (group_id, device_id)
+);
+CREATE INDEX idx_device_group_member_dim_device ON public.device_group_member_dim USING btree (device_id, group_id);
+
+-- cell_band_dim（派生：device_id, cell_id, band）；主键 (device_id, cell_id)，JOIN 键加索引。
+CREATE TABLE public.cell_band_dim (
+    device_id uuid NOT NULL,
+    cell_id text NOT NULL,
+    band text,
+    CONSTRAINT cell_band_dim_pkey PRIMARY KEY (device_id, cell_id)
+);
+CREATE INDEX idx_cell_band_dim_device_cell ON public.cell_band_dim USING btree (device_id, cell_id);
+
+-- product_dim ← products（全列镜像）
+CREATE TABLE public.product_dim (
+    id uuid NOT NULL,
+    product_name character varying(128),
+    vendor character varying(64),
+    tech character varying(8),
+    radio_modes character varying(64),
+    description text,
+    param_model_id uuid,
+    indicator_device_type character varying(8),
+    indicator_platform character varying(32),
+    alarm_ne_type character varying(16),
+    enable_filetype11 boolean,
+    device_attrs_override jsonb,
+    enable_unknown_alarm boolean,
+    created_at timestamp with time zone,
+    updated_at timestamp with time zone,
+    CONSTRAINT product_dim_pkey PRIMARY KEY (id)
+);
+
+-- device_group_dim ← device_groups（列子集：id, name；§1B 仅 JOIN 取 name）
+CREATE TABLE public.device_group_dim (
+    id uuid NOT NULL,
+    name character varying(128),
+    CONSTRAINT device_group_dim_pkey PRIMARY KEY (id)
+);
+
+-- alarm_definition_dim ← alarm_definitions（全列镜像，供 JOIN 取 identifier/cn_name/en_name 等）
+CREATE TABLE public.alarm_definition_dim (
+    id uuid NOT NULL,
+    identifier character varying(32),
+    ne_type character varying(16),
+    cn_name character varying(256),
+    en_name character varying(256),
+    severity_id uuid,
+    event_type integer,
+    cn_probable_cause text,
+    en_probable_cause text,
+    cn_suggestion text,
+    en_suggestion text,
+    is_show boolean,
+    created_at timestamp with time zone,
+    updated_at timestamp with time zone,
+    loaded_from character varying(256),
+    CONSTRAINT alarm_definition_dim_pkey PRIMARY KEY (id)
+);
+-- JOIN 键 identifier（alarms_history.alarm_identifier = ad.identifier）加索引。
+CREATE INDEX idx_alarm_definition_dim_identifier ON public.alarm_definition_dim USING btree (identifier);
+
+-- =====================================================================================
+-- 3b. 仅由时序库侧消费的主库表 —— 整张归时序库（非镜像，本库读写）。
+--     trace_tasks / trace_export_jobs：trace repo（单池 TsPool）写 trace_messages 同时 UPDATE
+--       trace_tasks、管理 trace_export_jobs，三表同库才能单池工作（避免跨库 split-brain）。
+--     kpi_definitions：仅 pm/kpi repo（TsPool）读写（ListDefinitions / SyncDefinitions），全仓无其它
+--       消费方，故整张归时序库，免第二池/镜像。
+--     （主库 000001 仍保留这几张同名空表，无害未用；fresh 部署不追求主库零冗余。）
+-- =====================================================================================
+CREATE TABLE public.trace_tasks (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    device_sn character varying(64) NOT NULL,
+    operator_code character varying(16) DEFAULT 'default'::character varying NOT NULL,
+    status character varying(16) DEFAULT 'running'::character varying NOT NULL,
+    start_time timestamp with time zone DEFAULT now() NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    stopped_at timestamp with time zone,
+    purged_at timestamp with time zone,
+    created_by character varying(64) DEFAULT 'system'::character varying NOT NULL,
+    message_count integer DEFAULT 0 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT trace_tasks_status_check CHECK (((status)::text = ANY ((ARRAY['running'::character varying, 'stopped'::character varying, 'purged'::character varying])::text[]))),
+    CONSTRAINT trace_tasks_pkey PRIMARY KEY (id)
+);
+CREATE INDEX idx_trace_tasks_created ON public.trace_tasks USING btree (created_at DESC);
+CREATE INDEX idx_trace_tasks_sn_status ON public.trace_tasks USING btree (device_sn, status);
+CREATE INDEX idx_trace_tasks_status_expires ON public.trace_tasks USING btree (status, expires_at) WHERE ((status)::text = 'running'::text);
+CREATE UNIQUE INDEX uniq_trace_tasks_running_sn ON public.trace_tasks USING btree (device_sn) WHERE ((status)::text = 'running'::text);
+
+CREATE TABLE public.trace_export_jobs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    task_id uuid NOT NULL,
+    requested_by character varying(64) DEFAULT 'system'::character varying NOT NULL,
+    status character varying(16) DEFAULT 'queued'::character varying NOT NULL,
+    object_key character varying(512),
+    object_bucket character varying(64),
+    message_count integer DEFAULT 0 NOT NULL,
+    size_bytes bigint DEFAULT 0 NOT NULL,
+    error_message text,
+    started_at timestamp with time zone,
+    completed_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT trace_export_jobs_status_check CHECK (((status)::text = ANY ((ARRAY['queued'::character varying, 'running'::character varying, 'done'::character varying, 'failed'::character varying])::text[]))),
+    CONSTRAINT trace_export_jobs_pkey PRIMARY KEY (id),
+    CONSTRAINT trace_export_jobs_task_id_fkey FOREIGN KEY (task_id) REFERENCES public.trace_tasks(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_trace_export_jobs_status ON public.trace_export_jobs USING btree (status, created_at DESC);
+CREATE INDEX idx_trace_export_jobs_task ON public.trace_export_jobs USING btree (task_id);
+
+CREATE TABLE public.kpi_definitions (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    name character varying(64) NOT NULL,
+    display_name character varying(128) NOT NULL,
+    formula text NOT NULL,
+    unit character varying(16) NOT NULL,
+    category character varying(32) NOT NULL,
+    carrier character varying(4),
+    technology character varying(3),
+    counters jsonb DEFAULT '[]'::jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT kpi_definitions_pkey PRIMARY KEY (id),
+    CONSTRAINT kpi_definitions_name_key UNIQUE (name)
+);
+CREATE INDEX idx_kpi_definitions_counters_gin ON public.kpi_definitions USING gin (counters);
+
+-- 内置 KPI 定义（原在主库 seed/000001_init_seed.sql；kpi_definitions 归时序库后随之迁来，
+-- 否则 ListDefinitions（TsPool）读不到内置定义）。ON CONFLICT DO NOTHING 幂等。
+INSERT INTO public.kpi_definitions (id, name, display_name, formula, unit, category, carrier, technology, counters, created_at) VALUES
+	('30000000-0001-4000-8000-000000000001', 'RRC_CONN_SETUP_SR', 'RRC连接建立成功率', '(rrc_conn_setup_succ / rrc_conn_setup_att) * 100', '%', 'accessibility', NULL, 'lte', '["rrc_conn_setup_succ", "rrc_conn_setup_att"]', '2026-05-31 11:28:45.998778+08'),
+	('30000000-0001-4000-8000-000000000002', 'ERAB_SETUP_SR', 'E-RAB建立成功率', '(erab_setup_succ / erab_setup_att) * 100', '%', 'accessibility', NULL, 'lte', '["erab_setup_succ", "erab_setup_att"]', '2026-05-31 11:28:45.998778+08'),
+	('30000000-0001-4000-8000-000000000003', 'INTRA_FREQ_HO_SR', '同频切换成功率', '(intra_freq_ho_succ / intra_freq_ho_att) * 100', '%', 'mobility', NULL, 'lte', '["intra_freq_ho_succ", "intra_freq_ho_att"]', '2026-05-31 11:28:45.998778+08'),
+	('30000000-0001-4000-8000-000000000004', 'INTER_FREQ_HO_SR', '异频切换成功率', '(inter_freq_ho_succ / inter_freq_ho_att) * 100', '%', 'mobility', NULL, 'lte', '["inter_freq_ho_succ", "inter_freq_ho_att"]', '2026-05-31 11:28:45.998778+08'),
+	('30000000-0001-4000-8000-000000000005', 'CALL_DROP_RATE', '掉话率', '(erab_abnormal_release / erab_release_total) * 100', '%', 'retainability', NULL, 'lte', '["erab_abnormal_release", "erab_release_total"]', '2026-05-31 11:28:45.998778+08'),
+	('30000000-0001-4000-8000-000000000006', 'DL_PRB_UTIL', '下行PRB利用率', '(dl_prb_used_avg / dl_prb_available) * 100', '%', 'utilization', NULL, 'lte', '["dl_prb_used_avg", "dl_prb_available"]', '2026-05-31 11:28:45.998778+08'),
+	('30000000-0002-4000-8000-000000000001', 'NR_RRC_SETUP_SR', 'NR RRC建立成功率', '(nr_rrc_setup_succ / nr_rrc_setup_att) * 100', '%', 'accessibility', NULL, 'nr', '["nr_rrc_setup_succ", "nr_rrc_setup_att"]', '2026-05-31 11:28:45.998778+08'),
+	('30000000-0002-4000-8000-000000000002', 'NR_PDCP_RATE_DL', 'NR 下行PDCP速率', 'pdcp_vol_dl / report_period', 'Mbps', 'throughput', NULL, 'nr', '["pdcp_vol_dl", "report_period"]', '2026-05-31 11:28:45.998778+08'),
+	('30000000-0002-4000-8000-000000000003', 'NR_SA_HO_SR', 'NR SA切换成功率', '(nr_ho_succ / nr_ho_att) * 100', '%', 'mobility', NULL, 'nr', '["nr_ho_succ", "nr_ho_att"]', '2026-05-31 11:28:45.998778+08'),
+	('30000000-0002-4000-8000-000000000004', 'NR_PRB_UTIL_DL', 'NR 下行PRB利用率', '(nr_dl_prb_used / nr_dl_prb_total) * 100', '%', 'utilization', NULL, 'nr', '["nr_dl_prb_used", "nr_dl_prb_total"]', '2026-05-31 11:28:45.998778+08'),
+	('30000000-0002-4000-8000-000000000005', 'NR_CQI_AVG', 'NR 平均CQI', 'AVG(cqi_value)', '', 'quality', NULL, 'nr', '["cqi_value"]', '2026-05-31 11:28:45.998778+08'),
+	('30000000-0002-4000-8000-000000000006', 'NR_RLC_LOSS_RATE', 'NR RLC丢包率', '(rlc_retx_dl / rlc_tx_dl) * 100', '%', 'retainability', NULL, 'nr', '["rlc_retx_dl", "rlc_tx_dl"]', '2026-05-31 11:28:45.998778+08')
+ON CONFLICT DO NOTHING;
+
+-- =====================================================================================
+-- 3c. perf_indicators_{enb,gnb,gsm} —— 时序库【同名镜像】（主库为源，由 worker tsdbsync 全量刷入）。
+--     pm 的指标名解析查询（aggregator/adhoc/export，跑 TsPool）按真实表名读，故时序库建同名表，
+--     SQL 零改动即命中本库镜像。主库保留原表（仍是字典源 + 指标管理消费方）。
+-- =====================================================================================
+CREATE TABLE public.perf_indicators_enb (
+    id character varying(20) NOT NULL,
+    en_name character varying(200) NOT NULL,
+    cn_name character varying(200) NOT NULL,
+    en_description text,
+    cn_description text,
+    group_id character varying(64) NOT NULL,
+    operator_code character varying(100),
+    data_type character varying(20),
+    unit_id character varying(50),
+    updator character varying(64),
+    is_build_in character(1) DEFAULT '0'::bpchar NOT NULL,
+    is_counter character(1) DEFAULT '1'::bpchar NOT NULL,
+    arithmetic text,
+    statis_type character varying(20),
+    calculating_status character varying(20),
+    product_types text,
+    indicator_level character varying(20),
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    loaded_from character varying(256),
+    CONSTRAINT perf_indicators_enb_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.perf_indicators_gnb (
+    id character varying(20) NOT NULL,
+    en_name character varying(200) NOT NULL,
+    cn_name character varying(200) NOT NULL,
+    en_description text,
+    cn_description text,
+    group_id character varying(64) NOT NULL,
+    operator_code character varying(100),
+    data_type character varying(20),
+    unit_id character varying(50),
+    updator character varying(64),
+    is_build_in character(1) DEFAULT '0'::bpchar NOT NULL,
+    is_counter character(1) DEFAULT '1'::bpchar NOT NULL,
+    arithmetic text,
+    statis_type character varying(20),
+    calculating_status character varying(20),
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    loaded_from character varying(256),
+    CONSTRAINT perf_indicators_gnb_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.perf_indicators_gsm (
+    id character varying(20) NOT NULL,
+    en_name character varying(200) NOT NULL,
+    cn_name character varying(200) NOT NULL,
+    en_description text,
+    cn_description text,
+    group_id character varying(64) NOT NULL,
+    operator_code character varying(100),
+    data_type character varying(20),
+    unit_id character varying(50),
+    updator character varying(64),
+    is_build_in character(1) DEFAULT '0'::bpchar NOT NULL,
+    is_counter character(1) DEFAULT '1'::bpchar NOT NULL,
+    arithmetic text,
+    statis_type character varying(20),
+    calculating_status character varying(20),
+    product_types text,
+    indicator_level character varying(20),
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    loaded_from character varying(256),
+    CONSTRAINT perf_indicators_gsm_pkey PRIMARY KEY (id)
+);
+
+-- =====================================================================================
+-- 3d. 同名视图（安全网）—— 把 6 张影子维度表以【源表原名】暴露在时序库。
+--     作用：pm/aggregator 等已把显式 JOIN 改成 *_dim，但 authz 包的 #64 数据权限子查询
+--     （ApplyDeviceSNVisibilityFilter / VisibleSNSubquerySQL / ApplyGroupVisibilityFilter）
+--     硬编码 FROM devices / device_group_members，且被 TsPool 查询调用。建同名视图后这些
+--     未改名引用在时序库自动命中影子表，零代码改动兜底任何遗漏的跨库引用。
+-- =====================================================================================
+CREATE VIEW public.devices AS SELECT * FROM public.device_dim;
+CREATE VIEW public.device_group_members AS SELECT * FROM public.device_group_member_dim;
+CREATE VIEW public.products AS SELECT * FROM public.product_dim;
+CREATE VIEW public.device_groups AS SELECT * FROM public.device_group_dim;
+CREATE VIEW public.cell_band AS SELECT * FROM public.cell_band_dim;
+CREATE VIEW public.alarm_definitions AS SELECT * FROM public.alarm_definition_dim;
+
+-- =====================================================================================
+-- 4. 告警效率物化视图 alarm_efficiency_metrics（最终形态 = seed 000042，含 MTTR 倒挂过滤）。
+--    建在 alarms_history 上；dashboard 用 REFRESH MATERIALIZED VIEW CONCURRENTLY 刷新，
+--    故必须建唯一索引（severity 为 GROUP BY 键 → 每行唯一）。原 seed 漏建唯一索引使
+--    CONCURRENTLY 刷新会报错；本处补齐（修该潜伏 bug）。
+-- =====================================================================================
+CREATE MATERIALIZED VIEW public.alarm_efficiency_metrics AS
+SELECT
+    severity,
+    COUNT(*) FILTER (WHERE acknowledged_at IS NOT NULL) as acknowledged_count,
+    COUNT(*) FILTER (WHERE cleared_at IS NOT NULL) as cleared_count,
+    COUNT(*) as total_count,
+    COALESCE(AVG(EXTRACT(EPOCH FROM (acknowledged_at - raised_at)) / 60)
+        FILTER (WHERE acknowledged_at IS NOT NULL), 0) as avg_acknowledge_minutes,
+    COALESCE(AVG(EXTRACT(EPOCH FROM (cleared_at - raised_at)) / 60)
+        FILTER (WHERE cleared_at IS NOT NULL AND cleared_at >= raised_at), 0) as avg_resolve_minutes,
+    ROUND(100.0 * COUNT(*) FILTER (WHERE acknowledged_at IS NOT NULL) /
+          NULLIF(COUNT(*), 0), 2) as acknowledge_rate,
+    ROUND(100.0 * COUNT(*) FILTER (WHERE cleared_at IS NOT NULL) /
+          NULLIF(COUNT(*), 0), 2) as clear_rate
+FROM public.alarms_history
+WHERE cleared_at > NOW() - INTERVAL '30 days'
+GROUP BY severity;
+
+-- 唯一索引：支持 REFRESH MATERIALIZED VIEW CONCURRENTLY（dashboard/efficiency.go）。
+CREATE UNIQUE INDEX uq_alarm_efficiency_metrics_severity ON public.alarm_efficiency_metrics USING btree (severity);
+
+COMMENT ON MATERIALIZED VIEW public.alarm_efficiency_metrics IS
+    '告警处理效率指标物化视图，包含MTTA、MTTR、确认率、清除率等指标（MTTR 已排除时间倒挂脏数据）';
+
+-- 刷新函数（dashboard 也可直接 REFRESH ... CONCURRENTLY；保留函数与原 seed 行为一致）。
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION public.refresh_alarm_efficiency_metrics()
+RETURNS void AS $$
+BEGIN
+    REFRESH MATERIALIZED VIEW CONCURRENTLY public.alarm_efficiency_metrics;
+END;
+$$ LANGUAGE plpgsql;
+-- +goose StatementEnd
+
+COMMENT ON FUNCTION public.refresh_alarm_efficiency_metrics() IS '刷新告警效率指标物化视图';
+
+
+-- +goose Down
+-- DROP 全部对象（同名视图 → matview + 函数 → 镜像/归库表 → 影子表 → 14 张时序表；策略随 DROP TABLE 级联消失）。
+DROP VIEW IF EXISTS public.alarm_definitions;
+DROP VIEW IF EXISTS public.cell_band;
+DROP VIEW IF EXISTS public.device_groups;
+DROP VIEW IF EXISTS public.products;
+DROP VIEW IF EXISTS public.device_group_members;
+DROP VIEW IF EXISTS public.devices;
+
+DROP TABLE IF EXISTS public.perf_indicators_gsm;
+DROP TABLE IF EXISTS public.perf_indicators_gnb;
+DROP TABLE IF EXISTS public.perf_indicators_enb;
+DROP TABLE IF EXISTS public.kpi_definitions;
+DROP TABLE IF EXISTS public.trace_export_jobs;
+DROP TABLE IF EXISTS public.trace_tasks;
+
+DROP FUNCTION IF EXISTS public.refresh_alarm_efficiency_metrics();
+DROP MATERIALIZED VIEW IF EXISTS public.alarm_efficiency_metrics;
+
+DROP TABLE IF EXISTS public.alarm_definition_dim;
+DROP TABLE IF EXISTS public.device_group_dim;
+DROP TABLE IF EXISTS public.product_dim;
+DROP TABLE IF EXISTS public.cell_band_dim;
+DROP TABLE IF EXISTS public.device_group_member_dim;
+DROP TABLE IF EXISTS public.device_dim;
+
+DROP TABLE IF EXISTS public.pm_adhoc_aggregation_results;
+DROP TABLE IF EXISTS public.pm_group_metrics_monthly;
+DROP TABLE IF EXISTS public.pm_group_metrics_weekly;
+DROP TABLE IF EXISTS public.pm_group_metrics_daily;
+DROP TABLE IF EXISTS public.pm_group_metrics_hourly;
+DROP TABLE IF EXISTS public.pm_metrics_monthly;
+DROP TABLE IF EXISTS public.pm_metrics_weekly;
+DROP TABLE IF EXISTS public.pm_metrics_daily;
+DROP TABLE IF EXISTS public.pm_metrics_hourly;
+DROP TABLE IF EXISTS public.pm_metrics;
+DROP TABLE IF EXISTS public.pm_files;
+DROP TABLE IF EXISTS public.trace_messages;
+DROP TABLE IF EXISTS public.mr_records;
+DROP TABLE IF EXISTS public.alarms_history;

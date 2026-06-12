@@ -23,7 +23,8 @@ db:
   log_sql_slow_threshold: 500
 
 tsdb:
-  dsn: "postgres://omcgo:omcgo123@postgres:5432/omcgo?sslmode=disable"
+  # KPI/时序库物理分离：指向独立时序库实例 postgres-tsdb（不再与主库 postgres 同实例）。
+  dsn: "postgres://omcgo:omcgo123@postgres-tsdb:5432/omcgo?sslmode=disable"
   max_conns: 30
   min_conns: 5
   max_conn_lifetime: 30m

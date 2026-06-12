@@ -18,14 +18,10 @@
 
 services:
   postgres:
-    # 必须 pin 到 2.25.2-pg16 — seed/000001_init_seed.sql 是从此版本 pg_dump 的,
-    # 含 _timescaledb_catalog.continuous_agg_migrate_plan / continuous_agg_migrate_plan_step
-    # 等内部 catalog 的 DISABLE/ENABLE TRIGGER 调用 + 末尾 timescaledb_post_restore()
-    # 探这些表;`latest-pg16` 会随上游推新漂到不同版本(用户实测 2026-05-31 报
-    # "relation _timescaledb_catalog.continuous_agg_migrate_plan does not exist"
-    # 就是上游推了更新/老版本导致 catalog schema 不一致)。当 schema/seed dump 升级时
-    # 同步动这里。
-    image: timescale/timescaledb:2.25.2-pg16
+    # 主库（业务数据：设备/RBAC/配置/字典…）。KPI/时序库物理分离后主库【不再有超表】，
+    # consolidated baseline（migrations/000001_init_schema.sql）也不再 CREATE EXTENSION timescaledb，
+    # 故主库用纯 PostgreSQL 16 即可（更轻）；所有时序超表在独立实例 postgres-tsdb。
+    image: postgres:16-alpine
     environment:
       TZ: "Asia/Shanghai"
       POSTGRES_USER: omcgo
@@ -64,6 +60,49 @@ services:
     # 监听还在内部 restart 周期 → 下游 migrate-schema 撞 connection refused。
     # 必须 `-h 127.0.0.1 -p 5432 -d omcgo` 强制走 TCP + 验证目标库存在;
     # start_period=30s 给冷 init 容器足够缓冲,失败不计入 unhealthy。
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U omcgo -d omcgo -h 127.0.0.1 -p 5432"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  # ──────────────────────────────────────────────────────────────────
+  # postgres-tsdb：第二个 TimescaleDB 实例 —— 物理隔离的时序库（TsPool）。
+  # 承载 PM/KPI 超表、告警历史、MR/trace 时序表 + pm_files + 影子维度表
+  # （见 KPI/时序库物理分离契约 §1）。业务数据仍留主库 postgres（PgPool）。
+  # 宿主端口 5433（避开主库 5432 与 boss 栈占用）；image / env / 调优档 /
+  # healthcheck / 优雅关闭 全部照搬 postgres 服务，独立 volume tsdbdata。
+  # ⚠️ 与主库共享同一 Docker VM（~11.67g，与 boss 栈共享）：两个 PG 实例各
+  # cap 10g 仅作上限，shared_buffers=3g 各占非顶满；两库同时高写时需实测内存
+  # 不互相挤 OOM（dev 上 PM 写主要落 tsdb，主库写量小，初期资源档与主库相同，
+  # 上线运营规模前按实测重新配比）。见 docs/operations/OMC内存分配与容量规划-20260611.md。
+  postgres-tsdb:
+    # 必须与主库 postgres 同 pin 2.25.2-pg16（超表 catalog schema 一致性）。
+    image: timescale/timescaledb:2.25.2-pg16
+    environment:
+      TZ: "Asia/Shanghai"
+      POSTGRES_USER: omcgo
+      POSTGRES_PASSWORD: omcgo123
+      POSTGRES_DB: omcgo
+    ports:
+      - "5433:5432"
+    volumes:
+      - tsdbdata:/var/lib/postgresql/data
+      - /etc/localtime:/etc/localtime:ro
+    # 写吞吐优化档同主库 postgres（PM copy 入库走本库，写压力主要在此）。
+    command: ["postgres", "-c", "timezone=Asia/Shanghai", "-c", "log_timezone=Asia/Shanghai", "-c", "max_connections=300",
+              "-c", "shared_buffers=3GB", "-c", "effective_cache_size=7GB", "-c", "work_mem=16MB",
+              "-c", "maintenance_work_mem=1GB", "-c", "max_wal_size=4GB", "-c", "checkpoint_completion_target=0.9"]
+    stop_grace_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: "8"
+          memory: 10g
+        reservations:
+          cpus: "0.5"
+          memory: 1g
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U omcgo -d omcgo -h 127.0.0.1 -p 5432"]
       interval: 3s
@@ -216,6 +255,40 @@ services:
           cpus: "0.25"
           memory: 128m
 
+  # migrate-tsdb-schema：把时序库 schema（migrations/tsdb/，table
+  # goose_db_version_tsdb）刷到 postgres-tsdb 实例。建 §1A 14 张时序表 +
+  # 7 张超表 + 6 张影子维度表 + alarm_efficiency_metrics matview。
+  # 与主库 migrate-schema/migrate-seed 互不影响（不同实例 + 不同 goose 版本表）。
+  # 时序库无业务种子数据（matview 在 schema 里建），故不需要 migrate-tsdb-seed。
+  migrate-tsdb-schema:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile.app
+      network: host
+    environment:
+      TZ: "Asia/Shanghai"
+      GOOSE_VERBOSITY: "1"
+      GOOSE_TABLE: "goose_db_version_tsdb"
+    entrypoint: ["omcgo-migrate"]
+    command: ["--dsn", "postgres://omcgo:omcgo123@postgres-tsdb:5432/omcgo?sslmode=disable",
+              "--path", "/etc/omcgo/migrations/tsdb", "up"]
+    volumes:
+      - ../../omcgo/migrations:/etc/omcgo/migrations:ro
+      - /etc/localtime:/etc/localtime:ro
+    depends_on:
+      postgres-tsdb:
+        condition: service_healthy
+    restart: on-failure:3
+    # 一次性迁移任务：限额防失控，无需 stop_grace_period（自行退出）
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512m
+        reservations:
+          cpus: "0.25"
+          memory: 128m
+
   acs:
     build:
       context: ../..
@@ -241,6 +314,10 @@ services:
           memory: 512m
     depends_on:
       migrate-seed:
+        condition: service_completed_successfully
+      # acs 写 trace_messages → 时序库；等时序库 schema 就绪后再起。
+      # （若 wiring 最终确认 trace 不在 acs 进程写，可去掉本依赖——无害的完成门）
+      migrate-tsdb-schema:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
@@ -286,6 +363,9 @@ services:
           memory: 512m
     depends_on:
       migrate-seed:
+        condition: service_completed_successfully
+      # app 连时序库（TsPool）读影子维度 / PM 聚合表；等时序库 schema 就绪。
+      migrate-tsdb-schema:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
@@ -337,6 +417,10 @@ services:
       start_period: 40s
     depends_on:
       migrate-seed:
+        condition: service_completed_successfully
+      # worker 连时序库（TsPool）：PM copy 入库 / KPI 聚合 / 影子维度同步任务
+      # / 告警历史 retention / trace 写入，等时序库 schema 就绪。
+      migrate-tsdb-schema:
         condition: service_completed_successfully
       app:
         # 等 app 起来 — app 启动期签发 .api-key,worker(omcctl) 才能读到
@@ -741,6 +825,8 @@ services:
 
 volumes:
   pgdata:
+  # tsdbdata：postgres-tsdb（第二个 TimescaleDB 实例 / 时序库 TsPool）数据卷。
+  tsdbdata:
   redisdata:
   natsdata:
   miniodata:

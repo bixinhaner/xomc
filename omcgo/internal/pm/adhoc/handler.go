@@ -239,12 +239,13 @@ func cronForGranularity(g string) string {
 
 // rejectCrossTechnology 校验 deviceSNs 全部属于指定制式 tech（lte/nr/gsm）。
 //
-// 任一设备制式不符（或在 devices 表查不到 → 无法确认制式）即返错，实现"建任务拒跨制式"（设计 §2.5）。
-// devices.technology 为小写 lte/nr/gsm。
+// 任一设备制式不符（或在影子表查不到 → 无法确认制式）即返错，实现"建任务拒跨制式"（设计 §2.5）。
+// device_dim.technology 为小写 lte/nr/gsm。
+// h.pool 是 TsPool；devices 改读本库影子表 device_dim（跨库分离）。
 func (h *Handler) rejectCrossTechnology(ctx context.Context, tech string, deviceSNs []string) error {
 	const q = `
 SELECT serial_number, technology
-FROM devices
+FROM device_dim
 WHERE serial_number = ANY($1)`
 	rows, err := h.pool.Query(ctx, q, deviceSNs)
 	if err != nil {
@@ -511,15 +512,16 @@ type resultsFilter struct {
 // 抽出来便于单测（带/不带大时间段两路）；时间段非法值容错忽略而非报错。
 func buildResultsQuery(taskID uuid.UUID, f resultsFilter, limit, offset int) (string, []any) {
 	// PM-线名解析：LEFT JOIN 在读时把分组键 ID 解析成可读名 —— product 维度按 product_id 取
-	// products.product_name；device_group 维度按 'DeviceGroup='||id 比对 object_ldn 取 device_groups.name。
+	// product_dim.product_name；device_group 维度按 'DeviceGroup='||id 比对 object_ldn 取 device_group_dim.name。
 	// 两 JOIN 都是 LEFT，互不影响（product 任务时组名 NULL、组任务时产品名 NULL）；名缺失（脏数据/已删）也返 NULL，前端回退 id 前 8 位。
+	// 查询跑在 TsPool（pm_adhoc_aggregation_results 在时序库），products/device_groups 改读本库影子表。
 	q := `
 SELECT r.id, r.task_id, r.device_oui, r.device_sn, r.product_id, r.metric_path, r.metric_type, r.metric_value,
        r.statis_type, r.granularity, r.time, r.start_time, r.end_time, r.ingest_time, r.object_ldn, r.extra,
        p.product_name, g.name AS device_group_name
 FROM pm_adhoc_aggregation_results r
-LEFT JOIN products p ON p.id = r.product_id
-LEFT JOIN device_groups g ON ('DeviceGroup=' || g.id::text) = split_part(r.object_ldn, ',', 1)
+LEFT JOIN product_dim p ON p.id = r.product_id
+LEFT JOIN device_group_dim g ON ('DeviceGroup=' || g.id::text) = split_part(r.object_ldn, ',', 1)
 WHERE r.task_id = $1`
 	args := []any{taskID}
 	pos := 2
@@ -806,25 +808,27 @@ type filterOptionDTO struct {
 //
 // 返回 (sql, args, supported)。supported=false 表示该维度不支持筛选（device/aggregate_group/network），
 // 调用方据此直接回空选项数组，不查库。
-//   - product：DISTINCT product_id + LEFT JOIN products 取 product_name
-//   - device_group：DISTINCT object_ldn + LEFT JOIN device_groups 取组名（'DeviceGroup='||id 比对）
+//   - product：DISTINCT product_id + LEFT JOIN product_dim 取 product_name（跨库分离用影子表）
+//   - device_group：DISTINCT object_ldn + LEFT JOIN device_group_dim 取组名（'DeviceGroup='||id 比对）
 //   - band：DISTINCT object_ldn（频段无现成名，label 给原值，可读化交前端）
 //
 // 三条 SQL 均无 LIMIT/OFFSET —— 选项是与结果分页/上限完全解耦的权威全量子集（不被结果上限截断）。
 func buildFilterOptionsQuery(dim Dimension, taskID uuid.UUID) (string, []any, bool) {
 	switch dim {
 	case DimensionProduct:
+		// 查询跑在 TsPool；products 改读本库影子表 product_dim。
 		return `
 SELECT DISTINCT r.product_id, p.product_name
 FROM pm_adhoc_aggregation_results r
-LEFT JOIN products p ON p.id = r.product_id
+LEFT JOIN product_dim p ON p.id = r.product_id
 WHERE r.task_id = $1 AND r.product_id IS NOT NULL
 ORDER BY p.product_name`, []any{taskID}, true
 	case DimensionDeviceGroup:
+		// 查询跑在 TsPool；device_groups 改读本库影子表 device_group_dim。
 		return `
 SELECT DISTINCT r.object_ldn, g.name
 FROM pm_adhoc_aggregation_results r
-LEFT JOIN device_groups g ON ('DeviceGroup=' || g.id::text) = split_part(r.object_ldn, ',', 1)
+LEFT JOIN device_group_dim g ON ('DeviceGroup=' || g.id::text) = split_part(r.object_ldn, ',', 1)
 WHERE r.task_id = $1 AND r.object_ldn LIKE 'DeviceGroup=%'
 ORDER BY g.name`, []any{taskID}, true
 	case DimensionBand:

@@ -29,6 +29,7 @@ type ACSConfig struct {
 	Redis                   RedisConfig           `mapstructure:"redis"`
 	NATS                    NATSConfig            `mapstructure:"nats"`
 	DB                      PostgresConfig        `mapstructure:"db"`
+	TSDB                    PostgresConfig        `mapstructure:"tsdb"` // KPI/时序库物理分离：ACS 写 trace_messages（已迁时序库）所需的第二个连接池
 	MinIO                   MinIOConfig           `mapstructure:"minio"`
 	Upload                  UploadConfig          `mapstructure:"upload"`
 	Download                DownloadConfig        `mapstructure:"download"`

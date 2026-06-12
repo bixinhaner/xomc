@@ -67,6 +67,15 @@ db:
   max_conn_idle_time: 5m
   health_check_interval: 30s
 
+# KPI/时序库物理分离：ACS 写 trace_messages（已迁时序库）所需的第二个连接池，指向 postgres-tsdb。
+tsdb:
+  dsn: "postgres://omcgo:omcgo123@postgres-tsdb:5432/omcgo?sslmode=disable"
+  max_conns: 10
+  min_conns: 2
+  max_conn_lifetime: 30m
+  max_conn_idle_time: 5m
+  health_check_interval: 30s
+
 minio:
   endpoint: "minio:9000"
   access_key: "minioadmin"

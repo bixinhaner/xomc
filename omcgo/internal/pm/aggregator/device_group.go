@@ -72,9 +72,9 @@ SELECT
     NOW(),
     NULL::jsonb
 FROM %s m
-JOIN devices d
+JOIN device_dim d
   ON d.oui = m.device_oui AND d.serial_number = m.device_sn
-JOIN device_group_members dgm
+JOIN device_group_member_dim dgm
   ON dgm.device_id = d.id
 WHERE m.metric_type = 'counter'
   AND m.end_time >= $4

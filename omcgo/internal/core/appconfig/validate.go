@@ -59,6 +59,10 @@ func (c *ACSConfig) Validate() error {
 	if err := c.DB.validate("db"); err != nil {
 		errs = append(errs, err.Error())
 	}
+	// KPI/时序库物理分离：ACS 写 trace_messages（已迁时序库），tsdb 池必填（仿 db）。
+	if err := c.TSDB.validate("tsdb"); err != nil {
+		errs = append(errs, err.Error())
+	}
 	if err := c.Redis.validate(); err != nil {
 		errs = append(errs, err.Error())
 	}

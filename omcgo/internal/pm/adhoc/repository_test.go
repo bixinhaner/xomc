@@ -24,6 +24,10 @@ import (
 //
 // 运行：OMCGO_DB_DSN=postgres://omcgo:omcgo123@localhost:5432/omcgo?sslmode=disable \
 //        go test -tags integration -count=1 ./internal/pm/adhoc/...
+//
+// 注：KPI/时序库物理分离后 NewPgRepository(pgPool, tsPool) 双池——pgPool 管 pm_tasks/
+// pm_adhoc_task_runs，tsPool 写 pm_adhoc_aggregation_results。集成测试单 DSN，两池传同一
+// pool（同实例），InsertResults round-trip 行为不变。
 
 func openPoolOrSkip(t *testing.T) *pgxpool.Pool {
 	t.Helper()
@@ -62,7 +66,7 @@ func cleanup(t *testing.T, pool *pgxpool.Pool, id uuid.UUID) {
 func Test_Repository_CreateAndGet(t *testing.T) {
 	pool := openPoolOrSkip(t)
 	defer pool.Close()
-	r := NewPgRepository(pool)
+	r := NewPgRepository(pool, pool)
 	ctx := context.Background()
 
 	req := sampleReq()
@@ -86,7 +90,7 @@ func Test_Repository_CreateAndGet(t *testing.T) {
 func Test_Repository_CreateContinuousWithoutCronRejected(t *testing.T) {
 	pool := openPoolOrSkip(t)
 	defer pool.Close()
-	r := NewPgRepository(pool)
+	r := NewPgRepository(pool, pool)
 	ctx := context.Background()
 
 	req := sampleReq()
@@ -98,7 +102,7 @@ func Test_Repository_CreateContinuousWithoutCronRejected(t *testing.T) {
 func Test_Repository_ListByStatus(t *testing.T) {
 	pool := openPoolOrSkip(t)
 	defer pool.Close()
-	r := NewPgRepository(pool)
+	r := NewPgRepository(pool, pool)
 	ctx := context.Background()
 
 	req := sampleReq()
@@ -122,7 +126,7 @@ func Test_Repository_ListByStatus(t *testing.T) {
 func Test_Repository_CancelPending(t *testing.T) {
 	pool := openPoolOrSkip(t)
 	defer pool.Close()
-	r := NewPgRepository(pool)
+	r := NewPgRepository(pool, pool)
 	ctx := context.Background()
 
 	req := sampleReq()
@@ -139,7 +143,7 @@ func Test_Repository_CancelPending(t *testing.T) {
 func Test_Repository_CancelTerminalRejected(t *testing.T) {
 	pool := openPoolOrSkip(t)
 	defer pool.Close()
-	r := NewPgRepository(pool)
+	r := NewPgRepository(pool, pool)
 	ctx := context.Background()
 
 	req := sampleReq()
@@ -158,7 +162,7 @@ func Test_Repository_CancelTerminalRejected(t *testing.T) {
 func Test_Repository_LockNextPending(t *testing.T) {
 	pool := openPoolOrSkip(t)
 	defer pool.Close()
-	r := NewPgRepository(pool)
+	r := NewPgRepository(pool, pool)
 	ctx := context.Background()
 
 	req := sampleReq()
@@ -185,7 +189,7 @@ func Test_Repository_LockNextPending(t *testing.T) {
 func Test_Repository_InsertResultsRoundTrip(t *testing.T) {
 	pool := openPoolOrSkip(t)
 	defer pool.Close()
-	r := NewPgRepository(pool)
+	r := NewPgRepository(pool, pool)
 	ctx := context.Background()
 
 	taskID := uuid.New()
@@ -213,7 +217,7 @@ func Test_Repository_InsertResultsRoundTrip(t *testing.T) {
 func Test_Repository_TaskRuns_OrderAndPaginate(t *testing.T) {
 	pool := openPoolOrSkip(t)
 	defer pool.Close()
-	r := NewPgRepository(pool)
+	r := NewPgRepository(pool, pool)
 	ctx := context.Background()
 
 	taskID := uuid.New()

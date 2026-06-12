@@ -70,6 +70,8 @@ func runACS(cmd *cobra.Command, args []string) error {
 	// ACS 持有 PG / MinIO / STUN 共享密钥；dev/test 自动跳过。
 	if err := appconfig.GuardProductionSecrets(
 		appconfig.SecretCheck{Field: "db.dsn(password)", Value: cfg.DB.DSN, IsDSN: true},
+		// KPI/时序库物理分离：ACS 写 trace_messages 也持有时序库凭证，纳入 guardrail。
+		appconfig.SecretCheck{Field: "tsdb.dsn(password)", Value: cfg.TSDB.DSN, IsDSN: true},
 		appconfig.SecretCheck{Field: "minio.access_key", Value: cfg.MinIO.AccessKey},
 		appconfig.SecretCheck{Field: "minio.secret_key", Value: cfg.MinIO.SecretKey},
 		appconfig.SecretCheck{Field: "stun.shared_secret", Value: cfg.STUN.SharedSecret},
@@ -316,8 +318,9 @@ func runACS(cmd *cobra.Command, args []string) error {
 	//   - WhitelistCache 启动加载 + 订阅 trace.task.* 实时增删 SN（30s 兜底轮询保活）
 	//   - Service 注入 EventBus，EnqueueCapture 改为 publish trace.message.captured 到 JetStream，
 	//     worker 群组消费 + 批量落库（ACS 不再写 PG，hot path < 1ms）
-	if inf.PgPool != nil {
-		traceRepo := trace.NewPgRepository(inf.PgPool)
+	// KPI/时序库物理分离：trace_messages 已迁时序库（TsPool），trace 旁路 hook 改连 TsPool。
+	if inf.TsPool != nil {
+		traceRepo := trace.NewPgRepository(inf.TsPool)
 		traceSvc := trace.NewService(traceRepo, trace.DefaultConfig(), inf.Logger)
 		if inf.EventBus != nil {
 			traceSvc.SetEventBus(inf.EventBus)

@@ -326,12 +326,13 @@ func (r *PgCounterRepository) counterFilterToMetricsQuery(ctx context.Context, f
 	return q, nil
 }
 
-// lookupDeviceOUISN 反查 devices 表的 (oui, serial_number) 双键。
+// lookupDeviceOUISN 反查设备的 (oui, serial_number) 双键。
 // 一次/请求开销，pgxpool 自带连接复用。
+// r.pool 是 TsPool；devices 反查改读本库影子表 device_dim（跨库分离）。
 func (r *PgCounterRepository) lookupDeviceOUISN(ctx context.Context, deviceID uuid.UUID) (string, string, error) {
 	var oui, sn string
 	err := r.pool.QueryRow(ctx,
-		`SELECT oui, serial_number FROM devices WHERE id = $1`, deviceID,
+		`SELECT oui, serial_number FROM device_dim WHERE id = $1`, deviceID,
 	).Scan(&oui, &sn)
 	if err != nil {
 		return "", "", fmt.Errorf("lookup device oui+sn by id %s: %w", deviceID, err)

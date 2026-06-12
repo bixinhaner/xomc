@@ -63,9 +63,10 @@ func counterType() *metrics.MetricType {
 	return &ct
 }
 
-// Test_queryBandTable_SQLShape：断言生成 SQL 含 band 聚合关键结构：
-// cell_band CTE（CellIdentity↔FreqBandIndicator 配对）、object_ldn 的 Cellid 正则抽取、
-// INNER JOIN（未命中跳过）、按 band GROUP BY。
+// Test_queryBandTable_SQLShape：断言生成 SQL 含 band 聚合关键结构（KPI/时序库物理分离后）：
+// 直接 JOIN 本库影子表 device_dim + cell_band_dim（小区→band 映射已由 worker 同步任务从主库
+// device_parameters 的 CellIdentity/FreqBandIndicator 配对派生入 cell_band_dim，不再现拼 CTE）、
+// object_ldn 的 Cellid 正则抽取、INNER JOIN（未命中跳过）、按 band GROUP BY。
 func Test_queryBandTable_SQLShape(t *testing.T) {
 	db := &recordingDB{
 		// T-0191：不再有 precheck 调用；call#0 = 主聚合查询（只聚 counter）
@@ -82,29 +83,22 @@ func Test_queryBandTable_SQLShape(t *testing.T) {
 	require.GreaterOrEqual(t, len(db.sqls), 1, "主查询")
 
 	sql := db.sqls[0]
-	assert.Contains(t, sql, "WITH cell_band AS", "需 cell_band 映射 CTE")
-	// CellIdentity 与 FreqBandIndicator 同 device_id + fap_instance 配对
-	assert.Contains(t, sql, "bp.fap_instance = cp.fap_instance")
-	// 路径后缀匹配（LTE band 路径 + CellIdentity 路径）
-	foundBandSuffix := false
-	foundCellSuffix := false
+	// 跨库分离后小区→band 映射改读时序库影子表，不再有 device_parameters 现拼 CTE / 路径后缀。
+	assert.NotContains(t, sql, "WITH cell_band AS", "影子表替代 CTE，不应再有 cell_band CTE")
 	for _, a := range db.argsLog[0] {
 		if s, ok := a.(string); ok {
-			if strings.HasSuffix(s, ".CellConfig.LTE.RAN.RF.FreqBandIndicator") {
-				foundBandSuffix = true
-			}
-			if strings.HasSuffix(s, ".CellConfig.LTE.RAN.Common.CellIdentity") {
-				foundCellSuffix = true
-			}
+			assert.False(t, strings.HasSuffix(s, ".CellConfig.LTE.RAN.RF.FreqBandIndicator"),
+				"不再以 band 路径后缀作参数")
+			assert.False(t, strings.HasSuffix(s, ".CellConfig.LTE.RAN.Common.CellIdentity"),
+				"不再以 CellIdentity 路径后缀作参数")
 		}
 	}
-	assert.True(t, foundBandSuffix, "args 含 LTE band 路径后缀")
-	assert.True(t, foundCellSuffix, "args 含 LTE CellIdentity 路径后缀")
-	// PM object_ldn 抽 Cellid 正则
+	// 直接 JOIN 影子表 device_dim + cell_band_dim
+	assert.Contains(t, sql, "JOIN device_dim d")
+	assert.Contains(t, sql, "JOIN cell_band_dim cb")
+	assert.NotContains(t, sql, "LEFT JOIN cell_band_dim")
+	// cell_band_dim.cell_id 与 PM object_ldn 抽出的 Cellid 等值
 	assert.Contains(t, sql, "substring(m.object_ldn FROM 'Cellid=([0-9]+)')")
-	// INNER JOIN cell_band：未命中的小区不产 band 行（兜底=跳过）
-	assert.Contains(t, sql, "JOIN cell_band cb")
-	assert.NotContains(t, sql, "LEFT JOIN cell_band")
 	// 按 band 分组
 	assert.Contains(t, sql, "GROUP BY cb.band")
 }

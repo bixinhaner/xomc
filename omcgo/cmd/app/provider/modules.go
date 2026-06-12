@@ -999,7 +999,8 @@ func initBackupModule(c *Container) error {
 		// 用独立的 PMFileStore（NewPgPMFileStore 是无状态构造器，可与 ph.pmFileStore
 		// 并存，不会产生竞争）。
 		pmBucket := c.Cfg.MinIO.Buckets.PMFiles
-		pmFileStoreForBundle := pm.NewPgPMFileStore(c.PgPool)
+		// KPI/时序库物理分离：pm_files 已迁时序库（TsPool）。
+		pmFileStoreForBundle := pm.NewPgPMFileStore(c.TsPool)
 		bundleSvc.Register(bundle.ModulePM, func(ctx context.Context, sns []string) ([]bundle.BundleFile, error) {
 			prefix := fmt.Sprintf("pm-bundle-%s", time.Now().Format("20060102-150405"))
 			out := make([]bundle.BundleFile, 0, len(sns)*5)
@@ -1176,7 +1177,8 @@ func initRebootRecordModule(c *Container) error {
 func initDashboardModule(c *Container) error {
 	logger := c.Logger.Named("dashboard")
 
-	dashboardService := dashboard.NewService(c.DeviceService, c.AlarmPgStore, c.PMKPIRepo, c.PgPool, c.GroupRepo, logger)
+	// KPI/时序库物理分离：alarms_history / alarm_efficiency_metrics matview 在时序库（TsPool），新增 tsPool 入参。
+	dashboardService := dashboard.NewService(c.DeviceService, c.AlarmPgStore, c.PMKPIRepo, c.PgPool, c.TsPool, c.GroupRepo, logger)
 	dashboardHandler := dashboard.NewHandler(dashboardService)
 
 	c.miscDeps.dashboardHandler = dashboardHandler
@@ -1971,7 +1973,8 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 	//   - CreateTask/StopTask 通过 EventBus 发 trace.task.{started,stopped,purged} 事件，
 	//     ACS 实例订阅后实时增删 SN 白名单；worker 订阅 purged 异步清理报文。
 	//   - 注入 BulkStore：handler 的 GetMessagePayload 端点遇到 external 报文时按需拉 MinIO
-	traceRepo := trace.NewPgRepository(c.PgPool)
+	// KPI/时序库物理分离：trace_messages 已迁时序库（TsPool），retention 超表。
+	traceRepo := trace.NewPgRepository(c.TsPool)
 	traceSvc := trace.NewService(traceRepo, trace.DefaultConfig(), logger)
 	if c.EventBus != nil {
 		traceSvc.SetEventBus(c.EventBus)
