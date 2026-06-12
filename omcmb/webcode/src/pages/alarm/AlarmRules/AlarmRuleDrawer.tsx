@@ -671,7 +671,10 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
         <Form.Item
           name="ruleName"
           label={t('alarm.ruleName')}
-          rules={[{ validator: validateRuleName }]}
+          rules={[
+            { required: true, message: t('filter.enterField', { label: t('alarm.ruleName') }) },
+            { validator: validateRuleName },
+          ]}
           validateTrigger="onBlur"
         >
           <Input placeholder={t('filter.enterField', { label: t('alarm.ruleName') })} maxLength={100} showCount />

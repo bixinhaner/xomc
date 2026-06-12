@@ -23,6 +23,8 @@ import { createApiSwitch } from '@core/services/apiSwitch';
 import { useT } from '@/hooks/useT';
 import type { Alarm, DealState, EventType } from '@core/types/alarm';
 import type { AlarmFilter } from '@core/types/alarm';
+import { parseDrillDownParams } from '../drillDown';
+import { useSearchParams } from 'react-router-dom';
 import AlarmDetail from '../AlarmDetail';
 import ExportModal from './ExportModal';
 import AutoRefreshDropdown from '../components/AutoRefreshDropdown';
@@ -100,9 +102,17 @@ function triggerCsvDownload(content: string, filename: string) {
 export default function CurrentAlarms() {
   const t = useT();
   const { modal, message } = App.useApp();
+  const [searchParams] = useSearchParams();
+  // 仅在挂载时解析一次钻取参数，作为筛选初始值（后续用户操作不再受 URL 影响）
+  const drillDown = useMemo(() => parseDrillDownParams(searchParams), []); // eslint-disable-line react-hooks/exhaustive-deps
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
-  const [filterParams, setFilterParams] = useState<AlarmFilter>({});
+  const [filterParams, setFilterParams] = useState<AlarmFilter>(() => drillDown.filter);
+  // 有钻取参数时把表单初始值传给 FilterBar（无则传 undefined，保留 sessionStorage 恢复行为）
+  const drillDownInitialValues = useMemo(
+    () => (Object.keys(drillDown.formValues).length > 0 ? drillDown.formValues : undefined),
+    [drillDown]
+  );
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [detailAlarm, setDetailAlarm] = useState<Alarm | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -789,6 +799,7 @@ export default function CurrentAlarms() {
         onSearch={handleSearch}
         onReset={handleReset}
         collapsedRows={2}
+        initialValues={drillDownInitialValues}
       />
 
       {/* 列表卡片 */}
