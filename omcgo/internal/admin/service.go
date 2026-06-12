@@ -223,7 +223,9 @@ func (s *AdminService) Login(ctx context.Context, username, password string) (*T
 
 	// Check if account is temporarily locked due to brute-force
 	if user.LockedUntil != nil && time.Now().Before(*user.LockedUntil) {
-		return nil, commonerrors.NewBusinessError(7012, "account temporarily locked due to too many failed attempts", commonerrors.ErrForbidden)
+		// issue #220：账号锁定文案与"IP 限流"文案刻意拆开，让用户能区分
+		// 是"自己这个账号被锁"还是"来源网络被整体限流"。
+		return nil, commonerrors.NewBusinessError(7012, "该账号已锁定，请稍后再试或联系管理员", commonerrors.ErrForbidden)
 	}
 
 	// PRD §7 P1：账号过期校验。expire_at <= now → 拒绝登录。

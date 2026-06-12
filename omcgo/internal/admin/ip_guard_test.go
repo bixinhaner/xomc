@@ -168,7 +168,7 @@ func TestIPGuard_RecordFailure_IsolatedPerIP(t *testing.T) {
 	assert.False(t, mr.Exists("auth:ip:locked:2.2.2.2"), "2.2.2.2 仅 1 次失败不应被锁")
 }
 
-// 未注入 policy 时走 default（IPLimitCount=5）。
+// 未注入 policy 时走 default（IPLimitCount=defaultIPLimitCount）。
 func TestIPGuard_NoPolicy_UsesDefaults(t *testing.T) {
 	mr := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
@@ -177,12 +177,17 @@ func TestIPGuard_NoPolicy_UsesDefaults(t *testing.T) {
 	g := NewIPGuard(client) // 不 SetPolicy
 	ctx := context.Background()
 
-	// default IPLimitCount=5，5 次失败应触发锁
-	for i := 0; i < 5; i++ {
+	// 差一次到 default 阈值时不应锁
+	for i := int64(0); i < defaultIPLimitCount-1; i++ {
 		require.NoError(t, g.RecordFailure(ctx, "1.2.3.4"))
 	}
+	assert.False(t, mr.Exists("auth:ip:locked:1.2.3.4"),
+		"未到 default 阈值不应触发锁")
+
+	// 再失败一次达到 default 阈值应触发锁
+	require.NoError(t, g.RecordFailure(ctx, "1.2.3.4"))
 	assert.True(t, mr.Exists("auth:ip:locked:1.2.3.4"),
-		"未注入 policy 应走 default 阈值 5 触发锁")
+		"未注入 policy 应走 default 阈值触发锁")
 }
 
 // Redis 连接故障时 fail-open（CheckAllowed 返 allow）— 防止 redis 抖动导致登录瘫痪。
