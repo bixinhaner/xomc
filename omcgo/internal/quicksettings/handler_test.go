@@ -162,6 +162,53 @@ func TestHandler_GetGroups_DeviceNotFound_404(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
+// TestHandler_GetGroups_EmptyDevice_404 锁 issue #180 回归:
+// 设备查询带「排除已删除」过滤,软删/不存在的设备查出来是 (nil, nil)。
+// 修复前代码紧接着解引用 device.ProductClass 触发空指针 panic → 兜成 500,前端拿 500 即空白。
+// 断言:查到空设备返回 404 而非 500/panic。
+func TestHandler_GetGroups_EmptyDevice_404(t *testing.T) {
+	deviceID := uuid.New()
+	h := NewHandler(
+		NewRegistry(),
+		&mockDeviceLookup{device: nil, err: nil}, // 软删/不存在:返回 (nil, nil)
+		&mockProductMatcher{},
+		&mockPMNameLookup{},
+	)
+	r := setupRouter(h)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/quicksettings/groups?device_id="+deviceID.String(), nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+// TestHandler_GetGroups_DeviceLookupInfraError_404 钉住「GetDevice 任意 error 一律 404」
+// 的当前契约(blanket err->404)。
+//
+// 此处模拟的是「瞬时基础设施错误」(如 DB 连接超时 / 网络抖动),而非业务语义上的
+// 「设备不存在」。handler.go GetGroups 中的 `if err != nil { 404 }` 不区分两者:
+// 不论是 sql.ErrNoRows 还是 context deadline / 连接失败,都兜成 404。
+//
+// 本测试的目的是 *记录并锁定当前行为*——并非主张 404 是基础设施错误的理想响应
+// (严格来说瞬时故障更宜 503/500 让前端可重试)。任何未来想把瞬时错误改判为
+// 5xx 的改动都会撞红此断言,从而被迫是一次「有意识」的契约变更而非无声漂移。
+// 不修改生产代码。
+func TestHandler_GetGroups_DeviceLookupInfraError_404(t *testing.T) {
+	deviceID := uuid.New()
+	h := NewHandler(
+		NewRegistry(),
+		// device:nil + 瞬时基础设施错误(连接超时),区别于 DeviceNotFound 用例的语义化 "not found"。
+		&mockDeviceLookup{device: nil, err: errors.New("dial tcp: i/o timeout")},
+		&mockProductMatcher{},
+		&mockPMNameLookup{},
+	)
+	r := setupRouter(h)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/quicksettings/groups?device_id="+deviceID.String(), nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	// 当前契约:任何 GetDevice error(含瞬时故障)→ 404。改判前请先确认这是有意为之。
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
 func TestHandler_GetGroups_ProductClassUnmatched_404(t *testing.T) {
 	deviceID := uuid.New()
 	h := NewHandler(

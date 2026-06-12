@@ -84,6 +84,13 @@ func (h *Handler) GetGroups(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "device not found", "device_id": deviceIDStr})
 		return
 	}
+	// 设备查询带「排除已删除」过滤,软删/不存在时返回 (nil, nil)。
+	// 不判空直接解引用 device.ProductClass 会触发空指针 panic → 兜成 500,前端拿 500 即空白。
+	// 按本接口注释承诺的约定,查到空设备返回 404。
+	if device == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "device not found", "device_id": deviceIDStr})
+		return
+	}
 
 	mr, err := h.productRegistry.MatchProductClass(c.Request.Context(), device.ProductClass)
 	if err != nil {
