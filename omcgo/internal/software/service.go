@@ -80,6 +80,16 @@ type SoftwareService struct {
 	// 额外 cancel 对应任务的执行 context，让在飞的子任务 goroutine 在派发 Download 前
 	// 提前退出。详见 stop_control.go。
 	cancelReg *taskCancelRegistry
+	// transferProvider 运行时 ACS 传输配置（sys_config 'acs_transfer'，30s 缓存）。
+	// 本层只消费 MaxGlobalUpgradeConcurrency（系统级升级并发上限）；
+	// BaseURL/凭据等由 executor 自己持有的同一 Provider 消费。
+	transferProvider transfercfg.Provider
+	// globalUpgradeSlots 系统级（跨任务）升级/回退设备并发闸：所有任务合计同时执行
+	// 的设备数 ≤ 上限，空闲槽位按任务轮转（round-robin）分配保证多任务雨露均沾。
+	// 任务级并发（MaxConcurrent）仍各自生效，本闸只封顶总量，防多任务叠加打爆固件
+	// 下载带宽 / ACS。上限运行时取自"系统设置 → ACS 传输配置"
+	// （acquireGlobalUpgradeSlot 每次占位前刷新），未配置默认 DefaultGlobalUpgradeConcurrency。
+	globalUpgradeSlots *fairSlotPool
 	// groupReader 是 #59 Problem 4「按设备归属校验」的统一强制层接入点（与 device /
 	// alarm 模块共用 internal/authz）。未注入时退化为不校验（dev/test），与既有
 	// nil-safe 语义一致；生产路由经 SetDeviceGroupReader 注入。可见分组的解析在 handler
@@ -168,6 +178,8 @@ func NewSoftwareService(
 		adapter:      NewDefaultUpgradeAdapter(),
 		logger:       logger.Named("software"),
 		cancelReg:    newTaskCancelRegistry(),
+
+		globalUpgradeSlots: newFairSlotPool(DefaultGlobalUpgradeConcurrency),
 	}
 
 	s.executor = NewUpgradeExecutor(
@@ -307,7 +319,82 @@ func (s *SoftwareService) SetUploadConfig(acsUploadBaseURL string) {
 // SetTransferProvider 把"系统管理 → ACS 传输"系统配置接进来，Upload RPC 下发时
 // 用它的 BaseURL / Username / Password。改配置 30 秒内自动生效，无需重启。
 func (s *SoftwareService) SetTransferProvider(p transfercfg.Provider) {
+	s.transferProvider = p
 	s.executor.SetTransferProvider(p)
+}
+
+// acquireGlobalUpgradeSlot 为 taskID 占用一个系统级升级槽位（跨任务轮转分配）。
+// 占位前先按运行时配置刷新上限（系统设置 → ACS 传输配置 → 升级并发上限，30s 缓存
+// 生效）；满载排队等待，ctx 取消（任务急停）时放弃并返回 false。
+func (s *SoftwareService) acquireGlobalUpgradeSlot(ctx context.Context, taskID uuid.UUID) bool {
+	if s.transferProvider != nil {
+		if n := s.transferProvider.Snapshot(ctx).MaxGlobalUpgradeConcurrency; n > 0 {
+			s.globalUpgradeSlots.SetLimit(n)
+		}
+	}
+	return s.globalUpgradeSlots.Acquire(ctx, taskID)
+}
+
+// isSlotReleasableState 并发槽位可释放的子任务状态。槽位语义 = 设备的**服务器侧
+// IO 阶段**（下发 RPC → CPE 拉/传文件 → TransferComplete），而非完整升级流程：
+// 大批量升级的瓶颈是固件下载的文件 IO / 带宽，TC 之后设备自行安装重启，不再占用
+// 服务器资源，提前放行下一台开始下载可显著加快整批节奏。
+//   - rebooting / verifying：文件已下载完成（5G TC 后等 102 UPGRADE FINISH），IO
+//     已结束 → 释放；终态判定仍由 102 事件处理 / reaper 收口，与槽位无关。
+//   - completed / failed / terminated：流程结束 → 释放（4G TC 即 completed）。
+//   - suspended 不释放——设备离线挂起会被 device.online 恢复（恢复后重新下载，IO
+//     还会发生）或 reaper 在 10min 内判失败，挂起期间设备仍属于"在飞批次"；任务级
+//     手动挂起走 execCtx cancel 释放。
+func isSlotReleasableState(st UpgradeState) bool {
+	switch st {
+	case UpgradeCompleted, UpgradeFailed, UpgradeTerminated,
+		UpgradeRebooting, UpgradeVerifying:
+		return true
+	}
+	return false
+}
+
+// waitSubTaskSlotRelease 阻塞等待子任务离开服务器侧 IO 阶段（见 isSlotReleasableState），
+// 让并发槽位（任务级 + 系统级）精确覆盖产生 IO 压力的窗口：下发 → 下载 → TC。
+//
+// 用 10s 轮询 DB 而非订阅事件：状态写入分散在 TC 处理 / 102 事件 / reaper 超时 / 急停
+// 多处，轮询是唯一不会漏的收口。退出条件三选一：
+//   - 子任务进入可释放状态（rebooting/verifying/completed/failed/terminated）
+//   - ctx 取消（任务级 Suspend/Terminate 急停）
+//   - 2h 兜底超时（reaper 单阶段最长 30min + 挂起恢复重试；防 reaper 失效时槽位永久泄漏）
+func (s *SoftwareService) waitSubTaskSlotRelease(ctx context.Context, subTaskID uuid.UUID) {
+	const pollInterval = 10 * time.Second
+	const maxWait = 2 * time.Hour
+	deadline := time.Now().Add(maxWait)
+
+	check := func() bool {
+		st, err := s.subTaskRepo.GetByID(ctx, subTaskID)
+		if err != nil {
+			return false // 瞬时 DB 错误下个 tick 重试；持续失败由 maxWait 兜底
+		}
+		return isSlotReleasableState(st.Status)
+	}
+	if check() {
+		return
+	}
+
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if check() {
+				return
+			}
+			if time.Now().After(deadline) {
+				s.logger.Warn("upgrade slot wait backstop timeout, releasing slot",
+					zap.String("sub_task_id", subTaskID.String()))
+				return
+			}
+		}
+	}
 }
 
 // BatchCollectRequest 日志采集任务创建请求。
@@ -603,7 +690,7 @@ func (s *SoftwareService) BatchUpgrade(ctx context.Context, req BatchUpgradeRequ
 
 	concurrency := req.Concurrency
 	if concurrency < 1 {
-		concurrency = 5
+		concurrency = DefaultUpgradeConcurrency
 	}
 
 	taskType := req.TaskType
@@ -876,26 +963,47 @@ func applyScheduleMode(task *UpgradeTask, mode scheduleMode, scheduledAt *time.T
 // goroutine 后清理注册表项并 cancel（释放 context 资源）。
 func (s *SoftwareService) startExecution(mainTask *UpgradeTask, subTasks []*UpgradeSubTask, fw *FirmwareVersion, concurrency int) {
 	if concurrency < 1 {
-		concurrency = 5
+		concurrency = DefaultUpgradeConcurrency
 	}
 	isKeepConfig := mainTask.IsKeepConfig
 	execCtx, done := s.launchControlledExecution(mainTask.ID, len(subTasks))
 	sem := make(chan struct{}, concurrency)
-	for i := range subTasks {
-		sem <- struct{}{}
-		go func(st *UpgradeSubTask) {
-			defer done()
-			defer func() { <-sem }()
-			defer func() {
-				if r := recover(); r != nil {
-					s.logger.Error("upgrade executor panic",
-						zap.String("sub_task_id", st.ID.String()),
-						zap.Any("recover", r))
+	// 派发循环放后台：槽位覆盖设备文件下载阶段，sem 满载会阻塞到有设备下载完成
+	// （TC 到达），不能占着调用方（BatchUpgrade HTTP 请求 / 定时调度器）。
+	go func() {
+		for i := range subTasks {
+			select {
+			case sem <- struct{}{}:
+			case <-execCtx.Done():
+				// 任务急停：未派发的设备不再启动，但要补齐 done 计数让监管 goroutine 收尾。
+				for j := i; j < len(subTasks); j++ {
+					done()
 				}
-			}()
-			s.executor.ExecuteOne(execCtx, st, fw, isKeepConfig, mainTask.DownloadFileType)
-		}(subTasks[i])
-	}
+				return
+			}
+			go func(st *UpgradeSubTask) {
+				defer done()
+				defer func() { <-sem }()
+				defer func() {
+					if r := recover(); r != nil {
+						s.logger.Error("upgrade executor panic",
+							zap.String("sub_task_id", st.ID.String()),
+							zap.Any("recover", r))
+					}
+				}()
+				// 系统级（跨任务）并发闸：满载时在此排队（按任务轮转放行），任务急停时放弃。
+				if !s.acquireGlobalUpgradeSlot(execCtx, mainTask.ID) {
+					return
+				}
+				defer s.globalUpgradeSlots.Release()
+				s.executor.ExecuteOne(execCtx, st, fw, isKeepConfig, mainTask.DownloadFileType)
+				// 槽位语义 = 设备文件 IO 阶段：ExecuteOne 只是派发（秒级返回），这里
+				// 继续占住任务级 + 系统级槽位，直到文件下载完成（TC 到达）才放行
+				// 下一台；之后的安装/重启不占服务器资源，终态由 102 / reaper 收口。
+				s.waitSubTaskSlotRelease(execCtx, st.ID)
+			}(subTasks[i])
+		}
+	}()
 }
 
 // startRollbackExecution launches goroutines to execute rollback sub-tasks with bounded concurrency.
@@ -906,40 +1014,58 @@ func (s *SoftwareService) startRollbackExecution(taskID uuid.UUID, subTasks []*U
 	concurrency := 5
 	execCtx, done := s.launchControlledExecution(taskID, len(subTasks))
 	sem := make(chan struct{}, concurrency)
-	for i := range subTasks {
-		sem <- struct{}{}
-		go func(st *UpgradeSubTask) {
-			defer done()
-			defer func() { <-sem }()
-			defer func() {
-				if r := recover(); r != nil {
-					s.logger.Error("rollback executor panic",
-						zap.String("sub_task_id", st.ID.String()),
-						zap.Any("recover", r))
+	// 同 startExecution：槽位覆盖全流程后 sem 会长时间满载，派发循环放后台。
+	go func() {
+		for i := range subTasks {
+			select {
+			case sem <- struct{}{}:
+			case <-execCtx.Done():
+				for j := i; j < len(subTasks); j++ {
+					done()
 				}
-			}()
-
-			// 派发前先看急停信号：cancel 后整批不再触发回退 SPV/GPV。
-			if execCtx.Err() != nil {
 				return
 			}
+			go func(st *UpgradeSubTask) {
+				defer done()
+				defer func() { <-sem }()
+				defer func() {
+					if r := recover(); r != nil {
+						s.logger.Error("rollback executor panic",
+							zap.String("sub_task_id", st.ID.String()),
+							zap.Any("recover", r))
+					}
+				}()
 
-			dev, err := s.deviceRepo.GetByID(execCtx, st.DeviceID)
-			if err != nil {
-				s.rollbackExec.FailRollbackSubTask(context.Background(), st, fmt.Sprintf("device not found: %v", err), FailureDeviceNotFound)
-				return
-			}
+				// 派发前先看急停信号：cancel 后整批不再触发回退 SPV/GPV。
+				if execCtx.Err() != nil {
+					return
+				}
 
-			tech := model.TechLTE
-			if Is5G(dev) {
-				tech = model.TechNR
-			}
+				// 与升级共用同一系统级并发闸（回退同样产生固件下载/重启压力）。
+				if !s.acquireGlobalUpgradeSlot(execCtx, taskID) {
+					return
+				}
+				defer s.globalUpgradeSlots.Release()
 
-			// 4G 走两阶段（GPV ROLLBACK_ENABLE → SPV ROLLBACK_CONTROL）；5G 直接 SPV。
-			// 路径与值统一在 RollbackExecutor 内部经 adapter + Translator 决定。
-			s.rollbackExec.RollbackOne(execCtx, st, dev, tech)
-		}(subTasks[i])
-	}
+				dev, err := s.deviceRepo.GetByID(execCtx, st.DeviceID)
+				if err != nil {
+					s.rollbackExec.FailRollbackSubTask(context.Background(), st, fmt.Sprintf("device not found: %v", err), FailureDeviceNotFound)
+					return
+				}
+
+				tech := model.TechLTE
+				if Is5G(dev) {
+					tech = model.TechNR
+				}
+
+				// 4G 走两阶段（GPV ROLLBACK_ENABLE → SPV ROLLBACK_CONTROL）；5G 直接 SPV。
+				// 路径与值统一在 RollbackExecutor 内部经 adapter + Translator 决定。
+				s.rollbackExec.RollbackOne(execCtx, st, dev, tech)
+				// 与升级同语义：槽位覆盖到设备开始重启（派发/IO 阶段结束）即释放。
+				s.waitSubTaskSlotRelease(execCtx, st.ID)
+			}(subTasks[i])
+		}
+	}()
 }
 
 // launchControlledExecution 为一批执行 goroutine 派生绑定到 taskID 的可取消 execCtx，

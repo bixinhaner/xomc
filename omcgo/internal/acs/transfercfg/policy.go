@@ -25,6 +25,10 @@ const (
 	KeyDownloadPath     = "downloadPath"
 	KeyDownloadUsername = "downloadUsername"
 	KeyDownloadPassword = "downloadPassword"
+
+	// KeyMaxGlobalUpgradeConcurrency 系统级（跨任务）升级/回退设备并发上限。
+	// 前端"系统设置 → ACS 传输配置"页维护；software 模块消费（全局升级闸）。
+	KeyMaxGlobalUpgradeConcurrency = "maxGlobalUpgradeConcurrency"
 )
 
 type Provider interface {
@@ -51,6 +55,9 @@ type DownloadSettings struct {
 type Snapshot struct {
 	Upload   UploadSettings
 	Download DownloadSettings
+	// MaxGlobalUpgradeConcurrency 系统级（跨任务）升级/回退设备并发上限；
+	// 0 表示 sys_config 未配置，消费方应回落自己的默认值。
+	MaxGlobalUpgradeConcurrency int
 
 	expiresAt time.Time
 }
@@ -157,6 +164,12 @@ func (p *Policy) loadFromSysConfig(ctx context.Context, snap *Snapshot) {
 	if value, ok := p.lookup(ctx, Category, KeyDownloadPassword); ok {
 		if trimmed, ok := optionalString(value); ok {
 			snap.Download.Password = trimmed
+		}
+	}
+
+	if value, ok := p.lookup(ctx, Category, KeyMaxGlobalUpgradeConcurrency); ok {
+		if parsed, err := strconv.Atoi(strings.TrimSpace(value)); err == nil && parsed > 0 {
+			snap.MaxGlobalUpgradeConcurrency = parsed
 		}
 	}
 }

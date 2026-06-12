@@ -265,6 +265,16 @@ type AllSubTaskFilter struct {
 	model.ListRequest
 }
 
+// DefaultUpgradeConcurrency 升级任务内设备并发执行数的兜底默认值：
+// 创建请求未传 / 传 0 时按此值并发派发（前端文件传输中心默认也填 20）。
+const DefaultUpgradeConcurrency = 20
+
+// DefaultGlobalUpgradeConcurrency 系统级（跨任务）升级/回退设备并发上限默认值：
+// 所有任务合计同时执行的设备数封顶，防多任务叠加打爆固件下载带宽 / ACS。
+// 运行时可通过"系统设置 → ACS 传输配置"（sys_config acs_transfer.maxGlobalUpgradeConcurrency）
+// 调整，30 秒内生效；未配置时用本默认值。
+const DefaultGlobalUpgradeConcurrency = 100
+
 // BatchUpgradeRequest is the JSON body for triggering a batch upgrade.
 type BatchUpgradeRequest struct {
 	DeviceIDs        []uuid.UUID `json:"device_ids" binding:"required,min=1"`

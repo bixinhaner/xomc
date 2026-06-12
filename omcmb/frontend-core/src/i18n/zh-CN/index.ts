@@ -3676,6 +3676,9 @@ const messages: Record<string, string> = {
   'system.transfer.pathHelp': '例如 /smallcell/FileUploadService。留空则回退到启动配置。',
   'system.transfer.uploadMaxFileSizeHelp': '单位：字节，默认 1 GB（1073741824），可按需修改。',
   'system.transfer.runtimeHint': '配置保存后会由 ACS 进程按本地缓存周期刷新生效，当前缓存周期为 30 秒。',
+  'system.transfer.maxGlobalUpgradeConcurrency': '基站升级系统级并发上限',
+  'system.transfer.maxGlobalUpgradeConcurrencyHelp': '全部升级/回退任务合计同时执行的基站数上限（跨任务共享），防止多任务叠加打爆下载带宽，默认 100 台。',
+  'system.transfer.maxGlobalUpgradeConcurrencyRequired': '请输入升级并发上限',
   // —— 简化版（仅填 IP）新增语料 ——
   'system.transfer.serverSection': '文件传输服务器',
   'system.transfer.serverIP': '服务器 IP 地址',
@@ -4544,6 +4547,8 @@ const messages: Record<string, string> = {
   'ufte.status.awaitingTc':                   '等待 TransferComplete',
   'ufte.status.verifying':                    '校验中',
   'ufte.form.keepConfig':                     '保留配置',
+  'ufte.form.concurrency':                    '升级并发数',
+  'ufte.form.concurrency.hint':               '同一任务内同时执行升级的设备数（1-100），默认 20 台',
 
   // P3 — 模板配置 (TemplateDefinitionManagement)
   'ufte.template.builtInGroup':               '内置模板',

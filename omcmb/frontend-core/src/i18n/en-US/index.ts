@@ -3649,6 +3649,9 @@ const messages: Record<string, string> = {
   'system.transfer.pathHelp': 'Example: /smallcell/FileUploadService. Leave blank to fall back to startup config.',
   'system.transfer.uploadMaxFileSizeHelp': 'Unit: bytes. Default 1 GB (1073741824); edit as needed.',
   'system.transfer.runtimeHint': 'After saving, ACS instances pick up the change on the local cache refresh cycle. The current cache TTL is 30 seconds.',
+  'system.transfer.maxGlobalUpgradeConcurrency': 'System-wide Upgrade Concurrency Limit',
+  'system.transfer.maxGlobalUpgradeConcurrencyHelp': 'Maximum devices upgrading/rolling back simultaneously across all tasks, preventing stacked tasks from saturating download bandwidth. Default 100.',
+  'system.transfer.maxGlobalUpgradeConcurrencyRequired': 'Please enter the upgrade concurrency limit',
   // —— Simplified (IP-only) additions ——
   'system.transfer.serverSection': 'File Transfer Server',
   'system.transfer.serverIP': 'Server IP Address',
@@ -4515,6 +4518,8 @@ const messages: Record<string, string> = {
   'ufte.status.awaitingTc':                   'Awaiting TransferComplete',
   'ufte.status.verifying':                    'Verifying',
   'ufte.form.keepConfig':                     'Keep Config',
+  'ufte.form.concurrency':                    'Upgrade Concurrency',
+  'ufte.form.concurrency.hint':               'Devices upgraded simultaneously within this task (1-100), default 20',
 
   // P3 — Template Configuration
   'ufte.template.builtInGroup':               'Built-in Templates',

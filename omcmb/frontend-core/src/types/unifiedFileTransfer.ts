@@ -132,6 +132,8 @@ export interface CreateUnifiedFileTransferTaskInput {
   productType?: string;
   firmwareId?: string;
   isKeepConfig?: boolean;
+  /** 任务内设备并发执行数，仅升级类（固件下载）任务生效；不传由后端兜底默认 20。 */
+  concurrency?: number;
   deviceIds?: string[];
   deviceCount: number;
   executionMode: TransferExecutionMode;

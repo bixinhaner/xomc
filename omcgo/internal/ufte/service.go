@@ -660,6 +660,7 @@ func (s *Service) CreateTask(ctx context.Context, req CreateTaskRequest, createU
 			TaskType:         typeDef.softwareTaskType,
 			DownloadFileType: typeDef.FileType,
 			IsKeepConfig:     req.IsKeepConfig,
+			Concurrency:      req.Concurrency,
 			CreateSuspended:  createSuspended,
 			ScheduledAt:      scheduledAt,
 		})

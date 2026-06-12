@@ -16,6 +16,8 @@ const FIXED_UPLOAD_PATH = '/smallcell/FileUploadService';
 const FIXED_DOWNLOAD_PATH = '/smallcell/FileDownloadService';
 const DEFAULT_MAX_FILE_SIZE = 1073741824; // 1 GiB
 const DEFAULT_HOST = '127.0.0.1'; // 默认服务器 IP（可编辑）
+// 系统级（跨任务）升级设备并发上限默认值，与后端 software.DefaultGlobalUpgradeConcurrency 一致
+const DEFAULT_MAX_GLOBAL_UPGRADE_CONCURRENCY = 100;
 
 const cardTitleStyle: React.CSSProperties = {
 	fontSize: 14,
@@ -86,6 +88,7 @@ export default function TransferSettings({ form }: TransferSettingsProps) {
 				uploadPath: FIXED_UPLOAD_PATH,
 				downloadPath: FIXED_DOWNLOAD_PATH,
 				uploadMaxFileSize: DEFAULT_MAX_FILE_SIZE,
+				maxGlobalUpgradeConcurrency: DEFAULT_MAX_GLOBAL_UPGRADE_CONCURRENCY,
 			}}
 		>
 			{/* 文件传输服务器：唯一可填项 —— 服务器 IP */}
@@ -170,6 +173,14 @@ export default function TransferSettings({ form }: TransferSettingsProps) {
 				{/* 下发 BaseURL 与上传共用同一 IP，由收敛副作用自动写入，无需用户填写 */}
 				<Form.Item name="downloadBaseURL" hidden>
 					<Input />
+				</Form.Item>
+				<Form.Item
+					name="maxGlobalUpgradeConcurrency"
+					label={t('system.transfer.maxGlobalUpgradeConcurrency')}
+					extra={t('system.transfer.maxGlobalUpgradeConcurrencyHelp')}
+					rules={[{ required: true, message: t('system.transfer.maxGlobalUpgradeConcurrencyRequired') }]}
+				>
+					<AddonInputNumber addonAfter={t('software.upgrade.units')} min={1} max={10000} precision={0} style={{ width: '100%' }} />
 				</Form.Item>
 			</Card>
 

@@ -9,6 +9,7 @@ import {
   Drawer,
   Form,
   Input,
+  InputNumber,
   Modal,
   Popconfirm,
   Progress,
@@ -1109,6 +1110,7 @@ export default function FileTransferCenter() {
       productClass: undefined,
       firmwareId: undefined,
       isKeepConfig: true,
+      concurrency: 20,
       executionMode: 'immediate',
     });
     setSelectedDrawerDeviceIds([]);
@@ -1141,9 +1143,13 @@ export default function FileTransferCenter() {
       taskForm.setFieldValue('productClass', undefined);
       taskForm.setFieldValue('firmwareId', undefined);
       taskForm.setFieldValue('isKeepConfig', undefined);
+      taskForm.setFieldValue('concurrency', undefined);
     } else {
       if (taskForm.getFieldValue('isKeepConfig') === undefined) {
         taskForm.setFieldValue('isKeepConfig', true);
+      }
+      if (taskForm.getFieldValue('concurrency') === undefined) {
+        taskForm.setFieldValue('concurrency', 20);
       }
       if (!drawerProductClass && drawerProductClassOptions.length === 1) {
         taskForm.setFieldValue('productClass', drawerProductClassOptions[0].value);
@@ -1561,6 +1567,13 @@ export default function FileTransferCenter() {
                   options={firmwareOptions}
                   optionFilterProp="label"
                 />
+              </Form.Item>
+              <Form.Item
+                label={t('ufte.form.concurrency')}
+                name="concurrency"
+                extra={t('ufte.form.concurrency.hint')}
+              >
+                <InputNumber min={1} max={100} precision={0} style={{ width: 120 }} />
               </Form.Item>
               <Form.Item name="isKeepConfig" valuePropName="checked">
                 <Checkbox>{t('ufte.form.keepConfig')}</Checkbox>
