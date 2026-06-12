@@ -956,7 +956,6 @@ const messages: Record<string, string> = {
   'device.productClassHint':'TR-069 productClass routing key; will be overwritten by the real value reported in the CPE Bootstrap Inform',
   'device.siteId':          'Site ID',
   'device.networkStepHint': 'All fields in this step are optional and may be left blank; TR-069 will overwrite with real values once the CPE auto-registers.',
-  'device.platformType':    'Platform Type',
   'device.networkType':     'Network Type',
   'device.radioMode':       'Radio Mode',
   'device.cellViewTech':    'View Tech',
