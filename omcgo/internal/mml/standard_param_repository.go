@@ -73,18 +73,29 @@ const standardParamSelectColumns = `id, standard_path, entry_type,
     COALESCE(change_applies, '') AS change_applies,
     min_value, max_value, description`
 
+// standardParamSearchCondition 构建路径下拉的搜索条件。
+//
+// Issue #115 调整2：本端点（GET /mml/admin/standard-params）只服务「选择标准 PATH」
+// 下拉（StandardParamSelect / PathPicker）与按完整 path 解析友好名，用户视角是按 PATH 查找。
+// 旧实现对 standard_path + description 两列联合 ILIKE，当关键字仅命中 description 时会
+// 返回 path 不含该词的条目，表现为「显示了不匹配的 PATH」。故收窄为仅 standard_path。
+// （需要按描述搜索的标准参数管理页走的是另一套 /param-models/standard 端点，不受影响。）
+//
+// search 为空 / 纯空白返回 nil，调用方据此不追加 WHERE。
+func standardParamSearchCondition(search string) sq.Sqlizer {
+	s := strings.TrimSpace(search)
+	if s == "" {
+		return nil
+	}
+	return sq.Expr("standard_path ILIKE ?", "%"+s+"%")
+}
+
 // List 按 search / entry_type 过滤并分页返回 standard_params。
 func (r *PgStandardParamRepository) List(ctx context.Context, filter StandardParamFilter) (*model.ListResponse[StandardParamView], error) {
 	base := storage.Psql.Select(splitColumns(standardParamSelectColumns)...).From("standard_params")
 	countBase := storage.Psql.Select("COUNT(*)").From("standard_params")
 
-	if s := strings.TrimSpace(filter.Search); s != "" {
-		like := "%" + s + "%"
-		// 在 standard_path / description 两列做 ILIKE 联合搜索（覆盖 path 关键字 + 中文/英文描述）
-		cond := sq.Or{
-			sq.Expr("standard_path ILIKE ?", like),
-			sq.Expr("description ILIKE ?", like),
-		}
+	if cond := standardParamSearchCondition(filter.Search); cond != nil {
 		base = base.Where(cond)
 		countBase = countBase.Where(cond)
 	}

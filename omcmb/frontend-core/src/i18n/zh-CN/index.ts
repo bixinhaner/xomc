@@ -5789,7 +5789,7 @@ const messages: Record<string, string> = {
   'mml.admin.catalog.subField.supportedUnknownTip':'该 path 未在任何 paramModel 的 param_mappings 中注册（active 行为 0）。默认按"支持"处理，但维护人员应当核查映射缺失原因。',
   'mml.admin.catalog.subField.supportedTip':       'M/N = 标该 path 支持的 active paramModel 数 / 注册该 path 的 active paramModel 总数。真值源为 param_mappings.is_supported（T-0176-PR-A 之后）。',
   'mml.admin.catalog.subField.batchAddBtn':        '批量添加',
-  'mml.admin.catalog.subField.batchAddTitle':      '按 path 批量添加',
+  'mml.admin.catalog.subField.batchAddTitle':      '批量添加',
   'mml.admin.catalog.subField.batchEmptyHint':     '请先在上方选择至少一条 path',
   'mml.admin.catalog.subField.batchAutofillHint':  '后端会按 standard_params 元数据自动派生 MML Code、显示名等默认值；如需精细控制请用单条新建。',
   'mml.admin.catalog.subField.batchCreated':       '已批量添加 {count} 条字段',

@@ -5762,7 +5762,7 @@ const messages: Record<string, string> = {
   'mml.admin.catalog.subField.supportedUnknownTip':'This path is not registered in any active param_mapping. Defaults to "supported" but maintainers should investigate missing mappings.',
   'mml.admin.catalog.subField.supportedTip':       'M/N = active paramModels marking this path supported / total active paramModels that registered this path. Source of truth: param_mappings.is_supported (post-T-0176-PR-A).',
   'mml.admin.catalog.subField.batchAddBtn':        'Batch add',
-  'mml.admin.catalog.subField.batchAddTitle':      'Batch add by path',
+  'mml.admin.catalog.subField.batchAddTitle':      'Batch add',
   'mml.admin.catalog.subField.batchEmptyHint':     'Select at least one path first',
   'mml.admin.catalog.subField.batchAutofillHint':  'Backend derives MML Code / labels from standard_params metadata automatically. Use single-row create for fine-grained control.',
   'mml.admin.catalog.subField.batchCreated':       'Batch added {count} fields',
