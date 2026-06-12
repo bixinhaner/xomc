@@ -1,11 +1,7 @@
 -- +goose Up
--- +goose StatementBegin
--- Consolidated schema baseline regenerated from test env on 2026-05-31T03:42:12Z.
--- Replaces 185 prior migration files (000001..000219). Old files archived at
--- omcgo/migrations.backup-20260531/ for rollback.
--- Dumped via: pg_dump --schema-only --no-owner --no-privileges --no-tablespaces
---   --no-publications --no-subscriptions --exclude-table='goose_db_version*'
--- TimescaleDB extension version: 2.25.2 on PostgreSQL 16.11
+-- 主库 consolidated baseline（KPI/时序库物理分离后；纯业务 schema，无 timescaledb 扩展；
+-- 时序对象在 migrations/tsdb/000001_tsdb_schema.sql）。由全量迁移后的库 pg_dump 生成。
+
 --
 -- PostgreSQL database dump
 --
@@ -19,24 +15,11 @@ SET lock_timeout = 0;
 SET idle_in_transaction_session_timeout = 0;
 SET client_encoding = 'UTF8';
 SET standard_conforming_strings = on;
+SELECT pg_catalog.set_config('search_path', '', false);
 SET check_function_bodies = false;
 SET xmloption = content;
 SET client_min_messages = warning;
 SET row_security = off;
-
---
--- Name: timescaledb; Type: EXTENSION; Schema: -; Owner: -
---
-
-CREATE EXTENSION IF NOT EXISTS timescaledb WITH SCHEMA public;
-
-
---
--- Name: EXTENSION timescaledb; Type: COMMENT; Schema: -; Owner: -
---
-
-COMMENT ON EXTENSION timescaledb IS 'Enables scalable inserts and complex queries for time-series data (Community Edition)';
-
 
 --
 -- Name: ltree; Type: EXTENSION; Schema: -; Owner: -
@@ -98,6 +81,7 @@ COMMENT ON EXTENSION "uuid-ossp" IS 'generate universally unique identifiers (UU
 -- Name: build_v_type_string(character varying, jsonb); Type: FUNCTION; Schema: public; Owner: -
 --
 
+-- +goose StatementBegin
 CREATE FUNCTION public.build_v_type_string(v_type character varying, v_constraint jsonb) RETURNS text
     LANGUAGE plpgsql IMMUTABLE
     AS $$
@@ -160,12 +144,14 @@ BEGIN
     RETURN v_type;
 END;
 $$;
+-- +goose StatementEnd
 
 
 --
 -- Name: nedirect_sessions_updated_at(); Type: FUNCTION; Schema: public; Owner: -
 --
 
+-- +goose StatementBegin
 CREATE FUNCTION public.nedirect_sessions_updated_at() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
@@ -174,12 +160,14 @@ BEGIN
     RETURN NEW;
 END;
 $$;
+-- +goose StatementEnd
 
 
 --
 -- Name: parse_v_type(text); Type: FUNCTION; Schema: public; Owner: -
 --
 
+-- +goose StatementBegin
 CREATE FUNCTION public.parse_v_type(v_type_str text) RETURNS TABLE(value_type character varying, value_constraint jsonb)
     LANGUAGE plpgsql IMMUTABLE
     AS $_$
@@ -268,12 +256,14 @@ BEGIN
     RETURN QUERY SELECT result_type, result_constraint;
 END;
 $_$;
+-- +goose StatementEnd
 
 
 --
 -- Name: refresh_mml_command_target_paths(uuid); Type: FUNCTION; Schema: public; Owner: -
 --
 
+-- +goose StatementBegin
 CREATE FUNCTION public.refresh_mml_command_target_paths(p_command_id uuid) RETURNS void
     LANGUAGE plpgsql
     AS $$
@@ -289,12 +279,14 @@ BEGIN
     WHERE c.id = p_command_id;
 END;
 $$;
+-- +goose StatementEnd
 
 
 --
 -- Name: trg_mml_sub_fields_refresh_paths(); Type: FUNCTION; Schema: public; Owner: -
 --
 
+-- +goose StatementBegin
 CREATE FUNCTION public.trg_mml_sub_fields_refresh_paths() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
@@ -308,12 +300,14 @@ BEGIN
     END IF;
 END;
 $$;
+-- +goose StatementEnd
 
 
 --
 -- Name: update_updated_at_column(); Type: FUNCTION; Schema: public; Owner: -
 --
 
+-- +goose StatementBegin
 CREATE FUNCTION public.update_updated_at_column() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
@@ -322,49 +316,12 @@ BEGIN
     RETURN NEW;
 END;
 $$;
+-- +goose StatementEnd
 
+
+SET default_tablespace = '';
 
 SET default_table_access_method = heap;
-
---
--- Name: _compressed_hypertable_10; Type: TABLE; Schema: _timescaledb_internal; Owner: -
---
-
-CREATE TABLE _timescaledb_internal._compressed_hypertable_10 (
-);
-
-
---
--- Name: _compressed_hypertable_12; Type: TABLE; Schema: _timescaledb_internal; Owner: -
---
-
-CREATE TABLE _timescaledb_internal._compressed_hypertable_12 (
-);
-
-
---
--- Name: _compressed_hypertable_14; Type: TABLE; Schema: _timescaledb_internal; Owner: -
---
-
-CREATE TABLE _timescaledb_internal._compressed_hypertable_14 (
-);
-
-
---
--- Name: _compressed_hypertable_16; Type: TABLE; Schema: _timescaledb_internal; Owner: -
---
-
-CREATE TABLE _timescaledb_internal._compressed_hypertable_16 (
-);
-
-
---
--- Name: _compressed_hypertable_7; Type: TABLE; Schema: _timescaledb_internal; Owner: -
---
-
-CREATE TABLE _timescaledb_internal._compressed_hypertable_7 (
-);
-
 
 --
 -- Name: alarm_definitions; Type: TABLE; Schema: public; Owner: -
@@ -380,12 +337,11 @@ CREATE TABLE public.alarm_definitions (
     event_type integer,
     cn_probable_cause text,
     en_probable_cause text,
-    cn_suggestion text,
-    en_suggestion text,
     is_show boolean DEFAULT true NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    loaded_from character varying(256)
+    loaded_from character varying(256),
+    description text
 );
 
 
@@ -421,7 +377,7 @@ COMMENT ON COLUMN public.alarm_definitions.severity_id IS 'ON DELETE RESTRICT：
 -- Name: COLUMN alarm_definitions.loaded_from; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.alarm_definitions.loaded_from IS 'T-0179 Loader 来源 XML 文件名(如 "ENB.xml");NULL 表示历史数据未回填,Reload 后会自动写入';
+COMMENT ON COLUMN public.alarm_definitions.loaded_from IS 'Loader 来源 XML 相对路径(含目录前缀,如 "alarm-definitions/ENB.xml" 或 "alarm-definitions-custom/MY.xml");NULL/空 表示运维手工新增(无 XML 来源)。ClassifySource 据前缀判定 builtin/custom。';
 
 
 --
@@ -558,9 +514,6 @@ CREATE TABLE public.alarms_active (
 COMMENT ON COLUMN public.alarms_active.is_unknown IS 'T-0098 fallback 标记：identifier 不在告警库时 product.enable_unknown_alarm=true 路径写入；治理闭环过滤依据';
 
 
--- NOTE: alarms_history 已迁至时序库 (migrations/tsdb/000001_tsdb_schema.sql)。
-
-
 --
 -- Name: api_endpoints; Type: TABLE; Schema: public; Owner: -
 --
@@ -574,7 +527,8 @@ CREATE TABLE public.api_endpoints (
     api_group character varying(64) DEFAULT ''::character varying,
     is_auto boolean DEFAULT true NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    is_user_modified boolean DEFAULT false NOT NULL
 );
 
 
@@ -625,6 +579,13 @@ COMMENT ON COLUMN public.api_endpoints.api_group IS 'API 分组名称';
 --
 
 COMMENT ON COLUMN public.api_endpoints.is_auto IS '是否自动扫描生成';
+
+
+--
+-- Name: COLUMN api_endpoints.is_user_modified; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.api_endpoints.is_user_modified IS 'true=name/api_group 被用户在 UI 手工改过；Sync 扫描不再用自动推断值覆盖。Update 改 name/api_group 时置 true。';
 
 
 --
@@ -759,17 +720,17 @@ CREATE TABLE public.backup_policies (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     alert_severity character varying(16) DEFAULT 'major'::character varying NOT NULL,
-    CONSTRAINT backup_policies_alert_severity_check CHECK (((alert_severity)::text = ANY ((ARRAY['warning'::character varying, 'major'::character varying, 'critical'::character varying])::text[]))),
+    CONSTRAINT backup_policies_alert_severity_check CHECK (((alert_severity)::text = ANY (ARRAY[('warning'::character varying)::text, ('major'::character varying)::text, ('critical'::character varying)::text]))),
     CONSTRAINT backup_policies_alert_threshold_percent_check CHECK (((alert_threshold_percent >= 50) AND (alert_threshold_percent <= 95))),
     CONSTRAINT backup_policies_cleanup_day_of_week_check CHECK (((cleanup_day_of_week >= '-1'::integer) AND (cleanup_day_of_week <= 6))),
-    CONSTRAINT backup_policies_compression_format_check CHECK (((compression_format)::text = ANY ((ARRAY['gzip'::character varying, 'bzip2'::character varying, 'lz4'::character varying, 'zstd'::character varying])::text[]))),
+    CONSTRAINT backup_policies_compression_format_check CHECK (((compression_format)::text = ANY (ARRAY[('gzip'::character varying)::text, ('bzip2'::character varying)::text, ('lz4'::character varying)::text, ('zstd'::character varying)::text]))),
     CONSTRAINT backup_policies_compression_level_check CHECK (((compression_level >= 1) AND (compression_level <= 9))),
     CONSTRAINT backup_policies_keep_last_n_check CHECK ((keep_last_n >= 1)),
     CONSTRAINT backup_policies_max_backup_count_check CHECK ((max_backup_count >= 1)),
     CONSTRAINT backup_policies_max_storage_gb_check CHECK ((max_storage_gb >= 1)),
     CONSTRAINT backup_policies_min_backup_count_check CHECK ((min_backup_count >= 1)),
     CONSTRAINT backup_policies_retention_days_check CHECK (((retention_days >= 1) AND (retention_days <= 3650))),
-    CONSTRAINT backup_policies_storage_backend_check CHECK (((storage_backend)::text = ANY ((ARRAY['local'::character varying, 'ftp'::character varying, 'sftp'::character varying, 'nfs'::character varying])::text[])))
+    CONSTRAINT backup_policies_storage_backend_check CHECK (((storage_backend)::text = ANY (ARRAY[('local'::character varying)::text, ('ftp'::character varying)::text, ('sftp'::character varying)::text, ('nfs'::character varying)::text])))
 );
 
 
@@ -900,7 +861,7 @@ CREATE TABLE public.config_backup_sub_tasks (
     completed_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT chk_upgrade_sub_tasks_status CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'downloading'::character varying, 'uploading'::character varying, 'rebooting'::character varying, 'verifying'::character varying, 'completed'::character varying, 'failed'::character varying, 'suspended'::character varying, 'terminated'::character varying])::text[])))
+    CONSTRAINT chk_upgrade_sub_tasks_status CHECK (((status)::text = ANY (ARRAY[('pending'::character varying)::text, ('downloading'::character varying)::text, ('uploading'::character varying)::text, ('rebooting'::character varying)::text, ('verifying'::character varying)::text, ('completed'::character varying)::text, ('failed'::character varying)::text, ('suspended'::character varying)::text, ('terminated'::character varying)::text])))
 );
 
 
@@ -946,15 +907,15 @@ CREATE TABLE public.config_backup_tasks (
     rollback_on_failure boolean DEFAULT false NOT NULL,
     download_file_type text DEFAULT ''::text NOT NULL,
     scheduled_at timestamp with time zone,
-    CONSTRAINT chk_upgrade_tasks_create_status CHECK (((create_status)::text = ANY ((ARRAY['active'::character varying, 'suspend'::character varying, 'timing'::character varying])::text[]))),
-    CONSTRAINT chk_upgrade_tasks_result CHECK (((result IS NULL) OR ((result)::text = ANY ((ARRAY['success'::character varying, 'partial'::character varying, 'failed'::character varying, 'terminated'::character varying])::text[])))),
-    CONSTRAINT chk_upgrade_tasks_status CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'in_progress'::character varying, 'suspended'::character varying, 'ended'::character varying])::text[]))),
+    CONSTRAINT chk_upgrade_tasks_create_status CHECK (((create_status)::text = ANY (ARRAY[('active'::character varying)::text, ('suspend'::character varying)::text, ('timing'::character varying)::text]))),
+    CONSTRAINT chk_upgrade_tasks_result CHECK (((result IS NULL) OR ((result)::text = ANY (ARRAY[('success'::character varying)::text, ('partial'::character varying)::text, ('failed'::character varying)::text, ('terminated'::character varying)::text])))),
+    CONSTRAINT chk_upgrade_tasks_status CHECK (((status)::text = ANY (ARRAY[('pending'::character varying)::text, ('in_progress'::character varying)::text, ('suspended'::character varying)::text, ('ended'::character varying)::text]))),
     CONSTRAINT chk_upgrade_tasks_task_type CHECK ((task_type = ANY (ARRAY[1, 2, 4, 6, 8, 10]))),
     CONSTRAINT upgrade_tasks_auto_advance_minutes_check CHECK (((auto_advance_minutes >= 0) AND (auto_advance_minutes <= 1440))),
     CONSTRAINT upgrade_tasks_current_stage_check CHECK (((current_stage >= 0) AND (current_stage <= 100))),
-    CONSTRAINT upgrade_tasks_rollback_source_check CHECK (((rollback_source)::text = ANY ((ARRAY['manual'::character varying, 'canary_failure'::character varying, 'compatibility'::character varying, 'scheduled'::character varying])::text[]))),
-    CONSTRAINT upgrade_tasks_stage_status_check CHECK (((stage_status)::text = ANY ((ARRAY['pending'::character varying, 'running'::character varying, 'paused'::character varying, 'aborted'::character varying, 'completed'::character varying])::text[]))),
-    CONSTRAINT upgrade_tasks_strategy_check CHECK (((strategy)::text = ANY ((ARRAY['full'::character varying, 'canary'::character varying])::text[])))
+    CONSTRAINT upgrade_tasks_rollback_source_check CHECK (((rollback_source)::text = ANY (ARRAY[('manual'::character varying)::text, ('canary_failure'::character varying)::text, ('compatibility'::character varying)::text, ('scheduled'::character varying)::text]))),
+    CONSTRAINT upgrade_tasks_stage_status_check CHECK (((stage_status)::text = ANY (ARRAY[('pending'::character varying)::text, ('running'::character varying)::text, ('paused'::character varying)::text, ('aborted'::character varying)::text, ('completed'::character varying)::text]))),
+    CONSTRAINT upgrade_tasks_strategy_check CHECK (((strategy)::text = ANY (ARRAY[('full'::character varying)::text, ('canary'::character varying)::text])))
 );
 
 
@@ -1016,7 +977,7 @@ CREATE TABLE public.config_restore_sub_tasks (
     completed_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT chk_upgrade_sub_tasks_status CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'downloading'::character varying, 'uploading'::character varying, 'rebooting'::character varying, 'verifying'::character varying, 'completed'::character varying, 'failed'::character varying, 'suspended'::character varying, 'terminated'::character varying])::text[])))
+    CONSTRAINT chk_upgrade_sub_tasks_status CHECK (((status)::text = ANY (ARRAY[('pending'::character varying)::text, ('downloading'::character varying)::text, ('uploading'::character varying)::text, ('rebooting'::character varying)::text, ('verifying'::character varying)::text, ('completed'::character varying)::text, ('failed'::character varying)::text, ('suspended'::character varying)::text, ('terminated'::character varying)::text])))
 );
 
 
@@ -1062,15 +1023,15 @@ CREATE TABLE public.config_restore_tasks (
     rollback_on_failure boolean DEFAULT false NOT NULL,
     download_file_type text DEFAULT ''::text NOT NULL,
     scheduled_at timestamp with time zone,
-    CONSTRAINT chk_upgrade_tasks_create_status CHECK (((create_status)::text = ANY ((ARRAY['active'::character varying, 'suspend'::character varying, 'timing'::character varying])::text[]))),
-    CONSTRAINT chk_upgrade_tasks_result CHECK (((result IS NULL) OR ((result)::text = ANY ((ARRAY['success'::character varying, 'partial'::character varying, 'failed'::character varying, 'terminated'::character varying])::text[])))),
-    CONSTRAINT chk_upgrade_tasks_status CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'in_progress'::character varying, 'suspended'::character varying, 'ended'::character varying])::text[]))),
+    CONSTRAINT chk_upgrade_tasks_create_status CHECK (((create_status)::text = ANY (ARRAY[('active'::character varying)::text, ('suspend'::character varying)::text, ('timing'::character varying)::text]))),
+    CONSTRAINT chk_upgrade_tasks_result CHECK (((result IS NULL) OR ((result)::text = ANY (ARRAY[('success'::character varying)::text, ('partial'::character varying)::text, ('failed'::character varying)::text, ('terminated'::character varying)::text])))),
+    CONSTRAINT chk_upgrade_tasks_status CHECK (((status)::text = ANY (ARRAY[('pending'::character varying)::text, ('in_progress'::character varying)::text, ('suspended'::character varying)::text, ('ended'::character varying)::text]))),
     CONSTRAINT chk_upgrade_tasks_task_type CHECK ((task_type = ANY (ARRAY[1, 2, 4, 6, 8, 10]))),
     CONSTRAINT upgrade_tasks_auto_advance_minutes_check CHECK (((auto_advance_minutes >= 0) AND (auto_advance_minutes <= 1440))),
     CONSTRAINT upgrade_tasks_current_stage_check CHECK (((current_stage >= 0) AND (current_stage <= 100))),
-    CONSTRAINT upgrade_tasks_rollback_source_check CHECK (((rollback_source)::text = ANY ((ARRAY['manual'::character varying, 'canary_failure'::character varying, 'compatibility'::character varying, 'scheduled'::character varying])::text[]))),
-    CONSTRAINT upgrade_tasks_stage_status_check CHECK (((stage_status)::text = ANY ((ARRAY['pending'::character varying, 'running'::character varying, 'paused'::character varying, 'aborted'::character varying, 'completed'::character varying])::text[]))),
-    CONSTRAINT upgrade_tasks_strategy_check CHECK (((strategy)::text = ANY ((ARRAY['full'::character varying, 'canary'::character varying])::text[])))
+    CONSTRAINT upgrade_tasks_rollback_source_check CHECK (((rollback_source)::text = ANY (ARRAY[('manual'::character varying)::text, ('canary_failure'::character varying)::text, ('compatibility'::character varying)::text, ('scheduled'::character varying)::text]))),
+    CONSTRAINT upgrade_tasks_stage_status_check CHECK (((stage_status)::text = ANY (ARRAY[('pending'::character varying)::text, ('running'::character varying)::text, ('paused'::character varying)::text, ('aborted'::character varying)::text, ('completed'::character varying)::text]))),
+    CONSTRAINT upgrade_tasks_strategy_check CHECK (((strategy)::text = ANY (ARRAY[('full'::character varying)::text, ('canary'::character varying)::text])))
 );
 
 
@@ -1094,8 +1055,9 @@ CREATE TABLE public.config_snapshots (
     update_time timestamp with time zone DEFAULT now() NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT config_snapshots_file_ext_check CHECK (((file_ext)::text = ANY ((ARRAY['xml'::character varying, 'nv'::character varying])::text[]))),
-    CONSTRAINT config_snapshots_source_check CHECK (((source)::text = ANY ((ARRAY['backup'::character varying, 'manual_upload'::character varying])::text[])))
+    source_version character varying(64),
+    CONSTRAINT config_snapshots_file_ext_check CHECK (((file_ext)::text = ANY (ARRAY[('xml'::character varying)::text, ('nv'::character varying)::text]))),
+    CONSTRAINT config_snapshots_source_check CHECK (((source)::text = ANY (ARRAY[('backup'::character varying)::text, ('manual_upload'::character varying)::text])))
 );
 
 
@@ -1142,7 +1104,7 @@ CREATE TABLE public.config_templates (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     auto_dispatch boolean DEFAULT false NOT NULL,
-    CONSTRAINT config_templates_template_type_check CHECK (((template_type)::text = ANY ((ARRAY['provisioning'::character varying, 'batch_config'::character varying, 'firmware_upgrade'::character varying])::text[])))
+    CONSTRAINT config_templates_template_type_check CHECK (((template_type)::text = ANY (ARRAY[('provisioning'::character varying)::text, ('batch_config'::character varying)::text, ('firmware_upgrade'::character varying)::text])))
 );
 
 
@@ -1193,7 +1155,7 @@ CREATE TABLE public.device_active_tasks (
     business_type character varying(32) NOT NULL,
     sub_task_table character varying(64) NOT NULL,
     acquired_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT device_active_tasks_business_type_check CHECK (((business_type)::text = ANY ((ARRAY['upgrade'::character varying, 'rollback'::character varying, 'config_backup'::character varying, 'config_restore'::character varying, 'runtime_log_collect'::character varying, 'fault_log_collect'::character varying])::text[])))
+    CONSTRAINT device_active_tasks_business_type_check CHECK (((business_type)::text = ANY (ARRAY[('upgrade'::character varying)::text, ('rollback'::character varying)::text, ('config_backup'::character varying)::text, ('config_restore'::character varying)::text, ('runtime_log_collect'::character varying)::text, ('fault_log_collect'::character varying)::text])))
 );
 
 
@@ -1206,7 +1168,7 @@ CREATE TABLE public.device_group_members (
     device_id uuid NOT NULL,
     added_at timestamp with time zone DEFAULT now() NOT NULL,
     source_type character varying(16) DEFAULT 'manual'::character varying NOT NULL,
-    CONSTRAINT chk_device_group_members_source_type CHECK (((source_type)::text = ANY ((ARRAY['manual'::character varying, 'rule'::character varying])::text[])))
+    CONSTRAINT chk_device_group_members_source_type CHECK (((source_type)::text = ANY (ARRAY[('manual'::character varying)::text, ('rule'::character varying)::text])))
 );
 
 
@@ -1234,9 +1196,12 @@ CREATE TABLE public.device_groups (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     serial_number_list text[],
+    name_i18n jsonb DEFAULT '{}'::jsonb NOT NULL,
+    description_i18n jsonb DEFAULT '{}'::jsonb NOT NULL,
+    remark_i18n jsonb DEFAULT '{}'::jsonb NOT NULL,
     CONSTRAINT chk_dg_level CHECK ((level = ANY (ARRAY[1, 2]))),
     CONSTRAINT chk_dg_level_parent CHECK ((((level = 1) AND (parent_id IS NULL)) OR ((level = 2) AND (parent_id IS NOT NULL)))),
-    CONSTRAINT chk_dg_matching_mode CHECK (((matching_mode IS NULL) OR ((matching_mode)::text = ANY ((ARRAY['deviceName'::character varying, 'lac'::character varying, 'tac'::character varying, 'serialNumber'::character varying])::text[]))))
+    CONSTRAINT chk_dg_matching_mode CHECK (((matching_mode IS NULL) OR ((matching_mode)::text = ANY (ARRAY[('deviceName'::character varying)::text, ('lac'::character varying)::text, ('tac'::character varying)::text, ('serialNumber'::character varying)::text]))))
 );
 
 
@@ -2836,7 +2801,7 @@ CREATE TABLE public.devices (
     last_param_sync_failed_at timestamp with time zone,
     last_param_sync_error text,
     last_offline_reason character varying(32),
-    CONSTRAINT chk_devices_lifecycle_state CHECK (((lifecycle_state)::text = ANY ((ARRAY['discovered'::character varying, 'registered'::character varying, 'provisioning'::character varying, 'commissioned'::character varying, 'maintenance'::character varying, 'decommissioned'::character varying])::text[])))
+    CONSTRAINT chk_devices_lifecycle_state CHECK (((lifecycle_state)::text = ANY (ARRAY[('discovered'::character varying)::text, ('registered'::character varying)::text, ('provisioning'::character varying)::text, ('commissioned'::character varying)::text, ('maintenance'::character varying)::text, ('decommissioned'::character varying)::text])))
 )
 PARTITION BY LIST (carrier);
 
@@ -3112,7 +3077,7 @@ CREATE TABLE public.devices_cmcc (
     last_param_sync_failed_at timestamp with time zone,
     last_param_sync_error text,
     last_offline_reason character varying(32),
-    CONSTRAINT chk_devices_lifecycle_state CHECK (((lifecycle_state)::text = ANY ((ARRAY['discovered'::character varying, 'registered'::character varying, 'provisioning'::character varying, 'commissioned'::character varying, 'maintenance'::character varying, 'decommissioned'::character varying])::text[])))
+    CONSTRAINT chk_devices_lifecycle_state CHECK (((lifecycle_state)::text = ANY (ARRAY[('discovered'::character varying)::text, ('registered'::character varying)::text, ('provisioning'::character varying)::text, ('commissioned'::character varying)::text, ('maintenance'::character varying)::text, ('decommissioned'::character varying)::text])))
 );
 
 
@@ -3156,7 +3121,7 @@ CREATE TABLE public.devices_ctcc (
     last_param_sync_failed_at timestamp with time zone,
     last_param_sync_error text,
     last_offline_reason character varying(32),
-    CONSTRAINT chk_devices_lifecycle_state CHECK (((lifecycle_state)::text = ANY ((ARRAY['discovered'::character varying, 'registered'::character varying, 'provisioning'::character varying, 'commissioned'::character varying, 'maintenance'::character varying, 'decommissioned'::character varying])::text[])))
+    CONSTRAINT chk_devices_lifecycle_state CHECK (((lifecycle_state)::text = ANY (ARRAY[('discovered'::character varying)::text, ('registered'::character varying)::text, ('provisioning'::character varying)::text, ('commissioned'::character varying)::text, ('maintenance'::character varying)::text, ('decommissioned'::character varying)::text])))
 );
 
 
@@ -3200,7 +3165,7 @@ CREATE TABLE public.devices_cucc (
     last_param_sync_failed_at timestamp with time zone,
     last_param_sync_error text,
     last_offline_reason character varying(32),
-    CONSTRAINT chk_devices_lifecycle_state CHECK (((lifecycle_state)::text = ANY ((ARRAY['discovered'::character varying, 'registered'::character varying, 'provisioning'::character varying, 'commissioned'::character varying, 'maintenance'::character varying, 'decommissioned'::character varying])::text[])))
+    CONSTRAINT chk_devices_lifecycle_state CHECK (((lifecycle_state)::text = ANY (ARRAY[('discovered'::character varying)::text, ('registered'::character varying)::text, ('provisioning'::character varying)::text, ('commissioned'::character varying)::text, ('maintenance'::character varying)::text, ('decommissioned'::character varying)::text])))
 );
 
 
@@ -3244,7 +3209,7 @@ CREATE TABLE public.devices_other (
     last_param_sync_failed_at timestamp with time zone,
     last_param_sync_error text,
     last_offline_reason character varying(32),
-    CONSTRAINT chk_devices_lifecycle_state CHECK (((lifecycle_state)::text = ANY ((ARRAY['discovered'::character varying, 'registered'::character varying, 'provisioning'::character varying, 'commissioned'::character varying, 'maintenance'::character varying, 'decommissioned'::character varying])::text[])))
+    CONSTRAINT chk_devices_lifecycle_state CHECK (((lifecycle_state)::text = ANY (ARRAY[('discovered'::character varying)::text, ('registered'::character varying)::text, ('provisioning'::character varying)::text, ('commissioned'::character varying)::text, ('maintenance'::character varying)::text, ('decommissioned'::character varying)::text])))
 );
 
 
@@ -3393,7 +3358,7 @@ CREATE TABLE public.fault_log_collect_sub_tasks (
     completed_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT chk_upgrade_sub_tasks_status CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'downloading'::character varying, 'uploading'::character varying, 'rebooting'::character varying, 'verifying'::character varying, 'completed'::character varying, 'failed'::character varying, 'suspended'::character varying, 'terminated'::character varying])::text[])))
+    CONSTRAINT chk_upgrade_sub_tasks_status CHECK (((status)::text = ANY (ARRAY[('pending'::character varying)::text, ('downloading'::character varying)::text, ('uploading'::character varying)::text, ('rebooting'::character varying)::text, ('verifying'::character varying)::text, ('completed'::character varying)::text, ('failed'::character varying)::text, ('suspended'::character varying)::text, ('terminated'::character varying)::text])))
 );
 
 
@@ -3439,15 +3404,15 @@ CREATE TABLE public.fault_log_collect_tasks (
     rollback_on_failure boolean DEFAULT false NOT NULL,
     download_file_type text DEFAULT ''::text NOT NULL,
     scheduled_at timestamp with time zone,
-    CONSTRAINT chk_upgrade_tasks_create_status CHECK (((create_status)::text = ANY ((ARRAY['active'::character varying, 'suspend'::character varying, 'timing'::character varying])::text[]))),
-    CONSTRAINT chk_upgrade_tasks_result CHECK (((result IS NULL) OR ((result)::text = ANY ((ARRAY['success'::character varying, 'partial'::character varying, 'failed'::character varying, 'terminated'::character varying])::text[])))),
-    CONSTRAINT chk_upgrade_tasks_status CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'in_progress'::character varying, 'suspended'::character varying, 'ended'::character varying])::text[]))),
+    CONSTRAINT chk_upgrade_tasks_create_status CHECK (((create_status)::text = ANY (ARRAY[('active'::character varying)::text, ('suspend'::character varying)::text, ('timing'::character varying)::text]))),
+    CONSTRAINT chk_upgrade_tasks_result CHECK (((result IS NULL) OR ((result)::text = ANY (ARRAY[('success'::character varying)::text, ('partial'::character varying)::text, ('failed'::character varying)::text, ('terminated'::character varying)::text])))),
+    CONSTRAINT chk_upgrade_tasks_status CHECK (((status)::text = ANY (ARRAY[('pending'::character varying)::text, ('in_progress'::character varying)::text, ('suspended'::character varying)::text, ('ended'::character varying)::text]))),
     CONSTRAINT chk_upgrade_tasks_task_type CHECK ((task_type = ANY (ARRAY[1, 2, 4, 6, 8, 10]))),
     CONSTRAINT upgrade_tasks_auto_advance_minutes_check CHECK (((auto_advance_minutes >= 0) AND (auto_advance_minutes <= 1440))),
     CONSTRAINT upgrade_tasks_current_stage_check CHECK (((current_stage >= 0) AND (current_stage <= 100))),
-    CONSTRAINT upgrade_tasks_rollback_source_check CHECK (((rollback_source)::text = ANY ((ARRAY['manual'::character varying, 'canary_failure'::character varying, 'compatibility'::character varying, 'scheduled'::character varying])::text[]))),
-    CONSTRAINT upgrade_tasks_stage_status_check CHECK (((stage_status)::text = ANY ((ARRAY['pending'::character varying, 'running'::character varying, 'paused'::character varying, 'aborted'::character varying, 'completed'::character varying])::text[]))),
-    CONSTRAINT upgrade_tasks_strategy_check CHECK (((strategy)::text = ANY ((ARRAY['full'::character varying, 'canary'::character varying])::text[])))
+    CONSTRAINT upgrade_tasks_rollback_source_check CHECK (((rollback_source)::text = ANY (ARRAY[('manual'::character varying)::text, ('canary_failure'::character varying)::text, ('compatibility'::character varying)::text, ('scheduled'::character varying)::text]))),
+    CONSTRAINT upgrade_tasks_stage_status_check CHECK (((stage_status)::text = ANY (ARRAY[('pending'::character varying)::text, ('running'::character varying)::text, ('paused'::character varying)::text, ('aborted'::character varying)::text, ('completed'::character varying)::text]))),
+    CONSTRAINT upgrade_tasks_strategy_check CHECK (((strategy)::text = ANY (ARRAY[('full'::character varying)::text, ('canary'::character varying)::text])))
 );
 
 
@@ -3457,7 +3422,7 @@ CREATE TABLE public.fault_log_collect_tasks (
 
 CREATE TABLE public.firmware_versions (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
-    product_class character varying(64),
+    product_class text,
     version character varying(64) NOT NULL,
     file_name character varying(256) NOT NULL,
     file_size bigint,
@@ -3473,8 +3438,12 @@ CREATE TABLE public.firmware_versions (
     uploader character varying(64),
     manufacturer character varying(128),
     description text,
+    sha256_val character varying(64),
+    signature text,
+    signature_alg character varying(32),
+    public_key_id character varying(128),
     CONSTRAINT chk_firmware_versions_file_type CHECK ((file_type = ANY (ARRAY[0, 1, 6]))),
-    CONSTRAINT chk_firmware_versions_status CHECK (((status)::text = ANY ((ARRAY['active'::character varying, 'deprecated'::character varying, 'archived'::character varying])::text[])))
+    CONSTRAINT chk_firmware_versions_status CHECK (((status)::text = ANY (ARRAY[('active'::character varying)::text, ('deprecated'::character varying)::text, ('archived'::character varying)::text])))
 );
 
 
@@ -3493,6 +3462,19 @@ CREATE TABLE public.ftp_configs (
     remote_path character varying(512) DEFAULT '/'::character varying NOT NULL,
     passive boolean DEFAULT true NOT NULL,
     enabled boolean DEFAULT true NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: indicator_file_descriptions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.indicator_file_descriptions (
+    tech text NOT NULL,
+    platform text NOT NULL,
+    description text DEFAULT ''::text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
@@ -3561,19 +3543,6 @@ CREATE TABLE public.indicator_threshold (
     threshold_low character varying(20),
     threshold_high character varying(20),
     threshold_level character varying(10),
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
---
--- Name: indicator_unit; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.indicator_unit (
-    id character varying(50) NOT NULL,
-    en_name character varying(100),
-    cn_name character varying(100),
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
@@ -3659,9 +3628,9 @@ CREATE TABLE public.menus (
     updated_by uuid,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     name_i18n jsonb,
-    CONSTRAINT chk_menu_type CHECK (((type)::text = ANY ((ARRAY['directory'::character varying, 'menu'::character varying, 'button'::character varying])::text[]))),
-    CONSTRAINT chk_show_status CHECK (((show_status)::text = ANY ((ARRAY['show'::character varying, 'hide'::character varying])::text[]))),
-    CONSTRAINT chk_status CHECK (((status)::text = ANY ((ARRAY['normal'::character varying, 'disabled'::character varying])::text[])))
+    CONSTRAINT chk_menu_type CHECK (((type)::text = ANY (ARRAY[('directory'::character varying)::text, ('menu'::character varying)::text, ('button'::character varying)::text]))),
+    CONSTRAINT chk_show_status CHECK (((show_status)::text = ANY (ARRAY[('show'::character varying)::text, ('hide'::character varying)::text]))),
+    CONSTRAINT chk_status CHECK (((status)::text = ANY (ARRAY[('normal'::character varying)::text, ('disabled'::character varying)::text])))
 );
 
 
@@ -3711,7 +3680,7 @@ CREATE TABLE public.mml_catalog_link_health (
     resolved_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT chk_mml_catalog_link_health_reason CHECK (((failure_reason)::text = ANY ((ARRAY['A'::character varying, 'B'::character varying, 'C'::character varying, 'D'::character varying])::text[])))
+    CONSTRAINT chk_mml_catalog_link_health_reason CHECK (((failure_reason)::text = ANY (ARRAY[('A'::character varying)::text, ('B'::character varying)::text, ('C'::character varying)::text, ('D'::character varying)::text])))
 );
 
 
@@ -3877,7 +3846,7 @@ CREATE TABLE public.mml_command_sub_fields (
     access_type character varying(4),
     deprecated_at timestamp with time zone,
     is_supported boolean DEFAULT true NOT NULL,
-    CONSTRAINT chk_sub_field_access_type CHECK (((access_type IS NULL) OR ((access_type)::text = ANY ((ARRAY['RO'::character varying, 'RW'::character varying])::text[]))))
+    CONSTRAINT chk_sub_field_access_type CHECK (((access_type IS NULL) OR ((access_type)::text = ANY (ARRAY[('RO'::character varying)::text, ('RW'::character varying)::text]))))
 );
 
 
@@ -3956,7 +3925,6 @@ CREATE TABLE public.mml_commands (
     require_confirm boolean DEFAULT false NOT NULL,
     confirm_msg_i18n jsonb DEFAULT '{}'::jsonb NOT NULL,
     operation_type character varying(20) DEFAULT 'LST'::character varying NOT NULL,
-    logical_code character varying(100),
     logical_name_i18n jsonb DEFAULT '{}'::jsonb NOT NULL,
     source character varying(20) DEFAULT 'admin'::character varying NOT NULL,
     catalog_protected boolean DEFAULT false NOT NULL,
@@ -3968,13 +3936,6 @@ CREATE TABLE public.mml_commands (
     help_doc text DEFAULT ''::text,
     notes text DEFAULT ''::text
 );
-
-
---
--- Name: COLUMN mml_commands.logical_code; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.mml_commands.logical_code IS '去除 op 前缀的逻辑命令码（command_code "LST_DEVICE_INFO" → logical_code "DEVICE_INFO"）；同 logical 不同 op 是命令树叶子同分支';
 
 
 --
@@ -4065,8 +4026,8 @@ CREATE TABLE public.mml_custom_command (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     category_group character varying(50),
     owner_user_id uuid,
-    CONSTRAINT chk_mml_custom_command_op CHECK (((operation_type)::text = ANY ((ARRAY['LST'::character varying, 'MOD'::character varying, 'ADD'::character varying, 'RMV'::character varying])::text[]))),
-    CONSTRAINT chk_mml_custom_command_scope CHECK (((command_scope)::text = ANY ((ARRAY['private'::character varying, 'public'::character varying])::text[])))
+    CONSTRAINT chk_mml_custom_command_op CHECK (((operation_type)::text = ANY (ARRAY[('LST'::character varying)::text, ('MOD'::character varying)::text, ('ADD'::character varying)::text, ('RMV'::character varying)::text]))),
+    CONSTRAINT chk_mml_custom_command_scope CHECK (((command_scope)::text = ANY (ARRAY[('private'::character varying)::text, ('public'::character varying)::text])))
 );
 
 
@@ -4172,12 +4133,15 @@ CREATE TABLE public.mml_tasks (
     total_devices integer DEFAULT 0 NOT NULL,
     success_count integer DEFAULT 0 NOT NULL,
     failed_count integer DEFAULT 0 NOT NULL,
-    result jsonb,
+    result text,
     product_resolved boolean DEFAULT true NOT NULL,
     matched_product_id uuid,
     matched_product_class character varying(64),
     path_translation_source character varying(32),
-    scheduled_at timestamp with time zone
+    scheduled_at timestamp with time zone,
+    export_object text,
+    device_export_objects jsonb DEFAULT '{}'::jsonb NOT NULL,
+    export_generated_at timestamp with time zone
 );
 
 
@@ -4248,8 +4212,8 @@ CREATE TABLE public.mr_customize_task (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     target_device_sns text[],
-    CONSTRAINT chk_mr_task_report_period CHECK (((report_period)::text = ANY ((ARRAY['15'::character varying, '30'::character varying, '60'::character varying])::text[]))),
-    CONSTRAINT chk_mr_task_status CHECK (((task_status)::text = ANY ((ARRAY['waitting'::character varying, 'on'::character varying, 'off'::character varying, 'suspend'::character varying, 'termination'::character varying])::text[]))),
+    CONSTRAINT chk_mr_task_report_period CHECK (((report_period)::text = ANY (ARRAY[('15'::character varying)::text, ('30'::character varying)::text, ('60'::character varying)::text]))),
+    CONSTRAINT chk_mr_task_status CHECK (((task_status)::text = ANY (ARRAY[('waitting'::character varying)::text, ('on'::character varying)::text, ('off'::character varying)::text, ('suspend'::character varying)::text, ('termination'::character varying)::text]))),
     CONSTRAINT chk_mr_task_time_order CHECK (((end_time IS NULL) OR (end_time > start_time)))
 );
 
@@ -4313,8 +4277,8 @@ CREATE TABLE public.mr_customize_task_progress (
     missed_heartbeat integer DEFAULT 0 NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT chk_mr_progress_health CHECK (((health_status)::text = ANY ((ARRAY['normal'::character varying, 'abnormal'::character varying, 'unknown'::character varying])::text[]))),
-    CONSTRAINT chk_mr_progress_status CHECK (((progress_status)::text = ANY ((ARRAY['pending'::character varying, 'openSuccess'::character varying, 'openFailure'::character varying, 'closeSuccess'::character varying, 'closeFailure'::character varying, 'unsupport'::character varying, 'timeOut'::character varying, 'noPermission'::character varying])::text[])))
+    CONSTRAINT chk_mr_progress_health CHECK (((health_status)::text = ANY (ARRAY[('normal'::character varying)::text, ('abnormal'::character varying)::text, ('unknown'::character varying)::text]))),
+    CONSTRAINT chk_mr_progress_status CHECK (((progress_status)::text = ANY (ARRAY[('pending'::character varying)::text, ('openSuccess'::character varying)::text, ('openFailure'::character varying)::text, ('closeSuccess'::character varying)::text, ('closeFailure'::character varying)::text, ('unsupport'::character varying)::text, ('timeOut'::character varying)::text, ('noPermission'::character varying)::text])))
 );
 
 
@@ -4404,13 +4368,6 @@ CREATE TABLE public.mr_indicators (
 
 
 --
--- Name: mr_records; Type: TABLE; Schema: public; Owner: -
---
-
--- NOTE: mr_records 已迁至时序库 (migrations/tsdb/000001_tsdb_schema.sql)。
-
-
---
 -- Name: ne_message_logs; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -4497,7 +4454,7 @@ CREATE TABLE public.northbound_servers (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT northbound_servers_port_check CHECK (((port > 0) AND (port <= 65535))),
-    CONSTRAINT northbound_servers_role_check CHECK (((role)::text = ANY ((ARRAY['primary'::character varying, 'standby'::character varying])::text[])))
+    CONSTRAINT northbound_servers_role_check CHECK (((role)::text = ANY (ARRAY[('primary'::character varying)::text, ('standby'::character varying)::text])))
 );
 
 
@@ -4518,8 +4475,8 @@ CREATE TABLE public.notification_history (
     retry_count integer DEFAULT 0 NOT NULL,
     sent_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT notification_history_channel_check CHECK (((channel)::text = ANY ((ARRAY['email'::character varying, 'sms'::character varying, 'webhook'::character varying])::text[]))),
-    CONSTRAINT notification_history_status_check CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'sent'::character varying, 'failed'::character varying, 'dead_letter'::character varying])::text[])))
+    CONSTRAINT notification_history_channel_check CHECK (((channel)::text = ANY (ARRAY[('email'::character varying)::text, ('sms'::character varying)::text, ('webhook'::character varying)::text]))),
+    CONSTRAINT notification_history_status_check CHECK (((status)::text = ANY (ARRAY[('pending'::character varying)::text, ('sent'::character varying)::text, ('failed'::character varying)::text, ('dead_letter'::character varying)::text])))
 );
 
 
@@ -4538,7 +4495,7 @@ CREATE TABLE public.notification_templates (
     enabled boolean DEFAULT true NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT notification_templates_channel_check CHECK (((channel)::text = ANY ((ARRAY['email'::character varying, 'sms'::character varying, 'webhook'::character varying])::text[])))
+    CONSTRAINT notification_templates_channel_check CHECK (((channel)::text = ANY (ARRAY[('email'::character varying)::text, ('sms'::character varying)::text, ('webhook'::character varying)::text])))
 );
 
 
@@ -4570,7 +4527,7 @@ CREATE TABLE public.notifications (
 CREATE TABLE public.ops_audit_logs (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     op_type character varying(32) NOT NULL,
-    target_type character varying(16) NOT NULL,
+    target_type character varying(64) NOT NULL,
     target_id character varying(128) NOT NULL,
     operator_user_id uuid,
     operator_name character varying(128) DEFAULT ''::character varying NOT NULL,
@@ -4625,8 +4582,8 @@ CREATE TABLE public.ops_diagnostics (
     file_path character varying(500),
     error_message text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT ops_diagnostics_initiator_check CHECK (((initiator)::text = ANY ((ARRAY['device'::character varying, 'omc'::character varying])::text[]))),
-    CONSTRAINT ops_diagnostics_status_check CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'running'::character varying, 'complete'::character varying, 'failed'::character varying, 'timeout'::character varying])::text[])))
+    CONSTRAINT ops_diagnostics_initiator_check CHECK (((initiator)::text = ANY (ARRAY[('device'::character varying)::text, ('omc'::character varying)::text]))),
+    CONSTRAINT ops_diagnostics_status_check CHECK (((status)::text = ANY (ARRAY[('pending'::character varying)::text, ('running'::character varying)::text, ('complete'::character varying)::text, ('failed'::character varying)::text, ('timeout'::character varying)::text])))
 );
 
 
@@ -4646,7 +4603,7 @@ CREATE TABLE public.ops_downloads (
     task_id uuid,
     expires_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT ops_downloads_status_check CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'uploading'::character varying, 'complete'::character varying, 'failed'::character varying, 'expired'::character varying])::text[])))
+    CONSTRAINT ops_downloads_status_check CHECK (((status)::text = ANY (ARRAY[('pending'::character varying)::text, ('uploading'::character varying)::text, ('complete'::character varying)::text, ('failed'::character varying)::text, ('expired'::character varying)::text])))
 );
 
 
@@ -4670,8 +4627,8 @@ CREATE TABLE public.ops_maintenance_windows (
     status character varying(16) DEFAULT 'planned'::character varying NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT ops_maintenance_windows_scope_type_check CHECK (((scope_type)::text = ANY ((ARRAY['device'::character varying, 'group'::character varying, 'all'::character varying])::text[]))),
-    CONSTRAINT ops_maintenance_windows_status_check CHECK (((status)::text = ANY ((ARRAY['planned'::character varying, 'approved'::character varying, 'active'::character varying, 'ended'::character varying, 'cancelled'::character varying])::text[])))
+    CONSTRAINT ops_maintenance_windows_scope_type_check CHECK (((scope_type)::text = ANY (ARRAY[('device'::character varying)::text, ('group'::character varying)::text, ('all'::character varying)::text]))),
+    CONSTRAINT ops_maintenance_windows_status_check CHECK (((status)::text = ANY (ARRAY[('planned'::character varying)::text, ('approved'::character varying)::text, ('active'::character varying)::text, ('ended'::character varying)::text, ('cancelled'::character varying)::text])))
 );
 
 
@@ -4744,9 +4701,9 @@ CREATE TABLE public.ops_tasks (
     approved_at timestamp with time zone,
     batch_config jsonb,
     failure_policy character varying(16) DEFAULT 'continue'::character varying NOT NULL,
-    CONSTRAINT ops_tasks_approval_state_check CHECK (((approval_state)::text = ANY ((ARRAY['not_required'::character varying, 'pending'::character varying, 'approved'::character varying, 'rejected'::character varying])::text[]))),
-    CONSTRAINT ops_tasks_failure_policy_check CHECK (((failure_policy)::text = ANY ((ARRAY['continue'::character varying, 'abort'::character varying, 'retry'::character varying, 'rollback'::character varying])::text[]))),
-    CONSTRAINT ops_tasks_risk_level_check CHECK (((risk_level)::text = ANY ((ARRAY['safe'::character varying, 'cautious'::character varying, 'dangerous'::character varying])::text[])))
+    CONSTRAINT ops_tasks_approval_state_check CHECK (((approval_state)::text = ANY (ARRAY[('not_required'::character varying)::text, ('pending'::character varying)::text, ('approved'::character varying)::text, ('rejected'::character varying)::text]))),
+    CONSTRAINT ops_tasks_failure_policy_check CHECK (((failure_policy)::text = ANY (ARRAY[('continue'::character varying)::text, ('abort'::character varying)::text, ('retry'::character varying)::text, ('rollback'::character varying)::text]))),
+    CONSTRAINT ops_tasks_risk_level_check CHECK (((risk_level)::text = ANY (ARRAY[('safe'::character varying)::text, ('cautious'::character varying)::text, ('dangerous'::character varying)::text])))
 );
 
 
@@ -4773,7 +4730,7 @@ CREATE TABLE public.ops_templates (
     owner_user_id uuid,
     rollback_steps jsonb,
     target_carriers jsonb DEFAULT '[]'::jsonb NOT NULL,
-    CONSTRAINT ops_templates_risk_level_check CHECK (((risk_level)::text = ANY ((ARRAY['safe'::character varying, 'cautious'::character varying, 'dangerous'::character varying])::text[])))
+    CONSTRAINT ops_templates_risk_level_check CHECK (((risk_level)::text = ANY (ARRAY[('safe'::character varying)::text, ('cautious'::character varying)::text, ('dangerous'::character varying)::text])))
 );
 
 
@@ -4800,7 +4757,9 @@ CREATE TABLE public.param_mappings (
     enum_values text,
     enum_labels text,
     mirror_with character varying(256),
-    CONSTRAINT param_mappings_entry_type_check CHECK (((entry_type)::text = ANY (ARRAY[('object'::character varying)::text, ('parameter'::character varying)::text])))
+    source character varying(16) DEFAULT 'builtin'::character varying NOT NULL,
+    CONSTRAINT param_mappings_entry_type_check CHECK (((entry_type)::text = ANY (ARRAY[('object'::character varying)::text, ('parameter'::character varying)::text]))),
+    CONSTRAINT param_mappings_source_check CHECK (((source)::text = ANY ((ARRAY['builtin'::character varying, 'custom'::character varying])::text[])))
 );
 
 
@@ -4956,7 +4915,8 @@ CREATE TABLE public.perf_indicators_enb (
     indicator_level character varying(20),
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    loaded_from character varying(256)
+    loaded_from character varying(256),
+    report_key character varying(256)
 );
 
 
@@ -4989,7 +4949,8 @@ CREATE TABLE public.perf_indicators_gnb (
     calculating_status character varying(20),
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    loaded_from character varying(256)
+    loaded_from character varying(256),
+    report_key character varying(256)
 );
 
 
@@ -5024,7 +4985,8 @@ CREATE TABLE public.perf_indicators_gsm (
     indicator_level character varying(20),
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    loaded_from character varying(256)
+    loaded_from character varying(256),
+    report_key character varying(256)
 );
 
 
@@ -5049,10 +5011,25 @@ CREATE TABLE public.perf_template_rel_arithmetic (
 
 
 --
--- Name: pm_adhoc_aggregation_results; Type: TABLE; Schema: public; Owner: -
+-- Name: pm_adhoc_task_runs; Type: TABLE; Schema: public; Owner: -
 --
 
--- NOTE: pm_adhoc_aggregation_results 已迁至时序库 (migrations/tsdb/000001_tsdb_schema.sql)。
+CREATE TABLE public.pm_adhoc_task_runs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    task_id uuid NOT NULL,
+    run_seq integer NOT NULL,
+    granularity text DEFAULT ''::text NOT NULL,
+    dimension text DEFAULT ''::text NOT NULL,
+    window_start timestamp with time zone,
+    window_end timestamp with time zone,
+    status text NOT NULL,
+    queued_at timestamp with time zone,
+    started_at timestamp with time zone DEFAULT now() NOT NULL,
+    finished_at timestamp with time zone,
+    error text DEFAULT ''::text NOT NULL,
+    rows_total integer DEFAULT 0 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
 
 
 --
@@ -5076,12 +5053,29 @@ CREATE TABLE public.pm_dashboards (
 
 
 --
--- Name: pm_files; Type: TABLE; Schema: public; Owner: -
+-- Name: pm_kpi_export_tasks; Type: TABLE; Schema: public; Owner: -
 --
 
--- NOTE: 以下 11 张表 (pm_files / pm_group_metrics_{daily,hourly,monthly,weekly}
--- / pm_metrics / pm_metrics_{daily,hourly,monthly,weekly}) 已迁至时序库
--- (migrations/tsdb/000001_tsdb_schema.sql)。pm_dashboards / pm_panels 等仍留主库。
+CREATE TABLE public.pm_kpi_export_tasks (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    task_name text DEFAULT ''::text NOT NULL,
+    source_type text NOT NULL,
+    params jsonb DEFAULT '{}'::jsonb NOT NULL,
+    format text DEFAULT 'csv'::text NOT NULL,
+    status text DEFAULT 'pending'::text NOT NULL,
+    row_count bigint DEFAULT 0 NOT NULL,
+    bucket text DEFAULT ''::text NOT NULL,
+    file_path text DEFAULT ''::text NOT NULL,
+    file_size bigint DEFAULT 0 NOT NULL,
+    error text DEFAULT ''::text NOT NULL,
+    create_user text DEFAULT ''::text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    started_at timestamp with time zone,
+    finished_at timestamp with time zone,
+    expire_at timestamp with time zone,
+    CONSTRAINT pm_kpi_export_tasks_source_type_chk CHECK ((source_type = ANY (ARRAY['dashboard'::text, 'adhoc'::text]))),
+    CONSTRAINT pm_kpi_export_tasks_status_chk CHECK ((status = ANY (ARRAY['pending'::text, 'running'::text, 'succeeded'::text, 'failed'::text])))
+);
 
 
 --
@@ -5124,7 +5118,7 @@ CREATE TABLE public.pm_query_templates (
     payload jsonb DEFAULT '{}'::jsonb NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT pm_query_templates_visibility_check CHECK (((visibility)::text = ANY ((ARRAY['public'::character varying, 'private'::character varying])::text[])))
+    CONSTRAINT pm_query_templates_visibility_check CHECK (((visibility)::text = ANY (ARRAY[('public'::character varying)::text, ('private'::character varying)::text])))
 );
 
 
@@ -5182,9 +5176,14 @@ CREATE TABLE public.pm_tasks (
     window_end timestamp with time zone,
     last_fire_at timestamp with time zone,
     dimension text DEFAULT 'device'::text NOT NULL,
+    technology text,
+    is_builtin boolean DEFAULT false NOT NULL,
+    expire_days integer DEFAULT 60 NOT NULL,
+    object_ldns text[],
     CONSTRAINT chk_pm_tasks_continuous_cron CHECK (((mode IS DISTINCT FROM 'continuous'::text) OR (cron_expr IS NOT NULL))),
-    CONSTRAINT chk_pm_tasks_dimension CHECK ((dimension = ANY (ARRAY['device'::text, 'aggregate_group'::text]))),
-    CONSTRAINT chk_pm_tasks_mode CHECK (((mode IS NULL) OR (mode = ANY (ARRAY['oneshot'::text, 'continuous'::text]))))
+    CONSTRAINT chk_pm_tasks_dimension CHECK ((dimension = ANY (ARRAY['device'::text, 'aggregate_group'::text, 'device_group'::text, 'product'::text, 'band'::text, 'network'::text]))),
+    CONSTRAINT chk_pm_tasks_mode CHECK (((mode IS NULL) OR (mode = ANY (ARRAY['oneshot'::text, 'continuous'::text])))),
+    CONSTRAINT chk_pm_tasks_technology CHECK (((technology IS NULL) OR (technology = ANY (ARRAY['lte'::text, 'nr'::text, 'gsm'::text]))))
 );
 
 
@@ -5222,7 +5221,9 @@ CREATE TABLE public.product_class_patterns (
     sort_order integer NOT NULL,
     is_active boolean DEFAULT true NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    source character varying(16) DEFAULT 'builtin'::character varying NOT NULL,
+    CONSTRAINT product_class_patterns_source_check CHECK (((source)::text = ANY ((ARRAY['builtin'::character varying, 'custom'::character varying])::text[])))
 );
 
 
@@ -5238,6 +5239,26 @@ COMMENT ON TABLE public.product_class_patterns IS 'productClass → product 路�
 --
 
 COMMENT ON COLUMN public.product_class_patterns.sort_order IS '全局唯一 sort_order；FAP 兜底正则必须排在最末';
+
+
+--
+-- Name: product_unsupported_paths; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.product_unsupported_paths (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    product_id uuid NOT NULL,
+    standard_path character varying(512) NOT NULL,
+    read_unsupported boolean DEFAULT false NOT NULL,
+    write_unsupported boolean DEFAULT false NOT NULL,
+    last_fault_code integer,
+    last_device_sn character varying(64),
+    hit_count integer DEFAULT 1 NOT NULL,
+    first_seen_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_seen_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
 
 
 --
@@ -5260,7 +5281,8 @@ CREATE TABLE public.products (
     enable_unknown_alarm boolean DEFAULT false NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT chk_products_indicator_device_type CHECK (((indicator_device_type)::text = ANY ((ARRAY['enb'::character varying, 'gsm'::character varying, 'gnb'::character varying])::text[])))
+    is_builtin boolean DEFAULT false NOT NULL,
+    CONSTRAINT chk_products_indicator_device_type CHECK (((indicator_device_type)::text = ANY (ARRAY[('enb'::character varying)::text, ('gsm'::character varying)::text, ('gnb'::character varying)::text])))
 );
 
 
@@ -5314,6 +5336,13 @@ COMMENT ON COLUMN public.products.enable_unknown_alarm IS 'identifier 不在告�
 
 
 --
+-- Name: COLUMN products.is_builtin; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.products.is_builtin IS 'true=products.xml 装配加载的内置产品（禁止删除）；false=UI 新建的自定义产品。loader UPSERT 置 true，Create 默认 false。';
+
+
+--
 -- Name: provisioning_tasks; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -5331,7 +5360,7 @@ CREATE TABLE public.provisioning_tasks (
     completed_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT provisioning_tasks_status_check CHECK (((status)::text = ANY ((ARRAY['discovered'::character varying, 'identifying'::character varying, 'matching'::character varying, 'configuring'::character varying, 'verifying'::character varying, 'discovering'::character varying, 'syncing'::character varying, 'completed'::character varying, 'failed'::character varying])::text[])))
+    CONSTRAINT provisioning_tasks_status_check CHECK (((status)::text = ANY (ARRAY[('discovered'::character varying)::text, ('identifying'::character varying)::text, ('matching'::character varying)::text, ('configuring'::character varying)::text, ('verifying'::character varying)::text, ('discovering'::character varying)::text, ('syncing'::character varying)::text, ('completed'::character varying)::text, ('failed'::character varying)::text])))
 );
 
 
@@ -5345,7 +5374,8 @@ CREATE TABLE public.rela_platform_indicator_formula_enb (
     indicator_id character varying(20) NOT NULL,
     formula text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    loaded_from text
 );
 
 
@@ -5359,7 +5389,8 @@ CREATE TABLE public.rela_platform_indicator_formula_gnb (
     indicator_id character varying(20) NOT NULL,
     formula text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    loaded_from text
 );
 
 
@@ -5373,7 +5404,8 @@ CREATE TABLE public.rela_platform_indicator_formula_gsm (
     indicator_id character varying(20) NOT NULL,
     formula text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    loaded_from text
 );
 
 
@@ -5441,8 +5473,15 @@ CREATE TABLE public.restore_tasks (
     task_result smallint,
     operator_code character varying(8),
     create_user character varying(64),
+    expected_hash character varying(128),
+    hash_algo character varying(16),
+    verified_hash character varying(128),
+    verification_method character varying(24),
+    verified_at timestamp with time zone,
+    downloaded_at timestamp with time zone,
+    source_version character varying(64),
     CONSTRAINT restore_tasks_progress_check CHECK (((progress >= 0) AND (progress <= 100))),
-    CONSTRAINT restore_tasks_status_check CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'running'::character varying, 'completed'::character varying, 'failed'::character varying, 'cancelled'::character varying])::text[]))),
+    CONSTRAINT restore_tasks_status_check CHECK (((status)::text = ANY (ARRAY['pending'::text, 'running'::text, 'downloaded'::text, 'completed'::text, 'failed'::text, 'cancelled'::text]))),
     CONSTRAINT restore_tasks_task_result_check CHECK (((task_result IS NULL) OR (task_result = ANY (ARRAY[1, 2]))))
 );
 
@@ -5615,7 +5654,7 @@ CREATE TABLE public.runtime_log_collect_sub_tasks (
     completed_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT chk_upgrade_sub_tasks_status CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'downloading'::character varying, 'uploading'::character varying, 'rebooting'::character varying, 'verifying'::character varying, 'completed'::character varying, 'failed'::character varying, 'suspended'::character varying, 'terminated'::character varying])::text[])))
+    CONSTRAINT chk_upgrade_sub_tasks_status CHECK (((status)::text = ANY (ARRAY[('pending'::character varying)::text, ('downloading'::character varying)::text, ('uploading'::character varying)::text, ('rebooting'::character varying)::text, ('verifying'::character varying)::text, ('completed'::character varying)::text, ('failed'::character varying)::text, ('suspended'::character varying)::text, ('terminated'::character varying)::text])))
 );
 
 
@@ -5661,15 +5700,15 @@ CREATE TABLE public.runtime_log_collect_tasks (
     rollback_on_failure boolean DEFAULT false NOT NULL,
     download_file_type text DEFAULT ''::text NOT NULL,
     scheduled_at timestamp with time zone,
-    CONSTRAINT chk_upgrade_tasks_create_status CHECK (((create_status)::text = ANY ((ARRAY['active'::character varying, 'suspend'::character varying, 'timing'::character varying])::text[]))),
-    CONSTRAINT chk_upgrade_tasks_result CHECK (((result IS NULL) OR ((result)::text = ANY ((ARRAY['success'::character varying, 'partial'::character varying, 'failed'::character varying, 'terminated'::character varying])::text[])))),
-    CONSTRAINT chk_upgrade_tasks_status CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'in_progress'::character varying, 'suspended'::character varying, 'ended'::character varying])::text[]))),
+    CONSTRAINT chk_upgrade_tasks_create_status CHECK (((create_status)::text = ANY (ARRAY[('active'::character varying)::text, ('suspend'::character varying)::text, ('timing'::character varying)::text]))),
+    CONSTRAINT chk_upgrade_tasks_result CHECK (((result IS NULL) OR ((result)::text = ANY (ARRAY[('success'::character varying)::text, ('partial'::character varying)::text, ('failed'::character varying)::text, ('terminated'::character varying)::text])))),
+    CONSTRAINT chk_upgrade_tasks_status CHECK (((status)::text = ANY (ARRAY[('pending'::character varying)::text, ('in_progress'::character varying)::text, ('suspended'::character varying)::text, ('ended'::character varying)::text]))),
     CONSTRAINT chk_upgrade_tasks_task_type CHECK ((task_type = ANY (ARRAY[1, 2, 4, 6, 8, 10]))),
     CONSTRAINT upgrade_tasks_auto_advance_minutes_check CHECK (((auto_advance_minutes >= 0) AND (auto_advance_minutes <= 1440))),
     CONSTRAINT upgrade_tasks_current_stage_check CHECK (((current_stage >= 0) AND (current_stage <= 100))),
-    CONSTRAINT upgrade_tasks_rollback_source_check CHECK (((rollback_source)::text = ANY ((ARRAY['manual'::character varying, 'canary_failure'::character varying, 'compatibility'::character varying, 'scheduled'::character varying])::text[]))),
-    CONSTRAINT upgrade_tasks_stage_status_check CHECK (((stage_status)::text = ANY ((ARRAY['pending'::character varying, 'running'::character varying, 'paused'::character varying, 'aborted'::character varying, 'completed'::character varying])::text[]))),
-    CONSTRAINT upgrade_tasks_strategy_check CHECK (((strategy)::text = ANY ((ARRAY['full'::character varying, 'canary'::character varying])::text[])))
+    CONSTRAINT upgrade_tasks_rollback_source_check CHECK (((rollback_source)::text = ANY (ARRAY[('manual'::character varying)::text, ('canary_failure'::character varying)::text, ('compatibility'::character varying)::text, ('scheduled'::character varying)::text]))),
+    CONSTRAINT upgrade_tasks_stage_status_check CHECK (((stage_status)::text = ANY (ARRAY[('pending'::character varying)::text, ('running'::character varying)::text, ('paused'::character varying)::text, ('aborted'::character varying)::text, ('completed'::character varying)::text]))),
+    CONSTRAINT upgrade_tasks_strategy_check CHECK (((strategy)::text = ANY (ARRAY[('full'::character varying)::text, ('canary'::character varying)::text])))
 );
 
 
@@ -5682,7 +5721,7 @@ CREATE TABLE public.seed_menu_show_status_backups (
     menu_id uuid NOT NULL,
     previous_show_status character varying(16) NOT NULL,
     captured_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT chk_seed_menu_show_status_backups_status CHECK (((previous_show_status)::text = ANY ((ARRAY['show'::character varying, 'hide'::character varying])::text[])))
+    CONSTRAINT chk_seed_menu_show_status_backups_status CHECK (((previous_show_status)::text = ANY (ARRAY[('show'::character varying)::text, ('hide'::character varying)::text])))
 );
 
 
@@ -5865,7 +5904,8 @@ CREATE TABLE public.sys_configs (
     is_public boolean DEFAULT false NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT chk_value_type CHECK (((value_type)::text = ANY ((ARRAY['string'::character varying, 'int'::character varying, 'float'::character varying, 'bool'::character varying, 'json'::character varying])::text[])))
+    description_i18n jsonb DEFAULT '{}'::jsonb NOT NULL,
+    CONSTRAINT chk_value_type CHECK (((value_type)::text = ANY (ARRAY[('string'::character varying)::text, ('int'::character varying)::text, ('float'::character varying)::text, ('bool'::character varying)::text, ('json'::character varying)::text])))
 );
 
 
@@ -5888,7 +5928,17 @@ CREATE TABLE public.sys_dictionaries (
     description character varying(255) DEFAULT ''::character varying NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    deleted_at timestamp with time zone
+    deleted_at timestamp with time zone,
+    source_table character varying(64),
+    source_label_field character varying(64),
+    source_value_field character varying(64),
+    source_filter jsonb,
+    last_refresh_at timestamp with time zone,
+    last_refresh_status character varying(16),
+    last_refresh_error text,
+    last_refresh_count integer,
+    name_i18n jsonb DEFAULT '{}'::jsonb NOT NULL,
+    description_i18n jsonb DEFAULT '{}'::jsonb NOT NULL
 );
 
 
@@ -5904,6 +5954,62 @@ COMMENT ON TABLE public.sys_dictionaries IS '字典主表：统一管理枚举�
 --
 
 COMMENT ON COLUMN public.sys_dictionaries.type IS '字典类型（英文标识），全局唯一，如 gender、status';
+
+
+--
+-- Name: COLUMN sys_dictionaries.source_table; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.sys_dictionaries.source_table IS '数据源表(白名单业务名);NULL=手工字典';
+
+
+--
+-- Name: COLUMN sys_dictionaries.source_label_field; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.sys_dictionaries.source_label_field IS '源表中作为字典项 label 的字段(白名单内)';
+
+
+--
+-- Name: COLUMN sys_dictionaries.source_value_field; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.sys_dictionaries.source_value_field IS '源表中作为字典项 value 的字段(白名单内,可与 label 同字段)';
+
+
+--
+-- Name: COLUMN sys_dictionaries.source_filter; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.sys_dictionaries.source_filter IS 'v1 预留,JSONB 过滤条件;v1 不读不写';
+
+
+--
+-- Name: COLUMN sys_dictionaries.last_refresh_at; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.sys_dictionaries.last_refresh_at IS '上次同步成功/失败的时间';
+
+
+--
+-- Name: COLUMN sys_dictionaries.last_refresh_status; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.sys_dictionaries.last_refresh_status IS '上次同步状态 ok|failed|running|timeout';
+
+
+--
+-- Name: COLUMN sys_dictionaries.last_refresh_error; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.sys_dictionaries.last_refresh_error IS '上次同步失败摘要(<=500 chars)';
+
+
+--
+-- Name: COLUMN sys_dictionaries.last_refresh_count; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.sys_dictionaries.last_refresh_count IS '上次同步完成后 origin=auto 项总数';
 
 
 --
@@ -5941,7 +6047,9 @@ CREATE TABLE public.sys_dictionary_details (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     deleted_at timestamp with time zone,
     parent_id bigint,
-    level integer DEFAULT 0 NOT NULL
+    level integer DEFAULT 0 NOT NULL,
+    origin character varying(16) DEFAULT 'manual'::character varying NOT NULL,
+    label_i18n jsonb DEFAULT '{}'::jsonb NOT NULL
 );
 
 
@@ -5964,6 +6072,13 @@ COMMENT ON COLUMN public.sys_dictionary_details.parent_id IS '父明细 ID；NUL
 --
 
 COMMENT ON COLUMN public.sys_dictionary_details.level IS '层级冗余：0=顶层 / 1=一级子 / 2=二级子，最大深度 3 层（应用层校验）';
+
+
+--
+-- Name: COLUMN sys_dictionary_details.origin; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.sys_dictionary_details.origin IS '来源 manual=手工 / auto=数据源同步;同步任务只动 auto 行,manual 行保留';
 
 
 --
@@ -6145,8 +6260,8 @@ CREATE TABLE public.system_license (
     is_current boolean DEFAULT true NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT chk_license_type CHECK (((license_type)::text = ANY ((ARRAY['Commercial'::character varying, 'Trial'::character varying, 'Evaluation'::character varying, 'Internal'::character varying])::text[]))),
-    CONSTRAINT chk_signature_status CHECK (((signature_status)::text = ANY ((ARRAY['verified'::character varying, 'unverified'::character varying, 'invalid'::character varying])::text[])))
+    CONSTRAINT chk_license_type CHECK (((license_type)::text = ANY (ARRAY[('Commercial'::character varying)::text, ('Trial'::character varying)::text, ('Evaluation'::character varying)::text, ('Internal'::character varying)::text]))),
+    CONSTRAINT chk_signature_status CHECK (((signature_status)::text = ANY (ARRAY[('verified'::character varying)::text, ('unverified'::character varying)::text, ('invalid'::character varying)::text])))
 );
 
 
@@ -6283,15 +6398,8 @@ CREATE TABLE public.trace_export_jobs (
     completed_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT trace_export_jobs_status_check CHECK (((status)::text = ANY ((ARRAY['queued'::character varying, 'running'::character varying, 'done'::character varying, 'failed'::character varying])::text[])))
+    CONSTRAINT trace_export_jobs_status_check CHECK (((status)::text = ANY (ARRAY[('queued'::character varying)::text, ('running'::character varying)::text, ('done'::character varying)::text, ('failed'::character varying)::text])))
 );
-
-
---
--- Name: trace_messages; Type: TABLE; Schema: public; Owner: -
---
-
--- NOTE: trace_messages 已迁至时序库 (migrations/tsdb/000001_tsdb_schema.sql)。
 
 
 --
@@ -6311,7 +6419,7 @@ CREATE TABLE public.trace_tasks (
     message_count integer DEFAULT 0 NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT trace_tasks_status_check CHECK (((status)::text = ANY ((ARRAY['running'::character varying, 'stopped'::character varying, 'purged'::character varying])::text[])))
+    CONSTRAINT trace_tasks_status_check CHECK (((status)::text = ANY (ARRAY[('running'::character varying)::text, ('stopped'::character varying)::text, ('purged'::character varying)::text])))
 );
 
 
@@ -6375,7 +6483,7 @@ CREATE TABLE public.upgrade_sub_tasks (
     completed_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT chk_upgrade_sub_tasks_status CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'downloading'::character varying, 'uploading'::character varying, 'rebooting'::character varying, 'verifying'::character varying, 'completed'::character varying, 'failed'::character varying, 'suspended'::character varying, 'terminated'::character varying])::text[])))
+    CONSTRAINT chk_upgrade_sub_tasks_status CHECK (((status)::text = ANY (ARRAY[('pending'::character varying)::text, ('downloading'::character varying)::text, ('uploading'::character varying)::text, ('rebooting'::character varying)::text, ('verifying'::character varying)::text, ('completed'::character varying)::text, ('failed'::character varying)::text, ('suspended'::character varying)::text, ('terminated'::character varying)::text])))
 );
 
 
@@ -6421,15 +6529,15 @@ CREATE TABLE public.upgrade_tasks (
     rollback_on_failure boolean DEFAULT false NOT NULL,
     download_file_type text DEFAULT ''::text NOT NULL,
     scheduled_at timestamp with time zone,
-    CONSTRAINT chk_upgrade_tasks_create_status CHECK (((create_status)::text = ANY ((ARRAY['active'::character varying, 'suspend'::character varying, 'timing'::character varying])::text[]))),
-    CONSTRAINT chk_upgrade_tasks_result CHECK (((result IS NULL) OR ((result)::text = ANY ((ARRAY['success'::character varying, 'partial'::character varying, 'failed'::character varying, 'terminated'::character varying])::text[])))),
-    CONSTRAINT chk_upgrade_tasks_status CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'in_progress'::character varying, 'suspended'::character varying, 'ended'::character varying])::text[]))),
+    CONSTRAINT chk_upgrade_tasks_create_status CHECK (((create_status)::text = ANY (ARRAY[('active'::character varying)::text, ('suspend'::character varying)::text, ('timing'::character varying)::text]))),
+    CONSTRAINT chk_upgrade_tasks_result CHECK (((result IS NULL) OR ((result)::text = ANY (ARRAY[('success'::character varying)::text, ('partial'::character varying)::text, ('failed'::character varying)::text, ('terminated'::character varying)::text])))),
+    CONSTRAINT chk_upgrade_tasks_status CHECK (((status)::text = ANY (ARRAY[('pending'::character varying)::text, ('in_progress'::character varying)::text, ('suspended'::character varying)::text, ('ended'::character varying)::text]))),
     CONSTRAINT chk_upgrade_tasks_task_type CHECK ((task_type = ANY (ARRAY[1, 2, 4, 6, 8, 10]))),
     CONSTRAINT upgrade_tasks_auto_advance_minutes_check CHECK (((auto_advance_minutes >= 0) AND (auto_advance_minutes <= 1440))),
     CONSTRAINT upgrade_tasks_current_stage_check CHECK (((current_stage >= 0) AND (current_stage <= 100))),
-    CONSTRAINT upgrade_tasks_rollback_source_check CHECK (((rollback_source)::text = ANY ((ARRAY['manual'::character varying, 'canary_failure'::character varying, 'compatibility'::character varying, 'scheduled'::character varying])::text[]))),
-    CONSTRAINT upgrade_tasks_stage_status_check CHECK (((stage_status)::text = ANY ((ARRAY['pending'::character varying, 'running'::character varying, 'paused'::character varying, 'aborted'::character varying, 'completed'::character varying])::text[]))),
-    CONSTRAINT upgrade_tasks_strategy_check CHECK (((strategy)::text = ANY ((ARRAY['full'::character varying, 'canary'::character varying])::text[])))
+    CONSTRAINT upgrade_tasks_rollback_source_check CHECK (((rollback_source)::text = ANY (ARRAY[('manual'::character varying)::text, ('canary_failure'::character varying)::text, ('compatibility'::character varying)::text, ('scheduled'::character varying)::text]))),
+    CONSTRAINT upgrade_tasks_stage_status_check CHECK (((stage_status)::text = ANY (ARRAY[('pending'::character varying)::text, ('running'::character varying)::text, ('paused'::character varying)::text, ('aborted'::character varying)::text, ('completed'::character varying)::text]))),
+    CONSTRAINT upgrade_tasks_strategy_check CHECK (((strategy)::text = ANY (ARRAY[('full'::character varying)::text, ('canary'::character varying)::text])))
 );
 
 
@@ -6483,7 +6591,7 @@ CREATE TABLE public.users (
     updated_by uuid,
     must_change_password boolean DEFAULT false NOT NULL,
     password_changed_at timestamp with time zone,
-    CONSTRAINT users_source_check CHECK (((source)::text = ANY ((ARRAY['builtIn'::character varying, 'admin'::character varying, 'LDAP'::character varying])::text[])))
+    CONSTRAINT users_source_check CHECK (((source)::text = ANY (ARRAY[('builtIn'::character varying)::text, ('admin'::character varying)::text, ('LDAP'::character varying)::text])))
 );
 
 
@@ -7729,6 +7837,14 @@ ALTER TABLE ONLY public.ftp_configs
 
 
 --
+-- Name: indicator_file_descriptions indicator_file_descriptions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.indicator_file_descriptions
+    ADD CONSTRAINT indicator_file_descriptions_pkey PRIMARY KEY (tech, platform);
+
+
+--
 -- Name: kpi_definitions kpi_definitions_name_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -8153,14 +8269,6 @@ ALTER TABLE ONLY public.indicator_threshold
 
 
 --
--- Name: indicator_unit pk_indicator_unit; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.indicator_unit
-    ADD CONSTRAINT pk_indicator_unit PRIMARY KEY (id);
-
-
---
 -- Name: perf_alarm_threshold pk_perf_alarm_threshold; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -8232,7 +8340,12 @@ ALTER TABLE ONLY public.rela_platform_indicator_formula_gsm
     ADD CONSTRAINT pk_rela_platform_indicator_formula_gsm PRIMARY KEY (id);
 
 
--- NOTE: pm_adhoc_aggregation_results pkey 已随表迁至时序库。
+--
+-- Name: pm_adhoc_task_runs pm_adhoc_task_runs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pm_adhoc_task_runs
+    ADD CONSTRAINT pm_adhoc_task_runs_pkey PRIMARY KEY (id);
 
 
 --
@@ -8243,8 +8356,12 @@ ALTER TABLE ONLY public.pm_dashboards
     ADD CONSTRAINT pm_dashboards_pkey PRIMARY KEY (id);
 
 
--- NOTE: pm_files / pm_group_metrics_* / pm_metrics / pm_metrics_* 的主键约束
--- 已随表迁至时序库 (migrations/tsdb/000001_tsdb_schema.sql)。
+--
+-- Name: pm_kpi_export_tasks pm_kpi_export_tasks_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pm_kpi_export_tasks
+    ADD CONSTRAINT pm_kpi_export_tasks_pkey PRIMARY KEY (id);
 
 
 --
@@ -8285,6 +8402,14 @@ ALTER TABLE ONLY public.pm_user_dashboard_preferences
 
 ALTER TABLE ONLY public.product_class_patterns
     ADD CONSTRAINT product_class_patterns_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: product_unsupported_paths product_unsupported_paths_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.product_unsupported_paths
+    ADD CONSTRAINT product_unsupported_paths_pkey PRIMARY KEY (id);
 
 
 --
@@ -8679,7 +8804,12 @@ ALTER TABLE ONLY public.mr_customize_task_progress
     ADD CONSTRAINT uq_mr_progress_task_cell UNIQUE (task_id, small_cell_code);
 
 
--- NOTE: pm_files uq_pm_files_device_filename 已随表迁至时序库。
+--
+-- Name: product_unsupported_paths uq_product_unsupported_path; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.product_unsupported_paths
+    ADD CONSTRAINT uq_product_unsupported_path UNIQUE (product_id, standard_path);
 
 
 --
@@ -8751,6 +8881,20 @@ CREATE INDEX device_parameters_p00_device_id_parameter_path_idx ON public.device
 
 
 --
+-- Name: idx_device_params_swver; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_device_params_swver ON ONLY public.device_parameters USING btree (parameter_value, device_id) WHERE ((parameter_path)::text = 'Device.DeviceInfo.SoftwareVersion'::text);
+
+
+--
+-- Name: device_parameters_p00_parameter_value_device_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_parameters_p00_parameter_value_device_id_idx ON public.device_parameters_p00 USING btree (parameter_value, device_id) WHERE ((parameter_path)::text = 'Device.DeviceInfo.SoftwareVersion'::text);
+
+
+--
 -- Name: device_parameters_p01_device_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -8762,6 +8906,13 @@ CREATE INDEX device_parameters_p01_device_id_idx ON public.device_parameters_p01
 --
 
 CREATE INDEX device_parameters_p01_device_id_parameter_path_idx ON public.device_parameters_p01 USING btree (device_id, parameter_path varchar_pattern_ops);
+
+
+--
+-- Name: device_parameters_p01_parameter_value_device_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_parameters_p01_parameter_value_device_id_idx ON public.device_parameters_p01 USING btree (parameter_value, device_id) WHERE ((parameter_path)::text = 'Device.DeviceInfo.SoftwareVersion'::text);
 
 
 --
@@ -8779,6 +8930,13 @@ CREATE INDEX device_parameters_p02_device_id_parameter_path_idx ON public.device
 
 
 --
+-- Name: device_parameters_p02_parameter_value_device_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_parameters_p02_parameter_value_device_id_idx ON public.device_parameters_p02 USING btree (parameter_value, device_id) WHERE ((parameter_path)::text = 'Device.DeviceInfo.SoftwareVersion'::text);
+
+
+--
 -- Name: device_parameters_p03_device_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -8790,6 +8948,13 @@ CREATE INDEX device_parameters_p03_device_id_idx ON public.device_parameters_p03
 --
 
 CREATE INDEX device_parameters_p03_device_id_parameter_path_idx ON public.device_parameters_p03 USING btree (device_id, parameter_path varchar_pattern_ops);
+
+
+--
+-- Name: device_parameters_p03_parameter_value_device_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_parameters_p03_parameter_value_device_id_idx ON public.device_parameters_p03 USING btree (parameter_value, device_id) WHERE ((parameter_path)::text = 'Device.DeviceInfo.SoftwareVersion'::text);
 
 
 --
@@ -8807,6 +8972,13 @@ CREATE INDEX device_parameters_p04_device_id_parameter_path_idx ON public.device
 
 
 --
+-- Name: device_parameters_p04_parameter_value_device_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_parameters_p04_parameter_value_device_id_idx ON public.device_parameters_p04 USING btree (parameter_value, device_id) WHERE ((parameter_path)::text = 'Device.DeviceInfo.SoftwareVersion'::text);
+
+
+--
 -- Name: device_parameters_p05_device_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -8818,6 +8990,13 @@ CREATE INDEX device_parameters_p05_device_id_idx ON public.device_parameters_p05
 --
 
 CREATE INDEX device_parameters_p05_device_id_parameter_path_idx ON public.device_parameters_p05 USING btree (device_id, parameter_path varchar_pattern_ops);
+
+
+--
+-- Name: device_parameters_p05_parameter_value_device_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_parameters_p05_parameter_value_device_id_idx ON public.device_parameters_p05 USING btree (parameter_value, device_id) WHERE ((parameter_path)::text = 'Device.DeviceInfo.SoftwareVersion'::text);
 
 
 --
@@ -8835,6 +9014,13 @@ CREATE INDEX device_parameters_p06_device_id_parameter_path_idx ON public.device
 
 
 --
+-- Name: device_parameters_p06_parameter_value_device_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_parameters_p06_parameter_value_device_id_idx ON public.device_parameters_p06 USING btree (parameter_value, device_id) WHERE ((parameter_path)::text = 'Device.DeviceInfo.SoftwareVersion'::text);
+
+
+--
 -- Name: device_parameters_p07_device_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -8846,6 +9032,13 @@ CREATE INDEX device_parameters_p07_device_id_idx ON public.device_parameters_p07
 --
 
 CREATE INDEX device_parameters_p07_device_id_parameter_path_idx ON public.device_parameters_p07 USING btree (device_id, parameter_path varchar_pattern_ops);
+
+
+--
+-- Name: device_parameters_p07_parameter_value_device_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_parameters_p07_parameter_value_device_id_idx ON public.device_parameters_p07 USING btree (parameter_value, device_id) WHERE ((parameter_path)::text = 'Device.DeviceInfo.SoftwareVersion'::text);
 
 
 --
@@ -8863,6 +9056,13 @@ CREATE INDEX device_parameters_p08_device_id_parameter_path_idx ON public.device
 
 
 --
+-- Name: device_parameters_p08_parameter_value_device_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_parameters_p08_parameter_value_device_id_idx ON public.device_parameters_p08 USING btree (parameter_value, device_id) WHERE ((parameter_path)::text = 'Device.DeviceInfo.SoftwareVersion'::text);
+
+
+--
 -- Name: device_parameters_p09_device_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -8874,6 +9074,13 @@ CREATE INDEX device_parameters_p09_device_id_idx ON public.device_parameters_p09
 --
 
 CREATE INDEX device_parameters_p09_device_id_parameter_path_idx ON public.device_parameters_p09 USING btree (device_id, parameter_path varchar_pattern_ops);
+
+
+--
+-- Name: device_parameters_p09_parameter_value_device_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_parameters_p09_parameter_value_device_id_idx ON public.device_parameters_p09 USING btree (parameter_value, device_id) WHERE ((parameter_path)::text = 'Device.DeviceInfo.SoftwareVersion'::text);
 
 
 --
@@ -8891,6 +9098,13 @@ CREATE INDEX device_parameters_p10_device_id_parameter_path_idx ON public.device
 
 
 --
+-- Name: device_parameters_p10_parameter_value_device_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_parameters_p10_parameter_value_device_id_idx ON public.device_parameters_p10 USING btree (parameter_value, device_id) WHERE ((parameter_path)::text = 'Device.DeviceInfo.SoftwareVersion'::text);
+
+
+--
 -- Name: device_parameters_p11_device_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -8902,6 +9116,13 @@ CREATE INDEX device_parameters_p11_device_id_idx ON public.device_parameters_p11
 --
 
 CREATE INDEX device_parameters_p11_device_id_parameter_path_idx ON public.device_parameters_p11 USING btree (device_id, parameter_path varchar_pattern_ops);
+
+
+--
+-- Name: device_parameters_p11_parameter_value_device_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_parameters_p11_parameter_value_device_id_idx ON public.device_parameters_p11 USING btree (parameter_value, device_id) WHERE ((parameter_path)::text = 'Device.DeviceInfo.SoftwareVersion'::text);
 
 
 --
@@ -8919,6 +9140,13 @@ CREATE INDEX device_parameters_p12_device_id_parameter_path_idx ON public.device
 
 
 --
+-- Name: device_parameters_p12_parameter_value_device_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_parameters_p12_parameter_value_device_id_idx ON public.device_parameters_p12 USING btree (parameter_value, device_id) WHERE ((parameter_path)::text = 'Device.DeviceInfo.SoftwareVersion'::text);
+
+
+--
 -- Name: device_parameters_p13_device_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -8930,6 +9158,13 @@ CREATE INDEX device_parameters_p13_device_id_idx ON public.device_parameters_p13
 --
 
 CREATE INDEX device_parameters_p13_device_id_parameter_path_idx ON public.device_parameters_p13 USING btree (device_id, parameter_path varchar_pattern_ops);
+
+
+--
+-- Name: device_parameters_p13_parameter_value_device_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_parameters_p13_parameter_value_device_id_idx ON public.device_parameters_p13 USING btree (parameter_value, device_id) WHERE ((parameter_path)::text = 'Device.DeviceInfo.SoftwareVersion'::text);
 
 
 --
@@ -8947,6 +9182,13 @@ CREATE INDEX device_parameters_p14_device_id_parameter_path_idx ON public.device
 
 
 --
+-- Name: device_parameters_p14_parameter_value_device_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_parameters_p14_parameter_value_device_id_idx ON public.device_parameters_p14 USING btree (parameter_value, device_id) WHERE ((parameter_path)::text = 'Device.DeviceInfo.SoftwareVersion'::text);
+
+
+--
 -- Name: device_parameters_p15_device_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -8958,6 +9200,13 @@ CREATE INDEX device_parameters_p15_device_id_idx ON public.device_parameters_p15
 --
 
 CREATE INDEX device_parameters_p15_device_id_parameter_path_idx ON public.device_parameters_p15 USING btree (device_id, parameter_path varchar_pattern_ops);
+
+
+--
+-- Name: device_parameters_p15_parameter_value_device_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_parameters_p15_parameter_value_device_id_idx ON public.device_parameters_p15 USING btree (parameter_value, device_id) WHERE ((parameter_path)::text = 'Device.DeviceInfo.SoftwareVersion'::text);
 
 
 --
@@ -8975,6 +9224,13 @@ CREATE INDEX device_parameters_p16_device_id_parameter_path_idx ON public.device
 
 
 --
+-- Name: device_parameters_p16_parameter_value_device_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_parameters_p16_parameter_value_device_id_idx ON public.device_parameters_p16 USING btree (parameter_value, device_id) WHERE ((parameter_path)::text = 'Device.DeviceInfo.SoftwareVersion'::text);
+
+
+--
 -- Name: device_parameters_p17_device_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -8986,6 +9242,13 @@ CREATE INDEX device_parameters_p17_device_id_idx ON public.device_parameters_p17
 --
 
 CREATE INDEX device_parameters_p17_device_id_parameter_path_idx ON public.device_parameters_p17 USING btree (device_id, parameter_path varchar_pattern_ops);
+
+
+--
+-- Name: device_parameters_p17_parameter_value_device_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_parameters_p17_parameter_value_device_id_idx ON public.device_parameters_p17 USING btree (parameter_value, device_id) WHERE ((parameter_path)::text = 'Device.DeviceInfo.SoftwareVersion'::text);
 
 
 --
@@ -9003,6 +9266,13 @@ CREATE INDEX device_parameters_p18_device_id_parameter_path_idx ON public.device
 
 
 --
+-- Name: device_parameters_p18_parameter_value_device_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_parameters_p18_parameter_value_device_id_idx ON public.device_parameters_p18 USING btree (parameter_value, device_id) WHERE ((parameter_path)::text = 'Device.DeviceInfo.SoftwareVersion'::text);
+
+
+--
 -- Name: device_parameters_p19_device_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -9014,6 +9284,13 @@ CREATE INDEX device_parameters_p19_device_id_idx ON public.device_parameters_p19
 --
 
 CREATE INDEX device_parameters_p19_device_id_parameter_path_idx ON public.device_parameters_p19 USING btree (device_id, parameter_path varchar_pattern_ops);
+
+
+--
+-- Name: device_parameters_p19_parameter_value_device_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_parameters_p19_parameter_value_device_id_idx ON public.device_parameters_p19 USING btree (parameter_value, device_id) WHERE ((parameter_path)::text = 'Device.DeviceInfo.SoftwareVersion'::text);
 
 
 --
@@ -9031,6 +9308,13 @@ CREATE INDEX device_parameters_p20_device_id_parameter_path_idx ON public.device
 
 
 --
+-- Name: device_parameters_p20_parameter_value_device_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_parameters_p20_parameter_value_device_id_idx ON public.device_parameters_p20 USING btree (parameter_value, device_id) WHERE ((parameter_path)::text = 'Device.DeviceInfo.SoftwareVersion'::text);
+
+
+--
 -- Name: device_parameters_p21_device_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -9042,6 +9326,13 @@ CREATE INDEX device_parameters_p21_device_id_idx ON public.device_parameters_p21
 --
 
 CREATE INDEX device_parameters_p21_device_id_parameter_path_idx ON public.device_parameters_p21 USING btree (device_id, parameter_path varchar_pattern_ops);
+
+
+--
+-- Name: device_parameters_p21_parameter_value_device_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_parameters_p21_parameter_value_device_id_idx ON public.device_parameters_p21 USING btree (parameter_value, device_id) WHERE ((parameter_path)::text = 'Device.DeviceInfo.SoftwareVersion'::text);
 
 
 --
@@ -9059,6 +9350,13 @@ CREATE INDEX device_parameters_p22_device_id_parameter_path_idx ON public.device
 
 
 --
+-- Name: device_parameters_p22_parameter_value_device_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_parameters_p22_parameter_value_device_id_idx ON public.device_parameters_p22 USING btree (parameter_value, device_id) WHERE ((parameter_path)::text = 'Device.DeviceInfo.SoftwareVersion'::text);
+
+
+--
 -- Name: device_parameters_p23_device_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -9070,6 +9368,13 @@ CREATE INDEX device_parameters_p23_device_id_idx ON public.device_parameters_p23
 --
 
 CREATE INDEX device_parameters_p23_device_id_parameter_path_idx ON public.device_parameters_p23 USING btree (device_id, parameter_path varchar_pattern_ops);
+
+
+--
+-- Name: device_parameters_p23_parameter_value_device_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_parameters_p23_parameter_value_device_id_idx ON public.device_parameters_p23 USING btree (parameter_value, device_id) WHERE ((parameter_path)::text = 'Device.DeviceInfo.SoftwareVersion'::text);
 
 
 --
@@ -9087,6 +9392,13 @@ CREATE INDEX device_parameters_p24_device_id_parameter_path_idx ON public.device
 
 
 --
+-- Name: device_parameters_p24_parameter_value_device_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_parameters_p24_parameter_value_device_id_idx ON public.device_parameters_p24 USING btree (parameter_value, device_id) WHERE ((parameter_path)::text = 'Device.DeviceInfo.SoftwareVersion'::text);
+
+
+--
 -- Name: device_parameters_p25_device_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -9098,6 +9410,13 @@ CREATE INDEX device_parameters_p25_device_id_idx ON public.device_parameters_p25
 --
 
 CREATE INDEX device_parameters_p25_device_id_parameter_path_idx ON public.device_parameters_p25 USING btree (device_id, parameter_path varchar_pattern_ops);
+
+
+--
+-- Name: device_parameters_p25_parameter_value_device_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_parameters_p25_parameter_value_device_id_idx ON public.device_parameters_p25 USING btree (parameter_value, device_id) WHERE ((parameter_path)::text = 'Device.DeviceInfo.SoftwareVersion'::text);
 
 
 --
@@ -9115,6 +9434,13 @@ CREATE INDEX device_parameters_p26_device_id_parameter_path_idx ON public.device
 
 
 --
+-- Name: device_parameters_p26_parameter_value_device_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_parameters_p26_parameter_value_device_id_idx ON public.device_parameters_p26 USING btree (parameter_value, device_id) WHERE ((parameter_path)::text = 'Device.DeviceInfo.SoftwareVersion'::text);
+
+
+--
 -- Name: device_parameters_p27_device_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -9126,6 +9452,13 @@ CREATE INDEX device_parameters_p27_device_id_idx ON public.device_parameters_p27
 --
 
 CREATE INDEX device_parameters_p27_device_id_parameter_path_idx ON public.device_parameters_p27 USING btree (device_id, parameter_path varchar_pattern_ops);
+
+
+--
+-- Name: device_parameters_p27_parameter_value_device_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_parameters_p27_parameter_value_device_id_idx ON public.device_parameters_p27 USING btree (parameter_value, device_id) WHERE ((parameter_path)::text = 'Device.DeviceInfo.SoftwareVersion'::text);
 
 
 --
@@ -9143,6 +9476,13 @@ CREATE INDEX device_parameters_p28_device_id_parameter_path_idx ON public.device
 
 
 --
+-- Name: device_parameters_p28_parameter_value_device_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_parameters_p28_parameter_value_device_id_idx ON public.device_parameters_p28 USING btree (parameter_value, device_id) WHERE ((parameter_path)::text = 'Device.DeviceInfo.SoftwareVersion'::text);
+
+
+--
 -- Name: device_parameters_p29_device_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -9154,6 +9494,13 @@ CREATE INDEX device_parameters_p29_device_id_idx ON public.device_parameters_p29
 --
 
 CREATE INDEX device_parameters_p29_device_id_parameter_path_idx ON public.device_parameters_p29 USING btree (device_id, parameter_path varchar_pattern_ops);
+
+
+--
+-- Name: device_parameters_p29_parameter_value_device_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_parameters_p29_parameter_value_device_id_idx ON public.device_parameters_p29 USING btree (parameter_value, device_id) WHERE ((parameter_path)::text = 'Device.DeviceInfo.SoftwareVersion'::text);
 
 
 --
@@ -9171,6 +9518,13 @@ CREATE INDEX device_parameters_p30_device_id_parameter_path_idx ON public.device
 
 
 --
+-- Name: device_parameters_p30_parameter_value_device_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_parameters_p30_parameter_value_device_id_idx ON public.device_parameters_p30 USING btree (parameter_value, device_id) WHERE ((parameter_path)::text = 'Device.DeviceInfo.SoftwareVersion'::text);
+
+
+--
 -- Name: device_parameters_p31_device_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -9182,6 +9536,13 @@ CREATE INDEX device_parameters_p31_device_id_idx ON public.device_parameters_p31
 --
 
 CREATE INDEX device_parameters_p31_device_id_parameter_path_idx ON public.device_parameters_p31 USING btree (device_id, parameter_path varchar_pattern_ops);
+
+
+--
+-- Name: device_parameters_p31_parameter_value_device_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_parameters_p31_parameter_value_device_id_idx ON public.device_parameters_p31 USING btree (parameter_value, device_id) WHERE ((parameter_path)::text = 'Device.DeviceInfo.SoftwareVersion'::text);
 
 
 --
@@ -11638,7 +11999,7 @@ CREATE INDEX idx_firmware_file_type_status ON public.firmware_versions USING btr
 -- Name: idx_firmware_unique_version; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX idx_firmware_unique_version ON public.firmware_versions USING btree (COALESCE(product_class, ''::character varying), version, file_type);
+CREATE UNIQUE INDEX idx_firmware_unique_version ON public.firmware_versions USING btree (COALESCE(product_class, (''::character varying)::text), version, file_type);
 
 
 --
@@ -11835,13 +12196,6 @@ CREATE INDEX idx_mml_commands_deprecated ON public.mml_commands USING btree (dep
 --
 
 CREATE INDEX idx_mml_commands_group_id ON public.mml_commands USING btree (group_id);
-
-
---
--- Name: idx_mml_commands_logical_code; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_mml_commands_logical_code ON public.mml_commands USING btree (logical_code);
 
 
 --
@@ -12692,6 +13046,13 @@ CREATE INDEX idx_perf_template_rel_arithmetic_temp_id ON public.perf_template_re
 
 
 --
+-- Name: idx_pm_adhoc_task_runs_task_started; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_pm_adhoc_task_runs_task_started ON public.pm_adhoc_task_runs USING btree (task_id, started_at DESC);
+
+
+--
 -- Name: idx_pm_dashboards_is_builtin; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -12717,6 +13078,20 @@ CREATE INDEX idx_pm_dashboards_parent ON public.pm_dashboards USING btree (paren
 --
 
 CREATE INDEX idx_pm_dashboards_shared ON public.pm_dashboards USING gin (shared_with);
+
+
+--
+-- Name: idx_pm_kpi_export_tasks_created_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_pm_kpi_export_tasks_created_at ON public.pm_kpi_export_tasks USING btree (created_at DESC);
+
+
+--
+-- Name: idx_pm_kpi_export_tasks_files; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_pm_kpi_export_tasks_files ON public.pm_kpi_export_tasks USING btree (created_at DESC) WHERE ((status = 'succeeded'::text) AND (file_path <> ''::text));
 
 
 --
@@ -12787,6 +13162,13 @@ CREATE INDEX idx_product_class_patterns_product ON public.product_class_patterns
 --
 
 CREATE INDEX idx_product_class_patterns_sort ON public.product_class_patterns USING btree (sort_order) WHERE is_active;
+
+
+--
+-- Name: idx_product_unsupported_paths_product; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_product_unsupported_paths_product ON public.product_unsupported_paths USING btree (product_id);
 
 
 --
@@ -13140,6 +13522,20 @@ CREATE INDEX idx_sys_dict_detail_dict_id ON public.sys_dictionary_details USING 
 
 
 --
+-- Name: idx_sys_dict_detail_dictid_origin; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_sys_dict_detail_dictid_origin ON public.sys_dictionary_details USING btree (sys_dictionary_id, origin);
+
+
+--
+-- Name: idx_sys_dict_source_table; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_sys_dict_source_table ON public.sys_dictionaries USING btree (source_table) WHERE (source_table IS NOT NULL);
+
+
+--
 -- Name: idx_system_license_expiry; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -13402,7 +13798,7 @@ CREATE INDEX idx_upgrade_sub_tasks_device_active ON public.upgrade_sub_tasks USI
 -- Name: idx_upgrade_sub_tasks_device_active_uniq; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX idx_upgrade_sub_tasks_device_active_uniq ON public.upgrade_sub_tasks USING btree (device_id) WHERE ((status)::text <> ALL ((ARRAY['completed'::character varying, 'failed'::character varying, 'terminated'::character varying])::text[]));
+CREATE UNIQUE INDEX idx_upgrade_sub_tasks_device_active_uniq ON public.upgrade_sub_tasks USING btree (device_id) WHERE ((status)::text <> ALL (ARRAY[('completed'::character varying)::text, ('failed'::character varying)::text, ('terminated'::character varying)::text]));
 
 
 --
@@ -13423,7 +13819,7 @@ CREATE INDEX idx_upgrade_sub_tasks_task_id_status ON public.upgrade_sub_tasks US
 -- Name: idx_upgrade_tasks_canary_active; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_upgrade_tasks_canary_active ON public.upgrade_tasks USING btree (strategy, stage_status) WHERE (((strategy)::text = 'canary'::text) AND ((stage_status)::text = ANY ((ARRAY['running'::character varying, 'paused'::character varying])::text[])));
+CREATE INDEX idx_upgrade_tasks_canary_active ON public.upgrade_tasks USING btree (strategy, stage_status) WHERE (((strategy)::text = 'canary'::text) AND ((stage_status)::text = ANY (ARRAY[('running'::character varying)::text, ('paused'::character varying)::text])));
 
 
 --
@@ -13553,6 +13949,13 @@ CREATE UNIQUE INDEX uniq_menu_name_per_parent ON public.menus USING btree (paren
 
 
 --
+-- Name: uniq_mml_commands_command_name_active; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uniq_mml_commands_command_name_active ON public.mml_commands USING btree (command_name) WHERE (deprecated_at IS NULL);
+
+
+--
 -- Name: uniq_mml_param_groups_object_path; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -13658,6 +14061,13 @@ ALTER INDEX public.idx_device_params_path_prefix ATTACH PARTITION public.device_
 
 
 --
+-- Name: device_parameters_p00_parameter_value_device_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_params_swver ATTACH PARTITION public.device_parameters_p00_parameter_value_device_id_idx;
+
+
+--
 -- Name: device_parameters_p00_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
@@ -13676,6 +14086,13 @@ ALTER INDEX public.idx_device_params_device ATTACH PARTITION public.device_param
 --
 
 ALTER INDEX public.idx_device_params_path_prefix ATTACH PARTITION public.device_parameters_p01_device_id_parameter_path_idx;
+
+
+--
+-- Name: device_parameters_p01_parameter_value_device_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_params_swver ATTACH PARTITION public.device_parameters_p01_parameter_value_device_id_idx;
 
 
 --
@@ -13700,6 +14117,13 @@ ALTER INDEX public.idx_device_params_path_prefix ATTACH PARTITION public.device_
 
 
 --
+-- Name: device_parameters_p02_parameter_value_device_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_params_swver ATTACH PARTITION public.device_parameters_p02_parameter_value_device_id_idx;
+
+
+--
 -- Name: device_parameters_p02_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
@@ -13718,6 +14142,13 @@ ALTER INDEX public.idx_device_params_device ATTACH PARTITION public.device_param
 --
 
 ALTER INDEX public.idx_device_params_path_prefix ATTACH PARTITION public.device_parameters_p03_device_id_parameter_path_idx;
+
+
+--
+-- Name: device_parameters_p03_parameter_value_device_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_params_swver ATTACH PARTITION public.device_parameters_p03_parameter_value_device_id_idx;
 
 
 --
@@ -13742,6 +14173,13 @@ ALTER INDEX public.idx_device_params_path_prefix ATTACH PARTITION public.device_
 
 
 --
+-- Name: device_parameters_p04_parameter_value_device_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_params_swver ATTACH PARTITION public.device_parameters_p04_parameter_value_device_id_idx;
+
+
+--
 -- Name: device_parameters_p04_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
@@ -13760,6 +14198,13 @@ ALTER INDEX public.idx_device_params_device ATTACH PARTITION public.device_param
 --
 
 ALTER INDEX public.idx_device_params_path_prefix ATTACH PARTITION public.device_parameters_p05_device_id_parameter_path_idx;
+
+
+--
+-- Name: device_parameters_p05_parameter_value_device_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_params_swver ATTACH PARTITION public.device_parameters_p05_parameter_value_device_id_idx;
 
 
 --
@@ -13784,6 +14229,13 @@ ALTER INDEX public.idx_device_params_path_prefix ATTACH PARTITION public.device_
 
 
 --
+-- Name: device_parameters_p06_parameter_value_device_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_params_swver ATTACH PARTITION public.device_parameters_p06_parameter_value_device_id_idx;
+
+
+--
 -- Name: device_parameters_p06_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
@@ -13802,6 +14254,13 @@ ALTER INDEX public.idx_device_params_device ATTACH PARTITION public.device_param
 --
 
 ALTER INDEX public.idx_device_params_path_prefix ATTACH PARTITION public.device_parameters_p07_device_id_parameter_path_idx;
+
+
+--
+-- Name: device_parameters_p07_parameter_value_device_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_params_swver ATTACH PARTITION public.device_parameters_p07_parameter_value_device_id_idx;
 
 
 --
@@ -13826,6 +14285,13 @@ ALTER INDEX public.idx_device_params_path_prefix ATTACH PARTITION public.device_
 
 
 --
+-- Name: device_parameters_p08_parameter_value_device_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_params_swver ATTACH PARTITION public.device_parameters_p08_parameter_value_device_id_idx;
+
+
+--
 -- Name: device_parameters_p08_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
@@ -13844,6 +14310,13 @@ ALTER INDEX public.idx_device_params_device ATTACH PARTITION public.device_param
 --
 
 ALTER INDEX public.idx_device_params_path_prefix ATTACH PARTITION public.device_parameters_p09_device_id_parameter_path_idx;
+
+
+--
+-- Name: device_parameters_p09_parameter_value_device_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_params_swver ATTACH PARTITION public.device_parameters_p09_parameter_value_device_id_idx;
 
 
 --
@@ -13868,6 +14341,13 @@ ALTER INDEX public.idx_device_params_path_prefix ATTACH PARTITION public.device_
 
 
 --
+-- Name: device_parameters_p10_parameter_value_device_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_params_swver ATTACH PARTITION public.device_parameters_p10_parameter_value_device_id_idx;
+
+
+--
 -- Name: device_parameters_p10_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
@@ -13886,6 +14366,13 @@ ALTER INDEX public.idx_device_params_device ATTACH PARTITION public.device_param
 --
 
 ALTER INDEX public.idx_device_params_path_prefix ATTACH PARTITION public.device_parameters_p11_device_id_parameter_path_idx;
+
+
+--
+-- Name: device_parameters_p11_parameter_value_device_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_params_swver ATTACH PARTITION public.device_parameters_p11_parameter_value_device_id_idx;
 
 
 --
@@ -13910,6 +14397,13 @@ ALTER INDEX public.idx_device_params_path_prefix ATTACH PARTITION public.device_
 
 
 --
+-- Name: device_parameters_p12_parameter_value_device_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_params_swver ATTACH PARTITION public.device_parameters_p12_parameter_value_device_id_idx;
+
+
+--
 -- Name: device_parameters_p12_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
@@ -13928,6 +14422,13 @@ ALTER INDEX public.idx_device_params_device ATTACH PARTITION public.device_param
 --
 
 ALTER INDEX public.idx_device_params_path_prefix ATTACH PARTITION public.device_parameters_p13_device_id_parameter_path_idx;
+
+
+--
+-- Name: device_parameters_p13_parameter_value_device_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_params_swver ATTACH PARTITION public.device_parameters_p13_parameter_value_device_id_idx;
 
 
 --
@@ -13952,6 +14453,13 @@ ALTER INDEX public.idx_device_params_path_prefix ATTACH PARTITION public.device_
 
 
 --
+-- Name: device_parameters_p14_parameter_value_device_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_params_swver ATTACH PARTITION public.device_parameters_p14_parameter_value_device_id_idx;
+
+
+--
 -- Name: device_parameters_p14_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
@@ -13970,6 +14478,13 @@ ALTER INDEX public.idx_device_params_device ATTACH PARTITION public.device_param
 --
 
 ALTER INDEX public.idx_device_params_path_prefix ATTACH PARTITION public.device_parameters_p15_device_id_parameter_path_idx;
+
+
+--
+-- Name: device_parameters_p15_parameter_value_device_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_params_swver ATTACH PARTITION public.device_parameters_p15_parameter_value_device_id_idx;
 
 
 --
@@ -13994,6 +14509,13 @@ ALTER INDEX public.idx_device_params_path_prefix ATTACH PARTITION public.device_
 
 
 --
+-- Name: device_parameters_p16_parameter_value_device_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_params_swver ATTACH PARTITION public.device_parameters_p16_parameter_value_device_id_idx;
+
+
+--
 -- Name: device_parameters_p16_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
@@ -14012,6 +14534,13 @@ ALTER INDEX public.idx_device_params_device ATTACH PARTITION public.device_param
 --
 
 ALTER INDEX public.idx_device_params_path_prefix ATTACH PARTITION public.device_parameters_p17_device_id_parameter_path_idx;
+
+
+--
+-- Name: device_parameters_p17_parameter_value_device_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_params_swver ATTACH PARTITION public.device_parameters_p17_parameter_value_device_id_idx;
 
 
 --
@@ -14036,6 +14565,13 @@ ALTER INDEX public.idx_device_params_path_prefix ATTACH PARTITION public.device_
 
 
 --
+-- Name: device_parameters_p18_parameter_value_device_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_params_swver ATTACH PARTITION public.device_parameters_p18_parameter_value_device_id_idx;
+
+
+--
 -- Name: device_parameters_p18_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
@@ -14054,6 +14590,13 @@ ALTER INDEX public.idx_device_params_device ATTACH PARTITION public.device_param
 --
 
 ALTER INDEX public.idx_device_params_path_prefix ATTACH PARTITION public.device_parameters_p19_device_id_parameter_path_idx;
+
+
+--
+-- Name: device_parameters_p19_parameter_value_device_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_params_swver ATTACH PARTITION public.device_parameters_p19_parameter_value_device_id_idx;
 
 
 --
@@ -14078,6 +14621,13 @@ ALTER INDEX public.idx_device_params_path_prefix ATTACH PARTITION public.device_
 
 
 --
+-- Name: device_parameters_p20_parameter_value_device_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_params_swver ATTACH PARTITION public.device_parameters_p20_parameter_value_device_id_idx;
+
+
+--
 -- Name: device_parameters_p20_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
@@ -14096,6 +14646,13 @@ ALTER INDEX public.idx_device_params_device ATTACH PARTITION public.device_param
 --
 
 ALTER INDEX public.idx_device_params_path_prefix ATTACH PARTITION public.device_parameters_p21_device_id_parameter_path_idx;
+
+
+--
+-- Name: device_parameters_p21_parameter_value_device_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_params_swver ATTACH PARTITION public.device_parameters_p21_parameter_value_device_id_idx;
 
 
 --
@@ -14120,6 +14677,13 @@ ALTER INDEX public.idx_device_params_path_prefix ATTACH PARTITION public.device_
 
 
 --
+-- Name: device_parameters_p22_parameter_value_device_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_params_swver ATTACH PARTITION public.device_parameters_p22_parameter_value_device_id_idx;
+
+
+--
 -- Name: device_parameters_p22_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
@@ -14138,6 +14702,13 @@ ALTER INDEX public.idx_device_params_device ATTACH PARTITION public.device_param
 --
 
 ALTER INDEX public.idx_device_params_path_prefix ATTACH PARTITION public.device_parameters_p23_device_id_parameter_path_idx;
+
+
+--
+-- Name: device_parameters_p23_parameter_value_device_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_params_swver ATTACH PARTITION public.device_parameters_p23_parameter_value_device_id_idx;
 
 
 --
@@ -14162,6 +14733,13 @@ ALTER INDEX public.idx_device_params_path_prefix ATTACH PARTITION public.device_
 
 
 --
+-- Name: device_parameters_p24_parameter_value_device_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_params_swver ATTACH PARTITION public.device_parameters_p24_parameter_value_device_id_idx;
+
+
+--
 -- Name: device_parameters_p24_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
@@ -14180,6 +14758,13 @@ ALTER INDEX public.idx_device_params_device ATTACH PARTITION public.device_param
 --
 
 ALTER INDEX public.idx_device_params_path_prefix ATTACH PARTITION public.device_parameters_p25_device_id_parameter_path_idx;
+
+
+--
+-- Name: device_parameters_p25_parameter_value_device_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_params_swver ATTACH PARTITION public.device_parameters_p25_parameter_value_device_id_idx;
 
 
 --
@@ -14204,6 +14789,13 @@ ALTER INDEX public.idx_device_params_path_prefix ATTACH PARTITION public.device_
 
 
 --
+-- Name: device_parameters_p26_parameter_value_device_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_params_swver ATTACH PARTITION public.device_parameters_p26_parameter_value_device_id_idx;
+
+
+--
 -- Name: device_parameters_p26_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
@@ -14222,6 +14814,13 @@ ALTER INDEX public.idx_device_params_device ATTACH PARTITION public.device_param
 --
 
 ALTER INDEX public.idx_device_params_path_prefix ATTACH PARTITION public.device_parameters_p27_device_id_parameter_path_idx;
+
+
+--
+-- Name: device_parameters_p27_parameter_value_device_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_params_swver ATTACH PARTITION public.device_parameters_p27_parameter_value_device_id_idx;
 
 
 --
@@ -14246,6 +14845,13 @@ ALTER INDEX public.idx_device_params_path_prefix ATTACH PARTITION public.device_
 
 
 --
+-- Name: device_parameters_p28_parameter_value_device_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_params_swver ATTACH PARTITION public.device_parameters_p28_parameter_value_device_id_idx;
+
+
+--
 -- Name: device_parameters_p28_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
@@ -14264,6 +14870,13 @@ ALTER INDEX public.idx_device_params_device ATTACH PARTITION public.device_param
 --
 
 ALTER INDEX public.idx_device_params_path_prefix ATTACH PARTITION public.device_parameters_p29_device_id_parameter_path_idx;
+
+
+--
+-- Name: device_parameters_p29_parameter_value_device_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_params_swver ATTACH PARTITION public.device_parameters_p29_parameter_value_device_id_idx;
 
 
 --
@@ -14288,6 +14901,13 @@ ALTER INDEX public.idx_device_params_path_prefix ATTACH PARTITION public.device_
 
 
 --
+-- Name: device_parameters_p30_parameter_value_device_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_params_swver ATTACH PARTITION public.device_parameters_p30_parameter_value_device_id_idx;
+
+
+--
 -- Name: device_parameters_p30_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
@@ -14306,6 +14926,13 @@ ALTER INDEX public.idx_device_params_device ATTACH PARTITION public.device_param
 --
 
 ALTER INDEX public.idx_device_params_path_prefix ATTACH PARTITION public.device_parameters_p31_device_id_parameter_path_idx;
+
+
+--
+-- Name: device_parameters_p31_parameter_value_device_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_params_swver ATTACH PARTITION public.device_parameters_p31_parameter_value_device_id_idx;
 
 
 --
@@ -16101,13 +16728,6 @@ CREATE TRIGGER trigger_indicator_threshold_updated_at BEFORE UPDATE ON public.in
 
 
 --
--- Name: indicator_unit trigger_indicator_unit_updated_at; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER trigger_indicator_unit_updated_at BEFORE UPDATE ON public.indicator_unit FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
-
-
---
 -- Name: kpi_thresholds trigger_kpi_thresholds_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -17104,23 +17724,13 @@ ALTER TABLE ONLY public.users
 --
 -- PostgreSQL database dump complete
 --
--- +goose StatementEnd
+
+
+
+SELECT pg_catalog.set_config('search_path', 'public', false);
 
 -- +goose Down
 -- +goose StatementBegin
 DROP SCHEMA IF EXISTS public CASCADE;
-DROP SCHEMA IF EXISTS _timescaledb_catalog CASCADE;
-DROP SCHEMA IF EXISTS _timescaledb_internal CASCADE;
-DROP SCHEMA IF EXISTS _timescaledb_cache CASCADE;
-DROP SCHEMA IF EXISTS _timescaledb_config CASCADE;
-DROP SCHEMA IF EXISTS _timescaledb_debug CASCADE;
-DROP SCHEMA IF EXISTS _timescaledb_functions CASCADE;
-DROP EXTENSION IF EXISTS timescaledb CASCADE;
-DROP EXTENSION IF EXISTS ltree CASCADE;
-DROP EXTENSION IF EXISTS pg_trgm CASCADE;
-DROP EXTENSION IF EXISTS pgcrypto CASCADE;
-DROP EXTENSION IF EXISTS "uuid-ossp" CASCADE;
 CREATE SCHEMA public;
-GRANT ALL ON SCHEMA public TO omcgo;
-GRANT ALL ON SCHEMA public TO public;
 -- +goose StatementEnd
