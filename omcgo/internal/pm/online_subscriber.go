@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	neturl "net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -109,8 +110,11 @@ func (s *OnlineSubscriber) handle(ctx context.Context, evt event.Event) error {
 	}
 
 	url := expandEnv(s.urlTemplate)
-	if !strings.Contains(url, "://") {
-		s.logger.Warn("rendered URL missing scheme; skip SPV",
+	// host 非空守卫：渲染后若缺 scheme 或 host（如 OMC_PUBLIC_HOST 漏配渲染成
+	// "http://:7557/..."，u.Hostname() 返空；或 "${...}" 残留），跳过 SPV 不污染设备。
+	// 跳过即不下发，下次设备 offline→online 自然重试；运维据本 warn 即知模板 host 漏配。
+	if u, perr := neturl.Parse(url); perr != nil || u.Scheme == "" || u.Hostname() == "" {
+		s.logger.Warn("rendered PM upload URL missing scheme or host; skip SPV to avoid pushing broken URL",
 			zap.String("device_sn", payload.SerialNumber),
 			zap.String("url", url))
 		return nil
@@ -212,4 +216,23 @@ func expandEnv(s string) string {
 		}
 		return os.Getenv(key)
 	})
+}
+
+// ValidateUploadURLTemplate 在 worker 启动期对 PM 上传 URL 模板做一次性 host 校验：
+// 用与 handle() 完全一致的 expandEnv 渲染（复用同一渲染逻辑，避免漂移），
+// 再用 net/url 解析校验 scheme/host 非空。返回渲染后的 url 与错误。
+//
+// 校验失败（如 OMC_PUBLIC_HOST 漏配渲染成 "http://:7557/..."）由调用方 logger.Error
+// 醒目告警但不阻断启动——把「运维漏配」从「设备上线时静默跳过下发」前移到「部署即可见」，
+// 同时不让单个配置项阻断整个 worker（worker 还跑 PM 解析/聚合等关键流程）。
+func ValidateUploadURLTemplate(urlTemplate string) (rendered string, err error) {
+	rendered = expandEnv(urlTemplate)
+	u, perr := neturl.Parse(rendered)
+	if perr != nil {
+		return rendered, fmt.Errorf("parse rendered PM upload URL %q: %w", rendered, perr)
+	}
+	if u.Scheme == "" || u.Hostname() == "" {
+		return rendered, fmt.Errorf("rendered PM upload URL %q missing scheme or host (check OMC_PUBLIC_HOST)", rendered)
+	}
+	return rendered, nil
 }

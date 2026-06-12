@@ -153,6 +153,48 @@ func Test_OnlineSubscriber_MalformedURLIsSkipped(t *testing.T) {
 	assert.Empty(t, stub.captured)
 }
 
+// Test_OnlineSubscriber_EmptyHostSkipsSPV 复现 #207：OMC_PUBLIC_HOST 漏配时模板渲染成
+// "http://:7557/..."（含 :// 含端口，但 host 段被清空）。旧守卫只查 :// 会放行，
+// 把残缺 URL 下发到设备导致 KPI 不上报。新 host 非空守卫必须拦住（不下发）。
+func Test_OnlineSubscriber_EmptyHostSkipsSPV(t *testing.T) {
+	stub := &stubTaskCreator{}
+	// 故意不设 OMC_PUBLIC_HOST_207，模板无 :- 兜底 → 渲染成 host 为空
+	require.NoError(t, os.Unsetenv("OMC_PUBLIC_HOST_207"))
+	tmpl := "http://${OMC_PUBLIC_HOST_207}:7557/smallcell/FileUploadService?fileType=PM&filename="
+	s := NewOnlineSubscriber(stub, tmpl, "1", 900, nil)
+
+	require.NoError(t, s.handle(context.Background(), mustEvent(t, samplePayload())))
+	assert.Empty(t, stub.captured, "empty-host URL (http://:7557) must not be pushed to device")
+}
+
+func Test_ValidateUploadURLTemplate(t *testing.T) {
+	t.Run("valid host renders ok", func(t *testing.T) {
+		t.Setenv("OMC_PUBLIC_HOST_207_OK", "172.19.1.132")
+		rendered, err := ValidateUploadURLTemplate("http://${OMC_PUBLIC_HOST_207_OK}:7557/x?fileType=PM&filename=")
+		require.NoError(t, err)
+		assert.Equal(t, "http://172.19.1.132:7557/x?fileType=PM&filename=", rendered)
+	})
+
+	t.Run("empty host is rejected", func(t *testing.T) {
+		require.NoError(t, os.Unsetenv("OMC_PUBLIC_HOST_207_EMPTY"))
+		rendered, err := ValidateUploadURLTemplate("http://${OMC_PUBLIC_HOST_207_EMPTY}:7557/x")
+		require.Error(t, err)
+		assert.Equal(t, "http://:7557/x", rendered, "rendered value returned for log visibility")
+	})
+
+	t.Run("missing scheme is rejected", func(t *testing.T) {
+		_, err := ValidateUploadURLTemplate("localhost:7557/x")
+		require.Error(t, err)
+	})
+
+	t.Run("default fallback host renders ok", func(t *testing.T) {
+		require.NoError(t, os.Unsetenv("OMC_PUBLIC_HOST_207_FB"))
+		rendered, err := ValidateUploadURLTemplate("http://${OMC_PUBLIC_HOST_207_FB:-localhost}:7557/x")
+		require.NoError(t, err)
+		assert.Equal(t, "http://localhost:7557/x", rendered)
+	})
+}
+
 func Test_expandEnv_DefaultSyntax(t *testing.T) {
 	t.Setenv("MY_VAR_X1", "value-x1")
 	cases := []struct {
@@ -162,7 +204,7 @@ func Test_expandEnv_DefaultSyntax(t *testing.T) {
 		{"plain text", "plain text"},
 		{"${MY_VAR_X1}", "value-x1"},
 		{"${UNSET_VAR_QQQ:-fallback}", "fallback"},
-		{"${MY_VAR_X1:-fallback}", "value-x1"},  // env wins over default
+		{"${MY_VAR_X1:-fallback}", "value-x1"}, // env wins over default
 		{"prefix-${MY_VAR_X1}-suffix", "prefix-value-x1-suffix"},
 		{"${UNSET_VAR_QQQ}", ""},
 	}

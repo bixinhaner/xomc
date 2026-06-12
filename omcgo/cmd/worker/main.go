@@ -501,6 +501,17 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	// PM 设备上线自动下发 PM 上传配置（KPI 上报参数整理.md 三参数）
 	// 仅在 cfg.PM.AutoSetupOnOnline=true 时启用；test 环境默认关闭防止干扰压测
 	if cfg.PM.AutoSetupOnOnline {
+		// 启动期一次性校验 PM 上传 URL 模板的 host：渲染后 host 为空（如生产 .env
+		// 漏配 OMC_PUBLIC_HOST，模板渲染成 "http://:7557/..."）则醒目 Error 告警，
+		// 把运维漏配从「设备上线时静默跳过下发」前移到「部署即可见」。不 fail-fast：
+		// worker 还跑 PM 解析/聚合等关键流程，单个配置项不应阻断整个 worker；
+		// 真正下发时 OnlineSubscriber.handle 仍有 per-event host 守卫兜底。
+		if rendered, verr := pm.ValidateUploadURLTemplate(cfg.PM.UploadURLTemplate); verr != nil {
+			logger.Error("PM upload URL template invalid; auto-SPV will be skipped until fixed (check OMC_PUBLIC_HOST)",
+				zap.String("url_template", cfg.PM.UploadURLTemplate),
+				zap.String("rendered", rendered),
+				zap.Error(verr))
+		}
 		pmOnlineSub := pm.NewOnlineSubscriber(
 			w.TaskService,
 			cfg.PM.UploadURLTemplate,
