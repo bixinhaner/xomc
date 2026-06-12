@@ -1208,7 +1208,20 @@ export default function DeviceList() {
         group: 'common',
         render: (_val, record) => fmtTime(record.lastOnlineTime),
       },
-      { key: 'siteName', title: t('device.cellName'), dataIndex: 'cellId', width: 130, hidden: true, ellipsis: true, group: 'common' },
+      {
+        key: 'siteName',
+        title: t('device.cellName'),
+        dataIndex: 'cellId',
+        width: 130,
+        hidden: true,
+        ellipsis: true,
+        group: 'common',
+        // cellId 为空/null/空串 → 显占位符 '--'(绝不回退显 SN/设备编码,#184)。
+        render: (val) => {
+          const v = val as string | null | undefined;
+          return v == null || v === '' ? '--' : v;
+        },
+      },
       { key: 'remark', title: t('device.remark'), dataIndex: 'remark', width: 185, hidden: true, ellipsis: true, group: 'common', headerRender: remarkHeaderRender },
       {
         key: 'longitude',
