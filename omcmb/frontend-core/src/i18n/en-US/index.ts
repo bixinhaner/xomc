@@ -2217,7 +2217,7 @@ const messages: Record<string, string> = {
   'user.logout':          'Logout',
   'user.notLoggedIn':     'Not Logged In',
   'user.switchToEn':      'Switch to English',
-  'user.switchToZh':      'Switch to Chinese',
+  'user.switchToZh':      '切换到中文',
 
   // -------------------------------------------------------------------------
   // Dashboard

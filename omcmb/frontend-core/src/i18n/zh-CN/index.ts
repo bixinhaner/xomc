@@ -2221,7 +2221,7 @@ const messages: Record<string, string> = {
   'user.changePassword':  '修改密码',
   'user.logout':          '退出登录',
   'user.notLoggedIn':     '未登录',
-  'user.switchToEn':      '切换到 English',
+  'user.switchToEn':      'Switch to English',
   'user.switchToZh':      '切换到中文',
 
   // -------------------------------------------------------------------------
