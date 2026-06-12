@@ -324,19 +324,19 @@ export default function AlarmLibraryPage() {
     },
     {
       title: t('alarmLibrary.col.actions'),
-      width: 130,
+      width: 180,
       render: (_: unknown, row: AlarmDefinition) => (
         <Space>
-          <Tooltip title={t('product.alarm.def.titleEdit')}>
-            <Button
-              size="small"
-              icon={<EditOutlined />}
-              onClick={() => {
-                setEditing(row);
-                setDrawerOpen(true);
-              }}
-            />
-          </Tooltip>
+          <Button
+            size="small"
+            icon={<EditOutlined />}
+            onClick={() => {
+              setEditing(row);
+              setDrawerOpen(true);
+            }}
+          >
+            {t('common.edit')}
+          </Button>
           <Popconfirm
             title={t('product.alarm.confirmDeleteDef', { id: row.identifier })}
             onConfirm={() =>
