@@ -232,6 +232,113 @@ func TestClassifyFileType_Log(t *testing.T) {
 	}
 }
 
+// #178/#222：自主传输运行日志（FileType "6"）应归 RunningLog。
+func TestClassifyFileType_RunningLog(t *testing.T) {
+	tests := []struct {
+		fileType string
+		fileName string
+	}{
+		{"6", "runtime-deadbeef-SN001.tar.gz"},
+		{"6", ""},
+	}
+	for _, tt := range tests {
+		result := classifyFileType(tt.fileType, tt.fileName)
+		if result != tr069.FileTypeRunningLog {
+			t.Errorf("classifyFileType(%q, %q) = %q, want %q", tt.fileType, tt.fileName, result, tr069.FileTypeRunningLog)
+		}
+	}
+}
+
+// #178/#222：自主传输故障日志（FileType "8"）此前误分类成 RunningLog（落 default），
+// 应显式归 FaultLog，与 ACS 直传路径对齐。
+func TestClassifyFileType_FaultLog(t *testing.T) {
+	tests := []struct {
+		fileType string
+		fileName string
+	}{
+		{"8", "fault-deadbeef-SN001.tar.gz"},
+		{"8", ""},
+		{"", "fault-deadbeef-SN001.tar.gz"},
+		{"", "device_FAULTLOG.tar.gz"},
+	}
+	for _, tt := range tests {
+		result := classifyFileType(tt.fileType, tt.fileName)
+		if result != tr069.FileTypeFaultLog {
+			t.Errorf("classifyFileType(%q, %q) = %q, want %q", tt.fileType, tt.fileName, result, tr069.FileTypeFaultLog)
+		}
+	}
+}
+
+// parseLogFilename 从 executor 生成的标准日志文件名解析出 (taskID8, deviceSN)。
+func TestParseLogFilename(t *testing.T) {
+	tests := []struct {
+		filename string
+		wantTask string
+		wantSN   string
+	}{
+		{"runtime-deadbeef-SN-ABC-001.tar.gz", "deadbeef", "SN-ABC-001"},
+		{"fault-0a1b2c3d-XYZ.tar.gz", "0a1b2c3d", "XYZ"},
+		{"adhoc_upload.txt", "", ""}, // 非标准命名 → 空
+	}
+	for _, tt := range tests {
+		gotTask, gotSN := parseLogFilename(tt.filename)
+		if gotTask != tt.wantTask || gotSN != tt.wantSN {
+			t.Errorf("parseLogFilename(%q) = (%q, %q), want (%q, %q)",
+				tt.filename, gotTask, gotSN, tt.wantTask, tt.wantSN)
+		}
+	}
+}
+
+// #178/#222 成功路径：自主传输运行日志事件构造的 SubjectLogFileReceived payload
+// 必须能被 stationlog 侧消费的字段名解出（bucket/object_path/file_name/file_type/
+// file_size/task_id8/device_sn），否则记录不会写库。
+func TestLogFileReceivedPayload_Shape(t *testing.T) {
+	bus := newMockEventBus()
+
+	taskID8, deviceSN := parseLogFilename("runtime-deadbeef-TEST-SN-009.tar.gz")
+	if deviceSN == "" {
+		deviceSN = "TEST-SN-009"
+	}
+	logPayload := map[string]interface{}{
+		"bucket":      "omc-logs",
+		"object_path": "running/cmcc/TEST-SN-009/runtime-deadbeef-TEST-SN-009.tar.gz",
+		"file_name":   "runtime-deadbeef-TEST-SN-009.tar.gz",
+		"file_type":   string(tr069.FileTypeRunningLog),
+		"file_size":   int64(2048),
+		"task_id8":    taskID8,
+		"device_sn":   deviceSN,
+	}
+	logEvt, err := event.NewEvent(event.SubjectLogFileReceived, logPayload)
+	if err != nil {
+		t.Fatalf("create log event: %v", err)
+	}
+	if err := bus.Publish(context.Background(), event.SubjectLogFileReceived, logEvt); err != nil {
+		t.Fatalf("publish log event: %v", err)
+	}
+
+	published := bus.publishedBySubject(event.SubjectLogFileReceived)
+	if len(published) != 1 {
+		t.Fatalf("expected 1 log.file.received event, got %d", len(published))
+	}
+
+	var decoded map[string]interface{}
+	if err := json.Unmarshal(published[0].Event.Payload, &decoded); err != nil {
+		t.Fatalf("decode log payload: %v", err)
+	}
+	if decoded["device_sn"] != "TEST-SN-009" {
+		t.Errorf("expected device_sn=TEST-SN-009, got %v", decoded["device_sn"])
+	}
+	if decoded["file_type"] != "6" {
+		t.Errorf("expected file_type=6 (running log), got %v", decoded["file_type"])
+	}
+	if decoded["task_id8"] != "deadbeef" {
+		t.Errorf("expected task_id8=deadbeef, got %v", decoded["task_id8"])
+	}
+	if decoded["object_path"] == "" || decoded["object_path"] == nil {
+		t.Errorf("expected non-empty object_path, got %v", decoded["object_path"])
+	}
+}
+
 func TestHandleATC_FaultSkipped(t *testing.T) {
 	logger := zap.NewNop()
 	bus := newMockEventBus()

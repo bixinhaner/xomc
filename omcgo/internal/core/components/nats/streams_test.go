@@ -1,0 +1,82 @@
+package nats
+
+import (
+	"strings"
+	"testing"
+
+	gonats "github.com/nats-io/nats.go"
+)
+
+// subjectMatchesStream 判断一个具体 subject（如 "log.file.received"）是否被某条
+// 流的 subject 模式（如 "log.>"）覆盖。仅支持本项目用到的 ">" 末尾通配。
+func subjectMatchesStream(subject, pattern string) bool {
+	if strings.HasSuffix(pattern, ".>") {
+		prefix := strings.TrimSuffix(pattern, ">")
+		return strings.HasPrefix(subject, prefix)
+	}
+	return subject == pattern
+}
+
+func subjectCovered(subject string, streams []StreamDef) bool {
+	for _, s := range streams {
+		for _, p := range s.Subjects {
+			if subjectMatchesStream(subject, p) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// TestDefaultStreams_LogStreamRegistered 守卫 issue #178/#222 的根因修复：
+// stationlog 订阅 log.file.received，自主传输桥发布同一 subject；NATS 部署态下
+// 必须有一条流吸纳 log.>，否则 publish 报 "no response from stream"、记录永不入库。
+func TestDefaultStreams_LogStreamRegistered(t *testing.T) {
+	streams := DefaultStreams()
+
+	var logStream *StreamDef
+	for i := range streams {
+		if streams[i].Name == "LOG" {
+			logStream = &streams[i]
+			break
+		}
+	}
+	if logStream == nil {
+		t.Fatal("LOG stream not registered in DefaultStreams (issue #178/#222 regression)")
+	}
+
+	// 必须以 log.> 前缀吸纳所有 log.* 事件
+	hasLogPrefix := false
+	for _, s := range logStream.Subjects {
+		if s == "log.>" {
+			hasLogPrefix = true
+		}
+	}
+	if !hasLogPrefix {
+		t.Errorf("LOG stream subjects = %v, want to include \"log.>\"", logStream.Subjects)
+	}
+
+	// stationlog 是单 consumer fan-in，WorkQueuePolicy（与 PM/MR 同档）
+	if logStream.Retention != gonats.WorkQueuePolicy {
+		t.Errorf("LOG stream retention = %v, want WorkQueuePolicy", logStream.Retention)
+	}
+}
+
+// TestDefaultStreams_LogFileReceivedCovered 端到端守卫：实际用到的 subject
+// "log.file.received"（event.SubjectLogFileReceived）必须被某条流覆盖。
+func TestDefaultStreams_LogFileReceivedCovered(t *testing.T) {
+	if !subjectCovered("log.file.received", DefaultStreams()) {
+		t.Error("subject log.file.received is not covered by any DefaultStreams stream")
+	}
+}
+
+// TestDefaultStreams_NamesUnique 守卫不会因复制粘贴造成重复流名。
+func TestDefaultStreams_NamesUnique(t *testing.T) {
+	seen := map[string]bool{}
+	for _, s := range DefaultStreams() {
+		if seen[s.Name] {
+			t.Errorf("duplicate stream name %q in DefaultStreams", s.Name)
+		}
+		seen[s.Name] = true
+	}
+}

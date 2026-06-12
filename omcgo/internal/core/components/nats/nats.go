@@ -53,6 +53,11 @@ func DefaultStreams() []StreamDef {
 		{Name: "REPORT", Subjects: []string{"report.>"}, Retention: nats.WorkQueuePolicy},
 		{Name: "NEDIRECT", Subjects: []string{"nedirect.>"}, Retention: nats.WorkQueuePolicy},
 		{Name: "SYS", Subjects: []string{"sys.>"}, Retention: nats.WorkQueuePolicy},
+		// 基站日志采集（运行日志 FileType 6 / 故障日志 8）：stationlog 单 consumer
+		// 订阅 log.file.received 写库。WorkQueuePolicy（与 PM/MR 文件处理同档：
+		// 任一 consumer ack 后即删）。缺这条流时 publish log.file.received 在
+		// NATS 部署态下报 "no response from stream"，记录永不入库（issue #178/#222）。
+		{Name: "LOG", Subjects: []string{"log.>"}, Retention: nats.WorkQueuePolicy},
 		// T-0137 M2: TR069 报文跟踪。
 		// TRACE_TASK 走 InterestPolicy — ACS 实例 + app SSE 推送 + worker（purge 处理）三类订阅者都需独立 fan-out。
 		// TRACE_MSG 走 WorkQueuePolicy — worker QueueSubscribe 群组消费 + 批量落库。
