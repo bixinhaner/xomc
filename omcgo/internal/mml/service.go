@@ -2108,13 +2108,14 @@ func buildTaskResultsStats(task *MMLTask, taskErr error) *TaskResultsStats {
 // 主字段保持可用。
 func deviceTaskRowToResultMap(row DeviceTaskResultRowView) map[string]interface{} {
 	m := map[string]interface{}{
-		"device_sn":     row.DeviceSN,
-		"status":        row.Status,
-		"error_code":    row.ErrorCode,
-		"error_message": row.ErrorMessage,
-		"command_index": row.CommandIndex,
-		"device_index":  row.DeviceIndex,
-		"success":       row.Status == "completed" && row.ErrorCode == 0,
+		"device_sn":      row.DeviceSN,
+		"device_task_id": row.DeviceTaskID, // 子任务 ID（device_tasks.id），前端「PATH 列表」复制用
+		"status":         row.Status,
+		"error_code":     row.ErrorCode,
+		"error_message":  row.ErrorMessage,
+		"command_index":  row.CommandIndex,
+		"device_index":   row.DeviceIndex,
+		"success":        row.Status == "completed" && row.ErrorCode == 0,
 	}
 	if row.SentAt != nil {
 		m["started_at"] = row.SentAt.Format(time.RFC3339)

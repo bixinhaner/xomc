@@ -414,7 +414,7 @@ export function mapResultItemToRow(
   }
   return {
     deviceSn: item.deviceSn,
-    deviceTaskId: '',
+    deviceTaskId: item.deviceTaskId ?? '',
     status,
     cells,
     faultCode: item.failReason,
@@ -461,7 +461,7 @@ export function buildDeviceRows(
       pathTasks.push({
         pathIndex: idx,
         path,
-        subTaskId: '',
+        subTaskId: it.deviceTaskId ?? '',
         status: base[i].status,
         dispatchedAt: base[i].dispatchedAt ?? '',
         respondedAt: base[i].respondedAt ?? '',
@@ -488,7 +488,7 @@ const upperOp = (d?: MMLTaskCommandDetail): string => (d?.operationType ?? '').t
  * 把「下发值（命令 paramValues）」与「回读值（回读 LST 结果）」按 path 关联成 verify 对比，
  * 并分别保留 MOD 下发响应报文（raw）与回读 LST 响应报文（readbackRaw）。
  */
-function buildMODReadbackRows(
+export function buildMODReadbackRows(
   items: DeviceTaskResultItem[],
   setValues: Record<string, string>,
 ): ResultRow[] {
@@ -507,6 +507,8 @@ function buildMODReadbackRows(
   for (const [deviceSn, devItems] of byDevice) {
     const modItems = devItems.filter((it) => !isLst(it));
     const lstItem = devItems.find((it) => isLst(it));
+    const modTaskId = modItems[0]?.deviceTaskId ?? '';
+    const lstTaskId = lstItem?.deviceTaskId ?? '';
 
     // 回读值 + 回读 path（GetParameterValues 响应的参数名即 PATH，修复回读行 PATH 为空）
     const readback = new Map<string, string>();
@@ -533,7 +535,7 @@ function buildMODReadbackRows(
       pathTasks.push({
         pathIndex: 0,
         path,
-        subTaskId: '',
+        subTaskId: modTaskId,
         opType: 'MOD',
         status: modOk ? 'success' : 'failed',
         dispatchedAt: toClock(firstMod?.startedAt) ?? '',
@@ -549,7 +551,7 @@ function buildMODReadbackRows(
         pathTasks.push({
           pathIndex: 1,
           path,
-          subTaskId: '',
+          subTaskId: lstTaskId,
           opType: 'LST',
           status: lstOk ? 'success' : 'failed',
           dispatchedAt: toClock(lstItem.startedAt) ?? '',
@@ -572,7 +574,7 @@ function buildMODReadbackRows(
 
     rows.push({
       deviceSn,
-      deviceTaskId: '',
+      deviceTaskId: modTaskId,
       status,
       cells,
       faultCode: modOk ? undefined : (firstMod?.failReason ?? '下发失败'),

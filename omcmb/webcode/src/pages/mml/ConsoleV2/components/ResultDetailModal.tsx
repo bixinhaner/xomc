@@ -50,6 +50,13 @@ export default function ResultDetailModal({
       }))
     : [];
 
+  // #196：MOD 下发值（path→value）取自 PATH 列表的 MOD 行，供「执行 PATH」弹层显示下发值。
+  const modSetValues = new Map<string, string>(
+    (row?.pathTasks ?? [])
+      .filter((t) => t.opType === 'MOD' && t.value)
+      .map((t) => [t.path, t.value]),
+  );
+
   const paramColumns: ColumnsType<ParsedParam> = [
     {
       title: '参数路径',
@@ -157,12 +164,13 @@ export default function ResultDetailModal({
       title: '子任务 ID',
       dataIndex: 'subTaskId',
       key: 'subTaskId',
-      width: 200,
-      // #196 修复：subTaskId 可能为空（无真实 device_task id），空值时不渲染坏掉的复制按钮。
+      width: 96,
+      align: 'center',
+      // #196：不直接显示冗长 ID，仅提供「复制」按钮（点击复制完整 device_task id）；无 ID 时占位 -。
       render: (v: string) =>
         v ? (
-          <Text code copyable={{ text: v }} style={{ fontSize: 11 }}>
-            {v.slice(0, 8)}…
+          <Text copyable={{ text: v, tooltips: ['复制子任务 ID', '已复制'] }} style={{ fontSize: 12 }}>
+            复制
           </Text>
         ) : (
           <Text type="secondary" style={{ fontSize: 11 }}>
@@ -251,8 +259,8 @@ export default function ResultDetailModal({
                           content={
                             <div style={{ maxHeight: 320, overflow: 'auto', maxWidth: 460 }}>
                               {columns.map((c) => {
-                                // #196：MOD 显示该 path 的下发值（取自 verify.expected）
-                                const setVal = row?.verify?.find((v) => v.path === c.path)?.expected;
+                                // #196：MOD 显示该 path 的下发值（取自 PATH 列表 MOD 行）
+                                const setVal = modSetValues.get(c.path);
                                 return (
                                   <div key={c.key} style={{ marginBottom: 6, lineHeight: 1.4 }}>
                                     <Text style={{ fontSize: 12 }}>{c.label}</Text>
@@ -388,7 +396,7 @@ export default function ResultDetailModal({
               <div style={{ marginTop: 6 }}>
                 <Table<PathTask>
                   size="small"
-                  rowKey="subTaskId"
+                  rowKey={(t) => `${t.opType ?? ''}-${t.pathIndex}-${t.path}`}
                   columns={pathTaskColumns}
                   dataSource={row.pathTasks}
                   pagination={false}

@@ -373,6 +373,7 @@ function mapTaskResultsStats(
 function mapBackendResult(br: Record<string, unknown>): DeviceTaskResultItem {
   return {
     deviceSn: (br.device_sn as string) || '',
+    deviceTaskId: (br.device_task_id as string) || undefined,
     commandIndex: typeof br.command_index === 'number' ? (br.command_index as number) : undefined,
     deviceName: (br.device_name as string) || undefined,
     mmlScript: (br.mml_script as string) || (br.command as string) || undefined,

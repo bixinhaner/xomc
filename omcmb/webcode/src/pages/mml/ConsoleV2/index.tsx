@@ -25,6 +25,7 @@ import {
   buildColumns,
   buildColumnsFromRawPaths,
   buildDeviceRows,
+  buildMODReadbackRows,
   buildRawExecutePayload,
   buildStructuredStatement,
   initialPendingRows,
@@ -50,6 +51,11 @@ interface LiveExec {
   columns: ResultColumn[];
   rows: ResultRow[];
   deviceCount: number;
+  /**
+   * #196：MOD 下发值 path→value。MOD 命令后端自动追加回读 LST（compound），
+   * 收口时据此走 buildMODReadbackRows 关联「下发 vs 回读」；非 MOD 为空。
+   */
+  setValues?: Record<string, string>;
 }
 
 /**
@@ -95,9 +101,18 @@ export default function MMLConsoleV2() {
     if (!le || le.taskId !== taskId) return;
     let rows: ResultRow[] | null = null;
     try {
-      const pageSize = Math.max(le.deviceCount * Math.max(le.columns.length, 1), 50);
+      // MOD 复合（下发 + 回读 LST）每设备 2 条 device_task，pageSize 预留回读条目空间。
+      const perDevice = Math.max(le.columns.length, 1) + (le.setValues ? 1 : 0);
+      const pageSize = Math.max(le.deviceCount * perDevice, 50);
       const resp = await mmlApi.getTaskResults(taskId, 1, pageSize);
-      if (resp.items.length > 0) rows = buildDeviceRows(resp.items, le.columns, le.meta.read);
+      if (resp.items.length > 0) {
+        // #196：MOD 命令后端自动追加回读 LST → 走「下发 vs 回读」关联视图（操作类型 / 前后对比 /
+        // 双报文页签）；其余命令按逐 PATH 合并。
+        rows =
+          le.meta.operationType === 'MOD' && le.setValues
+            ? buildMODReadbackRows(resp.items, le.setValues)
+            : buildDeviceRows(resp.items, le.columns, le.meta.read);
+      }
     } catch {
       /* 拉取失败：交给轮询下个 tick 重试 */
     }
@@ -204,6 +219,8 @@ export default function MMLConsoleV2() {
     let columns: ResultColumn[];
     let meta: ExecMeta;
     let taskId: string;
+    // #196：MOD 下发值 path→value（收口时关联回读 LST）；非 MOD 保持 undefined。
+    let setValues: Record<string, string> | undefined;
 
     try {
       setRunning(true);
@@ -219,6 +236,17 @@ export default function MMLConsoleV2() {
           label: command.commandCode,
           commandName: command.commandName,
         };
+        if (command.operationType === 'MOD') {
+          const checkedSet = new Set(req.checkedPaths);
+          const picked: Record<string, string> = {};
+          command.paramPaths
+            .filter((p) => p.writable && checkedSet.has(p.path))
+            .forEach((p) => {
+              const v = req.values?.[p.path];
+              if (v != null && v !== '') picked[p.path] = v;
+            });
+          setValues = picked;
+        }
         if (!command.isCustom && isStructuredOp(command.operationType)) {
           // 逐 PATH：LST/MOD 多 path 时按列序拆成每 path 一条 statement（后端每 statement 一条
           // command→一个 device_task/RPC，path 级成败独立）。命令序与结果列序一致，便于合并。
@@ -272,6 +300,14 @@ export default function MMLConsoleV2() {
           return;
         }
         columns = buildColumnsFromRawPaths(paths);
+        if (req.operationType === 'MOD') {
+          const picked: Record<string, string> = {};
+          for (const r of req.rows) {
+            const p = r.path.trim();
+            if (p) picked[p] = r.value ?? '';
+          }
+          setValues = picked;
+        }
         // 命令记录命名：用执行的 path → 设备模型 path 字典里的友好名（缺省回退叶子名）。
         const nameMap = await mmlApi.resolveParamNames(paths);
         const cmdName = rawCommandName(req.operationType, paths, nameMap);
@@ -316,7 +352,7 @@ export default function MMLConsoleV2() {
       columns,
       rows: pendingRows,
     });
-    setLiveExec({ taskId, recordId, startTime, meta, columns, rows: pendingRows, deviceCount });
+    setLiveExec({ taskId, recordId, startTime, meta, columns, rows: pendingRows, deviceCount, setValues });
     message.success(`已下发执行（任务 ${taskId}）`);
   };
 

@@ -93,6 +93,8 @@ export type DeviceResultStatus = 'completed' | 'running' | 'pending';
 
 export interface DeviceTaskResultItem {
   deviceSn: string;
+  /** device_tasks.id —— 子任务 ID（每条 RPC 一个；详情页「PATH 列表」复制用） */
+  deviceTaskId?: string;
   /** device_tasks.command_index —— 逐 PATH 模式下定位该条结果属于哪个 path（命令序号） */
   commandIndex?: number;
   deviceName?: string;
