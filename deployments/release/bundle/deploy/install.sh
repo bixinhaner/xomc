@@ -390,13 +390,48 @@ fi
 chown -R 10001:10001 "$OMC_ROOT/data" 2>/dev/null \
   || warn "chown 10001:10001 $OMC_ROOT/data 失败(UID 不存在 host 上属正常);容器内仍以 10001 写入"
 
-# 单目录 + sidecar 后不再使用独立 *-custom 目录;存量目录直接删除(用户决策:不做迁移)。
-# 上面的 data.bak.<ts> 快照已留存原状,需要时可从快照回捞历史自定义 XML。
-for _cdir in param-mappings-custom indicator-library-custom alarm-definitions-custom; do
-  if [ -d "$OMC_ROOT/data/$_cdir" ]; then
-    log "清理废弃 custom 目录:$OMC_ROOT/data/$_cdir(单目录+sidecar 后不再使用)"
-    rm -rf "$OMC_ROOT/data/$_cdir"
-  fi
+# 单目录 + sidecar 后不再使用独立 *-custom 目录。issue #206:旧版自定义 KPI 指标库 /
+# 告警定义 / 参数映射仍住在这些旧 *-custom 目录,直接 rm -rf 会丢用户数据(reload 找不到
+# 文件 → 公式被删不重插 → KPI 不解析)。改为"先抢救迁移、再删空目录":
+#   · 遍历旧目录内每个 *.xml,按其相对子路径 cp -an(no-clobber:现网单目录已有同名文件赢,
+#     不覆盖)到对应单目录;
+#   · 迁移成功的文件 touch 同名 .custom sidecar(标记为运维自定义,builtin 刷新循环不覆盖、
+#     dictloader 视为用户来源);
+#   · 全部处理完再删空旧目录。上面的 data.bak.<ts> 快照仍是回滚点。
+# 旧目录 → 单目录映射(与 config.dev.yaml 字典目录一致):
+#   param-mappings-custom → param-mappings;indicator-library-custom → indicator-library;
+#   alarm-definitions-custom → alarm-definitions。
+_legacy_custom_map="param-mappings-custom:param-mappings indicator-library-custom:indicator-library alarm-definitions-custom:alarm-definitions"
+for _pair in $_legacy_custom_map; do
+  _cdir="${_pair%%:*}"
+  _target="${_pair##*:}"
+  _csrc="$OMC_ROOT/data/$_cdir"
+  [ -d "$_csrc" ] || continue
+  _rescued=0
+  while IFS= read -r -d '' _cf; do
+    _crel="${_cf#"$_csrc"/}"                               # 保留旧目录内的相对子路径
+    _dst="$OMC_ROOT/data/$_target/$_crel"
+    mkdir -p "$(dirname "$_dst")" 2>/dev/null || true
+    # 不能用 cp -an 退出码判断"是否真迁入":GNU coreutils / BusyBox 上
+    # no-clobber 跳过仍返回 exit 0(只有 macOS BSD cp 返回非零),会给现网
+    # 内置文件误打 .custom sidecar(内置文件变 UI 可删 + builtin 刷新永久跳过)。
+    # 改为先判目标是否存在,再决定复制 + 打 sidecar。
+    if [ -e "$_dst" ]; then
+      # 单目录已有同名文件(现网赢),旧自定义副本丢弃即可,绝不补 sidecar。
+      # 现网那份是否带 sidecar 由 builtin 刷新循环/上传流程维护,这里不干预。
+      log "  · 跳过(现网已有同名,no-clobber):$_cdir/$_crel"
+    elif cp -p "$_cf" "$_dst" 2>/dev/null; then
+      # 真正迁入了新文件 → 补 .custom sidecar 标记为运维自定义。
+      touch "$_dst.custom" 2>/dev/null || true
+      log "  · 抢救自定义 XML:$_cdir/$_crel → $_target/$_crel(+.custom)"
+      _rescued=$((_rescued + 1))
+    else
+      warn "  · 抢救自定义 XML 失败:$_cdir/$_crel(请从 data.bak.<ts> 人工核对)"
+    fi
+  done < <(find "$_csrc" -type f -name '*.xml' -print0)
+  [ "$_rescued" -gt 0 ] && log "升级:从 $_cdir 抢救 $_rescued 个自定义 XML → $_target(单目录+sidecar)"
+  log "清理废弃 custom 目录:$_csrc(内容已迁移至 $_target)"
+  rm -rf "$_csrc"
 done
 
 # 实例配置：首次复制模板；非首次默认保留以保护已改口令

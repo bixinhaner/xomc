@@ -21,6 +21,17 @@ import (
 // LoaderName 是 dictloader.Registry 中的注册名。
 const LoaderName = "product"
 
+// deleteBuiltinPatternsSQL 销毁式 reload 的第一步：只删「内置产品」的内置正则，
+// 随后从 products.xml 重插（保持 builtin 正则刷新语义）。
+//
+// issue #206：旧实现 `DELETE ... WHERE source='builtin'` 无产品归属限定，会连带删掉
+// 用户自建产品（is_builtin=FALSE）中被 pre-000031 存量误标成 'builtin' 的正则——这些
+// 产品不在 products.xml、删后不会重插 → 升级后正则列变空。加 product_id IN
+// (SELECT id FROM products WHERE is_builtin=TRUE) 守卫后，用户产品正则一律不动。
+const deleteBuiltinPatternsSQL = `DELETE FROM product_class_patterns
+WHERE source = 'builtin'
+  AND product_id IN (SELECT id FROM products WHERE is_builtin = TRUE)`
+
 // Loader 实现 dictloader.Loader（T-0098 P1-06）。
 //
 // 加载语义（设计 §4.5）：
@@ -95,9 +106,13 @@ func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	// 只清空内置正则（source='builtin'）；UI 新增的 source='custom' 正则保留，
-	// 从而「重新加载 products.xml 不覆盖管理员自定义路由正则」（对标 param_mappings source）。
-	if _, err := tx.Exec(ctx, `DELETE FROM product_class_patterns WHERE source = 'builtin'`); err != nil {
+	// 只清空「内置产品」的内置正则，随后从 products.xml 重插（保持 builtin 正则刷新语义）。
+	// 关键约束（issue #206）：限定 product_id 属于 is_builtin=TRUE 的产品——
+	//   · UI 新增的 source='custom' 正则恒保留（对标 param_mappings source）；
+	//   · 用户自建产品（is_builtin=FALSE）的正则即使因 pre-000031 存量误标成 'builtin'，
+	//     也永不被删（这些产品不在 products.xml、删了不会重插 → 否则正则列变空）。
+	// loader 只对 products.xml 内产品 UPSERT is_builtin=TRUE，故 JOIN 限定即正确闭合。
+	if _, err := tx.Exec(ctx, deleteBuiltinPatternsSQL); err != nil {
 		return rep, fmt.Errorf("delete builtin patterns: %w", err)
 	}
 
