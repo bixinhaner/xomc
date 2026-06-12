@@ -199,12 +199,14 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-section "任务读链路（活栈含种子任务）"
+section "任务读链路（任务由运行期 POST 创建，非种子；首次部署可为空）"
 # ---------------------------------------------------------------------------
+# mml_tasks 不是种子数据（任何 seed 文件都不插），由 POST /api/v1/mml/tasks 运行期创建。
+# 首次部署 / 全新初始化的库该列表合法为空 —— 故只校验「可查 + 空集语义」，
+# 有任务时再机会性地走详情/结果读链路（与本文件 scripts/unsupported-paths 同范式）。
 req GET "/api/v1/mml/tasks"
 check_ret_ok "MML 任务列表可查"
-check_list_nonempty "任务列表非空（种子任务）" "data.items"
-check_count_ge "任务总数 ≥ 1" "data.total" 1
+check_list_or_empty "任务列表可查（空集语义；任务非种子）" "data.items"
 TASK_ID=$(jget "data.items.0.id")
 
 if [ -n "$TASK_ID" ]; then
