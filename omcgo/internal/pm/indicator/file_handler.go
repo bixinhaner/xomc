@@ -73,7 +73,7 @@ func NewFileHandler(repo FileRepository, reloader Reloader, cache CacheRefresher
 // RegisterRoutes 挂在 /api/v1 之下;内部使用 /indicators/... 多个子路径。
 //
 // gin 路由的 *loadedFrom 是 catch-all wildcard,匹配剩余完整路径(含 /),
-// 用于承载 "indicator-library-custom/enb/MY.xml" 形式的多段相对路径。
+// 用于承载 "indicator-library/enb/MY.xml" 形式的多段相对路径。
 func (h *FileHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	ig := rg.Group("/indicators")
 	ig.GET("/summary", h.Summary)

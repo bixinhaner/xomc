@@ -249,7 +249,7 @@ OMC 采用**「版本目录 + `current` 软链」**方式存放**不同版本的
 ├── infra/                          # 基础设施包解压处（docker/ + images/），装一次
 ├── etc/                            # 实例配置（跨版本保留，不随交付包覆盖）
 │   └── app.prod.yaml  acs.prod.yaml  worker.prod.yaml
-├── data/                           # host 主权的自定义 XML（param-mappings-custom / indicator-library-custom）
+├── data/                           # host 主权字典 XML（param-mappings / indicator-library / alarm-definitions，单目录 + .custom sidecar）
 ├── run/logs/{app,acs,worker,nginx}/ # 运行日志（跨版本保留）
 └── packages/                       # （可选）交付包压缩档原始存档备查
 ```
@@ -613,11 +613,14 @@ bash /opt/omc/current/deploy/healthcheck.sh -h          # 健康校验
 
 ### 6.4 host 主权的自定义 XML 目录
 
-deploy.sh 首次部署会建两个 host bind mount 目录（容器内 UID 10001 写入），与镜像内
-builtin XML 物理隔离，升级保留运维已设权限：
+deploy.sh 首次部署把整个 `data/` 目录外置 bind mount（容器内 UID 10001 写入），不进镜像；
+builtin 与运维上传的 custom XML **同住一个目录**，靠空文件 `X.xml.custom` sidecar 标记来源
+（ADR 0004 单目录 + sidecar，取代旧的 `*-custom` 双目录）。升级「现网赢、新版补充」反向合并，
+带 `.custom` sidecar 的自定义 XML 一律保留：
 
-- `/opt/omc/data/param-mappings-custom`（T-0178 自定义 paramModel XML）
-- `/opt/omc/data/indicator-library-custom/{enb,gsm,gnb}`（T-0180 自定义 indicator XML，三制式分桶）
+- `/opt/omc/data/param-mappings/`（paramModel XML，扁平；custom 旁有 `.custom`）
+- `/opt/omc/data/indicator-library/{enb,gsm,gnb}/`（indicator XML，三制式分桶；custom 旁有 `.custom`）
+- `/opt/omc/data/alarm-definitions/`（alarm XML，扁平；custom 旁有 `.custom`）
 
 ---
 
