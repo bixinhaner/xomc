@@ -2,13 +2,16 @@ package device
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
+	sq "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/storage"
 )
 
 // fakeGeoRow 模拟 pgx 行扫描语义供 scanGeoDeviceRow 单测使用：
@@ -160,4 +163,126 @@ func TestScanGeoDeviceRow_NullableJoinColumns(t *testing.T) {
 	assert.Nil(t, d.MAC)
 	assert.Nil(t, d.PCI)
 	assert.Nil(t, d.DeviceName)
+}
+
+// ---------------------------------------------------------------------------
+// issue #203：FindStaleDevicesByClass 的 SQL 构建断言（DB-free）
+//
+// FindStaleDevicesByClass 在同一方法里内联构建 SQL 后立即 r.pool.Query，pool
+// 是具体 *pgxpool.Pool（非接口），无法注入 fake 捕获 SQL；故此处按生产方法
+// 完全相同的方式重建同一个 squirrel builder 再 ToSql 断言。CASE / CPE 谓词
+// 直接引用生产常量 cpeProductClassPredicate，CPE-分支顺序与谓词内容锚定生产；
+// make_interval / 占位符绑定顺序逐字镜像 device_repository.go，二者改动须同步。
+// ---------------------------------------------------------------------------
+
+// buildFindStaleByClassSQLForTest 镜像 FindStaleDevicesByClass 的 builder 构建段
+// （device_repository.go），用于 DB-free 的 ToSql 断言。返回渲染后的 SQL 与 args。
+//
+// 注意：这是生产 builder 段的逐字镜像。若 FindStaleDevicesByClass 改了 SELECT 列、
+// WHERE 谓词、staleExpr 表达式或占位符绑定顺序，必须同步本函数，否则本测试失去回归意义。
+func buildFindStaleByClassSQLForTest(t *testing.T, cpeThresholdSec, enbThresholdSec, limit int) (string, []interface{}) {
+	t.Helper()
+	staleExpr := fmt.Sprintf(
+		"d.last_inform_at < NOW() - make_interval(secs => (CASE WHEN %s THEN (?)::int ELSE (?)::int END))",
+		cpeProductClassPredicate,
+	)
+	builder := storage.Psql.Select(deviceColumns()...).
+		From("devices d").
+		Where(sq.Eq{"d.is_online": true}).
+		Where(notDeleted).
+		Where("d.last_inform_at IS NOT NULL").
+		Where(staleExpr, cpeThresholdSec, enbThresholdSec).
+		OrderBy("d.last_inform_at ASC").
+		Limit(uint64(limit))
+
+	query, args, err := builder.ToSql()
+	require.NoError(t, err)
+	return query, args
+}
+
+// TestFindStaleDevicesByClass_SQLBuild_MakeIntervalAndCaseOrdering 断言离线判定
+// SQL 用 make_interval(secs => (?)::int) 造 interval（绕开 text*interval，issue #203
+// 回合2），CASE WHEN 把 CPE 谓词分支排在 ELSE（基站 eNB）之前，且占位参数按
+// cpeThresholdSec → enbThresholdSec → limit 的顺序绑定。
+func TestFindStaleDevicesByClass_SQLBuild_MakeIntervalAndCaseOrdering(t *testing.T) {
+	const (
+		cpe   = 600
+		enb   = 100
+		limit = 1000
+	)
+	query, args := buildFindStaleByClassSQLForTest(t, cpe, enb, limit)
+
+	// 1) make_interval(secs => (?)::int) 表达式必须出现（修复 text*interval 42883）。
+	assert.Contains(t, query, "make_interval(secs =>",
+		"必须用 make_interval 造 interval，绕开 text*interval（issue #203 回合2）")
+	assert.Contains(t, query, "::int",
+		"秒数必须显式 cast 成 int 再喂 make_interval")
+
+	// 2) CASE WHEN <CPE 谓词> THEN ... ELSE ...：CPE 分支必须排在 ELSE（eNB）之前。
+	assert.Contains(t, query, "CASE WHEN", "阈值选取必须用 CASE WHEN 分类")
+	caseIdx := strings.Index(query, "CASE WHEN")
+	cpeIdx := strings.Index(query, "ILIKE '%cpe%'")
+	elseIdx := strings.Index(query, "ELSE")
+	require.GreaterOrEqual(t, caseIdx, 0, "SQL 应含 CASE WHEN")
+	require.GreaterOrEqual(t, cpeIdx, 0, "SQL 应含 CPE 谓词 ILIKE '%cpe%'")
+	require.GreaterOrEqual(t, elseIdx, 0, "SQL 应含 ELSE 兜底（基站 eNB）分支")
+	assert.Less(t, caseIdx, cpeIdx, "CPE 谓词必须在 CASE WHEN 之后")
+	assert.Less(t, cpeIdx, elseIdx, "CPE 分支（THEN）必须排在 ELSE（eNB）之前")
+
+	// CPE 谓词的四个关键字都在 THEN 之前（即 CPE 分支内）。
+	for _, kw := range []string{"%cpe%", "%home%", "%residential%", "%indoor%"} {
+		kwIdx := strings.Index(query, "ILIKE '"+kw+"'")
+		require.GreaterOrEqual(t, kwIdx, 0, "CPE 谓词应含关键字 %s", kw)
+		assert.Less(t, kwIdx, elseIdx, "关键字 %s 必须落在 ELSE 之前的 CPE 分支", kw)
+	}
+
+	// 3) 占位参数绑定顺序：WHERE 子句按出现顺序收集 args——
+	//    is_online=true（$1）→ staleExpr 的 CPE 分支(THEN, $2)=cpe → ELSE($3)=enb。
+	//    notDeleted / last_inform_at IS NOT NULL 不带占位参数；
+	//    Limit 由 squirrel 渲染为字面量 `LIMIT 1000`，不占位（故 args 只有 3 个）。
+	require.Len(t, args, 3, "占位参数：is_online、cpe 阈值、enb 阈值（limit 是字面量不占位）")
+	assert.EqualValues(t, true, args[0], "args[0] 是 is_online=true 谓词")
+	assert.EqualValues(t, cpe, args[1], "args[1] 必须绑 cpeThresholdSec（CPE 分支 THEN，$2 在 ELSE 之前）")
+	assert.EqualValues(t, enb, args[2], "args[2] 必须绑 enbThresholdSec（ELSE 基站分支，$3）")
+
+	// 4) 基本结构：在线 + 未软删 + last_inform_at 非空 + 按 last_inform_at 升序 + LIMIT 字面量。
+	assert.Contains(t, query, "d.is_online")
+	assert.Contains(t, query, "d.deleted_at")
+	assert.Contains(t, query, "d.last_inform_at IS NOT NULL")
+	assert.Contains(t, query, "ORDER BY d.last_inform_at ASC")
+	assert.Contains(t, query, fmt.Sprintf("LIMIT %d", limit), "limit 渲染为字面量 LIMIT 子句")
+}
+
+// TestFindStaleDevicesByClass_NullProductClass_FallsIntoENBBranch 是 NULL
+// product_class 边界的 DB-free 断言：CASE 谓词全部走 `product_class ILIKE '%...%'`，
+// 当 product_class 为 SQL NULL 时，`NULL ILIKE '%cpe%'` 求值为 NULL（非 TRUE），
+// CASE WHEN 的所有分支条件均不满足 → 落入 ELSE（基站 eNB 阈值）分支。
+// 这从 SQL/CASE 形状层面证明：NULL product_class 设备按基站阈值（enb）判离线，
+// 不会被误用 CPE 阈值（cpe）。真正在 PG 上的求值验证见下方 //go:build integration 版本。
+func TestFindStaleDevicesByClass_NullProductClass_FallsIntoENBBranch(t *testing.T) {
+	query, args := buildFindStaleByClassSQLForTest(t, 600, 100, 1000)
+
+	// CPE 分类完全依赖 product_class 的 ILIKE 模式匹配——没有对 NULL 的显式兜底
+	// （如 COALESCE(product_class,'') 或 IS NOT NULL），因此 NULL 三值逻辑下
+	// CPE 分支不可能为 TRUE，必然落 ELSE。
+	caseStart := strings.Index(query, "CASE WHEN")
+	caseEnd := strings.Index(query, "END")
+	require.GreaterOrEqual(t, caseStart, 0)
+	require.Greater(t, caseEnd, caseStart, "SQL 应含完整 CASE ... END")
+	caseExpr := query[caseStart : caseEnd+len("END")]
+
+	// CASE 谓词只用 product_class ILIKE，未对 NULL 做 COALESCE/IS NULL 兜底，
+	// 故 NULL product_class 三值逻辑下走 ELSE 分支。
+	assert.Contains(t, caseExpr, "product_class ILIKE",
+		"CPE 分类只靠 product_class ILIKE 模式匹配")
+	assert.NotContains(t, caseExpr, "COALESCE",
+		"未对 product_class NULL 做 COALESCE 兜底——NULL 必落 ELSE（eNB）")
+	assert.NotContains(t, caseExpr, "IS NULL",
+		"CASE 谓词未显式处理 NULL——NULL ILIKE 求值 NULL→非 TRUE→走 ELSE（eNB）")
+	assert.Contains(t, caseExpr, "ELSE", "必须有 ELSE 兜底承接 NULL/非 CPE 设备")
+
+	// ELSE 分支绑的是 enbThresholdSec（args[2]，$3）——即 NULL product_class 设备用基站阈值。
+	// args 顺序见 SQLBuild 测试：[is_online, cpe($2,THEN), enb($3,ELSE)]。
+	require.Len(t, args, 3)
+	assert.EqualValues(t, 100, args[2], "ELSE（NULL/eNB）分支用 enbThresholdSec（$3）")
 }

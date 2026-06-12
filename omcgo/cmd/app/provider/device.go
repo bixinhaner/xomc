@@ -8,6 +8,7 @@ import (
 
 	"github.com/omcgo/omcgo/internal/acs/connreq"
 	"github.com/omcgo/omcgo/internal/acs/stun"
+	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/device"
 )
@@ -29,6 +30,18 @@ func initDeviceModule(c *Container) error {
 	//      在线设备,事务性翻 is_online=false + 累加 cumulative_online_duration +
 	//      publish device.offline。
 	reconciler := device.NewDeviceStatusReconciler(c.Redis, deviceRepo, c.EventBus, logger)
+	// issue #203：离线阈值接 sys_configs (category='device') 实时配置。
+	//   - key=enbTimeout → 基站类阈值（秒，默认 100）
+	//   - key=cpeTimeout → CPE 类阈值（秒，默认 600）
+	// 每轮扫描读最新值；改配置后下一轮扫描即生效（扫描周期 = min(阈值/2, 60s)），无需重启。
+	offlineSysCfgRepo := admin.NewPgSysConfigRepository(c.PgPool)
+	reconciler.SetThresholdLookup(func(ctx context.Context, category, key string) (string, bool) {
+		cfg, err := offlineSysCfgRepo.GetByKey(ctx, category, key)
+		if err != nil || cfg == nil {
+			return "", false
+		}
+		return cfg.Value, true
+	})
 	reconciler.Start()
 	c.GS.Register("device-status-reconciler", 1, func(ctx context.Context) error { reconciler.Stop(); return nil })
 

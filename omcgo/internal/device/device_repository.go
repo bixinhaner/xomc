@@ -1867,6 +1867,79 @@ func (r *PgDeviceRepository) FindStaleDevicesAdaptive(ctx context.Context, minSt
 	return devices, nil
 }
 
+// cpeProductClassPredicate 是判定设备是否属于 "CPE 类" 的 SQL 谓词。
+//
+// 与 topology.inferNodeType 的分类口径对齐：product_class 命中 CPE/Home/
+// Residential/Indoor 任一关键字即视为 CPE，其余（含基站 eNB/gNB、网关等）一律
+// 归 "基站类"。表里无显式 CPE 列，故按 product_class 模式匹配。
+const cpeProductClassPredicate = `(
+	d.product_class ILIKE '%cpe%' OR
+	d.product_class ILIKE '%home%' OR
+	d.product_class ILIKE '%residential%' OR
+	d.product_class ILIKE '%indoor%'
+)`
+
+// FindStaleDevicesByClass 找出 "上次心跳距今 > 该设备类阈值" 的在线设备。
+//
+// issue #203：离线判定接 sys_configs 实时配置。按设备类（基站 / CPE）应用各自
+// 阈值，**不叠加 2×inform_interval 安全网**——纯按配置阈值与 last_inform_at 的
+// 时间差判离线，让用户配置直接生效。CPE 与基站分类见 cpeProductClassPredicate。
+//
+// enbThresholdSec：基站类阈值（秒）；cpeThresholdSec：CPE 类阈值（秒）。
+// 返回按 last_inform_at ASC 排序，优先处理最久未心跳的设备。
+func (r *PgDeviceRepository) FindStaleDevicesByClass(ctx context.Context, enbThresholdSec, cpeThresholdSec, limit int) ([]*model.Device, error) {
+	if enbThresholdSec <= 0 {
+		enbThresholdSec = 100
+	}
+	if cpeThresholdSec <= 0 {
+		cpeThresholdSec = 600
+	}
+	if limit <= 0 {
+		limit = 1000
+	}
+	// 凡 is_online=true 但 last_inform_at 距今超过 "该类阈值" 的设备一律判离线。
+	// 阈值按 product_class 分类选取（CPE 用 cpeThresholdSec，其余用 enbThresholdSec）。
+	// 不限定 lifecycle_state（与 FindStaleDevicesAdaptive 一致，避免 maintenance 等
+	// 状态的僵尸在线设备永不离线）。
+	//
+	// issue #203 回合2：占位符经 pgx 绑成 text，PG 无 `text * interval` 运算符
+	// （报 operator does not exist: text * interval, SQLSTATE 42883），整轮扫描失败、
+	// 从不进入判离线分支。用 make_interval(secs => (?)::int) 把秒数显式转 int 再造
+	// interval，绕开 text*interval 运算。
+	staleExpr := fmt.Sprintf(
+		"d.last_inform_at < NOW() - make_interval(secs => (CASE WHEN %s THEN (?)::int ELSE (?)::int END))",
+		cpeProductClassPredicate,
+	)
+	builder := storage.Psql.Select(deviceColumns()...).
+		From("devices d").
+		Where(sq.Eq{"d.is_online": true}).
+		Where(notDeleted).
+		Where("d.last_inform_at IS NOT NULL").
+		Where(staleExpr, cpeThresholdSec, enbThresholdSec).
+		OrderBy("d.last_inform_at ASC").
+		Limit(uint64(limit))
+
+	query, args, err := builder.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build find stale devices by class query: %w", err)
+	}
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("find stale devices by class: %w", err)
+	}
+	defer rows.Close()
+
+	var devices []*model.Device
+	for rows.Next() {
+		d, err := scanDeviceRow(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan stale device by class: %w", err)
+		}
+		devices = append(devices, d)
+	}
+	return devices, nil
+}
+
 // FindOfflineDevicesBefore 找出当前仍离线且 last_offline_time 早于 cutoff 的设备。
 //
 // 用于 F04 离线超时告警清理：设备离线满 1 小时仍未恢复上线时，将当前告警转历史。
