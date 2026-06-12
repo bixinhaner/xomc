@@ -1141,6 +1141,78 @@ type DeviceOnlineEvent struct {
 	SwVersion    string    `json:"sw_version"`
 }
 
+// ForceBootStateFlip 在收到 BOOT 信号时确定性地强制把设备先置为离线，让随后的
+// Inform 驱动更新（UpdateFromInform）必然走出 "offline → active" 翻转、发出
+// device.online 事件，从而在 OMC 上如实呈现一次 "下线 → 上线" 过程（issue #212）。
+//
+// 设计要点（与 issue #212 口径对齐）：
+//   - 无条件：不论设备当前是否显示在线、不论被动超时离线探测是否已先行把它标离线，
+//     都先显式写 is_online=false。已经离线的设备这一步幂等（无副作用）。
+//   - 与被动超时离线探测彻底解耦：不读心跳超时链路，BOOT 是主动确定信号，直接驱动翻转。
+//   - 只翻转 is_online（在线/离线维度），不动 lifecycle_state（入网生命周期维度）——
+//     Commissioned + is_online=false → Status 派生为 Offline，正是 UpdateFromInform 里
+//     becameOnline 判定所需的 oldStatus==Offline 前置。Decommissioned 等非入网态设备
+//     的 lifecycle 不受影响。
+//   - 发 device.offline 事件让 "下线" 半程对订阅方（前端推送 / 审计）也可见；随后由
+//     UpdateFromInform 发 device.online 补齐 "上线" 半程。
+//
+// 注意：本方法只负责 "强制置离线 + 发 offline 事件 + 失效缓存"，"上线" 由调用方在其后
+// 调用 UpdateFromInform 自然完成。EventBus / 仓储错误均仅 log Warn 不阻塞 BOOT 主流程
+// （记录侧 RecordBootFromInform 仍会照常落库）。
+func (s *DeviceService) ForceBootStateFlip(ctx context.Context, device *model.Device) {
+	if device == nil {
+		return
+	}
+
+	// 已离线则跳过写库与发事件（幂等）：避免对本就离线的设备凭空多发一条 offline。
+	// 仍由调用方后续的 UpdateFromInform 把它带回在线并发 device.online。
+	if !device.IsOnline {
+		s.logger.Debug("ForceBootStateFlip: device already offline, skip forced offline write",
+			zap.String("device_id", device.ID.String()),
+			zap.String("serial_number", device.SerialNumber))
+		return
+	}
+
+	if err := s.deviceRepo.UpdateOnlineStatus(ctx, device.ID, false); err != nil {
+		s.logger.Warn("ForceBootStateFlip: force offline write failed",
+			zap.String("device_id", device.ID.String()),
+			zap.String("serial_number", device.SerialNumber),
+			zap.Error(err))
+		return
+	}
+
+	// 失效缓存，否则随后的 UpdateFromInform 走 cache 读到 is_online=true 的旧值，
+	// becameOnline 判定不成立、不发 device.online（真机 2026-05-25 已暴露过同类缓存竞态）。
+	device.IsOnline = false
+	if s.cache != nil {
+		s.cache.Delete(ctx, device.SerialNumber)
+	}
+
+	// 发 device.offline 让 "下线" 半程可见。reason=reboot 与超时离线（heartbeat_timeout）
+	// 区分开，下游可据此知道这是 BOOT 驱动的确定性离线，而非被动超时判定。
+	if s.eventBus != nil {
+		payload := DeviceOfflineEvent{
+			DeviceID:    device.ID,
+			Serial:      device.SerialNumber,
+			Carrier:     device.Carrier,
+			Technology:  device.Technology,
+			OfflineTime: time.Now(),
+			Reason:      OfflineReasonReboot,
+		}
+		if evt, evtErr := event.NewEvent(event.SubjectDeviceOffline, payload); evtErr != nil {
+			s.logger.Warn("ForceBootStateFlip: create device.offline event failed",
+				zap.Error(evtErr), zap.String("device_id", device.ID.String()))
+		} else if pubErr := s.eventBus.Publish(ctx, event.SubjectDeviceOffline, evt); pubErr != nil {
+			s.logger.Warn("ForceBootStateFlip: publish device.offline failed",
+				zap.Error(pubErr), zap.String("device_id", device.ID.String()))
+		}
+	}
+
+	s.logger.Info("ForceBootStateFlip: device force-marked offline on BOOT",
+		zap.String("device_id", device.ID.String()),
+		zap.String("serial_number", device.SerialNumber))
+}
+
 // PublishDeviceOnlineEvent 发布 device.online 事件（T-0123）。
 //
 // 不阻塞主流程：EventBus nil / 序列化失败 / Publish 失败均仅 log Warn，
