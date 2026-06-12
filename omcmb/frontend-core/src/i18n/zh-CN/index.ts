@@ -2643,6 +2643,8 @@ const messages: Record<string, string> = {
   'gis.search.notFound': '未找到匹配的设备',
   'gis.search.tryOther': '请尝试其他关键词',
   'gis.search.resultsCount': '共找到 {count} 个结果',
+  'gis.search.noCoordTag': '无坐标',
+  'gis.search.noCoordToast': '该设备无经纬度坐标，无法定位',
   'gis.loading': '加载设备数据...',
   'gis.legend.deviceCluster': '设备聚合',
   'gis.legend.alarmCount': '告警数量',

@@ -11,7 +11,7 @@
  */
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useIntl } from 'react-intl';
-import { Checkbox, Spin, Empty, Collapse, Input, Tooltip } from 'antd';
+import { Checkbox, Spin, Empty, Collapse, Input, Tooltip, message } from 'antd';
 import { SearchOutlined, PlusOutlined, MinusOutlined, CaretDownOutlined } from '@ant-design/icons';
 import GISMap from '@/components/GISMap';
 import { MAP_CONFIG } from '@/components/GISMap/constants';
@@ -30,6 +30,7 @@ import {
 import { useDeviceSearch } from '@core/hooks/useDeviceSearch';
 import { topologyApi } from '@core/services/api/topologyApi';
 import { SPACING, RADIUS, SHADOWS, COLORS, transitionString, DURATION, EASING } from './styles';
+import { hasValidCoord } from './coord';
 import './animations.css';
 
 /**
@@ -1184,18 +1185,26 @@ export default function GISMapView() {
                           : result.status === 'onlineInactive'
                             ? '#FAAD14'
                             : '#b60808';
+                        // 无有效坐标（null 或 (0,0)）的设备无法在地图定位，做视觉标记 + 点击给提示
+                        const coordValid = hasValidCoord(result.latitude, result.longitude);
                         return (
                           <div
                             key={result.id}
-                            style={searchResultItemStyle(index === 0)}
+                            style={{
+                              ...searchResultItemStyle(index === 0),
+                              ...(coordValid ? {} : { opacity: 0.6 }),
+                            }}
                             onClick={() => {
-                              // 跳过没有坐标的设备
-                              if (result.latitude == null || result.longitude == null) return;
+                              // 无有效坐标：给出明确反馈而非静默无反应或飞到 (0,0) 海面（issue #192）
+                              if (!coordValid) {
+                                void message.warning(intl.formatMessage({ id: 'gis.search.noCoordToast' }));
+                                return;
+                              }
                               setDeviceSearchExpanded(false);
                               const mapDevice: MapDevice = {
                                 id: result.id,
-                                lat: result.latitude,
-                                lng: result.longitude,
+                                lat: result.latitude!,
+                                lng: result.longitude!,
                                 name: result.name,
                                 status: result.status,
                                 sn: result.sn,
@@ -1220,6 +1229,23 @@ export default function GISMapView() {
                               <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-neutral-800)' }}>
                                 {result.name}
                               </span>
+                              {!coordValid && (
+                                <Tooltip title={intl.formatMessage({ id: 'gis.search.noCoordToast' })}>
+                                  <span
+                                    style={{
+                                      fontSize: 10,
+                                      lineHeight: '16px',
+                                      padding: '0 6px',
+                                      borderRadius: 4,
+                                      color: '#FA8C16',
+                                      background: 'rgba(250, 140, 22, 0.12)',
+                                      border: '1px solid rgba(250, 140, 22, 0.4)',
+                                    }}
+                                  >
+                                    {intl.formatMessage({ id: 'gis.search.noCoordTag' })}
+                                  </span>
+                                </Tooltip>
+                              )}
                             </div>
                             <div
                               style={{
