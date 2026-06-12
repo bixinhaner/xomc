@@ -277,7 +277,7 @@ sudo bash deploy/install.sh --skip-monitoring         # 不起监控栈
 sudo bash deploy/install.sh -h                        # 查看所有参数</pre>
 
 <p class="tip">install.sh 自动：环境检查 → 目录布局 → 智能 load 镜像（已有则跳过并重启）→ 默认口令检查 → 启动 infra → 等就绪 → migrate → seed → <code>docker compose up -d</code> 全栈 → 健康检查。<b>全 docker compose 部署，宿主机不再放业务二进制。</b></p>
-<div class="danger">🔐 凭证（#175 治本后）：首次安装 <code>install.sh</code> <b>自动生成强随机凭证</b>（PostgreSQL / MinIO / Grafana / JWT / TR-069 共享密钥）→ <code>/opt/omc/etc/secrets.env</code>（<code>600</code>/root；uninstall 保留、<code>--purge</code> 删，与数据卷同生命周期），<b>无需手工改默认口令</b>。MinIO / Grafana 登录口令在该文件，请<b>妥善备份</b>；轮换步骤见交付包 <code>deploy/secrets-lib.sh</code> 注释。<br>首次部署仍需手工填的只有 <code>OMC_PUBLIC_HOST</code>（基站可达 IP，见 §9.5）——在解压包的 <code>deploy/.env</code> 里填（此时 <code>current/deploy</code> 尚不存在）。</div>
+<div class="danger">🔐 凭证（#175 治本后）：首次安装 <code>install.sh</code> <b>自动生成强随机凭证</b>（PostgreSQL / MinIO / Grafana / JWT / TR-069 共享密钥）→ <code>/opt/omc/etc/secrets.env</code>（<code>600</code>/root；uninstall 保留、<code>--purge</code> 删，与数据卷同生命周期），<b>无需手工改默认口令</b>。MinIO / Grafana 登录口令在该文件，请<b>妥善备份</b>；<b>轮换 / 改口令</b>用 <code>deploy/reset_password.sh</code>（逐组件单选，见 §9.3）。<br>首次部署仍需手工填的只有 <code>OMC_PUBLIC_HOST</code>（基站可达 IP，见 §9.5）——在解压包的 <code>deploy/.env</code> 里填（此时 <code>current/deploy</code> 尚不存在）。</div>
 
 <h3>5.4 svc.sh — 日常服务控制(部署完成后用)</h3>
 <p class="lead">部署完成后,用 <code>svc.sh</code> 做日常启停 / 重启 / 查日志,无须再跑 install.sh。
@@ -358,29 +358,32 @@ bash svc.sh -h                                # 完整帮助</pre>
 </div>
 
 <h2>🔑 9. 配置文件修改指南（账号 / 口令 / JWT）</h2>
-<p class="lead">默认口令在两处出现、必须<b>同步修改</b>，否则 OMC 进程连不上 PostgreSQL / MinIO：</p>
+<p class="lead">#175 治本后：凭证<b>唯一权威源</b>是 <code>/opt/omc/etc/secrets.env</code>（首次部署 <code>install.sh</code> 自动生成强随机，<code>600</code>/root）。<code>etc/*.prod.yaml</code> 已改用 <code>\${VAR}</code> 占位、从 <code>deploy/.env</code> 读取，<code>.env</code> 的 6 个密钥键由 <code>secrets.env</code> 自动同步覆盖——<b>无需再逐处手改口令</b>。改口令 / 轮换走 §9.3 的 <code>reset_password.sh</code>：</p>
 <ul class="list">
-<li><code>/opt/omc/current/deploy/.env</code> —— docker compose 起容器时的<b>初始口令 / 镜像版本</b>（仅首次 <code>volumes</code> 创建时生效）</li>
-<li><code>/opt/omc/etc/{app,acs,worker}.prod.yaml</code> —— OMC 三进程连接中间件时的<b>客户端口令</b></li>
+<li><code>/opt/omc/etc/secrets.env</code> —— <b>唯一权威源</b>（6 键：PG / MinIO / Grafana / JWT / TR-069 共享密钥）</li>
+<li><code>/opt/omc/current/deploy/.env</code> —— compose 起容器用；6 密钥键由 <code>secrets.env</code> 同步，<b>非密钥</b>键（镜像版本 / <code>OMC_PUBLIC_HOST</code>）在此手改</li>
+<li><code>/opt/omc/etc/{app,acs,worker}.prod.yaml</code> —— OMC 三进程连接中间件；已是 <code>\${VAR}</code> 占位，<b>无口令可手改</b></li>
 </ul>
 
-<h3>9.1 需同步修改的口令对应表</h3>
+<h3>9.1 凭证权威源与对应键</h3>
+<p>所有口令唯一权威源是 <code>etc/secrets.env</code>。<b>下表「默认占位」仅历史值——首次部署已被 install.sh 随机值取代，不再是默认口令。</b>改口令 = 改 <code>secrets.env</code> 对应键（推荐用 §9.3 <code>reset_password.sh</code>），<code>*.prod.yaml</code> 走 <code>\${VAR}</code> 不需手改。</p>
 <table>
-<thead><tr><th>项</th><th>deploy/.env</th><th>etc/app.prod.yaml</th><th>说明</th></tr></thead>
+<thead><tr><th>项</th><th>secrets.env 键</th><th>prod.yaml 引用 / 默认占位</th><th>说明</th></tr></thead>
 <tbody>
-<tr><td>PostgreSQL 账号</td><td><code>POSTGRES_USER=omcgo</code></td><td><code>db.dsn</code> / <code>tsdb.dsn</code> 里的 <code>omcgo</code></td><td>DSN 格式：<code>postgres://<b>账号</b>:<b>口令</b>@postgres:5432/omcgo?sslmode=disable</code></td></tr>
-<tr><td>PostgreSQL 口令</td><td><code>POSTGRES_PASSWORD=omcgo123</code></td><td><code>db.dsn</code> / <code>tsdb.dsn</code> 里的 <code>omcgo123</code></td><td>同上，出现两次（db + tsdb）</td></tr>
-<tr><td>PostgreSQL 库名</td><td><code>POSTGRES_DB=omcgo</code></td><td>DSN 路径部分 <code>/omcgo</code></td><td>一般不改</td></tr>
-<tr><td>MinIO 账号</td><td><code>MINIO_ROOT_USER=minioadmin</code></td><td><code>minio.access_key</code></td><td>三个 yaml（app/acs/worker）都要改</td></tr>
-<tr><td>MinIO 口令</td><td><code>MINIO_ROOT_PASSWORD=minioadmin</code></td><td><code>minio.secret_key</code></td><td>同上</td></tr>
-<tr><td>JWT 密钥</td><td><code>OMCGO_JWT_SECRET=...</code></td><td><code>jwt.secret</code>（同值）</td><td>必须 ≥ 32 字符；产生：<code>openssl rand -base64 48</code></td></tr>
-<tr><td>Grafana 管理员</td><td><code>GRAFANA_ADMIN_PASSWORD=admin</code></td><td>—</td><td>仅监控栈使用；首次登录 :3030 也会强制提示改口令(宿主 3030 → 容器 3000)</td></tr>
-<tr><td><b>基站可达地址</b></td><td><code>OMC_PUBLIC_HOST=</code>(本机对外 IP)</td><td>—(自动注入 app/acs/worker)</td><td><b>必填</b>:基站回传 PM 文件的上传地址(<code>http://&lt;OMC_PUBLIC_HOST&gt;:7557/...</code>)，不能用 localhost / 127.0.0.1，否则基站传不上来。详见 §9.5</td></tr>
-<tr><td>Web 管理员 admin</td><td>—</td><td>—</td><td>首次登录 <code>http://&lt;IP&gt;:8081</code> 后在「个人中心 → 修改密码」里改，<b>不需改配置文件</b>(注意:8080 是基站 ACS 入口,人不要去登)</td></tr>
+<tr><td>PostgreSQL 口令</td><td><code>POSTGRES_PASSWORD</code></td><td><code>db.dsn</code>/<code>tsdb.dsn</code> 的 <code>\${POSTGRES_PASSWORD}</code>（旧默认 <code>omcgo123</code>，首次已随机）</td><td>轮换：§9.3 <code>reset_password.sh pg</code></td></tr>
+<tr><td>PostgreSQL 账号 / 库</td><td>—（<code>.env</code> 的 <code>POSTGRES_USER</code>/<code>POSTGRES_DB</code>，非密钥）</td><td>DSN 账号 / <code>/库名</code></td><td>一般不改；reset_password.sh 不轮换账号</td></tr>
+<tr><td>MinIO 账号</td><td><code>MINIO_ROOT_USER</code></td><td><code>minio.access_key</code>（首次 = <code>omcadmin</code>）</td><td><b>建议只改口令不改账号</b>（access_key 改名牵连引用）</td></tr>
+<tr><td>MinIO 口令</td><td><code>MINIO_ROOT_PASSWORD</code></td><td><code>minio.secret_key</code>（旧默认 <code>minioadmin</code>，首次已随机）</td><td>轮换：§9.3 <code>reset_password.sh minio</code></td></tr>
+<tr><td>JWT 密钥</td><td><code>OMCGO_JWT_SECRET</code></td><td><code>jwt.secret</code></td><td>≥32 字符；轮换后已签发 token 失效，需重登</td></tr>
+<tr><td>TR-069 共享密钥</td><td><code>OMC_SHARED_SECRET</code></td><td>ACS ConnReq / STUN HMAC-SHA1</td><td>轮换需经 SetParameterValues 同步到基站，见 §9.3 告警</td></tr>
+<tr><td>Grafana 管理员</td><td><code>GRAFANA_ADMIN_PASSWORD</code></td><td>—（容器 <code>GF_SECURITY_ADMIN_PASSWORD</code>，旧默认 <code>admin</code>，首次已随机）</td><td>仅监控栈；登录 :3030（宿主 3030 → 容器 3000）</td></tr>
+<tr><td><b>基站可达地址</b></td><td>—（<code>.env</code> 的 <code>OMC_PUBLIC_HOST</code>，非密钥）</td><td>—（自动注入 app/acs/worker）</td><td><b>必填</b>：基站回传 PM 文件地址（<code>http://&lt;OMC_PUBLIC_HOST&gt;:7557/...</code>），不能用 localhost / 127.0.0.1，详见 §9.5</td></tr>
+<tr><td>Web 管理员 admin</td><td>—</td><td>—</td><td>首次登录 <code>http://&lt;IP&gt;:8081</code> 在「个人中心 → 修改密码」改，<b>不动配置文件</b>（:8080 是 ACS 入口，人不要去登）</td></tr>
 </tbody>
 </table>
 
-<h3>9.2 修改步骤（首次部署、<code>install.sh</code> 起 infra 之前）</h3>
+<h3>9.2 首次部署改口令（可选——默认已自动随机）</h3>
+<p>#175 后<b>默认无需手工改口令</b>：<code>install.sh</code> 首次部署自动生成强随机凭证到 <code>secrets.env</code> 并同步 <code>.env</code>。仅当要用<b>自定义</b>口令时（首次 <code>install.sh</code> 起 infra 之前，直接写 <code>etc/secrets.env</code> 的 6 键，<code>chmod 600</code>；非密钥 <code>OMC_PUBLIC_HOST</code> 改解压包内 <code>deploy/.env</code>，见 §4.5/§9.5，再跑 <code>install.sh</code> 复用 secrets.env）。下方为底层等价步骤（仅参考）：</p>
 <pre># 1) 生成强口令（示例）
 openssl rand -base64 24    # PostgreSQL 口令
 openssl rand -base64 24    # MinIO 口令
@@ -396,7 +399,7 @@ sudo vi /opt/omc/current/deploy/.env
 #     OMCGO_JWT_SECRET=          → 刚生成的 JWT 密钥
 #     OMC_PUBLIC_HOST=           → 本机对外 IP（基站可达，如 172.19.1.132），必填，见 §9.5
 
-# 3) 改 etc/*.prod.yaml（OMC 进程以这里为准连接中间件）
+# 3) （#175 后无需此步）etc/*.prod.yaml 已是 \${VAR} 占位、从 .env 读取，无明文口令可改；下面三行仅历史参考
 sudo vi /opt/omc/etc/app.prod.yaml      # db.dsn / tsdb.dsn / minio.* / jwt.secret
 sudo vi /opt/omc/etc/acs.prod.yaml      # db.dsn / minio.* （按需）
 sudo vi /opt/omc/etc/worker.prod.yaml   # db.dsn / minio.* （按需）
@@ -404,17 +407,19 @@ sudo vi /opt/omc/etc/worker.prod.yaml   # db.dsn / minio.* （按需）
 # 4) 一键部署（自动 load 镜像 + up 全栈）
 sudo bash /opt/omc/current/deploy/install.sh</pre>
 
-<div class="danger">⚠️ <b>volume 已创建后改口令无效</b>：PostgreSQL / MinIO 只在首次创建 <code>pgdata</code> / <code>miniodata</code> volume 时读取环境变量。若发现初始口令错了，需重应。</div>
+<div class="danger">⚠️ <b>volume 已创建后，仅改 .env / secrets.env 不会改 PG / MinIO 卷内口令</b>：PG 口令固化在 <code>pgdata</code>（env 仅首次 initdb），MinIO 每次启动读 env。跑起来后改口令必须用 §9.3 的 <code>reset_password.sh</code>（自动处理各组件后端差异），不要只改文件。</div>
 
-<h3>9.3 已跑起来后改口令（volume 已创建）</h3>
-<pre># PostgreSQL — 在容器内改
-sudo docker exec -it omcgo-postgres-1 psql -U omcgo -d omcgo \
-    -c "ALTER USER omcgo WITH PASSWORD '新口令';"
-# 同步改 etc/*.prod.yaml 中的 dsn 口令部分；重启业务容器
-cd /opt/omc/current/deploy
-sudo docker compose -p omcgo -f docker-compose.app.yml restart app acs worker
-
-# MinIO — 使用 mc 客户端（或重建 volume）。参 MinIO 官方文档。</pre>
+<h3>9.3 已跑起来后改口令 / 轮换（volume 已创建）—— 主路径</h3>
+<p class="lead"><b>用 <code>reset_password.sh</code> 逐组件单选轮换</b>：自动处理「不同组件后端存口令方式不同」（PG 卷内 <code>ALTER ROLE</code> / MinIO 重建读 env / Grafana 容器内 reset / JWT·共享密钥 <code>up -d</code>），并保证 <code>secrets.env</code>（权威）↔ 组件口令 ↔ <code>.env</code> 三处一致。<b>不支持批量</b>，一次一个组件。</p>
+<pre>cd /opt/omc/current/deploy
+sudo bash reset_password.sh                   # 弹菜单，必须单选 1 个组件
+# 或直接指定组件：pg | minio | grafana | jwt | shared
+sudo bash reset_password.sh pg
+# 每组件可选「随机生成（推荐）」或「手动输入」（JWT/共享密钥 ≥32 字符）；
+# 随机值在终端显示一次，请妥善保存。</pre>
+<p>各组件动作：<b>PG</b> 容器内 <code>ALTER ROLE</code> 改卷内口令 + 改 secrets.env + <code>up -d app acs worker</code>；<b>MinIO</b> 改 secrets.env + <code>up -d minio app acs worker</code>（旧预签名 URL ≤1h 内失效，重新生成即可）；<b>Grafana</b> 容器内 <code>grafana cli admin reset-admin-password</code> + 改 secrets.env；<b>JWT</b> 改 secrets.env + <code>up -d app</code>（已签发 token 失效，需重登）；<b>TR-069 共享密钥</b> 改 secrets.env + <code>up -d acs app</code> + 打印基站同步告警。</p>
+<div class="danger">⚠️ <b>TR-069 共享密钥轮换</b>后，未同步基站的 ACS 主动触达（下发 / 重启 / 升级 / 即时 GPV / MML）会失败，直到经 TR-069 <b>SetParameterValues</b> 把新密钥下发到所有基站（下次 Inform 生效）；周期 Inform 不受影响、设备仍在线、无数据丢失。建议分批灰度 + 监控 ConnReq 成功率。脚本会自动打印该告警。</div>
+<p class="tip">改后再跑 <code>install.sh</code> 会复用 <code>secrets.env</code>（不会把新口令冲回旧值）。<b>不要</b>再改 <code>*.prod.yaml</code>（已是 <code>\${VAR}</code>）；<b>不要</b>用 <code>docker compose restart</code>（不重读 <code>.env</code>），轮换一律 <code>up -d</code>（配置变更触发重建）。</p>
 
 <h3>9.4 调口令后验证</h3>
 <pre># PG 可连
