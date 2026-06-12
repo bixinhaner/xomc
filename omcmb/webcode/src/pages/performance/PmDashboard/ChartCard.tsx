@@ -10,6 +10,7 @@ import { Card } from 'antd';
 import ReactECharts from 'echarts-for-react';
 import dayjs from 'dayjs';
 import type { MetricChart } from './taskDashboardUtils';
+import { computeTooltipPosition } from '@/components/Charts/LineChart';
 
 const fmtTime = (t: string) => (dayjs(t).isValid() ? dayjs(t).format('MM-DD HH:mm') : t);
 
@@ -72,7 +73,19 @@ export default function ChartCard({ chart }: { chart: MetricChart }) {
     xAxis: { type: 'category', data: xLabels, boundaryGap: false },
     yAxis: { type: 'value', scale: true },
     series: [...currentSeries, ...compareSeries],
-    tooltip: { trigger: 'axis', formatter: tooltipFormatter },
+    // 智能避让：多设备 tooltip 行多、易盖住曲线/图例，按光标位置放到对角（issue #202）。
+    tooltip: {
+      trigger: 'axis',
+      confine: true,
+      position: (
+        point: [number, number],
+        _params: unknown,
+        _dom: unknown,
+        _rect: unknown,
+        size: { contentSize: [number, number]; viewSize: [number, number] },
+      ) => computeTooltipPosition(point, size),
+      formatter: tooltipFormatter,
+    },
     legend: { type: 'scroll', top: 4 },
   };
   return (
