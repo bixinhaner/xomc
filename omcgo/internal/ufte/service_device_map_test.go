@@ -3,6 +3,7 @@ package ufte
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -134,4 +135,68 @@ func TestMapDeviceItem_ConfigRestore_EmptyDestVersionShowsEmptyTargetFile(t *tes
 	item, err := svc.mapDeviceItem(context.Background(), catalog, sub, parent, cache)
 	require.NoError(t, err)
 	assert.Empty(t, item.TargetFile, "未写回前 TargetFile 保持空（不应回退用 parent.FileName）")
+}
+
+// 以下两测覆盖 issue #195：上报时间只在文件真正上报成功（终态 ended）时才填。
+// sub_task.updated_at 在子任务生成 / 中间状态流转时都会刷新，但那不是
+// "文件上报成功"时刻——直接拿 updated_at 会在任务刚创建时就显示一个误导值。
+
+// 死判 empty-before：刚生成、未到终态的子任务，上报时间为空。
+func TestMapDeviceItem_ReportTime_EmptyBeforeSuccess(t *testing.T) {
+	svc := newServiceForMap(t)
+	catalog := mustCatalog(t, "RUNTIME_LOG_COLLECT")
+	parent := &software.UpgradeTask{
+		ID:       uuid.New(),
+		TaskName: "log-task",
+		TaskType: software.TaskTypeLogCollect,
+	}
+	// updated_at 已是非零（子任务生成那一刻就写了），但 status 还没到 ended。
+	sub := software.UpgradeSubTaskWithTaskName{
+		UpgradeSubTask: software.UpgradeSubTask{
+			ID:        uuid.New(),
+			TaskID:    parent.ID,
+			DeviceID:  uuid.New(),
+			DeviceSN:  "SN-195A",
+			Status:    software.UpgradeUploading, // 中间态，文件尚未上报成功
+			UpdatedAt: coremodel.Time(time.Date(2026, 6, 1, 17, 35, 21, 0, time.UTC)),
+		},
+		TaskName: "log-task",
+	}
+	cache := map[uuid.UUID]*coremodel.Device{
+		sub.DeviceID: {ID: sub.DeviceID, SerialNumber: "SN-195A"},
+	}
+	item, err := svc.mapDeviceItem(context.Background(), catalog, sub, parent, cache)
+	require.NoError(t, err)
+	assert.NotEqual(t, "ended", item.Status, "前置：该子任务尚未到成功终态")
+	assert.Empty(t, item.LastReportAt, "未到成功终态时上报时间必须为空")
+}
+
+// 死判 filled-on-success：上报成功终态，上报时间被填为 updated_at。
+func TestMapDeviceItem_ReportTime_FilledOnSuccess(t *testing.T) {
+	svc := newServiceForMap(t)
+	catalog := mustCatalog(t, "RUNTIME_LOG_COLLECT")
+	parent := &software.UpgradeTask{
+		ID:       uuid.New(),
+		TaskName: "log-task",
+		TaskType: software.TaskTypeLogCollect,
+	}
+	reportedAt := time.Date(2026, 6, 1, 17, 40, 9, 0, time.UTC)
+	sub := software.UpgradeSubTaskWithTaskName{
+		UpgradeSubTask: software.UpgradeSubTask{
+			ID:        uuid.New(),
+			TaskID:    parent.ID,
+			DeviceID:  uuid.New(),
+			DeviceSN:  "SN-195B",
+			Status:    software.UpgradeCompleted, // 文件上报成功终态
+			UpdatedAt: coremodel.Time(reportedAt),
+		},
+		TaskName: "log-task",
+	}
+	cache := map[uuid.UUID]*coremodel.Device{
+		sub.DeviceID: {ID: sub.DeviceID, SerialNumber: "SN-195B"},
+	}
+	item, err := svc.mapDeviceItem(context.Background(), catalog, sub, parent, cache)
+	require.NoError(t, err)
+	assert.Equal(t, "ended", item.Status, "前置：该子任务已到成功终态")
+	assert.Equal(t, reportedAt.Format(time.RFC3339), item.LastReportAt, "成功终态时上报时间应填为 updated_at")
 }
