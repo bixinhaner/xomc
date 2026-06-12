@@ -363,3 +363,113 @@ func TestServeHTTP_PassiveCapture_NotWhitelisted_ZeroCaptured(t *testing.T) {
 	assert.Equal(t, 0, len(sink.snapshot()),
 		"未起跟踪的设备周期 Inform 不应被捕获（按设备+窗口过滤，非无差别全抓）")
 }
+
+// TestServeHTTP_PassiveCapture_PeriodicInform_CapturedEvenWhenRateLimited：
+// 限流提前返回路径的回归 —— 跟踪窗口内的周期 Inform 即便被每设备限流器拒绝
+// （handler.go ~377-382，返回 503、根本没走到准入/建会话）也必须被捕获。
+// 这与准入拒绝路径互补，共同证明被动抓覆盖 handleInform 的所有早返回分支，
+// 而不仅是准入分支。
+func TestServeHTTP_PassiveCapture_PeriodicInform_CapturedEvenWhenRateLimited(t *testing.T) {
+	sink := &stubTraceSink{}
+	// 准入充足（1000 槽）→ 确保 503 来自限流而非准入，隔离被测路径。
+	h := newPassiveCaptureHandler(t, sink, acsHInformPeriodicSN, 1000)
+	// 配置一个会拒绝的限流器：每分钟 1 次、burst 1（构造器会把 <=0 钳到安全默认，
+	// 故无法直接给 burst 0）。先手动消费掉这唯一一个 token，使本设备下一次 Allow 必拒。
+	h.rateLimiter = NewDeviceRateLimiter(1, 1, 10000, zap.NewNop())
+	require.True(t, h.rateLimiter.Allow(acsHInformPeriodicSN),
+		"预消费：首个 burst token 应放行（之后才进入拒绝态）")
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(acsHInformPeriodicXML))
+	req.RemoteAddr = "10.0.0.11:5000"
+	h.ServeHTTP(w, req)
+
+	// 限流命中 → 503，确认确实走了"会话没建成"的限流提前返回路径。
+	require.Equal(t, http.StatusServiceUnavailable, w.Code,
+		"令牌已耗尽，周期 Inform 应被限流拒绝（证明走的是限流早返回路径）")
+
+	msgs := sink.snapshot()
+	require.NotEmpty(t, msgs,
+		"被限流拒绝的周期 Inform 仍必须被捕获，证明被动抓存活于限流路径（issue #186）")
+
+	// 至少有一条 IN 方向、RPC 方法为 Inform、SN 匹配。
+	var capturedInform bool
+	for _, m := range msgs {
+		if m.Direction == trace.DirectionIn && m.RPCMethod == "Inform" {
+			capturedInform = true
+			assert.Equal(t, acsHInformPeriodicSN, m.DeviceSN,
+				"捕获的入向 Inform 的 SN 必须与上报设备一致")
+		}
+	}
+	assert.True(t, capturedInform,
+		"限流路径下捕获结果里仍应含 RPC 方法=Inform 的入向报文")
+}
+
+// TestServeHTTP_PassiveCapture_MalformedInform_ZeroCaptured：解析失败防泄漏回归 ——
+// DecodeInform 在写入跟踪字段（SN/方法/CwmpID）之前就失败返回 400 时，
+// 不能向白名单查询泄漏空 SN，捕获条数必须为 0。
+// 否则空 SN 命中"全设备"白名单逻辑会把垃圾报文误抓入库。
+func TestServeHTTP_PassiveCapture_MalformedInform_ZeroCaptured(t *testing.T) {
+	sink := &stubTraceSink{}
+	// 把空 SN（""）加入白名单，模拟"空 SN 也命中"的最坏情形：
+	// 若解析失败仍以空 SN 走捕获，这条白名单会让它被误抓——必须证明不会发生。
+	h := newPassiveCaptureHandler(t, sink, "", 1000)
+	wl := trace.NewWhitelistCache(nil, trace.DefaultWhitelistConfig(), zap.NewNop())
+	wl.Add("", uuid.New()) // 故意把空 SN 起跟踪
+	h.traceWhitelist = wl
+
+	// 看似 Inform 但 body 在 DecodeInform 阶段即失败（标签未闭合 / 结构破损）。
+	const malformedInformXML = `<?xml version="1.0"?><soap:Envelope ` +
+		`xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">` +
+		`<soap:Body><cwmp:Inform xmlns:cwmp="urn:dslforum-org:cwmp-1-0">` +
+		`<broken></cwmp:Inform></soap:Body></soap:Envelope>`
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(malformedInformXML))
+	req.RemoteAddr = "10.0.0.12:5000"
+	h.ServeHTTP(w, req)
+
+	// 解析失败 → 400，确认走的是 entry-set 之前的失败返回。
+	require.Equal(t, http.StatusBadRequest, w.Code,
+		"破损的 Inform body 应在 DecodeInform 阶段失败返回 400")
+
+	assert.Equal(t, 0, len(sink.snapshot()),
+		"解析失败时不得以空 SN 走捕获旁路（防空 SN 命中白名单泄漏）")
+}
+
+// TestServeHTTP_PassiveCapture_AdmissionDenied_ExactCaptureCount：捕获条数钉死 ——
+// 一次 HTTP 事务（含准入拒绝的早返回路径）应恰好产生 2 条捕获：1 条入向（IN/Inform）
+// + 1 条出向（OUT，承载 503 错误响应体）。maybeCaptureTrace 对每个事务固定投递
+// in/out 一对，与 httpStatus 无关；既有的 *_CapturedEvenWhenAdmissionDenied 只断言
+// NotEmpty，无法捕捉意外双投（如 defer 注册两次会变成 4 条）。本测试用精确计数钉死，
+// 任何偏离 2 即说明捕获旁路被重复触发或漏触发。
+func TestServeHTTP_PassiveCapture_AdmissionDenied_ExactCaptureCount(t *testing.T) {
+	sink := &stubTraceSink{}
+	h := newPassiveCaptureHandler(t, sink, acsHInformPeriodicSN, 1)
+	require.True(t, h.admission.Acquire(context.Background(), "pre-occupied-session"),
+		"预占满唯一准入槽，迫使后续 Inform 在建会话前被拒")
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(acsHInformPeriodicXML))
+	req.RemoteAddr = "10.0.0.13:5000"
+	h.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusServiceUnavailable, w.Code,
+		"准入已满，周期 Inform 应被拒绝（走无会话的提前返回路径）")
+
+	msgs := sink.snapshot()
+	// 一个 HTTP 事务恰好 1 入 1 出；多于 2 = 双投，少于 2 = 漏投。
+	require.Len(t, msgs, 2,
+		"一次事务应恰好捕获 1 入 1 出，不得双投（防 defer 重复注册）或漏投")
+
+	in := msgs[0]
+	assert.Equal(t, trace.DirectionIn, in.Direction)
+	assert.Equal(t, "Inform", in.RPCMethod)
+	assert.Equal(t, acsHInformPeriodicSN, in.DeviceSN)
+
+	out := msgs[1]
+	assert.Equal(t, trace.DirectionOut, out.Direction)
+	assert.Equal(t, acsHInformPeriodicSN, out.DeviceSN)
+	assert.Equal(t, http.StatusServiceUnavailable, out.HTTPStatus,
+		"出向消息应承载准入拒绝的 503 状态码")
+}
