@@ -553,3 +553,53 @@ export interface AlarmHeatmapBySeverity {
   /** 热度图数据 */
   data: HeatmapData;
 }
+
+// ============================================================================
+// Dashboard KPI 动态定义（issue #213 Phase1 / #227）
+//
+// 后端 GET /dashboard/kpi/definitions 返回首页全部 KPI 的定义：可读 symbolic key +
+// 后端 K 编号 + 中文名 + 单位，按制式/Panel 分组。前端据此动态加载指标列表；取数仍用
+// symbolic key（后端别名层翻成 K 编号查 pm_metrics、按 symbolic key 回填）。
+//
+// 字段为 snake_case：HTTP 响应拦截器只解信封、不做 camelCase 转换，故与后端 JSON 一致。
+// ============================================================================
+
+/**
+ * 单个 KPI 的完整定义（一条 symbolic key）。
+ */
+export interface KPIDefinitionItem {
+  /** 前端可读 symbolic key（取数时传给后端，经别名层翻成 K 编号）。 */
+  key: string;
+  /** 指标库编号（pm_metrics.metric_path 落库值）；none 项为空字符串。 */
+  k_code: string;
+  /** 中文名（来自 indicator 库；缺则空）。 */
+  cn_name: string;
+  /** 单位（如 % / Mbps / MByte；缺则空）。 */
+  unit: string;
+  /** Dashboard Panel 归类（traffic / availability / utilization / accessibility / retainability / mobility）。 */
+  panel: string;
+  /** 该映射待领域复核（medium 置信度或 none 硬缺口）。 */
+  needs_review: boolean;
+  /** 库内是否有对应 KPI（false = none 项，前端可置灰/隐藏）。 */
+  available: boolean;
+}
+
+/**
+ * 单个制式的 KPI 定义集合。
+ */
+export interface KPITechDefinitions {
+  /** 制式：lte / nr / gsm。 */
+  tech: string;
+  /** 该制式全部 KPI 定义（按 Panel 归并）。 */
+  items: KPIDefinitionItem[];
+}
+
+/**
+ * GET /dashboard/kpi/definitions 的响应体。
+ */
+export interface KPIDefinitionsResponse {
+  /** 按制式分组的 KPI 定义。 */
+  technologies: KPITechDefinitions[];
+  /** KPI 定义总条数。 */
+  total: number;
+}

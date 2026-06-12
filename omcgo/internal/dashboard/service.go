@@ -14,6 +14,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/internal/pm/indicator"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
 	"github.com/omcgo/omcgo/internal/topology"
 	"go.uber.org/zap"
@@ -139,6 +140,10 @@ type Service struct {
 	pgPool        *pgxpool.Pool
 	tsPool        *pgxpool.Pool
 	groupRepo     topology.DeviceGroupRepository
+	// indicatorRepo 复用 PM 的 perf_indicators_{enb,gsm,gnb} 数据源（cnName / unit），
+	// 给 GetKPIDefinitions（issue #213 Phase1）按别名表的 K 编号反查中文名与单位用。
+	// 可能为 nil（测试 / 退化场景）：此时 GetKPIDefinitions 仅返回别名表静态元数据，不富化。
+	indicatorRepo indicator.IndicatorRepository
 	logger        *zap.Logger
 }
 
@@ -150,6 +155,7 @@ func NewService(
 	pgPool *pgxpool.Pool,
 	tsPool *pgxpool.Pool,
 	groupRepo topology.DeviceGroupRepository,
+	indicatorRepo indicator.IndicatorRepository,
 	logger *zap.Logger,
 ) *Service {
 	return &Service{
@@ -159,6 +165,7 @@ func NewService(
 		pgPool:        pgPool,
 		tsPool:        tsPool,
 		groupRepo:     groupRepo,
+		indicatorRepo: indicatorRepo,
 		logger:        logger.Named("dashboard"),
 	}
 }
@@ -861,6 +868,12 @@ func (s *Service) GetAlarmTypePie(ctx context.Context) ([]AlarmTypePieEntry, err
 }
 
 // GetKPITimeSeries returns time-series data for multiple KPI names within a time range.
+//
+// issue #227：前端传入的是可读 symbolic key（如 LTE_PDCP_VOLUME_DL），但 pm_metrics
+// .metric_path 存的是 K 编号（如 K900010015）。入口先经别名层（kpi_alias.go）把 symbolic
+// 翻成 K 编号查询，命中后按原 symbolic key 回填响应——前端继续用可读 key、无需感知 K 编号。
+// 未登记的 key 原样透传（兼容直接传 K 编号 / 非 Dashboard 调用方）；库内无对应 KPI 的
+// none 项（如 LTE_CELL_AVAILABLE）返回空序列。
 func (s *Service) GetKPITimeSeries(ctx context.Context, kpiNames []string, startTime, endTime time.Time) (KPITimeSeriesResponse, error) {
 	result := make(KPITimeSeriesResponse, len(kpiNames))
 
@@ -868,9 +881,16 @@ func (s *Service) GetKPITimeSeries(ctx context.Context, kpiNames []string, start
 		return result, nil
 	}
 
-	// Initialize empty slices for all requested names
+	// Initialize empty slices for all requested names（含 none 项 → 始终返回空序列而非缺键）。
 	for _, name := range kpiNames {
 		result[name] = []KPITimeSeriesEntry{}
+	}
+
+	// 别名解析：symbolic → K 编号（去重），并保留 K编号→symbolic 反查表用于回填。
+	kcodes, reverse := resolveKPIAliases(kpiNames)
+	if len(kcodes) == 0 {
+		// 全部是 none 项或解析后无可查 K 编号 → 直接返回（全空序列）。
+		return result, nil
 	}
 
 	// T-0164-P3 / G3：kpi_values 表合入 pm_metrics（metric_type='kpi'），列改名
@@ -878,7 +898,7 @@ func (s *Service) GetKPITimeSeries(ctx context.Context, kpiNames []string, start
 	query, args, err := storage.Psql.Select("metric_path", "time", "metric_value").
 		From("pm_metrics").
 		Where(sq.Eq{"metric_type": "kpi"}).
-		Where("metric_path = ANY(?)", kpiNames).
+		Where("metric_path = ANY(?)", kcodes).
 		Where(sq.GtOrEq{"time": startTime}).
 		Where(sq.LtOrEq{"time": endTime}).
 		OrderBy("metric_path", "time ASC").
@@ -895,16 +915,20 @@ func (s *Service) GetKPITimeSeries(ctx context.Context, kpiNames []string, start
 	defer rows.Close()
 
 	for rows.Next() {
-		var kpiName string
+		var kcode string
 		var t time.Time
 		var value float64
-		if err := rows.Scan(&kpiName, &t, &value); err != nil {
+		if err := rows.Scan(&kcode, &t, &value); err != nil {
 			return nil, fmt.Errorf("scan kpi time series row: %w", err)
 		}
-		result[kpiName] = append(result[kpiName], KPITimeSeriesEntry{
+		entry := KPITimeSeriesEntry{
 			Time:  t.Format(time.RFC3339),
 			Value: value,
-		})
+		}
+		// 按原 symbolic key 回填（一个 K 编号可能被多个 symbolic 请求引用）。
+		for _, symbolic := range reverse[kcode] {
+			result[symbolic] = append(result[symbolic], entry)
+		}
 	}
 
 	return result, nil

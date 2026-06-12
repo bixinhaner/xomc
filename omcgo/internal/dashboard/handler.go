@@ -44,6 +44,8 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		dashboard.PUT("/widgets", h.SaveWidgets)
 		dashboard.GET("/alarm-type-pie", h.GetAlarmTypePie)
 		dashboard.GET("/kpi-time-series", h.GetKPITimeSeries)
+		// issue #213 Phase1：KPI 定义动态化（symbolic key + K 编号 + 中文名 + 单位，按制式/Panel 分组）
+		dashboard.GET("/kpi/definitions", h.GetKPIDefinitions)
 		// 告警统计新增端点
 		dashboard.GET("/alarm-efficiency", h.GetAlarmEfficiency)
 		dashboard.GET("/alarm-heatmap", h.GetAlarmHeatmap)
@@ -241,6 +243,19 @@ func (h *Handler) GetKPITimeSeries(c *gin.Context) {
 		return
 	}
 	response.OK(c, result)
+}
+
+// GetKPIDefinitions handles GET /api/v1/dashboard/kpi/definitions.
+//
+// issue #213 Phase1：返回 Dashboard 首页全部 KPI 的动态定义（symbolic key + K 编号 +
+// 中文名 + 单位，按制式 / Panel 分组），供前端动态加载指标列表。
+func (h *Handler) GetKPIDefinitions(c *gin.Context) {
+	defs, err := h.service.GetKPIDefinitions(c.Request.Context())
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	response.OK(c, defs)
 }
 
 // getUserID extracts the authenticated user's UUID from the Gin context.

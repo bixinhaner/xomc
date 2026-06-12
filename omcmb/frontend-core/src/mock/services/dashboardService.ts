@@ -1,6 +1,70 @@
 import { mockDashboardSummary, mockDashboardChartData, mockDashboardWidgets } from '../data/dashboard';
 import type { DashboardSummary, DashboardChartData, KPITimeSeriesPoint } from '../data/dashboard';
+import type {
+  KPIDefinitionsResponse,
+  KPIDefinitionItem,
+  KPITechDefinitions,
+} from '../../types/dashboard';
 import { delay } from '../utils';
+
+// issue #213 Phase1：Dashboard KPI 动态定义 Mock 数据。
+// 与对照表（symbolic key → K 编号 → 中文名 → 单位 → Panel）一致；none 项 available=false。
+// 元组：[key, k_code, cn_name, unit, panel, needs_review, available]
+type KpiDefTuple = [string, string, string, string, string, boolean, boolean];
+const KPI_DEF_TUPLES: Record<string, KpiDefTuple[]> = {
+  lte: [
+    ['LTE_PDCP_VOLUME_DL', 'K900010015', '下行数据业务流量', 'MByte', 'traffic', false, true],
+    ['LTE_PDCP_VOLUME_UL', 'K900010016', '上行数据业务流量', 'MByte', 'traffic', false, true],
+    ['LTE_PDCP_RATE_DL', 'K900010040', 'UE下行速率', 'Mbps', 'traffic', false, true],
+    ['LTE_PDCP_RATE_UL', 'K900010041', 'UE上行速率', 'Mbps', 'traffic', false, true],
+    ['LTE_CELL_AVAILABLE', '', '小区可用率', '%', 'availability', true, false],
+    ['LTE_PRB_UTIL_DL', 'K900010014', '下行PRB平均占用率', '%', 'utilization', false, true],
+    ['LTE_PRB_UTIL_UL', 'K900010013', '上行PRB平均占用率', '%', 'utilization', false, true],
+    ['WIRELESS_SETUP_SR', 'K900010006', '无线初始连接成功率', '%', 'accessibility', true, true],
+    ['RRC_CONN_SETUP_SR', 'K900010002', 'RRC连接建立成功率', '%', 'accessibility', false, true],
+    ['ERAB_SETUP_SR', 'K900010005', 'E-RAB建立成功率', '%', 'accessibility', false, true],
+    ['CSFB_SR', 'K900010029', 'CSFB成功率', '%', 'accessibility', false, true],
+    ['ERAB_DROP_RATE', 'K900010027', 'E-RAB掉线率', '%', 'retainability', false, true],
+    ['HO_INTRA_ENB_OUT_SR', 'K900010017', '同频切换成功率-切出', '%', 'mobility', true, true],
+    ['HO_INTRA_ENB_IN_SR', 'K900010022', '同频切换成功率-切入', '%', 'mobility', true, true],
+    ['HO_INTER_ENB_OUT_SR', 'K900010021', 'eNB间切换成功率-切出', '%', 'mobility', false, true],
+    ['HO_INTER_ENB_IN_SR', 'K900010026', 'eNB间切换成功率-切入', '%', 'mobility', false, true],
+  ],
+  nr: [
+    ['NR_PDCP_VOLUME_DL', 'KGNB0511', 'PDCP下行业务字节数', 'MByte', 'traffic', true, true],
+    ['NR_PDCP_VOLUME_UL', 'KGNB0510', 'PDCP上行业务字节数', 'MByte', 'traffic', true, true],
+    ['NR_PDCP_RATE_DL', 'KGNB0517', '下行用户平均速率', 'Mbps', 'traffic', false, true],
+    ['NR_PDCP_RATE_UL', 'KGNB0516', '上行用户平均速率', 'Mbps', 'traffic', false, true],
+    ['NR_PRB_UTIL_DL', 'KGNB0506', '下行PRB平均利用率', '%', 'utilization', false, true],
+    ['NR_PRB_UTIL_UL', 'KGNB0505', '上行PRB平均利用率', '%', 'utilization', false, true],
+  ],
+  gsm: [
+    ['GSM_CALL_SETUP_SR', 'KGSM0102', '电话成功率', '%', 'accessibility', false, true],
+    ['GSM_CALL_DROP_RATE', 'KGSM0103', '电话掉线率', '%', 'retainability', false, true],
+    ['GSM_HO_SR', 'KGSM0101', 'Handover切换成功率', '%', 'mobility', false, true],
+  ],
+};
+
+const mockKPIDefinitions: KPIDefinitionsResponse = (() => {
+  const technologies: KPITechDefinitions[] = Object.entries(KPI_DEF_TUPLES).map(
+    ([tech, tuples]) => ({
+      tech,
+      items: tuples.map<KPIDefinitionItem>(
+        ([key, kCode, cnName, unit, panel, needsReview, available]) => ({
+          key,
+          k_code: kCode,
+          cn_name: cnName,
+          unit,
+          panel,
+          needs_review: needsReview,
+          available,
+        }),
+      ),
+    }),
+  );
+  const total = technologies.reduce((sum, t) => sum + t.items.length, 0);
+  return { technologies, total };
+})();
 
 // KPI 配置（用于动态生成数据）
 const KPI_CONFIG: Record<string, { base: number; variance: number }> = {
@@ -157,6 +221,14 @@ export const dashboardService = {
     }
 
     return result;
+  },
+
+  // issue #213 Phase1：Dashboard KPI 动态定义（Mock）。
+  // 真实数据源是后端别名表 + indicator 库；Mock 给一份与对照表一致的最小定义集，
+  // 让 dev:mock 下首页能动态加载指标列表。snake_case 与真实 API / 后端 JSON 对齐。
+  async getKPIDefinitions(): Promise<KPIDefinitionsResponse> {
+    await delay(60, 120);
+    return mockKPIDefinitions;
   },
 
   async getDeviceStatusByType(): Promise<Record<string, { online: number; offline: number; alarm: number }>> {

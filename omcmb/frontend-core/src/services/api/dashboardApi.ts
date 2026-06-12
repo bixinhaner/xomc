@@ -7,6 +7,7 @@ import type {
   HeatmapData,
   DayOfWeekData,
   AlarmHeatmapBySeverity,
+  KPIDefinitionsResponse,
 } from '../../types/dashboard';
 import type { DashboardChartData } from '../../mock/data/dashboard';
 
@@ -417,6 +418,20 @@ export const dashboardApi = {
       }
     );
     return mapKPITimeSeries(data);
+  },
+
+  /**
+   * 获取 Dashboard KPI 动态定义（issue #213 Phase1）
+   * GET /dashboard/kpi/definitions
+   *
+   * 返回首页全部 KPI 的定义（symbolic key + K 编号 + 中文名 + 单位，按制式/Panel 分组），
+   * 供前端动态加载指标列表。响应为 snake_case（拦截器不 camelize），与后端 JSON 一致。
+   */
+  async getKPIDefinitions(): Promise<KPIDefinitionsResponse> {
+    const { data } = await http.get<KPIDefinitionsResponse>(
+      '/dashboard/kpi/definitions'
+    );
+    return data;
   },
 
   /**

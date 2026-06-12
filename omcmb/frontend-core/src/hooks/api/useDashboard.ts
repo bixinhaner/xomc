@@ -106,6 +106,21 @@ export function useRegionStats() {
 }
 
 /**
+ * 获取 Dashboard KPI 动态定义（issue #213 Phase1）
+ *
+ * 返回首页全部 KPI 的定义（symbolic key + K 编号 + 中文名 + 单位，按制式/Panel 分组），
+ * 供前端动态加载指标列表。定义相对静态，缓存较久、不轮询。
+ */
+export function useKPIDefinitions(enabled = true) {
+  return useQuery({
+    queryKey: ['dashboard', 'kpi-definitions'],
+    queryFn: () => api.getKPIDefinitions(),
+    enabled,
+    staleTime: 5 * 60 * 1000, // 定义不常变，缓存 5 分钟
+  });
+}
+
+/**
  * 获取 KPI 时序数据
  * @param params 包含 kpi_names, start_time, end_time
  * @param enabled 是否启用查询

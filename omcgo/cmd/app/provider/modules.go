@@ -44,6 +44,7 @@ import (
 	"github.com/omcgo/omcgo/internal/notification"
 	"github.com/omcgo/omcgo/internal/ops"
 	"github.com/omcgo/omcgo/internal/pm"
+	"github.com/omcgo/omcgo/internal/pm/indicator"
 	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/internal/provision"
 	"github.com/omcgo/omcgo/internal/rebootrecord"
@@ -1178,7 +1179,13 @@ func initDashboardModule(c *Container) error {
 	logger := c.Logger.Named("dashboard")
 
 	// KPI/时序库物理分离：alarms_history / alarm_efficiency_metrics matview 在时序库（TsPool），新增 tsPool 入参。
-	dashboardService := dashboard.NewService(c.DeviceService, c.AlarmPgStore, c.PMKPIRepo, c.PgPool, c.TsPool, c.GroupRepo, logger)
+	// issue #213 Phase1：注入 PM 的 indicator 仓库（perf_indicators_{enb,gsm,gnb}），
+	// 供 GetKPIDefinitions 按别名表 K 编号反查 cnName / unit。dashboard 依赖 pm，pmHandlerDeps 此时已就绪。
+	var dashIndicatorRepo indicator.IndicatorRepository
+	if c.pmHandlerDeps != nil {
+		dashIndicatorRepo = c.pmHandlerDeps.pmIndicatorRepo
+	}
+	dashboardService := dashboard.NewService(c.DeviceService, c.AlarmPgStore, c.PMKPIRepo, c.PgPool, c.TsPool, c.GroupRepo, dashIndicatorRepo, logger)
 	dashboardHandler := dashboard.NewHandler(dashboardService)
 
 	c.miscDeps.dashboardHandler = dashboardHandler
