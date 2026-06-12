@@ -56,7 +56,7 @@ func (s *PgAlarmStore) GetActiveByID(ctx context.Context, id uuid.UUID) (*model.
 func (s *PgAlarmStore) GetHistoryByID(ctx context.Context, id uuid.UUID) (*model.Alarm, error) {
 	qb := storage.Psql.Select(
 		"alarms_history.time", "alarms_history.alarm_id", "alarms_history.device_id", "alarms_history.device_sn", "alarms_history.carrier", "alarms_history.severity",
-		"alarms_history.alarm_type", "alarms_history.alarm_identifier", "alarms_history.description", "alarms_history.status", "alarms_history.raised_at",
+		"COALESCE(alarms_history.alarm_type, '') AS alarm_type", "alarms_history.alarm_identifier", "COALESCE(alarms_history.description, '') AS description", "alarms_history.status", "alarms_history.raised_at",
 		"alarms_history.acknowledged_at", "alarms_history.cleared_at", "alarms_history.acknowledged_by", "alarms_history.ack_note",
 		"alarms_history.additional_info",
 		"alarms_history.device_name", "COALESCE(alarms_history.technology, d.technology) AS technology", "alarms_history.alarm_source", "alarms_history.event_type",
@@ -206,7 +206,7 @@ func (s *PgAlarmStore) ListHistory(ctx context.Context, filter AlarmFilter) (*mo
 	// 退回设备上报原文（COALESCE 兜底）；其余列与列表 scan 顺序保持不变。
 	qb := storage.Psql.Select(
 		"alarms_history.time", "alarms_history.alarm_id", "alarms_history.device_id", "alarms_history.device_sn", "alarms_history.carrier", "alarms_history.severity",
-		"alarms_history.alarm_type", "alarms_history.alarm_identifier",
+		"COALESCE(alarms_history.alarm_type, '') AS alarm_type", "alarms_history.alarm_identifier",
 		localizedAlarmNameExpr(appcontext.GetLocale(ctx), "alarms_history"),
 		"alarms_history.status", "alarms_history.raised_at",
 		"alarms_history.acknowledged_at", "alarms_history.cleared_at", "alarms_history.acknowledged_by", "alarms_history.ack_note",
@@ -374,10 +374,12 @@ func activeAlarmSelect() squirrel.SelectBuilder {
 // 别名固定为 description，使列表 scan 顺序与既有 scanAlarmRow / ListHistory 解码完全一致。
 func localizedAlarmNameExpr(loc appcontext.Locale, table string) string {
 	descCol := table + ".description"
+	// 末尾 '' 兜底：字典三源（ad.en_name/ad.cn_name/原文 description）若全 NULL，
+	// 整体退回空串，避免 NULL 扫进非空 string 字段 model.Alarm.Description（issue：历史告警 500）。
 	if loc == appcontext.LocaleEN {
-		return fmt.Sprintf("COALESCE(NULLIF(ad.en_name, ''), NULLIF(ad.cn_name, ''), %s) AS description", descCol)
+		return fmt.Sprintf("COALESCE(NULLIF(ad.en_name, ''), NULLIF(ad.cn_name, ''), %s, '') AS description", descCol)
 	}
-	return fmt.Sprintf("COALESCE(NULLIF(ad.cn_name, ''), NULLIF(ad.en_name, ''), %s) AS description", descCol)
+	return fmt.Sprintf("COALESCE(NULLIF(ad.cn_name, ''), NULLIF(ad.en_name, ''), %s, '') AS description", descCol)
 }
 
 // activeAlarmListSelect 构建活跃告警**列表**查询，description 列按 locale 取字典本地化名
