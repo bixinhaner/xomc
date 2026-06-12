@@ -64,6 +64,11 @@ import type {
   UnifiedFileTransferTaskType,
 } from '@core/types/unifiedFileTransfer';
 import {
+  mergeCandidatesIntoMap,
+  removeFromMap,
+  pruneSelectionForProductClass,
+} from './deviceSelection';
+import {
   buildCategoryTabs,
   getExecutionModeOptions,
   buildDefaultUfteTaskName,
@@ -352,26 +357,34 @@ export default function FileTransferCenter() {
   // #215: 当前页拉到的候选设备并入 selectedDeviceMap，只补充设备对象信息，
   // 不改 selectedDrawerDeviceIds —— 翻页只是让"已选清单"能补齐其它页设备的展示数据。
   useEffect(() => {
-    if (drawerDeviceCandidates.length === 0) {
-      return;
-    }
-    setSelectedDeviceMap((prev) => {
-      let changed = false;
-      const next = { ...prev };
-      for (const item of drawerDeviceCandidates) {
-        if (next[item.id] !== item) {
-          next[item.id] = item;
-          changed = true;
-        }
-      }
-      return changed ? next : prev;
-    });
+    setSelectedDeviceMap((prev) => mergeCandidatesIntoMap(prev, drawerDeviceCandidates));
   }, [drawerDeviceCandidates]);
 
   // #215: 过滤条件（分类/任务类型/产品类型/关键字）变化时，候选集变了，重置回第 1 页。
   useEffect(() => {
     setDrawerDevicePage(1);
   }, [selectedCategory, drawerTaskType?.typeCode, selectedTypeCode, drawerProductClass, drawerDeviceKeyword]);
+
+  // #215 回归守护：固件升级类任务是「按机型」的，换 productClass 筛选后，旧的不同
+  // 机型已选设备必须剔除，否则升级会下发到不兼容机型。以 selectedDeviceMap 判定
+  // （非当前页候选），翻页不会误删其它页合法已选。仅在 class / 任务类型变化时触发。
+  useEffect(() => {
+    if (!needsFirmwareSelection(drawerTaskType) || !drawerProductClass) {
+      return;
+    }
+    const { kept, droppedCount } = pruneSelectionForProductClass(
+      selectedDrawerDeviceIds,
+      selectedDeviceMap,
+      drawerProductClass,
+    );
+    if (droppedCount > 0) {
+      setSelectedDrawerDeviceIds(kept);
+      void message.warning(t('ufte.msg.selectionPrunedByClass', { count: droppedCount }));
+    }
+    // 只在 productClass / 任务类型变化时校正；selectedDrawerDeviceIds/Map 经闭包读取，
+    // 换 class 当下旧设备对象仍在 map 中，判定有效。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drawerProductClass, drawerTaskType]);
 
   const firmwareCandidates = useMemo(
     () => buildFirmwareCandidateList(firmwareData?.items ?? []),
@@ -657,14 +670,7 @@ export default function FileTransferCenter() {
   // #215: 从已选清单移除一台设备 —— 同时从 id 列表与设备 Map 清掉。
   const handleRemoveSelectedDevice = (deviceId: string) => {
     setSelectedDrawerDeviceIds((prev) => prev.filter((id) => id !== deviceId));
-    setSelectedDeviceMap((prev) => {
-      if (!(deviceId in prev)) {
-        return prev;
-      }
-      const next = { ...prev };
-      delete next[deviceId];
-      return next;
-    });
+    setSelectedDeviceMap((prev) => removeFromMap(prev, deviceId));
   };
 
   // 设备列表导出 CSV — 调后端 /ufte/devices/export 端点：复用 ListDevices

@@ -4349,6 +4349,7 @@ const messages: Record<string, string> = {
   'ufte.form.deviceTotal':                    '共 {count} 台',
   'ufte.selectedModal.title':                 '已选设备（{count} 台）',
   'ufte.selectedModal.empty':                 '暂无已选设备',
+  'ufte.msg.selectionPrunedByClass':          '已移除 {count} 台不匹配所选产品类型的设备',
   'ufte.form.licenseSource':                  'License 文件来源（按设备最新 license）',
   'ufte.form.openLicenseManager':             '打开 License 文件管理',
   'ufte.form.licenseSourceHint':              '每台设备升级时使用各自最新一份 license；缺失则整批拒绝。点击右上方「打开 License 文件管理」可上传新文件、删除旧文件。',
