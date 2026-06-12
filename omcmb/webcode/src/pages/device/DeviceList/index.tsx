@@ -1034,16 +1034,6 @@ export default function DeviceList() {
         // 原始 JSP: product 字段 — PM-B4860/QAFA/BaiBNX/BSC/BTS 等
         render: (_val, record) => record.productClass || '-',
       },
-      {
-        key: 'platformType',
-        title: t('device.platformType'),
-        dataIndex: 'platformType',
-        width: 140,
-        hidden: true,
-        group: 'common',
-        // 原始 JSP: platformType 字段 — 影响多小区/CA/DC 行为
-        render: (_val, record) => record.platformType || '-',
-      },
       { key: 'softwareVersion', title: t('device.softwareVersion'), dataIndex: 'softwareVersion', width: 140, ellipsis: true, group: 'common' },
       {
         key: 'ipAddress',
@@ -1117,17 +1107,16 @@ export default function DeviceList() {
         dataIndex: 'ueCount',
         width: 80,
         group: 'common',
-        // JSP 行为: eNB >0 且非 CA 站可点击(跳转 UE 详情页)；gNB/GSM 不可点击
+        // JSP 行为: eNB >0 可点击(跳转 UE 详情页)；gNB/GSM 不可点击
         render: (_val, record) => {
           const v = record.ueCount;
           if (v === -1 || v === null || v === undefined) return '--';
           if (v === 0) return '0';
-          // 仅 eNB 且非 CA 站支持点击跳转 UE 详情页
+          // 仅 eNB 支持点击跳转 UE 详情页
           const isEnb = record.networkType === 'eNB';
-          const isCaSite = record.platformType?.includes('_CA');
-          if (isEnb && !isCaSite) {
+          if (isEnb) {
             return (
-              <Link onClick={() => navigate(`/device/ue-detail/${record.sn}?platformType=${encodeURIComponent(record.platformType ?? '')}&name=${encodeURIComponent(record.name || record.sn)}&ueCount=${record.ueCount}`)}>
+              <Link onClick={() => navigate(`/device/ue-detail/${record.sn}?name=${encodeURIComponent(record.name || record.sn)}&ueCount=${record.ueCount}`)}>
                 {v}
               </Link>
             );

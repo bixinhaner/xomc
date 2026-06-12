@@ -12,13 +12,6 @@ const productModels: Record<string, string[]> = {
   GSM: ['BSC', 'BTS'],
 };
 
-// 平台类型 — 与原始 JSP platformType 字段对应（影响多小区/CA/DC 行为）
-const platformTypes: Record<string, string[]> = {
-  eNB: ['Intel_CR', 'Intel_CR_CA', 'Intel_CR_TC', 'Intel_CR_SC', 'Intel_CR_DC', 'MLN', 'MLN_CA', 'MLN_SC', 'MLN_DC', 'QA_436Q_CA', 'QA_436Q_SC'],
-  gNB: [''],
-  GSM: ['Intel_CR_CA', 'MLN_CA', 'QA_436Q_CA', ''],
-};
-
 const deviceModels: Record<string, string[]> = {
   eNB: ['BBU3910', 'DBS3900', 'BTS3900', 'eNodeB3900', 'ZXSDR B8200'],
   gNB: ['BBU5900', 'AAU5239', 'RRU5258', 'ZXRAN B8300', 'AIR6449'],
@@ -79,7 +72,6 @@ function generateDevice(index: number): Device {
   const isNR = type === 'gNB';
   const isLTE = type === 'eNB';
   const productModel = pickRandom(productModels[type]);
-  const platformType = pickRandom(platformTypes[type]);
   const enbIdVal = isLTE ? String(10000 + index) : '';
   const gnbIdVal = isNR ? String(50000 + index) : '';
   const pciVal = String(Math.floor(Math.random() * 504));
@@ -113,7 +105,6 @@ function generateDevice(index: number): Device {
     carrier: pickRandom(['cmcc', 'ctcc', 'cucc']),
 
     // 监控扩展字段
-    platformType: platformType,
     hostName: `${type}-${city.name}-${String(index + 1).padStart(3, '0')}`,
     productName: `${vendor} ${model}`,
     firmwareVersion: pickRandom(firmwareVersions),
@@ -269,7 +260,6 @@ const beijingDevices: Device[] = Array.from({ length: 50 }, (_, i) => {
   const isNR = type === 'gNB';
   const isLTE = type === 'eNB';
   const productModel = pickRandom(productModels[type]);
-  const platformType = pickRandom(platformTypes[type]);
   const enbIdVal = isLTE ? String(10000 + index) : '';
   const gnbIdVal = isNR ? String(50000 + index) : '';
   const pciVal = String(Math.floor(Math.random() * 504));
@@ -303,7 +293,6 @@ const beijingDevices: Device[] = Array.from({ length: 50 }, (_, i) => {
     carrier: pickRandom(['cmcc', 'ctcc', 'cucc']),
 
     // 监控扩展字段
-    platformType: platformType,
     hostName: `${type}-${beijingCity.name}-${String(index + 1).padStart(3, '0')}`,
     productName: `${vendor} ${model}`,
     firmwareVersion: pickRandom(firmwareVersions),

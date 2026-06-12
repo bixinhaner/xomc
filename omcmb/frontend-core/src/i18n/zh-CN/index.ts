@@ -958,7 +958,6 @@ const messages: Record<string, string> = {
   'device.productClassHint':'设备 TR-069 productClass 路由 key；CPE 上线后通过 Bootstrap Inform 自动覆盖此处占位',
   'device.siteId':          '站点ID',
   'device.networkStepHint': '本步骤所有字段可选；为空时使用默认值，CPE 通过 TR-069 自动注册后会被真实值更新。',
-  'device.platformType':    '平台类型',
   'device.networkType':     '网络类型',
   'device.radioMode':       '基站制式',
   'device.cellViewTech':    '查看制式',
