@@ -97,6 +97,9 @@ export function useAlarmUploadXml() {
     mutationFn: ({ file, force }: { file: File; force?: boolean }) => api.uploadXml(file, force),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: AD_KEY });
+      // #241：后端导入成功后已按 source_table 刷新 alarm_ne_type 绑定字典;
+      // 这里失效字典查询,让「新增产品 → 告警名称」下拉立即重取到新 neType。
+      void qc.invalidateQueries({ queryKey: ['dictionary', 'alarm_ne_type'] });
     },
   });
 }

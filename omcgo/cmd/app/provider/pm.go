@@ -138,7 +138,8 @@ func initPMModule(c *Container) error {
 	// 2026-06-03 用户决策:上传 = 写 builtin 目录 → destructive 重载(删孤儿)→ 刷新缓存
 	// reloader 触发 Loader.Reload;cache=indicatorSvc 重载成功后 BumpCacheVersion
 	indicatorFileHandler := indicator.NewFileHandler(
-		indicatorFileRepo, indicatorReloader, indicatorSvc, c.Cfg.DictLoader.XMLBaseDir, logger.Named("indicator-file"),
+		indicatorFileRepo, indicatorReloader, indicatorSvc, c.DictService, // #241: 导入后刷 kpi_platform_enb 绑定字典(pm 模块 Depends "admin")
+		c.Cfg.DictLoader.XMLBaseDir, logger.Named("indicator-file"),
 	)
 	// 启动期幂等 mkdir host bind mount 三制式子目录,首次部署不报错
 	if err := indicator.EnsureBaseDir(context.Background(), c.Cfg.DictLoader.XMLBaseDir); err != nil {

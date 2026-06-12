@@ -31,20 +31,28 @@ import (
 // 同时写 sidecar(<name>.xml.custom)标记为用户上传;仅有 sidecar 的文件可在线删。
 // 与 handler.go 的 CRUD(单条告警定义粒度)隔离。
 type FileHandler struct {
-	repo      FileRepository
-	service   *Service // RefreshCache + DeleteOrphansSince:上传/删除后刷新内存 Registry / 删孤儿
-	reloader  Reloader // ReloadOne:上传后全量重扫目录 UPSERT 入库(可为 nil → 跳过)
-	baseDir   string   // XMLBaseDir(= dictloader.XMLBaseDir,如 /etc/omcgo/data)
-	fileLocks sync.Map // map[basename(string)]*sync.Mutex
-	logger    *zap.Logger
+	repo          FileRepository
+	service       *Service            // RefreshCache + DeleteOrphansSince:上传/删除后刷新内存 Registry / 删孤儿
+	reloader      Reloader            // ReloadOne:上传后全量重扫目录 UPSERT 入库(可为 nil → 跳过)
+	dictRefresher DictSourceRefresher // #241: 导入成功后刷绑定字典(可为 nil → 跳过)
+	baseDir       string              // XMLBaseDir(= dictloader.XMLBaseDir,如 /etc/omcgo/data)
+	fileLocks     sync.Map            // map[basename(string)]*sync.Mutex
+	logger        *zap.Logger
+}
+
+// DictSourceRefresher 在导入 XML 成功后按 source_table 刷新绑定字典(T-0182 / #241)。
+// best-effort:刷新失败不阻断导入(daily cron 兜底)。可为 nil(未接入时整段跳过)。
+type DictSourceRefresher interface {
+	RefreshSourceBoundByTable(ctx context.Context, sourceTable string) (int, error)
 }
 
 // NewFileHandler 构造 FileHandler;baseDir 必须为 Loader 用的同一 XMLBaseDir。
-func NewFileHandler(repo FileRepository, service *Service, reloader Reloader, baseDir string, logger *zap.Logger) *FileHandler {
+// dictRefresher 可为 nil(未接入数据字典数据源时);非 nil 时导入成功后刷 alarm_definitions 绑定字典。
+func NewFileHandler(repo FileRepository, service *Service, reloader Reloader, dictRefresher DictSourceRefresher, baseDir string, logger *zap.Logger) *FileHandler {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &FileHandler{repo: repo, service: service, reloader: reloader, baseDir: baseDir, logger: logger.Named("alarmdef.file")}
+	return &FileHandler{repo: repo, service: service, reloader: reloader, dictRefresher: dictRefresher, baseDir: baseDir, logger: logger.Named("alarmdef.file")}
 }
 
 // RegisterRoutes 挂在 /api/v1 之下;内部使用 /alarm-definitions/... 子路径。
@@ -102,6 +110,24 @@ func (h *FileHandler) refreshCache(ctx context.Context) {
 	}
 	if err := h.service.RefreshCache(ctx); err != nil {
 		h.logger.Warn("post-op alarm registry refresh failed", zap.Error(err))
+	}
+}
+
+// refreshBoundDict 在导入成功后刷新绑定 sourceTable 的数据字典(T-0182 / #241)。
+// best-effort:未接入(dictRefresher==nil)或刷新失败均只记日志,不影响导入响应。
+func (h *FileHandler) refreshBoundDict(ctx context.Context, sourceTable string) {
+	if h.dictRefresher == nil {
+		return
+	}
+	n, err := h.dictRefresher.RefreshSourceBoundByTable(ctx, sourceTable)
+	if err != nil {
+		h.logger.Warn("post-upload bound dictionary refresh failed",
+			zap.String("source_table", sourceTable), zap.Error(err))
+		return
+	}
+	if n > 0 {
+		h.logger.Info("post-upload bound dictionary refreshed",
+			zap.String("source_table", sourceTable), zap.Int("dicts", n))
 	}
 }
 
@@ -479,6 +505,11 @@ func (h *FileHandler) UploadXML(c *gin.Context) {
 	}
 
 	h.refreshCache(c.Request.Context())
+
+	// #241:导入成功落库后,主动刷新绑定 alarm_definitions 的字典(alarm_ne_type),
+	// 使「新增产品 → 告警名称」下拉即时出现新 neType(无需等 daily cron / 手动刷新)。
+	// best-effort:刷新失败只 Warn,不影响 upload 响应。
+	h.refreshBoundDict(c.Request.Context(), "alarm_definitions")
 
 	backupName := ""
 	if backupPath != "" {

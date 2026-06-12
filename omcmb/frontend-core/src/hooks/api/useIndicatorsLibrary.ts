@@ -231,6 +231,9 @@ export function useIndicatorUploadXml() {
       api.uploadXml(tech, file, force),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: IL_KEY });
+      // #241：后端导入成功后已按 source_table 刷新 kpi_platform_enb 绑定字典(仅 enb 有绑定);
+      // 这里失效字典查询,让「新增产品 → KPI指标名称」下拉立即重取到新平台。
+      void qc.invalidateQueries({ queryKey: ['dictionary', 'kpi_platform_enb'] });
     },
   });
 }

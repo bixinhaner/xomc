@@ -157,6 +157,9 @@ func initAdminModule(c *Container) error {
 		engine.SetMetrics(admin.NewDictSourceMetrics(c.MetricsReg))
 		dictService.SetSourceWiring(reg, engine, logger.Named("dict_source"))
 	}
+	// #241：暴露 dictService 给 product/indicator/alarm 三库 upload handler,导入成功后按
+	// source_table 触发绑定字典刷新(pm/alarmdef/paramregistry 模块 Depends "admin" 保证此处已就绪)。
+	c.DictService = dictService
 	dictHandler := admin.NewDictionaryHandler(dictService)
 
 	// System config module

@@ -91,6 +91,7 @@ func initParamRegistryModule(c *Container) error {
 		repo,
 		registry,
 		&paramModelReloader{reg: c.DictLoaderRegistry},
+		c.DictService, // #241: 导入成功后刷 param_model_name 绑定字典(模块 Depends "admin" 保证非 nil)
 		c.Cfg.DictLoader.XMLBaseDir, // T-0178: 为 DELETE/Upload 提供物理路径根
 		logger,
 	)

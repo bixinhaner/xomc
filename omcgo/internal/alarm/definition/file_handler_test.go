@@ -92,7 +92,8 @@ func newTestRouter(t *testing.T, repo FileRepository, reloader Reloader, baseDir
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	rg := r.Group("/api/v1")
-	h := NewFileHandler(repo, nil, reloader, baseDir, zap.NewNop())
+	// dictRefresher 传 nil:测试不验证导入后字典刷新(走 DB,单测无)
+	h := NewFileHandler(repo, nil, reloader, nil, baseDir, zap.NewNop())
 	h.RegisterRoutes(rg)
 	return r
 }

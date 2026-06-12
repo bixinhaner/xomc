@@ -73,7 +73,8 @@ func Setup(r *gin.Engine, c *Container) error {
 		Name: "pm",
 		// T-0164-P1：KPIEngine 现在依赖 ProductRegistry / DeviceRepo / IndicatorRepo
 		// 三者构造 KPI Router。productregistry / device 必须先就绪。
-		Depends: []string{"productregistry", "device"},
+		// #241：indicator FileHandler 需 c.DictService(导入后刷 kpi_platform_enb 字典)→ Depends admin。
+		Depends: []string{"productregistry", "device", "admin"},
 		Init:    func() error { return initPMModule(c) },
 	})
 	// T-0164-P2 / G2 PM 保留策略层（sys_configs 5 键 + SavedHook reload）
@@ -170,15 +171,17 @@ func Setup(r *gin.Engine, c *Container) error {
 	// T-0098 P2-02：ParamRegistry（按 productId/paramModelId 取映射 + Translator 双向翻译）
 	// 依赖 productregistry 注入为 productGetter（反查 product.ParamModelID 供 default 降级）。
 	graph.Add(components.ModuleInitializer{
-		Name:    "paramregistry",
-		Depends: []string{"dictload", "productregistry"},
+		Name: "paramregistry",
+		// #241：parammodel Handler 需 c.DictService(导入后刷 param_model_name 字典)→ Depends admin。
+		Depends: []string{"dictload", "productregistry", "admin"},
 		Init:    func() error { return initParamRegistryModule(c) },
 	})
 	// T-0098 P3-04：AlarmDefinition Registry + Service + Handler — REST API 入口装配。
 	// 依赖 dictload 完成后 alarm_definitions / alarm_severity_levels 表已写入。
 	graph.Add(components.ModuleInitializer{
-		Name:    "alarmdef",
-		Depends: []string{"dictload"},
+		Name: "alarmdef",
+		// #241：alarmdef FileHandler 需 c.DictService(导入后刷 alarm_ne_type 字典)→ Depends admin。
+		Depends: []string{"dictload", "admin"},
 		Init:    func() error { return initAlarmDefModule(c) },
 	})
 	// F05 MR Task management (PRD docs/project/prd/F05-mr-task-management.md)
