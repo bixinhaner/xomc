@@ -203,7 +203,7 @@ export const NAV_CONFIG: NavConfig = [
       // { key: 'sys-group',       label: 'nav.system.groups',         path: '/system/groups' },  // 隐藏用户组菜单
       { key: 'sys-role',        label: 'nav.system.roles',          path: '/system/roles' },
       { key: 'sys-menu',        label: 'nav.system.menus',          path: '/system/menus' },
-      { key: 'sys-op-log',      label: 'nav.system.operationLog',   path: '/system/operation-log' },
+      { key: 'sys-op-log',      label: 'nav.system.logAudit',       path: '/system/operation-log' },
       { key: 'sys-config',      label: 'nav.system.config',         path: '/system/config' },
       { key: 'sys-ui-custom',   label: 'nav.system.uiCustom',       path: '/system/ui-custom' },
       // { key: 'sys-home',        label: 'nav.system.dashboard',      path: '/system/dashboard' },  // 隐藏系统仪表板

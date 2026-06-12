@@ -688,6 +688,7 @@ const messages: Record<string, string> = {
   'nav.system.roles':         'Role Management',
   'nav.system.menus':         'Menu Management',
   'nav.system.operationLog':  'Operation Log',
+  'nav.system.logAudit':      'Log Audit',
   'nav.system.config':        'System Config',
   'nav.system.dataDict':      'Data Dictionary',
   'nav.system.apiManagement': 'API Management',

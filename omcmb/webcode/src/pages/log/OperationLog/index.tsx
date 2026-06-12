@@ -1,27 +1,25 @@
 import { useState, useMemo, useCallback } from 'react';
 import {
-  App,
-  Button,
   Card,
   Tabs,
   Tag,
   Tooltip,
 } from 'antd';
-import {
-  DownloadOutlined,
-} from '@ant-design/icons';
 import dayjs from 'dayjs';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
-import { useOperationLogs, useExportLogs } from '@core/hooks/api/useLogs';
+import { useOperationLogs } from '@core/hooks/api/useLogs';
 import type { OperationLog } from '@core/types/system';
 import { useT } from '@/hooks/useT';
 
 // 日志类型
-type LogType = 'operation' | 'security' | 'system' | 'northbound';
+// northbound（北向接口日志）暂不在此页展示：后端 northbound 模块只有 push/sync/deadletter，
+// 没有「报文日志」列表端点，过去该 tab 复用 useOperationLogs（audit_logs）显示的是错配数据。
+// 待后端补北向报文日志端点后再恢复（另开 issue）。
+type LogType = 'operation' | 'security' | 'system';
 
 function truncate(str: string, maxLen = 50): string {
   if (!str) return '-';
@@ -31,7 +29,6 @@ function truncate(str: string, maxLen = 50): string {
 
 export default function OperationLogPage() {
   const t = useT();
-  const { message } = App.useApp();
 
   // Tab 状态
   const [activeTab, setActiveTab] = useState<LogType>('operation');
@@ -53,21 +50,6 @@ export default function OperationLogPage() {
     page,
     pageSize,
   });
-
-  // 导出
-  const exportLogs = useExportLogs();
-
-  // 处理导出
-  const handleExport = useCallback(() => {
-    exportLogs.mutate(
-      { type: 'operation', params: filters },
-      {
-        onSuccess: () => {
-          void message.success(t('log.exportSuccess'));
-        },
-      }
-    );
-  }, [filters, exportLogs, message, t]);
 
   // 重置搜索
   const handleReset = useCallback(() => {
@@ -119,37 +101,6 @@ export default function OperationLogPage() {
     { label: t('log.configRestore'), value: 'config_restore' },
     { label: t('log.dbBackup'), value: 'db_backup' },
   ], [t]);
-
-  // 获取北向接口类型选项
-  const getNorthboundTypeOptions = useMemo(() => [
-    { label: t('log.all'), value: '' },
-    { label: t('log.syncRequest'), value: '1' },
-    { label: t('log.asyncRequest'), value: '2' },
-    { label: t('log.alarm'), value: 'Real Alarm' },
-    { label: t('log.syncMsg'), value: 'Sync Msg' },
-    { label: t('log.login'), value: 'Login' },
-    { label: t('log.syncFile'), value: 'Sync File' },
-    { label: t('log.disconnection'), value: 'Disconnection' },
-    { label: t('log.connection'), value: 'Connection' },
-    { label: t('log.connectionTimeout'), value: 'Connection Timeout' },
-    { label: t('log.idleTimeout'), value: 'Idle Timeout' },
-    { label: t('log.heartbeat'), value: 'HEARTBEAT' },
-  ], [t]);
-
-  // 北向接口类型显示映射
-  const northboundTypeTextMap = useMemo(() => ({
-    '1': t('log.syncRequest'),
-    '2': t('log.asyncRequest'),
-    'Real Alarm': t('log.alarm'),
-    'Sync Msg': t('log.syncMsg'),
-    'Login': t('log.login'),
-    'Sync File': t('log.syncFile'),
-    'Disconnection': t('log.disconnection'),
-    'Connection': t('log.connection'),
-    'Connection Timeout': t('log.connectionTimeout'),
-    'Idle Timeout': t('log.idleTimeout'),
-    'HEARTBEAT': t('log.heartbeat'),
-  }), [t]);
 
   // 结果颜色映射
   const resultColorMap: Record<string, string> = {
@@ -225,14 +176,6 @@ export default function OperationLogPage() {
     { name: 'timeRange', label: t('log.timeRange'), type: 'date-range', width: 260 },
   ], [t, getSystemLogNameOptions]);
 
-  // 北向接口日志筛选字段
-  const northboundFilterFields: FilterField[] = useMemo(() => [
-    { name: 'ipAddress', label: t('log.ipAddress'), type: 'input', width: 160 },
-    { name: 'name', label: t('log.name'), type: 'input', width: 160 },
-    { name: 'type', label: t('log.type'), type: 'select', options: getNorthboundTypeOptions, width: 160 },
-    { name: 'timeRange', label: t('log.timeRange'), type: 'date-range', width: 260 },
-  ], [t, getNorthboundTypeOptions]);
-
   // 根据当前 tab 获取筛选字段
   const getFilterFields = useCallback(() => {
     switch (activeTab) {
@@ -240,12 +183,10 @@ export default function OperationLogPage() {
         return securityFilterFields;
       case 'system':
         return systemFilterFields;
-      case 'northbound':
-        return northboundFilterFields;
       default:
         return operationFilterFields;
     }
-  }, [activeTab, operationFilterFields, securityFilterFields, systemFilterFields, northboundFilterFields]);
+  }, [activeTab, operationFilterFields, securityFilterFields, systemFilterFields]);
 
   // 操作日志表格列
   const operationColumns: DataTableColumn<OperationLog & Record<string, unknown>>[] = useMemo(() => [
@@ -335,32 +276,10 @@ export default function OperationLogPage() {
         return operationColumns.filter((col) => col.key !== 'endTime');
       case 'system':
         return operationColumns.filter((col) => !['operator', 'clientIp', 'endTime'].includes(col.key as string));
-      case 'northbound':
-        return [
-          { key: 'id', title: 'ID', dataIndex: 'id', width: 80 },
-          { key: 'logName', title: t('log.logName'), dataIndex: 'logName', width: 300 },
-          { key: 'clientIp', title: t('log.clientIp'), dataIndex: 'clientIp', width: 200 },
-          {
-            key: 'type',
-            title: t('log.type'),
-            dataIndex: 'type',
-            width: 150,
-            render: (val: string) => northboundTypeTextMap[val as keyof typeof northboundTypeTextMap] || val,
-          },
-          { key: 'reqParams', title: t('log.reqParams'), dataIndex: 'reqParams', width: 250, ellipsis: true },
-          { key: 'resParams', title: t('log.resParams'), dataIndex: 'resParams', ellipsis: true },
-          {
-            key: 'createTime',
-            title: t('log.createTime'),
-            dataIndex: 'createTime',
-            width: 200,
-            render: (val: string) => (val ? dayjs(val).format('YYYY-MM-DD HH:mm:ss') : '-'),
-          },
-        ];
       default:
         return operationColumns;
     }
-  }, [activeTab, operationColumns, t, northboundTypeTextMap]);
+  }, [activeTab, operationColumns]);
 
   return (
     <ListPageLayout>
@@ -372,26 +291,17 @@ export default function OperationLogPage() {
           { key: 'operation', label: t('log.operationLog') },
           { key: 'security', label: t('log.securityLog') },
           { key: 'system', label: t('log.systemLog') },
-          { key: 'northbound', label: t('log.northboundLog') },
         ]}
       />
 
+      {/* 导出按钮暂时隐藏：原 useExportLogs 走 logService.exportLogs（mock，返回假 taskId
+          不打真实后端），保留假成功提示反而误导用户。待补真实日志导出端点后再恢复。 */}
       <FilterBar
         filterId={`${activeTab}-log-filter`}
         fields={getFilterFields()}
         onSearch={handleSearch}
         onReset={handleReset}
         collapsedRows={1}
-        extra={
-          <Button
-            type="primary"
-            icon={<DownloadOutlined />}
-            onClick={handleExport}
-            loading={exportLogs.isPending}
-          >
-            {t('common.export')}
-          </Button>
-        }
       />
 
       {/* 日志列表 */}

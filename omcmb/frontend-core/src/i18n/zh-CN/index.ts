@@ -689,6 +689,7 @@ const messages: Record<string, string> = {
   'nav.system.roles':         '角色管理',
   'nav.system.menus':         '菜单管理',
   'nav.system.operationLog':  '操作日志',
+  'nav.system.logAudit':      '日志审计',
   'nav.system.config':        '系统配置',
   'nav.system.uiCustom':      'UI定制化',
   'nav.system.dashboard':     '系统仪表板',
