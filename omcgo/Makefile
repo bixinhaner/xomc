@@ -3,6 +3,7 @@
        test-cover cover-report cover-summary cover-check \
        lint vet generate generate-mocks sqlc-generate \
        migrate-up migrate-down migrate-reset migrate-schema-up migrate-schema-down migrate-seed-up migrate-seed-down \
+       migrate-tsdb-up migrate-tsdb-down \
        docker-build docker-up docker-down clean
 
 # Build
@@ -113,6 +114,18 @@ migrate-seed-up:  ## Run seed data migrations only
 
 migrate-seed-down:  ## Rollback seed data migrations only
 	go run ./cmd/migrate down --path migrations/seed
+
+# 时序库（TsPool / postgres-tsdb 第二实例）schema 迁移 —— 独立 goose 版本表
+# goose_db_version_tsdb，独立 DSN。本机裸跑：时序库映射 localhost:5433
+# （docker compose 里则由 migrate-tsdb-schema 服务对 postgres-tsdb:5432 跑）。
+# 覆盖 DSN：make migrate-tsdb-up TSDB_DSN=postgres://...
+TSDB_DSN ?= postgres://omcgo:omcgo123@localhost:5433/omcgo?sslmode=disable
+
+migrate-tsdb-up:  ## Run time-series DB schema migrations (postgres-tsdb)
+	go run ./cmd/migrate up --path migrations/tsdb --table goose_db_version_tsdb --dsn "$(TSDB_DSN)"
+
+migrate-tsdb-down:  ## Rollback time-series DB schema migrations (postgres-tsdb)
+	go run ./cmd/migrate down --path migrations/tsdb --table goose_db_version_tsdb --dsn "$(TSDB_DSN)"
 
 # 注：原 omcgo-seed (cmd/seed) JSON 种子工具已下线，种子数据全部走 goose
 # migrations/seed/ — 用 make migrate-seed-up / migrate-seed-down 操作。

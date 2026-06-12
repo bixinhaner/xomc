@@ -31,11 +31,14 @@ type taskRepo interface {
 type Runner struct {
 	repo     taskRepo
 	aggr     *aggregator.Aggregator // dashboard 聚合维度取数 + KPI 反算
-	metricDB PgQuerier              // PM 指标表（TimescaleDB）：dashboard device 维度直查 + 指标名解析
-	adhocDB  PgQuerier              // 业务库：pm_adhoc_aggregation_results 直查
-	uploader Uploader               // 对象存储上传（流式）
-	bucket   string                 // 导出文件落地桶
-	logger   *zap.Logger
+	metricDB PgQuerier              // 时序库（TsPool）：dashboard device 维度直查 pm_metrics + 指标名解析
+	adhocDB  PgQuerier              // 时序库（TsPool）：pm_adhoc_aggregation_results 直查 + 指标名解析
+	// taskMetaDB 主库（PgPool）：pm_tasks 元数据读（loadAdhocDimension 取 adhoc 任务维度/设备数）。
+	// KPI/时序库物理分离后 pm_adhoc_aggregation_results 在 TsPool、pm_tasks 在 PgPool，二者拆池。
+	taskMetaDB PgQuerier
+	uploader   Uploader // 对象存储上传（流式）
+	bucket     string   // 导出文件落地桶
+	logger     *zap.Logger
 
 	// buildSourceFn 取数源构造入口；默认 r.buildSource，单测可注入 stub 源绕过 DB。
 	// 返回取数源 + 横表指标列集（列名已解析）+ CSV 列布局（首列表头 / 是否含小区列），
@@ -44,14 +47,20 @@ type Runner struct {
 }
 
 // RunnerDeps 是构造 T2 Runner 的依赖集合。
+//
+// 池路由（KPI/时序库物理分离）：
+//   - MetricDB / AdhocDB = 时序库（TsPool）：dashboard device 维度查 pm_metrics、
+//     adhoc 查 pm_adhoc_aggregation_results（两表均在时序库）。
+//   - TaskMetaDB = 主库（PgPool）：loadAdhocDimension 读 pm_tasks（任务元数据留主库）。
 type RunnerDeps struct {
-	Repo     taskRepo
-	Aggr     *aggregator.Aggregator
-	MetricDB PgQuerier
-	AdhocDB  PgQuerier
-	Uploader Uploader
-	Bucket   string
-	Logger   *zap.Logger
+	Repo       taskRepo
+	Aggr       *aggregator.Aggregator
+	MetricDB   PgQuerier
+	AdhocDB    PgQuerier
+	TaskMetaDB PgQuerier
+	Uploader   Uploader
+	Bucket     string
+	Logger     *zap.Logger
 }
 
 // NewRunner 构造 T2 Runner。
@@ -61,13 +70,14 @@ func NewRunner(d RunnerDeps) *Runner {
 		logger = zap.NewNop()
 	}
 	r := &Runner{
-		repo:     d.Repo,
-		aggr:     d.Aggr,
-		metricDB: d.MetricDB,
-		adhocDB:  d.AdhocDB,
-		uploader: d.Uploader,
-		bucket:   d.Bucket,
-		logger:   logger.Named("pm.export.runner"),
+		repo:       d.Repo,
+		aggr:       d.Aggr,
+		metricDB:   d.MetricDB,
+		adhocDB:    d.AdhocDB,
+		taskMetaDB: d.TaskMetaDB,
+		uploader:   d.Uploader,
+		bucket:     d.Bucket,
+		logger:     logger.Named("pm.export.runner"),
 	}
 	r.buildSourceFn = r.buildSource
 	return r
@@ -209,7 +219,8 @@ func (r *Runner) buildSource(ctx context.Context, task *Task) (RowSource, []Wide
 			return nil, nil, csvLayout{}, err
 		}
 		// 先查任务聚合维度 + 圈选设备数：决定首列表头 / 对象名解析口径 / 是否含小区列。
-		dim, deviceCount, derr := loadAdhocDimension(ctx, r.adhocDB, taskID)
+		// pm_tasks 在主库（PgPool），用 taskMetaDB 读；adhoc 结果表查询走 adhocDB（TsPool）。
+		dim, deviceCount, derr := loadAdhocDimension(ctx, r.taskMetaDB, taskID)
 		if derr != nil {
 			return nil, nil, csvLayout{}, derr
 		}

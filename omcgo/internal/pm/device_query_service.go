@@ -54,8 +54,9 @@ func NewDeviceQueryService(pool *pgxpool.Pool) DeviceQueryService {
 // LookupDeviceOUISN 反查 devices 表的 (oui, serial_number) 双键。
 func (s *pgDeviceQueryService) LookupDeviceOUISN(ctx context.Context, deviceID uuid.UUID) (string, string, error) {
 	var oui, sn string
+	// s.pool 是 TsPool；devices 反查改读本库影子表 device_dim（跨库分离）。
 	err := s.pool.QueryRow(ctx,
-		`SELECT oui, serial_number FROM devices WHERE id = $1`, deviceID,
+		`SELECT oui, serial_number FROM device_dim WHERE id = $1`, deviceID,
 	).Scan(&oui, &sn)
 	if err != nil {
 		return "", "", fmt.Errorf("lookup device oui+sn: %w", err)
@@ -65,8 +66,9 @@ func (s *pgDeviceQueryService) LookupDeviceOUISN(ctx context.Context, deviceID u
 
 // DeviceGroupIDs 读取设备所属分组 id 列表（device_group_members）。设备未分组返回空切片。
 func (s *pgDeviceQueryService) DeviceGroupIDs(ctx context.Context, deviceID uuid.UUID) ([]uuid.UUID, error) {
+	// s.pool 是 TsPool；device_group_members 改读本库影子表 device_group_member_dim。
 	rows, err := s.pool.Query(ctx,
-		`SELECT group_id FROM device_group_members WHERE device_id = $1`, deviceID,
+		`SELECT group_id FROM device_group_member_dim WHERE device_id = $1`, deviceID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("query device group ids: %w", err)
@@ -115,7 +117,8 @@ func (s *pgDeviceQueryService) ListMetricObjects(ctx context.Context, deviceSNs,
 //
 //   - $1 = device_sns（TEXT[]）
 //   - 制式过滤（technologies 非空时）照 applyCommonFilters 范式：
-//     (device_oui, device_sn) IN (SELECT oui, serial_number FROM devices WHERE technology = ANY($2))
+//     (device_oui, device_sn) IN (SELECT oui, serial_number FROM device_dim WHERE technology = ANY($2))
+//     （查询跑在 TsPool，devices 用本库影子表 device_dim）
 //
 // 抽出便于单测断言（device 过滤 + 制式过滤 + distinct）。
 func buildObjectsQuery(deviceSNs, technologies []string) (string, []any) {
@@ -126,7 +129,7 @@ WHERE device_sn = ANY($1)
 	args := []any{deviceSNs}
 	if len(technologies) > 0 {
 		q += `
-  AND (device_oui, device_sn) IN (SELECT oui, serial_number FROM devices WHERE technology = ANY($2))`
+  AND (device_oui, device_sn) IN (SELECT oui, serial_number FROM device_dim WHERE technology = ANY($2))`
 		args = append(args, technologies)
 	}
 	q += `

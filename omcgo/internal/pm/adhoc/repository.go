@@ -71,13 +71,21 @@ var (
 )
 
 // PgRepository 是 Repository 的 pgxpool 实现。
+//
+// 双池（KPI/时序库物理分离）：
+//   - pool（主库 PgPool）：pm_tasks / pm_adhoc_task_runs 任务生命周期表（Create/Update/Get/List/
+//     Cancel/LockNextPending/UpdateStatus/InsertRun/FinishRun/ListRuns/NextRunSeq）。
+//   - tsPool（时序库 TsPool）：pm_adhoc_aggregation_results 结果表（仅 InsertResults）。
 type PgRepository struct {
-	pool *pgxpool.Pool
+	pool   *pgxpool.Pool // 主库：任务生命周期表
+	tsPool *pgxpool.Pool // 时序库：pm_adhoc_aggregation_results
 }
 
 // NewPgRepository 创建 PgRepository。
-func NewPgRepository(pool *pgxpool.Pool) *PgRepository {
-	return &PgRepository{pool: pool}
+//
+// pgPool=主库（pm_tasks/pm_adhoc_task_runs），tsPool=时序库（pm_adhoc_aggregation_results）。
+func NewPgRepository(pgPool, tsPool *pgxpool.Pool) *PgRepository {
+	return &PgRepository{pool: pgPool, tsPool: tsPool}
 }
 
 var _ Repository = (*PgRepository)(nil)
@@ -442,7 +450,8 @@ func (r *PgRepository) InsertResults(ctx context.Context, rows []ResultRow) erro
 	if err != nil {
 		return fmt.Errorf("adhoc.InsertResults: build SQL: %w", err)
 	}
-	if _, err := r.pool.Exec(ctx, q, args...); err != nil {
+	// pm_adhoc_aggregation_results 在时序库（TsPool），用 tsPool 写。
+	if _, err := r.tsPool.Exec(ctx, q, args...); err != nil {
 		return fmt.Errorf("adhoc.InsertResults: exec: %w", err)
 	}
 	return nil

@@ -558,39 +558,7 @@ CREATE TABLE public.alarms_active (
 COMMENT ON COLUMN public.alarms_active.is_unknown IS 'T-0098 fallback 标记：identifier 不在告警库时 product.enable_unknown_alarm=true 路径写入；治理闭环过滤依据';
 
 
---
--- Name: alarms_history; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.alarms_history (
-    "time" timestamp with time zone NOT NULL,
-    alarm_id uuid NOT NULL,
-    device_id uuid NOT NULL,
-    device_sn character varying(64) NOT NULL,
-    carrier character varying(4) NOT NULL,
-    severity smallint NOT NULL,
-    alarm_type character varying(64),
-    alarm_identifier character varying(64) NOT NULL,
-    description text,
-    status character varying(16) NOT NULL,
-    raised_at timestamp with time zone NOT NULL,
-    acknowledged_at timestamp with time zone,
-    cleared_at timestamp with time zone,
-    device_name character varying(128),
-    technology character varying(16),
-    alarm_source character varying(64),
-    event_type character varying(64),
-    network_location text,
-    explicit_cause text,
-    ack_count integer DEFAULT 0 NOT NULL,
-    acknowledged_by character varying(128),
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    ack_note text DEFAULT ''::text,
-    cleared_by character varying(128),
-    clear_note text DEFAULT ''::text,
-    probable_cause text DEFAULT ''::text NOT NULL,
-    additional_info jsonb DEFAULT '{}'::jsonb
-);
+-- NOTE: alarms_history 已迁至时序库 (migrations/tsdb/000001_tsdb_schema.sql)。
 
 
 --
@@ -4439,14 +4407,7 @@ CREATE TABLE public.mr_indicators (
 -- Name: mr_records; Type: TABLE; Schema: public; Owner: -
 --
 
-CREATE TABLE public.mr_records (
-    "time" timestamp with time zone NOT NULL,
-    file_id uuid NOT NULL,
-    device_id uuid NOT NULL,
-    cell_id character varying(32) DEFAULT ''::character varying NOT NULL,
-    mr_type character varying(8) NOT NULL,
-    measurement_data jsonb DEFAULT '{}'::jsonb NOT NULL
-);
+-- NOTE: mr_records 已迁至时序库 (migrations/tsdb/000001_tsdb_schema.sql)。
 
 
 --
@@ -5091,26 +5052,7 @@ CREATE TABLE public.perf_template_rel_arithmetic (
 -- Name: pm_adhoc_aggregation_results; Type: TABLE; Schema: public; Owner: -
 --
 
-CREATE TABLE public.pm_adhoc_aggregation_results (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    task_id uuid NOT NULL,
-    device_oui text NOT NULL,
-    device_sn text NOT NULL,
-    metric_path text NOT NULL,
-    metric_type text NOT NULL,
-    metric_value double precision NOT NULL,
-    statis_type text,
-    granularity text NOT NULL,
-    "time" timestamp with time zone NOT NULL,
-    start_time timestamp with time zone NOT NULL,
-    end_time timestamp with time zone NOT NULL,
-    ingest_time timestamp with time zone DEFAULT now() NOT NULL,
-    object_ldn text,
-    extra jsonb,
-    CONSTRAINT pm_adhoc_aggregation_results_granularity_check CHECK ((granularity = ANY (ARRAY['15min'::text, 'hourly'::text, 'daily'::text, 'weekly'::text, 'monthly'::text]))),
-    CONSTRAINT pm_adhoc_aggregation_results_metric_type_check CHECK ((metric_type = ANY (ARRAY['counter'::text, 'kpi'::text]))),
-    CONSTRAINT pm_adhoc_aggregation_results_statis_type_check CHECK (((statis_type IS NULL) OR (statis_type = ANY (ARRAY['sum'::text, 'avg'::text, 'max'::text, 'min'::text, 'pct'::text]))))
-);
+-- NOTE: pm_adhoc_aggregation_results 已迁至时序库 (migrations/tsdb/000001_tsdb_schema.sql)。
 
 
 --
@@ -5137,232 +5079,9 @@ CREATE TABLE public.pm_dashboards (
 -- Name: pm_files; Type: TABLE; Schema: public; Owner: -
 --
 
-CREATE TABLE public.pm_files (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    device_id uuid NOT NULL,
-    device_sn character varying(128) NOT NULL,
-    carrier character varying(16) NOT NULL,
-    technology character varying(16) NOT NULL,
-    file_name character varying(512) NOT NULL,
-    file_size bigint DEFAULT 0,
-    collect_time timestamp with time zone,
-    minio_path character varying(1024) NOT NULL,
-    parsed boolean DEFAULT false,
-    parsed_at timestamp with time zone,
-    counter_count integer DEFAULT 0,
-    created_at timestamp with time zone DEFAULT now()
-);
-
-
---
--- Name: pm_group_metrics_daily; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.pm_group_metrics_daily (
-    device_group_id uuid NOT NULL,
-    metric_path text NOT NULL,
-    metric_type text NOT NULL,
-    metric_value double precision NOT NULL,
-    statis_type text,
-    granularity text NOT NULL,
-    "time" timestamp with time zone NOT NULL,
-    start_time timestamp with time zone NOT NULL,
-    end_time timestamp with time zone NOT NULL,
-    ingest_time timestamp with time zone DEFAULT now() NOT NULL,
-    extra jsonb,
-    CONSTRAINT pm_group_metrics_daily_granularity_check CHECK ((granularity = ANY (ARRAY['15min'::text, 'hourly'::text, 'daily'::text, 'weekly'::text, 'monthly'::text]))),
-    CONSTRAINT pm_group_metrics_daily_metric_type_check CHECK ((metric_type = ANY (ARRAY['counter'::text, 'kpi'::text]))),
-    CONSTRAINT pm_group_metrics_daily_statis_type_check CHECK (((statis_type IS NULL) OR (statis_type = ANY (ARRAY['sum'::text, 'avg'::text, 'max'::text, 'min'::text, 'pct'::text]))))
-);
-
-
---
--- Name: pm_group_metrics_hourly; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.pm_group_metrics_hourly (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    device_group_id uuid NOT NULL,
-    metric_path text NOT NULL,
-    metric_type text NOT NULL,
-    metric_value double precision NOT NULL,
-    statis_type text,
-    granularity text NOT NULL,
-    "time" timestamp with time zone NOT NULL,
-    start_time timestamp with time zone NOT NULL,
-    end_time timestamp with time zone NOT NULL,
-    ingest_time timestamp with time zone DEFAULT now() NOT NULL,
-    extra jsonb,
-    CONSTRAINT pm_group_metrics_hourly_granularity_check CHECK ((granularity = ANY (ARRAY['15min'::text, 'hourly'::text, 'daily'::text, 'weekly'::text, 'monthly'::text]))),
-    CONSTRAINT pm_group_metrics_hourly_metric_type_check CHECK ((metric_type = ANY (ARRAY['counter'::text, 'kpi'::text]))),
-    CONSTRAINT pm_group_metrics_hourly_statis_type_check CHECK (((statis_type IS NULL) OR (statis_type = ANY (ARRAY['sum'::text, 'avg'::text, 'max'::text, 'min'::text, 'pct'::text]))))
-);
-
-
---
--- Name: pm_group_metrics_monthly; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.pm_group_metrics_monthly (
-    device_group_id uuid NOT NULL,
-    metric_path text NOT NULL,
-    metric_type text NOT NULL,
-    metric_value double precision NOT NULL,
-    statis_type text,
-    granularity text NOT NULL,
-    "time" timestamp with time zone NOT NULL,
-    start_time timestamp with time zone NOT NULL,
-    end_time timestamp with time zone NOT NULL,
-    ingest_time timestamp with time zone DEFAULT now() NOT NULL,
-    extra jsonb,
-    CONSTRAINT pm_group_metrics_monthly_granularity_check CHECK ((granularity = ANY (ARRAY['15min'::text, 'hourly'::text, 'daily'::text, 'weekly'::text, 'monthly'::text]))),
-    CONSTRAINT pm_group_metrics_monthly_metric_type_check CHECK ((metric_type = ANY (ARRAY['counter'::text, 'kpi'::text]))),
-    CONSTRAINT pm_group_metrics_monthly_statis_type_check CHECK (((statis_type IS NULL) OR (statis_type = ANY (ARRAY['sum'::text, 'avg'::text, 'max'::text, 'min'::text, 'pct'::text]))))
-);
-
-
---
--- Name: pm_group_metrics_weekly; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.pm_group_metrics_weekly (
-    device_group_id uuid NOT NULL,
-    metric_path text NOT NULL,
-    metric_type text NOT NULL,
-    metric_value double precision NOT NULL,
-    statis_type text,
-    granularity text NOT NULL,
-    "time" timestamp with time zone NOT NULL,
-    start_time timestamp with time zone NOT NULL,
-    end_time timestamp with time zone NOT NULL,
-    ingest_time timestamp with time zone DEFAULT now() NOT NULL,
-    extra jsonb,
-    CONSTRAINT pm_group_metrics_weekly_granularity_check CHECK ((granularity = ANY (ARRAY['15min'::text, 'hourly'::text, 'daily'::text, 'weekly'::text, 'monthly'::text]))),
-    CONSTRAINT pm_group_metrics_weekly_metric_type_check CHECK ((metric_type = ANY (ARRAY['counter'::text, 'kpi'::text]))),
-    CONSTRAINT pm_group_metrics_weekly_statis_type_check CHECK (((statis_type IS NULL) OR (statis_type = ANY (ARRAY['sum'::text, 'avg'::text, 'max'::text, 'min'::text, 'pct'::text]))))
-);
-
-
---
--- Name: pm_metrics; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.pm_metrics (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    device_oui text NOT NULL,
-    device_sn text NOT NULL,
-    metric_path text NOT NULL,
-    metric_type text NOT NULL,
-    metric_value double precision NOT NULL,
-    statis_type text,
-    granularity text NOT NULL,
-    "time" timestamp with time zone NOT NULL,
-    start_time timestamp with time zone NOT NULL,
-    end_time timestamp with time zone NOT NULL,
-    ingest_time timestamp with time zone DEFAULT now() NOT NULL,
-    object_ldn text DEFAULT ''::text NOT NULL,
-    extra jsonb,
-    CONSTRAINT pm_metrics_granularity_check CHECK ((granularity = ANY (ARRAY['15min'::text, 'hourly'::text, 'daily'::text, 'weekly'::text, 'monthly'::text]))),
-    CONSTRAINT pm_metrics_metric_type_check CHECK ((metric_type = ANY (ARRAY['counter'::text, 'kpi'::text]))),
-    CONSTRAINT pm_metrics_statis_type_check CHECK (((statis_type IS NULL) OR (statis_type = ANY (ARRAY['sum'::text, 'avg'::text, 'max'::text, 'min'::text, 'pct'::text]))))
-);
-
-
---
--- Name: pm_metrics_daily; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.pm_metrics_daily (
-    device_oui text NOT NULL,
-    device_sn text NOT NULL,
-    metric_path text NOT NULL,
-    metric_type text NOT NULL,
-    metric_value double precision NOT NULL,
-    statis_type text,
-    granularity text NOT NULL,
-    "time" timestamp with time zone NOT NULL,
-    start_time timestamp with time zone NOT NULL,
-    end_time timestamp with time zone NOT NULL,
-    ingest_time timestamp with time zone DEFAULT now() NOT NULL,
-    object_ldn text,
-    extra jsonb,
-    CONSTRAINT pm_metrics_daily_granularity_check CHECK ((granularity = ANY (ARRAY['15min'::text, 'hourly'::text, 'daily'::text, 'weekly'::text, 'monthly'::text]))),
-    CONSTRAINT pm_metrics_daily_metric_type_check CHECK ((metric_type = ANY (ARRAY['counter'::text, 'kpi'::text]))),
-    CONSTRAINT pm_metrics_daily_statis_type_check CHECK (((statis_type IS NULL) OR (statis_type = ANY (ARRAY['sum'::text, 'avg'::text, 'max'::text, 'min'::text, 'pct'::text]))))
-);
-
-
---
--- Name: pm_metrics_hourly; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.pm_metrics_hourly (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    device_oui text NOT NULL,
-    device_sn text NOT NULL,
-    metric_path text NOT NULL,
-    metric_type text NOT NULL,
-    metric_value double precision NOT NULL,
-    statis_type text,
-    granularity text NOT NULL,
-    "time" timestamp with time zone NOT NULL,
-    start_time timestamp with time zone NOT NULL,
-    end_time timestamp with time zone NOT NULL,
-    ingest_time timestamp with time zone DEFAULT now() NOT NULL,
-    object_ldn text,
-    extra jsonb,
-    CONSTRAINT pm_metrics_hourly_granularity_check CHECK ((granularity = ANY (ARRAY['15min'::text, 'hourly'::text, 'daily'::text, 'weekly'::text, 'monthly'::text]))),
-    CONSTRAINT pm_metrics_hourly_metric_type_check CHECK ((metric_type = ANY (ARRAY['counter'::text, 'kpi'::text]))),
-    CONSTRAINT pm_metrics_hourly_statis_type_check CHECK (((statis_type IS NULL) OR (statis_type = ANY (ARRAY['sum'::text, 'avg'::text, 'max'::text, 'min'::text, 'pct'::text]))))
-);
-
-
---
--- Name: pm_metrics_monthly; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.pm_metrics_monthly (
-    device_oui text NOT NULL,
-    device_sn text NOT NULL,
-    metric_path text NOT NULL,
-    metric_type text NOT NULL,
-    metric_value double precision NOT NULL,
-    statis_type text,
-    granularity text NOT NULL,
-    "time" timestamp with time zone NOT NULL,
-    start_time timestamp with time zone NOT NULL,
-    end_time timestamp with time zone NOT NULL,
-    ingest_time timestamp with time zone DEFAULT now() NOT NULL,
-    object_ldn text,
-    extra jsonb,
-    CONSTRAINT pm_metrics_monthly_granularity_check CHECK ((granularity = ANY (ARRAY['15min'::text, 'hourly'::text, 'daily'::text, 'weekly'::text, 'monthly'::text]))),
-    CONSTRAINT pm_metrics_monthly_metric_type_check CHECK ((metric_type = ANY (ARRAY['counter'::text, 'kpi'::text]))),
-    CONSTRAINT pm_metrics_monthly_statis_type_check CHECK (((statis_type IS NULL) OR (statis_type = ANY (ARRAY['sum'::text, 'avg'::text, 'max'::text, 'min'::text, 'pct'::text]))))
-);
-
-
---
--- Name: pm_metrics_weekly; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.pm_metrics_weekly (
-    device_oui text NOT NULL,
-    device_sn text NOT NULL,
-    metric_path text NOT NULL,
-    metric_type text NOT NULL,
-    metric_value double precision NOT NULL,
-    statis_type text,
-    granularity text NOT NULL,
-    "time" timestamp with time zone NOT NULL,
-    start_time timestamp with time zone NOT NULL,
-    end_time timestamp with time zone NOT NULL,
-    ingest_time timestamp with time zone DEFAULT now() NOT NULL,
-    object_ldn text,
-    extra jsonb,
-    CONSTRAINT pm_metrics_weekly_granularity_check CHECK ((granularity = ANY (ARRAY['15min'::text, 'hourly'::text, 'daily'::text, 'weekly'::text, 'monthly'::text]))),
-    CONSTRAINT pm_metrics_weekly_metric_type_check CHECK ((metric_type = ANY (ARRAY['counter'::text, 'kpi'::text]))),
-    CONSTRAINT pm_metrics_weekly_statis_type_check CHECK (((statis_type IS NULL) OR (statis_type = ANY (ARRAY['sum'::text, 'avg'::text, 'max'::text, 'min'::text, 'pct'::text]))))
-);
+-- NOTE: 以下 11 张表 (pm_files / pm_group_metrics_{daily,hourly,monthly,weekly}
+-- / pm_metrics / pm_metrics_{daily,hourly,monthly,weekly}) 已迁至时序库
+-- (migrations/tsdb/000001_tsdb_schema.sql)。pm_dashboards / pm_panels 等仍留主库。
 
 
 --
@@ -6572,21 +6291,7 @@ CREATE TABLE public.trace_export_jobs (
 -- Name: trace_messages; Type: TABLE; Schema: public; Owner: -
 --
 
-CREATE TABLE public.trace_messages (
-    captured_at timestamp with time zone NOT NULL,
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    task_id uuid NOT NULL,
-    device_sn character varying(64) NOT NULL,
-    direction character varying(8) NOT NULL,
-    rpc_method character varying(64),
-    cwmp_id character varying(64),
-    session_id character varying(64),
-    http_status smallint,
-    payload_size_bytes integer DEFAULT 0 NOT NULL,
-    payload_inline text,
-    payload_object_key character varying(512),
-    CONSTRAINT trace_messages_direction_check CHECK (((direction)::text = ANY ((ARRAY['in'::character varying, 'out'::character varying])::text[])))
-);
+-- NOTE: trace_messages 已迁至时序库 (migrations/tsdb/000001_tsdb_schema.sql)。
 
 
 --
@@ -8527,12 +8232,7 @@ ALTER TABLE ONLY public.rela_platform_indicator_formula_gsm
     ADD CONSTRAINT pk_rela_platform_indicator_formula_gsm PRIMARY KEY (id);
 
 
---
--- Name: pm_adhoc_aggregation_results pm_adhoc_aggregation_results_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.pm_adhoc_aggregation_results
-    ADD CONSTRAINT pm_adhoc_aggregation_results_pkey PRIMARY KEY (id, "time");
+-- NOTE: pm_adhoc_aggregation_results pkey 已随表迁至时序库。
 
 
 --
@@ -8543,84 +8243,8 @@ ALTER TABLE ONLY public.pm_dashboards
     ADD CONSTRAINT pm_dashboards_pkey PRIMARY KEY (id);
 
 
---
--- Name: pm_files pm_files_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.pm_files
-    ADD CONSTRAINT pm_files_pkey PRIMARY KEY (id);
-
-
---
--- Name: pm_group_metrics_daily pm_group_metrics_daily_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.pm_group_metrics_daily
-    ADD CONSTRAINT pm_group_metrics_daily_pkey PRIMARY KEY (device_group_id, metric_path, granularity, end_time);
-
-
---
--- Name: pm_group_metrics_hourly pm_group_metrics_hourly_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.pm_group_metrics_hourly
-    ADD CONSTRAINT pm_group_metrics_hourly_pkey PRIMARY KEY (id, "time");
-
-
---
--- Name: pm_group_metrics_monthly pm_group_metrics_monthly_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.pm_group_metrics_monthly
-    ADD CONSTRAINT pm_group_metrics_monthly_pkey PRIMARY KEY (device_group_id, metric_path, granularity, end_time);
-
-
---
--- Name: pm_group_metrics_weekly pm_group_metrics_weekly_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.pm_group_metrics_weekly
-    ADD CONSTRAINT pm_group_metrics_weekly_pkey PRIMARY KEY (device_group_id, metric_path, granularity, end_time);
-
-
---
--- Name: pm_metrics_daily pm_metrics_daily_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.pm_metrics_daily
-    ADD CONSTRAINT pm_metrics_daily_pkey PRIMARY KEY (device_oui, device_sn, metric_path, granularity, end_time);
-
-
---
--- Name: pm_metrics_hourly pm_metrics_hourly_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.pm_metrics_hourly
-    ADD CONSTRAINT pm_metrics_hourly_pkey PRIMARY KEY (id, "time");
-
-
---
--- Name: pm_metrics_monthly pm_metrics_monthly_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.pm_metrics_monthly
-    ADD CONSTRAINT pm_metrics_monthly_pkey PRIMARY KEY (device_oui, device_sn, metric_path, granularity, end_time);
-
-
---
--- Name: pm_metrics pm_metrics_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.pm_metrics
-    ADD CONSTRAINT pm_metrics_pkey PRIMARY KEY (id, "time");
-
-
---
--- Name: pm_metrics_weekly pm_metrics_weekly_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.pm_metrics_weekly
-    ADD CONSTRAINT pm_metrics_weekly_pkey PRIMARY KEY (device_oui, device_sn, metric_path, granularity, end_time);
+-- NOTE: pm_files / pm_group_metrics_* / pm_metrics / pm_metrics_* 的主键约束
+-- 已随表迁至时序库 (migrations/tsdb/000001_tsdb_schema.sql)。
 
 
 --
@@ -9055,12 +8679,7 @@ ALTER TABLE ONLY public.mr_customize_task_progress
     ADD CONSTRAINT uq_mr_progress_task_cell UNIQUE (task_id, small_cell_code);
 
 
---
--- Name: pm_files uq_pm_files_device_filename; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.pm_files
-    ADD CONSTRAINT uq_pm_files_device_filename UNIQUE (device_sn, file_name);
+-- NOTE: pm_files uq_pm_files_device_filename 已随表迁至时序库。
 
 
 --
@@ -9101,13 +8720,6 @@ ALTER TABLE ONLY public.users
 
 ALTER TABLE ONLY public.users
     ADD CONSTRAINT users_username_key UNIQUE (username);
-
-
---
--- Name: alarms_history_time_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX alarms_history_time_idx ON public.alarms_history USING btree ("time" DESC);
 
 
 --
@@ -11295,34 +10907,6 @@ CREATE INDEX idx_alarms_active_status_severity_time ON public.alarms_active USIN
 
 
 --
--- Name: idx_alarms_history_alarm; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_alarms_history_alarm ON public.alarms_history USING btree (alarm_id, "time" DESC);
-
-
---
--- Name: idx_alarms_history_alarm_type; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_alarms_history_alarm_type ON public.alarms_history USING btree (alarm_type);
-
-
---
--- Name: idx_alarms_history_device; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_alarms_history_device ON public.alarms_history USING btree (device_id, "time" DESC);
-
-
---
--- Name: idx_alarms_history_severity_time; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_alarms_history_severity_time ON public.alarms_history USING btree (severity, "time" DESC);
-
-
---
 -- Name: idx_api_endpoints_group; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -12534,34 +12118,6 @@ CREATE INDEX idx_mr_progress_task_status ON public.mr_customize_task_progress US
 
 
 --
--- Name: idx_mr_records_device; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_mr_records_device ON public.mr_records USING btree (device_id, "time" DESC);
-
-
---
--- Name: idx_mr_records_file; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_mr_records_file ON public.mr_records USING btree (file_id);
-
-
---
--- Name: idx_mr_records_measurement_data_gin; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_mr_records_measurement_data_gin ON public.mr_records USING gin (measurement_data jsonb_path_ops);
-
-
---
--- Name: idx_mr_records_type; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_mr_records_type ON public.mr_records USING btree (mr_type, "time" DESC);
-
-
---
 -- Name: idx_mr_task_status_endtime; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -13136,20 +12692,6 @@ CREATE INDEX idx_perf_template_rel_arithmetic_temp_id ON public.perf_template_re
 
 
 --
--- Name: idx_pm_adhoc_results_device; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_pm_adhoc_results_device ON public.pm_adhoc_aggregation_results USING btree (device_oui, device_sn, "time" DESC);
-
-
---
--- Name: idx_pm_adhoc_results_task_time; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_pm_adhoc_results_task_time ON public.pm_adhoc_aggregation_results USING btree (task_id, "time" DESC);
-
-
---
 -- Name: idx_pm_dashboards_is_builtin; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -13175,188 +12717,6 @@ CREATE INDEX idx_pm_dashboards_parent ON public.pm_dashboards USING btree (paren
 --
 
 CREATE INDEX idx_pm_dashboards_shared ON public.pm_dashboards USING gin (shared_with);
-
-
---
--- Name: idx_pm_files_created; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_pm_files_created ON public.pm_files USING btree (created_at DESC);
-
-
---
--- Name: idx_pm_files_device; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_pm_files_device ON public.pm_files USING btree (device_id);
-
-
---
--- Name: idx_pm_group_metrics_daily_group_time; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_pm_group_metrics_daily_group_time ON public.pm_group_metrics_daily USING btree (device_group_id, end_time DESC);
-
-
---
--- Name: idx_pm_group_metrics_daily_path_time; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_pm_group_metrics_daily_path_time ON public.pm_group_metrics_daily USING btree (metric_path, end_time DESC);
-
-
---
--- Name: idx_pm_group_metrics_hourly_group_time; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_pm_group_metrics_hourly_group_time ON public.pm_group_metrics_hourly USING btree (device_group_id, "time" DESC);
-
-
---
--- Name: idx_pm_group_metrics_hourly_path_time; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_pm_group_metrics_hourly_path_time ON public.pm_group_metrics_hourly USING btree (metric_path, "time" DESC);
-
-
---
--- Name: idx_pm_group_metrics_monthly_group_time; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_pm_group_metrics_monthly_group_time ON public.pm_group_metrics_monthly USING btree (device_group_id, end_time DESC);
-
-
---
--- Name: idx_pm_group_metrics_monthly_path_time; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_pm_group_metrics_monthly_path_time ON public.pm_group_metrics_monthly USING btree (metric_path, end_time DESC);
-
-
---
--- Name: idx_pm_group_metrics_weekly_group_time; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_pm_group_metrics_weekly_group_time ON public.pm_group_metrics_weekly USING btree (device_group_id, end_time DESC);
-
-
---
--- Name: idx_pm_group_metrics_weekly_path_time; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_pm_group_metrics_weekly_path_time ON public.pm_group_metrics_weekly USING btree (metric_path, end_time DESC);
-
-
---
--- Name: idx_pm_metrics_daily_device_time; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_pm_metrics_daily_device_time ON public.pm_metrics_daily USING btree (device_oui, device_sn, end_time DESC);
-
-
---
--- Name: idx_pm_metrics_daily_object_ldn; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_pm_metrics_daily_object_ldn ON public.pm_metrics_daily USING btree (object_ldn) WHERE (object_ldn IS NOT NULL);
-
-
---
--- Name: idx_pm_metrics_daily_path_time; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_pm_metrics_daily_path_time ON public.pm_metrics_daily USING btree (metric_path, end_time DESC);
-
-
---
--- Name: idx_pm_metrics_device_time; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_pm_metrics_device_time ON public.pm_metrics USING btree (device_oui, device_sn, "time" DESC);
-
-
---
--- Name: idx_pm_metrics_hourly_device_time; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_pm_metrics_hourly_device_time ON public.pm_metrics_hourly USING btree (device_oui, device_sn, "time" DESC);
-
-
---
--- Name: idx_pm_metrics_hourly_object_ldn; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_pm_metrics_hourly_object_ldn ON public.pm_metrics_hourly USING btree (object_ldn) WHERE (object_ldn IS NOT NULL);
-
-
---
--- Name: idx_pm_metrics_hourly_path_time; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_pm_metrics_hourly_path_time ON public.pm_metrics_hourly USING btree (metric_path, "time" DESC);
-
-
---
--- Name: idx_pm_metrics_ingest_time; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_pm_metrics_ingest_time ON public.pm_metrics USING btree (ingest_time DESC);
-
-
---
--- Name: idx_pm_metrics_monthly_device_time; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_pm_metrics_monthly_device_time ON public.pm_metrics_monthly USING btree (device_oui, device_sn, end_time DESC);
-
-
---
--- Name: idx_pm_metrics_monthly_object_ldn; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_pm_metrics_monthly_object_ldn ON public.pm_metrics_monthly USING btree (object_ldn) WHERE (object_ldn IS NOT NULL);
-
-
---
--- Name: idx_pm_metrics_monthly_path_time; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_pm_metrics_monthly_path_time ON public.pm_metrics_monthly USING btree (metric_path, end_time DESC);
-
-
---
--- Name: idx_pm_metrics_object_ldn; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_pm_metrics_object_ldn ON public.pm_metrics USING btree (object_ldn) WHERE (object_ldn <> ''::text);
-
-
---
--- Name: idx_pm_metrics_path_time; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_pm_metrics_path_time ON public.pm_metrics USING btree (metric_path, "time" DESC);
-
-
---
--- Name: idx_pm_metrics_weekly_device_time; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_pm_metrics_weekly_device_time ON public.pm_metrics_weekly USING btree (device_oui, device_sn, end_time DESC);
-
-
---
--- Name: idx_pm_metrics_weekly_object_ldn; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_pm_metrics_weekly_object_ldn ON public.pm_metrics_weekly USING btree (object_ldn) WHERE (object_ldn IS NOT NULL);
-
-
---
--- Name: idx_pm_metrics_weekly_path_time; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_pm_metrics_weekly_path_time ON public.pm_metrics_weekly USING btree (metric_path, end_time DESC);
 
 
 --
@@ -13962,20 +13322,6 @@ CREATE INDEX idx_trace_export_jobs_task ON public.trace_export_jobs USING btree 
 
 
 --
--- Name: idx_trace_messages_sn_time; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_trace_messages_sn_time ON public.trace_messages USING btree (device_sn, captured_at DESC);
-
-
---
--- Name: idx_trace_messages_task_time; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_trace_messages_task_time ON public.trace_messages USING btree (task_id, captured_at DESC);
-
-
---
 -- Name: idx_trace_tasks_created; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -14172,48 +13518,6 @@ CREATE INDEX idx_users_username ON public.users USING btree (username);
 
 
 --
--- Name: mr_records_time_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX mr_records_time_idx ON public.mr_records USING btree ("time" DESC);
-
-
---
--- Name: pm_adhoc_aggregation_results_time_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX pm_adhoc_aggregation_results_time_idx ON public.pm_adhoc_aggregation_results USING btree ("time" DESC);
-
-
---
--- Name: pm_group_metrics_hourly_time_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX pm_group_metrics_hourly_time_idx ON public.pm_group_metrics_hourly USING btree ("time" DESC);
-
-
---
--- Name: pm_metrics_hourly_time_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX pm_metrics_hourly_time_idx ON public.pm_metrics_hourly USING btree ("time" DESC);
-
-
---
--- Name: pm_metrics_time_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX pm_metrics_time_idx ON public.pm_metrics USING btree ("time" DESC);
-
-
---
--- Name: trace_messages_captured_at_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX trace_messages_captured_at_idx ON public.trace_messages USING btree (captured_at DESC);
-
-
---
 -- Name: uniq_dict_detail_child_value; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -14330,27 +13634,6 @@ COMMENT ON INDEX public.uq_mml_custom_command_private_name_per_owner IS '用户�
 --
 
 CREATE UNIQUE INDEX uq_mr_files_sn_filename ON public.mr_files USING btree (device_sn, file_name);
-
-
---
--- Name: uq_pm_group_metrics_hourly_natural; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX uq_pm_group_metrics_hourly_natural ON public.pm_group_metrics_hourly USING btree (device_group_id, metric_path, granularity, end_time, "time");
-
-
---
--- Name: uq_pm_metrics_hourly_natural; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX uq_pm_metrics_hourly_natural ON public.pm_metrics_hourly USING btree (device_oui, device_sn, metric_path, granularity, end_time, "time");
-
-
---
--- Name: uq_pm_metrics_natural; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX uq_pm_metrics_natural ON public.pm_metrics USING btree (device_oui, device_sn, metric_path, granularity, end_time, "time", object_ldn);
 
 
 --

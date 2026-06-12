@@ -555,7 +555,7 @@ SELECT
     MIN(m.end_time) AS end_time,
     MAX(m.ingest_time) AS ingest_time
 FROM %s m
-JOIN devices d
+JOIN device_dim d
   ON d.oui = m.device_oui AND d.serial_number = m.device_sn
 %s
 GROUP BY d.product_id, m.metric_path, m.granularity, m.time
@@ -723,15 +723,8 @@ func (a *Aggregator) queryBandTable(ctx context.Context, table string, q QueryRe
 		return p
 	}
 
-	// 小区→band 映射的路径过滤（LIKE '%suffix'）。
-	bandLike := make([]string, 0, len(bandPathSuffixes))
-	for _, s := range bandPathSuffixes {
-		bandLike = append(bandLike, fmt.Sprintf("bp.parameter_path LIKE %s", add("%"+s)))
-	}
-	cellLike := make([]string, 0, len(cellIDPathSuffixes))
-	for _, s := range cellIDPathSuffixes {
-		cellLike = append(cellLike, fmt.Sprintf("cp.parameter_path LIKE %s", add("%"+s)))
-	}
+	// 小区→band 映射改读 cell_band_dim（band 已预派生），无需再按 device_parameters 参数路径过滤；
+	// bandPathSuffixes/cellIDPathSuffixes 仅作为同步任务派生 cell_band_dim 的语义参考（见 worker tsdbsync）。
 
 	// PM 行过滤条件（与 product 维度同构）。
 	where := []string{"m.object_ldn IS NOT NULL"}
@@ -772,21 +765,10 @@ func (a *Aggregator) queryBandTable(ctx context.Context, table string, q QueryRe
 		limitSQL += fmt.Sprintf("\nOFFSET %s", add(q.Offset))
 	}
 
-	// cell_band CTE：device_id + fap_instance 上把 CellIdentity 与 FreqBandIndicator 配对。
+	// 小区→band 映射改读时序库影子表 cell_band_dim（device_id, cell_id, band），
+	// 由 worker 同步任务从主库 device_parameters 的 CellIdentity/FreqBandIndicator 配对派生后刷入。
+	// 原先此处用 device_parameters 现拼 CTE，跨库分离后改读本库影子表，SQL 形状收敛为直接 JOIN。
 	sqlStr := fmt.Sprintf(`
-WITH cell_band AS (
-    SELECT
-        cp.device_id,
-        cp.parameter_value AS cell_id,
-        bp.parameter_value AS band
-    FROM device_parameters cp
-    JOIN device_parameters bp
-      ON bp.device_id = cp.device_id AND bp.fap_instance = cp.fap_instance
-    WHERE (%s)
-      AND (%s)
-      AND cp.parameter_value IS NOT NULL
-      AND bp.parameter_value IS NOT NULL
-)
 SELECT
     cb.band,
     m.metric_path,
@@ -799,15 +781,15 @@ SELECT
     MIN(m.end_time) AS end_time,
     MAX(m.ingest_time) AS ingest_time
 FROM %s m
-JOIN devices d
+JOIN device_dim d
   ON d.oui = m.device_oui AND d.serial_number = m.device_sn
-JOIN cell_band cb
+JOIN cell_band_dim cb
   ON cb.device_id = d.id
  AND cb.cell_id = substring(m.object_ldn FROM 'Cellid=([0-9]+)')
 %s
 GROUP BY cb.band, m.metric_path, m.granularity, m.time
 ORDER BY m.time DESC%s`,
-		joinOr(cellLike), joinOr(bandLike), aggValueExpr, table, whereSQL, limitSQL)
+		aggValueExpr, table, whereSQL, limitSQL)
 
 	rows, err := a.db.Query(ctx, sqlStr, args...)
 	if err != nil {
@@ -946,7 +928,7 @@ func applyCommonFilters(qb sq.SelectBuilder, q QueryRequest) sq.SelectBuilder {
 	// 用 (device_oui, device_sn) 子查询 JOIN devices 收口，不改 SELECT 列形态）。
 	if len(q.Technologies) > 0 {
 		qb = qb.Where(
-			"(device_oui, device_sn) IN (SELECT oui, serial_number FROM devices WHERE technology = ANY(?))",
+			"(device_oui, device_sn) IN (SELECT oui, serial_number FROM device_dim WHERE technology = ANY(?))",
 			q.Technologies,
 		)
 	}

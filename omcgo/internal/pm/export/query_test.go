@@ -101,11 +101,12 @@ func TestBuildAdhocKeysetSQL(t *testing.T) {
 	assert.Equal(t, id.String(), args[0])
 }
 
-// adhoc 取数镜像网页关联：LEFT JOIN products / device_groups，选出产品名 / 设备组名。
+// adhoc 取数镜像网页关联：LEFT JOIN product_dim / device_group_dim（跨库分离后用本库影子表），
+// 选出产品名 / 设备组名。
 func TestBuildAdhocKeysetSQL_JoinsNames(t *testing.T) {
 	q, _ := buildAdhocKeysetSQL(uuid.New(), time.Time{}, time.Time{}, false, time.Time{}, uuid.Nil, 5000)
-	assert.Contains(t, q, "LEFT JOIN products")
-	assert.Contains(t, q, "device_groups")
+	assert.Contains(t, q, "LEFT JOIN product_dim")
+	assert.Contains(t, q, "device_group_dim")
 	assert.Contains(t, q, "product_name")
 	assert.Contains(t, q, "device_group_name")
 	assert.Contains(t, q, "pm_adhoc_aggregation_results")

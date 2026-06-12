@@ -64,7 +64,7 @@ func (s *PgAlarmStore) GetHistoryByID(ctx context.Context, id uuid.UUID) (*model
 		"alarms_history.cleared_by", "alarms_history.clear_note",
 		"alarms_history.probable_cause",
 	).From("alarms_history").
-		LeftJoin("devices d ON d.id = alarms_history.device_id").
+		LeftJoin("device_dim d ON d.id = alarms_history.device_id").
 		Where(squirrel.Eq{"alarms_history.alarm_id": id}).
 		OrderBy("alarms_history.time DESC").
 		Limit(1)
@@ -176,7 +176,8 @@ func (s *PgAlarmStore) Archive(ctx context.Context, alarm *model.Alarm) error {
 	if archiveUpdatedAt.IsZero() {
 		archiveUpdatedAt = time.Now()
 	}
-	_, err := s.pool.Exec(ctx,
+	// alarms_history 在时序库（TsPool）。
+	_, err := s.tsPool.Exec(ctx,
 		`INSERT INTO alarms_history (time, alarm_id, device_id, device_sn, carrier, severity, alarm_type, alarm_identifier, description, status, raised_at, acknowledged_at, cleared_at, device_name, technology, alarm_source, event_type, network_location, explicit_cause, ack_count, acknowledged_by, ack_note, additional_info, updated_at, cleared_by, clear_note, probable_cause)
 			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)`,
 		time.Now(), alarm.ID, alarm.DeviceID, alarm.DeviceSN, alarm.Carrier,
@@ -216,22 +217,23 @@ func (s *PgAlarmStore) ListHistory(ctx context.Context, filter AlarmFilter) (*mo
 		"alarms_history.cleared_by", "alarms_history.clear_note",
 		"alarms_history.probable_cause",
 	).From("alarms_history").
-		LeftJoin("devices d ON d.id = alarms_history.device_id").
-		LeftJoin("alarm_definitions ad ON ad.identifier = alarms_history.alarm_identifier")
-	countQb := storage.Psql.Select("COUNT(*)").From("alarms_history").LeftJoin("devices d ON d.id = alarms_history.device_id")
+		LeftJoin("device_dim d ON d.id = alarms_history.device_id").
+		LeftJoin("alarm_definition_dim ad ON ad.identifier = alarms_history.alarm_identifier")
+	countQb := storage.Psql.Select("COUNT(*)").From("alarms_history").LeftJoin("device_dim d ON d.id = alarms_history.device_id")
 
 	qb = applyHistoryFilters(qb, filter)
 	countQb = applyHistoryFilters(countQb, filter)
 
+	// alarms_history 与其 JOIN 的影子表（device_dim/alarm_definition_dim）都在时序库（TsPool）。
 	countSQL, countArgs, _ := countQb.ToSql()
 	var total int64
-	if err := s.pool.QueryRow(ctx, countSQL, countArgs...).Scan(&total); err != nil {
+	if err := s.tsPool.QueryRow(ctx, countSQL, countArgs...).Scan(&total); err != nil {
 		return nil, fmt.Errorf("count alarms_history: %w", err)
 	}
 
 	qb = qb.OrderBy("time DESC").Limit(uint64(filter.Limit())).Offset(uint64(filter.Offset()))
 	sql, args, _ := qb.ToSql()
-	rows, err := s.pool.Query(ctx, sql, args...)
+	rows, err := s.tsPool.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query alarms_history: %w", err)
 	}
@@ -404,18 +406,19 @@ func activeAlarmListSelect(loc appcontext.Locale) squirrel.SelectBuilder {
 // 与 ListHistory 保持同一 LEFT JOIN，使 applyHistoryFilters 内的 d.technology 等
 // 跨表条件可用；统计随之按 filter 收窄，而非旧实现的全表扫描。
 func historyStatsBase(filter AlarmFilter) squirrel.SelectBuilder {
-	qb := storage.Psql.Select().From("alarms_history").LeftJoin("devices d ON d.id = alarms_history.device_id")
+	qb := storage.Psql.Select().From("alarms_history").LeftJoin("device_dim d ON d.id = alarms_history.device_id")
 	return applyHistoryFilters(qb, filter)
 }
 
 func (s *PgAlarmStore) HistoryStatistics(ctx context.Context, filter AlarmFilter) (*AlarmStatistics, error) {
 	stats := &AlarmStatistics{BySeverity: make(map[model.AlarmSeverity]int64), ByType: make(map[string]int64)}
 
+	// alarms_history 及其 JOIN 的 device_dim 影子表都在时序库（TsPool）。
 	totalSQL, totalArgs, err := historyStatsBase(filter).Column("COUNT(*)").ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build count history: %w", err)
 	}
-	if err := s.pool.QueryRow(ctx, totalSQL, totalArgs...).Scan(&stats.TotalActive); err != nil {
+	if err := s.tsPool.QueryRow(ctx, totalSQL, totalArgs...).Scan(&stats.TotalActive); err != nil {
 		return nil, fmt.Errorf("count history: %w", err)
 	}
 
@@ -425,7 +428,7 @@ func (s *PgAlarmStore) HistoryStatistics(ctx context.Context, filter AlarmFilter
 	if err != nil {
 		return nil, fmt.Errorf("build stats history by severity: %w", err)
 	}
-	rows, err := s.pool.Query(ctx, sevSQL, sevArgs...)
+	rows, err := s.tsPool.Query(ctx, sevSQL, sevArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("stats history by severity: %w", err)
 	}
@@ -445,7 +448,7 @@ func (s *PgAlarmStore) HistoryStatistics(ctx context.Context, filter AlarmFilter
 	if err != nil {
 		return nil, fmt.Errorf("build stats history by type: %w", err)
 	}
-	rows2, err := s.pool.Query(ctx, typeSQL, typeArgs...)
+	rows2, err := s.tsPool.Query(ctx, typeSQL, typeArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("stats history by type: %w", err)
 	}
@@ -719,7 +722,8 @@ func (s *PgAlarmStore) scanHistoryAlarm(ctx context.Context, qb squirrel.SelectB
 	if err != nil {
 		return nil, fmt.Errorf("build history query: %w", err)
 	}
-	row := s.pool.QueryRow(ctx, sql, args...)
+	// alarms_history 在时序库（TsPool）；其 JOIN 的 devices→device_dim 影子表同库。
+	row := s.tsPool.QueryRow(ctx, sql, args...)
 	var a model.Alarm
 	var timeVal time.Time
 	var additionalJSON []byte
@@ -760,21 +764,24 @@ func (s *PgAlarmStore) BatchUnacknowledge(ctx context.Context, ids []uuid.UUID) 
 }
 
 func (s *PgAlarmStore) BatchHistoryAcknowledge(ctx context.Context, ids []uuid.UUID, by string, note string) error {
-	_, err := s.pool.Exec(ctx,
+	// alarms_history 在时序库（TsPool）。
+	_, err := s.tsPool.Exec(ctx,
 		`UPDATE alarms_history SET acknowledged_at = NOW(), acknowledged_by = $1, ack_note = $2, updated_at = NOW() WHERE alarm_id = ANY($3) AND acknowledged_at IS NULL`,
 		by, note, ids)
 	return err
 }
 
 func (s *PgAlarmStore) BatchHistoryUnacknowledge(ctx context.Context, ids []uuid.UUID) error {
-	_, err := s.pool.Exec(ctx,
+	// alarms_history 在时序库（TsPool）。
+	_, err := s.tsPool.Exec(ctx,
 		`UPDATE alarms_history SET acknowledged_at = NULL, acknowledged_by = NULL, updated_at = NOW() WHERE alarm_id = ANY($1) AND acknowledged_at IS NOT NULL`,
 		ids)
 	return err
 }
 
 func (s *PgAlarmStore) BatchHistoryDelete(ctx context.Context, ids []uuid.UUID) error {
-	_, err := s.pool.Exec(ctx,
+	// alarms_history 在时序库（TsPool）。
+	_, err := s.tsPool.Exec(ctx,
 		`DELETE FROM alarms_history WHERE alarm_id = ANY($1)`,
 		ids)
 	return err

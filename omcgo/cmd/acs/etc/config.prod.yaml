@@ -69,6 +69,16 @@ db:
   max_conn_idle_time: 5m
   health_check_interval: 30s
 
+# KPI/时序库物理分离：ACS 写 trace_messages（已迁独立时序库实例 postgres-tsdb）所需的第二个连接池。
+# 凭据/主机由 deploy/.env 经 compose 注入 ${POSTGRES_TSDB_*}/${TSDB_HOST}，Load() 解析前展开。
+tsdb:
+  dsn: "postgres://${POSTGRES_TSDB_USER}:${POSTGRES_TSDB_PASSWORD}@${TSDB_HOST}:5432/${POSTGRES_TSDB_DB}?sslmode=disable"
+  max_conns: 10
+  min_conns: 2
+  max_conn_lifetime: 30m
+  max_conn_idle_time: 5m
+  health_check_interval: 30s
+
 minio:
   endpoint: "minio:9000"
   access_key: "${MINIO_ROOT_USER}"    # 由 deploy/.env 注入 ${MINIO_ROOT_USER}

@@ -63,6 +63,16 @@ db:
   max_conn_idle_time: 5m
   health_check_interval: 30s
 
+# KPI/时序库物理分离：ACS 写 trace_messages（已迁时序库）所需的第二个连接池。
+# 本机裸跑：时序库实例在 localhost:5433（docker-compose postgres-tsdb 宿主映射）。
+tsdb:
+  dsn: "postgres://omcgo:omcgo123@localhost:5433/omcgo?sslmode=disable"
+  max_conns: 10
+  min_conns: 2
+  max_conn_lifetime: 30m
+  max_conn_idle_time: 5m
+  health_check_interval: 30s
+
 minio:
   endpoint: "localhost:9000"
   access_key: "minioadmin"

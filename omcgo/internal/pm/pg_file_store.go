@@ -120,10 +120,10 @@ func (s *PgPMFileStore) ListFiles(ctx context.Context, filter PMFileFilter) (*mo
 
 // ListFileDeviceAggregates 按 device_sn 聚合 pm_files，每设备 1 行。
 // 给 File Management → PM Tab 主列表用：起止 collect_time + 文件数 + 是否最近活跃
-// + 站名 + 产品类（LEFT JOIN devices）。
+// + 站名 + 产品类（LEFT JOIN device_dim 影子表，pm_files 在时序库）。
 //
-// 性能：devices.serial_number 有索引，10 万级 device 表 + 每页 20 个 SN 的 JOIN
-// 命中索引 sub-ms。
+// 性能：device_dim.serial_number 有索引，10 万级影子表 + 每页 20 个 SN 的 JOIN
+// 命中索引 sub-ms（影子表由 worker 同步任务从主库 devices 刷入）。
 func (s *PgPMFileStore) ListFileDeviceAggregates(ctx context.Context, filter PMFileDeviceFilter) (*model.ListResponse[PMFileDeviceAggregate], error) {
 	args := make([]interface{}, 0, 4)
 	wherePieces := make([]string, 0, 3)
@@ -145,8 +145,10 @@ func (s *PgPMFileStore) ListFileDeviceAggregates(ctx context.Context, filter PMF
 	}
 
 	// JOIN 在 count 与 list 两段同时存在，保证基于 devices 的过滤一致。
-	// devices.deleted_at 过滤掉软删行（同 device repository 通用做法）。
-	joinClause := " LEFT JOIN devices d ON d.serial_number = m.device_sn AND d.deleted_at IS NULL"
+	// device_dim.deleted_at 过滤掉软删行（同 device repository 通用做法）。
+	// pm_files 现在落在时序库（s.pool 注入 TsPool），devices 改读本库影子表 device_dim
+	// 替代跨库 JOIN。
+	joinClause := " LEFT JOIN device_dim d ON d.serial_number = m.device_sn AND d.deleted_at IS NULL"
 
 	countSQL := `SELECT COUNT(*) FROM (SELECT m.device_sn FROM pm_files m` + joinClause + whereClause + ` GROUP BY m.device_sn) AS sub`
 	var total int64

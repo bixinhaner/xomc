@@ -33,7 +33,8 @@ func startPMAdhocPipeline(
 	logger := w.Logger.Named("pm-adhoc")
 
 	// Repository + Executor
-	repo := adhoc.NewPgRepository(w.PgPool)
+	// KPI/时序库物理分离：pm_tasks 留主库（PgPool），pm_adhoc_aggregation_results 迁时序库（TsPool），双池。
+	repo := adhoc.NewPgRepository(w.PgPool, w.TsPool)
 	aggr := aggregator.NewWithPool(w.TsPool, kpiRouter, logger)
 	publisher := &adhoc.EventBusPublisher{Bus: w.EventBus}
 	// T-0182：存储范围全局开关（全存默认 / 仅存所选）。

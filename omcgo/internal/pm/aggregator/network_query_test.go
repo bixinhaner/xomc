@@ -59,8 +59,8 @@ func Test_queryNetworkTable_TechnologyFilter(t *testing.T) {
 	require.NoError(t, err)
 	sql := db.sqls[0]
 	assert.True(t,
-		strings.Contains(sql, "SELECT oui, serial_number FROM devices WHERE technology"),
-		"制式过滤走 devices 子查询收口")
+		strings.Contains(sql, "SELECT oui, serial_number FROM device_dim WHERE technology"),
+		"制式过滤走 device_dim 影子表子查询收口（跨库分离）")
 	// args 含制式值
 	foundTech := false
 	for _, a := range db.argsLog[0] {

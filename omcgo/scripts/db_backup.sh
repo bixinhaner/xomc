@@ -55,6 +55,18 @@ RETENTION_DAYS=30
 COMPRESS_LEVEL=6
 MAX_RETRY=3
 
+# ---------- 时序库实例（postgres-tsdb / TsPool）----------
+# KPI/时序库物理分离后第二个 PG 实例（PM/KPI 超表、告警历史、MR/trace、pm_files）。
+# 主库（PgPool）走上面 DB_HOST/DB_PORT，时序库走下面 TSDB_*。
+# 宿主 cron 跑：主库映射 localhost:5432，时序库映射 localhost:5433（见 compose ports）。
+# 容器内跑可 OMC_BACKUP_DB_HOST=postgres / OMC_BACKUP_TSDB_HOST=postgres-tsdb（都 :5432）。
+# 设 OMC_BACKUP_TSDB_ENABLED=false 可关时序库备份（向后兼容只备主库的旧行为）。
+TSDB_ENABLED="${OMC_BACKUP_TSDB_ENABLED:-true}"
+TSDB_HOST="${OMC_BACKUP_TSDB_HOST:-localhost}"
+TSDB_PORT="${OMC_BACKUP_TSDB_PORT:-5433}"
+TSDB_USER="${OMC_BACKUP_TSDB_USER:-${DB_USER}}"
+TSDB_NAME="${OMC_BACKUP_TSDB_NAME:-${DB_NAME}}"
+
 # ---------- 异地备份（T-0067 W3.H.3） ----------
 # 全部走环境变量，**不**接受 CLI flag，避免命令行泄露凭据
 OFFSITE_S3_ENDPOINT="${OFFSITE_S3_ENDPOINT:-}"
@@ -85,6 +97,13 @@ Options:
   --retention-days <days>  保留天数（默认 30）
   --backup-root <dir>      备份根目录（默认 \${REPO_ROOT}/backups）
   -h | --help              显示此帮助
+
+时序库（postgres-tsdb / TsPool）第二实例 —— 仅 env，默认开启，各备一份：
+  OMC_BACKUP_TSDB_ENABLED  true|false（默认 true；false=仅备主库，回退旧行为）
+  OMC_BACKUP_TSDB_HOST     时序库主机（默认 localhost；容器内用 postgres-tsdb）
+  OMC_BACKUP_TSDB_PORT     时序库端口（默认 5433；容器内用 5432）
+  OMC_BACKUP_TSDB_USER     时序库用户（默认同 --db-user）
+  OMC_BACKUP_TSDB_NAME     时序库库名（默认同 --db-name）
 EOF
 }
 
@@ -120,14 +139,10 @@ log() {
     echo "${msg}" >> "${LOG_FILE}"
 }
 
-# ---------- 输出文件名 ----------
+# ---------- 时间戳（两实例共用同一批次时间戳）----------
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
-DUMP_FILE="${BACKUP_DIR}/omc-${TIMESTAMP}.dump"
-META_FILE="${BACKUP_DIR}/omc-${TIMESTAMP}.meta"
 
-log "==== backup start env=${ENV_NAME} host=${DB_HOST}:${DB_PORT} db=${DB_NAME} target=${DUMP_FILE} ===="
-
-# ---------- 重试封装 ----------
+# ---------- 重试封装（读 DB_HOST/DB_PORT/DB_USER/DB_NAME/DUMP_FILE 全局）----------
 run_pg_dump() {
     # 注意：不在命令行携带密码；依赖 PGPASSWORD env / .pgpass
     pg_dump \
@@ -144,46 +159,63 @@ run_pg_dump() {
         2>>"${LOG_FILE}"
 }
 
-attempt=1
-START_EPOCH=$(date +%s)
-while true; do
-    log "attempt ${attempt}/${MAX_RETRY}: invoking pg_dump..."
-    if run_pg_dump; then
-        log "attempt ${attempt} succeeded"
-        break
+# ---------- 备份单个实例 ----------
+# 入参: <inst_label> <host> <port> <user> <dbname>
+# inst_label 进文件名（main / tsdb）使两实例 dump 互不覆盖。
+# 设置下游 helper（run_pg_dump / offsite 段）读取的全局 DB_*/DUMP_FILE/META_FILE，
+# 跑 pg_dump 重试 + meta + offsite；产出结果累加到 SUMMARY_* 数组供最后汇总。
+# pg_dump 重试耗尽 → exit 4（任一实例失败都使整次备份失败，保持非零退出语义）。
+backup_one_instance() {
+    local inst_label="$1"
+    DB_HOST="$2"; DB_PORT="$3"; DB_USER="$4"; DB_NAME="$5"
+
+    DUMP_FILE="${BACKUP_DIR}/omc-${inst_label}-${TIMESTAMP}.dump"
+    META_FILE="${BACKUP_DIR}/omc-${inst_label}-${TIMESTAMP}.meta"
+
+    log "==== backup start instance=${inst_label} env=${ENV_NAME} host=${DB_HOST}:${DB_PORT} db=${DB_NAME} target=${DUMP_FILE} ===="
+
+    local attempt=1 rc sleep_secs
+    local start_epoch end_epoch
+    start_epoch=$(date +%s)
+    while true; do
+        log "[${inst_label}] attempt ${attempt}/${MAX_RETRY}: invoking pg_dump..."
+        if run_pg_dump; then
+            log "[${inst_label}] attempt ${attempt} succeeded"
+            break
+        fi
+        rc=$?
+        log "[${inst_label}] attempt ${attempt} failed rc=${rc}"
+        if [[ ${attempt} -ge ${MAX_RETRY} ]]; then
+            log "[FATAL][${inst_label}] pg_dump 失败 ${MAX_RETRY} 次，放弃"
+            # 清理半成品
+            [[ -f "${DUMP_FILE}" ]] && rm -f "${DUMP_FILE}"
+            exit 4
+        fi
+        sleep_secs=$(( 2 ** attempt ))   # 2, 4, 8 ...
+        log "[${inst_label}] backoff ${sleep_secs}s before retry"
+        sleep "${sleep_secs}"
+        attempt=$(( attempt + 1 ))
+    done
+
+    end_epoch=$(date +%s)
+    DURATION=$(( end_epoch - start_epoch ))
+
+    # ---------- 计算 size + 校验和 ----------
+    SIZE_BYTES=$(wc -c < "${DUMP_FILE}" | tr -d ' ')
+    SIZE_HUMAN=$(du -h "${DUMP_FILE}" | awk '{print $1}')
+
+    if command -v sha256sum >/dev/null 2>&1; then
+        CHECKSUM=$(sha256sum "${DUMP_FILE}" | awk '{print $1}')
+    elif command -v shasum >/dev/null 2>&1; then
+        CHECKSUM=$(shasum -a 256 "${DUMP_FILE}" | awk '{print $1}')
+    else
+        CHECKSUM="unavailable"
     fi
-    rc=$?
-    log "attempt ${attempt} failed rc=${rc}"
-    if [[ ${attempt} -ge ${MAX_RETRY} ]]; then
-        log "[FATAL] pg_dump 失败 ${MAX_RETRY} 次，放弃"
-        # 清理半成品
-        [[ -f "${DUMP_FILE}" ]] && rm -f "${DUMP_FILE}"
-        exit 4
-    fi
-    sleep_secs=$(( 2 ** attempt ))   # 2, 4, 8 ...
-    log "backoff ${sleep_secs}s before retry"
-    sleep "${sleep_secs}"
-    attempt=$(( attempt + 1 ))
-done
 
-END_EPOCH=$(date +%s)
-DURATION=$(( END_EPOCH - START_EPOCH ))
-
-# ---------- 计算 size + 校验和 ----------
-SIZE_BYTES=$(wc -c < "${DUMP_FILE}" | tr -d ' ')
-SIZE_HUMAN=$(du -h "${DUMP_FILE}" | awk '{print $1}')
-
-if command -v sha256sum >/dev/null 2>&1; then
-    CHECKSUM=$(sha256sum "${DUMP_FILE}" | awk '{print $1}')
-elif command -v shasum >/dev/null 2>&1; then
-    CHECKSUM=$(shasum -a 256 "${DUMP_FILE}" | awk '{print $1}')
-else
-    CHECKSUM="unavailable"
-fi
-
-# ---------- 写 meta ----------
-cat > "${META_FILE}" <<EOF
+    # ---------- 写 meta ----------
+    cat > "${META_FILE}" <<EOF
 file=${DUMP_FILE}
+instance=${inst_label}
 env=${ENV_NAME}
 host=${DB_HOST}
 port=${DB_PORT}
@@ -197,10 +229,26 @@ offsite_endpoint=${OFFSITE_S3_ENDPOINT}
 offsite_bucket=${OFFSITE_S3_BUCKET}
 EOF
 
-log "size=${SIZE_HUMAN} (${SIZE_BYTES} bytes) duration=${DURATION}s sha256=${CHECKSUM}"
+    log "[${inst_label}] size=${SIZE_HUMAN} (${SIZE_BYTES} bytes) duration=${DURATION}s sha256=${CHECKSUM}"
+
+    # 异地上传（读 DUMP_FILE/META_FILE 全局）
+    run_offsite_upload || true
+
+    # 累加汇总
+    SUMMARY_LABELS+=("${inst_label}")
+    SUMMARY_FILES+=("${DUMP_FILE}")
+    SUMMARY_SIZES+=("${SIZE_BYTES}")
+    SUMMARY_SIZES_HUMAN+=("${SIZE_HUMAN}")
+    SUMMARY_DURATIONS+=("${DURATION}")
+    SUMMARY_CHECKSUMS+=("${CHECKSUM}")
+    SUMMARY_OFFSITE_STATUS+=("${OFFSITE_STATUS}")
+    SUMMARY_OFFSITE_REASON+=("${OFFSITE_REASON}")
+    SUMMARY_OFFSITE_TARGET+=("${OFFSITE_TARGET}")
+    SUMMARY_OFFSITE_DURATION+=("${OFFSITE_DURATION}")
+}
 
 # ---------- 异地 S3/MinIO 上传（T-0067 W3.H.3） ----------
-# 默认值
+# 默认值在 run_offsite_upload 顶部按实例重置（两实例各上传一次）。
 OFFSITE_STATUS="skipped"
 OFFSITE_DURATION=0
 OFFSITE_TARGET=""
@@ -282,6 +330,11 @@ offsite_upload_aws() {
 }
 
 run_offsite_upload() {
+    # 每实例重置异地状态（两实例各上传一次，避免上轮残留串味）
+    OFFSITE_STATUS="skipped"
+    OFFSITE_DURATION=0
+    OFFSITE_TARGET=""
+    OFFSITE_REASON=""
     # 任一关键 env 缺失则视为未启用（与 W1.8 base 行为兼容）
     if [[ -z "${OFFSITE_S3_ENDPOINT}" || -z "${OFFSITE_S3_BUCKET}" \
           || -z "${OFFSITE_S3_ACCESS_KEY}" || -z "${OFFSITE_S3_SECRET_KEY}" ]]; then
@@ -330,7 +383,28 @@ run_offsite_upload() {
     done
 }
 
-run_offsite_upload || true   # 双保险：永不让异地段失败影响本地备份退出码
+# ---------- 驱动：对两实例各备份一次 ----------
+# 主库（PgPool / 业务数据）必备；时序库（TsPool / postgres-tsdb）按
+# OMC_BACKUP_TSDB_ENABLED 开关（默认开）。两实例 dump 落同一 env 目录，
+# 文件名以 instance 段（main/tsdb）区分。
+SUMMARY_LABELS=()
+SUMMARY_FILES=()
+SUMMARY_SIZES=()
+SUMMARY_SIZES_HUMAN=()
+SUMMARY_DURATIONS=()
+SUMMARY_CHECKSUMS=()
+SUMMARY_OFFSITE_STATUS=()
+SUMMARY_OFFSITE_REASON=()
+SUMMARY_OFFSITE_TARGET=()
+SUMMARY_OFFSITE_DURATION=()
+
+backup_one_instance "main" "${DB_HOST}" "${DB_PORT}" "${DB_USER}" "${DB_NAME}"
+
+if [[ "${TSDB_ENABLED}" == "true" || "${TSDB_ENABLED}" == "1" ]]; then
+    backup_one_instance "tsdb" "${TSDB_HOST}" "${TSDB_PORT}" "${TSDB_USER}" "${TSDB_NAME}"
+else
+    log "tsdb: OMC_BACKUP_TSDB_ENABLED=${TSDB_ENABLED} → 跳过时序库备份（仅备主库）"
+fi
 
 # ---------- 清理过期备份 ----------
 log "cleanup: 清理 > ${RETENTION_DAYS} 天的旧 dump/meta"
@@ -344,21 +418,36 @@ done < <(find "${BACKUP_DIR}" -maxdepth 1 -type f \( -name 'omc-*.dump' -o -name
 log "cleanup: removed=${removed} files"
 
 # ---------- 输出 stdout 摘要（cron / 日志收集器友好） ----------
+# instances 数组：每实例（main/tsdb）一条；retention/old_files_removed 为本次共享。
+INSTANCES_JSON=""
+for i in "${!SUMMARY_LABELS[@]}"; do
+    [[ -n "${INSTANCES_JSON}" ]] && INSTANCES_JSON+=","
+    INSTANCES_JSON+=$(cat <<EOF
+
+    {
+      "instance": "${SUMMARY_LABELS[$i]}",
+      "file": "${SUMMARY_FILES[$i]}",
+      "size_bytes": ${SUMMARY_SIZES[$i]},
+      "size_human": "${SUMMARY_SIZES_HUMAN[$i]}",
+      "duration_seconds": ${SUMMARY_DURATIONS[$i]},
+      "sha256": "${SUMMARY_CHECKSUMS[$i]}",
+      "offsite_status": "${SUMMARY_OFFSITE_STATUS[$i]}",
+      "offsite_reason": "${SUMMARY_OFFSITE_REASON[$i]}",
+      "offsite_target": "${SUMMARY_OFFSITE_TARGET[$i]}",
+      "offsite_duration_seconds": ${SUMMARY_OFFSITE_DURATION[$i]}
+    }
+EOF
+)
+done
+
 cat <<EOF
 {
   "status": "ok",
   "env": "${ENV_NAME}",
-  "file": "${DUMP_FILE}",
-  "size_bytes": ${SIZE_BYTES},
-  "size_human": "${SIZE_HUMAN}",
-  "duration_seconds": ${DURATION},
-  "sha256": "${CHECKSUM}",
   "retention_days": ${RETENTION_DAYS},
   "old_files_removed": ${removed},
-  "offsite_status": "${OFFSITE_STATUS}",
-  "offsite_reason": "${OFFSITE_REASON}",
-  "offsite_target": "${OFFSITE_TARGET}",
-  "offsite_duration_seconds": ${OFFSITE_DURATION}
+  "instances": [${INSTANCES_JSON}
+  ]
 }
 EOF
 

@@ -13,7 +13,8 @@ db:
   log_sql_slow_threshold: 1000
 
 tsdb:
-  dsn: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable"  # 同 db，复用 ${POSTGRES_*}（TimescaleDB 与 PG 同实例）
+  # KPI/时序库物理分离：指向独立时序库实例 postgres-tsdb（凭据/主机由 deploy/.env 经 compose 注入 ${POSTGRES_TSDB_*}/${TSDB_HOST}）。
+  dsn: "postgres://${POSTGRES_TSDB_USER}:${POSTGRES_TSDB_PASSWORD}@${TSDB_HOST}:5432/${POSTGRES_TSDB_DB}?sslmode=disable"
   # 连接池核定（#24）：KPI 聚合写时序，TS 池温和上调 20→25。
   max_conns: 25
   min_conns: 5

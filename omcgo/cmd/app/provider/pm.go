@@ -28,7 +28,8 @@ func initPMModule(c *Container) error {
 	pmCounterRepo := counter.NewPgCounterRepository(c.TsPool)
 	pmKPIRepo := kpi.NewPgKPIRepository(c.TsPool)
 	pmTaskRepo := pm.NewPgTaskRepository(c.PgPool)
-	pmFileStore := pm.NewPgPMFileStore(c.PgPool)
+	// KPI/时序库物理分离：pm_files 已迁时序库（与 pm_metrics 同库保 copy_ingest 原子性），文件存储走 TsPool。
+	pmFileStore := pm.NewPgPMFileStore(c.TsPool)
 
 	// Set shared services
 	c.PMCounterRepo = pmCounterRepo
@@ -78,7 +79,8 @@ func initPMModule(c *Container) error {
 	pmAsyncJobRepo := asyncjob.NewPgRepository(c.PgPool)
 
 	// T-0164-P7 / G7：adhoc 任务 REST 入口（worker 端跑实际执行）。
-	pmAdhocRepo := adhoc.NewPgRepository(c.PgPool)
+	// KPI/时序库物理分离：pm_tasks 留主库（PgPool），pm_adhoc_aggregation_results 迁时序库（TsPool），双池。
+	pmAdhocRepo := adhoc.NewPgRepository(c.PgPool, c.TsPool)
 	pmAdhocHandler := adhoc.NewHandler(pmAdhocRepo, c.TsPool, c.EventBus, logger.Named("adhoc"))
 
 	// T-0164-P6 / G6：PM 仪表盘 REST 入口（dashboard + panel + 用户偏好）。

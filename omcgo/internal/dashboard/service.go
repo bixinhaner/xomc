@@ -128,11 +128,16 @@ type KPITimeSeriesEntry struct {
 type KPITimeSeriesResponse map[string][]KPITimeSeriesEntry
 
 // Service aggregates data from multiple modules for the dashboard.
+//
+// pgPool 指向主库（业务数据：alarms_active / devices / device_groups / dashboard_widgets）；
+// tsPool 指向时序库（alarms_history / alarm_efficiency_metrics matview / pm_metrics）。
+// KPI/时序库物理分离后，读时序表的查询必须走 tsPool，否则跨库查不到表。
 type Service struct {
 	deviceService *device.DeviceService
 	alarmStore    alarm.AlarmStore
 	kpiRepo       kpi.KPIRepository
 	pgPool        *pgxpool.Pool
+	tsPool        *pgxpool.Pool
 	groupRepo     topology.DeviceGroupRepository
 	logger        *zap.Logger
 }
@@ -143,6 +148,7 @@ func NewService(
 	alarmStore alarm.AlarmStore,
 	kpiRepo kpi.KPIRepository,
 	pgPool *pgxpool.Pool,
+	tsPool *pgxpool.Pool,
 	groupRepo topology.DeviceGroupRepository,
 	logger *zap.Logger,
 ) *Service {
@@ -151,6 +157,7 @@ func NewService(
 		alarmStore:    alarmStore,
 		kpiRepo:       kpiRepo,
 		pgPool:        pgPool,
+		tsPool:        tsPool,
 		groupRepo:     groupRepo,
 		logger:        logger.Named("dashboard"),
 	}
@@ -880,7 +887,8 @@ func (s *Service) GetKPITimeSeries(ctx context.Context, kpiNames []string, start
 		return nil, fmt.Errorf("build kpi time series query: %w", err)
 	}
 
-	rows, err := s.pgPool.Query(ctx, query, args...)
+	// pm_metrics 在时序库（TsPool）。
+	rows, err := s.tsPool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query kpi time series: %w", err)
 	}

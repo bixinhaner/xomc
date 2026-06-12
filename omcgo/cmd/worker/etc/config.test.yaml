@@ -11,7 +11,8 @@ db:
   log_sql_slow_threshold: 500
 
 tsdb:
-  dsn: "postgres://omcgo:omcgo123@172.19.1.73:5432/omcgo?sslmode=disable"
+  # KPI/时序库物理分离：指向独立时序库实例（测试主机 postgres-tsdb 宿主映射端口 5433，与主库 5432 物理分离）。
+  dsn: "postgres://omcgo:omcgo123@172.19.1.73:5433/omcgo?sslmode=disable"
   # 连接池核定（#24）：与 prod 对齐，worker TS 池温和上调 20→25。
   max_conns: 25
   min_conns: 5

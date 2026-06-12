@@ -43,7 +43,8 @@ func (s *Service) GetAlarmHeatmap(ctx context.Context, days int) (*HeatmapData, 
 		ORDER BY day_of_week, hour_of_day
 	`
 
-	rows, err := s.pgPool.Query(ctx, query, days)
+	// alarms_history 在时序库（TsPool）。
+	rows, err := s.tsPool.Query(ctx, query, days)
 	if err != nil {
 		s.logger.Error("failed to query alarm heatmap", zap.Error(err))
 		return nil, fmt.Errorf("query alarm heatmap: %w", err)
@@ -125,7 +126,8 @@ func (s *Service) queryHeatmapBySeverityMap(ctx context.Context, days int, sever
 		ORDER BY severity, day_of_week, hour_of_day
 	`
 
-	rows, err := s.pgPool.Query(ctx, query, days, severityFilterValue(severity))
+	// alarms_history 在时序库（TsPool）。
+	rows, err := s.tsPool.Query(ctx, query, days, severityFilterValue(severity))
 	if err != nil {
 		s.logger.Error("failed to query alarm heatmap by severity", zap.Error(err))
 		return nil, fmt.Errorf("query alarm heatmap by severity: %w", err)
@@ -276,7 +278,8 @@ func (s *Service) GetAlarmHeatmapAll(ctx context.Context, days int) (map[string]
 		ORDER BY severity, day_of_week, hour_of_day
 	`
 
-	rows, err := s.pgPool.Query(ctx, query, days)
+	// alarms_history 在时序库（TsPool）。
+	rows, err := s.tsPool.Query(ctx, query, days)
 	if err != nil {
 		s.logger.Error("failed to query all alarm heatmaps", zap.Error(err))
 		return nil, fmt.Errorf("query all alarm heatmaps: %w", err)

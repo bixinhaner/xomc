@@ -32,8 +32,8 @@ func Test_buildResultsQuery_NameJoins(t *testing.T) {
 	assert.Contains(t, q, "g.name AS device_group_name")
 	// 两个 LEFT JOIN：product 按 id 对 product_id；device_group 按 'DeviceGroup='||id 对 object_ldn 逗号前段
 	// （设备组制式治本：object_ldn 改带 ',Tech=<制式>' 后缀，取组名需先 split_part 剥逗号前段）。
-	assert.Contains(t, q, "LEFT JOIN products p ON p.id = r.product_id")
-	assert.Contains(t, q, "LEFT JOIN device_groups g ON ('DeviceGroup=' || g.id::text) = split_part(r.object_ldn, ',', 1)")
+	assert.Contains(t, q, "LEFT JOIN product_dim p ON p.id = r.product_id")
+	assert.Contains(t, q, "LEFT JOIN device_group_dim g ON ('DeviceGroup=' || g.id::text) = split_part(r.object_ldn, ',', 1)")
 	// 主表起了别名 r
 	assert.Contains(t, q, "FROM pm_adhoc_aggregation_results r")
 }

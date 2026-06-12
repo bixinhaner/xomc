@@ -56,7 +56,8 @@ func (s *Service) GetEfficiencyMetrics(ctx context.Context) (*EfficiencyMetrics,
 		LIMIT 1
 	`
 
-	rows, err := s.pgPool.Query(ctx, query)
+	// alarm_efficiency_metrics matview 建在时序库（TsPool）的 alarms_history 上。
+	rows, err := s.tsPool.Query(ctx, query)
 	if err != nil {
 		s.logger.Error("failed to query efficiency metrics", zap.Error(err))
 		return nil, fmt.Errorf("query efficiency metrics: %w", err)
@@ -126,7 +127,8 @@ func (s *Service) getEfficiencyTrend(ctx context.Context, severity string) ([]Da
 		ORDER BY date DESC
 	`
 
-	rows, err := s.pgPool.Query(ctx, query, severity)
+	// alarms_history 在时序库（TsPool）。
+	rows, err := s.tsPool.Query(ctx, query, severity)
 	if err != nil {
 		return nil, fmt.Errorf("query efficiency trend: %w", err)
 	}
@@ -147,7 +149,8 @@ func (s *Service) getEfficiencyTrend(ctx context.Context, severity string) ([]Da
 // RefreshEfficiencyMetrics manually refreshes the materialized view.
 // 手动刷新告警效率指标物化视图
 func (s *Service) RefreshEfficiencyMetrics(ctx context.Context) error {
-	_, err := s.pgPool.Exec(ctx, "REFRESH MATERIALIZED VIEW CONCURRENTLY alarm_efficiency_metrics")
+	// alarm_efficiency_metrics matview 建在时序库（TsPool）。
+	_, err := s.tsPool.Exec(ctx, "REFRESH MATERIALIZED VIEW CONCURRENTLY alarm_efficiency_metrics")
 	if err != nil {
 		s.logger.Error("failed to refresh efficiency metrics", zap.Error(err))
 		return fmt.Errorf("refresh efficiency metrics: %w", err)
@@ -185,8 +188,9 @@ func (s *Service) GetOverallEfficiencyMetrics(ctx context.Context) (*EfficiencyM
 		WHERE cleared_at > NOW() - INTERVAL '30 days'
 	`
 
+	// alarms_history 在时序库（TsPool）。
 	var m EfficiencyMetrics
-	err := s.pgPool.QueryRow(ctx, query).Scan(
+	err := s.tsPool.QueryRow(ctx, query).Scan(
 		&m.Severity,
 		&m.AcknowledgedCount,
 		&m.ClearedCount,
@@ -226,7 +230,8 @@ func (s *Service) getOverallEfficiencyTrend(ctx context.Context) ([]DailyEfficie
 		ORDER BY date DESC
 	`
 
-	rows, err := s.pgPool.Query(ctx, query)
+	// alarms_history 在时序库（TsPool）。
+	rows, err := s.tsPool.Query(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("query overall efficiency trend: %w", err)
 	}
