@@ -10,6 +10,7 @@ import {
   Form,
   Input,
   InputNumber,
+  List,
   Modal,
   Popconfirm,
   Progress,
@@ -247,6 +248,15 @@ export default function FileTransferCenter() {
   }, []);
   const [drawerDeviceKeyword, setDrawerDeviceKeyword] = useState('');
   const [drawerDeviceKeywordInput, setDrawerDeviceKeywordInput] = useState('');
+  // #215: 选设备候选列表真分页 —— 当前页码 / 每页条数。
+  const [drawerDevicePage, setDrawerDevicePage] = useState(1);
+  const [drawerDevicePageSize, setDrawerDevicePageSize] = useState(20);
+  // #215: 已选设备清单（跨页累积）。候选列表分页后当前页只含本页设备，
+  // 而已选设备可能分布在多页，故用 id→设备 的 Map 累积，保证"已选 N 台"
+  // 文本、查看清单 Modal、CONFIG/LICENSE 探测表都能看到所有已选设备，不被分页截断。
+  const [selectedDeviceMap, setSelectedDeviceMap] = useState<Record<string, UnifiedFileTransferDeviceItem>>({});
+  // #215: 已选清单查看 Modal 开关。
+  const [selectedDevicesModalOpen, setSelectedDevicesModalOpen] = useState(false);
   const [detailTask, setDetailTask] = useState<UnifiedFileTransferTask | null>(null);
   const [detailDrawerOpen, setDetailDrawerOpen] = useState(false);
 
@@ -326,8 +336,8 @@ export default function FileTransferCenter() {
   const createExecutionModeOptions = executionModeOptions;
 
   const { data: drawerDevicesData, isLoading: drawerDevicesLoading } = useUnifiedFileTransferDeviceCandidates({
-    page: 1,
-    pageSize: 200,
+    page: drawerDevicePage,
+    pageSize: drawerDevicePageSize,
     category: selectedCategory || undefined,
     typeCode: drawerTaskType?.typeCode || selectedTypeCode || undefined,
     // 升级类任务（needsFirmwareSelection）用 drawerProductClass 表单字段
@@ -337,6 +347,31 @@ export default function FileTransferCenter() {
   });
 
   const drawerDeviceCandidates = drawerDevicesData?.items ?? [];
+  const drawerDeviceTotal = drawerDevicesData?.total ?? 0;
+
+  // #215: 当前页拉到的候选设备并入 selectedDeviceMap，只补充设备对象信息，
+  // 不改 selectedDrawerDeviceIds —— 翻页只是让"已选清单"能补齐其它页设备的展示数据。
+  useEffect(() => {
+    if (drawerDeviceCandidates.length === 0) {
+      return;
+    }
+    setSelectedDeviceMap((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const item of drawerDeviceCandidates) {
+        if (next[item.id] !== item) {
+          next[item.id] = item;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [drawerDeviceCandidates]);
+
+  // #215: 过滤条件（分类/任务类型/产品类型/关键字）变化时，候选集变了，重置回第 1 页。
+  useEffect(() => {
+    setDrawerDevicePage(1);
+  }, [selectedCategory, drawerTaskType?.typeCode, selectedTypeCode, drawerProductClass, drawerDeviceKeyword]);
 
   const firmwareCandidates = useMemo(
     () => buildFirmwareCandidateList(firmwareData?.items ?? []),
@@ -404,9 +439,13 @@ export default function FileTransferCenter() {
     [filteredTaskTypes, t],
   );
 
+  // #215: 已选设备从跨页累积的 selectedDeviceMap 取，保证翻页后其它页的已选设备
+  // 仍能在"已选 N 台"清单 / CONFIG/LICENSE 探测表里展示，不被当前页截断。
   const drawerSelectedDevices = useMemo(
-    () => drawerDeviceCandidates.filter((item) => selectedDrawerDeviceIds.includes(item.id)),
-    [drawerDeviceCandidates, selectedDrawerDeviceIds],
+    () => selectedDrawerDeviceIds
+      .map((id) => selectedDeviceMap[id])
+      .filter((item): item is UnifiedFileTransferDeviceItem => Boolean(item)),
+    [selectedDeviceMap, selectedDrawerDeviceIds],
   );
 
   // T-0164: CONFIG_RESTORE 模式自动检测每台设备是否已有最新配置快照。
@@ -573,16 +612,28 @@ export default function FileTransferCenter() {
         productType: needsFirmwareSelection(drawerTaskType) ? drawerProductClass : undefined,
       });
       const allCandidates = resp.items ?? [];
-      const snToId = new Map(allCandidates.map((d) => [d.deviceSn, d.id]));
+      const snToDevice = new Map(allCandidates.map((d) => [d.deviceSn, d]));
       const matchedIds: string[] = [];
+      const matchedDevices: UnifiedFileTransferDeviceItem[] = [];
       const unmatched: string[] = [];
       for (const sn of tokens) {
-        const id = snToId.get(sn);
-        if (id) matchedIds.push(id);
-        else unmatched.push(sn);
+        const device = snToDevice.get(sn);
+        if (device) {
+          matchedIds.push(device.id);
+          matchedDevices.push(device);
+        } else {
+          unmatched.push(sn);
+        }
       }
-      // 与已选合并去重
+      // 与已选合并去重；同时把命中设备对象并入 selectedDeviceMap，供已选清单展示。
       setSelectedDrawerDeviceIds((prev) => Array.from(new Set([...prev, ...matchedIds])));
+      setSelectedDeviceMap((prev) => {
+        const next = { ...prev };
+        for (const device of matchedDevices) {
+          next[device.id] = device;
+        }
+        return next;
+      });
       if (unmatched.length === 0) {
         void message.success(t('ufte.msg.batchSelectedCount', { count: matchedIds.length }));
       } else {
@@ -601,6 +652,19 @@ export default function FileTransferCenter() {
     } finally {
       setBatchSNApplying(false);
     }
+  };
+
+  // #215: 从已选清单移除一台设备 —— 同时从 id 列表与设备 Map 清掉。
+  const handleRemoveSelectedDevice = (deviceId: string) => {
+    setSelectedDrawerDeviceIds((prev) => prev.filter((id) => id !== deviceId));
+    setSelectedDeviceMap((prev) => {
+      if (!(deviceId in prev)) {
+        return prev;
+      }
+      const next = { ...prev };
+      delete next[deviceId];
+      return next;
+    });
   };
 
   // 设备列表导出 CSV — 调后端 /ufte/devices/export 端点：复用 ListDevices
@@ -1114,6 +1178,8 @@ export default function FileTransferCenter() {
       executionMode: 'immediate',
     });
     setSelectedDrawerDeviceIds([]);
+    setSelectedDeviceMap({});
+    setDrawerDevicePage(1);
     setDrawerDeviceKeyword('');
     setDrawerDeviceKeywordInput('');
     setSelectedTypeCode(nextTypeCode);
@@ -1160,12 +1226,10 @@ export default function FileTransferCenter() {
         taskForm.setFieldValue('firmwareId', undefined);
       }
     }
-
-    const validIds = selectedDrawerDeviceIds.filter((id) => drawerDeviceCandidates.some((item) => item.id === id));
-    if (validIds.length !== selectedDrawerDeviceIds.length) {
-      setSelectedDrawerDeviceIds(validIds);
-    }
-  }, [drawerDeviceCandidates, drawerProductClass, drawerProductClassOptions, drawerTaskType, firmwareOptions, selectedDrawerDeviceIds, taskDrawerOpen, taskForm]);
+    // #215: 候选列表启用真分页后，当前页只含本页设备，已选设备可能在其它页，
+    // 不能再按"当前页候选"裁剪 selectedDrawerDeviceIds（否则翻页即丢已选）。
+    // 选中跨页保留，用户可在"已选 N 台"清单里逐台移除。
+  }, [drawerProductClass, drawerProductClassOptions, drawerTaskType, firmwareOptions, taskDrawerOpen, taskForm]);
 
   const handleCreateTask = async () => {
     // 防止用户连续点击「创建」按钮重复提交：mutation 进行中直接忽略后续点击。
@@ -1212,6 +1276,8 @@ export default function FileTransferCenter() {
         void message.success(t('ufte.msg.taskCreated'));
         setTaskDrawerOpen(false);
         setSelectedDrawerDeviceIds([]);
+        setSelectedDeviceMap({});
+        setSelectedDevicesModalOpen(false);
         taskForm.resetFields();
       })
       .catch((error: unknown) => {
@@ -1597,7 +1663,16 @@ export default function FileTransferCenter() {
                 >
                   {t('ufte.action.batchSnInput')}
                 </Button>
-                <Text type="secondary">{t('ufte.form.selectedCount', { count: drawerSelectedDevices.length })}</Text>
+                <Text type="secondary">{t('ufte.form.deviceTotal', { count: drawerDeviceTotal })}</Text>
+                <Button
+                  type="link"
+                  size="small"
+                  style={{ padding: 0 }}
+                  disabled={drawerSelectedDevices.length === 0}
+                  onClick={() => setSelectedDevicesModalOpen(true)}
+                >
+                  {t('ufte.form.selectedCount', { count: drawerSelectedDevices.length })}
+                </Button>
               </Space>
               <Table<UnifiedFileTransferDeviceItem>
                 size="small"
@@ -1605,11 +1680,34 @@ export default function FileTransferCenter() {
                 loading={drawerDevicesLoading}
                 columns={drawerDeviceColumns}
                 dataSource={drawerDeviceCandidates}
-                pagination={false}
+                pagination={{
+                  current: drawerDevicePage,
+                  pageSize: drawerDevicePageSize,
+                  total: drawerDeviceTotal,
+                  showSizeChanger: true,
+                  showTotal: (total) => t('ufte.form.deviceTotal', { count: total }),
+                  onChange: (page, pageSize) => {
+                    setDrawerDevicePage(page);
+                    setDrawerDevicePageSize(pageSize);
+                  },
+                }}
                 rowSelection={{
                   selectedRowKeys: selectedDrawerDeviceIds,
-                  onChange: (selectedRowKeys) => {
+                  // #215: 真分页后 preserveSelectedRowKeys 让其它页的已选项不被
+                  // 当前页 onChange 覆盖丢失（受控 selectedRowKeys 跨页保留）。
+                  preserveSelectedRowKeys: true,
+                  onChange: (selectedRowKeys, selectedRows) => {
                     setSelectedDrawerDeviceIds(selectedRowKeys.map((item) => String(item)));
+                    // 当前页勾选的设备对象并入 map，供已选清单展示。
+                    setSelectedDeviceMap((prev) => {
+                      const next = { ...prev };
+                      for (const row of selectedRows) {
+                        if (row) {
+                          next[row.id] = row;
+                        }
+                      }
+                      return next;
+                    });
                   },
                 }}
                 scroll={{ x: 600, y: 240 }}
@@ -1854,6 +1952,48 @@ export default function FileTransferCenter() {
             </Form.Item>
             <Text type="secondary" style={{ fontSize: 12 }}>{t('ufte.batchSnModal.hint')}</Text>
           </Form>
+        </Modal>
+
+        {/* #215: 已选设备清单 —— 点"已选 N 台"打开，逐台可删除。 */}
+        <Modal
+          title={t('ufte.selectedModal.title', { count: drawerSelectedDevices.length })}
+          open={selectedDevicesModalOpen}
+          onCancel={() => setSelectedDevicesModalOpen(false)}
+          footer={null}
+          width={520}
+          destroyOnHidden
+        >
+          <List<UnifiedFileTransferDeviceItem>
+            size="small"
+            dataSource={drawerSelectedDevices}
+            locale={{ emptyText: t('ufte.selectedModal.empty') }}
+            style={{ maxHeight: 420, overflow: 'auto' }}
+            renderItem={(item) => (
+              <List.Item
+                actions={[
+                  <Button
+                    key="remove"
+                    type="link"
+                    size="small"
+                    danger
+                    icon={<DeleteOutlined />}
+                    onClick={() => handleRemoveSelectedDevice(item.id)}
+                  >
+                    {t('common.delete')}
+                  </Button>,
+                ]}
+              >
+                <List.Item.Meta
+                  title={<Text>{item.deviceSn}</Text>}
+                  description={(
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      {[item.deviceName, item.productType].filter(Boolean).join(' · ') || '—'}
+                    </Text>
+                  )}
+                />
+              </List.Item>
+            )}
+          />
         </Modal>
       </Drawer>
 
