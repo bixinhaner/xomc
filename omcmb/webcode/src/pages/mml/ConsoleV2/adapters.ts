@@ -633,6 +633,8 @@ export function mapTaskToRecord(task: MMLTask): ExecRecord {
       execMeta: { operationType: 'MOD' as MMLOperationType, read: false, label: name, commandName: name },
       columns: cols,
       rows: buildMODReadbackRows((task.results ?? []) as unknown as DeviceTaskResultItem[], setValues),
+      // 跨刷新惰性补结果行（useConsoleHistory）据此走 buildMODReadbackRows，而非逐 PATH。
+      setValues,
     };
   }
   // 逐 PATH 任务有多条 command（每 path 一条）→ 列取所有 command 的 path 展平（按 command_index 序，

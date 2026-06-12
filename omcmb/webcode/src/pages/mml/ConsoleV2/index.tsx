@@ -133,6 +133,7 @@ export default function MMLConsoleV2() {
       execMeta: le.meta,
       columns: le.columns,
       rows,
+      setValues: le.setValues,
     });
     setRunning(false);
     setLiveExec(null);
