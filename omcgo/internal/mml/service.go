@@ -34,6 +34,7 @@ type Service struct {
 	scriptRepo                   ScriptRepository
 	taskRepo                     TaskRepository
 	customCommandRepo            CustomCommandRepository
+	customCommandPathRepo        CustomCommandPathRepository // issue #115 调整3：自定义命令 path 关联表；setter 注入，nil 时 path 端点返 503
 	auditRepo                    AuditRepository
 	cmdParamRepo                 CommandParamRepository
 	fanouter                     *Fanouter

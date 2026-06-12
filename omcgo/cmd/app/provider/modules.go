@@ -1376,6 +1376,8 @@ func initMiscModules(c *Container) error {
 	mmlService := mml.NewService(mmlCmdRepo, mmlScriptRepo, mmlTaskRepo, mmlCustomCmdRepo, messageHub, logger)
 	mmlService.SetAuditRepo(mmlAuditRepo)
 	mmlService.SetCmdParamRepo(mmlCmdParamRepo)
+	// issue #115 调整3（A1）：自定义命令 PATH 关联表仓库。
+	mmlService.SetCustomCommandPathRepo(mml.NewPgCustomCommandPathRepository(c.PgPool))
 	// CSV 导出「参数名称」列：standardPath → standard_params.description（友好名）。
 	mmlService.SetPathNameResolver(func(ctx context.Context, paths []string) (map[string]string, error) {
 		if len(paths) == 0 {
