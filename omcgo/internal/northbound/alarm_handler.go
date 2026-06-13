@@ -116,15 +116,20 @@ func (h *AlarmHandler) ListActiveAlarms(c *gin.Context) {
 	response.OK(c, result)
 }
 
+// parseSeverity 把北向级别入参解析成 canonical 告警级别。
+// 库内 severity 列存 5 位字典码（31001~31004），系统对外也暴露这套码，故入参必须接受
+// 字典码；同时兼容历史 1~4 小编号。返回 canonical 1~4，仓储层 severityAliases 会把它
+// 双向展开匹配库内码。只认 1~4 会让字典码入参落默认分支返回 0、级别过滤静默失效（issue
+// #306，与 #219/#272 同根）。
 func parseSeverity(s string) model.AlarmSeverity {
 	switch s {
-	case "1":
+	case "1", "31001":
 		return model.AlarmCritical
-	case "2":
+	case "2", "31002":
 		return model.AlarmMajor
-	case "3":
+	case "3", "31003":
 		return model.AlarmMinor
-	case "4":
+	case "4", "31004":
 		return model.AlarmWarning
 	default:
 		return 0
