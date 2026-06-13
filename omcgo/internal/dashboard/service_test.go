@@ -8,6 +8,29 @@ import (
 )
 
 // ---------------------------------------------------------------------------
+// 告警趋势查询级别归一（issue #219 同根残留）
+// 库内 severity 列存的是 5 位字典码（31001~31004），趋势按天分级取数若只认旧的
+// 1~4 小编号，四条曲线会全读 0。断言每个级别桶同时匹配旧值与字典码。
+// ---------------------------------------------------------------------------
+
+func TestAlarmTrendQueryIncludesLegacySeverityCodes(t *testing.T) {
+	cases := []struct {
+		bucket string
+		expr   string
+	}{
+		{"critical", "severity IN (1, 31001)"},
+		{"major", "severity IN (2, 31002)"},
+		{"minor", "severity IN (3, 31003)"},
+		{"warning", "severity IN (4, 31004)"},
+	}
+	for _, c := range cases {
+		t.Run(c.bucket, func(t *testing.T) {
+			assert.Contains(t, alarmTrendByDateQuery, c.expr)
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
 // parseKPINames
 // ---------------------------------------------------------------------------
 

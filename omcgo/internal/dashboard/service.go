@@ -512,6 +512,22 @@ func computeKPIDelta(current, previous float64, compareType string) KPIDelta {
 	return delta
 }
 
+// alarmTrendByDateQuery 按天分级统计告警数。
+// 库内 severity 列存的是 5 位字典码（31001~31004），但兼容历史 1~4 小编号，故每个
+// 级别桶同时匹配旧值与字典码；只认 1~4 会让四条曲线全读 0（issue #219 同根残留）。
+// 复杂聚合（DATE()/CASE WHEN/COALESCE），裸 SQL 比 Squirrel 更易读。
+const alarmTrendByDateQuery = `
+		SELECT
+			DATE(raised_at) AS d,
+			COALESCE(SUM(CASE WHEN severity IN (1, 31001) THEN 1 ELSE 0 END), 0) AS critical,
+			COALESCE(SUM(CASE WHEN severity IN (2, 31002) THEN 1 ELSE 0 END), 0) AS major,
+			COALESCE(SUM(CASE WHEN severity IN (3, 31003) THEN 1 ELSE 0 END), 0) AS minor,
+			COALESCE(SUM(CASE WHEN severity IN (4, 31004) THEN 1 ELSE 0 END), 0) AS warning
+		FROM alarms_active
+		WHERE raised_at >= NOW() - $1::interval
+		GROUP BY DATE(raised_at)
+		ORDER BY d ASC`
+
 // GetAlarmTrend returns alarm counts grouped by date and severity for the last N days.
 func (s *Service) GetAlarmTrend(ctx context.Context, days int) ([]AlarmTrendEntry, error) {
 	if days < 1 {
@@ -521,21 +537,8 @@ func (s *Service) GetAlarmTrend(ctx context.Context, days int) ([]AlarmTrendEntr
 		days = 365
 	}
 
-	// Complex aggregation with DATE(), CASE WHEN, COALESCE — raw SQL preferred over Squirrel for readability
-	query := `
-		SELECT
-			DATE(raised_at) AS d,
-			COALESCE(SUM(CASE WHEN severity = 1 THEN 1 ELSE 0 END), 0) AS critical,
-			COALESCE(SUM(CASE WHEN severity = 2 THEN 1 ELSE 0 END), 0) AS major,
-			COALESCE(SUM(CASE WHEN severity = 3 THEN 1 ELSE 0 END), 0) AS minor,
-			COALESCE(SUM(CASE WHEN severity = 4 THEN 1 ELSE 0 END), 0) AS warning
-		FROM alarms_active
-		WHERE raised_at >= NOW() - $1::interval
-		GROUP BY DATE(raised_at)
-		ORDER BY d ASC`
-
 	interval := fmt.Sprintf("%d days", days)
-	rows, err := s.pgPool.Query(ctx, query, interval)
+	rows, err := s.pgPool.Query(ctx, alarmTrendByDateQuery, interval)
 	if err != nil {
 		return nil, fmt.Errorf("query alarm trend: %w", err)
 	}
