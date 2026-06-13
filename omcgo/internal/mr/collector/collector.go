@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
+	"github.com/omcgo/omcgo/internal/core/compress"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
 	coremodel "github.com/omcgo/omcgo/internal/core/model"
@@ -19,13 +20,13 @@ import (
 
 // MRFilePayload is the event payload for MR file received events.
 type MRFilePayload struct {
-	MinioPath  string `json:"minio_path"`
-	Bucket     string `json:"bucket"`
-	DeviceID   string `json:"device_id"`
-	DeviceSN   string `json:"device_sn"`
-	Carrier    string `json:"carrier"`
-	FileName   string `json:"file_name"`
-	FileSize   int64  `json:"file_size"`
+	MinioPath string `json:"minio_path"`
+	Bucket    string `json:"bucket"`
+	DeviceID  string `json:"device_id"`
+	DeviceSN  string `json:"device_sn"`
+	Carrier   string `json:"carrier"`
+	FileName  string `json:"file_name"`
+	FileSize  int64  `json:"file_size"`
 }
 
 // DeviceLookup 抽象按 SN 查设备的能力。device.DeviceRepository 满足。
@@ -196,8 +197,18 @@ func (c *MRCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 	}
 
 	carrierCode := model.CarrierCode(carrier)
+	// issue #321：真机按 TR-069 上传 .xml.gz，MinIO 原样存压缩字节；解析前按 gzip
+	// 魔数嗅探透明解压（明文原样透传）。解压在 LimitReader 之前 → 体积上限作用于
+	// 解压后内容，兼防 gzip 炸弹。
+	decoded, _, derr := compress.MaybeGunzip(obj)
+	if derr != nil {
+		c.logger.Warn("decompress MR file",
+			zap.Error(derr),
+			zap.String("file", payload.FileName))
+		return fmt.Errorf("decompress MR file %s: %w", payload.FileName, derr)
+	}
 	// io.LimitReader 兜底：Stat 不可用/谎报时,解析最多读 maxMRFileBytes,截断 → 解析报错被捕获。
-	data, err := p.Parse(io.LimitReader(obj, maxMRFileBytes), carrierCode)
+	data, err := p.Parse(io.LimitReader(decoded, maxMRFileBytes), carrierCode)
 	if err != nil {
 		c.logger.Warn("parse MR file",
 			zap.Error(err),

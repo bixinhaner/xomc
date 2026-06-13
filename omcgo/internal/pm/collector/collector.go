@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
+	"github.com/omcgo/omcgo/internal/core/compress"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/reliability/runner"
@@ -260,8 +261,21 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 	// 不在解析前预存。now 作为 marker 的 collect_time 透传给 ingestViaCopy。
 	now := time.Now()
 
+	// issue #321：真机/模拟器按 TR-069 上传 .xml.gz，MinIO 原样存压缩字节；解析前按
+	// gzip 魔数嗅探透明解压（明文 .xml 原样透传）。解压在 LimitReader 之前 → 体积
+	// 上限作用于解压后内容，兼防 gzip 炸弹。
+	decoded, _, derr := compress.MaybeGunzip(obj)
+	if derr != nil {
+		if c.metrics != nil {
+			c.metrics.FilesProcessedTotal.WithLabelValues("failed").Inc()
+			c.metrics.ProcessingDurationSecs.Observe(time.Since(startTime).Seconds())
+		}
+		tracing.RecordError(span, derr)
+		return fmt.Errorf("decompress pm file: %w", derr)
+	}
+
 	// io.LimitReader 兜底：Stat 不可用/谎报时,解析最多读 maxPMFileBytes,截断 → 解析报错被捕获。
-	content, err := c.parser.Parse(io.LimitReader(obj, maxPMFileBytes), deviceID)
+	content, err := c.parser.Parse(io.LimitReader(decoded, maxPMFileBytes), deviceID)
 	if err != nil {
 		if c.metrics != nil {
 			c.metrics.FilesProcessedTotal.WithLabelValues("failed").Inc()
@@ -306,6 +320,7 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 //   - counter 的自然键 ON CONFLICT DO UPDATE（每行索引探测 + 更新）；
 //   - KPI 单独一次 BatchInsert（又一趟 COPY 暂存表 + UPSERT）；
 //   - pm_files 预存 + UpdateFileParsed 两次额外写（marker 一次写定 parsed/counter_count）。
+//
 // 返回 nil 让该文件 ack（含 marker 冲突=已入库的幂等跳过与迟到压缩 chunk 降级）。
 func (c *PMCollector) ingestViaCopy(
 	ctx context.Context, span trace.Span, startTime, now time.Time, fileSize int64,
@@ -475,4 +490,3 @@ func (c *PMCollector) filterByWhitelist(ctx context.Context, deviceSN, carrier, 
 	}
 	return kept
 }
-
