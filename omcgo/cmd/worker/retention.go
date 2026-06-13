@@ -10,6 +10,7 @@ import (
 	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/core/asyncjob"
 	"github.com/omcgo/omcgo/internal/pm/retention"
+	"github.com/omcgo/omcgo/internal/stationlog"
 )
 
 // startPMRetentionCleanup wire 起 T-0164 收尾 G2-Gap-2：普通表（pm_metrics_{daily,weekly,monthly}
@@ -20,10 +21,10 @@ import (
 // 普通表 6 张的 DELETE 清理。
 //
 // 装配：
-//   1. retention.Service（worker 进程本地实例，复用 app 端 SysConfigRepository → sys_configs 读取）
-//   2. CleanupRunner（asyncjob.JobRunner）
-//   3. 注册到 registry + 单独 worker goroutine
-//   4. cron 每日 03:00 触发 enqueue（用 G8-Gap-1 cron_state 启动补跑机制）
+//  1. retention.Service（worker 进程本地实例，复用 app 端 SysConfigRepository → sys_configs 读取）
+//  2. CleanupRunner（asyncjob.JobRunner）
+//  3. 注册到 registry + 单独 worker goroutine
+//  4. cron 每日 03:00 触发 enqueue（用 G8-Gap-1 cron_state 启动补跑机制）
 func startPMRetentionCleanup(
 	ctx context.Context,
 	w *workerInfra,
@@ -121,5 +122,92 @@ func startRetentionCleanupCron(
 		stopCtx := c.Stop()
 		<-stopCtx.Done()
 		logger.Info("pm retention cleanup cron stopped")
+	}()
+}
+
+// startStationLogRetentionCleanup wire 起 #320：基站日志按时间保留（默认 60 天）的定时清理。
+//
+// 与 PM retention 同范式：retention.Service 角色由 stationlog.RetentionPolicy 承担（从 sys_configs
+// 读 stationlog.retention.max_retention_days / max_file_count，TTL 缓存）；CleanupRunner 删两表
+// （fault + running）过期记录的 MinIO 对象 + PG 软删；cron 每日 04:00（与 PM 03:00 错峰）触发 +
+// 启动补跑。文件数配额（事件驱动 enforceFaultLogQuota，app 进程）与本时间清理并存。
+func startStationLogRetentionCleanup(
+	ctx context.Context,
+	w *workerInfra,
+	jobRepo asyncjob.Repository,
+	cronStateRepo asyncjob.CronStateRepository,
+	registry *asyncjob.Registry,
+	asyncMetrics *asyncjob.Metrics,
+	loc *time.Location,
+) {
+	logger := w.Logger.Named("stationlog-retention")
+
+	sysConfigRepo := admin.NewPgSysConfigRepository(w.PgPool)
+	lookup := func(ctx context.Context, category, key string) (string, bool) {
+		row, err := sysConfigRepo.GetByKey(ctx, category, key)
+		if err != nil || row == nil {
+			return "", false
+		}
+		return row.Value, true
+	}
+	policy := stationlog.NewRetentionPolicy(lookup, logger)
+
+	faultRepo := stationlog.NewPgFaultRepository(w.PgPool)
+	runningRepo := stationlog.NewPgRunningRepository(w.PgPool)
+	runner := stationlog.NewCleanupRunner(faultRepo, runningRepo, w.MinIO, policy, logger)
+	registry.Register(runner)
+	logger.Info("registered stationlog retention cleanup runner",
+		zap.String("job_type", stationlog.JobTypeStationLogCleanup))
+
+	go runJobTypeWorker(ctx, registry, stationlog.JobTypeStationLogCleanup, logger)
+
+	startStationLogCleanupCron(ctx, jobRepo, cronStateRepo, logger, asyncMetrics, loc)
+
+	logger.Info("stationlog retention cleanup pipeline ready (1 runner + 1 cron + catchup)")
+}
+
+// startStationLogCleanupCron 单 cron entry，每日 04:00 触发基站日志时间清理入队
+// （与 startRetentionCleanupCron 同机制，错峰 + 共享 cron_state 表的不同 job_type 行）。
+func startStationLogCleanupCron(
+	ctx context.Context,
+	jobRepo asyncjob.Repository,
+	stateRepo asyncjob.CronStateRepository,
+	logger *zap.Logger,
+	asyncMetrics *asyncjob.Metrics,
+	loc *time.Location,
+) {
+	const spec = "0 4 * * *" // 每日 04:00（业务时区，与 PM retention 03:00 错峰）
+	jobType := stationlog.JobTypeStationLogCleanup
+
+	entry := cronEntry{
+		spec:    spec,
+		jobType: jobType,
+		window: func(now time.Time) (time.Time, time.Time) {
+			today := truncateDay(now.In(loc))
+			return today.AddDate(0, 0, -1), today
+		},
+		advance: func(prev time.Time) time.Time { return prev.AddDate(0, 0, 1) },
+	}
+
+	now := time.Now().In(loc)
+	catchupCronEntry(ctx, jobRepo, stateRepo, entry, now, logger, asyncMetrics)
+
+	c := cron.New(cron.WithLocation(loc))
+	_, err := c.AddFunc(spec, func() {
+		triggerCron(ctx, jobRepo, stateRepo, entry, logger, loc)
+	})
+	if err != nil {
+		logger.Error("stationlog cleanup cron AddFunc failed", zap.Error(err))
+		return
+	}
+	c.Start()
+	logger.Info("stationlog retention cleanup cron started",
+		zap.String("spec", spec), zap.String("job_type", jobType))
+
+	go func() {
+		<-ctx.Done()
+		stopCtx := c.Stop()
+		<-stopCtx.Done()
+		logger.Info("stationlog retention cleanup cron stopped")
 	}()
 }

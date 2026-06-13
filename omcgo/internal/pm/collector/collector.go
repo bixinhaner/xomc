@@ -13,6 +13,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/compress"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/rawarchive"
 	"github.com/omcgo/omcgo/internal/core/reliability/runner"
 	"github.com/omcgo/omcgo/internal/core/tracing"
 	"github.com/omcgo/omcgo/internal/pm"
@@ -114,6 +115,7 @@ type PMCollector struct {
 	deviceLookup     DeviceLookup
 	counterWhitelist CounterWhitelist
 	copyIngestor     CopyIngestor
+	archiver         *rawarchive.Archiver
 	concurrency      int
 	logger           *zap.Logger
 }
@@ -168,6 +170,12 @@ func (c *PMCollector) SetCounterWhitelist(w CounterWhitelist) {
 // 出现在不写库的单测）。
 func (c *PMCollector) SetCopyIngestor(ci CopyIngestor) {
 	c.copyIngestor = ci
+}
+
+// SetArchiver 注入原始文件压缩回写器（issue #321）：入库成功后把明文 XML gzip 覆盖写回
+// MinIO 省盘（已是 gzip 的真机文件零成本跳过）。Nil-safe — 未注入时不做压缩回写。
+func (c *PMCollector) SetArchiver(a *rawarchive.Archiver) {
+	c.archiver = a
 }
 
 // SetConcurrency 设置 PM 文件入库的进程内并发订阅数。
@@ -376,6 +384,10 @@ func (c *PMCollector) ingestViaCopy(
 		// marker 冲突：该文件已入库（NATS 重投 / 并发已写）→ 当作成功跳过，正常 ack。
 		c.logger.Info("PM file already ingested (marker conflict), skip",
 			zap.String("path", payload.MinIOPath), zap.String("device_sn", payload.DeviceSN))
+	} else {
+		// issue #321：仅新入库时把原始 XML 压缩回写 MinIO 省盘（已 gzip 则零成本跳过）。
+		// 异步有界并发，不阻塞 ack；nil-safe。
+		c.archiver.Schedule(c.bucket, payload.MinIOPath)
 	}
 	if c.metrics != nil {
 		c.metrics.FilesProcessedTotal.WithLabelValues("success").Inc()

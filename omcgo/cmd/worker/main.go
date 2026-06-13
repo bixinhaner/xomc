@@ -21,6 +21,7 @@ import (
 	"github.com/omcgo/omcgo/internal/config/parammodel"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/event"
+	"github.com/omcgo/omcgo/internal/core/rawarchive"
 	"github.com/omcgo/omcgo/internal/core/reliability"
 	"github.com/omcgo/omcgo/internal/core/reliability/dlq"
 	"github.com/omcgo/omcgo/internal/core/reliability/runner"
@@ -161,6 +162,34 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	pmParser := collector.NewPMXMLParser()
 	// KPI/时序库物理分离：pm_files 已迁时序库（与 pm_metrics 同库保 copy_ingest 原子性），文件存储走 TsPool。
 	pmFileStore := pm.NewPgPMFileStore(w.TsPool)
+
+	// issue #321：原始文件压缩回写器（PM/MR 共用一个实例，单点注册 metric）。入库成功后把
+	// 明文 XML gzip 覆盖写回 MinIO 省盘；真机已是 .xml.gz 的对象零成本跳过。开关走 sys_configs
+	// raw_archive.compress_after_ingest（默认 true，TTL 缓存）。异步有界并发，不阻塞入库 ack。
+	rawArchiveSysCfg := admin.NewPgSysConfigRepository(w.PgPool)
+	// 可取消的 base ctx：进程优雅关停时取消，停掉在途压缩 goroutine（对标 backpressure
+	// watchdog / tsdb-shadow-sync 的 GS.Register 模式）。
+	archiverCtx, archiverCancel := context.WithCancel(context.Background())
+	w.GS.Register("raw-archiver", 3, func(ctx context.Context) error {
+		_ = ctx
+		archiverCancel()
+		return nil
+	})
+	rawArchiver := rawarchive.New(
+		archiverCtx,
+		rawarchive.NewMinIOStore(w.MinIO),
+		func(ctx context.Context, category, key string) (string, bool) {
+			row, err := rawArchiveSysCfg.GetByKey(ctx, category, key)
+			if err != nil || row == nil {
+				return "", false
+			}
+			return row.Value, true
+		},
+		rawarchive.NewMetrics(w.MetricsReg),
+		logger.Named("raw-archive"),
+		4,
+	)
+
 	pmCollector := collector.NewPMCollector(w.MinIO, cfg.MinIO.Buckets.PMFiles, pmParser, kpiEngine, pmFileStore, w.EventBus, logger)
 	pmMetrics := pm.NewPMMetrics(w.MetricsReg)
 	pmCollector.SetMetrics(pmMetrics)
@@ -204,6 +233,9 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	// 删 uq_pm_metrics_natural 后无索引可供 ON CONFLICT，upsert 写模式已退役，copy 是唯一写路径。
 	// KPI/时序库物理分离：pm_metrics + pm_files 同在时序库（TsPool），单事务 copy 原子入库。
 	pmCollector.SetCopyIngestor(pmmetrics.NewPgRepository(w.TsPool))
+
+	// issue #321：入库成功后压缩回写原始 PM XML 省盘。
+	pmCollector.SetArchiver(rawArchiver)
 
 	// copy 是唯一写路径，KPI 恒用当前文件内存 counter 计算（CalculateFromCounters）；
 	// pm_kpi_window_from_db 的 DB 回读分支已随非 copy 旁路退役。仍配 true 时明确告警，避免运营误以为生效。
@@ -358,6 +390,8 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	// 注入 carrier MR-type 支持判定（#17）：MRE parser 的 "运营商是否采集 MRE" 决策
 	// 走 Carrier 适配器，去除 mr/parser 里的 "if carrier == cucc" 硬编码。
 	mrCollector.SetMRTypeSupport(w.Carriers)
+	// issue #321：入库成功后压缩回写原始 MR XML 省盘（与 PM 共用同一 archiver）。
+	mrCollector.SetArchiver(rawArchiver)
 	if err := mrCollector.Subscribe(w.EventBus); err != nil {
 		logger.Warn("subscribe MR collector", zap.Error(err))
 	}

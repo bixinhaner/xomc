@@ -51,6 +51,11 @@ type Handler struct {
 	// EnableEncryption=true, ServeHTTP buffers the (possibly compressed) body
 	// (up to 64MB), encrypts in-memory, appends ".enc" to the object path.
 	encryptor backup.Encryptor
+	// #318: optional PM upload backpressure gate. nil-safe — when wired and the
+	// inbound fileType is PM, ServeHTTP rejects with 503 while the watchdog
+	// reports backpressure (disk/CPU over high watermark). Devices retry per
+	// TR-069 so no data is lost.
+	backpressure BackpressureGate
 }
 
 // NewHandler creates a new upload Handler.
@@ -79,6 +84,11 @@ func NewHandler(
 
 func (h *Handler) SetRuntimeProvider(provider transfercfg.Provider) {
 	h.runtimeProvider = provider
+}
+
+// SetBackpressureGate 注入 PM 上传背压门闸（#318）。nil-safe：未注入时不做背压。
+func (h *Handler) SetBackpressureGate(gate BackpressureGate) {
+	h.backpressure = gate
 }
 
 // ServeHTTP handles upload requests.
@@ -179,6 +189,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// 5. Determine bucket and object path
 	ft := normalizeFileType(fileType)
+
+	// #318：PM 上传背压门闸。磁盘/CPU 超高水位时（watchdog 后台维护态，热路径仅读原子标志）
+	// 对 PM 文件早返回 503——在落 MinIO 前拒收，TR-069 设备会重传，不丢数据；回落自动恢复。
+	if ft == tr069.FileTypePM && h.backpressure != nil && !h.backpressure.Allowed() {
+		h.backpressure.RecordRejected()
+		h.logger.Warn("PM upload rejected: resource backpressure (disk/cpu high)",
+			zap.String("filename", filename), zap.String("remote_addr", r.RemoteAddr))
+		w.Header().Set("Retry-After", "60")
+		http.Error(w, "PM upload temporarily paused due to resource backpressure", http.StatusServiceUnavailable)
+		return
+	}
+
 	bucket, category := storage.BucketAndCategory(ft, h.buckets)
 	now := time.Now()
 	// 配置备份类（FileType=3 / CONFIGBACKUP_*）和故障日志类（FileType=8 / RL）加 taskId8
@@ -720,9 +742,12 @@ func isHexMD5(s string) bool {
 //	1: taskID8 (8 hex chars)
 //	2: deviceSN (any chars up to .xml)
 //	3: optional compression extension (.gz/.zst/.lz4/.bz2) — discarded
+//
 // backupFilenameRe 匹配两种备份扩展名：
-//   .xml — 标准平台（BLQ/QLS）的 CONFIG_BACKUP_XML 走 FileType=10 {OUI} Configuration File
-//   .nv  — NV 平台（MLQ/MLN_SC）的 CONFIG_BACKUP_NV 走 FileType=12 {OUI} Configuration File
+//
+//	.xml — 标准平台（BLQ/QLS）的 CONFIG_BACKUP_XML 走 FileType=10 {OUI} Configuration File
+//	.nv  — NV 平台（MLQ/MLN_SC）的 CONFIG_BACKUP_NV 走 FileType=12 {OUI} Configuration File
+//
 // 可选 .gz/.zst/.bz2/.lz4 等压缩后缀（T-0074）。
 var backupFilenameRe = regexp.MustCompile(`^backup-([0-9a-f]{8})-(.+?)\.(xml|nv)(\.[a-z0-9]+)?$`)
 
@@ -966,6 +991,7 @@ func extractDeviceSNFromFilename(filename string) string {
 //   - 备份配置（FileType 3 / CONFIGBACKUP_*）→ backup-{taskId8}-{sn}.<nv|xml>
 //   - 日志采集（FileType 6 运行日志 / 8 故障日志）→ log-{taskId8}-{sn}.tar.gz
 //   - 其它/兜底 → upload-{taskId8}-{sn}-{unix}
+//
 // 一致性保证：ACS 落地的 filename 与 UFTE DeviceItem.TargetFile 渲染结果同名，
 // 后续 fileLandedLookup / downloadURLLookup 用 (sn, target_file) 反查能命中。
 func deriveUploadFilename(fileType, taskID, sn string) string {

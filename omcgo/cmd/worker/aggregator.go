@@ -163,7 +163,10 @@ func startPMAggregatorPipeline(
 	// 6) PM retention cleanup（T-0164 收尾 G2-Gap-2）— 共享 jobRepo / cronStateRepo / registry / asyncMetrics
 	startPMRetentionCleanup(ctx, w, jobRepo, cronStateRepo, registry, asyncMetrics, loc)
 
-	logger.Info("PM aggregator pipeline ready (8 aggregator runners + 1 retention runner + sweeper + cron triggers + catchup)")
+	// 7) 基站日志按时间保留清理（#320）— 复用同一 jobRepo / cronStateRepo / registry / asyncMetrics
+	startStationLogRetentionCleanup(ctx, w, jobRepo, cronStateRepo, registry, asyncMetrics, loc)
+
+	logger.Info("PM aggregator pipeline ready (8 aggregator runners + 2 retention runners + sweeper + cron triggers + catchup)")
 }
 
 // runJobTypeWorker 单 JobType 内串行循环 RunNext。
@@ -196,19 +199,20 @@ func runJobTypeWorker(ctx context.Context, registry *asyncjob.Registry, jobType 
 
 // cronEntry 是单条 cron 调度配置（含启动补跑用的 advance）。
 type cronEntry struct {
-	spec     string
-	jobType  string
-	window   func(now time.Time) (start, end time.Time)
-	advance  asyncjob.BucketAdvance
+	spec    string
+	jobType string
+	window  func(now time.Time) (start, end time.Time)
+	advance asyncjob.BucketAdvance
 }
 
 // pmAggregatorCronEntries 8 个 G5 cron 配置（4 设备级 + 4 设备组级）。
 //
 // 设备组级 cron 时刻晚于对应设备级 10 分钟，避免读到未完成的 device-level 聚合表：
-//   设备级 hourly :05 → 设备组级 hourly :15
-//   设备级 daily 00:05 → 设备组级 daily 00:15
-//   设备级 weekly Mon 00:10 → 设备组级 weekly Mon 00:20
-//   设备级 monthly 1日 00:15 → 设备组级 monthly 1日 00:25
+//
+//	设备级 hourly :05 → 设备组级 hourly :15
+//	设备级 daily 00:05 → 设备组级 daily 00:15
+//	设备级 weekly Mon 00:10 → 设备组级 weekly Mon 00:20
+//	设备级 monthly 1日 00:15 → 设备组级 monthly 1日 00:25
 func pmAggregatorCronEntries(loc *time.Location) []cronEntry {
 	hourlyAdvance := func(prev time.Time) time.Time { return prev.Add(time.Hour) }
 	dailyAdvance := func(prev time.Time) time.Time { return prev.AddDate(0, 0, 1) }
@@ -253,8 +257,8 @@ func pmAggregatorCronEntries(loc *time.Location) []cronEntry {
 // startCronScheduler 启动 robfig/cron/v3，按 wall-clock 时刻触发 enqueue。
 //
 // G8-Gap-1 实施：
-//   1. 先做启动补跑（catchup）— 按 cron_state.last_bucket_end 算漏桶逐个 enqueue
-//   2. 再启动正常 cron 调度
+//  1. 先做启动补跑（catchup）— 按 cron_state.last_bucket_end 算漏桶逐个 enqueue
+//  2. 再启动正常 cron 调度
 //
 // 触发器只入队 async_jobs + Upsert cron_state，不直接调 runner
 // （解耦：worker 重启 / 多 worker 时同样安全）。
@@ -312,10 +316,10 @@ func startCronScheduler(
 // catchupCronEntry 启动时补跑单个 cron job_type 的所有漏桶。
 //
 // 流程：
-//   1. 查 cron_state — 没有则跳过（首次启动，等下次正常 cron 触发即可）
-//   2. CatchupMissedBuckets 算 (last_bucket_end, now] 区间所有应触发但漏掉的 bucket
-//   3. 逐个 enqueue（最多 10000 个上限保护）
-//   4. 更新 cron_state.last_bucket_end 到最后一个补跑的 bucket 的 end
+//  1. 查 cron_state — 没有则跳过（首次启动，等下次正常 cron 触发即可）
+//  2. CatchupMissedBuckets 算 (last_bucket_end, now] 区间所有应触发但漏掉的 bucket
+//  3. 逐个 enqueue（最多 10000 个上限保护）
+//  4. 更新 cron_state.last_bucket_end 到最后一个补跑的 bucket 的 end
 func catchupCronEntry(
 	ctx context.Context,
 	jobRepo asyncjob.Repository,

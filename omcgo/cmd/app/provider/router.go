@@ -85,6 +85,11 @@ func Setup(r *gin.Engine, c *Container) error {
 		Init:    func() error { return initPMRetentionModule(c) },
 	})
 	graph.Add(components.ModuleInitializer{
+		Name:    "minio-ilm",
+		Depends: []string{"admin"},
+		Init:    func() error { return initMinIOILMModule(c) },
+	})
+	graph.Add(components.ModuleInitializer{
 		Name: "mr",
 		Init: func() error { return initMRModule(c) },
 	})
@@ -480,7 +485,6 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 
 	// ----- Sprint B Q-V3-7：dictload admin reload 端点（含 mml-standard）-----
 	registerDictLoadAdminRoutes(c, superAdminGroup)
-
 
 	// ----- Alarm filter rule routes → resource "alarms" -----
 	alarmFilterHandler := alarm.NewFilterHandler(ah.alarmFilterRuleRepo, c.Logger)

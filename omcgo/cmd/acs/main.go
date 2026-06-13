@@ -192,6 +192,37 @@ func runACS(cmd *cobra.Command, args []string) error {
 			inf.EventBus, inf.Logger,
 		)
 		uploadHandler.SetRuntimeProvider(transferPolicy)
+
+		// issue #318：PM 上传背压 watchdog。磁盘（查 MinIO 集群指标端点，同栈内网免鉴权）+ CPU
+		// （host loadavg ÷ 核数）超高水位时拒收 PM 上传（设备重传不丢数据），回落自动恢复。配置
+		// 走 sys_configs(acs.backpressure)，经 SubjectSysConfigSaved 热刷新；GS 注册优雅关停。
+		bpSysCfg := admin.NewPgSysConfigRepository(inf.PgPool)
+		bpLookup := func(ctx context.Context, category, key string) (string, bool) {
+			row, lookupErr := bpSysCfg.GetByKey(ctx, category, key)
+			if lookupErr != nil || row == nil {
+				return "", false
+			}
+			return row.Value, true
+		}
+		bpWatchdog := upload.NewWatchdog(
+			bpLookup,
+			upload.NewMinIODiskUsage(upload.MinIOMetricsURL(cfg.MinIO.Endpoint, cfg.MinIO.UseSSL), 5*time.Second, nil),
+			upload.NewBackpressureMetrics(inf.MetricsReg),
+			inf.Logger.Named("backpressure"),
+		)
+		uploadHandler.SetBackpressureGate(bpWatchdog)
+		// watchdog 周期性自刷新 sys_configs(acs.backpressure) 阈值（见 Watchdog.sample）——
+		// 不订阅 SubjectSysConfigSaved：ACS 的 JetStream workqueue 流上该 subject 已被
+		// transfercfg 占用，同一 filter subject 不允许第二个 consumer（否则 NATS 报
+		// "filtered consumer not unique on workqueue stream"）。
+		bpCtx, bpCancel := context.WithCancel(context.Background())
+		go bpWatchdog.Run(bpCtx)
+		inf.GS.Register("backpressure-watchdog", 1, func(ctx context.Context) error {
+			_ = ctx
+			bpCancel()
+			return nil
+		})
+
 		// T-0074: enable streaming compression for FileTypeConfig backup uploads.
 		// PolicyGetter pulls live policy from PG; metrics track ratio/duration.
 		// Both args are nil-safe — PolicyService.Get always returns DefaultPolicy

@@ -13,6 +13,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
 	coremodel "github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/rawarchive"
 	"github.com/omcgo/omcgo/internal/mr"
 	"github.com/omcgo/omcgo/internal/mr/parser"
 	"go.uber.org/zap"
@@ -43,6 +44,7 @@ type MRCollector struct {
 	store       mr.MRStore
 	devices     DeviceLookup // 可 nil；nil 时强制要求 payload.DeviceID 非空
 	eventBus    event.EventBus
+	archiver    *rawarchive.Archiver
 	logger      *zap.Logger
 }
 
@@ -74,6 +76,12 @@ func NewMRCollector(
 // 不注入则 payload.DeviceID 必须非空（保留旧 transfer/bridge 路径行为）。
 func (c *MRCollector) SetDeviceLookup(d DeviceLookup) {
 	c.devices = d
+}
+
+// SetArchiver 注入原始文件压缩回写器（issue #321）：入库成功后把明文 MR XML gzip 覆盖写回
+// MinIO 省盘（已是 gzip 的真机文件零成本跳过）。Nil-safe — 未注入时不做压缩回写。
+func (c *MRCollector) SetArchiver(a *rawarchive.Archiver) {
+	c.archiver = a
 }
 
 // SetMRTypeSupport 注入 carrier MR-type 支持判定（可选，#17）。注入后 MRE parser
@@ -228,6 +236,10 @@ func (c *MRCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 	if err := c.store.UpdateFileParsed(ctx, fileID, len(data.Records)); err != nil {
 		c.logger.Warn("update file parsed status", zap.Error(err))
 	}
+
+	// issue #321：入库成功后把原始 MR XML 压缩回写 MinIO 省盘（已 gzip 则零成本跳过）。
+	// 异步有界并发，不阻塞 ack；nil-safe。
+	c.archiver.Schedule(bucket, payload.MinioPath)
 
 	// Publish parsed event
 	parsedPayload := map[string]interface{}{

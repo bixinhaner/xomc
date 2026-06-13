@@ -40,6 +40,14 @@ type Service struct {
 	// Delete 在拿到记录后用它校验记录归属设备是否在调用者可见组内。nil → dev/test 退化
 	// 放行（authz nil-safe）。
 	groupReader authz.GroupReader
+	// retentionPolicy 提供可配的故障日志文件数配额（#320）。nil → 退化用常量 FaultLogMaxCount。
+	retentionPolicy *RetentionPolicy
+}
+
+// SetRetentionPolicy 注入保留策略（#320）：enforceFaultLogQuota 据此读可配的文件数配额
+// （sys_configs stationlog.retention.max_file_count，0=禁用配额仅按时间保留）。Nil-safe。
+func (s *Service) SetRetentionPolicy(p *RetentionPolicy) {
+	s.retentionPolicy = p
 }
 
 // SetGroupReader 注入设备组归属读取器（#63 租户隔离强制层）。
@@ -216,18 +224,30 @@ func (s *Service) HandleLogFileReceived(ctx context.Context, evt event.Event) er
 	return nil
 }
 
-// enforceFaultLogQuota 确保 station_fault_logs 表中未删除记录不超过 FaultLogMaxCount。
+// enforceFaultLogQuota 确保 station_fault_logs 表中未删除记录不超过文件数配额。
 // 超出时从最早的文件开始清理（MinIO 删除 + 标记 is_deleted=true）。
+//
+// #320：配额值改为可配（sys_configs stationlog.retention.max_file_count，默认 20）。
+// maxCount<=0 表示禁用文件数配额（仅靠按时间保留 cron 治理）。本配额与时间保留并存：
+// 配额管短时洪泛，时间保留管长期留存。
 func (s *Service) enforceFaultLogQuota(ctx context.Context) error {
+	maxCount := FaultLogMaxCount
+	if s.retentionPolicy != nil {
+		maxCount = s.retentionPolicy.MaxFileCount(ctx)
+	}
+	if maxCount <= 0 {
+		return nil // 配额禁用：仅按时间保留
+	}
+
 	count, err := s.faultRepo.Count(ctx)
 	if err != nil {
 		return fmt.Errorf("count fault logs: %w", err)
 	}
-	if count <= FaultLogMaxCount {
+	if count <= int64(maxCount) {
 		return nil
 	}
 
-	excess := int(count) - FaultLogMaxCount
+	excess := int(count - int64(maxCount))
 	oldest, err := s.faultRepo.ListOldest(ctx, excess)
 	if err != nil {
 		return fmt.Errorf("list oldest fault logs: %w", err)

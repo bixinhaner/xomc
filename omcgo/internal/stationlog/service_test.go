@@ -37,8 +37,8 @@ type memRepo struct {
 	isFault bool
 }
 
-func newMemFaultRepo() *memRepo  { return &memRepo{logType: LogTypeFault, isFault: true} }
-func newMemRunRepo() *memRepo    { return &memRepo{logType: LogTypeRunning, isFault: false} }
+func newMemFaultRepo() *memRepo { return &memRepo{logType: LogTypeFault, isFault: true} }
+func newMemRunRepo() *memRepo   { return &memRepo{logType: LogTypeRunning, isFault: false} }
 
 func (m *memRepo) Create(_ context.Context, f *LogFile) error {
 	m.mu.Lock()
@@ -136,6 +136,23 @@ func (m *memRepo) ListOldest(_ context.Context, limit int) ([]*LogFile, error) {
 			continue
 		}
 		if m.isFault && r.RecordStatus != FaultRecordStatusFileReceived {
+			continue
+		}
+		clone := *r
+		out = append(out, &clone)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+func (m *memRepo) ListExpired(_ context.Context, cutoff time.Time, limit int) ([]*LogFile, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []*LogFile
+	for _, r := range m.rows {
+		if r.IsDeleted || !r.CreatedAt.Before(cutoff) {
 			continue
 		}
 		clone := *r

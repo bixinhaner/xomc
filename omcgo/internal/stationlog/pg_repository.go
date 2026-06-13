@@ -27,6 +27,8 @@ type Repository interface {
 	Count(ctx context.Context) (int64, error)
 	// ListOldest 按采集时间升序返回未删除记录（用于配额超额时清理最旧的文件）
 	ListOldest(ctx context.Context, limit int) ([]*LogFile, error)
+	// ListExpired 按入库时间(created_at)升序返回早于 cutoff 的未删除记录（用于按时间保留清理，#320）
+	ListExpired(ctx context.Context, cutoff time.Time, limit int) ([]*LogFile, error)
 	// LatestByDevice 获取指定设备最近一条未删除记录
 	LatestByDevice(ctx context.Context, deviceID uuid.UUID) (*LogFile, error)
 }
@@ -100,7 +102,7 @@ func (r *PgRepository) cols() []string {
 }
 
 // nilIfEmpty 把空字符串转成 nil，便于让 file_name/object_path/bucket 等
-// nullable 列在 detected 占位记录里写成 NULL 而非 ''。
+// nullable 列在 detected 占位记录里写成 NULL 而非 ”。
 func nilIfEmpty(s string) interface{} {
 	if s == "" {
 		return nil
@@ -320,6 +322,37 @@ func (r *PgRepository) ListOldest(ctx context.Context, limit int) ([]*LogFile, e
 	return items, rows.Err()
 }
 
+// ListExpired 按入库时间（created_at）升序返回早于 cutoff 的未删除记录，用于按时间保留清理
+// （#320）。不限定 record_status：60 天前仍是 detected 占位（始终没等到文件）的故障记录同样
+// 视为过期，由调用方对无 object_path 的记录跳过 MinIO 删除。
+func (r *PgRepository) ListExpired(ctx context.Context, cutoff time.Time, limit int) ([]*LogFile, error) {
+	query, args, err := storage.Psql.Select(r.cols()...).
+		From(r.tableName).
+		Where(sq.Eq{"is_deleted": false}).
+		Where(sq.Lt{"created_at": cutoff}).
+		OrderBy("created_at ASC").
+		Limit(uint64(limit)).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build list expired %s: %w", r.tableName, err)
+	}
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query expired %s: %w", r.tableName, err)
+	}
+	defer rows.Close()
+
+	var items []*LogFile
+	for rows.Next() {
+		f, err := r.scan(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, f)
+	}
+	return items, rows.Err()
+}
+
 func (r *PgRepository) LatestByDevice(ctx context.Context, deviceID uuid.UUID) (*LogFile, error) {
 	query, args, err := storage.Psql.Select(r.cols()...).
 		From(r.tableName).
@@ -396,11 +429,11 @@ func (r *PgRepository) scan(row pgx.Row) (*LogFile, error) {
 	if r.withFaultFields {
 		// 故障日志：nullable 列用 *string 接住，避免 pgx 在 NULL 上 panic
 		var (
-			fileName, objectPath, bucket                         *string
-			faultReason, faultDetail                             *string
-			deviceName, deviceType, operateIP, softwareVersion   *string
-			runtimeBeforeReboot                                  *int64
-			collectionFailReason                                 *string
+			fileName, objectPath, bucket                       *string
+			faultReason, faultDetail                           *string
+			deviceName, deviceType, operateIP, softwareVersion *string
+			runtimeBeforeReboot                                *int64
+			collectionFailReason                               *string
 		)
 		err = row.Scan(
 			&f.ID, &f.DeviceID, &f.DeviceSN, &fileName,
