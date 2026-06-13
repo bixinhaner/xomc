@@ -51,6 +51,7 @@ ACS 域额外：`OMC_ACS_URL`（默认 http://localhost:7557）。
 | smoke_provision.sh | F09 自动开站 | 任务列表/详情、创建校验负路径 |
 | smoke_interop.sh | F10 互操作 | 用例列表、报告导出、run 负路径 |
 | smoke_nedirect.sh | F07 网元直连 | 默认未启用整域 SKIP；启用时只测读路径 |
+| smoke_retention.sh | 资源保留与上传背压(#318-321) | 系统配置可见可改（10 键）、#318 背压指标+engage/release 503/200、#319 ILM 60天规则、#321 raw_archive 指标、#320 保留双旋钮并存 |
 
 ## 设计约定（写新脚本必读）
 

@@ -250,11 +250,15 @@ func (w *Watchdog) Run(ctx context.Context) {
 			w.logger.Info("backpressure watchdog stopped")
 			return
 		case <-t.C:
+			// 先采样（刷新阈值 + 采样周期到 w.cfg），再据最新采样周期校正 ticker——
+			// 这样 check_interval_sec 的变更与阈值变更一样在「下一拍」即生效，兑现下方
+			// sample 注释「变更 ≤1 个采样周期生效」的契约。若先读旧 cfg 再采样，interval
+			// 变更要多等一整拍（旧周期）才被 ticker 采纳，与契约不符。
+			w.sample(ctx)
 			if cur := w.cfg.Load().Interval; cur != interval {
 				interval = cur
 				t.Reset(interval)
 			}
-			w.sample(ctx)
 		}
 	}
 }
