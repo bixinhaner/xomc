@@ -2,6 +2,7 @@ import React from 'react';
 import { Alert, Button, Typography } from 'antd';
 import { BugOutlined } from '@ant-design/icons';
 import { useT } from '@/hooks/useT';
+import { isChunkLoadError, reloadOnceForStaleChunk } from '@/utils/staleChunkReload';
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -68,6 +69,11 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    // 懒加载分包失败（多见于发布后旧 hash 分包失效）→ 重载一次自愈，
+    // 不展示报错 UI（重试按钮对 404 的分包无意义）。带防抖避免重载死循环。
+    if (isChunkLoadError(error) && reloadOnceForStaleChunk()) {
+      return;
+    }
     this.setState({ errorInfo });
     // In production, send to error reporting service
     console.error('[ErrorBoundary] Caught error:', error, errorInfo);

@@ -17,6 +17,7 @@ import {
   Spin,
   Empty,
   Tooltip,
+  theme,
 } from 'antd';
 import {
   PlusOutlined,
@@ -49,6 +50,7 @@ interface DictListPanelProps {
 
 function DictListPanel({ selectedId, onSelect }: DictListPanelProps) {
   const t = useT();
+  const { token } = theme.useToken();
   const { fromRecord } = useI18nText();
   const { message, modal } = App.useApp();
   const queryClient = useQueryClient();
@@ -270,9 +272,9 @@ function DictListPanel({ selectedId, onSelect }: DictListPanelProps) {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', borderRight: '1px solid #f0f0f0' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', borderRight: `1px solid ${token.colorBorderSecondary}` }}>
       {/* Header */}
-      <div style={{ padding: '12px 12px 8px', borderBottom: '1px solid #f0f0f0', background: '#fafafa' }}>
+      <div style={{ padding: '12px 12px 8px', borderBottom: `1px solid ${token.colorBorderSecondary}`, background: token.colorFillAlter }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
           <span style={{ fontWeight: 600, fontSize: 14 }}>{t('dictionary.listTitle')}</span>
           <Button
@@ -312,8 +314,8 @@ function DictListPanel({ selectedId, onSelect }: DictListPanelProps) {
                 style={{
                   cursor: 'pointer',
                   padding: '8px 12px',
-                  background: selectedId === dict.id ? '#e6f4ff' : undefined,
-                  borderLeft: selectedId === dict.id ? '3px solid #1677ff' : '3px solid transparent',
+                  background: selectedId === dict.id ? token.controlItemBgActive : undefined,
+                  borderLeft: selectedId === dict.id ? `3px solid ${token.colorPrimary}` : '3px solid transparent',
                   transition: 'background 0.2s',
                 }}
               >
@@ -322,7 +324,7 @@ function DictListPanel({ selectedId, onSelect }: DictListPanelProps) {
                     <span
                       style={{
                         fontWeight: 500,
-                        color: selectedId === dict.id ? '#1677ff' : undefined,
+                        color: selectedId === dict.id ? token.colorPrimary : undefined,
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
                         whiteSpace: 'nowrap',
@@ -367,7 +369,7 @@ function DictListPanel({ selectedId, onSelect }: DictListPanelProps) {
                       </Tooltip>
                     </Space>
                   </div>
-                  <div style={{ fontSize: 11, color: '#8c8c8c', marginTop: 2 }}>
+                  <div style={{ fontSize: 11, color: token.colorTextSecondary, marginTop: 2 }}>
                     <Tag color="blue" style={{ fontSize: 11, lineHeight: '18px' }}>{dict.type}</Tag>
                     {!dict.status && <Tag color="default" style={{ fontSize: 11, lineHeight: '18px' }}>{t('status.disabled')}</Tag>}
                     {/* T-0182 托管字典标记 + 上次同步时间 */}
@@ -433,6 +435,7 @@ interface DictDetailPanelProps {
 
 function DictDetailPanel({ selectedDict }: DictDetailPanelProps) {
   const t = useT();
+  const { token } = theme.useToken();
   const { fromRecord } = useI18nText();
   const { message, modal } = App.useApp();
   const queryClient = useQueryClient();
@@ -765,11 +768,11 @@ function DictDetailPanel({ selectedDict }: DictDetailPanelProps) {
       <div
         style={{
           padding: '8px 16px',
-          borderBottom: '1px solid #f0f0f0',
+          borderBottom: `1px solid ${token.colorBorderSecondary}`,
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          background: '#fafafa',
+          background: token.colorFillAlter,
           gap: 8,
         }}
       >
@@ -894,11 +897,12 @@ function DictDetailPanel({ selectedDict }: DictDetailPanelProps) {
 
 // ---- Main Page ----
 export default function DataDictionary() {
+  const { token } = theme.useToken();
   const [selectedDict, setSelectedDict] = useState<Dictionary | null>(null);
 
   return (
     <App>
-      <div style={{ display: 'flex', height: '100%', background: '#fff' }}>
+      <div style={{ display: 'flex', height: '100%', background: token.colorBgContainer }}>
         {/* Left panel - dict list */}
         <div style={{ width: 300, flexShrink: 0, height: '100%', overflow: 'hidden' }}>
           <DictListPanel

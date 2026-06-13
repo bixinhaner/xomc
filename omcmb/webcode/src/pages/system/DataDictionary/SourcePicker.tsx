@@ -1,6 +1,6 @@
 import { useMemo, useState, useCallback } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { App, Button, Form, Modal, Select, Space, Table, Typography } from 'antd';
+import { App, Button, Form, Modal, Select, Space, Table, Typography, theme } from 'antd';
 import { EyeOutlined } from '@ant-design/icons';
 import { adminApi } from '@core/services/api/adminApi';
 import type {
@@ -43,6 +43,7 @@ interface SourcePickerProps {
 
 export default function SourcePicker({ value, onChange, disabled = false }: SourcePickerProps) {
   const t = useT();
+  const { token } = theme.useToken();
   const { message } = App.useApp();
 
   const { data: sources = [], isLoading: sourcesLoading } = useQuery<DictionarySource[]>({
@@ -156,7 +157,7 @@ export default function SourcePicker({ value, onChange, disabled = false }: Sour
 
   return (
     <>
-      <div style={{ padding: '8px 0 4px', borderTop: '1px dashed #f0f0f0', marginTop: 8 }}>
+      <div style={{ padding: '8px 0 4px', borderTop: `1px dashed ${token.colorBorderSecondary}`, marginTop: 8 }}>
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
           {t('dictionary.source.title')}
         </Typography.Text>
