@@ -4061,6 +4061,7 @@ const messages: Record<string, string> = {
   'system.config.northbound':    'Northbound Settings',
   'system.config.pmRetention':   'PM Data Retention',
   'system.config.retentionBp':   'Retention & Backpressure',
+  'system.config.logCfg':        'Log Retention & Rotation',
   'system.transfer.inheritHint': 'These fields are stored under sys_configs category acs_transfer. Leave a field blank to keep using the startup config file or environment default.',
   'system.transfer.uploadSection': 'Upload Service',
   'system.transfer.downloadSection': 'Download Service',
@@ -6598,6 +6599,28 @@ const messages: Record<string, string> = {
   'retentionBp.field.max_retention_days':    'Station Log Retention (days)',
   'retentionBp.field.max_file_count':        'Fault Log File Quota (0=disabled)',
   'retentionBp.field.compress_after_ingest': 'Compress After Ingest',
+
+  // -------------------------------------------------------------------------
+  // Log Retention & Rotation (system config log_cfg tab): log.retention + log.rotation
+  // -------------------------------------------------------------------------
+  'logCfg.save':                        'Save',
+  'logCfg.save.success':                'Saved; new config hot-reloaded and effective',
+  'logCfg.retention.title':             'Audit / Business Log Retention',
+  'logCfg.retention.desc':              'Time-based retention per log table; worker batch-deletes expired rows daily at 05:00. Keep security/audit logs longer, high-volume message logs shorter; disabling the master switch skips the whole cleanup.',
+  'logCfg.rotation.title':              'Log File Rotation',
+  'logCfg.rotation.desc':               'Per-service (app/acs/worker) runtime log file size/count/age. Hot-reloaded within ≤1 minute (shrinking max size takes effect immediately; enlarging is bounded by each service YAML as a hard backstop).',
+  'logCfg.field.enabled':               'Enable Log Retention Cleanup',
+  'logCfg.field.audit_days':            'Audit Log Retention (days)',
+  'logCfg.field.ops_audit_days':        'Ops Audit Log Retention (days)',
+  'logCfg.field.login_days':            'Login Log Retention (days)',
+  'logCfg.field.oper_days':             'Operation Log Retention (days)',
+  'logCfg.field.task_days':             'Task Log Retention (days)',
+  'logCfg.field.system_days':           'System Log Retention (days)',
+  'logCfg.field.ne_message_days':       'NE Message Log Retention (days)',
+  'logCfg.field.event_days':            'Device Event Log Retention (days)',
+  'logCfg.field.max_size_mb':           'Max File Size (MB, rotate above)',
+  'logCfg.field.max_age_days':          'Archive Retention (days)',
+  'logCfg.field.keep_files':            'Uncompressed Recent Archives to Keep',
 
   // -------------------------------------------------------------------------
   // F05 MR Measurement Task Management

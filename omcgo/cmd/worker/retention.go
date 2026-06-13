@@ -9,6 +9,8 @@ import (
 
 	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/core/asyncjob"
+	corelogger "github.com/omcgo/omcgo/internal/core/components/logger"
+	"github.com/omcgo/omcgo/internal/logretention"
 	"github.com/omcgo/omcgo/internal/pm/retention"
 	"github.com/omcgo/omcgo/internal/stationlog"
 )
@@ -164,6 +166,93 @@ func startStationLogRetentionCleanup(
 	startStationLogCleanupCron(ctx, jobRepo, cronStateRepo, logger, asyncMetrics, loc)
 
 	logger.Info("stationlog retention cleanup pipeline ready (1 runner + 1 cron + catchup)")
+}
+
+// startLogRetentionCleanup wire 起「审计/业务日志」按时间保留清理（internal/logretention）。
+//
+// 与 PM/stationlog retention 同范式：RetentionPolicy 从 sys_configs（category=log.retention）读
+// 各表保留天数（TTL 缓存）；CleanupRunner 对 8 张日志表（audit/ops_audit/login/oper/task/system/
+// ne_message/event）批量 DELETE 过期行；cron 每日 05:00（与 PM 03:00 / stationlog 04:00 错峰）触发 +
+// 启动补跑。全部 8 表都在主库（w.PgPool）。
+func startLogRetentionCleanup(
+	ctx context.Context,
+	w *workerInfra,
+	jobRepo asyncjob.Repository,
+	cronStateRepo asyncjob.CronStateRepository,
+	registry *asyncjob.Registry,
+	asyncMetrics *asyncjob.Metrics,
+	loc *time.Location,
+) {
+	logger := w.Logger.Named("log-retention")
+
+	sysConfigRepo := admin.NewPgSysConfigRepository(w.PgPool)
+	lookup := func(ctx context.Context, category, key string) (string, bool) {
+		row, err := sysConfigRepo.GetByKey(ctx, category, key)
+		if err != nil || row == nil {
+			return "", false
+		}
+		return row.Value, true
+	}
+	policy := logretention.NewRetentionPolicy(lookup, logger)
+	runner := logretention.NewCleanupRunner(w.PgPool, policy, logger)
+	registry.Register(runner)
+	logger.Info("registered log retention cleanup runner",
+		zap.String("job_type", logretention.JobTypeLogRetentionCleanup))
+
+	// 顺带为 worker 自身日志文件起轮转配置 watcher（log.rotation 热加载，复用同一 lookup）。
+	corelogger.StartRotationConfigWatcher(ctx, lookup, logger)
+
+	go runJobTypeWorker(ctx, registry, logretention.JobTypeLogRetentionCleanup, logger)
+
+	startLogCleanupCron(ctx, jobRepo, cronStateRepo, logger, asyncMetrics, loc)
+
+	logger.Info("log retention cleanup pipeline ready (1 runner + 1 cron + catchup)")
+}
+
+// startLogCleanupCron 单 cron entry，每日 05:00 触发审计/业务日志时间清理入队
+// （与 PM 03:00 / stationlog 04:00 错峰；共享 cron_state 表的不同 job_type 行）。
+func startLogCleanupCron(
+	ctx context.Context,
+	jobRepo asyncjob.Repository,
+	stateRepo asyncjob.CronStateRepository,
+	logger *zap.Logger,
+	asyncMetrics *asyncjob.Metrics,
+	loc *time.Location,
+) {
+	const spec = "0 5 * * *" // 每日 05:00（业务时区，与 PM/stationlog 错峰）
+	jobType := logretention.JobTypeLogRetentionCleanup
+
+	entry := cronEntry{
+		spec:    spec,
+		jobType: jobType,
+		window: func(now time.Time) (time.Time, time.Time) {
+			today := truncateDay(now.In(loc))
+			return today.AddDate(0, 0, -1), today
+		},
+		advance: func(prev time.Time) time.Time { return prev.AddDate(0, 0, 1) },
+	}
+
+	now := time.Now().In(loc)
+	catchupCronEntry(ctx, jobRepo, stateRepo, entry, now, logger, asyncMetrics)
+
+	c := cron.New(cron.WithLocation(loc))
+	_, err := c.AddFunc(spec, func() {
+		triggerCron(ctx, jobRepo, stateRepo, entry, logger, loc)
+	})
+	if err != nil {
+		logger.Error("log retention cleanup cron AddFunc failed", zap.Error(err))
+		return
+	}
+	c.Start()
+	logger.Info("log retention cleanup cron started",
+		zap.String("spec", spec), zap.String("job_type", jobType))
+
+	go func() {
+		<-ctx.Done()
+		stopCtx := c.Stop()
+		<-stopCtx.Done()
+		logger.Info("log retention cleanup cron stopped")
+	}()
 }
 
 // startStationLogCleanupCron 单 cron entry，每日 04:00 触发基站日志时间清理入队

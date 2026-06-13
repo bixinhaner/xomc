@@ -173,7 +173,7 @@ func NewLumberjackWriter(path string, cfg appconfig.RotationConfig) io.Writer {
 		startTimedRotation(lj, path, cfg.RotateInterval)
 	}
 	if useCompactor {
-		startCompactor(path, cfg.KeepUncompressed, time.Duration(maxAge)*24*time.Hour)
+		startCompactor(lj, path, cfg.KeepUncompressed, time.Duration(maxAge)*24*time.Hour)
 	}
 
 	return lj
@@ -221,12 +221,20 @@ func truncateToMinute(path string) string {
 //   - 删除 mtime 早于 cutoff 的归档
 //   - 保留最新 keepUncompressed 个 .log 文件不压缩（rename 到分钟精度供 tail/less 直读）
 //   - 其余 .log 归档压缩为 .log.gz 并删除原文件
-func startCompactor(path string, keepUncompressed int, maxAge time.Duration) {
+//
+// keepUncompressed/maxAge 是启动期 YAML 值；每个 tick 通过 effectiveRotation 与运行期
+// sys_configs override 合并（见 rotation.go），故 log.rotation 改完 ≤1 分钟生效。lj 用于
+// max_size override 的 size 切割（enforceMaxSize 调 lumberjack 线程安全 Rotate）。
+func startCompactor(lj *lumberjack.Logger, path string, keepUncompressed int, maxAge time.Duration) {
 	go func() {
 		t := time.NewTicker(1 * time.Minute)
 		defer t.Stop()
 		for range t.C {
-			compactOnce(path, keepUncompressed, maxAge)
+			keep, age, maxSizeMB := effectiveRotation(keepUncompressed, maxAge)
+			if maxSizeMB > 0 {
+				enforceMaxSize(lj, path, int64(maxSizeMB)*1024*1024)
+			}
+			compactOnce(path, keep, age)
 		}
 	}()
 }

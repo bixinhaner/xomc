@@ -572,12 +572,22 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	if exportBucket == "" {
 		exportBucket = "reports"
 	}
-	startPMAggregatorPipeline(context.Background(), w, pmKPIRouter, pmLoc, exportBucket)
+	// 可取消的流水线 ctx：进程优雅关停时取消整棵 PM 聚合/各 retention cron/adhoc + 日志轮转
+	// watcher 的 goroutine 树（对标上面 raw-archiver 的 GS.Register 模式）。否则这些只 gate 在
+	// <-ctx.Done() 的 goroutine 永不退出，关停后仍访问已关闭的 PG/Redis 池产生 "pool closed" 噪声。
+	// 优先级 1：早于一切资源关闭（nats/eventbus 2 / redis 3 / postgres·timescale 4），
+	// 让取消信号尽早发出，goroutine 在池关闭前就开始退出循环，最大限度减少关停期噪声。
+	pipeCtx, pipeCancel := context.WithCancel(context.Background())
+	w.GS.Register("pm-pipeline", 1, func(context.Context) error {
+		pipeCancel()
+		return nil
+	})
+	startPMAggregatorPipeline(pipeCtx, w, pmKPIRouter, pmLoc, exportBucket)
 
 	// T-0164-P7 / G7：自定义聚合任务（oneshot + continuous）。
 	// 复用同一 kpiRouter；4 个 worker 抢 pm_tasks 中 task_subtype='adhoc_aggregation' 的 pending 行；
 	// continuous scheduler 单 goroutine 每分钟扫 scheduled 任务切回 pending。
-	startPMAdhocPipeline(context.Background(), w, pmKPIRouter, cfg)
+	startPMAdhocPipeline(pipeCtx, w, pmKPIRouter, cfg)
 
 	// M3: 周期备份调度器 + 任务 reaper（event-loss 兜底恢复）
 	backupScheduleRepo := backup.NewPgScheduleRepository(w.PgPool)

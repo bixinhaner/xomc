@@ -166,7 +166,10 @@ func startPMAggregatorPipeline(
 	// 7) 基站日志按时间保留清理（#320）— 复用同一 jobRepo / cronStateRepo / registry / asyncMetrics
 	startStationLogRetentionCleanup(ctx, w, jobRepo, cronStateRepo, registry, asyncMetrics, loc)
 
-	logger.Info("PM aggregator pipeline ready (8 aggregator runners + 2 retention runners + sweeper + cron triggers + catchup)")
+	// 8) 审计/业务日志按时间保留清理（log.retention）— 复用同一 jobRepo / cronStateRepo / registry / asyncMetrics
+	startLogRetentionCleanup(ctx, w, jobRepo, cronStateRepo, registry, asyncMetrics, loc)
+
+	logger.Info("PM aggregator pipeline ready (8 aggregator runners + 3 retention runners + sweeper + cron triggers + catchup)")
 }
 
 // runJobTypeWorker 单 JobType 内串行循环 RunNext。

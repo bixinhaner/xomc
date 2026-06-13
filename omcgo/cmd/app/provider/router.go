@@ -90,6 +90,11 @@ func Setup(r *gin.Engine, c *Container) error {
 		Init:    func() error { return initMinIOILMModule(c) },
 	})
 	graph.Add(components.ModuleInitializer{
+		Name:    "log-rotation",
+		Depends: []string{"admin"},
+		Init:    func() error { return initLogRotationModule(c) },
+	})
+	graph.Add(components.ModuleInitializer{
 		Name: "mr",
 		Init: func() error { return initMRModule(c) },
 	})

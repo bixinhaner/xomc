@@ -103,6 +103,25 @@ func runACS(cmd *cobra.Command, args []string) error {
 	}
 	inf.Logger.Info("task service initialized")
 
+	// 日志轮转可配 watcher：让 acs 自身日志文件（acs.log / protocol.log）的大小/个数/过期可在
+	// 系统配置页里调（category=log.rotation，≤1 分钟生效）。与 app/worker 各自起一份管自己的日志。
+	{
+		rotRepo := admin.NewPgSysConfigRepository(inf.PgPool)
+		rotLookup := func(ctx context.Context, category, key string) (string, bool) {
+			row, err := rotRepo.GetByKey(ctx, category, key)
+			if err != nil || row == nil {
+				return "", false
+			}
+			return row.Value, true
+		}
+		rotCtx, rotCancel := context.WithCancel(context.Background())
+		logger.StartRotationConfigWatcher(rotCtx, rotLookup, inf.Logger.Named("log-rotation"))
+		inf.GS.Register("log-rotation-watcher", 1, func(context.Context) error {
+			rotCancel()
+			return nil
+		})
+	}
+
 	// Get request ID prefix from config, default to "acs"
 	requestIDPrefix := cfg.RequestIDPrefix
 	if requestIDPrefix == "" {
