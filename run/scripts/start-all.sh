@@ -22,15 +22,10 @@ echo ""
 bash "$SCRIPT_DIR/start-frontend.sh"
 echo ""
 
-# 4. 启动设计基线前端（独立 worktree，用于和当前开发版并排对比 UI）
-bash "$SCRIPT_DIR/start-design-baseline.sh"
-echo ""
-
 echo "╔══════════════════════════════════════╗"
 echo "║           全部服务已启动             ║"
 echo "╠══════════════════════════════════════╣"
 echo "║  前端:      http://localhost:3000    ║"
-echo "║  设计基线:  http://localhost:3001    ║"
 echo "║  App:       http://localhost:8081    ║"
 echo "║  ACS:       http://localhost:8080    ║"
 echo "║  Worker:    后台进程（无端口）       ║"

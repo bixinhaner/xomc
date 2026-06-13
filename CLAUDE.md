@@ -63,20 +63,6 @@ omc/                                # 根仓库（单一 git）
 
 **前端三包关系**：业务层（API / Hook / Store / Types / i18n / Mock）全部在 `omcmb/frontend-core/`，三个 UI 包通过 `@core → ../frontend-core/src` 共享同一份业务层。日常以 `webcode/` 为主皮肤；**新增 API / Hook / Store / Types 必须写在 `frontend-core/`**，UI 壳里只放页面与组件。
 
-### 3.1 设计基线对比环境（worktree）
-
-本仓库用 `design-baseline` 分支 + `goomc-design` 姊妹 worktree 做 UI 还原度对比。**初次 clone / pull 后一次性 setup**（否则 `start-all.sh` 跳过基线启动）：
-
-```bash
-cd <path>/omc/goomc
-git fetch origin design-baseline:design-baseline     # 拉取基线分支到本地
-git worktree add ../goomc-design design-baseline     # 建立姊妹 worktree
-ln -s "$(pwd)/omcmb/webcode/node_modules" \
-      ../goomc-design/omcmb/webcode/node_modules    # 共享 node_modules
-```
-
-之后 `bash run/scripts/restart-all.sh` 同时启动 `:3000`（当前开发版）与 `:3001`（设计基线），浏览器并排对比。基线由维护者把 `design-baseline` ff 到新 commit 后 push，其他人 pull 对应 worktree 同步。
-
 ---
 
 ## 4. 技术栈总览
@@ -125,7 +111,7 @@ ln -s "$(pwd)/omcmb/webcode/node_modules" \
 | `omcgo-worker` | 后台进程（PM/MR 文件处理、KPI 计算）| metrics `:9092` | 同左 |
 
 > 端口以 `config.dev.yaml` 为准。容器栈宿主映射（含 nginx `:8080`/`:8081`、acs metrics 宿主映射 `:9095`）见 §14 与 `deployments/docker/docker-compose.yml`。
-> **前端 SPA**：Vite dev server `:3000` 经 `/api` 代理到 App `:8081`；设计基线跑 `:3001`（§3.1）。
+> **前端 SPA**：Vite dev server `:3000` 经 `/api` 代理到 App `:8081`。
 
 ---
 

@@ -60,12 +60,10 @@ cd omcmb/webcode && npm install && npm run dev   # :3000，经 /api 代理到后
 **裸进程跑法（备用，未起容器栈时用，不要用于重启容器）**：
 
 ```bash
-bash run/scripts/start-all.sh    # 依赖 → 后端三进程 → 前端 :3000 → 设计基线 :3001
+bash run/scripts/start-all.sh    # 依赖 → 后端三进程 → 前端 :3000
 bash run/scripts/status.sh       # 查看 PID / 端口
 bash run/scripts/stop-all.sh     # 停止全部
 ```
-
-**设计基线对比（UI 还原度并排对比，:3001）** 依赖 `design-baseline` 分支 + `goomc-design` 姊妹 worktree 的一次性 setup，步骤见 [`CLAUDE.md` §3.1](./CLAUDE.md)。
 
 ---
 

@@ -105,6 +105,5 @@ check_app "omcgo-app"    "$RUN_DIR/app.pid"      "omcgo-app"    "8081"
 check_app "omcgo-acs"    "$RUN_DIR/acs.pid"       "omcgo-acs"    "8080"
 check_app "omcgo-worker" "$RUN_DIR/worker.pid"    "omcgo-worker" " -  "
 check_app "前端 Vite"     "$RUN_DIR/frontend.pid"  ""             "3000"
-check_app "设计基线"      "$RUN_DIR/design-baseline.pid" ""       "3001"
 
 echo ""
