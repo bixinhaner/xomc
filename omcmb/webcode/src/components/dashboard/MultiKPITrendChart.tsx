@@ -9,6 +9,7 @@ import LineChart from '@/components/Charts/LineChart';
 import type { ThresholdLine } from '@/components/Charts/LineChart';
 import { useT } from '@/hooks/useT';
 import { useThemeToken } from '@/hooks/useThemeToken';
+import { buildMultiKpiTrendModel } from '@core/utils/buildMultiKpiTrendModel';
 
 const { Text } = Typography;
 
@@ -53,8 +54,9 @@ export function MultiKPITrendChart({
   const t = useT();
   const token = useThemeToken();
 
-  // 转换数据格式给 LineChart 使用（包含KPI标签翻译）
-  const { xData, series } = useMemo(() => {
+  // 转换数据格式给 LineChart 使用（#200：多 KPI 时间轴取并集 + 按时间值对齐，替换旧
+  // "只取第一个 KPI 时间点 + 按索引 zip" 的错位逻辑）
+  const { xData, xDataFull, series } = useMemo(() => {
     // 辅助函数：从可能的数据结构中提取 current 数组
     // 兼容两种数据格式：
     // 1. React Query 结果格式: { data: { current: [...], compare: [...] } }
@@ -69,38 +71,15 @@ export function MultiKPITrendChart({
       return [];
     };
 
-    // 找到第一个有效的 KPI 数据来提取时间轴
-    const firstValidKPI = kpis.find(kpi => getCurrentData(kpi.key).length > 0);
-
-    if (!firstValidKPI) {
-      return { xData: [], series: [] };
-    }
-
-    // 提取时间轴数据 - 根据时间范围格式化
-    const currentData = getCurrentData(firstValidKPI.key);
-    const xData = currentData.map((d: { time: string; value: number }) => {
-      const date = new Date(d.time);
-      if (timeRange === 'last_week') {
-        // 上周对比显示日期 (MM/DD)
-        return `${(date.getMonth() + 1).toString().padStart(2, '0')}/${date.getDate().toString().padStart(2, '0')}`;
-      } else {
-        // 昨日对比显示时间 (HH:mm)
-        return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
-      }
-    });
-
-    // 转换每个 KPI 的数据为 LineChart 格式（包含翻译后的label）
-    const series = kpis.map(kpi => {
-      const kpiCurrentData = getCurrentData(kpi.key);
-      const data = kpiCurrentData.map((d: { time: string; value: number }) => d.value);
-      return {
+    // 装配多 KPI 并集时间轴模型（name 先做 i18n 翻译后传入纯函数）
+    return buildMultiKpiTrendModel(
+      kpis.map((kpi) => ({
         name: t(kpi.label),
-        data,
+        points: getCurrentData(kpi.key),
         color: kpi.color,
-      };
-    });
-
-    return { xData, series };
+      })),
+      timeRange,
+    );
   }, [kpis, trendDataMap, timeRange, t]);
 
   const hasData = xData.length > 0;
@@ -151,11 +130,13 @@ export function MultiKPITrendChart({
         <LineChart
           title=""
           xData={xData}
+          xDataFull={xDataFull}
           series={series}
           height={height - 40}
           areaFill
           smooth
           showLegend
+          connectNulls
           unit={kpis[0]?.unit}
           thresholdLines={thresholdLines}
         />

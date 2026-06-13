@@ -51,6 +51,272 @@ export interface LineChartProps {
    * 适用于告警数量、设备数量等整数指标的图表
    */
   integerValues?: boolean;
+  /**
+   * #200 是否让曲线跨 null 续连（connectNulls）。
+   * 默认 false（保持原行为：遇 null 即断线，不掩盖真实数据空洞）。
+   * 仅 KPI 趋势这类「多设备并集时间轴稀疏导致大量 null」的场景显式传 true，
+   * 让稀疏打点连成可读曲线；普通图表不要开，避免把真缺采样连成假线。
+   */
+  connectNulls?: boolean;
+}
+
+/** buildLineChartOption 入参：把组件渲染态（主题/调色板）与纯数据一起喂进来 */
+export interface BuildLineChartOptionParams {
+  title?: string;
+  xData: string[];
+  xDataFull?: string[];
+  series: LineSeries[];
+  areaFill?: boolean;
+  smooth?: boolean;
+  yAxisName?: string;
+  unit?: string;
+  showLegend?: boolean;
+  compareLabels?: (string | undefined)[];
+  thresholdLines?: ThresholdLine[];
+  integerValues?: boolean;
+  connectNulls?: boolean;
+  isDark: boolean;
+  appTheme: Parameters<typeof getBaseOption>[1];
+  palette: string[];
+}
+
+/**
+ * 纯函数：把数据 + 主题装配成 ECharts option。
+ * 从 LineChart 的 useMemo 抽出，便于单测断言（如 #200 的 series[].connectNulls 与 xAxis.data 长度）。
+ */
+export function buildLineChartOption({
+  title,
+  xData,
+  xDataFull,
+  series,
+  areaFill = false,
+  smooth = true,
+  yAxisName,
+  unit,
+  showLegend = true,
+  compareLabels,
+  thresholdLines,
+  integerValues = false,
+  connectNulls = false,
+  isDark,
+  appTheme,
+  palette,
+}: BuildLineChartOptionParams): EChartsOption {
+  const base = getBaseOption(isDark, appTheme);
+  const secondaryText = isDark ? '#8B949E' : '#8c8c8c';
+  const titleColor = isDark ? '#E6EDF3' : '#262626';
+
+  // 使用工具函数计算智能刻度
+  const seriesData = series.map((s) => s.data.filter((v): v is number => v !== null));
+  // 对于百分比数据，根据数据范围动态调整Y轴
+  const { interval, max: calculatedMax } = calculateSmartTicks(seriesData);
+  const isPercentage = unit === '%';
+  // 对于百分比数据，当最大值小于10%时，使用动态计算的Y轴最大值，否则固定为100%
+  const yMax = isPercentage && calculatedMax > 10 ? 100 : calculatedMax;
+
+  // Legend always at top with scroll enabled for multiple rows
+  const getLegendConfig = () => {
+    if (!showLegend) return { show: false };
+
+    const baseLegend = base.legend as object;
+
+    return {
+      ...baseLegend,
+      top: title ? 28 : 8,
+      type: 'scroll' as const,
+      pageIconSize: 10,
+      pageTextStyle: { fontSize: 10 },
+      // Allow multiple rows with scroll
+      pageButtonItemGap: 2,
+      pageButtonGap: 4,
+    };
+  };
+
+  // Grid with fixed top to leave room for legend (supports ~2 rows of legend items)
+  const getGridConfig = () => {
+    const baseGrid = base.grid as object;
+
+    return {
+      ...baseGrid,
+      top: title ? 80 : 64, // Fixed top to accommodate 2 rows of legend
+      bottom: 24,
+      left: 16,
+      right: 16,
+    };
+  };
+
+  return {
+    ...base,
+    title: title
+      ? {
+          text: title,
+          textStyle: { fontSize: 14, fontWeight: 600, color: titleColor },
+          left: 0,
+          top: 4,
+        }
+      : undefined,
+    tooltip: {
+      ...(base.tooltip as object),
+      trigger: 'axis',
+      confine: true,
+      appendToBody: true,
+      className: 'chart-tooltip',
+      // 智能避让：提示框放到光标对角，避免盖住曲线/图例/其它设备数据（issue #202）。
+      position: (
+        point: [number, number],
+        _params: unknown,
+        _dom: unknown,
+        _rect: unknown,
+        size: { contentSize: [number, number]; viewSize: [number, number] },
+      ) => computeTooltipPosition(point, size),
+      formatter: (params: unknown) => {
+        const items = params as Array<{ marker: string; seriesName: string; value: unknown; axisValue: string; dataIndex: number }>;
+        if (!Array.isArray(items) || items.length === 0) return '';
+
+        // 数值格式化函数：处理null/undefined，显示"-"，否则根据 integerValues 决定是否显示小数
+        const formatTooltipValue = (val: unknown): string => {
+          if (val === null || val === undefined || Number.isNaN(val as number)) {
+            return '-';
+          }
+          // integerValues=true 时显示整数，否则保留2位小数
+          return integerValues ? (val as number).toFixed(0) : (val as number).toFixed(2);
+        };
+
+        // 附加单位到数值后（如果单位不为空且不是"%"）
+        const displayUnit = (unit && unit !== '%') ? `${unit}` : '';
+        const unitSuffix = displayUnit ? ` ${displayUnit}` : '';
+
+        const lines = items.map(item => {
+          const formattedVal = formatTooltipValue(item.value);
+          // 如果是空值显示"-"，则不附加单位
+          const displayValue = formattedVal === '-' ? '-' : `${formattedVal}${unitSuffix}`;
+          return `${item.marker} ${item.seriesName}: <strong>${displayValue}</strong>`;
+        });
+
+        // 周期对比：当前时间行下方补一行「上一周期 …」（缺项不显示）。
+        const idx = items[0].dataIndex;
+        const compareLabel = compareLabels?.[idx];
+        const headerExtra = compareLabel
+          ? `<div style="font-size: 11px; color: #8c8c8c; margin-bottom: 4px;">上一周期 ${compareLabel}</div>`
+          : '';
+
+        // 使用 xDataFull 显示完整时间戳，否则使用 axisValue
+        const displayTime = xDataFull?.[idx] ?? items[0].axisValue;
+
+        return `<div style="max-height: 200px; overflow-y: auto;">
+          <div style="font-weight: 600; margin-bottom: 4px;">${displayTime}</div>
+          ${headerExtra}
+          ${lines.join('<br/>')}
+        </div>`;
+      },
+    },
+    legend: getLegendConfig(),
+    grid: getGridConfig(),
+    xAxis: {
+      ...(base.xAxis as object),
+      type: 'category',
+      data: xData,
+      boundaryGap: false,
+      axisLabel: {
+        rotate: xData.length > 10 ? 45 : 0,
+        fontSize: 10,
+        color: secondaryText,
+      },
+    },
+    yAxis: {
+      ...(base.yAxis as object),
+      type: 'value',
+      name: yAxisName,
+      nameTextStyle: { color: secondaryText, fontSize: 12 },
+      min: 0,
+      interval: interval,
+      max: yMax,
+      axisLabel: {
+        formatter: (value: number) => Number.isInteger(value) ? value.toString() : '',
+      },
+      splitLine: {
+        lineStyle: {
+          type: 'dashed',
+          opacity: 0.5,
+        },
+      },
+    },
+    series: series.map((s, i) => {
+      const color = s.color ?? palette[i % palette.length];
+      // dashed 显式优先：上一周期对比线强制虚线；否则按索引走原样式（向后兼容）。
+      const lineStyleType = s.dashed
+        ? 'dashed'
+        : LINE_STYLES[Math.floor(i / SYMBOL_SHAPES.length) % LINE_STYLES.length];
+      const symbolShape = SYMBOL_SHAPES[i % SYMBOL_SHAPES.length];
+
+      return {
+        name: s.name,
+        type: 'line',
+        data: s.data,
+        smooth,
+        // #200：稀疏并集时间轴下跨 null 续连（仅 connectNulls=true 时），避免曲线断成孤点。
+        connectNulls,
+        symbol: symbolShape,
+        symbolSize: 0,
+        showSymbol: false,
+        itemStyle: {
+          color,
+        },
+        lineStyle: {
+          width: 2,
+          type: lineStyleType,
+          color,
+        },
+        emphasis: {
+          focus: 'series',
+          lineStyle: { width: 3 },
+          itemStyle: {
+            shadowBlur: 8,
+            shadowColor: isDark ? 'rgba(0,0,0,0.3)' : 'rgba(0,0,0,0.15)',
+          },
+        },
+        areaStyle: areaFill && !s.dashed
+          ? {
+              opacity: 0.1,
+              color: {
+                type: 'linear',
+                x: 0,
+                y: 0,
+                x2: 0,
+                y2: 1,
+                colorStops: [
+                  { offset: 0, color },
+                  { offset: 1, color: 'rgba(255,255,255,0)' },
+                ],
+              },
+            }
+          : undefined,
+        markLine: thresholdLines && thresholdLines.length > 0
+          ? {
+              silent: true,
+              symbol: 'none',
+              data: thresholdLines.map((threshold) => ({
+                yAxis: threshold.value,
+                label: {
+                  show: true,
+                  position: 'end',
+                  formatter: threshold.label,
+                  fontSize: 10,
+                  color: isDark ? '#8B949E' : '#8c8c8c',
+                },
+                lineStyle: {
+                  type: threshold.lineType || 'dashed',
+                  color: threshold.color || (isDark ? '#8B949E' : '#8c8c8c'),
+                  width: 1,
+                },
+              })),
+            }
+          : undefined,
+        animationDuration: 500,
+        animationEasing: 'cubicOut',
+      };
+    }),
+  };
 }
 
 // Line styles for differentiating multiple series
@@ -98,226 +364,51 @@ const LineChart: React.FC<LineChartProps> = ({
   compareLabels,
   thresholdLines,
   integerValues = false,
+  connectNulls = false,
 }) => {
   const isDark = useIsDark();
   const appTheme = useAppStore((s) => s.theme);
   const palette = getChartPalette(appTheme);
 
-  const option = useMemo((): EChartsOption => {
-    const base = getBaseOption(isDark, appTheme);
-    const secondaryText = isDark ? '#8B949E' : '#8c8c8c';
-    const titleColor = isDark ? '#E6EDF3' : '#262626';
-
-    // 使用工具函数计算智能刻度
-    const seriesData = series.map((s) => s.data.filter((v): v is number => v !== null));
-    // 对于百分比数据，根据数据范围动态调整Y轴
-    const { interval, max: calculatedMax } = calculateSmartTicks(seriesData);
-    const isPercentage = unit === '%';
-    // 对于百分比数据，当最大值小于10%时，使用动态计算的Y轴最大值，否则固定为100%
-    const yMax = isPercentage && calculatedMax > 10 ? 100 : calculatedMax;
-
-    // Legend always at top with scroll enabled for multiple rows
-    const getLegendConfig = () => {
-      if (!showLegend) return { show: false };
-
-      const baseLegend = base.legend as object;
-
-      return {
-        ...baseLegend,
-        top: title ? 28 : 8,
-        type: 'scroll' as const,
-        pageIconSize: 10,
-        pageTextStyle: { fontSize: 10 },
-        // Allow multiple rows with scroll
-        pageButtonItemGap: 2,
-        pageButtonGap: 4,
-      };
-    };
-
-    // Grid with fixed top to leave room for legend (supports ~2 rows of legend items)
-    const getGridConfig = () => {
-      const baseGrid = base.grid as object;
-
-      return {
-        ...baseGrid,
-        top: title ? 80 : 64, // Fixed top to accommodate 2 rows of legend
-        bottom: 24,
-        left: 16,
-        right: 16,
-      };
-    };
-
-    return {
-      ...base,
-      title: title
-        ? {
-            text: title,
-            textStyle: { fontSize: 14, fontWeight: 600, color: titleColor },
-            left: 0,
-            top: 4,
-          }
-        : undefined,
-      tooltip: {
-        ...(base.tooltip as object),
-        trigger: 'axis',
-        confine: true,
-        appendToBody: true,
-        className: 'chart-tooltip',
-        // 智能避让：提示框放到光标对角，避免盖住曲线/图例/其它设备数据（issue #202）。
-        position: (
-          point: [number, number],
-          _params: unknown,
-          _dom: unknown,
-          _rect: unknown,
-          size: { contentSize: [number, number]; viewSize: [number, number] },
-        ) => computeTooltipPosition(point, size),
-        formatter: (params: unknown) => {
-          const items = params as Array<{ marker: string; seriesName: string; value: unknown; axisValue: string; dataIndex: number }>;
-          if (!Array.isArray(items) || items.length === 0) return '';
-
-          // 数值格式化函数：处理null/undefined，显示"-"，否则根据 integerValues 决定是否显示小数
-          const formatTooltipValue = (val: unknown): string => {
-            if (val === null || val === undefined || Number.isNaN(val as number)) {
-              return '-';
-            }
-            // integerValues=true 时显示整数，否则保留2位小数
-            return integerValues ? (val as number).toFixed(0) : (val as number).toFixed(2);
-          };
-
-          // 附加单位到数值后（如果单位不为空且不是"%"）
-          const displayUnit = (unit && unit !== '%') ? `${unit}` : '';
-          const unitSuffix = displayUnit ? ` ${displayUnit}` : '';
-
-          const lines = items.map(item => {
-            const formattedVal = formatTooltipValue(item.value);
-            // 如果是空值显示"-"，则不附加单位
-            const displayValue = formattedVal === '-' ? '-' : `${formattedVal}${unitSuffix}`;
-            return `${item.marker} ${item.seriesName}: <strong>${displayValue}</strong>`;
-          });
-
-          // 周期对比：当前时间行下方补一行「上一周期 …」（缺项不显示）。
-          const idx = items[0].dataIndex;
-          const compareLabel = compareLabels?.[idx];
-          const headerExtra = compareLabel
-            ? `<div style="font-size: 11px; color: #8c8c8c; margin-bottom: 4px;">上一周期 ${compareLabel}</div>`
-            : '';
-
-          // 使用 xDataFull 显示完整时间戳，否则使用 axisValue
-          const displayTime = xDataFull?.[idx] ?? items[0].axisValue;
-
-          return `<div style="max-height: 200px; overflow-y: auto;">
-            <div style="font-weight: 600; margin-bottom: 4px;">${displayTime}</div>
-            ${headerExtra}
-            ${lines.join('<br/>')}
-          </div>`;
-        },
-      },
-      legend: getLegendConfig(),
-      grid: getGridConfig(),
-      xAxis: {
-        ...(base.xAxis as object),
-        type: 'category',
-        data: xData,
-        boundaryGap: false,
-        axisLabel: {
-          rotate: xData.length > 10 ? 45 : 0,
-          fontSize: 10,
-          color: secondaryText,
-        },
-      },
-      yAxis: {
-        ...(base.yAxis as object),
-        type: 'value',
-        name: yAxisName,
-        nameTextStyle: { color: secondaryText, fontSize: 12 },
-        min: 0,
-        interval: interval,
-        max: yMax,
-        axisLabel: {
-          formatter: (value: number) => Number.isInteger(value) ? value.toString() : '',
-        },
-        splitLine: {
-          lineStyle: {
-            type: 'dashed',
-            opacity: 0.5,
-          },
-        },
-      },
-      series: series.map((s, i) => {
-        const color = s.color ?? palette[i % palette.length];
-        // dashed 显式优先：上一周期对比线强制虚线；否则按索引走原样式（向后兼容）。
-        const lineStyleType = s.dashed
-          ? 'dashed'
-          : LINE_STYLES[Math.floor(i / SYMBOL_SHAPES.length) % LINE_STYLES.length];
-        const symbolShape = SYMBOL_SHAPES[i % SYMBOL_SHAPES.length];
-
-        return {
-          name: s.name,
-          type: 'line',
-          data: s.data,
-          smooth,
-          symbol: symbolShape,
-          symbolSize: 0,
-          showSymbol: false,
-          itemStyle: {
-            color,
-          },
-          lineStyle: {
-            width: 2,
-            type: lineStyleType,
-            color,
-          },
-          emphasis: {
-            focus: 'series',
-            lineStyle: { width: 3 },
-            itemStyle: {
-              shadowBlur: 8,
-              shadowColor: isDark ? 'rgba(0,0,0,0.3)' : 'rgba(0,0,0,0.15)',
-            },
-          },
-          areaStyle: areaFill && !s.dashed
-            ? {
-                opacity: 0.1,
-                color: {
-                  type: 'linear',
-                  x: 0,
-                  y: 0,
-                  x2: 0,
-                  y2: 1,
-                  colorStops: [
-                    { offset: 0, color },
-                    { offset: 1, color: 'rgba(255,255,255,0)' },
-                  ],
-                },
-              }
-            : undefined,
-          markLine: thresholdLines && thresholdLines.length > 0
-            ? {
-                silent: true,
-                symbol: 'none',
-                data: thresholdLines.map((threshold) => ({
-                  yAxis: threshold.value,
-                  label: {
-                    show: true,
-                    position: 'end',
-                    formatter: threshold.label,
-                    fontSize: 10,
-                    color: isDark ? '#8B949E' : '#8c8c8c',
-                  },
-                  lineStyle: {
-                    type: threshold.lineType || 'dashed',
-                    color: threshold.color || (isDark ? '#8B949E' : '#8c8c8c'),
-                    width: 1,
-                  },
-                })),
-              }
-            : undefined,
-          animationDuration: 500,
-          animationEasing: 'cubicOut',
-        };
+  const option = useMemo(
+    (): EChartsOption =>
+      buildLineChartOption({
+        title,
+        xData,
+        xDataFull,
+        series,
+        areaFill,
+        smooth,
+        yAxisName,
+        unit,
+        showLegend,
+        compareLabels,
+        thresholdLines,
+        integerValues,
+        connectNulls,
+        isDark,
+        appTheme,
+        palette,
       }),
-    };
-  }, [title, xData, xDataFull, series, areaFill, smooth, yAxisName, unit, isDark, appTheme, palette, showLegend, compareLabels, thresholdLines]);
+    [
+      title,
+      xData,
+      xDataFull,
+      series,
+      areaFill,
+      smooth,
+      yAxisName,
+      unit,
+      showLegend,
+      compareLabels,
+      thresholdLines,
+      integerValues,
+      connectNulls,
+      isDark,
+      appTheme,
+      palette,
+    ],
+  );
 
   return (
     <ReactECharts
