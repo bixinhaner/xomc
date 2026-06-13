@@ -729,6 +729,7 @@ const messages: Record<string, string> = {
   'nav.system.config':        'System Config',
   'nav.system.dataDict':      'Data Dictionary',
   'nav.system.apiManagement': 'API Management',
+  'nav.system.kpiConfig':     'Dashboard KPI Config',
   'nav.system.dashboard':     'System Dashboard',
 
   // Dictionary management
@@ -2564,6 +2565,20 @@ const messages: Record<string, string> = {
   'dashboard.panel.accessibility':  'Accessibility',
   'dashboard.panel.retainability':  'Retainability',
   'dashboard.panel.mobility':       'Mobility',
+
+  // Dashboard KPI Config page (issue #213 S3, admin)
+  'dashboard.kpiConfig.pageTitle':       'Dashboard KPI Config',
+  'dashboard.kpiConfig.addPanel':        'Add Chart',
+  'dashboard.kpiConfig.deletePanel':     'Delete chart',
+  'dashboard.kpiConfig.save':            'Save',
+  'dashboard.kpiConfig.saveSuccess':     'Saved. Applied to all users.',
+  'dashboard.kpiConfig.saveFailed':      'Save failed',
+  'dashboard.kpiConfig.newPanelTitle':   'New Chart',
+  'dashboard.kpiConfig.titlePlaceholder':   'Enter chart title',
+  'dashboard.kpiConfig.metricsPlaceholder': 'Select metrics from library (multi-select)',
+  'dashboard.kpiConfig.hint':            'Drag the handle on the left of the title bar to move, drag the bottom-right corner to resize',
+  'dashboard.kpiConfig.dragHint':        'Drag to move this chart',
+  'dashboard.kpiConfig.emptyTip':        'No charts for this technology yet. Click "Add Chart" to start.',
 
   // Dashboard KPI指标 - v2.0新增
   'dashboard.kpi.totalDataVolumeDl':    'Total Data Volume DL',

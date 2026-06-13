@@ -24,7 +24,7 @@ import (
 func dashHSetupRouter() (*gin.Engine, *Handler) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	h := NewHandler(nil) // nil service — we only test validation paths
+	h := NewHandler(nil, nil) // nil service — we only test validation paths
 	h.RegisterRoutes(r.Group("/api/v1"))
 	return r, h
 }
@@ -171,7 +171,7 @@ func TestDashHandler_SaveWidgets_NoAuth(t *testing.T) {
 func TestDashHandler_SaveWidgets_BadBody(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	h := NewHandler(nil)
+	h := NewHandler(nil, nil)
 	h.RegisterRoutes(r.Group("/api/v1"))
 
 	// Set user_id in context to pass auth check, then send bad body.
@@ -197,7 +197,7 @@ func TestDashHandler_SaveWidgets_BadBody(t *testing.T) {
 func TestDashHandler_SaveWidgets_MissingLayout(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	h := NewHandler(nil)
+	h := NewHandler(nil, nil)
 	userID := uuid.New()
 	r.PUT("/test-widgets", func(c *gin.Context) {
 		c.Set(admin.CtxKeyUserID, userID)

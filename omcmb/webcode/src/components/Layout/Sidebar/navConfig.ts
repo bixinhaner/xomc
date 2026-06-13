@@ -214,6 +214,8 @@ export const NAV_CONFIG: NavConfig = [
       // { key: 'sys-db-monitor',  label: 'nav.system.dbMonitor',      path: '/system/db-monitor' },  // 隐藏数据库监控
       { key: 'sys-api',         label: 'nav.system.apiManagement',  path: '/system/api-management' },
       { key: 'sys-dict',        label: 'nav.system.dataDict',        path: '/system/data-dictionary' },
+      // issue #213 S3：首页 KPI 配置（管理员可见）
+      { key: 'sys-kpi-config',  label: 'nav.system.kpiConfig',      path: '/system/kpi-config', requireAdmin: true },
     ],
   },
   // {

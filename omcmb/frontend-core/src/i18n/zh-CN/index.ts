@@ -732,6 +732,7 @@ const messages: Record<string, string> = {
   'nav.system.dashboard':     '系统仪表板',
   'nav.system.dataDict':      '字典管理',
   'nav.system.apiManagement': 'API管理',
+  'nav.system.kpiConfig':     '首页 KPI 配置',
 
   // Dictionary management
   'dictionary.name':          '字典名称',
@@ -2573,6 +2574,20 @@ const messages: Record<string, string> = {
   'dashboard.panel.retainability':  '保持性',
   'dashboard.panel.mobility':       '移动性',
   'dashboard.panel.quality':         '质量',
+
+  // 首页 KPI 配置页（issue #213 S3，管理员）
+  'dashboard.kpiConfig.pageTitle':       '首页 KPI 配置',
+  'dashboard.kpiConfig.addPanel':        '新增图',
+  'dashboard.kpiConfig.deletePanel':     '删除此图',
+  'dashboard.kpiConfig.save':            '保存',
+  'dashboard.kpiConfig.saveSuccess':     '保存成功，已对所有用户生效',
+  'dashboard.kpiConfig.saveFailed':      '保存失败',
+  'dashboard.kpiConfig.newPanelTitle':   '新图',
+  'dashboard.kpiConfig.titlePlaceholder':   '请输入图标题',
+  'dashboard.kpiConfig.metricsPlaceholder': '从指标库选择指标（可多选）',
+  'dashboard.kpiConfig.hint':            '按住图标题栏左侧手柄可移动，拖右下角可调整大小',
+  'dashboard.kpiConfig.dragHint':        '按住拖动此图',
+  'dashboard.kpiConfig.emptyTip':        '当前制式暂无图，点「新增图」开始搭建',
 
   // Dashboard KPI指标 - v2.0新增
   'dashboard.kpi.totalDataVolumeDl':    '总下行数据量',

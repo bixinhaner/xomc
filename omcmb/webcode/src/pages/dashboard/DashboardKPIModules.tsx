@@ -1,17 +1,18 @@
 /**
- * Dashboard KPI Panel区域 - v2.0 Panel化设计
+ * Dashboard KPI Panel区域 - issue #213 S2：读全局布局（带回退）驱动渲染
  *
- * 根据制式显示不同的Panel布局：
- * - LTE (eNB): 6个Panel（2×3网格）
- * - NR (gNB): 2个Panel（1×2布局）
- * - GSM: 3个Panel（第一行2个，第二行1个占满）
+ * 流程：按当前制式读 S1 全局布局接口 → 读不到/为空/出错回退内置默认 →
+ * 汇总所有可见图要画的指标做一次批量取数 → 按网格位置（行）渲染折线图。
+ * 首页只读不可拖。
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Row, Col } from 'antd';
-import type { TechnologyType, PanelType } from './kpi-config';
-import { getPanelLayout } from './kpi-config';
-import { KPIPanel } from '@/components/dashboard';
+import type { TechnologyType } from './kpi-config';
+import { useKPILayout } from '@core/hooks/api/useDashboard';
+import { useMultiKPITrendComparison } from '@core/hooks/api/useDashboard';
+import { LayoutKPIPanel } from '@/components/dashboard/LayoutKPIPanel';
+import { resolveLayout, collectMetrics, layoutToRows } from './layoutMapping';
 
 interface DashboardKPIModulesProps {
   /** 当前制式 */
@@ -24,50 +25,56 @@ interface DashboardKPIModulesProps {
 
 /**
  * Dashboard KPI Panel区域组件
- *
- * @example
- * ```tsx
- * <DashboardKPIModules
- *   technology="lte"
- *   enableScrollReveal
- * />
- * ```
  */
 export function DashboardKPIModules({ technology, enableScrollReveal = true, startDelay = 2 }: DashboardKPIModulesProps) {
   const [isInitialLoad, setIsInitialLoad] = useState(true);
-  // 获取当前制式的Panel布局
-  const panelLayout = getPanelLayout(technology);
 
-  // 第一次渲染后标记为非初始加载
+  // 读全局布局（按制式）；读不到 / 为空 / 出错由 resolveLayout 回退内置默认。
+  const { data: remoteLayout } = useKPILayout(technology);
+  const layout = useMemo(
+    () => resolveLayout(technology, remoteLayout),
+    [technology, remoteLayout],
+  );
+
+  // 汇总当前制式所有图要画的指标，去重，做一次批量取数（今日 vs 昨日）。
+  const metrics = useMemo(() => collectMetrics(layout.panels), [layout.panels]);
+  const { data: trendData, isLoading } = useMultiKPITrendComparison(metrics, 'yesterday', metrics.length > 0);
+
+  // 按网格坐标把图排成行（首页只读不可拖）。
+  const rows = useMemo(() => layoutToRows(layout.panels), [layout.panels]);
+
+  // 第一次渲染后标记为非初始加载。
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect -- One-time initialization after mount */
     setIsInitialLoad(false);
     /* eslint-enable react-hooks/set-state-in-effect */
   }, []);
 
-  // 初始加载时启用动画，制式切换时禁用动画直接显示
   const shouldAnimate = enableScrollReveal && isInitialLoad;
 
   return (
     <>
-      {panelLayout.map((rowPanels, rowIndex) => (
+      {rows.map((row, rowIndex) => (
         <Row
           key={rowIndex}
           gutter={[16, 16]}
           className={shouldAnimate ? 'omc-scroll-reveal omc-visible' : ''}
           data-delay={startDelay + rowIndex}
         >
-          {rowPanels.map((panelType: PanelType) => (
+          {row.panels.map((panel) => (
             <Col
-              key={`${rowIndex}-${panelType}`}
+              key={`${rowIndex}-${panel.x}-${panel.title}`}
               xs={24}
-              lg={rowPanels.length === 1 ? 24 : 12}
+              // 12 列网格 → antd 24 栅格：lg = w*2（满宽 12→24，半宽 6→12）。
+              lg={Math.min(24, panel.w * 2)}
               style={{ display: 'flex' }}
             >
-              <KPIPanel
-                key={`${technology}-${panelType}`}  // 制式切换时重新挂载，重置状态
+              <LayoutKPIPanel
+                key={`${technology}-${panel.title}`}  // 制式切换时重新挂载，重置状态
                 technology={technology}
-                panelType={panelType}
+                panel={panel}
+                trendData={trendData}
+                isLoading={isLoading}
                 height={280}
               />
             </Col>

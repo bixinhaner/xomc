@@ -8,6 +8,9 @@ import type {
   DayOfWeekData,
   AlarmHeatmapBySeverity,
   KPIDefinitionsResponse,
+  BackendKPILayout,
+  KPILayout,
+  KPILayoutPanel,
 } from '../../types/dashboard';
 import type { DashboardChartData } from '../../mock/data/dashboard';
 
@@ -255,6 +258,38 @@ function mapAlarmTypePie(
   return items.map((item) => ({ name: item.name, value: item.value }));
 }
 
+/**
+ * 映射全局 KPI 布局（issue #213 S2）。
+ * 把后端 snake_case 信封映射为前端 camelCase 形状；panels 原样透传（已是 camelCase）。
+ * 后端可能返回 layout 为 null / 缺 panels，统一兜底成空数组（首页回退由调用方处理）。
+ */
+function mapBackendKPILayout(b: BackendKPILayout): KPILayout {
+  return {
+    tech: b.tech,
+    panels: b.layout?.panels ?? [],
+    updatedAt: b.updated_at,
+  };
+}
+
+/**
+ * 把前端布局形状映射回后端存盘信封（issue #213 S3）。
+ * panels 字段与后端一致（title/metrics/x,y/w,h/chartType），原样透传；
+ * 仅包上 layout.panels 信封（updated_at/updated_by 由后端按当前管理员写入，前端不传）。
+ */
+function mapKPILayoutToBackend(panels: KPILayoutPanel[]): { panels: KPILayoutPanel[] } {
+  return {
+    panels: panels.map((p) => ({
+      title: p.title,
+      metrics: [...p.metrics],
+      x: p.x,
+      y: p.y,
+      w: p.w,
+      h: p.h,
+      chartType: p.chartType,
+    })),
+  };
+}
+
 // --- Exported service ---
 
 export const dashboardApi = {
@@ -432,6 +467,35 @@ export const dashboardApi = {
       '/dashboard/kpi/definitions'
     );
     return data;
+  },
+
+  /**
+   * 获取首页 KPI 折线图区的全局布局（issue #213 S2）
+   * GET /dashboard/kpi-layout?tech=lte|nr|gsm
+   *
+   * 全局单套、按制式各一行，所有登录用户可读。响应为 snake_case 信封，
+   * 经 mapBackendKPILayout 映射为前端 camelCase 形状（panels 原样透传）。
+   */
+  async getKPILayout(tech: string): Promise<KPILayout> {
+    const { data } = await http.get<BackendKPILayout>('/dashboard/kpi-layout', {
+      params: { tech },
+    });
+    return mapBackendKPILayout(data);
+  },
+
+  /**
+   * 保存首页 KPI 折线图区的全局布局（issue #213 S3，仅管理员）
+   * PUT /dashboard/kpi-layout
+   *
+   * 后端从 JSON body 读 tech（制式）与 layout（panels 信封），最后写入生效（不做版本锁）。
+   * handler 再校验一次管理员身份；非管理员被拒（403）。存完对所有用户生效。
+   */
+  async saveKPILayout(tech: string, panels: KPILayoutPanel[]): Promise<KPILayout> {
+    const { data } = await http.put<BackendKPILayout>('/dashboard/kpi-layout', {
+      tech,
+      layout: mapKPILayoutToBackend(panels),
+    });
+    return mapBackendKPILayout(data);
   },
 
   /**

@@ -18,11 +18,17 @@ import (
 // Handler provides REST API endpoints for dashboard.
 type Handler struct {
 	service *Service
+	// permChecker 用于存全局布局接口在 handler 层再校验一次管理员身份（issue #213 S1）。
+	// 复用 admin 的 PermissionChecker（Casbin 端点级权限点）+ 超管 IsSuperAdmin 旁路，
+	// 不发明新机制。可能为 nil（测试 / 旧 wiring）：此时存盘只认 super_admin。
+	permChecker admin.PermissionChecker
 }
 
 // NewHandler creates a new dashboard handler.
-func NewHandler(service *Service) *Handler {
-	return &Handler{service: service}
+//
+// permChecker 用于存全局 KPI 布局接口的管理员二次校验（可为 nil，仅认 super_admin）。
+func NewHandler(service *Service, permChecker admin.PermissionChecker) *Handler {
+	return &Handler{service: service, permChecker: permChecker}
 }
 
 // RegisterRoutes registers dashboard routes on the given router group.
@@ -46,6 +52,10 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		dashboard.GET("/kpi-time-series", h.GetKPITimeSeries)
 		// issue #213 Phase1：KPI 定义动态化（symbolic key + K 编号 + 中文名 + 单位，按制式/Panel 分组）
 		dashboard.GET("/kpi/definitions", h.GetKPIDefinitions)
+		// issue #213 S1：全局首页 KPI 布局（全局单套，按制式带参）。
+		// GET 所有登录用户可读；PUT 仅管理员（handler 层再校验，super_admin 旁路 + Casbin 权限点）。
+		dashboard.GET("/kpi-layout", h.GetKPILayout)
+		dashboard.PUT("/kpi-layout", h.SaveKPILayout)
 		// 告警统计新增端点
 		dashboard.GET("/alarm-efficiency", h.GetAlarmEfficiency)
 		dashboard.GET("/alarm-heatmap", h.GetAlarmHeatmap)
@@ -256,6 +266,88 @@ func (h *Handler) GetKPIDefinitions(c *gin.Context) {
 		return
 	}
 	response.OK(c, defs)
+}
+
+// GetKPILayout handles GET /api/v1/dashboard/kpi-layout?tech=lte.
+//
+// issue #213 S1：读全局首页 KPI 布局（所有登录用户可读，按制式带参）。
+// 无配置时由 service 回退内置默认布局，保证永不空白。tech 缺省 lte。
+func (h *Handler) GetKPILayout(c *gin.Context) {
+	tech := c.Query("tech")
+	if tech == "" {
+		tech = "lte"
+	}
+	layout, err := h.service.GetKPILayout(c.Request.Context(), tech)
+	if err != nil {
+		if err == ErrInvalidTech {
+			commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+			return
+		}
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	response.OK(c, layout)
+}
+
+// SaveKPILayout handles PUT /api/v1/dashboard/kpi-layout.
+//
+// issue #213 S1：存全局首页 KPI 布局（仅管理员）。handler 层再校验一次管理员身份
+// （super_admin IsSuperAdmin 旁路 + Casbin 端点级权限点），非管理员一律 403。
+func (h *Handler) SaveKPILayout(c *gin.Context) {
+	userID, err := getUserID(c)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusUnauthorized, err)
+		return
+	}
+
+	// 管理员二次校验：super_admin 旁路，否则查 Casbin 端点级权限点（与中间件同口径）。
+	if !h.isAdmin(c, userID) {
+		commonerrors.AbortWithError(c, http.StatusForbidden,
+			fmt.Errorf("insufficient permissions: admin required to save dashboard layout"))
+		return
+	}
+
+	var body struct {
+		Tech   string          `json:"tech" binding:"required"`
+		Layout json.RawMessage `json:"layout" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			fmt.Errorf("invalid request body: %w", err))
+		return
+	}
+
+	layout, err := h.service.SaveKPILayout(c.Request.Context(), body.Tech, body.Layout, userID)
+	if err != nil {
+		if err == ErrInvalidTech {
+			commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+			return
+		}
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	response.OK(c, layout)
+}
+
+// isAdmin 判定当前请求者是否有权存全局布局。
+//
+// 复用 admin 现成机制，不发明新身份体系：
+//  1. super_admin（builtIn 用户，IsSuperAdmin）直接放行——与 RequireAPIPermission 旁路一致。
+//  2. 否则查 Casbin 端点级权限点（path+method），命中即放行；未授任何角色该端点 → 拒绝。
+func (h *Handler) isAdmin(c *gin.Context, userID uuid.UUID) bool {
+	if isSuper, _ := c.Get(admin.CtxKeyIsSuperAdmin); isSuper == true {
+		return true
+	}
+	if h.permChecker == nil {
+		// 无权限检查器时保守拒绝（只认 super_admin），不放行普通用户。
+		return false
+	}
+	allowed, err := h.permChecker.CheckPermission(
+		c.Request.Context(), userID, c.Request.URL.Path, c.Request.Method)
+	if err != nil {
+		return false
+	}
+	return allowed
 }
 
 // getUserID extracts the authenticated user's UUID from the Gin context.

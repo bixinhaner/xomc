@@ -4,8 +4,34 @@ import type {
   KPIDefinitionsResponse,
   KPIDefinitionItem,
   KPITechDefinitions,
+  KPILayout,
+  KPILayoutPanel,
 } from '../../types/dashboard';
 import { delay } from '../utils';
+
+// issue #213 S2：首页 KPI 全局布局 Mock 数据。
+// 与后端 seed（migrations/seed/000002_dashboard_kpi_layout_seed.sql）等价：
+// LTE 6 图 / NR 2 图 / GSM 3 图，12 列网格，半宽 w=6 / 满宽 w=12 / 统一 h=8。
+// dev:mock 下首页能按布局渲染、与真实接口同形状。
+const MOCK_KPI_LAYOUTS: Record<string, KPILayoutPanel[]> = {
+  lte: [
+    { title: 'dashboard.panel.traffic', metrics: ['LTE_PDCP_VOLUME_DL', 'LTE_PDCP_VOLUME_UL', 'LTE_PDCP_RATE_DL', 'LTE_PDCP_RATE_UL'], x: 0, y: 0, w: 6, h: 8, chartType: 'line' },
+    { title: 'dashboard.panel.availability', metrics: ['LTE_CELL_AVAILABLE'], x: 6, y: 0, w: 6, h: 8, chartType: 'line' },
+    { title: 'dashboard.panel.utilization', metrics: ['LTE_PRB_UTIL_DL', 'LTE_PRB_UTIL_UL'], x: 0, y: 8, w: 6, h: 8, chartType: 'line' },
+    { title: 'dashboard.panel.accessibility', metrics: ['WIRELESS_SETUP_SR', 'RRC_CONN_SETUP_SR', 'ERAB_SETUP_SR', 'CSFB_SR'], x: 6, y: 8, w: 6, h: 8, chartType: 'line' },
+    { title: 'dashboard.panel.retainability', metrics: ['ERAB_DROP_RATE'], x: 0, y: 16, w: 6, h: 8, chartType: 'line' },
+    { title: 'dashboard.panel.mobility', metrics: ['HO_INTRA_ENB_OUT_SR', 'HO_INTRA_ENB_IN_SR', 'HO_INTER_ENB_OUT_SR', 'HO_INTER_ENB_IN_SR'], x: 6, y: 16, w: 6, h: 8, chartType: 'line' },
+  ],
+  nr: [
+    { title: 'dashboard.panel.traffic', metrics: ['NR_PDCP_VOLUME_DL', 'NR_PDCP_VOLUME_UL', 'NR_PDCP_RATE_DL', 'NR_PDCP_RATE_UL'], x: 0, y: 0, w: 6, h: 8, chartType: 'line' },
+    { title: 'dashboard.panel.utilization', metrics: ['NR_PRB_UTIL_DL', 'NR_PRB_UTIL_UL'], x: 6, y: 0, w: 6, h: 8, chartType: 'line' },
+  ],
+  gsm: [
+    { title: 'dashboard.panel.accessibility', metrics: ['GSM_CALL_SETUP_SR'], x: 0, y: 0, w: 6, h: 8, chartType: 'line' },
+    { title: 'dashboard.panel.retainability', metrics: ['GSM_CALL_DROP_RATE'], x: 6, y: 0, w: 6, h: 8, chartType: 'line' },
+    { title: 'dashboard.panel.mobility', metrics: ['GSM_HO_SR'], x: 0, y: 8, w: 12, h: 8, chartType: 'line' },
+  ],
+};
 
 // issue #213 Phase1：Dashboard KPI 动态定义 Mock 数据。
 // 与对照表（symbolic key → K 编号 → 中文名 → 单位 → Panel）一致；none 项 available=false。
@@ -229,6 +255,29 @@ export const dashboardService = {
   async getKPIDefinitions(): Promise<KPIDefinitionsResponse> {
     await delay(60, 120);
     return mockKPIDefinitions;
+  },
+
+  // issue #213 S2：首页 KPI 全局布局（Mock）。按制式返回 seed 等价布局。
+  async getKPILayout(tech: string): Promise<KPILayout> {
+    await delay(60, 120);
+    return {
+      tech,
+      panels: MOCK_KPI_LAYOUTS[tech] ?? [],
+      updatedAt: new Date().toISOString(),
+    };
+  },
+
+  // issue #213 S3：保存首页 KPI 全局布局（Mock）。
+  // dev:mock 下写回进程内 MOCK_KPI_LAYOUTS，后续 getKPILayout 即读到新布局，
+  // 模拟「最后写入生效 + 存完对所有用户生效」。
+  async saveKPILayout(tech: string, panels: KPILayoutPanel[]): Promise<KPILayout> {
+    await delay(80, 160);
+    MOCK_KPI_LAYOUTS[tech] = panels.map((p) => ({ ...p, metrics: [...p.metrics] }));
+    return {
+      tech,
+      panels: MOCK_KPI_LAYOUTS[tech],
+      updatedAt: new Date().toISOString(),
+    };
   },
 
   async getDeviceStatusByType(): Promise<Record<string, { online: number; offline: number; alarm: number }>> {

@@ -603,3 +603,83 @@ export interface KPIDefinitionsResponse {
   /** KPI 定义总条数。 */
   total: number;
 }
+
+// ============================================================================
+// Dashboard KPI 全局布局（issue #213 S2）
+//
+// 首页 KPI 折线图区从「写死的 kpi-config.ts」改为读后端全局布局接口
+// （GET /dashboard/kpi-layout?tech=lte|nr|gsm）。后端按制式各存一行，
+// 布局体（panels 数组）原样透传。读不到/为空/出错时前端回退内置默认。
+//
+// 后端 JSON 为 snake_case（updated_at / updated_by）；panel 内字段 chartType 为
+// camelCase（seed 即如此），HTTP 响应拦截器不做 camelCase 转换，故 BackendXxx 与
+// 后端 JSON 字段一致。
+// ============================================================================
+
+/**
+ * 单张图的布局（后端 panels 数组的一项，原始 JSON 形状）。
+ */
+export interface BackendKPILayoutPanel {
+  /** 图标题（i18n key，与前端 PANEL_LABELS 对齐）。 */
+  title: string;
+  /** 该图要画的指标 symbolic key 列表。 */
+  metrics: string[];
+  /** 网格 X 坐标（12 列网格）。 */
+  x: number;
+  /** 网格 Y 坐标。 */
+  y: number;
+  /** 网格宽度（半宽 6 / 满宽 12）。 */
+  w: number;
+  /** 网格高度。 */
+  h: number;
+  /** 图类型（本版恒为 line）。 */
+  chartType: string;
+}
+
+/**
+ * 单个制式的全局布局（GET /dashboard/kpi-layout 响应，原始 JSON 形状）。
+ */
+export interface BackendKPILayout {
+  /** 制式：lte / nr / gsm。 */
+  tech: string;
+  /** 布局体：panels 数组。 */
+  layout: {
+    panels: BackendKPILayoutPanel[];
+  };
+  /** 最近保存时间（RFC3339 串）。 */
+  updated_at: string;
+  /** 最近保存的管理员用户 ID（seed 灌入的初始行为空）。 */
+  updated_by?: string | null;
+}
+
+/**
+ * 单张图的布局（前端使用形状，与后端 panel 等价，统一 camelCase）。
+ */
+export interface KPILayoutPanel {
+  /** 图标题（i18n key）。 */
+  title: string;
+  /** 该图要画的指标 symbolic key 列表。 */
+  metrics: string[];
+  /** 网格 X 坐标。 */
+  x: number;
+  /** 网格 Y 坐标。 */
+  y: number;
+  /** 网格宽度。 */
+  w: number;
+  /** 网格高度。 */
+  h: number;
+  /** 图类型（本版恒为 line）。 */
+  chartType: string;
+}
+
+/**
+ * 单个制式的全局布局（前端使用形状）。
+ */
+export interface KPILayout {
+  /** 制式：lte / nr / gsm。 */
+  tech: string;
+  /** 该制式的图列表。 */
+  panels: KPILayoutPanel[];
+  /** 最近保存时间（RFC3339 串）。 */
+  updatedAt: string;
+}

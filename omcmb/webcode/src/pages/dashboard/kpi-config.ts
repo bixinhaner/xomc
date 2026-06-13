@@ -315,6 +315,24 @@ export function getAllKPIKeysForTech(tech: TechnologyType): string[] {
 }
 
 /**
+ * 按 symbolic key 反查指标的展示配置（label/color/unit）。
+ *
+ * issue #213 S2：首页改读全局布局后，图要画的指标来自布局的 metrics（symbolic key），
+ * 需据 key 取本地化标签 / 线色 / 单位。回退默认布局与全局配置的指标都在 kpi-config 里登记，
+ * 故按 key 全表扫描即可命中。未登记的 key 返回 undefined（调用方兜底）。
+ */
+export function getKPIConfigByKey(key: string): KPIConfig | undefined {
+  for (const tech of Object.keys(KPI_BY_TECH) as TechnologyType[]) {
+    const config = KPI_BY_TECH[tech];
+    for (const panelType of config.panels) {
+      const found = config.panelConfigs[panelType]?.indicators.find((ind) => ind.key === key);
+      if (found) return found;
+    }
+  }
+  return undefined;
+}
+
+/**
  * 根据制式获取Panel布局配置
  * 返回每行的Panel列表，用于渲染网格布局
  */

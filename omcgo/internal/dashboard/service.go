@@ -144,7 +144,10 @@ type Service struct {
 	// 给 GetKPIDefinitions（issue #213 Phase1）按别名表的 K 编号反查中文名与单位用。
 	// 可能为 nil（测试 / 退化场景）：此时 GetKPIDefinitions 仅返回别名表静态元数据，不富化。
 	indicatorRepo indicator.IndicatorRepository
-	logger        *zap.Logger
+	// layoutRepo 是 issue #213 S1 全局 KPI 首页布局（dashboard_kpi_layouts）读写仓库。
+	// 可能为 nil（部分测试场景）：此时 GetKPILayout 回退内置默认，SaveKPILayout 报错。
+	layoutRepo KPILayoutRepository
+	logger     *zap.Logger
 }
 
 // NewService creates a new dashboard service.
@@ -158,7 +161,7 @@ func NewService(
 	indicatorRepo indicator.IndicatorRepository,
 	logger *zap.Logger,
 ) *Service {
-	return &Service{
+	s := &Service{
 		deviceService: deviceService,
 		alarmStore:    alarmStore,
 		kpiRepo:       kpiRepo,
@@ -168,6 +171,11 @@ func NewService(
 		indicatorRepo: indicatorRepo,
 		logger:        logger.Named("dashboard"),
 	}
+	// 全局 KPI 布局仓库走主库（dashboard_kpi_layouts 在主库）。pgPool 为 nil 时（测试）留空。
+	if pgPool != nil {
+		s.layoutRepo = NewKPILayoutRepository(pgPool)
+	}
+	return s
 }
 
 // GetSummary aggregates dashboard data from multiple sources in parallel.

@@ -1,4 +1,4 @@
-import { useQuery, useQueries, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueries, useQueryClient, useMutation } from '@tanstack/react-query';
 import { dashboardService } from '../../mock/services/dashboardService';
 import { dashboardApi } from '../../services/api/dashboardApi';
 import { createApiSwitchWithMock } from '../../services/apiSwitch';
@@ -8,6 +8,7 @@ import type {
   MultiTrendComparisonData,
   UseKPITrendComparisonV2Result,
   UseMultiKPITrendComparisonResult,
+  KPILayoutPanel,
 } from '../../types/dashboard';
 import { useMemo, useEffect } from 'react';
 
@@ -117,6 +118,44 @@ export function useKPIDefinitions(enabled = true) {
     queryFn: () => api.getKPIDefinitions(),
     enabled,
     staleTime: 5 * 60 * 1000, // 定义不常变，缓存 5 分钟
+  });
+}
+
+/**
+ * 获取首页 KPI 折线图区的全局布局（issue #213 S2）
+ *
+ * 按当前制式读全局布局（管理员配一次、所有人看同一份）。布局相对静态，
+ * 缓存较久、不轮询。读不到/为空/出错时由首页回退内置默认（保证永不空白）。
+ *
+ * @param tech 制式：lte / nr / gsm
+ * @param enabled 是否启用查询
+ */
+export function useKPILayout(tech: string, enabled = true) {
+  return useQuery({
+    queryKey: ['dashboard', 'kpi-layout', tech],
+    queryFn: () => api.getKPILayout(tech),
+    enabled: enabled && Boolean(tech),
+    staleTime: 5 * 60 * 1000, // 布局不常变，缓存 5 分钟
+  });
+}
+
+/**
+ * 保存首页 KPI 折线图区的全局布局（issue #213 S3，仅管理员）
+ *
+ * 把当前制式整套布局写回后端（最后写入生效），成功后失效该制式的读布局缓存，
+ * 使首页下次开页读到新布局（存完对所有用户生效）。后端再校验管理员身份，
+ * 非管理员被拒（403）由调用方 toast 提示。
+ */
+export function useSaveKPILayout() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ tech, panels }: { tech: string; panels: KPILayoutPanel[] }) =>
+      api.saveKPILayout(tech, panels),
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({
+        queryKey: ['dashboard', 'kpi-layout', variables.tech],
+      });
+    },
   });
 }
 
