@@ -2,7 +2,16 @@
 
 迁移工具：[`pressly/goose/v3`](https://github.com/pressly/goose)。版本号记录在数据库 `goose_db_version`（DDL）和 `goose_db_version_seed`（DML）两个表中，由 `cmd/migrate` 包装执行。
 
-## 当前状态：consolidated baseline（2026-06-12，KPI/时序库物理分离后重新合并）
+## 当前状态：consolidated baseline（2026-06-13 复合，面向全新发布部署）
+
+> **2026-06-13 再合并**：在 2026-06-12 基线之后又积累的少量增量被折叠回基线，三条流恢复为**各一个 000001 文件**。本次吸收：
+> - schema `000046`（`mml_custom_command_paths` 建表，#115）→ 折叠进 `000001_init_schema.sql` Up 段末尾。
+> - schema `000047`（`product_class_patterns.source` 存量回填，#206）→ **删除**：纯历史数据 UPDATE，全新库无 `is_builtin=FALSE` 用户产品、命中 0 行，是 no-op；前向防护已在 `loader.go`。
+> - seed `000044`（设备离线阈值 sys_configs，#203）+ seed `000047`（MML 路径端点 + 角色授权，#115）→ 折叠进 `seed/000001_init_seed.sql`（保留 `ON CONFLICT DO NOTHING`）。
+> - tsdb `000002`（KPI `start_time` 历史回填，#199/#208）→ **删除**：纯历史数据 UPDATE，全新库时序表为空、命中 0 行，是 no-op；前向逻辑已在 `copy_ingest.go`。
+>
+> **本基线面向「全新部署」**：全新双实例 `goose up` 三流全绿即得最终态。下一个新迁移号 = 各流当前最大文件号 + 1（schema/seed → `000002`，tsdb → `000002`）。
+> ⚠️ **既有（本基线之前已迁移过的）库不能靠简单 `goose up` 平滑升级到本基线**：它们的 `goose_db_version*` 里仍有被折叠/删除号（如 schema 46/47），且新号若 ≤ 其已应用最大号会被 goose 当「已过」跳过。既有库要么按本基线重建，要么手工重置版本表——这是 re-baseline 的固有约束，符合「全新发布」的使用场景。
 
 KPI/时序库物理分离落地后，对**三条流各做一次干净的 consolidated baseline**（把分离引入的全部增量折叠进基线，作全新部署使用，不背历史版本号包袱）。现在**每条流各一个 baseline 文件，共 3 个**：
 
@@ -81,9 +90,9 @@ schema、seed 与 tsdb 是**三条相互独立的 goose 版本序列**，各自�
 
 goose 以 `version_id`（号）为唯一键判定「已应用」。历史上若某号曾被应用又被删档，其号已写入版本表；**复用该号会让 goose 把新内容当作「已应用」而跳过执行**。所以：
 
-- 当前 schema 序列在 `000001..000033` 间存在空洞（如 12–15、22、28、32），seed 序列在 `000001..000032` 间存在空洞（如 21、23、26、27）——这些是被弃用/删档迁移留下的，**属正常现象**。
-- 新增一律用 `max+1`，**绝不**回填这些空洞，也不重排已有文件的号。
-- 因此 CLAUDE.md §4.6 里「连续递增、无跳跃」应理解为「**单调递增、不回填**」：相邻号之间可以有历史遗留空洞，新号只许在最大号之上递增。
+- 2026-06-13 复合 re-baseline 后，三条流文件号都收敛回单个 `000001`（无空洞）；新增一律用 `max+1`（当前即 `000002`）。
+- **绝不**回填空号、也不重排已有文件的号；本基线之前删/折叠掉的号（schema 46/47、seed 44/47、tsdb 2）**不得复用**——它们可能仍存在于历史部署的 `goose_db_version*` 中，复用会让 goose 把新内容当「已应用」跳过。
+- 因此 CLAUDE.md §4.6 里「连续递增、无跳跃」应理解为「**单调递增、不回填、不复用弃号**」。
 
 其它规则（StatementBegin/End、TimescaleDB 压缩顺序、分区表外键、UUID 校验、Down 完整性、TRUNCATE/FK、自查清单）见 `omcgo/CLAUDE.md` §4.6 数据库迁移规范。
 

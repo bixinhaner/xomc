@@ -6919,6 +6919,54 @@ SELECT pg_catalog.setval('public.sys_task_logs_id_seq', 1, false);
 
 SELECT pg_catalog.set_config('search_path', 'public', false);
 
+--
+-- consolidated（2026-06-13）：原 seed 000044 折叠进基线 —— issue #203 设备离线判定阈值
+-- 接 sys_configs 实时配置（键名与前端「系统配置 → 设备设置」面板字段一致）。
+-- ON CONFLICT DO NOTHING：用户在 UI 改过的值不被种子覆盖，仅缺失时补默认。
+--
+INSERT INTO sys_configs (category, key, value, value_type, description, is_public)
+VALUES
+    ('device', 'enbTimeout', '100', 'int', '基站类无心跳判离线阈值（秒）', false),
+    ('device', 'cpeTimeout', '600', 'int', 'CPE 类无心跳判离线阈值（秒）', false)
+ON CONFLICT (category, key) DO NOTHING;
+
+--
+-- consolidated（2026-06-13）：原 seed 000047 折叠进基线 —— issue #115 调整3（A1）
+-- 注册 4 个「自定义命令 PATH 管理」端点并授权内置角色。端点启动期会被 SyncApiEndpoints
+-- 自动 upsert，但 seed 在 migrate 期执行（早于启动同步），须先有确定的 api_endpoints 行
+-- 才能授权 role_api_permissions（casbin 无 admin/super_admin 旁路，授权全靠该表）。
+-- 授权策略：admin/operator 拥有全部 4 端点；viewer 仅 GET。
+--
+INSERT INTO public.api_endpoints (id, path, method, name, api_group, is_auto)
+VALUES
+    (gen_random_uuid(), '/api/v1/mml/templates/:id/paths',         'GET',    'GET /api/v1/mml/templates/:id/paths',          'mml', true),
+    (gen_random_uuid(), '/api/v1/mml/templates/:id/paths/batch',   'POST',   'POST /api/v1/mml/templates/:id/paths/batch',   'mml', true),
+    (gen_random_uuid(), '/api/v1/mml/templates/:id/paths/:pathId', 'PATCH',  'PATCH /api/v1/mml/templates/:id/paths/:pathId','mml', true),
+    (gen_random_uuid(), '/api/v1/mml/templates/:id/paths/:pathId', 'DELETE', 'DELETE /api/v1/mml/templates/:id/paths/:pathId','mml', true)
+ON CONFLICT (path, method) DO NOTHING;
+
+-- admin + operator：全部 4 端点
+INSERT INTO public.role_api_permissions (role_id, endpoint_id)
+SELECT r.id, ae.id
+FROM public.roles r
+JOIN public.api_endpoints ae
+    ON ae.path IN (
+        '/api/v1/mml/templates/:id/paths',
+        '/api/v1/mml/templates/:id/paths/batch',
+        '/api/v1/mml/templates/:id/paths/:pathId'
+    )
+WHERE r.name IN ('admin', 'operator')
+ON CONFLICT DO NOTHING;
+
+-- viewer：仅 GET
+INSERT INTO public.role_api_permissions (role_id, endpoint_id)
+SELECT r.id, ae.id
+FROM public.roles r
+JOIN public.api_endpoints ae
+    ON ae.path = '/api/v1/mml/templates/:id/paths' AND ae.method = 'GET'
+WHERE r.name = 'viewer'
+ON CONFLICT DO NOTHING;
+
 -- +goose Down
 -- consolidated seed 无回滚（baseline 内置参考数据；如需重置请重建库）。
 SELECT 1;

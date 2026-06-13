@@ -17729,6 +17729,34 @@ ALTER TABLE ONLY public.users
 
 SELECT pg_catalog.set_config('search_path', 'public', false);
 
+--
+-- issue #115 调整3（A1）：自定义命令↔标准路径精瘦关联表。
+-- consolidated（2026-06-13）：原 migration 000046 折叠进基线。仅存关联+排序+默认勾选；
+-- 元数据与是否支持读时 JOIN standard_params/param_mappings，不重复落库。
+-- 放在 Up 段末尾：依赖的 mml_custom_command / standard_params 已在前文创建，内联 FK 可解析。
+--
+CREATE TABLE IF NOT EXISTS public.mml_custom_command_paths (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    command_id uuid NOT NULL,
+    standard_path_id uuid NOT NULL,
+    default_selected boolean DEFAULT true NOT NULL,
+    sort_order integer DEFAULT 0 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT mml_custom_command_paths_pkey PRIMARY KEY (id),
+    CONSTRAINT fk_ccp_command FOREIGN KEY (command_id)
+        REFERENCES public.mml_custom_command(id) ON DELETE CASCADE,
+    CONSTRAINT fk_ccp_standard_path FOREIGN KEY (standard_path_id)
+        REFERENCES public.standard_params(id) ON DELETE RESTRICT,
+    CONSTRAINT uq_ccp_command_path UNIQUE (command_id, standard_path_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ccp_command_sort
+    ON public.mml_custom_command_paths (command_id, sort_order);
+
+COMMENT ON TABLE public.mml_custom_command_paths IS
+    'issue #115 调整3：自定义命令↔标准路径精瘦关联表。仅存关联+排序+默认勾选；元数据与是否支持读时 JOIN standard_params/param_mappings，不重复落库。standard_path_id NOT NULL = path 仅来自字典。';
+
 -- +goose Down
 -- +goose StatementBegin
 DROP SCHEMA IF EXISTS public CASCADE;
