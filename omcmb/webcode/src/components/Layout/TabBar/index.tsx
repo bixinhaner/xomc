@@ -21,6 +21,7 @@ import { useTabStore } from '@core/store/tabStore';
 import type { TabItem as TabItemType } from '@core/store/tabStore';
 import { useT } from '@/hooks/useT';
 import TabItem from './TabItem';
+import { useTabLabelResolver } from './useTabLabel';
 import styles from './TabBar.module.css';
 
 const MAX_VISIBLE_TABS = 12;
@@ -35,6 +36,7 @@ export default function TabBar() {
   const moveTab = useTabStore((s) => s.moveTab);
   const tabListRef = useRef<HTMLDivElement>(null);
   const t = useT();
+  const tabLabel = useTabLabelResolver();
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -76,7 +78,7 @@ export default function TabBar() {
 
   const overflowMenuItems: MenuProps['items'] = overflowTabs.map((tab) => ({
     key: tab.key,
-    label: tab.labelRaw ? tab.label : t(tab.label),
+    label: tabLabel(tab),
     onClick: () => handleTabClick(tab),
   }));
 
@@ -96,6 +98,7 @@ export default function TabBar() {
               <TabItem
                 key={tab.key}
                 tab={tab}
+                label={tabLabel(tab)}
                 isActive={tab.key === activeTabKey}
                 onClose={handleClose}
                 onClick={handleTabClick}

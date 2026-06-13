@@ -7,12 +7,14 @@ import styles from './TabBar.module.css';
 
 interface Props {
   tab: TabItemType;
+  /** 已按当前语言解析好的标题（由 TabBar 经 useTabLabelResolver 统一计算）。 */
+  label: string;
   isActive: boolean;
   onClose: (key: string, e: React.MouseEvent) => void;
   onClick: (tab: TabItemType) => void;
 }
 
-export default function TabItem({ tab, isActive, onClose, onClick }: Props) {
+export default function TabItem({ tab, label, isActive, onClose, onClick }: Props) {
   const t = useT();
   const {
     attributes,
@@ -48,7 +50,7 @@ export default function TabItem({ tab, isActive, onClose, onClick }: Props) {
     .filter(Boolean)
     .join(' ');
 
-  const resolvedLabel = tab.labelRaw ? tab.label : t(tab.label);
+  const resolvedLabel = label;
 
   return (
     <TabContextMenu tab={tab}>
