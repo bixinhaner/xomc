@@ -4060,6 +4060,7 @@ const messages: Record<string, string> = {
   'system.config.acsTransfer':   'ACS Transfer',
   'system.config.northbound':    'Northbound Settings',
   'system.config.pmRetention':   'PM Data Retention',
+  'system.config.retentionBp':   'Retention & Backpressure',
   'system.transfer.inheritHint': 'These fields are stored under sys_configs category acs_transfer. Leave a field blank to keep using the startup config file or environment default.',
   'system.transfer.uploadSection': 'Upload Service',
   'system.transfer.downloadSection': 'Download Service',
@@ -6573,6 +6574,30 @@ const messages: Record<string, string> = {
   'pmRetention.validate.tooShort':                  'Retention days must be at least 1 day',
   'pmRetention.validate.tooLong':                   'Retention days must be at most 3650 days (10 years)',
   'pmRetention.save.success':                       'Saved successfully; new retention policy is effective',
+
+  // -------------------------------------------------------------------------
+  // #318-321 Resource Retention & Upload Backpressure (system config retention_bp tab)
+  // -------------------------------------------------------------------------
+  'retentionBp.save':                        'Save',
+  'retentionBp.save.success':                'Saved; new config hot-reloaded and effective',
+  'retentionBp.bp.title':                    'PM Upload Backpressure (#318)',
+  'retentionBp.bp.desc':                     'Stop accepting PM uploads when data-disk usage or per-core load exceeds the high watermark (devices retransmit, no data loss); auto-resume when it falls to the low watermark. Changes take effect within ≤1 sample period.',
+  'retentionBp.ilm.title':                   'Raw File ILM Retention (#319)',
+  'retentionBp.ilm.desc':                    'Expire raw PM/MR files in MinIO (pm-files/mr-files buckets) after N days. The lifecycle rule is re-applied immediately on save.',
+  'retentionBp.stationlog.title':            'Base Station Log Retention (#320)',
+  'retentionBp.stationlog.desc':             'Time-based retention (days) coexists with the fault-log file-count quota; set the quota to 0 to disable it and keep time-based retention only.',
+  'retentionBp.archive.title':               'Post-Ingest Compression (#321)',
+  'retentionBp.archive.desc':                'After successful ingest, gzip the plaintext PM/MR raw XML back to MinIO to save disk (already-gzipped real-device files are skipped at zero cost).',
+  'retentionBp.field.enabled':               'Enable Backpressure',
+  'retentionBp.field.disk_high_pct':         'Disk Usage High Watermark (%, stop above)',
+  'retentionBp.field.disk_low_pct':          'Disk Usage Low Watermark (%, resume below)',
+  'retentionBp.field.cpu_high_per_core':     'Per-Core Load High Watermark (stop above)',
+  'retentionBp.field.cpu_low_per_core':      'Per-Core Load Low Watermark (resume below)',
+  'retentionBp.field.check_interval_sec':    'Sample Interval (sec)',
+  'retentionBp.field.raw_object_days':       'Raw File Retention (days)',
+  'retentionBp.field.max_retention_days':    'Station Log Retention (days)',
+  'retentionBp.field.max_file_count':        'Fault Log File Quota (0=disabled)',
+  'retentionBp.field.compress_after_ingest': 'Compress After Ingest',
 
   // -------------------------------------------------------------------------
   // F05 MR Measurement Task Management

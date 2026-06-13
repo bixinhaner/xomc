@@ -4087,6 +4087,7 @@ const messages: Record<string, string> = {
   'system.config.acsTransfer':   'ACS传输',
   'system.config.northbound':    '北向设置',
   'system.config.pmRetention':   'PM 数据保留',
+  'system.config.retentionBp':   '资源保留与背压',
   'system.transfer.inheritHint': '此页配置写入 sys_configs.category=acs_transfer。字段留空时，ACS 继续使用启动配置文件或环境变量中的默认值。',
   'system.transfer.uploadSection': '上传服务',
   'system.transfer.downloadSection': '下发服务',
@@ -6600,6 +6601,30 @@ const messages: Record<string, string> = {
   'pmRetention.validate.tooShort':                  '保留天数最少 1 天',
   'pmRetention.validate.tooLong':                   '保留天数最长 3650 天（10 年）',
   'pmRetention.save.success':                       '保存成功，新的保留策略已生效',
+
+  // -------------------------------------------------------------------------
+  // #318-321 资源保留与上传背压（系统配置页 retention_bp 页签）
+  // -------------------------------------------------------------------------
+  'retentionBp.save':                        '保存',
+  'retentionBp.save.success':                '保存成功，新配置已热加载生效',
+  'retentionBp.bp.title':                    'PM 上传背压（#318）',
+  'retentionBp.bp.desc':                     '数据盘使用率或每核负载超过高水位时停收 PM 上传（设备会重传不丢数据），回落到低水位自动恢复。变更 ≤1 个采样周期生效。',
+  'retentionBp.ilm.title':                   '原始件 ILM 保留（#319）',
+  'retentionBp.ilm.desc':                    'MinIO 原始 PM/MR 文件（pm-files/mr-files 桶）按天过期清理。保存后立即重应用生命周期规则。',
+  'retentionBp.stationlog.title':            '基站日志保留（#320）',
+  'retentionBp.stationlog.desc':             '基站日志按时间保留（天）与故障日志文件数配额并存；文件数配额填 0 表示禁用、仅按时间保留。',
+  'retentionBp.archive.title':               '入库压缩回写（#321）',
+  'retentionBp.archive.desc':                '入库成功后把明文 PM/MR 原始 XML 压缩回写 MinIO 省盘（真机已 gzip 的零成本跳过）。',
+  'retentionBp.field.enabled':               '启用背压',
+  'retentionBp.field.disk_high_pct':         '数据盘使用率高水位（%，超过停收）',
+  'retentionBp.field.disk_low_pct':          '数据盘使用率低水位（%，回落恢复）',
+  'retentionBp.field.cpu_high_per_core':     '每核负载高水位（超过停收）',
+  'retentionBp.field.cpu_low_per_core':      '每核负载低水位（回落恢复）',
+  'retentionBp.field.check_interval_sec':    '采样周期（秒）',
+  'retentionBp.field.raw_object_days':       '原始件保留天数',
+  'retentionBp.field.max_retention_days':    '基站日志保留天数',
+  'retentionBp.field.max_file_count':        '故障日志文件数配额（0=禁用）',
+  'retentionBp.field.compress_after_ingest': '入库后压缩回写',
 
   // -------------------------------------------------------------------------
   // F05 MR 测量任务管理（PRD docs/project/prd/F05-mr-task-management.md）

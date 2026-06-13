@@ -19,6 +19,7 @@ import OmcSettings from './OmcSettings';
 import NorthboundSettings from './NorthboundSettings';
 import TransferSettings from './TransferSettings';
 import PmRetentionSection from './PmRetentionSection';
+import RetentionBackpressureSection from './RetentionBackpressureSection';
 import {
   useSysConfigsByCategory,
   useBatchUpdateSysConfigs,
@@ -27,7 +28,7 @@ import type { SysConfigValueType } from '@core/types/system';
 import { buildBatchItems } from './sysConfigSerialize';
 
 // 设置子页签类型（v1.0：移除 sas / ldap，参 omgo/docs/prd/system/config.md）
-type SettingsTab = 'basic' | 'security' | 'device' | 'notify' | 'storage' | 'omc' | 'acs_transfer' | 'northbound' | 'pm_retention';
+type SettingsTab = 'basic' | 'security' | 'device' | 'notify' | 'storage' | 'omc' | 'acs_transfer' | 'northbound' | 'pm_retention' | 'retention_bp';
 
 // 设置子页签配置
 const settingsTabs: { key: SettingsTab; labelKey: string }[] = [
@@ -41,6 +42,8 @@ const settingsTabs: { key: SettingsTab; labelKey: string }[] = [
   { key: 'northbound', labelKey: 'system.config.northbound' },
   // T-0164 收尾 G2-Gap-1：PM 数据保留策略页签
   { key: 'pm_retention', labelKey: 'system.config.pmRetention' },
+  // #318-321：资源保留与上传背压（背压 / 原始件 ILM / 基站日志保留 / 压缩回写）
+  { key: 'retention_bp', labelKey: 'system.config.retentionBp' },
 ];
 
 // ----- value <-> form value 编解码 -----
@@ -172,6 +175,9 @@ export default function SystemConfig() {
       case 'pm_retention':
         // T-0164 收尾 G2-Gap-1：PM 数据保留独立组件，内部自管 form + state（不需要 form props）
         return <PmRetentionSection />;
+      case 'retention_bp':
+        // #318-321：资源保留与上传背压，4 张分类卡片各自管 form + 保存
+        return <RetentionBackpressureSection />;
       default:
         return null;
     }
