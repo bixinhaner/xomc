@@ -34,7 +34,7 @@ export interface DashboardDataResponse {
 export function useDashboardData() {
   return useQuery<DashboardDataResponse>({
     queryKey: ['dashboard', 'all'],
-    queryFn: () => api.getDashboardData() as Promise<DashboardDataResponse>,
+    queryFn: () => api.getDashboardData() as unknown as Promise<DashboardDataResponse>,
     refetchInterval: 30000,
   });
 }

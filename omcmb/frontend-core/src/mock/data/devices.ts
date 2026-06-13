@@ -148,6 +148,7 @@ function generateDevice(index: number): Device {
     uplinkFrequency: `${(1920 + Math.random() * 100).toFixed(1)}MHz`,
     downlinkFrequency: `${(2110 + Math.random() * 100).toFixed(1)}MHz`,
 
+    cellStatus: isOnline ? '正常' : '离线',
     opState: (() => {
       // 多小区场景: 70% 概率生成多小区值 "1,0,1" / "active,inactive"
       if ((isLTE || isNR) && Math.random() < 0.7) {
@@ -336,6 +337,7 @@ const beijingDevices: Device[] = Array.from({ length: 50 }, (_, i) => {
     uplinkFrequency: `${(1920 + Math.random() * 100).toFixed(1)}MHz`,
     downlinkFrequency: `${(2110 + Math.random() * 100).toFixed(1)}MHz`,
 
+    cellStatus: isOnline ? '正常' : '离线',
     opState: (() => {
       if ((isLTE || isNR) && Math.random() < 0.7) {
         const cellCount = Math.floor(Math.random() * 3) + 2;

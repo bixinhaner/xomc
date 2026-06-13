@@ -6,7 +6,6 @@
  * Mock 数据使用相同的类型定义，确保类型安全
  */
 
-import { type UseQueryResult } from '@tanstack/react-query';
 
 // ============================================================================
 // 从 mock/data/dashboard.ts 导入的核心类型

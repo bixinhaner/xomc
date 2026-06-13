@@ -26,10 +26,14 @@ let groups: DeviceGroup[] = [
 ];
 
 function computeStats(items: Device[]) {
+  const online = items.filter((d) => d.connStatus === 'online').length;
+  const offline = items.filter((d) => d.connStatus === 'offline').length;
   return {
     total: items.length,
-    online: items.filter((d) => d.connStatus === 'online').length,
-    offline: items.filter((d) => d.connStatus === 'offline').length,
+    online,
+    offline,
+    online_count: online,
+    offline_count: offline,
     alarmed: items.filter((d) => d.alarmLevel !== 'none').length,
   };
 }

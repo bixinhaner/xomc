@@ -1,0 +1,43 @@
+{
+  "name": "webcode-v3",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "OMC 前端 v3 皮肤 — STARFORGE 沉浸式指挥舰桥 HUD（Cyber NOC + Glassmorphism + 3D Holo）。消费 @omc/frontend-core 共享业务层。",
+  "scripts": {
+    "dev": "vite",
+    "dev:mock": "vite --mode mock",
+    "build": "vite build",
+    "build:mock": "vite build --mode mock",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.app.json"
+  },
+  "dependencies": {
+    "@omc/frontend-core": "*",
+    "@tanstack/react-query": "^5.90.21",
+    "axios": "^1.17.0",
+    "clsx": "^2.1.1",
+    "dayjs": "^1.11.19",
+    "lucide-react": "^0.468.0",
+    "node-forge": "^1.4.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-intl": "^10.1.13",
+    "react-router-dom": "^7.17.0",
+    "tailwind-merge": "^2.6.0",
+    "zustand": "^5.0.11"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "@types/node-forge": "^1.3.11",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.1",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.5.3",
+    "tailwindcss": "^3.4.17",
+    "tailwindcss-animate": "^1.0.7",
+    "typescript": "~5.9.3",
+    "vite": "^7.3.1"
+  }
+}

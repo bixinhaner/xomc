@@ -301,7 +301,9 @@ function mapBackendDevice(bd: BackendDevice): Device {
     uplinkFrequency: bd.uplink_frequency || '',
     downlinkFrequency: bd.downlink_frequency || '',
 
-    cellStatus: bd.cell_status || '',
+    // 后端 T-0162 起 BackendDevice 已无 cell_status 字段，保持原有空串占位
+    // （历史上 bd.cell_status 即为 undefined→''）；如需小区状态请从 op_state 派生。
+    cellStatus: '',
     opState: bd.op_state || 'unknown',
     mmeStatus: bd.mme_status || '',
     amfStatus: bd.amf_status || '',
