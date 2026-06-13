@@ -1,8 +1,6 @@
 package e2e
 
 import (
-	"bytes"
-	"encoding/json"
 	"net/http"
 	"testing"
 
@@ -11,42 +9,24 @@ import (
 )
 
 func TestLogin_Success(t *testing.T) {
-	body := map[string]string{
-		"username": "admin",
-		"password": "admin123",
-	}
-	jsonBody, _ := json.Marshal(body)
+	res := encryptedLogin(t, "admin", "admin123")
 
-	resp, err := newClient().Post(baseURL()+"/api/v1/auth/login", "application/json", bytes.NewReader(jsonBody))
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	// Accept both 200 (success) and 401 (if default password was changed)
-	if resp.StatusCode == http.StatusUnauthorized {
-		t.Skip("default admin password not set, skipping login test")
+	// Accept 401 if the default admin password was changed in this environment.
+	if res.status == http.StatusUnauthorized {
+		t.Skip("admin/admin123 not valid (password changed), skipping login success assertions")
 	}
 
-	var result map[string]interface{}
-	err = json.NewDecoder(resp.Body).Decode(&result)
-	require.NoError(t, err)
-
-	assert.Contains(t, result, "access_token")
-	assert.Contains(t, result, "refresh_token")
-	assert.Equal(t, "Bearer", result["token_type"])
+	require.Equal(t, http.StatusOK, res.status, "login status; body=%v", res.raw)
+	require.NotNil(t, res.data, "login response missing data envelope: %v", res.raw)
+	assert.NotEmpty(t, res.data["access_token"], "access_token should be present")
+	assert.NotEmpty(t, res.data["refresh_token"], "refresh_token should be present")
+	assert.Equal(t, "Bearer", res.data["token_type"])
 }
 
 func TestLogin_InvalidPassword(t *testing.T) {
-	body := map[string]string{
-		"username": "admin",
-		"password": "wrong_password",
-	}
-	jsonBody, _ := json.Marshal(body)
-
-	resp, err := newClient().Post(baseURL()+"/api/v1/auth/login", "application/json", bytes.NewReader(jsonBody))
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+	// A valid cipher of a wrong password decrypts fine but fails credential check → 401.
+	res := encryptedLogin(t, "admin", "definitely_the_wrong_password")
+	assert.Equal(t, http.StatusUnauthorized, res.status, "body=%v", res.raw)
 }
 
 func TestAuthMe_Unauthorized(t *testing.T) {

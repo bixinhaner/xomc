@@ -130,7 +130,7 @@ func (rl *DeviceRateLimiter) cleanup(timeout time.Duration) {
 		if !ok {
 			continue
 		}
-		if now.Sub(entry.lastAccessTime()) > timeout {
+		if now.Sub(entry.lastAccessTime()) >= timeout {
 			rl.cache.Remove(key)
 			evicted++
 		} else {

@@ -8,8 +8,13 @@ import (
 	"time"
 )
 
+// defaultBaseURL targets the app's direct HTTP port. The local container stack
+// (boss-stack port avoidance) maps app:8081 → host :18091; this is the same port
+// the smoke suite and the documented e2e recipe use. nginx :18080 is the
+// device-facing ACS gateway and intentionally does NOT proxy /api/. Override with
+// OMCGO_E2E_BASE_URL in CI / other environments.
 const (
-	defaultBaseURL = "http://localhost:18080"
+	defaultBaseURL = "http://localhost:18091"
 	timeout        = 10 * time.Second
 )
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
 import { render, screen } from '@testing-library/react';
 
 let appState: { theme: string; locale: string };
@@ -7,6 +7,15 @@ vi.mock('@core/store/appStore', () => ({
   useAppStore: <T,>(selector: (s: { theme: string; locale: string }) => T) =>
     selector(appState),
 }));
+
+// Warm the module cache before the timed tests. The first import of ThemeProvider
+// cold-loads the full antd library + 7 theme configs; under parallel full-suite CPU
+// contention that single cold import can exceed one test's 5s timeout (observed as a
+// flaky timeout on the first test only — siblings reuse the cached module). Doing it
+// once here, with a generous hook budget, keeps the per-test dynamic imports hot.
+beforeAll(async () => {
+  await import('../ThemeProvider');
+}, 30000);
 
 beforeEach(() => {
   appState = { theme: 'classic', locale: 'zh-CN' };
