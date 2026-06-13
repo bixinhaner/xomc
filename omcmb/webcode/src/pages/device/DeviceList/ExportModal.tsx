@@ -6,7 +6,10 @@ import { useT } from '@/hooks/useT';
 /** 导出列分组 */
 interface ExportColumn {
   code: string;
-  label: string;
+  /** 直出字面量（纯英文/代码缩写，如 SN）；与 labelKey 二选一 */
+  label?: string;
+  /** i18n message id；优先于 label */
+  labelKey?: string;
 }
 
 interface ExportColumnGroup {
@@ -35,9 +38,9 @@ export interface ExportParams {
 // 运营商选项（后续从 API 动态获取）
 // ---------------------------------------------------------------------------
 const OPERATOR_OPTIONS = [
-  { label: '中国移动', value: 'cmcc' },
-  { label: '中国电信', value: 'ctcc' },
-  { label: '中国联通', value: 'cucc' },
+  { labelKey: 'export.operator.cmcc', value: 'cmcc' },
+  { labelKey: 'export.operator.ctcc', value: 'ctcc' },
+  { labelKey: 'export.operator.cucc', value: 'cucc' },
 ];
 
 // ---------------------------------------------------------------------------
@@ -47,25 +50,25 @@ const OPERATOR_OPTIONS = [
 
 const COMMON_COLUMNS: ExportColumn[] = [
   { code: 'serial_number', label: 'SN' },
-  { code: 'connection_status', label: '连接状态' },
-  { code: 'alarm', label: '告警级别' },
-  { code: 'host_name', label: '名称' },
-  { code: 'network_type', label: '基站制式' },
-  { code: 'product', label: '产品类型' },
-  { code: 'module_type', label: '设备型号' },
-  { code: 'software_version', label: '软件版本' },
-  { code: 'firmware_version', label: '固件版本' },
-  { code: 'mac_address', label: 'MAC地址' },
-  { code: 'group_name', label: '设备组' },
-  { code: 'cell_ip', label: 'IP地址' },
-  { code: 'online_time', label: '接入时间' },
-  { code: 'offline_time', label: '断开时间' },
-  { code: 'op_state', label: '激活状态' },
-  { code: 'ue_count', label: 'UE数' },
-  { code: 'rf_status', label: '射频状态' },
-  { code: 'gps_longitude', label: 'GPS经度' },
-  { code: 'gps_latitude', label: 'GPS纬度' },
-  { code: 'gps_height', label: 'GPS高度' },
+  { code: 'connection_status', labelKey: 'export.col.connStatus' },
+  { code: 'alarm', labelKey: 'export.col.alarmLevel' },
+  { code: 'host_name', labelKey: 'export.col.name' },
+  { code: 'network_type', labelKey: 'export.col.radioMode' },
+  { code: 'product', labelKey: 'export.col.product' },
+  { code: 'module_type', labelKey: 'export.col.deviceModel' },
+  { code: 'software_version', labelKey: 'export.col.softwareVersion' },
+  { code: 'firmware_version', labelKey: 'export.col.firmwareVersion' },
+  { code: 'mac_address', labelKey: 'export.col.macAddress' },
+  { code: 'group_name', labelKey: 'export.col.deviceGroup' },
+  { code: 'cell_ip', labelKey: 'export.col.ipAddress' },
+  { code: 'online_time', labelKey: 'export.col.onlineTime' },
+  { code: 'offline_time', labelKey: 'export.col.offlineTime' },
+  { code: 'op_state', labelKey: 'export.col.opState' },
+  { code: 'ue_count', labelKey: 'export.col.ueCount' },
+  { code: 'rf_status', labelKey: 'export.col.rfStatus' },
+  { code: 'gps_longitude', labelKey: 'export.col.gpsLongitude' },
+  { code: 'gps_latitude', labelKey: 'export.col.gpsLatitude' },
+  { code: 'gps_height', labelKey: 'export.col.gpsHeight' },
 ];
 
 // ---------------------------------------------------------------------------
@@ -73,20 +76,20 @@ const COMMON_COLUMNS: ExportColumn[] = [
 // ---------------------------------------------------------------------------
 const DEFAULT_LOCKED_CODES = new Set([
   'serial_number',      // SN
-  'connection_status',  // 连接状态
-  'alarm',              // 告警级别
-  'host_name',          // 名称
-  'network_type',       // 基站制式
-  'product',            // 产品类型
-  'module_type',        // 设备型号
-  'software_version',   // 软件版本
-  'mac_address',        // MAC地址
-  'group_name',         // 设备组
-  'cell_ip',            // IP地址
-  'online_time',        // 接入时间
-  'offline_time',       // 断开时间
-  'op_state',           // 激活状态
-  'ue_count',           // UE数
+  'connection_status',  // connection status
+  'alarm',              // alarm level
+  'host_name',          // name
+  'network_type',       // radio mode
+  'product',            // product type
+  'module_type',        // device model
+  'software_version',   // software version
+  'mac_address',        // MAC address
+  'group_name',         // device group
+  'cell_ip',            // IP address
+  'online_time',        // online time
+  'offline_time',       // offline time
+  'op_state',           // operational state
+  'ue_count',           // UE count
 ]);
 
 export default function ExportModal({ open, onClose, onConfirm, confirmLoading }: ExportModalProps) {
@@ -167,14 +170,14 @@ export default function ExportModal({ open, onClose, onConfirm, confirmLoading }
                   disabled={DEFAULT_LOCKED_CODES.has(col.code)}
                   onChange={(e: CheckboxChangeEvent) => handleToggle(col.code, e.target.checked)}
                 >
-                  {col.label}
+                  {col.labelKey ? t(col.labelKey) : col.label}
                 </Checkbox>
               </div>
             ))}
           </div>
         ),
       };
-    }), [groups, selectedCodes, handleCheckAll, handleToggle]);
+    }), [groups, selectedCodes, handleCheckAll, handleToggle, t]);
 
   return (
     <Modal
@@ -195,7 +198,7 @@ export default function ExportModal({ open, onClose, onConfirm, confirmLoading }
           mode="multiple"
           allowClear
           placeholder={t('export.operatorPlaceholder')}
-          options={OPERATOR_OPTIONS}
+          options={OPERATOR_OPTIONS.map((o) => ({ label: t(o.labelKey), value: o.value }))}
           value={operatorCodes}
           onChange={setOperatorCodes}
           style={{ width: '100%' }}

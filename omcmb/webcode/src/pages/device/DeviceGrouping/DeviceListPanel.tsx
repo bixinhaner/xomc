@@ -139,7 +139,7 @@ export default function DeviceListPanel({
         </Card>
       </div>
       <style>{`
-        /* 设备分组表格 - flex 布局自适应高度，无需硬编码偏移 */
+        /* Device grouping table - flex layout auto-fits height, no hardcoded offset needed */
         .device-list-table-wrapper {
           display: flex;
           flex-direction: column;

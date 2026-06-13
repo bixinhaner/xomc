@@ -63,26 +63,22 @@ function hasOnRebootHits(statements: Statement[]): boolean {
 function buildTaskName(
   stmts: Statement[],
   sns: string[],
+  t: (id: string, values?: Record<string, string | number>) => string,
   lang: 'zh-CN' | 'en-US' = 'zh-CN',
 ): string {
   if (stmts.length === 0 || sns.length === 0) return '';
   const first = stmts[0];
   const cmdName =
     first.logicalNameI18n?.[lang] ?? first.logicalNameI18n?.['zh'] ?? first.logicalCode;
-  const opVerbZh: Record<string, string> = {
-    LST: '查询',
-    MOD: '修改',
-    ADD: '添加',
-    RMV: '删除',
-  };
-  const opVerb =
-    lang === 'zh-CN' ? (opVerbZh[first.operationType] ?? first.operationType) : first.operationType;
+  const opVerbKey = `mml.console.taskName.opVerb.${first.operationType}`;
+  const translated = t(opVerbKey);
+  const opVerb = translated && translated !== opVerbKey ? translated : first.operationType;
   // 防御性 dedup：CommandTree 历史上曾把后端 displayName（已带 op 动词，如「查询 设备
   // 基本信息」）塞进 logicalNameI18n。若 cmdName 已以 opVerb 开头，跳过 prepend，
   // 避免「查询 查询 设备基本信息」体感 bug 复发。
   const cmdPart = cmdName.startsWith(opVerb) ? cmdName : `${opVerb} ${cmdName}`.trim();
   const sn = sns[0];
-  const snPart = sns.length === 1 ? sn : `${sn} 等${sns.length}台`;
+  const snPart = sns.length === 1 ? sn : t('mml.console.taskName.snEtc', { sn, count: sns.length });
   return `${cmdPart} ${snPart}`;
 }
 
@@ -342,7 +338,7 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
             const snPart =
               selectedDeviceSns.length <= 1
                 ? sn
-                : `${sn} 等${selectedDeviceSns.length}台`;
+                : t('mml.console.taskName.snEtc', { sn, count: selectedDeviceSns.length });
             // 任务名:{logicalName} [{leafName}] {sn}
             const taskName = leafName
               ? `${cmdName} [${leafName}] ${snPart}`.trim()
@@ -416,7 +412,7 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
         statements: structured,
         deviceSns: selectedDeviceSns,
         executeType: 'immediate',
-        taskName: buildTaskName(statements, selectedDeviceSns),
+        taskName: buildTaskName(statements, selectedDeviceSns, t),
       });
       // 接入 SSE:先切 currentTaskIds(hook 会复位 lines)再种一条"已派发"行,
       // 避免 task 创建瞬间到第一台设备完成之间终端是空白的体感。
@@ -501,7 +497,9 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
           operation_type: op,
           execute_type: 'immediate',
           task_name: `${op} ${trimmedPaths[0]}${
-            selectedDeviceSns.length === 1 ? ` ${selectedDeviceSns[0]}` : ` 等${selectedDeviceSns.length}台`
+            selectedDeviceSns.length === 1
+              ? ` ${selectedDeviceSns[0]}`
+              : ` ${t('mml.console.taskName.etcCount', { count: selectedDeviceSns.length })}`
           }`,
         },
       });

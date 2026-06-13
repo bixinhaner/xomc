@@ -7,6 +7,7 @@ import { useQuickSettingsFeedbackStore } from '@core/store/quickSettingsFeedback
 import CellParameterForm from './CellParameterForm';
 import MultiInstanceTable from './MultiInstanceTable';
 import type { QuickSettingsInstanceContext } from './validators';
+import { useT } from '@/hooks/useT';
 
 const { Text } = Typography;
 
@@ -49,6 +50,7 @@ const HIDDEN_GROUP_IDS = new Set(['device-time', 'device-sync']);
  */
 export default function QuickSettingsTab({ deviceId, networkType }: QuickSettingsTabProps) {
   const intl = useIntl();
+  const t = useT();
   const locale: 'zh-CN' | 'en-US' = intl.locale === 'en-US' ? 'en-US' : 'zh-CN';
   const normalizedNetworkType = normalizeQuickSettingsNetworkType(networkType);
 
@@ -141,16 +143,16 @@ export default function QuickSettingsTab({ deviceId, networkType }: QuickSetting
   };
   const selectorLabel = isENB
     ? (isBM
-      ? (activeBmTech === 'GSM' ? 'GSM小区实例:' : 'LTE小区实例:')
-      : (lteConfiguredCellCount !== null ? '小区实例:' : 'FAPService 实例:'))
-    : '小区实例:';
+      ? (activeBmTech === 'GSM' ? t('device.quickSettings.cellInstanceGsm') : t('device.quickSettings.cellInstanceLte'))
+      : (lteConfiguredCellCount !== null ? t('device.quickSettings.cellInstance') : t('device.quickSettings.fapInstance')))
+    : t('device.quickSettings.cellInstance');
   const selectorHint = isENB
     ? (isBM
-      ? `(BM: cellModeIdx=${bmCellMode ? `${bmCellMode.gsmNum}/${bmCellMode.lteNum}` : '-'}(GSM/LTE) · 当前${activeBmTech}已启用 ${selectableInstances.length} 个)`
+      ? t('device.quickSettings.hintBm', { mode: bmCellMode ? `${bmCellMode.gsmNum}/${bmCellMode.lteNum}` : '-', tech: activeBmTech, count: selectableInstances.length })
       : (lteConfiguredCellCount !== null
-        ? `(按 ${LTE_NUM_OF_CELLS_PATH}=${lteConfiguredCellCount} 显示 · 共 ${selectableInstances.length} 个小区)`
-        : `(显示设备上实际存在的 FAPService 实例 · 共 ${lteInstances.length} 个)`))
-    : `(按 Device.Services.FAPService.1.CellConfig.{i}. 枚举 · 共 ${nrCellInstances.length} 个小区)`;
+        ? t('device.quickSettings.hintLte', { path: LTE_NUM_OF_CELLS_PATH, configured: lteConfiguredCellCount, count: selectableInstances.length })
+        : t('device.quickSettings.hintFap', { count: lteInstances.length })))
+    : t('device.quickSettings.hintNr', { count: nrCellInstances.length });
   const selectedKey = isNR
     ? `${instanceContext.fapInstance}-${instanceContext.cellInstance ?? 1}`
     : String(instanceContext.fapInstance);
@@ -158,7 +160,7 @@ export default function QuickSettingsTab({ deviceId, networkType }: QuickSetting
   if (error) {
     return (
       <div style={{ padding: 16 }}>
-        <Alert type="error" message="加载快速设置分组失败" description={String(error)} />
+        <Alert type="error" message={t('device.quickSettings.loadGroupsFailed')} description={String(error)} />
       </div>
     );
   }
@@ -172,9 +174,10 @@ export default function QuickSettingsTab({ deviceId, networkType }: QuickSetting
   }
 
   if (visibleGroups.length === 0) {
+    const pm = data?.paramModel ?? t('device.quickSettings.unknown');
     const emptyDesc = isENB && isBM && activeBmTech === 'GSM'
-      ? `该设备的 paramModel(${data?.paramModel ?? '未知'})未配置 GSM 快速设置分组`
-      : `该设备的 paramModel(${data?.paramModel ?? '未知'})未配置快速设置分组`;
+      ? t('device.quickSettings.noGsmGroups', { pm })
+      : t('device.quickSettings.noGroups', { pm });
     return (
       <div style={{ padding: 16 }}>
         <Empty description={emptyDesc} />
@@ -188,7 +191,7 @@ export default function QuickSettingsTab({ deviceId, networkType }: QuickSetting
         <Space style={{ marginBottom: 16 }}>
           {isENB && isBM && bmTechOptions.length > 1 && (
             <>
-              <Text strong>制式:</Text>
+              <Text strong>{t('device.quickSettings.radioMode')}:</Text>
               <Select
                 value={activeBmTech}
                 onChange={(v) => {
@@ -208,8 +211,8 @@ export default function QuickSettingsTab({ deviceId, networkType }: QuickSetting
             loading={selectorLoading}
             disabled={selectorLoading || selectableInstances.length === 0}
             options={selectableInstances.map((n) => ({ value: n, label: String(n) }))}
-            placeholder={selectorLoading ? '加载中...' : isENB ? '无有效实例' : '无小区实例'}
-            notFoundContent={isENB ? '无有效实例' : '无小区实例'}
+            placeholder={selectorLoading ? t('common.loading') : isENB ? t('device.quickSettings.noValidInstance') : t('device.quickSettings.noCellInstance')}
+            notFoundContent={isENB ? t('device.quickSettings.noValidInstance') : t('device.quickSettings.noCellInstance')}
           />
           <Text type="secondary">{selectorHint}</Text>
         </Space>

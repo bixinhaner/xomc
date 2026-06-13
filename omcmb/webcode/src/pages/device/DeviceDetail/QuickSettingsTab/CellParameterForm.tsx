@@ -16,9 +16,12 @@ import type { DeviceParameter, ParameterSchemaItem, ParameterUpdateRequest } fro
 import type { DeviceTaskStatus } from '@core/types/deviceTask';
 import type { QuickSettingsGroup } from '@core/types/quicksettings';
 import { applyInstanceContext, getEffectiveEnumMeta, validateValue, type QuickSettingsInstanceContext } from './validators';
+import { useT } from '@/hooks/useT';
 
 const { Text } = Typography;
 const ERROR_FEEDBACK_DURATION_SECONDS = 2;
+
+type TFn = (id: string, values?: Record<string, string | number>) => string;
 
 /**
  * GSM ARFCN -> 上下行频率(MHz) 派生计算。
@@ -48,11 +51,13 @@ function formatFreqMHz(v: number): string {
 
 // FrequencyDisplay: 跟随表单内 CurrentArfcn 变化重算 UL/DL。独立组件避免整表单重渲染。
 function FrequencyDisplay({ form, locale }: { form: FormInstance; locale: 'zh-CN' | 'en-US' }) {
+  void locale;
+  const t = useT();
   const arfcn = Form.useWatch('CurrentArfcn', form);
   const freq = arfcnToFrequencyMHz(arfcn);
-  const labelText = locale === 'zh-CN' ? '频率 (MHz)' : 'Frequency (MHz)';
-  const ulText = locale === 'zh-CN' ? '上行' : 'Uplink';
-  const dlText = locale === 'zh-CN' ? '下行' : 'Downlink';
+  const labelText = t('device.cell.freqMHz');
+  const ulText = t('device.cell.uplink');
+  const dlText = t('device.cell.downlink');
   const display = freq
     ? `${ulText}: ${formatFreqMHz(freq.ul)}  ${dlText}: ${formatFreqMHz(freq.dl)}`
     : '-';
@@ -62,7 +67,7 @@ function FrequencyDisplay({ form, locale }: { form: FormInstance; locale: 'zh-CN
         label={
           <Space size={4}>
             <span>{labelText}</span>
-            <Text type="secondary" style={{ fontSize: 12 }}>(只读)</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>{t('device.cell.readonly')}</Text>
           </Space>
         }
       >
@@ -83,10 +88,12 @@ function BoundRuRouteIndexDisplay({
   ruRouteByIdx: Map<string, string>;
   locale: 'zh-CN' | 'en-US';
 }) {
+  void locale;
+  const t = useT();
   const ruRel = Form.useWatch('GsmCellWithRuRelation', form);
   const ruIdx = ruRel == null ? '' : String(ruRel).trim();
   const routeIndex = ruIdx && ruRouteByIdx.has(ruIdx) ? ruRouteByIdx.get(ruIdx)! : '-';
-  const labelText = locale === 'zh-CN' ? 'Route Index (绑定 RU)' : 'Route Index (Bound RU)';
+  const labelText = t('device.cell.routeIndexBoundRu');
   const display = ruIdx ? `RU ${ruIdx} → ${routeIndex}` : '-';
   return (
     <Col span={12}>
@@ -94,7 +101,7 @@ function BoundRuRouteIndexDisplay({
         label={
           <Space size={4}>
             <span>{labelText}</span>
-            <Text type="secondary" style={{ fontSize: 12 }}>(只读)</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>{t('device.cell.readonly')}</Text>
           </Space>
         }
       >
@@ -130,10 +137,12 @@ function lteEarfcnToMHz(band: unknown, earfcn: unknown): number | null {
 
 // LteFrequencyDisplay: 跟随 BandIndicator + DLEarfcn 派生 DL 中心频率。
 function LteFrequencyDisplay({ form, locale }: { form: FormInstance; locale: 'zh-CN' | 'en-US' }) {
+  void locale;
+  const t = useT();
   const band = Form.useWatch('BandIndicator', form);
   const earfcn = Form.useWatch('DLEarfcn', form);
   const f = lteEarfcnToMHz(band, earfcn);
-  const labelText = locale === 'zh-CN' ? '频率 (MHz)' : 'Frequency (MHz)';
+  const labelText = t('device.cell.freqMHz');
   const display = f != null ? formatFreqMHz(f) : '-';
   return (
     <Col span={12}>
@@ -141,7 +150,7 @@ function LteFrequencyDisplay({ form, locale }: { form: FormInstance; locale: 'zh
         label={
           <Space size={4}>
             <span>{labelText}</span>
-            <Text type="secondary" style={{ fontSize: 12 }}>(只读)</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>{t('device.cell.readonly')}</Text>
           </Space>
         }
       >
@@ -153,17 +162,19 @@ function LteFrequencyDisplay({ form, locale }: { form: FormInstance; locale: 'zh
 
 // CellIdDerivedDisplay: 从 ECI(CellIdentity) 反推每小区 8 位 Cell ID(ECI mod 256)。
 function CellIdDerivedDisplay({ form, locale }: { form: FormInstance; locale: 'zh-CN' | 'en-US' }) {
+  void locale;
+  const t = useT();
   const eci = Form.useWatch('ECI', form);
   const n = Number(eci);
   const cid = Number.isFinite(n) ? n % 256 : null;
-  const labelText = locale === 'zh-CN' ? 'Cell ID (ECI%256)' : 'Cell ID (ECI%256)';
+  const labelText = 'Cell ID (ECI%256)';
   return (
     <Col span={12}>
       <Form.Item
         label={
           <Space size={4}>
             <span>{labelText}</span>
-            <Text type="secondary" style={{ fontSize: 12 }}>(只读)</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>{t('device.cell.readonly')}</Text>
           </Space>
         }
       >
@@ -175,9 +186,11 @@ function CellIdDerivedDisplay({ form, locale }: { form: FormInstance; locale: 'z
 
 // AntennaPortsAs2T4RDisplay: 由 AntennaPortsCount 派生 2T4R 开关(2 -> OFF, 4 -> ON)。
 function AntennaPortsAs2T4RDisplay({ form, locale }: { form: FormInstance; locale: 'zh-CN' | 'en-US' }) {
+  void locale;
+  const t = useT();
   const ports = Form.useWatch('AntennaPortsCount', form);
   const n = Number(ports);
-  const labelText = locale === 'zh-CN' ? '2T4R 开关' : '2T4R Switch';
+  const labelText = t('device.cell.switch2T4R');
   const v = n === 4 ? 'ON' : n === 2 ? 'OFF' : '-';
   return (
     <Col span={12}>
@@ -185,7 +198,7 @@ function AntennaPortsAs2T4RDisplay({ form, locale }: { form: FormInstance; local
         label={
           <Space size={4}>
             <span>{labelText}</span>
-            <Text type="secondary" style={{ fontSize: 12 }}>(只读)</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>{t('device.cell.readonly')}</Text>
           </Space>
         }
       >
@@ -207,26 +220,26 @@ interface StatusTagSpec {
   icon: React.ReactNode;
   label: string;
 }
-function statusTagSpec(submit: CellFeedback, taskStatus: DeviceTaskStatus | undefined): StatusTagSpec {
+function statusTagSpec(submit: CellFeedback, taskStatus: DeviceTaskStatus | undefined, t: TFn): StatusTagSpec {
   if (submit.submitStatus === 'failed_to_queue') {
-    return { color: 'error', icon: <CloseCircleOutlined />, label: '入队失败' };
+    return { color: 'error', icon: <CloseCircleOutlined />, label: t('device.cell.tagQueueFailed') };
   }
-  // submitStatus = 'queued' 后,根据 task 真实状态分支
+  // After submitStatus = 'queued', branch on the real task status
   switch (taskStatus) {
     case 'completed':
-      return { color: 'success', icon: <CheckCircleOutlined />, label: '基站应答成功' };
+      return { color: 'success', icon: <CheckCircleOutlined />, label: t('device.cell.tagAckSuccess') };
     case 'failed':
-      return { color: 'error', icon: <CloseCircleOutlined />, label: '基站应答失败' };
+      return { color: 'error', icon: <CloseCircleOutlined />, label: t('device.cell.tagAckFailed') };
     case 'expired':
-      return { color: 'warning', icon: <ClockCircleOutlined />, label: '超时' };
+      return { color: 'warning', icon: <ClockCircleOutlined />, label: t('device.cell.tagTimeout') };
     case 'cancelled':
-      return { color: 'default', icon: <CloseCircleOutlined />, label: '已取消' };
+      return { color: 'default', icon: <CloseCircleOutlined />, label: t('device.cell.tagCancelled') };
     case 'sent':
-      return { color: 'processing', icon: <SendOutlined />, label: '已发送给基站' };
+      return { color: 'processing', icon: <SendOutlined />, label: t('device.cell.tagSent') };
     case 'pending':
     default:
-      // pending 或 task 还没拉到(刚 mutateAsync 完)
-      return { color: 'processing', icon: <SyncOutlined spin />, label: '已入队,等待下发' };
+      // pending, or task not yet fetched (just after mutateAsync)
+      return { color: 'processing', icon: <SyncOutlined spin />, label: t('device.cell.tagPending') };
   }
 }
 
@@ -314,6 +327,8 @@ function toMmeIpPlmnRows(value: QuickSettingsDraftValue | string | undefined): M
 }
 
 function MmeIpPlmnTable({ value = [], onChange, disabled = false, locale }: MmeIpPlmnTableProps) {
+  void locale;
+  const t = useT();
   const rows = isMmeIpPlmnRows(value) ? value : [];
 
   const setRows = (nextRows: MmeIpPlmnRow[]) => {
@@ -363,7 +378,7 @@ function MmeIpPlmnTable({ value = [], onChange, disabled = false, locale }: MmeI
       ),
     },
     {
-      title: locale === 'zh-CN' ? '操作' : 'Actions',
+      title: t('table.operation'),
       key: 'actions',
       width: 80,
       render: (_: unknown, row: MmeIpPlmnRow) => (
@@ -392,7 +407,7 @@ function MmeIpPlmnTable({ value = [], onChange, disabled = false, locale }: MmeI
         onClick={addRow}
         disabled={disabled}
       >
-        {locale === 'zh-CN' ? '新增一行' : 'Add Row'}
+        {t('device.cell.addRow')}
       </Button>
     </Space>
   );
@@ -508,6 +523,7 @@ function findRawValueBySuffix(parameters: DeviceParameter[] | undefined, suffix:
  *  5. Save 部分失败时按字段标红保留输入值（继承 Antd Form 校验/状态行为）
  */
 export default function CellParameterForm({ deviceId, group, instanceContext, locale }: CellParameterFormProps) {
+  const t = useT();
   const [form] = Form.useForm();
   const updateMutation = useUpdateParameters();
   const queryClient = useQueryClient();
@@ -708,12 +724,12 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
 
     if (Object.keys(errors).length > 0) {
       setFieldErrors(errors);
-      message.error({ content: '校验失败,请检查标红字段', duration: ERROR_FEEDBACK_DURATION_SECONDS });
+      message.error({ content: t('device.cell.validationFailed'), duration: ERROR_FEEDBACK_DURATION_SECONDS });
       return;
     }
 
     if (updates.length === 0) {
-      message.info({ content: '无变更', duration: 4 });
+      message.info({ content: t('device.cell.noChange'), duration: 4 });
       return;
     }
 
@@ -721,7 +737,7 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
     try {
       const result = await updateMutation.mutateAsync({ deviceId, parameters: updates });
       message.success({
-        content: `已下发 ${updates.length} 项变更,正在等待基站应答(Tag 状态会自动刷新)`,
+        content: t('device.cell.saveSuccessMsg', { count: updates.length }),
         duration: 6,
       });
       setFeedback(fbKey, {
@@ -734,8 +750,8 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       notification.error({
-        message: `下发失败(${group.titleZh})`,
-        description: `${updates.length} 项变更入队失败:${errMsg}。输入值已保留,可修正后重试。`,
+        message: t('device.cell.dispatchFailed', { group: group.titleZh }),
+        description: t('device.multi.queueFailedDesc', { count: updates.length, err: errMsg }),
         duration: ERROR_FEEDBACK_DURATION_SECONDS,
       });
       setFeedback(fbKey, {
@@ -768,7 +784,7 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
         if (!cancelled) {
           const errMsg = err instanceof Error ? err.message : String(err);
           notification.error({
-            message: `设备侧数据回读失败(${group.titleZh})`,
+            message: t('device.multi.readbackFailed', { group: group.titleZh }),
             description: errMsg,
             duration: ERROR_FEEDBACK_DURATION_SECONDS,
           });
@@ -793,7 +809,7 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
     return () => {
       cancelled = true;
     };
-  }, [lastTask?.id, lastTask?.status, refetch, group.params, instanceContext, form, clearDraft, fbKey, group.titleZh, specialConfigByName]);
+  }, [lastTask?.id, lastTask?.status, refetch, group.params, instanceContext, form, clearDraft, fbKey, group.titleZh, specialConfigByName, t]);
 
   // T-0146:基站应答失败时弹一次 notification(只在 status 第一次变成 failed 时触发,避免重复弹)
   // notifiedFailedTaskId 同样存 store —— 切顶层 tab 再切回不会重复弹。
@@ -805,13 +821,13 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
       lastSubmit.notifiedFailedTaskId !== lastTask.id
     ) {
       notification.error({
-        message: `基站应答失败(${group.titleZh})`,
-        description: lastTask.errorMessage || '未知错误,可在通知中心查看任务详情',
+        message: t('device.multi.nackFailed', { group: group.titleZh }),
+        description: lastTask.errorMessage || t('device.multi.unknownErrorHint'),
         duration: ERROR_FEEDBACK_DURATION_SECONDS,
       });
       patchFeedback(fbKey, { notifiedFailedTaskId: lastTask.id });
     }
-  }, [lastTask, lastSubmit, group.titleZh, patchFeedback, fbKey]);
+  }, [lastTask, lastSubmit, group.titleZh, patchFeedback, fbKey, t]);
 
   const title = locale === 'zh-CN' ? group.titleZh : group.titleEn;
   const visibleLastSubmit = useMemo(() => {
@@ -829,15 +845,15 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
       extra={
         <Space>
           {visibleLastSubmit && (() => {
-            const spec = statusTagSpec(visibleLastSubmit, lastTask?.status);
+            const spec = statusTagSpec(visibleLastSubmit, lastTask?.status, t);
             return (
               <Tag icon={spec.icon} color={spec.color}>
-                {spec.label} · {visibleLastSubmit.count} 项 · {formatTime(visibleLastSubmit.at)}
+                {spec.label} · {t('device.cell.itemsCount', { count: visibleLastSubmit.count })} · {formatTime(visibleLastSubmit.at)}
               </Tag>
             );
           })()}
           <Button type="primary" onClick={handleSave} loading={updateMutation.isPending}>
-            {updateMutation.isPending ? '下发中...' : '保 存'}
+            {updateMutation.isPending ? t('device.cell.dispatching') : t('common.save')}
           </Button>
         </Space>
       }
@@ -951,7 +967,7 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
               ?? item?.writable
               ?? (isDeviceTimeParam ? true : false);
             const error = fieldErrors[p.name];
-            const constraintHint = formatConstraintHint(item);
+            const constraintHint = formatConstraintHint(item, t);
             const currentBindPath = String(form.getFieldValue(p.name) ?? rawItem?.parameterValue ?? item?.currentValue ?? '');
             const resolvedDisplayValue = displayValue || bindIpByPath.get(currentBindPath) || '';
             const label = (
@@ -959,7 +975,7 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
                 <span style={special?.kind === 'mme-ip-plmn-table' ? { whiteSpace: 'nowrap' } : undefined}>
                   {locale === 'zh-CN' ? p.titleZh : p.titleEn}
                 </span>
-                {!writable && <Text type="secondary" style={{ fontSize: 12 }}>(只读)</Text>}
+                {!writable && <Text type="secondary" style={{ fontSize: 12 }}>{t('device.cell.readonly')}</Text>}
                 {constraintHint && (
                   <Text type="secondary" style={{ fontSize: 12 }}>
                     {constraintHint}
@@ -967,7 +983,7 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
                 )}
                 {special?.kind === 'bind-select' && resolvedDisplayValue && (
                   <Text type="secondary" style={{ fontSize: 12 }}>
-                    {locale === 'zh-CN' ? `当前 IP: ${resolvedDisplayValue}` : `Current IP: ${resolvedDisplayValue}`}
+                    {t('device.cell.currentIp', { ip: resolvedDisplayValue })}
                   </Text>
                 )}
               </Space>
@@ -975,9 +991,7 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
             const enumMeta = getEffectiveEnumMeta(item?.constraints, path);
             const isEnum = !special && Boolean(enumMeta && enumMeta.values.length > 0);
             const extra = special?.kind === 'mme-ip-plmn-table'
-              ? (locale === 'zh-CN'
-                ? '每行一组 MME IP + PLMN，支持新增/删除/编辑'
-                : 'Each row is one MME IP + PLMN pair')
+              ? t('device.cell.mmeIpPlmnExtra')
               : special?.kind === 'bind-select'
                 ? undefined
                 : undefined;
@@ -1002,7 +1016,7 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
                       disabled={!writable}
                       showSearch
                       optionFilterProp="label"
-                      placeholder={locale === 'zh-CN' ? '请选择 WAN/VLAN IP 地址' : 'Select a WAN/VLAN IP address'}
+                      placeholder={t('device.cell.bindSelectPlaceholder')}
                       options={effectiveBindOptions}
                     />
                   ) : special?.kind === 'mme-ip-plmn-table' ? (
@@ -1059,21 +1073,21 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
 // formatConstraintHint 把 schema 取值范围渲染成 label 后的灰色提示。
 // 后端 MinValue/MaxValue 是按类型复用的字段：string → 长度边界；int/unsignedInt → 值范围。
 // 枚举字段不渲染提示（Select 组件已展示候选项，避免重复占位）。
-function formatConstraintHint(schema?: ParameterSchemaItem): string {
+function formatConstraintHint(schema: ParameterSchemaItem | undefined, t: TFn): string {
   if (!schema?.constraints) return '';
   const c = schema.constraints;
   if (c.enumValues && c.enumValues.length > 0) {
     return '';
   }
   const isString = schema.type === 'string';
-  // 优先用显式 maxLength/minLength；fallback 到 minValue/maxValue (按类型解释)
+  // Prefer explicit maxLength/minLength; fall back to minValue/maxValue (interpreted by type)
   const min = c.minLength ?? (isString ? c.minValue : c.minValue);
   const max = c.maxLength ?? (isString ? c.maxValue : c.maxValue);
   if (min !== undefined || max !== undefined) {
-    // 字典里没有 min 时按 0 显示（避免对用户出现 -∞ 这种无意义下界）。
+    // When the dictionary has no min, show 0 (avoid showing the user a meaningless -∞ lower bound).
     const lo = min ?? 0;
     const hi = max ?? '∞';
-    return isString ? `[长度 ${lo} ~ ${hi}]` : `[${lo} ~ ${hi}]`;
+    return isString ? t('device.multi.hintLenRange', { lo, hi }) : `[${lo} ~ ${hi}]`;
   }
   return '';
 }

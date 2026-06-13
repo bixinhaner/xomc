@@ -4,6 +4,7 @@ import type { MMLOperationType } from '@core/types/mml';
 import type { RawPathPayload, RawPathRow } from '../types';
 import { newRawPathRow as newRow } from '../rawPathRow';
 import { rawPathPlaceholder, validateRawPath } from '../rawPathValidate';
+import { useT } from '@/hooks/useT';
 
 const { Text } = Typography;
 
@@ -32,6 +33,7 @@ interface RawPathPanelProps {
  * onChange 上抛，由 ConfigParamsModal/index 在执行时驱动结果表格。
  */
 export default function RawPathPanel({ value, onChange, suggestions }: RawPathPanelProps) {
+  const t = useT();
   const { operationType, rows } = value;
   const showValue = operationType === 'MOD';
   const singleRowOnly = operationType === 'ADD' || operationType === 'RMV';
@@ -64,7 +66,7 @@ export default function RawPathPanel({ value, onChange, suggestions }: RawPathPa
   return (
     <Space orientation="vertical" size={14} style={{ width: '100%' }}>
       <div>
-        <Text type="secondary">操作类型</Text>
+        <Text type="secondary">{t('mml.consoleV2.rawPath.operationType')}</Text>
         <Select<MMLOperationType>
           value={operationType}
           onChange={handleOperationChange}
@@ -77,14 +79,14 @@ export default function RawPathPanel({ value, onChange, suggestions }: RawPathPa
       </div>
 
       <div>
-        <Text type="secondary">参数路径</Text>
-        {showValue && <Text type="secondary" style={{ marginLeft: 12 }}>· 参数值</Text>}
+        <Text type="secondary">{t('mml.consoleV2.rawPath.paramPath')}</Text>
+        {showValue && <Text type="secondary" style={{ marginLeft: 12 }}>{t('mml.consoleV2.rawPath.paramValueSuffix')}</Text>}
         {/* 提示文案紧跟「参数路径」之后（§需求 2）；ADD/RMV 给出 TR-069 对象路径形态提示（plan A）。 */}
         <Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 4 }}>
-          ⓘ 裸路径直发，支持 TR-069 参数树路径格式（须填具体实例号，不支持 {'{i}'} 占位符）。
-          {operationType === 'ADD' && ' ADD：路径填到对象表层级、以 . 结尾，末级不带实例号（设备自动分配）。'}
-          {(operationType === 'RMV') && ' RMV：路径须以 .<实例号>. 结尾，指定要删除的实例。'}
-          {showValue && ' MOD 需为每条路径填写参数值。'}
+          {t('mml.consoleV2.rawPath.hintBase')}
+          {operationType === 'ADD' && t('mml.consoleV2.rawPath.hintAdd')}
+          {(operationType === 'RMV') && t('mml.consoleV2.rawPath.hintRmv')}
+          {showValue && t('mml.consoleV2.rawPath.hintMod')}
         </Text>
         <Space orientation="vertical" size={8} style={{ width: '100%', marginTop: 8 }}>
           {rows.map((row, index) => {
@@ -110,7 +112,7 @@ export default function RawPathPanel({ value, onChange, suggestions }: RawPathPa
                     <Input
                       value={row.value}
                       onChange={(e) => updateValue(row.id, e.target.value)}
-                      placeholder="请输入参数值"
+                      placeholder={t('mml.consoleV2.rawPath.valuePlaceholder')}
                       style={{ flex: 1, minWidth: 0 }}
                     />
                   )}
@@ -119,7 +121,7 @@ export default function RawPathPanel({ value, onChange, suggestions }: RawPathPa
                     icon={<PlusOutlined />}
                     onClick={() => addRow(row.id)}
                     disabled={singleRowOnly}
-                    title={singleRowOnly ? 'ADD / RMV 单次仅作用一个对象，已锁定单行' : undefined}
+                    title={singleRowOnly ? t('mml.consoleV2.rawPath.singleRowLocked') : undefined}
                   />
                   <Button
                     size="small"

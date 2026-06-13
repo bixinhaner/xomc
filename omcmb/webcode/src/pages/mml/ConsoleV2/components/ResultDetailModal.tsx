@@ -2,6 +2,7 @@ import { Alert, Button, Descriptions, Modal, Popover, Space, Table, Tabs, Tag, T
 import { DownloadOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import XmlViewer from '@/components/XmlViewer';
+import { useT } from '@/hooks/useT';
 import type { ExecMeta, ExecStatus, PathTask, ResultColumn, ResultRow, VerifyItem } from '../types';
 import { STATUS_META, UNVERIFIED_REASON_TEXT, opColor, opLabel } from '../constants';
 import { exportOne } from '../download';
@@ -38,6 +39,7 @@ export default function ResultDetailModal({
   columns,
   onClose,
 }: ResultDetailModalProps) {
+  const t = useT();
   const read = execMeta?.read ?? true;
   const status = row?.status;
 
@@ -52,7 +54,7 @@ export default function ResultDetailModal({
 
   const paramColumns: ColumnsType<ParsedParam> = [
     {
-      title: '参数路径',
+      title: t('mml.consoleV2.detail.col.paramPath'),
       dataIndex: 'path',
       key: 'path',
       render: (v: string, r) => (
@@ -66,7 +68,7 @@ export default function ResultDetailModal({
       ),
     },
     {
-      title: '值',
+      title: t('mml.consoleV2.detail.col.value'),
       dataIndex: 'value',
       key: 'value',
       width: 220,
@@ -74,7 +76,7 @@ export default function ResultDetailModal({
         v ? (
           <Text style={{ fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all' }}>{v}</Text>
         ) : (
-          <Text type="secondary">(空)</Text>
+          <Text type="secondary">{t('mml.consoleV2.detail.emptyParen')}</Text>
         ),
     },
   ];
@@ -82,7 +84,7 @@ export default function ResultDetailModal({
   // 读后核实对比表（写类，§3.11.2）
   const verifyColumns: ColumnsType<VerifyItem> = [
     {
-      title: '参数',
+      title: t('mml.consoleV2.detail.col.param'),
       dataIndex: 'label',
       key: 'label',
       render: (_v, r) => (
@@ -96,7 +98,7 @@ export default function ResultDetailModal({
       ),
     },
     {
-      title: '预期下发值',
+      title: t('mml.consoleV2.detail.col.expected'),
       dataIndex: 'expected',
       key: 'expected',
       width: 150,
@@ -105,7 +107,7 @@ export default function ResultDetailModal({
       ),
     },
     {
-      title: '读回值',
+      title: t('mml.consoleV2.detail.col.actual'),
       dataIndex: 'actual',
       key: 'actual',
       width: 150,
@@ -115,36 +117,36 @@ export default function ResultDetailModal({
             {v}
           </Text>
         ) : (
-          <Text type="secondary">(未读回)</Text>
+          <Text type="secondary">{t('mml.consoleV2.detail.notReadBack')}</Text>
         ),
     },
     {
-      title: '核实',
+      title: t('mml.consoleV2.detail.col.verify'),
       dataIndex: 'matched',
       key: 'matched',
       width: 90,
-      render: (m: boolean) => (m ? <Tag color="success">一致</Tag> : <Tag color="error">不一致</Tag>),
+      render: (m: boolean) => (m ? <Tag color="success">{t('mml.consoleV2.detail.matched')}</Tag> : <Tag color="error">{t('mml.consoleV2.detail.mismatched')}</Tag>),
     },
   ];
 
   // PATH 列表（#196：MOD 下发 + LST 回读前后对比）。列序：类型 | 子任务 ID | 状态 | PATH | PATH 值。
   const pathTaskColumns: ColumnsType<PathTask> = [
     {
-      title: '类型',
+      title: t('mml.consoleV2.detail.col.type'),
       dataIndex: 'opType',
       key: 'opType',
       width: 96,
       render: (v?: string) =>
         v === 'MOD' ? (
-          <Tag color="blue">MOD 下发</Tag>
+          <Tag color="blue">{t('mml.consoleV2.detail.modDispatch')}</Tag>
         ) : v === 'LST' ? (
-          <Tag color="green">LST 回读</Tag>
+          <Tag color="green">{t('mml.consoleV2.detail.lstReadback')}</Tag>
         ) : (
           <Text type="secondary">-</Text>
         ),
     },
     {
-      title: '子任务 ID',
+      title: t('mml.consoleV2.detail.col.subTaskId'),
       dataIndex: 'subTaskId',
       key: 'subTaskId',
       width: 88,
@@ -152,8 +154,8 @@ export default function ResultDetailModal({
       // #196：不直接显示冗长 ID，仅提供「复制」按钮（点击复制完整 device_task id）；无 ID 时占位 -。
       render: (v: string) =>
         v ? (
-          <Text copyable={{ text: v, tooltips: ['复制子任务 ID', '已复制'] }} style={{ fontSize: 12 }}>
-            复制
+          <Text copyable={{ text: v, tooltips: [t('mml.consoleV2.detail.copySubTaskId'), t('mml.consoleV2.detail.copied')] }} style={{ fontSize: 12 }}>
+            {t('mml.consoleV2.detail.copy')}
           </Text>
         ) : (
           <Text type="secondary" style={{ fontSize: 11 }}>
@@ -162,11 +164,11 @@ export default function ResultDetailModal({
         ),
     },
     {
-      title: '状态',
+      title: t('mml.consoleV2.detail.col.status'),
       dataIndex: 'status',
       key: 'status',
       width: 80,
-      render: (s: ExecStatus) => <Tag color={STATUS_META[s].color}>{STATUS_META[s].text}</Tag>,
+      render: (s: ExecStatus) => <Tag color={STATUS_META[s].color}>{t(STATUS_META[s].textKey)}</Tag>,
     },
     {
       title: 'PATH',
@@ -180,14 +182,14 @@ export default function ResultDetailModal({
     },
     {
       // MOD 行显下发值、LST 行显回读值；失败时显故障原因。值可能很长 → 截断 + 悬停看全 + 复制。
-      title: 'PATH 值',
+      title: t('mml.consoleV2.detail.col.pathValue'),
       dataIndex: 'value',
       key: 'value',
       width: 220,
       render: (v: string) =>
         v ? (
           <Text
-            copyable={{ text: v, tooltips: ['复制', '已复制'] }}
+            copyable={{ text: v, tooltips: [t('mml.consoleV2.detail.copy'), t('mml.consoleV2.detail.copied')] }}
             ellipsis={{ tooltip: v }}
             style={{ fontSize: 11, maxWidth: 180 }}
           >
@@ -201,7 +203,7 @@ export default function ResultDetailModal({
 
   return (
     <Modal
-      title={row ? `执行详情 - ${row.deviceSn}` : '执行详情'}
+      title={row ? t('mml.consoleV2.detail.titleWithSn', { sn: row.deviceSn }) : t('mml.consoleV2.detail.title')}
       open={open}
       onCancel={onClose}
       width={780}
@@ -213,9 +215,9 @@ export default function ResultDetailModal({
             disabled={!row}
             onClick={() => row && exportOne(columns, row)}
           >
-            下载执行结果
+            {t('mml.consoleV2.detail.downloadResult')}
           </Button>
-          <Button onClick={onClose}>关闭</Button>
+          <Button onClick={onClose}>{t('common.close')}</Button>
         </Space>
       }
     >
@@ -230,7 +232,7 @@ export default function ResultDetailModal({
               items={[
                 {
                   key: 'taskId',
-                  label: '任务 ID',
+                  label: t('mml.consoleV2.detail.taskId'),
                   children: commandId ? (
                     <Text code copyable={{ text: commandId }} style={{ fontSize: 12 }}>
                       {commandId}
@@ -241,7 +243,7 @@ export default function ResultDetailModal({
                 },
                 {
                   key: 'cmd',
-                  label: '执行命令',
+                  label: t('mml.consoleV2.detail.execCommand'),
                   children: (
                     <Space size={6} wrap>
                       <Tag color={opColor(execMeta.operationType)} style={{ marginInlineEnd: 0 }}>
@@ -252,7 +254,7 @@ export default function ResultDetailModal({
                         <Popover
                           trigger="hover"
                           placement="bottomLeft"
-                          title={`执行 PATH（${columns.length}）`}
+                          title={t('mml.consoleV2.detail.execPathTitle', { count: columns.length })}
                           content={
                             // MOD 与 LST 同一样式：仅展示标签 + PATH（MOD 下发值在下方「PATH 列表」展示，不在此重复）。
                             <div style={{ maxHeight: 320, overflow: 'auto', maxWidth: 460 }}>
@@ -285,18 +287,18 @@ export default function ResultDetailModal({
                 },
                 {
                   key: 'device',
-                  label: '设备 SN',
+                  label: t('mml.consoleV2.detail.deviceSn'),
                   children: <Text>{row.deviceSn}</Text>,
                 },
                 {
                   key: 'status',
-                  label: '执行状态',
+                  label: t('mml.consoleV2.detail.execStatus'),
                   children: (
                     <Space size={12} wrap>
-                      <Tag color={STATUS_META[row.status].color}>{STATUS_META[row.status].text}</Tag>
-                      <Text type="secondary">用时 {(row.elapsedMs / 1000).toFixed(1)} s</Text>
+                      <Tag color={STATUS_META[row.status].color}>{t(STATUS_META[row.status].textKey)}</Tag>
+                      <Text type="secondary">{t('mml.consoleV2.detail.elapsed', { sec: (row.elapsedMs / 1000).toFixed(1) })}</Text>
                       <Text type="secondary">
-                        下发 / 响应：{row.dispatchedAt ?? '-'} → {row.respondedAt ?? '-'}
+                        {t('mml.consoleV2.detail.dispatchResponse', { dispatched: row.dispatchedAt ?? '-', responded: row.respondedAt ?? '-' })}
                       </Text>
                     </Space>
                   ),
@@ -307,22 +309,22 @@ export default function ResultDetailModal({
 
           {/* 状态提示：失败原因 / 未生效 / 未核实 */}
           {status === 'failed' && row.faultCode && (
-            <Alert type="error" showIcon message="下发失败" description={row.faultCode} />
+            <Alert type="error" showIcon message={t('mml.consoleV2.detail.alert.dispatchFailed')} description={row.faultCode} />
           )}
           {status === 'mismatch' && (
             <Alert
               type="error"
               showIcon
-              message="核实不一致：参数未生效"
-              description="写 RPC 响应成功，但读回值与预期下发值不符——基站可能未真正应用该变更。"
+              message={t('mml.consoleV2.detail.alert.mismatchTitle')}
+              description={t('mml.consoleV2.detail.alert.mismatchDesc')}
             />
           )}
           {status === 'unverified' && (
             <Alert
               type="warning"
               showIcon
-              message={`已下发·未核实（${row.unverifiedReason ? UNVERIFIED_REASON_TEXT[row.unverifiedReason] : '原因未知'}）`}
-              description="写 RPC 响应成功，但该参数未做读回核实，不计为失败；请知悉「未核实 ≠ 已确认生效」。"
+              message={t('mml.consoleV2.detail.alert.unverifiedTitle', { reason: row.unverifiedReason ? t(UNVERIFIED_REASON_TEXT[row.unverifiedReason]) : t('mml.consoleV2.detail.reasonUnknown') })}
+              description={t('mml.consoleV2.detail.alert.unverifiedDesc')}
             />
           )}
 
@@ -330,7 +332,7 @@ export default function ResultDetailModal({
           {!read && row.verify && row.verify.length > 0 && (
             <div>
               <Text strong style={{ fontSize: 13 }}>
-                读后核实对比（预期 vs 读回）
+                {t('mml.consoleV2.detail.verifySection')}
               </Text>
               <div style={{ marginTop: 6 }}>
                 <Table<VerifyItem>
@@ -349,7 +351,7 @@ export default function ResultDetailModal({
           {read && (
             <div>
               <Text strong style={{ fontSize: 13 }}>
-                执行结果
+                {t('mml.consoleV2.detail.execResultSection')}
               </Text>
               <div style={{ marginTop: 6 }}>
                 {status === 'success' ? (
@@ -363,7 +365,7 @@ export default function ResultDetailModal({
                   />
                 ) : (
                   <Text type="secondary" style={{ fontSize: 12 }}>
-                    执行失败，无可解析结果。
+                    {t('mml.consoleV2.detail.failedNoResult')}
                   </Text>
                 )}
               </div>
@@ -374,7 +376,7 @@ export default function ResultDetailModal({
           {row.pathTasks && row.pathTasks.length > 0 && (
             <div>
               <Text strong style={{ fontSize: 13 }}>
-                PATH 列表
+                {t('mml.consoleV2.detail.pathListSection')}
               </Text>
               <div style={{ marginTop: 6 }}>
                 <Table<PathTask>
@@ -392,17 +394,17 @@ export default function ResultDetailModal({
           {/* 结果报文：格式化 XML。#196：MOD 回读复合时分「MOD 响应 / 回读 LST 响应」两个页签。 */}
           <div>
             <Text strong style={{ fontSize: 13 }}>
-              结果报文（格式化 XML）
+              {t('mml.consoleV2.detail.rawSection')}
             </Text>
             <div style={{ marginTop: 6 }}>
               {row.readbackRaw ? (
                 <Tabs
                   size="small"
                   items={[
-                    { key: 'mod', label: 'MOD 响应', children: <XmlViewer xml={row.raw} maxHeight={280} /> },
+                    { key: 'mod', label: t('mml.consoleV2.detail.modResponse'), children: <XmlViewer xml={row.raw} maxHeight={280} /> },
                     {
                       key: 'lst',
-                      label: '回读 LST 响应',
+                      label: t('mml.consoleV2.detail.lstResponse'),
                       children: <XmlViewer xml={row.readbackRaw} maxHeight={280} />,
                     },
                   ]}

@@ -13,7 +13,10 @@ export type SyncNetworkType = 'eNB' | 'gNB' | 'GSM';
 
 interface SyncParam {
   code: string;
-  label: string;
+  /** 直出字面量（纯英文/代码缩写）；与 labelKey 二选一 */
+  label?: string;
+  /** i18n message id；优先于 label */
+  labelKey?: string;
   /** 适用的网络类型范围 */
   scope: NetworkScope;
 }
@@ -34,97 +37,97 @@ interface SyncParamsModalProps {
 }
 
 // ---------------------------------------------------------------------------
-// 同步参数定义 — 从三制式 JSP 源码逐字段提取并合并
-// scope: common = 三制式共��, eNB+gNB = LTE+5G共有, eNB/gNB/GSM = 仅该制式
+// Sync parameter definitions — extracted field-by-field from the three-RAT JSP sources.
+// scope: common = shared by all three RATs, eNB+gNB = LTE+5G shared, eNB/gNB/GSM = that RAT only
 // ---------------------------------------------------------------------------
 
 const BASIC_PARAMS: SyncParam[] = [
-  // --- 三制式公共 ---
-  { code: 'module_type',       label: '设备型号名',          scope: 'common' },
-  { code: 'software_version',  label: '软件版本',            scope: 'common' },
-  { code: 'firmware_version',  label: '固件版本',            scope: 'eNB+gNB' },
-  { code: 'MAC',               label: 'MAC地址',             scope: 'common' },
-  { code: 'IP',                label: 'IP地址',              scope: 'common' },
-  { code: 'ue_count',          label: 'UE数',                scope: 'common' },
-  // --- eNB + gNB 共有 ---
-  { code: 'cell_name',         label: '主机名/站点名',       scope: 'eNB+gNB' },
-  { code: 'ECI',               label: 'ECI',                 scope: 'eNB+gNB' },
-  { code: 'halob_flag',        label: 'HaloX',               scope: 'eNB+gNB' },
-  { code: 'sync_status',       label: '同步状态',            scope: 'eNB+gNB' },
-  { code: 'mme_addr',          label: 'MME Pool IPSEC地址',   scope: 'eNB+gNB' },
-  { code: 'gps_position',      label: 'GPS位置',             scope: 'eNB+gNB' },
-  // --- eNB 独有 ---
-  { code: 'PCI',               label: 'PCI',                 scope: 'eNB' },
-  { code: 'plmn',              label: 'PLMN',                scope: 'eNB' },
-  { code: 'tac',               label: 'TAC',                 scope: 'eNB' },
-  { code: 'bandwidth',         label: '带宽',                scope: 'eNB' },
-  { code: 'earfcn',            label: '频点',                scope: 'eNB' },
-  { code: 'duplex_mode',       label: '双工模式',            scope: 'eNB' },
-  { code: 'tx_power',          label: '发射功率',            scope: 'eNB' },
-  { code: 'cell_status',       label: '激活状态',            scope: 'eNB' },
-  { code: 'mme_status',        label: 'MME状态',             scope: 'eNB' },
-  { code: 'rf_status',         label: '射频开关状态',        scope: 'eNB' },
-  { code: 'lease',             label: '锁定状态',            scope: 'eNB' },
-  { code: 'root_sequence_index', label: '根序列索引',        scope: 'eNB' },
-  { code: 'gps_satellites',    label: 'GPS卫星数',           scope: 'eNB' },
-  { code: 'sub_frame_assignment', label: '子帧配比',         scope: 'eNB' },
-  { code: 'wan_speed',         label: 'WAN状态',             scope: 'eNB' },
-  { code: 'ipsec_addr',        label: 'IPSEC地址',           scope: 'eNB' },
-  { code: 'electronic_downtilt', label: '电子下倾角',        scope: 'eNB' },
-  // --- gNB 独有 ---
-  { code: 'adminState',        label: 'Admin State',         scope: 'gNB' },
-  { code: 'amf_status',        label: 'AMF Status',          scope: 'gNB' },
-  { code: 'multiPlmnEnable',   label: 'MultiPLMN状态',       scope: 'gNB' },
-  { code: 'cellConfig',        label: '小区参数',            scope: 'gNB' },
-  { code: 'sub_station_name', label: '站址名称',            scope: 'gNB' },
-  // --- GSM 独有 ---
-  { code: 'halob_license',     label: 'License',             scope: 'GSM' },
+  // --- shared by all three RATs ---
+  { code: 'module_type',       labelKey: 'sync.param.module_type',      scope: 'common' },
+  { code: 'software_version',  labelKey: 'sync.param.software_version', scope: 'common' },
+  { code: 'firmware_version',  labelKey: 'sync.param.firmware_version', scope: 'eNB+gNB' },
+  { code: 'MAC',               labelKey: 'sync.param.mac',              scope: 'common' },
+  { code: 'IP',                labelKey: 'sync.param.ip',               scope: 'common' },
+  { code: 'ue_count',          labelKey: 'sync.param.ue_count',         scope: 'common' },
+  // --- shared by eNB + gNB ---
+  { code: 'cell_name',         labelKey: 'sync.param.cell_name',        scope: 'eNB+gNB' },
+  { code: 'ECI',               label: 'ECI',                            scope: 'eNB+gNB' },
+  { code: 'halob_flag',        label: 'HaloX',                          scope: 'eNB+gNB' },
+  { code: 'sync_status',       labelKey: 'sync.param.sync_status',      scope: 'eNB+gNB' },
+  { code: 'mme_addr',          labelKey: 'sync.param.mme_addr',         scope: 'eNB+gNB' },
+  { code: 'gps_position',      labelKey: 'sync.param.gps_position',     scope: 'eNB+gNB' },
+  // --- eNB only ---
+  { code: 'PCI',               label: 'PCI',                            scope: 'eNB' },
+  { code: 'plmn',              label: 'PLMN',                           scope: 'eNB' },
+  { code: 'tac',               label: 'TAC',                            scope: 'eNB' },
+  { code: 'bandwidth',         labelKey: 'sync.param.bandwidth',        scope: 'eNB' },
+  { code: 'earfcn',            labelKey: 'sync.param.earfcn',           scope: 'eNB' },
+  { code: 'duplex_mode',       labelKey: 'sync.param.duplex_mode',      scope: 'eNB' },
+  { code: 'tx_power',          labelKey: 'sync.param.tx_power',         scope: 'eNB' },
+  { code: 'cell_status',       labelKey: 'sync.param.cell_status',      scope: 'eNB' },
+  { code: 'mme_status',        labelKey: 'sync.param.mme_status',       scope: 'eNB' },
+  { code: 'rf_status',         labelKey: 'sync.param.rf_status',        scope: 'eNB' },
+  { code: 'lease',             labelKey: 'sync.param.lease',            scope: 'eNB' },
+  { code: 'root_sequence_index', labelKey: 'sync.param.root_sequence_index', scope: 'eNB' },
+  { code: 'gps_satellites',    labelKey: 'sync.param.gps_satellites',   scope: 'eNB' },
+  { code: 'sub_frame_assignment', labelKey: 'sync.param.sub_frame_assignment', scope: 'eNB' },
+  { code: 'wan_speed',         labelKey: 'sync.param.wan_speed',        scope: 'eNB' },
+  { code: 'ipsec_addr',        labelKey: 'sync.param.ipsec_addr',       scope: 'eNB' },
+  { code: 'electronic_downtilt', labelKey: 'sync.param.electronic_downtilt', scope: 'eNB' },
+  // --- gNB only ---
+  { code: 'adminState',        label: 'Admin State',                    scope: 'gNB' },
+  { code: 'amf_status',        label: 'AMF Status',                     scope: 'gNB' },
+  { code: 'multiPlmnEnable',   labelKey: 'sync.param.multiPlmnEnable',  scope: 'gNB' },
+  { code: 'cellConfig',        labelKey: 'sync.param.cellConfig',       scope: 'gNB' },
+  { code: 'sub_station_name', labelKey: 'sync.param.sub_station_name',  scope: 'gNB' },
+  // --- GSM only ---
+  { code: 'halob_license',     label: 'License',                        scope: 'GSM' },
 ];
 
 const ADVANCED_PARAMS: SyncParam[] = [
-  // --- eNB + gNB 共有 ---
-  { code: 'rollback_version',  label: '回退版本',            scope: 'eNB+gNB' },
-  { code: 'sas_param',         label: 'SAS参数',             scope: 'eNB+gNB' },
-  { code: 'eu_ru',             label: 'EU/RU数',             scope: 'eNB+gNB' },
-  { code: 'halob_license',     label: 'HaloB License',       scope: 'gNB' },
-  // --- eNB 独有 ---
-  { code: 'band',              label: '频段',                scope: 'eNB' },
-  { code: 'cell_neighbor',     label: 'SAS邻区',            scope: 'eNB' },
-  { code: 'itfn_param',        label: '背向接口',            scope: 'eNB' },
-  { code: 'son_pci',           label: 'SON PCI',             scope: 'eNB' },
-  { code: 'rollback_enable',   label: '回退开关',            scope: 'eNB' },
-  { code: 'uboot_version',     label: 'UBoot版本',           scope: 'eNB' },
-  { code: 'kernel_version',    label: 'Kernel版本',          scope: 'eNB' },
-  { code: 'is_https',          label: 'Https状态',           scope: 'eNB' },
-  { code: 'lan_enable',        label: 'LAN状态',             scope: 'eNB' },
-  { code: 'wan_ip',            label: 'WAN IP地址',          scope: 'eNB' },
-  { code: 'lte_turbo_enable',  label: 'LTE Turbo',           scope: 'eNB' },
-  { code: 'lock_mac_addr',     label: '锁定MAC',             scope: 'eNB' },
-  { code: 'lock_mac_status',   label: '锁定MAC状态',         scope: 'eNB' },
+  // --- shared by eNB + gNB ---
+  { code: 'rollback_version',  labelKey: 'sync.param.rollback_version', scope: 'eNB+gNB' },
+  { code: 'sas_param',         labelKey: 'sync.param.sas_param',        scope: 'eNB+gNB' },
+  { code: 'eu_ru',             labelKey: 'sync.param.eu_ru',            scope: 'eNB+gNB' },
+  { code: 'halob_license',     label: 'HaloB License',                  scope: 'gNB' },
+  // --- eNB only ---
+  { code: 'band',              labelKey: 'sync.param.band',             scope: 'eNB' },
+  { code: 'cell_neighbor',     labelKey: 'sync.param.cell_neighbor',    scope: 'eNB' },
+  { code: 'itfn_param',        labelKey: 'sync.param.itfn_param',       scope: 'eNB' },
+  { code: 'son_pci',           label: 'SON PCI',                        scope: 'eNB' },
+  { code: 'rollback_enable',   labelKey: 'sync.param.rollback_enable',  scope: 'eNB' },
+  { code: 'uboot_version',     label: 'UBoot',                          scope: 'eNB' },
+  { code: 'kernel_version',    label: 'Kernel',                         scope: 'eNB' },
+  { code: 'is_https',          labelKey: 'sync.param.is_https',         scope: 'eNB' },
+  { code: 'lan_enable',        labelKey: 'sync.param.lan_enable',       scope: 'eNB' },
+  { code: 'wan_ip',            labelKey: 'sync.param.wan_ip',           scope: 'eNB' },
+  { code: 'lte_turbo_enable',  label: 'LTE Turbo',                      scope: 'eNB' },
+  { code: 'lock_mac_addr',     labelKey: 'sync.param.lock_mac_addr',    scope: 'eNB' },
+  { code: 'lock_mac_status',   labelKey: 'sync.param.lock_mac_status',  scope: 'eNB' },
   { code: 'ipsec_bind_interface', label: 'IPSec Bind Interface', scope: 'eNB' },
-  { code: 'lgw_basic',         label: 'WCG参数',             scope: 'eNB' },
+  { code: 'lgw_basic',         labelKey: 'sync.param.lgw_basic',        scope: 'eNB' },
   { code: 'lgw_mode_ue_speed_statistics', label: 'UE Speed Statistics', scope: 'eNB' },
   { code: 'ipsec_auto_enroll', label: 'IPSec Auto Enroll',   scope: 'eNB' },
   { code: 'slot',              label: 'Slot',                scope: 'eNB' },
-  // --- gNB 独有 ---
+  // --- gNB only ---
   { code: 'energy_saving',     label: 'Energy Saving',       scope: 'gNB' },
   { code: 'gnb_topo_cellmgr',  label: 'gNB TOPO',            scope: 'gNB' },
   { code: 'ssl_cert_validity', label: 'SSL Cert Validity',   scope: 'gNB' },
 ];
 
 const BSC_PARAMS: SyncParam[] = [
-  { code: 'BtsNum',            label: 'BTS数',               scope: 'GSM' },
+  { code: 'BtsNum',            labelKey: 'sync.param.bts_num',          scope: 'GSM' },
 ];
 
 const BTS_PARAMS: SyncParam[] = [
-  { code: 'cell_status',       label: '激活状态',            scope: 'GSM' },
-  { code: 'rf_status',         label: '射频开关状态',        scope: 'GSM' },
-  { code: 'sync_status',       label: '同步状态',            scope: 'GSM' },
-  { code: 'gps_satellites',    label: 'GPS卫星数',           scope: 'GSM' },
-  { code: 'currentLac',        label: 'LAC',                 scope: 'GSM' },
-  { code: 'currentArfcn',      label: '频点+上行频率+下行频率', scope: 'GSM' },
-  { code: 'gps_position',      label: 'GPS经度+纬度+高度',   scope: 'GSM' },
-  { code: 'bts_bsc_relationship', label: 'IPA Unit ID + OML Remote IP + BSC关系', scope: 'GSM' },
+  { code: 'cell_status',       labelKey: 'sync.param.cell_status',      scope: 'GSM' },
+  { code: 'rf_status',         labelKey: 'sync.param.rf_status',        scope: 'GSM' },
+  { code: 'sync_status',       labelKey: 'sync.param.sync_status',      scope: 'GSM' },
+  { code: 'gps_satellites',    labelKey: 'sync.param.gps_satellites',   scope: 'GSM' },
+  { code: 'currentLac',        labelKey: 'sync.param.current_lac',      scope: 'GSM' },
+  { code: 'currentArfcn',      labelKey: 'sync.param.current_arfcn',    scope: 'GSM' },
+  { code: 'gps_position',      labelKey: 'sync.param.gps_position_full', scope: 'GSM' },
+  { code: 'bts_bsc_relationship', labelKey: 'sync.param.bts_bsc_relationship', scope: 'GSM' },
 ];
 
 /** 判断 scope 是否匹配指定的网络制式 */
@@ -136,29 +139,29 @@ function matchesNetworkType(scope: NetworkScope, networkType: SyncNetworkType): 
 }
 
 // ---------------------------------------------------------------------------
-// 各制式默认勾选字段 — 从原始 JSP 同步弹窗提取
-// eNB: 原始页面通过 init() 从监控列表可见列动态映射 (monitorCols)，
-//      此处取设备列表默认可见列经 monitorCols 映射后的静态等价集
-// gNB: gnodeb_monitor.jsp 中 form.device 硬编码初始值
-// GSM: gsm_syncParams.jsp 中 form.basic/bsc/bts 均为空数组
+// Default-checked fields per RAT — extracted from the original JSP sync dialogs.
+// eNB: original page dynamically maps from monitor-list visible columns (monitorCols);
+//      here we take the static equivalent set of default-visible columns after monitorCols mapping
+// gNB: hardcoded initial values from form.device in gnodeb_monitor.jsp
+// GSM: form.basic/bsc/bts are all empty arrays in gsm_syncParams.jsp
 // ---------------------------------------------------------------------------
 const DEFAULT_CHECKED_CODES: Record<SyncNetworkType, string[]> = {
   eNB: [
-    'module_type',        // 设备型号名 ← deviceModel (default visible)
-    'software_version',   // 软件版本 ← softwareVersion (default visible)
-    'MAC',                // MAC地址 ← macAddress (default visible)
-    'cell_name',          // 主机名 ← hostName (default visible, via monitorCols)
-    'IP',                 // IP地址 ← ipAddress (default visible, via monitorCols)
-    'cell_status',        // 激活状态 ← opState (default visible, via monitorCols)
-    'ue_count',           // UE数 ← ueCount (default visible)
+    'module_type',        // device model <- deviceModel (default visible)
+    'software_version',   // software version <- softwareVersion (default visible)
+    'MAC',                // MAC address <- macAddress (default visible)
+    'cell_name',          // hostname <- hostName (default visible, via monitorCols)
+    'IP',                 // IP address <- ipAddress (default visible, via monitorCols)
+    'cell_status',        // operational state <- opState (default visible, via monitorCols)
+    'ue_count',           // UE count <- ueCount (default visible)
   ],
   gNB: [
-    'cell_name',          // 5G站点名称
-    'IP',                 // IP地址
-    'module_type',        // 设备型号名
-    'software_version',   // 软件版本
-    'halob_flag',         // HaloB开关
-    'ue_count',           // UE数
+    'cell_name',          // 5G site name
+    'IP',                 // IP address
+    'module_type',        // device model
+    'software_version',   // software version
+    'halob_flag',         // HaloB switch
+    'ue_count',           // UE count
   ],
   GSM: [],
 };
@@ -254,14 +257,14 @@ export default function SyncParamsModal({ open, networkType, onClose, onConfirm,
                   checked={selectedCodes.has(p.code)}
                   onChange={(e: CheckboxChangeEvent) => handleToggle(p.code, e.target.checked)}
                 >
-                  {p.label}
+                  {p.labelKey ? t(p.labelKey) : p.label}
                 </Checkbox>
               </div>
             ))}
           </div>
         ),
       };
-    }), [groups, selectedCodes, handleCheckAll, handleToggle]);
+    }), [groups, selectedCodes, handleCheckAll, handleToggle, t]);
 
   const defaultActiveKeys = useMemo(() => groups.map((g) => g.key), [groups]);
 

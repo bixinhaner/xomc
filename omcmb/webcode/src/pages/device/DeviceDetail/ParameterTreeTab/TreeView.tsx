@@ -45,10 +45,13 @@ interface EditTarget {
   defaultValue?: string;
 }
 
+type TFn = (id: string, values?: Record<string, string | number>) => string;
+
 function renderLeafTitle(
   node: ParameterTreeNode,
   onEdit: (target: EditTarget) => void,
-  highlightKeyword: string
+  highlightKeyword: string,
+  t: TFn
 ) {
   const nameContent = highlightKeyword
     ? highlightText(node.name, highlightKeyword)
@@ -70,12 +73,12 @@ function renderLeafTitle(
       )}
       {node.writable && (
         <Tag color="success" style={{ fontSize: 11 }}>
-          可写
+          {t('device.paramTree.writable')}
         </Tag>
       )}
       {node.changeApplies === 'RebootRequired' && (
         <Tag color="warning" style={{ fontSize: 11 }}>
-          需重启
+          {t('device.paramTree.rebootRequired')}
         </Tag>
       )}
       {node.description && (
@@ -109,6 +112,7 @@ function renderObjectTitle(
   highlightKeyword: string,
   onAdd: (objectPath: string) => void,
   onDelete: (objectPath: string) => void,
+  t: TFn,
 ) {
   const nameContent = highlightKeyword
     ? highlightText(node.name, highlightKeyword)
@@ -130,7 +134,7 @@ function renderObjectTitle(
         </Tooltip>
       )}
       {node.canAdd && (
-        <Tooltip title={`添加实例（当前 ${node.instanceCount ?? 0}，最大 ${node.maxInstances ?? '无限制'}）`}>
+        <Tooltip title={t('device.paramTree.addInstanceTooltip', { current: node.instanceCount ?? 0, max: node.maxInstances ?? t('device.paramTree.unlimited') })}>
           <PlusCircleOutlined
             style={{ color: '#52c41a', cursor: 'pointer', fontSize: 14 }}
             onClick={(e) => {
@@ -142,15 +146,15 @@ function renderObjectTitle(
       )}
       {node.canDelete && (
         <Popconfirm
-          title="确认删除此实例？"
-          description="删除操作将异步下发到设备。"
+          title={t('device.paramTree.deleteInstanceConfirm')}
+          description={t('device.paramTree.deleteInstanceDesc')}
           onConfirm={(e) => {
             e?.stopPropagation();
             onDelete(node.fullPath.endsWith('.') ? node.fullPath : node.fullPath + '.');
           }}
           onCancel={(e) => e?.stopPropagation()}
-          okText="删除"
-          cancelText="取消"
+          okText={t('common.delete')}
+          cancelText={t('common.cancel')}
         >
           <DeleteOutlined
             style={{ color: '#ff4d4f', cursor: 'pointer', fontSize: 14 }}
@@ -185,7 +189,8 @@ function convertToAntdTree(
   onEdit: (target: EditTarget) => void,
   onAdd: (objectPath: string) => void,
   onDelete: (objectPath: string) => void,
-  searchKeyword: string
+  searchKeyword: string,
+  t: TFn
 ): DataNode[] {
   return nodes.map((node) => {
     const isLeaf = !node.isObject;
@@ -194,10 +199,10 @@ function convertToAntdTree(
       key: node.fullPath,
       icon: isLeaf ? <FileOutlined /> : <FolderOutlined />,
       title: isLeaf
-        ? renderLeafTitle(node, onEdit, searchKeyword)
-        : renderObjectTitle(node, searchKeyword, onAdd, onDelete),
+        ? renderLeafTitle(node, onEdit, searchKeyword, t)
+        : renderObjectTitle(node, searchKeyword, onAdd, onDelete, t),
       children: node.children
-        ? convertToAntdTree(node.children, onEdit, onAdd, onDelete, searchKeyword)
+        ? convertToAntdTree(node.children, onEdit, onAdd, onDelete, searchKeyword, t)
         : undefined,
       isLeaf,
     };
@@ -261,10 +266,10 @@ export default function TreeView({
       { deviceId, objectPath },
       {
         onSuccess: () => {
-          message.success('添加实例命令已下发');
+          message.success(t('device.paramTree.addInstanceSentShort'));
         },
         onError: () => {
-          message.error('添加实例失败');
+          message.error(t('device.paramTree.addInstanceFailed'));
         },
       }
     );
@@ -275,10 +280,10 @@ export default function TreeView({
       { deviceId, objectPath },
       {
         onSuccess: () => {
-          message.success('删除实例命令已下发');
+          message.success(t('device.paramTree.deleteInstanceSentShort'));
         },
         onError: () => {
-          message.error('删除实例失败');
+          message.error(t('device.paramTree.deleteInstanceFailed'));
         },
       }
     );
@@ -314,9 +319,9 @@ export default function TreeView({
   }, [searchKeyword]);
 
   const antdTreeData = useMemo(
-    () => convertToAntdTree(filteredData, setEditTarget, handleAddObject, handleDeleteObject, searchKeyword),
+    () => convertToAntdTree(filteredData, setEditTarget, handleAddObject, handleDeleteObject, searchKeyword, t),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [filteredData, searchKeyword]
+    [filteredData, searchKeyword, t]
   );
 
   if (loading) {

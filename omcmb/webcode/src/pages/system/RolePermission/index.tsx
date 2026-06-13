@@ -65,19 +65,19 @@ const DATA_NETWORK_TYPE_OPTIONS = [
 ];
 
 // 基站制式选项
-const NETWORK_TYPE_OPTIONS = [
-  { label: '全部', value: '' },
+const buildNetworkTypeOptions = (t: (id: string) => string) => [
+  { label: t('role.all'), value: '' },
   { label: 'eNB', value: 'eNB' },
   { label: 'gNB', value: 'gNB' },
   { label: 'GSM', value: 'GSM' },
 ];
 
 // 产品类型选项
-const PRODUCT_TYPE_OPTIONS = [
-  { label: '全部', value: '' },
-  { label: '宏基站', value: 'Macro' },
-  { label: '小基站', value: 'Small Cell' },
-  { label: '皮基站', value: 'Pico' },
+const buildProductTypeOptions = (t: (id: string) => string) => [
+  { label: t('role.all'), value: '' },
+  { label: t('role.macroBaseStation'), value: 'Macro' },
+  { label: t('role.smallCell'), value: 'Small Cell' },
+  { label: t('role.picoBaseStation'), value: 'Pico' },
 ];
 
 // 构建设备组树形数据（带筛选）
@@ -598,23 +598,23 @@ export default function RoleManagement() {
   });
   const handleCopy = useCallback((role: Role) => {
     modal.confirm({
-      title: '确认复制角色',
-      content: `将复制角色「${role.roleName}」的菜单/数据/API 权限到新副本（副本名自动生成 ${role.roleName}_copy）。`,
+      title: t('role.copyConfirmTitle'),
+      content: t('role.copyConfirmContent', { roleName: role.roleName }),
       onOk: () => {
         copyRoleMut.mutate(role.id, {
           onSuccess: (newRole) => {
-            message.success(`已复制：${newRole.roleName}`);
+            message.success(t('role.copySuccess', { roleName: newRole.roleName }));
             // 强制刷新列表
             void refetch();
           },
           onError: (err: unknown) => {
-            const msg = err instanceof Error ? err.message : '复制失败';
+            const msg = err instanceof Error ? err.message : t('role.copyFailed');
             message.error(msg);
           },
         });
       },
     });
-  }, [copyRoleMut, modal, message, refetch]);
+  }, [copyRoleMut, modal, message, refetch, t]);
 
   const handleBatchDelete = useCallback((keys: React.Key[]) => {
     const rolesToDelete = (data?.items || []).filter(
@@ -784,11 +784,11 @@ export default function RoleManagement() {
       const selectedSecondLevel = selectedDeviceGroupIds.filter((id) => allSecondLevelIds.includes(id));
       if (selectedSecondLevel.length === 0) {
         modal.confirm({
-          title: '确认清空设备分组绑定',
-          content: '该角色下的用户将立即失去设备数据可见权限。是否继续？',
-          okText: '继续保存',
+          title: t('role.clearGroupBindingTitle'),
+          content: t('role.clearGroupBindingContent'),
+          okText: t('role.continueSave'),
           okButtonProps: { danger: true },
-          cancelText: '取消',
+          cancelText: t('common.cancel'),
           onOk: () => doEditSubmit(),
         });
         return;
@@ -800,11 +800,11 @@ export default function RoleManagement() {
     // 内置角色的权限改动会立即影响所有分配此角色的用户，需显式确认才能继续。
     if (isBuiltIn(selectedRole)) {
       modal.confirm({
-        title: '确认修改内置角色权限',
-        content: `内置角色「${selectedRole.roleName}」的权限调整将立即影响所有分配此角色的用户。是否继续？`,
-        okText: '继续保存',
+        title: t('role.editBuiltinTitle'),
+        content: t('role.editBuiltinContent', { roleName: selectedRole.roleName }),
+        okText: t('role.continueSave'),
         okButtonProps: { danger: true },
-        cancelText: '取消',
+        cancelText: t('common.cancel'),
         onOk: proceed,
       });
       return;
@@ -838,7 +838,7 @@ export default function RoleManagement() {
           },
           {
             key: 'copy',
-            label: '复制',
+            label: t('common.copy'),
             icon: <CopyOutlined />,
             onClick: () => handleCopy(role),
           },
@@ -1140,7 +1140,7 @@ export default function RoleManagement() {
                   style={{ width: 120 }}
                   value={deviceGroupNetworkType}
                   onChange={(val) => setDeviceGroupNetworkType(val)}
-                  options={NETWORK_TYPE_OPTIONS}
+                  options={buildNetworkTypeOptions(t)}
                   placeholder={t('role.baseStationType')}
                 />
                 <Select
@@ -1148,7 +1148,7 @@ export default function RoleManagement() {
                   style={{ width: 120 }}
                   value={deviceGroupProductClass}
                   onChange={(val) => setDeviceGroupProductClass(val)}
-                  options={PRODUCT_TYPE_OPTIONS}
+                  options={buildProductTypeOptions(t)}
                   placeholder={t('role.productClass')}
                 />
                 <Divider orientation="vertical" style={{ height: 20, margin: 0 }} />

@@ -63,15 +63,15 @@ const EVENT_TYPE_CONFIG: Record<EventType, string> = {
   performance: 'alarm.eventType.performance',
 };
 
-// 快捷筛选选项
+// 快捷筛选选项（label 在渲染处经 t() 派生，此处仅保留 key 与过滤条件）
 const QUICK_FILTER_OPTIONS = [
-  { label: '全部', key: 'all' },
-  { label: '严重', key: 'critical', severity: ['critical'] },
-  { label: '主要', key: 'major', severity: ['major'] },
-  { label: '次要', key: 'minor', severity: ['minor'] },
-  { label: '警告', key: 'warning', severity: ['warning'] },
-  { label: '未确认', key: 'unacked', dealState: ['0'] },
-  { label: '未读', key: 'unread', unread: '1' },
+  { key: 'all' },
+  { key: 'critical', severity: ['critical'] },
+  { key: 'major', severity: ['major'] },
+  { key: 'minor', severity: ['minor'] },
+  { key: 'warning', severity: ['warning'] },
+  { key: 'unacked', dealState: ['0'] },
+  { key: 'unread', unread: '1' },
 ];
 
 // 自动刷新间隔选项 - 移至组件内 useMemo
@@ -206,12 +206,12 @@ export default function CurrentAlarms() {
     {
       // 未识别告警过滤：识别状态 = identifier 是否在告警库中存在（设计 §3.3 治理闭环）
       name: 'isUnknown',
-      label: t('alarm.recognizeStatus', { defaultMessage: '识别状态' }),
+      label: t('alarm.recognizeStatus'),
       type: 'select',
       options: [
         { label: t('common.all'), value: '' },
-        { label: t('alarm.recognizeStatus.unknown', { defaultMessage: '仅未识别' }), value: 'true' },
-        { label: t('alarm.recognizeStatus.known', { defaultMessage: '仅已识别' }), value: 'false' },
+        { label: t('alarm.recognizeStatus.unknown'), value: 'true' },
+        { label: t('alarm.recognizeStatus.known'), value: 'false' },
       ],
     },
   ], [t]);
@@ -296,7 +296,9 @@ export default function CurrentAlarms() {
   // 快捷筛选处理
   const handleQuickFilter = useCallback((key: string) => {
     setActiveQuickFilter(key);
-    const option = QUICK_FILTER_OPTIONS.find((o) => o.key === key);
+    const option = QUICK_FILTER_OPTIONS.find((o) => o.key === key) as
+      | { key: string; severity?: string[]; dealState?: string[]; unread?: string }
+      | undefined;
     if (option && option.key !== 'all') {
       setFilterParams((prev) => ({
         ...prev,
@@ -734,7 +736,7 @@ export default function CurrentAlarms() {
             loading={exportLoading}
             onClick={() => { void handleExportTrigger(); }}
           >
-            导出
+            {t('common.export')}
           </Button>
         </Space>
       }

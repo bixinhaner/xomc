@@ -6,6 +6,7 @@
 import { useMemo, useState } from 'react';
 import { Modal, Input, Table, Space, Button, Tag, Typography, Tooltip, Divider } from 'antd';
 import { SearchOutlined, ClearOutlined } from '@ant-design/icons';
+import { useT } from '@/hooks/useT';
 import { useDeviceGroups } from '@core/hooks/api/useDevices';
 import type { DeviceGroup } from '@core/types/device';
 
@@ -24,6 +25,7 @@ export default function DeviceGroupPickerModal({
   onConfirm,
   initialSelected = [],
 }: DeviceGroupPickerModalProps) {
+  const t = useT();
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<string[]>(initialSelected);
 
@@ -45,18 +47,18 @@ export default function DeviceGroupPickerModal({
 
   const columns = useMemo(
     () => [
-      { title: '设备组名', dataIndex: 'name', key: 'name', ellipsis: true },
-      { title: '设备数', dataIndex: 'deviceCount', key: 'deviceCount', width: 90 },
+      { title: t('perf.kpiQuery.groupPicker.groupName'), dataIndex: 'name', key: 'name', ellipsis: true },
+      { title: t('perf.kpiQuery.groupPicker.deviceCount'), dataIndex: 'deviceCount', key: 'deviceCount', width: 90 },
       {
-        title: '类型',
+        title: t('perf.kpiQuery.groupPicker.type'),
         dataIndex: 'builtIn',
         key: 'builtIn',
         width: 80,
-        render: (v: number) => (v === 1 ? <Tag color="blue">内置</Tag> : <Tag>自定义</Tag>),
+        render: (v: number) => (v === 1 ? <Tag color="blue">{t('perf.kpiQuery.groupPicker.builtIn')}</Tag> : <Tag>{t('common.custom')}</Tag>),
       },
-      { title: '描述', dataIndex: 'description', key: 'description', ellipsis: true },
+      { title: t('perf.kpiQuery.groupPicker.description'), dataIndex: 'description', key: 'description', ellipsis: true },
     ],
-    [],
+    [t],
   );
 
   const handleConfirm = () => {
@@ -72,18 +74,18 @@ export default function DeviceGroupPickerModal({
 
   return (
     <Modal
-      title={`选择设备组（已选 ${selected.length} 个）`}
+      title={t('perf.kpiQuery.groupPicker.title', { count: selected.length })}
       open={open}
       onCancel={onClose}
       onOk={handleConfirm}
-      okText="确定"
-      cancelText="取消"
+      okText={t('common.confirm')}
+      cancelText={t('common.cancel')}
       width={760}
       destroyOnHidden
     >
       <Space orientation="vertical" style={{ width: '100%' }} size="middle">
         <Input
-          placeholder="按设备组名 搜索"
+          placeholder={t('perf.kpiQuery.groupPicker.searchPlaceholder')}
           prefix={<SearchOutlined />}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
@@ -98,7 +100,7 @@ export default function DeviceGroupPickerModal({
           columns={columns}
           dataSource={filtered}
           rowSelection={rowSelection}
-          pagination={{ pageSize: 20, showTotal: (t) => `共 ${t} 条` }}
+          pagination={{ pageSize: 20, showTotal: (count) => t('common.totalItems', { count }) }}
           scroll={{ y: 320 }}
         />
 
@@ -106,14 +108,14 @@ export default function DeviceGroupPickerModal({
 
         <div>
           <Space style={{ marginBottom: 6 }}>
-            <Text strong>已选设备组：</Text>
+            <Text strong>{t('perf.kpiQuery.groupPicker.selectedGroups')}</Text>
             <Button
               size="small"
               icon={<ClearOutlined />}
               onClick={() => setSelected([])}
               disabled={selected.length === 0}
             >
-              全部清空
+              {t('perf.kpiQuery.groupPicker.clearAll')}
             </Button>
           </Space>
           <div
@@ -126,7 +128,7 @@ export default function DeviceGroupPickerModal({
             }}
           >
             {selected.length === 0 ? (
-              <Text type="secondary">未选择任何设备组</Text>
+              <Text type="secondary">{t('perf.kpiQuery.groupPicker.noneSelected')}</Text>
             ) : (
               selected.map((id) => {
                 const name = nameById.get(id) ?? id;

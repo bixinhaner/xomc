@@ -4,7 +4,6 @@
 // 结果表格序列化为 CSV / JSON 下载。XLSX 暂以 CSV 兜底（待后端接入再走真实 xlsx 流）。
 
 import type { ResultColumn, ResultRow, ExportFormat } from './types';
-import { STATUS_META } from './constants';
 
 function triggerDownload(content: string, filename: string, mime: string): void {
   const blob = new Blob([content], { type: mime });
@@ -44,7 +43,9 @@ function toCsv(columns: ResultColumn[], rows: ResultRow[]): string {
     [
       String(i + 1),
       r.deviceSn,
-      STATUS_META[r.status].text,
+      // 客户端兜底导出（无 commandId 时）：CSV 状态列用状态码本身，
+      // 不再依赖已 i18n 化的 STATUS_META（消费方用 t(textKey) 解析，这里无 React 上下文）。
+      r.status,
       ...columns.map((c) => r.cells[c.path] ?? ''),
       r.faultCode ?? '',
     ]

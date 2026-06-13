@@ -26,8 +26,11 @@ import type {
   SubObjectSummary,
 } from '@core/types/deviceParameter';
 import { useUpdateParameters } from '@core/hooks/api/useDeviceParameters';
+import { useT } from '@/hooks/useT';
 
 const { Text } = Typography;
+
+type TFn = (id: string, values?: Record<string, string | number>) => string;
 
 const TYPE_COLOR: Record<string, string> = {
   string: 'blue',
@@ -44,37 +47,38 @@ const TYPE_COLOR: Record<string, string> = {
 function validateValue(
   value: string,
   parameterType: ParameterType,
+  t: TFn,
   constraints?: ParameterConstraints
 ): string | null {
-  if (!value && parameterType !== 'string') return '请输入值';
+  if (!value && parameterType !== 'string') return t('device.paramEdit.errRequired');
 
   if (parameterType === 'int') {
     const num = Number(value);
-    if (!Number.isInteger(num)) return '请输入整数';
+    if (!Number.isInteger(num)) return t('device.paramEdit.errInteger');
     if (constraints?.minValue !== undefined && num < constraints.minValue)
-      return `最小值 ${constraints.minValue}`;
+      return t('device.paramCell.errMin', { min: constraints.minValue });
     if (constraints?.maxValue !== undefined && num > constraints.maxValue)
-      return `最大值 ${constraints.maxValue}`;
+      return t('device.paramCell.errMax', { max: constraints.maxValue });
   }
 
   if (parameterType === 'unsignedInt') {
     const num = Number(value);
-    if (!Number.isInteger(num) || num < 0) return '请输入非负整数';
+    if (!Number.isInteger(num) || num < 0) return t('device.paramEdit.errNonNegative');
     if (constraints?.minValue !== undefined && num < constraints.minValue)
-      return `最小值 ${constraints.minValue}`;
+      return t('device.paramCell.errMin', { min: constraints.minValue });
     if (constraints?.maxValue !== undefined && num > constraints.maxValue)
-      return `最大值 ${constraints.maxValue}`;
+      return t('device.paramCell.errMax', { max: constraints.maxValue });
   }
 
   if (parameterType === 'string' && constraints) {
     if (constraints.maxLength && value.length > constraints.maxLength)
-      return `最大长度 ${constraints.maxLength}`;
+      return t('device.paramCell.errMaxLen', { max: constraints.maxLength });
     if (constraints.minLength && value.length < constraints.minLength)
-      return `最小长度 ${constraints.minLength}`;
+      return t('device.paramCell.errMinLen', { min: constraints.minLength });
     if (constraints.pattern) {
       try {
         if (!new RegExp(constraints.pattern).test(value))
-          return `不匹配模式`;
+          return t('device.paramCell.errPattern');
       } catch {
         /* ignore */
       }
@@ -82,28 +86,28 @@ function validateValue(
   }
 
   if (constraints?.enumValues?.length && !constraints.enumValues.includes(value))
-    return `不在允许值列表中`;
+    return t('device.paramCell.errEnum');
 
   return null;
 }
 
 // ---- Constraints display ----
 
-function formatConstraints(c?: ParameterConstraints): string {
+function formatConstraints(c: ParameterConstraints | undefined, t: TFn): string {
   if (!c) return '-';
   const parts: string[] = [];
   if (c.minValue !== undefined || c.maxValue !== undefined) {
     parts.push(`${c.minValue ?? ''} ~ ${c.maxValue ?? ''}`);
   }
   if (c.minLength !== undefined || c.maxLength !== undefined) {
-    if (c.minLength && c.maxLength) parts.push(`长度 ${c.minLength}~${c.maxLength}`);
-    else if (c.maxLength) parts.push(`长度 ≤${c.maxLength}`);
-    else if (c.minLength) parts.push(`长度 ≥${c.minLength}`);
+    if (c.minLength && c.maxLength) parts.push(t('device.paramCell.lenRange', { min: c.minLength, max: c.maxLength }));
+    else if (c.maxLength) parts.push(t('device.paramCell.lenMax', { max: c.maxLength }));
+    else if (c.minLength) parts.push(t('device.paramCell.lenMin', { min: c.minLength }));
   }
   if (c.enumValues?.length) {
     parts.push(c.enumValues.join(' | '));
   }
-  if (c.pattern) parts.push(`模式: ${c.pattern}`);
+  if (c.pattern) parts.push(t('device.paramCell.patternLabel', { pattern: c.pattern }));
   return parts.length > 0 ? parts.join('; ') : '-';
 }
 
@@ -143,6 +147,7 @@ export default function ChildParamTable({
   onPageChange,
   onNavigate,
 }: ChildParamTableProps) {
+  const t = useT();
   const [editingPath, setEditingPath] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState('');
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -176,7 +181,7 @@ export default function ChildParamTable({
 
   const handleSave = useCallback(
     (record: ChildParameter) => {
-      const error = validateValue(editingValue, record.parameterType, record.constraints);
+      const error = validateValue(editingValue, record.parameterType, t, record.constraints);
       if (error) {
         setValidationError(error);
         return;
@@ -198,29 +203,29 @@ export default function ChildParamTable({
         },
         {
           onSuccess: () => {
-            message.success(`参数 ${getParamName(record.parameterPath)} 已下发`);
+            message.success(t('device.paramCell.paramDispatched', { name: getParamName(record.parameterPath) }));
             cancelEdit();
           },
           onError: () => {
-            message.error('参数下发失败');
+            message.error(t('device.paramCell.dispatchFailed'));
           },
         }
       );
     },
-    [deviceId, editingValue, updateMutation, cancelEdit]
+    [deviceId, editingValue, updateMutation, cancelEdit, t]
   );
 
   const handleValueChange = useCallback(
     (value: string, parameterType: ParameterType, constraints?: ParameterConstraints) => {
       setEditingValue(value);
-      setValidationError(validateValue(value, parameterType, constraints));
+      setValidationError(validateValue(value, parameterType, t, constraints));
     },
-    []
+    [t]
   );
 
   const columns: ColumnsType<ChildParameter> = useMemo(() => [
     {
-      title: '参数名',
+      title: t('device.paramCell.colName'),
       dataIndex: 'parameterPath',
       key: 'name',
       width: 200,
@@ -234,7 +239,7 @@ export default function ChildParamTable({
       ),
     },
     {
-      title: '当前值',
+      title: t('device.paramEdit.currentValue'),
       dataIndex: 'parameterValue',
       key: 'value',
       width: 220,
@@ -321,13 +326,13 @@ export default function ChildParamTable({
             }}
             onClick={() => record.writable && startEdit(record)}
           >
-            {record.parameterValue || '(空)'}
+            {record.parameterValue || t('device.paramTree.emptyValue')}
           </Text>
         );
       },
     },
     {
-      title: '类型',
+      title: t('table.type'),
       dataIndex: 'parameterType',
       key: 'type',
       width: 90,
@@ -345,7 +350,7 @@ export default function ChildParamTable({
       ),
     },
     {
-      title: '默认值',
+      title: t('device.paramEdit.defaultValue'),
       dataIndex: 'defaultValue',
       key: 'defaultValue',
       width: 120,
@@ -362,12 +367,12 @@ export default function ChildParamTable({
         ),
     },
     {
-      title: '取值范围',
+      title: t('device.paramCell.colRange'),
       key: 'constraints',
       width: 160,
       ellipsis: true,
       render: (_: unknown, record: ChildParameter) => {
-        const text = formatConstraints(record.constraints);
+        const text = formatConstraints(record.constraints, t);
         return text !== '-' ? (
           <Tooltip title={text}>
             <Text type="secondary" style={{ fontSize: 11 }}>
@@ -382,7 +387,7 @@ export default function ChildParamTable({
       },
     },
     {
-      title: '操作',
+      title: t('table.operation'),
       key: 'action',
       width: 80,
       fixed: 'right',
@@ -415,15 +420,15 @@ export default function ChildParamTable({
             style={{ padding: 0 }}
             onClick={() => startEdit(record)}
           >
-            修改
+            {t('common.edit')}
           </Button>
         );
       },
     },
-  ], [editingPath, editingValue, validationError, updateMutation.isPending, startEdit, cancelEdit, handleSave, handleValueChange]);
+  ], [editingPath, editingValue, validationError, updateMutation.isPending, startEdit, cancelEdit, handleSave, handleValueChange, t]);
 
   if (!pathPrefix) {
-    return <Empty description="请在左侧选择一个参数节点" style={{ padding: 48 }} />;
+    return <Empty description={t('device.paramCell.selectNode')} style={{ padding: 48 }} />;
   }
 
   const subObjects = data?.subObjects ?? [];
@@ -447,7 +452,7 @@ export default function ChildParamTable({
       pageSize,
       total: totalItems,
       showSizeChanger: true,
-      showTotal: (total) => `共 ${total} 条参数`,
+      showTotal: (total) => t('device.paramTree.totalParams', { total }),
       pageSizeOptions: ['20', '50', '100', '200'],
       onChange: onPageChange,
     },
@@ -466,16 +471,16 @@ export default function ChildParamTable({
       {/* Path header */}
       <div style={{ marginBottom: 8 }}>
         <Text type="secondary" style={{ fontSize: 12 }}>
-          路径:{' '}
+          {t('device.paramCell.pathLabel')}:{' '}
         </Text>
         <Text code style={{ fontSize: 12 }}>
           {pathPrefix}
         </Text>
         {(hasSubObjects || hasLeaves) && (
           <Text type="secondary" style={{ fontSize: 12, marginLeft: 12 }}>
-            {hasSubObjects ? `${subObjects.length} 个子对象` : ''}
+            {hasSubObjects ? t('device.paramCell.subObjectCount', { count: subObjects.length }) : ''}
             {hasSubObjects && hasLeaves ? ', ' : ''}
-            {hasLeaves ? `${totalItems} 个参数` : ''}
+            {hasLeaves ? t('device.paramCell.paramCount', { count: totalItems }) : ''}
           </Text>
         )}
       </div>
@@ -515,14 +520,14 @@ export default function ChildParamTable({
       {hasLeaves ? (
         <Table<ChildParameter> {...tableProps} />
       ) : !hasSubObjects && !loading ? (
-        <Empty description="该节点下没有直接参数" style={{ padding: 24 }} />
+        <Empty description={t('device.paramCell.noDirectParams')} style={{ padding: 24 }} />
       ) : null}
 
       {/* Performance hint for large datasets */}
       {shouldVirtualize && (
         <div style={{ marginTop: 8, textAlign: 'right' }}>
           <Text type="secondary" style={{ fontSize: 11 }}>
-            已启用虚拟滚动优化
+            {t('device.paramCell.virtualScrollEnabled')}
           </Text>
         </div>
       )}

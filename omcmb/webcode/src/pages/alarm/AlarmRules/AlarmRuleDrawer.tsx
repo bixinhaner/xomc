@@ -27,28 +27,28 @@ import { Dayjs } from 'dayjs';
 const { RangePicker } = DatePicker;
 
 // 执行动作配置 (匹配后端 action 值)
-const RULE_TYPE_OPTIONS = [
-  { value: 'ignore', label: '不入库不显示' },
-  { value: 'auto_acknowledge', label: '自动确认' },
-  { value: 'auto_clear', label: '自动清除' },
+const RULE_TYPE_OPTIONS: { value: string; labelKey: string }[] = [
+  { value: 'ignore', labelKey: 'alarm.rule.action.ignore' },
+  { value: 'auto_acknowledge', labelKey: 'alarm.rule.action.autoAck' },
+  { value: 'auto_clear', labelKey: 'alarm.rule.action.autoClear' },
 ];
 
 // 事件类型配置
-const EVENT_TYPE_OPTIONS = [
-  { value: '30000', label: '通信告警' },
-  { value: '30001', label: '服务质量告警' },
-  { value: '30002', label: '处理失败告警' },
-  { value: '30003', label: '设备告警' },
-  { value: '30004', label: '环境告警' },
-  { value: '30006', label: '性能溢出告警' },
+const EVENT_TYPE_OPTIONS: { value: string; labelKey: string }[] = [
+  { value: '30000', labelKey: 'alarm.eventType.30000' },
+  { value: '30001', labelKey: 'alarm.eventType.30001' },
+  { value: '30002', labelKey: 'alarm.eventType.30002' },
+  { value: '30003', labelKey: 'alarm.eventType.30003' },
+  { value: '30004', labelKey: 'alarm.eventType.30004' },
+  { value: '30006', labelKey: 'alarm.eventType.30006' },
 ];
 
 // 告警级别配置
-const SEVERITY_OPTIONS: { value: AlarmSeverity; label: string; color: string }[] = [
-  { value: 'critical', label: '紧急', color: 'red' },
-  { value: 'major', label: '重要', color: 'orange' },
-  { value: 'minor', label: '次要', color: 'blue' },
-  { value: 'warning', label: '警告', color: 'gold' },
+const SEVERITY_OPTIONS: { value: AlarmSeverity; labelKey: string; color: string }[] = [
+  { value: 'critical', labelKey: 'alarm.severity.critical', color: 'red' },
+  { value: 'major', labelKey: 'alarm.severity.major', color: 'orange' },
+  { value: 'minor', labelKey: 'alarm.severity.minor', color: 'blue' },
+  { value: 'warning', labelKey: 'alarm.severity.warning', color: 'gold' },
 ];
 
 // 设备类型配置
@@ -260,14 +260,19 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
 
   const isViewMode = mode === 'view';
   const title = mode === 'add' ? t('common.add') : mode === 'edit' ? t('common.edit') : t('common.detail');
-  const ruleTypeOptions = useMemo(
-    () => (rule?.ruleType === 'default'
-      ? [
-          ...RULE_TYPE_OPTIONS,
-          { value: 'default', label: t('alarm.ruleType.defaultLegacy'), disabled: true },
-        ]
-      : RULE_TYPE_OPTIONS),
-    [rule?.ruleType, t]
+  const ruleTypeOptions = useMemo(() => {
+    const base = RULE_TYPE_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }));
+    return rule?.ruleType === 'default'
+      ? [...base, { value: 'default', label: t('alarm.ruleType.defaultLegacy'), disabled: true }]
+      : base;
+  }, [rule?.ruleType, t]);
+  const eventTypeOptions = useMemo(
+    () => EVENT_TYPE_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) })),
+    [t],
+  );
+  const severityOptions = useMemo(
+    () => SEVERITY_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) })),
+    [t],
   );
 
   // 处理设备数据，添加设备类型
@@ -561,7 +566,10 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
       title: t('alarm.eventType'),
       dataIndex: 'eventType',
       width: 120,
-      render: (type) => EVENT_TYPE_OPTIONS.find(o => o.value === type)?.label || type,
+      render: (type) => {
+        const opt = EVENT_TYPE_OPTIONS.find(o => o.value === type);
+        return opt ? t(opt.labelKey) : type;
+      },
     },
     {
       title: t('alarm.severity'),
@@ -569,7 +577,7 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
       width: 80,
       render: (severity) => {
         const config = SEVERITY_OPTIONS.find(o => o.value === severity);
-        return <Tag color={config?.color} style={{ margin: 0 }}>{config?.label || severity}</Tag>;
+        return <Tag color={config?.color} style={{ margin: 0 }}>{config ? t(config.labelKey) : severity}</Tag>;
       },
     },
   ];
@@ -809,7 +817,7 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
               <Select
                 placeholder={t('alarm.eventType')}
                 style={{ width: 130 }}
-                options={EVENT_TYPE_OPTIONS}
+                options={eventTypeOptions}
                 onChange={(v) => setAlarmFilter(prev => ({ ...prev, eventType: v }))}
                 allowClear
                 size="small"
@@ -817,7 +825,7 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
               <Select
                 placeholder={t('alarm.severity')}
                 style={{ width: 90 }}
-                options={SEVERITY_OPTIONS.map(s => ({ value: s.value, label: s.label }))}
+                options={severityOptions}
                 onChange={(v) => setAlarmFilter(prev => ({ ...prev, severity: v }))}
                 allowClear
                 size="small"
@@ -839,7 +847,7 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
                 background: '#fafafa',
               }}>
                 <div style={{ marginBottom: 8, fontSize: 12, color: 'rgba(0,0,0,0.65)' }}>
-                  已选告警标识
+                  {t('alarm.rule.selectedAlarmIds')}
                 </div>
                 <Space wrap size={[4, 8]}>
                   {visibleSelectedAlarmItems.map((alarm) => (

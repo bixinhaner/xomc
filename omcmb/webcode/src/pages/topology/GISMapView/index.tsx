@@ -214,31 +214,31 @@ export default function GISMapView() {
       return {
         aggregate: 'region',
         pageSize: 500,
-        description: '区域级视图',
+        description: intl.formatMessage({ id: 'gis.strategy.region' }),
       };
     } else if (zoom < 12) {
       // 中缩放级别：显示站点级数据
       return {
         aggregate: 'site',
         pageSize: 2000,
-        description: '站点级视图',
+        description: intl.formatMessage({ id: 'gis.strategy.site' }),
       };
     } else if (zoom < 15) {
       // 高缩放级别：显示详细设备，启用聚合
       return {
         aggregate: 'device',
         pageSize: 5000,
-        description: '设备级视图（聚合）',
+        description: intl.formatMessage({ id: 'gis.strategy.deviceAggregated' }),
       };
     } else {
       // 超高缩放级别：显示所有设备，禁用聚合
       return {
         aggregate: 'none',
         pageSize: 10000,
-        description: '设备级视图（详细）',
+        description: intl.formatMessage({ id: 'gis.strategy.deviceDetailed' }),
       };
     }
-  }, []);
+  }, [intl]);
 
   // ========== 数据转换 ==========
 

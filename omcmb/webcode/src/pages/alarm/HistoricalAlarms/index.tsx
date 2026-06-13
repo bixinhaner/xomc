@@ -664,7 +664,7 @@ export default function HistoricalAlarms() {
             loading={exportLoading}
             onClick={() => { void handleExportTrigger(); }}
           >
-            导出
+            {t('common.export')}
           </Button>
         </Space>
       }

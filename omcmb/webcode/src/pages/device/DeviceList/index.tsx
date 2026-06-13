@@ -644,9 +644,7 @@ export default function DeviceList() {
                 deviceCount: selectedDevices.length,
                 executionMode: 'immediate',
               });
-              void message.success(t('ufte.taskCreatedAndNavigate', {
-                defaultMessage: '日志采集任务已创建，正在跳转到运行日志采集 tab...',
-              }));
+              void message.success(t('ufte.taskCreatedAndNavigate'));
               // category=station_log + typeCode=RUNTIME_LOG_COLLECT —— FileTransferCenter
               // 初始化时按 URL 还原 selectedCategory + selectedTypeCode，定位到具体 tab。
               navigate('/transfer/center?category=station_log&typeCode=RUNTIME_LOG_COLLECT');

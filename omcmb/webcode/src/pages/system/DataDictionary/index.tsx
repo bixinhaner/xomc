@@ -77,7 +77,7 @@ function DictListPanel({ selectedId, onSelect }: DictListPanelProps) {
       setDictModalOpen(false);
       dictForm.resetFields();
     },
-    onError: () => void message.error(t('common.saveFailed') || '保存失败'),
+    onError: () => void message.error(t('common.saveFailed')),
   });
 
   const updateDictMutation = useMutation({
@@ -88,7 +88,7 @@ function DictListPanel({ selectedId, onSelect }: DictListPanelProps) {
       setDictModalOpen(false);
       dictForm.resetFields();
     },
-    onError: () => void message.error(t('common.saveFailed') || '保存失败'),
+    onError: () => void message.error(t('common.saveFailed')),
   });
 
   // T-0182 手动刷新单字典的数据源同步。
@@ -120,7 +120,7 @@ function DictListPanel({ selectedId, onSelect }: DictListPanelProps) {
       void queryClient.invalidateQueries({ queryKey: ['dictionaries'] });
       void message.success(t('common.deleteSuccess'));
     },
-    onError: () => void message.error(t('common.deleteFailed') || '删除失败'),
+    onError: () => void message.error(t('common.deleteFailed')),
   });
 
   const filteredList = useMemo(() => {
@@ -466,7 +466,7 @@ function DictDetailPanel({ selectedDict }: DictDetailPanelProps) {
       setDetailModalOpen(false);
       detailForm.resetFields();
     },
-    onError: () => void message.error(t('common.saveFailed') || '保存失败'),
+    onError: () => void message.error(t('common.saveFailed')),
   });
 
   const updateDetailMutation = useMutation({
@@ -477,7 +477,7 @@ function DictDetailPanel({ selectedDict }: DictDetailPanelProps) {
       setDetailModalOpen(false);
       detailForm.resetFields();
     },
-    onError: () => void message.error(t('common.saveFailed') || '保存失败'),
+    onError: () => void message.error(t('common.saveFailed')),
   });
 
   const deleteDetailMutation = useMutation({
@@ -486,7 +486,7 @@ function DictDetailPanel({ selectedDict }: DictDetailPanelProps) {
       void queryClient.invalidateQueries({ queryKey: ['dictionary-details', selectedDict?.id] });
       void message.success(t('common.deleteSuccess'));
     },
-    onError: () => void message.error(t('common.deleteFailed') || '删除失败'),
+    onError: () => void message.error(t('common.deleteFailed')),
   });
 
   // PRD §10：「+ 添加子项」打开抽屉时把 parent_id 预填为该行 id；
@@ -611,7 +611,7 @@ function DictDetailPanel({ selectedDict }: DictDetailPanelProps) {
       {
         // PRD §10 v0.2：层级列（0=顶层 / 1=一级子 / 2=二级子）
         key: 'level',
-        title: '层级',
+        title: t('dictionary.level'),
         dataIndex: 'level',
         width: 70,
         render: (val) => Number(val ?? 0),
@@ -676,7 +676,7 @@ function DictDetailPanel({ selectedDict }: DictDetailPanelProps) {
             <Space size={4}>
               {/* 托管字典下"+ 添加子项"按钮整体隐藏(托管字典不支持层级,参 PRD §3.2.5) */}
               {!isManaged && (
-                <Tooltip title={canAddChild ? '' : '已达最大深度'}>
+                <Tooltip title={canAddChild ? '' : t('dictionary.maxDepthReached')}>
                   <Button
                     type="link"
                     size="small"
@@ -684,7 +684,7 @@ function DictDetailPanel({ selectedDict }: DictDetailPanelProps) {
                     onClick={() => openAdd(detail)}
                     disabled={!canAddChild}
                   >
-                    添加子项
+                    {t('dictionary.addChild')}
                   </Button>
                 </Tooltip>
               )}
@@ -815,7 +815,7 @@ function DictDetailPanel({ selectedDict }: DictDetailPanelProps) {
       {/* Table */}
       <div style={{ flex: 1, overflow: 'auto' }}>
         {!selectedDict ? (
-          <Empty description={t('common.selectHint') || '请先选择左侧字典'} style={{ marginTop: 80 }} />
+          <Empty description={t('common.selectHint')} style={{ marginTop: 80 }} />
         ) : (
           <Card
             size="small"

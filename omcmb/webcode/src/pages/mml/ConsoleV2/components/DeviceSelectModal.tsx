@@ -8,6 +8,7 @@ import { useDictionaryBatch } from '@core/hooks/api/useSystem';
 import type { DeviceItem, DeviceStatus } from '../types';
 import { DEVICE_MODAL_PAGE_SIZE, MAX_SELECT_ALL } from '../constants';
 import { mapDeviceToItem } from '../adapters';
+import { useT } from '@/hooks/useT';
 
 const { Text } = Typography;
 
@@ -16,10 +17,10 @@ const { Text } = Typography;
 let lastProductId: string | undefined;
 let lastProductClass: string | undefined;
 
-const STATUS_TAG: Record<DeviceStatus, { color: string; text: string }> = {
-  online: { color: 'success', text: '在线' },
-  offline: { color: 'default', text: '离线' },
-  alarm: { color: 'warning', text: '告警' },
+const STATUS_TAG: Record<DeviceStatus, { color: string; textKey: string }> = {
+  online: { color: 'success', textKey: 'mml.consoleV2.deviceSelect.status.online' },
+  offline: { color: 'default', textKey: 'mml.consoleV2.deviceSelect.status.offline' },
+  alarm: { color: 'warning', textKey: 'mml.consoleV2.deviceSelect.status.alarm' },
 };
 
 interface DeviceSelectModalProps {
@@ -43,6 +44,7 @@ export default function DeviceSelectModal({
   onCancel,
   onConfirm,
 }: DeviceSelectModalProps) {
+  const t = useT();
   // 草稿态：编辑但未应用（输入 SN / 选产品 / 选产品类型都不实时触发查询，§需求 1）。
   const [snInput, setSnInput] = useState('');
   const [productFilter, setProductFilter] = useState<string | undefined>();
@@ -174,20 +176,20 @@ export default function DeviceSelectModal({
   const columns: ColumnsType<DeviceItem> = [
     { title: 'SN', dataIndex: 'sn', key: 'sn', width: 220, ellipsis: true },
     {
-      title: '状态',
+      title: t('mml.consoleV2.deviceSelect.col.status'),
       dataIndex: 'status',
       key: 'status',
       width: 80,
-      render: (s: DeviceStatus) => <Tag color={STATUS_TAG[s].color}>{STATUS_TAG[s].text}</Tag>,
+      render: (s: DeviceStatus) => <Tag color={STATUS_TAG[s].color}>{t(STATUS_TAG[s].textKey)}</Tag>,
     },
-    { title: '产品', dataIndex: 'productName', key: 'productName', width: 180, ellipsis: true },
-    { title: '产品类型', dataIndex: 'productClass', key: 'productClass', width: 120 },
+    { title: t('mml.consoleV2.deviceSelect.col.product'), dataIndex: 'productName', key: 'productName', width: 180, ellipsis: true },
+    { title: t('mml.consoleV2.deviceSelect.col.productClass'), dataIndex: 'productClass', key: 'productClass', width: 120 },
   ];
 
   return (
     <>
       <Modal
-        title="选择设备"
+        title={t('mml.consoleV2.deviceSelect.title')}
         open={open}
         width={860}
         onCancel={onCancel}
@@ -197,8 +199,8 @@ export default function DeviceSelectModal({
           lastProductClass = classApplied;
           onConfirm(selected, productApplied ?? '');
         }}
-        okText={`确定（已选 ${selected.length} 台）`}
-        cancelText="取消"
+        okText={t('mml.consoleV2.deviceSelect.okText', { count: selected.length })}
+        cancelText={t('common.cancel')}
         okButtonProps={{ disabled: selected.length === 0 }}
         destroyOnHidden
       >
@@ -207,7 +209,7 @@ export default function DeviceSelectModal({
           <Space wrap>
             <Input
               allowClear
-              placeholder="输入 SN"
+              placeholder={t('mml.consoleV2.deviceSelect.snPlaceholder')}
               style={{ width: 200 }}
               value={snInput}
               onChange={(e) => setSnInput(e.target.value)}
@@ -216,7 +218,7 @@ export default function DeviceSelectModal({
             <Select
               showSearch
               optionFilterProp="label"
-              placeholder="产品（必选）"
+              placeholder={t('mml.consoleV2.deviceSelect.productPlaceholder')}
               style={{ width: 200 }}
               options={productOptions}
               value={productFilter}
@@ -226,36 +228,36 @@ export default function DeviceSelectModal({
               allowClear
               showSearch
               optionFilterProp="label"
-              placeholder="产品类型：全部"
+              placeholder={t('mml.consoleV2.deviceSelect.classPlaceholder')}
               style={{ width: 200 }}
               options={classOptions}
               value={classFilter}
               onChange={(v) => setClassFilter(v)}
             />
             <Button type="primary" icon={<SearchOutlined />} onClick={doSearch}>
-              搜索
+              {t('common.search')}
             </Button>
-            <Button onClick={() => setPasteOpen(true)}>批量输入</Button>
+            <Button onClick={() => setPasteOpen(true)}>{t('mml.consoleV2.deviceSelect.batchInput')}</Button>
           </Space>
 
           <Space wrap>
-            <Badge status="processing" text={<Text>已选 {selected.length} 台</Text>} />
+            <Badge status="processing" text={<Text>{t('mml.consoleV2.deviceSelect.selectedCount', { count: selected.length })}</Text>} />
             {snListFilter.length > 0 && (
               <Text type="secondary" style={{ fontSize: 12 }}>
-                批量输入：{snListFilter.length} 个 SN（仅显示在线）
+                {t('mml.consoleV2.deviceSelect.batchSummary', { count: snListFilter.length })}
                 <Button type="link" size="small" onClick={() => setSnListFilter([])}>
-                  清除
+                  {t('mml.consoleV2.deviceSelect.clear')}
                 </Button>
               </Text>
             )}
             {overLimit && (
               <Text type="warning" style={{ fontSize: 12 }}>
-                筛选命中 {total} 台，已超单次执行上限 {MAX_SELECT_ALL} 台，全选仅选中前 {MAX_SELECT_ALL} 台
+                {t('mml.consoleV2.deviceSelect.overLimit', { total, max: MAX_SELECT_ALL })}
               </Text>
             )}
             {selected.length > 0 && (
               <Button type="link" size="small" onClick={() => setSelected([])}>
-                清空已选
+                {t('mml.consoleV2.deviceSelect.clearSelected')}
               </Button>
             )}
           </Space>
@@ -290,7 +292,7 @@ export default function DeviceSelectModal({
                 setPage(p);
                 setPageSize(ps);
               },
-              showTotal: (t) => `共 ${t} 台`,
+              showTotal: (count) => t('mml.consoleV2.deviceSelect.totalDevices', { count }),
               size: 'small',
             }}
             scroll={{ y: 320 }}
@@ -299,17 +301,17 @@ export default function DeviceSelectModal({
       </Modal>
 
       <Modal
-        title="批量输入"
+        title={t('mml.consoleV2.deviceSelect.batchInput')}
         open={pasteOpen}
         onCancel={() => setPasteOpen(false)}
         onOk={handlePasteConfirm}
-        okText="确定"
-        cancelText="取消"
+        okText={t('common.confirm')}
+        cancelText={t('common.cancel')}
         destroyOnHidden
       >
         <Input.TextArea
           rows={8}
-          placeholder="每行一个 SN，或用空格 / 逗号 / 分号分隔（仅显示在线设备）"
+          placeholder={t('mml.consoleV2.deviceSelect.pastePlaceholder')}
           value={pasteText}
           onChange={(e) => setPasteText(e.target.value)}
         />

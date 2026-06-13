@@ -38,29 +38,29 @@ interface CommissioningTask {
 
 const MOCK_TASKS: CommissioningTask[] = [
   {
-    id: '1', stationCode: 'BJ-CY-001', stationName: '北京朝阳站-001', stationType: 'eNB',
-    currentStep: '参数配置', status: 'running', createTime: '2024-03-01 09:00:00',
-    operateTime: '2024-03-01 09:32:00', operator: '张工', progress: 60,
+    id: '1', stationCode: 'BJ-CY-001', stationName: 'Beijing-Chaoyang-001', stationType: 'eNB',
+    currentStep: 'Param Config', status: 'running', createTime: '2024-03-01 09:00:00',
+    operateTime: '2024-03-01 09:32:00', operator: 'OP-Zhang', progress: 60,
   },
   {
-    id: '2', stationCode: 'SH-PD-002', stationName: '上海浦东站-002', stationType: 'gNB',
-    currentStep: '射频调试', status: 'success', createTime: '2024-03-01 08:00:00',
-    operateTime: '2024-03-01 10:15:00', operator: '李工', progress: 100,
+    id: '2', stationCode: 'SH-PD-002', stationName: 'Shanghai-Pudong-002', stationType: 'gNB',
+    currentStep: 'RF Tuning', status: 'success', createTime: '2024-03-01 08:00:00',
+    operateTime: '2024-03-01 10:15:00', operator: 'OP-Li', progress: 100,
   },
   {
-    id: '3', stationCode: 'GZ-TH-003', stationName: '广州天河站-003', stationType: 'eNB',
-    currentStep: '设备注册', status: 'failed', createTime: '2024-03-01 07:30:00',
-    operateTime: '2024-03-01 08:45:00', operator: '王工', progress: 20,
+    id: '3', stationCode: 'GZ-TH-003', stationName: 'Guangzhou-Tianhe-003', stationType: 'eNB',
+    currentStep: 'Device Register', status: 'failed', createTime: '2024-03-01 07:30:00',
+    operateTime: '2024-03-01 08:45:00', operator: 'OP-Wang', progress: 20,
   },
   {
-    id: '4', stationCode: 'SZ-NS-004', stationName: '深圳南山站-004', stationType: 'GSM',
-    currentStep: '待开始', status: 'pending', createTime: '2024-03-01 10:00:00',
-    operateTime: '2024-03-01 10:00:00', operator: '赵工', progress: 0,
+    id: '4', stationCode: 'SZ-NS-004', stationName: 'Shenzhen-Nanshan-004', stationType: 'GSM',
+    currentStep: 'Pending', status: 'pending', createTime: '2024-03-01 10:00:00',
+    operateTime: '2024-03-01 10:00:00', operator: 'OP-Zhao', progress: 0,
   },
   {
-    id: '5', stationCode: 'CD-WH-005', stationName: '成都武侯站-005', stationType: 'gNB',
-    currentStep: '网络测试', status: 'running', createTime: '2024-03-01 08:30:00',
-    operateTime: '2024-03-01 09:55:00', operator: '陈工', progress: 80,
+    id: '5', stationCode: 'CD-WH-005', stationName: 'Chengdu-Wuhou-005', stationType: 'gNB',
+    currentStep: 'Network Test', status: 'running', createTime: '2024-03-01 08:30:00',
+    operateTime: '2024-03-01 09:55:00', operator: 'OP-Chen', progress: 80,
   },
 ];
 
@@ -143,7 +143,7 @@ export default function Commissioning() {
   // 处理新增提交
   const handleAddSubmit = useCallback((values: Record<string, unknown>) => {
     setSubmitLoading(true);
-    console.log('新增开通任务:', values);
+    console.log('add commissioning task:', values);
     // 模拟API调用
     setTimeout(() => {
       message.success(t('common.success'));
@@ -161,7 +161,7 @@ export default function Commissioning() {
   // 处理编辑提交
   const handleEditSubmit = useCallback((values: Record<string, unknown>) => {
     setSubmitLoading(true);
-    console.log('编辑开通任务:', values);
+    console.log('edit commissioning task:', values);
     setTimeout(() => {
       message.success(t('common.success'));
       setSubmitLoading(false);

@@ -23,14 +23,15 @@ import RawPathPanel from './RawPathPanel';
 import { newRawPathRow } from '../rawPathRow';
 import { validateRawPath } from '../rawPathValidate';
 import { computeInstanceSlots, resolveObjectPath } from '../adapters';
+import { useT } from '@/hooks/useT';
 
 const { Text } = Typography;
 
 /** 写类操作各自的提醒文案（§需求 3）。读类 LST/DSP 无提醒。 */
-const WRITE_REMINDERS: Record<string, string> = {
-  ADD: 'ADD / RMV 协议规定单次仅作用于一个对象路径，已锁定为单行。',
-  RMV: 'ADD / RMV 协议规定单次仅作用于一个对象路径，已锁定为单行。',
-  MOD: 'MOD 将修改所有已选设备的参数值，请确认参数值无误。',
+const WRITE_REMINDER_KEYS: Record<string, string> = {
+  ADD: 'mml.consoleV2.config.writeReminder.addRmv',
+  RMV: 'mml.consoleV2.config.writeReminder.addRmv',
+  MOD: 'mml.consoleV2.config.writeReminder.mod',
 };
 
 interface ConfigParamsModalProps {
@@ -66,6 +67,7 @@ export default function ConfigParamsModal({
   onConfirm,
   onConfirmAndExecute,
 }: ConfigParamsModalProps) {
+  const t = useT();
   const [mode, setMode] = useState<OperationMode>('standard');
   const [wasOpen, setWasOpen] = useState(false);
 
@@ -148,7 +150,8 @@ export default function ConfigParamsModal({
   );
 
   // 写类操作各自的提醒文案（取代原「写操作将对所有已选设备生效」通用提示，§需求 3）。
-  const writeReminder = currentOp ? WRITE_REMINDERS[currentOp] : undefined;
+  const writeReminderKey = currentOp ? WRITE_REMINDER_KEYS[currentOp] : undefined;
+  const writeReminder = writeReminderKey ? t(writeReminderKey) : undefined;
 
   // 标准模式可执行性判定（§需求 3）：
   //   - ADD/RMV 以「目标对象路径」(target_object)下发 RPC，不依赖参数 PATH → 有 target_object 即可执行；
@@ -186,14 +189,14 @@ export default function ConfigParamsModal({
       // 未选命令时，「请先选择 MML 命令」做成跳转链接，点击直接去「选择命令」（§需求 2）。
       description={
         deviceCount === 0 ? (
-          '请先选择目标设备'
+          t('mml.consoleV2.config.pickDeviceFirst')
         ) : onGotoCommand ? (
           <Button type="link" onClick={onGotoCommand}>
-            请先选择 MML 命令
+            {t('mml.consoleV2.config.pickCommandFirst')}
             <RightOutlined style={{ fontSize: 11 }} />
           </Button>
         ) : (
-          '请先选择 MML 命令'
+          t('mml.consoleV2.config.pickCommandFirst')
         )
       }
       style={{ marginTop: 32 }}
@@ -211,7 +214,7 @@ export default function ConfigParamsModal({
                 setCheckedPaths(e.target.checked ? command.paramPaths.map((p) => p.path) : [])
               }
             >
-              全选
+              {t('mml.consoleV2.config.selectAll')}
             </Checkbox>
           )}
           <Tag color={opColor(command.operationType)} style={{ marginInlineEnd: 0 }}>
@@ -226,10 +229,10 @@ export default function ConfigParamsModal({
           </Text>
           <Text type="secondary" style={{ fontSize: 12 }}>
             {read
-              ? '勾选要查询的参数'
+              ? t('mml.consoleV2.config.hintRead')
               : command.operationType === 'RMV'
-                ? '指定要删除的实例号'
-                : '填写要下发的参数值'}
+                ? t('mml.consoleV2.config.hintRmv')
+                : t('mml.consoleV2.config.hintWrite')}
           </Text>
         </Space>
 
@@ -237,8 +240,13 @@ export default function ConfigParamsModal({
         {isAddRmvCmd && command.targetObject && (
           <div style={{ marginTop: 10 }}>
             <Text type="secondary" style={{ fontSize: 12 }}>
-              目标对象路径（{command.operationType} 下发 {command.operationType === 'ADD' ? 'AddObject' : 'DeleteObject'} 的对象，
-              {instanceSlots.length > 0 ? `{i} 由下方实例号替换` : '无实例占位'}）：
+              {t('mml.consoleV2.config.targetObjectHint', {
+                op: command.operationType,
+                rpc: command.operationType === 'ADD' ? 'AddObject' : 'DeleteObject',
+                slots: instanceSlots.length > 0
+                  ? t('mml.consoleV2.config.slotReplaced')
+                  : t('mml.consoleV2.config.noSlot'),
+              })}
             </Text>
             <div style={{ marginTop: 4 }}>
               <Text code style={{ fontSize: 12, wordBreak: 'break-all' }}>
@@ -252,7 +260,7 @@ export default function ConfigParamsModal({
         {instanceSlots.length > 0 && (
           <div style={{ marginTop: 10 }}>
             <Text type="secondary" style={{ fontSize: 12 }}>
-              对象实例（{'{i}'}，默认 1）：
+              {t('mml.consoleV2.config.objectInstance')}
             </Text>
             <Space wrap style={{ marginTop: 6 }}>
               {instanceSlots.map((s) => (
@@ -295,7 +303,7 @@ export default function ConfigParamsModal({
           // antd6 addonBefore 已废弃：改用 Space.Compact + InputAddon 复刻前缀盒子。
           <div style={{ marginTop: 8 }}>
             <Space.Compact style={{ width: 180 }}>
-              <InputAddon>实例号</InputAddon>
+              <InputAddon>{t('mml.consoleV2.config.instanceNo')}</InputAddon>
               <InputNumber
                 min={1}
                 value={instance}
@@ -313,7 +321,7 @@ export default function ConfigParamsModal({
                   {p.path}
                 </Text>
                 <Input
-                  placeholder={`输入 ${p.label}`}
+                  placeholder={t('mml.consoleV2.config.inputFieldPlaceholder', { label: p.label })}
                   value={values[p.path] ?? ''}
                   onChange={(e) => setValues((prev) => ({ ...prev, [p.path]: e.target.value }))}
                 />
@@ -329,11 +337,11 @@ export default function ConfigParamsModal({
     <Modal
       title={
         <Space size={12} align="center">
-          <span>配置参数</span>
+          <span>{t('mml.consoleV2.config.title')}</span>
           {/* 「选择命令 ›」与命令选择弹框的「指定参数 ›」形成双向切换（§需求 1） */}
           {onGotoCommand && (
             <Button type="link" size="small" style={{ padding: 0 }} onClick={onGotoCommand}>
-              选择命令
+              {t('mml.consoleV2.config.gotoCommand')}
               <RightOutlined style={{ fontSize: 11 }} />
             </Button>
           )}
@@ -344,10 +352,10 @@ export default function ConfigParamsModal({
       onCancel={onCancel}
       footer={[
         <Button key="cancel" onClick={onCancel}>
-          取消
+          {t('common.cancel')}
         </Button>,
         <Button key="ok" disabled={!valid} onClick={() => onConfirm(buildRequest())}>
-          确定
+          {t('common.confirm')}
         </Button>,
         <Button
           key="exec"
@@ -356,7 +364,7 @@ export default function ConfigParamsModal({
           disabled={!valid || deviceCount === 0}
           onClick={() => onConfirmAndExecute(buildRequest())}
         >
-          确定并执行（{deviceCount} 台）
+          {t('mml.consoleV2.config.confirmAndExecute', { count: deviceCount })}
         </Button>,
       ]}
     >
@@ -367,7 +375,7 @@ export default function ConfigParamsModal({
         items={[
           {
             key: 'standard',
-            label: '命令参数',
+            label: t('mml.consoleV2.config.tabStandard'),
             children: (
               <div style={{ height: CONFIG_TAB_HEIGHT, overflowY: 'auto', overflowX: 'auto', paddingRight: 4 }}>
                 {standardBody}
@@ -376,7 +384,7 @@ export default function ConfigParamsModal({
           },
           {
             key: 'raw',
-            label: '指定参数',
+            label: t('mml.consoleV2.config.tabRaw'),
             children: (
               <div style={{ height: CONFIG_TAB_HEIGHT, overflowY: 'auto', overflowX: 'auto', paddingRight: 4 }}>
                 <RawPathPanel value={rawPayload} onChange={setRawPayload} suggestions={suggestions} />
@@ -390,18 +398,18 @@ export default function ConfigParamsModal({
 
       <Space orientation="vertical" size={12} style={{ width: '100%' }}>
         <div>
-          <Text type="secondary">执行模式</Text>
+          <Text type="secondary">{t('mml.consoleV2.config.execMode')}</Text>
           <div style={{ marginTop: 6 }}>
             <Radio.Group
               value={effectiveExecMode}
               onChange={(e) => setExecMode(e.target.value)}
             >
-              <Radio value="whole">整体执行</Radio>
+              <Radio value="whole">{t('mml.consoleV2.config.execWhole')}</Radio>
               <Tooltip
-                title={perPathDisabled ? 'ADD / RMV 为单对象操作，不支持逐 PATH 拆分' : ''}
+                title={perPathDisabled ? t('mml.consoleV2.config.perPathDisabledTip') : ''}
               >
                 <Radio value="single-path" disabled={perPathDisabled}>
-                  逐 PATH
+                  {t('mml.consoleV2.config.execPerPath')}
                 </Radio>
               </Tooltip>
             </Radio.Group>

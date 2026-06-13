@@ -344,7 +344,7 @@ export default function DashboardPage() {
         <Col span={24}>
           <Space size="middle" style={{ width: '100%', justifyContent: 'space-between', alignItems: 'center' }}>
             <Space size="middle">
-              <Text type="secondary">网络制式:</Text>
+              <Text type="secondary">{t('dashboard.networkTech')}:</Text>
               <Segmented
                 value={technology}
                 onChange={(value) => setTechnology(value as TechnologyType)}

@@ -82,9 +82,9 @@ export default function UserManagement() {
   // 历史的 useAllUsers 全量映射方案已下线，避免重复请求 /admin/users。
   // PRD §11.9 v0.8：空值显示"内置"（覆盖 builtIn / LDAP / 历史三种无 operator 场景）。
   const renderOperator = useCallback((username: unknown) => {
-    if (!username) return '内置';
+    if (!username) return t('user.builtIn');
     return String(username);
-  }, []);
+  }, [t]);
 
   // PRD §11.7 决议 ①：未绑定任何设备分组的角色，下拉 option 追加 ⚠️ 标记，
   // 防止管理员误以为"分配了角色就能看到设备"。
@@ -367,7 +367,7 @@ export default function UserManagement() {
       onSuccess: (result) => {
         modal.success({
           title: t('common.success'),
-          content: `已复制为 ${result.user.username}\n临时密码：${result.tempPassword}\n请立即让该用户登录后修改密码。`,
+          content: t('user.copySuccessContent', { username: result.user.username, tempPassword: result.tempPassword }),
         });
       },
     });
@@ -434,10 +434,10 @@ export default function UserManagement() {
             key: 'status',
             label: !canChangeStatus ? (
               <Tooltip title={t('user.tooltip.builtinNoDisable')} placement="left">
-                <span>{user.status === 'active' ? '禁用' : '启用'}</span>
+                <span>{user.status === 'active' ? t('common.disable') : t('common.enable')}</span>
               </Tooltip>
             ) : (
-              user.status === 'active' ? '禁用' : '启用'
+              user.status === 'active' ? t('common.disable') : t('common.enable')
             ),
             icon: user.status === 'active' ? <StopOutlined /> : <CheckCircleOutlined />,
             disabled: !canChangeStatus,
@@ -445,7 +445,7 @@ export default function UserManagement() {
               const targetStatus: UserStatus = user.status === 'active' ? 'disabled' : 'active';
               modal.confirm({
                 title: t('common.confirm'),
-                content: user.status === 'active' ? '确定要禁用该用户吗？禁用后用户将无法登录系统。' : '确定要启用该用户吗？',
+                content: user.status === 'active' ? t('user.confirmDisableUser') : t('user.confirmEnableUser'),
                 onOk: () => {
                   updateUser.mutate(
                     { id: user.id, data: { status: targetStatus } },
@@ -528,7 +528,7 @@ export default function UserManagement() {
     },
     {
       key: 'displayName',
-      title: '用户昵称',
+      title: t('user.form.displayName'),
       dataIndex: 'displayName',
       width: 150,
       // PRD §11.8 v0.7：不再追加"内置"Tag；内置/管理员/LDAP 来源由"来源"列承担。
@@ -540,7 +540,7 @@ export default function UserManagement() {
     },
     {
       key: 'username',
-      title: '用户账号',
+      title: t('user.account'),
       dataIndex: 'username',
       width: 130,
       render: (val) => (
@@ -556,7 +556,7 @@ export default function UserManagement() {
         const isActive = val === 'active';
         return (
           <Tag color={isActive ? 'success' : 'error'}>
-            {isActive ? '激活' : '禁用'}
+            {isActive ? t('user.form.statusActive') : t('user.form.statusDisabled')}
           </Tag>
         );
       },
@@ -565,7 +565,7 @@ export default function UserManagement() {
     { key: 'phone', title: t('user.phone'), dataIndex: 'phone', width: 120, render: (v) => (v as string) || '-' },
     {
       key: 'roles',
-      title: '角色',
+      title: t('user.role'),
       dataIndex: 'roles',
       width: 150,
       render: (val) => {
@@ -600,10 +600,10 @@ export default function UserManagement() {
     },
     {
       key: 'expireTime',
-      title: '过期时间',
+      title: t('user.expireTime'),
       dataIndex: 'expireTime',
       width: 160,
-      render: (val) => (val ? new Date(String(val)).toLocaleString('zh-CN') : '永久') as string,
+      render: (val) => (val ? new Date(String(val)).toLocaleString('zh-CN') : t('user.permanent')) as string,
     },
     {
       key: 'lastLoginTime',
@@ -628,21 +628,21 @@ export default function UserManagement() {
     },
     {
       key: 'creatorUsername',
-      title: '创建人',
+      title: t('user.form.createdBy'),
       dataIndex: 'creatorUsername',
       width: 110,
       render: renderOperator,
     },
     {
       key: 'updaterUsername',
-      title: '更新人',
+      title: t('user.form.updatedBy'),
       dataIndex: 'updaterUsername',
       width: 110,
       render: renderOperator,
     },
     {
       key: 'description',
-      title: '备注',
+      title: t('common.remark'),
       dataIndex: 'description',
       width: 160,
       ellipsis: true,
@@ -713,14 +713,14 @@ export default function UserManagement() {
             },
             {
               key: 'disable',
-              label: '禁用',
+              label: t('common.disable'),
               icon: <StopOutlined />,
               onClick: handleBatchLock,
               disabled: hasBuiltInSelected,
             },
             {
               key: 'enable',
-              label: '启用',
+              label: t('common.enable'),
               icon: <CheckCircleOutlined />,
               onClick: handleBatchUnlock,
               disabled: hasBuiltInSelected,
@@ -969,7 +969,7 @@ export default function UserManagement() {
         <Form form={form} layout="vertical">
           <Form.Item label={t('user.form.status')}>
             <Tag color={selectedUser?.status === 'active' ? 'success' : 'error'}>
-              {selectedUser?.status === 'active' ? '激活' : '禁用'}
+              {selectedUser?.status === 'active' ? t('user.form.statusActive') : t('user.form.statusDisabled')}
             </Tag>
           </Form.Item>
           <Form.Item label={t('user.source')}>
@@ -994,7 +994,7 @@ export default function UserManagement() {
             <span>{selectedUser?.roles?.join(', ') || '-'}</span>
           </Form.Item>
           <Form.Item label={t('user.form.expireTime')}>
-            <span>{selectedUser?.expireTime ? new Date(selectedUser.expireTime).toLocaleString('zh-CN') : '永久'}</span>
+            <span>{selectedUser?.expireTime ? new Date(selectedUser.expireTime).toLocaleString('zh-CN') : t('user.permanent')}</span>
           </Form.Item>
           <Form.Item label={t('user.lastLoginTime')}>
             <span>{selectedUser?.lastLoginTime ? new Date(selectedUser.lastLoginTime).toLocaleString('zh-CN') : '-'}</span>
@@ -1076,7 +1076,7 @@ export default function UserManagement() {
             name="targetRoleIds"
             label={t('user.form.targetRole')}
             rules={[{ required: true, message: t('common.pleaseSelect') }]}
-            extra="选择后将整体替换所选用户的角色集合"
+            extra={t('user.batchReplaceRoleHint')}
           >
             <Select
               mode="multiple"

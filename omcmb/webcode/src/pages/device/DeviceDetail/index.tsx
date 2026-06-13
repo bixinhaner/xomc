@@ -1026,7 +1026,7 @@ function KPITabContent({ device, t }: KPITabContentProps) {
           const lineSeries = hasCompare
             ? [
                 { name: seriesName, data: chart.values },
-                { name: `${seriesName}（上一周期）`, data: compare.values, dashed: true },
+                { name: t('device.detail.kpiPrevPeriod', { name: seriesName }), data: compare.values, dashed: true },
               ]
             : [{ name: seriesName, data: chart.values }];
 
@@ -1063,7 +1063,7 @@ function KPITabContent({ device, t }: KPITabContentProps) {
                       // 与「时段无采样」。其它制式保持通用文案。
                       description={
                         technology === 'nr'
-                          ? '该设备暂无可用 KPI 数据，请确认厂商指标库已注册'
+                          ? t('device.detail.kpiNoDataNr')
                           : t('common.noData')
                       }
                     />
@@ -1255,7 +1255,7 @@ export default function DeviceDetail() {
     setQuickSettingsSyncPending(false);
 
     if (hasNewFailure && !hasNewSuccess) {
-      message.error(paramSyncStatus.lastParamSyncError || '设备侧取数失败');
+      message.error(paramSyncStatus.lastParamSyncError || t('device.detail.deviceFetchFailed'));
       return;
     }
 
@@ -1264,8 +1264,8 @@ export default function DeviceDetail() {
     void queryClient.invalidateQueries({ queryKey: ['devices', 'detail-composite-v2', deviceId] });
     void queryClient.invalidateQueries({ queryKey: ['quicksettings', 'groups', deviceId] });
     void queryClient.invalidateQueries({ queryKey: ['devices', 'parameter-schema', deviceId] });
-    message.success('已获取设备侧最新数据');
-  }, [activeTab, device?.id, message, paramSyncStatus, queryClient, quickSettingsSyncPending]);
+    message.success(t('device.detail.deviceFetchLatest'));
+  }, [activeTab, device?.id, message, paramSyncStatus, queryClient, quickSettingsSyncPending, t]);
 
   const handleHeaderRefresh = useCallback(() => {
     void refetch();
@@ -1295,12 +1295,12 @@ export default function DeviceDetail() {
             { deviceId },
             {
               onSuccess: (data) => {
-                message.success(`设备取数已入队（${data.sourceId}）`);
+                message.success(t('device.detail.deviceFetchQueued', { id: data.sourceId }));
                 void refetchParamSyncStatus();
               },
               onError: (err) => {
                 setQuickSettingsSyncPending(false);
-                const errMsg = err instanceof Error ? err.message : '设备取数触发失败';
+                const errMsg = err instanceof Error ? err.message : t('device.detail.deviceFetchTriggerFailed');
                 message.error(errMsg);
               },
             },
@@ -1310,7 +1310,7 @@ export default function DeviceDetail() {
       default:
         break;
     }
-  }, [activeTab, device?.id, message, paramSyncStatus?.lastParamSyncAt, paramSyncStatus?.lastParamSyncFailedAt, queryClient, refetch, refetchParamSyncStatus, syncMutation]);
+  }, [activeTab, device?.id, message, paramSyncStatus?.lastParamSyncAt, paramSyncStatus?.lastParamSyncFailedAt, queryClient, refetch, refetchParamSyncStatus, syncMutation, t]);
 
   const SEVERITY_LABEL: Record<string, string> = useMemo(() => ({
     critical: t('alarm.severity.critical'),

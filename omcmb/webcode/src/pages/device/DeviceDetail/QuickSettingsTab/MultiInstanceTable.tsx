@@ -28,8 +28,12 @@ import {
   type QuickSettingsInstanceContext,
 } from './validators';
 
+import { useT } from '@/hooks/useT';
+
 const { Text } = Typography;
 const ERROR_FEEDBACK_DURATION_SECONDS = 2;
+
+type TFn = (id: string, values?: Record<string, string | number>) => string;
 
 // "上次操作"状态形状由 frontend-core/store/quickSettingsFeedbackStore (MultiFeedback) 定义,
 // 提升至 store 持久化,顶层 TabBar 切走再切回不丢反馈。
@@ -46,29 +50,33 @@ interface StatusTagSpec {
   icon: React.ReactNode;
   label: string;
 }
-function statusTagSpec(action: MultiFeedback, taskStatus: DeviceTaskStatus | undefined): StatusTagSpec {
-  const actionLabel = action.action === 'save' ? '保存' : action.action === 'add' ? '新增' : '删除';
+function statusTagSpec(action: MultiFeedback, taskStatus: DeviceTaskStatus | undefined, t: TFn): StatusTagSpec {
+  const actionLabel = action.action === 'save'
+    ? t('device.multi.actionSave')
+    : action.action === 'add'
+      ? t('device.multi.actionAdd')
+      : t('device.multi.actionDelete');
   if (action.submitStatus === 'failed_to_queue') {
-    return { color: 'error', icon: <CloseCircleOutlined />, label: `${actionLabel}入队失败` };
+    return { color: 'error', icon: <CloseCircleOutlined />, label: t('device.multi.tagQueueFailed', { action: actionLabel }) };
   }
-  // AddObject / DeleteObject 当前不返 task_id;仅 Save 走完整状态机
+  // AddObject / DeleteObject currently return no task_id; only Save goes through the full state machine
   if (!action.taskId) {
-    return { color: 'processing', icon: <SyncOutlined spin />, label: `${actionLabel}已入队` };
+    return { color: 'processing', icon: <SyncOutlined spin />, label: t('device.multi.tagQueued', { action: actionLabel }) };
   }
   switch (taskStatus) {
     case 'completed':
-      return { color: 'success', icon: <CheckCircleOutlined />, label: `${actionLabel}成功` };
+      return { color: 'success', icon: <CheckCircleOutlined />, label: t('device.multi.tagSuccess', { action: actionLabel }) };
     case 'failed':
-      return { color: 'error', icon: <CloseCircleOutlined />, label: `${actionLabel}基站应答失败` };
+      return { color: 'error', icon: <CloseCircleOutlined />, label: t('device.multi.tagNackFailed', { action: actionLabel }) };
     case 'expired':
-      return { color: 'warning', icon: <ClockCircleOutlined />, label: `${actionLabel}超时` };
+      return { color: 'warning', icon: <ClockCircleOutlined />, label: t('device.multi.tagTimeout', { action: actionLabel }) };
     case 'cancelled':
-      return { color: 'default', icon: <CloseCircleOutlined />, label: `${actionLabel}已取消` };
+      return { color: 'default', icon: <CloseCircleOutlined />, label: t('device.multi.tagCancelled', { action: actionLabel }) };
     case 'sent':
-      return { color: 'processing', icon: <SendOutlined />, label: `${actionLabel}已发送给基站` };
+      return { color: 'processing', icon: <SendOutlined />, label: t('device.multi.tagSent', { action: actionLabel }) };
     case 'pending':
     default:
-      return { color: 'processing', icon: <SyncOutlined spin />, label: `${actionLabel}已入队,等待下发` };
+      return { color: 'processing', icon: <SyncOutlined spin />, label: t('device.multi.tagPending', { action: actionLabel }) };
   }
 }
 
@@ -101,7 +109,9 @@ interface EditModalState {
 interface SpecialColumnSpec {
   key: string;
   leaf?: string;
-  titleZh: string;
+  /** i18n message id；优先于 titleZh/titleEn（用于消除硬编码中文标题）。 */
+  titleKey?: string;
+  titleZh?: string;
   titleEn: string;
   width?: number;
   readOnly?: boolean;
@@ -111,25 +121,25 @@ interface SpecialColumnSpec {
 
 const BM_SPECIAL_COLUMNS: Record<string, SpecialColumnSpec[]> = {
   'enb-neighbor-freq': [
-    { key: 'EUTRACarrierARFCN', leaf: 'EUTRACarrierARFCN', titleZh: '频点', titleEn: 'Frequency', width: 180, formatValue: formatEarfcnDisplay },
-    { key: 'QOffsetFreq', leaf: 'QOffsetFreq', titleZh: 'Q-OffsetRange', titleEn: 'Q-OffsetRange', width: 140 },
-    { key: 'QRxLevMinSIB5', leaf: 'QRxLevMinSIB5', titleZh: 'Q-RxLevMin', titleEn: 'Q-RxLevMin', width: 130 },
-    { key: 'CellReselectionPriority', leaf: 'CellReselectionPriority', titleZh: '重选优先级', titleEn: 'Reselection Priority', width: 130 },
-    { key: 'ThreshXHigh', leaf: 'ThreshXHigh', titleZh: '高重选门限', titleEn: 'Reselection Thresh High', width: 130 },
-    { key: 'ThreshXLow', leaf: 'ThreshXLow', titleZh: '低重选门限', titleEn: 'Reselection Thresh Low', width: 130 },
-    { key: 'PMax', leaf: 'PMax', titleZh: 'UE最大发送功率', titleEn: 'UE Max Tx Power', width: 150 },
-    { key: 'TReselectionEUTRA', leaf: 'TReselectionEUTRA', titleZh: '重选定时器', titleEn: 'TReselectionEUTRA', width: 130 },
+    { key: 'EUTRACarrierARFCN', leaf: 'EUTRACarrierARFCN', titleKey: 'device.multi.col.frequency', titleEn: 'Frequency', width: 180, formatValue: formatEarfcnDisplay },
+    { key: 'QOffsetFreq', leaf: 'QOffsetFreq', titleEn: 'Q-OffsetRange', width: 140 },
+    { key: 'QRxLevMinSIB5', leaf: 'QRxLevMinSIB5', titleEn: 'Q-RxLevMin', width: 130 },
+    { key: 'CellReselectionPriority', leaf: 'CellReselectionPriority', titleKey: 'device.multi.col.reselPriority', titleEn: 'Reselection Priority', width: 130 },
+    { key: 'ThreshXHigh', leaf: 'ThreshXHigh', titleKey: 'device.multi.col.reselThreshHigh', titleEn: 'Reselection Thresh High', width: 130 },
+    { key: 'ThreshXLow', leaf: 'ThreshXLow', titleKey: 'device.multi.col.reselThreshLow', titleEn: 'Reselection Thresh Low', width: 130 },
+    { key: 'PMax', leaf: 'PMax', titleKey: 'device.multi.col.ueMaxTxPower', titleEn: 'UE Max Tx Power', width: 150 },
+    { key: 'TReselectionEUTRA', leaf: 'TReselectionEUTRA', titleKey: 'device.multi.col.reselTimer', titleEn: 'TReselectionEUTRA', width: 130 },
   ],
   'enb-neighbor-cell': [
-    { key: 'cellIndex', titleZh: 'cellIndex', titleEn: 'cellIndex', width: 110, readOnly: true, getValue: (_row, ctx) => `Cell ${ctx.fapInstance}` },
-    { key: 'EUTRACarrierARFCN', leaf: 'EUTRACarrierARFCN', titleZh: '频点', titleEn: 'Frequency', width: 180, formatValue: formatEarfcnDisplay },
-    { key: 'PhyCellID', leaf: 'PhyCellID', titleZh: 'PCI', titleEn: 'PCI', width: 100 },
-    { key: 'QOffset', leaf: 'QOffset', titleZh: 'QOffset', titleEn: 'QOffset', width: 110 },
-    { key: 'CIO', leaf: 'CIO', titleZh: 'CIO', titleEn: 'CIO', width: 100 },
-    { key: 'TAC', leaf: 'TAC', titleZh: 'TAC', titleEn: 'TAC', width: 110, readOnly: true },
-    { key: 'PLMNID', leaf: 'PLMNID', titleZh: 'PLMN', titleEn: 'PLMN', width: 140 },
-    { key: 'CID', leaf: 'CID', titleZh: 'ECI', titleEn: 'ECI', width: 130, readOnly: true },
-    { key: 'EnbType', leaf: 'EnbType', titleZh: 'eNodeB Type', titleEn: 'eNodeB Type', width: 140, readOnly: true, formatValue: formatEnbTypeDisplay },
+    { key: 'cellIndex', titleEn: 'cellIndex', width: 110, readOnly: true, getValue: (_row, ctx) => `Cell ${ctx.fapInstance}` },
+    { key: 'EUTRACarrierARFCN', leaf: 'EUTRACarrierARFCN', titleKey: 'device.multi.col.frequency', titleEn: 'Frequency', width: 180, formatValue: formatEarfcnDisplay },
+    { key: 'PhyCellID', leaf: 'PhyCellID', titleEn: 'PCI', width: 100 },
+    { key: 'QOffset', leaf: 'QOffset', titleEn: 'QOffset', width: 110 },
+    { key: 'CIO', leaf: 'CIO', titleEn: 'CIO', width: 100 },
+    { key: 'TAC', leaf: 'TAC', titleEn: 'TAC', width: 110, readOnly: true },
+    { key: 'PLMNID', leaf: 'PLMNID', titleEn: 'PLMN', width: 140 },
+    { key: 'CID', leaf: 'CID', titleEn: 'ECI', width: 130, readOnly: true },
+    { key: 'EnbType', leaf: 'EnbType', titleEn: 'eNodeB Type', width: 140, readOnly: true, formatValue: formatEnbTypeDisplay },
   ],
 };
 
@@ -146,6 +156,7 @@ const BM_SPECIAL_COLUMNS: Record<string, SpecialColumnSpec[]> = {
  *  7. 失败标红保留输入值，"重试"按钮原值重发
  */
 export default function MultiInstanceTable({ deviceId, group, instanceContext, locale }: MultiInstanceTableProps) {
+  const t = useT();
   // group.objectPath 形如 "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}."
   // - 外层 FAPService.{i} → 用 fapInstance 替换
   // - 内层 Carrier.{i}. 末段是实例号占位符 — 剥离后得到父对象路径,用于查 schema.objects / AddObject / 拼接行 path 前缀
@@ -311,8 +322,8 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
       if (isDeviceTaskTerminal(task.status)) return task;
       await new Promise((resolve) => window.setTimeout(resolve, 1000));
     }
-    throw new Error('等待任务完成超时');
-  }, []);
+    throw new Error(t('device.multi.waitTaskTimeout'));
+  }, [t]);
 
   // T-0146:Save 后用 task_id 轮询真实 CPE 应答状态;到终态后停轮询。
   // AddObject / DeleteObject 暂不走 taskId(后端 useAddObject/useDeleteObject 未返 task),
@@ -333,7 +344,7 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
         if (!cancelled) {
           const errMsg = err instanceof Error ? err.message : String(err);
           notification.error({
-            message: `设备侧数据回读失败(${group.titleZh})`,
+            message: t('device.multi.readbackFailed', { group: group.titleZh }),
             description: errMsg,
             duration: ERROR_FEEDBACK_DURATION_SECONDS,
           });
@@ -369,13 +380,13 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
       lastAction.notifiedFailedTaskId !== lastTask.id
     ) {
       notification.error({
-        message: `基站应答失败(${group.titleZh})`,
-        description: lastTask.errorMessage || '未知错误,可在通知中心查看任务详情',
+        message: t('device.multi.nackFailed', { group: group.titleZh }),
+        description: lastTask.errorMessage || t('device.multi.unknownErrorHint'),
         duration: ERROR_FEEDBACK_DURATION_SECONDS,
       });
       patchFeedback(fbKey, { notifiedFailedTaskId: lastTask.id });
     }
-  }, [lastTask, lastAction, group.titleZh, patchFeedback, fbKey]);
+  }, [lastTask, lastAction, group.titleZh, patchFeedback, fbKey, t]);
 
   // 单层确认：外层 Popconfirm 已二次确认，这里直接执行删除逻辑（原 Modal.confirm 套层移除）。
   const handleDelete = async (instId: string) => {
@@ -383,7 +394,7 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
       // T-0157 C7: 后端现返回 { taskId } → 消费 taskId 让 Tag 走完整状态机
       const result = await deleteMutation.mutateAsync({ deviceId, objectPath: `${objectPath}${instId}.` });
       message.success({
-        content: `已下发 DeleteObject(${instId}),请在右上角铃铛查看任务结果`,
+        content: t('device.multi.deleteDispatched', { instId }),
         duration: 6,
       });
       setFeedback(fbKey, {
@@ -391,7 +402,7 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
         action: 'delete',
         submitStatus: 'queued',
         taskId: result.taskId,
-        detail: `实例 ${instId}`,
+        detail: t('device.multi.detailInstance', { instId }),
         at: Date.now(),
       });
       // 实例已删 → 清该行可能残留的 draft + rowEdits（避免下次重挂载尝试恢复已不存在的实例）
@@ -405,15 +416,15 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       notification.error({
-        message: `DeleteObject 入队失败(${group.titleZh})`,
-        description: `实例 ${instId} 删除失败:${errMsg}`,
+        message: t('device.multi.deleteQueueFailed', { group: group.titleZh }),
+        description: t('device.multi.deleteFailedDesc', { instId, err: errMsg }),
         duration: ERROR_FEEDBACK_DURATION_SECONDS,
       });
       setFeedback(fbKey, {
         kind: 'multi',
         action: 'delete',
         submitStatus: 'failed_to_queue',
-        detail: `实例 ${instId}:${errMsg}`,
+        detail: t('device.multi.detailInstanceErr', { instId, err: errMsg }),
         at: Date.now(),
       });
       console.error('MultiInstanceTable: DeleteObject failed', err);
@@ -481,7 +492,7 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
         const addResult = await addMutation.mutateAsync({ deviceId, objectPath });
         const addTask = await waitForTaskTerminal(addResult.taskId);
         if (addTask.status !== 'completed') {
-          throw new Error(addTask.errorMessage || `新增实例失败(${addTask.status})`);
+          throw new Error(addTask.errorMessage || t('device.multi.addInstanceFailed', { status: addTask.status }));
         }
 
         const refreshed = await refetch();
@@ -489,12 +500,12 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
         const knownInstances = new Set(instanceIds);
         targetInstanceId = nextObject?.currentInstances.map((n) => String(n)).find((instId) => !knownInstances.has(instId));
         if (!targetInstanceId) {
-          throw new Error('新增实例成功，但未能识别新实例号');
+          throw new Error(t('device.multi.addInstanceNoId'));
         }
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
         notification.error({
-          message: `新增失败(${group.titleZh})`,
+          message: t('device.multi.addFailed', { group: group.titleZh }),
           description: errMsg,
           duration: ERROR_FEEDBACK_DURATION_SECONDS,
         });
@@ -537,12 +548,12 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
 
     if (Object.keys(errors).length > 0) {
       setEditModal((prev) => prev ? { ...prev, errors } : prev);
-      message.error({ content: '编辑页校验失败,请修正后再保存', duration: ERROR_FEEDBACK_DURATION_SECONDS });
+      message.error({ content: t('device.multi.editValidationFailed'), duration: ERROR_FEEDBACK_DURATION_SECONDS });
       return;
     }
 
     if (updates.length === 0) {
-      message.info({ content: editModal.mode === 'add' ? '新增实例成功' : '该行无变更', duration: 4 });
+      message.info({ content: editModal.mode === 'add' ? t('device.multi.addInstanceSuccess') : t('device.multi.noRowChange'), duration: 4 });
       setEditModal(null);
       return;
     }
@@ -563,38 +574,40 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
         submitStatus: 'queued',
         taskId: result.taskId,
         savedInstId: targetInstanceId,
-        detail: editModal.mode === 'add' ? `新增实例 ${targetInstanceId} ${updates.length} 项` : `第 ${targetInstanceId} 行 ${updates.length} 项`,
+        detail: editModal.mode === 'add' ? t('device.multi.detailAdd', { instId: targetInstanceId, count: updates.length }) : t('device.multi.detailRow', { instId: targetInstanceId, count: updates.length }),
         at: Date.now(),
       });
       message.success({
         content: editModal.mode === 'add'
-          ? `已新增实例 ${targetInstanceId}，并下发 ${updates.length} 项变更`
-          : `第 ${targetInstanceId} 行已下发 ${updates.length} 项变更,正在等待基站应答(Tag 会自动刷新)`,
+          ? t('device.multi.addSuccessMsg', { instId: targetInstanceId, count: updates.length })
+          : t('device.multi.saveSuccessMsg', { instId: targetInstanceId, count: updates.length }),
         duration: 6,
       });
       setEditModal(null);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       notification.error({
-        message: `${editModal.mode === 'add' ? '新增实例' : `第 ${targetInstanceId} 行`}入队失败(${group.titleZh})`,
-        description: `${updates.length} 项变更入队失败:${errMsg}。输入值已保留,可修正后重试。`,
+        message: editModal.mode === 'add'
+          ? t('device.multi.addQueueFailed', { group: group.titleZh })
+          : t('device.multi.rowQueueFailed', { instId: targetInstanceId ?? '', group: group.titleZh }),
+        description: t('device.multi.queueFailedDesc', { count: updates.length, err: errMsg }),
         duration: ERROR_FEEDBACK_DURATION_SECONDS,
       });
       setFeedback(fbKey, {
         kind: 'multi',
         action: editModal.mode === 'add' ? 'add' : 'save',
         submitStatus: 'failed_to_queue',
-        detail: `${targetInstanceId ?? '新增实例'}:${errMsg}`,
+        detail: t('device.multi.detailFailed', { target: targetInstanceId ?? t('device.multi.actionAdd'), err: errMsg }),
         at: Date.now(),
       });
     } finally {
       void queryClient.invalidateQueries({ queryKey: notificationKeys.all });
     }
-  }, [addMutation, deviceId, displayColumns, editModal, fbKey, group.titleZh, groupParamLeafSet, instanceIds, leafSchemaByLeaf, objectPath, queryClient, refetch, schemaByPath, setDraftField, setFeedback, updateMutation, waitForTaskTerminal]);
+  }, [addMutation, deviceId, displayColumns, editModal, fbKey, group.titleZh, groupParamLeafSet, instanceIds, leafSchemaByLeaf, objectPath, queryClient, refetch, schemaByPath, setDraftField, setFeedback, updateMutation, waitForTaskTerminal, t]);
 
   const columns: ColumnType<TableRow>[] = [
     {
-      title: '实例',
+      title: t('device.multi.instance'),
       dataIndex: 'instanceId',
       key: 'instanceId',
       width: 80,
@@ -610,12 +623,12 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
         if (!leaf) return '';
         for (const inst of instanceIds) {
           const tplItem = schemaByPath.get(`${objectPath}${inst}.${leaf}`);
-          const hint = formatConstraintHint(tplItem);
+          const hint = formatConstraintHint(tplItem, t);
           if (hint) return hint;
         }
         return '';
       })();
-      const baseTitle = locale === 'zh-CN' ? column.titleZh : column.titleEn;
+      const baseTitle = column.titleKey ? t(column.titleKey) : (locale === 'zh-CN' ? (column.titleZh ?? column.titleEn) : column.titleEn);
       return {
         title: titleHint ? (
           <Space size={4} wrap>
@@ -643,18 +656,18 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
       };
     }),
     {
-      title: '操作',
+      title: t('table.operation'),
       key: 'actions',
       width: 148,
       fixed: 'right',
       render: (_v: unknown, row: TableRow) => (
         <Space size={4}>
           <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEditModal(row)}>
-            修改
+            {t('common.edit')}
           </Button>
-          <Popconfirm title="确认删除？" onConfirm={() => row.instanceId && void handleDelete(row.instanceId)} disabled={!canDelete}>
+          <Popconfirm title={t('device.multi.deleteConfirm')} onConfirm={() => row.instanceId && void handleDelete(row.instanceId)} disabled={!canDelete}>
             <Button type="link" size="small" danger icon={<DeleteOutlined />} disabled={!canDelete}>
-              删除
+              {t('common.delete')}
             </Button>
           </Popconfirm>
         </Space>
@@ -671,7 +684,7 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
   const addDisabled = !canAdd || reachedMax || updateMutation.isPending || addMutation.isPending;
   const addBtn = (
     <Button type="default" icon={<PlusOutlined />} onClick={openAddModal} disabled={addDisabled}>
-      新 增
+      {t('common.add')}
     </Button>
   );
 
@@ -682,7 +695,7 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
       extra={
         <Space>
           {lastAction && (() => {
-            const spec = statusTagSpec(lastAction, lastTask?.status);
+            const spec = statusTagSpec(lastAction, lastTask?.status, t);
             return (
               <Tag icon={spec.icon} color={spec.color}>
                 {spec.label} · {lastAction.detail} · {formatTime(lastAction.at)}
@@ -690,7 +703,7 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
             );
           })()}
           {reachedMax ? (
-            <Tooltip title={`已达上限 ${maxInstances}，如需新增请先删除其它实例`}>
+            <Tooltip title={t('device.multi.reachedMaxTooltip', { max: maxInstances ?? 0 })}>
               <span style={{ display: 'inline-block', cursor: 'not-allowed' }}>{addBtn}</span>
             </Tooltip>
           ) : (
@@ -711,12 +724,12 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
         sticky
       />
       <Modal
-        title={editModal?.mode === 'add' ? `${title} · 新增实例` : `${title} · 修改实例 ${editModal?.instanceId ?? ''}`}
+        title={editModal?.mode === 'add' ? t('device.multi.modalAddTitle', { title }) : t('device.multi.modalEditTitle', { title, instId: editModal?.instanceId ?? '' })}
         open={Boolean(editModal)}
         onOk={() => void handleSaveEditModal()}
         onCancel={closeEditModal}
-        okText={editModal?.mode === 'add' ? '确认新增' : '确认下发'}
-        cancelText="取消"
+        okText={editModal?.mode === 'add' ? t('device.multi.confirmAdd') : t('device.paramEdit.confirmDispatch')}
+        cancelText={t('common.cancel')}
         confirmLoading={updateMutation.isPending || addMutation.isPending}
         width={960}
         destroyOnHidden
@@ -742,7 +755,7 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
             const isEditable = Boolean(leaf) && groupParamLeafSet.has(leaf) && !column.readOnly && (editModal.mode === 'add' ? true : (item?.writable ?? true));
             const enumMeta = getEffectiveEnumMeta(item?.constraints, item?.path);
             const error = leaf ? editModal.errors[leaf] : '';
-            const label = locale === 'zh-CN' ? column.titleZh : column.titleEn;
+            const label = column.titleKey ? t(column.titleKey) : (locale === 'zh-CN' ? (column.titleZh ?? column.titleEn) : column.titleEn);
             // 同列渲染：column.formatValue 收原始值；未提供则退到 enum 兜底。
             const displayValue = column.formatValue
               ? column.formatValue(value)
@@ -839,7 +852,7 @@ function resolveEarfcnFrequency(earfcn: number): number | null {
 }
 
 // 与 CellParameterForm 同语义：枚举不输出（Select 候选项已自解释），数值/长度输出 [min ~ max]。
-function formatConstraintHint(schema?: ParameterSchemaItem): string {
+function formatConstraintHint(schema: ParameterSchemaItem | undefined, t: TFn): string {
   if (!schema?.constraints) return '';
   const c = schema.constraints;
   if (c.enumValues && c.enumValues.length > 0) return '';
@@ -849,7 +862,7 @@ function formatConstraintHint(schema?: ParameterSchemaItem): string {
   if (min !== undefined || max !== undefined) {
     const lo = min ?? '-∞';
     const hi = max ?? '∞';
-    return isString ? `[长度 ${lo} ~ ${hi}]` : `[${lo} ~ ${hi}]`;
+    return isString ? t('device.multi.hintLenRange', { lo, hi }) : `[${lo} ~ ${hi}]`;
   }
   return '';
 }

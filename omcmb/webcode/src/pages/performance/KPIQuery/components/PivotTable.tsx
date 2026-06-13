@@ -12,6 +12,7 @@ import { Table, Tooltip, Empty, Typography } from 'antd';
 import type { ColumnsType, ColumnType } from 'antd/es/table';
 import { Resizable, type ResizeCallbackData } from 'react-resizable';
 import dayjs from 'dayjs';
+import { useT } from '@/hooks/useT';
 import type { AggregatedRow } from '@core/types/pmDashboard';
 import { pivotLongToWide, formatPivotNumber, type PivotColumn, type PivotRow } from '@core/utils/pmPivotTransform';
 import { useUserStore } from '@core/store/userStore';
@@ -106,6 +107,7 @@ function ResizableTitle({ width, onResize, ...restProps }: ResizableTitleProps) 
 }
 
 export default function PivotTable({ rows, loading, emptyDescription }: PivotTableProps) {
+  const t = useT();
   const pivoted = useMemo(() => pivotLongToWide(rows), [rows]);
 
   const userId = useUserStore((s) => s.currentUser?.id);
@@ -133,21 +135,21 @@ export default function PivotTable({ rows, loading, emptyDescription }: PivotTab
   const columns: ColumnsType<PivotRow> = useMemo(() => {
     const base: ColumnsType<PivotRow> = [
       {
-        title: '开始时间',
+        title: t('perf.kpiQuery.pivot.startTime'),
         dataIndex: 'startTime',
         key: 'startTime',
         width: FIXED_COL_WIDTHS.startTime,
-        render: (t?: string, r?: PivotRow) => dayjs(t ?? r?.time).format('YYYY-MM-DD HH:mm'),
+        render: (v?: string, r?: PivotRow) => dayjs(v ?? r?.time).format('YYYY-MM-DD HH:mm'),
       },
       {
-        title: '结束时间',
+        title: t('perf.kpiQuery.pivot.endTime'),
         dataIndex: 'endTime',
         key: 'endTime',
         width: FIXED_COL_WIDTHS.endTime,
-        render: (t?: string) => (t ? dayjs(t).format('YYYY-MM-DD HH:mm') : '-'),
+        render: (v?: string) => (v ? dayjs(v).format('YYYY-MM-DD HH:mm') : '-'),
       },
       {
-        title: '设备 SN',
+        title: t('perf.kpiQuery.pivot.deviceSn'),
         dataIndex: 'deviceSn',
         key: 'deviceSn',
         width: FIXED_COL_WIDTHS.deviceSn,
@@ -160,7 +162,7 @@ export default function PivotTable({ rows, loading, emptyDescription }: PivotTab
         width: FIXED_COL_WIDTHS.cellId,
         render: (v?: string, r?: PivotRow) =>
           v ?? (
-            <Tooltip title={r?.objectLdn ? `原始 LDN: ${r.objectLdn}` : '无 LDN'}>
+            <Tooltip title={r?.objectLdn ? t('perf.kpiQuery.pivot.rawLdn', { ldn: r.objectLdn }) : t('perf.kpiQuery.pivot.noLdn')}>
               <span>-</span>
             </Tooltip>
           ),
@@ -197,7 +199,7 @@ export default function PivotTable({ rows, loading, emptyDescription }: PivotTab
         },
       };
     });
-  }, [pivoted.columns, widths, handleResize]);
+  }, [pivoted.columns, widths, handleResize, t]);
 
   // 总宽 = 各列有效宽度（含已保存的拖拽宽度）累加
   const totalWidth = useMemo(() => {
@@ -217,7 +219,7 @@ export default function PivotTable({ rows, loading, emptyDescription }: PivotTab
       <Empty
         description={
           emptyDescription ?? (
-            <Text type="secondary">暂无数据，请选择查询条件后点击"查询"</Text>
+            <Text type="secondary">{t('perf.kpiQuery.pivot.emptyHint')}</Text>
           )
         }
         style={{ padding: '60px 0' }}
@@ -264,7 +266,7 @@ export default function PivotTable({ rows, loading, emptyDescription }: PivotTab
         columns={columns}
         components={{ header: { cell: ResizableTitle } }}
         dataSource={pivoted.rows}
-        pagination={{ defaultPageSize: 50, showSizeChanger: true, showTotal: (t) => `共 ${t} 行` }}
+        pagination={{ defaultPageSize: 50, showSizeChanger: true, showTotal: (count) => t('perf.kpiQuery.pivot.totalRows', { count }) }}
         tableLayout="fixed"
         scroll={{ x: totalWidth }}
         bordered

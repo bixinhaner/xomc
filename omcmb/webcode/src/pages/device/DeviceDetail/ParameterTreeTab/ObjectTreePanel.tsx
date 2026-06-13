@@ -10,6 +10,7 @@ import {
 } from '@ant-design/icons';
 import { Virtuoso } from 'react-virtuoso';
 import type { ParameterTreeNode } from '@core/types/deviceParameter';
+import { useT } from '@/hooks/useT';
 import './ObjectTreePanel.css';
 
 const { Text } = Typography;
@@ -234,6 +235,7 @@ const TreeNodeItem = React.memo<TreeNodeItemProps>(
     onAdd,
     onDelete,
   }) => {
+    const t = useT();
     const handleClick = useCallback(() => {
       const path = node.fullPath.endsWith('.') ? node.fullPath : node.fullPath + '.';
       onSelect(path);
@@ -313,7 +315,7 @@ const TreeNodeItem = React.memo<TreeNodeItemProps>(
           </span>
           <span className="tree-node-actions">
             {node.isMultiInstanceContainer && node.canAdd && onAdd && (
-              <Tooltip title="添加实例" mouseEnterDelay={0.5}>
+              <Tooltip title={t('device.paramTree.addInstance')} mouseEnterDelay={0.5}>
                 <Button
                   type="text"
                   size="small"
@@ -324,7 +326,7 @@ const TreeNodeItem = React.memo<TreeNodeItemProps>(
               </Tooltip>
             )}
             {node.isInstance && onDelete && (
-              <Tooltip title={`删除实例 #${node.name}`} mouseEnterDelay={0.5}>
+              <Tooltip title={t('device.paramTree.deleteInstance', { name: node.name })} mouseEnterDelay={0.5}>
                 <Button
                   type="text"
                   size="small"
@@ -352,6 +354,7 @@ export default function ObjectTreePanel({
   onAddObject,
   onDeleteObject,
 }: ObjectTreePanelProps) {
+  const t = useT();
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
 
   // Initialize expanded keys on first load
@@ -407,7 +410,7 @@ export default function ObjectTreePanel({
   if (loading) {
     return (
       <div className="tree-panel-empty">
-        <LoadingSpinner tip="加载参数树..." />
+        <LoadingSpinner tip={t('device.parameter.loadingTree')} />
       </div>
     );
   }
@@ -417,7 +420,7 @@ export default function ObjectTreePanel({
       <div className="tree-panel-empty">
         <Empty
           image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description="暂无参数数据"
+          description={t('device.paramTree.noData')}
         />
       </div>
     );
@@ -429,10 +432,10 @@ export default function ObjectTreePanel({
       <div className="tree-panel-header">
         <div className="tree-panel-title">
           <ApartmentOutlined />
-          <span>对象树</span>
+          <span>{t('device.paramTree.objectTree')}</span>
         </div>
         <Text type="secondary" style={{ fontSize: 11 }}>
-          {totalObjects} 个对象
+          {t('device.paramTree.objectCount', { count: totalObjects })}
         </Text>
       </div>
 

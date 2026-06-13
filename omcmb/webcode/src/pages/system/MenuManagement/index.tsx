@@ -124,16 +124,16 @@ function mapBackendMenu(b: BackendMenu): MenuItem {
 }
 
 // 菜单类型选项
-const MENU_TYPE_OPTIONS = [
-  { label: '目录', value: 'directory' },
-  { label: '菜单', value: 'menu' },
-  { label: '按钮', value: 'button' },
+const buildMenuTypeOptions = (t: (id: string) => string) => [
+  { label: t('menu.radio.directory'), value: 'directory' },
+  { label: t('menu.radio.menu'), value: 'menu' },
+  { label: t('menu.radio.button'), value: 'button' },
 ];
 
 // 菜单状态选项
-const MENU_STATUS_OPTIONS = [
-  { label: '正常', value: 'normal' },
-  { label: '停用', value: 'disabled' },
+const buildMenuStatusOptions = (t: (id: string) => string) => [
+  { label: t('menu.radio.normal'), value: 'normal' },
+  { label: t('menu.radio.disabled'), value: 'disabled' },
 ];
 
 // DEFAULT_OPERATIONS 占位常量已拆到同级 ./constants.ts
@@ -239,9 +239,9 @@ export default function MenuManagement() {
   // 搜索字段配置
   // 固定宽度：筛选框不随整行拉伸（width 设置后 FilterBar 用 flex:0 0 Npx）。
   const filterFields: FilterField[] = useMemo(() => [
-    { name: 'name', label: '菜单名称', type: 'input', placeholder: '请输入菜单名称', width: 240 },
-    { name: 'status', label: '状态', type: 'select', placeholder: '请选择状态', options: MENU_STATUS_OPTIONS, width: 180 },
-  ], []);
+    { name: 'name', label: t('menu.column.name'), type: 'input', placeholder: t('menu.placeholder.name'), width: 240 },
+    { name: 'status', label: t('menu.column.status'), type: 'select', placeholder: t('menu.placeholder.status'), options: buildMenuStatusOptions(t), width: 180 },
+  ], [t]);
 
   // 根据展开状态扁平化菜单数据
   const flatMenus = useMemo(() => {
@@ -300,7 +300,8 @@ export default function MenuManagement() {
   const handleDelete = useCallback((menu: MenuItem) => {
     modal.confirm({
       title: t('common.confirmDelete'),
-      content: `确定要删除菜单「${menu.name}」吗？${menu.children && menu.children.length > 0 ? '该菜单下的子菜单也将被删除。' : ''}`,
+      content: t('menu.confirm.deleteContent', { name: menu.name })
+        + (menu.children && menu.children.length > 0 ? t('menu.confirm.deleteChildrenSuffix') : ''),
       onOk: () => {
         deleteMenusMut.mutate([menu.id], {
           onSuccess: () => message.success(t('common.deleteSuccess')),
@@ -396,8 +397,8 @@ export default function MenuManagement() {
         children: item.children ? buildTree(item.children) : undefined,
       }));
     };
-    return [{ value: '0', title: '主类目', children: buildTree(menus) }];
-  }, [menus]);
+    return [{ value: '0', title: t('menu.treeRoot'), children: buildTree(menus) }];
+  }, [menus, t]);
 
   // 打开新增弹窗
   const handleAdd = useCallback(() => {
@@ -470,12 +471,12 @@ export default function MenuManagement() {
       fixed: 'right',
       render: (_, record) => {
         const moreItems: MenuProps['items'] = [
-          { key: 'delete', label: '删除', icon: <DeleteOutlined />, danger: true, onClick: () => handleDelete(record) },
+          { key: 'delete', label: t('common.delete'), icon: <DeleteOutlined />, danger: true, onClick: () => handleDelete(record) },
         ];
         return (
           <Space size={4}>
             <Button type="link" size="small" onClick={() => handleEdit(record)}>
-              编辑
+              {t('common.edit')}
             </Button>
             <Dropdown menu={{ items: moreItems }} trigger={['click']}>
               <Button type="text" size="small" icon={<MoreOutlined />} onClick={(e) => e.stopPropagation()} />
@@ -486,7 +487,7 @@ export default function MenuManagement() {
     },
     {
       key: 'icon',
-      title: '图标',
+      title: t('menu.column.icon'),
       dataIndex: 'icon',
       width: 60,
       render: (raw: unknown) => {
@@ -498,7 +499,7 @@ export default function MenuManagement() {
         // icon 名给运营定位 fixup 项。
         if (!Icon) {
           return (
-            <Tooltip title={`${val}（未在白名单）`}>
+            <Tooltip title={t('menu.iconNotWhitelisted', { name: val })}>
               <ExclamationCircleOutlined style={{ color: 'var(--color-error)', fontSize: 16 }} />
             </Tooltip>
           );
@@ -508,7 +509,7 @@ export default function MenuManagement() {
     },
     {
       key: 'name',
-      title: '菜单名称（中文）',
+      title: t('menu.column.nameZh'),
       dataIndex: 'name',
       width: 260,
       render: (val, record) => {
@@ -544,7 +545,7 @@ export default function MenuManagement() {
     },
     {
       key: 'nameEn',
-      title: '菜单名称（English）',
+      title: t('menu.column.nameEn'),
       // nameI18n 是嵌套对象，无法用 dataIndex 直取；用 render 自定义。
       // 缺译文时显示 "-"，与图标列保持一致的「无值」视觉。
       dataIndex: 'id',
@@ -557,15 +558,15 @@ export default function MenuManagement() {
     },
     {
       key: 'type',
-      title: '类型',
+      title: t('menu.column.type'),
       dataIndex: 'type',
       width: 100,
       render: (raw: unknown) => {
         const val = raw as MenuType;
         const typeMap: Record<MenuType, { color: string; text: string }> = {
-          menu: { color: 'blue', text: '菜单' },
-          directory: { color: 'green', text: '目录' },
-          button: { color: 'orange', text: '按钮' },
+          menu: { color: 'blue', text: t('menu.radio.menu') },
+          directory: { color: 'green', text: t('menu.radio.directory') },
+          button: { color: 'orange', text: t('menu.radio.button') },
         };
         const { color, text } = typeMap[val] || { color: 'default', text: String(val) };
         return <Tag color={color}>{text}</Tag>;
@@ -573,7 +574,7 @@ export default function MenuManagement() {
     },
     {
       key: 'sort',
-      title: '排序',
+      title: t('menu.column.sort'),
       dataIndex: 'sort',
       width: 120,
       render: (val, record) => {
@@ -602,7 +603,7 @@ export default function MenuManagement() {
     },
     {
       key: 'permissionKey',
-      title: '权限标识',
+      title: t('menu.column.permissionKey'),
       dataIndex: 'permissionKey',
       width: 200,
       ellipsis: true,
@@ -610,7 +611,7 @@ export default function MenuManagement() {
     },
     {
       key: 'componentPath',
-      title: '组件路径',
+      title: t('menu.column.componentPath'),
       dataIndex: 'componentPath',
       width: 180,
       ellipsis: true,
@@ -618,14 +619,14 @@ export default function MenuManagement() {
     },
     {
       key: 'status',
-      title: '状态',
+      title: t('menu.column.status'),
       dataIndex: 'status',
       width: 100,
       render: (raw: unknown) => {
         const val = raw as MenuStatus;
         return (
           <Tag color={val === 'normal' ? 'success' : 'error'}>
-            {val === 'normal' ? '正常' : '停用'}
+            {val === 'normal' ? t('menu.radio.normal') : t('menu.radio.disabled')}
           </Tag>
         );
       },
@@ -709,9 +710,9 @@ export default function MenuManagement() {
           <Form.Item
             name="type"
             label={t('menu.form.type')}
-            rules={[{ required: true, message: '请选择类型' }]}
+            rules={[{ required: true, message: t('menu.validation.type') }]}
           >
-            <Select options={MENU_TYPE_OPTIONS} disabled />
+            <Select options={buildMenuTypeOptions(t)} disabled />
           </Form.Item>
 
           {/* 根据类型动态显示字段 - 与添加页面保持一致 */}
@@ -726,7 +727,7 @@ export default function MenuManagement() {
                     <Form.Item
                       name="sort"
                       label={t('menu.form.sortOrder')}
-                      rules={[{ required: true, message: '请输入显示排序' }]}
+                      rules={[{ required: true, message: t('menu.validation.sortOrder') }]}
                     >
                       <InputNumber min={1} max={999} style={{ width: '100%' }} placeholder={t('menu.placeholder.sortOrder')} />
                     </Form.Item>
@@ -740,7 +741,7 @@ export default function MenuManagement() {
                     <Form.Item
                       name="isExternal"
                       label={t('menu.form.isExternal')}
-                      rules={[{ required: true, message: '请选择是否外链' }]}
+                      rules={[{ required: true, message: t('menu.validation.isExternal') }]}
                     >
                       <Radio.Group>
                         <Radio value="yes">{t('menu.radio.yes')}</Radio>
@@ -750,14 +751,14 @@ export default function MenuManagement() {
                     <Form.Item
                       name="routePath"
                       label={t('menu.form.routePath')}
-                      rules={[{ required: true, message: '请输入路由地址' }]}
+                      rules={[{ required: true, message: t('menu.validation.routePath') }]}
                     >
                       <Input placeholder={t('menu.placeholder.routePath')} maxLength={200} />
                     </Form.Item>
                     <Form.Item
                       name="showStatus"
                       label={t('menu.form.showStatus')}
-                      rules={[{ required: true, message: '请选择显示状态' }]}
+                      rules={[{ required: true, message: t('menu.validation.showStatus') }]}
                     >
                       <Radio.Group>
                         <Radio value="show">{t('menu.radio.show')}</Radio>
@@ -767,7 +768,7 @@ export default function MenuManagement() {
                     <Form.Item
                       name="status"
                       label={t('menu.form.status')}
-                      rules={[{ required: true, message: '请选择菜单状态' }]}
+                      rules={[{ required: true, message: t('menu.validation.status') }]}
                     >
                       <Radio.Group>
                         <Radio value="normal">{t('menu.radio.normal')}</Radio>
@@ -777,7 +778,7 @@ export default function MenuManagement() {
                     <Form.Item
                       name="apiPermission"
                       label={t('menu.form.apiPermission')}
-                      rules={[{ required: true, message: '请选择API权限' }]}
+                      rules={[{ required: true, message: t('menu.validation.apiPermission') }]}
                     >
                       <Radio.Group>
                         <Radio value="required">{t('menu.radio.required')}</Radio>
@@ -795,7 +796,7 @@ export default function MenuManagement() {
                     <Form.Item
                       name="sort"
                       label={t('menu.form.sortOrder')}
-                      rules={[{ required: true, message: '请输入显示排序' }]}
+                      rules={[{ required: true, message: t('menu.validation.sortOrder') }]}
                     >
                       <InputNumber min={1} max={999} style={{ width: '100%' }} placeholder={t('menu.placeholder.sortOrder')} />
                     </Form.Item>
@@ -809,7 +810,7 @@ export default function MenuManagement() {
                     <Form.Item
                       name="isExternal"
                       label={t('menu.form.isExternal')}
-                      rules={[{ required: true, message: '请选择是否外链' }]}
+                      rules={[{ required: true, message: t('menu.validation.isExternal') }]}
                     >
                       <Radio.Group>
                         <Radio value="yes">{t('menu.radio.yes')}</Radio>
@@ -819,7 +820,7 @@ export default function MenuManagement() {
                     <Form.Item
                       name="routePath"
                       label={t('menu.form.routePath')}
-                      rules={[{ required: true, message: '请输入路由地址' }]}
+                      rules={[{ required: true, message: t('menu.validation.routePath') }]}
                     >
                       <Input placeholder={t('menu.placeholder.routePath')} maxLength={200} />
                     </Form.Item>
@@ -844,7 +845,7 @@ export default function MenuManagement() {
                     <Form.Item
                       name="showStatus"
                       label={t('menu.form.showStatus')}
-                      rules={[{ required: true, message: '请选择显示状态' }]}
+                      rules={[{ required: true, message: t('menu.validation.showStatus') }]}
                     >
                       <Radio.Group>
                         <Radio value="show">{t('menu.radio.show')}</Radio>
@@ -854,7 +855,7 @@ export default function MenuManagement() {
                     <Form.Item
                       name="status"
                       label={t('menu.form.status')}
-                      rules={[{ required: true, message: '请选择菜单状态' }]}
+                      rules={[{ required: true, message: t('menu.validation.status') }]}
                     >
                       <Radio.Group>
                         <Radio value="normal">{t('menu.radio.normal')}</Radio>
@@ -864,7 +865,7 @@ export default function MenuManagement() {
                     <Form.Item
                       name="apiPermission"
                       label={t('menu.form.apiPermission')}
-                      rules={[{ required: true, message: '请选择API权限' }]}
+                      rules={[{ required: true, message: t('menu.validation.apiPermission') }]}
                     >
                       <Radio.Group>
                         <Radio value="required">{t('menu.radio.required')}</Radio>
@@ -882,7 +883,7 @@ export default function MenuManagement() {
                     <Form.Item
                       name="sort"
                       label={t('menu.form.sortOrder')}
-                      rules={[{ required: true, message: '请输入显示排序' }]}
+                      rules={[{ required: true, message: t('menu.validation.sortOrder') }]}
                     >
                       <InputNumber min={1} max={999} style={{ width: '100%' }} placeholder={t('menu.placeholder.sortOrder')} />
                     </Form.Item>
@@ -895,7 +896,7 @@ export default function MenuManagement() {
                     <Form.Item
                       name="status"
                       label={t('menu.form.status')}
-                      rules={[{ required: true, message: '请选择菜单状态' }]}
+                      rules={[{ required: true, message: t('menu.validation.status') }]}
                     >
                       <Radio.Group>
                         <Radio value="normal">{t('menu.radio.normal')}</Radio>
@@ -905,7 +906,7 @@ export default function MenuManagement() {
                     <Form.Item
                       name="apiPermission"
                       label={t('menu.form.apiPermission')}
-                      rules={[{ required: true, message: '请选择API权限' }]}
+                      rules={[{ required: true, message: t('menu.validation.apiPermission') }]}
                     >
                       <Radio.Group>
                         <Radio value="required">{t('menu.radio.required')}</Radio>
@@ -952,7 +953,7 @@ export default function MenuManagement() {
           <Form.Item
             name="parentId"
             label={t('menu.form.parent')}
-            rules={[{ required: true, message: '请选择上级菜单' }]}
+            rules={[{ required: true, message: t('menu.validation.parent') }]}
           >
             <TreeSelect
               treeData={menuTreeData}
@@ -963,7 +964,7 @@ export default function MenuManagement() {
           <Form.Item
             name="type"
             label={t('menu.form.menuType')}
-            rules={[{ required: true, message: '请选择菜单类型' }]}
+            rules={[{ required: true, message: t('menu.validation.menuType') }]}
           >
             <Radio.Group>
               <Radio value="directory">{t('menu.radio.directory')}</Radio>
@@ -984,7 +985,7 @@ export default function MenuManagement() {
                     <Form.Item
                       name="sort"
                       label={t('menu.form.sortOrder')}
-                      rules={[{ required: true, message: '请输入显示排序' }]}
+                      rules={[{ required: true, message: t('menu.validation.sortOrder') }]}
                     >
                       <InputNumber min={1} max={999} style={{ width: '100%' }} placeholder={t('menu.placeholder.sortOrder')} />
                     </Form.Item>
@@ -999,7 +1000,7 @@ export default function MenuManagement() {
                     <Form.Item
                       name="isExternal"
                       label={t('menu.form.isExternal')}
-                      rules={[{ required: true, message: '请选择是否外链' }]}
+                      rules={[{ required: true, message: t('menu.validation.isExternal') }]}
                       initialValue="no"
                     >
                       <Radio.Group>
@@ -1010,14 +1011,14 @@ export default function MenuManagement() {
                     <Form.Item
                       name="routePath"
                       label={t('menu.form.routePath')}
-                      rules={[{ required: true, message: '请输入路由地址' }]}
+                      rules={[{ required: true, message: t('menu.validation.routePath') }]}
                     >
                       <Input placeholder={t('menu.placeholder.routePath')} maxLength={200} />
                     </Form.Item>
                     <Form.Item
                       name="showStatus"
                       label={t('menu.form.showStatus')}
-                      rules={[{ required: true, message: '请选择显示状态' }]}
+                      rules={[{ required: true, message: t('menu.validation.showStatus') }]}
                       initialValue="show"
                     >
                       <Radio.Group>
@@ -1028,7 +1029,7 @@ export default function MenuManagement() {
                     <Form.Item
                       name="status"
                       label={t('menu.form.status')}
-                      rules={[{ required: true, message: '请选择菜单状态' }]}
+                      rules={[{ required: true, message: t('menu.validation.status') }]}
                       initialValue="normal"
                     >
                       <Radio.Group>
@@ -1039,7 +1040,7 @@ export default function MenuManagement() {
                     <Form.Item
                       name="apiPermission"
                       label={t('menu.form.apiPermission')}
-                      rules={[{ required: true, message: '请选择API权限' }]}
+                      rules={[{ required: true, message: t('menu.validation.apiPermission') }]}
                       initialValue="none"
                     >
                       <Radio.Group>
@@ -1058,7 +1059,7 @@ export default function MenuManagement() {
                     <Form.Item
                       name="sort"
                       label={t('menu.form.sortOrder')}
-                      rules={[{ required: true, message: '请输入显示排序' }]}
+                      rules={[{ required: true, message: t('menu.validation.sortOrder') }]}
                     >
                       <InputNumber min={1} max={999} style={{ width: '100%' }} placeholder={t('menu.placeholder.sortOrder')} />
                     </Form.Item>
@@ -1073,7 +1074,7 @@ export default function MenuManagement() {
                     <Form.Item
                       name="isExternal"
                       label={t('menu.form.isExternal')}
-                      rules={[{ required: true, message: '请选择是否外链' }]}
+                      rules={[{ required: true, message: t('menu.validation.isExternal') }]}
                       initialValue="no"
                     >
                       <Radio.Group>
@@ -1084,7 +1085,7 @@ export default function MenuManagement() {
                     <Form.Item
                       name="routePath"
                       label={t('menu.form.routePath')}
-                      rules={[{ required: true, message: '请输入路由地址' }]}
+                      rules={[{ required: true, message: t('menu.validation.routePath') }]}
                     >
                       <Input placeholder={t('menu.placeholder.routePath')} maxLength={200} />
                     </Form.Item>
@@ -1109,7 +1110,7 @@ export default function MenuManagement() {
                     <Form.Item
                       name="showStatus"
                       label={t('menu.form.showStatus')}
-                      rules={[{ required: true, message: '请选择显示状态' }]}
+                      rules={[{ required: true, message: t('menu.validation.showStatus') }]}
                       initialValue="show"
                     >
                       <Radio.Group>
@@ -1120,7 +1121,7 @@ export default function MenuManagement() {
                     <Form.Item
                       name="status"
                       label={t('menu.form.status')}
-                      rules={[{ required: true, message: '请选择菜单状态' }]}
+                      rules={[{ required: true, message: t('menu.validation.status') }]}
                       initialValue="normal"
                     >
                       <Radio.Group>
@@ -1131,7 +1132,7 @@ export default function MenuManagement() {
                     <Form.Item
                       name="apiPermission"
                       label={t('menu.form.apiPermission')}
-                      rules={[{ required: true, message: '请选择API权限' }]}
+                      rules={[{ required: true, message: t('menu.validation.apiPermission') }]}
                       initialValue="none"
                     >
                       <Radio.Group>
@@ -1150,7 +1151,7 @@ export default function MenuManagement() {
                     <Form.Item
                       name="sort"
                       label={t('menu.form.sortOrder')}
-                      rules={[{ required: true, message: '请输入显示排序' }]}
+                      rules={[{ required: true, message: t('menu.validation.sortOrder') }]}
                     >
                       <InputNumber min={1} max={999} style={{ width: '100%' }} placeholder={t('menu.placeholder.sortOrder')} />
                     </Form.Item>
@@ -1164,7 +1165,7 @@ export default function MenuManagement() {
                     <Form.Item
                       name="status"
                       label={t('menu.form.status')}
-                      rules={[{ required: true, message: '请选择菜单状态' }]}
+                      rules={[{ required: true, message: t('menu.validation.status') }]}
                       initialValue="normal"
                     >
                       <Radio.Group>
@@ -1175,7 +1176,7 @@ export default function MenuManagement() {
                     <Form.Item
                       name="apiPermission"
                       label={t('menu.form.apiPermission')}
-                      rules={[{ required: true, message: '请选择API权限' }]}
+                      rules={[{ required: true, message: t('menu.validation.apiPermission') }]}
                       initialValue="none"
                     >
                       <Radio.Group>

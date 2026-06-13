@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { message, Space } from 'antd';
+import { useT } from '@/hooks/useT';
 import { useExecuteStatementsStructured } from '@core/hooks/api/useMmlConsole';
 import { useExecuteMMLCommand } from '@core/hooks/api/useMML';
 import { mmlApi } from '@core/services/api/mmlApi';
@@ -66,6 +67,7 @@ interface LiveExec {
  * 结果经 SSE（mml_device_frame）就地回填表格行，整体完成后落入命令记录。
  */
 export default function MMLConsoleV2() {
+  const t = useT();
   const [deviceModalOpen, setDeviceModalOpen] = useState(false);
   const [commandModalOpen, setCommandModalOpen] = useState(false);
   const [configModalOpen, setConfigModalOpen] = useState(false);
@@ -131,7 +133,7 @@ export default function MMLConsoleV2() {
       status: 'done',
       commandId: le.taskId,
       time: le.startTime,
-      commandName: le.meta.commandName ?? `裸路径 ${opLabel(le.meta.operationType)}`,
+      commandName: le.meta.commandName ?? t('mml.consoleV2.rawPathCommand', { op: opLabel(le.meta.operationType) }),
       operationType: le.meta.operationType,
       deviceCount: le.deviceCount,
       execMeta: le.meta,
@@ -174,7 +176,7 @@ export default function MMLConsoleV2() {
       status: 'running',
       commandId: le.taskId,
       time: le.startTime,
-      commandName: le.meta.commandName ?? `裸路径 ${opLabel(le.meta.operationType)}`,
+      commandName: le.meta.commandName ?? t('mml.consoleV2.rawPathCommand', { op: opLabel(le.meta.operationType) }),
       operationType: le.meta.operationType,
       deviceCount: le.deviceCount,
       execMeta: le.meta,
@@ -225,10 +227,10 @@ export default function MMLConsoleV2() {
   // 配置摘要(顶部条③显示)。未手动配置时不显示(走默认全部)。
   const configSummary = useMemo(() => {
     if (!configTouched || !config) return undefined;
-    if (config.mode === 'standard') return `命令参数 · ${config.checkedPaths.length} 路径`;
+    if (config.mode === 'standard') return t('mml.consoleV2.configSummary.standard', { count: config.checkedPaths.length });
     const n = config.rows.filter((r) => r.path.trim()).length;
-    return `指定参数 · ${n} PATH · ${config.operationType}`;
-  }, [config, configTouched]);
+    return t('mml.consoleV2.configSummary.raw', { count: n, op: config.operationType });
+  }, [config, configTouched, t]);
 
   // #217：执行按钮可用性只看「选齐设备 + 命令/raw 路径」，不再因上一条命令未到达终态而禁用。
   // dispatching 仅遮挡当前一次下发的 HTTP 往返（见 SelectionBar 的 loading / disabled），
@@ -247,7 +249,7 @@ export default function MMLConsoleV2() {
     const snSuffix =
       targetSns.length === 1
         ? `_${targetSns[0]}`
-        : `_${targetSns[0]}等${targetSns.length}台`;
+        : t('mml.consoleV2.snSuffixMulti', { sn: targetSns[0], count: targetSns.length });
     const taskNameWithSn = (base: string): string => `${base}${snSuffix}`;
 
     let columns: ResultColumn[];
@@ -348,7 +350,7 @@ export default function MMLConsoleV2() {
         meta = {
           operationType: req.operationType,
           read: isReadOp(req.operationType),
-          label: `${req.operationType} (裸路径)`,
+          label: t('mml.consoleV2.rawPathLabel', { op: req.operationType }),
           commandName: cmdName,
         };
         // 用同一名称作为后端 task_name，使「命令记录」与「任务记录」名称对应（req4）。
@@ -364,7 +366,7 @@ export default function MMLConsoleV2() {
       }
     } catch (e) {
       setDispatching(false);
-      message.error(e instanceof Error ? e.message : '执行下发失败');
+      message.error(e instanceof Error ? e.message : t('mml.consoleV2.msg.dispatchFailed'));
       return;
     }
 
@@ -380,7 +382,7 @@ export default function MMLConsoleV2() {
       status: 'running',
       commandId: taskId,
       time: startTime,
-      commandName: meta.commandName ?? `裸路径 ${opLabel(meta.operationType)}`,
+      commandName: meta.commandName ?? t('mml.consoleV2.rawPathCommand', { op: opLabel(meta.operationType) }),
       operationType: meta.operationType,
       deviceCount,
       execMeta: meta,
@@ -404,7 +406,7 @@ export default function MMLConsoleV2() {
     });
     // #217：下发完成即解锁执行按钮，允许在本条仍「执行中」时并发发起下一条命令。
     setDispatching(false);
-    message.success(`已下发执行（任务 ${taskId}）`);
+    message.success(t('mml.consoleV2.msg.dispatched', { taskId }));
   };
 
   const handleExecute = (): void => {
@@ -439,11 +441,11 @@ export default function MMLConsoleV2() {
     const op = dispExecMeta?.operationType;
     const paths = dispColumns.map((c) => c.path);
     if (!op || paths.length === 0) {
-      message.warning('无可重新执行的命令');
+      message.warning(t('mml.consoleV2.msg.noReexecutable'));
       return;
     }
     if (!dispExecMeta?.read) {
-      message.warning('写类命令请重新选择命令并配置参数后执行');
+      message.warning(t('mml.consoleV2.msg.writeReconfig'));
       return;
     }
     void runExecute(

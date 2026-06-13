@@ -224,7 +224,7 @@ export default function UpdateModal({ open, onClose }: UpdateModalProps) {
               {preview.hasSignature ? (
                 <Tag color="success">included</Tag>
               ) : (
-                <Tag color="warning">no signature field — strict 模式将被拒</Tag>
+                <Tag color="warning">{t('systemLicense.update.noSignatureWarn')}</Tag>
               )}
             </Descriptions.Item>
           </Descriptions>

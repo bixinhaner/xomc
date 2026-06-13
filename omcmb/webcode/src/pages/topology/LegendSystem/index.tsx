@@ -4,49 +4,51 @@ import { useT } from '@/hooks/useT';
 
 const { Title, Text } = Typography;
 
+type TFn = (id: string) => string;
+
 interface LegendItem {
-  label: string;
+  labelKey: string;
   color?: string;
   bgColor?: string;
   borderColor?: string;
   dash?: string;
   shape?: 'circle' | 'rect' | 'diamond' | 'line';
-  description: string;
+  descKey: string;
 }
 
 const DEVICE_TYPE_ICONS: LegendItem[] = [
-  { label: 'eNB', color: '#1677ff', bgColor: '#e6f4ff', borderColor: '#91caff', shape: 'circle', description: '4G基站 (eNodeB)' },
-  { label: 'gNB', color: '#722ed1', bgColor: '#f9f0ff', borderColor: '#d3adf7', shape: 'circle', description: '5G基站 (gNodeB)' },
-  { label: 'CPE', color: '#13c2c2', bgColor: '#e6fffb', borderColor: '#87e8de', shape: 'circle', description: '客户前置设备 (CPE)' },
-  { label: 'eGW', color: '#fa8c16', bgColor: '#fff7e6', borderColor: '#ffd591', shape: 'diamond', description: '边缘网关 (eGateway)' },
-  { label: 'RT', color: '#389e0d', bgColor: '#f6ffed', borderColor: '#b7eb8f', shape: 'rect', description: '路由器 (Router)' },
-  { label: 'SW', color: '#cf1322', bgColor: '#fff1f0', borderColor: '#ffa39e', shape: 'rect', description: '交换机 (Switch)' },
-  { label: '域', color: '#8c8c8c', bgColor: '#f5f5f5', borderColor: '#d9d9d9', shape: 'circle', description: '网络域节点' },
-  { label: '站', color: '#d48806', bgColor: '#fffbe6', borderColor: '#ffe58f', shape: 'circle', description: '物理站点节点' },
+  { labelKey: 'gis.legend.deviceType.enb.label', color: '#1677ff', bgColor: '#e6f4ff', borderColor: '#91caff', shape: 'circle', descKey: 'gis.legend.deviceType.enb.desc' },
+  { labelKey: 'gis.legend.deviceType.gnb.label', color: '#722ed1', bgColor: '#f9f0ff', borderColor: '#d3adf7', shape: 'circle', descKey: 'gis.legend.deviceType.gnb.desc' },
+  { labelKey: 'gis.legend.deviceType.cpe.label', color: '#13c2c2', bgColor: '#e6fffb', borderColor: '#87e8de', shape: 'circle', descKey: 'gis.legend.deviceType.cpe.desc' },
+  { labelKey: 'gis.legend.deviceType.egw.label', color: '#fa8c16', bgColor: '#fff7e6', borderColor: '#ffd591', shape: 'diamond', descKey: 'gis.legend.deviceType.egw.desc' },
+  { labelKey: 'gis.legend.deviceType.rt.label', color: '#389e0d', bgColor: '#f6ffed', borderColor: '#b7eb8f', shape: 'rect', descKey: 'gis.legend.deviceType.rt.desc' },
+  { labelKey: 'gis.legend.deviceType.sw.label', color: '#cf1322', bgColor: '#fff1f0', borderColor: '#ffa39e', shape: 'rect', descKey: 'gis.legend.deviceType.sw.desc' },
+  { labelKey: 'gis.legend.deviceType.domain.label', color: '#8c8c8c', bgColor: '#f5f5f5', borderColor: '#d9d9d9', shape: 'circle', descKey: 'gis.legend.deviceType.domain.desc' },
+  { labelKey: 'gis.legend.deviceType.site.label', color: '#d48806', bgColor: '#fffbe6', borderColor: '#ffe58f', shape: 'circle', descKey: 'gis.legend.deviceType.site.desc' },
 ];
 
 const NODE_STATUS_COLORS: LegendItem[] = [
-  { label: '在线', color: '#52c41a', bgColor: '#f6ffed', description: '设备正常运行' },
-  { label: '离线', color: '#8c8c8c', bgColor: '#f5f5f5', description: '设备无法连接' },
-  { label: '告警', color: '#f5222d', bgColor: '#fff1f0', description: '设备存在活动告警' },
-  { label: '维护', color: '#fa8c16', bgColor: '#fff7e6', description: '设备处于维护状态' },
+  { labelKey: 'gis.legend.nodeStatus.online.label', color: '#52c41a', bgColor: '#f6ffed', descKey: 'gis.legend.nodeStatus.online.desc' },
+  { labelKey: 'gis.legend.nodeStatus.offline.label', color: '#8c8c8c', bgColor: '#f5f5f5', descKey: 'gis.legend.nodeStatus.offline.desc' },
+  { labelKey: 'gis.legend.nodeStatus.alarm.label', color: '#f5222d', bgColor: '#fff1f0', descKey: 'gis.legend.nodeStatus.alarm.desc' },
+  { labelKey: 'gis.legend.nodeStatus.maintenance.label', color: '#fa8c16', bgColor: '#fff7e6', descKey: 'gis.legend.nodeStatus.maintenance.desc' },
 ];
 
 const ALARM_SEVERITY_COLORS: LegendItem[] = [
-  { label: '严重', color: '#520339', bgColor: '#9e1068', description: '严重告警，需立即处理' },
-  { label: '主要', color: '#fff0f6', bgColor: '#f5222d', description: '主要告警，需尽快处理' },
-  { label: '次要', color: '#fff7e6', bgColor: '#fa8c16', description: '次要告警，需关注' },
-  { label: '警告', color: '#feffe6', bgColor: '#d4b106', description: '警告，建议关注' },
-  { label: '通知', color: '#e6f7ff', bgColor: '#1677ff', description: '普通通知' },
+  { labelKey: 'gis.legend.severity.critical.label', color: '#520339', bgColor: '#9e1068', descKey: 'gis.legend.severity.critical.desc' },
+  { labelKey: 'gis.legend.severity.major.label', color: '#fff0f6', bgColor: '#f5222d', descKey: 'gis.legend.severity.major.desc' },
+  { labelKey: 'gis.legend.severity.minor.label', color: '#fff7e6', bgColor: '#fa8c16', descKey: 'gis.legend.severity.minor.desc' },
+  { labelKey: 'gis.legend.severity.warning.label', color: '#feffe6', bgColor: '#d4b106', descKey: 'gis.legend.severity.warning.desc' },
+  { labelKey: 'gis.legend.severity.notice.label', color: '#e6f7ff', bgColor: '#1677ff', descKey: 'gis.legend.severity.notice.desc' },
 ];
 
 const EDGE_TYPES: LegendItem[] = [
-  { label: '正常连接', color: '#1677ff', shape: 'line', description: '链路正常传输中' },
-  { label: '降级连接', color: '#fa8c16', dash: '8,4', shape: 'line', description: '链路质量下降，带宽受限' },
-  { label: '断开连接', color: '#8c8c8c', dash: '4,4', shape: 'line', description: '链路断开或不可用' },
+  { labelKey: 'gis.legend.edge.normal.label', color: '#1677ff', shape: 'line', descKey: 'gis.legend.edge.normal.desc' },
+  { labelKey: 'gis.legend.edge.degraded.label', color: '#fa8c16', dash: '8,4', shape: 'line', descKey: 'gis.legend.edge.degraded.desc' },
+  { labelKey: 'gis.legend.edge.disconnected.label', color: '#8c8c8c', dash: '4,4', shape: 'line', descKey: 'gis.legend.edge.disconnected.desc' },
 ];
 
-function DeviceIconSwatch({ item }: { item: LegendItem }) {
+function DeviceIconSwatch({ item, t }: { item: LegendItem; t: TFn }) {
   const getShape = () => {
     const base: React.CSSProperties = {
       width: 40,
@@ -65,26 +67,28 @@ function DeviceIconSwatch({ item }: { item: LegendItem }) {
     return base;
   };
 
+  const label = t(item.labelKey);
+
   return (
-    <Tooltip title={item.description}>
+    <Tooltip title={t(item.descKey)}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0', cursor: 'default' }}>
         <div style={getShape()}>
           <span style={{ color: item.color, fontWeight: 700, fontSize: 11, transform: item.shape === 'diamond' ? 'rotate(-45deg)' : undefined }}>
-            {item.label}
+            {label}
           </span>
         </div>
         <div>
-          <Text style={{ fontSize: 12, fontWeight: 500, display: 'block' }}>{item.label}</Text>
-          <Text type="secondary" style={{ fontSize: 11 }}>{item.description}</Text>
+          <Text style={{ fontSize: 12, fontWeight: 500, display: 'block' }}>{label}</Text>
+          <Text type="secondary" style={{ fontSize: 11 }}>{t(item.descKey)}</Text>
         </div>
       </div>
     </Tooltip>
   );
 }
 
-function ColorSwatch({ item }: { item: LegendItem }) {
+function ColorSwatch({ item, t }: { item: LegendItem; t: TFn }) {
   return (
-    <Tooltip title={item.description}>
+    <Tooltip title={t(item.descKey)}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 0', cursor: 'default' }}>
         {item.shape === 'line' ? (
           <svg width={48} height={16} style={{ flexShrink: 0 }}>
@@ -110,8 +114,8 @@ function ColorSwatch({ item }: { item: LegendItem }) {
           }} />
         )}
         <div>
-          <Text style={{ fontSize: 12, fontWeight: 500, display: 'block' }}>{item.label}</Text>
-          <Text type="secondary" style={{ fontSize: 11 }}>{item.description}</Text>
+          <Text style={{ fontSize: 12, fontWeight: 500, display: 'block' }}>{t(item.labelKey)}</Text>
+          <Text type="secondary" style={{ fontSize: 11 }}>{t(item.descKey)}</Text>
         </div>
       </div>
     </Tooltip>
@@ -120,16 +124,21 @@ function ColorSwatch({ item }: { item: LegendItem }) {
 
 export default function LegendSystem() {
   const t = useT();
+  const otherMarkers = [
+    { symbol: '●', color: '#f5222d', labelKey: 'gis.legend.marker.redBadge' },
+    { symbol: '●', color: '#fa8c16', labelKey: 'gis.legend.marker.orangeBadge' },
+    { symbol: '⟳', color: '#1677ff', labelKey: 'gis.legend.marker.maintenance' },
+  ];
   return (
     <ListPageLayout title={t('nav.topology.legend')}>
       <Row gutter={[16, 16]}>
         {/* Device Type Icons */}
         <Col xs={24} md={12}>
-          <Card size="small" title={<Title level={5} style={{ margin: 0 }}>设备类型图标</Title>}>
+          <Card size="small" title={<Title level={5} style={{ margin: 0 }}>{t('gis.legend.section.deviceType')}</Title>}>
             <div style={{ columns: 2, columnGap: 24 }}>
               {DEVICE_TYPE_ICONS.map((item) => (
-                <div key={item.label} style={{ breakInside: 'avoid' }}>
-                  <DeviceIconSwatch item={item} />
+                <div key={item.labelKey} style={{ breakInside: 'avoid' }}>
+                  <DeviceIconSwatch item={item} t={t} />
                 </div>
               ))}
             </div>
@@ -138,26 +147,26 @@ export default function LegendSystem() {
 
         {/* Node Status */}
         <Col xs={24} md={12}>
-          <Card size="small" title={<Title level={5} style={{ margin: 0 }}>节点状态颜色</Title>}>
+          <Card size="small" title={<Title level={5} style={{ margin: 0 }}>{t('gis.legend.section.nodeStatus')}</Title>}>
             {NODE_STATUS_COLORS.map((item) => (
-              <ColorSwatch key={item.label} item={item} />
+              <ColorSwatch key={item.labelKey} item={item} t={t} />
             ))}
           </Card>
         </Col>
 
         {/* Alarm Severity */}
         <Col xs={24} md={12}>
-          <Card size="small" title={<Title level={5} style={{ margin: 0 }}>告警级别颜色</Title>}>
+          <Card size="small" title={<Title level={5} style={{ margin: 0 }}>{t('gis.legend.section.alarmSeverity')}</Title>}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {ALARM_SEVERITY_COLORS.map((item) => (
-                <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div key={item.labelKey} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <Tag
                     color={item.bgColor}
                     style={{ color: item.color, minWidth: 48, textAlign: 'center', fontWeight: 600 }}
                   >
-                    {item.label}
+                    {t(item.labelKey)}
                   </Tag>
-                  <Text type="secondary" style={{ fontSize: 12 }}>{item.description}</Text>
+                  <Text type="secondary" style={{ fontSize: 12 }}>{t(item.descKey)}</Text>
                 </div>
               ))}
             </div>
@@ -166,22 +175,18 @@ export default function LegendSystem() {
 
         {/* Edge Types */}
         <Col xs={24} md={12}>
-          <Card size="small" title={<Title level={5} style={{ margin: 0 }}>连线类型</Title>}>
+          <Card size="small" title={<Title level={5} style={{ margin: 0 }}>{t('gis.legend.section.edgeType')}</Title>}>
             {EDGE_TYPES.map((item) => (
-              <ColorSwatch key={item.label} item={item} />
+              <ColorSwatch key={item.labelKey} item={item} t={t} />
             ))}
 
             <div style={{ borderTop: '1px solid #f0f0f0', marginTop: 16, paddingTop: 12 }}>
-              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>其他标记说明:</Text>
+              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>{t('gis.legend.otherMarkers')}</Text>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {[
-                  { symbol: '●', color: '#f5222d', label: '红色角标 - 存在严重/主要告警' },
-                  { symbol: '●', color: '#fa8c16', label: '橙色角标 - 存在次要/警告告警' },
-                  { symbol: '⟳', color: '#1677ff', label: '蓝色图标 - 正在维护操作' },
-                ].map((s) => (
-                  <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {otherMarkers.map((s) => (
+                  <div key={s.labelKey} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <span style={{ color: s.color, fontSize: 16, lineHeight: 1, width: 20, textAlign: 'center' }}>{s.symbol}</span>
-                    <Text style={{ fontSize: 12 }}>{s.label}</Text>
+                    <Text style={{ fontSize: 12 }}>{t(s.labelKey)}</Text>
                   </div>
                 ))}
               </div>

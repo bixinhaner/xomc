@@ -34,13 +34,17 @@ import { selectorKeysForArity } from './instanceArity';
  *   · 动态上限 → "≥ 1（上限：NumberOfEntries）"
  *   · 无 metadata → "请输入实例号"
  */
-function buildPlaceholder(range: InstanceRange | undefined, fallback: string): string {
+function buildPlaceholder(
+  range: InstanceRange | undefined,
+  fallback: string,
+  t: (id: string, values?: Record<string, string | number>) => string,
+): string {
   if (!range) return fallback;
   const min = range.rangeMin;
   const max = range.rangeMax;
   if (typeof min === 'number' && typeof max === 'number') return `${min}~${max}`;
   if (typeof min === 'number' && range.dynamic && range.nSource) {
-    return `≥ ${min}（上限：${range.nSource}）`;
+    return t('mml.console.instanceArity.placeholderDynamic', { min, source: range.nSource });
   }
   if (typeof min === 'number') return `≥ ${min}`;
   if (typeof max === 'number') return `≤ ${max}`;
@@ -141,7 +145,7 @@ export function InstanceArityInput({
                   size="small"
                   status={!validation.ok ? 'error' : undefined}
                   style={{ width: 120 }}
-                  placeholder={buildPlaceholder(range, t('mml.console.instanceArity.placeholder'))}
+                  placeholder={buildPlaceholder(range, t('mml.console.instanceArity.placeholder'), t)}
                   value={value}
                   disabled={disabled}
                   onChange={(e) => onChange(key, e.target.value)}

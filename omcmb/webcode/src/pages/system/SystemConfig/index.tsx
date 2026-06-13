@@ -145,7 +145,7 @@ export default function SystemConfig() {
       await batchUpdate.mutateAsync({ category: activeTab, items });
       void message.success(t('common.save'));
     } catch (err) {
-      const msg = err instanceof Error ? err.message : '保存失败';
+      const msg = err instanceof Error ? err.message : t('sysconfig.error.saveFailed');
       void message.error(msg);
     }
   }, [activeTab, formMap, configList, batchUpdate, t]);

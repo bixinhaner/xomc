@@ -5,6 +5,7 @@ import type { ColumnsType, TableProps } from 'antd/es/table';
 import type { DeviceParameter, ParameterType } from '@core/types/deviceParameter';
 import type { PageResponse } from '@core/types/pagination';
 import ParameterEditModal from './ParameterEditModal';
+import { useT } from '@/hooks/useT';
 
 const { Text } = Typography;
 
@@ -46,11 +47,12 @@ export default function TableView({
   pageSize,
   onPageChange,
 }: TableViewProps) {
+  const t = useT();
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
 
   const columns: ColumnsType<DeviceParameter> = [
     {
-      title: '参数路径',
+      title: t('device.paramTree.colPath'),
       dataIndex: 'parameterPath',
       key: 'parameterPath',
       width: 400,
@@ -67,19 +69,19 @@ export default function TableView({
       ),
     },
     {
-      title: '值',
+      title: t('device.paramTree.colValue'),
       dataIndex: 'parameterValue',
       key: 'parameterValue',
       width: 200,
       ellipsis: true,
       render: (v: string) => (
         <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>
-          {v || '(空)'}
+          {v || t('device.paramTree.emptyValue')}
         </Text>
       ),
     },
     {
-      title: '类型',
+      title: t('table.type'),
       dataIndex: 'parameterType',
       key: 'parameterType',
       width: 120,
@@ -97,23 +99,23 @@ export default function TableView({
       ),
     },
     {
-      title: '可写',
+      title: t('device.paramTree.writable'),
       dataIndex: 'writable',
       key: 'writable',
       width: 80,
       filters: [
-        { text: '可写', value: true },
-        { text: '只读', value: false },
+        { text: t('device.paramTree.writable'), value: true },
+        { text: t('device.paramTree.readonly'), value: false },
       ],
       render: (v: boolean) =>
         v ? (
-          <Tag color="success">可写</Tag>
+          <Tag color="success">{t('device.paramTree.writable')}</Tag>
         ) : (
-          <Tag color="default">只读</Tag>
+          <Tag color="default">{t('device.paramTree.readonly')}</Tag>
         ),
     },
     {
-      title: '最后更新',
+      title: t('device.paramTree.colLastUpdate'),
       dataIndex: 'lastUpdatedAt',
       key: 'lastUpdatedAt',
       width: 170,
@@ -128,7 +130,7 @@ export default function TableView({
         ),
     },
     {
-      title: '操作',
+      title: t('table.operation'),
       key: 'action',
       width: 80,
       fixed: 'right',
@@ -151,7 +153,7 @@ export default function TableView({
   ];
 
   if (!data && !loading) {
-    return <Empty description="暂无参数数据，请先执行参数发现" />;
+    return <Empty description={t('device.parameter.noDataHint')} />;
   }
 
   // Calculate dynamic scroll height and virtual scroll threshold
@@ -174,7 +176,7 @@ export default function TableView({
       pageSize,
       total: data?.total ?? 0,
       showSizeChanger: true,
-      showTotal: (total) => `共 ${total} 条参数`,
+      showTotal: (total) => t('device.paramTree.totalParams', { total }),
       pageSizeOptions: ['20', '50', '100', '200'],
       onChange: onPageChange,
     },

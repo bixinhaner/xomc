@@ -309,8 +309,8 @@ export default function GroupTreePanel({
 
       {/* 保留部分原有的样式，用于特定细节 */}
       <style>{`
-        /* L2 dot indicator —— 用户反馈：折叠箭头/分组图标/分组名称之间太散；
-         * 间隔统一压到原来一半（margin-right 8→4，margin-left 2→1）。 */
+        /* L2 dot indicator: tighten spacing between collapse arrow / group icon / group name
+         * to half the original (margin-right 8->4, margin-left 2->1). */
         .group-tree-dot {
           display: inline-block;
           width: 4px;
@@ -329,24 +329,24 @@ export default function GroupTreePanel({
           padding-bottom: 4px !important;
         }
 
-        /* Reduce indent —— 减少子节点缩进 */
+        /* Reduce indent of child nodes */
         .group-tree .ant-tree-indent-unit {
           width: 8px !important;
         }
 
-        /* 收紧 折叠箭头 ↔ 分组图标 间距：antd 默认 switcher 占 24px 太宽
-         * margin-right:0 防止 antd 自带的右外边距把图标推开。 */
+        /* Tighten collapse-arrow <-> group-icon spacing: antd default switcher is 24px (too wide);
+         * margin-right:0 prevents antd's built-in right margin from pushing the icon away. */
         .group-tree .ant-tree-switcher {
           width: 16px !important;
           margin-right: 0 !important;
         }
 
-        /* node-content-wrapper 默认 padding 把 .groupNode 又推开一截，归零。 */
+        /* node-content-wrapper default padding pushes .groupNode further; reset to zero. */
         .group-tree .ant-tree-node-content-wrapper {
           padding: 0 !important;
         }
 
-        /* 收紧 分组图标 ↔ 分组名称 间距：treeNodeContent 默认 gap 8 → 4 */
+        /* Tighten group-icon <-> group-name spacing: treeNodeContent default gap 8 -> 4 */
         .group-tree .ant-tree-title > div > .ant-tooltip + * ,
         .group-tree .ant-tree-title [class*="treeNodeContent"] {
           gap: 4px !important;

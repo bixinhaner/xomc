@@ -188,17 +188,17 @@ export default function FileTransferCenter() {
       ...base,
       {
         category: 'mr_measurement',
-        categoryLabel: 'MR 测量', // 通过 localizeBuiltinCategoryLabel 翻译
+        categoryLabel: t('ufte.builtin.category.mr_measurement'), // 通过 localizeBuiltinCategoryLabel 翻译
         templateCount: 0,
       },
       {
         // KPI-EXPORT：KPI 导出虚拟分类，内联渲染 KpiExportTasksPanel 看导出任务状态。
         category: 'kpi_export',
-        categoryLabel: 'KPI 导出', // 通过 localizeBuiltinCategoryLabel 翻译
+        categoryLabel: t('ufte.builtin.category.kpi_export'), // 通过 localizeBuiltinCategoryLabel 翻译
         templateCount: 0,
       },
     ];
-  }, [taskTypes]);
+  }, [taskTypes, t]);
   // URL 参数初始化：?category=...&typeCode=... 用于外部 deep link（如
   // 设备列表批量"日志收集"自动跳到 station_log + RUNTIME_LOG_COLLECT tab）。
   const [urlSearchParams] = useSearchParams();

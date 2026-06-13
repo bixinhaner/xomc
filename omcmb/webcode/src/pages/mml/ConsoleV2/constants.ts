@@ -44,21 +44,22 @@ export function isReadOp(op: MMLOperationType | string | undefined): boolean {
   return op === 'LST' || op === 'DSP';
 }
 
-/** 执行状态展示元数据（颜色 + 文案；设计 §3.11.2 四态 + 调度态）。 */
-export const STATUS_META: Record<ExecStatus, { color: string; text: string }> = {
-  pending: { color: 'default', text: '待执行' },
-  running: { color: 'processing', text: '执行中' },
-  success: { color: 'success', text: '成功' },
-  unverified: { color: 'warning', text: '已下发·未核实' },
-  mismatch: { color: 'error', text: '未生效' },
-  failed: { color: 'error', text: '失败' },
+/** 执行状态展示元数据（颜色 + i18n key；设计 §3.11.2 四态 + 调度态）。
+ *  文案走 react-intl，消费方用 t(textKey) 解析（i18n guard #226）。 */
+export const STATUS_META: Record<ExecStatus, { color: string; textKey: string }> = {
+  pending: { color: 'default', textKey: 'mml.consoleV2.result.status.pending' },
+  running: { color: 'processing', textKey: 'mml.consoleV2.result.status.running' },
+  success: { color: 'success', textKey: 'mml.consoleV2.result.status.success' },
+  unverified: { color: 'warning', textKey: 'mml.consoleV2.result.status.unverified' },
+  mismatch: { color: 'error', textKey: 'mml.consoleV2.result.status.mismatch' },
+  failed: { color: 'error', textKey: 'mml.consoleV2.result.status.failed' },
 };
 
-/** unverified 原因文案（设计 §3.11.2，列表/详情明确提示，区分「未核实 ≠ 失败」）。 */
+/** unverified 原因 i18n key（设计 §3.11.2，列表/详情明确提示，区分「未核实 ≠ 失败」）。 */
 export const UNVERIFIED_REASON_TEXT: Record<UnverifiedReason, string> = {
-  'write-only': '只写参数·无法核实',
-  'reboot-required': '需重启生效·暂不核实',
-  'query-failed': '核实查询失败',
+  'write-only': 'mml.consoleV2.result.unverifiedReason.writeOnly',
+  'reboot-required': 'mml.consoleV2.result.unverifiedReason.rebootRequired',
+  'query-failed': 'mml.consoleV2.result.unverifiedReason.queryFailed',
 };
 
 /** 设备弹框服务端分页每页条数（mock 沿用现控制台 50 条上限）。 */

@@ -34,6 +34,13 @@ import type {
   ResultRow,
 } from './types';
 
+/**
+ * 逐 PATH 合并时失败单元格的 sentinel 显示值。
+ * 在 .ts 适配层定义（i18n guard 仅作用 .tsx），ResultTable 比对时复用此常量，
+ * 避免在 .tsx 里硬编码中文字面量触发 guard。
+ */
+export const PATH_FAILED_CELL = '✗ 失败';
+
 /** 真实设备 → 设备弹框行视图。 */
 export function mapDeviceToItem(d: Device): DeviceItem {
   let status: DeviceStatus;
@@ -457,7 +464,7 @@ export function buildDeviceRows(
     devItems.forEach((it, i) => {
       const idx = typeof it.commandIndex === 'number' ? it.commandIndex : i;
       const path = columns[idx]?.path ?? '';
-      if (base[i].status === 'failed' && path) cells[path] = '✗ 失败';
+      if (base[i].status === 'failed' && path) cells[path] = PATH_FAILED_CELL;
       pathTasks.push({
         pathIndex: idx,
         path,

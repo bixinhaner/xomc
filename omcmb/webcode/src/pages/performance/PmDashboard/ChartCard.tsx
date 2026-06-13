@@ -14,6 +14,7 @@ import { useMemo } from 'react';
 import { Card } from 'antd';
 import ReactECharts from 'echarts-for-react';
 import dayjs from 'dayjs';
+import { useT } from '@/hooks/useT';
 import type { MetricChart } from './taskDashboardUtils';
 import { computeTooltipPosition } from '@/components/Charts/LineChart';
 
@@ -28,6 +29,7 @@ interface TooltipParam {
 }
 
 export default function ChartCard({ chart }: { chart: MetricChart }) {
+  const t = useT();
   const xLabels = useMemo(() => chart.buckets.map(fmtTime), [chart.buckets]);
   const currentSeries = chart.series.map((s) => ({
     name: s.name,
@@ -56,7 +58,7 @@ export default function ChartCard({ chart }: { chart: MetricChart }) {
     const start = chart.buckets[idx] ?? '';
     const end = chart.bucketEnds[idx] ?? '';
     let header = end
-      ? `开始 ${fmtTime(start)}<br/>结束 ${fmtTime(end)}`
+      ? `${t('pm.chart.tooltipStart')} ${fmtTime(start)}<br/>${t('pm.chart.tooltipEnd')} ${fmtTime(end)}`
       : fmtTime(start);
     // T-0194：周期对比开启时，补一行上一周期对应桶的真实「开始~结束」时间段（非照搬当前轴标签）。
     if (chart.compareSeries && chart.compareSeries.length > 0) {
@@ -64,8 +66,8 @@ export default function ChartCard({ chart }: { chart: MetricChart }) {
       const pEnd = chart.compareBucketEnds?.[idx] ?? '';
       if (pStart) {
         header += pEnd
-          ? `<br/>上一周期 ${fmtTime(pStart)} ~ ${fmtTime(pEnd)}`
-          : `<br/>上一周期 ${fmtTime(pStart)}`;
+          ? `<br/>${t('pm.chart.tooltipPrevPeriod')} ${fmtTime(pStart)} ~ ${fmtTime(pEnd)}`
+          : `<br/>${t('pm.chart.tooltipPrevPeriod')} ${fmtTime(pStart)}`;
       }
     }
     const lines = arr

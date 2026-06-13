@@ -14,6 +14,7 @@ import {
 import { useSyncDeviceParams } from '@core/hooks/api/useDevices';
 import ObjectTreePanel from './ObjectTreePanel';
 import ChildParamTable from './ChildParamTable';
+import { useT } from '@/hooks/useT';
 
 dayjs.extend(relativeTime);
 dayjs.locale('zh-cn');
@@ -23,6 +24,7 @@ interface ParameterTreeTabProps {
 }
 
 export default function ParameterTreeTab({ deviceId }: ParameterTreeTabProps) {
+  const t = useT();
   const { token } = theme.useToken();
   const [selectedPath, setSelectedPath] = useState<string>('');
   const [searchKeyword, setSearchKeyword] = useState('');
@@ -78,17 +80,17 @@ export default function ParameterTreeTab({ deviceId }: ParameterTreeTabProps) {
       { deviceId },
       {
         onSuccess: (data) => {
-          message.success(`参数同步已入队（${data.sourceId}）`);
+          message.success(t('device.paramTree.syncQueued', { id: data.sourceId }));
           refetchSyncStatus();
         },
         onError: (err) => {
-          // Path B 不可用（503）/ 设备 404 / starter nil（500）— 显示明确错误
-          const errorMsg = err instanceof Error ? err.message : '参数同步触发失败';
+          // Path B unavailable (503) / device 404 / starter nil (500) — show explicit error
+          const errorMsg = err instanceof Error ? err.message : t('device.paramTree.syncTriggerFailed');
           message.error(errorMsg);
         },
       }
     );
-  }, [deviceId, syncMutation, refetchSyncStatus]);
+  }, [deviceId, syncMutation, refetchSyncStatus, t]);
 
   const handleSelectNode = useCallback((path: string) => {
     setSelectedPath(path);
@@ -105,12 +107,12 @@ export default function ParameterTreeTab({ deviceId }: ParameterTreeTabProps) {
       addObjectMutation.mutate(
         { deviceId, objectPath },
         {
-          onSuccess: () => message.success(`实例添加命令已下发: ${objectPath}`),
-          onError: () => message.error('添加实例失败'),
+          onSuccess: () => message.success(t('device.paramTree.addInstanceSent', { path: objectPath })),
+          onError: () => message.error(t('device.paramTree.addInstanceFailed')),
         }
       );
     },
-    [deviceId, addObjectMutation]
+    [deviceId, addObjectMutation, t]
   );
 
   const handleDeleteObject = useCallback(
@@ -118,12 +120,12 @@ export default function ParameterTreeTab({ deviceId }: ParameterTreeTabProps) {
       deleteObjectMutation.mutate(
         { deviceId, objectPath },
         {
-          onSuccess: () => message.success(`实例删除命令已下发: ${objectPath}`),
-          onError: () => message.error('删除实例失败'),
+          onSuccess: () => message.success(t('device.paramTree.deleteInstanceSent', { path: objectPath })),
+          onError: () => message.error(t('device.paramTree.deleteInstanceFailed')),
         }
       );
     },
-    [deviceId, deleteObjectMutation]
+    [deviceId, deleteObjectMutation, t]
   );
 
   return (
@@ -140,7 +142,7 @@ export default function ParameterTreeTab({ deviceId }: ParameterTreeTabProps) {
         }}
       >
         <Input.Search
-          placeholder="搜索参数路径或值"
+          placeholder={t('device.paramTree.searchPlaceholder')}
           allowClear
           onSearch={setSearchKeyword}
           style={{ width: 280 }}
@@ -157,32 +159,32 @@ export default function ParameterTreeTab({ deviceId }: ParameterTreeTabProps) {
             isSyncing ? (
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                 <LoadingOutlined style={{ marginRight: 4 }} />
-                同步中
+                {t('device.paramTree.syncing')}
                 {syncStatus.pendingCommands > 0
-                  ? ` · 待处理 ${syncStatus.pendingCommands} 条命令`
+                  ? t('device.paramTree.syncPending', { count: syncStatus.pendingCommands })
                   : ''}
               </Typography.Text>
             ) : syncStatus.lastParamSyncAt ? (
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                上次同步：{dayjs(syncStatus.lastParamSyncAt).fromNow()}
+                {t('device.paramTree.lastSync', { time: dayjs(syncStatus.lastParamSyncAt).fromNow() })}
                 {syncStatus.totalParameters > 0
-                  ? ` · 共 ${syncStatus.totalParameters} 参数`
+                  ? t('device.paramTree.syncTotal', { count: syncStatus.totalParameters })
                   : ''}
               </Typography.Text>
             ) : (
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                从未同步
+                {t('device.paramTree.neverSynced')}
               </Typography.Text>
             )
           )}
-          <Tooltip title="从设备同步全部参数值（异步执行）">
+          <Tooltip title={t('device.paramTree.syncTooltip')}>
             <Button
               icon={<SyncOutlined />}
               onClick={handleSync}
               loading={syncMutation.isPending}
               disabled={isSyncing}
             >
-              同步参数
+              {t('device.paramTree.syncParams')}
             </Button>
           </Tooltip>
         </Space>
@@ -195,8 +197,8 @@ export default function ParameterTreeTab({ deviceId }: ParameterTreeTabProps) {
           type="error"
           showIcon
           style={{ marginBottom: 16 }}
-          message={`上次同步失败：${dayjs(syncStatus.lastParamSyncFailedAt).fromNow()}`}
-          description={syncStatus.lastParamSyncError || '（无错误详情）'}
+          message={t('device.paramTree.lastSyncFailed', { time: dayjs(syncStatus.lastParamSyncFailedAt).fromNow() })}
+          description={syncStatus.lastParamSyncError || t('device.paramTree.noErrorDetail')}
         />
       )}
 

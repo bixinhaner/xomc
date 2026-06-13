@@ -134,7 +134,7 @@ export default function SecuritySettings({ form }: SecuritySettingsProps) {
         </div>
         <div style={subSettingStyle}>
           <Space wrap>
-            如果用户名或密码尝试错误
+            {t('sysconfig.security.failedAttemptsPrefix')}
             <Form.Item name="sumTimes" noStyle>
               <InputNumber min={1} max={20} style={{ width: 60 }} />
             </Form.Item>
@@ -151,7 +151,7 @@ export default function SecuritySettings({ form }: SecuritySettingsProps) {
       <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.security.ipRateLimit')}</span>} style={{ marginBottom: 16 }}>
         <div style={settingRowStyle}>
           <Space wrap>
-            如果你在
+            {t('sysconfig.security.ifWithinPrefix')}
             <Form.Item name="limitMinus" noStyle>
               <InputNumber min={1} max={60} style={{ width: 60 }} />
             </Form.Item>
@@ -172,7 +172,7 @@ export default function SecuritySettings({ form }: SecuritySettingsProps) {
       <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.security.screenLockout')}</span>} style={{ marginBottom: 16 }}>
         <div style={settingRowStyle}>
           <Space>
-            如果用户
+            {t('sysconfig.security.ifUserPrefix')}
             <Form.Item name="userSessionExpirationMin" noStyle>
               <InputNumber min={0} max={480} style={{ width: 60 }} />
             </Form.Item>

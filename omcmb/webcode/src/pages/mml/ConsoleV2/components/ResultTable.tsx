@@ -25,6 +25,7 @@ import type {
 } from '../types';
 import { STATUS_META, UNVERIFIED_REASON_TEXT } from '../constants';
 import { exportAll, exportOne, saveBlob } from '../download';
+import { PATH_FAILED_CELL } from '../adapters';
 import ResultDetailModal from './ResultDetailModal';
 
 const { Text } = Typography;
@@ -44,11 +45,19 @@ interface ResultTableProps {
 type StatusFilter = 'all' | 'success' | 'failed';
 
 /** 状态 Tag；unverified 悬浮显示原因（只写/重启生效/查询失败，设计 §3.11.2）。 */
-function StatusTag({ status, reason }: { status: ExecStatus; reason?: UnverifiedReason }) {
+function StatusTag({
+  status,
+  reason,
+  t,
+}: {
+  status: ExecStatus;
+  reason?: UnverifiedReason;
+  t: (id: string) => string;
+}) {
   const meta = STATUS_META[status];
-  const tag = <Tag color={meta.color}>{meta.text}</Tag>;
+  const tag = <Tag color={meta.color}>{t(meta.textKey)}</Tag>;
   if (status === 'unverified' && reason) {
-    return <Tooltip title={UNVERIFIED_REASON_TEXT[reason]}>{tag}</Tooltip>;
+    return <Tooltip title={t(UNVERIFIED_REASON_TEXT[reason])}>{tag}</Tooltip>;
   }
   return tag;
 }
@@ -82,13 +91,13 @@ export default function ResultTable({
       exportAll('csv', columns, rows, execMeta?.label ?? 'result');
       return;
     }
-    const name = `${execMeta?.commandName ?? execMeta?.label ?? 'mml-result'}-汇总.csv`;
+    const name = t('mml.consoleV2.result.summaryFileName', { name: execMeta?.commandName ?? execMeta?.label ?? 'mml-result' });
     exportCsv.mutate(commandId, {
       onSuccess: (blob) => {
         saveBlob(blob, name);
-        void message.success('已下载汇总 CSV');
+        void message.success(t('mml.consoleV2.result.summaryDownloaded'));
       },
-      onError: (e) => void message.error(e instanceof Error ? e.message : '导出失败'),
+      onError: (e) => void message.error(e instanceof Error ? e.message : t('mml.consoleV2.result.exportFailed')),
     });
   };
 
@@ -104,9 +113,9 @@ export default function ResultTable({
       {
         onSuccess: (blob) => {
           saveBlob(blob, `${cmd}_${deviceSn}.csv`);
-          void message.success(`已下载设备 ${deviceSn} 的 CSV`);
+          void message.success(t('mml.consoleV2.result.deviceDownloaded', { sn: deviceSn }));
         },
-        onError: (e) => void message.error(e instanceof Error ? e.message : '导出失败'),
+        onError: (e) => void message.error(e instanceof Error ? e.message : t('mml.consoleV2.result.exportFailed')),
       },
     );
   };
@@ -140,14 +149,14 @@ export default function ResultTable({
   const tableColumns: ColumnsType<ResultRow> = useMemo(() => {
     const base: ColumnsType<ResultRow> = [
       {
-        title: '序号',
+        title: t('mml.consoleV2.result.col.idx'),
         key: 'idx',
         width: 60,
         fixed: 'left',
         render: (_v, _r, i) => i + 1,
       },
       {
-        title: '设备SN',
+        title: t('mml.consoleV2.result.col.deviceSn'),
         dataIndex: 'deviceSn',
         key: 'deviceSn',
         width: 190,
@@ -155,12 +164,12 @@ export default function ResultTable({
         ellipsis: true,
       },
       {
-        title: '状态',
+        title: t('mml.consoleV2.result.col.status'),
         dataIndex: 'status',
         key: 'status',
         width: 120,
         fixed: 'left',
-        render: (s: ExecStatus, r) => <StatusTag status={s} reason={r.unverifiedReason} />,
+        render: (s: ExecStatus, r) => <StatusTag status={s} reason={r.unverifiedReason} t={t} />,
       },
     ];
 
@@ -174,13 +183,13 @@ export default function ResultTable({
         if (r.status === 'failed') {
           // 逐 PATH：失败行仍含成功 path 的读回值与失败 path 的「✗ 失败」标记，逐格呈现；
           // 整体下发失败（无单格值）回退「-」。
-          if (val === '✗ 失败') return <Text type="danger">{val}</Text>;
+          if (val === PATH_FAILED_CELL) return <Text type="danger">{val}</Text>;
           return val ? <Text>{val}</Text> : <Text type="secondary">-</Text>;
         }
         // 未核实（只写/重启生效）：无读回值，灰显占位
         if (r.status === 'unverified') {
           return (
-            <Tooltip title="未核实，以读回为准时无值">
+            <Tooltip title={t('mml.consoleV2.result.unverifiedCellTip')}>
               <Text type="secondary">—</Text>
             </Tooltip>
           );
@@ -200,7 +209,7 @@ export default function ResultTable({
 
     const tail: ColumnsType<ResultRow> = [
       {
-        title: '下发时间',
+        title: t('mml.consoleV2.result.col.dispatchedAt'),
         dataIndex: 'dispatchedAt',
         key: 'dispatchedAt',
         width: 104,
@@ -209,7 +218,7 @@ export default function ResultTable({
           v ? <Text style={{ fontSize: 12 }}>{v}</Text> : <Text type="secondary">-</Text>,
       },
       {
-        title: '响应时间',
+        title: t('mml.consoleV2.result.col.respondedAt'),
         dataIndex: 'respondedAt',
         key: 'respondedAt',
         width: 104,
@@ -218,14 +227,14 @@ export default function ResultTable({
           v ? <Text style={{ fontSize: 12 }}>{v}</Text> : <Text type="secondary">-</Text>,
       },
       {
-        title: '操作',
+        title: t('mml.consoleV2.result.col.action'),
         key: 'action',
         width: 110,
         fixed: 'right',
         align: 'center',
         render: (_v, r) => (
           <Space size={0}>
-            <Tooltip title="查看">
+            <Tooltip title={t('mml.consoleV2.result.view')}>
               <Button
                 type="text"
                 size="small"
@@ -233,7 +242,7 @@ export default function ResultTable({
                 onClick={() => setViewingRow(r)}
               />
             </Tooltip>
-            <Tooltip title="下载该设备结果">
+            <Tooltip title={t('mml.consoleV2.result.downloadDevice')}>
               <Button
                 type="text"
                 size="small"
@@ -243,7 +252,7 @@ export default function ResultTable({
               />
             </Tooltip>
             {onReexecute && (
-              <Tooltip title="重新执行">
+              <Tooltip title={t('mml.consoleV2.result.reexecute')}>
                 <Button
                   type="text"
                   size="small"
@@ -261,7 +270,7 @@ export default function ResultTable({
     return [...base, ...dynamic, ...tail];
     // commandId / 导出 mutation / 重新执行回调 / running 进依赖：切任务或对应状态变化时刷新「操作」列。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [columns, commandId, exportDeviceCsv.isPending, exportDeviceCsv.variables, onReexecute, running]);
+  }, [columns, commandId, exportDeviceCsv.isPending, exportDeviceCsv.variables, onReexecute, running, t]);
 
   return (
     <Card
@@ -269,7 +278,7 @@ export default function ResultTable({
         // 「执行结果」标题 + 当前命令名 + 汇总统计同一行（设计 §3.11.1 / §3.11.7 修订）
         <Space size={20} wrap style={{ rowGap: 4 }}>
           <Space size={6}>
-            <span>执行结果</span>
+            <span>{t('mml.consoleV2.result.title')}</span>
             {hasExecuted && execMeta && (
               <Text type="secondary" style={{ fontWeight: 400, fontSize: 14 }}>
                 · {execMeta.commandName ?? execMeta.label}
@@ -279,13 +288,13 @@ export default function ResultTable({
           {hasExecuted && (
             <Space size={14} wrap style={{ fontWeight: 400, fontSize: 13 }}>
               <span>
-                设备总数 <b>{stats.total}</b>
+                {t('mml.consoleV2.result.statTotal')} <b>{stats.total}</b>
               </span>
-              <span style={{ color: '#1677ff' }}>执行中 {stats.inProgress}</span>
-              <span style={{ color: '#52c41a' }}>成功 {stats.success}</span>
-              {isWrite && <span style={{ color: '#faad14' }}>未核实 {stats.unverified}</span>}
-              {isWrite && <span style={{ color: '#ff4d4f' }}>未生效 {stats.mismatch}</span>}
-              <span style={{ color: '#ff4d4f' }}>失败 {stats.failed}</span>
+              <span style={{ color: '#1677ff' }}>{t('mml.consoleV2.result.statInProgress', { count: stats.inProgress })}</span>
+              <span style={{ color: '#52c41a' }}>{t('mml.consoleV2.result.statSuccess', { count: stats.success })}</span>
+              {isWrite && <span style={{ color: '#faad14' }}>{t('mml.consoleV2.result.statUnverified', { count: stats.unverified })}</span>}
+              {isWrite && <span style={{ color: '#ff4d4f' }}>{t('mml.consoleV2.result.statMismatch', { count: stats.mismatch })}</span>}
+              <span style={{ color: '#ff4d4f' }}>{t('mml.consoleV2.result.statFailed', { count: stats.failed })}</span>
             </Space>
           )}
         </Space>
@@ -300,14 +309,14 @@ export default function ResultTable({
           loading={exportCsv.isPending}
           onClick={handleExportAllCsv}
         >
-          下载全部
+          {t('mml.consoleV2.result.downloadAll')}
         </Button>
       }
     >
       {!hasExecuted ? (
         <Empty
           image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description="选择设备与命令后点击「执行」，结果将在此以表格呈现"
+          description={t('mml.consoleV2.result.emptyHint')}
           style={{ marginTop: 80 }}
         />
       ) : (
@@ -317,14 +326,14 @@ export default function ResultTable({
               value={statusFilter}
               onChange={(v) => setStatusFilter(v as StatusFilter)}
               options={[
-                { label: `全部(${stats.total})`, value: 'all' },
-                { label: `成功(${stats.success})`, value: 'success' },
-                { label: `失败(${stats.failed})`, value: 'failed' },
+                { label: t('mml.consoleV2.result.filterAll', { count: stats.total }), value: 'all' },
+                { label: t('mml.consoleV2.result.filterSuccess', { count: stats.success }), value: 'success' },
+                { label: t('mml.consoleV2.result.filterFailed', { count: stats.failed }), value: 'failed' },
               ]}
             />
             <Input.Search
               allowClear
-              placeholder="按设备 SN 过滤"
+              placeholder={t('mml.consoleV2.result.snFilterPlaceholder')}
               style={{ width: 240 }}
               value={snKeyword}
               onChange={(e) => setSnKeyword(e.target.value)}
@@ -339,7 +348,7 @@ export default function ResultTable({
             dataSource={filteredRows}
             scroll={{ x: 'max-content' }}
             sticky
-            pagination={{ pageSize: 20, size: 'small', showTotal: (t) => `共 ${t} 行` }}
+            pagination={{ pageSize: 20, size: 'small', showTotal: (count) => t('mml.consoleV2.result.totalRows', { count }) }}
           />
         </Space>
       )}

@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react';
 import { Modal, Form, Input, Select, Typography, Alert, Space, Tag } from 'antd';
 import type { ParameterType, ParameterConstraints } from '@core/types/deviceParameter';
 import { useUpdateParameters } from '@core/hooks/api/useDeviceParameters';
+import { useT } from '@/hooks/useT';
+
+type TFn = (id: string, values?: Record<string, string | number>) => string;
 
 const { Text } = Typography;
 
@@ -26,45 +29,46 @@ const BOOLEAN_OPTIONS = [
 function validateValue(
   value: string,
   parameterType: ParameterType,
+  t: TFn,
   constraints?: ParameterConstraints
 ): string | null {
   if (!value && parameterType !== 'string') {
-    return '请输入值';
+    return t('device.paramEdit.errRequired');
   }
 
   if (parameterType === 'int') {
     const num = Number(value);
-    if (!Number.isInteger(num)) return '请输入整数';
+    if (!Number.isInteger(num)) return t('device.paramEdit.errInteger');
     if (constraints?.minValue !== undefined && num < constraints.minValue) {
-      return `最小值为 ${constraints.minValue}`;
+      return t('device.paramEdit.errMinValue', { min: constraints.minValue });
     }
     if (constraints?.maxValue !== undefined && num > constraints.maxValue) {
-      return `最大值为 ${constraints.maxValue}`;
+      return t('device.paramEdit.errMaxValue', { max: constraints.maxValue });
     }
   }
 
   if (parameterType === 'unsignedInt') {
     const num = Number(value);
-    if (!Number.isInteger(num) || num < 0) return '请输入非负整数';
+    if (!Number.isInteger(num) || num < 0) return t('device.paramEdit.errNonNegative');
     if (constraints?.minValue !== undefined && num < constraints.minValue) {
-      return `最小值为 ${constraints.minValue}`;
+      return t('device.paramEdit.errMinValue', { min: constraints.minValue });
     }
     if (constraints?.maxValue !== undefined && num > constraints.maxValue) {
-      return `最大值为 ${constraints.maxValue}`;
+      return t('device.paramEdit.errMaxValue', { max: constraints.maxValue });
     }
   }
 
   if (parameterType === 'string' && constraints) {
     if (constraints.maxLength && value.length > constraints.maxLength) {
-      return `最大长度为 ${constraints.maxLength}`;
+      return t('device.paramEdit.errMaxLength', { max: constraints.maxLength });
     }
     if (constraints.minLength && value.length < constraints.minLength) {
-      return `最小长度为 ${constraints.minLength}`;
+      return t('device.paramEdit.errMinLength', { min: constraints.minLength });
     }
     if (constraints.pattern) {
       try {
         const re = new RegExp(constraints.pattern);
-        if (!re.test(value)) return `不匹配模式: ${constraints.pattern}`;
+        if (!re.test(value)) return t('device.paramEdit.errPattern', { pattern: constraints.pattern });
       } catch {
         // ignore invalid regex
       }
@@ -73,7 +77,7 @@ function validateValue(
 
   if (constraints?.enumValues && constraints.enumValues.length > 0) {
     if (!constraints.enumValues.includes(value)) {
-      return `允许的值: ${constraints.enumValues.join(', ')}`;
+      return t('device.paramEdit.errEnum', { values: constraints.enumValues.join(', ') });
     }
   }
 
@@ -92,6 +96,7 @@ export default function ParameterEditModal({
   defaultValue,
   onClose,
 }: ParameterEditModalProps) {
+  const t = useT();
   const [newValue, setNewValue] = useState(currentValue);
   const [validationError, setValidationError] = useState<string | null>(null);
   const updateMutation = useUpdateParameters();
@@ -105,11 +110,11 @@ export default function ParameterEditModal({
 
   const handleValueChange = (value: string) => {
     setNewValue(value);
-    setValidationError(validateValue(value, parameterType, constraints));
+    setValidationError(validateValue(value, parameterType, t, constraints));
   };
 
   const handleOk = () => {
-    const error = validateValue(newValue, parameterType, constraints);
+    const error = validateValue(newValue, parameterType, t, constraints);
     if (error) {
       setValidationError(error);
       return;
@@ -162,7 +167,7 @@ export default function ParameterEditModal({
       <Input
         value={newValue}
         onChange={(e) => handleValueChange(e.target.value)}
-        placeholder="请输入新值"
+        placeholder={t('device.paramEdit.newValuePlaceholder')}
         status={validationError ? 'error' : undefined}
       />
     );
@@ -179,13 +184,13 @@ export default function ParameterEditModal({
 
   return (
     <Modal
-      title="修改参数值"
+      title={t('device.paramEdit.title')}
       open={open}
       onOk={handleOk}
       onCancel={onClose}
       confirmLoading={updateMutation.isPending}
-      okText="确认下发"
-      cancelText="取消"
+      okText={t('device.paramEdit.confirmDispatch')}
+      cancelText={t('common.cancel')}
       okButtonProps={{ disabled: Boolean(validationError) }}
       destroyOnHidden
     >
@@ -194,18 +199,18 @@ export default function ParameterEditModal({
           <Alert
             type="warning"
             showIcon
-            message="此参数修改后需要设备重启才能生效。"
+            message={t('device.paramEdit.rebootWarning')}
           />
         )}
 
         <Alert
           type="info"
           showIcon
-          message="参数修改将异步下发到设备，可能需要等待设备下次 Inform 后生效。"
+          message={t('device.paramEdit.asyncInfo')}
         />
 
         <Form layout="vertical">
-          <Form.Item label="参数路径">
+          <Form.Item label={t('device.paramTree.colPath')}>
             <Text
               code
               copyable
@@ -216,12 +221,12 @@ export default function ParameterEditModal({
           </Form.Item>
 
           {description && (
-            <Form.Item label="描述">
+            <Form.Item label={t('device.paramEdit.description')}>
               <Text type="secondary">{description}</Text>
             </Form.Item>
           )}
 
-          <Form.Item label="参数类型">
+          <Form.Item label={t('device.paramEdit.paramType')}>
             <Space>
               <Text>{parameterType}</Text>
               {changeApplies && (
@@ -232,18 +237,18 @@ export default function ParameterEditModal({
             </Space>
           </Form.Item>
 
-          <Form.Item label="当前值">
-            <Text type="secondary">{currentValue || '(空)'}</Text>
+          <Form.Item label={t('device.paramEdit.currentValue')}>
+            <Text type="secondary">{currentValue || t('device.paramTree.emptyValue')}</Text>
           </Form.Item>
 
           {defaultValue && (
-            <Form.Item label="默认值">
+            <Form.Item label={t('device.paramEdit.defaultValue')}>
               <Text type="secondary">{defaultValue}</Text>
             </Form.Item>
           )}
 
           {hasConstraints && (
-            <Form.Item label="约束">
+            <Form.Item label={t('device.paramEdit.constraints')}>
               <Space wrap>
                 {constraints!.minValue !== undefined && (
                   <Tag>min: {constraints!.minValue}</Tag>
@@ -268,7 +273,7 @@ export default function ParameterEditModal({
           )}
 
           <Form.Item
-            label="新值"
+            label={t('device.paramEdit.newValue')}
             required
             validateStatus={validationError ? 'error' : undefined}
             help={validationError}

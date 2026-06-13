@@ -8,6 +8,7 @@ import {
 } from '@ant-design/icons';
 import type { ExecRecord } from '../types';
 import { opColor } from '../constants';
+import { useT } from '@/hooks/useT';
 
 const { Text } = Typography;
 
@@ -34,6 +35,7 @@ export default function CommandHistoryPanel({
   onClear,
   onToggleCollapsed,
 }: CommandHistoryPanelProps) {
+  const t = useT();
   // 收缩态:窄条,仅图标 + 展开按钮 + 记录数徽标。
   if (collapsed) {
     return (
@@ -52,12 +54,12 @@ export default function CommandHistoryPanel({
           borderRadius: 8,
         }}
       >
-        <Tooltip title="展开命令记录" placement="right">
+        <Tooltip title={t('mml.consoleV2.history.expand')} placement="right">
           <Button type="text" icon={<RightOutlined />} onClick={onToggleCollapsed} />
         </Tooltip>
         <HistoryOutlined style={{ fontSize: 18, color: '#8c8c8c' }} />
         <Text type="secondary" style={{ writingMode: 'vertical-rl', letterSpacing: 4, marginTop: 4 }}>
-          命令记录
+          {t('mml.consoleV2.history.title')}
         </Text>
       </div>
     );
@@ -69,21 +71,21 @@ export default function CommandHistoryPanel({
       title={
         <Space size={6}>
           <HistoryOutlined />
-          <span>命令记录</span>
+          <span>{t('mml.consoleV2.history.title')}</span>
         </Space>
       }
       extra={
         <Space size={2}>
           <Popconfirm
-            title="清空命令记录"
-            description="将清除本地缓存的命令记录列表（不影响服务端任务）。"
-            okText="清空"
-            cancelText="取消"
+            title={t('mml.consoleV2.history.clearTitle')}
+            description={t('mml.consoleV2.history.clearDesc')}
+            okText={t('mml.consoleV2.history.clearOk')}
+            cancelText={t('common.cancel')}
             okButtonProps={{ danger: true }}
             onConfirm={onClear}
             disabled={records.length === 0}
           >
-            <Tooltip title="清空命令记录">
+            <Tooltip title={t('mml.consoleV2.history.clearTitle')}>
               <Button
                 type="text"
                 size="small"
@@ -92,7 +94,7 @@ export default function CommandHistoryPanel({
               />
             </Tooltip>
           </Popconfirm>
-          <Tooltip title="收起">
+          <Tooltip title={t('mml.consoleV2.history.collapse')}>
             <Button type="text" size="small" icon={<LeftOutlined />} onClick={onToggleCollapsed} />
           </Tooltip>
         </Space>
@@ -101,7 +103,7 @@ export default function CommandHistoryPanel({
       styles={{ body: { flex: 1, minHeight: 0, overflow: 'auto', padding: 8 } }}
     >
       {records.length === 0 ? (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无执行记录" style={{ marginTop: 48 }} />
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('mml.consoleV2.history.empty')} style={{ marginTop: 48 }} />
       ) : (
         <Space orientation="vertical" size={6} style={{ width: '100%' }}>
           {records.map((r) => {
@@ -125,13 +127,13 @@ export default function CommandHistoryPanel({
                   {/* 不再深链「任务详情」：一条命令记录对应多条「分设备」任务记录，
                       单 task 详情页无法对应；逐设备详情用结果表格行「查看」。 */}
                   <Text type="secondary" style={{ fontSize: 12 }}>
-                    {r.deviceCount} 台
+                    {t('mml.consoleV2.history.deviceCount', { count: r.deviceCount })}
                   </Text>
                 </Space>
                 <div style={{ marginTop: 4 }}>
                   {r.status === 'running' && (
                     <Tag color="processing" icon={<SyncOutlined spin />} style={{ marginInlineEnd: 6 }}>
-                      执行中
+                      {t('mml.consoleV2.history.running')}
                     </Tag>
                   )}
                   <Tag color={opColor(r.operationType)} style={{ marginInlineEnd: 6 }}>

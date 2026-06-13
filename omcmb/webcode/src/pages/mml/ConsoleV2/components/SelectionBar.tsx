@@ -8,6 +8,7 @@ import {
 } from '@ant-design/icons';
 import type { CommandItem } from '../types';
 import { opColor, opLabel } from '../constants';
+import { useT } from '@/hooks/useT';
 
 const { Text } = Typography;
 
@@ -39,6 +40,7 @@ export default function SelectionBar({
   onConfigParams,
   onExecute,
 }: SelectionBarProps) {
+  const t = useT();
   return (
     <Card variant="borderless" styles={{ body: { padding: '12px 16px' } }}>
       <Space size={12} wrap>
@@ -49,12 +51,12 @@ export default function SelectionBar({
           onClick={onPickDevices}
         >
           <Space size={6}>
-            <span>① 选择设备</span>
+            <span>{t('mml.consoleV2.selectionBar.step1')}</span>
             <RightOutlined style={{ fontSize: 10, opacity: 0.45 }} />
             {deviceCount > 0 ? (
-              <Text strong style={{ color: '#1677ff' }}>已选 {deviceCount} 台</Text>
+              <Text strong style={{ color: '#1677ff' }}>{t('mml.consoleV2.selectionBar.selectedDevices', { count: deviceCount })}</Text>
             ) : (
-              <Text type="secondary">未选择</Text>
+              <Text type="secondary">{t('mml.consoleV2.selectionBar.notSelected')}</Text>
             )}
           </Space>
         </Button>
@@ -67,7 +69,7 @@ export default function SelectionBar({
           onClick={onPickCommand}
         >
           <Space size={6}>
-            <span>② 选择命令</span>
+            <span>{t('mml.consoleV2.selectionBar.step2')}</span>
             <RightOutlined style={{ fontSize: 10, opacity: 0.45 }} />
             {command ? (
               <Space size={4}>
@@ -77,7 +79,7 @@ export default function SelectionBar({
                 <Text strong>{command.commandName}</Text>
               </Space>
             ) : (
-              <Text type="secondary">未选择</Text>
+              <Text type="secondary">{t('mml.consoleV2.selectionBar.notSelected')}</Text>
             )}
           </Space>
         </Button>
@@ -92,12 +94,12 @@ export default function SelectionBar({
           onClick={onConfigParams}
         >
           <Space size={6}>
-            <span>③ 配置参数</span>
+            <span>{t('mml.consoleV2.selectionBar.step3')}</span>
             <RightOutlined style={{ fontSize: 10, opacity: 0.45 }} />
             {configSummary ? (
               <Text strong style={{ color: '#1677ff' }}>{configSummary}</Text>
             ) : (
-              <Text type="secondary">{command ? '默认全部' : '未选择'}</Text>
+              <Text type="secondary">{command ? t('mml.consoleV2.selectionBar.defaultAll') : t('mml.consoleV2.selectionBar.notSelected')}</Text>
             )}
           </Space>
         </Button>
@@ -110,7 +112,9 @@ export default function SelectionBar({
           disabled={!canExecute}
           onClick={onExecute}
         >
-          执行{deviceCount > 0 ? `（${deviceCount} 台）` : ''}
+          {deviceCount > 0
+            ? t('mml.consoleV2.selectionBar.executeWithCount', { count: deviceCount })
+            : t('mml.consoleV2.selectionBar.execute')}
         </Button>
       </Space>
     </Card>

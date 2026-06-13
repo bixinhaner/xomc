@@ -45,6 +45,7 @@ import {
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { useIntl } from 'react-intl';
+import { useT } from '@/hooks/useT';
 import TreeListPageLayout from '@/components/Layout/TreeListPageLayout';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import {
@@ -76,20 +77,20 @@ import PivotTable from './components/PivotTable';
 const { Text, Title } = Typography;
 const { RangePicker } = DatePicker;
 
-const GRANULARITY_OPTIONS: { label: string; value: Granularity }[] = [
-  { label: '15 分钟', value: '15min' },
-  { label: '小时', value: 'hourly' },
-  { label: '日', value: 'daily' },
-  { label: '周', value: 'weekly' },
-  { label: '月', value: 'monthly' },
+const GRANULARITY_OPTIONS: { labelKey: string; value: Granularity }[] = [
+  { labelKey: 'perf.dashboard.granular15min', value: '15min' },
+  { labelKey: 'perf.dashboard.granularHourly', value: 'hourly' },
+  { labelKey: 'perf.dashboard.granularDaily', value: 'daily' },
+  { labelKey: 'perf.dashboard.granularWeekly', value: 'weekly' },
+  { labelKey: 'perf.dashboard.granularMonthly', value: 'monthly' },
 ];
 
-const TIME_RANGE_OPTIONS: { label: string; value: TimeRangePreset }[] = [
-  { label: '近 1 小时', value: 'last_1h' },
-  { label: '近 24 小时', value: 'last_24h' },
-  { label: '近 7 天', value: 'last_7d' },
-  { label: '近 30 天', value: 'last_30d' },
-  { label: '自定义', value: 'custom' },
+const TIME_RANGE_OPTIONS: { labelKey: string; value: TimeRangePreset }[] = [
+  { labelKey: 'perf.kpiQuery.range.last1h', value: 'last_1h' },
+  { labelKey: 'perf.kpiQuery.range.last24h', value: 'last_24h' },
+  { labelKey: 'perf.kpiQuery.range.last7d', value: 'last_7d' },
+  { labelKey: 'perf.kpiQuery.range.last30d', value: 'last_30d' },
+  { labelKey: 'perf.kpiQuery.range.custom', value: 'custom' },
 ];
 
 const DEVICE_TYPE_OPTIONS = [
@@ -199,6 +200,7 @@ export default function KPIQuery() {
   const [pickerTarget, setPickerTarget] = useState<'main' | 'modal'>('main');
 
   const intl = useIntl();
+  const t = useT();
 
   // ── 模板侧栏状态 ─────────────────────────────────────────────────
   const [templateTab, setTemplateTab] = useState<'public' | 'private'>('public');
@@ -212,12 +214,21 @@ export default function KPIQuery() {
   const createExport = useCreateKpiExport();
 
   const publicTemplates = useMemo(
-    () => (templatesData?.items ?? []).filter((t) => t.visibility === 'public'),
+    () => (templatesData?.items ?? []).filter((tpl) => tpl.visibility === 'public'),
     [templatesData],
   );
   const privateTemplates = useMemo(
-    () => (templatesData?.items ?? []).filter((t) => t.visibility === 'private'),
+    () => (templatesData?.items ?? []).filter((tpl) => tpl.visibility === 'private'),
     [templatesData],
+  );
+
+  const granularityOptions = useMemo(
+    () => GRANULARITY_OPTIONS.map((o) => ({ label: t(o.labelKey), value: o.value })),
+    [t],
+  );
+  const timeRangeOptions = useMemo(
+    () => TIME_RANGE_OPTIONS.map((o) => ({ label: t(o.labelKey), value: o.value })),
+    [t],
   );
 
   // ── 存为模板 Modal ───────────────────────────────────────────────
@@ -271,24 +282,24 @@ export default function KPIQuery() {
   useEffect(() => {
     if (aggErrors.length > 0) {
       const first = aggErrors[0] as Error;
-      message.error(`查询失败：${first?.message ?? '未知错误'}`);
+      message.error(t('perf.kpiQuery.queryFailed', { msg: first?.message ?? t('perf.kpiQuery.unknownError') }));
     }
-  }, [aggErrors, message]);
+  }, [aggErrors, message, t]);
 
   // ── 行为 ─────────────────────────────────────────────────────────
   const handleQuery = () => {
     if (payload.deviceSns.length === 0) {
-      message.warning('请选择至少一个设备');
+      message.warning(t('perf.kpiQuery.selectDeviceRequired'));
       return;
     }
     if (payload.metricPaths.length === 0) {
-      message.warning('请选择至少一个指标');
+      message.warning(t('perf.kpiQuery.selectMetricRequired'));
       return;
     }
     let range: { start: string; end: string } | null;
     if (payload.timeRangePreset === 'custom') {
       if (!customRange) {
-        message.warning('请选择自定义时间范围');
+        message.warning(t('perf.kpiQuery.selectCustomRangeRequired'));
         return;
       }
       range = {
@@ -299,7 +310,7 @@ export default function KPIQuery() {
       range = presetToRange(payload.timeRangePreset);
     }
     if (!range) {
-      message.warning('请选择时间范围');
+      message.warning(t('perf.kpiQuery.selectRangeRequired'));
       return;
     }
     setSubmittedPayload(payload);
@@ -316,11 +327,11 @@ export default function KPIQuery() {
       {
         sourceType: 'dashboard',
         params: buildDashboardExportParams(sel),
-        taskName: `KPI导出_指标查询_${ts}`, // 与仪表盘导出区分，便于任务列表辨识
+        taskName: t('perf.kpiQuery.exportTaskName', { ts }), // 与仪表盘导出区分，便于任务列表辨识
       },
       {
-        onSuccess: () => message.success('导出任务已提交，请到「文件管理」下载'),
-        onError: (e) => message.error(`导出提交失败：${(e as Error)?.message ?? '未知错误'}`),
+        onSuccess: () => message.success(t('perf.kpiQuery.exportSubmitted')),
+        onError: (e) => message.error(t('perf.kpiQuery.exportFailed', { msg: (e as Error)?.message ?? t('perf.kpiQuery.unknownError') })),
       },
     );
   };
@@ -338,7 +349,7 @@ export default function KPIQuery() {
     setMetricLabels((prev) => ({ ...prev, ...labels }));
     setPayload({ ...tpl.payload, metricPaths: paths });
     if (ambiguous.length > 0) {
-      message.warning(`模板中以下指标存在同名、无法唯一确定，请在「指标」里重新选择：${ambiguous.join('、')}`);
+      message.warning(t('perf.kpiQuery.ambiguousMetrics', { list: ambiguous.join(', ') }));
     }
   };
 
@@ -373,11 +384,11 @@ export default function KPIQuery() {
 
   const handleSaveTemplate = async () => {
     if (!saveForm.name.trim()) {
-      message.warning('请输入模板名称');
+      message.warning(t('perf.kpiQuery.templateNameRequired'));
       return;
     }
     if (saveForm.payload.timeRangePreset === 'custom' && !saveForm.customRange) {
-      message.warning('请选择自定义时间范围');
+      message.warning(t('perf.kpiQuery.selectCustomRangeRequired'));
       return;
     }
     // 保存时回填 custom 模式的绝对时间（使用 Modal 内部的 payload + customRange，不是主表单）
@@ -400,7 +411,7 @@ export default function KPIQuery() {
           description: saveForm.description,
           payload: payloadToSave,
         });
-        message.success('模板已创建');
+        message.success(t('perf.kpiQuery.templateCreated'));
       } else if (saveForm.templateId) {
         await updateMut.mutateAsync({
           id: saveForm.templateId,
@@ -411,17 +422,17 @@ export default function KPIQuery() {
             payload: payloadToSave,
           },
         });
-        message.success('模板已更新');
+        message.success(t('perf.kpiQuery.templateUpdated'));
       }
       setSaveForm((s) => ({ ...s, open: false }));
     } catch (err) {
       const e = err as Error & { response?: { status?: number } };
       if (e?.response?.status === 409) {
-        message.error('名称已被你创建的另一个模板占用');
+        message.error(t('perf.kpiQuery.nameConflict'));
       } else if (e?.response?.status === 403) {
-        message.error('权限不足：仅 super_admin 可创建/修改公共模板');
+        message.error(t('perf.kpiQuery.noPermissionPublic'));
       } else {
-        message.error(`保存失败：${e?.message ?? '未知错误'}`);
+        message.error(t('perf.kpiQuery.saveFailed', { msg: e?.message ?? t('perf.kpiQuery.unknownError') }));
       }
     }
   };
@@ -429,13 +440,13 @@ export default function KPIQuery() {
   const handleDeleteTemplate = async (id: string) => {
     try {
       await deleteMut.mutateAsync(id);
-      message.success('模板已删除');
+      message.success(t('perf.kpiQuery.templateDeleted'));
       if (activeTemplateId === id) {
         setActiveTemplateId(undefined);
       }
     } catch (err) {
       const e = err as Error;
-      message.error(`删除失败：${e?.message ?? '未知错误'}`);
+      message.error(t('perf.kpiQuery.deleteFailed', { msg: e?.message ?? t('perf.kpiQuery.unknownError') }));
     }
   };
 
@@ -443,10 +454,13 @@ export default function KPIQuery() {
   const metricSummary = (paths: string[], head: number): string =>
     paths.length === 0
       ? ''
-      : `已选 ${paths.length} 个：${paths
-          .slice(0, head)
-          .map((p) => metricLabels[p] ?? p)
-          .join(', ')}${paths.length > head ? ' ...' : ''}`;
+      : t('perf.kpiQuery.selectedSummary', {
+          count: paths.length,
+          items: paths
+            .slice(0, head)
+            .map((p) => metricLabels[p] ?? p)
+            .join(', ') + (paths.length > head ? ' ...' : ''),
+        });
 
   // ── 渲染辅助 ─────────────────────────────────────────────────────
   const renderTemplateItem = (tpl: QueryTemplate) => {
@@ -464,7 +478,7 @@ export default function KPIQuery() {
         actions={
           canEdit
             ? [
-                <Tooltip key="edit" title="编辑">
+                <Tooltip key="edit" title={t('common.edit')}>
                   <Button
                     type="text"
                     size="small"
@@ -477,7 +491,7 @@ export default function KPIQuery() {
                 </Tooltip>,
                 <Popconfirm
                   key="del"
-                  title="确定删除该模板？"
+                  title={t('perf.kpiQuery.confirmDeleteTemplate')}
                   onConfirm={(e) => {
                     e?.stopPropagation();
                     void handleDeleteTemplate(tpl.id);
@@ -501,9 +515,9 @@ export default function KPIQuery() {
             <Space>
               <Text>{tpl.name}</Text>
               {tpl.visibility === 'public' ? (
-                <Tag color="blue">公共</Tag>
+                <Tag color="blue">{t('perf.kpiQuery.public')}</Tag>
               ) : (
-                <Tag color="default">私有</Tag>
+                <Tag color="default">{t('perf.kpiQuery.private')}</Tag>
               )}
             </Space>
           }
@@ -524,10 +538,10 @@ export default function KPIQuery() {
       <div style={{ padding: '12px 16px', borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
         <Space style={{ width: '100%', justifyContent: 'space-between' }}>
           <Title level={5} style={{ margin: 0 }}>
-            查询模板
+            {t('perf.kpiQuery.queryTemplates')}
           </Title>
           <Space size={2}>
-            <Tooltip title="新建模板（用当前查询条件，未填则后续可补）">
+            <Tooltip title={t('perf.kpiQuery.newTemplateTip')}>
               <Button
                 type="text"
                 size="small"
@@ -535,7 +549,7 @@ export default function KPIQuery() {
                 onClick={handleOpenSaveModal}
               />
             </Tooltip>
-            <Tooltip title="刷新列表">
+            <Tooltip title={t('perf.kpiQuery.refreshList')}>
               <Button
                 type="text"
                 size="small"
@@ -554,7 +568,7 @@ export default function KPIQuery() {
             key: 'public',
             label: (
               <span>
-                <TeamOutlined /> 公共 ({publicTemplates.length})
+                <TeamOutlined /> {t('perf.kpiQuery.public')} ({publicTemplates.length})
               </span>
             ),
             children: (
@@ -562,7 +576,7 @@ export default function KPIQuery() {
                 <List
                   dataSource={publicTemplates}
                   renderItem={renderTemplateItem}
-                  locale={{ emptyText: <Empty description="暂无公共模板" /> }}
+                  locale={{ emptyText: <Empty description={t('perf.kpiQuery.noPublicTemplates')} /> }}
                 />
               </Spin>
             ),
@@ -571,7 +585,7 @@ export default function KPIQuery() {
             key: 'private',
             label: (
               <span>
-                <UserOutlined /> 私有 ({privateTemplates.length})
+                <UserOutlined /> {t('perf.kpiQuery.private')} ({privateTemplates.length})
               </span>
             ),
             children: (
@@ -579,7 +593,7 @@ export default function KPIQuery() {
                 <List
                   dataSource={privateTemplates}
                   renderItem={renderTemplateItem}
-                  locale={{ emptyText: <Empty description="暂无私有模板" /> }}
+                  locale={{ emptyText: <Empty description={t('perf.kpiQuery.noPrivateTemplates')} /> }}
                 />
               </Spin>
             ),
@@ -599,13 +613,13 @@ export default function KPIQuery() {
           title={
             <Space>
               <TableOutlined />
-              <span>查询条件</span>
+              <span>{t('perf.kpiQuery.queryConditions')}</span>
             </Space>
           }
         >
           <Form layout="vertical" size="middle">
             <Space wrap size="middle" align="start">
-              <Form.Item label="设备类型" style={{ marginBottom: 0 }}>
+              <Form.Item label={t('perf.kpiQuery.deviceType')} style={{ marginBottom: 0 }}>
                 <Select
                   style={{ width: 120 }}
                   value={payload.deviceType}
@@ -614,49 +628,52 @@ export default function KPIQuery() {
                 />
               </Form.Item>
 
-              <Form.Item label="设备" style={{ marginBottom: 0 }}>
+              <Form.Item label={t('perf.kpiQuery.device')} style={{ marginBottom: 0 }}>
                 <Space.Compact style={{ width: 360 }}>
                   <Input
                     readOnly
                     value={
                       payload.deviceSns.length === 0
                         ? ''
-                        : `已选 ${payload.deviceSns.length} 个：${payload.deviceSns.slice(0, 2).join(', ')}${payload.deviceSns.length > 2 ? ' ...' : ''}`
+                        : t('perf.kpiQuery.selectedSummary', {
+                            count: payload.deviceSns.length,
+                            items: payload.deviceSns.slice(0, 2).join(', ') + (payload.deviceSns.length > 2 ? ' ...' : ''),
+                          })
                     }
-                    placeholder="点击右侧按钮选择设备"
+                    placeholder={t('perf.kpiQuery.selectDevicePlaceholder')}
                   />
-                  <Button onClick={() => { setPickerTarget('main'); setDevicePickerOpen(true); }}>列表选</Button>
+                  <Button onClick={() => { setPickerTarget('main'); setDevicePickerOpen(true); }}>{t('perf.kpiQuery.pickFromList')}</Button>
                 </Space.Compact>
               </Form.Item>
 
-              <Form.Item label="指标" style={{ marginBottom: 0 }}>
+              <Form.Item label={t('perf.kpiQuery.metric')} style={{ marginBottom: 0 }}>
                 <Space.Compact style={{ width: 360 }}>
                   <Input
                     readOnly
                     value={metricSummary(payload.metricPaths, 2)}
-                    placeholder="点击右侧按钮选择指标"
+                    placeholder={t('perf.kpiQuery.selectMetricPlaceholder')}
                   />
-                  <Button onClick={() => { setPickerTarget('main'); setMetricPickerOpen(true); }}>列表选</Button>
+                  <Button onClick={() => { setPickerTarget('main'); setMetricPickerOpen(true); }}>{t('perf.kpiQuery.pickFromList')}</Button>
                 </Space.Compact>
               </Form.Item>
 
-              <Form.Item label="粒度" style={{ marginBottom: 0 }}>
+              <Form.Item label={t('perf.granularity')} style={{ marginBottom: 0 }}>
                 <Radio.Group
                   value={payload.granularity}
                   onChange={(e) => setPayload({ ...payload, granularity: e.target.value })}
-                  options={GRANULARITY_OPTIONS}
+                  options={granularityOptions}
                   optionType="button"
                   buttonStyle="solid"
                 />
               </Form.Item>
 
-              <Form.Item label="时间范围" style={{ marginBottom: 0 }}>
+              <Form.Item label={t('perf.kpiQuery.timeRange')} style={{ marginBottom: 0 }}>
                 <Space>
                   <Select
                     style={{ width: 140 }}
                     value={payload.timeRangePreset}
                     onChange={(v) => setPayload({ ...payload, timeRangePreset: v })}
-                    options={TIME_RANGE_OPTIONS}
+                    options={timeRangeOptions}
                     suffixIcon={<ClockCircleOutlined />}
                   />
                   {payload.timeRangePreset === 'custom' && (
@@ -673,13 +690,13 @@ export default function KPIQuery() {
             <div style={{ marginTop: 16, borderTop: `1px dashed ${token.colorBorderSecondary}`, paddingTop: 12 }}>
               <Space>
                 <Button type="primary" icon={<TableOutlined />} loading={aggFetching} onClick={handleQuery}>
-                  查询
+                  {t('common.query')}
                 </Button>
                 <Button icon={<ReloadOutlined />} onClick={() => void refetchAgg()} disabled={!submittedPayload}>
-                  刷新
+                  {t('common.refresh')}
                 </Button>
                 <Button icon={<SaveOutlined />} onClick={handleOpenSaveModal}>
-                  存为模板
+                  {t('perf.kpiQuery.saveAsTemplate')}
                 </Button>
                 <Button
                   icon={<ExportOutlined />}
@@ -687,7 +704,7 @@ export default function KPIQuery() {
                   loading={createExport.isPending}
                   disabled={!submittedPayload || aggFetching}
                 >
-                  导出 CSV
+                  {t('perf.kpiQuery.exportCsv')}
                 </Button>
                 <Button
                   icon={<PlusOutlined />}
@@ -699,7 +716,7 @@ export default function KPIQuery() {
                     setSubmittedRange(null);
                   }}
                 >
-                  重置
+                  {t('common.reset')}
                 </Button>
               </Space>
             </div>
@@ -718,7 +735,7 @@ export default function KPIQuery() {
           />
         ) : null}
 
-        <Card size="small" title={<span><TableOutlined /> 查询结果</span>}>
+        <Card size="small" title={<span><TableOutlined /> {t('perf.kpiQuery.queryResults')}</span>}>
           <PivotTable
             rows={aggregatedRows}
             loading={aggLoading || aggFetching}
@@ -728,7 +745,7 @@ export default function KPIQuery() {
             emptyDescription={
               submittedPayload?.deviceType === 'GNB' ? (
                 <Text type="secondary">
-                  该设备暂无可用 KPI 数据，请确认厂商指标库已注册（5G/gNB 指标依赖对应厂商指标库）
+                  {t('perf.kpiQuery.gnbEmptyHint')}
                 </Text>
               ) : undefined
             }
@@ -766,39 +783,39 @@ export default function KPIQuery() {
         />
 
         <Modal
-          title={saveForm.mode === 'create' ? '新建查询模板' : '编辑查询模板'}
+          title={saveForm.mode === 'create' ? t('perf.kpiQuery.newTemplate') : t('perf.kpiQuery.editTemplate')}
           open={saveForm.open}
           onCancel={() => setSaveForm((s) => ({ ...s, open: false }))}
           onOk={handleSaveTemplate}
           confirmLoading={createMut.isPending || updateMut.isPending}
-          okText="保存"
-          cancelText="取消"
+          okText={t('common.save')}
+          cancelText={t('common.cancel')}
           width={720}
           destroyOnHidden
         >
           <Form layout="vertical">
-            <Form.Item label="模板名称" required>
+            <Form.Item label={t('perf.kpiQuery.templateName')} required>
               <Input
                 value={saveForm.name}
                 onChange={(e) => setSaveForm({ ...saveForm, name: e.target.value })}
                 maxLength={128}
-                placeholder="例如：eNB 基础 KPI"
+                placeholder={t('perf.kpiQuery.templateNamePlaceholder')}
               />
             </Form.Item>
-            <Form.Item label="可见性">
+            <Form.Item label={t('perf.kpiQuery.visibility')}>
               <Radio.Group
                 value={saveForm.visibility}
                 onChange={(e) => setSaveForm({ ...saveForm, visibility: e.target.value })}
               >
-                <Radio value="private">私有（仅本人可见）</Radio>
-                <Tooltip title={isSuperAdmin ? '' : '仅 super_admin 可创建公共模板'}>
+                <Radio value="private">{t('perf.kpiQuery.privateOption')}</Radio>
+                <Tooltip title={isSuperAdmin ? '' : t('perf.kpiQuery.onlySuperAdminPublic')}>
                   <Radio value="public" disabled={!isSuperAdmin}>
-                    公共（所有人可见）
+                    {t('perf.kpiQuery.publicOption')}
                   </Radio>
                 </Tooltip>
               </Radio.Group>
             </Form.Item>
-            <Form.Item label="描述">
+            <Form.Item label={t('perf.kpiQuery.description')}>
               <Input.TextArea
                 rows={2}
                 value={saveForm.description}
@@ -808,11 +825,11 @@ export default function KPIQuery() {
             </Form.Item>
 
             <Divider titlePlacement="left" style={{ margin: '8px 0 16px' }}>
-              查询配置
+              {t('perf.kpiQuery.queryConfig')}
             </Divider>
 
             <Space wrap size="middle" align="start" style={{ width: '100%' }}>
-              <Form.Item label="设备类型" style={{ marginBottom: 8 }}>
+              <Form.Item label={t('perf.kpiQuery.deviceType')} style={{ marginBottom: 8 }}>
                 <Select
                   style={{ width: 120 }}
                   value={saveForm.payload.deviceType}
@@ -823,18 +840,18 @@ export default function KPIQuery() {
                 />
               </Form.Item>
 
-              <Form.Item label="粒度" style={{ marginBottom: 8 }}>
+              <Form.Item label={t('perf.granularity')} style={{ marginBottom: 8 }}>
                 <Select
                   style={{ width: 110 }}
                   value={saveForm.payload.granularity}
                   onChange={(v) =>
                     setSaveForm((s) => ({ ...s, payload: { ...s.payload, granularity: v } }))
                   }
-                  options={GRANULARITY_OPTIONS}
+                  options={granularityOptions}
                 />
               </Form.Item>
 
-              <Form.Item label="时间范围" style={{ marginBottom: 8 }}>
+              <Form.Item label={t('perf.kpiQuery.timeRange')} style={{ marginBottom: 8 }}>
                 <Space>
                   <Select
                     style={{ width: 140 }}
@@ -842,7 +859,7 @@ export default function KPIQuery() {
                     onChange={(v) =>
                       setSaveForm((s) => ({ ...s, payload: { ...s.payload, timeRangePreset: v } }))
                     }
-                    options={TIME_RANGE_OPTIONS}
+                    options={timeRangeOptions}
                   />
                   {saveForm.payload.timeRangePreset === 'custom' && (
                     <RangePicker
@@ -860,16 +877,19 @@ export default function KPIQuery() {
               </Form.Item>
             </Space>
 
-            <Form.Item label="设备" style={{ marginBottom: 8 }}>
+            <Form.Item label={t('perf.kpiQuery.device')} style={{ marginBottom: 8 }}>
               <Space.Compact style={{ width: '100%' }}>
                 <Input
                   readOnly
                   value={
                     saveForm.payload.deviceSns.length === 0
                       ? ''
-                      : `已选 ${saveForm.payload.deviceSns.length} 个：${saveForm.payload.deviceSns.slice(0, 3).join(', ')}${saveForm.payload.deviceSns.length > 3 ? ' ...' : ''}`
+                      : t('perf.kpiQuery.selectedSummary', {
+                          count: saveForm.payload.deviceSns.length,
+                          items: saveForm.payload.deviceSns.slice(0, 3).join(', ') + (saveForm.payload.deviceSns.length > 3 ? ' ...' : ''),
+                        })
                   }
-                  placeholder="点击右侧按钮选择设备"
+                  placeholder={t('perf.kpiQuery.selectDevicePlaceholder')}
                 />
                 <Button
                   onClick={() => {
@@ -877,17 +897,17 @@ export default function KPIQuery() {
                     setDevicePickerOpen(true);
                   }}
                 >
-                  列表选
+                  {t('perf.kpiQuery.pickFromList')}
                 </Button>
               </Space.Compact>
             </Form.Item>
 
-            <Form.Item label="指标" style={{ marginBottom: 0 }}>
+            <Form.Item label={t('perf.kpiQuery.metric')} style={{ marginBottom: 0 }}>
               <Space.Compact style={{ width: '100%' }}>
                 <Input
                   readOnly
                   value={metricSummary(saveForm.payload.metricPaths, 3)}
-                  placeholder="点击右侧按钮选择指标"
+                  placeholder={t('perf.kpiQuery.selectMetricPlaceholder')}
                 />
                 <Button
                   onClick={() => {
@@ -895,7 +915,7 @@ export default function KPIQuery() {
                     setMetricPickerOpen(true);
                   }}
                 >
-                  列表选
+                  {t('perf.kpiQuery.pickFromList')}
                 </Button>
               </Space.Compact>
             </Form.Item>

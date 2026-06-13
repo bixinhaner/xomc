@@ -264,11 +264,11 @@ export default function CommandSelectModal({
     <Modal
       title={
         <Space size={12} align="center">
-          <span>选择命令</span>
+          <span>{t('mml.consoleV2.cmdSelect.title')}</span>
           {/* 「指定参数」入口：跳过命令选择，直接跳到「配置参数」的指定 PATH 模式（§需求 1/5） */}
-          <Tooltip title="跳过命令选择，指定 PATH 执行">
+          <Tooltip title={t('mml.consoleV2.cmdSelect.gotoRawTip')}>
             <Button type="link" size="small" style={{ padding: 0 }} onClick={onGotoRawParams}>
-              指定参数
+              {t('mml.consoleV2.cmdSelect.gotoRaw')}
               <RightOutlined style={{ fontSize: 11 }} />
             </Button>
           </Tooltip>
@@ -278,8 +278,8 @@ export default function CommandSelectModal({
       width={860}
       onCancel={onCancel}
       onOk={handleOk}
-      okText="确定选择"
-      cancelText="取消"
+      okText={t('mml.consoleV2.cmdSelect.okText')}
+      cancelText={t('common.cancel')}
       // §需求 3：LST/MOD 无可执行 PATH 时禁用「确定选择」；ADD/RMV 看 target_object（§需求 1）。
       okButtonProps={{ disabled: okDisabled }}
       destroyOnHidden
@@ -287,7 +287,7 @@ export default function CommandSelectModal({
       <div style={{ marginBottom: 12 }}>
         <Input.Search
           allowClear
-          placeholder="命令分组 / 名称"
+          placeholder={t('mml.consoleV2.cmdSelect.searchPlaceholder')}
           style={{ width: 240 }}
           value={keyword}
           onChange={(e) => setKeyword(e.target.value)}
@@ -300,7 +300,7 @@ export default function CommandSelectModal({
               <Spin />
             </div>
           ) : treeData.length === 0 ? (
-            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="无匹配命令" />
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('mml.consoleV2.cmdSelect.noMatch')} />
           ) : (
             <Tree
               blockNode
@@ -324,10 +324,12 @@ export default function CommandSelectModal({
               ) : isAddRmvWithObject ? (
                 // §需求 1：ADD/RMV 无参数 PATH，展示执行 RPC 的「目标对象路径」提醒用户。
                 <>
-                  <Text strong>目标对象路径：</Text>
+                  <Text strong>{t('mml.consoleV2.cmdSelect.targetObjectPath')}</Text>
                   <Text type="secondary" style={{ fontSize: 12 }}>
-                    {selOp} 操作以下述对象路径下发 RPC（{selOp === 'ADD' ? 'AddObject' : 'DeleteObject'}），
-                    无需选择参数 PATH；实例号在「配置参数」填写。
+                    {t('mml.consoleV2.cmdSelect.addRmvHint', {
+                      op: selOp,
+                      rpc: selOp === 'ADD' ? 'AddObject' : 'DeleteObject',
+                    })}
                   </Text>
                   <Text code style={{ fontSize: 12, wordBreak: 'break-all' }}>
                     {selTargetObject}
@@ -335,9 +337,9 @@ export default function CommandSelectModal({
                 </>
               ) : (
                 <>
-                  <Text strong>参数 PATH（{paramPaths.length} 项）：</Text>
+                  <Text strong>{t('mml.consoleV2.cmdSelect.paramPathCount', { count: paramPaths.length })}</Text>
                   {paramPaths.length === 0 ? (
-                    <Text type="secondary">该命令无可展示的参数路径</Text>
+                    <Text type="secondary">{t('mml.consoleV2.cmdSelect.noParamPath')}</Text>
                   ) : (
                     <Space orientation="vertical" size={4} style={{ width: '100%' }}>
                       {paramPaths.map((p) => (
@@ -364,7 +366,7 @@ export default function CommandSelectModal({
               )}
             </Space>
           ) : (
-            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请选择左侧命令查看详情" />
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('mml.consoleV2.cmdSelect.selectToView')} />
           )}
         </div>
       </div>

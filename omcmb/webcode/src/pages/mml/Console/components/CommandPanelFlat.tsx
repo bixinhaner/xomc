@@ -37,11 +37,11 @@ const OP_TAG_COLOR: Record<FlatCommandOp, string> = {
   RMV: 'red',
 };
 
-const OP_DESC: Record<FlatCommandOp, string> = {
-  LST: '查询命令 · 选择需要读取的参数路径',
-  MOD: '修改命令 · 填写新值并下发',
-  ADD: '新增命令 · 在目标对象路径下创建实例',
-  RMV: '删除命令 · 删除目标对象路径下的实例',
+const OP_DESC_KEY: Record<FlatCommandOp, string> = {
+  LST: 'mml.console.panelFlat.opDesc.LST',
+  MOD: 'mml.console.panelFlat.opDesc.MOD',
+  ADD: 'mml.console.panelFlat.opDesc.ADD',
+  RMV: 'mml.console.panelFlat.opDesc.RMV',
 };
 
 export interface CommandPanelFlatProps {
@@ -57,21 +57,23 @@ interface LstRow {
   path: string;
 }
 
-const LST_COLUMNS: ColumnsType<LstRow> = [
-  { title: '#', dataIndex: 'key', width: 56 },
-  {
-    title: '参数路径',
-    dataIndex: 'path',
-    render: (p: string) => (
-      <Text code copyable={{ text: p }} style={{ fontSize: 12 }}>
-        {p}
-      </Text>
-    ),
-  },
-];
-
 function LstView({ paths }: { paths: string[] }) {
   const t = useT();
+  const columns = useMemo<ColumnsType<LstRow>>(
+    () => [
+      { title: '#', dataIndex: 'key', width: 56 },
+      {
+        title: t('mml.console.panelFlat.paramPath'),
+        dataIndex: 'path',
+        render: (p: string) => (
+          <Text code copyable={{ text: p }} style={{ fontSize: 12 }}>
+            {p}
+          </Text>
+        ),
+      },
+    ],
+    [t],
+  );
   const rows = useMemo<LstRow[]>(
     () => paths.map((p, i) => ({ key: String(i + 1), path: p })),
     [paths],
@@ -84,7 +86,7 @@ function LstView({ paths }: { paths: string[] }) {
       size="small"
       bordered
       pagination={false}
-      columns={LST_COLUMNS}
+      columns={columns}
       dataSource={rows}
       scroll={{ y: 'calc(100vh - 460px)' }}
     />
@@ -157,7 +159,7 @@ function ModView({
                   value={values[p.path] ?? ''}
                   maxLength={p.max_length}
                   onChange={(e) => onChange(p.path, e.target.value)}
-                  placeholder={`输入 ${p.type} 值`}
+                  placeholder={t('mml.console.panelFlat.inputValuePlaceholder', { type: p.type })}
                 />
               )}
             </Form.Item>
@@ -170,13 +172,13 @@ function ModView({
 
 /* ----------------------------- ADD / RMV 渲染 ----------------------------- */
 
-function ObjectPathView({ op, path }: { op: 'ADD' | 'RMV'; path: string }) {
+function ObjectPathView({ op, path, t }: { op: 'ADD' | 'RMV'; path: string; t: (id: string) => string }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <Paragraph type="secondary" style={{ marginBottom: 0 }}>
         {op === 'ADD'
-          ? '将在以下目标对象路径下创建新实例：'
-          : '将删除以下目标对象路径下的指定实例：'}
+          ? t('mml.console.panelFlat.addHint')
+          : t('mml.console.panelFlat.rmvHint')}
       </Paragraph>
       <div
         style={{
@@ -233,7 +235,7 @@ export default function CommandPanelFlat({ command, onValuesChange }: CommandPan
       </div>
       {op && (
         <Text type="secondary" style={{ fontSize: 12 }}>
-          {OP_DESC[op]}
+          {t(OP_DESC_KEY[op])}
         </Text>
       )}
 
@@ -250,7 +252,7 @@ export default function CommandPanelFlat({ command, onValuesChange }: CommandPan
         />
       )}
       {(op === 'ADD' || op === 'RMV') && isStringObjectPath(command.object_path) && (
-        <ObjectPathView op={op} path={command.object_path} />
+        <ObjectPathView op={op} path={command.object_path} t={t} />
       )}
 
       {/* 兜底：op 缺失或 object_path 与前缀不匹配（数据异常） */}
@@ -260,7 +262,7 @@ export default function CommandPanelFlat({ command, onValuesChange }: CommandPan
         ((op === 'ADD' || op === 'RMV') &&
           !isStringObjectPath(command.object_path))) && (
         <Empty
-          description={`命令 object_path 形态与操作前缀不匹配（op=${op ?? 'unknown'}）`}
+          description={t('mml.console.panelFlat.shapeMismatch', { op: op ?? 'unknown' })}
         />
       )}
     </div>

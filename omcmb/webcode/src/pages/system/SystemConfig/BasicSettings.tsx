@@ -5,23 +5,23 @@ interface BasicSettingsProps {
   form: ReturnType<typeof Form.useForm>[0];
 }
 
-// 时区选项
-const timezoneOptions = [
-  { label: '(GMT+08:00) 北京, 重庆, 香港, 乌鲁木齐', value: 'Asia/Shanghai' },
-  { label: '(GMT+00:00) 格林威治标准时间', value: 'UTC' },
-  { label: '(GMT-05:00) 美国东部时间', value: 'America/New_York' },
-  { label: '(GMT-08:00) 美国太平洋时间', value: 'America/Los_Angeles' },
-  { label: '(GMT+01:00) 中欧时间', value: 'Europe/Paris' },
-  { label: '(GMT+09:00) 日本时间', value: 'Asia/Tokyo' },
-];
-
-// 设置行样式
+// Row spacing for settings
 const settingRowStyle: React.CSSProperties = {
   marginBottom: 16,
 };
 
 export default function BasicSettings({ form }: BasicSettingsProps) {
   const t = useT();
+
+  // Timezone options
+  const timezoneOptions = [
+    { label: t('system.basic.tz.shanghai'), value: 'Asia/Shanghai' },
+    { label: t('system.basic.tz.utc'), value: 'UTC' },
+    { label: t('system.basic.tz.newYork'), value: 'America/New_York' },
+    { label: t('system.basic.tz.losAngeles'), value: 'America/Los_Angeles' },
+    { label: t('system.basic.tz.paris'), value: 'Europe/Paris' },
+    { label: t('system.basic.tz.tokyo'), value: 'Asia/Tokyo' },
+  ];
 
   return (
     <Form form={form} layout="vertical" size="small" initialValues={{
