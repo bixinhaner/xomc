@@ -7172,6 +7172,8 @@ const messages: Record<string, string> = {
   'perf.kpiQuery.queryTemplates':        '查询模板',
   'perf.kpiQuery.newTemplateTip':        '新建模板（用当前查询条件，未填则后续可补）',
   'perf.kpiQuery.refreshList':           '刷新列表',
+  'perf.kpiQuery.collapseSidebar':       '收起模板栏',
+  'perf.kpiQuery.expandSidebar':         '展开模板栏',
   'perf.kpiQuery.public':                '公共',
   'perf.kpiQuery.private':               '私有',
   'perf.kpiQuery.noPublicTemplates':     '暂无公共模板',

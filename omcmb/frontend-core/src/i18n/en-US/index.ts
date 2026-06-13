@@ -7137,6 +7137,8 @@ const messages: Record<string, string> = {
   'perf.kpiQuery.queryTemplates':        'Query Templates',
   'perf.kpiQuery.newTemplateTip':        'New template (uses current query conditions; unfilled fields can be added later)',
   'perf.kpiQuery.refreshList':           'Refresh List',
+  'perf.kpiQuery.collapseSidebar':       'Collapse template panel',
+  'perf.kpiQuery.expandSidebar':         'Expand template panel',
   'perf.kpiQuery.public':                'Public',
   'perf.kpiQuery.private':               'Private',
   'perf.kpiQuery.noPublicTemplates':     'No public templates',

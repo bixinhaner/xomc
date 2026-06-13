@@ -42,11 +42,12 @@ import {
   ExportOutlined,
   TableOutlined,
   ClockCircleOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { useIntl } from 'react-intl';
 import { useT } from '@/hooks/useT';
-import TreeListPageLayout from '@/components/Layout/TreeListPageLayout';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import {
   useQueryTemplates,
@@ -533,6 +534,9 @@ export default function KPIQuery() {
     );
   };
 
+  // 左侧模板栏折叠态（仅本页、仅当前会话内，不记忆；默认展开）。
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
   const sidebar = (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div style={{ padding: '12px 16px', borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
@@ -555,6 +559,15 @@ export default function KPIQuery() {
                 size="small"
                 icon={<ReloadOutlined />}
                 onClick={() => void refetchTemplates()}
+              />
+            </Tooltip>
+            <Tooltip title={t('perf.kpiQuery.collapseSidebar')}>
+              <Button
+                type="text"
+                size="small"
+                icon={<MenuFoldOutlined />}
+                onClick={() => setSidebarCollapsed(true)}
+                aria-label={t('perf.kpiQuery.collapseSidebar')}
               />
             </Tooltip>
           </Space>
@@ -605,7 +618,58 @@ export default function KPIQuery() {
   );
 
   return (
-    <TreeListPageLayout tree={sidebar} defaultTreeWidth={280} minTreeWidth={220}>
+    // 内联两栏布局（替代公共 TreeListPageLayout，仅本页）：左栏可折叠成瘦条，右栏被挤宽。
+    // 视觉对齐原公共组件（bg/圆角6/边框/gap15），不动公共组件、其它页零影响。
+    <div style={{ display: 'flex', width: '100%', height: '100%', overflow: 'hidden', gap: 15 }}>
+      {sidebarCollapsed ? (
+        // 折叠态：整条可点的瘦竖条 + 展开图标 + 竖排标题（与性能仪表盘任务栏收起样式统一）。
+        <Tooltip title={t('perf.kpiQuery.expandSidebar')} placement="right">
+          <div
+            onClick={() => setSidebarCollapsed(false)}
+            style={{
+              width: 36,
+              flexShrink: 0,
+              cursor: 'pointer',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 8,
+              paddingTop: 8,
+              border: `1px solid ${token.colorBorderSecondary}`,
+              borderRadius: token.borderRadiusLG,
+              background: token.colorBgContainer,
+            }}
+          >
+            <MenuUnfoldOutlined style={{ color: token.colorPrimary }} />
+            <span
+              style={{
+                fontSize: 12,
+                color: token.colorTextSecondary,
+                writingMode: 'vertical-rl',
+                letterSpacing: 2,
+              }}
+            >
+              {t('perf.kpiQuery.queryTemplates')}
+            </span>
+          </div>
+        </Tooltip>
+      ) : (
+        <div
+          style={{
+            width: 280,
+            flexShrink: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            background: token.colorBgContainer,
+            borderRadius: 6,
+            border: `1px solid ${token.colorBorderSecondary}`,
+          }}
+        >
+          {sidebar}
+        </div>
+      )}
+      <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
       <div style={{ padding: 16, height: '100%', overflow: 'auto' }}>
         <Card
           size="small"
@@ -922,6 +986,7 @@ export default function KPIQuery() {
           </Form>
         </Modal>
       </div>
-    </TreeListPageLayout>
+      </div>
+    </div>
   );
 }
