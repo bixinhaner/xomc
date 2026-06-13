@@ -40,18 +40,22 @@ services:
     # （shared_buffers=3g 而非顶满），避免 PG 真占满 10g 把共享 VM/boss 容器挤 OOM。
     # shared_buffers=3g / effective_cache_size=7g(仅规划器提示，不实占) / work_mem=16m /
     # maintenance_work_mem=1g / max_wal_size=4g（写突发少 checkpoint）/ checkpoint_completion_target=0.9
-    # （摊平 checkpoint I/O）。硬约束：cap(10g) >= shared_buffers(3g)+maintenance(1g)。
-    command: ["postgres", "-c", "timezone=Asia/Shanghai", "-c", "log_timezone=Asia/Shanghai", "-c", "max_connections=300",
-              "-c", "shared_buffers=3GB", "-c", "effective_cache_size=7GB", "-c", "work_mem=16MB",
-              "-c", "maintenance_work_mem=1GB", "-c", "max_wal_size=4GB", "-c", "checkpoint_completion_target=0.9"]
+    # （摊平 checkpoint I/O）。硬约束：cap >= shared_buffers+maintenance。
+    # ↓ 下列 cpus/memory 及 -c 调优参数均可由 resources.env 注入（plan-resources.sh 据 VM 探测派生）；
+    #   不传 env 时取下方 :- 默认值 = 历史「PM 写吞吐优化档」，行为与改造前完全一致。
+    command: ["postgres", "-c", "timezone=Asia/Shanghai", "-c", "log_timezone=Asia/Shanghai",
+              "-c", "max_connections=${PG_MAX_CONNECTIONS:-300}",
+              "-c", "shared_buffers=${PG_SHARED_BUFFERS:-3GB}", "-c", "effective_cache_size=${PG_EFFECTIVE_CACHE_SIZE:-7GB}",
+              "-c", "work_mem=${PG_WORK_MEM:-16MB}", "-c", "maintenance_work_mem=${PG_MAINTENANCE_WORK_MEM:-1GB}",
+              "-c", "max_wal_size=${PG_MAX_WAL_SIZE:-4GB}", "-c", "checkpoint_completion_target=0.9"]
     # 有状态服务给足 60s 优雅退出窗口：checkpoint flush + WAL 落盘，避免被 SIGKILL
     # 截断导致 recovery（详见 README §13 资源与优雅关闭）。
     stop_grace_period: 60s
     deploy:
       resources:
         limits:
-          cpus: "8"
-          memory: 10g
+          cpus: "${PG_CPUS:-8}"
+          memory: ${PG_MEM:-10g}
         reservations:
           cpus: "0.5"
           memory: 1g
@@ -91,15 +95,18 @@ services:
       - tsdbdata:/var/lib/postgresql/data
       - /etc/localtime:/etc/localtime:ro
     # 写吞吐优化档同主库 postgres（PM copy 入库走本库，写压力主要在此）。
-    command: ["postgres", "-c", "timezone=Asia/Shanghai", "-c", "log_timezone=Asia/Shanghai", "-c", "max_connections=300",
-              "-c", "shared_buffers=3GB", "-c", "effective_cache_size=7GB", "-c", "work_mem=16MB",
-              "-c", "maintenance_work_mem=1GB", "-c", "max_wal_size=4GB", "-c", "checkpoint_completion_target=0.9"]
+    # ↓ TSDB_* 旋钮由 resources.env 注入；不传 env 取 :- 默认 = 历史值（与主库同档）。
+    command: ["postgres", "-c", "timezone=Asia/Shanghai", "-c", "log_timezone=Asia/Shanghai",
+              "-c", "max_connections=${TSDB_MAX_CONNECTIONS:-300}",
+              "-c", "shared_buffers=${TSDB_SHARED_BUFFERS:-3GB}", "-c", "effective_cache_size=${TSDB_EFFECTIVE_CACHE_SIZE:-7GB}",
+              "-c", "work_mem=${TSDB_WORK_MEM:-16MB}", "-c", "maintenance_work_mem=${TSDB_MAINTENANCE_WORK_MEM:-1GB}",
+              "-c", "max_wal_size=${TSDB_MAX_WAL_SIZE:-4GB}", "-c", "checkpoint_completion_target=0.9"]
     stop_grace_period: 60s
     deploy:
       resources:
         limits:
-          cpus: "8"
-          memory: 10g
+          cpus: "${TSDB_CPUS:-8}"
+          memory: ${TSDB_MEM:-10g}
         reservations:
           cpus: "0.5"
           memory: 1g
@@ -120,7 +127,7 @@ services:
     # 原 3g/2gb 是历史 OOM 事故(数据集 2.36GB)后的过度保险，对 OMC 实际量级是浪费——回收喂给 PG。
     # 保留 maxmemory 上限 + LRU 淘汰防失控（队列/会话丢失可从 PG 双写或重新上报恢复）；容器 limit
     # 768m（> maxmemory，给 AOF rewrite 的 fork COW 留余量）。见 docs/operations/OMC内存分配与容量规划-20260611.md。
-    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    command: redis-server --appendonly yes --maxmemory ${REDIS_MAXMEMORY:-512mb} --maxmemory-policy ${REDIS_MAXMEMORY_POLICY:-allkeys-lru}
     volumes:
       - redisdata:/data
       - /etc/localtime:/etc/localtime:ro
@@ -129,8 +136,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1"
-          memory: 768m
+          cpus: "${REDIS_CPUS:-1}"
+          memory: ${REDIS_MEM:-768m}
         reservations:
           cpus: "0.25"
           memory: 256m
@@ -156,8 +163,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1"
-          memory: 768m
+          cpus: "${NATS_CPUS:-1}"
+          memory: ${NATS_MEM:-768m}
         reservations:
           cpus: "0.25"
           memory: 256m
@@ -187,8 +194,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1"
-          memory: 1g
+          cpus: "${MINIO_CPUS:-1}"
+          memory: ${MINIO_MEM:-1g}
         reservations:
           cpus: "0.25"
           memory: 512m
@@ -299,6 +306,10 @@ services:
       - "7557:7557"
     environment:
       OMCGO_ENV: "${OMCGO_ENV:-dev}"
+      # Go 运行时上限（resources.env 注入）；ACS TR-069 长连接堆压力最大，GOMEMLIMIT 价值最高。
+      # 缺省空串：GOMEMLIMIT 关闭、GOMAXPROCS 由 Go 从 cgroup 推断 —— 与改造前行为一致。
+      GOMEMLIMIT: "${ACS_GOMEMLIMIT:-}"
+      GOMAXPROCS: "${ACS_GOMAXPROCS:-}"
     volumes:
       - ../../run/logs/acs:/run/logs/acs
       - /etc/localtime:/etc/localtime:ro
@@ -307,8 +318,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "2"
-          memory: 768m
+          cpus: "${ACS_CPUS:-2}"
+          memory: ${ACS_MEM:-768m}
         reservations:
           cpus: "0.5"
           memory: 512m
@@ -340,6 +351,9 @@ services:
       # 触发 InfoSyncer + applyProductMetadata —— batch path 漏接这两个的 follow-up bug
       # 在另一 commit 中修复）。生产默认保持 batch 启用以保证 Inform 吞吐。
       OMCGO_BATCH_PROCESSOR_ENABLED: "${OMCGO_BATCH_PROCESSOR_ENABLED:-true}"
+      # Go 运行时上限（resources.env 注入）；缺省空串 = 历史行为（GOMEMLIMIT 关、GOMAXPROCS 由 cgroup 推断）。
+      GOMEMLIMIT: "${APP_GOMEMLIMIT:-}"
+      GOMAXPROCS: "${APP_GOMAXPROCS:-}"
     volumes:
       - ../../run/logs/app:/run/logs/app
       # 全局 API 密钥共享卷:app 启动期幂等签发 .api-key,worker(omcctl) 只读消费。
@@ -356,8 +370,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "2"
-          memory: 1g
+          cpus: "${APP_CPUS:-2}"
+          memory: ${APP_MEM:-1g}
         reservations:
           cpus: "0.5"
           memory: 512m
@@ -387,6 +401,10 @@ services:
       # (由 app 启动期幂等签发,见 omcgo/CLAUDE.md §5.6)。
       # OMCCTL_API_KEY env 仅作可选 override,适用 CI / 外部覆盖场景。
       OMCCTL_API_KEY: "${OMCCTL_API_KEY:-}"
+      # Go 运行时上限（resources.env 注入）；worker PM/MR XML 解析最吃内存，GOMEMLIMIT 兜底 OOM。
+      # 缺省空串 = 历史行为（GOMEMLIMIT 关、GOMAXPROCS 由 cgroup 推断）。
+      GOMEMLIMIT: "${WORKER_GOMEMLIMIT:-}"
+      GOMAXPROCS: "${WORKER_GOMAXPROCS:-}"
     volumes:
       - ../../run/logs/worker:/run/logs/worker
       # 共享 secrets 卷只读 — omcctl/scripts 默认从此读 .api-key
@@ -400,8 +418,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "4"
-          memory: 1g
+          cpus: "${WORKER_CPUS:-4}"
+          memory: ${WORKER_MEM:-1g}
         reservations:
           cpus: "0.5"
           memory: 384m
@@ -456,8 +474,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1"
-          memory: 256m
+          cpus: "${WEB_CPUS:-1}"
+          memory: ${WEB_MEM:-256m}
         reservations:
           cpus: "0.25"
           memory: 128m

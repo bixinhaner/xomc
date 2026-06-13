@@ -669,6 +669,12 @@ sudo ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
 
 > 端口表与基础资源建议见本文件 §2 / §3；此处只补「每服务限额 + 优雅关闭窗口」的取舍依据。
 
+> 🆕 **不想每次换机器手改这些限额？** dev compose 的资源旋钮已全部参数化为 `${VAR:-默认}`
+> （默认 = 下表历史值，不传 env 行为不变）。跑 `bash deployments/docker/plan-resources.sh` 按本机
+> Docker 引擎（Docker Desktop 下是 VM）可用资源自动算好 `resources.env`，再用包装器
+> `bash deployments/docker/dc.sh up -d --build` 一键起栈（自动带 `--env-file`）。
+> 详见 [RESOURCE-PLANNING.md](./RESOURCE-PLANNING.md)。
+
 ### 14.1 资源限额一览（dev 与 prod 同值）
 
 | 服务 | CPU limit | mem limit | CPU reserve | mem reserve | 说明 |

@@ -73,3 +73,7 @@ omcgo/data/**/*.tmp.*
 
 # Migration baseline backups (consolidation snapshots, kept locally for rollback only)
 omcgo/migrations.backup-*/
+
+# 本机资源规划（plan-resources.sh 生成，机器相关，不入库）
+deployments/docker/resources.env
+deployments/docker/retention.sql
