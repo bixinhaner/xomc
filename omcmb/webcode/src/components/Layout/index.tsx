@@ -22,6 +22,7 @@ export default function AppShell() {
   const effects3D = useAppStore((s) => s.effects3DEnabled);
   const isMobileOverlayOpen = useAppStore((s) => s.isMobileOverlayOpen);
   const setMobileOverlayOpen = useAppStore((s) => s.setMobileOverlayOpen);
+  const locale = useAppStore((s) => s.locale);
 
   const { isMobile, isTablet } = useResponsive();
   const { isTouchPrimary } = useIsTouchDevice();
@@ -96,7 +97,16 @@ export default function AppShell() {
         <main className={styles.content} style={{ position: 'relative' }}>
           {effects3D && <ParticleCanvas />}
           {effects3D && <DynamicLightSource />}
-          <div style={{ position: 'relative', zIndex: 1, height: '100%' }}>
+          {/*
+            key={locale}：切换语言时强制重挂载路由内容子树。
+            页面里大量表格列（DataTableColumn.title）通过 useMemo 缓存翻译文案，
+            部分页面的依赖数组未纳入 t/locale，导致切语言后当前活跃 tab 的表头
+            不刷新、要重新点一次才更新。以 locale 作为 key 让活跃页在切语言时
+            整体重建，所有 i18n 依赖的 memo 一并重算，单点根治、避免逐页补依赖。
+            （非活跃 tab 本就未挂载，点开即按新语言渲染；切语言为低频操作，
+             当前页重渲染的代价可接受。）
+          */}
+          <div key={locale} style={{ position: 'relative', zIndex: 1, height: '100%' }}>
             <Outlet />
           </div>
         </main>
