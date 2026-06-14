@@ -407,15 +407,21 @@ interface BackendSysConfig {
   updated_at?: string;
 }
 
-// Backend group model
+// Backend group model.
+// 注意：后端 /admin/groups 是 roles 的只读别名（GET → ListRoles），返回的是 Role 形态：
+// { id, name, description, user_count, is_system, updated_by, updated_at }（snake→camel 后）。
+// 历史的 groupName/builtIn/roleCount/updUser 字段后端并不返回，故都为可选 + 读取时回退到 role 字段。
 interface BackendGroup {
   id: string;
-  groupName: string;
+  groupName?: string;
+  name?: string; // 实际后端字段（role.name）
   description: string;
-  builtIn: number;
-  userCount: number;
-  roleCount: number;
+  builtIn?: number;
+  isSystem?: boolean; // role.is_system
+  userCount?: number;
+  roleCount?: number;
   updUser?: string;
+  updatedBy?: string;
   updTime?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -553,12 +559,13 @@ function mapBackendAuditLog(ba: BackendAuditLog): OperationLog {
 function mapBackendGroup(bg: BackendGroup): Group {
   return {
     id: bg.id,
-    groupName: bg.groupName,
+    // /admin/groups 实为 roles 别名，名称落在 role.name；回退兼容历史 groupName 字段。
+    groupName: bg.name ?? bg.groupName ?? '',
     description: bg.description || '',
     userCount: bg.userCount || 0,
     roleCount: bg.roleCount || 0,
-    builtIn: bg.builtIn || 0,
-    updUser: bg.updUser || '',
+    builtIn: bg.builtIn ?? (bg.isSystem ? 1 : 0),
+    updUser: bg.updUser || bg.updatedBy || '',
     updTime: bg.updTime || bg.updatedAt || '',
   };
 }
@@ -886,30 +893,27 @@ export const adminApi = {
     }
   },
 
+  // 写操作走 /admin/roles：后端 /admin/groups 只有 GET（roles 只读别名），无 POST/PUT/DELETE，
+  // 旧实现 POST /admin/groups 会 404。groups==roles，故名称→role.name 落库。
   async createGroup(data: Omit<Group, 'id' | 'userCount' | 'roleCount' | 'updUser' | 'updTime'> & { roleIds?: string[]; userIds?: string[] }): Promise<Group> {
-    const { data: result } = await http.post<BackendGroup>('/admin/groups', {
-      groupName: data.groupName,
+    const { data: result } = await http.post<BackendGroup>('/admin/roles', {
+      name: data.groupName,
       description: data.description,
-      builtIn: data.builtIn,
-      roleIds: data.roleIds,
-      userIds: data.userIds,
     });
     return mapBackendGroup(result);
   },
 
   async updateGroup(id: string, data: Partial<Group> & { roleIds?: string[]; userIds?: string[] }): Promise<Group> {
     const payload: Record<string, unknown> = {};
-    if (data.groupName !== undefined) payload.groupName = data.groupName;
+    if (data.groupName !== undefined) payload.name = data.groupName;
     if (data.description !== undefined) payload.description = data.description;
-    if (data.roleIds !== undefined) payload.roleIds = data.roleIds;
-    if (data.userIds !== undefined) payload.userIds = data.userIds;
-    const { data: result } = await http.put<BackendGroup>(`/admin/groups/${id}`, payload);
+    const { data: result } = await http.put<BackendGroup>(`/admin/roles/${id}`, payload);
     return mapBackendGroup(result);
   },
 
   async deleteGroups(ids: string[]): Promise<void> {
     for (const id of ids) {
-      await http.delete(`/admin/groups/${id}`);
+      await http.delete(`/admin/roles/${id}`);
     }
   },
 
