@@ -19,9 +19,11 @@
  * 实际上传走主皮肤 webcode（mutation 需 FileReader + 文件选择交互，超出本轮范围）。
  */
 import { useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Download,
   FileKey,
+  History,
   Loader2,
   RefreshCcw,
   Search,
@@ -356,6 +358,7 @@ function InfoItem({
 }
 
 function SystemLicenseHistoryPanel() {
+  const navigate = useNavigate()
   const { data, isLoading, error } = useSystemLicenseHistory({
     page: 1,
     pageSize: 5,
@@ -363,13 +366,22 @@ function SystemLicenseHistoryPanel() {
 
   return (
     <div className="rounded-lg border bg-card p-4">
-      <div className="mb-3 text-sm font-medium">
-        最近历史
-        {data ? (
-          <span className="ml-2 text-xs font-normal text-muted-foreground">
-            共 {data.total} 条
-          </span>
-        ) : null}
+      <div className="mb-3 flex items-center justify-between">
+        <div className="text-sm font-medium">
+          最近历史
+          {data ? (
+            <span className="ml-2 text-xs font-normal text-muted-foreground">
+              共 {data.total} 条
+            </span>
+          ) : null}
+        </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => navigate('/license/history')}
+        >
+          <History /> 查看完整历史
+        </Button>
       </div>
       <div className="overflow-hidden rounded-lg border">
         <Table>

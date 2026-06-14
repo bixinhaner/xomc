@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   flexRender,
   getCoreRowModel,
@@ -110,6 +111,7 @@ function ActivationBadge({ opState }: { opState: string }) {
 }
 
 export function DevicesPage() {
+  const navigate = useNavigate()
   const [page, setPage] = useState(1)
   const [pageSize] = useState(20)
   const [searchText, setSearchText] = useState('')
@@ -272,7 +274,13 @@ export function DevicesPage() {
         accessorKey: 'sn',
         header: 'SN',
         cell: ({ row }) => (
-          <span className="font-mono text-xs">{row.original.sn || '—'}</span>
+          <button
+            type="button"
+            className="font-mono text-xs text-primary hover:underline"
+            onClick={() => navigate(`/devices/detail/${row.original.sn}`)}
+          >
+            {row.original.sn || '—'}
+          </button>
         ),
       },
       {
