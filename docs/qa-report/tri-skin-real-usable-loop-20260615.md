@@ -66,6 +66,20 @@
 
 ---
 
+## 4b. R7 · 写端点静态审计（前端写调用 vs 后端路由）
+
+对 frontend-core 全部 **332 个写调用（POST/PUT/DELETE/PATCH）** 逐个解析全路径，
+与后端 368 条写路由（解析 gin group 前缀 + provider 内联注册后）positional diff：
+
+- **327/332 正确接通**（含 RPC 风格 `/pm/indicatormg/*` 等遗留端点）—— 强"可用"证据。
+- **2 处潜伏不匹配（均为 dormant，当前无 UI 组件调用 → 不影响现有可用性）**：
+  1. `adminApi.moveUsersToGroup → POST /admin/users/move-group`（后端无此路由；近邻 `/admin/users/assign-roles` 存在）。
+  2. `topologyApi.getAggregation → POST /devices/geo/aggregate`（后端 `/devices/geo` 下无任何 POST）。
+  二者经 hook 可达但三皮肤均无组件调用，属"已上线但休眠"的 404——待相应功能接线前应补后端路由或删除死调用。
+- 1 处误报已排除（`/admin/dictload/reload` 在 provider 内联注册，非 handler RegisterRoutes）。
+
+> 结论：写路径整体接通率 327/332，无用户可触达的断裂端点。
+
 ## 5. 结论
 
 经 6 轮 真实/对抗/业务/数据 迭代测试：
