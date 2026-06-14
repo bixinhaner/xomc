@@ -3,9 +3,7 @@ import type {
   DashboardSummary,
   KPIDelta,
   EfficiencyMetrics,
-  DailyEfficiencyTrend,
   HeatmapData,
-  DayOfWeekData,
   AlarmHeatmapBySeverity,
   KPIDefinitionsResponse,
   BackendKPILayout,
@@ -318,7 +316,7 @@ export const dashboardApi = {
         // 暂时注释：PRB利用率、无线质量指标图表已隐藏，不需要获取全部KPI时序数据
         // 如需恢复显示，取消下面注释即可
         // dashboardApi.getKPITimeSeries(),
-        {} as Record<string, BackendKPITimeSeriesEntry[]>,
+        {} as DashboardChartData['kpiTimeSeries'],
         dashboardApi.getWidgets(),
       ]);
     return {

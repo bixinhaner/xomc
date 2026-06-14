@@ -626,7 +626,7 @@ export function statementToStructured(stmt: Statement): StructuredStatement {
 
   const out: StructuredStatement = {
     commandId: stmt.commandId ?? '',
-    operationType: stmt.operationType,
+    operationType: stmt.operationType as ConsoleSupportedOp,
     paths,
   };
   if (stmt.commandCode) out.commandCode = stmt.commandCode;
