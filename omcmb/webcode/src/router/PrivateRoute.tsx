@@ -114,7 +114,13 @@ export default function PrivateRoute({
   }
 
   // 路径守卫：仅动态模式 + 菜单已加载时启用，避免误判
-  if (isDynamicMenuEnabled() && menuLoaded) {
+  //
+  // 超管 / admin 整体放行（授权全量）：admin 是系统管理员，应能进所有业务路由，
+  // 不受"菜单种子只覆盖部分路由"的限制。非 admin 角色仍按菜单门禁。
+  // 三皮肤一致：v2/v3 的 RouteGuard 同样对 admin bypass（见 frontend-core/utils/routeAccess）。
+  const isAdminLike =
+    currentUser?.role === 'admin' || currentUser?.isSuperAdmin === true;
+  if (isDynamicMenuEnabled() && menuLoaded && !isAdminLike) {
     const pathname = location.pathname;
     if (
       !ALWAYS_ALLOWED_PATHS.has(pathname) &&

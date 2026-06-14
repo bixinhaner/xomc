@@ -1,15 +1,40 @@
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { Activity, LogOut } from 'lucide-react'
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { Activity, LogOut, ShieldAlert } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { useUserStore } from '@core/store/userStore'
+import { useRouteAccessGuard, useModuleVisibility } from '@core/hooks/useRouteGuard'
 import { MODULES, SECTIONS } from '@/router/navConfig'
+
+// 动态菜单门禁开关（与 v1 webcode 对齐）。admin/超管恒放行，非 admin 按模块级菜单门禁。
+const DYNAMIC_MENU = import.meta.env.VITE_DYNAMIC_MENU === 'true'
+
+function Forbidden() {
+  const navigate = useNavigate()
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-3 p-10 text-center">
+      <ShieldAlert className="size-12 text-destructive/70" />
+      <div className="text-lg font-semibold">403 · 无权限访问</div>
+      <p className="max-w-md text-sm text-muted-foreground">
+        抱歉，您没有权限访问此页面。如需访问，请联系系统管理员为您增加菜单权限。
+      </p>
+      <Button size="sm" variant="outline" onClick={() => navigate('/dashboard')}>
+        返回控制台
+      </Button>
+    </div>
+  )
+}
 
 export function AppShell() {
   const navigate = useNavigate()
+  const location = useLocation()
   const user = useUserStore((s) => s.currentUser)
   const clearAuth = useUserStore((s) => s.clearAuth)
+  // 路由门禁（admin 恒放行）：拉用户菜单 + 判定当前路由可访问性
+  const allowed = useRouteAccessGuard(location.pathname, DYNAMIC_MENU)
+  // 侧栏模块按菜单可见性过滤（对齐 v1 菜单驱动侧栏；admin 也按菜单 curated，不 bypass）
+  const moduleVisible = useModuleVisibility(DYNAMIC_MENU)
 
   const onLogout = () => {
     clearAuth()
@@ -45,7 +70,11 @@ export function AppShell() {
         </div>
         <nav className="p-2 pb-6">
           {SECTIONS.map((section) => {
-            const mods = MODULES.filter((m) => m.section === section)
+            const mods = MODULES.filter((m) => {
+              if (m.section !== section) return false
+              const primary = m.routes.find((r) => !r.hidden) ?? m.routes[0]
+              return moduleVisible(primary?.path ?? '')
+            })
             if (mods.length === 0) return null
             return (
               <div key={section} className="mb-4">
@@ -93,7 +122,7 @@ export function AppShell() {
         </header>
 
         <main className="flex-1 overflow-auto">
-          <Outlet />
+          {allowed ? <Outlet /> : <Forbidden />}
         </main>
       </div>
     </div>

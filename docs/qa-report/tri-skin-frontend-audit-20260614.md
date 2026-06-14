@@ -155,4 +155,24 @@ v3  total=136  PASS=136  FAIL=0   RBAC403=0
 
 ---
 
-*报告由 Claude Code 全自动对抗测试生成；修复见 PR #338（`fix/frontend-tri-skin-audit-20260614` → `main`，待 review 合入）。*
+*报告由 Claude Code 全自动对抗测试生成；首轮修复见 PR #338（已合入 `main`）。*
+
+---
+
+## 9. 对齐落地（业务拉齐，第二轮 PR）
+
+> 用户决策：P1 取「**统一开门禁 + 授权 admin 全量**」。本轮把 §6 三项「待决策」对齐差异全部落地，做到 **admin 在三皮肤看到/可达完全一致**。
+
+| 差异 | 处置 | 验证 |
+|------|------|------|
+| **P1 RBAC 不对齐** | v1 PrivateRoute 加**超管 bypass**（admin/超管整体放行，授权全量）；v2/v3 接入动态菜单门禁——新增共享 `frontend-core/utils/routeAccess.ts`（纯函数：超管 bypass + 模块级门禁，皮肤路由首段→v1 菜单前缀映射，规避 slug 不一致）+ `hooks/useRouteGuard.ts`；v2 AppShell / v3 BridgeShell 包 Outlet 门禁 + 各自 403 视图；三皮肤 `VITE_DYNAMIC_MENU=true` | admin 全路由扫描 **RBAC 403：v1 78→0**、v2/v3 仍 0；三皮肤 admin 可达全部路由（v1 122/123、v2 137/137、v3 136/136）。非 admin 按模块级门禁。单测 11 例 |
+| **P2 v3 GIS 空地图** | v3 GISMapView 改用 `useMapDevicesGeo`→`/devices/geo`（与 v1/v2 同源 550 设备），投影按数据动态拟合 bbox（赞比亚），保留 STARFORGE 自绘 | 浏览器实测渲染 **1104 标记**，无「NO GEO-TAGGED SITES」 |
+| **P3a v2 性能无图** | v2 设备视图新增 **echarts 多指标时序折线图**（指标选择 chips，主题自适应），保留数值卡 | 实测 echarts 图渲染 |
+| **P3b v2 GIS 表格** | v2 GIS 由地理分布表格升级为 **OpenLayers 交互式地图**（设备打点+聚合+点击跳详情），保留表格为辅助列表 | 实测 ol 地图 canvas 渲染 |
+| 附带 | v1 `topology/domain` 空态缺失 `/images/empty-tree.svg`(404) → 换内置 AntD 图标 | `/topology/domain` 由 FAIL→PASS |
+
+**P4 侧边栏对齐（用户追加："v2/v3 应和 v1 一样"）**：v1 侧栏是菜单驱动（admin 仅显示有可见菜单的 ~10 模块，backup/software/mr/file/log/report/license 因无可见菜单不出现）；此前 v2/v3 静态 navConfig 全 ~19 模块。新增 `routeAccess.isModuleVisible`（无 admin bypass，与 v1 一致）+ `useModuleVisibility`，v2 AppShell / v3 CockpitDock 按菜单可见性过滤模块。实测三皮肤侧栏模块集一致（v1 10 / v2 同集 / v3 11，含跨域通知中心；backup/software/mr 均隐藏）；admin 仍可经门禁 bypass 直达未在侧栏的页面（与 v1 同）。
+
+**最终验收（含侧栏对齐）**：三套 typecheck 真实归零；frontend-core 单测 22 例全过；三皮肤**全路由 render-sweep（admin）：v1 123/123、v2 137/137、v3 136/136，RBAC 403 全 0、渲染 0 FAIL**；P2/P3 浏览器实测（v3 1104 标记 / v2 echarts 图 / v2 ol 地图）+ 侧栏模块集一致实测通过。
+
+RBAC 设计说明：admin 业务**可达性**经超管 bypass 全量放行（三皮肤一致）；**侧栏**则三皮肤统一菜单驱动（curated，admin 也按菜单），故"看到的入口"与"能进的页面"在三皮肤完全对齐。第二轮 PR #339。

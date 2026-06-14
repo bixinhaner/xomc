@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { Button, Form, Input, Modal, Space, Tag, Tree, Typography, message, Tabs, Select } from 'antd';
-import { PlusOutlined, EditOutlined, ReloadOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, ReloadOutlined, ApartmentOutlined } from '@ant-design/icons';
 import type { DataNode } from 'antd/es/tree';
 import TreeListPageLayout from '@/components/Layout/TreeListPageLayout';
 import DataTable from '@/components/DataTable';
@@ -489,12 +489,8 @@ export default function DomainManagement() {
           flexDirection: 'column',
           gap: 12
         }}>
-          <img
-            src="/images/empty-tree.svg"
-            alt=""
-            style={{ width: 120, height: 120, opacity: 0.5 }}
-            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-          />
+          {/* 空态图标改用内置 AntD 图标，避免引用缺失的 /images/empty-tree.svg（404）。 */}
+          <ApartmentOutlined style={{ fontSize: 96, opacity: 0.25 }} />
           <Typography.Text type="secondary">{t('common.pleaseSelect')}</Typography.Text>
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
             {t('nav.topology.domain')} {t('common.tree')}

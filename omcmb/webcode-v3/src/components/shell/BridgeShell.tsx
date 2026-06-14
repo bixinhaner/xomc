@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { NavLink, Outlet, useLocation } from 'react-router-dom'
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 
 import { HUDStatusBar } from '@/components/shell/HUDStatusBar'
 import { CockpitDock } from '@/components/shell/CockpitDock'
@@ -7,6 +7,29 @@ import { MiniRadar } from '@/components/shell/MiniRadar'
 import { TelemetryStream } from '@/components/shell/TelemetryStream'
 import { cn } from '@/lib/utils'
 import { MODULES } from '@/router/navConfig'
+import { useRouteAccessGuard } from '@core/hooks/useRouteGuard'
+
+// 动态菜单门禁开关（与 v1/v2 对齐）。admin/超管恒放行，非 admin 按模块级菜单门禁。
+const DYNAMIC_MENU = import.meta.env.VITE_DYNAMIC_MENU === 'true'
+
+function AccessDenied() {
+  const navigate = useNavigate()
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-4 p-10 text-center">
+      <div className="text-2xl font-bold tracking-widest text-rose-400/90">403 · ACCESS DENIED</div>
+      <p className="max-w-md text-sm text-cyan-200/70">
+        权限不足 · 无法进入该指挥分区。如需访问，请联系系统管理员开通菜单权限。
+      </p>
+      <button
+        type="button"
+        onClick={() => navigate('/bridge')}
+        className="rounded border border-cyan-400/40 px-4 py-1.5 text-sm text-cyan-200 hover:bg-cyan-400/10"
+      >
+        返回 BRIDGE
+      </button>
+    </div>
+  )
+}
 
 // 当前模块的子路由横向导航（v1 子路由全量对齐后，HUD 下用上下文子导航暴露子页）。
 function SubNav() {
@@ -41,6 +64,9 @@ function SubNav() {
 
 export function BridgeShell() {
   const root = useRef<HTMLDivElement>(null)
+  const { pathname } = useLocation()
+  // 路由门禁（admin 恒放行）：拉用户菜单 + 判定当前路由可访问性
+  const allowed = useRouteAccessGuard(pathname, DYNAMIC_MENU)
 
   // 鼠标光斑（CSS 变量驱动）
   useEffect(() => {
@@ -103,7 +129,7 @@ export function BridgeShell() {
           <main className="relative flex min-h-0 flex-col overflow-hidden pb-28">
             <SubNav />
             <div className="min-h-0 flex-1 overflow-auto">
-              <Outlet />
+              {allowed ? <Outlet /> : <AccessDenied />}
             </div>
           </main>
 

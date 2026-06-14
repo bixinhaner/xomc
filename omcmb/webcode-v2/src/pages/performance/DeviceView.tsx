@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react'
-import { RefreshCcw, Search } from 'lucide-react'
+import { LineChart, RefreshCcw, Search } from 'lucide-react'
+import ReactECharts from 'echarts-for-react'
+import type { EChartsOption } from 'echarts'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -76,10 +78,190 @@ function groupByMetric(rows: AggregatedRow[]): {
   }))
 }
 
+// 单条指标分组（groupByMetric 的元素类型），多处复用。
+type GroupedMetric = {
+  path: string
+  label: string
+  points: { time: string; value: number | null }[]
+}
+
+// 时序折线最多默认选中的指标数（71 个指标全画线会糊成一团，先取前若干条）。
+const MAX_DEFAULT_LINES = 6
+
+// 折线配色板（高对比、明暗主题通用）；series 索引取模复用。
+const SERIES_COLORS = [
+  '#3b82f6', // blue
+  '#10b981', // emerald
+  '#f59e0b', // amber
+  '#ef4444', // red
+  '#8b5cf6', // violet
+  '#06b6d4', // cyan
+  '#ec4899', // pink
+  '#84cc16', // lime
+]
+
+// 读取 shadcn 主题 CSS 变量（`H S% L%` 三元组）拼成 echarts 可用的 hsl()。
+// 直接读 document.documentElement 的计算值,明暗主题(.dark)切换后重渲染即取到对应色。
+function themeHsl(varName: string, fallback: string): string {
+  if (typeof window === 'undefined') return fallback
+  const raw = getComputedStyle(document.documentElement).getPropertyValue(varName).trim()
+  return raw ? `hsl(${raw})` : fallback
+}
+
+// 把按指标分组的 long 数据透视成 echarts 多系列折线：
+// X 轴 = 所有选中指标时间桶的并集(升序)；每指标一条线,按桶对齐取值,缺桶为 null。
+function buildChartOption(metrics: GroupedMetric[]): EChartsOption {
+  const fg = themeHsl('--muted-foreground', '#94a3b8')
+  const border = themeHsl('--border', '#334155')
+
+  // 并集时间轴
+  const bucketSet = new Set<string>()
+  for (const m of metrics) for (const p of m.points) bucketSet.add(p.time)
+  const buckets = Array.from(bucketSet).sort((a, b) => a.localeCompare(b))
+  const bucketIndex = new Map(buckets.map((t, i) => [t, i]))
+
+  const series = metrics.map((m, i) => {
+    const data: (number | null)[] = new Array(buckets.length).fill(null)
+    for (const p of m.points) {
+      const idx = bucketIndex.get(p.time)
+      if (idx !== undefined) data[idx] = p.value
+    }
+    return {
+      name: m.label,
+      type: 'line' as const,
+      smooth: true,
+      showSymbol: buckets.length <= 30,
+      symbolSize: 5,
+      // 多指标各自相位不同 → 并集轴上易出空洞；connectNulls 跨桶连线保证曲线连续(仅视觉)。
+      connectNulls: true,
+      data,
+      lineStyle: { width: 2 },
+      itemStyle: { color: SERIES_COLORS[i % SERIES_COLORS.length] },
+    }
+  })
+
+  return {
+    color: SERIES_COLORS,
+    grid: { left: 56, right: 18, top: 40, bottom: 36 },
+    tooltip: {
+      trigger: 'axis',
+      confine: true,
+      backgroundColor: themeHsl('--popover', '#1e293b'),
+      borderColor: border,
+      textStyle: { color: themeHsl('--popover-foreground', '#e2e8f0') },
+    },
+    legend: {
+      type: 'scroll',
+      top: 4,
+      textStyle: { color: fg },
+      pageTextStyle: { color: fg },
+    },
+    xAxis: {
+      type: 'category',
+      boundaryGap: false,
+      data: buckets.map((t) => formatTime(t)),
+      axisLabel: { color: fg, fontSize: 10 },
+      axisLine: { lineStyle: { color: border } },
+    },
+    yAxis: {
+      type: 'value',
+      scale: true,
+      axisLabel: { color: fg, fontSize: 10 },
+      splitLine: { lineStyle: { color: border, opacity: 0.4 } },
+    },
+    series,
+  }
+}
+
+// 多指标时序折线卡：echarts 渲染,带指标选择 chips（默认前若干条,避免一次画 71 条线）。
+function TimeSeriesChart({ metrics }: { metrics: GroupedMetric[] }) {
+  // 仅含有效采样(至少一个非空值)的指标可入选,空指标不进选择器。
+  const selectable = useMemo(
+    () => metrics.filter((m) => m.points.some((p) => p.value !== null)),
+    [metrics]
+  )
+
+  const [picked, setPicked] = useState<Set<string> | null>(null)
+  // 首次/数据变化时,默认选中前 MAX_DEFAULT_LINES 条有数据的指标。
+  const selectedPaths = useMemo(() => {
+    if (picked) return picked
+    return new Set(selectable.slice(0, MAX_DEFAULT_LINES).map((m) => m.path))
+  }, [picked, selectable])
+
+  const shown = useMemo(
+    () => selectable.filter((m) => selectedPaths.has(m.path)),
+    [selectable, selectedPaths]
+  )
+
+  const option = useMemo(() => buildChartOption(shown), [shown])
+
+  const toggle = (path: string) => {
+    const next = new Set(selectedPaths)
+    if (next.has(path)) next.delete(path)
+    else next.add(path)
+    setPicked(next)
+  }
+
+  return (
+    <Card className="p-4">
+      <div className="mb-3 flex items-center gap-2">
+        <LineChart className="size-4 text-primary" />
+        <span className="text-sm font-medium">时序折线图</span>
+        <Badge variant="muted">{shown.length} 条曲线</Badge>
+      </div>
+
+      {/* 指标选择 chips：71 个指标里挑要画的线 */}
+      <div className="mb-3 flex max-h-24 flex-wrap gap-1.5 overflow-y-auto">
+        {selectable.map((m) => {
+          const active = selectedPaths.has(m.path)
+          return (
+            <button
+              key={m.path}
+              type="button"
+              onClick={() => toggle(m.path)}
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs transition-colors',
+                active
+                  ? 'border-primary/40 bg-primary/10 text-primary'
+                  : 'border-border text-muted-foreground hover:bg-accent'
+              )}
+              title={m.path}
+            >
+              <span
+                className="inline-block size-2 shrink-0 rounded-full"
+                style={{
+                  backgroundColor: active
+                    ? SERIES_COLORS[shown.findIndex((s) => s.path === m.path) % SERIES_COLORS.length]
+                    : 'transparent',
+                  border: active ? undefined : `1px solid hsl(var(--border))`,
+                }}
+              />
+              <span className="max-w-[10rem] truncate">{m.label}</span>
+            </button>
+          )
+        })}
+      </div>
+
+      {shown.length === 0 ? (
+        <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">
+          请至少选择一个指标以绘制曲线
+        </div>
+      ) : (
+        <ReactECharts
+          option={option}
+          style={{ height: 320 }}
+          notMerge
+          opts={{ renderer: 'svg' }}
+        />
+      )}
+    </Card>
+  )
+}
+
 function MetricCard({
   metric,
 }: {
-  metric: { path: string; label: string; points: { time: string; value: number | null }[] }
+  metric: GroupedMetric
 }) {
   const nums = metric.points.map((p) => p.value).filter((v): v is number => v !== null)
   const max = nums.reduce((m, v) => Math.max(m, v), 0)
@@ -304,10 +486,15 @@ export function DeviceViewPage() {
               该设备在此时间窗内暂无聚合指标数据
             </Card>
           ) : (
-            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-              {metrics.map((m) => (
-                <MetricCard key={m.path} metric={m} />
-              ))}
+            <div className="space-y-4">
+              {/* 时序折线图：选指标多线对比,放在数值卡上方(对齐 v1/v3 出图) */}
+              <TimeSeriesChart metrics={metrics} />
+              {/* 数值卡(逐指标 CSS 柱状概览),保留 */}
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                {metrics.map((m) => (
+                  <MetricCard key={m.path} metric={m} />
+                ))}
+              </div>
             </div>
           )}
         </div>

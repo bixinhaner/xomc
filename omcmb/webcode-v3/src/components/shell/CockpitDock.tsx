@@ -1,28 +1,32 @@
 import { NavLink } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { MODULES } from '@/router/navConfig'
+import { useModuleVisibility } from '@core/hooks/useRouteGuard'
 
-// 数据驱动：每个模块取首个路由作为停靠入口（与侧栏/路由唯一事实源一致）。
-const ITEMS = MODULES.map((m) => ({
-  key: m.key,
-  to: m.routes[0]?.path ?? '/bridge',
-  label: m.label.split(' ')[0],
-  icon: m.icon,
-}))
+// 动态菜单门禁开关（与 v1/v2 对齐）。
+const DYNAMIC_MENU = import.meta.env.VITE_DYNAMIC_MENU === 'true'
 
 export function CockpitDock() {
+  // 数据驱动：每个模块取首个路由作为停靠入口；按菜单可见性过滤（对齐 v1 菜单驱动侧栏）。
+  const moduleVisible = useModuleVisibility(DYNAMIC_MENU)
+  const items = MODULES.filter((m) => moduleVisible(m.routes[0]?.path ?? '/bridge')).map((m) => ({
+    key: m.key,
+    to: m.routes[0]?.path ?? '/bridge',
+    label: m.label.split(' ')[0],
+    icon: m.icon,
+  }))
   return (
     <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-30 flex justify-center">
       <div className="pointer-events-auto relative">
         <div className="absolute -bottom-12 left-1/2 -translate-x-1/2 h-32 w-[1100px] max-w-[95vw] rounded-[50%] bg-cyan-400/10 blur-2xl" />
         <div className="relative glass-strong rounded-t-2xl border-b-0 px-6 pt-3">
           <div className="cockpit-dock">
-            {ITEMS.map((it, idx) => (
+            {items.map((it, idx) => (
               <NavLink key={it.key} to={it.to} className="relative">
                 {({ isActive }) => (
                   <div
                     className={cn('dock-cell', isActive && 'active')}
-                    style={{ transform: `translateY(${arcOffset(idx, ITEMS.length)}px)` }}
+                    style={{ transform: `translateY(${arcOffset(idx, items.length)}px)` }}
                   >
                     <span className="hex-bg hex" />
                     <span className="icon-wrap [&_svg]:size-5">{it.icon}</span>

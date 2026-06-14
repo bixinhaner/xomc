@@ -4,118 +4,185 @@ import { Loader2, RefreshCcw, Crosshair, Search, X } from 'lucide-react'
 import { PageShell } from '@/components/shell/PageShell'
 import { GlassPanel } from '@/components/ui/GlassPanel'
 import { NeonButton } from '@/components/ui/NeonButton'
-import { useGeoData, useMapStats } from '@core/hooks/api/useTopology'
-import type { Site, TopoNode } from '@core/types/topology'
+import { useMapDevicesGeo, useMapStats } from '@core/hooks/api/useTopology'
+import type { DeviceGeo, DeviceStatus, MapFilterParams } from '@core/types/map'
 
 // ── 视觉常量 ──
-const SITE_STATUS_COLOR: Record<string, string> = {
-  active: '#00ff88',
-  maintenance: '#ffaa00',
-  inactive: '#525a78',
-}
-const SITE_STATUS_LABEL: Record<string, string> = {
-  active: '在线',
-  maintenance: '维护',
-  inactive: '离线',
-}
-const NODE_STATUS_COLOR: Record<string, string> = {
-  online: '#00ff88',
+// 设备显示状态 → STARFORGE 配色（与 v1/v2 的三态语义对齐：激活/未激活/离线）
+const STATUS_COLOR: Record<DeviceStatus, string> = {
+  onlineActive: '#00ff88',
+  onlineInactive: '#ffaa00',
   offline: '#525a78',
-  alarm: '#ff2d6f',
-  maintenance: '#ffaa00',
+}
+const STATUS_LABEL: Record<DeviceStatus, string> = {
+  onlineActive: '在线激活',
+  onlineInactive: '在线未激活',
+  offline: '离线',
 }
 
-// 中国本土经纬度大致范围（用于把经纬度投影到画布）
-const LNG_MIN = 73
-const LNG_MAX = 135
-const LAT_MIN = 18
-const LAT_MAX = 53
 const MAP_W = 960
 const MAP_H = 600
 const PAD = 40
+// 投影边界兜底：当无标记可拟合时，退回覆盖赞比亚区域的经纬度窗口
+// （数据已灌：550 设备落在赞比亚 lon~25-29 / lat~-12~-18）
+const FALLBACK_BBOX = { minLng: 24, maxLng: 30, minLat: -18, maxLat: -11 }
 
-interface SitePos {
-  site: Site
+/**
+ * 地图标记（由 DeviceGeo 投影渲染所需的最小形状）。
+ * 复用 frontend-core 已有的 DeviceGeo，不新增共享类型。
+ */
+interface MarkerSite {
+  id: string
+  name: string
+  sn: string
+  longitude: number
+  latitude: number
+  status: DeviceStatus
+  address?: string
+  groupName?: string
+  alarmCount?: number
+}
+
+interface MarkerPos {
+  site: MarkerSite
   x: number
   y: number
 }
 
-function project(lng: number, lat: number): { x: number; y: number } {
-  const x = PAD + ((lng - LNG_MIN) / (LNG_MAX - LNG_MIN)) * (MAP_W - PAD * 2)
-  const y = PAD + ((LAT_MAX - lat) / (LAT_MAX - LAT_MIN)) * (MAP_H - PAD * 2)
+interface BBox {
+  minLng: number
+  maxLng: number
+  minLat: number
+  maxLat: number
+}
+
+/**
+ * 按一组标记动态拟合投影边界（min/max + padding）。
+ * 让赞比亚坐标（lon~28, lat~-15）落在可视区，而非被中国经纬度窗口投到屏幕外。
+ */
+function fitBBox(markers: MarkerSite[]): BBox {
+  if (markers.length === 0) return FALLBACK_BBOX
+
+  let minLng = Infinity
+  let maxLng = -Infinity
+  let minLat = Infinity
+  let maxLat = -Infinity
+  for (const m of markers) {
+    if (m.longitude < minLng) minLng = m.longitude
+    if (m.longitude > maxLng) maxLng = m.longitude
+    if (m.latitude < minLat) minLat = m.latitude
+    if (m.latitude > maxLat) maxLat = m.latitude
+  }
+
+  // 经纬度跨度过小（单点 / 高度聚集）时给一个最小窗口，避免投影除零或全部叠在中心
+  const lngSpan = Math.max(maxLng - minLng, 0.05)
+  const latSpan = Math.max(maxLat - minLat, 0.05)
+  // 10% 外扩留白，使边缘标记不贴边
+  const lngPad = lngSpan * 0.1
+  const latPad = latSpan * 0.1
+  return {
+    minLng: minLng - lngPad,
+    maxLng: maxLng + lngPad,
+    minLat: minLat - latPad,
+    maxLat: maxLat + latPad,
+  }
+}
+
+function projectWith(bbox: BBox, lng: number, lat: number): { x: number; y: number } {
+  const x =
+    PAD + ((lng - bbox.minLng) / (bbox.maxLng - bbox.minLng)) * (MAP_W - PAD * 2)
+  // 纬度向北为正，屏幕 y 向下为正 → 取反
+  const y =
+    PAD + ((bbox.maxLat - lat) / (bbox.maxLat - bbox.minLat)) * (MAP_H - PAD * 2)
   return { x, y }
+}
+
+/** DeviceGeo（已保证经纬度非空）→ 渲染用 MarkerSite */
+function toMarker(d: DeviceGeo): MarkerSite {
+  return {
+    id: d.id,
+    name: d.name,
+    sn: d.sn,
+    longitude: d.longitude as number,
+    latitude: d.latitude as number,
+    status: d.status,
+    address: d.address,
+    groupName: d.groupName,
+    alarmCount: d.alarmCount,
+  }
 }
 
 export default function GISMapView() {
   const [keyword, setKeyword] = useState('')
-  const [selected, setSelected] = useState<Site | null>(null)
+  const [selected, setSelected] = useState<MarkerSite | null>(null)
 
-  // 主数据：地理数据（站点 + 节点经纬度）
+  // 主数据：设备地理坐标（/devices/geo，赞比亚 550 设备有坐标）。
+  // 与 v1/v2 一致；初始化即启用（v3 无设备组筛选侧栏，不做 enabled 门控）。
+  const filterParams = useMemo<MapFilterParams>(() => ({ pageSize: 10000 }), [])
   const {
-    data: geo,
+    data: devicesGeoData,
     isLoading,
     isError,
     error,
     isFetching,
     refetch,
-  } = useGeoData()
+  } = useMapDevicesGeo(filterParams)
+
   // 辅助：地图统计（在线/离线/告警计数），失败不阻塞主图
   const { data: stats } = useMapStats()
 
-  const sites = useMemo<Site[]>(() => geo?.sites ?? [], [geo])
-  const nodes = useMemo<TopoNode[]>(() => geo?.nodes ?? [], [geo])
-
-  // 仅保留含有效经纬度且落在投影范围内的站点
-  const geoSites = useMemo(
-    () =>
-      sites.filter(
-        (s) =>
-          s.longitude != null &&
-          s.latitude != null &&
-          s.longitude >= LNG_MIN &&
-          s.longitude <= LNG_MAX &&
-          s.latitude >= LAT_MIN &&
-          s.latitude <= LAT_MAX
-      ),
-    [sites]
-  )
+  // 仅保留含有效经纬度的设备，投影成标记
+  const markers = useMemo<MarkerSite[]>(() => {
+    const items = devicesGeoData?.items ?? []
+    return items
+      .filter((d) => d.longitude != null && d.latitude != null)
+      .map(toMarker)
+  }, [devicesGeoData])
 
   const filtered = useMemo(() => {
-    const kw = keyword.trim()
-    if (!kw) return geoSites
-    return geoSites.filter(
-      (s) => s.name.includes(kw) || (s.address ?? '').includes(kw)
+    const kw = keyword.trim().toLowerCase()
+    if (!kw) return markers
+    return markers.filter(
+      (m) =>
+        m.name.toLowerCase().includes(kw) ||
+        m.sn.toLowerCase().includes(kw) ||
+        (m.address ?? '').toLowerCase().includes(kw)
     )
-  }, [geoSites, keyword])
+  }, [markers, keyword])
 
-  const positions = useMemo<SitePos[]>(
+  // 投影边界按全量标记拟合（保持稳定视窗，不随搜索缩放跳动）
+  const bbox = useMemo(() => fitBBox(markers), [markers])
+
+  const positions = useMemo<MarkerPos[]>(
     () =>
-      filtered.map((s) => {
-        const { x, y } = project(s.longitude as number, s.latitude as number)
-        return { site: s, x, y }
+      filtered.map((m) => {
+        const { x, y } = projectWith(bbox, m.longitude, m.latitude)
+        return { site: m, x, y }
       }),
-    [filtered]
+    [filtered, bbox]
   )
 
-  const siteStatusCount = useMemo(() => {
-    const acc = { active: 0, maintenance: 0, inactive: 0 }
-    for (const s of geoSites) {
-      if (s.status in acc) acc[s.status as keyof typeof acc] += 1
+  // 标记状态计数（统计接口缺失时的兜底来源）
+  const markerStatusCount = useMemo(() => {
+    const acc: Record<DeviceStatus, number> = {
+      onlineActive: 0,
+      onlineInactive: 0,
+      offline: 0,
     }
+    for (const m of markers) acc[m.status] += 1
     return acc
-  }, [geoSites])
+  }, [markers])
 
-  const nodeStatusCount = useMemo(() => {
-    const acc: Record<string, number> = {}
-    for (const n of nodes) acc[n.status] = (acc[n.status] ?? 0) + 1
-    return acc
-  }, [nodes])
+  const totalAlarms = useMemo(
+    () => markers.reduce((sum, m) => sum + (m.alarmCount ?? 0), 0),
+    [markers]
+  )
 
   return (
     <PageShell
       code="F06"
       title="GIS MAP · 地理态势"
-      subtitle="GEO OVERLAY · 站点经纬投影 / 设备分布"
+      subtitle="GEO OVERLAY · 设备经纬投影 / 分布态势"
       isFetching={isFetching}
       bare
       toolbar={
@@ -124,7 +191,7 @@ export default function GISMapView() {
             <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-cyan-300/50" />
             <input
               className="neon-input w-60 pl-9"
-              placeholder="站点名称 / 地址"
+              placeholder="设备名称 / 序列号 / 地址"
               value={keyword}
               onChange={(e) => setKeyword(e.target.value)}
             />
@@ -137,30 +204,30 @@ export default function GISMapView() {
     >
       {/* ── 统计带 ── */}
       <div className="mb-3 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
-        <Stat label="TOTAL · 设备" value={stats?.total ?? nodes.length} color="#00f0ff" />
+        <Stat label="TOTAL · 设备" value={stats?.total ?? markers.length} color="#00f0ff" />
         <Stat
           label="ONLINE · 激活"
-          value={stats?.statusCount.onlineActive ?? siteStatusCount.active}
+          value={stats?.statusCount.onlineActive ?? markerStatusCount.onlineActive}
           color="#00ff88"
         />
         <Stat
           label="STANDBY · 未激活"
-          value={stats?.statusCount.onlineInactive ?? siteStatusCount.maintenance}
+          value={stats?.statusCount.onlineInactive ?? markerStatusCount.onlineInactive}
           color="#ffaa00"
         />
         <Stat
           label="OFFLINE · 离线"
-          value={stats?.statusCount.offline ?? siteStatusCount.inactive}
+          value={stats?.statusCount.offline ?? markerStatusCount.offline}
           color="#525a78"
         />
-        <Stat label="ALARM · 告警" value={stats?.alarmCount ?? 0} color="#ff2d6f" />
+        <Stat label="ALARM · 告警" value={stats?.alarmCount ?? totalAlarms} color="#ff2d6f" />
       </div>
 
       <div className="grid grid-cols-1 gap-3 xl:grid-cols-[1fr_320px]">
         {/* ── 地图 ── */}
         <GlassPanel
-          title="MAP · 站点投影"
-          meta={`${positions.length} SITES · CN GRID`}
+          title="MAP · 设备投影"
+          meta={`${positions.length} NODES · GEO GRID`}
           strong
           className="min-h-[560px]"
         >
@@ -178,7 +245,7 @@ export default function GISMapView() {
             ) : positions.length === 0 ? (
               <Center>
                 <span className="font-mono text-xs uppercase tracking-[0.2em] text-cyan-300/40">
-                  {geoSites.length === 0 ? 'NO GEO-TAGGED SITES' : 'NO MATCH · 无匹配站点'}
+                  {markers.length === 0 ? 'NO GEO-TAGGED DEVICES' : 'NO MATCH · 无匹配设备'}
                 </span>
               </Center>
             ) : (
@@ -237,9 +304,9 @@ export default function GISMapView() {
                   strokeDasharray="4 6"
                 />
 
-                {/* 站点点位 */}
+                {/* 设备点位 */}
                 {positions.map((p) => {
-                  const color = SITE_STATUS_COLOR[p.site.status] ?? '#525a78'
+                  const color = STATUS_COLOR[p.site.status] ?? '#525a78'
                   const isSel = selected?.id === p.site.id
                   return (
                     <g
@@ -261,7 +328,7 @@ export default function GISMapView() {
                       <circle
                         cx={p.x}
                         cy={p.y}
-                        r={Math.min(4 + Math.sqrt(p.site.deviceCount || 1) * 1.4, 14)}
+                        r={Math.min(4 + Math.sqrt((p.site.alarmCount ?? 0) + 1) * 1.4, 14)}
                         fill={color}
                         fillOpacity={0.22}
                       />
@@ -284,31 +351,31 @@ export default function GISMapView() {
             <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-cyan-300/55">
               LEGEND
             </span>
-            {(['active', 'maintenance', 'inactive'] as const).map((s) => (
+            {(['onlineActive', 'onlineInactive', 'offline'] as const).map((s) => (
               <span key={s} className="flex items-center gap-1.5">
                 <span
                   className="size-2 rounded-full"
                   style={{
-                    background: SITE_STATUS_COLOR[s],
-                    boxShadow: `0 0 6px ${SITE_STATUS_COLOR[s]}`,
+                    background: STATUS_COLOR[s],
+                    boxShadow: `0 0 6px ${STATUS_COLOR[s]}`,
                   }}
                 />
                 <span className="text-[10px] text-cyan-300/70">
-                  {SITE_STATUS_LABEL[s]} · {siteStatusCount[s]}
+                  {STATUS_LABEL[s]} · {markerStatusCount[s]}
                 </span>
               </span>
             ))}
             <span className="ml-auto font-mono text-[10px] text-cyan-300/40">
-              点位面积 ∝ 设备数
+              点位面积 ∝ 告警数
             </span>
           </div>
         </GlassPanel>
 
         {/* ── 右栏 ── */}
         <div className="flex flex-col gap-3">
-          {/* 选中站点详情 */}
+          {/* 选中设备详情 */}
           {selected && (
-            <GlassPanel title="SITE · 站点详情" meta="SELECTED">
+            <GlassPanel title="DEVICE · 设备详情" meta="SELECTED">
               <div className="relative p-3">
                 <button
                   type="button"
@@ -324,19 +391,20 @@ export default function GISMapView() {
                 <DetailRow
                   k="状态"
                   v={
-                    <span style={{ color: SITE_STATUS_COLOR[selected.status] ?? '#6b86b6' }}>
-                      {SITE_STATUS_LABEL[selected.status] ?? selected.status}
+                    <span style={{ color: STATUS_COLOR[selected.status] ?? '#6b86b6' }}>
+                      {STATUS_LABEL[selected.status] ?? selected.status}
                     </span>
                   }
                 />
+                <DetailRow k="序列号" v={selected.sn || '—'} mono />
                 <DetailRow k="地址" v={selected.address || '—'} />
                 <DetailRow
                   k="经纬度"
-                  v={`${selected.longitude?.toFixed(4) ?? '—'}, ${selected.latitude?.toFixed(4) ?? '—'}`}
+                  v={`${selected.longitude.toFixed(4)}, ${selected.latitude.toFixed(4)}`}
                   mono
                 />
-                <DetailRow k="设备数" v={String(selected.deviceCount)} mono />
-                <DetailRow k="域" v={selected.domainId || '—'} mono />
+                <DetailRow k="告警数" v={String(selected.alarmCount ?? 0)} mono />
+                <DetailRow k="设备组" v={selected.groupName || '—'} />
                 <div className="mt-3">
                   <NeonButton
                     icon={<Crosshair />}
@@ -350,22 +418,28 @@ export default function GISMapView() {
             </GlassPanel>
           )}
 
-          {/* 节点状态分布 */}
-          <GlassPanel title="NODES · 节点状态" meta={`${nodes.length}`}>
-            <div className="grid grid-cols-2 gap-px border-b border-cyan-500/10 bg-cyan-500/5">
-              {(['online', 'offline', 'alarm', 'maintenance'] as const).map((s) => (
+          {/* 状态分布 */}
+          <GlassPanel title="STATUS · 状态分布" meta={`${markers.length}`}>
+            <div className="grid grid-cols-3 gap-px border-b border-cyan-500/10 bg-cyan-500/5">
+              {(['onlineActive', 'onlineInactive', 'offline'] as const).map((s) => (
                 <MiniStat
                   key={s}
-                  label={s.toUpperCase()}
-                  value={nodeStatusCount[s] ?? 0}
-                  color={NODE_STATUS_COLOR[s]}
+                  label={STATUS_LABEL[s]}
+                  value={
+                    s === 'onlineActive'
+                      ? stats?.statusCount.onlineActive ?? markerStatusCount.onlineActive
+                      : s === 'onlineInactive'
+                        ? stats?.statusCount.onlineInactive ?? markerStatusCount.onlineInactive
+                        : stats?.statusCount.offline ?? markerStatusCount.offline
+                  }
+                  color={STATUS_COLOR[s]}
                 />
               ))}
             </div>
           </GlassPanel>
 
-          {/* 站点清单 */}
-          <GlassPanel title="SITES · 站点清单" meta={`${filtered.length}`}>
+          {/* 设备清单 */}
+          <GlassPanel title="DEVICES · 设备清单" meta={`${filtered.length}`}>
             <div className="max-h-[300px] overflow-auto">
               {isLoading ? (
                 <div className="flex items-center justify-center gap-2 py-8 text-cyan-300/60">
@@ -376,17 +450,17 @@ export default function GISMapView() {
                 </div>
               ) : filtered.length === 0 ? (
                 <div className="py-8 text-center font-mono text-[10px] uppercase tracking-[0.2em] text-cyan-300/40">
-                  NO SITES
+                  NO DEVICES
                 </div>
               ) : (
-                filtered.map((s) => {
-                  const color = SITE_STATUS_COLOR[s.status] ?? '#525a78'
-                  const isSel = selected?.id === s.id
+                filtered.map((m) => {
+                  const color = STATUS_COLOR[m.status] ?? '#525a78'
+                  const isSel = selected?.id === m.id
                   return (
                     <button
-                      key={s.id}
+                      key={m.id}
                       type="button"
-                      onClick={() => setSelected(s)}
+                      onClick={() => setSelected(m)}
                       className={`flex w-full items-center gap-2 border-b border-cyan-500/8 px-3 py-2 text-left transition-colors ${
                         isSel ? 'bg-cyan-500/10' : 'hover:bg-cyan-500/5'
                       }`}
@@ -397,14 +471,14 @@ export default function GISMapView() {
                       />
                       <div className="min-w-0 flex-1">
                         <div className="truncate font-mono text-xs text-cyan-100">
-                          {s.name}
+                          {m.name}
                         </div>
                         <div className="truncate text-[10px] text-cyan-300/55">
-                          {s.address || '—'}
+                          {m.sn || m.address || '—'}
                         </div>
                       </div>
                       <span className="shrink-0 font-display text-sm font-bold text-cyan-200">
-                        {s.deviceCount}
+                        {m.alarmCount ?? 0}
                       </span>
                     </button>
                   )
