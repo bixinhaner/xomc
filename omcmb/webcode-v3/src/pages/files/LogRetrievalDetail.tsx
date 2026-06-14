@@ -54,7 +54,7 @@ export default function LogRetrievalDetail() {
       isFetching={isFetching}
       toolbar={
         <>
-          <NeonButton icon={<ArrowLeft />} onClick={() => navigate('/files/log-retrieval')}>
+          <NeonButton icon={<ArrowLeft />} onClick={() => navigate('/file/log-retrieval')}>
             返回列表
           </NeonButton>
           <NeonButton icon={<RefreshCcw />} onClick={() => refetch()}>

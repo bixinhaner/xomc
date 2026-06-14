@@ -14,6 +14,7 @@ import {
   RefreshCcw,
   RefreshCw,
   Search,
+  Users,
   X,
 } from 'lucide-react'
 
@@ -360,6 +361,28 @@ export function DevicesPage() {
             {formatTime(row.original.lastOnlineTime)}
           </span>
         ),
+      },
+      {
+        accessorKey: 'ueCount',
+        header: '在线 UE',
+        cell: ({ row }) => {
+          const d = row.original
+          const label = d.deviceName || d.name || d.sn
+          return (
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 text-xs text-primary tabular-nums hover:underline"
+              onClick={() =>
+                navigate(
+                  `/devices/ue-detail/${encodeURIComponent(d.sn)}?name=${encodeURIComponent(label || '')}&ueCount=${d.ueCount ?? 0}`
+                )
+              }
+            >
+              <Users className="size-3.5" />
+              {d.ueCount ?? 0}
+            </button>
+          )
+        },
       },
     ],
     [allOnPageSelected, someOnPageSelected, selectedIds]

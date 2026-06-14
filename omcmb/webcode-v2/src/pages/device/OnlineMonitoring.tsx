@@ -206,7 +206,7 @@ export default function OnlineMonitoring() {
   const offlineCount = filtered.filter((d) => !d.isOnline).length
   const alarmCount = filtered.filter((d) => d.alarmLevel !== 'none').length
 
-  const handleView = (sn: string) => navigate(`/device/detail/${sn}`)
+  const handleView = (sn: string) => navigate(`/devices/detail/${sn}`)
 
   return (
     <PageShell

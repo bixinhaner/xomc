@@ -619,7 +619,7 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
     lng: number,
     lat: number,
     targetZoom: number,
-    maxZoom: number,
+    _maxZoom: number,
     onComplete?: () => void
   ) => {
     const map = mapInstanceRef.current;

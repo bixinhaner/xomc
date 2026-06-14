@@ -61,7 +61,7 @@ export default function ConfigDistributionDetail() {
       isFetching={isFetching || tasks.isFetching}
       toolbar={
         <>
-          <NeonButton icon={<ArrowLeft />} onClick={() => navigate('/files/config-distribution')}>
+          <NeonButton icon={<ArrowLeft />} onClick={() => navigate('/file/config-distribution')}>
             返回列表
           </NeonButton>
           <NeonButton

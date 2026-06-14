@@ -16,6 +16,7 @@ export const mockProducts: Product[] = [
     deviceAttrsOverride: { data_type: false, access: true, min_value: false, max_value: false, change_applies: true },
     enableUnknownAlarm: true,
     deviceCount: 12,
+    isBuiltin: true,
     patterns: ['PicoCell-LTE-.+', 'CombaPico.*'],
   },
   {
@@ -33,6 +34,7 @@ export const mockProducts: Product[] = [
     deviceAttrsOverride: { data_type: false, access: false, min_value: false, max_value: false, change_applies: false },
     enableUnknownAlarm: false,
     deviceCount: 5,
+    isBuiltin: true,
     patterns: ['MicroCell-NR-.+'],
   },
 ];

@@ -351,8 +351,8 @@ export function DashboardPage() {
           iconClass="bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400"
           label="设备总数"
           value={formatNumber(totalDevices)}
-          deltaText={deltaText(totalDevicesDelta?.change_percent)}
-          deltaLabel={totalDevicesDelta ? deltaLabel(totalDevicesDelta.compare_type) : undefined}
+          deltaText={deltaText(totalDevicesDelta?.changePercent)}
+          deltaLabel={totalDevicesDelta ? deltaLabel(totalDevicesDelta.compareType) : undefined}
           trend={totalDevicesDelta?.trend ?? 'stable'}
           loading={isLoading}
           onClick={() => navigate('/devices')}
@@ -373,8 +373,8 @@ export function DashboardPage() {
           iconClass="bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-400"
           label="活动告警"
           value={formatNumber(activeAlarms)}
-          deltaText={deltaText(activeAlarmsDelta?.change_percent)}
-          deltaLabel={activeAlarmsDelta ? deltaLabel(activeAlarmsDelta.compare_type) : undefined}
+          deltaText={deltaText(activeAlarmsDelta?.changePercent)}
+          deltaLabel={activeAlarmsDelta ? deltaLabel(activeAlarmsDelta.compareType) : undefined}
           trend={activeAlarmsDelta?.trend ?? 'stable'}
           loading={isLoading}
           onClick={() => navigate('/alarms')}
@@ -384,8 +384,8 @@ export function DashboardPage() {
           iconClass="bg-violet-50 text-violet-600 dark:bg-violet-950/40 dark:text-violet-400"
           label="活动用户数 (UE)"
           value={formatNumber(currentActiveUE)}
-          deltaText={deltaText(ueDelta?.change_percent)}
-          deltaLabel={ueDelta ? deltaLabel(ueDelta.compare_type) : undefined}
+          deltaText={deltaText(ueDelta?.changePercent)}
+          deltaLabel={ueDelta ? deltaLabel(ueDelta.compareType) : undefined}
           trend={ueDelta?.trend ?? 'stable'}
           loading={isLoading}
         />

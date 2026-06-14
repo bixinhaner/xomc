@@ -166,6 +166,15 @@ function getUpgradeTypeLabel(category: string, fallback: string, t: (id: string)
   return fallback;
 }
 
+/**
+ * 新建任务抽屉的表单值。
+ * 在 CreateUnifiedFileTransferTaskInput（提交载荷）之外，多一个 UI-only 的 `productClass`
+ * 字段：用于按机型筛选固件候选（watch 后喂给候选查询的 productType），不直接提交。
+ */
+type TaskFormValues = CreateUnifiedFileTransferTaskInput & {
+  productClass?: string;
+};
+
 export default function FileTransferCenter() {
   const t = useT();
   const queryClient = useQueryClient();
@@ -223,7 +232,7 @@ export default function FileTransferCenter() {
   const [taskDrawerOpen, setTaskDrawerOpen] = useState(false);
   // MR 测量 Tab 的新建抽屉 — 受控状态，让顶部 "New Task" 按钮接管打开（与 UFTE 风格一致）
   const [mrCreateOpen, setMrCreateOpen] = useState(false);
-  const [taskForm] = Form.useForm<CreateUnifiedFileTransferTaskInput>();
+  const [taskForm] = Form.useForm<TaskFormValues>();
   const drawerTypeCode = Form.useWatch('typeCode', taskForm);
   const drawerProductClass = Form.useWatch('productClass', taskForm);
   const [selectedDrawerDeviceIds, setSelectedDrawerDeviceIds] = useState<string[]>([]);
@@ -1095,7 +1104,6 @@ export default function FileTransferCenter() {
         render: (_, record) => renderEllipsisCell(record.taskName, {
           strong: true,
           subtitle: record.deviceName,
-          maxWidth: 260,
         }),
       },
       {

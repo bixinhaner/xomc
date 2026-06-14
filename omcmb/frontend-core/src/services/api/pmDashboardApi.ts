@@ -243,6 +243,7 @@ export const pmDashboardMock: typeof pmDashboardApi = {
       sharedWith: [],
       technology: input.technology,
       layout: input.layout ?? { panels: [] },
+      isBuiltin: false,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };

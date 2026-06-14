@@ -51,7 +51,7 @@ function createDevicePreviewItems(task: UnifiedFileTransferTask, typeDef: Unifie
     typeDisplayName: task.typeDisplayName,
     deviceName: `${task.categoryLabel}-演示设备-${String(index + 1).padStart(2, '0')}`,
     deviceSn: `${task.category.slice(0, 3).toUpperCase()}${String(index + 1).padStart(5, '0')}`,
-    productClass: task.productClass ?? typeDef?.platformScope[0] ?? '待绑定平台',
+    productType: task.productType ?? typeDef?.platformScope[0] ?? '待绑定平台',
     currentVersion: task.category.includes('upgrade') || task.category.includes('rollback') ? `V1.${index}.0` : 'baseline',
     targetVersion: task.targetVersion ?? typeDef?.fileNameTemplate ?? typeDef?.targetFileNameTemplate ?? typeDef?.fileTypeLabel ?? '按模板生成',
     status: index === 0 ? 'downloading' : index === 1 ? 'verifying' : task.status === 'ended' ? 'ended' : 'pending',
@@ -525,7 +525,7 @@ let deviceItems: UnifiedFileTransferDeviceItem[] = [
     typeDisplayName: '4G 基站软件升级',
     deviceName: '华北-eNB-0001',
     deviceSn: 'ENB00001',
-    productClass: 'QAFA',
+    productType: 'QAFA',
     currentVersion: 'V1.0.2',
     targetVersion: 'IMG_2026_05_A',
     status: 'downloading',
@@ -543,7 +543,7 @@ let deviceItems: UnifiedFileTransferDeviceItem[] = [
     typeDisplayName: '4G 基站软件升级',
     deviceName: '华北-eNB-0002',
     deviceSn: 'ENB00002',
-    productClass: 'QAFB',
+    productType: 'QAFB',
     currentVersion: 'V1.0.2',
     targetVersion: 'IMG_2026_05_A',
     status: 'verifying',
@@ -561,7 +561,7 @@ let deviceItems: UnifiedFileTransferDeviceItem[] = [
     typeDisplayName: '5G 基站软件升级',
     deviceName: '研发-gNB-0101',
     deviceSn: 'GNB00101',
-    productClass: 'BBU-XSS',
+    productType: 'BBU-XSS',
     currentVersion: 'V2.1.7',
     targetVersion: 'NR_IMG_2026_05',
     status: 'verifying',
@@ -579,7 +579,7 @@ let deviceItems: UnifiedFileTransferDeviceItem[] = [
     typeDisplayName: '运行日志采集',
     deviceName: '现网-eNB-2203',
     deviceSn: 'ENB02203',
-    productClass: 'DXDF',
+    productType: 'DXDF',
     currentVersion: 'runtime',
     targetVersion: 'runtime-{task_id8}-{sn}.tar.gz',
     status: 'ended',
@@ -598,7 +598,7 @@ let deviceItems: UnifiedFileTransferDeviceItem[] = [
     typeDisplayName: '基站版本回退',
     deviceName: '重点站-gNB-0312',
     deviceSn: 'GNB00312',
-    productClass: 'BBU-QSS',
+    productType: 'BBU-QSS',
     currentVersion: 'V2.3.1',
     targetVersion: 'Rollback_V2.2.8',
     status: 'pending',
@@ -616,7 +616,7 @@ let deviceItems: UnifiedFileTransferDeviceItem[] = [
     typeDisplayName: '配置归档采集',
     deviceName: '演示-eNB-0418',
     deviceSn: 'ENB00418',
-    productClass: '4G eNB',
+    productType: '4G eNB',
     currentVersion: 'baseline',
     targetVersion: 'archive-{task_id8}-{sn}.cfg',
     status: 'suspended',
@@ -634,7 +634,7 @@ let deviceItems: UnifiedFileTransferDeviceItem[] = [
     typeDisplayName: '配置恢复',
     deviceName: '恢复-eNB-0501',
     deviceSn: 'ENB00501',
-    productClass: '5G gNB',
+    productType: '5G gNB',
     currentVersion: 'restore-ready',
     targetVersion: 'backup-20260513.xml',
     status: 'downloading',
@@ -715,7 +715,7 @@ export const unifiedFileTransferService = {
   },
 
   async getDevices(
-    params: { status?: string; typeCode?: string; keyword?: string; category?: string } & PageRequest,
+    params: { status?: string; typeCode?: string; keyword?: string; category?: string; productType?: string } & PageRequest,
   ): Promise<PageResponse<UnifiedFileTransferDeviceItem>> {
     await delay(120, 260);
     let filtered = [...deviceItems].sort((left, right) => right.lastReportAt.localeCompare(left.lastReportAt));
@@ -727,6 +727,35 @@ export const unifiedFileTransferService = {
     }
     if (params.typeCode) {
       filtered = filtered.filter((item) => item.typeCode === params.typeCode);
+    }
+    if (params.productType) {
+      filtered = filtered.filter((item) => item.productType === params.productType);
+    }
+    if (params.keyword) {
+      const keyword = params.keyword.toLowerCase();
+      filtered = filtered.filter((item) =>
+        item.taskName.toLowerCase().includes(keyword) ||
+        item.deviceName.toLowerCase().includes(keyword) ||
+        item.deviceSn.toLowerCase().includes(keyword) ||
+        item.operatorScope.toLowerCase().includes(keyword),
+      );
+    }
+    return paginate(filtered, params.page, params.pageSize);
+  },
+
+  async getDeviceCandidates(
+    params: { keyword?: string; category?: string; typeCode?: string; productType?: string } & PageRequest,
+  ): Promise<PageResponse<UnifiedFileTransferDeviceItem>> {
+    await delay(120, 260);
+    let filtered = [...deviceItems].sort((left, right) => right.lastReportAt.localeCompare(left.lastReportAt));
+    if (params.category) {
+      filtered = filtered.filter((item) => item.category === params.category);
+    }
+    if (params.typeCode) {
+      filtered = filtered.filter((item) => item.typeCode === params.typeCode);
+    }
+    if (params.productType) {
+      filtered = filtered.filter((item) => item.productType === params.productType);
     }
     if (params.keyword) {
       const keyword = params.keyword.toLowerCase();
@@ -753,7 +782,7 @@ export const unifiedFileTransferService = {
       typeDisplayName: typeDef?.displayName ?? input.typeCode,
       firmwareId: firmware?.id,
       targetVersion: firmware?.versionCode ?? typeDef?.fileNameTemplate ?? typeDef?.targetFileNameTemplate ?? typeDef?.fileTypeLabel,
-      productClass: firmware?.deviceType ?? typeDef?.platformScope?.[0],
+      productType: firmware?.deviceType ?? typeDef?.platformScope?.[0],
       status: input.executionMode === 'suspended' ? 'suspended' : 'pending',
       progress: input.executionMode === 'suspended' ? 0 : 6,
       totalCount: input.deviceCount,
@@ -861,5 +890,64 @@ export const unifiedFileTransferService = {
         }
       : item);
     return updated;
+  },
+
+  async deleteTaskType(typeCode: string): Promise<void> {
+    await delay(80, 160);
+    taskTypes = taskTypes.filter((item) => item.typeCode !== typeCode);
+  },
+
+  async startTask(id: string): Promise<void> {
+    await delay(80, 160);
+    tasks = tasks.map((item) => item.id === id
+      ? { ...item, status: 'in_progress', currentStep: 'CHECK_ONLINE' }
+      : item);
+  },
+
+  async suspendTask(id: string): Promise<void> {
+    await delay(80, 160);
+    tasks = tasks.map((item) => item.id === id
+      ? { ...item, status: 'suspended' }
+      : item);
+  },
+
+  async terminateTask(id: string): Promise<void> {
+    await delay(80, 160);
+    tasks = tasks.map((item) => item.id === id
+      ? { ...item, status: 'ended', result: 'terminated' }
+      : item);
+  },
+
+  async deleteTask(id: string): Promise<void> {
+    await delay(80, 160);
+    tasks = tasks.filter((item) => item.id !== id);
+    deviceItems = deviceItems.filter((item) => item.taskId !== id);
+  },
+
+  async batchDeleteTasks(taskIds: string[]): Promise<{
+    succeeded: string[];
+    failed: Array<{ taskId: string; error: string }>;
+  }> {
+    await delay(120, 240);
+    const idSet = new Set(taskIds);
+    const succeeded: string[] = [];
+    const failed: Array<{ taskId: string; error: string }> = [];
+    for (const id of taskIds) {
+      if (tasks.some((item) => item.id === id)) {
+        succeeded.push(id);
+      } else {
+        failed.push({ taskId: id, error: '任务不存在' });
+      }
+    }
+    tasks = tasks.filter((item) => !idSet.has(item.id));
+    deviceItems = deviceItems.filter((item) => !idSet.has(item.taskId));
+    return { succeeded, failed };
+  },
+
+  async retryTask(id: string): Promise<void> {
+    await delay(80, 160);
+    tasks = tasks.map((item) => item.id === id
+      ? { ...item, status: 'in_progress', result: undefined, failCount: 0, currentStep: 'CHECK_ONLINE' }
+      : item);
   },
 };

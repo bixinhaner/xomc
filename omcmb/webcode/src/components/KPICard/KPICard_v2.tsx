@@ -47,6 +47,7 @@ const KPICard: React.FC<KPICardProps> = ({
   deltaLabel,
   unit,
   onClick,
+  loading = false,
   minHeight,
   pulse = false,
   tooltip,

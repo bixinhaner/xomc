@@ -244,8 +244,8 @@ function DictListPanel({ selectedId, onSelect }: DictListPanelProps) {
           const createBody: CreateDictionaryPayload = vals as CreateDictionaryPayload;
           if (sc.fields.sourceTable) {
             createBody.sourceTable = sc.fields.sourceTable;
-            createBody.sourceLabelField = sc.fields.sourceLabelField;
-            createBody.sourceValueField = sc.fields.sourceValueField;
+            createBody.sourceLabelField = sc.fields.sourceLabelField ?? undefined;
+            createBody.sourceValueField = sc.fields.sourceValueField ?? undefined;
           }
           createDictMutation.mutate(createBody);
         }

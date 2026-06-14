@@ -1,4 +1,5 @@
 import { lazy, Suspense, type ComponentType, type ReactNode } from 'react'
+import { Navigate } from 'react-router-dom'
 import {
   AlertTriangle, ArrowLeftRight, Bell, Boxes, Cpu, FileBarChart, FileStack, FolderOpen, Globe, KeySquare, LayoutDashboard, LineChart, Package, Radio, ScrollText, Settings, Sliders, Terminal, Wrench,
 } from 'lucide-react'
@@ -24,6 +25,7 @@ const C_pages_alarms_AlarmRuleDetail = lazy(() => import('@/pages/alarms/AlarmRu
 const C_pages_alarms_AlarmRules = lazy(() => import('@/pages/alarms/AlarmRules'))
 const C_pages_alarms_AlarmStatistics = lazy(() => import('@/pages/alarms/AlarmStatistics'))
 const C_pages_alarms_AlarmSync = lazy(() => import('@/pages/alarms/AlarmSync'))
+const C_pages_alarms_HistoricalAlarms = lazy(() => import('@/pages/alarms/HistoricalAlarms'))
 const C_pages_alarms_CustomAlarmStats = lazy(() => import('@/pages/alarms/CustomAlarmStats'))
 const C_pages_backup_BackupPolicy = lazy(() => import('@/pages/backup/BackupPolicy'))
 const C_pages_backup_BackupSchedule = lazy(() => import('@/pages/backup/BackupSchedule'))
@@ -88,6 +90,8 @@ const C_pages_mml_Console = lazy(() => import('@/pages/mml/Console'))
 const C_pages_mml_ConsoleV2 = lazy(() => import('@/pages/mml/ConsoleV2'))
 const C_pages_mml_PrivateCommand = lazy(() => import('@/pages/mml/PrivateCommand'))
 const C_pages_mml_PrivateCommandDetail = lazy(() => import('@/pages/mml/PrivateCommandDetail'))
+const C_pages_mml_ScriptTask = lazy(() => import('@/pages/mml/ScriptTask'))
+const C_pages_mml_TaskRecord = lazy(() => import('@/pages/mml/TaskRecord'))
 const C_pages_mml_admin_Catalog = lazy(() => import('@/pages/mml/admin/Catalog'))
 const C_pages_mml_admin_CatalogCommandDetail = lazy(() => import('@/pages/mml/admin/CatalogCommandDetail'))
 const C_pages_mr_DeviceFiles = lazy(() => import('@/pages/mr/DeviceFiles'))
@@ -214,6 +218,7 @@ export const MODULES: ModuleDef[] = [
   ] },
   { key: 'alarms', label: '告警中心', icon: <AlertTriangle />, section: '监控', routes: [
     { path: '/alarms', element: s(AlarmsPage), label: "告警中心" },
+    { path: '/alarms/history', element: s(C_pages_alarms_HistoricalAlarms), label: "历史告警" },
     { path: '/alarms/statistics', element: s(C_pages_alarms_AlarmStatistics), label: "告警统计" },
     { path: '/alarms/rules', element: s(C_pages_alarms_AlarmRules), label: "告警规则" },
     { path: '/alarms/rules/:id', element: s(C_pages_alarms_AlarmRuleDetail), label: "规则详情", hidden: true },
@@ -259,6 +264,8 @@ export const MODULES: ModuleDef[] = [
   ] },
   { key: 'mml', label: 'MML 脚本', icon: <Terminal />, section: '运维', routes: [
     { path: '/mml', element: s(MMLPage), label: "MML 脚本" },
+    { path: '/mml/script', element: s(C_pages_mml_ScriptTask), label: "脚本库" },
+    { path: '/mml/task-records', element: s(C_pages_mml_TaskRecord), label: "任务记录" },
     { path: '/mml/console', element: s(C_pages_mml_Console), label: "命令树控制台" },
     { path: '/mml/console-v2', element: s(C_pages_mml_ConsoleV2), label: "控制台 V2" },
     { path: '/mml/commands-tree', element: s(C_pages_mml_CommandTree), label: "命令树" },
@@ -323,6 +330,9 @@ export const MODULES: ModuleDef[] = [
     { path: '/performance/pm-adhoc', element: s(C_pages_performance_PmAdhoc), label: "自定义聚合任务" },
     { path: '/performance/pm-adhoc/new', element: s(C_pages_performance_PmAdhocWizard), label: "新建聚合任务", hidden: true },
     { path: '/performance/pm-adhoc/:id/edit', element: s(C_pages_performance_PmAdhocWizard), label: "编辑聚合任务", hidden: true },
+    // v1 兼容重定向：旧 pm-dashboard URL → 性能管理（非真页面）
+    { path: '/performance/pm-dashboard', element: <Navigate to="/performance" replace />, label: "PM 仪表盘（重定向）", hidden: true },
+    { path: '/performance/pm-dashboard/:id', element: <Navigate to="/performance" replace />, label: "PM 仪表盘（重定向）", hidden: true },
   ] },
   { key: 'mr', label: '测量报告', icon: <Radio />, section: '数据', routes: [
     { path: '/mr', element: s(MRPage), label: "测量报告" },

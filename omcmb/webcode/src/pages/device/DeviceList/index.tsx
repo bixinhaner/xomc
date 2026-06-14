@@ -770,7 +770,7 @@ export default function DeviceList() {
   const fmtTime = useCallback((v: string) => (v ? new Date(v).toLocaleString('zh-CN') : '-'), []);
 
   // 格式化在线时长(秒)
-  const fmtDuration = useCallback((seconds: number) => {
+  const fmtDuration = useCallback((seconds: number | null | undefined) => {
     if (!seconds) return '-';
     const d = Math.floor(seconds / 86400);
     const h = Math.floor((seconds % 86400) / 3600);

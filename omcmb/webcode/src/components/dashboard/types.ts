@@ -69,22 +69,9 @@ export interface KPITrendConfig {
 }
 
 /**
- * KPI 趋势图属性
+ * KPI 趋势图属性 — 实际生效的定义在 ./KPITrendChart.tsx（与组件强绑定）。
+ * 此处原有的同名 interface 与组件实现已分叉且无人引用，移除以消除 barrel 重复导出歧义。
  */
-export interface KPITrendChartProps {
-  title: string;          // 图表标题
-  kpiCode: string;        // KPI 代码
-  kpiLabel: string;       // KPI 显示标签
-  unit: string;           // 单位
-  value?: number;         // 当前值（顶部显示）
-  status?: KPIStatus;     // 状态
-  timeRange?: TimeRange;  // 时间范围
-  height?: number;        // 图表高度
-  loading?: boolean;      // 加载状态
-  className?: string;     // 自定义类名
-  onTimeRangeChange?: (range: TimeRange) => void;  // 时间范围切换回调
-  trendData?: KPITrendComparison;  // 趋势数据（今日vs昨日）
-}
 
 /**
  * 图表时间范围选项

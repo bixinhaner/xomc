@@ -20,7 +20,8 @@ import {
   PhoneOutlined,
   SwapOutlined,
   DashboardOutlined,
-  InfoCircleOutlined
+  InfoCircleOutlined,
+  ThunderboltOutlined
 } from '@ant-design/icons';
 import LineChart from '@/components/Charts/LineChart';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
@@ -402,7 +403,7 @@ export function KPIPanelV2({
             menu={{ items: quickActionItems }}
             trigger={['click']}
           >
-            <Button type="text" icon={< ThunderboardOutlined />} size="small" />
+            <Button type="text" icon={<ThunderboltOutlined />} size="small" />
           </Dropdown>
         ) : null
       }

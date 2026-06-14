@@ -10,7 +10,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   configSnapshotApi,
-  type ConfigSnapshot,
   type SnapshotListParams,
   type SnapshotImportResult,
   type BatchGetSnapshotsResult,

@@ -55,6 +55,7 @@ export const productService = {
       deviceAttrsOverride: input.deviceAttrsOverride || {},
       enableUnknownAlarm: input.enableUnknownAlarm ?? false,
       deviceCount: 0,
+      isBuiltin: false,
       patterns: [...inputPatterns],
     };
     products.push(newP);
@@ -118,11 +119,19 @@ export const productService = {
     return clone(newPat);
   },
 
-  async updatePattern(productId: string, patternId: string, productClass: string): Promise<ProductPattern> {
+  async updatePattern(
+    productId: string,
+    patternId: string,
+    fields: { productClass?: string; isActive?: boolean }
+  ): Promise<ProductPattern> {
     const arr = patterns[productId] || [];
     const idx = arr.findIndex((p) => p.id === patternId);
     if (idx < 0) throw new Error(`pattern ${patternId} not found`);
-    arr[idx] = { ...arr[idx], productClass };
+    arr[idx] = {
+      ...arr[idx],
+      ...(fields.productClass !== undefined && { productClass: fields.productClass }),
+      ...(fields.isActive !== undefined && { isActive: fields.isActive }),
+    };
     return clone(arr[idx]);
   },
 
@@ -172,8 +181,22 @@ export const productService = {
     return { items: clone(mockMatchOrder), total: mockMatchOrder.length };
   },
 
-  async listOrphan(_limit?: number): Promise<{ items: OrphanDevice[]; total: number }> {
-    return { items: clone(orphans), total: orphans.length };
+  async listOrphan(params: {
+    page?: number;
+    pageSize?: number;
+    search?: string;
+  } = {}): Promise<{ items: OrphanDevice[]; total: number; page: number; pageSize: number }> {
+    const page = params.page ?? 1;
+    const pageSize = params.pageSize ?? 50;
+    let items = [...orphans];
+    if (params.search) {
+      const k = params.search.toLowerCase();
+      items = items.filter((o) => o.serialNumber.toLowerCase().includes(k));
+    }
+    const total = items.length;
+    const start = (page - 1) * pageSize;
+    const pageItems = items.slice(start, start + pageSize);
+    return { items: clone(pageItems), total, page, pageSize };
   },
 
   /** 2026-05-29 对齐真 API:返 { status: 'accepted' | 'running', message }。

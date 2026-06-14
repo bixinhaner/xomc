@@ -251,7 +251,7 @@ export default function ConfigDistribution() {
                     </div>
                     <div className="font-mono text-[11px] text-cyan-300/75">{formatTime(d.lastReportAt)}</div>
                     <div className="flex justify-end">
-                      <NeonButton icon={<ChevronRight />} onClick={() => navigate(`/files/config-distribution/${d.taskId}`)}>
+                      <NeonButton icon={<ChevronRight />} onClick={() => navigate(`/file/config-distribution/${d.taskId}`)}>
                         任务
                       </NeonButton>
                     </div>

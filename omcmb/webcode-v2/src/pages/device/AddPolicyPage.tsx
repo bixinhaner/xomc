@@ -27,7 +27,7 @@ import {
 //   - add：录入 deviceId，调用 useCreateProvisioningTask 真实建任务
 //   - view/:id：useProvisioningTask 真实加载任务详情（含失败重试）
 //   - edit/:id：同 view，加重试入口（后端无任务字段更新接口，故只读 + 重试）
-// 路由由 /device/plug-and-play/{add,edit/:id,view/:id} 决定模式。
+// 路由由 /devices/plug-and-play/{add,edit/:id,view/:id} 决定模式。
 // ============================================================
 
 type Mode = 'add' | 'edit' | 'view'
@@ -81,7 +81,7 @@ function AddForm() {
     create.mutate(
       { deviceId: trimmed },
       {
-        onSuccess: () => navigate('/device/plug-and-play'),
+        onSuccess: () => navigate('/devices/plug-and-play'),
       }
     )
   }
@@ -123,7 +123,7 @@ function AddForm() {
           </Button>
           <Button
             variant="ghost"
-            onClick={() => navigate('/device/plug-and-play')}
+            onClick={() => navigate('/devices/plug-and-play')}
           >
             取消
           </Button>
@@ -166,7 +166,7 @@ function TaskDetail({ id, mode }: { id: string; mode: Mode }) {
         <Button
           variant="outline"
           size="sm"
-          onClick={() => navigate('/device/plug-and-play')}
+          onClick={() => navigate('/devices/plug-and-play')}
         >
           返回任务列表
         </Button>
@@ -286,7 +286,7 @@ export default function AddPolicyPage() {
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => navigate('/device/plug-and-play')}
+          onClick={() => navigate('/devices/plug-and-play')}
         >
           <ArrowLeft className="size-4" /> 返回
         </Button>

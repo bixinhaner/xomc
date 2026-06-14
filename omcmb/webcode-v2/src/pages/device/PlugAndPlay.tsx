@@ -116,7 +116,7 @@ export default function PlugAndPlay() {
             </Button>
             <Button
               size="sm"
-              onClick={() => navigate('/device/plug-and-play/add')}
+              onClick={() => navigate('/devices/plug-and-play/add')}
             >
               <Plus className="size-4" /> 新增策略
             </Button>
@@ -162,7 +162,7 @@ export default function PlugAndPlay() {
                         type="button"
                         className="font-mono text-xs text-primary hover:underline"
                         onClick={() =>
-                          navigate(`/device/plug-and-play/view/${v.taskId}`)
+                          navigate(`/devices/plug-and-play/view/${v.taskId}`)
                         }
                       >
                         {v.taskId}
@@ -195,7 +195,7 @@ export default function PlugAndPlay() {
                           size="sm"
                           onClick={() =>
                             navigate(
-                              `/device/plug-and-play/view/${v.taskId}`
+                              `/devices/plug-and-play/view/${v.taskId}`
                             )
                           }
                         >

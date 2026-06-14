@@ -70,8 +70,8 @@
 
 1. 〔机械·P5〕`cd omcgo && go build ./...` 不过 → P5 起全部不过
 2. 〔机械·P5〕`go test ./...` 不全绿 → P5 出口不过（成功 + 失败两条路径都要有）
-3. 〔机械·P5〕前端涉及 `cd omcmb/webcode && npm run typecheck` 不过 → P5 不过
-4. 〔机械·P6〕新端点 E/R < 1（E2E 新增 claim 数 / 新路由数）→ 不过；新 metric/log 名 `grep` 不到（存在性检查）→ 不过
+3. 〔机械·P5〕**前端三皮肤铁律**：任何前端 bug/需求必须在 `webcode`(v1)/`webcode-v2`/`webcode-v3` 三皮肤同时实现（业务层改 `frontend-core/` 一处共享，页面层三套各补齐）；`cd omcmb && npm run typecheck`（三皮肤全跑，**v1 须真校验非空跑**）任一不过 → P5 不过。详见 `CLAUDE.md` §8.3。
+4. 〔机械·P6〕新端点 E/R < 1（E2E 新增 claim 数 / 新路由数）→ 不过；新 metric/log 名 `grep` 不到（存在性检查）→ 不过；**前端改动须三皮肤 v1/v2/v3 各自浏览器冒烟**（真实后端，判 FAIL 含 `未找到/加载失败/Error/pageerror`，非"没崩"即过），任一皮肤未冒烟或报错 → 不过
 5. 〔机械·P6〕新迁移 `.up.sql`/`.down.sql` 不配对、或本地 `migrate-up`/`migrate-down` 未各演练一次 → 不过
 6. 〔质量·P7〕审查报告含 CRITICAL → 不过。CRITICAL 清单**归 `/review`**，含：`if carrier == "cmcc|ctcc|cucc"` 硬编码、字符串拼接 SQL、裸 `panic`、公共接口新增 `any`/`interface{}`、删测试 / 降安全等
 7. 〔质量·P7〕触 `internal/admin/` 或 `middleware/auth*` 未跑 `/security-review` → 不过

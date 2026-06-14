@@ -160,10 +160,10 @@ export const componentRegistry: Record<string, ComponentType> = {
   'mr/Reports': lazy(() => import('@/pages/mr/Reports')),
   'mr/Files': lazy(() => import('@/pages/mr/Files')),
 
-  // License Management
-  'license/LicenseList': lazy(() => import('@/pages/license/LicenseList')),
-  'license/LicenseOperations': lazy(() => import('@/pages/license/LicenseOperations')),
-  'license/LicenseLogs': lazy(() => import('@/pages/license/LicenseLogs')),
+  // License Management（F06-system-license-redesign：老 license/{list,operations,logs} 已删，
+  // 现为单例 SystemLicense 主页 + history 子页，与 routes.tsx 1:1 对齐）
+  'system/License': lazy(() => import('@/pages/SystemLicense')),
+  'system/LicenseHistory': lazy(() => import('@/pages/SystemLicense/History')),
 
   // Notifications
   'notifications/Index': lazy(() => import('@/pages/notifications')),

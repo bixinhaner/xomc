@@ -1,12 +1,14 @@
 import type { ReactNode } from 'react';
 import { Steps } from 'antd';
-import type { StepProps } from 'antd';
 import { useThemeToken } from '@/hooks/useThemeToken';
+
+/** antd v6 不再导出 StepProps，单步状态用其 StepItem.status 的字面量并集。 */
+type WizardStepStatus = 'wait' | 'process' | 'finish' | 'error';
 
 interface WizardStep {
   title: string;
   description?: string;
-  status?: StepProps['status'];
+  status?: WizardStepStatus;
 }
 
 interface Props {

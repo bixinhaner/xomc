@@ -237,7 +237,7 @@ export default function UserFiles() {
                     <NeonButton tone="danger" icon={<Trash2 />} disabled={remove.isPending} onClick={() => handleDelete([f.id])}>
                       DEL
                     </NeonButton>
-                    <NeonButton icon={<ChevronRight />} onClick={() => navigate(`/files/perf-retrieval/${f.id}`)}>
+                    <NeonButton icon={<ChevronRight />} onClick={() => navigate(`/file/perf-retrieval/${f.id}`)}>
                       详情
                     </NeonButton>
                   </div>

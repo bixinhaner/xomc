@@ -10,7 +10,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useIntl, type IntlShape } from 'react-intl';
-import { Alert, Button, Card, DatePicker, Empty, Space, Table, Tabs, Tag, Tooltip, Typography, message } from 'antd';
+import { Alert, Button, Card, DatePicker, Empty, Space, Spin, Table, Tabs, Tag, Tooltip, Typography, message } from 'antd';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { ExportOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';

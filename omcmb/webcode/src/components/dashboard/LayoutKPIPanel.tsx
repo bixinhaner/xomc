@@ -54,11 +54,11 @@ function buildSeries(
   todayLabel: string,
   yesterdayLabel: string,
   conversion: number,
-): { series: Array<{ name: string; data: number[]; color: string }>; currentValue: number | null } {
+): { series: Array<{ name: string; data: (number | null)[]; color: string }>; currentValue: number | null } {
   const comparison = trendData?.[metricKey];
 
-  const todayValues = new Array<number>(xData.length).fill(null) as number[];
-  const yesterdayValues = new Array<number>(xData.length).fill(null) as number[];
+  const todayValues = new Array<number | null>(xData.length).fill(null);
+  const yesterdayValues = new Array<number | null>(xData.length).fill(null);
 
   if (comparison) {
     comparison.current.forEach((point) => {

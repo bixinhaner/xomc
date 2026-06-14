@@ -215,7 +215,7 @@ export default function ConfigRetrieval() {
                       )}
                       <NeonButton
                         icon={<ChevronRight />}
-                        onClick={() => navigate(`/files/config-retrieval/${d.taskId}`)}
+                        onClick={() => navigate(`/file/config-retrieval/${d.taskId}`)}
                       >
                         任务
                       </NeonButton>

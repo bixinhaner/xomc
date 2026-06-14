@@ -2,7 +2,7 @@
  * KPI 趋势图组件 - 使用 LineChart 实现
  */
 
-import React, { useMemo } from 'react';
+import { useMemo } from 'react';
 import { Card, Button, Space, Typography, Empty } from 'antd';
 import LineChart from '@/components/Charts/LineChart';
 import { LoadingSpinner } from '@/components/LoadingSpinner';

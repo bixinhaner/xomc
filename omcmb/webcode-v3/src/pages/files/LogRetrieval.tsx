@@ -156,7 +156,7 @@ export default function LogRetrieval() {
                       >
                         DEL
                       </NeonButton>
-                      <NeonButton icon={<ChevronRight />} onClick={() => navigate(`/files/log-retrieval/${f.deviceSn}`)}>
+                      <NeonButton icon={<ChevronRight />} onClick={() => navigate(`/file/log-retrieval/${f.deviceSn}`)}>
                         设备
                       </NeonButton>
                     </div>

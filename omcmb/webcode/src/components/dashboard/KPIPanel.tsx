@@ -111,7 +111,7 @@ export function KPIPanel({ technology, panelType, height = 280, className }: KPI
 
     const xData: string[] = [];
     const xDataFull: string[] = []; // 完整时间戳，用于tooltip显示
-    const series: Array<{ name: string; data: number[]; color: string }> = [];
+    const series: Array<{ name: string; data: (number | null)[]; color: string }> = [];
     let currentValue: number | null = null;
     let trend: 'up' | 'down' | 'flat' | null = null;
 
@@ -161,7 +161,7 @@ export function KPIPanel({ technology, panelType, height = 280, className }: KPI
 
     // 处理Today数据 - 始终添加到series（即使数据为空也显示图例）
     {
-      const todayValues = new Array<number>(xData.length).fill(null);
+      const todayValues = new Array<number | null>(xData.length).fill(null);
       const conversionFactor = selectedKPIConfig.unitConversion ?? 1;
 
       // 将数据点映射到对应的X轴位置（如果有数据）
@@ -213,7 +213,7 @@ export function KPIPanel({ technology, panelType, height = 280, className }: KPI
 
     // 处理Yesterday数据 - 始终添加到series（即使数据为空也显示图例）
     {
-      const yesterdayValues = new Array<number>(xData.length).fill(null);
+      const yesterdayValues = new Array<number | null>(xData.length).fill(null);
       const conversionFactor = selectedKPIConfig.unitConversion ?? 1;
 
       // 将数据点映射到对应的X轴位置（如果有数据）

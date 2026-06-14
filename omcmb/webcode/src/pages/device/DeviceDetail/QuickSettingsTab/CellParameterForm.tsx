@@ -10,7 +10,6 @@ import {
   feedbackKey,
   useQuickSettingsFeedbackStore,
   type CellFeedback,
-  type QuickSettingsDraftValue,
 } from '@core/store/quickSettingsFeedbackStore';
 import type { DeviceParameter, ParameterSchemaItem, ParameterUpdateRequest } from '@core/types/deviceParameter';
 import type { DeviceTaskStatus } from '@core/types/deviceTask';
@@ -263,11 +262,11 @@ interface SpecialFieldConfig {
   forceWritable?: boolean;
 }
 
-interface MmeIpPlmnRow {
+type MmeIpPlmnRow = {
   key: string;
   mmeIp: string;
   plmn: string;
-}
+};
 
 interface MmeIpPlmnTableProps {
   value?: MmeIpPlmnRow[];
@@ -314,7 +313,7 @@ function isMmeIpPlmnRows(value: unknown): value is MmeIpPlmnRow[] {
     ));
 }
 
-function toMmeIpPlmnRows(value: QuickSettingsDraftValue | string | undefined): MmeIpPlmnRow[] {
+function toMmeIpPlmnRows(value: unknown): MmeIpPlmnRow[] {
   if (isMmeIpPlmnRows(value)) {
     return (value as MmeIpPlmnRow[]).map((row, idx) => ({
       ...row,
@@ -869,7 +868,7 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
             const p = group.params.find((q) => q.name === name);
             const special = p ? specialConfigByName.get(p.name) : undefined;
             if (special?.kind === 'mme-ip-plmn-table') {
-              setDraftField(fbKey, name, toMmeIpPlmnRows(value as QuickSettingsDraftValue));
+              setDraftField(fbKey, name, toMmeIpPlmnRows(value));
             } else {
               setDraftField(fbKey, name, String(value ?? ''));
             }
@@ -902,7 +901,7 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
               const path = special?.configPath ?? applyInstanceContext(p.standardPath || '', instanceContext);
               const sItem = schemaByPath.get(path);
               const normalizedValue = special?.kind === 'mme-ip-plmn-table'
-                ? serializeMmeIpPlmnList(toMmeIpPlmnRows(value as QuickSettingsDraftValue))
+                ? serializeMmeIpPlmnList(toMmeIpPlmnRows(value))
                 : String(value ?? '');
               const err = validateValue(
                 normalizedValue,

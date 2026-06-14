@@ -105,7 +105,7 @@ export default function MRFilesPage({ embedded }: Props) {
         dataIndex: 'siteName',
         width: 180,
         ellipsis: true,
-        render: (v) => v || '—',
+        render: (v) => (v ? String(v) : '—'),
       },
       {
         key: 'productClass',
@@ -113,7 +113,7 @@ export default function MRFilesPage({ embedded }: Props) {
         dataIndex: 'productClass',
         width: 160,
         ellipsis: true,
-        render: (v) => v || '—',
+        render: (v) => (v ? String(v) : '—'),
       },
       {
         key: 'firstCollectTime',

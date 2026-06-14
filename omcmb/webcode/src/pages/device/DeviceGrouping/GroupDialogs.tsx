@@ -1,6 +1,7 @@
 import React from 'react';
 import type { FormInstance } from 'antd';
 import type { NameFilterItem, GroupItem } from './types';
+import type { AddGroupFormValues } from './useGroupActions';
 import AddGroupDrawer from './AddGroupDrawer';
 import EditGroupModal from './EditGroupModal';
 import AddChildGroupDrawer from './AddChildGroupDrawer';
@@ -9,14 +10,14 @@ import EditLevel2GroupDrawer from './EditLevel2GroupDrawer';
 export interface GroupDialogsProps {
   // Add Level-1 Group Drawer
   addModalOpen: boolean;
-  addForm: FormInstance<{ name: string; parentId?: string; description: string }>;
+  addForm: FormInstance<AddGroupFormValues>;
   groups: GroupItem[];
   onAddModalOk: () => void;
   onAddModalCancel: () => void;
 
   // Edit Level-1 Group Modal
   editModalOpen: boolean;
-  editForm: FormInstance<{ name: string; parentId?: string; description: string }>;
+  editForm: FormInstance<AddGroupFormValues>;
   editingGroupId?: string;
   onEditModalOk: () => void;
   onEditModalCancel: () => void;

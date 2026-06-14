@@ -41,7 +41,7 @@ export default function PerfRetrievalDetail() {
       isFetching={isFetching}
       toolbar={
         <>
-          <NeonButton icon={<ArrowLeft />} onClick={() => navigate('/files/perf-retrieval')}>
+          <NeonButton icon={<ArrowLeft />} onClick={() => navigate('/file/perf-retrieval')}>
             返回列表
           </NeonButton>
           <NeonButton icon={<RefreshCcw />} onClick={() => refetch()}>

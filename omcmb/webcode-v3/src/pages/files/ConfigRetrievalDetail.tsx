@@ -63,7 +63,7 @@ export default function ConfigRetrievalDetail() {
       isFetching={isFetching || tasks.isFetching}
       toolbar={
         <>
-          <NeonButton icon={<ArrowLeft />} onClick={() => navigate('/files/config-retrieval')}>
+          <NeonButton icon={<ArrowLeft />} onClick={() => navigate('/file/config-retrieval')}>
             返回列表
           </NeonButton>
           <NeonButton
