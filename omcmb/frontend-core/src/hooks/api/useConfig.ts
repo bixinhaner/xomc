@@ -13,6 +13,9 @@ export function useConfigParams(
 ) {
   return useQuery({
     queryKey: ['config', 'params', params],
+    // 真实模式下没选设备（deviceId/deviceSn 都空）不发请求，否则会打出
+    // `/devices//parameters`（空段）→ 400。mock 模式不依赖设备 id，照常放行。
+    enabled: useMock || Boolean(params.deviceId || params.deviceSn),
     queryFn: () =>
       useMock
         ? (configService.getParams(params) as unknown as ReturnType<typeof deviceApi.getParameters>)

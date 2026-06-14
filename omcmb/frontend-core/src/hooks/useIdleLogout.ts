@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useUserStore } from '../store/userStore';
+import { loginUrl } from '../utils/appBase';
 
 /**
  * P2-⑦ 屏幕锁定：用户连续 idleMinutes 无操作后强制登出。
@@ -51,8 +52,10 @@ export function useIdleLogout(idleMinutes: number): void {
       if (now - last >= idleMs) {
         // 超时 — 登出 + 主动跳登录页（避免依赖 store 内的 navigate 副作用）
         logout();
-        if (window.location.pathname !== '/login') {
-          window.location.href = '/login';
+        // 三皮肤：跳当前皮肤的登录页（带 base 前缀），别甩到 v1 的 /login
+        const target = loginUrl();
+        if (window.location.pathname !== target) {
+          window.location.href = target;
         }
       }
     }, 30_000);

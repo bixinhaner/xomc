@@ -7,6 +7,7 @@ import axios, {
 import { useUserStore } from '../store/userStore';
 import { useAppStore } from '../store/appStore';
 import { useMock } from './apiSwitch';
+import { loginUrl } from '../utils/appBase';
 
 // --- Parameter name conversion (camelCase → snake_case) ---
 
@@ -164,7 +165,7 @@ http.interceptors.response.use(
       // No refresh token or this was already a refresh attempt → logout
       if (!refreshToken || (originalRequest as unknown as Record<string, unknown>)._isRetry) {
         clearAuth();
-        window.location.href = '/login';
+        window.location.href = loginUrl();
         return Promise.reject(error);
       }
 
@@ -215,7 +216,7 @@ http.interceptors.response.use(
         return http(originalRequest);
       } catch {
         clearAuth();
-        window.location.href = '/login';
+        window.location.href = loginUrl();
         return Promise.reject(error);
       } finally {
         isRefreshing = false;
