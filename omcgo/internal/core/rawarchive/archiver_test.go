@@ -7,7 +7,9 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -24,19 +26,26 @@ type fakeStore struct {
 	mu      sync.Mutex
 	objects map[string][]byte
 	puts    map[string]putRec
+	missing map[string]bool // key → ReadHead 返回 ErrObjectNotFound（模拟孤儿行）
 }
 
 func newFakeStore() *fakeStore {
-	return &fakeStore{objects: map[string][]byte{}, puts: map[string]putRec{}}
+	return &fakeStore{objects: map[string][]byte{}, puts: map[string]putRec{}, missing: map[string]bool{}}
 }
 
 func key(b, o string) string { return b + "/" + o }
 
 func (f *fakeStore) put(b, o string, data []byte) { f.objects[key(b, o)] = data }
 
+// markMissing 让该对象的 ReadHead 返回 ErrObjectNotFound，模拟 retention 删了对象但行尚存。
+func (f *fakeStore) markMissing(b, o string) { f.missing[key(b, o)] = true }
+
 func (f *fakeStore) ReadHead(_ context.Context, b, o string, n int) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.missing[key(b, o)] {
+		return nil, ErrObjectNotFound
+	}
 	data := f.objects[key(b, o)]
 	if n > len(data) {
 		n = len(data)
@@ -167,8 +176,78 @@ func TestParseBool(t *testing.T) {
 
 func TestNilArchiverScheduleSafe(t *testing.T) {
 	var a *Archiver
-	a.Schedule("b", "o") // 不应 panic
+	a.Schedule("b", "o", nil) // 不应 panic
 
 	a2 := New(context.Background(), nil, nil, NewMetrics(nil), nil, 1) // nil store
-	a2.Schedule("b", "o")                                              // 无操作
+	a2.Schedule("b", "o", nil)                                         // 无操作
+}
+
+func TestCompressNow_TerminalSemantics(t *testing.T) {
+	store := newFakeStore()
+	store.put("pm-files", "plain.xml", []byte(largeXML()))
+	store.put("pm-files", "gz.xml.gz", gzipOf(t, largeXML()))
+	store.put("pm-files", "tiny.xml", []byte("<a/>"))
+
+	a := newTestArchiver(store, nil)
+	assert.True(t, a.CompressNow(context.Background(), "pm-files", "plain.xml"), "明文压成功=终态")
+	assert.True(t, a.CompressNow(context.Background(), "pm-files", "gz.xml.gz"), "已 gzip=终态")
+	assert.True(t, a.CompressNow(context.Background(), "pm-files", "tiny.xml"), "no_gain=终态")
+
+	// 禁用 → 非终态（留待开关恢复后重扫）。
+	lookup := func(_ context.Context, category, k string) (string, bool) {
+		if category == Category && k == KeyEnabled {
+			return "false", true
+		}
+		return "", false
+	}
+	ad := newTestArchiver(store, lookup)
+	assert.False(t, ad.CompressNow(context.Background(), "pm-files", "plain.xml"), "禁用=非终态")
+}
+
+func TestCompressNow_NotFoundIsTerminal(t *testing.T) {
+	// 孤儿行：对象已被 retention 删除（ReadHead → ErrObjectNotFound）。须判终态，
+	// 否则 Sweeper 会永久重扫该行、卡死其后真正待压的文件。
+	store := newFakeStore()
+	store.markMissing("pm-files", "gone.xml")
+
+	a := newTestArchiver(store, nil)
+	assert.True(t, a.CompressNow(context.Background(), "pm-files", "gone.xml"),
+		"对象不存在=终态（标记后移出待扫集）")
+	_, ok := store.puts[key("pm-files", "gone.xml")]
+	assert.False(t, ok, "不存在的对象不应触发任何回写")
+}
+
+func TestSchedule_InvokesOnTerminalWithObject(t *testing.T) {
+	store := newFakeStore()
+	store.put("pm-files", "a.xml", []byte(largeXML()))
+
+	a := newTestArchiver(store, nil)
+	got := make(chan string, 1)
+	a.Schedule("pm-files", "a.xml", func(_ context.Context, object string) { got <- object })
+
+	select {
+	case o := <-got:
+		assert.Equal(t, "a.xml", o, "onTerminal 应回传对象键")
+	case <-time.After(2 * time.Second):
+		t.Fatal("压缩终态后未回调 onTerminal")
+	}
+}
+
+func TestSchedule_NoCallbackWhenDisabled(t *testing.T) {
+	store := newFakeStore()
+	store.put("pm-files", "c.xml", []byte(largeXML()))
+
+	lookup := func(_ context.Context, category, k string) (string, bool) {
+		if category == Category && k == KeyEnabled {
+			return "false", true
+		}
+		return "", false
+	}
+	a := newTestArchiver(store, lookup)
+	var called int32
+	a.Schedule("pm-files", "c.xml", func(_ context.Context, _ string) { atomic.AddInt32(&called, 1) })
+
+	// 给压缩 goroutine 足够时间跑完（禁用路径会很快返回非终态）。
+	time.Sleep(200 * time.Millisecond)
+	assert.Equal(t, int32(0), atomic.LoadInt32(&called), "禁用（非终态）不应回调")
 }

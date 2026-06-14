@@ -106,6 +106,14 @@ func (m *mockPMFileStore) UpdateFileParsed(ctx context.Context, id uuid.UUID, co
 	return nil
 }
 
+func (m *mockPMFileStore) ListUncompressed(ctx context.Context, olderThan time.Time, limit int) ([]string, error) {
+	return nil, nil
+}
+
+func (m *mockPMFileStore) MarkCompressed(ctx context.Context, objects []string) error {
+	return nil
+}
+
 func TestMockPMFileStore_SaveAndRetrieve(t *testing.T) {
 	store := make(map[uuid.UUID]*PMFileInfo)
 

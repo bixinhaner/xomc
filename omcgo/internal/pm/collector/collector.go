@@ -178,6 +178,18 @@ func (c *PMCollector) SetArchiver(a *rawarchive.Archiver) {
 	c.archiver = a
 }
 
+// markRawCompressed 把已压缩回写的 PM 原始对象在 pm_files 标记 raw_compressed=true（issue #321
+// 加固）。作为 archiver.Schedule 的 onTerminal 回调，在压缩 goroutine 内调用；nil-safe，失败只
+// warn（标记丢失最多让 Sweeper 多扫一次，幂等无害）。
+func (c *PMCollector) markRawCompressed(ctx context.Context, object string) {
+	if c.fileStore == nil {
+		return
+	}
+	if err := c.fileStore.MarkCompressed(ctx, []string{object}); err != nil {
+		c.logger.Warn("mark pm_files raw_compressed", zap.String("object", object), zap.Error(err))
+	}
+}
+
 // SetConcurrency 设置 PM 文件入库的进程内并发订阅数。
 //
 // 动机：NATS push 订阅的 async 回调由 nats.go 单 goroutine 串行投递，单订阅只能用 ~1 核。
@@ -386,8 +398,9 @@ func (c *PMCollector) ingestViaCopy(
 			zap.String("path", payload.MinIOPath), zap.String("device_sn", payload.DeviceSN))
 	} else {
 		// issue #321：仅新入库时把原始 XML 压缩回写 MinIO 省盘（已 gzip 则零成本跳过）。
-		// 异步有界并发，不阻塞 ack；nil-safe。
-		c.archiver.Schedule(c.bucket, payload.MinIOPath)
+		// 异步有界并发，不阻塞 ack；nil-safe。压成功后经 onTerminal 标记 pm_files.raw_compressed=true，
+		// 使 Sweeper 待扫描集只剩内联未压成功的残量（加固：保证压到）。
+		c.archiver.Schedule(c.bucket, payload.MinIOPath, c.markRawCompressed)
 	}
 	if c.metrics != nil {
 		c.metrics.FilesProcessedTotal.WithLabelValues("success").Inc()

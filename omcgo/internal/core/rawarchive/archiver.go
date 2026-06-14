@@ -7,17 +7,25 @@
 // core/compress.MaybeGunzip 透明解压，故压缩态对象后续仍可正确再解析。
 //
 // 设计取舍：压缩是纯省盘优化，绝不影响已入库数据。
-//   - 异步 + 有界并发：不阻塞 NATS 入库回调 ack；并发满则直接丢弃本次压缩（ILM 仍兜底，
-//     见 #319），不积压 goroutine。
+//   - 异步 + 有界并发：不阻塞 NATS 入库回调 ack；并发满则丢弃本次内联压缩（记 dropped_busy），
+//     不积压 goroutine —— 丢弃的不会漏压，由 Sweeper 兜底（见下）。
 //   - 失败只 warn + 记 metric，不回报错误。
 //   - enabled 走 sys_configs（category=raw_archive, key=compress_after_ingest，默认 true），
 //     TTL 缓存避免每文件查库。
+//
+// 保证压到（issue #321 加固）：内联 Schedule 是"快路径"，压成功后在 pm_files/mr_files
+// 标记 raw_compressed=true；Sweeper（sweeper.go）是"兜底"——周期性补压所有 raw_compressed=false
+// 的残量（内联 dropped_busy / 失败 / 崩溃前未压），直至置真。两者复用同一压缩核心 compress()，
+// 终态判定（terminal）一致：成功压缩 / 本就是 gzip / 明确无需压（no_gain/too_large/empty）/
+// 对象已删（not_found 孤儿行）皆为终态可标记；disabled / error 非终态，留待重扫。故每个原始
+// XML 最终都被压缩，不再有静默漏压，Sweeper 也不会在孤儿行处卡死。
 package rawarchive
 
 import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"sync"
@@ -41,6 +49,55 @@ const (
 	archiveTimeout = 30 * time.Second // 单文件压缩回写超时
 )
 
+// outcome 是单次压缩回写的结果分类。terminal 的结果意味着"该对象的压缩状态已确定"
+// （成功压缩 / 本就是 gzip / 明确决定不压）——可在 pm_files/mr_files 标记 raw_compressed=true
+// 并移出 Sweeper 待扫描集；非 terminal（disabled / error）保持未压缩，留待 Sweeper 重试。
+// dropped_busy 不进入 compress()（在 Schedule 的并发门处直接丢弃），故不在此枚举。
+type outcome int
+
+const (
+	outcomeError     outcome = iota // 读/写/压缩失败（非终态，待重扫）
+	outcomeDisabled                 // 总开关关闭（非终态，开关恢复后重扫）
+	outcomeEmpty                    // 对象 0 字节（终态，无可压）
+	outcomeSkippedGz                // 已是 gzip（终态，真机 .xml.gz 常态）
+	outcomeCompressed               // 明文压缩并覆盖回写成功（终态）
+	outcomeNoGain                   // 压不动（gzip 头开销 ≥ 收益，终态，保留明文）
+	outcomeTooLarge                 // 超 maxObjectBytes 上限（终态，保留明文防 OOM）
+	outcomeNotFound                 // 对象已不存在（孤儿行，终态，标记后移出待扫集）
+)
+
+// terminal 报告该结果是否表示"压缩状态已确定"，可标记 raw_compressed=true。
+func (o outcome) terminal() bool {
+	switch o {
+	case outcomeCompressed, outcomeSkippedGz, outcomeNoGain, outcomeTooLarge, outcomeEmpty, outcomeNotFound:
+		return true
+	default: // outcomeError / outcomeDisabled
+		return false
+	}
+}
+
+// label 返回 omc_raw_archive_total 的 result 标签（与历史标签字符串保持一致）。
+func (o outcome) label() string {
+	switch o {
+	case outcomeCompressed:
+		return "compressed"
+	case outcomeSkippedGz:
+		return "skipped_gz"
+	case outcomeNoGain:
+		return "no_gain"
+	case outcomeTooLarge:
+		return "too_large"
+	case outcomeEmpty:
+		return "empty"
+	case outcomeNotFound:
+		return "not_found"
+	case outcomeDisabled:
+		return "disabled"
+	default:
+		return "error"
+	}
+}
+
 // RawStore 是 archiver 需要的 MinIO 子集（便于单测注入 fake）。
 type RawStore interface {
 	// ReadHead 返回对象前 n 字节（用于探测 gzip 魔数，避免整文件读）。
@@ -56,7 +113,7 @@ type ConfigLookup func(ctx context.Context, category, key string) (value string,
 
 // Metrics 暴露压缩回写的可观测指标。
 type Metrics struct {
-	Total      *prometheus.CounterVec // result=compressed|skipped_gz|disabled|empty|too_large|no_gain|dropped_busy|error
+	Total      *prometheus.CounterVec // result=compressed|skipped_gz|disabled|empty|too_large|no_gain|not_found|dropped_busy|error
 	SavedBytes prometheus.Counter
 }
 
@@ -111,8 +168,11 @@ func New(baseCtx context.Context, store RawStore, lookup ConfigLookup, metrics *
 	}
 }
 
-// Schedule 非阻塞地排程一次压缩回写。并发已满则丢弃本次（记 dropped_busy，ILM 仍兜底）。
-func (a *Archiver) Schedule(bucket, object string) {
+// Schedule 非阻塞地排程一次压缩回写（内联快路径）。并发已满则丢弃本次（记 dropped_busy）——
+// 丢弃的对象不会漏压，Sweeper 会兜底补压（见包注释）。onTerminal 在压缩抵达终态后于压缩
+// goroutine 内回调（传入对象键），供调用方在 pm_files/mr_files 标记 raw_compressed=true；
+// nil-safe，非终态（error/disabled）或 dropped_busy 不回调。
+func (a *Archiver) Schedule(bucket, object string, onTerminal func(ctx context.Context, object string)) {
 	if a == nil || a.store == nil || bucket == "" || object == "" {
 		return
 	}
@@ -126,53 +186,81 @@ func (a *Archiver) Schedule(bucket, object string) {
 			}
 			ctx, cancel := context.WithTimeout(base, archiveTimeout)
 			defer cancel()
-			a.archive(ctx, bucket, object)
+			oc, saved := a.compress(ctx, bucket, object)
+			a.record(oc.label(), saved)
+			if oc.terminal() && onTerminal != nil {
+				onTerminal(ctx, object)
+			}
 		}()
 	default:
 		a.record("dropped_busy", 0)
 	}
 }
 
-// archive 执行一次压缩回写的完整逻辑（同步）。
+// CompressNow 同步压缩一个对象并记 metric（供 Sweeper 补偿扫描用），返回结果是否为终态。
+// 终态即可在 pm_files/mr_files 标记 raw_compressed=true 并移出待扫描集；非终态（禁用 /
+// 读写错误）返回 false，保持 raw_compressed=false 待下一轮重扫。
+func (a *Archiver) CompressNow(ctx context.Context, bucket, object string) bool {
+	if a == nil || a.store == nil || bucket == "" || object == "" {
+		return false
+	}
+	oc, saved := a.compress(ctx, bucket, object)
+	a.record(oc.label(), saved)
+	return oc.terminal()
+}
+
+// Enabled 返回压缩回写总开关（供 Sweeper 每轮扫描前短路，禁用时不空转扫描）。
+func (a *Archiver) Enabled(ctx context.Context) bool {
+	if a == nil {
+		return false
+	}
+	return a.enabled(ctx)
+}
+
+// archive 同步执行一次压缩回写并记 metric（保留供内部直调与单测）。
 func (a *Archiver) archive(ctx context.Context, bucket, object string) {
+	oc, saved := a.compress(ctx, bucket, object)
+	a.record(oc.label(), saved)
+}
+
+// compress 是压缩回写的核心逻辑（同步，仅返回结果分类与省下字节，不记 metric）——由
+// Schedule（内联快路径）、CompressNow（Sweeper 兜底）、archive（单测）共用，保证三路语义一致。
+func (a *Archiver) compress(ctx context.Context, bucket, object string) (outcome, int64) {
 	if !a.enabled(ctx) {
-		a.record("disabled", 0)
-		return
+		return outcomeDisabled, 0
 	}
 
 	// 廉价探测：前 2 字节命中 gzip 魔数 → 对象已压缩（真机常态），跳过整文件读写。
 	head, err := a.store.ReadHead(ctx, bucket, object, probeBytes)
 	if err != nil {
+		// 对象已被删除（孤儿行）→ 终态，让 Sweeper 标记移出，不永久重扫卡死。
+		if errors.Is(err, ErrObjectNotFound) {
+			return outcomeNotFound, 0
+		}
 		a.warn("probe head", bucket, object, err)
-		a.record("error", 0)
-		return
+		return outcomeError, 0
 	}
 	if len(head) == 0 {
-		a.record("empty", 0)
-		return
+		return outcomeEmpty, 0
 	}
 	if compress.IsGzip(head) {
-		a.record("skipped_gz", 0)
-		return
+		return outcomeSkippedGz, 0
 	}
 
 	// 明文：整读（受上限约束）→ gzip → 覆盖写。
 	rc, err := a.store.Get(ctx, bucket, object)
 	if err != nil {
 		a.warn("get object", bucket, object, err)
-		a.record("error", 0)
-		return
+		return outcomeError, 0
 	}
 	raw, rerr := io.ReadAll(io.LimitReader(rc, maxObjectBytes+1))
 	_ = rc.Close()
 	if rerr != nil {
 		a.warn("read object", bucket, object, rerr)
-		a.record("error", 0)
-		return
+		return outcomeError, 0
 	}
 	if len(raw) > maxObjectBytes {
-		a.record("too_large", 0)
-		return
+		return outcomeTooLarge, 0
 	}
 
 	var buf bytes.Buffer
@@ -180,32 +268,28 @@ func (a *Archiver) archive(ctx context.Context, bucket, object string) {
 	if _, werr := zw.Write(raw); werr != nil {
 		_ = zw.Close()
 		a.warn("gzip write", bucket, object, werr)
-		a.record("error", 0)
-		return
+		return outcomeError, 0
 	}
 	if cerr := zw.Close(); cerr != nil {
 		a.warn("gzip close", bucket, object, cerr)
-		a.record("error", 0)
-		return
+		return outcomeError, 0
 	}
 	gz := buf.Bytes()
 	if len(gz) >= len(raw) {
 		// 压不动（极小/高熵）→ 不回写，避免越压越大。
-		a.record("no_gain", 0)
-		return
+		return outcomeNoGain, 0
 	}
 
 	if perr := a.store.Put(ctx, bucket, object, bytes.NewReader(gz), int64(len(gz)), "application/xml", "gzip"); perr != nil {
 		a.warn("put compressed", bucket, object, perr)
-		a.record("error", 0)
-		return
+		return outcomeError, 0
 	}
 
 	saved := int64(len(raw) - len(gz))
-	a.record("compressed", saved)
 	a.logger.Debug("raw file compressed in place",
 		zap.String("bucket", bucket), zap.String("object", object),
 		zap.Int("orig_bytes", len(raw)), zap.Int("gz_bytes", len(gz)), zap.Int64("saved_bytes", saved))
+	return outcomeCompressed, saved
 }
 
 // enabled 返回压缩回写开关，结果 TTL 缓存避免每文件查 sys_configs。

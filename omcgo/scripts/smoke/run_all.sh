@@ -21,7 +21,7 @@ SUITES=(
     auth acs device topology config product alarm pm mr
     software ufte backup dashboard ops report mml filemanager logs
     admin system task notification northbound provision interop nedirect
-    retention
+    retention rawarchive
 )
 
 if [ -n "${SMOKE_ONLY:-}" ]; then

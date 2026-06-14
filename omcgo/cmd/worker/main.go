@@ -397,6 +397,24 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	}
 	logger.Info("MR collector started")
 
+	// issue #321 加固「保证压到」：补偿扫描 Sweeper —— 周期性补压内联快路径遗漏的原始对象
+	// （dropped_busy / 失败 / 崩溃前未压），PM/MR 双源，直至各自 raw_compressed 置真。复用同一
+	// rawArchiver（共用总开关 + 压缩核心）。生命周期挂 archiverCtx（进程优雅关停时取消，停掉
+	// 在途扫描）。pmFileStore(TsPool) / mrStore(PgPool) 各实现 RawFileRegistry。
+	rawSweeper := rawarchive.NewSweeper(
+		rawArchiver,
+		[]rawarchive.SweepSource{
+			{Name: "pm", Bucket: cfg.MinIO.Buckets.PMFiles, Registry: pmFileStore},
+			{Name: "mr", Bucket: cfg.MinIO.Buckets.MRFiles, Registry: mrStore},
+		},
+		rawarchive.DefaultSweepInterval, rawarchive.DefaultSweepGrace,
+		rawarchive.DefaultSweepBatch, rawarchive.DefaultSweepConc,
+		rawarchive.NewSweepMetrics(w.MetricsReg),
+		logger.Named("raw-archive-sweeper"),
+	)
+	go rawSweeper.Run(archiverCtx)
+	logger.Info("raw-archive sweeper started")
+
 	// F05 MR 任务管理（scheduler / heartbeat / cleaner / completion）已迁到 app 进程，
 	// 详见 cmd/app/provider/modules.go 中的 mrtask 装配段。
 	// 原因：dispatcher 需要 ParamRegistry + ProductRegistry 做 standardPath → privatePath 翻译，
