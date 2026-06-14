@@ -3273,6 +3273,8 @@ const messages: Record<string, string> = {
   'alarm.ruleType.autoConfirm': '自动确认',
   'alarm.ruleType.autoClear': '自动清除',
   'alarm.ruleType.defaultLegacy': '按系统默认流程处理（旧规则）',
+  'alarm.ruleType.notifyWebhook': 'Webhook 通知',
+  'alarm.ruleType.notifyEmail': '邮件通知',
   'alarm.ruleFilterType.alarmIdentifier': '告警标识',
   'alarm.ruleFilterType.alarmSource': '告警来源',
   'alarm.ruleFilterType.device': '设备',
