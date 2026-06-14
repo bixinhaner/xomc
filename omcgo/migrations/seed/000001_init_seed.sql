@@ -5423,14 +5423,9 @@ ALTER TABLE public.mr_device_mappings DISABLE TRIGGER ALL;
 ALTER TABLE public.mr_device_mappings ENABLE TRIGGER ALL;
 
 --
--- Data for Name: mr_files; Type: TABLE DATA; Schema: public; Owner: -
+-- mr_files 已迁至时序库 schema（migrations/tsdb/000001_tsdb_schema.sql），主库不再有此表，
+-- 故移除其空数据块（原 pg_dump 的 DISABLE/ENABLE TRIGGER 占位），避免主库 seed 引用不存在的表。
 --
-
-ALTER TABLE public.mr_files DISABLE TRIGGER ALL;
-
-
-
-ALTER TABLE public.mr_files ENABLE TRIGGER ALL;
 
 --
 -- Data for Name: mr_indicators; Type: TABLE DATA; Schema: public; Owner: -

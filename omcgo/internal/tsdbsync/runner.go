@@ -99,6 +99,13 @@ func (r *SyncRunner) Sync(ctx context.Context) error {
 		return r.syncFullMirror(ctx, "alarm_definitions", "alarm_definition_dim")
 	})
 
+	// 5b) mr_customize_task_dim ← mr_customize_task（列子集镜像：task_id, task_status,
+	//     target_device_sns）。mr_files 迁时序库后，MR 文件设备聚合的「上报中」徽标判定需本库
+	//     JOIN 任务订阅状态；mr_customize_task 配置仍留主库，这里只读镜像。
+	r.runTable(ctx, "mr_customize_task_dim", func(ctx context.Context) (int64, error) {
+		return r.syncFullMirror(ctx, "mr_customize_task", "mr_customize_task_dim")
+	})
+
 	// 6) cell_band_dim ← 从 device_parameters 派生（device_id, cell_id, band）。
 	r.runTable(ctx, "cell_band_dim", r.syncCellBandDim)
 

@@ -63,7 +63,7 @@ import (
 func initMRModule(c *Container) error {
 	logger := c.Logger.Named("mr")
 
-	mrStore := mr.NewPgMRStore(c.PgPool, c.TsPool)
+	mrStore := mr.NewPgMRStore(c.TsPool) // mr_files 已迁时序库，单 TsPool
 	mrIndRepo := mr.NewPgIndicatorRepository(c.PgPool)
 	mrMapRepo := mr.NewPgMappingRepository(c.PgPool)
 

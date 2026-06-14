@@ -382,7 +382,7 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	}
 
 	// MR Collector（worker 端保留 — 文件 I/O 类，与 PM collector 同进程更合理）
-	mrStore := mr.NewPgMRStore(w.PgPool, w.TsPool)
+	mrStore := mr.NewPgMRStore(w.TsPool) // mr_files 已迁时序库，单 TsPool
 	mrCollector := mrcollector.NewMRCollector(w.MinIO, cfg.MinIO.Buckets.MRFiles, mrStore, w.EventBus, logger)
 	// 注入 DeviceLookup：upload handler 直传路径的 mr.file.received payload 不带
 	// device_id，由 collector 按 device_sn 反查（参 internal/acs/upload publishMRFileReceivedEvent）。

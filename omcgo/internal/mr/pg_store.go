@@ -16,15 +16,18 @@ import (
 	"github.com/omcgo/omcgo/internal/mr/parser"
 )
 
-// PgMRStore implements MRStore using PostgreSQL and TimescaleDB.
+// PgMRStore implements MRStore using TimescaleDB（时序库 / TsPool）。
+//
+// 「MR 也记录到时序库」后，mr_files 与 mr_records 同库（TsPool），故只持一个池。
+// 设备维度（device_dim）与任务订阅状态（mr_customize_task_dim）经 worker tsdbsync 从主库
+// 同步成本库影子表，ListFileDeviceAggregates 直接本库 JOIN，不再跨库连主库。
 type PgMRStore struct {
-	pool   *pgxpool.Pool
-	tsPool *pgxpool.Pool
+	pool *pgxpool.Pool // 时序库 TsPool（mr_files + mr_records + 影子维度表同库）
 }
 
-// NewPgMRStore creates a new PostgreSQL-backed MR store.
-func NewPgMRStore(pool *pgxpool.Pool, tsPool *pgxpool.Pool) *PgMRStore {
-	return &PgMRStore{pool: pool, tsPool: tsPool}
+// NewPgMRStore creates a new TimescaleDB-backed MR store（单 TsPool）。
+func NewPgMRStore(tsPool *pgxpool.Pool) *PgMRStore {
+	return &PgMRStore{pool: tsPool}
 }
 
 func (s *PgMRStore) SaveFile(ctx context.Context, file *MRFileInfo) error {
@@ -96,9 +99,10 @@ func (s *PgMRStore) UpdateFileParsed(ctx context.Context, fileID uuid.UUID, reco
 }
 
 // ListFileDeviceAggregates 按 device_sn 聚合查询。每设备 1 行，含起止 collect_time + 文件数
-// + 站名 + 产品类（LEFT JOIN devices）。
+// + 站名 + 产品类（LEFT JOIN device_dim 影子表）。
 //
-// 性能：devices.serial_number 有索引，每页 20 个 SN 的 JOIN 命中索引 sub-ms。
+// mr_files 迁时序库后，本查询全程本库（TsPool）：设备维度读 device_dim、订阅状态读
+// mr_customize_task_dim，均由 worker tsdbsync 从主库同步，避免跨库 JOIN（与 pm_files 同范式）。
 func (s *PgMRStore) ListFileDeviceAggregates(ctx context.Context, filter MRFileDeviceFilter) (*model.ListResponse[MRFileDeviceAggregate], error) {
 	args := make([]interface{}, 0, 4)
 	wherePieces := make([]string, 0, 3)
@@ -119,8 +123,8 @@ func (s *PgMRStore) ListFileDeviceAggregates(ctx context.Context, filter MRFileD
 		whereClause = " WHERE " + strings.Join(wherePieces, " AND ")
 	}
 
-	// JOIN devices 提供 site_name / product_class，同时支持基于这两列的过滤。
-	joinClause := " LEFT JOIN devices d ON d.serial_number = m.device_sn AND d.deleted_at IS NULL"
+	// JOIN device_dim（主库 devices 的本库影子）提供 site_name / product_class，同时支持过滤。
+	joinClause := " LEFT JOIN device_dim d ON d.serial_number = m.device_sn AND d.deleted_at IS NULL"
 
 	countSQL := `SELECT COUNT(*) FROM (SELECT m.device_sn FROM mr_files m` + joinClause + whereClause + ` GROUP BY m.device_sn) AS sub`
 	var total int64
@@ -140,9 +144,9 @@ func (s *PgMRStore) ListFileDeviceAggregates(ctx context.Context, filter MRFileD
 		pageSize = 1000
 	}
 
-	// reporting 列：EXISTS 查 mr_customize_task task_status='on' 且
+	// reporting 列：EXISTS 查 mr_customize_task_dim（影子表）task_status='on' 且
 	// device_sn 在 target_device_sns 数组里，存在即 true。
-	// site_name / product_class 用 MAX() 包：devices.serial_number 唯一，
+	// site_name / product_class 用 MAX() 包：device_dim.serial_number 唯一，
 	// 1:1 关系下 MAX 等价 ANY_VALUE，不影响 GROUP BY 分组维度。
 	listSQL := `SELECT m.device_sn,
 	                  COALESCE(MAX(d.site_name), '')     AS site_name,
@@ -151,7 +155,7 @@ func (s *PgMRStore) ListFileDeviceAggregates(ctx context.Context, filter MRFileD
 	                  MAX(m.collect_time) AS last_collect_time,
 	                  COUNT(*)::bigint    AS file_count,
 	                  EXISTS (
-	                      SELECT 1 FROM mr_customize_task t
+	                      SELECT 1 FROM mr_customize_task_dim t
 	                      WHERE t.task_status = 'on'
 	                        AND m.device_sn = ANY(t.target_device_sns)
 	                  ) AS reporting
@@ -240,7 +244,7 @@ func (s *PgMRStore) BatchInsertRecords(ctx context.Context, fileID, deviceID uui
 		})
 	}
 
-	_, err := s.tsPool.CopyFrom(ctx,
+	_, err := s.pool.CopyFrom(ctx,
 		pgx.Identifier{"mr_records"},
 		[]string{"time", "file_id", "device_id", "cell_id", "mr_type", "measurement_data"},
 		pgx.CopyFromRows(rows),
@@ -355,13 +359,13 @@ func (s *PgMRStore) QueryRecords(ctx context.Context, filter MRRecordFilter) (*m
 
 	countSQL, countArgs, _ := countQb.ToSql()
 	var total int64
-	if err := s.tsPool.QueryRow(ctx, countSQL, countArgs...).Scan(&total); err != nil {
+	if err := s.pool.QueryRow(ctx, countSQL, countArgs...).Scan(&total); err != nil {
 		return nil, fmt.Errorf("count mr_records: %w", err)
 	}
 
 	qb = qb.OrderBy("time DESC").Limit(uint64(filter.Limit())).Offset(uint64(filter.Offset()))
 	sql, args, _ := qb.ToSql()
-	rows, err := s.tsPool.Query(ctx, sql, args...)
+	rows, err := s.pool.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query mr_records: %w", err)
 	}

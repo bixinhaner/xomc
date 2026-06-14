@@ -2,9 +2,10 @@
 -- =====================================================================================
 -- TimescaleDB 时序库 schema baseline（KPI/时序库物理分离，goose 版本表 goose_db_version_tsdb）
 --
--- 本文件建立第二个 TimescaleDB 实例（TsPool / postgres-tsdb）的全部时序对象，承载 14 张
--- 从主库迁出的表（§契约 1A）+ 6 张影子维度表（§契约 1B，从主库同步供本库 JOIN）+ 1 个
--- 告警效率物化视图（原在 seed，建在 alarms_history 上）。
+-- 本文件建立第二个 TimescaleDB 实例（TsPool / postgres-tsdb）的全部时序对象，承载从主库
+-- 迁出的表（§契约 1A，含 pm_files / mr_files 两张文件元数据表）+ 7 张影子维度表（§契约 1B，
+-- 从主库同步供本库 JOIN，含 mr_customize_task_dim）+ 1 个告警效率物化视图（原在 seed，建在
+-- alarms_history 上）。注：mr_files 随「MR 也记录到时序库」由主库迁来，与 mr_records 同库。
 --
 -- 14 张表的「最终形态」= 主库 000001 原始定义 叠加 这些增量的净效果：
 --   - pm_metrics：去掉随机 uuid 主键 pm_metrics_pkey（000044）+ 去掉自然键唯一索引
@@ -85,6 +86,8 @@ CREATE TABLE public.trace_messages (
 );
 
 -- ── pm_files（普通表；pm_metrics 同库保住 copy_ingest 单事务原子性）────────────────────
+-- raw_compressed（#321 加固）：原始 PM XML 是否已 gzip 压缩回写 MinIO；内联压成功置真，
+-- rawarchive.Sweeper 补压内联遗漏的残量直至置真，保证压到。
 CREATE TABLE public.pm_files (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     device_id uuid NOT NULL,
@@ -99,11 +102,42 @@ CREATE TABLE public.pm_files (
     parsed_at timestamp with time zone,
     counter_count integer DEFAULT 0,
     created_at timestamp with time zone DEFAULT now(),
+    raw_compressed boolean DEFAULT false NOT NULL,
     CONSTRAINT pm_files_pkey PRIMARY KEY (id),
     CONSTRAINT uq_pm_files_device_filename UNIQUE (device_sn, file_name)
 );
 CREATE INDEX idx_pm_files_created ON public.pm_files USING btree (created_at DESC);
 CREATE INDEX idx_pm_files_device ON public.pm_files USING btree (device_id);
+-- 部分索引：只索引未压行（稳态近空集），让 Sweeper 的 WHERE raw_compressed=false AND
+-- created_at<cutoff 查询代价 O(待压残量)。
+CREATE INDEX idx_pm_files_uncompressed ON public.pm_files USING btree (created_at) WHERE (raw_compressed = false);
+
+-- ── mr_files（普通表；与 mr_records 同库 —— MR 文件元数据落时序库，不再放主库）────────────
+-- 原在主库（PgPool），随「MR 也记录到时序库」迁来 TsPool：与 pm_files / mr_records 一致。
+-- 无外键（device 维度经 device_dim 影子表 JOIN，订阅状态经 mr_customize_task_dim 影子表）。
+-- raw_compressed 语义同 pm_files（#321 加固）。
+CREATE TABLE public.mr_files (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    device_id uuid NOT NULL,
+    device_sn character varying(64) NOT NULL,
+    carrier character varying(4) NOT NULL,
+    mr_type character varying(8) NOT NULL,
+    file_name character varying(256) NOT NULL,
+    file_size bigint DEFAULT 0 NOT NULL,
+    collect_time timestamp with time zone NOT NULL,
+    minio_path character varying(512) NOT NULL,
+    parsed boolean DEFAULT false NOT NULL,
+    parsed_at timestamp with time zone,
+    record_count integer DEFAULT 0 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    raw_compressed boolean DEFAULT false NOT NULL,
+    CONSTRAINT mr_files_pkey PRIMARY KEY (id)
+);
+CREATE UNIQUE INDEX uq_mr_files_sn_filename ON public.mr_files USING btree (device_sn, file_name);
+CREATE INDEX idx_mr_files_carrier ON public.mr_files USING btree (carrier);
+CREATE INDEX idx_mr_files_device ON public.mr_files USING btree (device_id, collect_time DESC);
+CREATE INDEX idx_mr_files_type ON public.mr_files USING btree (mr_type);
+CREATE INDEX idx_mr_files_uncompressed ON public.mr_files USING btree (created_at) WHERE (raw_compressed = false);
 
 -- ── pm_metrics（超表：time 4h chunk[修 B0]，compress 7d，retention 30d；无主键/无自然唯一）──
 -- 最终形态：无 pm_metrics_pkey（000044）、无 uq_pm_metrics_natural（000042）、无 ingest_time/
@@ -508,6 +542,17 @@ CREATE TABLE public.alarm_definition_dim (
 );
 -- JOIN 键 identifier（alarms_history.alarm_identifier = ad.identifier）加索引。
 CREATE INDEX idx_alarm_definition_dim_identifier ON public.alarm_definition_dim USING btree (identifier);
+
+-- mr_customize_task_dim ← mr_customize_task（列子集：task_id, task_status, target_device_sns）
+-- mr_files 迁来时序库后，MR 文件设备聚合的「上报中」徽标判定（mr_customize_task task_status='on'
+-- AND device_sn = ANY(target_device_sns)）需本库 JOIN —— 故把任务订阅状态镜像成影子表。
+-- mr_customize_task 本身（任务配置）仍留主库，此处只读镜像。
+CREATE TABLE public.mr_customize_task_dim (
+    task_id uuid NOT NULL,
+    task_status character varying(16),
+    target_device_sns text[],
+    CONSTRAINT mr_customize_task_dim_pkey PRIMARY KEY (task_id)
+);
 
 -- =====================================================================================
 -- 3b. 仅由时序库侧消费的主库表 —— 整张归时序库（非镜像，本库读写）。
