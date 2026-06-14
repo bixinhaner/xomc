@@ -134,8 +134,8 @@ func (r *PgAlarmFilterRuleRepository) GetByID(ctx context.Context, id uuid.UUID)
 	query := storage.Psql.
 		Select(
 			"id", "name", "filter_type", "alarm_sources", "alarm_identifiers",
-			"device_ids", "device_group_ids", "action", "acknowledge_desc", "webhook_url", "webhook_secret", "email_recipients",
-			"priority", "enabled", "created_by", "created_at", "updated_by", "updated_at",
+			"device_ids", "device_group_ids", "action", "COALESCE(acknowledge_desc, '') AS acknowledge_desc", "webhook_url", "webhook_secret", "email_recipients",
+			"priority", "enabled", "COALESCE(created_by, '') AS created_by", "created_at", "COALESCE(updated_by, '') AS updated_by", "updated_at",
 		).
 		From("alarm_filters").
 		Where(squirrel.Eq{"id": id})
@@ -227,8 +227,8 @@ func (r *PgAlarmFilterRuleRepository) List(ctx context.Context, filter AlarmFilt
 	query := applyAlarmFilterRuleFilters(applyAlarmFilterRuleOrdering(storage.Psql.
 		Select(
 			"id", "name", "filter_type", "alarm_sources", "alarm_identifiers",
-			"device_ids", "device_group_ids", "action", "acknowledge_desc", "webhook_url", "webhook_secret", "email_recipients",
-			"priority", "enabled", "created_by", "created_at", "updated_by", "updated_at",
+			"device_ids", "device_group_ids", "action", "COALESCE(acknowledge_desc, '') AS acknowledge_desc", "webhook_url", "webhook_secret", "email_recipients",
+			"priority", "enabled", "COALESCE(created_by, '') AS created_by", "created_at", "COALESCE(updated_by, '') AS updated_by", "updated_at",
 		).
 		From("alarm_filters")), filter)
 
@@ -317,8 +317,8 @@ func (r *PgAlarmFilterRuleRepository) ListEnabled(ctx context.Context) ([]AlarmF
 	query := applyAlarmFilterRuleOrdering(storage.Psql.
 		Select(
 			"id", "name", "filter_type", "alarm_sources", "alarm_identifiers",
-			"device_ids", "device_group_ids", "action", "acknowledge_desc", "webhook_url", "webhook_secret", "email_recipients",
-			"priority", "enabled", "created_by", "created_at", "updated_by", "updated_at",
+			"device_ids", "device_group_ids", "action", "COALESCE(acknowledge_desc, '') AS acknowledge_desc", "webhook_url", "webhook_secret", "email_recipients",
+			"priority", "enabled", "COALESCE(created_by, '') AS created_by", "created_at", "COALESCE(updated_by, '') AS updated_by", "updated_at",
 		).
 		From("alarm_filters").
 		Where(squirrel.Eq{"enabled": true}))

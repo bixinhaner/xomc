@@ -22,6 +22,9 @@ const COLORS = ['#00f0ff', '#00ff88', '#ffaa00', '#a855f7', '#ff00aa', '#5b9eff'
 
 const MAX_KPIS = 8
 
+// 目录就绪后默认勾选的 KPI 条数（默认即出真实图，不空等用户手选）。
+const DEFAULT_KPI_COUNT = 4
+
 function fmt(v: number | null): string {
   if (v === null) return '—'
   if (Math.abs(v) >= 1000) return v.toLocaleString(undefined, { maximumFractionDigits: 0 })
@@ -68,6 +71,14 @@ export default function PerformanceCharts() {
   useEffect(() => {
     if (!deviceSn && devices.length > 0) setDeviceSn(devices[0].sn)
   }, [devices, deviceSn])
+
+  // KPI 目录就绪后默认勾选前 N 条真实 KPI（仅在无搜索词时，避免搜索结果污染默认）。
+  useEffect(() => {
+    if (kpiKeyword.trim() || kpis.length === 0) return
+    setSelectedKpis((prev) =>
+      prev.length > 0 ? prev : kpis.slice(0, DEFAULT_KPI_COUNT).map((k) => k.kpiCode),
+    )
+  }, [kpis, kpiKeyword])
 
   // 真实多 KPI 序列（enabled 仅当 kpiCodes 非空）。
   const { data: seriesData, isLoading: seriesLoading, isFetching, isError: seriesError, refetch } =
