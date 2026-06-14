@@ -6278,6 +6278,7 @@ const messages: Record<string, string> = {
   'notificationCenter.markAllReadFailed':      '标记失败：{error}',
   'notificationCenter.clearSuccess':           '已清空 {count} 条消息',
   'notificationCenter.clearFailed':            '清空失败：{error}',
+  'notificationCenter.viewAll':                '查看全部',
 
   // T-0078 备份恢复（数据恢复页面）
   'backup.restore.title':                      '数据恢复',

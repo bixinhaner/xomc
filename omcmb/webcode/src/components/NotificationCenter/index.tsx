@@ -147,6 +147,26 @@ export default function NotificationCenter({ onClose }: Props) {
           </Flex>
         )}
       </div>
+
+      {/* 底部：查看全部 → 通知中心整页（消息/模板/历史 tab），与 v2/v3 暴露通知中心对齐 */}
+      <div
+        style={{
+          padding: '6px 12px',
+          borderTop: `1px solid ${token.colorBorderSecondary}`,
+          textAlign: 'center',
+        }}
+      >
+        <Button
+          type="link"
+          size="small"
+          onClick={() => {
+            navigate('/notifications');
+            onClose?.();
+          }}
+        >
+          {t('notificationCenter.viewAll')}
+        </Button>
+      </div>
     </div>
   );
 }
