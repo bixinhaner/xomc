@@ -1,5 +1,4 @@
 import { useState, useMemo } from 'react';
-import { Tag } from 'antd';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
@@ -32,8 +31,6 @@ const mockIndicators: MRIndicator[] = [
   { id: 'ind-009', indicatorName: '邻区RSRP', indicatorCode: 'MR_NB_RSRP', unit: 'dBm', description: '邻区参考信号接收功率', category: '覆盖质量', status: 'active', mrType: 'MRO', valueRange: '-140 ~ -44' },
   { id: 'ind-010', indicatorName: '上行RSSI', indicatorCode: 'MR_UL_RSSI', unit: 'dBm', description: '上行接收信号强度指示', category: '干扰', status: 'inactive', mrType: 'MRS', valueRange: '-120 ~ 0' },
 ];
-
-const mrTypeColorMap: Record<string, string> = { MRO: 'blue', MRE: 'green', MRS: 'orange' };
 
 export default function Indicators() {
   const t = useT();
@@ -87,17 +84,16 @@ export default function Indicators() {
     { key: 'indicatorName', title: t('mr.indicatorName'), dataIndex: 'indicatorName', width: 140 },
     { key: 'indicatorCode', title: t('mr.indicatorCode'), dataIndex: 'indicatorCode', width: 160, render: (val) => <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{String(val)}</span> },
     { key: 'unit', title: t('mr.unit'), dataIndex: 'unit', width: 70 },
-    { key: 'valueRange', title: t('mr.valueRange'), dataIndex: 'valueRange', width: 120 },
+    {
+      key: 'valueRange', title: t('mr.valueRange'), dataIndex: 'valueRange', width: 120,
+      render: (val) => {
+        const r = val as [number, number] | undefined;
+        return Array.isArray(r) ? `[${r[0]}, ${r[1]}]` : '-';
+      },
+    },
     { key: 'description', title: t('table.description'), dataIndex: 'description', ellipsis: true },
     { key: 'category', title: t('mr.category'), dataIndex: 'category', width: 100 },
-    {
-      key: 'mrType', title: t('mr.mrType'), dataIndex: 'mrType', width: 90,
-      render: (val) => <Tag color={mrTypeColorMap[String(val)] ?? 'default'}>{String(val)}</Tag>,
-    },
-    {
-      key: 'status', title: t('table.status'), dataIndex: 'status', width: 80,
-      render: (val) => <Tag color={val === 'active' ? 'green' : 'default'}>{val === 'active' ? t('status.enabled') : t('status.disabled')}</Tag>,
-    },
+    // 注：mr_indicators 表无 mr_type / status 字段（v2/v3 亦不展示），故移除这两列，避免渲染 "undefined"。
   ], [t]);
 
   return (
