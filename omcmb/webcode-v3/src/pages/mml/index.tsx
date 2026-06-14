@@ -32,6 +32,7 @@ import type {
   MMLTaskStatus,
   MMLExecuteType,
   DeviceTaskResultItem,
+  MMLTaskResultsStats,
 } from '@core/types/mml'
 
 // ─────────────────────────────────────────────────────────────
@@ -633,7 +634,9 @@ function TaskDetailDrawer({ task, onClose }: { task: MMLTask; onClose: () => voi
     () => data?.items ?? (task.results as unknown as DeviceTaskResultItem[]) ?? [],
     [data, task]
   )
-  const stats = data?.stats
+  // apiSwitch 取真实 API（stats: MMLTaskResultsStats）与 mock（默认 stats {}）的
+  // 返回类型交集，stats 被收窄为 {}；运行期真实 API 填充翻译审计元数据，按已声明类型读取。
+  const stats = data?.stats as MMLTaskResultsStats | undefined
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/60 backdrop-blur-sm" onClick={onClose}>

@@ -1109,7 +1109,7 @@ function PolicySection() {
                   {p.maxStorageGB} GB
                 </div>
                 <div className="font-mono text-[10px] text-cyan-300/55">
-                  {p.storageBackend.toUpperCase()} · {p.localPath}
+                  {(p.storageBackend || '—').toUpperCase()} · {p.localPath || '—'}
                 </div>
               </div>
             </div>
@@ -1130,7 +1130,7 @@ function PolicySection() {
                 [
                   '压缩',
                   p.enableCompression
-                    ? `${p.compressionFormat.toUpperCase()} L${p.compressionLevel}`
+                    ? `${(p.compressionFormat || '').toUpperCase()} L${p.compressionLevel}`
                     : '关',
                 ],
                 [
@@ -1138,7 +1138,7 @@ function PolicySection() {
                   p.enableEncryption ? p.encryptionAlgorithm : '关',
                 ],
                 ['失败告警', p.alertOnFailure ? '开' : '关'],
-                ['告警级别', p.alertSeverity.toUpperCase()],
+                ['告警级别', (p.alertSeverity || '—').toUpperCase()],
               ]}
             />
           </div>

@@ -1,10 +1,43 @@
 import { useEffect, useRef } from 'react'
-import { Outlet } from 'react-router-dom'
+import { NavLink, Outlet, useLocation } from 'react-router-dom'
 
 import { HUDStatusBar } from '@/components/shell/HUDStatusBar'
 import { CockpitDock } from '@/components/shell/CockpitDock'
 import { MiniRadar } from '@/components/shell/MiniRadar'
 import { TelemetryStream } from '@/components/shell/TelemetryStream'
+import { cn } from '@/lib/utils'
+import { MODULES } from '@/router/navConfig'
+
+// 当前模块的子路由横向导航（v1 子路由全量对齐后，HUD 下用上下文子导航暴露子页）。
+function SubNav() {
+  const { pathname } = useLocation()
+  const seg = '/' + (pathname.split('/')[1] || '')
+  const mod = MODULES.find((m) => m.routes.some((r) => r.path === seg || r.path.startsWith(seg + '/')))
+  if (!mod) return null
+  const visible = mod.routes.filter((r) => !r.hidden)
+  if (visible.length <= 1) return null
+  return (
+    <div className="mb-2 flex flex-wrap gap-1.5">
+      {visible.map((r) => (
+        <NavLink
+          key={r.path}
+          to={r.path}
+          end
+          className={({ isActive }) =>
+            cn(
+              'rounded border px-2.5 py-1 font-mono text-[11px] tracking-wide transition-colors',
+              isActive
+                ? 'border-cyan-400/60 bg-cyan-400/15 text-cyan-100'
+                : 'border-cyan-500/15 bg-cyan-500/5 text-cyan-300/65 hover:border-cyan-400/40 hover:text-cyan-200'
+            )
+          }
+        >
+          {r.label}
+        </NavLink>
+      ))}
+    </div>
+  )
+}
 
 export function BridgeShell() {
   const root = useRef<HTMLDivElement>(null)
@@ -67,8 +100,11 @@ export function BridgeShell() {
           </aside>
 
           {/* 中央内容 */}
-          <main className="relative min-h-0 overflow-hidden pb-28">
-            <Outlet />
+          <main className="relative flex min-h-0 flex-col overflow-hidden pb-28">
+            <SubNav />
+            <div className="min-h-0 flex-1 overflow-auto">
+              <Outlet />
+            </div>
           </main>
 
           {/* 右侧遥测 */}

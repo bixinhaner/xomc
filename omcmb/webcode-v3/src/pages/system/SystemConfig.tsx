@@ -1,0 +1,114 @@
+import { useState } from 'react'
+import { RefreshCcw, SlidersHorizontal } from 'lucide-react'
+
+import { PageShell } from '@/components/shell/PageShell'
+import { NeonButton } from '@/components/ui/NeonButton'
+import { useSysConfigsByCategory } from '@core/hooks/api/useSystem'
+import type { SysConfigItem } from '@core/types/system'
+
+import { StateBlock, MiniStat, RowHeader } from './_shared'
+
+// 后端 7 个 category（参 frontend-core/src/types/system.ts SysConfigItem 注释）。
+const CONFIG_CATEGORIES: { key: string; label: string }[] = [
+  { key: 'basic', label: '基础' },
+  { key: 'security', label: '安全' },
+  { key: 'device', label: '设备' },
+  { key: 'notify', label: '通知' },
+  { key: 'storage', label: '存储' },
+  { key: 'omc', label: 'OMC' },
+  { key: 'northbound', label: '北向' },
+]
+
+export default function SystemConfig() {
+  const [category, setCategory] = useState<string>('basic')
+  const { data, isLoading, isError, error, isFetching, refetch } = useSysConfigsByCategory(category)
+  const items = data ?? []
+
+  return (
+    <PageShell
+      code="F06"
+      title="CONFIG · 系统参数"
+      subtitle="SYS CONFIG · KV STORE"
+      isFetching={isFetching}
+      bare
+      toolbar={
+        <>
+          {CONFIG_CATEGORIES.map((c) => (
+            <button
+              key={c.key}
+              type="button"
+              onClick={() => setCategory(c.key)}
+              className={`chip transition-all ${
+                category === c.key
+                  ? 'text-cyan-200 shadow-[0_0_10px_currentColor]'
+                  : 'text-cyan-300/55 hover:text-cyan-200'
+              }`}
+            >
+              {c.label}
+            </button>
+          ))}
+          <NeonButton icon={<RefreshCcw />} onClick={() => refetch()}>
+            REFRESH
+          </NeonButton>
+        </>
+      }
+    >
+      <div className="flex h-full flex-col gap-3">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <MiniStat
+            label="当前分类"
+            value={CONFIG_CATEGORIES.find((c) => c.key === category)?.label ?? category}
+            color="#00f0ff"
+            icon={<SlidersHorizontal className="size-3.5" />}
+          />
+          <MiniStat label="配置项数" value={items.length} color="#00ff88" />
+          <MiniStat label="公开项" value={items.filter((i) => i.isPublic).length} color="#a855f7" />
+          <MiniStat label="分类总数" value={CONFIG_CATEGORIES.length} color="#5b9eff" />
+        </div>
+
+        <div className="glass-strong relative flex-1 min-h-0 overflow-hidden rounded-sm">
+          <div className="scanline" />
+          <div className="relative h-full overflow-auto p-3">
+            <StateBlock
+              isLoading={isLoading}
+              isError={isError}
+              error={error}
+              isEmpty={items.length === 0}
+              emptyLabel="NO CONFIG ITEMS · 该分类无配置"
+            >
+              <div className="space-y-1.5">
+                <RowHeader cols="1.6fr_1.6fr_0.8fr_2fr">
+                  <span>键 · KEY</span>
+                  <span>值 · VALUE</span>
+                  <span>类型</span>
+                  <span>说明</span>
+                </RowHeader>
+                {items.map((cfg: SysConfigItem) => (
+                  <div
+                    key={cfg.id || `${cfg.category}.${cfg.key}`}
+                    className="fleet-row grid grid-cols-[1.6fr_1.6fr_0.8fr_2fr] items-center gap-3 rounded-sm px-3 py-2.5"
+                    style={{ ['--row-color' as never]: '#00f0ff' }}
+                  >
+                    <div className="min-w-0">
+                      <div className="truncate font-mono text-xs text-cyan-100">{cfg.key}</div>
+                      {cfg.isPublic ? <span className="chip text-[#00ff88]">PUBLIC</span> : null}
+                    </div>
+                    <div className="min-w-0 truncate font-mono text-xs text-cyan-200">
+                      {cfg.value || '—'}
+                    </div>
+                    <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-cyan-300/65">
+                      {cfg.valueType || 'string'}
+                    </div>
+                    <div className="min-w-0 truncate text-xs text-cyan-100/75">
+                      {cfg.description || '—'}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </StateBlock>
+          </div>
+        </div>
+      </div>
+    </PageShell>
+  )
+}
