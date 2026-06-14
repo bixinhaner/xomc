@@ -15,7 +15,9 @@ interface PrivateRouteProps {
 //   - /dashboard：默认登录后跳转目标，所有角色都应能进
 //   - /403：未授权页本身
 //   - /login：在 routes 上层，本守卫不会经过；列出仅作文档
-const ALWAYS_ALLOWED_PATHS = new Set<string>(['/dashboard', '/403', '/login']);
+//   - /notifications：通知中心（顶栏铃铛"查看全部"入口）—— 跨域功能，不挂菜单，
+//     与 v2/v3 暴露通知中心整页对齐（消息/模板/历史 tab）
+const ALWAYS_ALLOWED_PATHS = new Set<string>(['/dashboard', '/403', '/login', '/notifications']);
 
 // 错误页：未登录用户访问这些路径被弹到 /login 时，**不要**把它们当成
 // "登录后想去的地方"塞进 state.from —— 否则登录成功会回弹到错误页。

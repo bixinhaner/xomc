@@ -6251,6 +6251,7 @@ const messages: Record<string, string> = {
   'notificationCenter.markAllReadFailed':      'Failed to mark read: {error}',
   'notificationCenter.clearSuccess':           'Cleared {count} messages',
   'notificationCenter.clearFailed':            'Failed to clear: {error}',
+  'notificationCenter.viewAll':                'View All',
 
   // T-0078 backup restore (RestoreData page)
   'backup.restore.title':                      'Data Restore',

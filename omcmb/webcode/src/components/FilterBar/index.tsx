@@ -210,6 +210,7 @@ const FilterBar: React.FC<FilterBarProps> = ({
           <Input
             placeholder={field.placeholder ?? field.label}
             allowClear
+            onPressEnter={handleSearch}
           />
         );
       case 'select':
