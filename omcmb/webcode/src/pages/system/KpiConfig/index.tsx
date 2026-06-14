@@ -17,29 +17,35 @@ import {
   Card,
   Empty,
   Input,
-  Select,
   Space,
   Tabs,
+  Tag,
   Tooltip,
   Typography,
 } from 'antd';
-import { DeleteOutlined, HolderOutlined, PlusOutlined, SaveOutlined } from '@ant-design/icons';
+import {
+  DeleteOutlined,
+  HolderOutlined,
+  PlusOutlined,
+  SaveOutlined,
+  TableOutlined,
+} from '@ant-design/icons';
 import GridLayout, { type Layout } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 
 import { useT } from '@/hooks/useT';
-import { useKPILayout, useKPIDefinitions, useSaveKPILayout } from '@core/hooks/api/useDashboard';
+import MetricPickerModal from '@/components/MetricPickerModal';
+import type { DeviceType } from '@core/types/indicatorLibrary';
+import { useKPILayout, useSaveKPILayout } from '@core/hooks/api/useDashboard';
 import { resolveLayout } from '@/pages/dashboard/layoutMapping';
 import type { TechnologyType } from '@/pages/dashboard/kpi-config';
 import { TECH_LABELS } from '@/pages/dashboard/kpi-config';
 import {
   addPanel,
   applyGridLayout,
-  definitionsForTech,
   removePanel,
   toGridLayout,
-  toMetricOptions,
   toSavePanels,
   toWorkingPanels,
   updatePanelMetrics,
@@ -52,6 +58,16 @@ const { Text } = Typography;
 
 /** 制式 tab 顺序（与首页一致）。 */
 const TECHS: TechnologyType[] = ['lte', 'nr', 'gsm'];
+
+/**
+ * 制式 → 指标库设备类型（弹窗按制式锁定取数）。
+ * LTE→ENB（4G），NR→GNB（5G），GSM→GSM（2G）。
+ */
+const TECH_TO_DEVICE_TYPE: Record<TechnologyType, DeviceType> = {
+  lte: 'ENB',
+  nr: 'GNB',
+  gsm: 'GSM',
+};
 
 /** 12 列网格、每行高度（px）；与首页渲染口径相近，纯编辑期视觉用。 */
 const GRID_COLS = 12;
@@ -67,12 +83,17 @@ function TechEditor({ tech }: { tech: TechnologyType }) {
   const { message } = App.useApp();
 
   const { data: remoteLayout, isLoading: layoutLoading } = useKPILayout(tech);
-  const { data: definitions } = useKPIDefinitions();
   const saveMutation = useSaveKPILayout();
 
   // 工作态：本地可编辑的 panels（带前端临时 id）。读到布局 / 回退默认后初始化一次。
   const [panels, setPanels] = useState<WorkingPanel[]>([]);
   const [initialized, setInitialized] = useState(false);
+
+  // 指标表格弹窗（共享件 MetricPickerModal）：记录当前正在编辑指标的 panel id；
+  // null = 弹窗关闭。弹窗按当前制式锁定（lockDeviceType），选回的是指标编号（K/C 编号）。
+  const [pickerPanelId, setPickerPanelId] = useState<string | null>(null);
+  // 编号 → 友好名映射：弹窗确认时累积，仅供编辑期摘要标签显示，不持久化（面板存的是编号）。
+  const [metricLabels, setMetricLabels] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (layoutLoading || initialized) return;
@@ -83,13 +104,10 @@ function TechEditor({ tech }: { tech: TechnologyType }) {
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [tech, remoteLayout, layoutLoading, initialized]);
 
-  // 指标选择器选项：按当前制式过滤指标库，不可用项置灰。
-  const metricOptions = useMemo(
-    () => toMetricOptions(definitionsForTech(definitions?.technologies, tech)),
-    [definitions, tech],
-  );
-
   const gridLayout = useMemo<GridLayoutItem[]>(() => toGridLayout(panels), [panels]);
+
+  // 正在编辑指标的 panel（弹窗以它的已选指标为初始选中）。
+  const pickerPanel = pickerPanelId ? panels.find((p) => p.id === pickerPanelId) : undefined;
 
   const handleLayoutChange = (layout: Layout) => {
     setPanels((prev) => applyGridLayout(prev, layout as unknown as GridLayoutItem[]));
@@ -179,24 +197,67 @@ function TechEditor({ tech }: { tech: TechnologyType }) {
                 }
               >
                 <div onMouseDown={(e) => e.stopPropagation()}>
-                  <Select
-                    mode="multiple"
-                    allowClear
-                    style={{ width: '100%' }}
-                    placeholder={t('dashboard.kpiConfig.metricsPlaceholder')}
-                    value={panel.metrics}
-                    options={metricOptions}
-                    maxTagCount="responsive"
-                    onChange={(values: string[]) =>
-                      setPanels((prev) => updatePanelMetrics(prev, panel.id, values))
-                    }
-                  />
+                  <Space orientation="vertical" style={{ width: '100%' }} size={4}>
+                    <Button
+                      icon={<TableOutlined />}
+                      style={{ width: '100%' }}
+                      onClick={() => setPickerPanelId(panel.id)}
+                    >
+                      {t('dashboard.kpiConfig.pickMetrics')}
+                      {panel.metrics.length > 0
+                        ? `（${t('dashboard.kpiConfig.metricsCount', { count: panel.metrics.length })}）`
+                        : ''}
+                    </Button>
+                    <div style={{ maxHeight: 64, overflowY: 'auto' }}>
+                      {panel.metrics.length === 0 ? (
+                        <Text type="secondary">{t('dashboard.kpiConfig.noMetrics')}</Text>
+                      ) : (
+                        panel.metrics.map((code) => (
+                          <Tag
+                            key={code}
+                            closable
+                            onClose={() =>
+                              setPanels((prev) =>
+                                updatePanelMetrics(
+                                  prev,
+                                  panel.id,
+                                  panel.metrics.filter((m) => m !== code),
+                                ),
+                              )
+                            }
+                            style={{ marginBottom: 4 }}
+                          >
+                            {metricLabels[code] ?? code}
+                          </Tag>
+                        ))
+                      )}
+                    </div>
+                  </Space>
                 </div>
               </Card>
             </div>
           ))}
         </GridLayout>
       )}
+
+      {/* 指标表格弹窗（共享件）：按当前制式锁定取数，可搜索 / 跨页多选全库（counter+KPI）。
+          确认后把选回的指标编号写进目标 panel.metrics，并累积友好名供摘要标签显示。 */}
+      <MetricPickerModal
+        // 按 panel id 重挂载：弹窗内部「已选」state 仅首挂载读 initialSelected，
+        // 不随后续 prop 变化重置；给每个 panel 一个独立实例，避免开 B 图却带出 A 图的旧选中。
+        key={pickerPanelId ?? 'none'}
+        open={pickerPanelId !== null}
+        onClose={() => setPickerPanelId(null)}
+        onConfirm={(codes, labels) => {
+          setMetricLabels((prev) => ({ ...prev, ...labels }));
+          if (pickerPanelId) {
+            setPanels((prev) => updatePanelMetrics(prev, pickerPanelId, codes));
+          }
+        }}
+        initialSelected={pickerPanel?.metrics ?? []}
+        initialDeviceType={TECH_TO_DEVICE_TYPE[tech]}
+        lockDeviceType
+      />
     </div>
   );
 }

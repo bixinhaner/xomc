@@ -153,6 +153,12 @@ func (e *Executor) queryAndConvert(ctx context.Context, task *Task, g metrics.Gr
 		EndTime:      task.WindowEnd,
 		Limit:        100000,
 	}
+	// KPI-ALL-IND：全网维度且指标列表为空（全聚到全库）时，让聚合层连派生 KPI 一起重算落库，
+	// 使首页读现成全网预聚合表时 KPI 也有线（否则全聚只产 counter、首页 KPI 面板空线）。
+	// 仅 network 维度（设备组/产品/频段仍按各自精选列表，不受影响）。
+	if dim == aggregator.DimensionNetwork && len(task.MetricPaths) == 0 {
+		req.RecomputeAllKPIs = true
+	}
 	rows, err := e.aggr.Query(ctx, req)
 	if err != nil {
 		return nil, err

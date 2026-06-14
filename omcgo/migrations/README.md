@@ -2,9 +2,18 @@
 
 迁移工具：[`pressly/goose/v3`](https://github.com/pressly/goose)。版本号记录在数据库 `goose_db_version`（DDL）和 `goose_db_version_seed`（DML）两个表中，由 `cmd/migrate` 包装执行。
 
-## 当前状态：consolidated baseline（2026-06-13 复合，面向全新发布部署）
+## 当前状态：consolidated baseline（2026-06-14 复合，面向全新发布部署）
 
-> **2026-06-13 再合并**：在 2026-06-12 基线之后又积累的少量增量被折叠回基线，三条流恢复为**各一个 000001 文件**。本次吸收：
+> **2026-06-14 再合并**：在 2026-06-13 基线之后又积累的增量被折叠回基线，三条流恢复为**各一个 000001 文件**。本次吸收：
+> - schema `000002`（`dashboard_kpi_layouts` 建表，#213）→ 折叠进 `000001_init_schema.sql` Up 段末尾。
+> - seed `000002`（KPI 全局布局初始三行 + 接口权限点，#213）+ seed `000003`（「首页 KPI 配置」菜单 + 角色绑定，#213）+ seed `000004`（保留/背压 sys_configs，#318-321）+ seed `000005`（日志保留/轮转 sys_configs，#331）→ 折叠进 `seed/000001_init_seed.sql`（保留 `ON CONFLICT DO NOTHING`）。
+> - seed `000006`（全网三任务 `metric_paths` 放开全库，KPI-ALL-IND）→ **焊进最终态**：非 no-op（全新库基线已插入这 3 条精选任务），故直接把基线 `pm_tasks` INSERT 里 `0184dddd-0001-*` 三条的 `metric_paths` 改为空数组 `'{}'`（全库聚合语义），而非保留 UPDATE。
+> - tsdb 流本轮无新增。
+>
+> **本基线面向「全新部署」**：全新双实例 `goose up` 三流全绿即得最终态。下一个新迁移号 = 各流当前最大文件号 + 1（schema/seed/tsdb 均 → `000002`）。
+> ⚠️ **既有（本基线之前已迁移过的）库不能靠简单 `goose up` 平滑升级到本基线**：它们的 `goose_db_version*` 里仍有被折叠/删除号（如 schema/seed 旧 2~6），且新号若 ≤ 其已应用最大号会被 goose 当「已过」跳过。既有库要么按本基线重建，要么手工重置版本表——这是 re-baseline 的固有约束，符合「全新发布」的使用场景。
+
+> **2026-06-13 再合并**（上一轮，归档）：在 2026-06-12 基线之后又积累的少量增量被折叠回基线，三条流恢复为**各一个 000001 文件**。本次吸收：
 > - schema `000046`（`mml_custom_command_paths` 建表，#115）→ 折叠进 `000001_init_schema.sql` Up 段末尾。
 > - schema `000047`（`product_class_patterns.source` 存量回填，#206）→ **删除**：纯历史数据 UPDATE，全新库无 `is_builtin=FALSE` 用户产品、命中 0 行，是 no-op；前向防护已在 `loader.go`。
 > - seed `000044`（设备离线阈值 sys_configs，#203）+ seed `000047`（MML 路径端点 + 角色授权，#115）→ 折叠进 `seed/000001_init_seed.sql`（保留 `ON CONFLICT DO NOTHING`）。
@@ -90,8 +99,8 @@ schema、seed 与 tsdb 是**三条相互独立的 goose 版本序列**，各自�
 
 goose 以 `version_id`（号）为唯一键判定「已应用」。历史上若某号曾被应用又被删档，其号已写入版本表；**复用该号会让 goose 把新内容当作「已应用」而跳过执行**。所以：
 
-- 2026-06-13 复合 re-baseline 后，三条流文件号都收敛回单个 `000001`（无空洞）；新增一律用 `max+1`（当前即 `000002`）。
-- **绝不**回填空号、也不重排已有文件的号；本基线之前删/折叠掉的号（schema 46/47、seed 44/47、tsdb 2）**不得复用**——它们可能仍存在于历史部署的 `goose_db_version*` 中，复用会让 goose 把新内容当「已应用」跳过。
+- 2026-06-14 复合 re-baseline 后，三条流文件号都收敛回单个 `000001`（无空洞）；新增一律用 `max+1`（当前即 `000002`）。
+- **绝不**回填空号、也不重排已有文件的号；历次基线删/折叠掉的号（schema 46/47/旧2、seed 44/47/旧2~6、tsdb 旧2）**不得复用**——它们可能仍存在于历史部署的 `goose_db_version*` 中，复用会让 goose 把新内容当「已应用」跳过。
 - 因此 CLAUDE.md §4.6 里「连续递增、无跳跃」应理解为「**单调递增、不回填、不复用弃号**」。
 
 其它规则（StatementBegin/End、TimescaleDB 压缩顺序、分区表外键、UUID 校验、Down 完整性、TRUNCATE/FK、自查清单）见 `omcgo/CLAUDE.md` §4.6 数据库迁移规范。

@@ -645,51 +645,15 @@ func (s *Service) GetKPITrendComparison(ctx context.Context, kpiName string, com
 
 	// Query current period data (today 00:00 to now)
 	currentStart := now.Truncate(24 * time.Hour)
-	currentFilter := kpi.KPIFilter{
-		KPIName:   &kpiName,
-		StartTime: currentStart,
-		EndTime:   now,
-	}
-	currentFilter.Page = 1
-	currentFilter.PageSize = 100
-	currentFilter.SortBy = "time"
-	currentFilter.SortDir = "asc"
-
-	currentResult, err := s.kpiRepo.Query(ctx, currentFilter)
+	currentEntries, err := s.queryNetworkKPISeries(ctx, kpiName, currentStart, now)
 	if err != nil {
 		return nil, fmt.Errorf("query current kpi trend: %w", err)
 	}
 
-	currentEntries := make([]KPITrendEntry, 0, len(currentResult.Items))
-	for _, v := range currentResult.Items {
-		currentEntries = append(currentEntries, KPITrendEntry{
-			Time:  v.Time.Format(time.RFC3339),
-			Value: v.KPIValue,
-		})
-	}
-
 	// Query comparison period data
-	compareFilter := kpi.KPIFilter{
-		KPIName:   &kpiName,
-		StartTime: compareStart,
-		EndTime:   compareEnd,
-	}
-	compareFilter.Page = 1
-	compareFilter.PageSize = 100
-	compareFilter.SortBy = "time"
-	compareFilter.SortDir = "asc"
-
-	compareResult, err := s.kpiRepo.Query(ctx, compareFilter)
+	compareEntries, err := s.queryNetworkKPISeries(ctx, kpiName, compareStart, compareEnd)
 	if err != nil {
 		return nil, fmt.Errorf("query compare kpi trend: %w", err)
-	}
-
-	compareEntries := make([]KPITrendEntry, 0, len(compareResult.Items))
-	for _, v := range compareResult.Items {
-		compareEntries = append(compareEntries, KPITrendEntry{
-			Time:  v.Time.Format(time.RFC3339),
-			Value: v.KPIValue,
-		})
 	}
 
 	// Calculate change percent if both periods have data
@@ -880,10 +844,12 @@ func (s *Service) GetAlarmTypePie(ctx context.Context) ([]AlarmTypePieEntry, err
 
 // GetKPITimeSeries returns time-series data for multiple KPI names within a time range.
 //
-// issue #227：前端传入的是可读 symbolic key（如 LTE_PDCP_VOLUME_DL），但 pm_metrics
-// .metric_path 存的是 K 编号（如 K900010015）。入口先经别名层（kpi_alias.go）把 symbolic
-// 翻成 K 编号查询，命中后按原 symbolic key 回填响应——前端继续用可读 key、无需感知 K 编号。
-// 未登记的 key 原样透传（兼容直接传 K 编号 / 非 Dashboard 调用方）；库内无对应 KPI 的
+// 取数源（阶段2 改造）：从「读原始每设备每小区明细（pm_metrics）」改为「读全网预聚合结果表
+// pm_adhoc_aggregation_results（network 维度）」——3 条内置全网任务每小时把全库指标
+// （counter 求和、KPI 重算）汇成全网总线，首页直接拿口径正确的全网线。详见 kpi_network_query.go。
+//
+// 查询键：前端可直接传指标编号（K/C 编号）；老的精选 symbolic 别名（如 LTE_PDCP_VOLUME_DL）
+// 经别名层（kpi_alias.go）映射成编号（存量兼容），返回时按原 key 回填；库内无对应编号的
 // none 项（如 LTE_CELL_AVAILABLE）返回空序列。
 func (s *Service) GetKPITimeSeries(ctx context.Context, kpiNames []string, startTime, endTime time.Time) (KPITimeSeriesResponse, error) {
 	result := make(KPITimeSeriesResponse, len(kpiNames))
@@ -897,28 +863,20 @@ func (s *Service) GetKPITimeSeries(ctx context.Context, kpiNames []string, start
 		result[name] = []KPITimeSeriesEntry{}
 	}
 
-	// 别名解析：symbolic → K 编号（去重），并保留 K编号→symbolic 反查表用于回填。
+	// 别名解析：symbolic 别名 → 指标编号（去重，含原样透传的裸编号），并保留 编号→key 反查表用于回填。
 	kcodes, reverse := resolveKPIAliases(kpiNames)
 	if len(kcodes) == 0 {
-		// 全部是 none 项或解析后无可查 K 编号 → 直接返回（全空序列）。
+		// 全部是 none 项或解析后无可查编号 → 直接返回（全空序列）。
 		return result, nil
 	}
 
-	// T-0164-P3 / G3：kpi_values 表合入 pm_metrics（metric_type='kpi'），列改名
-	// kpi_name → metric_path，kpi_value → metric_value。
-	query, args, err := storage.Psql.Select("metric_path", "time", "metric_value").
-		From("pm_metrics").
-		Where(sq.Eq{"metric_type": "kpi"}).
-		Where("metric_path = ANY(?)", kcodes).
-		Where(sq.GtOrEq{"time": startTime}).
-		Where(sq.LtOrEq{"time": endTime}).
-		OrderBy("metric_path", "time ASC").
-		ToSql()
+	// 读全网预聚合结果表（3 条 network 任务覆盖全制式；不限 metric_type，counter/KPI 同表读）。
+	query, args, err := buildNetworkKPISeriesQuery(kcodes, startTime, endTime)
 	if err != nil {
 		return nil, fmt.Errorf("build kpi time series query: %w", err)
 	}
 
-	// pm_metrics 在时序库（TsPool）。
+	// pm_adhoc_aggregation_results 在时序库（TsPool）。
 	rows, err := s.tsPool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query kpi time series: %w", err)
@@ -943,6 +901,45 @@ func (s *Service) GetKPITimeSeries(ctx context.Context, kpiNames []string, start
 	}
 
 	return result, nil
+}
+
+// queryNetworkKPISeries 读单个指标在某时窗内的全网预聚合时序（供 GetKPITrendComparison 用）。
+//
+// kpiName 可为老精选 symbolic 别名（经 resolveKPIAliases 映射成编号）或裸指标编号（原样透传）；
+// none 项（无对应编号）或解析后无编号 → 返回空序列（不报错）。读 pm_adhoc_aggregation_results
+// （network 维度，3 条全网任务覆盖全制式），与 GetKPITimeSeries 同源。
+func (s *Service) queryNetworkKPISeries(ctx context.Context, kpiName string, startTime, endTime time.Time) ([]KPITrendEntry, error) {
+	kcodes, _ := resolveKPIAliases([]string{kpiName})
+	if len(kcodes) == 0 {
+		// none 项或无可查编号 → 空序列。
+		return []KPITrendEntry{}, nil
+	}
+
+	query, args, err := buildNetworkKPISeriesQuery(kcodes, startTime, endTime)
+	if err != nil {
+		return nil, fmt.Errorf("build network kpi series query: %w", err)
+	}
+
+	rows, err := s.tsPool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query network kpi series: %w", err)
+	}
+	defer rows.Close()
+
+	entries := make([]KPITrendEntry, 0)
+	for rows.Next() {
+		var code string
+		var t time.Time
+		var value float64
+		if err := rows.Scan(&code, &t, &value); err != nil {
+			return nil, fmt.Errorf("scan network kpi series row: %w", err)
+		}
+		entries = append(entries, KPITrendEntry{
+			Time:  t.Format(time.RFC3339),
+			Value: value,
+		})
+	}
+	return entries, nil
 }
 
 // parseKPINames splits a comma-separated string of KPI names into a slice.

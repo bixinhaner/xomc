@@ -54,6 +54,11 @@ type QueryRequest struct {
 	VisibleGroups []uuid.UUID
 	Limit         int
 	Offset        int
+	// RecomputeAllKPIs（KPI-ALL-IND）：全网/全聚任务放开到全库时置 true。聚合层在汇总
+	// 全部 counter 的同时，额外从指标库加载全库「派生 KPI」按公式重算并产出 KPI 行，
+	// 使「首页读现成全网预聚合表」时 KPI 也有线（否则全聚只产 counter 行、KPI 面板空线）。
+	// 仅用于「空 MetricPaths＝全聚」的聚合任务执行路径；动态从指标库枚举，不在 seed 硬编码。
+	RecomputeAllKPIs bool
 }
 
 // Row 是 Aggregator.Query 的输出行。device 维度填 DeviceOUI/DeviceSN/ObjectLDN；

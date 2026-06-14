@@ -352,6 +352,12 @@ func (a *Aggregator) queryWithKPIRecompute(
 	q QueryRequest,
 	dimFn func(context.Context, string, QueryRequest) ([]Row, error),
 ) ([]Row, error) {
+	// KPI-ALL-IND：全网/全聚放开到全库——汇总全部 counter 的同时，额外重算全库派生 KPI 产 KPI 行。
+	// 与默认路径（按请求里显式 KPI 列表重算）互斥：这里指标列表本就为空（全聚），改由指标库枚举驱动。
+	if q.RecomputeAllKPIs {
+		return a.queryFullLibraryWithKPIs(ctx, table, q, dimFn)
+	}
+
 	kpis, userCounters := a.resolveKPIMetadata(ctx, q.MetricPaths)
 	if len(kpis) == 0 {
 		// 请求里没有派生 KPI：原样查（仍强制只聚 counter 行，避免撞 device 级 KPI 行 SUM）。
@@ -380,4 +386,99 @@ func (a *Aggregator) queryWithKPIRecompute(
 func counterMetricType() *metrics.MetricType {
 	ct := metrics.MetricTypeCounter
 	return &ct
+}
+
+// queryFullLibraryWithKPIs 是「全网/全聚放开到全库」的取数路径（RecomputeAllKPIs=true）：
+//  1. 拉全部 counter（不下推 metric_path 过滤、强制只聚 counter 行）—— 与放开前的全聚行为一致；
+//  2. 从指标库枚举全库「派生 KPI」元数据（动态加载，不在 seed 硬编码，库变即生效）；
+//  3. 复用 recomputeKPIs（userCounters=nil）按公式从同 (维度键,桶) 的 counter 重算出 KPI 行；
+//  4. 返回「全部 counter 行 + 全部派生 KPI 行」一并落库 —— 首页读现成全网表时 counter / KPI 都有线。
+//
+// 跨制式安全：counter 编号三表全局唯一，故某制式任务的 counter 行只能命中本制式 KPI 的 deps，
+// 其它制式 KPI 因 deps 缺失被 recomputeKPIs 跳过（不产假 0），无跨制式误算。
+func (a *Aggregator) queryFullLibraryWithKPIs(
+	ctx context.Context,
+	table string,
+	q QueryRequest,
+	dimFn func(context.Context, string, QueryRequest) ([]Row, error),
+) ([]Row, error) {
+	cq := q
+	cq.MetricPaths = nil // 全库：不下推指标过滤
+	cq.MetricType = counterMetricType()
+	cq.Limit = 0 // 重算需每桶全部 deps counter，不截行
+	cq.Offset = 0
+	counterRows, err := dimFn(ctx, table, cq)
+	if err != nil {
+		return nil, err
+	}
+	kpis := a.resolveAllDerivedKPIs(ctx)
+	if len(kpis) == 0 {
+		// 指标库无可重算 KPI（或查询失败已降级）：退回「全部 counter」，不丢 counter 行。
+		return counterRows, nil
+	}
+	// recomputeKPIs(userCounters=nil, 全派生 KPI)：passthrough 为空 → 仅产出 KPI 行；
+	// 与全部 counter 行合并 = 全部 counter + 全部 KPI。
+	kpiRows := a.recomputeKPIs(counterRows, kpis, nil)
+	return append(counterRows, kpiRows...), nil
+}
+
+// resolveAllDerivedKPIs 从指标库枚举全库「派生 KPI」（arithmetic 非空且 is_counter≠'1'）的重算元数据。
+// 用于 RecomputeAllKPIs 路径动态驱动全库 KPI 重算，避免在 seed/任务里硬编码指标列表（库变即漂）。
+// 原始计数（is_counter='1'）不在此列：其聚合值已由全部 counter 汇总直接产出，无需公式重算。
+// 查法照搬 resolveKPIMetadata 的跨三表 UNION 范式（编号三表全局唯一）；查询失败降级返回空（不报错、不丢 counter）。
+func (a *Aggregator) resolveAllDerivedKPIs(ctx context.Context) []kpiMeta {
+	const tmpl = `
+SELECT id, statis_type, arithmetic FROM perf_indicators_enb WHERE COALESCE(arithmetic, '') <> '' AND COALESCE(is_counter, '0') <> '1'
+UNION ALL
+SELECT id, statis_type, arithmetic FROM perf_indicators_gnb WHERE COALESCE(arithmetic, '') <> '' AND COALESCE(is_counter, '0') <> '1'
+UNION ALL
+SELECT id, statis_type, arithmetic FROM perf_indicators_gsm WHERE COALESCE(arithmetic, '') <> '' AND COALESCE(is_counter, '0') <> '1'`
+	rows, err := a.db.Query(ctx, tmpl)
+	if err != nil {
+		a.logger.Warn("resolveAllDerivedKPIs query failed; skip KPI recompute for full-lib aggregation", zap.Error(err))
+		return nil
+	}
+	defer rows.Close()
+	seen := make(map[string]struct{})
+	var out []kpiMeta
+	for rows.Next() {
+		var id string
+		var statis, formula *string
+		if err := rows.Scan(&id, &statis, &formula); err != nil {
+			a.logger.Warn("resolveAllDerivedKPIs scan failed", zap.Error(err))
+			return out
+		}
+		f := ""
+		if formula != nil {
+			f = *formula
+		}
+		if f == "" {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue // 编号三表全局唯一，防御性去重
+		}
+		parsed, perr := expr.Parse(f)
+		if perr != nil {
+			a.logger.Warn("resolveAllDerivedKPIs arithmetic parse failed; skip code",
+				zap.String("code", id), zap.String("arithmetic", f), zap.Error(perr))
+			continue
+		}
+		st := ""
+		if statis != nil {
+			st = *statis
+		}
+		seen[id] = struct{}{}
+		out = append(out, kpiMeta{
+			code:       id,
+			statisType: st,
+			formula:    f,
+			deps:       parsed.Identifiers(),
+			isCounter:  false,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		a.logger.Warn("resolveAllDerivedKPIs rows err", zap.Error(err))
+	}
+	return out
 }

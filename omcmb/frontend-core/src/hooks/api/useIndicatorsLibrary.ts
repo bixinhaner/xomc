@@ -24,6 +24,36 @@ export function useIndicatorList(deviceType: DeviceType, filter?: IndicatorListF
   });
 }
 
+/**
+ * useAllIndicators - 取某制式「整库」指标（自动翻页聚合，KPI-ALL-IND 阶段4 修复）。
+ *
+ * 背景：后端分页契约把 page_size 全局封顶 1000（model/pagination.go），单次请求 pageSize=5000
+ * 只会返回前 1000 条；指标库单制式可达 ~1408 条，靠单页拉不全 → 编号落在 1000 名之后的指标
+ * （如 K900010002）查不到元数据、面板回退显示原始编号。本 hook 按 1000/页循环翻页取全，
+ * 供首页面板「编号 → 中文名/单位」元数据反查。复用 api.list，不动后端分页上限。
+ */
+const ALL_INDICATORS_PAGE_SIZE = 1000; // 后端分页契约上限（model/pagination.go），按此循环翻页取全
+export function useAllIndicators(deviceType: DeviceType) {
+  return useQuery({
+    queryKey: [...IL_KEY, 'all', deviceType],
+    queryFn: async () => {
+      const first = await api.list(deviceType, { page: 1, pageSize: ALL_INDICATORS_PAGE_SIZE });
+      const items = [...first.items];
+      const total = first.total;
+      let page = 2;
+      // 防御上限：最多 100 页（远超任何单制式库规模），避免异常下死循环。
+      while (items.length < total && page <= 100) {
+        const next = await api.list(deviceType, { page, pageSize: ALL_INDICATORS_PAGE_SIZE });
+        if (!next.items.length) break; // 空页防御
+        items.push(...next.items);
+        page += 1;
+      }
+      return { items, total };
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
 export function usePlatformList(deviceType: DeviceType) {
   return useQuery({
     queryKey: [...IL_KEY, 'platforms', deviceType],

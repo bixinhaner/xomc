@@ -72,7 +72,7 @@ import type {
   TimeRangePreset,
 } from '@core/types/pmQuery';
 import DevicePickerModal from './components/DevicePickerModal';
-import MetricPickerModal from './components/MetricPickerModal';
+import MetricPickerModal from '@/components/MetricPickerModal';
 import PivotTable from './components/PivotTable';
 
 const { Text, Title } = Typography;
