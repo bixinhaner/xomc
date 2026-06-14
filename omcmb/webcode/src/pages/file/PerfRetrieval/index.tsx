@@ -1,11 +1,20 @@
 import { useState, useMemo } from 'react';
-import { Button, Tabs, Tree, Tag, Space, message, Modal, Form, Select, DatePicker } from 'antd';
-import { DownloadOutlined, MinusCircleOutlined, ClearOutlined, SyncOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Button, Tabs, Tree, Tag, Space, Input, message, Modal, Form, Select, DatePicker } from 'antd';
+import {
+  DownloadOutlined,
+  DeleteOutlined,
+  MinusCircleOutlined,
+  ClearOutlined,
+  SyncOutlined,
+  SearchOutlined,
+} from '@ant-design/icons';
 import type { DataNode } from 'antd/es/tree';
 import type { Dayjs } from 'dayjs';
 import TreeListPageLayout from '@/components/Layout/TreeListPageLayout';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
+import { useFileList, useDownloadFile, useDeleteFiles } from '@core/hooks/api/useFiles';
+import type { ManagedFile, FileStatus } from '@core/mock/data/fileManagement';
 import { useT } from '@/hooks/useT';
 
 const { RangePicker } = DatePicker;
@@ -16,18 +25,6 @@ interface NEItem {
   sn: string;
   neType: string;
   region: string;
-}
-
-interface PerfResult {
-  id: string;
-  neName: string;
-  sn: string;
-  fileName: string;
-  fileSize: number;
-  granularity: '15min' | '1h' | '24h';
-  status: 'success' | 'failed' | 'retrieving' | 'pending';
-  failReason?: string;
-  retrievalTime: string;
 }
 
 const treeData: DataNode[] = [
@@ -50,16 +47,9 @@ const treeTabs = [
   { key: 'group', label: '按分组', treeData: [{ key: 'grp-1', title: '默认分组' }] },
 ];
 
-const mockNEs: NEItem[] = [
+const initialNEs: NEItem[] = [
   { id: 'ne-001', neName: '北京-eNB-0001', sn: 'ENB00001', neType: 'eNB', region: '北京' },
   { id: 'ne-002', neName: '北京-eNB-0002', sn: 'ENB00002', neType: 'eNB', region: '北京' },
-  { id: 'ne-003', neName: '上海-gNB-0001', sn: 'GNB00001', neType: 'gNB', region: '上海' },
-];
-
-const mockResults: PerfResult[] = [
-  { id: 'pr-001', neName: '北京-eNB-0001', sn: 'ENB00001', fileName: 'ENB00001_perf_15min_20240601.xml', fileSize: 1024 * 2048, granularity: '15min', status: 'success', retrievalTime: '2024-06-01T08:00:00.000Z' },
-  { id: 'pr-002', neName: '北京-eNB-0002', sn: 'ENB00002', fileName: 'ENB00002_perf_1h_20240601.xml', fileSize: 1024 * 512, granularity: '1h', status: 'success', retrievalTime: '2024-06-01T08:01:00.000Z' },
-  { id: 'pr-003', neName: '上海-gNB-0001', sn: 'GNB00001', fileName: 'GNB00001_perf_15min_20240601.xml', fileSize: 0, granularity: '15min', status: 'failed', failReason: '无可用数据', retrievalTime: '2024-06-01T08:02:00.000Z' },
 ];
 
 function formatFileSize(bytes: number): string {
@@ -67,16 +57,42 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / 1024).toFixed(2)} KB`;
 }
 
-const granularityLabelMap: Record<string, string> = { '15min': '15min', '1h': '1h', '24h': '24h' };
+const PAGE_SIZE = 20;
 
+const statusColorMap: Record<FileStatus, string> = {
+  available: 'green', uploading: 'blue', processing: 'processing', expired: 'red', deleted: 'default',
+};
+const statusLabelKeyMap: Record<FileStatus, string> = {
+  available: 'status.success', uploading: 'status.running', processing: 'status.running', expired: 'status.failed', deleted: 'status.disabled',
+};
+
+type PerfFileRow = ManagedFile & Record<string, unknown>;
+
+// 性能数据获取结果 = PM/KPI 报表产物文件库，真实接口 GET /files?file_type=report
 export default function PerfRetrieval() {
   const t = useT();
   const [activeTreeTab, setActiveTreeTab] = useState('type');
-  const [selectedNEs, setSelectedNEs] = useState<NEItem[]>(mockNEs.slice(0, 2));
-  const [results, setResults] = useState<PerfResult[]>(mockResults);
+  const [selectedNEs, setSelectedNEs] = useState<NEItem[]>(initialNEs);
   const [retrieveVisible, setRetrieveVisible] = useState(false);
   const [form] = Form.useForm();
   const [retrieving, setRetrieving] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE);
+  const [keyword, setKeyword] = useState('');
+
+  const params = useMemo(
+    () => ({
+      fileType: 'report' as const,
+      page,
+      pageSize,
+      ...(keyword.trim() ? { keyword: keyword.trim() } : {}),
+    }),
+    [page, pageSize, keyword]
+  );
+
+  const { data, isLoading, refetch } = useFileList(params);
+  const download = useDownloadFile();
+  const deleteFiles = useDeleteFiles();
 
   const neColumns: DataTableColumn<NEItem & Record<string, unknown>>[] = useMemo(() => [
     { key: 'neName', title: t('device.name'), dataIndex: 'neName', ellipsis: true },
@@ -93,78 +109,73 @@ export default function PerfRetrieval() {
     },
   ], [t]);
 
-  const resultColumns: DataTableColumn<PerfResult & Record<string, unknown>>[] = useMemo(() => [
-    { key: 'neName', title: t('device.name'), dataIndex: 'neName', ellipsis: true },
-    { key: 'sn', title: t('device.sn'), dataIndex: 'sn', width: 120, mono: true },
+  const resultColumns: DataTableColumn<PerfFileRow>[] = useMemo(() => [
     { key: 'fileName', title: t('table.name'), dataIndex: 'fileName', ellipsis: true },
+    { key: 'deviceSn', title: t('device.sn'), dataIndex: 'deviceSn', width: 140, mono: true, render: (val) => (val ? String(val) : '—') },
     { key: 'fileSize', title: t('table.description'), dataIndex: 'fileSize', width: 100, render: (val) => formatFileSize(Number(val)) },
     {
-      key: 'granularity', title: t('table.type'), dataIndex: 'granularity', width: 90,
-      render: (val) => <Tag color="blue">{granularityLabelMap[String(val)] ?? String(val)}</Tag>,
-    },
-    {
       key: 'status', title: t('table.status'), dataIndex: 'status', width: 90,
-      render: (val) => {
-        const m: Record<string, [string, string]> = { success: ['green', t('status.success')], failed: ['red', t('status.failed')], retrieving: ['processing', t('status.running')], pending: ['default', t('status.pending')] };
-        const [color, label] = m[String(val)] ?? ['default', String(val)];
-        return <Tag color={color}>{label}</Tag>;
-      },
+      render: (val) => <Tag color={statusColorMap[val as FileStatus] ?? 'default'}>{t(statusLabelKeyMap[val as FileStatus] ?? 'status.pending')}</Tag>,
     },
+    { key: 'uploader', title: t('table.operator'), dataIndex: 'uploader', width: 100, render: (val) => (val ? String(val) : '—') },
+    { key: 'uploadTime', title: t('table.time'), dataIndex: 'uploadTime', width: 160, render: (val) => new Date(String(val)).toLocaleString('zh-CN') },
     {
-      key: 'failReason', title: t('table.result'), dataIndex: 'failReason', width: 120,
-      render: (val) => val ? <span style={{ color: '#ff4d4f', fontSize: 12 }}>{String(val)}</span> : '—',
-    },
-    { key: 'retrievalTime', title: t('table.time'), dataIndex: 'retrievalTime', width: 160, render: (val) => new Date(String(val)).toLocaleString('zh-CN') },
-    {
-      key: 'actions', title: t('table.operation'), dataIndex: 'id', width: 80, fixed: 'right',
+      key: 'actions', title: t('table.operation'), dataIndex: 'id', width: 120, fixed: 'right',
       render: (_, record) => {
-        const r = record as PerfResult;
-        if (r.status === 'success') return <Button type="link" size="small" icon={<DownloadOutlined />}>{t('common.download')}</Button>;
-        if (r.status === 'failed') return <Button type="link" size="small" icon={<ReloadOutlined />}>{t('common.refresh')}</Button>;
-        return null;
+        const file = record as ManagedFile;
+        return (
+          <Space size={4}>
+            <Button
+              type="link"
+              size="small"
+              icon={<DownloadOutlined />}
+              disabled={file.status !== 'available' || download.isPending}
+              onClick={() => download.mutate(file.id)}
+            >
+              {t('common.download')}
+            </Button>
+            <Button
+              type="link"
+              size="small"
+              danger
+              icon={<DeleteOutlined />}
+              onClick={() => deleteFiles.mutate([file.id], { onSuccess: () => void message.success(t('common.deleteSuccess')) })}
+            >
+              {t('common.delete')}
+            </Button>
+          </Space>
+        );
       },
     },
-  ], [t]);
+  ], [t, download, deleteFiles]);
 
   const handleRetrieve = () => {
     form.validateFields().then((vals) => {
-      const granularity = vals.granularity as string;
       const timeRange = vals.timeRange as [Dayjs, Dayjs];
       const days = timeRange[1].diff(timeRange[0], 'day');
       if (days > 7) { void message.error(t('common.featureInDev')); return; }
       setRetrieving(true);
       setRetrieveVisible(false);
-      setTimeout(() => {
-        const newResults = selectedNEs.map((ne) => ({
-          id: `pr-${Date.now()}-${ne.id}`,
-          neName: ne.neName,
-          sn: ne.sn,
-          fileName: `${ne.sn}_perf_${granularity}_${timeRange[0].format('YYYYMMDD')}.xml`,
-          fileSize: Math.floor(Math.random() * 1024 * 4096) + 1024 * 100,
-          granularity: granularity as PerfResult['granularity'],
-          status: (Math.random() > 0.1 ? 'success' : 'failed') as PerfResult['status'],
-          failReason: Math.random() > 0.9 ? '无可用数据' : undefined,
-          retrievalTime: new Date().toISOString(),
-        }));
-        setResults((prev) => [...newResults, ...prev]);
+      // 触发拉取后刷新真实性能文件列表
+      void refetch().finally(() => {
         setRetrieving(false);
         void message.success(t('status.success'));
         form.resetFields();
-      }, 1500);
+      });
     });
   };
 
-  const currentTreeData = treeTabs.find((t) => t.key === activeTreeTab)?.treeData ?? [];
+  const currentTreeData = treeTabs.find((tab) => tab.key === activeTreeTab)?.treeData ?? [];
 
   const treePanel = (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <Tabs size="small" activeKey={activeTreeTab} onChange={setActiveTreeTab}
-        items={treeTabs.map((t) => ({ key: t.key, label: t.label }))}
+        items={treeTabs.map((tab) => ({ key: tab.key, label: tab.label }))}
         style={{ padding: '8px 8px 0' }}
       />
       <div style={{ flex: 1, overflow: 'auto', padding: 8 }}>
         <Tree treeData={currentTreeData} defaultExpandAll checkable
-          onSelect={() => setSelectedNEs(mockNEs.slice(0, 2))} />
+          onSelect={() => setSelectedNEs(initialNEs)} />
       </div>
     </div>
   );
@@ -189,13 +200,27 @@ export default function PerfRetrieval() {
               loading={false} rowKey="id" showPagination={false} size="small" />
           </div>
         </div>
-        <div style={{ flex: 1, overflow: 'auto' }}>
-          <div style={{ padding: '8px 12px', background: '#fafafa', borderBottom: '1px solid #f0f0f0' }}>
-            <span style={{ fontWeight: 500 }}>{t('table.result')}: {results.length}</span>
+        <div style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ padding: '8px 12px', background: '#fafafa', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+            <span style={{ fontWeight: 500 }}>{t('table.result')}: {data?.total ?? 0}</span>
+            <Input
+              allowClear
+              prefix={<SearchOutlined />}
+              placeholder={t('table.name')}
+              value={keyword}
+              onChange={(e) => { setKeyword(e.target.value); setPage(1); }}
+              style={{ width: 220 }}
+            />
           </div>
           <DataTable tableId="perf-retrieval-results" columns={resultColumns}
-            dataSource={results as (PerfResult & Record<string, unknown>)[]}
-            loading={false} rowKey="id" showPagination={false} size="small" scroll={{ x: 1000 }} />
+            dataSource={(data?.items ?? []) as PerfFileRow[]}
+            loading={isLoading} rowKey="id"
+            total={data?.total ?? 0}
+            pageSize={pageSize}
+            currentPage={page}
+            onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
+            onRefresh={() => void refetch()}
+            size="small" scroll={{ x: 1000 }} />
         </div>
       </div>
 

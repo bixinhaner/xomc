@@ -1,16 +1,19 @@
 import { useState, useMemo } from 'react';
-import { Button, Tabs, Tree, Tag, Space, message, Modal, Form, Checkbox, DatePicker, Select } from 'antd';
+import { Button, Tabs, Tree, Tag, Space, Input, message, Modal, Form, Checkbox, DatePicker, Select } from 'antd';
 import {
   DownloadOutlined,
+  DeleteOutlined,
   MinusCircleOutlined,
   ClearOutlined,
   SyncOutlined,
-  ReloadOutlined,
+  SearchOutlined,
 } from '@ant-design/icons';
 import type { DataNode } from 'antd/es/tree';
 import TreeListPageLayout from '@/components/Layout/TreeListPageLayout';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
+import { useFileList, useDownloadFile, useDeleteFiles } from '@core/hooks/api/useFiles';
+import type { ManagedFile, FileStatus } from '@core/mock/data/fileManagement';
 import { useT } from '@/hooks/useT';
 
 const { RangePicker } = DatePicker;
@@ -21,18 +24,6 @@ interface NEItem {
   sn: string;
   neType: string;
   region: string;
-}
-
-interface LogRetrievalResult {
-  id: string;
-  neName: string;
-  sn: string;
-  fileName: string;
-  fileSize: number;
-  logType: string;
-  status: 'success' | 'failed' | 'retrieving' | 'pending';
-  failReason?: string;
-  retrievalTime: string;
 }
 
 const treeData: DataNode[] = [
@@ -55,16 +46,9 @@ const treeTabs = [
   { key: 'group', label: '按分组', treeData: [{ key: 'grp-1', title: '默认分组' }] },
 ];
 
-const mockNEs: NEItem[] = [
+const initialNEs: NEItem[] = [
   { id: 'ne-001', neName: '北京-eNB-0001', sn: 'ENB00001', neType: 'eNB', region: '北京' },
   { id: 'ne-002', neName: '北京-eNB-0002', sn: 'ENB00002', neType: 'eNB', region: '北京' },
-  { id: 'ne-003', neName: '上海-gNB-0001', sn: 'GNB00001', neType: 'gNB', region: '上海' },
-];
-
-const mockResults: LogRetrievalResult[] = [
-  { id: 'lr-001', neName: '北京-eNB-0001', sn: 'ENB00001', fileName: 'ENB00001_runtime_20240601.log', fileSize: 1024 * 1024 * 12, logType: 'runtime', status: 'success', retrievalTime: '2024-06-01T08:00:00.000Z' },
-  { id: 'lr-002', neName: '北京-eNB-0001', sn: 'ENB00001', fileName: 'ENB00001_alarm_20240601.log', fileSize: 1024 * 512, logType: 'alarm', status: 'success', retrievalTime: '2024-06-01T08:01:00.000Z' },
-  { id: 'lr-003', neName: '北京-eNB-0002', sn: 'ENB00002', fileName: 'ENB00002_runtime_20240601.log', fileSize: 0, logType: 'runtime', status: 'failed', failReason: '设备离线', retrievalTime: '2024-06-01T08:02:00.000Z' },
 ];
 
 function formatFileSize(bytes: number): string {
@@ -72,14 +56,42 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / 1024).toFixed(2)} KB`;
 }
 
+const PAGE_SIZE = 20;
+
+const statusColorMap: Record<FileStatus, string> = {
+  available: 'green', uploading: 'blue', processing: 'processing', expired: 'red', deleted: 'default',
+};
+const statusLabelKeyMap: Record<FileStatus, string> = {
+  available: 'status.success', uploading: 'status.running', processing: 'status.running', expired: 'status.failed', deleted: 'status.disabled',
+};
+
+type LogFileRow = ManagedFile & Record<string, unknown>;
+
+// 日志文件获取结果 = 已采集的设备日志文件库，真实接口 GET /files?file_type=log
 export default function LogRetrieval() {
   const t = useT();
   const [activeTreeTab, setActiveTreeTab] = useState('type');
-  const [selectedNEs, setSelectedNEs] = useState<NEItem[]>(mockNEs.slice(0, 2));
-  const [results, setResults] = useState<LogRetrievalResult[]>(mockResults);
+  const [selectedNEs, setSelectedNEs] = useState<NEItem[]>(initialNEs);
   const [retrieveVisible, setRetrieveVisible] = useState(false);
   const [form] = Form.useForm();
   const [retrieving, setRetrieving] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE);
+  const [keyword, setKeyword] = useState('');
+
+  const params = useMemo(
+    () => ({
+      fileType: 'log' as const,
+      page,
+      pageSize,
+      ...(keyword.trim() ? { keyword: keyword.trim() } : {}),
+    }),
+    [page, pageSize, keyword]
+  );
+
+  const { data, isLoading, refetch } = useFileList(params);
+  const download = useDownloadFile();
+  const deleteFiles = useDeleteFiles();
 
   const neColumns: DataTableColumn<NEItem & Record<string, unknown>>[] = useMemo(() => [
     { key: 'neName', title: t('device.name'), dataIndex: 'neName', ellipsis: true },
@@ -100,84 +112,70 @@ export default function LogRetrieval() {
     },
   ], [t]);
 
-  const logTypeColorMap: Record<string, string> = {
-    runtime: 'blue', alarm: 'orange', debug: 'default', security: 'purple',
-  };
-  const logTypeLabelMap: Record<string, string> = {
-    runtime: 'runtime', alarm: 'alarm', debug: 'debug', security: 'security',
-  };
-
-  const resultColumns: DataTableColumn<LogRetrievalResult & Record<string, unknown>>[] = useMemo(() => [
-    { key: 'neName', title: t('device.name'), dataIndex: 'neName', ellipsis: true },
-    { key: 'sn', title: t('device.sn'), dataIndex: 'sn', width: 120, mono: true },
+  const resultColumns: DataTableColumn<LogFileRow>[] = useMemo(() => [
     { key: 'fileName', title: t('table.name'), dataIndex: 'fileName', ellipsis: true },
+    { key: 'deviceSn', title: t('device.sn'), dataIndex: 'deviceSn', width: 140, mono: true, render: (val) => (val ? String(val) : '—') },
     { key: 'fileSize', title: t('table.description'), dataIndex: 'fileSize', width: 100, render: (val) => formatFileSize(Number(val)) },
     {
-      key: 'logType', title: t('table.type'), dataIndex: 'logType', width: 100,
-      render: (val) => <Tag color={logTypeColorMap[String(val)] ?? 'default'}>{logTypeLabelMap[String(val)] ?? String(val)}</Tag>,
-    },
-    {
       key: 'status', title: t('table.status'), dataIndex: 'status', width: 90,
-      render: (val) => {
-        const m: Record<string, [string, string]> = { success: ['green', t('status.success')], failed: ['red', t('status.failed')], retrieving: ['processing', t('status.running')], pending: ['default', t('status.pending')] };
-        const [color, label] = m[String(val)] ?? ['default', String(val)];
-        return <Tag color={color}>{label}</Tag>;
-      },
+      render: (val) => <Tag color={statusColorMap[val as FileStatus] ?? 'default'}>{t(statusLabelKeyMap[val as FileStatus] ?? 'status.pending')}</Tag>,
     },
+    { key: 'uploader', title: t('table.operator'), dataIndex: 'uploader', width: 100, render: (val) => (val ? String(val) : '—') },
+    { key: 'uploadTime', title: t('table.time'), dataIndex: 'uploadTime', width: 160, render: (val) => new Date(String(val)).toLocaleString('zh-CN') },
     {
-      key: 'failReason', title: t('table.result'), dataIndex: 'failReason', width: 120,
-      render: (val) => val ? <span style={{ color: '#ff4d4f', fontSize: 12 }}>{String(val)}</span> : '—',
-    },
-    { key: 'retrievalTime', title: t('table.time'), dataIndex: 'retrievalTime', width: 160, render: (val) => new Date(String(val)).toLocaleString('zh-CN') },
-    {
-      key: 'actions', title: t('table.operation'), dataIndex: 'id', width: 80, fixed: 'right',
+      key: 'actions', title: t('table.operation'), dataIndex: 'id', width: 120, fixed: 'right',
       render: (_, record) => {
-        const r = record as LogRetrievalResult;
-        if (r.status === 'success') return <Button type="link" size="small" icon={<DownloadOutlined />}>{t('common.download')}</Button>;
-        if (r.status === 'failed') return <Button type="link" size="small" icon={<ReloadOutlined />}>{t('common.refresh')}</Button>;
-        return null;
+        const file = record as ManagedFile;
+        return (
+          <Space size={4}>
+            <Button
+              type="link"
+              size="small"
+              icon={<DownloadOutlined />}
+              disabled={file.status !== 'available' || download.isPending}
+              onClick={() => download.mutate(file.id)}
+            >
+              {t('common.download')}
+            </Button>
+            <Button
+              type="link"
+              size="small"
+              danger
+              icon={<DeleteOutlined />}
+              onClick={() => deleteFiles.mutate([file.id], { onSuccess: () => void message.success(t('common.deleteSuccess')) })}
+            >
+              {t('common.delete')}
+            </Button>
+          </Space>
+        );
       },
     },
-  ], [t]);
+  ], [t, download, deleteFiles]);
 
   const handleRetrieve = () => {
-    form.validateFields().then((vals) => {
-      const logTypes = vals.logTypes as string[];
+    form.validateFields().then(() => {
       setRetrieving(true);
       setRetrieveVisible(false);
-      setTimeout(() => {
-        const newResults = selectedNEs.flatMap((ne) =>
-          logTypes.map((lt) => ({
-            id: `lr-${Date.now()}-${ne.id}-${lt}`,
-            neName: ne.neName,
-            sn: ne.sn,
-            fileName: `${ne.sn}_${lt}_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.log`,
-            fileSize: Math.floor(Math.random() * 1024 * 1024 * 20) + 1024 * 100,
-            logType: lt,
-            status: (Math.random() > 0.15 ? 'success' : 'failed') as LogRetrievalResult['status'],
-            failReason: Math.random() > 0.85 ? '设备离线' : undefined,
-            retrievalTime: new Date().toISOString(),
-          }))
-        );
-        setResults((prev) => [...newResults, ...prev]);
+      // 触发拉取后刷新真实日志文件列表
+      void refetch().finally(() => {
         setRetrieving(false);
         void message.success(t('status.success'));
         form.resetFields();
-      }, 1500);
+      });
     });
   };
 
-  const currentTreeData = treeTabs.find((t) => t.key === activeTreeTab)?.treeData ?? [];
+  const currentTreeData = treeTabs.find((tab) => tab.key === activeTreeTab)?.treeData ?? [];
 
   const treePanel = (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <Tabs size="small" activeKey={activeTreeTab} onChange={setActiveTreeTab}
-        items={treeTabs.map((t) => ({ key: t.key, label: t.label }))}
+        items={treeTabs.map((tab) => ({ key: tab.key, label: tab.label }))}
         style={{ padding: '8px 8px 0' }}
       />
       <div style={{ flex: 1, overflow: 'auto', padding: 8 }}>
         <Tree treeData={currentTreeData} defaultExpandAll checkable
-          onSelect={() => setSelectedNEs(mockNEs.slice(0, 2))} />
+          onSelect={() => setSelectedNEs(initialNEs)} />
       </div>
     </div>
   );
@@ -215,17 +213,29 @@ export default function LogRetrieval() {
             />
           </div>
         </div>
-        <div style={{ flex: 1, overflow: 'auto' }}>
-          <div style={{ padding: '8px 12px', background: '#fafafa', borderBottom: '1px solid #f0f0f0' }}>
-            <span style={{ fontWeight: 500 }}>{t('table.result')}: {results.length}</span>
+        <div style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ padding: '8px 12px', background: '#fafafa', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+            <span style={{ fontWeight: 500 }}>{t('table.result')}: {data?.total ?? 0}</span>
+            <Input
+              allowClear
+              prefix={<SearchOutlined />}
+              placeholder={t('table.name')}
+              value={keyword}
+              onChange={(e) => { setKeyword(e.target.value); setPage(1); }}
+              style={{ width: 220 }}
+            />
           </div>
           <DataTable
             tableId="log-retrieval-results"
             columns={resultColumns}
-            dataSource={results as (LogRetrievalResult & Record<string, unknown>)[]}
-            loading={false}
+            dataSource={(data?.items ?? []) as LogFileRow[]}
+            loading={isLoading}
             rowKey="id"
-            showPagination={false}
+            total={data?.total ?? 0}
+            pageSize={pageSize}
+            currentPage={page}
+            onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
+            onRefresh={() => void refetch()}
             size="small"
             scroll={{ x: 1000 }}
           />
