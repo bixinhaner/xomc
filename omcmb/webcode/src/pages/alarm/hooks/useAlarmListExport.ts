@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { Key } from 'react';
 import type { MessageInstance } from 'antd/es/message/interface';
 import type { Alarm, AlarmFilter } from '@core/types/alarm';
+import type { TranslateFn } from '@/hooks/useT';
 import type { AlarmExportFieldKey } from '../utils/alarmExportFields';
 
 interface AlarmScopedExportParams {
@@ -19,7 +20,7 @@ interface UseAlarmListExportOptions {
   fetchDeviceSnsByGroups: (groupIds: string[]) => Promise<Set<string>>;
   downloadAlarmCsv: (items: Alarm[], fieldKeys: AlarmExportFieldKey[]) => void;
   message: MessageInstance;
-  t: (id: string, values?: Record<string, unknown>) => string;
+  t: TranslateFn;
 }
 
 export function useAlarmListExport({

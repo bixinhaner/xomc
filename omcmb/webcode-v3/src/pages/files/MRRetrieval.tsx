@@ -165,7 +165,7 @@ export default function MRRetrieval() {
                           停止
                         </NeonButton>
                       ) : null}
-                      <NeonButton icon={<ChevronRight />} onClick={() => navigate(`/files/mr-retrieval/${t.taskId}`)}>
+                      <NeonButton icon={<ChevronRight />} onClick={() => navigate(`/file/mr-retrieval/${t.taskId}`)}>
                         详情
                       </NeonButton>
                     </div>

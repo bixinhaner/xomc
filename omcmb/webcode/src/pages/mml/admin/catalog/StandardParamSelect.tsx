@@ -51,7 +51,7 @@ export default function StandardParamSelect({
 }: StandardParamSelectProps) {
   const t = useT();
   const [search, setSearch] = useState('');
-  const debouncedSearch = useDebounce(search, 300);
+  const debouncedSearch = useDebounce(search, { wait: 300 });
 
   const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } =
     useStandardParamsInfiniteList({

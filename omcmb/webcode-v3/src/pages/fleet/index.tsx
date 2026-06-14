@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Search, RefreshCcw, Power, Loader2 } from 'lucide-react'
 
 import { PageShell } from '@/components/shell/PageShell'
@@ -15,6 +16,7 @@ const STATUS_COLOR: Record<string, string> = {
 }
 
 export function FleetPage() {
+  const navigate = useNavigate()
   const [page, setPage] = useState(1)
   const pageSize = 20
   const [keyword, setKeyword] = useState('')
@@ -164,7 +166,11 @@ export function FleetPage() {
 
               {/* 动作 */}
               <div className="flex items-center justify-end gap-2 opacity-60 transition-opacity group-hover:opacity-100">
-                <NeonButton tone="cyan" className="!py-1 !px-2">
+                <NeonButton
+                  tone="cyan"
+                  className="!py-1 !px-2"
+                  onClick={() => navigate(`/fleet/detail/${d.sn}`)}
+                >
                   DETAIL
                 </NeonButton>
                 <NeonButton tone="danger" icon={<Power />} className="!py-1 !px-2">

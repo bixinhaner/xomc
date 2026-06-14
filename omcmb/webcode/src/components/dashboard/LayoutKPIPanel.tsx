@@ -44,14 +44,14 @@ function buildSeries(
   xData: string[],
   todayLabel: string,
   yesterdayLabel: string,
-): { series: Array<{ name: string; data: number[]; color: string }>; currentValue: number | null } {
+): { series: Array<{ name: string; data: (number | null)[]; color: string }>; currentValue: number | null } {
   const config = getKPIConfigByKey(metricKey);
   const color = config?.color ?? '#1677FF';
   const conversion = config?.unitConversion ?? 1;
   const comparison = trendData?.[metricKey];
 
-  const todayValues = new Array<number>(xData.length).fill(null) as number[];
-  const yesterdayValues = new Array<number>(xData.length).fill(null) as number[];
+  const todayValues = new Array<number | null>(xData.length).fill(null);
+  const yesterdayValues = new Array<number | null>(xData.length).fill(null);
 
   if (comparison) {
     comparison.current.forEach((point) => {

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import type React from 'react';
 import { Card, Button, Tag, Space, Typography, message, Descriptions } from 'antd';
 import { ReloadOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { useIntl } from 'react-intl';
@@ -26,7 +27,7 @@ const { Text } = Typography;
  *
  * 鉴权:仅 super_admin 可见(后端 superAdminGroup 限制)。
  */
-export default function DictLoaderPage(): JSX.Element {
+export default function DictLoaderPage(): React.JSX.Element {
   const intl = useIntl();
   const lang: 'zh-CN' | 'en-US' = intl.locale === 'en-US' ? 'en-US' : 'zh-CN';
 

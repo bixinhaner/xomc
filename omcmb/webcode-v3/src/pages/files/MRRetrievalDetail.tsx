@@ -74,7 +74,7 @@ export default function MRRetrievalDetail() {
       isFetching={isFetching || progress.isFetching}
       toolbar={
         <>
-          <NeonButton icon={<ArrowLeft />} onClick={() => navigate('/files/mr-retrieval')}>
+          <NeonButton icon={<ArrowLeft />} onClick={() => navigate('/file/mr-retrieval')}>
             返回列表
           </NeonButton>
           <NeonButton

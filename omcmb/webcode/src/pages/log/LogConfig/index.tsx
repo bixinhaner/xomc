@@ -98,7 +98,10 @@ export default function LogConfig() {
               style={{ width: '100%' }}
               onChange={(val) => {
                 if (val !== null) {
-                  setConfigs((prev) => prev.map((c) => c.id === record.id ? { ...c, editValue: val } : c));
+                  const next = Number(val);
+                  if (!Number.isNaN(next)) {
+                    setConfigs((prev) => prev.map((c) => c.id === record.id ? { ...c, editValue: next } : c));
+                  }
                 }
               }}
             />

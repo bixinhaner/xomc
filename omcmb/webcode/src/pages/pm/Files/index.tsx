@@ -112,7 +112,7 @@ export default function PMFilesPage({ embedded }: Props) {
         dataIndex: 'siteName',
         width: 180,
         ellipsis: true,
-        render: (v) => v || '—',
+        render: (v) => (v ? String(v) : '—'),
       },
       {
         key: 'productClass',
@@ -120,7 +120,7 @@ export default function PMFilesPage({ embedded }: Props) {
         dataIndex: 'productClass',
         width: 160,
         ellipsis: true,
-        render: (v) => v || '—',
+        render: (v) => (v ? String(v) : '—'),
       },
       {
         // 测量周期目前是固定值：CPE 默认 PM 上传间隔 900s = 15 分钟（worker

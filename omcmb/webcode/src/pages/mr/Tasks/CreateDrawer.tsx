@@ -84,6 +84,9 @@ export default function CreateDrawer({ open, onClose, onCreated }: CreateDrawerP
     const n = parseInt(reportPeriodValue ?? '15', 10);
     return n === 30 || n === 60 ? n : 15;
   }, [reportPeriodValue]);
+  // antd v6 的 DatePicker.minuteStep 取值范围是 1..59，不接受 60。
+  // 60 分钟周期下用 30 作为下拉步进（实际可选分钟仍由 disabledTime 限制为 :00），其余沿用本身的步进。
+  const pickerMinuteStep: 15 | 30 = minuteStep === 60 ? 30 : (minuteStep as 15 | 30);
   const disabledTime = useMemo(
     () => () => ({
       disabledMinutes: () =>
@@ -337,7 +340,7 @@ export default function CreateDrawer({ open, onClose, onCreated }: CreateDrawerP
           rules={[{ required: true }]}
         >
           <DatePicker
-            showTime={{ format: 'HH:mm', minuteStep: minuteStep as 15 | 30 | 60 }}
+            showTime={{ format: 'HH:mm', minuteStep: pickerMinuteStep }}
             format="YYYY-MM-DD HH:mm"
             disabledTime={disabledTime}
             style={{ width: '100%' }}
@@ -358,7 +361,7 @@ export default function CreateDrawer({ open, onClose, onCreated }: CreateDrawerP
                 rules={[{ required: true }]}
               >
                 <DatePicker
-                  showTime={{ format: 'HH:mm', minuteStep: minuteStep as 15 | 30 | 60 }}
+                  showTime={{ format: 'HH:mm', minuteStep: pickerMinuteStep }}
                   format="YYYY-MM-DD HH:mm"
                   disabledTime={disabledTime}
                   style={{ width: '100%' }}

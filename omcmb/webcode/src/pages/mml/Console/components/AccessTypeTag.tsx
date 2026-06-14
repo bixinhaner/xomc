@@ -19,6 +19,7 @@
  * 使用方：SubFieldChecklist（LST）/ SubFieldInputList（MOD / ADD）。
  */
 
+import type React from 'react';
 import { Tag, Tooltip } from 'antd';
 import { useT } from '@/hooks/useT';
 
@@ -35,7 +36,7 @@ export default function AccessTypeTag({
   valueType,
   constraintText,
   tr069Path,
-}: AccessTypeTagProps): JSX.Element {
+}: AccessTypeTagProps): React.JSX.Element {
   const t = useT();
   const isReadOnly = accessType === 'READ_ONLY';
 

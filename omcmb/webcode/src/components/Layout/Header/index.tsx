@@ -115,7 +115,7 @@ export default function Header() {
             }
           }}
           content={<NotificationCenter onClose={() => setNotifOpen(false)} />}
-          styles={{ body: { padding: 0 } }}
+          styles={{ content: { padding: 0 } }}
         >
           <button className={styles.headerAction} title={t('header.notification')} type="button">
             <Badge count={unreadCount} size="small" overflowCount={99}>

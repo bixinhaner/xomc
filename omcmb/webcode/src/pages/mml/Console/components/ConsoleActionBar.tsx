@@ -16,6 +16,7 @@
  *   - 整体放一行: [Tag] 摘要 · 设备数  |  执行模式 ◉/○  |  [全部取消] [执行 ▸]
  */
 
+import type React from 'react';
 import { Button, Radio, Space, Tooltip } from 'antd';
 import { useT } from '@/hooks/useT';
 import { useThemeToken } from '@/hooks/useThemeToken';
@@ -69,7 +70,7 @@ export function ConsoleActionBar({
   onExecute,
   executionMode,
   onExecutionModeChange,
-}: ConsoleActionBarProps): JSX.Element {
+}: ConsoleActionBarProps): React.JSX.Element {
   const t = useT();
   const token = useThemeToken();
 

@@ -10,6 +10,7 @@
  */
 
 import type { InstanceRange } from '@core/types/mmlConsole';
+import type { TranslateFn } from '@/hooks/useT';
 
 /**
  * 校验单层 {i} 输入是否合规。
@@ -97,7 +98,7 @@ export function findRangeByLayer(
  */
 export function buildRangeHint(
   range: InstanceRange | undefined,
-  t: (key: string, values?: Record<string, unknown>) => string,
+  t: TranslateFn,
 ): string | undefined {
   if (!range) return undefined;
 

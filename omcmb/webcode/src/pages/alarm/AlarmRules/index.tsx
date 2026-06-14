@@ -12,7 +12,7 @@ import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useAlarmRules, useCreateAlarmRule, useDeleteAlarmRules, useUpdateAlarmRule } from '@core/hooks/api/useAlarms';
-import { useT } from '@/hooks/useT';
+import { useT, type TranslateFn } from '@/hooks/useT';
 import type { AlarmRule, AlarmRuleCondition, AlarmRuleAction } from '@core/types/alarm';
 import type { PageRequest } from '@core/types/pagination';
 import AlarmRuleDrawer, { type AlarmRuleFormData } from './AlarmRuleDrawer';
@@ -35,7 +35,7 @@ type AlarmRuleListParams = PageRequest & {
   enabled?: string;
 };
 
-function getRuleFilterDimensions(rule: AlarmRule, t: (key: string, values?: Record<string, unknown>) => string): string[] {
+function getRuleFilterDimensions(rule: AlarmRule, t: TranslateFn): string[] {
   const dimensions: string[] = [];
 
   if (rule.conditions.some((condition) => condition.field === 'alarm_identifier')) {

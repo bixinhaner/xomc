@@ -1,4 +1,5 @@
 import type { Alarm, DealState, EventType } from '@core/types/alarm';
+import type { TranslateFn } from '@/hooks/useT';
 import { formatBaseStationTypeLabel } from './baseStationType';
 
 export type AlarmExportFieldKey =
@@ -62,7 +63,7 @@ function formatAdditionalInfo(additionalInfo?: Record<string, string>): string {
 }
 
 export function buildAlarmExportFieldDefinitions(
-  t: (id: string, values?: Record<string, unknown>) => string,
+  t: TranslateFn,
 ): AlarmExportFieldDefinition[] {
   return [
     {

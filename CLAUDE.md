@@ -199,7 +199,12 @@ API / Hook / Store / Types / i18n / Mock 全在 `omcmb/frontend-core/`；页面 
 
 ### 8.3 React/TypeScript 前端规范
 
-代码归属：API/Hook/Store/Types/i18n/Mock → `frontend-core/`，页面/组件/路由 → `webcode*/` · 禁 `any`（后端响应 `BackendXxx` → `mapBackendXxx` → `Xxx`）· 跨包引用走 `@core/...`，禁相对路径越级 · 用户可见文本走 `react-intl` · （多皮肤候选 v2/v3 已于 2026-06-10 移除）。
+代码归属：API/Hook/Store/Types/i18n/Mock → `frontend-core/`，页面/组件/路由 → `webcode*/` · 禁 `any`（后端响应 `BackendXxx` → `mapBackendXxx` → `Xxx`）· 跨包引用走 `@core/...`，禁相对路径越级 · 用户可见文本走 `react-intl`。
+
+> 🔒 **前端三皮肤铁律（不可绕过）**：前端 = **单底层 `frontend-core` + 三套皮肤** `webcode`(v1 主皮肤 Antd5) / `webcode-v2`(shadcn/Tailwind) / `webcode-v3`(STARFORGE HUD)。**任何涉及前端的 bug 修复或需求，必须在 v1/v2/v3 三套皮肤同时解决与实现，缺一不可。**
+> - **优先改 `frontend-core/`**：API/Hook/Store/Types/i18n/Mock 是三皮肤共享层——业务逻辑/数据契约的改动写在这里一处生效，三皮肤同时受益（这是铁律最省力的落点）。
+> - **页面/组件层**：若需求落到页面/交互，三套 `webcode*/` 各自的页面都要补齐到同等业务深度（路由数据驱动，见 [project_frontend_three_skins_restored]）。**不允许只改 v1 不管 v2/v3**，反之亦然。
+> - **验收门**：三套各自 `npm run typecheck` 必须真实通过（非空跑）+ 三套路由各自浏览器冒烟无 `未找到/加载失败/Error/pageerror`，才算该前端任务完成（见 §10）。
 
 ---
 
@@ -225,7 +230,7 @@ API / Hook / Store / Types / i18n / Mock 全在 `omcmb/frontend-core/`；页面 
 
 **每次提交必须**：
 - [ ] 后端 `go build ./...` 编译通过、`go test ./...` 测试通过
-- [ ] 前端（如涉及）`cd omcmb/webcode && npm run typecheck` 通过
+- [ ] 前端（如涉及）`cd omcmb && npm run typecheck` 通过 —— **三皮肤 v1/v2/v3 全部真实通过**（webcode 用 `-p tsconfig.app.json` 真校验，非 `files:[]` 空跑；前端 bug/需求三皮肤同时实现，见 §8.3 铁律）
 - [ ] 无编译器 / linter 警告
 - [ ] 新功能含成功 + 失败两条路径的测试
 - [ ] 提交消息说清"为什么"

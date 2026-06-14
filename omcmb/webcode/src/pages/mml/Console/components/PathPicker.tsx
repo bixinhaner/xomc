@@ -10,6 +10,7 @@
  */
 
 import { useEffect, useMemo, useState, type UIEventHandler } from 'react';
+import type React from 'react';
 import { Empty, Select, Spin, Tag, Tooltip, Typography } from 'antd';
 import {
   useStandardParamsInfiniteList,
@@ -37,7 +38,7 @@ export default function PathPicker({
   value,
   onChange,
   disabled,
-}: PathPickerProps): JSX.Element {
+}: PathPickerProps): React.JSX.Element {
   const t = useT();
 
   // 受控搜索词 + 300ms debounce，降低后端 RTT。

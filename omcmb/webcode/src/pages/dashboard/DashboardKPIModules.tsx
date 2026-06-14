@@ -6,7 +6,7 @@
  * 首页只读不可拖。
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Row, Col } from 'antd';
 import type { TechnologyType } from './kpi-config';
 import { useKPILayout } from '@core/hooks/api/useDashboard';

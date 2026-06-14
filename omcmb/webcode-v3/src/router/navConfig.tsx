@@ -1,4 +1,5 @@
 import { lazy, Suspense, type ComponentType, type ReactNode } from 'react'
+import { Navigate } from 'react-router-dom'
 import {
   AlertTriangle, ArrowLeftRight, Bell, Boxes, Cpu, FileBarChart, FileStack, FolderOpen, Globe, KeySquare, LayoutDashboard, LineChart, Package, Radio, ScrollText, Settings, Sliders, Terminal, Wrench,
 } from 'lucide-react'
@@ -26,6 +27,7 @@ const C_pages_alarms_AlarmRules = lazy(() => import('@/pages/alarms/AlarmRules')
 const C_pages_alarms_AlarmStatistics = lazy(() => import('@/pages/alarms/AlarmStatistics'))
 const C_pages_alarms_AlarmSync = lazy(() => import('@/pages/alarms/AlarmSync'))
 const C_pages_alarms_CustomAlarmStats = lazy(() => import('@/pages/alarms/CustomAlarmStats'))
+const C_pages_alarms_HistoricalAlarms = lazy(() => import('@/pages/alarms/HistoricalAlarms'))
 const C_pages_backup_ConfigSnapshots = lazy(() => import('@/pages/backup/ConfigSnapshots'))
 const C_pages_backup_Ftp = lazy(() => import('@/pages/backup/Ftp'))
 const C_pages_backup_Policy = lazy(() => import('@/pages/backup/Policy'))
@@ -208,6 +210,7 @@ export const MODULES: ModuleDef[] = [
   { key: 'alarms', label: 'ALARM 告警', icon: <AlertTriangle />, section: '监控', routes: [
     { path: '/alarms', element: s(AlarmsPage), label: "ALARM 告警" },
     { path: '/alarms/statistics', element: s(C_pages_alarms_AlarmStatistics), label: "告警统计" },
+    { path: '/alarms/history', element: s(C_pages_alarms_HistoricalAlarms), label: "历史告警" },
     { path: '/alarms/rules', element: s(C_pages_alarms_AlarmRules), label: "告警规则" },
     { path: '/alarms/rules/:id', element: s(C_pages_alarms_AlarmRuleDetail), label: "规则详情", hidden: true },
     { path: '/alarms/sync', element: s(C_pages_alarms_AlarmSync), label: "告警同步" },
@@ -311,6 +314,9 @@ export const MODULES: ModuleDef[] = [
     { path: 'performance/pm-adhoc', element: s(C_pages_performance_PmAdhoc), label: "自定义聚合" },
     { path: 'performance/pm-adhoc/new', element: s(C_pages_performance_PmAdhocWizard), label: "新建聚合任务", hidden: true },
     { path: 'performance/pm-adhoc/:id/edit', element: s(C_pages_performance_PmAdhocWizard), label: "编辑聚合任务", hidden: true },
+    // 兼容重定向（对齐 v1 routes.tsx：旧 pm-dashboard 路径 → /performance）
+    { path: 'performance/pm-dashboard', element: <Navigate to="/performance" replace />, label: "PM 看板（重定向）", hidden: true },
+    { path: 'performance/pm-dashboard/:id', element: <Navigate to="/performance" replace />, label: "PM 看板（重定向）", hidden: true },
   ] },
   { key: 'mr', label: 'MR 测量', icon: <Radio />, section: '数据', routes: [
     { path: '/mr', element: s(MRPage), label: "MR 测量" },

@@ -15,6 +15,7 @@
  */
 
 import { useMemo } from 'react';
+import type React from 'react';
 import { Button, Select, Space, Spin, Tooltip } from 'antd';
 import { DeleteOutlined, ReloadOutlined } from '@ant-design/icons';
 
@@ -32,7 +33,7 @@ export interface InstancePickerProps {
 // effectiveIndices / parseTagValues 已拆到同级 ./instanceSelection.ts
 // （react-refresh/only-export-components：组件文件只导出组件）。
 
-export default function InstancePicker({ statement }: InstancePickerProps): JSX.Element {
+export default function InstancePicker({ statement }: InstancePickerProps): React.JSX.Element {
   const t = useT();
   const setRmvIndices = useMmlConsoleStore((s) => s.setRmvIndices);
   const selectedDeviceSns = useMmlConsoleStore((s) => s.selectedDeviceSns);

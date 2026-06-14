@@ -21,7 +21,6 @@ export interface KPIDataPoint {
 export interface KPIPanelDataResult {
   today?: KPIDataPoint[];
   yesterday?: KPIDataPoint[];
-  isLoading: boolean;
 }
 
 /**
@@ -121,7 +120,7 @@ export function useKPIPanelData(
   timeRangeSelection: TimeRangeOption[],
   viewMode: ViewMode,
   enabled = true
-): KPIPanelDataResult {
+): { data: KPIPanelDataResult; isLoading: boolean } {
   // 计算查询参数
   const queries = useMemo(() => {
     if (!enabled || !kpiName) {
@@ -166,9 +165,7 @@ export function useKPIPanelData(
 
   // 组合结果
   const data = useMemo(() => {
-    const result: KPIPanelDataResult = {
-      isLoading: false,
-    };
+    const result: KPIPanelDataResult = {};
 
     let hasToday = false;
     let hasYesterday = false;
@@ -201,10 +198,10 @@ export function useKPIPanelData(
       result.yesterday = [];
     }
 
-    result.isLoading = results.some(r => r.isLoading);
-
     return result;
   }, [results, queries, kpiName, timeRangeSelection]);
 
-  return { data, isLoading: data.isLoading };
+  const isLoading = results.some(r => r.isLoading);
+
+  return { data, isLoading };
 }

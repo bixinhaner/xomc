@@ -99,7 +99,7 @@ export function useReactQueryMonitor(options?: {
    */
   const getQueryInfo = (queryKey: unknown[]) => {
     const cache = queryClient.getQueryCache();
-    const query = cache.find(queryKey);
+    const query = cache.find({ queryKey });
 
     if (!query) {
       return null;

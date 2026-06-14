@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Activity, Database, Gauge, Layers, LineChart, Loader2, Play, RefreshCcw, Search } from 'lucide-react'
 
-import { PageShell } from '@/components/shell/PageShell'
 import { GlassPanel } from '@/components/ui/GlassPanel'
 import { NeonButton } from '@/components/ui/NeonButton'
 import { StatusBadge } from '@/components/ui/StatusBadge'

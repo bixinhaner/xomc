@@ -12,9 +12,11 @@
 // ============================================================================
 
 /**
- * 设备状态统计
+ * 设备状态统计（Dashboard 概览卡片用）。
+ * 注：与 types/device.ts 的 DeviceStats（{ counts: Record<string, number> }）形状不同、
+ * 用途不同，故用 DashboardDeviceStats 命名避免 types barrel 重复导出歧义。
  */
-export interface DeviceStats {
+export interface DashboardDeviceStats {
   total: number;
   online: number;
   offline: number;
@@ -71,7 +73,7 @@ export interface TaskStats {
  * Dashboard 汇总数据
  */
 export interface DashboardSummary {
-  deviceCounts: DeviceStats;
+  deviceCounts: DashboardDeviceStats;
   alarmCounts: AlarmStats;
   kpiSummary: KPIOverview;
   kpiDeltas: Record<string, KPIDelta>;  // KPI趋势数据（新增）

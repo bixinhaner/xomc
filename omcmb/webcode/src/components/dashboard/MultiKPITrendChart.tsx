@@ -2,7 +2,7 @@
  * 多指标 KPI 趋势图组件 - 使用 LineChart 实现
  */
 
-import React, { useMemo } from 'react';
+import { useMemo } from 'react';
 import { Card, Button, Space, Typography, Spin, Empty } from 'antd';
 import { LoadingOutlined } from '@ant-design/icons';
 import LineChart from '@/components/Charts/LineChart';

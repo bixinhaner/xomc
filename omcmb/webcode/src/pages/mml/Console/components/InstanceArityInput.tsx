@@ -16,6 +16,7 @@
  *     由 `instance_range_meta` 派生。
  */
 
+import type React from 'react';
 import { Input, Space, Tooltip } from 'antd';
 import { useT } from '@/hooks/useT';
 import { useThemeToken } from '@/hooks/useThemeToken';
@@ -80,7 +81,7 @@ export function InstanceArityInput({
   operationType,
   instanceRangeMeta,
   disabled,
-}: InstanceArityInputProps): JSX.Element | null {
+}: InstanceArityInputProps): React.JSX.Element | null {
   const t = useT();
   const token = useThemeToken();
 

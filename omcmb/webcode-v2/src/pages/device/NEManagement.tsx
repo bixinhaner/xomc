@@ -243,7 +243,7 @@ export default function NEManagement() {
                       variant="ghost"
                       size="sm"
                       disabled={!ne.sn}
-                      onClick={() => navigate(`/device/detail/${ne.sn}`)}
+                      onClick={() => navigate(`/devices/detail/${ne.sn}`)}
                     >
                       <Eye className="size-4" /> 详情
                     </Button>

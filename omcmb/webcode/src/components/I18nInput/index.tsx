@@ -1,3 +1,4 @@
+import type React from 'react';
 import { Form, Input } from 'antd';
 import type { Rule } from 'antd/es/form';
 import { AddonInput } from '@/components/common/InputAddon';
@@ -47,7 +48,7 @@ export function I18nInput({
   rows = 2,
   placeholder,
   rules,
-}: I18nInputProps): JSX.Element {
+}: I18nInputProps): React.JSX.Element {
   const t = useT();
   const InputComp = textarea ? Input.TextArea : Input;
   const inputCommonProps = textarea ? { rows, maxLength } : { maxLength };

@@ -219,7 +219,7 @@ export default function HandoverManagement() {
                       <button
                         type="button"
                         className="font-mono text-xs text-primary hover:underline"
-                        onClick={() => navigate(`/device/detail/${d.sn}`)}
+                        onClick={() => navigate(`/devices/detail/${d.sn}`)}
                       >
                         {d.sn || '—'}
                       </button>

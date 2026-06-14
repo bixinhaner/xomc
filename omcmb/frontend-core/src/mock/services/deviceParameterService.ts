@@ -932,23 +932,17 @@ export const deviceParameterService = {
     syncStates.set(deviceId, {
       deviceId,
       status: 'syncing',
-      totalBatches: 1,
-      completedBatches: 0,
       totalParameters: 100,
-      syncedParameters: 0,
-      percentage: 0,
-      startedAt: new Date().toISOString(),
+      pendingCommands: 1,
     });
     setTimeout(() => {
       const state = syncStates.get(deviceId);
       if (state) {
         syncStates.set(deviceId, {
           ...state,
-          status: 'completed',
-          completedBatches: 1,
-          syncedParameters: 100,
-          percentage: 100,
-          completedAt: new Date().toISOString(),
+          status: 'idle',
+          pendingCommands: 0,
+          lastParamSyncAt: new Date().toISOString(),
         });
       }
     }, 1500);
@@ -960,11 +954,8 @@ export const deviceParameterService = {
       syncStates.get(deviceId) ?? {
         deviceId,
         status: 'idle',
-        totalBatches: 0,
-        completedBatches: 0,
         totalParameters: 0,
-        syncedParameters: 0,
-        percentage: 0,
+        pendingCommands: 0,
       }
     );
   },
