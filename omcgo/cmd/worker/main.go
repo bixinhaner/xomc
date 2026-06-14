@@ -382,7 +382,7 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	}
 
 	// MR Collector（worker 端保留 — 文件 I/O 类，与 PM collector 同进程更合理）
-	mrStore := mr.NewPgMRStore(w.PgPool, w.TsPool)
+	mrStore := mr.NewPgMRStore(w.TsPool) // mr_files 已迁时序库，单 TsPool
 	mrCollector := mrcollector.NewMRCollector(w.MinIO, cfg.MinIO.Buckets.MRFiles, mrStore, w.EventBus, logger)
 	// 注入 DeviceLookup：upload handler 直传路径的 mr.file.received payload 不带
 	// device_id，由 collector 按 device_sn 反查（参 internal/acs/upload publishMRFileReceivedEvent）。
@@ -396,6 +396,24 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 		logger.Warn("subscribe MR collector", zap.Error(err))
 	}
 	logger.Info("MR collector started")
+
+	// issue #321 加固「保证压到」：补偿扫描 Sweeper —— 周期性补压内联快路径遗漏的原始对象
+	// （dropped_busy / 失败 / 崩溃前未压），PM/MR 双源，直至各自 raw_compressed 置真。复用同一
+	// rawArchiver（共用总开关 + 压缩核心）。生命周期挂 archiverCtx（进程优雅关停时取消，停掉
+	// 在途扫描）。pmFileStore(TsPool) / mrStore(PgPool) 各实现 RawFileRegistry。
+	rawSweeper := rawarchive.NewSweeper(
+		rawArchiver,
+		[]rawarchive.SweepSource{
+			{Name: "pm", Bucket: cfg.MinIO.Buckets.PMFiles, Registry: pmFileStore},
+			{Name: "mr", Bucket: cfg.MinIO.Buckets.MRFiles, Registry: mrStore},
+		},
+		rawarchive.DefaultSweepInterval, rawarchive.DefaultSweepGrace,
+		rawarchive.DefaultSweepBatch, rawarchive.DefaultSweepConc,
+		rawarchive.NewSweepMetrics(w.MetricsReg),
+		logger.Named("raw-archive-sweeper"),
+	)
+	go rawSweeper.Run(archiverCtx)
+	logger.Info("raw-archive sweeper started")
 
 	// F05 MR 任务管理（scheduler / heartbeat / cleaner / completion）已迁到 app 进程，
 	// 详见 cmd/app/provider/modules.go 中的 mrtask 装配段。

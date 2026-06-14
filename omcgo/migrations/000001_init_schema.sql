@@ -4330,24 +4330,9 @@ CREATE TABLE public.mr_device_mappings (
 
 
 --
--- Name: mr_files; Type: TABLE; Schema: public; Owner: -
+-- mr_files：随「MR 也记录到时序库」迁至时序库 schema（migrations/tsdb/000001_tsdb_schema.sql），
+-- 不再建于主库。MR 文件元数据 + mr_records 时序记录同库（TsPool），与 pm_files 一致。
 --
-
-CREATE TABLE public.mr_files (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    device_id uuid NOT NULL,
-    device_sn character varying(64) NOT NULL,
-    carrier character varying(4) NOT NULL,
-    mr_type character varying(8) NOT NULL,
-    file_name character varying(256) NOT NULL,
-    file_size bigint DEFAULT 0 NOT NULL,
-    collect_time timestamp with time zone NOT NULL,
-    minio_path character varying(512) NOT NULL,
-    parsed boolean DEFAULT false NOT NULL,
-    parsed_at timestamp with time zone,
-    record_count integer DEFAULT 0 NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
-);
 
 
 --
@@ -8005,11 +7990,8 @@ ALTER TABLE ONLY public.mr_device_mappings
 
 
 --
--- Name: mr_files mr_files_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- mr_files 约束/索引随表迁至时序库 schema（见 migrations/tsdb/000001_tsdb_schema.sql）。
 --
-
-ALTER TABLE ONLY public.mr_files
-    ADD CONSTRAINT mr_files_pkey PRIMARY KEY (id);
 
 
 --
@@ -12402,24 +12384,8 @@ CREATE INDEX idx_mml_templates_scope_group ON public.mml_custom_command USING bt
 
 
 --
--- Name: idx_mr_files_carrier; Type: INDEX; Schema: public; Owner: -
+-- idx_mr_files_* 随 mr_files 表迁至时序库 schema（见 migrations/tsdb/000001_tsdb_schema.sql）。
 --
-
-CREATE INDEX idx_mr_files_carrier ON public.mr_files USING btree (carrier);
-
-
---
--- Name: idx_mr_files_device; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_mr_files_device ON public.mr_files USING btree (device_id, collect_time DESC);
-
-
---
--- Name: idx_mr_files_type; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_mr_files_type ON public.mr_files USING btree (mr_type);
 
 
 --
@@ -14033,10 +13999,8 @@ COMMENT ON INDEX public.uq_mml_custom_command_private_name_per_owner IS '用户�
 
 
 --
--- Name: uq_mr_files_sn_filename; Type: INDEX; Schema: public; Owner: -
+-- uq_mr_files_sn_filename 随 mr_files 表迁至时序库 schema（见 migrations/tsdb/000001_tsdb_schema.sql）。
 --
-
-CREATE UNIQUE INDEX uq_mr_files_sn_filename ON public.mr_files USING btree (device_sn, file_name);
 
 
 --

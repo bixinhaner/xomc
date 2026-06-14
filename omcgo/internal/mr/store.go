@@ -106,4 +106,10 @@ type MRStore interface {
 	// DeleteFilesBySN 删除该 SN 下所有 mr_files 元数据行。返回删除行数。
 	// MinIO 对象由 handler 在调用前删除（参考 backup.LicenseService.BatchDelete 模式）。
 	DeleteFilesBySN(ctx context.Context, sn string) (int64, error)
+
+	// ListUncompressed / MarkCompressed 供 rawarchive.Sweeper 补偿扫描"原始 XML 压缩回写"
+	// （issue #321 加固）：列出尚未确认压缩的对象键、标记其已压缩。MarkCompressed 也被内联
+	// 压缩成功后单键调用。
+	ListUncompressed(ctx context.Context, olderThan time.Time, limit int) ([]string, error)
+	MarkCompressed(ctx context.Context, objects []string) error
 }

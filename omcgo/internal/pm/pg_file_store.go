@@ -233,6 +233,44 @@ func (s *PgPMFileStore) DeleteFilesBySN(ctx context.Context, sn string) (int64, 
 	return tag.RowsAffected(), nil
 }
 
+// ListUncompressed 返回 raw_compressed=false 且 created_at < olderThan 的 pm_files 对应
+// MinIO 对象键（按 created_at 升序，至多 limit 条）。供 rawarchive.Sweeper 补偿扫描，命中
+// idx_pm_files_uncompressed 部分索引，稳态下待压残量接近空集。
+func (s *PgPMFileStore) ListUncompressed(ctx context.Context, olderThan time.Time, limit int) ([]string, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT minio_path FROM pm_files
+		 WHERE raw_compressed = false AND created_at < $1
+		 ORDER BY created_at
+		 LIMIT $2`, olderThan, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list uncompressed pm_files: %w", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, fmt.Errorf("scan uncompressed pm_files: %w", err)
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// MarkCompressed 把给定 MinIO 对象键对应的 pm_files 行标记为已压缩回写（raw_compressed=true）。
+// 内联压缩成功后单键调用、Sweeper 补压后批量调用，二者共用。
+func (s *PgPMFileStore) MarkCompressed(ctx context.Context, objects []string) error {
+	if len(objects) == 0 {
+		return nil
+	}
+	_, err := s.pool.Exec(ctx,
+		`UPDATE pm_files SET raw_compressed = true WHERE minio_path = ANY($1)`, objects)
+	if err != nil {
+		return fmt.Errorf("mark pm_files raw_compressed: %w", err)
+	}
+	return nil
+}
+
 func (s *PgPMFileStore) UpdateFileParsed(ctx context.Context, id uuid.UUID, counterCount int) error {
 	now := time.Now()
 	_, err := s.pool.Exec(ctx,

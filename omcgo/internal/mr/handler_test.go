@@ -96,6 +96,14 @@ func (m *mockMRStore) DeleteFilesBySN(ctx context.Context, sn string) (int64, er
 	return 0, nil
 }
 
+func (m *mockMRStore) ListUncompressed(ctx context.Context, olderThan time.Time, limit int) ([]string, error) {
+	return nil, nil
+}
+
+func (m *mockMRStore) MarkCompressed(ctx context.Context, objects []string) error {
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 
 type mockIndicatorRepo struct {

@@ -38,8 +38,9 @@ KPI/时序库物理分离落地后，对**三条流各做一次干净的 consoli
 
 OMC 现在跑**两个 PostgreSQL/TimescaleDB 实例**：
 
-- **主库**（`postgres` / PgPool，镜像 `postgres:16-alpine`）—— 业务数据（devices、RBAC、config、products、device_groups、alarm_definitions、`alarms`[当前告警]、pm_tasks、pm_summary、mr_files…）。**纯 PostgreSQL 16，无 timescaledb 扩展、无任何超表**（分离后主库不再需要）。
-- **时序库**（`postgres-tsdb` / TsPool）—— 14 张时序/PM 表（`pm_metrics`+4 rollup、`pm_group_metrics_*` 4、`pm_adhoc_aggregation_results`、`alarms_history`、`mr_records`、`trace_messages`、`pm_files`）+ 6 张「影子维度表」（`device_dim`/`device_group_member_dim`/`cell_band_dim`/`product_dim`/`device_group_dim`/`alarm_definition_dim`，由 worker `tsdbsync` 从主库同步，供本库 JOIN 替代跨库 JOIN）+ 1 个告警效率物化视图 `alarm_efficiency_metrics`。
+- **主库**（`postgres` / PgPool，镜像 `postgres:16-alpine`）—— 业务数据（devices、RBAC、config、products、device_groups、alarm_definitions、`alarms`[当前告警]、pm_tasks、pm_summary、`mr_customize_task`[MR 任务配置]…）。**纯 PostgreSQL 16，无 timescaledb 扩展、无任何超表**（分离后主库不再需要）。
+- **时序库**（`postgres-tsdb` / TsPool）—— 时序/PM 表（`pm_metrics`+4 rollup、`pm_group_metrics_*` 4、`pm_adhoc_aggregation_results`、`alarms_history`、`mr_records`、`trace_messages`、`pm_files`、`mr_files`）+ 7 张「影子维度表」（`device_dim`/`device_group_member_dim`/`cell_band_dim`/`product_dim`/`device_group_dim`/`alarm_definition_dim`/`mr_customize_task_dim`，由 worker `tsdbsync` 从主库同步，供本库 JOIN 替代跨库 JOIN）+ 1 个告警效率物化视图 `alarm_efficiency_metrics`。
+  > `mr_files` 随「MR 也记录到时序库」由主库迁来（与 `pm_files` / `mr_records` 同库）；其设备聚合「上报中」徽标改 JOIN 影子表 `mr_customize_task_dim`（`mr_customize_task` 配置本身仍留主库）。
 
 | 流 | 目录 | 版本表 | compose 服务 | DSN |
 |----|------|--------|--------------|-----|

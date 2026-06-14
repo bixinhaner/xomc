@@ -2,11 +2,27 @@ package rawarchive
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 
 	"github.com/minio/minio-go/v7"
 )
+
+// ErrObjectNotFound 表示对象在 MinIO 中已不存在（如被 retention/cleanup 删除，pm_files/
+// mr_files 行尚存的孤儿）。compress() 据此把该次结果判为终态（outcomeNotFound），让 Sweeper
+// 标记其 raw_compressed=true 移出待扫集，避免对已删对象永久重扫导致 Sweeper 在孤儿行处卡死、
+// 饿死其后真正待压的文件（"保证压到"加固）。
+var ErrObjectNotFound = errors.New("rawarchive: object not found")
+
+// isNotFound 判定 MinIO 错误是否为对象/桶不存在。
+func isNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	code := minio.ToErrorResponse(err).Code
+	return code == "NoSuchKey" || code == "NoSuchBucket"
+}
 
 // minioStore 用 *minio.Client 实现 RawStore。
 type minioStore struct {
@@ -30,6 +46,9 @@ func (s *minioStore) ReadHead(ctx context.Context, bucket, object string, n int)
 	}
 	obj, err := s.client.GetObject(ctx, bucket, object, opts)
 	if err != nil {
+		if isNotFound(err) {
+			return nil, ErrObjectNotFound
+		}
 		return nil, err
 	}
 	defer obj.Close()
@@ -39,6 +58,11 @@ func (s *minioStore) ReadHead(ctx context.Context, bucket, object string, n int)
 		return buf[:m], nil // 对象短于 n 字节
 	}
 	if rerr != nil {
+		// 对象不存在（孤儿 pm_files/mr_files 行：对象已被 retention 删，行尚存）→ 归一化为
+		// ErrObjectNotFound，让 compress 判终态、Sweeper 标记并移出待扫集（不永久重扫卡死）。
+		if isNotFound(rerr) {
+			return nil, ErrObjectNotFound
+		}
 		return nil, rerr
 	}
 	return buf[:m], nil

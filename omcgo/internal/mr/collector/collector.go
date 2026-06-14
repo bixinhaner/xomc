@@ -84,6 +84,18 @@ func (c *MRCollector) SetArchiver(a *rawarchive.Archiver) {
 	c.archiver = a
 }
 
+// markRawCompressed 把已压缩回写的 MR 原始对象在 mr_files 标记 raw_compressed=true（issue #321
+// 加固）。作为 archiver.Schedule 的 onTerminal 回调，在压缩 goroutine 内调用；nil-safe，失败只
+// warn（标记丢失最多让 Sweeper 多扫一次，幂等无害）。
+func (c *MRCollector) markRawCompressed(ctx context.Context, object string) {
+	if c.store == nil {
+		return
+	}
+	if err := c.store.MarkCompressed(ctx, []string{object}); err != nil {
+		c.logger.Warn("mark mr_files raw_compressed", zap.String("object", object), zap.Error(err))
+	}
+}
+
 // SetMRTypeSupport 注入 carrier MR-type 支持判定（可选，#17）。注入后 MRE parser
 // 的 "某运营商是否采集 MRE" 决策由 Carrier 适配器（经 CarrierRegistry）给出，
 // 取代旧的 "if carrier == cucc" 硬编码。不注入则 MREParser 走内置回退表
@@ -238,8 +250,9 @@ func (c *MRCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 	}
 
 	// issue #321：入库成功后把原始 MR XML 压缩回写 MinIO 省盘（已 gzip 则零成本跳过）。
-	// 异步有界并发，不阻塞 ack；nil-safe。
-	c.archiver.Schedule(bucket, payload.MinioPath)
+	// 异步有界并发，不阻塞 ack；nil-safe。压成功后经 onTerminal 标记 mr_files.raw_compressed=true，
+	// 使 Sweeper 待扫描集只剩内联未压成功的残量（加固：保证压到）。
+	c.archiver.Schedule(bucket, payload.MinioPath, c.markRawCompressed)
 
 	// Publish parsed event
 	parsedPayload := map[string]interface{}{
