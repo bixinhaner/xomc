@@ -3247,6 +3247,8 @@ const messages: Record<string, string> = {
   'alarm.ruleType.autoConfirm': 'Auto Confirm',
   'alarm.ruleType.autoClear': 'Auto Clear',
   'alarm.ruleType.defaultLegacy': 'Use system default flow (legacy rule)',
+  'alarm.ruleType.notifyWebhook': 'Webhook Notify',
+  'alarm.ruleType.notifyEmail': 'Email Notify',
   'alarm.ruleFilterType.alarmIdentifier': 'Alarm Identifier',
   'alarm.ruleFilterType.alarmSource': 'Alarm Source',
   'alarm.ruleFilterType.device': 'Device',

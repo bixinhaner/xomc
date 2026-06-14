@@ -21,10 +21,12 @@ const { Text } = Typography;
 
 // 执行动作配置 (后端 action 值)
 const RULE_TYPE_CONFIG: Record<string, { label: string; color: string }> = {
-  default: { label: 'alarm.ruleType.default', color: 'blue' },
+  default: { label: 'alarm.ruleType.defaultLegacy', color: 'blue' },
   ignore: { label: 'alarm.ruleType.forbidReport', color: 'red' },
   auto_acknowledge: { label: 'alarm.ruleType.autoConfirm', color: 'green' },
   auto_clear: { label: 'alarm.ruleType.autoClear', color: 'orange' },
+  notify_webhook: { label: 'alarm.ruleType.notifyWebhook', color: 'purple' },
+  notify_email: { label: 'alarm.ruleType.notifyEmail', color: 'cyan' },
 };
 
 type DrawerMode = 'add' | 'edit' | 'view';
