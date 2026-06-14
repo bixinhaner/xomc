@@ -5763,10 +5763,14 @@ ALTER TABLE public.pm_query_templates ENABLE TRIGGER ALL;
 
 ALTER TABLE public.pm_tasks DISABLE TRIGGER ALL;
 
+-- 注：3 条内置「全网」任务（0184dddd-0001-*）的 metric_paths 为空数组 '{}' = 全库聚合语义
+--   （KPI-ALL-IND 阶段1，原 seed/000006_network_aggregation_full_library_seed.sql；
+--    2026-06-14 复合基线直接焊进最终态：聚合器 network 维度 metric_path 过滤「列表非空才过滤、
+--    空则不过滤」，配合默认开着的 pm.storage.store_all_metrics，全库每个 counter 都聚成全网线落库）。
 INSERT INTO public.pm_tasks VALUES
-	('0184dddd-0001-4000-8000-000000000001', '内置-全网-LTE', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 10:16:52.409282+00', '2026-06-12 10:16:52.409282+00', 'adhoc_aggregation', 'continuous', '5 * * * *', '{K900010015,K900010016,C000060216,K900010014,K900010013,K900010006,K900010002,K900010005,K900010029,K900010027,K900010017,K900010022,K900010021,K900010026}', '{hourly}', NULL, NULL, NULL, 'network', 'lte', true, 60, NULL),
-	('0184dddd-0001-4000-8000-000000000002', '内置-全网-NR', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 10:16:52.409282+00', '2026-06-12 10:16:52.409282+00', 'adhoc_aggregation', 'continuous', '5 * * * *', '{KGNB0511,KGNB0510,KGNB0506,KGNB0505}', '{hourly}', NULL, NULL, NULL, 'network', 'nr', true, 60, NULL),
-	('0184dddd-0001-4000-8000-000000000003', '内置-全网-GSM', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 10:16:52.409282+00', '2026-06-12 10:16:52.409282+00', 'adhoc_aggregation', 'continuous', '5 * * * *', '{KGSM0102,KGSM0103,KGSM0101}', '{hourly}', NULL, NULL, NULL, 'network', 'gsm', true, 60, NULL),
+	('0184dddd-0001-4000-8000-000000000001', '内置-全网-LTE', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 10:16:52.409282+00', '2026-06-12 10:16:52.409282+00', 'adhoc_aggregation', 'continuous', '5 * * * *', '{}', '{hourly}', NULL, NULL, NULL, 'network', 'lte', true, 60, NULL),
+	('0184dddd-0001-4000-8000-000000000002', '内置-全网-NR', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 10:16:52.409282+00', '2026-06-12 10:16:52.409282+00', 'adhoc_aggregation', 'continuous', '5 * * * *', '{}', '{hourly}', NULL, NULL, NULL, 'network', 'nr', true, 60, NULL),
+	('0184dddd-0001-4000-8000-000000000003', '内置-全网-GSM', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 10:16:52.409282+00', '2026-06-12 10:16:52.409282+00', 'adhoc_aggregation', 'continuous', '5 * * * *', '{}', '{hourly}', NULL, NULL, NULL, 'network', 'gsm', true, 60, NULL),
 	('0184dddd-0002-4000-8000-000000000001', '内置-设备组-LTE', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 10:16:52.409282+00', '2026-06-12 10:16:52.409282+00', 'adhoc_aggregation', 'continuous', '5 * * * *', '{K900010015,K900010016,C000060216,K900010014,K900010013,K900010006,K900010002,K900010005,K900010029,K900010027,K900010017,K900010022,K900010021,K900010026}', '{hourly}', NULL, NULL, NULL, 'device_group', 'lte', true, 60, NULL),
 	('0184dddd-0002-4000-8000-000000000002', '内置-设备组-NR', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 10:16:52.409282+00', '2026-06-12 10:16:52.409282+00', 'adhoc_aggregation', 'continuous', '5 * * * *', '{KGNB0511,KGNB0510,KGNB0506,KGNB0505}', '{hourly}', NULL, NULL, NULL, 'device_group', 'nr', true, 60, NULL),
 	('0184dddd-0002-4000-8000-000000000003', '内置-设备组-GSM', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 10:16:52.409282+00', '2026-06-12 10:16:52.409282+00', 'adhoc_aggregation', 'continuous', '5 * * * *', '{KGSM0102,KGSM0103,KGSM0101}', '{hourly}', NULL, NULL, NULL, 'device_group', 'gsm', true, 60, NULL),
@@ -6966,6 +6970,111 @@ JOIN public.api_endpoints ae
     ON ae.path = '/api/v1/mml/templates/:id/paths' AND ae.method = 'GET'
 WHERE r.name = 'viewer'
 ON CONFLICT DO NOTHING;
+
+-- ======================================================================
+-- 2026-06-14 复合基线折叠区：原 seed/000002~000005 折进本 baseline。
+-- 全部 ON CONFLICT DO NOTHING，全新库前向重复应用安全。
+-- ======================================================================
+
+-- ---- 原 000002_dashboard_kpi_layout_seed.sql（issue #213 S1）----
+-- Dashboard KPI 全局布局初始三行（lte/nr/gsm），把前端写死布局灌成初始行，上线首页零变化。
+INSERT INTO public.dashboard_kpi_layouts (tech, layout) VALUES
+    ('lte', '{
+      "panels": [
+        {"title": "dashboard.panel.traffic",        "metrics": ["LTE_PDCP_VOLUME_DL", "LTE_PDCP_VOLUME_UL", "LTE_PDCP_RATE_DL", "LTE_PDCP_RATE_UL"], "x": 0, "y": 0,  "w": 6, "h": 8, "chartType": "line"},
+        {"title": "dashboard.panel.availability",   "metrics": ["LTE_CELL_AVAILABLE"], "x": 6, "y": 0,  "w": 6, "h": 8, "chartType": "line"},
+        {"title": "dashboard.panel.utilization",    "metrics": ["LTE_PRB_UTIL_DL", "LTE_PRB_UTIL_UL"], "x": 0, "y": 8,  "w": 6, "h": 8, "chartType": "line"},
+        {"title": "dashboard.panel.accessibility",  "metrics": ["WIRELESS_SETUP_SR", "RRC_CONN_SETUP_SR", "ERAB_SETUP_SR", "CSFB_SR"], "x": 6, "y": 8,  "w": 6, "h": 8, "chartType": "line"},
+        {"title": "dashboard.panel.retainability",  "metrics": ["ERAB_DROP_RATE"], "x": 0, "y": 16, "w": 6, "h": 8, "chartType": "line"},
+        {"title": "dashboard.panel.mobility",       "metrics": ["HO_INTRA_ENB_OUT_SR", "HO_INTRA_ENB_IN_SR", "HO_INTER_ENB_OUT_SR", "HO_INTER_ENB_IN_SR"], "x": 6, "y": 16, "w": 6, "h": 8, "chartType": "line"}
+      ]
+    }'::jsonb),
+    ('nr', '{
+      "panels": [
+        {"title": "dashboard.panel.traffic",     "metrics": ["NR_PDCP_VOLUME_DL", "NR_PDCP_VOLUME_UL", "NR_PDCP_RATE_DL", "NR_PDCP_RATE_UL"], "x": 0, "y": 0, "w": 6, "h": 8, "chartType": "line"},
+        {"title": "dashboard.panel.utilization", "metrics": ["NR_PRB_UTIL_DL", "NR_PRB_UTIL_UL"], "x": 6, "y": 0, "w": 6, "h": 8, "chartType": "line"}
+      ]
+    }'::jsonb),
+    ('gsm', '{
+      "panels": [
+        {"title": "dashboard.panel.accessibility", "metrics": ["GSM_CALL_SETUP_SR"], "x": 0, "y": 0, "w": 6,  "h": 8, "chartType": "line"},
+        {"title": "dashboard.panel.retainability", "metrics": ["GSM_CALL_DROP_RATE"], "x": 6, "y": 0, "w": 6,  "h": 8, "chartType": "line"},
+        {"title": "dashboard.panel.mobility",      "metrics": ["GSM_HO_SR"], "x": 0, "y": 8, "w": 12, "h": 8, "chartType": "line"}
+      ]
+    }'::jsonb)
+ON CONFLICT DO NOTHING;
+
+-- 读/存全局布局两接口的端点级权限点（migrate 期先于启动同步建好确定行）。
+INSERT INTO public.api_endpoints (id, path, method, name, api_group, is_auto)
+VALUES
+    (gen_random_uuid(), '/api/v1/dashboard/kpi-layout', 'GET', 'GET /api/v1/dashboard/kpi-layout', 'dashboard', true),
+    (gen_random_uuid(), '/api/v1/dashboard/kpi-layout', 'PUT', 'PUT /api/v1/dashboard/kpi-layout', 'dashboard', true)
+ON CONFLICT (path, method) DO NOTHING;
+
+-- 读接口（GET）授权 admin / operator / viewer（所有登录用户可读）。
+INSERT INTO public.role_api_permissions (role_id, endpoint_id)
+SELECT r.id, ae.id
+FROM public.roles r
+JOIN public.api_endpoints ae
+    ON ae.path = '/api/v1/dashboard/kpi-layout' AND ae.method = 'GET'
+WHERE r.name IN ('admin', 'operator', 'viewer')
+ON CONFLICT DO NOTHING;
+
+-- 存接口（PUT）授权 admin（仅管理员可写全局布局；super_admin 旁路始终可达）。
+INSERT INTO public.role_api_permissions (role_id, endpoint_id)
+SELECT r.id, ae.id
+FROM public.roles r
+JOIN public.api_endpoints ae
+    ON ae.path = '/api/v1/dashboard/kpi-layout' AND ae.method = 'PUT'
+WHERE r.name = 'admin'
+ON CONFLICT DO NOTHING;
+
+-- ---- 原 000003_dashboard_kpi_config_menu_seed.sql（issue #213 S3）----
+-- 系统管理下「首页 KPI 配置」菜单（动态菜单走 menus 表，新页须灌一行否则无入口）。
+INSERT INTO public.menus
+    (id, name, type, permission_key, parent_id, sort_order, route_path, component_path, icon, show_status, status, created_by, created_at, updated_by, updated_at, name_i18n)
+VALUES
+    ('aaaa0008-1000-0000-0000-000000000009', '首页 KPI 配置', 'menu', 'system:kpi-config', '11111111-1111-1111-1111-111111111108', 20, '/system/kpi-config', 'system/KpiConfig', 'LineChartOutlined', 'show', 'normal', NULL, now(), NULL, now(), '{"en-US": "Dashboard KPI Config", "zh-CN": "首页 KPI 配置"}')
+ON CONFLICT (id) DO NOTHING;
+
+-- 绑定到 admin 角色，使非超管的普通 admin 也能看到该菜单。
+INSERT INTO public.role_menus (role_id, menu_id)
+SELECT '10000000-0000-0000-0000-000000000001', m.id
+FROM public.menus m
+WHERE m.id = 'aaaa0008-1000-0000-0000-000000000009'
+ON CONFLICT DO NOTHING;
+
+-- ---- 原 000004_retention_backpressure_configs.sql（issue #318-321）----
+-- 保留/背压相关后端特性的 sys_configs 默认值（前端「系统配置」页可改、各模块热加载；代码侧均有同值兜底）。
+INSERT INTO public.sys_configs (category, key, value, value_type, description, is_public) VALUES
+  ('minio.retention', 'raw_object_days', '60', 'int', 'MinIO 原始 PM/MR 文件 ILM 过期天数（#319）', false),
+  ('stationlog.retention', 'max_retention_days', '60', 'int', '基站日志按时间保留天数（#320）', false),
+  ('stationlog.retention', 'max_file_count', '20', 'int', '故障日志文件数配额，0=禁用仅按时间保留（#320）', false),
+  ('raw_archive', 'compress_after_ingest', 'true', 'bool', '入库成功后把明文 PM/MR 原始 XML 压缩回写 MinIO 省盘（#321）', false),
+  ('acs.backpressure', 'enabled', 'true', 'bool', 'PM 上传资源背压总开关（#318）', false),
+  ('acs.backpressure', 'disk_high_pct', '85', 'int', '数据盘使用率高水位%，超过停收 PM 上传（#318）', false),
+  ('acs.backpressure', 'disk_low_pct', '75', 'int', '数据盘使用率低水位%，回落到此自动恢复（#318）', false),
+  ('acs.backpressure', 'cpu_high_per_core', '0.9', 'float', '每核 1 分钟负载高水位，超过停收 PM 上传（#318）', false),
+  ('acs.backpressure', 'cpu_low_per_core', '0.7', 'float', '每核 1 分钟负载低水位，回落到此自动恢复（#318）', false),
+  ('acs.backpressure', 'check_interval_sec', '30', 'int', 'PM 上传背压 watchdog 采样周期（秒）（#318）', false)
+ON CONFLICT (category, key) DO NOTHING;
+
+-- ---- 原 000005_log_retention_rotation_configs.sql（issue #331）----
+-- 审计/业务日志保留（log.retention）+ 运行期日志文件轮转（log.rotation）的 sys_configs 默认值。
+INSERT INTO public.sys_configs (category, key, value, value_type, description, is_public) VALUES
+  ('log.retention', 'enabled', 'true', 'bool', '日志保留清理总开关（关则跳过整轮清理）', false),
+  ('log.retention', 'audit_days', '180', 'int', '审计日志(audit_logs)保留天数', false),
+  ('log.retention', 'ops_audit_days', '180', 'int', '运维审计日志(ops_audit_logs)保留天数', false),
+  ('log.retention', 'login_days', '180', 'int', '登录日志(sys_login_logs)保留天数', false),
+  ('log.retention', 'oper_days', '180', 'int', '操作日志(sys_oper_logs)保留天数', false),
+  ('log.retention', 'task_days', '90', 'int', '任务日志(sys_task_logs)保留天数', false),
+  ('log.retention', 'system_days', '90', 'int', '系统日志(system_logs)保留天数', false),
+  ('log.retention', 'ne_message_days', '30', 'int', '网元报文日志(ne_message_logs)保留天数', false),
+  ('log.retention', 'event_days', '90', 'int', '设备事件日志(event_logs)保留天数', false),
+  ('log.rotation', 'max_size_mb', '50', 'int', '单个日志文件触发切割的大小(MB)', false),
+  ('log.rotation', 'max_age_days', '30', 'int', '日志归档保留天数(早于此的归档删除)', false),
+  ('log.rotation', 'keep_files', '10', 'int', '保持不压缩的最新归档个数(可直接 tail 的近期文件数)', false)
+ON CONFLICT (category, key) DO NOTHING;
 
 -- +goose Down
 -- consolidated seed 无回滚（baseline 内置参考数据；如需重置请重建库）。
