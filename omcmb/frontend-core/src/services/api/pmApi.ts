@@ -63,10 +63,14 @@ interface BackendDefinitionsResponse {
 // --- Mapping functions ---
 
 function mapBackendKPIDefinition(d: BackendKPIDefinition): KPI {
+  // kpiCode 必须用后端的 id（K/C 编号）——KPI 时序值落库 metric_path=K 编号，
+  // /pm/kpi?kpi_name= 按 metric_path 精确匹配；用 display 英文名(name)会查不到任何数据。
+  // 后端 handler 恒返回 id；缺省退回 name 兜底（旧后端）。
+  const code = d.id || d.name;
   return {
-    id: d.name,
+    id: code,
     kpiName: d.display_name,
-    kpiCode: d.name,
+    kpiCode: code,
     unit: d.unit,
     description: d.formula,
     category: '',
