@@ -1,9 +1,13 @@
 /**
- * LayoutKPIPanel - 全局布局驱动的首页 KPI 折线图卡（issue #213 S2）
+ * LayoutKPIPanel - 全局布局驱动的首页 KPI 折线图卡（issue #213 S2 / KPI-ALL-IND 阶段4）
  *
  * 与旧 KPIPanel 的区别：本卡不再各自发请求、不再按 panelType 读写死配置，
- * 而是接收「布局里这张图的 metrics（symbolic key）」+「整页一次批量取数得到的对比数据」，
- * 只负责渲染。指标 label / 线色 / 单位按 key 反查 kpi-config。
+ * 而是接收「布局里这张图的 metrics（指标编号 / 旧 symbolic key）」+「整页一次批量取数得到的对比数据」，
+ * 只负责渲染。
+ *
+ * KPI-ALL-IND 阶段4：放开全部指标后面板存的是指标编号（K/C 编号），名字/单位改从
+ * 指标库元数据取（中文名 + 单位）；线色用默认色。旧存量 symbolic 别名在库里查不到时
+ * 回退老的 getKPIConfigByKey（i18n label + 单位 + 换算系数）。
  *
  * 容错：某指标在批量取数结果里缺失（指标库下线 / 无数据）时，那条线跳过、不让整图崩。
  * 首页只读不可拖。
@@ -15,16 +19,21 @@ import { LoadingOutlined } from '@ant-design/icons';
 import LineChart from '@/components/Charts/LineChart';
 import { useT } from '@/hooks/useT';
 import { useThemeToken } from '@/hooks/useThemeToken';
-import { formatKPIValue, generateDayAxisLabels, generateDayAxisTimestamps } from '@core/utils/format';
+import { generateDayAxisLabels, generateDayAxisTimestamps } from '@core/utils/format';
 import type { KPILayoutPanel } from '@core/types/dashboard';
 import type { MultiTrendComparisonData } from '@core/types/dashboard';
-import { getKPIConfigByKey } from '@/pages/dashboard/kpi-config';
+import type { TechnologyType } from '@/pages/dashboard/kpi-config';
+import { useMetricMetadata, resolveMetricMeta } from './useMetricMetadata';
 
 const { Text } = Typography;
 
+// 折线默认色：今日主色、昨日灰（KPI-ALL-IND 阶段4：线色用默认色，不再按指标取配置色）。
+const COLOR_TODAY = '#1677FF';
+const COLOR_YESTERDAY = '#999999';
+
 export interface LayoutKPIPanelProps {
-  /** 当前制式（仅用于稳定 key，渲染不依赖）。 */
-  technology: string;
+  /** 当前制式（用于稳定 key + 按制式拉指标库元数据）。 */
+  technology: TechnologyType;
   /** 这张图的布局（标题 + 指标列表）。 */
   panel: KPILayoutPanel;
   /** 整页一次批量取数得到的多指标今日/昨日对比数据。 */
@@ -44,10 +53,8 @@ function buildSeries(
   xData: string[],
   todayLabel: string,
   yesterdayLabel: string,
+  conversion: number,
 ): { series: Array<{ name: string; data: number[]; color: string }>; currentValue: number | null } {
-  const config = getKPIConfigByKey(metricKey);
-  const color = config?.color ?? '#1677FF';
-  const conversion = config?.unitConversion ?? 1;
   const comparison = trendData?.[metricKey];
 
   const todayValues = new Array<number>(xData.length).fill(null) as number[];
@@ -73,8 +80,8 @@ function buildSeries(
 
   return {
     series: [
-      { name: todayLabel, data: todayValues, color },
-      { name: yesterdayLabel, data: yesterdayValues, color: '#999999' },
+      { name: todayLabel, data: todayValues, color: COLOR_TODAY },
+      { name: yesterdayLabel, data: yesterdayValues, color: COLOR_YESTERDAY },
     ],
     currentValue,
   };
@@ -83,6 +90,9 @@ function buildSeries(
 export function LayoutKPIPanel({ technology, panel, trendData, isLoading, height = 280 }: LayoutKPIPanelProps) {
   const t = useT();
   const token = useThemeToken();
+
+  // 按制式拉指标库元数据（编号 → 名字/单位）。放开全部指标后名字/单位来源在此。
+  const meta = useMetricMetadata(technology);
 
   // 默认选中第一条指标。
   const [selectedMetric, setSelectedMetric] = useState<string>(panel.metrics[0] ?? '');
@@ -94,7 +104,11 @@ export function LayoutKPIPanel({ technology, panel, trendData, isLoading, height
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [panel.metrics]);
 
-  const selectedConfig = useMemo(() => getKPIConfigByKey(selectedMetric), [selectedMetric]);
+  // 当前选中指标的展示元数据（名字/单位/换算）。
+  const selectedMeta = useMemo(
+    () => resolveMetricMeta(selectedMetric, meta, t),
+    [selectedMetric, meta, t],
+  );
 
   const todayLabel = t('dashboard.timeRange.today');
   const yesterdayLabel = t('dashboard.timeRange.yesterday');
@@ -102,18 +116,16 @@ export function LayoutKPIPanel({ technology, panel, trendData, isLoading, height
   const xData = useMemo(() => generateDayAxisLabels(), []);
   const xDataFull = useMemo(() => generateDayAxisTimestamps(), []);
 
-  const { series, currentValue } = useMemo(
-    () => buildSeries(selectedMetric, trendData, xData, todayLabel, yesterdayLabel),
-    [selectedMetric, trendData, xData, todayLabel, yesterdayLabel],
+  const { series } = useMemo(
+    () => buildSeries(selectedMetric, trendData, xData, todayLabel, yesterdayLabel, selectedMeta.conversion),
+    [selectedMetric, trendData, xData, todayLabel, yesterdayLabel, selectedMeta.conversion],
   );
 
-  // 指标下拉：按 key 反查标签；缺登记时退回展示 key 本身。
-  const indicatorOptions = panel.metrics.map((key) => {
-    const cfg = getKPIConfigByKey(key);
-    return { label: cfg ? t(cfg.label) : key, value: key };
-  });
-
-  const unitLabel = selectedConfig?.unit ? t(selectedConfig.unit) : '';
+  // 指标下拉：按编号取指标库名字；存量旧别名回退老配置 label；都缺退回编号本身。
+  const indicatorOptions = panel.metrics.map((key) => ({
+    label: resolveMetricMeta(key, meta, t).name,
+    value: key,
+  }));
 
   return (
     <Card
@@ -122,14 +134,10 @@ export function LayoutKPIPanel({ technology, panel, trendData, isLoading, height
       title={
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
           <Text style={{ fontSize: 15, fontWeight: 600, color: token.colorText }}>
-            {/* 卡片标题显示配置的图标题（管理员在配置页起的名；默认图的 title 是 i18n key，
-                t() 译成「流量/可用性」等用途名）。未设标题时回退展示当前选中指标的 label。 */}
-            {panel.title ? t(panel.title) : (selectedConfig ? t(selectedConfig.label) : '')}
-            {currentValue !== null && (
-              <Text style={{ fontSize: 14, fontWeight: 500, marginLeft: 8 }}>
-                {formatKPIValue(currentValue, selectedConfig?.unit || '', t)}
-              </Text>
-            )}
+            {/* 卡片标题只显示配置的图标题（管理员在配置页起的名；默认图的 title 是 i18n key，
+                t() 译成「流量/可用性」等用途名）。未设标题时回退展示当前选中指标的名字。
+                不再在标题旁拼当前选中指标的「最新值」。 */}
+            {panel.title ? t(panel.title) : selectedMeta.name}
           </Text>
           <Select
             value={selectedMetric}
@@ -164,7 +172,7 @@ export function LayoutKPIPanel({ technology, panel, trendData, isLoading, height
             height={height - 70}
             smooth
             showLegend={true}
-            unit={unitLabel}
+            unit={selectedMeta.unit}
           />
         )}
       </div>

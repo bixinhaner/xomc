@@ -4,7 +4,7 @@
  * 交互：
  *   - 制式 Segmented（默认 LTE；ENB/GNB/GSM）。
  *   - 设备多选（≤10，复用 KPIQuery/components/DevicePickerModal；超 10 拦截提示并截断）。
- *   - 指标可换（复用 KPIQuery/components/MetricPickerModal，initialDeviceType 随制式）；
+ *   - 指标可换（复用共享件 components/MetricPickerModal，initialDeviceType 随制式）；
  *     默认集 = 选中制式的内置任务指标集（usePmAdhocList isBuiltin，按 technology 找一个取 metricPaths）。
  *     用户未手动改过指标时，切制式默认集随之切换；手动改过则保留用户选择。
  *   - 粒度选择（默认 15min）。
@@ -44,7 +44,7 @@ import { useCreateKpiExport } from '@core/hooks/api/useKpiExport';
 import type { DeviceType } from '@core/types/indicatorLibrary';
 import type { Granularity } from '@core/types/pmDashboard';
 import DevicePickerModal from '../KPIQuery/components/DevicePickerModal';
-import MetricPickerModal from '../KPIQuery/components/MetricPickerModal';
+import MetricPickerModal from '@/components/MetricPickerModal';
 import ChartCard from './ChartCard';
 import { buildDeviceMetricCharts, filterRowsByObjectLdns } from './deviceListUtils';
 import CellDrilldownSelector from './CellDrilldownSelector';
