@@ -83,6 +83,60 @@ func TestOfflineAlarmCleanerSweep_ClearsTimedOutOfflineDeviceAlarms(t *testing.T
 	assert.WithinDuration(t, time.Now().Add(-DefaultOfflineAlarmCleanupThreshold), repo.cutoff, 2*time.Second)
 }
 
+// #358：阈值/周期/批量可配——SetThreshold/SetInterval/SetBatchSize 注入后，
+// sweep 的 cutoff 与 FindOfflineDevicesBefore limit 须随配置变化，而非硬编码 Default*。
+func TestOfflineAlarmCleaner_ConfiguredThresholdOverridesDefault(t *testing.T) {
+	deviceID := uuid.New()
+	repo := &stubOfflineAlarmDeviceRepo{
+		devices: []*model.Device{{ID: deviceID, SerialNumber: "SN-OFF-CFG"}},
+	}
+	store := &stubOfflineAlarmStore{
+		alarmsBySN: map[string][]*model.Alarm{
+			"SN-OFF-CFG": {{ID: uuid.New(), DeviceID: deviceID, DeviceSN: "SN-OFF-CFG", AlarmIdentifier: "A1"}},
+		},
+	}
+	clearer := &capturingOfflineAlarmClearer{}
+	cleaner := NewOfflineAlarmCleaner(repo, store, clearer, zap.NewNop())
+
+	// 运营商把收敛阈值降到分钟级（120s），周期 30s，批量 50。
+	const cfgThreshold = 120 * time.Second
+	const cfgInterval = 30 * time.Second
+	const cfgBatch = 50
+	cleaner.SetThreshold(cfgThreshold)
+	cleaner.SetInterval(cfgInterval)
+	cleaner.SetBatchSize(cfgBatch)
+
+	// getter 反映注入后的生效值（启动日志依赖）。
+	assert.Equal(t, cfgThreshold, cleaner.Threshold())
+	assert.Equal(t, cfgInterval, cleaner.Interval())
+	assert.Equal(t, cfgBatch, cleaner.BatchSize())
+
+	cleaner.sweep(context.Background())
+
+	// cutoff 须 = now - 配置阈值（而非 now - DefaultOfflineAlarmCleanupThreshold=1h）。
+	assert.Equal(t, cfgBatch, repo.limit)
+	assert.WithinDuration(t, time.Now().Add(-cfgThreshold), repo.cutoff, 2*time.Second)
+	// 反向断言：cutoff 明显不同于默认 1h 阈值算出的 cutoff（差约 1h-120s）。
+	defaultCutoff := time.Now().Add(-DefaultOfflineAlarmCleanupThreshold)
+	assert.Greater(t, repo.cutoff.Sub(defaultCutoff), 30*time.Minute,
+		"配置阈值生效时 cutoff 应明显晚于默认 1h 阈值的 cutoff")
+	require.Len(t, clearer.cleared, 1)
+}
+
+// #358：非法（<=0）配置值不应覆盖默认，setter 须忽略，保持向后兼容。
+func TestOfflineAlarmCleaner_NonPositiveConfigKeepsDefaults(t *testing.T) {
+	cleaner := NewOfflineAlarmCleaner(&stubOfflineAlarmDeviceRepo{}, &stubOfflineAlarmStore{}, &capturingOfflineAlarmClearer{}, zap.NewNop())
+
+	cleaner.SetThreshold(0)
+	cleaner.SetThreshold(-5 * time.Second)
+	cleaner.SetInterval(0)
+	cleaner.SetBatchSize(-1)
+
+	assert.Equal(t, DefaultOfflineAlarmCleanupThreshold, cleaner.Threshold())
+	assert.Equal(t, DefaultOfflineAlarmCleanupInterval, cleaner.Interval())
+	assert.Equal(t, DefaultOfflineAlarmCleanupBatchSize, cleaner.BatchSize())
+}
+
 func TestOfflineAlarmCleanerSweep_ContinuesWhenOneDeviceLookupFails(t *testing.T) {
 	repo := &stubOfflineAlarmDeviceRepo{
 		devices: []*model.Device{

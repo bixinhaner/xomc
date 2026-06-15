@@ -172,3 +172,12 @@ func (c *OfflineAlarmCleaner) SetBatchSize(n int) {
 		c.batchSize = n
 	}
 }
+
+// Interval 返回当前生效的扫描周期（含 SetInterval 注入后的值），供启动日志/测试断言用。
+func (c *OfflineAlarmCleaner) Interval() time.Duration { return c.interval }
+
+// Threshold 返回当前生效的离线收敛阈值（含 SetThreshold 注入后的值），供启动日志/测试断言用。
+func (c *OfflineAlarmCleaner) Threshold() time.Duration { return c.threshold }
+
+// BatchSize 返回当前生效的每轮扫描批量上限（含 SetBatchSize 注入后的值），供启动日志/测试断言用。
+func (c *OfflineAlarmCleaner) BatchSize() int { return c.batchSize }

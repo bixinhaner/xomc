@@ -73,7 +73,11 @@ export default function ConfirmWithNoteModal({
     >
       <Space orientation="vertical" style={{ width: '100%' }} size="middle">
         <Text>{message}</Text>
-        <div>
+        {/* #380: showCount 计数器（.ant-input-data-count）以 bottom:-(fontSize*lineHeight)≈-22px 绝对
+            定位渲染到 TextArea 下边缘之外；Antd6 Modal 默认 bodyPadding:0 + footerMarginTop≈12px，
+            间隙不足以容纳外溢的计数器，会与底部『确定』按钮重叠。给 TextArea 包裹层补 paddingBottom
+            为外溢计数器预留行高空间（等价于 Form.Item 的下边距兜底），消除遮挡。 */}
+        <div style={{ paddingBottom: 22 }}>
           <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
             {noteLabel || t('alarm.noteLabel')}
           </Text>

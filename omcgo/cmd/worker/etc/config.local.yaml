@@ -54,6 +54,13 @@ task:
   sweep_interval_seconds: 10
   reconcile_interval_seconds: 30
 
+# #358: 离线设备活动告警清理器（local 开发用分钟级短阈值，便于本地复现收敛）。
+# 任一字段 <=0 或缺省则回退代码 Default*（threshold 3600s / interval 300s / batch 200）。
+offline_alarm_cleanup:
+  threshold_seconds: 120
+  interval_seconds: 30
+  batch_size: 200
+
 # PM 文件上传自动下发配置（local 开发，OMC_PUBLIC_HOST 不设时回退 localhost — 基站不可达）
 pm:
   upload_url_template: "http://${OMC_PUBLIC_HOST:-localhost}:7557/smallcell/FileUploadService?fileType=PM&filename="

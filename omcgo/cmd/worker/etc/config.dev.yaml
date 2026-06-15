@@ -70,6 +70,15 @@ task:
   sweep_interval_seconds: 10
   reconcile_interval_seconds: 30
 
+# #358: 离线设备活动告警清理器阈值/周期/批量。设备离线满 threshold_seconds 仍未恢复，
+# 下一轮扫描（<=interval_seconds）把其当前活动告警归档到历史告警（clearedBy=system:offline_timeout）。
+# 与设备离线检测阈值（offline_threshold.go，#203）对齐，运营商可把告警收敛调到分钟级。
+# 任一字段 <=0 或缺省则回退代码 Default*（threshold 3600s / interval 300s / batch 200）。
+offline_alarm_cleanup:
+  threshold_seconds: 3600
+  interval_seconds: 300
+  batch_size: 200
+
 # 设备上线时（device.online 事件）自动下发 PM 文件上传配置（KPI 上报参数整理.md 三参数）：
 #   Device.FAP.PerfMgmt.Config.1.Enable = enable_value
 #   Device.FAP.PerfMgmt.Config.1.URL = 渲染后的 upload_url_template
