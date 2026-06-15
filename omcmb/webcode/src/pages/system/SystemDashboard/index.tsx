@@ -47,7 +47,8 @@ export default function SystemDashboard() {
   const activeSessions = (systemInfo as Record<string, unknown>)?.activeSessions as number ?? 8;
   const onlineDevices = (systemInfo as Record<string, unknown>)?.onlineDevices as number ?? 189;
   const totalDevices = (systemInfo as Record<string, unknown>)?.totalDevices as number ?? 215;
-  const activeAlarms = (systemInfo as Record<string, unknown>)?.activeAlarms as number ?? 7;
+  // 活动告警统计：用真实数据；未就绪时回退 0，不再展示硬编码占位数字（避免刷新闪现假数。issue #370）
+  const activeAlarms = (systemInfo as Record<string, unknown>)?.activeAlarms as number ?? 0;
 
   const offlineServices = serviceStatuses.filter((s) => s.status === 'offline').length;
   const warningServices = serviceStatuses.filter((s) => s.status === 'warning').length;

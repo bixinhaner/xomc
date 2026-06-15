@@ -48,3 +48,41 @@ func buildNetworkKPISeriesQuery(codes []string, startTimeArg, endTimeArg any) (s
 		OrderBy("metric_path", "time ASC").
 		ToSql()
 }
+
+// rawFallbackGranularity 是回退口径读取的原始明细粒度（pm_metrics raw 表本身就是 15min 粒度，
+// 与性能仪表板默认模板 15min 直读 pm_metrics 原表的容错口径对齐，见 pm/handler.go:296-297）。
+const rawFallbackGranularity = "15min"
+
+// buildRawNetworkKPISeriesQuery 构建「直读原始明细 pm_metrics 现场汇总成全网一条线」的回退 SQL
+// （纯函数，便于单测）。
+//
+// 背景（issue #359）：首页 KPI 折线图只读每小时预聚合表 pm_adhoc_aggregation_results。刚灌数
+// 未到整点 / continuous scheduler 未起 / 聚合落后时该表为空，首页裸空白，但同期性能仪表板默认
+// 模板能 15min 直读 pm_metrics 原表出图——这是两条取数链路容错能力的结构性差异。本回退让首页在
+// 预聚合缺数据时也能 15min 直读原始明细现场汇总，与性能仪表板对齐容错。
+//
+// 汇总口径：与 aggregator.queryNetworkTable（全网一条总线）一致——按 metric_path + time GROUP BY
+// （不带任何设备/小区实体键），算子按 statis_type 路由（sum/avg/max/min；未知按 sum），把全网所有
+// 设备/小区的同指标同时间桶汇成一条全网线。只读 15min 原始明细（granularity=15min）。
+//
+// 成本：10 万级全网即时汇总有代价，故调用方对回退默认时窗设下限（见 service.go GetKPITimeSeries）。
+func buildRawNetworkKPISeriesQuery(codes []string, startTimeArg, endTimeArg any) (string, []any, error) {
+	// 算子按 statis_type 路由（与 aggregator.queryNetworkTable 同范式）。
+	const aggValueExpr = `
+		CASE MIN(statis_type)
+			WHEN 'sum' THEN SUM(metric_value)
+			WHEN 'avg' THEN AVG(metric_value)
+			WHEN 'max' THEN MAX(metric_value)
+			WHEN 'min' THEN MIN(metric_value)
+			ELSE SUM(metric_value)
+		END`
+	return storage.Psql.Select("metric_path", "time", aggValueExpr+" AS metric_value").
+		From("pm_metrics").
+		Where("metric_path = ANY(?)", codes).
+		Where(sq.Eq{"granularity": rawFallbackGranularity}).
+		Where(sq.GtOrEq{"time": startTimeArg}).
+		Where(sq.LtOrEq{"time": endTimeArg}).
+		GroupBy("metric_path", "time").
+		OrderBy("metric_path", "time ASC").
+		ToSql()
+}
