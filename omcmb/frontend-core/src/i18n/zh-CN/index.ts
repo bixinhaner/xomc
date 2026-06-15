@@ -7535,6 +7535,13 @@ const messages: Record<string, string> = {
   'deviceSelector.tpl.selectedTag':      '已选',
   'deviceSelector.tpl.apply':            '应用',
   'deviceSelector.tpl.hint':             '选择预设模板快速添加设备。应用后可在「已选设备」中查看和调整。',
+
+  // qa-614 c5 — software 固件/升级（#369 / #371 / #379）
+  'software.firmware.selectOrInputProductClass': '请选择或输入产品类型',
+  'software.firmware.versionExists':             '该版本固件已存在，请勿重复导入或修改版本号',
+  'software.rollback.destVersionPending':        '回退后版本以设备上报为准',
+  'software.rollback.targetVersion':             '目标版本',
+  'software.rollback.originVersion':             '原始版本',
 };
 
 export default messages;

@@ -25,6 +25,7 @@ import {
   useUpdateFirmware,
 } from '@core/hooks/api/useSoftware'
 import { useProductClasses } from '@core/hooks/api/useDevices'
+import { collapseImageProductClasses } from '@core/utils/productClass'
 import type { SoftwareVersion } from '@core/mock/data/software'
 
 import { NEON, StatCard, Drawer, Syncing, ErrorBlock, EmptyBlock, Pager, formatFileSize } from './_shared'
@@ -267,10 +268,11 @@ function FirmwareDrawer({
   onClose: () => void
 }) {
   const { data: productClassesData } = useProductClasses()
-  const productOptions = useMemo(
-    () => (productClassesData && productClassesData.length > 0 ? productClassesData : FALLBACK_PRODUCT_CLASSES),
-    [productClassesData]
-  )
+  const productOptions = useMemo(() => {
+    const raw = productClassesData && productClassesData.length > 0 ? productClassesData : FALLBACK_PRODUCT_CLASSES
+    // qa-614 #369：IMAGE（升级镜像）版本合一，同族载波变体 /SC /DC /CA 收敛为共同基础标识。
+    return fileType === 'upgrade' ? collapseImageProductClasses(raw) : raw
+  }, [productClassesData, fileType])
 
   const upload = useUploadFirmware()
   const update = useUpdateFirmware()
@@ -350,11 +352,19 @@ function FirmwareDrawer({
 
         <label className="block">
           <span className="mb-1 block font-mono text-[10px] uppercase tracking-[0.18em] text-cyan-300/55">制式 · PRODUCT CLASS</span>
-          <select className="neon-input w-full cursor-pointer" value={productClass} onChange={(e) => setProductClass(e.target.value)}>
+          {/* qa-614 #379：可手填的 combobox（input+datalist），BM 等无在线设备的产品类也能输入。 */}
+          <input
+            className="neon-input w-full"
+            list="fw-product-class-options"
+            value={productClass}
+            onChange={(e) => setProductClass(e.target.value)}
+            placeholder="选择或输入产品类型"
+          />
+          <datalist id="fw-product-class-options">
             {productOptions.map((o) => (
-              <option key={o} value={o}>{o}</option>
+              <option key={o} value={o} />
             ))}
-          </select>
+          </datalist>
         </label>
 
         <label className="block">

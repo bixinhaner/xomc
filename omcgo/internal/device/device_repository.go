@@ -1779,10 +1779,19 @@ func (r *PgDeviceRepository) ListSerialsByIDs(ctx context.Context, ids []uuid.UU
 	return out, rows.Err()
 }
 
-// ListProductClasses returns distinct product_class values from real device data, sorted alphabetically.
+// ListProductClasses returns distinct product_class values, sorted alphabetically.
+//
+// qa-614 #379：合并 devices ∪ firmware_versions 两个来源。固件上传抽屉的"产品类型标识"
+// 下拉消费本端点；若只取 devices 表，BM 等"已有固件但暂无在线设备"的产品类就选不到 →
+// "BM 版本导入失败"。把已上传固件的 product_class 一并并入，保证这些类可被再次选中。
 func (r *PgDeviceRepository) ListProductClasses(ctx context.Context) ([]string, error) {
-	query := `SELECT DISTINCT product_class FROM devices
-		WHERE product_class IS NOT NULL AND product_class != ''
+	query := `SELECT product_class FROM (
+			SELECT DISTINCT product_class FROM devices
+			WHERE product_class IS NOT NULL AND product_class != ''
+			UNION
+			SELECT DISTINCT product_class FROM firmware_versions
+			WHERE product_class IS NOT NULL AND product_class != ''
+		) merged
 		ORDER BY product_class`
 
 	rows, err := r.pool.Query(ctx, query)

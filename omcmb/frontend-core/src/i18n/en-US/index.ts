@@ -7500,6 +7500,13 @@ const messages: Record<string, string> = {
   'deviceSelector.tpl.selectedTag':      'Selected',
   'deviceSelector.tpl.apply':            'Apply',
   'deviceSelector.tpl.hint':             'Select a preset template to quickly add devices. After applying, review and adjust under "Selected Devices".',
+
+  // qa-614 c5 — software firmware/upgrade (#369 / #371 / #379)
+  'software.firmware.selectOrInputProductClass': 'Select or enter product type',
+  'software.firmware.versionExists':             'This firmware version already exists; do not re-import or change the version number',
+  'software.rollback.destVersionPending':        'Post-rollback version follows the device report',
+  'software.rollback.targetVersion':             'Target Version',
+  'software.rollback.originVersion':             'Original Version',
 };
 
 export default messages;

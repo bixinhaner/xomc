@@ -3,12 +3,14 @@ package software
 import (
 	"context"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
@@ -97,6 +99,14 @@ func (r *PgFirmwareRepository) Create(ctx context.Context, fw *FirmwareVersion) 
 	row := r.pool.QueryRow(ctx, query, args...)
 	created, err := scanFirmware(row)
 	if err != nil {
+		// qa-614 #372/#379：唯一索引 idx_firmware_unique_version
+		// (COALESCE(product_class,''), version, file_type) 命中 → 23505。原样裸 wrap
+		// 会落 HTTPStatusFromError 的 default 500，前端只能拿到裸 pgx duplicate key 串。
+		// 翻成 ErrAlreadyExists → HTTPStatusFromError 自动映射 409 + 可读中文。
+		var pgErr *pgconn.PgError
+		if stderrors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return fmt.Errorf("%w: 该产品类型+版本+文件类型的固件已存在，请勿重复导入或修改版本号", commonerrors.ErrAlreadyExists)
+		}
 		return fmt.Errorf("create firmware: %w", err)
 	}
 	*fw = *created
