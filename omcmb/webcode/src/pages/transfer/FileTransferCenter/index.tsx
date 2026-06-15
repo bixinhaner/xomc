@@ -77,6 +77,8 @@ import {
   localizeBuiltinCategoryLabel,
   localizeBuiltinTypeName,
   UPGRADE_LIKE_CATEGORIES,
+  filterTaskTypesForCategory,
+  resolveBackendCategoryParam,
 } from '../shared';
 import {
   renderDeviceStatus,
@@ -88,6 +90,16 @@ import type { TransferStepId } from '@core/types/unifiedFileTransfer';
 
 const { Text, Title } = Typography;
 
+// qa-614 c6 #367：任务详情 Descriptions 局部样式——标签/内容单行不换行（超长走
+// ellipsis），并把详情区字号收紧至 12（不动全局 token，避免全 v1 页面回归）。
+const DETAIL_LABEL_STYLE: React.CSSProperties = { whiteSpace: 'nowrap', fontSize: 12 };
+const DETAIL_CONTENT_STYLE: React.CSSProperties = {
+  whiteSpace: 'nowrap',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  fontSize: 12,
+};
+
 // buildDefaultTaskName 适配器：保持原签名（typeCode + username），内部委托给
 // shared.buildDefaultUfteTaskName + appStore.locale，全局保持 i18n 一致。
 function buildDefaultTaskName(typeCode: string | undefined, username: string | undefined, locale: string): string {
@@ -95,7 +107,14 @@ function buildDefaultTaskName(typeCode: string | undefined, username: string | u
 }
 
 function isUpgradeTaskCategory(category?: string) {
-  return category === 'gnb_upgrade' || category === 'enb_upgrade';
+  // qa-614 c6 #365 #373：2G(gsm_upgrade) 也是升级类，需固件选择；
+  // #368：device_upgrade 是 4G/5G 合并虚拟分类，同属升级类。
+  return (
+    category === 'gnb_upgrade' ||
+    category === 'enb_upgrade' ||
+    category === 'gsm_upgrade' ||
+    category === 'device_upgrade'
+  );
 }
 
 function matchesScope(scope: string[], _category: string, productClass: string): boolean {
@@ -157,7 +176,13 @@ function resolveFirmwareLibraryFileType(taskType?: UnifiedFileTransferTaskType):
 }
 
 function getUpgradeTypeLabel(category: string, fallback: string, t: (id: string) => string) {
-  if (category === 'gnb_upgrade' || category === 'enb_upgrade') {
+  // qa-614 c6 #365 #373 #368：2G(gsm_upgrade) 与合并虚拟分类 device_upgrade 同归升级标签。
+  if (
+    category === 'gnb_upgrade' ||
+    category === 'enb_upgrade' ||
+    category === 'gsm_upgrade' ||
+    category === 'device_upgrade'
+  ) {
     return t('ufte.softLib.upgrade');
   }
   if (category === 'version_rollback') {
@@ -274,10 +299,15 @@ export default function FileTransferCenter() {
   const [detailTask, setDetailTask] = useState<UnifiedFileTransferTask | null>(null);
   const [detailDrawerOpen, setDetailDrawerOpen] = useState(false);
 
+  // qa-614 c6 #368：device_upgrade 虚拟分类展开为后端 category 查询参数。
+  // 选了具体 typeCode → 传 undefined（按 typeCode 精确过滤）；未选 → 传成员超集
+  // 'enb_upgrade'（softwareTaskType 集 {Upgrade,Patch,FPGA} 已含 4G+5G 全部升级任务）。
+  const backendCategoryParam = resolveBackendCategoryParam(selectedCategory, selectedTypeCode);
+
   const { data: tasksData, isLoading: tasksLoading } = useUnifiedFileTransferTasks({
     page: taskPage,
     pageSize: taskPageSize,
-    category: selectedCategory || undefined,
+    category: backendCategoryParam,
     keyword: taskKeyword || undefined,
     status: taskStatusFilter,
     typeCode: selectedTypeCode || undefined,
@@ -286,7 +316,7 @@ export default function FileTransferCenter() {
   const { data: devicesData, isLoading: devicesLoading } = useUnifiedFileTransferDevices({
     page: devicePage,
     pageSize: devicePageSize,
-    category: selectedCategory || undefined,
+    category: backendCategoryParam,
     keyword: deviceKeyword || undefined,
     status: deviceStatusFilter,
     typeCode: selectedTypeCode || undefined,
@@ -311,7 +341,8 @@ export default function FileTransferCenter() {
     // 顺序由后端 ORDER BY sort_order ASC 控制（数据库字段 ufte_task_types.sort_order
     // 由内置模板初始化，未来可在「模板配置」页面拖拽调整）。前端不再二次排序，避免
     // 跟数据库源头不一致。
-    () => taskTypes.filter((item) => item.category === selectedCategory),
+    // qa-614 c6 #368：device_upgrade 虚拟分类下取 enb_upgrade + gnb_upgrade 两类。
+    () => filterTaskTypesForCategory(taskTypes, selectedCategory),
     [selectedCategory, taskTypes],
   );
 
@@ -352,7 +383,9 @@ export default function FileTransferCenter() {
   const { data: drawerDevicesData, isLoading: drawerDevicesLoading } = useUnifiedFileTransferDeviceCandidates({
     page: drawerDevicePage,
     pageSize: drawerDevicePageSize,
-    category: selectedCategory || undefined,
+    // qa-614 c6 #368：抽屉里 typeCode 必选（升级类），故传 undefined 让后端按
+    // typeCode 精确匹配设备候选（productTechLookup 区分 4G/5G/2G）。
+    category: resolveBackendCategoryParam(selectedCategory, drawerTaskType?.typeCode || selectedTypeCode || ''),
     typeCode: drawerTaskType?.typeCode || selectedTypeCode || undefined,
     // 升级类任务（needsFirmwareSelection）用 drawerProductClass 表单字段
     // 缩窄候选设备 — UFTE 后端字段名是 productType。
@@ -448,18 +481,9 @@ export default function FileTransferCenter() {
     return Array.from(values).map((item) => ({ label: item, value: item }));
   }, [activeTaskType?.platformScope, productClasses, recentDevices]);
 
-  const templateTabItems = useMemo(
-    () => filteredTaskTypes.map((item) => ({
-      key: item.typeCode,
-      label: (
-        <Space size={6}>
-          <span>{localizeBuiltinTypeName(item.typeCode, item.displayName, t)}</span>
-          <Tag color={item.builtIn ? 'blue' : 'gold'}>{item.builtIn ? t('ufte.tag.builtIn') : t('ufte.tag.custom')}</Tag>
-        </Space>
-      ),
-    })),
-    [filteredTaskTypes, t],
-  );
+  // qa-614 c6 #368：原 templateTabItems（『模板』子页签数据）已删除——与执行视图
+  // 任务列表上方的 typeCode 下拉框完全重复（ant-space-item 多余）。typeCode 选择
+  // 统一收口到 Select，单一入口。
 
   // #215: 已选设备从跨页累积的 selectedDeviceMap 取，保证翻页后其它页的已选设备
   // 仍能在"已选 N 台"清单 / CONFIG/LICENSE 探测表里展示，不被当前页截断。
@@ -1343,8 +1367,11 @@ export default function FileTransferCenter() {
                 setSelectedCategory(key);
               }}
             />
-            {/* MR 测量 / KPI 导出 Tab 选中时：① 不显示 UFTE 模板子 Tab，② 直接在 Tabs
-                下方内联渲染各自的任务管理面板（视觉上就是 Tab 切换内容）。 */}
+            {/* MR 测量 / KPI 导出 Tab 选中时：直接在 Tabs 下方内联渲染各自的任务管理面板
+                （视觉上就是 Tab 切换内容）。
+                qa-614 c6 #368：删除原『模板』子页签（与下方执行视图任务列表上方的 typeCode
+                下拉框 1:1 重复，DOM 里多余的 ant-space-item）。typeCode 选择统一收口到
+                执行视图任务列表上方的 Select，单一入口。 */}
             {selectedCategory === 'mr_measurement' ? (
               <MRTasksPanel
                 createOpen={mrCreateOpen}
@@ -1352,13 +1379,7 @@ export default function FileTransferCenter() {
               />
             ) : selectedCategory === 'kpi_export' ? (
               <KpiExportTasksPanel />
-            ) : (
-              <Tabs
-                activeKey={selectedTypeCode}
-                items={templateTabItems}
-                onChange={(key) => setSelectedTypeCode(key)}
-              />
-            )}
+            ) : null}
           </Space>
         </Card>
 
@@ -2020,8 +2041,18 @@ export default function FileTransferCenter() {
       >
         {detailTask ? (
           <Space orientation="vertical" size={16} style={{ width: '100%' }}>
-            <Descriptions column={2} size="small" bordered>
-              <Descriptions.Item label={t('ufte.col.taskName')}>{detailTask.taskName}</Descriptions.Item>
+            {/* qa-614 c6 #367：标签/内容均单行不换行（fontSize 12 收紧详情区），
+                超长值（任务名称/时间）整行占满（span=2）+ Tooltip 展示全文。 */}
+            <Descriptions
+              column={2}
+              size="small"
+              bordered
+              labelStyle={DETAIL_LABEL_STYLE}
+              contentStyle={DETAIL_CONTENT_STYLE}
+            >
+              <Descriptions.Item label={t('ufte.col.taskName')} span={2}>
+                <Tooltip title={detailTask.taskName}>{detailTask.taskName}</Tooltip>
+              </Descriptions.Item>
               <Descriptions.Item label={t('ufte.col.taskType')}>{localizeBuiltinTypeName(detailTask.typeCode, detailTask.typeDisplayName, t)}</Descriptions.Item>
               <Descriptions.Item label={t('common.status')}>{renderTaskStatus(detailTask.status, t)}</Descriptions.Item>
               <Descriptions.Item label={t('ufte.col.result')}>
@@ -2029,7 +2060,9 @@ export default function FileTransferCenter() {
                   ? <Tag color={detailTask.result === 'success' ? 'success' : detailTask.result === 'partial' ? 'warning' : 'error'}>{detailTask.result === 'success' ? t('ufte.result.success') : detailTask.result === 'partial' ? t('ufte.result.partial') : detailTask.result === 'terminated' ? t('ufte.result.terminated') : t('ufte.result.failed')}</Tag>
                   : '-'}
               </Descriptions.Item>
-              <Descriptions.Item label={t('ufte.col.destVersion')}>{getTaskTargetVersion(detailTask)}</Descriptions.Item>
+              <Descriptions.Item label={t('ufte.col.destVersion')}>
+                <Tooltip title={getTaskTargetVersion(detailTask)}>{getTaskTargetVersion(detailTask)}</Tooltip>
+              </Descriptions.Item>
               <Descriptions.Item label={t('ufte.col.productType')}>{getTaskProductClass(detailTask)}</Descriptions.Item>
               <Descriptions.Item label={t('ufte.col.executionMode')}>
                 <Tag>{executionModeOptions.find((o) => o.value === detailTask.executionMode)?.label ?? detailTask.executionMode}</Tag>
@@ -2041,7 +2074,11 @@ export default function FileTransferCenter() {
               ) : null}
               <Descriptions.Item label={t('ufte.col.currentStep')}>{stepLabels[detailTask.currentStep as TransferStepId] ?? '-'}</Descriptions.Item>
               <Descriptions.Item label={t('ufte.col.operator')}>{detailTask.createUser}</Descriptions.Item>
-              <Descriptions.Item label={t('ufte.col.createdAt')}>{new Date(detailTask.createdAt).toLocaleString('zh-CN')}</Descriptions.Item>
+              <Descriptions.Item label={t('ufte.col.createdAt')}>
+                <Tooltip title={new Date(detailTask.createdAt).toLocaleString('zh-CN')}>
+                  {new Date(detailTask.createdAt).toLocaleString('zh-CN')}
+                </Tooltip>
+              </Descriptions.Item>
             </Descriptions>
             <Card title={t('ufte.card.executionProgress')} size="small">
               <Space orientation="vertical" size={12} style={{ width: '100%' }}>

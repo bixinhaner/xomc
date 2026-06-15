@@ -341,10 +341,8 @@ func (e *RollbackExecutor) HandleEnableCheckResponse(ctx context.Context, device
 		e.FailRollbackSubTask(ctx, subTask, fmt.Sprintf("Rollback can not be started, device not found: %v", err), FailureDeviceNotFound)
 		return
 	}
-	tech := model.TechLTE
-	if Is5G(dev) {
-		tech = model.TechNR
-	}
+	// 三态识别：GSM(2G) / NR(5G) / LTE(4G 兜底)，与 service.go 回退派发保持一致。
+	tech := ResolveDeviceTech(dev)
 	e.logger.Info("rollback stage 1 passed, dispatching SPV (stage 2)",
 		zap.String("sub_task_id", subTask.ID.String()),
 		zap.String("device_sn", deviceSN),

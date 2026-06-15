@@ -35,6 +35,12 @@ import {
   useUnifiedFileTransferDevices,
 } from '@core/hooks/api/useUnifiedFileTransfer'
 import type { PageRequest } from '@core/types/pagination'
+import {
+  DEVICE_UPGRADE_CATEGORY,
+  aggregateCategoryOptions,
+  isDeviceUpgradeMember,
+  resolveBackendCategoryParam,
+} from '@core/utils/ufteCategory'
 
 import {
   DeviceStatusBadge,
@@ -68,34 +74,45 @@ export default function FileTransferCenter() {
   const overviewQuery = useUnifiedFileTransferOverview()
   const { data: taskTypes = [] } = useUnifiedFileTransferTaskTypes()
 
-  // 分类下拉:从任务类型聚合(category -> categoryLabel),去重
+  // 分类下拉:从任务类型聚合(category -> categoryLabel),去重。
+  // qa-614 c6 #368：4G(enb_upgrade)+5G(gnb_upgrade) 折叠为单条『设备升级』(device_upgrade)，
+  // 与 v1/v3 口径一致（聚合逻辑共享自 @core/utils/ufteCategory）。
   const categoryOptions = useMemo(() => {
-    const map = new Map<string, string>()
-    taskTypes.forEach((tt) => {
-      if (!map.has(tt.category)) map.set(tt.category, tt.categoryLabel)
-    })
-    return Array.from(map.entries()).map(([value, label]) => ({ value, label }))
+    return aggregateCategoryOptions(taskTypes).map((opt) =>
+      opt.value === DEVICE_UPGRADE_CATEGORY ? { value: opt.value, label: '设备升级' } : opt,
+    )
   }, [taskTypes])
 
-  // 类型下拉随分类联动
+  // 类型下拉随分类联动；device_upgrade 选中时取 enb_upgrade+gnb_upgrade 两类 typeCode。
   const typeOptions = useMemo(
     () =>
       taskTypes
-        .filter((tt) => category === 'all' || tt.category === category)
+        .filter((tt) => {
+          if (category === 'all') return true
+          if (category === DEVICE_UPGRADE_CATEGORY) return isDeviceUpgradeMember(tt.category)
+          return tt.category === category
+        })
         .map((tt) => ({ value: tt.typeCode, label: tt.displayName })),
     [taskTypes, category]
   )
+
+  // qa-614 c6 #368：device_upgrade 虚拟分类展开为后端 category 查询参数
+  // （有 typeCode 按 typeCode 精确过滤；无 typeCode 传成员超集 enb_upgrade 含 4G+5G）。
+  const backendCategory =
+    category === 'all'
+      ? undefined
+      : resolveBackendCategoryParam(category, typeCode !== 'all' ? typeCode : undefined)
 
   const sharedParams = useMemo(
     () => ({
       page,
       pageSize: PAGE_SIZE,
       ...(keyword.trim() ? { keyword: keyword.trim() } : {}),
-      ...(category !== 'all' ? { category } : {}),
+      ...(backendCategory ? { category: backendCategory } : {}),
       ...(typeCode !== 'all' ? { typeCode } : {}),
       ...(status !== 'all' ? { status } : {}),
     }),
-    [page, keyword, category, typeCode, status]
+    [page, keyword, backendCategory, typeCode, status]
   ) satisfies { keyword?: string; category?: string; typeCode?: string; status?: string } & PageRequest
 
   const tasksQuery = useUnifiedFileTransferTasks(sharedParams)

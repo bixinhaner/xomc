@@ -7535,6 +7535,12 @@ const messages: Record<string, string> = {
   'deviceSelector.tpl.selectedTag':      '已选',
   'deviceSelector.tpl.apply':            '应用',
   'deviceSelector.tpl.hint':             '选择预设模板快速添加设备。应用后可在「已选设备」中查看和调整。',
+
+  // qa-614 c6 — UFTE 2G(GSM) 升级分类（#365 #373）+ 4G/5G 合并设备升级虚拟分类（#368）
+  'ufte.builtin.category.gsm_upgrade':        '2G升级',
+  'ufte.builtin.category.device_upgrade':     '设备升级',
+  'ufte.builtin.type.GSM_IMG_UPGRADE':        '2G 基站软件升级',
+  'ufte.builtin.desc.GSM_IMG_UPGRADE':        '复用现网软件升级链路，统一承载 2G(GSM) 基站镜像升级任务。',
 };
 
 export default messages;
