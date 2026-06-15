@@ -6926,7 +6926,14 @@ SELECT pg_catalog.set_config('search_path', 'public', false);
 INSERT INTO sys_configs (category, key, value, value_type, description, is_public)
 VALUES
     ('device', 'enbTimeout', '100', 'int', '基站类无心跳判离线阈值（秒）', false),
-    ('device', 'cpeTimeout', '600', 'int', 'CPE 类无心跳判离线阈值（秒）', false)
+    ('device', 'cpeTimeout', '600', 'int', 'CPE 类无心跳判离线阈值（秒）', false),
+    -- qa-614 #357：Inform 周期自动调整 4 字段补 seed（带中文 description），
+    -- 使三皮肤系统配置 KV 编辑器（v1 强类型表单 / v2 可编辑 KV / v3 只读 KV）天然可见、有说明。
+    -- 键名与前端「系统配置 → 设备设置」面板字段一致；目标值真正下发 PeriodicInformInterval 的 SPV 属 #203 功能范畴，本处仅做配置可见性。
+    ('device', 'enbInformPeriodAdjustEnable', 'true', 'bool', '是否启用基站类 Inform 周期自动调整（设备启动时若周期不符则自动调整）', false),
+    ('device', 'enbInformPeriod', '60', 'int', '基站类 Inform 周期不符时自动调整到的目标周期（秒）', false),
+    ('device', 'cpeInformPeriodAdjustEnable', 'false', 'bool', '是否启用 CPE 类 Inform 周期自动调整（设备启动时若周期不符则自动调整）', false),
+    ('device', 'cpeInformPeriod', '60', 'int', 'CPE 类 Inform 周期不符时自动调整到的目标周期（秒）', false)
 ON CONFLICT (category, key) DO NOTHING;
 
 --

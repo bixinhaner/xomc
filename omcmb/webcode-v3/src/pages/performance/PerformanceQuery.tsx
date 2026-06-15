@@ -13,6 +13,7 @@ import type { DeviceType } from '@core/types/indicatorLibrary'
 import type { Granularity } from '@core/types/pmDashboard'
 import type { Device } from '@core/types/device'
 import { MetricTrendChart } from './MetricTrendChart'
+import { useT } from '@/hooks/useT'
 
 /**
  * F03 · 实时取数（performance/query）
@@ -30,17 +31,18 @@ const TECH_OPTS: { label: string; value: Tech; deviceType: DeviceType }[] = [
   { label: 'GSM', value: 'gsm', deviceType: 'GSM' },
 ]
 
-const GRAN_OPTS: { label: string; value: Granularity }[] = [
-  { label: '15分钟', value: '15min' },
-  { label: '小时', value: 'hourly' },
-  { label: '天', value: 'daily' },
+// label 改为 i18n key（在渲染处经 t() 翻译），避免模块级常量写死中文。
+const GRAN_OPTS: { labelKey: string; value: Granularity }[] = [
+  { labelKey: 'perf.kpiQuery.gran.15min', value: '15min' },
+  { labelKey: 'perf.kpiQuery.gran.hourly', value: 'hourly' },
+  { labelKey: 'perf.kpiQuery.gran.daily', value: 'daily' },
 ]
 
-const RANGE_OPTS: { label: string; hours: number }[] = [
-  { label: '近 1 小时', hours: 1 },
-  { label: '近 24 小时', hours: 24 },
-  { label: '近 7 天', hours: 24 * 7 },
-  { label: '近 30 天', hours: 24 * 30 },
+const RANGE_OPTS: { labelKey: string; hours: number }[] = [
+  { labelKey: 'perf.kpiQuery.range.last1h', hours: 1 },
+  { labelKey: 'perf.kpiQuery.range.last24h', hours: 24 },
+  { labelKey: 'perf.kpiQuery.range.last7d', hours: 24 * 7 },
+  { labelKey: 'perf.kpiQuery.range.last30d', hours: 24 * 30 },
 ]
 
 const MAX_METRICS = 12
@@ -54,6 +56,7 @@ interface Submitted {
 }
 
 export default function PerformanceQuery() {
+  const t = useT()
   const [tech, setTech] = useState<Tech>('lte')
   const deviceType = TECH_OPTS.find((t) => t.value === tech)!.deviceType
   const [deviceSn, setDeviceSn] = useState('')
@@ -153,7 +156,7 @@ export default function PerformanceQuery() {
   return (
     <PageShell
       code="F03"
-      title="TIME-SERIES QUERY · 实时取数"
+      title={`TIME-SERIES QUERY · ${t('perf.kpiQuery.v3.realtimeQuery')}`}
       subtitle="DEVICE × METRIC AGGREGATION · LIVE PLOT"
       isFetching={aggFetching}
       bare
@@ -161,7 +164,7 @@ export default function PerformanceQuery() {
       <div className="grid grid-cols-12 gap-3">
         {/* 左：条件 */}
         <div className="col-span-12 space-y-3 lg:col-span-4 xl:col-span-3">
-          <GlassPanel title="制式 · TECH">
+          <GlassPanel title={`${t('perf.kpiQuery.tech')} · TECH`}>
             <div className="flex gap-1.5 p-3">
               {TECH_OPTS.map((t) => (
                 <button
@@ -181,13 +184,13 @@ export default function PerformanceQuery() {
             </div>
           </GlassPanel>
 
-          <GlassPanel title="设备 · DEVICE" meta={deviceSn ? '已选 1' : '未选'}>
+          <GlassPanel title={`${t('perf.kpiQuery.device')} · DEVICE`} meta={deviceSn ? '1' : '0'}>
             <div className="p-3">
               <div className="relative mb-2">
                 <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-cyan-300/50" />
                 <input
                   className="neon-input w-full pl-9"
-                  placeholder="SN / 名称 / IP 搜索"
+                  placeholder={t('perf.kpiQuery.deviceSearchPlaceholder')}
                   value={deviceKeyword}
                   onChange={(e) => setDeviceKeyword(e.target.value)}
                 />
@@ -225,13 +228,13 @@ export default function PerformanceQuery() {
             </div>
           </GlassPanel>
 
-          <GlassPanel title="指标 · METRIC" meta={`${selectedMetrics.length}/${MAX_METRICS}`}>
+          <GlassPanel title={`${t('perf.kpiQuery.metric')} · METRIC`} meta={`${selectedMetrics.length}/${MAX_METRICS}`}>
             <div className="p-3">
               <div className="relative mb-2">
                 <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-cyan-300/50" />
                 <input
                   className="neon-input w-full pl-9"
-                  placeholder="指标名 / 编码搜索"
+                  placeholder={t('perf.kpiQuery.metricSearchPlaceholder')}
                   value={metricKeyword}
                   onChange={(e) => setMetricKeyword(e.target.value)}
                 />
@@ -285,7 +288,7 @@ export default function PerformanceQuery() {
             </div>
           </GlassPanel>
 
-          <GlassPanel title="粒度 / 时段 · WINDOW">
+          <GlassPanel title={`${t('perf.kpiQuery.granularityWindow')} · WINDOW`}>
             <div className="space-y-2.5 p-3">
               <div className="flex flex-wrap gap-1.5">
                 {GRAN_OPTS.map((g) => (
@@ -300,7 +303,7 @@ export default function PerformanceQuery() {
                         : 'text-cyan-300/55 opacity-70 hover:opacity-100',
                     )}
                   >
-                    {g.label}
+                    {t(g.labelKey)}
                   </button>
                 ))}
               </div>
@@ -317,7 +320,7 @@ export default function PerformanceQuery() {
                         : 'text-cyan-300/55 opacity-70 hover:opacity-100',
                     )}
                   >
-                    {r.label}
+                    {t(r.labelKey)}
                   </button>
                 ))}
               </div>
@@ -326,10 +329,10 @@ export default function PerformanceQuery() {
 
           <div className="flex gap-2">
             <NeonButton icon={<Play />} onClick={runQuery} disabled={!canQuery} className="flex-1 justify-center">
-              出图 · PLOT
+              {t('perf.kpiQuery.plot')} · PLOT
             </NeonButton>
             <NeonButton icon={<RefreshCcw />} onClick={() => refetch()} disabled={!submitted}>
-              刷新
+              {t('perf.kpiQuery.refresh')}
             </NeonButton>
           </div>
         </div>
@@ -337,33 +340,35 @@ export default function PerformanceQuery() {
         {/* 右：结果 */}
         <div className="col-span-12 lg:col-span-8 xl:col-span-9">
           {!submitted ? (
-            <GlassPanel title="QUERY RESULT · 取数结果">
+            <GlassPanel title={`QUERY RESULT · ${t('perf.kpiQuery.v3.queryResult')}`}>
               <div className="flex flex-col items-center justify-center gap-3 py-20">
                 <LineChart className="size-10 text-cyan-300/40" />
                 <div className="font-mono text-xs uppercase tracking-[0.2em] text-cyan-300/45">
-                  选择设备 + 指标后点「出图」
+                  {t('perf.kpiQuery.v3.emptyHint')}
                 </div>
               </div>
             </GlassPanel>
           ) : aggLoading || aggFetching ? (
-            <GlassPanel title="QUERY RESULT · 取数结果" meta="SYNC">
+            <GlassPanel title={`QUERY RESULT · ${t('perf.kpiQuery.v3.queryResult')}`} meta="SYNC">
               <Loading text="QUERYING TIME-SERIES…" />
             </GlassPanel>
           ) : aggError ? (
-            <GlassPanel title="QUERY RESULT · 取数结果">
+            <GlassPanel title={`QUERY RESULT · ${t('perf.kpiQuery.v3.queryResult')}`}>
               <div className="p-4">
-                <ErrorBox text={`QUERY FAILED · ${(errors[0] as Error)?.message ?? '未知错误'}`} />
+                <ErrorBox text={`QUERY FAILED · ${(errors[0] as Error)?.message ?? t('perf.kpiQuery.unknownError')}`} />
               </div>
             </GlassPanel>
           ) : (
             <div className="space-y-3">
-              <GlassPanel title="QUERY RESULT · 取数结果" meta={`${grouped.length} METRIC · ${total} ROW`}>
+              <GlassPanel title={`QUERY RESULT · ${t('perf.kpiQuery.v3.queryResult')}`} meta={`${grouped.length} METRIC · ${total} ROW`}>
                 <div className="flex flex-wrap items-center gap-2 p-3 font-mono text-[10px] text-cyan-300/60">
                   <span className="chip text-cyan-200">{submitted.deviceSn}</span>
                   <span className="chip text-cyan-300/70">{tech.toUpperCase()}</span>
                   <span className="chip text-cyan-300/70">{granularity}</span>
                   {truncated ? (
-                    <span className="chip text-[#ffaa00]">已截断 · 仅显示 {aggRows.length}/{total}</span>
+                    <span className="chip text-[#ffaa00]">
+                      {t('perf.kpiQuery.truncatedShown', { shown: aggRows.length, total })}
+                    </span>
                   ) : null}
                 </div>
               </GlassPanel>

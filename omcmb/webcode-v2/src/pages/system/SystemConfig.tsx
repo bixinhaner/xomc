@@ -15,6 +15,7 @@ import type {
   BatchUpdateSysConfigItem,
   SysConfigItem,
 } from '@core/types/system'
+import { useT } from '@/hooks/useT'
 
 // ============================================================
 // 系统管理 / 系统配置 — 对齐 v1 webcode/src/pages/system/SystemConfig
@@ -35,12 +36,36 @@ const CATEGORIES: { key: string; label: string }[] = [
   { key: 'northbound', label: '北向' },
 ]
 
+// device 分类按 enb*/cpe* 前缀分组，与 v1「基站类 / CPE 类」结构化表单等深（issue #357）。
+// 其余分类不分组（单组），保持通用 KV 编辑器形态。
+function groupDeviceItems(
+  category: string,
+  items: SysConfigItem[],
+): { titleKey: string | null; items: SysConfigItem[] }[] {
+  if (category !== 'device') return [{ titleKey: null, items }]
+  const base: SysConfigItem[] = []
+  const cpe: SysConfigItem[] = []
+  const other: SysConfigItem[] = []
+  for (const it of items) {
+    if (it.key.startsWith('enb')) base.push(it)
+    else if (it.key.startsWith('cpe')) cpe.push(it)
+    else other.push(it)
+  }
+  const groups: { titleKey: string | null; items: SysConfigItem[] }[] = []
+  if (base.length) groups.push({ titleKey: 'system.device.informGroup.baseStation', items: base })
+  if (cpe.length) groups.push({ titleKey: 'system.device.informGroup.cpe', items: cpe })
+  if (other.length) groups.push({ titleKey: null, items: other })
+  return groups
+}
+
 function CategoryEditor({ category }: { category: string }) {
+  const t = useT()
   const { data, isLoading, isError, error, refetch, isFetching } =
     useSysConfigsByCategory(category)
   const batchUpdate = useBatchUpdateSysConfigs()
 
   const items = useMemo<SysConfigItem[]>(() => data ?? [], [data])
+  const groups = useMemo(() => groupDeviceItems(category, items), [category, items])
 
   // 本地编辑态：key -> value（字符串，与后端 sys_configs.value TEXT 列一致）
   const [edits, setEdits] = useState<Record<string, string>>({})
@@ -118,57 +143,64 @@ function CategoryEditor({ category }: { category: string }) {
         </div>
       ) : null}
 
-      <div className="overflow-hidden rounded-lg border bg-card divide-y">
-        {items.map((it) => {
-          const isBool = it.valueType === 'bool'
-          const cur = edits[it.key] ?? ''
-          return (
-            <div
-              key={it.id || it.key}
-              className="grid gap-2 px-4 py-3 md:grid-cols-[280px_1fr] md:items-center"
-            >
-              <div>
-                <Label className="font-mono text-xs">{it.key}</Label>
-                <div className="mt-0.5 flex items-center gap-2">
-                  {it.valueType ? (
-                    <Badge variant="muted">{it.valueType}</Badge>
-                  ) : null}
-                  {it.description ? (
-                    <span className="text-xs text-muted-foreground">
-                      {it.description}
-                    </span>
-                  ) : null}
+      {groups.map((group, gi) => (
+        <div key={group.titleKey ?? `grp-${gi}`} className="space-y-1.5">
+          {group.titleKey ? (
+            <div className="px-1 text-sm font-semibold text-foreground">{t(group.titleKey)}</div>
+          ) : null}
+          <div className="overflow-hidden rounded-lg border bg-card divide-y">
+            {group.items.map((it) => {
+              const isBool = it.valueType === 'bool'
+              const cur = edits[it.key] ?? ''
+              return (
+                <div
+                  key={it.id || it.key}
+                  className="grid gap-2 px-4 py-3 md:grid-cols-[280px_1fr] md:items-center"
+                >
+                  <div>
+                    <Label className="font-mono text-xs">{it.key}</Label>
+                    <div className="mt-0.5 flex items-center gap-2">
+                      {it.valueType ? (
+                        <Badge variant="muted">{it.valueType}</Badge>
+                      ) : null}
+                      {it.description ? (
+                        <span className="text-xs text-muted-foreground">
+                          {it.description}
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                  {isBool ? (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        className="size-4 cursor-pointer accent-primary"
+                        checked={cur === 'true' || cur === '1'}
+                        onChange={(e) =>
+                          setEdits((prev) => ({
+                            ...prev,
+                            [it.key]: e.target.checked ? 'true' : 'false',
+                          }))
+                        }
+                      />
+                      <span className="text-xs text-muted-foreground">
+                        {cur === 'true' || cur === '1' ? '开启' : '关闭'}
+                      </span>
+                    </div>
+                  ) : (
+                    <Input
+                      value={cur}
+                      onChange={(e) =>
+                        setEdits((prev) => ({ ...prev, [it.key]: e.target.value }))
+                      }
+                    />
+                  )}
                 </div>
-              </div>
-              {isBool ? (
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    className="size-4 cursor-pointer accent-primary"
-                    checked={cur === 'true' || cur === '1'}
-                    onChange={(e) =>
-                      setEdits((prev) => ({
-                        ...prev,
-                        [it.key]: e.target.checked ? 'true' : 'false',
-                      }))
-                    }
-                  />
-                  <span className="text-xs text-muted-foreground">
-                    {cur === 'true' || cur === '1' ? '开启' : '关闭'}
-                  </span>
-                </div>
-              ) : (
-                <Input
-                  value={cur}
-                  onChange={(e) =>
-                    setEdits((prev) => ({ ...prev, [it.key]: e.target.value }))
-                  }
-                />
-              )}
-            </div>
-          )
-        })}
-      </div>
+              )
+            })}
+          </div>
+        </div>
+      ))}
 
       <div className="flex items-center gap-2">
         <Button
