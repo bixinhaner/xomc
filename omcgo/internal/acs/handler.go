@@ -78,7 +78,10 @@ type Handler struct {
 	connReqSender      ConnectionRequester
 	postSessionWakeCfg appconfig.PostSessionWakeConfig
 	redisClient        redis.Cmdable // 用于连续唤醒计数器
-	stunStore          *stun.Store   // 缓存 Inform 中的设备 STUN 地址
+	// onlineIndex 在线设备索引（acs:online ZSET）。issue #397：收 Inform 当场、发 NATS
+	// 之前同步 ZADD，作为「免 NATS」的存活信号。nil 时 Mark 安全 no-op。
+	onlineIndex *redisx.OnlineIndex
+	stunStore   *stun.Store // 缓存 Inform 中的设备 STUN 地址
 	// connReqURLStore 共享存储设备的 ConnectionRequestURL（issue #65 Option B：取代进程内
 	// sync.Map）。nil 时退化为不缓存 CR URL —— postSessionWake 的 HTTP 回退拿到空 URL，
 	// 行为等价于改造前缓存 miss（STUN 设备不受影响）。
@@ -1526,6 +1529,15 @@ func (h *Handler) handleAutonomousTransferComplete(w http.ResponseWriter, r *htt
 }
 
 func (h *Handler) publishInformEvents(ctx context.Context, inform *tr069.InformMessage, eventCodes []string, log *zap.Logger) {
+	// issue #397：发 NATS 事件之前，先同步把设备写入在线索引（acs:online ZSET）。
+	// 这是「免 NATS」的存活信号 —— PM 上报洪峰压垮 NATS 时此写入不受影响，供在线计数
+	// 与后续离线判定使用。ZADD O(log N)；Redis 不可用时 Mark 内部降级 no-op，
+	// 失败仅告警、绝不阻断 Inform 主流程。
+	if err := h.onlineIndex.Mark(ctx, inform.DeviceId.SerialNumber, time.Now().Unix()); err != nil {
+		log.Warn("mark device online (acs:online) failed",
+			zap.Error(err), zap.String("device_sn", inform.DeviceId.SerialNumber))
+	}
+
 	// 构建事件载荷
 	payload := map[string]interface{}{
 		"device_id":      inform.DeviceId,

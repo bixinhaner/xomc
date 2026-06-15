@@ -9,6 +9,7 @@ import (
 	"github.com/omcgo/omcgo/internal/acs/connreq"
 	"github.com/omcgo/omcgo/internal/acs/stun"
 	"github.com/omcgo/omcgo/internal/admin"
+	"github.com/omcgo/omcgo/internal/core/components/redisx"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/device"
 )
@@ -44,6 +45,18 @@ func initDeviceModule(c *Container) error {
 	})
 	reconciler.Start()
 	c.GS.Register("device-status-reconciler", 1, func(ctx context.Context) error { reconciler.Stop(); return nil })
+
+	// issue #397（加法优先）：在线索引 acs:online ZSET —— ACS 收 Inform 当场同步 ZADD 写入
+	// （免 NATS 的存活信号）；这里在 app 单点周期 Prune（控规模）+ 记录在线总数。
+	// 本期不改离线判定（reconciler 仍读 last_inform_at），仅铺设索引与计数能力。
+	// Redis 为 nil（dev/test）时不构造、不启动。
+	var onlineIdx *redisx.OnlineIndex
+	if c.Redis != nil {
+		onlineIdx = redisx.NewOnlineIndex(c.Redis)
+	}
+	onlinePruner := device.NewOnlinePruner(onlineIdx, logger)
+	onlinePruner.Start()
+	c.GS.Register("online-index-pruner", 1, func(ctx context.Context) error { onlinePruner.Stop(); return nil })
 
 	// Shared infrastructure
 	connReqClient := connreq.NewClient(c.Redis, logger)
