@@ -27,8 +27,11 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import { DeleteOutlined, DownloadOutlined, EyeOutlined, PlusOutlined, ExportOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useQueryClient } from '@tanstack/react-query';
-import { useSearchParams } from 'react-router-dom';
+import { useLocation, useSearchParams } from 'react-router-dom';
 import { useT } from '@/hooks/useT';
+import { useTabStore } from '@core/store/tabStore';
+import { useMenuStore } from '@core/store/menuStore';
+import { resolveMenuLabel } from '@core/types/menu';
 
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import SearchInput from '@/components/SearchInput';
@@ -182,6 +185,41 @@ export default function FileTransferCenter() {
   const currentUser = useUserStore((s) => s.currentUser);
   const taskNameUser = currentUser?.username || currentUser?.displayName || 'user';
   const appLocale = useAppStore((s) => s.locale);
+
+  // #375: 自注册「任务管理」页签。v1 多页签机制下激活页签标题取自 tabStore 的
+  // 激活 tab.label；从设备列表「日志收集」navigate('/transfer/center?...') 直跳进
+  // 本页时没有任何 openTab，AppShell 的 syncActiveTabPath 又被同 pathname 守卫拦截
+  // （旧激活 tab 是 /device/list），导致激活页签标题仍停留在「设备列表」、内容却已
+  // 是本页。仿 DeviceDetail 在自身 effect 里 openTab 自注册，覆盖任何入口（设备列表
+  // 跳入 / 北向直链 / 侧栏点击均命中同一页签）。
+  const location = useLocation();
+  const openTab = useTabStore((s) => s.openTab);
+  const flatMenus = useMenuStore((s) => s.flatMenus);
+  useEffect(() => {
+    // 按 routePath='/transfer/center' 反查菜单 key + nameI18n，兼容静态/动态两种菜单：
+    //  - 动态菜单(DB)：key===routePath、labelRaw=true（用 nameI18n 切语言刷新）；
+    //  - 查不到则回退静态：key='transfer-task-create'、label='nav.transfer.taskCreate'、labelRaw=false。
+    // openTab 的 dedup(key 或 path 命中)确保与侧栏点击命中同一页签，不产生错配双页签。
+    const menu = flatMenus.find((m) => m.routePath === '/transfer/center');
+    const path = `/transfer/center${location.search}`;
+    if (menu) {
+      openTab({
+        key: menu.routePath as string,
+        label: resolveMenuLabel(menu, appLocale),
+        labelRaw: true,
+        path,
+        closable: true,
+      });
+    } else {
+      openTab({
+        key: 'transfer-task-create',
+        label: 'nav.transfer.taskCreate',
+        labelRaw: false,
+        path,
+        closable: true,
+      });
+    }
+  }, [flatMenus, location.search, appLocale, openTab]);
   // lastAutoFilledTaskNameRef 记录最近一次自动填的名字。用户在表单里手动改过 → ref
   // 跟 form 值不再一致 → typeCode 切换时不覆盖；用户没改 → 切换业务时跟着刷新。
   const lastAutoFilledTaskNameRef = useRef<string>('');

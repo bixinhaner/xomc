@@ -100,8 +100,11 @@ function ConnStatusBadge({ online }: { online: boolean }) {
   )
 }
 
-function AlarmBadge({ level }: { level: AlarmSeverity | 'none' }) {
-  return <Badge variant={ALARM_VARIANT[level]}>{ALARM_LABEL[level]}</Badge>
+function AlarmBadge({ level, count }: { level: AlarmSeverity | 'none'; count?: number }) {
+  // #361: 有活动告警时把告警数拼进 label（如「重要 · 3」）。
+  const label =
+    level !== 'none' && (count ?? 0) > 0 ? `${ALARM_LABEL[level]} · ${count}` : ALARM_LABEL[level]
+  return <Badge variant={ALARM_VARIANT[level]}>{label}</Badge>
 }
 
 function ActivationBadge({ opState }: { opState: string }) {
@@ -301,7 +304,7 @@ export function DevicesPage() {
       {
         accessorKey: 'alarmLevel',
         header: '告警',
-        cell: ({ row }) => <AlarmBadge level={row.original.alarmLevel} />,
+        cell: ({ row }) => <AlarmBadge level={row.original.alarmLevel} count={row.original.activeAlarmCount} />,
       },
       {
         accessorKey: 'networkType',

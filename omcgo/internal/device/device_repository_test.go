@@ -286,3 +286,57 @@ func TestFindStaleDevicesByClass_NullProductClass_FallsIntoENBBranch(t *testing.
 	require.Len(t, args, 3)
 	assert.EqualValues(t, 100, args[2], "ELSE（NULL/eNB）分支用 enbThresholdSec（$3）")
 }
+
+// TestAlarmSeverityTextToNum 锁定 #361 文本↔severity 数值映射：
+// 1=critical / 2=major / 3=minor / 4=warning（最严重=数值最小），未知→0。
+func TestAlarmSeverityTextToNum(t *testing.T) {
+	cases := map[string]int{
+		"critical": 1, "major": 2, "minor": 3, "warning": 4,
+		"CRITICAL": 1, " Major ": 2, // 大小写/空白容错
+		"none": 0, "": 0, "bogus": 0,
+	}
+	for text, want := range cases {
+		assert.Equalf(t, want, alarmSeverityTextToNum(text),
+			"alarmSeverityTextToNum(%q)", text)
+	}
+}
+
+// TestAlarmSeverityFilterCond_SQLShape 验证 #361 告警级别筛选用相关子查询匹配
+// 「该设备未 cleared 活动告警最严重级别 = 请求级别」，与列表展示口径一致；
+// 未知级别返回 nil（不过滤）。
+func TestAlarmSeverityFilterCond_SQLShape(t *testing.T) {
+	// 已知级别：构造出相关子查询条件，占位参数 = 该级别数值。
+	cond := alarmSeverityFilterCond("major")
+	require.NotNil(t, cond)
+	sqlStr, args, err := cond.ToSql()
+	require.NoError(t, err)
+	assert.Contains(t, sqlStr, "FROM alarms_active")
+	assert.Contains(t, sqlStr, "MIN(aaf.severity)")
+	assert.Contains(t, sqlStr, "status <> 'cleared'")
+	require.Len(t, args, 1)
+	assert.EqualValues(t, 2, args[0], "major → severity=2")
+
+	// 未知级别：不过滤。
+	assert.Nil(t, alarmSeverityFilterCond("none"))
+	assert.Nil(t, alarmSeverityFilterCond(""))
+}
+
+// TestDeviceWithInfoSelectColumns_AlarmAggregation 验证 #361 list select 列已切到
+// alarms_active 实时聚合派生值（CASE aa.top_sev → 文本 + aa.active_alarm_count），
+// 不再读无人维护的 di.alarm_severity 冗余列。
+func TestDeviceWithInfoSelectColumns_AlarmAggregation(t *testing.T) {
+	cols := deviceWithInfoSelectColumns()
+	joined := strings.Join(cols, " || ")
+
+	assert.Contains(t, joined, "CASE aa.top_sev", "告警级别列必须来自聚合派生 CASE")
+	assert.Contains(t, joined, "AS alarm_severity", "派生列别名仍为 alarm_severity（前端契约不变）")
+	assert.Contains(t, joined, "aa.active_alarm_count", "必须暴露活动告警数列")
+	assert.NotContains(t, joined, "di.alarm_severity",
+		"#361：列表 select 不再读无人维护的 di.alarm_severity 冗余列")
+
+	// aa JOIN 子句聚合 alarms_active：MIN(severity)=top_sev、COUNT(*)=active_alarm_count、排除 cleared。
+	assert.Contains(t, alarmsActiveAggJoin, "MIN(severity)")
+	assert.Contains(t, alarmsActiveAggJoin, "COUNT(*)")
+	assert.Contains(t, alarmsActiveAggJoin, "status <> 'cleared'")
+	assert.Contains(t, alarmsActiveAggJoin, "aa ON aa.device_id = d.id")
+}

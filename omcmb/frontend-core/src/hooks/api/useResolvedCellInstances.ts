@@ -47,17 +47,60 @@ const BM_CELL_MODE_MAP: Record<string, { gsmNum: number; lteNum: number }> = {
 
 const LTE_FAP_INUSE_RE = /^Device\.Services\.FAPService\.(\d+)\.FAPControl\.LTE\.InUse$/i;
 const GSM_INUSE_RE = /^Device\.Services\.GsmBTSCellDT\.(\d+)\.InUse$/i;
+const GSM_INSTANCE_RE = /^Device\.Services\.GsmBTSCellDT\.(\d+)\./i; // #374: GSM 实例存在性
 const FAP_INSTANCE_RE = /^Device\.Services\.FAPService\.(\d+)\./;
 const NR_INSTANCE_RE = /^Device\.Services\.FAPService\.1\.CellConfig\.(\d+)\./;
 
-function isTruthyInUse(value: string | null | undefined): boolean {
-  const normalized = String(value ?? '').trim().toLowerCase();
-  return normalized === '1'
-    || normalized === 'true'
-    || normalized === 'on'
-    || normalized === 'enable'
-    || normalized === 'enabled'
-    || normalized === 'yes';
+// #374: 显式「禁用」判定——仅当 InUse 参数存在且取值明确为假值时才隐藏小区。
+// 缺参 / 同步缺失 / undefined / 空串 不算「禁用」（返回 false），这样「实例存在但
+// InUse 缺失/未同步」的小区不会被静默吃掉（第 6 个 LTE 小区丢失根因）。
+function isExplicitFalsyInUse(value: string | null | undefined): boolean {
+  if (value === null || value === undefined) return false;
+  const normalized = String(value).trim().toLowerCase();
+  if (normalized === '') return false; // 空串视为「未同步」，不当禁用
+  return normalized === '0'
+    || normalized === 'false'
+    || normalized === 'off'
+    || normalized === 'disable'
+    || normalized === 'disabled'
+    || normalized === 'no';
+}
+
+/**
+ * #374: 纯函数——从 schema 的 parameters/objects 解析「存在即可见、仅显式 InUse
+ * 假值隐藏」的实例集合。LTE 与 GSM 共用，便于单测（hook 内 useMemo 调它）。
+ *
+ * @param parameters schema.parameters（含 path + currentValue）
+ * @param objectCurrentInstances 对应对象路径的 currentInstances（schema 显式列出的实例）
+ * @param inUseRe 匹配该制式 InUse path 的正则（捕获组 1 = 实例号）
+ * @param instanceRe 匹配该制式『实例存在』path 的正则（捕获组 1 = 实例号）
+ * @param limit 上界（bmCellMode 的 lteNum/gsmNum；未识别 mode 传 Infinity）
+ */
+export function resolveExistsVisibleInstances(
+  parameters: ReadonlyArray<{ path: string; currentValue?: string | null }>,
+  objectCurrentInstances: ReadonlyArray<number>,
+  inUseRe: RegExp,
+  instanceRe: RegExp,
+  limit: number,
+): number[] {
+  if (limit <= 0) return [];
+  const inUseByInstance = new Map<number, string | null | undefined>();
+  const existing = new Set<number>();
+  for (const p of parameters) {
+    const inUseMatch = inUseRe.exec(p.path);
+    if (inUseMatch) inUseByInstance.set(Number(inUseMatch[1]), p.currentValue);
+    const instMatch = instanceRe.exec(p.path);
+    if (instMatch) existing.add(Number(instMatch[1]));
+  }
+  for (const n of objectCurrentInstances) existing.add(n);
+
+  const enabled = new Set<number>();
+  for (const instance of existing) {
+    if (instance < 1 || instance > limit) continue;
+    if (isExplicitFalsyInUse(inUseByInstance.get(instance))) continue;
+    enabled.add(instance);
+  }
+  return Array.from(enabled).sort((a, b) => a - b);
 }
 
 export interface ResolvedCellInstancesOptions {
@@ -172,36 +215,41 @@ export function useResolvedCellInstances({
     return BM_CELL_MODE_MAP[modeKey] ?? null;
   }, [isENB, isBM, bmDeviceInfoSchema]);
 
-  // BM 实例集合：bmCellMode 命中 → 用其上限 + InUse 过滤；
-  // bmCellMode 为 null（未识别 mode）→ 退化到「仅 InUse=true」，不限上界，避免选择器整体空白。
+  // BM 实例集合：bmCellMode 命中 → 用其上限；bmCellMode 为 null（未识别 mode）→
+  // 不限上界，避免选择器整体空白。
+  //
+  // #374 兜底：原实现只把「InUse 命中且为真值」的实例计入，对「实例存在(有
+  // NumOfCells/PCI 等参数)但 InUse 缺失 / 同步缺失 / 空串」的实例无兜底——3GMS+6LTE
+  // 时只要第 6 个 FAPService 的 InUse 缺失就被静默丢掉。改为「存在即可见」：枚举
+  // 在 [1, limit] 范围内『存在』的 FAPService 实例（FAP_INSTANCE_RE / currentInstances），
+  // 仅当其 InUse 参数存在且显式为假值（'0'/'false'…）才隐藏；缺参/未同步保留可见。
+  // 与后端 GSM AssembleGSMCells 的 hasAnyGSMInUse『InUse 缺失不静默吃掉』口径一致。
   const bmEnabledLteInstances = useMemo<number[]>(() => {
     if (!isENB || !isBM || !fapSchema) return [];
     const limit = bmCellMode?.lteNum ?? Infinity;
-    if (bmCellMode && limit <= 0) return [];
-    const enabled = new Set<number>();
-    for (const p of fapSchema.parameters) {
-      const m = LTE_FAP_INUSE_RE.exec(p.path);
-      if (!m) continue;
-      const instance = Number(m[1]);
-      if (instance < 1 || instance > limit) continue;
-      if (isTruthyInUse(p.currentValue)) enabled.add(instance);
-    }
-    return Array.from(enabled).sort((a, b) => a - b);
+    const objEntry = fapSchema.objects.find((o) => o.path === LTE_FAPSERVICE_PREFIX);
+    return resolveExistsVisibleInstances(
+      fapSchema.parameters,
+      objEntry?.currentInstances ?? [],
+      LTE_FAP_INUSE_RE,
+      FAP_INSTANCE_RE,
+      limit,
+    );
   }, [isENB, isBM, fapSchema, bmCellMode]);
 
+  // #374: GSM 侧与 LTE 对齐——存在即可见，仅显式 InUse 假值隐藏；与后端
+  // AssembleGSMCells 的 hasAnyGSMInUse『InUse 缺失不静默吃掉』口径一致。
   const bmEnabledGsmInstances = useMemo<number[]>(() => {
     if (!isENB || !isBM || !bmGsmSchema) return [];
     const limit = bmCellMode?.gsmNum ?? Infinity;
-    if (bmCellMode && limit <= 0) return [];
-    const enabled = new Set<number>();
-    for (const p of bmGsmSchema.parameters) {
-      const m = GSM_INUSE_RE.exec(p.path);
-      if (!m) continue;
-      const instance = Number(m[1]);
-      if (instance < 1 || instance > limit) continue;
-      if (isTruthyInUse(p.currentValue)) enabled.add(instance);
-    }
-    return Array.from(enabled).sort((a, b) => a - b);
+    const objEntry = bmGsmSchema.objects.find((o) => o.path === BM_GSM_CELL_PREFIX);
+    return resolveExistsVisibleInstances(
+      bmGsmSchema.parameters,
+      objEntry?.currentInstances ?? [],
+      GSM_INUSE_RE,
+      GSM_INSTANCE_RE,
+      limit,
+    );
   }, [isENB, isBM, bmGsmSchema, bmCellMode]);
 
   const nrCellInstances = useMemo<number[]>(() => {

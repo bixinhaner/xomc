@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
@@ -43,7 +44,9 @@ var allowedSortColumnsWithInfo = map[string]string{
 	"transmit_power":  "di.transmit_power",
 	"num_of_cells":    "di.num_of_cells",
 	"gps_status":      "di.gps_status",
-	"alarm_severity":  "di.alarm_severity",
+	// #361: 告警级别排序随显示口径切到聚合派生值 aa.top_sev（1=critical..4=warning，
+	// NULL=无告警）。OrderBy 处对该列追加 NULLS LAST，使无告警设备恒排末尾。
+	"alarm_severity":  "aa.top_sev",
 	"license_status":  "di.license_status",
 }
 
@@ -217,6 +220,7 @@ func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter
 		LeftJoin("device_info di ON di.device_id = d.id").
 		LeftJoin("device_group_members dgm ON dgm.device_id = d.id").
 		LeftJoin("device_groups dg ON dg.id = dgm.group_id").
+		LeftJoin(alarmsActiveAggJoin). // #361: 告警级别/告警数实时聚合
 		Where(sq.Eq{"d.deleted_at": nil})
 	countBuilder := storage.Psql.Select("COUNT(*)").
 		From("devices d").
@@ -348,8 +352,13 @@ func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter
 		countBuilder = countBuilder.Where(sq.Eq{"di.gps_status": *filter.GPSStatus})
 	}
 	if filter.AlarmSeverity != nil && *filter.AlarmSeverity != "" {
-		builder = builder.Where(sq.Eq{"di.alarm_severity": *filter.AlarmSeverity})
-		countBuilder = countBuilder.Where(sq.Eq{"di.alarm_severity": *filter.AlarmSeverity})
+		// #361: 告警级别筛选随显示口径切到 alarms_active 实时聚合（不再用无人维护的
+		// di.alarm_severity 冗余列）。用相关子查询匹配「该设备未 cleared 活动告警的
+		// 最严重级别(MIN severity) = 请求级别」，与列表展示的告警级别一致。
+		if cond := alarmSeverityFilterCond(*filter.AlarmSeverity); cond != nil {
+			builder = builder.Where(cond)
+			countBuilder = countBuilder.Where(cond)
+		}
 	}
 	if filter.LicenseStatus != nil && *filter.LicenseStatus != "" {
 		builder = builder.Where(sq.Eq{"di.license_status": *filter.LicenseStatus})
@@ -403,8 +412,13 @@ func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter
 	if filter.SortDir == "asc" {
 		sortDir = "ASC"
 	}
+	orderClause := sortCol + " " + sortDir
+	// #361: 告警级别按聚合派生值排序时，无告警(NULL)设备恒排末尾（与「无」语义一致）。
+	if sortCol == "aa.top_sev" {
+		orderClause += " NULLS LAST"
+	}
 	builder = builder.
-		OrderBy(sortCol + " " + sortDir).
+		OrderBy(orderClause).
 		Limit(uint64(filter.Limit())).
 		Offset(uint64(filter.Offset()))
 
@@ -444,6 +458,7 @@ func (r *PgDeviceInfoRepository) GetByIDWithInfo(ctx context.Context, deviceID u
 		LeftJoin("device_info di ON di.device_id = d.id").
 		LeftJoin("device_group_members dgm ON dgm.device_id = d.id").
 		LeftJoin("device_groups dg ON dg.id = dgm.group_id").
+		LeftJoin(alarmsActiveAggJoin). // #361: 告警级别/告警数实时聚合
 		Where(sq.Eq{"d.id": deviceID}).
 		Where(sq.Eq{"d.deleted_at": nil}).
 		Limit(1). // 设备可能属多组，JOIN 可能出多行；详情只取一行
@@ -477,7 +492,14 @@ func (r *PgDeviceInfoRepository) GetByIDWithInfo(ctx context.Context, deviceID u
 func (r *PgDeviceInfoRepository) ComputeListStats(ctx context.Context, filter DeviceFilter) (*DeviceListStats, error) {
 	// 用子查询去重再聚合：先按筛选条件取所有命中设备的 (id, lifecycle, is_online)，
 	// 再 GROUP BY。避免 dgm/dg LEFT JOIN 引起的设备重复计数。
-	subBuilder := storage.Psql.Select("DISTINCT d.id", "d.lifecycle_state", "d.is_online").
+	// #361: alarmed 标记——该设备是否存在未 cleared 活动告警（相关子查询 EXISTS）。
+	// 放进 DISTINCT 子查询的 SELECT 列里，外层用 COUNT FILTER 数有告警的设备，
+	// 与列表『告警级别』非『无』的口径一致（同一 alarms_active status<>'cleared' 源）。
+	const alarmedFlagExpr = `EXISTS (
+		SELECT 1 FROM alarms_active aa
+		WHERE aa.device_id = d.id AND aa.status <> 'cleared'
+	) AS alarmed`
+	subBuilder := storage.Psql.Select("DISTINCT d.id", "d.lifecycle_state", "d.is_online", alarmedFlagExpr).
 		From("devices d").
 		LeftJoin("device_info di ON di.device_id = d.id").
 		LeftJoin("device_group_members dgm ON dgm.device_id = d.id").
@@ -495,7 +517,11 @@ func (r *PgDeviceInfoRepository) ComputeListStats(ctx context.Context, filter De
 		return nil, fmt.Errorf("build stats subquery: %w", err)
 	}
 
-	groupQ := "SELECT lifecycle_state, is_online, COUNT(*) FROM (" + subQ +
+	// #361: 外层 GROUP BY 增加 alarmed 真实统计——COUNT FILTER 数有活动告警的设备。
+	// alarmed 已是子查询每设备唯一一行的布尔，外层直接 COUNT(*) FILTER 即得
+	// COUNT(DISTINCT device_id with active alarm)，与 list 列『告警级别』非『无』一致。
+	groupQ := "SELECT lifecycle_state, is_online, COUNT(*), " +
+		"COUNT(*) FILTER (WHERE alarmed) FROM (" + subQ +
 		") s GROUP BY lifecycle_state, is_online"
 
 	rows, err := r.pool.Query(ctx, groupQ, subArgs...)
@@ -511,18 +537,22 @@ func (r *PgDeviceInfoRepository) ComputeListStats(ctx context.Context, filter De
 		var lifecycle model.DeviceLifecycle
 		var isOnline bool
 		var count int64
-		if err := rows.Scan(&lifecycle, &isOnline, &count); err != nil {
+		var alarmedCount int64
+		if err := rows.Scan(&lifecycle, &isOnline, &count, &alarmedCount); err != nil {
 			return nil, fmt.Errorf("scan device list stats: %w", err)
 		}
 		stats.Total += count
 		stats.ByLifecycle[lifecycle] += count
+		stats.Alarmed += alarmedCount
 		if isOnline {
 			stats.OnlineCount += count
 		} else {
 			stats.OfflineCount += count
 		}
 	}
-	// Alarmed 占位为 0（JOIN alarms 表的逻辑留 T-0162 follow-up）
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate device list stats: %w", err)
+	}
 	return stats, nil
 }
 
@@ -656,7 +686,19 @@ func deviceWithInfoSelectColumns() []string {
 		"di.device_name", "di.address", "di.remark", "di.project_status", "di.height",
 		"di.eci", "di.pci", "di.cell_id", "di.freq_point", "di.bandwidth", "di.transmit_power", "di.plmn",
 		"di.rf_status", "di.cell_status", "di.mme_status", "di.sync_status", "di.kpi_status",
-		"di.num_of_cells", "di.gps_status", "di.alarm_severity", "di.license_status",
+		"di.num_of_cells", "di.gps_status",
+		// #361: 告警级别不再读 di.alarm_severity（该冗余列仅 Radisys 自报路径写、
+		// 与 OMC 告警引擎无关、从无人维护）。改实时 JOIN alarms_active 子查询 aa，
+		// 取每设备未 cleared 活动告警最严重级别(MIN(severity)，1=critical..4=warning)
+		// 映成文本；无活动告警 → NULL → 前端归 'none'。
+		`CASE aa.top_sev
+			WHEN 1 THEN 'critical'
+			WHEN 2 THEN 'major'
+			WHEN 3 THEN 'minor'
+			WHEN 4 THEN 'warning'
+			ELSE NULL
+		END AS alarm_severity`,
+		"di.license_status",
 		"di.mac", "di.hardware_version",
 		"di.first_online_time", "di.last_online_time", "di.last_offline_time", "di.run_time",
 		"di.cumulative_online_duration", // T-0173: OMC 视角累计在线时长
@@ -697,7 +739,54 @@ func deviceWithInfoSelectColumns() []string {
 			THEN FLOOR((EXTRACT(EPOCH FROM (NOW() - di.last_offline_time)) % 3600) / 60)::bigint
 			ELSE NULL
 		END AS offline_minutes`,
+		// #361: 该设备未 cleared 活动告警数（来自 alarms_active 聚合子查询 aa）。
+		// 无活动告警时 LEFT JOIN 命中空 → NULL → 前端归 0。
+		"aa.active_alarm_count",
 	}
+}
+
+// alarmsActiveAggJoin 是设备列表/单设备查询用的 alarms_active 聚合子查询 JOIN 子句。
+// 按 device_id 聚合每设备未 cleared(status<>'cleared') 活动告警的最严重级别
+// （MIN(severity)，smallint 1=critical..4=warning，最严重=数值最小）与告警数。
+// #361：把告警级别列从无人维护的 di.alarm_severity 冗余列切到实时聚合派生值。
+const alarmsActiveAggJoin = `(
+	SELECT device_id,
+	       MIN(severity)  AS top_sev,
+	       COUNT(*)       AS active_alarm_count
+	FROM alarms_active
+	WHERE status <> 'cleared'
+	GROUP BY device_id
+) aa ON aa.device_id = d.id`
+
+// alarmSeverityTextToNum 把前端 AlarmSeverity 文本映成 alarms_active.severity
+// (smallint 1=critical..4=warning)。未知文本返回 0（调用方据此跳过过滤）。
+func alarmSeverityTextToNum(text string) int {
+	switch strings.ToLower(strings.TrimSpace(text)) {
+	case "critical":
+		return 1
+	case "major":
+		return 2
+	case "minor":
+		return 3
+	case "warning":
+		return 4
+	default:
+		return 0
+	}
+}
+
+// alarmSeverityFilterCond 构造「该设备未 cleared 活动告警最严重级别 = 请求级别」
+// 的相关子查询条件（#361，与列表展示口径一致）。未知级别返回 nil（不过滤）。
+func alarmSeverityFilterCond(text string) sq.Sqlizer {
+	num := alarmSeverityTextToNum(text)
+	if num == 0 {
+		return nil
+	}
+	return sq.Expr(
+		`(SELECT MIN(aaf.severity) FROM alarms_active aaf
+		   WHERE aaf.device_id = d.id AND aaf.status <> 'cleared') = ?`,
+		num,
+	)
 }
 
 func scanDeviceInfoFromRow(row pgx.Row) (*DeviceInfo, error) {
@@ -782,6 +871,8 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 		offlineDays    *int64
 		offlineHours   *int64
 		offlineMinutes *int64
+		// #361: 活动告警数（alarms_active 聚合，LEFT JOIN 未命中→NULL）
+		activeAlarmCount *int
 	)
 
 	err := rows.Scan(
@@ -816,6 +907,8 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 		&onlineDuration,
 		// 离线时长（SQL计算）
 		&offlineSeconds, &offlineDays, &offlineHours, &offlineMinutes,
+		// #361: 活动告警数（select 列末尾 aa.active_alarm_count）
+		&activeAlarmCount,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("scan device with info: %w", err)
@@ -877,7 +970,8 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 	d.KPIStatus = diKPIStatus
 	d.NumOfCells = diNumOfCells
 	d.GPSStatus = diGPSStatus
-	d.AlarmSeverity = diAlarmSeverity
+	d.AlarmSeverity = diAlarmSeverity // #361: 现来自 alarms_active 聚合 CASE，非 di.alarm_severity 冗余列
+	d.ActiveAlarmCount = activeAlarmCount
 	d.LicenseStatus = diLicenseStatus
 	d.MAC = diMAC
 	d.HardwareVersion = diHWVersion

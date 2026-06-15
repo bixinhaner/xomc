@@ -1974,19 +1974,20 @@ func (s *DeviceService) ListRecycleBin(ctx context.Context, filter RecycleBinFil
 }
 
 // RestoreDevices restores soft-deleted devices.
-func (s *DeviceService) RestoreDevices(ctx context.Context, ids []uuid.UUID) (int64, error) {
+// #378: 返回 RestoreResult（恢复数 + 冲突明细），可部分成功；仅真正 DB 错误才返回 err。
+func (s *DeviceService) RestoreDevices(ctx context.Context, ids []uuid.UUID) (*RestoreResult, error) {
 	// C2 修复：恢复后清 cache，让下次 inform 重新走 GetOrLoad 加载干净的 device 行
 	idToSN, _ := s.deviceRepo.ListSerialsByIDs(ctx, ids)
-	n, err := s.deviceRepo.RestoreDevices(ctx, ids)
+	res, err := s.deviceRepo.RestoreDevices(ctx, ids)
 	if err != nil {
-		return n, err
+		return res, err
 	}
 	if s.cache != nil {
 		for _, sn := range idToSN {
 			s.cache.Delete(ctx, sn)
 		}
 	}
-	return n, nil
+	return res, nil
 }
 
 // PermanentDeleteDevices permanently removes devices from the database.
