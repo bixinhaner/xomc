@@ -1,6 +1,7 @@
 package soap
 
 import (
+	"bytes"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -8,6 +9,73 @@ import (
 
 	"github.com/omcgo/omcgo/pkg/tr069"
 )
+
+// SanitizeBareAmpersands 把 XML 文本里"裸"的 '&'（不构成合法实体引用的）转义为 '&amp;'，
+// 已合法的实体（&amp; &lt; &gt; &quot; &apos; 与数字 &#NN; / &#xHH;）原样保留。
+// 用于容忍部分 CPE 固件在 XML 里回传 URL 时未转义 '&'（如 ?fileType=PM&filename=...）的情况——
+// encoding/xml 默认严格拒绝裸 '&' 会报 "invalid character entity"，导致整条报文解析失败。
+func SanitizeBareAmpersands(b []byte) []byte {
+	if !bytes.ContainsRune(b, '&') {
+		return b
+	}
+	out := make([]byte, 0, len(b)+16)
+	for i := 0; i < len(b); i++ {
+		if b[i] != '&' {
+			out = append(out, b[i])
+			continue
+		}
+		if startsWithXMLEntity(b[i+1:]) {
+			out = append(out, '&')
+		} else {
+			out = append(out, "&amp;"...)
+		}
+	}
+	return out
+}
+
+// startsWithXMLEntity 判断 '&' 之后的字节是否构成合法 XML 实体引用（到首个 ';' 为止）。
+func startsWithXMLEntity(s []byte) bool {
+	semi := -1
+	for j := 0; j < len(s) && j <= 10; j++ {
+		if s[j] == ';' {
+			semi = j
+			break
+		}
+	}
+	if semi <= 0 {
+		return false
+	}
+	name := s[:semi]
+	switch string(name) {
+	case "amp", "lt", "gt", "quot", "apos":
+		return true
+	}
+	if name[0] != '#' {
+		return false
+	}
+	digits := name[1:]
+	if len(digits) == 0 {
+		return false
+	}
+	if digits[0] == 'x' || digits[0] == 'X' {
+		digits = digits[1:]
+		if len(digits) == 0 {
+			return false
+		}
+		for _, c := range digits {
+			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+				return false
+			}
+		}
+		return true
+	}
+	for _, c := range digits {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
 
 // DecodeInform stream-parses a SOAP Inform message and returns the InformMessage and CWMP ID.
 func DecodeInform(r io.Reader) (*tr069.InformMessage, string, error) {
@@ -252,7 +320,14 @@ func DecodeDownloadResponse(r io.Reader) (int, string, string, error) {
 
 // DecodeAutonomousTransferComplete stream-parses a SOAP AutonomousTransferComplete message.
 func DecodeAutonomousTransferComplete(r io.Reader) (*tr069.AutonomousTransferComplete, string, error) {
-	decoder := xml.NewDecoder(r)
+	// 部分 CPE 固件在 AutonomousTransferComplete 里回传上传 URL 时未对查询串的 '&'
+	// （?fileType=PM&filename=...）做 XML 转义，导致 encoding/xml 报 invalid character
+	// entity、整条完成通知解析失败、ACS 回 400。先把裸 '&' 修成 '&amp;' 再解析以容忍之。
+	raw, err := io.ReadAll(r)
+	if err != nil {
+		return nil, "", fmt.Errorf("read SOAP body: %w", err)
+	}
+	decoder := xml.NewDecoder(bytes.NewReader(SanitizeBareAmpersands(raw)))
 
 	var cwmpID string
 	var atc tr069.AutonomousTransferComplete
