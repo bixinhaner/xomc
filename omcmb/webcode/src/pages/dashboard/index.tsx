@@ -98,7 +98,6 @@ const QUICK_ACCESS_ITEMS = [
   { labelKey: 'nav.alarm.rules',       icon: <SettingOutlined />,     path: '/alarm/rules',               color: '#8C8C8C' },
   { labelKey: 'nav.log.system',        icon: <FileTextOutlined />,    path: '/log/system',                color: '#595959' },
   { labelKey: 'nav.system.users',      icon: <TeamOutlined />,        path: '/system/users',              color: '#D46B08' },
-  { labelKey: 'nav.mml.console',       icon: <PlayCircleOutlined />,  path: '/mml/console',               color: '#08979C' },
 ];
 
 export default function DashboardPage() {

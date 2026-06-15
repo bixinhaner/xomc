@@ -2,13 +2,10 @@ import { test, expect } from '@playwright/test';
 import { expectPageRenders, smokeLogin } from './helpers';
 
 /**
- * MML 控制台域冒烟：七个页面在真实后端下正常渲染。
+ * MML 控制台域冒烟：六个页面在真实后端下正常渲染。
  *
- * 路由依据 src/router/routes.tsx（mml/console 是侧边栏主入口 nav.mml.console，
- * mml/console-v2 为重设计版独立路由，mml/commands 在导航中隐藏但路由仍在）：
- *   - /mml/console      src/pages/mml/Console      三栏布局（设备树｜命令树｜操作面板）
- *                       + StepBar(.ant-steps，mml.console.stepBar.step1-4)
- *                       + DeviceTree 头部 nav.device.list（设备列表）与 mml.console.batchInput（批量输入）
+ * 路由依据 src/router/routes.tsx（mml/console-v2 为控制台独立路由，
+ * mml/commands 在导航中隐藏但路由仍在）：
  *   - /mml/console-v2   src/pages/mml/ConsoleV2    顶部 SelectionBar（硬编码中文：
  *                       ① 选择设备 / ② 选择命令 / ③ 配置参数 / 执行）
  *   - /mml/commands     src/pages/mml/CommandTree  TreeListPageLayout：
@@ -32,21 +29,6 @@ import { expectPageRenders, smokeLogin } from './helpers';
 test.describe('MML控制台冒烟（真实后端）', { tag: '@smoke' }, () => {
   test.beforeEach(async ({ page }) => {
     await smokeLogin(page);
-  });
-
-  test('/mml/console MML控制台（主入口）三栏布局渲染', async ({ page }) => {
-    await expectPageRenders(page, '/mml/console');
-
-    // 顶部步骤条（StepBar：选择设备 → 选择命令 → 配置参数 → 查看结果）
-    await expect(page.locator('.ant-steps').first()).toBeVisible();
-    await expect(page.getByText(/选择设备|Select device/).first()).toBeVisible();
-    await expect(page.getByText(/配置参数|Configure/).first()).toBeVisible();
-
-    // 左栏 DeviceTree 头部：设备列表标题 + 批量输入按钮
-    await expect(page.getByText(/设备列表|Device List/).first()).toBeVisible();
-    await expect(
-      page.getByRole('button', { name: /批量输入|Batch Input/ }),
-    ).toBeVisible();
   });
 
   test('/mml/console-v2 MML控制台V2 顶部选择条渲染', async ({ page }) => {

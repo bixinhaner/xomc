@@ -4,7 +4,7 @@ import { AxiosError } from 'axios';
 import { useCreateMMLTemplate, useUpdateMMLTemplate } from '@core/hooks/api/useMML';
 import type { MMLCustomCommand } from '@core/types/mml';
 import { useT } from '@/hooks/useT';
-import OperationTypeWithModify from '../../components/OperationTypeWithModify';
+import OperationTypeWithModify from './OperationTypeWithModify';
 import PathPicker from './PathPicker';
 
 interface AddTemplateModalProps {

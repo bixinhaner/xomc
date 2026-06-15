@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 import { login } from './helpers/auth';
 
 /**
@@ -124,14 +124,4 @@ test.describe('MML standard-model rebuild (T-0119)', () => {
     }
   });
 
-  // UI 层面的回归（轻量）：MML Console 页能成功加载新 schema 命令树
-  test('MML Console 页面可加载新 schema 命令列表', async ({ page }: { page: Page }) => {
-    await page.goto('/mml/console');
-    // 命令树（左侧）容器渲染出至少一个 category 节点
-    const tree = page.locator('.ant-tree');
-    await expect(tree).toBeVisible({ timeout: 10_000 });
-    // 至少出现一个类别 folder（标 FolderOutlined 的图标）
-    const folders = page.locator('.ant-tree .anticon-folder, .ant-tree-icon');
-    await expect.poll(async () => folders.count(), { timeout: 8_000 }).toBeGreaterThan(0);
-  });
 });
