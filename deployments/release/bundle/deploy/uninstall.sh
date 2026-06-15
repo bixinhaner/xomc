@@ -4,7 +4,7 @@
 #
 # ★ 默认【保留数据】：拆掉正在跑的栈（容器 / 网络 / 业务镜像 / 代码目录），但
 #   保留所有持久化数据与凭据，使下次 install.sh 能直接复用现有 DB / MinIO：
-#     · 保留：所有数据卷（pgdata/miniodata/redisdata/natsdata + 监控各卷）
+#     · 保留：所有数据卷（pgdata/tsdbdata/miniodata/redisdata/natsdata + 监控各卷）
 #     · 保留：$OMC_ROOT/data（UI 上传的自定义参数模型/指标/告警 XML + 升级快照）
 #     · 保留：$OMC_ROOT/etc（实例配置）+ 凭据快照 .env.saved + 主凭据 secrets.env（#175，
 #             密钥唯一权威源；与数据卷同生命周期：默认保留 → reinstall 沿用同套口令连得上旧卷）

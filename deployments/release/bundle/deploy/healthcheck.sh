@@ -69,7 +69,7 @@ for svc in app acs worker; do
 done
 
 echo "== docker compose 基础设施容器 =="
-for svc in postgres redis nats minio; do
+for svc in postgres postgres-tsdb redis nats minio; do
   check "$svc 容器 running" container_running "$svc"
 done
 

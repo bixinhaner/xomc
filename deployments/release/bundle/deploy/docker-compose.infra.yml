@@ -93,6 +93,64 @@ services:
       timeout: 5s
       retries: 10
 
+  # postgres-tsdb：第二个 TimescaleDB 实例 —— 物理隔离的时序库（TsPool）。承载 PM/KPI
+  # 超表、告警历史、MR/trace 时序表 + pm_files + 影子维度表；业务数据仍留主库 postgres。
+  # 复用主库同一 TimescaleDB 镜像 ${IMAGE_POSTGRES}（已 pin 2.25.2-pg16，超表 catalog 一致），
+  # 独立 volume tsdbdata、独立凭据 POSTGRES_TSDB_*（口令由 install.sh ensure_secrets 强随机
+  # 生成，与主库口令独立，见 #347）。宿主端口 5433 避开主库 5432。
+  # 调优旋钮 TSDB_* 由 resources.env(plan-resources.sh) 注入；缺省档保守（两 PG 同机不互挤 OOM）。
+  postgres-tsdb:
+    image: ${IMAGE_POSTGRES}
+    restart: unless-stopped
+    environment:
+      TZ: "Asia/Shanghai"
+      POSTGRES_USER: ${POSTGRES_TSDB_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_TSDB_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_TSDB_DB}
+    ports:
+      - "5433:5432"                        # 内网开放(0.0.0.0)，避开主库 5432，供数据中台直连时序库
+    command:
+      - "postgres"
+      - "-c"
+      - "timezone=Asia/Shanghai"
+      - "-c"
+      - "log_timezone=Asia/Shanghai"
+      - "-c"
+      - "max_connections=${TSDB_MAX_CONNECTIONS:-300}"
+      - "-c"
+      # PM copy 入库走本库，写压力主要在此 → work_mem / max_wal 比主库略大；缺省档与主库同量级，
+      # 防未跑 plan-resources.sh 的部署在两 PG 同机时 OOM。生产经 resources.env 按内存重配。
+      - "shared_buffers=${TSDB_SHARED_BUFFERS:-1792MB}"
+      - "-c"
+      - "effective_cache_size=${TSDB_EFFECTIVE_CACHE_SIZE:-5GB}"
+      - "-c"
+      - "work_mem=${TSDB_WORK_MEM:-16MB}"
+      - "-c"
+      - "maintenance_work_mem=${TSDB_MAINTENANCE_WORK_MEM:-256MB}"
+      - "-c"
+      - "max_wal_size=${TSDB_MAX_WAL_SIZE:-4GB}"
+      - "-c"
+      - "checkpoint_completion_target=0.9"
+    stop_grace_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: "${TSDB_CPUS:-2}"
+          memory: "${TSDB_MEM:-7g}"
+        reservations:
+          cpus: "0.5"
+          memory: 512m
+    volumes:
+      - tsdbdata:/var/lib/postgresql/data   # 生产建议改为数据盘 bind mount，如 /data/omc/tsdb
+      - /etc/localtime:/etc/localtime:ro
+    networks:
+      - omcgo-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_TSDB_USER} -d ${POSTGRES_TSDB_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   redis:
     image: ${IMAGE_REDIS}
     restart: unless-stopped
@@ -197,6 +255,7 @@ services:
 
 volumes:
   pgdata:
+  tsdbdata:
   redisdata:
   natsdata:
   miniodata:

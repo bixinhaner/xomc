@@ -80,6 +80,7 @@ CPU 空闲预算 = nproc − 主机保留(1) − max(其它容器CPU, ⌈load15�
 | acs | 1024 | 2048 | 15% | TR-069 最热堆（1万并发会话+20万限流器映射+50MB SOAP体）；1M 走横向多副本 |
 | worker | 1024 | 2048 | 25% | PM/MR XML 解析最吃内存（111→1111 文件/s）；1M 走横向 |
 | **postgres** | **5120** | 16384 | 25% | **须容 `max_connections=200`**（180池+余量）：shared_buffers+maint+200×(10+work_mem) 须舒适放进限额 |
+| **postgres-tsdb** | **4096** | 12288 | 22% | **时序库（#347）独立 TimescaleDB 实例**：PM COPY 入库 + KPI 聚合写主要在此；与主库分别计入预算，防双 PG 同机超分 OOM。同源派生 `TSDB_*`（shared_buffers 25% 等），`max_connections=300` 与主库对齐（实际池仅 ~65，余量充足） |
 | redis | 3072 | 8192 | 15% | appendonly；限额须 ≥ maxmemory + 1GiB（AOF rewrite 的 fork COW 余量） |
 | nats | 512 | 2048 | 5% | JetStream file store |
 | minio | 1024 | 2048 | 5% | 存储型，瓶颈在磁盘非内存 |
@@ -99,6 +100,7 @@ CPU 空闲预算 = nproc − 主机保留(1) − max(其它容器CPU, ⌈load15�
 | PG `effective_cache_size` | `0.70 × PG_MEM` | 规划器提示（当前 4GB 默认对 2g 容器说谎） |
 | PG `max_connections` | `200`（固定） | 覆盖 Go 端 180 池 + 余量；自检饱和估算逼近限额时告警建议 pgbouncer |
 | Redis `maxmemory` | `0.66 × REDIS_MEM`，且保证 `限额−maxmemory ≥ 1GiB` | COW 余量；策略 `volatile-lru`（只淘汰带 TTL 的键，保护无 TTL 队列） |
+| `TSDB_*`（时序库 #347） | 同各 PG 公式 | 独立实例 postgres-tsdb 同源派生 `shared_buffers`/`effective_cache_size`/`work_mem`/`maint`/`max_wal`；`max_connections=300` 与主库对齐 |
 
 ---
 
@@ -108,13 +110,13 @@ CPU 空闲预算 = nproc − 主机保留(1) − max(其它容器CPU, ⌈load15�
 
 | 档位 | 空闲内存 | 目标规模 | 拓扑 |
 |------|---------|---------|------|
-| small | ≥ ~13 GiB（达下限即可） | 100k 单副本 | 单机；推荐 16c/32g |
+| small | ≥ ~19 GiB（达下限即可，#347 起含两 PG）| 100k 单副本 | 单机；推荐 16c/32g |
 | medium | ≥ 24 GiB | 100k 满突发 / 300-500k | 单机 + pgbouncer + acs/worker ×2-3（Phase 2/手动） |
 | large | ≥ 48 GiB | 1M | **多机**：acs/worker ×6-8 + pgbouncer + Redis 拆分；脚本仅规划单机切片并告警 |
 
 **最低配置门禁**：`空闲预算 < Σfloor` 直接 `die`，给出检测值 vs 需求值 + 建议最低配 +
-逃生口（`--skip-monitoring` 约降到 16 GiB / `--assume-dedicated` / 释放其它项目）。
-全栈推荐底线 **≥ 24 GiB**，`--skip-monitoring` 约 **16 GiB**。
+逃生口（`--skip-monitoring` 约降到 20 GiB / `--assume-dedicated` / 释放其它项目）。
+全栈推荐底线 **≥ 28 GiB**，`--skip-monitoring` 约 **20 GiB**（#347 起含独立时序库 postgres-tsdb，较单 PG 时上调约 4 GiB）。
 
 > **1M 明确超出单机范围**（~3333 会话/s + ~1111 PM 文件/s），脚本检出 large 档时
 > 给多机拓扑建议而非假装单机能扛。

@@ -124,6 +124,44 @@ GRAFANA_ADMIN_PASSWORD=admin
 ensure_secrets
 chk "D: 卷在时不瞎生成,导入默认匹配旧卷" "$(secrets_get_val POSTGRES_PASSWORD "$OMC_ROOT/etc/secrets.env")" "omcgo123"
 
+echo "── 时序库口令 POSTGRES_TSDB_PASSWORD 独立生成（#347）──"
+secrets_generate_to "$TMP/sec347"
+TPW="$(secrets_get_val POSTGRES_TSDB_PASSWORD "$TMP/sec347")"
+MPW="$(secrets_get_val POSTGRES_PASSWORD "$TMP/sec347")"
+{ [ -n "$TPW" ] && ! secrets_is_default_value POSTGRES_TSDB_PASSWORD "$TPW"; } && ok || bad "生成的 TSDB 口令应非空非默认"
+[ "$TPW" != "$MPW" ] && ok || bad "TSDB 口令应独立于主库口令(不相等)"
+secrets_is_default_value POSTGRES_TSDB_PASSWORD omcgo123 && ok || bad "TSDB omcgo123 应判默认"
+
+echo "── secrets_ensure_keys（跨版本新增键幂等补齐，不动现行值）──"
+# 空值键 + 缺失键都应补强随机；已有非空值绝不改动
+printf 'POSTGRES_PASSWORD=keepme\nPOSTGRES_TSDB_PASSWORD=\nMINIO_ROOT_USER=opsuser\n' > "$TMP/ek"
+secrets_ensure_keys "$TMP/ek"
+chk "ensure_keys 保留现行 PG 口令" "$(secrets_get_val POSTGRES_PASSWORD "$TMP/ek")" "keepme"
+chk "ensure_keys 保留现行 MINIO user" "$(secrets_get_val MINIO_ROOT_USER "$TMP/ek")" "opsuser"
+ETPW="$(secrets_get_val POSTGRES_TSDB_PASSWORD "$TMP/ek")"
+{ [ -n "$ETPW" ] && ! secrets_is_default_value POSTGRES_TSDB_PASSWORD "$ETPW"; } && ok || bad "空 TSDB 口令应补强随机"
+[ "$(grep -c '^POSTGRES_TSDB_PASSWORD=' "$TMP/ek")" -eq 1 ] && ok || bad "补齐后不应出现重复 TSDB 口令行"
+# 完全缺失键（无该行）也补齐；其它缺失密钥同样补（MINIO_ROOT_USER 固定 omcadmin）
+printf 'POSTGRES_PASSWORD=keepme2\n' > "$TMP/ek2"
+secrets_ensure_keys "$TMP/ek2"
+[ -n "$(secrets_get_val POSTGRES_TSDB_PASSWORD "$TMP/ek2")" ] && ok || bad "缺失 TSDB 口令键应补齐"
+chk "ensure_keys 补齐 MINIO user 用固定 omcadmin" "$(secrets_get_val MINIO_ROOT_USER "$TMP/ek2")" "omcadmin"
+
+echo "── ensure_secrets 升级路径：旧 secrets.env 缺 TSDB 键 → 补齐并覆盖进 .env（#347）──"
+DOCKER_VOL_EXISTS=0
+setup_omc 'POSTGRES_PASSWORD=REPLACE_ME
+POSTGRES_TSDB_PASSWORD=REPLACE_ME
+OMC_PUBLIC_HOST=9.9.9.9
+'
+# 模拟上一版（无 tsdb 键）的 secrets.env 已存在 → 走「复用」分支，再被 ensure_keys 补齐
+printf 'POSTGRES_PASSWORD=existingMain\nMINIO_ROOT_USER=omcadmin\nMINIO_ROOT_PASSWORD=m\nOMCGO_JWT_SECRET=j\nOMC_SHARED_SECRET=s\nGRAFANA_ADMIN_PASSWORD=g\n' > "$OMC_ROOT/etc/secrets.env"
+ensure_secrets
+GTPW="$(secrets_get_val POSTGRES_TSDB_PASSWORD "$OMC_ROOT/etc/secrets.env")"
+{ [ -n "$GTPW" ] && ! secrets_is_default_value POSTGRES_TSDB_PASSWORD "$GTPW"; } && ok || bad "G: secrets.env 应补齐强随机 TSDB 口令"
+chk "G: 主库口令复用不变" "$(secrets_get_val POSTGRES_PASSWORD "$OMC_ROOT/etc/secrets.env")" "existingMain"
+chk "G: .env 拿到补齐的 TSDB 口令(非 REPLACE_ME)" "$(secrets_get_val POSTGRES_TSDB_PASSWORD "$OMC_ROOT/current/deploy/.env")" "$GTPW"
+chk "G: .env 非密钥键保留" "$(secrets_get_val OMC_PUBLIC_HOST "$OMC_ROOT/current/deploy/.env")" "9.9.9.9"
+
 echo ""
 echo "════ Results: PASS=$PASS FAIL=$FAIL ════"
 [ "$FAIL" -eq 0 ]

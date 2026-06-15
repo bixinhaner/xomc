@@ -10,8 +10,9 @@
 # 快照继承被默认值污染」两个老坑。值任何时候**不打印**。
 # =============================================================================
 
-# 由 secrets.env 权威管理的 6 个密钥键。
-SECRET_KEYS="POSTGRES_PASSWORD MINIO_ROOT_USER MINIO_ROOT_PASSWORD OMCGO_JWT_SECRET OMC_SHARED_SECRET GRAFANA_ADMIN_PASSWORD"
+# 由 secrets.env 权威管理的密钥键。POSTGRES_TSDB_PASSWORD（时序库口令，#347）独立于主库
+# POSTGRES_PASSWORD —— 跨版本新增键，旧 secrets.env 缺它时由 secrets_ensure_keys 幂等补齐。
+SECRET_KEYS="POSTGRES_PASSWORD POSTGRES_TSDB_PASSWORD MINIO_ROOT_USER MINIO_ROOT_PASSWORD OMCGO_JWT_SECRET OMC_SHARED_SECRET GRAFANA_ADMIN_PASSWORD"
 
 # rand_hex <字节数> —— 生成 hex 随机串。优先 openssl，回退 /dev/urandom（不依赖 openssl 存在）。
 rand_hex() {
@@ -39,6 +40,7 @@ secrets_is_default_value() {
     "OMC_SHARED_SECRET=dps") return 0 ;;
     "GRAFANA_ADMIN_PASSWORD=admin") return 0 ;;
     "OMCGO_JWT_SECRET=8f7a9b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6") return 0 ;;
+    "POSTGRES_TSDB_PASSWORD=omcgo123") return 0 ;;
   esac
   return 1
 }
@@ -47,12 +49,35 @@ secrets_is_default_value() {
 secrets_generate_to() {
   ( umask 077; {
       echo "POSTGRES_PASSWORD=$(rand_hex 24)"
+      echo "POSTGRES_TSDB_PASSWORD=$(rand_hex 24)"   # 时序库口令，独立于主库（#347）
       echo "MINIO_ROOT_USER=omcadmin"
       echo "MINIO_ROOT_PASSWORD=$(rand_hex 24)"
       echo "OMCGO_JWT_SECRET=$(rand_hex 32)"
       echo "OMC_SHARED_SECRET=$(rand_hex 32)"
       echo "GRAFANA_ADMIN_PASSWORD=$(rand_hex 16)"
     } > "$1" )
+}
+
+# secrets_ensure_keys <file> —— 保证 SECRET_KEYS 每个键在 file 中都存在且非空（幂等）。
+# 跨版本【新增密钥键】（如 #347 的 POSTGRES_TSDB_PASSWORD）时，复用旧 secrets.env 或从旧 .env
+# 导入都可能缺该键 / 写成空值；这里补齐：缺失或空值 → 生成强随机（MINIO_ROOT_USER 用固定
+# omcadmin）。**已有非空值绝不改动**（保护现行口令）。umask 077 → 600。
+secrets_ensure_keys() {
+  local file="$1" k v
+  [ -f "$file" ] || return 0
+  ( umask 077
+    for k in $SECRET_KEYS; do
+      v="$(secrets_get_val "$k" "$file")"
+      [ -n "$v" ] && continue
+      # 删掉可能存在的空值行（key= 无值），避免与即将追加的 key=val 并存
+      if grep -q "^${k}=" "$file" 2>/dev/null; then
+        grep -v "^${k}=" "$file" > "${file}.tmp" 2>/dev/null && mv "${file}.tmp" "$file"
+      fi
+      case "$k" in
+        MINIO_ROOT_USER) printf '%s=omcadmin\n' "$k" >> "$file" ;;
+        *)               printf '%s=%s\n' "$k" "$(rand_hex 24)" >> "$file" ;;
+      esac
+    done )
 }
 
 # secrets_import_to <src_env> <file> —— 从现行有效凭证 src 抽 6 键写入 file（**存量机迁移用**，
@@ -130,9 +155,12 @@ ensure_secrets() {
       secrets_generate_to "$SECRETS_FILE"
     fi
   fi
+  # 跨版本新增密钥键补齐（#347 POSTGRES_TSDB_PASSWORD）：复用旧 secrets.env / 从旧凭证导入
+  # 都可能缺新键；幂等补强随机（已有值不动），保证 .env 不会拿到空口令 / REPLACE_ME。
+  secrets_ensure_keys "$SECRETS_FILE"
   chmod 600 "$SECRETS_FILE" 2>/dev/null || true
 
-  # secrets.env 为 6 密钥键权威源 → 覆盖进 current/deploy/.env（取代 .env.saved 对密钥的脆弱继承）
+  # secrets.env 为密钥键权威源 → 覆盖进 current/deploy/.env（取代 .env.saved 对密钥的脆弱继承）
   secrets_apply_to_env "$SECRETS_FILE" "$target_env" \
     || warn "secrets：覆盖 $target_env 失败，请人工核对其 6 个密钥键"
   # .env.saved 同步刷新（供 uninstall→reinstall 一致；但密钥真权威是 secrets.env）

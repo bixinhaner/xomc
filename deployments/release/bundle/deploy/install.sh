@@ -67,7 +67,9 @@ fi
 # 但密钥的【唯一权威源】是 etc/secrets.env —— ensure_secrets 在 source/起 infra 前用它覆盖 .env，
 # 故 .env.saved 即便被某次默认口令安装写脏，也不再污染密钥（secrets.env 一经生成永不重生成）。
 # 【版本相关】键(PROJECT_VERSION / IMAGE_*)不在此列,始终用新包值。
-ENV_PRESERVE_KEYS="POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB MINIO_ROOT_USER MINIO_ROOT_PASSWORD GRAFANA_ADMIN_USER GRAFANA_ADMIN_PASSWORD OMCGO_JWT_SECRET OMC_SHARED_SECRET OMC_PUBLIC_HOST"
+# 注：POSTGRES_TSDB_USER/PASSWORD/DB（时序库凭据，#347）跨版本继承；TSDB_HOST 是 compose 服务名
+# （随包固定值），故【不】列入继承白名单，始终用新包值。
+ENV_PRESERVE_KEYS="POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB POSTGRES_TSDB_USER POSTGRES_TSDB_PASSWORD POSTGRES_TSDB_DB MINIO_ROOT_USER MINIO_ROOT_PASSWORD GRAFANA_ADMIN_USER GRAFANA_ADMIN_PASSWORD OMCGO_JWT_SECRET OMC_SHARED_SECRET OMC_PUBLIC_HOST"
 
 # merge_env_preserve <prev_env> <new_env>
 # 升级继承:以新包 .env 为基底(拿到新镜像 tag),把上一版 .env 中白名单键的值
@@ -511,7 +513,7 @@ if [ "$SKIP_INFRA" = 0 ]; then
 
   if images_exist "${INFRA_IMAGES[@]}" "${MON_IMAGES[@]}"; then
     log "基础设施 + 监控镜像已存在，跳过 load，重启容器"
-    $COMPOSE -p "$COMPOSE_PROJECT" restart postgres redis nats minio 2>/dev/null || true
+    $COMPOSE -p "$COMPOSE_PROJECT" restart postgres postgres-tsdb redis nats minio 2>/dev/null || true
   else
     log "load 基础设施 + 监控镜像（$INFRA_DIR/images/）"
     for tar in "$INFRA_DIR/images"/*.tar; do
@@ -587,32 +589,37 @@ log "compose 命令：${DC[*]}"
 # =============================================================================
 sep "7/9 启动基础设施 + 执行 migrate / seed"
 
-# 7.1 起基础设施（postgres / redis / nats / minio）
+# 7.1 起基础设施（postgres / postgres-tsdb / redis / nats / minio）
 log "启动基础设施容器 ..."
-"${DC[@]}" up -d postgres redis nats minio
+"${DC[@]}" up -d postgres postgres-tsdb redis nats minio
 
 log "等待基础设施 ready（最多 90s）..."
 WAIT=0
-PG_OK=0; RD_OK=0
+PG_OK=0; TS_OK=0; RD_OK=0
 while [ $WAIT -lt 90 ]; do
   sleep 3; WAIT=$((WAIT+3))
   PG_CID="$("${DC[@]}" ps -q postgres 2>/dev/null || true)"
+  TS_CID="$("${DC[@]}" ps -q postgres-tsdb 2>/dev/null || true)"
   RD_CID="$("${DC[@]}" ps -q redis 2>/dev/null || true)"
   if [ -n "$PG_CID" ]; then
     docker exec "$PG_CID" pg_isready -U "${POSTGRES_USER:-omcgo}" >/dev/null 2>&1 && PG_OK=1 || PG_OK=0
   fi
+  # 时序库（#347）：用 TSDB 凭据 pg_isready，与主库分别就绪判定。
+  if [ -n "$TS_CID" ]; then
+    docker exec "$TS_CID" pg_isready -U "${POSTGRES_TSDB_USER:-omcgo}" >/dev/null 2>&1 && TS_OK=1 || TS_OK=0
+  fi
   if [ -n "$RD_CID" ]; then
     docker exec "$RD_CID" redis-cli ping >/dev/null 2>&1 && RD_OK=1 || RD_OK=0
   fi
-  [ "$PG_OK" = 1 ] && [ "$RD_OK" = 1 ] && break
-  echo "  ... ${WAIT}s (PG=$PG_OK RD=$RD_OK)"
+  [ "$PG_OK" = 1 ] && [ "$TS_OK" = 1 ] && [ "$RD_OK" = 1 ] && break
+  echo "  ... ${WAIT}s (PG=$PG_OK TSDB=$TS_OK RD=$RD_OK)"
 done
-if [ "$PG_OK" != 1 ] || [ "$RD_OK" != 1 ]; then
-  die "基础设施 90s 内未就绪：PG=$PG_OK RD=$RD_OK
+if [ "$PG_OK" != 1 ] || [ "$TS_OK" != 1 ] || [ "$RD_OK" != 1 ]; then
+  die "基础设施 90s 内未就绪：PG=$PG_OK TSDB=$TS_OK RD=$RD_OK
   手动检查：${DC[*]} ps
-            ${DC[*]} logs postgres redis" 2
+            ${DC[*]} logs postgres postgres-tsdb redis" 2
 fi
-log "基础设施已就绪 (PG / Redis)"
+log "基础设施已就绪 (PG / TSDB / Redis)"
 
 # 7.2 验证 omcgo-net 网络已创建
 log "验证 omcgo-net 网络 ..."
@@ -653,6 +660,29 @@ if [ "$SKIP_MIGRATE" = 0 ]; then
     die "seed 失败：${DC[*]} up --exit-code-from migrate-seed-sql migrate-seed-sql" 3
   fi
   "${DC[@]}" rm -f migrate-seed-sql 2>/dev/null || true
+
+  # 7.5 时序库 schema 迁移（容器：migrate-tsdb-schema，#347）—— 独立 TimescaleDB
+  #     实例 postgres-tsdb，goose 版本表 goose_db_version_tsdb，与主库 migrate 互不影响。
+  #     与 7.3 同样用 `up --exit-code-from` + 3 次重试，显式捕获失败（优于仅靠 Step 8
+  #     up -d 的隐式 depends_on——后者失败时诊断信息差、无重试）。goose 幂等，升级重跑安全。
+  log "执行时序库 migrate（容器：migrate-tsdb-schema，goose 幂等）..."
+  TSDB_MIGRATE_OK=0
+  for attempt in 1 2 3; do
+    if "${DC[@]}" up --exit-code-from migrate-tsdb-schema migrate-tsdb-schema; then
+      TSDB_MIGRATE_OK=1
+      break
+    fi
+    if [ $attempt -lt 3 ]; then
+      warn "时序库 migrate 第 ${attempt} 次失败，等待 5s 重试..."
+      sleep 5
+    fi
+  done
+  "${DC[@]}" rm -f migrate-tsdb-schema 2>/dev/null || true
+  if [ "$TSDB_MIGRATE_OK" = 1 ]; then
+    log "时序库 migrate 成功"
+  else
+    die "时序库 migrate 失败（已重试 3 次）：${DC[*]} up --exit-code-from migrate-tsdb-schema migrate-tsdb-schema" 3
+  fi
 else
   log "--skip-migrate：跳过 migrate / seed"
 fi
