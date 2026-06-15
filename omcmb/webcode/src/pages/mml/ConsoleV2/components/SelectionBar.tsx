@@ -1,4 +1,4 @@
-import { Button, Card, Space, Tag, Typography } from 'antd';
+import { Button, Card, Space, Tag, Tooltip, Typography } from 'antd';
 import {
   ApartmentOutlined,
   CodeOutlined,
@@ -9,6 +9,7 @@ import {
 import type { CommandItem } from '../types';
 import { opColor, opLabel } from '../constants';
 import { useT } from '@/hooks/useT';
+import { usePermission } from '@core/hooks/usePermission';
 
 const { Text } = Typography;
 
@@ -41,6 +42,8 @@ export default function SelectionBar({
   onExecute,
 }: SelectionBarProps) {
   const t = useT();
+  // issue #409：执行下发为高危写操作，无 mml:console-v2:execute 权限时禁用（不隐藏）+ 提示。
+  const canExecutePerm = usePermission('mml:console-v2:execute');
   return (
     <Card variant="borderless" styles={{ body: { padding: '12px 16px' } }}>
       <Space size={12} wrap>
@@ -104,18 +107,20 @@ export default function SelectionBar({
           </Space>
         </Button>
 
-        <Button
-          size="large"
-          type="primary"
-          icon={<PlayCircleOutlined />}
-          loading={running}
-          disabled={!canExecute}
-          onClick={onExecute}
-        >
-          {deviceCount > 0
-            ? t('mml.consoleV2.selectionBar.executeWithCount', { count: deviceCount })
-            : t('mml.consoleV2.selectionBar.execute')}
-        </Button>
+        <Tooltip title={canExecutePerm ? undefined : '无执行权限'}>
+          <Button
+            size="large"
+            type="primary"
+            icon={<PlayCircleOutlined />}
+            loading={running}
+            disabled={!canExecute || !canExecutePerm}
+            onClick={onExecute}
+          >
+            {deviceCount > 0
+              ? t('mml.consoleV2.selectionBar.executeWithCount', { count: deviceCount })
+              : t('mml.consoleV2.selectionBar.execute')}
+          </Button>
+        </Tooltip>
       </Space>
     </Card>
   );

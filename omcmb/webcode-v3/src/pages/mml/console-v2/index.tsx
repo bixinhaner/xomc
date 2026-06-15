@@ -19,6 +19,7 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 import { useDeviceList } from '@core/hooks/api/useDevices'
 import { useParseMML, useExecuteStatements } from '@core/hooks/api/useMmlConsole'
 import { useUserStore } from '@core/store/userStore'
+import { usePermission } from '@core/hooks/usePermission'
 import type { Device } from '@core/types/device'
 import type { Statement, ParseError } from '@core/types/mmlConsole'
 
@@ -89,8 +90,10 @@ export function MMLConsoleV2Page() {
     )
   }
 
+  // issue #409：执行下发受 mml:console-v2:execute 权限管控（无权限禁用 + 原生 title 提示）。
+  const canExecutePerm = usePermission('mml:console-v2:execute')
   const canExecute =
-    selectedSns.length > 0 && parsed.length > 0 && parseErrors.length === 0 && !exec.isPending
+    selectedSns.length > 0 && parsed.length > 0 && parseErrors.length === 0 && !exec.isPending && canExecutePerm
 
   const handleExecute = () => {
     if (!canExecute) return
@@ -301,13 +304,15 @@ export function MMLConsoleV2Page() {
                   {selectedSns.length} 设备 × {parsed.length} 语句
                   {unknownCount > 0 ? ` · ${unknownCount} 未知字段` : ''}
                 </span>
-                <NeonButton
-                  icon={exec.isPending ? <Loader2 className="animate-spin" /> : <Rocket />}
-                  disabled={!canExecute}
-                  onClick={handleExecute}
-                >
-                  {exec.isPending ? 'DISPATCHING…' : 'EXECUTE'}
-                </NeonButton>
+                <span title={canExecutePerm ? undefined : '无执行权限'}>
+                  <NeonButton
+                    icon={exec.isPending ? <Loader2 className="animate-spin" /> : <Rocket />}
+                    disabled={!canExecute}
+                    onClick={handleExecute}
+                  >
+                    {exec.isPending ? 'DISPATCHING…' : 'EXECUTE'}
+                  </NeonButton>
+                </span>
               </div>
             </div>
           </GlassPanel>

@@ -27,6 +27,7 @@ import { STATUS_META, UNVERIFIED_REASON_TEXT } from '../constants';
 import { exportAll, exportOne, saveBlob } from '../download';
 import { PATH_FAILED_CELL } from '../adapters';
 import ResultDetailModal from './ResultDetailModal';
+import { usePermission } from '@core/hooks/usePermission';
 
 const { Text } = Typography;
 
@@ -84,6 +85,9 @@ export default function ResultTable({
   // CSV 导出走后端（落 MinIO + 记入 mml_tasks），拿预签名 URL 触发浏览器下载。
   const exportCsv = useExportTaskCSV();
   const exportDeviceCsv = useExportTaskDeviceCSV();
+  // issue #409：导出 / 重新执行的按钮级权限（无权限禁用 + Tooltip，不隐藏）。
+  const canExportPerm = usePermission('mml:console-v2:export');
+  const canExecutePerm = usePermission('mml:console-v2:execute');
 
   const handleExportAllCsv = (): void => {
     if (!commandId) {
@@ -242,22 +246,23 @@ export default function ResultTable({
                 onClick={() => setViewingRow(r)}
               />
             </Tooltip>
-            <Tooltip title={t('mml.consoleV2.result.downloadDevice')}>
+            <Tooltip title={canExportPerm ? t('mml.consoleV2.result.downloadDevice') : '无导出权限'}>
               <Button
                 type="text"
                 size="small"
                 icon={<DownloadOutlined />}
+                disabled={!canExportPerm}
                 loading={exportDeviceCsv.isPending && exportDeviceCsv.variables?.deviceSn === r.deviceSn}
                 onClick={() => handleExportDeviceCsv(r.deviceSn)}
               />
             </Tooltip>
             {onReexecute && (
-              <Tooltip title={t('mml.consoleV2.result.reexecute')}>
+              <Tooltip title={canExecutePerm ? t('mml.consoleV2.result.reexecute') : '无执行权限'}>
                 <Button
                   type="text"
                   size="small"
                   icon={<RedoOutlined />}
-                  disabled={running}
+                  disabled={running || !canExecutePerm}
                   onClick={() => onReexecute(r.deviceSn)}
                 />
               </Tooltip>
@@ -270,7 +275,7 @@ export default function ResultTable({
     return [...base, ...dynamic, ...tail];
     // commandId / 导出 mutation / 重新执行回调 / running 进依赖：切任务或对应状态变化时刷新「操作」列。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [columns, commandId, exportDeviceCsv.isPending, exportDeviceCsv.variables, onReexecute, running, t]);
+  }, [columns, commandId, exportDeviceCsv.isPending, exportDeviceCsv.variables, onReexecute, running, t, canExportPerm, canExecutePerm]);
 
   return (
     <Card
@@ -303,14 +308,16 @@ export default function ResultTable({
       style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
       styles={{ body: { padding: 16, flex: 1, minHeight: 0, overflow: 'auto' } }}
       extra={
-        <Button
-          icon={<DownloadOutlined />}
-          disabled={rows.length === 0}
-          loading={exportCsv.isPending}
-          onClick={handleExportAllCsv}
-        >
-          {t('mml.consoleV2.result.downloadAll')}
-        </Button>
+        <Tooltip title={canExportPerm ? undefined : '无导出权限'}>
+          <Button
+            icon={<DownloadOutlined />}
+            disabled={rows.length === 0 || !canExportPerm}
+            loading={exportCsv.isPending}
+            onClick={handleExportAllCsv}
+          >
+            {t('mml.consoleV2.result.downloadAll')}
+          </Button>
+        </Tooltip>
       }
     >
       {!hasExecuted ? (

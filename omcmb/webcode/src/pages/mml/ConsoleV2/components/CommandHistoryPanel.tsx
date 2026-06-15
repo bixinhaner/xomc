@@ -9,6 +9,7 @@ import {
 import type { ExecRecord } from '../types';
 import { opColor } from '../constants';
 import { useT } from '@/hooks/useT';
+import { usePermission } from '@core/hooks/usePermission';
 
 const { Text } = Typography;
 
@@ -36,6 +37,8 @@ export default function CommandHistoryPanel({
   onToggleCollapsed,
 }: CommandHistoryPanelProps) {
   const t = useT();
+  // issue #409：清空命令记录的按钮级权限（无 mml:console-v2:history 时禁用 + 提示）。
+  const canHistoryPerm = usePermission('mml:console-v2:history');
   // 收缩态:窄条,仅图标 + 展开按钮 + 记录数徽标。
   if (collapsed) {
     return (
@@ -83,14 +86,14 @@ export default function CommandHistoryPanel({
             cancelText={t('common.cancel')}
             okButtonProps={{ danger: true }}
             onConfirm={onClear}
-            disabled={records.length === 0}
+            disabled={records.length === 0 || !canHistoryPerm}
           >
-            <Tooltip title={t('mml.consoleV2.history.clearTitle')}>
+            <Tooltip title={canHistoryPerm ? t('mml.consoleV2.history.clearTitle') : '无清空权限'}>
               <Button
                 type="text"
                 size="small"
                 icon={<DeleteOutlined />}
-                disabled={records.length === 0}
+                disabled={records.length === 0 || !canHistoryPerm}
               />
             </Tooltip>
           </Popconfirm>

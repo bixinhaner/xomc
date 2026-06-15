@@ -24,6 +24,7 @@ import { newRawPathRow } from '../rawPathRow';
 import { validateRawPath } from '../rawPathValidate';
 import { computeInstanceSlots, resolveObjectPath } from '../adapters';
 import { useT } from '@/hooks/useT';
+import { usePermission } from '@core/hooks/usePermission';
 
 const { Text } = Typography;
 
@@ -68,6 +69,8 @@ export default function ConfigParamsModal({
   onConfirmAndExecute,
 }: ConfigParamsModalProps) {
   const t = useT();
+  // issue #409：弹框内「确定并执行」= 下发，受 execute 权限管控（无权限禁用 + 提示）。
+  const canExecutePerm = usePermission('mml:console-v2:execute');
   const [mode, setMode] = useState<OperationMode>('standard');
   const [wasOpen, setWasOpen] = useState(false);
 
@@ -357,15 +360,16 @@ export default function ConfigParamsModal({
         <Button key="ok" disabled={!valid} onClick={() => onConfirm(buildRequest())}>
           {t('common.confirm')}
         </Button>,
-        <Button
-          key="exec"
-          type="primary"
-          icon={<PlayCircleOutlined />}
-          disabled={!valid || deviceCount === 0}
-          onClick={() => onConfirmAndExecute(buildRequest())}
-        >
-          {t('mml.consoleV2.config.confirmAndExecute', { count: deviceCount })}
-        </Button>,
+        <Tooltip key="exec" title={canExecutePerm ? undefined : '无执行权限'}>
+          <Button
+            type="primary"
+            icon={<PlayCircleOutlined />}
+            disabled={!valid || deviceCount === 0 || !canExecutePerm}
+            onClick={() => onConfirmAndExecute(buildRequest())}
+          >
+            {t('mml.consoleV2.config.confirmAndExecute', { count: deviceCount })}
+          </Button>
+        </Tooltip>,
       ]}
     >
       {/* 标签页内容区固定高度，超出竖向滚动 → 弹框总高不随命令/标签页变化（§需求 1/2）。 */}

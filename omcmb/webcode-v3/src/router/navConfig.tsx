@@ -251,7 +251,7 @@ export const MODULES: ModuleDef[] = [
   ] },
   { key: 'mml', label: 'MML', icon: <Terminal />, section: '运维', routes: [
     { path: '/mml', element: s(MMLPage), label: "MML" },
-    { path: '/mml/console-v2', element: s(C_pages_mml_console_v2_index), label: "MML 脚本控制台 V2" },
+    { path: '/mml/console-v2', element: s(C_pages_mml_console_v2_index), label: "MML控制台" },
     { path: '/mml/script', element: s(C_pages_mml_script_index), label: "脚本库" },
     { path: '/mml/task-records', element: s(C_pages_mml_task_records_index), label: "任务记录" },
     { path: '/mml/commands', element: s(C_pages_mml_commands_index), label: "命令字典" },
