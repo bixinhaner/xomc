@@ -7505,6 +7505,8 @@ const messages: Record<string, string> = {
   // qa-614 c2 — homepage KPI line-chart empty state (issue #359: distinguish "no aggregated data yet / hourly refresh" from a blank chart)
   'dashboard.kpiPanel.empty.title':      'No aggregated data yet',
   'dashboard.kpiPanel.empty.hint':       'Network-wide metrics refresh hourly on the hour; freshly ingested data appears after the next hour mark or once raw-detail fallback kicks in.',
+  // qa-614 c3 #363: device_group dimension does not support 15min granularity
+  'perf.adhoc.granDeviceGroupNo15min':   'Device group dimension is hourly at finest; 15-minute granularity is not supported',
 };
 
 export default messages;

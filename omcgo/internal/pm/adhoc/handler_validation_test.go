@@ -118,6 +118,63 @@ func Test_Handler_Create_DeviceGroupDimension_OK(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, w.Code)
 }
 
+// ── #363：(粒度, 维度) 组合守门 ────────────────────────────────────────────
+
+// 失败路径：dimension=device_group + granularities=['15min'] → 400（无 15min 级设备组聚合源，
+// 前置守门拦下，不再落库等 worker 跑才失败）。错误消息明确指向设备组不支持 15min。
+func Test_Handler_Create_DeviceGroup15Min_Rejected(t *testing.T) {
+	var created bool
+	repo := &handlerStubRepo{
+		create: func(CreateRequest) (uuid.UUID, error) { created = true; return uuid.New(), nil },
+	}
+	b := baseCreateBody()
+	b["granularities"] = []string{"15min"}
+	b["dimension"] = "device_group"
+	w := postCreateWithRepo(t, repo, b)
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "device_group")
+	assert.Contains(t, w.Body.String(), "15min")
+	assert.False(t, created, "非法组合不应落库")
+}
+
+// 成功路径：dimension=device_group + granularities=['hourly'] → 201（不误伤合法组合）。
+func Test_Handler_Create_DeviceGroupHourly_OK(t *testing.T) {
+	b := baseCreateBody()
+	b["granularities"] = []string{"hourly"}
+	b["dimension"] = "device_group"
+	w := postCreate(t, b)
+	assert.Equal(t, http.StatusCreated, w.Code)
+}
+
+// 成功路径：dimension=device（默认）+ granularities=['15min'] → 201（设备维度 15min 合法）。
+func Test_Handler_Create_Device15Min_OK(t *testing.T) {
+	b := baseCreateBody()
+	b["granularities"] = []string{"15min"}
+	// dimension 不填 → 默认 device
+	w := postCreate(t, b)
+	assert.Equal(t, http.StatusCreated, w.Code)
+}
+
+// 失败路径：编辑自建 device_group 任务，把粒度改成 15min → 400（编辑分支同样守门）。
+func Test_Handler_Update_DeviceGroup15Min_Rejected(t *testing.T) {
+	id := uuid.New()
+	var updated bool
+	repo := &handlerStubRepo{
+		get: func(uuid.UUID) (*Task, error) {
+			return &Task{ID: id, IsBuiltin: false, Mode: ModeContinuous, Dimension: DimensionDeviceGroup}, nil
+		},
+		update: func(uuid.UUID, UpdateRequest) error { updated = true; return nil },
+	}
+	b := map[string]any{
+		"metric_paths":  []string{"M1"},
+		"granularities": []string{"15min"},
+	}
+	w := patchUpdate(t, repo, id, b)
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "device_group")
+	assert.False(t, updated, "非法组合不应更新")
+}
+
 // ── T-0185：device_sns / window 放宽校验 ──────────────────────────────────
 
 // postCreateWithRepo 用注入的 stub repo 跑建任务（用于捕获 CreateRequest 验证派生值）。

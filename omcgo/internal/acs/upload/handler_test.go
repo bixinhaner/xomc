@@ -271,9 +271,54 @@ func TestExtractDeviceSNFromPMFilename(t *testing.T) {
 			filename: "pm-G1-VALIDATE-001.xml",
 			want:     "G1-VALIDATE-001",
 		},
+		// #364: BSC / 2G GSM real-CPE dialect — 3GPP A-form without an {OUI} vendor
+		// tag (no underscore-OUI segment). The SN is the last dot-segment.
+		{
+			name:     "BSC/GSM A-form without OUI tag (.xml)",
+			filename: "A20260615.0000-0015.B54DEF3B1F059A9077B8998FD274.xml",
+			want:     "B54DEF3B1F059A9077B8998FD274",
+		},
+		{
+			name:     "BSC/GSM A-form without OUI tag (.xml.gz)",
+			filename: "A20260615.0000-0015.B54DEF3B1F059A9077B8998FD274.xml.gz",
+			want:     "B54DEF3B1F059A9077B8998FD274",
+		},
+		// #364: vendor PM-prefix dialects (uppercase / underscore / lowercase underscore).
+		{
+			name:     "vendor PM_{SN}.xml dialect",
+			filename: "PM_B54DEF3B1F059A9077B8998FD274.xml",
+			want:     "B54DEF3B1F059A9077B8998FD274",
+		},
+		{
+			name:     "vendor PM-{SN}.xml.gz dialect",
+			filename: "PM-B54DEF3B1F059A9077B8998FD274.xml.gz",
+			want:     "B54DEF3B1F059A9077B8998FD274",
+		},
+		{
+			name:     "simulator pm_{SN}.xml underscore dialect",
+			filename: "pm_B54DEF3B1F059A9077B8998FD274.xml",
+			want:     "B54DEF3B1F059A9077B8998FD274",
+		},
 		{
 			name:     "unknown pattern returns empty (caller will WARN-skip)",
 			filename: "random-filename.xml",
+			want:     "",
+		},
+		// #364: bare SN and SN-prefix forms remain ambiguous (no vendor marker) and
+		// are intentionally NOT matched — the safe path for those is the ?sn= URL query.
+		{
+			name:     "bare {SN}.xml stays unmatched (ambiguous, use ?sn=)",
+			filename: "B54DEF3B1F059A9077B8998FD274.xml",
+			want:     "",
+		},
+		{
+			name:     "SN-prefix {SN}_date.xml stays unmatched (ambiguous, use ?sn=)",
+			filename: "B54DEF3B1F059A9077B8998FD274_20260615.xml",
+			want:     "",
+		},
+		{
+			name:     "single-segment A{x}.xml stays unmatched (needs >=2 dots)",
+			filename: "Anything.xml",
 			want:     "",
 		},
 		{

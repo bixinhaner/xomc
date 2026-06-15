@@ -17,6 +17,7 @@ import { useIndicatorCandidates } from '@core/hooks/api/usePerformance'
 import type { IndicatorCandidate } from '@core/services/api/pmApi'
 import type { AdhocDimension, AdhocMode } from '@core/types/pmAdhoc'
 import type { DeviceType } from '@core/types/indicatorLibrary'
+import { isGranularityDimensionSupported } from '@core/utils/pmAdhocConstraints'
 
 /**
  * F03 · 自定义聚合任务向导（performance/pm-adhoc/new + /:id/edit）
@@ -163,8 +164,11 @@ export default function PmAdhocWizard() {
   const step1Valid = name.trim().length > 0
   const step2Valid = needsDevicePick ? selectedSns.length > 0 : true
   const step3Valid = metricPaths.length >= 1
+  // #363：(粒度, 维度) 组合守门——15min × 设备组不支持，禁用提交不发注定失败请求。
+  const granDimSupported = isGranularityDimensionSupported(granularity, dimension)
   const step4Valid =
     granularity.length > 0 &&
+    granDimSupported &&
     (mode === 'continuous' || (Boolean(windowStart) && Boolean(windowEnd) && new Date(windowEnd) > new Date(windowStart)))
   const stepValid = [step1Valid, step2Valid, step3Valid, step4Valid][step]
   const allValid = step1Valid && step2Valid && step3Valid && step4Valid
@@ -343,7 +347,13 @@ export default function PmAdhocWizard() {
                     key={d.value}
                     type="button"
                     disabled={isEdit}
-                    onClick={() => setDimension(d.value)}
+                    onClick={() => {
+                      setDimension(d.value)
+                      // #363：切到设备组若当前粒度 15min（不支持）→ 自动回落 hourly。
+                      if (!isGranularityDimensionSupported(granularity, d.value)) {
+                        setGranularity('hourly')
+                      }
+                    }}
                     className={cn(
                       'rounded-sm border px-3 py-2 text-left transition-all disabled:opacity-40',
                       dimension === d.value
@@ -481,22 +491,33 @@ export default function PmAdhocWizard() {
             <div className="space-y-4 p-4">
               <Field label="粒度 · GRANULARITY">
                 <div className="flex gap-1.5">
-                  {GRAN_OPTS.map((g) => (
-                    <button
-                      key={g.value}
-                      type="button"
-                      onClick={() => setGranularity(g.value)}
-                      className={cn(
-                        'chip transition-all',
-                        granularity === g.value
-                          ? 'text-cyan-200 shadow-[0_0_10px_currentColor]'
-                          : 'text-cyan-300/55 opacity-70 hover:opacity-100',
-                      )}
-                    >
-                      {g.label}
-                    </button>
-                  ))}
+                  {GRAN_OPTS.map((g) => {
+                    // #363：设备组维度不支持 15min 粒度，禁用该 chip + title 提示。
+                    const disabled = !isGranularityDimensionSupported(g.value, dimension)
+                    return (
+                      <button
+                        key={g.value}
+                        type="button"
+                        disabled={disabled}
+                        title={disabled ? '设备组维度最细为小时，不支持 15 分钟粒度' : undefined}
+                        onClick={() => setGranularity(g.value)}
+                        className={cn(
+                          'chip transition-all disabled:cursor-not-allowed disabled:opacity-30',
+                          granularity === g.value
+                            ? 'text-cyan-200 shadow-[0_0_10px_currentColor]'
+                            : 'text-cyan-300/55 opacity-70 hover:opacity-100',
+                        )}
+                      >
+                        {g.label}
+                      </button>
+                    )
+                  })}
                 </div>
+                {!granDimSupported && (
+                  <div className="mt-1.5 font-mono text-[10px] text-rose-300/80">
+                    设备组维度最细为小时，不支持 15 分钟粒度，请改用小时及以上。
+                  </div>
+                )}
               </Field>
               {mode === 'oneshot' ? (
                 <div className="grid max-w-lg grid-cols-2 gap-3">

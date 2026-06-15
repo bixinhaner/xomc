@@ -154,6 +154,13 @@ func (h *Handler) Create(c *gin.Context) {
 	if dim == "" {
 		dim = DimensionDevice
 	}
+	// #363：(粒度, 维度) 组合前置守门——把 aggregator 唯一不支持的组合
+	// (15min × device_group，无 15min 级 group 聚合源) 在落库前拦下，给友好提示，
+	// 避免「任务建得成、跑起来才失败」。
+	if msg := unsupportedGranularityDimension(req.Granularities[0], dim); msg != "" {
+		response.Fail(c, http.StatusBadRequest, msg)
+		return
+	}
 	// T-0185：device_sns 仅 device/aggregate_group（自选设备）维度必填；其余维度按制式全量聚合。
 	if (dim == DimensionDevice || dim == DimensionAggregateGroup) && len(req.DeviceSNs) == 0 {
 		response.Fail(c, http.StatusBadRequest, "device_sns is required for device/aggregate_group dimension")
@@ -235,6 +242,22 @@ func cronForGranularity(g string) string {
 	default:
 		return "5 * * * *"
 	}
+}
+
+// unsupportedGranularityDimension 校验 (粒度, 维度) 组合是否被聚合器支持。
+//
+// 唯一不支持的组合：15min × device_group——设备组维度只物化了 hourly/daily/weekly/monthly
+// 四档预聚合快表 (pm_group_metrics_*)，没有 15min 级设备组聚合源（见
+// aggregator.SelectTable / query.go 的 ErrUnsupportedQuery 注释）。该约束原本只在最底层
+// aggregator 硬拒，导致任务建得成、worker 跑起来才失败（#363）。这里把约束前移到创建/编辑
+// 守门，命中返回面向用户的友好错误消息；不命中返回空串。
+//
+// 采用轻量自包含判定（与 handler 内其它内联校验风格一致），不引入 aggregator 跨层依赖。
+func unsupportedGranularityDimension(granularity string, dim Dimension) string {
+	if dim == DimensionDeviceGroup && granularity == "15min" {
+		return "device_group dimension does not support 15min granularity (group aggregation is hourly at finest; use hourly or coarser, or use 15min under the device dimension)"
+	}
+	return ""
 }
 
 // rejectCrossTechnology 校验 deviceSNs 全部属于指定制式 tech（lte/nr/gsm）。
@@ -423,6 +446,12 @@ func (h *Handler) Update(c *gin.Context) {
 		dim := existing.Dimension
 		if dim == "" {
 			dim = DimensionDevice
+		}
+		// #363：编辑自建任务时同样守门 (粒度, 维度) 组合（维度沿用既有不可改，
+		// 但粒度可改 → 改成 15min 落到 device_group 任务上同样要拦）。
+		if msg := unsupportedGranularityDimension(req.Granularities[0], dim); msg != "" {
+			response.Fail(c, http.StatusBadRequest, msg)
+			return
 		}
 		if (dim == DimensionDevice || dim == DimensionAggregateGroup) && len(req.DeviceSNs) == 0 {
 			response.Fail(c, http.StatusBadRequest, "device_sns is required for device/aggregate_group dimension")
