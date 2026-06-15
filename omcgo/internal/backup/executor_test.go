@@ -130,8 +130,8 @@ func (m *execDeviceRepo) ListSerialsByIDs(_ context.Context, _ []uuid.UUID) (map
 func (m *execDeviceRepo) ListRecycleBin(_ context.Context, _ device.RecycleBinFilter) (*model.ListResponse[model.Device], error) {
 	return model.NewListResponse([]model.Device{}, 0, 1, 20), nil
 }
-func (m *execDeviceRepo) RestoreDevices(_ context.Context, _ []uuid.UUID) (int64, error) {
-	return 0, nil
+func (m *execDeviceRepo) RestoreDevices(_ context.Context, _ []uuid.UUID) (*device.RestoreResult, error) {
+	return &device.RestoreResult{}, nil
 }
 func (m *execDeviceRepo) PermanentDelete(_ context.Context, _ []uuid.UUID) (int64, error) {
 	return 0, nil
