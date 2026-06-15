@@ -10,7 +10,9 @@
 
 services:
   postgres-test:
-    image: timescale/timescaledb:latest-pg16
+    # 单实例集成测试库：同时充当主库与时序库（要建超表），故【必须】TimescaleDB；
+    # 固定 2.25.2-pg16 与 dev/release 时序库一致，弃用 latest-pg16 浮动 tag（避免漂版）。
+    image: timescale/timescaledb:2.25.2-pg16
     environment:
       POSTGRES_USER: omcgo_test
       POSTGRES_PASSWORD: omcgo_test
