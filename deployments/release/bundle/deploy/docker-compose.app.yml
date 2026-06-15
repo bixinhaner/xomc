@@ -85,6 +85,42 @@ services:
       migrate-schema:
         condition: service_completed_successfully
 
+  # ── 时序库 schema 迁移（postgres-tsdb 实例，#347）─────────────────────────
+  #   把 migrations/tsdb/ 刷到独立 TimescaleDB 实例：建 PM/KPI 超表 + 告警历史 +
+  #   MR/trace 时序表 + 影子维度表 + matview。独立 GOOSE_TABLE=goose_db_version_tsdb，
+  #   与主库 migrate-schema/seed（不同实例 + 不同版本表）互不影响。
+  #   时序库无业务种子（matview 在 schema 内建），故无 migrate-tsdb-seed。
+  #   network_mode: service:postgres-tsdb 共享其网络命名空间，127.0.0.1:5432 直连本实例。
+  migrate-tsdb-schema:
+    image: ${IMAGE_APP}
+    restart: "no"
+    network_mode: "service:postgres-tsdb"
+    environment:
+      TZ: "Asia/Shanghai"
+      GOOSE_VERBOSITY: "1"
+      GOOSE_TABLE: "goose_db_version_tsdb"
+    entrypoint: ["omcgo-migrate"]
+    command:
+      - "--dsn"
+      - "postgres://${POSTGRES_TSDB_USER}:${POSTGRES_TSDB_PASSWORD}@127.0.0.1:5432/${POSTGRES_TSDB_DB}?sslmode=disable"
+      - "--path"
+      - "/etc/omcgo/migrations/tsdb"
+      - "up"
+    # 一次性迁移任务：限额防失控，无需 stop_grace_period（自行退出）
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512m
+        reservations:
+          cpus: "0.25"
+          memory: 128m
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+    depends_on:
+      postgres-tsdb:
+        condition: service_healthy
+
   # 注：旧 migrate-seed (omcgo-seed JSON) 容器已下线，所有种子数据收敛进
   #     migrations/seed/，由上方 migrate-seed-sql 统一应用。详见 commit 日志
   #     "fix(release): 接通 migrations/seed/" + "refactor(seed): 下线 JSON 双轨"。
@@ -118,6 +154,11 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
+      # 时序库（TsPool）凭据/主机：app dashboard 直查 PM 聚合表 / 影子维度表（#347）。
+      POSTGRES_TSDB_USER: ${POSTGRES_TSDB_USER}
+      POSTGRES_TSDB_PASSWORD: ${POSTGRES_TSDB_PASSWORD}
+      POSTGRES_TSDB_DB: ${POSTGRES_TSDB_DB}
+      TSDB_HOST: ${TSDB_HOST}
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
       OMCGO_JWT_SECRET: ${OMCGO_JWT_SECRET}
@@ -137,6 +178,9 @@ services:
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       migrate-seed-sql:
+        condition: service_completed_successfully
+      # app 连时序库（TsPool）读影子维度 / PM 聚合表；等时序库 schema 就绪。
+      migrate-tsdb-schema:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
@@ -173,6 +217,11 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
+      # 时序库（TsPool）凭据/主机：acs 写 trace_messages 到时序库（#347）。
+      POSTGRES_TSDB_USER: ${POSTGRES_TSDB_USER}
+      POSTGRES_TSDB_PASSWORD: ${POSTGRES_TSDB_PASSWORD}
+      POSTGRES_TSDB_DB: ${POSTGRES_TSDB_DB}
+      TSDB_HOST: ${TSDB_HOST}
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
       OMC_SHARED_SECRET: ${OMC_SHARED_SECRET}   # TR-069 ConnReq/STUN 共享密钥，见 deploy/.env
@@ -187,6 +236,9 @@ services:
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       migrate-seed-sql:
+        condition: service_completed_successfully
+      # acs 写 trace_messages → 时序库；等时序库 schema 就绪后再起。
+      migrate-tsdb-schema:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
@@ -223,6 +275,12 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
+      # 时序库（TsPool）凭据/主机：worker PM copy 入库 / KPI 聚合 / 影子维度同步 /
+      # 告警历史 retention / trace 写入全部走时序库（#347）。
+      POSTGRES_TSDB_USER: ${POSTGRES_TSDB_USER}
+      POSTGRES_TSDB_PASSWORD: ${POSTGRES_TSDB_PASSWORD}
+      POSTGRES_TSDB_DB: ${POSTGRES_TSDB_DB}
+      TSDB_HOST: ${TSDB_HOST}
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
       OMC_PUBLIC_HOST: ${OMC_PUBLIC_HOST}   # 本机对外 IP（基站可达）：worker 据此生成 PM 上传 URL，见 deploy/.env
@@ -237,6 +295,10 @@ services:
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       migrate-seed-sql:
+        condition: service_completed_successfully
+      # worker 连时序库（TsPool）：PM copy 入库 / KPI 聚合 / 影子维度同步 / 告警历史
+      # retention / trace 写入，等时序库 schema 就绪。
+      migrate-tsdb-schema:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
