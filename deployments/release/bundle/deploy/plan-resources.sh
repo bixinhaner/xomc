@@ -169,20 +169,21 @@ log "  CPU 空闲预算  : ${C_G}${C_B}${IDLE_CPU} 核${C_0}  = ${HOST_CPU} − 
 # 单位 MiB。floor = 100k 基线下限（绝不低于）；ceil = 单机纵向上限（再大走横向扩展）。
 # 数据来源：资源规划分析 + 对抗评审修正（floor-clamp / 全量记账 / PG按连接数定容）。
 #
-#   组件        floor   ceil    surplus权重(%)   说明
-#   app          768    1536        10           非设备量驱动，最先让出预算
-#   acs         1024    2048        15           TR-069 最热堆；1M 走横向多副本
-#   worker      1024    2048        25           PM/MR 解析最吃内存；1M 走横向
-#   postgres    7168   16384        25           须容 max_connections=300(180池+exporter+余,与 main #131 对齐)
-#   redis       3072    8192        15           appendonly，限额需≥1.5×maxmemory
-#   nats         512    2048         5
-#   minio       1024    2048         5
-#   web          512     512         0           静态+反代，固定
+#   组件          floor   ceil    surplus权重(%)   说明
+#   app            768    1536        10           非设备量驱动，最先让出预算
+#   acs           1024    2048        15           TR-069 最热堆；1M 走横向多副本
+#   worker        1024    2048        25           PM/MR 解析最吃内存；1M 走横向
+#   postgres      7168   16384        25           业务主库；须容 max_connections=300(池+exporter+余,与 main #131 对齐)
+#   postgres-tsdb 4096   12288        22           时序库(#347)：PM COPY 入库 + KPI 聚合，写压力主要在此；独立实例，计入预算防双 PG 超分 OOM
+#   redis         3072    8192        15           appendonly，限额需≥1.5×maxmemory
+#   nats           512    2048         5
+#   minio         1024    2048         5
+#   web            512     512         0           静态+反代，固定
 # 监控栈（固定块，不纵向伸缩，但计入预算）：~4224 MiB
-COMP_NAMES=(app acs worker postgres redis nats minio web)
-COMP_FLOOR=(768 1024 1024 7168 3072 512 1024 512)
-COMP_CEIL=(1536 2048 2048 16384 8192 2048 2048 512)
-COMP_WEIGHT=(10 15 25 25 15 5 5 0)
+COMP_NAMES=(app acs worker postgres postgres-tsdb redis nats minio web)
+COMP_FLOOR=(768 1024 1024 7168 4096 3072 512 1024 512)
+COMP_CEIL=(1536 2048 2048 16384 12288 8192 2048 2048 512)
+COMP_WEIGHT=(10 15 25 25 22 15 5 5 0)
 
 MON_FIXED_MIB=4224   # prometheus1024+loki512+tempo512+otelcol512+grafana512+alertmgr512+exporters(128*3+256)
 [ "$SKIP_MONITORING" = 1 ] && MON_FIXED_MIB=0
@@ -198,7 +199,7 @@ log "  组件下限之和  : $(to_gib "$FLOOR_SUM") GiB$([ "$SKIP_MONITORING" = 
 if [ "$IDLE_MEM_MIB" -lt "$FLOOR_SUM" ]; then
   REC_FULL=$(( (FLOOR_SUM + OS_RESERVE_MIB) / 1024 + 2 ))
   die "空闲内存 $(to_gib "$IDLE_MEM_MIB") GiB < 组件下限之和 $(to_gib "$FLOOR_SUM") GiB —— 无法安全部署。
-       建议最低配置：整机 ≥ ${REC_FULL} GiB 内存$([ "$SKIP_MONITORING" = 0 ] && echo '（或加 --skip-monitoring 降到约 16 GiB）')；
+       建议最低配置：整机 ≥ ${REC_FULL} GiB 内存$([ "$SKIP_MONITORING" = 0 ] && echo '（或加 --skip-monitoring 降到约 20 GiB）')；
        或释放本机其它项目占用后重试，或用 --assume-dedicated（确认本机 OMC 独占时）。" 1
 fi
 
@@ -225,11 +226,11 @@ else TIER=small; fi
 
 # CPU 限额（突发可超分；按档位给值）
 case "$TIER" in
-  small)  CPU_app=1;   CPU_acs=2; CPU_worker=2; CPU_pg=2; CPU_redis=1; CPU_nats=1; CPU_minio=1; CPU_web=1 ;;
-  medium) CPU_app="1.5"; CPU_acs=3; CPU_worker=3; CPU_pg=4; CPU_redis=2; CPU_nats=1; CPU_minio=1; CPU_web=1 ;;
-  large)  CPU_app=2;   CPU_acs=4; CPU_worker=4; CPU_pg=6; CPU_redis=2; CPU_nats=2; CPU_minio=1; CPU_web=1 ;;
+  small)  CPU_app=1;   CPU_acs=2; CPU_worker=2; CPU_pg=2; CPU_tsdb=2; CPU_redis=1; CPU_nats=1; CPU_minio=1; CPU_web=1 ;;
+  medium) CPU_app="1.5"; CPU_acs=3; CPU_worker=3; CPU_pg=4; CPU_tsdb=4; CPU_redis=2; CPU_nats=1; CPU_minio=1; CPU_web=1 ;;
+  large)  CPU_app=2;   CPU_acs=4; CPU_worker=4; CPU_pg=6; CPU_tsdb=6; CPU_redis=2; CPU_nats=2; CPU_minio=1; CPU_web=1 ;;
 esac
-CPU_LIST=("$CPU_app" "$CPU_acs" "$CPU_worker" "$CPU_pg" "$CPU_redis" "$CPU_nats" "$CPU_minio" "$CPU_web")
+CPU_LIST=("$CPU_app" "$CPU_acs" "$CPU_worker" "$CPU_pg" "$CPU_tsdb" "$CPU_redis" "$CPU_nats" "$CPU_minio" "$CPU_web")
 
 # 校验：Σ内存限额 ≤ 空闲预算（全量记账，含监控）
 ALLOC_SUM=0; for m in "${COMP_MEM[@]}"; do ALLOC_SUM=$(( ALLOC_SUM + m )); done
@@ -244,6 +245,7 @@ idx() { local n="$1"; for i in "${!COMP_NAMES[@]}"; do [ "${COMP_NAMES[$i]}" = "
 
 APP_MEM=${COMP_MEM[$(idx app)]};     ACS_MEM=${COMP_MEM[$(idx acs)]}
 WORKER_MEM=${COMP_MEM[$(idx worker)]}; PG_MEM=${COMP_MEM[$(idx postgres)]}
+TSDB_MEM=${COMP_MEM[$(idx postgres-tsdb)]}
 REDIS_MEM=${COMP_MEM[$(idx redis)]};   NATS_MEM=${COMP_MEM[$(idx nats)]}
 MINIO_MEM=${COMP_MEM[$(idx minio)]};   WEB_MEM=${COMP_MEM[$(idx web)]}
 
@@ -265,6 +267,19 @@ PG_SAT=$(( PG_SHARED_BUFFERS + PG_MAINT_WORK_MEM + PG_MAXCONN * (10 + PG_WORK_ME
 [ "$PG_SAT" -gt "$(mul_pct "$PG_MEM" 92)" ] && \
   warn "Postgres 饱和估算 $(to_gib "$PG_SAT") GiB 接近限额 $(to_gib "$PG_MEM") GiB；建议增大内存或上 pgbouncer 收敛连接。"
 
+# Postgres-tsdb（#347 时序库）：与主库同源派生（shared_buffers 25% / effective_cache 70% /
+# work_mem / maint / max_wal）。写压力主要在此；连接池较小（app40+worker25=65 < 主库 115），
+# max_connections 取 300 与主库/compose 缺省对齐（充足余量、口径一致）。
+TSDB_MAXCONN=300
+TSDB_SHARED_BUFFERS=$(mul_pct "$TSDB_MEM" 25)
+TSDB_EFFECTIVE_CACHE=$(mul_pct "$TSDB_MEM" 70)
+TSDB_WORK_MEM=$([ "$TSDB_MEM" -ge 8192 ] && echo 16 || { [ "$TSDB_MEM" -ge 6144 ] && echo 8 || echo 4; })
+TSDB_MAINT_WORK_MEM=$(awk -v m="$TSDB_MEM" 'BEGIN{v=m*0.05; if(v>2048)v=2048; if(v<256)v=256; printf "%d", v}')
+TSDB_MAX_WAL=$([ "$TSDB_MEM" -ge 8192 ] && echo 8GB || echo 4GB)
+TSDB_SAT=$(( TSDB_SHARED_BUFFERS + TSDB_MAINT_WORK_MEM + TSDB_MAXCONN * (10 + TSDB_WORK_MEM) + 512 ))
+[ "$TSDB_SAT" -gt "$(mul_pct "$TSDB_MEM" 92)" ] && \
+  warn "Postgres-tsdb 饱和估算 $(to_gib "$TSDB_SAT") GiB 接近限额 $(to_gib "$TSDB_MEM") GiB；建议增大内存或下调 TSDB_MAX_CONNECTIONS（时序库连接池仅 ~65）。"
+
 # Redis：maxmemory = 0.66 × 限额，且保证 限额 − maxmemory ≥ 1 GiB（AOF rewrite 的 COW 余量）
 REDIS_MAXMEM=$(mul_pct "$REDIS_MEM" 66)
 [ $(( REDIS_MEM - REDIS_MAXMEM )) -lt 1024 ] && REDIS_MAXMEM=$(( REDIS_MEM - 1024 ))
@@ -279,6 +294,7 @@ printf '  %-10s  %8s MiB\n' "app"    "$APP_MEM" ; printf '              ↳ GOME
 printf '  %-10s  %8s MiB\n' "acs"    "$ACS_MEM" ; printf '              ↳ GOMEMLIMIT=%sMiB GOMAXPROCS=%s\n' "$ACS_GOMEM" "$ACS_GOMAXPROCS"
 printf '  %-10s  %8s MiB\n' "worker" "$WORKER_MEM" ; printf '              ↳ GOMEMLIMIT=%sMiB GOMAXPROCS=%s\n' "$WORKER_GOMEM" "$WORKER_GOMAXPROCS"
 printf '  %-10s  %8s MiB\n' "postgres" "$PG_MEM" ; printf '              ↳ shared_buffers=%sMB effective_cache=%sMB max_connections=%s work_mem=%sMB\n' "$PG_SHARED_BUFFERS" "$PG_EFFECTIVE_CACHE" "$PG_MAXCONN" "$PG_WORK_MEM"
+printf '  %-13s  %8s MiB\n' "postgres-tsdb" "$TSDB_MEM" ; printf '              ↳ shared_buffers=%sMB effective_cache=%sMB max_connections=%s work_mem=%sMB（时序库 #347）\n' "$TSDB_SHARED_BUFFERS" "$TSDB_EFFECTIVE_CACHE" "$TSDB_MAXCONN" "$TSDB_WORK_MEM"
 printf '  %-10s  %8s MiB\n' "redis"  "$REDIS_MEM" ; printf '              ↳ maxmemory=%sMB policy=%s（限额−maxmemory=%sMiB COW 余量）\n' "$REDIS_MAXMEM" "$REDIS_POLICY" "$(( REDIS_MEM - REDIS_MAXMEM ))"
 printf '  %-10s  %8s MiB\n' "nats"   "$NATS_MEM"
 printf '  %-10s  %8s MiB\n' "minio"  "$MINIO_MEM"
@@ -305,6 +321,7 @@ fi
   echo "#   · GOMEMLIMIT 必须 < 对应 *_MEM（软限，建议 0.90×）；ACS 还须配合准入控制+SOAP体上限"
   echo "#   · REDIS_MEM 必须 ≥ REDIS_MAXMEMORY + 1GiB（AOF rewrite 的 fork COW 余量）"
   echo "#   · PG_MAX_CONNECTIONS 必须 ≥ Go 端连接池总和(当前 180)；增大须同步增大 POSTGRES_MEM"
+  echo "#   · 时序库(#347)：TSDB_* 同理；TSDB_MEM 变则 TSDB_SHARED_BUFFERS 联动；两 PG 内存合计须 ≤ 空闲预算"
   echo "# =============================================================================="
   echo ""
   echo "# ── 业务（Go）── *_MEM 是 cgroup 硬限；*_GOMEMLIMIT 是 Go 堆软限（0.90×）"
@@ -312,11 +329,17 @@ fi
   echo "ACS_CPUS=$CPU_acs";       echo "ACS_MEM=${ACS_MEM}m";       echo "ACS_GOMEMLIMIT=${ACS_GOMEM}MiB";       echo "ACS_GOMAXPROCS=$ACS_GOMAXPROCS"
   echo "WORKER_CPUS=$CPU_worker"; echo "WORKER_MEM=${WORKER_MEM}m"; echo "WORKER_GOMEMLIMIT=${WORKER_GOMEM}MiB"; echo "WORKER_GOMAXPROCS=$WORKER_GOMAXPROCS"
   echo ""
-  echo "# ── Postgres / TimescaleDB ── 限额与 -c 调优参数同源派生"
+  echo "# ── Postgres 主库 ── 业务数据（时序已分离到 tsdb）；限额与 -c 调优参数同源派生"
   echo "POSTGRES_CPUS=$CPU_pg";   echo "POSTGRES_MEM=${PG_MEM}m"
   echo "PG_SHARED_BUFFERS=${PG_SHARED_BUFFERS}MB"; echo "PG_EFFECTIVE_CACHE_SIZE=${PG_EFFECTIVE_CACHE}MB"
   echo "PG_MAX_CONNECTIONS=$PG_MAXCONN"; echo "PG_WORK_MEM=${PG_WORK_MEM}MB"
   echo "PG_MAINTENANCE_WORK_MEM=${PG_MAINT_WORK_MEM}MB"; echo "PG_MAX_WAL_SIZE=$PG_MAX_WAL"
+  echo ""
+  echo "# ── Postgres 时序库 postgres-tsdb（#347）── 独立 TimescaleDB 实例，PM COPY/KPI 聚合写主要在此"
+  echo "TSDB_CPUS=$CPU_tsdb";     echo "TSDB_MEM=${TSDB_MEM}m"
+  echo "TSDB_SHARED_BUFFERS=${TSDB_SHARED_BUFFERS}MB"; echo "TSDB_EFFECTIVE_CACHE_SIZE=${TSDB_EFFECTIVE_CACHE}MB"
+  echo "TSDB_MAX_CONNECTIONS=$TSDB_MAXCONN"; echo "TSDB_WORK_MEM=${TSDB_WORK_MEM}MB"
+  echo "TSDB_MAINTENANCE_WORK_MEM=${TSDB_MAINT_WORK_MEM}MB"; echo "TSDB_MAX_WAL_SIZE=$TSDB_MAX_WAL"
   echo ""
   echo "# ── Redis ── 限额 ≥ maxmemory + 1GiB"
   echo "REDIS_CPUS=$CPU_redis";   echo "REDIS_MEM=${REDIS_MEM}m"
