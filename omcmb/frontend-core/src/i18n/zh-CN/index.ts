@@ -7549,6 +7549,12 @@ const messages: Record<string, string> = {
   'software.rollback.destVersionPending':        '回退后版本以设备上报为准',
   'software.rollback.targetVersion':             '目标版本',
   'software.rollback.originVersion':             '原始版本',
+
+  // qa-614 c6 — UFTE 2G(GSM) 升级分类（#365 #373）+ 4G/5G 合并设备升级虚拟分类（#368）
+  'ufte.builtin.category.gsm_upgrade':        '2G升级',
+  'ufte.builtin.category.device_upgrade':     '设备升级',
+  'ufte.builtin.type.GSM_IMG_UPGRADE':        '2G 基站软件升级',
+  'ufte.builtin.desc.GSM_IMG_UPGRADE':        '复用现网软件升级链路，统一承载 2G(GSM) 基站镜像升级任务。',
 };
 
 export default messages;

@@ -34,10 +34,14 @@ import {
 } from '@core/hooks/api/useUnifiedFileTransfer'
 import type {
   UnifiedFileTransferTask,
-  UnifiedFileTransferTaskType,
   TransferTaskStatus,
   TransferTaskResult,
 } from '@core/types/unifiedFileTransfer'
+import {
+  DEVICE_UPGRADE_CATEGORY,
+  aggregateCategoryOptions,
+  resolveBackendCategoryParam,
+} from '@core/utils/ufteCategory'
 
 const PAGE_SIZE = 20
 
@@ -73,14 +77,18 @@ export default function TransferCenterPage() {
   const { data: overview, isFetching: overviewFetching } = useUnifiedFileTransferOverview()
   const { data: taskTypes } = useUnifiedFileTransferTaskTypes()
 
-  // 分类下拉来自任务类型表（去重）—— 真实后端 category/categoryLabel
+  // 分类下拉来自任务类型表（去重）—— 真实后端 category/categoryLabel。
+  // qa-614 c6 #368：4G(enb_upgrade)+5G(gnb_upgrade) 折叠为单条『设备升级』(device_upgrade)，
+  // 与 v1/v2 口径一致（聚合逻辑共享自 @core/utils/ufteCategory）。v3 无 typeCode 选择器，
+  // 选中『设备升级』chip 即按成员超集筛出 4G+5G 全部升级任务。
   const categories = useMemo(() => {
-    const map = new Map<string, string>()
-    ;(taskTypes ?? []).forEach((t: UnifiedFileTransferTaskType) => {
-      if (!map.has(t.category)) map.set(t.category, t.categoryLabel)
-    })
-    return Array.from(map.entries()).map(([value, label]) => ({ value, label }))
+    return aggregateCategoryOptions(taskTypes ?? []).map((opt) =>
+      opt.value === DEVICE_UPGRADE_CATEGORY ? { value: opt.value, label: '设备升级' } : opt,
+    )
   }, [taskTypes])
+
+  // qa-614 c6 #368：device_upgrade 展开为后端 category 查询参数（无 typeCode → 成员超集）。
+  const backendCategory = category ? resolveBackendCategoryParam(category) : undefined
 
   const params = useMemo(
     () => ({
@@ -88,9 +96,9 @@ export default function TransferCenterPage() {
       pageSize: PAGE_SIZE,
       ...(keyword.trim() ? { keyword: keyword.trim() } : {}),
       ...(status ? { status } : {}),
-      ...(category ? { category } : {}),
+      ...(backendCategory ? { category: backendCategory } : {}),
     }),
-    [page, keyword, status, category],
+    [page, keyword, status, backendCategory],
   )
   const { data, isLoading, isError, error, isFetching, refetch } = useUnifiedFileTransferTasks(params)
   const rows = useMemo<UnifiedFileTransferTask[]>(() => data?.items ?? [], [data])

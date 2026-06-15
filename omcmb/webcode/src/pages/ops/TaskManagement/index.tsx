@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback } from 'react';
+import type { CSSProperties } from 'react';
 import { Button, Dropdown, Tag, Space, Progress, Modal, Form, Input, Select, message, Descriptions, Drawer, Tooltip } from 'antd';
 import type { MenuProps } from 'antd';
 import { PlusOutlined, PlayCircleOutlined, PauseCircleOutlined, StopOutlined, MoreOutlined } from '@ant-design/icons';
@@ -18,6 +19,16 @@ import {
 } from '@core/hooks/api/useOpsTools';
 import { usePermission } from '@core/hooks/usePermission';
 import { useT } from '@/hooks/useT';
+
+// qa-614 c6 #367：任务详情 Descriptions 局部样式——标签/内容单行不换行（超长 ellipsis），
+// 详情区字号收紧至 12（不动全局 token，避免全局回归）。
+const OPS_DETAIL_LABEL_STYLE: CSSProperties = { whiteSpace: 'nowrap', fontSize: 12 };
+const OPS_DETAIL_CONTENT_STYLE: CSSProperties = {
+  whiteSpace: 'nowrap',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  fontSize: 12,
+};
 
 // 状态值集合保持为常量（value 是与后端契约，不翻译）；显示标签在 render 时经 t() 派生（#226）。
 const STATUS_VALUES: ReadonlyArray<OpsTask['status']> = [
@@ -349,9 +360,16 @@ export default function TaskManagement() {
         size={600}
       >
         {selectedTask && (
-          <Descriptions bordered column={2} size="small">
+          // qa-614 c6 #367：标签/内容单行不换行 + 详情区字号收紧至 12（局部，不动全局 token）。
+          <Descriptions
+            bordered
+            column={2}
+            size="small"
+            labelStyle={OPS_DETAIL_LABEL_STYLE}
+            contentStyle={OPS_DETAIL_CONTENT_STYLE}
+          >
             <Descriptions.Item label={t('ops.task.colName')} span={2}>
-              {selectedTask.taskName}
+              <Tooltip title={selectedTask.taskName}>{selectedTask.taskName}</Tooltip>
             </Descriptions.Item>
             <Descriptions.Item label={t('ops.task.colTemplate')} span={2}>
               {selectedTask.templateId ? templateNameMap[selectedTask.templateId] ?? selectedTask.templateId : '—'}

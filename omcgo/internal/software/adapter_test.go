@@ -65,3 +65,45 @@ func TestDefaultAdapter_RollbackNeedsEnableCheck_NR(t *testing.T) {
 	adapter := NewDefaultUpgradeAdapter()
 	assert.False(t, adapter.RollbackNeedsEnableCheck(model.TechNR))
 }
+
+// qa-614 c6 / #373：2G/GSM 回退分支显式列出，与 4G 同属 Baicells param_model
+// 家族（两阶段 GPV ROLLBACK_ENABLE → SPV ROLLBACK_CONTROL），不再静默落 LTE default。
+func TestDefaultAdapter_GSM_RollbackBranch(t *testing.T) {
+	adapter := NewDefaultUpgradeAdapter()
+	assert.Equal(t, "Device.DeviceInfo.ROLLBACK_ENABLE", adapter.RollbackEnableCheckPath(model.TechGSM))
+	assert.Equal(t, "Device.DeviceInfo.ROLLBACK_CONTROL", adapter.RollbackParameterPath(model.TechGSM))
+	assert.True(t, adapter.RollbackNeedsEnableCheck(model.TechGSM))
+	v, xsd := adapter.RollbackParameterValue(model.TechGSM, "Device.DeviceInfo.X_COM_ROLLBACK_CONTROL")
+	assert.Equal(t, "1", v)
+	assert.Equal(t, "xsd:string", xsd)
+}
+
+// qa-614 c6 / #373：ResolveDeviceTech 三态识别 GSM / NR / LTE（兜底）。
+func TestResolveDeviceTech_ThreeState(t *testing.T) {
+	cases := []struct {
+		name string
+		dev  *model.Device
+		want model.Technology
+	}{
+		{"gsm by technology field", &model.Device{Technology: model.TechGSM}, model.TechGSM},
+		{"gsm by PGSM productClass", &model.Device{ProductClass: "FAP/PGSM"}, model.TechGSM},
+		{"gsm by BTS productClass", &model.Device{ProductClass: "FAP/BTS"}, model.TechGSM},
+		{"nr by technology field", &model.Device{Technology: model.TechNR}, model.TechNR},
+		{"nr by BNQ productClass", &model.Device{ProductClass: "BNQ"}, model.TechNR},
+		{"lte fallback unclassified", &model.Device{ProductClass: "4G eNB"}, model.TechLTE},
+		{"lte fallback empty", &model.Device{}, model.TechLTE},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, ResolveDeviceTech(tc.dev))
+		})
+	}
+}
+
+func TestIsGSM(t *testing.T) {
+	assert.True(t, IsGSM(&model.Device{Technology: model.TechGSM}))
+	assert.True(t, IsGSM(&model.Device{ProductClass: "FAP/PGSM"}))
+	assert.True(t, IsGSM(&model.Device{ProductClass: "FAP/BTS"}))
+	assert.False(t, IsGSM(&model.Device{ProductClass: "4G eNB"}))
+	assert.False(t, IsGSM(&model.Device{ProductClass: "BNQ"}))
+}

@@ -7514,6 +7514,12 @@ const messages: Record<string, string> = {
   'software.rollback.destVersionPending':        'Post-rollback version follows the device report',
   'software.rollback.targetVersion':             'Target Version',
   'software.rollback.originVersion':             'Original Version',
+
+  // qa-614 c6 — UFTE 2G(GSM) upgrade category (#365 #373) + merged device-upgrade virtual category (#368)
+  'ufte.builtin.category.gsm_upgrade':        '2G Upgrade',
+  'ufte.builtin.category.device_upgrade':     'Device Upgrade',
+  'ufte.builtin.type.GSM_IMG_UPGRADE':        '2G Base Station Software Upgrade',
+  'ufte.builtin.desc.GSM_IMG_UPGRADE':        'Reuses the live software upgrade pipeline to carry 2G (GSM) base station image upgrade tasks.',
 };
 
 export default messages;
