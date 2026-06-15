@@ -79,3 +79,37 @@ describe('MetricPickerModal 制式锁定', () => {
     expect(useIndicatorListSpy.mock.calls.at(-1)?.[0]).toBe('GNB');
   });
 });
+
+describe('MetricPickerModal 已选回显', () => {
+  beforeEach(() => {
+    useIndicatorListSpy.mockClear();
+  });
+
+  // 回归：与制式同款「组件常驻不卸载」问题——内部 selected 仅首挂载赋值一次。
+  // 编辑不同模板时关闭后用新 initialSelected 重开，「已选」面板必须回显最新模板的指标，
+  // 而非停留在上次打开弹窗时的残留选择。
+  it('关闭后以新 initialSelected 重开，「已选」回显最新入参而非上次残留', () => {
+    const { rerender } = render(
+      wrapIntl(
+        <MetricPickerModal open onClose={() => {}} onConfirm={() => {}} initialSelected={['C000080007']} />,
+      ),
+    );
+    // 首开：回显模板 A 的指标
+    expect(screen.getByText('C000080007')).toBeTruthy();
+
+    // 关闭（不卸载组件）→ 换成模板 B 的指标 → 重开
+    rerender(
+      wrapIntl(
+        <MetricPickerModal open={false} onClose={() => {}} onConfirm={() => {}} initialSelected={['C000030170']} />,
+      ),
+    );
+    rerender(
+      wrapIntl(
+        <MetricPickerModal open onClose={() => {}} onConfirm={() => {}} initialSelected={['C000030170']} />,
+      ),
+    );
+    // 重开：必须回显模板 B 的指标，且不残留模板 A 的指标
+    expect(screen.getByText('C000030170')).toBeTruthy();
+    expect(screen.queryByText('C000080007')).toBeNull();
+  });
+});

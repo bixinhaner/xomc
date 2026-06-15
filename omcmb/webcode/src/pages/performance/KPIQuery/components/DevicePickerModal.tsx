@@ -54,6 +54,16 @@ export default function DevicePickerModal({
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState('');
 
+  // 已选回显同步：本组件在调用页常驻不卸载（Modal 的 destroyOnHidden 只销毁弹窗 DOM、不重挂载本组件），
+  // 内部 selected 仅首挂载赋值一次，关闭后用新 initialSelected 重开（如切换编辑不同模板）时不会自动刷新、
+  // 会残留上次打开的选择。故用渲染期幂等同步（不用 useEffect）：监听 open 由关变开，把 selected 重置为
+  // 最新入参；open 期间用户的勾选/批量粘贴不受影响（仅在打开瞬间同步一次）。
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (prevOpen !== open) {
+    setPrevOpen(open);
+    if (open) setSelected(initialSelected);
+  }
+
   const { data, isLoading } = useDeviceList(
     { page, pageSize, searchText: search || undefined, networkType: technology },
     { enabled: open },

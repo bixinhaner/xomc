@@ -78,6 +78,16 @@ export default function MetricPickerModal({
   const [pageSize, setPageSize] = useState(20);
   const [selected, setSelected] = useState<string[]>(initialSelected);
 
+  // 已选回显同步：与下方制式同款「组件常驻不卸载」问题——内部 selected 仅首挂载赋值一次，
+  // 关闭后用新 initialSelected 重开（如切换编辑不同模板）时不会自动刷新，会残留上次打开的选择。
+  // 故用渲染期幂等同步（与 labelMap/seenItems 同套路、不用 useEffect）：监听 open 由关变开，
+  // 把 selected 重置为最新入参；open 期间用户的勾选不受影响（仅在打开瞬间同步一次）。
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (prevOpen !== open) {
+    setPrevOpen(open);
+    if (open) setSelected(initialSelected);
+  }
+
   // 制式联动锁定（T-0188）：锁定态 deviceType 恒等于外部制式入参 initialDeviceType。
   // 本组件在调用页常驻不卸载（Modal 的 destroyOnHidden 只销毁弹窗 DOM 内容、不重挂载本组件），
   // 内部 state 仅首挂载赋值一次、不随外部制式切换更新；故锁定态直接取 prop，避免停留在首挂载制式。

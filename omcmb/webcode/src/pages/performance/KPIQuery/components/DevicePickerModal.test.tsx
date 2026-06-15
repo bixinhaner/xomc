@@ -6,7 +6,7 @@
  *   - 不传 technology 时，networkType 为 undefined（列全部设备，向后兼容 KPIQuery）。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { App } from 'antd';
 import { IntlProvider } from 'react-intl';
 import { zhCN } from '@core/i18n';
@@ -49,5 +49,38 @@ describe('DevicePickerModal 制式联动', () => {
     renderModal();
     const lastParams = useDeviceListSpy.mock.calls.at(-1)?.[0] as { networkType?: string };
     expect(lastParams.networkType).toBeUndefined();
+  });
+});
+
+describe('DevicePickerModal 已选回显', () => {
+  beforeEach(() => {
+    useDeviceListSpy.mockClear();
+  });
+
+  // 回归：与制式同款「组件常驻不卸载」问题——内部 selected 仅首挂载赋值一次。
+  // 编辑不同模板时关闭后用新 initialSelected 重开，「已选」面板必须回显最新模板的设备，
+  // 而非停留在上次打开弹窗时的残留选择。
+  it('关闭后以新 initialSelected 重开，「已选」回显最新入参而非上次残留', () => {
+    const wrap = (node: React.ReactElement) => (
+      <IntlProvider locale="zh-CN" defaultLocale="zh-CN" messages={zhCN}>
+        <App>{node}</App>
+      </IntlProvider>
+    );
+    const { rerender } = render(
+      wrap(<DevicePickerModal open onClose={() => {}} onConfirm={() => {}} initialSelected={['SN-AAA']} />),
+    );
+    // 首开：回显模板 A 的设备
+    expect(screen.getByText('SN-AAA')).toBeTruthy();
+
+    // 关闭（不卸载组件）→ 换成模板 B 的设备 → 重开
+    rerender(
+      wrap(<DevicePickerModal open={false} onClose={() => {}} onConfirm={() => {}} initialSelected={['SN-BBB']} />),
+    );
+    rerender(
+      wrap(<DevicePickerModal open onClose={() => {}} onConfirm={() => {}} initialSelected={['SN-BBB']} />),
+    );
+    // 重开：必须回显模板 B 的设备，且不残留模板 A 的设备
+    expect(screen.getByText('SN-BBB')).toBeTruthy();
+    expect(screen.queryByText('SN-AAA')).toBeNull();
   });
 });
