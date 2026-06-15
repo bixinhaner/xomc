@@ -1,0 +1,163 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "title": "OMC 进程在线（app/acs/worker）",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 5, "x": 0, "y": 0},
+      "targets": [
+        {"expr": "sum(up{job=~\"omc-.*\"})", "legendFormat": "online"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short", "thresholds": {"steps": [{"color": "red", "value": null}, {"color": "green", "value": 3}]}}}
+    },
+    {
+      "title": "容器重启次数（1h）",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 5, "x": 5, "y": 0},
+      "targets": [
+        {"expr": "sum(changes(container_start_time_seconds{name=~\"(omcgo|docker)-(app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web)-.*\"}[1h]))", "legendFormat": "restarts"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short", "thresholds": {"steps": [{"color": "green", "value": null}, {"color": "orange", "value": 1}, {"color": "red", "value": 3}]}}}
+    },
+    {
+      "title": "协程总数（全进程）",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 5, "x": 10, "y": 0},
+      "targets": [
+        {"expr": "sum(go_goroutines{job=~\"omc-.*\"})", "legendFormat": "goroutines"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short"}}
+    },
+    {
+      "title": "连接池最高使用率",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 4, "x": 15, "y": 0},
+      "targets": [
+        {"expr": "max(pgxpool_in_use / pgxpool_max)", "legendFormat": "max pool"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1, "thresholds": {"steps": [{"color": "green", "value": null}, {"color": "orange", "value": 0.8}, {"color": "red", "value": 0.95}]}}}
+    },
+    {
+      "title": "进程常驻内存合计（RSS）",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 5, "x": 19, "y": 0},
+      "targets": [
+        {"expr": "sum(process_resident_memory_bytes{job=~\"omc-.*\"})", "legendFormat": "rss"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "bytes"}}
+    },
+
+    {
+      "title": "容器 CPU 使用（核，按容器）",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+      "targets": [
+        {"expr": "sum by (name) (rate(container_cpu_usage_seconds_total{name=~\"(omcgo|docker)-(app|acs|worker)-.*\"}[$__rate_interval]))", "legendFormat": "{{name}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short"}}
+    },
+    {
+      "title": "容器内存 working set（按容器）",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+      "targets": [
+        {"expr": "sum by (name) (container_memory_working_set_bytes{name=~\"(omcgo|docker)-(app|acs|worker)-.*\"})", "legendFormat": "{{name}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "bytes"}}
+    },
+
+    {
+      "title": "容器内存饱和度（vs limit）",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+      "targets": [
+        {"expr": "sum by (name) (container_memory_working_set_bytes{name=~\"(omcgo|docker)-(app|acs|worker)-.*\"}) / sum by (name) (container_spec_memory_limit_bytes{name=~\"(omcgo|docker)-(app|acs|worker)-.*\"} > 0)", "legendFormat": "{{name}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}}
+    },
+    {
+      "title": "容器网络收发（按容器）",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+      "targets": [
+        {"expr": "sum by (name) (rate(container_network_receive_bytes_total{name=~\"(omcgo|docker)-(app|acs|worker)-.*\"}[$__rate_interval]))", "legendFormat": "{{name}} rx"},
+        {"expr": "sum by (name) (rate(container_network_transmit_bytes_total{name=~\"(omcgo|docker)-(app|acs|worker)-.*\"}[$__rate_interval]))", "legendFormat": "{{name}} tx"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "Bps"}}
+    },
+
+    {
+      "title": "Go 协程数（按服务）",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 20},
+      "targets": [
+        {"expr": "go_goroutines{job=~\"omc-.*\"}", "legendFormat": "{{deployment_unit}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short"}}
+    },
+    {
+      "title": "Go 堆内存 inuse（按服务）",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 20},
+      "targets": [
+        {"expr": "go_memstats_heap_inuse_bytes{job=~\"omc-.*\"}", "legendFormat": "{{deployment_unit}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "bytes"}}
+    },
+    {
+      "title": "GC 暂停耗时速率（按服务）",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 20},
+      "targets": [
+        {"expr": "rate(go_gc_duration_seconds_sum{job=~\"omc-.*\"}[$__rate_interval])", "legendFormat": "{{deployment_unit}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "s"}}
+    },
+
+    {
+      "title": "pgxpool 使用率（按服务/池）",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 28},
+      "targets": [
+        {"expr": "pgxpool_in_use{job=~\"omc-.*\"} / pgxpool_max{job=~\"omc-.*\"}", "legendFormat": "{{deployment_unit}}/{{pool}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1, "thresholds": {"steps": [{"color": "green", "value": null}, {"color": "orange", "value": 0.8}, {"color": "red", "value": 0.95}]}}}
+    },
+    {
+      "title": "Redis 连接池使用率（按服务）",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 28},
+      "targets": [
+        {"expr": "redis_pool_in_use{job=~\"omc-.*\"} / redis_pool_max{job=~\"omc-.*\"}", "legendFormat": "{{deployment_unit}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}}
+    },
+    {
+      "title": "进程文件描述符使用率（按服务）",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 28},
+      "targets": [
+        {"expr": "process_open_fds{job=~\"omc-.*\"} / process_max_fds{job=~\"omc-.*\"}", "legendFormat": "{{deployment_unit}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}}
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["omcgo", "resources", "runtime"],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "title": "OMC - 服务资源与运行时（容器/进程/连接池）",
+  "uid": "omcgo-resources"
+}

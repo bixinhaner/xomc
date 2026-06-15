@@ -1,0 +1,42 @@
+# Go 运行时资源告警 — app / acs / worker 进程级（协程 / 文件描述符）
+#
+# 数据源：app/acs/worker `/metrics` 暴露的 Go runtime 与 process 采集器指标
+#   （go_goroutines / process_open_fds / process_max_fds）。
+#   这些指标由 internal/core/components/infra.go 在 NewInfra 注册（issue #394）。
+#   修复接线前 registry 为空、这些规则无数据；接线后生效。
+#
+# 范围：仅服务进程自身的运行时资源饱和，不含业务数据/服务性能。
+
+groups:
+  - name: omc.runtime
+    interval: 30s
+    rules:
+      - alert: GoGoroutineSurge
+        # 协程数绝对高水位 —— 协程泄漏的直接信号。阈值偏保守，按各服务实际基线调整。
+        expr: go_goroutines{job=~"omc-.*"} > 10000
+        for: 15m
+        labels:
+          severity: warning
+          domain: omc
+        annotations:
+          summary: "协程数异常偏高：{{ $labels.deployment_unit }}（{{ $value | humanize }}）"
+          description: |
+            {{ $labels.deployment_unit }} 进程协程数持续 15 分钟 > 10000。
+            Impact: 协程泄漏会持续吞内存，最终 OOM；常因 goroutine 未退出（阻塞在 channel/锁/网络）。
+            Action: 开 OMCGO_PPROF 后取 /debug/pprof/goroutine 看堆栈；定位未退出的 goroutine。
+
+      - alert: ProcessFDNearLimit
+        # 打开的文件描述符接近进程上限 —— 连接/文件句柄泄漏信号。
+        expr: |
+          (process_open_fds{job=~"omc-.*"} / process_max_fds{job=~"omc-.*"} > 0.8)
+          and (process_max_fds{job=~"omc-.*"} > 0)
+        for: 10m
+        labels:
+          severity: warning
+          domain: omc
+        annotations:
+          summary: "文件描述符接近上限（> 80%）：{{ $labels.deployment_unit }}"
+          description: |
+            {{ $labels.deployment_unit }} 进程已用 FD > 软上限的 80%，持续 10 分钟。
+            Impact: 触顶后 accept/open 失败（"too many open files"），新连接/文件操作报错。
+            Action: 查连接/文件句柄泄漏（未关闭的 conn/file）；评估调大 ulimit -n。

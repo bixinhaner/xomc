@@ -151,6 +151,58 @@ groups:
             Impact: 触限将被 OOMKill 重启，丢失会话/进行中任务。
             Action: 查该容器内存泄漏；评估调大 limit 或优化内存占用。
 
+      - alert: ContainerOOMKilled
+        # container_oom_events_total 在容器被 OOMKill 时自增；任何一次都需关注。
+        expr: |
+          increase(container_oom_events_total{name=~"(omcgo|docker)-(app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web)-.*"}[10m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          domain: omc
+          service: cadvisor
+        annotations:
+          summary: "容器发生 OOMKill：{{ $labels.name }}"
+          description: |
+            容器 {{ $labels.name }} 近 10 分钟发生过 OOMKill（内存触限被内核杀死并重启）。
+            Impact: 进行中会话/任务丢失，可能反复重启抖动。
+            Action: 查该容器内存泄漏；调大 mem limit 或优化占用；结合「容器内存饱和度」面板定位。
+
+      - alert: ContainerCPUSaturation
+        # 仅当容器设了 CPU limit（cpu_quota 有限值）时才触发；当前 compose 多数未设
+        # → 不会误报，属加 limit 后的前瞻规则。limit 核数 = cpu_quota / cpu_period。
+        expr: |
+          (sum by (name) (rate(container_cpu_usage_seconds_total{name=~"(omcgo|docker)-(app|acs|worker)-.*"}[5m]))
+           / sum by (name) (container_spec_cpu_quota{name=~"(omcgo|docker)-(app|acs|worker)-.*"} / container_spec_cpu_period{name=~"(omcgo|docker)-(app|acs|worker)-.*"}) > 0.9)
+          and (sum by (name) (container_spec_cpu_quota{name=~"(omcgo|docker)-(app|acs|worker)-.*"}) > 0)
+        for: 10m
+        labels:
+          severity: warning
+          domain: omc
+          service: cadvisor
+        annotations:
+          summary: "容器 CPU 接近 limit（> 90%）：{{ $labels.name }}"
+          description: |
+            容器 {{ $labels.name }} CPU 使用已达其 CPU limit 的 90%，持续 10 分钟。
+            Impact: 触限将被 CFS 限流，请求延迟上升。
+            Action: 评估调大 CPU limit 或水平扩容；定位 CPU 热点（开 pprof CPU profile）。
+
+      - alert: ContainerCPUThrottling
+        # CFS 限流比 = 被限流周期 / 总周期；持续偏高说明 CPU limit 偏紧。
+        expr: |
+          (rate(container_cpu_cfs_throttled_periods_total{name=~"(omcgo|docker)-(app|acs|worker)-.*"}[5m])
+           / rate(container_cpu_cfs_periods_total{name=~"(omcgo|docker)-(app|acs|worker)-.*"}[5m])) > 0.25
+        for: 10m
+        labels:
+          severity: warning
+          domain: omc
+          service: cadvisor
+        annotations:
+          summary: "容器 CPU 被 CFS 限流（> 25%）：{{ $labels.name }}"
+          description: |
+            容器 {{ $labels.name }} 近 5 分钟超过 25% 的调度周期被 CPU 限流，持续 10 分钟。
+            Impact: 即使整体 CPU 利用率不高，请求也会因限流而抖动变慢。
+            Action: 调大 CPU limit；或核对 limit 是否设得过紧。
+
   - name: omc.nginx
     interval: 30s
     rules:
