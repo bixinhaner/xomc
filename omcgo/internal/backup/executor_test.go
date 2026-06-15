@@ -357,6 +357,125 @@ func TestHandleTask_NVPlatform(t *testing.T) {
 	assert.Contains(t, params["url"], "CONFIGBACKUP_NV")
 }
 
+// qa-614 #376: selectBackupType 前缀契约固化。
+// 修复前 BM(FAP/BU1810) 永远兜底 XML、MLN 全系因 "FAP/MLN_SC"(下划线) 不命中而误落 XML。
+func TestSelectBackupType_PrefixContract(t *testing.T) {
+	tests := []struct {
+		name         string
+		productClass string
+		wantType     string
+		wantExt      string
+		wantURLParam string
+	}{
+		// NV 平台
+		{"MLQ/SC → NV", "FAP/MLQ/SC", "CONFIG_BACKUP_NV", ".nv", "CONFIGBACKUP_NV"},
+		{"MLN/SC → NV（修复下划线漂移）", "FAP/MLN/SC", "CONFIG_BACKUP_NV", ".nv", "CONFIGBACKUP_NV"},
+		{"MLN/CA → NV", "FAP/MLN/CA", "CONFIG_BACKUP_NV", ".nv", "CONFIGBACKUP_NV"},
+		{"MLN/DC → NV", "FAP/MLN/DC", "CONFIG_BACKUP_NV", ".nv", "CONFIGBACKUP_NV"},
+		{"BM/BU1810 → NV（新增登记）", "FAP/BU1810", "CONFIG_BACKUP_NV", ".nv", "CONFIGBACKUP_NV"},
+		// XML 兜底平台（不回归）
+		{"BLQ/SC → XML 兜底", "FAP/BLQ/SC", "CONFIG_BACKUP_XML", ".xml", "CONFIGBACKUP_XML"},
+		{"QLS → XML 兜底", "FAP/QLS/SC", "CONFIG_BACKUP_XML", ".xml", "CONFIGBACKUP_XML"},
+		{"BSC → XML 兜底", "FAP/BSC", "CONFIG_BACKUP_XML", ".xml", "CONFIGBACKUP_XML"},
+		{"空 ProductClass → XML 兜底", "", "CONFIG_BACKUP_XML", ".xml", "CONFIGBACKUP_XML"},
+		// 边界：曾错写的下划线串本身不应再命中 NV（确保前缀契约就是斜杠）
+		{"FAP/MLN_SC（旧错误串）不再命中 NV", "FAP/MLN_SC", "CONFIG_BACKUP_XML", ".xml", "CONFIGBACKUP_XML"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec := selectBackupType(tt.productClass)
+			require.NotNil(t, spec)
+			assert.Equal(t, tt.wantType, spec.TypeCode)
+			assert.Equal(t, tt.wantExt, spec.FileExtension)
+			assert.Equal(t, tt.wantURLParam, spec.URLFileTypeParam)
+		})
+	}
+}
+
+// qa-614 #376: BM 站(FAP/BU1810) 端到端应下发 NV 备份。
+func TestHandleTask_BMPlatformNV(t *testing.T) {
+	taskID := uuid.New()
+	task := &BackupTask{
+		ID:        taskID,
+		Status:    TaskPending,
+		TargetIDs: []string{"SN_BM"},
+	}
+
+	taskRepo := &execTaskRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*BackupTask, error) { return task, nil },
+		updateFn:  func(_ context.Context, _ *BackupTask) error { return nil },
+	}
+	// BM 站：真机 ProductClass=FAP/BU1810，应使用 NV 备份。
+	deviceRepo := &execDeviceRepo{
+		getBySNFn: func(_ context.Context, sn string) (*model.Device, error) {
+			return &model.Device{SerialNumber: sn, OUI: "0000B9", ProductClass: "FAP/BU1810"}, nil
+		},
+	}
+	cmdQ := &execCmdQueue{}
+	executor := newTestExecutor(taskRepo, deviceRepo, cmdQ)
+	executor.SetTransferProvider(&execTransferProvider{
+		upload: transfercfg.UploadSettings{
+			BaseURL: "http://acs:7557",
+			Path:    "/smallcell/FileUploadService",
+		},
+	})
+
+	payload, _ := json.Marshal(backupTaskPayload{TaskID: taskID.String()})
+	evt := event.Event{ID: uuid.New().String(), Subject: event.SubjectBackupTaskCreated, Payload: payload, Timestamp: time.Now()}
+
+	err := executor.handleTaskCreated(context.Background(), evt)
+	require.NoError(t, err)
+
+	require.Len(t, cmdQ.pushed, 1)
+	var params map[string]interface{}
+	_ = json.Unmarshal(cmdQ.pushed[0].Req.Params, &params)
+	assert.Equal(t, "12 0000B9 Configuration File", params["file_type"])
+	assert.Contains(t, params["url"], "CONFIGBACKUP_NV")
+	// 目标文件名应以 .nv 结尾。
+	assert.Contains(t, params["url"], ".nv")
+}
+
+// qa-614 #376: MLN/SC 端到端应下发 NV 备份（修复下划线 vs 斜杠潜伏 bug）。
+func TestHandleTask_MLNPlatformNV(t *testing.T) {
+	taskID := uuid.New()
+	task := &BackupTask{
+		ID:        taskID,
+		Status:    TaskPending,
+		TargetIDs: []string{"SN_MLN"},
+	}
+
+	taskRepo := &execTaskRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*BackupTask, error) { return task, nil },
+		updateFn:  func(_ context.Context, _ *BackupTask) error { return nil },
+	}
+	deviceRepo := &execDeviceRepo{
+		getBySNFn: func(_ context.Context, sn string) (*model.Device, error) {
+			return &model.Device{SerialNumber: sn, OUI: "0000B9", ProductClass: "FAP/MLN/SC"}, nil
+		},
+	}
+	cmdQ := &execCmdQueue{}
+	executor := newTestExecutor(taskRepo, deviceRepo, cmdQ)
+	executor.SetTransferProvider(&execTransferProvider{
+		upload: transfercfg.UploadSettings{
+			BaseURL: "http://acs:7557",
+			Path:    "/smallcell/FileUploadService",
+		},
+	})
+
+	payload, _ := json.Marshal(backupTaskPayload{TaskID: taskID.String()})
+	evt := event.Event{ID: uuid.New().String(), Subject: event.SubjectBackupTaskCreated, Payload: payload, Timestamp: time.Now()}
+
+	err := executor.handleTaskCreated(context.Background(), evt)
+	require.NoError(t, err)
+
+	require.Len(t, cmdQ.pushed, 1)
+	var params map[string]interface{}
+	_ = json.Unmarshal(cmdQ.pushed[0].Req.Params, &params)
+	assert.Equal(t, "12 0000B9 Configuration File", params["file_type"])
+	assert.Contains(t, params["url"], "CONFIGBACKUP_NV")
+	assert.Contains(t, params["url"], ".nv")
+}
+
 func TestHandleTask_RemoteFTPPolicyUsesRemoteURL(t *testing.T) {
 	taskID := uuid.New()
 	ftpID := uuid.New()
