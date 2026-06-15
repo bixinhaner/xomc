@@ -3,6 +3,7 @@ package device
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -41,6 +42,12 @@ type DeviceStatusReconciler struct {
 	repo     statusReconcilerRepo
 	eventBus event.EventBus
 	logger   *zap.Logger
+
+	// onlineIndex acs:online 在线索引（issue #397 根治片）。离线判定在把 last_inform_at
+	// 超阈值的候选标离线之前，用此索引（ACS 同步写、免 NATS）做二次确认：候选若 score
+	// 仍在其 class 阈值内 → 设备实际在线（last_inform_at 只是 NATS 滞后）→ 不离线。
+	// 仅能减少误判离线、绝不新增误判。nil（无 Redis）时退化为不确认（旧行为）。
+	onlineIndex *redisx.OnlineIndex
 
 	// issue #203：离线阈值实时配置读取（category=device, key=enbTimeout/cpeTimeout）。
 	// nil 时退化到默认阈值（基站 100s / CPE 600s）。每轮扫描读最新值，改配置下一轮即生效。
@@ -95,6 +102,9 @@ func NewDeviceStatusReconciler(
 		repo:     repo,
 		eventBus: eventBus,
 		logger:   logger,
+		// issue #397：从同一 Redis 客户端构造在线索引（redisClient 为 nil 时 client 为 nil，
+		// Scores 返回 nil → 退化为不确认）。
+		onlineIndex: redisx.NewOnlineIndex(redisClient),
 		// issue #203：checkInterval=0 表示不固定，每轮按 min(配置阈值/2, 60s) 动态算。
 		// thresholdLookup 由 wiring 层经 SetThresholdLookup 注入；未注入则用默认阈值。
 		checkInterval: 0,
@@ -211,7 +221,22 @@ func (r *DeviceStatusReconciler) detect(ctx context.Context) OfflineThresholds {
 		return th
 	}
 
-	r.logger.Info("detected stale devices", zap.Int("count", len(devices)))
+	// issue #397 根治片：用 acs:online（ACS 同步写、免 NATS）二次确认。候选里 score 仍在
+	// 其 class 阈值内的设备，说明实际在上报（last_inform_at 只是 NATS 滞后）→ 从离线名单剔除。
+	candidateCount := len(devices)
+	rescued := 0
+	if r.onlineConfirmEnabled(ctx) {
+		devices, rescued = r.vetoAliveByOnlineIndex(ctx, devices, th, start.Unix())
+	}
+
+	r.logger.Info("detected stale devices",
+		zap.Int("candidates", candidateCount),
+		zap.Int("rescued_by_online_index", rescued),
+		zap.Int("to_offline", len(devices)))
+
+	if len(devices) == 0 {
+		return th // 全部被在线索引确认为在线，无需标离线
+	}
 
 	var (
 		transitionedCount int
@@ -239,6 +264,67 @@ func (r *DeviceStatusReconciler) detect(ctx context.Context) OfflineThresholds {
 		zap.Duration("elapsed", time.Since(start)),
 	)
 	return th
+}
+
+// onlineConfirmEnabled 报告本轮是否启用 acs:online 二次确认（issue #397）。
+// 索引未接线（无 Redis）→ false；sys_configs 显式 false/0/off → false；其余 → 默认 true。
+func (r *DeviceStatusReconciler) onlineConfirmEnabled(ctx context.Context) bool {
+	if r.onlineIndex == nil {
+		return false
+	}
+	if r.thresholdLookup == nil {
+		return true
+	}
+	v, found := r.thresholdLookup(ctx, offlineConfigCategory, offlineConfigKeyZsetConfirm)
+	if !found {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "false", "0", "no", "off":
+		return false
+	default:
+		return true
+	}
+}
+
+// vetoAliveByOnlineIndex 从离线候选中剔除「acs:online 确认仍在线」的设备：
+// 候选 d 若在索引中的 score ≥ now-该设备类阈值，则其实际在线（last_inform_at 是 NATS
+// 滞后造成的假离线）→ 不标离线。返回应继续标离线的子集 + 被救回数。
+// 索引读失败 → 回退到不剔除（与未接索引前行为一致，安全：绝不因索引故障漏判真离线）。
+func (r *DeviceStatusReconciler) vetoAliveByOnlineIndex(
+	ctx context.Context, candidates []*model.Device, th OfflineThresholds, nowUnix int64,
+) (keep []*model.Device, rescued int) {
+	if r.onlineIndex == nil || len(candidates) == 0 {
+		return candidates, 0
+	}
+	sns := make([]string, len(candidates))
+	for i, d := range candidates {
+		sns[i] = d.SerialNumber
+	}
+	scores, err := r.onlineIndex.Scores(ctx, sns...)
+	if err != nil || len(scores) != len(candidates) {
+		if err != nil {
+			r.logger.Warn("online index scores failed; skip veto (fall back to last_inform_at)",
+				zap.Error(err))
+		}
+		return candidates, 0
+	}
+
+	keep = make([]*model.Device, 0, len(candidates))
+	for i, d := range candidates {
+		threshold := th.ENBSec
+		if isCPEClass(d.ProductClass) {
+			threshold = th.CPESec
+		}
+		cutoff := nowUnix - int64(threshold)
+		// score>0 排除「不在索引中」（ZMSCORE 缺失返回 0）；score≥cutoff 即阈值内有上报。
+		if scores[i] > 0 && scores[i] >= float64(cutoff) {
+			rescued++
+			continue
+		}
+		keep = append(keep, d)
+	}
+	return keep, rescued
 }
 
 // markOffline 把单台设备从 online→offline,并发布事件（仅在真翻转时)。

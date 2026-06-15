@@ -47,6 +47,16 @@ func (o *OnlineIndex) Count(ctx context.Context, cutoffUnix int64) (int64, error
 	return o.client.ZCount(ctx, o.key, strconv.FormatInt(cutoffUnix, 10), "+inf").Result()
 }
 
+// Scores 批量返回 sns 各自的 score（最近 Inform unix 秒，0 = 不在索引中），切片与 sns 一一对应。
+// 用于离线判定的「免 NATS」二次确认：候选离线设备若 score 仍在阈值内即判其实际在线。
+// client 不可用或 sns 为空时返回 nil（调用方据此退化为不确认）。
+func (o *OnlineIndex) Scores(ctx context.Context, sns ...string) ([]float64, error) {
+	if o == nil || o.client == nil || len(sns) == 0 {
+		return nil, nil
+	}
+	return o.client.ZMScore(ctx, o.key, sns...).Result()
+}
+
 // Prune 删除 score < cutoffUnix 的成员（清理过期在线记录，控制集合规模），返回删除数。
 // 用法：cutoffUnix = now - 保留窗口秒（保留窗口应 ≥ 最大离线阈值，避免误删仍可能在线的设备）。
 func (o *OnlineIndex) Prune(ctx context.Context, cutoffUnix int64) (int64, error) {
