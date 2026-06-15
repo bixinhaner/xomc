@@ -39,8 +39,16 @@ type OnlineSubscriber struct {
 	urlTemplate string
 	enableValue string
 	intervalSec int
-	logger      *zap.Logger
+	// resolveBaseURL 可选：运行时解析 PM 上传基址（通常读 sys_configs
+	// acs_transfer.uploadBaseURL，与「系统配置→ACS 传输」页同源）。非空合法时
+	// 覆盖 urlTemplate 的 scheme/host（path+query 仍取自 urlTemplate）；为空回退 urlTemplate。
+	resolveBaseURL func(ctx context.Context) string
+	logger         *zap.Logger
 }
+
+// defaultPMUploadPathQuery 是 urlTemplate 不可解析时回退用的 PM 上传 path+query，
+// 与 config.*.yaml 的 pm.upload_url_template 末段保持一致。
+const defaultPMUploadPathQuery = "/smallcell/FileUploadService?fileType=PM&filename="
 
 // TaskCreator 是 OnlineSubscriber 入队 SPV task 的最小依赖。
 // 真实实现是 *task.TaskService。
@@ -74,48 +82,78 @@ func NewOnlineSubscriber(
 	}
 }
 
+// SetUploadBaseURLResolver 注入运行时上传基址解析器（通常读 sys_configs
+// acs_transfer.uploadBaseURL）。设置后，PM 上传 URL 的 scheme/host 用解析结果、
+// path+query 仍取自 urlTemplate；解析为空则回退 urlTemplate（${OMC_PUBLIC_HOST} 插值）。
+// 这样上传地址与「系统配置→ACS 传输」页同源，改 IP 无需重建镜像。
+func (s *OnlineSubscriber) SetUploadBaseURLResolver(fn func(ctx context.Context) string) {
+	s.resolveBaseURL = fn
+}
+
 // Subscribe 把 OnlineSubscriber 挂到 EventBus。使用 QueueSubscribe 让多 worker 实例
 // 同时启动时只有一个实例处理同一事件（避免重复入队 SPV task）。
 //
 // queueName 固定 "pm-online-pm-upload-setup" — 与 provision 的 "provision-online-sync"
 // 处于不同 queue group，互不抢消息（两个订阅者都会各自收到事件，是设计意图）。
 func (s *OnlineSubscriber) Subscribe(bus event.EventBus) error {
-	const queueName = "pm-online-pm-upload-setup"
-	_, err := bus.QueueSubscribe(event.SubjectDeviceOnline, queueName, s.handle)
-	if err != nil {
+	// device.online 只在 offline→active 翻转时发（重连/重启上线）。
+	const onlineQueue = "pm-online-pm-upload-setup"
+	if _, err := bus.QueueSubscribe(event.SubjectDeviceOnline, onlineQueue, s.handleOnline); err != nil {
 		return fmt.Errorf("subscribe %s: %w", event.SubjectDeviceOnline, err)
 	}
+	// device.registered 在「首次 onboard」（BOOTSTRAP/BOOT/未知设备自动注册）发——
+	// 与 device.online 并订，确保**首次上线**也下发 PM 上报配置（不只重连）。
+	// 独立 queue group，互不抢消息；同 CommandKey 幂等，与 online 重复下发同值无害。
+	const registeredQueue = "pm-registered-pm-upload-setup"
+	if _, err := bus.QueueSubscribe(event.SubjectDeviceRegistered, registeredQueue, s.handleRegistered); err != nil {
+		return fmt.Errorf("subscribe %s: %w", event.SubjectDeviceRegistered, err)
+	}
 	s.logger.Info("pm online subscriber registered",
-		zap.String("subject", event.SubjectDeviceOnline),
-		zap.String("queue", queueName),
+		zap.String("subjects", event.SubjectDeviceOnline+","+event.SubjectDeviceRegistered),
 		zap.String("url_template", s.urlTemplate),
 		zap.Int("interval_seconds", s.intervalSec))
 	return nil
 }
 
-// handle 是单事件处理：解析 → 渲染 URL → 入队 1 个 SPV task 带 3 个 params。
-func (s *OnlineSubscriber) handle(ctx context.Context, evt event.Event) error {
+// handleOnline 处理 device.online（offline→active 重连上线）。
+func (s *OnlineSubscriber) handleOnline(ctx context.Context, evt event.Event) error {
 	var payload device.DeviceOnlineEvent
 	if err := evt.DecodePayload(&payload); err != nil {
 		s.logger.Warn("decode device.online payload failed",
 			zap.String("event_id", evt.ID), zap.Error(err))
-		// 返 nil 让 EventBus 不重试（payload 损坏重试无意义）
+		return nil // payload 损坏，重试无意义
+	}
+	return s.enqueuePMSetup(ctx, payload.SerialNumber, payload.DeviceID.String())
+}
+
+// handleRegistered 处理 device.registered（首次 onboard）。payload 是 map 结构
+// （device_service.go PublishDeviceRegistered），取 serial_number / device_id。
+func (s *OnlineSubscriber) handleRegistered(ctx context.Context, evt event.Event) error {
+	var payload struct {
+		SerialNumber string `json:"serial_number"`
+		DeviceID     string `json:"device_id"`
+	}
+	if err := evt.DecodePayload(&payload); err != nil {
+		s.logger.Warn("decode device.registered payload failed",
+			zap.String("event_id", evt.ID), zap.Error(err))
+		return nil
+	}
+	return s.enqueuePMSetup(ctx, payload.SerialNumber, payload.DeviceID)
+}
+
+// enqueuePMSetup 解析上传 URL → host 守卫 → 入队 1 个 SPV task 带 3 个 PM 参数。
+func (s *OnlineSubscriber) enqueuePMSetup(ctx context.Context, serialNumber, deviceID string) error {
+	if serialNumber == "" {
+		s.logger.Warn("PM upload setup skipped: missing serial_number")
 		return nil
 	}
 
-	if payload.SerialNumber == "" {
-		s.logger.Warn("device.online payload missing serial_number",
-			zap.String("event_id", evt.ID))
-		return nil
-	}
-
-	url := expandEnv(s.urlTemplate)
+	url := s.resolveUploadURL(ctx)
 	// host 非空守卫：渲染后若缺 scheme 或 host（如 OMC_PUBLIC_HOST 漏配渲染成
 	// "http://:7557/..."，u.Hostname() 返空；或 "${...}" 残留），跳过 SPV 不污染设备。
-	// 跳过即不下发，下次设备 offline→online 自然重试；运维据本 warn 即知模板 host 漏配。
 	if u, perr := neturl.Parse(url); perr != nil || u.Scheme == "" || u.Hostname() == "" {
 		s.logger.Warn("rendered PM upload URL missing scheme or host; skip SPV to avoid pushing broken URL",
-			zap.String("device_sn", payload.SerialNumber),
+			zap.String("device_sn", serialNumber),
 			zap.String("url", url))
 		return nil
 	}
@@ -124,39 +162,67 @@ func (s *OnlineSubscriber) handle(ctx context.Context, evt event.Event) error {
 	paramsJSON, err := json.Marshal(params)
 	if err != nil {
 		s.logger.Warn("marshal SPV params failed",
-			zap.String("device_sn", payload.SerialNumber), zap.Error(err))
+			zap.String("device_sn", serialNumber), zap.Error(err))
 		return nil
 	}
 
 	req := &task.CreateTaskRequest{
-		DeviceSN:    payload.SerialNumber,
+		DeviceSN:    serialNumber,
 		Method:      "SetParameterValues",
 		Params:      paramsJSON,
 		Priority:    20, // 低于业务关键命令（默认 10），但高于纯监控类
 		Source:      task.TaskSourceSystem,
 		CreatorID:   "", // 系统任务，不进消息中心
-		Description: "Auto-setup PM file upload on device online",
+		Description: "Auto-setup PM file upload on device onboard/online",
 		CommandKey:  "pm_upload_setup_on_online",
 		ExpiresIn:   3600, // 1 小时不下发则视为过期（避免设备长时间离线后积压）
 	}
 
 	tsk, err := s.taskSvc.CreateTask(ctx, req)
 	if err != nil {
-		// 失败 log only，下次自然 offline→online 时自动重发
+		// 失败 log only，下次设备 onboard/online 时自动重发
 		s.logger.Warn("enqueue PM upload SPV task failed",
-			zap.String("device_sn", payload.SerialNumber),
-			zap.String("device_id", payload.DeviceID.String()),
+			zap.String("device_sn", serialNumber),
+			zap.String("device_id", deviceID),
 			zap.Error(err))
 		return nil
 	}
 
 	s.logger.Info("PM upload SPV task enqueued",
-		zap.String("device_sn", payload.SerialNumber),
+		zap.String("device_sn", serialNumber),
 		zap.String("task_id", tsk.ID),
 		zap.String("url", url),
 		zap.String("enable", s.enableValue),
 		zap.Int("interval", s.intervalSec))
 	return nil
+}
+
+// resolveUploadURL 计算 PM 上传 URL：
+//   - 无 resolveBaseURL（未注入）或解析为空/非法 → 回退 expandEnv(urlTemplate)；
+//   - 解析到合法 base（如 sys_configs.acs_transfer.uploadBaseURL=http://172.19.1.173:8080）
+//     → 用 base 的 scheme/host，path+query 仍取自 urlTemplate（保留 fileType=PM&filename= 等），
+//     使上传地址与「系统配置→ACS 传输」页同源、改 IP 即时生效、无需重建镜像。
+func (s *OnlineSubscriber) resolveUploadURL(ctx context.Context) string {
+	rendered := expandEnv(s.urlTemplate)
+	if s.resolveBaseURL == nil {
+		return rendered
+	}
+	base := strings.TrimSpace(s.resolveBaseURL(ctx))
+	if base == "" {
+		return rendered
+	}
+	bu, err := neturl.Parse(base)
+	if err != nil || bu.Scheme == "" || bu.Host == "" {
+		return rendered // base 非法，回退模板
+	}
+	tu, terr := neturl.Parse(rendered)
+	if terr != nil || tu.Path == "" {
+		// 模板不可解析/无 path：用 base + 默认 PM 上传 path+query
+		return strings.TrimRight(base, "/") + defaultPMUploadPathQuery
+	}
+	tu.Scheme = bu.Scheme
+	tu.Host = bu.Host
+	return tu.String()
 }
 
 // spvParam 是 SetParameterValuesHandler.BuildRequest 解析期望的 params.values[] 项。

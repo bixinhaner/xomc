@@ -57,7 +57,7 @@ func Test_OnlineSubscriber_EnqueuesSingleSPVWith3Params(t *testing.T) {
 		"http://1.2.3.4:7557/smallcell/FileUploadService?fileType=PM&filename=",
 		"1", 900, nil,
 	)
-	require.NoError(t, s.handle(context.Background(), mustEvent(t, samplePayload())))
+	require.NoError(t, s.handleOnline(context.Background(), mustEvent(t, samplePayload())))
 
 	require.Len(t, stub.captured, 1)
 	req := stub.captured[0]
@@ -95,7 +95,7 @@ func Test_OnlineSubscriber_EnvSubstitutionDefaultFallback(t *testing.T) {
 	tmpl := "http://${OMC_PUBLIC_HOST_TEST_KEY:-localhost}:7557/x?fileType=PM&filename="
 	s := NewOnlineSubscriber(stub, tmpl, "1", 900, nil)
 
-	require.NoError(t, s.handle(context.Background(), mustEvent(t, samplePayload())))
+	require.NoError(t, s.handleOnline(context.Background(), mustEvent(t, samplePayload())))
 	require.Len(t, stub.captured, 1)
 
 	var params spvParams
@@ -113,7 +113,7 @@ func Test_OnlineSubscriber_EnvSubstitutionFromEnv(t *testing.T) {
 	tmpl := "http://${OMC_PUBLIC_HOST_TEST_KEY2:-localhost}:7557/x?fileType=PM&filename="
 	s := NewOnlineSubscriber(stub, tmpl, "1", 900, nil)
 
-	require.NoError(t, s.handle(context.Background(), mustEvent(t, samplePayload())))
+	require.NoError(t, s.handleOnline(context.Background(), mustEvent(t, samplePayload())))
 	require.Len(t, stub.captured, 1)
 
 	var params spvParams
@@ -129,7 +129,7 @@ func Test_OnlineSubscriber_FailureIsLoggedNotPropagated(t *testing.T) {
 	stub := &stubTaskCreator{err: errors.New("enqueue failed")}
 	s := NewOnlineSubscriber(stub, "http://localhost/x", "1", 900, nil)
 
-	err := s.handle(context.Background(), mustEvent(t, samplePayload()))
+	err := s.handleOnline(context.Background(), mustEvent(t, samplePayload()))
 	// 失败 log only，不返 error 让 EventBus 重试
 	assert.NoError(t, err)
 }
@@ -140,7 +140,7 @@ func Test_OnlineSubscriber_EmptySerialIsSkipped(t *testing.T) {
 
 	payload := samplePayload()
 	payload.SerialNumber = ""
-	require.NoError(t, s.handle(context.Background(), mustEvent(t, payload)))
+	require.NoError(t, s.handleOnline(context.Background(), mustEvent(t, payload)))
 
 	assert.Empty(t, stub.captured, "empty SN should be skipped without enqueue")
 }
@@ -149,7 +149,7 @@ func Test_OnlineSubscriber_MalformedURLIsSkipped(t *testing.T) {
 	stub := &stubTaskCreator{}
 	// 模板不含 :// → 渲染后也不是合法 URL，跳过
 	s := NewOnlineSubscriber(stub, "localhost/x", "1", 900, nil)
-	require.NoError(t, s.handle(context.Background(), mustEvent(t, samplePayload())))
+	require.NoError(t, s.handleOnline(context.Background(), mustEvent(t, samplePayload())))
 	assert.Empty(t, stub.captured)
 }
 
@@ -163,7 +163,7 @@ func Test_OnlineSubscriber_EmptyHostSkipsSPV(t *testing.T) {
 	tmpl := "http://${OMC_PUBLIC_HOST_207}:7557/smallcell/FileUploadService?fileType=PM&filename="
 	s := NewOnlineSubscriber(stub, tmpl, "1", 900, nil)
 
-	require.NoError(t, s.handle(context.Background(), mustEvent(t, samplePayload())))
+	require.NoError(t, s.handleOnline(context.Background(), mustEvent(t, samplePayload())))
 	assert.Empty(t, stub.captured, "empty-host URL (http://:7557) must not be pushed to device")
 }
 
@@ -193,6 +193,61 @@ func Test_ValidateUploadURLTemplate(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "http://localhost:7557/x", rendered)
 	})
+}
+
+// Test_OnlineSubscriber_BaseURLResolverOverridesHost 验证：注入 sys_config 解析器后，
+// 上传 URL 的 scheme/host 用 acs_transfer.uploadBaseURL，path+query 仍取自模板。
+func Test_OnlineSubscriber_BaseURLResolverOverridesHost(t *testing.T) {
+	stub := &stubTaskCreator{}
+	// 模板 host 故意是不可达的 localhost；解析器给出真实可达基址
+	s := NewOnlineSubscriber(stub, "http://localhost:8080/smallcell/FileUploadService?fileType=PM&filename=", "1", 900, nil)
+	s.SetUploadBaseURLResolver(func(_ context.Context) string { return "http://172.19.1.173:8080" })
+
+	require.NoError(t, s.handleOnline(context.Background(), mustEvent(t, samplePayload())))
+	require.Len(t, stub.captured, 1)
+	var params spvParams
+	require.NoError(t, json.Unmarshal(stub.captured[0].Params, &params))
+	var gotURL string
+	for _, v := range params.Values {
+		if v.Name == "Device.FAP.PerfMgmt.Config.1.URL" {
+			gotURL = v.Value
+		}
+	}
+	// host 被换成 sys_config 基址，path+query 保留
+	assert.Equal(t, "http://172.19.1.173:8080/smallcell/FileUploadService?fileType=PM&filename=", gotURL)
+}
+
+// Test_OnlineSubscriber_BaseURLResolverEmptyFallsBackToTemplate 验证：解析器返回空时回退模板。
+func Test_OnlineSubscriber_BaseURLResolverEmptyFallsBackToTemplate(t *testing.T) {
+	stub := &stubTaskCreator{}
+	s := NewOnlineSubscriber(stub, "http://1.2.3.4:8080/smallcell/FileUploadService?fileType=PM&filename=", "1", 900, nil)
+	s.SetUploadBaseURLResolver(func(_ context.Context) string { return "" }) // 未配置 → 回退
+	require.NoError(t, s.handleOnline(context.Background(), mustEvent(t, samplePayload())))
+	require.Len(t, stub.captured, 1)
+	var params spvParams
+	require.NoError(t, json.Unmarshal(stub.captured[0].Params, &params))
+	for _, v := range params.Values {
+		if v.Name == "Device.FAP.PerfMgmt.Config.1.URL" {
+			assert.Contains(t, v.Value, "http://1.2.3.4:8080/smallcell/FileUploadService")
+		}
+	}
+}
+
+// Test_OnlineSubscriber_RegisteredTriggersSPV 验证：首次 onboard 的 device.registered
+// 事件（map payload）也会下发 PM 上报配置（覆盖「首次上线」，不只重连）。
+func Test_OnlineSubscriber_RegisteredTriggersSPV(t *testing.T) {
+	stub := &stubTaskCreator{}
+	s := NewOnlineSubscriber(stub, "http://1.2.3.4:8080/smallcell/FileUploadService?fileType=PM&filename=", "1", 900, nil)
+	evt, err := event.NewEvent(event.SubjectDeviceRegistered, map[string]interface{}{
+		"device_id":     uuid.New().String(),
+		"serial_number": "REG-TEST-001",
+		"product_class": "FAP/MLQ/SC",
+	})
+	require.NoError(t, err)
+	require.NoError(t, s.handleRegistered(context.Background(), evt))
+	require.Len(t, stub.captured, 1)
+	assert.Equal(t, "REG-TEST-001", stub.captured[0].DeviceSN)
+	assert.Equal(t, "pm_upload_setup_on_online", stub.captured[0].CommandKey)
 }
 
 func Test_expandEnv_DefaultSyntax(t *testing.T) {
