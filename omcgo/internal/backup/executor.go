@@ -47,10 +47,14 @@ type BackupTypeSpec struct {
 // 以 ufte/model.go 内置模板定义为唯一数据源，此处不重复维护。
 var backupTypeSpecs = []BackupTypeSpec{
 	{
-		TypeCode:             "CONFIG_BACKUP_NV",
-		URLFileTypeParam:     "CONFIGBACKUP_NV",
-		FileExtension:        ".nv",
-		ProductClassPrefixes: []string{"FAP/MLQ", "FAP/MLN_SC"},
+		TypeCode:         "CONFIG_BACKUP_NV",
+		URLFileTypeParam: "CONFIGBACKUP_NV",
+		FileExtension:    ".nv",
+		// 前缀须与 products.xml / param-model-routing.xml 的真实 ProductClass 对齐：
+		// MLQ 全系（FAP/MLQ/SC）、MLN 全系（FAP/MLN/SC|CA|DC）、BM（FAP/BU1810）均导出 NV 配置。
+		// 历史 bug：曾写成 "FAP/MLN_SC"（下划线）导致 MLN 全系不命中而误落 XML；
+		// BM(FAP/BU1810) 此前完全未登记 → 永远兜底 XML，NV 路径不可达（qa-614 #376）。
+		ProductClassPrefixes: []string{"FAP/MLQ/", "FAP/MLN/", "FAP/BU1810"},
 	},
 	{
 		TypeCode:         "CONFIG_BACKUP_XML",
@@ -289,7 +293,7 @@ func (e *BackupExecutor) handleTaskCreated(ctx context.Context, evt event.Event)
 
 		// Build Upload command. TR-069 Upload RPC 需要：
 		// - FileType：厂商扩展格式，XML 平台 "10 {OUI} Configuration File"，
-		//             NV 平台（MLQ/MLN_SC 等）"12 {OUI} Configuration File"。
+		//             NV 平台（MLQ/MLN/BM 等）"12 {OUI} Configuration File"。
 		// - URL：CPE 上传目标，格式
 		//   {baseURL}{path}?fileType=CONFIGBACKUP_XML|CONFIGBACKUP_NV&sn={sn}&taskId={taskID}&filename={file}
 		//   upload handler 通过 fileType query 参数路由到 config_backup bucket。

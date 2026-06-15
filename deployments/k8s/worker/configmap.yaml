@@ -42,6 +42,12 @@ data:
 
     minio:
       endpoint: "${MINIO_HOST}:9000"
+      # 【运维必填】浏览器 / 外部 SDK 可达的 MinIO 公网地址（host[:port]，无 scheme），
+      # 用于签发 License / 配置备份 / 文件导出等下载的预签名 URL。留空则回退用
+      # endpoint(${MINIO_HOST}:9000，k8s ClusterIP) 签发——浏览器无法解析会报
+      # ERR_NAME_NOT_RESOLVED（qa-614 #377）。请经 env/Secret 注入 MINIO_PUBLIC_HOST
+      # 为对外域名 / SLB VIP / Ingress 地址。
+      public_endpoint: "${MINIO_PUBLIC_HOST}"
       access_key: "${MINIO_ACCESS_KEY}"
       secret_key: "${MINIO_SECRET_KEY}"
       use_ssl: false

@@ -9,6 +9,7 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/minio/minio-go/v7/pkg/lifecycle"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
+	"go.uber.org/zap"
 )
 
 // DefaultRawFileRetentionDays 是 PM/MR 原始文件桶（pm-files / mr-files）自动过期天数的
@@ -50,8 +51,18 @@ func NewMinIOClient(cfg appconfig.MinIOConfig) (*minio.Client, error) {
 // docker 容器内时，这个探测会 dial ::1:9000 失败 → 整个预签名失败。
 // 显式 Region: "us-east-1"（MinIO 默认 region）后 SDK 跳过探测，纯客户端
 // 计算签名，不再发任何 HTTP 请求。
-func NewPresignClient(cfg appconfig.MinIOConfig) (*minio.Client, error) {
+//
+// 可选 logger（变参，传 0 或 1 个）：当 PublicEndpoint 为空回退内部 endpoint 时
+// 打 Warn 级日志，把「该配 public_endpoint 否则浏览器解析不了」显式化（qa-614 #377）。
+// 不传 logger 时静默回退（兼容既有调用点）。
+func NewPresignClient(cfg appconfig.MinIOConfig, log ...*zap.Logger) (*minio.Client, error) {
 	if cfg.PublicEndpoint == "" {
+		if len(log) > 0 && log[0] != nil {
+			log[0].Warn("MinIO public_endpoint 未配置，预签名 URL 将回退使用内部 endpoint；"+
+				"浏览器 / 外部 SDK 可能解析失败（ERR_NAME_NOT_RESOLVED），"+
+				"请在 prod/test/k8s 配置 minio.public_endpoint 指向对外可达地址",
+				zap.String("internal_endpoint", cfg.Endpoint))
+		}
 		return NewMinIOClient(cfg)
 	}
 	client, err := minio.New(cfg.PublicEndpoint, &minio.Options{
