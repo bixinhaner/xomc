@@ -1,4 +1,4 @@
-import { Form, InputNumber, Checkbox, Select, Card, Space, Typography, Divider } from 'antd';
+import { Form, InputNumber, Checkbox, Select, Card, Space, Typography, Divider, theme } from 'antd';
 import { useT } from '@/hooks/useT';
 
 const { Option } = Select;
@@ -14,6 +14,7 @@ const settingRowStyle: React.CSSProperties = {
 
 export default function DeviceSettings({ form }: DeviceSettingsProps) {
   const t = useT();
+  const { token } = theme.useToken();
 
   return (
     <Form form={form} layout="vertical" size="small" initialValues={{
@@ -134,22 +135,22 @@ export default function DeviceSettings({ form }: DeviceSettingsProps) {
       <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.device.cpeSignalStrength')}</span>} style={{ marginBottom: 16 }}>
         <div style={settingRowStyle}>
           <span style={{ marginRight: 16 }}>{t('system.device.displaySignalByRange')}</span>
-          <span style={{ marginRight: 16, display: 'inline-flex', alignItems: 'center', padding: '4px 12px', backgroundColor: '#fff1f0', borderRadius: 4 }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#ff4d4f', marginRight: 8 }} />
+          <span style={{ marginRight: 16, display: 'inline-flex', alignItems: 'center', padding: '4px 12px', backgroundColor: token.colorErrorBg, borderRadius: 4 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: token.colorError, marginRight: 8 }} />
             {t('system.device.signal.weak')}(&lt;
             <Form.Item name="rsrpVal0" noStyle style={{ marginLeft: 4, marginRight: 4 }}>
               <InputNumber min={-150} max={0} style={{ width: 60 }} />
             </Form.Item>
           </span>
-          <span style={{ marginRight: 16, display: 'inline-flex', alignItems: 'center', padding: '4px 12px', backgroundColor: '#fff7e6', borderRadius: 4 }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#fa8c16', marginRight: 8 }} />
+          <span style={{ marginRight: 16, display: 'inline-flex', alignItems: 'center', padding: '4px 12px', backgroundColor: token.colorWarningBg, borderRadius: 4 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: token.colorWarning, marginRight: 8 }} />
             {t('system.device.signal.normal')}&lt;
             <Form.Item name="rsrpVal1" noStyle style={{ marginLeft: 4, marginRight: 4 }}>
               <InputNumber min={-150} max={0} style={{ width: 60 }} />
             </Form.Item>
           </span>
-          <span style={{ display: 'inline-flex', alignItems: 'center', padding: '4px 12px', backgroundColor: '#f6ffed', borderRadius: 4 }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#52c41a', marginRight: 8 }} />
+          <span style={{ display: 'inline-flex', alignItems: 'center', padding: '4px 12px', backgroundColor: token.colorSuccessBg, borderRadius: 4 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: token.colorSuccess, marginRight: 8 }} />
             {t('system.device.signal.strong')}
           </span>
         </div>
@@ -159,22 +160,22 @@ export default function DeviceSettings({ form }: DeviceSettingsProps) {
       <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.device.ueSignalStrength')}</span>} style={{ marginBottom: 16 }}>
         <div style={settingRowStyle}>
           <span style={{ marginRight: 16 }}>{t('system.device.displaySignalByRange')}</span>
-          <span style={{ marginRight: 16, display: 'inline-flex', alignItems: 'center', padding: '4px 12px', backgroundColor: '#fff1f0', borderRadius: 4 }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#ff4d4f', marginRight: 8 }} />
+          <span style={{ marginRight: 16, display: 'inline-flex', alignItems: 'center', padding: '4px 12px', backgroundColor: token.colorErrorBg, borderRadius: 4 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: token.colorError, marginRight: 8 }} />
             {t('system.device.signal.weak')}&lt;
             <Form.Item name="uersrpVal0" noStyle style={{ marginLeft: 4, marginRight: 4 }}>
               <InputNumber min={-150} max={0} style={{ width: 60 }} />
             </Form.Item>
           </span>
-          <span style={{ marginRight: 16, display: 'inline-flex', alignItems: 'center', padding: '4px 12px', backgroundColor: '#fff7e6', borderRadius: 4 }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#fa8c16', marginRight: 8 }} />
+          <span style={{ marginRight: 16, display: 'inline-flex', alignItems: 'center', padding: '4px 12px', backgroundColor: token.colorWarningBg, borderRadius: 4 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: token.colorWarning, marginRight: 8 }} />
             {t('system.device.signal.normal')}&lt;
             <Form.Item name="uersrpVal1" noStyle style={{ marginLeft: 4, marginRight: 4 }}>
               <InputNumber min={-150} max={0} style={{ width: 60 }} />
             </Form.Item>
           </span>
-          <span style={{ display: 'inline-flex', alignItems: 'center', padding: '4px 12px', backgroundColor: '#f6ffed', borderRadius: 4 }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#52c41a', marginRight: 8 }} />
+          <span style={{ display: 'inline-flex', alignItems: 'center', padding: '4px 12px', backgroundColor: token.colorSuccessBg, borderRadius: 4 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: token.colorSuccess, marginRight: 8 }} />
             {t('system.device.signal.strong')}
           </span>
         </div>
@@ -207,7 +208,7 @@ export default function DeviceSettings({ form }: DeviceSettingsProps) {
           </Space>
         </div>
         <div style={settingRowStyle}>
-          <span style={{ color: 'rgba(0, 0, 0, 0.45)' }}>{t('system.device.dailyCheckOfflineTime')}</span>
+          <span style={{ color: token.colorTextTertiary }}>{t('system.device.dailyCheckOfflineTime')}</span>
         </div>
       </Card>
 

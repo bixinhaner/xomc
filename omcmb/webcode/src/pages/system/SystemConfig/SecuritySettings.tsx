@@ -1,4 +1,4 @@
-import { Form, Input, InputNumber, Checkbox, Card, Space } from 'antd';
+import { Form, Input, InputNumber, Checkbox, Card, Space, theme } from 'antd';
 import { useT } from '@/hooks/useT';
 
 interface SecuritySettingsProps {
@@ -10,17 +10,19 @@ const settingRowStyle: React.CSSProperties = {
   marginBottom: 16,
 };
 
-// 子设置区域样式
-const subSettingStyle: React.CSSProperties = {
+// 子设置区域布局（颜色随主题，见组件内 subSettingStyle）
+const subSettingBaseStyle: React.CSSProperties = {
   marginLeft: 24,
   marginTop: 12,
   padding: '12px 16px',
-  backgroundColor: '#fafafa',
   borderRadius: 4,
 };
 
 export default function SecuritySettings({ form }: SecuritySettingsProps) {
   const t = useT();
+  const { token } = theme.useToken();
+  // 子设置区域背景跟随明/暗主题，不再写死 #fafafa
+  const subSettingStyle: React.CSSProperties = { ...subSettingBaseStyle, backgroundColor: token.colorFillAlter };
 
   return (
     <Form form={form} layout="vertical" size="small" initialValues={{
@@ -94,7 +96,7 @@ export default function SecuritySettings({ form }: SecuritySettingsProps) {
       {/* 用户 */}
       <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.security.user')}</span>} style={{ marginBottom: 16 }}>
         <div style={settingRowStyle}>
-          <span style={{ color: 'rgba(0, 0, 0, 0.45)' }}>
+          <span style={{ color: token.colorTextTertiary }}>
             {t('system.security.usernameRule')}
           </span>
         </div>

@@ -1,4 +1,4 @@
-import { Form, Input, InputNumber, Checkbox, Select, Card, Space, Button, message } from 'antd';
+import { Form, Input, InputNumber, Checkbox, Select, Card, Space, Button, message, theme } from 'antd';
 import { useT } from '@/hooks/useT';
 
 const { Option } = Select;
@@ -12,11 +12,10 @@ const settingRowStyle: React.CSSProperties = {
   marginBottom: 16,
 };
 
-// 子设置区域样式
-const subSettingStyle: React.CSSProperties = {
+// 子设置区域布局（颜色随主题，见组件内 subSettingStyle）
+const subSettingBaseStyle: React.CSSProperties = {
   marginTop: 12,
   padding: '12px 16px',
-  backgroundColor: '#fafafa',
   borderRadius: 4,
 };
 
@@ -35,6 +34,9 @@ const diskSpaceOptions = [
 
 export default function StorageSettings({ form }: StorageSettingsProps) {
   const t = useT();
+  const { token } = theme.useToken();
+  // 子设置区域背景跟随明/暗主题，不再写死 #fafafa
+  const subSettingStyle: React.CSSProperties = { ...subSettingBaseStyle, backgroundColor: token.colorFillAlter };
 
   // 监听 MinIO 启用状态
   const minioEnable = Form.useWatch('minioEnable', form);
@@ -155,7 +157,7 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
         </div>
 
         <div style={subSettingStyle}>
-          <div style={{ marginBottom: 12, fontWeight: 500, color: '#555' }}>{t('system.storage.minioConfig')}</div>
+          <div style={{ marginBottom: 12, fontWeight: 500, color: token.colorTextSecondary }}>{t('system.storage.minioConfig')}</div>
 
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 12 }}>
             <Form.Item label={t('system.storage.minioEndpoint')} name="minioEndpoint" style={{ marginBottom: 0 }}>

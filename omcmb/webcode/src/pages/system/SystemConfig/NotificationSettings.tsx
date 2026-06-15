@@ -1,4 +1,4 @@
-import { Form, Input, InputNumber, Checkbox, Button, Card, Space, Select, message } from 'antd';
+import { Form, Input, InputNumber, Checkbox, Button, Card, Space, Select, message, theme } from 'antd';
 import { MailOutlined, MobileOutlined } from '@ant-design/icons';
 import { useT } from '@/hooks/useT';
 
@@ -11,11 +11,10 @@ const settingRowStyle: React.CSSProperties = {
   marginBottom: 16,
 };
 
-// 子设置区域样式
-const subSettingStyle: React.CSSProperties = {
+// 子设置区域布局（颜色随主题，见组件内 subSettingStyle）
+const subSettingBaseStyle: React.CSSProperties = {
   marginTop: 16,
   padding: '16px',
-  backgroundColor: '#fafafa',
   borderRadius: 4,
 };
 
@@ -29,6 +28,9 @@ const formGroupStyle: React.CSSProperties = {
 
 export default function NotificationSettings({ form }: NotificationSettingsProps) {
   const t = useT();
+  const { token } = theme.useToken();
+  // 子设置区域背景跟随明/暗主题，不再写死 #fafafa
+  const subSettingStyle: React.CSSProperties = { ...subSettingBaseStyle, backgroundColor: token.colorFillAlter };
 
   // 监听复选框状态
   const emEnabel = Form.useWatch('emEnabel', form);
@@ -78,7 +80,7 @@ export default function NotificationSettings({ form }: NotificationSettingsProps
         </div>
 
         <div style={subSettingStyle}>
-          <div style={{ marginBottom: 12, fontWeight: 500, color: '#555' }}>{t('system.notification.mailServerConfig')}</div>
+          <div style={{ marginBottom: 12, fontWeight: 500, color: token.colorTextSecondary }}>{t('system.notification.mailServerConfig')}</div>
 
           <div style={formGroupStyle}>
             <Form.Item label={t('system.notification.email')} name="mailUsername" style={{ marginBottom: 0 }}>
@@ -120,7 +122,7 @@ export default function NotificationSettings({ form }: NotificationSettingsProps
         </div>
 
         <div style={subSettingStyle}>
-          <div style={{ marginBottom: 12, fontWeight: 500, color: '#555' }}>{t('system.notification.smsServerConfig')}</div>
+          <div style={{ marginBottom: 12, fontWeight: 500, color: token.colorTextSecondary }}>{t('system.notification.smsServerConfig')}</div>
 
           <div style={formGroupStyle}>
             <Form.Item label={t('system.notification.smsProvider')} name="smsProvider" style={{ marginBottom: 0 }}>
