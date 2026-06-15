@@ -41,6 +41,11 @@ func (KeyBuilder) ACSHeartbeat(deviceSN string) string { return acsHeartbeatPref
 // ACSHeartbeatPrefix 返回心跳键前缀。
 func (KeyBuilder) ACSHeartbeatPrefix() string { return acsHeartbeatPrefix }
 
+// ACSOnlineSet 在线设备索引（Sorted Set，member=SN，score=最近 Inform unix 秒）。
+// issue #397：ACS 收 Inform 当场（发 NATS 之前）同步 ZADD，作为「免 NATS」的存活信号；
+// ZCOUNT 算在线总数 O(log N)、ZREMRANGEBYSCORE 周期清理。单一全局键，非 per-device。
+func (KeyBuilder) ACSOnlineSet() string { return acsOnlineSetKey }
+
 // ACSConnReqPending Connection Request 去重键（30s TTL）。
 func (KeyBuilder) ACSConnReqPending(deviceSN string) string {
 	return acsConnReqPendingPrefix + deviceSN
@@ -286,6 +291,7 @@ const (
 	// ACS
 	acsSessionPrefix        = "acs:session:id:"
 	acsHeartbeatPrefix      = "acs:heartbeat:"
+	acsOnlineSetKey         = "acs:online"
 	acsConnReqPendingPrefix = "acs:connreq:pending:"
 	acsContinuousWakePrefix = "acs:continuous_wake:"
 	acsSTUNPrefix           = "acs:stun:"

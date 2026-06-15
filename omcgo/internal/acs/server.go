@@ -13,6 +13,7 @@ import (
 	"github.com/omcgo/omcgo/internal/acs/transfercfg"
 	"github.com/omcgo/omcgo/internal/acs/upload"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
+	"github.com/omcgo/omcgo/internal/core/components/redisx"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/health"
 	"github.com/omcgo/omcgo/internal/task"
@@ -21,6 +22,15 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
+
+// newOnlineIndexFromRedis 在 redis 客户端可用时构造在线索引（issue #397）。
+// c 为 nil（dev/test 无 Redis）时返回 nil，Handler.onlineIndex.Mark 走 nil-receiver no-op。
+func newOnlineIndexFromRedis(c redis.Cmdable) *redisx.OnlineIndex {
+	if c == nil {
+		return nil
+	}
+	return redisx.NewOnlineIndex(c)
+}
 
 // ACSServer is the TR069 ACS HTTP server.
 type ACSServer struct {
@@ -95,6 +105,7 @@ func NewACSServer(cfg appconfig.ACSConfig, deps ServerDeps) *ACSServer {
 		connReqSender:           deps.ConnReqSender,
 		postSessionWakeCfg:      deps.PostSessionWakeCfg,
 		redisClient:             deps.RedisClient,
+		onlineIndex:             newOnlineIndexFromRedis(deps.RedisClient),
 		stunStore:               deps.StunStore,
 		protocolLogger:          deps.ProtocolLogger,
 		maxBodySize:             deps.MaxBodySize,
