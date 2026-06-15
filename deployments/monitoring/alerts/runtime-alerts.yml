@@ -40,3 +40,22 @@ groups:
             {{ $labels.deployment_unit }} 进程已用 FD > 软上限的 80%，持续 10 分钟。
             Impact: 触顶后 accept/open 失败（"too many open files"），新连接/文件操作报错。
             Action: 查连接/文件句柄泄漏（未关闭的 conn/file）；评估调大 ulimit -n。
+
+      - alert: GoSoftMemLimitNear
+        # Go 堆已用接近 GOMEMLIMIT 软限（resources.env 注入，约 0.9×容器内存 limit）。
+        # 触及后 Go GC 会更激进地回收（GC 背压），是「在被 OOMKill 前」的预警。
+        # go_gc_gomemlimit_bytes 由 GoCollector 暴露；未设 GOMEMLIMIT 时该值为 ~9.2e18，
+        # 哨兵 < 64e9 排除之，只对真正设了软限的进程告警。
+        expr: |
+          (go_memstats_heap_inuse_bytes{job=~"omc-.*"}
+           / (go_gc_gomemlimit_bytes{job=~"omc-.*"} < 64e9)) > 0.9
+        for: 10m
+        labels:
+          severity: warning
+          domain: omc
+        annotations:
+          summary: "Go 堆接近软内存上限（> 90% GOMEMLIMIT）：{{ $labels.deployment_unit }}"
+          description: |
+            {{ $labels.deployment_unit }} 进程堆已用 > GOMEMLIMIT 软限的 90%，持续 10 分钟。
+            Impact: 已进入 GC 背压区，GC 更频繁吃 CPU；再涨触容器 mem limit 即被 OOMKill。
+            Action: 查堆增长来源（开 pprof heap profile）；评估调大容器 mem limit + GOMEMLIMIT。
