@@ -70,6 +70,15 @@ task:
   sweep_interval_seconds: 10
   reconcile_interval_seconds: 30
 
+# #358: 离线设备活动告警清理器阈值/周期/批量。设备离线满 threshold_seconds 仍未恢复，
+# 下一轮扫描（<=interval_seconds）把其当前活动告警归档到历史告警（clearedBy=system:offline_timeout）。
+# 与设备离线检测阈值（offline_threshold.go，#203）对齐口径，运营商可按需收敛。
+# 任一字段 <=0 或缺省则回退代码 Default*（threshold 3600s / interval 300s / batch 200）。
+offline_alarm_cleanup:
+  threshold_seconds: 3600
+  interval_seconds: 300
+  batch_size: 200
+
 # 设备上线时自动下发 PM 文件上传配置（KPI 上报参数整理.md 三参数）。
 # OMC_PUBLIC_HOST 必须在生产环境部署时填本机对外 IP（基站可达），不能用 localhost。
 pm:
