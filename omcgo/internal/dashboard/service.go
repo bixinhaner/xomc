@@ -870,37 +870,90 @@ func (s *Service) GetKPITimeSeries(ctx context.Context, kpiNames []string, start
 		return result, nil
 	}
 
-	// 读全网预聚合结果表（3 条 network 任务覆盖全制式；不限 metric_type，counter/KPI 同表读）。
-	query, args, err := buildNetworkKPISeriesQuery(kcodes, startTime, endTime)
+	// 取全网时序：优先读每小时预聚合表，缺数据时回退 15min 直读原始明细（见 fetchNetworkKCodeSeries）。
+	points, err := s.fetchNetworkKCodeSeries(ctx, kcodes, startTime, endTime)
 	if err != nil {
-		return nil, fmt.Errorf("build kpi time series query: %w", err)
+		return nil, err
 	}
 
-	// pm_adhoc_aggregation_results 在时序库（TsPool）。
-	rows, err := s.tsPool.Query(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("query kpi time series: %w", err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var kcode string
-		var t time.Time
-		var value float64
-		if err := rows.Scan(&kcode, &t, &value); err != nil {
-			return nil, fmt.Errorf("scan kpi time series row: %w", err)
-		}
+	for _, p := range points {
 		entry := KPITimeSeriesEntry{
-			Time:  t.Format(time.RFC3339),
-			Value: value,
+			Time:  p.time.Format(time.RFC3339),
+			Value: p.value,
 		}
 		// 按原 symbolic key 回填（一个 K 编号可能被多个 symbolic 请求引用）。
-		for _, symbolic := range reverse[kcode] {
+		for _, symbolic := range reverse[p.code] {
 			result[symbolic] = append(result[symbolic], entry)
 		}
 	}
 
 	return result, nil
+}
+
+// networkSeriesPoint 是全网时序的一行（指标编号 + 时间桶 + 值），供 GetKPITimeSeries 回填用。
+type networkSeriesPoint struct {
+	code  string
+	time  time.Time
+	value float64
+}
+
+// fetchNetworkKCodeSeries 读多个指标编号的全网时序，带容错回退（issue #359）：
+//  1. 优先读每小时预聚合表 pm_adhoc_aggregation_results（口径正确的全网线，10 万级规模成本低）。
+//  2. 预聚合表对该时窗无任何行时（刚灌数未到整点 / continuous scheduler 未起 / 聚合落后），
+//     回退 15min 直读原始明细 pm_metrics 现场汇成全网线，与性能仪表板默认模板 15min 容错对齐，
+//     避免首页裸空白被误判为故障。
+//
+// 两条链路都查时序库（tsPool）。回退是「整体缺数据」才触发（而非逐指标），简单且可预期。
+func (s *Service) fetchNetworkKCodeSeries(ctx context.Context, kcodes []string, startTime, endTime time.Time) ([]networkSeriesPoint, error) {
+	// 1. 预聚合表（首选口径）。
+	aggQuery, aggArgs, err := buildNetworkKPISeriesQuery(kcodes, startTime, endTime)
+	if err != nil {
+		return nil, fmt.Errorf("build kpi time series query: %w", err)
+	}
+	points, err := s.scanNetworkSeries(ctx, aggQuery, aggArgs, "aggregated")
+	if err != nil {
+		return nil, err
+	}
+	if len(points) > 0 {
+		return points, nil
+	}
+
+	// 2. 回退：15min 直读原始明细现场汇总（与性能仪表板默认模板对齐容错）。
+	rawQuery, rawArgs, err := buildRawNetworkKPISeriesQuery(kcodes, startTime, endTime)
+	if err != nil {
+		return nil, fmt.Errorf("build raw kpi time series fallback query: %w", err)
+	}
+	rawPoints, err := s.scanNetworkSeries(ctx, rawQuery, rawArgs, "raw-fallback")
+	if err != nil {
+		return nil, err
+	}
+	if len(rawPoints) > 0 {
+		s.logger.Info("dashboard: kpi time series fell back to raw pm_metrics (hourly aggregation empty)",
+			zap.Int("codes", len(kcodes)))
+	}
+	return rawPoints, nil
+}
+
+// scanNetworkSeries 跑一条「metric_path, time, metric_value」三列查询并扫成 networkSeriesPoint 列表。
+func (s *Service) scanNetworkSeries(ctx context.Context, query string, args []any, label string) ([]networkSeriesPoint, error) {
+	rows, err := s.tsPool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query kpi time series (%s): %w", label, err)
+	}
+	defer rows.Close()
+
+	var points []networkSeriesPoint
+	for rows.Next() {
+		var p networkSeriesPoint
+		if err := rows.Scan(&p.code, &p.time, &p.value); err != nil {
+			return nil, fmt.Errorf("scan kpi time series row (%s): %w", label, err)
+		}
+		points = append(points, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate kpi time series rows (%s): %w", label, err)
+	}
+	return points, nil
 }
 
 // queryNetworkKPISeries 读单个指标在某时窗内的全网预聚合时序（供 GetKPITrendComparison 用）。
@@ -915,28 +968,17 @@ func (s *Service) queryNetworkKPISeries(ctx context.Context, kpiName string, sta
 		return []KPITrendEntry{}, nil
 	}
 
-	query, args, err := buildNetworkKPISeriesQuery(kcodes, startTime, endTime)
-	if err != nil {
-		return nil, fmt.Errorf("build network kpi series query: %w", err)
-	}
-
-	rows, err := s.tsPool.Query(ctx, query, args...)
+	// 与 GetKPITimeSeries 同源：优先读每小时预聚合表，缺数据时回退 15min 直读原始明细（issue #359）。
+	points, err := s.fetchNetworkKCodeSeries(ctx, kcodes, startTime, endTime)
 	if err != nil {
 		return nil, fmt.Errorf("query network kpi series: %w", err)
 	}
-	defer rows.Close()
 
-	entries := make([]KPITrendEntry, 0)
-	for rows.Next() {
-		var code string
-		var t time.Time
-		var value float64
-		if err := rows.Scan(&code, &t, &value); err != nil {
-			return nil, fmt.Errorf("scan network kpi series row: %w", err)
-		}
+	entries := make([]KPITrendEntry, 0, len(points))
+	for _, p := range points {
 		entries = append(entries, KPITrendEntry{
-			Time:  t.Format(time.RFC3339),
-			Value: value,
+			Time:  p.time.Format(time.RFC3339),
+			Value: p.value,
 		})
 	}
 	return entries, nil

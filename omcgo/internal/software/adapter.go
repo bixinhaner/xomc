@@ -60,7 +60,9 @@ func NewDefaultUpgradeAdapter() *DefaultUpgradeAdapter {
 }
 
 func (a *DefaultUpgradeAdapter) RollbackEnableCheckPath(tech model.Technology) string {
-	if tech == model.TechLTE {
+	// LTE 与 GSM(2G) 同属 Baicells 小基站 param_model 家族（BM/BLQ/BSC/BTS/MLN/MLQ
+	// → X_COM_ROLLBACK_ENABLE），回退前都需要 GET 校验 ROLLBACK_ENABLE；5G/NR 不需要。
+	if tech == model.TechLTE || tech == model.TechGSM {
 		// standardPath（字典里 ROLLBACK_ENABLE 无 X_COM 前缀），Translator 翻译到
 		// 各 param_model 对应的私有 path（BM/BLQ/BSC/BTS/MLN/MLQ → X_COM_ROLLBACK_ENABLE）
 		return "Device.DeviceInfo.ROLLBACK_ENABLE"
@@ -72,6 +74,11 @@ func (a *DefaultUpgradeAdapter) RollbackParameterPath(tech model.Technology) str
 	switch tech {
 	case model.TechNR:
 		return "Device.SoftwareCtrl.ActivateEnable"
+	case model.TechGSM:
+		// 2G/GSM 小基站（BSC/BTS）与 4G 同属 Baicells param_model 家族，回退走同一
+		// standardPath（X_COM_ROLLBACK_CONTROL）。显式列出 GSM 分支而非落入 default，
+		// 避免"静默走 LTE 默认值"——若将来 2G 回退语义与 4G 分化，在此独立调整。
+		return "Device.DeviceInfo.ROLLBACK_CONTROL"
 	default: // LTE
 		// standardPath（无 X_COM 前缀）。Translator 翻译到各 param_model 对应的私有
 		// 路径再下发，详见 RollbackParameterValue 注释。
@@ -84,7 +91,7 @@ func (a *DefaultUpgradeAdapter) RollbackParameterValue(tech model.Technology, pr
 	if tech == model.TechNR {
 		return "1", "xsd:string"
 	}
-	// 4G：TR-098 系（InternetGatewayDevice.* + RollBackEnable 驼峰命名）走 boolean，
+	// 4G/2G：TR-098 系（InternetGatewayDevice.* + RollBackEnable 驼峰命名）走 boolean，
 	// 其它（X_COM_ROLLBACK_CONTROL / 等 TR-181 风格）走 string/1
 	lower := strings.ToLower(strings.TrimSpace(privatePath))
 	if strings.HasPrefix(lower, "internetgatewaydevice.") && strings.Contains(lower, "rollbackenable") {
@@ -94,7 +101,8 @@ func (a *DefaultUpgradeAdapter) RollbackParameterValue(tech model.Technology, pr
 }
 
 func (a *DefaultUpgradeAdapter) RollbackNeedsEnableCheck(tech model.Technology) bool {
-	return tech == model.TechLTE
+	// 4G 与 2G/GSM 同属需先 GET 校验 ROLLBACK_ENABLE 的 param_model 家族；5G/NR 不需要。
+	return tech == model.TechLTE || tech == model.TechGSM
 }
 
 // DownloadFileType returns the TR-069 FileType string for a given firmware file type.
@@ -122,4 +130,30 @@ func Is5G(dev *model.Device) bool {
 	return dev.Technology == model.TechNR ||
 		dev.ProductClass == "BNQ" ||
 		dev.ProductClass == "BNX"
+}
+
+// IsGSM returns true if the device is a 2G/GSM device.
+// Determined by Technology field or ProductClass matching the 2G BSC/BTS family
+// (products.xml: ^FAP/PGSM$ → BSC, ^FAP/BTS$ → BTS, both tech="2G").
+func IsGSM(dev *model.Device) bool {
+	if dev.Technology == model.TechGSM {
+		return true
+	}
+	upper := strings.ToUpper(dev.ProductClass)
+	return strings.Contains(upper, "PGSM") || strings.Contains(upper, "BTS")
+}
+
+// ResolveDeviceTech resolves a device's radio technology as a three-state value
+// (GSM / NR / LTE) for upgrade and rollback parameter selection. GSM is checked
+// first so 2G BSC/BTS devices no longer silently fall into the LTE default.
+// LTE remains the fallback for unclassified devices (back-compat).
+func ResolveDeviceTech(dev *model.Device) model.Technology {
+	switch {
+	case IsGSM(dev):
+		return model.TechGSM
+	case Is5G(dev):
+		return model.TechNR
+	default:
+		return model.TechLTE
+	}
 }

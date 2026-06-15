@@ -1053,12 +1053,11 @@ func (s *SoftwareService) startRollbackExecution(taskID uuid.UUID, subTasks []*U
 					return
 				}
 
-				tech := model.TechLTE
-				if Is5G(dev) {
-					tech = model.TechNR
-				}
+				// 三态识别：GSM(2G) / NR(5G) / LTE(4G 兜底)。GSM 优先判定，避免 2G
+				// BSC/BTS 静默落入 LTE 默认分支（adapter 已为 GSM 显式列出回退分支）。
+				tech := ResolveDeviceTech(dev)
 
-				// 4G 走两阶段（GPV ROLLBACK_ENABLE → SPV ROLLBACK_CONTROL）；5G 直接 SPV。
+				// 4G/2G 走两阶段（GPV ROLLBACK_ENABLE → SPV ROLLBACK_CONTROL）；5G 直接 SPV。
 				// 路径与值统一在 RollbackExecutor 内部经 adapter + Translator 决定。
 				s.rollbackExec.RollbackOne(execCtx, st, dev, tech)
 				// 与升级同语义：槽位覆盖到设备开始重启（派发/IO 阶段结束）即释放。

@@ -150,11 +150,12 @@ export default function DashboardPage() {
   // 获取设备按技术类型分组的状态数据
   const { data: deviceStatusByTypeData, isLoading: isDeviceStatusLoading } = useDeviceStatusByType();
 
-  // KPI values — use real data when available, fall back to sensible defaults
-  const totalDevices = dashboardData?.summary?.deviceCounts?.total ?? 1284;
-  const onlineDevices = dashboardData?.summary?.deviceCounts?.online ?? 1137;
-  const activeAlarms = dashboardData?.summary?.alarmCounts?.total ?? 43;
-  const runningTasks = dashboardData?.summary?.taskSummary?.running ?? 7;
+  // KPI values — 用真实数据；未就绪时回退 0（加载期由 KPICard 的 loading 态显示骨架，
+  // 不再展示硬编码占位数字，避免硬刷新闪现假数。issue #370）
+  const totalDevices = dashboardData?.summary?.deviceCounts?.total ?? 0;
+  const onlineDevices = dashboardData?.summary?.deviceCounts?.online ?? 0;
+  const activeAlarms = dashboardData?.summary?.alarmCounts?.total ?? 0;
+  const runningTasks = dashboardData?.summary?.taskSummary?.running ?? 0;
 
   // KPI trend data — 用于卡片显示趋势
   const kpiDeltas = dashboardData?.summary?.kpiDeltas ?? {};

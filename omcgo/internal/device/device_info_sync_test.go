@@ -423,6 +423,91 @@ func TestInfoSyncer_SyncFromParameters_ComputesQuickFieldsWithoutCarrierMapping(
 	assert.NoError(t, err)
 }
 
+// txPowerCarrier 是带 LTE ReferenceSignalPower→transmit_power 映射的运营商桩，
+// 模拟 cmcc/ctcc adapter 的 GetInfoParamMapping 行为，用于 #362 取值校验。
+type txPowerCarrier struct{ testCarrier }
+
+func (txPowerCarrier) GetInfoParamMapping(tech model.Technology) map[string]string {
+	if tech == model.TechLTE {
+		return map[string]string{
+			"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.ReferenceSignalPower": "transmit_power",
+		}
+	}
+	return nil
+}
+
+// TestInfoSyncer_SyncFromParameters_TransmitPowerSource 锁定 #362：
+// 4G(LTE) 设备的 transmit_power 必须取 carrier adapter 的 ReferenceSignalPower
+// （与 LMT 口径一致），且 universalInformMapping 不再用 Capabilities.MaxTxPower
+// 覆盖它（删除 MaxTxPower→transmit_power 后，单一权威来源生效）。
+func TestInfoSyncer_SyncFromParameters_TransmitPowerSource(t *testing.T) {
+	deviceID := uuid.New()
+	registry := carrier.NewRegistry()
+	registry.Register(txPowerCarrier{})
+
+	const refSignalPath = "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.ReferenceSignalPower"
+	const maxTxPath = "Device.Services.FAPService.1.Capabilities.MaxTxPower"
+
+	cases := []struct {
+		name   string
+		params []model.DeviceParameter
+		want   interface{} // nil 表示不应写 transmit_power
+	}{
+		{
+			name: "only ReferenceSignalPower → 取 RS 功率",
+			params: []model.DeviceParameter{
+				{ParameterPath: refSignalPath, ParameterValue: "18.2"},
+			},
+			want: "18.2",
+		},
+		{
+			name: "only MaxTxPower → 不再投影到 transmit_power（#362 已删 universal 映射）",
+			params: []model.DeviceParameter{
+				{ParameterPath: maxTxPath, ParameterValue: "46"},
+			},
+			want: nil,
+		},
+		{
+			name: "both present → 仍取 ReferenceSignalPower，不被 MaxTxPower 覆盖",
+			params: []model.DeviceParameter{
+				{ParameterPath: refSignalPath, ParameterValue: "18.2"},
+				{ParameterPath: maxTxPath, ParameterValue: "46"},
+			},
+			want: "18.2",
+		},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			infoRepo := stubDeviceInfoRepo{updateSyncFields: func(_ context.Context, _ uuid.UUID, fields map[string]interface{}) error {
+				got, exists := fields["transmit_power"]
+				if tt.want == nil {
+					assert.False(t, exists, "transmit_power 不应被写入（MaxTxPower 不再映射）")
+					return nil
+				}
+				assert.True(t, exists, "transmit_power 应被写入")
+				assert.Equal(t, tt.want, got)
+				return nil
+			}}
+			paramRepo := stubDeviceParamRepo{params: tt.params}
+			syncer := NewInfoSyncer(infoRepo, paramRepo, nil, registry, zap.NewNop())
+
+			_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechLTE)
+			assert.NoError(t, err)
+		})
+	}
+}
+
+// TestUniversalInformMapping_NoTransmitPowerOverride 防回归守卫：#362 删除
+// universalInformMapping 里 MaxTxPower→transmit_power 后，该表不应再含任何
+// transmit_power 映射目标（避免后人误加回 universal 覆盖）。
+func TestUniversalInformMapping_NoTransmitPowerOverride(t *testing.T) {
+	for path, col := range universalInformMapping {
+		assert.NotEqualf(t, "transmit_power", col,
+			"universalInformMapping 不应映射到 transmit_power（#362）；命中 path=%s", path)
+	}
+}
+
 func TestParseRunTimeToSeconds(t *testing.T) {
 	tests := []struct {
 		name  string

@@ -133,7 +133,11 @@ export function FleetPage() {
               <div className="flex flex-col gap-1">
                 <StatusBadge status={d.connStatus} />
                 {d.alarmLevel !== 'none' ? (
-                  <StatusBadge status={d.alarmLevel} label={`ALM · ${d.alarmLevel}`} />
+                  // #361: 把活动告警数拼进 HUD 徽标（如「ALM · major · 3」）。
+                  <StatusBadge
+                    status={d.alarmLevel}
+                    label={`ALM · ${d.alarmLevel}${(d.activeAlarmCount ?? 0) > 0 ? ` · ${d.activeAlarmCount}` : ''}`}
+                  />
                 ) : (
                   <span className="font-mono text-[10px] text-cyan-300/40">NO ALARM</span>
                 )}

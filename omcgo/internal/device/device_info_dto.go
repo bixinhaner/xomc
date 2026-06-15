@@ -86,7 +86,12 @@ type DeviceWithInfo struct {
 	GPSStatus *string `json:"gps_status"`
 
 	// AlarmSeverity 最高告警级别
+	// #361: 来自 alarms_active 实时聚合（未 cleared 活动告警 MIN(severity) 映成
+	// critical/major/minor/warning 文本），无活动告警 → nil → 前端归 'none'。
 	AlarmSeverity *string `json:"alarm_severity"`
+
+	// ActiveAlarmCount 该设备未 cleared 活动告警数（#361）；无活动告警 → nil → 前端归 0。
+	ActiveAlarmCount *int `json:"active_alarm_count"`
 
 	// LicenseStatus 许可证状态
 	LicenseStatus *string `json:"license_status"`

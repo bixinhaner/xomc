@@ -47,6 +47,7 @@ export function getExecutionModeOptions(t: Translate): Array<{ label: string; va
 const BUILTIN_TYPE_CODES = new Set([
   'ENB_IMG_UPGRADE', 'ENB_PATCH_UPGRADE', 'ENB_FPGA_UPGRADE',
   'GNB_IMG_UPGRADE', 'GNB_FPGA_UPGRADE',
+  'GSM_IMG_UPGRADE', // qa-614 c6 #365 #373：2G/GSM 升级
   'VERSION_ROLLBACK',
   'RUNTIME_LOG_COLLECT', 'FAULT_LOG_COLLECT',
   'CONFIG_BACKUP', 'CONFIG_BACKUP_NV', 'CONFIG_BACKUP_XML',
@@ -55,13 +56,31 @@ const BUILTIN_TYPE_CODES = new Set([
 ]);
 
 const BUILTIN_CATEGORY_CODES = new Set([
-  'enb_upgrade', 'gnb_upgrade', 'version_rollback',
+  'enb_upgrade', 'gnb_upgrade',
+  'gsm_upgrade', // qa-614 c6 #365 #373：2G/GSM 升级分类
+  'device_upgrade', // qa-614 c6 #368：4G/5G 合并的虚拟『设备升级』分类
+  'version_rollback',
   'station_log', 'config_backup', 'config_restore', 'license_upgrade',
   // F05：MR 测量虚拟分类（不走 UFTE 模板，作为入口聚合按钮跳到 /mr/tasks）
   'mr_measurement',
   // KPI-EXPORT：KPI 导出虚拟分类（不走 UFTE 模板，内联渲染 KpiExportTasksPanel）
   'kpi_export',
 ]);
+
+// qa-614 c6 #368：4G(enb_upgrade) + 5G(gnb_upgrade) 在展示层合并为虚拟分类
+// 'device_upgrade'（『设备升级』）。聚合/展开逻辑下沉到 frontend-core（三皮肤共享，
+// 见 @core/utils/ufteCategory），v1 这里只做 re-export 保持现有 import 路径不变。
+export {
+  DEVICE_UPGRADE_CATEGORY,
+  DEVICE_UPGRADE_MEMBER_CATEGORIES,
+  isDeviceUpgradeMember,
+  resolveBackendCategoryParam,
+  filterTaskTypesForCategory,
+} from '@core/utils/ufteCategory';
+import {
+  DEVICE_UPGRADE_CATEGORY as DEVICE_UPGRADE_CATEGORY_LOCAL,
+  isDeviceUpgradeMember as isDeviceUpgradeMemberLocal,
+} from '@core/utils/ufteCategory';
 
 /** 内置 taskType displayName 翻译。非内置 typeCode（用户自定义）原样返回 fallback。 */
 export function localizeBuiltinTypeName(
@@ -100,8 +119,10 @@ export function localizeBuiltinDescription(
 }
 
 export const DEFAULT_CATEGORY_ORDER = [
-  'gnb_upgrade',
-  'enb_upgrade',
+  // qa-614 c6 #368：4G/5G 合并为单个『设备升级』虚拟分类（buildCategoryTabs 已折叠）；
+  // #365 #373：2G 升级独立分类紧随其后。
+  'device_upgrade',
+  'gsm_upgrade',
   'version_rollback',
   'station_log',
   'config_backup',
@@ -121,7 +142,12 @@ export const TYPE_DRAWER_DEFAULT_STEPS: TransferStepId[] = [
   'WAIT_TRANSFER_COMPLETE',
 ];
 
-export const UPGRADE_LIKE_CATEGORIES = new Set(['gnb_upgrade', 'enb_upgrade', 'version_rollback']);
+export const UPGRADE_LIKE_CATEGORIES = new Set([
+  'gnb_upgrade', 'enb_upgrade',
+  'gsm_upgrade', // qa-614 c6 #365 #373
+  'device_upgrade', // qa-614 c6 #368：合并虚拟分类
+  'version_rollback',
+]);
 
 // TASK_NAME_PREFIX_BY_TYPE_I18N：UFTE 新建任务默认名前缀，按 typeCode 区分业务，
 // 同时提供 zh-CN / en-US 两套字面值。命名规则与升级模块沿袭：
@@ -131,6 +157,7 @@ export const UPGRADE_LIKE_CATEGORIES = new Set(['gnb_upgrade', 'enb_upgrade', 'v
 export const TASK_NAME_PREFIX_BY_TYPE_I18N: Record<string, { zh: string; en: string }> = {
   ENB_IMG_UPGRADE:     { zh: '4G升级',         en: 'Upgrade' },
   GNB_IMG_UPGRADE:     { zh: '5G升级',         en: 'Upgrade' },
+  GSM_IMG_UPGRADE:     { zh: '2G升级',         en: 'Upgrade' }, // qa-614 c6 #365 #373
   ENB_PATCH_UPGRADE:   { zh: '基站补丁升级',   en: 'Upgrade' },
   ENB_FPGA_UPGRADE:    { zh: 'FPGA升级',       en: 'Upgrade' },
   VERSION_ROLLBACK:    { zh: '版本回退',       en: 'Rollback' },
@@ -212,14 +239,23 @@ export function getSoftwareLibraryFileTypeLabel(value: FirmwareLibraryFileType |
 export function buildCategoryTabs(taskTypes: UnifiedFileTransferTaskType[]): CategoryTabItem[] {
   const categoryMap = new Map<string, CategoryTabItem>();
   taskTypes.forEach((item) => {
-    const existing = categoryMap.get(item.category);
+    // qa-614 c6 #368：4G(enb_upgrade) + 5G(gnb_upgrade) 在展示层折叠为单个
+    // 虚拟分类 device_upgrade（『设备升级』）。categoryLabel 用 key，渲染时由
+    // localizeBuiltinCategoryLabel('device_upgrade') 翻译。
+    const displayCategory = isDeviceUpgradeMemberLocal(item.category)
+      ? DEVICE_UPGRADE_CATEGORY_LOCAL
+      : item.category;
+    const displayLabel = isDeviceUpgradeMemberLocal(item.category)
+      ? DEVICE_UPGRADE_CATEGORY_LOCAL
+      : item.categoryLabel;
+    const existing = categoryMap.get(displayCategory);
     if (existing) {
       existing.templateCount += 1;
       return;
     }
-    categoryMap.set(item.category, {
-      category: item.category,
-      categoryLabel: item.categoryLabel,
+    categoryMap.set(displayCategory, {
+      category: displayCategory,
+      categoryLabel: displayLabel,
       templateCount: 1,
     });
   });

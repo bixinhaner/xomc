@@ -7370,6 +7370,39 @@ const messages: Record<string, string> = {
   'perf.kpiQuery.pivot.noLdn':           '无 LDN',
   'perf.kpiQuery.pivot.emptyHint':       '暂无数据，请选择查询条件后点击"查询"',
   'perf.kpiQuery.pivot.totalRows':       '共 {count} 行',
+  // qa-614 c8 (#366): v2/v3 KPI 查询/取数页 i18n 补键（v2 只读查询页 + v3 HUD 取数页）
+  'perf.kpiQuery.v2.title':              '指标查询',
+  'perf.kpiQuery.v2.desc':              '基于保存的查询模板跑多设备聚合查询，结果透视为时间 × 指标表',
+  'perf.kpiQuery.truncated':            '结果已截断',
+  'perf.kpiQuery.colTime':              '时间',
+  'perf.kpiQuery.queryFailedShort':     '查询失败',
+  'perf.kpiQuery.noResults':            '暂无查询结果',
+  'perf.kpiQuery.searchTemplate':       '模板名称',
+  'perf.kpiQuery.refreshTemplates':     '刷新模板',
+  'perf.kpiQuery.loadingTemplates':     '加载模板…',
+  'perf.kpiQuery.loadFailed':           '加载失败：{msg}',
+  'perf.kpiQuery.noTemplates':          '暂无查询模板',
+  'perf.kpiQuery.deviceCount':          '{count} 设备',
+  'perf.kpiQuery.metricCount':          '{count} 指标',
+  'perf.kpiQuery.selectTemplateHint':   '请选择左侧一个查询模板',
+  'perf.kpiQuery.runQuery':             '运行查询',
+  'perf.kpiQuery.granularityLabel':     '粒度 {value}',
+  'perf.kpiQuery.windowLabel':          '时窗 {value}',
+  'perf.kpiQuery.noDeviceLinked':       '模板未关联设备，无法运行查询。',
+  'perf.kpiQuery.clickRunHint':         '点击「运行查询」加载聚合结果',
+  'perf.kpiQuery.tech':                 '制式',
+  'perf.kpiQuery.gran.15min':           '15分钟',
+  'perf.kpiQuery.gran.hourly':          '小时',
+  'perf.kpiQuery.gran.daily':           '天',
+  'perf.kpiQuery.deviceSearchPlaceholder': 'SN / 名称 / IP 搜索',
+  'perf.kpiQuery.metricSearchPlaceholder': '指标名 / 编码搜索',
+  'perf.kpiQuery.granularityWindow':    '粒度 / 时段',
+  'perf.kpiQuery.plot':                 '出图',
+  'perf.kpiQuery.refresh':              '刷新',
+  'perf.kpiQuery.v3.realtimeQuery':     '实时取数',
+  'perf.kpiQuery.v3.queryResult':       '取数结果',
+  'perf.kpiQuery.v3.emptyHint':         '选择设备 + 指标后点「出图」',
+  'perf.kpiQuery.truncatedShown':       '已截断 · 仅显示 {shown}/{total}',
   // PM 出图卡片 tooltip
   'pm.chart.tooltipStart':               '开始',
   'pm.chart.tooltipEnd':                 '结束',
@@ -7535,6 +7568,26 @@ const messages: Record<string, string> = {
   'deviceSelector.tpl.selectedTag':      '已选',
   'deviceSelector.tpl.apply':            '应用',
   'deviceSelector.tpl.hint':             '选择预设模板快速添加设备。应用后可在「已选设备」中查看和调整。',
+  // qa-614 c1 — #378 回收站批量恢复部分成功提示
+  'recycle.restorePartial':              '已恢复 {restored} 台，{skipped} 台因序列号已存在活跃设备被跳过：{sns}',
+  // qa-614 c2 — 首页 KPI 折线图空状态文案（issue #359：区分"暂无聚合数据/每小时整点更新"与裸空白）
+  'dashboard.kpiPanel.empty.title':      '暂无聚合数据',
+  'dashboard.kpiPanel.empty.hint':       '全网指标每小时整点更新；刚灌入的数据将在下个整点后或回退原始明细后显示。',
+  // qa-614 c3 #363：设备组维度不支持 15min 粒度提示
+  'perf.adhoc.granDeviceGroupNo15min':   '设备组维度最细为小时，不支持 15 分钟粒度',
+
+  // qa-614 c5 — software 固件/升级（#369 / #371 / #379）
+  'software.firmware.selectOrInputProductClass': '请选择或输入产品类型',
+  'software.firmware.versionExists':             '该版本固件已存在，请勿重复导入或修改版本号',
+  'software.rollback.destVersionPending':        '回退后版本以设备上报为准',
+  'software.rollback.targetVersion':             '目标版本',
+  'software.rollback.originVersion':             '原始版本',
+
+  // qa-614 c6 — UFTE 2G(GSM) 升级分类（#365 #373）+ 4G/5G 合并设备升级虚拟分类（#368）
+  'ufte.builtin.category.gsm_upgrade':        '2G升级',
+  'ufte.builtin.category.device_upgrade':     '设备升级',
+  'ufte.builtin.type.GSM_IMG_UPGRADE':        '2G 基站软件升级',
+  'ufte.builtin.desc.GSM_IMG_UPGRADE':        '复用现网软件升级链路，统一承载 2G(GSM) 基站镜像升级任务。',
 };
 
 export default messages;

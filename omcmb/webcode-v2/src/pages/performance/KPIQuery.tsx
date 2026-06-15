@@ -26,6 +26,7 @@ import { cn } from '@/lib/utils'
 import { useQueryTemplates, useAggregatedMetricsByDevices } from '@core/hooks/api/usePmQuery'
 import type { QueryTemplate } from '@core/types/pmQuery'
 import type { AggregatedRow, Granularity } from '@core/types/pmDashboard'
+import { useT, type TranslateFn } from '@/hooks/useT'
 
 // ============================================================
 // 指标查询 — 对齐 v1 /performance/query
@@ -93,6 +94,7 @@ function ResultTable({
   isLoading,
   isError,
   errors,
+  t,
 }: {
   rows: AggregatedRow[]
   total: number
@@ -100,6 +102,7 @@ function ResultTable({
   isLoading: boolean
   isError: boolean
   errors: unknown[]
+  t: TranslateFn
 }) {
   const { times, metrics, cell } = useMemo(() => pivot(rows), [rows])
   const colCount = metrics.length + 1
@@ -107,14 +110,14 @@ function ResultTable({
   return (
     <div>
       <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
-        <span>共 {total} 行</span>
-        {truncated && <Badge variant="warning">结果已截断</Badge>}
+        <span>{t('perf.kpiQuery.pivot.totalRows', { count: total })}</span>
+        {truncated && <Badge variant="warning">{t('perf.kpiQuery.truncated')}</Badge>}
       </div>
       <TableCard>
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>时间</TableHead>
+              <TableHead>{t('perf.kpiQuery.colTime')}</TableHead>
               {metrics.map((m) => (
                 <TableHead key={m.path}>{m.label}</TableHead>
               ))}
@@ -124,9 +127,9 @@ function ResultTable({
             {isLoading ? (
               <LoadingRow colSpan={colCount} />
             ) : isError ? (
-              <ErrorRow colSpan={colCount} error={errors[0] ?? new Error('查询失败')} />
+              <ErrorRow colSpan={colCount} error={errors[0] ?? new Error(t('perf.kpiQuery.queryFailedShort'))} />
             ) : times.length === 0 ? (
-              <EmptyRow colSpan={colCount}>暂无查询结果</EmptyRow>
+              <EmptyRow colSpan={colCount}>{t('perf.kpiQuery.noResults')}</EmptyRow>
             ) : (
               times.map((time) => (
                 <TableRow key={time}>
@@ -152,6 +155,7 @@ function ResultTable({
 }
 
 export function KPIQueryPage() {
+  const t = useT()
   const [keyword, setKeyword] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [run, setRun] = useState(false)
@@ -204,8 +208,8 @@ export function KPIQueryPage() {
 
   return (
     <PageShell
-      title="指标查询"
-      description="基于保存的查询模板跑多设备聚合查询，结果透视为时间 × 指标表"
+      title={t('perf.kpiQuery.v2.title')}
+      description={t('perf.kpiQuery.v2.desc')}
       isFetching={tplFetching || agg.isFetching}
     >
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[320px_1fr]">
@@ -216,7 +220,7 @@ export function KPIQueryPage() {
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 className="pl-9"
-                placeholder="模板名称"
+                placeholder={t('perf.kpiQuery.searchTemplate')}
                 value={keyword}
                 onChange={(e) => setKeyword(e.target.value)}
               />
@@ -226,40 +230,43 @@ export function KPIQueryPage() {
               size="sm"
               disabled={tplFetching}
               onClick={() => void refetchTpl()}
-              aria-label="刷新模板"
+              aria-label={t('perf.kpiQuery.refreshTemplates')}
             >
               <RefreshCcw className="size-4" />
             </Button>
           </div>
           <div className="max-h-[560px] space-y-1 overflow-auto">
             {tplLoading ? (
-              <div className="p-6 text-center text-sm text-muted-foreground">加载模板…</div>
+              <div className="p-6 text-center text-sm text-muted-foreground">{t('perf.kpiQuery.loadingTemplates')}</div>
             ) : tplError ? (
               <div className="p-6 text-center text-sm text-destructive">
-                加载失败：{tplErr instanceof Error ? tplErr.message : '未知错误'}
+                {t('perf.kpiQuery.loadFailed', {
+                  msg: tplErr instanceof Error ? tplErr.message : t('perf.kpiQuery.unknownError'),
+                })}
               </div>
             ) : filtered.length === 0 ? (
-              <div className="p-6 text-center text-sm text-muted-foreground">暂无查询模板</div>
+              <div className="p-6 text-center text-sm text-muted-foreground">{t('perf.kpiQuery.noTemplates')}</div>
             ) : (
-              filtered.map((t) => (
+              filtered.map((tpl) => (
                 <button
-                  key={t.id}
+                  key={tpl.id}
                   type="button"
-                  onClick={() => onSelect(t.id)}
+                  onClick={() => onSelect(tpl.id)}
                   className={cn(
                     'flex w-full flex-col items-start gap-1 rounded-md border px-3 py-2 text-left transition-colors hover:bg-accent',
-                    selectedId === t.id && 'border-primary bg-accent'
+                    selectedId === tpl.id && 'border-primary bg-accent'
                   )}
                 >
                   <div className="flex w-full items-center justify-between gap-2">
-                    <span className="truncate text-sm font-medium">{t.name}</span>
-                    <Badge variant={t.visibility === 'public' ? 'success' : 'muted'}>
-                      {t.visibility === 'public' ? '公开' : '私有'}
+                    <span className="truncate text-sm font-medium">{tpl.name}</span>
+                    <Badge variant={tpl.visibility === 'public' ? 'success' : 'muted'}>
+                      {tpl.visibility === 'public' ? t('perf.kpiQuery.public') : t('perf.kpiQuery.private')}
                     </Badge>
                   </div>
                   <span className="text-xs text-muted-foreground">
-                    {t.payload.deviceSns.length} 设备 · {t.payload.metricPaths.length} 指标 ·{' '}
-                    {t.payload.granularity}
+                    {t('perf.kpiQuery.deviceCount', { count: tpl.payload.deviceSns.length })} ·{' '}
+                    {t('perf.kpiQuery.metricCount', { count: tpl.payload.metricPaths.length })} ·{' '}
+                    {tpl.payload.granularity}
                   </span>
                 </button>
               ))
@@ -271,7 +278,7 @@ export function KPIQueryPage() {
         <div>
           {!selected ? (
             <Card className="flex h-64 items-center justify-center text-sm text-muted-foreground">
-              请选择左侧一个查询模板
+              {t('perf.kpiQuery.selectTemplateHint')}
             </Card>
           ) : (
             <div className="space-y-4">
@@ -291,18 +298,18 @@ export function KPIQueryPage() {
                       if (run) agg.refetch()
                     }}
                   >
-                    运行查询
+                    {t('perf.kpiQuery.runQuery')}
                   </Button>
                 </div>
                 <div className="flex flex-wrap gap-1.5 text-xs">
-                  <Badge variant="outline">粒度 {granularity}</Badge>
-                  <Badge variant="outline">{deviceSns.length} 设备</Badge>
-                  <Badge variant="outline">{metricPaths.length} 指标</Badge>
-                  <Badge variant="outline">时窗 {selected.payload.timeRangePreset}</Badge>
+                  <Badge variant="outline">{t('perf.kpiQuery.granularityLabel', { value: granularity })}</Badge>
+                  <Badge variant="outline">{t('perf.kpiQuery.deviceCount', { count: deviceSns.length })}</Badge>
+                  <Badge variant="outline">{t('perf.kpiQuery.metricCount', { count: metricPaths.length })}</Badge>
+                  <Badge variant="outline">{t('perf.kpiQuery.windowLabel', { value: selected.payload.timeRangePreset })}</Badge>
                 </div>
                 {deviceSns.length === 0 && (
                   <div className="mt-2 text-xs text-amber-600 dark:text-amber-400">
-                    模板未关联设备，无法运行查询。
+                    {t('perf.kpiQuery.noDeviceLinked')}
                   </div>
                 )}
               </Card>
@@ -315,10 +322,11 @@ export function KPIQueryPage() {
                   isLoading={agg.isLoading}
                   isError={agg.isError}
                   errors={agg.errors}
+                  t={t}
                 />
               ) : (
                 <Card className="flex h-40 items-center justify-center text-sm text-muted-foreground">
-                  点击「运行查询」加载聚合结果
+                  {t('perf.kpiQuery.clickRunHint')}
                 </Card>
               )}
             </div>

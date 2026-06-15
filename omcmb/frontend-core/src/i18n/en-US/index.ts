@@ -7335,6 +7335,39 @@ const messages: Record<string, string> = {
   'perf.kpiQuery.pivot.noLdn':           'No LDN',
   'perf.kpiQuery.pivot.emptyHint':       'No data. Please select query conditions and click "Query".',
   'perf.kpiQuery.pivot.totalRows':       'Total {count} rows',
+  // qa-614 c8 (#366): v2/v3 KPI 查询/取数页 i18n 补键（v2 只读查询页 + v3 HUD 取数页）
+  'perf.kpiQuery.v2.title':              'Metric Query',
+  'perf.kpiQuery.v2.desc':              'Run multi-device aggregated queries from saved templates; results pivoted as time × metric table',
+  'perf.kpiQuery.truncated':            'Results truncated',
+  'perf.kpiQuery.colTime':              'Time',
+  'perf.kpiQuery.queryFailedShort':     'Query failed',
+  'perf.kpiQuery.noResults':            'No query results',
+  'perf.kpiQuery.searchTemplate':       'Template name',
+  'perf.kpiQuery.refreshTemplates':     'Refresh templates',
+  'perf.kpiQuery.loadingTemplates':     'Loading templates…',
+  'perf.kpiQuery.loadFailed':           'Load failed: {msg}',
+  'perf.kpiQuery.noTemplates':          'No query templates',
+  'perf.kpiQuery.deviceCount':          '{count} devices',
+  'perf.kpiQuery.metricCount':          '{count} metrics',
+  'perf.kpiQuery.selectTemplateHint':   'Select a query template on the left',
+  'perf.kpiQuery.runQuery':             'Run Query',
+  'perf.kpiQuery.granularityLabel':     'Granularity {value}',
+  'perf.kpiQuery.windowLabel':          'Window {value}',
+  'perf.kpiQuery.noDeviceLinked':       'Template has no linked devices; cannot run query.',
+  'perf.kpiQuery.clickRunHint':         'Click "Run Query" to load aggregated results',
+  'perf.kpiQuery.tech':                 'Technology',
+  'perf.kpiQuery.gran.15min':           '15 min',
+  'perf.kpiQuery.gran.hourly':          'Hour',
+  'perf.kpiQuery.gran.daily':           'Day',
+  'perf.kpiQuery.deviceSearchPlaceholder': 'Search by SN / name / IP',
+  'perf.kpiQuery.metricSearchPlaceholder': 'Search by metric name / code',
+  'perf.kpiQuery.granularityWindow':    'Granularity / Window',
+  'perf.kpiQuery.plot':                 'Plot',
+  'perf.kpiQuery.refresh':              'Refresh',
+  'perf.kpiQuery.v3.realtimeQuery':     'Live Query',
+  'perf.kpiQuery.v3.queryResult':       'Query Result',
+  'perf.kpiQuery.v3.emptyHint':         'Select devices + metrics then click "Plot"',
+  'perf.kpiQuery.truncatedShown':       'Truncated · showing {shown}/{total}',
   // PM chart card tooltip
   'pm.chart.tooltipStart':               'Start',
   'pm.chart.tooltipEnd':                 'End',
@@ -7500,6 +7533,26 @@ const messages: Record<string, string> = {
   'deviceSelector.tpl.selectedTag':      'Selected',
   'deviceSelector.tpl.apply':            'Apply',
   'deviceSelector.tpl.hint':             'Select a preset template to quickly add devices. After applying, review and adjust under "Selected Devices".',
+  // qa-614 c1 — #378 recycle bin batch restore partial-success notice
+  'recycle.restorePartial':              'Restored {restored}; skipped {skipped} (serial number already in use by an active device): {sns}',
+  // qa-614 c2 — homepage KPI line-chart empty state (issue #359: distinguish "no aggregated data yet / hourly refresh" from a blank chart)
+  'dashboard.kpiPanel.empty.title':      'No aggregated data yet',
+  'dashboard.kpiPanel.empty.hint':       'Network-wide metrics refresh hourly on the hour; freshly ingested data appears after the next hour mark or once raw-detail fallback kicks in.',
+  // qa-614 c3 #363: device_group dimension does not support 15min granularity
+  'perf.adhoc.granDeviceGroupNo15min':   'Device group dimension is hourly at finest; 15-minute granularity is not supported',
+
+  // qa-614 c5 — software firmware/upgrade (#369 / #371 / #379)
+  'software.firmware.selectOrInputProductClass': 'Select or enter product type',
+  'software.firmware.versionExists':             'This firmware version already exists; do not re-import or change the version number',
+  'software.rollback.destVersionPending':        'Post-rollback version follows the device report',
+  'software.rollback.targetVersion':             'Target Version',
+  'software.rollback.originVersion':             'Original Version',
+
+  // qa-614 c6 — UFTE 2G(GSM) upgrade category (#365 #373) + merged device-upgrade virtual category (#368)
+  'ufte.builtin.category.gsm_upgrade':        '2G Upgrade',
+  'ufte.builtin.category.device_upgrade':     'Device Upgrade',
+  'ufte.builtin.type.GSM_IMG_UPGRADE':        '2G Base Station Software Upgrade',
+  'ufte.builtin.desc.GSM_IMG_UPGRADE':        'Reuses the live software upgrade pipeline to carry 2G (GSM) base station image upgrade tasks.',
 };
 
 export default messages;

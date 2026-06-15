@@ -69,8 +69,13 @@ var universalInformMapping = map[string]string{
 	"Device.Services.FAPService.1.FAPControl.X_RADISYS_COM_AlarmStatus": "alarm_severity",
 	// TR-181 Ethernet 标准 path（取代 CMCC X_CMCC_MACAddress，多数 CPE 上报此 path）
 	"Device.Ethernet.Interface.MACAddress": "mac",
-	// 发射功率：CPE 实际上报 MaxTxPower（Capabilities 子树）而非 ReferenceSignalPower
-	"Device.Services.FAPService.1.Capabilities.MaxTxPower": "transmit_power",
+	// #362: 发射功率不再走 universal 的 Capabilities.MaxTxPower。MaxTxPower 是
+	// 硬件最大能力上限(READ_ONLY)，而前端"发射功率"列与 LMT 口径是参考信号功率
+	// (ReferenceSignalPower，RW，小区实际工作功率)。原映射在此 universal 循环里
+	// 串行覆盖了 cmcc/ctcc adapter 的 ReferenceSignalPower→transmit_power（universal
+	// 循环在 carrier 循环之后执行，确定性覆盖），导致列表/详情恒显能力上限值、与 LMT
+	// 不一致。删除此条后 transmit_power 的唯一权威来源 = carrier adapter 的
+	// ReferenceSignalPower→transmit_power（见 cmcc/ctcc adapter.go GetInfoParamMapping）。
 	// LTE 小区配置（device_info 表 Phase 2 新增列）
 	"Device.Services.FAPService.1.CellConfig.LTE.EPC.TAC": "tac",
 	// GSM 位置区码：补全 device_groups LAC 匹配模式所需的设备侧数据源（T-2026-05-25）。

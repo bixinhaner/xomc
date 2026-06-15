@@ -470,6 +470,21 @@ func (r *PgSubTaskRepo) UpdateDestVersionByCommandKey(ctx context.Context, comma
 	return nil
 }
 
+// UpdateDestVersionByID 同 software.PgSubTaskRepository 同名方法（qa-614 #371），按子任务 ID 更新本表 dest_version。
+func (r *PgSubTaskRepo) UpdateDestVersionByID(ctx context.Context, id uuid.UUID, destVersion string) error {
+	query, args, err := storage.Psql.Update(r.subTaskTable).
+		Set("dest_version", destVersion).
+		Where(sq.Eq{"id": id}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build update %s dest_version by id SQL: %w", r.subTaskTable, err)
+	}
+	if _, err := r.pool.Exec(ctx, query, args...); err != nil {
+		return fmt.Errorf("update %s dest_version by id: %w", r.subTaskTable, err)
+	}
+	return nil
+}
+
 func (r *PgSubTaskRepo) UpdateFailureReasonByTask(ctx context.Context, taskID uuid.UUID, code software.FailureCode) error {
 	query, args, err := storage.Psql.Update(r.subTaskTable).
 		Set("failure_reason", string(code)).

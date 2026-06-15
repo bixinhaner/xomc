@@ -303,6 +303,22 @@ type TaskConfig struct {
 	ReconcileIntervalSeconds int `mapstructure:"reconcile_interval_seconds"`
 }
 
+// OfflineAlarmCleanupConfig 配置离线设备活动告警清理器（worker 进程的 OfflineAlarmCleaner）。
+//
+// 解决 issue #358：原阈值硬编码 1h（DefaultOfflineAlarmCleanupThreshold），运营商无法把告警
+// 收敛阈值调到分钟级，与已可配的设备离线检测阈值（offline_threshold.go，issue #203）口径不一致。
+// 三个字段 <=0 时各自回退到 alarm 包内的 Default* 常量（threshold 1h / interval 5min / batch 200），
+// 保持向后兼容；yaml 显式赋值即生效，worker 启动期 SetThreshold/SetInterval/SetBatchSize 注入。
+type OfflineAlarmCleanupConfig struct {
+	// ThresholdSeconds 设备离线满多少秒仍未恢复，则把其当前活动告警归档到历史告警。
+	// <=0 时回退到 alarm.DefaultOfflineAlarmCleanupThreshold（3600s）。
+	ThresholdSeconds int `mapstructure:"threshold_seconds"`
+	// IntervalSeconds 后台扫描周期（秒）。<=0 时回退到 alarm.DefaultOfflineAlarmCleanupInterval（300s）。
+	IntervalSeconds int `mapstructure:"interval_seconds"`
+	// BatchSize 每轮扫描最多处理的离线设备数。<=0 时回退到 alarm.DefaultOfflineAlarmCleanupBatchSize（200）。
+	BatchSize int `mapstructure:"batch_size"`
+}
+
 // MRConfig 配置 F05 MR 测量任务（PRD docs/project/prd/F05-mr-task-management.md）。
 //
 // 字段语义对齐 MR_Feature_Analysis.md：
@@ -600,13 +616,14 @@ type DataModelExpiryConfig struct {
 // Worker 服务负责后台异步任务：PM 文件解析入库、MR 文件处理、
 // 告警聚合/OSS 推送、定时 KPI 计算等，不对外提供 HTTP API。
 type WorkerConfig struct {
-	DB              PostgresConfig   `mapstructure:"db"`
-	TSDB            PostgresConfig   `mapstructure:"tsdb"`
-	Redis           RedisConfig      `mapstructure:"redis"`
-	NATS            NATSConfig       `mapstructure:"nats"`
-	MinIO           MinIOConfig      `mapstructure:"minio"`
-	Task            TaskConfig       `mapstructure:"task"`        // T-0157 C2: 任务过期扫描器配置
-	PM              PMConfig         `mapstructure:"pm"`          // 设备上线时自动下发 PM 上传配置
+	DB                  PostgresConfig            `mapstructure:"db"`
+	TSDB                PostgresConfig            `mapstructure:"tsdb"`
+	Redis               RedisConfig               `mapstructure:"redis"`
+	NATS                NATSConfig                `mapstructure:"nats"`
+	MinIO               MinIOConfig               `mapstructure:"minio"`
+	Task                TaskConfig                `mapstructure:"task"`                  // T-0157 C2: 任务过期扫描器配置
+	OfflineAlarmCleanup OfflineAlarmCleanupConfig `mapstructure:"offline_alarm_cleanup"` // #358: 离线设备活动告警清理阈值/周期/批量可配
+	PM                  PMConfig                  `mapstructure:"pm"`                    // 设备上线时自动下发 PM 上传配置
 	// PMConsumerConcurrency 是 PM 文件入库消费者的进程内并发订阅数（pm.file.received → 解析入库）。
 	// NATS push 订阅 async 回调由 nats.go 单 goroutine 串行投递，单订阅只用 ~1 核；N 个订阅共享同一
 	// durable consumer "pm-workers" 由 JetStream 负载均衡，吃满 worker 多核。<=0 时 worker 启动期
@@ -619,12 +636,12 @@ type WorkerConfig struct {
 	// PMKPIWindowFromDB：KPI 计算是否从 DB 回读 counter（true）还是用内存刚解析的 counter 直接算
 	// （false，默认，省每文件一次全量回读 SELECT）。仅当部署存在"同一窗口拆成多文件上报、需跨文件
 	// 聚合 KPI"时才置 true。
-	PMKPIWindowFromDB bool `mapstructure:"pm_kpi_window_from_db"`
-	DictLoader      DictLoaderConfig `mapstructure:"dict_loader"` // T-0178: worker BackupCleanup 需读 XMLBaseDir + ParamModel 子配置
-	Metrics         MetricsConfig    `mapstructure:"metrics"`
-	Tracer          TracerConfig     `mapstructure:"tracer"`
-	Log             LogConfig        `mapstructure:"log"`
-	RequestIDPrefix string           `mapstructure:"request_id_prefix"` // 请求 ID 前缀，如 "worker"
+	PMKPIWindowFromDB bool             `mapstructure:"pm_kpi_window_from_db"`
+	DictLoader        DictLoaderConfig `mapstructure:"dict_loader"` // T-0178: worker BackupCleanup 需读 XMLBaseDir + ParamModel 子配置
+	Metrics           MetricsConfig    `mapstructure:"metrics"`
+	Tracer            TracerConfig     `mapstructure:"tracer"`
+	Log               LogConfig        `mapstructure:"log"`
+	RequestIDPrefix   string           `mapstructure:"request_id_prefix"` // 请求 ID 前缀，如 "worker"
 }
 
 // PMConfig 配置 PM 文件上传自动下发流程。

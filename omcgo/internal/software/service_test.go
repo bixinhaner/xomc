@@ -101,6 +101,7 @@ type svcMockSubTaskRepo struct {
 	getActiveByDeviceFn func(ctx context.Context, deviceID uuid.UUID) (*UpgradeSubTask, error)
 	getByCommandKeyFn   func(ctx context.Context, commandKey string) (*UpgradeSubTask, error)
 	batchCreateFn       func(ctx context.Context, tasks []*UpgradeSubTask) error
+	updateDestByIDFn    func(ctx context.Context, id uuid.UUID, destVersion string) error
 }
 
 func (m *svcMockSubTaskRepo) Create(ctx context.Context, task *UpgradeSubTask) error {
@@ -142,6 +143,12 @@ func (m *svcMockSubTaskRepo) UpdateFailureReasonByTask(_ context.Context, _ uuid
 	return nil
 }
 func (m *svcMockSubTaskRepo) UpdateDestVersionByCommandKey(_ context.Context, _, _ string) error {
+	return nil
+}
+func (m *svcMockSubTaskRepo) UpdateDestVersionByID(ctx context.Context, id uuid.UUID, destVersion string) error {
+	if m.updateDestByIDFn != nil {
+		return m.updateDestByIDFn(ctx, id, destVersion)
+	}
 	return nil
 }
 func (m *svcMockSubTaskRepo) GetActiveByDeviceID(ctx context.Context, deviceID uuid.UUID) (*UpgradeSubTask, error) {
@@ -248,8 +255,8 @@ func (m *svcMockDeviceRepo) ListSerialsByIDs(_ context.Context, _ []uuid.UUID) (
 func (m *svcMockDeviceRepo) ListRecycleBin(_ context.Context, _ device.RecycleBinFilter) (*model.ListResponse[model.Device], error) {
 	return model.NewListResponse([]model.Device{}, 0, 1, 20), nil
 }
-func (m *svcMockDeviceRepo) RestoreDevices(_ context.Context, _ []uuid.UUID) (int64, error) {
-	return 0, nil
+func (m *svcMockDeviceRepo) RestoreDevices(_ context.Context, _ []uuid.UUID) (*device.RestoreResult, error) {
+	return &device.RestoreResult{}, nil
 }
 func (m *svcMockDeviceRepo) PermanentDelete(_ context.Context, _ []uuid.UUID) (int64, error) {
 	return 0, nil

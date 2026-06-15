@@ -29,6 +29,7 @@ import {
   Spin,
   Steps,
   Tag,
+  Tooltip,
   Transfer,
   message,
 } from 'antd';
@@ -41,6 +42,7 @@ import { useIndicatorCandidates } from '@core/hooks/api/usePerformance';
 import type { IndicatorCandidate } from '@core/services/api/pmApi';
 import type { AdhocDimension, AdhocMode } from '@core/types/pmAdhoc';
 import type { DeviceType } from '@core/types/indicatorLibrary';
+import { isGranularityDimensionSupported } from '@core/utils/pmAdhocConstraints';
 import CellDrilldownSelector from '../PmDashboard/CellDrilldownSelector';
 import { getEffectiveLdns, type CellSelection } from '../PmDashboard/cellDrilldownUtils';
 
@@ -257,6 +259,8 @@ export default function PmAdhocWizard() {
   const step3Valid = metricPaths.length >= 1;
   const step4Valid =
     granularity.length > 0 &&
+    // #363：(粒度, 维度) 组合守门——15min × 设备组不支持，禁用提交不发注定失败请求。
+    isGranularityDimensionSupported(granularity, dimension) &&
     (mode === 'continuous' || (window[0] && window[1] && window[1].isAfter(window[0])));
 
   const canNext = [step1Valid, step2Valid, step3Valid, step4Valid][current];
@@ -406,7 +410,14 @@ export default function PmAdhocWizard() {
           <div style={{ marginBottom: 8, fontWeight: 500 }}>{intl.formatMessage({ id: 'perf.adhoc.fieldDimensionReq' })}</div>
           <Radio.Group
             value={dimension}
-            onChange={(e) => setDimension(e.target.value as AdhocDimension)}
+            onChange={(e) => {
+              const next = e.target.value as AdhocDimension;
+              setDimension(next);
+              // #363：切到设备组若当前粒度是 15min（不支持）→ 自动回落 hourly。
+              if (!isGranularityDimensionSupported(granularity, next)) {
+                setGranularity('hourly');
+              }
+            }}
           >
             <Space orientation="vertical">
               {DIMENSION_OPTIONS.map((d) => (
@@ -543,13 +554,29 @@ export default function PmAdhocWizard() {
     <Space orientation="vertical" size="large" style={{ width: '100%', maxWidth: 560 }}>
       <div>
         <div style={{ marginBottom: 8, fontWeight: 500 }}>{intl.formatMessage({ id: 'perf.adhoc.fieldGranReq' })}</div>
+        {/* #363：维度为设备组时 15min 选项禁用 + tooltip 说明（设备组维度最细为小时）。 */}
         <Radio.Group
           optionType="button"
           buttonStyle="solid"
-          options={GRANULARITY_OPTIONS}
           value={granularity}
           onChange={(e) => setGranularity(e.target.value)}
-        />
+        >
+          {GRANULARITY_OPTIONS.map((g) => {
+            const disabled = !isGranularityDimensionSupported(g.value, dimension);
+            const btn = (
+              <Radio.Button key={g.value} value={g.value} disabled={disabled}>
+                {g.label}
+              </Radio.Button>
+            );
+            return disabled ? (
+              <Tooltip key={g.value} title={intl.formatMessage({ id: 'perf.adhoc.granDeviceGroupNo15min' })}>
+                {btn}
+              </Tooltip>
+            ) : (
+              btn
+            );
+          })}
+        </Radio.Group>
       </div>
       {mode === 'oneshot' ? (
         <div>

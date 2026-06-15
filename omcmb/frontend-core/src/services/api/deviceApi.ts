@@ -1,5 +1,6 @@
 import http from '../http';
 import type { Device, NE, DeviceFilter, DeviceGroup, DeviceListResponse, DeviceListStats, DeviceStats, DeviceParameter, CreateDeviceInput, NameFilterItem, BatchImportRequest, BatchImportResponse } from '../../types/device';
+import type { AlarmSeverity } from '../../types/common';
 import type { PageRequest, PageResponse } from '../../types/pagination';
 
 // Backend device model from Go struct
@@ -96,6 +97,12 @@ interface BackendDevice {
   downlink_frequency?: string;
 
   // Status
+  // #361: 告警级别来自后端 alarms_active 实时聚合（未 cleared 活动告警 MIN(severity)
+  // 映成 critical/major/minor/warning 文本），无活动告警 → null → 前端归 'none'。
+  // 原 mapper 写死 'none' 且 interface 未声明该字段，即便后端给值也被丢弃。
+  alarm_severity?: string | null;
+  // #361: 该设备未 cleared 活动告警数；无活动告警 → null → 前端归 0。
+  active_alarm_count?: number | null;
   op_state?: string;
   mme_status?: string;
   amf_status?: string;
@@ -154,6 +161,25 @@ export interface BatchOperationResult {
   errors?: Array<{ id: string; message: string }>;
 }
 
+// #378: 回收站批量恢复结果——可部分成功。SN+carrier 与某活跃设备冲突的回收站行
+// 被跳过（不再触发部分唯一索引 23505 整批回滚 500），其余正常恢复。
+export interface RestoreConflict {
+  id: string;
+  serialNumber: string;
+  reason: string;
+}
+export interface RestoreDevicesResult {
+  restored: number;
+  skipped: number;
+  conflicts: RestoreConflict[];
+}
+// 后端 handler 返回的 JSON 形态（key 与 Go gin.H / 结构体 json tag 一致）。
+interface BackendRestoreResult {
+  restored?: number;
+  skipped?: number;
+  conflicts?: Array<{ id: string; serialNumber: string; reason: string }> | null;
+}
+
 interface BackendListResponse<T> {
   items: T[];
   total: number;
@@ -208,6 +234,15 @@ function toRadioMode(technology: string): string {
   }
 }
 
+// #361: 把后端 alarm_severity 文本归一化到 AlarmSeverity | 'none'。
+// 后端已把 alarms_active.severity(smallint 1..4) 映成 critical/major/minor/warning
+// 文本；无活动告警时为 null/空/未知 → 归 'none'（灰色）。
+const VALID_ALARM_SEVERITIES: ReadonlyArray<AlarmSeverity> = ['critical', 'major', 'minor', 'warning'];
+function normalizeAlarmLevel(raw?: string | null): AlarmSeverity | 'none' {
+  const v = (raw ?? '').toLowerCase().trim();
+  return (VALID_ALARM_SEVERITIES as readonly string[]).includes(v) ? (v as AlarmSeverity) : 'none';
+}
+
 function mapBackendDevice(bd: BackendDevice): Device {
   // 兼容旧后端：若尚未升级到 T-0162 双字段，回退到 status 口径。
   const lifecycleState = (bd.lifecycle_state || deriveLegacyLifecycle(bd.status)) as Device['lifecycleState'];
@@ -239,7 +274,10 @@ function mapBackendDevice(bd: BackendDevice): Device {
     // 不再用老 mapStatus 那种 5 种状态全归 online 的"乐观归类"做法）
     connStatus: isOnline ? 'online' : 'offline',
 
-    alarmLevel: 'none',
+    // #361: 读后端 alarm_severity（alarms_active 实时聚合的文本），归一化到
+    // AlarmSeverity | 'none'；不再无条件写死 'none'。
+    alarmLevel: normalizeAlarmLevel(bd.alarm_severity),
+    activeAlarmCount: bd.active_alarm_count ?? 0,
     engStatus: 'commissioned',
     mgmtStatus: 'managed',
     lastOnlineTime: bd.last_inform_at || '',
@@ -759,9 +797,18 @@ export const deviceApi = {
     return mapListResponse(data);
   },
 
-  async restoreDevices(ids: string[]): Promise<BatchOperationResult> {
-    const { data } = await http.patch<BatchOperationResult>('/devices/recycle/restore', { ids });
-    return data;
+  // #378: 返回 RestoreDevicesResult（恢复数 + 跳过数 + 冲突明细），可部分成功。
+  async restoreDevices(ids: string[]): Promise<RestoreDevicesResult> {
+    const { data } = await http.patch<BackendRestoreResult>('/devices/recycle/restore', { ids });
+    return {
+      restored: data?.restored ?? 0,
+      skipped: data?.skipped ?? 0,
+      conflicts: (data?.conflicts ?? []).map((c) => ({
+        id: c.id,
+        serialNumber: c.serialNumber,
+        reason: c.reason,
+      })),
+    };
   },
 
   async permanentDeleteDevices(ids: string[]): Promise<BatchOperationResult> {

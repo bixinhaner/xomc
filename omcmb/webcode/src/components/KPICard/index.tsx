@@ -1,5 +1,5 @@
 import React from 'react';
-import { Card, Typography } from 'antd';
+import { Card, Skeleton, Typography } from 'antd';
 import { ArrowDownOutlined, ArrowUpOutlined } from '@ant-design/icons';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import { TiltCard, FloatingElement } from '@/components/Effects';
@@ -30,6 +30,7 @@ const KPICard: React.FC<KPICardProps> = ({
   deltaLabel,
   unit,
   onClick,
+  loading,
   minHeight,
 }) => {
   const token = useThemeToken();
@@ -93,25 +94,30 @@ const KPICard: React.FC<KPICardProps> = ({
               flexWrap: 'wrap',
             }}
           >
-            <span
-              style={{
-                fontSize: 32,
-                fontWeight: 700,
-                lineHeight: 1.2,
-                color: token.colorTextHeading,
-              }}
-            >
-              {value}
-            </span>
-            {unit && (
+            {/* 加载期显示骨架占位，避免硬刷新（缓存为空）首帧闪现占位/旧数字。issue #370 */}
+            {loading ? (
+              <Skeleton.Button active size="small" style={{ width: 80, height: 36 }} />
+            ) : (
+              <span
+                style={{
+                  fontSize: 32,
+                  fontWeight: 700,
+                  lineHeight: 1.2,
+                  color: token.colorTextHeading,
+                }}
+              >
+                {value}
+              </span>
+            )}
+            {!loading && unit && (
               <Typography.Text type="secondary" style={{ fontSize: 13 }}>
                 {unit}
               </Typography.Text>
             )}
           </div>
 
-          {/* Trend */}
-          {(trend || delta !== undefined) && (
+          {/* Trend —— 加载期一并隐藏趋势/增量行（参照 v2），避免闪现旧 delta。issue #370 */}
+          {!loading && (trend || delta !== undefined) && (
             <div
               style={{
                 display: 'flex',

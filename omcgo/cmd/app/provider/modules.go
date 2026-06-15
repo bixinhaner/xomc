@@ -1074,7 +1074,9 @@ func initBackupModule(c *Container) error {
 		// 重签为对外可达 host（如 localhost:9000）。
 		// 与 UFTE 模块 SetDownloadURLLookup 同一套逻辑（见上方 line 207-213）。
 		presignSigner := c.MinIO
-		if pc, perr := minioinfra.NewPresignClient(c.Cfg.MinIO); perr != nil {
+		// 传入 logger：public_endpoint 为空回退内部 endpoint 时会打 Warn（qa-614 #377），
+		// 让运维知道 License / ExportFile 等预签名下载 URL 浏览器可能解析失败。
+		if pc, perr := minioinfra.NewPresignClient(c.Cfg.MinIO, logger); perr != nil {
 			logger.Warn("create MinIO presign client failed for backupHandler; download URLs may be unreachable",
 				zap.Error(perr))
 		} else {

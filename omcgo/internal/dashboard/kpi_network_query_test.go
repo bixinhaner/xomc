@@ -56,3 +56,50 @@ func TestNetworkAggregationTaskIDs_Fixed(t *testing.T) {
 	}, networkAggregationTaskIDs)
 	assert.Equal(t, "hourly", networkResultGranularity)
 }
+
+// 成功路径（回退口径，issue #359）：预聚合表缺数据时直读原始明细 pm_metrics 现场汇成全网线。
+// SQL 含 metric_path/time GROUP BY + statis_type 路由的 CASE 算子 + 15min 粒度 + 时间窗。
+func TestBuildRawNetworkKPISeriesQuery_Basic(t *testing.T) {
+	start := time.Date(2026, 6, 13, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 6, 13, 12, 0, 0, 0, time.UTC)
+
+	q, args, err := buildRawNetworkKPISeriesQuery([]string{"K900010015", "C000060216"}, start, end)
+	require.NoError(t, err)
+
+	// 回退读原始明细 pm_metrics，而非预聚合表。
+	assert.Contains(t, q, "FROM pm_metrics")
+	assert.NotContains(t, q, "pm_adhoc_aggregation_results")
+	// 现场汇成全网一条线：按 metric_path + time GROUP BY，不带任何设备/小区实体键。
+	assert.Contains(t, q, "GROUP BY metric_path, time")
+	assert.NotContains(t, q, "device_sn")
+	assert.NotContains(t, q, "object_ldn")
+	// 算子按 statis_type 路由（sum/avg/max/min；未知按 sum）。
+	assert.Contains(t, q, "CASE MIN(statis_type)")
+	assert.Contains(t, q, "WHEN 'sum' THEN SUM(metric_value)")
+	assert.Contains(t, q, "WHEN 'avg' THEN AVG(metric_value)")
+	// 只读 15min 原始明细。
+	assert.Contains(t, q, "granularity = ")
+	// 编号过滤 + 时间窗。
+	assert.Contains(t, q, "metric_path = ANY(")
+	assert.Contains(t, q, "time >= ")
+	assert.Contains(t, q, "time <= ")
+	// 排序便于回填时序。
+	assert.Contains(t, q, "ORDER BY metric_path, time ASC")
+
+	// args 顺序：[codes, granularity, start, end]
+	require.Len(t, args, 4)
+	assert.Equal(t, []string{"K900010015", "C000060216"}, args[0])
+	assert.Equal(t, rawFallbackGranularity, args[1])
+	assert.Equal(t, start, args[2])
+	assert.Equal(t, end, args[3])
+}
+
+// 回退口径只读 15min 原始明细（与性能仪表板默认模板 15min 容错对齐）。
+func TestBuildRawNetworkKPISeriesQuery_Granularity15min(t *testing.T) {
+	assert.Equal(t, "15min", rawFallbackGranularity)
+
+	_, args, err := buildRawNetworkKPISeriesQuery([]string{"C999999999"}, time.Time{}, time.Time{})
+	require.NoError(t, err)
+	require.Len(t, args, 4)
+	assert.Equal(t, "15min", args[1])
+}

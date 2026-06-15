@@ -141,7 +141,8 @@ function SubTasks({ taskId }: { taskId: string }) {
   const total = data?.total ?? 0
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
-  const cols = ['设备SN', '原版本', '目标版本', '状态', '重试', '失败原因', '完成时间']
+  // qa-614 #371：补"起始时间"列以呼应起止时间（5G 回退起始时间现已记录）。
+  const cols = ['设备SN', '原版本', '目标版本', '状态', '重试', '失败原因', '起始时间', '完成时间']
 
   return (
     <div>
@@ -169,7 +170,8 @@ function SubTasks({ taskId }: { taskId: string }) {
                   <TableRow key={s.id}>
                     <TableCell className="font-mono text-xs">{s.deviceSn || s.deviceId}</TableCell>
                     <TableCell className="text-xs">{s.oriVersion || '—'}</TableCell>
-                    <TableCell className="text-xs">{s.destVersion || '—'}</TableCell>
+                    {/* qa-614 #371：目标版本完成后由后端回填，未回报时显示"待上报"。 */}
+                    <TableCell className="text-xs">{s.destVersion || '待上报'}</TableCell>
                     <TableCell>
                       <Badge variant={st.variant}>{st.label}</Badge>
                     </TableCell>
@@ -182,6 +184,7 @@ function SubTasks({ taskId }: { taskId: string }) {
                     >
                       {s.failureReason || s.errorMessage || '—'}
                     </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{formatTime(s.startedAt)}</TableCell>
                     <TableCell className="text-xs text-muted-foreground">{formatTime(s.completedAt)}</TableCell>
                   </TableRow>
                 )

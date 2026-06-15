@@ -27,6 +27,8 @@ export default function FleetRecycleBin() {
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [opError, setOpError] = useState<unknown>(null)
+  // #378: 恢复部分成功（SN 冲突跳过）的内联提示。
+  const [restoreNotice, setRestoreNotice] = useState<string | null>(null)
 
   const params = useMemo(
     () => ({ page, pageSize: PAGE_SIZE, ...(search.trim() ? { search: search.trim() } : {}) }),
@@ -68,6 +70,26 @@ export default function FleetRecycleBin() {
     [ids, refetch]
   )
 
+  // #378: 还原走独立 handler——恢复可部分成功，SN 冲突设备被后端跳过并回传 conflicts。
+  const runRestore = useCallback(() => {
+    if (ids.length === 0) return
+    setOpError(null)
+    setRestoreNotice(null)
+    restore
+      .mutateAsync(ids)
+      .then((res) => {
+        setSelected(new Set())
+        void refetch()
+        if (res.skipped > 0) {
+          const sns = res.conflicts.map((c) => c.serialNumber).join('、')
+          setRestoreNotice(
+            `已恢复 ${res.restored} 台，${res.skipped} 台因序列号已存在活跃设备被跳过：${sns}`
+          )
+        }
+      })
+      .catch((e) => setOpError(e))
+  }, [ids, refetch, restore])
+
   return (
     <PageShell
       code="F06"
@@ -98,7 +120,7 @@ export default function FleetRecycleBin() {
       {ids.length > 0 && (
         <div className="mb-2 flex flex-wrap items-center gap-2 rounded-sm border border-cyan-500/25 bg-cyan-500/[0.05] px-3 py-2">
           <span className="font-mono text-[11px] text-cyan-200">已选 {ids.length} 条</span>
-          <NeonButton icon={<RotateCcw />} disabled={busy} onClick={() => run(restore)}>
+          <NeonButton icon={<RotateCcw />} disabled={busy} onClick={runRestore}>
             还原
           </NeonButton>
           <NeonButton tone="danger" icon={<Trash2 />} disabled={busy} onClick={() => run(purge)}>
@@ -114,6 +136,13 @@ export default function FleetRecycleBin() {
           <ErrorBlock error={opError} />
         </div>
       ) : null}
+
+      {restoreNotice && (
+        // #378: 恢复部分成功（SN 冲突跳过）的 HUD 内联告警提示。
+        <div className="mb-2 rounded-sm border border-amber-400/30 bg-amber-400/[0.06] px-3 py-2 font-mono text-[11px] text-amber-200">
+          {restoreNotice}
+        </div>
+      )}
 
       <StateGate
         isLoading={isLoading}

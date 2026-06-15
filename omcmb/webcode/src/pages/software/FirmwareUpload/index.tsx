@@ -45,6 +45,7 @@ import {
   useUpdateFirmware,
 } from '@core/hooks/api/useSoftware';
 import { useProductClasses } from '@core/hooks/api/useDevices';
+import { collapseImageProductClasses } from '@core/utils/productClass';
 import { useBatchDownloadWithMessage } from '@/hooks/useBatchDownloadWithMessage';
 import type { SoftwareVersion } from '@core/mock/data/software';
 
@@ -93,12 +94,22 @@ export default function FirmwareUpload({ embedded = false }: FirmwareUploadProps
 
   // Dynamic product type options from API
   const { data: productClassesData } = useProductClasses();
-  const productClassOptions = useMemo(() => {
+  const rawProductClasses = useMemo(() => {
     if (productClassesData && productClassesData.length > 0) {
-      return productClassesData.map((c) => ({ label: c, value: c }));
+      return productClassesData;
     }
-    return fallbackProductClassOptions;
+    return fallbackProductClassOptions.map((o) => o.value);
   }, [productClassesData]);
+  const productClassOptions = useMemo(
+    () => rawProductClasses.map((c) => ({ label: c, value: c })),
+    [rawProductClasses],
+  );
+  // qa-614 #369：IMAGE（升级镜像）做"版本合一"，同族载波变体 /SC /DC /CA 收敛为共同
+  // 基础标识（如 FAP/MLN），下拉不再出现载波变体级别条目。PATCH/FPGA 维持细分。
+  const imageProductClassOptions = useMemo(
+    () => collapseImageProductClasses(rawProductClasses).map((c) => ({ label: c, value: c })),
+    [rawProductClasses],
+  );
 
   // 文件类型状态
   const [fileType, setFileType] = useState<FileType>('upgrade');
@@ -210,8 +221,12 @@ export default function FirmwareUpload({ embedded = false }: FirmwareUploadProps
               void message.success(t('software.firmware.modifySuccess'));
               handleCloseImportDrawer();
             },
-            onError: () => {
-              void message.error(t('software.firmware.modifyFailed'));
+            // qa-614 #372：透出后端真实失败原因（http 拦截器已把信封 msg 写进
+            // error.message），而非固定"修改失败"。
+            onError: (e) => {
+              void message.error(
+                e instanceof Error && e.message ? e.message : t('software.firmware.modifyFailed'),
+              );
             },
           },
         );
@@ -248,8 +263,12 @@ export default function FirmwareUpload({ embedded = false }: FirmwareUploadProps
             void message.success(t('software.firmware.importSuccess'));
             handleCloseImportDrawer();
           },
-          onError: () => {
-            void message.error(t('software.firmware.importFailed'));
+          // qa-614 #372/#379：透出后端真实失败原因（如重复导入 → 409"…的固件已存在"），
+          // 而非固定"导入失败"。http 拦截器已把信封 msg 写进 error.message。
+          onError: (e) => {
+            void message.error(
+              e instanceof Error && e.message ? e.message : t('software.firmware.importFailed'),
+            );
             setUploadProgress(0);
           },
         },
@@ -514,16 +533,24 @@ export default function FirmwareUpload({ embedded = false }: FirmwareUploadProps
               rules={[{ required: true, message: t('software.firmware.selectProductClass') }]}
             >
               {fileType === 'upgrade' ? (
+                // qa-614 #369：IMAGE 用收敛后的共同基础标识（隐藏 SC/DC/CA 载波变体级别）。
+                // qa-614 #379：mode="tags" 允许手填 BM 等"无在线设备"的产品类。
                 <Select
-                  mode="multiple"
+                  mode="tags"
                   maxTagCount="responsive"
-                  placeholder={t('software.firmware.selectProductClass')}
-                  options={productClassOptions}
+                  placeholder={t('software.firmware.selectOrInputProductClass')}
+                  options={imageProductClassOptions}
+                  tokenSeparators={[',']}
                 />
               ) : (
+                // qa-614 #379：PATCH/FPGA 维持细分，但同样支持手填兜底；
+                // 取首个值（join(',') 对单值无影响），保持单产品类语义。
                 <Select
-                  placeholder={t('software.firmware.selectProductClass')}
+                  mode="tags"
+                  maxTagCount={1}
+                  placeholder={t('software.firmware.selectOrInputProductClass')}
                   options={productClassOptions}
+                  tokenSeparators={[',']}
                 />
               )}
             </Form.Item>

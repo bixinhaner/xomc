@@ -57,6 +57,8 @@ export default function RecycleBin() {
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  // #378: 恢复部分成功（含 SN 冲突跳过）时的内联提示。
+  const [restoreNotice, setRestoreNotice] = useState<string | null>(null)
 
   const params = useMemo<RecycleBinFilter>(
     () => ({
@@ -106,7 +108,19 @@ export default function RecycleBin() {
 
   function handleRestore() {
     if (selectedCount === 0) return
-    restore.mutate(Array.from(selectedIds), { onSuccess: clearSelection })
+    setRestoreNotice(null)
+    // #378: 恢复可部分成功——SN 冲突设备被后端跳过并回传 conflicts。
+    restore.mutate(Array.from(selectedIds), {
+      onSuccess: (res) => {
+        clearSelection()
+        if (res.skipped > 0) {
+          const sns = res.conflicts.map((c) => c.serialNumber).join('、')
+          setRestoreNotice(
+            `已恢复 ${res.restored} 台，${res.skipped} 台因序列号已存在活跃设备被跳过：${sns}`
+          )
+        }
+      },
+    })
   }
 
   function handleDelete() {
@@ -207,6 +221,13 @@ export default function RecycleBin() {
           {(restore.error ?? permanentDelete.error) instanceof Error
             ? (restore.error ?? permanentDelete.error)!.message
             : '未知错误'}
+        </div>
+      )}
+
+      {restoreNotice && (
+        // #378: 恢复部分成功（SN 冲突跳过）的内联告警提示（amber，与 warning Badge 同色系）。
+        <div className="mb-3 rounded-md border border-amber-500/30 bg-amber-500/5 px-4 py-2 text-sm text-amber-600 dark:text-amber-400">
+          {restoreNotice}
         </div>
       )}
 

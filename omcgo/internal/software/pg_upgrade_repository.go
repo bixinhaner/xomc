@@ -204,8 +204,14 @@ func (r *PgSubTaskRepository) UpdateStatusWithCode(ctx context.Context, id uuid.
 	if code != "" && status == UpgradeFailed {
 		builder = builder.Set("failure_reason", string(code))
 	}
-	if status == UpgradeDownloading || status == UpgradeUploading {
-		builder = builder.Set("started_at", time.Now())
+	// qa-614 #371: 子任务"起始时间"在首次进入任一执行态时记录（含 rebooting/verifying），
+	// 而非只在 downloading/uploading。5G 手动回退 RollbackNeedsEnableCheck=false，状态从
+	// pending 直跳 rebooting（既不经 downloading 也不经 uploading），原条件导致 started_at 恒
+	// NULL → 前端"开始时间"恒显示"-"。用 COALESCE(started_at, now()) 守卫：仅当 started_at
+	// 仍为 NULL 时写入，避免 4G 多次状态翻转把先前已记录的开始时间覆盖（4G 行为不回归）。
+	if status == UpgradeDownloading || status == UpgradeUploading ||
+		status == UpgradeRebooting || status == UpgradeVerifying {
+		builder = builder.Set("started_at", sq.Expr("COALESCE(started_at, now())"))
 	}
 	if status == UpgradeCompleted || status == UpgradeFailed || status == UpgradeTerminated {
 		builder = builder.Set("completed_at", time.Now())
@@ -717,6 +723,22 @@ func (r *PgSubTaskRepository) UpdateDestVersionByCommandKey(ctx context.Context,
 	}
 	if _, err := r.pool.Exec(ctx, query, args...); err != nil {
 		return fmt.Errorf("update dest_version by command_key: %w", err)
+	}
+	return nil
+}
+
+// UpdateDestVersionByID sets dest_version for a single sub-task by its ID (qa-614 #371).
+// RowsAffected=0 不视为错误（子任务可能已被清理）。
+func (r *PgSubTaskRepository) UpdateDestVersionByID(ctx context.Context, id uuid.UUID, destVersion string) error {
+	query, args, err := storage.Psql.Update("upgrade_sub_tasks").
+		Set("dest_version", destVersion).
+		Where(sq.Eq{"id": id}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build update dest_version by id SQL: %w", err)
+	}
+	if _, err := r.pool.Exec(ctx, query, args...); err != nil {
+		return fmt.Errorf("update dest_version by id: %w", err)
 	}
 	return nil
 }

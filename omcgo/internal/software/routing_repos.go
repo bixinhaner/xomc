@@ -525,3 +525,12 @@ func (r *RoutingSubTaskRepository) UpdateDestVersionByCommandKey(ctx context.Con
 	}
 	return nil
 }
+
+// UpdateDestVersionByID 按子任务 ID 路由到命中那张表后单字段更新 dest_version（qa-614 #371）。
+func (r *RoutingSubTaskRepository) UpdateDestVersionByID(ctx context.Context, id uuid.UUID, destVersion string) error {
+	repo, _, err := r.pickByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	return repo.UpdateDestVersionByID(ctx, id, destVersion)
+}

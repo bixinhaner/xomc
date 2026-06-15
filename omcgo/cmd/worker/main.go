@@ -318,12 +318,24 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	}
 	logger.Info("reboot monitor started")
 
-	// 设备离线超时告警清理：离线满 1 小时仍未恢复时，把当前告警归档到历史告警。
+	// 设备离线超时告警清理：离线满阈值仍未恢复时，把当前告警归档到历史告警。
+	// #358：阈值/周期/批量从 config.offline_alarm_cleanup 注入（<=0 回退 Default* 常量），
+	// 与设备离线检测阈值（offline_threshold.go，#203）对齐口径，运营商可把收敛阈值调到分钟级。
 	offlineAlarmCleaner := alarm.NewOfflineAlarmCleaner(alarmDeviceRepo, alarmPgStore, alarmEngine, logger)
+	if s := cfg.OfflineAlarmCleanup.ThresholdSeconds; s > 0 {
+		offlineAlarmCleaner.SetThreshold(time.Duration(s) * time.Second)
+	}
+	if s := cfg.OfflineAlarmCleanup.IntervalSeconds; s > 0 {
+		offlineAlarmCleaner.SetInterval(time.Duration(s) * time.Second)
+	}
+	if n := cfg.OfflineAlarmCleanup.BatchSize; n > 0 {
+		offlineAlarmCleaner.SetBatchSize(n)
+	}
 	go offlineAlarmCleaner.Run(context.Background())
 	logger.Info("offline alarm cleaner started",
-		zap.Duration("interval", alarm.DefaultOfflineAlarmCleanupInterval),
-		zap.Duration("threshold", alarm.DefaultOfflineAlarmCleanupThreshold))
+		zap.Duration("interval", offlineAlarmCleaner.Interval()),
+		zap.Duration("threshold", offlineAlarmCleaner.Threshold()),
+		zap.Int("batch_size", offlineAlarmCleaner.BatchSize()))
 
 	// Reboot Task Closer (F01/F06)：M Reboot Inform 兜底收敛未 ACK 的 Reboot/FactoryReset 任务。
 	rebootCloser := task.NewRebootCloser(w.TaskRepo, w.TaskService, logger)

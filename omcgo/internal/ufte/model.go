@@ -190,6 +190,7 @@ func builtInTaskTypes() []TaskType {
 	now := time.Now().Format(time.RFC3339)
 	lte := coremodel.TechLTE
 	nr := coremodel.TechNR
+	gsm := coremodel.TechGSM
 	return []TaskType{
 		{
 			TypeCode:               "ENB_IMG_UPGRADE",
@@ -309,6 +310,36 @@ func builtInTaskTypes() []TaskType {
 			techHint:               &nr,
 		},
 		{
+			TypeCode:      "GSM_IMG_UPGRADE",
+			SortOrder:     19,
+			Category:      "gsm_upgrade",
+			CategoryLabel: "2G升级",
+			DisplayName:   "2G 基站软件升级",
+			// 镜像下载链路本身与制式无关，复用与 4G/5G 同一条 Download 链路。
+			Description:            "复用现网软件升级链路，统一承载 2G(GSM) 基站镜像升级任务。",
+			RPCType:                "DOWNLOAD",
+			BuiltIn:                true,
+			Enabled:                true,
+			StepChain:              []string{"CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_FILE_TRANSFER", "WAIT_TRANSFER_COMPLETE"},
+			PermissionCode:         "CODE_GSM_UPGRADE_IMAGE",
+			PlatformScope:          []string{"2G BSC", "2G BTS", "BSC", "BTS", "PGSM"},
+			FileType:               "1 Firmware Upgrade Image",
+			FileTypeLabel:          "1 Firmware Upgrade Image",
+			FileTypeEditable:       true,
+			FirmwareFileType:       firmwareFileTypePtr(software.FileTypeIMG),
+			URLTemplate:            "firmware/{minio_path}",
+			TargetFileNameTemplate: "{firmware_name}",
+			FileNameTemplate:       "{firmware_name}",
+			FileSizeField:          "firmware.fileSize",
+			ChecksumField:          "firmware.md5",
+			RawMode:                "false",
+			TransportPath:          "/smallcell/FileDownloadService/firmware/img/{path}",
+			LastEditor:             "system",
+			UpdatedAt:              now,
+			softwareTaskType:       software.TaskTypeUpgrade,
+			techHint:               &gsm,
+		},
+		{
 			TypeCode:         "VERSION_ROLLBACK",
 			SortOrder:        20,
 			Category:         "version_rollback",
@@ -424,13 +455,13 @@ func builtInTaskTypes() []TaskType {
 			Category:               "config_backup",
 			CategoryLabel:          "配置文件备份",
 			DisplayName:            "配置文件备份（NV）",
-			Description:            "NV 平台（MLQ/MLN_SC 等）配置文件备份，TR-069 Upload FileType=12 {OUI} Configuration File。",
+			Description:            "NV 平台（MLQ/MLN/BM 等）配置文件备份，TR-069 Upload FileType=12 {OUI} Configuration File。",
 			RPCType:                "UPLOAD",
 			BuiltIn:                true,
 			Enabled:                true,
 			StepChain:              []string{"CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "PRE_VALIDATE", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_TRANSFER_COMPLETE"},
 			PermissionCode:         "CODE_CONFIG_BACKUP",
-			PlatformScope:          []string{"MLQ", "MLN_SC"},
+			PlatformScope:          []string{"MLQ", "MLN", "BM"},
 			FileType:               "12 {OUI} Configuration File",
 			FileTypeLabel:          "12 {OUI} Configuration File",
 			FileTypeEditable:       false,
@@ -574,6 +605,13 @@ func matchesTaskTypeScope(item TaskType, productClass string) bool {
 		return strings.Contains(upper, "5G") || strings.Contains(upper, "GNB") || strings.Contains(upper, "QSS") || strings.Contains(upper, "XSS") || strings.Contains(upper, "BBU") || strings.Contains(upper, "BSC")
 	case coremodel.TechLTE:
 		return strings.Contains(upper, "4G") || strings.Contains(upper, "ENB") || strings.Contains(upper, "QAFA") || strings.Contains(upper, "QAFB") || strings.Contains(upper, "FAP") || strings.Contains(upper, "BM") || strings.Contains(upper, "BNQ") || strings.Contains(upper, "MLQ") || strings.Contains(upper, "MLN") || strings.Contains(upper, "BLQ")
+	case coremodel.TechGSM:
+		// 2G/GSM 兜底关键字白名单（productTechLookup 不可用 / 未注册时生效）。
+		// products.xml：BSC=^FAP/PGSM$、BTS=^FAP/BTS$，均 tech="2G" deviceType="gsm"。
+		// 注意："FAP" 子串也命中 LTE 白名单，故 2G 设备的精确识别仍以 service.
+		// deviceMatchesTaskType 经 productTechLookup 查 product.tech=="gsm" 为准，
+		// 本兜底只在 registry 不可用时放行 PGSM/BTS/BSC/GSM/2G 关键字。
+		return strings.Contains(upper, "2G") || strings.Contains(upper, "GSM") || strings.Contains(upper, "PGSM") || strings.Contains(upper, "BTS") || strings.Contains(upper, "BSC")
 	default:
 		return false
 	}

@@ -810,19 +810,30 @@ func (h *Handler) publishPMFileReceivedEvent(
 		zap.Int64("size", fileSize))
 }
 
-// pmFilenameSNRe matches the two PM filename layouts we've seen in the wild:
+// pmFilenameSNRe matches the PM filename layouts we've seen in the wild. The
+// deviceSN is always the final dot-segment before `.xml`; the leading branches
+// just gate which prefixes we trust as PM files (anchored so an arbitrary
+// `{anything}.xml` won't be mistaken for a PM upload):
 //
-//	A{date}.{startTime}-{endTime}_{OUI}.{SN}.xml(.gz)?   — Baicells real CPE
-//	pm-{SN}.xml(.gz)?                                    — cpe_simulator.py
+//	A{date}.{period}_{OUI}.{SN}.xml(.gz)?   — Baicells real CPE (4G/LTE)
+//	A{date}.{period}.{SN}.xml(.gz)?         — 3GPP 32.435 `A`-form without an
+//	                                          {OUI} vendor tag (#364: BSC/2G GSM
+//	                                          real-CPE dialect, no underscore-OUI)
+//	pm-{SN}.xml(.gz)? / pm_{SN}.xml(.gz)?   — cpe_simulator.py + simulator dialect
+//	PM-{SN}.xml(.gz)? / PM_{SN}.xml(.gz)?   — vendor PM-prefix dialect (#364)
 //
 // Capture group 1 is the deviceSN. Anchored to the end (after stripping the
 // optional .gz) so it can't confuse intermediate dot-segments with the SN.
 //
-// 3GPP 32.435 names PM files this way (`A{date}.{period}_{vendorTag}.{neId}`
-// or similar); the regex below captures the Baicells dialect that uses
-// `{OUI}.{SN}` as the vendor/NE tag. New vendor dialects should add an
-// alternative branch here rather than scattering parsing logic at the call site.
-var pmFilenameSNRe = regexp.MustCompile(`(?:^A.+?_[0-9a-fA-F]{6,}\.|^pm-)([^.]+)\.xml(\.gz)?$`)
+// 3GPP 32.435 names PM files `A{date}.{period}_{vendorTag}.{neId}` (or without
+// the vendor tag). The `^A` branch is generalised to "starts with A, capture the
+// last dot-segment", so both the OUI and no-OUI dialects route through one rule.
+//
+// New vendor dialects should add an alternative prefix branch in this single
+// regex rather than scattering parsing logic at the call site. The safest path
+// for any new vendor remains the explicit `?sn=` URL query (see handler PM
+// branch), which bypasses filename-dialect guessing entirely.
+var pmFilenameSNRe = regexp.MustCompile(`(?i:^A.+\.|^pm[-_])([^.]+)\.xml(\.gz)?$`)
 
 // extractDeviceSNFromPMFilename returns the device SN parsed from a PM upload
 // filename, or "" when none of the recognised vendor patterns match. The

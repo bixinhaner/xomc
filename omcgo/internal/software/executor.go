@@ -1416,6 +1416,13 @@ func (e *UpgradeExecutor) completeSubTask(ctx context.Context, subTask *UpgradeS
 	if err := e.subTaskRepo.UpdateStatus(ctx, subTask.ID, UpgradeCompleted, ""); err != nil {
 		e.logger.Error("complete sub-task", zap.String("sub_task_id", subTask.ID.String()), zap.Error(err))
 	}
+
+	// qa-614 #371: 完成后回填"目标版本"(dest_version)。手动回退/升级时 OMC 事先不知道
+	// 回退后的具体版本号（走设备上一个 bank），创建子任务时 DestVersion 为空，前端"目标版本"
+	// 列恒显示"-"。完成时设备已重启并上报新 FirmwareVersion，按设备 SN 取最新值回填。
+	// 仅当 DestVersion 仍为空时才回填，避免覆盖创建时已显式指定的目标固件版本。
+	e.backfillDestVersion(ctx, subTask, deviceSN)
+
 	e.releaseDeviceLock(ctx, deviceSN)
 
 	// Clean up Redis flags
@@ -1430,4 +1437,25 @@ func (e *UpgradeExecutor) completeSubTask(ctx context.Context, subTask *UpgradeS
 		e.logger.Error("increment success count", zap.Error(err))
 	}
 	finalizeTask(ctx, e.taskRepo, e.logger, subTask.TaskID)
+}
+
+// backfillDestVersion 在子任务完成后，用设备最新上报的固件版本回填 dest_version（qa-614 #371）。
+// 仅当 subTask.DestVersion 为空时才回填——创建时已显式指定目标固件版本的不覆盖。
+// 任何失败都仅记日志、不影响完成流程（dest_version 仅用于展示）。
+func (e *UpgradeExecutor) backfillDestVersion(ctx context.Context, subTask *UpgradeSubTask, deviceSN string) {
+	if subTask.DestVersion != "" || deviceSN == "" {
+		return
+	}
+	dev, err := e.deviceRepo.GetBySerialNumber(ctx, deviceSN)
+	if err != nil || dev == nil || dev.FirmwareVersion == "" {
+		return
+	}
+	if err := e.subTaskRepo.UpdateDestVersionByID(ctx, subTask.ID, dev.FirmwareVersion); err != nil {
+		e.logger.Warn("backfill dest_version after completion",
+			zap.String("sub_task_id", subTask.ID.String()),
+			zap.String("device_sn", deviceSN),
+			zap.Error(err))
+		return
+	}
+	subTask.DestVersion = dev.FirmwareVersion
 }

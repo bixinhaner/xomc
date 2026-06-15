@@ -121,6 +121,15 @@ export function LayoutKPIPanel({ technology, panel, trendData, isLoading, height
     [selectedMetric, trendData, xData, todayLabel, yesterdayLabel, selectedMeta.conversion],
   );
 
+  // 选中指标在今日/昨日两条线里是否有任一真实数据点（issue #359）。
+  // 全网线优先读每小时预聚合表、缺数据时后端已回退原始明细；若两边都拿不到（聚合任务尚未跑过且
+  // 原表也无可聚数据），不再画裸空图，而是给出"暂无聚合数据/每小时整点更新"的明确提示，
+  // 避免被误判为故障。
+  const hasSeriesData = useMemo(
+    () => series.some((s) => s.data.some((v) => v !== null && !Number.isNaN(v))),
+    [series],
+  );
+
   // 指标下拉：按编号取指标库名字；存量旧别名回退老配置 label；都缺退回编号本身。
   const indicatorOptions = panel.metrics.map((key) => ({
     label: resolveMetricMeta(key, meta, t).name,
@@ -161,6 +170,21 @@ export function LayoutKPIPanel({ technology, panel, trendData, isLoading, height
         ) : panel.metrics.length === 0 ? (
           <div style={{ height: height - 70, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Empty description={t('common.noData')} image={Empty.PRESENTED_IMAGE_SIMPLE} />
+          </div>
+        ) : !hasSeriesData ? (
+          // 有指标但无任何数据点：区分"暂无聚合数据/每小时整点更新"与裸空白（issue #359）。
+          <div style={{ height: height - 70, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description={
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ color: token.colorText }}>{t('dashboard.kpiPanel.empty.title')}</div>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {t('dashboard.kpiPanel.empty.hint')}
+                  </Text>
+                </div>
+              }
+            />
           </div>
         ) : (
           <LineChart

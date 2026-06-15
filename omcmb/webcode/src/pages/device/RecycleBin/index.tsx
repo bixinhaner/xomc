@@ -146,8 +146,20 @@ export default function RecycleBin() {
         icon: <ExportOutlined style={{ color: '#52C41A' }} />,
         onOk: async () => {
           try {
-            await restoreMutation.mutateAsync(ids.map(String));
-            message.success(t('status.success'));
+            // #378: 恢复可部分成功——SN 冲突设备被后端跳过并回传 conflicts。
+            const res = await restoreMutation.mutateAsync(ids.map(String));
+            if (res.skipped > 0) {
+              const conflictSNs = res.conflicts.map((c) => c.serialNumber).join('、');
+              message.warning(
+                t('recycle.restorePartial', {
+                  restored: res.restored,
+                  skipped: res.skipped,
+                  sns: conflictSNs,
+                })
+              );
+            } else {
+              message.success(t('status.success'));
+            }
             setSelectedRowKeys([]);
           } catch {
             message.error(t('common.operationFailed'));

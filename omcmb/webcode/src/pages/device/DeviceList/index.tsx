@@ -918,10 +918,13 @@ export default function DeviceList() {
           const color = SEVERITY_COLOR[record.alarmLevel] ?? 'default';
           const label = getSeverityLabel(record.alarmLevel);
           if (record.alarmLevel && record.alarmLevel !== 'none') {
+            // #361: 告警级别 Tag 旁拼接活动告警数（如「重要 · 3」）。
+            const count = record.activeAlarmCount ?? 0;
+            const display = count > 0 ? `${label} · ${count}` : label;
             // 点击告警跳转到设备详情告警 tab
             return (
               <Tag color={color} style={{ cursor: 'pointer' }} onClick={() => void navigate(`/device/detail/${record.sn}?tab=alarm`)}>
-                {label}
+                {display}
               </Tag>
             );
           }
