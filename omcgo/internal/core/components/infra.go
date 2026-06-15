@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/minio/minio-go/v7"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
@@ -24,6 +25,7 @@ import (
 	miniocomp "github.com/omcgo/omcgo/internal/core/components/minio"
 	natscomp "github.com/omcgo/omcgo/internal/core/components/nats"
 	"github.com/omcgo/omcgo/internal/core/components/postgres"
+	redismetrics "github.com/omcgo/omcgo/internal/core/components/redis"
 	"github.com/omcgo/omcgo/internal/core/components/redisx"
 	"github.com/omcgo/omcgo/internal/core/components/sdnotify"
 	"github.com/omcgo/omcgo/internal/core/event"
@@ -68,10 +70,19 @@ func NewInfra(logCfg appconfig.LogConfig, metricsPort int) (*Infra, error) {
 	}
 	// Set as global logger so logger.L(ctx) can access it via zap.L()
 	zap.ReplaceGlobals(logger)
+
+	// 指标 registry：注册 Go runtime 采集器（go_goroutines / go_threads /
+	// go_memstats_* / go_gc_*）与进程采集器（process_resident_memory_bytes /
+	// process_cpu_seconds_total / process_open_fds）。这是「服务资源监控」的运行时
+	// 基线 —— 各业务/基础设施模块的指标随后注册到同一 registry，由 /metrics 统一暴露。
+	metricsReg := prometheus.NewRegistry()
+	metricsReg.MustRegister(collectors.NewGoCollector())
+	metricsReg.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
+
 	return &Infra{
 		Logger:      logger,
 		GS:          NewGracefulShutdown(30*time.Second, logger),
-		MetricsReg:  prometheus.NewRegistry(),
+		MetricsReg:  metricsReg,
 		Health:      NewHealthChecker(),
 		metricsPort: metricsPort,
 	}, nil
@@ -110,6 +121,12 @@ func (inf *Infra) ConnectPostgres(ctx context.Context, cfg appconfig.PostgresCon
 	inf.Health.Register("postgres", func(ctx context.Context) error {
 		return pool.Ping(ctx)
 	})
+	// 连接池资源指标（pgxpool_in_use/idle/max/acquire_total），带 pool="main" 常量标签
+	// 与时序库（pool="tsdb"）区分，避免同名指标在同一 registry 冲突。
+	mainPoolMetrics := postgres.RegisterPoolMetrics(pool,
+		prometheus.WrapRegistererWith(prometheus.Labels{"pool": "main"}, inf.MetricsReg))
+	// 优先级 1：采样器先于连接池关闭（优先级 4）停止，避免采样已关闭的 pool。
+	inf.GS.Register("postgres-pool-metrics", 1, func(context.Context) error { mainPoolMetrics.Stop(); return nil })
 	return nil
 }
 
@@ -125,6 +142,10 @@ func (inf *Infra) ConnectTimescale(ctx context.Context, cfg appconfig.PostgresCo
 	inf.Health.Register("timescale", func(ctx context.Context) error {
 		return pool.Ping(ctx)
 	})
+	// 时序库连接池资源指标，带 pool="tsdb" 常量标签与主库（pool="main"）区分。
+	tsPoolMetrics := postgres.RegisterPoolMetrics(pool,
+		prometheus.WrapRegistererWith(prometheus.Labels{"pool": "tsdb"}, inf.MetricsReg))
+	inf.GS.Register("timescale-pool-metrics", 1, func(context.Context) error { tsPoolMetrics.Stop(); return nil })
 	return nil
 }
 
@@ -140,6 +161,9 @@ func (inf *Infra) ConnectRedis(cfg appconfig.RedisConfig) error {
 	inf.Health.Register("redis", func(ctx context.Context) error {
 		return client.Ping(ctx).Err()
 	})
+	// 连接池资源指标（redis_pool_in_use/idle/max）。
+	redisPoolMetrics := redismetrics.RegisterPoolMetrics(client, cfg.PoolSize, inf.MetricsReg)
+	inf.GS.Register("redis-pool-metrics", 1, func(context.Context) error { redisPoolMetrics.Stop(); return nil })
 	return nil
 }
 
@@ -155,6 +179,10 @@ func (inf *Infra) ConnectNATS(ctx context.Context, cfg appconfig.NATSConfig) err
 	inf.Health.Register("nats", func(ctx context.Context) error {
 		return client.HealthCheck()
 	})
+	// 连接资源指标（nats_conn_status / nats_reconnect_total / nats_msgs_*）。
+	// RegisterMetrics 在装计数回调的同时保留 NewNATSClient 的「重连」日志。
+	natsConnMetrics := client.RegisterMetrics(inf.MetricsReg)
+	inf.GS.Register("nats-conn-metrics", 1, func(context.Context) error { natsConnMetrics.Stop(); return nil })
 
 	if err := client.EnsureStreams(ctx, cfg.AllowStreamRebuild); err != nil {
 		inf.Logger.Warn("ensure NATS streams", zap.Error(err))

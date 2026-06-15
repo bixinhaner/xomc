@@ -7,7 +7,25 @@ import (
 
 	"github.com/nats-io/nats.go"
 	"github.com/prometheus/client_golang/prometheus"
+	"go.uber.org/zap"
 )
+
+// RegisterMetrics 为本客户端底层 nats.Conn 在 reg 上注册连接指标
+// （nats_conn_status / nats_reconnect_total / nats_msgs_*），同时保留
+// NewNATSClient 安装的「NATS reconnected」日志。
+//
+// RegisterConnMetrics 只装一个「计数」型重连回调，会覆盖 NewNATSClient 的日志回调；
+// 这里随后重装一个组合回调（计数 + 日志），让指标与重连可观测性两者都不丢失。
+func (c *NATSClient) RegisterMetrics(reg prometheus.Registerer) *ConnMetrics {
+	cm := RegisterConnMetrics(c.Conn, reg)
+	c.Conn.SetReconnectHandler(func(nc *nats.Conn) {
+		cm.IncReconnect()
+		if c.logger != nil {
+			c.logger.Info("NATS reconnected", zap.String("url", nc.ConnectedUrl()))
+		}
+	})
+	return cm
+}
 
 // DefaultConnMetricsInterval 默认采样周期。
 const DefaultConnMetricsInterval = 5 * time.Second
