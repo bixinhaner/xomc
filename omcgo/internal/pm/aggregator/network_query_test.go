@@ -149,7 +149,7 @@ func Test_Query_NetworkDimension_RecomputeAllKPIs(t *testing.T) {
 		case metrics.MetricTypeKPI:
 			kpis++
 			if r.MetricPath == "K900010015" {
-				kpiVal = r.MetricValue
+				kpiVal = float64(r.MetricValue)
 			}
 		}
 	}
@@ -235,7 +235,7 @@ func Test_queryNetworkTable_AggregatesToOneBus(t *testing.T) {
 	assert.Equal(t, "AGGREGATED", rows[0].DeviceSN)
 	assert.Equal(t, "", rows[0].DeviceOUI)
 	assert.Nil(t, rows[0].ObjectLDN, "全网总线无实体键 object_ldn")
-	assert.Equal(t, float64(99999), rows[0].MetricValue)
+	assert.Equal(t, float64(99999), float64(rows[0].MetricValue))
 	require.NotNil(t, rows[0].StatisType)
 	assert.Equal(t, metrics.StatisType("sum"), *rows[0].StatisType)
 }

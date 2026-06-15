@@ -171,7 +171,7 @@ func aggregatorRowToExport(r aggregator.Row) ExportRow {
 		Time:        r.Time,
 		StartTime:   r.StartTime,
 		EndTime:     r.EndTime,
-		Value:       r.MetricValue,
+		Value:       float64(r.MetricValue),
 		StatisType:  statisStr(r.StatisType),
 	}
 }

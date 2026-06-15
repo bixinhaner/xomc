@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/omcgo/omcgo/internal/core/jsonx"
 	"github.com/omcgo/omcgo/internal/pm/kpi/router"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
@@ -262,6 +263,8 @@ func scanInto(row []any, dest []any) error {
 			*dp = row[i].(string)
 		case *float64:
 			*dp = row[i].(float64)
+		case *jsonx.Float:
+			*dp = jsonx.Float(row[i].(float64))
 		case *time.Time:
 			*dp = row[i].(time.Time)
 		case **string:

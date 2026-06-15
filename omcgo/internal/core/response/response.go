@@ -43,7 +43,7 @@ const MsgOK = "ok"
 // OK writes a success response with HTTP 200 and the standard envelope.
 // data 可为 nil（用于纯写操作的成功响应）。
 func OK(c *gin.Context, data any) {
-	c.JSON(http.StatusOK, gin.H{
+	renderJSON(c, http.StatusOK, gin.H{
 		"ret":  1,
 		"msg":  MsgOK,
 		"data": data,
@@ -52,7 +52,7 @@ func OK(c *gin.Context, data any) {
 
 // OKWithStatus writes a success response with custom HTTP status (e.g. 201 Created).
 func OKWithStatus(c *gin.Context, statusCode int, data any) {
-	c.JSON(statusCode, gin.H{
+	renderJSON(c, statusCode, gin.H{
 		"ret":  1,
 		"msg":  MsgOK,
 		"data": data,
@@ -62,7 +62,7 @@ func OKWithStatus(c *gin.Context, statusCode int, data any) {
 // OKWithMsg writes a success response with a custom human-readable message.
 // 主要用于把历史 {code:0,data,msg:"创建成功"} 形式映射过来。
 func OKWithMsg(c *gin.Context, data any, msg string) {
-	c.JSON(http.StatusOK, gin.H{
+	renderJSON(c, http.StatusOK, gin.H{
 		"ret":  1,
 		"msg":  msg,
 		"data": data,

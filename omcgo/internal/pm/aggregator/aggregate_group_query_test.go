@@ -73,7 +73,7 @@ func Test_queryAggregateGroupTable_CollapsesAllCells(t *testing.T) {
 	assert.Nil(t, rows[0].ObjectLDN, "单条聚合无小区 → ObjectLDN 置 nil")
 	assert.Equal(t, "AGGREGATED", rows[0].DeviceSN)
 	assert.Equal(t, "", rows[0].DeviceOUI)
-	assert.Equal(t, float64(400), rows[0].MetricValue, "全部设备全部小区合计")
+	assert.Equal(t, float64(400), float64(rows[0].MetricValue), "全部设备全部小区合计")
 	require.NotNil(t, rows[0].StatisType)
 	assert.Equal(t, metrics.StatisType("sum"), *rows[0].StatisType)
 }

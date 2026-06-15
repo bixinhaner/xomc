@@ -124,7 +124,7 @@ func Test_queryBandTable_JoinHit_LabelsBand(t *testing.T) {
 	require.NotNil(t, rows[0].ObjectLDN)
 	assert.Equal(t, "Band=42", *rows[0].ObjectLDN, "命中频段 → ObjectLDN 标 Band=42")
 	assert.Equal(t, "AGGREGATED", rows[0].DeviceSN)
-	assert.Equal(t, float64(1500), rows[0].MetricValue)
+	assert.Equal(t, float64(1500), float64(rows[0].MetricValue))
 	require.NotNil(t, rows[0].StatisType)
 	assert.Equal(t, metrics.StatisType("sum"), *rows[0].StatisType)
 }
@@ -169,7 +169,7 @@ func Test_queryBandTable_MultiCellSameBand(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, rows, 1, "多小区同 band 经 SQL GROUP BY 折叠为一行")
 	assert.Equal(t, "Band=42", *rows[0].ObjectLDN)
-	assert.Equal(t, float64(1500), rows[0].MetricValue, "同 band 多小区合计")
+	assert.Equal(t, float64(1500), float64(rows[0].MetricValue), "同 band 多小区合计")
 }
 
 // Test_Query_BandDimension_EndToEnd：经 Query 入口（不再返 ErrBandNotImplemented），

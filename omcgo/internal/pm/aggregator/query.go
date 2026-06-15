@@ -12,6 +12,7 @@ import (
 
 	"github.com/omcgo/omcgo/internal/authz"
 	appcontext "github.com/omcgo/omcgo/internal/core/context"
+	"github.com/omcgo/omcgo/internal/core/jsonx"
 	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
@@ -80,7 +81,10 @@ type Row struct {
 	// counter 行 = metric_path 本身。前端列头/系列名用它，避免露出 K 编号。
 	DisplayName string             `json:"display_name,omitempty"`
 	MetricType  metrics.MetricType `json:"metric_type"`
-	MetricValue   float64             `json:"metric_value"`
+	// MetricValue 用 jsonx.Float（底层 float64）兜底非有限值（NaN/Inf → null），
+	// 避免单个 NaN 行致整批 JSON 编码失败、返回空 body（issue #387）。
+	// 「平均型/比率型」KPI 分母为 0 时合法地算出 NaN，是真实聚合数据普遍会踩的坑。
+	MetricValue   jsonx.Float         `json:"metric_value"`
 	StatisType    *metrics.StatisType `json:"statis_type,omitempty"`
 	Granularity   metrics.Granularity `json:"granularity"`
 	Time          time.Time           `json:"time"`

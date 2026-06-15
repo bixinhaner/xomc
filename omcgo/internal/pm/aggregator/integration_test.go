@@ -110,7 +110,7 @@ WHERE device_oui=$1 AND device_sn=$2 AND metric_path=$3 AND end_time=$4`,
 	require.NoError(t, err)
 	require.NotEmpty(t, rows)
 	assert.Equal(t, path, rows[0].MetricPath)
-	assert.InDelta(t, 450.0, rows[0].MetricValue, 0.001)
+	assert.InDelta(t, 450.0, float64(rows[0].MetricValue), 0.001)
 }
 
 // Test runner via asyncjob payload — 验证 Runner.Run 能完整跑通 hourly pipeline

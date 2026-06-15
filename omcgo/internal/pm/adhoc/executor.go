@@ -192,7 +192,7 @@ func (e *Executor) queryAndConvert(ctx context.Context, task *Task, g metrics.Gr
 			ProductID:   r.ProductID, // T-0182-fix: product 维度分组键透传（device/aggregate_group 维度为 Nil）
 			MetricPath:  r.MetricPath,
 			MetricType:  string(r.MetricType),
-			MetricValue: r.MetricValue,
+			MetricValue: float64(r.MetricValue),
 			StatisType:  statisStr,
 			Granularity: string(r.Granularity),
 			Time:        r.Time,

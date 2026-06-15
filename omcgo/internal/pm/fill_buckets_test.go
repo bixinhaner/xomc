@@ -59,7 +59,7 @@ func Test_fillEmptyBuckets_FillMissingMetricInExistingBucket(t *testing.T) {
 	b, ok := findRow(out, ldn, bktTime, "B")
 	require.True(t, ok, "B 应被补出")
 	assert.True(t, b.Filled, "B 是占位行")
-	assert.Equal(t, float64(0), b.MetricValue)
+	assert.Equal(t, float64(0), float64(b.MetricValue))
 	// 身份/时段字段抄真实行
 	require.NotNil(t, b.ObjectLDN)
 	assert.Equal(t, "Cellid=1", *b.ObjectLDN, "ObjectLDN 抄真实行")
