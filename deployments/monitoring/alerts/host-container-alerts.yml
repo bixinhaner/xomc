@@ -133,12 +133,14 @@ groups:
             Action: docker compose ps cadvisor；查 privileged 与挂载（/var/lib/docker 等）。
 
       - alert: ContainerMemoryNearLimit
-        # 仅当容器设了 mem limit（spec_memory_limit_bytes 有限值）时才触发；
-        # 当前 compose 未设 limit → 不会误报，属加 limit 后的前瞻规则。
+        # release bundle 强制设 deploy.resources.limits（env 参数化，resources.env 注入），
+        # 此为一线生效规则。哨兵 < 64e9 排除未设限环境（cAdvisor 在无 limit 时把
+        # spec_memory_limit_bytes 报成整机内存，会稀释饱和度 → 误判）。
         expr: |
           (container_memory_working_set_bytes{name!=""}
            / container_spec_memory_limit_bytes{name!=""} > 0.90)
           and (container_spec_memory_limit_bytes{name!=""} > 0)
+          and (container_spec_memory_limit_bytes{name!=""} < 64e9)
         for: 10m
         labels:
           severity: warning
@@ -168,8 +170,9 @@ groups:
             Action: 查该容器内存泄漏；调大 mem limit 或优化占用；结合「容器内存饱和度」面板定位。
 
       - alert: ContainerCPUSaturation
-        # 仅当容器设了 CPU limit（cpu_quota 有限值）时才触发；当前 compose 多数未设
-        # → 不会误报，属加 limit 后的前瞻规则。limit 核数 = cpu_quota / cpu_period。
+        # release bundle 强制设 CPU limit（cpu_quota 有限值），此为一线生效规则。
+        # `cpu_quota > 0` 守卫排除未设限容器（cgroup 无限额时 quota = -1）。
+        # limit 核数 = cpu_quota / cpu_period。
         expr: |
           (sum by (name) (rate(container_cpu_usage_seconds_total{name=~"(omcgo|docker)-(app|acs|worker)-.*"}[5m]))
            / sum by (name) (container_spec_cpu_quota{name=~"(omcgo|docker)-(app|acs|worker)-.*"} / container_spec_cpu_period{name=~"(omcgo|docker)-(app|acs|worker)-.*"}) > 0.9)
