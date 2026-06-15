@@ -651,7 +651,6 @@ const messages: Record<string, string> = {
   // -------------------------------------------------------------------------
   // Navigation — sub-pages: MML
   // -------------------------------------------------------------------------
-  'nav.mml.console':    'MML控制台',
   'nav.mml.script':     '脚本任务',
   'nav.mml.taskRecord': '任务记录',
   'nav.mml.commands':   '命令树',

@@ -80,7 +80,6 @@ export const componentRegistry: Record<string, ComponentType> = {
   ),
 
   // MML Management
-  'mml/Console': lazy(() => import('@/pages/mml/Console')),
   'mml/ConsoleV2': lazy(() => import('@/pages/mml/ConsoleV2')),
   'mml/ScriptTask': lazy(() => import('@/pages/mml/ScriptTask')),
   'mml/TaskRecord': lazy(() => import('@/pages/mml/TaskRecord')),

@@ -30,7 +30,7 @@ import RightDetailPanel from './RightDetailPanel';
 import CustomCommandDetailPanel from './CustomCommandDetailPanel';
 import GroupEditorModal, { type GroupEditorMode } from './GroupEditorModal';
 import CommandEditorModal from './CommandEditorModal';
-import AddTemplateModal from '../../Console/components/AddTemplateModal';
+import AddTemplateModal from '../../components/AddTemplateModal';
 // mml-console-redesign-20260603：复用 Console 的 Customized 子树共享模块。
 import {
   CUSTOM_COMMANDS_QUERY_KEY,

@@ -14,7 +14,7 @@ import {
   useDeleteMMLTemplate,
 } from '@core/hooks/api/useMML';
 import { useT } from '@/hooks/useT';
-import AddTemplateModal from '../Console/components/AddTemplateModal';
+import AddTemplateModal from '../components/AddTemplateModal';
 
 // T-0090-d：MML 私有命令独立列表页
 //   - 后端 GET /mml/templates?command_scope=private 由 T-0090-c RBAC 服务端
