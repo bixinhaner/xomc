@@ -153,6 +153,60 @@ confirm() {
   case "${yn:-Y}" in [Yy]*|"") return 0 ;; *) return 1 ;; esac
 }
 
+# heal_main_pg_timescaledb_downgrade —— 升级自愈（#347 主库 timescaledb → 纯 PG 降级）
+# 旧版 release 主库用 timescaledb 镜像初始化，卷内 postgresql.conf 写死
+# shared_preload_libraries='timescaledb'；本版主库降级 postgres:16-alpine（无该库），旧卷
+# 直接起会 FATAL: could not access file "timescaledb"。三条件全满足才动手（否则跳过=幂等）：
+#   ① 目标主库镜像 $IMAGE_POSTGRES 是纯 PG（不含 timescale）；
+#   ② 主库卷 ${COMPOSE_PROJECT}_pgdata 已存在（存量升级，非全新装）；
+#   ③ 卷内 postgresql.conf 有【未注释】的 timescaledb 预加载。
+# 动作：用【包内】timescaledb 镜像临时挂卷拉起 → DROP EXTENSION timescaledb CASCADE（删主库
+#   残留时序超表，时序数据已分离到 postgres-tsdb）→ 注释 conf 预加载行 → 停容器。
+# 离线友好：只用包内已 docker load 的 $IMAGE_POSTGRES_TSDB，绝不拉 alpine 等外网镜像。
+heal_main_pg_timescaledb_downgrade() {
+  local vol="${COMPOSE_PROJECT}_pgdata"
+  local heal_img="${IMAGE_POSTGRES_TSDB:-timescale/timescaledb:2.25.2-pg16}"
+  case "${IMAGE_POSTGRES:-}" in *timescale*) return 0 ;; esac          # 目标本就 timescaledb，无陷阱
+  docker volume inspect "$vol" >/dev/null 2>&1 || return 0             # 全新装，无存量卷
+  local has_pre
+  has_pre="$(docker run --rm --entrypoint sh -v "$vol":/d:ro "$heal_img" \
+    -c "grep -E '^[[:space:]]*shared_preload_libraries[[:space:]]*=.*timescaledb' /d/postgresql.conf 2>/dev/null" 2>/dev/null || true)"
+  [ -n "$has_pre" ] || return 0                                        # 已剥离/本就纯 PG → 跳过
+
+  warn "检测到【存量主库卷被 timescaledb 初始化】，而本版主库已降级纯 PG（$IMAGE_POSTGRES）。"
+  warn "  直接启动会 FATAL: could not access file \"timescaledb\"。"
+  warn "  自愈将剥离 timescaledb：DROP EXTENSION ... CASCADE（删主库残留时序超表——这些时序数据"
+  warn "  已物理分离到 postgres-tsdb 实例）+ 注释 postgresql.conf 预加载行。业务表（普通表）不受影响。"
+  confirm "确认对主库卷 $vol 执行 timescaledb 剥离自愈？" || \
+    die "用户取消自愈。如需保数据，可临时把 deploy/.env 的 IMAGE_POSTGRES 改回 timescaledb 镜像后重装。" 1
+
+  local cname="${COMPOSE_PROJECT}-pgheal" db="${POSTGRES_DB:-omcgo}" usr="${POSTGRES_USER:-omcgo}"
+  docker rm -f "$cname" >/dev/null 2>&1 || true
+  # 重试场景下，上一轮 7.1 可能已建出 restart-loop 的 compose 主库容器在持卷，先移除释放卷（7.1 会重建）。
+  docker rm -f "${COMPOSE_PROJECT}-postgres-1" >/dev/null 2>&1 || true
+  log "自愈：用 $heal_img 临时挂卷启动主库 ..."
+  docker run -d --name "$cname" -e POSTGRES_PASSWORD=heal \
+    -v "$vol":/var/lib/postgresql/data "$heal_img" >/dev/null 2>&1 \
+    || die "自愈：临时容器启动失败（$cname）" 3
+  local ok=0 i
+  for i in $(seq 1 30); do
+    docker exec "$cname" pg_isready -U "$usr" >/dev/null 2>&1 && { ok=1; break; }
+    sleep 1
+  done
+  if [ "$ok" != 1 ]; then
+    docker logs --tail 20 "$cname" 2>&1 || true
+    docker rm -f "$cname" >/dev/null 2>&1 || true
+    die "自愈：临时库 30s 未就绪，无法剥离" 3
+  fi
+  docker exec "$cname" psql -U "$usr" -d "$db" -c "DROP EXTENSION IF EXISTS timescaledb CASCADE;" >/dev/null 2>&1 \
+    || warn "自愈：DROP EXTENSION 返回非零（可能已无扩展），继续清理 conf"
+  docker exec "$cname" sh -c "sed -i.bak-347 's/^[[:space:]]*shared_preload_libraries/#347 &/; s/^[[:space:]]*timescaledb\\./#347 &/' /var/lib/postgresql/data/postgresql.conf" 2>/dev/null || true
+  docker exec "$cname" sh -c "test -f /var/lib/postgresql/data/postgresql.auto.conf && sed -i '/timescaledb/d' /var/lib/postgresql/data/postgresql.auto.conf || true" 2>/dev/null || true
+  docker stop "$cname" >/dev/null 2>&1 || true
+  docker rm -f "$cname" >/dev/null 2>&1 || true
+  log "自愈完成：主库卷已剥离 timescaledb，可在纯 PG（$IMAGE_POSTGRES）上启动。"
+}
+
 # =============================================================================
 # Step 1. precheck
 # =============================================================================
@@ -508,7 +562,7 @@ if [ -f "$ENV_FILE" ]; then
 fi
 
 if [ "$SKIP_INFRA" = 0 ]; then
-  INFRA_IMAGES=("$IMAGE_POSTGRES" "$IMAGE_REDIS" "$IMAGE_NATS" "$IMAGE_MINIO" "${IMAGE_NGINX:-}")
+  INFRA_IMAGES=("$IMAGE_POSTGRES" "${IMAGE_POSTGRES_TSDB:-}" "$IMAGE_REDIS" "$IMAGE_NATS" "$IMAGE_MINIO" "${IMAGE_NGINX:-}")
   MON_IMAGES=("${IMAGE_PROMETHEUS:-}" "${IMAGE_ALERTMANAGER:-}" "${IMAGE_GRAFANA:-}" "${IMAGE_LOKI:-}" "${IMAGE_TEMPO:-}" "${IMAGE_OTELCOL:-}" "${IMAGE_NATS_EXPORTER:-}")
 
   if images_exist "${INFRA_IMAGES[@]}" "${MON_IMAGES[@]}"; then
@@ -588,6 +642,11 @@ log "compose 命令：${DC[*]}"
 # Step 7. 启动基础设施 + 等就绪 → 跑 migrate / seed（一次性容器）
 # =============================================================================
 sep "7/9 启动基础设施 + 执行 migrate / seed"
+
+# 7.0 升级自愈（#347）：存量主库卷若被 timescaledb 初始化过，先剥离再起纯 PG，
+#     否则 postgres:16-alpine 读到卷内 shared_preload_libraries='timescaledb' 会 FATAL。
+#     幂等：全新装 / 已剥离 / 目标镜像仍 timescaledb 时自动跳过。
+heal_main_pg_timescaledb_downgrade
 
 # 7.1 起基础设施（postgres / postgres-tsdb / redis / nats / minio）
 log "启动基础设施容器 ..."

@@ -95,12 +95,13 @@ services:
 
   # postgres-tsdb：第二个 TimescaleDB 实例 —— 物理隔离的时序库（TsPool）。承载 PM/KPI
   # 超表、告警历史、MR/trace 时序表 + pm_files + 影子维度表；业务数据仍留主库 postgres。
-  # 复用主库同一 TimescaleDB 镜像 ${IMAGE_POSTGRES}（已 pin 2.25.2-pg16，超表 catalog 一致），
+  # 用【独立】镜像 ${IMAGE_POSTGRES_TSDB}（TimescaleDB，pin 2.25.2-pg16，超表 catalog 绑版）——
+  # 主库已降级纯 PG ${IMAGE_POSTGRES}(postgres:16-alpine) 更轻，时序库才需 timescaledb。
   # 独立 volume tsdbdata、独立凭据 POSTGRES_TSDB_*（口令由 install.sh ensure_secrets 强随机
   # 生成，与主库口令独立，见 #347）。宿主端口 5433 避开主库 5432。
   # 调优旋钮 TSDB_* 由 resources.env(plan-resources.sh) 注入；缺省档保守（两 PG 同机不互挤 OOM）。
   postgres-tsdb:
-    image: ${IMAGE_POSTGRES}
+    image: ${IMAGE_POSTGRES_TSDB}
     restart: unless-stopped
     environment:
       TZ: "Asia/Shanghai"
