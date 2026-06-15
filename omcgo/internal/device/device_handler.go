@@ -987,13 +987,19 @@ func (h *Handler) RestoreDevices(c *gin.Context) {
 		return
 	}
 
-	restored, err := h.service.RestoreDevices(c.Request.Context(), req.IDs)
+	// #378: 恢复可部分成功——SN 冲突设备被跳过并回传 conflicts，不再因一台冲突
+	// 整批 500。仅真正 DB 错误才走 500。
+	res, err := h.service.RestoreDevices(c.Request.Context(), req.IDs)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
 
-	response.OKWithMsg(c, gin.H{"restored": restored}, "Devices restored successfully")
+	response.OKWithMsg(c, gin.H{
+		"restored":  res.Restored,
+		"skipped":   res.Skipped,
+		"conflicts": res.Conflicts,
+	}, "Devices restored successfully")
 }
 
 // PermanentDeleteDevices handles DELETE /api/v1/devices/recycle/permanent.

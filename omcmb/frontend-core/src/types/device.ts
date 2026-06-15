@@ -102,6 +102,8 @@ export interface Device {
   connStatus: ConnStatus;
 
   alarmLevel: AlarmSeverity | 'none';
+  // #361: 该设备未 cleared 活动告警数（来自后端 alarms_active 聚合）；无告警 → 0。
+  activeAlarmCount?: number;
   engStatus: EngStatus;
   mgmtStatus: MgmtStatus;
   lastOnlineTime: string;

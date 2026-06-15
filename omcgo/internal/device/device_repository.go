@@ -202,7 +202,8 @@ type DeviceWriter interface {
 	// ListRecycleBin returns soft-deleted devices with filtering.
 	ListRecycleBin(ctx context.Context, filter RecycleBinFilter) (*model.ListResponse[model.Device], error)
 	// RestoreDevices restores soft-deleted devices (sets deleted_at to NULL).
-	RestoreDevices(ctx context.Context, ids []uuid.UUID) (int64, error)
+	// #378: 可部分成功——返回恢复数 + 因 SN 冲突被跳过的明细，避免整批回滚 500。
+	RestoreDevices(ctx context.Context, ids []uuid.UUID) (*RestoreResult, error)
 	// PermanentDelete permanently removes devices from the database.
 	PermanentDelete(ctx context.Context, ids []uuid.UUID) (int64, error)
 }
@@ -1567,21 +1568,90 @@ func (r *PgDeviceRepository) ListRecycleBin(ctx context.Context, filter RecycleB
 }
 
 // RestoreDevices restores soft-deleted devices by setting deleted_at to NULL.
-// Returns the number of devices actually restored.
-func (r *PgDeviceRepository) RestoreDevices(ctx context.Context, ids []uuid.UUID) (int64, error) {
+//
+// #378：改为「可部分成功」。原实现是单条全或无批量 UPDATE，无 SN 冲突处理——
+// 当回收站某软删行与某活跃行同 serial_number+carrier 时，恢复（deleted_at→NULL）
+// 触发部分唯一索引 (serial_number, carrier) WHERE deleted_at IS NULL 的 23505
+// unique_violation，整条批量 UPDATE 回滚 → 一台冲突拖垮整批 → handler 一律 500。
+//
+// 现用 NOT EXISTS 守卫让冲突行自然不被更新（一条语句、无需逐条事务），RETURNING
+// 返回真正恢复的 id；再单独查出被跳过（仍软删且存在同 SN+carrier 活跃行）的明细
+// 回传上层。RowsAffected 反映实际恢复数，冲突场景不再 500。
+func (r *PgDeviceRepository) RestoreDevices(ctx context.Context, ids []uuid.UUID) (*RestoreResult, error) {
+	result := &RestoreResult{}
 	if len(ids) == 0 {
-		return 0, nil
+		return result, nil
 	}
 
-	tag, err := r.pool.Exec(ctx,
-		`UPDATE devices SET deleted_at = NULL, deleted_by = '', updated_at = NOW() WHERE id = ANY($1) AND deleted_at IS NOT NULL`,
+	// 1) 恢复——NOT EXISTS 守卫排除会撞部分唯一索引的冲突行。RETURNING 拿恢复 id。
+	rows, err := r.pool.Query(ctx,
+		`UPDATE devices d
+		    SET deleted_at = NULL, deleted_by = '', updated_at = NOW()
+		  WHERE d.id = ANY($1)
+		    AND d.deleted_at IS NOT NULL
+		    AND NOT EXISTS (
+		        SELECT 1 FROM devices a
+		         WHERE a.serial_number = d.serial_number
+		           AND a.carrier = d.carrier
+		           AND a.deleted_at IS NULL
+		    )
+		RETURNING d.id`,
 		ids,
 	)
 	if err != nil {
-		return 0, fmt.Errorf("restore devices: %w", err)
+		return nil, fmt.Errorf("restore devices: %w", err)
 	}
+	restoredIDs := make(map[uuid.UUID]struct{})
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scan restored device id: %w", err)
+		}
+		restoredIDs[id] = struct{}{}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate restored device ids: %w", err)
+	}
+	result.Restored = int64(len(restoredIDs))
 
-	return tag.RowsAffected(), nil
+	// 2) 查出被跳过（仍软删且存在同 SN+carrier 活跃行）的冲突明细回传上层。
+	confRows, err := r.pool.Query(ctx,
+		`SELECT d.id, d.serial_number
+		   FROM devices d
+		  WHERE d.id = ANY($1)
+		    AND d.deleted_at IS NOT NULL
+		    AND EXISTS (
+		        SELECT 1 FROM devices a
+		         WHERE a.serial_number = d.serial_number
+		           AND a.carrier = d.carrier
+		           AND a.deleted_at IS NULL
+		    )`,
+		ids,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query restore conflicts: %w", err)
+	}
+	defer confRows.Close()
+	for confRows.Next() {
+		var id uuid.UUID
+		var sn string
+		if err := confRows.Scan(&id, &sn); err != nil {
+			return nil, fmt.Errorf("scan restore conflict: %w", err)
+		}
+		result.Conflicts = append(result.Conflicts, RestoreConflict{
+			ID:           id.String(),
+			SerialNumber: sn,
+			Reason:       "serial_number_conflict",
+		})
+	}
+	if err := confRows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate restore conflicts: %w", err)
+	}
+	result.Skipped = int64(len(result.Conflicts))
+
+	return result, nil
 }
 
 // PermanentDelete permanently removes devices from the database.

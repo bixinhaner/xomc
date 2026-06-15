@@ -296,10 +296,10 @@ func (mr *MockDeviceRepositoryMockRecorder) PermanentDelete(ctx, ids any) *gomoc
 }
 
 // RestoreDevices mocks base method.
-func (m *MockDeviceRepository) RestoreDevices(ctx context.Context, ids []uuid.UUID) (int64, error) {
+func (m *MockDeviceRepository) RestoreDevices(ctx context.Context, ids []uuid.UUID) (*RestoreResult, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "RestoreDevices", ctx, ids)
-	ret0, _ := ret[0].(int64)
+	ret0, _ := ret[0].(*RestoreResult)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }

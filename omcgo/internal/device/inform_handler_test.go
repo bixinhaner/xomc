@@ -142,8 +142,8 @@ func (m *infMockDeviceRepo) ListSerialsByIDs(_ context.Context, _ []uuid.UUID) (
 func (m *infMockDeviceRepo) ListRecycleBin(_ context.Context, _ RecycleBinFilter) (*model.ListResponse[model.Device], error) {
 	return model.NewListResponse([]model.Device{}, 0, 1, 20), nil
 }
-func (m *infMockDeviceRepo) RestoreDevices(_ context.Context, _ []uuid.UUID) (int64, error) {
-	return 0, nil
+func (m *infMockDeviceRepo) RestoreDevices(_ context.Context, _ []uuid.UUID) (*RestoreResult, error) {
+	return &RestoreResult{}, nil
 }
 func (m *infMockDeviceRepo) PermanentDelete(_ context.Context, _ []uuid.UUID) (int64, error) {
 	return 0, nil

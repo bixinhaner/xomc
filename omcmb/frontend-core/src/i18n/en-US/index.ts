@@ -7500,6 +7500,8 @@ const messages: Record<string, string> = {
   'deviceSelector.tpl.selectedTag':      'Selected',
   'deviceSelector.tpl.apply':            'Apply',
   'deviceSelector.tpl.hint':             'Select a preset template to quickly add devices. After applying, review and adjust under "Selected Devices".',
+  // qa-614 c1 — #378 recycle bin batch restore partial-success notice
+  'recycle.restorePartial':              'Restored {restored}; skipped {skipped} (serial number already in use by an active device): {sns}',
 };
 
 export default messages;

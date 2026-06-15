@@ -7535,6 +7535,8 @@ const messages: Record<string, string> = {
   'deviceSelector.tpl.selectedTag':      '已选',
   'deviceSelector.tpl.apply':            '应用',
   'deviceSelector.tpl.hint':             '选择预设模板快速添加设备。应用后可在「已选设备」中查看和调整。',
+  // qa-614 c1 — #378 回收站批量恢复部分成功提示
+  'recycle.restorePartial':              '已恢复 {restored} 台，{skipped} 台因序列号已存在活跃设备被跳过：{sns}',
 };
 
 export default messages;
