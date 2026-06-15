@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/omcgo/omcgo/internal/core/jsonx"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
@@ -189,7 +190,7 @@ func newThreeMetricAggr() *stubAggr {
 		return aggregator.Row{
 			DeviceOUI: "A", DeviceSN: "S1",
 			MetricPath: path, MetricType: metrics.MetricTypeCounter,
-			MetricValue: v, StatisType: &stype, Granularity: metrics.GranularityHourly,
+			MetricValue: jsonx.Float(v), StatisType: &stype, Granularity: metrics.GranularityHourly,
 			Time: time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),
 		}
 	}

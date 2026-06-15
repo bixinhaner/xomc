@@ -19,6 +19,7 @@ import (
 	appcontext "github.com/omcgo/omcgo/internal/core/context"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/event"
+	"github.com/omcgo/omcgo/internal/core/jsonx"
 	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
@@ -732,7 +733,9 @@ func (h *Handler) Results(c *gin.Context) {
 		// KPI 行 metric_path 是 K 编号；display_name 为按编号回填的友好名（PLMN 级带标记）。counter 行 = metric_path。
 		DisplayName string    `json:"display_name,omitempty"`
 		MetricType  string    `json:"metric_type"`
-		MetricValue float64   `json:"metric_value"`
+		// MetricValue 用 jsonx.Float（底层 float64）兜底非有限值（NaN/Inf → null），
+		// 避免单个 NaN 行致整批 JSON 编码失败、返回空 body（issue #387）。
+		MetricValue jsonx.Float `json:"metric_value"`
 		StatisType  *string   `json:"statis_type,omitempty"`
 		Granularity string    `json:"granularity"`
 		Time        time.Time `json:"time"`

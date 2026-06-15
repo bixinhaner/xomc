@@ -26,6 +26,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/core/jsonx"
 	"github.com/omcgo/omcgo/internal/pm/kpi/expr"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
@@ -238,7 +239,7 @@ func (a *Aggregator) recomputeKPIs(counterRows []Row, kpis []kpiMeta, userCounte
 			buckets[k] = b
 			b.sample = r
 		}
-		b.values[r.MetricPath] = r.MetricValue
+		b.values[r.MetricPath] = float64(r.MetricValue)
 	}
 
 	// 2. passthrough 集合 = 用户请求的无元数据 counter ∪ 原始计数（arithmetic=自身）。
@@ -309,7 +310,7 @@ func (a *Aggregator) recomputeKPIs(counterRows []Row, kpis []kpiMeta, userCounte
 			kr := b.sample
 			kr.MetricPath = km.code
 			kr.MetricType = metrics.MetricTypeKPI
-			kr.MetricValue = val
+			kr.MetricValue = jsonx.Float(val)
 			kr.DisplayName = "" // 交给 backfillDisplayNames 回填
 			if km.statisType != "" {
 				st := metrics.StatisType(km.statisType)

@@ -72,8 +72,8 @@ func Test_Recompute_SimplePct_Network_NotDeviceAverage(t *testing.T) {
 	require.Len(t, rows, 1, "deps-only counter 不出现，仅 1 条重算 KPI 行")
 	assert.Equal(t, "K900010002", rows[0].MetricPath)
 	assert.Equal(t, metrics.MetricTypeKPI, rows[0].MetricType)
-	assert.InDelta(t, 25.0, rows[0].MetricValue, 1e-9, "跨设备分子分母各自SUM后重算=25%")
-	assert.Greater(t, 46.0, rows[0].MetricValue, "不是各设备百分比平均(46.67%)")
+	assert.InDelta(t, 25.0, float64(rows[0].MetricValue), 1e-9, "跨设备分子分母各自SUM后重算=25%")
+	assert.Greater(t, 46.0, float64(rows[0].MetricValue), "不是各设备百分比平均(46.67%)")
 	require.NotNil(t, rows[0].StatisType)
 	assert.Equal(t, metrics.StatisPct, *rows[0].StatisType)
 }
@@ -108,7 +108,7 @@ func Test_Recompute_MultiTermPct_Product(t *testing.T) {
 	require.Len(t, rows, 1)
 	assert.Equal(t, "K900099999", rows[0].MetricPath)
 	assert.Equal(t, pid, rows[0].ProductID, "product 维度分组键透传")
-	assert.InDelta(t, 10.0, rows[0].MetricValue, 1e-9)
+	assert.InDelta(t, 10.0, float64(rows[0].MetricValue), 1e-9)
 }
 
 // ── 3. 除零优雅：分母全 0 → 不产 KPI 行 ──────────────────────────────────────
@@ -176,7 +176,7 @@ func Test_Recompute_CounterPlusKPI_Mixed(t *testing.T) {
 	assert.Equal(t, []string{"K900010002"}, kpiPaths, "KPI 行重算返回")
 	for _, r := range rows {
 		if r.MetricType == metrics.MetricTypeKPI {
-			assert.InDelta(t, 25.0, r.MetricValue, 1e-9)
+			assert.InDelta(t, 25.0, float64(r.MetricValue), 1e-9)
 		}
 	}
 }
@@ -210,7 +210,7 @@ func Test_Recompute_DeviceGroupDimension(t *testing.T) {
 	assert.Equal(t, "K900010002", rows[0].MetricPath)
 	assert.Equal(t, gid, rows[0].DeviceGroupID, "按 device_group_id 归组透传")
 	assert.Equal(t, "lte", rows[0].Technology, "制式透传到 KPI 行")
-	assert.InDelta(t, 25.0, rows[0].MetricValue, 1e-9)
+	assert.InDelta(t, 25.0, float64(rows[0].MetricValue), 1e-9)
 }
 
 // 设备组制式治本：同一组内 lte 与 nr 的 counter 不可跨制式混算——KPI 重算分组键含制式，
@@ -243,7 +243,7 @@ func Test_Recompute_DeviceGroupTechnology_NoCrossTechMix(t *testing.T) {
 	byTech := map[string]float64{}
 	for _, r := range rows {
 		assert.Equal(t, gid, r.DeviceGroupID)
-		byTech[r.Technology] = r.MetricValue
+		byTech[r.Technology] = float64(r.MetricValue)
 	}
 	assert.InDelta(t, 25.0, byTech["lte"], 1e-9, "lte 100/400=25%")
 	assert.InDelta(t, 50.0, byTech["nr"], 1e-9, "nr 300/600=50%（不被 lte 污染）")
@@ -279,7 +279,7 @@ func Test_Recompute_MultiGroupBucket_NoCrossContamination(t *testing.T) {
 	require.Len(t, rows, 2)
 	byPid := map[uuid.UUID]float64{}
 	for _, r := range rows {
-		byPid[r.ProductID] = r.MetricValue
+		byPid[r.ProductID] = float64(r.MetricValue)
 	}
 	assert.InDelta(t, 25.0, byPid[pidA], 1e-9, "产品A 100/400=25%")
 	assert.InDelta(t, 50.0, byPid[pidB], 1e-9, "产品B 100/200=50%")
@@ -315,7 +315,7 @@ func Test_Recompute_ArithmeticNumberedFormula_Success(t *testing.T) {
 	require.Len(t, rows, 1, "仅 KPI 行，deps counter 用户未请求被剔除")
 	assert.Equal(t, "K000010050", rows[0].MetricPath)
 	assert.Equal(t, metrics.MetricTypeKPI, rows[0].MetricType)
-	assert.InDelta(t, 10.0, rows[0].MetricValue, 1e-9)
+	assert.InDelta(t, 10.0, float64(rows[0].MetricValue), 1e-9)
 }
 
 // ── PM-P3: 依赖 counter 缺失时跳过该桶该 KPI（不产假 0）────────────────────────
@@ -376,7 +376,7 @@ func Test_Recompute_RawCounter_IdentityPassthrough(t *testing.T) {
 	assert.Equal(t, "C000060216", rows[0].MetricPath)
 	assert.Equal(t, metrics.MetricTypeCounter, rows[0].MetricType,
 		"原始计数保持 metric_type='counter'，不被误标成 kpi")
-	assert.InDelta(t, 31.0, rows[0].MetricValue, 1e-9, "输出=该 counter 桶内聚合值，非假 0")
+	assert.InDelta(t, 31.0, float64(rows[0].MetricValue), 1e-9, "输出=该 counter 桶内聚合值，非假 0")
 	require.NotNil(t, rows[0].StatisType, "StatisType 正确透传")
 	assert.Equal(t, metrics.StatisSum, *rows[0].StatisType)
 }
@@ -412,7 +412,7 @@ func Test_Recompute_RawCounterPlusDerivedKPI_Mixed(t *testing.T) {
 	var counterPaths, kpiPaths []string
 	valByPath := map[string]float64{}
 	for _, r := range rows {
-		valByPath[r.MetricPath] = r.MetricValue
+		valByPath[r.MetricPath] = float64(r.MetricValue)
 		if r.MetricType == metrics.MetricTypeKPI {
 			kpiPaths = append(kpiPaths, r.MetricPath)
 		} else {
