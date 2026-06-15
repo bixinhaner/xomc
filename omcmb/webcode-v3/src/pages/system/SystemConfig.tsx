@@ -7,6 +7,28 @@ import { useSysConfigsByCategory } from '@core/hooks/api/useSystem'
 import type { SysConfigItem } from '@core/types/system'
 
 import { StateBlock, MiniStat, RowHeader } from './_shared'
+import { useT } from '@/hooks/useT'
+
+// device 分类按 enb*/cpe* 前缀分组，与 v1「基站类 / CPE 类」结构化表单等深（issue #357）。
+function groupDeviceItems(
+  category: string,
+  items: SysConfigItem[],
+): { titleKey: string | null; items: SysConfigItem[] }[] {
+  if (category !== 'device') return [{ titleKey: null, items }]
+  const base: SysConfigItem[] = []
+  const cpe: SysConfigItem[] = []
+  const other: SysConfigItem[] = []
+  for (const it of items) {
+    if (it.key.startsWith('enb')) base.push(it)
+    else if (it.key.startsWith('cpe')) cpe.push(it)
+    else other.push(it)
+  }
+  const groups: { titleKey: string | null; items: SysConfigItem[] }[] = []
+  if (base.length) groups.push({ titleKey: 'system.device.informGroup.baseStation', items: base })
+  if (cpe.length) groups.push({ titleKey: 'system.device.informGroup.cpe', items: cpe })
+  if (other.length) groups.push({ titleKey: null, items: other })
+  return groups
+}
 
 // 后端 7 个 category（参 frontend-core/src/types/system.ts SysConfigItem 注释）。
 const CONFIG_CATEGORIES: { key: string; label: string }[] = [
@@ -20,9 +42,11 @@ const CONFIG_CATEGORIES: { key: string; label: string }[] = [
 ]
 
 export default function SystemConfig() {
+  const t = useT()
   const [category, setCategory] = useState<string>('basic')
   const { data, isLoading, isError, error, isFetching, refetch } = useSysConfigsByCategory(category)
   const items = data ?? []
+  const groups = groupDeviceItems(category, items)
 
   return (
     <PageShell
@@ -83,25 +107,34 @@ export default function SystemConfig() {
                   <span>类型</span>
                   <span>说明</span>
                 </RowHeader>
-                {items.map((cfg: SysConfigItem) => (
-                  <div
-                    key={cfg.id || `${cfg.category}.${cfg.key}`}
-                    className="fleet-row grid grid-cols-[1.6fr_1.6fr_0.8fr_2fr] items-center gap-3 rounded-sm px-3 py-2.5"
-                    style={{ ['--row-color' as never]: '#00f0ff' }}
-                  >
-                    <div className="min-w-0">
-                      <div className="truncate font-mono text-xs text-cyan-100">{cfg.key}</div>
-                      {cfg.isPublic ? <span className="chip text-[#00ff88]">PUBLIC</span> : null}
-                    </div>
-                    <div className="min-w-0 truncate font-mono text-xs text-cyan-200">
-                      {cfg.value || '—'}
-                    </div>
-                    <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-cyan-300/65">
-                      {cfg.valueType || 'string'}
-                    </div>
-                    <div className="min-w-0 truncate text-xs text-cyan-100/75">
-                      {cfg.description || '—'}
-                    </div>
+                {groups.map((group, gi) => (
+                  <div key={group.titleKey ?? `grp-${gi}`} className="space-y-1.5">
+                    {group.titleKey ? (
+                      <div className="px-1 pt-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-cyan-300/70">
+                        ── {t(group.titleKey)} ──
+                      </div>
+                    ) : null}
+                    {group.items.map((cfg: SysConfigItem) => (
+                      <div
+                        key={cfg.id || `${cfg.category}.${cfg.key}`}
+                        className="fleet-row grid grid-cols-[1.6fr_1.6fr_0.8fr_2fr] items-center gap-3 rounded-sm px-3 py-2.5"
+                        style={{ ['--row-color' as never]: '#00f0ff' }}
+                      >
+                        <div className="min-w-0">
+                          <div className="truncate font-mono text-xs text-cyan-100">{cfg.key}</div>
+                          {cfg.isPublic ? <span className="chip text-[#00ff88]">PUBLIC</span> : null}
+                        </div>
+                        <div className="min-w-0 truncate font-mono text-xs text-cyan-200">
+                          {cfg.value || '—'}
+                        </div>
+                        <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-cyan-300/65">
+                          {cfg.valueType || 'string'}
+                        </div>
+                        <div className="min-w-0 truncate text-xs text-cyan-100/75">
+                          {cfg.description || '—'}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 ))}
               </div>
