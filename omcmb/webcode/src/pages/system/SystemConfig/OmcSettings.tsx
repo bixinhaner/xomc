@@ -1,4 +1,4 @@
-import { Form, Input, Switch, Select, Button, Card, Space, message } from 'antd';
+import { Form, Input, Switch, Select, Button, Card, Space, message, theme } from 'antd';
 import { useT } from '@/hooks/useT';
 
 const { Option } = Select;
@@ -12,22 +12,19 @@ const settingRowStyle: React.CSSProperties = {
   marginBottom: 16,
 };
 
-// 子设置区域样式
-const subSettingStyle: React.CSSProperties = {
+// 子设置区域布局（颜色随主题，见组件内 subSettingStyle）
+const subSettingBaseStyle: React.CSSProperties = {
   marginTop: 12,
   padding: '12px 16px',
-  backgroundColor: '#fafafa',
   borderRadius: 4,
 };
 
-// 分组标题样式
-const sectionTitleStyle: React.CSSProperties = {
+// 分组标题布局（颜色/边框随主题，见组件内 sectionTitleStyle）
+const sectionTitleBaseStyle: React.CSSProperties = {
   fontSize: 13,
   fontWeight: 600,
-  color: '#555',
   marginBottom: 12,
   paddingBottom: 8,
-  borderBottom: '1px solid #e8e8e8',
 };
 
 // 磁盘空间选项
@@ -45,6 +42,10 @@ const diskSpaceOptions = [
 
 export default function OmcSettings({ form }: OmcSettingsProps) {
   const t = useT();
+  const { token } = theme.useToken();
+  // 子设置区域 / 分组标题颜色随明暗主题，不再写死 #fafafa / #555 / #e8e8e8
+  const subSettingStyle: React.CSSProperties = { ...subSettingBaseStyle, backgroundColor: token.colorFillAlter };
+  const sectionTitleStyle: React.CSSProperties = { ...sectionTitleBaseStyle, color: token.colorTextSecondary, borderBottom: `1px solid ${token.colorBorderSecondary}` };
 
   const handleTestSyslog = () => {
     void message.info(t('system.omc.testingSyslog'));
