@@ -3,6 +3,7 @@ package device
 import (
 	"context"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -21,7 +22,21 @@ const (
 	offlineConfigCategory = "device"
 	offlineConfigKeyENB   = "enbTimeout"
 	offlineConfigKeyCPE   = "cpeTimeout"
+	// offlineConfigKeyZsetConfirm 控制是否用 acs:online 在线索引做离线「免 NATS」二次确认
+	// （issue #397 根治片）。缺失 / 非 false → 默认开（索引已接线时）。
+	offlineConfigKeyZsetConfirm = "offlineZsetConfirm"
 )
+
+// isCPEClass 判定 product_class 是否属于 "CPE 类"（阈值用 CPESec），与
+// cpeProductClassPredicate（device_repository.go 的 SQL 谓词）口径一致：
+// 含 cpe/home/residential/indoor 任一关键字即 CPE，其余归基站类（ENBSec）。
+func isCPEClass(productClass string) bool {
+	pc := strings.ToLower(productClass)
+	return strings.Contains(pc, "cpe") ||
+		strings.Contains(pc, "home") ||
+		strings.Contains(pc, "residential") ||
+		strings.Contains(pc, "indoor")
+}
 
 // 默认阈值（与 seed 迁移种子值一致：基站 100s、CPE 600s）。
 const (
