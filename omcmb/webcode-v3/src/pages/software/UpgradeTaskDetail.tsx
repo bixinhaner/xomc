@@ -132,15 +132,18 @@ export default function UpgradeTaskDetail() {
                         <div className="min-w-0">
                           <div className="truncate font-mono text-xs text-cyan-100">{s.deviceSn || s.deviceId}</div>
                           <div className="truncate font-mono text-[10px] text-cyan-300/55">
-                            {s.oriVersion || '—'} → {s.destVersion || '—'}
+                            {/* qa-614 #371：目标版本完成后由后端回填，未回报时显示"待上报"而非裸 —。 */}
+                            {s.oriVersion || '—'} → {s.destVersion || '待上报'}
                             {s.retryCount > 0 ? ` · 重试 ${s.retryCount}/${s.maxRetries}` : ''}
                           </div>
                           {s.failureReason || s.errorMessage ? (
                             <div className="truncate font-mono text-[10px] text-rose-300/70">{s.failureReason || s.errorMessage}</div>
                           ) : null}
                         </div>
-                        <div className="font-mono text-[10px] text-cyan-300/65">
-                          {s.completedAt ? formatTime(s.completedAt) : s.startedAt ? formatTime(s.startedAt) : '—'}
+                        {/* qa-614 #371：子任务起止时间——5G 回退起始时间现已记录，分行展示开始/结束。 */}
+                        <div className="font-mono text-[10px] leading-tight text-cyan-300/65">
+                          <div>始 {s.startedAt ? formatTime(s.startedAt) : '—'}</div>
+                          <div>终 {s.completedAt ? formatTime(s.completedAt) : '—'}</div>
                         </div>
                         <div className="text-right">
                           <span className="chip" style={{ color: ss.color }}>

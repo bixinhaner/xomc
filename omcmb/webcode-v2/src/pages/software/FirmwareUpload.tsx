@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Boxes, Download, Eye, FileBox, Package, RefreshCcw, Star, Trash2 } from 'lucide-react'
+import { Boxes, Download, Eye, FileBox, Package, RefreshCcw, Star, Trash2, Upload, X } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import {
   Select,
   SelectContent,
@@ -36,8 +38,10 @@ import {
   useToggleRecommend,
   useDeleteSoftwareVersions,
   useDownloadFirmware,
+  useUploadFirmware,
 } from '@core/hooks/api/useSoftware'
 import { useProductClasses } from '@core/hooks/api/useDevices'
+import { collapseImageProductClasses } from '@core/utils/productClass'
 import type { SoftwareVersion } from '@core/mock/data/software'
 
 import { VERSION_STATUS } from './_shared'
@@ -46,7 +50,8 @@ import { IconBtn, Stat } from './_components'
 // ===========================================================================
 // 固件管理 — 对照 v1 webcode/src/pages/software/FirmwareUpload
 // 按文件类型（固件/补丁/FPGA）浏览固件库，支持下载 / 推荐切换 / 删除 / 详情下钻。
-// 上传走 v1 的 Upload Dragger（依赖 antd），本皮肤不引入 antd，故聚焦库管理动作。
+// qa-614 #379：补齐导入入口（三皮肤铁律）。本皮肤不引入 antd，导入表单用 shadcn 基础
+// 组件 + 原生 file input（参考 v3 Firmware.tsx 写法），与 v1/v3 字段对齐。
 // ===========================================================================
 
 type FileTypeTab = 'upgrade' | 'patch' | 'fpga'
@@ -70,6 +75,7 @@ export default function FirmwareUpload() {
   const [pageSize] = useState(20)
   const [search, setSearch] = useState('')
   const [deviceType, setDeviceType] = useState('')
+  const [showImport, setShowImport] = useState(false)
 
   const { data: productClasses } = useProductClasses()
 
@@ -162,10 +168,29 @@ export default function FirmwareUpload() {
             ))}
           </SelectContent>
         </Select>
-        <Button variant="outline" size="sm" className="ml-auto" onClick={() => refetch()}>
+        <Button
+          size="sm"
+          className="ml-auto"
+          onClick={() => setShowImport((v) => !v)}
+        >
+          <Upload className="size-3.5" /> 导入固件
+        </Button>
+        <Button variant="outline" size="sm" onClick={() => refetch()}>
           <RefreshCcw className={isFetching ? 'animate-spin' : ''} /> 刷新
         </Button>
       </div>
+
+      {showImport ? (
+        <FirmwareImportPanel
+          fileType={fileType}
+          productClasses={productClasses ?? []}
+          onClose={() => setShowImport(false)}
+          onSuccess={() => {
+            setShowImport(false)
+            void refetch()
+          }}
+        />
+      ) : null}
 
       <TableCard>
         <Table>
@@ -265,5 +290,147 @@ export default function FirmwareUpload() {
 
       <Pagination page={page} totalPages={totalPages} pageSize={pageSize} onChange={setPage} />
     </PageShell>
+  )
+}
+
+// FirmwareImportPanel — qa-614 #379：v2 导入固件表单（不引 antd）。
+// 字段与 v1/v3 对齐：产品类型（可手填）、版本号（必填）、推荐、描述、文件。
+function FirmwareImportPanel({
+  fileType,
+  productClasses,
+  onClose,
+  onSuccess,
+}: {
+  fileType: FileTypeTab
+  productClasses: string[]
+  onClose: () => void
+  onSuccess: () => void
+}) {
+  const upload = useUploadFirmware()
+  const [file, setFile] = useState<File | null>(null)
+  const [version, setVersion] = useState('')
+  const [productClass, setProductClass] = useState('')
+  const [recommend, setRecommend] = useState(false)
+  const [description, setDescription] = useState('')
+  const [err, setErr] = useState('')
+
+  // qa-614 #369：IMAGE（升级镜像）做版本合一，同族载波变体 /SC /DC /CA 收敛为共同基础标识。
+  const productOptions = useMemo(
+    () => (fileType === 'upgrade' ? collapseImageProductClasses(productClasses) : productClasses),
+    [fileType, productClasses]
+  )
+
+  const handleSubmit = () => {
+    setErr('')
+    if (!version.trim()) {
+      setErr('版本号必填')
+      return
+    }
+    if (!file) {
+      setErr('请选择固件文件')
+      return
+    }
+    upload.mutate(
+      {
+        file,
+        metadata: {
+          version: version.trim(),
+          productClass: productClass.trim() || undefined,
+          releaseNotes: description,
+          fileType: FILE_TYPE_PARAM[fileType],
+          recommend,
+          description,
+        },
+      },
+      {
+        onSuccess,
+        // qa-614 #372/#379：透出后端真实失败原因（如重复导入 → 409 文案）。
+        onError: (e) => setErr(e instanceof Error && e.message ? e.message : '导入失败'),
+      }
+    )
+  }
+
+  return (
+    <Card className="mb-3">
+      <CardContent className="space-y-3 pt-4">
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-medium">
+            导入{FILE_TYPE_TABS.find((t) => t.key === fileType)?.label ?? ''}
+          </span>
+          <Button variant="ghost" size="sm" onClick={onClose} aria-label="关闭">
+            <X className="size-4" />
+          </Button>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label htmlFor="fw-product-class">产品类型</Label>
+            {/* 可手填：input + datalist，BM 等无在线设备的产品类也能输入 */}
+            <Input
+              id="fw-product-class"
+              list="fw-v2-product-class-options"
+              value={productClass}
+              onChange={(e) => setProductClass(e.target.value)}
+              placeholder="选择或输入产品类型"
+            />
+            <datalist id="fw-v2-product-class-options">
+              {productOptions.map((pc) => (
+                <option key={pc} value={pc} />
+              ))}
+            </datalist>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="fw-version">版本号 *</Label>
+            <Input
+              id="fw-version"
+              maxLength={45}
+              value={version}
+              onChange={(e) => setVersion(e.target.value)}
+              placeholder="如 V100R011C10SPC200"
+            />
+          </div>
+        </div>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="fw-file">固件文件 *</Label>
+          <Input
+            id="fw-file"
+            type="file"
+            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="fw-desc">描述</Label>
+          <Input
+            id="fw-desc"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="发布说明 / 描述"
+          />
+        </div>
+
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={recommend}
+            onChange={(e) => setRecommend(e.target.checked)}
+          />
+          设为推荐版本
+        </label>
+
+        {err ? <div className="text-xs text-destructive">{err}</div> : null}
+
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" size="sm" onClick={onClose}>
+            取消
+          </Button>
+          <Button size="sm" disabled={upload.isPending} onClick={handleSubmit}>
+            {upload.isPending ? '提交中…' : '确认导入'}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   )
 }

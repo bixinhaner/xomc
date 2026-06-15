@@ -68,4 +68,7 @@ type SubTaskRepository interface {
 	// 实际下发文件名，UFTE 设备列表"目标文件"列读这一列展示。
 	// RowsAffected=0 不视为错误（command_key 可能尚未生成 / 跨表分流未命中）。
 	UpdateDestVersionByCommandKey(ctx context.Context, commandKey, destVersion string) error
+	// UpdateDestVersionByID 按子任务 ID 单字段更新 dest_version（qa-614 #371）。
+	// 升级/回退完成后回填设备实际上报的新固件版本，供"目标版本"列展示。
+	UpdateDestVersionByID(ctx context.Context, id uuid.UUID, destVersion string) error
 }

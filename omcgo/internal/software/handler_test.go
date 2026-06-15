@@ -130,6 +130,9 @@ func (m *swHSubTaskRepo) UpdateFailureReasonByTask(_ context.Context, _ uuid.UUI
 func (m *swHSubTaskRepo) UpdateDestVersionByCommandKey(_ context.Context, _, _ string) error {
 	return nil
 }
+func (m *swHSubTaskRepo) UpdateDestVersionByID(_ context.Context, _ uuid.UUID, _ string) error {
+	return nil
+}
 func (m *swHSubTaskRepo) GetActiveByDeviceID(_ context.Context, _ uuid.UUID) (*UpgradeSubTask, error) {
 	return nil, commonerrors.ErrNotFound
 }

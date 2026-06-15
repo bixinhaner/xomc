@@ -382,6 +382,9 @@ func (s *swHSubTaskRepoStub) UpdateFailureReasonByTask(_ context.Context, _ uuid
 func (s *swHSubTaskRepoStub) UpdateDestVersionByCommandKey(_ context.Context, _, _ string) error {
 	return nil
 }
+func (s *swHSubTaskRepoStub) UpdateDestVersionByID(_ context.Context, _ uuid.UUID, _ string) error {
+	return nil
+}
 
 type swHFirmwareRepoStub struct{}
 

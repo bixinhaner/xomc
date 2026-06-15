@@ -58,6 +58,7 @@ type BasicSubTaskRepo interface {
 	FailStale(ctx context.Context, cutoffs StaleTimeouts) (map[uuid.UUID]int64, error)
 	UpdateFailureReasonByTask(ctx context.Context, taskID uuid.UUID, code FailureCode) error
 	UpdateDestVersionByCommandKey(ctx context.Context, commandKey, destVersion string) error
+	UpdateDestVersionByID(ctx context.Context, id uuid.UUID, destVersion string) error
 }
 
 // TransferRepoSet 一对（main + sub）业务仓储。

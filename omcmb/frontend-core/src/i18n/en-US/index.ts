@@ -7507,6 +7507,13 @@ const messages: Record<string, string> = {
   'dashboard.kpiPanel.empty.hint':       'Network-wide metrics refresh hourly on the hour; freshly ingested data appears after the next hour mark or once raw-detail fallback kicks in.',
   // qa-614 c3 #363: device_group dimension does not support 15min granularity
   'perf.adhoc.granDeviceGroupNo15min':   'Device group dimension is hourly at finest; 15-minute granularity is not supported',
+
+  // qa-614 c5 — software firmware/upgrade (#369 / #371 / #379)
+  'software.firmware.selectOrInputProductClass': 'Select or enter product type',
+  'software.firmware.versionExists':             'This firmware version already exists; do not re-import or change the version number',
+  'software.rollback.destVersionPending':        'Post-rollback version follows the device report',
+  'software.rollback.targetVersion':             'Target Version',
+  'software.rollback.originVersion':             'Original Version',
 };
 
 export default messages;

@@ -7542,6 +7542,13 @@ const messages: Record<string, string> = {
   'dashboard.kpiPanel.empty.hint':       '全网指标每小时整点更新；刚灌入的数据将在下个整点后或回退原始明细后显示。',
   // qa-614 c3 #363：设备组维度不支持 15min 粒度提示
   'perf.adhoc.granDeviceGroupNo15min':   '设备组维度最细为小时，不支持 15 分钟粒度',
+
+  // qa-614 c5 — software 固件/升级（#369 / #371 / #379）
+  'software.firmware.selectOrInputProductClass': '请选择或输入产品类型',
+  'software.firmware.versionExists':             '该版本固件已存在，请勿重复导入或修改版本号',
+  'software.rollback.destVersionPending':        '回退后版本以设备上报为准',
+  'software.rollback.targetVersion':             '目标版本',
+  'software.rollback.originVersion':             '原始版本',
 };
 
 export default messages;
