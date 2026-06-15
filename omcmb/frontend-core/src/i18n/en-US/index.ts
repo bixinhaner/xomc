@@ -7502,6 +7502,9 @@ const messages: Record<string, string> = {
   'deviceSelector.tpl.hint':             'Select a preset template to quickly add devices. After applying, review and adjust under "Selected Devices".',
   // qa-614 c1 — #378 recycle bin batch restore partial-success notice
   'recycle.restorePartial':              'Restored {restored}; skipped {skipped} (serial number already in use by an active device): {sns}',
+  // qa-614 c2 — homepage KPI line-chart empty state (issue #359: distinguish "no aggregated data yet / hourly refresh" from a blank chart)
+  'dashboard.kpiPanel.empty.title':      'No aggregated data yet',
+  'dashboard.kpiPanel.empty.hint':       'Network-wide metrics refresh hourly on the hour; freshly ingested data appears after the next hour mark or once raw-detail fallback kicks in.',
 };
 
 export default messages;

@@ -28,10 +28,11 @@ export default function ResourceStatistics() {
   const t = useT();
   const { data: dashboardData, isLoading } = useDashboardData();
 
-  const totalDevices = (dashboardData as Record<string, unknown> | undefined)?.totalDevices as number | undefined ?? 1284;
-  const onlineDevices = (dashboardData as Record<string, unknown> | undefined)?.onlineDevices as number | undefined ?? 1137;
+  // 设备数量统计：用真实数据；未就绪时回退 0，不再展示硬编码占位数字（避免刷新闪现假数。issue #370）
+  const totalDevices = (dashboardData as Record<string, unknown> | undefined)?.totalDevices as number | undefined ?? 0;
+  const onlineDevices = (dashboardData as Record<string, unknown> | undefined)?.onlineDevices as number | undefined ?? 0;
   const offlineDevices = totalDevices - onlineDevices;
-  const onlineRate = Math.round((onlineDevices / totalDevices) * 100);
+  const onlineRate = totalDevices > 0 ? Math.round((onlineDevices / totalDevices) * 100) : 0;
 
   // Device count by type
   const typeData = useMemo(

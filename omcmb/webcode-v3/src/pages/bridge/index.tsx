@@ -5,12 +5,24 @@ import { GlassPanel } from '@/components/ui/GlassPanel'
 import { HoloGlobe } from '@/components/viz/HoloGlobe'
 import { Sparkline } from '@/components/viz/Sparkline'
 import { RadialGauge } from '@/components/viz/RadialGauge'
-import { useDashboardData } from '@core/hooks/api/useDashboard'
+import { useDashboardData, useDeviceStatusByType, useTopAlarmDevices } from '@core/hooks/api/useDashboard'
 import { useAlarmCount } from '@core/hooks/api/useAlarms'
+import type { AlarmStats, TopAlarmDevice } from '@core/types/dashboard'
+import type { BackendDeviceStatusByType } from '@core/types/dashboard'
+
+// 制式展示名（与 v1 TECH_DISPLAY_NAME 一致）。
+const TECH_DISPLAY_NAME: Record<string, string> = {
+  lte: 'LTE',
+  nr: '5G NR',
+  gsm: 'GSM',
+}
 
 export function BridgePage() {
   const { data, isFetching } = useDashboardData()
   const { data: alarmCount } = useAlarmCount()
+  // issue #360：接入真实「按制式设备状态」与「高频告警设备」，替换写死/伪随机假数据。
+  const { data: deviceStatusByType } = useDeviceStatusByType()
+  const { data: topAlarmDevices } = useTopAlarmDevices()
 
   const summary = data?.summary
   const totalDev = summary?.deviceCounts?.total ?? 0
@@ -59,23 +71,10 @@ export function BridgePage() {
 
       {/* 中央 + 左右 */}
       <div className="col-span-12 grid grid-cols-12 gap-3 min-h-0">
-        {/* 左侧 KPI 圆环组 */}
+        {/* 左侧 — 按制式设备状态（在线/离线/告警，真实数据，issue #360） */}
         <div className="col-span-3 flex flex-col gap-3 min-h-0">
-          <GlassPanel title="GLOBAL KPI · 全网指标" className="flex-1 min-h-0">
-            <div className="grid grid-cols-2 gap-4 p-5">
-              <div className="flex flex-col items-center gap-1">
-                <RadialGauge value={onlineRate} label="ONLINE" size={104} color="#00ff88" />
-              </div>
-              <div className="flex flex-col items-center gap-1">
-                <RadialGauge value={73.5} label="RRC SR" size={104} color="#00f0ff" />
-              </div>
-              <div className="flex flex-col items-center gap-1">
-                <RadialGauge value={84} label="HO SR" size={104} color="#a855f7" />
-              </div>
-              <div className="flex flex-col items-center gap-1">
-                <RadialGauge value={47} label="LOAD" size={104} color="#ffaa00" />
-              </div>
-            </div>
+          <GlassPanel title="DEVICE STATUS · 按制式状态" className="flex-1 min-h-0 overflow-hidden">
+            <DeviceStatusByTech statusByType={deviceStatusByType} onlineRate={onlineRate} />
             <div className="border-t border-cyan-500/15 px-4 py-2 font-mono text-[10px] tracking-[0.18em] text-cyan-300/55">
               {isFetching ? 'SYNC… · 30s 自动' : 'TICK · 30s 自动'}
             </div>
@@ -125,32 +124,7 @@ export function BridgePage() {
         {/* 右侧 Top-N + 实时波形 */}
         <div className="col-span-3 flex flex-col gap-3 min-h-0">
           <GlassPanel title="TOP ALARMED · 故障设备" className="flex-1 min-h-0 overflow-hidden">
-            <div className="overflow-auto">
-              {TOP_DEVS.map((d) => (
-                <div
-                  key={d.sn}
-                  className="flex items-center gap-2 border-b border-cyan-500/8 px-3 py-2 hover:bg-cyan-500/5"
-                >
-                  <span
-                    className="size-2 rounded-full animate-breathe"
-                    style={{ background: d.color, color: d.color, boxShadow: '0 0 8px currentColor' }}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate font-mono text-xs text-cyan-100">{d.sn}</div>
-                    <div className="truncate text-[10px] uppercase tracking-[0.15em] text-cyan-300/55">
-                      {d.region}
-                    </div>
-                  </div>
-                  <div
-                    className="font-display text-sm font-bold"
-                    style={{ color: d.color, textShadow: `0 0 6px ${d.color}` }}
-                  >
-                    {d.cnt}
-                  </div>
-                  <ChevronRight className="size-3 text-cyan-300/40" />
-                </div>
-              ))}
-            </div>
+            <TopAlarmedDevices devices={topAlarmDevices} />
           </GlassPanel>
 
           <GlassPanel title="ACS THROUGHPUT" meta="60s">
@@ -159,10 +133,10 @@ export function BridgePage() {
         </div>
       </div>
 
-      {/* 底部 — 严重度光谱 */}
+      {/* 底部 — 严重度分布（真实 alarmCounts，issue #360） */}
       <div className="col-span-12">
-        <GlassPanel title="ALARM SPECTRUM · 严重度分布" meta="60min · LIVE">
-          <SeveritySpectrum />
+        <GlassPanel title="ALARM SPECTRUM · 严重度分布" meta="LIVE">
+          <SeveritySpectrum alarmCounts={summary?.alarmCounts} />
         </GlassPanel>
       </div>
     </div>
@@ -282,67 +256,206 @@ function prand(seed: number, n: number): number[] {
   return out
 }
 
-const TOP_DEVS = [
-  { sn: 'GNB-1102-LXK', region: '北京 · 海淀', cnt: 12, color: '#ff2d6f' },
-  { sn: 'ENB-2241-PUS', region: '上海 · 浦东', cnt: 9, color: '#ff2d6f' },
-  { sn: 'GNB-3308-XCD', region: '广州 · 越秀', cnt: 7, color: '#ff7a1a' },
-  { sn: 'CPE-A1B0E9-CD', region: '成都 · 高新', cnt: 6, color: '#ff7a1a' },
-  { sn: 'ENB-7714-CHL', region: '长沙 · 雨花', cnt: 5, color: '#ffd400' },
-  { sn: 'GNB-4521-WHM', region: '武汉 · 江汉', cnt: 4, color: '#ffd400' },
-  { sn: 'CPE-CC3F32-XJ', region: '乌鲁木齐', cnt: 3, color: '#5b9eff' },
-]
+/**
+ * DeviceStatusByTech —— 按制式（LTE/5G NR/GSM）渲染真实「在线/离线/告警」分布（issue #360）。
+ * 数据来自 useDeviceStatusByType() → GET /dashboard/device-status-by-type。
+ * 每制式一行：在线率环 + 在线/离线/告警三色数值条。无数据时给明确空状态而非写死假数。
+ */
+function DeviceStatusByTech({
+  statusByType,
+  onlineRate,
+}: {
+  statusByType: BackendDeviceStatusByType | undefined
+  onlineRate: number
+}) {
+  const rows = useMemo(() => {
+    if (!statusByType) return []
+    return Object.entries(statusByType).map(([tech, counts]) => {
+      const total = counts.online + counts.offline
+      const rate = total > 0 ? (counts.online / total) * 100 : 0
+      return {
+        tech,
+        label: TECH_DISPLAY_NAME[tech] ?? tech.toUpperCase(),
+        online: counts.online,
+        offline: counts.offline,
+        alarm: counts.alarm,
+        rate,
+      }
+    })
+  }, [statusByType])
 
-function SeveritySpectrum() {
-  // 60 列 × 4 行（critical/major/minor/warning）
-  // 用稳定的伪随机种子，避免 render 中调用 Math.random
-  const rows = useMemo(
-    () =>
-      (
-        [
-          { sev: 'CRIT', color: '#ff2d6f', seed: 17 },
-          { sev: 'MAJ', color: '#ff7a1a', seed: 41 },
-          { sev: 'MIN', color: '#ffd400', seed: 73 },
-          { sev: 'WRN', color: '#5b9eff', seed: 109 },
-        ] as const
-      ).map((r) => ({
-        sev: r.sev,
-        color: r.color,
-        data: prand(r.seed, 60),
-      })),
-    []
-  )
+  if (rows.length === 0) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
+        <RadialGauge value={onlineRate} label="ONLINE" size={104} color="#00ff88" />
+        <div className="font-mono text-[11px] tracking-[0.2em] text-cyan-300/55">
+          暂无按制式设备状态数据
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div className="space-y-1.5 p-4">
+    <div className="space-y-3 overflow-auto p-4">
       {rows.map((r) => (
-        <div key={r.sev} className="flex items-center gap-3">
-          <div
-            className="w-10 font-mono text-[10px] font-bold tracking-[0.2em]"
-            style={{ color: r.color, textShadow: `0 0 4px ${r.color}` }}
-          >
-            {r.sev}
-          </div>
-          <div className="flex flex-1 items-end gap-[3px]">
-            {r.data.map((v, i) => (
-              <span
-                key={i}
-                className="block flex-1 rounded-[1px]"
-                style={{
-                  height: 4 + v * 18,
-                  background: r.color,
-                  opacity: 0.18 + v * 0.7,
-                  boxShadow: v > 0.65 ? `0 0 6px ${r.color}` : undefined,
-                }}
-              />
-            ))}
-          </div>
-          <div
-            className="w-10 text-right font-display text-xs font-bold"
-            style={{ color: r.color }}
-          >
-            {Math.floor(r.data.reduce((a, b) => a + b, 0))}
+        <div key={r.tech} className="flex items-center gap-3">
+          <RadialGauge
+            value={r.rate}
+            label={r.label}
+            size={72}
+            color={r.alarm > 0 ? '#ffaa00' : '#00ff88'}
+          />
+          <div className="min-w-0 flex-1 space-y-1.5">
+            <StatusBar label="在线 · ON" value={r.online} max={r.online + r.offline} color="#00ff88" />
+            <StatusBar label="离线 · OFF" value={r.offline} max={r.online + r.offline} color="#5b9eff" />
+            <StatusBar label="告警 · ALM" value={r.alarm} max={r.online + r.offline} color="#ff2d6f" />
           </div>
         </div>
       ))}
+    </div>
+  )
+}
+
+function StatusBar({
+  label,
+  value,
+  max,
+  color,
+}: {
+  label: string
+  value: number
+  max: number
+  color: string
+}) {
+  const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0
+  return (
+    <div className="flex items-center gap-2">
+      <div className="w-16 font-mono text-[9px] uppercase tracking-[0.15em] text-cyan-300/60">
+        {label}
+      </div>
+      <div className="h-2 flex-1 overflow-hidden rounded-[1px] bg-cyan-500/8">
+        <span
+          className="block h-full rounded-[1px]"
+          style={{ width: `${pct}%`, background: color, boxShadow: `0 0 6px ${color}` }}
+        />
+      </div>
+      <div
+        className="w-8 text-right font-display text-xs font-bold"
+        style={{ color, textShadow: `0 0 4px ${color}` }}
+      >
+        {value}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * TopAlarmedDevices —— 高频告警设备 Top-N（真实数据，issue #360）。
+ * 数据来自 useTopAlarmDevices() → /dashboard/summary recent_alarms 折算。
+ */
+function TopAlarmedDevices({ devices }: { devices: TopAlarmDevice[] | undefined }) {
+  const severityColor = (sev: string): string => {
+    switch (sev.toLowerCase()) {
+      case 'critical':
+        return '#ff2d6f'
+      case 'major':
+        return '#ff7a1a'
+      case 'minor':
+        return '#ffd400'
+      default:
+        return '#5b9eff'
+    }
+  }
+
+  if (!devices || devices.length === 0) {
+    return (
+      <div className="flex h-full items-center justify-center p-6 font-mono text-[11px] tracking-[0.2em] text-cyan-300/55">
+        暂无故障设备
+      </div>
+    )
+  }
+
+  return (
+    <div className="overflow-auto">
+      {devices.map((d) => {
+        const color = severityColor(d.severity)
+        return (
+          <div
+            key={d.deviceSN}
+            className="flex items-center gap-2 border-b border-cyan-500/8 px-3 py-2 hover:bg-cyan-500/5"
+          >
+            <span
+              className="size-2 rounded-full animate-breathe"
+              style={{ background: color, color, boxShadow: '0 0 8px currentColor' }}
+            />
+            <div className="min-w-0 flex-1">
+              <div className="truncate font-mono text-xs text-cyan-100">{d.deviceSN}</div>
+              <div className="truncate text-[10px] uppercase tracking-[0.15em] text-cyan-300/55">
+                {d.deviceName || TECH_DISPLAY_NAME[d.technology] || d.technology}
+              </div>
+            </div>
+            <div
+              className="font-display text-sm font-bold"
+              style={{ color, textShadow: `0 0 6px ${color}` }}
+            >
+              {d.alarmCount}
+            </div>
+            <ChevronRight className="size-3 text-cyan-300/40" />
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+/**
+ * SeveritySpectrum —— 告警严重度分布（真实 alarmCounts，issue #360）。
+ * 四档（critical/major/minor/warning）按真实计数渲染条形，替换原 prand 伪随机。
+ */
+function SeveritySpectrum({ alarmCounts }: { alarmCounts: AlarmStats | undefined }) {
+  const rows = useMemo(() => {
+    const c = alarmCounts
+    return [
+      { sev: 'CRIT', color: '#ff2d6f', count: c?.critical ?? 0 },
+      { sev: 'MAJ', color: '#ff7a1a', count: c?.major ?? 0 },
+      { sev: 'MIN', color: '#ffd400', count: c?.minor ?? 0 },
+      { sev: 'WRN', color: '#5b9eff', count: c?.warning ?? 0 },
+    ]
+  }, [alarmCounts])
+
+  const maxCount = Math.max(1, ...rows.map((r) => r.count))
+
+  return (
+    <div className="space-y-1.5 p-4">
+      {rows.map((r) => {
+        const pct = Math.min(100, (r.count / maxCount) * 100)
+        return (
+          <div key={r.sev} className="flex items-center gap-3">
+            <div
+              className="w-10 font-mono text-[10px] font-bold tracking-[0.2em]"
+              style={{ color: r.color, textShadow: `0 0 4px ${r.color}` }}
+            >
+              {r.sev}
+            </div>
+            <div className="h-3 flex-1 overflow-hidden rounded-[1px] bg-cyan-500/8">
+              <span
+                className="block h-full rounded-[1px]"
+                style={{
+                  width: `${pct}%`,
+                  background: r.color,
+                  boxShadow: r.count > 0 ? `0 0 6px ${r.color}` : undefined,
+                }}
+              />
+            </div>
+            <div
+              className="w-10 text-right font-display text-xs font-bold"
+              style={{ color: r.color }}
+            >
+              {r.count}
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }
