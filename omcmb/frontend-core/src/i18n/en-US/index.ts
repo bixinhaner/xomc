@@ -7500,6 +7500,8 @@ const messages: Record<string, string> = {
   'deviceSelector.tpl.selectedTag':      'Selected',
   'deviceSelector.tpl.apply':            'Apply',
   'deviceSelector.tpl.hint':             'Select a preset template to quickly add devices. After applying, review and adjust under "Selected Devices".',
+  // qa-614 c3 #363: device_group dimension does not support 15min granularity
+  'perf.adhoc.granDeviceGroupNo15min':   'Device group dimension is hourly at finest; 15-minute granularity is not supported',
 };
 
 export default messages;

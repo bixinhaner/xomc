@@ -187,6 +187,12 @@ func (r *Router) LookupByDevice(ctx context.Context, deviceSN string) (*KPIRoute
 	if err != nil {
 		if errors.Is(err, product.ErrOrphan) {
 			r.metrics.miss("orphan")
+			// #364：把孤儿 product_class 升级为带原值的结构化 warn，便于现场自助定位
+			// （真机 ProductClass 与 products.xml 锚定正则差一字时——版本后缀/大小写/分隔符——
+			//  对照本行原值即可调正则，无需翻代码）。下游 KPIEngine 仍静默 skip 该设备。
+			r.logger.Warn("kpi route: device product_class not matched to any product pattern (no KPI will be computed)",
+				zap.String("device_sn", deviceSN),
+				zap.String("product_class", dev.ProductClass))
 			return nil, ErrProductNotMatched
 		}
 		return nil, fmt.Errorf("match productClass %q: %w", dev.ProductClass, err)

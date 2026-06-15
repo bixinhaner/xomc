@@ -7535,6 +7535,8 @@ const messages: Record<string, string> = {
   'deviceSelector.tpl.selectedTag':      '已选',
   'deviceSelector.tpl.apply':            '应用',
   'deviceSelector.tpl.hint':             '选择预设模板快速添加设备。应用后可在「已选设备」中查看和调整。',
+  // qa-614 c3 #363：设备组维度不支持 15min 粒度提示
+  'perf.adhoc.granDeviceGroupNo15min':   '设备组维度最细为小时，不支持 15 分钟粒度',
 };
 
 export default messages;

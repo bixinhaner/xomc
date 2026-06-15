@@ -27,6 +27,7 @@ import type {
   CreateAdhocTaskInput,
   UpdateAdhocTaskInput,
 } from '@core/types/pmAdhoc'
+import { isGranularityDimensionSupported } from '@core/utils/pmAdhocConstraints'
 
 // ============================================================
 // 自定义聚合任务 新建/编辑 — 对齐 v1 /performance/pm-adhoc/new 与 /:id/edit
@@ -110,7 +111,17 @@ export function PmAdhocWizardPage() {
     return Number.isNaN(d.getTime()) ? undefined : d.toISOString()
   }
 
-  const canSubmit = name.trim().length > 0 && metricPaths.length > 0 && !createTask.isPending && !updateTask.isPending
+  // #363：编辑模式维度不可改，取任务原维度做组合校验；新建模式取表单维度。
+  const effectiveDimension: AdhocDimension = isEdit ? (task?.dimension ?? dimension) : dimension
+  // #363：(粒度, 维度) 组合守门——15min × 设备组不支持。
+  const granDimSupported = isGranularityDimensionSupported(granularity, effectiveDimension)
+
+  const canSubmit =
+    name.trim().length > 0 &&
+    metricPaths.length > 0 &&
+    granDimSupported &&
+    !createTask.isPending &&
+    !updateTask.isPending
 
   const handleSubmit = () => {
     if (isEdit && id) {
@@ -220,7 +231,17 @@ export function PmAdhocWizardPage() {
             </div>
             <div className="flex flex-col gap-1.5">
               <Label>聚合维度</Label>
-              <Select value={dimension} onValueChange={(v) => setDimension(v as AdhocDimension)}>
+              <Select
+                value={dimension}
+                onValueChange={(v) => {
+                  const next = v as AdhocDimension
+                  setDimension(next)
+                  // #363：切到设备组若当前粒度 15min（不支持）→ 自动回落 hourly。
+                  if (!isGranularityDimensionSupported(granularity, next)) {
+                    setGranularity('hourly')
+                  }
+                }}
+              >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -271,13 +292,22 @@ export function PmAdhocWizardPage() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {GRANULARITY_OPTIONS.map((g) => (
-                <SelectItem key={g} value={g}>
-                  {g}
-                </SelectItem>
-              ))}
+              {GRANULARITY_OPTIONS.map((g) => {
+                // #363：设备组维度不支持 15min 粒度，禁用该选项。
+                const disabled = !isGranularityDimensionSupported(g, effectiveDimension)
+                return (
+                  <SelectItem key={g} value={g} disabled={disabled}>
+                    {disabled ? `${g}（设备组不支持）` : g}
+                  </SelectItem>
+                )
+              })}
             </SelectContent>
           </Select>
+          {!granDimSupported && (
+            <span className="text-xs text-destructive">
+              设备组维度最细为小时，不支持 15 分钟粒度，请改用小时及以上。
+            </span>
+          )}
         </div>
 
         <div className="flex flex-col gap-1.5">
