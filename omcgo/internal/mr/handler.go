@@ -1,15 +1,18 @@
 package mr
 
 import (
+	"bufio"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
+	"github.com/omcgo/omcgo/internal/core/compress"
 	coreerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/response"
@@ -160,9 +163,21 @@ func (h *Handler) DownloadFile(c *gin.Context) {
 		return
 	}
 
-	c.Header("Content-Disposition", "attachment; filename="+fileInfo.FileName)
-	c.Header("Content-Type", "application/xml")
-	c.DataFromReader(http.StatusOK, stat.Size, "application/xml", obj, nil)
+	// issue #321：入库后原始 MR XML 被 gzip 压缩回写 MinIO，但对象键 / file_name 仍是 .xml。
+	// 嗅探 gzip 魔数：压缩内容补 .gz 下载名（拿到可正常解压的 .xml.gz），明文原样透传。
+	// 不设 Content-Encoding: gzip，避免浏览器自动解压与 .gz 文件名矛盾。
+	filename := fileInfo.FileName
+	contentType := "application/xml"
+	br := bufio.NewReader(obj)
+	if head, _ := br.Peek(2); compress.IsGzip(head) {
+		if !strings.HasSuffix(strings.ToLower(filename), ".gz") {
+			filename += ".gz"
+		}
+		contentType = "application/gzip"
+	}
+	c.Header("Content-Disposition", "attachment; filename="+filename)
+	c.Header("Content-Type", contentType)
+	c.DataFromReader(http.StatusOK, stat.Size, contentType, br, nil)
 }
 
 // BatchDeleteFilesRequest body.

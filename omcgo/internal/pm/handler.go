@@ -1,6 +1,7 @@
 package pm
 
 import (
+	"bufio"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/omcgo/omcgo/internal/authz"
 	"github.com/omcgo/omcgo/internal/core/asyncjob"
+	"github.com/omcgo/omcgo/internal/core/compress"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/response"
@@ -1026,7 +1028,21 @@ func (h *Handler) DownloadPMFile(c *gin.Context) {
 		return
 	}
 
-	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, fileInfo.FileName))
-	c.Header("Content-Type", "application/xml")
-	c.DataFromReader(http.StatusOK, stat.Size, "application/xml", obj, nil)
+	// issue #321：入库后原始 XML 被 gzip 压缩回写 MinIO 省盘，但对象键 / file_name 仍是 .xml。
+	// 直接透传压缩字节会让用户下载到「.xml 实为 gzip」的乱码文件。嗅探 gzip 魔数：是压缩内容
+	// 就把下载名补 .gz（让用户拿到可正常解压的 .xml.gz），明文 .xml 原样透传。注意不要设
+	// Content-Encoding: gzip——否则浏览器会自动解压，与 .gz 文件名矛盾。Peek 不消耗数据，后续
+	// DataFromReader 仍从头读满 stat.Size。
+	filename := fileInfo.FileName
+	contentType := "application/xml"
+	br := bufio.NewReader(obj)
+	if head, _ := br.Peek(2); compress.IsGzip(head) {
+		if !strings.HasSuffix(strings.ToLower(filename), ".gz") {
+			filename += ".gz"
+		}
+		contentType = "application/gzip"
+	}
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	c.Header("Content-Type", contentType)
+	c.DataFromReader(http.StatusOK, stat.Size, contentType, br, nil)
 }
