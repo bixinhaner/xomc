@@ -58,7 +58,12 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-cyan-300/55">
         {label}
       </div>
-      <div className="break-words text-[12px] text-cyan-100/90">{children ?? '—'}</div>
+      <div
+        className="text-[12px] text-cyan-100/90"
+        style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', wordBreak: 'break-word' }}
+      >
+        {children ?? '—'}
+      </div>
     </div>
   )
 }
@@ -118,7 +123,10 @@ export function AlarmDetailPanel({
                 {SEV_LABEL[a.severity] ?? a.severity}
               </span>
             )}
-            <span className="truncate font-display text-sm font-bold text-cyan-100">
+            <span
+              className="font-display text-sm font-bold text-cyan-100"
+              style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', wordBreak: 'break-word' }}
+            >
               {a?.probableCause || a?.alarmName || a?.description || '告警详情'}
             </span>
           </div>
@@ -144,7 +152,7 @@ export function AlarmDetailPanel({
                   <span className="font-mono">{a.alarmIdentifier || '—'}</span>
                 </Field>
                 <Field label="可能原因">{a.probableCause || '—'}</Field>
-                <Field label="具体故障">{a.description || '—'}</Field>
+                <Field label="具体故障">{a.specificProblem || a.description || '—'}</Field>
                 <Field label="严重程度">
                   <span style={{ color: SEV_COLOR[a.severity] }}>
                     {SEV_LABEL[a.severity] ?? a.severity}

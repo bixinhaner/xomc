@@ -48,6 +48,13 @@ const EVENT_TYPE_CONFIG: Record<EventType, string> = {
   'performance': 'alarm.eventType.performance',
 };
 
+const LONG_TEXT_STYLE: React.CSSProperties = {
+  margin: 0,
+  whiteSpace: 'pre-wrap',
+  overflowWrap: 'anywhere',
+  wordBreak: 'break-word',
+};
+
 const AlarmDetail: React.FC<AlarmDetailProps> = ({ alarm, open, onClose }) => {
   const t = useT();
   const { data: fetchedAlarm } = useAlarmById(alarm?.id ?? '');
@@ -105,7 +112,9 @@ const AlarmDetail: React.FC<AlarmDetailProps> = ({ alarm, open, onClose }) => {
           >
             {SEVERITY_LABEL[resolvedAlarm.severity] ?? resolvedAlarm.severity}
           </Tag>
-          <span>{resolvedAlarm.probableCause || resolvedAlarm.description || t('alarm.detail')}</span>
+          <span style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
+            {resolvedAlarm.probableCause || resolvedAlarm.description || t('alarm.detail')}
+          </span>
         </Space>
       }
       open={open}
@@ -133,7 +142,9 @@ const AlarmDetail: React.FC<AlarmDetailProps> = ({ alarm, open, onClose }) => {
             </Descriptions.Item>
             {/* 3. 具体故障 */}
             <Descriptions.Item label={t('alarm.specificProblem')}>
-              {resolvedAlarm.description || '-'}
+              <Paragraph style={LONG_TEXT_STYLE}>
+                {resolvedAlarm.specificProblem || resolvedAlarm.description || '-'}
+              </Paragraph>
             </Descriptions.Item>
             {/* 4. 严重程度 */}
             <Descriptions.Item label={t('alarm.severity')}>
@@ -237,12 +248,12 @@ const AlarmDetail: React.FC<AlarmDetailProps> = ({ alarm, open, onClose }) => {
           <Descriptions column={1} size="small" bordered>
             {/* 确认描述 */}
             <Descriptions.Item label={t('alarm.dealMemo')}>
-              <Paragraph style={{ margin: 0 }}>{resolvedAlarm.dealMemo || '-'}</Paragraph>
+              <Paragraph style={LONG_TEXT_STYLE}>{resolvedAlarm.dealMemo || '-'}</Paragraph>
             </Descriptions.Item>
             {/* 清除描述 */}
             {isCleared && (
               <Descriptions.Item label={t('alarm.clearMemo')}>
-                <Paragraph style={{ margin: 0 }}>{resolvedAlarm.clearMemo || '-'}</Paragraph>
+                <Paragraph style={LONG_TEXT_STYLE}>{resolvedAlarm.clearMemo || '-'}</Paragraph>
               </Descriptions.Item>
             )}
           </Descriptions>
@@ -258,16 +269,16 @@ const AlarmDetail: React.FC<AlarmDetailProps> = ({ alarm, open, onClose }) => {
           </Text>
           <Descriptions column={1} size="small" bordered>
             <Descriptions.Item label={t('alarm.additionalText')}>
-              <Paragraph style={{ margin: 0 }}>{additionalText || '-'}</Paragraph>
+              <Paragraph style={LONG_TEXT_STYLE}>{additionalText || '-'}</Paragraph>
             </Descriptions.Item>
             <Descriptions.Item label={t('alarm.additionalInfo')}>
               {additionalInformation || additionalInfoEntries.length > 0 ? (
                 <Space orientation="vertical" size={4} style={{ width: '100%' }}>
-                  {additionalInformation ? <Paragraph style={{ margin: 0 }}>{additionalInformation}</Paragraph> : null}
+                  {additionalInformation ? <Paragraph style={LONG_TEXT_STYLE}>{additionalInformation}</Paragraph> : null}
                   {additionalInfoEntries.map(([key, value]) => (
                     <div key={key} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
                       <Text type="secondary" style={{ minWidth: 140, fontFamily: 'monospace' }}>{key}</Text>
-                      <Paragraph style={{ margin: 0, flex: 1 }}>{value || '-'}</Paragraph>
+                      <Paragraph style={{ ...LONG_TEXT_STYLE, flex: 1 }}>{value || '-'}</Paragraph>
                     </div>
                   ))}
                 </Space>

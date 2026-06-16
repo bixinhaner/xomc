@@ -47,7 +47,12 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
       <span className="text-xs uppercase tracking-wider text-muted-foreground">
         {label}
       </span>
-      <span className="break-words text-sm">{value || '—'}</span>
+      <span
+        className="text-sm"
+        style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', wordBreak: 'break-word' }}
+      >
+        {value || '—'}
+      </span>
     </div>
   )
 }
@@ -85,13 +90,16 @@ export function AlarmDetailDrawer({
       {/* 抽屉 */}
       <div className="relative flex h-full w-full max-w-xl flex-col border-l bg-background shadow-xl">
         <div className="flex items-center justify-between border-b px-5 py-4">
-          <div className="flex items-center gap-2">
+          <div className="min-w-0 flex items-center gap-2">
             {resolved ? (
               <Badge variant={SEVERITY_VARIANT[resolved.severity]}>
                 {SEVERITY_LABEL[resolved.severity]}
               </Badge>
             ) : null}
-            <h2 className="text-base font-semibold">
+            <h2
+              className="min-w-0 text-base font-semibold"
+              style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', wordBreak: 'break-word' }}
+            >
               {resolved?.probableCause ||
                 resolved?.alarmName ||
                 resolved?.description ||
@@ -126,7 +134,7 @@ export function AlarmDetailDrawer({
                 }
               />
               <Field label="可能原因" value={resolved.alarmName} />
-              <Field label="具体故障" value={resolved.specificProblem} />
+              <Field label="具体故障" value={resolved.specificProblem || resolved.description} />
               <Field label="设备名称" value={resolved.deviceName} />
               <Field
                 label="设备 SN"

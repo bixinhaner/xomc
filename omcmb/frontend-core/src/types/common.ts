@@ -39,4 +39,8 @@ export interface TabItem {
   // 当 label 为已本地化的纯文本（含动态片段如 SN/名称）时设为 true，
   // 渲染时跳过 react-intl 翻译，避免触发 missing translation 报错。
   labelRaw?: boolean;
+  // 可翻译前缀的 i18n key；用于「详情 · 设备名」这类带动态后缀的标题在切语言时重算前缀。
+  labelPrefixI18nKey?: string;
+  // 标题中不可翻译的动态后缀；与 labelPrefixI18nKey 组合用于重算当前 locale 下的标题。
+  labelSuffix?: string;
 }

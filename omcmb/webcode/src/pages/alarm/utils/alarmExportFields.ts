@@ -89,7 +89,7 @@ export function buildAlarmExportFieldDefinitions(
     {
       key: 'specificProblem',
       label: t('alarm.specificProblem'),
-      getValue: (alarm) => alarm.description || '',
+      getValue: (alarm) => alarm.specificProblem || alarm.description || '',
     },
     {
       key: 'neType',

@@ -22,7 +22,7 @@ export interface Alarm {
   technology: string;
   // 展示字段（mapper 推导/复合生成）
   alarmName: string;                  // 可能原因 = probable_cause || description || alarm_identifier
-  specificProblem: string;            // 具体故障 = probable_cause
+  specificProblem: string;            // 具体故障 = description（缺失时回退 probable_cause）
   neType: string;                     // 网元类型 = technology
   equipInfo: string;                  // 网元定位 = device_name(device_sn)
   eventTime: string;                  // 故障时间 = raised_at

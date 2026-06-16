@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   Check,
   Eraser,
@@ -166,6 +167,8 @@ function Stat({
 // ---------------------------------------------------------------------------
 
 export function AlarmsPage() {
+  const [searchParams] = useSearchParams()
+  const searchKey = searchParams.toString()
   const [tab, setTab] = useState<AlarmTab>('active')
   const [page, setPage] = useState(1)
   const [pageSize] = useState(20)
@@ -188,6 +191,30 @@ export function AlarmsPage() {
   const [ackIds, setAckIds] = useState<string[]>([])
   const [clearOpen, setClearOpen] = useState(false)
   const [clearIds, setClearIds] = useState<string[]>([])
+
+  const drillDown = useMemo<{ severity: AlarmSeverity | ''; keyword: string }>(() => {
+    const nextSeverity = searchParams.get('severity')
+    const nextKeyword = (searchParams.get('keyword') ?? '').trim()
+    return {
+      severity:
+        nextSeverity && Object.hasOwn(SEVERITY_LABEL, nextSeverity)
+          ? (nextSeverity as AlarmSeverity)
+          : '',
+      keyword: nextKeyword,
+    }
+  }, [searchKey, searchParams])
+
+  useEffect(() => {
+    setSeverity(drillDown.severity)
+    setKeyword(drillDown.keyword)
+    setEventType('')
+    setDealState('')
+    setNeType('')
+    setUnread('')
+    setQuick(drillDown.severity || drillDown.keyword ? (drillDown.severity || 'all') as QuickFilterKey : 'all')
+    setPage(1)
+    setSelected(new Set())
+  }, [drillDown])
 
   const isActive = tab === 'active'
 
