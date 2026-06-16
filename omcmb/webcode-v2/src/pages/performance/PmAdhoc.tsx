@@ -23,7 +23,18 @@ import {
 import { cn } from '@/lib/utils'
 
 import { usePmAdhocList, useCancelPmAdhoc, useDeletePmAdhoc } from '@core/hooks/api/usePmAdhoc'
+import {
+  useAdhocProgressStream,
+  type AdhocLiveProgress,
+} from '@core/hooks/api/useAdhocProgress'
 import type { AdhocStatus, AdhocTask } from '@core/types/pmAdhoc'
+
+// issue #399：SSE 接通后进度由事件实时驱动，轮询降为低频兜底。
+const ADHOC_POLL_FALLBACK_MS = 30_000
+// 运行中（含 pending）才订阅 SSE；scheduled/终态不建连。
+function isRunningStatus(s: AdhocStatus): boolean {
+  return s === 'running' || s === 'pending'
+}
 
 // ============================================================
 // 自定义聚合任务 — 对齐 v1 /performance/pm-adhoc
@@ -68,6 +79,7 @@ function AdhocTable({
   isLoading,
   isError,
   error,
+  liveProgress,
   onEdit,
   onCancel,
   onDelete,
@@ -80,6 +92,8 @@ function AdhocTable({
   isLoading: boolean
   isError: boolean
   error: unknown
+  // issue #399：运行中任务实时进度（live 优先于轮询拿到的 task.progress）。
+  liveProgress: ReadonlyMap<string, AdhocLiveProgress>
   onEdit: (id: string) => void
   onCancel: (id: string) => void
   // issue #392：删除终态自建任务（仅自建区传入；内置区不传，按钮恒不渲染）。
@@ -161,19 +175,25 @@ function AdhocTable({
                         {formatTime(t.updatedAt)}
                       </TableCell>
                     ) : (
-                      <TableCell className="w-32">
-                        <div className="flex items-center gap-2">
-                          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
-                            <div
-                              className="h-full rounded-full bg-primary transition-all"
-                              style={{ width: `${Math.min(100, Math.max(0, t.progress))}%` }}
-                            />
-                          </div>
-                          <span className="w-8 text-right text-xs tabular-nums text-muted-foreground">
-                            {Math.round(t.progress)}%
-                          </span>
-                        </div>
-                      </TableCell>
+                      (() => {
+                        // issue #399：进度 live 优先（SSE 事件驱动），缺 live 时回退轮询拿到的 task.progress。
+                        const pct = liveProgress.get(t.id)?.progress ?? t.progress
+                        return (
+                          <TableCell className="w-32">
+                            <div className="flex items-center gap-2">
+                              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+                                <div
+                                  className="h-full rounded-full bg-primary transition-all"
+                                  style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
+                                />
+                              </div>
+                              <span className="w-8 text-right text-xs tabular-nums text-muted-foreground">
+                                {Math.round(pct)}%
+                              </span>
+                            </div>
+                          </TableCell>
+                        )
+                      })()
                     )}
                     {!builtin && (
                       <TableCell className="text-xs text-muted-foreground">
@@ -233,13 +253,23 @@ export function PmAdhocPage() {
   const [cancelingId, setCancelingId] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
-  const builtin = usePmAdhocList({ isBuiltin: true, refetchInterval: 10_000 })
-  const custom = usePmAdhocList({ isBuiltin: false, refetchInterval: 10_000 })
+  const builtin = usePmAdhocList({ isBuiltin: true, refetchInterval: ADHOC_POLL_FALLBACK_MS })
+  const custom = usePmAdhocList({ isBuiltin: false, refetchInterval: ADHOC_POLL_FALLBACK_MS })
   const cancel = useCancelPmAdhoc()
   const del = useDeletePmAdhoc()
 
   const builtinRows = useMemo(() => builtin.data ?? [], [builtin.data])
   const customRows = useMemo(() => custom.data ?? [], [custom.data])
+
+  // issue #399：收集两区运行中（含 pending）任务 id，订阅进度 SSE；终态/scheduled 不订阅。
+  const runningIds = useMemo(
+    () =>
+      [...builtinRows, ...customRows]
+        .filter((t) => isRunningStatus(t.status))
+        .map((t) => t.id),
+    [builtinRows, customRows],
+  )
+  const liveProgress = useAdhocProgressStream(runningIds)
 
   const onEdit = (id: string) => navigate(`/performance/pm-adhoc/${id}/edit`)
   const onCancel = (id: string) => {
@@ -288,6 +318,7 @@ export function PmAdhocPage() {
           isLoading={builtin.isLoading}
           isError={builtin.isError}
           error={builtin.error}
+          liveProgress={liveProgress}
           onEdit={onEdit}
           onCancel={onCancel}
           cancelingId={cancelingId}
@@ -300,6 +331,7 @@ export function PmAdhocPage() {
           isLoading={custom.isLoading}
           isError={custom.isError}
           error={custom.error}
+          liveProgress={liveProgress}
           onEdit={onEdit}
           onCancel={onCancel}
           onDelete={onDelete}

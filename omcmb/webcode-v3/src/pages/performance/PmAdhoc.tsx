@@ -9,7 +9,18 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 import { formatTime } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { usePmAdhocList, useCancelPmAdhoc, useDeletePmAdhoc } from '@core/hooks/api/usePmAdhoc'
+import {
+  useAdhocProgressStream,
+  type AdhocLiveProgress,
+} from '@core/hooks/api/useAdhocProgress'
 import type { AdhocStatus, AdhocTask } from '@core/types/pmAdhoc'
+
+// issue #399：SSE 接通后进度由事件实时驱动，轮询降为低频兜底。
+const ADHOC_POLL_FALLBACK_MS = 30000
+// 运行中（含 pending）才订阅 SSE；scheduled/终态不建连。
+function isRunningStatus(s: AdhocStatus): boolean {
+  return s === 'running' || s === 'pending'
+}
 
 /**
  * F03 · 自定义聚合任务（performance/pm-adhoc）
@@ -48,11 +59,21 @@ const TECH_LABEL: Record<string, string> = { lte: 'LTE', nr: 'NR', gsm: 'GSM' }
 export default function PmAdhoc() {
   const navigate = useNavigate()
   const { data: builtin = [], isLoading: builtinLoading, isError: builtinError, refetch: refetchBuiltin } =
-    usePmAdhocList({ refetchInterval: 5000, isBuiltin: true })
+    usePmAdhocList({ refetchInterval: ADHOC_POLL_FALLBACK_MS, isBuiltin: true })
   const { data: custom = [], isLoading: customLoading, isError: customError, refetch: refetchCustom } =
-    usePmAdhocList({ refetchInterval: 5000, isBuiltin: false })
+    usePmAdhocList({ refetchInterval: ADHOC_POLL_FALLBACK_MS, isBuiltin: false })
   const cancelMut = useCancelPmAdhoc()
   const deleteMut = useDeletePmAdhoc()
+
+  // issue #399：收集两区运行中（含 pending）任务 id，订阅进度 SSE；终态/scheduled 不订阅。
+  const runningIds = useMemo(
+    () =>
+      [...builtin, ...custom]
+        .filter((t) => isRunningStatus(t.status))
+        .map((t) => t.id),
+    [builtin, custom],
+  )
+  const liveProgress = useAdhocProgressStream(runningIds)
 
   // issue #392：删除终态自建任务 —— 二次确认 → 删除 → 列表自动刷新（任务消失）。
   const onDelete = (id: string) => {
@@ -95,6 +116,7 @@ export default function PmAdhoc() {
           loading={builtinLoading}
           isError={builtinError}
           builtinArea
+          liveProgress={liveProgress}
           onCancel={(id) => cancelMut.mutate(id)}
           onEdit={(t) => navigate(`/performance/pm-adhoc/${t.id}/edit`)}
           cancelling={cancelMut.isPending}
@@ -106,6 +128,7 @@ export default function PmAdhoc() {
           loading={customLoading}
           isError={customError}
           builtinArea={false}
+          liveProgress={liveProgress}
           onCancel={(id) => cancelMut.mutate(id)}
           onEdit={(t) => navigate(`/performance/pm-adhoc/${t.id}/edit`)}
           onDelete={onDelete}
@@ -124,6 +147,7 @@ function TaskTable({
   loading,
   isError,
   builtinArea,
+  liveProgress,
   onCancel,
   onEdit,
   onDelete,
@@ -136,6 +160,8 @@ function TaskTable({
   loading: boolean
   isError: boolean
   builtinArea: boolean
+  // issue #399：运行中任务实时进度（live 优先于轮询拿到的 task.progress）。
+  liveProgress: ReadonlyMap<string, AdhocLiveProgress>
   onCancel: (id: string) => void
   onEdit: (t: AdhocTask) => void
   // issue #392：删除终态自建任务（仅自建区传入；内置区不传，按钮恒不渲染）。
@@ -204,7 +230,11 @@ function TaskTable({
                       <div className="h-1.5 w-12 overflow-hidden rounded-full bg-cyan-500/10">
                         <div
                           className="h-full rounded-full bg-cyan-400"
-                          style={{ width: `${Math.max(0, Math.min(100, t.progress))}%`, boxShadow: '0 0 8px #00f0ff' }}
+                          style={{
+                            // issue #399：进度 live 优先（SSE 事件驱动），缺 live 时回退轮询拿到的 task.progress。
+                            width: `${Math.max(0, Math.min(100, liveProgress.get(t.id)?.progress ?? t.progress))}%`,
+                            boxShadow: '0 0 8px #00f0ff',
+                          }}
                         />
                       </div>
                     ) : null}
