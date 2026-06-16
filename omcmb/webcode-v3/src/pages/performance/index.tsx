@@ -515,6 +515,9 @@ function QueryView() {
                   displayName={g.displayName}
                   rows={g.rows}
                   color={COLORS[i % COLORS.length]}
+                  startTime={submitted.startTime}
+                  endTime={submitted.endTime}
+                  granularity={submitted.granularity}
                 />
               ))}
             </div>

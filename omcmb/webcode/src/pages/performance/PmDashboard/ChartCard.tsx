@@ -37,7 +37,9 @@ export default function ChartCard({ chart }: { chart: MetricChart }) {
     smooth: true,
     showSymbol: chart.buckets.length <= 30,
     data: s.values,
-    connectNulls: true, // #200：跨空洞桶连线，修多设备并集轴稀疏导致的曲线断裂
+    // issue #429：规整网格下断档槽位置 '-'/null，connectNulls=false 让缺口处线断开
+    // （断档在网管有运维含义，不再连线抹平）；#200 的"假空洞"在规整网格下已不存在。
+    connectNulls: false,
   }));
   // T-0189 周期对比：上一周期系列画虚线（已在上游按 +L 对齐到当前轴）。
   const compareSeries = (chart.compareSeries ?? []).map((s) => ({
@@ -46,7 +48,8 @@ export default function ChartCard({ chart }: { chart: MetricChart }) {
     smooth: true,
     showSymbol: chart.buckets.length <= 30,
     data: s.values,
-    connectNulls: true, // #200：同当前系列，对比虚线也跨空洞连线
+    // issue #429：对比虚线同当前系列，断档处断开线（与上文同口径）。
+    connectNulls: false,
     lineStyle: { type: 'dashed' as const },
   }));
   // tooltip 表头显示该桶的「开始~结束」时间段（每个点代表一个时间桶，非单时间点）。
