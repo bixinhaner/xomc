@@ -47,11 +47,11 @@ type TaskType struct {
 	// SortOrder 控制「任务创建」/「模板配置」子 tab 显示顺序；数字小靠前。
 	// 内置模板初始值由 migrations/000146 赋（10/20/30/...），自定义默认 100。
 	// 后续在「模板配置」UI 拖拽可改。
-	SortOrder              int                `json:"sortOrder"`
-	LastEditor             string             `json:"lastEditor"`
-	TaskCount30d           int                `json:"taskCount30d"`
-	SuccessRate30d         float64            `json:"successRate30d"`
-	UpdatedAt              string             `json:"updatedAt"`
+	SortOrder      int     `json:"sortOrder"`
+	LastEditor     string  `json:"lastEditor"`
+	TaskCount30d   int     `json:"taskCount30d"`
+	SuccessRate30d float64 `json:"successRate30d"`
+	UpdatedAt      string  `json:"updatedAt"`
 
 	softwareTaskType software.TaskType
 	techHint         *coremodel.Technology
@@ -101,11 +101,15 @@ type DeviceItem struct {
 	TargetFile string `json:"targetFile,omitempty"`
 	// DownloadURL 是 CPE 上传完成、ACS 落 MinIO 后的 1h presigned GET 链接；
 	// 仅当子任务已 ended 且 backup_restore_file 元数据存在时填充，否则留空。
-	DownloadURL   string `json:"downloadUrl,omitempty"`
-	Status        string `json:"status"`
-	Result        string `json:"result,omitempty"`
-	Progress      int    `json:"progress"`
-	LastReportAt  string `json:"lastReportAt"`
+	DownloadURL  string `json:"downloadUrl,omitempty"`
+	Status       string `json:"status"`
+	Result       string `json:"result,omitempty"`
+	Progress     int    `json:"progress"`
+	LastReportAt string `json:"lastReportAt"`
+	// CreatedAt 是设备子任务的创建时刻（设备加入任务的时间），仅用于列表稳定排序。
+	// 不能用 LastReportAt 排序：它只在上报成功终态才有值（见 mapDeviceItem / issue #195），
+	// 未上报设备为空串，倒序会把新建任务的设备挤到列表最后。
+	CreatedAt     string `json:"createdAt"`
 	OperatorScope string `json:"operatorScope"`
 	FailureReason string `json:"failureReason,omitempty"`
 	// FailureDetail 是设备失败时的详细错误描述（含 FaultCode + FaultString 原文），
@@ -117,13 +121,13 @@ type DeviceItem struct {
 }
 
 type CreateTaskRequest struct {
-	TaskName      string      `json:"taskName" binding:"required"`
-	TypeCode      string      `json:"typeCode" binding:"required"`
-	ProductType   string      `json:"productType"`
-	FirmwareID    *uuid.UUID  `json:"firmwareId,omitempty"`
-	IsKeepConfig  bool        `json:"isKeepConfig"`
-	DeviceIDs     []uuid.UUID `json:"deviceIds" binding:"required,min=1"`
-	DeviceCount   int         `json:"deviceCount"`
+	TaskName     string      `json:"taskName" binding:"required"`
+	TypeCode     string      `json:"typeCode" binding:"required"`
+	ProductType  string      `json:"productType"`
+	FirmwareID   *uuid.UUID  `json:"firmwareId,omitempty"`
+	IsKeepConfig bool        `json:"isKeepConfig"`
+	DeviceIDs    []uuid.UUID `json:"deviceIds" binding:"required,min=1"`
+	DeviceCount  int         `json:"deviceCount"`
 	// Concurrency 任务内设备并发执行数，仅固件下载类（升级/PATCH/FPGA）生效，
 	// 透传 software.BatchUpgradeRequest.Concurrency；≤0 由 software 层兜底默认值。
 	Concurrency   int    `json:"concurrency"`
@@ -382,10 +386,10 @@ func builtInTaskTypes() []TaskType {
 			// · 无 sn 参数（厂商样本只有 fileType+taskId+filename）
 			// · taskId 用 32 字符纯 hex 无连字符 → 模板用 {taskId32} 占位符
 			// · filename 留空让设备自己决定上传名（同 NV/XML）
-			TransportPath: "/smallcell/FileUploadService?fileType=LOG&sn={sn}&taskId={taskId32}&filename=",
-			LastEditor:             "system",
-			UpdatedAt:              now,
-			softwareTaskType:       software.TaskTypeLogCollect,
+			TransportPath:    "/smallcell/FileUploadService?fileType=LOG&sn={sn}&taskId={taskId32}&filename=",
+			LastEditor:       "system",
+			UpdatedAt:        now,
+			softwareTaskType: software.TaskTypeLogCollect,
 		},
 		{
 			TypeCode:      "FAULT_LOG_COLLECT",
@@ -444,10 +448,10 @@ func builtInTaskTypes() []TaskType {
 			TargetFileNameTemplate: "backup-{task_id8}-{sn}.xml",
 			FileNameTemplate:       "backup-{task_id8}-{sn}.xml",
 			// URL `filename=` 留空：详见 RUNTIME_LOG_COLLECT 同名说明。
-			TransportPath: "/smallcell/FileUploadService?fileType=CONFIGBACKUP_XML&sn={sn}&taskId={taskId}&filename=",
-			LastEditor:             "system",
-			UpdatedAt:              now,
-			softwareTaskType:       software.TaskTypeLogCollect,
+			TransportPath:    "/smallcell/FileUploadService?fileType=CONFIGBACKUP_XML&sn={sn}&taskId={taskId}&filename=",
+			LastEditor:       "system",
+			UpdatedAt:        now,
+			softwareTaskType: software.TaskTypeLogCollect,
 		},
 		{
 			TypeCode:               "CONFIG_BACKUP_NV",
@@ -468,10 +472,10 @@ func builtInTaskTypes() []TaskType {
 			TargetFileNameTemplate: "backup-{task_id8}-{sn}.nv",
 			FileNameTemplate:       "backup-{task_id8}-{sn}.nv",
 			// URL `filename=` 留空：详见 RUNTIME_LOG_COLLECT 同名说明。
-			TransportPath: "/smallcell/FileUploadService?fileType=CONFIGBACKUP_NV&sn={sn}&taskId={taskId}&filename=",
-			LastEditor:             "system",
-			UpdatedAt:              now,
-			softwareTaskType:       software.TaskTypeLogCollect,
+			TransportPath:    "/smallcell/FileUploadService?fileType=CONFIGBACKUP_NV&sn={sn}&taskId={taskId}&filename=",
+			LastEditor:       "system",
+			UpdatedAt:        now,
+			softwareTaskType: software.TaskTypeLogCollect,
 		},
 		{
 			TypeCode:               "CONFIG_RESTORE",
@@ -641,9 +645,9 @@ func normalizeTaskResult(result software.TaskResult) string {
 //   - UpgradeDownloading（Download RPC，升级 / 回滚）→ "downloading"
 //   - UpgradeUploading（Upload RPC，备份 / 日志采集）→ "uploading"
 //     · 子分支：fileLanded=true（backup_restore_file 已落地）→ "awaiting_tc"
-//       —— TR-069 上"等 UploadResponse"和"CPE PUT 文件中"两步紧贴且无独立 ACS 信号，
-//       合并到"上传中"；CPE 完成 HTTP PUT → ACS 写 backup_restore_file 是唯一可观测分界点，
-//       之后等 CPE 主动发 TransferComplete 是独立的一段，单独展示。
+//     —— TR-069 上"等 UploadResponse"和"CPE PUT 文件中"两步紧贴且无独立 ACS 信号，
+//     合并到"上传中"；CPE 完成 HTTP PUT → ACS 写 backup_restore_file 是唯一可观测分界点，
+//     之后等 CPE 主动发 TransferComplete 是独立的一段，单独展示。
 //   - 其它状态按状态机直译。
 func normalizeDeviceStatus(status software.UpgradeState, fileLanded bool) string {
 	switch status {

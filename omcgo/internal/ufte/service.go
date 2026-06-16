@@ -886,9 +886,10 @@ func (s *Service) ListDevices(ctx context.Context, filter DeviceListFilter) (*co
 
 // StreamDeviceItems 流式过滤 + 逐条输出设备子任务，每条调一次 write 回调。
 // 给导出 CSV 用 —— 全程不把全量结果累积在内存：
-//   1. 按 taskType / page 分批拉 sub_tasks（每批 200 条）
-//   2. 当批 mapDeviceItem + matchesDeviceFilter → 命中即立刻 write 回调出去
-//   3. 调用方在 write 里写 CSV + 周期性 Flush，bytes 直推 HTTP 流
+//  1. 按 taskType / page 分批拉 sub_tasks（每批 200 条）
+//  2. 当批 mapDeviceItem + matchesDeviceFilter → 命中即立刻 write 回调出去
+//  3. 调用方在 write 里写 CSV + 周期性 Flush，bytes 直推 HTTP 流
+//
 // 内存峰值约 = 1 批 sub_tasks + deviceCache + parentCache + catalog（cache 体量
 // 随设备 / 任务总数线性增长但单项 ~百字节，相对全量 DeviceItem 累积小得多）。
 //
@@ -990,8 +991,12 @@ func (s *Service) collectFilteredDeviceItems(ctx context.Context, filter DeviceL
 		}
 		items = append(items, *mapped)
 	}
+	// 按子任务创建时间倒序——新建任务的设备排在最前面。
+	// 不能按 LastReportAt 排：它只在文件上报成功的终态才有值（见 mapDeviceItem / issue #195），
+	// 新建、未上报的设备为空串，倒序会把它们挤到列表最后（本次修复的 bug）。
+	// CreatedAt（子任务 created_at）建任务即有值且 NOT NULL，倒序即"最新建的在最上"。
 	sort.Slice(items, func(i, j int) bool {
-		return items[i].LastReportAt > items[j].LastReportAt
+		return items[i].CreatedAt > items[j].CreatedAt
 	})
 	return items, nil
 }
@@ -1400,6 +1405,7 @@ func (s *Service) mapDeviceItem(
 		Result:          result,
 		Progress:        progressForDeviceStatus(status),
 		LastReportAt:    formatTime(lastReport),
+		CreatedAt:       formatTime(time.Time(subTask.CreatedAt)),
 		OperatorScope:   parent.CreateUser,
 		FailureReason:   subTask.FailureReason,
 		FailureDetail:   subTask.ErrorMessage,

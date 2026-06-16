@@ -932,7 +932,13 @@ export default function FileTransferCenter() {
           dataIndex: 'createdAt',
           key: 'createdAt',
           width: 180,
-          render: (value: string) => new Date(value).toLocaleString('zh-CN'),
+          render: (value: string) => {
+            // 上报时间只在文件上报成功的终态才有值；未上报时为空，直接显示 '-'，
+            // 不要把空值丢给 new Date()（会渲染成 "Invalid Date"）。
+            if (!value) return '-';
+            const d = new Date(value);
+            return Number.isNaN(d.getTime()) ? '-' : d.toLocaleString('zh-CN');
+          },
         },
         {
           title: t('common.status'),
@@ -1148,7 +1154,13 @@ export default function FileTransferCenter() {
           dataIndex: 'lastReportAt',
           key: 'lastReportAt',
           width: 180,
-          render: (value: string) => new Date(value).toLocaleString('zh-CN'),
+          render: (value: string) => {
+            // 上报时间只在文件上报成功的终态才有值；未上报时为空，直接显示 '-'，
+            // 不要把空值丢给 new Date()（会渲染成 "Invalid Date"）。
+            if (!value) return '-';
+            const d = new Date(value);
+            return Number.isNaN(d.getTime()) ? '-' : d.toLocaleString('zh-CN');
+          },
         },
       ];
     }
