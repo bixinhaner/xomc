@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  BSC paramModel 快速设置（GSM）。
+  字段对照截图：
+    IPA        ← DeviceGSM.Bts.{i}.OmlIpaStreamId  (BSC 字典中唯一的 IPA 流标识)
+    Unit ID    ← DeviceGSM.Bts.{i}.IpaUnitId       (按 BTS 多实例展开)
+    Remote IP  ← DeviceGSM.Bts.{i}.IpaRslIp        (RSL Remote IP)
+    Bind IP    ← Device.KeepalivedMgmt.LocalUplinkIpAddr   (BSC 本端上行口)
+    BSC IP     ← Device.KeepalivedMgmt.RemoteUplinkIpAddr  (对端 BSC 上行口)
+    WAN IP     ← Device.IP.Interface.{i}.IPv4Address.{i}.IPAddress
+    OMC        ← Device.LogMgmt.URL                (OMC 数据上报地址)
+  BSC 字典内未提供独立的 “BSC ID 监听端口/同步源” 字段，按用户要求保持原方案，
+  仅依据 BSC.xml 字典里实际存在的 standardPath 进行映射，不改动后端/前端代码。
+-->
+<quickSettings paramModel="BSC">
+  <group id="bsc-bts-access" titleZh="BTS 接入参数" titleEn="BTS Access Settings"
+         multiInstance="true" maxInstances="256"
+         objectPath="DeviceGSM.Bts.{i}.">
+    <param name="IPA" titleZh="IPA" titleEn="IPA" leaf="OmlIpaStreamId"/>
+    <param name="UnitID" titleZh="Unit ID" titleEn="Unit ID" leaf="IpaUnitId"/>
+    <param name="RemoteIP" titleZh="Remote IP" titleEn="Remote IP" leaf="IpaRslIp"/>
+  </group>
+
+  <group id="bsc-network" titleZh="网络参数" titleEn="Network Settings">
+    <param name="BindIP" titleZh="Bind IP" titleEn="Bind IP"
+           standardPath="Device.KeepalivedMgmt.LocalUplinkIpAddr"/>
+    <param name="BscIP" titleZh="BSC IP" titleEn="BSC IP"
+           standardPath="Device.KeepalivedMgmt.RemoteUplinkIpAddr"/>
+    <param name="WanIP" titleZh="WAN IP" titleEn="WAN IP"
+           standardPath="Device.IP.Interface.{i}.IPv4Address.{i}.IPAddress"/>
+    <param name="OMC" titleZh="OMC" titleEn="OMC"
+           standardPath="Device.LogMgmt.URL"/>
+  </group>
+</quickSettings>
