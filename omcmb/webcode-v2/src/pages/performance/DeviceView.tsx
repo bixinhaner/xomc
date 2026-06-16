@@ -35,6 +35,7 @@ import { cn } from '@/lib/utils'
 
 import { useDeviceList } from '@core/hooks/api/useDevices'
 import { useAggregatedMetricsByDevices } from '@core/hooks/api/usePmQuery'
+import { alignPointsToGrid } from '@core/utils/buildRegularTimeGrid'
 import type { DeviceFilter } from '@core/types/device'
 import type { PageRequest } from '@core/types/pagination'
 import type { AggregatedRow, Granularity } from '@core/types/pmDashboard'
@@ -109,36 +110,39 @@ function themeHsl(varName: string, fallback: string): string {
 }
 
 // 把按指标分组的 long 数据透视成 echarts 多系列折线：
-// X 轴 = 所有选中指标时间桶的并集(升序)；每指标一条线,按桶对齐取值,缺桶为 null。
-function buildChartOption(metrics: GroupedMetric[]): EChartsOption {
+// issue #429：X 轴按"查询窗口起止 + 粒度"铺规整网格(窗口内每个整点槽位都上轴,非仅
+// 有数桶并集),有数桶对齐、空槽 null、connectNulls=false → 断档处线断开可见。
+function buildChartOption(
+  metrics: GroupedMetric[],
+  startMs: number,
+  endMs: number,
+  granularity: Granularity,
+): EChartsOption {
   const fg = themeHsl('--muted-foreground', '#94a3b8')
   const border = themeHsl('--border', '#334155')
 
-  // 并集时间轴
-  const bucketSet = new Set<string>()
-  for (const m of metrics) for (const p of m.points) bucketSet.add(p.time)
-  const buckets = Array.from(bucketSet).sort((a, b) => a.localeCompare(b))
-  const bucketIndex = new Map(buckets.map((t, i) => [t, i]))
-
-  const series = metrics.map((m, i) => {
-    const data: (number | null)[] = new Array(buckets.length).fill(null)
-    for (const p of m.points) {
-      const idx = bucketIndex.get(p.time)
-      if (idx !== undefined) data[idx] = p.value
-    }
-    return {
-      name: m.label,
-      type: 'line' as const,
-      smooth: true,
-      showSymbol: buckets.length <= 30,
-      symbolSize: 5,
-      // 多指标各自相位不同 → 并集轴上易出空洞；connectNulls 跨桶连线保证曲线连续(仅视觉)。
-      connectNulls: true,
-      data,
-      lineStyle: { width: 2 },
-      itemStyle: { color: SERIES_COLORS[i % SERIES_COLORS.length] },
-    }
+  // 规整网格：以第一条指标对齐铺出槽位轴(所有指标共用同一窗口+粒度,网格一致)。
+  let gridMs: number[] = []
+  const seriesData = metrics.map((m) => {
+    const points = m.points.map((p) => ({ timeMs: Date.parse(p.time), value: p.value }))
+    const { grid, values } = alignPointsToGrid(points, startMs, endMs, granularity)
+    if (grid.length > gridMs.length) gridMs = grid
+    return values
   })
+
+  const series = metrics.map((m, i) => ({
+    name: m.label,
+    type: 'line' as const,
+    smooth: true,
+    showSymbol: gridMs.length <= 30,
+    symbolSize: 5,
+    // issue #429：规整网格下空槽=断档,connectNulls=false 让缺口处线断开(运维含义),
+    // 不再跨空洞连线抹平；连续有数区间仍连续(#200 不回归)。
+    connectNulls: false,
+    data: seriesData[i],
+    lineStyle: { width: 2 },
+    itemStyle: { color: SERIES_COLORS[i % SERIES_COLORS.length] },
+  }))
 
   return {
     color: SERIES_COLORS,
@@ -159,7 +163,7 @@ function buildChartOption(metrics: GroupedMetric[]): EChartsOption {
     xAxis: {
       type: 'category',
       boundaryGap: false,
-      data: buckets.map((t) => formatTime(t)),
+      data: gridMs.map((ms) => formatTime(new Date(ms).toISOString())),
       axisLabel: { color: fg, fontSize: 10 },
       axisLine: { lineStyle: { color: border } },
     },
@@ -174,7 +178,18 @@ function buildChartOption(metrics: GroupedMetric[]): EChartsOption {
 }
 
 // 多指标时序折线卡：echarts 渲染,带指标选择 chips（默认前若干条,避免一次画 71 条线）。
-function TimeSeriesChart({ metrics }: { metrics: GroupedMetric[] }) {
+// issue #429：传入查询窗口起止 ms + 粒度,横轴按窗口铺规整网格(非有数桶并集)。
+function TimeSeriesChart({
+  metrics,
+  startMs,
+  endMs,
+  granularity,
+}: {
+  metrics: GroupedMetric[]
+  startMs: number
+  endMs: number
+  granularity: Granularity
+}) {
   // 仅含有效采样(至少一个非空值)的指标可入选,空指标不进选择器。
   const selectable = useMemo(
     () => metrics.filter((m) => m.points.some((p) => p.value !== null)),
@@ -193,7 +208,10 @@ function TimeSeriesChart({ metrics }: { metrics: GroupedMetric[] }) {
     [selectable, selectedPaths]
   )
 
-  const option = useMemo(() => buildChartOption(shown), [shown])
+  const option = useMemo(
+    () => buildChartOption(shown, startMs, endMs, granularity),
+    [shown, startMs, endMs, granularity],
+  )
 
   const toggle = (path: string) => {
     const next = new Set(selectedPaths)
@@ -488,7 +506,12 @@ export function DeviceViewPage() {
           ) : (
             <div className="space-y-4">
               {/* 时序折线图：选指标多线对比,放在数值卡上方(对齐 v1/v3 出图) */}
-              <TimeSeriesChart metrics={metrics} />
+              <TimeSeriesChart
+                metrics={metrics}
+                startMs={Date.parse(range.start)}
+                endMs={Date.parse(range.end)}
+                granularity={granularity}
+              />
               {/* 数值卡(逐指标 CSS 柱状概览),保留 */}
               <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
                 {metrics.map((m) => (
