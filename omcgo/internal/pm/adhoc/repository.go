@@ -410,17 +410,25 @@ const onConflictResultsBusiness = `ON CONFLICT (task_id, granularity, metric_pat
 	`metric_type = EXCLUDED.metric_type, statis_type = EXCLUDED.statis_type, ` +
 	`start_time = EXCLUDED.start_time, end_time = EXCLUDED.end_time, extra = EXCLUDED.extra`
 
-// InsertResults 批量写 pm_adhoc_aggregation_results。
-// T-0194：改 ON CONFLICT DO UPDATE（值以最新一次聚合为准），入口按业务键同批去重防重复键报错。
-func (r *PgRepository) InsertResults(ctx context.Context, rows []ResultRow) error {
-	if len(rows) == 0 {
-		return nil
-	}
-	rows = dedupResultRows(rows)
-	ib := storage.Psql.Insert("pm_adhoc_aggregation_results").Columns(
-		"task_id", "device_oui", "device_sn", "product_id", "metric_path", "metric_type", "metric_value",
-		"statis_type", "granularity", "time", "start_time", "end_time", "object_ldn", "extra",
-	)
+// resultInsertCols 是结果表 INSERT 的列清单（14 列）。
+// 单独抽出供分批 SQL 构建与单测复用；列序必须与 buildInsertResultsSQL 的 Values 一致。
+var resultInsertCols = []string{
+	"task_id", "device_oui", "device_sn", "product_id", "metric_path", "metric_type", "metric_value",
+	"statis_type", "granularity", "time", "start_time", "end_time", "object_ldn", "extra",
+}
+
+// resultInsertBatchSize 是单条多行 INSERT 的最大行数（issue #393）。
+//
+// pgx 扩展协议单条语句绑定参数上限 65535；结果表每行 14 个参数 →
+// 理论上限 65535/14 ≈ 4681 行。取 4000 留余量，避免越界被驱动拒绝回滚。
+// 「内置-全网-LTE」等无指标过滤的全网级聚合行数随数据增长会越过旧 ~4600 行上限，
+// 不分批则整条 INSERT 失败、本轮结果丢失、任务标记失败。
+const resultInsertBatchSize = 4000
+
+// buildInsertResultsSQL 为一批结果行构建带 ON CONFLICT 的多行 INSERT SQL。
+// 抽出便于单测断言列序/占位符数量；调用方保证 rows 已全局去重且非空。
+func buildInsertResultsSQL(rows []ResultRow) (string, []any, error) {
+	ib := storage.Psql.Insert("pm_adhoc_aggregation_results").Columns(resultInsertCols...)
 	for _, row := range rows {
 		var stype, ldn any
 		if row.StatisType != nil {
@@ -433,7 +441,7 @@ func (r *PgRepository) InsertResults(ctx context.Context, rows []ResultRow) erro
 		if len(row.Extra) > 0 {
 			b, err := json.Marshal(row.Extra)
 			if err != nil {
-				return fmt.Errorf("adhoc.InsertResults: marshal extra: %w", err)
+				return "", nil, fmt.Errorf("marshal extra: %w", err)
 			}
 			extra = b
 		}
@@ -446,13 +454,45 @@ func (r *PgRepository) InsertResults(ctx context.Context, rows []ResultRow) erro
 			stype, row.Granularity, t, row.StartTime, row.EndTime, ldn, extra,
 		)
 	}
-	q, args, err := ib.Suffix(onConflictResultsBusiness).ToSql()
-	if err != nil {
-		return fmt.Errorf("adhoc.InsertResults: build SQL: %w", err)
+	return ib.Suffix(onConflictResultsBusiness).ToSql()
+}
+
+// InsertResults 批量写 pm_adhoc_aggregation_results。
+// T-0194：改 ON CONFLICT DO UPDATE（值以最新一次聚合为准），入口按业务键同批去重防重复键报错。
+// issue #393：分批写入，单批 ≤ resultInsertBatchSize 行（避免越过 pgx 65535 参数上限）；
+// 全批同一事务，保证全部落库或全部回滚（不因分批产生部分写入）。
+func (r *PgRepository) InsertResults(ctx context.Context, rows []ResultRow) error {
+	if len(rows) == 0 {
+		return nil
 	}
+	// 先全局去重：同一调用内同业务键只留最后一条。去重在分批前做，保证任意两个批次
+	// 之间不会共享业务键（否则跨批次会触发 ON CONFLICT DO UPDATE 重复命中同行）。
+	rows = dedupResultRows(rows)
+
 	// pm_adhoc_aggregation_results 在时序库（TsPool），用 tsPool 写。
-	if _, err := r.tsPool.Exec(ctx, q, args...); err != nil {
-		return fmt.Errorf("adhoc.InsertResults: exec: %w", err)
+	// 全批分片落在同一事务：任一批失败整体回滚，杜绝部分落库。
+	tx, err := r.tsPool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("adhoc.InsertResults: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }() // 提交成功后 rollback 为 no-op
+
+	for start := 0; start < len(rows); start += resultInsertBatchSize {
+		end := start + resultInsertBatchSize
+		if end > len(rows) {
+			end = len(rows)
+		}
+		q, args, err := buildInsertResultsSQL(rows[start:end])
+		if err != nil {
+			return fmt.Errorf("adhoc.InsertResults: build SQL: %w", err)
+		}
+		if _, err := tx.Exec(ctx, q, args...); err != nil {
+			return fmt.Errorf("adhoc.InsertResults: exec batch [%d,%d): %w", start, end, err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("adhoc.InsertResults: commit: %w", err)
 	}
 	return nil
 }
