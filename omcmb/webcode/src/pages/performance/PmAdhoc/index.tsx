@@ -36,12 +36,23 @@ import {
   useCancelPmAdhoc,
   useDeletePmAdhoc,
 } from '@core/hooks/api/usePmAdhoc';
+import {
+  useAdhocProgressStream,
+  type AdhocLiveProgress,
+} from '@core/hooks/api/useAdhocProgress';
 import type {
   AdhocMode,
   AdhocStatus,
   AdhocTask,
   AdhocTaskRun,
 } from '@core/types/pmAdhoc';
+
+// issue #399：SSE 接通后进度由事件实时驱动，轮询降为低频兜底（状态翻转 + 断连兜底）。
+const ADHOC_POLL_FALLBACK_MS = 30000;
+// 运行中（含 pending）才订阅 SSE；scheduled/终态不建连。
+function isRunningStatus(s: AdhocStatus): boolean {
+  return s === 'running' || s === 'pending';
+}
 import { CreateAdhocTaskDrawer, type CreateAdhocPreset } from './CreateAdhocTaskDrawer';
 import { AdhocResultPanel } from './AdhocResultPanel';
 import BuiltinMetricEditModal from './BuiltinMetricEditModal';
@@ -124,8 +135,16 @@ function fmtTime(v?: string): string {
 /** 运行历史表（任务详情 Tab）。 */
 function RunHistoryTab({ taskId }: { taskId: string }) {
   const intl = useIntl();
-  // 运行中任务会持续产生 run，轮询刷新
-  const { data: runs = [], isLoading } = usePmAdhocRuns(taskId, { refetchInterval: 10000 });
+  // 运行中任务会持续产生 run；issue #399 SSE 接通后轮询降为低频兜底。
+  const { data: runs = [], isLoading } = usePmAdhocRuns(taskId, {
+    refetchInterval: ADHOC_POLL_FALLBACK_MS,
+  });
+
+  // issue #399：当本任务有运行中的 run 时，订阅该任务进度 SSE 实时驱动；
+  // 终态/无运行中 run 时不传 id → 不建连。
+  const hasRunningRun = runs.some((r) => isRunningStatus(r.status));
+  const live = useAdhocProgressStream(hasRunningRun ? [taskId] : []);
+  const liveRows = live.get(taskId)?.rows;
 
   const columns: ColumnsType<AdhocTaskRun> = useMemo(
     () => [
@@ -158,7 +177,14 @@ function RunHistoryTab({ taskId }: { taskId: string }) {
       },
       { title: intl.formatMessage({ id: 'perf.adhoc.colQueuedAt' }), dataIndex: 'queuedAt', width: 180, render: (v: string) => fmtTime(v) },
       { title: intl.formatMessage({ id: 'perf.adhoc.colFinishedAt' }), dataIndex: 'finishedAt', width: 180, render: (v: string) => fmtTime(v) },
-      { title: intl.formatMessage({ id: 'perf.adhoc.colRowsTotal' }), dataIndex: 'rowsTotal', width: 90 },
+      {
+        title: intl.formatMessage({ id: 'perf.adhoc.colRowsTotal' }),
+        dataIndex: 'rowsTotal',
+        width: 90,
+        // issue #399：运行中的 run 行数由 SSE progress 事件实时驱动（live 优先）。
+        render: (v: number, r) =>
+          isRunningStatus(r.status) && liveRows != null ? liveRows : v,
+      },
       {
         title: intl.formatMessage({ id: 'perf.adhoc.colError' }),
         dataIndex: 'error',
@@ -166,7 +192,7 @@ function RunHistoryTab({ taskId }: { taskId: string }) {
         render: (e: string) => (e ? <Typography.Text type="danger">{e}</Typography.Text> : '—'),
       },
     ],
-    [intl],
+    [intl, liveRows],
   );
 
   return (
@@ -198,6 +224,7 @@ function TaskTable({
   tasks,
   loading,
   isBuiltinArea,
+  liveProgress,
   onView,
   onCancel,
   onEdit,
@@ -207,6 +234,8 @@ function TaskTable({
   loading: boolean;
   // 内置区 = true：操作列给「编辑指标」（开轻量弹窗）；自建区 = false：给「编辑」（进向导编辑页）。
   isBuiltinArea: boolean;
+  // issue #399：运行中任务的实时进度（live 优先于轮询拿到的 task.progress）。
+  liveProgress: ReadonlyMap<string, AdhocLiveProgress>;
   onView: (t: AdhocTask) => void;
   onCancel: (id: string) => void;
   onEdit: (t: AdhocTask) => void;
@@ -238,9 +267,10 @@ function TaskTable({
         title: intl.formatMessage({ id: 'perf.adhoc.colProgress' }),
         dataIndex: 'progress',
         width: 140,
+        // issue #399：运行中进度 live 优先（SSE 事件驱动），缺 live 时回退轮询拿到的 task.progress。
         render: (p: number, r) =>
           r.status === 'running' || r.status === 'succeeded' ? (
-            <Progress percent={p} size="small" />
+            <Progress percent={liveProgress.get(r.id)?.progress ?? p} size="small" />
           ) : (
             '—'
           ),
@@ -291,7 +321,7 @@ function TaskTable({
         ),
       },
     ],
-    [intl, isBuiltinArea, onView, onCancel, onEdit, onDelete],
+    [intl, isBuiltinArea, liveProgress, onView, onCancel, onEdit, onDelete],
   );
 
   return (
@@ -310,13 +340,24 @@ export default function PmAdhocPage() {
   const intl = useIntl();
   // T-0186：分两区，各发一次 list（内置 / 自建）。
   const { data: builtinTasks = [], isLoading: builtinLoading } = usePmAdhocList({
-    refetchInterval: 5000,
+    refetchInterval: ADHOC_POLL_FALLBACK_MS,
     isBuiltin: true,
   });
   const { data: customTasks = [], isLoading: customLoading } = usePmAdhocList({
-    refetchInterval: 5000,
+    refetchInterval: ADHOC_POLL_FALLBACK_MS,
     isBuiltin: false,
   });
+
+  // issue #399：收集两区运行中（含 pending）任务 id，订阅进度 SSE；终态/scheduled 不订阅。
+  const runningIds = useMemo(
+    () =>
+      [...builtinTasks, ...customTasks]
+        .filter((t) => isRunningStatus(t.status))
+        .map((t) => t.id),
+    [builtinTasks, customTasks],
+  );
+  const liveProgress = useAdhocProgressStream(runningIds);
+
   const cancelMut = useCancelPmAdhoc();
   const deleteMut = useDeletePmAdhoc();
   const navigate = useNavigate();
@@ -412,6 +453,7 @@ export default function PmAdhocPage() {
           tasks={builtinTasks}
           loading={builtinLoading}
           isBuiltinArea
+          liveProgress={liveProgress}
           onView={setSelectedTask}
           onCancel={handleCancel}
           onEdit={handleEditBuiltin}
@@ -435,6 +477,7 @@ export default function PmAdhocPage() {
           tasks={customTasks}
           loading={customLoading}
           isBuiltinArea={false}
+          liveProgress={liveProgress}
           onView={setSelectedTask}
           onCancel={handleCancel}
           onEdit={handleEditCustom}
