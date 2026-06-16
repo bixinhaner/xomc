@@ -100,7 +100,7 @@ func (m *mockMRStore) ListUncompressed(ctx context.Context, olderThan time.Time,
 	return nil, nil
 }
 
-func (m *mockMRStore) MarkCompressed(ctx context.Context, objects []string) error {
+func (m *mockMRStore) MarkCompressed(ctx context.Context, renames map[string]string) error {
 	return nil
 }
 

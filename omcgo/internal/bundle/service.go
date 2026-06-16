@@ -2,10 +2,12 @@ package bundle
 
 import (
 	"archive/zip"
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 	"github.com/minio/minio-go/v7"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/core/compress"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 )
 
@@ -202,12 +205,22 @@ func (s *Service) appendOne(ctx context.Context, zw *zip.Writer, f BundleFile, f
 		return fmt.Errorf("get object: %w", err)
 	}
 	defer obj.Close()
+
+	// issue #321：PM/MR 原始文件入库后被 gzip 压缩回写 MinIO（对象键 / file_name 仍是 .xml）。
+	// 嗅探 gzip 魔数：压缩内容的 zip 条目名补 .gz，让用户解开外层 zip 后得到可正常解压的
+	// .xml.gz；明文及非 gzip 模块（固件 / 配置 / license）原样不变。bufio 包裹后 Peek 不消耗
+	// 数据，后续读取仍从头开始。
+	br := bufio.NewReader(obj)
+	entryName := f.EntryName
+	if head, _ := br.Peek(2); compress.IsGzip(head) && !strings.HasSuffix(strings.ToLower(entryName), ".gz") {
+		entryName += ".gz"
+	}
 	// Method: Store(不压缩,直传字节)而不是默认 Deflate 的两个理由：
 	//  1. 流式可观测性: deflate writer 内部要攒 ~32KB 才 emit 一个 block,大文件
 	//     里 onDownloadProgress 看到的是大段大段跳;Store 模式 io.Copy 直接落到 socket。
 	//  2. 性能 + 文件大小: 固件 IMG / NV / license 多数已是压缩过的二进制,deflate
 	//     再压缩压缩率接近 0 反而费 CPU(单核 ~100MB/s 上限)。
-	w, err := zw.CreateHeader(&zip.FileHeader{Name: f.EntryName, Method: zip.Store})
+	w, err := zw.CreateHeader(&zip.FileHeader{Name: entryName, Method: zip.Store})
 	if err != nil {
 		return fmt.Errorf("zip create entry: %w", err)
 	}
@@ -217,7 +230,7 @@ func (s *Service) appendOne(ctx context.Context, zw *zip.Writer, f BundleFile, f
 	var written int64
 	lastLog := time.Now()
 	for {
-		n, rerr := obj.Read(buf)
+		n, rerr := br.Read(buf)
 		if n > 0 {
 			if _, werr := w.Write(buf[:n]); werr != nil {
 				return fmt.Errorf("zip write: %w", werr)

@@ -25,8 +25,9 @@ type RawFileRegistry interface {
 	// ListUncompressed 返回至多 limit 个 raw_compressed=false 且 created_at < olderThan
 	// （grace 截止）的 MinIO 对象键，按 created_at 升序（先压最旧的）。
 	ListUncompressed(ctx context.Context, olderThan time.Time, limit int) ([]string, error)
-	// MarkCompressed 把给定 MinIO 对象键对应的行标记为已压缩（raw_compressed=true）。
-	MarkCompressed(ctx context.Context, objects []string) error
+	// MarkCompressed 把每个 old 键的行标记 raw_compressed=true，并把其 minio_path 更新为对应 new 键
+	//（压缩改名 .xml→.xml.gz）。new==old 时只置标志位不改键。
+	MarkCompressed(ctx context.Context, renames map[string]string) error
 }
 
 // SweepSource 把一个注册表绑定到其对象所在的 MinIO bucket。
@@ -167,6 +168,12 @@ func (s *Sweeper) sweepSource(ctx context.Context, src SweepSource, cutoff time.
 				return
 			}
 			s.recordCompressed(src.Name, len(done))
+			// DB minio_path 已更新为新键 → 安全删除改键后遗留的旧明文对象（仅改键的）。
+			for oldKey, newKey := range done {
+				if oldKey != newKey {
+					s.archiver.RemoveOld(ctx, src.Bucket, oldKey)
+				}
+			}
 		}
 		// 排空（取回不足一批）或本轮零进展（整批非终态/错误）→ 收手，留待下一 tick 重试，避免自旋。
 		if len(objs) < s.batch || len(done) == 0 {
@@ -175,12 +182,13 @@ func (s *Sweeper) sweepSource(ctx context.Context, src SweepSource, cutoff time.
 	}
 }
 
-// compressBatch 有界并发地压缩一批对象，返回其中"终态"的对象键（可标记已压缩）。
-func (s *Sweeper) compressBatch(ctx context.Context, bucket string, objs []string) []string {
+// compressBatch 有界并发地压缩一批对象，返回其中"终态"对象的 old→new 键映射（可标记已压缩）。
+// new 是压缩后对象键（改键 .xml→.xml.gz；未改键时 new==old）。
+func (s *Sweeper) compressBatch(ctx context.Context, bucket string, objs []string) map[string]string {
 	sem := make(chan struct{}, s.conc)
 	var mu sync.Mutex
 	var wg sync.WaitGroup
-	done := make([]string, 0, len(objs))
+	done := make(map[string]string, len(objs))
 	for _, obj := range objs {
 		if ctx.Err() != nil {
 			break
@@ -190,9 +198,9 @@ func (s *Sweeper) compressBatch(ctx context.Context, bucket string, objs []strin
 		go func(o string) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			if s.archiver.CompressNow(ctx, bucket, o) {
+			if ok, newObj := s.archiver.CompressNow(ctx, bucket, o); ok {
 				mu.Lock()
-				done = append(done, o)
+				done[o] = newObj
 				mu.Unlock()
 			}
 		}(obj)

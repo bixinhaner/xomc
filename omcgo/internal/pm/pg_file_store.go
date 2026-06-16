@@ -257,16 +257,25 @@ func (s *PgPMFileStore) ListUncompressed(ctx context.Context, olderThan time.Tim
 	return out, rows.Err()
 }
 
-// MarkCompressed 把给定 MinIO 对象键对应的 pm_files 行标记为已压缩回写（raw_compressed=true）。
-// 内联压缩成功后单键调用、Sweeper 补压后批量调用，二者共用。
-func (s *PgPMFileStore) MarkCompressed(ctx context.Context, objects []string) error {
-	if len(objects) == 0 {
+// MarkCompressed 把每个 old 键对应的 pm_files 行标记为已压缩（raw_compressed=true），并把 minio_path
+// 更新为对应 new 键（压缩改名 .xml→.xml.gz；new==old 时只置标志位）。内联压缩成功后单条调用、
+// Sweeper 补压后批量调用，二者共用。批内逐行更新（每行 new 各异，无法用单条 ANY）。
+func (s *PgPMFileStore) MarkCompressed(ctx context.Context, renames map[string]string) error {
+	if len(renames) == 0 {
 		return nil
 	}
-	_, err := s.pool.Exec(ctx,
-		`UPDATE pm_files SET raw_compressed = true WHERE minio_path = ANY($1)`, objects)
-	if err != nil {
-		return fmt.Errorf("mark pm_files raw_compressed: %w", err)
+	batch := &pgx.Batch{}
+	for oldKey, newKey := range renames {
+		batch.Queue(
+			`UPDATE pm_files SET raw_compressed = true, minio_path = $1 WHERE minio_path = $2`,
+			newKey, oldKey)
+	}
+	br := s.pool.SendBatch(ctx, batch)
+	defer br.Close()
+	for range renames {
+		if _, err := br.Exec(); err != nil {
+			return fmt.Errorf("mark pm_files raw_compressed: %w", err)
+		}
 	}
 	return nil
 }

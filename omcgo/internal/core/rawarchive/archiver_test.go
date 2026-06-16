@@ -27,10 +27,11 @@ type fakeStore struct {
 	objects map[string][]byte
 	puts    map[string]putRec
 	missing map[string]bool // key → ReadHead 返回 ErrObjectNotFound（模拟孤儿行）
+	removed map[string]bool // key → 已被 Remove（改键后删旧明文键）
 }
 
 func newFakeStore() *fakeStore {
-	return &fakeStore{objects: map[string][]byte{}, puts: map[string]putRec{}, missing: map[string]bool{}}
+	return &fakeStore{objects: map[string][]byte{}, puts: map[string]putRec{}, missing: map[string]bool{}, removed: map[string]bool{}}
 }
 
 func key(b, o string) string { return b + "/" + o }
@@ -68,6 +69,15 @@ func (f *fakeStore) Put(_ context.Context, b, o string, r io.Reader, _ int64, _,
 	return nil
 }
 
+// Remove 删除对象（改键后清理旧明文键），并记录到 removed 供断言。对象不存在视为成功（幂等）。
+func (f *fakeStore) Remove(_ context.Context, b, o string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.objects, key(b, o))
+	f.removed[key(b, o)] = true
+	return nil
+}
+
 func gzipOf(t *testing.T, s string) []byte {
 	t.Helper()
 	var buf bytes.Buffer
@@ -101,8 +111,9 @@ func TestArchive_PlaintextGetsCompressedInPlace(t *testing.T) {
 	a := newTestArchiver(store, nil) // nil lookup → default enabled
 	a.archive(context.Background(), "pm-files", "a.xml")
 
-	rec, ok := store.puts[key("pm-files", "a.xml")]
-	require.True(t, ok, "明文对象应被压缩回写")
+	// 压缩回写到新键 a.xml.gz（改键自描述）；archive() 本身不删旧键（删旧键是 onTerminal 回调职责）。
+	rec, ok := store.puts[key("pm-files", "a.xml.gz")]
+	require.True(t, ok, "明文对象应被压缩回写到 .gz 新键")
 	assert.Equal(t, "gzip", rec.contentEncoding)
 	assert.True(t, compress.IsGzip(rec.data), "回写内容应是 gzip 字节")
 	assert.Less(t, len(rec.data), len(plain), "压缩后应更小")
@@ -189,9 +200,15 @@ func TestCompressNow_TerminalSemantics(t *testing.T) {
 	store.put("pm-files", "tiny.xml", []byte("<a/>"))
 
 	a := newTestArchiver(store, nil)
-	assert.True(t, a.CompressNow(context.Background(), "pm-files", "plain.xml"), "明文压成功=终态")
-	assert.True(t, a.CompressNow(context.Background(), "pm-files", "gz.xml.gz"), "已 gzip=终态")
-	assert.True(t, a.CompressNow(context.Background(), "pm-files", "tiny.xml"), "no_gain=终态")
+	okPlain, newPlain := a.CompressNow(context.Background(), "pm-files", "plain.xml")
+	assert.True(t, okPlain, "明文压成功=终态")
+	assert.Equal(t, "plain.xml.gz", newPlain, "明文压缩成功应改键为 .gz")
+	okGz, newGz := a.CompressNow(context.Background(), "pm-files", "gz.xml.gz")
+	assert.True(t, okGz, "已 gzip=终态")
+	assert.Equal(t, "gz.xml.gz", newGz, "已 gzip 不改键")
+	okTiny, newTiny := a.CompressNow(context.Background(), "pm-files", "tiny.xml")
+	assert.True(t, okTiny, "no_gain=终态")
+	assert.Equal(t, "tiny.xml", newTiny, "no_gain 不改键")
 
 	// 禁用 → 非终态（留待开关恢复后重扫）。
 	lookup := func(_ context.Context, category, k string) (string, bool) {
@@ -201,7 +218,8 @@ func TestCompressNow_TerminalSemantics(t *testing.T) {
 		return "", false
 	}
 	ad := newTestArchiver(store, lookup)
-	assert.False(t, ad.CompressNow(context.Background(), "pm-files", "plain.xml"), "禁用=非终态")
+	okDisabled, _ := ad.CompressNow(context.Background(), "pm-files", "plain.xml")
+	assert.False(t, okDisabled, "禁用=非终态")
 }
 
 func TestCompressNow_NotFoundIsTerminal(t *testing.T) {
@@ -211,10 +229,10 @@ func TestCompressNow_NotFoundIsTerminal(t *testing.T) {
 	store.markMissing("pm-files", "gone.xml")
 
 	a := newTestArchiver(store, nil)
-	assert.True(t, a.CompressNow(context.Background(), "pm-files", "gone.xml"),
-		"对象不存在=终态（标记后移出待扫集）")
-	_, ok := store.puts[key("pm-files", "gone.xml")]
-	assert.False(t, ok, "不存在的对象不应触发任何回写")
+	okGone, _ := a.CompressNow(context.Background(), "pm-files", "gone.xml")
+	assert.True(t, okGone, "对象不存在=终态（标记后移出待扫集）")
+	_, putOk := store.puts[key("pm-files", "gone.xml")]
+	assert.False(t, putOk, "不存在的对象不应触发任何回写")
 }
 
 func TestSchedule_InvokesOnTerminalWithObject(t *testing.T) {
@@ -222,12 +240,15 @@ func TestSchedule_InvokesOnTerminalWithObject(t *testing.T) {
 	store.put("pm-files", "a.xml", []byte(largeXML()))
 
 	a := newTestArchiver(store, nil)
-	got := make(chan string, 1)
-	a.Schedule("pm-files", "a.xml", func(_ context.Context, object string) { got <- object })
+	type rename struct{ bucket, oldKey, newKey string }
+	got := make(chan rename, 1)
+	a.Schedule("pm-files", "a.xml", func(_ context.Context, bkt, oldKey, newKey string) { got <- rename{bkt, oldKey, newKey} })
 
 	select {
-	case o := <-got:
-		assert.Equal(t, "a.xml", o, "onTerminal 应回传对象键")
+	case r := <-got:
+		assert.Equal(t, "pm-files", r.bucket, "onTerminal 应回传压缩所用 bucket")
+		assert.Equal(t, "a.xml", r.oldKey, "onTerminal 应回传旧对象键")
+		assert.Equal(t, "a.xml.gz", r.newKey, "压缩成功应回传改键后的 .gz 新键")
 	case <-time.After(2 * time.Second):
 		t.Fatal("压缩终态后未回调 onTerminal")
 	}
@@ -245,7 +266,7 @@ func TestSchedule_NoCallbackWhenDisabled(t *testing.T) {
 	}
 	a := newTestArchiver(store, lookup)
 	var called int32
-	a.Schedule("pm-files", "c.xml", func(_ context.Context, _ string) { atomic.AddInt32(&called, 1) })
+	a.Schedule("pm-files", "c.xml", func(_ context.Context, _, _, _ string) { atomic.AddInt32(&called, 1) })
 
 	// 给压缩 goroutine 足够时间跑完（禁用路径会很快返回非终态）。
 	time.Sleep(200 * time.Millisecond)

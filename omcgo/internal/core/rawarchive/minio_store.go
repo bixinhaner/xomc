@@ -77,11 +77,22 @@ func (s *minioStore) Get(ctx context.Context, bucket, object string) (io.ReadClo
 	return obj, nil
 }
 
-// Put 按原 key 覆盖写。
+// Put 写对象（压缩回写到新键 object+".gz"）。
 func (s *minioStore) Put(ctx context.Context, bucket, object string, r io.Reader, size int64, contentType, contentEncoding string) error {
 	_, err := s.client.PutObject(ctx, bucket, object, r, size, minio.PutObjectOptions{
 		ContentType:     contentType,
 		ContentEncoding: contentEncoding,
 	})
 	return err
+}
+
+// Remove 删除对象（改键后清理旧明文键）。对象/桶已不存在视为成功（幂等）。
+func (s *minioStore) Remove(ctx context.Context, bucket, object string) error {
+	if err := s.client.RemoveObject(ctx, bucket, object, minio.RemoveObjectOptions{}); err != nil {
+		if isNotFound(err) {
+			return nil
+		}
+		return err
+	}
+	return nil
 }

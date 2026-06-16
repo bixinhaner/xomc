@@ -42,11 +42,13 @@ const (
 	Category   = "raw_archive"
 	KeyEnabled = "compress_after_ingest"
 
-	defaultEnabled = true
-	configTTL      = 30 * time.Second
-	probeBytes     = 2                // gzip 魔数长度
-	maxObjectBytes = 64 << 20         // 64MiB 安全上限（对齐上传体积限），超限不压缩防 OOM
-	archiveTimeout = 30 * time.Second // 单文件压缩回写超时
+	defaultEnabled   = true
+	configTTL        = 30 * time.Second
+	probeBytes       = 2                // gzip 魔数长度
+	maxObjectBytes   = 64 << 20         // 64MiB 安全上限（对齐上传体积限），超限不压缩防 OOM
+	archiveTimeout   = 30 * time.Second // 单文件压缩回写超时
+	gzSuffix         = ".gz"            // 压缩后对象键追加的后缀（.xml → .xml.gz，自描述）
+	removeOldTimeout = 10 * time.Second // 删旧明文键的独立短超时（与压缩/扫描 ctx 解耦）
 )
 
 // outcome 是单次压缩回写的结果分类。terminal 的结果意味着"该对象的压缩状态已确定"
@@ -56,14 +58,14 @@ const (
 type outcome int
 
 const (
-	outcomeError     outcome = iota // 读/写/压缩失败（非终态，待重扫）
-	outcomeDisabled                 // 总开关关闭（非终态，开关恢复后重扫）
-	outcomeEmpty                    // 对象 0 字节（终态，无可压）
-	outcomeSkippedGz                // 已是 gzip（终态，真机 .xml.gz 常态）
-	outcomeCompressed               // 明文压缩并覆盖回写成功（终态）
-	outcomeNoGain                   // 压不动（gzip 头开销 ≥ 收益，终态，保留明文）
-	outcomeTooLarge                 // 超 maxObjectBytes 上限（终态，保留明文防 OOM）
-	outcomeNotFound                 // 对象已不存在（孤儿行，终态，标记后移出待扫集）
+	outcomeError      outcome = iota // 读/写/压缩失败（非终态，待重扫）
+	outcomeDisabled                  // 总开关关闭（非终态，开关恢复后重扫）
+	outcomeEmpty                     // 对象 0 字节（终态，无可压）
+	outcomeSkippedGz                 // 已是 gzip（终态，真机 .xml.gz 常态）
+	outcomeCompressed                // 明文压缩并覆盖回写成功（终态）
+	outcomeNoGain                    // 压不动（gzip 头开销 ≥ 收益，终态，保留明文）
+	outcomeTooLarge                  // 超 maxObjectBytes 上限（终态，保留明文防 OOM）
+	outcomeNotFound                  // 对象已不存在（孤儿行，终态，标记后移出待扫集）
 )
 
 // terminal 报告该结果是否表示"压缩状态已确定"，可标记 raw_compressed=true。
@@ -104,8 +106,10 @@ type RawStore interface {
 	ReadHead(ctx context.Context, bucket, object string, n int) ([]byte, error)
 	// Get 返回对象完整字节流。
 	Get(ctx context.Context, bucket, object string) (io.ReadCloser, error)
-	// Put 按原 key 覆盖写，contentEncoding 落对象元数据。
+	// Put 写对象（压缩回写到新键 object+".gz"），contentEncoding 落对象元数据。
 	Put(ctx context.Context, bucket, object string, r io.Reader, size int64, contentType, contentEncoding string) error
+	// Remove 删除对象（改键后清理旧明文键）。对象不存在应视为成功（幂等）。
+	Remove(ctx context.Context, bucket, object string) error
 }
 
 // ConfigLookup 读 sys_configs 单值（value, found）。
@@ -170,9 +174,11 @@ func New(baseCtx context.Context, store RawStore, lookup ConfigLookup, metrics *
 
 // Schedule 非阻塞地排程一次压缩回写（内联快路径）。并发已满则丢弃本次（记 dropped_busy）——
 // 丢弃的对象不会漏压，Sweeper 会兜底补压（见包注释）。onTerminal 在压缩抵达终态后于压缩
-// goroutine 内回调（传入对象键），供调用方在 pm_files/mr_files 标记 raw_compressed=true；
-// nil-safe，非终态（error/disabled）或 dropped_busy 不回调。
-func (a *Archiver) Schedule(bucket, object string, onTerminal func(ctx context.Context, object string)) {
+// goroutine 内回调，传入 (bucket, 旧键, 新键)：压缩成功改键时新键为 object+".gz"，其余终态新键==旧键。
+// 透传 bucket 是为了让调用方对正确的桶删旧键（调用方的 c.bucket 未必等于本次 Schedule 的 bucket，
+// 如 MR 用 payload.Bucket）。供调用方在 pm_files/mr_files 标记 raw_compressed=true 并把 minio_path
+// 更新为新键、再删旧键；nil-safe，非终态（error/disabled）或 dropped_busy 不回调。
+func (a *Archiver) Schedule(bucket, object string, onTerminal func(ctx context.Context, bucket, oldObject, newObject string)) {
 	if a == nil || a.store == nil || bucket == "" || object == "" {
 		return
 	}
@@ -186,10 +192,10 @@ func (a *Archiver) Schedule(bucket, object string, onTerminal func(ctx context.C
 			}
 			ctx, cancel := context.WithTimeout(base, archiveTimeout)
 			defer cancel()
-			oc, saved := a.compress(ctx, bucket, object)
+			oc, saved, newObject := a.compress(ctx, bucket, object)
 			a.record(oc.label(), saved)
 			if oc.terminal() && onTerminal != nil {
-				onTerminal(ctx, object)
+				onTerminal(ctx, bucket, object, newObject)
 			}
 		}()
 	default:
@@ -197,16 +203,17 @@ func (a *Archiver) Schedule(bucket, object string, onTerminal func(ctx context.C
 	}
 }
 
-// CompressNow 同步压缩一个对象并记 metric（供 Sweeper 补偿扫描用），返回结果是否为终态。
-// 终态即可在 pm_files/mr_files 标记 raw_compressed=true 并移出待扫描集；非终态（禁用 /
-// 读写错误）返回 false，保持 raw_compressed=false 待下一轮重扫。
-func (a *Archiver) CompressNow(ctx context.Context, bucket, object string) bool {
+// CompressNow 同步压缩一个对象并记 metric（供 Sweeper 补偿扫描用），返回 (是否终态, 压缩后对象键)。
+// 终态即可在 pm_files/mr_files 标记 raw_compressed=true 并把 minio_path 更新为返回的新键（压缩成功
+// 改键时为 object+".gz"，否则==object），随后删旧键；非终态（禁用 / 读写错误）返回 false，保持
+// raw_compressed=false 待下一轮重扫。
+func (a *Archiver) CompressNow(ctx context.Context, bucket, object string) (bool, string) {
 	if a == nil || a.store == nil || bucket == "" || object == "" {
-		return false
+		return false, object
 	}
-	oc, saved := a.compress(ctx, bucket, object)
+	oc, saved, newObject := a.compress(ctx, bucket, object)
 	a.record(oc.label(), saved)
-	return oc.terminal()
+	return oc.terminal(), newObject
 }
 
 // Enabled 返回压缩回写总开关（供 Sweeper 每轮扫描前短路，禁用时不空转扫描）。
@@ -219,15 +226,36 @@ func (a *Archiver) Enabled(ctx context.Context) bool {
 
 // archive 同步执行一次压缩回写并记 metric（保留供内部直调与单测）。
 func (a *Archiver) archive(ctx context.Context, bucket, object string) {
-	oc, saved := a.compress(ctx, bucket, object)
+	oc, saved, _ := a.compress(ctx, bucket, object)
 	a.record(oc.label(), saved)
 }
 
-// compress 是压缩回写的核心逻辑（同步，仅返回结果分类与省下字节，不记 metric）——由
+// RemoveOld 删除改键后遗留的旧明文对象（object 压缩改名为 object+".gz" 后的清理）。必须在 DB 的
+// minio_path 已更新为新键之后调用，否则会删掉仍被引用的对象。失败仅 warn + 记 metric——残留旧对象
+// 只是占盘、不影响功能（DB 已指向新键），可被后续 retention/GC 清理。nil-safe。
+func (a *Archiver) RemoveOld(ctx context.Context, bucket, object string) {
+	if a == nil || a.store == nil || bucket == "" || object == "" {
+		return
+	}
+	// 删旧键是 best-effort 清理，但必须与压缩/扫描的 ctx 生命周期解耦：压缩 ctx 临近 30s 到期、
+	// 或 worker 优雅关停 cancel(baseCtx)，都不应在「DB 已切新键」之后打断删旧键（否则留旧明文孤儿，
+	// 虽有 MinIO ILM 兜底回收，仍应尽量避免）。WithoutCancel 保留 ctx 的 trace/值、仅解除取消传播，
+	// 再叠加独立短超时。代价：关停期最多延后一个 removeOldTimeout 退出，可接受。
+	rmCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), removeOldTimeout)
+	defer cancel()
+	if err := a.store.Remove(rmCtx, bucket, object); err != nil {
+		a.warn("remove old object", bucket, object, err)
+		a.record("remove_old_error", 0)
+	}
+}
+
+// compress 是压缩回写的核心逻辑（同步，返回结果分类、省下字节、压缩后对象键）——由
 // Schedule（内联快路径）、CompressNow（Sweeper 兜底）、archive（单测）共用，保证三路语义一致。
-func (a *Archiver) compress(ctx context.Context, bucket, object string) (outcome, int64) {
+// 压缩成功时回写到新键 object+".gz"（自描述，不覆盖原明文键），第三个返回值即新键；其余情况
+// 返回值==object（未改键）。原明文键由调用方在 DB minio_path 更新成功后经 RemoveOld 删除。
+func (a *Archiver) compress(ctx context.Context, bucket, object string) (outcome, int64, string) {
 	if !a.enabled(ctx) {
-		return outcomeDisabled, 0
+		return outcomeDisabled, 0, object
 	}
 
 	// 廉价探测：前 2 字节命中 gzip 魔数 → 对象已压缩（真机常态），跳过整文件读写。
@@ -235,32 +263,32 @@ func (a *Archiver) compress(ctx context.Context, bucket, object string) (outcome
 	if err != nil {
 		// 对象已被删除（孤儿行）→ 终态，让 Sweeper 标记移出，不永久重扫卡死。
 		if errors.Is(err, ErrObjectNotFound) {
-			return outcomeNotFound, 0
+			return outcomeNotFound, 0, object
 		}
 		a.warn("probe head", bucket, object, err)
-		return outcomeError, 0
+		return outcomeError, 0, object
 	}
 	if len(head) == 0 {
-		return outcomeEmpty, 0
+		return outcomeEmpty, 0, object
 	}
 	if compress.IsGzip(head) {
-		return outcomeSkippedGz, 0
+		return outcomeSkippedGz, 0, object
 	}
 
-	// 明文：整读（受上限约束）→ gzip → 覆盖写。
+	// 明文：整读（受上限约束）→ gzip → 写到新键。
 	rc, err := a.store.Get(ctx, bucket, object)
 	if err != nil {
 		a.warn("get object", bucket, object, err)
-		return outcomeError, 0
+		return outcomeError, 0, object
 	}
 	raw, rerr := io.ReadAll(io.LimitReader(rc, maxObjectBytes+1))
 	_ = rc.Close()
 	if rerr != nil {
 		a.warn("read object", bucket, object, rerr)
-		return outcomeError, 0
+		return outcomeError, 0, object
 	}
 	if len(raw) > maxObjectBytes {
-		return outcomeTooLarge, 0
+		return outcomeTooLarge, 0, object
 	}
 
 	var buf bytes.Buffer
@@ -268,28 +296,35 @@ func (a *Archiver) compress(ctx context.Context, bucket, object string) (outcome
 	if _, werr := zw.Write(raw); werr != nil {
 		_ = zw.Close()
 		a.warn("gzip write", bucket, object, werr)
-		return outcomeError, 0
+		return outcomeError, 0, object
 	}
 	if cerr := zw.Close(); cerr != nil {
 		a.warn("gzip close", bucket, object, cerr)
-		return outcomeError, 0
+		return outcomeError, 0, object
 	}
 	gz := buf.Bytes()
 	if len(gz) >= len(raw) {
 		// 压不动（极小/高熵）→ 不回写，避免越压越大。
-		return outcomeNoGain, 0
+		return outcomeNoGain, 0, object
 	}
 
-	if perr := a.store.Put(ctx, bucket, object, bytes.NewReader(gz), int64(len(gz)), "application/xml", "gzip"); perr != nil {
-		a.warn("put compressed", bucket, object, perr)
-		return outcomeError, 0
+	// 改键回写：写到 object+".gz"（自描述），不覆盖原明文键。原键由调用方在 DB minio_path 更新
+	// 成功后删除（RemoveOld），保证「DB 永远指向已存在的对象」、崩溃可由 Sweeper 重扫自愈。
+	// 防御：object 已以 .gz 结尾（理论上明文不会）则不再追加，覆盖原键。
+	newObject := object
+	if !strings.HasSuffix(strings.ToLower(object), gzSuffix) {
+		newObject = object + gzSuffix
+	}
+	if perr := a.store.Put(ctx, bucket, newObject, bytes.NewReader(gz), int64(len(gz)), "application/xml", "gzip"); perr != nil {
+		a.warn("put compressed", bucket, newObject, perr)
+		return outcomeError, 0, object
 	}
 
 	saved := int64(len(raw) - len(gz))
-	a.logger.Debug("raw file compressed in place",
-		zap.String("bucket", bucket), zap.String("object", object),
+	a.logger.Debug("raw file compressed",
+		zap.String("bucket", bucket), zap.String("object", object), zap.String("new_object", newObject),
 		zap.Int("orig_bytes", len(raw)), zap.Int("gz_bytes", len(gz)), zap.Int64("saved_bytes", saved))
-	return outcomeCompressed, saved
+	return outcomeCompressed, saved, newObject
 }
 
 // enabled 返回压缩回写开关，结果 TTL 缓存避免每文件查 sys_configs。
