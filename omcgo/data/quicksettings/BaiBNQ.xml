@@ -62,16 +62,28 @@
            standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.CN.TA.{i}.NrcellIdentity"/>
   </group>
   <group id="gnb-tdd" titleZh="TDD 配置" titleEn="TDD Configuration">
-    <param name="DlULTransmissionPeriodicity" titleZh="TDD 时隙周期" titleEn="TDD Periodicity"
+    <param name="ReferenceSubcarrierSpacing" titleZh="参考子载波间隔" titleEn="Reference Subcarrier Spacing"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.TddULDLConfigurationCommon.ReferenceSubcarrierSpacing"/>
+    <param name="DlULTransmissionPeriodicity" titleZh="Pattern1 时隙周期" titleEn="Pattern1 Periodicity"
            standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.TddULDLConfigurationCommon.pattern1.DlULTransmissionPeriodicity"/>
-    <param name="NrofDownlinkSlots" titleZh="下行时隙数" titleEn="Downlink Slots"
+    <param name="NrofDownlinkSlots" titleZh="Pattern1 下行时隙数" titleEn="Pattern1 DL Slots"
            standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.TddULDLConfigurationCommon.pattern1.NrofDownlinkSlots"/>
-    <param name="NrofDownlinkSymbols" titleZh="下行特殊符号数" titleEn="Downlink Symbols"
+    <param name="NrofDownlinkSymbols" titleZh="Pattern1 下行特殊符号数" titleEn="Pattern1 DL Symbols"
            standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.TddULDLConfigurationCommon.pattern1.NrofDownlinkSymbols"/>
-    <param name="NrofUplinkSlots" titleZh="上行时隙数" titleEn="Uplink Slots"
+    <param name="NrofUplinkSlots" titleZh="Pattern1 上行时隙数" titleEn="Pattern1 UL Slots"
            standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.TddULDLConfigurationCommon.pattern1.NrofUplinkSlots"/>
-    <param name="NrofUplinkSymbols" titleZh="上行特殊符号数" titleEn="Uplink Symbols"
+    <param name="NrofUplinkSymbols" titleZh="Pattern1 上行特殊符号数" titleEn="Pattern1 UL Symbols"
            standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.TddULDLConfigurationCommon.pattern1.NrofUplinkSymbols"/>
+    <param name="Pat2DlULTransmissionPeriodicity" titleZh="Pattern2 时隙周期" titleEn="Pattern2 Periodicity"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.TddULDLConfigurationCommon.pattern2.DlULTransmissionPeriodicity"/>
+    <param name="Pat2NrofDownlinkSlots" titleZh="Pattern2 下行时隙数" titleEn="Pattern2 DL Slots"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.TddULDLConfigurationCommon.pattern2.NrofDownlinkSlots"/>
+    <param name="Pat2NrofDownlinkSymbols" titleZh="Pattern2 下行特殊符号数" titleEn="Pattern2 DL Symbols"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.TddULDLConfigurationCommon.pattern2.NrofDownlinkSymbols"/>
+    <param name="Pat2NrofUplinkSlots" titleZh="Pattern2 上行时隙数" titleEn="Pattern2 UL Slots"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.TddULDLConfigurationCommon.pattern2.NrofUplinkSlots"/>
+    <param name="Pat2NrofUplinkSymbols" titleZh="Pattern2 上行特殊符号数" titleEn="Pattern2 UL Symbols"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.TddULDLConfigurationCommon.pattern2.NrofUplinkSymbols"/>
   </group>
   <group id="device-time" titleZh="时间设置" titleEn="Time Settings">
     <param name="LocalTimeZoneName" titleZh="本地时区" titleEn="Local Time Zone"
@@ -134,25 +146,31 @@
               <param name="SmtcOffset" titleZh="SMTC 偏移" titleEn="SMTC Offset" leaf="SmtcOffset"/>
               <param name="FreqBandIndicatorNR" titleZh="频段" titleEn="Band" leaf="FreqBandIndicatorNR"/>
        </group>
-       <group id="gnb-lte-neighbor-cell" titleZh="LTE 邻区列表" titleEn="LTE Neighbor Cell List"
+       <group id="gnb-lte-neighbor-cell" titleZh="LTE小区邻区列表" titleEn="LTE Cell Neighbor List"
                              multiInstance="true" maxInstances="32"
                              objectPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.LTECell.{i}.">
-              <param name="PLMNID" titleZh="PLMN" titleEn="PLMN" leaf="PLMNID"/>
-              <param name="CID" titleZh="小区 ID" titleEn="Cell ID" leaf="CID"/>
-              <param name="EUTRACarrierARFCN" titleZh="EARFCN" titleEn="EARFCN" leaf="EUTRACarrierARFCN"/>
-              <param name="PhyCellID" titleZh="PCI" titleEn="PCI" leaf="PhyCellID"/>
+              <param name="PLMNID" titleZh="PLMN标识" titleEn="PLMN ID" leaf="PLMNID"/>
+              <param name="CID" titleZh="CID" titleEn="CID" leaf="CID"/>
+              <param name="EUTRACarrierARFCN" titleZh="邻区EARFCN" titleEn="Neighbor EARFCN" leaf="EUTRACarrierARFCN"/>
+              <param name="PhyCellID" titleZh="物理小区ID" titleEn="Physical Cell ID" leaf="PhyCellID"/>
               <param name="Qoffset" titleZh="QOffset" titleEn="QOffset" leaf="Qoffset"/>
-              <param name="TAC" titleZh="TAC" titleEn="TAC" leaf="TAC"/>
        </group>
-       <group id="gnb-lte-neighbor-freq" titleZh="LTE 邻频列表" titleEn="LTE Neighbor Frequency List"
+       <group id="gnb-lte-neighbor-freq" titleZh="LTE异系统测量频点列表" titleEn="LTE Inter-System Measurement Frequency List"
                              multiInstance="true" maxInstances="8"
                              objectPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.EUTRA.Carrier.{i}.">
-              <param name="CarrierFreq" titleZh="频点" titleEn="Carrier Frequency" leaf="CarrierFreq"/>
+              <param name="CarrierFreq" titleZh="载波频点" titleEn="Carrier Frequency" leaf="CarrierFreq"/>
               <param name="AllowedMeasBandwidth" titleZh="测量带宽" titleEn="Allowed Meas Bandwidth" leaf="AllowedMeasBandwidth"/>
-              <param name="PresenceAntennaPort1" titleZh="天线端口 1" titleEn="Antenna Port 1" leaf="PresenceAntennaPort1"/>
-              <param name="Qoffset" titleZh="QOffset" titleEn="QOffset" leaf="Qoffset"/>
-              <param name="ThreshXHigh" titleZh="高门限" titleEn="Thresh X High" leaf="ThreshXHigh"/>
-              <param name="ThreshXLow" titleZh="低门限" titleEn="Thresh X Low" leaf="ThreshXLow"/>
-              <param name="CellReselectionPriority" titleZh="重选优先级" titleEn="Cell Reselection Priority" leaf="CellReselectionPriority"/>
+              <param name="PresenceAntennaPort1" titleZh="指示是否所有邻小区使用天线端口1" titleEn="Presence Antenna Port 1" leaf="PresenceAntennaPort1"/>
+              <param name="Qoffset" titleZh="Q_OffsetRange" titleEn="Q-Offset Range" leaf="Qoffset"/>
+              <param name="WideBandRsrqMeas" titleZh="宽带测量" titleEn="WideBand RSRQ Meas" leaf="WideBandRsrqMeas"/>
+       </group>
+       <group id="gnb-lte-reselection" titleZh="LTE异系统重选列表" titleEn="LTE Inter-System Reselection List"
+                             multiInstance="true" maxInstances="8"
+                             objectPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.EUTRA.Carrier.{i}.">
+              <param name="CarrierFreq" titleZh="邻区EARFCN" titleEn="Neighbor EARFCN" leaf="CarrierFreq"/>
+              <param name="CellReselectionPriority" titleZh="小区重选优先级" titleEn="Cell Reselection Priority" leaf="CellReselectionPriority"/>
+              <param name="ThreshXHigh" titleZh="EUTRAN频点高优先级重选门限" titleEn="EUTRAN High Priority Reselection Threshold" leaf="ThreshXHigh"/>
+              <param name="ThreshXLow" titleZh="EUTRAN频点低优先级重选门限" titleEn="EUTRAN Low Priority Reselection Threshold" leaf="ThreshXLow"/>
+              <param name="QRxLevMin" titleZh="EUTRAN最低接收电平" titleEn="EUTRAN Minimum Receive Level" leaf="QRxLevMin"/>
        </group>
 </quickSettings>
