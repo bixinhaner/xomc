@@ -42,6 +42,28 @@ export interface AdhocListFilter {
   isBuiltin?: boolean;
 }
 
+/**
+ * 把 params 序列化成 query string，数组 → 重复键（k=a&k=b，无方括号），标量原样。
+ * 用于 results 端点的 object_ldns 多值（值合法含逗号，不能 CSV-join，见 issue #401）。
+ * 每个键/值都 encodeURIComponent，避免 UUID/逗号/等号被破坏。
+ */
+function serializeRepeatedParams(params: Record<string, unknown>): string {
+  const parts: string[] = [];
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null) continue;
+    const ek = encodeURIComponent(key);
+    if (Array.isArray(value)) {
+      for (const v of value) {
+        if (v === undefined || v === null) continue;
+        parts.push(`${ek}=${encodeURIComponent(String(v))}`);
+      }
+    } else {
+      parts.push(`${ek}=${encodeURIComponent(String(value))}`);
+    }
+  }
+  return parts.join('&');
+}
+
 export const pmAdhocApi = {
   async list(filter?: AdhocListFilter): Promise<AdhocTask[]> {
     const params: Record<string, unknown> = {};
@@ -105,18 +127,24 @@ export const pmAdhocApi = {
     objectLdns?: string[],
   ): Promise<{ rows: AdhocResultRow[]; total: number }> {
     // 大时间段（页签1 仪表盘）：startTime/endTime 为 RFC3339，透传为 start_time/end_time query 参数。
-    // PM-DASH-DIMFILTER：维度子集过滤——本端点 query 是手动 snake_case 构造（不靠 Axios 自动转换），
-    // 故新参数也手写 snake_case。数组发 CSV（join(',')）而非原始数组：http.ts 无 paramsSerializer，
-    // Axios 默认把数组序列化成带方括号的 product_ids[]=a&product_ids[]=b，后端 gin QueryArray("product_ids")
-    // 按精确键名取值收不到（值落在 product_ids[] 键下）→ 子集过滤静默失效。CSV 形态 product_ids=a,b 后端
-    // parseCSVQuery 逗号切正确解析。与同仓库 pmObjectsApi.ts 的 device_sns.join(',') 既定模式一致。
+    // PM-DASH-DIMFILTER：维度子集过滤——本端点 query 是手动 snake_case 构造（不靠 Axios 自动转换），故新参数手写 snake_case。
+    //
+    // 两个维度参数传法不同（issue #401 修复后定型）：
+    //   - product_ids：纯 UUID，值内永不含逗号 → 发 CSV（join(',')），后端 parseCSVQuery 逗号切分还原多值。
+    //   - object_ldns：设备组维度值本身合法含一个逗号（'DeviceGroup=<uuid>,Tech=<tech>'），不能再用 CSV——
+    //     否则单个值被逗号切成两段、后端 object_ldn = ANY(...) 匹配不上完整存储值 → 0 行（issue #401 根因）。
+    //     故 object_ldns 发「重复参数」形态 ?object_ldns=a&object_ldns=b，整值保留不拆，后端 parseRepeatedQuery
+    //     用 gin QueryArray 逐值取回。下方 paramsSerializer 把数组序列化成无方括号的重复键（Axios 默认会发
+    //     object_ldns[]=a&object_ldns[]=b，方括号键被 QueryArray("object_ldns") 收不到 → 过滤静默失效）。
     const params: Record<string, unknown> = { limit, offset };
     if (startTime) params.start_time = startTime;
     if (endTime) params.end_time = endTime;
     if (productIds?.length) params.product_ids = productIds.join(',');
-    if (objectLdns?.length) params.object_ldns = objectLdns.join(',');
+    if (objectLdns?.length) params.object_ldns = objectLdns;
     const { data } = await http.get<ResultsResponse>(`/pm/adhoc/tasks/${id}/results`, {
       params,
+      // 数组按重复键序列化（object_ldns=a&object_ldns=b），标量原样拼接——不引第三方 qs 依赖。
+      paramsSerializer: (p: Record<string, unknown>) => serializeRepeatedParams(p),
     });
     const rows = (data.items ?? []).map(mapBackendAdhocResult);
     // T-0194：total 是后端真实 COUNT(*)，rows.length<total 即被 limit 截断（前端据此提示）。
