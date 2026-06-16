@@ -14,6 +14,10 @@ import {
   useSaveKPILayout,
 } from '@core/hooks/api/useDashboard'
 import type { KPILayoutPanel } from '@core/types/dashboard'
+import {
+  validateKpiPanels,
+  formatKpiPanelViolations,
+} from '@core/utils/kpiPanelValidation'
 
 // ============================================================
 // 系统管理 / 首页 KPI 配置（管理员）— 对齐 v1 webcode/src/pages/system/KpiConfig
@@ -52,6 +56,8 @@ function TechEditor({ tech }: { tech: string }) {
 
   const [panels, setPanels] = useState<WorkingPanel[]>([])
   const [initializedTech, setInitializedTech] = useState<string | null>(null)
+  // 保存前校验不通过时的提示文案（拦截 PUT，内联告警展示）。
+  const [validationError, setValidationError] = useState<string | null>(null)
 
   // 读到布局后一次性初始化本地工作态（按 tech 重置）。
   useEffect(() => {
@@ -99,6 +105,15 @@ function TechEditor({ tech }: { tech: string }) {
       void _id
       return rest
     })
+    // 保存前校验：每张图必须「标题非空 + 至少 1 指标」，否则拦截不发 PUT。
+    const result = validateKpiPanels(
+      payload.map((p) => ({ title: p.title, metrics: p.metrics })),
+    )
+    if (!result.valid) {
+      setValidationError(formatKpiPanelViolations(result.violations))
+      return
+    }
+    setValidationError(null)
     saveMutation.mutate({ tech, panels: payload })
   }
 
@@ -132,6 +147,12 @@ function TechEditor({ tech }: { tech: string }) {
           保存后对所有用户生效（最后写入生效）
         </span>
       </div>
+
+      {validationError ? (
+        <div className="rounded-md border border-destructive/30 bg-destructive/5 px-4 py-2 text-sm text-destructive">
+          {validationError}
+        </div>
+      ) : null}
 
       {saveMutation.isSuccess ? (
         <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 px-4 py-2 text-sm text-emerald-600 dark:text-emerald-400">
