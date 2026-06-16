@@ -32,7 +32,6 @@ import {
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import LineChart from '@/components/Charts/LineChart';
-import StatusIndicator from '@/components/StatusIndicator';
 import ErrorBoundary from '@/components/common/ErrorBoundary';
 import { useSyncStatus } from '@core/hooks/api/useDeviceParameters';
 import { useDeviceBySn, useSyncDeviceParams } from '@core/hooks/api/useDevices';
@@ -1616,10 +1615,14 @@ export default function DeviceDetail() {
                 {displayDevice.sn}
               </Text>
             </div>
-            <StatusIndicator
-              status={displayDevice.connStatus === 'online' ? 'online' : 'offline'}
-              variant="tag"
-            />
+            {renderStatusTag(displayDevice.opState, {
+              '1': { label: t('status.active'), color: 'success' },
+              '0': { label: t('status.inactive'), color: 'error' },
+              true: { label: t('status.active'), color: 'success' },
+              false: { label: t('status.inactive'), color: 'error' },
+              active: { label: t('status.active'), color: 'success' },
+              inactive: { label: t('status.inactive'), color: 'error' },
+            })}
             {displayDevice.alarmLevel !== 'none' && (
               <Tag color={SEVERITY_COLOR[displayDevice.alarmLevel]}>
                 {SEVERITY_LABEL[displayDevice.alarmLevel]}
