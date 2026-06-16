@@ -96,39 +96,8 @@ func (s *PathTranslationService) TranslateTaskParams(ctx context.Context, t *tas
 		return t.Params, false
 	}
 
-	device, err := s.devices.GetBySerialNumber(ctx, t.DeviceSN)
-	if err != nil || device == nil {
-		s.logger.Warn("path translation skipped: device lookup failed",
-			zap.String("device_sn", t.DeviceSN),
-			zap.String("task_id", t.ID),
-			zap.Error(err))
-		return t.Params, false
-	}
-
-	matchRes, err := s.products.MatchProductClass(ctx, device.ProductClass)
-	if err != nil || matchRes == nil || matchRes.Product == nil || matchRes.Product.ParamModelID == nil {
-		// orphan device 不算严重错误:App 端 fanout 也会走 orphan_passthrough。
-		// 这里 WARN 但不阻断 — 原 params 直发(很可能 9005,但语义与改造前一致)。
-		if !errors.Is(err, product.ErrOrphan) && err != nil {
-			s.logger.Warn("path translation skipped: product match failed",
-				zap.String("device_sn", t.DeviceSN),
-				zap.String("product_class", device.ProductClass),
-				zap.String("task_id", t.ID),
-				zap.Error(err))
-		}
-		return t.Params, false
-	}
-
-	tr, err := s.translator.Translator(ctx, matchRes.Product.ID, device.FirmwareVersion)
-	if err != nil || tr == nil {
-		if err != nil && !errors.Is(err, parammodel.ErrNoMapping) {
-			s.logger.Warn("path translation skipped: translator unavailable",
-				zap.String("device_sn", t.DeviceSN),
-				zap.String("product_class", device.ProductClass),
-				zap.String("software_version", device.FirmwareVersion),
-				zap.String("task_id", t.ID),
-				zap.Error(err))
-		}
+	tr, ok := s.resolveTranslator(ctx, t.DeviceSN)
+	if !ok {
 		return t.Params, false
 	}
 
@@ -142,6 +111,68 @@ func (s *PathTranslationService) TranslateTaskParams(ctx context.Context, t *tas
 		return t.Params, false
 	}
 	return translated, true
+}
+
+// resolveTranslator 按设备 SN 解析出对应的 Translator（SN→product→param_model）。
+// 出站（TranslateTaskParams）与入站（TranslateResponseNames）共用同一解析链。
+// 任一步失败 → (nil, false)，调用方退化为透传（与改造前 fallback 一致）。
+func (s *PathTranslationService) resolveTranslator(ctx context.Context, deviceSN string) (*parammodel.Translator, bool) {
+	device, err := s.devices.GetBySerialNumber(ctx, deviceSN)
+	if err != nil || device == nil {
+		s.logger.Warn("path translation skipped: device lookup failed",
+			zap.String("device_sn", deviceSN), zap.Error(err))
+		return nil, false
+	}
+
+	matchRes, err := s.products.MatchProductClass(ctx, device.ProductClass)
+	if err != nil || matchRes == nil || matchRes.Product == nil || matchRes.Product.ParamModelID == nil {
+		// orphan device 不算严重错误（与 App fanout orphan_passthrough 一致）：WARN 不阻断。
+		if !errors.Is(err, product.ErrOrphan) && err != nil {
+			s.logger.Warn("path translation skipped: product match failed",
+				zap.String("device_sn", deviceSN),
+				zap.String("product_class", device.ProductClass), zap.Error(err))
+		}
+		return nil, false
+	}
+
+	tr, err := s.translator.Translator(ctx, matchRes.Product.ID, device.FirmwareVersion)
+	if err != nil || tr == nil {
+		if err != nil && !errors.Is(err, parammodel.ErrNoMapping) {
+			s.logger.Warn("path translation skipped: translator unavailable",
+				zap.String("device_sn", deviceSN),
+				zap.String("product_class", device.ProductClass),
+				zap.String("software_version", device.FirmwareVersion), zap.Error(err))
+		}
+		return nil, false
+	}
+	return tr, true
+}
+
+// TranslateResponseNames 把基站响应里的参数名（私有 path）回译为标准 path（issue #424）。
+//
+// 与出站 TranslateTaskParams 对称、共用 resolveTranslator；用于 GPV/GPA 响应的
+// parameter_values[].name。返回**新切片**（不修改入参，遵不可变约定）；
+// (translated, true) 表示走过翻译路径，(原值拷贝, false) 表示透传（依赖缺失/解析失败）。
+// 单个 name 在 Translator 内 Found=false 时原样保留（私有 path 兜底，不丢值）。
+func (s *PathTranslationService) TranslateResponseNames(ctx context.Context, deviceSN string, names []string) ([]string, bool) {
+	out := make([]string, len(names))
+	copy(out, names)
+	if !s.Enabled() || len(names) == 0 {
+		return out, false
+	}
+	tr, ok := s.resolveTranslator(ctx, deviceSN)
+	if !ok {
+		return out, false
+	}
+	for i, n := range out {
+		if n == "" {
+			continue
+		}
+		if res := tr.ToStandard(n); res.Found {
+			out[i] = res.Translated
+		}
+	}
+	return out, true
 }
 
 // methodNeedsTranslation 报告哪些 RPC 方法的 params 含 path 字段。

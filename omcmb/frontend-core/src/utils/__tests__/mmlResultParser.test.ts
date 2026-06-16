@@ -58,6 +58,32 @@ describe('parseMmlDeviceTaskResult', () => {
     ]);
   });
 
+  // issue #424：standard_parameter_values 存在时优先用它（标准 path），不再解析 raw_response 的私有 path。
+  it('GPV → 优先用 ACS 回译的 standard_parameter_values（标准 path）', () => {
+    const got = parseMmlDeviceTaskResult({
+      method: 'GetParameterValuesResponse',
+      raw_response: gpvSample, // 私有 path 原文（保留供 XmlViewer），但应被 standard 覆盖
+      standard_parameter_values: [
+        { name: 'Device.WiFi.SSID', value: 'home', type: 'xsd:string' },
+        { name: 'Device.LAN.IP', value: '192.168.1.1', type: 'xsd:string' },
+      ],
+    });
+    expect(got?.kind).toBe('gpv');
+    expect(got?.params).toEqual([
+      { name: 'Device.WiFi.SSID', value: 'home', type: 'xsd:string' },
+      { name: 'Device.LAN.IP', value: '192.168.1.1', type: 'xsd:string' },
+    ]);
+  });
+
+  it('GPV → standard_parameter_values 缺失/空时回退解析 raw_response', () => {
+    const got = parseMmlDeviceTaskResult({
+      method: 'GetParameterValuesResponse',
+      raw_response: gpvSample,
+      standard_parameter_values: [],
+    });
+    expect(got?.params).toHaveLength(3); // 回退到 raw 解析
+  });
+
   it('SPV Status=0 → 立即生效', () => {
     const got = parseMmlDeviceTaskResult({
       method: 'SetParameterValuesResponse',

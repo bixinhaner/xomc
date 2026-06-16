@@ -133,6 +133,49 @@ func TestTranslateTaskParams_TranslatesGPVNames(t *testing.T) {
 	}, got.Names)
 }
 
+// issue #424：响应方向（私有→标准）回译，与出站 TranslateTaskParams 对称。
+func TestTranslateResponseNames_PrivateToStandard(t *testing.T) {
+	dev := &coremodel.Device{ProductClass: "X-BLQ", FirmwareVersion: "1.0.0"}
+	prodID := uuid.New()
+	modelID := uuid.New()
+	prod := &product.Product{ID: prodID, ParamModelID: &modelID}
+	matcher := &stubProductMatcher{res: &product.MatchResult{Product: prod}}
+	tr := buildTranslator(t, map[string]string{
+		"Device.WiFi.SSID.": "X_COM_VENDOR.WiFi.SSID.",
+		"Device.LAN.IP.":    "X_COM_VENDOR.LAN.IP.",
+	})
+
+	s := NewPathTranslationService(
+		&stubDeviceLookup{dev: dev},
+		matcher,
+		&stubTranslatorFactory{tr: tr},
+		zap.NewNop(),
+	)
+
+	// 基站响应里的私有 path → 回译为标准 path；未命中的私有 path 原样保留（不丢值）。
+	in := []string{"X_COM_VENDOR.WiFi.SSID.", "X_COM_VENDOR.LAN.IP.", "X_COM_VENDOR.Unknown."}
+	out, changed := s.TranslateResponseNames(context.Background(), "SN1", in)
+
+	require.True(t, changed)
+	assert.Equal(t, []string{
+		"Device.WiFi.SSID.",
+		"Device.LAN.IP.",
+		"X_COM_VENDOR.Unknown.", // miss → 私有 path 原样保留
+	}, out)
+	// 不可变：返回的是新切片，入参不被改写。
+	assert.Equal(t, "X_COM_VENDOR.WiFi.SSID.", in[0])
+}
+
+func TestTranslateResponseNames_PassthroughWhenDisabled(t *testing.T) {
+	s := NewPathTranslationService(nil, nil, nil, zap.NewNop())
+	in := []string{"a", "b"}
+	out, changed := s.TranslateResponseNames(context.Background(), "SN", in)
+	require.False(t, changed)
+	assert.Equal(t, in, out)
+	out[0] = "x" // 改返回值不影响入参（拷贝语义）
+	assert.Equal(t, "a", in[0])
+}
+
 func TestTranslateTaskParams_TranslatesSPVValues(t *testing.T) {
 	dev := &coremodel.Device{ProductClass: "X-BLQ", FirmwareVersion: "1.0.0"}
 	modelID := uuid.New()
