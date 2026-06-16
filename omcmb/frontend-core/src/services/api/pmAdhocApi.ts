@@ -117,6 +117,11 @@ export const pmAdhocApi = {
   async cancel(id: string): Promise<void> {
     await http.delete(`/pm/adhoc/tasks/${id}`);
   },
+  // issue #392：硬删终态自建任务的定义行（与取消软删区分子路径 /definition，避免与取消端点冲突）。
+  // 后端守门：非终态→409 / 内置→403 / 不存在→404；只删 pm_tasks 定义行，结果交 retention 自然过期。
+  async deleteTask(id: string): Promise<void> {
+    await http.delete(`/pm/adhoc/tasks/${id}/definition`);
+  },
   async results(
     id: string,
     limit = 100,
@@ -244,6 +249,10 @@ export const pmAdhocMock: typeof pmAdhocApi = {
   async cancel(id) {
     const t = mockTasks.find((x) => x.id === id);
     if (t) t.status = 'canceled';
+  },
+  async deleteTask(id) {
+    const i = mockTasks.findIndex((x) => x.id === id);
+    if (i >= 0) mockTasks.splice(i, 1);
   },
   async results() {
     return { rows: [], total: 0 };

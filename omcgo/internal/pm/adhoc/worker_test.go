@@ -47,6 +47,7 @@ func (s *workerStubRepo) Update(context.Context, uuid.UUID, UpdateRequest) error
 func (s *workerStubRepo) Get(context.Context, uuid.UUID) (*Task, error)            { return nil, nil }
 func (s *workerStubRepo) List(context.Context, ListFilter) ([]Task, error)         { return nil, nil }
 func (s *workerStubRepo) Cancel(context.Context, uuid.UUID) error                  { return nil }
+func (s *workerStubRepo) Delete(context.Context, uuid.UUID) error                  { return nil }
 
 func (s *workerStubRepo) LockNextPending(context.Context, string) (*Task, error) {
 	s.mu.Lock()

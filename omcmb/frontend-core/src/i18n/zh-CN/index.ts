@@ -7210,6 +7210,12 @@ const messages: Record<string, string> = {
   'perf.adhoc.cancelTaskTitle':          '取消任务',
   'perf.adhoc.cancelTaskContent':        '已在运行的任务取消后不会回滚已写入结果',
   'perf.adhoc.canceled':                 '已取消',
+  // issue #392：删除终态自建任务
+  'perf.adhoc.btnDelete':                '删除',
+  'perf.adhoc.deleteTaskTitle':          '删除任务',
+  'perf.adhoc.deleteTaskContent':        '删除后任务从列表移除且不可恢复；已聚合的结果数据由保留期自动清理。确认删除？',
+  'perf.adhoc.deleted':                  '已删除',
+  'perf.adhoc.deleteFailed':             '删除失败：{msg}',
   'perf.adhoc.detailTitle':              '任务详情：{name}',
   'perf.adhoc.detailTitleDefault':       '任务详情',
   'perf.adhoc.descMode':                 '模式',

@@ -39,6 +39,15 @@ type Repository interface {
 	// 已 succeeded/failed 行调用返 ErrTerminalState。
 	Cancel(ctx context.Context, id uuid.UUID) error
 
+	// Delete 硬删一行 adhoc 任务【定义行】（#392）。
+	//   - 仅删终态（succeeded/failed/canceled）+ 自建（is_builtin=false）+ task_subtype='adhoc_aggregation' 行。
+	//   - 复用过期清理的删除语义（只删 pm_tasks 定义行，绝不触碰结果表，结果交 TimescaleDB retention 自然过期），
+	//     但绕过过期天数判断，按 id 即时删。
+	//   - 非终态（pending/running/scheduled）行返 ErrTerminalState（语义：仍活跃，应走 Cancel）。
+	//   - 内置任务（is_builtin=true）返 ErrBuiltinNotDeletable。
+	//   - 行不存在返 ErrNotFound。
+	Delete(ctx context.Context, id uuid.UUID) error
+
 	// LockNextPending worker 抢任务（pending → running + 占 lock_owner）。
 	// 无可用任务返 ErrNoPendingTask。
 	LockNextPending(ctx context.Context, lockOwner string) (*Task, error)
@@ -68,6 +77,10 @@ var (
 	ErrNoPendingTask = errors.New("adhoc: no pending task available")
 	ErrTerminalState = errors.New("adhoc: task already in terminal state")
 	ErrNotFound      = errors.New("adhoc: task not found")
+	// ErrNotTerminal #392：删除端点对非终态（pending/running/scheduled）任务返回——仍活跃，应走 Cancel。
+	ErrNotTerminal = errors.New("adhoc: task not in terminal state, cannot delete")
+	// ErrBuiltinNotDeletable #392：删除端点对内置任务返回——内置任务由 seed 维护，永不可删。
+	ErrBuiltinNotDeletable = errors.New("adhoc: builtin task cannot be deleted")
 )
 
 // PgRepository 是 Repository 的 pgxpool 实现。
@@ -280,6 +293,43 @@ RETURNING status`
 			return ErrTerminalState
 		}
 		return fmt.Errorf("adhoc.Cancel: %w", err)
+	}
+	return nil
+}
+
+// Delete 硬删一行终态自建 adhoc 任务定义行（#392）。
+//
+// 复用 ExpireCleanup 的删除语义（只删 pm_tasks 定义行，绝不触碰结果表 pm_adhoc_aggregation_results——
+// 结果是 TimescaleDB 超表，由 add_retention_policy 365 天自动 drop_chunks），但绕过过期天数判断按 id 即时删。
+//
+// 删除条件全部 AND：
+//   - id = $1
+//   - task_subtype = 'adhoc_aggregation'（只动 adhoc 行）
+//   - is_builtin = false（内置任务排除）
+//   - status IN ('succeeded','failed','canceled')（仅终态可删）
+//
+// 删 0 行时回查行状态区分原因：不存在→ErrNotFound、内置→ErrBuiltinNotDeletable、非终态→ErrNotTerminal。
+func (r *PgRepository) Delete(ctx context.Context, id uuid.UUID) error {
+	const q = `
+DELETE FROM pm_tasks
+WHERE id = $1
+  AND task_subtype = $2
+  AND is_builtin = false
+  AND status IN ('succeeded','failed','canceled')`
+	tag, err := r.pool.Exec(ctx, q, id, TaskSubtype)
+	if err != nil {
+		return fmt.Errorf("adhoc.Delete: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		// 没删到：回查区分原因（不存在 / 内置 / 非终态）。
+		check, getErr := r.Get(ctx, id)
+		if getErr != nil {
+			return getErr // ErrNotFound 或底层错误
+		}
+		if check.IsBuiltin {
+			return ErrBuiltinNotDeletable
+		}
+		return ErrNotTerminal
 	}
 	return nil
 }
