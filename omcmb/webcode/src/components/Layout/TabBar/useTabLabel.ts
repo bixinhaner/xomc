@@ -5,6 +5,21 @@ import { resolveMenuLabel } from '@core/types/menu';
 import type { TabItem } from '@core/store/tabStore';
 import { useT } from '@/hooks/useT';
 
+const RAW_LABEL_SEPARATOR = ' · ';
+
+function extractRawLabelSuffix(label: string): string {
+  const idx = label.indexOf(RAW_LABEL_SEPARATOR);
+  if (idx === -1) return '';
+  return label.slice(idx + RAW_LABEL_SEPARATOR.length);
+}
+
+function getRawLabelPrefixKey(tab: TabItem): string | undefined {
+  if (tab.labelPrefixI18nKey) return tab.labelPrefixI18nKey;
+  // 兼容历史 sessionStorage 里的设备详情页签：旧数据只有「详情 · 设备名」冻结串。
+  if (tab.key.startsWith('device-detail:')) return 'common.detail';
+  return undefined;
+}
+
 /**
  * 把一个 tab 解析成「当前语言」下的标题。
  *
@@ -12,7 +27,7 @@ import { useT } from '@/hooks/useT';
  *  - labelRaw=false：label 是前端 i18n key（静态菜单）→ t(key) 实时翻译。
  *  - labelRaw=true ：label 是「打开 tab 那一刻」按当时 locale 解析好的字符串：
  *      · 动态菜单(DB)叶子 —— 见 NavMenu.handleMenuClick；
- *      · 设备详情等 drill-down —— label 是设备名等业务数据（不可翻译）。
+ *      · 设备详情等 drill-down —— label 含设备名等业务数据（后缀不可翻译，前缀可重算）。
  *    旧实现直接显示这个冻结串，导致切换语言后已打开的动态菜单 tab 标题不刷新
  *    （侧边栏重解析了、tab 没有），出现「中英混排」。
  *
@@ -37,6 +52,12 @@ export function useTabLabelResolver(): (tab: TabItem) => string {
 
   return (tab: TabItem): string => {
     if (!tab.labelRaw) return t(tab.label);
+    const prefixKey = getRawLabelPrefixKey(tab);
+    if (prefixKey) {
+      const suffix = tab.labelSuffix ?? extractRawLabelSuffix(tab.label);
+      const prefix = t(prefixKey);
+      return suffix ? `${prefix}${RAW_LABEL_SEPARATOR}${suffix}` : prefix;
+    }
     // 去掉 URL 上的二级 query（syncActiveTabPath 会把 search 写进 path）。
     const basePath = tab.path.split('?')[0];
     const menu = pathToMenu.get(basePath);

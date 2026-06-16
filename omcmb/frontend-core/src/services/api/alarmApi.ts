@@ -188,7 +188,7 @@ function mapBackendAlarm(ba: BackendAlarm): Alarm {
     id: ba.id,
     alarmIdentifier: ba.alarm_identifier,
     alarmName: ba.probable_cause || ba.description || ba.alarm_identifier,
-    specificProblem: ba.probable_cause || '',
+    specificProblem: ba.description || ba.probable_cause || '',
     severity: (severityNumToStr[ba.severity] || 'warning') as Alarm['severity'],
     deviceSn: ba.device_sn,
     deviceName: ba.device_name || ba.device_sn,

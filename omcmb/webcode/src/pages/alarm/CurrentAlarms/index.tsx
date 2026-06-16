@@ -103,8 +103,8 @@ export default function CurrentAlarms() {
   const t = useT();
   const { modal, message } = App.useApp();
   const [searchParams] = useSearchParams();
-  // 仅在挂载时解析一次钻取参数，作为筛选初始值（后续用户操作不再受 URL 影响）
-  const drillDown = useMemo(() => parseDrillDownParams(searchParams), []); // eslint-disable-line react-hooks/exhaustive-deps
+  const searchKey = searchParams.toString();
+  const drillDown = useMemo(() => parseDrillDownParams(searchParams), [searchKey, searchParams]);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [filterParams, setFilterParams] = useState<AlarmFilter>(() => drillDown.filter);
@@ -132,6 +132,12 @@ export default function CurrentAlarms() {
   // 自动刷新状态
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [refreshInterval, setRefreshInterval] = useState(30);
+
+  useEffect(() => {
+    setFilterParams(drillDown.filter);
+    setCurrentPage(1);
+    setActiveQuickFilter('all');
+  }, [drillDown]);
 
   const SEVERITY_LABEL: Record<string, string> = useMemo(() => ({
     critical: t('alarm.severity.critical'),
@@ -661,7 +667,7 @@ export default function CurrentAlarms() {
       {
         key: 'specificProblem',
         title: t('alarm.specificProblem'),
-        dataIndex: 'description',
+        dataIndex: 'specificProblem',
         width: 150,
         ellipsis: true,
       },

@@ -2,6 +2,7 @@ import { memo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAlarmStore } from '@core/store/alarmStore';
 import type { AlarmSeverity } from '@core/store/alarmStore';
+import { useTabStore } from '@core/store/tabStore';
 import { useT } from '@/hooks/useT';
 import styles from './Header.module.css';
 
@@ -25,10 +26,19 @@ const SEVERITY_CONFIG: SeverityConfig[] = [
 function AlarmBadges() {
   const counts = useAlarmStore((s) => s.counts);
   const navigate = useNavigate();
+  const openTab = useTabStore((s) => s.openTab);
   const t = useT();
 
   const handleClick = (severity: AlarmSeverity) => {
-    void navigate(`/alarm/current?severity=${severity}`);
+    const path = `/alarm/current?severity=${severity}`;
+    openTab({
+      key: 'alarm-current',
+      label: 'nav.alarm.current',
+      labelRaw: false,
+      path,
+      closable: true,
+    });
+    void navigate(path);
   };
 
   return (

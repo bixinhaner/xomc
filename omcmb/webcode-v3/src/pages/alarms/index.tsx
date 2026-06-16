@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   Search,
   RefreshCcw,
@@ -90,6 +91,8 @@ interface ModalState {
 }
 
 export function AlarmsPage() {
+  const [searchParams] = useSearchParams()
+  const searchKey = searchParams.toString()
   const [mode, setMode] = useState<Mode>('active')
   const [page, setPage] = useState(1)
   const [severity, setSeverity] = useState<AlarmSeverity | ''>('')
@@ -107,6 +110,30 @@ export function AlarmsPage() {
   const [modal, setModal] = useState<ModalState>({ kind: null, ids: [] })
   const [submitting, setSubmitting] = useState(false)
   const [opError, setOpError] = useState<string | null>(null)
+
+  const drillDown = useMemo<{ severity: AlarmSeverity | ''; keyword: string }>(() => {
+    const nextSeverity = searchParams.get('severity')
+    const nextKeyword = (searchParams.get('keyword') ?? '').trim()
+    return {
+      severity:
+        nextSeverity && Object.hasOwn(SEV_LABEL, nextSeverity)
+          ? (nextSeverity as AlarmSeverity)
+          : '',
+      keyword: nextKeyword,
+    }
+  }, [searchKey, searchParams])
+
+  useEffect(() => {
+    setSeverity(drillDown.severity)
+    setKeyword(drillDown.keyword)
+    setDealState('')
+    setEventType('')
+    setNeType('')
+    setUnread('')
+    setIsUnknown('')
+    setPage(1)
+    setSelected(new Set())
+  }, [drillDown])
 
   // ---- 统计（全网计数，与列表分页解耦） ---------------------------------
   const { data: activeCnt } = useAlarmCount()
