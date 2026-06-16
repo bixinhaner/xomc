@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  BTS paramModel 快速设置（GSM）。
+  字段对照截图 GSM 传输参数表：
+    Unit ID    ← DeviceGSM.IpaUnitId
+    Remote IP  ← DeviceGSM.OmlRemoteIp
+    备 Remote  ← DeviceGSM.OmlRemoteIpBak
+    WAN IP     ← Device.DeviceInfo.WAN_CONFIG1_IPADDR (主管理口)
+    同步       ← Device.FAP.TfcsParams.SyncMode (1=FREE_RUNNING,2=GNSS)
+    同步源     ← Device.FAP.TfcsParams.PrimSrc
+    OMC        ← Device.LogMgmt.URL
+  Bind IP 在 BTS 字典中与 WAN IP 同源（图表说明：BTS 地址与基站 WAN IP 相同），
+  为避免重复展示，仅暴露 WAN IP。
+-->
+<quickSettings paramModel="BTS">
+  <group id="gsm-transport" titleZh="GSM 传输参数" titleEn="GSM Transport Settings">
+    <param name="UnitID" titleZh="Unit ID" titleEn="Unit ID"
+           standardPath="DeviceGSM.IpaUnitId"/>
+    <param name="RemoteIP" titleZh="Remote IP" titleEn="Remote IP"
+           standardPath="DeviceGSM.OmlRemoteIp"/>
+    <param name="RemoteIPBak" titleZh="Remote IP 备份" titleEn="Remote IP Backup"
+           standardPath="DeviceGSM.OmlRemoteIpBak"/>
+    <param name="WanIP" titleZh="WAN IP" titleEn="WAN IP"
+           standardPath="Device.DeviceInfo.WAN_CONFIG1_IPADDR"/>
+  </group>
+
+  <group id="gsm-sync" titleZh="同步参数" titleEn="Sync Settings">
+    <param name="SyncMode" titleZh="同步" titleEn="Sync Mode"
+           standardPath="Device.FAP.TfcsParams.SyncMode"/>
+    <param name="PrimSrc" titleZh="同步源" titleEn="Sync Source"
+           standardPath="Device.FAP.TfcsParams.PrimSrc"/>
+  </group>
+
+  <group id="gsm-omc" titleZh="OMC 参数" titleEn="OMC Settings">
+    <param name="OMC" titleZh="OMC" titleEn="OMC"
+           standardPath="Device.LogMgmt.URL"/>
+  </group>
+</quickSettings>
