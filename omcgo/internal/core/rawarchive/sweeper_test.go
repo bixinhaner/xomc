@@ -48,14 +48,15 @@ func (r *fakeRegistry) ListUncompressed(_ context.Context, _ time.Time, limit in
 	return out, nil
 }
 
-func (r *fakeRegistry) MarkCompressed(_ context.Context, objects []string) error {
+func (r *fakeRegistry) MarkCompressed(_ context.Context, renames map[string]string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.markErr != nil {
 		return r.markErr
 	}
-	for _, o := range objects {
-		r.marked[o] = true
+	// 按旧键标记（旧键即 uncompressed 列表里的待压键），模拟 UPDATE ... WHERE minio_path=old。
+	for oldKey := range renames {
+		r.marked[oldKey] = true
 	}
 	return nil
 }
@@ -87,13 +88,15 @@ func TestSweeper_CompressesAndMarksResidue(t *testing.T) {
 	s.SweepOnce(context.Background())
 
 	for _, o := range []string{"p1.xml", "p2.xml"} {
-		rec, ok := store.puts[key("pm-files", o)]
-		require.True(t, ok, "%s 应被补压回写", o)
+		// 压缩回写到 .gz 新键，原明文键由 RemoveOld 删除。
+		rec, ok := store.puts[key("pm-files", o+".gz")]
+		require.True(t, ok, "%s 应被补压回写到 .gz 新键", o)
 		assert.True(t, compress.IsGzip(rec.data), "%s 回写应是 gzip", o)
 		assert.True(t, reg.isMarked(o), "%s 应被标记 raw_compressed", o)
+		assert.True(t, store.removed[key("pm-files", o)], "%s 改键后旧明文键应被删除", o)
 	}
-	_, ok := store.puts[key("mr-files", "m1.xml")]
-	assert.True(t, ok, "MR 源也应被补压")
+	_, ok := store.puts[key("mr-files", "m1.xml.gz")]
+	assert.True(t, ok, "MR 源也应被补压到 .gz 新键")
 	assert.True(t, mreg.isMarked("m1.xml"), "MR 对象应被标记")
 }
 

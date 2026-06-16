@@ -108,8 +108,8 @@ type MRStore interface {
 	DeleteFilesBySN(ctx context.Context, sn string) (int64, error)
 
 	// ListUncompressed / MarkCompressed 供 rawarchive.Sweeper 补偿扫描"原始 XML 压缩回写"
-	// （issue #321 加固）：列出尚未确认压缩的对象键、标记其已压缩。MarkCompressed 也被内联
-	// 压缩成功后单键调用。
+	// （issue #321 加固）：列出尚未确认压缩的对象键、标记其已压缩并把 minio_path 改键为
+	// 压缩后的 .xml.gz（renames: old→new）。MarkCompressed 也被内联压缩成功后单条调用。
 	ListUncompressed(ctx context.Context, olderThan time.Time, limit int) ([]string, error)
-	MarkCompressed(ctx context.Context, objects []string) error
+	MarkCompressed(ctx context.Context, renames map[string]string) error
 }

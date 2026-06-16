@@ -178,15 +178,21 @@ func (c *PMCollector) SetArchiver(a *rawarchive.Archiver) {
 	c.archiver = a
 }
 
-// markRawCompressed 把已压缩回写的 PM 原始对象在 pm_files 标记 raw_compressed=true（issue #321
-// 加固）。作为 archiver.Schedule 的 onTerminal 回调，在压缩 goroutine 内调用；nil-safe，失败只
-// warn（标记丢失最多让 Sweeper 多扫一次，幂等无害）。
-func (c *PMCollector) markRawCompressed(ctx context.Context, object string) {
+// markRawCompressed 把已压缩回写的 PM 原始对象在 pm_files 标记 raw_compressed=true 并把 minio_path
+// 更新为压缩后的新键（issue #321 加固 + 改键 .xml→.xml.gz）。作为 archiver.Schedule 的 onTerminal
+// 回调，在压缩 goroutine 内调用；nil-safe。DB 更新成功后删旧明文键（仅改键时）；标记/删除失败只
+// warn（标记丢失最多让 Sweeper 多扫一次，幂等无害；旧键残留只占盘）。
+func (c *PMCollector) markRawCompressed(ctx context.Context, bucket, oldObject, newObject string) {
 	if c.fileStore == nil {
 		return
 	}
-	if err := c.fileStore.MarkCompressed(ctx, []string{object}); err != nil {
-		c.logger.Warn("mark pm_files raw_compressed", zap.String("object", object), zap.Error(err))
+	if err := c.fileStore.MarkCompressed(ctx, map[string]string{oldObject: newObject}); err != nil {
+		c.logger.Warn("mark pm_files raw_compressed", zap.String("object", oldObject), zap.Error(err))
+		return
+	}
+	if oldObject != newObject {
+		// 用 archiver 实际压缩的 bucket 删旧键（不能假定等于 c.bucket）。
+		c.archiver.RemoveOld(ctx, bucket, oldObject)
 	}
 }
 
