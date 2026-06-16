@@ -31,6 +31,31 @@ const RADIO_MODE_TO_DICT_VALUE: Record<string, string> = {
   GSM: 'gsm',
 };
 
+/** 制式码（technology：lte/nr/gsm）→ device.networkType（eNB/gNB/GSM）。 */
+const DICT_VALUE_TO_RADIO_MODE: Record<string, string> = {
+  lte: 'eNB',
+  nr: 'gNB',
+  gsm: 'GSM',
+};
+
+/**
+ * 把设备列表过滤入参的「制式」归一到 device.networkType 字段实际存储的值
+ * （eNB/gNB/GSM）。
+ *
+ * 背景（#443）：设备列表过滤入参的 networkType 可能是制式码（'lte'/'nr'/'gsm'，
+ * 与后端 technology 同源）或老链路的基站类型码（'eNB'/'gNB'/'GSM'）。而
+ * device.networkType 字段（deviceApi.toRadioMode 由后端 technology 翻译而来）
+ * 恒为 'eNB'/'gNB'/'GSM'。mock 过滤层若直接 `d.networkType === params.networkType`
+ * 比对，传入 'lte' 永不命中 'eNB'。此函数统一把两种入参都归一到基站类型码，
+ * 与真实 deviceApi（接受 lte/nr/gsm 并兼容 eNB/gNB）的过滤语义对齐。
+ *
+ * @param networkType 过滤入参（'lte'/'nr'/'gsm' 或 'eNB'/'gNB'/'GSM' 或其它）
+ * @returns           归一后的基站类型码；无法识别时回退原值
+ */
+export function normalizeNetworkTypeFilter(networkType: string): string {
+  return DICT_VALUE_TO_RADIO_MODE[networkType] ?? networkType;
+}
+
 /**
  * 把设备的 networkType 字段值映射为 network_type 字典 label（与筛选下拉同源）。
  *

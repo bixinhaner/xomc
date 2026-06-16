@@ -3,6 +3,7 @@ import type { PageRequest, PageResponse } from '../../types/pagination';
 import { mockDevices } from '../data/devices';
 import { mockNEs } from '../data/nes';
 import { delay, paginate, sortBy, filterByText, generateId } from '../utils';
+import { normalizeNetworkTypeFilter } from '../../utils/networkType';
 
 let devices = [...mockDevices];
 let groups: DeviceGroup[] = [
@@ -60,7 +61,13 @@ export const deviceService = {
     }
     if (params.vendor) filtered = filtered.filter((d) => d.vendor === params.vendor);
     if (params.productClass) filtered = filtered.filter((d) => d.productClass === params.productClass);
-    if (params.networkType) filtered = filtered.filter((d) => d.networkType === params.networkType);
+    // #443: 入参的「制式」（lte/nr/gsm 或老链路 eNB/gNB/GSM）先归一到
+    // device.networkType 实际存储的基站类型码（eNB/gNB/GSM）再比对，与真实
+    // deviceApi 的过滤语义对齐，否则传 'lte' 永不命中 'eNB'。
+    if (params.networkType) {
+      const want = normalizeNetworkTypeFilter(params.networkType);
+      filtered = filtered.filter((d) => d.networkType === want);
+    }
     if (params.connStatus) {
       // 前端传数字值 '1'(在线)/'0'(离线)/'2'(同步失败)/'3'(同步中)，mock 数据用 'online'/'offline'
       const connMap: Record<string, string[]> = {
