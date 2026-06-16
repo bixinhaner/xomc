@@ -265,7 +265,7 @@ export const MODULES: ModuleDef[] = [
     { path: '/mml', element: s(MMLPage), label: "MML 脚本" },
     { path: '/mml/script', element: s(C_pages_mml_ScriptTask), label: "脚本库" },
     { path: '/mml/task-records', element: s(C_pages_mml_TaskRecord), label: "任务记录" },
-    { path: '/mml/console-v2', element: s(C_pages_mml_ConsoleV2), label: "控制台 V2" },
+    { path: '/mml/console-v2', element: s(C_pages_mml_ConsoleV2), label: "MML控制台" },
     { path: '/mml/commands-tree', element: s(C_pages_mml_CommandTree), label: "命令树" },
     { path: '/mml/command-detail/:id', element: s(C_pages_mml_CommandDetail), label: "命令详情", hidden: true },
     { path: '/mml/private-command', element: s(C_pages_mml_PrivateCommand), label: "私有命令" },
