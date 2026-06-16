@@ -13,6 +13,7 @@ import (
 	"github.com/omcgo/omcgo/internal/config/parammodel/mmlstandardloader"
 	"github.com/omcgo/omcgo/internal/core/dictloader"
 	"github.com/omcgo/omcgo/internal/pm/indicator"
+	"github.com/omcgo/omcgo/internal/pm/kpi/router"
 	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/internal/quicksettings"
 )
@@ -47,6 +48,16 @@ func initDictLoadModule(c *Container) error {
 
 	paramLoader := parammodel.NewLoader(c.PgPool, c.Cfg.DictLoader.ParamModel, baseDir, logger)
 	indicatorLoader := indicator.NewLoader(c.PgPool, c.Cfg.DictLoader.Indicator, baseDir, logger)
+	// ISSUE-389：指标库加载/重载后 bump KPI 路由 cache_version，让 Redis L2 里旧路由立即
+	// 视为 stale（否则新增的「统计时长」计数器 report_key 不在缓存白名单，落库被当孤儿丢弃）。
+	// 无 Redis 部署时跳过；KPI 路由缓存只有 Redis L2，无 Redis 即无缓存可失效。
+	if c.Redis != nil {
+		kpiRouteCache := router.NewRedisCache(c.Redis)
+		indicatorLoader = indicatorLoader.WithCacheBumper(func(ctx context.Context) error {
+			_, err := kpiRouteCache.BumpVersion(ctx)
+			return err
+		})
+	}
 	alarmLoader := alarmdef.NewLoader(c.PgPool, c.Cfg.DictLoader.AlarmDefinition, baseDir, logger)
 	productLoader := product.NewLoader(c.PgPool, c.Cfg.DictLoader.Product, baseDir, logger)
 

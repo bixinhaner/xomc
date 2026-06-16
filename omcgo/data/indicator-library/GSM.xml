@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<indicatorModel platform="BSC" deviceType="GSM" indicatorCount="73">
+<indicatorModel platform="BSC" deviceType="GSM" indicatorCount="75">
     <indicators>
         <indicator id="CGSM0010001" groupId="5b9df07ef8f711f09ab456b61e61b1f6" enName="HO.Completed" reportKey="HO.Completed" cnName="切换成功次数" isBuildIn="1" isCounter="1" dataType="int" unitId="number" statisType="sum" arithmetic="CGSM0010001" indicatorLevel="both" formula="HO.Completed" />
         <indicator id="CGSM0010002" groupId="5b9df07ef8f711f09ab456b61e61b1f6" enName="HO.Attempted" reportKey="HO.Attempted" cnName="切换发起次数" isBuildIn="1" isCounter="1" dataType="int" unitId="number" statisType="sum" arithmetic="CGSM0010002" indicatorLevel="both" formula="HO.Attempted" />
@@ -74,5 +74,7 @@
         <indicator id="KGSM0140" groupId="5b9df11ff8f711f09ab456b61e61b1f6" enName="KPI.UlDataTaffic" reportKey="KPI.UlDataTaffic" cnName="上行数据总流量" isBuildIn="1" isCounter="0" unitId="Kbit" statisType="sum" arithmetic="(CGSM0070002*8)/1024" indicatorLevel="both" formula="(DATA.VolCellULGPRS*8)/1024" />
         <indicator id="KGSM0141" groupId="5b9df11ff8f711f09ab456b61e61b1f6" enName="KPI.DlDataSSR" reportKey="KPI.DlDataSSR" cnName="下行数据业务会话成功率" isBuildIn="1" isCounter="0" unitId="%" statisType="pct" arithmetic="(CGSM0070004/CGSM0070006)*100" indicatorLevel="both" formula="(DATA.ConnTbfDLSucc/DATA.ConnTbfDLAtt)*100" />
         <indicator id="KGSM0142" groupId="5b9df11ff8f711f09ab456b61e61b1f6" enName="KPI.UlDataSSR" reportKey="KPI.UlDataSSR" cnName="上行数据业务会话成功率" isBuildIn="1" isCounter="0" unitId="%" statisType="pct" arithmetic="(CGSM0070003/CGSM0070005)*100" indicatorLevel="both" formula="(DATA.ConnTbfULSucc/DATA.ConnTbfULAtt)*100" />
+        <indicator id="CGSM0080001" groupId="5b9df074f8f711f09ab456b61e61b1f6" enName="OTHER.StatisDuration" reportKey="OTHER.StatisDuration" cnName="统计时长" isBuildIn="1" isCounter="1" dataType="int" unitId="s" statisType="sum" arithmetic="CGSM0080001" indicatorLevel="both" formula="OTHER.StatisDuration" />
+        <indicator id="KGSM0143" groupId="5b9df11ff8f711f09ab456b61e61b1f6" enName="Cell Availability Rate" reportKey="Cell Availability Rate" cnName="小区可用率" isBuildIn="1" isCounter="0" unitId="%" statisType="pct" arithmetic="OTHER.CellServiceTime/CGSM0080001*100" indicatorLevel="both" formula="OTHER.CellServiceTime/OTHER.StatisDuration*100" />
     </indicators>
 </indicatorModel>

@@ -500,6 +500,94 @@ func Test_Recompute_DeviceGroup_NoSkipLogWhenAllComputed(t *testing.T) {
 		"无跳过则不记日志")
 }
 
+// ── ISSUE-389：小区可用率 = 在服时长 ÷ 统计时长 × 100 ─────────────────────────
+//
+// 死判/自判锚点：派生指标「小区可用率」（K900010076，arithmetic=C000060216/C000060273*100）
+// 由现有公式引擎自动重算，引擎零改动。满在服（在服时长 == 统计时长）→ 100%。
+// 验证统计时长（C000060273）作为分母进重算、比率正确。
+func Test_Recompute_CellAvailability_FullService_100Pct(t *testing.T) {
+	now := time.Date(2026, 6, 15, 10, 0, 0, 0, time.UTC)
+	db := &recordingDB{
+		results: []pgx.Rows{
+			&fakeRows{rows: [][]any{
+				metaRow("K900010076", "pct", "C000060216/C000060273*100"),
+			}},
+			// 满在服：在服时长 == 统计时长（900）→ 100%。
+			&fakeRows{rows: [][]any{
+				networkRow("C000060216", "counter", 900, "sum", "hourly", now),
+				networkRow("C000060273", "counter", 900, "sum", "hourly", now),
+			}},
+			&fakeRows{}, // backfill
+		},
+	}
+	a := New(db, nil, nil)
+	rows, err := a.Query(context.Background(), QueryRequest{
+		Granularity: metrics.GranularityHourly,
+		Dimension:   DimensionNetwork,
+		MetricPaths: []string{"K900010076"},
+	})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, "K900010076", rows[0].MetricPath)
+	assert.InDelta(t, 100.0, float64(rows[0].MetricValue), 1e-9, "满在服小区可用率=100%")
+}
+
+// 跨小区（全网）累加后比率仍正确：两小区在服时长各 900，统计时长各 900，
+// DB 全网维度已各自 SUM（在服=1800，统计=1800）→ 1800/1800*100=100%，
+// 不被"小区数"稀释——同源累加量相除自动消解粒度/小区数。
+func Test_Recompute_CellAvailability_NetworkAccumulate_StillCorrect(t *testing.T) {
+	now := time.Date(2026, 6, 15, 11, 0, 0, 0, time.UTC)
+	db := &recordingDB{
+		results: []pgx.Rows{
+			&fakeRows{rows: [][]any{
+				metaRow("K900010076", "pct", "C000060216/C000060273*100"),
+			}},
+			// 全网：2 小区累加。在服 = 900+900 = 1800，统计 = 900+900 = 1800。
+			&fakeRows{rows: [][]any{
+				networkRow("C000060216", "counter", 1800, "sum", "hourly", now),
+				networkRow("C000060273", "counter", 1800, "sum", "hourly", now),
+			}},
+			&fakeRows{}, // backfill
+		},
+	}
+	a := New(db, nil, nil)
+	rows, err := a.Query(context.Background(), QueryRequest{
+		Granularity: metrics.GranularityHourly,
+		Dimension:   DimensionNetwork,
+		MetricPaths: []string{"K900010076"},
+	})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.InDelta(t, 100.0, float64(rows[0].MetricValue), 1e-9, "全网累加后比率仍 100%，不被小区数稀释")
+}
+
+// 部分在服：一小区满在服（900），一小区半在服（450），统计时长各 900。
+// 全网：在服 = 1350，统计 = 1800 → 75%。验证比率反映真实在服情况、非"满可用"。
+func Test_Recompute_CellAvailability_PartialService(t *testing.T) {
+	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
+	db := &recordingDB{
+		results: []pgx.Rows{
+			&fakeRows{rows: [][]any{
+				metaRow("K900010076", "pct", "C000060216/C000060273*100"),
+			}},
+			&fakeRows{rows: [][]any{
+				networkRow("C000060216", "counter", 1350, "sum", "hourly", now), // 900 + 450
+				networkRow("C000060273", "counter", 1800, "sum", "hourly", now), // 900 + 900
+			}},
+			&fakeRows{}, // backfill
+		},
+	}
+	a := New(db, nil, nil)
+	rows, err := a.Query(context.Background(), QueryRequest{
+		Granularity: metrics.GranularityHourly,
+		Dimension:   DimensionNetwork,
+		MetricPaths: []string{"K900010076"},
+	})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.InDelta(t, 75.0, float64(rows[0].MetricValue), 1e-9, "1350/1800*100=75%，比率反映真实在服")
+}
+
 // ── 纯函数：effectiveCounterPaths 去重并合并 deps ───────────────────────────
 func Test_effectiveCounterPaths_DedupsUserAndDeps(t *testing.T) {
 	kpis := []kpiMeta{
