@@ -26,13 +26,13 @@ func TestResolveKPIAliases_Hit(t *testing.T) {
 	assert.Equal(t, []string{"RRC_CONN_SETUP_SR"}, reverse["K900010002"])
 }
 
-// none 项（库内无对应 KPI，如 LTE_CELL_AVAILABLE）：不进 K 编号查询集，反查表也无对应键，
-// → 取数侧据此返回空序列（硬缺口）。
-func TestResolveKPIAliases_NoneItemSkipped(t *testing.T) {
+// issue #389 阶段1：LTE_CELL_AVAILABLE 原为 none 项（硬缺口、返回空序列），现已接到
+// 新建“小区可用率”指标编号 K900010076，应正常解析、不再返回空序列。
+func TestResolveKPIAliases_CellAvailableResolved(t *testing.T) {
 	kcodes, reverse := resolveKPIAliases([]string{"LTE_CELL_AVAILABLE"})
 
-	assert.Empty(t, kcodes, "none 项不应进 K 编号查询集")
-	assert.Empty(t, reverse, "none 项不应出现在反查表")
+	assert.Equal(t, []string{"K900010076"}, kcodes, "LTE_CELL_AVAILABLE 应解析到 K900010076")
+	assert.Equal(t, []string{"LTE_CELL_AVAILABLE"}, reverse["K900010076"])
 }
 
 // 未命中别名表的值（调用方直接传 K 编号 / 非 Dashboard 调用方）：原样透传作为 K 编号，
@@ -44,19 +44,20 @@ func TestResolveKPIAliases_PassthroughUnknown(t *testing.T) {
 	assert.Equal(t, []string{"K900010099"}, reverse["K900010099"])
 }
 
-// 混合输入：命中 + none + 透传 三类同时出现，各自归位。
+// 混合输入：命中（含已补齐的小区可用率）+ 透传 同时出现，各自归位。
 func TestResolveKPIAliases_Mixed(t *testing.T) {
 	kcodes, reverse := resolveKPIAliases([]string{
-		"GSM_CALL_SETUP_SR", // 命中 → KGSM0102
-		"LTE_CELL_AVAILABLE", // none → 跳过
+		"GSM_CALL_SETUP_SR",  // 命中 → KGSM0102
+		"LTE_CELL_AVAILABLE", // 命中 → K900010076（issue #389 已补齐）
 		"SOME_RAW_KEY",       // 透传
 	})
 
-	assert.ElementsMatch(t, []string{"KGSM0102", "SOME_RAW_KEY"}, kcodes)
+	assert.ElementsMatch(t, []string{"KGSM0102", "K900010076", "SOME_RAW_KEY"}, kcodes)
 	assert.Equal(t, []string{"GSM_CALL_SETUP_SR"}, reverse["KGSM0102"])
+	assert.Equal(t, []string{"LTE_CELL_AVAILABLE"}, reverse["K900010076"])
 	assert.Equal(t, []string{"SOME_RAW_KEY"}, reverse["SOME_RAW_KEY"])
-	_, hasNone := reverse[""]
-	assert.False(t, hasNone, "none 项不应在反查表留空键")
+	_, hasEmpty := reverse[""]
+	assert.False(t, hasEmpty, "不应在反查表留空键")
 }
 
 // 别名表自洽性：除 none 项外，所有 symbolic 都有非空 K 编号且 K 编号全局唯一
@@ -144,6 +145,7 @@ func TestGetKPIDefinitions_Enriched(t *testing.T) {
 	repo := &dashFakeIndicatorRepo{
 		byID: map[string]*indicator.PerfIndicator{
 			"K900010015": {ID: "K900010015", CnName: strptr("下行数据业务流量"), UnitID: strptr("MByte")},
+			"K900010076": {ID: "K900010076", CnName: strptr("小区可用率"), UnitID: strptr("%")},
 			"KGSM0102":   {ID: "KGSM0102", CnName: strptr("电话成功率"), UnitID: strptr("%")},
 		},
 	}
@@ -178,11 +180,11 @@ func TestGetKPIDefinitions_Enriched(t *testing.T) {
 	assert.Equal(t, "MByte", dlVolume.Unit)
 	assert.True(t, dlVolume.Available)
 
-	// none 项：KCode 空 / Available=false / NeedsReview=true，且无 cnName 富化。
+	// issue #389 阶段1：小区可用率已补齐 → KCode=K900010076 / Available=true / cnName 富化。
 	require.NotNil(t, cellAvail)
-	assert.Empty(t, cellAvail.KCode)
-	assert.False(t, cellAvail.Available)
-	assert.True(t, cellAvail.NeedsReview)
+	assert.Equal(t, "K900010076", cellAvail.KCode)
+	assert.True(t, cellAvail.Available)
+	assert.Equal(t, "小区可用率", cellAvail.CnName)
 }
 
 // 退化路径：indicatorRepo 为 nil → 仍返回完整别名表结构（仅缺 cnName / unit 富化），端点不报错。

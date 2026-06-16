@@ -50,11 +50,11 @@ var dashboardKPIAliases = []kpiAlias{
 	{Symbolic: "LTE_PDCP_RATE_UL", KCode: "K900010041", Tech: "lte", DeviceType: indicator.DeviceTypeENB, Panel: "traffic"},
 
 	// ── LTE / Availability ───────────────────────────────────────────────────
-	// LTE_CELL_AVAILABLE（小区可用率）：confidence=none —— LTE 指标库（BLQ/ALL/ENB_DEFAULT…
-	// 全集）无任何“小区可用率 / Cell Availability”KPI（硬缺口）。暂不解析（KCode 留空 →
-	// 取数返回空序列），待党晓萍复核：(a) 库内新增该 KPI；(b) 前端隐藏 Availability Panel；
-	// (c) 用其它可用性近似指标替代。
-	{Symbolic: "LTE_CELL_AVAILABLE", KCode: "", Tech: "lte", DeviceType: indicator.DeviceTypeENB, Panel: "availability", NeedsReview: true},
+	// LTE_CELL_AVAILABLE（小区可用率）→ K900010076（issue #389 阶段1）：原硬缺口（LTE 指标库
+	// 无任何“小区可用率 / Cell Availability”KPI、KCode 留空 → 取数返回空序列）已补齐。指标库
+	// 三制式各登记“统计时长”计数器 + “小区可用率”派生指标（公式 = 在服时长 ÷ 统计时长 × 100），
+	// 此处把该别名接到新建的 LTE 小区可用率编号 K900010076 上，仪表板可用性面板不再为空。
+	{Symbolic: "LTE_CELL_AVAILABLE", KCode: "K900010076", Tech: "lte", DeviceType: indicator.DeviceTypeENB, Panel: "availability"},
 
 	// ── LTE / Utilization ────────────────────────────────────────────────────
 	{Symbolic: "LTE_PRB_UTIL_DL", KCode: "K900010014", Tech: "lte", DeviceType: indicator.DeviceTypeENB, Panel: "utilization"},

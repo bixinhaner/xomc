@@ -43,6 +43,15 @@ type Loader struct {
 	cfg    appconfig.IndicatorLoaderConfig
 	base   string
 	logger *zap.Logger
+
+	// cacheBumper 在每次成功加载后调用，使依赖指标库的下游缓存（KPI 路由缓存）失效。
+	// 解析侧采集白名单 / KPI 公式都从 KPI 路由派生（pm/kpi/router），而路由按 product 缓存
+	// 于 Redis L2（24h TTL，version-bump 失效）。若指标库新增/改动指标后不 bump 路由 cache
+	// version，已缓存的旧路由会继续生效——新增计数器（如 ISSUE-389 的「统计时长」）的 report_key
+	// 不在旧路由白名单里 → 落库被当孤儿丢弃 → 派生 KPI 永远无分母。
+	// 为避免 indicator → router 的反向 import 环（router 已 import indicator），此处用裸回调，
+	// 由 provider/worker 接线层注入「调 RedisCache.BumpVersion」的闭包。nil 时跳过（无 Redis 部署）。
+	cacheBumper func(context.Context) error
 }
 
 func NewLoader(pool *pgxpool.Pool, cfg appconfig.IndicatorLoaderConfig, baseDir string, logger *zap.Logger) *Loader {
@@ -62,6 +71,13 @@ func NewLoader(pool *pgxpool.Pool, cfg appconfig.IndicatorLoaderConfig, baseDir 
 		logger = zap.NewNop()
 	}
 	return &Loader{pool: pool, cfg: cfg, base: baseDir, logger: logger.Named(LoaderName)}
+}
+
+// WithCacheBumper 注入加载成功后的下游缓存失效回调（典型实现：bump KPI 路由 cache_version）。
+// 返回 *Loader 便于链式调用。bumper 为 nil 时为 no-op（不改变现有行为）。
+func (l *Loader) WithCacheBumper(bumper func(context.Context) error) *Loader {
+	l.cacheBumper = bumper
+	return l
 }
 
 func (l *Loader) Name() string      { return LoaderName }
@@ -219,7 +235,27 @@ func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
 	if rep.HasErrors() {
 		return rep, rep.FirstError()
 	}
+
+	// 加载成功 → 使依赖指标库的 KPI 路由缓存失效（ISSUE-389：新增「统计时长」计数器后，
+	// 旧路由白名单不含其 report_key，不 bump 则注入的统计时长落库被丢弃）。
+	l.bumpDownstreamCache(ctx)
+
 	return rep, nil
+}
+
+// bumpDownstreamCache 调用注入的 cacheBumper 使下游 KPI 路由缓存失效。
+// bump 失败不回滚加载（指标库本身已一致），仅告警——下游路由最坏沿用 24h TTL 兜底失效。
+// cacheBumper 为 nil（无 Redis 部署 / 测试场景）时为 no-op。
+func (l *Loader) bumpDownstreamCache(ctx context.Context) {
+	if l.cacheBumper == nil {
+		return
+	}
+	if err := l.cacheBumper(ctx); err != nil {
+		l.logger.Warn("indicator load succeeded but KPI route cache bump failed; stale routes will expire via TTL",
+			zap.Error(err))
+		return
+	}
+	l.logger.Info("KPI route cache version bumped after indicator load (downstream routes will rebuild)")
 }
 
 // parseDocs 是 T-0180 P1.2 引入的内聚 helper:把 resolveXxxSources 返回的 []fileSource

@@ -47,6 +47,22 @@ type PMFileContent struct {
 	Counters      []model.PMCounter
 }
 
+// StatisDurationReportKey 是合成「统计时长」计数器的上报名（report_key）。
+//
+// ISSUE-389 阶段2：解析每个性能文件时，为每个测量对象（小区）注入一条「统计时长」
+// 计数器行，值 = 文件头里上报的真实采集周期（秒，当前 15 分钟 = 900）。设备本身不上报
+// 这个计数器，由解析层合成注入。下游 collector 的白名单按 report_key 命中后会把它改写成
+// 各制式指标库登记的统计时长编号（4G C000060273 / 5G C010120025 / GSM CGSM0080001），
+// 三制式 report_key 统一为本常量，故注入侧只认一个名字即可三制式通用。
+//
+// 它是累加型（statis_type=sum）计数器，跟随现有累加聚合一路滚动：单小区小时=3600、
+// 天=86400、全网=所有小区累加。小区可用率（在服时长÷统计时长×100）作为派生指标随现有
+// 公式引擎/聚合内核自动产出，引擎零改动。
+//
+// 取文件实际采集周期、不写死：将来采集周期变化（如改 5 分钟一报）时统计时长自动跟随，
+// 归一化分母仍正确。见 docs/adr/0006-statis-duration-universal-time-base.md。
+const StatisDurationReportKey = "OTHER.StatisDuration"
+
 // PMXMLParser parses 3GPP 32.435 format PM XML files using streaming XML decoder.
 type PMXMLParser struct{}
 
@@ -117,6 +133,23 @@ func (p *PMXMLParser) Parse(r io.Reader, deviceID uuid.UUID) (*PMFileContent, er
 
 	content := &PMFileContent{}
 	var inMeasData bool
+
+	// ISSUE-389 阶段2：统计时长注入去重表。
+	// key = cellID + collectTime + granularity（同一小区同一采集窗口只注入一条「统计时长」），
+	// 避免同一小区出现在多个 measInfo 块（接入性 / 吞吐率…）时被注入多条而聚合后失真。
+	// value = 该采集窗口的真实周期（秒，取文件实际值）+ counterGroup（沿用首个 measInfo 的组）。
+	type statisDurKey struct {
+		cellID string
+		endTS  string
+		gran   int
+	}
+	type statisDurInfo struct {
+		collectTime time.Time
+		seconds     int
+		granMinutes int
+		group       string
+	}
+	statisDurSeen := make(map[statisDurKey]statisDurInfo)
 
 	for {
 		token, err := decoder.Token()
@@ -198,6 +231,19 @@ func (p *PMXMLParser) Parse(r io.Reader, deviceID uuid.UUID) (*PMFileContent, er
 				cellID := extractCellID(mv.MeasObjLdn)
 				counterGroup := mi.MeasInfoId
 
+				// ISSUE-389 阶段2：登记该（小区, 采集窗口）需注入一条「统计时长」。
+				// granSeconds 取本 measInfo granPeriod/@duration 的真实秒数（PT900S→900），
+				// 非写死；同一 key 已登记则跳过（首个 measInfo 的 group 胜出，去重防多块重复注入）。
+				sdKey := statisDurKey{cellID: cellID, endTS: mi.GranPeriod.EndTime, gran: content.Granularity}
+				if _, exists := statisDurSeen[sdKey]; !exists {
+					statisDurSeen[sdKey] = statisDurInfo{
+						collectTime: collectTime,
+						seconds:     granSeconds,
+						granMinutes: content.Granularity,
+						group:       counterGroup,
+					}
+				}
+
 				for _, r := range mv.Results {
 					counterName, ok := typeIndex[r.P]
 					if !ok {
@@ -225,6 +271,24 @@ func (p *PMXMLParser) Parse(r io.Reader, deviceID uuid.UUID) (*PMFileContent, er
 
 	if len(content.Counters) == 0 {
 		return nil, fmt.Errorf("no counters found in pm xml")
+	}
+
+	// ISSUE-389 阶段2：为每个（小区, 采集窗口）注入一条「统计时长」计数器。
+	// 值 = 该采集窗口的真实周期（秒），CounterName = report_key（下游 collector 白名单按
+	// report_key 命中后改写成各制式统计时长编号）。它是合成计数器（设备不上报），随现有
+	// 累加聚合一路滚动；小区可用率 = 在服时长 ÷ 统计时长 × 100 由公式引擎自动产出。
+	// 仅在文件本就有真实 counter（上面非空校验已过）时注入，不让纯空文件靠它"凑"出非空。
+	for k, info := range statisDurSeen {
+		content.Counters = append(content.Counters, model.PMCounter{
+			Time:         info.collectTime,
+			DeviceID:     deviceID,
+			DeviceSN:     content.DeviceSN,
+			CellID:       k.cellID,
+			CounterGroup: info.group,
+			CounterName:  StatisDurationReportKey,
+			CounterValue: float64(info.seconds),
+			Granularity:  info.granMinutes,
+		})
 	}
 
 	// G4: fallback 推断 + 设 IngestTime。

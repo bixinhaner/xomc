@@ -67,7 +67,7 @@ func TestPMXMLParser_Parse(t *testing.T) {
 </measCollecFile>`,
 			wantErr:         false,
 			wantDeviceSN:    "eNB001",
-			wantCounters:    4, // 2 counters * 2 cells
+			wantCounters:    6, // 2 counters * 2 cells + ISSUE-389 注入每小区 1 条统计时长（2 cells）
 			wantGranularity: 15,
 			wantCells:       []string{"Cell1", "Cell2"},
 		},
@@ -98,7 +98,7 @@ func TestPMXMLParser_Parse(t *testing.T) {
 </measCollecFile>`,
 			wantErr:      false,
 			wantDeviceSN: "gNB002",
-			wantCounters: 3, // 1 + 2 counters for 1 cell
+			wantCounters: 4, // 1 + 2 counters for 1 cell + ISSUE-389 注入 1 条统计时长（NRCell1 跨 2 measInfo 去重为 1）
 			wantCells:    []string{"NRCell1"},
 		},
 		{
@@ -142,7 +142,7 @@ func TestPMXMLParser_Parse(t *testing.T) {
 </measCollecFile>`,
 			wantErr:         false,
 			wantDeviceSN:    "eNB003",
-			wantCounters:    1,
+			wantCounters:    2, // 1 counter + ISSUE-389 注入 1 条统计时长（Cell1）
 			wantGranularity: 60,
 		},
 	}
@@ -211,7 +211,8 @@ func TestPMXMLParser_ParseCounterValues(t *testing.T) {
 	parser := NewPMXMLParser()
 	result, err := parser.Parse(strings.NewReader(xml), deviceID)
 	require.NoError(t, err)
-	require.Len(t, result.Counters, 2)
+	// ISSUE-389: 2 真实 counter + 1 条注入统计时长（Cell1）。
+	require.Len(t, result.Counters, 3)
 
 	// Verify counter values
 	counterMap := make(map[string]float64)
@@ -220,6 +221,8 @@ func TestPMXMLParser_ParseCounterValues(t *testing.T) {
 	}
 	assert.Equal(t, float64(1000), counterMap["rrc_conn_setup_att"])
 	assert.Equal(t, float64(950), counterMap["rrc_conn_setup_succ"])
+	// ISSUE-389: 注入的统计时长 = granPeriod 真实周期（PT900S → 900 秒）。
+	assert.Equal(t, float64(900), counterMap[StatisDurationReportKey])
 
 	// Verify metadata
 	for _, c := range result.Counters {
@@ -228,6 +231,118 @@ func TestPMXMLParser_ParseCounterValues(t *testing.T) {
 		assert.Equal(t, 15, c.Granularity)
 		assert.Equal(t, deviceID, c.DeviceID)
 	}
+}
+
+// ==================== ISSUE-389 阶段2：统计时长注入 ====================
+
+// TestPMXMLParser_InjectsStatisDuration 守死判 statduration-injected-900：
+// 喂一个性能文件，断言解析结果里每个小区多出一条「统计时长」计数器，
+// 值 = 文件头声明的采集周期（PT900S → 900 秒），CounterName = report_key（下游
+// collector 白名单据此改写成各制式统计时长编号）。取文件实际周期、非写死。
+func TestPMXMLParser_InjectsStatisDuration(t *testing.T) {
+	const xmlTwoCells = `<?xml version="1.0" encoding="UTF-8"?>
+<measCollecFile>
+  <fileHeader dnPrefix="DC=cmcc"/>
+  <measData>
+    <managedElement localDn="SubNetwork=1,MeContext=eNB001"/>
+    <measInfo measInfoId="PM_Counters">
+      <granPeriod duration="PT900S" endTime="2026-03-06T15:00:00+08:00"/>
+      <measType p="1">OTHER.CellServiceTime</measType>
+      <measValue measObjLdn="CellId=Cell1">
+        <r p="1">900</r>
+      </measValue>
+      <measValue measObjLdn="CellId=Cell2">
+        <r p="1">900</r>
+      </measValue>
+    </measInfo>
+  </measData>
+</measCollecFile>`
+
+	parser := NewPMXMLParser()
+	result, err := parser.Parse(strings.NewReader(xmlTwoCells), uuid.New())
+	require.NoError(t, err)
+
+	// 收集每个小区的统计时长行。
+	statisByCell := make(map[string]float64)
+	for _, c := range result.Counters {
+		if c.CounterName == StatisDurationReportKey {
+			statisByCell[c.CellID] = c.CounterValue
+		}
+	}
+	require.Len(t, statisByCell, 2, "每个小区各注入一条统计时长")
+	assert.Equal(t, float64(900), statisByCell["Cell1"], "Cell1 统计时长 = 采集周期 900s")
+	assert.Equal(t, float64(900), statisByCell["Cell2"], "Cell2 统计时长 = 采集周期 900s")
+}
+
+// TestPMXMLParser_StatisDurationFollowsRealPeriod 验证统计时长取文件实际采集周期、非写死。
+// 文件头声明 PT300S（5 分钟一报）→ 注入的统计时长应为 300，而非写死的 900。
+func TestPMXMLParser_StatisDurationFollowsRealPeriod(t *testing.T) {
+	const xml5Min = `<?xml version="1.0" encoding="UTF-8"?>
+<measCollecFile>
+  <fileHeader dnPrefix="DC=cmcc"/>
+  <measData>
+    <managedElement localDn="MeContext=eNB001"/>
+    <measInfo measInfoId="PM_Counters">
+      <granPeriod duration="PT300S" endTime="2026-03-06T15:05:00+08:00"/>
+      <measType p="1">OTHER.CellServiceTime</measType>
+      <measValue measObjLdn="CellId=Cell1">
+        <r p="1">300</r>
+      </measValue>
+    </measInfo>
+  </measData>
+</measCollecFile>`
+
+	parser := NewPMXMLParser()
+	result, err := parser.Parse(strings.NewReader(xml5Min), uuid.New())
+	require.NoError(t, err)
+
+	var statis float64
+	var found bool
+	for _, c := range result.Counters {
+		if c.CounterName == StatisDurationReportKey {
+			statis, found = c.CounterValue, true
+		}
+	}
+	require.True(t, found, "应注入统计时长")
+	assert.Equal(t, float64(300), statis, "统计时长跟随真实采集周期 300s，非写死 900")
+}
+
+// TestPMXMLParser_StatisDurationDedupAcrossMeasInfo 验证同一小区出现在多个 measInfo 块
+// （接入性 / 吞吐率…）时，统计时长只注入一条，避免聚合后失真（否则 900*N）。
+func TestPMXMLParser_StatisDurationDedupAcrossMeasInfo(t *testing.T) {
+	const xmlMultiInfo = `<?xml version="1.0" encoding="UTF-8"?>
+<measCollecFile>
+  <fileHeader dnPrefix="DC=cmcc"/>
+  <measData>
+    <managedElement localDn="MeContext=eNB001"/>
+    <measInfo measInfoId="Accessibility">
+      <granPeriod duration="PT900S" endTime="2026-03-06T15:00:00+08:00"/>
+      <measType p="1">RRC.AttConnEstab</measType>
+      <measValue measObjLdn="CellId=Cell1">
+        <r p="1">100</r>
+      </measValue>
+    </measInfo>
+    <measInfo measInfoId="Service">
+      <granPeriod duration="PT900S" endTime="2026-03-06T15:00:00+08:00"/>
+      <measType p="1">OTHER.CellServiceTime</measType>
+      <measValue measObjLdn="CellId=Cell1">
+        <r p="1">900</r>
+      </measValue>
+    </measInfo>
+  </measData>
+</measCollecFile>`
+
+	parser := NewPMXMLParser()
+	result, err := parser.Parse(strings.NewReader(xmlMultiInfo), uuid.New())
+	require.NoError(t, err)
+
+	count := 0
+	for _, c := range result.Counters {
+		if c.CounterName == StatisDurationReportKey && c.CellID == "Cell1" {
+			count++
+		}
+	}
+	assert.Equal(t, 1, count, "同小区同采集窗口跨多 measInfo 只注入一条统计时长")
 }
 
 func TestExtractDeviceSN(t *testing.T) {

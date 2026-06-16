@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<indicatorModel platform="BaiBNQ" deviceType="GNB" indicatorCount="284">
+<indicatorModel platform="BaiBNQ" deviceType="GNB" indicatorCount="286">
     <indicators>
         <indicator id="C010000001" groupId="f942ce91d529d43aaf1521067a058828" enName="RRU.RachPreambleRcvd" reportKey="RRU.RachPreambleRcvd" cnName="前导码接收数" isBuildIn="1" isCounter="1" dataType="int" unitId="number" statisType="sum" arithmetic="C010000001" formula="RRU.RachPreambleRcvd" />
         <indicator id="C010000002" groupId="f942ce91d529d43aaf1521067a058828" enName="RRU.PdcchCceAvail" reportKey="RRU.PdcchCceAvail" cnName="PDCCH信道CCE可用个数" isBuildIn="1" isCounter="1" dataType="int" unitId="number" statisType="sum" arithmetic="C010000002" formula="RRU.PdcchCceAvail" />
@@ -286,5 +286,7 @@
         <!-- UE Dashboard Indicators -->
         <indicator id="KGNB0568" groupId="3aa8d56f20205678977003cf6ab17081" enName="UE_ACTIVE" reportKey="UE_ACTIVE" cnName="活跃UE数" isBuildIn="1" isCounter="0" unitId="number" statisType="avg" arithmetic="C010070014" formula="RRC.NbrMeanActiveUE" />
         <indicator id="KGNB0569" groupId="3aa8d56f20205678977003cf6ab17081" enName="UE_PEAK" reportKey="UE_PEAK" cnName="峰值UE数" isBuildIn="1" isCounter="0" unitId="number" statisType="max" arithmetic="C010070015" formula="RRC.NbrMaxActiveUE" />
+        <indicator id="C010120025" groupId="f942ce91d529d43aaf1521067a058828" enName="OTHER.StatisDuration" reportKey="OTHER.StatisDuration" cnName="统计时长" isBuildIn="1" isCounter="1" dataType="int" unitId="s" statisType="sum" arithmetic="C010120025" formula="OTHER.StatisDuration" />
+        <indicator id="KGNB0570" groupId="3aa8d56f20205678977003cf6ab17081" enName="Cell Availability Rate" reportKey="Cell Availability Rate" cnName="小区可用率" isBuildIn="1" isCounter="0" unitId="%" statisType="pct" arithmetic="OTHER.CellServiceTime/C010120025*100" formula="OTHER.CellServiceTime/OTHER.StatisDuration*100" />
     </indicators>
 </indicatorModel>
