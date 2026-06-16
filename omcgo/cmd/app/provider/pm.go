@@ -12,7 +12,6 @@ import (
 	"github.com/omcgo/omcgo/internal/pm/adhoc"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
 	"github.com/omcgo/omcgo/internal/pm/counter"
-	pmdashboard "github.com/omcgo/omcgo/internal/pm/dashboard"
 	pmexport "github.com/omcgo/omcgo/internal/pm/export"
 	"github.com/omcgo/omcgo/internal/pm/indicator"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
@@ -82,11 +81,6 @@ func initPMModule(c *Container) error {
 	// KPI/时序库物理分离：pm_tasks 留主库（PgPool），pm_adhoc_aggregation_results 迁时序库（TsPool），双池。
 	pmAdhocRepo := adhoc.NewPgRepository(c.PgPool, c.TsPool)
 	pmAdhocHandler := adhoc.NewHandler(pmAdhocRepo, c.TsPool, c.EventBus, logger.Named("adhoc"))
-
-	// T-0164-P6 / G6：PM 仪表盘 REST 入口（dashboard + panel + 用户偏好）。
-	pmDashboardRepo := pmdashboard.NewPgRepository(c.PgPool)
-	pmDashboardSvc := pmdashboard.NewService(pmDashboardRepo, logger.Named("dashboard"))
-	pmDashboardHandler := pmdashboard.NewHandler(pmDashboardSvc, logger.Named("dashboard"))
 
 	// T-0174 阶段 1：指标查询页"查询模板"REST 入口（5 CRUD：list/get/create/update/delete）。
 	pmQueryTemplateRepo := querytemplate.NewPgRepository(c.PgPool)
@@ -160,7 +154,6 @@ func initPMModule(c *Container) error {
 		pmAggregator:           pmAggregator,
 		pmAsyncJobRepo:         pmAsyncJobRepo,
 		pmAdhocHandler:         pmAdhocHandler,
-		pmDashboardHandler:     pmDashboardHandler,
 		pmQueryTemplateHandler: pmQueryTemplateHandler,
 		pmExportHandler:        pmExportHandler,
 		indicatorHandler:       indicatorHandler,
@@ -196,7 +189,6 @@ type pmHandlerDeps struct {
 	pmAggregator    *aggregator.Aggregator        // T-0164-P5 ListAggregatedMetrics 数据源
 	pmAsyncJobRepo  asyncjob.Repository           // T-0164 收尾 G5-Gap-2 手动重算端点
 	pmAdhocHandler         *adhoc.Handler         // T-0164-P7 自定义聚合任务 REST 入口
-	pmDashboardHandler     *pmdashboard.Handler   // T-0164-P6 PM 仪表盘 REST 入口
 	pmQueryTemplateHandler *querytemplate.Handler // T-0174 指标查询模板 REST 入口
 	pmExportHandler        *pmexport.Handler      // KPI-EXPORT T1 KPI 导出 REST 入口
 
