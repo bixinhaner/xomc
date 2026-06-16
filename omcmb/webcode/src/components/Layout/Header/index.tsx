@@ -9,6 +9,7 @@ import {
   MenuUnfoldOutlined,
 } from '@ant-design/icons';
 import { useAppStore } from '@core/store/appStore';
+import { usePublicOmcName, resolveOmcName } from '@core/hooks/api/useOmcName';
 import { useAlarmStore } from '@core/store/alarmStore';
 import { useNotificationUnreadCount, useSyncStaleNotifications } from '@core/hooks/api/useNotificationCenter';
 import { useAlarmCount } from '@core/hooks/api/useAlarms';
@@ -57,6 +58,10 @@ export default function Header() {
 
   const deviceLabel = DEVICE_TYPE_KEY[deviceType] ? t(DEVICE_TYPE_KEY[deviceType]) : deviceType;
 
+  const { omcName } = usePublicOmcName();
+  const storedOmcName = useAppStore((s) => s.omcName);
+  const brandTitle = resolveOmcName(omcName ?? storedOmcName, t('app.title'));
+
   return (
     <header className={styles.header}>
       {/* Left zone */}
@@ -72,7 +77,7 @@ export default function Header() {
               <MenuOutlined />
             </button>
             <div className={styles.logoMark}>OMC</div>
-            <span className={styles.systemName}>{t('app.title')}</span>
+            <span className={styles.systemName}>{brandTitle}</span>
           </>
         ) : (
           <button

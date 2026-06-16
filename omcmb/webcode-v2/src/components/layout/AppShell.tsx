@@ -4,6 +4,8 @@ import { Activity, LogOut, ShieldAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { useUserStore } from '@core/store/userStore'
+import { useAppStore } from '@core/store/appStore'
+import { usePublicOmcName, resolveOmcName } from '@core/hooks/api/useOmcName'
 import { useRouteAccessGuard, useModuleVisibility } from '@core/hooks/useRouteGuard'
 import { MODULES, SECTIONS } from '@/router/navConfig'
 
@@ -43,6 +45,11 @@ export function AppShell() {
 
   const userLabel = user?.displayName || user?.username || '未登录'
 
+  // 左上角品牌标题跟随「OMC 名称」配置（公开通道），空回退 'OMC · v2'。
+  const { omcName } = usePublicOmcName()
+  const storedOmcName = useAppStore((s) => s.omcName)
+  const brandTitle = resolveOmcName(omcName ?? storedOmcName, 'OMC · v2')
+
   const linkClass = ({ isActive }: { isActive: boolean }) =>
     cn(
       'mb-0.5 flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors [&_svg]:size-4',
@@ -63,7 +70,7 @@ export function AppShell() {
       <aside className="w-60 shrink-0 overflow-y-auto border-r border-border/60 bg-card/40">
         <div className="sticky top-0 z-10 flex h-14 items-center gap-2 border-b border-border/60 bg-card/40 px-4 backdrop-blur">
           <Activity className="size-5 text-primary" />
-          <span className="font-semibold tracking-wide">OMC · v2</span>
+          <span className="font-semibold tracking-wide">{brandTitle}</span>
           <span className="ml-auto rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
             alpha
           </span>

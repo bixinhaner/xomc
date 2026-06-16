@@ -5,12 +5,17 @@ import { Lock, ScanLine, Loader2, ChevronRight, Rocket } from 'lucide-react'
 import { NeonButton } from '@/components/ui/NeonButton'
 import { authApi } from '@core/services/api/authApi'
 import { useUserStore } from '@core/store/userStore'
+import { usePublicOmcName, resolveOmcName } from '@core/hooks/api/useOmcName'
 import type { User } from '@core/types/system'
 
 export function LoginPage() {
   const navigate = useNavigate()
   const setTokenPair = useUserStore((s) => s.setTokenPair)
   const login = useUserStore((s) => s.login)
+
+  // 登录页品牌标题跟随「OMC 名称」配置（免登录公开通道），空回退 'STARFORGE · OMC v3'。
+  const { omcName } = usePublicOmcName()
+  const brandTitle = resolveOmcName(omcName, 'STARFORGE · OMC v3')
 
   const [username, setUsername] = useState('admin')
   const [password, setPassword] = useState('')
@@ -83,7 +88,7 @@ export function LoginPage() {
             <div className="flex items-center gap-2 text-cyan-300">
               <ScanLine className="size-5" />
               <span className="font-display text-sm font-bold tracking-[0.25em]">
-                STARFORGE · OMC v3
+                {brandTitle}
               </span>
             </div>
             <span className="font-mono text-[10px] tracking-[0.2em] text-cyan-300/55">
