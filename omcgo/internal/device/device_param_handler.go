@@ -939,7 +939,6 @@ func (h *ParameterTreeHandler) GetParameterSchema(c *gin.Context) {
 // 这些字段在响应里会留空（向前兼容）。
 func mergeSchemaWithValues(mv *parammodel.MappingValidator, params []model.DeviceParameter, pathPrefix string) []ParameterSchemaItem {
 	items := make([]ParameterSchemaItem, 0, len(params))
-	seen := make(map[string]struct{}, len(params))
 
 	for _, p := range params {
 		if pathPrefix != "" && !strings.HasPrefix(p.ParameterPath, pathPrefix) {
@@ -965,76 +964,8 @@ func mergeSchemaWithValues(mv *parammodel.MappingValidator, params []model.Devic
 		}
 
 		items = append(items, item)
-		seen[item.Path] = struct{}{}
-	}
-
-	if mv == nil || pathPrefix == "" {
-		return items
-	}
-
-	for _, def := range mv.Mappings() {
-		if def.EntryType != "parameter" {
-			continue
-		}
-		privatePath, ok := instantiatePrivatePathForPrefix(def.PrivatePath, pathPrefix)
-		if !ok || !strings.HasPrefix(privatePath, pathPrefix) {
-			continue
-		}
-		if _, exists := seen[privatePath]; exists {
-			continue
-		}
-		items = append(items, ParameterSchemaItem{
-			Path:          privatePath,
-			Type:          def.DataType,
-			Writable:      parammodel.IsAccessWritable(def.Access),
-			ChangeApplies: def.ChangeApplies,
-			Constraints:   constraintsFromMapping(&def),
-		})
-		seen[privatePath] = struct{}{}
 	}
 	return items
-}
-
-func instantiatePrivatePathForPrefix(template, pathPrefix string) (string, bool) {
-	if template == "" {
-		return "", false
-	}
-	numbers := extractNumericSegments(pathPrefix)
-	parts := strings.Split(template, ".")
-	placeholderCount := 0
-	for _, part := range parts {
-		if part == "{i}" {
-			placeholderCount++
-		}
-	}
-	if placeholderCount == 0 {
-		return template, true
-	}
-	if len(numbers) != placeholderCount {
-		return "", false
-	}
-	idx := 0
-	for i, part := range parts {
-		if part == "{i}" {
-			parts[i] = numbers[idx]
-			idx++
-		}
-	}
-	return strings.Join(parts, "."), true
-}
-
-func extractNumericSegments(path string) []string {
-	parts := strings.Split(path, ".")
-	segments := make([]string, 0, 4)
-	for _, part := range parts {
-		if part == "" {
-			continue
-		}
-		if isNumericName(part) {
-			segments = append(segments, part)
-		}
-	}
-	return segments
 }
 
 // buildObjectSchema 从实际参数路径推断多实例对象 + 用 MappingValidator 补 access / writable。
@@ -1056,10 +987,11 @@ func buildObjectSchema(mv *parammodel.MappingValidator, params []model.DevicePar
 		}
 		// 判断该叶子是否 writable：mapping access 优先，回退到 DB 标记
 		paramWritable := p.Writable
-		if def := mv.LookupParam(p.ParameterPath); def != nil {
-			paramWritable = parammodel.IsAccessWritable(def.Access)
+		if mv != nil {
+			if def := mv.LookupParam(p.ParameterPath); def != nil {
+				paramWritable = parammodel.IsAccessWritable(def.Access)
+			}
 		}
-
 		refs := extractInstanceRefs(p.ParameterPath)
 		path := p.ParameterPath
 		for _, ref := range refs {
@@ -1101,11 +1033,13 @@ func buildObjectSchema(mv *parammodel.MappingValidator, params []model.DevicePar
 			CurrentInstances: instances,
 		}
 
-		if obj := mv.LookupObject(objPrefix); obj != nil {
-			item.Access = obj.Access
-			canWrite := parammodel.IsAccessWritable(obj.Access)
-			item.CanAdd = canWrite
-			item.CanDeleteAny = canWrite && len(instances) > 0
+		if mv != nil {
+			if obj := mv.LookupObject(objPrefix); obj != nil {
+				item.Access = obj.Access
+				canWrite := parammodel.IsAccessWritable(obj.Access)
+				item.CanAdd = canWrite
+				item.CanDeleteAny = canWrite && len(instances) > 0
+			}
 		}
 
 		items = append(items, item)
