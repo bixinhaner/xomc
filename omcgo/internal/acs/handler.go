@@ -830,6 +830,23 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 				"method":       string(method),
 				"raw_response": string(body),
 			}
+			// issue #424：GPV 响应里的参数名是私有 path，回译为标准 path 一并入库
+			// （raw_response 保留原文供 XmlViewer 调试）。MML 控制台据此按「执行的标准
+			// path」匹配结果，不再因私有/标准不一致而显示为空。
+			if method == soap.MethodGetParameterValuesResp {
+				if pvs, _, decErr := soap.DecodeGetParameterValuesResponse(bytes.NewReader(body)); decErr == nil && len(pvs) > 0 {
+					names := make([]string, len(pvs))
+					for i, pv := range pvs {
+						names[i] = pv.Name
+					}
+					stdNames, _ := h.pathTranslator.TranslateResponseNames(r.Context(), taskItem.DeviceSN, names)
+					std := make([]tr069.ParameterValueStruct, len(pvs))
+					for i, pv := range pvs {
+						std[i] = tr069.ParameterValueStruct{Name: stdNames[i], Value: pv.Value, Type: pv.Type}
+					}
+					resultMap["standard_parameter_values"] = std
+				}
+			}
 			// AddObject 提前解析 InstanceNumber 写入 result,供 notification 渲染
 			// 标题"InterFreq.Carrier.6"等场景使用,避免下游再解一次 SOAP body。
 			if method == soap.MethodAddObjectResp {

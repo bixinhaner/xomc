@@ -42,6 +42,11 @@ interface DeviceTaskResultEnvelope {
   method?: string;
   raw_response?: string;
   instance_number?: number;
+  /**
+   * issue #424：ACS 已把 GPV 响应里的私有 path 回译为标准 path 的 (name=标准path, value, type) 列表。
+   * 存在时优先用它（按"执行的标准 path"匹配结果），缺失时回退解析 raw_response（私有 path）。
+   */
+  standard_parameter_values?: ParsedParamValue[];
 }
 
 /**
@@ -57,6 +62,16 @@ export function parseMmlDeviceTaskResult(result: unknown): ParsedMmlResult | nul
   const xml = r.raw_response;
 
   if (method.includes('GetParameterValuesResponse')) {
+    // issue #424：优先用 ACS 回译后的标准 path（standard_parameter_values）；缺失才回退
+    // 解析 raw_response（私有 path）。前者让结果按"执行的标准 path"匹配，不再因私有/标准
+    // 不一致而显示为空。
+    const std = r.standard_parameter_values;
+    if (Array.isArray(std) && std.length > 0) {
+      const params = std
+        .filter((p) => p && typeof p.name === 'string' && p.name)
+        .map((p) => ({ name: p.name, value: String(p.value ?? ''), type: p.type }));
+      if (params.length > 0) return { kind: 'gpv', params };
+    }
     return { kind: 'gpv', params: parseGPVResponse(xml) };
   }
   if (method.includes('SetParameterValuesResponse')) {
