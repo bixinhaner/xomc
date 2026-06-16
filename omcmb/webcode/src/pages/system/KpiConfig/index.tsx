@@ -38,6 +38,10 @@ import { useT } from '@/hooks/useT';
 import MetricPickerModal from '@/components/MetricPickerModal';
 import type { DeviceType } from '@core/types/indicatorLibrary';
 import { useKPILayout, useSaveKPILayout } from '@core/hooks/api/useDashboard';
+import {
+  validateKpiPanels,
+  formatKpiPanelViolations,
+} from '@core/utils/kpiPanelValidation';
 import { resolveLayout } from '@/pages/dashboard/layoutMapping';
 import type { TechnologyType } from '@/pages/dashboard/kpi-config';
 import { TECH_LABELS } from '@/pages/dashboard/kpi-config';
@@ -118,8 +122,18 @@ function TechEditor({ tech }: { tech: TechnologyType }) {
   };
 
   const handleSave = () => {
+    const savePanels = toSavePanels(panels);
+    // 保存前校验：每张图必须「标题非空 + 至少 1 指标」，否则拦截不发 PUT，弹明确提示。
+    // 默认图标题是 i18n key（非空），管理员清空后才为空串——按当前 tab 译文判定可见标题是否真空。
+    const result = validateKpiPanels(
+      savePanels.map((p) => ({ title: t(p.title), metrics: p.metrics })),
+    );
+    if (!result.valid) {
+      message.error(formatKpiPanelViolations(result.violations));
+      return;
+    }
     saveMutation.mutate(
-      { tech, panels: toSavePanels(panels) },
+      { tech, panels: savePanels },
       {
         onSuccess: () => message.success(t('dashboard.kpiConfig.saveSuccess')),
         onError: () => message.error(t('dashboard.kpiConfig.saveFailed')),
