@@ -29,10 +29,15 @@ func Test_buildDeviceGroupSQL_HourlyGroupTableHasIDAndJoins(t *testing.T) {
 	assert.Contains(t, sql, "ON d.oui = m.device_oui AND d.serial_number = m.device_sn")
 	assert.Contains(t, sql, "ON dgm.device_id = d.id")
 
-	// GROUP BY 维度键含制式（设备组制式治本 B 方案：按「组 × 制式 × 指标」分组）
-	assert.Contains(t, sql, "GROUP BY dgm.group_id, d.technology, m.metric_path, m.statis_type")
+	// GROUP BY 维度键含制式 + 源桶时刻（issue #395：按「组 × 制式 × 指标 × 源桶时刻」分组，
+	// 每个源小时各成一行，消除「整窗压成单点」）
+	assert.Contains(t, sql, "GROUP BY dgm.group_id, d.technology, m.metric_path, m.statis_type, m.time, m.start_time, m.end_time")
 	// SELECT 带出 d.technology，insertCols 含 technology 列
 	assert.Contains(t, sql, "d.technology")
+
+	// issue #395：写入 time/start_time/end_time 取源行自身桶时刻（m.time/m.start_time/m.end_time），
+	// 而非窗口起点 $2 —— 与设备单维度聚合表逐档对齐、无 1 小时偏移
+	assert.Contains(t, sql, "m.time,\n    m.start_time,\n    m.end_time,")
 
 	// hourly group 表含 id 列（hypertable）+ technology 列
 	assert.Contains(t, sql, "INSERT INTO pm_group_metrics_hourly (id, device_group_id, technology")
@@ -41,8 +46,40 @@ func Test_buildDeviceGroupSQL_HourlyGroupTableHasIDAndJoins(t *testing.T) {
 	// ON CONFLICT 含 device_group_id + technology（不含 device_oui/sn），列序与迁移 000026 唯一键一致
 	assert.Contains(t, sql, "ON CONFLICT (device_group_id, metric_path, granularity, end_time, time, technology)")
 
-	// args 顺序与 buildCountersSQL 一致：granularity / bktStart / bktEnd / whereStart / whereEnd
-	assert.Equal(t, []any{"hourly", w.Start, w.End, w.Start, w.End}, args)
+	// issue #395：time 来自源行（m.time）后不再需要 bucketStart 占位，args 仅余
+	// granularity / whereStart / whereEnd 三参。
+	assert.Equal(t, []any{"hourly", w.Start, w.End}, args)
+}
+
+// issue #395 专项：组聚合必须按源行自身桶时刻分桶并取时刻，确保
+//   1) 写入 time/start_time/end_time 取源行（m.time/...）而非窗口起点 → 与设备单维度无 1 小时偏移
+//   2) GROUP BY 含源桶时刻 → 跨多小时窗口产出多行（每源小时各一行），不被压成单点
+func Test_buildDeviceGroupSQL_Issue395_BucketsBySourceTime_NoOffset(t *testing.T) {
+	w := WindowSpec{
+		Granularity: metrics.GranularityHourly,
+		// 故意用一个跨多小时的宽窗（>=3 小时），验证不再依赖窗口起点写时刻
+		Start: time.Date(2026, 6, 14, 4, 0, 0, 0, time.UTC),
+		End:   time.Date(2026, 6, 14, 8, 0, 0, 0, time.UTC),
+	}
+	sql, args := buildDeviceGroupSQL("pm_metrics_hourly", "pm_group_metrics_hourly", w)
+
+	// 死判 no-time-offset：写入的 time/start_time/end_time 取源行三列，不出现把 time 硬编码成
+	// 窗口起点的 "$2,\n    $2," 旧模式
+	assert.Contains(t, sql, "m.time,\n    m.start_time,\n    m.end_time,",
+		"写入时刻应取源行 m.time/m.start_time/m.end_time")
+	assert.NotContains(t, sql, "$1,\n    $2,\n    $2,\n    $3,",
+		"不应再把 time/start_time 硬编码成窗口起点 $2")
+
+	// 死判 multi-bucket-rows：GROUP BY 含源桶时刻 → 每源小时各成一行
+	assert.Contains(t, sql, "m.time, m.start_time, m.end_time",
+		"GROUP BY 必须含源桶时刻才能逐小时分桶")
+
+	// WHERE 仍按 end_time 半开区间命中窗口（窗口选择不变，只是不再用窗口起点当写入时刻）
+	assert.Contains(t, sql, "AND m.end_time >= $2")
+	assert.Contains(t, sql, "AND m.end_time <  $3")
+
+	// args 去掉了多余的 bucketStart 占位，仅 granularity + where 区间
+	assert.Equal(t, []any{"hourly", w.Start, w.End}, args)
 }
 
 func Test_buildDeviceGroupSQL_DailyGroupTableNoID(t *testing.T) {
@@ -76,5 +113,5 @@ func Test_AggregateDeviceGroup_PassesThroughToExec(t *testing.T) {
 	assert.Equal(t, 2, n)
 	assert.Contains(t, db.execSQL, "INSERT INTO pm_group_metrics_hourly")
 	assert.Contains(t, db.execSQL, "JOIN device_group_member_dim dgm")
-	assert.Equal(t, []any{"hourly", w.Start, w.End, w.Start, w.End}, db.execArgs)
+	assert.Equal(t, []any{"hourly", w.Start, w.End}, db.execArgs)
 }
