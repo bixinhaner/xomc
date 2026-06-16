@@ -73,9 +73,16 @@ export default function PerformanceQuery() {
     setSubmitted(null)
   }, [tech])
 
+  // 外层选中制式是设备清单的唯一来源（#443）：把 tech(lte/nr/gsm) 带进 networkType，
+  // 设备弹窗只列对应制式设备，不再混列其它制式。
   const deviceParams = useMemo(
-    () => ({ page: 1, pageSize: 30, ...(deviceKeyword.trim() ? { searchText: deviceKeyword.trim() } : {}) }),
-    [deviceKeyword],
+    () => ({
+      page: 1,
+      pageSize: 30,
+      networkType: tech,
+      ...(deviceKeyword.trim() ? { searchText: deviceKeyword.trim() } : {}),
+    }),
+    [tech, deviceKeyword],
   )
   const { data: deviceData, isLoading: devLoading, isError: devError } = useDeviceList(deviceParams)
   const devices: Device[] = deviceData?.items ?? []

@@ -64,6 +64,7 @@ import {
 } from '@core/utils/kpiExportParams';
 import { indicatorLibraryApi } from '@core/services/api/indicatorLibraryApi';
 import type { DeviceType } from '@core/types/indicatorLibrary';
+import { deviceTypeToNetworkTech } from '@core/types/indicatorLibrary';
 import type { Granularity } from '@core/types/pmDashboard';
 import type {
   QueryTemplate,
@@ -827,6 +828,11 @@ export default function KPIQuery() {
             }
           }}
           initialSelected={pickerTarget === 'modal' ? saveForm.payload.deviceSns : payload.deviceSns}
+          // 外层「设备类型」是设备清单的唯一来源（#443）：按当前目标的 deviceType 映射制式，
+          // 设备弹窗只列对应制式设备（main/modal 各按各自 deviceType）。
+          technology={deviceTypeToNetworkTech(
+            (pickerTarget === 'modal' ? saveForm.payload.deviceType : payload.deviceType) ?? 'ENB',
+          )}
         />
 
         <MetricPickerModal
@@ -844,6 +850,8 @@ export default function KPIQuery() {
           initialDeviceType={
             (pickerTarget === 'modal' ? saveForm.payload.deviceType : payload.deviceType) ?? 'ENB'
           }
+          // 外层「设备类型」是唯一来源（#443）：锁定弹窗内部类型，隐藏其重复下拉，跟随外层值。
+          lockDeviceType
         />
 
         <Modal

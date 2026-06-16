@@ -103,6 +103,21 @@ export function techToDeviceType(t: TechLower): DeviceType {
   return t.toUpperCase() as DeviceType;
 }
 
+// 设备类型 → 制式码（对齐 devices.technology 小写）：eNB=LTE / gNB=NR(5G) / GSM=2G。
+// 注意与 deviceTypeToTech 区分：那个返回设备类型小写（enb/gnb/gsm，给指标库 ?tech= 用），
+// 本函数返回网络制式码（lte/nr/gsm，给设备清单 networkType / DevicePickerModal.technology 用）。
+export type NetworkTech = 'lte' | 'nr' | 'gsm';
+
+const DEVICE_TYPE_TO_NETWORK_TECH: Record<DeviceType, NetworkTech> = {
+  ENB: 'lte',
+  GNB: 'nr',
+  GSM: 'gsm',
+};
+
+export function deviceTypeToNetworkTech(dt: DeviceType): NetworkTech {
+  return DEVICE_TYPE_TO_NETWORK_TECH[dt] ?? 'lte';
+}
+
 // IndicatorSource 与 ParamModelSource 同枚举(builtin/custom/unknown);
 // 后端 source.go::ClassifySource 派生,前端 SummaryTab 渲染"来源"列 + 守门删除。
 export type IndicatorSource = 'builtin' | 'custom' | 'unknown';
