@@ -12,10 +12,10 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// 用 vi.hoisted 让 mock 工厂能安全引用 getMock（vi.mock 被提升到文件顶部）。
-const { getMock } = vi.hoisted(() => ({ getMock: vi.fn() }));
+// 用 vi.hoisted 让 mock 工厂能安全引用 getMock/deleteMock（vi.mock 被提升到文件顶部）。
+const { getMock, deleteMock } = vi.hoisted(() => ({ getMock: vi.fn(), deleteMock: vi.fn() }));
 vi.mock('../../http', () => ({
-  default: { get: getMock, post: vi.fn(), patch: vi.fn(), delete: vi.fn() },
+  default: { get: getMock, post: vi.fn(), patch: vi.fn(), delete: deleteMock },
 }));
 
 import { pmAdhocApi } from '../pmAdhocApi';
@@ -23,6 +23,8 @@ import { pmAdhocApi } from '../pmAdhocApi';
 beforeEach(() => {
   getMock.mockReset();
   getMock.mockResolvedValue({ data: { items: [], total: 0 } });
+  deleteMock.mockReset();
+  deleteMock.mockResolvedValue({ data: { deleted: true } });
 });
 
 describe('pmAdhocApi.results — 维度子集过滤 query（手动 snake_case，CSV 形态）', () => {
@@ -92,5 +94,29 @@ describe('pmAdhocApi.filterOptions — 端点 + 响应透传', () => {
     getMock.mockResolvedValue({ data: { dimension: 'product', options: null } });
     const out = await pmAdhocApi.filterOptions('t9');
     expect(out.options).toEqual([]);
+  });
+});
+
+describe('pmAdhocApi.deleteTask / cancel — 删除 vs 取消打到不同端点（issue #392）', () => {
+  it('deleteTask 打到硬删子路径 /pm/adhoc/tasks/:id/definition（成功路径）', async () => {
+    await pmAdhocApi.deleteTask('task-终态-自建');
+    expect(deleteMock).toHaveBeenCalledTimes(1);
+    const [url] = deleteMock.mock.calls[0];
+    expect(url).toBe('/pm/adhoc/tasks/task-终态-自建/definition');
+  });
+
+  it('cancel 打到软删/取消端点 /pm/adhoc/tasks/:id（无 /definition 后缀，二者不混淆）', async () => {
+    await pmAdhocApi.cancel('task-运行中');
+    const [url] = deleteMock.mock.calls[0];
+    expect(url).toBe('/pm/adhoc/tasks/task-运行中');
+    expect(url).not.toContain('/definition');
+  });
+
+  it('deleteTask 失败路径（后端 409/403）向上抛错，不静默吞', async () => {
+    const err = new Error('task not in terminal state');
+    deleteMock.mockRejectedValueOnce(err);
+    await expect(pmAdhocApi.deleteTask('task-非终态')).rejects.toThrow(
+      'task not in terminal state',
+    );
   });
 });

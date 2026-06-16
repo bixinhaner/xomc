@@ -7175,6 +7175,12 @@ const messages: Record<string, string> = {
   'perf.adhoc.cancelTaskTitle':          'Cancel Task',
   'perf.adhoc.cancelTaskContent':        'Canceling a running task will not roll back results already written',
   'perf.adhoc.canceled':                 'Canceled',
+  // issue #392: delete terminal custom task
+  'perf.adhoc.btnDelete':                'Delete',
+  'perf.adhoc.deleteTaskTitle':          'Delete Task',
+  'perf.adhoc.deleteTaskContent':        'The task will be removed from the list and cannot be restored; aggregated results are cleaned up automatically by retention. Confirm delete?',
+  'perf.adhoc.deleted':                  'Deleted',
+  'perf.adhoc.deleteFailed':             'Delete failed: {msg}',
   'perf.adhoc.detailTitle':              'Task Detail: {name}',
   'perf.adhoc.detailTitleDefault':       'Task Detail',
   'perf.adhoc.descMode':                 'Mode',

@@ -22,8 +22,9 @@ type handlerStubRepo struct {
 	tasks  map[uuid.UUID]*Task
 	create func(CreateRequest) (uuid.UUID, error)
 	cancel func(uuid.UUID) error
-	get    func(uuid.UUID) (*Task, error)       // T-0194：注入既有任务（含 is_builtin/mode/technology）
-	update func(uuid.UUID, UpdateRequest) error  // T-0194：捕获更新入参
+	get      func(uuid.UUID) (*Task, error)       // T-0194：注入既有任务（含 is_builtin/mode/technology）
+	update   func(uuid.UUID, UpdateRequest) error // T-0194：捕获更新入参
+	deleteFn func(uuid.UUID) error                // #392：注入删除结果（区分终态/内置/非终态）
 }
 
 func (s *handlerStubRepo) Create(_ context.Context, req CreateRequest) (uuid.UUID, error) {
@@ -78,6 +79,18 @@ func (s *handlerStubRepo) Cancel(_ context.Context, id uuid.UUID) error {
 	defer s.mu.Unlock()
 	if t, ok := s.tasks[id]; ok {
 		t.Status = StatusCanceled
+		return nil
+	}
+	return ErrNotFound
+}
+func (s *handlerStubRepo) Delete(_ context.Context, id uuid.UUID) error {
+	if s.deleteFn != nil {
+		return s.deleteFn(id)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.tasks[id]; ok {
+		delete(s.tasks, id)
 		return nil
 	}
 	return ErrNotFound
@@ -180,4 +193,65 @@ func Test_Handler_Cancel_Conflict(t *testing.T) {
 	req := httptest.NewRequest(http.MethodDelete, "/pm/adhoc/tasks/"+uuid.New().String(), nil)
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusConflict, w.Code)
+}
+
+// ── #392 删除端点 ─────────────────────────────────────────────────────────
+
+// 成功路径：终态自建任务硬删，返回 200 + deleted=true，且任务从 stub map 消失。
+func Test_Handler_Delete_TerminalSelfBuilt_Success(t *testing.T) {
+	id := uuid.New()
+	repo := &handlerStubRepo{
+		tasks: map[uuid.UUID]*Task{
+			id: {ID: id, Status: StatusSucceeded, IsBuiltin: false},
+		},
+	}
+	r := newTestRouter(repo)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/pm/adhoc/tasks/"+id.String()+"/definition", nil)
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	data := resp["data"].(map[string]any)
+	assert.Equal(t, true, data["deleted"])
+	// 任务确实从 map 删除。
+	_, ok := repo.tasks[id]
+	assert.False(t, ok)
+}
+
+// 失败路径之一：内置任务被拒，返回 403，行仍在。
+func Test_Handler_Delete_Builtin_Forbidden(t *testing.T) {
+	repo := &handlerStubRepo{
+		deleteFn: func(_ uuid.UUID) error { return ErrBuiltinNotDeletable },
+	}
+	r := newTestRouter(repo)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/pm/adhoc/tasks/"+uuid.New().String()+"/definition", nil)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusForbidden, w.Code)
+}
+
+// 失败路径之二：非终态任务被拒，返回 409 冲突，行仍在。
+func Test_Handler_Delete_NonTerminal_Conflict(t *testing.T) {
+	repo := &handlerStubRepo{
+		deleteFn: func(_ uuid.UUID) error { return ErrNotTerminal },
+	}
+	r := newTestRouter(repo)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/pm/adhoc/tasks/"+uuid.New().String()+"/definition", nil)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusConflict, w.Code)
+}
+
+// 失败路径之三：不存在任务返回 404。
+func Test_Handler_Delete_NotFound(t *testing.T) {
+	repo := &handlerStubRepo{
+		deleteFn: func(_ uuid.UUID) error { return ErrNotFound },
+	}
+	r := newTestRouter(repo)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/pm/adhoc/tasks/"+uuid.New().String()+"/definition", nil)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Code)
 }

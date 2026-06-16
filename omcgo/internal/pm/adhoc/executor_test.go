@@ -44,6 +44,7 @@ func (s *stubRepo) Update(context.Context, uuid.UUID, UpdateRequest) error   { r
 func (s *stubRepo) Get(context.Context, uuid.UUID) (*Task, error)            { return nil, nil }
 func (s *stubRepo) List(context.Context, ListFilter) ([]Task, error)         { return nil, nil }
 func (s *stubRepo) Cancel(context.Context, uuid.UUID) error                  { return nil }
+func (s *stubRepo) Delete(context.Context, uuid.UUID) error                  { return nil }
 func (s *stubRepo) LockNextPending(context.Context, string) (*Task, error)   { return nil, nil }
 
 func (s *stubRepo) UpdateStatus(_ context.Context, id uuid.UUID, status Status, progress *int, _ string) error {

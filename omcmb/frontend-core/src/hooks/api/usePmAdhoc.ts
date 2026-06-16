@@ -70,6 +70,21 @@ export function useCancelPmAdhoc() {
   });
 }
 
+/**
+ * issue #392：硬删终态自建任务的定义行。删除成功后失效自定义聚合任务列表使其刷新（任务消失）。
+ * 仅对终态(成功/失败/已取消) + 自建任务调用；非终态/内置由 UI 不渲染删除按钮拦在前面，
+ * 后端也会以 409/403 二次守门。
+ */
+export function useDeletePmAdhoc() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteTask(id),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ADHOC_KEY });
+    },
+  });
+}
+
 export function usePmAdhocResults(
   taskId: string | undefined,
   opts?: {

@@ -49,6 +49,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		adhoc.GET("/tasks/:id", h.Get)
 		adhoc.PATCH("/tasks/:id", h.Update) // T-0194：编辑任务定义
 		adhoc.DELETE("/tasks/:id", h.Cancel)
+		adhoc.DELETE("/tasks/:id/definition", h.Delete) // #392：硬删终态自建任务定义行
 		adhoc.GET("/tasks/:id/results", h.Results)
 		adhoc.GET("/tasks/:id/filter-options", h.FilterOptions) // PM-DASH-DIMFILTER：按维度列出可筛子集选项
 		adhoc.GET("/tasks/:id/runs", h.Runs) // T-0186：运行历史
@@ -518,6 +519,35 @@ func (h *Handler) Cancel(c *gin.Context) {
 		return
 	}
 	response.OK(c, gin.H{"id": id.String(), "status": string(StatusCanceled)})
+}
+
+// Delete DELETE /pm/adhoc/tasks/:id/definition
+//
+// 硬删终态（succeeded/failed/canceled）自建（is_builtin=false）adhoc 任务的定义行（#392）。
+// 只删 pm_tasks 定义行，结果数据交 TimescaleDB retention 自然过期（不级联删）。
+//   - 非终态（pending/running/scheduled）任务返 409（仍活跃，应走「取消」）。
+//   - 内置任务返 403（永不可删）。
+//   - 行不存在返 404。
+func (h *Handler) Delete(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Fail(c, http.StatusBadRequest, "invalid id")
+		return
+	}
+	if err := h.repo.Delete(c.Request.Context(), id); err != nil {
+		switch {
+		case errors.Is(err, ErrNotFound):
+			response.Fail(c, http.StatusNotFound, "not found")
+		case errors.Is(err, ErrBuiltinNotDeletable):
+			response.Fail(c, http.StatusForbidden, "builtin task cannot be deleted")
+		case errors.Is(err, ErrNotTerminal):
+			response.Fail(c, http.StatusConflict, "task not in terminal state, cancel it first")
+		default:
+			commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		}
+		return
+	}
+	response.OK(c, gin.H{"id": id.String(), "deleted": true})
 }
 
 // resultsFilter 是 Results 端点的可选过滤项（均为原始 query 字符串，空串=不过滤）。

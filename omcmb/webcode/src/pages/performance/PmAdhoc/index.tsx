@@ -29,11 +29,12 @@ import {
   message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { PlusOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons';
+import { PlusOutlined, DeleteOutlined, EditOutlined, StopOutlined } from '@ant-design/icons';
 import {
   usePmAdhocList,
   usePmAdhocRuns,
   useCancelPmAdhoc,
+  useDeletePmAdhoc,
 } from '@core/hooks/api/usePmAdhoc';
 import type {
   AdhocMode,
@@ -200,6 +201,7 @@ function TaskTable({
   onView,
   onCancel,
   onEdit,
+  onDelete,
 }: {
   tasks: AdhocTask[];
   loading: boolean;
@@ -208,6 +210,8 @@ function TaskTable({
   onView: (t: AdhocTask) => void;
   onCancel: (id: string) => void;
   onEdit: (t: AdhocTask) => void;
+  // issue #392：删除终态自建任务（仅自建区传入；内置区不传，按钮恒不渲染）。
+  onDelete?: (t: AdhocTask) => void;
 }) {
   const intl = useIntl();
   const columns: ColumnsType<AdhocTask> = useMemo(
@@ -267,15 +271,27 @@ function TaskTable({
                 : intl.formatMessage({ id: 'perf.adhoc.btnEdit' })}
             </Button>
             {(r.status === 'pending' || r.status === 'running' || r.status === 'scheduled') && (
-              <Button size="small" danger icon={<DeleteOutlined />} onClick={() => onCancel(r.id)}>
+              <Button size="small" danger icon={<StopOutlined />} onClick={() => onCancel(r.id)}>
                 {intl.formatMessage({ id: 'perf.adhoc.btnCancel' })}
               </Button>
             )}
+            {/* issue #392：终态(成功/失败/已取消)自建任务给「删除」（onDelete 仅自建区传入）。 */}
+            {onDelete &&
+              (r.status === 'succeeded' || r.status === 'failed' || r.status === 'canceled') && (
+                <Button
+                  size="small"
+                  danger
+                  icon={<DeleteOutlined />}
+                  onClick={() => onDelete(r)}
+                >
+                  {intl.formatMessage({ id: 'perf.adhoc.btnDelete' })}
+                </Button>
+              )}
           </Space>
         ),
       },
     ],
-    [intl, isBuiltinArea, onView, onCancel, onEdit],
+    [intl, isBuiltinArea, onView, onCancel, onEdit, onDelete],
   );
 
   return (
@@ -302,6 +318,7 @@ export default function PmAdhocPage() {
     isBuiltin: false,
   });
   const cancelMut = useCancelPmAdhoc();
+  const deleteMut = useDeletePmAdhoc();
   const navigate = useNavigate();
 
   const [searchParams, setSearchParams] = useSearchParams();
@@ -362,6 +379,28 @@ export default function PmAdhocPage() {
     });
   };
 
+  // issue #392：删除终态自建任务（二次确认 → 删除 → 列表自动刷新，任务消失）。
+  const handleDelete = (t: AdhocTask) => {
+    Modal.confirm({
+      title: intl.formatMessage({ id: 'perf.adhoc.deleteTaskTitle' }),
+      content: intl.formatMessage({ id: 'perf.adhoc.deleteTaskContent' }),
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          await deleteMut.mutateAsync(t.id);
+          message.success(intl.formatMessage({ id: 'perf.adhoc.deleted' }));
+        } catch (e) {
+          message.error(
+            intl.formatMessage(
+              { id: 'perf.adhoc.deleteFailed' },
+              { msg: (e as Error).message },
+            ),
+          );
+        }
+      },
+    });
+  };
+
   return (
     <Space orientation="vertical" size="large" style={{ width: '100%' }}>
       <Card
@@ -399,6 +438,7 @@ export default function PmAdhocPage() {
           onView={setSelectedTask}
           onCancel={handleCancel}
           onEdit={handleEditCustom}
+          onDelete={handleDelete}
         />
       </Card>
 

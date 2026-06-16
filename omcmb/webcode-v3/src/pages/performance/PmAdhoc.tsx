@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Ban, Loader2, Pencil, Plus, RefreshCcw } from 'lucide-react'
+import { Ban, Loader2, Pencil, Plus, RefreshCcw, Trash2 } from 'lucide-react'
 
 import { PageShell } from '@/components/shell/PageShell'
 import { GlassPanel } from '@/components/ui/GlassPanel'
@@ -8,7 +8,7 @@ import { NeonButton } from '@/components/ui/NeonButton'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { formatTime } from '@/lib/format'
 import { cn } from '@/lib/utils'
-import { usePmAdhocList, useCancelPmAdhoc } from '@core/hooks/api/usePmAdhoc'
+import { usePmAdhocList, useCancelPmAdhoc, useDeletePmAdhoc } from '@core/hooks/api/usePmAdhoc'
 import type { AdhocStatus, AdhocTask } from '@core/types/pmAdhoc'
 
 /**
@@ -52,6 +52,15 @@ export default function PmAdhoc() {
   const { data: custom = [], isLoading: customLoading, isError: customError, refetch: refetchCustom } =
     usePmAdhocList({ refetchInterval: 5000, isBuiltin: false })
   const cancelMut = useCancelPmAdhoc()
+  const deleteMut = useDeletePmAdhoc()
+
+  // issue #392：删除终态自建任务 —— 二次确认 → 删除 → 列表自动刷新（任务消失）。
+  const onDelete = (id: string) => {
+    if (!window.confirm('删除后任务从列表移除且不可恢复；已聚合的结果数据由保留期自动清理。确认删除？')) {
+      return
+    }
+    deleteMut.mutate(id)
+  }
 
   const isFetching = builtinLoading || customLoading
 
@@ -99,7 +108,9 @@ export default function PmAdhoc() {
           builtinArea={false}
           onCancel={(id) => cancelMut.mutate(id)}
           onEdit={(t) => navigate(`/performance/pm-adhoc/${t.id}/edit`)}
+          onDelete={onDelete}
           cancelling={cancelMut.isPending}
+          deleting={deleteMut.isPending}
         />
       </div>
     </PageShell>
@@ -115,7 +126,9 @@ function TaskTable({
   builtinArea,
   onCancel,
   onEdit,
+  onDelete,
   cancelling,
+  deleting,
 }: {
   title: string
   meta: string
@@ -125,7 +138,10 @@ function TaskTable({
   builtinArea: boolean
   onCancel: (id: string) => void
   onEdit: (t: AdhocTask) => void
+  // issue #392：删除终态自建任务（仅自建区传入；内置区不传，按钮恒不渲染）。
+  onDelete?: (id: string) => void
   cancelling: boolean
+  deleting?: boolean
 }) {
   const sorted = useMemo(
     () => [...tasks].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')),
@@ -156,6 +172,9 @@ function TaskTable({
             sorted.map((t) => {
               const cancellable =
                 t.status === 'pending' || t.status === 'running' || t.status === 'scheduled'
+              // issue #392：终态(成功/失败/已取消)自建任务可删除。
+              const terminal =
+                t.status === 'succeeded' || t.status === 'failed' || t.status === 'canceled'
               return (
                 <div
                   key={t.id}
@@ -197,6 +216,12 @@ function TaskTable({
                     {cancellable ? (
                       <NeonButton tone="danger" icon={<Ban />} disabled={cancelling} onClick={() => onCancel(t.id)}>
                         取消
+                      </NeonButton>
+                    ) : null}
+                    {/* issue #392：终态自建任务给「删除」（onDelete 仅自建区传入） */}
+                    {!builtinArea && terminal && onDelete ? (
+                      <NeonButton tone="danger" icon={<Trash2 />} disabled={deleting} onClick={() => onDelete(t.id)}>
+                        删除
                       </NeonButton>
                     ) : null}
                   </div>

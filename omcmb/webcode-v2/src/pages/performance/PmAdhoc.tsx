@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Pencil, Plus, RefreshCcw, XCircle } from 'lucide-react'
+import { Pencil, Plus, RefreshCcw, Trash2, XCircle } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -22,7 +22,7 @@ import {
 } from '@/components/layout/PageShell'
 import { cn } from '@/lib/utils'
 
-import { usePmAdhocList, useCancelPmAdhoc } from '@core/hooks/api/usePmAdhoc'
+import { usePmAdhocList, useCancelPmAdhoc, useDeletePmAdhoc } from '@core/hooks/api/usePmAdhoc'
 import type { AdhocStatus, AdhocTask } from '@core/types/pmAdhoc'
 
 // ============================================================
@@ -70,7 +70,9 @@ function AdhocTable({
   error,
   onEdit,
   onCancel,
+  onDelete,
   cancelingId,
+  deletingId,
   builtin,
 }: {
   title: string
@@ -80,7 +82,10 @@ function AdhocTable({
   error: unknown
   onEdit: (id: string) => void
   onCancel: (id: string) => void
+  // issue #392：删除终态自建任务（仅自建区传入；内置区不传，按钮恒不渲染）。
+  onDelete?: (id: string) => void
   cancelingId: string | null
+  deletingId: string | null
   builtin: boolean
 }) {
   const cols = builtin
@@ -110,8 +115,11 @@ function AdhocTable({
               </EmptyRow>
             ) : (
               rows.map((t) => {
-                const busy = cancelingId === t.id
+                const busy = cancelingId === t.id || deletingId === t.id
                 const active = t.status === 'running' || t.status === 'pending' || t.status === 'scheduled'
+                // issue #392：终态(成功/失败/已取消)自建任务可删除。
+                const terminal =
+                  t.status === 'succeeded' || t.status === 'failed' || t.status === 'canceled'
                 return (
                   <TableRow key={t.id} className={cn(busy && 'opacity-50')}>
                     <TableCell className="font-medium">
@@ -194,6 +202,19 @@ function AdhocTable({
                             <XCircle className="size-4" />
                           </Button>
                         )}
+                        {/* issue #392：终态自建任务给「删除」（onDelete 仅自建区传入） */}
+                        {!builtin && terminal && onDelete && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={busy}
+                            className="text-destructive hover:text-destructive"
+                            onClick={() => onDelete(t.id)}
+                            aria-label="删除任务"
+                          >
+                            <Trash2 className="size-4" /> 删除
+                          </Button>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -210,10 +231,12 @@ function AdhocTable({
 export function PmAdhocPage() {
   const navigate = useNavigate()
   const [cancelingId, setCancelingId] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   const builtin = usePmAdhocList({ isBuiltin: true, refetchInterval: 10_000 })
   const custom = usePmAdhocList({ isBuiltin: false, refetchInterval: 10_000 })
   const cancel = useCancelPmAdhoc()
+  const del = useDeletePmAdhoc()
 
   const builtinRows = useMemo(() => builtin.data ?? [], [builtin.data])
   const customRows = useMemo(() => custom.data ?? [], [custom.data])
@@ -223,8 +246,16 @@ export function PmAdhocPage() {
     setCancelingId(id)
     cancel.mutate(id, { onSettled: () => setCancelingId(null) })
   }
+  // issue #392：删除终态自建任务 —— 二次确认 → 删除 → 列表自动刷新（任务消失）。
+  const onDelete = (id: string) => {
+    if (!window.confirm('删除后任务从列表移除且不可恢复；已聚合的结果数据由保留期自动清理。确认删除？')) {
+      return
+    }
+    setDeletingId(id)
+    del.mutate(id, { onSettled: () => setDeletingId(null) })
+  }
 
-  const fetching = builtin.isFetching || custom.isFetching || cancel.isPending
+  const fetching = builtin.isFetching || custom.isFetching || cancel.isPending || del.isPending
 
   return (
     <PageShell
@@ -260,6 +291,7 @@ export function PmAdhocPage() {
           onEdit={onEdit}
           onCancel={onCancel}
           cancelingId={cancelingId}
+          deletingId={deletingId}
           builtin
         />
         <AdhocTable
@@ -270,7 +302,9 @@ export function PmAdhocPage() {
           error={custom.error}
           onEdit={onEdit}
           onCancel={onCancel}
+          onDelete={onDelete}
           cancelingId={cancelingId}
+          deletingId={deletingId}
           builtin={false}
         />
       </div>
