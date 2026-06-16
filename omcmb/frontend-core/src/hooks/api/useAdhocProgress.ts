@@ -157,7 +157,7 @@ export function useAdhocProgressStream(
       const url = `${baseURL}/pm/adhoc/tasks/${encodeURIComponent(
         id,
       )}/progress?token=${encodeURIComponent(accessToken)}`;
-      let source: EventSource | null = null;
+      let source: EventSource;
       try {
         source = new EventSource(url, { withCredentials: true });
       } catch {
@@ -199,7 +199,6 @@ export function useAdhocProgressStream(
     }
 
     // 注意：本 effect 内 sources 的增删是增量的；cleanup 只在 unmount / token 变化时关全部。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accessToken, idsKey, qc]);
 
   // unmount 关全部连接（token 变化时上面分支已先清；此处兜底卸载场景）。
