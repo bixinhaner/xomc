@@ -3,6 +3,7 @@ package adhoc
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -53,6 +54,14 @@ type Executor struct {
 	//   - false（仅存所选）：落库前按 task.MetricPaths 过滤，只存任务定义的 N 个指标
 	// 注意：此开关只影响"落哪些指标"，不影响"查看/导出限 N 个"那条收口规则（设计 §2.4）。
 	storeAllMetrics bool
+
+	// loc 是 PM 业务时区（T-0192）。ISSUE-398 持续任务算「最近一格」窗口时，
+	// daily/weekly/monthly 的零点对齐依赖此时区（hourly/15min 与时区无关）。
+	// 默认 time.UTC；worker 启动期按 pm.timezone 用 SetLocation 注入（同 G5 聚合口径）。
+	loc *time.Location
+
+	// now 是当前时刻取值器，便于单测注入固定时刻断言「最近一格」窗口。默认 time.Now。
+	now func() time.Time
 }
 
 // NewExecutor 构造 Executor。publisher 可为 nil（不上报进度事件）。
@@ -67,7 +76,19 @@ func NewExecutor(aggr AggregatorQuerier, repo Repository, publisher ProgressPubl
 		publisher:       publisher,
 		logger:          logger.Named("pm.adhoc.executor"),
 		storeAllMetrics: true,
+		loc:             time.UTC,
+		now:             time.Now,
 	}
+}
+
+// SetLocation 注入 PM 业务时区（worker 启动期按 pm.timezone）。
+// nil 视为 time.UTC。返回自身便于链式调用。
+func (e *Executor) SetLocation(loc *time.Location) *Executor {
+	if loc == nil {
+		loc = time.UTC
+	}
+	e.loc = loc
+	return e
 }
 
 // SetStoreAllMetrics 配置落库范围开关（worker 启动期按 pm.storage.store_all_metrics 注入）。
@@ -143,14 +164,26 @@ func (e *Executor) queryAndConvert(ctx context.Context, task *Task, g metrics.Gr
 	if task.Technology != "" {
 		techs = []string{task.Technology}
 	}
+	// 时间窗：
+	//   - oneshot：用户选的固定时间窗，原样透传（不动）。
+	//   - continuous：ISSUE-398 方案 A——无论首跑还是滚动，都只算「最近一个已完成周期」
+	//     那一格，按本粒度自算窗口覆盖 Start/EndTime，避免空窗扫全历史。
+	startTime := task.WindowStart
+	endTime := task.WindowEnd
+	if isContinuous(task) {
+		// 结果聚合表里桶行的 `time` 列即桶起点；StartTime==EndTime==桶起点 → 只命中这一格。
+		bucket := lastCompletedBucket(g, e.now(), e.loc)
+		startTime = bucket
+		endTime = bucket
+	}
 	req := aggregator.QueryRequest{
 		Granularity:  g,
 		Dimension:    dim,
 		DeviceSNs:    task.DeviceSNs,
 		MetricPaths:  task.MetricPaths,
 		Technologies: techs,
-		StartTime:    task.WindowStart,
-		EndTime:      task.WindowEnd,
+		StartTime:    startTime,
+		EndTime:      endTime,
 		Limit:        100000,
 	}
 	// KPI-ALL-IND：全网维度且指标列表为空（全聚到全库）时，让聚合层连派生 KPI 一起重算落库，
@@ -203,6 +236,17 @@ func (e *Executor) queryAndConvert(ctx context.Context, task *Task, g metrics.Gr
 		})
 	}
 	return out, nil
+}
+
+// isContinuous 判定任务是否为持续型（ISSUE-398 落点）。
+//
+// 显式 Mode==continuous 优先；为兼容历史/边界数据，窗口零值（创建时清窗存 NULL）也视为持续型。
+// oneshot 任务窗口非零，不命中——其固定窗口保持原样不被覆盖。
+func isContinuous(task *Task) bool {
+	if task.Mode == ModeContinuous {
+		return true
+	}
+	return task.WindowStart.IsZero() && task.WindowEnd.IsZero()
 }
 
 // filterByMetricPaths 只保留 metric_path 在 allowed 集合里的结果行（"仅存所选"模式用）。
