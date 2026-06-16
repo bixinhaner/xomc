@@ -705,9 +705,13 @@ func (h *Handler) Results(c *gin.Context) {
 		StartTime:   c.Query("start_time"),
 		EndTime:     c.Query("end_time"),
 		ObjectLDNs:  task.ObjectLDNs, // 任务自带白名单（空=全小区）
-		// PM-DASH-DIMFILTER：仪表盘维度子集过滤（CSV 或重复参数）。默认两者都不传 = 不过滤 = 现行行为。
+		// PM-DASH-DIMFILTER：仪表盘维度子集过滤（默认两者都不传 = 不过滤 = 现行行为）。
+		// product_ids 是纯 UUID（永不含逗号），可走 CSV 切分兼容单参数多值。
 		ProductIDs: parseCSVQuery(c, "product_ids"),
-		SubsetLDNs: parseCSVQuery(c, "object_ldns"),
+		// object_ldns 的值合法含逗号（设备组维度 'DeviceGroup=<uuid>,Tech=<tech>'），
+		// 故不能按逗号切分（issue #401：切分后两段都匹配不上完整存储值 → 0 行）。
+		// 改走纯重复参数形态 ?object_ldns=a&object_ldns=b，整值保留不拆。
+		SubsetLDNs: parseRepeatedQuery(c, "object_ldns"),
 	}
 	q, args := buildResultsQuery(id, filter, limit, offset)
 
@@ -822,6 +826,25 @@ func parseCSVQuery(c *gin.Context, key string) []string {
 			if p != "" {
 				out = append(out, p)
 			}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// parseRepeatedQuery 读取只走「重复参数」形态（?k=a&k=b）的多值 query，整值保留不按逗号拆分。
+// 用于值本身合法含逗号的参数（如 object_ldns 的设备组值 'DeviceGroup=<uuid>,Tech=<tech>'，
+// issue #401：若按逗号拆会把单个完整值切成两段，导致 object_ldn = ANY(...) 匹配不上 → 0 行）。
+// 返回去空白后的非空项切片；无值返回 nil（让 = ANY 子句不进 SQL = 不过滤）。
+func parseRepeatedQuery(c *gin.Context, key string) []string {
+	raw := c.QueryArray(key) // 重复参数形态 ?k=a&k=b；每个值整体保留，不拆逗号
+	out := make([]string, 0, len(raw))
+	for _, v := range raw {
+		p := strings.TrimSpace(v)
+		if p != "" {
+			out = append(out, p)
 		}
 	}
 	if len(out) == 0 {
