@@ -442,10 +442,6 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	if ph.pmAdhocHandler != nil {
 		ph.pmAdhocHandler.RegisterRoutes(permGroup("pm"))
 	}
-	// T-0164-P6 / G6：PM 仪表盘 REST 路由（同 pm 权限组）
-	if ph.pmDashboardHandler != nil {
-		ph.pmDashboardHandler.RegisterRoutes(permGroup("pm"))
-	}
 	// T-0174 阶段 1：指标查询模板 REST 路由（5 CRUD，同 pm 权限组）
 	if ph.pmQueryTemplateHandler != nil {
 		ph.pmQueryTemplateHandler.RegisterRoutes(permGroup("pm"))
