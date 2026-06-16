@@ -38,12 +38,24 @@ func (a *Aggregator) AggregateDeviceGroup(ctx context.Context, deviceTarget, gro
 //     （dgm 表 UNIQUE constraint uq_dgm_device 保证 1 设备 ≤ 1 group）
 //   - 不在 SQL 里走 ParamModel/Translator —— metric_path 已是 standardPath
 //   - 聚合方式同 buildCountersSQL：CASE WHEN m.statis_type → SUM/AVG/MAX
+//
+// 时刻语义（issue #395 修复）：
+//   - deviceTarget（pm_metrics_*）是**已按自然桶分行**的设备维度聚合表，每行自带
+//     正确的 time/start_time/end_time。组聚合必须按源行自身的桶时刻分桶，
+//     GROUP BY 增加 m.time/m.start_time/m.end_time，写入也取源行这三列，
+//     而非窗口起点 w.Start。
+//   - 修复前：GROUP BY 不含 time → 整窗内所有源小时被压成一个聚合点；写入 time
+//     硬编码为 w.Start；cron 用 [end-1h,end) 窗口 + WHERE 按 end_time 命中，
+//     使 device 行（time=T, end_time=T+1h）落进窗口被标成 T+1h → 恒后移 1 格。
+//   - 修复后：每个源小时各成一行，写入 time 与设备单维度表逐档对齐、无偏移；
+//     宽窗补算自然产出多行。
 func buildDeviceGroupSQL(deviceTarget, groupTarget string, w WindowSpec) (string, []any) {
 	conflictTarget := conflictTargetForTable(groupTarget)
 	withID := targetHasIDColumn(groupTarget)
 
-	// device_group 快表按「组 × 制式 × 指标」拆行（设备组制式治本 B 方案）：
-	// SELECT 带出 d.technology、GROUP BY 加制式、insertCols 加 technology 列、冲突列尾部含 technology。
+	// device_group 快表按「组 × 制式 × 指标 × 源桶时刻」拆行：
+	// SELECT 带出 d.technology + 源行三时刻列、GROUP BY 加制式与桶时刻、
+	// insertCols 加 technology 列、冲突列尾部含 technology。
 	insertCols := "device_group_id, technology, metric_path, metric_type, metric_value, statis_type, granularity, time, start_time, end_time, ingest_time, extra"
 	selectIDExpr := ""
 	if withID {
@@ -66,9 +78,9 @@ SELECT
     END,
     m.statis_type,
     $1,
-    $2,
-    $2,
-    $3,
+    m.time,
+    m.start_time,
+    m.end_time,
     NOW(),
     NULL::jsonb
 FROM %s m
@@ -77,10 +89,10 @@ JOIN device_dim d
 JOIN device_group_member_dim dgm
   ON dgm.device_id = d.id
 WHERE m.metric_type = 'counter'
-  AND m.end_time >= $4
-  AND m.end_time <  $5
+  AND m.end_time >= $2
+  AND m.end_time <  $3
   AND m.statis_type IN ('sum','avg','max','min')
-GROUP BY dgm.group_id, d.technology, m.metric_path, m.statis_type
+GROUP BY dgm.group_id, d.technology, m.metric_path, m.statis_type, m.time, m.start_time, m.end_time
 ON CONFLICT %s DO UPDATE SET
     metric_value = EXCLUDED.metric_value,
     ingest_time  = NOW()`,
@@ -89,5 +101,5 @@ ON CONFLICT %s DO UPDATE SET
 		deviceTarget,
 		conflictTarget,
 	)
-	return sql, []any{string(w.Granularity), w.Start, w.End, w.Start, w.End}
+	return sql, []any{string(w.Granularity), w.Start, w.End}
 }
