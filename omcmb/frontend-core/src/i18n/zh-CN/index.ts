@@ -4274,8 +4274,6 @@ const messages: Record<string, string> = {
   'device.deviceGroup':          '设备组',
 
   // System - Basic Settings
-  'system.basic.operatorName':         '运营商名称',
-  'system.basic.pleaseInputOperatorName': '请输入运营商名称',
   'system.basic.omcName':              'OMC名称',
   'system.basic.pleaseInputOmcName':   '请输入网管系统名称',
   'system.basic.info':                 '基本信息',

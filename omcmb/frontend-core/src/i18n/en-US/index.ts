@@ -4247,8 +4247,6 @@ const messages: Record<string, string> = {
   'device.deviceGroup':          'Device Group',
 
   // System - Basic Settings
-  'system.basic.operatorName':         'Operator Name',
-  'system.basic.pleaseInputOperatorName': 'Please enter operator name',
   'system.basic.omcName':              'OMC Name',
   'system.basic.pleaseInputOmcName':   'Please enter OMC system name',
   'system.basic.info':                 'Basic Information',

@@ -25,23 +25,11 @@ export default function BasicSettings({ form }: BasicSettingsProps) {
 
   return (
     <Form form={form} layout="vertical" size="small" initialValues={{
-      mrVendor: '',
       mrOMCName: '',
       timezoneCode: '',
     }}>
       {/* 基本信息 */}
       <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.basic.info')}</span>} style={{ marginBottom: 16 }}>
-        <div style={settingRowStyle}>
-          <Form.Item
-            name="mrVendor"
-            label={t('system.basic.operatorName')}
-            rules={[{ max: 50, message: t('common.max50Chars') }]}
-            style={{ marginBottom: 0 }}
-          >
-            <Input placeholder={t('system.basic.pleaseInputOperatorName')} maxLength={50} style={{ width: 300 }} />
-          </Form.Item>
-        </div>
-
         <div style={settingRowStyle}>
           <Form.Item
             name="mrOMCName"
