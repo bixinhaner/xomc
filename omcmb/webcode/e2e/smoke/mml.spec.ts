@@ -4,9 +4,9 @@ import { expectPageRenders, smokeLogin } from './helpers';
 /**
  * MML 控制台域冒烟：六个页面在真实后端下正常渲染。
  *
- * 路由依据 src/router/routes.tsx（mml/console-v2 为控制台独立路由，
+ * 路由依据 src/router/routes.tsx（mml/console 为控制台独立路由，
  * mml/commands 在导航中隐藏但路由仍在）：
- *   - /mml/console-v2   src/pages/mml/ConsoleV2    顶部 SelectionBar（硬编码中文：
+ *   - /mml/console   src/pages/mml/Console    顶部 SelectionBar（硬编码中文：
  *                       ① 选择设备 / ② 选择命令 / ③ 配置参数 / 执行）
  *   - /mml/commands     src/pages/mml/CommandTree  TreeListPageLayout：
  *                       左侧分类树(.ant-tree，根节点 mml.category.all)
@@ -31,8 +31,8 @@ test.describe('MML控制台冒烟（真实后端）', { tag: '@smoke' }, () => {
     await smokeLogin(page);
   });
 
-  test('/mml/console-v2 MML控制台V2 顶部选择条渲染', async ({ page }) => {
-    await expectPageRenders(page, '/mml/console-v2');
+  test('/mml/console MML控制台V2 顶部选择条渲染', async ({ page }) => {
+    await expectPageRenders(page, '/mml/console');
 
     // SelectionBar 三个步骤按钮 + 执行按钮（组件内硬编码中文，无 en-US 分支）
     await expect(page.getByRole('button', { name: /① 选择设备/ })).toBeVisible();

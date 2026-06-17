@@ -88,7 +88,7 @@ const C_pages_logs_SystemLog = lazy(() => import('@/pages/logs/SystemLog'))
 const C_pages_mml_admin_catalog_index = lazy(() => import('@/pages/mml/admin-catalog/index'))
 const C_pages_mml_commands_detail = lazy(() => import('@/pages/mml/commands/detail'))
 const C_pages_mml_commands_index = lazy(() => import('@/pages/mml/commands/index'))
-const C_pages_mml_console_v2_index = lazy(() => import('@/pages/mml/console-v2/index'))
+const C_pages_mml_console_index = lazy(() => import('@/pages/mml/console/index'))
 const C_pages_mml_private_command_detail = lazy(() => import('@/pages/mml/private-command/detail'))
 const C_pages_mml_private_command_index = lazy(() => import('@/pages/mml/private-command/index'))
 const C_pages_mml_script_index = lazy(() => import('@/pages/mml/script/index'))
@@ -251,7 +251,7 @@ export const MODULES: ModuleDef[] = [
   ] },
   { key: 'mml', label: 'MML', icon: <Terminal />, section: '运维', routes: [
     { path: '/mml', element: s(MMLPage), label: "MML" },
-    { path: '/mml/console-v2', element: s(C_pages_mml_console_v2_index), label: "MML控制台" },
+    { path: '/mml/console', element: s(C_pages_mml_console_index), label: "MML控制台" },
     { path: '/mml/script', element: s(C_pages_mml_script_index), label: "脚本库" },
     { path: '/mml/task-records', element: s(C_pages_mml_task_records_index), label: "任务记录" },
     { path: '/mml/commands', element: s(C_pages_mml_commands_index), label: "命令字典" },

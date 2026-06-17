@@ -94,7 +94,7 @@ export interface BuildCustomizedSubtreeOptions {
   t: (id: string, values?: Record<string, string | number>) => string;
   /**
    * 「+」按钮点击：打开 AddTemplateModal（private / public）。
-   * 不传则不渲染「+」（console-v2「选择命令」只读复用，仅选不增）。
+   * 不传则不渲染「+」（console「选择命令」只读复用，仅选不增）。
    */
   onAdd?: (scope: 'public' | 'private') => void;
   /**
@@ -141,7 +141,7 @@ export function buildCustomizedSubtree(
   });
 
   // 标题尾部「+」：stopPropagation 阻止冒泡触发节点展开 / 选中。
-  // onAdd 缺省（只读场景，如 console-v2 选择命令）时返回 null，不渲染「+」。
+  // onAdd 缺省（只读场景，如 console 选择命令）时返回 null，不渲染「+」。
   const addBtn = (scope: 'public' | 'private') =>
     onAdd ? (
       <Tooltip

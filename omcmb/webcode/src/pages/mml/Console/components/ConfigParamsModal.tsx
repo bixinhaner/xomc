@@ -67,7 +67,7 @@ export default function ConfigParamsModal({
 }: ConfigParamsModalProps) {
   const t = useT();
   // issue #409：弹框内「确定并执行」= 下发，受 execute 权限管控（无权限禁用 + 提示）。
-  const canExecutePerm = usePermission('mml:console-v2:execute');
+  const canExecutePerm = usePermission('mml:console:execute');
   const [mode, setMode] = useState<OperationMode>('standard');
   const [wasOpen, setWasOpen] = useState(false);
 
