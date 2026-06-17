@@ -25,11 +25,11 @@ import type { MapDevice, MapViewport, MapBounds } from '@core/types/map';
 import {
   MAP_CONFIG,
   ANIMATION_CONFIG,
-  CLUSTER_CONFIG,
   COLORS,
   DEVICE_STATUS_CONFIG,
   SPIDERFY_CONFIG,
   VIEWPORT_CULLING,
+  getClusterDistanceForZoom,
 } from './constants';
 import {
   clusterStyleFunction,
@@ -93,8 +93,6 @@ interface UseOLMapOptions {
   minZoom?: number;
   /** 最大缩放级别 */
   maxZoom?: number;
-  /** 聚合距离 */
-  clusterDistance?: number;
   /** 设备点击回调（包含鼠标位置） */
   onDeviceClick?: (device: MapDevice, pixel?: { x: number; y: number }) => void;
   /** 设备悬停回调（包含鼠标位置） */
@@ -212,7 +210,6 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
     zoom,
     minZoom = config.minZoom,
     maxZoom = config.maxZoom,
-    clusterDistance = CLUSTER_CONFIG.distance,
     onDeviceClick,
     onDeviceHover,
     onViewportChange,
@@ -344,31 +341,18 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
     mapInstanceRef.current.render();
   }, [unspiderfy]);
 
-  // 根据缩放级别动态调整聚合距离
+  // 根据缩放级别动态调整聚合距离（按 CLUSTER_CONFIG.distanceTiers 查表）
   const updateClusterDistance = useCallback((zoom: number) => {
     if (!clusterSourceRef.current) return;
 
-    let newDistance: number;
-    if (zoom >= CLUSTER_CONFIG.disableClusterZoom) {
-      // 高缩放级别：禁用聚合（distance = 0 表示不聚合）
-      newDistance = 0;
-    } else if (zoom >= 12) {
-      // 中等缩放级别：使用较小的聚合距离
-      newDistance = CLUSTER_CONFIG.highZoomDistance;
-    } else {
-      // 低缩放级别：使用正常聚合距离
-      newDistance = clusterDistance;
-    }
+    const newDistance = getClusterDistanceForZoom(zoom);
 
-    // 只有距离变化时才更新，避免不必要的重绘
     if (clusterSourceRef.current.getDistance() !== newDistance) {
       clusterSourceRef.current.setDistance(newDistance);
-      // 强制刷新 Cluster source，确保重新计算聚合
       clusterSourceRef.current.refresh();
-      // 触发地图重新渲染
       mapInstanceRef.current?.render();
     }
-  }, [clusterDistance]);
+  }, []);
 
   // 使用 ref 跟踪地图是否已初始化（避免依赖项导致的重复初始化）
   const isMapInitializedRef = useRef(false);
@@ -411,10 +395,10 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
     // 创建设备数据源
     deviceSourceRef.current = new VectorSource();
 
-    // 创建聚合数据源
+    // 创建聚合数据源（初始 distance 按初始 zoom 查表，避免首帧聚合距离不匹配）
     clusterSourceRef.current = new Cluster({
       source: deviceSourceRef.current,
-      distance: clusterDistance,
+      distance: getClusterDistanceForZoom(zoom ?? defaultZoom ?? config.defaultZoom),
     });
 
     // 创建设备图层
