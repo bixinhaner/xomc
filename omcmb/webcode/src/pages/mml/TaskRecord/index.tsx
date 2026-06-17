@@ -9,8 +9,8 @@ import type { DataTableColumn } from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import { useT } from '@/hooks/useT';
-import ResultTable from '../ConsoleV2/components/ResultTable';
-import { mapTaskToRecord, buildDeviceRows } from '../ConsoleV2/adapters';
+import ResultTable from '../Console/components/ResultTable';
+import { mapTaskToRecord, buildDeviceRows } from '../Console/adapters';
 
 import type {
   MMLTask,
@@ -238,7 +238,7 @@ export default function TaskRecord() {
     },
   ], [t]);
 
-  // 查看明细复用 console-v2「执行结果」组件（ResultTable），保证两页面布局一致：
+  // 查看明细复用 console「执行结果」组件（ResultTable），保证两页面布局一致：
   // mapTaskToRecord 取命令元信息 + columns；rows 用单独拉取的 resultRows（更可靠）重建。
   const viewRecord = useMemo(() => {
     if (!viewing) return null;
@@ -278,7 +278,7 @@ export default function TaskRecord() {
         width={960}
         destroyOnHidden
       >
-        {/* 查看明细复用 console-v2「执行结果」表（含逐设备「查看」→ 执行详情），两页面布局一致 */}
+        {/* 查看明细复用 console「执行结果」表（含逐设备「查看」→ 执行详情），两页面布局一致 */}
         {viewRecord && (
           <div style={{ minHeight: 360 }}>
             <ResultTable

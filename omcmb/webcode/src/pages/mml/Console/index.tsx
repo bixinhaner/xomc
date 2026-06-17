@@ -66,7 +66,7 @@ interface LiveExec {
  * 执行走真实后端：标准命令 → POST …/execute-statements-structured；裸路径 → POST /mml/execute；
  * 结果经 SSE（mml_device_frame）就地回填表格行，整体完成后落入命令记录。
  */
-export default function MMLConsoleV2() {
+export default function MMLConsole() {
   const t = useT();
   const [deviceModalOpen, setDeviceModalOpen] = useState(false);
   const [commandModalOpen, setCommandModalOpen] = useState(false);

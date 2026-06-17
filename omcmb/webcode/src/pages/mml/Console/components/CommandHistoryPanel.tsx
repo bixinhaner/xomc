@@ -37,8 +37,8 @@ export default function CommandHistoryPanel({
   onToggleCollapsed,
 }: CommandHistoryPanelProps) {
   const t = useT();
-  // issue #409：清空命令记录的按钮级权限（无 mml:console-v2:history 时禁用 + 提示）。
-  const canHistoryPerm = usePermission('mml:console-v2:history');
+  // issue #409：清空命令记录的按钮级权限（无 mml:console:history 时禁用 + 提示）。
+  const canHistoryPerm = usePermission('mml:console:history');
   // 收缩态:窄条,仅图标 + 展开按钮 + 记录数徽标。
   if (collapsed) {
     return (

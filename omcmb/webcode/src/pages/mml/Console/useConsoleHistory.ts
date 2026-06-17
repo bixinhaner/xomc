@@ -37,7 +37,7 @@ export interface ConsoleHistory {
   clear: () => void;
 }
 
-const STORAGE_KEY = 'mml-console-v2-history';
+const STORAGE_KEY = 'mml-console-history';
 const MAX_IDS = 50;
 
 // 本会话已执行命令：commandId(= mml_tasks.id) → ExecRecord（含结果行）。跨刷新丢失（P3 重建）。
@@ -71,7 +71,7 @@ export function useConsoleHistory(): ConsoleHistory {
   const missingIds = useMemo(() => ids.filter((id) => !recordStore.has(id)), [ids]);
   const queries = useQueries({
     queries: missingIds.map((id) => ({
-      queryKey: ['mml', 'console-v2', 'task', id],
+      queryKey: ['mml', 'console', 'task', id],
       queryFn: () => mmlApi.getTaskById(id),
       staleTime: 60 * 1000,
       retry: false,
@@ -102,7 +102,7 @@ export function useConsoleHistory(): ConsoleHistory {
   const needResults = !!baseActiveRecord && baseActiveRecord.rows.length === 0;
   const activeCommandId = baseActiveRecord?.commandId ?? null;
   const resultsQuery = useQuery({
-    queryKey: ['mml', 'console-v2', 'results', activeCommandId],
+    queryKey: ['mml', 'console', 'results', activeCommandId],
     queryFn: () => mmlApi.getTaskResults(activeCommandId as string, 1, 200),
     enabled: needResults && !!activeCommandId,
     staleTime: 60 * 1000,

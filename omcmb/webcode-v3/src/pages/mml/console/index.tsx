@@ -24,8 +24,8 @@ import type { Device } from '@core/types/device'
 import type { Statement, ParseError } from '@core/types/mmlConsole'
 
 // ─────────────────────────────────────────────────────────────
-// MML EDITOR · 多语句脚本控制台（console-v2，real）
-// v1 路由 mml/console-v2（ConsoleV2）—— MML 文本编辑 → 解析 → N 设备扇出执行。
+// MML EDITOR · 多语句脚本控制台（console，real）
+// v1 路由 mml/console（Console）—— MML 文本编辑 → 解析 → N 设备扇出执行。
 //   设备 useDeviceList；解析 useParseMML(POST /mml/parse)；
 //   执行 useExecuteStatements(POST /mml/execute-statements)。
 // 执行成功导航到任务记录页查看推进状态。
@@ -44,7 +44,7 @@ const OP_COLOR: Record<string, string> = {
 
 const SAMPLE = ['LST DEVICE_INFO;', 'LST FAP_CONTROL;'].join('\n')
 
-export function MMLConsoleV2Page() {
+export function MMLConsolePage() {
   const navigate = useNavigate()
   const creator = useUserStore((s) => s.currentUser?.username) ?? ''
 
@@ -90,8 +90,8 @@ export function MMLConsoleV2Page() {
     )
   }
 
-  // issue #409：执行下发受 mml:console-v2:execute 权限管控（无权限禁用 + 原生 title 提示）。
-  const canExecutePerm = usePermission('mml:console-v2:execute')
+  // issue #409：执行下发受 mml:console:execute 权限管控（无权限禁用 + 原生 title 提示）。
+  const canExecutePerm = usePermission('mml:console:execute')
   const canExecute =
     selectedSns.length > 0 && parsed.length > 0 && parseErrors.length === 0 && !exec.isPending && canExecutePerm
 
@@ -340,4 +340,4 @@ function CenterState({
   )
 }
 
-export default MMLConsoleV2Page
+export default MMLConsolePage

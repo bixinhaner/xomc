@@ -1,7 +1,7 @@
 // MML 控制台 V2 —— 真实后端类型 → 页面视图类型 适配层（设计 §3.12.3）。
 //
 // 把 frontend-core 的真实 API 类型（Device / GroupTreeCommand / SubFieldDef /
-// DeviceTaskResultItem）映射为 ConsoleV2 本地视图类型（DeviceItem / CommandItem /
+// DeviceTaskResultItem）映射为 Console 本地视图类型（DeviceItem / CommandItem /
 // ResultRow），隔离对接面：组件只认本地 view 类型，换端点只改本文件。
 
 import type { Device } from '@core/types/device';
@@ -105,7 +105,7 @@ export function customCommandParamPaths(cc: MMLCustomCommand): CommandParamPath[
 }
 
 /**
- * MMLCustomCommand + 已过滤 paramPaths → ConsoleV2 CommandItem。
+ * MMLCustomCommand + 已过滤 paramPaths → Console CommandItem。
  * 标记 isCustom=true：执行时强制走裸路径通道（结构化端点要 command_id，自定义命令没有）。
  */
 export function mapCustomCommandItem(
@@ -125,7 +125,7 @@ export function mapCustomCommandItem(
   };
 }
 
-/** GroupTreeCommand + 已加载 sub-fields → ConsoleV2 CommandItem（id = 真实 mml_commands.id）。 */
+/** GroupTreeCommand + 已加载 sub-fields → Console CommandItem（id = 真实 mml_commands.id）。 */
 export function mapCommandItem(
   groupName: string,
   c: GroupTreeCommand,
@@ -598,7 +598,7 @@ export function buildMODReadbackRows(
 }
 
 /**
- * 真实任务（GET /mml/tasks/:id）→ ConsoleV2 命令记录（含结果行）。
+ * 真实任务（GET /mml/tasks/:id）→ Console 命令记录（含结果行）。
  *
  * - 命令元信息取首条 `commandsDetail`（op_type + param_paths）；老任务缺 detail 时降级为
  *   仅摘要（columns/rows 尽力而为）。
