@@ -102,7 +102,7 @@ export default function MessageTrace() {
                     <button
                       type="button"
                       className="text-left font-mono text-xs font-medium hover:underline"
-                      onClick={() => navigate(`/ops/message-trace/${r.id}`)}
+                      onClick={() => navigate(`/ops/message-trace`)}
                     >
                       {r.deviceSn}
                     </button>
@@ -123,7 +123,7 @@ export default function MessageTrace() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => navigate(`/ops/message-trace/${r.id}`)}
+                        onClick={() => navigate(`/ops/message-trace`)}
                         title="查看报文"
                       >
                         <Eye className="size-4" />

@@ -34,7 +34,7 @@ export default function FleetDeviceDetail() {
       isFetching={isFetching}
       toolbar={
         <>
-          <NeonButton icon={<ArrowLeft />} onClick={() => navigate('/fleet')}>
+          <NeonButton icon={<ArrowLeft />} onClick={() => navigate('/device/list')}>
             FLEET
           </NeonButton>
           <NeonButton icon={<RefreshCcw />} onClick={() => refetch()}>
@@ -61,7 +61,7 @@ export default function FleetDeviceDetail() {
         loadingLabel="LOADING UNIT…"
         emptyLabel={`NO UNIT FOR SN ${sn}`}
       >
-        {device ? <DetailBody d={device} onUe={() => navigate(`/fleet/ue-detail/${device.sn}`)} /> : null}
+        {device ? <DetailBody d={device} onUe={() => navigate(`/device/ue-detail/${device.sn}`)} /> : null}
       </StateGate>
     </PageShell>
   )

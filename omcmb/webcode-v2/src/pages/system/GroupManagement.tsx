@@ -103,7 +103,7 @@ export default function GroupManagement() {
                     <button
                       type="button"
                       className="text-left font-medium text-primary hover:underline"
-                      onClick={() => navigate(`/system/groups/${g.id}`)}
+                      onClick={() => navigate(`/system/groups`)}
                     >
                       {g.groupName}
                     </button>

@@ -146,7 +146,7 @@ export default function DeviceClassification() {
                       <button
                         key={d.id}
                         type="button"
-                        onClick={() => navigate(`/fleet?sn=${encodeURIComponent(d.sn)}`)}
+                        onClick={() => navigate(`/device/list?sn=${encodeURIComponent(d.sn)}`)}
                         className="fleet-row grid w-full grid-cols-[1.6fr_1.4fr_1fr_1fr_1fr_1.4fr_0.4fr] items-center gap-3 rounded-sm px-3 py-2.5 text-left"
                         style={{ ['--row-color' as never]: d.isOnline ? '#00ff88' : '#525a78' }}
                       >

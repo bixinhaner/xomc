@@ -118,7 +118,7 @@ export default function FleetCommissioning() {
                 <button
                   type="button"
                   className="min-w-0 text-left"
-                  onClick={() => navigate(`/fleet/detail/${encodeURIComponent(t.deviceId)}`)}
+                  onClick={() => navigate(`/device/detail/${encodeURIComponent(t.deviceId)}`)}
                 >
                   <div className="truncate font-display text-sm font-bold text-cyan-100">
                     TASK {t.id.slice(0, 8)}

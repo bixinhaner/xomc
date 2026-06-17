@@ -55,6 +55,7 @@ import {
 } from '@core/hooks/api/useDevices'
 import { useProductList } from '@core/hooks/api/useProducts'
 import { useAlarmCount, useTriggerAlarmSync } from '@core/hooks/api/useAlarms'
+import { activationStatusOf } from '@core/utils/activationStatus'
 import type { Device, DeviceFilter } from '@core/types/device'
 import type { PageRequest } from '@core/types/pagination'
 import type { AlarmSeverity } from '@core/types/common'
@@ -283,7 +284,7 @@ export function DevicesPage() {
           <button
             type="button"
             className="font-mono text-xs text-primary hover:underline"
-            onClick={() => navigate(`/devices/detail/${row.original.sn}`)}
+            onClick={() => navigate(`/device/detail/${row.original.sn}`)}
           >
             {row.original.sn || '—'}
           </button>
@@ -379,7 +380,7 @@ export function DevicesPage() {
               className="inline-flex items-center gap-1 text-xs text-primary tabular-nums hover:underline"
               onClick={() =>
                 navigate(
-                  `/devices/ue-detail/${encodeURIComponent(d.sn)}?name=${encodeURIComponent(label || '')}&ueCount=${d.ueCount ?? 0}`
+                  `/device/ue-detail/${encodeURIComponent(d.sn)}?name=${encodeURIComponent(label || '')}&ueCount=${d.ueCount ?? 0}`
                 )
               }
             >

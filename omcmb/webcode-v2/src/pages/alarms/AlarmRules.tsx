@@ -286,7 +286,7 @@ export default function AlarmRules() {
                       <button
                         type="button"
                         className="flex items-center gap-2 hover:underline"
-                        onClick={() => navigate(`/alarms/rules/${r.id}`)}
+                        onClick={() => navigate(`/alarm/rules`)}
                       >
                         {r.isDefault ? (
                           <Badge variant="secondary">默认</Badge>
@@ -307,7 +307,7 @@ export default function AlarmRules() {
                           variant="ghost"
                           size="sm"
                           className="h-7 px-2 text-xs"
-                          onClick={() => navigate(`/alarms/rules/${r.id}`)}
+                          onClick={() => navigate(`/alarm/rules`)}
                         >
                           查看
                         </Button>

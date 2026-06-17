@@ -84,7 +84,7 @@ export default function StationReportPage() {
       bare
       toolbar={
         <>
-          <button type="button" onClick={() => navigate('/reports')} className="chip text-cyan-300/70 hover:opacity-100">
+          <button type="button" onClick={() => navigate('/report/lte-standard')} className="chip text-cyan-300/70 hover:opacity-100">
             ← 简报中心
           </button>
           <div className="relative">
@@ -167,13 +167,7 @@ export default function StationReportPage() {
               return (
                 <div
                   key={d.id}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => navigate(`/reports/station/${encodeURIComponent(d.sn)}`)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') navigate(`/reports/station/${encodeURIComponent(d.sn)}`)
-                  }}
-                  className="fleet-row grid cursor-pointer grid-cols-[1.4fr_0.7fr_0.6fr_0.8fr_1fr_auto] items-center gap-2 px-3.5 py-2.5"
+                  className="fleet-row grid grid-cols-[1.4fr_0.7fr_0.6fr_0.8fr_1fr_auto] items-center gap-2 px-3.5 py-2.5"
                   style={{ ['--row-color' as never]: d.isOnline ? '#00ff88' : '#525a78' }}
                 >
                   <div className="min-w-0">

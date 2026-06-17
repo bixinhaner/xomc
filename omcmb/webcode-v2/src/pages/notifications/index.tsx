@@ -110,7 +110,7 @@ export default function NotificationsPage() {
           icon={<FileText className="size-5" />}
           title="通知模板"
           desc="维护邮件 / 短信 / Webhook 通知模板，支持启用与多语言"
-          onClick={() => navigate('/notifications/templates')}
+          onClick={() => navigate('/notifications')}
           footer={
             <span className="text-xs text-muted-foreground">
               共 {templateTotal} 个模板 · 启用 {enabledTemplates}
@@ -121,7 +121,7 @@ export default function NotificationsPage() {
           icon={<History className="size-5" />}
           title="发送历史"
           desc="查看通知发送记录、状态分布与失败原因，支持重试计数追踪"
-          onClick={() => navigate('/notifications/history')}
+          onClick={() => navigate('/notifications')}
           footer={
             <div className="flex flex-wrap items-center gap-1.5">
               <RecentBadge label={HISTORY_STATUS_LABEL.sent} value={statusCounts.sent} tone="success" />
@@ -143,14 +143,14 @@ export default function NotificationsPage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => navigate('/notifications/templates/new')}
+            onClick={() => navigate('/notifications')}
           >
             新建模板
           </Button>
           <Button
             variant="outline"
             size="sm"
-            onClick={() => navigate('/notifications/history')}
+            onClick={() => navigate('/notifications')}
           >
             查看发送历史
           </Button>

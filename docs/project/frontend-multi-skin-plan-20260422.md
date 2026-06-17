@@ -5,6 +5,14 @@
 **状态**: 草案（待评审）
 **关联**: `CLAUDE.md §3.1（design-baseline worktree）`、`omcmb/webcode/`
 
+> **2026-06-17 更新 — v1 = 唯一标准（已落地）**：保留三皮肤，但 **`webcode`(v1, Antd5) 为唯一标准**；
+> `webcode-v2`(shadcn) / `webcode-v3`(HUD) 的「可路由 path 集合」与「可见菜单项集合」**必须严格 == v1**，
+> 只允许外观不同。已删除 v2/v3 相对 v1 多出的功能（Notifications 子页、超出 v1 的详情路由、v3 的
+> bridge/fleet/库页拆分等），路径统一到 v1 方案（`/device` `/alarm` `/log` `/report` `/file`，v3 的
+> bridge→`/dashboard`、fleet→`/device`、库页并回 `/product/*`）。新增 **`omcmb/scripts/skin-parity.mjs`**
+> 守卫从 v1 源码抽 canonical 路由+菜单集断言 v2/v3 一致（已并入 `npm run typecheck`），杜绝再漂移。
+> 下方 0.x 起为最初方案设计，保留作背景。
+
 ---
 
 ## 0. 背景与目标

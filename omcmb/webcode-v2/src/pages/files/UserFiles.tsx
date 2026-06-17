@@ -242,7 +242,7 @@ export default function UserFiles() {
                     <button
                       type="button"
                       className="font-medium text-primary hover:underline"
-                      onClick={() => navigate(`/files/detail/${f.id}`)}
+                      onClick={() => navigate(`/file/config-retrieval`)}
                     >
                       {f.fileName}
                     </button>

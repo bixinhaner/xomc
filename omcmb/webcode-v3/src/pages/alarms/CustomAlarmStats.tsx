@@ -316,7 +316,7 @@ export default function CustomAlarmStats() {
                     key={a.id}
                     type="button"
                     onClick={() =>
-                      navigate(`/alarms?keyword=${encodeURIComponent(a.deviceSn || a.alarmIdentifier)}`)
+                      navigate(`/alarm/current?keyword=${encodeURIComponent(a.deviceSn || a.alarmIdentifier)}`)
                     }
                     className="grid w-full grid-cols-[28px_2fr_1.3fr_1fr_1fr] items-center gap-3 border-b border-cyan-500/8 px-3.5 py-2.5 text-left last:border-b-0 hover:bg-cyan-500/5"
                   >

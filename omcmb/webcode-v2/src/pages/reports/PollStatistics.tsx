@@ -221,7 +221,7 @@ export default function PollStatistics() {
                 <TableRow
                   key={t.id}
                   className="cursor-pointer"
-                  onClick={() => navigate(`/reports/poll-stats/${t.id}`)}
+                  onClick={() => navigate(`/report/poll-stats`)}
                 >
                   <TableCell className="font-medium text-primary hover:underline">
                     {t.taskName}
@@ -261,7 +261,7 @@ export default function PollStatistics() {
                       size="sm"
                       onClick={(e) => {
                         e.stopPropagation()
-                        navigate(`/reports/poll-stats/${t.id}`)
+                        navigate(`/report/poll-stats`)
                       }}
                     >
                       查看

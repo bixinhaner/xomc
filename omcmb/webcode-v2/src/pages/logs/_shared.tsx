@@ -64,12 +64,12 @@ export function SearchInput({
 
 // 子页统一的导航标签条（系统 / 操作 / 设备 / 异常 / 事件 / 配置）
 const LOG_NAV: { to: string; label: string }[] = [
-  { to: '/logs/system', label: '系统日志' },
-  { to: '/logs/operation', label: '操作审计' },
-  { to: '/logs/device', label: '基站日志' },
-  { to: '/logs/exception', label: '异常重启' },
-  { to: '/logs/event', label: '设备事件' },
-  { to: '/logs/config', label: '保留配置' },
+  { to: '/log/system', label: '系统日志' },
+  { to: '/log/operation', label: '操作审计' },
+  { to: '/log/device', label: '基站日志' },
+  { to: '/log/exception', label: '异常重启' },
+  { to: '/log/event', label: '设备事件' },
+  { to: '/log/config', label: '保留配置' },
 ]
 
 // 各日志子页顶部统一的标签条（用真实路由跳转，对齐 v1 log 模块各子菜单）

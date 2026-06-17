@@ -125,7 +125,7 @@ export default function DeviceMapping() {
                     <button
                       type="button"
                       className="font-mono text-xs text-primary hover:underline"
-                      onClick={() => navigate(`/mr/device-mapping/${m.id}`)}
+                      onClick={() => navigate(`/mr/device-mapping`)}
                     >
                       {m.deviceSn}
                     </button>

@@ -126,7 +126,7 @@ function NeTypeRow({
         <button
           type="button"
           className="font-medium text-primary hover:underline"
-          onClick={() => navigate(`/product/alarm-library/${encodeURIComponent(row.neType)}`)}
+          onClick={() => navigate(`/product/alarm-library`)}
         >
           {row.neType}
         </button>

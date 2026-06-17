@@ -145,7 +145,7 @@ export default function BaselineManagement() {
                       <button
                         type="button"
                         className="text-left font-medium text-primary hover:underline"
-                        onClick={() => navigate(`/config/baseline/${b.id}`)}
+                        onClick={() => navigate(`/config/baseline`)}
                       >
                         {b.baselineName}
                       </button>
