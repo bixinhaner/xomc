@@ -447,8 +447,12 @@ export const topologyApi = {
 
   /**
    * 获取设备地理数据（支持筛选）
+   * @param signal 可选 AbortSignal，由 React Query 注入；queryKey 变化时自动取消未完成请求
    */
-  async getDevicesGeo(params?: MapFilterParams): Promise<{ items: DeviceGeo[]; total: number }> {
+  async getDevicesGeo(
+    params?: MapFilterParams,
+    signal?: AbortSignal,
+  ): Promise<{ items: DeviceGeo[]; total: number }> {
     const { data } = await http.get<{ items: BackendDeviceGeo[]; total: number }>('/devices/geo', {
       params: {
         group_ids: params?.groupIds?.join(','),
@@ -459,6 +463,7 @@ export const topologyApi = {
         page: params?.page,
         page_size: params?.pageSize,
       },
+      signal,
     });
     return {
       items: (data.items || []).map(mapBackendDeviceGeo),
@@ -469,26 +474,33 @@ export const topologyApi = {
   /**
    * 获取聚合数据
    */
-  async getAggregation(params: {
-    bounds: MapBounds;
-    zoom: number;
-    gridSize?: number;
-    filters?: MapFilterParams;
-  }): Promise<{ clusters: DeviceCluster[] }> {
-    const { data } = await http.post<{ clusters: BackendDeviceCluster[] }>('/devices/geo/aggregate', {
-      bounds: {
-        min_lng: params.bounds.minLng,
-        max_lng: params.bounds.maxLng,
-        min_lat: params.bounds.minLat,
-        max_lat: params.bounds.maxLat,
+  async getAggregation(
+    params: {
+      bounds: MapBounds;
+      zoom: number;
+      gridSize?: number;
+      filters?: MapFilterParams;
+    },
+    signal?: AbortSignal,
+  ): Promise<{ clusters: DeviceCluster[] }> {
+    const { data } = await http.post<{ clusters: BackendDeviceCluster[] }>(
+      '/devices/geo/aggregate',
+      {
+        bounds: {
+          min_lng: params.bounds.minLng,
+          max_lng: params.bounds.maxLng,
+          min_lat: params.bounds.minLat,
+          max_lat: params.bounds.maxLat,
+        },
+        zoom: params.zoom,
+        grid_size: params.gridSize || 50,
+        filters: {
+          group_ids: params.filters?.groupIds,
+          status: params.filters?.status,
+        },
       },
-      zoom: params.zoom,
-      grid_size: params.gridSize || 50,
-      filters: {
-        group_ids: params.filters?.groupIds,
-        status: params.filters?.status,
-      },
-    });
+      { signal },
+    );
     return {
       clusters: (data.clusters || []).map(mapBackendCluster),
     };
@@ -497,13 +509,17 @@ export const topologyApi = {
   /**
    * 获取地图统计数据
    */
-  async getMapStats(params?: { groupIds?: string[]; status?: string[]; bounds?: string }): Promise<MapStats> {
+  async getMapStats(
+    params?: { groupIds?: string[]; status?: string[]; bounds?: string },
+    signal?: AbortSignal,
+  ): Promise<MapStats> {
     const { data } = await http.get<BackendMapStats>('/devices/geo/stats', {
       params: {
         group_ids: params?.groupIds?.join(','),
         status: params?.status?.join(','),
         bounds: params?.bounds,
       },
+      signal,
     });
     const result = mapBackendStats(data);
     return result;

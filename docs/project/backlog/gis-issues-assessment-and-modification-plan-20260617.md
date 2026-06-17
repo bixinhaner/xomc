@@ -500,21 +500,140 @@ P1（核心搜索定位体验退化）
 
 ---
 
+## Issue E（P0, Bug）
+### 标题
+拖动地图时 `/devices/geo` 请求堆积、不取消，弱网或大数据集下表现为「卡顿+长时 pending」
+
+### 当前评估结论
+确认存在，影响所有进入 GIS 地图页的用户。Network 面板可观察到拖动地图后多个 `/devices/geo?bounds=...` 请求并列 pending，老请求不会被取消。本质是请求生命周期没有和视口生命周期对齐。
+
+### 复现步骤
+1. 进入 GIS 地图页，等待首次加载完成。
+2. 在地图上连续拖动若干次（每次拖动间隔 >300ms）。
+3. 打开 DevTools → Network → XHR，过滤 `geo`。
+4. 观察：拖动停下后多条 `/devices/geo` 仍为 pending，且按拖动次数累积。
+
+### 代码证据（现状）
+- React Query queryFn 未接收/转发 AbortSignal：
+  - `omcmb/frontend-core/src/hooks/api/useTopology.ts` (`useMapDevicesGeo / useMapStats / useMapAggregation`)
+- axios 请求未携带 signal，无法被取消：
+  - `omcmb/frontend-core/src/services/api/topologyApi.ts` (`getDevicesGeo / getMapStats / getAggregation`)
+- `getLoadStrategy(zoom)` 在 zoom≥15 时 `pageSize=10000`，单请求耗时被放大：
+  - `omcmb/webcode/src/pages/topology/GISMapView/index.tsx`
+- 视口防抖硬编码 300ms，散落多处，难以统一调优：
+  - `omcmb/webcode/src/pages/topology/GISMapView/index.tsx`
+  - `omcmb/webcode/src/components/GISMap/useOLMap.ts` 内 `bindMapEvents` 100ms
+
+### 根因
+- 旧请求未取消：queryFn 没接 `signal`，axios 没 `{ signal }`，React Query 即使 queryKey 变化也无法取消底层网络。
+- 旧请求未屏蔽 UI：缺少 `placeholderData: keepPreviousData`，拖动期间画面会闪空，加重「卡顿」感。
+- pageSize 过大：zoom≥15 直接 10000，叠加后端无优化时单请求耗时 1~3s+。
+- 多处防抖时序硬编码，无单一入口调节。
+
+### 修改方案（按分层）
+1. `topologyApi.ts`：`getDevicesGeo / getAggregation / getMapStats` 新增可选第二参 `signal?: AbortSignal`，传给 axios `{ signal }`（axios v1 原生支持）。
+2. `useTopology.ts`：三个 map hooks 改成 `queryFn: ({ signal }) => topologyApi.xxx(params, signal)`；同时加 `placeholderData: keepPreviousData`，避免拖动期间画面闪空。
+3. `GISMapView/index.tsx`：
+   - 视口防抖时间统一改为读取 `MAP_CONFIG.viewportDebounce`，删除硬编码 300。
+   - `getLoadStrategy` 的 pageSize 上限收到 2000（与 `VIEWPORT_CULLING.enableThreshold` 对齐），中段 zoom 降到 1000，避免极端值放大后端耗时。
+4. （可选 P1）`useOLMap.ts` 的 bindMapEvents 100ms 是否合并入页面层 300ms，留作 Issue C 一并评估。
+
+### 验收标准
+- 连续拖动地图 5 次后，Network 中 `/devices/geo` pending 请求数 ≤ 1（前一发被自动 abort）。
+- 拖动过程中画面不出现「空白闪烁」，旧设备 marker 平滑过渡到新数据。
+- zoom=15+ 时单次请求 pageSize ≤ 2000，响应时间显著低于先前 10000 的水平。
+- typecheck + lint 通过。
+
+### 风险与回滚
+- 风险：AbortController 改造涉及 frontend-core 公共 API。已采用「可选参数」形式，旧调用方零影响。
+- 回滚：每个 hook 移除 `placeholderData` + signal 透传即可，原行为可恢复。
+
+### 工作量预估
+- 开发 0.3~0.5 人日
+- 联调验证 0.3 人日
+
+### 关联
+- 问题来源：测试拖动期间截图（Network 面板大量 pending `/devices/geo`）。
+- Issue 链接：https://github.com/569423176-sketch/goomc/issues/508
+- 建议分支：`fix/gis-geo-request-cancel-and-initial-fit`（与 Issue F 合并）。
+
+---
+
+## Issue F（P0, Bug）
+### 标题
+首屏地图视口落在 `tiles-metadata.center`，但实际设备分布不在该区域时用户看不到任何节点
+
+### 当前评估结论
+确认存在。当离线瓦片 metadata 的 `center` 与本地/测试库的实际设备坐标不在同一区域时（例如 metadata 是赞比亚、设备落在中国移动域），用户首屏看到地图但完全没有设备点；只有手动拖图到设备分布区域才能看到，体验偏差严重。
+
+### 复现步骤
+1. 让 `tiles-metadata.json` 中心点配置在 A 区域（例如赞比亚 [28, -15]）。
+2. seed 数据中所有设备坐标落在 B 区域（例如东亚）。
+3. 进入 GIS 地图页。
+4. 观察首屏：地图渲染正常但没有任何设备 marker。
+
+### 代码证据（现状）
+- 首屏中心点 4 层策略，metadata 优先级最高：
+  - `omcmb/webcode/src/pages/topology/GISMapView/index.tsx` (`initialCenter / initialZoom` useMemo)
+- 计算设备分布兜底的工具已有：
+  - `omcmb/webcode/src/utils/mapValidation.ts` (`calculateCenterFromDevices`)
+- OL Map 仅在初始化时消费一次 center/zoom，后续不响应 props 变化：
+  - `omcmb/webcode/src/components/GISMap/useOLMap.ts` (`isMapInitializedRef` guard)
+
+### 根因
+- 4 层策略的优先级 1 是「无脑使用 metadata.center」，没有验证 metadata.bounds 是否覆盖实际设备分布。
+- 优先级 2「按设备分布计算 center」存在鸡生蛋问题：首发请求未必带 bounds（mapViewport=null），即使返回也是优先级 1 已经落地之后。
+- OL Map 视图初始化一次性消费 center/zoom，后续即使算出更合适的中心也不会自动跟进。
+
+### 修改方案（按分层）
+不破坏 Issue A 已确认的 4 层策略优先级，新增一次性「fit-to-devices」兜底机制：
+
+1. `GISMapView/index.tsx`：新增 `useEffect`，依赖 `mapDevices`：
+   - 用 `hasAutoFittedRef` 守卫只触发一次。
+   - 通过 `mapRef.current.getViewport()` 判断当前可视范围内是否包含任意一个设备。
+   - 若包含 → 标记完成，什么也不做。
+   - 若一个都没有 → 调用 `calculateCenterFromDevices(mapDevices)`，再 `mapRef.current.flyTo(centerLng, centerLat, zoom, { progressive: false })`。
+2. 不修改 4 层策略本身，不改 `useOLMap` 初始化逻辑，零侵入。
+3. 后续若 metadata 与设备一致，effect 走 `hasAnyInView=true` 分支自然 noop。
+
+### 验收标准
+- metadata.center 与设备分布同区域：首屏行为完全不变（兜底分支 noop）。
+- metadata.center 与设备分布不同区域：首屏出现地图后短时间内自动 flyTo 到设备区域，可见到设备点。
+- 用户手动拖动后，effect 不再触发（仅一次性）。
+
+### 风险与回滚
+- 风险：兜底 flyTo 的初始动画可能让用户感觉「地图自己动了一下」。已选用 `progressive: false`（平滑单段），动画时长 < 600ms。
+- 回滚：删除 effect 即可恢复原行为。
+
+### 工作量预估
+- 开发 0.2 人日
+- 联调验证 0.2 人日
+
+### 关联
+- 问题来源：测试本地 docker 环境进入 GIS 页面截图（地图渲染正常但无设备 marker）。
+- Issue 链接：https://github.com/569423176-sketch/goomc/issues/509
+- 关联 Issue A：本兜底机制是 Issue A 4 层策略的补充，不冲突。
+- 建议分支：`fix/gis-geo-request-cancel-and-initial-fit`（与 Issue E 合并）。
+
+---
+
 ## 4. 合并说明
 
 - 153-156 四条作为本轮主问题，按截图原文保留。
-- 之前文档中“聚合分层 + 搜索定位”曾合并描述，这次按截图拆分为两个独立 Issue，便于分别评估和提单。
-- 之前文档中的“无离线地图场景中心点策略统一”不删除，改为补充关注项保留，避免丢失既有上下文。
+- 之前文档中"聚合分层 + 搜索定位"曾合并描述，这次按截图拆分为两个独立 Issue，便于分别评估和提单。
+- 之前文档中的"无离线地图场景中心点策略统一"不删除，改为补充关注项保留，避免丢失既有上下文。
 - 本轮分析和实施建议主要聚焦 Issue B-D，Issue A 保持现有结论不再展开。
+- Issue E（请求堆积）+ Issue F（首屏中心 race）在 Issue B 修复期间通过测试复现新增，因影响所有用户已提升至 P0，建议同 PR 处理。
 
 ---
 
 ## 6. 实施顺序建议（按收益/风险）
 
-1. Issue B（P1）：先解决设备状态统计异常问题。
-2. Issue C（P1）：随后解决节点分层渲染不合理问题。
-3. Issue D（P1）：最后解决搜索定位渐进放大回归问题。
-4. Issue A：作为已确认项保留，不纳入本轮修改顺序。
+1. Issue E + F（P0）：先解决日常拖图必现的请求堆积 + 首屏看不到设备问题（一个 PR）。
+2. Issue B（P1）：解决设备状态统计异常问题（已在 PR #495 处理）。
+3. Issue C（P1）：解决节点分层渲染不合理问题。
+4. Issue D（P1）：解决搜索定位渐进放大回归问题。
+5. Issue A：作为已确认项保留，不纳入本轮修改顺序。
 
 ---
 
@@ -524,7 +643,7 @@ P1（核心搜索定位体验退化）
   - 建议分支：`fix/gis-tiles-metadata-fallback`
   - 涉及：`omcmb`
 - PR-B（Issue B）
-  - 建议分支：`fix/gis-status-count-align`
+  - 建议分支：`fix/gis-status-count-align`（已在 PR #495）
   - 涉及：`omcgo + omcmb`（跨栈）
 - PR-C（Issue C）
   - 建议分支：`fix/gis-cluster-layering-align`
@@ -532,6 +651,9 @@ P1（核心搜索定位体验退化）
 - PR-D（Issue D）
   - 建议分支：`fix/gis-search-progressive-locate`
   - 涉及：`omcmb`
+- PR-EF（Issue E + Issue F，合并 PR）
+  - 建议分支：`fix/gis-geo-request-cancel-and-initial-fit`
+  - 涉及：`omcmb`（frontend-core + webcode）
 
 每个 PR 独立验收，避免大改动互相干扰。
 

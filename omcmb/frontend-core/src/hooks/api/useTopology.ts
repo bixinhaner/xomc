@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { topologyService } from '../../mock/services/topologyService';
 import { topologyApi } from '../../services/api/topologyApi';
 import { useMock } from '../../services/apiSwitch';
@@ -218,16 +218,22 @@ export function useRemoveDeviceFromGroup() {
 
 /**
  * 获取设备地理数据（支持筛选）
+ *
+ * 行为要点：
+ * - queryFn 接受 React Query 注入的 signal 并透传给 axios，
+ *   queryKey 变化时会自动 abort 之前的请求，避免拖动地图时请求堆积。
+ * - placeholderData 使用 keepPreviousData，避免拖动期间画面闪烁。
  */
 export function useMapDevicesGeo(params: MapFilterParams) {
   return useQuery({
     queryKey: ['topology', 'map', 'geo', params],
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       useMock
         ? Promise.resolve({ items: [], total: 0 }) // Mock 实现
-        : topologyApi.getDevicesGeo(params),
+        : topologyApi.getDevicesGeo(params, signal),
     staleTime: 5 * 60 * 1000,
     enabled: params.enabled !== false,
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -241,12 +247,13 @@ export function useMapAggregation(params: {
 }) {
   return useQuery({
     queryKey: ['topology', 'map', 'aggregation', params],
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       useMock
         ? Promise.resolve({ clusters: [] }) // Mock 实现
-        : topologyApi.getAggregation(params),
+        : topologyApi.getAggregation(params, signal),
     staleTime: 2 * 60 * 1000,
     enabled: params.zoom < 12, // 仅在缩放级别较小时请求
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -256,12 +263,13 @@ export function useMapAggregation(params: {
 export function useMapStats(params?: { groupIds?: string[]; status?: string[]; bounds?: string }) {
   return useQuery<MapStats>({
     queryKey: ['topology', 'map', 'stats', params],
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       useMock
         ? Promise.resolve<MapStats>({ total: 0, statusCount: { onlineActive: 0, onlineInactive: 0, offline: 0 }, alarmCount: 0 }) // Mock 实现
-        : topologyApi.getMapStats(params),
+        : topologyApi.getMapStats(params, signal),
     staleTime: 5 * 60 * 1000,
     refetchInterval: 60 * 1000, // 每分钟刷新
+    placeholderData: keepPreviousData,
   });
 }
 
