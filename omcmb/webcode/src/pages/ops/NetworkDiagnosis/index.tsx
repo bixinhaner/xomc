@@ -15,6 +15,7 @@ import {
   useOpsDiagnostics,
 } from '@core/hooks/api/useOpsExt';
 import type { DiagnosticStatus, OpsDiagnostic } from '@core/services/api/opsExtApi';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 type OpsDiagnosticRow = OpsDiagnostic & Record<string, unknown>;
 type DiagKind = 'ping' | 'traceroute' | 'throughput';
@@ -112,7 +113,7 @@ export default function NetworkDiagnosis() {
         title: t('ops.diag.started'),
         dataIndex: 'started_at',
         width: 170,
-        render: (val) => (val ? new Date(String(val)).toLocaleString('zh-CN') : '—'),
+        render: (val) => (val ? formatSystemTime(String(val)) : '—'),
       },
       { key: 'duration_ms', title: t('ops.diag.duration'), dataIndex: 'duration_ms', width: 100, render: (val) => (val ? `${Number(val)} ms` : '—') },
       {
@@ -222,14 +223,14 @@ function DiagnosticDetailModal({
             <Descriptions.Item label={t('ops.diag.device')}>{diag.device_sn || '—'}</Descriptions.Item>
             <Descriptions.Item label={t('ops.diag.initiator')}>{diag.initiator || diag.operator || '—'}</Descriptions.Item>
             <Descriptions.Item label={t('ops.diag.started')}>
-              {new Date(diag.started_at).toLocaleString('zh-CN')}
+              {formatSystemTime(diag.started_at)}
             </Descriptions.Item>
             <Descriptions.Item label={t('ops.diag.duration')}>
               {diag.duration_ms ? `${diag.duration_ms} ms` : '—'}
             </Descriptions.Item>
             {diag.completed_at && (
               <Descriptions.Item label={t('ops.executeTime')}>
-                {new Date(diag.completed_at).toLocaleString('zh-CN')}
+                {formatSystemTime(diag.completed_at)}
               </Descriptions.Item>
             )}
             {diag.error_message && (

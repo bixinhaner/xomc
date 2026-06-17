@@ -57,6 +57,8 @@ import {
   useAggregatedMetricsByDevices,
 } from '@core/hooks/api/usePmQuery';
 import { useUserStore } from '@core/store/userStore';
+import { useSystemTimezoneValue } from '@core/hooks/api/useSystemTimezone';
+import { toSystemTimezoneRFC3339 } from '@core/utils/systemTime';
 import { useCreateKpiExport } from '@core/hooks/api/useKpiExport';
 import {
   kpiQueryToDashboardSelection,
@@ -190,6 +192,8 @@ export default function KPIQuery() {
   const { message } = App.useApp();
   const currentUser = useUserStore((s) => s.currentUser);
   const isSuperAdmin = currentUser?.isSuperAdmin ?? false;
+  // #459 子单 D：自定义时间范围按系统时区附加偏移后再发后端（后端按 RFC3339 解析为 UTC）。
+  const systemTimezone = useSystemTimezoneValue();
 
   // ── 查询表单状态 ─────────────────────────────────────────────────
   const [payload, setPayload] = useState<QueryTemplatePayload>(DEFAULT_PAYLOAD);
@@ -305,8 +309,9 @@ export default function KPIQuery() {
         return;
       }
       range = {
-        start: customRange[0].toISOString(),
-        end: customRange[1].toISOString(),
+        // 用户在选择器里看到/选的是系统时区钟面，按系统时区附加偏移后再发后端。
+        start: toSystemTimezoneRFC3339(customRange[0], systemTimezone) ?? customRange[0].toISOString(),
+        end: toSystemTimezoneRFC3339(customRange[1], systemTimezone) ?? customRange[1].toISOString(),
       };
     } else {
       range = presetToRange(payload.timeRangePreset);
@@ -398,11 +403,11 @@ export default function KPIQuery() {
       ...saveForm.payload,
       absoluteStart:
         saveForm.payload.timeRangePreset === 'custom' && saveForm.customRange
-          ? saveForm.customRange[0].toISOString()
+          ? toSystemTimezoneRFC3339(saveForm.customRange[0], systemTimezone) ?? saveForm.customRange[0].toISOString()
           : undefined,
       absoluteEnd:
         saveForm.payload.timeRangePreset === 'custom' && saveForm.customRange
-          ? saveForm.customRange[1].toISOString()
+          ? toSystemTimezoneRFC3339(saveForm.customRange[1], systemTimezone) ?? saveForm.customRange[1].toISOString()
           : undefined,
     };
     try {

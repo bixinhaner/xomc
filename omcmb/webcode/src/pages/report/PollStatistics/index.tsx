@@ -7,6 +7,7 @@ import type { FilterField } from '@/components/FilterBar';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import { useT } from '@/hooks/useT';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 type PollStatus = 'running' | 'paused' | 'stopped' | 'error';
 
@@ -116,7 +117,7 @@ export default function PollStatistics() {
     },
     {
       key: 'lastExecution', title: t('table.time'), dataIndex: 'lastExecution', width: 160,
-      render: (val) => new Date(String(val)).toLocaleString('zh-CN'),
+      render: (val) => formatSystemTime(String(val)),
     },
     {
       key: 'status', title: t('table.status'), dataIndex: 'status', width: 100,

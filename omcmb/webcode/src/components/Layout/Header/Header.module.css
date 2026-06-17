@@ -236,6 +236,30 @@
   margin-right: 2px;
 }
 
+/* 只读时钟（#459 子单 D）：去掉可点交互，展示「系统时区 + 实时时间」 */
+.timezoneClock {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.02);
+  color: #8a8f98;
+  font-size: 12px;
+  font-weight: 510;
+  letter-spacing: -0.12px;
+  cursor: default;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.timezoneClockTime {
+  color: #d0d6e0;
+  font-variant-numeric: tabular-nums;
+}
+
 /* User dropdown trigger */
 .userTrigger {
   display: flex;

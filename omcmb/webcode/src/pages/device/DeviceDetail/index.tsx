@@ -51,6 +51,7 @@ import { formatLteBandwidthDisplay } from './QuickSettingsTab/validators';
 import AlarmDetail from '@/pages/alarm/AlarmDetail';
 import AutoRefreshDropdown from '@/pages/alarm/components/AutoRefreshDropdown';
 import ConfirmWithNoteModal from '@/pages/alarm/components/ConfirmWithNoteModal';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 const { Title, Text } = Typography;
 
@@ -472,7 +473,7 @@ const normalizeQuickSettingsNetworkType = (networkType: string | undefined): str
 };
 
 // 格式化时间
-const fmtTime = (v: string | undefined | null) => (v ? new Date(v).toLocaleString('zh-CN') : '-');
+const fmtTime = (v: string | undefined | null) => (v ? formatSystemTime(v) : '-');
 
 // 格式化时长(秒)
 const fmtDuration = (seconds: number | string | undefined | null) => {
@@ -1488,7 +1489,7 @@ export default function DeviceDetail() {
         title: t('alarm.time'),
         dataIndex: 'eventTime',
         width: 160,
-        render: (_val, record) => new Date(record.eventTime).toLocaleString('zh-CN'),
+        render: (_val, record) => formatSystemTime(record.eventTime),
       },
       {
         key: 'dealState',

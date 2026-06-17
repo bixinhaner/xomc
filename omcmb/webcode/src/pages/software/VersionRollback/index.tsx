@@ -43,6 +43,7 @@ import {
 } from '@core/hooks/api/useSoftware';
 import { useDeviceList, useProductClasses } from '@core/hooks/api/useDevices';
 import type { UpgradeTaskInfo, UpgradeSubTaskInfo } from '@core/mock/data/software';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 // Execution method enum
 type ExecutionMethod = 'immediate' | 'suspend' | 'scheduled';
@@ -596,7 +597,7 @@ export default function VersionRollback() {
       ),
     },
     { key: 'operator', title: t('table.operator'), dataIndex: 'createUser', width: 100 },
-    { key: 'operateTime', title: t('software.operateTime'), dataIndex: 'createdAt', width: 160, render: (val: unknown) => val ? dayjs(val as string).format('YYYY-MM-DD HH:mm:ss') : '-' },
+    { key: 'operateTime', title: t('software.operateTime'), dataIndex: 'createdAt', width: 160, render: (val: unknown) => val ? formatSystemTime(val as string, { format: 'YYYY-MM-DD HH:mm:ss', placeholder: '-' }) : '-' },
     {
       key: 'status',
       title: t('software.taskStatus'),
@@ -631,8 +632,8 @@ export default function VersionRollback() {
         return <Tag color={cfg.color}>{cfg.text}</Tag>;
       },
     },
-    { key: 'startTime', title: t('software.startTime'), dataIndex: 'startedAt', width: 160, render: (val: unknown) => val ? dayjs(val as string).format('YYYY-MM-DD HH:mm:ss') : '-' },
-    { key: 'endTime', title: t('software.endTime'), dataIndex: 'endedAt', width: 160, render: (val: unknown) => val ? dayjs(val as string).format('YYYY-MM-DD HH:mm:ss') : '-' },
+    { key: 'startTime', title: t('software.startTime'), dataIndex: 'startedAt', width: 160, render: (val: unknown) => val ? formatSystemTime(val as string, { format: 'YYYY-MM-DD HH:mm:ss', placeholder: '-' }) : '-' },
+    { key: 'endTime', title: t('software.endTime'), dataIndex: 'endedAt', width: 160, render: (val: unknown) => val ? formatSystemTime(val as string, { format: 'YYYY-MM-DD HH:mm:ss', placeholder: '-' }) : '-' },
   ], [t, TASK_STATUS_CONFIG, TASK_RESULT_MAP, resumeMutation, suspendMutation, terminateMutation]);
 
   // ---- Device list tab columns (sub-tasks for selected rollback task) ----
@@ -699,9 +700,9 @@ export default function VersionRollback() {
       return text ? <span style={{ color: '#ff4d4f' }}>{text}</span> : '-';
     }},
     { key: 'operator', title: t('table.operator'), width: 100, render: () => '-' },
-    { key: 'operateTime', title: t('software.operateTime'), dataIndex: 'createdAt', width: 160, render: (val: unknown) => val ? dayjs(val as string).format('YYYY-MM-DD HH:mm:ss') : '-' },
-    { key: 'startTime', title: t('software.startTime'), dataIndex: 'startedAt', width: 160, render: (val: unknown) => val ? dayjs(val as string).format('YYYY-MM-DD HH:mm:ss') : '-' },
-    { key: 'endTime', title: t('software.endTime'), dataIndex: 'completedAt', width: 160, render: (val: unknown) => val ? dayjs(val as string).format('YYYY-MM-DD HH:mm:ss') : '-' },
+    { key: 'operateTime', title: t('software.operateTime'), dataIndex: 'createdAt', width: 160, render: (val: unknown) => val ? formatSystemTime(val as string, { format: 'YYYY-MM-DD HH:mm:ss', placeholder: '-' }) : '-' },
+    { key: 'startTime', title: t('software.startTime'), dataIndex: 'startedAt', width: 160, render: (val: unknown) => val ? formatSystemTime(val as string, { format: 'YYYY-MM-DD HH:mm:ss', placeholder: '-' }) : '-' },
+    { key: 'endTime', title: t('software.endTime'), dataIndex: 'completedAt', width: 160, render: (val: unknown) => val ? formatSystemTime(val as string, { format: 'YYYY-MM-DD HH:mm:ss', placeholder: '-' }) : '-' },
   ], [t, SUB_TASK_STATUS_MAP]);
 
   // ---- Header buttons ----
@@ -1135,12 +1136,12 @@ export default function VersionRollback() {
                   <Checkbox checked={taskDetailRecord.isKeepConfig} disabled />
                 </Descriptions.Item>
                 <Descriptions.Item label={t('table.operator')}>{taskDetailRecord.createUser}</Descriptions.Item>
-                <Descriptions.Item label={t('software.operateTime')}>{taskDetailRecord.createdAt ? dayjs(taskDetailRecord.createdAt).format('YYYY-MM-DD HH:mm:ss') : '-'}</Descriptions.Item>
+                <Descriptions.Item label={t('software.operateTime')}>{taskDetailRecord.createdAt ? formatSystemTime(taskDetailRecord.createdAt, { format: 'YYYY-MM-DD HH:mm:ss', placeholder: '-' }) : '-'}</Descriptions.Item>
                 <Descriptions.Item label={t('software.taskStatus')}>
                   <Tag color={TASK_STATUS_CONFIG[resultCode]?.color}>{TASK_STATUS_CONFIG[resultCode]?.text}</Tag>
                 </Descriptions.Item>
-                <Descriptions.Item label={t('software.startTime')}>{taskDetailRecord.startedAt ? dayjs(taskDetailRecord.startedAt).format('YYYY-MM-DD HH:mm:ss') : '-'}</Descriptions.Item>
-                <Descriptions.Item label={t('software.endTime')}>{taskDetailRecord.endedAt ? dayjs(taskDetailRecord.endedAt).format('YYYY-MM-DD HH:mm:ss') : '-'}</Descriptions.Item>
+                <Descriptions.Item label={t('software.startTime')}>{taskDetailRecord.startedAt ? formatSystemTime(taskDetailRecord.startedAt, { format: 'YYYY-MM-DD HH:mm:ss', placeholder: '-' }) : '-'}</Descriptions.Item>
+                <Descriptions.Item label={t('software.endTime')}>{taskDetailRecord.endedAt ? formatSystemTime(taskDetailRecord.endedAt, { format: 'YYYY-MM-DD HH:mm:ss', placeholder: '-' }) : '-'}</Descriptions.Item>
               </Descriptions>
 
               {/* Progress overview */}

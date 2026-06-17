@@ -1,3 +1,5 @@
+import { formatSystemTime } from '@core/utils/systemTime'
+
 export function formatBytes(bytes?: number | null) {
   if (bytes == null) return '—'
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
@@ -10,12 +12,13 @@ export function formatBytes(bytes?: number | null) {
   return `${v.toFixed(1)} ${units[i]}`
 }
 
+/**
+ * 格式化后端时间（#459 子单 D）：保留后端返回的系统时区钟面，**不**再用 new Date()
+ * 按浏览器本地二次转换（那会抵消子单 B 的出口转换）。统一走共享 formatSystemTime。
+ * 空值占位沿用 v3 习惯的 '—'。
+ */
 export function formatTime(iso?: string | null) {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+  return formatSystemTime(iso, { placeholder: '—' })
 }
 
 export function formatHHMMSS(date: Date = new Date()) {

@@ -6,6 +6,7 @@ import type { DeviceParameter, ParameterType } from '@core/types/deviceParameter
 import type { PageResponse } from '@core/types/pagination';
 import ParameterEditModal from './ParameterEditModal';
 import { useT } from '@/hooks/useT';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 const { Text } = Typography;
 
@@ -123,7 +124,7 @@ export default function TableView({
       render: (v: string) =>
         v ? (
           <Text type="secondary" style={{ fontSize: 12 }}>
-            {new Date(v).toLocaleString('zh-CN')}
+            {formatSystemTime(v)}
           </Text>
         ) : (
           '-'

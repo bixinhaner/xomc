@@ -12,6 +12,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
+import { formatSystemTime } from '@core/utils/systemTime';
 import { useIntl, type IntlShape } from 'react-intl';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
@@ -128,8 +129,7 @@ function technologyLabel(intl: IntlShape, t?: string): string {
 
 function fmtTime(v?: string): string {
   if (!v) return '—';
-  const d = new Date(v);
-  return Number.isNaN(d.getTime()) ? v : d.toLocaleString();
+  return formatSystemTime(v, { placeholder: '—' });
 }
 
 /** 运行历史表（任务详情 Tab）。 */

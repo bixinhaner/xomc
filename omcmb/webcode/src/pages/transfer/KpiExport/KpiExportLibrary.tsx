@@ -8,7 +8,6 @@
 import { useMemo, useState } from 'react';
 import { Button, Card, Input, Select, Space, Tag, message } from 'antd';
 import { DownloadOutlined, ReloadOutlined } from '@ant-design/icons';
-import dayjs from 'dayjs';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import { useT } from '@/hooks/useT';
@@ -16,6 +15,7 @@ import { useKpiExportFiles } from '@core/hooks/api/useKpiExport';
 import { kpiExportApi } from '@core/services/api/kpiExportApi';
 import type { KpiExportSource, KpiExportTask } from '@core/types/kpiExport';
 import { SOURCE_LABEL_KEY, formatBytes, deriveFileName } from './shared';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 const LIST_LIMIT = 500;
 
@@ -79,7 +79,7 @@ export default function KpiExportLibrary() {
       title: t('kpiExport.col.generatedAt'),
       dataIndex: 'finishedAt',
       width: 180,
-      render: (v) => (v ? dayjs(v as string).format('YYYY-MM-DD HH:mm:ss') : '—'),
+      render: (v) => (v ? formatSystemTime(v as string, { format: 'YYYY-MM-DD HH:mm:ss', placeholder: '-' }) : '—'),
     },
     {
       key: 'actions',

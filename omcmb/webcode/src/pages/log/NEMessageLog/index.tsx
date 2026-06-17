@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { formatSystemTime } from '@core/utils/systemTime';
 import { Tag, Tooltip, Modal, Button } from 'antd';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import FilterBar from '@/components/FilterBar';
@@ -139,10 +140,11 @@ export default function NEMessageLog() {
       title: t('table.time'),
       dataIndex: 'timestamp',
       width: 190,
-      render: (val) => {
-        const d = new Date(String(val));
-        return <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{d.toLocaleString('zh-CN')}.{d.getMilliseconds().toString().padStart(3, '0')}</span>;
-      },
+      render: (val) => (
+        <span style={{ fontFamily: 'monospace', fontSize: 12 }}>
+          {formatSystemTime(String(val), { format: 'YYYY-MM-DD HH:mm:ss.SSS' })}
+        </span>
+      ),
     },
     {
       key: 'messageType',

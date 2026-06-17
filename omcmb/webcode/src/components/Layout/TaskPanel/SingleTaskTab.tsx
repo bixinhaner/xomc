@@ -5,6 +5,7 @@ import type { ColumnsType } from 'antd/es/table';
 import { useTaskStore } from '@core/store/taskStore';
 import type { SingleTask, TaskStatus } from '@core/store/taskStore';
 import { useT } from '@/hooks/useT';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 export default function SingleTaskTab() {
   const singleTasks = useTaskStore((s) => s.singleTasks);
@@ -162,10 +163,10 @@ export default function SingleTaskTab() {
               )}
             </Descriptions.Item>
             <Descriptions.Item label={t('task.startTime')}>
-              {new Date(currentTask.createdAt).toLocaleString('zh-CN')}
+              {formatSystemTime(currentTask.createdAt)}
             </Descriptions.Item>
             <Descriptions.Item label={t('task.endTime')}>
-              {new Date(currentTask.updatedAt).toLocaleString('zh-CN')}
+              {formatSystemTime(currentTask.updatedAt)}
             </Descriptions.Item>
             {fileInfo && (
               <>

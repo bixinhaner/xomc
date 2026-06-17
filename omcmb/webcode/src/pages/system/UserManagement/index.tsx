@@ -51,6 +51,7 @@ import type { User, UserRole, UserStatus } from '@core/types/system';
 import { isBuiltInUser, isLdapUser } from '@core/types/system';
 import { useT } from '@/hooks/useT';
 import { toast } from '@/utils/toast';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 export default function UserManagement() {
   const t = useT();
@@ -603,28 +604,28 @@ export default function UserManagement() {
       title: t('user.expireTime'),
       dataIndex: 'expireTime',
       width: 160,
-      render: (val) => (val ? new Date(String(val)).toLocaleString('zh-CN') : t('user.permanent')) as string,
+      render: (val) => (val ? formatSystemTime(String(val)) : t('user.permanent')) as string,
     },
     {
       key: 'lastLoginTime',
       title: t('user.lastLoginTime'),
       dataIndex: 'lastLoginTime',
       width: 160,
-      render: (val) => (val ? new Date(String(val)).toLocaleString('zh-CN') : '—') as string,
+      render: (val) => (val ? formatSystemTime(String(val)) : '—') as string,
     },
     {
       key: 'createTime',
       title: t('table.createTime'),
       dataIndex: 'createTime',
       width: 160,
-      render: (val) => (val ? new Date(String(val)).toLocaleString('zh-CN') : '—'),
+      render: (val) => (val ? formatSystemTime(String(val)) : '—'),
     },
     {
       key: 'updateTime',
       title: t('table.updateTime'),
       dataIndex: 'updateTime',
       width: 160,
-      render: (val) => (val ? new Date(String(val)).toLocaleString('zh-CN') : '—'),
+      render: (val) => (val ? formatSystemTime(String(val)) : '—'),
     },
     {
       key: 'creatorUsername',
@@ -994,16 +995,16 @@ export default function UserManagement() {
             <span>{selectedUser?.roles?.join(', ') || '-'}</span>
           </Form.Item>
           <Form.Item label={t('user.form.expireTime')}>
-            <span>{selectedUser?.expireTime ? new Date(selectedUser.expireTime).toLocaleString('zh-CN') : t('user.permanent')}</span>
+            <span>{selectedUser?.expireTime ? formatSystemTime(selectedUser.expireTime) : t('user.permanent')}</span>
           </Form.Item>
           <Form.Item label={t('user.lastLoginTime')}>
-            <span>{selectedUser?.lastLoginTime ? new Date(selectedUser.lastLoginTime).toLocaleString('zh-CN') : '-'}</span>
+            <span>{selectedUser?.lastLoginTime ? formatSystemTime(selectedUser.lastLoginTime) : '-'}</span>
           </Form.Item>
           <Form.Item label={t('user.form.createdAt')}>
-            <span>{selectedUser?.createTime ? new Date(selectedUser.createTime).toLocaleString('zh-CN') : '-'}</span>
+            <span>{selectedUser?.createTime ? formatSystemTime(selectedUser.createTime) : '-'}</span>
           </Form.Item>
           <Form.Item label={t('user.form.updatedAt')}>
-            <span>{selectedUser?.updateTime ? new Date(selectedUser.updateTime).toLocaleString('zh-CN') : '-'}</span>
+            <span>{selectedUser?.updateTime ? formatSystemTime(selectedUser.updateTime) : '-'}</span>
           </Form.Item>
           <Form.Item label={t('user.form.createdBy')}>
             <span>{renderOperator(selectedUser?.creatorUsername)}</span>

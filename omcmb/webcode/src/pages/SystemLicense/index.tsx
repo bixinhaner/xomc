@@ -47,6 +47,7 @@ import {
 } from '@core/services/api/systemLicenseApi';
 import UpdateModal from './UpdateModal';
 import { FeatureListView } from './FeatureListView';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -74,7 +75,7 @@ function signatureTagLabelKey(status: SystemLicenseSignatureStatus): string {
 
 function formatDateTime(iso: string | null | undefined): string {
   if (!iso) return '-';
-  return new Date(iso).toLocaleString();
+  return formatSystemTime(iso);
 }
 
 function daysRemaining(expiryISO: string | null): number | null {

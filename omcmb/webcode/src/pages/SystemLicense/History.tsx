@@ -14,12 +14,13 @@ import { useNavigate } from 'react-router-dom';
 import { useT } from '@/hooks/useT';
 import { useSystemLicenseHistory } from '@core/hooks/api/useSystemLicense';
 import type { SystemLicenseHistory } from '@core/services/api/systemLicenseApi';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 const { Title } = Typography;
 
 function formatDateTime(iso: string | null | undefined): string {
   if (!iso) return '-';
-  return new Date(iso).toLocaleString();
+  return formatSystemTime(iso);
 }
 
 export default function SystemLicenseHistoryPage() {

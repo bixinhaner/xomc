@@ -20,6 +20,7 @@ import { useCreateKpiExport } from '@core/hooks/api/useKpiExport';
 import type { AdhocResultRow, AdhocDimension } from '@core/types/pmAdhoc';
 import { buildAdhocExportParams, defaultExportTaskName } from '@core/utils/kpiExportParams';
 import { adhocIncludesCell, adhocObjectHeaderKey, adhocObjectName, adhocTechnology, objectKeyOf } from './adhocObjectColumn';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 // 按粒度算默认时窗：覆盖最近 7 天，但粒度粗于"天"时至少 7 个周期。
 // 15min / hourly / daily → 7 天；weekly → 7 周；monthly → 7 月。end 取当前时刻。
@@ -127,8 +128,8 @@ function buildWideTable(
         deviceLabel: adhocObjectName(r, dimension, taskDeviceSns, intl),
         cellPlmn: r.objectLdn || '-',
         technology: dimension === 'device_group' ? adhocTechnology(r) : '',
-        time: r.startTime ? dayjs(r.startTime).format('YYYY-MM-DD HH:mm') : '-',
-        endTime: r.endTime ? dayjs(r.endTime).format('YYYY-MM-DD HH:mm') : '-',
+        time: r.startTime ? formatSystemTime(r.startTime, { format: 'YYYY-MM-DD HH:mm', placeholder: '-' }) : '-',
+        endTime: r.endTime ? formatSystemTime(r.endTime, { format: 'YYYY-MM-DD HH:mm', placeholder: '-' }) : '-',
         values: {},
       };
       rowMap.set(rowKey, wr);

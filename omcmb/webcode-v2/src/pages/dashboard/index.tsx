@@ -52,6 +52,7 @@ import {
   useTopAlarmDevices,
 } from '@core/hooks/api/useDashboard'
 import { useUserStore } from '@core/store/userStore'
+import { formatSystemTime } from '@core/utils/systemTime'
 
 // ============================================================================
 // 常量
@@ -129,11 +130,8 @@ function formatMetric(n?: number): string {
 }
 
 function formatLastLogin(iso?: string): string {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-  const pad = (x: number) => String(x).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+  // #459 子单 D：保留后端系统时区钟面，不按浏览器本地二次转换。
+  return formatSystemTime(iso, { format: 'YYYY-MM-DD HH:mm', placeholder: '—' })
 }
 
 // ============================================================================

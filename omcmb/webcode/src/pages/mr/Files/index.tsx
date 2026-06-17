@@ -7,7 +7,6 @@
 import { useMemo, useState } from 'react';
 import { Badge, Button, Card, Input, Modal, Space, message } from 'antd';
 import { DeleteOutlined, DownloadOutlined, ReloadOutlined } from '@ant-design/icons';
-import dayjs from 'dayjs';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import { useT } from '@/hooks/useT';
@@ -15,6 +14,7 @@ import { useBatchDeleteMRFiles, useMRFileDevices } from '@core/hooks/api/useMR';
 import { useBatchDownloadWithMessage } from '@/hooks/useBatchDownloadWithMessage';
 import type { MRFileDeviceItem } from '@core/services/api/mrApi';
 import DeviceFilesDrawer from './DeviceFilesDrawer';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 interface Props {
   /** 嵌入到 FileManagement 时去掉外层卡片背景的留白。 */
@@ -120,14 +120,14 @@ export default function MRFilesPage({ embedded }: Props) {
         title: t('mr.firstCollectTime'),
         dataIndex: 'firstCollectTime',
         width: 180,
-        render: (v) => (v ? dayjs(v as string).format('YYYY-MM-DD HH:mm:ss') : '—'),
+        render: (v) => (v ? formatSystemTime(v as string, { format: 'YYYY-MM-DD HH:mm:ss', placeholder: '-' }) : '—'),
       },
       {
         key: 'lastCollectTime',
         title: t('mr.lastCollectTime'),
         dataIndex: 'lastCollectTime',
         width: 180,
-        render: (v) => (v ? dayjs(v as string).format('YYYY-MM-DD HH:mm:ss') : '—'),
+        render: (v) => (v ? formatSystemTime(v as string, { format: 'YYYY-MM-DD HH:mm:ss', placeholder: '-' }) : '—'),
       },
       {
         key: 'fileCount',

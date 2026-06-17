@@ -10,6 +10,7 @@ import {
 import { useT } from '@/hooks/useT';
 import { useMRTask } from '@core/hooks/api/useMrTasks';
 import type { MRTaskStatus } from '@core/types/mrTask';
+import { formatSystemTime } from '@core/utils/systemTime'
 
 interface DetailDrawerProps {
   taskId?: string;
@@ -58,11 +59,11 @@ export default function DetailDrawer({ taskId, onClose }: DetailDrawerProps) {
           {task.reportPeriod} {t('mrTask.field.reportPeriodSuffix')}
         </Descriptions.Item>
         <Descriptions.Item label={t('mrTask.field.startTime')}>
-          {new Date(task.startTime).toLocaleString()}
+          {formatSystemTime(task.startTime)}
         </Descriptions.Item>
         <Descriptions.Item label={t('mrTask.field.endTime')}>
           {task.endTime ? (
-            new Date(task.endTime).toLocaleString()
+            formatSystemTime(task.endTime)
           ) : (
             <span style={{ color: 'rgba(0,0,0,0.45)' }}>
               {t('mrTask.field.endTimeUnlimited')}

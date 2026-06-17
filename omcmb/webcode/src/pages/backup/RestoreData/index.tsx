@@ -13,7 +13,6 @@ import {
   Typography,
 } from 'antd';
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
-import dayjs from 'dayjs';
 
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import DataTable from '@/components/DataTable';
@@ -21,6 +20,7 @@ import type { DataTableColumn } from '@/components/DataTable';
 import { useT } from '@/hooks/useT';
 
 import type { RestoreTask, RestoreStatus } from '@core/mock/data/backup';
+import { formatSystemTime } from '@core/utils/systemTime';
 import {
   useBackupRestoreTasks,
   useCreateBackupRestore,
@@ -50,7 +50,7 @@ interface RestoreFormValues {
 
 function formatDate(iso?: string): string {
   if (!iso) return '-';
-  return dayjs(iso).format('YYYY-MM-DD HH:mm:ss');
+  return formatSystemTime(iso, { format: 'YYYY-MM-DD HH:mm:ss', placeholder: '-' });
 }
 
 function parseSnList(raw: string): string[] {

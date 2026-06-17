@@ -30,6 +30,7 @@ import { buildAlarmExportFieldDefinitions, type AlarmExportFieldKey } from '../u
 import { BASE_STATION_TYPE_OPTIONS, formatBaseStationTypeLabel } from '../utils/baseStationType';
 import { renderSnWithTooltip } from '../utils/snTooltip';
 import styles from './HistoricalAlarms.module.css';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 const { Text } = Typography;
 
@@ -576,21 +577,21 @@ export default function HistoricalAlarms() {
         title: t('alarm.eventTime'),
         dataIndex: 'eventTime',
         width: 150,
-        render: (v) => v ? new Date(String(v)).toLocaleString('zh-CN') : '-',
+        render: (v) => v ? formatSystemTime(String(v)) : '-',
       },
       {
         key: 'updTime',
         title: t('alarm.updTime'),
         dataIndex: 'updTime',
         width: 150,
-        render: (v) => v ? new Date(String(v)).toLocaleString('zh-CN') : '-',
+        render: (v) => v ? formatSystemTime(String(v)) : '-',
       },
       {
         key: 'clearTime',
         title: t('alarm.clearTime'),
         dataIndex: 'clearTime',
         width: 150,
-        render: (v) => v ? new Date(String(v)).toLocaleString('zh-CN') : '-',
+        render: (v) => v ? formatSystemTime(String(v)) : '-',
       },
       {
         key: 'specificProblem',

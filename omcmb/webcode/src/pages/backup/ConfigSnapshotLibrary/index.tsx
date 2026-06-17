@@ -15,7 +15,6 @@ import {
   DeleteOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
-import dayjs from 'dayjs';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import { useT } from '@/hooks/useT';
@@ -30,6 +29,7 @@ import type {
 import { configSnapshotApi } from '@core/services/api/configSnapshotApi';
 import { useBatchDownloadWithMessage } from '@/hooks/useBatchDownloadWithMessage';
 import ImportDrawer from './ImportDrawer';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 // 来源 Tag 颜色映射；label 走 i18n key 在渲染时按当前 locale 取。
 const SOURCE_TAG: Record<SnapshotSource, { color: string; labelKey: string }> = {
@@ -111,7 +111,7 @@ export default function ConfigSnapshotLibraryPage() {
       dataIndex: 'updateTime',
       width: 180,
       sorter: true,
-      render: (v) => (v ? dayjs(v as string).format('YYYY-MM-DD HH:mm:ss') : '—'),
+      render: (v) => (v ? formatSystemTime(v as string, { format: 'YYYY-MM-DD HH:mm:ss', placeholder: '-' }) : '—'),
     },
     {
       key: 'actions',

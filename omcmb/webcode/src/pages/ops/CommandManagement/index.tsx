@@ -10,6 +10,7 @@ import JSONViewer from '@/components/JSONViewer';
 import type { OpsCommandRecord } from '@core/mock/data/opsTools';
 import { useOpsCommandRecords } from '@core/hooks/api/useOpsTools';
 import { useT } from '@/hooks/useT';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 function formatDuration(ms: number): string {
   if (ms >= 1000) return `${(ms / 1000).toFixed(2)} s`;
@@ -67,7 +68,7 @@ export default function CommandManagement() {
   const columns: DataTableColumn<OpsCommandRecord & Record<string, unknown>>[] = useMemo(() => [
     {
       key: 'executeTime', title: t('ops.executeTime'), dataIndex: 'executeTime', width: 170,
-      render: (val) => new Date(String(val)).toLocaleString('zh-CN'),
+      render: (val) => formatSystemTime(String(val)),
     },
     {
       key: 'commandText', title: t('ops.command'), dataIndex: 'commandText', width: 240,

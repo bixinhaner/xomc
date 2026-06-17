@@ -2464,7 +2464,7 @@ const messages: Record<string, string> = {
   'header.switchToLight': '切换到浅色主题',
   'header.timezone':      '时区:',
   'header.localTimezone': '本地时区',
-  'header.timezoneTitle': '当前时区: {tz}，点击切换',
+  'header.timezoneTitle': '当前系统时区: {tz}',
   'header.alarmTitle':    '{label}告警: {count}',
 
   // -------------------------------------------------------------------------

@@ -47,6 +47,7 @@ import { adminApi } from '@core/services/api/adminApi';
 import { useMenuTree, useInvalidateUserMenus } from '@core/hooks/api/useMenus';
 import { fetchRoleMenuIds, setRoleMenus as apiSetRoleMenus } from '@core/services/api/menuApi';
 import type { Menu } from '@core/types/menu';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 // PERMISSION_MODULES 已删除（B3-Phase2-B + 菜单动态加载 P3）。
 // 角色菜单权限的唯一权威源是后端 menus 表（GET /admin/menus/tree）；
@@ -896,7 +897,7 @@ export default function RoleManagement() {
       title: t('role.createTime'),
       dataIndex: 'createTime',
       width: 160,
-      render: (val) => (val ? new Date(String(val)).toLocaleString('zh-CN') : '-') as string,
+      render: (val) => (val ? formatSystemTime(String(val)) : '-') as string,
     },
     { key: 'updateUser', title: t('role.updateUser'), dataIndex: 'updateUser', width: 100, render: (v) => (v as string) || '-' },
     {
@@ -904,7 +905,7 @@ export default function RoleManagement() {
       title: t('role.updateTime'),
       dataIndex: 'updateTime',
       width: 160,
-      render: (val) => (val ? new Date(String(val)).toLocaleString('zh-CN') : '-') as string,
+      render: (val) => (val ? formatSystemTime(String(val)) : '-') as string,
     },
   ], [t, isBuiltIn, handleDelete, handleCopy, loadRoleDetailToForm]);
 
@@ -1589,13 +1590,13 @@ export default function RoleManagement() {
           <span>{selectedRole?.createUser ?? '-'}</span>
         </Form.Item>
         <Form.Item label={t('role.createTime')}>
-          <span>{selectedRole?.createTime ? new Date(selectedRole.createTime).toLocaleString('zh-CN') : '-'}</span>
+          <span>{selectedRole?.createTime ? formatSystemTime(selectedRole.createTime) : '-'}</span>
         </Form.Item>
         <Form.Item label={t('role.updateUser')}>
           <span>{selectedRole?.updateUser ?? '-'}</span>
         </Form.Item>
         <Form.Item label={t('role.updateTime')}>
-          <span>{selectedRole?.updateTime ? new Date(selectedRole.updateTime).toLocaleString('zh-CN') : '-'}</span>
+          <span>{selectedRole?.updateTime ? formatSystemTime(selectedRole.updateTime) : '-'}</span>
         </Form.Item>
       </Drawer>
     </ListPageLayout>

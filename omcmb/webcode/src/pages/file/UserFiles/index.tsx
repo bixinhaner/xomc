@@ -10,6 +10,7 @@ import type { DataTableColumn } from '@/components/DataTable';
 import { useFileList, useDeleteFiles } from '@core/hooks/api/useFiles';
 import type { ManagedFile, FileType } from '@core/mock/data/fileManagement';
 import { useT } from '@/hooks/useT';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 const { Dragger } = Upload;
 
@@ -129,7 +130,7 @@ export default function UserFiles() {
       },
     },
     { key: 'uploader', title: t('table.operator'), dataIndex: 'uploader', width: 100 },
-    { key: 'uploadTime', title: t('table.createTime'), dataIndex: 'uploadTime', width: 160, render: (val) => new Date(String(val)).toLocaleString('zh-CN') },
+    { key: 'uploadTime', title: t('table.createTime'), dataIndex: 'uploadTime', width: 160, render: (val) => formatSystemTime(String(val)) },
     {
       key: 'actions', title: t('table.operation'), dataIndex: 'id', width: 120, fixed: 'right',
       render: (_, record) => {
@@ -152,7 +153,7 @@ export default function UserFiles() {
     { key: 'fileSize', title: t('table.description'), dataIndex: 'fileSize', width: 110, render: (val) => formatFileSize(Number(val)) },
     { key: 'deviceType', title: t('device.productClass'), dataIndex: 'deviceType', width: 100 },
     { key: 'version', title: t('table.version'), dataIndex: 'version', width: 200, render: (val) => <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{String(val)}</span> },
-    { key: 'uploadTime', title: t('table.createTime'), dataIndex: 'uploadTime', width: 160, render: (val) => new Date(String(val)).toLocaleString('zh-CN') },
+    { key: 'uploadTime', title: t('table.createTime'), dataIndex: 'uploadTime', width: 160, render: (val) => formatSystemTime(String(val)) },
     { key: 'uploader', title: t('table.operator'), dataIndex: 'uploader', width: 100 },
     {
       key: 'actions', title: t('table.operation'), dataIndex: 'id', width: 120, fixed: 'right',

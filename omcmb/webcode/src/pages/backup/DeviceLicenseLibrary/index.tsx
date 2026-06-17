@@ -13,7 +13,6 @@ import {
   DeleteOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
-import dayjs from 'dayjs';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import { useT } from '@/hooks/useT';
@@ -25,6 +24,7 @@ import type { DeviceLicense } from '@core/services/api/deviceLicenseApi';
 import { deviceLicenseApi } from '@core/services/api/deviceLicenseApi';
 import { useBatchDownloadWithMessage } from '@/hooks/useBatchDownloadWithMessage';
 import ImportDrawer from './ImportDrawer';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 export default function DeviceLicenseLibraryPage() {
   const t = useT();
@@ -95,7 +95,7 @@ export default function DeviceLicenseLibraryPage() {
       dataIndex: 'updateTime',
       width: 180,
       sorter: true,
-      render: (v) => (v ? dayjs(v as string).format('YYYY-MM-DD HH:mm:ss') : '—'),
+      render: (v) => (v ? formatSystemTime(v as string, { format: 'YYYY-MM-DD HH:mm:ss', placeholder: '-' }) : '—'),
     },
     {
       key: 'actions',

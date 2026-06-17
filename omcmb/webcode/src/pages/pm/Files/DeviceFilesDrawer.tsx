@@ -7,12 +7,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Button, DatePicker, Drawer, Space, Table, Tag } from 'antd';
 import { DownloadOutlined } from '@ant-design/icons';
-import dayjs, { type Dayjs } from 'dayjs';
+import { type Dayjs } from 'dayjs';
 import type { ColumnsType } from 'antd/es/table';
 import { useT } from '@/hooks/useT';
 import { usePMFiles, useDownloadPMFile } from '@core/hooks/api/usePerformance';
 import type { PMFileItem, PMFileDeviceItem } from '@core/services/api/pmApi';
 import { useBatchDownloadWithMessage } from '@/hooks/useBatchDownloadWithMessage';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 function formatBytes(n: number) {
   if (!n) return '—';
@@ -101,7 +102,7 @@ export default function DeviceFilesDrawer({ open, device, onClose }: Props) {
       title: t('pm.collectTime'),
       dataIndex: 'collectTime',
       width: 170,
-      render: (v) => (v ? dayjs(v).format('YYYY-MM-DD HH:mm:ss') : '—'),
+      render: (v) => (v ? formatSystemTime(v, { format: 'YYYY-MM-DD HH:mm:ss', placeholder: '-' }) : '—'),
     },
     {
       title: t('table.operation'),

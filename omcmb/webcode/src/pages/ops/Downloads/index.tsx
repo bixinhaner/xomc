@@ -9,6 +9,7 @@ import type { DataTableColumn } from '@/components/DataTable';
 import { useT } from '@/hooks/useT';
 import { useCollectDownload, useOpsDownloads } from '@core/hooks/api/useOpsExt';
 import type { DownloadStatus, OpsDownload } from '@core/services/api/opsExtApi';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 type OpsDownloadRow = OpsDownload & Record<string, unknown>;
 
@@ -146,7 +147,7 @@ export default function Downloads() {
         title: t('table.createTime'),
         dataIndex: 'created_at',
         width: 170,
-        render: (val) => (val ? new Date(String(val)).toLocaleString('zh-CN') : '—'),
+        render: (val) => (val ? formatSystemTime(String(val)) : '—'),
       },
       {
         key: 'actions',
@@ -268,11 +269,11 @@ function DownloadDetailModal({
           )}
           <Descriptions.Item label={t('table.operator')}>{download.operator || '—'}</Descriptions.Item>
           <Descriptions.Item label={t('table.createTime')}>
-            {new Date(download.created_at).toLocaleString('zh-CN')}
+            {formatSystemTime(download.created_at)}
           </Descriptions.Item>
           {download.expires_at && (
             <Descriptions.Item label={t('ops.expireTime')}>
-              {new Date(download.expires_at).toLocaleString('zh-CN')}
+              {formatSystemTime(download.expires_at)}
             </Descriptions.Item>
           )}
         </Descriptions>

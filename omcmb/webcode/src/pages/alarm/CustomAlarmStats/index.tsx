@@ -24,6 +24,7 @@ import type { AlarmFilter } from '@core/types/alarm';
 import AlarmDetail from '../AlarmDetail';
 import ConfirmWithNoteModal from '../components/ConfirmWithNoteModal';
 import styles from './CustomAlarmStats.module.css';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 const { Text } = Typography;
 
@@ -875,14 +876,14 @@ export default function CustomAlarmStats() {
       title: t('alarm.eventTime'),
       dataIndex: 'eventTime',
       width: 150,
-      render: (v) => (v ? new Date(String(v)).toLocaleString('zh-CN') : '-'),
+      render: (v) => (v ? formatSystemTime(String(v)) : '-'),
     },
     {
       key: 'updTime',
       title: t('alarm.updTime'),
       dataIndex: 'updTime',
       width: 150,
-      render: (v) => (v ? new Date(String(v)).toLocaleString('zh-CN') : '-'),
+      render: (v) => (v ? formatSystemTime(String(v)) : '-'),
     },
     {
       key: 'specificProblem',

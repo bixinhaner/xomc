@@ -18,6 +18,7 @@ import type {
 
 import CreateDrawer from './CreateDrawer';
 import DetailDrawer from './DetailDrawer';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 /**
  * MRTasksPanel — MR 任务管理面板（无 ListPageLayout 页面 chrome）。
@@ -194,7 +195,7 @@ export default function MRTasksPanel(props: MRTasksPanelProps = {}) {
         title: t('mrTask.field.startTime'),
         dataIndex: 'startTime',
         width: 170,
-        render: (val) => new Date(String(val)).toLocaleString(),
+        render: (val) => formatSystemTime(String(val)),
       },
       {
         key: 'endTime',
@@ -203,7 +204,7 @@ export default function MRTasksPanel(props: MRTasksPanelProps = {}) {
         width: 170,
         render: (val) =>
           val ? (
-            new Date(String(val)).toLocaleString()
+            formatSystemTime(String(val))
           ) : (
             <span style={{ color: 'rgba(0,0,0,0.45)' }}>
               {t('mrTask.field.endTimeUnlimited')}

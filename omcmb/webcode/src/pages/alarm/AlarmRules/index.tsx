@@ -16,6 +16,7 @@ import { useT, type TranslateFn } from '@/hooks/useT';
 import type { AlarmRule, AlarmRuleCondition, AlarmRuleAction } from '@core/types/alarm';
 import type { PageRequest } from '@core/types/pagination';
 import AlarmRuleDrawer, { type AlarmRuleFormData } from './AlarmRuleDrawer';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 const { Text } = Typography;
 
@@ -464,7 +465,7 @@ export default function AlarmRules() {
         title: t('alarm.updateTime'),
         dataIndex: 'updateTime',
         width: 160,
-        render: (v) => v ? new Date(String(v)).toLocaleString('zh-CN') : '-',
+        render: (v) => v ? formatSystemTime(String(v)) : '-',
       },
     ],
     [handleToggle, handleEdit, handleView, handleDelete, togglingId, t]

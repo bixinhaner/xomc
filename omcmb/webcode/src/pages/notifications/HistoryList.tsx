@@ -13,6 +13,7 @@ import type {
 } from '@core/types/notification';
 import { useT } from '@/hooks/useT';
 import HistoryDetail from './HistoryDetail';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 const channelColorMap: Record<NotificationChannel, string> = {
   email: 'blue',
@@ -87,7 +88,7 @@ export default function HistoryList() {
           dataIndex: 'createdAt',
           width: 170,
           render: (val) =>
-            val ? new Date(String(val)).toLocaleString() : '-',
+            val ? formatSystemTime(String(val)) : '-',
         },
         {
           key: 'channel',
@@ -140,7 +141,7 @@ export default function HistoryList() {
           dataIndex: 'sentAt',
           width: 170,
           render: (val) =>
-            val ? new Date(String(val)).toLocaleString() : '-',
+            val ? formatSystemTime(String(val)) : '-',
         },
         {
           key: 'actions',
