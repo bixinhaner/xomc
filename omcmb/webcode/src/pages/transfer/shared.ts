@@ -203,6 +203,8 @@ export interface TaskTypeFormValues {
   postTcEventCode?: string;
   enabled: boolean;
   platformScope: string[];
+  /** #492 适用产品（产品英文名多选）。取代 platformScope 作为模板编辑的可选范围控件。 */
+  products?: string[];
   fileType: string;
   fileTypeLabel: string;
   fileTypeEditable: boolean;

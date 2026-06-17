@@ -42,6 +42,9 @@ export interface UnifiedFileTransferTaskType {
   postTcEventCode?: string;
   permissionCode: string;
   platformScope: string[];
+  /** #492 适用产品：产品英文名列表（引用产品管理 product_name）。非空时设备匹配走产品目录精确匹配，
+   *  制式由所选产品派生；空则回退 platformScope。后端始终返回数组，老 mock 可缺省故标可选。 */
+  products?: string[];
   fileType: string;
   fileTypeLabel: string;
   fileTypeEditable: boolean;
@@ -155,6 +158,8 @@ export interface CreateUnifiedFileTransferTypeInput {
   postTcEventCode?: string;
   enabled: boolean;
   platformScope: string[];
+  /** #492 适用产品（产品英文名列表）。模板编辑改为产品名多选后提交此字段；留空则沿用 platformScope。 */
+  products?: string[];
   fileType: string;
   fileTypeLabel: string;
   fileTypeEditable: boolean;

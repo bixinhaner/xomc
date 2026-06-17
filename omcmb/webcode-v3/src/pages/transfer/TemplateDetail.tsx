@@ -69,6 +69,9 @@ export default function TransferTemplateDetailPage() {
     )
   }
 
+  // #492：优先展示「适用产品」（产品英文名），空则回退旧平台范围。
+  const scopeItems = (type.products ?? []).length > 0 ? (type.products ?? []) : type.platformScope
+
   return (
     <PageShell
       code="F06"
@@ -85,7 +88,7 @@ export default function TransferTemplateDetailPage() {
             <div className="flex flex-col gap-3">
               <Stat label="30D 任务" value={`${type.taskCount30d}`} color="#00f0ff" />
               <Stat label="步骤数" value={`${type.stepChain.length}`} color="#5b9eff" />
-              <Stat label="平台范围" value={`${type.platformScope.length}`} color="#a855f7" />
+              <Stat label="适用产品" value={`${scopeItems.length}`} color="#a855f7" />
             </div>
           </div>
         </GlassPanel>
@@ -188,18 +191,18 @@ export default function TransferTemplateDetailPage() {
         </GlassPanel>
 
         <GlassPanel
-          title="PLATFORM SCOPE · 适用平台"
-          meta={`${type.platformScope.length} CLASSES`}
+          title="PRODUCTS · 适用产品"
+          meta={`${scopeItems.length} ITEMS`}
           className="col-span-12 lg:col-span-5"
         >
-          {type.platformScope.length === 0 ? (
+          {scopeItems.length === 0 ? (
             <div className="flex items-center gap-2 px-4 py-6 font-mono text-[11px] uppercase tracking-[0.18em] text-cyan-300/45">
               <Cpu className="size-3.5" />
-              ALL PLATFORMS · 不限平台
+              ALL PRODUCTS · 不限产品
             </div>
           ) : (
             <div className="flex flex-wrap gap-2 p-3.5">
-              {type.platformScope.map((p) => (
+              {scopeItems.map((p) => (
                 <span key={p} className="chip text-cyan-200">
                   {p}
                 </span>

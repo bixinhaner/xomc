@@ -34,7 +34,7 @@ import {
   useUnifiedFileTransferTaskTypes,
   useUpdateUnifiedFileTransferTaskType,
 } from '@core/hooks/api/useUnifiedFileTransfer';
-import { useProductClasses } from '@core/hooks/api/useDevices';
+import { useProductList } from '@core/hooks/api/useProducts';
 import type {
   CreateUnifiedFileTransferTypeInput,
   UnifiedFileTransferTaskType,
@@ -61,7 +61,8 @@ export default function TemplateDefinitionManagement() {
   const { data: taskTypes = [], isLoading: taskTypesLoading } = useUnifiedFileTransferTaskTypes({
     refetchOnMount: 'always',
   });
-  const { data: productClasses = [] } = useProductClasses();
+  const { data: productsData } = useProductList();
+  const products = useMemo(() => productsData?.items ?? [], [productsData]);
   const categories = useMemo(() => buildCategoryTabs(taskTypes), [taskTypes]);
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedTypeCode, setSelectedTypeCode] = useState('');
@@ -101,14 +102,29 @@ export default function TemplateDefinitionManagement() {
   const stepLabels = useMemo(() => getStepLabels(t), [t]);
   const softwareLibraryFileTypeOptions = useMemo(() => getSoftwareLibraryFileTypeOptions(t), [t]);
 
-  const platformScopeOptions = useMemo(() => {
-    const values = new Set<string>(productClasses);
-    editingType?.platformScope.forEach((entry) => values.add(entry));
-    return Array.from(values)
-      .filter(Boolean)
-      .sort((left, right) => left.localeCompare(right, 'zh-CN'))
-      .map((item) => ({ label: item, value: item }));
-  }, [editingType?.platformScope, productClasses]);
+  // #492：模板「适用范围」改为按产品英文名选择（来自产品中心-产品管理目录），
+  // 取代旧的 productClass 自由文本。label 带制式 tag 便于辨识。
+  const productOptions = useMemo(
+    () => products
+      .map((p) => ({ label: `${p.name} (${p.tech})`, value: p.name }))
+      .sort((left, right) => left.label.localeCompare(right.label, 'zh-CN')),
+    [products],
+  );
+  const productTechByName = useMemo(() => {
+    const map = new Map<string, string>();
+    products.forEach((p) => map.set(p.name, p.tech));
+    return map;
+  }, [products]);
+  // 制式按所选产品自动派生（只读展示），不再让用户手填 techHint。
+  const formProducts = Form.useWatch('products', typeForm);
+  const derivedTech = useMemo(() => {
+    const set = new Set<string>();
+    (formProducts ?? []).forEach((name) => {
+      const tech = productTechByName.get(name);
+      if (tech) set.add(tech);
+    });
+    return Array.from(set);
+  }, [formProducts, productTechByName]);
 
   useEffect(() => {
     if (categories.length === 0) {
@@ -154,7 +170,7 @@ export default function TemplateDefinitionManagement() {
         stepChain: record.stepChain,
         postTcEventCode: record.postTcEventCode,
         enabled: record.enabled,
-        platformScope: record.platformScope,
+        products: record.products ?? [],
         fileType: record.fileType,
         fileTypeEditable: record.fileTypeEditable,
         firmwareFileType: record.firmwareFileType,
@@ -166,7 +182,7 @@ export default function TemplateDefinitionManagement() {
         categoryCustomLabel: undefined,
         rpcType: 'DOWNLOAD',
         enabled: true,
-        platformScope: [],
+        products: [],
         fileTypeEditable: true,
         firmwareFileType: undefined,
         delaySeconds: 0,
@@ -201,7 +217,10 @@ export default function TemplateDefinitionManagement() {
       stepChain: values.stepChain,
       postTcEventCode: values.postTcEventCode,
       enabled: values.enabled,
-      platformScope: values.platformScope,
+      // #492：模板编辑改用 products（适用产品名）。platformScope 不再在表单里编辑，
+      // 透传 editingType 原值保留（作为 product_scope 为空时的后端回退口径）。
+      platformScope: editingType?.platformScope ?? [],
+      products: values.products ?? [],
       fileType: values.fileType,
       fileTypeLabel: values.fileType,
       fileTypeEditable: values.fileTypeEditable,
@@ -374,7 +393,11 @@ export default function TemplateDefinitionManagement() {
               <Descriptions.Item label={t('ufte.template.fileType')}>{detailType.fileType}</Descriptions.Item>
               <Descriptions.Item label={t('ufte.template.softLib')}>{getSoftwareLibraryFileTypeLabel(detailType.firmwareFileType, t)}</Descriptions.Item>
               <Descriptions.Item label={t('ufte.template.permCode')}>{detailType.permissionCode}</Descriptions.Item>
-              <Descriptions.Item label={t('ufte.template.platformScope')}>{detailType.platformScope.join(' / ')}</Descriptions.Item>
+              <Descriptions.Item label={t('ufte.template.products')}>
+                {(detailType.products ?? []).length > 0
+                  ? (detailType.products ?? []).join(' / ')
+                  : (detailType.platformScope.length > 0 ? detailType.platformScope.join(' / ') : '-')}
+              </Descriptions.Item>
               <Descriptions.Item label={t('ufte.template.lastEditor')}>{detailType.lastEditor}</Descriptions.Item>
               <Descriptions.Item label={t('ufte.template.postEvent')}>{detailType.postTcEventCode || '-'}</Descriptions.Item>
             </Descriptions>
@@ -459,13 +482,20 @@ export default function TemplateDefinitionManagement() {
               placeholder={t('ufte.template.stepChain.placeholder')}
             />
           </Form.Item>
-          <Form.Item label={t('ufte.template.platformScope')} name="platformScope" rules={[{ required: true, message: t('ufte.template.platformScope.required') }]}>
+          {/* #492：模板「适用范围」改为按产品英文名（产品中心-产品管理）多选；制式按所选产品自动派生（只读）。 */}
+          <Form.Item
+            label={t('ufte.template.products')}
+            name="products"
+            extra={derivedTech.length > 0
+              ? `${t('ufte.template.derivedTech')}: ${derivedTech.join(' / ').toUpperCase()}`
+              : undefined}
+          >
             <Select
-              mode="tags"
+              mode="multiple"
               showSearch
               optionFilterProp="label"
-              options={platformScopeOptions}
-              placeholder={t('ufte.template.platformScope.placeholder')}
+              options={productOptions}
+              placeholder={t('ufte.template.products.placeholder')}
             />
           </Form.Item>
           <Form.Item label={t('ufte.template.fileType')} name="fileType" rules={[{ required: true, message: t('ufte.template.fileType.required') }]}>

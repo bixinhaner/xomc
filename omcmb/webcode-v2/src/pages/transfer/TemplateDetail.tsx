@@ -175,13 +175,16 @@ function Detail({ template: tt }: { template: UnifiedFileTransferTaskType }) {
 
         <Card>
           <CardHeader className="p-4 pb-2">
-            <CardTitle className="text-base font-medium">适用平台范围</CardTitle>
+            {/* #492：优先展示「适用产品」（产品英文名），空则回退旧平台范围。 */}
+            <CardTitle className="text-base font-medium">
+              {(tt.products ?? []).length > 0 ? '适用产品' : '适用平台范围'}
+            </CardTitle>
           </CardHeader>
           <CardContent className="flex flex-wrap gap-1.5 p-4 pt-2">
-            {tt.platformScope.length === 0 ? (
+            {(tt.products ?? []).length === 0 && tt.platformScope.length === 0 ? (
               <span className="text-sm text-muted-foreground">全部平台</span>
             ) : (
-              tt.platformScope.map((p) => (
+              ((tt.products ?? []).length > 0 ? (tt.products ?? []) : tt.platformScope).map((p) => (
                 <Badge key={p} variant="secondary">
                   {p}
                 </Badge>
