@@ -119,6 +119,9 @@ export default function TemplateDefinitionManagement() {
     products.forEach((p) => map.set(p.name, p.tech));
     return map;
   }, [products]);
+  // #492：「适用产品」空 = 适用全部产品。展示/编辑层统一把"空"呈现为"全选所有产品名"，
+  // 保存时若仍是全选则回存空（保持"不限、未来新产品自动纳入"语义）。
+  const allProductNames = useMemo(() => products.map((p) => p.name), [products]);
   // 制式按所选产品自动派生（只读展示），不再让用户手填 techHint。
   const formProducts = Form.useWatch('products', typeForm);
   const derivedTech = useMemo(() => {
@@ -174,7 +177,8 @@ export default function TemplateDefinitionManagement() {
         stepChain: record.stepChain,
         postTcEventCode: record.postTcEventCode,
         enabled: record.enabled,
-        products: record.products ?? [],
+        // 空（=适用全部）→ 编辑器里呈现为全选所有产品名，与升级模板格式统一。
+        products: (record.products && record.products.length > 0) ? record.products : allProductNames,
         fileType: record.fileType,
         fileTypeEditable: record.fileTypeEditable,
         firmwareFileType: record.firmwareFileType,
@@ -186,7 +190,8 @@ export default function TemplateDefinitionManagement() {
         categoryCustomLabel: undefined,
         rpcType: 'DOWNLOAD',
         enabled: true,
-        products: [],
+        // 新建模板默认适用全部产品（全选展示；保存时全选回存空=不限）。
+        products: allProductNames,
         fileTypeEditable: true,
         firmwareFileType: undefined,
         delaySeconds: 0,
@@ -212,6 +217,10 @@ export default function TemplateDefinitionManagement() {
       void message.warning(t(key));
       return;
     }
+    // #492：全选所有产品 = 适用全部 → 回存空（不限、未来新产品自动纳入）；子集则存具体列表。
+    const selectedProducts = values.products ?? [];
+    const isAllProducts = allProductNames.length > 0 && allProductNames.every((n) => selectedProducts.includes(n));
+    const productsToSave = isAllProducts ? [] : selectedProducts;
     const payload: CreateUnifiedFileTransferTypeInput = {
       category: categoryPayload.category,
       categoryLabel: categoryPayload.categoryLabel,
@@ -224,7 +233,7 @@ export default function TemplateDefinitionManagement() {
       // #492：模板编辑改用 products（适用产品名）。platformScope 不再在表单里编辑，
       // 透传 editingType 原值保留（作为 product_scope 为空时的后端回退口径）。
       platformScope: editingType?.platformScope ?? [],
-      products: values.products ?? [],
+      products: productsToSave,
       fileType: values.fileType,
       fileTypeLabel: values.fileType,
       fileTypeEditable: values.fileTypeEditable,
@@ -398,9 +407,12 @@ export default function TemplateDefinitionManagement() {
               <Descriptions.Item label={t('ufte.template.softLib')}>{getSoftwareLibraryFileTypeLabel(detailType.firmwareFileType, t)}</Descriptions.Item>
               <Descriptions.Item label={t('ufte.template.permCode')}>{detailType.permissionCode}</Descriptions.Item>
               <Descriptions.Item label={t('ufte.template.products')}>
+                {/* #492：空 = 适用全部产品 → 展示「全部产品」+ 全部产品名，与升级模板格式统一。 */}
                 {(detailType.products ?? []).length > 0
                   ? (detailType.products ?? []).join(' / ')
-                  : (detailType.platformScope.length > 0 ? detailType.platformScope.join(' / ') : '-')}
+                  : (allProductNames.length > 0
+                      ? `${t('ufte.template.allProducts')}（${allProductNames.length}）：${allProductNames.join(' / ')}`
+                      : t('ufte.template.allProducts'))}
               </Descriptions.Item>
               <Descriptions.Item label={t('ufte.template.lastEditor')}>{detailType.lastEditor}</Descriptions.Item>
               <Descriptions.Item label={t('ufte.template.postEvent')}>{detailType.postTcEventCode || '-'}</Descriptions.Item>
