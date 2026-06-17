@@ -37,6 +37,7 @@ import {
   useSyncDeviceParams,
 } from '@core/hooks/api/useDevices'
 import { useDeviceParameters } from '@core/hooks/api/useDeviceParameters'
+import { activationStatusOf } from '@core/utils/activationStatus'
 import type { Device } from '@core/types/device'
 import type { AlarmSeverity } from '@core/types/common'
 
@@ -256,7 +257,14 @@ export default function DeviceDetail() {
   const statusFields = (d: Device): Field[] => [
     { label: '连接状态', value: d.isOnline ? '在线' : '离线' },
     { label: '生命周期', value: d.lifecycleState },
-    { label: '激活状态', value: d.opState === '1' ? '激活' : d.opState === '0' ? '未激活' : d.opState },
+    // 「激活状态」判定走 frontend-core/utils/activationStatus——与 webcode/webcode-v3 同口径。
+    {
+      label: '激活状态',
+      value: (() => {
+        const s = activationStatusOf(d.opState)
+        return s === 'active' ? '激活' : s === 'inactive' ? '未激活' : '-'
+      })(),
+    },
     { label: '同步状态', value: d.syncStatus },
     { label: 'RF 状态', value: d.rfStatus },
     { label: 'MME/AMF', value: d.mmeStatus || d.amfStatus },

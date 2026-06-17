@@ -1315,6 +1315,11 @@ const messages: Record<string, string> = {
 
   // Monitor page extended fields (Status)
   'device.opState':             'Activation Status',
+  // Per-cell op state column on device-detail's cell-info table. Distinct from
+  //   device-level device.opState — they share the same backend field name but
+  //   are two different dimensions; using one i18n key for both caused 'list
+  //   says active / detail cell row says inactive' to be mis-reported as a bug.
+  'device.cellOpState':         'Cell Op State',
   'device.ueCount':             'UE Count',
   'device.mmeStatus':           'MME Status',
   'device.amfStatus':           'AMF Status',

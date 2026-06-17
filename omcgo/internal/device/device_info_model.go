@@ -73,6 +73,13 @@ type DeviceInfo struct {
 	// 计算逻辑: CalcCellStatus()
 	CellStatus string `json:"cell_status"`
 
+	// OpState 激活状态(前端展示用,'1'=激活 / '0'=未激活)。
+	// 派生口径同 CellStatus —— 任一 cell active(FAPControl/CellConfig 下
+	// {LTE|NR}.OpState/CellOpState 任一 trpath 为 "1"/"true"/"active")则
+	// 设备激活,否则未激活。由 InfoSyncer.CalcOpState 在每次参数同步时刷新。
+	// 取代历史 model.DeriveOpStateActivated(first_online_time) 的一次性持久语义。
+	OpState string `json:"op_state"`
+
 	// MMEStatus MME/AMF 连接状态
 	// 可能值: MMEStatusConnected, MMEStatusPartial, MMEStatusDisconnected
 	// 计算逻辑: CalcMMEStatus()

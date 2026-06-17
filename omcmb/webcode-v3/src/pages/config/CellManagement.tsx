@@ -8,6 +8,7 @@ import { NeonButton } from '@/components/ui/NeonButton'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { RadialGauge } from '@/components/viz/RadialGauge'
 import { useDeviceList } from '@core/hooks/api/useDevices'
+import { activationStatusOf } from '@core/utils/activationStatus'
 import type { Device } from '@core/types/device'
 import { StatCard, HudLoading, HudError, HudEmpty } from './_hud'
 
@@ -173,7 +174,9 @@ function CellDetail({ device, onOpenDevice }: { device: Device; onOpenDevice: ()
   ]
   const status: Array<[string, string]> = [
     ['CELL STATUS', device.cellStatus || '—'],
-    ['OP STATE', device.opState || '—'],
+    // HUD raw 风保留 '1'/'0' 原样显示,仅把后端兜底的 'unknown' 与空值同步为 '—'。
+    // 口径走 frontend-core/utils/activationStatus,与 v3 设备详情 KV 同来源。
+    ['OP STATE', activationStatusOf(device.opState) ? device.opState : '—'],
     ['ADMIN', device.adminState || device.lockStatus || '—'],
     ['SERVICE', device.serviceStatus || '—'],
     ['RF', device.rfStatus || '—'],

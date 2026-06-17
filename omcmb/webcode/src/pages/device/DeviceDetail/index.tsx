@@ -35,6 +35,7 @@ import LineChart from '@/components/Charts/LineChart';
 import ErrorBoundary from '@/components/common/ErrorBoundary';
 import { useSyncStatus } from '@core/hooks/api/useDeviceParameters';
 import { useDeviceBySn, useSyncDeviceParams } from '@core/hooks/api/useDevices';
+import { activationStatusOf } from '@core/utils/activationStatus';
 import { useQuickSettingsGroups } from '@core/hooks/api/useQuickSettings';
 import { useResolvedCellInstances } from '@core/hooks/api/useResolvedCellInstances';
 import { useAcknowledgeAlarms, useClearAlarms, useCurrentAlarms, useUnacknowledgeAlarms } from '@core/hooks/api/useAlarms';
@@ -799,9 +800,13 @@ const renderCellAdminState = (
 };
 
 const getCellSummaryColumns = (networkType: string, t: ReturnType<typeof useT>): CellSummaryColumn[] => {
+  // 表里每行是一个 cell，这里的「激活状态」是 cell.op_state（小区维度），
+  // 与设备列表/详情头的 device.op_state（设备维度）是底层同名但完全不同的
+  // 字段。为避免同名给用户造成「列表激活/详情未激活」的误解，列标题专用
+  // device.cellOpState（'小区激活态'）。渲染仄 renderCellOpState 仍复用 cell op_state 语义。
   const base: CellSummaryColumn[] = [
     { title: 'index', dataIndex: ['index'], key: 'index', width: 80 },
-    { title: t('device.opState'), key: 'opState', width: 120 },
+    { title: t('device.cellOpState'), key: 'opState', width: 120 },
   ];
 
   switch (networkType) {
@@ -810,7 +815,7 @@ const getCellSummaryColumns = (networkType: string, t: ReturnType<typeof useT>):
         { title: 'index', dataIndex: ['index'], key: 'index', width: 80 },
         { title: t('device.cellId'), dataIndex: ['values', 'cellId'], key: 'cellId', width: 120 },
         { title: 'Admin State', dataIndex: ['values', 'adminState'], key: 'adminState', width: 140 },
-        { title: t('device.opState'), key: 'opState', width: 120 },
+        { title: t('device.cellOpState'), key: 'opState', width: 120 },
         { title: t('device.rfStatus'), dataIndex: ['values', 'rfStatus'], key: 'rfStatus', width: 140 },
         { title: 'PCI', dataIndex: ['values', 'pci'], key: 'pci', width: 100 },
         { title: 'Freq Point', dataIndex: ['values', 'freqPoint'], key: 'freqPoint', width: 140 },
@@ -820,7 +825,7 @@ const getCellSummaryColumns = (networkType: string, t: ReturnType<typeof useT>):
     case 'gNB':
       return [
         { title: 'index', dataIndex: ['index'], key: 'index', width: 80 },
-        { title: t('device.opState'), key: 'opState', width: 120 },
+        { title: t('device.cellOpState'), key: 'opState', width: 120 },
         { title: t('device.rfStatus'), dataIndex: ['values', 'rfStatus'], key: 'rfStatus', width: 140 },
         { title: 'PCI', dataIndex: ['values', 'pci'], key: 'pci', width: 100 },
         { title: 'NRARFCN', dataIndex: ['values', 'freqPoint'], key: 'freqPoint', width: 140 },
@@ -834,7 +839,7 @@ const getCellSummaryColumns = (networkType: string, t: ReturnType<typeof useT>):
         { title: 'index', dataIndex: ['index'], key: 'index', width: 80 },
         { title: t('device.cellId'), dataIndex: ['values', 'cellId'], key: 'cellId', width: 120 },
         { title: 'Admin State', dataIndex: ['values', 'adminState'], key: 'adminState', width: 140 },
-        { title: t('device.opState'), key: 'opState', width: 120 },
+        { title: t('device.cellOpState'), key: 'opState', width: 120 },
         { title: t('device.rfStatus'), dataIndex: ['values', 'rfStatus'], key: 'rfStatus', width: 140 },
         { title: 'LAC', dataIndex: ['values', 'lac'], key: 'lac', width: 120 },
         { title: t('device.arfcn'), dataIndex: ['values', 'arfcn'], key: 'arfcn', width: 120 },
@@ -1617,14 +1622,24 @@ export default function DeviceDetail() {
                 {displayDevice.sn}
               </Text>
             </div>
-            {renderStatusTag(displayDevice.opState, {
-              '1': { label: t('status.active'), color: 'success' },
-              '0': { label: t('status.inactive'), color: 'error' },
-              true: { label: t('status.active'), color: 'success' },
-              false: { label: t('status.inactive'), color: 'error' },
-              active: { label: t('status.active'), color: 'success' },
-              inactive: { label: t('status.inactive'), color: 'error' },
-            })}
+            {/*
+              「激活状态」设备级 Tag —— 判定走 frontend-core/utils/activationStatus.ts,
+              三皮肤 + 列表/详情/KV 全调同一函数，修改口径请只改 utility。
+
+              注: 「小区信息』表里也有列名「激活状态」但那是 cell.op_state（小区维度），
+              与这里的 device.op_state（设备维度）是后端同名不同事实的两个字段——
+              详情页小区表列标题已拆为 device.cellOpState「小区激活态」，避免同名误解。
+            */}
+            {(() => {
+              const status = activationStatusOf(displayDevice.opState);
+              if (status == null) return '-';
+              const isActive = status === 'active';
+              return (
+                <Tag color={isActive ? 'success' : 'error'}>
+                  {isActive ? t('status.active') : t('status.inactive')}
+                </Tag>
+              );
+            })()}
             {displayDevice.alarmLevel !== 'none' && (
               <Tag color={SEVERITY_COLOR[displayDevice.alarmLevel]}>
                 {SEVERITY_LABEL[displayDevice.alarmLevel]}

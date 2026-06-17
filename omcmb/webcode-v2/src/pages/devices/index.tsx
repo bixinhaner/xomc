@@ -108,10 +108,12 @@ function AlarmBadge({ level, count }: { level: AlarmSeverity | 'none'; count?: n
 }
 
 function ActivationBadge({ opState }: { opState: string }) {
-  // 后端 opState 取值约定：'1' 激活 / '0' 未激活；其它值原样回退
-  if (opState === '1') return <Badge variant="success">激活</Badge>
-  if (opState === '0') return <Badge variant="muted">未激活</Badge>
-  return <span className="text-xs text-muted-foreground">{opState || '—'}</span>
+  // 「激活状态」判定走 frontend-core/utils/activationStatus —— 与 webcode/webcode-v3
+  // 同一来源,后端兜底的 'unknown' 与空值一律显示 '—',不再回显 raw 字符串。
+  const status = activationStatusOf(opState)
+  if (status === 'active') return <Badge variant="success">激活</Badge>
+  if (status === 'inactive') return <Badge variant="muted">未激活</Badge>
+  return <span className="text-xs text-muted-foreground">—</span>
 }
 
 export function DevicesPage() {

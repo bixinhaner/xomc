@@ -396,6 +396,7 @@ func (s *InfoSyncer) SyncFromParameters(ctx context.Context, deviceID uuid.UUID,
 
 	// Computed quick-query columns from multiple parameters
 	fields["cell_status"] = CalcCellStatus(paramValues)
+	fields["op_state"] = CalcOpState(paramValues)
 	fields["mme_status"] = CalcMMEStatus(paramValues)
 	fields["sync_status"] = CalcSyncStatus(paramValues)
 	fields["rf_status"] = CalcRFStatus(paramValues)

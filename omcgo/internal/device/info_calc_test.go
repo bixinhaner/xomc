@@ -76,6 +76,113 @@ func TestCalcCellStatus(t *testing.T) {
 	}
 }
 
+func TestCalcOpState(t *testing.T) {
+	tests := []struct {
+		name   string
+		params map[string]string
+		want   string
+	}{
+		{
+			name:   "无 cell 数据 → 0(未激活)",
+			params: map[string]string{},
+			want:   "0",
+		},
+		{
+			name: "单 cell active → 1",
+			params: map[string]string{
+				"Device.Services.FAPService.1.FAPControl.LTE.CellOpState": "1",
+			},
+			want: "1",
+		},
+		{
+			name: "单 cell inactive → 0",
+			params: map[string]string{
+				"Device.Services.FAPService.1.FAPControl.LTE.CellOpState": "0",
+			},
+			want: "0",
+		},
+		{
+			name: "多 cell 任一 active → 1(用户口径)",
+			params: map[string]string{
+				"Device.Services.FAPService.1.FAPControl.LTE.CellOpState": "0",
+				"Device.Services.FAPService.2.FAPControl.LTE.CellOpState": "1",
+			},
+			want: "1",
+		},
+		{
+			name: "多 cell 全 inactive → 0",
+			params: map[string]string{
+				"Device.Services.FAPService.1.FAPControl.LTE.CellOpState": "0",
+				"Device.Services.FAPService.2.FAPControl.LTE.CellOpState": "false",
+			},
+			want: "0",
+		},
+		{
+			name: "NR 路径同样起效",
+			params: map[string]string{
+				"Device.Services.FAPService.1.CellConfig.NR.RAN.Common.CellOpState": "1",
+			},
+			want: "1",
+		},
+		{
+			name: "兜底 FAPControl.LTE.OpState 老路径",
+			params: map[string]string{
+				"Device.Services.FAPService.1.FAPControl.LTE.OpState": "true",
+			},
+			want: "1",
+		},
+		{
+			name: "GSM cell active(GsmBTSCellDT.{i}.OpState)— 走独立对象树",
+			params: map[string]string{
+				"Device.Services.GsmBTSCellDT.1.OpState": "1",
+				"Device.Services.GsmBTSCellDT.1.InUse":   "true",
+			},
+			want: "1",
+		},
+		{
+			name: "GSM cell 全 inactive — 设备未激活",
+			params: map[string]string{
+				"Device.Services.GsmBTSCellDT.1.OpState": "0",
+				"Device.Services.GsmBTSCellDT.1.InUse":   "true",
+				"Device.Services.GsmBTSCellDT.2.OpState": "0",
+				"Device.Services.GsmBTSCellDT.2.InUse":   "true",
+			},
+			want: "0",
+		},
+		{
+			name: "GSM 设备含 InUse=false 的 cell 应被跳过 — 仅 InUse=true 的 cell 也 inactive 时设备未激活",
+			params: map[string]string{
+				"Device.Services.GsmBTSCellDT.1.OpState": "1", // 但 InUse=false 不计
+				"Device.Services.GsmBTSCellDT.1.InUse":   "false",
+				"Device.Services.GsmBTSCellDT.2.OpState": "0",
+				"Device.Services.GsmBTSCellDT.2.InUse":   "true",
+			},
+			want: "0",
+		},
+		{
+			name: "GSM 老快照(无 InUse 字段)— 任一 cell active 也算激活",
+			params: map[string]string{
+				"Device.Services.GsmBTSCellDT.1.OpState": "1",
+			},
+			want: "1",
+		},
+		{
+			name: "GSM cell active 与 LTE/NR cell inactive 共存 — 任一制式 active 即激活",
+			params: map[string]string{
+				"Device.Services.FAPService.1.FAPControl.LTE.CellOpState": "0",
+				"Device.Services.GsmBTSCellDT.1.OpState":                  "1",
+				"Device.Services.GsmBTSCellDT.1.InUse":                    "true",
+			},
+			want: "1",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, CalcOpState(tt.params))
+		})
+	}
+}
+
 func TestCalcMMEStatus(t *testing.T) {
 	tests := []struct {
 		name   string
