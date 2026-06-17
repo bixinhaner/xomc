@@ -5902,9 +5902,6 @@ const messages: Record<string, string> = {
   'mml.consoleV2.detail.execResultSection':  '执行结果',
   'mml.consoleV2.detail.failedNoResult':     '执行失败，无可解析结果。',
   'mml.consoleV2.detail.pathListSection':    'PATH 列表',
-  'mml.consoleV2.detail.rawSection':         '结果报文（格式化 XML）',
-  'mml.consoleV2.detail.modResponse':        'MOD 响应',
-  'mml.consoleV2.detail.lstResponse':        '回读 LST 响应',
   'mml.console.instanceArity.requiredHint':  '必填',
   'mml.console.instanceArity.layer':         '第 {n} 层',
   // R-4.1.1：每层 {i} 取值范围 metadata 校验 + Tooltip 提示
