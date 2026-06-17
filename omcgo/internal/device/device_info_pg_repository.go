@@ -666,6 +666,8 @@ func deviceInfoColumns() []string {
 		"tac", "band", "ul_earfcn",
 		"subframe_assignment", "special_subframe", "root_index",
 		"gps_satellites", "gps_height", "lock_status",
+		// migration 000004：NR 管理状态 + IPSec 地址
+		"admin_state", "ipsec_addr",
 		"enb_id", "network_model",
 		"creator", "updater", "created_at", "updated_at",
 	}
@@ -716,6 +718,8 @@ func deviceWithInfoSelectColumns() []string {
 		"di.tac", "di.band", "di.ul_earfcn",
 		"di.subframe_assignment", "di.special_subframe", "di.root_index",
 		"di.gps_satellites", "di.gps_height", "di.lock_status",
+		// migration 000004：NR 管理状态 + IPSec 地址
+		"di.admin_state", "di.ipsec_addr",
 		"di.enb_id", "di.network_model",
 		// 在线时长派生（设计文档 §13）：
 		//   - is_online → 当前已在线多久（NOW - last_online_time）
@@ -815,6 +819,7 @@ func scanDeviceInfoFromRow(row pgx.Row) (*DeviceInfo, error) {
 		&info.TAC, &info.Band, &info.ULEarfcn,
 		&info.SubframeAssignment, &info.SpecialSubframe, &info.RootIndex,
 		&info.GPSSatellites, &info.GPSHeight, &info.LockStatus,
+		&info.AdminState, &info.IpsecAddr,
 		&info.EnbID, &info.NetworkModel,
 		&info.Creator, &info.Updater, &info.CreatedAt, &info.UpdatedAt,
 	)
@@ -873,6 +878,8 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 		diGPSSatellites      *int
 		diGPSHeight          *float64
 		diLockStatus         *string
+		diAdminState         *string // migration 000004
+		diIpsecAddr          *string // migration 000004
 		diEnbID              *string
 		diNetworkModel       *string
 		// 在线时长派生（SQL计算，设计文档 §13）
@@ -913,6 +920,7 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 		&diTAC, &diBand, &diULEarfcn,
 		&diSubframeAssignment, &diSpecialSubframe, &diRootIndex,
 		&diGPSSatellites, &diGPSHeight, &diLockStatus,
+		&diAdminState, &diIpsecAddr,
 		&diEnbID, &diNetworkModel,
 		// 在线时长派生
 		&onlineDuration,
@@ -1001,6 +1009,8 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 	d.GPSSatellites = diGPSSatellites
 	d.GPSHeight = diGPSHeight
 	d.LockStatus = diLockStatus
+	d.AdminState = diAdminState
+	d.IpsecAddr = diIpsecAddr
 	d.EnbID = diEnbID
 	d.NetworkModel = diNetworkModel
 	d.OnlineDuration = onlineDuration

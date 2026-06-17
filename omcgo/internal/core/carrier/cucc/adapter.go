@@ -77,13 +77,25 @@ func (c *CUCCCarrier) GetInfoParamMapping(tech model.Technology) map[string]stri
 	if tech != model.TechNR {
 		return nil
 	}
+	// 双路径覆盖：未带 cell index 的 TR-181 标准 path 与 Baicells/Dengyo 等设备实际上报
+	// 带 cell index 的路径并列。详见 cmcc/adapter.go GetInfoParamMapping 中的同款注释。
 	return map[string]string{
+		// 标准（未索引）路径
 		"Device.Services.FAPService.1.CellConfig.NR.RAN.Common.CellLocalId":  "cell_id",
 		"Device.Services.FAPService.1.CellConfig.NR.RAN.RF.NRPCI":            "pci",
 		"Device.Services.FAPService.1.CellConfig.NR.RAN.Common.NRARFCN":      "freq_point",
 		"Device.Services.FAPService.1.CellConfig.NR.RAN.RF.ChannelBandwidth": "bandwidth",
 		"Device.Services.FAPService.1.CellConfig.NR.Core.PLMNList.1.PLMNID":  "plmn",
-		"Device.DeviceInfo.HardwareVersion":                                  "hardware_version",
+		// Baicells/Dengyo 带 cell index 路径（实际上报）
+		"Device.Services.FAPService.1.CellConfig.1.NR.RAN.Common.CellLocalId": "cell_id",
+		"Device.Services.FAPService.1.CellConfig.1.NR.RAN.RF.PhyCellID":       "pci",
+		"Device.Services.FAPService.1.CellConfig.1.NR.RAN.RF.NRARFCNDL":       "freq_point",
+		"Device.Services.FAPService.1.CellConfig.1.NR.RAN.RF.DLBandwidth":     "bandwidth",
+		"Device.Services.FAPService.1.CellConfig.1.NR.Core.PLMNList.1.PLMNID": "plmn",
+		// NR 发射功率：与 #362 LTE 设计一致 —— 取 RW、表征「小区实际工作功率」的字段
+		// （PowerModify，对应快速设置面板「功率调整」），而非只读硬件能力上限 MaxTxPower。
+		"Device.Services.FAPService.1.CellConfig.1.NR.RAN.PowerModify": "transmit_power",
+		"Device.DeviceInfo.HardwareVersion":                            "hardware_version",
 	}
 }
 

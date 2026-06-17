@@ -138,6 +138,23 @@ func Test_GetInfoParamMapping_NR(t *testing.T) {
 	c := New()
 	m := c.GetInfoParamMapping(model.TechNR)
 	assert.NotEmpty(t, m)
+	// Baicells/Dengyo NR 设备实际上报的 .CellConfig.1.NR.* 索引路径必须覆盖到。
+	for _, want := range []struct {
+		path string
+		col  string
+	}{
+		{"Device.Services.FAPService.1.CellConfig.1.NR.RAN.RF.PhyCellID", "pci"},
+		{"Device.Services.FAPService.1.CellConfig.1.NR.RAN.RF.NRARFCNDL", "freq_point"},
+		{"Device.Services.FAPService.1.CellConfig.1.NR.RAN.RF.DLBandwidth", "bandwidth"},
+		{"Device.Services.FAPService.1.CellConfig.1.NR.RAN.Common.CellLocalId", "cell_id"},
+		// #362 NR 版：取 RW PowerModify（快速设置「功率调整」）作为 transmit_power。
+		// 不使用只读硬件能力上限 MaxTxPower，语义与 LTE ReferenceSignalPower 对齐。
+		{"Device.Services.FAPService.1.CellConfig.1.NR.RAN.PowerModify", "transmit_power"},
+	} {
+		got, ok := m[want.path]
+		assert.Truef(t, ok, "CTCC NR mapping missing path %s", want.path)
+		assert.Equalf(t, want.col, got, "CTCC NR mapping %s expected column %s", want.path, want.col)
+	}
 }
 
 // T-0029: CTCC RF control path follows TR-181 standard.
