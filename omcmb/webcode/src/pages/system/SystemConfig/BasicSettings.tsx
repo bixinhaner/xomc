@@ -1,5 +1,7 @@
+import { useMemo } from 'react';
 import { Form, Input, Select, Card } from 'antd';
 import { useT } from '@/hooks/useT';
+import { buildTimezoneOptions } from '@core/utils/timezoneOptions';
 
 interface BasicSettingsProps {
   form: ReturnType<typeof Form.useForm>[0];
@@ -13,15 +15,9 @@ const settingRowStyle: React.CSSProperties = {
 export default function BasicSettings({ form }: BasicSettingsProps) {
   const t = useT();
 
-  // Timezone options
-  const timezoneOptions = [
-    { label: t('system.basic.tz.shanghai'), value: 'Asia/Shanghai' },
-    { label: t('system.basic.tz.utc'), value: 'UTC' },
-    { label: t('system.basic.tz.newYork'), value: 'America/New_York' },
-    { label: t('system.basic.tz.losAngeles'), value: 'America/Los_Angeles' },
-    { label: t('system.basic.tz.paris'), value: 'Europe/Paris' },
-    { label: t('system.basic.tz.tokyo'), value: 'Asia/Tokyo' },
-  ];
+  // 时区下拉：完整 IANA 列表（带 GMT 偏移、按偏移排序），生成逻辑在 frontend-core 共享。
+  // 字段仍是 timezoneCode（IANA 名），保存链路不变。
+  const timezoneOptions = useMemo(() => buildTimezoneOptions(), []);
 
   return (
     <Form form={form} layout="vertical" size="small" initialValues={{
@@ -49,7 +45,13 @@ export default function BasicSettings({ form }: BasicSettingsProps) {
           label={t('system.basic.timezoneSetting')}
           style={{ marginBottom: 0 }}
         >
-          <Select placeholder={t('system.basic.pleaseSelectTimezone')} options={timezoneOptions} style={{ width: 400 }} />
+          <Select
+            placeholder={t('system.basic.pleaseSelectTimezone')}
+            options={timezoneOptions}
+            style={{ width: 400 }}
+            showSearch
+            optionFilterProp="label"
+          />
         </Form.Item>
       </Card>
     </Form>
