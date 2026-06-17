@@ -185,13 +185,18 @@ export default function TemplateDefinitionManagement() {
         delaySeconds: record.delaySeconds,
       });
     } else {
+      // 新建自定义模板：业务信息（分类/适用产品/名称/描述）一律留空，由用户填写——
+      // 不再默认带入当前所在 tab 的分类。仅保留通用技术脚手架默认（RPC 类型/步骤链/启用）。
       typeForm.setFieldsValue({
-        categorySelection: selectedCategory,
+        categorySelection: undefined,
         categoryCustomLabel: undefined,
+        displayName: undefined,
+        description: undefined,
+        postTcEventCode: undefined,
         rpcType: 'DOWNLOAD',
         enabled: true,
-        // 新建模板默认适用全部产品（全选展示；保存时全选回存空=不限）。
-        products: allProductNames,
+        products: [],
+        fileType: undefined,
         fileTypeEditable: true,
         firmwareFileType: undefined,
         delaySeconds: 0,
@@ -470,11 +475,13 @@ export default function TemplateDefinitionManagement() {
         )}
       >
         <Form form={typeForm} layout="vertical">
-          <Form.Item label={t('ufte.template.existingCategoryTab')} name="categorySelection">
+          {/* #492：去掉「新增分类页签名称」自定义框——自定义模板只归入现有业务分类，由用户选择。 */}
+          <Form.Item
+            label={t('ufte.template.existingCategoryTab')}
+            name="categorySelection"
+            rules={[{ required: true, message: t('ufte.template.pickCategory') }]}
+          >
             <Select allowClear options={categoryOptions} placeholder={t('ufte.template.existingCategoryTab.placeholder')} />
-          </Form.Item>
-          <Form.Item label={t('ufte.template.newCategoryLabel')} name="categoryCustomLabel">
-            <Input placeholder={t('ufte.template.newCategoryLabel.placeholder')} />
           </Form.Item>
           <Form.Item label={t('ufte.template.displayName')} name="displayName" rules={[{ required: true, message: t('ufte.template.displayName.required') }]}>
             <Input placeholder={t('ufte.template.displayName.placeholder')} />
