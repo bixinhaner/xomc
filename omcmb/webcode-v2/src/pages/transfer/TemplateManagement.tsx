@@ -29,6 +29,11 @@ import {
 } from '@/components/layout/PageShell'
 
 import { useUnifiedFileTransferTaskTypes } from '@core/hooks/api/useUnifiedFileTransfer'
+import {
+  DEVICE_UPGRADE_CATEGORY,
+  aggregateCategoryOptions,
+  filterTaskTypesForCategory,
+} from '@core/utils/ufteCategory'
 
 import { RPC_TYPE_LABEL } from './_shared'
 
@@ -47,24 +52,26 @@ export default function TemplateManagement() {
   const [category, setCategory] = useState<string>(ALL)
   const [kind, setKind] = useState<'all' | 'builtin' | 'custom'>('all')
 
-  const categoryOptions = useMemo(() => {
-    const map = new Map<string, string>()
-    taskTypes.forEach((tt) => {
-      if (!map.has(tt.category)) map.set(tt.category, tt.categoryLabel)
-    })
-    return Array.from(map.entries()).map(([value, label]) => ({ value, label }))
-  }, [taskTypes])
-
-  const rows = useMemo(
+  // #483：4G/5G/2G 折叠为单条『设备升级』(device_upgrade)，与任务创建页一致
+  // （共享 @core/utils/ufteCategory，三皮肤同一口径）。
+  const categoryOptions = useMemo(
     () =>
-      taskTypes.filter((tt) => {
-        if (category !== ALL && tt.category !== category) return false
-        if (kind === 'builtin' && !tt.builtIn) return false
-        if (kind === 'custom' && tt.builtIn) return false
-        return true
-      }),
-    [taskTypes, category, kind]
+      aggregateCategoryOptions(taskTypes).map((opt) =>
+        opt.value === DEVICE_UPGRADE_CATEGORY ? { value: opt.value, label: '设备升级' } : opt
+      ),
+    [taskTypes]
   )
+
+  const rows = useMemo(() => {
+    // device_upgrade 是折叠虚拟分类，需经 filterTaskTypesForCategory 展开成员（4G/5G/2G）；
+    // 精确等值会漏掉真实分类 enb/gnb/gsm_upgrade 的模板。
+    const byCategory = category === ALL ? taskTypes : filterTaskTypesForCategory(taskTypes, category)
+    return byCategory.filter((tt) => {
+      if (kind === 'builtin' && !tt.builtIn) return false
+      if (kind === 'custom' && tt.builtIn) return false
+      return true
+    })
+  }, [taskTypes, category, kind])
 
   const builtinCount = taskTypes.filter((tt) => tt.builtIn).length
   const customCount = taskTypes.length - builtinCount
