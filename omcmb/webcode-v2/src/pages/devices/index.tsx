@@ -55,6 +55,7 @@ import {
 } from '@core/hooks/api/useDevices'
 import { useProductList } from '@core/hooks/api/useProducts'
 import { useAlarmCount, useTriggerAlarmSync } from '@core/hooks/api/useAlarms'
+import { activationStatusOf } from '@core/utils/activationStatus'
 import type { Device, DeviceFilter } from '@core/types/device'
 import type { PageRequest } from '@core/types/pagination'
 import type { AlarmSeverity } from '@core/types/common'
