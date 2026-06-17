@@ -180,3 +180,181 @@ export async function checkTileAvailability(
     return false;
   }
 }
+
+/**
+ * 从设备数据计算地图中心点和缩放级别
+ *
+ * 算法：
+ * 1. 计算所有设备的经纬度范围（minLng, maxLng, minLat, maxLat）
+ * 2. 中心点 = [(minLng+maxLng)/2, (minLat+maxLat)/2]
+ * 3. 根据设备分布范围自动选择缩放级别
+ *
+ * 缩放级别选择规则：
+ * - 范围 > 50°：zoom = 4（全国级别，如中国）
+ * - 范围 > 20°：zoom = 6（省级别）
+ * - 范围 > 5°：zoom = 8（市级别）
+ * - 范围 > 1°：zoom = 11（县级别）
+ * - 其他：zoom = 13（详细级别）
+ *
+ * @param devices 设备地理位置数据数组，每个设备必须有有效的 longitude 和 latitude
+ * @returns 中心点、缩放级别和边界范围；如果设备列表为空则返回全球默认值
+ *
+ * @example
+ * ```ts
+ * const result = calculateCenterFromDevices(devices);
+ * const [lng, lat] = result.center;
+ * map.setCenter([lng, lat], result.zoom);
+ * ```
+ */
+interface DeviceCoordinate {
+  longitude: number | null | undefined;
+  latitude: number | null | undefined;
+}
+
+interface ValidDeviceCoordinate {
+  longitude: number;
+  latitude: number;
+}
+
+export function calculateCenterFromDevices(devices: DeviceCoordinate[]): {
+  center: [number, number];
+  zoom: number;
+  bounds: { minLng: number; maxLng: number; minLat: number; maxLat: number };
+} {
+  const isValidCoordinate = (device: DeviceCoordinate): device is ValidDeviceCoordinate =>
+    Number.isFinite(device.longitude) && Number.isFinite(device.latitude);
+
+  // 过滤掉无效坐标，避免 NaN 传播导致中心点异常
+  const validDevices = (devices || []).filter(isValidCoordinate);
+
+  // 处理空列表
+  if (validDevices.length === 0) {
+    return {
+      center: [0, 20],
+      zoom: 2,
+      bounds: { minLng: -180, maxLng: 180, minLat: -90, maxLat: 90 }
+    };
+  }
+
+  // 初始化边界范围
+  let minLng = validDevices[0].longitude;
+  let maxLng = validDevices[0].longitude;
+  let minLat = validDevices[0].latitude;
+  let maxLat = validDevices[0].latitude;
+
+  // 遍历计算最小/最大值
+  for (const device of validDevices) {
+    minLng = Math.min(minLng, device.longitude);
+    maxLng = Math.max(maxLng, device.longitude);
+    minLat = Math.min(minLat, device.latitude);
+    maxLat = Math.max(maxLat, device.latitude);
+  }
+
+  // 计算中心点
+  const centerLng = (minLng + maxLng) / 2;
+  const centerLat = (minLat + maxLat) / 2;
+
+  // 计算范围
+  const lngRange = maxLng - minLng;
+  const latRange = maxLat - minLat;
+  const maxRange = Math.max(lngRange, latRange);
+
+  // 根据范围自动选择缩放级别
+  let zoom = 13; // 默认值
+  if (maxRange > 50) {
+    zoom = 4;
+  } else if (maxRange > 20) {
+    zoom = 6;
+  } else if (maxRange > 5) {
+    zoom = 8;
+  } else if (maxRange > 1) {
+    zoom = 11;
+  }
+
+  return {
+    center: [centerLng, centerLat],
+    zoom,
+    bounds: { minLng, maxLng, minLat, maxLat }
+  };
+}
+
+/**
+ * 解析和验证环境变量中的默认中心点配置
+ *
+ * 格式：VITE_MAP_DEFAULT_CENTER="lng,lat,zoom"
+ * 示例：
+ * - "28.221,-14.607,6"  (赞比亚)
+ * - "104.0,35.0,4"      (中国)
+ * - "-3.436,55.378,6"   (英国)
+ * - "-95.713,37.090,4"  (美国)
+ *
+ * @returns 中心点和缩放级别，或 null 如果未配置或格式错误
+ *
+ * @example
+ * ```ts
+ * const envCenter = parseEnvCenter();
+ * if (envCenter) {
+ *   const [lng, lat] = envCenter.center;
+ *   map.setCenter([lng, lat], envCenter.zoom);
+ * }
+ * ```
+ */
+export function parseEnvCenter(): {
+  center: [number, number];
+  zoom: number;
+} | null {
+  const envValue = import.meta.env.VITE_MAP_DEFAULT_CENTER;
+
+  // 未配置
+  if (!envValue) {
+    return null;
+  }
+
+  // 解析逗号分隔的值
+  const parts = envValue.split(',').map((p: string) => p.trim());
+
+  // 必须至少有经度和纬度
+  if (parts.length < 2) {
+    console.warn('[mapValidation] Invalid VITE_MAP_DEFAULT_CENTER format, expected "lng,lat[,zoom]"');
+    return null;
+  }
+
+  try {
+    const lng = parseFloat(parts[0]);
+    const lat = parseFloat(parts[1]);
+    const zoom = parts.length > 2 ? parseInt(parts[2], 10) : 13;
+
+    // 验证值的有效性
+    if (isNaN(lng) || isNaN(lat) || isNaN(zoom)) {
+      console.warn('[mapValidation] VITE_MAP_DEFAULT_CENTER contains non-numeric values');
+      return null;
+    }
+
+    // 验证坐标范围
+    if (lng < -180 || lng > 180) {
+      console.warn(`[mapValidation] Longitude ${lng} out of range [-180, 180]`);
+      return null;
+    }
+
+    if (lat < -90 || lat > 90) {
+      console.warn(`[mapValidation] Latitude ${lat} out of range [-90, 90]`);
+      return null;
+    }
+
+    // 验证缩放级别范围
+    if (zoom < 1 || zoom > 18) {
+      console.warn(`[mapValidation] Zoom ${zoom} out of range [1, 18]`);
+      return null;
+    }
+
+    console.info(`[mapValidation] Parsed VITE_MAP_DEFAULT_CENTER: center=[${lng},${lat}], zoom=${zoom}`);
+
+    return {
+      center: [lng, lat],
+      zoom
+    };
+  } catch (err) {
+    console.warn('[mapValidation] Error parsing VITE_MAP_DEFAULT_CENTER:', err);
+    return null;
+  }
+}

@@ -15,6 +15,11 @@ import { Checkbox, Spin, Empty, Collapse, Input, Tooltip, message } from 'antd';
 import { SearchOutlined, PlusOutlined, MinusOutlined, CaretDownOutlined } from '@ant-design/icons';
 import GISMap from '@/components/GISMap';
 import { MAP_CONFIG } from '@/components/GISMap/constants';
+import { useMapConfig } from '@/components/GISMap/useMapConfig';
+import { calculateCenterFromDevices, parseEnvCenter } from '@/utils/mapValidation';
+
+// 环境变量在运行期不变，解析一次即可，避免每次 useMemo 重跑并重复打日志
+const ENV_CENTER = parseEnvCenter();
 import type { GISMapRef } from '@/components/GISMap';
 import type { MapDevice, DeviceGroupNode, DeviceGeo, MapViewport } from '@core/types/map';
 import type { Domain } from '@core/types/topology';
@@ -297,6 +302,9 @@ export default function GISMapView() {
 
   const { data: devicesGeoData } = useMapDevicesGeo(filterParams);
 
+  // 加载地图元数据（离线瓦片配置）
+  const mapConfigData = useMapConfig();
+
   // 获取地图统计数据
   const { data: mapStatsData } = useMapStats({
     groupIds: selectedGroupIds.length > 0 ? selectedGroupIds : undefined,
@@ -359,6 +367,55 @@ export default function GISMapView() {
       center: mapStatsData.center,
     };
   }, [mapStatsData]);
+
+  // 使用稳定引用避免频繁重新计算
+  const deviceItems = devicesGeoData?.items;
+
+  /**
+   * 计算初始地图中心点和缩放级别（4层决策逻辑）
+   * 
+   * 优先级：
+   * 1. tiles.json 元数据中心点（如果离线瓦片可用）
+   * 2. 设备数据计算的中心点（如果元数据不可用但设备存在）
+   * 3. 环境变量配置的中心点（支持多地区部署）
+   * 4. 代码默认值（全球默认）
+   */
+  const { initialCenter, initialZoom } = useMemo(() => {
+    console.info('[GISMapView] Computing initial center point with 4-tier strategy');
+
+    // 第一层：优先使用 tiles.json 元数据中心点
+    if (mapConfigData.metadata && !mapConfigData.isUsingDefault && mapConfigData.status === 'success') {
+      const metadataCenter: [number, number] = [
+        mapConfigData.metadata.center.lon,
+        mapConfigData.metadata.center.lat,
+      ];
+      const metadataZoom = mapConfigData.metadata.zoom.default || 8;
+      console.info('[GISMapView] ✓ Tier 1: Using tiles.json metadata center', metadataCenter, 'zoom:', metadataZoom);
+      return { initialCenter: metadataCenter, initialZoom: metadataZoom };
+    }
+
+    // 第二层：如果元数据不可用但有设备数据，计算设备范围的中心点
+    if (deviceItems && deviceItems.length > 0) {
+      const result = calculateCenterFromDevices(deviceItems);
+      console.info('[GISMapView] ✓ Tier 2: Calculated center from devices', result.center, 'zoom:', result.zoom);
+      return { initialCenter: result.center, initialZoom: result.zoom };
+    }
+
+    // 第三层：尝试使用环境变量配置（模块级缓存，无重复解析开销）
+    if (ENV_CENTER) {
+      console.info('[GISMapView] ✓ Tier 3: Using VITE_MAP_DEFAULT_CENTER from env', ENV_CENTER.center, 'zoom:', ENV_CENTER.zoom);
+      return { initialCenter: ENV_CENTER.center, initialZoom: ENV_CENTER.zoom };
+    }
+
+    // 第四层：使用代码默认值
+    console.info('[GISMapView] ✓ Tier 4: Using hardcoded default', MAP_CONFIG.defaultCenter, 'zoom:', MAP_CONFIG.defaultZoom);
+    return { initialCenter: MAP_CONFIG.defaultCenter, initialZoom: MAP_CONFIG.defaultZoom };
+  }, [
+    mapConfigData.metadata,
+    mapConfigData.isUsingDefault,
+    mapConfigData.status,
+    deviceItems,
+  ]);
 
   // ========== 搜索处理 ==========
 
@@ -1021,8 +1078,8 @@ export default function GISMapView() {
           devices={mapDevices}
           searchResultDevice={searchResultDevice}
           height="100%"
-          defaultCenter={[26, -13] as [number, number]}
-          defaultZoom={MAP_CONFIG.defaultZoom}
+          defaultCenter={initialCenter}
+          defaultZoom={initialZoom}
           showStats={false}
           showControls={false}
           tileUrl={MAP_CONFIG.tileUrl}
