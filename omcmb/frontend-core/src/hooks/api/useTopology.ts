@@ -253,7 +253,7 @@ export function useMapAggregation(params: {
 /**
  * 获取地图统计数据
  */
-export function useMapStats(params?: { groupIds?: string[]; bounds?: string }) {
+export function useMapStats(params?: { groupIds?: string[]; status?: string[]; bounds?: string }) {
   return useQuery<MapStats>({
     queryKey: ['topology', 'map', 'stats', params],
     queryFn: () =>

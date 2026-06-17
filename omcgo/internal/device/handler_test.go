@@ -142,8 +142,8 @@ func (m *fakeDeviceRepo) ListGeo(_ context.Context, f GeoDeviceFilter) ([]GeoDev
 	m.geoListVisible = f.VisibleGroups
 	return nil, 0, nil
 }
-func (m *fakeDeviceRepo) GetGeoStats(_ context.Context, _ []string, visibleGroups []uuid.UUID) (*GeoStats, error) {
-	m.geoStatsVisible = visibleGroups
+func (m *fakeDeviceRepo) GetGeoStats(_ context.Context, filter GeoStatsFilter) (*GeoStats, error) {
+	m.geoStatsVisible = filter.VisibleGroups
 	return &GeoStats{}, nil
 }
 func (m *fakeDeviceRepo) SearchDevices(_ context.Context, _ string, _ int, visibleGroups []uuid.UUID) ([]GeoDevice, error) {

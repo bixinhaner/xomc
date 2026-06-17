@@ -205,18 +205,18 @@ func (mr *MockDeviceRepositoryMockRecorder) GetBySerialNumber(ctx, sn any) *gomo
 }
 
 // GetGeoStats mocks base method.
-func (m *MockDeviceRepository) GetGeoStats(ctx context.Context, groupIDs []string, visibleGroups []uuid.UUID) (*GeoStats, error) {
+func (m *MockDeviceRepository) GetGeoStats(ctx context.Context, filter GeoStatsFilter) (*GeoStats, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetGeoStats", ctx, groupIDs, visibleGroups)
+	ret := m.ctrl.Call(m, "GetGeoStats", ctx, filter)
 	ret0, _ := ret[0].(*GeoStats)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // GetGeoStats indicates an expected call of GetGeoStats.
-func (mr *MockDeviceRepositoryMockRecorder) GetGeoStats(ctx, groupIDs, visibleGroups any) *gomock.Call {
+func (mr *MockDeviceRepositoryMockRecorder) GetGeoStats(ctx, filter any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetGeoStats", reflect.TypeOf((*MockDeviceRepository)(nil).GetGeoStats), ctx, groupIDs, visibleGroups)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetGeoStats", reflect.TypeOf((*MockDeviceRepository)(nil).GetGeoStats), ctx, filter)
 }
 
 // List mocks base method.

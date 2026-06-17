@@ -77,17 +77,31 @@ type RecycleBinFilter struct {
 }
 
 // GeoDeviceFilter specifies criteria for listing devices with geo data.
+// GroupIDs 仅包含「真实」分组（service 层在调用 repository 前已剥离 DefaultLevel2GroupID）。
+// IncludeUngrouped=true 表示调用方选中了「未分组设备」伪节点，repository 用
+// ungroupedDevicesWhere 子查询独立合并到 group 过滤里，口径与设备列表/拓扑徽标一致。
 type GeoDeviceFilter struct {
-	GroupIDs []string
-	Status   []model.DeviceStatus
-	Keyword  string
-	Bounds   *GeoBounds
-	Page     int
-	PageSize int
+	GroupIDs         []string
+	IncludeUngrouped bool
+	Status           []model.DeviceStatus
+	Keyword          string
+	Bounds           *GeoBounds
+	Page             int
+	PageSize         int
 	// VisibleGroups 是 #64 设备组数据权限的三态可见分组（nil=超管不过滤 / []=fail-closed 空集 /
 	// [g...]=仅这些组下设备）。GIS 地图读链路按调用者可见分组 fail-closed 收口，过滤经
 	// authz.ApplyDeviceVisibilityFilter 在 d.id 上做相关子查询（避免与已有 LEFT JOIN 行翻倍）。
 	VisibleGroups []uuid.UUID
+}
+
+// GeoStatsFilter specifies criteria for /devices/geo/stats.
+// 与 GeoDeviceFilter 拆分是为了让 stats 也能接受 Status 过滤（handler 入参对齐 ListGeo），
+// 同时与 list 接口共用 splitGeoGroupIDs 归一化（service 层填好 GroupIDs/IncludeUngrouped）。
+type GeoStatsFilter struct {
+	GroupIDs         []string
+	IncludeUngrouped bool
+	Status           []model.DeviceStatus
+	VisibleGroups    []uuid.UUID
 }
 
 // GeoBounds defines a geographic bounding box.
@@ -147,8 +161,8 @@ type DeviceReader interface {
 	// ListGeo returns devices with geographic coordinates for map display.
 	ListGeo(ctx context.Context, filter GeoDeviceFilter) ([]GeoDevice, int64, error)
 	// GetGeoStats returns device statistics for map display.
-	// visibleGroups 为 #64 设备组数据权限的三态可见分组（nil 超管 / [] fail-closed / [g...] 限定）。
-	GetGeoStats(ctx context.Context, groupIDs []string, visibleGroups []uuid.UUID) (*GeoStats, error)
+	// filter.VisibleGroups 为 #64 设备组数据权限的三态可见分组（nil 超管 / [] fail-closed / [g...] 限定）。
+	GetGeoStats(ctx context.Context, filter GeoStatsFilter) (*GeoStats, error)
 	// SearchDevices searches devices by keyword for map display.
 	// visibleGroups 为 #64 设备组数据权限的三态可见分组（nil 超管 / [] fail-closed / [g...] 限定）。
 	SearchDevices(ctx context.Context, keyword string, limit int, visibleGroups []uuid.UUID) ([]GeoDevice, error)
@@ -1057,6 +1071,45 @@ func scanGeoDeviceRow(row scannable) (GeoDevice, error) {
 	return d, nil
 }
 
+// applyGeoGroupFilter 给 GIS Geo 查询（list/stats/center）拼上「真实分组 IN ∨ 未分组 NOT EXISTS」语义。
+// realIDs 与 includeUngrouped 由 service.splitGeoGroupIDs 归一化后传入，体口与设备列表一致
+// （参见 device_info_pg_repository.go ungroupedDevicesWhere），避免 Geo 链路对 DefaultLevel2GroupID
+// 简单 IN 导致「未分组」节点计数归 0 的口径分叉。
+func applyGeoGroupFilter(builder sq.SelectBuilder, realIDs []string, includeUngrouped bool) sq.SelectBuilder {
+	switch {
+	case len(realIDs) > 0 && includeUngrouped:
+		return builder.Where(sq.Or{
+			sq.Eq{"dg.id": realIDs},
+			sq.Expr(ungroupedDevicesWhere),
+		})
+	case len(realIDs) > 0:
+		return builder.Where(sq.Eq{"dg.id": realIDs})
+	case includeUngrouped:
+		return builder.Where(sq.Expr(ungroupedDevicesWhere))
+	default:
+		return builder
+	}
+}
+
+// applyGeoStatusFilter 给 GIS Geo 查询拼上 status OR 条件（lifecycle_state + is_online 翻译）。
+// ListGeo 与 GetGeoStats 共享，避免两处表达式拼装不一致。
+func applyGeoStatusFilter(builder sq.SelectBuilder, statuses []model.DeviceStatus) sq.SelectBuilder {
+	if len(statuses) == 0 {
+		return builder
+	}
+	var orClauses sq.Or
+	for _, s := range statuses {
+		lifecycle, isOnline := DeriveLifecycleFromStatus(s)
+		clause := sq.Eq{"d.lifecycle_state": lifecycle}
+		if s == model.DeviceActive || s == model.DeviceOffline {
+			orClauses = append(orClauses, sq.And{clause, sq.Eq{"d.is_online": isOnline}})
+		} else {
+			orClauses = append(orClauses, clause)
+		}
+	}
+	return builder.Where(orClauses)
+}
+
 // ListGeo returns devices with geographic coordinates for map display.
 func (r *PgDeviceRepository) ListGeo(ctx context.Context, filter GeoDeviceFilter) ([]GeoDevice, int64, error) {
 	// T-0162: SELECT 改用 lifecycle_state + is_online，scan 后派生 Status 给老
@@ -1075,24 +1128,9 @@ func (r *PgDeviceRepository) ListGeo(ctx context.Context, filter GeoDeviceFilter
 		Where(sq.NotEq{"d.longitude": nil})
 
 	// Apply filters
-	if len(filter.GroupIDs) > 0 {
-		builder = builder.Where(sq.Eq{"dg.id": filter.GroupIDs})
-	}
-	// T-0162: filter.Status 翻译到 lifecycle + is_online。注意 GeoDeviceFilter.Status
-	// 是 []DeviceStatus 多选；按状态分组 OR 拼。语义对齐前端 GeoStats handler 的三档分类。
-	if len(filter.Status) > 0 {
-		var orClauses sq.Or
-		for _, s := range filter.Status {
-			lifecycle, isOnline := DeriveLifecycleFromStatus(s)
-			clause := sq.Eq{"d.lifecycle_state": lifecycle}
-			if s == model.DeviceActive || s == model.DeviceOffline {
-				orClauses = append(orClauses, sq.And{clause, sq.Eq{"d.is_online": isOnline}})
-			} else {
-				orClauses = append(orClauses, clause)
-			}
-		}
-		builder = builder.Where(orClauses)
-	}
+	builder = applyGeoGroupFilter(builder, filter.GroupIDs, filter.IncludeUngrouped)
+	// T-0162: filter.Status 翻译到 lifecycle + is_online（与 GetGeoStats 共享 applyGeoStatusFilter）。
+	builder = applyGeoStatusFilter(builder, filter.Status)
 	if filter.Keyword != "" {
 		// GIS 地图搜索字段（6 个）：SN / 名称 / IP / MAC / PCI / 设备名称
 		// 注意：d.ip_address 是 INET 类型，需要用 host() 转为 TEXT 后才能 ILIKE
@@ -1122,23 +1160,9 @@ func (r *PgDeviceRepository) ListGeo(ctx context.Context, filter GeoDeviceFilter
 		Where(sq.NotEq{"d.latitude": nil}).
 		Where(sq.NotEq{"d.longitude": nil})
 
-	if len(filter.GroupIDs) > 0 {
-		countBuilder = countBuilder.Where(sq.Eq{"dg.id": filter.GroupIDs})
-	}
+	countBuilder = applyGeoGroupFilter(countBuilder, filter.GroupIDs, filter.IncludeUngrouped)
 	// T-0162: countBuilder 同样翻译 filter.Status
-	if len(filter.Status) > 0 {
-		var orClauses sq.Or
-		for _, s := range filter.Status {
-			lifecycle, isOnline := DeriveLifecycleFromStatus(s)
-			clause := sq.Eq{"d.lifecycle_state": lifecycle}
-			if s == model.DeviceActive || s == model.DeviceOffline {
-				orClauses = append(orClauses, sq.And{clause, sq.Eq{"d.is_online": isOnline}})
-			} else {
-				orClauses = append(orClauses, clause)
-			}
-		}
-		countBuilder = countBuilder.Where(orClauses)
-	}
+	countBuilder = applyGeoStatusFilter(countBuilder, filter.Status)
 	if filter.Keyword != "" {
 		// GIS 地图搜索字段（6 个）：SN / 名称 / IP / MAC / PCI / 设备名称
 		// 注意：d.ip_address 是 INET 类型，需要用 host() 转为 TEXT 后才能 ILIKE
@@ -1201,8 +1225,11 @@ func (r *PgDeviceRepository) ListGeo(ctx context.Context, filter GeoDeviceFilter
 }
 
 // GetGeoStats returns device statistics for map display.
-// visibleGroups 是 #64 设备组数据权限的三态可见分组（nil 超管 / [] fail-closed / [g...] 限定）。
-func (r *PgDeviceRepository) GetGeoStats(ctx context.Context, groupIDs []string, visibleGroups []uuid.UUID) (*GeoStats, error) {
+// filter.VisibleGroups 是 #64 设备组数据权限的三态可见分组（nil 超管 / [] fail-closed / [g...] 限定）。
+// filter.GroupIDs/IncludeUngrouped 由 service.splitGeoGroupIDs 归一化后传入，使 stats 与 ListGeo
+// 在未分组节点选中场景下口径一致。filter.Status 接受三档筛选（onlineActive/onlineInactive/
+// offline）翻译后的 model.DeviceStatus 列表，让顶部统计带随状态筛选变化与点位保持一致。
+func (r *PgDeviceRepository) GetGeoStats(ctx context.Context, filter GeoStatsFilter) (*GeoStats, error) {
 	// Build base condition for all queries
 	baseCondition := sq.And{
 		sq.NotEq{"d.latitude": nil},
@@ -1221,11 +1248,10 @@ func (r *PgDeviceRepository) GetGeoStats(ctx context.Context, groupIDs []string,
 		Where(baseCondition).
 		GroupBy("d.lifecycle_state", "d.is_online")
 
-	if len(groupIDs) > 0 {
-		statusBuilder = statusBuilder.Where(sq.Eq{"dg.id": groupIDs})
-	}
+	statusBuilder = applyGeoGroupFilter(statusBuilder, filter.GroupIDs, filter.IncludeUngrouped)
+	statusBuilder = applyGeoStatusFilter(statusBuilder, filter.Status)
 	// #64 设备组数据权限：状态统计按可见分组三态收口（子查询走 d.id 避免 LEFT JOIN 行翻倍）。
-	statusBuilder = authz.ApplyDeviceVisibilityFilter(statusBuilder, "d.id", visibleGroups)
+	statusBuilder = authz.ApplyDeviceVisibilityFilter(statusBuilder, "d.id", filter.VisibleGroups)
 
 	query, args, _ := statusBuilder.ToSql()
 	rows, err := r.pool.Query(ctx, query, args...)
@@ -1260,11 +1286,11 @@ func (r *PgDeviceRepository) GetGeoStats(ctx context.Context, groupIDs []string,
 		LeftJoin("device_groups dg ON dgm.group_id = dg.id").
 		Where(baseCondition)
 
-	if len(groupIDs) > 0 {
-		centerBuilder = centerBuilder.Where(sq.Eq{"dg.id": groupIDs})
-	}
+	centerBuilder = applyGeoGroupFilter(centerBuilder, filter.GroupIDs, filter.IncludeUngrouped)
+	// #490: center 只按 group 收口，不随 status 变化——避免用户切换在线/离线档时
+	// 地图中心漂移（center 语义是「当前组下设备的几何中心」，是定位锚点而非筛选反馈）。
 	// #64 设备组数据权限：中心点计算同口径按可见分组收口。
-	centerBuilder = authz.ApplyDeviceVisibilityFilter(centerBuilder, "d.id", visibleGroups)
+	centerBuilder = authz.ApplyDeviceVisibilityFilter(centerBuilder, "d.id", filter.VisibleGroups)
 
 	centerQuery, centerArgs, _ := centerBuilder.ToSql()
 	var avgLat, avgLng *float64
