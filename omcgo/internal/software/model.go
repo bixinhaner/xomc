@@ -136,11 +136,14 @@ const (
 
 // FirmwareVersion represents a firmware image stored in MinIO.
 type FirmwareVersion struct {
-	ID            uuid.UUID `json:"id"`
-	ProductClass  string    `json:"product_class"`
-	Version       string    `json:"version"`
-	FileName      string    `json:"file_name"`
-	FileSize      int64     `json:"file_size"`
+	ID uuid.UUID `json:"id"`
+	// ProductID #492：固件所属产品（products.id）。上传选产品名 → 存此列，作为产品归属权威；
+	// 历史行为 nil。前端按 product_id 关联产品管理目录展示/选择产品名。
+	ProductID     *uuid.UUID `json:"product_id,omitempty"`
+	ProductClass  string     `json:"product_class"`
+	Version       string     `json:"version"`
+	FileName      string     `json:"file_name"`
+	FileSize      int64      `json:"file_size"`
 	FileType      FileType  `json:"file_type"`
 	MinIOPath     string    `json:"minio_path"`
 	CompatibleOUI []string  `json:"compatible_oui"`
@@ -234,8 +237,9 @@ type UpgradeSubTaskWithTaskName struct {
 
 // FirmwareFilter specifies criteria for listing firmware versions.
 type FirmwareFilter struct {
-	ProductClass *string   `form:"product_class"`
-	FileType     *FileType `form:"file_type"`
+	ProductClass *string    `form:"product_class"`
+	ProductID    *uuid.UUID `form:"product_id"` // #492：按产品过滤固件（升级抽屉选产品名 → 传 product_id）
+	FileType     *FileType  `form:"file_type"`
 	model.ListRequest
 }
 

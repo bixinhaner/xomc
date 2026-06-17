@@ -143,6 +143,12 @@ func (h *Handler) UploadFirmware(c *gin.Context) {
 			fw.FileType = FileType(n)
 		}
 	}
+	// #492：上传按产品名（前端传 product_id）。产品归属以 product_id 为权威。
+	if pid := c.PostForm("product_id"); pid != "" {
+		if id, err := uuid.Parse(pid); err == nil {
+			fw.ProductID = &id
+		}
+	}
 
 	if fw.Version == "" {
 		commonerrors.AbortWithError(c, http.StatusBadRequest,
@@ -243,6 +249,7 @@ func (h *Handler) UpdateFirmware(c *gin.Context) {
 	}
 
 	var req struct {
+		ProductID    string `json:"product_id"`
 		ProductClass string `json:"product_class"`
 		Version      string `json:"version"`
 		Recommend    *bool  `json:"recommend"`
@@ -254,6 +261,12 @@ func (h *Handler) UpdateFirmware(c *gin.Context) {
 		return
 	}
 
+	// #492：允许改产品归属（产品名 → 前端传 product_id）。
+	if req.ProductID != "" {
+		if id, err := uuid.Parse(req.ProductID); err == nil {
+			fw.ProductID = &id
+		}
+	}
 	if req.ProductClass != "" {
 		fw.ProductClass = req.ProductClass
 	}

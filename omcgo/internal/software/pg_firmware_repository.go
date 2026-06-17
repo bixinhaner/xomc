@@ -19,7 +19,7 @@ import (
 )
 
 var firmwareColumns = []string{
-	"id", "product_class", "version", "file_name", "file_size",
+	"id", "product_id", "product_class", "version", "file_name", "file_size",
 	"file_type", "minio_path", "compatible_oui", "md5_val", "recommend",
 	"uploader", "manufacturer", "release_notes", "description", "status",
 	"created_at", "updated_at",
@@ -48,7 +48,7 @@ func scanFirmware(row pgx.Row) (*FirmwareVersion, error) {
 	var createdAt, updatedAt time.Time
 
 	err := row.Scan(
-		&fw.ID, &fw.ProductClass, &fw.Version,
+		&fw.ID, &fw.ProductID, &fw.ProductClass, &fw.Version,
 		&fw.FileName, &fw.FileSize, &fw.FileType, &fw.MinIOPath,
 		&ouiJSON, &md5Val, &recommend, &uploader,
 		&manufacturer, &fw.ReleaseNotes, &description, &fw.Status,
@@ -79,11 +79,11 @@ func (r *PgFirmwareRepository) Create(ctx context.Context, fw *FirmwareVersion) 
 	ouiJSON, _ := json.Marshal(fw.CompatibleOUI)
 
 	query, args, err := storage.Psql.Insert("firmware_versions").
-		Columns("product_class", "version", "file_name", "file_size",
+		Columns("product_id", "product_class", "version", "file_name", "file_size",
 			"file_type", "minio_path", "compatible_oui", "md5_val", "recommend",
 			"uploader", "manufacturer", "release_notes", "description", "status",
 			"sha256_val", "signature", "signature_alg", "public_key_id").
-		Values(fw.ProductClass, fw.Version, fw.FileName, fw.FileSize,
+		Values(fw.ProductID, fw.ProductClass, fw.Version, fw.FileName, fw.FileSize,
 			fw.FileType, fw.MinIOPath, ouiJSON, fw.MD5Val, fw.Recommend,
 			fw.Uploader, fw.Manufacturer, fw.ReleaseNotes, fw.Description, fw.Status,
 			// 空字符串落 NULL：保持"无可用 SHA-256 / 无签名"语义清晰，
@@ -136,6 +136,10 @@ func (r *PgFirmwareRepository) List(ctx context.Context, filter FirmwareFilter) 
 	base := storage.Psql.Select(firmwareColumns...).From("firmware_versions")
 	countBase := storage.Psql.Select("COUNT(*)").From("firmware_versions")
 
+	if filter.ProductID != nil {
+		base = base.Where(sq.Eq{"product_id": *filter.ProductID})
+		countBase = countBase.Where(sq.Eq{"product_id": *filter.ProductID})
+	}
 	if filter.ProductClass != nil {
 		base = base.Where(sq.Eq{"product_class": *filter.ProductClass})
 		countBase = countBase.Where(sq.Eq{"product_class": *filter.ProductClass})
@@ -207,6 +211,7 @@ func (r *PgFirmwareRepository) List(ctx context.Context, filter FirmwareFilter) 
 
 func (r *PgFirmwareRepository) Update(ctx context.Context, fw *FirmwareVersion) error {
 	builder := storage.Psql.Update("firmware_versions").
+		Set("product_id", fw.ProductID).
 		Set("product_class", fw.ProductClass).
 		Set("version", fw.Version).
 		Set("recommend", fw.Recommend).
@@ -258,7 +263,7 @@ func scanFirmwareRow(rows pgx.Rows) (*FirmwareVersion, error) {
 	var createdAt, updatedAt time.Time
 
 	err := rows.Scan(
-		&fw.ID, &fw.ProductClass, &fw.Version,
+		&fw.ID, &fw.ProductID, &fw.ProductClass, &fw.Version,
 		&fw.FileName, &fw.FileSize, &fw.FileType, &fw.MinIOPath,
 		&ouiJSON, &md5Val, &recommend, &uploader,
 		&manufacturer, &fw.ReleaseNotes, &description, &fw.Status,
