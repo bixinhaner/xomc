@@ -225,21 +225,22 @@ export default function GISMapView() {
       // 中缩放级别：显示站点级数据
       return {
         aggregate: 'site',
-        pageSize: 2000,
+        pageSize: 1000,
         description: intl.formatMessage({ id: 'gis.strategy.site' }),
       };
     } else if (zoom < 15) {
       // 高缩放级别：显示详细设备，启用聚合
       return {
         aggregate: 'device',
-        pageSize: 5000,
+        pageSize: 2000,
         description: intl.formatMessage({ id: 'gis.strategy.deviceAggregated' }),
       };
     } else {
-      // 超高缩放级别：显示所有设备，禁用聚合
+      // 超高缩放级别：显示详细设备，后端按 bounds + 前端 VIEWPORT_CULLING 收收收口
+      // 不再用 5000/10000 这种极端值，避免拖动时单发请求后端几秒
       return {
         aggregate: 'none',
-        pageSize: 10000,
+        pageSize: 2000,
         description: intl.formatMessage({ id: 'gis.strategy.deviceDetailed' }),
       };
     }
@@ -418,6 +419,51 @@ export default function GISMapView() {
     mapConfigData.status,
     deviceItems,
   ]);
+
+  // 首屏兜底：若 4 层中心点策略落点（通常是 metadata.center）与实际设备分布不在同一区域，
+  // 用户首屏会看不到任何设备点。这里在地图就绪、设备数据到货后做一次性 fit：
+  // - 若当前视口已经包含至少一个设备 → 标记完成，不动；
+  // - 若一个都没有 → flyTo 到设备 bounds 中心。
+  // 仅触发一次（hasAutoFittedRef 守卫），后续用户拖动/缩放不再被覆盖。
+  const hasAutoFittedRef = useRef(false);
+  useEffect(() => {
+    if (hasAutoFittedRef.current) return;
+    if (!mapDevices.length) return;
+
+    const map = mapRef.current;
+    if (!map) return;
+
+    const vp = map.getViewport();
+    if (!vp?.bounds) return;
+
+    const { bounds } = vp;
+    const hasAnyInView = mapDevices.some(
+      (d) =>
+        d.lng >= bounds.minLng &&
+        d.lng <= bounds.maxLng &&
+        d.lat >= bounds.minLat &&
+        d.lat <= bounds.maxLat,
+    );
+
+    if (hasAnyInView) {
+      hasAutoFittedRef.current = true;
+      return;
+    }
+
+    const fitTarget = calculateCenterFromDevices(
+      mapDevices.map((d) => ({ longitude: d.lng, latitude: d.lat })),
+    );
+    console.info(
+      '[GISMapView] Auto-fit map to device bounds (initial viewport empty)',
+      fitTarget.center,
+      'zoom:',
+      fitTarget.zoom,
+    );
+    map.flyTo(fitTarget.center[0], fitTarget.center[1], fitTarget.zoom, {
+      progressive: false,
+    });
+    hasAutoFittedRef.current = true;
+  }, [mapDevices]);
 
   // ========== 搜索处理 ==========
 
@@ -1094,13 +1140,16 @@ export default function GISMapView() {
             // setSearchResultDevice(null);
           }}
           onViewportChange={(viewport) => {
-            // 视口变化防抖处理（300ms）
+            // 视口变化防抖（默认 300ms，可通过 MAP_CONFIG.viewportDebounce 调整）
+            // 需要这里防抖是因为 useOLMap 内部的 moveend 只做了 100ms 偏轻的合并，
+            // 拖动过程中仍会频繁调出；再叠一层防抖避免拖动期间堆 setState。
             if (viewportChangeTimerRef.current) {
               clearTimeout(viewportChangeTimerRef.current);
             }
 
             viewportChangeTimerRef.current = setTimeout(() => {
               // 更新视口状态，触发设备数据重新请求
+              // 旧请求会被 React Query 自动 abort（queryFn 已打通 signal）
               setMapViewport(viewport);
 
               // 预加载周边区域（扩展 20%）
@@ -1126,7 +1175,7 @@ export default function GISMapView() {
                 // 3. 缓存结果供后续视口变化时使用
               }
               */
-            }, 300);
+            }, MAP_CONFIG.viewportDebounce);
           }}
         />
 
