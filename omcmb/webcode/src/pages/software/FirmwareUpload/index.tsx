@@ -378,7 +378,7 @@ export default function FirmwareUpload({ embedded = false }: FirmwareUploadProps
       width: 180,
       render: (val: unknown) => val ? String(val) : '-',
     },
-  ], [t, handleOpenImportDrawer, handleToggleRecommend]);
+  ], [t, handleOpenImportDrawer, handleToggleRecommend, productNameById]);
 
   // 获取当前文件类型的中文名称
   const fileTypeName = useMemo(() => {

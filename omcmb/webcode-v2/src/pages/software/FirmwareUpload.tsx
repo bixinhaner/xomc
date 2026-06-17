@@ -40,8 +40,7 @@ import {
   useDownloadFirmware,
   useUploadFirmware,
 } from '@core/hooks/api/useSoftware'
-import { useProductClasses } from '@core/hooks/api/useDevices'
-import { collapseImageProductClasses } from '@core/utils/productClass'
+import { useProductList } from '@core/hooks/api/useProducts'
 import type { SoftwareVersion } from '@core/mock/data/software'
 
 import { VERSION_STATUS } from './_shared'
@@ -74,19 +73,26 @@ export default function FirmwareUpload() {
   const [page, setPage] = useState(1)
   const [pageSize] = useState(20)
   const [search, setSearch] = useState('')
-  const [deviceType, setDeviceType] = useState('')
+  const [filterProductId, setFilterProductId] = useState('')
   const [showImport, setShowImport] = useState(false)
 
-  const { data: productClasses } = useProductClasses()
+  // #492：固件按产品名（产品中心目录）。products 用于过滤/上传选择 + product_id→产品名展示。
+  const { data: productsData } = useProductList()
+  const products = useMemo(() => productsData?.items ?? [], [productsData])
+  const productNameById = useMemo(() => {
+    const map = new Map<string, string>()
+    products.forEach((p) => map.set(p.id, p.name))
+    return map
+  }, [products])
 
   const params = useMemo(
     () => ({
       page,
       pageSize,
       fileType: FILE_TYPE_PARAM[fileType],
-      ...(deviceType ? { deviceType } : {}),
+      ...(filterProductId ? { productId: filterProductId } : {}),
     }),
-    [page, pageSize, fileType, deviceType]
+    [page, pageSize, fileType, filterProductId]
   )
 
   const { data, isLoading, isError, error, isFetching, refetch } = useSoftwareVersions(params)
@@ -150,20 +156,20 @@ export default function FirmwareUpload() {
           onChange={(e) => setSearch(e.target.value)}
         />
         <Select
-          value={deviceType || 'all'}
+          value={filterProductId || 'all'}
           onValueChange={(v) => {
-            setDeviceType(v === 'all' ? '' : v)
+            setFilterProductId(v === 'all' ? '' : v)
             setPage(1)
           }}
         >
           <SelectTrigger className="w-44">
-            <SelectValue placeholder="设备型号" />
+            <SelectValue placeholder="产品名称" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">全部型号</SelectItem>
-            {(productClasses ?? []).map((pc) => (
-              <SelectItem key={pc} value={pc}>
-                {pc}
+            <SelectItem value="all">全部产品</SelectItem>
+            {products.map((p) => (
+              <SelectItem key={p.id} value={p.id}>
+                {p.name}
               </SelectItem>
             ))}
           </SelectContent>
@@ -183,7 +189,7 @@ export default function FirmwareUpload() {
       {showImport ? (
         <FirmwareImportPanel
           fileType={fileType}
-          productClasses={productClasses ?? []}
+          products={products}
           onClose={() => setShowImport(false)}
           onSuccess={() => {
             setShowImport(false)
@@ -226,7 +232,7 @@ export default function FirmwareUpload() {
                     <TableCell className="max-w-[200px] truncate text-xs" title={v.fileName}>
                       {v.fileName || '—'}
                     </TableCell>
-                    <TableCell>{v.deviceType || '—'}</TableCell>
+                    <TableCell>{(v.productId && productNameById.get(v.productId)) || v.deviceType || '—'}</TableCell>
                     <TableCell>{v.vendor || v.manufacturer || '—'}</TableCell>
                     <TableCell>
                       <Badge variant={st.variant}>{st.label}</Badge>
@@ -297,28 +303,23 @@ export default function FirmwareUpload() {
 // 字段与 v1/v3 对齐：产品类型（可手填）、版本号（必填）、推荐、描述、文件。
 function FirmwareImportPanel({
   fileType,
-  productClasses,
+  products,
   onClose,
   onSuccess,
 }: {
   fileType: FileTypeTab
-  productClasses: string[]
+  products: { id: string; name: string; tech: string }[]
   onClose: () => void
   onSuccess: () => void
 }) {
   const upload = useUploadFirmware()
   const [file, setFile] = useState<File | null>(null)
   const [version, setVersion] = useState('')
-  const [productClass, setProductClass] = useState('')
+  // #492：固件所属产品 = 选产品名，提交 product_id。
+  const [productId, setProductId] = useState('')
   const [recommend, setRecommend] = useState(false)
   const [description, setDescription] = useState('')
   const [err, setErr] = useState('')
-
-  // qa-614 #369：IMAGE（升级镜像）做版本合一，同族载波变体 /SC /DC /CA 收敛为共同基础标识。
-  const productOptions = useMemo(
-    () => (fileType === 'upgrade' ? collapseImageProductClasses(productClasses) : productClasses),
-    [fileType, productClasses]
-  )
 
   const handleSubmit = () => {
     setErr('')
@@ -335,7 +336,7 @@ function FirmwareImportPanel({
         file,
         metadata: {
           version: version.trim(),
-          productClass: productClass.trim() || undefined,
+          productId: productId || undefined,
           releaseNotes: description,
           fileType: FILE_TYPE_PARAM[fileType],
           recommend,
@@ -364,20 +365,20 @@ function FirmwareImportPanel({
 
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <div className="space-y-1.5">
-            <Label htmlFor="fw-product-class">产品类型</Label>
-            {/* 可手填：input + datalist，BM 等无在线设备的产品类也能输入 */}
-            <Input
-              id="fw-product-class"
-              list="fw-v2-product-class-options"
-              value={productClass}
-              onChange={(e) => setProductClass(e.target.value)}
-              placeholder="选择或输入产品类型"
-            />
-            <datalist id="fw-v2-product-class-options">
-              {productOptions.map((pc) => (
-                <option key={pc} value={pc} />
-              ))}
-            </datalist>
+            <Label htmlFor="fw-product-name">产品名称</Label>
+            {/* #492：固件所属产品 = 选产品名（产品中心目录），提交 product_id。 */}
+            <Select value={productId || undefined} onValueChange={setProductId}>
+              <SelectTrigger id="fw-product-name">
+                <SelectValue placeholder="选择产品名称" />
+              </SelectTrigger>
+              <SelectContent>
+                {products.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           <div className="space-y-1.5">
