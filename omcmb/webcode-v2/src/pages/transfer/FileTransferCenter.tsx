@@ -468,7 +468,8 @@ function DeviceTable({
                 </TableCell>
                 <TableCell>
                   <span className="text-xs text-muted-foreground">
-                    {d.productType || '—'}
+                    {/* #492：优先展示产品英文名，解析不到回退裸 productClass。 */}
+                    {d.productName || d.productType || '—'}
                   </span>
                 </TableCell>
                 <TableCell>

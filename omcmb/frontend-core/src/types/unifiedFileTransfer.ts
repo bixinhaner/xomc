@@ -42,6 +42,9 @@ export interface UnifiedFileTransferTaskType {
   postTcEventCode?: string;
   permissionCode: string;
   platformScope: string[];
+  /** #492 适用产品：产品英文名列表（引用产品管理 product_name）。非空时设备匹配走产品目录精确匹配，
+   *  制式由所选产品派生；空则回退 platformScope。后端始终返回数组，老 mock 可缺省故标可选。 */
+  products?: string[];
   fileType: string;
   fileTypeLabel: string;
   fileTypeEditable: boolean;
@@ -108,6 +111,8 @@ export interface UnifiedFileTransferDeviceItem {
   deviceName: string;
   deviceSn: string;
   productType: string;
+  /** #492 设备所属产品英文名（productClass 经 ProductRegistry 解析）。候选/设备列表展示产品名取代裸 productClass；孤儿设备为空。 */
+  productName?: string;
   currentVersion: string;
   targetVersion: string;
   /** OUTPUT 文件类（备份 / 日志采集 / 配置恢复）的目标文件名，{task_id8}/{sn} 已渲染。
@@ -155,6 +160,8 @@ export interface CreateUnifiedFileTransferTypeInput {
   postTcEventCode?: string;
   enabled: boolean;
   platformScope: string[];
+  /** #492 适用产品（产品英文名列表）。模板编辑改为产品名多选后提交此字段；留空则沿用 platformScope。 */
+  products?: string[];
   fileType: string;
   fileTypeLabel: string;
   fileTypeEditable: boolean;

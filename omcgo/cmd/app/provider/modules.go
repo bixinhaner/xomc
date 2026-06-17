@@ -373,6 +373,14 @@ func initUFTEModule(c *Container) error {
 			}
 			return res.Product.Tech, true
 		})
+		// #492：模板 product_scope（适用产品名列表）非空时，设备候选按产品英文名精确匹配。
+		service.SetProductNameLookup(func(ctx context.Context, productClass string) (string, bool) {
+			res, err := c.ProductRegistry.MatchProductClass(ctx, productClass)
+			if err != nil || res == nil || res.Product == nil {
+				return "", false
+			}
+			return res.Product.Name, true
+		})
 	}
 	inserted, err := service.EnsureBuiltInTaskTypes(context.Background())
 	if err != nil {

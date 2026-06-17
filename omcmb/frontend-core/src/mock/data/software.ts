@@ -18,6 +18,8 @@ export interface SoftwareVersion {
   versionCode: string;
   fileName: string;
   deviceType: string;
+  /** #492 固件所属产品（products.id）。上传选产品名 → 存此；前端按 useProductList 映射展示产品名。历史固件为空。 */
+  productId?: string;
   vendor: string;
   releaseDate: string;
   status: VersionStatus;

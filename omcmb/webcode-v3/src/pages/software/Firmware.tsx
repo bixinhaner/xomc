@@ -24,8 +24,7 @@ import {
   useDownloadFirmware,
   useUpdateFirmware,
 } from '@core/hooks/api/useSoftware'
-import { useProductClasses } from '@core/hooks/api/useDevices'
-import { collapseImageProductClasses } from '@core/utils/productClass'
+import { useProductList } from '@core/hooks/api/useProducts'
 import type { SoftwareVersion } from '@core/mock/data/software'
 
 import { NEON, StatCard, Drawer, Syncing, ErrorBlock, EmptyBlock, Pager, formatFileSize } from './_shared'
@@ -49,7 +48,6 @@ const FILE_TYPE_LABEL: Record<FileTypeTab, string> = {
   fpga: 'FPGA',
 }
 
-const FALLBACK_PRODUCT_CLASSES = ['PM-B4860', 'QAFA', 'QAFB', 'FAP/BU1810']
 
 export default function Firmware() {
   const [fileType, setFileType] = useState<FileTypeTab>('upgrade')
@@ -66,6 +64,13 @@ export default function Firmware() {
 
   const { data, isLoading, isError, error, isFetching, refetch } = useSoftwareVersions(params)
   const allItems = data?.items ?? []
+  // #492：product_id → 产品名，固件列表展示产品名（回退裸 productClass）。
+  const { data: productsData } = useProductList()
+  const productNameById = useMemo(() => {
+    const map = new Map<string, string>()
+    ;(productsData?.items ?? []).forEach((p) => map.set(p.id, p.name))
+    return map
+  }, [productsData])
   const total = data?.total ?? 0
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
@@ -176,7 +181,7 @@ export default function Firmware() {
                 )}
                 <span className="truncate font-mono text-xs text-cyan-100">{v.versionCode}</span>
               </div>
-              <span className="truncate font-mono text-[11px] text-cyan-300/70">{v.deviceType || '—'}</span>
+              <span className="truncate font-mono text-[11px] text-cyan-300/70">{(v.productId && productNameById.get(v.productId)) || v.deviceType || '—'}</span>
               <span className="font-mono text-[11px] text-cyan-100/80">{formatFileSize(v.fileSize)}</span>
               <span className="font-mono text-[10px] text-cyan-300/60">{v.releaseDate ? formatTime(v.releaseDate) : '—'}</span>
               <div className="flex items-center justify-end gap-1.5">
@@ -267,19 +272,16 @@ function FirmwareDrawer({
   fileType: FileTypeTab
   onClose: () => void
 }) {
-  const { data: productClassesData } = useProductClasses()
-  const productOptions = useMemo(() => {
-    const raw = productClassesData && productClassesData.length > 0 ? productClassesData : FALLBACK_PRODUCT_CLASSES
-    // qa-614 #369：IMAGE（升级镜像）版本合一，同族载波变体 /SC /DC /CA 收敛为共同基础标识。
-    return fileType === 'upgrade' ? collapseImageProductClasses(raw) : raw
-  }, [productClassesData, fileType])
+  // #492：固件所属产品 = 选产品名（产品中心目录），提交 product_id。
+  const { data: productsData } = useProductList()
+  const products = useMemo(() => productsData?.items ?? [], [productsData])
 
   const upload = useUploadFirmware()
   const update = useUpdateFirmware()
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [version, setVersion] = useState(file?.versionCode ?? '')
-  const [productClass, setProductClass] = useState(file?.deviceType ?? productOptions[0] ?? '')
+  const [productId, setProductId] = useState(file?.productId ?? '')
   const [recommend, setRecommend] = useState(Boolean(file?.recommend))
   const [description, setDescription] = useState(file?.description ?? file?.releaseNotes ?? '')
   const [err, setErr] = useState('')
@@ -297,7 +299,7 @@ function FirmwareDrawer({
       update.mutate(
         {
           id: file.id,
-          metadata: { productClass, version: version.trim(), recommend, description },
+          metadata: { productId: productId || undefined, version: version.trim(), recommend, description },
         },
         { onSuccess: onClose, onError: (e) => setErr(e instanceof Error ? e.message : '修改失败') }
       )
@@ -312,7 +314,7 @@ function FirmwareDrawer({
         file: selectedFile,
         metadata: {
           version: version.trim(),
-          productClass,
+          productId: productId || undefined,
           releaseNotes: description,
           fileType: FILE_TYPE_PARAM[fileType],
           recommend,
@@ -351,20 +353,20 @@ function FirmwareDrawer({
         )}
 
         <label className="block">
-          <span className="mb-1 block font-mono text-[10px] uppercase tracking-[0.18em] text-cyan-300/55">制式 · PRODUCT CLASS</span>
-          {/* qa-614 #379：可手填的 combobox（input+datalist），BM 等无在线设备的产品类也能输入。 */}
-          <input
+          <span className="mb-1 block font-mono text-[10px] uppercase tracking-[0.18em] text-cyan-300/55">产品名称 · PRODUCT</span>
+          {/* #492：固件所属产品 = 选产品名（产品中心目录），提交 product_id。 */}
+          <select
             className="neon-input w-full"
-            list="fw-product-class-options"
-            value={productClass}
-            onChange={(e) => setProductClass(e.target.value)}
-            placeholder="选择或输入产品类型"
-          />
-          <datalist id="fw-product-class-options">
-            {productOptions.map((o) => (
-              <option key={o} value={o} />
+            value={productId}
+            onChange={(e) => setProductId(e.target.value)}
+          >
+            <option value="">选择产品名称</option>
+            {products.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
             ))}
-          </datalist>
+          </select>
         </label>
 
         <label className="block">

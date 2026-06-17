@@ -32,6 +32,10 @@ type TaskType struct {
 	PostTCEventCode        string             `json:"postTcEventCode,omitempty"`
 	PermissionCode         string             `json:"permissionCode"`
 	PlatformScope          []string           `json:"platformScope"`
+	// Products 是「适用产品」= 产品英文名列表（引用 products.product_name，#492）。
+	// 非空时设备候选匹配走产品目录精确匹配（deviceMatchesTaskType），制式由所选产品 tech 派生；
+	// 空则回退旧 PlatformScope 子串 + techHint 关键字匹配（灰度兼容）。
+	Products               []string           `json:"products"`
 	FileType               string             `json:"fileType"`
 	FileTypeLabel          string             `json:"fileTypeLabel"`
 	FileTypeEditable       bool               `json:"fileTypeEditable"`
@@ -93,6 +97,9 @@ type DeviceItem struct {
 	DeviceName      string `json:"deviceName"`
 	DeviceSN        string `json:"deviceSN"`
 	ProductType     string `json:"productType"`
+	// ProductName 是设备 productClass 经 ProductRegistry 解析出的产品英文名（#492）。
+	// 前端候选/设备列表展示产品名（取代裸 productClass）；解析不到（孤儿/未注册）时为空。
+	ProductName     string `json:"productName,omitempty"`
 	CurrentVersion  string `json:"currentVersion"`
 	TargetVersion   string `json:"targetVersion"`
 	// TargetFile 是"OUTPUT 文件类"（备份 / 日志采集 / 配置恢复，softwareTaskType=LogCollect）
@@ -148,6 +155,9 @@ type TaskTypeWriteRequest struct {
 	PostTCEventCode        string             `json:"postTcEventCode"`
 	Enabled                bool               `json:"enabled"`
 	PlatformScope          []string           `json:"platformScope"`
+	// Products「适用产品」= 产品英文名列表（#492）。前端模板编辑改为产品名多选后提交此字段；
+	// 留空则沿用 PlatformScope 旧口径。
+	Products               []string           `json:"products"`
 	FileType               string             `json:"fileType" binding:"required"`
 	FileTypeLabel          string             `json:"fileTypeLabel" binding:"required"`
 	FileTypeEditable       bool               `json:"fileTypeEditable"`
@@ -185,6 +195,9 @@ type DeviceCandidateFilter struct {
 	Category    string `form:"category"`
 	TypeCode    string `form:"typeCode"`
 	ProductType string `form:"productType"`
+	// ProductName #492：按产品英文名收窄候选（设备 productClass→ProductRegistry→name == 该值）。
+	// 前端「产品类型」下拉改为产品名后传此参数；与 ProductType(productClass) 二选一，优先 ProductName。
+	ProductName string `form:"productName"`
 	Keyword     string `form:"keyword"`
 	Page        int    `form:"page"`
 	PageSize    int    `form:"page_size"`
@@ -764,6 +777,7 @@ func materializeTaskTypes(stored []TaskType) []TaskType {
 	for _, item := range stored {
 		item.StepChain = normalizeStringSlice(item.StepChain)
 		item.PlatformScope = normalizeStringSlice(item.PlatformScope)
+		item.Products = normalizeStringSlice(item.Products)
 		item.FirmwareFileType = normalizeTaskTypeFirmwareFileType(item.RPCType, item.FirmwareFileType, item.FileType)
 		if base, ok := defaultByCode[item.TypeCode]; ok {
 			item.BuiltIn = item.BuiltIn || base.BuiltIn

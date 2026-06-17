@@ -84,6 +84,8 @@ export default function TransferTemplateManagementPage() {
         postTcEventCode: t.postTcEventCode,
         enabled: !t.enabled,
         platformScope: t.platformScope,
+        // #492：必须回传 products，否则启停切换会把 product_scope 冲空。
+        products: t.products,
         fileType: t.fileType,
         fileTypeLabel: t.fileTypeLabel,
         fileTypeEditable: t.fileTypeEditable,

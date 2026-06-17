@@ -54,7 +54,7 @@ export function useUnifiedFileTransferDevices(
 }
 
 export function useUnifiedFileTransferDeviceCandidates(
-  params: { keyword?: string; category?: string; typeCode?: string; productType?: string } & PageRequest,
+  params: { keyword?: string; category?: string; typeCode?: string; productType?: string; productName?: string } & PageRequest,
 ) {
   return useQuery({
     queryKey: ['ufte', 'device-candidates', params],

@@ -205,7 +205,17 @@ func (s *SoftwareService) UploadFirmware(ctx context.Context, fw *FirmwareVersio
 	case FileTypeFPGA:
 		category = "fpga"
 	}
-	objectPath := storage.FirmwarePath(category, fw.ProductClass, fw.Version, fw.FileName)
+	// #492：固件对象路径段以 product_id 为准。产品名中心化后上传只传 product_id、
+	// product_class 可能为空，空段会让 MinIO 对象名出现 "//" 被拒
+	// （"object name contains unsupported characters"）。product_id 是 uuid，路径安全。
+	productSeg := fw.ProductClass
+	if fw.ProductID != nil {
+		productSeg = fw.ProductID.String()
+	}
+	if productSeg == "" {
+		productSeg = "unknown"
+	}
+	objectPath := storage.FirmwarePath(category, productSeg, fw.Version, fw.FileName)
 
 	// 单次串流同时算 MD5（向后兼容旧列）与 SHA-256（issue #8 新完整性根）。
 	// io.MultiWriter 让 TeeReader 把字节同时喂给两个 hasher，避免二次读文件。
