@@ -59,7 +59,6 @@ import { activationStatusOf } from '@core/utils/activationStatus'
 import type { Device, DeviceFilter } from '@core/types/device'
 import type { PageRequest } from '@core/types/pagination'
 import type { AlarmSeverity } from '@core/types/common'
-import { activationStatusOf } from '@core/utils/activationStatus'
 
 // ============================================================
 // 设备管理 — 主列表 + 概览统计 + 多维筛选 + 批量操作
