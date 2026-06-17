@@ -606,8 +606,14 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	// T-0164-P5 / G5 + T-0164-P8 / G8：PM 自然桶聚合 cron + asyncjob 框架接入。
 	// 复用上文已构造的 pmKPIRouter（KPI 反算依赖路由）；新开 4 个 cron runner +
 	// sweeper + 触发器（hourly @:05 / daily 00:05 / weekly 周一 00:10 / monthly 1日 00:15）。
-	// T-0192：日/周/月桶按业务时区切本地零点，loc 同时穿入窗口计算与 cron 调度。
-	pmLoc := resolvePMTimezone(cfg.PM.Timezone, logger)
+	// T-0192：日/周/月桶按业务时区切本地零点。
+	// #458：业务时区改读 #456 统一源 sys_configs（category='basic'/key='timezoneCode'），
+	// 不再读 YAML PM.Timezone（空/非法 Provider 内回落 UTC）。tzManager 统一管理
+	// 窗口计算与 cron 调度的时区；后台轮询 sys_configs（默认 30s）感知管理员改时区，
+	// 变更即重排调度、无需重启 worker。不走 sys.config.saved 事件：该 subject 属 NATS SYS
+	// WorkQueue 流，其唯一 consumer 已被 ACS transfercfg 占用，worker 不能在同 filter
+	// subject 再开第二个 consumer（必报 "filtered consumer not unique on workqueue stream"）。
+	pmTz := newTzManager(context.Background(), w.PgPool, logger)
 	// KPI 导出文件落地桶：复用报表桶（设计 §5.6）；缺省回退 "reports"。
 	exportBucket := cfg.MinIO.Buckets.Reports
 	if exportBucket == "" {
@@ -623,12 +629,15 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 		pipeCancel()
 		return nil
 	})
-	startPMAggregatorPipeline(pipeCtx, w, pmKPIRouter, pmLoc, exportBucket)
+	// #458：cron 随 pipeCtx 取消统一停；后台轮询 sys_configs 感知改时区后即时重排（不重启）。
+	pmTz.shutdownOnCtx(pipeCtx)
+	pmTz.startReloadPoller(pipeCtx, defaultReloadPollInterval)
+	startPMAggregatorPipeline(pipeCtx, w, pmKPIRouter, pmTz, exportBucket)
 
 	// T-0164-P7 / G7：自定义聚合任务（oneshot + continuous）。
 	// 复用同一 kpiRouter；4 个 worker 抢 pm_tasks 中 task_subtype='adhoc_aggregation' 的 pending 行；
 	// continuous scheduler 单 goroutine 每分钟扫 scheduled 任务切回 pending。
-	startPMAdhocPipeline(pipeCtx, w, pmKPIRouter, cfg, pmLoc)
+	startPMAdhocPipeline(pipeCtx, w, pmKPIRouter, cfg, pmTz)
 
 	// M3: 周期备份调度器 + 任务 reaper（event-loss 兜底恢复）
 	backupScheduleRepo := backup.NewPgScheduleRepository(w.PgPool)

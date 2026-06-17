@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"go.uber.org/zap"
 
@@ -30,7 +29,7 @@ func startPMAdhocPipeline(
 	w *workerInfra,
 	kpiRouter *router.Router,
 	cfg *appconfig.WorkerConfig,
-	loc *time.Location,
+	tz *tzManager,
 ) {
 	logger := w.Logger.Named("pm-adhoc")
 
@@ -41,9 +40,11 @@ func startPMAdhocPipeline(
 	publisher := &adhoc.EventBusPublisher{Bus: w.EventBus}
 	// T-0182：存储范围全局开关（全存默认 / 仅存所选）。
 	// ISSUE-398：持续任务「最近一格」窗口的 daily/weekly/monthly 零点对齐用同一 PM 业务时区。
+	// #458：executor 经 SetLocationFunc 实时读当前业务时区（与 cron 调度读同一 sys_configs 源），
+	// 管理员改时区后持续任务「最近一格」窗口下次即用新时区零点对齐、无需重启。
 	executor := adhoc.NewExecutor(aggr, repo, publisher, logger).
 		SetStoreAllMetrics(cfg.PM.Storage.StoreAllMetrics).
-		SetLocation(loc)
+		SetLocationFunc(tz.Current)
 
 	// 4 worker goroutine（共享 repo，LockNextPending SKIP LOCKED 保证不重复抢同一行）
 	hostname := buildLockOwner()

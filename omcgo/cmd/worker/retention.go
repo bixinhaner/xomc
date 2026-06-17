@@ -34,7 +34,7 @@ func startPMRetentionCleanup(
 	cronStateRepo asyncjob.CronStateRepository,
 	registry *asyncjob.Registry,
 	asyncMetrics *asyncjob.Metrics,
-	loc *time.Location,
+	tz *tzManager,
 ) {
 	logger := w.Logger.Named("pm-retention")
 
@@ -53,7 +53,7 @@ func startPMRetentionCleanup(
 	go runJobTypeWorker(ctx, registry, retention.JobTypeCleanup, w.Logger.Named("pm-retention"))
 
 	// cron 触发器（每日 03:00）+ 启动补跑
-	startRetentionCleanupCron(ctx, jobRepo, cronStateRepo, logger, asyncMetrics, loc)
+	startRetentionCleanupCron(ctx, jobRepo, cronStateRepo, logger, asyncMetrics, tz)
 
 	logger.Info("PM retention cleanup pipeline ready (1 runner + 1 cron + catchup)")
 }
@@ -85,7 +85,7 @@ func startRetentionCleanupCron(
 	stateRepo asyncjob.CronStateRepository,
 	logger *zap.Logger,
 	asyncMetrics *asyncjob.Metrics,
-	loc *time.Location,
+	tz *tzManager,
 ) {
 	const spec = "0 3 * * *" // 每日 03:00（业务时区，T-0192）
 	jobType := retention.JobTypeCleanup
@@ -94,37 +94,31 @@ func startRetentionCleanupCron(
 		spec:    spec,
 		jobType: jobType,
 		window: func(now time.Time) (time.Time, time.Time) {
-			// cleanup 不读时间窗 payload（runner 内自己算 cutoff），但保持与 G5 同接口形态
-			today := truncateDay(now.In(loc))
+			// cleanup 不读时间窗 payload（runner 内自己算 cutoff），但保持与 G5 同接口形态。
+			// 经 tz.Current() 实时取业务时区（#458 动态感知）。
+			today := truncateDay(now.In(tz.Current()))
 			return today.AddDate(0, 0, -1), today
 		},
 		advance: func(prev time.Time) time.Time { return prev.AddDate(0, 0, 1) },
 	}
 
 	// 启动补跑（complementary 防丢）
-	now := time.Now().In(loc)
+	now := time.Now().In(tz.Current())
 	catchupCronEntry(ctx, jobRepo, stateRepo, entry, now, logger, asyncMetrics)
 
-	// 正常 cron（WithLocation 与业务时区一致，T-0192）
-	c := cron.New(cron.WithLocation(loc))
-	_, err := c.AddFunc(spec, func() {
-		triggerCron(ctx, jobRepo, stateRepo, entry, logger, loc)
+	// 注册到 tzManager：WithLocation 与业务时区一致（T-0192），改时区时随其余 cron 一并重建（#458）。
+	tz.registerCron(func(loc *time.Location) (*cron.Cron, error) {
+		c := cron.New(cron.WithLocation(loc))
+		if _, err := c.AddFunc(spec, func() {
+			triggerCron(ctx, jobRepo, stateRepo, entry, logger, tz.Current)
+		}); err != nil {
+			return nil, err
+		}
+		return c, nil
 	})
-	if err != nil {
-		logger.Error("retention cleanup cron AddFunc failed", zap.Error(err))
-		return
-	}
-	c.Start()
 	logger.Info("pm retention cleanup cron started",
 		zap.String("spec", spec),
 		zap.String("job_type", jobType))
-
-	go func() {
-		<-ctx.Done()
-		stopCtx := c.Stop()
-		<-stopCtx.Done()
-		logger.Info("pm retention cleanup cron stopped")
-	}()
 }
 
 // startStationLogRetentionCleanup wire 起 #320：基站日志按时间保留（默认 60 天）的定时清理。
@@ -140,7 +134,7 @@ func startStationLogRetentionCleanup(
 	cronStateRepo asyncjob.CronStateRepository,
 	registry *asyncjob.Registry,
 	asyncMetrics *asyncjob.Metrics,
-	loc *time.Location,
+	tz *tzManager,
 ) {
 	logger := w.Logger.Named("stationlog-retention")
 
@@ -163,7 +157,7 @@ func startStationLogRetentionCleanup(
 
 	go runJobTypeWorker(ctx, registry, stationlog.JobTypeStationLogCleanup, logger)
 
-	startStationLogCleanupCron(ctx, jobRepo, cronStateRepo, logger, asyncMetrics, loc)
+	startStationLogCleanupCron(ctx, jobRepo, cronStateRepo, logger, asyncMetrics, tz)
 
 	logger.Info("stationlog retention cleanup pipeline ready (1 runner + 1 cron + catchup)")
 }
@@ -181,7 +175,7 @@ func startLogRetentionCleanup(
 	cronStateRepo asyncjob.CronStateRepository,
 	registry *asyncjob.Registry,
 	asyncMetrics *asyncjob.Metrics,
-	loc *time.Location,
+	tz *tzManager,
 ) {
 	logger := w.Logger.Named("log-retention")
 
@@ -204,7 +198,7 @@ func startLogRetentionCleanup(
 
 	go runJobTypeWorker(ctx, registry, logretention.JobTypeLogRetentionCleanup, logger)
 
-	startLogCleanupCron(ctx, jobRepo, cronStateRepo, logger, asyncMetrics, loc)
+	startLogCleanupCron(ctx, jobRepo, cronStateRepo, logger, asyncMetrics, tz)
 
 	logger.Info("log retention cleanup pipeline ready (1 runner + 1 cron + catchup)")
 }
@@ -217,7 +211,7 @@ func startLogCleanupCron(
 	stateRepo asyncjob.CronStateRepository,
 	logger *zap.Logger,
 	asyncMetrics *asyncjob.Metrics,
-	loc *time.Location,
+	tz *tzManager,
 ) {
 	const spec = "0 5 * * *" // 每日 05:00（业务时区，与 PM/stationlog 错峰）
 	jobType := logretention.JobTypeLogRetentionCleanup
@@ -226,33 +220,26 @@ func startLogCleanupCron(
 		spec:    spec,
 		jobType: jobType,
 		window: func(now time.Time) (time.Time, time.Time) {
-			today := truncateDay(now.In(loc))
+			today := truncateDay(now.In(tz.Current()))
 			return today.AddDate(0, 0, -1), today
 		},
 		advance: func(prev time.Time) time.Time { return prev.AddDate(0, 0, 1) },
 	}
 
-	now := time.Now().In(loc)
+	now := time.Now().In(tz.Current())
 	catchupCronEntry(ctx, jobRepo, stateRepo, entry, now, logger, asyncMetrics)
 
-	c := cron.New(cron.WithLocation(loc))
-	_, err := c.AddFunc(spec, func() {
-		triggerCron(ctx, jobRepo, stateRepo, entry, logger, loc)
+	tz.registerCron(func(loc *time.Location) (*cron.Cron, error) {
+		c := cron.New(cron.WithLocation(loc))
+		if _, err := c.AddFunc(spec, func() {
+			triggerCron(ctx, jobRepo, stateRepo, entry, logger, tz.Current)
+		}); err != nil {
+			return nil, err
+		}
+		return c, nil
 	})
-	if err != nil {
-		logger.Error("log retention cleanup cron AddFunc failed", zap.Error(err))
-		return
-	}
-	c.Start()
 	logger.Info("log retention cleanup cron started",
 		zap.String("spec", spec), zap.String("job_type", jobType))
-
-	go func() {
-		<-ctx.Done()
-		stopCtx := c.Stop()
-		<-stopCtx.Done()
-		logger.Info("log retention cleanup cron stopped")
-	}()
 }
 
 // startStationLogCleanupCron 单 cron entry，每日 04:00 触发基站日志时间清理入队
@@ -263,7 +250,7 @@ func startStationLogCleanupCron(
 	stateRepo asyncjob.CronStateRepository,
 	logger *zap.Logger,
 	asyncMetrics *asyncjob.Metrics,
-	loc *time.Location,
+	tz *tzManager,
 ) {
 	const spec = "0 4 * * *" // 每日 04:00（业务时区，与 PM retention 03:00 错峰）
 	jobType := stationlog.JobTypeStationLogCleanup
@@ -272,31 +259,24 @@ func startStationLogCleanupCron(
 		spec:    spec,
 		jobType: jobType,
 		window: func(now time.Time) (time.Time, time.Time) {
-			today := truncateDay(now.In(loc))
+			today := truncateDay(now.In(tz.Current()))
 			return today.AddDate(0, 0, -1), today
 		},
 		advance: func(prev time.Time) time.Time { return prev.AddDate(0, 0, 1) },
 	}
 
-	now := time.Now().In(loc)
+	now := time.Now().In(tz.Current())
 	catchupCronEntry(ctx, jobRepo, stateRepo, entry, now, logger, asyncMetrics)
 
-	c := cron.New(cron.WithLocation(loc))
-	_, err := c.AddFunc(spec, func() {
-		triggerCron(ctx, jobRepo, stateRepo, entry, logger, loc)
+	tz.registerCron(func(loc *time.Location) (*cron.Cron, error) {
+		c := cron.New(cron.WithLocation(loc))
+		if _, err := c.AddFunc(spec, func() {
+			triggerCron(ctx, jobRepo, stateRepo, entry, logger, tz.Current)
+		}); err != nil {
+			return nil, err
+		}
+		return c, nil
 	})
-	if err != nil {
-		logger.Error("stationlog cleanup cron AddFunc failed", zap.Error(err))
-		return
-	}
-	c.Start()
 	logger.Info("stationlog retention cleanup cron started",
 		zap.String("spec", spec), zap.String("job_type", jobType))
-
-	go func() {
-		<-ctx.Done()
-		stopCtx := c.Stop()
-		<-stopCtx.Done()
-		logger.Info("stationlog retention cleanup cron stopped")
-	}()
 }
