@@ -16,6 +16,7 @@ import type { DataTableColumn } from '@/components/DataTable';
 import { useFileList, useDownloadFile, useDeleteFiles } from '@core/hooks/api/useFiles';
 import type { ManagedFile, FileStatus } from '@core/mock/data/fileManagement';
 import { useT } from '@/hooks/useT';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 const { RangePicker } = DatePicker;
 
@@ -118,7 +119,7 @@ export default function PerfRetrieval() {
       render: (val) => <Tag color={statusColorMap[val as FileStatus] ?? 'default'}>{t(statusLabelKeyMap[val as FileStatus] ?? 'status.pending')}</Tag>,
     },
     { key: 'uploader', title: t('table.operator'), dataIndex: 'uploader', width: 100, render: (val) => (val ? String(val) : '—') },
-    { key: 'uploadTime', title: t('table.time'), dataIndex: 'uploadTime', width: 160, render: (val) => new Date(String(val)).toLocaleString('zh-CN') },
+    { key: 'uploadTime', title: t('table.time'), dataIndex: 'uploadTime', width: 160, render: (val) => formatSystemTime(String(val)) },
     {
       key: 'actions', title: t('table.operation'), dataIndex: 'id', width: 120, fixed: 'right',
       render: (_, record) => {

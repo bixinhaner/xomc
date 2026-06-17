@@ -5,6 +5,7 @@ import type {
   NotificationHistoryStatus,
 } from '@core/types/notification';
 import { useT } from '@/hooks/useT';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 interface HistoryDetailProps {
   open: boolean;
@@ -99,11 +100,11 @@ export default function HistoryDetail({
           )}
           <Descriptions.Item label={t('notification.history.sentAt')}>
             {history.sentAt
-              ? new Date(history.sentAt).toLocaleString()
+              ? formatSystemTime(history.sentAt)
               : '-'}
           </Descriptions.Item>
           <Descriptions.Item label={t('notification.history.createdAt')}>
-            {new Date(history.createdAt).toLocaleString()}
+            {formatSystemTime(history.createdAt)}
           </Descriptions.Item>
         </Descriptions>
       ) : null}

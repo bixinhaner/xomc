@@ -34,6 +34,7 @@ import styles from './index.module.css';
 import DetectDialog from './components/DetectDialog';
 import ExecuteDetailPanel from './components/ExecuteDetailPanel';
 import BatchRetryDialog from './components/BatchRetryDialog';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 const { Text } = Typography;
 
@@ -438,7 +439,7 @@ export default function PlugAndPlay() {
       width: 170,
       render: (val: unknown) => {
         const s = val as string;
-        return s ? new Date(s).toLocaleString('zh-CN') : '-';
+        return s ? formatSystemTime(s) : '-';
       },
     },
     {
@@ -448,7 +449,7 @@ export default function PlugAndPlay() {
       width: 170,
       render: (val: unknown) => {
         const s = val as string;
-        return s ? new Date(s).toLocaleString('zh-CN') : '-';
+        return s ? formatSystemTime(s) : '-';
       },
     },
     {

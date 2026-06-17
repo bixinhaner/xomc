@@ -2459,7 +2459,7 @@ const messages: Record<string, string> = {
   'header.switchToLight': 'Switch to Light Theme',
   'header.timezone':      'TZ:',
   'header.localTimezone': 'Local',
-  'header.timezoneTitle': 'Current timezone: {tz}, click to switch',
+  'header.timezoneTitle': 'System timezone: {tz}',
   'header.alarmTitle':    '{label} alarms: {count}',
 
   // -------------------------------------------------------------------------

@@ -20,6 +20,7 @@ import type {
 } from '@core/types/notification';
 import { useT } from '@/hooks/useT';
 import TemplateForm from './TemplateForm';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 const channelColorMap: Record<NotificationChannel, string> = {
   email: 'blue',
@@ -158,7 +159,7 @@ export default function TemplateList() {
           dataIndex: 'updatedAt',
           width: 170,
           render: (val) =>
-            val ? new Date(String(val)).toLocaleString() : '-',
+            val ? formatSystemTime(String(val)) : '-',
         },
         {
           key: 'actions',

@@ -7,6 +7,7 @@ import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import { useMRMappings, useToggleMRMapping } from '@core/hooks/api/useMR';
 import type { MRDeviceMapping } from '@core/mock/data/mr';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 const filterFields: FilterField[] = [
   { name: 'deviceSn', label: '设备SN', type: 'input', placeholder: '请输入设备SN' },
@@ -90,7 +91,7 @@ export default function DeviceMapping() {
     },
     {
       key: 'lastCollectTime', title: '最后采集时间', dataIndex: 'lastCollectTime', width: 160,
-      render: (val) => val ? new Date(String(val)).toLocaleString('zh-CN') : '—',
+      render: (val) => val ? formatSystemTime(String(val)) : '—',
     },
     {
       key: 'actions', title: '操作', dataIndex: 'id', width: 80,

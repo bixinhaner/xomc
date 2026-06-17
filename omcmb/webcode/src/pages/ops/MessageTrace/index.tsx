@@ -41,6 +41,7 @@ import type {
   TraceTaskStatus,
 } from '@core/types/trace';
 import { useT } from '@/hooks/useT';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 // prettyXML 简单美化：按 tag 边界拆行 + 计算缩进。
 // SOAP 报文里 CDATA / 自闭合 / 文本节点 各 case 都覆盖，极端复杂报文（嵌套
@@ -243,14 +244,14 @@ export default function MessageTrace() {
         title: t('trace.column.startTime'),
         dataIndex: 'startTime',
         width: 180,
-        render: (v) => (v ? new Date(v as string).toLocaleString() : '-'),
+        render: (v) => (v ? formatSystemTime(v as string) : '-'),
       },
       {
         key: 'expiresAt',
         title: t('trace.column.expiresAt'),
         dataIndex: 'expiresAt',
         width: 180,
-        render: (v) => (v ? new Date(v as string).toLocaleString() : '-'),
+        render: (v) => (v ? formatSystemTime(v as string) : '-'),
       },
       {
         key: 'messageCount',
@@ -544,7 +545,7 @@ function MessageDetail({ msg, t }: MessageDetailProps) {
           {t(`trace.message.direction.${msg.direction}` as never)}
         </Tag>
         <Typography.Text type="secondary">
-          {new Date(msg.capturedAt).toLocaleString()}
+          {formatSystemTime(msg.capturedAt)}
         </Typography.Text>
         {msg.rpcMethod && <Tag style={{ marginLeft: 8 }}>{msg.rpcMethod}</Tag>}
         {msg.payloadObjectKey && <Tag color="gold">external</Tag>}
@@ -639,7 +640,7 @@ function MessageList({ task, onSelect, t }: MessageListProps) {
         title: t('trace.message.column.capturedAt'),
         dataIndex: 'capturedAt',
         width: 200,
-        render: (v) => new Date(v as string).toLocaleString(),
+        render: (v) => formatSystemTime(v as string),
       },
       {
         key: 'direction',

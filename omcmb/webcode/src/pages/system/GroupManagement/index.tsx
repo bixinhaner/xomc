@@ -32,6 +32,7 @@ import {
 } from '@core/hooks/api/useSystem';
 import type { Group } from '@core/types/system';
 import { useT } from '@/hooks/useT';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 export default function GroupManagement() {
   const t = useT();
@@ -241,7 +242,7 @@ export default function GroupManagement() {
       title: t('group.updTime'),
       dataIndex: 'updTime',
       ellipsis: true,
-      render: (val) => (val ? new Date(String(val)).toLocaleString('zh-CN') : '—'),
+      render: (val) => (val ? formatSystemTime(String(val)) : '—'),
     },
   ], [t, form, isBuiltIn, handleDelete]);
 
@@ -457,7 +458,7 @@ export default function GroupManagement() {
             <span>{selectedGroup?.updUser ?? '-'}</span>
           </Form.Item>
           <Form.Item label={t('group.updTime')}>
-            <span>{selectedGroup?.updTime ? new Date(selectedGroup.updTime).toLocaleString('zh-CN') : '-'}</span>
+            <span>{selectedGroup?.updTime ? formatSystemTime(selectedGroup.updTime) : '-'}</span>
           </Form.Item>
         </Form>
       </Drawer>

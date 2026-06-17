@@ -83,7 +83,7 @@ interface RowWithStartTime {
  * 星期 + 小时段过滤：保留某行当且仅当 startTime 的本地星期 ∈ weekdays 且本地小时 ∈ hours。
  * 全选（两集合都覆盖全集）= 不过滤，直接返回原数组（默认行为不变，不破坏已验收出图）。
  * 星期口径 0=周日..6=周六（dayjs().day()），小时 0..23（dayjs().hour()），均本地时区
- * （与 ChartCard 横轴 dayjs(b).format('MM-DD HH:mm') 显示口径一致）。
+ * （与 ChartCard 横轴 MM-DD HH:mm 显示口径一致）。
  * 非法 startTime 行直接丢弃（不抛错）。
  */
 export function filterRowsByWeekdayHour<T extends RowWithStartTime>(

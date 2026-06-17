@@ -46,6 +46,7 @@ import { buildDefaultUfteTaskName } from '@/pages/transfer/shared';
 import dayjs from 'dayjs';
 import { buildBatchTaskTypeMap, batchActionHasDetail } from './deviceBatchTask';
 import type { Device } from '@core/types/device';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 const { Link } = Typography;
 
@@ -767,7 +768,7 @@ export default function DeviceList() {
   }, []);
 
   // 格式化时间戳
-  const fmtTime = useCallback((v: string) => (v ? new Date(v).toLocaleString('zh-CN') : '-'), []);
+  const fmtTime = useCallback((v: string) => (v ? formatSystemTime(v) : '-'), []);
 
   // 格式化在线时长(秒)
   const fmtDuration = useCallback((seconds: number | null | undefined) => {

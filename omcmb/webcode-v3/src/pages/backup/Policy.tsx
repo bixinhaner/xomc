@@ -4,6 +4,7 @@ import { PageShell } from '@/components/shell/PageShell'
 import { NeonButton } from '@/components/ui/NeonButton'
 import { RadialGauge } from '@/components/viz/RadialGauge'
 import { useBackupPolicy } from '@core/hooks/api/useBackup'
+import { formatSystemTime } from '@core/utils/systemTime'
 
 function getErrMsg(e: unknown): string {
   if (e instanceof Error) return e.message
@@ -14,10 +15,8 @@ function getErrMsg(e: unknown): string {
 }
 
 function formatTime(iso?: string): string {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleString('zh-CN', { hour12: false })
+  // #459 子单 D：保留后端系统时区钟面，不按浏览器本地二次转换。
+  return formatSystemTime(iso, { placeholder: '—' })
 }
 
 // ---------------------------------------------------------------------------

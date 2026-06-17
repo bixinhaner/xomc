@@ -19,6 +19,7 @@ import {
 } from '@core/hooks/api/useOpsTools';
 import { usePermission } from '@core/hooks/usePermission';
 import { useT } from '@/hooks/useT';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 // qa-614 c6 #367：任务详情 Descriptions 局部样式——标签/内容单行不换行（超长 ellipsis），
 // 详情区字号收紧至 12（不动全局 token，避免全局回归）。
@@ -220,7 +221,7 @@ export default function TaskManagement() {
         title: t('ops.task.colCreatedAt'),
         dataIndex: 'createdAt',
         width: 160,
-        render: (val) => new Date(String(val)).toLocaleString('zh-CN'),
+        render: (val) => formatSystemTime(String(val)),
       },
       { key: 'creator', title: t('ops.task.colCreator'), dataIndex: 'creator', width: 90 },
       {
@@ -402,15 +403,15 @@ export default function TaskManagement() {
               </span>
             </Descriptions.Item>
             <Descriptions.Item label={t('ops.task.colCreator')}>{selectedTask.creator}</Descriptions.Item>
-            <Descriptions.Item label={t('ops.task.colCreatedAt')}>{new Date(selectedTask.createdAt).toLocaleString('zh-CN')}</Descriptions.Item>
+            <Descriptions.Item label={t('ops.task.colCreatedAt')}>{formatSystemTime(selectedTask.createdAt)}</Descriptions.Item>
             {selectedTask.startedAt && (
               <Descriptions.Item label={t('ops.task.startedAt')}>
-                {new Date(selectedTask.startedAt).toLocaleString('zh-CN')}
+                {formatSystemTime(selectedTask.startedAt)}
               </Descriptions.Item>
             )}
             {selectedTask.completedAt && (
               <Descriptions.Item label={t('ops.task.completedAt')}>
-                {new Date(selectedTask.completedAt).toLocaleString('zh-CN')}
+                {formatSystemTime(selectedTask.completedAt)}
               </Descriptions.Item>
             )}
             {selectedTask.message && (

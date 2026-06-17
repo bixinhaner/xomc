@@ -8,6 +8,7 @@ import type { DataTableColumn } from '@/components/DataTable';
 import { useSystemLogs } from '@core/hooks/api/useLogs';
 import type { SystemLog } from '@core/mock/data/logs';
 import { useT } from '@/hooks/useT';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 type LogLevel = 'DEBUG' | 'INFO' | 'WARN' | 'ERROR';
 
@@ -99,10 +100,11 @@ export default function SystemLogPage() {
       title: t('table.time'),
       dataIndex: 'timestamp',
       width: 210,
-      render: (val) => {
-        const d = new Date(String(val));
-        return <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{d.toLocaleString('zh-CN')}.{d.getMilliseconds().toString().padStart(3, '0')}</span>;
-      },
+      render: (val) => (
+        <span style={{ fontFamily: 'monospace', fontSize: 12 }}>
+          {formatSystemTime(String(val), { format: 'YYYY-MM-DD HH:mm:ss.SSS' })}
+        </span>
+      ),
     },
     {
       key: 'source',
@@ -207,7 +209,7 @@ export default function SystemLogPage() {
               </Tag>
               <span style={{ marginLeft: 8, fontFamily: 'monospace', fontSize: 12, color: '#666' }}>{selectedLog.source}</span>
               <span style={{ float: 'right', fontSize: 12, color: '#999' }}>
-                {new Date(selectedLog.timestamp).toLocaleString('zh-CN')}
+                {formatSystemTime(selectedLog.timestamp)}
               </span>
             </div>
             <div style={{

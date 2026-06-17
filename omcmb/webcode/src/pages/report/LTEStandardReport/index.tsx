@@ -54,6 +54,7 @@ const REPORT_CATEGORY_KEYS = [
 ];
 
 // T-0022: shapes + mock data centralised in @core/mock/data/reports.
+import { formatSystemTime } from '@core/utils/systemTime';
 import {
   mockLTEReportRecords,
   type LTEReportRecord,
@@ -106,7 +107,7 @@ export default function LTEStandardReport() {
     { key: 'period', title: t('perf.timeRange'), dataIndex: 'period', width: 120 },
     {
       key: 'generatedTime', title: t('table.createTime'), dataIndex: 'generatedTime', width: 160,
-      render: (val) => val ? new Date(String(val)).toLocaleString('zh-CN') : '—',
+      render: (val) => val ? formatSystemTime(String(val)) : '—',
     },
     {
       key: 'status', title: t('table.status'), dataIndex: 'status', width: 100,

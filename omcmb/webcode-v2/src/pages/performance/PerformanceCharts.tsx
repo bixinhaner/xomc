@@ -17,6 +17,7 @@ import { cn } from '@/lib/utils'
 
 import { useAllKPIs, useMultipleKPISeries } from '@core/hooks/api/usePerformance'
 import type { KPISeries } from '@core/types/performance'
+import { formatSystemTime } from '@core/utils/systemTime'
 
 // ============================================================
 // 性能趋势图 — 对齐 v1 /performance/charts
@@ -35,10 +36,8 @@ const DAYS_OPTIONS: { label: string; value: string }[] = [
 const DEFAULT_KPI_COUNT = 4
 
 function shortTime(iso: string): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+  // #459 子单 D：图表轴标签保留系统时区钟面（MM-DD HH:mm），不按浏览器本地转换。
+  return formatSystemTime(iso, { format: 'MM-DD HH:mm', placeholder: iso })
 }
 
 function MiniBarChart({ series, name }: { series: KPISeries; name: string }) {

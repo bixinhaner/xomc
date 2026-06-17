@@ -3,10 +3,11 @@ import { Power, Wifi, ShieldCheck } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 
 import { PulseHex } from '@/components/viz/PulseHex'
-import { formatHHMMSS, formatDateLong } from '@/lib/format'
 import { useUserStore } from '@core/store/userStore'
 import { useAppStore } from '@core/store/appStore'
 import { usePublicOmcName, resolveOmcName } from '@core/hooks/api/useOmcName'
+import { useSystemTimezone } from '@core/hooks/api/useSystemTimezone'
+import { useSystemClock } from '@core/hooks/useSystemClock'
 
 export function HUDStatusBar() {
   const navigate = useNavigate()
@@ -18,13 +19,12 @@ export function HUDStatusBar() {
   const storedOmcName = useAppStore((s) => s.omcName)
   const brandTitle = resolveOmcName(omcName ?? storedOmcName, 'STARFORGE')
 
-  const [now, setNow] = useState(new Date())
-  const [vitals, setVitals] = useState({ cpu: 38, mem: 56, net: 72, sess: 64, alm: 21 })
+  // 系统时区（#459 子单 D）：登录后拉取写入 appStore，供顶部只读时钟 + 时间筛选/显示。
+  useSystemTimezone()
+  // 只读时钟：按系统时区每秒刷新「时区 + 实时时间」，替代原浏览器本地 new Date()。
+  const { timezoneLabel, time: clockTime, date: clockDate } = useSystemClock()
 
-  useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 1000)
-    return () => clearInterval(t)
-  }, [])
+  const [vitals, setVitals] = useState({ cpu: 38, mem: 56, net: 72, sess: 64, alm: 21 })
 
   useEffect(() => {
     const t = setInterval(() => {
@@ -87,11 +87,11 @@ export function HUDStatusBar() {
           </span>
         </div>
 
-        {/* 时钟 */}
-        <div className="text-right">
-          <div className="lcd text-2xl leading-none">{formatHHMMSS(now)}</div>
+        {/* 时钟（#459 子单 D）：只读，按系统时区显示「时区 + 实时时间」 */}
+        <div className="text-right" title={`当前系统时区: ${timezoneLabel}`}>
+          <div className="lcd text-2xl leading-none">{clockTime}</div>
           <div className="font-mono text-[10px] tracking-[0.2em] text-cyan-300/55">
-            {formatDateLong(now)} · UTC+08
+            {clockDate} · {timezoneLabel}
           </div>
         </div>
 

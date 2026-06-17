@@ -8,6 +8,7 @@ import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import { useDownloadReport } from '@core/hooks/api/useReports';
 import { useT } from '@/hooks/useT';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 type ReportStatus = 'generated' | 'generating' | 'failed';
 
@@ -125,7 +126,7 @@ export default function Reports() {
     },
     {
       key: 'generatedTime', title: t('mr.generateTime'), dataIndex: 'generatedTime', width: 160,
-      render: (val) => val ? new Date(String(val)).toLocaleString('zh-CN') : '—',
+      render: (val) => val ? formatSystemTime(String(val)) : '—',
     },
     {
       key: 'fileSize', title: t('mr.fileSize'), dataIndex: 'fileSize', width: 100,

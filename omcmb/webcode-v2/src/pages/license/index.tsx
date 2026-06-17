@@ -57,16 +57,14 @@ import {
   type LicenseListParams,
 } from '@core/services/api/deviceLicenseApi'
 
+import { formatSystemTime } from '@core/utils/systemTime'
 import { FeatureList } from './FeatureList'
 
 // ───────────────────────────────────────────────────────── helpers
 
 function formatTime(iso?: string | null) {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+  // #459 子单 D：保留后端系统时区钟面，不按浏览器本地二次转换。
+  return formatSystemTime(iso, { format: 'YYYY-MM-DD HH:mm', placeholder: '—' })
 }
 
 function formatBytes(bytes?: number | null) {

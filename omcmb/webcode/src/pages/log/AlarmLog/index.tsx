@@ -6,6 +6,7 @@ import type { FilterField } from '@/components/FilterBar';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import { useT } from '@/hooks/useT';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 type AlarmOperationType = 'confirm' | 'clear' | 'sync' | 'suppress' | 'unsuppress';
 
@@ -97,7 +98,7 @@ export default function AlarmLog() {
       title: t('table.time'),
       dataIndex: 'operationTime',
       width: 180,
-      render: (val) => new Date(String(val)).toLocaleString('zh-CN'),
+      render: (val) => formatSystemTime(String(val)),
     },
     { key: 'operator', title: t('table.operator'), dataIndex: 'operator', width: 100 },
     {

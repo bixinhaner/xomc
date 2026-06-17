@@ -16,6 +16,7 @@ import {
   useRetryProvisioningTask,
 } from '@core/hooks/api/useProvisioning';
 import type { ProvisioningTask } from '@core/services/api/provisionApi';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 const STATUS_COLOR: Record<string, string> = {
   discovered: 'default',
@@ -152,14 +153,14 @@ export default function AutoProvisioning() {
         dataIndex: 'createdAt',
         key: 'createdAt',
         width: 160,
-        render: (val: string) => (val ? new Date(val).toLocaleString('zh-CN') : '-'),
+        render: (val: string) => (val ? formatSystemTime(val) : '-'),
       },
       {
         title: 'Completed',
         dataIndex: 'completedAt',
         key: 'completedAt',
         width: 160,
-        render: (val: string | null) => (val ? new Date(val).toLocaleString('zh-CN') : '-'),
+        render: (val: string | null) => (val ? formatSystemTime(val) : '-'),
       },
       {
         title: 'Actions',
@@ -298,17 +299,17 @@ export default function AutoProvisioning() {
             )}
             <div>
               <strong>Started:</strong>{' '}
-              {selectedTask.startedAt ? new Date(selectedTask.startedAt).toLocaleString('zh-CN') : '-'}
+              {selectedTask.startedAt ? formatSystemTime(selectedTask.startedAt) : '-'}
             </div>
             <div>
               <strong>Completed:</strong>{' '}
-              {selectedTask.completedAt ? new Date(selectedTask.completedAt).toLocaleString('zh-CN') : '-'}
+              {selectedTask.completedAt ? formatSystemTime(selectedTask.completedAt) : '-'}
             </div>
             <div>
-              <strong>Created:</strong> {new Date(selectedTask.createdAt).toLocaleString('zh-CN')}
+              <strong>Created:</strong> {formatSystemTime(selectedTask.createdAt)}
             </div>
             <div>
-              <strong>Updated:</strong> {new Date(selectedTask.updatedAt).toLocaleString('zh-CN')}
+              <strong>Updated:</strong> {formatSystemTime(selectedTask.updatedAt)}
             </div>
           </div>
         )}

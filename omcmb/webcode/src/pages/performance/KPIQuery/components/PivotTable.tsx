@@ -11,11 +11,11 @@ import { useCallback, useMemo, useState } from 'react';
 import { Table, Tooltip, Empty, Typography } from 'antd';
 import type { ColumnsType, ColumnType } from 'antd/es/table';
 import { Resizable, type ResizeCallbackData } from 'react-resizable';
-import dayjs from 'dayjs';
 import { useT } from '@/hooks/useT';
 import type { AggregatedRow } from '@core/types/pmDashboard';
 import { pivotLongToWide, formatPivotNumber, type PivotColumn, type PivotRow } from '@core/utils/pmPivotTransform';
 import { useUserStore } from '@core/store/userStore';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 const { Text } = Typography;
 
@@ -139,14 +139,14 @@ export default function PivotTable({ rows, loading, emptyDescription }: PivotTab
         dataIndex: 'startTime',
         key: 'startTime',
         width: FIXED_COL_WIDTHS.startTime,
-        render: (v?: string, r?: PivotRow) => dayjs(v ?? r?.time).format('YYYY-MM-DD HH:mm'),
+        render: (v?: string, r?: PivotRow) => formatSystemTime(v ?? r?.time, { format: 'YYYY-MM-DD HH:mm', placeholder: '-' }),
       },
       {
         title: t('perf.kpiQuery.pivot.endTime'),
         dataIndex: 'endTime',
         key: 'endTime',
         width: FIXED_COL_WIDTHS.endTime,
-        render: (v?: string) => (v ? dayjs(v).format('YYYY-MM-DD HH:mm') : '-'),
+        render: (v?: string) => (v ? formatSystemTime(v, { format: 'YYYY-MM-DD HH:mm', placeholder: '-' }) : '-'),
       },
       {
         title: t('perf.kpiQuery.pivot.deviceSn'),

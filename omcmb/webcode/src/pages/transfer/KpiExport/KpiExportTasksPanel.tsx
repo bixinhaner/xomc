@@ -8,7 +8,6 @@
 import { useMemo, useState } from 'react';
 import { Button, Card, Input, Modal, Progress, Select, Space, Tag, Tooltip, message } from 'antd';
 import { DeleteOutlined, ReloadOutlined, RedoOutlined } from '@ant-design/icons';
-import dayjs from 'dayjs';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import { useT } from '@/hooks/useT';
@@ -19,6 +18,7 @@ import {
 } from '@core/hooks/api/useKpiExport';
 import type { KpiExportSource, KpiExportStatus, KpiExportTask } from '@core/types/kpiExport';
 import { SOURCE_LABEL_KEY, STATUS_TAG, statusProgress } from './shared';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 const LIST_LIMIT = 500;
 
@@ -116,7 +116,7 @@ export default function KpiExportTasksPanel() {
       title: t('kpiExport.col.createdAt'),
       dataIndex: 'createdAt',
       width: 180,
-      render: (v) => (v ? dayjs(v as string).format('YYYY-MM-DD HH:mm:ss') : '—'),
+      render: (v) => (v ? formatSystemTime(v as string, { format: 'YYYY-MM-DD HH:mm:ss', placeholder: '-' }) : '—'),
     },
     {
       key: 'actions',

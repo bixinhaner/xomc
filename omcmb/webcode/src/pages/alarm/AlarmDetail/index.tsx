@@ -13,6 +13,7 @@ import { useAlarmById } from '@core/hooks/api/useAlarms';
 import type { Alarm, DealState, EventType } from '@core/types/alarm';
 import { useT } from '@/hooks/useT';
 import { formatBaseStationTypeLabel } from '../utils/baseStationType';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 const { Text, Paragraph } = Typography;
 
@@ -82,7 +83,7 @@ const AlarmDetail: React.FC<AlarmDetailProps> = ({ alarm, open, onClose }) => {
   // 格式化时间
   const formatTime = (time?: string) => {
     if (!time) return '-';
-    return new Date(String(time)).toLocaleString('zh-CN');
+    return formatSystemTime(String(time));
   };
 
   if (!resolvedAlarm) {

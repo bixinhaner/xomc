@@ -13,12 +13,13 @@
 import { memo, useMemo } from 'react';
 import { Card } from 'antd';
 import ReactECharts from 'echarts-for-react';
-import dayjs from 'dayjs';
 import { useT } from '@/hooks/useT';
+import { formatSystemTime } from '@core/utils/systemTime';
 import type { MetricChart, MetricSeries } from './taskDashboardUtils';
 import { computeTooltipPosition } from '@/components/Charts/LineChart';
 
-const fmtTime = (t: string) => (dayjs(t).isValid() ? dayjs(t).format('MM-DD HH:mm') : t);
+// #459 子单 D：图表横轴时间标签按系统时区显示（与列表一致），不按浏览器本地转换。
+const fmtTime = (t: string) => formatSystemTime(t, { format: 'MM-DD HH:mm', placeholder: t });
 
 /** ECharts axis-trigger tooltip 回调单项（只取本组件用到的字段）。 */
 interface TooltipParam {

@@ -2,6 +2,7 @@ import { Loader2 } from 'lucide-react'
 import type { ReactNode } from 'react'
 
 import { cn } from '@/lib/utils'
+import { formatSystemTime } from '@core/utils/systemTime'
 
 export function PageShell({
   title,
@@ -134,9 +135,6 @@ export function formatBytes(bytes?: number | null) {
 }
 
 export function formatTime(iso?: string | null) {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+  // #459 子单 D：保留后端系统时区钟面，不按浏览器本地二次转换。沿用 v2 的 YYYY-MM-DD HH:mm 视觉。
+  return formatSystemTime(iso, { format: 'YYYY-MM-DD HH:mm', placeholder: '—' })
 }

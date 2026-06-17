@@ -90,6 +90,7 @@ import {
 } from '../shared.render';
 import { resolveAutoSelectedCategory } from './categorySelection';
 import type { TransferStepId } from '@core/types/unifiedFileTransfer';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 const { Text, Title } = Typography;
 
@@ -936,8 +937,7 @@ export default function FileTransferCenter() {
             // 上报时间只在文件上报成功的终态才有值；未上报时为空，直接显示 '-'，
             // 不要把空值丢给 new Date()（会渲染成 "Invalid Date"）。
             if (!value) return '-';
-            const d = new Date(value);
-            return Number.isNaN(d.getTime()) ? '-' : d.toLocaleString('zh-CN');
+            return formatSystemTime(value);
           },
         },
         {
@@ -990,13 +990,13 @@ export default function FileTransferCenter() {
           title: t('ufte.col.startTime'),
           key: 'startTime',
           width: 180,
-          render: (_, record) => record.executionMode === 'scheduled' && record.scheduledAt ? new Date(record.scheduledAt).toLocaleString('zh-CN') : '-',
+          render: (_, record) => record.executionMode === 'scheduled' && record.scheduledAt ? formatSystemTime(record.scheduledAt) : '-',
         },
         {
           title: t('ufte.col.endTime'),
           key: 'endTime',
           width: 180,
-          render: (_, record) => record.status === 'ended' ? new Date(record.createdAt).toLocaleString('zh-CN') : '-',
+          render: (_, record) => record.status === 'ended' ? formatSystemTime(record.createdAt) : '-',
         },
       ];
     }
@@ -1069,7 +1069,7 @@ export default function FileTransferCenter() {
         dataIndex: 'createdAt',
         key: 'createdAt',
         width: 180,
-        render: (value: string) => new Date(value).toLocaleString('zh-CN'),
+        render: (value: string) => formatSystemTime(value),
       },
     ];
   }, [isUpgradeLikeCategory, taskTypes, t]);
@@ -1158,8 +1158,7 @@ export default function FileTransferCenter() {
             // 上报时间只在文件上报成功的终态才有值；未上报时为空，直接显示 '-'，
             // 不要把空值丢给 new Date()（会渲染成 "Invalid Date"）。
             if (!value) return '-';
-            const d = new Date(value);
-            return Number.isNaN(d.getTime()) ? '-' : d.toLocaleString('zh-CN');
+            return formatSystemTime(value);
           },
         },
       ];
@@ -1243,7 +1242,7 @@ export default function FileTransferCenter() {
         dataIndex: 'lastReportAt',
         key: 'lastReportAt',
         width: 180,
-        render: (value: string) => new Date(value).toLocaleString('zh-CN'),
+        render: (value: string) => formatSystemTime(value),
       },
     ];
   }, [isUpgradeLikeCategory, t]);
@@ -1866,7 +1865,7 @@ export default function FileTransferCenter() {
                           width: 160,
                           render: (_, rec) => {
                             const lic = licenseProbe.found[rec.deviceSn];
-                            return lic ? dayjs(lic.updateTime).format('YYYY-MM-DD HH:mm') : '—';
+                            return lic ? formatSystemTime(lic.updateTime, { format: 'YYYY-MM-DD HH:mm', placeholder: '-' }) : '—';
                           },
                         },
                       ]}
@@ -1945,7 +1944,7 @@ export default function FileTransferCenter() {
                           width: 160,
                           render: (_, rec) => {
                             const snap = snapshotProbe.found[rec.deviceSn];
-                            return snap ? dayjs(snap.updateTime).format('YYYY-MM-DD HH:mm') : '—';
+                            return snap ? formatSystemTime(snap.updateTime, { format: 'YYYY-MM-DD HH:mm', placeholder: '-' }) : '—';
                           },
                         },
                         {
@@ -2119,14 +2118,14 @@ export default function FileTransferCenter() {
               </Descriptions.Item>
               {detailTask.executionMode === 'scheduled' && detailTask.scheduledAt ? (
                 <Descriptions.Item label={t('ufte.form.scheduledAt')}>
-                  {new Date(detailTask.scheduledAt).toLocaleString('zh-CN')}
+                  {formatSystemTime(detailTask.scheduledAt)}
                 </Descriptions.Item>
               ) : null}
               <Descriptions.Item label={t('ufte.col.currentStep')}>{stepLabels[detailTask.currentStep as TransferStepId] ?? '-'}</Descriptions.Item>
               <Descriptions.Item label={t('ufte.col.operator')}>{detailTask.createUser}</Descriptions.Item>
               <Descriptions.Item label={t('ufte.col.createdAt')}>
-                <Tooltip title={new Date(detailTask.createdAt).toLocaleString('zh-CN')}>
-                  {new Date(detailTask.createdAt).toLocaleString('zh-CN')}
+                <Tooltip title={formatSystemTime(detailTask.createdAt)}>
+                  {formatSystemTime(detailTask.createdAt)}
                 </Tooltip>
               </Descriptions.Item>
             </Descriptions>

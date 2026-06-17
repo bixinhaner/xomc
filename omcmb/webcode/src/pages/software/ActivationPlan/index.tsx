@@ -8,6 +8,7 @@ import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import { useSoftwareVersions } from '@core/hooks/api/useSoftware';
 import { useT } from '@/hooks/useT';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 type ActivationStatus = 'pending' | 'activating' | 'activated' | 'failed' | 'scheduled';
 type ActivationMethod = 'immediate' | 'scheduled';
@@ -180,7 +181,7 @@ export default function ActivationPlan() {
       render: (_val, record) => {
         const r = record as ActivationPlanRecord;
         const time = r.executedTime ?? r.scheduledTime;
-        return time ? new Date(time).toLocaleString('zh-CN') : '—';
+        return time ? formatSystemTime(time) : '—';
       },
     },
     { key: 'creator', title: t('table.operator'), dataIndex: 'creator', width: 100 },

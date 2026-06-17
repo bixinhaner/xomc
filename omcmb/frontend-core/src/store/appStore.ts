@@ -42,6 +42,19 @@ interface AppState {
    * v2 'OMC · v2' / v3 'STARFORGE'），不渲染空白。
    */
   omcName: string | undefined;
+  /**
+   * 系统时区 IANA 名（如 'Asia/Tokyo' / 'UTC'），来源 sys_configs（category='basic',
+   * key='timezoneCode'，#456 唯一源）。登录后由 useSystemTimezone 拉取后写入；persist
+   * 到 localStorage，让冷启动顶部时钟在请求 resolve 前先用缓存即时渲染。
+   *
+   * 全局用途（#459 子单 D）：
+   *   - 顶部只读时钟：按此时区显示「当前系统时区 + 实时当前时间」（每秒走）；
+   *   - 时间范围筛选输入：按此时区附加偏移后再发后端（后端按 RFC3339 解析为 UTC）；
+   *   - epoch/Date 类时间显示落系统钟面（带偏移的后端字符串无需它，原样保留）。
+   *
+   * undefined = 未拉到 → 各消费方回落 UTC。
+   */
+  systemTimezone: string | undefined;
   /** Mobile sidebar drawer visibility (not persisted) */
   isMobileOverlayOpen: boolean;
 
@@ -59,6 +72,7 @@ interface AppState {
   setEffects3DEnabled: (enabled: boolean) => void;
   setShowMenuIcon: (show: boolean) => void;
   setOmcName: (name: string | undefined) => void;
+  setSystemTimezone: (tz: string | undefined) => void;
   setMobileOverlayOpen: (open: boolean) => void;
 }
 
@@ -75,6 +89,7 @@ export const useAppStore = create<AppState>()(
       effects3DEnabled: false,
       showMenuIcon: true,
       omcName: undefined,
+      systemTimezone: undefined,
       isMobileOverlayOpen: false,
 
       setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
@@ -103,6 +118,7 @@ export const useAppStore = create<AppState>()(
       setEffects3DEnabled: (enabled) => set({ effects3DEnabled: enabled }),
       setShowMenuIcon: (show) => set({ showMenuIcon: show }),
       setOmcName: (name) => set({ omcName: name }),
+      setSystemTimezone: (tz) => set({ systemTimezone: tz }),
       setMobileOverlayOpen: (open) => set({ isMobileOverlayOpen: open }),
     }),
     {

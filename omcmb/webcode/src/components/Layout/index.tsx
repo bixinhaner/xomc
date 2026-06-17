@@ -3,6 +3,7 @@ import { Outlet, useLocation } from 'react-router-dom';
 import { useAppStore } from '@core/store/appStore';
 import { useTabStore } from '@core/store/tabStore';
 import { useSecuritySettings } from '@core/hooks/api/useSecuritySettings';
+import { useSystemTimezone } from '@core/hooks/api/useSystemTimezone';
 import { useIdleLogout } from '@core/hooks/useIdleLogout';
 import { SIDEBAR_WIDTH, SIDEBAR_COLLAPSED_WIDTH } from '@/theme/tokens';
 import { useResponsive } from '@/hooks/useResponsive';
@@ -40,6 +41,10 @@ export default function AppShell() {
   // 因此 hook 在此挂载是正确时机（LoginPage 上不会跑）。
   const { settings: securitySettings } = useSecuritySettings();
   useIdleLogout(securitySettings?.idleLockMinutes ?? 0);
+
+  // 系统时区（#459 子单 D）：登录后拉取 sys_configs basic/timezoneCode 写入 appStore，
+  // 供顶部只读时钟、时间筛选输入按系统时区构造、epoch/Date 时间显示落系统钟面。
+  useSystemTimezone();
 
   // 隐藏任务面板
   const hideTaskPanel = true;

@@ -1,16 +1,36 @@
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { Activity, LogOut, ShieldAlert } from 'lucide-react'
+import { Activity, Clock, LogOut, ShieldAlert } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { useUserStore } from '@core/store/userStore'
 import { useAppStore } from '@core/store/appStore'
 import { usePublicOmcName, resolveOmcName } from '@core/hooks/api/useOmcName'
+import { useSystemTimezone } from '@core/hooks/api/useSystemTimezone'
+import { useSystemClock } from '@core/hooks/useSystemClock'
 import { useRouteAccessGuard, useModuleVisibility } from '@core/hooks/useRouteGuard'
 import { MODULES, SECTIONS } from '@/router/navConfig'
 
 // 动态菜单门禁开关（与 v1 webcode 对齐）。admin/超管恒放行，非 admin 按模块级菜单门禁。
 const DYNAMIC_MENU = import.meta.env.VITE_DYNAMIC_MENU === 'true'
+
+/**
+ * 顶部只读时钟（#459 子单 D）：展示「系统时区 + 实时当前时间」，每秒按系统时区刷新，
+ * 不可点切换。系统时区来自 sys_configs basic/timezoneCode（登录后写入 appStore）。
+ */
+function SystemClockBadge() {
+  const { timezoneLabel, dateTime } = useSystemClock()
+  return (
+    <div
+      className="flex select-none items-center gap-1.5 rounded-md border border-border/60 bg-muted/40 px-2.5 py-1 text-xs text-muted-foreground"
+      title={`当前系统时区: ${timezoneLabel}`}
+    >
+      <Clock className="size-3.5" />
+      <span className="text-muted-foreground/70">{timezoneLabel}</span>
+      <span className="font-medium tabular-nums text-foreground">{dateTime}</span>
+    </div>
+  )
+}
 
 function Forbidden() {
   const navigate = useNavigate()
@@ -49,6 +69,9 @@ export function AppShell() {
   const { omcName } = usePublicOmcName()
   const storedOmcName = useAppStore((s) => s.omcName)
   const brandTitle = resolveOmcName(omcName ?? storedOmcName, 'OMC · v2')
+
+  // 系统时区（#459 子单 D）：登录后拉取写入 appStore，供顶部时钟 + 时间筛选/显示。
+  useSystemTimezone()
 
   const linkClass = ({ isActive }: { isActive: boolean }) =>
     cn(
@@ -122,6 +145,7 @@ export function AppShell() {
 
       <div className="flex flex-1 flex-col">
         <header className="sticky top-0 z-10 flex h-14 items-center justify-end gap-3 border-b border-border/60 bg-card/40 px-6 backdrop-blur">
+          <SystemClockBadge />
           <span className="text-sm text-muted-foreground">{userLabel}</span>
           <Button size="sm" variant="ghost" onClick={onLogout}>
             <LogOut /> 退出
