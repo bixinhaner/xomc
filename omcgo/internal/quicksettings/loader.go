@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"go.uber.org/zap"
@@ -128,21 +129,36 @@ type xmlQuickSettings struct {
 }
 
 type xmlGroup struct {
-	ID            string     `xml:"id,attr"`
-	TitleZh       string     `xml:"titleZh,attr"`
-	TitleEn       string     `xml:"titleEn,attr"`
-	MultiInstance string     `xml:"multiInstance,attr"`
-	ObjectPath    string     `xml:"objectPath,attr"`
-	MaxInstances  int        `xml:"maxInstances,attr"`
-	Params        []xmlParam `xml:"param"`
+	ID             string     `xml:"id,attr"`
+	TitleZh        string     `xml:"titleZh,attr"`
+	TitleEn        string     `xml:"titleEn,attr"`
+	MultiInstance  string     `xml:"multiInstance,attr"`
+	ObjectPath     string     `xml:"objectPath,attr"`
+	MaxInstances   int        `xml:"maxInstances,attr"`
+	Style          string     `xml:"style,attr"`
+	ParentSelector string     `xml:"parentSelector,attr"`
+	Params         []xmlParam `xml:"param"`
 }
 
 type xmlParam struct {
-	Name         string `xml:"name,attr"`
-	TitleZh      string `xml:"titleZh,attr"`
-	TitleEn      string `xml:"titleEn,attr"`
-	StandardPath string `xml:"standardPath,attr"`
-	Leaf         string `xml:"leaf,attr"`
+	Name            string         `xml:"name,attr"`
+	TitleZh         string         `xml:"titleZh,attr"`
+	TitleEn         string         `xml:"titleEn,attr"`
+	StandardPath    string         `xml:"standardPath,attr"`
+	Leaf            string         `xml:"leaf,attr"`
+	Type            string         `xml:"type,attr"`
+	Required        string         `xml:"required,attr"`
+	Readonly        string         `xml:"readonly,attr"`
+	Hint            string         `xml:"hint,attr"`
+	MinValue        string         `xml:"minValue,attr"`
+	MaxValue        string         `xml:"maxValue,attr"`
+	CheckboxOptions string         `xml:"checkboxOptions,attr"`
+	EnumOptions    []xmlEnumOption `xml:"option"`
+}
+
+type xmlEnumOption struct {
+	Value string `xml:"value,attr"`
+	Label string `xml:"label,attr"`
 }
 
 // buildGroups 把 XML 解码结果转换为领域 Group 列表,并做最小一致性校验。
@@ -170,23 +186,75 @@ func buildGroups(doc xmlQuickSettings, fileName string) ([]Group, error) {
 					return nil, fmt.Errorf("%s: group %s param %s missing standardPath", fileName, g.ID, p.Name)
 				}
 			}
+			var enums []EnumOption
+			if len(p.EnumOptions) > 0 {
+				enums = make([]EnumOption, 0, len(p.EnumOptions))
+				for _, eo := range p.EnumOptions {
+					if eo.Value == "" {
+						return nil, fmt.Errorf("%s: group %s param %s option missing value", fileName, g.ID, p.Name)
+					}
+					label := eo.Label
+					if label == "" {
+						label = eo.Value
+					}
+					enums = append(enums, EnumOption{Value: eo.Value, Label: label})
+				}
+			}
+			var checkboxes []string
+			if p.CheckboxOptions != "" {
+				for _, s := range strings.Split(p.CheckboxOptions, ",") {
+					s = strings.TrimSpace(s)
+					if s != "" {
+						checkboxes = append(checkboxes, s)
+					}
+				}
+			}
+			var minPtr, maxPtr *int64
+			if p.MinValue != "" {
+				v, err := parseInt64(p.MinValue)
+				if err != nil {
+					return nil, fmt.Errorf("%s: group %s param %s minValue invalid: %w", fileName, g.ID, p.Name, err)
+				}
+				minPtr = &v
+			}
+			if p.MaxValue != "" {
+				v, err := parseInt64(p.MaxValue)
+				if err != nil {
+					return nil, fmt.Errorf("%s: group %s param %s maxValue invalid: %w", fileName, g.ID, p.Name, err)
+				}
+				maxPtr = &v
+			}
 			params = append(params, Param{
-				Name:         p.Name,
-				TitleZh:      p.TitleZh,
-				TitleEn:      p.TitleEn,
-				StandardPath: p.StandardPath,
-				Leaf:         p.Leaf,
+				Name:            p.Name,
+				TitleZh:         p.TitleZh,
+				TitleEn:         p.TitleEn,
+				StandardPath:    p.StandardPath,
+				Leaf:            p.Leaf,
+				Type:            p.Type,
+				Required:        strings.EqualFold(p.Required, "true"),
+				Readonly:        strings.EqualFold(p.Readonly, "true"),
+				Hint:            p.Hint,
+				MinValue:        minPtr,
+				MaxValue:        maxPtr,
+				EnumOptions:     enums,
+				CheckboxOptions: checkboxes,
 			})
 		}
 		out = append(out, Group{
-			ID:            g.ID,
-			TitleZh:       g.TitleZh,
-			TitleEn:       g.TitleEn,
-			MultiInstance: multi,
-			ObjectPath:    g.ObjectPath,
-			MaxInstances:  g.MaxInstances,
-			Params:        params,
+			ID:             g.ID,
+			TitleZh:        g.TitleZh,
+			TitleEn:        g.TitleEn,
+			MultiInstance:  multi,
+			ObjectPath:     g.ObjectPath,
+			MaxInstances:   g.MaxInstances,
+			Style:          g.Style,
+			ParentSelector: g.ParentSelector,
+			Params:         params,
 		})
 	}
 	return out, nil
+}
+
+func parseInt64(s string) (int64, error) {
+	return strconv.ParseInt(strings.TrimSpace(s), 10, 64)
 }

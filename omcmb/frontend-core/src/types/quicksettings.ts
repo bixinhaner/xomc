@@ -7,6 +7,14 @@
  */
 
 /**
+ * 枚举选项(用于 Param.type === 'enum')。
+ */
+export interface QuickSettingsEnumOption {
+  value: string;
+  label: string;
+}
+
+/**
  * 单个参数的元数据。
  *
  * 单实例分组(multiInstance=false):使用 standardPath。
@@ -18,6 +26,15 @@ export interface QuickSettingsParam {
   titleEn: string;
   standardPath?: string;
   leaf?: string;
+  /** 控件类型:string | int | enum | multiCheckbox。未指定时按 string 处理。 */
+  type?: string;
+  required?: boolean;
+  readonly?: boolean;
+  hint?: string;
+  minValue?: number;
+  maxValue?: number;
+  enumOptions?: QuickSettingsEnumOption[];
+  checkboxOptions?: string[];
 }
 
 /**
@@ -28,10 +45,14 @@ export interface QuickSettingsGroup {
   titleZh: string;
   titleEn: string;
   multiInstance: boolean;
-  /** 多实例分组的对象路径前缀(含 {i} 占位符)。 */
+  /** 多实例分组的对象路径前缀(含 {i} 占位符,二级子表使用 {j})。 */
   objectPath?: string;
   /** 多实例分组的最大实例数(仅 multiInstance=true 生效);未配置时为 undefined。 */
   maxInstances?: number;
+  /** 渲染样式:table(顶层多实例选择器) | form(表单) | subtable(二级子表)。 */
+  style?: 'table' | 'form' | 'subtable' | string;
+  /** 父级 group id。当本组依赖另一个 multiInstance 分组的实例选择时填写。 */
+  parentSelector?: string;
   params: QuickSettingsParam[];
 }
 
