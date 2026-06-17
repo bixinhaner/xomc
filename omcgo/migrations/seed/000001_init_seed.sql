@@ -5758,14 +5758,16 @@ ALTER TABLE public.pm_query_templates ENABLE TRIGGER ALL;
 
 ALTER TABLE public.pm_tasks DISABLE TRIGGER ALL;
 
--- 注：3 条内置「全网」任务（0184dddd-0001-*）的 metric_paths 为空数组 '{}' = 全库聚合语义
---   （KPI-ALL-IND 阶段1，原 seed/000006_network_aggregation_full_library_seed.sql；
---    2026-06-14 复合基线直接焊进最终态：聚合器 network 维度 metric_path 过滤「列表非空才过滤、
---    空则不过滤」，配合默认开着的 pm.storage.store_all_metrics，全库每个 counter 都聚成全网线落库）。
+-- 注：3 条内置「全网」任务（0184dddd-0001-*）的 metric_paths 已配与同制式其它维度
+--   （设备组/产品/频段）一致的精选清单（LTE 14 / NR 4 / GSM 3，issue #474）。
+--   收敛前为空数组 '{}' = 全库聚合语义（聚合器 network 维度 metric_path 过滤「列表非空才过滤、
+--   空则不过滤」，配合默认开着的 pm.storage.store_all_metrics，全库每个 counter 都聚成全网线落库），
+--   致性能仪表盘按全网任务实际落库的上百指标铺图卡顿；改为精选清单后铺图量与其它维度一致。
+--   空=全库语义仍保留给用户自定义 network 任务（executor.go RecomputeAllKPIs 分支不变）。
 INSERT INTO public.pm_tasks VALUES
-	('0184dddd-0001-4000-8000-000000000001', '内置-全网-LTE', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 10:16:52.409282+00', '2026-06-12 10:16:52.409282+00', 'adhoc_aggregation', 'continuous', '5 * * * *', '{}', '{hourly}', NULL, NULL, NULL, 'network', 'lte', true, 60, NULL),
-	('0184dddd-0001-4000-8000-000000000002', '内置-全网-NR', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 10:16:52.409282+00', '2026-06-12 10:16:52.409282+00', 'adhoc_aggregation', 'continuous', '5 * * * *', '{}', '{hourly}', NULL, NULL, NULL, 'network', 'nr', true, 60, NULL),
-	('0184dddd-0001-4000-8000-000000000003', '内置-全网-GSM', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 10:16:52.409282+00', '2026-06-12 10:16:52.409282+00', 'adhoc_aggregation', 'continuous', '5 * * * *', '{}', '{hourly}', NULL, NULL, NULL, 'network', 'gsm', true, 60, NULL),
+	('0184dddd-0001-4000-8000-000000000001', '内置-全网-LTE', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 10:16:52.409282+00', '2026-06-12 10:16:52.409282+00', 'adhoc_aggregation', 'continuous', '5 * * * *', '{K900010015,K900010016,C000060216,K900010014,K900010013,K900010006,K900010002,K900010005,K900010029,K900010027,K900010017,K900010022,K900010021,K900010026}', '{hourly}', NULL, NULL, NULL, 'network', 'lte', true, 60, NULL),
+	('0184dddd-0001-4000-8000-000000000002', '内置-全网-NR', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 10:16:52.409282+00', '2026-06-12 10:16:52.409282+00', 'adhoc_aggregation', 'continuous', '5 * * * *', '{KGNB0511,KGNB0510,KGNB0506,KGNB0505}', '{hourly}', NULL, NULL, NULL, 'network', 'nr', true, 60, NULL),
+	('0184dddd-0001-4000-8000-000000000003', '内置-全网-GSM', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 10:16:52.409282+00', '2026-06-12 10:16:52.409282+00', 'adhoc_aggregation', 'continuous', '5 * * * *', '{KGSM0102,KGSM0103,KGSM0101}', '{hourly}', NULL, NULL, NULL, 'network', 'gsm', true, 60, NULL),
 	('0184dddd-0002-4000-8000-000000000001', '内置-设备组-LTE', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 10:16:52.409282+00', '2026-06-12 10:16:52.409282+00', 'adhoc_aggregation', 'continuous', '5 * * * *', '{K900010015,K900010016,C000060216,K900010014,K900010013,K900010006,K900010002,K900010005,K900010029,K900010027,K900010017,K900010022,K900010021,K900010026}', '{hourly}', NULL, NULL, NULL, 'device_group', 'lte', true, 60, NULL),
 	('0184dddd-0002-4000-8000-000000000002', '内置-设备组-NR', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 10:16:52.409282+00', '2026-06-12 10:16:52.409282+00', 'adhoc_aggregation', 'continuous', '5 * * * *', '{KGNB0511,KGNB0510,KGNB0506,KGNB0505}', '{hourly}', NULL, NULL, NULL, 'device_group', 'nr', true, 60, NULL),
 	('0184dddd-0002-4000-8000-000000000003', '内置-设备组-GSM', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 10:16:52.409282+00', '2026-06-12 10:16:52.409282+00', 'adhoc_aggregation', 'continuous', '5 * * * *', '{KGSM0102,KGSM0103,KGSM0101}', '{hourly}', NULL, NULL, NULL, 'device_group', 'gsm', true, 60, NULL),
