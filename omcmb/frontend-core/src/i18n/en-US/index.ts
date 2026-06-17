@@ -5718,8 +5718,6 @@ const messages: Record<string, string> = {
   'mml.consoleV2.selectionBar.selectedDevices': '{count} selected',
   'mml.consoleV2.selectionBar.notSelected':  'Not selected',
   'mml.consoleV2.selectionBar.defaultAll':   'Default all',
-  'mml.consoleV2.selectionBar.execute':      'Execute',
-  'mml.consoleV2.selectionBar.executeWithCount': 'Execute ({count} devices)',
   // CommandHistoryPanel
   'mml.consoleV2.history.expand':            'Expand command history',
   'mml.consoleV2.history.title':             'Command History',
@@ -5769,7 +5767,7 @@ const messages: Record<string, string> = {
   'mml.consoleV2.config.inputFieldPlaceholder': 'Enter {label}',
   'mml.consoleV2.config.title':              'Configure Params',
   'mml.consoleV2.config.gotoCommand':        'Select Command',
-  'mml.consoleV2.config.confirmAndExecute':  'Confirm & Execute ({count} devices)',
+  'mml.consoleV2.config.confirmAndExecute':  'Execute ({count} devices)',
   'mml.consoleV2.config.tabStandard':        'Command Params',
   'mml.consoleV2.config.tabRaw':             'Custom Params',
   'mml.consoleV2.config.execMode':           'Execution Mode',

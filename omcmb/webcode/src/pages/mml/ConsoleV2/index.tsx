@@ -232,15 +232,6 @@ export default function MMLConsoleV2() {
     return t('mml.consoleV2.configSummary.raw', { count: n, op: config.operationType });
   }, [config, configTouched, t]);
 
-  // #217：执行按钮可用性只看「选齐设备 + 命令/raw 路径」，不再因上一条命令未到达终态而禁用。
-  // dispatching 仅遮挡当前一次下发的 HTTP 往返（见 SelectionBar 的 loading / disabled），
-  // 允许在第一条仍「执行中」时并发发起第二条命令。
-  const canExecute = useMemo(() => {
-    if (dispatching || selectedSns.length === 0) return false;
-    if (config?.mode === 'raw') return config.rows.some((r) => r.path.trim() !== '');
-    return !!command; // standard(含默认配置)需有命令
-  }, [dispatching, selectedSns.length, config, command]);
-
   // targetSns 默认全部所选设备；「重新执行」时传 [单个设备 SN] 仅对该设备重跑同一命令。
   const runExecute = async (req: ExecRequest, targetSns: string[] = selectedSns): Promise<void> => {
     if (targetSns.length === 0) return;
@@ -409,13 +400,6 @@ export default function MMLConsoleV2() {
     message.success(t('mml.consoleV2.msg.dispatched', { taskId }));
   };
 
-  const handleExecute = (): void => {
-    // 顶部「执行」按钮:用已保存配置;未手动配置时用默认(标准模式全部路径)
-    const req: ExecRequest =
-      config ?? { mode: 'standard', checkedPaths: command?.paramPaths.map((p) => p.path) ?? [] };
-    void runExecute(req);
-  };
-
   // #217：结果区以命令记录选中项（activeRecord）为唯一展示入口——并发多任务在途时，
   // 各 liveExec 的 SSE 帧只把实时结果回填到各自的命令记录行（handleFrame 内 append upsert），
   // 不再由「最近一次 liveExec」抢占结果区，避免多任务下结果跳变；点哪条记录看哪条的结果。
@@ -465,12 +449,9 @@ export default function MMLConsoleV2() {
         deviceCount={selectedSns.length}
         command={command}
         configSummary={configSummary}
-        running={dispatching}
-        canExecute={canExecute}
         onPickDevices={() => setDeviceModalOpen(true)}
         onPickCommand={() => setCommandModalOpen(true)}
         onConfigParams={() => setConfigModalOpen(true)}
-        onExecute={handleExecute}
       />
 
       <div style={{ display: 'flex', gap: 12, height: 'calc(100vh - 220px)', minHeight: 420 }}>
@@ -556,11 +537,6 @@ export default function MMLConsoleV2() {
           setCommandModalOpen(true);
         }}
         onCancel={() => setConfigModalOpen(false)}
-        onConfirm={(req) => {
-          setConfig(req);
-          setConfigTouched(true);
-          setConfigModalOpen(false);
-        }}
         onConfirmAndExecute={(req) => {
           setConfig(req);
           setConfigTouched(true);

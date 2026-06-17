@@ -47,9 +47,7 @@ interface ConfigParamsModalProps {
    */
   onGotoCommand?: () => void;
   onCancel: () => void;
-  /** 确定:保存配置(不执行) */
-  onConfirm: (req: ExecRequest) => void;
-  /** 确定并执行 */
+  /** 执行:保存配置 + 直接下发（原「确定并执行」，#470 后唯一执行入口） */
   onConfirmAndExecute: (req: ExecRequest) => void;
 }
 
@@ -65,7 +63,6 @@ export default function ConfigParamsModal({
   initialMode,
   onGotoCommand,
   onCancel,
-  onConfirm,
   onConfirmAndExecute,
 }: ConfigParamsModalProps) {
   const t = useT();
@@ -356,9 +353,6 @@ export default function ConfigParamsModal({
       footer={[
         <Button key="cancel" onClick={onCancel}>
           {t('common.cancel')}
-        </Button>,
-        <Button key="ok" disabled={!valid} onClick={() => onConfirm(buildRequest())}>
-          {t('common.confirm')}
         </Button>,
         <Tooltip key="exec" title={canExecutePerm ? undefined : '无执行权限'}>
           <Button

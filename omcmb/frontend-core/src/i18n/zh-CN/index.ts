@@ -5746,8 +5746,6 @@ const messages: Record<string, string> = {
   'mml.consoleV2.selectionBar.selectedDevices': '已选 {count} 台',
   'mml.consoleV2.selectionBar.notSelected':  '未选择',
   'mml.consoleV2.selectionBar.defaultAll':   '默认全部',
-  'mml.consoleV2.selectionBar.execute':      '执行',
-  'mml.consoleV2.selectionBar.executeWithCount': '执行（{count} 台）',
   // CommandHistoryPanel
   'mml.consoleV2.history.expand':            '展开命令记录',
   'mml.consoleV2.history.title':             '命令记录',
@@ -5797,7 +5795,7 @@ const messages: Record<string, string> = {
   'mml.consoleV2.config.inputFieldPlaceholder': '输入 {label}',
   'mml.consoleV2.config.title':              '配置参数',
   'mml.consoleV2.config.gotoCommand':        '选择命令',
-  'mml.consoleV2.config.confirmAndExecute':  '确定并执行（{count} 台）',
+  'mml.consoleV2.config.confirmAndExecute':  '执行（{count} 台）',
   'mml.consoleV2.config.tabStandard':        '命令参数',
   'mml.consoleV2.config.tabRaw':             '指定参数',
   'mml.consoleV2.config.execMode':           '执行模式',
