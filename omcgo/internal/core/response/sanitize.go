@@ -25,10 +25,14 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// renderJSON 把 body 内所有非有限浮点规整为 null 后，再用 Gin 的标准 JSON 渲染写出。
-// 这是所有成功响应（OK / OKWithStatus / OKWithMsg）的统一出口。
+// renderJSON 是所有成功响应（OK / OKWithStatus / OKWithMsg）的统一出口。
+// 序列化前依次做两层处理（顺序无关，互不影响）：
+//  1. 时区转换（issue #457）：把响应体内时间值（time.Time / model.Time）按系统时区展示；
+//     北向响应 / 未注入 Provider / 类型不含时间时短路，原样输出 UTC。
+//  2. 非有限浮点兜底（issue #387）：把 NaN/±Inf 规整为 null，避免 Gin 边写边编码中断。
 func renderJSON(c *gin.Context, statusCode int, body gin.H) {
-	c.JSON(statusCode, sanitizeNonFiniteFloats(body))
+	converted := convertResponseTimezone(c, body)
+	c.JSON(statusCode, sanitizeNonFiniteFloats(converted))
 }
 
 // jsonMarshalerType 用于识别自定义 JSON 序列化类型（如 time.Time、model.Time、jsonx.Float），
@@ -204,20 +208,75 @@ func sanitizeStruct(rv reflect.Value) any {
 // jsonFieldName 解析 json tag，返回字段名与是否忽略。
 // 空名 + 非忽略表示「用字段原名」（或匿名嵌入内联，由调用方判断）。
 func jsonFieldName(field reflect.StructField) (name string, skip bool) {
+	name, skip, _ = jsonFieldTag(field)
+	return name, skip
+}
+
+// jsonFieldTag 解析 json tag，返回字段名、是否忽略、是否带 omitempty 选项。
+// 与 encoding/json 对 tag 的解析语义一致（逗号前为名字，逗号后为选项列表）。
+func jsonFieldTag(field reflect.StructField) (name string, skip bool, omitEmpty bool) {
 	tag, ok := field.Tag.Lookup("json")
 	if !ok {
-		return "", false // 无 tag：用字段原名
+		return "", false, false // 无 tag：用字段原名
 	}
 	if tag == "-" {
-		return "", true // 显式忽略
+		return "", true, false // 显式忽略
 	}
-	// 取逗号前的名字部分；逗号后是 omitempty/string 等选项。
+	// 逗号前是名字，逗号后是 omitempty/string 等选项。
+	nameEnd := len(tag)
 	for i := 0; i < len(tag); i++ {
 		if tag[i] == ',' {
-			return tag[:i], false
+			nameEnd = i
+			break
 		}
 	}
-	return tag, false
+	name = tag[:nameEnd]
+	if nameEnd < len(tag) {
+		opts := tag[nameEnd+1:]
+		// 选项以逗号分隔，逐个比对 omitempty。
+		for len(opts) > 0 {
+			var opt string
+			if j := indexByte(opts, ','); j >= 0 {
+				opt, opts = opts[:j], opts[j+1:]
+			} else {
+				opt, opts = opts, ""
+			}
+			if opt == "omitempty" {
+				omitEmpty = true
+			}
+		}
+	}
+	return name, false, omitEmpty
+}
+
+// indexByte 返回 b 在 s 中首次出现的下标，未找到返回 -1（避免引入额外 import）。
+func indexByte(s string, b byte) int {
+	for i := 0; i < len(s); i++ {
+		if s[i] == b {
+			return i
+		}
+	}
+	return -1
+}
+
+// isEmptyJSONValue 复刻 encoding/json 的 isEmptyValue 语义：
+// 带 omitempty 的字段在值为「空」时被省略——空数组/切片/map/字符串、false、0 数值、nil 指针/接口。
+func isEmptyJSONValue(rv reflect.Value) bool {
+	switch rv.Kind() {
+	case reflect.Array, reflect.Map, reflect.Slice, reflect.String:
+		return rv.Len() == 0
+	case reflect.Bool:
+		return !rv.Bool()
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return rv.Int() == 0
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return rv.Uint() == 0
+	case reflect.Float32, reflect.Float64:
+		return rv.Float() == 0
+	case reflect.Interface, reflect.Pointer:
+		return rv.IsNil()
+	}
+	return false
 }
 
 // mapKeyString 把 map 键转成字符串（JSON 对象键必须为字符串）。

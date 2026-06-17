@@ -88,6 +88,12 @@ func (r *Router) rateLimit(endpoint string) gin.HandlerFunc {
 // RegisterRoutes registers northbound API routes on the given router group.
 func (r *Router) RegisterRoutes(rg *gin.RouterGroup) {
 	nb := rg.Group("/northbound")
+	// 北向响应对上游 OSS 必须保持 UTC 标准格式（issue #457）：打上下文标记，
+	// 统一响应出口（response.renderJSON）识别后整体跳过系统时区转换。
+	nb.Use(func(c *gin.Context) {
+		c.Set(response.ContextKeyNorthbound, true)
+		c.Next()
+	})
 	{
 		// Push target management
 		nb.GET("/push/targets", r.listTargets)
