@@ -1405,6 +1405,7 @@ const messages: Record<string, string> = {
   'device.batch.deleteWarning':        'All device data will be deleted (monitoring data, configuration, alarms, KPI, etc.)',
   'device.batch.selectGroup':           'Please select a target group',
   'device.batch.selectGroupPlaceholder': 'Select a device group',
+  'device.batch.removeFromGroup':       'Remove from group (Ungrouped)',
   'device.batch.targetGroup':           'Target Group',
   'device.batch.selectedDevices':       '{count} device(s) selected',
 

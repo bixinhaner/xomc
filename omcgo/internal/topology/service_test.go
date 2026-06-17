@@ -28,6 +28,10 @@ type mockGroupRepo struct {
 	addDeviceFn     func(ctx context.Context, groupID, deviceID uuid.UUID) error
 	removeDeviceFn  func(ctx context.Context, groupID, deviceID uuid.UUID) error
 	listDeviceIDsFn func(ctx context.Context, groupID uuid.UUID) ([]uuid.UUID, error)
+
+	batchAddDevicesFn            func(ctx context.Context, groupID uuid.UUID, deviceIDs []uuid.UUID) (int64, error)
+	moveDevicesFn                func(ctx context.Context, deviceIDs []uuid.UUID, targetGroupID uuid.UUID) (int64, error)
+	removeDevicesFromAllGroupsFn func(ctx context.Context, deviceIDs []uuid.UUID) (int64, error)
 }
 
 func (m *mockGroupRepo) Create(ctx context.Context, group *DeviceGroup) error {
@@ -128,7 +132,10 @@ func (m *mockGroupRepo) ListChildIDs(_ context.Context, _ uuid.UUID) ([]uuid.UUI
 	return nil, nil
 }
 
-func (m *mockGroupRepo) BatchAddDevices(_ context.Context, _ uuid.UUID, deviceIDs []uuid.UUID) (int64, error) {
+func (m *mockGroupRepo) BatchAddDevices(ctx context.Context, groupID uuid.UUID, deviceIDs []uuid.UUID) (int64, error) {
+	if m.batchAddDevicesFn != nil {
+		return m.batchAddDevicesFn(ctx, groupID, deviceIDs)
+	}
 	return int64(len(deviceIDs)), nil
 }
 
@@ -136,8 +143,18 @@ func (m *mockGroupRepo) BatchRemoveDevices(_ context.Context, _ uuid.UUID, _ []u
 	return 0, nil
 }
 
-func (m *mockGroupRepo) MoveDevices(_ context.Context, _ []uuid.UUID, _ uuid.UUID) (int64, error) {
+func (m *mockGroupRepo) MoveDevices(ctx context.Context, deviceIDs []uuid.UUID, targetGroupID uuid.UUID) (int64, error) {
+	if m.moveDevicesFn != nil {
+		return m.moveDevicesFn(ctx, deviceIDs, targetGroupID)
+	}
 	return 0, nil
+}
+
+func (m *mockGroupRepo) RemoveDevicesFromAllGroups(ctx context.Context, deviceIDs []uuid.UUID) (int64, error) {
+	if m.removeDevicesFromAllGroupsFn != nil {
+		return m.removeDevicesFromAllGroupsFn(ctx, deviceIDs)
+	}
+	return int64(len(deviceIDs)), nil
 }
 
 func (m *mockGroupRepo) MoveGroupDevicesToDefault(_ context.Context, _ []uuid.UUID) (int64, error) {
@@ -410,4 +427,167 @@ func TestDeviceGroupService_MoveDevices_ValidInputSucceeds(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Zero(t, affected) // mock MoveDevices 返回 0
+}
+
+// --- Tests: issue #478 移动/添加到「未分组设备」内置节点 = 移出分组 ---
+
+// 成功路径：移到真实分组 → 走 UPSERT（repo.MoveDevices），不触碰移出分组路径。
+func TestDeviceGroupService_MoveDevices_RealGroup_UpsertsRecord(t *testing.T) {
+	var moveCalled, removeAllCalled bool
+	devA, devB := uuid.New(), uuid.New()
+	realGroup := uuid.New()
+
+	svc := newTestGroupService(&mockGroupRepo{
+		getByIDFn: func(_ context.Context, id uuid.UUID) (*DeviceGroup, error) {
+			return &DeviceGroup{ID: id, Name: "real"}, nil
+		},
+		moveDevicesFn: func(_ context.Context, deviceIDs []uuid.UUID, target uuid.UUID) (int64, error) {
+			moveCalled = true
+			assert.Equal(t, realGroup, target)
+			return int64(len(deviceIDs)), nil
+		},
+		removeDevicesFromAllGroupsFn: func(_ context.Context, _ []uuid.UUID) (int64, error) {
+			removeAllCalled = true
+			return 0, nil
+		},
+	})
+
+	affected, err := svc.MoveDevices(context.Background(), MoveDevicesRequest{
+		TargetGroupID: realGroup.String(),
+		DeviceIDs:     []string{devA.String(), devB.String()},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), affected)
+	assert.True(t, moveCalled, "移到真实分组应走 UPSERT")
+	assert.False(t, removeAllCalled, "移到真实分组不应触发移出分组")
+}
+
+// 特例路径：移到「未分组设备」内置节点(...0002) → 删全部归属记录（移出分组），
+// 不走 UPSERT，且不校验目标分组存在（虚拟节点）。
+func TestDeviceGroupService_MoveDevices_UnassignedNode_RemovesAllMemberships(t *testing.T) {
+	var moveCalled, removeAllCalled, getByIDCalled bool
+	devA, devB := uuid.New(), uuid.New()
+
+	svc := newTestGroupService(&mockGroupRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*DeviceGroup, error) {
+			getByIDCalled = true
+			return &DeviceGroup{}, nil
+		},
+		moveDevicesFn: func(_ context.Context, _ []uuid.UUID, _ uuid.UUID) (int64, error) {
+			moveCalled = true
+			return 0, nil
+		},
+		removeDevicesFromAllGroupsFn: func(_ context.Context, deviceIDs []uuid.UUID) (int64, error) {
+			removeAllCalled = true
+			assert.ElementsMatch(t, []uuid.UUID{devA, devB}, deviceIDs)
+			return int64(len(deviceIDs)), nil
+		},
+	})
+
+	affected, err := svc.MoveDevices(context.Background(), MoveDevicesRequest{
+		TargetGroupID: global.DefaultLevel2GroupID,
+		DeviceIDs:     []string{devA.String(), devB.String()},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), affected, "应返回删除的归属记录数")
+	assert.True(t, removeAllCalled, "移到未分组节点应删全部归属记录")
+	assert.False(t, moveCalled, "移到未分组节点不应走 UPSERT")
+	assert.False(t, getByIDCalled, "未分组虚拟节点不应校验目标分组存在")
+}
+
+// BatchAddDevices 成功路径：加入真实分组 → 走 UPSERT。
+func TestDeviceGroupService_BatchAddDevices_RealGroup_UpsertsRecord(t *testing.T) {
+	var addCalled, removeAllCalled bool
+	realGroup := uuid.New()
+	devs := []uuid.UUID{uuid.New(), uuid.New()}
+
+	svc := newTestGroupService(&mockGroupRepo{
+		batchAddDevicesFn: func(_ context.Context, group uuid.UUID, deviceIDs []uuid.UUID) (int64, error) {
+			addCalled = true
+			assert.Equal(t, realGroup, group)
+			return int64(len(deviceIDs)), nil
+		},
+		removeDevicesFromAllGroupsFn: func(_ context.Context, _ []uuid.UUID) (int64, error) {
+			removeAllCalled = true
+			return 0, nil
+		},
+	})
+
+	affected, err := svc.BatchAddDevices(context.Background(), realGroup, devs)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), affected)
+	assert.True(t, addCalled)
+	assert.False(t, removeAllCalled)
+}
+
+// BatchAddDevices 特例路径：加入「未分组设备」内置节点 → 删全部归属记录。
+func TestDeviceGroupService_BatchAddDevices_UnassignedNode_RemovesAllMemberships(t *testing.T) {
+	var addCalled, removeAllCalled bool
+	devs := []uuid.UUID{uuid.New(), uuid.New()}
+	unassigned := uuid.MustParse(global.DefaultLevel2GroupID)
+
+	svc := newTestGroupService(&mockGroupRepo{
+		batchAddDevicesFn: func(_ context.Context, _ uuid.UUID, _ []uuid.UUID) (int64, error) {
+			addCalled = true
+			return 0, nil
+		},
+		removeDevicesFromAllGroupsFn: func(_ context.Context, deviceIDs []uuid.UUID) (int64, error) {
+			removeAllCalled = true
+			assert.ElementsMatch(t, devs, deviceIDs)
+			return int64(len(deviceIDs)), nil
+		},
+	})
+
+	affected, err := svc.BatchAddDevices(context.Background(), unassigned, devs)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), affected)
+	assert.True(t, removeAllCalled, "加入未分组节点应删全部归属记录")
+	assert.False(t, addCalled, "加入未分组节点不应走 UPSERT")
+}
+
+// AddDevice（legacy 单设备）特例路径：加入「未分组设备」内置节点 → 删该设备全部归属记录。
+func TestDeviceGroupService_AddDevice_UnassignedNode_RemovesAllMemberships(t *testing.T) {
+	var addCalled, removeAllCalled bool
+	dev := uuid.New()
+	unassigned := uuid.MustParse(global.DefaultLevel2GroupID)
+
+	svc := newTestGroupService(&mockGroupRepo{
+		addDeviceFn: func(_ context.Context, _, _ uuid.UUID) error {
+			addCalled = true
+			return nil
+		},
+		removeDevicesFromAllGroupsFn: func(_ context.Context, deviceIDs []uuid.UUID) (int64, error) {
+			removeAllCalled = true
+			assert.Equal(t, []uuid.UUID{dev}, deviceIDs)
+			return 1, nil
+		},
+	})
+
+	err := svc.AddDevice(context.Background(), unassigned, dev)
+	require.NoError(t, err)
+	assert.True(t, removeAllCalled, "加入未分组节点应删全部归属记录")
+	assert.False(t, addCalled, "加入未分组节点不应走 UPSERT")
+}
+
+// AddDevice 成功路径：加入真实分组 → 走 UPSERT。
+func TestDeviceGroupService_AddDevice_RealGroup_UpsertsRecord(t *testing.T) {
+	var addCalled, removeAllCalled bool
+	realGroup, dev := uuid.New(), uuid.New()
+
+	svc := newTestGroupService(&mockGroupRepo{
+		addDeviceFn: func(_ context.Context, group, _ uuid.UUID) error {
+			addCalled = true
+			assert.Equal(t, realGroup, group)
+			return nil
+		},
+		removeDevicesFromAllGroupsFn: func(_ context.Context, _ []uuid.UUID) (int64, error) {
+			removeAllCalled = true
+			return 0, nil
+		},
+	})
+
+	err := svc.AddDevice(context.Background(), realGroup, dev)
+	require.NoError(t, err)
+	assert.True(t, addCalled)
+	assert.False(t, removeAllCalled)
 }

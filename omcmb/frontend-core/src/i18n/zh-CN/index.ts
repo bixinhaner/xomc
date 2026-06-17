@@ -1409,6 +1409,7 @@ const messages: Record<string, string> = {
   'device.batch.deleteWarning':         '将会同时删除设备的所有数据（如：监控数据、配置、告警、KPI等）',
   'device.batch.selectGroup':           '请选择目标设备组',
   'device.batch.selectGroupPlaceholder': '请选择设备组',
+  'device.batch.removeFromGroup':       '移出分组（未分组设备）',
   'device.batch.targetGroup':           '目标设备组',
   'device.batch.selectedDevices':       '已选择 {count} 台设备',
 

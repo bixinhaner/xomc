@@ -167,6 +167,26 @@ func (m *mockDeviceGroupRepo) MoveDevices(_ context.Context, _ []uuid.UUID, _ uu
 	return 0, nil
 }
 
+func (m *mockDeviceGroupRepo) RemoveDevicesFromAllGroups(_ context.Context, deviceIDs []uuid.UUID) (int64, error) {
+	rm := make(map[uuid.UUID]struct{}, len(deviceIDs))
+	for _, id := range deviceIDs {
+		rm[id] = struct{}{}
+	}
+	var removed int64
+	for gid, devs := range m.devices {
+		kept := devs[:0:0]
+		for _, d := range devs {
+			if _, drop := rm[d]; drop {
+				removed++
+				continue
+			}
+			kept = append(kept, d)
+		}
+		m.devices[gid] = kept
+	}
+	return removed, nil
+}
+
 func (m *mockDeviceGroupRepo) MoveGroupDevicesToDefault(_ context.Context, _ []uuid.UUID) (int64, error) {
 	return 0, nil
 }

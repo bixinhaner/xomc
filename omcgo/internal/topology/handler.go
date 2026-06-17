@@ -363,7 +363,7 @@ func (h *Handler) BatchAddDevices(c *gin.Context) {
 		return
 	}
 
-	affected, err := h.repo.BatchAddDevices(c.Request.Context(), groupID, deviceIDs)
+	affected, err := h.service.BatchAddDevices(c.Request.Context(), groupID, deviceIDs)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
@@ -453,7 +453,7 @@ func (h *Handler) AddDevice(c *gin.Context) {
 		return
 	}
 
-	if err := h.repo.AddDevice(c.Request.Context(), groupID, deviceID); err != nil {
+	if err := h.service.AddDevice(c.Request.Context(), groupID, deviceID); err != nil {
 		response.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
