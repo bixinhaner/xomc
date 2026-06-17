@@ -142,7 +142,7 @@ export default function AutoProvisioning() {
                       <button
                         type="button"
                         className="font-mono text-xs text-primary hover:underline"
-                        onClick={() => navigate(`/config/auto-provision/${t.id}`)}
+                        onClick={() => navigate(`/config/auto-provision`)}
                       >
                         {t.id}
                       </button>

@@ -12,7 +12,8 @@
   "scripts": {
     "lint": "eslint webcode/src webcode-v2/src webcode-v3/src frontend-core/src",
     "lint:fix": "eslint webcode/src webcode-v2/src webcode-v3/src frontend-core/src --fix",
-    "typecheck": "npm run typecheck --workspace webcode && npm run typecheck --workspace webcode-v2 && npm run typecheck --workspace webcode-v3"
+    "skin-parity": "node scripts/skin-parity.mjs",
+    "typecheck": "npm run skin-parity && npm run typecheck --workspace webcode && npm run typecheck --workspace webcode-v2 && npm run typecheck --workspace webcode-v3"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

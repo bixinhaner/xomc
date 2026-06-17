@@ -184,7 +184,7 @@ function ProductRow({
         <button
           type="button"
           className="font-medium text-primary hover:underline"
-          onClick={() => navigate(`/product/products/${row.id}`)}
+          onClick={() => navigate(`/product/products`)}
         >
           {row.name}
         </button>

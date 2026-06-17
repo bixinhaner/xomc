@@ -168,7 +168,7 @@ export default function CommandManagement() {
                     <button
                       type="button"
                       className="rounded bg-muted/60 px-1.5 py-0.5 text-left font-mono text-xs hover:underline"
-                      onClick={() => navigate(`/ops/commands/${r.id}`)}
+                      onClick={() => navigate(`/ops/commands`)}
                     >
                       {r.commandText}
                     </button>
@@ -195,7 +195,7 @@ export default function CommandManagement() {
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => navigate(`/ops/commands/${r.id}`)}
+                      onClick={() => navigate(`/ops/commands`)}
                       title="详情"
                     >
                       <Eye className="size-4" />

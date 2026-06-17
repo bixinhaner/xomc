@@ -59,7 +59,7 @@ export default function FleetDeviceRegister() {
       title="REGISTER · 设备注册"
       subtitle="MANUAL UNIT ENROLLMENT · TR069 PARTITION"
       toolbar={
-        <NeonButton icon={<ArrowLeft />} onClick={() => navigate('/fleet')}>
+        <NeonButton icon={<ArrowLeft />} onClick={() => navigate('/device/list')}>
           FLEET
         </NeonButton>
       }
@@ -166,7 +166,7 @@ export default function FleetDeviceRegister() {
                 <button
                   type="button"
                   className="ml-2 underline decoration-dotted"
-                  onClick={() => navigate('/fleet')}
+                  onClick={() => navigate('/device/list')}
                 >
                   返回舰队
                 </button>

@@ -265,9 +265,9 @@ export default function AlarmStatistics() {
   const topMax = topDevices[0]?.alarmCount ?? 0
 
   const drillSeverity = (severity: AlarmSeverity) =>
-    navigate(`/alarms?severity=${severity}`)
+    navigate(`/alarm/current?severity=${severity}`)
   const drillDevice = (sn: string) =>
-    navigate(`/alarms?keyword=${encodeURIComponent(sn)}`)
+    navigate(`/alarm/current?keyword=${encodeURIComponent(sn)}`)
 
   const refreshAll = () => {
     void countQuery.refetch()

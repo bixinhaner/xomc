@@ -137,7 +137,7 @@ function ModelRow({
         <button
           type="button"
           className="font-medium text-primary hover:underline"
-          onClick={() => navigate(`/product/param-model/${encodeURIComponent(row.name)}`)}
+          onClick={() => navigate(`/product/param-model`)}
         >
           {row.name}
         </button>

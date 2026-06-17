@@ -77,7 +77,7 @@ export default function FleetDeviceGroup() {
                     <button
                       key={c.id}
                       type="button"
-                      onClick={() => navigate(`/fleet?groupId=${c.id}`)}
+                      onClick={() => navigate(`/device/list?groupId=${c.id}`)}
                       className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-cyan-500/5"
                     >
                       <Layers className="size-3.5 text-cyan-400/70" />

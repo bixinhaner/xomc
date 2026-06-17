@@ -177,13 +177,13 @@ export default function DeviceRegistration() {
               {submittedSn}
             </div>
             <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
-              <Button onClick={() => navigate(`/devices/detail/${submittedSn}`)}>
+              <Button onClick={() => navigate(`/device/detail/${submittedSn}`)}>
                 查看设备
               </Button>
               <Button variant="outline" onClick={resetForm}>
                 继续注册
               </Button>
-              <Button variant="ghost" onClick={() => navigate('/devices')}>
+              <Button variant="ghost" onClick={() => navigate('/device/list')}>
                 返回列表
               </Button>
             </div>

@@ -13,7 +13,7 @@ function Protected({ children }: { children: ReactNode }) {
 }
 
 export const router = createBrowserRouter([
-  { path: '/', element: <Navigate to="/bridge" replace /> },
+  { path: '/', element: <Navigate to="/dashboard" replace /> },
   { path: '/login', element: <LoginPage /> },
   {
     element: (
@@ -24,5 +24,5 @@ export const router = createBrowserRouter([
     // 路由清单数据驱动（见 ./navConfig）。各模块对齐 v1 子路由只往清单追加。
     children: ALL_ROUTES.map((r) => ({ path: r.path, element: r.element })),
   },
-  { path: '*', element: <Navigate to="/bridge" replace /> },
+  { path: '*', element: <Navigate to="/dashboard" replace /> },
 ], { basename: import.meta.env.BASE_URL?.replace(/\/$/, '') || undefined })

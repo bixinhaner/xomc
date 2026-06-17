@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { Download, FileWarning, HardDrive, RefreshCcw, Search } from 'lucide-react'
 
 import { PageShell } from '@/components/shell/PageShell'
@@ -39,7 +38,6 @@ const TYPE_META: Record<LogType, { label: string; color: string }> = {
 const COLS = 'grid-cols-[150px_100px_1.4fr_110px_150px_70px]'
 
 export default function DeviceLogPage() {
-  const navigate = useNavigate()
   const [page, setPage] = useState(1)
   const [deviceId, setDeviceId] = useState('')
   const [logType, setLogType] = useState<LogType | ''>('')
@@ -147,24 +145,15 @@ export default function DeviceLogPage() {
                     className={`fleet-row grid w-full ${COLS} items-center gap-3 px-3 py-2.5`}
                     style={{ ['--row-color' as never]: meta.color }}
                   >
-                    <button
-                      type="button"
-                      onClick={() => navigate(`/logs/device/${r.id}`)}
-                      className="truncate text-left font-display text-sm font-bold text-cyan-100 hover:text-cyan-300"
-                      title="查看详情"
-                    >
+                    <span className="truncate text-left font-display text-sm font-bold text-cyan-100">
                       {r.deviceSn || '—'}
-                    </button>
+                    </span>
                     <span className="chip" style={{ color: meta.color }}>
                       {meta.label}
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => navigate(`/logs/device/${r.id}`)}
-                      className="min-w-0 truncate text-left font-mono text-[11px] text-cyan-300/75 hover:text-cyan-200"
-                    >
+                    <span className="min-w-0 truncate text-left font-mono text-[11px] text-cyan-300/75">
                       {r.fileName || r.objectPath || '—'}
-                    </button>
+                    </span>
                     <span className="font-mono text-[11px] text-cyan-300/70">
                       {formatBytes(r.fileSize)}
                     </span>

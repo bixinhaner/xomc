@@ -92,7 +92,7 @@ export default function FleetHandoverManagement() {
               <button
                 key={d.id}
                 type="button"
-                onClick={() => navigate(`/fleet/detail/${encodeURIComponent(d.sn)}`)}
+                onClick={() => navigate(`/device/detail/${encodeURIComponent(d.sn)}`)}
                 className="grid w-full grid-cols-[16px_1.6fr_1fr_1fr_1fr] items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-cyan-500/5"
               >
                 <GitCompareArrows className="size-4 text-cyan-400/70" />

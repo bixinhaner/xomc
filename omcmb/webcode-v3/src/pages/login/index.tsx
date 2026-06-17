@@ -31,7 +31,7 @@ export function LoginPage() {
       setTokenPair(tokens)
       const me = await authApi.getMe()
       login(me)
-      navigate('/bridge')
+      navigate('/dashboard')
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'AUTH FAILED'
       setError(msg)
@@ -60,7 +60,7 @@ export function LoginPage() {
       updateTime: new Date().toISOString(),
     }
     login(fakeUser)
-    navigate('/bridge')
+    navigate('/dashboard')
   }
 
   return (

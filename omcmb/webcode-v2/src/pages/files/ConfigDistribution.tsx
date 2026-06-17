@@ -92,7 +92,7 @@ export default function ConfigDistribution() {
             setSelectedFileId(id)
             setSelectedFileName(name)
           }}
-          onOpen={(id) => navigate(`/files/detail/${id}`)}
+          onOpen={() => navigate(`/file/config-retrieval`)}
         />
         <TargetDevices selected={selectedSns} onChange={setSelectedSns} />
       </div>

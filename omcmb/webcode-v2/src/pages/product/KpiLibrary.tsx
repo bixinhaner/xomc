@@ -135,7 +135,7 @@ function SummaryRow({
           type="button"
           className="font-medium text-primary hover:underline"
           onClick={() =>
-            navigate(`/product/kpi-library/${row.tech}/${encodeURIComponent(row.platform)}`)
+            navigate(`/product/kpi-library`)
           }
         >
           {row.platform}

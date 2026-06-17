@@ -9,9 +9,9 @@ const DYNAMIC_MENU = import.meta.env.VITE_DYNAMIC_MENU === 'true'
 export function CockpitDock() {
   // 数据驱动：每个模块取首个路由作为停靠入口；按菜单可见性过滤（对齐 v1 菜单驱动侧栏）。
   const moduleVisible = useModuleVisibility(DYNAMIC_MENU)
-  const items = MODULES.filter((m) => moduleVisible(m.routes[0]?.path ?? '/bridge')).map((m) => ({
+  const items = MODULES.filter((m) => moduleVisible(m.routes[0]?.path ?? '/dashboard')).map((m) => ({
     key: m.key,
-    to: m.routes[0]?.path ?? '/bridge',
+    to: m.routes[0]?.path ?? '/dashboard',
     label: m.label.split(' ')[0],
     icon: m.icon,
   }))

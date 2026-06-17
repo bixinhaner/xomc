@@ -224,7 +224,7 @@ export default function DomainManagement() {
                           <TableRow
                             key={s.id}
                             className="cursor-pointer"
-                            onClick={() => navigate(`/topology/site/${s.id}`)}
+                            onClick={() => navigate(`/topology/site`)}
                           >
                             <TableCell className="font-medium text-primary hover:underline">
                               {s.name}

@@ -149,7 +149,7 @@ export default function CellManagement() {
                       <button
                         type="button"
                         className="text-left text-primary hover:underline"
-                        onClick={() => navigate(`/devices/detail/${d.sn}`)}
+                        onClick={() => navigate(`/device/detail/${d.sn}`)}
                       >
                         {d.deviceName || d.name || d.sn}
                       </button>

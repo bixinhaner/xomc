@@ -184,7 +184,7 @@ export default function Files() {
                     <button
                       type="button"
                       className="font-mono text-xs text-primary hover:underline"
-                      onClick={() => navigate(`/mr/files/${encodeURIComponent(d.deviceSn)}`)}
+                      onClick={() => navigate(`/mr/files`)}
                     >
                       {d.deviceSn}
                     </button>

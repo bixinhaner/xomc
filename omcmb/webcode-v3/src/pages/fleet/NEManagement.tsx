@@ -109,7 +109,7 @@ export default function FleetNEManagement() {
               <div className="text-right">
                 <NeonButton
                   className="!py-1 !px-2"
-                  onClick={() => navigate(`/fleet/detail/${encodeURIComponent(n.sn)}`)}
+                  onClick={() => navigate(`/device/detail/${encodeURIComponent(n.sn)}`)}
                 >
                   DETAIL
                 </NeonButton>

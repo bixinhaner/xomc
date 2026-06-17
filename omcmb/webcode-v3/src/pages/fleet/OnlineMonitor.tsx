@@ -116,7 +116,7 @@ export default function FleetOnlineMonitor() {
             <button
               key={d.id}
               type="button"
-              onClick={() => navigate(`/fleet/detail/${encodeURIComponent(d.sn)}`)}
+              onClick={() => navigate(`/device/detail/${encodeURIComponent(d.sn)}`)}
               className="fleet-row grid w-full grid-cols-[12px_1.6fr_1fr_1fr_1fr] items-center gap-3 rounded-sm px-3 py-2.5 text-left"
               style={{ ['--row-color' as never]: d.isOnline ? '#00ff88' : '#525a78' }}
             >

@@ -1,8 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import {
   AlertTriangle,
-  ChevronRight,
   Loader2,
   Power,
   RefreshCcw,
@@ -39,7 +37,6 @@ const ENABLED_OPTIONS: { v: string; t: string }[] = [
 ]
 
 export default function AlarmRules() {
-  const navigate = useNavigate()
   const [page, setPage] = useState(1)
   const [keyword, setKeyword] = useState('')
   const [enabled, setEnabled] = useState('')
@@ -208,11 +205,7 @@ export default function AlarmRules() {
                   key={r.id}
                   className="grid grid-cols-[2fr_1fr_1fr_1.2fr_120px] items-center gap-3 border-b border-cyan-500/8 px-3.5 py-2.5 last:border-b-0 hover:bg-cyan-500/5"
                 >
-                  <button
-                    type="button"
-                    onClick={() => navigate(`/alarms/rules/${r.id}`)}
-                    className="min-w-0 text-left"
-                  >
+                  <div className="min-w-0 text-left">
                     <div className="flex items-center gap-1.5">
                       {r.isDefault && (
                         <span className="chip text-[#5b9eff]">默认</span>
@@ -225,7 +218,7 @@ export default function AlarmRules() {
                       {r.conditions.length} 条件 · {r.actions.length} 动作
                       {r.userCode ? ` · ${r.userCode}` : ''}
                     </div>
-                  </button>
+                  </div>
                   <span
                     className="chip"
                     style={{ color: typeCfg.color }}
@@ -258,11 +251,6 @@ export default function AlarmRules() {
                           disabled={r.isDefault || r.enabled}
                           onClick={() => void onDelete(r)}
                           icon={<Trash2 className="size-3.5" />}
-                        />
-                        <RowAction
-                          title="详情"
-                          onClick={() => navigate(`/alarms/rules/${r.id}`)}
-                          icon={<ChevronRight className="size-3.5" />}
                         />
                       </>
                     )}

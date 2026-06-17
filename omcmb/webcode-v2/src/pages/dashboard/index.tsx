@@ -106,12 +106,12 @@ const ALARM_SEVERITY: {
 ]
 
 const QUICK_ACCESS: { label: string; path: string; icon: React.ReactNode }[] = [
-  { label: '设备列表', path: '/devices', icon: <AppWindow /> },
-  { label: '当前告警', path: '/alarms', icon: <AlertTriangle /> },
+  { label: '设备列表', path: '/device/list', icon: <AppWindow /> },
+  { label: '当前告警', path: '/alarm/current', icon: <AlertTriangle /> },
   { label: '拓扑监控', path: '/topology', icon: <Network /> },
   { label: '性能 KPI', path: '/performance', icon: <Signal /> },
   { label: 'MML 控制台', path: '/mml', icon: <Terminal /> },
-  { label: '系统日志', path: '/logs', icon: <FileText /> },
+  { label: '系统日志', path: '/log/system', icon: <FileText /> },
   { label: '系统设置', path: '/system', icon: <Settings /> },
 ]
 
@@ -353,7 +353,7 @@ export function DashboardPage() {
           deltaLabel={totalDevicesDelta ? deltaLabel(totalDevicesDelta.compareType) : undefined}
           trend={totalDevicesDelta?.trend ?? 'stable'}
           loading={isLoading}
-          onClick={() => navigate('/devices')}
+          onClick={() => navigate('/device/list')}
         />
         <KpiCard
           icon={<Wifi />}
@@ -364,7 +364,7 @@ export function DashboardPage() {
           deltaLabel="在线率"
           trend="up"
           loading={isLoading}
-          onClick={() => navigate('/devices')}
+          onClick={() => navigate('/device/list')}
         />
         <KpiCard
           icon={<AlertTriangle />}
@@ -375,7 +375,7 @@ export function DashboardPage() {
           deltaLabel={activeAlarmsDelta ? deltaLabel(activeAlarmsDelta.compareType) : undefined}
           trend={activeAlarmsDelta?.trend ?? 'stable'}
           loading={isLoading}
-          onClick={() => navigate('/alarms')}
+          onClick={() => navigate('/alarm/current')}
         />
         <KpiCard
           icon={<Users />}
@@ -504,7 +504,7 @@ export function DashboardPage() {
               <CardTitle>告警等级分布</CardTitle>
               <CardDescription>当前活动告警按严重级别统计</CardDescription>
             </div>
-            <Button variant="link" size="sm" className="px-0" onClick={() => navigate('/alarms')}>
+            <Button variant="link" size="sm" className="px-0" onClick={() => navigate('/alarm/current')}>
               查看全部
             </Button>
           </CardHeader>

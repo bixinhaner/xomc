@@ -188,7 +188,7 @@ export default function LteStandardReportPage() {
         <>
           <button
             type="button"
-            onClick={() => navigate('/reports')}
+            onClick={() => navigate('/report/lte-standard')}
             className="chip text-cyan-300/70 hover:opacity-100"
           >
             ← 简报中心

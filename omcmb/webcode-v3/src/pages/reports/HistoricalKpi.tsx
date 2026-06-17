@@ -109,7 +109,7 @@ export default function HistoricalKpiReportPage() {
       bare
       toolbar={
         <>
-          <button type="button" onClick={() => navigate('/reports')} className="chip text-cyan-300/70 hover:opacity-100">
+          <button type="button" onClick={() => navigate('/report/lte-standard')} className="chip text-cyan-300/70 hover:opacity-100">
             ← 简报中心
           </button>
           <NeonButton

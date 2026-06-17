@@ -109,7 +109,7 @@ export default function AlarmStatistics() {
 
   const goDrill = useCallback(
     (severity: AlarmSeverity) => {
-      navigate(`/alarms?severity=${severity}`)
+      navigate(`/alarm/current?severity=${severity}`)
     },
     [navigate]
   )
@@ -316,7 +316,7 @@ export default function AlarmStatistics() {
                   <button
                     key={d.deviceSN}
                     type="button"
-                    onClick={() => navigate(`/alarms?keyword=${encodeURIComponent(d.deviceSN)}`)}
+                    onClick={() => navigate(`/alarm/current?keyword=${encodeURIComponent(d.deviceSN)}`)}
                     className="flex w-full items-center gap-2.5 px-3 py-2 text-left hover:bg-cyan-500/5"
                   >
                     <span className="w-5 shrink-0 text-center font-mono text-[11px] text-cyan-300/40">

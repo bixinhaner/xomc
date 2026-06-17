@@ -146,7 +146,7 @@ export default function TemplateManagement() {
                       type="button"
                       className="text-left text-sm font-medium text-primary hover:underline"
                       onClick={() =>
-                        navigate(`/transfer/template-management/${encodeURIComponent(tt.typeCode)}`)
+                        navigate(`/transfer/template-management`)
                       }
                     >
                       {tt.displayName || tt.typeCode}

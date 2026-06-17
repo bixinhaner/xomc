@@ -354,7 +354,7 @@ export default function BackupTasks() {
                       <button
                         type="button"
                         className="text-left font-medium text-primary hover:underline"
-                        onClick={() => navigate(`/backup/tasks/${t.id}`)}
+                        onClick={() => navigate(`/backup/tasks`)}
                       >
                         {t.taskName || '—'}
                       </button>
@@ -409,7 +409,7 @@ export default function BackupTasks() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => navigate(`/backup/tasks/${t.id}`)}
+                          onClick={() => navigate(`/backup/tasks`)}
                         >
                           详情
                         </Button>

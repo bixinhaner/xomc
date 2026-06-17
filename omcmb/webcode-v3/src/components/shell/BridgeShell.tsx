@@ -22,7 +22,7 @@ function AccessDenied() {
       </p>
       <button
         type="button"
-        onClick={() => navigate('/bridge')}
+        onClick={() => navigate('/dashboard')}
         className="rounded border border-cyan-400/40 px-4 py-1.5 text-sm text-cyan-200 hover:bg-cyan-400/10"
       >
         返回 BRIDGE

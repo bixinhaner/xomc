@@ -262,7 +262,7 @@ export default function LteStandardReport() {
                     <TableRow
                       key={r.id}
                       className="cursor-pointer"
-                      onClick={() => navigate(`/reports/record/${r.id}`)}
+                      onClick={() => navigate(`/report/lte-standard`)}
                     >
                       <TableCell className="font-medium text-primary hover:underline">
                         {r.reportName}

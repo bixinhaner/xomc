@@ -92,7 +92,7 @@ export default function FleetPlugAndPlay() {
               {s.t}
             </button>
           ))}
-          <NeonButton icon={<PlusCircle />} onClick={() => navigate('/fleet/plug-and-play/add')}>
+          <NeonButton icon={<PlusCircle />} onClick={() => navigate('/device/plug-and-play/add')}>
             NEW POLICY
           </NeonButton>
           <NeonButton icon={<RefreshCcw />} onClick={() => refetch()}>
@@ -135,7 +135,7 @@ export default function FleetPlugAndPlay() {
                   <button
                     type="button"
                     className="min-w-0 text-left"
-                    onClick={() => navigate(`/fleet/detail/${encodeURIComponent(t.deviceId)}`)}
+                    onClick={() => navigate(`/device/detail/${encodeURIComponent(t.deviceId)}`)}
                   >
                     <div className="truncate font-display text-sm font-bold text-cyan-100">
                       TASK {t.id.slice(0, 8)}

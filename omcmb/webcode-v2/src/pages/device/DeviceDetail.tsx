@@ -322,7 +322,7 @@ export default function DeviceDetail() {
       isFetching={isFetching}
       toolbar={
         <div className="flex w-full flex-wrap items-center gap-2">
-          <Button variant="ghost" size="sm" onClick={() => navigate('/devices')}>
+          <Button variant="ghost" size="sm" onClick={() => navigate('/device/list')}>
             <ArrowLeft className="size-4" /> 返回
           </Button>
           {device && (
@@ -390,7 +390,7 @@ export default function DeviceDetail() {
       ) : !device ? (
         <Card className="flex h-48 flex-col items-center justify-center gap-2 p-6 text-muted-foreground">
           <span className="text-sm">未找到设备 {sn}</span>
-          <Button variant="outline" size="sm" onClick={() => navigate('/devices')}>
+          <Button variant="outline" size="sm" onClick={() => navigate('/device/list')}>
             返回设备列表
           </Button>
         </Card>

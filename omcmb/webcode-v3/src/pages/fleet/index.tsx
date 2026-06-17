@@ -173,7 +173,7 @@ export function FleetPage() {
                 <NeonButton
                   tone="cyan"
                   className="!py-1 !px-2"
-                  onClick={() => navigate(`/fleet/detail/${d.sn}`)}
+                  onClick={() => navigate(`/device/detail/${d.sn}`)}
                 >
                   DETAIL
                 </NeonButton>
