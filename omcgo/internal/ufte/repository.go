@@ -44,6 +44,7 @@ var taskTypeColumns = []string{
 	"post_tc_event_code",
 	"permission_code",
 	"platform_scope",
+	"product_scope",
 	"file_type",
 	"file_type_label",
 	"file_type_editable",
@@ -120,6 +121,10 @@ func (r *PgTaskTypeRepository) Upsert(ctx context.Context, item *TaskType) error
 	if err != nil {
 		return fmt.Errorf("marshal UFTE platform scope: %w", err)
 	}
+	productScope, err := json.Marshal(normalizeStringSlice(item.Products))
+	if err != nil {
+		return fmt.Errorf("marshal UFTE product scope: %w", err)
+	}
 	now := time.Now()
 	if item.LastEditor == "" {
 		item.LastEditor = "system"
@@ -138,6 +143,7 @@ func (r *PgTaskTypeRepository) Upsert(ctx context.Context, item *TaskType) error
 			"post_tc_event_code",
 			"permission_code",
 			"platform_scope",
+			"product_scope",
 			"file_type",
 			"file_type_label",
 			"file_type_editable",
@@ -168,6 +174,7 @@ func (r *PgTaskTypeRepository) Upsert(ctx context.Context, item *TaskType) error
 			item.PostTCEventCode,
 			item.PermissionCode,
 			platformScope,
+			productScope,
 			item.FileType,
 			item.FileTypeLabel,
 			item.FileTypeEditable,
@@ -197,6 +204,7 @@ func (r *PgTaskTypeRepository) Upsert(ctx context.Context, item *TaskType) error
 			post_tc_event_code = EXCLUDED.post_tc_event_code,
 			permission_code = EXCLUDED.permission_code,
 			platform_scope = EXCLUDED.platform_scope,
+			product_scope = EXCLUDED.product_scope,
 			file_type = EXCLUDED.file_type,
 			file_type_label = EXCLUDED.file_type_label,
 			file_type_editable = EXCLUDED.file_type_editable,
@@ -247,6 +255,7 @@ func scanTaskType(scanner taskTypeScanner) (*TaskType, error) {
 	var item TaskType
 	var stepChainRaw []byte
 	var platformScopeRaw []byte
+	var productScopeRaw []byte
 	var firmwareFileType sql.NullInt32
 	var createdAt time.Time
 	var updatedAt time.Time
@@ -263,6 +272,7 @@ func scanTaskType(scanner taskTypeScanner) (*TaskType, error) {
 		&item.PostTCEventCode,
 		&item.PermissionCode,
 		&platformScopeRaw,
+		&productScopeRaw,
 		&item.FileType,
 		&item.FileTypeLabel,
 		&item.FileTypeEditable,
@@ -288,12 +298,18 @@ func scanTaskType(scanner taskTypeScanner) (*TaskType, error) {
 	if err := json.Unmarshal(platformScopeRaw, &item.PlatformScope); err != nil {
 		return nil, fmt.Errorf("unmarshal UFTE platform scope: %w", err)
 	}
+	if len(productScopeRaw) > 0 {
+		if err := json.Unmarshal(productScopeRaw, &item.Products); err != nil {
+			return nil, fmt.Errorf("unmarshal UFTE product scope: %w", err)
+		}
+	}
 	if firmwareFileType.Valid {
 		value := software.FileType(firmwareFileType.Int32)
 		item.FirmwareFileType = firmwareFileTypePtr(value)
 	}
 	item.StepChain = normalizeStringSlice(item.StepChain)
 	item.PlatformScope = normalizeStringSlice(item.PlatformScope)
+	item.Products = normalizeStringSlice(item.Products)
 	item.UpdatedAt = formatTime(updatedAt)
 	return &item, nil
 }

@@ -26,6 +26,10 @@ import (
 // 用闭包把真实 Registry.MatchProductClass 包成这个签名注入。
 type ProductTechLookup func(ctx context.Context, productClass string) (tech string, ok bool)
 
+// ProductNameLookup 按设备 productClass 经 ProductRegistry 反查产品英文名（products.product_name）。
+// #492：模板 product_scope（适用产品名列表）非空时，设备候选匹配用它做"产品目录精确匹配"。
+type ProductNameLookup func(ctx context.Context, productClass string) (name string, ok bool)
+
 type Service struct {
 	softwareService *software.SoftwareService
 	taskTypeRepo    TaskTypeRepository
@@ -37,6 +41,9 @@ type Service struct {
 	// 否则像 FAP/BSC7041C243 这种 BaiBNQ 5G 产品因为字符串没 "5G/GNB/BBU" 关键字,
 	// 5G 升级任务的设备候选会整批漏选（用户实测反馈过）。
 	productTechLookup ProductTechLookup
+	// productNameLookup 注入式：productClass → 产品英文名。nil 时 product_scope 匹配整批漏选
+	// （退回为：product_scope 非空但查不到产品名 → 不放行），推荐生产部署一定注入。
+	productNameLookup ProductNameLookup
 	// downloadURLLookup 注入式回调：(sn, fileName) → presigned GET URL（1h 有效）。
 	// nil 表示部署未装配 backup.FileRepository / MinIO，DeviceItem.DownloadURL 留空。
 	// 返回 ("", nil) 表示元数据缺失（CPE 还没传完）；返回 ("", err) 仅在 DB/MinIO
@@ -208,6 +215,12 @@ func NewService(
 // 没 BSC 关键字会被漏掉）。
 func (s *Service) SetProductTechLookup(fn ProductTechLookup) {
 	s.productTechLookup = fn
+}
+
+// SetProductNameLookup 注入"按 productClass 查产品英文名 product.Name"的回调（#492）。
+// 模板 product_scope 非空时，设备候选按产品名精确匹配走该 lookup 调 ProductRegistry。
+func (s *Service) SetProductNameLookup(fn ProductNameLookup) {
+	s.productNameLookup = fn
 }
 
 // SetDownloadURLLookup 注入"按 (sn, fileName) 拿 presigned URL"的回调。
@@ -1162,6 +1175,25 @@ func (s *Service) loadAllSubTasks(ctx context.Context, catalog []TaskType, categ
 //  3. ProductRegistry 不可用 / productClass 字典里没注册 → 退回 matchesTaskTypeScope
 //     的旧关键字模糊匹配（保留向后兼容，避免新装环境 / 单测环境无 registry 时一刀切）。
 func (s *Service) deviceMatchesTaskType(ctx context.Context, item TaskType, productClass string) bool {
+	// #492：product_scope（适用产品=产品英文名列表）非空 → 走产品目录精确匹配，作为权威口径：
+	// 设备 productClass → ProductRegistry → product.Name，命中列表才放行，
+	// 取代旧的 PlatformScope 子串 + tech 关键字白名单（关键字有 "FAP" 同时命中 LTE/GSM 的坑）。
+	// product_scope 为空时（自定义模板未配 / 非升级类）回退旧口径，保证灰度兼容。
+	if len(item.Products) > 0 {
+		if productClass == "" || s.productNameLookup == nil {
+			return false
+		}
+		name, ok := s.productNameLookup(ctx, productClass)
+		if !ok || name == "" {
+			return false
+		}
+		for _, p := range item.Products {
+			if p == name {
+				return true
+			}
+		}
+		return false
+	}
 	if matchesTaskTypeScope(item, productClass) {
 		return true
 	}
@@ -1584,6 +1616,7 @@ func taskTypeFromWriteRequest(typeCode, permissionCode string, builtIn bool, req
 		PostTCEventCode:        strings.TrimSpace(req.PostTCEventCode),
 		PermissionCode:         permissionCode,
 		PlatformScope:          normalizeStringSlice(req.PlatformScope),
+		Products:               normalizeStringSlice(req.Products),
 		FileType:               fileType,
 		FileTypeLabel:          fileTypeLabel,
 		FileTypeEditable:       req.FileTypeEditable,

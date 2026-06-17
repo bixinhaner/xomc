@@ -32,6 +32,10 @@ type TaskType struct {
 	PostTCEventCode        string             `json:"postTcEventCode,omitempty"`
 	PermissionCode         string             `json:"permissionCode"`
 	PlatformScope          []string           `json:"platformScope"`
+	// Products 是「适用产品」= 产品英文名列表（引用 products.product_name，#492）。
+	// 非空时设备候选匹配走产品目录精确匹配（deviceMatchesTaskType），制式由所选产品 tech 派生；
+	// 空则回退旧 PlatformScope 子串 + techHint 关键字匹配（灰度兼容）。
+	Products               []string           `json:"products"`
 	FileType               string             `json:"fileType"`
 	FileTypeLabel          string             `json:"fileTypeLabel"`
 	FileTypeEditable       bool               `json:"fileTypeEditable"`
@@ -148,6 +152,9 @@ type TaskTypeWriteRequest struct {
 	PostTCEventCode        string             `json:"postTcEventCode"`
 	Enabled                bool               `json:"enabled"`
 	PlatformScope          []string           `json:"platformScope"`
+	// Products「适用产品」= 产品英文名列表（#492）。前端模板编辑改为产品名多选后提交此字段；
+	// 留空则沿用 PlatformScope 旧口径。
+	Products               []string           `json:"products"`
 	FileType               string             `json:"fileType" binding:"required"`
 	FileTypeLabel          string             `json:"fileTypeLabel" binding:"required"`
 	FileTypeEditable       bool               `json:"fileTypeEditable"`
@@ -764,6 +771,7 @@ func materializeTaskTypes(stored []TaskType) []TaskType {
 	for _, item := range stored {
 		item.StepChain = normalizeStringSlice(item.StepChain)
 		item.PlatformScope = normalizeStringSlice(item.PlatformScope)
+		item.Products = normalizeStringSlice(item.Products)
 		item.FirmwareFileType = normalizeTaskTypeFirmwareFileType(item.RPCType, item.FirmwareFileType, item.FileType)
 		if base, ok := defaultByCode[item.TypeCode]; ok {
 			item.BuiltIn = item.BuiltIn || base.BuiltIn
