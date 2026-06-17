@@ -13,24 +13,49 @@ package quicksettings
 // 单实例分组(multiInstance=false)的 Params 每项含 StandardPath,前端按 path 查 schema 渲染表单。
 // 多实例分组(multiInstance=true)的 Params 每项含 Leaf 叶子名,前端拼接 ObjectPath + 实例号 + Leaf
 // 形成完整 standardPath,并支持 AddObject / DeleteObject。
+//
+// Style/ParentSelector 用于 BSC 等需要「实例选择器 + 多面板」UI 的场景:
+//   - Style="table" (默认):MultiInstanceTable 行=实例,列=Params
+//   - Style="form":InstanceSelectorForm 顶部按 ParentSelector 选实例,中部以 grid 渲染本组 Params
+//   - Style="subtable":InstanceSelectorForm 嵌入子表(行=子实例,列=Params),ObjectPath 为 2 层 {i}.<sub>.{j}.
 type Group struct {
-	ID            string  `json:"id"`
-	TitleZh       string  `json:"titleZh"`
-	TitleEn       string  `json:"titleEn"`
-	MultiInstance bool    `json:"multiInstance"`
-	ObjectPath    string  `json:"objectPath,omitempty"` // 仅 multiInstance=true 时填,含 {i} 占位符
+	ID            string `json:"id"`
+	TitleZh       string `json:"titleZh"`
+	TitleEn       string `json:"titleEn"`
+	MultiInstance bool   `json:"multiInstance"`
+	ObjectPath    string `json:"objectPath,omitempty"` // 仅 multiInstance=true 时填,含 {i} 占位符
 	// MaxInstances 多实例分组的最大实例数(仅 multiInstance=true 生效)。0 表示未指定。
-	MaxInstances int     `json:"maxInstances,omitempty"`
-	Params       []Param `json:"params"`
+	MaxInstances int `json:"maxInstances,omitempty"`
+	// Style 渲染样式,可选 "table" / "form" / "subtable";空值由前端按 multiInstance 默认 "table"。
+	Style string `json:"style,omitempty"`
+	// ParentSelector 引用同 paramModel 内另一个 Group ID,UI 由该 group 的实例选择器统一控制。
+	ParentSelector string  `json:"parentSelector,omitempty"`
+	Params         []Param `json:"params"`
 }
 
 // Param 是分组下的单个参数。
 //
 // 单实例分组用 StandardPath;多实例分组用 Leaf(与 Group.ObjectPath 拼接成完整路径)。
+// Type/Required/Min/Max/Hint/Readonly/EnumOptions/CheckboxOptions 为可选 UI 元数据,供 form/subtable
+// 渲染器决定输入控件类型与校验规则;table 风格不使用这些字段(由 schema 推断)。
 type Param struct {
-	Name         string `json:"name"`
-	TitleZh      string `json:"titleZh"`
-	TitleEn      string `json:"titleEn"`
-	StandardPath string `json:"standardPath,omitempty"`
-	Leaf         string `json:"leaf,omitempty"`
+	Name             string       `json:"name"`
+	TitleZh          string       `json:"titleZh"`
+	TitleEn          string       `json:"titleEn"`
+	StandardPath     string       `json:"standardPath,omitempty"`
+	Leaf             string       `json:"leaf,omitempty"`
+	Type             string       `json:"type,omitempty"` // string/int/enum/multiCheckbox
+	Required         bool         `json:"required,omitempty"`
+	Readonly         bool         `json:"readonly,omitempty"`
+	Hint             string       `json:"hint,omitempty"`
+	MinValue         *int64       `json:"minValue,omitempty"`
+	MaxValue         *int64       `json:"maxValue,omitempty"`
+	EnumOptions      []EnumOption `json:"enumOptions,omitempty"`
+	CheckboxOptions  []string     `json:"checkboxOptions,omitempty"`
+}
+
+// EnumOption 单个枚举值（value 是上送 TR069 的字符串，label 是 UI 显示）。
+type EnumOption struct {
+	Value string `json:"value"`
+	Label string `json:"label"`
 }

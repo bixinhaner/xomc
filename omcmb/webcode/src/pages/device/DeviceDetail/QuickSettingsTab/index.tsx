@@ -5,6 +5,7 @@ import { useQuickSettingsGroups } from '@core/hooks/api/useQuickSettings';
 import { useResolvedCellInstances } from '@core/hooks/api/useResolvedCellInstances';
 import { useQuickSettingsFeedbackStore } from '@core/store/quickSettingsFeedbackStore';
 import CellParameterForm from './CellParameterForm';
+import InstanceSelectorForm from './InstanceSelectorForm';
 import MultiInstanceTable from './MultiInstanceTable';
 import type { QuickSettingsInstanceContext } from './validators';
 import { useT } from '@/hooks/useT';
@@ -218,8 +219,24 @@ export default function QuickSettingsTab({ deviceId, networkType }: QuickSetting
         </Space>
       )}
 
-      {visibleGroups.map((group) =>
-        group.multiInstance ? (
+      {visibleGroups.map((group) => {
+        // 若该 group 是其他 group 的 parentSelector，则把对应子 groups 嵌入到 InstanceSelectorForm 中渲染。
+        const childGroups = visibleGroups.filter((g) => g.parentSelector === group.id);
+        if (group.style === 'table' && childGroups.length > 0) {
+          return (
+            <InstanceSelectorForm
+              key={`${group.id}::${refreshTick}::${selectedKey}`}
+              deviceId={deviceId}
+              selectorGroup={group}
+              childGroups={childGroups}
+              instanceContext={instanceContext}
+              locale={locale}
+            />
+          );
+        }
+        // 子 groups (parentSelector 非空) 已嵌入到上面的 selector，这里跳过独立渲染。
+        if (group.parentSelector) return null;
+        return group.multiInstance ? (
           <MultiInstanceTable
             key={`${group.id}::${refreshTick}::${selectedKey}`}
             deviceId={deviceId}
@@ -235,8 +252,8 @@ export default function QuickSettingsTab({ deviceId, networkType }: QuickSetting
             instanceContext={instanceContext}
             locale={locale}
           />
-        ),
-      )}
+        );
+      })}
     </div>
   );
 }

@@ -545,15 +545,7 @@ const getStationFields = (t: ReturnType<typeof useT>, networkType: string): Fiel
     );
   }
 
-  // GSM 独有字段
-  if (networkType === 'GSM') {
-    fields.push(
-      { key: 'ipaUnitId', label: 'IPA Unit ID', render: (d) => <Text style={{ fontFamily: 'monospace' }}>{d.ipaUnitId ?? '-'}</Text> },
-      { key: 'omlRemoteIp', label: 'OML Remote IP', render: (d) => <Text style={{ fontFamily: 'monospace' }}>{d.omlRemoteIp ?? '-'}</Text> },
-      { key: 'omlRemoteIpBak', label: 'OML Remote IP Bak', render: (d) => <Text style={{ fontFamily: 'monospace' }}>{d.omlRemoteIpBak ?? '-'}</Text> },
-      { key: 'bscSelect', label: 'BSC Select', render: (d) => d.bscSelect === '0' ? t('device.bscPrimary') : d.bscSelect === '1' ? t('device.bscBackup') : d.bscSelect ?? '-' },
-    );
-  }
+  // GSM 独有字段（IPA Unit ID / OML Remote IP / OML Remote IP Bak / BSC Select 按需求隐藏）
 
   return { title: t('device.group.station'), fields };
 };
@@ -1516,11 +1508,13 @@ export default function DeviceDetail() {
     if (!displayDevice) return [];
     const networkType = normalizeNetworkType(displayDevice.networkType);
 
-    return [
-      getStationFields(t, networkType),
-      getStatusFields(t, networkType),
-      getOtherFields(t, networkType, displayDevice),
-    ];
+    // BSC（GSM）详情页按需求隐藏「状态信息」组
+    const groups: FieldGroup[] = [getStationFields(t, networkType)];
+    if (networkType !== 'GSM') {
+      groups.push(getStatusFields(t, networkType));
+    }
+    groups.push(getOtherFields(t, networkType, displayDevice));
+    return groups;
   }, [displayDevice, t]);
 
   const cellGroup = useMemo((): FieldGroup | null => {
@@ -1528,6 +1522,8 @@ export default function DeviceDetail() {
     const networkType = isBmProduct && activeBmTech === 'GSM'
       ? 'GSM'
       : normalizeNetworkType(displayDevice.networkType);
+    // BSC（GSM）详情页按需求隐藏「小区信息」表（保留 BM 产品里的 GSM 小区视图）
+    if (networkType === 'GSM' && !isBmProduct) return null;
     return getCellFields(t, networkType);
   }, [activeBmTech, displayDevice, isBmProduct, t]);
 
