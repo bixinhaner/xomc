@@ -4,7 +4,7 @@
 --   · 非空 → 设备候选匹配按"设备 productClass → ProductRegistry → product.Name ∈ 列表"精确放行；
 --   · 空   → 回退旧 platform_scope 子串 + tech 关键字匹配（灰度兼容，见 internal/ufte deviceMatchesTaskType）。
 -- 制式(2G/4G/5G)由所选产品的 tech 派生，不再依赖硬编码 techHint。
--- 内置升级模板的初始 product_scope 由 seed/000012 按制式回填。
+-- 内置升级模板的初始 product_scope 由 seed/000013 按制式回填。
 ALTER TABLE public.ufte_task_types
     ADD COLUMN IF NOT EXISTS product_scope jsonb NOT NULL DEFAULT '[]'::jsonb;
 
