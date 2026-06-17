@@ -20,6 +20,11 @@ import { useState, useEffect } from 'react';
 // 全局缓存状态，避免 React StrictMode 双重渲染导致重复请求
 let globalMetadataCache: MapMetadata | null = null;
 let globalFetchPromise: Promise<void> | null = null;
+let globalCacheIsDefault = false;
+let globalCacheError: string | null = null;
+
+// tiles-metadata 最大等待时间（ms）
+const METADATA_TIMEOUT_MS = 5000;
 
 /**
  * TileJSON 格式（Maperitive / TileServer GL 生成）
@@ -166,16 +171,17 @@ export type LoadStatus =
 export function useMapConfig() {
   const [metadata, setMetadata] = useState<MapMetadata | null>(() => globalMetadataCache);
   const [loading, setLoading] = useState(() => globalMetadataCache === null);
-  const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<LoadStatus>(() => globalMetadataCache ? 'success' : 'idle');
-  const [isUsingDefault, setIsUsingDefault] = useState(false);
+  const [error, setError] = useState<string | null>(() => globalCacheError);
+  const [status, setStatus] = useState<LoadStatus>(() => {
+    if (!globalMetadataCache) return 'idle';
+    return globalCacheIsDefault ? 'error' : 'success';
+  });
+  const [isUsingDefault, setIsUsingDefault] = useState(() => globalCacheIsDefault);
 
   useEffect(() => {
     // 如果已有缓存，直接使用
     if (globalMetadataCache) {
-      setMetadata(globalMetadataCache);
-      setLoading(false);
-      setStatus('success');
+      // 初始化 state 已从缓存读取，这里无需再次 setState，避免级联渲染
       return;
     }
 
@@ -185,7 +191,9 @@ export function useMapConfig() {
         if (globalMetadataCache) {
           setMetadata(globalMetadataCache);
           setLoading(false);
-          setStatus('success');
+          setStatus(globalCacheIsDefault ? 'error' : 'success');
+          setIsUsingDefault(globalCacheIsDefault);
+          setError(globalCacheError);
         }
       });
       return;
@@ -194,45 +202,77 @@ export function useMapConfig() {
     const fetchMetadata = async () => {
       setStatus('loading');
       setIsUsingDefault(false);
+      setError(null);
+
+      let timeoutId: ReturnType<typeof setTimeout> | null = null;
+      const controller = new AbortController();
+
+      const applyDefaultFallback = (reason: string, logMessage: string) => {
+        console.warn(`[MapConfig] ${logMessage}`);
+        globalMetadataCache = DEFAULT_METADATA;
+        globalCacheIsDefault = true;
+        globalCacheError = reason;
+        setMetadata(DEFAULT_METADATA);
+        setStatus('error');
+        setIsUsingDefault(true);
+        setError(reason);
+      };
 
       try {
-        const response = await fetch('/tiles-metadata');
+        timeoutId = setTimeout(() => {
+          controller.abort();
+        }, METADATA_TIMEOUT_MS);
+
+        const response = await fetch('/tiles-metadata', {
+          signal: controller.signal,
+        });
 
         if (response.ok) {
-          const tilejson: TileJSON = await response.json();
+          let tilejson: TileJSON;
+          try {
+            tilejson = await response.json();
+          } catch {
+            applyDefaultFallback('json_parse_error', 'tiles-metadata parse failed, fallback to defaults');
+            return;
+          }
 
           // 验证 TileJSON 基本结构
           if (tilejson && (tilejson.bounds || tilejson.center)) {
             const converted = tileJsonToMetadata(tilejson);
             globalMetadataCache = converted; // 缓存结果
+            globalCacheIsDefault = false;
+            globalCacheError = null;
             setMetadata(converted);
             setStatus('success');
+            setIsUsingDefault(false);
+            setError(null);
           } else {
             // TileJSON 格式不完整，使用默认值
-            globalMetadataCache = DEFAULT_METADATA; // 缓存默认值
-            setMetadata(DEFAULT_METADATA);
-            setStatus('error');
-            setIsUsingDefault(true);
-            setError('TileJSON format incomplete');
+            applyDefaultFallback('tilejson_incomplete', 'tiles-metadata incomplete, fallback to defaults');
           }
         } else {
           // HTTP 错误（404/500 等），使用默认值
-          globalMetadataCache = DEFAULT_METADATA; // 缓存默认值
-          setMetadata(DEFAULT_METADATA);
-          setStatus('error');
-          setIsUsingDefault(true);
-          setError(`HTTP ${response.status}: ${response.statusText}`);
+          applyDefaultFallback(
+            `http_${response.status}`,
+            `tiles-metadata http error ${response.status}, fallback to defaults`
+          );
         }
       } catch (err) {
         // 网络错误或其他异常，使用默认值
-        const errorMessage =
-          err instanceof Error ? err.message : 'Unknown error';
-        globalMetadataCache = DEFAULT_METADATA; // 缓存默认值
-        setMetadata(DEFAULT_METADATA);
-        setStatus('error');
-        setIsUsingDefault(true);
-        setError(errorMessage);
+        const isTimeoutAbort = err instanceof Error && err.name === 'AbortError';
+        if (isTimeoutAbort) {
+          applyDefaultFallback(
+            `timeout_${METADATA_TIMEOUT_MS}ms`,
+            `tiles-metadata timeout after ${METADATA_TIMEOUT_MS}ms, fallback to defaults`
+          );
+        } else {
+          const errorMessage = err instanceof Error ? err.message : 'unknown_error';
+          applyDefaultFallback(`network_error_${errorMessage}`, 'tiles-metadata network error, fallback to defaults');
+        }
       } finally {
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+        }
         setLoading(false);
         globalFetchPromise = null; // 清空 Promise
       }
