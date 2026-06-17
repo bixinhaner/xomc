@@ -81,9 +81,13 @@ const Easing = {
 interface UseOLMapOptions {
   /** 瓦片服务地址（离线模式） */
   tileUrl?: string;
-  /** 默认中心点 [lng, lat] */
+  /** 默认中心点 [lng, lat] - 传入后作为备选中心点，优先级低于 center */
+  defaultCenter?: [number, number];
+  /** 默认缩放级别 - 传入后作为备选缩放，优先级低于 zoom */
+  defaultZoom?: number;
+  /** 中心点 [lng, lat] - 优先级最高，用于动态更新中心点 */
   center?: [number, number];
-  /** 默认缩放级别 */
+  /** 缩放级别 - 优先级最高，用于动态更新缩放 */
   zoom?: number;
   /** 最小缩放级别 */
   minZoom?: number;
@@ -204,8 +208,8 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
 
   const {
     tileUrl,
-    center = config.defaultCenter,
-    zoom = config.defaultZoom,
+    center,
+    zoom,
     minZoom = config.minZoom,
     maxZoom = config.maxZoom,
     clusterDistance = CLUSTER_CONFIG.distance,
@@ -214,6 +218,8 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
     onViewportChange,
     onClusterClick,
     onMapClick,
+    defaultCenter,
+    defaultZoom,
   } = options;
 
   const mapRef = useRef<HTMLDivElement>(null);
@@ -433,8 +439,8 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
       target: mapRef.current,
       layers,
       view: new View({
-        center: fromLonLat(center),
-        zoom,
+        center: fromLonLat(center ?? defaultCenter ?? config.defaultCenter),
+        zoom: zoom ?? defaultZoom ?? config.defaultZoom,
         minZoom,
         maxZoom,
       }),
@@ -822,9 +828,10 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
 
   // 获取当前 zoom 级别
   const getZoom = useCallback((): number => {
-    if (!mapInstanceRef.current) return zoom;
-    return mapInstanceRef.current.getView().getZoom() ?? zoom;
-  }, [zoom]);
+    const fallbackZoom = zoom ?? defaultZoom ?? config.defaultZoom;
+    if (!mapInstanceRef.current) return fallbackZoom;
+    return mapInstanceRef.current.getView().getZoom() ?? fallbackZoom;
+  }, [zoom, defaultZoom, config.defaultZoom]);
 
   // 适配边界
   const fitBounds = useCallback((bounds: MapBounds) => {

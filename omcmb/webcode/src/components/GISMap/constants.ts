@@ -164,10 +164,56 @@ export const MARKER_SIZE_CONFIG = {
  * 地图默认配置
  */
 export const MAP_CONFIG = {
-  /** 默认中心点 [lng, lat] - 赞比亚中心 (所有设备经纬度平均值) */
-  defaultCenter: [28.221, -14.607] as [number, number],
-  /** 默认缩放级别 */
-  defaultZoom: 6,
+  /**
+   * 默认中心点 [lng, lat]
+   * 支持环境变量配置：VITE_MAP_DEFAULT_CENTER="lng,lat,zoom"
+   * 优先级：环境变量 > 赞比亚中心点 (28.221, -14.607)
+   */
+  get defaultCenter(): [number, number] {
+    // 尝试从环境变量读取
+    const envValue = import.meta.env.VITE_MAP_DEFAULT_CENTER;
+    if (envValue) {
+      try {
+        const parts = envValue.split(',').map((p: string) => p.trim());
+        if (parts.length >= 2) {
+          const lng = parseFloat(parts[0]);
+          const lat = parseFloat(parts[1]);
+          if (!isNaN(lng) && !isNaN(lat) && lng >= -180 && lng <= 180 && lat >= -90 && lat <= 90) {
+            return [lng, lat];
+          }
+        }
+      } catch {
+        console.warn('[MAP_CONFIG] Failed to parse VITE_MAP_DEFAULT_CENTER, using default');
+      }
+    }
+    // 默认值：赞比亚中心 (所有设备经纬度平均值)
+    return [28.221, -14.607];
+  },
+
+  /**
+   * 默认缩放级别
+   * 支持从环境变量 VITE_MAP_DEFAULT_CENTER="lng,lat,zoom" 中读取
+   * 优先级：环境变量中的 zoom > 硬编码默认值 6
+   */
+  get defaultZoom(): number {
+    // 尝试从环境变量读取
+    const envValue = import.meta.env.VITE_MAP_DEFAULT_CENTER;
+    if (envValue) {
+      try {
+        const parts = envValue.split(',').map((p: string) => p.trim());
+        if (parts.length >= 3) {
+          const zoom = parseInt(parts[2], 10);
+          if (!isNaN(zoom) && zoom >= 1 && zoom <= 18) {
+            return zoom;
+          }
+        }
+      } catch {
+        console.warn('[MAP_CONFIG] Failed to parse zoom from VITE_MAP_DEFAULT_CENTER, using default');
+      }
+    }
+    // 默认缩放级别
+    return 6;
+  },
   /** 最小缩放级别 */
   minZoom: 1,
   /** 最大缩放级别 */
