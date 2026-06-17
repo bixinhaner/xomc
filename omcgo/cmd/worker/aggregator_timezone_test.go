@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/omcgo/omcgo/internal/core/systimezone"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -137,21 +140,173 @@ func TestHourlyWindow_UnaffectedByTimezone(t *testing.T) {
 	}
 }
 
-// 验收 5：loc 解析失败回落 UTC 不 panic；空值默认 Asia/Shanghai。
-func TestResolvePMTimezone_FallbackAndDefault(t *testing.T) {
-	logger := zap.NewNop()
+// stubFetcher 是 systimezone.Fetcher 的可变桩：原子换值模拟 sys_configs 改时区。
+type stubFetcher struct {
+	val atomic.Pointer[string]
+}
 
-	// 空值 → Asia/Shanghai
-	loc := resolvePMTimezone("", logger)
-	require.Equal(t, "Asia/Shanghai", loc.String())
+func (s *stubFetcher) set(v string) { s.val.Store(&v) }
+func (s *stubFetcher) fetch(_ context.Context, category, key string) (string, bool) {
+	if category != systimezone.Category || key != systimezone.Key {
+		return "", false
+	}
+	if p := s.val.Load(); p != nil {
+		return *p, true
+	}
+	return "", false
+}
+
+// newTzManagerWithProvider 构造一个用桩 Provider 的 tzManager（不走 DB）。
+func newTzManagerWithProvider(p *systimezone.Provider) *tzManager {
+	m := &tzManager{provider: p, logger: zap.NewNop()}
+	m.cur.Store(m.resolve(context.Background()))
+	return m
+}
+
+// 验收 5（改）：业务时区改读 sys_configs 统一源；空/非法回落 UTC 不 panic。
+func TestTzManager_ResolveFromSysConfig_FallbackUTC(t *testing.T) {
+	ctx := context.Background()
+
+	// 合法时区
+	sf := &stubFetcher{}
+	sf.set("Asia/Tokyo")
+	m := newTzManagerWithProvider(systimezone.New(sf.fetch, nil))
+	require.Equal(t, "Asia/Tokyo", m.Current().String())
+
+	// 空值 → 回落 UTC（Provider DefaultTimezone=UTC）
+	sf2 := &stubFetcher{}
+	sf2.set("")
+	m2 := newTzManagerWithProvider(systimezone.New(sf2.fetch, nil))
+	require.Equal(t, time.UTC, m2.Current())
 
 	// 非法时区 → 回落 UTC，不 panic
 	require.NotPanics(t, func() {
-		bad := resolvePMTimezone("Not/AZone", logger)
-		require.Equal(t, time.UTC, bad)
+		sf3 := &stubFetcher{}
+		sf3.set("Not/AZone")
+		m3 := newTzManagerWithProvider(systimezone.New(sf3.fetch, nil))
+		require.Equal(t, time.UTC, m3.Current())
 	})
 
-	// 合法时区原样返回
-	good := resolvePMTimezone("Asia/Shanghai", logger)
-	require.Equal(t, "Asia/Shanghai", good.String())
+	// 无 Provider（无 DB）→ UTC
+	m4 := &tzManager{logger: zap.NewNop()}
+	m4.cur.Store(m4.resolve(ctx))
+	require.Equal(t, time.UTC, m4.Current())
+}
+
+// 验收（新）：动态切换后按新 loc 切桶——改 sys_configs 时区 → reload → 同一 now 的
+// daily/weekly/monthly 窗口边界按新时区零点对齐（不重启 worker，核心验收）。
+func TestTzManager_DynamicSwitch_BucketsCutByNewLoc(t *testing.T) {
+	ctx := context.Background()
+	tokyo, err := time.LoadLocation("Asia/Tokyo")
+	require.NoError(t, err)
+	shanghai := loadShanghai(t)
+
+	// 初始时区 = Asia/Tokyo（+09:00）
+	sf := &stubFetcher{}
+	sf.set("Asia/Tokyo")
+	// 用 0 TTL 让每次 reload 后 Location() 必重读桩值（避免 5min 缓存遮蔽）。
+	m := newTzManagerWithProvider(systimezone.New(sf.fetch, nil, systimezone.WithTTL(0)))
+	require.Equal(t, "Asia/Tokyo", m.Current().String())
+
+	// cron entries 的 window 经 m.Current() 实时取时区（生产同路径）。
+	entries := pmAggregatorCronEntriesFn(m.Current)
+	dailyWindow := func() func(time.Time) (time.Time, time.Time) {
+		for _, e := range entries {
+			if e.jobType == aggregator.JobTypeDaily {
+				return e.window
+			}
+		}
+		t.Fatal("daily entry 未找到")
+		return nil
+	}()
+
+	// 注入跨本地零点的 now：UTC 2026-05-30 18:00 = 东京 5-31 03:00 = 北京 5-31 02:00。
+	now := time.Date(2026, 5, 30, 18, 0, 0, 0, time.UTC)
+
+	// 切换前（东京）：daily end = 东京 5-31 00:00 = UTC 5-30 15:00。
+	_, endTokyo := dailyWindow(now)
+	require.True(t, endTokyo.Equal(time.Date(2026, 5, 31, 0, 0, 0, 0, tokyo)),
+		"切换前 daily end 应落东京本地零点；got=%s", endTokyo)
+	require.True(t, endTokyo.Equal(time.Date(2026, 5, 30, 15, 0, 0, 0, time.UTC)),
+		"东京零点等价 UTC 5-30 15:00；got=%s", endTokyo.UTC())
+
+	// === 管理员改系统时区为 Asia/Shanghai（模拟改 sys_configs + 触发 reload）===
+	sf.set("Asia/Shanghai")
+	changed := m.reload(ctx)
+	require.True(t, changed, "时区从东京改上海应被识别为变化")
+	require.Equal(t, "Asia/Shanghai", m.Current().String())
+
+	// 切换后（上海）：同一 now，window 用新时区——daily end = 上海 5-31 00:00 = UTC 5-30 16:00。
+	// 这是不重启即生效的核心断言：边界从东京零点(UTC15:00)移到上海零点(UTC16:00)。
+	_, endShanghai := dailyWindow(now)
+	require.True(t, endShanghai.Equal(time.Date(2026, 5, 31, 0, 0, 0, 0, shanghai)),
+		"切换后 daily end 应落上海本地零点；got=%s", endShanghai)
+	require.True(t, endShanghai.Equal(time.Date(2026, 5, 30, 16, 0, 0, 0, time.UTC)),
+		"上海零点等价 UTC 5-30 16:00；got=%s", endShanghai.UTC())
+
+	require.False(t, endTokyo.Equal(endShanghai),
+		"切换前后 daily 桶边界必须不同（东京零点 != 上海零点）")
+
+	// 再切回 UTC：daily end = UTC 5-31 00:00（now 当天 UTC 零点之后，端落本日零点）。
+	sf.set("UTC")
+	require.True(t, m.reload(ctx))
+	require.Equal(t, time.UTC, m.Current())
+	_, endUTC := dailyWindow(now)
+	require.True(t, endUTC.Equal(time.Date(2026, 5, 30, 0, 0, 0, 0, time.UTC)),
+		"切回 UTC 后 daily end 应落 UTC 当日零点(now=5-30 18:00→桶端 5-30 00:00)；got=%s", endUTC.UTC())
+}
+
+// 验收（新）：reload 时区未变则不触发重建（changed=false）。
+func TestTzManager_Reload_NoChange(t *testing.T) {
+	sf := &stubFetcher{}
+	sf.set("Asia/Tokyo")
+	m := newTzManagerWithProvider(systimezone.New(sf.fetch, nil, systimezone.WithTTL(0)))
+	require.False(t, m.reload(context.Background()), "时区未变 reload 应返回 false")
+	require.Equal(t, "Asia/Tokyo", m.Current().String())
+}
+
+// 验收（新·替换事件驱动）：后台轮询感知改时区——startReloadPoller 启动后周期重读
+// sys_configs，管理员改桩值后无需重启即被感知、Current() 切到新时区。
+//
+// 此用例直接驱动生产路径（startReloadPoller→reload→Provider 重读），不再用
+// ChannelEventBus 掩盖真实 NATS WorkQueue 下事件订阅会失败的问题（回合1 检查阻塞缺陷）。
+func TestTzManager_ReloadPoller_DynamicNoRestart(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sf := &stubFetcher{}
+	sf.set("Asia/Tokyo")
+	// TTL=0 让每轮 reload 后 Location() 必重读桩值（生产靠 reload 内 Invalidate 同效）。
+	m := newTzManagerWithProvider(systimezone.New(sf.fetch, nil, systimezone.WithTTL(0)))
+	require.Equal(t, "Asia/Tokyo", m.Current().String())
+
+	// 用很短的轮询周期（10ms）跑真实 poller。
+	m.startReloadPoller(ctx, 10*time.Millisecond)
+
+	// 管理员改 sys_configs 时区为上海（不重启）→ 轮询应在一两拍内感知。
+	sf.set("Asia/Shanghai")
+	require.Eventually(t, func() bool {
+		return m.Current().String() == "Asia/Shanghai"
+	}, 2*time.Second, 10*time.Millisecond, "轮询应感知改时区为上海（不重启即生效）")
+
+	// 再改回 UTC → 同样被轮询感知。
+	sf.set("UTC")
+	require.Eventually(t, func() bool {
+		return m.Current() == time.UTC
+	}, 2*time.Second, 10*time.Millisecond, "轮询应感知改时区回 UTC")
+}
+
+// 验收（新）：无 Provider（无 DB）时 startReloadPoller 不启动轮询，时区恒为启动值，
+// 不 panic、不泄漏 goroutine。
+func TestTzManager_ReloadPoller_NoProviderNoOp(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	m := &tzManager{logger: zap.NewNop()}
+	m.cur.Store(m.resolve(ctx))
+	require.Equal(t, time.UTC, m.Current())
+	require.NotPanics(t, func() {
+		m.startReloadPoller(ctx, 10*time.Millisecond)
+	})
+	// 即便有桩 fetcher（这里没接 Provider），无 Provider 也不重读。
+	require.Equal(t, time.UTC, m.Current())
 }

@@ -57,8 +57,13 @@ type Executor struct {
 
 	// loc 是 PM 业务时区（T-0192）。ISSUE-398 持续任务算「最近一格」窗口时，
 	// daily/weekly/monthly 的零点对齐依赖此时区（hourly/15min 与时区无关）。
-	// 默认 time.UTC；worker 启动期按 pm.timezone 用 SetLocation 注入（同 G5 聚合口径）。
-	loc *time.Location
+	// 默认 time.UTC；worker 启动期按系统时区（#456 sys_configs 统一源）注入。
+	//
+	// #458：管理员改系统时区后不重启 worker 即生效——locFn 是「实时读当前业务时区」
+	// 的取值器。SetLocation 注入固定值；SetLocationFunc 注入实时源（worker 用后者，
+	// 与 cron 调度读同一份 sys_configs，保证两条聚合线划桶一致）。
+	// adhoc worker 跑在独立 goroutine，locFn 实现需自身并发安全（worker 侧用 atomic）。
+	locFn func() *time.Location
 
 	// now 是当前时刻取值器，便于单测注入固定时刻断言「最近一格」窗口。默认 time.Now。
 	now func() time.Time
@@ -76,19 +81,47 @@ func NewExecutor(aggr AggregatorQuerier, repo Repository, publisher ProgressPubl
 		publisher:       publisher,
 		logger:          logger.Named("pm.adhoc.executor"),
 		storeAllMetrics: true,
-		loc:             time.UTC,
+		locFn:           func() *time.Location { return time.UTC },
 		now:             time.Now,
 	}
 }
 
-// SetLocation 注入 PM 业务时区（worker 启动期按 pm.timezone）。
-// nil 视为 time.UTC。返回自身便于链式调用。
+// SetLocation 注入固定的 PM 业务时区。nil 视为 time.UTC。返回自身便于链式调用。
+// 单测用此注入确定时区；生产 worker 用 SetLocationFunc 注入实时源。
 func (e *Executor) SetLocation(loc *time.Location) *Executor {
 	if loc == nil {
 		loc = time.UTC
 	}
-	e.loc = loc
+	e.locFn = func() *time.Location { return loc }
 	return e
+}
+
+// SetLocationFunc 注入「实时读当前业务时区」的取值器（#458 动态感知）。
+// worker 用它读 sys_configs 统一源，管理员改时区后下次聚合即用新时区切桶、无需重启。
+// fn 为 nil 时回落固定 time.UTC。返回自身便于链式调用。
+func (e *Executor) SetLocationFunc(fn func() *time.Location) *Executor {
+	if fn == nil {
+		e.locFn = func() *time.Location { return time.UTC }
+		return e
+	}
+	e.locFn = func() *time.Location {
+		if loc := fn(); loc != nil {
+			return loc
+		}
+		return time.UTC
+	}
+	return e
+}
+
+// loc 取当前业务时区（实时）。永不返回 nil。
+func (e *Executor) loc() *time.Location {
+	if e.locFn == nil {
+		return time.UTC
+	}
+	if loc := e.locFn(); loc != nil {
+		return loc
+	}
+	return time.UTC
 }
 
 // SetStoreAllMetrics 配置落库范围开关（worker 启动期按 pm.storage.store_all_metrics 注入）。
@@ -172,7 +205,7 @@ func (e *Executor) queryAndConvert(ctx context.Context, task *Task, g metrics.Gr
 	endTime := task.WindowEnd
 	if isContinuous(task) {
 		// 结果聚合表里桶行的 `time` 列即桶起点；StartTime==EndTime==桶起点 → 只命中这一格。
-		bucket := lastCompletedBucket(g, e.now(), e.loc)
+		bucket := lastCompletedBucket(g, e.now(), e.loc())
 		startTime = bucket
 		endTime = bucket
 	}

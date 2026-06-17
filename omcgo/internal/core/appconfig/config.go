@@ -669,9 +669,12 @@ type PMConfig struct {
 	// 关闭时 OnlineSubscriber 不订阅事件（兜底开关，回归 / 排查时可关）。
 	AutoSetupOnOnline bool `mapstructure:"auto_setup_on_online"`
 
-	// Timezone 是 PM 日/周/月聚合桶的业务时区（T-0192）。
-	// 空值默认 "Asia/Shanghai"；worker 启动期 LoadLocation，失败回落 UTC。
-	// 决定日/周/月桶的本地零点对齐（北京 00:00 = UTC 前一日 16:00）；hourly 整点对齐时区无关，不受影响。
+	// Timezone 已废弃（#458）：PM 聚合业务时区改读 sys_configs 统一源
+	// （category='basic'/key='timezoneCode'，#456 systimezone.Provider），不再读本 YAML 字段。
+	// 保留字段仅为 YAML 向后兼容（旧配置含 timezone 不报错），worker 已不再消费它。
+	// 决定日/周/月桶本地零点对齐的逻辑不变，只是时区来源换成可动态改的 sys_configs。
+	//
+	// Deprecated: 用系统时区 sys_configs（basic/timezoneCode）替代；本字段不再生效。
 	Timezone string `mapstructure:"timezone"`
 
 	// Storage 聚合任务结果落库范围配置（T-0182，全局开关，非任务级）。
