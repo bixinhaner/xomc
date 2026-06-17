@@ -44,21 +44,12 @@ import {
   useDownloadFirmware,
   useUpdateFirmware,
 } from '@core/hooks/api/useSoftware';
-import { useProductClasses } from '@core/hooks/api/useDevices';
-import { collapseImageProductClasses } from '@core/utils/productClass';
+import { useProductList } from '@core/hooks/api/useProducts';
 import { useBatchDownloadWithMessage } from '@/hooks/useBatchDownloadWithMessage';
 import type { SoftwareVersion } from '@core/mock/data/software';
 
 const { Dragger } = Upload;
 const { TextArea } = Input;
-
-// 产品类型列表 — 从后端动态获取，此常量仅作为 fallback
-const fallbackProductClassOptions = [
-  { label: 'PM-B4860', value: 'PM-B4860' },
-  { label: 'QAFA', value: 'QAFA' },
-  { label: 'QAFB', value: 'QAFB' },
-  { label: 'FAP/BU1810', value: 'FAP/BU1810' },
-];
 
 // 文件类型枚举
 type FileType = 'upgrade' | 'patch' | 'fpga';
@@ -92,24 +83,20 @@ export default function FirmwareUpload({ embedded = false }: FirmwareUploadProps
   const [fileList, setFileList] = useState<UploadFile[]>([]);
   const [uploadProgress, setUploadProgress] = useState(0);
 
-  // Dynamic product type options from API
-  const { data: productClassesData } = useProductClasses();
-  const rawProductClasses = useMemo(() => {
-    if (productClassesData && productClassesData.length > 0) {
-      return productClassesData;
-    }
-    return fallbackProductClassOptions.map((o) => o.value);
-  }, [productClassesData]);
-  const productClassOptions = useMemo(
-    () => rawProductClasses.map((c) => ({ label: c, value: c })),
-    [rawProductClasses],
+  // #492：固件按产品名（产品中心-产品管理目录）。上传/编辑选产品名 → 提交 product_id。
+  const { data: productsData } = useProductList();
+  const productNameOptions = useMemo(
+    () => (productsData?.items ?? [])
+      .map((p) => ({ label: `${p.name} (${p.tech})`, value: p.id }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'zh-CN')),
+    [productsData],
   );
-  // qa-614 #369：IMAGE（升级镜像）做"版本合一"，同族载波变体 /SC /DC /CA 收敛为共同
-  // 基础标识（如 FAP/MLN），下拉不再出现载波变体级别条目。PATCH/FPGA 维持细分。
-  const imageProductClassOptions = useMemo(
-    () => collapseImageProductClasses(rawProductClasses).map((c) => ({ label: c, value: c })),
-    [rawProductClasses],
-  );
+  // product_id → 产品名，用于固件列表展示产品名。
+  const productNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    (productsData?.items ?? []).forEach((p) => map.set(p.id, p.name));
+    return map;
+  }, [productsData]);
 
   // 文件类型状态
   const [fileType, setFileType] = useState<FileType>('upgrade');
@@ -174,7 +161,7 @@ export default function FirmwareUpload({ embedded = false }: FirmwareUploadProps
     setSelectedFile(file ?? null);
     if (file) {
       form.setFieldsValue({
-        product: file.deviceType?.split(',') ?? [],
+        product: file.productId,
         version: file.versionCode,
         recommend: file.recommend ? '1' : '0',
         description: file.description ?? '',
@@ -210,7 +197,8 @@ export default function FirmwareUpload({ embedded = false }: FirmwareUploadProps
           {
             id: selectedFile.id,
             metadata: {
-              productClass: Array.isArray(values.product) ? values.product.join(',') : values.product,
+              // #492：产品归属以 product_id 为权威（product 字段值即所选产品 id）。
+              productId: values.product,
               version: values.version ?? '',
               recommend: values.recommend === '1',
               description: values.description ?? '',
@@ -251,7 +239,8 @@ export default function FirmwareUpload({ embedded = false }: FirmwareUploadProps
           file: rawFile,
           metadata: {
             version: values.version ?? '',
-            productClass: Array.isArray(values.product) ? values.product.join(',') : values.product,
+            // #492：产品归属以 product_id 为权威（product 字段值即所选产品 id）。
+            productId: values.product,
             releaseNotes: values.description ?? '',
             fileType: fileTypeParamMap[fileType],
             recommend: values.recommend === '1',
@@ -369,10 +358,11 @@ export default function FirmwareUpload({ embedded = false }: FirmwareUploadProps
     {
       key: 'product',
       title: t('software.firmware.productClass'),
-      dataIndex: 'deviceType',
       width: 250,
       ellipsis: true,
-      render: (val: unknown) => val ? String(val) : '-',
+      // #492：展示产品名（product_id→名），解析不到回退裸 productClass(deviceType)。
+      render: (_: unknown, record: SoftwareVersion) =>
+        (record.productId && productNameById.get(record.productId)) || record.deviceType || '-',
     },
     {
       key: 'size',
@@ -526,33 +516,18 @@ export default function FirmwareUpload({ embedded = false }: FirmwareUploadProps
           size="small"
           disabled={importMode === 'view'}
         >
-          {/* 产品类型标识 */}
+          {/* #492：固件所属产品 = 选产品名（产品中心-产品管理目录），提交 product_id。 */}
           <Form.Item
               name="product"
               label={t('software.firmware.productClass')}
               rules={[{ required: true, message: t('software.firmware.selectProductClass') }]}
             >
-              {fileType === 'upgrade' ? (
-                // qa-614 #369：IMAGE 用收敛后的共同基础标识（隐藏 SC/DC/CA 载波变体级别）。
-                // qa-614 #379：mode="tags" 允许手填 BM 等"无在线设备"的产品类。
-                <Select
-                  mode="tags"
-                  maxTagCount="responsive"
-                  placeholder={t('software.firmware.selectOrInputProductClass')}
-                  options={imageProductClassOptions}
-                  tokenSeparators={[',']}
-                />
-              ) : (
-                // qa-614 #379：PATCH/FPGA 维持细分，但同样支持手填兜底；
-                // 取首个值（join(',') 对单值无影响），保持单产品类语义。
-                <Select
-                  mode="tags"
-                  maxTagCount={1}
-                  placeholder={t('software.firmware.selectOrInputProductClass')}
-                  options={productClassOptions}
-                  tokenSeparators={[',']}
-                />
-              )}
+              <Select
+                showSearch
+                optionFilterProp="label"
+                placeholder={t('software.firmware.selectProductClass')}
+                options={productNameOptions}
+              />
             </Form.Item>
 
           {/* 文件名 */}

@@ -336,6 +336,7 @@ export const softwareApi = {
     file: File,
     metadata: {
       version: string;
+      productId?: string;
       productClass?: string;
       releaseNotes?: string;
       fileType?: number;
@@ -348,6 +349,9 @@ export const softwareApi = {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('version', metadata.version);
+    // #492：上传按产品名 → 提交 product_id 作为产品归属权威；product_class 兼容保留。
+    if (metadata.productId)
+      formData.append('product_id', metadata.productId);
     if (metadata.productClass)
       formData.append('product_class', metadata.productClass);
     if (metadata.releaseNotes)
@@ -417,6 +421,7 @@ export const softwareApi = {
   },
 
   async updateFirmware(id: string, metadata: {
+    productId?: string;
     productClass?: string;
     version?: string;
     recommend?: boolean;
@@ -424,6 +429,8 @@ export const softwareApi = {
     releaseNotes?: string;
   }): Promise<SoftwareVersion> {
     const { data } = await http.put<BackendFirmwareVersion>(`/firmware/${id}`, {
+      // #492：改产品归属（产品名 → product_id）。
+      product_id: metadata.productId,
       product_class: metadata.productClass,
       version: metadata.version,
       recommend: metadata.recommend,

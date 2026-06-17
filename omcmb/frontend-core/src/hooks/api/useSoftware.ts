@@ -46,6 +46,7 @@ export function useUploadFirmware() {
       file: File;
       metadata: {
         version: string;
+        productId?: string;
         productClass?: string;
         releaseNotes?: string;
         fileType?: number;
@@ -94,6 +95,7 @@ export function useUpdateFirmware() {
     mutationFn: (params: {
       id: string;
       metadata: {
+        productId?: string;
         productClass?: string;
         version?: string;
         recommend?: boolean;
