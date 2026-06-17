@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Search, Loader2, Ghost, RefreshCcw } from 'lucide-react'
+import { Search, Loader2, Inbox, RefreshCcw } from 'lucide-react'
 
 import { PageShell } from '@/components/shell/PageShell'
 import { NeonButton } from '@/components/ui/NeonButton'
@@ -89,11 +89,10 @@ export default function OrphanDevicesPage() {
         ) : isError ? (
           <ErrorRow message={error instanceof Error ? error.message : '未知错误'} />
         ) : rows.length === 0 ? (
-          <div className="flex flex-col items-center justify-center gap-3 py-16">
-            <Ghost className="size-10 text-emerald-400/60" />
-            <div className="font-mono text-xs uppercase tracking-[0.2em] text-emerald-300/70">
-              {search ? `NO MATCH · 无匹配「${search}」` : 'ALL MATCHED · 无孤儿设备'}
-            </div>
+          // 空态对齐 MML 任务记录:CenterState 同款(Inbox 图标 + cyan + 暂无数据)
+          <div className="flex flex-col items-center justify-center gap-2 py-14 font-mono text-xs uppercase tracking-[0.2em] text-cyan-300/60">
+            <Inbox className="size-6" />
+            <span>{search ? `NO MATCH · 无匹配「${search}」` : '暂无数据'}</span>
           </div>
         ) : (
           rows.map((d) => (
