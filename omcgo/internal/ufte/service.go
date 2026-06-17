@@ -1330,6 +1330,14 @@ func (s *Service) mapDeviceItem(
 	if currentVersion == "" {
 		currentVersion = "-"
 	}
+	// #492：解析设备所属产品英文名（与候选列表 ListDeviceCandidates 同口径），让设备列表
+	// 「产品名称」列展示产品名而非裸 productClass；解析不到（孤儿/未注册）留空，前端回退 productType。
+	productName := ""
+	if s.productNameLookup != nil && productType != "" {
+		if n, ok := s.productNameLookup(ctx, productType); ok {
+			productName = n
+		}
+	}
 	// 备份 / 日志采集 / 配置恢复（softwareTaskType=LogCollect）的 TargetFile 完全由
 	// 设备实际 PUT 上来的文件名决定（厂商如 baicells/MMMM 用自己的 NV 文件名，
 	// 如 "mib-home-fap.nv"，跟 OMC 端模板渲染的 "backup-{taskId8}-{sn}.nv" 无关）。
@@ -1430,6 +1438,7 @@ func (s *Service) mapDeviceItem(
 		DeviceName:      deviceName,
 		DeviceSN:        subTask.DeviceSN,
 		ProductType:     productType,
+		ProductName:     productName,
 		CurrentVersion:  currentVersion,
 		TargetVersion:   targetVersion,
 		TargetFile:      targetFile,
