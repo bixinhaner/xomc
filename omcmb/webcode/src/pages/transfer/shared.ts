@@ -119,10 +119,9 @@ export function localizeBuiltinDescription(
 }
 
 export const DEFAULT_CATEGORY_ORDER = [
-  // qa-614 c6 #368：4G/5G 合并为单个『设备升级』虚拟分类（buildCategoryTabs 已折叠）；
-  // #365 #373：2G 升级独立分类紧随其后。
+  // #368/#483：4G/5G/2G 全部折叠进单个『设备升级』虚拟分类（buildCategoryTabs 已折叠），
+  // 故这里不再单列 enb/gnb/gsm_upgrade —— 只放折叠后的 device_upgrade。
   'device_upgrade',
-  'gsm_upgrade',
   'version_rollback',
   'station_log',
   'config_backup',
