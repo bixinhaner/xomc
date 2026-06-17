@@ -1,10 +1,17 @@
 import { useMemo, useState } from 'react'
-import { Search, Loader2, ListTree, RefreshCcw } from 'lucide-react'
+import { Search, Loader2, ListTree, RefreshCcw, Plus, Pencil, Trash2 } from 'lucide-react'
 
 import { PageShell } from '@/components/shell/PageShell'
 import { NeonButton } from '@/components/ui/NeonButton'
-import { useStandardParams } from '@core/hooks/api/useParamModels'
-import type { StandardParam } from '@core/types/paramModel'
+import {
+  useStandardParams,
+  useUpsertStandard,
+  useDeleteStandard,
+} from '@core/hooks/api/useParamModels'
+import type { StandardParam, UpsertStandardInput } from '@core/types/paramModel'
+
+import { Modal } from './Modal'
+import { StandardParamDialog } from './StandardParamDialog'
 
 const PAGE_SIZE = 30
 
@@ -25,10 +32,40 @@ export default function StandardParamsPage() {
   const [entryType, setEntryType] = useState('')
   const [page, setPage] = useState(1)
 
+  // ISSUE-488: 新增 / 编辑 / 删除表单状态
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [editing, setEditing] = useState<StandardParam | null>(null)
+  const [confirmDel, setConfirmDel] = useState<StandardParam | null>(null)
+
   const { data, isLoading, isError, error, isFetching, refetch } = useStandardParams({
     keyword: keyword || undefined,
     entryType: entryType || undefined,
   })
+
+  const upsert = useUpsertStandard()
+  const del = useDeleteStandard()
+
+  const openCreate = () => {
+    setEditing(null)
+    upsert.reset()
+    setDialogOpen(true)
+  }
+  const openEdit = (row: StandardParam) => {
+    setEditing(row)
+    upsert.reset()
+    setDialogOpen(true)
+  }
+  const submitDialog = (input: UpsertStandardInput, path?: string) => {
+    upsert.mutate(
+      { input, path },
+      {
+        onSuccess: () => {
+          setDialogOpen(false)
+          setEditing(null)
+        },
+      },
+    )
+  }
 
   const all = useMemo<StandardParam[]>(() => data?.items ?? [], [data])
   const total = all.length
@@ -88,6 +125,9 @@ export default function StandardParamsPage() {
           <NeonButton icon={<RefreshCcw />} onClick={() => refetch()}>
             REFRESH
           </NeonButton>
+          <NeonButton icon={<Plus />} onClick={openCreate}>
+            新增
+          </NeonButton>
         </>
       }
     >
@@ -100,7 +140,7 @@ export default function StandardParamsPage() {
 
       {/* 列表头 */}
       {pageRows.length > 0 && (
-        <div className="mb-1 grid grid-cols-[2.6fr_0.9fr_1fr_0.9fr_1fr_0.7fr_0.7fr] items-center gap-3 px-3 font-mono text-[10px] uppercase tracking-[0.16em] text-cyan-300/45">
+        <div className="mb-1 grid grid-cols-[2.6fr_0.9fr_1fr_0.9fr_1fr_0.7fr_0.7fr_0.8fr] items-center gap-3 px-3 font-mono text-[10px] uppercase tracking-[0.16em] text-cyan-300/45">
           <span>STANDARD PATH</span>
           <span>ENTRY</span>
           <span>ACCESS</span>
@@ -108,6 +148,7 @@ export default function StandardParamsPage() {
           <span>CHANGE APPLIES</span>
           <span className="text-right">MIN</span>
           <span className="text-right">MAX</span>
+          <span className="text-right">操作</span>
         </div>
       )}
 
@@ -127,7 +168,7 @@ export default function StandardParamsPage() {
           pageRows.map((row) => (
             <div
               key={row.standardPath}
-              className="fleet-row grid grid-cols-[2.6fr_0.9fr_1fr_0.9fr_1fr_0.7fr_0.7fr] items-center gap-3 rounded-sm px-3 py-2.5"
+              className="fleet-row grid grid-cols-[2.6fr_0.9fr_1fr_0.9fr_1fr_0.7fr_0.7fr_0.8fr] items-center gap-3 rounded-sm px-3 py-2.5"
               style={{ ['--row-color' as never]: row.entryType === 'object' ? '#5b9eff' : '#00ff88' }}
             >
               <code className="min-w-0 truncate font-mono text-xs text-cyan-100/90" title={row.standardPath}>
@@ -139,6 +180,26 @@ export default function StandardParamsPage() {
               <span className="font-mono text-[11px] text-cyan-300/75">{row.changeApplies || '—'}</span>
               <span className="text-right font-mono text-[11px] text-cyan-300/60">{row.minValue ?? '—'}</span>
               <span className="text-right font-mono text-[11px] text-cyan-300/60">{row.maxValue ?? '—'}</span>
+              <span className="flex justify-end gap-1">
+                <button
+                  type="button"
+                  aria-label="编辑"
+                  title="编辑"
+                  onClick={() => openEdit(row)}
+                  className="rounded-sm border border-cyan-500/25 p-1 text-cyan-300/70 transition-colors hover:border-cyan-400/60 hover:bg-cyan-500/10 hover:text-cyan-200"
+                >
+                  <Pencil className="size-3.5" />
+                </button>
+                <button
+                  type="button"
+                  aria-label="删除"
+                  title="删除"
+                  onClick={() => setConfirmDel(row)}
+                  className="rounded-sm border border-rose-500/25 p-1 text-rose-300/70 transition-colors hover:border-rose-400/60 hover:bg-rose-500/10 hover:text-rose-200"
+                >
+                  <Trash2 className="size-3.5" />
+                </button>
+              </span>
             </div>
           ))
         )}
@@ -161,6 +222,56 @@ export default function StandardParamsPage() {
           </NeonButton>
         </div>
       </div>
+
+      {/* ISSUE-488: 新增 / 编辑 弹窗 */}
+      <StandardParamDialog
+        open={dialogOpen}
+        editing={editing}
+        loading={upsert.isPending}
+        error={upsert.isError}
+        onSubmit={submitDialog}
+        onCancel={() => {
+          setDialogOpen(false)
+          setEditing(null)
+        }}
+      />
+
+      {/* ISSUE-488: 删除确认 */}
+      <Modal
+        open={confirmDel !== null}
+        title="删除标准参数"
+        subtitle="DELETE STANDARD PARAM"
+        width={460}
+        onClose={() => setConfirmDel(null)}
+        footer={
+          <>
+            <NeonButton onClick={() => setConfirmDel(null)} disabled={del.isPending}>
+              取消
+            </NeonButton>
+            <NeonButton
+              tone="danger"
+              icon={del.isPending ? <Loader2 className="animate-spin" /> : <Trash2 />}
+              disabled={del.isPending}
+              onClick={() => {
+                if (!confirmDel) return
+                del.mutate(confirmDel.standardPath, {
+                  onSuccess: () => setConfirmDel(null),
+                })
+              }}
+            >
+              确认删除
+            </NeonButton>
+          </>
+        }
+      >
+        <p className="text-[13px] text-cyan-100/85">
+          确认删除标准参数{' '}
+          <code className="font-mono text-cyan-50">{confirmDel?.standardPath}</code> ？此操作不可撤销。
+        </p>
+        {del.isError ? (
+          <p className="mt-2 font-mono text-[11px] text-rose-300">删除失败，请重试</p>
+        ) : null}
+      </Modal>
     </PageShell>
   )
 }

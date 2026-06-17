@@ -7481,6 +7481,16 @@ const messages: Record<string, string> = {
   'product.standardParams.col.changeApplies': 'Change Applies',
   'product.standardParams.col.min': 'Min',
   'product.standardParams.col.max': 'Max',
+  // ISSUE-488: dynamic min/max label —— string type = char length, otherwise = numeric value
+  'product.standardParams.col.minLength': 'Min Length',
+  'product.standardParams.col.maxLength': 'Max Length',
+  'product.standardParams.intPlaceholder': 'Integer, optional',
+  'product.standardParams.intOnly': 'Integer only',
+  // boolean / dateTime types have no value range; min/max disabled with hint
+  'product.standardParams.noRange': 'No value range for this type',
+  // changeApplies enum item labels
+  'product.standardParams.changeApplies.Immediate': 'Immediate',
+  'product.standardParams.changeApplies.OnReboot': 'On Reboot',
 
   // -------------------------------------------------------------------------
   // Batch input device SN (BatchInput component)
