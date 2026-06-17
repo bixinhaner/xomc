@@ -1,7 +1,6 @@
-import { Alert, Button, Descriptions, Modal, Popover, Space, Table, Tabs, Tag, Typography } from 'antd';
+import { Alert, Button, Descriptions, Modal, Popover, Space, Table, Tag, Typography } from 'antd';
 import { DownloadOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
-import XmlViewer from '@/components/XmlViewer';
 import { useT } from '@/hooks/useT';
 import type { ExecMeta, ExecStatus, PathTask, ResultColumn, ResultRow, VerifyItem } from '../types';
 import { STATUS_META, UNVERIFIED_REASON_TEXT, opColor, opLabel } from '../constants';
@@ -390,30 +389,6 @@ export default function ResultDetailModal({
               </div>
             </div>
           )}
-
-          {/* 结果报文：格式化 XML。#196：MOD 回读复合时分「MOD 响应 / 回读 LST 响应」两个页签。 */}
-          <div>
-            <Text strong style={{ fontSize: 13 }}>
-              {t('mml.consoleV2.detail.rawSection')}
-            </Text>
-            <div style={{ marginTop: 6 }}>
-              {row.readbackRaw ? (
-                <Tabs
-                  size="small"
-                  items={[
-                    { key: 'mod', label: t('mml.consoleV2.detail.modResponse'), children: <XmlViewer xml={row.raw} maxHeight={280} /> },
-                    {
-                      key: 'lst',
-                      label: t('mml.consoleV2.detail.lstResponse'),
-                      children: <XmlViewer xml={row.readbackRaw} maxHeight={280} />,
-                    },
-                  ]}
-                />
-              ) : (
-                <XmlViewer xml={row.raw} maxHeight={300} />
-              )}
-            </div>
-          </div>
         </Space>
       )}
     </Modal>

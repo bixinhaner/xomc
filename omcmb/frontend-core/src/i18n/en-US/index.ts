@@ -5874,9 +5874,6 @@ const messages: Record<string, string> = {
   'mml.consoleV2.detail.execResultSection':  'Execution Result',
   'mml.consoleV2.detail.failedNoResult':     'Execution failed, no parseable result.',
   'mml.consoleV2.detail.pathListSection':    'PATH List',
-  'mml.consoleV2.detail.rawSection':         'Result Message (Formatted XML)',
-  'mml.consoleV2.detail.modResponse':        'MOD Response',
-  'mml.consoleV2.detail.lstResponse':        'LST Read-back Response',
   'mml.console.instanceArity.requiredHint':  'Required',
   'mml.console.instanceArity.layer':         'Layer {n}',
   // R-4.1.1: per-{i}-layer range metadata validation + tooltip hints
