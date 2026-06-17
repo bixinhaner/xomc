@@ -1,8 +1,8 @@
 // search.go — 设备列表多关键字搜索 helper（device list 页面 G07 升级）。
 //
-// 之前 device_info_pg_repository.ListDevicesWithInfo 只支持单个关键字 ILIKE，
-// 而前端搜索框 placeholder 承诺 "SN/名称/IP/MAC/PCI" 多字段且用户期望能一次
-// 搜多个值（如批量粘贴 SN 列表）。本文件提供一个公共 helper：
+// device_info_pg_repository.ListDevicesWithInfo 之前只支持单个关键字 ILIKE；
+// 前端 placeholder 承诺了 "SN/名称/IP/MAC/PCI"，而本文件提供的公共 helper 只负责
+// 把传入字段集展开为多关键字 OR 条件，具体搜哪些字段由 caller 决定：
 //
 //   - 输入字符串按英文逗号分隔成多个关键字
 //   - 每个关键字 TrimSpace，跳过空
@@ -24,7 +24,7 @@ import (
 
 // MaxSearchKeywords 限制单次搜索的关键字数量上限。
 //
-// 50 个 SN × 6 字段 = 300 个 ILIKE 子句，PostgreSQL planner 可接受；超过此值
+// 50 个关键字 × 9 字段 = 450 个 ILIKE 子句，PostgreSQL planner 可接受；超过此值
 // 直接截断，避免用户误粘 10k 行把 SQL 体积撑爆。
 const MaxSearchKeywords = 50
 

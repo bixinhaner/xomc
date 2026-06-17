@@ -213,6 +213,20 @@ func softwareVersionDeviceIDSubquery(versions []string) sq.SelectBuilder {
 		Where(sq.Eq{"parameter_value": versions})
 }
 
+func deviceListSearchFields() []string {
+	return []string{
+		"d.serial_number",
+		"d.site_name",
+		"d.manufacturer",
+		"d.model_name",
+		"di.device_name",
+		"di.address",
+		"host(d.ip_address)",
+		"di.mac",
+		"di.pci",
+	}
+}
+
 func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter DeviceFilter) (*model.ListResponse[DeviceWithInfo], error) {
 	selectCols := deviceWithInfoSelectColumns()
 	builder := storage.Psql.Select(selectCols...).
@@ -373,18 +387,10 @@ func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter
 
 	// Multi-field fuzzy search (G07) — 升级为多关键字（英文逗号分隔，最多 50）。
 	// 任一关键字命中任一字段即匹配（设备级 OR）。单值场景与老行为完全等价。
-	// caller 端 UX：前端搜索框 placeholder "SN/名称/IP/MAC/PCI"，目前后端实际
-	// 匹配 SN/site_name/manufacturer/model_name/device_name/address 6 字段，
-	// IP/MAC/PCI 字段扩展是另一个独立 task（见 search.go 文件头注释）。
+	// caller 端 UX：前端搜索框 placeholder "SN/名称/IP/MAC/PCI"；主列表与共用过滤
+	// 逻辑保持同一字段集，避免列表与子查询口径漂移。
 	if filter.Search != nil {
-		if cond := BuildSearchOR(*filter.Search, []string{
-			"d.serial_number",
-			"d.site_name",
-			"d.manufacturer",
-			"d.model_name",
-			"di.device_name",
-			"di.address",
-		}); cond != nil {
+		if cond := BuildSearchOR(*filter.Search, deviceListSearchFields()); cond != nil {
 			builder = builder.Where(cond)
 			countBuilder = countBuilder.Where(cond)
 		}
@@ -617,10 +623,7 @@ func applyDeviceFilters(b sq.SelectBuilder, filter DeviceFilter) sq.SelectBuilde
 		b = b.Where(sq.Eq{"dgm.group_id": filter.VisibleGroups})
 	}
 	if filter.Search != nil {
-		if cond := BuildSearchOR(*filter.Search, []string{
-			"d.serial_number", "d.site_name", "d.manufacturer",
-			"d.model_name", "di.device_name", "di.address",
-		}); cond != nil {
+		if cond := BuildSearchOR(*filter.Search, deviceListSearchFields()); cond != nil {
 			b = b.Where(cond)
 		}
 	}
