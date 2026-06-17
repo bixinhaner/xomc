@@ -69,28 +69,26 @@ func TestMatchesTaskTypeScope_GSM_PlatformScopeHit(t *testing.T) {
 	assert.True(t, matchesTaskTypeScope(item, "2G BSC"))
 }
 
-// qa-614 c6 / #373：deviceMatchesTaskType 经 productTechLookup 对 gsm 设备放行
-// （PlatformScope 完全不命中、关键字也不命中时，精确路径仍能放行）。
-func TestDeviceMatchesTaskType_GSM_ViaProductTechLookup(t *testing.T) {
-	gsm := coremodel.TechGSM
-	// 用一个既不命中 PlatformScope 也不命中关键字白名单的 productClass，
-	// 验证精确路径（productTechLookup → tech=="gsm"）能放行。
-	item := TaskType{TypeCode: "GSM_IMG_UPGRADE", techHint: &gsm, PlatformScope: []string{"2G BSC"}}
+// #492：deviceMatchesTaskType 改走 product_scope（产品英文名）。GSM 模板 Products 限定
+// 2G 产品，设备 productClass 经 productNameLookup 解析出产品名命中才放行；5G 设备解析出
+// 别的产品名 → 不放行。（旧 productTechLookup/PlatformScope 关键字匹配口径已下线。）
+func TestDeviceMatchesTaskType_GSM_ViaProductName(t *testing.T) {
+	item := TaskType{TypeCode: "GSM_IMG_UPGRADE", Products: []string{"2G 基站产品"}}
 
 	svc := NewService(nil, nil, nil, nil, nil, zap.NewNop())
-	svc.productTechLookup = func(_ context.Context, pc string) (string, bool) {
-		if pc == "FAP/CUSTOM-2G" {
-			return "gsm", true
+	svc.productNameLookup = func(_ context.Context, pc string) (string, bool) {
+		switch pc {
+		case "FAP/PGSM":
+			return "2G 基站产品", true
+		case "FAP/NR-CUSTOM":
+			return "5G 基站产品", true
+		default:
+			return "", false
 		}
-		return "", false
 	}
 
-	assert.True(t, svc.deviceMatchesTaskType(context.Background(), item, "FAP/CUSTOM-2G"),
-		"gsm 设备应经 productTechLookup 精确放行")
-	// 一个 5G 设备（lookup 返回 nr）不应被 gsm 升级类放行
-	svc.productTechLookup = func(_ context.Context, pc string) (string, bool) {
-		return "nr", true
-	}
+	assert.True(t, svc.deviceMatchesTaskType(context.Background(), item, "FAP/PGSM"),
+		"2G 设备产品名命中 GSM 模板 Products 应放行")
 	assert.False(t, svc.deviceMatchesTaskType(context.Background(), item, "FAP/NR-CUSTOM"),
-		"5G 设备不应被 GSM 升级类放行")
+		"5G 设备产品名不在 GSM 模板 Products 内不应放行")
 }

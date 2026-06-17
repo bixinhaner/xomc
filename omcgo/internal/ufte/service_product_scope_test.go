@@ -52,10 +52,13 @@ func TestDeviceMatchesTaskType_ProductScope_NoLookup(t *testing.T) {
 		"product_scope 非空但无 lookup 时不应回退旧 PlatformScope 放行")
 }
 
-// product_scope 为空 → 回退旧 PlatformScope/关键字口径（灰度兼容）。
-func TestDeviceMatchesTaskType_EmptyProductScope_FallsBack(t *testing.T) {
-	item := TaskType{TypeCode: "ENB_IMG_UPGRADE", Products: nil, PlatformScope: []string{"4G eNB", "QAFA"}}
+// #492：product_scope 为空 = 不限产品 = 适用「全部产品」（非升级模板默认如此）。
+// 任意 productClass 都放行，且不依赖 productNameLookup / PlatformScope。
+func TestDeviceMatchesTaskType_EmptyProductScope_MatchesAll(t *testing.T) {
+	item := TaskType{TypeCode: "RUNTIME_LOG_COLLECT", Products: nil, PlatformScope: []string{"4G eNB"}}
 	svc := NewService(nil, nil, nil, nil, nil, zap.NewNop())
-	assert.True(t, svc.deviceMatchesTaskType(context.Background(), item, "QAFA"),
-		"product_scope 为空时应回退 PlatformScope 子串匹配")
+	assert.True(t, svc.deviceMatchesTaskType(context.Background(), item, "FAP/ANY/PRODUCT"),
+		"空 product_scope 应适用全部产品")
+	assert.True(t, svc.deviceMatchesTaskType(context.Background(), item, ""),
+		"空 product_scope 对空 productClass 也放行（不限）")
 }

@@ -239,56 +239,69 @@ func TestNormalizeTaskTypeFileType_DownloadTemplatesUseFinalCWMPString(t *testin
 	assert.Equal(t, "6", normalizeTaskTypeFileType("UPLOAD", "6"))
 }
 
-func TestService_ListDeviceCandidates_FiltersByTypeScope(t *testing.T) {
+// #492：候选过滤走 product_scope（产品英文名）。模板 Products 非空 → 设备 productClass
+// 经 productNameLookup 解析出产品名，命中列表才入候选；候选回填 ProductName。
+func TestService_ListDeviceCandidates_FiltersByProductName(t *testing.T) {
+	// 自定义一条 ENB_IMG_UPGRADE，限定两个产品；materializeTaskTypes 会按 TypeCode
+	// 叠加内置的 softwareTaskType/techHint，但保留这里设置的 Products。
 	taskTypeRepo := &ensureBuiltInTaskTypeRepo{
-		items: builtInTaskTypes(),
+		items: []TaskType{{
+			TypeCode:      "ENB_IMG_UPGRADE",
+			Category:      "enb_upgrade",
+			CategoryLabel: "4G升级",
+			Products:      []string{"甲产品", "乙产品"},
+		}},
 	}
 	deviceRepo := &stubDeviceRepo{listResponse: &coremodel.ListResponse[coremodel.Device]{
 		Items: []coremodel.Device{
-			{
-				ID:              uuid.New(),
-				SerialNumber:    "ENB00001",
-				ProductClass:    "QAFA",
-				Technology:      coremodel.TechLTE,
-				FirmwareVersion: "V1.0.0",
-				DeviceName:      "北京 4G 站点",
-			},
-			{
-				ID:              uuid.New(),
-				SerialNumber:    "ENB00002",
-				ProductClass:    "FAP/BU1810",
-				Technology:      coremodel.TechLTE,
-				FirmwareVersion: "V1.0.1",
-				DeviceName:      "广州 4G 站点",
-			},
-			{
-				ID:              uuid.New(),
-				SerialNumber:    "GNB00001",
-				ProductClass:    "BBU-XSS",
-				Technology:      coremodel.TechNR,
-				FirmwareVersion: "V9.0.0",
-				DeviceName:      "上海 5G 站点",
-			},
+			{ID: uuid.New(), SerialNumber: "ENB00001", ProductClass: "QAFA", Technology: coremodel.TechLTE, FirmwareVersion: "V1.0.0", DeviceName: "北京 4G 站点"},
+			{ID: uuid.New(), SerialNumber: "ENB00002", ProductClass: "FAP/BU1810", Technology: coremodel.TechLTE, FirmwareVersion: "V1.0.1", DeviceName: "广州 4G 站点"},
+			{ID: uuid.New(), SerialNumber: "ENB00003", ProductClass: "FAP/OTHER", Technology: coremodel.TechLTE, FirmwareVersion: "V1.0.2", DeviceName: "深圳 4G 站点"},
 		},
-		Total:    2,
+		Total:    3,
 		Page:     1,
 		PageSize: 200,
 	}}
 
 	svc := NewService(nil, taskTypeRepo, nil, nil, deviceRepo, zap.NewNop())
+	svc.productNameLookup = func(_ context.Context, pc string) (string, bool) {
+		switch pc {
+		case "QAFA":
+			return "甲产品", true
+		case "FAP/BU1810":
+			return "乙产品", true
+		case "FAP/OTHER":
+			return "丙产品", true
+		default:
+			return "", false
+		}
+	}
 
+	// 不带 productName → 命中模板 Products（甲/乙）的两台入候选，丙产品被排除。
 	result, err := svc.ListDeviceCandidates(context.Background(), DeviceCandidateFilter{
 		Category: "enb_upgrade",
-		TypeCode: "ENB_PATCH_UPGRADE",
+		TypeCode: "ENB_IMG_UPGRADE",
 		Page:     1,
 		PageSize: 200,
 	})
 	require.NoError(t, err)
 	require.Len(t, result.Items, 2)
 	assert.Equal(t, "ENB00001", result.Items[0].DeviceSN)
-	assert.Equal(t, "QAFA", result.Items[0].ProductType)
+	assert.Equal(t, "甲产品", result.Items[0].ProductName)
 	assert.Equal(t, "ENB00002", result.Items[1].DeviceSN)
-	assert.Equal(t, "FAP/BU1810", result.Items[1].ProductType)
+	assert.Equal(t, "乙产品", result.Items[1].ProductName)
+
+	// 带 productName=甲产品 → 进一步收窄到 1 台。
+	narrowed, err := svc.ListDeviceCandidates(context.Background(), DeviceCandidateFilter{
+		Category:    "enb_upgrade",
+		TypeCode:    "ENB_IMG_UPGRADE",
+		ProductName: "甲产品",
+		Page:        1,
+		PageSize:    200,
+	})
+	require.NoError(t, err)
+	require.Len(t, narrowed.Items, 1)
+	assert.Equal(t, "ENB00001", narrowed.Items[0].DeviceSN)
 }
 
 func TestService_DeleteTaskType_DeletesCustomTypeOnly(t *testing.T) {

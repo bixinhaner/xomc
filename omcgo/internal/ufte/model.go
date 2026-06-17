@@ -97,6 +97,9 @@ type DeviceItem struct {
 	DeviceName      string `json:"deviceName"`
 	DeviceSN        string `json:"deviceSN"`
 	ProductType     string `json:"productType"`
+	// ProductName 是设备 productClass 经 ProductRegistry 解析出的产品英文名（#492）。
+	// 前端候选/设备列表展示产品名（取代裸 productClass）；解析不到（孤儿/未注册）时为空。
+	ProductName     string `json:"productName,omitempty"`
 	CurrentVersion  string `json:"currentVersion"`
 	TargetVersion   string `json:"targetVersion"`
 	// TargetFile 是"OUTPUT 文件类"（备份 / 日志采集 / 配置恢复，softwareTaskType=LogCollect）
@@ -192,6 +195,9 @@ type DeviceCandidateFilter struct {
 	Category    string `form:"category"`
 	TypeCode    string `form:"typeCode"`
 	ProductType string `form:"productType"`
+	// ProductName #492：按产品英文名收窄候选（设备 productClass→ProductRegistry→name == 该值）。
+	// 前端「产品类型」下拉改为产品名后传此参数；与 ProductType(productClass) 二选一，优先 ProductName。
+	ProductName string `form:"productName"`
 	Keyword     string `form:"keyword"`
 	Page        int    `form:"page"`
 	PageSize    int    `form:"page_size"`

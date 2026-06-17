@@ -1057,6 +1057,16 @@ func (s *Service) ListDeviceCandidates(ctx context.Context, filter DeviceCandida
 		if typeDef != nil && !s.deviceMatchesTaskType(ctx, *typeDef, item.ProductClass) {
 			continue
 		}
+		// #492：设备 productClass → 产品英文名（候选列表展示 + 按产品名收窄）。
+		productName := ""
+		if s.productNameLookup != nil && item.ProductClass != "" {
+			if n, ok := s.productNameLookup(ctx, item.ProductClass); ok {
+				productName = n
+			}
+		}
+		if filter.ProductName != "" && productName != filter.ProductName {
+			continue
+		}
 		currentVersion := item.FirmwareVersion
 		if currentVersion == "" {
 			currentVersion = "-"
@@ -1072,6 +1082,7 @@ func (s *Service) ListDeviceCandidates(ctx context.Context, filter DeviceCandida
 			DeviceName:      defaultDeviceName(item.DeviceName, item.SerialNumber, item.ProductClass),
 			DeviceSN:        item.SerialNumber,
 			ProductType:     item.ProductClass,
+			ProductName:     productName,
 			CurrentVersion:  currentVersion,
 			TargetVersion:   "",
 			Status:          "pending",
@@ -1175,36 +1186,26 @@ func (s *Service) loadAllSubTasks(ctx context.Context, catalog []TaskType, categ
 //  3. ProductRegistry 不可用 / productClass 字典里没注册 → 退回 matchesTaskTypeScope
 //     的旧关键字模糊匹配（保留向后兼容，避免新装环境 / 单测环境无 registry 时一刀切）。
 func (s *Service) deviceMatchesTaskType(ctx context.Context, item TaskType, productClass string) bool {
-	// #492：product_scope（适用产品=产品英文名列表）非空 → 走产品目录精确匹配，作为权威口径：
-	// 设备 productClass → ProductRegistry → product.Name，命中列表才放行，
-	// 取代旧的 PlatformScope 子串 + tech 关键字白名单（关键字有 "FAP" 同时命中 LTE/GSM 的坑）。
-	// product_scope 为空时（自定义模板未配 / 非升级类）回退旧口径，保证灰度兼容。
-	if len(item.Products) > 0 {
-		if productClass == "" || s.productNameLookup == nil {
-			return false
-		}
-		name, ok := s.productNameLookup(ctx, productClass)
-		if !ok || name == "" {
-			return false
-		}
-		for _, p := range item.Products {
-			if p == name {
-				return true
-			}
-		}
-		return false
-	}
-	if matchesTaskTypeScope(item, productClass) {
+	// #492：product_scope（适用产品=产品英文名列表）= 设备匹配的唯一口径（弃用旧
+	// PlatformScope 子串 + tech 关键字白名单，历史不兼容）。
+	//   · 空    → 不限产品 = 适用「全部产品」（用户口径：空=所有；非升级模板如日志/恢复等默认如此）。
+	//   · 非空  → 设备 productClass → ProductRegistry → product.Name，命中列表才放行。
+	if len(item.Products) == 0 {
 		return true
 	}
-	if item.techHint == nil || productClass == "" || s.productTechLookup == nil {
+	if productClass == "" || s.productNameLookup == nil {
 		return false
 	}
-	tech, ok := s.productTechLookup(ctx, productClass)
-	if !ok || tech == "" {
+	name, ok := s.productNameLookup(ctx, productClass)
+	if !ok || name == "" {
 		return false
 	}
-	return coremodel.Technology(tech) == *item.techHint
+	for _, p := range item.Products {
+		if p == name {
+			return true
+		}
+	}
+	return false
 }
 
 // resolveTaskTypeForTask 是 mapTask / mapDeviceItem 用的"读路径"分类入口。
