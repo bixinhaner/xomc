@@ -17,8 +17,9 @@ import (
 //   - GroupRunner（设备组维度）：source=device-level 聚合表 → target=group-level 聚合表，
 //     执行 JOIN devices + device_group_members 二阶段聚合
 //
-// 注意调度时机：GroupRunner 的 cron 时刻应**晚于**对应 Runner 的 cron（避免读到未完成的
-// device-level 聚合表）。worker/aggregator.go 中按 hourly:05 → hourly_group:15 错峰 10 分钟。
+// 触发时机（#479 改动三）：GroupRunner 不再有独立 cron / 固定错峰。改为对应粒度的设备级
+// Runner 该桶聚合**成功提交后**确定性 chain 出本组任务（同一 [Start,End)），因此读到的必是
+// 已提交的完整 device-level 聚合数据。装配见 worker/aggregator.go（Runner.SetGroupChain）。
 type GroupRunner struct {
 	aggregator   *Aggregator
 	jobType      string

@@ -64,11 +64,13 @@ func MetricFromCounter(c model.PMCounter) PMMetric {
 		MetricType:  MetricTypeCounter,
 		MetricValue: c.CounterValue,
 		Granularity: Granularity15Min,
-		Time:        endTime,
-		StartTime:   startTime,
-		EndTime:     endTime,
-		ObjectLDN:   ldn,
-		Extra:       extra,
+		// #479 改动二：time 统一为桶起点（= start_time），不再写桶结束时刻。
+		// time 列只作时序库分区/排序/去重的时间轴，语义恒等于 start_time。
+		Time:      startTime,
+		StartTime: startTime,
+		EndTime:   endTime,
+		ObjectLDN: ldn,
+		Extra:     extra,
 	}
 	if c.StatisType != "" {
 		st := StatisType(c.StatisType)
@@ -114,11 +116,12 @@ func MetricFromKPIValue(v model.KPIValue) PMMetric {
 		MetricType:  MetricTypeKPI,
 		MetricValue: v.KPIValue,
 		Granularity: Granularity15Min,
-		Time:        endTime,
-		StartTime:   startTime,
-		EndTime:     endTime,
-		ObjectLDN:   ldn,
-		Extra:       extra,
+		// #479 改动二：time 统一为桶起点（= start_time），不再写桶结束时刻。
+		Time:      startTime,
+		StartTime: startTime,
+		EndTime:   endTime,
+		ObjectLDN: ldn,
+		Extra:     extra,
 	}
 }
 

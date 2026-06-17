@@ -51,6 +51,134 @@ func Test_buildCountersSQL_HourlyFromPmMetrics(t *testing.T) {
 	assert.Equal(t, []any{"hourly", w.Start, w.End, w.Start, w.End}, args)
 }
 
+// #479 改动一：buildCountersSQL 的源筛选必须按桶**起点** start_time 框半开窗口
+// [w.Start, w.End)，不再按 end_time。横跨小时/日/周/月各粒度（设备级源筛选统一治本，
+// 一处修复消除日/周/月聚合值偏一格）。args 顺序不变（$4=w.Start, $5=w.End）。
+func Test_buildCountersSQL_FramesBy_StartTime_AllGranularities(t *testing.T) {
+	cases := []struct {
+		name       string
+		gran       metrics.Granularity
+		source     string
+		target     string
+		start, end time.Time
+	}{
+		{
+			name: "hourly", gran: metrics.GranularityHourly,
+			source: "pm_metrics", target: "pm_metrics_hourly",
+			start: time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC),
+			end:   time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),
+		},
+		{
+			name: "daily", gran: metrics.GranularityDaily,
+			source: "pm_metrics_hourly", target: "pm_metrics_daily",
+			start: time.Date(2026, 5, 22, 0, 0, 0, 0, time.UTC),
+			end:   time.Date(2026, 5, 23, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			name: "weekly", gran: metrics.GranularityWeekly,
+			source: "pm_metrics_daily", target: "pm_metrics_weekly",
+			start: time.Date(2026, 5, 18, 0, 0, 0, 0, time.UTC),
+			end:   time.Date(2026, 5, 25, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			name: "monthly", gran: metrics.GranularityMonthly,
+			source: "pm_metrics_daily", target: "pm_metrics_monthly",
+			start: time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC),
+			end:   time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			w := WindowSpec{Granularity: c.gran, Start: c.start, End: c.end}
+			sql, args := buildCountersSQL(c.source, c.target, w)
+			// 绿：按 start_time 半开框桶
+			assert.Contains(t, sql, "AND m.start_time >= $4", "源筛选下界应按桶起点 start_time")
+			assert.Contains(t, sql, "AND m.start_time <  $5", "源筛选上界应按桶起点 start_time")
+			// 红：绝不再按 end_time 框桶（旧法导致偏一格）
+			assert.NotContains(t, sql, "AND m.end_time >= $4", "源筛选不应再按 end_time 框桶")
+			assert.NotContains(t, sql, "AND m.end_time <  $5", "源筛选不应再按 end_time 框桶")
+			// args 顺序未变：$4/$5 仍是 w.Start/w.End
+			assert.Equal(t, []any{string(c.gran), w.Start, w.End, w.Start, w.End}, args)
+		})
+	}
+}
+
+// #479 改动一 行为红绿：窗口归属语义。
+// 桶 end_time = start + 桶宽。按起点语义窗口 [w.Start, w.End)：
+//   - 起点落入窗口的源桶 → 归属本窗口（绿）。
+//   - 边界源桶（其 end_time = w.End，即下一窗口起点）按 start_time 框桶时归本窗口、
+//     而不会被下一窗口（[w.End, w.End+宽)）算走（红：旧按 end_time 框会把它算到下一窗口 → 偏一格）。
+//
+// framedByStart 复现 SQL 谓词 start_time >= w.Start AND start_time < w.End。
+func framedByStart(bucketStart, wStart, wEnd time.Time) bool {
+	return !bucketStart.Before(wStart) && bucketStart.Before(wEnd)
+}
+
+// framedByEnd 复现修复前的旧谓词 end_time >= w.Start AND end_time < w.End（用于红对照）。
+func framedByEnd(bucketEnd, wStart, wEnd time.Time) bool {
+	return !bucketEnd.Before(wStart) && bucketEnd.Before(wEnd)
+}
+
+func Test_WindowAttribution_StartTimeFraming_AllGranularities(t *testing.T) {
+	cases := []struct {
+		name               string
+		bktStart, bktEnd   time.Time // 源桶自身的起止
+		curStart, curEnd   time.Time // 本窗口
+		nextStart, nextEnd time.Time // 下一窗口
+	}{
+		{
+			name:      "hourly",
+			bktStart:  time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC),
+			bktEnd:    time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),
+			curStart:  time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC),
+			curEnd:    time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),
+			nextStart: time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),
+			nextEnd:   time.Date(2026, 5, 22, 12, 0, 0, 0, time.UTC),
+		},
+		{
+			name:      "daily",
+			bktStart:  time.Date(2026, 5, 22, 0, 0, 0, 0, time.UTC),
+			bktEnd:    time.Date(2026, 5, 23, 0, 0, 0, 0, time.UTC),
+			curStart:  time.Date(2026, 5, 22, 0, 0, 0, 0, time.UTC),
+			curEnd:    time.Date(2026, 5, 23, 0, 0, 0, 0, time.UTC),
+			nextStart: time.Date(2026, 5, 23, 0, 0, 0, 0, time.UTC),
+			nextEnd:   time.Date(2026, 5, 24, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			name:      "weekly",
+			bktStart:  time.Date(2026, 5, 18, 0, 0, 0, 0, time.UTC),
+			bktEnd:    time.Date(2026, 5, 25, 0, 0, 0, 0, time.UTC),
+			curStart:  time.Date(2026, 5, 18, 0, 0, 0, 0, time.UTC),
+			curEnd:    time.Date(2026, 5, 25, 0, 0, 0, 0, time.UTC),
+			nextStart: time.Date(2026, 5, 25, 0, 0, 0, 0, time.UTC),
+			nextEnd:   time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			name:      "monthly",
+			bktStart:  time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC),
+			bktEnd:    time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
+			curStart:  time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC),
+			curEnd:    time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
+			nextStart: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
+			nextEnd:   time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			// 绿：按 start_time 框桶 → 源桶归本窗口、不归下一窗口（无偏移）
+			assert.True(t, framedByStart(c.bktStart, c.curStart, c.curEnd),
+				"源桶起点落本窗口 → 应归本窗口")
+			assert.False(t, framedByStart(c.bktStart, c.nextStart, c.nextEnd),
+				"源桶起点不在下一窗口 → 不应归下一窗口")
+			// 红对照：旧按 end_time 框 → 源桶被错算到下一窗口（end_time = 下一窗口起点）
+			assert.False(t, framedByEnd(c.bktEnd, c.curStart, c.curEnd),
+				"旧 end_time 框：源桶 end_time = 本窗口上界，半开区间排除本窗口（漏本窗口）")
+			assert.True(t, framedByEnd(c.bktEnd, c.nextStart, c.nextEnd),
+				"旧 end_time 框：源桶被错算到下一窗口 → 整体偏一格（这正是被修复的缺陷）")
+		})
+	}
+}
+
 func Test_buildCountersSQL_DailyFromHourly(t *testing.T) {
 	w := WindowSpec{
 		Granularity: metrics.GranularityDaily,
@@ -112,7 +240,7 @@ func Test_conflictTargetForTable_DeviceTablesIncludeObjectLdn(t *testing.T) {
 	}
 }
 
-// buildKPIInsertSQL（T-B）：object_ldn 由硬写 '' 改为写实体实际 object_ldn（参数化 $N），
+// buildKPIInsertSQL（T-B）：object_ldn 由硬写 ” 改为写实体实际 object_ldn（参数化 $N），
 // 设备级实体（object_ldn==""）仍落空串；object_ldn 绝不写 NULL（NOT NULL 约束）。
 // 覆盖 hourly（带 id 列）与 daily（不带 id）两种目标表。
 func Test_buildKPIInsertSQL_WritesEntityObjectLdn(t *testing.T) {
@@ -244,15 +372,15 @@ type fakeRows struct {
 	err  error
 }
 
-func (f *fakeRows) Next() bool                           { f.idx++; return f.idx <= len(f.rows) }
-func (f *fakeRows) Scan(dest ...any) error               { return scanInto(f.rows[f.idx-1], dest) }
-func (f *fakeRows) Close()                               {}
-func (f *fakeRows) Err() error                           { return f.err }
+func (f *fakeRows) Next() bool                                   { f.idx++; return f.idx <= len(f.rows) }
+func (f *fakeRows) Scan(dest ...any) error                       { return scanInto(f.rows[f.idx-1], dest) }
+func (f *fakeRows) Close()                                       {}
+func (f *fakeRows) Err() error                                   { return f.err }
 func (f *fakeRows) CommandTag() pgconn.CommandTag                { return pgconn.NewCommandTag("") }
 func (f *fakeRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
-func (f *fakeRows) Values() ([]any, error)               { return nil, nil }
-func (f *fakeRows) RawValues() [][]byte                  { return nil }
-func (f *fakeRows) Conn() *pgx.Conn                      { return nil }
+func (f *fakeRows) Values() ([]any, error)                       { return nil, nil }
+func (f *fakeRows) RawValues() [][]byte                          { return nil }
+func (f *fakeRows) Conn() *pgx.Conn                              { return nil }
 
 // scanInto copies row values into dest pointers, supporting string, float64,
 // time.Time, and nullable *string (dest **string).
@@ -554,7 +682,7 @@ func Test_countersForEntity_TwoCells_NoCrossContamination(t *testing.T) {
 func Test_countersForEntity_PLMN_CrossLayerPairing(t *testing.T) {
 	byLdn := map[string]map[string]float64{
 		// 基础小区行：只上报小区级计数器
-		"Cellid=111172245":            {"cellLevelCnt": 1000},
+		"Cellid=111172245": {"cellLevelCnt": 1000},
 		// 两个 PLMN 行：各只上报 PLMN 级计数器
 		"Cellid=111172245,PLMN=00101": {"plmnLevelCnt": 200},
 		"Cellid=111172245,PLMN=46068": {"plmnLevelCnt": 350},
@@ -626,6 +754,7 @@ type cellRow struct {
 // cellAwareDB 复现 T-B 后 target 表：每 (object_ldn, metric_path) 一行。
 //   - listEntitiesInBucket（3 args）：DISTINCT (oui, sn, object_ldn) 实体
 //   - loadCountersByObjectLdn（5 args）：按本桶返回 (object_ldn, metric_path, value)，不折回
+//
 // 每次 Exec 累积 args，供断言多实体多次插入。
 type cellAwareDB struct {
 	rows     []cellRow
@@ -898,11 +1027,11 @@ func Test_kpiDependsOnOwnCounters(t *testing.T) {
 
 // bucketRow 是智能桩里 target 表的一行（带 end_time，供按桶精确过滤）。
 type bucketRow struct {
-	oui, sn  string
-	path     string
-	value    float64
-	endTime  time.Time
-	timeCol  time.Time
+	oui, sn string
+	path    string
+	value   float64
+	endTime time.Time
+	timeCol time.Time
 }
 
 // preciseBucketDB 模拟"按 end_time 精确过滤"的 target 表：
