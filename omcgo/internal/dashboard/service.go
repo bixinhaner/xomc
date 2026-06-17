@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -50,11 +51,11 @@ type FrontendRecentAlarm struct {
 // KPIDelta represents the trend comparison data for a single KPI metric.
 // 用于KPI卡片显示趋势数据（如设备总数、活跃告警等的变化趋势）
 type KPIDelta struct {
-	CurrentValue  float64  `json:"current_value"`
-	PreviousValue float64  `json:"previous_value"`
-	ChangePercent float64  `json:"change_percent"`  // 变化百分比，正数表示增长
-	Trend         string   `json:"trend"`           // "up" | "down" | "stable"
-	CompareType   string   `json:"compare_type"`    // "yesterday" | "last_week"
+	CurrentValue  float64 `json:"current_value"`
+	PreviousValue float64 `json:"previous_value"`
+	ChangePercent float64 `json:"change_percent"` // 变化百分比，正数表示增长
+	Trend         string  `json:"trend"`          // "up" | "down" | "stable"
+	CompareType   string  `json:"compare_type"`   // "yesterday" | "last_week"
 }
 
 // DashboardSummary is the aggregated dashboard response.
@@ -62,7 +63,7 @@ type DashboardSummary struct {
 	DeviceStats  FrontendDeviceStats   `json:"device_stats"`
 	AlarmStats   FrontendAlarmStats    `json:"alarm_stats"`
 	KPIOverview  map[string]float64    `json:"kpi_overview"`
-	KPIDeltas    map[string]KPIDelta   `json:"kpi_deltas"`     // KPI趋势数据（新增）
+	KPIDeltas    map[string]KPIDelta   `json:"kpi_deltas"` // KPI趋势数据（新增）
 	RecentAlarms []FrontendRecentAlarm `json:"recent_alarms"`
 	Timestamp    time.Time             `json:"timestamp"`
 }
@@ -91,8 +92,8 @@ type KPITrendComparison struct {
 
 // KPITrendComparisonMeta represents metadata for KPI trend comparison.
 type KPITrendComparisonMeta struct {
-	KPIName       string  `json:"kpi_name"`
-	CompareType   string  `json:"compare_type"`   // "yesterday" or "last_week"
+	KPIName       string   `json:"kpi_name"`
+	CompareType   string   `json:"compare_type"` // "yesterday" or "last_week"
 	ChangePercent *float64 `json:"change_percent,omitempty"`
 }
 
@@ -325,9 +326,9 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 			}
 		} else {
 			deviceAlarms[key] = &FrontendRecentAlarm{
-				DeviceSN:   a.DeviceSN,                         // 完整设备 SN
-				Technology: derefOrEmpty(a.Technology),         // 技术类型
-				DeviceName: a.DeviceSN,                         // 与 device_sn 相同，使用完整 SN
+				DeviceSN:   a.DeviceSN,                 // 完整设备 SN
+				Technology: derefOrEmpty(a.Technology), // 技术类型
+				DeviceName: a.DeviceSN,                 // 与 device_sn 相同，使用完整 SN
 				AlarmCount: 1,
 				Severity:   severityToLabel(a.Severity),
 			}
@@ -345,7 +346,7 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 }
 
 func severityToLabel(s model.AlarmSeverity) string {
-	switch s {
+	switch canonicalDashboardSeverity(s) {
 	case model.AlarmCritical:
 		return "critical"
 	case model.AlarmMajor:
@@ -360,7 +361,22 @@ func severityToLabel(s model.AlarmSeverity) string {
 }
 
 func severityLabel(s model.AlarmSeverity) int {
-	return int(s)
+	return int(canonicalDashboardSeverity(s))
+}
+
+func canonicalDashboardSeverity(s model.AlarmSeverity) model.AlarmSeverity {
+	switch int(s) {
+	case 31001:
+		return model.AlarmCritical
+	case 31002:
+		return model.AlarmMajor
+	case 31003:
+		return model.AlarmMinor
+	case 31004:
+		return model.AlarmWarning
+	default:
+		return s
+	}
 }
 
 func severityFromLabel(label string) int {
@@ -436,9 +452,10 @@ func (s *Service) calculateKPIDeltas(ctx context.Context, currentTotalDevices in
 // which means trend comparison data is not accurate.
 //
 // Future implementation options:
-//   Option 1: Add device_history table to track device status changes over time
-//   Option 2: Use time-series database (TimescaleDB) to store historical device counts
-//   Option 3: Query device lifecycle events to reconstruct historical counts
+//
+//	Option 1: Add device_history table to track device status changes over time
+//	Option 2: Use time-series database (TimescaleDB) to store historical device counts
+//	Option 3: Query device lifecycle events to reconstruct historical counts
 //
 // For now, this serves as a baseline implementation for UI development.
 func (s *Service) countDevicesAtTime(ctx context.Context, t time.Time) (int64, error) {
@@ -467,7 +484,8 @@ func (s *Service) countDevicesAtTime(ctx context.Context, t time.Time) (int64, e
 // which means trend comparison data is not accurate.
 //
 // Future implementation:
-//   Query alarm_history table with time filter: raised_at <= t AND (cleared_at IS NULL OR cleared_at > t)
+//
+//	Query alarm_history table with time filter: raised_at <= t AND (cleared_at IS NULL OR cleared_at > t)
 //
 // For now, this serves as a baseline implementation for UI development.
 func (s *Service) countAlarmsAtTime(ctx context.Context, t time.Time) (int64, error) {
@@ -520,9 +538,9 @@ func computeKPIDelta(current, previous float64, compareType string) KPIDelta {
 	return delta
 }
 
-// alarmTrendByDateQuery 按天分级统计告警数。
-// 库内 severity 列存的是 5 位字典码（31001~31004），但兼容历史 1~4 小编号，故每个
-// 级别桶同时匹配旧值与字典码；只认 1~4 会让四条曲线全读 0（issue #219 同根残留）。
+// alarmTrendByDateQuery 按天分级统计告警数。调用侧只用固定表名格式化，不接收用户输入。
+// 库内 severity 列可能是 5 位字典码（31001~31004），也可能是历史 1~4 小编号，故每个
+// 级别桶同时匹配两种值；只认 1~4 会让四条曲线全读 0（issue #219 同根残留）。
 // 复杂聚合（DATE()/CASE WHEN/COALESCE），裸 SQL 比 Squirrel 更易读。
 const alarmTrendByDateQuery = `
 		SELECT
@@ -531,7 +549,7 @@ const alarmTrendByDateQuery = `
 			COALESCE(SUM(CASE WHEN severity IN (2, 31002) THEN 1 ELSE 0 END), 0) AS major,
 			COALESCE(SUM(CASE WHEN severity IN (3, 31003) THEN 1 ELSE 0 END), 0) AS minor,
 			COALESCE(SUM(CASE WHEN severity IN (4, 31004) THEN 1 ELSE 0 END), 0) AS warning
-		FROM alarms_active
+		FROM %s
 		WHERE raised_at >= NOW() - $1::interval
 		GROUP BY DATE(raised_at)
 		ORDER BY d ASC`
@@ -546,26 +564,57 @@ func (s *Service) GetAlarmTrend(ctx context.Context, days int) ([]AlarmTrendEntr
 	}
 
 	interval := fmt.Sprintf("%d days", days)
-	rows, err := s.pgPool.Query(ctx, alarmTrendByDateQuery, interval)
+	entriesByDate := make(map[string]*AlarmTrendEntry)
+
+	if err := s.queryAlarmTrendInto(ctx, s.pgPool, "alarms_active", interval, entriesByDate); err != nil {
+		return nil, err
+	}
+	if s.tsPool != nil {
+		if err := s.queryAlarmTrendInto(ctx, s.tsPool, "alarms_history", interval, entriesByDate); err != nil {
+			return nil, err
+		}
+	}
+
+	entries := make([]AlarmTrendEntry, 0, len(entriesByDate))
+	for _, entry := range entriesByDate {
+		entries = append(entries, *entry)
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Date < entries[j].Date })
+	return entries, nil
+}
+
+func (s *Service) queryAlarmTrendInto(ctx context.Context, pool *pgxpool.Pool, tableName string, interval string, entriesByDate map[string]*AlarmTrendEntry) error {
+	if pool == nil {
+		return nil
+	}
+	query := fmt.Sprintf(alarmTrendByDateQuery, tableName)
+	rows, err := pool.Query(ctx, query, interval)
 	if err != nil {
-		return nil, fmt.Errorf("query alarm trend: %w", err)
+		return fmt.Errorf("query alarm trend from %s: %w", tableName, err)
 	}
 	defer rows.Close()
 
-	var entries []AlarmTrendEntry
 	for rows.Next() {
-		var e AlarmTrendEntry
+		var entry AlarmTrendEntry
 		var d time.Time
-		if err := rows.Scan(&d, &e.Critical, &e.Major, &e.Minor, &e.Warning); err != nil {
-			return nil, fmt.Errorf("scan alarm trend row: %w", err)
+		if err := rows.Scan(&d, &entry.Critical, &entry.Major, &entry.Minor, &entry.Warning); err != nil {
+			return fmt.Errorf("scan alarm trend row from %s: %w", tableName, err)
 		}
-		e.Date = d.Format("2006-01-02")
-		entries = append(entries, e)
+		entry.Date = d.Format("2006-01-02")
+		merged, exists := entriesByDate[entry.Date]
+		if !exists {
+			entriesByDate[entry.Date] = &entry
+			continue
+		}
+		merged.Critical += entry.Critical
+		merged.Major += entry.Major
+		merged.Minor += entry.Minor
+		merged.Warning += entry.Warning
 	}
-	if entries == nil {
-		entries = []AlarmTrendEntry{}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate alarm trend rows from %s: %w", tableName, err)
 	}
-	return entries, nil
+	return nil
 }
 
 // GetDeviceStatus returns device counts grouped by status.
@@ -634,7 +683,7 @@ func (s *Service) GetKPITrendComparison(ctx context.Context, kpiName string, com
 		if weekday == 0 {
 			weekday = 7 // Sunday = 7
 		}
-		compareStart = now.AddDate(0, 0, -weekday-6).Truncate(24 * time.Hour) // Last Monday
+		compareStart = now.AddDate(0, 0, -weekday-6).Truncate(24 * time.Hour)      // Last Monday
 		compareEnd = compareStart.AddDate(0, 0, 6).Add(24*time.Hour - time.Second) // Last Sunday
 	default:
 		// Default to yesterday
@@ -679,8 +728,8 @@ func (s *Service) GetKPITrendComparison(ctx context.Context, kpiName string, com
 	}
 
 	return &KPITrendComparison{
-		Current:  currentEntries,
-		Compare:  compareEntries,
+		Current: currentEntries,
+		Compare: compareEntries,
 		Metadata: KPITrendComparisonMeta{
 			KPIName:       kpiName,
 			CompareType:   compareWith,

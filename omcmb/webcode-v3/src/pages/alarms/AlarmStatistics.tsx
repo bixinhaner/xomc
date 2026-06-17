@@ -39,6 +39,38 @@ const RANGE_OPTIONS: { v: number; t: string }[] = [
   { v: 90, t: '近 90 天' },
 ]
 
+type TrendPoint = {
+  date: string
+  critical: number
+  major: number
+  minor: number
+  warning: number
+}
+
+function formatLocalDate(date: Date) {
+  const year = date.getFullYear()
+  const month = `${date.getMonth() + 1}`.padStart(2, '0')
+  const day = `${date.getDate()}`.padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function buildTrendSeries(raw: TrendPoint[] | undefined, days: number): TrendPoint[] {
+  const byDate = new Map((raw ?? []).map((item) => [item.date, item]))
+  return Array.from({ length: days }, (_, index) => {
+    const date = new Date()
+    date.setDate(date.getDate() - (days - index - 1))
+    const key = formatLocalDate(date)
+    const item = byDate.get(key)
+    return {
+      date: key,
+      critical: item?.critical ?? 0,
+      major: item?.major ?? 0,
+      minor: item?.minor ?? 0,
+      warning: item?.warning ?? 0,
+    }
+  })
+}
+
 export default function AlarmStatistics() {
   const navigate = useNavigate()
   const [days, setDays] = useState(7)
@@ -95,17 +127,18 @@ export default function AlarmStatistics() {
     return Math.max(0, Math.round(100 - (weighted / worst) * 100))
   }, [sevTotals])
 
+  const trendSeries = useMemo(() => buildTrendSeries(trend, days), [trend, days])
+
   const trendSums = useMemo(() => {
     const base: Record<AlarmSeverity, number> = { critical: 0, major: 0, minor: 0, warning: 0 }
-    if (!trend) return base
-    for (const d of trend) {
+    for (const d of trendSeries) {
       base.critical += d.critical
       base.major += d.major
       base.minor += d.minor
       base.warning += d.warning
     }
     return base
-  }, [trend])
+  }, [trendSeries])
 
   const goDrill = useCallback(
     (severity: AlarmSeverity) => {
@@ -128,20 +161,6 @@ export default function AlarmStatistics() {
       isFetching={isFetching}
       toolbar={
         <>
-          {RANGE_OPTIONS.map((r) => (
-            <button
-              key={r.v}
-              type="button"
-              onClick={() => setDays(r.v)}
-              className={`chip transition-all ${
-                days === r.v
-                  ? 'text-cyan-200 shadow-[0_0_10px_currentColor]'
-                  : 'text-cyan-300/45 hover:text-cyan-300/80'
-              }`}
-            >
-              {r.t}
-            </button>
-          ))}
           <NeonButton icon={<RefreshCcw />} onClick={refreshAll}>
             REFRESH
           </NeonButton>
@@ -256,16 +275,18 @@ export default function AlarmStatistics() {
           meta="BY SEVERITY"
           className="col-span-12 lg:col-span-7"
         >
-          {trendLoading ? (
-            <LoadingBox />
-          ) : trendError ? (
-            <ErrorBox label="趋势加载失败" onRetry={() => void refetchTrend()} />
-          ) : !trend || trend.length === 0 ? (
-            <EmptyBox label="NO TREND DATA · 暂无趋势数据" />
-          ) : (
-            <div className="space-y-2 p-4">
+          <div className="space-y-3 p-4">
+            <TrendRangeSelector days={days} onChange={setDays} />
+            {trendLoading ? (
+              <LoadingBox />
+            ) : trendError ? (
+              <ErrorBox label="趋势加载失败" onRetry={() => void refetchTrend()} />
+            ) : trendSeries.every((d) => d.critical + d.major + d.minor + d.warning === 0) ? (
+              <EmptyBox label="NO TREND DATA · 暂无趋势数据" />
+            ) : (
+              <div className="space-y-2">
               {SEV_KEYS.map((s) => {
-                const points = trend.map((d) => d[s])
+                const points = trendSeries.map((d) => d[s])
                 return (
                   <div key={s} className="flex items-center gap-3">
                     <span
@@ -287,11 +308,12 @@ export default function AlarmStatistics() {
                 )
               })}
               <div className="flex justify-between pt-1 font-mono text-[10px] text-cyan-300/40">
-                <span>{trend[0]?.date}</span>
-                <span>{trend[trend.length - 1]?.date}</span>
+                <span>{trendSeries[0]?.date}</span>
+                <span>{trendSeries[trendSeries.length - 1]?.date}</span>
               </div>
-            </div>
-          )}
+              </div>
+            )}
+          </div>
         </GlassPanel>
 
         {/* Top 故障设备 */}
@@ -351,6 +373,27 @@ export default function AlarmStatistics() {
         </GlassPanel>
       </div>
     </PageShell>
+  )
+}
+
+function TrendRangeSelector({ days, onChange }: { days: number; onChange: (days: number) => void }) {
+  return (
+    <div className="flex flex-wrap justify-end gap-2">
+      {RANGE_OPTIONS.map((r) => (
+        <button
+          key={r.v}
+          type="button"
+          onClick={() => onChange(r.v)}
+          className={`chip transition-all ${
+            days === r.v
+              ? 'text-cyan-200 shadow-[0_0_10px_currentColor]'
+              : 'text-cyan-300/45 hover:text-cyan-300/80'
+          }`}
+        >
+          {r.t}
+        </button>
+      ))}
+    </div>
   )
 }
 

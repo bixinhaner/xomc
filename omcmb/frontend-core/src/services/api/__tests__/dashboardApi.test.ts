@@ -121,6 +121,15 @@ describe('dashboardApi — 告警热力图集成（Dashboard heatmap）', () => 
     expect(out.days_of_week[6].day).toBe(6);
   });
 
+  it('getAlarmHeatmap 兼容残留统一信封，避免热度图误判为空', async () => {
+    const heatmap = buildHeatmap(42);
+    getMock.mockResolvedValue({ data: { ret: 1, msg: 'ok', data: heatmap } });
+    const out = await dashboardApi.getAlarmHeatmap({ days: 30 });
+    expect(out.days_of_week).toHaveLength(7);
+    expect(out.max_count).toBe(42);
+    expect(out.days_of_week[0].hours[9]).toBe(42);
+  });
+
   it('getAlarmHeatmapBySeverity 打 by-severity 端点 + 带 severity query', async () => {
     const payload: AlarmHeatmapBySeverity = { severity: 'critical', data: buildHeatmap(7) };
     getMock.mockResolvedValue({ data: payload });
@@ -131,6 +140,14 @@ describe('dashboardApi — 告警热力图集成（Dashboard heatmap）', () => 
     expect(opts.params.severity).toBe('critical');
     expect(out.severity).toBe('critical');
     expect(out.data.days_of_week).toHaveLength(7);
+    expect(out.data.max_count).toBe(7);
+  });
+
+  it('getAlarmHeatmapBySeverity 兼容残留统一信封', async () => {
+    const payload: AlarmHeatmapBySeverity = { severity: 'critical', data: buildHeatmap(7) };
+    getMock.mockResolvedValue({ data: { ret: 1, msg: 'ok', data: payload } });
+    const out = await dashboardApi.getAlarmHeatmapBySeverity({ days: 30, severity: 'critical' });
+    expect(out.severity).toBe('critical');
     expect(out.data.max_count).toBe(7);
   });
 

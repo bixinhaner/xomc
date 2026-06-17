@@ -141,6 +141,12 @@ interface BackendKPITimeSeriesEntry {
 /** GET /dashboard/kpi-time-series returns { kpiName: [{ time, value }, ...], ... } */
 type BackendKPITimeSeriesResponse = Record<string, BackendKPITimeSeriesEntry[]>;
 
+type ApiEnvelope<T> = {
+  ret?: number;
+  msg?: string;
+  data?: T;
+};
+
 // --- Mapping functions ---
 
 function mapBackendSummary(b: BackendDashboardSummary): DashboardSummary {
@@ -254,6 +260,19 @@ function mapAlarmTypePie(
   items: BackendAlarmTypePieItem[]
 ): DashboardChartData['alarmTypePie'] {
   return items.map((item) => ({ name: item.name, value: item.value }));
+}
+
+function unwrapDashboardEnvelope<T>(payload: T | ApiEnvelope<T>): T {
+  if (
+    payload &&
+    typeof payload === 'object' &&
+    'ret' in payload &&
+    'data' in payload &&
+    (payload as ApiEnvelope<T>).ret === 1
+  ) {
+    return (payload as ApiEnvelope<T>).data as T;
+  }
+  return payload as T;
 }
 
 /**
@@ -527,8 +546,8 @@ export const dashboardApi = {
    * GET /dashboard/alarm-heatmap?days=30
    */
   async getAlarmHeatmap(params: { days: number }): Promise<HeatmapData> {
-    const { data } = await http.get<HeatmapData>('/dashboard/alarm-heatmap', { params });
-    return data;
+    const { data } = await http.get<HeatmapData | ApiEnvelope<HeatmapData>>('/dashboard/alarm-heatmap', { params });
+    return unwrapDashboardEnvelope(data);
   },
 
   /**
@@ -539,10 +558,10 @@ export const dashboardApi = {
     days: number;
     severity?: string;
   }): Promise<AlarmHeatmapBySeverity> {
-    const { data } = await http.get<AlarmHeatmapBySeverity>(
+    const { data } = await http.get<AlarmHeatmapBySeverity | ApiEnvelope<AlarmHeatmapBySeverity>>(
       '/dashboard/alarm-heatmap-by-severity',
       { params }
     );
-    return data;
+    return unwrapDashboardEnvelope(data);
   },
 };

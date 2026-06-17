@@ -30,6 +30,10 @@ func TestAlarmTrendQueryIncludesLegacySeverityCodes(t *testing.T) {
 	}
 }
 
+func TestAlarmTrendQueryHasTablePlaceholder(t *testing.T) {
+	assert.Contains(t, alarmTrendByDateQuery, "FROM %s")
+}
+
 // ---------------------------------------------------------------------------
 // parseKPINames
 // ---------------------------------------------------------------------------
@@ -73,6 +77,10 @@ func TestSeverityToLabel(t *testing.T) {
 		{"major", model.AlarmMajor, "major"},
 		{"minor", model.AlarmMinor, "minor"},
 		{"warning", model.AlarmWarning, "warning"},
+		{"critical dictionary code", model.AlarmSeverity(31001), "critical"},
+		{"major dictionary code", model.AlarmSeverity(31002), "major"},
+		{"minor dictionary code", model.AlarmSeverity(31003), "minor"},
+		{"warning dictionary code", model.AlarmSeverity(31004), "warning"},
 		{"unknown value", model.AlarmSeverity(99), "unknown"},
 		{"zero value", model.AlarmSeverity(0), "unknown"},
 	}
@@ -123,24 +131,24 @@ func strPtr(s string) *string {
 
 func TestDerefOrEmpty(t *testing.T) {
 	tests := []struct {
-		name string
+		name  string
 		input *string
-		want string
+		want  string
 	}{
 		{
-			name: "非空指针返回值",
+			name:  "非空指针返回值",
 			input: strPtr("test-value"),
-			want: "test-value",
+			want:  "test-value",
 		},
 		{
-			name: "nil指针返回空字符串",
+			name:  "nil指针返回空字符串",
 			input: nil,
-			want: "",
+			want:  "",
 		},
 		{
-			name: "空字符串指针返回空字符串",
+			name:  "空字符串指针返回空字符串",
 			input: strPtr(""),
-			want: "",
+			want:  "",
 		},
 	}
 

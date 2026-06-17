@@ -106,9 +106,9 @@ func TestPostgreSQLDOWConversion(t *testing.T) {
 	// PostgreSQL DOW: 0=Sunday, 1=Monday, ..., 6=Saturday
 	// Our adjusted DOW: 0=Monday, 1=Tuesday, ..., 6=Sunday
 	testCases := []struct {
-		name         string
-		pgDOW        int // PostgreSQL DOW
-		expectedDOW  int // Adjusted DOW (0=Monday)
+		name        string
+		pgDOW       int // PostgreSQL DOW
+		expectedDOW int // Adjusted DOW (0=Monday)
 	}{
 		{"Sunday to Monday", 0, 6},
 		{"Monday stays Monday", 1, 0},
@@ -205,9 +205,9 @@ func TestScanHeatmapBySeverity(t *testing.T) {
 		{
 			name: "severity smallint values map to label keys",
 			rows: [][4]int{
-				{1, 1, 0, 10},  // critical, PG Monday, 00h
-				{2, 1, 5, 3},   // major
-				{4, 0, 23, 7},  // warning, PG Sunday, 23h
+				{1, 1, 0, 10}, // critical, PG Monday, 00h
+				{2, 1, 5, 3},  // major
+				{4, 0, 23, 7}, // warning, PG Sunday, 23h
 			},
 			wantKeys: []string{"critical", "major", "warning"},
 			wantChecks: func(t *testing.T, m map[string]*HeatmapData) {
@@ -215,6 +215,31 @@ func TestScanHeatmapBySeverity(t *testing.T) {
 				assert.Equal(t, int64(10), m["critical"].DaysOfWeek[0].Hours[0])
 				assert.Equal(t, int64(10), m["critical"].MaxCount)
 				assert.Equal(t, int64(7), m["warning"].DaysOfWeek[6].Hours[23])
+			},
+		},
+		{
+			name: "dictionary severity codes map to label keys",
+			rows: [][4]int{
+				{31001, 1, 0, 10},
+				{31002, 1, 5, 3},
+				{31004, 0, 23, 7},
+			},
+			wantKeys: []string{"critical", "major", "warning"},
+			wantChecks: func(t *testing.T, m map[string]*HeatmapData) {
+				assert.Equal(t, int64(10), m["critical"].DaysOfWeek[0].Hours[0])
+				assert.Equal(t, int64(7), m["warning"].DaysOfWeek[6].Hours[23])
+			},
+		},
+		{
+			name: "same bucket accumulates counts",
+			rows: [][4]int{
+				{1, 1, 0, 10},
+				{31001, 1, 0, 5},
+			},
+			wantKeys: []string{"critical"},
+			wantChecks: func(t *testing.T, m map[string]*HeatmapData) {
+				assert.Equal(t, int64(15), m["critical"].DaysOfWeek[0].Hours[0])
+				assert.Equal(t, int64(15), m["critical"].MaxCount)
 			},
 		},
 		{

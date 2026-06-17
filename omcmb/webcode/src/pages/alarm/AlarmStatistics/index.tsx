@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback, useEffect } from 'react';
+import { useMemo, useState, useCallback, useEffect, type ReactNode } from 'react';
 import { Card, Col, Row, Typography, DatePicker, Radio, Space, Button, Switch, Tag, Tooltip, Spin } from 'antd';
 import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
@@ -52,13 +52,13 @@ interface StatisticsFilters {
 }
 
 // 生成时间标签
-function generateDayLabels(count: number): string[] {
-  const days: string[] = [];
+function generateDayBuckets(count: number): Array<{ date: string; label: string }> {
+  const buckets: Array<{ date: string; label: string }> = [];
   for (let i = count - 1; i >= 0; i--) {
     const d = dayjs().subtract(i, 'day');
-    days.push(d.format('MM/DD'));
+    buckets.push({ date: d.format('YYYY-MM-DD'), label: d.format('MM/DD') });
   }
-  return days;
+  return buckets;
 }
 
 // 告警级别分布图组件
@@ -149,53 +149,71 @@ function AlarmTrendChart({
   onRetry,
   days,
   t,
+  extra,
 }: {
   trendData: ReturnType<typeof useAlarmTrend>['data'];
   isError?: boolean;
   onRetry?: () => void;
   days: number;
   t: (key: string) => string;
+  extra?: ReactNode;
 }) {
-  const xData = useMemo(() => generateDayLabels(days), [days]);
+  const dayBuckets = useMemo(() => generateDayBuckets(days), [days]);
+  const normalizedTrendData = useMemo(() => {
+    const byDate = new Map((trendData || []).map((item) => [item.date, item]));
+    return dayBuckets.map(({ date }) => {
+      const item = byDate.get(date);
+      return {
+        date,
+        critical: item?.critical || 0,
+        major: item?.major || 0,
+        minor: item?.minor || 0,
+        warning: item?.warning || 0,
+      };
+    });
+  }, [trendData, dayBuckets]);
+
+  const xData = useMemo(() => dayBuckets.map((bucket) => bucket.label), [dayBuckets]);
 
   const hasData = useMemo(() => {
-    return trendData && trendData.length > 0 && trendData.some(d =>
+    return normalizedTrendData.some(d =>
       (d.critical || 0) + (d.major || 0) + (d.minor || 0) + (d.warning || 0) > 0
     );
-  }, [trendData]);
+  }, [normalizedTrendData]);
 
   const series = useMemo(() => {
-    if (!trendData || trendData.length === 0) return [];
+    if (normalizedTrendData.length === 0) return [];
 
     return [
       {
         name: t('alarm.severity.critical'),
-        data: trendData.map((d) => d.critical || 0),
+        data: normalizedTrendData.map((d) => d.critical || 0),
         color: SEVERITY_COLORS.critical,
       },
       {
         name: t('alarm.severity.major'),
-        data: trendData.map((d) => d.major || 0),
+        data: normalizedTrendData.map((d) => d.major || 0),
         color: SEVERITY_COLORS.major,
       },
       {
         name: t('alarm.severity.minor'),
-        data: trendData.map((d) => d.minor || 0),
+        data: normalizedTrendData.map((d) => d.minor || 0),
         color: SEVERITY_COLORS.minor,
       },
       {
         name: t('alarm.severity.warning'),
-        data: trendData.map((d) => d.warning || 0),
+        data: normalizedTrendData.map((d) => d.warning || 0),
         color: SEVERITY_COLORS.warning,
       },
     ];
-  }, [trendData, t]);
+  }, [normalizedTrendData, t]);
 
   // 数据层错误优先于空态：钩子已全部声明在前，此处 early-return 不违反 rules-of-hooks。
   if (isError) {
     return (
       <Card
         title={<span style={{ fontSize: 14, fontWeight: 500 }}>{t('alarm.stats.trend')}</span>}
+        extra={extra}
         size="small"
         styles={{ body: { padding: '16px', height: '280px', display: 'flex', alignItems: 'center', justifyContent: 'center' } }}
       >
@@ -212,6 +230,7 @@ function AlarmTrendChart({
     return (
       <Card
         title={<span style={{ fontSize: 14, fontWeight: 500 }}>{t('alarm.stats.trend')}</span>}
+        extra={extra}
         size="small"
         styles={{ body: { padding: '16px', height: '280px', display: 'flex', alignItems: 'center', justifyContent: 'center' } }}
       >
@@ -223,6 +242,7 @@ function AlarmTrendChart({
   return (
     <Card
       title={<span style={{ fontSize: 14, fontWeight: 500 }}>{t('alarm.stats.trend')}</span>}
+      extra={extra}
       size="small"
       styles={{ body: { padding: '12px', height: '280px' } }}
     >
@@ -477,18 +497,38 @@ export default function AlarmStatistics() {
     }
   };
 
-  // 钻取到告警详情：带上点击对象 + 统计页当前全量上下文（时间范围等）
+  // 钻取到告警详情
   const handleDrillDown = useCallback((severity?: string, deviceSN?: string) => {
-    // 把统计页当前时间范围一并带入，让列表筛选与统计口径一致
     const params = buildDrillDownSearch({
       severity,
       deviceSN,
-      timeRange: filters.timeRange,
-      customStartDate: filters.customStartDate,
-      customEndDate: filters.customEndDate,
     });
     navigate(`/alarm/current?${params.toString()}`);
-  }, [navigate, filters]);
+  }, [navigate]);
+
+  const trendRangeControl = (
+    <Space size="small" wrap>
+      <Radio.Group
+        value={filters.timeRange}
+        onChange={(e) => handleTimeRangeChange(e.target.value)}
+        optionType="button"
+        size="small"
+      >
+        <Radio.Button value="7days">{t('alarm.stats.last7Days')}</Radio.Button>
+        <Radio.Button value="30days">{t('alarm.stats.last30Days')}</Radio.Button>
+        <Radio.Button value="custom">{t('alarm.stats.custom')}</Radio.Button>
+      </Radio.Group>
+
+      {filters.timeRange === 'custom' && (
+        <DatePicker.RangePicker
+          value={[filters.customStartDate || null, filters.customEndDate || null]}
+          onChange={handleCustomDateChange}
+          allowClear={false}
+          size="small"
+        />
+      )}
+    </Space>
+  );
 
 
   return (
@@ -540,36 +580,12 @@ export default function AlarmStatistics() {
             )}
           </Space>
         </div>
-
-        {/* 过滤器区域 - 简化设计，移除Card容器 */}
-        <Space size="middle" wrap>
-          <span style={{ color: '#8c8c8c', fontSize: 14 }}>{t('alarm.stats.timeRange')}:</span>
-          <Radio.Group
-            value={filters.timeRange}
-            onChange={(e) => handleTimeRangeChange(e.target.value)}
-            optionType="button"
-            size="small"
-          >
-            <Radio.Button value="7days">{t('alarm.stats.last7Days')}</Radio.Button>
-            <Radio.Button value="30days">{t('alarm.stats.last30Days')}</Radio.Button>
-            <Radio.Button value="custom">{t('alarm.stats.custom')}</Radio.Button>
-          </Radio.Group>
-
-          {filters.timeRange === 'custom' && (
-            <DatePicker.RangePicker
-              value={[filters.customStartDate || null, filters.customEndDate || null]}
-              onChange={handleCustomDateChange}
-              allowClear={false}
-              size="small"
-            />
-          )}
-        </Space>
       </div>
 
       {/* 图表区域。细粒度 ErrorBoundary 兜住任一图表渲染异常，不连累整页白屏；
           数据层错误（isError）则在各卡片内显示错误空态 + 重试。 */}
       <ErrorBoundary onRetry={handleRefresh}>
-        <Spin spinning={isRefreshing} description={t('common.loading')} size="large">
+        <Spin spinning={isRefreshing} tip={t('common.loading')} size="large">
           <Row gutter={[16, 16]}>
             {/* 第零行：告警效率指标 */}
             <Col xs={24}>
@@ -598,6 +614,7 @@ export default function AlarmStatistics() {
                 onRetry={() => void refetchTrend()}
                 days={days}
                 t={t}
+                extra={trendRangeControl}
               />
             </Col>
             <Col xs={24} lg={12}>

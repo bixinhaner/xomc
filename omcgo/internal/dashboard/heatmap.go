@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"go.uber.org/zap"
 )
@@ -12,58 +13,73 @@ import (
 // 告警热度图数据，按星期几和小时统计告警数量
 type HeatmapData struct {
 	DaysOfWeek []DayOfWeekData `json:"days_of_week"` // 7天数据，0=周一, 6=周日
-	MaxCount   int64           `json:"max_count"`     // 最大告警数（用于热力图颜色范围）
+	MaxCount   int64           `json:"max_count"`    // 最大告警数（用于热力图颜色范围）
 }
 
 // DayOfWeekData represents alarm counts for each hour of a specific day.
 // 一天24小时的告警数量分布
 type DayOfWeekData struct {
-	Day   int    `json:"day"`   // 星期几，0=周一, 6=周日
+	Day   int     `json:"day"`   // 星期几，0=周一, 6=周日
 	Hours []int64 `json:"hours"` // 24小时告警数量，索引0=00:00-00:59, 23=23:00-23:59
 }
 
 // AlarmHeatmapBySeverity represents heatmap data broken down by severity.
 // 按严重程度分组的告警热度图数据
 type AlarmHeatmapBySeverity struct {
-	Severity string       `json:"severity"`     // 告警级别
-	Data     *HeatmapData `json:"data"`        // 热度图数据
+	Severity string       `json:"severity"` // 告警级别
+	Data     *HeatmapData `json:"data"`     // 热度图数据
 }
 
-// GetAlarmHeatmap retrieves alarm heatmap data for the specified time range.
-// 获取指定时间范围的告警热度图数据
-func (s *Service) GetAlarmHeatmap(ctx context.Context, days int) (*HeatmapData, error) {
-	query := `
+const alarmHeatmapQuery = `
 		SELECT
 			EXTRACT(DOW FROM raised_at)::integer as day_of_week,
 			EXTRACT(HOUR FROM raised_at)::integer as hour_of_day,
 			COUNT(*) as alarm_count
-		FROM alarms_history
+		FROM %s
 		WHERE raised_at > NOW() - INTERVAL '1 day' * $1
 		GROUP BY day_of_week, hour_of_day
 		ORDER BY day_of_week, hour_of_day
 	`
 
-	// alarms_history 在时序库（TsPool）。
-	rows, err := s.tsPool.Query(ctx, query, days)
+const alarmHeatmapBySeverityQuery = `
+		SELECT
+			severity,
+			EXTRACT(DOW FROM raised_at)::integer as day_of_week,
+			EXTRACT(HOUR FROM raised_at)::integer as hour_of_day,
+			COUNT(*) as alarm_count
+		FROM %s
+		WHERE raised_at > NOW() - INTERVAL '1 day' * $1
+			AND ($2 = 0 OR severity = $2 OR severity = $2 + 31000)
+		GROUP BY severity, day_of_week, hour_of_day
+		ORDER BY severity, day_of_week, hour_of_day
+	`
+
+// GetAlarmHeatmap retrieves alarm heatmap data for the specified time range.
+// 获取指定时间范围的告警热度图数据
+func (s *Service) GetAlarmHeatmap(ctx context.Context, days int) (*HeatmapData, error) {
+	result := initializeEmptyHeatmap()
+	if err := s.queryAlarmHeatmapInto(ctx, s.pgPool, "alarms_active", days, result); err != nil {
+		return nil, err
+	}
+	if s.tsPool != nil {
+		if err := s.queryAlarmHeatmapInto(ctx, s.tsPool, "alarms_history", days, result); err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
+}
+
+func (s *Service) queryAlarmHeatmapInto(ctx context.Context, pool *pgxpool.Pool, tableName string, days int, result *HeatmapData) error {
+	if pool == nil {
+		return nil
+	}
+	rows, err := pool.Query(ctx, fmt.Sprintf(alarmHeatmapQuery, tableName), days)
 	if err != nil {
-		s.logger.Error("failed to query alarm heatmap", zap.Error(err))
-		return nil, fmt.Errorf("query alarm heatmap: %w", err)
+		s.logger.Error("failed to query alarm heatmap", zap.String("table", tableName), zap.Error(err))
+		return fmt.Errorf("query alarm heatmap from %s: %w", tableName, err)
 	}
 	defer rows.Close()
 
-	// 初始化结果：7天，每天24小时
-	result := &HeatmapData{
-		DaysOfWeek: make([]DayOfWeekData, 7),
-		MaxCount:   0,
-	}
-	for i := 0; i < 7; i++ {
-		result.DaysOfWeek[i] = DayOfWeekData{
-			Day:   i,
-			Hours: make([]int64, 24),
-		}
-	}
-
-	// 填充数据
 	var scanErrors int
 	totalRows := 0
 	for rows.Next() {
@@ -78,23 +94,21 @@ func (s *Service) GetAlarmHeatmap(ctx context.Context, days int) (*HeatmapData, 
 
 		// PostgreSQL DOW: 0=Sunday, 调整为 0=Monday
 		adjustedDay := (dayOfWeek + 6) % 7
-		if adjustedDay >= 0 && adjustedDay < 7 && hourOfDay >= 0 && hourOfDay < 24 {
-			result.DaysOfWeek[adjustedDay].Hours[hourOfDay] = alarmCount
-			if alarmCount > result.MaxCount {
-				result.MaxCount = alarmCount
-			}
-		}
+		addHeatmapBucket(result, adjustedDay, hourOfDay, alarmCount)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate alarm heatmap rows from %s: %w", tableName, err)
 	}
 
-	// 记录扫描错误统计
 	if scanErrors > 0 {
 		s.logger.Warn("heatmap scan completed with errors",
+			zap.String("table", tableName),
 			zap.Int("total_rows", totalRows),
 			zap.Int("scan_errors", scanErrors),
 			zap.Int("successful_rows", totalRows-scanErrors))
 	}
 
-	return result, nil
+	return nil
 }
 
 // GetAlarmHeatmapBySeverity retrieves alarm heatmap data broken down by severity.
@@ -111,30 +125,38 @@ func (s *Service) GetAlarmHeatmapBySeverity(ctx context.Context, days int, sever
 // queryHeatmapBySeverityMap executes the heatmap query and returns data grouped by severity.
 // 执行热度图查询并按严重程度分组返回数据
 func (s *Service) queryHeatmapBySeverityMap(ctx context.Context, days int, severity string) (map[string]*HeatmapData, error) {
-	// alarms_history.severity 是 smallint（1=critical..4=warning），过滤参数必须用整型语义：
-	// 空字符串用 0 哨兵表示不过滤，避免 text 与 smallint 直接比较（SQLSTATE 42883）。
-	query := `
-		SELECT
-			severity,
-			EXTRACT(DOW FROM raised_at)::integer as day_of_week,
-			EXTRACT(HOUR FROM raised_at)::integer as hour_of_day,
-			COUNT(*) as alarm_count
-		FROM alarms_history
-		WHERE raised_at > NOW() - INTERVAL '1 day' * $1
-			AND ($2 = 0 OR severity = $2)
-		GROUP BY severity, day_of_week, hour_of_day
-		ORDER BY severity, day_of_week, hour_of_day
-	`
+	result := make(map[string]*HeatmapData)
+	if err := s.queryHeatmapBySeverityInto(ctx, s.pgPool, "alarms_active", days, severity, result); err != nil {
+		return nil, err
+	}
+	if s.tsPool != nil {
+		if err := s.queryHeatmapBySeverityInto(ctx, s.tsPool, "alarms_history", days, severity, result); err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
+}
 
-	// alarms_history 在时序库（TsPool）。
-	rows, err := s.tsPool.Query(ctx, query, days, severityFilterValue(severity))
+func (s *Service) queryHeatmapBySeverityInto(ctx context.Context, pool *pgxpool.Pool, tableName string, days int, severity string, result map[string]*HeatmapData) error {
+	if pool == nil {
+		return nil
+	}
+	rows, err := pool.Query(ctx, fmt.Sprintf(alarmHeatmapBySeverityQuery, tableName), days, severityFilterValue(severity))
 	if err != nil {
-		s.logger.Error("failed to query alarm heatmap by severity", zap.Error(err))
-		return nil, fmt.Errorf("query alarm heatmap by severity: %w", err)
+		s.logger.Error("failed to query alarm heatmap by severity", zap.String("table", tableName), zap.Error(err))
+		return fmt.Errorf("query alarm heatmap by severity from %s: %w", tableName, err)
 	}
 	defer rows.Close()
 
-	return s.scanHeatmapBySeverity(rows)
+	scanned, err := s.scanHeatmapBySeverity(rows)
+	if err != nil {
+		return err
+	}
+	mergeHeatmapBySeverity(result, scanned)
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate alarm heatmap by severity rows from %s: %w", tableName, err)
+	}
+	return nil
 }
 
 // scanHeatmapBySeverity scans query results and organizes data by severity.
@@ -162,7 +184,6 @@ func (s *Service) scanHeatmapBySeverity(rows interface{}) (map[string]*HeatmapDa
 			continue
 		}
 
-		// severity 列是 smallint，转为标签字符串作 map key，与请求侧过滤参数对齐
 		sev := severityToLabel(model.AlarmSeverity(sevValue))
 
 		// 初始化该严重程度的数据结构（如果尚未存在）
@@ -172,15 +193,33 @@ func (s *Service) scanHeatmapBySeverity(rows interface{}) (map[string]*HeatmapDa
 
 		// PostgreSQL DOW: 0=Sunday, 调整为 0=Monday
 		adjustedDay := (dayOfWeek + 6) % 7
-		if adjustedDay >= 0 && adjustedDay < 7 && hourOfDay >= 0 && hourOfDay < 24 {
-			heatmapBySeverity[sev].DaysOfWeek[adjustedDay].Hours[hourOfDay] = alarmCount
-			if alarmCount > heatmapBySeverity[sev].MaxCount {
-				heatmapBySeverity[sev].MaxCount = alarmCount
-			}
-		}
+		addHeatmapBucket(heatmapBySeverity[sev], adjustedDay, hourOfDay, alarmCount)
 	}
 
 	return heatmapBySeverity, nil
+}
+
+func addHeatmapBucket(result *HeatmapData, adjustedDay, hourOfDay int, alarmCount int64) {
+	if adjustedDay < 0 || adjustedDay >= 7 || hourOfDay < 0 || hourOfDay >= 24 {
+		return
+	}
+	result.DaysOfWeek[adjustedDay].Hours[hourOfDay] += alarmCount
+	if result.DaysOfWeek[adjustedDay].Hours[hourOfDay] > result.MaxCount {
+		result.MaxCount = result.DaysOfWeek[adjustedDay].Hours[hourOfDay]
+	}
+}
+
+func mergeHeatmapBySeverity(dst, src map[string]*HeatmapData) {
+	for severity, data := range src {
+		if _, exists := dst[severity]; !exists {
+			dst[severity] = initializeEmptyHeatmap()
+		}
+		for dayIdx, day := range data.DaysOfWeek {
+			for hourIdx, count := range day.Hours {
+				addHeatmapBucket(dst[severity], dayIdx, hourIdx, count)
+			}
+		}
+	}
 }
 
 // selectHeatmapResult selects the appropriate heatmap based on severity filter.
@@ -256,10 +295,7 @@ func findMaxSeverity(heatmapBySeverity map[string]*HeatmapData) (string, int64) 
 func createEmptyAlarmHeatmapBySeverity(severity string) *AlarmHeatmapBySeverity {
 	return &AlarmHeatmapBySeverity{
 		Severity: severity,
-		Data: &HeatmapData{
-			DaysOfWeek: make([]DayOfWeekData, 7),
-			MaxCount:   0,
-		},
+		Data:     initializeEmptyHeatmap(),
 	}
 }
 

@@ -49,6 +49,38 @@ const TIME_RANGES: { key: '7days' | '30days'; label: string; days: number }[] = 
   { key: '30days', label: '近 30 天', days: 30 },
 ]
 
+type TrendPoint = {
+  date: string
+  critical: number
+  major: number
+  minor: number
+  warning: number
+}
+
+function formatLocalDate(date: Date) {
+  const year = date.getFullYear()
+  const month = `${date.getMonth() + 1}`.padStart(2, '0')
+  const day = `${date.getDate()}`.padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function buildTrendSeries(raw: TrendPoint[] | undefined, days: number): TrendPoint[] {
+  const byDate = new Map((raw ?? []).map((item) => [item.date, item]))
+  return Array.from({ length: days }, (_, index) => {
+    const date = new Date()
+    date.setDate(date.getDate() - (days - index - 1))
+    const key = formatLocalDate(date)
+    const item = byDate.get(key)
+    return {
+      date: key,
+      critical: item?.critical ?? 0,
+      major: item?.major ?? 0,
+      minor: item?.minor ?? 0,
+      warning: item?.warning ?? 0,
+    }
+  })
+}
+
 // ---------------------------------------------------------------------------
 // 子组件
 // ---------------------------------------------------------------------------
@@ -138,8 +170,12 @@ function SeverityDistribution({
 // 告警趋势（堆叠 CSS 柱图近似）
 function TrendChart({
   series,
+  range,
+  onRangeChange,
 }: {
   series: { date: string; critical: number; major: number; minor: number; warning: number }[]
+  range: '7days' | '30days'
+  onRangeChange: (range: '7days' | '30days') => void
 }) {
   const max = useMemo(() => {
     let m = 0
@@ -155,7 +191,26 @@ function TrendChart({
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-sm">告警趋势</CardTitle>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <CardTitle className="text-sm">告警趋势</CardTitle>
+          <div className="inline-flex rounded-md border p-0.5">
+            {TIME_RANGES.map((r) => (
+              <button
+                key={r.key}
+                type="button"
+                className={cn(
+                  'rounded px-3 py-1 text-sm transition-colors',
+                  range === r.key
+                    ? 'bg-primary text-primary-foreground'
+                    : 'text-muted-foreground hover:text-foreground'
+                )}
+                onClick={() => onRangeChange(r.key)}
+              >
+                {r.label}
+              </button>
+            ))}
+          </div>
+        </div>
       </CardHeader>
       <CardContent>
         {!hasData ? (
@@ -244,15 +299,8 @@ export default function AlarmStatistics() {
   )
 
   const trendSeries = useMemo(
-    () =>
-      (trendQuery.data ?? []).map((d) => ({
-        date: d.date,
-        critical: d.critical ?? 0,
-        major: d.major ?? 0,
-        minor: d.minor ?? 0,
-        warning: d.warning ?? 0,
-      })),
-    [trendQuery.data]
+    () => buildTrendSeries(trendQuery.data, days),
+    [trendQuery.data, days]
   )
 
   const topDevices = useMemo(
@@ -281,33 +329,14 @@ export default function AlarmStatistics() {
       description="告警级别分布 · 趋势 · 高频告警设备排行"
       isFetching={isFetching}
       toolbar={
-        <>
-          <div className="inline-flex rounded-md border p-0.5">
-            {TIME_RANGES.map((r) => (
-              <button
-                key={r.key}
-                type="button"
-                className={cn(
-                  'rounded px-3 py-1 text-sm transition-colors',
-                  range === r.key
-                    ? 'bg-primary text-primary-foreground'
-                    : 'text-muted-foreground hover:text-foreground'
-                )}
-                onClick={() => setRange(r.key)}
-              >
-                {r.label}
-              </button>
-            ))}
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="ml-auto"
-            onClick={refreshAll}
-          >
-            <RefreshCcw /> 刷新
-          </Button>
-        </>
+        <Button
+          variant="outline"
+          size="sm"
+          className="ml-auto"
+          onClick={refreshAll}
+        >
+          <RefreshCcw /> 刷新
+        </Button>
       }
     >
       {/* 概览统计 */}
@@ -323,7 +352,7 @@ export default function AlarmStatistics() {
       {/* 分布 + 趋势 */}
       <div className="mb-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <SeverityDistribution data={severityData} onDrill={drillSeverity} />
-        <TrendChart series={trendSeries} />
+        <TrendChart series={trendSeries} range={range} onRangeChange={setRange} />
       </div>
 
       {/* 高频告警设备排行 */}
