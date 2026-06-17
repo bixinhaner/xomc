@@ -4,6 +4,9 @@ import path from 'path'
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
+  // 仅 dev server 保留 console.log/debug/info/trace；其余构建（production / mock）剥离。
+  // 保留 console.warn / console.error 用于线上问题排查（ErrorBoundary、catch 分支等依赖）。
+  const stripDebugLogs = mode !== 'development'
 
   return {
   plugins: [react()],
@@ -42,6 +45,13 @@ export default defineConfig(({ mode }) => {
         rewrite: (path) => path,
       },
     },
+  },
+  esbuild: {
+    // 生产 / mock 构建剥离调试日志与 debugger；保留 warn/error 便于线上排查。
+    pure: stripDebugLogs
+      ? ['console.log', 'console.debug', 'console.info', 'console.trace']
+      : [],
+    drop: stripDebugLogs ? ['debugger'] : [],
   },
   build: {
     chunkSizeWarningLimit: 600,
