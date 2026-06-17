@@ -9,6 +9,8 @@ import (
 	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/admin/loginpwd"
 	"github.com/omcgo/omcgo/internal/core/event"
+	"github.com/omcgo/omcgo/internal/core/response"
+	"github.com/omcgo/omcgo/internal/core/systimezone"
 	"github.com/omcgo/omcgo/internal/topology"
 	"go.uber.org/zap"
 )
@@ -166,6 +168,26 @@ func initAdminModule(c *Container) error {
 	sysConfigRepo := admin.NewPgSysConfigRepository(c.PgPool)
 	sysConfigService := admin.NewSysConfigService(sysConfigRepo)
 	sysConfigHandler := admin.NewSysConfigHandler(sysConfigService)
+
+	// 系统时区统一入口（issue #456，子单 A）+ 响应出口时区转换接通（issue #457，子单 B）。
+	// Fetcher 从 sys_configs 读 (basic, timezoneCode)；注入 response 包后，所有走统一响应信封的
+	// 成功响应在序列化前按系统时区展示时间字段（北向除外，保持 UTC）。
+	tzFetcher := func(ctx context.Context, category, key string) (string, bool) {
+		cfg, err := sysConfigRepo.GetByKey(ctx, category, key)
+		if err != nil || cfg == nil {
+			return "", false
+		}
+		return cfg.Value, true
+	}
+	tzProvider := systimezone.New(tzFetcher, logger.Named("systimezone"))
+	response.SetTimezoneProvider(tzProvider)
+	// 配置页保存"基础设置"（category='basic'，含 timezoneCode）后，立刻失效时区缓存，
+	// 使后续响应即按新系统时区展示，无需重启 app。
+	sysConfigService.RegisterSavedHook(func(_ context.Context, category string) {
+		if category == systimezone.Category {
+			tzProvider.Invalidate()
+		}
+	})
 
 	// FE 保存"安全设置"页（category='security'）后立刻让 SecurityPolicy 30s 缓存失效，
 	// 避免管理员看到设置变更但实际生效要等 ≤30s 的体验断层。
