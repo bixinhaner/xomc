@@ -144,12 +144,13 @@ var BulkAsyncCommit = false
 //   - 正常入库走 copy-direct 写模式（CopyIngest，每文件一次 pm_files 唯一约束 + 文件内 last-wins
 //     去重），不经本方法；
 //   - admin KPI 重算（kpi.CalculateAndStore）在调用本方法前 scoped DELETE 旧窗口行，保证重算幂等。
+//
 // 故本方法只需把行高吞吐灌库：
 //   - 小批量（< batchInsertThreshold）：VALUES 多行 INSERT，一次 round-trip。
 //   - 大批量（>= batchInsertThreshold）：CopyFrom 二进制协议直灌 pm_metrics（不再需要 TEMP 暂存
 //     表 + INSERT...SELECT —— 那是为了在 COPY 上套 ON CONFLICT，去掉幂等后可直接 COPY，更快）。
 //
-// object_ldn 列 NOT NULL DEFAULT ''（migration 000171），nil 在 buildRows 统一落 ''。
+// object_ldn 列 NOT NULL DEFAULT ”（migration 000171），nil 在 buildRows 统一落 ”。
 //
 // 附带：去掉 ON CONFLICT 后，写入 TimescaleDB 压缩 chunk 不再抛 SQLSTATE 0A000（那是 ON CONFLICT
 // on compressed chunk 专有约束），迟到补传写压缩 chunk 不再被降级跳过（issue #14 写侧约束解除）。
@@ -266,7 +267,7 @@ func isLateArrivalError(err error) bool {
 }
 
 // metricRowValues 把单条 PMMetric 归一化为与 pmMetricsColumns 等长、等序的列值数组。
-// 落值规则（id 缺省生成 / ingest 缺省 NOW / time 缺省取 end_time / object_ldn nil → ” /
+// 落值规则（id 缺省生成 / ingest 缺省 NOW / time 缺省取 start_time（#479，桶起点语义）/ object_ldn nil → ” /
 // extra map → JSONB bytes）在 VALUES INSERT 与 COPY 两条路径间共享，保证两路写出的行
 // 完全一致。
 func metricRowValues(m PMMetric) ([]any, error) {
@@ -278,7 +279,12 @@ func metricRowValues(m PMMetric) ([]any, error) {
 	if ingest.IsZero() {
 		ingest = time.Now()
 	}
+	// #479 改动二：time 语义统一为桶起点（= start_time）。缺省时取 start_time（非旧的 end_time），
+	// 保证 time == start_time 不变量；start_time 也为零时才退化到 end_time（防御，避免写零时刻）。
 	t := m.Time
+	if t.IsZero() {
+		t = m.StartTime
+	}
 	if t.IsZero() {
 		t = m.EndTime
 	}

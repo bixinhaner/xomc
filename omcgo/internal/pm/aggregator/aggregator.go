@@ -367,6 +367,12 @@ func buildCountersSQL(source, target string, w WindowSpec) (string, []any) {
 
 	// 参数顺序：$1=granularity, $2=bucket_start, $3=bucket_end, $4=where_start, $5=where_end
 	// bucket_start/end 等于 where_start/end（cron 同步驱动），但用独立位允许未来错峰回填。
+	//
+	// 源筛选窗口（#479 改动一）：按桶**起点** start_time 落入半开窗口 [w.Start, w.End) 框桶
+	// （start_time >= w.Start AND start_time < w.End），而非旧的「按 end_time 框桶」。
+	// 桶 end_time = start + 桶宽，按结束时刻套起点语义窗口会把每个源桶算到「结束所在周期」，
+	// 整体偏移一个源桶宽度（设备级日/周/月聚合值偏一格）。改按 start_time 后归属正确周期。
+	// 不按 time 筛：15min 源表 time=end 不可靠（#479 改动二前），start_time 是唯一稳定指向桶起点的列。
 	sql := fmt.Sprintf(`
 INSERT INTO %s (%s)
 SELECT
@@ -390,8 +396,8 @@ SELECT
     NULL::jsonb
 FROM %s m
 WHERE m.metric_type = 'counter'
-  AND m.end_time >= $4
-  AND m.end_time <  $5
+  AND m.start_time >= $4
+  AND m.start_time <  $5
   AND m.statis_type IN ('sum','avg','max','min')
 GROUP BY m.device_oui, m.device_sn, m.metric_path, m.statis_type, m.object_ldn
 ON CONFLICT %s DO UPDATE SET

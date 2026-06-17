@@ -367,6 +367,46 @@ func Test_buildRows_NilObjectLDN_EmptyString(t *testing.T) {
 	assert.Equal(t, "", rows[0][12], "ObjectLDN=nil 必须落空字符串")
 }
 
+// #479 改动二：metricRowValues 写出的 time（列 8）必须恒等于 start_time（列 9），
+// 即 15min 写入端的「time == start_time」不变量。覆盖：
+//  1. 显式设了 Time 的行——按显式值落库且与 start_time 一致（构造器已保证）。
+//  2. Time 为零的缺省行——time 退化取 start_time（非旧的 end_time）。
+//  3. Time 与 StartTime 都为零的兜底行——退化到 end_time（防御不写零时刻）。
+func Test_metricRowValues_TimeEqualsStartTime_Invariant(t *testing.T) {
+	start := time.Date(2026, 6, 14, 10, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 6, 14, 11, 0, 0, 0, time.UTC)
+
+	// 1. 显式 Time == StartTime（构造器产出形态）。
+	explicit := PMMetric{
+		DeviceOUI: "A", DeviceSN: "S1", MetricPath: "C1", MetricType: MetricTypeCounter,
+		Granularity: Granularity15Min, Time: start, StartTime: start, EndTime: end,
+	}
+	vals, err := metricRowValues(explicit)
+	require.NoError(t, err)
+	assert.Equal(t, start, vals[8], "time 列（idx 8）应为桶起点")
+	assert.Equal(t, vals[9], vals[8], "不变量：time == start_time")
+
+	// 2. Time 缺省（零值）→ 取 start_time，绝不取 end_time。
+	noTime := PMMetric{
+		DeviceOUI: "A", DeviceSN: "S1", MetricPath: "C1", MetricType: MetricTypeCounter,
+		Granularity: Granularity15Min, StartTime: start, EndTime: end,
+	}
+	vals2, err := metricRowValues(noTime)
+	require.NoError(t, err)
+	assert.Equal(t, start, vals2[8], "Time 缺省时 time 应退化取 start_time（#479），而非 end_time")
+	assert.NotEqual(t, end, vals2[8], "Time 缺省时 time 绝不取 end_time")
+	assert.Equal(t, vals2[9], vals2[8], "不变量：time == start_time")
+
+	// 3. Time 与 StartTime 都为零 → 防御退化到 end_time（不写零时刻）。
+	onlyEnd := PMMetric{
+		DeviceOUI: "A", DeviceSN: "S1", MetricPath: "C1", MetricType: MetricTypeCounter,
+		Granularity: Granularity15Min, EndTime: end,
+	}
+	vals3, err := metricRowValues(onlyEnd)
+	require.NoError(t, err)
+	assert.Equal(t, end, vals3[8], "start_time 也为零时防御退化到 end_time")
+}
+
 // 列序常量稳定性：pmMetricsColumns 必须与 buildBatchInsertSQL 的 14 列一致，
 // 否则 COPY 写入列错位。
 func Test_pmMetricsColumns_Count(t *testing.T) {

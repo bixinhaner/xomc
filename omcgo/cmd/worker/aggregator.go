@@ -62,11 +62,17 @@ func startPMAggregatorPipeline(
 	}
 	for _, r := range runners {
 		r.SetMetrics(aggregatorMetrics)
+		// #479 改动三：设备级该桶聚合成功后，确定性串联对应粒度的设备组聚合任务
+		// （同一 [Start,End)，读到的必是已提交的完整设备级数据）。取代旧组级独立 cron + 10 分钟错峰。
+		if gjt := aggregator.GroupJobTypeFor(r.JobType()); gjt != "" {
+			r.SetGroupChain(gjt, jobRepo)
+		}
 		registry.Register(r)
 		logger.Info("registered pm aggregator runner (device)",
 			zap.String("job_type", r.JobType()),
 			zap.String("source", r.Source()),
 			zap.String("target", r.Target()),
+			zap.String("chained_group_job_type", aggregator.GroupJobTypeFor(r.JobType())),
 			zap.String("granularity", string(r.Granularity())))
 	}
 
@@ -190,14 +196,14 @@ type cronEntry struct {
 	advance asyncjob.BucketAdvance
 }
 
-// pmAggregatorCronEntries 8 个 G5 cron 配置（4 设备级 + 4 设备组级）。
+// pmAggregatorCronEntries 4 个 G5 设备级 cron 配置（#479 改动三后只剩设备级）。
 //
-// 设备组级 cron 时刻晚于对应设备级 10 分钟，避免读到未完成的 device-level 聚合表：
+// 设备组级聚合不再有独立 cron——改为设备级该桶聚合成功后由 Runner 确定性 chain
+// （见 internal/pm/aggregator GroupJobTypeFor / Runner.SetGroupChain）。
+// 旧的"设备组级 cron 晚 10 分钟错峰"已废弃（脆弱、两套游标漂移、白等延迟）。
 //
-//	设备级 hourly :05 → 设备组级 hourly :15
-//	设备级 daily 00:05 → 设备组级 daily 00:15
-//	设备级 weekly Mon 00:10 → 设备组级 weekly Mon 00:20
-//	设备级 monthly 1日 00:15 → 设备组级 monthly 1日 00:25
+//	设备级 hourly :05 / daily 00:05 / weekly Mon 00:10 / monthly 1日 00:15
+//	→ 各自成功后立即 chain 出对应粒度的设备组聚合任务（同一 [Start,End)）。
 // pmAggregatorCronEntries 接受固定 loc，等价 pmAggregatorCronEntriesFn(func() loc)。
 // 保留此签名供既有单测直接断言某时区下的窗口边界。
 func pmAggregatorCronEntries(loc *time.Location) []cronEntry {
@@ -246,17 +252,16 @@ func pmAggregatorCronEntriesFn(locFn func() *time.Location) []cronEntry {
 		return thisMonth.AddDate(0, -1, 0), thisMonth
 	}
 
+	// #479 改动三：只保留设备级 cron。设备组聚合不再有独立 cron / 固定错峰——
+	// 改为设备级该桶聚合成功后由 Runner.SetGroupChain 确定性 chain（同一 [Start,End)）。
+	// 单一触发链：设备级 cron → 设备级任务成功 → chain 组任务；无两套游标漂移、无 10 分钟空等。
+	// 启动补跑同理：设备级漏桶被 catchup 重跑时会重新 chain 出对应组任务，组级无需独立 catchup。
 	return []cronEntry{
 		// 设备级
 		{spec: "5 * * * *", jobType: aggregator.JobTypeHourly, window: hourlyWindow, advance: hourlyAdvance},
 		{spec: "5 0 * * *", jobType: aggregator.JobTypeDaily, window: dailyWindow, advance: dailyAdvance},
 		{spec: "10 0 * * 1", jobType: aggregator.JobTypeWeekly, window: weeklyWindow, advance: weeklyAdvance},
 		{spec: "15 0 1 * *", jobType: aggregator.JobTypeMonthly, window: monthlyWindow, advance: monthlyAdvance},
-		// 设备组级（错峰 10 分钟）
-		{spec: "15 * * * *", jobType: aggregator.JobTypeHourlyGroup, window: hourlyWindow, advance: hourlyAdvance},
-		{spec: "15 0 * * *", jobType: aggregator.JobTypeDailyGroup, window: dailyWindow, advance: dailyAdvance},
-		{spec: "20 0 * * 1", jobType: aggregator.JobTypeWeeklyGroup, window: weeklyWindow, advance: weeklyAdvance},
-		{spec: "25 0 1 * *", jobType: aggregator.JobTypeMonthlyGroup, window: monthlyWindow, advance: monthlyAdvance},
 	}
 }
 
@@ -309,9 +314,7 @@ func startCronScheduler(
 		zap.Strings("schedules_device", []string{
 			"hourly @:05", "daily 00:05", "weekly Mon 00:10", "monthly 1日 00:15",
 		}),
-		zap.Strings("schedules_group", []string{
-			"hourly @:15", "daily 00:15", "weekly Mon 00:20", "monthly 1日 00:25",
-		}))
+		zap.String("schedules_group", "chained from device-level success (#479; no separate cron)"))
 }
 
 // catchupCronEntry 启动时补跑单个 cron job_type 的所有漏桶。

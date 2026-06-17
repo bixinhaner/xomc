@@ -28,8 +28,10 @@ func Test_MetricFromKPIValue_StartIsEndMinus15Min(t *testing.T) {
 
 	assert.Equal(t, MetricTypeKPI, m.MetricType)
 	assert.Equal(t, end, m.EndTime, "EndTime 仍为窗口止点 v.Time")
-	assert.Equal(t, end, m.Time, "Time 仍为窗口止点 v.Time")
 	assert.Equal(t, end.Add(-15*time.Minute), m.StartTime, "StartTime 推导为 end - 15min")
+	// #479 改动二：time 统一为桶起点（= start_time），不再写桶结束时刻。
+	assert.Equal(t, end.Add(-15*time.Minute), m.Time, "Time 必须为桶起点（= start_time）")
+	assert.Equal(t, m.StartTime, m.Time, "不变量：time == start_time")
 	assert.NotEqual(t, m.StartTime, m.EndTime, "start 必须严格早于 end，杜绝起止相同")
 	require.NotNil(t, m.ObjectLDN)
 	assert.Equal(t, "cell-1", *m.ObjectLDN)
@@ -43,6 +45,7 @@ func Test_MetricFromKPIValue_NoCellID_LdnNil(t *testing.T) {
 	assert.Nil(t, m.ObjectLDN, "无 CellID 时 object_ldn 为 nil")
 	assert.Equal(t, end.Add(-15*time.Minute), m.StartTime)
 	assert.Equal(t, end, m.EndTime)
+	assert.Equal(t, m.StartTime, m.Time, "不变量：time == start_time")
 }
 
 func Test_MetricFromCounter_StartWindow_NoRegression(t *testing.T) {
@@ -55,11 +58,14 @@ func Test_MetricFromCounter_StartWindow_NoRegression(t *testing.T) {
 	assert.Equal(t, MetricTypeCounter, withGran.MetricType)
 	assert.Equal(t, end.Add(-15*time.Minute), withGran.StartTime, "granularity>0 时 start = end - granularity")
 	assert.Equal(t, end, withGran.EndTime)
+	// #479 改动二：time 统一为桶起点（= start_time）。
+	assert.Equal(t, withGran.StartTime, withGran.Time, "不变量：time == start_time（granularity>0）")
 
 	// granularity=0（未知粒度）时退回 start == end，保持既有行为。
 	noGran := MetricFromCounter(model.PMCounter{Time: end, CounterName: "C1", CounterValue: 7})
 	assert.Equal(t, end, noGran.StartTime, "granularity=0 时 start 退回 end（不推导窗口）")
 	assert.Equal(t, end, noGran.EndTime)
+	assert.Equal(t, noGran.StartTime, noGran.Time, "不变量：time == start_time（granularity=0）")
 }
 
 // dedupeByNaturalKey 是 copy 模式（plain COPY 无 ON CONFLICT）的文件内幂等闸：撞 uq_pm_metrics_natural

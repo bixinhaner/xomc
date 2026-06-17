@@ -51,9 +51,60 @@ func Test_buildDeviceGroupSQL_HourlyGroupTableHasIDAndJoins(t *testing.T) {
 	assert.Equal(t, []any{"hourly", w.Start, w.End}, args)
 }
 
+// #479 改动一：device_group 源筛选必须按桶**起点** start_time 框半开窗口
+// [w.Start, w.End)，不再按 end_time（旧法源行恒后移一格 → 设备组「标签老一格」）。
+// 横跨小时/日/周/月各粒度；args 顺序不变（$2=w.Start, $3=w.End）。
+func Test_buildDeviceGroupSQL_FramesBy_StartTime_AllGranularities(t *testing.T) {
+	cases := []struct {
+		name       string
+		gran       metrics.Granularity
+		deviceTbl  string
+		groupTbl   string
+		start, end time.Time
+	}{
+		{
+			name: "hourly", gran: metrics.GranularityHourly,
+			deviceTbl: "pm_metrics_hourly", groupTbl: "pm_group_metrics_hourly",
+			start: time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC),
+			end:   time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),
+		},
+		{
+			name: "daily", gran: metrics.GranularityDaily,
+			deviceTbl: "pm_metrics_daily", groupTbl: "pm_group_metrics_daily",
+			start: time.Date(2026, 5, 22, 0, 0, 0, 0, time.UTC),
+			end:   time.Date(2026, 5, 23, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			name: "weekly", gran: metrics.GranularityWeekly,
+			deviceTbl: "pm_metrics_weekly", groupTbl: "pm_group_metrics_weekly",
+			start: time.Date(2026, 5, 18, 0, 0, 0, 0, time.UTC),
+			end:   time.Date(2026, 5, 25, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			name: "monthly", gran: metrics.GranularityMonthly,
+			deviceTbl: "pm_metrics_monthly", groupTbl: "pm_group_metrics_monthly",
+			start: time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC),
+			end:   time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			w := WindowSpec{Granularity: c.gran, Start: c.start, End: c.end}
+			sql, args := buildDeviceGroupSQL(c.deviceTbl, c.groupTbl, w)
+			assert.Contains(t, sql, "AND m.start_time >= $2", "源筛选下界应按桶起点 start_time")
+			assert.Contains(t, sql, "AND m.start_time <  $3", "源筛选上界应按桶起点 start_time")
+			assert.NotContains(t, sql, "AND m.end_time >= $2", "源筛选不应再按 end_time 框桶")
+			assert.NotContains(t, sql, "AND m.end_time <  $3", "源筛选不应再按 end_time 框桶")
+			// 写入 time/start_time/end_time 仍取源行自身桶时刻（逐档对齐、无偏移）
+			assert.Contains(t, sql, "m.time,\n    m.start_time,\n    m.end_time,")
+			assert.Equal(t, []any{string(c.gran), w.Start, w.End}, args)
+		})
+	}
+}
+
 // issue #395 专项：组聚合必须按源行自身桶时刻分桶并取时刻，确保
-//   1) 写入 time/start_time/end_time 取源行（m.time/...）而非窗口起点 → 与设备单维度无 1 小时偏移
-//   2) GROUP BY 含源桶时刻 → 跨多小时窗口产出多行（每源小时各一行），不被压成单点
+//  1. 写入 time/start_time/end_time 取源行（m.time/...）而非窗口起点 → 与设备单维度无 1 小时偏移
+//  2. GROUP BY 含源桶时刻 → 跨多小时窗口产出多行（每源小时各一行），不被压成单点
 func Test_buildDeviceGroupSQL_Issue395_BucketsBySourceTime_NoOffset(t *testing.T) {
 	w := WindowSpec{
 		Granularity: metrics.GranularityHourly,
@@ -74,9 +125,12 @@ func Test_buildDeviceGroupSQL_Issue395_BucketsBySourceTime_NoOffset(t *testing.T
 	assert.Contains(t, sql, "m.time, m.start_time, m.end_time",
 		"GROUP BY 必须含源桶时刻才能逐小时分桶")
 
-	// WHERE 仍按 end_time 半开区间命中窗口（窗口选择不变，只是不再用窗口起点当写入时刻）
-	assert.Contains(t, sql, "AND m.end_time >= $2")
-	assert.Contains(t, sql, "AND m.end_time <  $3")
+	// #479 改动一：源筛选改按桶起点 start_time 半开区间框桶（与 buildCountersSQL 同步），
+	// 消除设备组「标签老一格」。不再按 end_time 命中（旧法源行恒后移一格）。
+	assert.Contains(t, sql, "AND m.start_time >= $2")
+	assert.Contains(t, sql, "AND m.start_time <  $3")
+	assert.NotContains(t, sql, "AND m.end_time >= $2", "源筛选不应再按 end_time 框桶")
+	assert.NotContains(t, sql, "AND m.end_time <  $3", "源筛选不应再按 end_time 框桶")
 
 	// args 去掉了多余的 bucketStart 占位，仅 granularity + where 区间
 	assert.Equal(t, []any{"hourly", w.Start, w.End}, args)
