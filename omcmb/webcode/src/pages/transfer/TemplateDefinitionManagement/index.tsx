@@ -43,6 +43,7 @@ import type {
 import {
   buildCategoryPayload,
   buildCategoryTabs,
+  filterTaskTypesForCategory,
   getSoftwareLibraryFileTypeLabel,
   getSoftwareLibraryFileTypeOptions,
   getStepLabels,
@@ -77,7 +78,10 @@ export default function TemplateDefinitionManagement() {
   const deleteTaskTypeMutation = useDeleteUnifiedFileTransferTaskType();
 
   const filteredTaskTypes = useMemo(
-    () => taskTypes.filter((item) => item.category === selectedCategory),
+    // #483：buildCategoryTabs 已把 4G/5G/2G 折叠成虚拟分类 device_upgrade，selectedCategory
+    // 可能就是它。后端没有 category==='device_upgrade' 的模板（真实是 enb/gnb/gsm_upgrade），
+    // 故必须经 filterTaskTypesForCategory 展开成员，不能精确等值——否则虚拟分类下模板恒为空。
+    () => filterTaskTypesForCategory(taskTypes, selectedCategory),
     [selectedCategory, taskTypes],
   );
   const builtInTypes = useMemo(

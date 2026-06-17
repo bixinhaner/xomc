@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Checkbox, DatePicker, Modal, Spin, Tree, Typography } from 'antd';
+import { Checkbox, DatePicker, Modal, Spin, Tree, Typography, theme } from 'antd';
 import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
 import { FolderOutlined } from '@ant-design/icons';
@@ -83,6 +83,7 @@ export default function ExportModal({
   selectedRowCount = 0,
 }: ExportModalProps) {
   const t = useT();
+  const { token } = theme.useToken();
   const { data: groupsData, isLoading: groupsLoading } = useDeviceGroups();
   const deviceGroups = groupsData?.groups ?? [];
   const [checkedKeys, setCheckedKeys] = useState<string[]>([]);
@@ -163,7 +164,7 @@ export default function ExportModal({
       destroyOnHidden
     >
       {hasSelectedRows ? (
-        <div style={{ marginBottom: 16, color: '#666', fontSize: 12 }}>
+        <div style={{ marginBottom: 16, color: token.colorTextSecondary, fontSize: 12 }}>
           {t('export.selectedAlarmCount', { count: selectedRowCount })}
         </div>
       ) : (
@@ -195,16 +196,17 @@ export default function ExportModal({
             <Spin spinning={groupsLoading}>
               <div
                 style={{
-                  border: '1px solid #d9d9d9',
+                  border: `1px solid ${token.colorBorderSecondary}`,
                   borderRadius: 6,
                   padding: 8,
                   maxHeight: 280,
                   overflowY: 'auto',
-                  background: '#fafafa',
+                  background: token.colorBgContainer,
+                  color: token.colorText,
                 }}
               >
                 {deviceGroups.length === 0 && !groupsLoading ? (
-                  <div style={{ color: '#999', textAlign: 'center', padding: 20 }}>
+                  <div style={{ color: token.colorTextTertiary, textAlign: 'center', padding: 20 }}>
                     {t('common.noData')}
                   </div>
                 ) : (
@@ -219,7 +221,7 @@ export default function ExportModal({
                 )}
               </div>
             </Spin>
-            <div style={{ marginTop: 4, color: '#666', fontSize: 12 }}>
+            <div style={{ marginTop: 4, color: token.colorTextSecondary, fontSize: 12 }}>
               {t('export.selectedCount', { count: checkedKeys.length })}
             </div>
           </div>
@@ -268,10 +270,11 @@ export default function ExportModal({
         </div>
         <div
           style={{
-            border: '1px solid #d9d9d9',
+            border: `1px solid ${token.colorBorderSecondary}`,
             borderRadius: 6,
             padding: 12,
-            background: '#fafafa',
+            background: token.colorBgContainer,
+            color: token.colorText,
           }}
         >
           <Checkbox.Group
@@ -294,7 +297,7 @@ export default function ExportModal({
             </div>
           </Checkbox.Group>
         </div>
-        <div style={{ marginTop: 4, color: '#666', fontSize: 12 }}>
+        <div style={{ marginTop: 4, color: token.colorTextSecondary, fontSize: 12 }}>
           {t('export.selectedFieldCount', { count: checkedFieldKeys.length })}
         </div>
       </div>

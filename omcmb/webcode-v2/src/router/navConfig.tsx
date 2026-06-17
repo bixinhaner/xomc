@@ -70,7 +70,7 @@ const C_pages_logs_LogConfig = lazy(() => import('@/pages/logs/LogConfig'))
 const C_pages_logs_OperationLog = lazy(() => import('@/pages/logs/OperationLog'))
 const C_pages_logs_SystemLog = lazy(() => import('@/pages/logs/SystemLog'))
 const C_pages_mml_CommandTree = lazy(() => import('@/pages/mml/CommandTree'))
-const C_pages_mml_ConsoleV2 = lazy(() => import('@/pages/mml/ConsoleV2'))
+const C_pages_mml_Console = lazy(() => import('@/pages/mml/Console'))
 const C_pages_mml_PrivateCommand = lazy(() => import('@/pages/mml/PrivateCommand'))
 const C_pages_mml_ScriptTask = lazy(() => import('@/pages/mml/ScriptTask'))
 const C_pages_mml_TaskRecord = lazy(() => import('@/pages/mml/TaskRecord'))
@@ -222,7 +222,7 @@ export const MODULES: ModuleDef[] = [
     { path: '/mml/script', element: s(C_pages_mml_ScriptTask), label: '脚本任务' },
     { path: '/mml/task-records', element: s(C_pages_mml_TaskRecord), label: '任务记录' },
     // routable but hidden
-    { path: '/mml/console-v2', element: s(C_pages_mml_ConsoleV2), label: 'MML 控制台', hidden: true },
+    { path: '/mml/console', element: s(C_pages_mml_Console), label: 'MML 控制台', hidden: true },
     { path: '/mml/commands', element: s(C_pages_mml_CommandTree), label: '命令树', hidden: true },
     { path: '/mml/private-command', element: s(C_pages_mml_PrivateCommand), label: '私有命令', hidden: true },
     { path: '/mml/admin/catalog', element: s(C_pages_mml_admin_Catalog), label: '命令字典管理', hidden: true },

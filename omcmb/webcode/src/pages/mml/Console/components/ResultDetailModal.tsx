@@ -1,10 +1,12 @@
-import { Alert, Button, Descriptions, Modal, Popover, Space, Table, Tag, Typography } from 'antd';
+import { Alert, Button, Descriptions, message, Modal, Popover, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import { DownloadOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useT } from '@/hooks/useT';
 import type { ExecMeta, ExecStatus, PathTask, ResultColumn, ResultRow, VerifyItem } from '../types';
 import { STATUS_META, UNVERIFIED_REASON_TEXT, opColor, opLabel } from '../constants';
-import { exportOne } from '../download';
+import { exportOne, saveBlob } from '../download';
+import { useExportTaskDeviceCSV } from '@core/hooks/api/useMmlConsole';
+import { usePermission } from '@core/hooks/usePermission';
 
 const { Text } = Typography;
 
@@ -39,6 +41,31 @@ export default function ResultDetailModal({
   onClose,
 }: ResultDetailModalProps) {
   const t = useT();
+  // 「下载结果」统一走后端单设备 CSV（与操作列下载同一路径 buildDeviceCSVMulti 竖表），
+  // 不再用客户端 exportOne 的横表格式；仅无真实任务 ID 的兜底场景退回 exportOne。
+  const exportDeviceCsv = useExportTaskDeviceCSV();
+  const canExportPerm = usePermission('mml:console:export');
+
+  const handleDownloadResult = (): void => {
+    if (!row) return;
+    if (!commandId) {
+      exportOne(columns, row);
+      return;
+    }
+    const cmd = execMeta?.commandName ?? execMeta?.label ?? 'mml-result';
+    exportDeviceCsv.mutate(
+      { taskId: commandId, deviceSn: row.deviceSn },
+      {
+        onSuccess: (blob) => {
+          saveBlob(blob, `${cmd}_${row.deviceSn}.csv`);
+          void message.success(t('mml.consoleV2.result.deviceDownloaded', { sn: row.deviceSn }));
+        },
+        onError: (e) =>
+          void message.error(e instanceof Error ? e.message : t('mml.consoleV2.result.exportFailed')),
+      },
+    );
+  };
+
   const read = execMeta?.read ?? true;
   const status = row?.status;
 
@@ -209,13 +236,16 @@ export default function ResultDetailModal({
       destroyOnHidden
       footer={
         <Space>
-          <Button
-            icon={<DownloadOutlined />}
-            disabled={!row}
-            onClick={() => row && exportOne(columns, row)}
-          >
-            {t('mml.consoleV2.detail.downloadResult')}
-          </Button>
+          <Tooltip title={canExportPerm ? undefined : '无导出权限'}>
+            <Button
+              icon={<DownloadOutlined />}
+              disabled={!row || !canExportPerm}
+              loading={exportDeviceCsv.isPending}
+              onClick={handleDownloadResult}
+            >
+              {t('mml.consoleV2.detail.downloadResult')}
+            </Button>
+          </Tooltip>
           <Button onClick={onClose}>{t('common.close')}</Button>
         </Space>
       }

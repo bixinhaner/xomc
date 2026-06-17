@@ -25,6 +25,7 @@ import { useGroupActions } from './useGroupActions';
 import { useDeviceActions } from './useDeviceActions';
 import { useBatchActions } from './useBatchActions';
 import { useImportExportHandlers } from './useImportExportHandlers';
+import { buildGroupTargetOptions } from '@core/utils/deviceGroupTargets';
 
 /**
  * 设备分组主页面。
@@ -131,18 +132,10 @@ export default function DeviceGrouping() {
 
   const targetGroupOptions = useMemo(
     () =>
-      // 设备只能绑定到「非一级」分组(二级/叶子组);一级分组(root, parentId==null)是容器,
-      // 不作为「移动到分组」的目标 —— 故过滤掉一级分组。
-      groups
-        .filter((g) => g.parentId)
-        .map((g) => {
-          const parentName = getParentName(g.parentId ?? null);
-          return {
-            label: parentName ? `${parentName} / ${g.name}` : g.name,
-            value: g.id,
-          };
-        }),
-    [groups, getParentName]
+      // 一级分组(root)是容器不作目标；「未分组设备」内置节点保留为"移出分组"项
+      // （issue #478：选它走移出分组语义，删除归属记录让设备回到未分组态）。
+      buildGroupTargetOptions(groups, getParentName, t('device.batch.removeFromGroup')),
+    [groups, getParentName, t]
   );
 
   // ── Group / Device action hooks ──

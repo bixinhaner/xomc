@@ -61,8 +61,9 @@ func Setup(r *gin.Engine, c *Container) error {
 		Init:    func() error { return initDeviceModule(c) },
 	})
 	graph.Add(components.ModuleInitializer{
-		Name: "alarm",
-		Init: func() error { return initAlarmModule(c) },
+		Name:    "alarm",
+		Depends: []string{"productregistry"},
+		Init:    func() error { return initAlarmModule(c) },
 	})
 	graph.Add(components.ModuleInitializer{
 		Name:    "alarm-retention",

@@ -39,7 +39,7 @@ interface ResultTableProps {
   rows: ResultRow[];
   running: boolean;
   hasExecuted: boolean;
-  /** 基于设备的「重新执行」回调（仅 console-v2 传入；任务记录-查看为只读不传）。 */
+  /** 基于设备的「重新执行」回调（仅 console 传入；任务记录-查看为只读不传）。 */
   onReexecute?: (deviceSn: string) => void;
 }
 
@@ -86,8 +86,8 @@ export default function ResultTable({
   const exportCsv = useExportTaskCSV();
   const exportDeviceCsv = useExportTaskDeviceCSV();
   // issue #409：导出 / 重新执行的按钮级权限（无权限禁用 + Tooltip，不隐藏）。
-  const canExportPerm = usePermission('mml:console-v2:export');
-  const canExecutePerm = usePermission('mml:console-v2:execute');
+  const canExportPerm = usePermission('mml:console:export');
+  const canExecutePerm = usePermission('mml:console:execute');
 
   const handleExportAllCsv = (): void => {
     if (!commandId) {

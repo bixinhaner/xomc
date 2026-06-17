@@ -25,6 +25,8 @@ type AlarmSyncProcessor struct {
 	eventBus         event.EventBus
 	logger           *zap.Logger
 	alarmDefRegistry *definition.Registry
+	productResolver  definition.ProductResolver
+	defMetrics       fallbackMetrics
 	deviceReader     deviceReader
 }
 
@@ -54,6 +56,15 @@ func (p *AlarmSyncProcessor) WithDeviceReader(reader deviceReader) *AlarmSyncPro
 // WithAlarmDefRegistry enables severity override from alarm definitions during sync.
 func (p *AlarmSyncProcessor) WithAlarmDefRegistry(alarmDefRegistry *definition.Registry) *AlarmSyncProcessor {
 	p.alarmDefRegistry = alarmDefRegistry
+	if alarmDefRegistry != nil {
+		p.defMetrics = alarmDefRegistry.Metrics()
+	}
+	return p
+}
+
+// WithProductResolver enables unknown-alarm fallback decisions during sync.
+func (p *AlarmSyncProcessor) WithProductResolver(productResolver definition.ProductResolver) *AlarmSyncProcessor {
+	p.productResolver = productResolver
 	return p
 }
 
@@ -169,18 +180,22 @@ func (p *AlarmSyncProcessor) processSync(ctx context.Context, deviceSN string, p
 	localAlarmByKey := indexActiveAlarms(localAlarms)
 
 	// 3. Resolve device-derived fields for any newly added alarms.
-	deviceID, carrier, technology := p.resolveDeviceFields(ctx, deviceSN, localAlarms)
+	deviceID, carrier, technology, productClass := p.resolveDeviceFields(ctx, deviceSN, localAlarms)
 	remoteAlarms := make([]*model.Alarm, 0, len(tr069Alarms))
 	for i := range tr069Alarms {
 		alarm := tr069Alarms[i].ToModel(deviceID, deviceSN, carrier)
-		if err := applyAlarmDefinitionSeverity(ctx, p.alarmDefRegistry, alarm); err != nil {
-			p.logger.Warn("resolve synced alarm definition severity failed (proceed with source severity)",
+		if technology != "" {
+			alarm.Technology = &technology
+		}
+		drop, err := applyUnknownAlarmFallback(ctx, p.alarmDefRegistry, p.productResolver, p.defMetrics, p.logger, alarm, productClass)
+		if err != nil {
+			p.logger.Warn("apply synced alarm fallback failed (proceed without fallback)",
 				zap.Error(err),
 				zap.String("device_sn", deviceSN),
 				zap.String("alarm_identifier", alarm.AlarmIdentifier))
 		}
-		if technology != "" {
-			alarm.Technology = &technology
+		if drop {
+			continue
 		}
 		remoteAlarms = append(remoteAlarms, alarm)
 	}
@@ -252,10 +267,11 @@ func (p *AlarmSyncProcessor) processSync(ctx context.Context, deviceSN string, p
 	return result
 }
 
-func (p *AlarmSyncProcessor) resolveDeviceFields(ctx context.Context, deviceSN string, localAlarms []*model.Alarm) (uuid.UUID, model.CarrierCode, string) {
+func (p *AlarmSyncProcessor) resolveDeviceFields(ctx context.Context, deviceSN string, localAlarms []*model.Alarm) (uuid.UUID, model.CarrierCode, string, string) {
 	deviceID := uuid.Nil
 	var carrier model.CarrierCode
 	technology := ""
+	productClass := ""
 
 	for _, alarm := range localAlarms {
 		if alarm == nil {
@@ -272,13 +288,14 @@ func (p *AlarmSyncProcessor) resolveDeviceFields(ctx context.Context, deviceSN s
 		}
 	}
 
-	if p.deviceReader == nil || (deviceID != uuid.Nil && carrier != "" && technology != "") {
-		return deviceID, carrier, technology
+	needProductClass := p.productResolver != nil && productClass == ""
+	if p.deviceReader == nil || (deviceID != uuid.Nil && carrier != "" && technology != "" && !needProductClass) {
+		return deviceID, carrier, technology, productClass
 	}
 
 	device, err := p.deviceReader.GetBySerialNumber(ctx, deviceSN)
 	if err != nil || device == nil {
-		return deviceID, carrier, technology
+		return deviceID, carrier, technology, productClass
 	}
 	if deviceID == uuid.Nil {
 		deviceID = device.ID
@@ -289,8 +306,9 @@ func (p *AlarmSyncProcessor) resolveDeviceFields(ctx context.Context, deviceSN s
 	if technology == "" && device.Technology != "" {
 		technology = string(device.Technology)
 	}
+	productClass = device.ProductClass
 
-	return deviceID, carrier, technology
+	return deviceID, carrier, technology, productClass
 }
 
 // isAlarmGPVResponse checks if the GPV response contains alarm parameters.

@@ -114,6 +114,21 @@ func (mr *MockDeviceGroupRepositoryMockRecorder) BatchRemoveDevices(ctx, groupID
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "BatchRemoveDevices", reflect.TypeOf((*MockDeviceGroupRepository)(nil).BatchRemoveDevices), ctx, groupID, deviceIDs)
 }
 
+// RemoveDevicesFromAllGroups mocks base method.
+func (m *MockDeviceGroupRepository) RemoveDevicesFromAllGroups(ctx context.Context, deviceIDs []uuid.UUID) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RemoveDevicesFromAllGroups", ctx, deviceIDs)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RemoveDevicesFromAllGroups indicates an expected call of RemoveDevicesFromAllGroups.
+func (mr *MockDeviceGroupRepositoryMockRecorder) RemoveDevicesFromAllGroups(ctx, deviceIDs any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RemoveDevicesFromAllGroups", reflect.TypeOf((*MockDeviceGroupRepository)(nil).RemoveDevicesFromAllGroups), ctx, deviceIDs)
+}
+
 // ClearBoundRule mocks base method.
 func (m *MockDeviceGroupRepository) ClearBoundRule(ctx context.Context, groupID uuid.UUID) error {
 	m.ctrl.T.Helper()

@@ -55,6 +55,170 @@ func parseRunTimeToSeconds(val string) int64 {
 	return totalSeconds
 }
 
+// instanceAggregationRule 描述「同一逻辑列对应多个实例化 TR069 路径」的聚合规则。
+// 模板中以 `{x}` 形式表示通配数字索引（如 `{f}` `{c}` `{t}`），实际占位字符无关，
+// 仅用于阅读;运行期把所有 `\{[a-zA-Z]\}` 替换为 `(\d+)` 编译成正则匹配。
+//
+// 聚合语义（设计 #364-followup "多实例小区级聚合"）:
+//   - 命中模板的所有 paramValues 路径 → 提取数字索引 → 数值升序排序 → 值去重 →
+//     用 `,` 拼接覆盖 fields[column]。
+//   - 同列允许有多模板(NR/LTE 双套兜底)，按列分组汇总;实际只一套有数据时不混淆。
+//   - 在 SyncFromParameters 末尾、carrier mapping + universalInformMapping 之后执行，
+//     确定性覆盖单实例写入。无命中则保留单值不动。
+//   - 仅适用于 varchar 列；数值列(bandwidth/transmit_power/gps_satellites)若需多
+//     实例显示需先单独 migration 改字段类型，此处不参与。
+type instanceAggregationRule struct {
+	column   string
+	template string
+	pattern  *regexp.Regexp
+}
+
+// universalInformInstanceMappings 列出小区级/多实例字段的 TR069 路径模板，按列分组。
+// detail_assembler.go 渲染详情页时是逐 cell 遍历，list 页则统一聚合显示。
+//
+// 编辑时若新增模板，须确保通配符在 TR069 实际上报路径中确实是数字索引（如
+// FAPService.{i} / CellConfig.{j} / NR.CN.TA.{k} / FAP.Ipsec.{i}）。
+var universalInformInstanceMappings = []struct {
+	column    string
+	templates []string
+}{
+	// PCI（小区级，NR + LTE 兜底）
+	{column: "pci", templates: []string{
+		"Device.Services.FAPService.{f}.CellConfig.{c}.NR.RAN.RF.PhyCellID",
+		"Device.Services.FAPService.{f}.CellConfig.LTE.RAN.RF.PhyCellID",
+	}},
+	// 频点 EARFCN / NRARFCNDL（小区级）
+	{column: "freq_point", templates: []string{
+		"Device.Services.FAPService.{f}.CellConfig.{c}.NR.RAN.RF.NRARFCNDL",
+		"Device.Services.FAPService.{f}.CellConfig.LTE.RAN.Common.EARFCNDL",
+	}},
+	// 上行 EARFCN / NRARFCNUL（小区级）
+	{column: "ul_earfcn", templates: []string{
+		"Device.Services.FAPService.{f}.CellConfig.{c}.NR.RAN.RF.NRARFCNUL",
+		"Device.Services.FAPService.{f}.CellConfig.LTE.RAN.RF.EARFCNUL",
+	}},
+	// Band（小区级）
+	{column: "band", templates: []string{
+		"Device.Services.FAPService.{f}.CellConfig.{c}.NR.RAN.RF.FreqBandIndicator",
+		"Device.Services.FAPService.{f}.CellConfig.LTE.RAN.RF.FreqBandIndicator",
+	}},
+	// TAC（小区级，NR 走 CN.TA 子树，LTE 走 EPC.TAC）
+	{column: "tac", templates: []string{
+		"Device.Services.FAPService.{f}.CellConfig.{c}.NR.CN.TA.{t}.TAC",
+		"Device.Services.FAPService.{f}.CellConfig.LTE.EPC.TAC",
+	}},
+	// Cell ID / NR Cell Identity（小区级）
+	{column: "cell_id", templates: []string{
+		"Device.Services.FAPService.{f}.CellConfig.{c}.NR.CN.TA.{t}.NrcellIdentity",
+		"Device.Services.FAPService.{f}.CellConfig.{c}.NR.RAN.Common.CellLocalId",
+		"Device.Services.FAPService.{f}.CellConfig.LTE.RAN.Common.CellIdentity",
+	}},
+	// NR Admin State（小区级 CellEnable.AdminState；与详情页小区表同源）
+	{column: "admin_state", templates: []string{
+		"Device.Services.FAPService.{f}.CellConfig.{c}.NR.RAN.CellEnable.AdminState",
+	}},
+	// LTE FAP AdminState（设备/FAPService 级 boolean，多 FAPService 实例时聚合）
+	{column: "lock_status", templates: []string{
+		"Device.Services.FAPService.{f}.FAPControl.LTE.AdminState",
+	}},
+	// IPSec 网关地址（多实例 IPSec 隧道，与详情页 IPSec 参数表同源）
+	{column: "ipsec_addr", templates: []string{
+		"Device.FAP.Ipsec.{i}.TUNNEL_GATEWAY",
+	}},
+}
+
+// compiledInstanceAggregationRules 预编译形态（package init 期间生成）。
+var compiledInstanceAggregationRules []instanceAggregationRule
+
+// instancePlaceholderRegex 匹配模板字符串中的 `{x}` 通配符（QuoteMeta 后变成
+// `\{x\}`），运行时替换为 `(\d+)` 形成捕获组。
+var instancePlaceholderRegex = regexp.MustCompile(`\\\{[a-zA-Z_]\\\}`)
+
+func init() {
+	for _, m := range universalInformInstanceMappings {
+		for _, tmpl := range m.templates {
+			pattern := "^" + instancePlaceholderRegex.ReplaceAllString(regexp.QuoteMeta(tmpl), `(\d+)`) + "$"
+			compiledInstanceAggregationRules = append(compiledInstanceAggregationRules, instanceAggregationRule{
+				column:   m.column,
+				template: tmpl,
+				pattern:  regexp.MustCompile(pattern),
+			})
+		}
+	}
+}
+
+// aggregateInstanceFields scans paramValues for every templated path and
+// overrides fields[column] with the comma-joined values of all matched
+// instances (sorted by numeric instance indices, duplicates removed).
+//
+// 若某列所有模板都无命中，则 fields[column] 维持上游 carrier/universal mapping
+// 写入的单值（或空），不覆盖。这保证：单 cell / 单实例设备聚合后等价单值；多
+// cell / 多 IPSec 隧道设备前端直接看到 "1,2,3" 这样的 csv 串。
+func aggregateInstanceFields(paramValues map[string]string, fields map[string]interface{}) {
+	type instanceValue struct {
+		indices []int64
+		value   string
+	}
+	byColumn := make(map[string][]instanceValue)
+
+	for _, rule := range compiledInstanceAggregationRules {
+		for path, val := range paramValues {
+			if val == "" {
+				continue
+			}
+			matches := rule.pattern.FindStringSubmatch(path)
+			if matches == nil {
+				continue
+			}
+			indices := make([]int64, 0, len(matches)-1)
+			for _, s := range matches[1:] {
+				n, err := strconv.ParseInt(s, 10, 64)
+				if err != nil {
+					indices = nil
+					break
+				}
+				indices = append(indices, n)
+			}
+			if indices == nil {
+				continue
+			}
+			byColumn[rule.column] = append(byColumn[rule.column], instanceValue{indices: indices, value: val})
+		}
+	}
+
+	for col, list := range byColumn {
+		if len(list) == 0 {
+			continue
+		}
+		sort.SliceStable(list, func(i, j int) bool {
+			a, b := list[i].indices, list[j].indices
+			n := len(a)
+			if len(b) < n {
+				n = len(b)
+			}
+			for k := 0; k < n; k++ {
+				if a[k] != b[k] {
+					return a[k] < b[k]
+				}
+			}
+			return len(a) < len(b)
+		})
+		seen := make(map[string]struct{}, len(list))
+		vals := make([]string, 0, len(list))
+		for _, v := range list {
+			if _, ok := seen[v.value]; ok {
+				continue
+			}
+			seen[v.value] = struct{}{}
+			vals = append(vals, v.value)
+		}
+		if len(vals) == 0 {
+			continue
+		}
+		fields[col] = strings.Join(vals, ",")
+	}
+}
+
 // universalInformMapping maps TR069 parameter paths to device_info columns
 // for parameters that are identical across all carriers (not carrier-specific).
 // Note: run_time is handled separately with priority logic (UpTime > X_COM_STATION_RUN_Time)
@@ -65,6 +229,10 @@ func parseRunTimeToSeconds(val string) int64 {
 // carrier-specific 路径仍保留在各自 adapter.GetInfoParamMapping 中（如
 // X_CMCC_MACAddress 兜底）— InfoSyncer 用 universal 后写覆盖 carrier
 // 的语义：标准 path 优先（若 CPE 同时上报两种，标准胜出）。
+//
+// 小区级字段（pci/tac/band/freq_point/ul_earfcn/cell_id/admin_state/lock_status）
+// 与多实例字段（ipsec_addr）的实例化路径不在此表，统一走 universalInformInstanceMappings
+// 聚合（见 aggregateInstanceFields），单实例设备聚合后等价此处保留的单值。
 var universalInformMapping = map[string]string{
 	"Device.Services.FAPService.1.FAPControl.X_RADISYS_COM_AlarmStatus": "alarm_severity",
 	// TR-181 Ethernet 标准 path（取代 CMCC X_CMCC_MACAddress，多数 CPE 上报此 path）
@@ -76,20 +244,17 @@ var universalInformMapping = map[string]string{
 	// 循环在 carrier 循环之后执行，确定性覆盖），导致列表/详情恒显能力上限值、与 LMT
 	// 不一致。删除此条后 transmit_power 的唯一权威来源 = carrier adapter 的
 	// ReferenceSignalPower→transmit_power（见 cmcc/ctcc adapter.go GetInfoParamMapping）。
-	// LTE 小区配置（device_info 表 Phase 2 新增列）
-	"Device.Services.FAPService.1.CellConfig.LTE.EPC.TAC": "tac",
+	// LTE 设备特有 PHY 参数（不参与小区聚合 — 这些列前端按单值显示且只 cell-1 有意义）
 	// GSM 位置区码：补全 device_groups LAC 匹配模式所需的设备侧数据源（T-2026-05-25）。
 	// 与 TAC 平行，CPE 同时上报时 LAC 多见于双模 / GSM 设备。
-	"Device.DeviceInfo.BTS.CurrentLac":                                                     "lac",
-	"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.FreqBandIndicator":                 "band",
-	"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.EARFCNUL":                          "ul_earfcn",
+	"Device.DeviceInfo.BTS.CurrentLac": "lac",
 	"Device.Services.FAPService.1.CellConfig.LTE.RAN.PHY.TDDFrame.SubFrameAssignment":      "subframe_assignment",
 	"Device.Services.FAPService.1.CellConfig.LTE.RAN.PHY.TDDFrame.SpecialSubframePatterns": "special_subframe",
 	"Device.Services.FAPService.1.CellConfig.LTE.RAN.PHY.PRACH.ZeroCorrelationZoneConfig":  "root_index",
 	// GPS（卫星数 + 高度）
 	"Device.FAP.GPS.NumberOfSatellites": "gps_satellites",
-	// 锁状态 = FAP AdminState（"true"=已激活/unlocked, "false"=锁定）
-	"Device.Services.FAPService.1.FAPControl.LTE.AdminState": "lock_status",
+	// 小区级 / 多实例字段（PCI/TAC/Band/EARFCN/Cell ID/AdminState/IPSec 等）已搬到
+	// universalInformInstanceMappings 走聚合管线，详情见 aggregateInstanceFields。
 }
 
 // gpsHeightCandidatePaths lists possible TR069 paths for GPS height.
@@ -416,6 +581,12 @@ func (s *InfoSyncer) SyncFromParameters(ctx context.Context, deviceID uuid.UUID,
 	if model, ok := deriveNetworkModel(paramValues); ok {
 		fields["network_model"] = model
 	}
+
+	// 多实例聚合（#364-followup）：覆盖小区级 / 多实例字段为
+	// "v1,v2,..." 形式，与详情页逐 cell 表格逻辑保持一致。
+	// 必须在所有 carrier mapping + universalInformMapping 写入之后执行,
+	// 单实例设备聚合结果与之前单值等价,多实例设备 list 直接显示 csv 串。
+	aggregateInstanceFields(paramValues, fields)
 
 	latitude, longitude, hasCoordinates := lookupGPSCoordinates(paramValues)
 

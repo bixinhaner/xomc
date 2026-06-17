@@ -1143,7 +1143,9 @@ export default function DeviceList() {
           return v == null || v === '' ? '--' : v;
         },
       },
-      { key: 'remark', title: t('device.remark'), dataIndex: 'remark', width: 185, hidden: true, ellipsis: true, group: 'common', headerRender: remarkHeaderRender },
+      // Remark 列暂时隐藏（用户反馈：含义不明 + 表头自定义编辑能力暂未对接后端持久化）。
+      // 恢复方式：取消下行注释并保留 remarkHeaderRender / handleRemarkLabel* state（已保留）。
+      // { key: 'remark', title: t('device.remark'), dataIndex: 'remark', width: 185, hidden: true, ellipsis: true, group: 'common', headerRender: remarkHeaderRender },
       {
         key: 'longitude',
         title: t('device.longitude'),
@@ -1246,7 +1248,8 @@ export default function DeviceList() {
       { key: 'band', title: 'Band', dataIndex: 'band', width: 100, hidden: true, group: 'common' },
       { key: 'dlEarfcn', title: t('device.dlEarfcn'), dataIndex: 'dlEarfcn', width: 110, hidden: true, group: 'common' },
       { key: 'ulEarfcn', title: t('device.ulEarfcn'), dataIndex: 'ulEarfcn', width: 110, hidden: true, group: 'common' },
-      { key: 'networkModel', title: t('device.networkModel'), dataIndex: 'networkModel', width: 110, hidden: true, group: 'common' },
+      // 基站类型(networkModel)暂时隐藏：当前 LTE/NR/双模 推导口径未与产品对齐;恢复时取消下行注释。
+      // { key: 'networkModel', title: t('device.networkModel'), dataIndex: 'networkModel', width: 110, hidden: true, group: 'common' },
       { key: 'txPower', title: 'Tx Power', dataIndex: 'txPower', width: 100, hidden: true, group: 'common' },
       {
         key: 'halobFlag',
@@ -1303,7 +1306,8 @@ export default function DeviceList() {
       },
 
     ],
-    [navigate, t, fmtTime, fmtDuration, fmtStatus, renderMultiCellStatus, renderActivationStatus, remarkHeaderRender, message, downloadStationLog, mapConnStatus, getSeverityLabel, networkTypeDict?.sysDictionaryDetails]
+    // remarkHeaderRender 暂从 dep 列表移除：remark 列定义已注释，恢复时同步加回。
+    [navigate, t, fmtTime, fmtDuration, fmtStatus, renderMultiCellStatus, renderActivationStatus, message, downloadStationLog, mapConnStatus, getSeverityLabel, networkTypeDict?.sysDictionaryDetails]
   );
 
   // ─── 列表导出(用户决策 2026-06-02) ──────────────────────────────────────

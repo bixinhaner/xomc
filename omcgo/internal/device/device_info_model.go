@@ -173,6 +173,15 @@ type DeviceInfo struct {
 	// LockStatus 小区锁状态（FAPControl.LTE.AdminState："true"=unlocked/"false"=locked）
 	LockStatus *string `json:"lock_status,omitempty"`
 
+	// AdminState NR FAPControl Admin State（NR.RAN.Common.AdminState："1"=Locked/"2"=Unlocked/"3"=ShuttingDown）。
+	// 与 LockStatus 互补：LockStatus 是 LTE 口径（boolean 派生），AdminState 是 NR 口径（int 三态）。
+	// LTE 设备此列为空（NULL），前端 Admin State 列对空值不渲染。
+	AdminState *string `json:"admin_state,omitempty"`
+
+	// IpsecAddr IPSec 隧道地址（Device.DeviceInfo.SERVING_UNIT1_IPSEC_Address）。
+	// 值 "0.0.0.0" 表示隧道尚未建立。
+	IpsecAddr *string `json:"ipsec_addr,omitempty"`
+
 	// EnbID eNodeB ID（派生：ECI >> 8）
 	EnbID *string `json:"enb_id,omitempty"`
 

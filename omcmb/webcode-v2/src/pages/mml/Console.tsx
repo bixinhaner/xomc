@@ -42,7 +42,7 @@ import {
 import type { FlatCommand, FlatGroup } from '@core/types/mmlConsole'
 
 // ============================================================
-// MML 控制台 V2 — 扁平命令树浏览（对齐 v1 webcode mml/ConsoleV2 的数据通道）
+// MML 控制台 V2 — 扁平命令树浏览（对齐 v1 webcode mml/Console 的数据通道）
 // 数据：
 //   - useGroupTreeFlat   GET /mml/group-tree?format=flat（章节分组 → 命令叶子 + object_path）
 //   - useSearchCommands  命令联合搜索（command_code / 名称 / path / 描述）
@@ -203,7 +203,7 @@ function SearchResults({
   )
 }
 
-export default function ConsoleV2() {
+export default function Console() {
   const { data, isLoading, isError, error, isFetching, refetch } =
     useGroupTreeFlat()
   const [expanded, setExpanded] = useState<Set<string>>(new Set())

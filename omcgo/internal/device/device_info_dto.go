@@ -117,6 +117,11 @@ type DeviceWithInfo struct {
 	GPSSatellites      *int     `json:"gps_satellites"`
 	GPSHeight          *float64 `json:"gps_height"`
 	LockStatus         *string  `json:"lock_status"`
+	// AdminState NR 管理状态（NR.RAN.Common.AdminState 1/2/3 → Locked/Unlocked/ShuttingDown）。
+	// 前端 device list 'Admin State' 列；LTE 设备为 NULL。
+	AdminState *string `json:"admin_state"`
+	// IpsecAddr Device.DeviceInfo.SERVING_UNIT1_IPSEC_Address，前端 'IPSec 地址' 列。
+	IpsecAddr  *string `json:"ipsec_addr"`
 	EnbID              *string  `json:"enb_id"`
 	NetworkModel       *string  `json:"network_model"`
 
