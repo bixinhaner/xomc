@@ -17737,6 +17737,89 @@ COMMENT ON COLUMN public.dashboard_kpi_layouts.tech IS '制式主键：lte / nr 
 COMMENT ON COLUMN public.dashboard_kpi_layouts.layout IS '布局体 JSONB：panels 数组，每图含 title / metrics(symbolic key 列表) / x,y(网格位置) / w,h(网格大小) / chartType(预留，恒 line)。';
 COMMENT ON COLUMN public.dashboard_kpi_layouts.updated_by IS '最近一次保存的管理员用户 ID（nullable：seed 灌入的初始行无来源用户）。';
 
+
+-- ============================================================
+-- 2026-06-17 复合基线：以下增量折叠进 Up 段末尾（原独立迁移文件已删）。
+-- 均为对现有表的幂等加列/改注释/改索引，CREATE/ALTER ... IF [NOT] EXISTS。
+-- ============================================================
+
+-- 原 000002_fix_transmit_power_comment.sql（#362：修正 transmit_power 列注释口径）
+-- #362：修正 device_info.transmit_power 列 COMMENT。
+-- 原 000001 baseline 注释把该列写成「对应 TR-181 FAPService.{i}.Capabilities.MaxTxPower」，
+-- 但 MaxTxPower 是硬件最大能力上限(READ_ONLY)，而前端"发射功率"列与 LMT 口径是
+-- 参考信号功率 ReferenceSignalPower(RW，小区实际工作功率)。已在 device_info_sync.go
+-- 删除 universalInformMapping 对 transmit_power 的 MaxTxPower 覆盖，使 cmcc/ctcc adapter
+-- 的 ReferenceSignalPower→transmit_power 成为唯一权威来源。此处同步修正列注释口径。
+COMMENT ON COLUMN public.device_info.transmit_power IS '发射功率（dBm），口径=参考信号功率（与 LMT 一致），来源 TR-181 FAPService.{i}.CellConfig.LTE.RAN.RF.ReferenceSignalPower（经 cmcc/ctcc carrier adapter 映射）。注：非硬件最大能力上限 MaxTxPower。';
+
+
+-- 原 000003_add_device_info_op_state.sql（激活状态派生列 op_state + 索引）
+-- 设备激活状态升级为派生列,语义改为"基站当前是否在运营"。
+--
+-- 新口径(取代历史 model.DeriveOpStateActivated(first_online_time)):
+--   op_state = CalcCellStatus(params) == "normal" ? "1" : "0"
+-- 即遍历该设备所有 FAPService.{i} 的 OpState/CellOpState trpath,任一 cell active
+-- 即设备激活,否则未激活。设备级 OpState 与 cell_status 严格同源派生。
+--
+-- 与 first_online_time 派生口径的区别:
+--   - 旧口径:激活是一次性单调持久事实(曾上线即激活,永不掉)
+--   - 新口径:激活反映网元上报的实时运营态(基站全部小区下电/未启用即未激活)
+-- 选择新口径是因为用户对"激活状态"的预期就是网元真实运营态,而非历史曾经露过头。
+--
+-- DEFAULT '0' 保证新加列对老行不报 NULL;首次 InfoSyncer 跑后立即被覆盖为真值。
+-- 旧 model.DeriveOpStateActivated 函数保留(其它路径还在用),但 device_info_pg_repository
+-- list 查询路径已切换到读 di.op_state。
+
+ALTER TABLE public.device_info
+    ADD COLUMN IF NOT EXISTS op_state character varying(8) DEFAULT '0';
+
+COMMENT ON COLUMN public.device_info.op_state IS '激活状态:1=激活/0=未激活;由 InfoSyncer.CalcOpState 派生(等价 cell_status: 任一 cell active → "1")。与 first_online_time 派生口径解耦。';
+
+-- 设备列表"激活状态"过滤是常用项,加索引(同 cell_status)。
+CREATE INDEX IF NOT EXISTS idx_device_info_op_state ON public.device_info USING btree (op_state);
+
+
+-- 原 000004_add_device_info_admin_ipsec.sql（admin_state / ipsec_addr 列）
+ALTER TABLE public.device_info
+    ADD COLUMN IF NOT EXISTS admin_state character varying(16),
+    ADD COLUMN IF NOT EXISTS ipsec_addr  character varying(64);
+
+COMMENT ON COLUMN public.device_info.admin_state IS
+    'NR FAPControl AdminState ("1"=Locked, "2"=Unlocked, "3"=ShuttingDown), source Device.Services.FAPService.1.FAPControl.NR.RAN.Common.AdminState. NULL for LTE devices (use lock_status instead).';
+
+COMMENT ON COLUMN public.device_info.ipsec_addr IS
+    'IPSec serving unit 1 tunnel address, source Device.DeviceInfo.SERVING_UNIT1_IPSEC_Address. "0.0.0.0" means tunnel not established.';
+
+
+-- 原 000005_ufte_task_type_product_scope.sql（#492：ufte_task_types.product_scope）
+-- #492：UFTE 模板「适用产品」对齐产品目录。
+-- 新增 product_scope（产品英文名列表，引用 products.product_name）。语义：
+--   · 非空 → 设备候选匹配按"设备 productClass → ProductRegistry → product.Name ∈ 列表"精确放行；
+--   · 空   → 回退旧 platform_scope 子串 + tech 关键字匹配（灰度兼容，见 internal/ufte deviceMatchesTaskType）。
+-- 制式(2G/4G/5G)由所选产品的 tech 派生，不再依赖硬编码 techHint。
+-- 内置升级模板的初始 product_scope 由 seed/000013 按制式回填。
+ALTER TABLE public.ufte_task_types
+    ADD COLUMN IF NOT EXISTS product_scope jsonb NOT NULL DEFAULT '[]'::jsonb;
+
+COMMENT ON COLUMN public.ufte_task_types.product_scope IS
+    '#492 适用产品：产品英文名列表（引用 products.product_name）。非空时设备匹配按产品名精确匹配，空则回退 platform_scope。';
+
+
+-- 原 000006_firmware_product_id.sql（#492：firmware_versions.product_id + 唯一索引改 product_id）
+-- #492：固件库产品名中心化。固件改为关联产品（product_id → products.id），
+-- 上传时选产品（前端按 product_id 提交、按产品名展示），不再以 product_class 为准。
+-- 唯一约束从 (product_class, version, file_type) 改为 (product_id, version, file_type)：
+-- 同一产品下 版本+文件类型 唯一；不同产品可同版本。product_class 列保留（设备侧
+-- 下载/兼容仍可用），但产品归属以 product_id 为权威。历史行 product_id 为 NULL（不兼容历史，
+-- PG 唯一索引中多个 NULL 互不冲突，建索引不会因旧行报错）。
+ALTER TABLE public.firmware_versions ADD COLUMN IF NOT EXISTS product_id uuid;
+CREATE INDEX IF NOT EXISTS idx_firmware_versions_product_id ON public.firmware_versions USING btree (product_id);
+
+DROP INDEX IF EXISTS idx_firmware_unique_version;
+CREATE UNIQUE INDEX idx_firmware_unique_version ON public.firmware_versions USING btree (product_id, version, file_type);
+
+COMMENT ON COLUMN public.firmware_versions.product_id IS '#492 固件所属产品（products.id）。上传选产品名 → 存此列；升级/库列表按产品名展示与过滤。';
+
 -- +goose Down
 -- +goose StatementBegin
 DROP SCHEMA IF EXISTS public CASCADE;
