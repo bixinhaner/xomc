@@ -7,6 +7,7 @@ import { useT } from '@/hooks/useT';
 import { useMock } from '@core/services/apiSwitch';
 import { authApi } from '@core/services/api/authApi';
 import { usePublicSecuritySettings } from '@core/hooks/api/useSecuritySettings';
+import { usePublicOmcName, resolveOmcName } from '@core/hooks/api/useOmcName';
 import type { User } from '@core/types/system';
 import type { AxiosError } from 'axios';
 import styles from './Login.module.css';
@@ -69,6 +70,9 @@ export default function LoginPage() {
   // autocomplete 属性。注意：现代浏览器（Chrome）会忽略 autocomplete=off，
   // 此为 best-effort —— 严格合规仍需依赖客户端策略。
   const { settings: publicSettings } = usePublicSecuritySettings();
+  // 登录页大标题跟随「OMC 名称」配置（走免登录公开通道，登录前可读）；空回退 login.title。
+  const { omcName } = usePublicOmcName();
+  const loginTitle = resolveOmcName(omcName, t('login.title'));
   const usernameAutocomplete = publicSettings?.preventBrowserAutofill ? 'off' : 'username';
   const passwordAutocomplete = publicSettings?.preventBrowserAutofill ? 'new-password' : 'current-password';
 
@@ -199,7 +203,7 @@ export default function LoginPage() {
           <div className={styles.logoIcon}>
             <span role="img" aria-label="network">🌐</span>
           </div>
-          <h1 className={styles.title}>{t('login.title')}</h1>
+          <h1 className={styles.title}>{loginTitle}</h1>
           <p className={styles.subtitle}>Unified Network Management System</p>
         </div>
 

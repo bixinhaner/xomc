@@ -1,4 +1,5 @@
 import { useAppStore } from '@core/store/appStore';
+import { usePublicOmcName, resolveOmcName } from '@core/hooks/api/useOmcName';
 import { SIDEBAR_WIDTH, SIDEBAR_COLLAPSED_WIDTH } from '@/theme/tokens';
 import NavMenu from './NavMenu';
 import { useT } from '@/hooks/useT';
@@ -11,6 +12,9 @@ export default function Sidebar() {
   const isTop = sidebarPosition === 'top';
   const width = isTop ? '100%' : collapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_WIDTH;
   const t = useT();
+  const { omcName } = usePublicOmcName();
+  const storedOmcName = useAppStore((s) => s.omcName);
+  const brandTitle = resolveOmcName(omcName ?? storedOmcName, t('app.title'));
 
   return (
     <aside
@@ -22,7 +26,7 @@ export default function Sidebar() {
       {!isTop && (
         <div className={`${styles.logoArea}${collapsed ? ` ${styles.logoAreaCollapsed}` : ''}`}>
           <div className={styles.logoMark}>OMC</div>
-          {!collapsed && <span className={styles.logoName}>{t('app.title')}</span>}
+          {!collapsed && <span className={styles.logoName}>{brandTitle}</span>}
         </div>
       )}
       <div className={styles.menuWrapper}>

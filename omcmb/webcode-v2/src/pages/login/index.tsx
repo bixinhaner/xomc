@@ -15,11 +15,16 @@ import {
 
 import { authApi } from '@core/services/api/authApi'
 import { useUserStore } from '@core/store/userStore'
+import { usePublicOmcName, resolveOmcName } from '@core/hooks/api/useOmcName'
 
 export function LoginPage() {
   const navigate = useNavigate()
   const setTokenPair = useUserStore((s) => s.setTokenPair)
   const login = useUserStore((s) => s.login)
+
+  // 登录页品牌标题跟随「OMC 名称」配置（免登录公开通道），空回退 'OMC · v2'。
+  const { omcName } = usePublicOmcName()
+  const brandTitle = resolveOmcName(omcName, 'OMC · v2')
 
   const [username, setUsername] = useState('admin')
   const [password, setPassword] = useState('')
@@ -50,7 +55,7 @@ export function LoginPage() {
         <CardHeader className="space-y-2">
           <div className="flex items-center gap-2 text-primary">
             <Activity className="size-6" />
-            <span className="text-base font-semibold tracking-wide">OMC · v2</span>
+            <span className="text-base font-semibold tracking-wide">{brandTitle}</span>
           </div>
           <CardTitle>欢迎回来</CardTitle>
           <CardDescription>运维与网管控制台 · 新一代界面</CardDescription>

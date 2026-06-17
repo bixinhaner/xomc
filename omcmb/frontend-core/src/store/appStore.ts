@@ -33,6 +33,15 @@ interface AppState {
    * 全部以纯文字渲染。
    */
   showMenuIcon: boolean;
+  /**
+   * OMC 名称（系统品牌标题），来源 sys_configs.basic.mrOMCName（is_public=true）。
+   * 启动 / 登录后由 usePublicOmcName 从公开配置通道拉取后写入；persist 到 localStorage，
+   * 让冷启动 / 登录页在请求 resolve 前先用缓存名即时渲染，避免标题闪烁。
+   *
+   * undefined = 未配置 / 未拉到 — 各皮肤标题处自行回退默认名（v1 app.title /
+   * v2 'OMC · v2' / v3 'STARFORGE'），不渲染空白。
+   */
+  omcName: string | undefined;
   /** Mobile sidebar drawer visibility (not persisted) */
   isMobileOverlayOpen: boolean;
 
@@ -49,6 +58,7 @@ interface AppState {
   toggleLocale: () => void;
   setEffects3DEnabled: (enabled: boolean) => void;
   setShowMenuIcon: (show: boolean) => void;
+  setOmcName: (name: string | undefined) => void;
   setMobileOverlayOpen: (open: boolean) => void;
 }
 
@@ -64,6 +74,7 @@ export const useAppStore = create<AppState>()(
       locale: 'zh-CN',
       effects3DEnabled: false,
       showMenuIcon: true,
+      omcName: undefined,
       isMobileOverlayOpen: false,
 
       setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
@@ -91,6 +102,7 @@ export const useAppStore = create<AppState>()(
         set((state) => ({ locale: state.locale === 'zh-CN' ? 'en-US' : 'zh-CN' })),
       setEffects3DEnabled: (enabled) => set({ effects3DEnabled: enabled }),
       setShowMenuIcon: (show) => set({ showMenuIcon: show }),
+      setOmcName: (name) => set({ omcName: name }),
       setMobileOverlayOpen: (open) => set({ isMobileOverlayOpen: open }),
     }),
     {

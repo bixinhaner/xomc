@@ -5,11 +5,18 @@ import { useNavigate } from 'react-router-dom'
 import { PulseHex } from '@/components/viz/PulseHex'
 import { formatHHMMSS, formatDateLong } from '@/lib/format'
 import { useUserStore } from '@core/store/userStore'
+import { useAppStore } from '@core/store/appStore'
+import { usePublicOmcName, resolveOmcName } from '@core/hooks/api/useOmcName'
 
 export function HUDStatusBar() {
   const navigate = useNavigate()
   const user = useUserStore((s) => s.currentUser)
   const clearAuth = useUserStore((s) => s.clearAuth)
+
+  // HUD 左上角主标题跟随「OMC 名称」配置（公开通道），空回退 'STARFORGE'。
+  const { omcName } = usePublicOmcName()
+  const storedOmcName = useAppStore((s) => s.omcName)
+  const brandTitle = resolveOmcName(omcName ?? storedOmcName, 'STARFORGE')
 
   const [now, setNow] = useState(new Date())
   const [vitals, setVitals] = useState({ cpu: 38, mem: 56, net: 72, sess: 64, alm: 21 })
@@ -46,7 +53,7 @@ export function HUDStatusBar() {
         </div>
         <div>
           <div className="font-display text-sm font-bold tracking-[0.2em] text-cyan-100">
-            STARFORGE
+            {brandTitle}
           </div>
           <div className="font-mono text-[10px] tracking-[0.3em] text-cyan-300/60">
             OMC · v3.0 · BRIDGE
