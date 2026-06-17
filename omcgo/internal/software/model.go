@@ -237,9 +237,11 @@ type UpgradeSubTaskWithTaskName struct {
 
 // FirmwareFilter specifies criteria for listing firmware versions.
 type FirmwareFilter struct {
-	ProductClass *string    `form:"product_class"`
-	ProductID    *uuid.UUID `form:"product_id"` // #492：按产品过滤固件（升级抽屉选产品名 → 传 product_id）
-	FileType     *FileType  `form:"file_type"`
+	ProductClass *string   `form:"product_class"`
+	// ProductID #492：按产品过滤固件（升级抽屉选产品名 → 传 product_id）。用 string 而非
+	// *uuid.UUID —— gin 的 query 绑定不支持 uuid（会 400），仓储层再 uuid.Parse。
+	ProductID string    `form:"product_id"`
+	FileType  *FileType `form:"file_type"`
 	model.ListRequest
 }
 

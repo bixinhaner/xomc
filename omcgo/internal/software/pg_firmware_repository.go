@@ -136,9 +136,13 @@ func (r *PgFirmwareRepository) List(ctx context.Context, filter FirmwareFilter) 
 	base := storage.Psql.Select(firmwareColumns...).From("firmware_versions")
 	countBase := storage.Psql.Select("COUNT(*)").From("firmware_versions")
 
-	if filter.ProductID != nil {
-		base = base.Where(sq.Eq{"product_id": *filter.ProductID})
-		countBase = countBase.Where(sq.Eq{"product_id": *filter.ProductID})
+	if filter.ProductID != "" {
+		// #492：gin 绑进来的是 uuid 字符串，解析为 uuid.UUID 再比较（pgx 按 uuid 编码，
+		// 避免 "operator does not exist: uuid = text"）。解析失败则跳过该过滤。
+		if pid, err := uuid.Parse(filter.ProductID); err == nil {
+			base = base.Where(sq.Eq{"product_id": pid})
+			countBase = countBase.Where(sq.Eq{"product_id": pid})
+		}
 	}
 	if filter.ProductClass != nil {
 		base = base.Where(sq.Eq{"product_class": *filter.ProductClass})
