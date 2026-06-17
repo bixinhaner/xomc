@@ -146,7 +146,7 @@ export default function CellManagement() {
           className="min-h-0"
         >
           {selected ? (
-            <CellDetail device={selected} onOpenDevice={() => navigate(`/fleet?sn=${selected.sn}`)} />
+            <CellDetail device={selected} onOpenDevice={() => navigate(`/device/list?sn=${selected.sn}`)} />
           ) : (
             <HudEmpty icon={Radio} text="选择小区查看无线参数" />
           )}

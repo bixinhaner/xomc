@@ -129,7 +129,7 @@ export default function EventLog() {
                     <button
                       type="button"
                       className="text-left hover:underline"
-                      onClick={() => navigate(`/logs/event/${r.id}`)}
+                      onClick={() => navigate(`/log/event/${r.id}`)}
                     >
                       <div className="font-medium text-primary">{r.deviceName || r.deviceSn}</div>
                       <div className="font-mono text-xs text-muted-foreground">{r.deviceSn}</div>
@@ -157,7 +157,7 @@ export default function EventLog() {
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => navigate(`/logs/event/${r.id}`)}
+                      onClick={() => navigate(`/log/event/${r.id}`)}
                     >
                       详情
                     </Button>

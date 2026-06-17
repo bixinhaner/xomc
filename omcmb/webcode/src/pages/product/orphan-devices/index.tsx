@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
-import { Card, Table, Tag, Empty } from 'antd';
+import { Card, Table, Tag } from 'antd';
 import { useOrphanDevices } from '@core/hooks/api/useProducts';
 import type { OrphanDevice } from '@core/types/product';
 import { makeSeqColumn } from '@/components/Table/seqColumn';
+import EmptyState from '@/components/DataTable/EmptyState';
 import SearchInput from '@/components/SearchInput';
 import { useT } from '@/hooks/useT';
 
@@ -57,21 +58,24 @@ export default function OrphanDevicesPage() {
             enterButton
           />
         </div>
-        {items.length === 0 && !isLoading ? (
-          <Empty
-            description={
-              search
-                ? t('product.orphan.notFoundSearch', { search })
-                : t('product.orphan.emptyState')
-            }
-          />
-        ) : (
-          <Table<OrphanDevice>
+        {/* 空态对齐 MML 任务记录:复用 DataTable/EmptyState(InboxOutlined + 暂无数据) */}
+        <Table<OrphanDevice>
             rowKey="id"
             loading={isLoading}
             columns={[makeSeqColumn<OrphanDevice>({ title: t('table.rowNumber'), current: page, pageSize }), ...columns]}
             dataSource={items}
             size="small"
+            locale={{
+              emptyText: (
+                <EmptyState
+                  description={
+                    search
+                      ? t('product.orphan.notFoundSearch', { search })
+                      : t('common.noData')
+                  }
+                />
+              ),
+            }}
             pagination={{
               current: page,
               pageSize,
@@ -85,7 +89,6 @@ export default function OrphanDevicesPage() {
               },
             }}
           />
-        )}
       </Card>
     </div>
   );

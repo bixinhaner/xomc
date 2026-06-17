@@ -411,7 +411,7 @@ export default function TopologyCanvas() {
                   variant="outline"
                   className="ml-auto"
                   onClick={() =>
-                    navigate(`/devices/detail/${encodeURIComponent(selectedNode.deviceSn!)}`)
+                    navigate(`/device/detail/${encodeURIComponent(selectedNode.deviceSn!)}`)
                   }
                 >
                   <ExternalLink className="mr-1 h-3.5 w-3.5" />

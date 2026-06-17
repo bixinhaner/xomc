@@ -63,7 +63,7 @@ export default function ConfigRetrieval() {
     >
       <div className="grid gap-4 lg:grid-cols-[minmax(0,360px)_1fr]">
         <DevicePicker activeSn={activeSn} onPick={setActiveSn} />
-        <ConfigFiles activeSn={activeSn} onClearFilter={() => setActiveSn('')} onOpen={(id) => navigate(`/files/detail/${id}`)} />
+        <ConfigFiles activeSn={activeSn} onClearFilter={() => setActiveSn('')} onOpen={() => navigate(`/file/config-retrieval`)} />
       </div>
     </PageShell>
   )

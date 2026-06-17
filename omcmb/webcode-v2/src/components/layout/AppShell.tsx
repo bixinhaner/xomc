@@ -102,8 +102,10 @@ export function AppShell() {
           {SECTIONS.map((section) => {
             const mods = MODULES.filter((m) => {
               if (m.section !== section) return false
-              const primary = m.routes.find((r) => !r.hidden) ?? m.routes[0]
-              return moduleVisible(primary?.path ?? '')
+              // 与 v1 一致：模块全部路由 hidden 时不在侧栏出现（无可见叶子项）。
+              const primary = m.routes.find((r) => !r.hidden)
+              if (!primary) return false
+              return moduleVisible(primary.path)
             })
             if (mods.length === 0) return null
             return (

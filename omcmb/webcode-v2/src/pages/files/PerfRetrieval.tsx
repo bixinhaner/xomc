@@ -112,7 +112,7 @@ export default function PerfRetrieval() {
                     <button
                       type="button"
                       className="font-mono text-xs text-primary hover:underline"
-                      onClick={() => navigate(`/files/perf-detail/${d.deviceSn}`)}
+                      onClick={() => navigate(`/file/perf-retrieval`)}
                     >
                       {d.deviceSn}
                     </button>

@@ -4,6 +4,16 @@ import path from 'path'
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
+  // VITE_MAP_METADATA_TIMEOUT_MS 与客户端 useMapConfig 共享语义：
+  // 空串 / 纯空白 / 未配置 / 非法值 → 回落 2500ms，再夹到 [500, 10000]
+  const rawStr = (env.VITE_MAP_METADATA_TIMEOUT_MS ?? '').trim()
+  const rawTimeout = rawStr ? Number(rawStr) : NaN
+  const metadataTimeout = Number.isFinite(rawTimeout)
+    ? Math.min(10000, Math.max(500, Math.floor(rawTimeout)))
+    : 2500
+  // 仅 dev server 保留 console.log/debug/info/trace；其余构建（production / mock）剥离。
+  // 保留 console.warn / console.error 用于线上问题排查（ErrorBoundary、catch 分支等依赖）。
+  const stripDebugLogs = mode !== 'development'
 
   return {
   plugins: [react()],
@@ -31,6 +41,8 @@ export default defineConfig(({ mode }) => {
       '/tiles-metadata': {
         target: env.VITE_TILES_PROXY_TARGET || 'http://localhost:8081',
         changeOrigin: true,
+        timeout: metadataTimeout, // ✅ 支持通过 VITE_MAP_METADATA_TIMEOUT_MS 统一控制
+        proxyTimeout: metadataTimeout, // ✅ 上游响应超时与客户端超时保持一致
         rewrite: (path) => path,
       },
       // 离线地图瓦片代理（通过环境变量配置目标服务器）
@@ -42,6 +54,13 @@ export default defineConfig(({ mode }) => {
         rewrite: (path) => path,
       },
     },
+  },
+  esbuild: {
+    // 生产 / mock 构建剥离调试日志与 debugger；保留 warn/error 便于线上排查。
+    pure: stripDebugLogs
+      ? ['console.log', 'console.debug', 'console.info', 'console.trace']
+      : [],
+    drop: stripDebugLogs ? ['debugger'] : [],
   },
   build: {
     chunkSizeWarningLimit: 600,

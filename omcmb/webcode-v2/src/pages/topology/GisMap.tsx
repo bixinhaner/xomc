@@ -335,7 +335,7 @@ export default function GisMap() {
       const leaf = members?.[0] ?? hit
       const device = leaf.get('device') as DeviceGeo | undefined
       if (device?.sn) {
-        navigate(`/devices/detail/${encodeURIComponent(device.sn)}`)
+        navigate(`/device/detail/${encodeURIComponent(device.sn)}`)
       }
     })
 
@@ -486,12 +486,12 @@ export default function GisMap() {
                   tabIndex={0}
                   onClick={(e) => {
                     e.stopPropagation()
-                    navigate(`/devices/detail/${encodeURIComponent(r.sn)}`)
+                    navigate(`/device/detail/${encodeURIComponent(r.sn)}`)
                   }}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.stopPropagation()
-                      navigate(`/devices/detail/${encodeURIComponent(r.sn)}`)
+                      navigate(`/device/detail/${encodeURIComponent(r.sn)}`)
                     }
                   }}
                   className="font-mono text-muted-foreground hover:text-primary hover:underline"
@@ -594,7 +594,7 @@ export default function GisMap() {
                   <TableRow
                     key={d.id}
                     className="cursor-pointer"
-                    onClick={() => navigate(`/devices/detail/${encodeURIComponent(d.sn)}`)}
+                    onClick={() => navigate(`/device/detail/${encodeURIComponent(d.sn)}`)}
                   >
                     <TableCell className="font-medium text-primary hover:underline">
                       {d.device_name || d.name}

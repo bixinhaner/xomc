@@ -187,7 +187,7 @@ export default function Commissioning() {
                       <button
                         type="button"
                         className="font-mono text-xs text-primary hover:underline"
-                        onClick={() => navigate(`/devices/detail/${d.sn}`)}
+                        onClick={() => navigate(`/device/detail/${d.sn}`)}
                       >
                         {d.sn || '—'}
                       </button>

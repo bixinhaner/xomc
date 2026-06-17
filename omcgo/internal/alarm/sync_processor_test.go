@@ -176,6 +176,44 @@ func TestProcessSync_OverridesSeverityFromDefinitionRegistry(t *testing.T) {
 	assert.Equal(t, model.AlarmSeverity(31004), alarm.Severity)
 }
 
+func TestProcessSync_DropsUnknownAlarmWhenProductDisablesFallback(t *testing.T) {
+	store := newMockAlarmStore()
+	engine := newTestEngine(store)
+	deviceID := uuid.New()
+	registry := newTestAlarmDefRegistry(t)
+	processor := NewAlarmSyncProcessor(engine, store, nil, nil, zap.NewNop()).
+		WithDeviceReader(&rcvMockDeviceReader{
+			deviceBySN: map[string]*model.Device{
+				"SN-SYNC-BM": {
+					ID:           deviceID,
+					SerialNumber: "SN-SYNC-BM",
+					Carrier:      model.CarrierCode("cmcc"),
+					Technology:   model.TechLTE,
+					ProductClass: "FAP/BU1810",
+				},
+			},
+		}).
+		WithAlarmDefRegistry(registry).
+		WithProductResolver(&mockProductResolver{products: map[string]*definition.ProductSnapshot{
+			"FAP/BU1810": {Name: "BM Product", EnableUnknownAlarm: false},
+		}})
+
+	params := []tr069.ParameterValueStruct{
+		{Name: "Device.FaultMgmt.CurrentAlarm.5.AlarmIdentifier", Value: "70011"},
+		{Name: "Device.FaultMgmt.CurrentAlarm.5.AlarmRaisedTime", Value: "2026-06-15T08:11:19Z"},
+		{Name: "Device.FaultMgmt.CurrentAlarm.5.EventType", Value: "Equipment Alarm"},
+		{Name: "Device.FaultMgmt.CurrentAlarm.5.ProbableCause", Value: "RU RF shutdown for cell"},
+		{Name: "Device.FaultMgmt.CurrentAlarm.5.SpecificProblem", Value: "RU RF shutdown for cell"},
+		{Name: "Device.FaultMgmt.CurrentAlarm.5.PerceivedSeverity", Value: "Major"},
+		{Name: "Device.FaultMgmt.CurrentAlarm.5.AdditionalText", Value: "LTE Cell 2"},
+	}
+
+	result := processor.processSync(context.Background(), "SN-SYNC-BM", params)
+	require.Zero(t, result.Added)
+	require.Zero(t, result.FailedAdd)
+	assert.Empty(t, store.active)
+}
+
 func TestProcessSync_PreservesFirstRaisedAtOnUpdate(t *testing.T) {
 	store := newMockAlarmStore()
 	engine := newTestEngine(store)

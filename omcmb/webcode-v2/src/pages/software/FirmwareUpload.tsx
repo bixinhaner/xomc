@@ -223,7 +223,7 @@ export default function FirmwareUpload() {
                       <button
                         type="button"
                         className="text-left font-mono text-xs text-primary hover:underline"
-                        onClick={() => navigate(`/software/version/${v.id}`)}
+                        onClick={() => navigate(`/software/version`)}
                         title="查看版本详情"
                       >
                         {v.versionCode}
@@ -273,7 +273,7 @@ export default function FirmwareUpload() {
                         >
                           <Star className={`size-3.5 ${v.recommend ? 'fill-current text-amber-500' : ''}`} />
                         </IconBtn>
-                        <IconBtn title="详情" disabled={busy} onClick={() => navigate(`/software/version/${v.id}`)}>
+                        <IconBtn title="详情" disabled={busy} onClick={() => navigate(`/software/version`)}>
                           <Eye className="size-3.5" />
                         </IconBtn>
                         <IconBtn

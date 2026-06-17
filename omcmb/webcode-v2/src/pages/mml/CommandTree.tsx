@@ -177,7 +177,7 @@ export default function CommandTree() {
                           <button
                             type="button"
                             className="font-medium text-primary hover:underline"
-                            onClick={() => navigate(`/mml/command-detail/${c.id}`)}
+                            onClick={() => navigate(`/mml/commands`)}
                           >
                             {c.commandName}
                           </button>
@@ -205,7 +205,7 @@ export default function CommandTree() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => navigate(`/mml/command-detail/${c.id}`)}
+                            onClick={() => navigate(`/mml/commands`)}
                           >
                             详情
                           </Button>

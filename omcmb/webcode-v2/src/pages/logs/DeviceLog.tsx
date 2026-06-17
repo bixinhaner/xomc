@@ -154,7 +154,7 @@ export default function DeviceLog() {
                     <button
                       type="button"
                       className="font-mono text-xs text-primary hover:underline"
-                      onClick={() => navigate(`/logs/device/${l.id}`)}
+                      onClick={() => navigate(`/log/device/${l.id}`)}
                     >
                       {l.deviceSn || '—'}
                     </button>
@@ -189,7 +189,7 @@ export default function DeviceLog() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => navigate(`/logs/device/${l.id}`)}
+                        onClick={() => navigate(`/log/device/${l.id}`)}
                       >
                         详情
                       </Button>

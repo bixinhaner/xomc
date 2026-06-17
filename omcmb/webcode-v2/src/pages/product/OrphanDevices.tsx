@@ -110,7 +110,7 @@ export function OrphanDevicesPage() {
               <ErrorRow colSpan={colCount} error={error} />
             ) : rows.length === 0 ? (
               <EmptyRow colSpan={colCount}>
-                {search ? `未找到与 “${search}” 匹配的设备` : '暂无孤儿设备'}
+                {search ? `未找到与 “${search}” 匹配的设备` : '暂无数据'}
               </EmptyRow>
             ) : (
               rows.map((row) => <OrphanRow key={row.id} row={row} />)

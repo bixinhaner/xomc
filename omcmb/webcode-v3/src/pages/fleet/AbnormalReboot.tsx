@@ -149,7 +149,7 @@ export default function FleetAbnormalReboot() {
                 <button
                   type="button"
                   className="min-w-0 text-left"
-                  onClick={() => navigate(`/fleet/detail/${encodeURIComponent(r.deviceSn)}`)}
+                  onClick={() => navigate(`/device/detail/${encodeURIComponent(r.deviceSn)}`)}
                 >
                   <div className="truncate font-display text-sm font-bold text-cyan-100">
                     {r.deviceName || r.deviceSn}

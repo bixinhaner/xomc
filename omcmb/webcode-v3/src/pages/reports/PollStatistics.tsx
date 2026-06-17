@@ -124,7 +124,7 @@ export default function PollStatisticsReportPage() {
       bare
       toolbar={
         <>
-          <button type="button" onClick={() => navigate('/reports')} className="chip text-cyan-300/70 hover:opacity-100">
+          <button type="button" onClick={() => navigate('/report/lte-standard')} className="chip text-cyan-300/70 hover:opacity-100">
             ← 简报中心
           </button>
           {STATUS_FILTERS.map((f) => (
@@ -272,15 +272,9 @@ export default function PollStatisticsReportPage() {
                     </div>
                     <div className="flex max-h-32 flex-wrap gap-1.5 overflow-auto">
                       {selected.deviceSns.map((s) => (
-                        <button
-                          key={s}
-                          type="button"
-                          onClick={() => navigate(`/reports/station/${encodeURIComponent(s)}`)}
-                          className="chip text-cyan-200 hover:opacity-100"
-                          title={`钻取 ${s} KPI 趋势`}
-                        >
+                        <span key={s} className="chip text-cyan-200">
                           {s}
-                        </button>
+                        </span>
                       ))}
                     </div>
                   </div>

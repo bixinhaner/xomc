@@ -520,7 +520,7 @@ export default function DeviceGrouping() {
                           variant="ghost"
                           size="sm"
                           disabled={!d.sn}
-                          onClick={() => navigate(`/devices/detail/${d.sn}`)}
+                          onClick={() => navigate(`/device/detail/${d.sn}`)}
                         >
                           <Eye className="size-4" /> 详情
                         </Button>

@@ -296,7 +296,9 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 		alarmSyncProcessor = alarmSyncProcessor.WithAlarmDefRegistry(alarmDefRegistry)
 		// T-0164-P1：复用 KPI Router 已构造的 pmProductRegistry，避免
 		// 重复 RegistryMetrics MustRegister 触发 Prometheus duplicate collector panic。
-		alarmReceiver, expeditedReceiver, _ = wireUnknownAlarmFallback(alarmReceiver, expeditedReceiver, alarmDefRegistry, pmProductRegistry)
+		var productResolver definition.ProductResolver
+		alarmReceiver, expeditedReceiver, productResolver = wireUnknownAlarmFallback(alarmReceiver, expeditedReceiver, alarmDefRegistry, pmProductRegistry)
+		alarmSyncProcessor = alarmSyncProcessor.WithProductResolver(productResolver)
 		logger.Info("alarm-definition fallback enabled",
 			zap.Int("definitions_loaded", alarmDefRegistry.Count()))
 	}

@@ -25,6 +25,11 @@ import type {
   UnifiedFileTransferTaskType,
   TransferRpcType,
 } from '@core/types/unifiedFileTransfer'
+import {
+  DEVICE_UPGRADE_CATEGORY,
+  aggregateCategoryOptions,
+  filterTaskTypesForCategory,
+} from '@core/utils/ufteCategory'
 
 const RPC_BADGE: Record<TransferRpcType, { status: string; label: string }> = {
   DOWNLOAD: { status: 'active', label: 'DOWNLOAD' },
@@ -43,18 +48,21 @@ export default function TransferTemplateManagementPage() {
   })
   const taskTypes = useMemo<UnifiedFileTransferTaskType[]>(() => data ?? [], [data])
 
-  const categories = useMemo(() => {
-    const map = new Map<string, { label: string; count: number }>()
-    taskTypes.forEach((t) => {
-      const cur = map.get(t.category)
-      if (cur) cur.count += 1
-      else map.set(t.category, { label: t.categoryLabel, count: 1 })
-    })
-    return Array.from(map.entries()).map(([value, v]) => ({ value, label: v.label, count: v.count }))
-  }, [taskTypes])
+  // #483：4G/5G/2G 折叠为单条『设备升级』(device_upgrade)，与任务创建页一致
+  // （共享 @core/utils/ufteCategory，三皮肤同一口径）。count 经 filterTaskTypesForCategory
+  // 计算——device_upgrade 取成员（4G/5G/2G）合计，其它分类取精确等值。
+  const categories = useMemo(
+    () =>
+      aggregateCategoryOptions(taskTypes).map((opt) => ({
+        value: opt.value,
+        label: opt.value === DEVICE_UPGRADE_CATEGORY ? '设备升级' : opt.label,
+        count: filterTaskTypesForCategory(taskTypes, opt.value).length,
+      })),
+    [taskTypes],
+  )
 
   const visible = useMemo(
-    () => (category ? taskTypes.filter((t) => t.category === category) : taskTypes),
+    () => (category ? filterTaskTypesForCategory(taskTypes, category) : taskTypes),
     [taskTypes, category],
   )
 

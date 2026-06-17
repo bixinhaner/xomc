@@ -146,7 +146,7 @@ export default function PrivateCommand() {
                     <button
                       type="button"
                       className="font-medium text-primary hover:underline"
-                      onClick={() => navigate(`/mml/private-command/${c.id}`)}
+                      onClick={() => navigate(`/mml/private-command`)}
                     >
                       {c.commandName}
                     </button>
@@ -172,7 +172,7 @@ export default function PrivateCommand() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => navigate(`/mml/private-command/${c.id}`)}
+                        onClick={() => navigate(`/mml/private-command`)}
                       >
                         详情
                       </Button>

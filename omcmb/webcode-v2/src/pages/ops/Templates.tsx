@@ -187,7 +187,7 @@ export default function Templates() {
                     <button
                       type="button"
                       className="text-left font-medium hover:underline"
-                      onClick={() => navigate(`/ops/templates/${t.id}`)}
+                      onClick={() => navigate(`/ops/templates`)}
                     >
                       {t.templateName}
                     </button>
@@ -225,7 +225,7 @@ export default function Templates() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => navigate(`/ops/templates/${t.id}`)}
+                        onClick={() => navigate(`/ops/templates`)}
                         title="详情"
                       >
                         <Eye className="size-4" />

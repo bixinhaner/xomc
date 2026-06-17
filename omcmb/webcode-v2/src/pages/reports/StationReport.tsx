@@ -209,7 +209,7 @@ export default function StationReport() {
                 <TableRow
                   key={r.region}
                   className="cursor-pointer"
-                  onClick={() => navigate(`/reports/station/${encodeURIComponent(r.region)}`)}
+                  onClick={() => navigate(`/report/station`)}
                 >
                   <TableCell className="font-medium text-primary hover:underline">
                     {r.region}
@@ -233,7 +233,7 @@ export default function StationReport() {
                       size="sm"
                       onClick={(e) => {
                         e.stopPropagation()
-                        navigate(`/reports/station/${encodeURIComponent(r.region)}`)
+                        navigate(`/report/station`)
                       }}
                     >
                       明细

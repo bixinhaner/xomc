@@ -198,7 +198,7 @@ export default function UpgradePlan() {
                       <button
                         type="button"
                         className="text-left font-medium text-primary hover:underline"
-                        onClick={() => navigate(`/software/upgrade-plan/${t.id}`)}
+                        onClick={() => navigate(`/software/upgrade-plan`)}
                         title="查看子任务"
                       >
                         {t.taskName}

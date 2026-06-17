@@ -290,7 +290,7 @@ export default function FileTransferCenter() {
           error={tasksQuery.error}
           rows={tasksQuery.data?.items ?? []}
           hasActiveFilter={hasActiveFilter}
-          onOpen={(id) => navigate(`/transfer/center/task/${id}`)}
+          onOpen={() => navigate(`/transfer/center`)}
         />
       ) : (
         <DeviceTable
@@ -299,7 +299,7 @@ export default function FileTransferCenter() {
           error={devicesQuery.error}
           rows={devicesQuery.data?.items ?? []}
           hasActiveFilter={hasActiveFilter}
-          onOpenTask={(id) => navigate(`/transfer/center/task/${id}`)}
+          onOpenTask={() => navigate(`/transfer/center`)}
         />
       )}
 

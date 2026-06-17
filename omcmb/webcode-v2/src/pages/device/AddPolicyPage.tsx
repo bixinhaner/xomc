@@ -81,7 +81,7 @@ function AddForm() {
     create.mutate(
       { deviceId: trimmed },
       {
-        onSuccess: () => navigate('/devices/plug-and-play'),
+        onSuccess: () => navigate('/device/plug-and-play'),
       }
     )
   }
@@ -123,7 +123,7 @@ function AddForm() {
           </Button>
           <Button
             variant="ghost"
-            onClick={() => navigate('/devices/plug-and-play')}
+            onClick={() => navigate('/device/plug-and-play')}
           >
             取消
           </Button>
@@ -166,7 +166,7 @@ function TaskDetail({ id, mode }: { id: string; mode: Mode }) {
         <Button
           variant="outline"
           size="sm"
-          onClick={() => navigate('/devices/plug-and-play')}
+          onClick={() => navigate('/device/plug-and-play')}
         >
           返回任务列表
         </Button>
@@ -286,7 +286,7 @@ export default function AddPolicyPage() {
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => navigate('/devices/plug-and-play')}
+          onClick={() => navigate('/device/plug-and-play')}
         >
           <ArrowLeft className="size-4" /> 返回
         </Button>

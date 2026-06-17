@@ -105,7 +105,7 @@ export default function AlarmSync() {
               输入设备 SN，向 ACS 下发该网元的告警全量同步请求。后端将拉取该设备当前告警快照并入库，可在
               <button
                 type="button"
-                onClick={() => navigate('/alarms')}
+                onClick={() => navigate('/alarm/current')}
                 className="mx-1 text-cyan-200 underline decoration-cyan-500/40 underline-offset-2 hover:text-cyan-100"
               >
                 警报阵列

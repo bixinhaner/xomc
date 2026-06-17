@@ -129,7 +129,7 @@ export default function Reports() {
                     <button
                       type="button"
                       className="text-left text-sm font-medium text-primary hover:underline"
-                      onClick={() => navigate(`/mr/reports/${r.id}`)}
+                      onClick={() => navigate(`/mr/reports`)}
                     >
                       {r.reportName}
                     </button>

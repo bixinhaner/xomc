@@ -116,9 +116,51 @@
 ```typescript
 // 环境变量配置
 VITE_MAP_TILE_URL=/api/v1/tiles/{z}/{x}/{y}.png  // 离线瓦片地址
-VITE_MAP_DEFAULT_CENTER=104.0,35.0               // 默认中心点
-VITE_MAP_DEFAULT_ZOOM=4                          // 默认缩放级别
+VITE_MAP_DEFAULT_CENTER=104.0,35.0,4             // 多地区部署时的兜底中心点（格式：lng,lat,zoom）
 ```
+
+### 2.6 中心点决策链
+
+> **核心设计**：支持多地区部署，中心点由优先级决策而非硬编码
+
+```
+优先级 1: tiles.json 中的 center 字段
+         (离线地图元数据返回的中心点 - 最优先)
+         ↓ (不存在或异常)
+         
+优先级 2: /api/v1/devices/geo 设备数据计算
+         (根据实际设备位置自动计算中心点 - 智能适配)
+         ├─ 计算设备 bounds（经纬度范围）
+         ├─ 中心点 = [(minLng+maxLng)/2, (minLat+maxLat)/2]
+         └─ 缩放级别根据设备分布范围自动调整
+         ↓ (无设备数据)
+         
+优先级 3: 环境变量 VITE_MAP_DEFAULT_CENTER
+         (多地区部署时的兜底配置)
+         ↓ (未配置)
+         
+优先级 4: 代码内置默认值
+         (全球通用默认值 [0, 20, 2])
+```
+
+**多地区部署示例**：
+
+```bash
+# .env.development（赞比亚）
+VITE_MAP_DEFAULT_CENTER=28.221,-14.607,6
+
+# .env.staging（中国）
+VITE_MAP_DEFAULT_CENTER=104.0,35.0,4
+
+# .env.production（其他地区，由设备数据决定）
+# 不设置，使用全球默认值，优先从设备数据计算中心点
+```
+
+**优势**：
+- ✅ 自动适配部署地区（无需手动修改代码）
+- ✅ 基于真实设备数据智能定位
+- ✅ 多地区部署只需环境变量配置
+- ✅ 页面层无硬编码坐标
 
 ---
 
@@ -616,13 +658,19 @@ interface MapFilterParams {
   type?: DeviceType[];
   /** 搜索关键词（名称/序列号） */
   keyword?: string;
+  /** 是否启用查询（控制请求发送）*/
+  enabled?: boolean;
+  /** 分页大小 */
+  pageSize?: number;
+  /** 视图边界（用于动态加载）*/
+  bounds?: string;
 }
 
 /**
  * 地图配置
  */
 interface MapConfig {
-  /** 默认中心点 */
+  /** 默认中心点（多地区部署时的兜底值）*/
   defaultCenter: [number, number]; // [lng, lat]
   /** 默认缩放级别 */
   defaultZoom: number;
@@ -632,6 +680,18 @@ interface MapConfig {
   maxZoom: number;
   /** 瓦片服务地址 */
   tileUrl?: string;
+}
+
+/**
+ * 中心点决策结果
+ */
+interface CenterPointDecision {
+  /** 中心点坐标 [lng, lat] */
+  center: [number, number];
+  /** 缩放级别 */
+  zoom: number;
+  /** 决策来源 */
+  source: 'metadata' | 'device_data' | 'env_config' | 'default';
 }
 ```
 
@@ -873,6 +933,9 @@ src/
 │       ├── geoUtils.ts              # 地理计算工具
 │       ├── constants.ts             # 常量配置
 │       └── styles.module.css        # 样式文件
+│
+├── utils/
+│   └── mapValidation.ts             # 【新增】地图中心点计算、参数验证等工具函数
 │
 ├── services/api/
 │   └── topologyApi.ts               # 【扩展】新增地图相关 API 方法
@@ -1139,9 +1202,9 @@ interface GISMapProps {
   devices: MapDevice[];
   /** 地图高度 */
   height?: string | number;
-  /** 默认中心点 [lng, lat] */
+  /** 默认中心点 [lng, lat]（由 GISMapView 通过中心点决策链计算） */
   defaultCenter?: [number, number];
-  /** 默认缩放级别 */
+  /** 默认缩放级别（由 GISMapView 通过中心点决策链计算） */
   defaultZoom?: number;
   /** 设备点击回调 */
   onDeviceClick?: (device: MapDevice) => void;

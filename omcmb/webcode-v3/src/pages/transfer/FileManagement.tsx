@@ -46,11 +46,11 @@ const DEV_STATUS_BADGE: Record<UnifiedFileTransferDeviceStatus, { status: string
 
 // 文件库快捷入口 —— 仅链接到本皮肤实际存在的 v3 路由（router/index.tsx 已注册）。
 const LIBRARY_LINKS: { label: string; desc: string; path: string; icon: React.ReactNode; color: string }[] = [
-  { label: '版本固件库', desc: 'SOFTWARE · 升级镜像 / 补丁 / FPGA', path: '/software', icon: <Boxes className="size-4" />, color: '#00f0ff' },
-  { label: '配置备份库', desc: 'BACKUP · 配置快照 / License 备份', path: '/backup', icon: <Archive className="size-4" />, color: '#00ff88' },
+  { label: '版本固件库', desc: 'SOFTWARE · 升级镜像 / 补丁 / FPGA', path: '/software/version', icon: <Boxes className="size-4" />, color: '#00f0ff' },
+  { label: '配置备份库', desc: 'BACKUP · 配置快照 / License 备份', path: '/backup/tasks', icon: <Archive className="size-4" />, color: '#00ff88' },
   { label: '设备 License', desc: 'LICENSE · 授权文件管理', path: '/license', icon: <KeyRound className="size-4" />, color: '#a855f7' },
-  { label: 'MR 测量文件', desc: 'MR · MRO / MRS / MRE', path: '/mr', icon: <Radio className="size-4" />, color: '#5b9eff' },
-  { label: '文件总览', desc: 'FILES · 统一文件浏览', path: '/files', icon: <FileText className="size-4" />, color: '#ffaa00' },
+  { label: 'MR 测量文件', desc: 'MR · MRO / MRS / MRE', path: '/mr/files', icon: <Radio className="size-4" />, color: '#5b9eff' },
+  { label: '文件总览', desc: 'FILES · 统一文件浏览', path: '/file/config-retrieval', icon: <FileText className="size-4" />, color: '#ffaa00' },
 ]
 
 export default function TransferFileManagementPage() {

@@ -167,7 +167,7 @@ export default function VersionQuery() {
                       <button
                         type="button"
                         className="text-left font-mono text-xs text-primary hover:underline"
-                        onClick={() => navigate(`/software/version/${v.id}`)}
+                        onClick={() => navigate(`/software/version`)}
                         title="查看版本详情"
                       >
                         {v.versionCode}
@@ -214,7 +214,7 @@ export default function VersionQuery() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => navigate(`/software/version/${v.id}`)}
+                          onClick={() => navigate(`/software/version`)}
                         >
                           <Eye className="size-3.5" /> 详情
                         </Button>

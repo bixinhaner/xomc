@@ -31,7 +31,7 @@ export default function FleetUeDetail() {
       isFetching={isFetching}
       toolbar={
         <>
-          <NeonButton icon={<ArrowLeft />} onClick={() => navigate(`/fleet/detail/${encodeURIComponent(sn)}`)}>
+          <NeonButton icon={<ArrowLeft />} onClick={() => navigate(`/device/detail/${encodeURIComponent(sn)}`)}>
             UNIT
           </NeonButton>
           <NeonButton icon={<RefreshCcw />} onClick={() => refetch()}>

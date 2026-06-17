@@ -154,6 +154,25 @@ func Test_GetInfoParamMapping_NR(t *testing.T) {
 	c := New()
 	m := c.GetInfoParamMapping(model.TechNR)
 	assert.NotEmpty(t, m)
+	// Baicells/Dengyo 等 NR 设备实际上报路径在 .CellConfig.1.NR.* 下；
+	// 这些 path 必须落进 mapping，否则设备列表 PCI/EARFCN/Bandwidth/CellID 列在 NR
+	// 制式下会因 InfoSyncer 找不到匹配 path 而长期空白。
+	for _, want := range []struct {
+		path string
+		col  string
+	}{
+		{"Device.Services.FAPService.1.CellConfig.1.NR.RAN.RF.PhyCellID", "pci"},
+		{"Device.Services.FAPService.1.CellConfig.1.NR.RAN.RF.NRARFCNDL", "freq_point"},
+		{"Device.Services.FAPService.1.CellConfig.1.NR.RAN.RF.DLBandwidth", "bandwidth"},
+		{"Device.Services.FAPService.1.CellConfig.1.NR.RAN.Common.CellLocalId", "cell_id"},
+		// #362 NR 版：取 RW PowerModify（快速设置「功率调整」）作为 transmit_power。
+		// 不使用只读硬件能力上限 MaxTxPower，语义与 LTE ReferenceSignalPower 对齐。
+		{"Device.Services.FAPService.1.CellConfig.1.NR.RAN.PowerModify", "transmit_power"},
+	} {
+		got, ok := m[want.path]
+		assert.Truef(t, ok, "CMCC NR mapping missing path %s", want.path)
+		assert.Equalf(t, want.col, got, "CMCC NR mapping %s expected column %s", want.path, want.col)
+	}
 }
 
 // T-0029: CMCC RFControlPath returns standard FAPControl path per technology.

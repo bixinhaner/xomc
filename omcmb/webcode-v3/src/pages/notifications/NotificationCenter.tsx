@@ -1,10 +1,7 @@
 import { useMemo } from 'react'
-import { useNavigate } from 'react-router-dom'
 import {
   AlertTriangle,
-  ChevronRight,
   FileText,
-  History,
   Loader2,
   Mail,
   MessageSquare,
@@ -45,7 +42,6 @@ const STATUS_BADGE: Record<NotificationHistoryStatus, { status: string; label: s
 }
 
 export default function NotificationCenter() {
-  const navigate = useNavigate()
 
   const templatesQ = useNotificationTemplates({ page: 1, pageSize: 200 })
   const historyQ = useNotificationHistory({ page: 1, pageSize: 50 })
@@ -108,12 +104,6 @@ export default function NotificationCenter() {
       isFetching={isFetching}
       toolbar={
         <>
-          <NeonButton icon={<FileText />} onClick={() => navigate('/notifications/templates')}>
-            模板
-          </NeonButton>
-          <NeonButton icon={<History />} onClick={() => navigate('/notifications/history')}>
-            发送历史
-          </NeonButton>
           <NeonButton icon={<RefreshCcw />} onClick={refetchAll}>
             REFRESH
           </NeonButton>
@@ -241,11 +231,9 @@ export default function NotificationCenter() {
                   const badge = STATUS_BADGE[h.status]
                   const chMeta = CHANNEL_META[h.channel]
                   return (
-                    <button
-                      type="button"
+                    <div
                       key={h.id}
-                      onClick={() => navigate(`/notifications/history/${h.id}`)}
-                      className="flex w-full items-center gap-2 border-b border-cyan-500/8 px-3.5 py-2.5 text-left last:border-b-0 hover:bg-cyan-500/5"
+                      className="flex w-full items-center gap-2 border-b border-cyan-500/8 px-3.5 py-2.5 text-left last:border-b-0"
                     >
                       <span
                         className="size-1.5 shrink-0 rounded-full"
@@ -260,8 +248,7 @@ export default function NotificationCenter() {
                         </div>
                       </div>
                       <StatusBadge status={badge.status} label={badge.label} />
-                      <ChevronRight className="size-3.5 shrink-0 text-cyan-300/40" />
-                    </button>
+                    </div>
                   )
                 })}
               </div>
@@ -280,23 +267,15 @@ export default function NotificationCenter() {
                 <div className="font-mono text-[11px] uppercase tracking-[0.18em] text-cyan-300/45">
                   NO TEMPLATES · 暂无模板
                 </div>
-                <NeonButton
-                  icon={<FileText />}
-                  onClick={() => navigate('/notifications/templates')}
-                >
-                  前往模板管理
-                </NeonButton>
               </div>
             ) : (
               <div className="grid grid-cols-1 gap-2 p-3 md:grid-cols-2 xl:grid-cols-3">
                 {templates.slice(0, 9).map((tpl) => {
                   const chMeta = CHANNEL_META[tpl.channel]
                   return (
-                    <button
-                      type="button"
+                    <div
                       key={tpl.id}
-                      onClick={() => navigate(`/notifications/templates/${tpl.id}`)}
-                      className="glass flex items-center gap-3 rounded-sm border-l-2 px-3 py-2.5 text-left hover:bg-cyan-500/5"
+                      className="glass flex items-center gap-3 rounded-sm border-l-2 px-3 py-2.5 text-left"
                       style={{ borderLeftColor: chMeta.color }}
                     >
                       <div className="min-w-0 flex-1">
@@ -311,7 +290,7 @@ export default function NotificationCenter() {
                         status={tpl.enabled ? 'active' : 'inactive'}
                         label={tpl.enabled ? '启用' : '禁用'}
                       />
-                    </button>
+                    </div>
                   )
                 })}
               </div>

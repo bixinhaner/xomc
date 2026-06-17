@@ -508,6 +508,146 @@ func TestUniversalInformMapping_NoTransmitPowerOverride(t *testing.T) {
 	}
 }
 
+// TestUniversalInformMapping_NRBandAndULEARFCN 防回归守卫：NR 制式下设备列表
+// Band / UL EARFCN 列必须由 universalInformInstanceMappings 用 NR.RAN.RF.* 模板
+// 覆盖；删除任一条会令 BaiBNQ 等 NR 设备列表对应列长期空白。
+func TestUniversalInformMapping_NRBandAndULEARFCN(t *testing.T) {
+	assert.Contains(t, instanceTemplatesFor(t, "band"),
+		"Device.Services.FAPService.{f}.CellConfig.{c}.NR.RAN.RF.FreqBandIndicator",
+		"NR FreqBandIndicator 必须在 band 列的实例聚合模板中")
+	assert.Contains(t, instanceTemplatesFor(t, "ul_earfcn"),
+		"Device.Services.FAPService.{f}.CellConfig.{c}.NR.RAN.RF.NRARFCNUL",
+		"NR NRARFCNUL 必须在 ul_earfcn 列的实例聚合模板中")
+}
+
+// TestUniversalInformMapping_NRTACAndCellID 防回归守卫：NR 制式下设备列表
+// TAC / Cell ID 列必须由 universalInformInstanceMappings 用 NR.CN.TA.{t}.* 模板
+// 覆盖；删除任一条会令 BaiBNQ 等 NR 设备列表对应列长期空白。
+// 与 LTE 的 EPC.TAC → tac 映射形成跨制式对称。
+func TestUniversalInformMapping_NRTACAndCellID(t *testing.T) {
+	assert.Contains(t, instanceTemplatesFor(t, "tac"),
+		"Device.Services.FAPService.{f}.CellConfig.{c}.NR.CN.TA.{t}.TAC",
+		"NR CN.TA.{t}.TAC 必须在 tac 列的实例聚合模板中")
+	assert.Contains(t, instanceTemplatesFor(t, "cell_id"),
+		"Device.Services.FAPService.{f}.CellConfig.{c}.NR.CN.TA.{t}.NrcellIdentity",
+		"NR CN.TA.{t}.NrcellIdentity 必须在 cell_id 列的实例聚合模板中")
+}
+
+// TestUniversalInformMapping_AdminStateAndIpsecAddr 防回归守卫：设备列表
+// "Admin State" 列必须与详情页「小区信息」表同源（detail_assembler 用
+// CellConfig.{c}.NR.RAN.CellEnable.AdminState），"IPSec 地址" 列必须与详情页
+// 「IPSec 参数」表"网关地址"列同源（Device.FAP.Ipsec.{i}.TUNNEL_GATEWAY）。
+func TestUniversalInformMapping_AdminStateAndIpsecAddr(t *testing.T) {
+	assert.Contains(t, instanceTemplatesFor(t, "admin_state"),
+		"Device.Services.FAPService.{f}.CellConfig.{c}.NR.RAN.CellEnable.AdminState",
+		"CellEnable.AdminState 必须在 admin_state 列的实例聚合模板中（与详情页小区表同源）")
+	assert.Contains(t, instanceTemplatesFor(t, "ipsec_addr"),
+		"Device.FAP.Ipsec.{i}.TUNNEL_GATEWAY",
+		"FAP.Ipsec.{i}.TUNNEL_GATEWAY 必须在 ipsec_addr 列的实例聚合模板中（与详情页 IPSec 网关地址列同源）")
+
+	// 反向断言：之前一版选错的路径不应再被任何 mapping 路径写入 admin_state/ipsec_addr，
+	// 否则 list 会与详情页给出相反结论。
+	assert.NotEqual(t, "admin_state",
+		universalInformMapping["Device.Services.FAPService.1.FAPControl.NR.RAN.Common.AdminState"],
+		"FAPControl.NR.RAN.Common.AdminState（设备级三态）不得复用 admin_state 列")
+	assert.NotEqual(t, "ipsec_addr",
+		universalInformMapping["Device.DeviceInfo.SERVING_UNIT1_IPSEC_Address"],
+		"SERVING_UNIT1_IPSEC_Address（本端 source IP, 未建立隧道时 0.0.0.0）不得复用 ipsec_addr 列")
+}
+
+// instanceTemplatesFor 返回 universalInformInstanceMappings 中目标列的所有模板。
+func instanceTemplatesFor(t *testing.T, column string) []string {
+	t.Helper()
+	for _, m := range universalInformInstanceMappings {
+		if m.column == column {
+			return m.templates
+		}
+	}
+	return nil
+}
+
+// TestAggregateInstanceFields_SingleCell 单 cell 设备聚合结果应等价单值,不破坏
+// 历史行为(BaiBNQ 等 1 个 cell 设备 sync 后 list 列仍是单值字符串)。
+func TestAggregateInstanceFields_SingleCell(t *testing.T) {
+	params := map[string]string{
+		"Device.Services.FAPService.1.CellConfig.1.NR.RAN.RF.PhyCellID":             "21",
+		"Device.Services.FAPService.1.CellConfig.1.NR.CN.TA.1.TAC":                  "81",
+		"Device.Services.FAPService.1.CellConfig.1.NR.CN.TA.1.NrcellIdentity":       "1153",
+		"Device.Services.FAPService.1.CellConfig.1.NR.RAN.CellEnable.AdminState":    "1",
+		"Device.FAP.Ipsec.1.TUNNEL_GATEWAY":                                         "192.168.13.180",
+	}
+	fields := map[string]interface{}{}
+	aggregateInstanceFields(params, fields)
+
+	assert.Equal(t, "21", fields["pci"])
+	assert.Equal(t, "81", fields["tac"])
+	assert.Equal(t, "1153", fields["cell_id"])
+	assert.Equal(t, "1", fields["admin_state"])
+	assert.Equal(t, "192.168.13.180", fields["ipsec_addr"])
+}
+
+// TestAggregateInstanceFields_MultiCell 多 cell / 多 IPSec 隧道场景：按实例索引
+// 升序、值去重后用 "," 拼接，覆盖此前可能写入的单值。这是 #364-followup 的
+// 核心契约：前端 device list 小区级/多实例字段统一显示 csv。
+func TestAggregateInstanceFields_MultiCell(t *testing.T) {
+	params := map[string]string{
+		// cell 1 / cell 2：两个 PCI、两个 TAC、两个 NR Cell Identity、两个 admin_state
+		"Device.Services.FAPService.1.CellConfig.1.NR.RAN.RF.PhyCellID":             "21",
+		"Device.Services.FAPService.1.CellConfig.2.NR.RAN.RF.PhyCellID":             "22",
+		"Device.Services.FAPService.1.CellConfig.1.NR.CN.TA.1.TAC":                  "81",
+		"Device.Services.FAPService.1.CellConfig.2.NR.CN.TA.1.TAC":                  "82",
+		"Device.Services.FAPService.1.CellConfig.1.NR.CN.TA.1.NrcellIdentity":       "1153",
+		"Device.Services.FAPService.1.CellConfig.2.NR.CN.TA.1.NrcellIdentity":       "1154",
+		"Device.Services.FAPService.1.CellConfig.1.NR.RAN.CellEnable.AdminState":    "1",
+		"Device.Services.FAPService.1.CellConfig.2.NR.RAN.CellEnable.AdminState":    "2",
+		// IPSec 多隧道
+		"Device.FAP.Ipsec.1.TUNNEL_GATEWAY": "10.0.0.1",
+		"Device.FAP.Ipsec.2.TUNNEL_GATEWAY": "10.0.0.2",
+		"Device.FAP.Ipsec.3.TUNNEL_GATEWAY": "10.0.0.3",
+	}
+	// 单值预填（模拟上游 carrier mapping 已写 cell-1 单值），聚合后应覆盖。
+	fields := map[string]interface{}{
+		"pci":         "21",
+		"admin_state": "1",
+		"ipsec_addr":  "10.0.0.1",
+	}
+	aggregateInstanceFields(params, fields)
+
+	assert.Equal(t, "21,22", fields["pci"], "PCI 多 cell 升序 csv")
+	assert.Equal(t, "81,82", fields["tac"], "TAC 多 cell 升序 csv")
+	assert.Equal(t, "1153,1154", fields["cell_id"], "Cell ID 多 cell 升序 csv")
+	assert.Equal(t, "1,2", fields["admin_state"], "Admin State 多 cell 升序 csv（覆盖单值 \"1\"）")
+	assert.Equal(t, "10.0.0.1,10.0.0.2,10.0.0.3", fields["ipsec_addr"], "IPSec 多隧道升序 csv")
+}
+
+// TestAggregateInstanceFields_DedupSameValue 多 cell 上报相同值（如双 cell 同
+// PCI 不太合理但 admin_state 双 cell 都 "1" 常见）时，应去重而非显示 "1,1"。
+func TestAggregateInstanceFields_DedupSameValue(t *testing.T) {
+	params := map[string]string{
+		"Device.Services.FAPService.1.CellConfig.1.NR.RAN.CellEnable.AdminState": "1",
+		"Device.Services.FAPService.1.CellConfig.2.NR.RAN.CellEnable.AdminState": "1",
+		"Device.Services.FAPService.1.CellConfig.3.NR.RAN.CellEnable.AdminState": "2",
+	}
+	fields := map[string]interface{}{}
+	aggregateInstanceFields(params, fields)
+	assert.Equal(t, "1,2", fields["admin_state"], "相同值去重，仅保留首次出现")
+}
+
+// TestAggregateInstanceFields_NoMatch 模板都不命中时 fields 不动，保留上游
+// carrier/universal mapping 的单值。
+func TestAggregateInstanceFields_NoMatch(t *testing.T) {
+	params := map[string]string{
+		"Device.DeviceInfo.UpTime": "12345",
+	}
+	fields := map[string]interface{}{
+		"pci": "21",
+	}
+	aggregateInstanceFields(params, fields)
+	assert.Equal(t, "21", fields["pci"], "无命中时单值字段不变")
+	_, hasTac := fields["tac"]
+	assert.False(t, hasTac, "无命中时不引入新字段")
+}
+
 func TestParseRunTimeToSeconds(t *testing.T) {
 	tests := []struct {
 		name  string

@@ -103,7 +103,7 @@ export default function BatchParamTemplate() {
                     <button
                       type="button"
                       className="text-left font-medium text-primary hover:underline"
-                      onClick={() => navigate(`/config/batch-template/${t.id}`)}
+                      onClick={() => navigate(`/config/batch-template`)}
                     >
                       {t.templateName}
                     </button>

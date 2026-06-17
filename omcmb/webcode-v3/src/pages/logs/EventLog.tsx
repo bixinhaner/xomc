@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { Activity, RefreshCcw, Search } from 'lucide-react'
 
 import { PageShell } from '@/components/shell/PageShell'
@@ -35,7 +34,6 @@ export const EVENT_LEVEL_META: Record<EventLevel, { label: string; color: string
 const COLS = 'grid-cols-[150px_90px_120px_1.4fr_150px]'
 
 export default function EventLogPage() {
-  const navigate = useNavigate()
   const [page, setPage] = useState(1)
   const [deviceSn, setDeviceSn] = useState('')
   const [eventType, setEventType] = useState('')
@@ -132,10 +130,8 @@ export default function EventLogPage() {
                   color: '#6b86b6',
                 }
                 return (
-                  <button
-                    type="button"
+                  <div
                     key={r.id}
-                    onClick={() => navigate(`/logs/event/${r.id}`)}
                     className={`fleet-row grid w-full ${COLS} items-center gap-3 px-3 py-2.5 text-left`}
                     style={{ ['--row-color' as never]: meta.color }}
                   >
@@ -159,7 +155,7 @@ export default function EventLogPage() {
                     <span className="font-mono text-[11px] text-cyan-300/70">
                       {formatTime(r.occurredAt)}
                     </span>
-                  </button>
+                  </div>
                 )
               })
             )}

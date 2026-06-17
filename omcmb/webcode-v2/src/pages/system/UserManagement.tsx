@@ -124,7 +124,7 @@ export default function UserManagement() {
                       <button
                         type="button"
                         className="text-left font-medium text-primary hover:underline"
-                        onClick={() => navigate(`/system/users/${u.id}`)}
+                        onClick={() => navigate(`/system/users`)}
                       >
                         {u.displayName || u.username}
                       </button>

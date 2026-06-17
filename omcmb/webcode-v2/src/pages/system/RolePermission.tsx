@@ -106,7 +106,7 @@ export default function RolePermission() {
                       <button
                         type="button"
                         className="text-left font-medium text-primary hover:underline"
-                        onClick={() => navigate(`/system/roles/${r.id}`)}
+                        onClick={() => navigate(`/system/roles`)}
                       >
                         {r.roleName}
                       </button>

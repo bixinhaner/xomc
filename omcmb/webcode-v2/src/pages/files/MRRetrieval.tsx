@@ -112,7 +112,7 @@ export default function MRRetrieval() {
                     <button
                       type="button"
                       className="font-mono text-xs text-primary hover:underline"
-                      onClick={() => navigate(`/files/mr-detail/${d.deviceSn}`)}
+                      onClick={() => navigate(`/file/mr-retrieval`)}
                     >
                       {d.deviceSn}
                     </button>

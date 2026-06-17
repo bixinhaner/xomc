@@ -94,16 +94,16 @@ export default function FleetPlugAndPlayPolicy() {
       subtitle="AUTO-PROVISION POLICY · LOCAL CONFIG DRAFT"
       toolbar={
         <>
-          <NeonButton icon={<ArrowLeft />} onClick={() => navigate('/fleet/plug-and-play')}>
+          <NeonButton icon={<ArrowLeft />} onClick={() => navigate('/device/plug-and-play')}>
             BACK
           </NeonButton>
           {mode === 'view' && id ? (
-            <NeonButton icon={<Pencil />} onClick={() => navigate(`/fleet/plug-and-play/edit/${id}`)}>
+            <NeonButton icon={<Pencil />} onClick={() => navigate(`/device/plug-and-play/edit/${id}`)}>
               EDIT
             </NeonButton>
           ) : null}
           {mode === 'edit' && id ? (
-            <NeonButton icon={<Eye />} onClick={() => navigate(`/fleet/plug-and-play/view/${id}`)}>
+            <NeonButton icon={<Eye />} onClick={() => navigate(`/device/plug-and-play/view/${id}`)}>
               VIEW
             </NeonButton>
           ) : null}
@@ -166,7 +166,7 @@ export default function FleetPlugAndPlayPolicy() {
               disabled={!canSave}
               onClick={() => {
                 setSaved(true)
-                window.setTimeout(() => navigate('/fleet/plug-and-play'), 600)
+                window.setTimeout(() => navigate('/device/plug-and-play'), 600)
               }}
             >
               {mode === 'add' ? 'CREATE POLICY' : 'SAVE POLICY'}

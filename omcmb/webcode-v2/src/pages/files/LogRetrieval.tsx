@@ -141,7 +141,7 @@ export default function LogRetrieval() {
                     <button
                       type="button"
                       className="font-mono text-xs text-primary hover:underline"
-                      onClick={() => navigate('/files/device-files')}
+                      onClick={() => navigate('/file/device-files')}
                       title="在设备文件页查看该设备文件"
                     >
                       {f.deviceSn}

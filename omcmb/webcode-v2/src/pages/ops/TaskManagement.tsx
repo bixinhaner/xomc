@@ -266,7 +266,7 @@ export default function TaskManagement() {
                     <button
                       type="button"
                       className="text-left font-medium hover:underline"
-                      onClick={() => navigate(`/ops/tasks/${t.id}`)}
+                      onClick={() => navigate(`/ops/tasks`)}
                     >
                       {t.taskName}
                     </button>
@@ -297,7 +297,7 @@ export default function TaskManagement() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => navigate(`/ops/tasks/${t.id}`)}
+                        onClick={() => navigate(`/ops/tasks`)}
                         title="详情"
                       >
                         <Eye className="size-4" />

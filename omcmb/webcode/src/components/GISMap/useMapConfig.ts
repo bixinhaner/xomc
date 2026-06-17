@@ -20,6 +20,41 @@ import { useState, useEffect } from 'react';
 // 全局缓存状态，避免 React StrictMode 双重渲染导致重复请求
 let globalMetadataCache: MapMetadata | null = null;
 let globalFetchPromise: Promise<void> | null = null;
+let globalLastFetchFailed = false;
+let globalLastError: string | null = null;
+// 失败时间戳：用于在短时间内复用上次的错误结果，避免每次组件挂载都重新等满超时
+let globalLastFailedAt: number | null = null;
+
+const DEFAULT_METADATA_TIMEOUT_MS = 2500;
+// 失败冷却：短时间内（默认 30s）跳过重新 fetch，直接复用 DEFAULT_METADATA
+// 避免用户在 metadata 持续不可用时每次进入地图页都转一次满超时的圈
+const FAILURE_COOLDOWN_MS = 30_000;
+
+function getMetadataTimeoutMs(): number {
+  const rawEnv = import.meta.env.VITE_MAP_METADATA_TIMEOUT_MS;
+  // 空串 / 纯空白 / undefined 都等同于未配置，避免 Number('') === 0 / Number(' ') === 0 被 clamp 到 500
+  const trimmed = typeof rawEnv === 'string' ? rawEnv.trim() : '';
+  if (!trimmed) {
+    return DEFAULT_METADATA_TIMEOUT_MS;
+  }
+  const raw = Number(trimmed);
+
+  if (!Number.isFinite(raw)) {
+    return DEFAULT_METADATA_TIMEOUT_MS;
+  }
+
+  // 保护性夹取，避免配置异常导致过小或过大超时
+  return Math.min(10000, Math.max(500, Math.floor(raw)));
+}
+
+// 处在失败冷却窗内 → 直接复用上次错误，不再发请求
+function isInFailureCooldown(): boolean {
+  return (
+    globalLastFetchFailed &&
+    globalLastFailedAt !== null &&
+    Date.now() - globalLastFailedAt < FAILURE_COOLDOWN_MS
+  );
+}
 
 /**
  * TileJSON 格式（Maperitive / TileServer GL 生成）
@@ -164,42 +199,102 @@ export type LoadStatus =
  * - isUsingDefault: 是否使用了默认配置（用于调试）
  */
 export function useMapConfig() {
-  const [metadata, setMetadata] = useState<MapMetadata | null>(() => globalMetadataCache);
-  const [loading, setLoading] = useState(() => globalMetadataCache === null);
-  const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<LoadStatus>(() => globalMetadataCache ? 'success' : 'idle');
-  const [isUsingDefault, setIsUsingDefault] = useState(false);
+  // 三种初始情形：
+  // a) 命中成功缓存 → 立即返回缓存的 metadata，不 loading
+  // b) 处在失败冷却窗 → 立即返回 DEFAULT_METADATA + error 信息，不 loading（避免再转 2.5s 圈）
+  // c) 首次或冷却已过期 → metadata=null + loading=true，等 fetch
+  const inCooldown = isInFailureCooldown();
+
+  const [metadata, setMetadata] = useState<MapMetadata | null>(() => {
+    if (globalMetadataCache) return globalMetadataCache;
+    if (inCooldown) return DEFAULT_METADATA;
+    return null;
+  });
+  const [loading, setLoading] = useState(() => !globalMetadataCache && !inCooldown);
+  const [error, setError] = useState<string | null>(() => {
+    if (globalMetadataCache) return null;
+    if (inCooldown) return globalLastError;
+    return null;
+  });
+  const [status, setStatus] = useState<LoadStatus>(() => {
+    if (globalMetadataCache) return 'success';
+    if (inCooldown) return 'error';
+    return 'idle';
+  });
+  const [isUsingDefault, setIsUsingDefault] = useState(() => inCooldown);
 
   useEffect(() => {
-    // 如果已有缓存，直接使用
-    if (globalMetadataCache) {
-      setMetadata(globalMetadataCache);
-      setLoading(false);
-      setStatus('success');
+    // a) 命中成功缓存 / b) 处在失败冷却窗：初始化器已置好所有状态，无需任何 setState
+    if (globalMetadataCache || isInFailureCooldown()) {
       return;
     }
 
-    // 如果正在获取中，等待同一个 Promise
+    // 正在获取中：等待同一个 Promise，避免并发挂载触发多次请求
     if (globalFetchPromise) {
       globalFetchPromise.then(() => {
         if (globalMetadataCache) {
           setMetadata(globalMetadataCache);
           setLoading(false);
           setStatus('success');
+          setIsUsingDefault(false);
+          setError(null);
+        } else if (globalLastFetchFailed) {
+          setMetadata(DEFAULT_METADATA);
+          setLoading(false);
+          setStatus('error');
+          setIsUsingDefault(true);
+          setError(globalLastError);
         }
       });
       return;
     }
 
     const fetchMetadata = async () => {
+      // 覆盖 render 阶段初始化器可能留下的“冷却未过期”状态：
+      // 在 render 与 effect 之间冷却刚好过期时，state 可能仍是 loading=false/status='error'，
+      // 这里重新开始 fetch 前重置为 loading，避免 UI 与后台请求不一致。
+      setLoading(true);
+      setError(null);
       setStatus('loading');
       setIsUsingDefault(false);
+      globalLastFetchFailed = false;
+      globalLastError = null;
+      globalLastFailedAt = null;
+
+      let timeoutId: ReturnType<typeof setTimeout> | null = null;
+      let timedOut = false;
 
       try {
-        const response = await fetch('/tiles-metadata');
+        // 创建 AbortController 用于超时控制
+        const controller = new AbortController();
+
+        // tiles-metadata 超时支持环境变量配置，默认 2.5 秒
+        const TIMEOUT_MS = getMetadataTimeoutMs();
+
+        timeoutId = setTimeout(() => {
+          timedOut = true;
+          controller.abort();
+        }, TIMEOUT_MS);
+
+        const response = await fetch('/tiles-metadata', {
+          signal: controller.signal,
+        });
 
         if (response.ok) {
-          const tilejson: TileJSON = await response.json();
+          let tilejson: TileJSON;
+          try {
+            tilejson = await response.json();
+          } catch {
+            const parseError = 'json_parse_error:invalid_tiles_metadata_json';
+            console.warn('[MapConfig] ⚠', parseError);
+            setMetadata(DEFAULT_METADATA);
+            setStatus('error');
+            setIsUsingDefault(true);
+            setError(parseError);
+            globalLastFetchFailed = true;
+            globalLastError = parseError;
+            return;
+          }
 
           // 验证 TileJSON 基本结构
           if (tilejson && (tilejson.bounds || tilejson.center)) {
@@ -207,32 +302,63 @@ export function useMapConfig() {
             globalMetadataCache = converted; // 缓存结果
             setMetadata(converted);
             setStatus('success');
+            setIsUsingDefault(false);
+            setError(null);
           } else {
             // TileJSON 格式不完整，使用默认值
-            globalMetadataCache = DEFAULT_METADATA; // 缓存默认值
             setMetadata(DEFAULT_METADATA);
             setStatus('error');
             setIsUsingDefault(true);
-            setError('TileJSON format incomplete');
+            const parseError = 'json_parse_error:tilejson_format_incomplete';
+            console.warn('[MapConfig] ⚠', parseError);
+            setError(parseError);
+            globalLastFetchFailed = true;
+            globalLastError = parseError;
           }
         } else {
           // HTTP 错误（404/500 等），使用默认值
-          globalMetadataCache = DEFAULT_METADATA; // 缓存默认值
           setMetadata(DEFAULT_METADATA);
           setStatus('error');
           setIsUsingDefault(true);
-          setError(`HTTP ${response.status}: ${response.statusText}`);
+          const httpError = `http_${response.status}:${response.statusText || 'unknown'}`;
+          console.warn('[MapConfig] ⚠', httpError);
+          setError(httpError);
+          globalLastFetchFailed = true;
+          globalLastError = httpError;
         }
       } catch (err) {
-        // 网络错误或其他异常，使用默认值
-        const errorMessage =
-          err instanceof Error ? err.message : 'Unknown error';
-        globalMetadataCache = DEFAULT_METADATA; // 缓存默认值
+        // 网络错误、超时或其他异常，使用默认值
+        const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+        const timeoutMs = getMetadataTimeoutMs();
+        let classifiedError = `network_error_tiles_metadata:${errorMessage}`;
+
+        // 判断是否是超时导致的中止
+        if (err instanceof Error && err.name === 'AbortError') {
+          if (timedOut) {
+            classifiedError = `timeout_tiles_metadata:${timeoutMs}ms`;
+            console.warn('[MapConfig] ⚠', classifiedError, 'offline map not available, using default config');
+          } else {
+            classifiedError = 'network_error_abort:tiles_metadata_request_aborted';
+            console.warn('[MapConfig] ⚠', classifiedError, 'using default config');
+          }
+        } else {
+          console.warn('[MapConfig] ⚠', classifiedError);
+        }
+
         setMetadata(DEFAULT_METADATA);
         setStatus('error');
         setIsUsingDefault(true);
-        setError(errorMessage);
+        setError(classifiedError);
+        globalLastFetchFailed = true;
+        globalLastError = classifiedError;
       } finally {
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+        }
+        // 集中记录失败时间戳，触发后续 FAILURE_COOLDOWN_MS 窗口内的快速降级
+        if (globalLastFetchFailed) {
+          globalLastFailedAt = Date.now();
+        }
         setLoading(false);
         globalFetchPromise = null; // 清空 Promise
       }
