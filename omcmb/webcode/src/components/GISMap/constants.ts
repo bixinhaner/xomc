@@ -77,12 +77,23 @@ export const CLUSTER_CONFIG = {
   baseRadius: 16,
   /** 半径计算系数 */
   radiusFactor: 10,
-  /** 聚合距离 (px) - 低缩放级别时使用 */
-  distance: 40,
-  /** 高缩放级别时的聚合距离 (px) - 更小的值让设备更容易分散 */
-  highZoomDistance: 10,
-  /** 禁用聚合的缩放阈值 - 超过此级别完全禁用聚合 */
-  disableClusterZoom: 15,
+  /**
+   * 按 zoom 分档的聚合距离 (px)
+   *
+   * 取第一个满足 `zoom <= maxZoom` 的档；列表必须按 maxZoom 升序。
+   * 设计意图：让 zoom 5→16 每升一档都能看到聚合数变化，
+   * 形成洲→国→省→市→区→街道的逐级分散视觉过渡。
+   */
+  distanceTiers: [
+    { maxZoom: 5, distance: 60 },
+    { maxZoom: 7, distance: 50 },
+    { maxZoom: 9, distance: 40 },
+    { maxZoom: 11, distance: 30 },
+    { maxZoom: 12, distance: 22 },
+    { maxZoom: 13, distance: 14 },
+    { maxZoom: 14, distance: 8 },
+    { maxZoom: Infinity, distance: 0 },
+  ] as ReadonlyArray<{ maxZoom: number; distance: number }>,
   /** 小型聚合阈值 (10-49) */
   smallThreshold: 10,
   /** 中型聚合阈值 (50-99) */
@@ -90,6 +101,15 @@ export const CLUSTER_CONFIG = {
   /** 大型聚合阈值 (100+) */
   largeThreshold: 100,
 };
+
+/**
+ * 根据 zoom 查询聚合距离（像素）
+ * 与 `CLUSTER_CONFIG.distanceTiers` 配套使用。
+ */
+export function getClusterDistanceForZoom(zoom: number): number {
+  const tier = CLUSTER_CONFIG.distanceTiers.find((t) => zoom <= t.maxZoom);
+  return tier ? tier.distance : 0;
+}
 
 /**
  * 视口裁剪配置（性能 #15）
