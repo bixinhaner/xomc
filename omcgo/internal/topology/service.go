@@ -489,7 +489,17 @@ func (s *DeviceGroupService) CheckDelete(ctx context.Context, id uuid.UUID) (*Ch
 	return resp, nil
 }
 
+// isUnassignedNode 判定目标分组是否为「未分组设备」内置虚拟节点
+// (DefaultLevel2GroupID = ...0002)。该节点不是真实分组，只是"未绑定任何分组"
+// 的虚拟视图；把设备写进它会与读取侧 NOT EXISTS 口径自相矛盾（issue #478）。
+func isUnassignedNode(targetID uuid.UUID) bool {
+	return targetID.String() == global.DefaultLevel2GroupID
+}
+
 // MoveDevices moves devices to a target group.
+//
+// issue #478：目标 = 「未分组设备」内置节点(DefaultLevel2GroupID) 时，不写归属记录，
+// 改为删除该批设备的全部归属记录（等价"移出分组"），使设备真正回到未分组态并正常显示。
 func (s *DeviceGroupService) MoveDevices(ctx context.Context, req MoveDevicesRequest) (int64, error) {
 	targetID, err := uuid.Parse(req.TargetGroupID)
 	if err != nil {
@@ -499,12 +509,6 @@ func (s *DeviceGroupService) MoveDevices(ctx context.Context, req MoveDevicesReq
 			fmt.Errorf("%w: %v", commonerrors.ErrInvalidInput, err))
 	}
 
-	// 验证目标分组存在
-	_, err = s.repo.GetByID(ctx, targetID)
-	if err != nil {
-		return 0, err
-	}
-
 	deviceIDs, err := parseUUIDs(req.DeviceIDs)
 	if err != nil {
 		// 同上：非法 device_id UUID 是参数校验类错误，须映射 400。
@@ -512,7 +516,42 @@ func (s *DeviceGroupService) MoveDevices(ctx context.Context, req MoveDevicesReq
 			fmt.Errorf("%w: %v", commonerrors.ErrInvalidInput, err))
 	}
 
+	// 内置「未分组设备」节点：移出分组语义，删全部归属记录（不校验目标分组存在，
+	// 它是虚拟节点）。
+	if isUnassignedNode(targetID) {
+		return s.repo.RemoveDevicesFromAllGroups(ctx, deviceIDs)
+	}
+
+	// 验证目标分组存在
+	_, err = s.repo.GetByID(ctx, targetID)
+	if err != nil {
+		return 0, err
+	}
+
 	return s.repo.MoveDevices(ctx, deviceIDs, targetID)
+}
+
+// BatchAddDevices 把多台设备加入目标分组（服务层统一入口）。
+//
+// issue #478：目标 = 「未分组设备」内置节点(DefaultLevel2GroupID) 时拦截，改为
+// 删除该批设备的全部归属记录（等价"移出分组"），杜绝产生指向内置节点的归属行。
+func (s *DeviceGroupService) BatchAddDevices(ctx context.Context, groupID uuid.UUID, deviceIDs []uuid.UUID) (int64, error) {
+	if isUnassignedNode(groupID) {
+		return s.repo.RemoveDevicesFromAllGroups(ctx, deviceIDs)
+	}
+	return s.repo.BatchAddDevices(ctx, groupID, deviceIDs)
+}
+
+// AddDevice 把单台设备加入目标分组（服务层统一入口，legacy）。
+//
+// issue #478：目标 = 「未分组设备」内置节点(DefaultLevel2GroupID) 时拦截，改为
+// 删除该设备的全部归属记录（等价"移出分组"）。
+func (s *DeviceGroupService) AddDevice(ctx context.Context, groupID, deviceID uuid.UUID) error {
+	if isUnassignedNode(groupID) {
+		_, err := s.repo.RemoveDevicesFromAllGroups(ctx, []uuid.UUID{deviceID})
+		return err
+	}
+	return s.repo.AddDevice(ctx, groupID, deviceID)
 }
 
 // BatchSort updates sort orders for multiple groups using a single CASE WHEN SQL.

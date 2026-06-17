@@ -98,7 +98,9 @@ func initDeviceModule(c *Container) error {
 	deviceService.SetRegistrationRepo(regRepo)
 
 	// Group assigner (from topology module)
-	deviceService.SetGroupAssigner(c.GroupRepo)
+	// issue #478：走 GroupService 而非 GroupRepo，使"目标 = 未分组内置节点 → 移出分组"
+	// 的服务层兜底同样覆盖批量导入 / 预注册分组路径，杜绝写出指向内置节点的归属记录。
+	deviceService.SetGroupAssigner(c.GroupService)
 
 	// BatchInformProcessor（可选）
 	var batchProcessor *device.BatchInformProcessor

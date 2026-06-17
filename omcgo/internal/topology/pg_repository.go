@@ -564,6 +564,27 @@ func (r *PgDeviceGroupRepository) MoveDevices(ctx context.Context, deviceIDs []u
 	return r.BatchAddDevices(ctx, targetGroupID, deviceIDs)
 }
 
+// RemoveDevicesFromAllGroups 按 device_id 删除给定设备的全部归属记录（不限分组），
+// 等价"移出分组"。issue #478：用于「移动/添加到『未分组设备』内置节点」的服务层兜底。
+func (r *PgDeviceGroupRepository) RemoveDevicesFromAllGroups(ctx context.Context, deviceIDs []uuid.UUID) (int64, error) {
+	if len(deviceIDs) == 0 {
+		return 0, nil
+	}
+
+	query, args, err := storage.Psql.Delete("device_group_members").
+		Where(sq.Eq{"device_id": deviceIDs}).
+		ToSql()
+	if err != nil {
+		return 0, fmt.Errorf("build remove devices from all groups SQL: %w", err)
+	}
+
+	tag, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("remove devices from all groups: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
 // MoveGroupDevicesToDefault 删除分组时处理其成员设备。
 // 2026-06-03 用户决策「未分组 = 未绑定任何分组」：不再把成员回退到默认 L2 组,
 // 而是直接移除成员关系 —— 设备变为真正"未分组"(NOT EXISTS device_group_members),
