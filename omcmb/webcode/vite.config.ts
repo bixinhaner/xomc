@@ -34,8 +34,6 @@ export default defineConfig(({ mode }) => {
       '/tiles-metadata': {
         target: env.VITE_TILES_PROXY_TARGET || 'http://localhost:8081',
         changeOrigin: true,
-        timeout: 5000,
-        proxyTimeout: 5000,
         rewrite: (path) => path,
       },
       // 离线地图瓦片代理（通过环境变量配置目标服务器）
