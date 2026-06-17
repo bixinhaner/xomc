@@ -497,10 +497,11 @@ export const topologyApi = {
   /**
    * 获取地图统计数据
    */
-  async getMapStats(params?: { groupIds?: string[]; bounds?: string }): Promise<MapStats> {
+  async getMapStats(params?: { groupIds?: string[]; status?: string[]; bounds?: string }): Promise<MapStats> {
     const { data } = await http.get<BackendMapStats>('/devices/geo/stats', {
       params: {
         group_ids: params?.groupIds?.join(','),
+        status: params?.status?.join(','),
         bounds: params?.bounds,
       },
     });

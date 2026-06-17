@@ -115,7 +115,7 @@ func (m *infMockDeviceRepo) ListActiveByLastInform(_ context.Context, _ *time.Ti
 func (m *infMockDeviceRepo) ListGeo(_ context.Context, _ GeoDeviceFilter) ([]GeoDevice, int64, error) {
 	return nil, 0, nil
 }
-func (m *infMockDeviceRepo) GetGeoStats(_ context.Context, _ []string, _ []uuid.UUID) (*GeoStats, error) {
+func (m *infMockDeviceRepo) GetGeoStats(_ context.Context, _ GeoStatsFilter) (*GeoStats, error) {
 	return &GeoStats{}, nil
 }
 func (m *infMockDeviceRepo) SearchDevices(_ context.Context, _ string, _ int, _ []uuid.UUID) ([]GeoDevice, error) {

@@ -266,11 +266,11 @@ export default function GISMapView() {
       ...(statusFilter.offline ? ['offline' as const] : []),
     ];
 
-    // 判断是否选中了所有组
-    // 简化逻辑：只要选中的数量等于所有组的数量，就认为选中了所有组
-    // 传 undefined 让后端返回所有设备（包括未分组的）
-    const isAllSelected = selectedGroupIds.length > 0 &&
-      selectedGroupIds.length === allGroupIds.size;
+    // 判断是否选中了所有组（严格全等：避免 length 巧合一致但成员不同）
+    // 全选时传 undefined 让后端返回所有设备（包括未分组的）
+    const selectedSet = new Set(selectedGroupIds);
+    const isAllSelected = allGroupIds.size > 0 &&
+      [...allGroupIds].every((id) => selectedSet.has(id));
 
     // 根据视口范围生成 bounds 参数
     let boundsParam: string | undefined;
@@ -305,9 +305,11 @@ export default function GISMapView() {
   // 加载地图元数据（离线瓦片配置）
   const mapConfigData = useMapConfig();
 
-  // 获取地图统计数据
+  // 获取地图统计数据（与 useMapDevicesGeo 共用同一套 group/status 过滤口径，
+  // 避免顶部统计与地图设备不一致；不传 bounds，统计始终反映过滤维度的全量）
   const { data: mapStatsData } = useMapStats({
-    groupIds: selectedGroupIds.length > 0 ? selectedGroupIds : undefined,
+    groupIds: filterParams.groupIds,
+    status: filterParams.status,
   });
 
   // 设备搜索 hook（支持防抖、50 值限制和自动展开）

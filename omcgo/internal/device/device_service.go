@@ -1948,16 +1948,51 @@ func (s *DeviceService) BatchRebootDevices(ctx context.Context, ids []uuid.UUID)
 	return result
 }
 
+// splitGeoGroupIDs 把前端传来的 group_ids（可能混入 DefaultLevel2GroupID 这个「未分组设备」伪节点）
+// 拆分为「真实分组 ID」+「是否包含未分组」两路。Geo 三接口（list/stats/center）都先经过此归一，
+// 再由 repository 的 applyGeoGroupFilter 拼装为 (dg.id IN realIDs ∨ NOT EXISTS device_group_members)，
+// 与设备列表 / 拓扑徽标对未分组节点的口径保持一致。
+func splitGeoGroupIDs(ids []string) (realIDs []string, includeUngrouped bool) {
+	if len(ids) == 0 {
+		return nil, false
+	}
+	realIDs = make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		if id == global.DefaultLevel2GroupID {
+			includeUngrouped = true
+			continue
+		}
+		realIDs = append(realIDs, id)
+	}
+	if len(realIDs) == 0 {
+		realIDs = nil
+	}
+	return realIDs, includeUngrouped
+}
+
 // ListGeo returns devices with geographic coordinates for map display.
 // filter.VisibleGroups 携带 #64 设备组数据权限，由 handler 解析调用者身份后注入。
+// filter.GroupIDs 经 splitGeoGroupIDs 归一后传给 repository，确保「未分组设备」节点选中场景能命中。
 func (s *DeviceService) ListGeo(ctx context.Context, filter GeoDeviceFilter) ([]GeoDevice, int64, error) {
+	filter.GroupIDs, filter.IncludeUngrouped = splitGeoGroupIDs(filter.GroupIDs)
 	return s.deviceRepo.ListGeo(ctx, filter)
 }
 
 // GetGeoStats returns device statistics for map display.
 // visibleGroups 携带 #64 设备组数据权限（nil 超管 / [] fail-closed / [g...] 限定）。
-func (s *DeviceService) GetGeoStats(ctx context.Context, groupIDs []string, visibleGroups []uuid.UUID) (*GeoStats, error) {
-	return s.deviceRepo.GetGeoStats(ctx, groupIDs, visibleGroups)
+// statusFilter 与 ListGeo 同口径（handler 已把 onlineActive/onlineInactive/offline 三档翻译为
+// model.DeviceStatus 列表），让顶部统计带随状态筛选变化与地图点位一致。
+func (s *DeviceService) GetGeoStats(ctx context.Context, groupIDs []string, statusFilter []model.DeviceStatus, visibleGroups []uuid.UUID) (*GeoStats, error) {
+	realIDs, includeUngrouped := splitGeoGroupIDs(groupIDs)
+	return s.deviceRepo.GetGeoStats(ctx, GeoStatsFilter{
+		GroupIDs:         realIDs,
+		IncludeUngrouped: includeUngrouped,
+		Status:           statusFilter,
+		VisibleGroups:    visibleGroups,
+	})
 }
 
 // SearchDevices searches devices by keyword for map display.

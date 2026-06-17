@@ -477,6 +477,31 @@ func (h *Handler) RebootDevice(c *gin.Context) {
 	response.OKWithStatus(c, http.StatusAccepted, gin.H{"message": "reboot command queued"})
 }
 
+// parseGeoStatusFilter 把前端 GIS 的三档 status（onlineActive/onlineInactive/offline）翻译为
+// 后端 model.DeviceStatus 列表。ListGeo 与 GetGeoStats 共用此 helper，保证两接口语义对齐。
+// 空串返回 nil 表示不施加状态过滤。
+func parseGeoStatusFilter(statusStr string) []model.DeviceStatus {
+	if statusStr == "" {
+		return nil
+	}
+	statusList := strings.Split(statusStr, ",")
+	result := make([]model.DeviceStatus, 0, len(statusList))
+	for _, s := range statusList {
+		switch s {
+		case "onlineActive":
+			result = append(result, model.DeviceActive)
+		case "onlineInactive":
+			result = append(result, model.DeviceRegistered, model.DeviceProvisioning)
+		case "offline":
+			result = append(result, model.DeviceOffline, model.DeviceMaintenance, model.DeviceDiscovered, model.DeviceDecommissioned)
+		default:
+			// Pass through any other status values for backward compatibility
+			result = append(result, model.DeviceStatus(s))
+		}
+	}
+	return result
+}
+
 // ListGeo handles GET /api/v1/devices/geo.
 // Returns devices with geographic coordinates for map display.
 func (h *Handler) ListGeo(c *gin.Context) {
@@ -487,27 +512,8 @@ func (h *Handler) ListGeo(c *gin.Context) {
 		filter.GroupIDs = strings.Split(groupIDs, ",")
 	}
 
-	// Parse status (comma-separated)
-	// Frontend sends: onlineActive, onlineInactive, offline
-	// Backend expects: active, registered, provisioning, offline, maintenance, discovered, decommissioned
-	if statusStr := c.Query("status"); statusStr != "" {
-		statusList := strings.Split(statusStr, ",")
-		filter.Status = make([]model.DeviceStatus, 0)
-		for _, s := range statusList {
-			// Map frontend status values to backend database status values
-			switch s {
-			case "onlineActive":
-				filter.Status = append(filter.Status, model.DeviceActive)
-			case "onlineInactive":
-				filter.Status = append(filter.Status, model.DeviceRegistered, model.DeviceProvisioning)
-			case "offline":
-				filter.Status = append(filter.Status, model.DeviceOffline, model.DeviceMaintenance, model.DeviceDiscovered, model.DeviceDecommissioned)
-			default:
-				// Pass through any other status values for backward compatibility
-				filter.Status = append(filter.Status, model.DeviceStatus(s))
-			}
-		}
-	}
+	// Parse status (comma-separated) — 与 GetGeoStats 共享 parseGeoStatusFilter
+	filter.Status = parseGeoStatusFilter(c.Query("status"))
 
 	// Parse keyword
 	filter.Keyword = c.Query("keyword")
@@ -560,6 +566,9 @@ func (h *Handler) ListGeo(c *gin.Context) {
 
 // GetGeoStats handles GET /api/v1/devices/geo/stats.
 // Returns device statistics for map display.
+//
+// 入参与 ListGeo 对齐：group_ids / status 两个筛选都受 stats 影响，避免顶部统计带与地图点位不一致。
+// group_ids 包含 DefaultLevel2GroupID 时由 service 层 splitGeoGroupIDs 归一化为未分组分支。
 func (h *Handler) GetGeoStats(c *gin.Context) {
 	var groupIDs []string
 
@@ -568,13 +577,16 @@ func (h *Handler) GetGeoStats(c *gin.Context) {
 		groupIDs = strings.Split(groupIDsStr, ",")
 	}
 
+	// Parse status (comma-separated) — 与 ListGeo 共享 parseGeoStatusFilter
+	statusFilter := parseGeoStatusFilter(c.Query("status"))
+
 	// #64 设备组数据权限：统计只覆盖调用者可见分组（三态 fail-closed 在仓库层施加）。
 	visibleGroups, ok := h.resolveVisibleGroups(c)
 	if !ok {
 		return
 	}
 
-	stats, err := h.service.GetGeoStats(c.Request.Context(), groupIDs, visibleGroups)
+	stats, err := h.service.GetGeoStats(c.Request.Context(), groupIDs, statusFilter, visibleGroups)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
