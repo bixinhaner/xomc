@@ -352,6 +352,9 @@ function GranularityView({
       name: s.name,
       type: 'line',
       smooth: true,
+      // issue #514：点标记始终可见，避免单个/极稀疏孤立点隐身被误判"暂无数据"。
+      showSymbol: true,
+      symbolSize: 4,
       data: s.values,
       connectNulls: false,
     })),

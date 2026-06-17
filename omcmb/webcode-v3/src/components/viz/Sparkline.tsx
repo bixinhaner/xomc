@@ -26,10 +26,10 @@ export function Sparkline({
   strokeWidth = 1.4,
   className,
 }: Props) {
-  const { line, area, lastDot } = useMemo(() => {
+  const { line, area, lastDot, dots } = useMemo(() => {
     const nums = data.filter((v): v is number => v !== null && v !== undefined)
     if (nums.length === 0) {
-      return { line: '', area: '', lastDot: null }
+      return { line: '', area: '', lastDot: null, dots: [] as Array<{ x: number; y: number }> }
     }
     const min = Math.min(...nums)
     const max = Math.max(...nums)
@@ -59,10 +59,17 @@ export function Sparkline({
     const lastNonNull = [...points].reverse().find((p): p is readonly [number, number] => p !== null)
     const lastX = lastNonNull ? lastNonNull[0] : width
     const areaPath = lastNonNull ? `${linePath} L ${lastX} ${height} L 0 ${height} Z` : ''
+    // issue #514：为每个非 null 点画可见圆点。原先只画 lastDot（最后一个点），当某点
+    // 左右相邻槽位皆为 null（连不成线段、SVG 仅 `M x y` 无可见笔触）时，该孤立点会
+    // 彻底隐身被误判"暂无数据"；单点序列同理。逐点画小圆点即可让单个/孤立点恒可见。
+    const allDots = points
+      .filter((p): p is readonly [number, number] => p !== null)
+      .map(([x, y]) => ({ x, y }))
     return {
       line: linePath,
       area: areaPath,
       lastDot: lastNonNull ? { x: lastNonNull[0], y: lastNonNull[1] } : null,
+      dots: allDots,
     }
   }, [data, width, height])
 
@@ -95,6 +102,17 @@ export function Sparkline({
         strokeLinecap="round"
         style={{ filter: `drop-shadow(0 0 4px ${color})` }}
       />
+      {/* issue #514：逐点小圆点，确保单个/孤立（两侧断档）数据点恒可见，不只画末点。 */}
+      {dots.map((d, i) => (
+        <circle
+          key={i}
+          cx={d.x}
+          cy={d.y}
+          r={1.6}
+          fill={color}
+          style={{ filter: `drop-shadow(0 0 3px ${color})` }}
+        />
+      ))}
       {lastDot && (
         <circle
           cx={lastDot.x}

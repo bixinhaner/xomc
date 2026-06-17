@@ -86,7 +86,10 @@ function ChartCard({ chart }: { chart: MetricChart }) {
         name: s.name,
         type: 'line',
         smooth: true,
-        showSymbol: chart.buckets.length <= 30,
+        // issue #514：点标记始终可见（原 buckets.length<=30 条件下，多桶时隐藏点标记，
+        // 单个/极稀疏孤立点连不成线段仍会隐身）。改为始终画点，避免误判"暂无数据"。
+        showSymbol: true,
+        symbolSize: 4,
         data: s.values,
         // issue #429：规整网格下断档槽位置 '-'/null，connectNulls=false 让缺口处线断开
         // （断档在网管有运维含义，不再连线抹平）；#200 的"假空洞"在规整网格下已不存在。
@@ -101,7 +104,9 @@ function ChartCard({ chart }: { chart: MetricChart }) {
         name: s.name,
         type: 'line',
         smooth: true,
-        showSymbol: chart.buckets.length <= 30,
+        // issue #514：点标记始终可见（同当前系列口径）。
+        showSymbol: true,
+        symbolSize: 4,
         data: s.values,
         // issue #429：对比虚线同当前系列，断档处断开线（与上文同口径）。
         connectNulls: false,
