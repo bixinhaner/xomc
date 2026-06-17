@@ -19,6 +19,7 @@ import { softwareService } from '../../mock/services/softwareService';
 
 interface BackendFirmwareVersion {
   id: string;
+  product_id?: string;
   product_class: string;
   version: string;
   file_name: string;
@@ -137,6 +138,7 @@ function mapFirmware(bf: BackendFirmwareVersion): SoftwareVersion {
     versionCode: bf.version,
     fileName: bf.file_name,
     deviceType: bf.product_class || '',
+    productId: bf.product_id,
     vendor: bf.compatible_oui?.[0] || '',
     releaseDate: bf.created_at,
     status: mapFirmwareStatus(bf.status),
@@ -281,13 +283,15 @@ export const softwareApi = {
   // ---- Firmware (固件) ----
 
   async getVersions(
-    params: { deviceType?: string; status?: string; vendor?: string; fileType?: number } & PageRequest
+    params: { deviceType?: string; productId?: string; status?: string; vendor?: string; fileType?: number } & PageRequest
   ): Promise<PageResponse<SoftwareVersion>> {
     const query: Record<string, unknown> = {
       page: params.page,
       page_size: params.pageSize,
     };
     if (params.deviceType) query.product_class = params.deviceType;
+    // #492：按产品过滤固件（升级抽屉选产品名 → 映射 product_id 传入）。
+    if (params.productId) query.product_id = params.productId;
     if (params.status) query.status = params.status;
     if (params.fileType !== undefined) query.file_type = params.fileType;
 
@@ -312,6 +316,8 @@ export const softwareApi = {
   ): Promise<SoftwareVersion> {
     const formData = new FormData();
     formData.append('version', data.versionCode);
+    // #492：上传按产品名 → 提交 product_id 作为产品归属权威；product_class 兼容保留。
+    if (data.productId) formData.append('product_id', data.productId);
     if (data.deviceType) formData.append('product_class', data.deviceType);
     if (data.releaseNotes) formData.append('release_notes', data.releaseNotes);
 

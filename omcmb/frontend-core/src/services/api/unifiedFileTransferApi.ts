@@ -114,7 +114,7 @@ export const unifiedFileTransferApi = {
   },
 
   async getDeviceCandidates(
-    params: { keyword?: string; category?: string; typeCode?: string; productType?: string } & PageRequest,
+    params: { keyword?: string; category?: string; typeCode?: string; productType?: string; productName?: string } & PageRequest,
   ): Promise<PageResponse<UnifiedFileTransferDeviceItem>> {
     const { data } = await http.get<PageResponse<BackendUnifiedFileTransferDeviceItem>>('/ufte/device-candidates', {
       params: {
@@ -123,6 +123,8 @@ export const unifiedFileTransferApi = {
         category: params.category,
         typeCode: params.typeCode,
         productType: params.productType,
+        // #492：按产品英文名收窄候选（升级抽屉选产品名后传此参数）。
+        productName: params.productName,
         keyword: params.keyword,
       },
     });

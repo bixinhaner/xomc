@@ -111,6 +111,8 @@ export interface UnifiedFileTransferDeviceItem {
   deviceName: string;
   deviceSn: string;
   productType: string;
+  /** #492 设备所属产品英文名（productClass 经 ProductRegistry 解析）。候选/设备列表展示产品名取代裸 productClass；孤儿设备为空。 */
+  productName?: string;
   currentVersion: string;
   targetVersion: string;
   /** OUTPUT 文件类（备份 / 日志采集 / 配置恢复）的目标文件名，{task_id8}/{sn} 已渲染。

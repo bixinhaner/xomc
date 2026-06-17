@@ -51,6 +51,7 @@ import {
 } from '@core/hooks/api/useUnifiedFileTransfer';
 import { useProductClasses } from '@core/hooks/api/useDevices';
 import { useSoftwareVersions } from '@core/hooks/api/useSoftware';
+import { useProductList } from '@core/hooks/api/useProducts';
 import { unifiedFileTransferApi } from '@core/services/api/unifiedFileTransferApi';
 import { configSnapshotApi } from '@core/services/api/configSnapshotApi';
 import type { BatchGetSnapshotsResult } from '@core/services/api/configSnapshotApi';
@@ -119,28 +120,6 @@ function isUpgradeTaskCategory(category?: string) {
     category === 'gsm_upgrade' ||
     category === 'device_upgrade'
   );
-}
-
-function matchesScope(scope: string[], _category: string, productClass: string): boolean {
-  const upper = productClass.toUpperCase();
-  for (const s of scope) {
-    const su = s.toUpperCase();
-    if (upper === su || upper.includes(su) || su.includes(upper)) return true;
-    if (su.includes(' ')) {
-      const tokens = su.split(/\s+/).filter((t) => t.length >= 2);
-      for (const token of tokens) {
-        if (upper.includes(token)) return true;
-      }
-    }
-  }
-  return false;
-}
-
-function splitDeviceTypes(deviceType?: string) {
-  return (deviceType ?? '')
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean);
 }
 
 function needsFirmwareSelection(taskType?: UnifiedFileTransferTaskType) {
@@ -408,11 +387,21 @@ export default function FileTransferCenter() {
     () => taskTypes.find((item) => item.typeCode === drawerTypeCode) ?? activeTaskType,
     [activeTaskType, drawerTypeCode, taskTypes],
   );
+  // #492：升级抽屉「产品类型」改为产品名。products 来自产品中心目录，用于把所选产品名映射成
+  // product_id（固件按产品过滤）。
+  const { data: productsData } = useProductList();
+  const products = useMemo(() => productsData?.items ?? [], [productsData]);
+  const drawerProductId = useMemo(
+    () => products.find((p) => p.name === drawerProductClass)?.id,
+    [products, drawerProductClass],
+  );
   const firmwareLibraryFileType = resolveFirmwareLibraryFileType(drawerTaskType);
   const { data: firmwareData } = useSoftwareVersions({
     page: 1,
     pageSize: 200,
     fileType: firmwareLibraryFileType,
+    // #492：固件按所选产品过滤（产品名→product_id）。未选产品则不限。
+    productId: drawerProductId,
   });
 
   // 创建任务时全部三种执行方式可选（立即 / 挂起 / 定时）。
@@ -426,9 +415,8 @@ export default function FileTransferCenter() {
     // typeCode 精确匹配设备候选（productTechLookup 区分 4G/5G/2G）。
     category: resolveBackendCategoryParam(selectedCategory, drawerTaskType?.typeCode || selectedTypeCode || ''),
     typeCode: drawerTaskType?.typeCode || selectedTypeCode || undefined,
-    // 升级类任务（needsFirmwareSelection）用 drawerProductClass 表单字段
-    // 缩窄候选设备 — UFTE 后端字段名是 productType。
-    productType: needsFirmwareSelection(drawerTaskType) ? drawerProductClass : undefined,
+    // #492：升级类任务用所选「产品名」缩窄候选设备（后端按 productName 过滤：设备 productClass→产品名∈选中）。
+    productName: needsFirmwareSelection(drawerTaskType) ? drawerProductClass || undefined : undefined,
     keyword: drawerDeviceKeyword || undefined,
   });
 
@@ -472,32 +460,20 @@ export default function FileTransferCenter() {
     [firmwareData?.items],
   );
 
+  // #492：升级抽屉「产品类型」下拉 = 模板适用产品名（products）。模板未配产品（=全部）时退为
+  // 产品目录全集，便于按产品收窄。value/label 均为产品英文名。
   const drawerProductClassOptions = useMemo(() => {
-    const scope = drawerTaskType?.platformScope ?? [];
-    const category = drawerTaskType?.category ?? '';
-    const realClasses = new Set<string>();
-    productClasses.forEach((pc) => {
-      if (scope.length === 0 || matchesScope(scope, category, pc)) {
-        realClasses.add(pc);
-      }
-    });
-    firmwareCandidates.forEach((item) => {
-      splitDeviceTypes(item.deviceType).forEach((entry) => {
-        if (scope.length === 0 || matchesScope(scope, category, entry)) {
-          realClasses.add(entry);
-        }
-      });
-    });
-    return Array.from(realClasses).map((item) => ({ label: item, value: item }));
-  }, [drawerTaskType, firmwareCandidates, productClasses]);
+    const tplProducts = drawerTaskType?.products ?? [];
+    const names = tplProducts.length > 0 ? tplProducts : products.map((p) => p.name);
+    return Array.from(new Set(names))
+      .filter(Boolean)
+      .sort((left, right) => left.localeCompare(right, 'zh-CN'))
+      .map((name) => ({ label: name, value: name }));
+  }, [drawerTaskType?.products, products]);
 
   const filteredFirmwareCandidates = useMemo(
-    () => (drawerProductClass
-      ? firmwareCandidates.filter((item) => {
-          const deviceTypes = splitDeviceTypes(item.deviceType);
-          return deviceTypes.length === 0 || deviceTypes.includes(drawerProductClass);
-        })
-      : []),
+    // #492：固件已按所选产品(product_id) 服务端过滤；这里仅在选了产品后展示其固件。
+    () => (drawerProductClass ? firmwareCandidates : []),
     [drawerProductClass, firmwareCandidates],
   );
 
@@ -608,9 +584,14 @@ export default function FileTransferCenter() {
     () => [
       { title: t('ufte.col.deviceSn'), dataIndex: 'deviceSn', key: 'deviceSn', width: 160 },
       { title: t('ufte.col.stationName'), dataIndex: 'deviceName', key: 'deviceName', ellipsis: true },
-      // 后端 UFTE DeviceItem 字段名是 productType（见 internal/ufte/model.go），
-      // 不是 productClass —— 前端原 dataIndex 写错，真实数据下永远空。
-      { title: t('ufte.col.productType'), dataIndex: 'productType', key: 'productType', width: 140 },
+      // #492：候选列展示产品英文名（productName，由后端 productClass→ProductRegistry 解析）；
+      // 解析不到（孤儿设备）回退裸 productClass。
+      {
+        title: t('ufte.col.productType'),
+        key: 'productType',
+        width: 140,
+        render: (_: unknown, record: UnifiedFileTransferDeviceItem) => record.productName || record.productType || '-',
+      },
       { title: t('ufte.col.currentVersion'), dataIndex: 'currentVersion', key: 'currentVersion', width: 120 },
     ],
     [t],
@@ -694,7 +675,7 @@ export default function FileTransferCenter() {
         pageSize: 10000,
         category: selectedCategory || undefined,
         typeCode: drawerTaskType?.typeCode || selectedTypeCode || undefined,
-        productType: needsFirmwareSelection(drawerTaskType) ? drawerProductClass : undefined,
+        productName: needsFirmwareSelection(drawerTaskType) ? drawerProductClass || undefined : undefined,
       });
       const allCandidates = resp.items ?? [];
       const snToDevice = new Map(allCandidates.map((d) => [d.deviceSn, d]));
@@ -1115,10 +1096,10 @@ export default function FileTransferCenter() {
         },
         {
           title: t('ufte.col.productType'),
-          dataIndex: 'productType',
           key: 'productType',
           width: 130,
-          render: (value: string) => renderEllipsisCell(value),
+          // #492：展示产品英文名，解析不到回退裸 productClass。
+          render: (_: unknown, record: UnifiedFileTransferDeviceItem) => renderEllipsisCell(record.productName || record.productType),
         },
         {
           title: t('ufte.col.upgradeProgress'),
@@ -1188,10 +1169,10 @@ export default function FileTransferCenter() {
       },
       {
         title: t('ufte.col.productType'),
-        dataIndex: 'productType',
         key: 'productType',
         width: 130,
-        render: (value: string) => renderEllipsisCell(value),
+        // #492：展示产品英文名，解析不到回退裸 productClass。
+        render: (_: unknown, record: UnifiedFileTransferDeviceItem) => renderEllipsisCell(record.productName || record.productType),
       },
       {
         title: t('ufte.col.currentVersion'),
