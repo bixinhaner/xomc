@@ -89,7 +89,7 @@ func (r *PgDeviceInfoRepository) Create(ctx context.Context, info *DeviceInfo) e
 		Columns(
 			"device_id", "device_name", "address", "remark", "project_status", "height",
 			"eci", "pci", "cell_id", "freq_point", "bandwidth", "transmit_power", "plmn",
-			"rf_status", "cell_status", "mme_status", "sync_status", "kpi_status",
+			"rf_status", "cell_status", "op_state", "mme_status", "sync_status", "kpi_status",
 			"num_of_cells", "gps_status", "alarm_severity", "license_status",
 			"mac", "hardware_version",
 			// T-0173: 显式带上 last_online_time + cumulative_online_duration,与读路径对齐。
@@ -100,7 +100,7 @@ func (r *PgDeviceInfoRepository) Create(ctx context.Context, info *DeviceInfo) e
 		Values(
 			info.DeviceID, info.DeviceName, info.Address, info.Remark, info.ProjectStatus, info.Height,
 			info.ECI, info.PCI, info.CellID, info.FreqPoint, info.Bandwidth, info.TransmitPower, info.PLMN,
-			info.RFStatus, info.CellStatus, info.MMEStatus, info.SyncStatus, info.KPIStatus,
+			info.RFStatus, info.CellStatus, info.OpState, info.MMEStatus, info.SyncStatus, info.KPIStatus,
 			info.NumOfCells, info.GPSStatus, info.AlarmSeverity, info.LicenseStatus,
 			info.MAC, info.HardwareVersion,
 			info.FirstOnlineTime, info.LastOnlineTime, info.LastOfflineTime,
@@ -365,15 +365,9 @@ func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter
 		countBuilder = countBuilder.Where(sq.Eq{"di.license_status": *filter.LicenseStatus})
 	}
 	if filter.OpState != nil {
-		// 契约同 model.DeriveOpStateActivated：激活状态 = 设备是否曾首次上线
-		// （device_info.first_online_time 非空）。激活是一次性持久事实，与在线/
-		// 离线解耦——离线设备仍属已激活，不会因 OfflineDetector 翻 status 而掉。
-		if *filter.OpState == "1" {
-			builder = builder.Where(sq.NotEq{"di.first_online_time": nil})
-			countBuilder = countBuilder.Where(sq.NotEq{"di.first_online_time": nil})
-		} else if *filter.OpState == "0" {
-			builder = builder.Where(sq.Eq{"di.first_online_time": nil})
-			countBuilder = countBuilder.Where(sq.Eq{"di.first_online_time": nil})
+		if cond := opStateFilterCond(*filter.OpState); cond != nil {
+			builder = builder.Where(cond)
+			countBuilder = countBuilder.Where(cond)
 		}
 	}
 
@@ -631,13 +625,29 @@ func applyDeviceFilters(b sq.SelectBuilder, filter DeviceFilter) sq.SelectBuilde
 		}
 	}
 	if filter.OpState != nil {
-		if *filter.OpState == "1" {
-			b = b.Where(sq.NotEq{"di.first_online_time": nil})
-		} else if *filter.OpState == "0" {
-			b = b.Where(sq.Eq{"di.first_online_time": nil})
+		if cond := opStateFilterCond(*filter.OpState); cond != nil {
+			b = b.Where(cond)
 		}
 	}
 	return b
+}
+
+// opStateFilterCond 构造 op_state 列("1"=激活/"0"=未激活)的 WHERE 条件。
+// 口径同 InfoSyncer.CalcOpState、与 cell_status 严格同源派生：任一 cell active → "1" 否则 "0"。
+// migrations/000003 DEFAULT '0' 后 NULL 理论不出现，但 LEFT JOIN 设备无 device_info 行
+// 时 di.op_state 列会是 NULL，filter "0" 路径并入 NULL 作为“未激活”。
+//
+// 抽出作 helper 是为了让 ListDevicesWithInfo 与 applyDeviceFilters（供 ComputeListStats 用）
+// 两处过滤口径 1:1 对齐，避免 list/stats 数量不一致的 P3 回归。
+func opStateFilterCond(value string) sq.Sqlizer {
+	switch value {
+	case "1":
+		return sq.Eq{"di.op_state": "1"}
+	case "0":
+		return sq.Or{sq.Eq{"di.op_state": "0"}, sq.Eq{"di.op_state": nil}}
+	default:
+		return nil
+	}
 }
 
 // deviceInfoColumns returns column names for the device_info table.
@@ -646,7 +656,7 @@ func deviceInfoColumns() []string {
 		"device_id",
 		"device_name", "address", "remark", "project_status", "height",
 		"eci", "pci", "cell_id", "freq_point", "bandwidth", "transmit_power", "plmn",
-		"rf_status", "cell_status", "mme_status", "sync_status", "kpi_status",
+		"rf_status", "cell_status", "op_state", "mme_status", "sync_status", "kpi_status",
 		"num_of_cells", "gps_status", "alarm_severity", "license_status",
 		"mac", "hardware_version",
 		// T-0173: 补齐 last_online_time（pre-existing 漏读) + 新增 cumulative_online_duration
@@ -685,7 +695,7 @@ func deviceWithInfoSelectColumns() []string {
 		// device_info columns
 		"di.device_name", "di.address", "di.remark", "di.project_status", "di.height",
 		"di.eci", "di.pci", "di.cell_id", "di.freq_point", "di.bandwidth", "di.transmit_power", "di.plmn",
-		"di.rf_status", "di.cell_status", "di.mme_status", "di.sync_status", "di.kpi_status",
+		"di.rf_status", "di.cell_status", "di.op_state", "di.mme_status", "di.sync_status", "di.kpi_status",
 		"di.num_of_cells", "di.gps_status",
 		// #361: 告警级别不再读 di.alarm_severity（该冗余列仅 Radisys 自报路径写、
 		// 与 OMC 告警引擎无关、从无人维护）。改实时 JOIN alarms_active 子查询 aa，
@@ -795,7 +805,7 @@ func scanDeviceInfoFromRow(row pgx.Row) (*DeviceInfo, error) {
 		&info.DeviceID,
 		&info.DeviceName, &info.Address, &info.Remark, &info.ProjectStatus, &info.Height,
 		&info.ECI, &info.PCI, &info.CellID, &info.FreqPoint, &info.Bandwidth, &info.TransmitPower, &info.PLMN,
-		&info.RFStatus, &info.CellStatus, &info.MMEStatus, &info.SyncStatus, &info.KPIStatus,
+		&info.RFStatus, &info.CellStatus, &info.OpState, &info.MMEStatus, &info.SyncStatus, &info.KPIStatus,
 		&info.NumOfCells, &info.GPSStatus, &info.AlarmSeverity, &info.LicenseStatus,
 		&info.MAC, &info.HardwareVersion,
 		// T-0173: 顺序与 deviceInfoColumns() 对齐;补齐 last_online_time + cumulative_online_duration
@@ -838,6 +848,7 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 		diPLMN          *string
 		diRFStatus      *string
 		diCellStatus    *string
+		diOpState       *string
 		diMMEStatus     *string
 		diSyncStatus    *string
 		diKPIStatus     *string
@@ -893,7 +904,7 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 		// device_info fields (all nullable from LEFT JOIN)
 		&diDeviceName, &diAddress, &diRemark, &diProjectStatus, &diHeight,
 		&diECI, &diPCI, &diCellID, &diFreqPoint, &diBandwidth, &diTransmitPower, &diPLMN,
-		&diRFStatus, &diCellStatus, &diMMEStatus, &diSyncStatus, &diKPIStatus,
+		&diRFStatus, &diCellStatus, &diOpState, &diMMEStatus, &diSyncStatus, &diKPIStatus,
 		&diNumOfCells, &diGPSStatus, &diAlarmSeverity, &diLicenseStatus,
 		&diMAC, &diHWVersion,
 		&diFirstOnline, &diLastOnline, &diLastOffline, &diRunTime,
@@ -1001,9 +1012,12 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 	// T-0162: 派生老 Status 字段给读侧兼容（DeriveStatusFromLifecycle 用
 	// commissioned+online=Active / commissioned+offline=Offline / 等映射）
 	d.Status = DeriveStatusFromLifecycle(d.LifecycleState, d.IsOnline)
-	// 派生 op_state 给前端"激活状态"列展示。激活 = 设备曾首次上线
-	// （device_info.first_online_time 非空），一次性持久事实，与在线/离线解耦。
-	d.OpState = model.DeriveOpStateActivated(d.FirstOnlineTime)
+	// op_state 从 di.op_state 读取 —— InfoSyncer.CalcOpState 在参数同步时写入,
+	// 语义同 cell_status：任一 cell active → "1";全部 inactive / 无 cell 数据 → "0"。
+	// di 未 JOIN 上(设备还没 device_info 行)时忄底 "" —— 前端 helper 会展示 '-'。
+	if diOpState != nil {
+		d.OpState = *diOpState
+	}
 
 	return &d, nil
 }

@@ -1317,6 +1317,13 @@ const messages: Record<string, string> = {
 
   // 监控页面扩展字段 (Status)
   'device.opState':             '激活状态',
+  // 「小区激活态」专用 key —— 设备详情页『小区信息』表里每行是一个 cell，
+  //  cell.op_state 是『小区维度』的运营态，与设备级 device.op_state 同名但是两个
+  //  完全不同的字段（一台已激活的设备其下属某些小区仍可能未激活）。历史上两边都用
+  //  device.opState='激活状态'，导致同一台设备列表显示『激活』、详情页小区表显示
+  //  『未激活』，被用户当作前端 bug 反复报上来。此 key 在中文 UI 加『小区』维度限
+  //  定词，与设备级 device.opState 视觉区分。
+  'device.cellOpState':         '小区激活态',
   'device.ueCount':             'UE数',
   'device.mmeStatus':           'MME状态',
   'device.amfStatus':           'AMF状态',

@@ -15,7 +15,19 @@ import (
 //	Any cell OpState active   → "normal"
 //	All observed cells inactive → "inactive"
 //	No cell data                → "inactive"
+//
+// 覆盖制式:
+//   - LTE / NR (FAPService.{i}.{FAPControl|CellConfig}.{LTE|NR}.*OpState) —— isCellActiveForIndex
+//   - GSM (GsmBTSCellDT.{i}.OpState)                                       —— hasActiveGSMCell
+// CMCC/CTCC/CUCC 在 LTE/NR 上走同一组标准 TR-181 路径，X_CMCC/X_CTCC/X_CUCC 私有命名
+// 空间未提供独立 OpState 字段。
 func CalcCellStatus(params map[string]string) string {
+	// GSM 制式并行检查——走 GsmBTSCellDT.{i}.* 对象树,与 FAPService 体系独立,
+	// 任一 GSM cell active 也算设备激活(不依赖 FAPService maxIndex)。
+	if gsmActive, ok := hasActiveGSMCell(params); ok && gsmActive {
+		return "normal"
+	}
+
 	maxIndex := detectMaxFAPServiceIndexFromMap(params)
 	if count := CalcNumOfCells(params); count > maxIndex {
 		maxIndex = count
@@ -24,22 +36,32 @@ func CalcCellStatus(params map[string]string) string {
 		maxIndex = 1
 	}
 
-	hasObservedCell := false
-
 	for i := 1; i <= maxIndex; i++ {
 		isActive, ok := isCellActiveForIndex(params, i)
 		if !ok {
 			continue
 		}
-		hasObservedCell = true
 		if isActive {
 			return "normal"
 		}
 	}
-	if !hasObservedCell {
-		return "inactive"
-	}
 	return "inactive"
+}
+
+// CalcOpState 派生设备级“激活状态”（前端设备列表 op_state 列专用）。
+//
+// 口径与 CalcCellStatus 同源（同一轮 isCellActiveForIndex 遍历），仅取值不同：
+//
+//	CalcCellStatus 返 "normal"  → CalcOpState 返 "1" （激活）
+//	其它一切                        → CalcOpState 返 "0" （未激活，含无 cell 数据）
+//
+// 该口径取代了 model.DeriveOpStateActivated(first_online_time) 这种“一次性持久”语义、
+// 表达“设备当前是否在运营”。InfoSyncer 在 sync_from_parameters 中同步 device_info.op_state。
+func CalcOpState(params map[string]string) string {
+	if CalcCellStatus(params) == "normal" {
+		return "1"
+	}
+	return "0"
 }
 
 // CalcMMEStatus computes the mme_status quick-query column from device_parameters.
@@ -240,6 +262,65 @@ func isCellActiveForIndex(params map[string]string, index int) (bool, bool) {
 		return false, false
 	}
 	return isTrueValue(cellOpState) || strings.EqualFold(cellOpState, "active"), true
+}
+
+// hasActiveGSMCell 遍历 GsmBTSCellDT.{i}.OpState 判定是否有 GSM cell active。
+//
+// GSM 制式在 BM (BaseManager) 形态下走 Device.Services.GsmBTSCellDT.{i}.* 对象树,
+// 与 LTE/NR 的 FAPService.{i}.* 体系完全并行。与 detail_assembler.AssembleGSMCells 同口径,
+// 只看带 .InUse=true 的 cell。
+//
+// 返回:
+//   - active=true,observed=true   —— 至少一个 GSM cell active
+//   - active=false,observed=true  —— 有 GSM cell 但全未激活
+//   - active=false,observed=false —— 未观测到 GSM 参数 (非 GSM 设备)
+func hasActiveGSMCell(params map[string]string) (active, observed bool) {
+	const prefix = "Device.Services.GsmBTSCellDT."
+
+	// 先扫一遍看是否有 .InUse 表明着是 GSM 设备;同时收集联败 idx 集合
+	hasAnyInUse := false
+	cellIdx := map[int]struct{}{}
+	for path := range params {
+		if !strings.HasPrefix(path, prefix) {
+			continue
+		}
+		if strings.HasSuffix(path, ".InUse") {
+			hasAnyInUse = true
+		}
+		rest := strings.TrimPrefix(path, prefix)
+		dot := strings.Index(rest, ".")
+		if dot <= 0 {
+			continue
+		}
+		idx, err := strconv.Atoi(rest[:dot])
+		if err == nil && idx > 0 {
+			cellIdx[idx] = struct{}{}
+		}
+	}
+	if len(cellIdx) == 0 {
+		return false, false
+	}
+
+	observed = true
+	for i := range cellIdx {
+		cellPrefix := fmt.Sprintf("%s%d.", prefix, i)
+		// 与 detail_assembler.AssembleGSMCells 一致: 有任何 InUse 信息时按 InUse 过滤,
+		// 跳过未启用 cell。无 InUse 字段时（老设备快照）不过滤。
+		if hasAnyInUse {
+			inUse := strings.TrimSpace(params[cellPrefix+"InUse"])
+			if inUse == "" || (!isTrueValue(inUse) && !strings.EqualFold(inUse, "enabled")) {
+				continue
+			}
+		}
+		cellOp := strings.TrimSpace(params[cellPrefix+"OpState"])
+		if cellOp == "" {
+			continue
+		}
+		if isTrueValue(cellOp) || strings.EqualFold(cellOp, "active") || strings.EqualFold(cellOp, "enabled") {
+			return true, true
+		}
+	}
+	return false, observed
 }
 
 func detectMaxFAPServiceIndexFromMap(params map[string]string) int {

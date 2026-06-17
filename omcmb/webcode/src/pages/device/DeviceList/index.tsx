@@ -24,6 +24,7 @@ import { useDeviceList, useBatchRebootDevices, useDeviceGroups } from '@core/hoo
 import { useProductList } from '@core/hooks/api/useProducts';
 import { useDictionaryBatch } from '@core/hooks/api/useSystem';
 import { resolveNetworkTypeLabel } from '@core/utils/networkType';
+import { activationStatusOf } from '@core/utils/activationStatus';
 import { useAlarmCount, useTriggerAlarmSync } from '@core/hooks/api/useAlarms';
 import { useCreateUnifiedFileTransferTask } from '@core/hooks/api/useUnifiedFileTransfer';
 import { useDownloadStationLog } from '@core/hooks/api/useStationLog';
@@ -860,9 +861,14 @@ export default function DeviceList() {
   // 激活状态 = 设备是否曾首次上线（后端 op_state = DeriveOpStateActivated(first_online_time)：
   // '1'=激活 / '0'=未激活）。与"在线(实时连接 is_online)""小区状态(cell_status)"是三个不同维度——
   // 此前误用 cell_status==='normal' 当激活，导致在线设备因小区 inactive 显示未激活。
+  //
+  // ™ 判定口径由 frontend-core/utils/activationStatus.ts 统一控管——
+  // 三皮肤(webcode / webcode-v2 / webcode-v3) + 列表/详情头/v2 KV/v3 KV 全调同一函数，
+  // 在上层各自渲染 Tag/文本。修改判定请只改 utility。
   const renderActivationStatus = useCallback((opState: string | undefined | null) => {
-    if (opState == null || opState === '' || opState === 'unknown') return '-';
-    const isActive = opState === '1';
+    const status = activationStatusOf(opState);
+    if (status == null) return '-';
+    const isActive = status === 'active';
     return <Tag color={isActive ? 'success' : 'error'}>{isActive ? t('status.active') : t('status.inactive')}</Tag>;
   }, [t]);
 

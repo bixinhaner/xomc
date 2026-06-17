@@ -16,6 +16,7 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 import { RadialGauge } from '@/components/viz/RadialGauge'
 import { formatTime } from '@/lib/format'
 import { useDeviceBySn, useRebootDevice } from '@core/hooks/api/useDevices'
+import { activationStatusOf } from '@core/utils/activationStatus'
 import type { Device } from '@core/types/device'
 import { KV, StatCard, StateGate, formatDuration } from './_shared'
 
@@ -169,7 +170,11 @@ function DetailBody({ d, onUe }: { d: Device; onUe: () => void }) {
             </div>
           </div>
           <KV label="CELL STATUS">{d.cellStatus}</KV>
-          <KV label="OP / ADMIN STATE">{`${d.opState || '—'} · ${d.adminState || '—'}`}</KV>
+          {/*
+            HUD raw 风保留 ('1'/'0' 直接显示)，仅把后端兜底值 'unknown' 与空值同步
+            显示为 '—'——口径走 frontend-core/utils/activationStatus，与 v1/v2 同一来源。
+          */}
+          <KV label="OP / ADMIN STATE">{`${activationStatusOf(d.opState) ? d.opState : '—'} · ${d.adminState || '—'}`}</KV>
           <KV label="RF / SYNC">{`${d.rfStatus || '—'} · ${d.syncStatus || '—'}`}</KV>
           <KV label="SERVICE STATUS">{d.serviceStatus}</KV>
           <KV label="LAST ONLINE">{formatTime(d.lastOnlineTime)}</KV>
