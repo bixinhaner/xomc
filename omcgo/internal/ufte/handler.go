@@ -270,7 +270,9 @@ func (h *Handler) ExportDevices(c *gin.Context) {
 		}
 	} else {
 		headers = []string{
-			"任务名称", "设备名称", "设备 SN", "产品类型", "当前版本",
+			// #529：去掉独立「设备名称」列——v1 标准皮肤设备列表非升级视图把设备名
+			// 并进「任务/设备」组合列(不作独立列展示)，CSV 据此对齐，避免「导出比页面多一列」。
+			"任务名称", "设备 SN", "产品类型", "当前版本",
 			"目标版本/目标文件", "状态", "进度(%)", "失败原因", "上报时间",
 		}
 	}
@@ -303,7 +305,8 @@ func (h *Handler) ExportDevices(c *gin.Context) {
 					tgt = it.TargetVersion
 				}
 				row = []string{
-					it.TaskName, it.DeviceName, it.DeviceSN, it.ProductType, it.CurrentVersion,
+					// #529：列顺序与上方 headers 对齐——已去掉「设备名称」列。
+					it.TaskName, it.DeviceSN, it.ProductType, it.CurrentVersion,
 					tgt, translateDeviceStatus(it.Status),
 					fmt.Sprintf("%d", it.Progress),
 					translateFailureReason(it.FailureReason), it.LastReportAt,
