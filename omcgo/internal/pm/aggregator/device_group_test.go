@@ -51,8 +51,10 @@ func Test_buildDeviceGroupSQL_HourlyGroupTableHasIDAndJoins(t *testing.T) {
 	assert.Equal(t, []any{"hourly", w.Start, w.End}, args)
 }
 
-// #479 改动一：device_group 源筛选必须按桶**起点** start_time 框半开窗口
-// [w.Start, w.End)，不再按 end_time（旧法源行恒后移一格 → 设备组「标签老一格」）。
+// #516 分区裁剪：device_group 源筛选必须按**分区列** time 框半开窗口 [w.Start, w.End)，
+// 不再按非分区列 start_time（亦不按 end_time）。deviceTarget 为 TimescaleDB 超表、按 time
+// 列分区，改用分区列过滤后只命中目标分片、走索引。等价性由 #479（time == start_time）背书。
+// 写入列（SELECT/GROUP BY 的 m.time/m.start_time/m.end_time）不动，仅换 WHERE 谓词列。
 // 横跨小时/日/周/月各粒度；args 顺序不变（$2=w.Start, $3=w.End）。
 func Test_buildDeviceGroupSQL_FramesBy_StartTime_AllGranularities(t *testing.T) {
 	cases := []struct {
@@ -91,11 +93,16 @@ func Test_buildDeviceGroupSQL_FramesBy_StartTime_AllGranularities(t *testing.T) 
 		t.Run(c.name, func(t *testing.T) {
 			w := WindowSpec{Granularity: c.gran, Start: c.start, End: c.end}
 			sql, args := buildDeviceGroupSQL(c.deviceTbl, c.groupTbl, w)
-			assert.Contains(t, sql, "AND m.start_time >= $2", "源筛选下界应按桶起点 start_time")
-			assert.Contains(t, sql, "AND m.start_time <  $3", "源筛选上界应按桶起点 start_time")
+			// 绿（#516）：WHERE 谓词按分区列 time 半开框桶 → 分区裁剪
+			assert.Contains(t, sql, "AND m.time >= $2", "源筛选下界应按分区列 time")
+			assert.Contains(t, sql, "AND m.time <  $3", "源筛选上界应按分区列 time")
+			// 红：WHERE 绝不再按非分区列 start_time 框桶（全表扫根因）
+			assert.NotContains(t, sql, "AND m.start_time >= $2", "源筛选不应再按非分区列 start_time 框桶")
+			assert.NotContains(t, sql, "AND m.start_time <  $3", "源筛选不应再按非分区列 start_time 框桶")
+			// 红：也绝不按 end_time 框桶
 			assert.NotContains(t, sql, "AND m.end_time >= $2", "源筛选不应再按 end_time 框桶")
 			assert.NotContains(t, sql, "AND m.end_time <  $3", "源筛选不应再按 end_time 框桶")
-			// 写入 time/start_time/end_time 仍取源行自身桶时刻（逐档对齐、无偏移）
+			// 写入 time/start_time/end_time 仍取源行自身桶时刻（逐档对齐、无偏移；写入列不动）
 			assert.Contains(t, sql, "m.time,\n    m.start_time,\n    m.end_time,")
 			assert.Equal(t, []any{string(c.gran), w.Start, w.End}, args)
 		})
@@ -125,10 +132,12 @@ func Test_buildDeviceGroupSQL_Issue395_BucketsBySourceTime_NoOffset(t *testing.T
 	assert.Contains(t, sql, "m.time, m.start_time, m.end_time",
 		"GROUP BY 必须含源桶时刻才能逐小时分桶")
 
-	// #479 改动一：源筛选改按桶起点 start_time 半开区间框桶（与 buildCountersSQL 同步），
-	// 消除设备组「标签老一格」。不再按 end_time 命中（旧法源行恒后移一格）。
-	assert.Contains(t, sql, "AND m.start_time >= $2")
-	assert.Contains(t, sql, "AND m.start_time <  $3")
+	// #516 分区裁剪：源筛选改按分区列 time 半开区间框桶（与 buildCountersSQL 同步），
+	// 获得分区裁剪 + 索引。不再按非分区列 start_time（全表扫根因），亦不按 end_time。
+	assert.Contains(t, sql, "AND m.time >= $2")
+	assert.Contains(t, sql, "AND m.time <  $3")
+	assert.NotContains(t, sql, "AND m.start_time >= $2", "源筛选不应再按非分区列 start_time 框桶")
+	assert.NotContains(t, sql, "AND m.start_time <  $3", "源筛选不应再按非分区列 start_time 框桶")
 	assert.NotContains(t, sql, "AND m.end_time >= $2", "源筛选不应再按 end_time 框桶")
 	assert.NotContains(t, sql, "AND m.end_time <  $3", "源筛选不应再按 end_time 框桶")
 

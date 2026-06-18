@@ -50,9 +50,11 @@ func (a *Aggregator) AggregateDeviceGroup(ctx context.Context, deviceTarget, gro
 //   - 修复后：每个源小时各成一行，写入 time 与设备单维度表逐档对齐、无偏移；
 //     宽窗补算自然产出多行。
 //
-// 源筛选窗口（#479 改动一）：与 buildCountersSQL 同步，按桶**起点** start_time 落入
-// 半开窗口 [w.Start, w.End)（start_time >= w.Start AND start_time < w.End），不再按
-// end_time 框桶。旧「按 end_time 命中」会让源行恒后移一格（设备组「标签老一格」延迟）。
+// 源筛选窗口（#516 分区裁剪）：与 buildCountersSQL 同步，按**分区列** time 落入
+// 半开窗口 [w.Start, w.End)（time >= w.Start AND time < w.End）。deviceTarget 为
+// TimescaleDB 超表、按 time 列分区，改用分区列过滤后只命中目标分片、走索引（分区裁剪），
+// 消除原按非分区列 start_time 全表扫。等价性：#479 已统一 time == start_time，查的是
+// 同一批源行、聚合行为完全不变；半开区间语义不变；args 顺序不变（$2=w.Start, $3=w.End）。
 func buildDeviceGroupSQL(deviceTarget, groupTarget string, w WindowSpec) (string, []any) {
 	conflictTarget := conflictTargetForTable(groupTarget)
 	withID := targetHasIDColumn(groupTarget)
@@ -93,8 +95,8 @@ JOIN device_dim d
 JOIN device_group_member_dim dgm
   ON dgm.device_id = d.id
 WHERE m.metric_type = 'counter'
-  AND m.start_time >= $2
-  AND m.start_time <  $3
+  AND m.time >= $2
+  AND m.time <  $3
   AND m.statis_type IN ('sum','avg','max','min')
 GROUP BY dgm.group_id, d.technology, m.metric_path, m.statis_type, m.time, m.start_time, m.end_time
 ON CONFLICT %s DO UPDATE SET
