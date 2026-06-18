@@ -1298,15 +1298,28 @@ export default function FileTransferCenter() {
     // 选中跨页保留，用户可在"已选 N 台"清单里逐台移除。
   }, [drawerProductClass, drawerProductClassOptions, drawerTaskType, firmwareOptions, taskDrawerOpen, taskForm]);
 
+  // 同步 in-flight 锁：防止快速连点「创建」时发出两条创建请求、落两条相同任务（issue #522）。
+  // isPending 与按钮 loading 都是「渲染态」，在第一次 mutateAsync 触发的 re-render 落地前一直为 false，
+  // 加上处理函数中间 await validateFields 的异步间隙，一个渲染周期内的连点都能越过 isPending 守卫。
+  // 用 ref 在任何 await 之前同步置位、提交结束（成败）后释放，确保同一时刻只放行一次提交。
+  const creatingTaskRef = useRef(false);
+
   const handleCreateTask = async () => {
-    // 防止用户连续点击「创建」按钮重复提交：mutation 进行中直接忽略后续点击。
-    // 仅靠按钮 loading 不够 —— validateFields 是异步的，期间 isPending 仍为 false。
-    if (createTaskMutation.isPending) {
+    if (creatingTaskRef.current || createTaskMutation.isPending) {
       return;
     }
-    const values = await taskForm.validateFields();
+    creatingTaskRef.current = true;
+    let values: TaskFormValues;
+    try {
+      values = await taskForm.validateFields();
+    } catch {
+      // 校验未通过：antd 已高亮对应字段，释放同步锁让用户改后重新提交。
+      creatingTaskRef.current = false;
+      return;
+    }
     if (selectedDrawerDeviceIds.length === 0) {
       void message.warning(t('ufte.msg.pickDevice'));
+      creatingTaskRef.current = false;
       return;
     }
     // T-0164: CONFIG_RESTORE 整批拒绝 — 任一设备缺快照即阻止提交。
@@ -1314,6 +1327,7 @@ export default function FileTransferCenter() {
       void message.error(t('ufte.msg.snapshotMissing', {
         sns: snapshotProbe?.missing.join(', ') ?? '',
       }));
+      creatingTaskRef.current = false;
       return;
     }
     // T-0165: LICENSE_UPGRADE 同款整批拒绝 — 任一设备缺 license 即阻止提交。
@@ -1321,9 +1335,7 @@ export default function FileTransferCenter() {
       void message.error(t('ufte.msg.licenseMissing', {
         sns: licenseProbe?.missing.join(', ') ?? '',
       }));
-      return;
-    }
-    if (createTaskMutation.isPending) {
+      creatingTaskRef.current = false;
       return;
     }
     // scheduledAt 在表单里是 dayjs 实例，发请求前转 ISO 字符串（后端 RFC3339 解析）。
@@ -1349,6 +1361,9 @@ export default function FileTransferCenter() {
       })
       .catch((error: unknown) => {
         void message.error(getTaskActionErrorMessage(error, t('ufte.msg.taskCreateFailed')));
+      })
+      .finally(() => {
+        creatingTaskRef.current = false;
       });
   };
 
