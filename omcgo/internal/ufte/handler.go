@@ -266,13 +266,13 @@ func (h *Handler) ExportDevices(c *gin.Context) {
 	if upgrade {
 		headers = []string{
 			"基站编码", "任务名称", "源版本", "目标版本", "升级类型",
-			"产品类型", "升级进度(%)", "结果", "操作人", "失败原因", "操作时间",
+			"产品名称", "升级进度(%)", "结果", "操作人", "失败原因", "操作时间",
 		}
 	} else {
 		headers = []string{
 			// #529：去掉独立「设备名称」列——v1 标准皮肤设备列表非升级视图把设备名
 			// 并进「任务/设备」组合列(不作独立列展示)，CSV 据此对齐，避免「导出比页面多一列」。
-			"任务名称", "设备 SN", "产品类型", "当前版本",
+			"任务名称", "设备 SN", "产品名称", "当前版本",
 			"目标版本/目标文件", "状态", "进度(%)", "失败原因", "上报时间",
 		}
 	}
@@ -283,6 +283,13 @@ func (h *Handler) ExportDevices(c *gin.Context) {
 	streamErr := h.service.StreamDeviceItems(c.Request.Context(), filter,
 		func(it DeviceItem) error {
 			var row []string
+			// 产品列与页面口径一致（#492/#524）：优先展示 ProductRegistry 解析出的产品英文名
+			// （ProductName），解析不到（孤儿 / 未注册设备）回退裸 productClass，对齐前端
+			// 设备列表「产品名称」列 render 的 productName || productType。
+			productName := it.ProductName
+			if productName == "" {
+				productName = it.ProductType
+			}
 			if upgrade {
 				// 升级类型显示规则与前端 getUpgradeTypeLabel 一致
 				upType := it.TypeDisplayName
@@ -294,7 +301,7 @@ func (h *Handler) ExportDevices(c *gin.Context) {
 				}
 				row = []string{
 					it.DeviceSN, it.TaskName, it.CurrentVersion, it.TargetVersion, upType,
-					it.ProductType, fmt.Sprintf("%d", it.Progress),
+					productName, fmt.Sprintf("%d", it.Progress),
 					translateDeviceStatus(it.Status), it.OperatorScope,
 					translateFailureReason(it.FailureReason), it.LastReportAt,
 				}
@@ -306,7 +313,7 @@ func (h *Handler) ExportDevices(c *gin.Context) {
 				}
 				row = []string{
 					// #529：列顺序与上方 headers 对齐——已去掉「设备名称」列。
-					it.TaskName, it.DeviceSN, it.ProductType, it.CurrentVersion,
+					it.TaskName, it.DeviceSN, productName, it.CurrentVersion,
 					tgt, translateDeviceStatus(it.Status),
 					fmt.Sprintf("%d", it.Progress),
 					translateFailureReason(it.FailureReason), it.LastReportAt,
