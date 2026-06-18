@@ -198,6 +198,12 @@ export interface Device {
   bscSelect: string;
   bscSerialNumber: string;
   btsNum: number;
+  // GSM 设备详情『Status Info』新增字段（参考 BTS 友机 OMC 截图）。
+  // 后端暂未提供时返回空串/0，前端渲染为 '-'。
+  wanLinkStatus: string;   // WAN 链路状态 (Connected/Disconnected)
+  omcStatus: string;       // OMC 连接状态 (Connected/Disconnected)
+  bsic: string;            // GSM 基站识别码
+  vswr: string;            // VSWR (例 "ch0:5.4 ch1:5.8")
 
   // 网络信息组 (Network)
   ipsecAddr: string;

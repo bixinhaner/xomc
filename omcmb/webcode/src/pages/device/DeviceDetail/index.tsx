@@ -1508,24 +1508,24 @@ export default function DeviceDetail() {
     if (!displayDevice) return [];
     const networkType = normalizeNetworkType(displayDevice.networkType);
 
-    // BSC（GSM）详情页按需求隐藏「状态信息」组
+    // BSC（独立 GSM 设备，paramModel === 'BSC'）按需求隐藏「状态信息」组；BTS 保留显示。
     const groups: FieldGroup[] = [getStationFields(t, networkType)];
-    if (networkType !== 'GSM') {
+    if (!detailResolved.isBSC) {
       groups.push(getStatusFields(t, networkType));
     }
     groups.push(getOtherFields(t, networkType, displayDevice));
     return groups;
-  }, [displayDevice, t]);
+  }, [detailResolved.isBSC, displayDevice, t]);
 
   const cellGroup = useMemo((): FieldGroup | null => {
     if (!displayDevice) return null;
     const networkType = isBmProduct && activeBmTech === 'GSM'
       ? 'GSM'
       : normalizeNetworkType(displayDevice.networkType);
-    // BSC（GSM）详情页按需求隐藏「小区信息」表（保留 BM 产品里的 GSM 小区视图）
-    if (networkType === 'GSM' && !isBmProduct) return null;
+    // BSC（独立 GSM 设备）按需求隐藏「小区信息」表；BTS 与 BM 产品里的 GSM 小区视图均保留。
+    if (detailResolved.isBSC) return null;
     return getCellFields(t, networkType);
-  }, [activeBmTech, displayDevice, isBmProduct, t]);
+  }, [activeBmTech, detailResolved.isBSC, displayDevice, isBmProduct, t]);
 
   const displayCellNetworkType = useMemo(() => {
     if (isBmProduct) {

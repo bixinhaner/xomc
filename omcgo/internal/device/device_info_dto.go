@@ -109,6 +109,7 @@ type DeviceWithInfo struct {
 	// 化暴露给前端,无需走 /devices/:id/detail composite 接口。
 
 	TAC                *string  `json:"tac"`
+	Lac                *string  `json:"lac,omitempty"`
 	Band               *string  `json:"band"`
 	ULEarfcn           *string  `json:"ul_earfcn"`
 	SubframeAssignment *string  `json:"subframe_assignment"`
@@ -124,6 +125,20 @@ type DeviceWithInfo struct {
 	IpsecAddr  *string `json:"ipsec_addr"`
 	EnbID              *string  `json:"enb_id"`
 	NetworkModel       *string  `json:"network_model"`
+
+	// ===== GSM/BTS 专属（migration 000003，DeviceGSM.* TR069 路径同步）=====
+	// 前端 mapBackendDevice 早已声明 bd.bsc_select / bd.oml_remote_ip 等并消费，
+	// 此前 device_info 物理列缺失 → 后端始终回 NULL → 详情页恒 "-"；
+	// 000003 引入物理列后由这 4 个字段透传到前端列表/详情。
+
+	BscSelect      *string `json:"bsc_select,omitempty"`
+	OmlRemoteIp    *string `json:"oml_remote_ip,omitempty"`
+	OmlRemoteIpBak *string `json:"oml_remote_ip_bak,omitempty"`
+	IpaUnitId      *string `json:"ipa_unit_id,omitempty"`
+
+	// BscLinkStatus 由 SELECT 派生（oml_remote_ip 非空 + d.is_online → "connected"
+	// 否则 "disconnected"），不对应物理列。前端 Tag 映射 connected/disconnected。
+	BscLinkStatus *string `json:"bsc_link_status,omitempty"`
 
 	// ===== device_info 时间信息（可能为空）=====
 

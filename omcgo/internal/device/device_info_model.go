@@ -149,6 +149,11 @@ type DeviceInfo struct {
 	// TAC Tracking Area Code（TR-181 EPC.TAC）
 	TAC *string `json:"tac,omitempty"`
 
+	// Lac GSM 位置区码（Location Area Code）。
+	// 由 InfoSyncer 解析 Device.DeviceInfo.GSM.CurrentLac（sNBS1200）或
+	// Device.DeviceInfo.BTS.CurrentLac（BaiBS_AGS）写入。LTE/NR 设备为 NULL。
+	Lac *string `json:"lac,omitempty"`
+
 	// Band LTE 频段编号（TR-181 RAN.RF.FreqBandIndicator）
 	Band *string `json:"band,omitempty"`
 
@@ -208,6 +213,35 @@ type DeviceInfo struct {
 
 	// WANStatus WAN 口链路状态（详情页按 Device.Ethernet.Interface.{i}.Status 参数临时投影）。
 	WANStatus string `json:"wan_status,omitempty"`
+
+	// ===== GSM/BTS 专属（migration 000005，DeviceGSM.* TR069 路径同步）=====
+
+	// BscSelect BSC 主备角色（DeviceGSM.BscSelect："0"=Master / "1"=Backup）。
+	// BTS 设备专属，LTE/NR 为 NULL。
+	BscSelect *string `json:"bsc_select,omitempty"`
+
+	// OmlRemoteIp Abis (OML) BSC 主 IP（DeviceGSM.OmlRemoteIp）。
+	OmlRemoteIp *string `json:"oml_remote_ip,omitempty"`
+
+	// OmlRemoteIpBak Abis (OML) BSC 备 IP（DeviceGSM.OmlRemoteIpBak）。
+	OmlRemoteIpBak *string `json:"oml_remote_ip_bak,omitempty"`
+
+	// IpaUnitId IPA 单元 ID（DeviceGSM.IpaUnitId，如 "9227-2"）。
+	IpaUnitId *string `json:"ipa_unit_id,omitempty"`
+
+	// BscLinkStatus 派生字段：BSC 连接状态。不入库。
+	//   - oml_remote_ip 有值 + is_online=true → "connected"
+	//   - oml_remote_ip 有值 + is_online=false → "disconnected"
+	//   - 否则 → ""（前端会渲染为 "-"）
+	// 列表接口由 DeviceWithInfo DTO 在 SQL CASE 派生；详情接口由
+	// GetDeviceDetailComposite 手工派生填充。
+	BscLinkStatus string `json:"bsc_link_status,omitempty"`
+
+	// OmcStatus 派生字段：设备到 OMC 平台的连接状态。不入库。
+	//   - is_online=true → "connected"
+	//   - is_online=false → "disconnected"
+	// 详情接口由 GetDeviceDetailComposite 填充；列表接口前端可直接用 device.is_online。
+	OmcStatus string `json:"omc_status,omitempty"`
 
 	// ===== 审计字段 =====
 

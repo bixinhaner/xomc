@@ -1,18 +1,32 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
   BTS paramModel 快速设置（GSM）。
-  字段对照截图 GSM 传输参数表：
-    Unit ID    ← DeviceGSM.IpaUnitId
-    Remote IP  ← DeviceGSM.OmlRemoteIp
-    备 Remote  ← DeviceGSM.OmlRemoteIpBak
-    WAN IP     ← Device.DeviceInfo.WAN_CONFIG1_IPADDR (主管理口)
-    同步       ← Device.FAP.TfcsParams.SyncMode (1=FREE_RUNNING,2=GNSS)
-    同步源     ← Device.FAP.TfcsParams.PrimSrc
-    OMC        ← Device.LogMgmt.URL
-  Bind IP 在 BTS 字典中与 WAN IP 同源（图表说明：BTS 地址与基站 WAN IP 相同），
-  为避免重复展示，仅暴露 WAN IP。
+  布局对照参考截图（友机 OMC 风格 3 列布局）：
+    [基站信息]          LAC | ARFCN | Frequency(MHz, 派生)
+    [GSM 传输参数]      ipa Port | Unit ID | Remote IP
+                       Remote IP Backup | Power Modify | Abis Link Interface Binding
+  字段 ← 标准路径映射:
+    LAC                ← Device.DeviceInfo.BTS.CurrentLac
+    ARFCN              ← Device.DeviceInfo.BTS.CurrentArfcn
+    Frequency          ← 前端按 ARFCN 派生（CellParameterForm.FrequencyDisplay）
+    Unit ID            ← DeviceGSM.IpaUnitId
+    Remote IP          ← DeviceGSM.OmlRemoteIp
+    Remote IP Backup   ← DeviceGSM.OmlRemoteIpBak
+    Power Modify       ← Device.DeviceInfo.GSM.BtsRfPower (U_INT, 24..43 dBm)
+    WAN IP             ← Device.DeviceInfo.WAN_CONFIG1_IPADDR
+  TODO（缺标准映射，待后端确认 standardPath 后补）:
+    ipa Port                       (截图示例值 9227, 范围 0..65534)
+    Abis Link Interface Binding    (截图示例值 eth2, 下拉枚举)
 -->
 <quickSettings paramModel="BTS">
+  <group id="bts-cell-info" titleZh="基站信息" titleEn="Cell Info">
+    <param name="CurrentLac" titleZh="Location Area Code" titleEn="Location Area Code"
+           standardPath="Device.DeviceInfo.BTS.CurrentLac"/>
+    <param name="CurrentArfcn" titleZh="ARFCN" titleEn="ARFCN"
+           standardPath="Device.DeviceInfo.BTS.CurrentArfcn"/>
+    <!-- Frequency(MHz) 由前端按 CurrentArfcn 派生显示，参见 CellParameterForm.FrequencyDisplay -->
+  </group>
+
   <group id="gsm-transport" titleZh="GSM 传输参数" titleEn="GSM Transport Settings">
     <param name="UnitID" titleZh="Unit ID" titleEn="Unit ID"
            standardPath="DeviceGSM.IpaUnitId"/>
@@ -20,19 +34,9 @@
            standardPath="DeviceGSM.OmlRemoteIp"/>
     <param name="RemoteIPBak" titleZh="Remote IP 备份" titleEn="Remote IP Backup"
            standardPath="DeviceGSM.OmlRemoteIpBak"/>
+    <param name="BtsRfPower" titleZh="Power Modify" titleEn="Power Modify"
+           standardPath="Device.DeviceInfo.GSM.BtsRfPower" unit="dBm"/>
     <param name="WanIP" titleZh="WAN IP" titleEn="WAN IP"
            standardPath="Device.DeviceInfo.WAN_CONFIG1_IPADDR"/>
-  </group>
-
-  <group id="gsm-sync" titleZh="同步参数" titleEn="Sync Settings">
-    <param name="SyncMode" titleZh="同步" titleEn="Sync Mode"
-           standardPath="Device.FAP.TfcsParams.SyncMode"/>
-    <param name="PrimSrc" titleZh="同步源" titleEn="Sync Source"
-           standardPath="Device.FAP.TfcsParams.PrimSrc"/>
-  </group>
-
-  <group id="gsm-omc" titleZh="OMC 参数" titleEn="OMC Settings">
-    <param name="OMC" titleZh="OMC" titleEn="OMC"
-           standardPath="Device.LogMgmt.URL"/>
   </group>
 </quickSettings>

@@ -17820,6 +17820,20 @@ CREATE UNIQUE INDEX idx_firmware_unique_version ON public.firmware_versions USIN
 
 COMMENT ON COLUMN public.firmware_versions.product_id IS '#492 固件所属产品（products.id）。上传选产品名 → 存此列；升级/库列表按产品名展示与过滤。';
 
+
+-- BTS/GSM 专属 DeviceGSM.* 投影列（bsc_select / oml_remote_ip[_bak] / ipa_unit_id）。
+-- 历史：原先作为独立增量 000005_gsm_status_fields.sql 存在，已合并进本基线后删除。
+-- 全部 IF NOT EXISTS，幂等可重跑。
+ALTER TABLE public.device_info ADD COLUMN IF NOT EXISTS bsc_select        varchar(8);
+ALTER TABLE public.device_info ADD COLUMN IF NOT EXISTS oml_remote_ip     varchar(45);
+ALTER TABLE public.device_info ADD COLUMN IF NOT EXISTS oml_remote_ip_bak varchar(45);
+ALTER TABLE public.device_info ADD COLUMN IF NOT EXISTS ipa_unit_id       varchar(32);
+
+COMMENT ON COLUMN public.device_info.bsc_select        IS 'GSM BSC 主备角色（DeviceGSM.BscSelect："0"=Master / "1"=Backup）。BTS 设备专属，LTE/NR 为 NULL。';
+COMMENT ON COLUMN public.device_info.oml_remote_ip     IS 'Abis (OML) BSC 主 IP（DeviceGSM.OmlRemoteIp）。BTS 设备专属。';
+COMMENT ON COLUMN public.device_info.oml_remote_ip_bak IS 'Abis (OML) BSC 备 IP（DeviceGSM.OmlRemoteIpBak）。BTS 设备专属。';
+COMMENT ON COLUMN public.device_info.ipa_unit_id       IS 'IPA 单元 ID（DeviceGSM.IpaUnitId，如 "9227-2"）。BTS 设备专属。';
+
 -- +goose Down
 -- +goose StatementBegin
 DROP SCHEMA IF EXISTS public CASCADE;

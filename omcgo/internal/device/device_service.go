@@ -1708,6 +1708,26 @@ func (s *DeviceService) GetDeviceDetailComposite(ctx context.Context, deviceID u
 		}
 		result.Info.WANStatus = wanStatus
 	}
+	// BscLinkStatus 派生（GSM/BTS 专属）：详情接口走的是 *DeviceInfo 直接序列化，
+	// 没经过 DeviceWithInfo 列表 DTO 的 SQL CASE，因此在这里手工补一次，
+	// 让前端 "BSC连接状态" 字段能与列表页一致。
+	if result.Info != nil && result.Info.OmlRemoteIp != nil && *result.Info.OmlRemoteIp != "" {
+		if device.IsOnline {
+			result.Info.BscLinkStatus = "connected"
+		} else {
+			result.Info.BscLinkStatus = "disconnected"
+		}
+	}
+	// OmcStatus 派生：设备到 OMC 平台的连接态。基于 device.is_online 直接映射，
+	// 前端 "OMC 连接状态" 字段使用。无需依赖 TR-069 参数，所有技术/厂商通用。
+	if result.Info == nil {
+		result.Info = &DeviceInfo{DeviceID: deviceID}
+	}
+	if device.IsOnline {
+		result.Info.OmcStatus = "connected"
+	} else {
+		result.Info.OmcStatus = "disconnected"
+	}
 	result.Cells = AssembleCells(allParams, numOfCells)
 	result.GSMCells = AssembleGSMCells(allParams)
 
