@@ -582,6 +582,54 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
     200,
     group.id === 'device-time',
   );
+  // XML 驱动的 extraInfoPath:在某个字段下方以小字展示另一个只读参数当前值(范围提示)。
+  // 由 quicksettings XML 在 <param> 上声明 extraInfoPath="Device.X.Y",前端按该路径拉 schema,
+  // 把 currentValue 按 [lo ~ hi] 格式渲染到对应 Form.Item 的 extra 槽位。
+  const extraInfoPaths = useMemo(() => {
+    const set = new Set<string>();
+    for (const p of group.params) {
+      if (p.extraInfoPath) set.add(p.extraInfoPath);
+    }
+    return Array.from(set);
+  }, [group.params]);
+  const extraInfoCommonPrefix = useMemo(() => {
+    if (extraInfoPaths.length === 0) return '';
+    if (extraInfoPaths.length === 1) return extraInfoPaths[0];
+    let prefix = extraInfoPaths[0];
+    for (const p of extraInfoPaths.slice(1)) {
+      let i = 0;
+      const max = Math.min(prefix.length, p.length);
+      while (i < max && prefix[i] === p[i]) i++;
+      prefix = prefix.slice(0, i);
+    }
+    return prefix;
+  }, [extraInfoPaths]);
+  const { data: extraInfoSchemaResp } = useParameterSchema(
+    deviceId,
+    extraInfoCommonPrefix,
+    extraInfoPaths.length > 0,
+  );
+  const extraInfoValueByPath = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const path of extraInfoPaths) {
+      const item = extraInfoSchemaResp?.parameters?.find((q) => q.path === path);
+      const v = item?.currentValue ?? '';
+      m.set(path, typeof v === 'string' ? v : String(v ?? ''));
+    }
+    return m;
+  }, [extraInfoPaths, extraInfoSchemaResp]);
+  // 由 extraInfoPath 当前值反推数值范围 [min, max],用于该字段输入校验:
+  // "24,30" / "24~30" / "24-30" 都拆成两端;非两段或非数字时返回 null,跳过校验。
+  const extraInfoBoundsByName = useMemo(() => {
+    const m = new Map<string, [number, number]>();
+    for (const p of group.params) {
+      if (!p.extraInfoPath) continue;
+      const raw = extraInfoValueByPath.get(p.extraInfoPath);
+      const bounds = parseExtraInfoBounds(raw ?? '');
+      if (bounds) m.set(p.name, bounds);
+    }
+    return m;
+  }, [group.params, extraInfoValueByPath]);
 
   // BM GSM 专属:并行拉 RU 节点 schema,用于在 gsm-cell 表单中展示"绑定 RU 的 Route Index"。
   // 拉取与主 schema 解耦,避免污染 commonPrefix 退化成 Device. 触发全量拉取。
@@ -677,7 +725,8 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
       if (special?.kind === 'mme-ip-plmn-table') {
         form.setFieldValue(p.name, toMmeIpPlmnRows(rawItem?.parameterValue ?? item?.currentValue ?? ''));
       } else {
-        form.setFieldValue(p.name, rawItem?.parameterValue ?? item?.currentValue ?? '');
+        const raw = rawItem?.parameterValue ?? item?.currentValue ?? '';
+        form.setFieldValue(p.name, normalizeEnumValue(raw, p.enumOptions));
       }
     });
   }, [schemaResp, group, instanceContext, form, schemaByPath, rawParameterByPath, draft, specialConfigByName]);
@@ -713,6 +762,15 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
       if (err) {
         errors[p.name] = err;
         continue;
+      }
+      // XML 驱动的 extraInfoPath 范围校验:超出 [min, max] 阻断保存。
+      const extraBounds = extraInfoBoundsByName.get(p.name);
+      if (extraBounds) {
+        const rangeErr = validateExtraInfoBounds(newVal, extraBounds);
+        if (rangeErr) {
+          errors[p.name] = rangeErr;
+          continue;
+        }
       }
       updates.push({
         parameterPath: rawItem?.parameterPath ?? path,
@@ -799,7 +857,7 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
         const refreshedValue = refreshedSchemaByPath.get(path)?.currentValue ?? '';
         nextValues[p.name] = special?.kind === 'mme-ip-plmn-table'
           ? toMmeIpPlmnRows(refreshedValue)
-          : refreshedValue;
+          : normalizeEnumValue(refreshedValue, p.enumOptions);
       }
       form.setFieldsValue(nextValues);
       clearDraft(fbKey);
@@ -908,7 +966,14 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
                 (sItem?.type as never) ?? 'string',
                 sItem?.constraints,
               );
-              if (err) next[name] = err;
+              // XML 驱动的 extraInfoPath 范围校验:在 schema 校验之后追加;
+              // schema 已报错时优先展示 schema 错误,避免双错信息互盖。
+              const extraBounds = extraInfoBoundsByName.get(name);
+              const rangeErr = !err && extraBounds
+                ? validateExtraInfoBounds(normalizedValue, extraBounds)
+                : null;
+              const finalErr = err ?? rangeErr;
+              if (finalErr) next[name] = finalErr;
               else delete next[name];
               // 镜像字段同时清/重新校验（值刚被程序性写入，旧 error 应失效）
               const mirrorPath = sItem?.constraints?.mirrorWith;
@@ -966,9 +1031,15 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
               ?? item?.writable
               ?? (isDeviceTimeParam ? true : false);
             const error = fieldErrors[p.name];
-            const constraintHint = formatConstraintHint(item, t);
+            // XML hideRangeHint="true" 时不在 label 后展示 schema 推导的 [min ~ max]
+            // (字典范围与业务允许值不一致的字段如 Band:字典 1..maxInt,业务允许集只有少数频段)。
+            const constraintHint = p.hideRangeHint ? '' : formatConstraintHint(item, t);
             const currentBindPath = String(form.getFieldValue(p.name) ?? rawItem?.parameterValue ?? item?.currentValue ?? '');
             const resolvedDisplayValue = displayValue || bindIpByPath.get(currentBindPath) || '';
+            // XML 驱动:若 param 在 quicksettings XML 上声明了 extraInfoPath,
+            // 把对应路径的当前值按 [lo ~ hi] 格式与 label 同一行显示(灰色小字)。
+            const extraInfoRaw = p.extraInfoPath ? extraInfoValueByPath.get(p.extraInfoPath) ?? '' : '';
+            const extraInfoFormatted = extraInfoRaw ? formatExtraInfoRange(extraInfoRaw) : '';
             const label = (
               <Space size={4}>
                 <span style={special?.kind === 'mme-ip-plmn-table' ? { whiteSpace: 'nowrap' } : undefined}>
@@ -980,6 +1051,16 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
                     {constraintHint}
                   </Text>
                 )}
+                {extraInfoFormatted && (
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {extraInfoFormatted}
+                  </Text>
+                )}
+                {p.unit && (
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {`(${p.unit})`}
+                  </Text>
+                )}
                 {special?.kind === 'bind-select' && resolvedDisplayValue && (
                   <Text type="secondary" style={{ fontSize: 12 }}>
                     {t('device.cell.currentIp', { ip: resolvedDisplayValue })}
@@ -988,12 +1069,21 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
               </Space>
             );
             const enumMeta = getEffectiveEnumMeta(item?.constraints, path);
-            const isEnum = !special && Boolean(enumMeta && enumMeta.values.length > 0);
+            // XML 驱动枚举:quicksettings <param> 上的 <option value=".." label=".."/> 优先于 schema
+            // constraints。用于不宜修改 param-mapping 只想在 UI 层展示友好选项的场景
+            // (如 RFEnable: 1→ON / 0→OFF)。
+            const xmlEnumValues = p.enumOptions?.map((o) => o.value) ?? [];
+            const xmlEnumLabels = p.enumOptions?.map((o) => o.label) ?? [];
+            const effectiveEnumValues = xmlEnumValues.length > 0
+              ? xmlEnumValues
+              : (enumMeta?.values ?? []);
+            const effectiveEnumLabels = xmlEnumValues.length > 0
+              ? xmlEnumLabels
+              : (enumMeta?.labels ?? []);
+            const isEnum = !special && effectiveEnumValues.length > 0;
             const extra = special?.kind === 'mme-ip-plmn-table'
               ? t('device.cell.mmeIpPlmnExtra')
-              : special?.kind === 'bind-select'
-                ? undefined
-                : undefined;
+              : undefined;
             const effectiveBindOptions = special?.kind === 'bind-select'
               ? appendCurrentBindOption(
                   bindSelectOptions,
@@ -1024,9 +1114,9 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
                     <Select
                       disabled={!writable}
                       placeholder={item?.defaultValue || ''}
-                      options={enumMeta!.values.map((v, idx) => ({
+                      options={effectiveEnumValues.map((v, idx) => ({
                         value: v,
-                        label: enumMeta!.labels[idx] || v,
+                        label: effectiveEnumLabels[idx] || v,
                       }))}
                     />
                   ) : (
@@ -1067,6 +1157,68 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
       </Spin>
     </Card>
   );
+}
+
+// formatExtraInfoRange 把 quicksettings XML extraInfoPath 指向的参数当前值
+// 转成 [lo ~ hi] 形式 (与 OffsetToPointA 等数值范围提示视觉一致)。
+// 设备上送的 SupportedPowerRange 实测形如 "24,30",也兼容 "24~30" / "24-30" 与空白分隔;
+// 形如单值或非两段时,直接 [raw] 包裹回退,保持小字提示语义。
+function formatExtraInfoRange(raw: string): string {
+  const s = raw.trim();
+  if (!s) return '';
+  const parts = s.split(/[,~\-\s]+/).filter(Boolean);
+  if (parts.length === 2) return `[${parts[0]} ~ ${parts[1]}]`;
+  return `[${s}]`;
+}
+
+// parseExtraInfoBounds 由设备上送的 range 字符串解析数值上下界,用于输入校验。
+// 仅在两端均为合法数字时返回 [min, max] (自动按数值排序),否则 null 跳过校验。
+function parseExtraInfoBounds(raw: string): [number, number] | null {
+  const s = raw.trim();
+  if (!s) return null;
+  const parts = s.split(/[,~\-\s]+/).filter(Boolean);
+  if (parts.length !== 2) return null;
+  const a = Number(parts[0]);
+  const b = Number(parts[1]);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+  return a <= b ? [a, b] : [b, a];
+}
+
+// validateExtraInfoBounds 把字段输入值与 extraInfoPath 解析出的范围比对。
+// 输入非数值时返回 null (跳过——上游 validateValue 已处理类型错误);
+// 超出区间则返回中文错误信息 (与 validators.ts 风格保持一致)。
+function validateExtraInfoBounds(value: string, bounds: [number, number]): string | null {
+  const s = String(value ?? '').trim();
+  if (!s) return null;
+  const num = Number(s);
+  if (!Number.isFinite(num)) return null;
+  const [min, max] = bounds;
+  if (num < min || num > max) return `取值范围 [${min} ~ ${max}]`;
+  return null;
+}
+
+// normalizeEnumValue 把设备上送的字符串(可能是 "true"/"false"、"True"/"FALSE"、"1"/"0")
+// 归一到 XML <option value="..."/> 的真实值,确保 Select 能选中正确项。
+// 仅在 enumOptions 非空时生效;不存在等价匹配时原样返回(保留原始值,Select 留空)。
+function normalizeEnumValue(raw: unknown, enumOptions?: { value: string; label: string }[]): string {
+  const s = String(raw ?? '');
+  if (!enumOptions || enumOptions.length === 0) return s;
+  if (enumOptions.some((o) => o.value === s)) return s;
+  const ci = s.toLowerCase();
+  const direct = enumOptions.find((o) => o.value.toLowerCase() === ci);
+  if (direct) return direct.value;
+  // BOOLEAN 等价:true/1 与 false/0 互转,适配 TR-069 BOOLEAN 字段两种序列化。
+  if ((ci === 'true' || ci === '1') && enumOptions.some((o) => o.value === '1')) return '1';
+  if ((ci === 'false' || ci === '0') && enumOptions.some((o) => o.value === '0')) return '0';
+  if ((ci === 'true' || ci === '1')) {
+    const m = enumOptions.find((o) => o.value.toLowerCase() === 'true');
+    if (m) return m.value;
+  }
+  if ((ci === 'false' || ci === '0')) {
+    const m = enumOptions.find((o) => o.value.toLowerCase() === 'false');
+    if (m) return m.value;
+  }
+  return s;
 }
 
 // formatConstraintHint 把 schema 取值范围渲染成 label 后的灰色提示。
