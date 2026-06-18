@@ -2,6 +2,7 @@ package adhoc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -16,6 +17,15 @@ import (
 // AggregatorQuerier 是 Executor 对 G5 aggregator 的最小依赖（便于单测 stub）。
 type AggregatorQuerier interface {
 	Query(ctx context.Context, req aggregator.QueryRequest) ([]aggregator.Row, error)
+}
+
+// WatermarkReader 是 Executor 读「上游完成水位」的最小依赖（#528 P2，便于单测 stub）。
+//
+// 持续任务取数口径从「now − 固定 N 格」改为「直接取上游已确定卷完的最新一格」：
+// 按 (粒度, 层级) 读完成水位，水位记录的桶起点即下游可安全消费的目标桶上界。
+// 真实实现为 aggregator.WatermarkRepository（水位表在主库 PgPool）。
+type WatermarkReader interface {
+	Get(ctx context.Context, gran metrics.Granularity, level aggregator.WatermarkLevel) (*aggregator.Watermark, error)
 }
 
 // ProgressPublisher 把进度事件发布到事件总线（SSE handler 订阅）。
@@ -48,6 +58,10 @@ type Executor struct {
 	repo      Repository
 	publisher ProgressPublisher
 	logger    *zap.Logger
+
+	// watermarks 读上游「完成水位」（#528 P2）。持续任务取数目标桶 = 对应 (粒度,层级) 水位的桶起点。
+	// 为 nil 时退化为「不取数」（无水位即上游尚未卷完任何格，下游不应扑空），保证 nil 安全不回归。
+	watermarks WatermarkReader
 
 	// storeAllMetrics 控制落库范围（T-0182，全局配置 pm.storage.store_all_metrics）：
 	//   - true（默认）：聚合结果全部指标都落库，便于事后改任务指标集时无需重算
@@ -131,6 +145,25 @@ func (e *Executor) SetStoreAllMetrics(v bool) *Executor {
 	return e
 }
 
+// SetWatermarkReader 注入「上游完成水位」读取器（#528 P2，worker 启动期注入主库水位仓库）。
+// 注入后持续任务目标桶改为「按 (粒度,层级) 水位的桶起点」；nil 时退化为不取数（不回归）。
+// 返回自身便于链式调用。
+func (e *Executor) SetWatermarkReader(r WatermarkReader) *Executor {
+	e.watermarks = r
+	return e
+}
+
+// watermarkLevelForDimension 把任务维度映射到完成水位层级（#528 P2）。
+//
+// device_group 维度看设备组级水位（组级是设备级之后链式产出，完成更晚）；
+// device / band / network / product / aggregate_group 维度均看设备级水位。
+func watermarkLevelForDimension(dim Dimension) aggregator.WatermarkLevel {
+	if dim == DimensionDeviceGroup {
+		return aggregator.WatermarkLevelGroup
+	}
+	return aggregator.WatermarkLevelDevice
+}
+
 // ExecuteOneshot 单次执行任务（不切换终态，由 caller 根据 mode 决定 succeeded/scheduled）。
 //
 // 返回写入的 ResultRow 行数（含所有粒度）。
@@ -199,13 +232,19 @@ func (e *Executor) queryAndConvert(ctx context.Context, task *Task, g metrics.Gr
 	}
 	// 时间窗：
 	//   - oneshot：用户选的固定时间窗，原样透传（不动）。
-	//   - continuous：ISSUE-398 方案 A——无论首跑还是滚动，都只算「最近一个已完成周期」
-	//     那一格，按本粒度自算窗口覆盖 Start/EndTime，避免空窗扫全历史。
+	//   - continuous（#528 P2）：目标桶 = 对应 (粒度,层级) 完成水位的桶起点——上游已确定卷完的最新一格。
+	//     不再用「now − 固定 N 格」猜测（#479 那段竞态随固定补偿格一并消除）；水位只覆盖已完成格，
+	//     天然排除进行中格，故下游绝不读超过水位的格、也不扑空半成品格。
 	startTime := task.WindowStart
 	endTime := task.WindowEnd
 	if isContinuous(task) {
+		bucket, ok := e.continuousTargetBucket(ctx, task, g)
+		if !ok {
+			// 水位未到（上游尚未卷完任何可消费格 / 未注入读取器 / 读取出错）→ 本格不取数，
+			// 不扑空也不越过水位。游标由调度器按 last_fire_at 推进，下次 tick 水位到了再取。
+			return nil, nil
+		}
 		// 结果聚合表里桶行的 `time` 列即桶起点；StartTime==EndTime==桶起点 → 只命中这一格。
-		bucket := lastCompletedBucket(g, e.now(), e.loc())
 		startTime = bucket
 		endTime = bucket
 	}
@@ -269,6 +308,36 @@ func (e *Executor) queryAndConvert(ctx context.Context, task *Task, g metrics.Gr
 		})
 	}
 	return out, nil
+}
+
+// continuousTargetBucket 求持续任务在给定粒度下的目标桶起点（#528 P2）。
+//
+// 目标桶 = 对应 (粒度, 层级) 完成水位的桶起点（上游已确定卷完的最新一格）。
+// 维度→层级：device_group 看组级水位，其余维度看设备级水位。
+//
+// 返回 ok=false 表示「本格不可取」：未注入水位读取器、该 (粒度,层级) 尚无水位
+// （上游一格都没卷完）、或读取出错。此时下游不取数、不扑空、不越过水位。
+func (e *Executor) continuousTargetBucket(ctx context.Context, task *Task, g metrics.Granularity) (time.Time, bool) {
+	if e.watermarks == nil {
+		e.logger.Warn("continuous task has no watermark reader; skip this granularity",
+			zap.String("task_id", task.ID.String()), zap.String("granularity", string(g)))
+		return time.Time{}, false
+	}
+	level := watermarkLevelForDimension(task.Dimension)
+	wm, err := e.watermarks.Get(ctx, g, level)
+	if err != nil {
+		// ErrWatermarkNotFound 是正常状态（上游尚未卷完该粒度的任何格）；其余错误也保守跳过本格。
+		if !errors.Is(err, aggregator.ErrWatermarkNotFound) {
+			e.logger.Warn("read completion watermark failed; skip this granularity",
+				zap.String("task_id", task.ID.String()),
+				zap.String("granularity", string(g)),
+				zap.String("level", string(level)),
+				zap.Error(err))
+		}
+		return time.Time{}, false
+	}
+	// 水位桶起点本已对齐格边界，仍做一次防御性对齐，确保 time 过滤精确命中这一格。
+	return truncateBucketStart(g, wm.CompletedBucketStart, e.loc()), true
 }
 
 // isContinuous 判定任务是否为持续型（ISSUE-398 落点）。

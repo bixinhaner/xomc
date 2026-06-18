@@ -27,7 +27,15 @@ type GroupRunner struct {
 	groupTarget  string // 本级 group 聚合表（如 pm_group_metrics_hourly）
 	granularity  metrics.Granularity
 	metrics      *Metrics // G5-Gap-3 Prometheus hook；nil 则不记
+
+	// 完成水位写入（#528 P1）。watermarkExec 非 nil 时，组级该桶聚合**成功后**
+	// 把 (granularity, group) 水位 UPSERT 推进到本格起点（取 max 不回退、空格也推进）。
+	// 由 worker 装配时注入（传主库 PgPool）。nil 则退化为不写水位。
+	watermarkExec WatermarkExecer
 }
+
+// SetWatermarkExec 注入组级完成水位写入执行体（#528 P1，传主库 PgPool）。nil 关闭水位写入。
+func (r *GroupRunner) SetWatermarkExec(exec WatermarkExecer) { r.watermarkExec = exec }
 
 // JobType / DeviceTarget / GroupTarget / Granularity — 暴露给外部（路由 + 日志）。
 func (r *GroupRunner) JobType() string                  { return r.jobType }
@@ -75,6 +83,15 @@ func (r *GroupRunner) Run(ctx context.Context, job *asyncjob.Job) (json.RawMessa
 	}
 	r.metrics.AddRows(r.jobType, "group", rows)
 	r.metrics.SetBucketLag(r.jobType, time.Since(p.End).Seconds())
+
+	// 组级该桶已成功处理完——推进组级完成水位（#528 P1）。
+	// 语义「已处理」非「有数据」：rows 可能为 0（空格），水位照样推进。UPSERT 取 max 不回退。
+	if r.watermarkExec != nil {
+		if werr := UpsertWatermark(ctx, r.watermarkExec, r.granularity, WatermarkLevelGroup, p.Start); werr != nil {
+			runStatus = "failed"
+			return nil, fmt.Errorf("group runner %s: upsert group watermark: %w", r.jobType, werr)
+		}
+	}
 
 	out := map[string]any{
 		"rows":          rows,

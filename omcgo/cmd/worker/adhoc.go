@@ -35,7 +35,14 @@ func startPMAdhocPipeline(
 
 	// Repository + Executor
 	// KPI/时序库物理分离：pm_tasks 留主库（PgPool），pm_adhoc_aggregation_results 迁时序库（TsPool），双池。
-	repo := adhoc.NewPgRepository(w.PgPool, w.TsPool)
+	// #528 P2：持续任务取数口径改为「上游完成水位」驱动（替换固定 −2 格猜测）。
+	// 水位表在主库（PgPool），与上游 runner 写水位的库一致。
+	watermarks := aggregator.NewWatermarkRepository(w.PgPool)
+	// #528 P3：repo 也注入水位读取器 + 业务时区——新建持续任务初始游标 = 建任务时刻当前水位桶起点
+	//（从「现在」起算，不回扫历史）。
+	repo := adhoc.NewPgRepository(w.PgPool, w.TsPool).
+		SetWatermarkReader(watermarks).
+		SetLocationFunc(tz.Current)
 	aggr := aggregator.NewWithPool(w.TsPool, kpiRouter, logger)
 	publisher := &adhoc.EventBusPublisher{Bus: w.EventBus}
 	// T-0182：存储范围全局开关（全存默认 / 仅存所选）。
@@ -44,7 +51,8 @@ func startPMAdhocPipeline(
 	// 管理员改时区后持续任务「最近一格」窗口下次即用新时区零点对齐、无需重启。
 	executor := adhoc.NewExecutor(aggr, repo, publisher, logger).
 		SetStoreAllMetrics(cfg.PM.Storage.StoreAllMetrics).
-		SetLocationFunc(tz.Current)
+		SetLocationFunc(tz.Current).
+		SetWatermarkReader(watermarks)
 
 	// 4 worker goroutine（共享 repo，LockNextPending SKIP LOCKED 保证不重复抢同一行）
 	hostname := buildLockOwner()
@@ -57,8 +65,12 @@ func startPMAdhocPipeline(
 	logger.Info("adhoc worker pool started", zap.Int("workers", workerCount))
 
 	// continuous scheduler — 周期把 scheduled cron 任务转 pending
+	// #528 P3：注入水位 gate + 业务时区——追平上界由真实水位决定（不越过水位、不空磨史前格、
+	// 不读 #479 半成品格），而非旧墙钟上界。
 	contRepo := adhoc.NewPgContinuousRepository(w.PgPool)
-	scheduler := adhoc.NewContinuousScheduler(contRepo, 0, logger)
+	scheduler := adhoc.NewContinuousScheduler(contRepo, 0, logger).
+		SetWatermarkGate(adhoc.NewWatermarkGateAdapter(watermarks)).
+		SetLocationFunc(tz.Current)
 	go scheduler.Run(ctx)
 	logger.Info("adhoc continuous scheduler started")
 

@@ -210,6 +210,9 @@ func Test_Worker_RunRecord_FailurePath(t *testing.T) {
 		Mode:          ModeOneshot,
 		Granularities: []string{"hourly"},
 		Dimension:     DimensionDevice,
+		// 非零窗口 → 明确 oneshot（#528 P2 后零窗口会被当持续型走水位口径）。
+		WindowStart: time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC),
+		WindowEnd:   time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),
 	}
 	// aggr.Query 报错 → ExecuteOneshot 返错 → run 终态 failed
 	aggr := &failingAggr{err: errors.New("aggregator boom")}
@@ -354,4 +357,135 @@ func Test_ContinuousScheduler_LosslessCatchup_AdvancesOneWindowPerSweep(t *testi
 	expected := time.Date(2026, 5, 23, 0, 0, 0, 0, time.UTC)
 	assert.Equal(t, expected, repo.markedFire[0],
 		"fire_at 必须推进 1 格（不是直接跳到 now），让后续 sweep 继续追平漏桶")
+}
+
+// ---------------------------------------------------------------------------
+// #528 P3：调度器水位 gate —— 追平上界由真实水位决定（不越水位、不空磨史前格、不读 #479 半成品格）
+// ---------------------------------------------------------------------------
+
+// gateStub 模拟「上游完成水位」。bucket=该 (粒度,层级) 当前水位桶起点；ok=false 表示无水位。
+type gateStub struct {
+	bucket time.Time
+	ok     bool
+	calls  int
+}
+
+func (g *gateStub) CompletedBucketStart(_ context.Context, _ metrics.Granularity, _ aggregator.WatermarkLevel) (time.Time, bool) {
+	g.calls++
+	return g.bucket, g.ok
+}
+
+// 追平上界 == 水位：下游落后多格、水位只到 T，调度器追到 T 即停，不放行 > T 的格。
+// 用每小时 cron，last_fire_at 在 4 小时前，墙钟 now 已过去很久（墙钟不挡）；水位停在 T=02:00。
+// fire 02:00 处理桶 [01:00,02:00) 起点 01:00 ≤ 水位 02:00 → 放行；
+// （下一 sweep 会 fire 03:00 处理桶 [02:00,03:00) 起点 02:00 ≤ 水位 02:00 → 仍放行；
+//  再下一 sweep fire 04:00 处理桶 [03:00,04:00) 起点 03:00 > 水位 02:00 → 挡住，即追平终点 = 水位 T）。
+func Test_ContinuousScheduler_P3_CatchupBoundedByWatermark(t *testing.T) {
+	now := time.Date(2026, 5, 23, 10, 0, 0, 0, time.UTC) // 墙钟远超水位，确保上界由水位卡而非墙钟
+	watermarkT := time.Date(2026, 5, 23, 2, 0, 0, 0, time.UTC)
+
+	// 逐 sweep 推进 last_fire_at，断言放行的最后一格 fire 对应的处理桶 == 水位 T。
+	lastFire := time.Date(2026, 5, 22, 23, 0, 0, 0, time.UTC)
+	var lastAllowedFire time.Time
+	for i := 0; i < 12; i++ {
+		repo := &schedRepoStub{
+			tasks: []ContinuousTask{{
+				ID: "task-1", CronExpr: "0 * * * *", LastFireAt: lastFire,
+				Granularities: []string{string(metrics.GranularityHourly)}, Dimension: DimensionNetwork,
+			}},
+		}
+		gate := &gateStub{bucket: watermarkT, ok: true}
+		s := NewContinuousScheduler(repo, time.Hour, nil).SetWatermarkGate(gate)
+		s.sweepOnce(context.Background(), now)
+		if len(repo.markedIDs) == 0 {
+			break // 被水位挡住，追平停止
+		}
+		lastAllowedFire = repo.markedFire[0]
+		lastFire = repo.markedFire[0] // 模拟 worker 跑完后游标推进
+	}
+	// 最后放行的 fire = 03:00（处理桶 [02:00,03:00) 起点 02:00 == 水位 T）；fire 04:00 起被挡。
+	require.False(t, lastAllowedFire.IsZero(), "至少应放行若干格")
+	wantLastFire := time.Date(2026, 5, 23, 3, 0, 0, 0, time.UTC)
+	assert.Equal(t, wantLastFire, lastAllowedFire,
+		"追平终点 fire 对应的处理桶起点必须 == 水位 T，绝不越过水位")
+	// 处理桶起点 = lastAllowedFire 前一格 = 02:00 == 水位 T → 相差 0 格。
+	processedBucket := truncateBucketStart(metrics.GranularityHourly, lastAllowedFire.Add(-time.Nanosecond), time.UTC)
+	assert.Equal(t, watermarkT, processedBucket, "追平终点桶 == 水位 T（相差 0 格）")
+}
+
+// #479 回归：上一格刚结束、上游卷数据未跑完（水位未推进到该格）时运行下游 → 不放行（不读半成品格）。
+// cron fire 当前小时（处理刚结束的上一格），但水位还停在更早的格 → gate 挡住，不 MarkPending。
+func Test_ContinuousScheduler_P3_479Regression_NoDirtyRead(t *testing.T) {
+	// fire 03:00 想处理桶 [02:00,03:00)，但上游水位还停在 01:00（[01:00,02:00) 刚卷完，
+	// [02:00,03:00) 的卷数据还没跑完）→ 处理桶起点 02:00 > 水位 01:00 → 挡住。
+	now := time.Date(2026, 5, 23, 3, 0, 30, 0, time.UTC) // 03:00 刚过（上一格 02:00-03:00 刚结束）
+	lastFire := time.Date(2026, 5, 23, 2, 0, 0, 0, time.UTC)
+	staleWatermark := time.Date(2026, 5, 23, 1, 0, 0, 0, time.UTC) // 水位未推进到刚结束的格
+
+	repo := &schedRepoStub{
+		tasks: []ContinuousTask{{
+			ID: "task-1", CronExpr: "0 * * * *", LastFireAt: lastFire,
+			Granularities: []string{string(metrics.GranularityHourly)}, Dimension: DimensionNetwork,
+		}},
+	}
+	gate := &gateStub{bucket: staleWatermark, ok: true}
+	s := NewContinuousScheduler(repo, time.Hour, nil).SetWatermarkGate(gate)
+	s.sweepOnce(context.Background(), now)
+
+	assert.Empty(t, repo.markedIDs, "上游卷数据未跑完（水位未到该格）→ 调度器不放行，不读半成品格（clean）")
+	assert.Equal(t, 1, gate.calls, "应查过水位一次")
+}
+
+// #479 续：等水位推进到该格后，同一 fire 即放行（半成品变成成品才读）。
+func Test_ContinuousScheduler_P3_479Regression_FiresAfterWatermarkAdvances(t *testing.T) {
+	now := time.Date(2026, 5, 23, 3, 0, 30, 0, time.UTC)
+	lastFire := time.Date(2026, 5, 23, 2, 0, 0, 0, time.UTC)
+	freshWatermark := time.Date(2026, 5, 23, 2, 0, 0, 0, time.UTC) // 水位已推进到 [02:00,03:00) 桶
+
+	repo := &schedRepoStub{
+		tasks: []ContinuousTask{{
+			ID: "task-1", CronExpr: "0 * * * *", LastFireAt: lastFire,
+			Granularities: []string{string(metrics.GranularityHourly)}, Dimension: DimensionNetwork,
+		}},
+	}
+	gate := &gateStub{bucket: freshWatermark, ok: true}
+	s := NewContinuousScheduler(repo, time.Hour, nil).SetWatermarkGate(gate)
+	s.sweepOnce(context.Background(), now)
+
+	require.Len(t, repo.markedIDs, 1, "水位推进到该格后即放行")
+	assert.Equal(t, time.Date(2026, 5, 23, 3, 0, 0, 0, time.UTC), repo.markedFire[0])
+}
+
+// 无水位记录（上游一格都没卷完 / 全新环境）→ gate 返回 ok=false → 不放行（不空磨史前格）。
+func Test_ContinuousScheduler_P3_NoWatermark_SkipsCatchup(t *testing.T) {
+	now := time.Date(2026, 5, 23, 10, 0, 0, 0, time.UTC)
+	lastFire := time.Date(2026, 5, 22, 23, 0, 0, 0, time.UTC) // 落后很多格
+
+	repo := &schedRepoStub{
+		tasks: []ContinuousTask{{
+			ID: "task-1", CronExpr: "0 * * * *", LastFireAt: lastFire,
+			Granularities: []string{string(metrics.GranularityHourly)}, Dimension: DimensionNetwork,
+		}},
+	}
+	gate := &gateStub{ok: false} // 上游尚未卷完任何格
+	s := NewContinuousScheduler(repo, time.Hour, nil).SetWatermarkGate(gate)
+	s.sweepOnce(context.Background(), now)
+
+	assert.Empty(t, repo.markedIDs, "无水位 → 全新环境不空磨史前空格")
+}
+
+// 未注入 gate（nil）→ 退化为旧墙钟语义，不回归（已运行任务在 gate 接通前仍可调度）。
+func Test_ContinuousScheduler_P3_NilGate_FallbackToWallClock(t *testing.T) {
+	now := time.Date(2026, 5, 23, 10, 0, 0, 0, time.UTC)
+	lastFire := time.Date(2026, 5, 23, 8, 30, 0, 0, time.UTC)
+	repo := &schedRepoStub{
+		tasks: []ContinuousTask{{
+			ID: "task-1", CronExpr: "0 * * * *", LastFireAt: lastFire,
+			Granularities: []string{string(metrics.GranularityHourly)}, Dimension: DimensionNetwork,
+		}},
+	}
+	s := NewContinuousScheduler(repo, time.Hour, nil) // 不注入 gate
+	s.sweepOnce(context.Background(), now)
+	require.Len(t, repo.markedIDs, 1, "nil gate 退化墙钟，行为不回归")
+	assert.Equal(t, time.Date(2026, 5, 23, 9, 0, 0, 0, time.UTC), repo.markedFire[0])
 }
