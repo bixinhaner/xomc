@@ -224,6 +224,10 @@ services:
 
   minio:
     image: ${IMAGE_MINIO}
+    # alpine/minio 以非 root 用户 minio(uid 100) 运行，而命名卷 miniodata 首次创建为 root 属主，
+    # 非 root 写 /data 会 FATAL "file access denied"。官方 minio/minio 默认即 root，这里显式 root
+    # 对齐官方行为（无安全回退），让 root 属主的卷可写。换回官方 minio 时本行保留亦无害。
+    user: "0:0"
     restart: unless-stopped
     environment:
       TZ: "Asia/Shanghai"
