@@ -134,7 +134,9 @@ function buildChartOption(
     name: m.label,
     type: 'line' as const,
     smooth: true,
-    showSymbol: gridMs.length <= 30,
+    // issue #514：点标记始终可见（原 gridMs.length<=30 条件下，多桶时隐藏点标记，
+    // 单个/极稀疏孤立点连不成线段仍隐身）。改为始终画点，避免误判"暂无数据"。
+    showSymbol: true,
     symbolSize: 5,
     // issue #429：规整网格下空槽=断档,connectNulls=false 让缺口处线断开(运维含义),
     // 不再跨空洞连线抹平；连续有数区间仍连续(#200 不回归)。

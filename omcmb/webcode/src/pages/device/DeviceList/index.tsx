@@ -321,6 +321,9 @@ export default function DeviceList() {
       </span>
     );
   }, [editingRemark, remarkInput, remarkLabel, handleRemarkLabelSave, handleRemarkLabelCancel]);
+  // remark 列定义当前注释隐藏（见下方 columns 定义处说明）；remarkHeaderRender 有意保留以便恢复列时直接接回。
+  // 此处显式引用消除 TS6133「声明未使用」，恢复 remark 列时删除本行即可。
+  void remarkHeaderRender;
 
   const queryParams = useMemo(
     () => ({ ...filterParams, page: currentPage, pageSize } as Parameters<typeof useDeviceList>[0]),

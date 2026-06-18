@@ -497,14 +497,17 @@ export default function AlarmStatistics() {
     }
   };
 
-  // 钻取到告警详情
+  // 钻取到告警详情（带上当前时间范围，钻取后列表筛选窗口与统计页一致）
   const handleDrillDown = useCallback((severity?: string, deviceSN?: string) => {
     const params = buildDrillDownSearch({
       severity,
       deviceSN,
+      timeRange: filters.timeRange,
+      customStartDate: filters.customStartDate,
+      customEndDate: filters.customEndDate,
     });
     navigate(`/alarm/current?${params.toString()}`);
-  }, [navigate]);
+  }, [navigate, filters.timeRange, filters.customStartDate, filters.customEndDate]);
 
   const trendRangeControl = (
     <Space size="small" wrap>

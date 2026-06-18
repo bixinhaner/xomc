@@ -257,8 +257,11 @@ export function buildLineChartOption({
         // #200：稀疏并集时间轴下跨 null 续连（仅 connectNulls=true 时），避免曲线断成孤点。
         connectNulls,
         symbol: symbolShape,
-        symbolSize: 0,
-        showSymbol: false,
+        // issue #514：点标记始终可见。原 showSymbol:false / symbolSize:0 会让单个或
+        // 极稀疏的孤立点（左右相邻槽位皆空、连不成线段）在画布上彻底隐身，被误判为"暂无数据"。
+        // 改为始终画点（不引入 #437 的稀疏阴影/虚线，也不改 #429 的 connectNulls 断档语义）。
+        symbolSize: 4,
+        showSymbol: true,
         itemStyle: {
           color,
         },
