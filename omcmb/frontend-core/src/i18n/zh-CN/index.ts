@@ -7521,6 +7521,16 @@ const messages: Record<string, string> = {
   'product.standardParams.col.changeApplies': '生效方式',
   'product.standardParams.col.min': '最小值',
   'product.standardParams.col.max': '最大值',
+  // ISSUE-488: min/max 动态 label —— string 类型按字符串长度，其它按数值取值
+  'product.standardParams.col.minLength': '最小长度',
+  'product.standardParams.col.maxLength': '最大长度',
+  'product.standardParams.intPlaceholder': '整数，可空',
+  'product.standardParams.intOnly': '仅可输入整数',
+  // boolean / dateTime 等无取值范围类型，min/max 禁用并提示
+  'product.standardParams.noRange': '该类型无取值范围',
+  // changeApplies 枚举项标签
+  'product.standardParams.changeApplies.Immediate': '立即生效',
+  'product.standardParams.changeApplies.OnReboot': '重启生效',
 
   // -------------------------------------------------------------------------
   // 批量输入设备 SN（BatchInput 组件）

@@ -50,6 +50,39 @@ export interface StandardParam {
   maxValue?: string;
 }
 
+// ISSUE-488: 标准参数树 dataType / changeApplies 枚举化 —— 三皮肤共享。
+//
+// dataType 枚举取值（小写，对齐 TR-069 与前端默认）。后端校验大小写不敏感
+// （strings.EqualFold），且 min/max 在 dataType==='string' 时按字符串长度校验、
+// 其它（数值类型）按数值取值校验（见 omcgo/internal/config/parammodel/validator.go:118-155）。
+export const STANDARD_DATA_TYPES = ['string', 'int', 'unsignedInt', 'boolean', 'dateTime'] as const;
+export type StandardDataType = (typeof STANDARD_DATA_TYPES)[number];
+
+// changeApplies 枚举取值（大写，对齐字典 standard-model.xml）。
+export const STANDARD_CHANGE_APPLIES = ['Immediate', 'OnReboot'] as const;
+export type StandardChangeApplies = (typeof STANDARD_CHANGE_APPLIES)[number];
+
+// min/max 是否按「字符串长度」语义（dataType==='string'）显示，否则按「数值取值」语义。
+export function isStringDataType(dataType?: string): boolean {
+  return dataType === 'string';
+}
+
+// min/max 取值范围语义分档（ISSUE-488 验收细化）：
+//   'length' = 字符串长度范围（dataType==='string'）
+//   'value'  = 数值取值范围（int / unsignedInt；未知或历史遗留值保守按数值，便于编辑旧数据）
+//   'none'   = 无取值范围（boolean / dateTime）—— min/max 不适用，应禁用
+export type DataTypeRangeKind = 'length' | 'value' | 'none';
+export function dataTypeRangeKind(dataType?: string): DataTypeRangeKind {
+  if (dataType === 'string') return 'length';
+  if (dataType === 'boolean' || dataType === 'dateTime') return 'none';
+  return 'value';
+}
+
+// unsignedInt 取值下界为 0（无符号）。
+export function isUnsignedDataType(dataType?: string): boolean {
+  return dataType === 'unsignedInt';
+}
+
 export interface DiscoveredVersion {
   softwareVersion: string;
   totalRows: number;
