@@ -25,7 +25,7 @@ import {
   message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { DeleteOutlined, DownloadOutlined, EyeOutlined, PlusOutlined, ExportOutlined, ReloadOutlined } from '@ant-design/icons';
+import { DeleteOutlined, DownloadOutlined, PlusOutlined, ExportOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useQueryClient } from '@tanstack/react-query';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import { useT } from '@/hooks/useT';
@@ -779,7 +779,6 @@ export default function FileTransferCenter() {
         <Button
           type="link"
           size="small"
-          icon={<EyeOutlined />}
           onClick={() => openDetailDrawer(record)}
           style={{ paddingInline: 0 }}
         >
