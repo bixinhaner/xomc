@@ -187,6 +187,10 @@ type DeviceListFilter struct {
 	Keyword     string `form:"keyword"`
 	Category    string `form:"category"`
 	ProductType string `form:"productType"`
+	// ProductName #524：设备列表筛选改按产品名（DeviceItem.ProductName 由 mapDeviceItem
+	// 经 productNameLookup 回填）。前端「产品名称」下拉传此参数；与 ProductType(productClass)
+	// 二选一，优先 ProductName。列表与 CSV 导出共用本过滤器，故两条路径同时生效。
+	ProductName string `form:"productName"`
 	Page        int    `form:"page"`
 	PageSize    int    `form:"page_size"`
 }
