@@ -60,6 +60,15 @@ type QueryRequest struct {
 	// 使「首页读现成全网预聚合表」时 KPI 也有线（否则全聚只产 counter 行、KPI 面板空线）。
 	// 仅用于「空 MetricPaths＝全聚」的聚合任务执行路径；动态从指标库枚举，不在 seed 硬编码。
 	RecomputeAllKPIs bool
+	// StoreAllEnabled（#532 P2）：store_all_metrics=true 的落库侧全存模式。置 true 时聚合层
+	// 不按请求里 MetricPaths 收窄，改按 Technologies 驱动「已启用指标集」
+	// （enabled_pm_indicators_{enb,gnb,gsm}）：全部已启用 counter 随全量 counter 汇总产出，
+	// 全部已启用派生 KPI 按公式重算产出，一并落库——使事后改任务指标集无需重算。
+	// 与 RecomputeAllKPIs（全库枚举）的区别：枚举源限定到「已启用 ∩（counter/派生）」而非全库，
+	// 体量可控。已启用集为空时降级（不丢 counter，见 queryEnabledWithKPIs）。
+	// 仅经 queryWithKPIRecompute 的维度（product/band/device_group/aggregate_group/network）生效；
+	// device 维度由执行器在请求侧把 MetricPaths 直接灌成已启用集（设备级 KPI 已算好，无需重算）。
+	StoreAllEnabled bool
 }
 
 // Row 是 Aggregator.Query 的输出行。device 维度填 DeviceOUI/DeviceSN/ObjectLDN；
@@ -129,6 +138,15 @@ func (a *Aggregator) Query(ctx context.Context, q QueryRequest) ([]Row, error) {
 	case DimensionNetwork:
 		rows, err = a.queryWithKPIRecompute(ctx, table, q, a.queryNetworkTable)
 	default:
+		// device 维度直接读设备级聚合表（counter / KPI 行都是设备自己算好的，无需跨维重算）。
+		// #532 P2 store-all-by-enabled：device 维度不走重算 wrapper，故在入口把已启用集直接
+		// 灌成 MetricPaths（既存 counter 行 + 设备级已算好的 KPI 行都按已启用集筛取落库）；
+		// 已启用集为空时降级为不下推过滤（取设备表全部，不丢行）。
+		if q.StoreAllEnabled && len(q.MetricPaths) == 0 {
+			if enabled := a.resolveEnabledIndicators(ctx, q.Technologies); len(enabled) > 0 {
+				q.MetricPaths = enabled
+			}
+		}
 		rows, err = a.queryDeviceTable(ctx, table, q)
 	}
 	if err != nil {

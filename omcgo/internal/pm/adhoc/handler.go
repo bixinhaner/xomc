@@ -566,6 +566,10 @@ type resultsFilter struct {
 	// SubsetLDNs PM-DASH-DIMFILTER：device_group/band 维度仪表盘按选中子集过滤（object_ldn = ANY，text 数组，
 	// 值形态 'DeviceGroup=<uuid>' / 'Band=<值>'）。空 = 不过滤。与 ObjectLDNs（任务白名单）各自独立成子句。
 	SubsetLDNs  []string
+	// TaskMetricPaths #532：任务配置的指标集（task.MetricPaths）。显示侧收口——把「配置指标=显示范围」
+	// 真正落在显示阶段。非空时叠加 metric_path = ANY(...)，与用户临时选的单指标/子集（MetricPath）各自独立成子句、
+	// AND 取交集；空 = 不过滤（历史/边界任务向后兼容）。P2 落库全存已启用指标后，这道闸防止把全部指标铺满仪表盘。
+	TaskMetricPaths []string
 }
 
 // buildResultsQuery 纯函数：拼 adhoc results 查询 SQL + 占位参数。
@@ -635,6 +639,13 @@ WHERE r.task_id = $1`
 		args = append(args, f.SubsetLDNs)
 		pos++
 	}
+	// #532 显示侧收口：按任务配置指标集过滤（与用户临时选的 MetricPath 各自独立成子句、AND 取交集）。
+	// 空 = 不过滤（历史/边界任务向后兼容）。须与 buildResultsCountQuery 同口径，否则 count 与数据对不上。
+	if len(f.TaskMetricPaths) > 0 {
+		q += fmt.Sprintf(" AND r.metric_path = ANY($%d)", pos)
+		args = append(args, f.TaskMetricPaths)
+		pos++
+	}
 	q += fmt.Sprintf(" ORDER BY r.time DESC LIMIT $%d OFFSET $%d", pos, pos+1)
 	args = append(args, limit, offset)
 	return q, args
@@ -693,6 +704,12 @@ func buildResultsCountQuery(taskID uuid.UUID, f resultsFilter) (string, []any) {
 		args = append(args, f.SubsetLDNs)
 		pos++
 	}
+	// #532：与 buildResultsQuery 同口径——同样的任务配置指标集子句，否则 count 与数据对不上。
+	if len(f.TaskMetricPaths) > 0 {
+		q += fmt.Sprintf(" AND r.metric_path = ANY($%d)", pos)
+		args = append(args, f.TaskMetricPaths)
+		pos++
+	}
 	return q, args
 }
 
@@ -742,6 +759,9 @@ func (h *Handler) Results(c *gin.Context) {
 		// 故不能按逗号切分（issue #401：切分后两段都匹配不上完整存储值 → 0 行）。
 		// 改走纯重复参数形态 ?object_ldns=a&object_ldns=b，整值保留不拆。
 		SubsetLDNs: parseRepeatedQuery(c, "object_ldns"),
+		// #532：任务配置指标集（显示侧收口）。让「配置指标=显示范围」落在显示阶段——
+		// 与用户临时选的 metric_path 各自独立成子句、AND 取交集。空（历史/边界任务）= 不过滤（向后兼容）。
+		TaskMetricPaths: task.MetricPaths,
 	}
 	q, args := buildResultsQuery(id, filter, limit, offset)
 

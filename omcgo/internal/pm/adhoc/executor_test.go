@@ -381,6 +381,68 @@ func Test_Executor_DeviceGroupDimension_ReusesPreaggAndCarriesGroupID(t *testing
 }
 
 // ---------------------------------------------------------------------------
+// #532 P2：store_all_metrics=true 时执行器不下传 task 配置指标，改置 StoreAllEnabled
+// 让聚合层按已启用集全存；=false 时仍下传配置指标且不置 StoreAllEnabled。
+// ---------------------------------------------------------------------------
+
+// store_all=true：请求里 MetricPaths 必须被清空、StoreAllEnabled=true（落库侧全存已启用前提）。
+func Test_Executor_StoreAll_True_RequestDropsMetricPathsAndSetsEnabled(t *testing.T) {
+	aggr := newThreeMetricAggr()
+	e := NewExecutor(aggr, &stubRepo{}, nil, nil) // 默认 store_all=true
+	task := newStoreSwitchTask()
+	task.Dimension = DimensionProduct
+	task.Technology = "lte"
+	_, err := e.ExecuteOneshot(context.Background(), task)
+	require.NoError(t, err)
+
+	assert.True(t, aggr.lastReq.StoreAllEnabled, "store_all=true 必须置 StoreAllEnabled")
+	assert.Empty(t, aggr.lastReq.MetricPaths, "store_all=true 不得下传 task 配置指标（否则数据库层先筛掉非配置指标）")
+	assert.False(t, aggr.lastReq.RecomputeAllKPIs, "product 维度不走全库 RecomputeAllKPIs")
+}
+
+// store_all=false：请求里仍下传 task 配置指标、不置 StoreAllEnabled（仅存所选口径不变）。
+func Test_Executor_StoreAll_False_RequestKeepsMetricPathsNoEnabled(t *testing.T) {
+	aggr := newThreeMetricAggr()
+	e := NewExecutor(aggr, &stubRepo{}, nil, nil).SetStoreAllMetrics(false)
+	task := newStoreSwitchTask()
+	task.Dimension = DimensionProduct
+	task.Technology = "lte"
+	_, err := e.ExecuteOneshot(context.Background(), task)
+	require.NoError(t, err)
+
+	assert.False(t, aggr.lastReq.StoreAllEnabled, "store_all=false 不得置 StoreAllEnabled")
+	assert.Equal(t, []string{"M.kept.1", "M.kept.2"}, aggr.lastReq.MetricPaths, "store_all=false 必须下传 task 配置指标")
+}
+
+// store_all=true 且 network 维度：仍走全库 RecomputeAllKPIs（既有特例自洽），且不置 StoreAllEnabled
+// （两条全聚路径互斥，避免打架）。
+func Test_Executor_StoreAll_True_NetworkStillUsesRecomputeAllKPIs(t *testing.T) {
+	aggr := &stubAggr{
+		rowsByGran: map[metrics.Granularity][]aggregator.Row{
+			metrics.GranularityHourly: {{
+				DeviceSN: "AGGREGATED", MetricPath: "M.x", MetricType: metrics.MetricTypeCounter,
+				MetricValue: 1, Granularity: metrics.GranularityHourly,
+				Time: time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),
+			}},
+		},
+	}
+	e := NewExecutor(aggr, &stubRepo{}, nil, nil) // store_all=true
+	task := &Task{
+		ID:            uuid.New(),
+		Granularities: []string{"hourly"},
+		Dimension:     DimensionNetwork,
+		Technology:    "lte",
+		WindowStart:   time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC),
+		WindowEnd:     time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),
+	}
+	_, err := e.ExecuteOneshot(context.Background(), task)
+	require.NoError(t, err)
+
+	assert.True(t, aggr.lastReq.RecomputeAllKPIs, "network 维度全存仍走全库 RecomputeAllKPIs（既有特例口径）")
+	assert.False(t, aggr.lastReq.StoreAllEnabled, "network 维度与 StoreAllEnabled 互斥，避免双全聚路径打架")
+}
+
+// ---------------------------------------------------------------------------
 // T-0182：filterByMetricPaths 纯函数（空 allowed 不过滤 / 非空只留匹配）
 // ---------------------------------------------------------------------------
 
