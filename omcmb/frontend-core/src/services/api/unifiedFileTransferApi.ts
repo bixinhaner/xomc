@@ -72,6 +72,8 @@ export const unifiedFileTransferApi = {
     keyword?: string;
     category?: string;
     productType?: string;
+    /** #524：按产品名筛选（与列表口径一致），后端 matchesDeviceFilter 按 ProductName 过滤 */
+    productName?: string;
     /** "upgrade" = 4G/5G 升级页签列名；其它（默认） = 通用页签列名 */
     view?: 'upgrade' | 'default';
   }): Promise<{ blob: Blob; filename: string }> {
@@ -81,6 +83,7 @@ export const unifiedFileTransferApi = {
         typeCode: params.typeCode,
         category: params.category,
         productType: params.productType,
+        productName: params.productName,
         keyword: params.keyword,
         view: params.view,
       },
@@ -97,7 +100,7 @@ export const unifiedFileTransferApi = {
   },
 
   async getDevices(
-    params: { status?: string; typeCode?: string; keyword?: string; category?: string; productType?: string } & PageRequest,
+    params: { status?: string; typeCode?: string; keyword?: string; category?: string; productType?: string; productName?: string } & PageRequest,
   ): Promise<PageResponse<UnifiedFileTransferDeviceItem>> {
     const { data } = await http.get<PageResponse<BackendUnifiedFileTransferDeviceItem>>('/ufte/devices', {
       params: {
@@ -107,6 +110,8 @@ export const unifiedFileTransferApi = {
         typeCode: params.typeCode,
         category: params.category,
         productType: params.productType,
+        // #524：设备列表「产品名称」筛选改传产品名（后端 matchesDeviceFilter 按 ProductName 过滤）。
+        productName: params.productName,
         keyword: params.keyword,
       },
     });

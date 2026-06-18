@@ -49,7 +49,6 @@ import {
   useUnifiedFileTransferTasks,
   useUnifiedFileTransferTaskTypes,
 } from '@core/hooks/api/useUnifiedFileTransfer';
-import { useProductClasses } from '@core/hooks/api/useDevices';
 import { useSoftwareVersions } from '@core/hooks/api/useSoftware';
 import { useProductList } from '@core/hooks/api/useProducts';
 import { unifiedFileTransferApi } from '@core/services/api/unifiedFileTransferApi';
@@ -229,7 +228,6 @@ export default function FileTransferCenter() {
   // 跟 form 值不再一致 → typeCode 切换时不覆盖；用户没改 → 切换业务时跟着刷新。
   const lastAutoFilledTaskNameRef = useRef<string>('');
   const { data: taskTypes = [], isLoading: taskTypesLoading } = useUnifiedFileTransferTaskTypes();
-  const { data: productClasses = [] } = useProductClasses();
   // 原始 categories 来自后端 ufte_task_types，新增一个虚拟分类 "mr_measurement"
   // 作为入口聚合按钮（点击跳到独立的 MR 任务管理页 /mr/tasks）。MR 不走 UFTE
   // 任务模板（PRD F05 决策 A — 独立引擎），这里只做"入口聚合"。
@@ -270,7 +268,7 @@ export default function FileTransferCenter() {
   const [deviceKeyword, setDeviceKeyword] = useState('');
   const [deviceKeywordInput, setDeviceKeywordInput] = useState('');
   const [deviceStatusFilter, setDeviceStatusFilter] = useState<string>();
-  const [deviceProductClassFilter, setDeviceProductClassFilter] = useState<string>();
+  const [deviceProductNameFilter, setDeviceProductNameFilter] = useState<string>();
   const [viewMode, setViewMode] = useState<'tasks' | 'devices'>('tasks');
   const [taskDrawerOpen, setTaskDrawerOpen] = useState(false);
   // MR 测量 Tab 的新建抽屉 — 受控状态，让顶部 "New Task" 按钮接管打开（与 UFTE 风格一致）
@@ -338,7 +336,7 @@ export default function FileTransferCenter() {
     keyword: deviceKeyword || undefined,
     status: deviceStatusFilter,
     typeCode: selectedTypeCode || undefined,
-    productType: deviceProductClassFilter,
+    productName: deviceProductNameFilter,
   });
 
   const createTaskMutation = useCreateUnifiedFileTransferTask();
@@ -485,16 +483,26 @@ export default function FileTransferCenter() {
     [filteredFirmwareCandidates],
   );
 
-  const deviceProductClassOptions = useMemo(() => {
-    const values = new Set<string>(productClasses);
+  // #524：设备列表「产品名称」筛选 —— 选项与传参均用产品名（与「产品名称」列展示口径一致）。
+  // 与升级抽屉 drawerProductClassOptions 同口径：所选任务类型配了适用产品(products，产品英文名)
+  // 就按其收窄，未配(=全部)则退回产品目录全集；设备已带回的 productName 再兜底并入（任务类型
+  // 范围之外仍可见的产品名）。原先直接把 productClass 英文代码当选项、按 productType 过滤——文案
+  // 改「按产品名称过滤」后名实不符，这里对齐为真·按产品名。
+  const deviceProductNameOptions = useMemo(() => {
+    const scoped = activeTaskType?.products ?? [];
+    const names = new Set<string>(
+      scoped.length > 0 ? scoped : products.map((product) => product.name),
+    );
     recentDevices.forEach((item) => {
-      if (item.productType) {
-        values.add(item.productType);
+      if (item.productName) {
+        names.add(item.productName);
       }
     });
-    (activeTaskType?.platformScope ?? []).forEach((entry) => values.add(entry));
-    return Array.from(values).map((item) => ({ label: item, value: item }));
-  }, [activeTaskType?.platformScope, productClasses, recentDevices]);
+    return Array.from(names)
+      .filter(Boolean)
+      .sort((left, right) => left.localeCompare(right, 'zh-CN'))
+      .map((name) => ({ label: name, value: name }));
+  }, [activeTaskType?.products, products, recentDevices]);
 
   // qa-614 c6 #368：原 templateTabItems（『模板』子页签数据）已删除——与执行视图
   // 任务列表上方的 typeCode 下拉框完全重复（ant-space-item 多余）。typeCode 选择
@@ -738,7 +746,7 @@ export default function FileTransferCenter() {
         typeCode: selectedTypeCode || undefined,
         keyword: deviceKeyword || undefined,
         status: deviceStatusFilter,
-        productType: deviceProductClassFilter,
+        productName: deviceProductNameFilter,
         // 与当前 tab 的 deviceColumns 分支保持一致
         view: isUpgradeLikeCategory ? 'upgrade' : 'default',
       });
@@ -858,7 +866,7 @@ export default function FileTransferCenter() {
     setDevicePage(1);
     // 同步清空批量选中——切 tab / 改过滤 / 翻页时旧的选中 ID 已不在当前可见行
     setSelectedTaskIds([]);
-  }, [selectedCategory, selectedTypeCode, taskKeyword, taskStatusFilter, deviceKeyword, deviceStatusFilter, deviceProductClassFilter]);
+  }, [selectedCategory, selectedTypeCode, taskKeyword, taskStatusFilter, deviceKeyword, deviceStatusFilter, deviceProductNameFilter]);
 
   // 翻页（taskPage / taskPageSize 变化）同样清空选中，避免跨页 ID 残留计数
   useEffect(() => {
@@ -866,7 +874,7 @@ export default function FileTransferCenter() {
   }, [taskPage, taskPageSize]);
 
   useEffect(() => {
-    setDeviceProductClassFilter(undefined);
+    setDeviceProductNameFilter(undefined);
   }, [selectedTypeCode]);
 
   const isUpgradeLikeCategory = UPGRADE_LIKE_CATEGORIES.has(selectedCategory);
@@ -1558,9 +1566,9 @@ export default function FileTransferCenter() {
                         allowClear
                         showSearch
                         placeholder={t('ufte.filter.productType')}
-                        value={deviceProductClassFilter}
-                        onChange={(value) => setDeviceProductClassFilter(value)}
-                        options={deviceProductClassOptions}
+                        value={deviceProductNameFilter}
+                        onChange={(value) => setDeviceProductNameFilter(value)}
+                        options={deviceProductNameOptions}
                         optionFilterProp="label"
                         style={{ width: 220 }}
                       />

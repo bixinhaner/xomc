@@ -1523,6 +1523,11 @@ func matchesDeviceFilter(item DeviceItem, filter DeviceListFilter) bool {
 	if filter.ProductType != "" && !strings.EqualFold(item.ProductType, filter.ProductType) {
 		return false
 	}
+	// #524：按产品名过滤。item.ProductName 由 mapDeviceItem 经 productNameLookup 回填
+	// （productClass→产品英文名），口径与设备列表「产品名称」列一致。
+	if filter.ProductName != "" && !strings.EqualFold(item.ProductName, filter.ProductName) {
+		return false
+	}
 	if filter.Keyword != "" {
 		needle := strings.ToLower(strings.TrimSpace(filter.Keyword))
 		if !strings.Contains(strings.ToLower(item.TaskName), needle) &&

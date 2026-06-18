@@ -304,6 +304,35 @@ func TestService_ListDeviceCandidates_FiltersByProductName(t *testing.T) {
 	assert.Equal(t, "ENB00001", narrowed.Items[0].DeviceSN)
 }
 
+// #524：设备列表筛选改按产品名（DeviceItem.ProductName）。matchesDeviceFilter 命中
+// ProductName 时大小写不敏感精确匹配，与「产品名称」列展示口径一致；ProductType 仍兼容。
+func TestMatchesDeviceFilter_ByProductName(t *testing.T) {
+	item := DeviceItem{
+		DeviceSN:    "ENB00001",
+		ProductType: "QAFA",   // productClass
+		ProductName: "甲产品", // 由 mapDeviceItem 回填
+	}
+
+	tests := []struct {
+		name   string
+		filter DeviceListFilter
+		want   bool
+	}{
+		{"产品名命中", DeviceListFilter{ProductName: "甲产品"}, true},
+		{"传 productClass 当产品名→不命中", DeviceListFilter{ProductName: "QAFA"}, false}, // 按名过滤，不是按 class
+		{"产品名不命中", DeviceListFilter{ProductName: "乙产品"}, false},
+		{"空过滤器全放行", DeviceListFilter{}, true},
+		{"productClass 口径仍兼容", DeviceListFilter{ProductType: "qafa"}, true},
+		{"产品名 + class 同时命中", DeviceListFilter{ProductName: "甲产品", ProductType: "QAFA"}, true},
+		{"产品名命中但 class 不命中→排除", DeviceListFilter{ProductName: "甲产品", ProductType: "OTHER"}, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, matchesDeviceFilter(item, tc.filter))
+		})
+	}
+}
+
 func TestService_DeleteTaskType_DeletesCustomTypeOnly(t *testing.T) {
 	repo := &ensureBuiltInTaskTypeRepo{
 		items: []TaskType{
