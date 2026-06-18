@@ -153,6 +153,9 @@ type xmlParam struct {
 	MinValue        string         `xml:"minValue,attr"`
 	MaxValue        string         `xml:"maxValue,attr"`
 	CheckboxOptions string         `xml:"checkboxOptions,attr"`
+	ExtraInfoPath   string         `xml:"extraInfoPath,attr"`
+	Unit            string         `xml:"unit,attr"`
+	HideRangeHint   string         `xml:"hideRangeHint,attr"`
 	EnumOptions    []xmlEnumOption `xml:"option"`
 }
 
@@ -238,6 +241,9 @@ func buildGroups(doc xmlQuickSettings, fileName string) ([]Group, error) {
 				MaxValue:        maxPtr,
 				EnumOptions:     enums,
 				CheckboxOptions: checkboxes,
+				ExtraInfoPath:   strings.TrimSpace(p.ExtraInfoPath),
+				Unit:            strings.TrimSpace(p.Unit),
+				HideRangeHint:   strings.EqualFold(p.HideRangeHint, "true"),
 			})
 		}
 		out = append(out, Group{

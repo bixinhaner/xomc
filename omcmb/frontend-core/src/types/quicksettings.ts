@@ -35,6 +35,19 @@ export interface QuickSettingsParam {
   maxValue?: number;
   enumOptions?: QuickSettingsEnumOption[];
   checkboxOptions?: string[];
+  /**
+   * 可选:在该字段下方以小字展示另一个只读参数的当前值。
+   * 前端按该路径拉取 schema/currentValue,按 [lo ~ hi] 格式展示
+   * (值若是 "24,30" / "24~30" / "24-30" 则拆成两端,其它情况按原值包裹方括号)。
+   */
+  extraInfoPath?: string;
+  /** 可选:参数单位后缀 (如 "dBm")。前端渲染 label 时以 "(unit)" 拼在 extraInfo 之后。 */
+  unit?: string;
+  /**
+   * 可选:为 true 时前端不在 label 后面展示 schema 推导的取值范围提示
+   * (如 [0 ~ 2199])。适用于字典范围与业务含义不一致的场景。
+   */
+  hideRangeHint?: boolean;
 }
 
 /**

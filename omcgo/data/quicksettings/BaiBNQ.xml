@@ -9,7 +9,8 @@
 <quickSettings paramModel="BaiBNQ">
   <group id="gnb-cell" titleZh="小区参数" titleEn="Cell Parameters">
     <param name="Band" titleZh="频段" titleEn="Band"
-           standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoDLSIB.MultiFrequencyBandListNRSIB.{i}.FreqBandIndicatorNR"/>
+           standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoDLSIB.MultiFrequencyBandListNRSIB.{i}.FreqBandIndicatorNR"
+           hideRangeHint="true"/>
     <param name="DLCarrierBandWidth" titleZh="下行载波带宽" titleEn="DL Carrier Bandwidth"
            standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoDLSIB.ScsSpecificCarrierList.{i}.SCSSpecificCarrier.CarrierBandwidth"/>
     <param name="DLSubCarrierSpacing" titleZh="下行子载波间隔" titleEn="DL SubCarrier Spacing"
@@ -28,14 +29,14 @@
            standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoDLSIB.OffsetToPointA"/>
     <param name="PCI" titleZh="PCI" titleEn="PCI"
            standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.RF.PhyCellID"/>
-    <param name="PowerModify" titleZh="功率调整" titleEn="Power Modify"
-           standardPath="Device.Services.FAPService.1.CellConfig.{i}.NR.RAN.PowerModify"/>
-    <param name="PowerMaxLimit" titleZh="最大功率限制" titleEn="Power Max Limit"
-           standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PowerMaxLimit"/>
-    <param name="PowerRange" titleZh="功率范围" titleEn="Power Range"
-           standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PowerMinLimit"/>
+    <param name="PowerModify" titleZh="功率等级" titleEn="Power Level"
+           standardPath="Device.Services.FAPService.1.CellConfig.{i}.NR.RAN.PowerModify"
+           extraInfoPath="Device.DeviceInfo.SupportedPowerRange" unit="dBm"/>
     <param name="RFEnable" titleZh="射频启用" titleEn="RF Enable"
-           standardPath="Device.Services.FAPService.1.CellConfig.1.NR.RAN.rftxEnable"/>
+           standardPath="Device.Services.FAPService.1.CellConfig.1.NR.RAN.rftxEnable" type="enum">
+      <option value="1" label="ON"/>
+      <option value="0" label="OFF"/>
+    </param>
     <param name="SsbSubcarrierOffset" titleZh="SSB 子载波偏移" titleEn="SSB Subcarrier Offset"
            standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.SSB.SsbSubcarrierOffset"/>
     <param name="ULCarrierBandWidth" titleZh="上行载波带宽" titleEn="UL Carrier Bandwidth"

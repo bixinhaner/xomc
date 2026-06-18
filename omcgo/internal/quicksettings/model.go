@@ -52,6 +52,16 @@ type Param struct {
 	MaxValue         *int64       `json:"maxValue,omitempty"`
 	EnumOptions      []EnumOption `json:"enumOptions,omitempty"`
 	CheckboxOptions  []string     `json:"checkboxOptions,omitempty"`
+	// ExtraInfoPath 可选:用于在该参数下方以小字方式展示另一个只读参数的当前值
+	// (如 NR PowerModify 下方提示 Device.DeviceInfo.SupportedPowerRange = "24,30" → "[24 ~ 30]")。
+	// 前端在渲染时按该路径拉取 schema/currentValue 并按 [lo ~ hi] 格式展示。
+	ExtraInfoPath string `json:"extraInfoPath,omitempty"`
+	// Unit 可选:参数单位后缀 (如 "dBm" / "MHz")。
+	// 前端渲染 label 时以 "(unit)" 形式拼在 ExtraInfo 之后,以保证范围提示位于单位之前。
+	Unit string `json:"unit,omitempty"`
+	// HideRangeHint 可选:为 true 时前端不在 label 后面展示 schema 推导的
+	// 取值范围提示 (如 [0 ~ 2199])。适用于字典范围与业务含义不一致的场景。
+	HideRangeHint bool `json:"hideRangeHint,omitempty"`
 }
 
 // EnumOption 单个枚举值（value 是上送 TR069 的字符串，label 是 UI 显示）。
