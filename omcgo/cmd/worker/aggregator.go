@@ -67,6 +67,8 @@ func startPMAggregatorPipeline(
 		if gjt := aggregator.GroupJobTypeFor(r.JobType()); gjt != "" {
 			r.SetGroupChain(gjt, jobRepo)
 		}
+		// #528 P1：设备级该桶聚合成功后推进设备级完成水位（水位表在主库，故传 PgPool）。
+		r.SetWatermarkExec(w.PgPool)
 		registry.Register(r)
 		logger.Info("registered pm aggregator runner (device)",
 			zap.String("job_type", r.JobType()),
@@ -85,6 +87,8 @@ func startPMAggregatorPipeline(
 	}
 	for _, r := range groupRunners {
 		r.SetMetrics(aggregatorMetrics)
+		// #528 P1：组级该桶聚合成功后推进组级完成水位（水位表在主库，故传 PgPool）。
+		r.SetWatermarkExec(w.PgPool)
 		registry.Register(r)
 		logger.Info("registered pm aggregator runner (group)",
 			zap.String("job_type", r.JobType()),

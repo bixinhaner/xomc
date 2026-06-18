@@ -13,6 +13,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/omcgo/omcgo/internal/core/storage"
+	"github.com/omcgo/omcgo/internal/pm/aggregator"
+	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
 
 // Repository 是 G7 adhoc 任务的持久化接口。
@@ -92,13 +94,71 @@ var (
 type PgRepository struct {
 	pool   *pgxpool.Pool // 主库：任务生命周期表
 	tsPool *pgxpool.Pool // 时序库：pm_adhoc_aggregation_results
+	// watermarks 读上游「完成水位」（#528 P3）。新建持续任务时把初始游标 last_fire_at
+	// 置为「建任务时刻当前对应水位桶起点」——从「现在」起算、不回扫历史、结果表不冒出史前空格。
+	// nil 安全：不注入则 last_fire_at 留 NULL（退化到 created_at），行为不回归。
+	watermarks WatermarkReader
+	loc        func() *time.Location // #528 P3：初始游标桶对齐用业务时区
 }
 
 // NewPgRepository 创建 PgRepository。
 //
 // pgPool=主库（pm_tasks/pm_adhoc_task_runs），tsPool=时序库（pm_adhoc_aggregation_results）。
 func NewPgRepository(pgPool, tsPool *pgxpool.Pool) *PgRepository {
-	return &PgRepository{pool: pgPool, tsPool: tsPool}
+	return &PgRepository{pool: pgPool, tsPool: tsPool, loc: func() *time.Location { return time.UTC }}
+}
+
+// SetWatermarkReader 注入「上游完成水位」读取器（#528 P3，新建持续任务初始游标用）。
+func (r *PgRepository) SetWatermarkReader(reader WatermarkReader) *PgRepository {
+	r.watermarks = reader
+	return r
+}
+
+// HasWatermarkReader 报告本 repo 是否已注入「上游完成水位」读取器（#528 P3）。
+//
+// 仅供装配回归测试用：建持续任务的唯一入口是 app 进程的 POST /pm/adhoc，其 repo 必须注入
+// 水位读取器，否则新建持续任务初始游标退化为 NULL（落回 created_at），结果表会冒出史前空格。
+// 检查方曾发现「水位读取器误注入到 worker 进程（从不建任务）」的装配缺口——本 getter 让该缺口
+// 能在不连真库的单测里被钉死。
+func (r *PgRepository) HasWatermarkReader() bool {
+	return r.watermarks != nil
+}
+
+// SetLocationFunc 注入业务时区取值器（#528 P3，初始游标桶对齐用）。
+func (r *PgRepository) SetLocationFunc(fn func() *time.Location) *PgRepository {
+	if fn != nil {
+		r.loc = fn
+	}
+	return r
+}
+
+// initialCursorForContinuous 求新建持续任务的初始游标 last_fire_at（#528 P3）。
+//
+// = 建任务时刻「当前对应 (粒度,层级) 完成水位的桶起点」。下次 sweep 从该游标算 cron.Next，
+// 加上 P3 的水位 gate（只追 ≤ 水位的格），新任务从当前水位起算、绝不回扫历史空格。
+// 无水位读取器 / 无粒度 / 上游尚未卷完任何格 / 读取出错 → 返回 ok=false（last_fire_at 留 NULL，
+// 退化到 created_at；新环境下水位 gate 仍会挡住史前格，安全）。
+func (r *PgRepository) initialCursorForContinuous(ctx context.Context, req CreateRequest) (time.Time, bool) {
+	if r.watermarks == nil || len(req.Granularities) == 0 {
+		return time.Time{}, false
+	}
+	g := metrics.Granularity(req.Granularities[0])
+	dim := req.Dimension
+	if dim == "" {
+		dim = DimensionDevice
+	}
+	level := watermarkLevelForDimension(dim)
+	wm, err := r.watermarks.Get(ctx, g, level)
+	if err != nil {
+		return time.Time{}, false
+	}
+	loc := time.UTC
+	if r.loc != nil {
+		if l := r.loc(); l != nil {
+			loc = l
+		}
+	}
+	return truncateBucketStart(g, wm.CompletedBucketStart, loc), true
 }
 
 var _ Repository = (*PgRepository)(nil)
@@ -132,18 +192,27 @@ func (r *PgRepository) Create(ctx context.Context, req CreateRequest) (uuid.UUID
 	if expireDays <= 0 {
 		expireDays = 60 // 默认 60 天（约束任务定义层，与结果数据 PM 保留期分离）
 	}
+	// #528 P3：持续任务初始游标 = 建任务时刻当前对应水位桶起点（从「现在」起算，不回扫历史）。
+	// 取不到水位（上游尚未卷完 / 未注入读取器）→ last_fire_at 留 NULL，退化到 created_at，
+	// 水位 gate 仍兜底挡史前格，安全。oneshot 任务无 cron 调度，初始游标无意义。
+	var initialFire interface{}
+	if req.Mode == ModeContinuous {
+		if bucket, ok := r.initialCursorForContinuous(ctx, req); ok {
+			initialFire = bucket
+		}
+	}
 	q, args, err := storage.Psql.Insert("pm_tasks").
 		Columns(
 			"task_name", "task_type", "task_subtype", "mode", "cron_expr",
 			"device_sns", "metric_paths", "granularities",
 			"window_start", "window_end", "dimension", "technology", "is_builtin", "expire_days",
-			"status", "progress", "creator", "object_ldns",
+			"status", "progress", "creator", "object_ldns", "last_fire_at",
 		).
 		Values(
 			req.Name, "extraction", TaskSubtype, string(req.Mode), nullableString(req.CronExpr),
 			deviceSNsJSON, req.MetricPaths, req.Granularities,
 			nullableTime(req.WindowStart), nullableTime(req.WindowEnd), string(dim), nullableTech(req.Technology), req.IsBuiltin, expireDays,
-			string(StatusPending), 0, req.Creator, nullableStrSlice(req.ObjectLDNs),
+			string(StatusPending), 0, req.Creator, nullableStrSlice(req.ObjectLDNs), initialFire,
 		).
 		Suffix("RETURNING id").
 		ToSql()
@@ -795,8 +864,10 @@ var _ ContinuousRepository = (*PgContinuousRepository)(nil)
 func (r *PgContinuousRepository) ListReschedulable(ctx context.Context) ([]ContinuousTask, error) {
 	// G7-Gap-9: 用 COALESCE(last_fire_at, created_at) 作"上次触发时刻"，
 	// 老行 last_fire_at IS NULL 时退化到 created_at（首次启动会立即追到当前 cron 窗口）。
+	// #528 P3：连带取 granularities/dimension，让调度器能读对应 (粒度,层级) 水位做追平上界。
 	const q = `
-SELECT id::text, cron_expr, COALESCE(last_fire_at, created_at)
+SELECT id::text, cron_expr, COALESCE(last_fire_at, created_at),
+       COALESCE(granularities, '{}'::text[]), COALESCE(dimension, '')
 FROM pm_tasks
 WHERE task_subtype = $1
   AND mode = 'continuous'
@@ -812,9 +883,11 @@ LIMIT 1000`
 	var out []ContinuousTask
 	for rows.Next() {
 		var ct ContinuousTask
-		if err := rows.Scan(&ct.ID, &ct.CronExpr, &ct.LastFireAt); err != nil {
+		var dim string
+		if err := rows.Scan(&ct.ID, &ct.CronExpr, &ct.LastFireAt, &ct.Granularities, &dim); err != nil {
 			return nil, err
 		}
+		ct.Dimension = Dimension(dim)
 		out = append(out, ct)
 	}
 	return out, rows.Err()
@@ -838,4 +911,32 @@ WHERE id = $1::uuid AND task_subtype = $2 AND status = 'scheduled'`
 		return nil
 	}
 	return nil
+}
+
+// ── ContinuousScheduler 水位 gate 适配器（#528 P3）────────────────────────
+
+// WatermarkGateAdapter 把 aggregator.WatermarkRepository 适配成调度器的 WatermarkGate。
+// 调度器只需「给定 (粒度,层级) 当前水位桶起点 + 是否存在」，不暴露 aggregator 细节。
+type WatermarkGateAdapter struct {
+	reader WatermarkReader
+}
+
+// NewWatermarkGateAdapter 用一个 WatermarkReader（真实为 aggregator.WatermarkRepository）构造 gate。
+func NewWatermarkGateAdapter(reader WatermarkReader) *WatermarkGateAdapter {
+	return &WatermarkGateAdapter{reader: reader}
+}
+
+var _ WatermarkGate = (*WatermarkGateAdapter)(nil)
+
+// CompletedBucketStart 返回 (粒度,层级) 当前完成水位桶起点；无水位 / 出错返 ok=false。
+func (a *WatermarkGateAdapter) CompletedBucketStart(ctx context.Context, gran metrics.Granularity, level aggregator.WatermarkLevel) (time.Time, bool) {
+	if a == nil || a.reader == nil {
+		return time.Time{}, false
+	}
+	wm, err := a.reader.Get(ctx, gran, level)
+	if err != nil {
+		// ErrWatermarkNotFound 是正常状态（上游尚未卷完该粒度任何格）；其余错误也保守不放行。
+		return time.Time{}, false
+	}
+	return wm.CompletedBucketStart, true
 }

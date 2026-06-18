@@ -49,6 +49,12 @@ type Runner struct {
 	// 直接 chain 即可。chain 点（此处）就是将来插入屏障的唯一位置。
 	chainGroupJobType string
 	enqueuer          JobEnqueuer
+
+	// 完成水位写入（#528 P1）。watermarkExec 非 nil 时，设备级该桶聚合**成功提交后**
+	// 把 (granularity, device) 水位 UPSERT 推进到本格起点（取 max 不回退、空格也推进）。
+	// 语义是「已处理」非「有数据」：只要 Run 走到成功收尾就推进，与该桶是否产生聚合行无关。
+	// 由 worker 装配时注入（传主库 PgPool）。nil 则退化为不写水位（不回归既有行为）。
+	watermarkExec WatermarkExecer
 }
 
 // JobType 返回 asyncjob 注册主键。
@@ -70,6 +76,12 @@ func (r *Runner) SetGroupChain(groupJobType string, enq JobEnqueuer) {
 	r.chainGroupJobType = groupJobType
 	r.enqueuer = enq
 }
+
+// SetWatermarkExec 注入完成水位写入执行体（#528 P1，传主库 PgPool）。
+//
+// 设备级该桶聚合成功后用它把 (granularity, device) 水位推进到本格起点。
+// nil 关闭水位写入（退化为既有行为，不回归）。
+func (r *Runner) SetWatermarkExec(exec WatermarkExecer) { r.watermarkExec = exec }
 
 // runPayload 是 cron 注入到 async_jobs.payload 的字段集。Start/End 半开区间 [Start, End)。
 type runPayload struct {
@@ -128,6 +140,17 @@ func (r *Runner) Run(ctx context.Context, job *asyncjob.Job) (json.RawMessage, e
 
 	// 更新桶滞后秒数（end 到现在的秒差），Grafana 用它判断是否堵塞
 	r.metrics.SetBucketLag(r.jobType, time.Since(p.End).Seconds())
+
+	// 设备级该桶已成功处理完（counter + KPI 均落库）——推进设备级完成水位（#528 P1）。
+	// 语义是「已处理」非「有数据」：counterRows/kpiRows 可能为 0（空格），水位照样推进，
+	// 否则下游会卡死在真正空的格上。UPSERT 取 max 不回退，重试/乱序补跑幂等。
+	// 水位写在 chain 组任务之前：保证下游消费设备级水位时，组任务尚未必产出（device 先于 group）。
+	if r.watermarkExec != nil {
+		if werr := UpsertWatermark(ctx, r.watermarkExec, r.granularity, WatermarkLevelDevice, p.Start); werr != nil {
+			runStatus = "failed"
+			return nil, fmt.Errorf("runner %s: upsert device watermark: %w", r.jobType, werr)
+		}
+	}
 
 	// 设备级该桶已成功提交（counter + KPI 均落库）——确定性串联设备组聚合（#479 改动三）。
 	// 此时 chain，组任务必读到本桶完整的、已提交的设备级数据；不再靠固定错峰猜先后。
