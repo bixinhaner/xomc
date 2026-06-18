@@ -71,6 +71,12 @@ func (s *SyncService) StartPathBSync(ctx context.Context, dev *model.Device, sou
 		return true, nil
 	}
 
+	// T-NATS-PAYLOAD: instance-level expansion 防大对象 GPV 响应撑爆 NATS 单事件上限。
+	// 估算 single-prefix 响应字节数 > expandThreshold (600KB) 时,把 object prefix
+	// "DeviceGSM.Bts." 展开成 ["DeviceGSM.Bts.1.", ..., "DeviceGSM.Bts.N."],
+	// 每条独立成批 GPV task (object 前缀 size=1)。详见 sync_pathb_expand.go 文件注释。
+	prefixes = s.expandLargeObjectPrefixes(ctx, dev.ID, set.Mappings, prefixes)
+
 	// T-0123: 提取 reason 写 Redis 临时映射供 HandleSyncResultPathB 完成时读取（TTL=10min 覆盖 GPV 上界）。
 	var pbOpts pathBOptions
 	for _, opt := range opts {
@@ -487,10 +493,15 @@ func (s *SyncService) logPathBSyncDiff(ctx context.Context, dev *model.Device,
 //   - 完全没返回任何实例的对象 → 推导不出 prefix → DB 残留（保守，避免空响应误删）
 //   - 每条 missing 是 leaf 级 standardPath，调 DeleteByPathPrefix(path) 精确删 1 行
 //
+// T-NATS-PAYLOAD: 配合 sync_pathb_expand.go 的 instance 展开,reconcile 推导改用
+// deriveReconcilePrefixes(batch-aware): 单实例 batch 推导 instance-level prefix
+// (DeviceGSM.Bts.5.) 而非 object-level prefix (DeviceGSM.Bts.),避免 expand 后
+// 每个 instance batch 误删兄弟实例。
+//
 // 错误降级：DeleteByPathPrefix 失败仅打 Warn，不阻断主流程（下次同步还有机会修复）。
 func (s *SyncService) reconcileDeletedPaths(ctx context.Context, dev *model.Device,
 	prevPaths map[string]struct{}, params []model.DeviceParameter) {
-	objectPrefixes := deriveObjectPrefixesFromParams(params)
+	objectPrefixes := deriveReconcilePrefixes(params)
 	if len(objectPrefixes) == 0 {
 		return
 	}
@@ -600,6 +611,75 @@ func nearestObjectPrefix(path string) string {
 		}
 	}
 	return ""
+}
+
+// splitObjectAndInstancePrefix 把 path 同时拆出 (objectPrefix, instancePrefix)。
+//
+// 算法同 nearestObjectPrefix(取最深数字段),并额外返回"含数字段+尾点"的 instance prefix:
+//   - "DeviceGSM.Bts.5.CellId"             → ("DeviceGSM.Bts.", "DeviceGSM.Bts.5.")
+//   - "DeviceGSM.Bts.5.Trx.1.Rf"           → ("DeviceGSM.Bts.5.Trx.", "DeviceGSM.Bts.5.Trx.1.")
+//                                            (最深数字段是 Trx 下的 "1",不是 Bts.5)
+//   - "Device.System.Mode"                 → ("", "")
+//   - 数字段位置 < minPrefixSegments(4)     → ("", "")
+//
+// 第二个返回值用于"单实例 batch reconcile 范围精化",见 deriveReconcilePrefixes。
+func splitObjectAndInstancePrefix(path string) (string, string) {
+	if path == "" {
+		return "", ""
+	}
+	parts := strings.Split(strings.TrimSuffix(path, "."), ".")
+	for i := len(parts) - 1; i >= 0; i-- {
+		if isPositiveInteger(parts[i]) {
+			if i < minPrefixSegments {
+				return "", ""
+			}
+			objPrefix := strings.Join(parts[:i], ".") + "."
+			instPrefix := strings.Join(parts[:i+1], ".") + "."
+			return objPrefix, instPrefix
+		}
+	}
+	return "", ""
+}
+
+// deriveReconcilePrefixes 智能推导 reconcile 范围 prefix 列表(batch-aware)。
+//
+// 配合 sync_pathb_expand.go 的 instance 展开:
+//   - object batch (CPE 一次返多 instance,如 LTECell.{2,3,5} 都有 path):
+//     输出 object-level prefix "...LTECell.",reconcile 范围覆盖整对象(可删该对象未上报的实例)
+//   - instance batch (来自 expand,batch 内只有 1 个 instance,如全部都属 Bts.5):
+//     输出 instance-level prefix "DeviceGSM.Bts.5.",reconcile 范围限定到该实例内部
+//     (不会越界删兄弟 Bts.1..4 / 6..N 的字段)
+//
+// 算法:按 (objectPrefix → set{instancePrefix}) 分组,每组:
+//   |set| == 1 → 输出 instancePrefix (单实例,精化)
+//   |set| > 1  → 输出 objectPrefix   (多实例,沿用原逻辑)
+//
+// 弱化语义提示: instance batch 模式下 instance 整体被 CPE 删除(没有任何字段返回)
+// 是"幽灵实例"残留场景,本算法无法感知;由 Phase 2 哨兵 GPN 同步处理。
+func deriveReconcilePrefixes(params []model.DeviceParameter) []string {
+	type instSet = map[string]struct{}
+	groups := make(map[string]instSet)
+	for _, p := range params {
+		obj, inst := splitObjectAndInstancePrefix(p.ParameterPath)
+		if obj == "" || inst == "" {
+			continue
+		}
+		if _, ok := groups[obj]; !ok {
+			groups[obj] = make(instSet)
+		}
+		groups[obj][inst] = struct{}{}
+	}
+	out := make([]string, 0, len(groups))
+	for obj, set := range groups {
+		if len(set) == 1 {
+			for inst := range set {
+				out = append(out, inst)
+			}
+			continue
+		}
+		out = append(out, obj)
+	}
+	return out
 }
 
 // isFullSyncTrigger 判定本次 GPV 响应是否来自"全量 Path B 同步"上下文。

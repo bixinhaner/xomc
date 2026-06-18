@@ -34,14 +34,8 @@ type ParameterTreeHandler struct {
 	paramRepo       DeviceParameterRepository
 	paramRegistry   *parammodel.Registry
 	productRegistry *product.Registry
-	permService     VisibleGroupsResolver
+	permissionSvc   VisibleGroupsResolver
 	logger          *zap.Logger
-}
-
-// SetPermissionService wires the data permission service for per-device
-// group-membership (IDOR) checks on by-ID parameter read endpoints.
-func (h *ParameterTreeHandler) SetPermissionService(ps VisibleGroupsResolver) {
-	h.permService = ps
 }
 
 // NewParameterTreeHandler creates a new parameter tree handler.
@@ -59,6 +53,13 @@ func NewParameterTreeHandler(
 		productRegistry: prodReg,
 		logger:          logger,
 	}
+}
+
+// SetPermissionService wires the data permission service for route-level injection.
+// Parameter tree endpoints currently resolve a single device by ID/SN and keep
+// behavior unchanged when the service is not consulted.
+func (h *ParameterTreeHandler) SetPermissionService(ps VisibleGroupsResolver) {
+	h.permissionSvc = ps
 }
 
 // resolveMappingValidator 尝试构造当前设备的 MappingValidator。
@@ -238,7 +239,7 @@ func (h *ParameterTreeHandler) GetParameterTree(c *gin.Context) {
 		return
 	}
 
-	if !authorizeDeviceAccess(c, h.deviceService, h.permService, id) {
+	if !authorizeDeviceAccess(c, h.deviceService, h.permissionSvc, id) {
 		return
 	}
 
@@ -291,7 +292,7 @@ func (h *ParameterTreeHandler) SearchParameters(c *gin.Context) {
 		return
 	}
 
-	if !authorizeDeviceAccess(c, h.deviceService, h.permService, id) {
+	if !authorizeDeviceAccess(c, h.deviceService, h.permissionSvc, id) {
 		return
 	}
 
@@ -449,7 +450,7 @@ func (h *ParameterTreeHandler) GetSyncStatus(c *gin.Context) {
 		return
 	}
 
-	if !authorizeDeviceAccess(c, h.deviceService, h.permService, id) {
+	if !authorizeDeviceAccess(c, h.deviceService, h.permissionSvc, id) {
 		return
 	}
 
@@ -758,7 +759,7 @@ func (h *ParameterTreeHandler) GetDirectChildren(c *gin.Context) {
 		return
 	}
 
-	if !authorizeDeviceAccess(c, h.deviceService, h.permService, id) {
+	if !authorizeDeviceAccess(c, h.deviceService, h.permissionSvc, id) {
 		return
 	}
 
@@ -876,7 +877,7 @@ func (h *ParameterTreeHandler) GetParameterSchema(c *gin.Context) {
 		return
 	}
 
-	if !authorizeDeviceAccess(c, h.deviceService, h.permService, id) {
+	if !authorizeDeviceAccess(c, h.deviceService, h.permissionSvc, id) {
 		return
 	}
 
@@ -939,6 +940,7 @@ func (h *ParameterTreeHandler) GetParameterSchema(c *gin.Context) {
 // 这些字段在响应里会留空（向前兼容）。
 func mergeSchemaWithValues(mv *parammodel.MappingValidator, params []model.DeviceParameter, pathPrefix string) []ParameterSchemaItem {
 	items := make([]ParameterSchemaItem, 0, len(params))
+	seen := make(map[string]struct{}, len(params))
 
 	for _, p := range params {
 		if pathPrefix != "" && !strings.HasPrefix(p.ParameterPath, pathPrefix) {
@@ -964,8 +966,76 @@ func mergeSchemaWithValues(mv *parammodel.MappingValidator, params []model.Devic
 		}
 
 		items = append(items, item)
+		seen[item.Path] = struct{}{}
+	}
+
+	if mv == nil || pathPrefix == "" {
+		return items
+	}
+
+	for _, def := range mv.Mappings() {
+		if def.EntryType != "parameter" {
+			continue
+		}
+		privatePath, ok := instantiatePrivatePathForPrefix(def.PrivatePath, pathPrefix)
+		if !ok || !strings.HasPrefix(privatePath, pathPrefix) {
+			continue
+		}
+		if _, exists := seen[privatePath]; exists {
+			continue
+		}
+		items = append(items, ParameterSchemaItem{
+			Path:          privatePath,
+			Type:          def.DataType,
+			Writable:      parammodel.IsAccessWritable(def.Access),
+			ChangeApplies: def.ChangeApplies,
+			Constraints:   constraintsFromMapping(&def),
+		})
+		seen[privatePath] = struct{}{}
 	}
 	return items
+}
+
+func instantiatePrivatePathForPrefix(template, pathPrefix string) (string, bool) {
+	if template == "" {
+		return "", false
+	}
+	numbers := extractNumericSegments(pathPrefix)
+	parts := strings.Split(template, ".")
+	placeholderCount := 0
+	for _, part := range parts {
+		if part == "{i}" {
+			placeholderCount++
+		}
+	}
+	if placeholderCount == 0 {
+		return template, true
+	}
+	if len(numbers) != placeholderCount {
+		return "", false
+	}
+	idx := 0
+	for i, part := range parts {
+		if part == "{i}" {
+			parts[i] = numbers[idx]
+			idx++
+		}
+	}
+	return strings.Join(parts, "."), true
+}
+
+func extractNumericSegments(path string) []string {
+	parts := strings.Split(path, ".")
+	segments := make([]string, 0, 4)
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		if isNumericName(part) {
+			segments = append(segments, part)
+		}
+	}
+	return segments
 }
 
 // buildObjectSchema 从实际参数路径推断多实例对象 + 用 MappingValidator 补 access / writable。
@@ -987,11 +1057,10 @@ func buildObjectSchema(mv *parammodel.MappingValidator, params []model.DevicePar
 		}
 		// 判断该叶子是否 writable：mapping access 优先，回退到 DB 标记
 		paramWritable := p.Writable
-		if mv != nil {
-			if def := mv.LookupParam(p.ParameterPath); def != nil {
-				paramWritable = parammodel.IsAccessWritable(def.Access)
-			}
+		if def := mv.LookupParam(p.ParameterPath); def != nil {
+			paramWritable = parammodel.IsAccessWritable(def.Access)
 		}
+
 		refs := extractInstanceRefs(p.ParameterPath)
 		path := p.ParameterPath
 		for _, ref := range refs {
@@ -1018,10 +1087,25 @@ func buildObjectSchema(mv *parammodel.MappingValidator, params []model.DevicePar
 			continue
 		}
 
+		// 全只读对象兜底：BSC 的 DeviceGSM.Bts.{i}.*、TR-181 只读容器等场景，
+		// mapping seed 把所有叶子标 READ_ONLY，每个实例的 wcount 必然 = 0；
+		// 若仍套用 "wcount==0 → phantom 过滤" 会把整个对象的真实实例全删空，
+		// 前端选择器永远 0 实例（实际现网 18-06 BTS=254 的根因之一）。
+		// 判定：对象内所有实例 wcount=0 → 对象是 "全只读" → 不过滤；
+		// 对象内至少有一个实例 wcount>0 → 用老 phantom 规则剔除 wcount=0 的伪槽位。
+		allReadOnly := true
+		for _, w := range instCounts {
+			if w > 0 {
+				allReadOnly = false
+				break
+			}
+		}
+
 		instances := make([]int, 0, len(instCounts))
 		for inst, wcount := range instCounts {
-			// mv==nil（部分单元测试）退化为不过滤；生产路径总有 mv，全只读 phantom 过滤生效。
-			if mv != nil && wcount == 0 {
+			// mv==nil（部分单元测试）退化为不过滤；生产路径总有 mv。
+			// allReadOnly=true 时跳过 phantom 过滤（保留全只读对象的全部实例）。
+			if mv != nil && !allReadOnly && wcount == 0 {
 				continue
 			}
 			instances = append(instances, inst)
@@ -1033,13 +1117,11 @@ func buildObjectSchema(mv *parammodel.MappingValidator, params []model.DevicePar
 			CurrentInstances: instances,
 		}
 
-		if mv != nil {
-			if obj := mv.LookupObject(objPrefix); obj != nil {
-				item.Access = obj.Access
-				canWrite := parammodel.IsAccessWritable(obj.Access)
-				item.CanAdd = canWrite
-				item.CanDeleteAny = canWrite && len(instances) > 0
-			}
+		if obj := mv.LookupObject(objPrefix); obj != nil {
+			item.Access = obj.Access
+			canWrite := parammodel.IsAccessWritable(obj.Access)
+			item.CanAdd = canWrite
+			item.CanDeleteAny = canWrite && len(instances) > 0
 		}
 
 		items = append(items, item)

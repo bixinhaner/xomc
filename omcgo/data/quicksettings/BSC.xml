@@ -1,69 +1,76 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  BSC paramModel 快速设置（GSM）。
+  BSC paramModel(GSM 2G) 快速设置 - 5 group 结构（按用户老系统截图重组）。
 
-  分组结构（XML 驱动 InstanceSelectorForm 5 折叠面板 UI）：
-    bsc-bts-access      table   ← BTS 接入参数（实例选择器，列：IPA/UnitID/RemoteIP）
-    bsc-bts-config      form    ← BTS Config 折叠面板（19 字段）
-    bsc-bts-handover    form    ← Handover 折叠面板（21 字段）
-    bsc-bts-neighbor4g  subtable← 4G Neighbor 子表
-    bsc-bts-neighbor2g  subtable← 2G Neighbor 子表
-    bsc-bts-trx         subtable← Trx 子表（行级编辑）
+  设计：
+    1. BTS Config       单实例 form - 接入/基础/小区 19 字段（含 NeighborListMode）
+    2. Handover         单实例 form - 切换公共/算法1/算法2 共 21 字段
+    3. 4G Neighbor      多实例 table - DeviceGSM.Bts.{i}.Neighbor4G.{i}.{leaf}
+    4. 2G Neighbor      多实例 table - DeviceGSM.Bts.{i}.Neighbor2G.{i}.{leaf}
+    5. Trx              多实例 table - DeviceGSM.Bts.{i}.Trx.{i}.{leaf}
 
-  实例号占位:
-    {i} = 顶层 BTS 实例号（由 bsc-bts-access 选择器控制）
-    {j} = 子对象实例号（subtable 内部行）
+  形态约定：
+    - form group：仅 standardPath（完整含 {i}），不含 objectPath；前端按选中 BTS 实例
+      把 {i} 替换为 btsInstance；schema 字典自动给出 range hint。
+    - multi group：BLQ 经典写法 objectPath 含两层 {i}（外=BTS，内=子实例行号），
+      param 只填 leaf；MultiInstanceTable 自动行级增删 + 列内单元格保存。
+
+  顶部 BTS 实例选择器复用 BLQ 机制，已支持 ＋/✖ 增删 DeviceGSM.Bts.{i}.。
 -->
 <quickSettings paramModel="BSC">
 
-  <!-- ========== BTS 接入参数 (顶部 MultiInstanceTable + 实例选择器) ========== -->
-  <group id="bsc-bts-access" titleZh="BTS 接入参数" titleEn="BTS Access Settings"
-         multiInstance="true" maxInstances="256" style="table"
-         objectPath="DeviceGSM.Bts.{i}.">
-    <param name="IPA" titleZh="IPA" titleEn="IPA" leaf="OmlIpaStreamId" type="string"/>
-    <param name="UnitID" titleZh="Unit ID" titleEn="Unit ID" leaf="IpaUnitId" type="string"/>
-    <param name="RemoteIP" titleZh="Remote IP" titleEn="Remote IP" leaf="IpaRslIp" type="string"
-           hint="Range: Only supports IPv4 addresses"/>
-  </group>
+  <!-- ============ 1. BTS Config 大表单（19 字段，3 列布局自动） ============ -->
+  <group id="bsc-bts-config" titleZh="BTS 配置" titleEn="BTS Config">
+    <param name="ID" titleZh="BTS ID" titleEn="ID"
+           standardPath="DeviceGSM.Bts.{i}.ID" readonly="true"/>
+    <param name="NumofTrxChannel" titleZh="TRX 信道数" titleEn="NumofTrxChannel"
+           standardPath="DeviceGSM.Bts.{i}.NumofTrxChannel" readonly="true"/>
+    <param name="OmlConnectState" titleZh="OML 连接状态" titleEn="OmlConnectState"
+           standardPath="DeviceGSM.Bts.{i}.OmlConnectState" readonly="true"/>
 
-  <!-- ========== BTS Config (form 面板) ========== -->
-  <group id="bsc-bts-config" titleZh="BTS Config" titleEn="BTS Config"
-         multiInstance="true" style="form" parentSelector="bsc-bts-access"
-         objectPath="DeviceGSM.Bts.{i}.">
-    <param name="ID" titleZh="ID" titleEn="ID" leaf="ID" type="int" readonly="true"/>
-    <param name="NumofTrxChannel" titleZh="NumofTrxChannel" titleEn="NumofTrxChannel" leaf="NumofTrxChannel" type="int" readonly="true"/>
-    <param name="OmlConnectState" titleZh="OmlConnectState" titleEn="OmlConnectState" leaf="OmlConnectState" type="string" readonly="true"/>
-    <param name="LocationAreaCode" titleZh="LocationAreaCode" titleEn="LocationAreaCode" leaf="LocationAreaCode" type="int"
-           required="true" minValue="0" maxValue="65535" hint="Range: 0-65535 Integer"/>
-    <param name="Bsic" titleZh="Bsic" titleEn="Bsic" leaf="Bsic" type="int"
-           required="true" minValue="0" maxValue="63" hint="Range: 0-63 Integer"/>
-    <param name="IpaUnitId" titleZh="IpaUnitId" titleEn="IpaUnitId" leaf="IpaUnitId" type="string"/>
-    <param name="IpaRslIp" titleZh="IpaRslIp" titleEn="IpaRslIp" leaf="IpaRslIp" type="string"
-           required="true" hint="Range: Only supports IPv4 addresses"/>
-    <param name="OmlIpaStreamId" titleZh="OmlIpaStreamId" titleEn="OmlIpaStreamId" leaf="OmlIpaStreamId" type="string"/>
-    <param name="Band" titleZh="Band" titleEn="Band" leaf="Band" type="string" readonly="true"/>
-    <param name="CellId" titleZh="CellId" titleEn="CellId" leaf="CellId" type="int"
-           required="true" minValue="0" maxValue="65535" hint="Range: 0-65535 Integer"/>
-    <param name="MsMaxPower" titleZh="MsMaxPower" titleEn="MsMaxPower" leaf="MsMaxPower" type="int"
-           required="true" minValue="0" maxValue="40" hint="Range: 0-40 Integer"/>
-    <param name="GprsMode" titleZh="GprsMode" titleEn="GprsMode" leaf="GprsMode" type="enum">
+    <param name="LocationAreaCode" titleZh="位置区码 (LAC)" titleEn="LocationAreaCode"
+           standardPath="DeviceGSM.Bts.{i}.LocationAreaCode"/>
+    <param name="Bsic" titleZh="基站识别码 (BSIC)" titleEn="Bsic"
+           standardPath="DeviceGSM.Bts.{i}.Bsic"/>
+    <param name="IpaUnitId" titleZh="IPA 单元 ID" titleEn="IpaUnitId"
+           standardPath="DeviceGSM.Bts.{i}.IpaUnitId"/>
+
+    <param name="IpaRslIp" titleZh="IPA RSL IP" titleEn="IpaRslIp"
+           standardPath="DeviceGSM.Bts.{i}.IpaRslIp"/>
+    <param name="OmlIpaStreamId" titleZh="OML IPA 流 ID" titleEn="OmlIpaStreamId"
+           standardPath="DeviceGSM.Bts.{i}.OmlIpaStreamId"/>
+    <param name="Band" titleZh="频段" titleEn="Band"
+           standardPath="DeviceGSM.Bts.{i}.Band" readonly="true"/>
+
+    <param name="CellId" titleZh="小区 ID" titleEn="CellId"
+           standardPath="DeviceGSM.Bts.{i}.CellId"/>
+    <param name="MsMaxPower" titleZh="终端最大功率" titleEn="MsMaxPower"
+           standardPath="DeviceGSM.Bts.{i}.MsMaxPower"/>
+    <param name="GprsMode" titleZh="GPRS 模式" titleEn="GprsMode"
+           standardPath="DeviceGSM.Bts.{i}.GprsMode" type="enum">
       <option value="egprs"/>
       <option value="gprs"/>
       <option value="none"/>
     </param>
-    <param name="C0PowerRed" titleZh="C0PowerRed" titleEn="C0PowerRed" leaf="C0PowerRed" type="enum">
+
+    <param name="C0PowerRed" titleZh="C0 功率衰减" titleEn="C0PowerRed"
+           standardPath="DeviceGSM.Bts.{i}.C0PowerRed" type="enum">
       <option value="0"/><option value="1"/><option value="2"/><option value="3"/><option value="4"/>
       <option value="5"/><option value="6"/><option value="7"/><option value="8"/><option value="9"/><option value="10"/>
     </param>
-    <param name="NeighborListMode" titleZh="NeighborListMode" titleEn="NeighborListMode" leaf="NeighborListMode" type="enum">
+    <param name="NeighborListMode" titleZh="邻区列表模式" titleEn="NeighborListMode"
+           standardPath="DeviceGSM.Bts.{i}.NeighborListMode" type="enum">
       <option value="automatic"/>
       <option value="manual"/>
     </param>
-    <param name="CellReselectOffset" titleZh="CellReselectOffset" titleEn="CellReselectOffset" leaf="CellReselectOffset" type="enum">
+    <param name="CellReselectOffset" titleZh="小区重选偏移" titleEn="CellReselectOffset"
+           standardPath="DeviceGSM.Bts.{i}.CellReselectOffset" type="enum">
       <option value="0"/><option value="1"/><option value="2"/><option value="3"/>
       <option value="4"/><option value="5"/><option value="6"/><option value="7"/>
     </param>
-    <param name="CellReselectPenaltyTime" titleZh="CellReselectPenaltyTime" titleEn="CellReselectPenaltyTime" leaf="CellReselectPenaltyTime" type="enum">
+
+    <param name="CellReselectPenaltyTime" titleZh="小区重选惩罚时间" titleEn="CellReselectPenaltyTime"
+           standardPath="DeviceGSM.Bts.{i}.CellReselectPenaltyTime" type="enum">
       <option value="0"/><option value="10"/><option value="20"/><option value="30"/><option value="40"/>
       <option value="50"/><option value="60"/><option value="70"/><option value="80"/><option value="90"/>
       <option value="100"/><option value="110"/><option value="120"/><option value="130"/><option value="140"/>
@@ -72,120 +79,138 @@
       <option value="250"/><option value="260"/><option value="270"/><option value="280"/><option value="290"/>
       <option value="300"/><option value="310"/>
     </param>
-    <param name="CellReselectHysteresis" titleZh="CellReselectHysteresis" titleEn="CellReselectHysteresis" leaf="CellReselectHysteresis" type="enum">
+    <param name="CellReselectHysteresis" titleZh="小区重选迟滞" titleEn="CellReselectHysteresis"
+           standardPath="DeviceGSM.Bts.{i}.CellReselectHysteresis" type="enum">
       <option value="0"/><option value="1"/><option value="2"/><option value="3"/>
       <option value="4"/><option value="5"/><option value="6"/><option value="7"/>
     </param>
-    <param name="RachCellBarred" titleZh="RachCellBarred" titleEn="RachCellBarred" leaf="RachCellBarred" type="enum">
+    <param name="RachCellBarred" titleZh="RACH 小区禁入" titleEn="RachCellBarred"
+           standardPath="DeviceGSM.Bts.{i}.RachCellBarred" type="enum">
       <option value="0"/>
       <option value="1"/>
     </param>
-    <param name="CodecSupport" titleZh="CodecSupport" titleEn="CodecSupport" leaf="CodecSupport"
+
+    <param name="CodecSupport" titleZh="编解码支持" titleEn="CodecSupport"
+           standardPath="DeviceGSM.Bts.{i}.CodecSupport"
            type="multiCheckbox" checkboxOptions="fr,hr,efr,amr"/>
   </group>
 
-  <!-- ========== Handover (form 面板) ========== -->
-  <group id="bsc-bts-handover" titleZh="Handover" titleEn="Handover"
-         multiInstance="true" style="form" parentSelector="bsc-bts-access"
-         objectPath="DeviceGSM.Bts.{i}.">
-    <param name="handover" titleZh="handover" titleEn="handover" leaf="handover" type="enum">
+  <!-- ============ 2. Handover 大表单（21 字段，含 handover+算法1+算法2） ============ -->
+  <group id="bsc-bts-handover" titleZh="切换配置" titleEn="Handover">
+    <param name="handover" titleZh="切换开关" titleEn="handover"
+           standardPath="DeviceGSM.Bts.{i}.handover" type="enum">
       <option value="Allow"/>
       <option value="Forbid"/>
     </param>
-    <param name="HandoverAlgorithm" titleZh="HandoverAlgorithm" titleEn="HandoverAlgorithm" leaf="HandoverAlgorithm" type="enum">
+    <param name="HandoverAlgorithm" titleZh="切换算法版本" titleEn="HandoverAlgorithm"
+           standardPath="DeviceGSM.Bts.{i}.HandoverAlgorithm" type="enum">
       <option value="1"/>
       <option value="2"/>
     </param>
-    <param name="handover1.maximum.distance" titleZh="handover1.maximum.distance" titleEn="handover1.maximum.distance" leaf="handover1.maximum.distance"
-           type="int" required="true" minValue="0" maxValue="9999" hint="Range: 0-9999 Integer"/>
-    <param name="handover1.power.budget.hysteresis" titleZh="handover1.power.budget.hysteresis" titleEn="handover1.power.budget.hysteresis" leaf="handover1.power.budget.hysteresis"
-           type="int" required="true" minValue="0" maxValue="999" hint="Range: 0-999 Integer"/>
-    <param name="handover1.power.budget.interval" titleZh="handover1.power.budget.interval" titleEn="handover1.power.budget.interval" leaf="handover1.power.budget.interval"
-           type="int" required="true" minValue="1" maxValue="99" hint="Range: 1-99 Integer"/>
-    <param name="handover1.window.rxlev.averaging" titleZh="handover1.window.rxlev.averaging" titleEn="handover1.window.rxlev.averaging" leaf="handover1.window.rxlev.averaging" type="enum">
+    <param name="handover1.maximum.distance" titleZh="算法1 最大距离" titleEn="handover1.maximum.distance"
+           standardPath="DeviceGSM.Bts.{i}.handover1.maximum.distance"/>
+
+    <param name="handover1.power.budget.hysteresis" titleZh="算法1 功率预算迟滞" titleEn="handover1.power.budget.hysteresis"
+           standardPath="DeviceGSM.Bts.{i}.handover1.power.budget.hysteresis"/>
+    <param name="handover1.power.budget.interval" titleZh="算法1 功率预算评估间隔" titleEn="handover1.power.budget.interval"
+           standardPath="DeviceGSM.Bts.{i}.handover1.power.budget.interval"/>
+    <param name="handover1.window.rxlev.averaging" titleZh="算法1 RXLEV 平均窗" titleEn="handover1.window.rxlev.averaging" type="enum"
+           standardPath="DeviceGSM.Bts.{i}.handover1.window.rxlev.averaging">
       <option value="1"/><option value="2"/><option value="3"/><option value="4"/>
       <option value="5"/><option value="6"/><option value="7"/><option value="8"/>
       <option value="9"/><option value="10"/><option value="11"/><option value="12"/>
       <option value="13"/><option value="14"/><option value="15"/><option value="16"/>
     </param>
-    <param name="handover1.window.rxlev.neighbor.averaging" titleZh="handover1.window.rxlev.neighbor.averaging" titleEn="handover1.window.rxlev.neighbor.averaging" leaf="handover1.window.rxlev.neighbor.averaging" type="enum">
+
+    <param name="handover1.window.rxlev.neighbor.averaging" titleZh="算法1 邻区 RXLEV 平均窗" titleEn="handover1.window.rxlev.neighbor.averaging" type="enum"
+           standardPath="DeviceGSM.Bts.{i}.handover1.window.rxlev.neighbor.averaging">
       <option value="1"/><option value="2"/><option value="3"/><option value="4"/>
       <option value="5"/><option value="6"/><option value="7"/><option value="8"/>
       <option value="9"/><option value="10"/><option value="11"/><option value="12"/>
       <option value="13"/><option value="14"/><option value="15"/><option value="16"/>
     </param>
-    <param name="handover1.window.rxqual.averaging" titleZh="handover1.window.rxqual.averaging" titleEn="handover1.window.rxqual.averaging" leaf="handover1.window.rxqual.averaging" type="enum">
+    <param name="handover1.window.rxqual.averaging" titleZh="算法1 RXQUAL 平均窗" titleEn="handover1.window.rxqual.averaging" type="enum"
+           standardPath="DeviceGSM.Bts.{i}.handover1.window.rxqual.averaging">
       <option value="1"/><option value="2"/><option value="3"/><option value="4"/>
       <option value="5"/><option value="6"/><option value="7"/><option value="8"/>
       <option value="9"/><option value="10"/><option value="11"/><option value="12"/>
       <option value="13"/><option value="14"/><option value="15"/><option value="16"/>
     </param>
-    <param name="handover2.afs-bias.rxlev" titleZh="handover2.afs-bias.rxlev" titleEn="handover2.afs-bias.rxlev" leaf="handover2.afs-bias.rxlev" type="enum">
+    <param name="handover2.afs-bias.rxlev" titleZh="算法2 AFS RXLEV 偏置" titleEn="handover2.afs-bias.rxlev" type="enum"
+           standardPath="DeviceGSM.Bts.{i}.handover2.afs-bias.rxlev">
       <option value="0"/><option value="1"/><option value="2"/><option value="3"/>
       <option value="4"/><option value="5"/><option value="6"/><option value="7"/>
     </param>
-    <param name="handover2.afs-bias.rxqual" titleZh="handover2.afs-bias.rxqual" titleEn="handover2.afs-bias.rxqual" leaf="handover2.afs-bias.rxqual" type="enum">
+
+    <param name="handover2.afs-bias.rxqual" titleZh="算法2 AFS RXQUAL 偏置" titleEn="handover2.afs-bias.rxqual" type="enum"
+           standardPath="DeviceGSM.Bts.{i}.handover2.afs-bias.rxqual">
       <option value="0"/><option value="1"/><option value="2"/><option value="3"/>
       <option value="4"/><option value="5"/><option value="6"/><option value="7"/>
     </param>
-    <param name="handover2_assignment" titleZh="handover2_assignment" titleEn="handover2_assignment" leaf="handover2_assignment" type="enum">
+    <param name="handover2_assignment" titleZh="算法2 指配触发" titleEn="handover2_assignment" type="enum"
+           standardPath="DeviceGSM.Bts.{i}.handover2_assignment">
       <option value="0"/>
       <option value="1"/>
     </param>
-    <param name="handover2.max-handovers" titleZh="handover2.max-handovers" titleEn="handover2.max-handovers" leaf="handover2.max-handovers"
-           type="int" required="true" minValue="1" maxValue="9999" hint="Range: 1-9999 Integer"/>
-    <param name="handover2.maximum.distance" titleZh="handover2.maximum.distance" titleEn="handover2.maximum.distance" leaf="handover2.maximum.distance"
-           type="int" required="true" minValue="0" maxValue="9999" hint="Range: 0-9999 Integer"/>
-    <param name="handover2.min.rxlev" titleZh="handover2.min.rxlev" titleEn="handover2.min.rxlev" leaf="handover2.min.rxlev"
-           type="int" required="true" minValue="-110" maxValue="-50" hint="Range: (-110)-(-50) Integer"/>
-    <param name="handover2.min.rxqual" titleZh="handover2.min.rxqual" titleEn="handover2.min.rxqual" leaf="handover2.min.rxqual" type="enum">
+    <param name="handover2.max-handovers" titleZh="算法2 最大切换数" titleEn="handover2.max-handovers"
+           standardPath="DeviceGSM.Bts.{i}.handover2.max-handovers"/>
+
+    <param name="handover2.maximum.distance" titleZh="算法2 最大距离" titleEn="handover2.maximum.distance"
+           standardPath="DeviceGSM.Bts.{i}.handover2.maximum.distance"/>
+    <param name="handover2.min.rxlev" titleZh="算法2 最低 RXLEV" titleEn="handover2.min.rxlev"
+           standardPath="DeviceGSM.Bts.{i}.handover2.min.rxlev"/>
+    <param name="handover2.min.rxqual" titleZh="算法2 最低 RXQUAL" titleEn="handover2.min.rxqual" type="enum"
+           standardPath="DeviceGSM.Bts.{i}.handover2.min.rxqual">
       <option value="0"/><option value="1"/><option value="2"/><option value="3"/>
       <option value="4"/><option value="5"/><option value="6"/><option value="7"/>
     </param>
-    <param name="handover2.min-free-slots.tch-f" titleZh="handover2.min-free-slots.tch-f" titleEn="handover2.min-free-slots.tch-f" leaf="handover2.min-free-slots.tch-f"
-           type="int" required="true" minValue="0" maxValue="9999" hint="Range: 0-9999 Integer"/>
-    <param name="handover2.min-free-slots.tch-h" titleZh="handover2.min-free-slots.tch-h" titleEn="handover2.min-free-slots.tch-h" leaf="handover2.min-free-slots.tch-h"
-           type="int" required="true" minValue="0" maxValue="9999" hint="Range: 0-9999 Integer"/>
-    <param name="handover2.penalty-time.failed-assignment" titleZh="handover2.penalty-time.failed-assignment" titleEn="handover2.penalty-time.failed-assignment" leaf="handover2.penalty-time.failed-assignment"
-           type="int" required="true" minValue="0" maxValue="99999" hint="Range: 0-99999 Integer"/>
-    <param name="handover2.penalty-time.failed-ho" titleZh="handover2.penalty-time.failed-ho" titleEn="handover2.penalty-time.failed-ho" leaf="handover2.penalty-time.failed-ho"
-           type="int" required="true" minValue="0" maxValue="99999"/>
-    <param name="handover2.penalty-time.low-rxqual-assignment" titleZh="handover2.penalty-time.low-rxqual-assignment" titleEn="handover2.penalty-time.low-rxqual-assignment" leaf="handover2.penalty-time.low-rxqual-assignment"
-           type="int" required="true" minValue="0" maxValue="99999"/>
-    <param name="handover2.penalty-time.low-rxqual-ho" titleZh="handover2.penalty-time.low-rxqual-ho" titleEn="handover2.penalty-time.low-rxqual-ho" leaf="handover2.penalty-time.low-rxqual-ho"
-           type="int" required="true" minValue="0" maxValue="99999"/>
+
+    <param name="handover2.min-free-slots.tch-f" titleZh="算法2 TCH/F 最少空闲时隙" titleEn="handover2.min-free-slots.tch-f"
+           standardPath="DeviceGSM.Bts.{i}.handover2.min-free-slots.tch-f"/>
+    <param name="handover2.min-free-slots.tch-h" titleZh="算法2 TCH/H 最少空闲时隙" titleEn="handover2.min-free-slots.tch-h"
+           standardPath="DeviceGSM.Bts.{i}.handover2.min-free-slots.tch-h"/>
+    <param name="handover2.penalty-time.failed-assignment" titleZh="算法2 指配失败惩罚时间" titleEn="handover2.penalty-time.failed-assignment"
+           standardPath="DeviceGSM.Bts.{i}.handover2.penalty-time.failed-assignment"/>
+
+    <param name="handover2.penalty-time.failed-ho" titleZh="算法2 切换失败惩罚时间" titleEn="handover2.penalty-time.failed-ho"
+           standardPath="DeviceGSM.Bts.{i}.handover2.penalty-time.failed-ho"/>
+    <param name="handover2.penalty-time.low-rxqual-assignment" titleZh="算法2 低 RXQUAL 指配惩罚" titleEn="handover2.penalty-time.low-rxqual-assignment"
+           standardPath="DeviceGSM.Bts.{i}.handover2.penalty-time.low-rxqual-assignment"/>
+    <param name="handover2.penalty-time.low-rxqual-ho" titleZh="算法2 低 RXQUAL 切换惩罚" titleEn="handover2.penalty-time.low-rxqual-ho"
+           standardPath="DeviceGSM.Bts.{i}.handover2.penalty-time.low-rxqual-ho"/>
   </group>
 
-  <!-- ========== 4G Neighbor 子表 ========== -->
-  <group id="bsc-bts-neighbor4g" titleZh="4G Neighbor" titleEn="4G Neighbor"
-         multiInstance="true" style="subtable" parentSelector="bsc-bts-access"
-         objectPath="DeviceGSM.Bts.{i}.Neighbor4G.{j}.">
-    <param name="earfcn" titleZh="earfcn" titleEn="earfcn" leaf="earfcn" type="string"/>
-    <param name="thresh-hi" titleZh="thresh-hi" titleEn="thresh-hi" leaf="thresh-hi" type="string"/>
-    <param name="thresh-lo" titleZh="thresh-lo" titleEn="thresh-lo" leaf="thresh-lo" type="string"/>
-    <param name="prio" titleZh="prio" titleEn="prio" leaf="prio" type="string"/>
-    <param name="qrxlv" titleZh="qrxlv" titleEn="qrxlv" leaf="qrxlv" type="string"/>
-    <param name="meas" titleZh="meas" titleEn="meas" leaf="meas" type="string"/>
+  <!-- ============ 3. 4G Neighbor 多实例表（每 BTS 下 N 条 4G 邻区） ============ -->
+  <group id="bsc-bts-neighbor4g" titleZh="4G 邻区" titleEn="4G Neighbor"
+         multiInstance="true" maxInstances="32"
+         objectPath="DeviceGSM.Bts.{i}.Neighbor4G.{i}.">
+    <param name="earfcn"    titleZh="EARFCN"    titleEn="earfcn"    leaf="earfcn"/>
+    <param name="thresh-hi" titleZh="高门限"     titleEn="thresh-hi" leaf="thresh-hi"/>
+    <param name="thresh-lo" titleZh="低门限"     titleEn="thresh-lo" leaf="thresh-lo"/>
+    <param name="prio"      titleZh="优先级"     titleEn="prio"      leaf="prio"/>
+    <param name="qrxlv"     titleZh="QRxLev 门限" titleEn="qrxlv"    leaf="qrxlv"/>
+    <param name="meas"      titleZh="测量带宽"   titleEn="meas"      leaf="meas"/>
   </group>
 
-  <!-- ========== 2G Neighbor 子表 ========== -->
-  <group id="bsc-bts-neighbor2g" titleZh="2G Neighbor" titleEn="2G Neighbor"
-         multiInstance="true" style="subtable" parentSelector="bsc-bts-access"
-         objectPath="DeviceGSM.Bts.{i}.Neighbor2G.{j}.">
-    <param name="mcc" titleZh="mcc" titleEn="mcc" leaf="mcc" type="string"/>
-    <param name="mnc" titleZh="mnc" titleEn="mnc" leaf="mnc" type="string"/>
-    <param name="lac" titleZh="lac" titleEn="lac" leaf="lac" type="string"/>
-    <param name="ci" titleZh="ci" titleEn="ci" leaf="ci" type="string"/>
-    <param name="arfcn" titleZh="arfcn" titleEn="arfcn" leaf="arfcn" type="string"/>
-    <param name="bsic" titleZh="bsic" titleEn="bsic" leaf="bsic" type="string"/>
+  <!-- ============ 4. 2G Neighbor 多实例表（每 BTS 下 N 条 2G 邻区） ============ -->
+  <group id="bsc-bts-neighbor2g" titleZh="2G 邻区" titleEn="2G Neighbor"
+         multiInstance="true" maxInstances="64"
+         objectPath="DeviceGSM.Bts.{i}.Neighbor2G.{i}.">
+    <param name="mcc"   titleZh="MCC"   titleEn="mcc"   leaf="mcc"/>
+    <param name="mnc"   titleZh="MNC"   titleEn="mnc"   leaf="mnc"/>
+    <param name="lac"   titleZh="LAC"   titleEn="lac"   leaf="lac"/>
+    <param name="ci"    titleZh="CI"    titleEn="ci"    leaf="ci"/>
+    <param name="arfcn" titleZh="ARFCN" titleEn="arfcn" leaf="arfcn"/>
+    <param name="bsic"  titleZh="BSIC"  titleEn="bsic"  leaf="bsic"/>
   </group>
 
-  <!-- ========== Trx 子表（行级编辑） ========== -->
-  <group id="bsc-bts-trx" titleZh="Trx" titleEn="Trx"
-         multiInstance="true" style="subtable" parentSelector="bsc-bts-access"
-         objectPath="DeviceGSM.Bts.{i}.Trx.{j}.">
-    <param name="Arfcn" titleZh="Arfcn" titleEn="Arfcn" leaf="Arfcn" type="string"/>
-    <param name="RfLocked" titleZh="RfLocked" titleEn="RfLocked" leaf="RfLocked" type="string"/>
-    <param name="MaxPowerRed" titleZh="MaxPowerRed" titleEn="MaxPowerRed" leaf="MaxPowerRed" type="string"/>
+  <!-- ============ 5. Trx 多实例表（每 BTS 下 N 个 TRX） ============ -->
+  <group id="bsc-bts-trx" titleZh="TRX 收发信机" titleEn="Trx"
+         multiInstance="true" maxInstances="8"
+         objectPath="DeviceGSM.Bts.{i}.Trx.{i}.">
+    <param name="Arfcn"       titleZh="ARFCN"        titleEn="Arfcn"       leaf="Arfcn"/>
+    <param name="RfLocked"    titleZh="RF 锁定"      titleEn="RfLocked"    leaf="RfLocked"/>
+    <param name="MaxPowerRed" titleZh="最大功率衰减" titleEn="MaxPowerRed" leaf="MaxPowerRed"/>
   </group>
+
 </quickSettings>

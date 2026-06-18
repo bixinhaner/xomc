@@ -143,7 +143,54 @@ func TestLoader_ValidationCatches_MissingLeafForMultiInstance(t *testing.T) {
 	loader := NewLoader(appconfig.QuickSettingsLoaderConfig{Directory: "quicksettings"}, tmp, reg, nil)
 	_, err := loader.LoadOnce(context.Background())
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "missing leaf")
+	assert.Contains(t, err.Error(), "missing leaf or standardPath")
+}
+
+// TestLoader_MultiInstance_StandardPathDerivesLeaf 验证多实例 group 可以
+// 只写 standardPath，loader 自动按 objectPath 前缀反推 Leaf。
+func TestLoader_MultiInstance_StandardPathDerivesLeaf(t *testing.T) {
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, "quicksettings")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	writeXML(t, dir, "BSC.xml", `<?xml version="1.0" encoding="UTF-8"?>
+<quickSettings paramModel="BSC">
+  <group id="bsc-bts-access" titleZh="BTS 接入" titleEn="BTS Access"
+         multiInstance="true" objectPath="DeviceGSM.Bts.{i}.">
+    <param name="OmlIpaStreamId" titleZh="IPA" titleEn="IPA"
+           standardPath="DeviceGSM.Bts.{i}.OmlIpaStreamId"/>
+  </group>
+</quickSettings>`)
+
+	reg := NewRegistry()
+	loader := NewLoader(appconfig.QuickSettingsLoaderConfig{Directory: "quicksettings"}, tmp, reg, nil)
+	_, err := loader.LoadOnce(context.Background())
+	require.NoError(t, err)
+	bsc := reg.GetByParamModel("BSC")
+	require.Len(t, bsc, 1)
+	require.Len(t, bsc[0].Params, 1)
+	assert.Equal(t, "DeviceGSM.Bts.{i}.OmlIpaStreamId", bsc[0].Params[0].StandardPath)
+	assert.Equal(t, "OmlIpaStreamId", bsc[0].Params[0].Leaf, "loader 应按 objectPath 前缀反推 leaf")
+}
+
+// TestLoader_MultiInstance_StandardPathPrefixMismatch_Rejects 验证 standardPath
+// 与所在 group 的 objectPath 不一致时 loader 拒绝加载。
+func TestLoader_MultiInstance_StandardPathPrefixMismatch_Rejects(t *testing.T) {
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, "quicksettings")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	writeXML(t, dir, "BSC.xml", `<?xml version="1.0" encoding="UTF-8"?>
+<quickSettings paramModel="BSC">
+  <group id="g" titleZh="g" titleEn="g"
+         multiInstance="true" objectPath="DeviceGSM.Bts.{i}.">
+    <param name="x" titleZh="x" titleEn="x" standardPath="Device.Other.X"/>
+  </group>
+</quickSettings>`)
+
+	reg := NewRegistry()
+	loader := NewLoader(appconfig.QuickSettingsLoaderConfig{Directory: "quicksettings"}, tmp, reg, nil)
+	_, err := loader.LoadOnce(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must start with group objectPath")
 }
 
 func TestRegistry_GetByParamModel_IsCopy(t *testing.T) {

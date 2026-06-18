@@ -181,8 +181,23 @@ func buildGroups(doc xmlQuickSettings, fileName string) ([]Group, error) {
 				return nil, fmt.Errorf("%s: group %s has param missing name", fileName, g.ID)
 			}
 			if multi {
-				if p.Leaf == "" {
-					return nil, fmt.Errorf("%s: group %s param %s missing leaf", fileName, g.ID, p.Name)
+				// 多实例 group: leaf 与 standardPath 至少有一个;若给了 standardPath
+				// 但未给 leaf,则按 objectPath 反推 leaf;若同时给了二者,校验一致。
+				if p.Leaf == "" && p.StandardPath == "" {
+					return nil, fmt.Errorf("%s: group %s param %s missing leaf or standardPath", fileName, g.ID, p.Name)
+				}
+				if p.StandardPath != "" {
+					if !strings.HasPrefix(p.StandardPath, g.ObjectPath) {
+						return nil, fmt.Errorf("%s: group %s param %s standardPath %q must start with group objectPath %q",
+							fileName, g.ID, p.Name, p.StandardPath, g.ObjectPath)
+					}
+					derived := strings.TrimPrefix(p.StandardPath, g.ObjectPath)
+					if p.Leaf == "" {
+						p.Leaf = derived
+					} else if p.Leaf != derived {
+						return nil, fmt.Errorf("%s: group %s param %s leaf %q inconsistent with standardPath %q (expect %q)",
+							fileName, g.ID, p.Name, p.Leaf, p.StandardPath, derived)
+					}
 				}
 			} else {
 				if p.StandardPath == "" {
