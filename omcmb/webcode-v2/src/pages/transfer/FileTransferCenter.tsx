@@ -184,7 +184,7 @@ export default function FileTransferCenter() {
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               className="w-64 pl-9"
-              placeholder={view === 'tasks' ? '搜索任务名 / 类型' : '搜索 SN / 设备名'}
+              placeholder={view === 'tasks' ? '搜索任务名 / 类型' : '搜索 SN / 任务名'}
               value={keywordInput}
               onChange={(e) => setKeywordInput(e.target.value)}
               onKeyDown={(e) => {
@@ -422,14 +422,14 @@ function DeviceTable({
   hasActiveFilter: boolean
   onOpenTask: (id: string) => void
 }) {
-  const cols = 8
+  // #529：去掉独立「设备名称」列，跟齐 v1 标准皮肤(设备名并入「所属任务」上下文，不作独立列)。
+  const cols = 7
   return (
     <TableCard>
       <Table>
         <TableHeader>
           <TableRow>
             <TableHead>设备 SN</TableHead>
-            <TableHead>设备名称</TableHead>
             <TableHead>所属任务</TableHead>
             <TableHead>产品型号</TableHead>
             <TableHead>版本 (当前→目标)</TableHead>
@@ -452,9 +452,6 @@ function DeviceTable({
               <TableRow key={d.id}>
                 <TableCell>
                   <span className="font-mono text-xs">{d.deviceSn || '—'}</span>
-                </TableCell>
-                <TableCell>
-                  <span className="text-sm">{d.deviceName || '—'}</span>
                 </TableCell>
                 <TableCell>
                   <button

@@ -4847,7 +4847,7 @@ const messages: Record<string, string> = {
   'ufte.form.devicesMissingSnapshot':         '{count} device(s) have no available snapshot — batch cannot be submitted',
   'ufte.batchSnModal.hint':                   'Multiple SNs can be separated by semicolons (;), commas (,), spaces or newlines; duplicates and blanks are ignored. SNs not in the current candidate list will be reported after submission.',
   'ufte.search.tasks':                        'Search by task name or type',
-  'ufte.search.devices':                      'Search by device name, SN or task name',
+  'ufte.search.devices':                      'Search by SN or task name',
   'ufte.filter.status':                       'Filter by status',
   'ufte.filter.productType':                  'Filter by product name',
   'ufte.form.taskName':                       'Task Name',
