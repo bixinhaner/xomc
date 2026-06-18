@@ -118,7 +118,11 @@ func (h *Handler) ListTasks(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
-	result, err := h.service.ListTasks(c.Request.Context(), filter)
+	visibleGroups, ok := h.resolver.FromContext(c) // #63 设备组可见性
+	if !ok {
+		return
+	}
+	result, err := h.service.ListTasks(c.Request.Context(), filter, visibleGroups)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
@@ -164,7 +168,11 @@ func (h *Handler) ListDevices(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
-	result, err := h.service.ListDevices(c.Request.Context(), filter)
+	visibleGroups, ok := h.resolver.FromContext(c) // #63 设备组可见性
+	if !ok {
+		return
+	}
+	result, err := h.service.ListDevices(c.Request.Context(), filter, visibleGroups)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
@@ -241,6 +249,11 @@ func (h *Handler) ExportDevices(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
+	// #63 设备组可见性——必须在写出 200/header 之前解析，FromContext 失败会 abort 403。
+	visibleGroups, ok := h.resolver.FromContext(c)
+	if !ok {
+		return
+	}
 
 	stamp := time.Now().Format("20060102-150405")
 	c.Header("Content-Type", "text/csv; charset=utf-8")
@@ -280,7 +293,7 @@ func (h *Handler) ExportDevices(c *gin.Context) {
 
 	rowCount := 0
 	const flushEvery = 500
-	streamErr := h.service.StreamDeviceItems(c.Request.Context(), filter,
+	streamErr := h.service.StreamDeviceItems(c.Request.Context(), filter, visibleGroups,
 		func(it DeviceItem) error {
 			var row []string
 			// 产品列与页面口径一致（#492/#524）：优先展示 ProductRegistry 解析出的产品英文名
@@ -489,7 +502,11 @@ func (h *Handler) ListDeviceCandidates(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
-	result, err := h.service.ListDeviceCandidates(c.Request.Context(), filter)
+	visibleGroups, ok := h.resolver.FromContext(c) // #63 设备组可见性
+	if !ok {
+		return
+	}
+	result, err := h.service.ListDeviceCandidates(c.Request.Context(), filter, visibleGroups)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return

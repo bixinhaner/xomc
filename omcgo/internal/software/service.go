@@ -631,6 +631,32 @@ func BuildDirectDispatchCommandKey(typeCode string, upgradeTaskID uuid.UUID, dev
 	return fmt.Sprintf("%s_%s_%s", typeCode, tid, deviceSN)
 }
 
+// listAllSubTasksByTaskID 翻页取「任务的全部子任务」。ListByTaskID 单页上限 100、
+// 默认仅首页 20——凡是"按任务遍历全部子任务"的逻辑（Resume 恢复 / finalize 状态推进 /
+// file-landed 按 device_id 反查）不翻页就会漏掉第 21+ 台设备。statuses 非空时只取
+// 这些状态的子任务（对齐 Resume 的 pending/suspended 过滤）。
+func listAllSubTasksByTaskID(
+	ctx context.Context, repo SubTaskRepository, taskID uuid.UUID, statuses ...UpgradeState,
+) ([]UpgradeSubTaskWithTaskName, error) {
+	const pageSize = 100
+	items := make([]UpgradeSubTaskWithTaskName, 0)
+	for page := 1; ; page++ {
+		res, err := repo.ListByTaskID(ctx, taskID, SubTaskFilter{
+			TaskID:      taskID,
+			Statuses:    statuses,
+			ListRequest: model.ListRequest{Page: page, PageSize: pageSize},
+		})
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, res.Items...)
+		if page >= res.TotalPages || len(res.Items) == 0 {
+			break
+		}
+	}
+	return items, nil
+}
+
 // FinalizePlaceholderTrackingTask 把一个 suspended 状态的占位任务推进到"已派发"
 // 状态（task=in_progress，sub_tasks=downloading）—— 与 immediate 模式创建后的状态
 // 完全一致。在 UFTE StartTask 内 direct-dispatch 路径派发完后调用。
@@ -644,13 +670,13 @@ func (s *SoftwareService) FinalizePlaceholderTrackingTask(
 	if err := s.taskRepo.UpdateStatus(ctx, taskID, TaskInProgress, ""); err != nil {
 		return fmt.Errorf("update status to in_progress: %w", err)
 	}
-	// 子任务从 pending → downloading
-	page, err := s.subTaskRepo.ListByTaskID(ctx, taskID, SubTaskFilter{})
+	// 子任务从 pending → downloading（翻页取全量：>20 台的任务不能只推进前 20 台）
+	subs, err := listAllSubTasksByTaskID(ctx, s.subTaskRepo, taskID)
 	if err != nil {
 		s.logger.Warn("list sub_tasks for finalize failed", zap.Error(err))
 		return nil
 	}
-	for _, sub := range page.Items {
+	for _, sub := range subs {
 		if sub.Status != UpgradePending {
 			continue // 已不是 pending（可能已 completed/failed 由其他链路推进过）
 		}
@@ -1362,21 +1388,19 @@ func (s *SoftwareService) ResumeUpgrade(ctx context.Context, taskID uuid.UUID) e
 	// 同时接受 Pending 和 Suspended sub-tasks——SuspendUpgrade 修复后会把 active 的
 	// downloading/rebooting 子任务翻成 Suspended，Resume 需要把它们也捞回来。
 	// 这与 ResumeCollect 行为对齐。
-	subResult, err := s.subTaskRepo.ListByTaskID(ctx, taskID, SubTaskFilter{
-		TaskID:   taskID,
-		Statuses: []UpgradeState{UpgradePending, UpgradeSuspended},
-	})
+	// 翻页取全量待恢复子任务：>20 台的任务不能只 resume 前 20 台，其余会卡死。
+	resumable, err := listAllSubTasksByTaskID(ctx, s.subTaskRepo, taskID, UpgradePending, UpgradeSuspended)
 	if err != nil {
 		return fmt.Errorf("list pending/suspended sub-tasks: %w", err)
 	}
 
-	if len(subResult.Items) == 0 {
+	if len(resumable) == 0 {
 		return commonerrors.NewBusinessError(8010, "no pending or suspended sub-tasks to execute", commonerrors.ErrInvalidInput)
 	}
 
-	subTasks := make([]*UpgradeSubTask, len(subResult.Items))
-	for i := range subResult.Items {
-		subTasks[i] = &subResult.Items[i].UpgradeSubTask
+	subTasks := make([]*UpgradeSubTask, len(resumable))
+	for i := range resumable {
+		subTasks[i] = &resumable[i].UpgradeSubTask
 	}
 
 	if err := s.taskRepo.UpdateStatus(ctx, taskID, TaskInProgress, ""); err != nil {
@@ -1515,20 +1539,18 @@ func (s *SoftwareService) ResumeCollect(ctx context.Context, taskID uuid.UUID, t
 
 	// Resume both pending and suspended sub-tasks (suspended = device was offline
 	// when first attempted; they should be retried on resume).
-	subResult, err := s.subTaskRepo.ListByTaskID(ctx, taskID, SubTaskFilter{
-		TaskID:   taskID,
-		Statuses: []UpgradeState{UpgradePending, UpgradeSuspended},
-	})
+	// 翻页取全量：>20 台的采集/备份任务不能只 resume 前 20 台。
+	resumable, err := listAllSubTasksByTaskID(ctx, s.subTaskRepo, taskID, UpgradePending, UpgradeSuspended)
 	if err != nil {
 		return fmt.Errorf("list pending sub-tasks: %w", err)
 	}
-	if len(subResult.Items) == 0 {
+	if len(resumable) == 0 {
 		return commonerrors.NewBusinessError(8010, "no pending sub-tasks to execute", commonerrors.ErrInvalidInput)
 	}
 
-	subTasks := make([]*UpgradeSubTask, len(subResult.Items))
-	for i := range subResult.Items {
-		subTasks[i] = &subResult.Items[i].UpgradeSubTask
+	subTasks := make([]*UpgradeSubTask, len(resumable))
+	for i := range resumable {
+		subTasks[i] = &resumable[i].UpgradeSubTask
 	}
 
 	if err := s.taskRepo.UpdateStatus(ctx, taskID, TaskInProgress, ""); err != nil {

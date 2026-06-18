@@ -283,7 +283,7 @@ func TestService_ListDeviceCandidates_FiltersByProductName(t *testing.T) {
 		TypeCode: "ENB_IMG_UPGRADE",
 		Page:     1,
 		PageSize: 200,
-	})
+	}, nil)
 	require.NoError(t, err)
 	require.Len(t, result.Items, 2)
 	assert.Equal(t, "ENB00001", result.Items[0].DeviceSN)
@@ -298,10 +298,125 @@ func TestService_ListDeviceCandidates_FiltersByProductName(t *testing.T) {
 		ProductName: "甲产品",
 		Page:        1,
 		PageSize:    200,
-	})
+	}, nil)
 	require.NoError(t, err)
 	require.Len(t, narrowed.Items, 1)
 	assert.Equal(t, "ENB00001", narrowed.Items[0].DeviceSN)
+}
+
+// stubGroupReader 满足 authz.GroupReader：按 deviceID 返回其所属设备组。
+type stubGroupReader struct {
+	groups map[uuid.UUID][]uuid.UUID
+	calls  int
+}
+
+func (s *stubGroupReader) GetDeviceGroupIDs(_ context.Context, deviceID uuid.UUID) ([]uuid.UUID, error) {
+	s.calls++
+	return s.groups[deviceID], nil
+}
+
+// TestDeviceVisibility_ThreeStateContract 锁定 #63 读路径设备组过滤的三态语义：
+// 超管(nil)放行全部、空集 fail-closed、限定组按交集放行；并验证 nil 设备 fail-closed
+// 与按 deviceID 缓存（避免大列表重复查库）。
+func TestDeviceVisibility_ThreeStateContract(t *testing.T) {
+	g1 := uuid.New()
+	g2 := uuid.New()
+	devInG1 := uuid.New()
+	devInG2 := uuid.New()
+	reader := &stubGroupReader{groups: map[uuid.UUID][]uuid.UUID{
+		devInG1: {g1},
+		devInG2: {g2},
+	}}
+	svc := &Service{groupReader: reader}
+	ctx := context.Background()
+
+	// 超管 nil → 恒放行，且不查库（calls 不增）。
+	vfNil := svc.newDeviceVisibility(nil)
+	assert.True(t, vfNil.allow(ctx, devInG1))
+	assert.True(t, vfNil.allow(ctx, devInG2))
+	assert.Equal(t, 0, reader.calls, "超管不应触发 groupReader 查询")
+
+	// 空集 → fail-closed，全部不可见。
+	vfEmpty := svc.newDeviceVisibility([]uuid.UUID{})
+	assert.False(t, vfEmpty.allow(ctx, devInG1))
+
+	// 限定 g1 → 仅 g1 下设备可见。
+	vfG1 := svc.newDeviceVisibility([]uuid.UUID{g1})
+	assert.True(t, vfG1.allow(ctx, devInG1))
+	assert.False(t, vfG1.allow(ctx, devInG2))
+
+	// nil 设备 → fail-closed（不泄漏未归组孤儿行）。
+	assert.False(t, vfG1.allow(ctx, uuid.Nil))
+
+	// 缓存命中：同一 deviceID 再判定不应再查库。
+	before := reader.calls
+	assert.True(t, vfG1.allow(ctx, devInG1))
+	assert.Equal(t, before, reader.calls, "重复 deviceID 应命中缓存，不再查库")
+}
+
+// pagingSubTaskRepo 按 ListByTaskID 分页契约切片返回，单页上限 100（与 pg 实现一致），
+// 用于验证 listAllSubTasksByTaskID 会翻页取全量。
+type pagingSubTaskRepo struct {
+	software.SubTaskRepository
+	all []software.UpgradeSubTaskWithTaskName
+}
+
+func (r *pagingSubTaskRepo) ListByTaskID(_ context.Context, _ uuid.UUID, filter software.SubTaskFilter) (*coremodel.ListResponse[software.UpgradeSubTaskWithTaskName], error) {
+	ps := filter.PageSize
+	if ps < 1 {
+		ps = 20
+	}
+	if ps > 100 {
+		ps = 100
+	}
+	page := filter.Page
+	if page < 1 {
+		page = 1
+	}
+	total := len(r.all)
+	start := (page - 1) * ps
+	if start > total {
+		start = total
+	}
+	end := start + ps
+	if end > total {
+		end = total
+	}
+	totalPages := (total + ps - 1) / ps
+	if totalPages == 0 {
+		totalPages = 1
+	}
+	return &coremodel.ListResponse[software.UpgradeSubTaskWithTaskName]{
+		Items: r.all[start:end], Total: int64(total),
+		Page: page, PageSize: ps, TotalPages: totalPages,
+	}, nil
+}
+
+// TestListAllSubTasksByTaskID_PagesBeyondCap 锁定 H3：>100 台的任务必须翻页取全量，
+// 不能被默认首页(20)/单页上限(100)截断——否则归属校验/直接派发漏覆盖尾部设备。
+func TestListAllSubTasksByTaskID_PagesBeyondCap(t *testing.T) {
+	const n = 250
+	all := make([]software.UpgradeSubTaskWithTaskName, n)
+	for i := range all {
+		all[i].DeviceID = uuid.New()
+	}
+	svc := &Service{subTaskRepo: &pagingSubTaskRepo{all: all}}
+
+	got, err := svc.listAllSubTasksByTaskID(context.Background(), uuid.New())
+	require.NoError(t, err)
+	require.Len(t, got, n, "应翻页取回全部 250 条，而非被截断到 20/100")
+}
+
+// TestStartDirectDispatch_RejectsNonResumableStatus 锁定 H2：对非 suspended/pending
+// 的 CONFIG_RESTORE/LICENSE 任务点「开始」必须被拒，避免二次派发（现网重复刷配置）。
+func TestStartDirectDispatch_RejectsNonResumableStatus(t *testing.T) {
+	svc := &Service{}
+	for _, st := range []software.TaskStatus{software.TaskEnded, software.TaskInProgress} {
+		task := &software.UpgradeTask{ID: uuid.New(), Status: st}
+		err := svc.startDirectDispatchTask(context.Background(), task, &TaskType{TypeCode: "CONFIG_RESTORE"})
+		require.Error(t, err, "status=%s 应被拒绝", st)
+		assert.Contains(t, err.Error(), "not suspended or pending")
+	}
 }
 
 // #524：设备列表筛选改按产品名（DeviceItem.ProductName）。matchesDeviceFilter 命中

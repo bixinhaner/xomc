@@ -963,19 +963,19 @@ func (e *UpgradeExecutor) HandleFileLandedForCollect(ctx context.Context, evt ev
 	// 老的 CONFIG_BACKUP / CONFIG_RESTORE pending 没清理），fan-out 直接返回那个，
 	// 永远走不到 fault_log_collect_sub_tasks → 当前 SPV 任务的 sub_task 推不动 →
 	// 反器 15 分钟后兜底标 failed → 用户看到"Awaiting TransferComplete"15 分钟后变失败。
-	listResp, err := e.subTaskRepo.ListByTaskID(ctx, parentID, SubTaskFilter{
-		ListRequest: model.DefaultListRequest(),
-	})
-	if err != nil || listResp == nil {
+	// 翻页取全量子任务再按 device_id 反查：默认页只取前 20 台，>20 台的任务里
+	// 超页设备文件落地后会找不到 sub_task → 推不动 → 15 分钟后被反器误标失败。
+	allSubs, err := listAllSubTasksByTaskID(ctx, e.subTaskRepo, parentID)
+	if err != nil {
 		e.logger.Warn("file landed: list sub_tasks by parent_task_id failed",
 			zap.String("parent_task_id", parentID.String()),
 			zap.Error(err))
 		return nil
 	}
 	var subTask *UpgradeSubTask
-	for i := range listResp.Items {
-		if listResp.Items[i].DeviceID == dev.ID {
-			subTask = &listResp.Items[i].UpgradeSubTask
+	for i := range allSubs {
+		if allSubs[i].DeviceID == dev.ID {
+			subTask = &allSubs[i].UpgradeSubTask
 			break
 		}
 	}
@@ -984,7 +984,7 @@ func (e *UpgradeExecutor) HandleFileLandedForCollect(ctx context.Context, evt ev
 			zap.String("parent_task_id", parentID.String()),
 			zap.String("device_id", dev.ID.String()),
 			zap.String("device_sn", payload.DeviceSN),
-			zap.Int("scanned", len(listResp.Items)))
+			zap.Int("scanned", len(allSubs)))
 		return nil
 	}
 	if subTask.Status != UpgradeUploading {
