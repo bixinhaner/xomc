@@ -6,6 +6,7 @@ import {
   Space,
   Select,
   Input,
+  InputNumber,
   Modal,
   Form,
   message,
@@ -30,6 +31,12 @@ import {
   useUpdateMapping,
   useDeleteMapping,
 } from '@core/hooks/api/useParamModels';
+import {
+  STANDARD_DATA_TYPES,
+  STANDARD_CHANGE_APPLIES,
+  dataTypeRangeKind,
+  isUnsignedDataType,
+} from '@core/types/paramModel';
 import type { ParamMapping, CreateMappingInput, UpdateMappingInput } from '@core/types/paramModel';
 import { makeSeqColumn } from '@/components/Table/seqColumn';
 import {
@@ -144,6 +151,54 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
   }
   const [creating, setCreating] = useState(false);
   const [form] = Form.useForm<CreateMappingInput | UpdateMappingInput>();
+
+  // 当前表单内的 dataType / changeApplies —— 用于动态 label 与历史值兼容（对齐 standard-params 页面）。
+  const watchedDataType = Form.useWatch('dataType', form);
+  const watchedChangeApplies = Form.useWatch('changeApplies', form);
+
+  // dataType 下拉：枚举集 + 若当前编辑/回填值不在枚举内则并入（历史遗留如 STRING/bool 不被静默清空）。
+  const dataTypeOptions = (() => {
+    const opts: { label: string; value: string }[] = STANDARD_DATA_TYPES.map((v) => ({
+      label: v,
+      value: v,
+    }));
+    if (watchedDataType && !STANDARD_DATA_TYPES.includes(watchedDataType as never)) {
+      opts.push({ label: watchedDataType, value: watchedDataType });
+    }
+    return opts;
+  })();
+
+  // changeApplies 下拉：枚举集（显示英文枚举值 Immediate/OnReboot）+ 历史遗留值（如 reload/immediate）并入。
+  const changeAppliesOptions = (() => {
+    const opts: { label: string; value: string }[] = STANDARD_CHANGE_APPLIES.map((v) => ({
+      label: v,
+      value: v,
+    }));
+    if (
+      watchedChangeApplies &&
+      !STANDARD_CHANGE_APPLIES.includes(watchedChangeApplies as never)
+    ) {
+      opts.push({ label: watchedChangeApplies, value: watchedChangeApplies });
+    }
+    return opts;
+  })();
+
+  // min/max 按 dataType 分三档：string→长度，int/unsignedInt→数值，boolean/dateTime→无范围（禁用）。
+  const rangeKind = dataTypeRangeKind(watchedDataType);
+  const rangeNone = rangeKind === 'none';
+  const minLabel =
+    rangeKind === 'length'
+      ? t('product.standardParams.col.minLength')
+      : t('product.standardParams.col.min');
+  const maxLabel =
+    rangeKind === 'length'
+      ? t('product.standardParams.col.maxLength')
+      : t('product.standardParams.col.max');
+  // unsignedInt 下界 0；无范围类型禁用并清空。
+  const minBound = isUnsignedDataType(watchedDataType) ? 0 : undefined;
+  const intPlaceholder = rangeNone
+    ? t('product.standardParams.noRange')
+    : t('product.standardParams.intPlaceholder');
 
   // 条目类型下拉(对齐 standard-params 的 ENTRY_OPTIONS:全部 / parameter / object)
   const ENTRY_FILTER_OPTIONS = [
@@ -263,6 +318,10 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
     if (!selectedName) return;
     try {
       const v = await form.validateFields();
+      // InputNumber 产出 number | undefined / null；后端契约 minValue/maxValue 为字符串，
+      // 这里规整：空(undefined/null/'') → undefined(留空=不校验)，数值 → 字符串。
+      const norm = (n: unknown): string | undefined =>
+        n === undefined || n === null || n === '' ? undefined : String(n);
       const input: CreateMappingInput = {
         standardPath: v.standardPath as string,
         privatePath: v.privatePath as string,
@@ -270,8 +329,8 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
         access: (v.access as string) || 'readWrite',
         dataType: (v.dataType as string) || 'string',
         changeApplies: v.changeApplies,
-        minValue: v.minValue,
-        maxValue: v.maxValue,
+        minValue: norm(v.minValue),
+        maxValue: norm(v.maxValue),
         isStorable: v.isStorable ?? true,
         isActive: v.isActive ?? true,
         softwareVersion: v.softwareVersion,
@@ -335,7 +394,7 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
                 setCreating(true);
                 setEditing(null);
                 form.resetFields();
-                form.setFieldsValue({ entryType: 'parameter', access: 'readWrite', dataType: 'string', changeApplies: 'reload' });
+                form.setFieldsValue({ entryType: 'parameter', access: 'readWrite', dataType: 'string', changeApplies: 'OnReboot' });
               }}
             >
               {t('common.create')}
@@ -430,18 +489,39 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
               <Select options={ACCESS_OPTIONS} style={{ width: 140 }} />
             </Form.Item>
             <Form.Item name="dataType" label={t('product.paramModel.mappings.col.dataType')} rules={[{ required: true }]}>
-              <Input style={{ width: 140 }} placeholder="string / int / bool" />
+              <Select
+                options={dataTypeOptions}
+                style={{ width: 140 }}
+                onChange={(val) => {
+                  // 切到无取值范围类型（boolean/dateTime）时清空 min/max，避免提交残留值。
+                  if (dataTypeRangeKind(val as string) === 'none') {
+                    form.setFieldsValue({ minValue: undefined, maxValue: undefined });
+                  }
+                }}
+              />
             </Form.Item>
           </Space>
           <Space wrap>
             <Form.Item name="changeApplies" label={t('product.paramModel.mappings.col.changeApplies')}>
-              <Input style={{ width: 140 }} placeholder="reload / immediate" />
+              <Select options={changeAppliesOptions} style={{ width: 140 }} />
             </Form.Item>
-            <Form.Item name="minValue" label={t('product.paramModel.mappings.col.min')}>
-              <Input style={{ width: 140 }} />
+            <Form.Item name="minValue" label={minLabel}>
+              <InputNumber
+                precision={0}
+                min={minBound}
+                disabled={rangeNone}
+                placeholder={intPlaceholder}
+                style={{ width: 140 }}
+              />
             </Form.Item>
-            <Form.Item name="maxValue" label={t('product.paramModel.mappings.col.max')}>
-              <Input style={{ width: 140 }} />
+            <Form.Item name="maxValue" label={maxLabel}>
+              <InputNumber
+                precision={0}
+                min={minBound}
+                disabled={rangeNone}
+                placeholder={intPlaceholder}
+                style={{ width: 140 }}
+              />
             </Form.Item>
           </Space>
         </Form>
