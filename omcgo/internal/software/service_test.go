@@ -130,6 +130,46 @@ func (m *svcMockSubTaskRepo) ListByTaskID(ctx context.Context, taskID uuid.UUID,
 	}
 	return model.NewListResponse([]UpgradeSubTaskWithTaskName{}, 0, 1, 20), nil
 }
+
+// TestListAllSubTasksByTaskID_PagesAll 锁定 software 翻页助手：>100 台的任务必须翻页
+// 取全量，不被默认首页(20)/单页上限(100)截断——否则 Resume 漏恢复、finalize 漏推进、
+// file-landed 反查不到尾部设备 sub_task。
+func TestListAllSubTasksByTaskID_PagesAll(t *testing.T) {
+	const n = 250
+	all := make([]UpgradeSubTaskWithTaskName, n)
+	for i := range all {
+		all[i].ID = uuid.New()
+		all[i].DeviceID = uuid.New()
+	}
+	repo := &svcMockSubTaskRepo{
+		listByTaskIDFn: func(_ context.Context, _ uuid.UUID, f SubTaskFilter) (*model.ListResponse[UpgradeSubTaskWithTaskName], error) {
+			ps := f.PageSize
+			if ps < 1 {
+				ps = 20
+			}
+			if ps > 100 {
+				ps = 100
+			}
+			page := f.Page
+			if page < 1 {
+				page = 1
+			}
+			start := (page - 1) * ps
+			if start > n {
+				start = n
+			}
+			end := start + ps
+			if end > n {
+				end = n
+			}
+			return model.NewListResponse(all[start:end], int64(n), page, ps), nil
+		},
+	}
+
+	got, err := listAllSubTasksByTaskID(context.Background(), repo, uuid.New())
+	require.NoError(t, err)
+	require.Len(t, got, n, "翻页应取回全部 250 条，而非被默认 20/上限 100 截断")
+}
 func (m *svcMockSubTaskRepo) ListAll(_ context.Context, _ AllSubTaskFilter) (*model.ListResponse[UpgradeSubTaskWithTaskName], error) {
 	return model.NewListResponse([]UpgradeSubTaskWithTaskName{}, 0, 1, 20), nil
 }

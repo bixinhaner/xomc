@@ -93,6 +93,29 @@ func (s *Service) authorizeDevices(ctx context.Context, visibleGroups []uuid.UUI
 	return authz.AuthorizeDevicesAccess(ctx, s.groupReader, visibleGroups, deviceIDs...)
 }
 
+// listAllSubTasksByTaskID 翻页取「任务的全部子任务」。ListByTaskID 单页上限 100，
+// 不翻页就只拿默认首页（20 条）——大批量任务（>20/>100 台）会导致 #63 归属校验
+// 漏校验 21+ 台、CONFIG_RESTORE/LICENSE 直接派发只发前 20 台还标全成功。这里循环
+// 取尽所有页，保证按任务的校验/派发覆盖每一台设备。
+func (s *Service) listAllSubTasksByTaskID(ctx context.Context, taskID uuid.UUID) ([]software.UpgradeSubTaskWithTaskName, error) {
+	const pageSize = 100
+	items := make([]software.UpgradeSubTaskWithTaskName, 0)
+	for page := 1; ; page++ {
+		res, err := s.subTaskRepo.ListByTaskID(ctx, taskID, software.SubTaskFilter{
+			TaskID:      taskID,
+			ListRequest: coremodel.ListRequest{Page: page, PageSize: pageSize},
+		})
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, res.Items...)
+		if page >= res.TotalPages || len(res.Items) == 0 {
+			break
+		}
+	}
+	return items, nil
+}
+
 // authorizeTaskDevices 反查任务关联设备（从 upgrade_sub_tasks 的 device_id）后逐个
 // 校验归属，用于 Start/Suspend/Terminate/Delete/Retry 等按任务操作的端点。
 //
@@ -107,14 +130,16 @@ func (s *Service) authorizeTaskDevices(ctx context.Context, taskID uuid.UUID, vi
 	if s.subTaskRepo == nil {
 		return nil
 	}
-	page, err := s.subTaskRepo.ListByTaskID(ctx, taskID, software.SubTaskFilter{})
+	// #63 + H3：必须取全量子任务（翻页），否则 >20 台的任务只校验前 20 台归属，
+	// 第 21+ 台可越权。
+	subTasks, err := s.listAllSubTasksByTaskID(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("list sub_tasks for task authz: %w", err)
 	}
-	seen := make(map[uuid.UUID]struct{}, len(page.Items))
-	ids := make([]uuid.UUID, 0, len(page.Items))
-	for i := range page.Items {
-		did := page.Items[i].DeviceID
+	seen := make(map[uuid.UUID]struct{}, len(subTasks))
+	ids := make([]uuid.UUID, 0, len(subTasks))
+	for i := range subTasks {
+		did := subTasks[i].DeviceID
 		if did == uuid.Nil {
 			continue
 		}
@@ -128,6 +153,42 @@ func (s *Service) authorizeTaskDevices(ctx context.Context, taskID uuid.UUID, vi
 		return nil
 	}
 	return authz.AuthorizeDevicesAccess(ctx, s.groupReader, visibleGroups, ids...)
+}
+
+// deviceVisibility 是 #63 读路径的设备组可见性过滤器，复用与写路径同款的 groupReader，
+// 把列表/导出/候选收窄到调用者可见设备组下的设备。三态契约同 authz 包：
+//
+//	visibleGroups == nil  → 超管：恒放行（不查库、不改变现网行为）。
+//	groupReader == nil    → dev/test 退化：恒放行（authz nil-safe）。
+//	[]uuid.UUID{}         → 已认证但无任何分组：全部不可见（fail-closed）。
+//	[g1, g2, ...]         → 设备分组与之有交集才可见。
+//
+// 结果按 deviceID 缓存，避免大列表逐行重复查 device_group_members。
+type deviceVisibility struct {
+	groups []uuid.UUID
+	reader authz.GroupReader
+	cache  map[uuid.UUID]bool
+}
+
+func (s *Service) newDeviceVisibility(visibleGroups []uuid.UUID) *deviceVisibility {
+	return &deviceVisibility{groups: visibleGroups, reader: s.groupReader, cache: make(map[uuid.UUID]bool)}
+}
+
+// allow 返回该设备是否对调用者可见。超管 / 未装配强制 → 恒 true。
+func (f *deviceVisibility) allow(ctx context.Context, deviceID uuid.UUID) bool {
+	if f == nil || f.groups == nil || f.reader == nil {
+		return true
+	}
+	// 子任务异常未关联设备：fail-closed，不把未归组的孤儿行泄漏给限权用户。
+	if deviceID == uuid.Nil {
+		return false
+	}
+	if v, ok := f.cache[deviceID]; ok {
+		return v
+	}
+	allowed := authz.AuthorizeDeviceAccess(ctx, f.reader, deviceID, f.groups) == nil
+	f.cache[deviceID] = allowed
+	return allowed
 }
 
 // SnapshotConfigRestoreDispatcher 是 UFTE 对 backup.RestoreService.CreateBySnapshot
@@ -421,13 +482,20 @@ func (s *Service) StartTask(ctx context.Context, taskID uuid.UUID, visibleGroups
 func (s *Service) startDirectDispatchTask(
 	ctx context.Context, task *software.UpgradeTask, typeDef *TaskType,
 ) error {
-	// 取 sub_tasks 的设备 SN
-	subPage, err := s.subTaskRepo.ListByTaskID(ctx, task.ID, software.SubTaskFilter{})
+	// H2：与 ResumeUpgrade/ResumeCollect 对齐，只有 suspended/pending 任务可「开始」。
+	// 否则对已 ended/进行中的 CONFIG_RESTORE/LICENSE 任务再点开始会二次派发 device_tasks
+	// （现网重复刷配置 / 重发 license），破坏幂等。复用同一业务码 8004。
+	if task.Status != software.TaskSuspended && task.Status != software.TaskPending {
+		return commonerrors.NewBusinessError(8004, "task is not suspended or pending", commonerrors.ErrInvalidInput)
+	}
+	// H3：翻页取全量子任务 SN。不翻页只拿首页（20 条）→ >20 台的任务只派发前 20 台，
+	// 却用 len(sns) 把整任务标 100% 成功（静默部分派发）。
+	subTasks, err := s.listAllSubTasksByTaskID(ctx, task.ID)
 	if err != nil {
 		return fmt.Errorf("list sub_tasks for direct dispatch start: %w", err)
 	}
-	sns := make([]string, 0, len(subPage.Items))
-	for _, sub := range subPage.Items {
+	sns := make([]string, 0, len(subTasks))
+	for _, sub := range subTasks {
 		if sub.DeviceSN == "" {
 			continue
 		}
@@ -861,7 +929,7 @@ func (s *Service) persistDispatchedFiles(ctx context.Context, typeCode string, u
 	}
 }
 
-func (s *Service) ListTasks(ctx context.Context, filter TaskListFilter) (*coremodel.ListResponse[Task], error) {
+func (s *Service) ListTasks(ctx context.Context, filter TaskListFilter, visibleGroups []uuid.UUID) (*coremodel.ListResponse[Task], error) {
 	catalog, err := s.loadTaskTypeCatalog(ctx)
 	if err != nil {
 		return nil, err
@@ -870,8 +938,23 @@ func (s *Service) ListTasks(ctx context.Context, filter TaskListFilter) (*coremo
 	if err != nil {
 		return nil, err
 	}
+	// #63 租户隔离：非超管时把任务收窄到「至少含一台可见设备」的任务。超管
+	// (visibleGroups==nil) 跳过——visibleTaskIDs 为 nil，下面的成员判定直接放行，
+	// 不额外查 sub_tasks，保持现网行为与开销不变。
+	var visibleTaskIDs map[uuid.UUID]struct{}
+	if visibleGroups != nil && s.groupReader != nil {
+		visibleTaskIDs, err = s.visibleTaskIDSet(ctx, catalog, filter, visibleGroups)
+		if err != nil {
+			return nil, err
+		}
+	}
 	items := make([]Task, 0, len(tasks))
 	for _, task := range tasks {
+		if visibleTaskIDs != nil {
+			if _, ok := visibleTaskIDs[task.ID]; !ok {
+				continue
+			}
+		}
 		taskCopy := task
 		mapped, err := s.mapTask(ctx, catalog, &taskCopy)
 		if err != nil {
@@ -889,8 +972,32 @@ func (s *Service) ListTasks(ctx context.Context, filter TaskListFilter) (*coremo
 	return paginate(items, filter.Page, filter.PageSize), nil
 }
 
-func (s *Service) ListDevices(ctx context.Context, filter DeviceListFilter) (*coremodel.ListResponse[DeviceItem], error) {
-	items, err := s.collectFilteredDeviceItems(ctx, filter)
+// visibleTaskIDSet 用一次批量 sub_tasks 加载，算出「至少含一台可见设备」的任务 ID 集合。
+// 仅在非超管（visibleGroups != nil）时调用。语义为「任务触及调用者任一可见设备即可见」，
+// 与写路径「整批含域外设备即拒绝」是读/写两侧各自合理的取舍：读侧不因混入域外设备而
+// 把本租户也有份的任务整体藏掉。注意设备级明细仍由 ListDevices/Export 单独按设备过滤。
+func (s *Service) visibleTaskIDSet(
+	ctx context.Context, catalog []TaskType, filter TaskListFilter, visibleGroups []uuid.UUID,
+) (map[uuid.UUID]struct{}, error) {
+	subTasks, err := s.loadAllSubTasks(ctx, catalog, filter.Category, filter.TypeCode)
+	if err != nil {
+		return nil, err
+	}
+	vf := s.newDeviceVisibility(visibleGroups)
+	set := make(map[uuid.UUID]struct{})
+	for _, st := range subTasks {
+		if _, ok := set[st.TaskID]; ok {
+			continue
+		}
+		if vf.allow(ctx, st.DeviceID) {
+			set[st.TaskID] = struct{}{}
+		}
+	}
+	return set, nil
+}
+
+func (s *Service) ListDevices(ctx context.Context, filter DeviceListFilter, visibleGroups []uuid.UUID) (*coremodel.ListResponse[DeviceItem], error) {
+	items, err := s.collectFilteredDeviceItems(ctx, filter, visibleGroups)
 	if err != nil {
 		return nil, err
 	}
@@ -909,7 +1016,7 @@ func (s *Service) ListDevices(ctx context.Context, filter DeviceListFilter) (*co
 // 与 ListDevices 区别：**不做全局排序**——排序需要全量在内存。导出可在 Excel
 // 里自行排序，不影响数据完整性。
 func (s *Service) StreamDeviceItems(
-	ctx context.Context, filter DeviceListFilter, write func(DeviceItem) error,
+	ctx context.Context, filter DeviceListFilter, visibleGroups []uuid.UUID, write func(DeviceItem) error,
 ) error {
 	catalog, err := s.loadTaskTypeCatalog(ctx)
 	if err != nil {
@@ -922,6 +1029,7 @@ func (s *Service) StreamDeviceItems(
 	if len(typeSet) == 0 {
 		return nil
 	}
+	vis := s.newDeviceVisibility(visibleGroups) // #63 租户隔离
 	deviceCache := make(map[uuid.UUID]*coremodel.Device)
 	parentCache := make(map[uuid.UUID]*software.UpgradeTask)
 	const batchSize = 200
@@ -939,6 +1047,9 @@ func (s *Service) StreamDeviceItems(
 				return err
 			}
 			for _, subTask := range pageResult.Items {
+				if !vis.allow(ctx, subTask.DeviceID) { // #63 跳过越权设备
+					continue
+				}
 				parent, ok := parentCache[subTask.TaskID]
 				if !ok {
 					parent, err = s.taskRepo.GetByID(ctx, subTask.TaskID)
@@ -972,7 +1083,7 @@ func (s *Service) StreamDeviceItems(
 }
 
 // collectFilteredDeviceItems 把 ListDevices 的核心抓取/映射/过滤/排序逻辑提出来复用。
-func (s *Service) collectFilteredDeviceItems(ctx context.Context, filter DeviceListFilter) ([]DeviceItem, error) {
+func (s *Service) collectFilteredDeviceItems(ctx context.Context, filter DeviceListFilter, visibleGroups []uuid.UUID) ([]DeviceItem, error) {
 	catalog, err := s.loadTaskTypeCatalog(ctx)
 	if err != nil {
 		return nil, err
@@ -981,10 +1092,14 @@ func (s *Service) collectFilteredDeviceItems(ctx context.Context, filter DeviceL
 	if err != nil {
 		return nil, err
 	}
+	vis := s.newDeviceVisibility(visibleGroups) // #63 租户隔离
 	deviceCache := make(map[uuid.UUID]*coremodel.Device)
 	parentCache := make(map[uuid.UUID]*software.UpgradeTask)
 	items := make([]DeviceItem, 0, len(subTasks))
 	for _, subTask := range subTasks {
+		if !vis.allow(ctx, subTask.DeviceID) { // #63 跳过越权设备
+			continue
+		}
 		parent, ok := parentCache[subTask.TaskID]
 		if !ok {
 			parent, err = s.taskRepo.GetByID(ctx, subTask.TaskID)
@@ -1014,7 +1129,7 @@ func (s *Service) collectFilteredDeviceItems(ctx context.Context, filter DeviceL
 	return items, nil
 }
 
-func (s *Service) ListDeviceCandidates(ctx context.Context, filter DeviceCandidateFilter) (*coremodel.ListResponse[DeviceItem], error) {
+func (s *Service) ListDeviceCandidates(ctx context.Context, filter DeviceCandidateFilter, visibleGroups []uuid.UUID) (*coremodel.ListResponse[DeviceItem], error) {
 	catalog, err := s.loadTaskTypeCatalog(ctx)
 	if err != nil {
 		return nil, err
@@ -1035,6 +1150,9 @@ func (s *Service) ListDeviceCandidates(ctx context.Context, filter DeviceCandida
 			Page:     filter.Page,
 			PageSize: filter.PageSize,
 		},
+		// #63 租户隔离：候选设备直接在 device 仓储层按可见分组三态过滤
+		// （nil 超管不过滤 / [] fail-closed / [g..] 限定）。
+		VisibleGroups: visibleGroups,
 	}
 	if filter.Keyword != "" {
 		keyword := filter.Keyword
