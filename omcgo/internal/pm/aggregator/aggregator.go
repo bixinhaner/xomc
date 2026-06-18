@@ -60,23 +60,48 @@ type PgQuerier interface {
 }
 
 // Aggregator 是 G5 聚合主入口；线程安全，可被多 cron runner 共享。
+//
+// 双库说明（KPI/时序库物理分离，#532 P2）：
+//   - db：时序库（TsPool）——pm_metrics_* 聚合源表 + perf_indicators_*（两库都有副本）。
+//   - metaDB：主库（PgPool）——控制面元数据，含 enabled_pm_indicators_*（仅主库有，时序库无）。
+//
+// resolveEnabledIndicators 必须走 metaDB（启用集表只在主库）；其余聚合/重算走 db。
+// metaDB 为 nil（旧构造 / 单测）时退回 db，保持向后兼容（旧路径不读 enabled_pm_indicators_*）。
 type Aggregator struct {
 	db        PgQuerier
+	metaDB    PgQuerier
 	kpiRouter KPIRouter
 	logger    *zap.Logger
 }
 
 // New 构造 Aggregator。kpiRouter 可为 nil（表示禁用 KPI 聚合）。
+// metaDB 缺省退回 db（见 NewWithMeta / NewWithPools）。
 func New(db PgQuerier, kpiRouter KPIRouter, logger *zap.Logger) *Aggregator {
+	return NewWithMeta(db, nil, kpiRouter, logger)
+}
+
+// NewWithMeta 构造 Aggregator 并显式注入控制面元数据库 metaDB（主库）。
+// metaDB 为 nil 时退回 db（向后兼容旧调用 / 单测）。
+func NewWithMeta(db, metaDB PgQuerier, kpiRouter KPIRouter, logger *zap.Logger) *Aggregator {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &Aggregator{db: db, kpiRouter: kpiRouter, logger: logger.Named("pm.aggregator")}
+	if metaDB == nil {
+		metaDB = db
+	}
+	return &Aggregator{db: db, metaDB: metaDB, kpiRouter: kpiRouter, logger: logger.Named("pm.aggregator")}
 }
 
 // NewWithPool 便利构造器（外部传 *pgxpool.Pool 时省去接口断言）。
+// 不注入 metaDB（metaDB 退回 db）——仅用于不需要读 enabled_pm_indicators_* 的场景（如纯 cron 聚合）。
 func NewWithPool(pool *pgxpool.Pool, kpiRouter KPIRouter, logger *zap.Logger) *Aggregator {
 	return New(pool, kpiRouter, logger)
+}
+
+// NewWithPools 便利构造器：tsPool=时序库（聚合源 + perf_indicators_*）、pgPool=主库（enabled_pm_indicators_*）。
+// 落库侧全存已启用（#532 P2）必须用此构造，否则 resolveEnabledIndicators 在时序库查 enabled_pm_indicators_* 报 relation 不存在。
+func NewWithPools(tsPool, pgPool *pgxpool.Pool, kpiRouter KPIRouter, logger *zap.Logger) *Aggregator {
+	return NewWithMeta(tsPool, pgPool, kpiRouter, logger)
 }
 
 // AggregateCounters 把 source 表中 [w.Start, w.End) 内的 counter 行按

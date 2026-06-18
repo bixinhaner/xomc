@@ -182,3 +182,71 @@ func Test_buildResultsCountQuery_InvalidTimeIgnored(t *testing.T) {
 	assert.NotContains(t, q, "AND r.time >=")
 	assert.Equal(t, []any{id}, args)
 }
+
+// ── #532 显示侧按任务配置指标集过滤 ──────────────────────────────────────────
+
+// 成功路径：任务配置指标集非空时，SQL 含 metric_path = ANY 谓词，占位号顺延，配置指标切片入 args。
+func Test_buildResultsQuery_FilterByTaskMetricPaths(t *testing.T) {
+	id := uuid.New()
+	metrics := []string{"KGSM0101", "KGSM0102", "KGSM0103"}
+	q, args := buildResultsQuery(id, resultsFilter{TaskMetricPaths: metrics}, 100, 0)
+
+	assert.Contains(t, q, "AND r.metric_path = ANY($2)")
+	assert.Contains(t, q, "ORDER BY r.time DESC LIMIT $3 OFFSET $4")
+	if assert.Len(t, args, 4) {
+		assert.Equal(t, id, args[0])
+		assert.Equal(t, metrics, args[1])
+		assert.Equal(t, 100, args[2])
+		assert.Equal(t, 0, args[3])
+	}
+}
+
+// 空配置回退：任务配置指标集为空（历史/边界任务）时不过滤，SQL 不含按配置指标的 ANY 谓词。
+func Test_buildResultsQuery_EmptyTaskMetricPathsNoFilter(t *testing.T) {
+	id := uuid.New()
+	q, args := buildResultsQuery(id, resultsFilter{TaskMetricPaths: nil}, 100, 0)
+
+	assert.NotContains(t, q, "r.metric_path = ANY")
+	assert.Equal(t, []any{id, 100, 0}, args)
+}
+
+// 与用户临时单指标叠加：两道子句各自独立、AND 取交集，占位号连续递增。
+func Test_buildResultsQuery_TaskMetricPathsWithUserMetric(t *testing.T) {
+	id := uuid.New()
+	q, args := buildResultsQuery(id, resultsFilter{
+		MetricPath:      "KGSM0102",
+		TaskMetricPaths: []string{"KGSM0101", "KGSM0102", "KGSM0103"},
+	}, 100, 0)
+
+	// 用户临时单指标（=$2 标量）先出，任务配置集（ANY($3)）后出
+	assert.Contains(t, q, "AND r.metric_path = $2")
+	assert.Contains(t, q, "AND r.metric_path = ANY($3)")
+	assert.Contains(t, q, "LIMIT $4 OFFSET $5")
+	assert.Len(t, args, 5)
+	assert.True(t, strings.Index(q, "r.metric_path = $2") < strings.Index(q, "r.metric_path = ANY"))
+}
+
+// count 与数据查询同口径：任务配置指标集子句也出现在 COUNT 查询里（否则 count 与数据对不上）。
+func Test_buildResultsCountQuery_FilterByTaskMetricPaths(t *testing.T) {
+	id := uuid.New()
+	metrics := []string{"KGSM0101", "KGSM0102"}
+	q, args := buildResultsCountQuery(id, resultsFilter{TaskMetricPaths: metrics})
+
+	assert.Contains(t, q, "SELECT COUNT(*)")
+	assert.Contains(t, q, "AND r.metric_path = ANY($2)")
+	assert.NotContains(t, q, "ORDER BY")
+	assert.NotContains(t, q, "LIMIT")
+	if assert.Len(t, args, 2) {
+		assert.Equal(t, id, args[0])
+		assert.Equal(t, metrics, args[1])
+	}
+}
+
+// count 空配置回退：与数据查询一致，配置集为空时不过滤。
+func Test_buildResultsCountQuery_EmptyTaskMetricPathsNoFilter(t *testing.T) {
+	id := uuid.New()
+	q, args := buildResultsCountQuery(id, resultsFilter{TaskMetricPaths: nil})
+
+	assert.NotContains(t, q, "r.metric_path = ANY")
+	assert.Equal(t, []any{id}, args)
+}

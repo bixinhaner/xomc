@@ -258,11 +258,23 @@ func (e *Executor) queryAndConvert(ctx context.Context, task *Task, g metrics.Gr
 		EndTime:      endTime,
 		Limit:        100000,
 	}
+	// #532 P2 落库侧全存：store_all_metrics=true 时不再下传 task 配置指标，改让聚合层按任务制式
+	// 驱动「已启用指标集」全存（counter 全量汇总 + 已启用派生 KPI 重算，限定到已启用 ∩ 派生）。
+	// 不下推 MetricPaths 是 StoreAllEnabled 生效前提（聚合层据空列表 + 制式枚举已启用集）。
+	// 显示侧由 P1 的 task.MetricPaths 过滤收口，故全存不会铺满仪表盘。
+	if e.storeAllMetrics {
+		req.MetricPaths = nil
+		req.StoreAllEnabled = true
+	}
 	// KPI-ALL-IND：全网维度且指标列表为空（全聚到全库）时，让聚合层连派生 KPI 一起重算落库，
 	// 使首页读现成全网预聚合表时 KPI 也有线（否则全聚只产 counter、首页 KPI 面板空线）。
 	// 仅 network 维度（设备组/产品/频段仍按各自精选列表，不受影响）。
-	if dim == aggregator.DimensionNetwork && len(task.MetricPaths) == 0 {
+	// 与 StoreAllEnabled 的取舍：network 维度仍走全库重算（既有特例口径，与首页 KPI 面板自洽）；
+	// 其余维度用已启用集（体量可控）。两条互斥——network 命中下面分支后下面置 RecomputeAllKPIs，
+	// 同时清掉 StoreAllEnabled 避免双路径打架。
+	if dim == aggregator.DimensionNetwork && len(req.MetricPaths) == 0 {
 		req.RecomputeAllKPIs = true
+		req.StoreAllEnabled = false
 	}
 	rows, err := e.aggr.Query(ctx, req)
 	if err != nil {

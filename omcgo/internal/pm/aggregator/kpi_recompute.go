@@ -359,6 +359,13 @@ func (a *Aggregator) queryWithKPIRecompute(
 		return a.queryFullLibraryWithKPIs(ctx, table, q, dimFn)
 	}
 
+	// #532 P2 store-all-by-enabled：落库侧全存「已启用指标集」——汇总全部 counter 的同时，
+	// 按已启用 ∩ 派生重算 KPI 产 KPI 行；枚举源限定到 enabled_pm_indicators_{tech}（体量可控，
+	// 非全库）。与 RecomputeAllKPIs 互斥（后者全库）；二者均要求请求侧不下推 MetricPaths。
+	if q.StoreAllEnabled {
+		return a.queryEnabledWithKPIs(ctx, table, q, dimFn)
+	}
+
 	kpis, userCounters := a.resolveKPIMetadata(ctx, q.MetricPaths)
 	if len(kpis) == 0 {
 		// 请求里没有派生 KPI：原样查（仍强制只聚 counter 行，避免撞 device 级 KPI 行 SUM）。
@@ -421,6 +428,126 @@ func (a *Aggregator) queryFullLibraryWithKPIs(
 	// 与全部 counter 行合并 = 全部 counter + 全部 KPI。
 	kpiRows := a.recomputeKPIs(counterRows, kpis, nil)
 	return append(counterRows, kpiRows...), nil
+}
+
+// queryEnabledWithKPIs 是「落库侧全存已启用指标集」的取数路径（#532 P2，StoreAllEnabled=true）：
+//  1. 按请求制式枚举「已启用指标集」（enabled_pm_indicators_{tech}），拆成 已启用 counter / 已启用派生 KPI；
+//  2. 已启用集为空 → 降级：退回「全部 counter」原聚合（不下推过滤、只聚 counter 行），不丢 counter；
+//  3. 拉 effective counter（已启用 counter ∪ 派生 KPI deps）—— deps 即便自身未启用也要拉来供重算；
+//  4. recomputeKPIs(userCounters=已启用 counter, kpis=已启用派生)：
+//     passthrough 只含已启用 counter（dep-only 的非启用 counter 行被剔除）+ 已启用派生 KPI 重算行
+//     → 输出严格落在「已启用 counter ∪ 已启用派生 KPI」集合内（store-within-enabled 守恒）。
+//
+// 与 queryFullLibraryWithKPIs（全库）的差异仅在「枚举源 = 已启用集而非全库」，体量受已启用上界约束。
+func (a *Aggregator) queryEnabledWithKPIs(
+	ctx context.Context,
+	table string,
+	q QueryRequest,
+	dimFn func(context.Context, string, QueryRequest) ([]Row, error),
+) ([]Row, error) {
+	enabled := a.resolveEnabledIndicators(ctx, q.Technologies)
+	if len(enabled) == 0 {
+		// 已启用集为空（无配置 / 查询失败已降级）：退回「全库 counter + 全库派生 KPI 重算」口径，
+		// 而非裸 counter 原聚合——后者会丢掉本可重算的派生 KPI（相对仅配置反而退化，见 #532 P2 回合1 运行栈）。
+		// queryFullLibraryWithKPIs 内部 resolveAllDerivedKPIs 查的是 perf_indicators_*（时序库也有副本），
+		// 故该降级不依赖主库 metaDB，纯库降级也不丢 KPI、不丢 counter。
+		a.logger.Warn("queryEnabledWithKPIs: enabled set empty; degrade to full-library KPI recompute (no KPI loss)")
+		return a.queryFullLibraryWithKPIs(ctx, table, q, dimFn)
+	}
+	// 用已启用集合走与默认重算同一套元数据解析：命中 arithmetic 的进 kpis（含派生 + 原始计数），
+	// 其余无元数据的进 userCounters（纯 counter 编号）。
+	kpis, userCounters := a.resolveKPIMetadata(ctx, enabled)
+	eff := effectiveCounterPaths(userCounters, kpis)
+	cq := q
+	cq.MetricPaths = eff
+	cq.MetricType = counterMetricType() // 只聚 counter 行
+	cq.Limit = 0                        // 重算需每桶全部 deps counter，不截行
+	cq.Offset = 0
+	counterRows, err := dimFn(ctx, table, cq)
+	if err != nil {
+		return nil, err
+	}
+	if len(kpis) == 0 {
+		// 已启用集里没有任何 arithmetic 指标：所有已启用项都是裸 counter，直接返回（已被 eff 收口）。
+		return counterRows, nil
+	}
+	// passthrough = 已启用 counter（userCounters）+ 已启用原始计数；dep-only 非启用 counter 被剔除。
+	return a.recomputeKPIs(counterRows, kpis, userCounters), nil
+}
+
+// resolveEnabledIndicators 按请求制式枚举「已启用指标编号集」（#532 P2）。
+//
+// 制式（lte/nr/gsm）→ 启用表后缀（enb/gnb/gsm）；多制式取并集（去重）。
+// 跨 operator_code 取并集（default + 各运营商任一启用即视为启用）；编号在三表全局唯一。
+// 查询失败 → 返回空（调用方据此降级为「全部 counter」，不报错、不丢 counter）。
+func (a *Aggregator) resolveEnabledIndicators(ctx context.Context, technologies []string) []string {
+	suffixes := enabledTableSuffixes(technologies)
+	if len(suffixes) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	var out []string
+	for _, suf := range suffixes {
+		// 表名由内部固定后缀拼接（非用户输入），无注入面。
+		// enabled_pm_indicators_* 只在主库（metaDB），时序库（db）无此表——必须走 metaDB，
+		// 否则真实部署态报 relation "enabled_pm_indicators_enb" does not exist (42P01) 整段降级。
+		sql := fmt.Sprintf("SELECT DISTINCT indicator_id FROM enabled_pm_indicators_%s", suf)
+		rows, err := a.metaDB.Query(ctx, sql)
+		if err != nil {
+			a.logger.Warn("resolveEnabledIndicators query failed; degrade this suffix",
+				zap.String("suffix", suf), zap.Error(err))
+			continue
+		}
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				a.logger.Warn("resolveEnabledIndicators scan failed", zap.String("suffix", suf), zap.Error(err))
+				break
+			}
+			if id == "" {
+				continue
+			}
+			if _, dup := seen[id]; dup {
+				continue
+			}
+			seen[id] = struct{}{}
+			out = append(out, id)
+		}
+		rows.Close()
+	}
+	return out
+}
+
+// enabledTableSuffixes 把任务制式集合（lte/nr/gsm）映射到启用表后缀（enb/gnb/gsm）。
+//
+//	lte → enb · nr → gnb · gsm → gsm
+//
+// 空制式（任务不限制式）→ 三表全取（保守取全部已启用集，与「不限制式即全制式」语义一致）。
+// 未知制式忽略。返回去重后缀切片。
+func enabledTableSuffixes(technologies []string) []string {
+	if len(technologies) == 0 {
+		return []string{"enb", "gnb", "gsm"}
+	}
+	seen := make(map[string]struct{})
+	var out []string
+	add := func(s string) {
+		if _, dup := seen[s]; dup {
+			return
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	for _, t := range technologies {
+		switch t {
+		case "lte":
+			add("enb")
+		case "nr":
+			add("gnb")
+		case "gsm":
+			add("gsm")
+		}
+	}
+	return out
 }
 
 // resolveAllDerivedKPIs 从指标库枚举全库「派生 KPI」（arithmetic 非空且 is_counter≠'1'）的重算元数据。

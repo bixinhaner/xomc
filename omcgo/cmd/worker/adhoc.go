@@ -43,7 +43,10 @@ func startPMAdhocPipeline(
 	repo := adhoc.NewPgRepository(w.PgPool, w.TsPool).
 		SetWatermarkReader(watermarks).
 		SetLocationFunc(tz.Current)
-	aggr := aggregator.NewWithPool(w.TsPool, kpiRouter, logger)
+	// #532 P2 落库侧全存已启用：聚合源 + perf_indicators_* 在时序库（TsPool），
+	// 但启用集表 enabled_pm_indicators_* 只在主库（PgPool）——必须双池注入，
+	// 否则 store_all_metrics=true 时解析启用集在时序库报 relation 不存在而整段降级（丢派生 KPI）。
+	aggr := aggregator.NewWithPools(w.TsPool, w.PgPool, kpiRouter, logger)
 	publisher := &adhoc.EventBusPublisher{Bus: w.EventBus}
 	// T-0182：存储范围全局开关（全存默认 / 仅存所选）。
 	// ISSUE-398：持续任务「最近一格」窗口的 daily/weekly/monthly 零点对齐用同一 PM 业务时区。

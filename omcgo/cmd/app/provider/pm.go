@@ -78,7 +78,9 @@ func initPMModule(c *Container) error {
 
 	// T-0164-P5 / G5：聚合查询入口。复用同一 kpiRouter（KPI 反算所需），
 	// app 端只走查询不跑 cron（cron runner 在 worker 端注册）。
-	pmAggregator := aggregator.NewWithPool(c.TsPool, kpiRouter, logger.Named("aggregator"))
+	// #532 P2：双池注入——聚合源 + perf_indicators_* 在时序库（TsPool），
+	// 启用集表 enabled_pm_indicators_* 只在主库（PgPool）。落库侧全存已启用需读启用集走主库。
+	pmAggregator := aggregator.NewWithPools(c.TsPool, c.PgPool, kpiRouter, logger.Named("aggregator"))
 
 	// T-0164 收尾 G5-Gap-2：手动重算入口需 asyncjob.Repository
 	pmAsyncJobRepo := asyncjob.NewPgRepository(c.PgPool)
