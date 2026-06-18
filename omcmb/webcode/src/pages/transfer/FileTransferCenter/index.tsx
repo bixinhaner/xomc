@@ -1155,10 +1155,12 @@ export default function FileTransferCenter() {
     return [
       {
         // 任务列表场景：每行是「某任务在某设备上的执行情况」。主显示任务名（用户操作
-        // 上下文，他刚创建的 testNV 想看这个任务的进展），副显示设备名（区分多设备）。
+        // 上下文，他刚创建的 testNV 想看这个任务的进展），副标题挂设备名（区分多设备）。
         // 列宽 280：UFTE 自动生成的任务名形如 "ConfigBackupNV_admin_2026-05-21 13:39:55"
         // 约 36 字符，hover Tooltip 看全名。
-        title: t('ufte.col.taskOrDevice'),
+        // 表头统一为「任务名称」：本列主体就是任务（设备名仅作副标题、另有独立「设备 SN」列），
+        // 原「任务/设备」名实不符；并与后端 CSV 导出 default 视图首列表头「任务名称」对齐。
+        title: t('ufte.col.taskName'),
         dataIndex: 'taskName',
         key: 'taskName',
         width: 280,
