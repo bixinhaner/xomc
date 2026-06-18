@@ -3,6 +3,8 @@ package aggregator
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -51,9 +53,11 @@ func Test_buildCountersSQL_HourlyFromPmMetrics(t *testing.T) {
 	assert.Equal(t, []any{"hourly", w.Start, w.End, w.Start, w.End}, args)
 }
 
-// #479 改动一：buildCountersSQL 的源筛选必须按桶**起点** start_time 框半开窗口
-// [w.Start, w.End)，不再按 end_time。横跨小时/日/周/月各粒度（设备级源筛选统一治本，
-// 一处修复消除日/周/月聚合值偏一格）。args 顺序不变（$4=w.Start, $5=w.End）。
+// #516 分区裁剪：buildCountersSQL 的源筛选必须按**分区列** time 框半开窗口
+// [w.Start, w.End)，不再按非分区列 start_time（亦不按 end_time）。源表/上级表均为
+// TimescaleDB 超表、按 time 列分区，改用分区列过滤后只命中目标分片、走索引（分区裁剪）。
+// 等价性由 #479（time == start_time）背书，查的是同一批源行。
+// 横跨小时/日/周/月各粒度（设备级源筛选统一治本）。args 顺序不变（$4=w.Start, $5=w.End）。
 func Test_buildCountersSQL_FramesBy_StartTime_AllGranularities(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -91,10 +95,13 @@ func Test_buildCountersSQL_FramesBy_StartTime_AllGranularities(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			w := WindowSpec{Granularity: c.gran, Start: c.start, End: c.end}
 			sql, args := buildCountersSQL(c.source, c.target, w)
-			// 绿：按 start_time 半开框桶
-			assert.Contains(t, sql, "AND m.start_time >= $4", "源筛选下界应按桶起点 start_time")
-			assert.Contains(t, sql, "AND m.start_time <  $5", "源筛选上界应按桶起点 start_time")
-			// 红：绝不再按 end_time 框桶（旧法导致偏一格）
+			// 绿（#516）：按分区列 time 半开框桶 → 分区裁剪
+			assert.Contains(t, sql, "AND m.time >= $4", "源筛选下界应按分区列 time")
+			assert.Contains(t, sql, "AND m.time <  $5", "源筛选上界应按分区列 time")
+			// 红：绝不再按非分区列 start_time 框桶（全表扫根因）
+			assert.NotContains(t, sql, "AND m.start_time >= $4", "源筛选不应再按非分区列 start_time 框桶")
+			assert.NotContains(t, sql, "AND m.start_time <  $5", "源筛选不应再按非分区列 start_time 框桶")
+			// 红：也绝不按 end_time 框桶（旧法导致偏一格）
 			assert.NotContains(t, sql, "AND m.end_time >= $4", "源筛选不应再按 end_time 框桶")
 			assert.NotContains(t, sql, "AND m.end_time <  $5", "源筛选不应再按 end_time 框桶")
 			// args 顺序未变：$4/$5 仍是 w.Start/w.End
@@ -350,6 +357,76 @@ func Test_AggregateCounters_PassesThroughToExec(t *testing.T) {
 	assert.Equal(t, []any{"hourly", w.Start, w.End, w.Start, w.End}, db.execArgs)
 }
 
+// #516 死判（设备维度）：第一段 counter 聚合的区间过滤谓词列必须是**分区列** time，
+// 不是桶起始时间列 start_time。源表是 TimescaleDB 超表、按 time 列分区，按分区列过滤
+// 才能命中目标分片走索引（分区裁剪）；按非分区列 start_time 过滤会全表扫（本单根因）。
+// 仅断言 WHERE 谓词列；GROUP BY / 写入列 / 算子路由不在本断言范围。
+func Test_buildCountersSQL_IntervalFilterUsesPartitionColumn_NotStartTime(t *testing.T) {
+	w := WindowSpec{
+		Granularity: metrics.GranularityHourly,
+		Start:       time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC),
+		End:         time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),
+	}
+	sql, _ := buildCountersSQL("pm_metrics", "pm_metrics_hourly", w)
+	// 谓词列为分区列 time
+	assert.Contains(t, sql, "AND m.time >= $4", "区间过滤下界应为分区列 time")
+	assert.Contains(t, sql, "AND m.time <  $5", "区间过滤上界应为分区列 time")
+	// 谓词列不再是桶起始时间列 start_time（亦不是 end_time）
+	assert.NotContains(t, sql, "AND m.start_time >= $4", "区间过滤不应再用非分区列 start_time")
+	assert.NotContains(t, sql, "AND m.start_time <  $5", "区间过滤不应再用非分区列 start_time")
+	assert.NotContains(t, sql, "AND m.end_time >= $4")
+	assert.NotContains(t, sql, "AND m.end_time <  $5")
+}
+
+// #516 死判（设备组维度）：第二处第一段 counter 聚合（设备→设备组）的区间过滤谓词列
+// 同样必须是分区列 time，不是 start_time。两处同型一起改。写入列 m.time/m.start_time/
+// m.end_time（SELECT/GROUP BY）保持不动，故只断言 WHERE 子句的具体谓词字符串。
+func Test_buildDeviceGroupSQL_IntervalFilterUsesPartitionColumn_NotStartTime(t *testing.T) {
+	w := WindowSpec{
+		Granularity: metrics.GranularityHourly,
+		Start:       time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC),
+		End:         time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),
+	}
+	sql, _ := buildDeviceGroupSQL("pm_metrics_hourly", "pm_group_metrics_hourly", w)
+	assert.Contains(t, sql, "AND m.time >= $2", "区间过滤下界应为分区列 time")
+	assert.Contains(t, sql, "AND m.time <  $3", "区间过滤上界应为分区列 time")
+	assert.NotContains(t, sql, "AND m.start_time >= $2", "区间过滤不应再用非分区列 start_time")
+	assert.NotContains(t, sql, "AND m.start_time <  $3", "区间过滤不应再用非分区列 start_time")
+	assert.NotContains(t, sql, "AND m.end_time >= $2")
+	assert.NotContains(t, sql, "AND m.end_time <  $3")
+	// 写入列不动：SELECT/GROUP BY 仍取源行三时刻
+	assert.Contains(t, sql, "m.time,\n    m.start_time,\n    m.end_time,", "写入列保持不动")
+}
+
+// #516 失败/空路径（设备维度）：窗口内无源行 → DB Exec 返回 0 行，AggregateCounters
+// 返回 (0, nil) 不报错（INSERT ... SELECT 命中 0 源行是合法空结果，非错误）。
+func Test_AggregateCounters_EmptyWindow_WritesZeroRows_NoError(t *testing.T) {
+	db := &stubDB{execTag: pgconn.NewCommandTag("INSERT 0 0")}
+	a := New(db, nil, nil)
+	w := WindowSpec{
+		Granularity: metrics.GranularityHourly,
+		Start:       time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC),
+		End:         time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),
+	}
+	n, err := a.AggregateCounters(context.Background(), "pm_metrics", "pm_metrics_hourly", w)
+	require.NoError(t, err)
+	assert.Equal(t, 0, n, "窗口内无源行应写 0 行")
+}
+
+// #516 失败/空路径（设备组维度）：窗口内无源行 → AggregateDeviceGroup 返回 (0, nil)。
+func Test_AggregateDeviceGroup_EmptyWindow_WritesZeroRows_NoError(t *testing.T) {
+	db := &stubDB{execTag: pgconn.NewCommandTag("INSERT 0 0")}
+	a := New(db, nil, nil)
+	w := WindowSpec{
+		Granularity: metrics.GranularityHourly,
+		Start:       time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC),
+		End:         time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),
+	}
+	n, err := a.AggregateDeviceGroup(context.Background(), "pm_metrics_hourly", "pm_group_metrics_hourly", w)
+	require.NoError(t, err)
+	assert.Equal(t, 0, n, "窗口内无源行应写 0 行")
+}
+
 // ---------------------------------------------------------------------------
 // KPI 求值路径：用 stub router + stub Query/Exec 验证 evaluator 路径
 // ---------------------------------------------------------------------------
@@ -451,10 +528,10 @@ func Test_AggregateKPIs_EvaluatesFormulaAndInserts(t *testing.T) {
 			switch queryCalls {
 			case 1: // listEntitiesInBucket: (oui, sn, object_ldn) —— 设备级实体（空串）
 				return &fakeRows{rows: [][]any{{"A", "S1", ""}}}, nil
-			case 2: // loadCountersByObjectLdn: (object_ldn, metric_path, value)
+			case 2: // #516 整桶分批载入: (oui, sn, object_ldn, metric_path, value)
 				return &fakeRows{rows: [][]any{
-					{"", "numerator", float64(80)},
-					{"", "denominator", float64(100)},
+					{"A", "S1", "", "numerator", float64(80)},
+					{"A", "S1", "", "denominator", float64(100)},
 				}}, nil
 			}
 			return nil, errors.New("unexpected Query")
@@ -514,10 +591,10 @@ func Test_AggregateKPIs_SameDisplayNameUsesDistinctIndicatorID(t *testing.T) {
 			switch queryCalls {
 			case 1: // listEntitiesInBucket: (oui, sn, object_ldn)
 				return &fakeRows{rows: [][]any{{"A", "S1", ""}}}, nil
-			case 2: // loadCountersByObjectLdn: (object_ldn, metric_path, value)
+			case 2: // #516 整桶分批载入: (oui, sn, object_ldn, metric_path, value)
 				return &fakeRows{rows: [][]any{
-					{"", "numerator", float64(95)},
-					{"", "denominator", float64(100)},
+					{"A", "S1", "", "numerator", float64(95)},
+					{"A", "S1", "", "denominator", float64(100)},
 				}}, nil
 			}
 			return nil, errors.New("unexpected Query")
@@ -560,14 +637,14 @@ func Test_buildListEntitiesInBucketSQL_PreciseBucketMatch_Hourly(t *testing.T) {
 
 	// T-B：实体枚举含 object_ldn——每个小区/PLMN 各成一独立实体
 	assert.Contains(t, sql, "SELECT DISTINCT device_oui, device_sn, object_ldn")
-	// 精确命中本桶：end_time = $N（不再是半开 >= ... AND < ...）
-	assert.Contains(t, sql, "end_time = $2")
-	assert.Contains(t, sql, "time = $3")
-	assert.NotContains(t, sql, "end_time >=", "不应再有半开下界")
-	assert.NotContains(t, sql, "end_time <", "不应再有半开上界")
+	// #516：精确命中本桶改用分区列（桶头）time = $2，不再用非分区桶尾时刻列 end_time。
+	assert.Contains(t, sql, "time = $2")
+	assert.NotContains(t, sql, "end_time", "#516 精确谓词应为分区列 time（桶头），不再含桶尾时刻列 end_time")
+	assert.NotContains(t, sql, "time >=", "不应再有半开下界")
+	assert.NotContains(t, sql, "time <", "不应再有半开上界")
 	assert.Contains(t, sql, "FROM pm_metrics_hourly")
-	// args：granularity / w.End / w.Start —— 桶尾 w.End 进了谓词，不再是半开 w.Start/w.End 对
-	assert.Equal(t, []any{"hourly", w.End, w.Start}, args)
+	// args：granularity / w.Start（分区列桶头）—— 不再带桶尾 w.End
+	assert.Equal(t, []any{"hourly", w.Start}, args)
 }
 
 func Test_buildListEntitiesInBucketSQL_PreciseBucketMatch_AllGranularities(t *testing.T) {
@@ -604,10 +681,12 @@ func Test_buildListEntitiesInBucketSQL_PreciseBucketMatch_AllGranularities(t *te
 			w := WindowSpec{Granularity: c.granularity, Start: c.start, End: c.end}
 			sql, args := buildListEntitiesInBucketSQL(c.target, w)
 			assert.Contains(t, sql, "SELECT DISTINCT device_oui, device_sn, object_ldn")
-			assert.Contains(t, sql, "end_time = $2")
-			assert.NotContains(t, sql, "end_time >=")
-			assert.NotContains(t, sql, "end_time <")
-			assert.Equal(t, []any{string(c.granularity), c.end, c.start}, args)
+			// #516：精确谓词列 == 分区列（桶头）time，非桶尾时刻列 end_time
+			assert.Contains(t, sql, "time = $2")
+			assert.NotContains(t, sql, "end_time")
+			assert.NotContains(t, sql, "time >=")
+			assert.NotContains(t, sql, "time <")
+			assert.Equal(t, []any{string(c.granularity), c.start}, args)
 		})
 	}
 }
@@ -624,13 +703,14 @@ func Test_buildLoadCountersByObjectLdnSQL_PreciseBucketMatch_Hourly(t *testing.T
 	assert.Contains(t, sql, "SELECT object_ldn, metric_path, metric_value")
 	assert.NotContains(t, sql, "GROUP BY metric_path", "T-B 拆掉折回层，不再按 metric_path 聚合")
 	assert.NotContains(t, sql, "CASE MIN(statis_type)", "T-B 不再折回设备级")
-	assert.Contains(t, sql, "end_time = $4")
-	assert.Contains(t, sql, "time = $5")
-	assert.NotContains(t, sql, "end_time >=", "不应再有半开下界")
-	assert.NotContains(t, sql, "end_time <", "不应再有半开上界")
+	// #516：精确命中本桶改用分区列（桶头）time = $4，不再用桶尾时刻列 end_time。
+	assert.Contains(t, sql, "time = $4")
+	assert.NotContains(t, sql, "end_time", "#516 精确谓词应为分区列 time（桶头），不再含桶尾时刻列 end_time")
+	assert.NotContains(t, sql, "time >=", "不应再有半开下界")
+	assert.NotContains(t, sql, "time <", "不应再有半开上界")
 	assert.Contains(t, sql, "FROM pm_metrics_hourly")
-	// args：oui / sn / granularity / w.End / w.Start
-	assert.Equal(t, []any{"A", "S1", "hourly", w.End, w.Start}, args)
+	// args：oui / sn / granularity / w.Start（分区列桶头）—— 不再带桶尾 w.End
+	assert.Equal(t, []any{"A", "S1", "hourly", w.Start}, args)
 }
 
 func Test_buildLoadCountersByObjectLdnSQL_PreciseBucketMatch_Daily(t *testing.T) {
@@ -642,11 +722,13 @@ func Test_buildLoadCountersByObjectLdnSQL_PreciseBucketMatch_Daily(t *testing.T)
 	sql, args := buildLoadCountersByObjectLdnSQL("pm_metrics_daily", "A", "S1", w)
 
 	assert.Contains(t, sql, "SELECT object_ldn, metric_path, metric_value")
-	assert.Contains(t, sql, "end_time = $4")
-	assert.NotContains(t, sql, "end_time >=")
-	assert.NotContains(t, sql, "end_time <")
+	// #516：精确谓词列 == 分区列（桶头）time，非桶尾时刻列 end_time
+	assert.Contains(t, sql, "time = $4")
+	assert.NotContains(t, sql, "end_time")
+	assert.NotContains(t, sql, "time >=")
+	assert.NotContains(t, sql, "time <")
 	assert.Contains(t, sql, "FROM pm_metrics_daily")
-	assert.Equal(t, []any{"A", "S1", "daily", w.End, w.Start}, args)
+	assert.Equal(t, []any{"A", "S1", "daily", w.Start}, args)
 }
 
 // ---------------------------------------------------------------------------
@@ -752,9 +834,10 @@ type cellRow struct {
 }
 
 // cellAwareDB 复现 T-B 后 target 表：每 (object_ldn, metric_path) 一行。
-//   - listEntitiesInBucket（3 args）：DISTINCT (oui, sn, object_ldn) 实体
-//   - loadCountersByObjectLdn（5 args）：按本桶返回 (object_ldn, metric_path, value)，不折回
+//   - listEntitiesInBucket（2 args）：DISTINCT (oui, sn, object_ldn) 实体
+//   - loadCountersByObjectLdn（4 args）：按本桶返回 (object_ldn, metric_path, value)，不折回
 //
+// #516：精确过滤按分区列（桶头）time = w.Start（args 末位），不再按桶尾时刻列 end_time。
 // 每次 Exec 累积 args，供断言多实体多次插入。
 type cellAwareDB struct {
 	rows     []cellRow
@@ -764,7 +847,9 @@ type cellAwareDB struct {
 
 func (db *cellAwareDB) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
 	db.execArgs = append(db.execArgs, args)
-	return db.execTag, nil
+	// #516 批量化：一次 Exec 插入跨实体多行（每行 9 参），RowsAffected 须反映实际行数，
+	// 否则 AggregateKPIs 返回的总行数（从 RowsAffected 累加）会与实际写入行数不符。
+	return pgconn.NewCommandTag(fmt.Sprintf("INSERT 0 %d", len(args)/9)), nil
 }
 
 func (db *cellAwareDB) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
@@ -772,13 +857,17 @@ func (db *cellAwareDB) QueryRow(ctx context.Context, sql string, args ...any) pg
 }
 
 func (db *cellAwareDB) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
-	// listEntitiesInBucket: args = [granularity, end_time, time]
-	if len(args) == 3 {
+	// #516：守住改动方向——SQL 必须用分区列 time 精确等值且不再含桶尾时刻列 end_time。
+	if !strings.Contains(sql, "time = $") || strings.Contains(sql, "end_time") {
+		return nil, errors.New("cellAwareDB: SQL 未按 #516 用分区列 time 精确等值（或仍含 end_time）")
+	}
+	// listEntitiesInBucket: args = [granularity, time(桶头)]
+	if strings.Contains(sql, "SELECT DISTINCT device_oui, device_sn, object_ldn") {
 		want := args[1].(time.Time)
 		seen := map[entityKey]bool{}
 		var out [][]any
 		for _, r := range db.rows {
-			if r.endTime.Equal(want) {
+			if r.timeCol.Equal(want) {
 				k := entityKey{r.oui, r.sn, r.objectLdn}
 				if !seen[k] {
 					seen[k] = true
@@ -788,28 +877,40 @@ func (db *cellAwareDB) Query(ctx context.Context, sql string, args ...any) (pgx.
 		}
 		return &fakeRows{rows: out}, nil
 	}
-	// loadCountersByObjectLdn: args = [oui, sn, granularity, end_time, time]
-	// 按本桶/本设备返回每 (object_ldn, metric_path) 一行（T-B 不折回设备级）。
-	if len(args) == 5 {
-		oui := args[0].(string)
-		sn := args[1].(string)
-		want := args[3].(time.Time)
+	// #516 整桶分批载入: args = [granularity, time(桶头), oui1, sn1, oui2, sn2, ...]
+	//   → (oui, sn, object_ldn, metric_path, value)，按本桶 + (oui,sn) IN 集合过滤。
+	// 守住批量化方向：必须是复合 IN 的整桶查询、非逐设备单查（含 device_sn IN 形态）。
+	if strings.Contains(sql, "SELECT device_oui, device_sn, object_ldn, metric_path, metric_value") {
+		if !strings.Contains(sql, "(device_oui, device_sn) IN") {
+			return nil, errors.New("cellAwareDB: 整桶载入 SQL 必须用 (oui,sn) 复合 IN 批量，非逐设备单查")
+		}
+		want := args[1].(time.Time)
+		// 收集本批设备集合（从 args[2:] 成对取 oui/sn）。
+		type pair struct{ oui, sn string }
+		inSet := map[pair]bool{}
+		for i := 2; i+1 < len(args); i += 2 {
+			inSet[pair{args[i].(string), args[i+1].(string)}] = true
+		}
 		var out [][]any
 		for _, r := range db.rows {
-			if r.oui == oui && r.sn == sn && r.endTime.Equal(want) {
-				out = append(out, []any{r.objectLdn, r.path, r.value})
+			if r.timeCol.Equal(want) && inSet[pair{r.oui, r.sn}] {
+				out = append(out, []any{r.oui, r.sn, r.objectLdn, r.path, r.value})
 			}
 		}
 		return &fakeRows{rows: out}, nil
 	}
-	return nil, errors.New("cellAwareDB.Query unexpected args len")
+	return nil, errors.New("cellAwareDB.Query unexpected sql")
 }
 
-// findKPIArgs 从累积的 Exec args 里找出 object_ldn 实参等于 wantLdn 的那次插入（每次 9 参/行）。
+// findKPIArgs 从累积的 Exec args 里找出 object_ldn 实参等于 wantLdn 的那一行（每行 9 参）。
+// #516 批量化后一次 Exec 可含跨实体多行（9×N 参），逐行 9 参切片匹配 object_ldn。
 func findKPIArgs(execArgs [][]any, wantLdn string) []any {
 	for _, args := range execArgs {
-		if len(args) == 9 && args[8] == wantLdn {
-			return args
+		for off := 0; off+9 <= len(args); off += 9 {
+			row := args[off : off+9]
+			if row[8] == wantLdn {
+				return row
+			}
 		}
 	}
 	return nil
@@ -1022,21 +1123,21 @@ func Test_kpiDependsOnOwnCounters(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 路子 B：行为单测——智能桩按 end_time 精确过滤，证明 KPI 取本桶值、孤立桶也能算
+// 路子 B：行为单测——智能桩按分区列（桶头）time 精确过滤，证明 KPI 取本桶值、孤立桶也能算
 // ---------------------------------------------------------------------------
 
-// bucketRow 是智能桩里 target 表的一行（带 end_time，供按桶精确过滤）。
+// bucketRow 是智能桩里 target 表的一行（带 time 桶头列，供按分区列精确过滤）。
 type bucketRow struct {
 	oui, sn string
 	path    string
 	value   float64
 	endTime time.Time
-	timeCol time.Time
+	timeCol time.Time // 分区列（桶头）：#516 后按此列精确等值过滤
 }
 
-// preciseBucketDB 模拟"按 end_time 精确过滤"的 target 表：
-// listDevicesInBucket / loadCountersForDevice 传入 w.End（args 第二/第四位），
-// 只返回 end_time == 该值的行——复现真实 PG 谓词行为，从而验证修复后只读到本桶。
+// preciseBucketDB 模拟"按分区列（桶头）time 精确过滤"的 target 表：
+// #516 后 listEntitiesInBucket / loadCountersByObjectLdn 传入 w.Start（= 桶头 time，args 末位），
+// 只返回 time(桶头) == 该值的行——复现真实 PG 谓词行为，验证修复后只读本桶。
 type preciseBucketDB struct {
 	rows    []bucketRow
 	execTag pgconn.CommandTag
@@ -1055,14 +1156,21 @@ func (db *preciseBucketDB) QueryRow(ctx context.Context, sql string, args ...any
 }
 
 func (db *preciseBucketDB) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
-	// listEntitiesInBucket: args = [granularity, end_time, time] → (oui, sn, object_ldn)
-	// loadCountersByObjectLdn: args = [oui, sn, granularity, end_time, time] → (object_ldn, metric_path, value)
-	if len(args) == 3 {
+	// #516 后参数布局：
+	//   listEntitiesInBucket:     args = [granularity, time(桶头)]            → (oui, sn, object_ldn)
+	//   loadCountersByObjectLdn:  args = [oui, sn, granularity, time(桶头)]   → (object_ldn, metric_path, value)
+	// 末位均为分区列（桶头）time = w.Start，按它精确等值过滤——复现 #516 改后 WHERE time = $N 行为。
+	// 守住改动方向：SQL 必须用分区列 time 精确等值且不再含桶尾时刻列 end_time。
+	if !strings.Contains(sql, "time = $") || strings.Contains(sql, "end_time") {
+		return nil, errors.New("preciseBucketDB: SQL 未按 #516 用分区列 time 精确等值（或仍含 end_time）")
+	}
+	// listEntitiesInBucket: args = [granularity, time(桶头)]
+	if strings.Contains(sql, "SELECT DISTINCT device_oui, device_sn, object_ldn") {
 		want := args[1].(time.Time)
 		seen := map[entityKey]bool{}
 		var out [][]any
 		for _, r := range db.rows {
-			if r.endTime.Equal(want) {
+			if r.timeCol.Equal(want) {
 				k := entityKey{r.oui, r.sn, ""} // 设备级实体（object_ldn 空串）
 				if !seen[k] {
 					seen[k] = true
@@ -1072,19 +1180,26 @@ func (db *preciseBucketDB) Query(ctx context.Context, sql string, args ...any) (
 		}
 		return &fakeRows{rows: out}, nil
 	}
-	if len(args) == 5 {
-		oui := args[0].(string)
-		sn := args[1].(string)
-		want := args[3].(time.Time)
+	// #516 整桶分批载入: args = [granularity, time(桶头), oui1, sn1, ...] → (oui, sn, object_ldn, metric_path, value)
+	if strings.Contains(sql, "SELECT device_oui, device_sn, object_ldn, metric_path, metric_value") {
+		if !strings.Contains(sql, "(device_oui, device_sn) IN") {
+			return nil, errors.New("preciseBucketDB: 整桶载入 SQL 必须用 (oui,sn) 复合 IN 批量，非逐设备单查")
+		}
+		want := args[1].(time.Time)
+		type pair struct{ oui, sn string }
+		inSet := map[pair]bool{}
+		for i := 2; i+1 < len(args); i += 2 {
+			inSet[pair{args[i].(string), args[i+1].(string)}] = true
+		}
 		var out [][]any
 		for _, r := range db.rows {
-			if r.oui == oui && r.sn == sn && r.endTime.Equal(want) {
-				out = append(out, []any{"", r.path, r.value})
+			if r.timeCol.Equal(want) && inSet[pair{r.oui, r.sn}] {
+				out = append(out, []any{r.oui, r.sn, "", r.path, r.value})
 			}
 		}
 		return &fakeRows{rows: out}, nil
 	}
-	return nil, errors.New("preciseBucketDB.Query unexpected args len")
+	return nil, errors.New("preciseBucketDB.Query unexpected sql")
 }
 
 func avilRateRoute() *router.KPIRoute {
@@ -1174,4 +1289,409 @@ func Test_backfillDisplayNames(t *testing.T) {
 	assert.Equal(t, "RRC连接建立成功率", rows[0].DisplayName, "命中编号回填 cn_name")
 	assert.Equal(t, "K_UNKNOWN", rows[1].DisplayName, "查不到的编号回退用编号本身")
 	assert.Equal(t, "L.Cell.RrcConn", rows[2].DisplayName, "counter 行用 metric_path")
+}
+
+// ---------------------------------------------------------------------------
+// #516 边界测试（关键）：第二段精确过滤换分区列后，查目标桶只命中本桶，不漏不串相邻桶。
+//
+// 构造相邻三桶（prev / target / next，桶头各差一个桶宽）的源行，s516FixtureDB 按查询里
+// 传入的「分区列 time 桶头值」精确等值过滤夹具（模拟 #516 改后的 WHERE time = $N 单分片命中）。
+// 断言：用 target 桶窗口查实体枚举 / 取计数器，只拿到 target 桶的实体与计数器，
+// 不漏（target 全在）、不串（prev/next 一个都不串入）。
+// 这道测试守的是「桶头精确等值 → 唯一本桶」的不变量；若误改回半开区间或桶尾时刻列，会漏/串。
+// ---------------------------------------------------------------------------
+
+// s516FixtureRow 是 target 表（pm_metrics_hourly 等）夹具里的一行计数器。
+type s516FixtureRow struct {
+	oui, sn, objectLdn, metricPath string
+	value                          float64
+	bucketHead                     time.Time // 该行所属桶的桶头（== time 列，#479 后 time==start_time==桶头）
+}
+
+// s516FixtureDB 是按「分区列 time 桶头」精确过滤的夹具型 PgQuerier，
+// 专用于 #516 边界测试：只实现 listEntities / loadCounters 两条 SELECT 的过滤语义。
+type s516FixtureDB struct {
+	fixture []s516FixtureRow
+}
+
+func (b *s516FixtureDB) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	return pgconn.NewCommandTag(""), nil
+}
+func (b *s516FixtureDB) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	return countRow{n: 0}
+}
+
+// Query 模拟 #516 改后两条 SELECT 的分区列精确过滤：
+//   - listEntities SQL：args = [granularity, bucketHead]，最后一个 arg 即分区列 time 桶头；
+//   - loadCounters SQL：args = [oui, sn, granularity, bucketHead]，最后一个 arg 即分区列 time 桶头。
+// 仅按桶头精确等值（外加 loadCounters 的 oui/sn）过滤夹具，正是 #516 改后 WHERE time = $N 的行为。
+func (b *s516FixtureDB) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	// 断言被测 SQL 确实用分区列 time 精确等值、且不含桶尾时刻列 end_time（守住改动方向）。
+	if !strings.Contains(sql, "time = $") || strings.Contains(sql, "end_time") {
+		return nil, errors.New("s516FixtureDB: SQL 未按 #516 用分区列 time 精确等值（或仍含 end_time）")
+	}
+	head, _ := args[len(args)-1].(time.Time)
+
+	if strings.Contains(sql, "SELECT DISTINCT device_oui, device_sn, object_ldn") {
+		// listEntitiesInBucket：按桶头过滤后去重 (oui, sn, object_ldn)
+		seen := map[entityKey]struct{}{}
+		var out [][]any
+		for _, r := range b.fixture {
+			if !r.bucketHead.Equal(head) {
+				continue
+			}
+			k := entityKey{oui: r.oui, sn: r.sn, objectLdn: r.objectLdn}
+			if _, dup := seen[k]; dup {
+				continue
+			}
+			seen[k] = struct{}{}
+			out = append(out, []any{r.oui, r.sn, r.objectLdn})
+		}
+		return &fakeRows{rows: out}, nil
+	}
+
+	// loadCountersByObjectLdn：args = [oui, sn, granularity, bucketHead]
+	oui, _ := args[0].(string)
+	sn, _ := args[1].(string)
+	var out [][]any
+	for _, r := range b.fixture {
+		if !r.bucketHead.Equal(head) || r.oui != oui || r.sn != sn {
+			continue
+		}
+		out = append(out, []any{r.objectLdn, r.metricPath, r.value})
+	}
+	return &fakeRows{rows: out}, nil
+}
+
+// 三相邻桶夹具：prev/target/next 桶头各差 1 小时。每桶放各自独立的实体与计数器值。
+func adjacentThreeBucketFixture(prevHead, targetHead, nextHead time.Time) []s516FixtureRow {
+	return []s516FixtureRow{
+		// prev 桶（桶头 = targetHead - 1h）
+		{oui: "A", sn: "S1", objectLdn: "Cellid=1", metricPath: "c", value: 11, bucketHead: prevHead},
+		{oui: "A", sn: "S1", objectLdn: "PREV_ONLY", metricPath: "c", value: 12, bucketHead: prevHead},
+		// target 桶（本桶，应被精确命中）
+		{oui: "A", sn: "S1", objectLdn: "Cellid=1", metricPath: "c", value: 21, bucketHead: targetHead},
+		{oui: "A", sn: "S1", objectLdn: "Cellid=2", metricPath: "c", value: 22, bucketHead: targetHead},
+		// next 桶（桶头 = targetHead + 1h）
+		{oui: "A", sn: "S1", objectLdn: "Cellid=1", metricPath: "c", value: 31, bucketHead: nextHead},
+		{oui: "A", sn: "S1", objectLdn: "NEXT_ONLY", metricPath: "c", value: 32, bucketHead: nextHead},
+	}
+}
+
+func Test_listEntitiesInBucket_DoesNotLeakToAdjacentBuckets(t *testing.T) {
+	targetHead := time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC)
+	prevHead := targetHead.Add(-time.Hour)
+	nextHead := targetHead.Add(time.Hour)
+	db := &s516FixtureDB{fixture: adjacentThreeBucketFixture(prevHead, targetHead, nextHead)}
+	a := New(db, nil, nil)
+
+	w := WindowSpec{Granularity: metrics.GranularityHourly, Start: targetHead, End: targetHead.Add(time.Hour)}
+	ents, err := a.listEntitiesInBucket(context.Background(), "pm_metrics_hourly", w)
+	require.NoError(t, err)
+
+	got := map[string]struct{}{}
+	for _, e := range ents {
+		got[e.objectLdn] = struct{}{}
+	}
+	// 不漏：target 桶两实体都在
+	assert.Contains(t, got, "Cellid=1", "应命中本桶 Cellid=1")
+	assert.Contains(t, got, "Cellid=2", "应命中本桶 Cellid=2")
+	// 不串：相邻桶独有实体一个都不串入
+	assert.NotContains(t, got, "PREV_ONLY", "不应串到前一桶")
+	assert.NotContains(t, got, "NEXT_ONLY", "不应串到后一桶")
+	assert.Len(t, ents, 2, "目标桶恰两个实体，无相邻桶混入")
+}
+
+func Test_loadCountersByObjectLdn_DoesNotLeakToAdjacentBuckets(t *testing.T) {
+	targetHead := time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC)
+	prevHead := targetHead.Add(-time.Hour)
+	nextHead := targetHead.Add(time.Hour)
+	db := &s516FixtureDB{fixture: adjacentThreeBucketFixture(prevHead, targetHead, nextHead)}
+	a := New(db, nil, nil)
+
+	w := WindowSpec{Granularity: metrics.GranularityHourly, Start: targetHead, End: targetHead.Add(time.Hour)}
+	byLdn, err := a.loadCountersByObjectLdn(context.Background(), "pm_metrics_hourly", "A", "S1", w)
+	require.NoError(t, err)
+
+	// 不漏 + 取的是本桶的值（target Cellid=1=21, Cellid=2=22），不是相邻桶的 11/31。
+	require.Contains(t, byLdn, "Cellid=1")
+	require.Contains(t, byLdn, "Cellid=2")
+	assert.Equal(t, 21.0, byLdn["Cellid=1"]["c"], "应取本桶值 21，非前桶 11 / 后桶 31")
+	assert.Equal(t, 22.0, byLdn["Cellid=2"]["c"], "应取本桶值 22")
+	// 不串：相邻桶独有实体不出现
+	assert.NotContains(t, byLdn, "PREV_ONLY", "不应串到前一桶")
+	assert.NotContains(t, byLdn, "NEXT_ONLY", "不应串到后一桶")
+	assert.Len(t, byLdn, 2, "目标桶恰两个实体计数器，无相邻桶混入")
+}
+
+// ===========================================================================
+// #516 阶段3：第二段 N+1 批量化 —— 调用形状 / 等价 / 分批控内存 / 失败路径
+//
+// 核心命题：第二段从"逐设备取计数器 + 逐实体单条 INSERT"改为"按设备分批整桶载入 +
+// 全桶批量写"。下列测试守：①取计数器是整桶批量查询（复合 IN）非逐设备循环单查；
+// ②KPI 写入是批量插入（一次多行 VALUES）非逐实体单条；③同一桶批量化前后 KPI 行集合逐字段
+// 完全一致；④多设备大桶分批控内存生效；⑤某设备路由/计数器缺失时 WARN 跳过不阻塞整体。
+// ===========================================================================
+
+// s3RecordingDB 记录每次 Query / Exec 的 SQL 与 args，供断言"调用形状/批数/单条行数"。
+// counters：deviceKey → object_ldn → metric_path → value（整桶真实数据，按桶头 time 过滤）。
+type s3RecordingDB struct {
+	entities  []entityKey                                  // 本桶实体（listEntitiesInBucket 返回）
+	counters  map[deviceKey]map[string]map[string]float64 // 整桶计数器
+	loadSQLs  []string                                     // 每次"取计数器"查询的 SQL
+	loadArgs  [][]any                                      // 每次"取计数器"查询的 args
+	execSQLs  []string                                     // 每次 KPI 写入的 SQL
+	execArgs  [][]any                                      // 每次 KPI 写入的 args
+	listCount int                                          // listEntitiesInBucket 调用次数
+}
+
+func (db *s3RecordingDB) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	db.execSQLs = append(db.execSQLs, sql)
+	db.execArgs = append(db.execArgs, args)
+	return pgconn.NewCommandTag(fmt.Sprintf("INSERT 0 %d", len(args)/9)), nil
+}
+func (db *s3RecordingDB) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	return errRow{err: errors.New("s3RecordingDB.QueryRow unimplemented")}
+}
+func (db *s3RecordingDB) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	if strings.Contains(sql, "SELECT DISTINCT device_oui, device_sn, object_ldn") {
+		db.listCount++
+		var out [][]any
+		for _, e := range db.entities {
+			out = append(out, []any{e.oui, e.sn, e.objectLdn})
+		}
+		return &fakeRows{rows: out}, nil
+	}
+	if strings.Contains(sql, "SELECT device_oui, device_sn, object_ldn, metric_path, metric_value") {
+		db.loadSQLs = append(db.loadSQLs, sql)
+		db.loadArgs = append(db.loadArgs, args)
+		// 从复合 IN 还原本批设备集合（args[2:] 成对）。
+		type pair struct{ oui, sn string }
+		inSet := map[pair]bool{}
+		for i := 2; i+1 < len(args); i += 2 {
+			inSet[pair{args[i].(string), args[i+1].(string)}] = true
+		}
+		var out [][]any
+		for dk, byLdn := range db.counters {
+			if !inSet[pair{dk.oui, dk.sn}] {
+				continue
+			}
+			for ldn, m := range byLdn {
+				for path, v := range m {
+					out = append(out, []any{dk.oui, dk.sn, ldn, path, v})
+				}
+			}
+		}
+		return &fakeRows{rows: out}, nil
+	}
+	return nil, errors.New("s3RecordingDB.Query unexpected sql: " + sql)
+}
+
+// 调用形状死判：取计数器是整桶批量查询（复合 IN）、非逐设备循环单查；KPI 写入是批量多行 INSERT。
+func Test_AggregateKPIs_S3_CallShape_BatchLoadAndBatchInsert(t *testing.T) {
+	curStart := time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC)
+	curEnd := curStart.Add(time.Hour)
+	w := WindowSpec{Granularity: metrics.GranularityHourly, Start: curStart, End: curEnd}
+
+	// 3 个设备各一个设备级实体，各有 numerator/denominator → 各产 1 行 KPI。
+	db := &s3RecordingDB{
+		entities: []entityKey{
+			{oui: "A", sn: "S1", objectLdn: ""},
+			{oui: "A", sn: "S2", objectLdn: ""},
+			{oui: "A", sn: "S3", objectLdn: ""},
+		},
+		counters: map[deviceKey]map[string]map[string]float64{
+			{"A", "S1"}: {"": {"numerator": 10, "denominator": 100}},
+			{"A", "S2"}: {"": {"numerator": 20, "denominator": 100}},
+			{"A", "S3"}: {"": {"numerator": 30, "denominator": 100}},
+		},
+	}
+	kr := &stubKPIRouter{byDevice: map[string]*router.KPIRoute{
+		"S1": avilRateRoute(), "S2": avilRateRoute(), "S3": avilRateRoute(),
+	}}
+	a := New(db, kr, nil)
+
+	n, err := a.AggregateKPIs(context.Background(), "pm_metrics_hourly", w)
+	require.NoError(t, err)
+	assert.Equal(t, 3, n, "3 个设备各 1 行 KPI")
+
+	// ① 取计数器：整桶批量（3 设备 ≤ batchSize → 1 次查询），且用复合 IN，非逐设备单查（3 次）。
+	require.Len(t, db.loadSQLs, 1, "3 设备应只发 1 次整桶批量取计数器查询，非逐设备 3 次")
+	assert.Contains(t, db.loadSQLs[0], "(device_oui, device_sn) IN", "取计数器必须用 (oui,sn) 复合 IN 批量")
+	assert.NotContains(t, db.loadSQLs[0], "device_sn  = $2", "不应是逐设备单查（单 device_sn 等值）")
+
+	// ② KPI 写入：批量插入（1 次 Exec 含 3 行，非逐实体 3 次单条 INSERT）。
+	require.Len(t, db.execSQLs, 1, "3 实体 KPI 应只发 1 次批量 INSERT，非逐实体 3 次")
+	assert.Len(t, db.execArgs[0], 27, "1 次 Exec 含 3 行 × 9 参 = 27 参（多行 VALUES）")
+	assert.Equal(t, 1, db.listCount, "listEntitiesInBucket 仍只 1 次")
+}
+
+// 等价死判（关键）：同一桶数据，批量化路径产出的 KPI 行集合（实体 object_ldn / metric_path /
+// metric_value）必须与"逐实体求值"参照实现逐字段完全一致。
+// 参照实现：直接复用 countersForEntity + evalKPIs（求值逻辑不动），按实体独立算一遍，
+// 与 AggregateKPIs 批量路径产出的 Exec 行做集合比对。
+func Test_AggregateKPIs_S3_EquivalentRowSet_BeforeAfterBatching(t *testing.T) {
+	curStart := time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC)
+	curEnd := curStart.Add(time.Hour)
+	w := WindowSpec{Granularity: metrics.GranularityHourly, Start: curStart, End: curEnd}
+
+	// 混合数据：两设备、各含基础小区 + 两 PLMN（覆盖跨层级配对 + 自身门槛），纯小区级 + 纯 PLMN 级 KPI。
+	route := &router.KPIRoute{KPIs: []router.KPIDef{
+		{IndicatorID: "KcellOnly", Name: "PureCell", StatisType: "pct", Formula: "cellNum / cellDen", Dependencies: []string{"cellNum", "cellDen"}},
+		{IndicatorID: "KplmnOnly", Name: "PurePLMN", StatisType: "pct", Formula: "plmnNum / plmnDen", Dependencies: []string{"plmnNum", "plmnDen"}},
+	}}
+	counters := map[deviceKey]map[string]map[string]float64{
+		{"A", "S1"}: {
+			"Cellid=7":            {"cellNum": 40, "cellDen": 80},
+			"Cellid=7,PLMN=00101": {"plmnNum": 10, "plmnDen": 20},
+			"Cellid=7,PLMN=46068": {"plmnNum": 15, "plmnDen": 30},
+		},
+		{"A", "S2"}: {
+			"Cellid=9":            {"cellNum": 5, "cellDen": 25},
+			"Cellid=9,PLMN=00101": {"plmnNum": 7, "plmnDen": 14},
+		},
+	}
+	entities := []entityKey{
+		{oui: "A", sn: "S1", objectLdn: "Cellid=7"},
+		{oui: "A", sn: "S1", objectLdn: "Cellid=7,PLMN=00101"},
+		{oui: "A", sn: "S1", objectLdn: "Cellid=7,PLMN=46068"},
+		{oui: "A", sn: "S2", objectLdn: "Cellid=9"},
+		{oui: "A", sn: "S2", objectLdn: "Cellid=9,PLMN=00101"},
+	}
+
+	// ── 参照实现（"批量化前"逐实体求值，等价对照） ──
+	type kpiKey struct{ oui, sn, ldn, path string }
+	want := map[kpiKey]float64{}
+	refA := New(&s3RecordingDB{}, nil, nil) // 仅借 evalKPIs（不触 DB）
+	for _, ent := range entities {
+		byLdn := counters[deviceKey{ent.oui, ent.sn}]
+		c := countersForEntity(byLdn, ent.objectLdn)
+		ownSet := byLdn[ent.objectLdn]
+		for _, r := range refA.evalKPIs(ent, route.KPIs, c, ownSet) {
+			want[kpiKey{ent.oui, ent.sn, ent.objectLdn, r.path}] = r.value
+		}
+	}
+	require.NotEmpty(t, want, "参照实现应产出若干 KPI 行")
+
+	// ── 批量化路径（实际被测）──
+	db := &s3RecordingDB{entities: entities, counters: counters}
+	kr := &stubKPIRouter{byDevice: map[string]*router.KPIRoute{"S1": route, "S2": route}}
+	a := New(db, kr, nil)
+	n, err := a.AggregateKPIs(context.Background(), "pm_metrics_hourly", w)
+	require.NoError(t, err)
+
+	// 从批量 Exec 还原产出行集合（每行 9 参：oui,sn,path,val,...,object_ldn[idx8]）。
+	got := map[kpiKey]float64{}
+	for _, args := range db.execArgs {
+		for off := 0; off+9 <= len(args); off += 9 {
+			row := args[off : off+9]
+			got[kpiKey{row[0].(string), row[1].(string), row[8].(string), row[2].(string)}] = row[3].(float64)
+		}
+	}
+
+	// 逐字段完全一致（实体 object_ldn + metric_path + metric_value）。
+	assert.Equal(t, want, got, "批量化前后 KPI 行集合必须逐字段完全一致")
+	assert.Equal(t, len(want), n, "返回行数应等于产出 KPI 行数")
+}
+
+// 分批控内存死判：多设备大桶（设备数 > loadCountersBatchSize）→ 取计数器按设备分多批，
+// 每批一次查询且每批设备数 ≤ batchSize（不一次性吞整桶），全设备 KPI 仍全部算出。
+func Test_AggregateKPIs_S3_BatchesDevicesToBoundMemory(t *testing.T) {
+	curStart := time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC)
+	curEnd := curStart.Add(time.Hour)
+	w := WindowSpec{Granularity: metrics.GranularityHourly, Start: curStart, End: curEnd}
+
+	// 构造 loadCountersBatchSize*2 + 1 个设备 → 至少 3 批。
+	nDev := loadCountersBatchSize*2 + 1
+	entities := make([]entityKey, 0, nDev)
+	counters := map[deviceKey]map[string]map[string]float64{}
+	routes := map[string]*router.KPIRoute{}
+	for i := 0; i < nDev; i++ {
+		sn := fmt.Sprintf("S%05d", i)
+		entities = append(entities, entityKey{oui: "A", sn: sn, objectLdn: ""})
+		counters[deviceKey{"A", sn}] = map[string]map[string]float64{"": {"numerator": float64(i + 1), "denominator": 100}}
+		routes[sn] = avilRateRoute()
+	}
+	db := &s3RecordingDB{entities: entities, counters: counters}
+	a := New(db, &stubKPIRouter{byDevice: routes}, nil)
+
+	n, err := a.AggregateKPIs(context.Background(), "pm_metrics_hourly", w)
+	require.NoError(t, err)
+	assert.Equal(t, nDev, n, "全部设备 KPI 都应算出")
+
+	// 取计数器分批：批数 = ceil(nDev / batchSize) = 3，且绝不是 1 次整桶吞下、也不是逐设备 nDev 次。
+	wantBatches := (nDev + loadCountersBatchSize - 1) / loadCountersBatchSize
+	assert.Equal(t, wantBatches, len(db.loadSQLs), "应按 loadCountersBatchSize 分批取计数器（控内存）")
+	assert.Greater(t, len(db.loadSQLs), 1, "多设备大桶不应一次性吞整桶（须分批）")
+	assert.Less(t, len(db.loadSQLs), nDev, "也不应退化为逐设备单查")
+	// 每批设备数 ≤ batchSize（从复合 IN 的 args 还原：(len-2)/2 个设备）。
+	for _, args := range db.loadArgs {
+		devInBatch := (len(args) - 2) / 2
+		assert.LessOrEqual(t, devInBatch, loadCountersBatchSize, "单批设备数不得超过 batchSize")
+	}
+}
+
+// 失败路径①：某设备 KPI 路由缺失（LookupByDevice 报错）→ WARN 跳过该设备，其余设备照常产出。
+func Test_AggregateKPIs_S3_SkipsDeviceWithMissingRoute_NotBlocking(t *testing.T) {
+	curStart := time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC)
+	w := WindowSpec{Granularity: metrics.GranularityHourly, Start: curStart, End: curStart.Add(time.Hour)}
+
+	db := &s3RecordingDB{
+		entities: []entityKey{
+			{oui: "A", sn: "OK1", objectLdn: ""},
+			{oui: "A", sn: "NOROUTE", objectLdn: ""}, // 路由查不到
+			{oui: "A", sn: "OK2", objectLdn: ""},
+		},
+		counters: map[deviceKey]map[string]map[string]float64{
+			{"A", "OK1"}:     {"": {"numerator": 50, "denominator": 100}},
+			{"A", "NOROUTE"}: {"": {"numerator": 99, "denominator": 100}},
+			{"A", "OK2"}:     {"": {"numerator": 70, "denominator": 100}},
+		},
+	}
+	// NOROUTE 不在 byDevice → LookupByDevice 返回 error。
+	kr := &stubKPIRouter{byDevice: map[string]*router.KPIRoute{"OK1": avilRateRoute(), "OK2": avilRateRoute()}}
+	a := New(db, kr, nil)
+
+	n, err := a.AggregateKPIs(context.Background(), "pm_metrics_hourly", w)
+	require.NoError(t, err, "单设备路由缺失不应让整体报错")
+	assert.Equal(t, 2, n, "仅 OK1/OK2 产 KPI，NOROUTE 被跳过")
+	// NOROUTE 不应出现在任何写入行（按 sn 检查）。
+	for _, args := range db.execArgs {
+		for off := 0; off+9 <= len(args); off += 9 {
+			assert.NotEqual(t, "NOROUTE", args[off+1], "NOROUTE 设备不应有 KPI 写入行")
+		}
+	}
+}
+
+// 失败路径②：某设备计数器整桶载入没拿到（数据态缺失）→ WARN 跳过该设备不阻塞整体。
+// 用 missingCountersDB：listEntities 返回 3 设备，但整桶载入只回 2 个设备的计数器。
+func Test_AggregateKPIs_S3_SkipsDeviceWithMissingCounters_NotBlocking(t *testing.T) {
+	curStart := time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC)
+	w := WindowSpec{Granularity: metrics.GranularityHourly, Start: curStart, End: curStart.Add(time.Hour)}
+
+	db := &s3RecordingDB{
+		entities: []entityKey{
+			{oui: "A", sn: "HAS1", objectLdn: ""},
+			{oui: "A", sn: "NOCNT", objectLdn: ""}, // 列在实体里，但整桶载入无其计数器
+			{oui: "A", sn: "HAS2", objectLdn: ""},
+		},
+		counters: map[deviceKey]map[string]map[string]float64{
+			{"A", "HAS1"}: {"": {"numerator": 40, "denominator": 100}},
+			{"A", "HAS2"}: {"": {"numerator": 60, "denominator": 100}},
+			// 故意不放 NOCNT
+		},
+	}
+	kr := &stubKPIRouter{byDevice: map[string]*router.KPIRoute{
+		"HAS1": avilRateRoute(), "NOCNT": avilRateRoute(), "HAS2": avilRateRoute(),
+	}}
+	a := New(db, kr, nil)
+
+	n, err := a.AggregateKPIs(context.Background(), "pm_metrics_hourly", w)
+	require.NoError(t, err, "单设备计数器缺失不应让整体报错")
+	assert.Equal(t, 2, n, "仅 HAS1/HAS2 产 KPI，NOCNT 计数器缺失被跳过")
+	for _, args := range db.execArgs {
+		for off := 0; off+9 <= len(args); off += 9 {
+			assert.NotEqual(t, "NOCNT", args[off+1], "NOCNT 设备无计数器，不应有 KPI 写入行")
+		}
+	}
 }

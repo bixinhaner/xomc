@@ -98,14 +98,34 @@ func (a *Aggregator) AggregateCounters(ctx context.Context, source, target strin
 	return int(tag.RowsAffected()), nil
 }
 
+// loadCountersBatchSize 是第二段"整桶载入计数器"的分设备批大小（#516 N+1 批量化）。
+//
+// 整桶一次性载入会把全桶所有设备的全部 counter 行一次吞进内存，10 万级设备桶可能 GB 量级；
+// 故按设备分批：每批取 N 个设备的全部 object_ldn 计数器一次查询载入，处理完该批的 KPI 后释放，
+// 再载下一批——往返次数从"逐设备一次（上千次）"降到"每批一次（设备数/N 次）"，同时内存只驻留单批。
+// 200 是经验阈值（单批 ≈ 数百设备 × 上千 metric_path，内存可控、往返足够少）；非性能死判，可调。
+const loadCountersBatchSize = 200
+
+// kpiInsertBatchSize 是第二段"批量写 KPI"的单条 INSERT 最大行数（#516 N+1 批量化）。
+//
+// 全桶 KPI 行累积后批量写替代逐实体单条 INSERT；但单条多行 VALUES 受 PG 参数上限（65535）约束，
+// 每行 9 个占位符 → 上限约 7000 行/条，取 1000 留足余量并控单条 SQL 体积。非性能死判，可调。
+const kpiInsertBatchSize = 1000
+
 // AggregateKPIs 在 target 表内做"二阶段"KPI 聚合（T-B 多粒度：按小区/PLMN 算）：
 //  1. SELECT 出 [w.Start, w.End) 桶内 (device_oui, device_sn, object_ldn) DISTINCT 实体——
 //     每个 object_ldn（基础小区 / 各 PLMN / 设备级空串）各成一个独立 KPI 实体
-//  2. 对每个设备：KPIRouter.LookupByDevice → KPI 列表（同设备多实体共用一次路由查询）
+//  2. #516 批量化：把"逐设备一次取计数器"改为"按设备分批整桶载入"——每批一次查询拿该批
+//     全设备全 object_ldn 的 counter，在内存按 设备→实体→指标 组织（分批控内存，避免一次性
+//     吞整桶）；KPI 路由仍按设备 LookupByDevice（已缓存则复用，不重复查）
 //  3. 对每个实体：按本 object_ldn 精确取计数器，对 PLMN 实体做跨层级配对
 //     （合并同 cellID 基础小区行的小区级计数器）→ 自身层级门槛过滤（KPI 公式须引用本实体
 //     自身行至少一个计数器，纯小区级 KPI 因此不泄漏到 PLMN 行）→ expr.Evaluate →
-//     INSERT 带实际 object_ldn 的 KPI 行
+//     KPI 行累积
+//  4. #516 批量化：全桶 KPI 行累积后**批量插入**（单条多行 VALUES，按 kpiInsertBatchSize 分条），
+//     替代逐实体单条 INSERT（往返从"每实体一次（上万次）"降到"每千行一次"）
+//
+// KPI 公式求值仍在内存逐实体算（无法下推 SQL，保持不动）。
 //
 // 注意：本函数假设 AggregateCounters 已写入对应桶的 counter 行（否则 KPI 拿不到入参）。
 // 单 cron runner 内调用顺序：AggregateCounters → AggregateKPIs。
@@ -123,64 +143,76 @@ func (a *Aggregator) AggregateKPIs(ctx context.Context, target string, w WindowS
 		return 0, nil
 	}
 
-	// 同设备的计数器（全 object_ldn 行）与 KPI 路由各取一次，跨该设备的多个小区/PLMN 实体复用。
-	type devCache struct {
-		route       *router.KPIRoute
-		byObjectLdn map[string]map[string]float64 // object_ldn → metric_path → value
-		loaded      bool
-		skip        bool
-	}
-	caches := map[deviceKey]*devCache{}
-
-	total := 0
+	// 按设备聚合实体，便于"取一次路由 + 整桶分批载计数器"在设备粒度复用。
+	// devOrder 保持首次出现顺序，让批划分与产出稳定（测试可断言、行集合稳定）。
+	devEntities := map[deviceKey][]entityKey{}
+	var devOrder []deviceKey
 	for _, ent := range entities {
 		dk := deviceKey{ent.oui, ent.sn}
-		c := caches[dk]
-		if c == nil {
-			c = &devCache{}
-			caches[dk] = c
-			route, err := a.kpiRouter.LookupByDevice(ctx, ent.sn)
+		if _, seen := devEntities[dk]; !seen {
+			devOrder = append(devOrder, dk)
+		}
+		devEntities[dk] = append(devEntities[dk], ent)
+	}
+
+	// 累积全桶 KPI 行，最后批量写（#516）。每行带自身实体（落库需写实体 object_ldn）。
+	var pending []entityRow
+
+	// 按设备分批：每批整桶载入该批全设备的计数器（一次查询），算完即释放该批内存。
+	for start := 0; start < len(devOrder); start += loadCountersBatchSize {
+		end := start + loadCountersBatchSize
+		if end > len(devOrder) {
+			end = len(devOrder)
+		}
+		batchDevs := devOrder[start:end]
+
+		// 整桶（本批设备）一次性载入：deviceKey → object_ldn → metric_path → value。
+		byDevice, err := a.loadCountersForDevices(ctx, target, batchDevs, w)
+		if err != nil {
+			// 整批载入失败：本批所有设备跳过不阻塞其余批（记 WARN 继续，沿用单设备失败语义）。
+			a.logger.Warn("batch load counters failed; skip device batch",
+				zap.Int("batch_devices", len(batchDevs)), zap.Error(err))
+			continue
+		}
+
+		for _, dk := range batchDevs {
+			// KPI 路由按设备取一次（缺失/空 → 跳过整设备，沿用 WARN 跳过语义）。
+			route, err := a.kpiRouter.LookupByDevice(ctx, dk.sn)
 			if err != nil {
-				// 单设备失败不阻塞整体（orphan / 元数据残缺都是稳定状态，记 WARN 继续）。
 				a.logger.Warn("kpi route lookup failed; skip device",
-					zap.String("device_oui", ent.oui), zap.String("device_sn", ent.sn),
+					zap.String("device_oui", dk.oui), zap.String("device_sn", dk.sn),
 					zap.Error(err))
-				c.skip = true
-			} else if route == nil || len(route.KPIs) == 0 {
-				c.skip = true
-			} else {
-				c.route = route
-				byLdn, err := a.loadCountersByObjectLdn(ctx, target, ent.oui, ent.sn, w)
-				if err != nil {
-					a.logger.Warn("load counters failed; skip device",
-						zap.String("device_oui", ent.oui), zap.String("device_sn", ent.sn),
-						zap.Error(err))
-					c.skip = true
-				} else {
-					c.byObjectLdn = byLdn
-					c.loaded = true
+				continue
+			}
+			if route == nil || len(route.KPIs) == 0 {
+				continue
+			}
+			byObjectLdn := byDevice[dk]
+			if byObjectLdn == nil {
+				// 该设备列出了实体但整桶载入没拿到其计数器（数据态/竞态）→ 跳过不阻塞。
+				a.logger.Warn("counters missing for listed device; skip device",
+					zap.String("device_oui", dk.oui), zap.String("device_sn", dk.sn))
+				continue
+			}
+
+			for _, ent := range devEntities[dk] {
+				counters := countersForEntity(byObjectLdn, ent.objectLdn)
+				// 自身层级门槛：实体本行（未经跨层级合并）的计数器集合。
+				// 仅当 KPI 公式依赖与该集合有交集时才在本实体落库——纯小区级 KPI 不引用任何
+				// PLMN 自身计数 → 在 PLMN 实体门槛不过 → 不落（修掉「device 级 KPI 泄漏到 PLMN 行」）。
+				ownSet := byObjectLdn[ent.objectLdn]
+				rows := a.evalKPIs(ent, route.KPIs, counters, ownSet)
+				for _, r := range rows {
+					pending = append(pending, entityRow{ent: ent, row: r})
 				}
 			}
 		}
-		if c.skip || !c.loaded {
-			continue
-		}
-
-		counters := countersForEntity(c.byObjectLdn, ent.objectLdn)
-		// 自身层级门槛：实体本行（未经跨层级合并）的计数器集合。
-		// 仅当 KPI 公式依赖与该集合有交集时才在本实体落库——纯小区级 KPI 不引用任何 PLMN
-		// 自身计数 → 在 PLMN 实体门槛不过 → 不落（修掉「device 级 KPI 泄漏到 PLMN 行」）。
-		ownSet := c.byObjectLdn[ent.objectLdn]
-		written, err := a.evalAndInsertKPIs(ctx, target, ent, w, c.route.KPIs, counters, ownSet)
-		if err != nil {
-			a.logger.Warn("eval/insert kpis failed; skip entity",
-				zap.String("device_oui", ent.oui), zap.String("device_sn", ent.sn),
-				zap.String("object_ldn", ent.objectLdn), zap.Error(err))
-			continue
-		}
-		total += written
 	}
-	return total, nil
+
+	if len(pending) == 0 {
+		return 0, nil
+	}
+	return a.batchInsertKPIs(ctx, target, w, pending)
 }
 
 // ── 内部 helper ───────────────────────────────────────────────────────────
@@ -214,6 +246,9 @@ func (a *Aggregator) listEntitiesInBucket(ctx context.Context, target string, w 
 //
 // T-A 后 target 表每 metric_path 按 object_ldn 分多行；T-B 按实体取本行计数器，
 // 故这里以 (object_ldn, metric_path) 为粒度精确带出，跨层级配对在 countersForEntity 完成。
+//
+// #516：单设备版保留（仅供边界单测验"不串相邻桶"用）；AggregateKPIs 已改走整桶分批的
+// loadCountersForDevices，不再逐设备调用本函数。
 func (a *Aggregator) loadCountersByObjectLdn(ctx context.Context, target, oui, sn string, w WindowSpec) (map[string]map[string]float64, error) {
 	sql, args := buildLoadCountersByObjectLdnSQL(target, oui, sn, w)
 	rows, err := a.db.Query(ctx, sql, args...)
@@ -232,6 +267,44 @@ func (a *Aggregator) loadCountersByObjectLdn(ctx context.Context, target, oui, s
 		if m == nil {
 			m = make(map[string]float64)
 			out[objectLdn] = m
+		}
+		m[name] = val
+	}
+	return out, rows.Err()
+}
+
+// loadCountersForDevices 整桶一次性载入一批设备的全部 counter 行（#516 N+1 批量化）：
+// 单条 SQL 用 (device_oui, device_sn) IN (...) 把该批所有设备的本桶 counter 一次拉回，
+// 在内存按 deviceKey → object_ldn → metric_path → value 组织——把"逐设备一次查询"折成"每批一次"。
+//
+// devs 为本批设备（调用方按 loadCountersBatchSize 切批，控内存只驻留单批）；空批返回空 map。
+func (a *Aggregator) loadCountersForDevices(ctx context.Context, target string, devs []deviceKey, w WindowSpec) (map[deviceKey]map[string]map[string]float64, error) {
+	out := make(map[deviceKey]map[string]map[string]float64, len(devs))
+	if len(devs) == 0 {
+		return out, nil
+	}
+	sql, args := buildLoadCountersForDevicesSQL(target, devs, w)
+	rows, err := a.db.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var oui, sn, objectLdn, name string
+		var val float64
+		if err := rows.Scan(&oui, &sn, &objectLdn, &name, &val); err != nil {
+			return nil, err
+		}
+		dk := deviceKey{oui, sn}
+		byLdn := out[dk]
+		if byLdn == nil {
+			byLdn = make(map[string]map[string]float64)
+			out[dk] = byLdn
+		}
+		m := byLdn[objectLdn]
+		if m == nil {
+			m = make(map[string]float64)
+			byLdn[objectLdn] = m
 		}
 		m[name] = val
 	}
@@ -291,15 +364,21 @@ func kpiDependsOnOwnCounters(k router.KPIDef, ownSet map[string]float64) bool {
 	return false
 }
 
-func (a *Aggregator) evalAndInsertKPIs(
-	ctx context.Context,
-	target string,
+// entityRow 把一条求值后的 KPI 行与其所属实体绑定，供全桶累积后批量写（#516）。
+type entityRow struct {
+	ent entityKey
+	row kpiRow
+}
+
+// evalKPIs 在内存对单实体逐 KPI 求值（无 DB 往返）——#516 把求值与写入解耦：
+// 求值结果不再立刻 INSERT，而是返回给调用方累积，最后全桶批量写。
+// 公式解析/求值/门槛过滤语义与原 evalAndInsertKPIs 完全一致（KPI 公式求值保持不动）。
+func (a *Aggregator) evalKPIs(
 	ent entityKey,
-	w WindowSpec,
 	kpis []router.KPIDef,
 	counters map[string]float64,
 	ownSet map[string]float64,
-) (int, error) {
+) []kpiRow {
 	var rows []kpiRow
 	for _, k := range kpis {
 		if k.Formula == "" {
@@ -313,7 +392,8 @@ func (a *Aggregator) evalAndInsertKPIs(
 		f, err := expr.Parse(k.Formula)
 		if err != nil {
 			a.logger.Warn("kpi formula parse failed; skip",
-				zap.String("kpi", k.Name), zap.String("formula", k.Formula), zap.Error(err))
+				zap.String("kpi", k.Name), zap.String("formula", k.Formula),
+				zap.String("device_sn", ent.sn), zap.Error(err))
 			continue
 		}
 		val, err := f.Evaluate(counters)
@@ -327,16 +407,27 @@ func (a *Aggregator) evalAndInsertKPIs(
 		}
 		rows = append(rows, kpiRow{path: k.IndicatorID, value: val, stype: statis})
 	}
-	if len(rows) == 0 {
-		return 0, nil
-	}
+	return rows
+}
 
-	sql, args := buildKPIInsertSQL(target, ent, w, rows)
-	tag, err := a.db.Exec(ctx, sql, args...)
-	if err != nil {
-		return 0, err
+// batchInsertKPIs 把全桶累积的 KPI 行批量写入 target（#516 N+1 批量化）：
+// 单条多行 VALUES（按 kpiInsertBatchSize 分条以守 PG 参数上限），替代逐实体单条 INSERT，
+// 往返从"每实体一次（上万次）"降到"每千行一次"。返回总写入行数（含 UPSERT 冲突更新）。
+func (a *Aggregator) batchInsertKPIs(ctx context.Context, target string, w WindowSpec, pending []entityRow) (int, error) {
+	total := 0
+	for start := 0; start < len(pending); start += kpiInsertBatchSize {
+		end := start + kpiInsertBatchSize
+		if end > len(pending) {
+			end = len(pending)
+		}
+		sql, args := buildKPIInsertSQLMulti(target, w, pending[start:end])
+		tag, err := a.db.Exec(ctx, sql, args...)
+		if err != nil {
+			return total, err
+		}
+		total += int(tag.RowsAffected())
 	}
-	return int(tag.RowsAffected()), nil
+	return total, nil
 }
 
 // ── 纯 SQL builder（便于 TDD 单测，不依赖 DB）─────────────────────────────
@@ -368,11 +459,12 @@ func buildCountersSQL(source, target string, w WindowSpec) (string, []any) {
 	// 参数顺序：$1=granularity, $2=bucket_start, $3=bucket_end, $4=where_start, $5=where_end
 	// bucket_start/end 等于 where_start/end（cron 同步驱动），但用独立位允许未来错峰回填。
 	//
-	// 源筛选窗口（#479 改动一）：按桶**起点** start_time 落入半开窗口 [w.Start, w.End) 框桶
-	// （start_time >= w.Start AND start_time < w.End），而非旧的「按 end_time 框桶」。
-	// 桶 end_time = start + 桶宽，按结束时刻套起点语义窗口会把每个源桶算到「结束所在周期」，
-	// 整体偏移一个源桶宽度（设备级日/周/月聚合值偏一格）。改按 start_time 后归属正确周期。
-	// 不按 time 筛：15min 源表 time=end 不可靠（#479 改动二前），start_time 是唯一稳定指向桶起点的列。
+	// 源筛选窗口（#516 分区裁剪）：按**分区列** time 落入半开窗口 [w.Start, w.End) 框桶
+	// （time >= w.Start AND time < w.End）。源表/上级表均为 TimescaleDB 超表、按 time 列分区；
+	// 改用分区列过滤后查询只命中目标分片、走索引（分区裁剪），消除原按非分区列 start_time
+	// 全表扫（公共环境 EXPLAIN 约 106 倍成本差）。
+	// 等价性：#479 已统一桶头语义 time == start_time，查的是同一批源行、聚合行为完全不变，
+	// 仅获得分区裁剪 + 索引收益。半开区间语义不变；args 顺序不变（$4=w.Start, $5=w.End）。
 	sql := fmt.Sprintf(`
 INSERT INTO %s (%s)
 SELECT
@@ -396,8 +488,8 @@ SELECT
     NULL::jsonb
 FROM %s m
 WHERE m.metric_type = 'counter'
-  AND m.start_time >= $4
-  AND m.start_time <  $5
+  AND m.time >= $4
+  AND m.time <  $5
   AND m.statis_type IN ('sum','avg','max','min')
 GROUP BY m.device_oui, m.device_sn, m.metric_path, m.statis_type, m.object_ldn
 ON CONFLICT %s DO UPDATE SET
@@ -413,36 +505,44 @@ ON CONFLICT %s DO UPDATE SET
 
 // buildListEntitiesInBucketSQL 构造"列出本桶有计数的实体（设备 + 小区/PLMN）" SELECT。
 //
-// 读的是 target 表（每行即一个已聚合完整桶，桶尾时刻 end_time = w.End），
-// 因此必须**精确命中本桶**（end_time = w.End），而非源表式半开区间扫描。
-// 叠加 time = w.Start（hourly 表 PK 含 time，daily/weekly/monthly 该列恒为桶起点）
-// 既无害又自证锁定到唯一本桶；配合 granularity = $1 唯一定位。
+// 读的是 target 表（每行即一个已聚合完整桶）。target 同样是 TimescaleDB 超表、按分区列
+// time 分区；改前按非分区的桶尾时刻列 end_time 精确命中会跨全部分片扫，故 #516 改为
+// 按**分区列（桶头）time = w.Start** 精确命中——获得分区裁剪 + time 索引，只碰单分片。
+//
+// 等价性（#479 背书）：#479 已统一桶头语义 time == start_time == 桶头，且同一 granularity 内
+// 每个桶的桶头唯一，故 (granularity = $1 AND time = w.Start) 精确锁定唯一本桶，与改前
+// (end_time = w.End AND time = w.Start) 命中同一行集合（仅去掉冗余的桶尾时刻列谓词）。
+// 不串相邻桶：相邻桶桶头不同（前桶 time = 本桶 w.Start - 桶宽，后桶 time = w.End），time = w.Start
+// 精确等值不会命中前后桶（边界单测 Test_buildListEntitiesInBucketSQL_DoesNotLeakToAdjacentBuckets 守卫）。
 //
 // T-B：DISTINCT 维加 object_ldn——基础小区 / 各 PLMN / 设备级空串各成一个独立 KPI 实体。
 //
-// 参数顺序：$1=granularity, $2=bucket_end(=w.End), $3=bucket_start(=w.Start)
+// 参数顺序：$1=granularity, $2=bucket_start(=w.Start，分区列桶头)
 func buildListEntitiesInBucketSQL(target string, w WindowSpec) (string, []any) {
 	sql := fmt.Sprintf(`
 SELECT DISTINCT device_oui, device_sn, object_ldn
 FROM %s
 WHERE metric_type = 'counter'
   AND granularity = $1
-  AND end_time = $2
-  AND time = $3`, target)
-	return sql, []any{string(w.Granularity), w.End, w.Start}
+  AND time = $2`, target)
+	return sql, []any{string(w.Granularity), w.Start}
 }
 
 // buildLoadCountersByObjectLdnSQL 构造"取某设备本桶各 object_ldn 行的 counter 值"SELECT。
 //
-// 与 buildListEntitiesInBucketSQL 同理：读 target 表必须精确命中本桶
-// （end_time = w.End），不能用半开区间——否则会命中上一桶（其 end_time = 本桶 w.Start）。
+// 与 buildListEntitiesInBucketSQL 同理：#516 把精确命中从非分区的桶尾时刻列 end_time
+// 改为**分区列（桶头）time = w.Start**——target 是按 time 分区的超表，按分区列精确等值
+// 命中获得分区裁剪 + time 索引、只碰单分片，消除原按 end_time 全分片扫。
+// 等价性（#479 背书）：time == start_time == 桶头、同 granularity 内桶头唯一，故
+// (granularity AND time = w.Start) 命中与改前 (end_time = w.End AND time = w.Start) 同一行集合；
+// 相邻桶桶头不同（前桶 time = w.Start - 桶宽），time = w.Start 精确等值不会命中相邻桶。
 //
 // 【T-B 关键】：拆掉 T-A 的"折回设备级"层——不再 GROUP BY metric_path 把多小区相加，
 // 而是按 (object_ldn, metric_path) 精确带出每行计数器（T-A 后该表每对组合恰一行），
 // 交由 countersForEntity 按实体取本行 + 对 PLMN 实体做跨层级配对。
 // 这从根上杜绝了"把基础小区 + 各 PLMN 计数相加折回设备级"导致的跨小区串味/重复叠加。
 //
-// 参数顺序：$1=oui, $2=sn, $3=granularity, $4=bucket_end(=w.End), $5=bucket_start(=w.Start)
+// 参数顺序：$1=oui, $2=sn, $3=granularity, $4=bucket_start(=w.Start，分区列桶头)
 func buildLoadCountersByObjectLdnSQL(target, oui, sn string, w WindowSpec) (string, []any) {
 	sql := fmt.Sprintf(`
 SELECT object_ldn, metric_path, metric_value
@@ -451,17 +551,64 @@ WHERE device_oui = $1
   AND device_sn  = $2
   AND metric_type = 'counter'
   AND granularity = $3
-  AND end_time = $4
-  AND time = $5`, target)
-	return sql, []any{oui, sn, string(w.Granularity), w.End, w.Start}
+  AND time = $4`, target)
+	return sql, []any{oui, sn, string(w.Granularity), w.Start}
 }
 
-// buildKPIInsertSQL 给 target 表构造批量 KPI INSERT。
-// 与 buildCountersSQL 不同，KPI 行是 Go 端 evaluate 后逐行插入；这里复用同样的桶时间列设计。
+// buildLoadCountersForDevicesSQL 构造"整桶一次性载入一批设备全部 counter 行"SELECT（#516 N+1 批量化）。
 //
-// T-B：object_ldn 由硬写 '' 改为写实体实际 object_ldn（设备级实体 object_ldn=='' 仍写 ''），
-// 让 KPI 按小区/PLMN 落库分行下钻。复用 T-A 的唯一键（已含 object_ldn），同桶重跑幂等覆盖。
+// 与 buildLoadCountersByObjectLdnSQL 的精确命中语义完全一致（按**分区列（桶头）time = w.Start**
+// 精确等值命中本桶，获分区裁剪 + time 索引、只碰单分片），区别仅在：
+//   - 一次带一批设备（(device_oui, device_sn) IN ((..),(..)) 复合 IN），把"逐设备一次查询"
+//     折成"每批一次查询"——往返条数从设备数降到批数（#516 第一个慢源 N+1 的根治）。
+//   - SELECT 多带 device_oui/device_sn 两列，供调用方按设备归位（单设备版无需带，因 oui/sn 已知）。
+//
+// 不串相邻桶：与单设备版同理，time = w.Start 精确等值，相邻桶桶头不同，不命中前后桶。
+// 等价性（#479 背书）：time == start_time == 桶头、同 granularity 内桶头唯一。
+//
+// 参数顺序：$1=granularity, $2=bucket_start(=w.Start，分区列桶头)，
+// 其后每设备两参（oui, sn）依次排布在复合 IN 里（$3=oui1,$4=sn1,$5=oui2,$6=sn2,...）。
+func buildLoadCountersForDevicesSQL(target string, devs []deviceKey, w WindowSpec) (string, []any) {
+	args := make([]any, 0, 2+len(devs)*2)
+	args = append(args, string(w.Granularity), w.Start)
+
+	pairs := make([]string, 0, len(devs))
+	pos := 3 // $1=granularity, $2=time 已占
+	for _, d := range devs {
+		pairs = append(pairs, fmt.Sprintf("($%d, $%d)", pos, pos+1))
+		args = append(args, d.oui, d.sn)
+		pos += 2
+	}
+
+	sql := fmt.Sprintf(`
+SELECT device_oui, device_sn, object_ldn, metric_path, metric_value
+FROM %s
+WHERE metric_type = 'counter'
+  AND granularity = $1
+  AND time = $2
+  AND (device_oui, device_sn) IN (%s)`, target, joinComma(pairs))
+	return sql, args
+}
+
+// buildKPIInsertSQL 给 target 表构造单实体多 KPI 行的 INSERT（保留：供单实体单测用）。
+// 内部委托 buildKPIInsertSQLMulti——把单实体的多行包装成跨实体的统一格式，行为完全一致。
 func buildKPIInsertSQL(target string, ent entityKey, w WindowSpec, rows []kpiRow) (string, []any) {
+	pending := make([]entityRow, 0, len(rows))
+	for _, r := range rows {
+		pending = append(pending, entityRow{ent: ent, row: r})
+	}
+	return buildKPIInsertSQLMulti(target, w, pending)
+}
+
+// buildKPIInsertSQLMulti 给 target 表构造**跨实体批量** KPI INSERT（#516 N+1 批量化）。
+// 与 buildCountersSQL 不同，KPI 行是 Go 端 evaluate 后批量插入；这里复用同样的桶时间列设计。
+//
+// #516：从"每实体一条单实体 INSERT"改为"全桶累积行一次多行 VALUES"——单条 SQL 跨多个实体/小区/PLMN，
+// 每行各自带自身实体的 oui/sn/object_ldn。往返从"每实体一次（上万次）"降到"每批一次"。
+//
+// T-B：object_ldn 写实体实际 object_ldn（设备级实体 object_ldn=='' 仍写 ''），
+// 让 KPI 按小区/PLMN 落库分行下钻。复用 T-A 的唯一键（已含 object_ldn），同桶重跑幂等覆盖。
+func buildKPIInsertSQLMulti(target string, w WindowSpec, pending []entityRow) (string, []any) {
 	conflictTarget := conflictTargetForTable(target)
 	withID := targetHasIDColumn(target)
 
@@ -470,7 +617,7 @@ func buildKPIInsertSQL(target string, ent entityKey, w WindowSpec, rows []kpiRow
 		columnList = "id, " + columnList
 	}
 
-	valueRows := make([]string, 0, len(rows))
+	valueRows := make([]string, 0, len(pending))
 	args := []any{}
 	pos := 1
 	add := func(v any) string {
@@ -480,7 +627,9 @@ func buildKPIInsertSQL(target string, ent entityKey, w WindowSpec, rows []kpiRow
 		return p
 	}
 
-	for _, r := range rows {
+	for _, pr := range pending {
+		ent := pr.ent
+		r := pr.row
 		oui := add(ent.oui)
 		sn := add(ent.sn)
 		path := add(r.path)
