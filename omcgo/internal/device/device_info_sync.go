@@ -247,7 +247,14 @@ var universalInformMapping = map[string]string{
 	// LTE 设备特有 PHY 参数（不参与小区聚合 — 这些列前端按单值显示且只 cell-1 有意义）
 	// GSM 位置区码：补全 device_groups LAC 匹配模式所需的设备侧数据源（T-2026-05-25）。
 	// 与 TAC 平行，CPE 同时上报时 LAC 多见于双模 / GSM 设备。
+	// 兼容两种 CPE 命名：BTS.* 是 Baicells BaiBS_AGS 旧固件；GSM.* 是 sNBS1200/9200 实测路径。
 	"Device.DeviceInfo.BTS.CurrentLac": "lac",
+	"Device.DeviceInfo.GSM.CurrentLac": "lac",
+	// migration 000003：GSM/BTS 专属（DeviceGSM.* TR069 路径同步）
+	"DeviceGSM.BscSelect":     "bsc_select",
+	"DeviceGSM.OmlRemoteIp":   "oml_remote_ip",
+	"DeviceGSM.OmlRemoteIpBak": "oml_remote_ip_bak",
+	"DeviceGSM.IpaUnitId":     "ipa_unit_id",
 	"Device.Services.FAPService.1.CellConfig.LTE.RAN.PHY.TDDFrame.SubFrameAssignment":      "subframe_assignment",
 	"Device.Services.FAPService.1.CellConfig.LTE.RAN.PHY.TDDFrame.SpecialSubframePatterns": "special_subframe",
 	"Device.Services.FAPService.1.CellConfig.LTE.RAN.PHY.PRACH.ZeroCorrelationZoneConfig":  "root_index",
@@ -456,6 +463,37 @@ const (
 	ParamStationRunTime = "Device.DeviceInfo.X_COM_STATION_RUN_Time"
 )
 
+// existPlmnIdListPath matches FAPControl Gateway ExistPlmnidList paths across
+// FAPService instances. Used as a PLMN fallback when carrier mapping
+// (EPC.PLMNList) is empty — common on GSM / 旧固件 设备。
+var existPlmnIdListPath = regexp.MustCompile(`^Device\.Services\.FAPService\.(\d+)\.FAPControl\.LTE\.Gateway\.ExistPlmnidList$`)
+
+// lookupExistPlmnIdList scans for FAPControl ExistPlmnidList values and
+// returns the first non-empty entry (FAPService 索引最小者优先)。值形如
+// "314030" 或 "314030,460000"；多 PLMN 时取原值不再切分（与 EPC.PLMNList 单值映射对齐）。
+func lookupExistPlmnIdList(paramValues map[string]string) string {
+	bestIdx := -1
+	best := ""
+	for path, val := range paramValues {
+		if val == "" {
+			continue
+		}
+		matches := existPlmnIdListPath.FindStringSubmatch(path)
+		if matches == nil {
+			continue
+		}
+		idx, err := strconv.Atoi(matches[1])
+		if err != nil {
+			continue
+		}
+		if bestIdx == -1 || idx < bestIdx {
+			bestIdx = idx
+			best = val
+		}
+	}
+	return best
+}
+
 // InfoSyncer extracts key TR069 parameters from device_parameters
 // and updates the corresponding device_info columns for fast query access.
 type DeviceCoordinateWriter interface {
@@ -539,6 +577,16 @@ func (s *InfoSyncer) SyncFromParameters(ctx context.Context, deviceID uuid.UUID,
 	if tech == model.TechNR {
 		if mac, ok := lookupWANMAC(paramValues); ok {
 			fields["mac"] = mac
+		}
+	}
+
+	// PLMN fallback：carrier mapping 一般用 EPC.PLMNList.{n}.PLMNID 路径，
+	// 但部分 GSM / 旧固件设备只上报 FAPControl.LTE.Gateway.ExistPlmnidList
+	// （实测 sNBS1200 sNBS9200）。仅在前述映射未命中时兜底取首个非空值，
+	// 避免覆盖 carrier-specific 优先级。
+	if _, exists := fields["plmn"]; !exists {
+		if plmn := lookupExistPlmnIdList(paramValues); plmn != "" {
+			fields["plmn"] = plmn
 		}
 	}
 

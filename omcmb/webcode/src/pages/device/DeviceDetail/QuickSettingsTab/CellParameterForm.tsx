@@ -1037,8 +1037,11 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
                 ?? schemaByPath.get(displayPath)?.currentValue
                 ?? ''
               : '';
-            // 紧贴 ARFCN 之后插入派生的 Frequency(MHz) 显示行(GSM 空口分组专属)。
-            const renderFrequencyAfter = group.id === 'gsm-cell' && p.name === 'CurrentArfcn';
+            // 紧贴 ARFCN 之后插入派生的 Frequency(MHz) 显示行。
+            // 命中分组:BSC 的 GSM 空口分组(gsm-cell) 与 BTS 的基站信息分组(bts-cell-info)。
+            const renderFrequencyAfter =
+              (group.id === 'gsm-cell' || group.id === 'bts-cell-info') &&
+              p.name === 'CurrentArfcn';
             // BM GSM 专属:在 BscSelect 后插入"绑定 RU 的 Route Index"派生行。
             const renderRuRouteAfter = isGsmCell && p.name === 'BscSelect';
             // BM LTE 派生显示:Frequency / Cell ID / 2T4R 开关。

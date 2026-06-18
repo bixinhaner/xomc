@@ -1353,6 +1353,22 @@ const messages: Record<string, string> = {
   'device.bscBackup':           'Backup',
   'device.multiCellStatus':     'Multi-cell Status',
   'device.btsNum':              'BTS Count',
+  // GSM 设备 Status Info 截图新增字段
+  'device.linkSpeedNegotiated': 'Link Speed Negotiated',
+  'device.wanLinkStatus':       'WAN Link Status',
+  'device.cellStatus':          'Cell Status',
+  'device.omcStatus':           'OMC Status',
+  'device.gpsSyncStatus':       'GPS Sync Status',
+  'device.abisLinkStatus':      'Abis Link Status',
+  'device.ueConnections':       'UE Connections',
+  // device.cellId 在上方独立定义(遵照原 key,不重复)
+  'device.lac':                 'LAC',
+  'device.plmn':                'PLMN',
+  'device.bsic':                'BSIC',
+  'device.vswr':                'VSWR',
+  'device.uptime':              'Uptime',
+  // status.notSynchronized / status.off 为全站通用状态词,已在上方 status.* 区块定义
+  'status.on':                  'ON',
 
   // Monitor page extended fields (Network)
   'device.ipsecAddr':           'IPSec Address',

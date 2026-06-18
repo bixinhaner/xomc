@@ -220,6 +220,10 @@ function generateDevice(index: number): Device {
     bscSelect: '',
     bscSerialNumber: '',
     btsNum: 0,
+    wanLinkStatus: '',
+    omcStatus: '',
+    bsic: '',
+    vswr: '',
 
     ipsecAddr: Math.random() > 0.7 ? generateIP() : '',
     mmepoolIpsecAddr: isLTE && Math.random() > 0.8 ? generateIP() : '',
@@ -405,6 +409,10 @@ const beijingDevices: Device[] = Array.from({ length: 50 }, (_, i) => {
     bscSelect: '',
     bscSerialNumber: '',
     btsNum: 0,
+    wanLinkStatus: '',
+    omcStatus: '',
+    bsic: '',
+    vswr: '',
 
     ipsecAddr: Math.random() > 0.7 ? generateIP() : '',
     mmepoolIpsecAddr: isLTE && Math.random() > 0.8 ? generateIP() : '',

@@ -104,6 +104,9 @@ interface BackendDevice {
   // #361: 该设备未 cleared 活动告警数；无活动告警 → null → 前端归 0。
   active_alarm_count?: number | null;
   op_state?: string;
+  // T-2026-06-18: device_info.cell_status 透传（后端 CalcCellStatus 派生 ：任一 cell active → "active"，
+  // 全部 inactive / 无 cell 数据 → "inactive"）。之前 T-0162 误以为后端不再透出此列。
+  cell_status?: string;
   mme_status?: string;
   amf_status?: string;
   rf_status?: string;
@@ -124,6 +127,11 @@ interface BackendDevice {
   bsc_select?: string;
   bsc_serial_number?: string;
   bts_num?: number;
+  // GSM 设备详情「Status Info」截图新增字段。后端按设备是 BTS 时才下发,其余制式为 undefined.
+  wan_link_status?: string;
+  omc_status?: string;
+  bsic?: string;
+  vswr?: string;
 
   // Network
   ipsec_addr?: string;
@@ -339,9 +347,9 @@ function mapBackendDevice(bd: BackendDevice): Device {
     uplinkFrequency: bd.uplink_frequency || '',
     downlinkFrequency: bd.downlink_frequency || '',
 
-    // 后端 T-0162 起 BackendDevice 已无 cell_status 字段，保持原有空串占位
-    // （历史上 bd.cell_status 即为 undefined→''）；如需小区状态请从 op_state 派生。
-    cellStatus: '',
+    // T-2026-06-18: 后端 device_info.cell_status 重新透传（CalcCellStatus 派生：任一 cell active → "active"，
+    // 全部 inactive / 无 cell 数据 → "inactive"）。之前 T-0162 误以为后端不再透出此列写死 ''，导致 BTS 详情页「小区状态」恒为 '-'。
+    cellStatus: bd.cell_status || '',
     opState: bd.op_state || 'unknown',
     mmeStatus: bd.mme_status || '',
     amfStatus: bd.amf_status || '',
@@ -363,6 +371,12 @@ function mapBackendDevice(bd: BackendDevice): Device {
     bscSelect: bd.bsc_select || '',
     bscSerialNumber: bd.bsc_serial_number || '',
     btsNum: bd.bts_num ?? 0,
+    // GSM 设备详情『Status Info』新增字段(截图友机 OMC 风格)。
+    // 后端仅 BTS 下发,其余制式为 undefined → 前端回退 ''(表格展示 '-')。
+    wanLinkStatus: bd.wan_link_status || '',
+    omcStatus: bd.omc_status || '',
+    bsic: bd.bsic || '',
+    vswr: bd.vswr || '',
 
     ipsecAddr: bd.ipsec_addr || '',
     mmepoolIpsecAddr: bd.mmepool_ipsec_addr || '',

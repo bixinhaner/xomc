@@ -666,12 +666,14 @@ func deviceInfoColumns() []string {
 		"first_online_time", "last_online_time", "last_offline_time",
 		"run_time", "cumulative_online_duration",
 		// Phase 2/3 (设计文档 §4.2)：扩展列
-		"tac", "band", "ul_earfcn",
+		"tac", "lac", "band", "ul_earfcn",
 		"subframe_assignment", "special_subframe", "root_index",
 		"gps_satellites", "gps_height", "lock_status",
 		// migration 000004：NR 管理状态 + IPSec 地址
 		"admin_state", "ipsec_addr",
 		"enb_id", "network_model",
+		// migration 000003：GSM/BTS 专属（DeviceGSM.* TR069 同步）
+		"bsc_select", "oml_remote_ip", "oml_remote_ip_bak", "ipa_unit_id",
 		"creator", "updater", "created_at", "updated_at",
 	}
 }
@@ -718,12 +720,23 @@ func deviceWithInfoSelectColumns() []string {
 		"di.first_online_time", "di.last_online_time", "di.last_offline_time", "di.run_time",
 		"di.cumulative_online_duration", // T-0173: OMC 视角累计在线时长
 		// Phase 2/3 (设计文档 §4.2 Layer E)：device_info 扩展列
-		"di.tac", "di.band", "di.ul_earfcn",
+		"di.tac", "di.lac", "di.band", "di.ul_earfcn",
 		"di.subframe_assignment", "di.special_subframe", "di.root_index",
 		"di.gps_satellites", "di.gps_height", "di.lock_status",
 		// migration 000004：NR 管理状态 + IPSec 地址
 		"di.admin_state", "di.ipsec_addr",
 		"di.enb_id", "di.network_model",
+		// migration 000003：GSM/BTS 专属字段（DeviceGSM.* TR069 同步）
+		"di.bsc_select", "di.oml_remote_ip", "di.oml_remote_ip_bak", "di.ipa_unit_id",
+		// bsc_link_status 派生：oml_remote_ip 非空 + 设备在线 → connected，否则 disconnected。
+		// 前端 BackendDevice.bsc_link_status 直接消费此派生值（无需独立物理列）。
+		`CASE
+			WHEN di.oml_remote_ip IS NOT NULL AND di.oml_remote_ip <> '' AND d.is_online
+			THEN 'connected'
+			WHEN di.oml_remote_ip IS NOT NULL AND di.oml_remote_ip <> ''
+			THEN 'disconnected'
+			ELSE NULL
+		END AS bsc_link_status`,
 		// 在线时长派生（设计文档 §13）：
 		//   - is_online → 当前已在线多久（NOW - last_online_time）
 		//   - 离线后 → 上次在线区间长度（last_offline_time - last_online_time）
@@ -819,11 +832,13 @@ func scanDeviceInfoFromRow(row pgx.Row) (*DeviceInfo, error) {
 		&info.FirstOnlineTime, &info.LastOnlineTime, &info.LastOfflineTime,
 		&info.RunTime, &info.CumulativeOnlineDuration,
 		// Phase 2/3 (设计文档 §4.2)：扩展列与 deviceInfoColumns 顺序一致
-		&info.TAC, &info.Band, &info.ULEarfcn,
+		&info.TAC, &info.Lac, &info.Band, &info.ULEarfcn,
 		&info.SubframeAssignment, &info.SpecialSubframe, &info.RootIndex,
 		&info.GPSSatellites, &info.GPSHeight, &info.LockStatus,
 		&info.AdminState, &info.IpsecAddr,
 		&info.EnbID, &info.NetworkModel,
+		// migration 000003：GSM/BTS 专属字段
+		&info.BscSelect, &info.OmlRemoteIp, &info.OmlRemoteIpBak, &info.IpaUnitId,
 		&info.Creator, &info.Updater, &info.CreatedAt, &info.UpdatedAt,
 	)
 	if err != nil {
@@ -873,6 +888,7 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 		diCumOnline     *int64 // T-0173: cumulative_online_duration
 		// Phase 2/3 (设计文档 §4.2)：扩展列接收变量
 		diTAC                *string
+		diLac                *string
 		diBand               *string
 		diULEarfcn           *string
 		diSubframeAssignment *string
@@ -885,6 +901,12 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 		diIpsecAddr          *string // migration 000004
 		diEnbID              *string
 		diNetworkModel       *string
+		// migration 000003：GSM/BTS 专属
+		diBscSelect      *string
+		diOmlRemoteIp    *string
+		diOmlRemoteIpBak *string
+		diIpaUnitId      *string
+		diBscLinkStatus  *string // SELECT 派生，非物理列
 		// 在线时长派生（SQL计算，设计文档 §13）
 		onlineDuration *int64
 		// 离线时长（SQL计算）
@@ -920,11 +942,14 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 		&diFirstOnline, &diLastOnline, &diLastOffline, &diRunTime,
 		&diCumOnline, // T-0173: cumulative_online_duration（与 select 列顺序一致)
 		// Phase 2/3 扩展列
-		&diTAC, &diBand, &diULEarfcn,
+		&diTAC, &diLac, &diBand, &diULEarfcn,
 		&diSubframeAssignment, &diSpecialSubframe, &diRootIndex,
 		&diGPSSatellites, &diGPSHeight, &diLockStatus,
 		&diAdminState, &diIpsecAddr,
 		&diEnbID, &diNetworkModel,
+		// migration 000003：GSM/BTS 专属 4 列 + bsc_link_status 派生列（顺序与 SELECT 一致）
+		&diBscSelect, &diOmlRemoteIp, &diOmlRemoteIpBak, &diIpaUnitId,
+		&diBscLinkStatus,
 		// 在线时长派生
 		&onlineDuration,
 		// 离线时长（SQL计算）
@@ -1004,6 +1029,7 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 	d.CumulativeOnlineDuration = diCumOnline // T-0173
 	// Phase 2/3 扩展列
 	d.TAC = diTAC
+	d.Lac = diLac
 	d.Band = diBand
 	d.ULEarfcn = diULEarfcn
 	d.SubframeAssignment = diSubframeAssignment
@@ -1016,6 +1042,12 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 	d.IpsecAddr = diIpsecAddr
 	d.EnbID = diEnbID
 	d.NetworkModel = diNetworkModel
+	// migration 000003：GSM/BTS 专属
+	d.BscSelect = diBscSelect
+	d.OmlRemoteIp = diOmlRemoteIp
+	d.OmlRemoteIpBak = diOmlRemoteIpBak
+	d.IpaUnitId = diIpaUnitId
+	d.BscLinkStatus = diBscLinkStatus
 	d.OnlineDuration = onlineDuration
 	// 离线时长
 	d.OfflineSeconds = offlineSeconds
