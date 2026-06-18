@@ -145,7 +145,10 @@ export const UPGRADE_LIKE_CATEGORIES = new Set([
   'gnb_upgrade', 'enb_upgrade',
   'gsm_upgrade', // qa-614 c6 #365 #373
   'device_upgrade', // qa-614 c6 #368：合并虚拟分类
-  'version_rollback',
+  // 版本回退（version_rollback）不再归入「升级类」列布局：它是独立业务，套升级列会多出
+  // 无意义的「升级类型」列、且任务/设备列与「设备升级」逐列雷同（很不统一）。摘出后落入
+  // 通用（非升级）列分支，与「日志收集/配置备份」同款，设备导出亦随 isUpgradeLikeCategory
+  // 走 default 视图（与后端 CSV default 表头对齐）。
 ]);
 
 // TASK_NAME_PREFIX_BY_TYPE_I18N：UFTE 新建任务默认名前缀，按 typeCode 区分业务，
