@@ -29,6 +29,10 @@ const LTE_NUM_OF_CELLS_PREFIX = 'Device.Services.FAPService.1.CellConfig.LTE.RAN
 const LTE_NUM_OF_CELLS_PATH = 'Device.Services.FAPService.1.CellConfig.LTE.RAN.CA.PARAMS.NumOfCells';
 const BM_DEVICE_INFO_PREFIX = 'Device.DeviceInfo.';
 const BM_GSM_CELL_PREFIX = 'Device.Services.GsmBTSCellDT.';
+// BSC(独立 GSM BSC 设备,非 BM)的 BTS 多实例前缀。与 BM 的 GsmBTSCellDT 不同,
+// 这是 osmo-bsc 风格的 DeviceGSM.Bts.{i}. 路径,每个 {i} 为一个 BTS 实例。
+const BSC_BTS_PREFIX = 'DeviceGSM.Bts.';
+const BSC_BTS_INSTANCE_RE = /^DeviceGSM\.Bts\.(\d+)\./;
 
 // 非 BM 的 ENB 设备每个 FAPService 最多展示几个 cell。来源：BLN/MLN/BLQ 现网模板
 // 上限是 3（CA 最多 3 载波）。如果将来出现 4-CA 设备，改这个常量即可。
@@ -122,11 +126,15 @@ export interface ResolvedCellInstances {
   isENB: boolean;
   isNR: boolean;
   isBM: boolean;
+  /** BSC(独立 GSM 设备,paramModel === 'BSC')，顶部需要 BTS 实例选择器。*/
+  isBSC: boolean;
   loading: boolean;
   instances: number[];
   lteInstances: number[];
   lteConfiguredCellCount: number | null;
   nrCellInstances: number[];
+  /** BSC 设备枚举出的 BTS 实例号(升序)。 */
+  bscBtsInstances: number[];
   bmCellMode: { gsmNum: number; lteNum: number } | null;
   bmEnabledLteInstances: number[];
   bmEnabledGsmInstances: number[];
@@ -144,6 +152,8 @@ export function useResolvedCellInstances({
   const isENB = networkType === 'lte';
   const isNR = networkType === 'nr';
   const isBM = (paramModel ?? '').toUpperCase().startsWith('BM');
+  // BSC(独立 GSM 设备) 按 paramModel 判定;与 BM/ENB/NR 互斥。
+  const isBSC = (paramModel ?? '').toUpperCase() === 'BSC';
 
   const { data: fapSchema, isLoading: fapSchemaLoading } = useParameterSchema(
     deviceId,
@@ -173,6 +183,12 @@ export function useResolvedCellInstances({
     deviceId,
     NR_CELLCONFIG_PREFIX,
     Boolean(deviceId) && isNR,
+  );
+
+  const { data: bscBtsSchema, isLoading: bscBtsSchemaLoading } = useParameterSchema(
+    deviceId,
+    BSC_BTS_PREFIX,
+    Boolean(deviceId) && isBSC,
   );
 
   const lteInstances = useMemo<number[]>(() => {
@@ -265,6 +281,26 @@ export function useResolvedCellInstances({
     return Array.from(fallback).sort((a, b) => a - b);
   }, [isNR, nrCellSchema]);
 
+  // BSC 枚举 DeviceGSM.Bts.{i}. 实例集合。优先用 schema 指定的 currentInstances,
+  // 其次从 parameters[].path 正则 fallback;与 LTE/NR 枚举策略一致。
+  // 业务约定 BTS 实例号从 1 开始(与 LTE FAPService.{i} / NR Cell.{i} 一致),
+  // osmo-bsc 0 号槽位是内部模板,不暴露给运维。
+  const bscBtsInstances = useMemo<number[]>(() => {
+    if (!isBSC || !bscBtsSchema) return [];
+    const objEntry = bscBtsSchema.objects.find((o) => o.path === BSC_BTS_PREFIX);
+    const candidate = objEntry?.currentInstances ?? [];
+    if (candidate.length > 0) return [...candidate].filter((n) => n > 0).sort((a, b) => a - b);
+    const fallback = new Set<number>();
+    for (const p of bscBtsSchema.parameters) {
+      const m = BSC_BTS_INSTANCE_RE.exec(p.path);
+      if (m) {
+        const n = Number(m[1]);
+        if (n > 0) fallback.add(n);
+      }
+    }
+    return Array.from(fallback).sort((a, b) => a - b);
+  }, [isBSC, bscBtsSchema]);
+
   const bmTechOptions = useMemo<Array<'LTE' | 'GSM'>>(() => {
     const options: Array<'LTE' | 'GSM'> = [];
     if (bmEnabledLteInstances.length > 0 || hasBmLteGroups) options.push('LTE');
@@ -278,8 +314,9 @@ export function useResolvedCellInstances({
       return lteCellInstances;
     }
     if (isNR) return nrCellInstances;
+    if (isBSC) return bscBtsInstances;
     return [];
-  }, [isENB, isBM, bmTech, bmEnabledGsmInstances, bmEnabledLteInstances, lteCellInstances, isNR, nrCellInstances]);
+  }, [isENB, isBM, bmTech, bmEnabledGsmInstances, bmEnabledLteInstances, lteCellInstances, isNR, nrCellInstances, isBSC, bscBtsInstances]);
 
   const loading = useMemo(() => {
     if (isENB) {
@@ -287,21 +324,24 @@ export function useResolvedCellInstances({
       return fapSchemaLoading || lteNumOfCellsLoading;
     }
     if (isNR) return nrCellSchemaLoading;
+    if (isBSC) return bscBtsSchemaLoading;
     return false;
-  }, [isENB, isBM, fapSchemaLoading, bmDeviceInfoLoading, bmGsmSchemaLoading, lteNumOfCellsLoading, isNR, nrCellSchemaLoading]);
+  }, [isENB, isBM, fapSchemaLoading, bmDeviceInfoLoading, bmGsmSchemaLoading, lteNumOfCellsLoading, isNR, nrCellSchemaLoading, isBSC, bscBtsSchemaLoading]);
 
-  const ready = (isENB || isNR) && !loading && Boolean(deviceId);
+  const ready = (isENB || isNR || isBSC) && !loading && Boolean(deviceId);
 
   return {
     ready,
     isENB,
     isNR,
     isBM,
+    isBSC,
     loading,
     instances,
     lteInstances,
     lteConfiguredCellCount,
     nrCellInstances,
+    bscBtsInstances,
     bmCellMode,
     bmEnabledLteInstances,
     bmEnabledGsmInstances,

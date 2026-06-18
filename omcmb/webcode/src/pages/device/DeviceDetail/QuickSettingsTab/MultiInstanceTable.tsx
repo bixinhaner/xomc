@@ -144,6 +144,149 @@ const BM_SPECIAL_COLUMNS: Record<string, SpecialColumnSpec[]> = {
 };
 
 /**
+ * BSC 邻区打包标量映射：把 quicksettings XML 中的“多实例邻区表”映射到 BTS 父对象上的单标量字符串。
+ * 设备实际不上报 `DeviceGSM.Bts.{i}.Neighbor{2G,4G}.{j}.<leaf>` 子对象，而是把整张邻区列表
+ * 拼成一个字符串放在 `DeviceGSM.Bts.{i}.<scalarLeaf>` 上，多条由空白分隔、单条字段由 `-` 分隔。
+ *
+ *   2G (NeighborCgiAdd)         : MCC-MNC-LAC-CI-ARFCN-BSIC
+ *   4G (Si2quaterNeighborListAdd): EARFCN-thresh_hi-thresh_lo-prio-qrxlv-meas
+ *
+ * 命中该映射的 group 走只读“打包标量解析”渲染分支，不调用 AddObject / SetParameterValues。
+ */
+const PACKED_NEIGHBOR_TABLE_BY_GROUP_ID: Record<
+  string,
+  { parentObjectPath: string; scalarLeaf: string }
+> = {
+  'bsc-bts-neighbor2g': {
+    parentObjectPath: 'DeviceGSM.Bts.{i}.',
+    scalarLeaf: 'NeighborCgiAdd',
+  },
+  'bsc-bts-neighbor4g': {
+    parentObjectPath: 'DeviceGSM.Bts.{i}.',
+    scalarLeaf: 'Si2quaterNeighborListAdd',
+  },
+};
+
+function parsePackedNeighborList(packed: string): string[][] {
+  if (!packed) return [];
+  return packed
+    .trim()
+    .split(/\s+/)
+    .filter((entry) => entry.length > 0)
+    .map((entry) => entry.split('-'));
+}
+
+interface PackedScalarNeighborTableProps {
+  deviceId: string;
+  group: QuickSettingsGroup;
+  instanceContext: QuickSettingsInstanceContext;
+  locale: 'zh-CN' | 'en-US';
+  spec: { parentObjectPath: string; scalarLeaf: string };
+}
+
+/**
+ * 打包标量邻区表：只读展示从 BTS 父对象单标量解析出的邻区列表。
+ * 不支持新增/修改/删除（设备不提供 AddObject 入口，编辑需在 MML 直接改父标量字符串）。
+ */
+function PackedScalarNeighborTable({
+  deviceId,
+  group,
+  instanceContext,
+  locale,
+  spec,
+}: PackedScalarNeighborTableProps) {
+  const t = useT();
+  // 解析 BTS 实例号（占位符为 {i}），得到父对象路径，e.g. "DeviceGSM.Bts.1."
+  const parentPath = useMemo(() => {
+    const resolved = applyInstanceContext(spec.parentObjectPath, instanceContext, {
+      preserveTrailingInstance: true,
+    });
+    // 末尾仍可能残留 {i}.；把它替换成 fapInstance(BTS 实例号)。
+    return resolved.replace(/\{i\}\.$/, `${instanceContext.fapInstance}.`);
+  }, [spec.parentObjectPath, instanceContext]);
+
+  const scalarPath = `${parentPath}${spec.scalarLeaf}`;
+
+  // 拉父路径下的所有参数，从中找出打包标量。父路径粒度命中只读 schema 已足够。
+  const { data: schemaResp, isLoading, refetch, isFetching } = useParameterSchema(deviceId, parentPath);
+
+  const packedValue = useMemo(() => {
+    const item = schemaResp?.parameters.find((p) => p.path === scalarPath);
+    return item?.currentValue ?? '';
+  }, [schemaResp, scalarPath]);
+
+  const lastSyncedAt = useMemo(() => {
+    const item = schemaResp?.parameters.find((p) => p.path === scalarPath);
+    return item?.lastSyncedAt ?? null;
+  }, [schemaResp, scalarPath]);
+
+  const rows = useMemo(() => {
+    const cellsList = parsePackedNeighborList(packedValue);
+    return cellsList.map((cells, idx) => ({ key: idx + 1, id: idx + 1, cells }));
+  }, [packedValue]);
+
+  const columns: ColumnType<{ key: number; id: number; cells: string[] }>[] = [
+    {
+      title: t('device.multi.instance'),
+      dataIndex: 'id',
+      key: 'id',
+      width: 80,
+      fixed: 'left',
+      render: (_v: unknown, row) => <Text strong>{row.id}</Text>,
+    },
+    ...group.params.map<ColumnType<{ key: number; id: number; cells: string[] }>>((param, colIdx) => ({
+      title: locale === 'zh-CN' ? param.titleZh : param.titleEn,
+      key: param.leaf || param.name,
+      width: 140,
+      render: (_v: unknown, row) => <Text>{row.cells[colIdx] ?? '-'}</Text>,
+    })),
+  ];
+
+  const title = locale === 'zh-CN' ? group.titleZh : group.titleEn;
+  const maxInstances = group.maxInstances && group.maxInstances > 0 ? group.maxInstances : undefined;
+  const cardTitle = maxInstances !== undefined
+    ? `${title}（${rows.length}/${maxInstances}）`
+    : `${title}（${rows.length}）`;
+
+  return (
+    <Card
+      title={cardTitle}
+      size="small"
+      extra={
+        <Space>
+          <Tag color="default">{t('device.multi.packed.readonlyTag')}</Tag>
+          <Button
+            size="small"
+            icon={<SyncOutlined spin={isFetching} />}
+            onClick={() => void refetch()}
+            loading={isFetching}
+          >
+            {t('common.refresh')}
+          </Button>
+        </Space>
+      }
+      style={{ marginBottom: 16 }}
+    >
+      <Table
+        rowKey="key"
+        dataSource={rows}
+        columns={columns}
+        loading={isLoading}
+        size="small"
+        pagination={false}
+        scroll={{ x: 'max-content', y: 240 }}
+        sticky
+        locale={{ emptyText: t('device.multi.packed.emptyText') }}
+      />
+      <div style={{ marginTop: 8, color: '#8c8c8c', fontSize: 12 }}>
+        {t('device.multi.packed.sourceLabel')}{scalarPath}
+        {lastSyncedAt ? ` · ${t('device.multi.packed.lastSynced', { time: formatTime(new Date(lastSyncedAt).getTime()) })}` : ''}
+      </div>
+    </Card>
+  );
+}
+
+/**
  * 多实例分组表格（异频邻区频点列表 / 邻区列表）。
  *
  * 行为：
@@ -157,6 +300,20 @@ const BM_SPECIAL_COLUMNS: Record<string, SpecialColumnSpec[]> = {
  */
 export default function MultiInstanceTable({ deviceId, group, instanceContext, locale }: MultiInstanceTableProps) {
   const t = useT();
+  // BSC 邻区兼容：部分 GSM 设备不按 TR-181 子对象上报，而是把整张邻区列表打包到 BTS 父对象单标量。
+  // 这种 group 不存在 currentInstances，常规多实例渲染会出现「暂无数据」。改走打包标量解析路径。
+  const packedSpec = PACKED_NEIGHBOR_TABLE_BY_GROUP_ID[group.id];
+  if (packedSpec) {
+    return (
+      <PackedScalarNeighborTable
+        deviceId={deviceId}
+        group={group}
+        instanceContext={instanceContext}
+        locale={locale}
+        spec={packedSpec}
+      />
+    );
+  }
   // group.objectPath 形如 "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}."
   // - 外层 FAPService.{i} → 用 fapInstance 替换
   // - 内层 Carrier.{i}. 末段是实例号占位符 — 剥离后得到父对象路径,用于查 schema.objects / AddObject / 拼接行 path 前缀

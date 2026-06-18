@@ -203,6 +203,59 @@ func (r *PgDeviceParameterRepository) CountByPathPrefix(ctx context.Context, dev
 	return count, nil
 }
 
+// MaxInstanceNumberByPrefix 查询 device_parameters 中以 prefix 开头的 path,
+// 提取 prefix 之后的第一段(如果是数字)取最大值。供 Path B instance 展开估算用。
+//
+// 例 prefix="DeviceGSM.Bts.":
+//   DB path = "DeviceGSM.Bts.254.CellId"  → 提取出 "254"
+//   DB path = "DeviceGSM.Bts.256.Trx.1.Rf" → 提取出 "256"
+//   返回 256
+//
+// 查询返回去重后的"第一段"集合(BSC 场景 ≤ 256 行),Go 侧扫描取 max,避免拉全部
+// 17791 行 path。无匹配返回 (0, nil)。仅 expand 路径调用,不在主接口。
+func (r *PgDeviceParameterRepository) MaxInstanceNumberByPrefix(ctx context.Context, deviceID uuid.UUID, prefix string) (int, error) {
+	if prefix == "" {
+		return 0, nil
+	}
+	// substring(path FROM length(prefix)+1) 去掉前缀,
+	// regexp_replace 去掉第一个 "." 及之后,得到 "第一段"。
+	// DISTINCT 后行数 = 实例数量(BTS 256 → 256 行)。
+	const q = `SELECT DISTINCT regexp_replace(
+		substring(parameter_path FROM length($2) + 1),
+		'\..*$', ''
+	) AS inst
+	FROM device_parameters
+	WHERE device_id = $1
+	  AND parameter_path LIKE $2 || '%'`
+	rows, err := r.pool.Query(ctx, q, deviceID, prefix)
+	if err != nil {
+		return 0, fmt.Errorf("query max instance number: %w", err)
+	}
+	defer rows.Close()
+	maxInst := 0
+	for rows.Next() {
+		var inst string
+		if err := rows.Scan(&inst); err != nil {
+			return 0, fmt.Errorf("scan inst: %w", err)
+		}
+		if inst == "" {
+			continue
+		}
+		n := 0
+		for _, c := range inst {
+			if c < '0' || c > '9' {
+				n = 0
+				break
+			}
+			n = n*10 + int(c-'0')
+		}
+		if n > maxInst {
+			maxInst = n
+		}
+	}
+	return maxInst, nil
+}
+
 func (r *PgDeviceParameterRepository) SearchByKeyword(ctx context.Context, deviceID uuid.UUID, keyword string, limit int) ([]model.DeviceParameter, error) {
 	if limit <= 0 {
 		limit = 100

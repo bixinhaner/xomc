@@ -241,3 +241,36 @@ func TestBuildObjectSchema_IgnoresModelOnlyPlaceholderInstances(t *testing.T) {
 	assert.Equal(t, "Device.Services.FAPService.", objects[0].Path)
 	assert.Equal(t, []int{1, 6}, objects[0].CurrentInstances)
 }
+
+func TestBuildObjectSchema_KeepsAllReadOnlyObjectInstances(t *testing.T) {
+	mv := parammodel.NewMappingValidator(&parammodel.MappingSet{Mappings: []parammodel.ParamMapping{
+		{
+			StandardPath: "DeviceGSM.Bts.{i}.Band",
+			PrivatePath:  "DeviceGSM.Bts.{i}.Band",
+			EntryType:    "parameter",
+			Access:       "READ_ONLY",
+			IsStorable:   true,
+			IsActive:     true,
+			IsSupported:  true,
+		},
+		{
+			StandardPath: "DeviceGSM.Bts.{i}.CellId",
+			PrivatePath:  "DeviceGSM.Bts.{i}.CellId",
+			EntryType:    "parameter",
+			Access:       "READ_ONLY",
+			IsStorable:   true,
+			IsActive:     true,
+			IsSupported:  true,
+		},
+	}})
+	params := []model.DeviceParameter{
+		{ParameterPath: "DeviceGSM.Bts.1.Band", LastUpdatedAt: time.Date(2026, 6, 18, 12, 30, 0, 0, time.UTC)},
+		{ParameterPath: "DeviceGSM.Bts.2.Band", LastUpdatedAt: time.Date(2026, 6, 18, 12, 30, 1, 0, time.UTC)},
+		{ParameterPath: "DeviceGSM.Bts.3.CellId", LastUpdatedAt: time.Date(2026, 6, 18, 12, 30, 2, 0, time.UTC)},
+	}
+
+	objects := buildObjectSchema(mv, params, "DeviceGSM.Bts.")
+	require.Len(t, objects, 1)
+	assert.Equal(t, "DeviceGSM.Bts.", objects[0].Path)
+	assert.Equal(t, []int{1, 2, 3}, objects[0].CurrentInstances)
+}

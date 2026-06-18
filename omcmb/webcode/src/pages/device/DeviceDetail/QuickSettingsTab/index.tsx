@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react';
-import { Alert, Empty, Select, Space, Spin, Typography } from 'antd';
+import { Alert, Button, Empty, Popconfirm, Select, Space, Spin, Typography, message } from 'antd';
+import { MinusOutlined, PlusOutlined } from '@ant-design/icons';
 import { useIntl } from 'react-intl';
 import { useQuickSettingsGroups } from '@core/hooks/api/useQuickSettings';
 import { useResolvedCellInstances } from '@core/hooks/api/useResolvedCellInstances';
+import { useAddObject, useDeleteObject, useParameterSchema } from '@core/hooks/api/useDeviceParameters';
 import { useQuickSettingsFeedbackStore } from '@core/store/quickSettingsFeedbackStore';
 import CellParameterForm from './CellParameterForm';
 import InstanceSelectorForm from './InstanceSelectorForm';
@@ -33,6 +35,9 @@ function normalizeQuickSettingsNetworkType(networkType: string): string {
 
 const LTE_NUM_OF_CELLS_PATH = 'Device.Services.FAPService.1.CellConfig.LTE.RAN.CA.PARAMS.NumOfCells';
 const HIDDEN_GROUP_IDS = new Set(['device-time', 'device-sync']);
+// BSC 设备 BTS 多实例父路径。额外的顶部 ＋/✖ 按钮调用 AddObject/DeleteObject
+// 在该路径下管理 BTS 实例。
+const BSC_BTS_OBJECT_PREFIX = 'DeviceGSM.Bts.';
 
 /**
  * 设备详情「快速设置」tab — T-0138 per-paramModel 架构。
@@ -99,10 +104,12 @@ export default function QuickSettingsTab({ deviceId, networkType }: QuickSetting
     isENB,
     isNR,
     isBM,
+    isBSC,
     instances: selectableInstances,
     lteInstances,
     lteConfiguredCellCount,
     nrCellInstances,
+    bscBtsInstances,
     bmCellMode,
     bmTechOptions,
     loading: selectorLoading,
@@ -139,24 +146,78 @@ export default function QuickSettingsTab({ deviceId, networkType }: QuickSetting
 
   const instanceContext: QuickSettingsInstanceContext = {
     networkType: normalizedNetworkType,
-    fapInstance: isENB ? selectedInstance : 1,
+    // BSC 重用 fapInstance 字段。applyInstanceContext 的非-NR 分支会把第一个 {i}
+    // 替换为 fapInstance,而 BSC 的 standardPath 只含一个 {i}(DeviceGSM.Bts.{i}.<leaf>),
+    // 正好被完整替换为选中的 BTS 实例号,无需新增独立的 btsInstance 字段。
+    fapInstance: (isENB || isBSC) ? selectedInstance : 1,
     cellInstance: isNR ? selectedInstance : undefined,
   };
   const selectorLabel = isENB
     ? (isBM
       ? (activeBmTech === 'GSM' ? t('device.quickSettings.cellInstanceGsm') : t('device.quickSettings.cellInstanceLte'))
       : (lteConfiguredCellCount !== null ? t('device.quickSettings.cellInstance') : t('device.quickSettings.fapInstance')))
-    : t('device.quickSettings.cellInstance');
+    : isBSC
+      ? t('device.quickSettings.btsInstance')
+      : t('device.quickSettings.cellInstance');
   const selectorHint = isENB
     ? (isBM
       ? t('device.quickSettings.hintBm', { mode: bmCellMode ? `${bmCellMode.gsmNum}/${bmCellMode.lteNum}` : '-', tech: activeBmTech, count: selectableInstances.length })
       : (lteConfiguredCellCount !== null
         ? t('device.quickSettings.hintLte', { path: LTE_NUM_OF_CELLS_PATH, configured: lteConfiguredCellCount, count: selectableInstances.length })
         : t('device.quickSettings.hintFap', { count: lteInstances.length })))
-    : t('device.quickSettings.hintNr', { count: nrCellInstances.length });
+    : isBSC
+      ? t('device.quickSettings.hintBsc', { count: bscBtsInstances.length })
+      : t('device.quickSettings.hintNr', { count: nrCellInstances.length });
   const selectedKey = isNR
     ? `${instanceContext.fapInstance}-${instanceContext.cellInstance ?? 1}`
     : String(instanceContext.fapInstance);
+
+  // BSC BTS 实例增删：复用 useAddObject/useDeleteObject，成功后由 hook
+  // 自动 invalidate parameter-schema 查询，useResolvedCellInstances 会重拉。
+  const addObjectMutation = useAddObject();
+  const deleteObjectMutation = useDeleteObject();
+  const btsAddPending = addObjectMutation.isPending;
+  const btsDeletePending = deleteObjectMutation.isPending;
+
+  // BSC 下拉显示 "实例号 · IpaUnitId=xxx"，让运维能直接看出 BTS 与 IPA 单元映射。
+  // 复用 useResolvedCellInstances 已经发过的同一份 schema 查询（react-query
+  // 按 (deviceId, 'DeviceGSM.Bts.') key 去重，不会额外触发请求）。
+  const { data: bscBtsSchema } = useParameterSchema(deviceId, BSC_BTS_OBJECT_PREFIX, isBSC);
+  const bscBtsIpaUnitIdByInstance = useMemo(() => {
+    const m = new Map<number, string>();
+    if (!isBSC || !bscBtsSchema) return m;
+    const RE = /^DeviceGSM\.Bts\.(\d+)\.IpaUnitId$/;
+    for (const p of bscBtsSchema.parameters) {
+      const match = RE.exec(p.path);
+      if (!match) continue;
+      const v = p.currentValue;
+      if (v == null || v === '') continue;
+      m.set(Number(match[1]), String(v));
+    }
+    return m;
+  }, [isBSC, bscBtsSchema]);
+
+  const handleAddBts = async () => {
+    try {
+      await addObjectMutation.mutateAsync({ deviceId, objectPath: BSC_BTS_OBJECT_PREFIX });
+      message.success(t('device.quickSettings.btsAddSubmitted'));
+    } catch (err) {
+      message.error(t('device.quickSettings.btsAddFailed', { reason: String(err) }));
+    }
+  };
+  const handleDeleteBts = async () => {
+    if (!Number.isFinite(selectedInstance) || selectedInstance <= 0) return;
+    try {
+      await deleteObjectMutation.mutateAsync({
+        deviceId,
+        objectPath: `${BSC_BTS_OBJECT_PREFIX}${selectedInstance}.`,
+      });
+      message.success(t('device.quickSettings.btsDeleteSubmitted', { id: selectedInstance }));
+      setUserPickedInstance(null);
+    } catch (err) {
+      message.error(t('device.quickSettings.btsDeleteFailed', { reason: String(err) }));
+    }
+  };
 
   if (error) {
     return (
@@ -188,7 +249,7 @@ export default function QuickSettingsTab({ deviceId, networkType }: QuickSetting
 
   return (
     <div style={{ padding: 16 }}>
-      {(isENB || isNR) && (
+      {(isENB || isNR || isBSC) && (
         <Space style={{ marginBottom: 16 }}>
           {isENB && isBM && bmTechOptions.length > 1 && (
             <>
@@ -208,13 +269,50 @@ export default function QuickSettingsTab({ deviceId, networkType }: QuickSetting
           <Select
             value={selectableInstances.includes(selectedInstance) ? selectedInstance : undefined}
             onChange={(v) => setUserPickedInstance(Number(v) || null)}
-            style={{ width: 120 }}
+            style={{ width: isBSC ? 260 : 120 }}
             loading={selectorLoading}
             disabled={selectorLoading || selectableInstances.length === 0}
-            options={selectableInstances.map((n) => ({ value: n, label: String(n) }))}
+            options={selectableInstances.map((n) => {
+              if (isBSC) {
+                const ipa = bscBtsIpaUnitIdByInstance.get(n);
+                return { value: n, label: ipa ? `${n} · IpaUnitId=${ipa}` : String(n) };
+              }
+              return { value: n, label: String(n) };
+            })}
             placeholder={selectorLoading ? t('common.loading') : isENB ? t('device.quickSettings.noValidInstance') : t('device.quickSettings.noCellInstance')}
             notFoundContent={isENB ? t('device.quickSettings.noValidInstance') : t('device.quickSettings.noCellInstance')}
           />
+          {isBSC && (
+            <>
+              <Button
+                size="small"
+                icon={<PlusOutlined />}
+                loading={btsAddPending}
+                onClick={handleAddBts}
+                title={t('device.quickSettings.btsAdd')}
+              >
+                {t('device.quickSettings.btsAdd')}
+              </Button>
+              <Popconfirm
+                title={t('device.quickSettings.btsDeleteConfirm', { id: selectedInstance })}
+                onConfirm={handleDeleteBts}
+                okText={t('common.confirm')}
+                cancelText={t('common.cancel')}
+                disabled={selectableInstances.length === 0 || btsDeletePending}
+              >
+                <Button
+                  size="small"
+                  danger
+                  icon={<MinusOutlined />}
+                  loading={btsDeletePending}
+                  disabled={selectableInstances.length === 0}
+                  title={t('device.quickSettings.btsDelete')}
+                >
+                  {t('device.quickSettings.btsDelete')}
+                </Button>
+              </Popconfirm>
+            </>
+          )}
           <Text type="secondary">{selectorHint}</Text>
         </Space>
       )}

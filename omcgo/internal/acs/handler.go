@@ -1715,6 +1715,18 @@ func (h *Handler) publishRPCResponseEvent(ctx context.Context, deviceSN string, 
 				zap.String("device_sn", deviceSN),
 				zap.Int("parameter_count", len(paramValues)),
 			)
+			// 体量防御:Path B 同步对大对象(如 DeviceGSM.Bts.,17791 项 ~1.5MB)
+			// 现已通过 provision/sync_pathb_expand.go 的 instance 展开机制把
+			// 单 batch 压到 1100~1500 项(~80-120KB),稳稳在 NATS 默认 max_payload=1MB
+			// 之内。这里 5000 阈值作为兜底告警:任何超过 5000 项 GPV 响应都意味着
+			// (1) 新设备/新对象未走 expand 路径 或 (2) maxInstanceHint 估算偏低,
+			// 需要排查 sync_pathb_expand 的 fieldsPerInstance 判定。
+			if len(paramValues) > 5000 {
+				log.Warn("GPV response payload is very large; instance expand may be misconfigured",
+					zap.String("device_sn", deviceSN),
+					zap.Int("parameter_count", len(paramValues)),
+				)
+			}
 		}
 	}
 

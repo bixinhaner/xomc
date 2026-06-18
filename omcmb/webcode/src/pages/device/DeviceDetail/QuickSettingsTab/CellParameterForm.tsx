@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, Fragment } from 'react';
+import { useCallback, useEffect, useMemo, useState, Fragment } from 'react';
 import { Button, Card, Col, Form, Input, Row, Select, Space, Spin, Table, Tag, Typography, message, notification } from 'antd';
 import type { FormInstance } from 'antd';
 import { CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, DeleteOutlined, PlusOutlined, SendOutlined, SyncOutlined } from '@ant-design/icons';
@@ -545,12 +545,24 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
   const setDraftField = useQuickSettingsFeedbackStore((s) => s.setDraftField);
   const clearDraft = useQuickSettingsFeedbackStore((s) => s.clearDraft);
 
+  // osmo-bsc 这两个 DeviceGSM.Bts.{i}.<leaf> 字段实际只在第一个实例 (Bts.0.) 上报,
+  // 业务侧约定所有 BTS 实例统一展示同一份值,这里把读取 path 强制重写到 Bts.0.<leaf>。
+  // 写入路径不需要,这两个字段都是 READ_ONLY,UI 也不会触发保存。
+  const resolveReadPath = useCallback(
+    (standardPath: string) => {
+      const m = /^DeviceGSM\.Bts\.\{i\}\.(NumofTrxChannel|OmlConnectState)$/.exec(standardPath || '');
+      if (m) return `DeviceGSM.Bts.0.${m[1]}`;
+      return applyInstanceContext(standardPath || '', instanceContext);
+    },
+    [instanceContext],
+  );
+
   // 单实例分组：每条 standardPath 单独查 schema（少量字段，不批量优化）
   // 注：useParameterSchema 接受 pathPrefix，前缀匹配即可；这里以分组共用前缀粗查再过滤
   // 为简化，取 group 中 standardPath 的公共前缀作 pathPrefix
   const commonPrefix = useMemo(
-    () => commonPathPrefix(group.params.map((p) => applyInstanceContext(p.standardPath || '', instanceContext))),
-    [group, instanceContext],
+    () => commonPathPrefix(group.params.map((p) => resolveReadPath(p.standardPath || ''))),
+    [group, resolveReadPath],
   );
   const { data: schemaResp, isLoading, refetch } = useParameterSchema(deviceId, commonPrefix);
   const { data: ethernetSchemaResp } = useParameterSchema(
@@ -691,7 +703,7 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
   const paramNameByPath = useMemo(() => {
     const map = new Map<string, string>();
     for (const p of group.params) {
-      const path = applyInstanceContext(p.standardPath || '', instanceContext);
+      const path = resolveReadPath(p.standardPath || '');
       map.set(path, p.name);
     }
     return map;
@@ -714,7 +726,7 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
       if (form.isFieldTouched(p.name)) return;
       // 优先级 3: schema 原值
       const special = specialConfigByName.get(p.name);
-      const path = special?.configPath ?? applyInstanceContext(p.standardPath || '', instanceContext);
+      const path = special?.configPath ?? resolveReadPath(p.standardPath || '');
       const item = schemaByPath.get(path);
       const rawItem = getRawValueByPath(rawParameterByPath, path)
         ?? (special?.kind === 'mme-ip-plmn-table'
@@ -725,7 +737,16 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
       if (special?.kind === 'mme-ip-plmn-table') {
         form.setFieldValue(p.name, toMmeIpPlmnRows(rawItem?.parameterValue ?? item?.currentValue ?? ''));
       } else {
-        const raw = rawItem?.parameterValue ?? item?.currentValue ?? '';
+        let raw = rawItem?.parameterValue ?? item?.currentValue ?? '';
+        // BSC osmo-bsc 不上报 DeviceGSM.Bts.{i}.ID,该字段语义即为 BTS 实例号本身,
+        // 此处按实例号派生填充,避免显示"未上报"。
+        if (
+          (raw === '' || raw == null) &&
+          (p.standardPath || '') === 'DeviceGSM.Bts.{i}.ID' &&
+          instanceContext.fapInstance != null
+        ) {
+          raw = String(instanceContext.fapInstance);
+        }
         form.setFieldValue(p.name, normalizeEnumValue(raw, p.enumOptions));
       }
     });
@@ -738,7 +759,7 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
 
     for (const p of group.params) {
       const special = specialConfigByName.get(p.name);
-      const path = special?.configPath ?? applyInstanceContext(p.standardPath || '', instanceContext);
+      const path = special?.configPath ?? resolveReadPath(p.standardPath || '');
       const item = schemaByPath.get(path);
       const rawItem = getRawValueByPath(rawParameterByPath, path)
         ?? (special?.kind === 'mme-ip-plmn-table'
@@ -853,7 +874,7 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
       const refreshedSchemaByPath = new Map((refreshed.data?.parameters ?? []).map((item) => [item.path, item]));
       for (const p of group.params) {
         const special = specialConfigByName.get(p.name);
-        const path = special?.configPath ?? applyInstanceContext(p.standardPath || '', instanceContext);
+        const path = special?.configPath ?? resolveReadPath(p.standardPath || '');
         const refreshedValue = refreshedSchemaByPath.get(path)?.currentValue ?? '';
         nextValues[p.name] = special?.kind === 'mme-ip-plmn-table'
           ? toMmeIpPlmnRows(refreshedValue)
@@ -937,7 +958,7 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
             const p = group.params.find((q) => q.name === name);
             if (!p) continue;
             const special = specialConfigByName.get(name);
-            const path = special?.configPath ?? applyInstanceContext(p.standardPath || '', instanceContext);
+            const path = special?.configPath ?? resolveReadPath(p.standardPath || '');
             const sItem = schemaByPath.get(path);
             const mirrorPath = sItem?.constraints?.mirrorWith;
             if (!mirrorPath) continue;
@@ -956,7 +977,7 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
               const p = group.params.find((q) => q.name === name);
               if (!p) continue;
               const special = specialConfigByName.get(name);
-              const path = special?.configPath ?? applyInstanceContext(p.standardPath || '', instanceContext);
+              const path = special?.configPath ?? resolveReadPath(p.standardPath || '');
               const sItem = schemaByPath.get(path);
               const normalizedValue = special?.kind === 'mme-ip-plmn-table'
                 ? serializeMmeIpPlmnList(toMmeIpPlmnRows(value))
@@ -999,7 +1020,7 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
         <Row gutter={16}>
           {group.params.map((p) => {
             const special = specialConfigByName.get(p.name);
-            const path = special?.configPath ?? applyInstanceContext(p.standardPath || '', instanceContext);
+            const path = special?.configPath ?? resolveReadPath(p.standardPath || '');
             const item = schemaByPath.get(path);
             const rawItem = getRawValueByPath(rawParameterByPath, path)
               ?? (special?.kind === 'mme-ip-plmn-table'
@@ -1120,7 +1141,7 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
                       }))}
                     />
                   ) : (
-                    <Input disabled={!writable} placeholder={special?.placeholder || item?.defaultValue || ''} />
+                    <Input disabled={!writable} placeholder={special?.placeholder || item?.defaultValue || (!writable ? '未上报' : '')} />
                   )}
                 </Form.Item>
               </Col>

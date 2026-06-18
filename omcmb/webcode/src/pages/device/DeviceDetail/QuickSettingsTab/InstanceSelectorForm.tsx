@@ -231,10 +231,11 @@ function renderFieldGrid(
         ) : null;
 
         if (isReadOnly) {
+          const displayValue = rawValue !== '' && rawValue != null ? rawValue : '未上报';
           return (
             <div key={def.leaf} style={{ minWidth: 0 }}>
               {labelNode}
-              <Input value={rawValue} disabled />
+              <Input value={displayValue} disabled />
               {hintNode}
             </div>
           );
