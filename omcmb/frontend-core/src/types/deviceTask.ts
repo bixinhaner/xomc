@@ -41,4 +41,8 @@ export interface DeviceTask {
   expiresAt?: string;
   errorCode?: number;
   errorMessage?: string;
+  /** 任务结果 raw payload(终态时存在)。
+   *  - AddObjectResponse:`{ instance_number: number, method: 'AddObjectResponse', raw_response: string }`
+   *  - 其他 RPC 类型按需扩展;消费方按 method 判定字段。 */
+  result?: Record<string, unknown>;
 }

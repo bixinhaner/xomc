@@ -5,6 +5,23 @@
         <object name="Device.FaultMgmt.ExpeditedEvent." standardPath="Device.FaultMgmt.ExpeditedEvent." access="READ_ONLY" changeApplies="Immediate"/>
         <object name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE." standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE." access="READ_ONLY" changeApplies="Immediate"/>
         <object name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.Capacity." standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Capacity." access="READ_ONLY" changeApplies="Immediate"/>
+        <!-- BSC 多实例对象：允许 QuickSettings 表前端启用 AddObject / DeleteObject 操作。
+             注：path 形态为「容器路径（不含内层实例号 {i}）」，与 device_param_handler.buildObjectSchema
+             派生的 objPrefix（截到 Segment.，e.g. "DeviceGSM.Bts.1.Trx."）一致；
+             多写一层 .{i}. 会因 LookupObject 归一化后键不匹配导致 canAdd/canDelete 永远 false。
+
+             - Trx.        每 BTS 下 N 个收发信机：osmo-bsc 真按 TR-181 子对象上报
+               `Trx.{i}.{Arfcn,RfLocked,MaxPowerRed}`，标准 AddObject / SPV / DeleteObject 路径可直接工作。
+
+             - Neighbor4G / Neighbor2G **不在此声明**：osmo-bsc 不上报 `Neighbor{4G,2G}.{i}.<leaf>` 子对象，
+               整张邻区列表打包成 BTS 父对象单标量 `Si2quaterNeighborListAdd` / `NeighborCgiAdd`。
+               前端走 `PackedScalarNeighborTable` 只读视图。要支持新增需另做：
+                 方案 B（推荐）：扩展 `PackedScalarNeighborTable`，弹窗收集字段→拼字符串→SPV 父标量；
+                 方案 C：后端 BSC 适配器拦截 AddObject(Neighbor4G.)→ 解析/拼装父标量并 SET，
+                        同时把字符串反解析为 `Neighbor4G.{i}.<leaf>` 子参数登记入 DB。
+               在任何一项落地前不在此暴露 READ_WRITE 容器，避免前端 schema 返回 can_add=true
+               但点击实际无效（无 standard <param>、无设备 AddObject 入口）。-->
+        <object name="DeviceGSM.Bts.{i}.Trx." standardPath="DeviceGSM.Bts.{i}.Trx." access="READ_WRITE" changeApplies="Immediate"/>
     </objects>
     <parameters>
         <param name="Device.DeviceInfo.AntennaInfo.Height" standardPath="Device.DeviceInfo.AntennaInfo.Height" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
@@ -103,23 +120,23 @@
         <param name="Device.KeepalivedMgmt.VrrpNumberOfEntries" standardPath="Device.KeepalivedMgmt.VrrpNumberOfEntries" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="4"/>
         <param name="DeviceGSM.Bts.Index" standardPath="DeviceGSM.Bts.Index" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="1" max="256"/>
         <param name="DeviceGSM.Bts.Trx.Index" standardPath="DeviceGSM.Bts.Trx.Index" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="1" max="8"/>
-        <param name="DeviceGSM.Bts.{i}.Band" standardPath="DeviceGSM.Bts.{i}.Band" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="1" max="31"/>
-        <param name="DeviceGSM.Bts.{i}.Bsic" standardPath="DeviceGSM.Bts.{i}.Bsic" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="63"/>
-        <param name="DeviceGSM.Bts.{i}.C0PowerRed" standardPath="DeviceGSM.Bts.{i}.C0PowerRed" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="6"/>
-        <param name="DeviceGSM.Bts.{i}.CellId" standardPath="DeviceGSM.Bts.{i}.CellId" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="65535"/>
-        <param name="DeviceGSM.Bts.{i}.CellReselectHysteresis" standardPath="DeviceGSM.Bts.{i}.CellReselectHysteresis" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="14"/>
-        <param name="DeviceGSM.Bts.{i}.CellReselectOffset" standardPath="DeviceGSM.Bts.{i}.CellReselectOffset" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="126"/>
-        <param name="DeviceGSM.Bts.{i}.CellReselectPenaltyTime" standardPath="DeviceGSM.Bts.{i}.CellReselectPenaltyTime" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="20" max="620"/>
-        <param name="DeviceGSM.Bts.{i}.CodecSupport" standardPath="DeviceGSM.Bts.{i}.CodecSupport" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="32"/>
-        <param name="DeviceGSM.Bts.{i}.GprsMode" standardPath="DeviceGSM.Bts.{i}.GprsMode" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="none,gprs,egprs" enumLabels="none,gprs,egprs"/>
-        <param name="DeviceGSM.Bts.{i}.HandoverAlgorithm" standardPath="DeviceGSM.Bts.{i}.HandoverAlgorithm" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="1,2" enumLabels="1,2"/>
-        <param name="DeviceGSM.Bts.{i}.IpaRslIp" standardPath="DeviceGSM.Bts.{i}.IpaRslIp" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="256"/>
-        <param name="DeviceGSM.Bts.{i}.IpaUnitId" standardPath="DeviceGSM.Bts.{i}.IpaUnitId" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="16"/>
-        <param name="DeviceGSM.Bts.{i}.LocationAreaCode" standardPath="DeviceGSM.Bts.{i}.LocationAreaCode" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="65535"/>
-        <param name="DeviceGSM.Bts.{i}.MsMaxPower" standardPath="DeviceGSM.Bts.{i}.MsMaxPower" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="40"/>
-        <param name="DeviceGSM.Bts.{i}.NeighborCgiAdd" standardPath="DeviceGSM.Bts.{i}.NeighborCgiAdd" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param name="DeviceGSM.Bts.{i}.NeighborCgiDel" standardPath="DeviceGSM.Bts.{i}.NeighborCgiDel" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param name="DeviceGSM.Bts.{i}.NeighborListMode" standardPath="DeviceGSM.Bts.{i}.NeighborListMode" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="automatic,manual,manual_si5" enumLabels="automatic,manual,manual_si5"/>
+        <param name="DeviceGSM.Bts.{i}.Band" standardPath="DeviceGSM.Bts.{i}.Band" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="1" max="31"/>
+        <param name="DeviceGSM.Bts.{i}.Bsic" standardPath="DeviceGSM.Bts.{i}.Bsic" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="63"/>
+        <param name="DeviceGSM.Bts.{i}.C0PowerRed" standardPath="DeviceGSM.Bts.{i}.C0PowerRed" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="6"/>
+        <param name="DeviceGSM.Bts.{i}.CellId" standardPath="DeviceGSM.Bts.{i}.CellId" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="65535"/>
+        <param name="DeviceGSM.Bts.{i}.CellReselectHysteresis" standardPath="DeviceGSM.Bts.{i}.CellReselectHysteresis" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="14"/>
+        <param name="DeviceGSM.Bts.{i}.CellReselectOffset" standardPath="DeviceGSM.Bts.{i}.CellReselectOffset" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="126"/>
+        <param name="DeviceGSM.Bts.{i}.CellReselectPenaltyTime" standardPath="DeviceGSM.Bts.{i}.CellReselectPenaltyTime" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="20" max="620"/>
+        <param name="DeviceGSM.Bts.{i}.CodecSupport" standardPath="DeviceGSM.Bts.{i}.CodecSupport" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="32"/>
+        <param name="DeviceGSM.Bts.{i}.GprsMode" standardPath="DeviceGSM.Bts.{i}.GprsMode" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="none,gprs,egprs" enumLabels="none,gprs,egprs"/>
+        <param name="DeviceGSM.Bts.{i}.HandoverAlgorithm" standardPath="DeviceGSM.Bts.{i}.HandoverAlgorithm" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="1,2" enumLabels="1,2"/>
+        <param name="DeviceGSM.Bts.{i}.IpaRslIp" standardPath="DeviceGSM.Bts.{i}.IpaRslIp" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="256"/>
+        <param name="DeviceGSM.Bts.{i}.IpaUnitId" standardPath="DeviceGSM.Bts.{i}.IpaUnitId" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="16"/>
+        <param name="DeviceGSM.Bts.{i}.LocationAreaCode" standardPath="DeviceGSM.Bts.{i}.LocationAreaCode" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="65535"/>
+        <param name="DeviceGSM.Bts.{i}.MsMaxPower" standardPath="DeviceGSM.Bts.{i}.MsMaxPower" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="40"/>
+        <param name="DeviceGSM.Bts.{i}.NeighborCgiAdd" standardPath="DeviceGSM.Bts.{i}.NeighborCgiAdd" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.NeighborCgiDel" standardPath="DeviceGSM.Bts.{i}.NeighborCgiDel" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.NeighborListMode" standardPath="DeviceGSM.Bts.{i}.NeighborListMode" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="automatic,manual,manual_si5" enumLabels="automatic,manual,manual_si5"/>
         <!-- BSC 设备约定: osmo-bsc 把 NumofTrxChannel / OmlConnectState 这两个 BSC 全局只读状态量
              暴露在 DeviceGSM.Bts.0 实例上(固定索引 0)，所有 BTS 实例共享同一份值。
              设备对无下标的 DeviceGSM.Bts.NumofTrxChannel 会返回 9005 Fault；对其他下标也无意义。
@@ -127,34 +144,34 @@
              由于路径不再含 {i}，applyInstanceContext 直接原样返回，所有 BTS 行展示同一值。 -->
         <param name="DeviceGSM.Bts.0.NumofTrxChannel" standardPath="DeviceGSM.Bts.0.NumofTrxChannel" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="256"/>
         <param name="DeviceGSM.Bts.0.OmlConnectState" standardPath="DeviceGSM.Bts.0.OmlConnectState" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="16"/>
-        <param name="DeviceGSM.Bts.{i}.OmlIpaStreamId" standardPath="DeviceGSM.Bts.{i}.OmlIpaStreamId" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="8"/>
-        <param name="DeviceGSM.Bts.{i}.RachCellBarred" standardPath="DeviceGSM.Bts.{i}.RachCellBarred" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="1"/>
-        <param name="DeviceGSM.Bts.{i}.Si2quaterNeighborListAdd" standardPath="DeviceGSM.Bts.{i}.Si2quaterNeighborListAdd" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param name="DeviceGSM.Bts.{i}.Si2quaterNeighborListDel" standardPath="DeviceGSM.Bts.{i}.Si2quaterNeighborListDel" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param name="DeviceGSM.Bts.{i}.Trx.{i}.Arfcn" standardPath="DeviceGSM.Bts.{i}.Trx.{i}.Arfcn" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="1023"/>
-        <param name="DeviceGSM.Bts.{i}.Trx.{i}.MaxPowerRed" standardPath="DeviceGSM.Bts.{i}.Trx.{i}.MaxPowerRed" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="100"/>
-        <param name="DeviceGSM.Bts.{i}.Trx.{i}.RfLocked" standardPath="DeviceGSM.Bts.{i}.Trx.{i}.RfLocked" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="0,1" enumLabels="Unlocked,Locked"/>
+        <param name="DeviceGSM.Bts.{i}.OmlIpaStreamId" standardPath="DeviceGSM.Bts.{i}.OmlIpaStreamId" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="8"/>
+        <param name="DeviceGSM.Bts.{i}.RachCellBarred" standardPath="DeviceGSM.Bts.{i}.RachCellBarred" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="1"/>
+        <param name="DeviceGSM.Bts.{i}.Si2quaterNeighborListAdd" standardPath="DeviceGSM.Bts.{i}.Si2quaterNeighborListAdd" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.Si2quaterNeighborListDel" standardPath="DeviceGSM.Bts.{i}.Si2quaterNeighborListDel" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.Trx.{i}.Arfcn" standardPath="DeviceGSM.Bts.{i}.Trx.{i}.Arfcn" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="1023"/>
+        <param name="DeviceGSM.Bts.{i}.Trx.{i}.MaxPowerRed" standardPath="DeviceGSM.Bts.{i}.Trx.{i}.MaxPowerRed" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="100"/>
+        <param name="DeviceGSM.Bts.{i}.Trx.{i}.RfLocked" standardPath="DeviceGSM.Bts.{i}.Trx.{i}.RfLocked" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="0,1" enumLabels="Unlocked,Locked"/>
         <param name="DeviceGSM.Bts.{i}.Trx.{i}.Ts.{i}.PhyChanConfig" standardPath="DeviceGSM.Bts.{i}.Trx.{i}.Ts.{i}.PhyChanConfig" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="NONE,CCCH,CCCH+SDCCH4,TCH/F,TCH/H,SDCCH8,PDCH,TCH/F_PDCH,UNKNOWN,CCCH+SDCCH4+CBCH,SDCCH8+CBCH,TCH/F_TCH/H_PDCH" enumLabels="NONE,CCCH,CCCH+SDCCH4,TCH/F,TCH/H,SDCCH8,PDCH,TCH/F_PDCH,UNKNOWN,CCCH+SDCCH4+CBCH,SDCCH8+CBCH,TCH/F_TCH/H_PDCH"/>
-        <param name="DeviceGSM.Bts.{i}.handover" standardPath="DeviceGSM.Bts.{i}.handover" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="0,1" enumLabels="Disabled,Enable"/>
-        <param name="DeviceGSM.Bts.{i}.handover1.maximum.distance" standardPath="DeviceGSM.Bts.{i}.handover1.maximum.distance" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="9999"/>
-        <param name="DeviceGSM.Bts.{i}.handover1.power.budget.hysteresis" standardPath="DeviceGSM.Bts.{i}.handover1.power.budget.hysteresis" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="999"/>
-        <param name="DeviceGSM.Bts.{i}.handover1.power.budget.interval" standardPath="DeviceGSM.Bts.{i}.handover1.power.budget.interval" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="1" max="99"/>
-        <param name="DeviceGSM.Bts.{i}.handover1.window.rxlev.averaging" standardPath="DeviceGSM.Bts.{i}.handover1.window.rxlev.averaging" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="1" max="10"/>
-        <param name="DeviceGSM.Bts.{i}.handover1.window.rxlev.neighbor.averaging" standardPath="DeviceGSM.Bts.{i}.handover1.window.rxlev.neighbor.averaging" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="1" max="10"/>
-        <param name="DeviceGSM.Bts.{i}.handover1.window.rxqual.averaging" standardPath="DeviceGSM.Bts.{i}.handover1.window.rxqual.averaging" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="1" max="10"/>
-        <param name="DeviceGSM.Bts.{i}.handover2.afs-bias.rxlev" standardPath="DeviceGSM.Bts.{i}.handover2.afs-bias.rxlev" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="20"/>
-        <param name="DeviceGSM.Bts.{i}.handover2.afs-bias.rxqual" standardPath="DeviceGSM.Bts.{i}.handover2.afs-bias.rxqual" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="7"/>
-        <param name="DeviceGSM.Bts.{i}.handover2.assignment" standardPath="DeviceGSM.Bts.{i}.handover2.assignment" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="0,1" enumLabels="Disabled,Enable"/>
-        <param name="DeviceGSM.Bts.{i}.handover2.max-handovers" standardPath="DeviceGSM.Bts.{i}.handover2.max-handovers" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="1" max="9999"/>
-        <param name="DeviceGSM.Bts.{i}.handover2.maximum.distance" standardPath="DeviceGSM.Bts.{i}.handover2.maximum.distance" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="9999"/>
-        <param name="DeviceGSM.Bts.{i}.handover2.min-free-slots.tch-f" standardPath="DeviceGSM.Bts.{i}.handover2.min-free-slots.tch-f" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="9999"/>
-        <param name="DeviceGSM.Bts.{i}.handover2.min-free-slots.tch-h" standardPath="DeviceGSM.Bts.{i}.handover2.min-free-slots.tch-h" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="9999"/>
-        <param name="DeviceGSM.Bts.{i}.handover2.min.rxlev" standardPath="DeviceGSM.Bts.{i}.handover2.min.rxlev" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="-110" max="-50"/>
-        <param name="DeviceGSM.Bts.{i}.handover2.min.rxqual" standardPath="DeviceGSM.Bts.{i}.handover2.min.rxqual" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="7"/>
-        <param name="DeviceGSM.Bts.{i}.handover2.penalty-time.failed-assignment" standardPath="DeviceGSM.Bts.{i}.handover2.penalty-time.failed-assignment" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="99999"/>
-        <param name="DeviceGSM.Bts.{i}.handover2.penalty-time.failed-ho" standardPath="DeviceGSM.Bts.{i}.handover2.penalty-time.failed-ho" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="99999"/>
-        <param name="DeviceGSM.Bts.{i}.handover2.penalty-time.low-rxqual-assignment" standardPath="DeviceGSM.Bts.{i}.handover2.penalty-time.low-rxqual-assignment" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="99999"/>
-        <param name="DeviceGSM.Bts.{i}.handover2.penalty-time.low-rxqual-ho" standardPath="DeviceGSM.Bts.{i}.handover2.penalty-time.low-rxqual-ho" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="99999"/>
+        <param name="DeviceGSM.Bts.{i}.handover" standardPath="DeviceGSM.Bts.{i}.handover" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="0,1" enumLabels="Disabled,Enable"/>
+        <param name="DeviceGSM.Bts.{i}.handover1.maximum.distance" standardPath="DeviceGSM.Bts.{i}.handover1.maximum.distance" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="9999"/>
+        <param name="DeviceGSM.Bts.{i}.handover1.power.budget.hysteresis" standardPath="DeviceGSM.Bts.{i}.handover1.power.budget.hysteresis" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="999"/>
+        <param name="DeviceGSM.Bts.{i}.handover1.power.budget.interval" standardPath="DeviceGSM.Bts.{i}.handover1.power.budget.interval" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="1" max="99"/>
+        <param name="DeviceGSM.Bts.{i}.handover1.window.rxlev.averaging" standardPath="DeviceGSM.Bts.{i}.handover1.window.rxlev.averaging" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="1" max="10"/>
+        <param name="DeviceGSM.Bts.{i}.handover1.window.rxlev.neighbor.averaging" standardPath="DeviceGSM.Bts.{i}.handover1.window.rxlev.neighbor.averaging" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="1" max="10"/>
+        <param name="DeviceGSM.Bts.{i}.handover1.window.rxqual.averaging" standardPath="DeviceGSM.Bts.{i}.handover1.window.rxqual.averaging" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="1" max="10"/>
+        <param name="DeviceGSM.Bts.{i}.handover2.afs-bias.rxlev" standardPath="DeviceGSM.Bts.{i}.handover2.afs-bias.rxlev" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="20"/>
+        <param name="DeviceGSM.Bts.{i}.handover2.afs-bias.rxqual" standardPath="DeviceGSM.Bts.{i}.handover2.afs-bias.rxqual" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="7"/>
+        <param name="DeviceGSM.Bts.{i}.handover2.assignment" standardPath="DeviceGSM.Bts.{i}.handover2.assignment" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="0,1" enumLabels="Disabled,Enable"/>
+        <param name="DeviceGSM.Bts.{i}.handover2.max-handovers" standardPath="DeviceGSM.Bts.{i}.handover2.max-handovers" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="1" max="9999"/>
+        <param name="DeviceGSM.Bts.{i}.handover2.maximum.distance" standardPath="DeviceGSM.Bts.{i}.handover2.maximum.distance" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="9999"/>
+        <param name="DeviceGSM.Bts.{i}.handover2.min-free-slots.tch-f" standardPath="DeviceGSM.Bts.{i}.handover2.min-free-slots.tch-f" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="9999"/>
+        <param name="DeviceGSM.Bts.{i}.handover2.min-free-slots.tch-h" standardPath="DeviceGSM.Bts.{i}.handover2.min-free-slots.tch-h" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="9999"/>
+        <param name="DeviceGSM.Bts.{i}.handover2.min.rxlev" standardPath="DeviceGSM.Bts.{i}.handover2.min.rxlev" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="-110" max="-50"/>
+        <param name="DeviceGSM.Bts.{i}.handover2.min.rxqual" standardPath="DeviceGSM.Bts.{i}.handover2.min.rxqual" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="7"/>
+        <param name="DeviceGSM.Bts.{i}.handover2.penalty-time.failed-assignment" standardPath="DeviceGSM.Bts.{i}.handover2.penalty-time.failed-assignment" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="99999"/>
+        <param name="DeviceGSM.Bts.{i}.handover2.penalty-time.failed-ho" standardPath="DeviceGSM.Bts.{i}.handover2.penalty-time.failed-ho" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="99999"/>
+        <param name="DeviceGSM.Bts.{i}.handover2.penalty-time.low-rxqual-assignment" standardPath="DeviceGSM.Bts.{i}.handover2.penalty-time.low-rxqual-assignment" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="99999"/>
+        <param name="DeviceGSM.Bts.{i}.handover2.penalty-time.low-rxqual-ho" standardPath="DeviceGSM.Bts.{i}.handover2.penalty-time.low-rxqual-ho" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="99999"/>
         <param name="DeviceGSM.Bts.{i}.handover2.penalty-time.max-distance" standardPath="DeviceGSM.Bts.{i}.handover2.penalty-time.max-distance" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="99999"/>
         <param name="DeviceGSM.Bts.{i}.handover2.power.budget.hysteresis" standardPath="DeviceGSM.Bts.{i}.handover2.power.budget.hysteresis" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="999"/>
         <param name="DeviceGSM.Bts.{i}.handover2.power.budget.interval" standardPath="DeviceGSM.Bts.{i}.handover2.power.budget.interval" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="1" max="99"/>

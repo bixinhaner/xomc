@@ -15,6 +15,7 @@ interface BackendDeviceTask {
   expires_at?: string;
   error_code?: number;
   error_message?: string;
+  result?: Record<string, unknown>;
 }
 
 function mapBackendDeviceTask(bt: BackendDeviceTask): DeviceTask {
@@ -31,6 +32,7 @@ function mapBackendDeviceTask(bt: BackendDeviceTask): DeviceTask {
     expiresAt: bt.expires_at,
     errorCode: bt.error_code,
     errorMessage: bt.error_message,
+    result: bt.result,
   };
 }
 

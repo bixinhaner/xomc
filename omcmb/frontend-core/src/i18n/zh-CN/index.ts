@@ -1165,8 +1165,11 @@ const messages: Record<string, string> = {
   // BSC 邻区打包标量表 (PackedScalarNeighborTable) 专用
   'device.multi.packed.readonlyTag':      '只读',
   'device.multi.packed.emptyText':        '暂无邻区数据',
-  'device.multi.packed.sourceLabel':      '数据来源(只读)：',
+  'device.multi.packed.sourceLabel':      '数据来源：',
   'device.multi.packed.lastSynced':       '最近同步 {time}',
+  'device.multi.packed.colActions':       '操作',
+  'device.multi.packed.fieldRequired':    '请填写',
+  'device.multi.packed.fieldInvalidChar': '不允许含空白或 "-" 字符',
   'device.multi.deleteConfirm':           '确认删除？',
   'device.multi.reachedMaxTooltip':       '已达上限 {max}，如需新增请先删除其它实例',
   'device.multi.modalAddTitle':           '{title} · 新增实例',
