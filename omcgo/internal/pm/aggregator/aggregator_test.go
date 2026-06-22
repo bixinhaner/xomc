@@ -732,10 +732,10 @@ func Test_buildLoadCountersByObjectLdnSQL_PreciseBucketMatch_Daily(t *testing.T)
 }
 
 // ---------------------------------------------------------------------------
-// T-B：countersForEntity 跨层级配对——PLMN 实体配同小区基础行的小区级计数器
+// countersForEntity 只取本行计数器（不做跨层级配对）
 // ---------------------------------------------------------------------------
 
-// 基础小区实体只取本行小区级计数器（无需配 PLMN）。
+// 基础小区实体只取本行小区级计数器。
 func Test_countersForEntity_BaseCell_OwnCounters(t *testing.T) {
 	byLdn := map[string]map[string]float64{
 		"Cellid=1": {"cellNum": 30, "cellDen": 60},
@@ -760,8 +760,9 @@ func Test_countersForEntity_TwoCells_NoCrossContamination(t *testing.T) {
 	assert.Equal(t, float64(40), c2["den"])
 }
 
-// 验收 #3：PLMN 实体跨层级配对——本 PLMN 行的 PLMN 级计数 ∪ 同小区基础行的小区级计数。
-func Test_countersForEntity_PLMN_CrossLayerPairing(t *testing.T) {
+// PLMN 实体只取本行 PLMN 级计数，不合并同 cellID 基础小区行的小区级计数器。
+// 真机实测「零重叠」：PLMN 级与小区级计数器 metric_path 互斥，配对从未真"必需"。
+func Test_countersForEntity_PLMN_OwnRowOnly_NoCrossLayerMerge(t *testing.T) {
 	byLdn := map[string]map[string]float64{
 		// 基础小区行：只上报小区级计数器
 		"Cellid=111172245": {"cellLevelCnt": 1000},
@@ -769,34 +770,36 @@ func Test_countersForEntity_PLMN_CrossLayerPairing(t *testing.T) {
 		"Cellid=111172245,PLMN=00101": {"plmnLevelCnt": 200},
 		"Cellid=111172245,PLMN=46068": {"plmnLevelCnt": 350},
 	}
-	// PLMN=00101 实体：拿到本 PLMN 级 + 基础小区的小区级
+	// PLMN=00101 实体：只拿本行 PLMN 级，不再混入基础小区的小区级
 	p1 := countersForEntity(byLdn, "Cellid=111172245,PLMN=00101")
 	assert.Equal(t, float64(200), p1["plmnLevelCnt"], "本 PLMN 级计数")
-	assert.Equal(t, float64(1000), p1["cellLevelCnt"], "跨层级配上基础小区的小区级计数")
+	_, hasCellInP1 := p1["cellLevelCnt"]
+	assert.False(t, hasCellInP1, "PLMN 实体不合并基础小区的小区级计数器")
 
-	// PLMN=46068 实体：配同一基础小区，各自 PLMN 级值不串
+	// PLMN=46068 实体：同理只拿本行
 	p2 := countersForEntity(byLdn, "Cellid=111172245,PLMN=46068")
 	assert.Equal(t, float64(350), p2["plmnLevelCnt"])
-	assert.Equal(t, float64(1000), p2["cellLevelCnt"])
+	_, hasCellInP2 := p2["cellLevelCnt"]
+	assert.False(t, hasCellInP2)
 
-	// 基础小区实体：只有小区级，不带 PLMN 级
+	// 基础小区实体：只有小区级，不带 PLMN 级（行为不变）
 	base := countersForEntity(byLdn, "Cellid=111172245")
 	assert.Equal(t, float64(1000), base["cellLevelCnt"])
 	_, hasPlmn := base["plmnLevelCnt"]
 	assert.False(t, hasPlmn, "基础小区实体不应混入 PLMN 级计数器")
 }
 
-// 自身行的值优先于配上来的小区级值（防御：两类 metric_path 互斥，撞键时实体自身胜出）。
-func Test_countersForEntity_OwnValueWinsOnKeyCollision(t *testing.T) {
+// 撞键时直接看本行值（无跨层级合并，断言「本行值」即可）。
+func Test_countersForEntity_OwnRowValue(t *testing.T) {
 	byLdn := map[string]map[string]float64{
 		"Cellid=5":          {"shared": 100},
 		"Cellid=5,PLMN=001": {"shared": 7},
 	}
 	p := countersForEntity(byLdn, "Cellid=5,PLMN=001")
-	assert.Equal(t, float64(7), p["shared"], "实体自身行的值优先")
+	assert.Equal(t, float64(7), p["shared"], "本行值（不再合并基础小区行）")
 }
 
-// 设备级实体（object_ldn==""）只取空串行计数器，不配对。
+// 设备级实体（object_ldn==""）只取空串行计数器（行为不变）。
 func Test_countersForEntity_DeviceLevel_EmptyLdn(t *testing.T) {
 	byLdn := map[string]map[string]float64{
 		"":         {"a": 1, "b": 2},
@@ -806,7 +809,7 @@ func Test_countersForEntity_DeviceLevel_EmptyLdn(t *testing.T) {
 	assert.Equal(t, map[string]float64{"a": 1, "b": 2}, got)
 }
 
-// NR/空小区实体（parseObjectLDN 提不出 cellID）不 panic，按本行取数降级。
+// NR/空小区 / 无法解析的 LDN 串不 panic，按本行降级。
 func Test_countersForEntity_NonParsableLdn_NoPanic(t *testing.T) {
 	byLdn := map[string]map[string]float64{
 		"NRCellDU=Cell0": {"x": 5},
@@ -965,9 +968,11 @@ func Test_AggregateKPIs_PerCell_NoCrossContamination(t *testing.T) {
 	assert.Equal(t, float64(1.25), c2[3], "小区2 KPI=50/40，不混入小区1")
 }
 
-// 验收 #1/#3：基础小区 + 两个 PLMN 三实体；混合公式（小区级 numerator + PLMN 级 denominator）→
-// PLMN 实体跨层级配对算出正确结果；基础小区实体缺 PLMN 级入参按规则跳过、不报错。
-func Test_AggregateKPIs_PLMN_CrossLayerPairing(t *testing.T) {
+// 基础小区 + 两个 PLMN 三实体；混合公式（分子小区级 + 分母 PLMN 级）→
+// PLMN 实体只拿本行 PLMN 级 denominator、缺基础小区 numerator → Evaluate
+// 缺依赖 skip 不落库；基础小区实体只有 numerator、缺 PLMN 级 denominator → 同样 skip。
+// 三个实体最终都不产 Kmix 行——决策 1 兜底：偷懒跨层级公式在错误层级行天然被求值器过滤。
+func Test_AggregateKPIs_PLMN_OwnRowOnly_MixedFormulaSkipped(t *testing.T) {
 	curStart := time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC)
 	curEnd := time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC)
 
@@ -997,24 +1002,19 @@ func Test_AggregateKPIs_PLMN_CrossLayerPairing(t *testing.T) {
 
 	n, err := a.AggregateKPIs(context.Background(), "pm_metrics_hourly", w)
 	require.NoError(t, err)
-	// 基础小区实体缺 denominator（PLMN 级）→ Evaluate 缺依赖跳过；两个 PLMN 实体各配上小区级 numerator 算出
-	assert.Equal(t, 2, n, "仅两个 PLMN 实体算出 KPI（基础小区缺 PLMN 级入参被跳过）")
+	// 混合公式在三个层级实体都缺一边入参 → 全部 skip 不落库
+	assert.Equal(t, 0, n, "混合公式在三层级均缺入参、自然全 skip")
 
-	p1 := findKPIArgs(db.execArgs, "Cellid=9,PLMN=00101")
-	require.NotNil(t, p1)
-	assert.Equal(t, float64(5), p1[3], "PLMN=00101：基础小区级 1000 / 本 PLMN 级 200 = 5")
-
-	p2 := findKPIArgs(db.execArgs, "Cellid=9,PLMN=46068")
-	require.NotNil(t, p2)
-	assert.Equal(t, float64(2), p2[3], "PLMN=46068：1000 / 500 = 2，不混入另一 PLMN 的 200")
-
-	// 基础小区实体不应产 Kmix 行（缺 PLMN 级 denominator）
-	assert.Nil(t, findKPIArgs(db.execArgs, "Cellid=9"), "基础小区缺 PLMN 级入参，跳过不报错")
+	assert.Nil(t, findKPIArgs(db.execArgs, "Cellid=9,PLMN=00101"),
+		"PLMN 实体只有 denominator、缺基础小区 numerator → Evaluate skip")
+	assert.Nil(t, findKPIArgs(db.execArgs, "Cellid=9,PLMN=46068"),
+		"PLMN 实体只有 denominator、缺基础小区 numerator → Evaluate skip")
+	assert.Nil(t, findKPIArgs(db.execArgs, "Cellid=9"),
+		"基础小区实体只有 numerator、缺 PLMN 级 denominator → Evaluate skip")
 }
 
-// 运行栈缺陷修复（自身层级门槛）：纯小区级 KPI（公式只引用基础小区上报的小区级计数器）
-// 只能在基础小区实体落库，绝不因跨层级配对把基础小区计数合并进 PLMN map 后被无差别求值
-// 而"泄漏"到 PLMN 行（同编号、同值）。
+// 纯小区级 KPI 在 PLMN 行不出现——PLMN 实体的计数器 map 里没有小区级计数器，
+// 求值器 Evaluate 缺依赖 skip 不落库。
 //
 // 构造：
 //   - 基础小区 Cellid=7 上报小区级 cellNum=40 / cellDen=80（纯小区级 KPI 的全部依赖）
@@ -1022,8 +1022,8 @@ func Test_AggregateKPIs_PLMN_CrossLayerPairing(t *testing.T) {
 //   - 纯小区级 KPI（依赖 cellNum/cellDen）+ 纯 PLMN 级 KPI（依赖 plmnNum/plmnDen）
 //
 // 断言：
-//   - 纯小区级 KPI 只在 Cellid=7 落库；两个 PLMN 实体均不得出现纯小区级 KPI（修掉泄漏）
-//   - 纯 PLMN 级 KPI 仍在两个 PLMN 实体落库（门槛不误杀）
+//   - 纯小区级 KPI 只在 Cellid=7 落库；两个 PLMN 实体均不得出现纯小区级 KPI（无泄漏）
+//   - 纯 PLMN 级 KPI 仍在两个 PLMN 实体落库（基础小区行无 plmn* 计数 → 基础小区实体自然不出 KplmnOnly）
 func Test_AggregateKPIs_PureCellKPI_DoesNotLeakToPLMN(t *testing.T) {
 	curStart := time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC)
 	curEnd := time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC)
@@ -1081,45 +1081,62 @@ func Test_AggregateKPIs_PureCellKPI_DoesNotLeakToPLMN(t *testing.T) {
 	assert.Nil(t, findKPIArgsByPath(db.execArgs, "Cellid=7,PLMN=46068", "KcellOnly"),
 		"纯小区级 KPI 不得泄漏到 PLMN=46068")
 
-	// 纯 PLMN 级 KPI 仍在两个 PLMN 实体落库（门槛不误杀）
+	// 纯 PLMN 级 KPI 仍在两个 PLMN 实体落库（基础小区行无 plmn* 计数 → 基础小区实体不出 KplmnOnly）
 	p1 := findKPIArgsByPath(db.execArgs, "Cellid=7,PLMN=00101", "KplmnOnly")
 	require.NotNil(t, p1, "纯 PLMN 级 KPI 应在 PLMN=00101 落库")
 	assert.Equal(t, float64(0.5), p1[3], "10/20=0.5")
 	p2 := findKPIArgsByPath(db.execArgs, "Cellid=7,PLMN=46068", "KplmnOnly")
 	require.NotNil(t, p2, "纯 PLMN 级 KPI 应在 PLMN=46068 落库")
 
-	// 纯 PLMN 级 KPI 不应出现在基础小区（基础小区无 PLMN 级自身计数 → 门槛不过）
+	// 纯 PLMN 级 KPI 不应出现在基础小区（基础小区行无 plmnNum/plmnDen → Evaluate skip）
 	assert.Nil(t, findKPIArgsByPath(db.execArgs, "Cellid=7", "KplmnOnly"),
 		"纯 PLMN 级 KPI 不应在基础小区实体落库")
 }
 
-// kpiDependsOnOwnCounters 单测：门槛判据——公式依赖与实体自身行计数器有交集才落库。
-func Test_kpiDependsOnOwnCounters(t *testing.T) {
-	ownCell := map[string]float64{"cellNum": 1, "cellDen": 1}
-	ownPlmn := map[string]float64{"plmnNum": 1, "plmnDen": 1}
+// 聚焦死判：构造同一 cellID 下基础小区行（X=cellNum=100/cellDen=200）+ PLMN 行
+// （Y=plmnNum=10/plmnDen=20），纯 PLMN 级 KPI (plmnNum/plmnDen) → 断言 PLMN 实体 KPI
+// **仅用 Y 算出 = 10/20 = 0.5**，不混入 X 的 cellNum/cellDen。
+// 任务卡 hardCheck `own-row-only` 的最直白单测形态。
+func Test_AggregateKPIs_PLMN_OnlyOwnRowCounters(t *testing.T) {
+	curStart := time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC)
+	curEnd := time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC)
 
-	pureCell := router.KPIDef{Dependencies: []string{"cellNum", "cellDen"}}
-	purePlmn := router.KPIDef{Dependencies: []string{"plmnNum", "plmnDen"}}
-	mixed := router.KPIDef{Dependencies: []string{"cellNum", "plmnDen"}}
+	route := &router.KPIRoute{
+		KPIs: []router.KPIDef{{
+			IndicatorID:  "KplmnOnly",
+			Name:         "PurePLMN",
+			StatisType:   "pct",
+			Formula:      "plmnNum / plmnDen",
+			Dependencies: []string{"plmnNum", "plmnDen"},
+		}},
+	}
+	db := &cellAwareDB{
+		execTag: pgconn.NewCommandTag("INSERT 0 1"),
+		rows: []cellRow{
+			// X：基础小区行 cellNum=100 / cellDen=200（不参与 PLMN 实体求值）
+			{oui: "A", sn: "S1", path: "cellNum", value: 100, objectLdn: "Cellid=42", endTime: curEnd, timeCol: curStart},
+			{oui: "A", sn: "S1", path: "cellDen", value: 200, objectLdn: "Cellid=42", endTime: curEnd, timeCol: curStart},
+			// Y：PLMN 行 plmnNum=10 / plmnDen=20
+			{oui: "A", sn: "S1", path: "plmnNum", value: 10, objectLdn: "Cellid=42,PLMN=46001", endTime: curEnd, timeCol: curStart},
+			{oui: "A", sn: "S1", path: "plmnDen", value: 20, objectLdn: "Cellid=42,PLMN=46001", endTime: curEnd, timeCol: curStart},
+		},
+	}
+	kr := &stubKPIRouter{byDevice: map[string]*router.KPIRoute{"S1": route}}
+	a := New(db, kr, nil)
+	w := WindowSpec{Granularity: metrics.GranularityHourly, Start: curStart, End: curEnd}
 
-	// 纯小区级 KPI：在基础小区自身集里依赖齐全 → 门槛过；在 PLMN 自身集里无交集 → 门槛不过
-	assert.True(t, kpiDependsOnOwnCounters(pureCell, ownCell), "纯小区级 KPI 在基础小区门槛过")
-	assert.False(t, kpiDependsOnOwnCounters(pureCell, ownPlmn), "纯小区级 KPI 在 PLMN 门槛不过（修掉泄漏）")
+	n, err := a.AggregateKPIs(context.Background(), "pm_metrics_hourly", w)
+	require.NoError(t, err)
+	// 仅 PLMN 实体产 1 行 KPI（基础小区缺 plmnNum/plmnDen → skip）
+	assert.Equal(t, 1, n, "PLMN 实体只用本行计数器算出 1 行 KPI")
 
-	// 纯 PLMN 级 KPI：在 PLMN 自身集里门槛过；在基础小区自身集里门槛不过
-	assert.True(t, kpiDependsOnOwnCounters(purePlmn, ownPlmn))
-	assert.False(t, kpiDependsOnOwnCounters(purePlmn, ownCell))
+	plmn := findKPIArgsByPath(db.execArgs, "Cellid=42,PLMN=46001", "KplmnOnly")
+	require.NotNil(t, plmn, "PLMN 实体应落库 KplmnOnly")
+	assert.Equal(t, float64(0.5), plmn[3], "PLMN 实体 KPI 仅用本行 Y：10/20=0.5，不混入基础小区 X 的 100/200")
 
-	// 混合公式：只要引用了 PLMN 自身至少一个计数 → 在 PLMN 实体门槛过（配对补小区级入参）
-	assert.True(t, kpiDependsOnOwnCounters(mixed, ownPlmn), "混合公式引用 PLMN 自身计数 → 门槛过")
-	// 混合公式在基础小区：引用了小区级 cellNum → 门槛过（但缺 PLMN 级入参会在 Evaluate 阶段跳过）
-	assert.True(t, kpiDependsOnOwnCounters(mixed, ownCell))
-
-	// 无 Dependencies（无法判定层级归属）→ 保守落库（不门槛拦），保持原行为
-	assert.True(t, kpiDependsOnOwnCounters(router.KPIDef{}, ownCell),
-		"无依赖清单时不被门槛拦截（保守）")
-	// 空自身集（理论上不会传入有 KPI 的实体）→ 门槛不过
-	assert.False(t, kpiDependsOnOwnCounters(pureCell, map[string]float64{}))
+	// 基础小区实体不出该 KPI（缺 plmn* 入参）
+	assert.Nil(t, findKPIArgsByPath(db.execArgs, "Cellid=42", "KplmnOnly"),
+		"基础小区缺 PLMN 级入参 → Evaluate skip")
 }
 
 // ---------------------------------------------------------------------------
@@ -1566,8 +1583,7 @@ func Test_AggregateKPIs_S3_EquivalentRowSet_BeforeAfterBatching(t *testing.T) {
 	for _, ent := range entities {
 		byLdn := counters[deviceKey{ent.oui, ent.sn}]
 		c := countersForEntity(byLdn, ent.objectLdn)
-		ownSet := byLdn[ent.objectLdn]
-		for _, r := range refA.evalKPIs(ent, route.KPIs, c, ownSet) {
+		for _, r := range refA.evalKPIs(ent, route.KPIs, c) {
 			want[kpiKey{ent.oui, ent.sn, ent.objectLdn, r.path}] = r.value
 		}
 	}
