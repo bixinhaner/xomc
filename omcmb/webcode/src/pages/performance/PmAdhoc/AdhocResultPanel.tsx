@@ -14,18 +14,19 @@ import { Alert, Button, Card, DatePicker, Empty, Space, Spin, Table, Tabs, Tag, 
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { ExportOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
-import dayjs, { type Dayjs } from 'dayjs';
+import type { Dayjs } from 'dayjs';
 import { usePmAdhocDetail, usePmAdhocResults } from '@core/hooks/api/usePmAdhoc';
 import { useCreateKpiExport } from '@core/hooks/api/useKpiExport';
+import { useSystemTimezoneValue } from '@core/hooks/api/useSystemTimezone';
 import type { AdhocResultRow, AdhocDimension } from '@core/types/pmAdhoc';
 import { buildAdhocExportParams, defaultExportTaskName } from '@core/utils/kpiExportParams';
 import { adhocIncludesCell, adhocObjectHeaderKey, adhocObjectName, adhocTechnology, objectKeyOf } from './adhocObjectColumn';
-import { formatSystemTime } from '@core/utils/systemTime';
+import { formatSystemTime, nowInSystemTimezone, toSystemTimezoneRFC3339 } from '@core/utils/systemTime';
 
 // 按粒度算默认时窗：覆盖最近 7 天，但粒度粗于"天"时至少 7 个周期。
-// 15min / hourly / daily → 7 天；weekly → 7 周；monthly → 7 月。end 取当前时刻。
-function defaultWindowByGranularity(granularity: string | undefined): [Dayjs, Dayjs] {
-  const end = dayjs();
+// 15min / hourly / daily → 7 天；weekly → 7 周；monthly → 7 月。end 取系统时区当前时刻。
+function defaultWindowByGranularity(granularity: string | undefined, systemTimezone?: string): [Dayjs, Dayjs] {
+  const end = nowInSystemTimezone(systemTimezone);
   switch (granularity) {
     case 'weekly':
       return [end.subtract(7, 'week'), end];
@@ -147,13 +148,15 @@ function buildWideTable(
 export function AdhocResultPanel({ taskId, embedded = false }: Props) {
   const intl = useIntl();
   const taskQuery = usePmAdhocDetail(taskId);
+  // #563：筛选器按系统时区展示和序列化，与图表 X 轴统一参照系。
+  const systemTimezone = useSystemTimezoneValue();
 
   // 二次时窗筛选：同时驱动「页面展示重查」与「导出取数」。默认按粒度算（见 defaultWindowByGranularity）。
   // windowTouched=用户手动改过后不再被粒度联动覆盖。
-  const [windowRange, setWindowRange] = useState<[Dayjs, Dayjs]>(() => defaultWindowByGranularity(undefined));
+  const [windowRange, setWindowRange] = useState<[Dayjs, Dayjs]>(() => defaultWindowByGranularity(undefined, systemTimezone));
   const [windowTouched, setWindowTouched] = useState(false);
-  const startISO = windowRange[0].toISOString();
-  const endISO = windowRange[1].toISOString();
+  const startISO = toSystemTimezoneRFC3339(windowRange[0], systemTimezone) ?? windowRange[0].toISOString();
+  const endISO = toSystemTimezoneRFC3339(windowRange[1], systemTimezone) ?? windowRange[1].toISOString();
 
   const { data: resultsResp, isLoading: rowsLoading } = usePmAdhocResults(taskId, {
     startTime: startISO,
@@ -171,8 +174,8 @@ export function AdhocResultPanel({ taskId, embedded = false }: Props) {
   // 粒度联动默认时窗：粒度就绪/切换时，若用户未手动改过则按当前粒度重设默认时窗。
   useEffect(() => {
     if (windowTouched) return;
-    setWindowRange(defaultWindowByGranularity(effectiveGran));
-  }, [effectiveGran, windowTouched]);
+    setWindowRange(defaultWindowByGranularity(effectiveGran, systemTimezone));
+  }, [effectiveGran, windowTouched, systemTimezone]);
 
   // 导出（KPI-EXPORT adhoc 来源）：建后端异步任务 → 文件传输菜单下载，带当前二次时窗。
   const createExport = useCreateKpiExport();

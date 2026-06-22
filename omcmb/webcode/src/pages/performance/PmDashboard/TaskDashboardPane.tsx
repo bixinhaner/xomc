@@ -14,13 +14,14 @@ import { useIntl } from 'react-intl';
 import { Alert, App, Button, Card, Empty, Segmented, Space, Tag, Typography } from 'antd';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { ExportOutlined } from '@ant-design/icons';
-import dayjs from 'dayjs';
 import {
   usePmAdhocDetail,
   usePmAdhocFilterOptions,
   usePmAdhocResults,
 } from '@core/hooks/api/usePmAdhoc';
 import { useCreateKpiExport } from '@core/hooks/api/useKpiExport';
+import { useSystemTimezoneValue } from '@core/hooks/api/useSystemTimezone';
+import { nowInSystemTimezone, toSystemTimezoneRFC3339 } from '@core/utils/systemTime';
 import { buildAdhocExportParams, defaultExportTaskName } from '@core/utils/kpiExportParams';
 import { buildMetricCharts, filterChartsByMetricPaths } from './taskDashboardUtils';
 import ChartCard from './ChartCard';
@@ -53,6 +54,8 @@ const GRAN_MSG_IDS: Record<string, string> = {
 export default function TaskDashboardPane({ taskId }: Props) {
   const intl = useIntl();
   const { message } = App.useApp();
+  // #563：筛选器按系统时区展示和序列化，与图表 X 轴统一参照系。
+  const systemTimezone = useSystemTimezoneValue();
   // 粒度短标签：有对应键走语料，无键回退原值（等价旧 GRAN_LABEL[g] ?? g）。
   const granLabel = (g: string) =>
     GRAN_MSG_IDS[g] ? intl.formatMessage({ id: GRAN_MSG_IDS[g] }) : g;
@@ -60,11 +63,15 @@ export default function TaskDashboardPane({ taskId }: Props) {
   const dimension = taskQuery.data?.dimension;
 
   // ── 共用三级筛选 + 周期对比开关（本 Pane 持状态，驱动取数 + 二拉）──────
-  const [filter, setFilter] = useState<DashboardFilterValue>({
-    range: [dayjs().subtract(7, 'day'), dayjs()],
-    weekdays: [...ALL_WEEKDAYS],
-    hours: [...ALL_HOURS],
-    compare: false,
+  // #563：默认范围按系统时区「当前时刻」，与图表 X 轴同一参照系。
+  const [filter, setFilter] = useState<DashboardFilterValue>(() => {
+    const now = nowInSystemTimezone(systemTimezone);
+    return {
+      range: [now.subtract(7, 'day'), now],
+      weekdays: [...ALL_WEEKDAYS],
+      hours: [...ALL_HOURS],
+      compare: false,
+    };
   });
 
   // ── PM-DASH-DIMFILTER 维度子集筛选（按维度动态显示产品/设备组/频段多选框）──────
@@ -82,8 +89,9 @@ export default function TaskDashboardPane({ taskId }: Props) {
   const { productIds, objectLdns } = dimSelectionToParams(dimension, dimSelected);
 
   const [start, end] = filter.range;
-  const startISO = start.toISOString();
-  const endISO = end.toISOString();
+  // #563：把用户选的系统时区钟面按系统时区偏移序列化，而非浏览器本地时区。
+  const startISO = toSystemTimezoneRFC3339(start, systemTimezone) ?? start.toISOString();
+  const endISO = toSystemTimezoneRFC3339(end, systemTimezone) ?? end.toISOString();
   const offsetMs = end.valueOf() - start.valueOf();
   const [prevStart, prevEnd] = previousWindow(filter.range);
 
@@ -101,8 +109,8 @@ export default function TaskDashboardPane({ taskId }: Props) {
     filter.compare ? taskId : undefined,
     {
       limit: RESULTS_LIMIT,
-      startTime: prevStart.toISOString(),
-      endTime: prevEnd.toISOString(),
+      startTime: toSystemTimezoneRFC3339(prevStart, systemTimezone) ?? prevStart.toISOString(),
+      endTime: toSystemTimezoneRFC3339(prevEnd, systemTimezone) ?? prevEnd.toISOString(),
       productIds,
       objectLdns,
     },
