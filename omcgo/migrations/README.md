@@ -2,7 +2,7 @@
 
 迁移工具：[`pressly/goose/v3`](https://github.com/pressly/goose)。由 `cmd/migrate` 包装执行，docker compose 的 `migrate-*` 服务在容器栈启动期跑。版本号记录在数据库的 goose 版本表里。
 
-## 当前状态：consolidated baseline（2026-06-17）
+## 当前状态：consolidated baseline（最近一次：2026-06-22）
 
 三条**相互独立**的 goose 流，各自只有一个 `000001` 基线文件（面向全新发布部署）：
 
@@ -12,7 +12,9 @@
 | 主库 seed (DML) | `migrations/seed/*.sql` | `000001_init_seed.sql` | `goose_db_version_seed` | `migrate-seed` | postgres |
 | 时序库 schema | `migrations/tsdb/*.sql` | `000001_tsdb_schema.sql` | `goose_db_version_tsdb` | `migrate-tsdb-schema` | postgres-tsdb（TimescaleDB）|
 
-> **2026-06-17 复合**：把三条流自上次基线后积累的全部增量各自折叠回单个 `000001`——
+> **2026-06-22 复合**（产品尚未正式上线，允许清库重建）：把 schema 流的 `000002`（`pm_completion_watermarks` 表）折进 `000001` 基线 Up 段末尾，删除 `000002_pm_completion_watermark.sql`；同时确认上轮已合入 baseline 末尾的 `device_info` BTS/GSM 投影列段（`bsc_select`/`oml_remote_ip`/`oml_remote_ip_bak`/`ipa_unit_id`）在历史部署上未应用，本次通过 `docker compose down -v` 清空 volume 后重跑 baseline 直接生效（短期所有部署均按全新部署起跑）。seed/tsdb 流未变动。
+>
+> **2026-06-17 复合**（首次）：把三条流自上次基线后积累的全部增量各自折叠回单个 `000001`——
 > - schema 的 `000002~000006`（`device_info` 加列 `op_state`/`admin_state`/`ipsec_addr` + 改 `transmit_power` 注释；`ufte_task_types.product_scope`；`firmware_versions.product_id` + 唯一索引改 `product_id`）折进 schema 基线 Up 段末尾（均幂等 `ADD COLUMN/CREATE INDEX IF [NOT] EXISTS` / `COMMENT`）。
 > - seed 的 `000002~000013`（菜单/字典/`sys_config` 变更 + `console_v2`→`console` 改名 + ufte 升级模板 `product_scope` 回填等）由全量迁移后的干净库重新 `pg_dump --data-only` 成**最终态** seed 基线（不再保留 insert-then-delete 的中间变更）。
 > - tsdb 流本就单文件，未改。
