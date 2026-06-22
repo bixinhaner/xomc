@@ -4426,7 +4426,7 @@ const messages: Record<string, string> = {
   // enable/endpoint/port/accessKey/secret/bucket/region/pathStyle/useSSL are
   // deployment-time decisions in docker compose / yaml and not part of UI.
   'system.storage.minioPublicEndpoint':      'MinIO Public Endpoint',
-  'system.storage.minioPublicEndpointDesc':  'host[:port] for browser / external SDKs to reach MinIO. Leave empty to auto-derive from OMC_PUBLIC_HOST:9000',
+  'system.storage.minioPublicEndpointDesc':  'host[:port] for browser / external SDKs to reach MinIO. Fill in an operator-reachable address here (recommended); leaving empty falls back to the startup config’s internal host and is only for demo / dev environments',
   'system.storage.minioPublicEndpointPlaceholder': 'e.g. minio.example.com:9000 or 10.0.0.5:9100',
   'system.storage.minioPublicEndpointErrScheme':   'Do not include http:// or https://',
   'system.storage.minioPublicEndpointErrPath':     'Path / query / fragment not allowed',

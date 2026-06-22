@@ -57,10 +57,12 @@ nats:
 
 minio:
   endpoint: "minio:9000"
-  # 【运维必填】浏览器 / 外部 SDK 可达的 MinIO 公网地址（host[:port]，无 scheme），
-  # 用于签发 License / 配置备份 / 文件导出等下载的预签名 URL。留空则回退用 endpoint
-  # (minio:9000) 签发——浏览器无法解析该内网主机名会报 ERR_NAME_NOT_RESOLVED
-  # （qa-614 #377）。生产请经 deploy/.env 注入 MINIO_PUBLIC_ENDPOINT=对外域名 / SLB VIP。
+  # 浏览器 / 外部 SDK 可达的 MinIO 公网地址（host[:port]，无 scheme），
+  # 用于签发 License / 配置备份 / 文件导出等下载的预签名 URL。
+  # 【主流用法】部署后进「系统配置 → 存储」填写对外可达地址（热生效不需重启），
+  # 下面的 ${MINIO_PUBLIC_ENDPOINT} 仅作为启动期兑底；UI 未填 + env 未注入时会
+  # 回退用 endpoint (minio:9000) 签发，浏览器无法解析该内网主机名会报 ERR_NAME_NOT_RESOLVED
+  # （qa-614 #377 初始场景；issue #548 已上线运行时订阅桥）。
   public_endpoint: "${MINIO_PUBLIC_ENDPOINT}"
   access_key: "${MINIO_ROOT_USER}"    # 由 deploy/.env 注入 ${MINIO_ROOT_USER}
   secret_key: "${MINIO_ROOT_PASSWORD}"  # 由 deploy/.env 注入 ${MINIO_ROOT_PASSWORD}

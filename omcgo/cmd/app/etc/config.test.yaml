@@ -52,8 +52,9 @@ nats:
 minio:
   endpoint: "172.19.1.73:9000"
   # 浏览器 / 外部 SDK 可达的 MinIO 地址，用于签发下载预签名 URL（qa-614 #377）。
-  # test 环境 endpoint 已是可路由 IP，默认沿用它；如浏览器从别的网段访问，
-  # 经 env 注入 MINIO_PUBLIC_ENDPOINT 覆盖为对外可达地址。留空会回退 endpoint 并打 Warn。
+  # 【主流用法】部署后进「系统配置 → 存储」填写对外可达地址（热生效不需重启，
+  # issue #548 订阅桥）。下面的 ${MINIO_PUBLIC_ENDPOINT} 仅作启动期兑底；
+  # test 环境默认回退到 172.19.1.73:9000（该网段可直接路由访问）。
   public_endpoint: "${MINIO_PUBLIC_ENDPOINT:-172.19.1.73:9000}"
   access_key: "minioadmin"
   secret_key: "minioadmin"

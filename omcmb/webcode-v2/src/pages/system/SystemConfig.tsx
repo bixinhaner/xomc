@@ -50,7 +50,7 @@ const KNOWN_KEYS_BY_CATEGORY: Record<
       key: 'minio_public_endpoint',
       valueType: 'string',
       description:
-        'MinIO 对外可达 endpoint（浏览器/外部 SDK 用，host[:port]，空 = 自动派生 OMC_PUBLIC_HOST:9000）',
+        'MinIO 对外可达 endpoint（浏览器/外部 SDK 用，host[:port]）。建议在此填写运维可达地址；留空仅演示 / 开发环境使用，会回退到启动配置中的内部 host',
     },
   ],
 }
