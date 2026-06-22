@@ -1126,8 +1126,11 @@ const messages: Record<string, string> = {
   // BSC packed-scalar neighbor table (PackedScalarNeighborTable)
   'device.multi.packed.readonlyTag':      'Read-only',
   'device.multi.packed.emptyText':        'No neighbor data',
-  'device.multi.packed.sourceLabel':      'Source (read-only): ',
+  'device.multi.packed.sourceLabel':      'Source: ',
   'device.multi.packed.lastSynced':       'Last synced {time}',
+  'device.multi.packed.colActions':       'Actions',
+  'device.multi.packed.fieldRequired':    'Required',
+  'device.multi.packed.fieldInvalidChar': 'Whitespace or "-" not allowed',
   'device.multi.deleteConfirm':           'Confirm delete?',
   'device.multi.reachedMaxTooltip':       'Reached max {max}; delete other instances before adding',
   'device.multi.modalAddTitle':           '{title} · Add Instance',
