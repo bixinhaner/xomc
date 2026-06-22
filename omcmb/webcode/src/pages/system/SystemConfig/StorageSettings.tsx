@@ -1,4 +1,4 @@
-import { Form, Input, InputNumber, Checkbox, Select, Card, Space, Button, message, theme } from 'antd';
+import { Form, Input, InputNumber, Checkbox, Select, Card, Space, theme } from 'antd';
 import { useT } from '@/hooks/useT';
 
 const { Option } = Select;
@@ -38,32 +38,14 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
   // 子设置区域背景跟随明/暗主题，不再写死 #fafafa
   const subSettingStyle: React.CSSProperties = { ...subSettingBaseStyle, backgroundColor: token.colorFillAlter };
 
-  // 监听 MinIO 启用状态
-  const minioEnable = Form.useWatch('minioEnable', form);
-
-  const handleTestMinio = () => {
-    void message.info(t('system.storage.testingMinioConn'));
-    setTimeout(() => {
-      void message.success(t('system.storage.minioConnSuccess'));
-    }, 1000);
-  };
-
   return (
     <Form form={form} layout="vertical" size="small" initialValues={{
       logDataSaveDays: 90,
       rebootLogDataSaveDays: 60,
       rebootLogSaveCount: 2,
       sysOperateLogDataSaveDays: 90,
-      // MinIO 对象存储默认值
-      minioEnable: true,
-      minioEndpoint: '127.0.0.1',
-      minioPort: 9000,
-      minioAccessKey: 'minioadmin',
-      minioSecretKey: '',
-      minioUseSSL: false,
-      minioBucket: 'omc-data',
-      minioRegion: 'us-east-1',
-      minioPathStyle: true,
+      // MinIO 对外可达 endpoint：issue #548 切片 3。空 = 走 env / 派生回退（后端订阅桥处理）
+      minio_public_endpoint: '',
       alarmHisMaxHoldTime: 365,
       kpiFilesSaveDays: 7,
       kpiReportDataSaveDays: 7,
@@ -144,63 +126,51 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
 
       </Card>
 
-      {/* MinIO 对象存储 */}
+      {/* MinIO 对象存储 — issue #548 切片 3 收敛：
+           只暴露 `MinIO 对外可达 endpoint`（sys_configs.storage.minio_public_endpoint）
+           一字段；其他 endpoint/port/accessKey/secret/bucket/region/pathStyle/useSSL/enable
+           都是部署期决策（docker compose / yaml）不该 UI 编辑——改了不生效就是 §5
+           设计原则禁止的"打字进数据库不生效"半成品。详见 issue-548-slice3-ledger.md。 */}
       <Card
         size="small"
         title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.storage.minio')}</span>}
         style={{ marginBottom: 16 }}
       >
-        <div style={settingRowStyle}>
-          <Form.Item name="minioEnable" valuePropName="checked" noStyle>
-            <Checkbox>{t('system.storage.minioEnable')}</Checkbox>
-          </Form.Item>
-        </div>
-
         <div style={subSettingStyle}>
-          <div style={{ marginBottom: 12, fontWeight: 500, color: token.colorTextSecondary }}>{t('system.storage.minioConfig')}</div>
-
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 12 }}>
-            <Form.Item label={t('system.storage.minioEndpoint')} name="minioEndpoint" style={{ marginBottom: 0 }}>
-              <Input
-                style={{ width: 240 }}
-                placeholder="minio.example.com"
-                disabled={!minioEnable}
-              />
-            </Form.Item>
-            <Form.Item label={t('system.storage.minioPort')} name="minioPort" style={{ marginBottom: 0 }}>
-              <InputNumber min={1} max={65535} style={{ width: 100 }} disabled={!minioEnable} />
-            </Form.Item>
-            <Form.Item label={t('system.storage.minioUseSSL')} name="minioUseSSL" valuePropName="checked" style={{ marginBottom: 0, marginTop: 24 }}>
-              <Checkbox disabled={!minioEnable}>HTTPS</Checkbox>
-            </Form.Item>
-          </div>
-
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 12 }}>
-            <Form.Item label={t('system.storage.minioAccessKey')} name="minioAccessKey" style={{ marginBottom: 0 }}>
-              <Input style={{ width: 240 }} disabled={!minioEnable} />
-            </Form.Item>
-            <Form.Item label={t('system.storage.minioSecretKey')} name="minioSecretKey" style={{ marginBottom: 0 }}>
-              <Input.Password style={{ width: 240 }} maxLength={128} disabled={!minioEnable} />
-            </Form.Item>
-          </div>
-
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 12 }}>
-            <Form.Item label={t('system.storage.minioBucket')} name="minioBucket" style={{ marginBottom: 0 }}>
-              <Input style={{ width: 200 }} disabled={!minioEnable} />
-            </Form.Item>
-            <Form.Item label={t('system.storage.minioRegion')} name="minioRegion" style={{ marginBottom: 0 }}>
-              <Input style={{ width: 160 }} disabled={!minioEnable} />
-            </Form.Item>
-            <Form.Item label={t('system.storage.minioPathStyle')} name="minioPathStyle" valuePropName="checked" style={{ marginBottom: 0, marginTop: 24 }}>
-              <Checkbox disabled={!minioEnable}>Path-Style</Checkbox>
-            </Form.Item>
-          </div>
-
-          <Space>
-            <Button type="primary" size="small" onClick={handleTestMinio} disabled={!minioEnable}>
-              {t('common.test')}
-            </Button>
-          </Space>
+          <Form.Item
+            label={t('system.storage.minioPublicEndpoint')}
+            name="minio_public_endpoint"
+            // 后端 storage.minio_public_endpoint validator 已对相同正则校验并返 400；
+            // 此处加前端 pattern 让用户在输入即时看到错误，避免一次保存才得知。
+            // 规则与后端 ValidatePublicEndpoint 同步：禁 scheme/path/IPv6，允许空。
+            rules={[{
+              validator: (_, value: string) => {
+                if (!value) return Promise.resolve();
+                if (value.includes('://')) return Promise.reject(new Error(t('system.storage.minioPublicEndpointErrScheme')));
+                if (/[/?#]/.test(value)) return Promise.reject(new Error(t('system.storage.minioPublicEndpointErrPath')));
+                if (/[[\]]/.test(value) || (value.match(/:/g) || []).length > 1) {
+                  return Promise.reject(new Error(t('system.storage.minioPublicEndpointErrIpv6')));
+                }
+                const m = value.match(/^([^:]+)(?::(\d+))?$/);
+                if (!m || !m[1]) return Promise.reject(new Error(t('system.storage.minioPublicEndpointErrFormat')));
+                if (m[2]) {
+                  const p = parseInt(m[2], 10);
+                  if (!Number.isFinite(p) || p < 1 || p > 65535) {
+                    return Promise.reject(new Error(t('system.storage.minioPublicEndpointErrPort')));
+                  }
+                }
+                return Promise.resolve();
+              },
+            }]}
+            extra={<span style={{ color: token.colorTextSecondary }}>{t('system.storage.minioPublicEndpointDesc')}</span>}
+          >
+            <Input
+              style={{ width: 360 }}
+              placeholder={t('system.storage.minioPublicEndpointPlaceholder')}
+              allowClear
+              maxLength={253}
+            />
+          </Form.Item>
         </div>
       </Card>
 

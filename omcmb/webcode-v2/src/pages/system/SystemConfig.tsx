@@ -14,6 +14,7 @@ import {
 import type {
   BatchUpdateSysConfigItem,
   SysConfigItem,
+  SysConfigValueType,
 } from '@core/types/system'
 import { useT } from '@/hooks/useT'
 
@@ -35,6 +36,42 @@ const CATEGORIES: { key: string; label: string }[] = [
   { key: 'omc', label: 'OMC' },
   { key: 'northbound', label: '北向' },
 ]
+
+// 已知 sys_configs key 占位（issue #548 切片 3）。
+// 后端 admin.SysConfigService.RegisterValidator 注册的 key 在 DB 没记录时，
+// 通用 KV 编辑器会显示"暂无配置项"——运维找不到入口去设置。把这类 key 写进
+// 占位列表，DB 没有就显示一个空 input 行让用户填，保存后变成真 DB 行。
+const KNOWN_KEYS_BY_CATEGORY: Record<
+  string,
+  Array<{ key: string; valueType: SysConfigValueType; description?: string }>
+> = {
+  storage: [
+    {
+      key: 'minio_public_endpoint',
+      valueType: 'string',
+      description:
+        'MinIO 对外可达 endpoint（浏览器/外部 SDK 用，host[:port]，空 = 自动派生 OMC_PUBLIC_HOST:9000）',
+    },
+  ],
+}
+
+// mergeKnownKeys：DB 拉到的 items + 已知 key 占位行（未出现的）合并。
+function mergeKnownKeys(category: string, dbItems: SysConfigItem[]): SysConfigItem[] {
+  const known = KNOWN_KEYS_BY_CATEGORY[category]
+  if (!known || known.length === 0) return dbItems
+  const dbKeys = new Set(dbItems.map((it) => it.key))
+  const placeholders: SysConfigItem[] = known
+    .filter((k) => !dbKeys.has(k.key))
+    .map((k) => ({
+      id: '',
+      category,
+      key: k.key,
+      value: '',
+      valueType: k.valueType,
+      description: k.description,
+    }))
+  return [...dbItems, ...placeholders]
+}
 
 // device 分类按 enb*/cpe* 前缀分组，与 v1「基站类 / CPE 类」结构化表单等深（issue #357）。
 // 其余分类不分组（单组），保持通用 KV 编辑器形态。
@@ -64,7 +101,10 @@ function CategoryEditor({ category }: { category: string }) {
     useSysConfigsByCategory(category)
   const batchUpdate = useBatchUpdateSysConfigs()
 
-  const items = useMemo<SysConfigItem[]>(() => data ?? [], [data])
+  const items = useMemo<SysConfigItem[]>(
+    () => mergeKnownKeys(category, data ?? []),
+    [data, category],
+  )
   const groups = useMemo(() => groupDeviceItems(category, items), [category, items])
 
   // 本地编辑态：key -> value（字符串，与后端 sys_configs.value TEXT 列一致）

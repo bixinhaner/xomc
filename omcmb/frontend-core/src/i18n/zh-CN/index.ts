@@ -4453,21 +4453,17 @@ const messages: Record<string, string> = {
   'system.storage.diskAlarm':                '磁盘告警',
   // MinIO 对象存储
   'system.storage.minio':                    'MinIO 对象存储',
-  'system.storage.minioEnable':              '启用 MinIO 对象存储',
-  'system.storage.minioConfig':              'MinIO 配置',
-  'system.storage.minioEndpoint':            'Endpoint',
-  'system.storage.minioPort':                '端口',
-  'system.storage.minioAccessKey':           'AccessKey',
-  'system.storage.minioSecretKey':           'SecretKey',
-  'system.storage.minioUseSSL':              '启用 SSL/TLS',
-  'system.storage.minioBucket':              '默认 Bucket',
-  'system.storage.minioRegion':              '区域 (Region)',
-  'system.storage.minioPathStyle':           '使用 Path-Style 访问',
-  'system.storage.testingMinioConn':         '正在测试 MinIO 连接...',
-  'system.storage.minioConnSuccess':         'MinIO 连接成功',
-  'system.storage.pleaseInputEndpoint':      '请输入 Endpoint',
-  'system.storage.pleaseInputAccessKey':     '请输入 AccessKey',
-  'system.storage.pleaseInputBucket':        '请输入 Bucket 名称',
+  // issue #548 切片 3：只暴露对外可达 endpoint 一个运行时可改字段，其余
+  // enable/endpoint/port/accessKey/secret/bucket/region/pathStyle/useSSL
+  // 均为部署期决策（docker compose / yaml），不进 UI。
+  'system.storage.minioPublicEndpoint':      'MinIO 对外可达 endpoint',
+  'system.storage.minioPublicEndpointDesc':  '浏览器 / 外部 SDK 访问 MinIO 用的 host[:port]，留空则自动派生为 OMC_PUBLIC_HOST:9000',
+  'system.storage.minioPublicEndpointPlaceholder': '如 minio.example.com:9000 或 10.0.0.5:9100',
+  'system.storage.minioPublicEndpointErrScheme':   '不要带 http:// 或 https:// 前缀',
+  'system.storage.minioPublicEndpointErrPath':     '不要带路径 / 查询串 / fragment',
+  'system.storage.minioPublicEndpointErrIpv6':     '暂不支持 IPv6 地址',
+  'system.storage.minioPublicEndpointErrFormat':   '格式应为 host 或 host:port',
+  'system.storage.minioPublicEndpointErrPort':     '端口范围 1-65535',
   'common.ftpProtocol':                      'FTP协议',
   'common.username':                         '用户名',
 
