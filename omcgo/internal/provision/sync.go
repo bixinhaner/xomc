@@ -19,6 +19,19 @@ import (
 	"go.uber.org/zap"
 )
 
+// syncGPVTaskExpiresIn 是 Path B / 手动 sync GPV task 的过期秒数（30 分钟）。
+//
+// 为什么需要单独的 TTL：全局 default_expires_in_seconds=120 适用于交互式 / 单 RPC
+// 场景，但单次 sync 在 BSC 等慢设备上会产生 200+ object 前缀 task（如
+// DeviceGSM.Bts.{1..256}.），ACS 在一次 inform session 内只能串行 push（CPE 完
+// 成一个空 POST 再触发下一个 RPC），按 ~1 task/s 估算 250 task 需要 4~5 分钟才
+// 能消化完，并且要跨越多次 inform 周期（设备 inform_interval 通常 300s）。
+//
+// 沿用 120s 时后半批 task 会被 ExpiredSweeper 抢先标 expired，导致部分 BTS
+// 实例无法落库（前端临区/TRX 表显示不全），与首次同步语义不符。1800s 留出
+// 5~10 次 inform 机会，配合 ACS handler 单 task 1s 处理上限完全够 250 task 收尾。
+const syncGPVTaskExpiresIn = 1800
+
 // SyncService handles batch parameter value synchronization from devices.
 //
 // T-0098 P5-01：旧 datamodel 双阶段同步（StartTwoPhaseSync / HandleGPNResult /
@@ -163,6 +176,11 @@ func (s *SyncService) StartSync(ctx context.Context, dev *model.Device, paramPat
 // commandKey 一律用 "sync-gpv-{sn}-{i}" 前缀。该前缀同时是 ACS handler 判定
 // "本任务允许 Fault 自愈"和 Path B "允许 reconcile" 的关键标识。
 //
+// ExpiresIn=syncGPVTaskExpiresIn（1800s）：BSC 等慢设备一次 sync 会产生 200+ object
+// 前缀 task（DeviceGSM.Bts.{1..254}.），ACS 在 inform session 内串行 push，按 ~1 task/s
+// 估算 250 task 需要 4~5 分钟才能消化完，跨越多次 inform 周期才能完成。沿用全局默认
+// 120s 时后半批 task 会被 sweeper 抢先标 expired，导致部分实例无法落库（首次同步缺数）。
+//
 // 返回入队成功的 task ID 列表，调用方可用于追溯/北向返回。
 func (s *SyncService) EnqueueGPVBatches(ctx context.Context, deviceSN string, paramPaths []string, sourceID string) ([]string, error) {
 	if deviceSN == "" {
@@ -182,6 +200,7 @@ func (s *SyncService) EnqueueGPVBatches(ctx context.Context, deviceSN string, pa
 			Method:     MethodGetParameterValues,
 			Params:     gpvParams,
 			Priority:   10 + i,
+			ExpiresIn:  syncGPVTaskExpiresIn,
 			CommandKey: fmt.Sprintf("sync-gpv-%s-%d", deviceSN, i),
 			Source:     task.TaskSourceSystem,
 			SourceID:   sourceID,

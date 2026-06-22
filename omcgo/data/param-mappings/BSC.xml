@@ -120,8 +120,13 @@
         <param name="DeviceGSM.Bts.{i}.NeighborCgiAdd" standardPath="DeviceGSM.Bts.{i}.NeighborCgiAdd" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <param name="DeviceGSM.Bts.{i}.NeighborCgiDel" standardPath="DeviceGSM.Bts.{i}.NeighborCgiDel" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <param name="DeviceGSM.Bts.{i}.NeighborListMode" standardPath="DeviceGSM.Bts.{i}.NeighborListMode" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="automatic,manual,manual_si5" enumLabels="automatic,manual,manual_si5"/>
-        <param name="DeviceGSM.Bts.{i}.NumofTrxChannel" standardPath="DeviceGSM.Bts.{i}.NumofTrxChannel" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="256"/>
-        <param name="DeviceGSM.Bts.{i}.OmlConnectState" standardPath="DeviceGSM.Bts.{i}.OmlConnectState" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="16"/>
+        <!-- BSC 设备约定: osmo-bsc 把 NumofTrxChannel / OmlConnectState 这两个 BSC 全局只读状态量
+             暴露在 DeviceGSM.Bts.0 实例上(固定索引 0)，所有 BTS 实例共享同一份值。
+             设备对无下标的 DeviceGSM.Bts.NumofTrxChannel 会返回 9005 Fault；对其他下标也无意义。
+             因此 standardPath/privatePath 均固定为 Bts.0；前端 quicksettings/BSC.xml 同步写 Bts.0，
+             由于路径不再含 {i}，applyInstanceContext 直接原样返回，所有 BTS 行展示同一值。 -->
+        <param name="DeviceGSM.Bts.0.NumofTrxChannel" standardPath="DeviceGSM.Bts.0.NumofTrxChannel" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="256"/>
+        <param name="DeviceGSM.Bts.0.OmlConnectState" standardPath="DeviceGSM.Bts.0.OmlConnectState" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="16"/>
         <param name="DeviceGSM.Bts.{i}.OmlIpaStreamId" standardPath="DeviceGSM.Bts.{i}.OmlIpaStreamId" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="8"/>
         <param name="DeviceGSM.Bts.{i}.RachCellBarred" standardPath="DeviceGSM.Bts.{i}.RachCellBarred" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="1"/>
         <param name="DeviceGSM.Bts.{i}.Si2quaterNeighborListAdd" standardPath="DeviceGSM.Bts.{i}.Si2quaterNeighborListAdd" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
