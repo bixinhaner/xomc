@@ -11,7 +11,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/model"
-	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
 
 // parseReadBufferSize 是包在传入 io.Reader 外的 bufio 缓冲上限（64 KiB）。
@@ -326,15 +325,12 @@ func extractDeviceSN(localDn string) string {
 	return localDn
 }
 
-// extractCellID extracts the cell ID from a measObjLdn string.
+// extractCellID returns the measObjLdn as-is for use as the object_ldn DB column.
 //
-// 委托 metrics.ParseObjectLDN 单一真值源（含三制式：4G Cellid / 5G NrCGI / GSM Uid），
-// 不再各写一套正则。BaseCellID 返回按制式选定的天然小区标识，无法识别时回退到原串
-// 保留旧契约（"never returns empty when input is non-empty"，让下游分组键不丢标签）。
+// object_ldn 必须保留完整 LDN 原串（如 Cellid=111172245,PLMN=46068），
+// 下游需要 PLMN 等层级信息做频段映射、去重、前端友好显示等。
+// 需要裸小区号的场景（频段映射等）应在读取时调用 ParseObjectLDN().BaseCellID()。
 func extractCellID(measObjLdn string) string {
-	if id := metrics.ParseObjectLDN(measObjLdn).BaseCellID(); id != "" {
-		return id
-	}
 	return measObjLdn
 }
 
