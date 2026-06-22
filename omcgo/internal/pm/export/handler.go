@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/minio/minio-go/v7"
 	"go.uber.org/zap"
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
@@ -26,11 +27,19 @@ type Presigner interface {
 	PresignedGetObject(ctx context.Context, bucket, object string, expiry time.Duration, reqParams url.Values) (*url.URL, error)
 }
 
+// PresignClientProvider 抽象"按需取当前 MinIO 预签名 client"的能力（issue #548 切片 4）。
+// 主线生产实现是 internal/core/components/minio.PresignBridge；sys_configs 写入
+// storage.minio_public_endpoint 后下一次 Get() 拿到新 endpoint 对应的 client。
+type PresignClientProvider interface {
+	Get() *minio.Client
+}
+
 // Handler 是 KPI 导出的 REST 入口。
 type Handler struct {
-	svc       *Service
-	presigner Presigner // 下载用；nil 时下载端点返 503
-	logger    *zap.Logger
+	svc             *Service
+	presigner       Presigner             // 启动期默认；nil 时下载端点返 503
+	presignProvider PresignClientProvider // issue #548 切片 4：sys_configs 热改 endpoint 后下次 Download 即生效
+	logger          *zap.Logger
 }
 
 // NewHandler 构造 Handler。presigner 可为 nil（无对象存储环境，下载端点降级返 503）。
@@ -39,6 +48,25 @@ func NewHandler(svc *Service, presigner Presigner, logger *zap.Logger) *Handler 
 		logger = zap.NewNop()
 	}
 	return &Handler{svc: svc, presigner: presigner, logger: logger.Named("pm.export.handler")}
+}
+
+// SetPresignProvider 注入运行期感知 sys_configs 变更的 presign client provider（issue #548 切片 4）。
+// nil 时回退使用 h.presigner（启动期静态注入的 client）。
+func (h *Handler) SetPresignProvider(p PresignClientProvider) {
+	if h == nil {
+		return
+	}
+	h.presignProvider = p
+}
+
+// currentPresigner 返回当前 Download 该用的 Presigner：优先 provider.Get()、其次 h.presigner。
+func (h *Handler) currentPresigner() Presigner {
+	if h.presignProvider != nil {
+		if c := h.presignProvider.Get(); c != nil {
+			return c
+		}
+	}
+	return h.presigner
 }
 
 // RegisterRoutes 把 5 个 REST 端点挂到 router group（不带 /pm 前缀，由调用方决定 group）。
@@ -179,11 +207,11 @@ func (h *Handler) Download(c *gin.Context) {
 		response.Fail(c, http.StatusConflict, "export file not ready")
 		return
 	}
-	if h.presigner == nil {
+	if h.presigner == nil && (h.presignProvider == nil || h.presignProvider.Get() == nil) {
 		response.Fail(c, http.StatusServiceUnavailable, "object storage not available")
 		return
 	}
-	u, err := h.presigner.PresignedGetObject(c.Request.Context(), task.Bucket, task.FilePath, presignURLTTL, url.Values{})
+	u, err := h.currentPresigner().PresignedGetObject(c.Request.Context(), task.Bucket, task.FilePath, presignURLTTL, url.Values{})
 	if err != nil {
 		h.logger.Warn("presign export download url failed",
 			zap.String("task_id", id.String()), zap.Error(err))

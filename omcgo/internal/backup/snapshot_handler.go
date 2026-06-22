@@ -281,7 +281,7 @@ func (h *Handler) DownloadSnapshot(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
 		return
 	}
-	presigned, presignErr := h.minioClient.PresignedGetObject(
+	presigned, presignErr := h.presignClient().PresignedGetObject(
 		c.Request.Context(), snap.ObjectBucket, snap.ObjectPath, time.Hour, nil,
 	)
 	if presignErr != nil {

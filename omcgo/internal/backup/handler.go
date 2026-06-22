@@ -26,6 +26,10 @@ type Handler struct {
 	// M4: ExportFile presigned URL support
 	fileRepo    FileRepository // nil-safe (ExportFile returns 503 if unset)
 	minioClient *minio.Client  // nil-safe (ExportFile returns 503 if unset)
+	// issue #548 切片 4：sys_configs 写入 storage.minio_public_endpoint 后
+	// presignProvider.Get() 返回新 endpoint 对应的 client；优先级高于 minioClient。
+	// 由 provider/modules.go 注入 PresignBridge；nil 时回退 minioClient。
+	presignProvider PresignClientProvider // nil-safe (M1补丁法：仅在 PresignBridge 未装配时为 nil)
 	// M4: device repo used by QueryCellInfos / QueryTaskDeviceList / GetProductType.
 	// nil-safe (those endpoints return 503 if unset).
 	deviceReader device.DeviceReader
@@ -66,6 +70,33 @@ func (h *Handler) SetFileRepository(r FileRepository) {
 // in ExportFile (M4). When nil, ExportFile returns 503.
 func (h *Handler) SetMinioClient(c *minio.Client) {
 	h.minioClient = c
+}
+
+// PresignClientProvider 抽象"按需取当前 MinIO 预签名 client"的能力（issue #548 切片 4）。
+// 主线生产实现是 internal/core/components/minio.PresignBridge——sys_configs 写入
+// storage.minio_public_endpoint 后原子替换内部 client，下一次 Get() 拿到新端点的签名 client。
+// 不要把 Get() 结果缓存跨请求用。
+type PresignClientProvider interface {
+	Get() *minio.Client
+}
+
+// SetPresignProvider wires the runtime-aware MinIO presign client provider
+// (issue #548 切片 4). When set, license / snapshot / M4 导出下载 URL 会用
+// provider.Get() 返的当前 client 签发，实时响应 sys_configs 热改。nil 时回退
+// h.minioClient（启动期注入的静态 client）。
+func (h *Handler) SetPresignProvider(p PresignClientProvider) {
+	h.presignProvider = p
+}
+
+// presignClient 返回当前该用于签发预签名 URL 的 client。优先 provider.Get()，
+// 其次 h.minioClient。两者都不可用时返 nil（调用方负责报 503）。
+func (h *Handler) presignClient() *minio.Client {
+	if h.presignProvider != nil {
+		if c := h.presignProvider.Get(); c != nil {
+			return c
+		}
+	}
+	return h.minioClient
 }
 
 // SetDeviceReader wires the device repository used by M4 device-facing

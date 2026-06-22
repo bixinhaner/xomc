@@ -96,8 +96,9 @@ func initPMModule(c *Container) error {
 	// KPI-EXPORT T1：KPI 数据导出 REST 入口（建任务落表 + 入队 pm_kpi_export job）。
 	// 下载用 presign client（对外可达 host 签链接）；构造失败降级 nil，下载端点返 503。
 	//
-	// TODO(issue #548 切片 2 后续切片)：迁移到 c.PresignBridge.Get() 以支持
-	// sys_configs storage.minio_public_endpoint 热生效（KPI 导出文件下载）。
+	// issue #548 切片 4：同时注入 PresignBridge，sys_configs 写入
+	// storage.minio_public_endpoint 后下一次 Download 立即用新 endpoint，无需重启容器。
+	// 原 NewPresignClient 路径作启动期兜底。
 	pmExportRepo := pmexport.NewPgRepository(c.PgPool)
 	pmExportSvc := pmexport.NewService(pmExportRepo, pmAsyncJobRepo)
 	var exportPresigner pmexport.Presigner
@@ -107,6 +108,9 @@ func initPMModule(c *Container) error {
 		exportPresigner = presignClient
 	}
 	pmExportHandler := pmexport.NewHandler(pmExportSvc, exportPresigner, logger.Named("export"))
+	if c.PresignBridge != nil {
+		pmExportHandler.SetPresignProvider(c.PresignBridge)
+	}
 
 	enabledRepo := indicator.NewPgEnabledRepository(c.PgPool)
 	templateRelRepo := indicator.NewPgTemplateRelRepository(c.PgPool)

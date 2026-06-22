@@ -149,7 +149,7 @@ func (h *Handler) ExportFile(c *gin.Context) {
 		return
 	}
 
-	presigned, presignErr := h.minioClient.PresignedGetObject(
+	presigned, presignErr := h.presignClient().PresignedGetObject(
 		c.Request.Context(), bucket, objectPath, time.Hour, url.Values{},
 	)
 	if presignErr != nil {

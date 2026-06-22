@@ -21,15 +21,24 @@ import (
 // ErrExporterNotConfigured 当 MinIO 导出器未注入时返回（dev/单测场景），handler 映射 503。
 var ErrExporterNotConfigured = errors.New("mml: result exporter not configured")
 
+// PresignClientProvider 抽象"按需取当前 MinIO 预签名 client"的能力（issue #548 切片 4）。
+// 主线生产实现是 internal/core/components/minio.PresignBridge；sys_configs 写入
+// storage.minio_public_endpoint 后下一次 Get() 拿到新 endpoint 对应的 client。
+type PresignClientProvider interface {
+	Get() *minio.Client
+}
+
 // Exporter 把 MML 任务结果 CSV 上传到 MinIO 并签发下载 URL。
 //   - put：内部客户端（走 docker 内网 endpoint），用于 PutObject
-//   - sign：预签名客户端（走 public_endpoint），用于浏览器可达的 PresignedGetObject
+//   - sign：默认预签名客户端（走 public_endpoint），作 PresignedGetObject
+//     启动期兑底；运行期优先使用 signProvider.Get()（sys_configs 热改生效）
 //   - bucket：reports bucket；对象统一落在 mml-results/ 独立目录下
 type Exporter struct {
-	put    *minio.Client
-	sign   *minio.Client
-	bucket string
-	logger *zap.Logger
+	put          *minio.Client
+	sign         *minio.Client         // 启动期默认。signProvider != nil 且 Get()!=nil 时优先走 provider。
+	signProvider PresignClientProvider // issue #548 切片 4：sys_configs 热改 endpoint 后下次 presign 即生效
+	bucket       string
+	logger       *zap.Logger
 }
 
 // NewExporter 构造导出器。put/sign 任一为 nil 视为未配置（ExportXxx 返回 503）。
@@ -37,8 +46,27 @@ func NewExporter(put, sign *minio.Client, bucket string, logger *zap.Logger) *Ex
 	return &Exporter{put: put, sign: sign, bucket: bucket, logger: logger}
 }
 
+// SetSignProvider 注入 运行期感知 sys_configs 变更的 presign client provider（issue #548 切片 4）。
+// nil 时回退使用 e.sign（启动期静态 client）。
+func (e *Exporter) SetSignProvider(p PresignClientProvider) {
+	if e == nil {
+		return
+	}
+	e.signProvider = p
+}
+
+// signClient 返回当前该用于签发预签名 URL 的 client：优先 provider.Get()，其次 e.sign。
+func (e *Exporter) signClient() *minio.Client {
+	if e.signProvider != nil {
+		if c := e.signProvider.Get(); c != nil {
+			return c
+		}
+	}
+	return e.sign
+}
+
 func (e *Exporter) ready() bool {
-	return e != nil && e.put != nil && e.sign != nil && e.bucket != ""
+	return e != nil && e.put != nil && e.bucket != "" && e.signClient() != nil
 }
 
 func (e *Exporter) upload(ctx context.Context, key string, data []byte) error {
@@ -51,7 +79,7 @@ func (e *Exporter) upload(ctx context.Context, key string, data []byte) error {
 }
 
 func (e *Exporter) presign(ctx context.Context, key string) (string, error) {
-	u, err := e.sign.PresignedGetObject(ctx, e.bucket, key, time.Hour, nil)
+	u, err := e.signClient().PresignedGetObject(ctx, e.bucket, key, time.Hour, nil)
 	if err != nil {
 		return "", fmt.Errorf("presign %s: %w", key, err)
 	}

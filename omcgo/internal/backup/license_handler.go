@@ -243,7 +243,7 @@ func (h *Handler) DownloadLicense(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
 		return
 	}
-	presigned, presignErr := h.minioClient.PresignedGetObject(
+	presigned, presignErr := h.presignClient().PresignedGetObject(
 		c.Request.Context(), lic.ObjectBucket, lic.ObjectPath, time.Hour, nil,
 	)
 	if presignErr != nil {

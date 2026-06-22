@@ -397,10 +397,16 @@ func initUFTEModule(c *Container) error {
 	// 解析不了；NewPresignClient 在 minio.public_endpoint 非空时换成对外可达 host
 	// 重签（如 dev 配置 localhost:9000），空时退化到内部 endpoint。
 	//
-	// TODO(issue #548 切片 2 后续切片)：迁移到 c.PresignBridge.Get() 以支持 sys_configs
-	// 写入 storage.minio_public_endpoint 后热生效，无需重启容器。当前 trace 是 PoC。
+	// issue #548 切片 4：默认 signer 优先用 c.PresignBridge.Get()（sys_configs 热改
+	// storage.minio_public_endpoint 后下一次签 URL 立即用新 endpoint）；桥未装配
+	// （dev/test 路径）回退旧 NewPresignClient。注意 line 451 的"按 ACS uploadBaseURL
+	// 动态重签"是 UFTE 独立业务诉求，保留不动。
 	minioClient := c.MinIO
-	if presignClient, presignErr := minioinfra.NewPresignClient(c.Cfg.MinIO); presignErr != nil {
+	if c.PresignBridge != nil {
+		if pc := c.PresignBridge.Get(); pc != nil {
+			minioClient = pc
+		}
+	} else if presignClient, presignErr := minioinfra.NewPresignClient(c.Cfg.MinIO); presignErr != nil {
 		logger.Warn("create MinIO presign client failed; download URLs will use internal endpoint",
 			zap.Error(presignErr))
 	} else {
@@ -1085,8 +1091,9 @@ func initBackupModule(c *Container) error {
 		// 重签为对外可达 host（如 localhost:9000）。
 		// 与 UFTE 模块 SetDownloadURLLookup 同一套逻辑（见上方 line 207-213）。
 		//
-		// TODO(issue #548 切片 2 后续切片)：迁移到 c.PresignBridge.Get() 以支持
-		// sys_configs storage.minio_public_endpoint 热生效（备份 / license 文件下载）。
+		// issue #548 切片 4：同时注入 PresignBridge 作运行时 provider，sys_configs
+		// 写入 storage.minio_public_endpoint 后下一次签名 URL 立即用新 endpoint，
+		// 无需重启容器（备份 / license / 快照下载）。原 SetMinioClient 路径作启动期兜底。
 		presignSigner := c.MinIO
 		// 传入 logger：public_endpoint 为空回退内部 endpoint 时会打 Warn（qa-614 #377），
 		// 让运维知道 License / ExportFile 等预签名下载 URL 浏览器可能解析失败。
@@ -1097,6 +1104,9 @@ func initBackupModule(c *Container) error {
 			presignSigner = pc
 		}
 		backupHandler.SetMinioClient(presignSigner)
+		if c.PresignBridge != nil {
+			backupHandler.SetPresignProvider(c.PresignBridge)
+		}
 	}
 	// M4: device 相关端点（QueryCellInfos / QueryTaskDeviceList / GetProductType）
 	backupHandler.SetDeviceReader(c.DeviceRepo)
@@ -1450,8 +1460,9 @@ func initMiscModules(c *Container) error {
 	// 下载 URL 用 PresignClient（public_endpoint，浏览器可达）；落 reports bucket 的
 	// mml-results/ 独立目录。任一缺失 → 导出端点返回 503。
 	//
-	// TODO(issue #548 切片 2 后续切片)：迁移到 c.PresignBridge.Get() 以支持
-	// sys_configs storage.minio_public_endpoint 热生效（MML 结果 CSV 下载）。
+	// issue #548 切片 4：同时注入 PresignBridge 给 Exporter，sys_configs 写入
+	// storage.minio_public_endpoint 后下一次 presign 立即用新 endpoint，无需重启容器。
+	// 原 exportSignClient（NewPresignClient）作启动期兜底。
 	if c.MinIO != nil {
 		exportSignClient := c.MinIO
 		if pc, perr := minioinfra.NewPresignClient(c.Cfg.MinIO); perr != nil {
@@ -1459,7 +1470,11 @@ func initMiscModules(c *Container) error {
 		} else {
 			exportSignClient = pc
 		}
-		mmlService.SetExporter(mml.NewExporter(c.MinIO, exportSignClient, c.Cfg.MinIO.Buckets.Reports, logger))
+		mmlExporter := mml.NewExporter(c.MinIO, exportSignClient, c.Cfg.MinIO.Buckets.Reports, logger)
+		if c.PresignBridge != nil {
+			mmlExporter.SetSignProvider(c.PresignBridge)
+		}
+		mmlService.SetExporter(mmlExporter)
 	}
 	// T-0090-c：注入 admin RoleRepo 作 RBAC group 派生器，让 ListCustomCommands
 	// 走 group-share 路径（同组管理员可见对方 private 命令）。c.RoleRepo 由 admin
