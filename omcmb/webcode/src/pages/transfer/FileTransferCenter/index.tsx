@@ -1024,7 +1024,7 @@ export default function FileTransferCenter() {
         key: 'progress',
         width: 180,
         render: (value: number, record) => (
-          <Space orientation="vertical" size={4} style={{ width: '100%' }}>
+          <Space direction="vertical" size={4} style={{ width: '100%' }}>
             <Progress percent={value} size="small" status={record.status === 'ended' ? 'success' : 'active'} />
             <Text type="secondary">{t('ufte.col.statsBrief', { ok: record.successCount, fail: record.failCount, total: record.totalCount })}</Text>
           </Space>
@@ -1405,9 +1405,9 @@ export default function FileTransferCenter() {
         )
       )}
     >
-      <Space orientation="vertical" size={16} style={{ width: '100%' }}>
+      <Space direction="vertical" size={16} style={{ width: '100%' }}>
         <Card>
-          <Space orientation="vertical" size={12} style={{ width: '100%' }}>
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
             <Title level={4} style={{ margin: 0 }}>{t('ufte.page.taskCreate')}</Title>
             <Tabs
               activeKey={selectedCategory}
@@ -1448,7 +1448,7 @@ export default function FileTransferCenter() {
                 key: 'tasks',
                 label: t('ufte.tab.taskList'),
                 children: (
-                  <Space orientation="vertical" size={12} style={{ width: '100%' }}>
+                  <Space direction="vertical" size={12} style={{ width: '100%' }}>
                     <Space wrap>
                       <SearchInput
                         allowClear
@@ -1548,7 +1548,7 @@ export default function FileTransferCenter() {
                 key: 'devices',
                 label: t('ufte.tab.deviceList'),
                 children: (
-                  <Space orientation="vertical" size={12} style={{ width: '100%' }}>
+                  <Space direction="vertical" size={12} style={{ width: '100%' }}>
                     <Space wrap>
                       <SearchInput
                         allowClear
@@ -1630,7 +1630,7 @@ export default function FileTransferCenter() {
 
       <Drawer
         title={t('ufte.drawer.newTask')}
-        size={520}
+        width={520}
         open={taskDrawerOpen}
         onClose={() => setTaskDrawerOpen(false)}
         destroyOnHidden
@@ -1675,7 +1675,7 @@ export default function FileTransferCenter() {
                 name="firmwareId"
                 rules={[{ required: true, message: t('ufte.form.firmware.required') }]}
                 extra={(
-                  <Space orientation="vertical" size={0}>
+                  <Space direction="vertical" size={0}>
                     <Text type="secondary">{t('ufte.form.firmwareLibraryHint', { kind: getSoftwareLibraryFileTypeLabel(firmwareLibraryFileType, t) })}</Text>
                     <Space size={12}>
                       {/* 新窗口打开 — 用户在新 tab 上传完关闭即可回原弹窗，表单状态不丢；
@@ -1736,7 +1736,7 @@ export default function FileTransferCenter() {
             </>
           ) : null}
           <Form.Item label={t('ufte.form.deviceSelection')} required>
-            <Space orientation="vertical" size={12} style={{ width: '100%' }}>
+            <Space direction="vertical" size={12} style={{ width: '100%' }}>
               <Space>
                 <Input.Search
                   placeholder={t('ufte.form.deviceSearchPlaceholder')}
@@ -1822,7 +1822,7 @@ export default function FileTransferCenter() {
                 </Space>
               )}
             >
-              <Space orientation="vertical" size={8} style={{ width: '100%' }}>
+              <Space direction="vertical" size={8} style={{ width: '100%' }}>
                 <Text type="secondary">{t('ufte.form.licenseSourceHint')}</Text>
 
                 {drawerSelectedDevices.length === 0 ? (
@@ -1901,7 +1901,7 @@ export default function FileTransferCenter() {
                 </Space>
               )}
             >
-              <Space orientation="vertical" size={8} style={{ width: '100%' }}>
+              <Space direction="vertical" size={8} style={{ width: '100%' }}>
                 <Text type="secondary">{t('ufte.form.configSourceHint')}</Text>
 
                 {drawerSelectedDevices.length === 0 ? (
@@ -2088,13 +2088,13 @@ export default function FileTransferCenter() {
 
       <Drawer
         title={detailTask ? t('ufte.drawer.taskDetailWithName', { name: detailTask.taskName }) : t('ufte.drawer.taskDetail')}
-        size={640}
+        width={640}
         open={detailDrawerOpen}
         onClose={() => { setDetailDrawerOpen(false); setDetailTask(null); }}
         destroyOnHidden
       >
         {detailTask ? (
-          <Space orientation="vertical" size={16} style={{ width: '100%' }}>
+          <Space direction="vertical" size={16} style={{ width: '100%' }}>
             {/* qa-614 c6 #367：标签/内容均单行不换行（fontSize 12 收紧详情区），
                 超长值（任务名称/时间）整行占满（span=2）+ Tooltip 展示全文。 */}
             <Descriptions
@@ -2135,7 +2135,7 @@ export default function FileTransferCenter() {
               </Descriptions.Item>
             </Descriptions>
             <Card title={t('ufte.card.executionProgress')} size="small">
-              <Space orientation="vertical" size={12} style={{ width: '100%' }}>
+              <Space direction="vertical" size={12} style={{ width: '100%' }}>
                 <Progress
                   type="circle"
                   percent={detailTask.progress}
