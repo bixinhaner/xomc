@@ -250,10 +250,26 @@ SET value = EXCLUDED.value, updated_at = NOW()
 // hook 收到的 category 是本次保存的 category 名，回调侧自行判定是否相关。
 type SysConfigSavedHook func(ctx context.Context, category string)
 
+// SysConfigValidator 是 BatchUpsert 提交前 (category, key) 维度的值校验回调。
+// 仅在进程启动 wiring 阶段经 RegisterValidator 注册。校验失败返非 nil error，
+// BatchUpsert 立即中止（整批不落库），错误包 commonerrors.ErrInvalidInput 让
+// handler.HTTPStatusFromError 自动映射成 HTTP 400。
+//
+// 典型用途：minio public_endpoint 等业务语义强的 KV 在 sys_config 通用 KV 模型上
+// 做格式守门（如 host[:port] 无 scheme，issue #548 切片 2 D 后端）。
+type SysConfigValidator func(value string) error
+
+// validatorKey 用 (category, key) 锁定一个 validator。
+type validatorKey struct {
+	Category string
+	Key      string
+}
+
 // SysConfigService provides business logic for system configuration.
 type SysConfigService struct {
-	repo  SysConfigRepository
-	hooks []SysConfigSavedHook
+	repo       SysConfigRepository
+	hooks      []SysConfigSavedHook
+	validators map[validatorKey]SysConfigValidator
 }
 
 // NewSysConfigService creates a new SysConfigService.
@@ -268,6 +284,21 @@ func (s *SysConfigService) RegisterSavedHook(h SysConfigSavedHook) {
 		return
 	}
 	s.hooks = append(s.hooks, h)
+}
+
+// RegisterValidator 注册 (category, key) 的值校验器。仅在进程启动 wiring 阶段调用。
+// 同一 (category, key) 重复注册以后注册的为准（不报错，便于调试期反复注入）。
+// fn 为 nil 等价于"删除"该 key 的校验。
+func (s *SysConfigService) RegisterValidator(category, key string, fn SysConfigValidator) {
+	if s.validators == nil {
+		s.validators = make(map[validatorKey]SysConfigValidator)
+	}
+	k := validatorKey{Category: category, Key: key}
+	if fn == nil {
+		delete(s.validators, k)
+		return
+	}
+	s.validators[k] = fn
 }
 
 // Create creates a new config entry.
@@ -329,15 +360,38 @@ func (s *SysConfigService) Delete(ctx context.Context, id uuid.UUID) error {
 	return s.repo.Delete(ctx, id)
 }
 
-// BatchUpsert 按 PRD config.md §5.2 把整个 category 的 KV 批量写入，commit 成功后
-// 顺序触发已注册的 SysConfigSavedHook（hook 异常被 recover 隔离，不阻塞接口返回）。
+// BatchUpsert 按 PRD config.md §5.2 把整个 category 的 KV 批量写入。
+// 先跑已注册的 SysConfigValidator（任一失败包 ErrInvalidInput → handler 翻 HTTP 400，整批不落库），
+// 再 repo.BatchUpsert，commit 成功后顺序触发 SysConfigSavedHook（hook 异常被 recover 隔离）。
 func (s *SysConfigService) BatchUpsert(ctx context.Context, req BatchUpdateSysConfigRequest) (int, error) {
+	if err := s.runValidators(req.Category, req.Items); err != nil {
+		return 0, err
+	}
 	n, err := s.repo.BatchUpsert(ctx, req.Category, req.Items)
 	if err != nil {
 		return n, err
 	}
 	s.fireSavedHooks(ctx, req.Category)
 	return n, nil
+}
+
+// runValidators 对每个 BatchItem 找 (category, key) 匹配 validator 并执行。
+// 找不到 validator 视作"通用 KV，无需校验"，直接通过。任一失败立即返错（短路）。
+func (s *SysConfigService) runValidators(category string, items []BatchItem) error {
+	if len(s.validators) == 0 {
+		return nil
+	}
+	for _, item := range items {
+		v, ok := s.validators[validatorKey{Category: category, Key: item.Key}]
+		if !ok {
+			continue
+		}
+		if err := v(item.Value); err != nil {
+			// 包 ErrInvalidInput 让 HTTPStatusFromError 映射成 400。
+			return fmt.Errorf("%w: sys_config %s.%s: %v", commonerrors.ErrInvalidInput, category, item.Key, err)
+		}
+	}
+	return nil
 }
 
 // fireSavedHooks 串行调用注册的 SavedHook。单 hook panic 不影响后续 hook 与 caller。

@@ -90,6 +90,15 @@ func Setup(r *gin.Engine, c *Container) error {
 		Depends: []string{"admin"},
 		Init:    func() error { return initMinIOILMModule(c) },
 	})
+	// issue #548 切片 2 · D 后端：MinIO public_endpoint 运行时订阅桥。
+	// 依赖 admin（拿 SysConfigSvc 挂 SavedHook / Validator）。
+	// 消费方（trace / 后续 mml/license/backup）需 Depends 上 minio-presign-bridge
+	// 才能保证 c.PresignBridge 已就绪——misc 模块当前装配 trace，于下方追加该依赖。
+	graph.Add(components.ModuleInitializer{
+		Name:    "minio-presign-bridge",
+		Depends: []string{"admin"},
+		Init:    func() error { return initMinIOPresignBridgeModule(c) },
+	})
 	graph.Add(components.ModuleInitializer{
 		Name:    "log-rotation",
 		Depends: []string{"admin"},
@@ -163,7 +172,7 @@ func Setup(r *gin.Engine, c *Container) error {
 	})
 	graph.Add(components.ModuleInitializer{
 		Name:    "misc",
-		Depends: []string{"task", "admin"},
+		Depends: []string{"task", "admin", "minio-presign-bridge"},
 		Init:    func() error { return initMiscModules(c) },
 	})
 	// T-0098 P1-06：字典加载（4 域 paramModel/indicator/alarm-definition/product）

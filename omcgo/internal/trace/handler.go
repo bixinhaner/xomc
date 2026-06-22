@@ -19,18 +19,35 @@ import (
 	"github.com/omcgo/omcgo/internal/core/response"
 )
 
+// PresignClientProvider 抽象"按需取当前 MinIO 预签名 client"的能力（issue #548 切片 2）。
+// 主线生产实现是 internal/core/components/minio.PresignBridge——sys_configs 写入
+// storage.minio_public_endpoint 时原子替换内部 client，调用方下次 Get() 立刻拿新 endpoint。
+//
+// 抽象在 trace 包内复用 minio.PresignClientProvider 的契约（不引循环依赖：trace → minio 已存在）。
+// 测试可注入 staticPresignProvider 直接 wrap *minio.Client。
+type PresignClientProvider interface {
+	Get() *minio.Client
+}
+
+// staticPresignProvider 把固定的 *minio.Client 包成 PresignClientProvider —— 兼容旧
+// SetMinIO 调用与单元测试直接传 client 的场景。
+type staticPresignProvider struct{ c *minio.Client }
+
+func (s staticPresignProvider) Get() *minio.Client { return s.c }
+
 // Handler trace REST handler。
 //
-// 异步下载（M2-08）依赖一个 MinIO 客户端生成预签名 URL；未注入时端点仍工作但返回的 job
+// 异步下载（M2-08）依赖一个 MinIO 预签名 client 生成预签名 URL；未注入时端点仍工作但返回的 job
 // 不会带 download_url，前端需走代理路径或后续轮询。
 //
-// L-8 修复：presignClient 应当用 PublicEndpoint 配置（minio.NewPresignClient 构造），
-// 否则签出来的 URL host 是 docker 内部名（如 "minio:9000"），浏览器无法解析。
+// L-8 修复：预签名 client 应当用 PublicEndpoint 配置（issue #548 切片 2 进一步改成
+// PresignBridge：sys_configs > env/YAML > 内部 兜底），否则签出来的 URL host 是 docker
+// 内部名（如 "minio:9000"），浏览器无法解析。
 type Handler struct {
-	service       *Service
-	presignClient *minio.Client // 可 nil（M1 兼容 / 无 MinIO 部署）
-	presignTTL    time.Duration
-	logger        *zap.Logger
+	service         *Service
+	presignProvider PresignClientProvider // 可 nil（M1 兼容 / 无 MinIO 部署）
+	presignTTL      time.Duration
+	logger          *zap.Logger
 }
 
 // NewHandler 构造函数。
@@ -45,10 +62,22 @@ func NewHandler(service *Service, logger *zap.Logger) *Handler {
 	}
 }
 
-// SetMinIO 注入 MinIO 预签名客户端（M2-08 异步下载预签名）。
-// 期望传入 minio.NewPresignClient(cfg) 的返回值 — 用 PublicEndpoint 签 URL。
+// SetMinIO 注入固定 *minio.Client 预签名 client（旧路径 / 单测兼容）。
+// 生产路径应改用 SetPresignProvider 注入 PresignBridge——可在 sys_configs
+// 写入后热生效切换 endpoint（issue #548 切片 2）。
 func (h *Handler) SetMinIO(client *minio.Client) {
-	h.presignClient = client
+	if client == nil {
+		h.presignProvider = nil
+		return
+	}
+	h.presignProvider = staticPresignProvider{c: client}
+}
+
+// SetPresignProvider 注入预签名 client 提供方（issue #548 切片 2）。
+// 生产传 minio.PresignBridge：每次签 URL 前 Get() 拿当前 endpoint 的 client，
+// sys_configs 写入新值后 SavedHook 让 bridge 原子替换，调用方无感切换。
+func (h *Handler) SetPresignProvider(p PresignClientProvider) {
+	h.presignProvider = p
 }
 
 // RegisterRoutes 在已含 /api/v1 与权限中间件的 RouterGroup 上挂载。
@@ -343,23 +372,26 @@ func (h *Handler) GetExportJob(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	// done + 有对象 + MinIO 注入 → 生成预签名
-	if job.Status == ExportJobDone && job.ObjectKey != "" && job.ObjectBucket != "" && h.presignClient != nil {
-		task, _ := h.service.GetTask(c.Request.Context(), job.TaskID)
-		fname := exportFilename(task, job)
-		reqParams := url.Values{}
-		reqParams.Set("response-content-disposition", `attachment; filename="`+fname+`"`)
-		// Content-Type 在 Exporter 上传时已经写成 application/octet-stream（见
-		// internal/trace/exporter.go），不要在预签名 URL 上覆盖 — minio-go 客户端
-		// 对 reqParams 的 SigV4 处理与 MinIO server 不完全一致，覆盖后会得到
-		// SignatureDoesNotMatch 403。
-		signed, sErr := h.presignClient.PresignedGetObject(c.Request.Context(),
-			job.ObjectBucket, job.ObjectKey, h.presignTTL, reqParams)
-		if sErr != nil {
-			h.logger.Warn("trace: presign URL failed",
-				zap.String("job_id", job.ID.String()), zap.Error(sErr))
-		} else {
-			job.DownloadURL = signed.String()
+	// done + 有对象 + provider 注入且当前 client 非 nil → 生成预签名
+	if job.Status == ExportJobDone && job.ObjectKey != "" && job.ObjectBucket != "" && h.presignProvider != nil {
+		presignClient := h.presignProvider.Get()
+		if presignClient != nil {
+			task, _ := h.service.GetTask(c.Request.Context(), job.TaskID)
+			fname := exportFilename(task, job)
+			reqParams := url.Values{}
+			reqParams.Set("response-content-disposition", `attachment; filename="`+fname+`"`)
+			// Content-Type 在 Exporter 上传时已经写成 application/octet-stream（见
+			// internal/trace/exporter.go），不要在预签名 URL 上覆盖 — minio-go 客户端
+			// 对 reqParams 的 SigV4 处理与 MinIO server 不完全一致，覆盖后会得到
+			// SignatureDoesNotMatch 403。
+			signed, sErr := presignClient.PresignedGetObject(c.Request.Context(),
+				job.ObjectBucket, job.ObjectKey, h.presignTTL, reqParams)
+			if sErr != nil {
+				h.logger.Warn("trace: presign URL failed",
+					zap.String("job_id", job.ID.String()), zap.Error(sErr))
+			} else {
+				job.DownloadURL = signed.String()
+			}
 		}
 	}
 	response.OK(c, job)

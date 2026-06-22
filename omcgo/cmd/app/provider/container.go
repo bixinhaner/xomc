@@ -18,6 +18,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/carrier"
 	"github.com/omcgo/omcgo/internal/core/components"
+	minioinfra "github.com/omcgo/omcgo/internal/core/components/minio"
 	"github.com/omcgo/omcgo/internal/core/dictloader"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/device"
@@ -107,6 +108,12 @@ type Container struct {
 	SysConfigSvc   *admin.SysConfigService // 提供 RegisterSavedHook 给其他模块挂 cache invalidate
 	SecurityPolicy *admin.SecurityPolicy   // 让其他模块可注册 InvalidateCache hook
 	DictService    *admin.DictionaryService // #241：三库导入 XML 后按 source_table 刷新绑定字典（依赖 admin 模块先初始化）
+
+	// MinIO 预签名 client 运行时订阅桥（issue #548 切片 2 D 后端）。
+	// 由 minio-presign-bridge 模块装配；sys_configs 写入 storage.minio_public_endpoint
+	// 时原子替换内部 client，trace / 后续 mml/license/backup 通过 .Get() 拿当前 client。
+	// 可为 nil（dev/test 路径无 MinIO 部署时），消费方需 nil-safe（如 trace.Handler 的 presignProvider 检查）。
+	PresignBridge *minioinfra.PresignBridge
 
 	// DeviceModule 设置
 	DeviceService  *device.DeviceService

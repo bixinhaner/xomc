@@ -132,6 +132,9 @@ func (h *SysConfigHandler) Delete(c *gin.Context) {
 
 // BatchUpdate 按 category 批量 upsert 一组 (key,value) 配置项 — system/config 页面"保存"用。
 // 参 docs/prd/system/config.md §5.2。
+//
+// validator 校验失败的错误已被 SysConfigService.BatchUpsert 包 ErrInvalidInput，
+// 走 HTTPStatusFromError 自动映射成 HTTP 400（issue #548 切片 2）。
 func (h *SysConfigHandler) BatchUpdate(c *gin.Context) {
 	var req BatchUpdateSysConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -140,7 +143,7 @@ func (h *SysConfigHandler) BatchUpdate(c *gin.Context) {
 	}
 	count, err := h.service.BatchUpsert(c.Request.Context(), req)
 	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
 	response.OKWithMsg(c, gin.H{"updated": count}, "保存成功")

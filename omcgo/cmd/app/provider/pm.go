@@ -95,6 +95,9 @@ func initPMModule(c *Container) error {
 
 	// KPI-EXPORT T1：KPI 数据导出 REST 入口（建任务落表 + 入队 pm_kpi_export job）。
 	// 下载用 presign client（对外可达 host 签链接）；构造失败降级 nil，下载端点返 503。
+	//
+	// TODO(issue #548 切片 2 后续切片)：迁移到 c.PresignBridge.Get() 以支持
+	// sys_configs storage.minio_public_endpoint 热生效（KPI 导出文件下载）。
 	pmExportRepo := pmexport.NewPgRepository(c.PgPool)
 	pmExportSvc := pmexport.NewService(pmExportRepo, pmAsyncJobRepo)
 	var exportPresigner pmexport.Presigner

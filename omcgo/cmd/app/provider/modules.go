@@ -396,6 +396,9 @@ func initUFTEModule(c *Container) error {
 	// `minio:9000`（docker 服务名 / k8s ClusterIP），签出来的 presigned URL 浏览器
 	// 解析不了；NewPresignClient 在 minio.public_endpoint 非空时换成对外可达 host
 	// 重签（如 dev 配置 localhost:9000），空时退化到内部 endpoint。
+	//
+	// TODO(issue #548 切片 2 后续切片)：迁移到 c.PresignBridge.Get() 以支持 sys_configs
+	// 写入 storage.minio_public_endpoint 后热生效，无需重启容器。当前 trace 是 PoC。
 	minioClient := c.MinIO
 	if presignClient, presignErr := minioinfra.NewPresignClient(c.Cfg.MinIO); presignErr != nil {
 		logger.Warn("create MinIO presign client failed; download URLs will use internal endpoint",
@@ -1081,6 +1084,9 @@ func initBackupModule(c *Container) error {
 		// 会报 ERR_NAME_NOT_RESOLVED。PresignClient 用 minio.public_endpoint
 		// 重签为对外可达 host（如 localhost:9000）。
 		// 与 UFTE 模块 SetDownloadURLLookup 同一套逻辑（见上方 line 207-213）。
+		//
+		// TODO(issue #548 切片 2 后续切片)：迁移到 c.PresignBridge.Get() 以支持
+		// sys_configs storage.minio_public_endpoint 热生效（备份 / license 文件下载）。
 		presignSigner := c.MinIO
 		// 传入 logger：public_endpoint 为空回退内部 endpoint 时会打 Warn（qa-614 #377），
 		// 让运维知道 License / ExportFile 等预签名下载 URL 浏览器可能解析失败。
@@ -1443,6 +1449,9 @@ func initMiscModules(c *Container) error {
 	// 结果 CSV 导出：上传用内部 client（c.MinIO，连 docker 内网 minio:9000），
 	// 下载 URL 用 PresignClient（public_endpoint，浏览器可达）；落 reports bucket 的
 	// mml-results/ 独立目录。任一缺失 → 导出端点返回 503。
+	//
+	// TODO(issue #548 切片 2 后续切片)：迁移到 c.PresignBridge.Get() 以支持
+	// sys_configs storage.minio_public_endpoint 热生效（MML 结果 CSV 下载）。
 	if c.MinIO != nil {
 		exportSignClient := c.MinIO
 		if pc, perr := minioinfra.NewPresignClient(c.Cfg.MinIO); perr != nil {
@@ -2023,11 +2032,14 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 	traceSvc.SetMetrics(trace.NewMetrics(c.MetricsReg))
 	c.miscDeps.traceService = traceSvc
 	traceHandler := trace.NewHandler(traceSvc, logger)
-	if c.MinIO != nil {
+	if c.PresignBridge != nil {
+		// issue #548 切片 2：trace 模块作为 PoC 接入 PresignBridge——sys_configs 改
+		// storage.minio_public_endpoint 后无需重启，下一次 GetExportJob 立即用新 endpoint
+		// 重签下载 URL（minio-presign-bridge 模块已注册 SavedHook 触发 SetPublicEndpoint）。
+		traceHandler.SetPresignProvider(c.PresignBridge)
+	} else if c.MinIO != nil {
+		// 兜底（dev/test 路径没装 bridge）：保留旧 NewPresignClient 路径。
 		// L-8：预签名 URL 必须用 PublicEndpoint 签出来浏览器才能直接打开。
-		// c.MinIO 是内部 client（endpoint=minio:9000 / k8s ClusterIP），用它签的
-		// URL host 浏览器解析不了；NewPresignClient 在 PublicEndpoint 非空时切到
-		// 公网 host 重签，空时回退内部 endpoint（保持兼容）。
 		presignClient, err := minioinfra.NewPresignClient(c.Cfg.MinIO)
 		if err != nil {
 			logger.Warn("create MinIO presign client failed, falling back to internal client",
