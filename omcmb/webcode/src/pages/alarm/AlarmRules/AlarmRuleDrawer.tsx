@@ -252,7 +252,15 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
     page: 1,
     pageSize: 100,
   });
-  const selectedDeviceQueries = useDevicesByIds(selectedDevices);
+  const loadedDeviceIds = useMemo(
+    () => new Set((deviceData?.items || []).map((device) => device.id)),
+    [deviceData]
+  );
+  const missingSelectedDeviceIds = useMemo(
+    () => selectedDevices.filter((deviceId) => !loadedDeviceIds.has(deviceId)),
+    [selectedDevices, loadedDeviceIds]
+  );
+  const selectedDeviceQueries = useDevicesByIds(missingSelectedDeviceIds);
 
   // 获取设备组列表
   const { data: groupsData, isLoading: groupsLoading } = useDeviceGroups();
@@ -281,16 +289,14 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
     [selectedDeviceQueries]
   );
 
-  const selectedDeviceLoading = selectedDeviceQueries.some((query) => query.isLoading);
-
   const devicesWithType: DeviceWithType[] = useMemo(() => {
     const deviceMap = new Map<string, DeviceWithType>();
 
-    selectedDeviceRecords.forEach((device) => {
+    (deviceData?.items || []).forEach((device) => {
       deviceMap.set(device.id, attachDeviceType(device));
     });
 
-    (deviceData?.items || []).forEach((device) => {
+    selectedDeviceRecords.forEach((device) => {
       if (!deviceMap.has(device.id)) {
         deviceMap.set(device.id, attachDeviceType(device));
       }
@@ -365,9 +371,8 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
       );
     }
 
-    const selectedDeviceSet = new Set(selectedDevices);
-    return sortSelectedFirst(result, (device) => selectedDeviceSet.has(device.id));
-  }, [devicesWithType, deviceFilter, selectedDevices]);
+    return result;
+  }, [devicesWithType, deviceFilter]);
 
   // 初始化表单数据
   useEffect(() => {
@@ -753,7 +758,7 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
                   dataSource={filteredDevices}
                   rowKey="id"
                   size="small"
-                  loading={deviceLoading || selectedDeviceLoading}
+                  loading={deviceLoading}
                   pagination={{ pageSize: 5, size: 'small', showSizeChanger: false }}
                   scroll={{ y: 180 }}
                 />
