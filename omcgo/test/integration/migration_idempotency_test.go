@@ -36,19 +36,27 @@ type publicInsert struct {
 
 var (
 	insertStartRe = regexp.MustCompile(`^\s*INSERT INTO public\.(\w+)\s`)
-	// onConflictEndRe 匹配已加固语句的终止行：独立成行的 `ON CONFLICT ... DO NOTHING;`。
+	// onConflictEndRe 匹配已加固语句的"独立成行"形态：`    ON CONFLICT ... DO NOTHING;`
+	// 单独占一行（pg_dump 重排或手写多行 INSERT 时出现）。
 	onConflictEndRe = regexp.MustCompile(`(?i)^\s*ON CONFLICT\b.*\bDO NOTHING\s*;\s*$`)
-	// rowEndRe 匹配未加固语句的 pg_dump 行末 `);`（最后一行数据行直接收尾的情况）。
+	// inlineOnConflictEndRe 匹配已加固语句的"内联"形态：最后一行数据行以
+	// `) ON CONFLICT ... DO NOTHING;` 收尾——seed baseline 由 PR #51 加固时
+	// 直接把 ON CONFLICT DO NOTHING 追加到 pg_dump 输出的末行尾部，与
+	// 独立成行形态语义等价、均触发幂等冲突静默跳过。
+	inlineOnConflictEndRe = regexp.MustCompile(`(?i)\)\s+ON CONFLICT\b.*\bDO NOTHING\s*;\s*$`)
+	// rowEndRe 匹配未加固语句的 pg_dump 行末 `);`（最后一行数据行直接收尾且未追加 ON CONFLICT）。
+	// 注意：内联形态的行末是 `... DO NOTHING;`，被 inlineOnConflictEndRe 捕获、不会落到这里。
 	rowEndRe = regexp.MustCompile(`\);\s*$`)
 )
 
 // parsePublicInserts 扫描 seed 文件，提取所有 INSERT INTO public.* 语句。
-// 每条语句从 `INSERT INTO public.X` 行起；终止行为以下两者之一（取先命中者）：
-//   - 独立成行的 `ON CONFLICT ... DO NOTHING;`（已加固语句，幂等）；
-//   - pg_dump 的行末 `);`（未加固语句的最后一行数据行）。
+// 每条语句从 `INSERT INTO public.X` 行起；终止行为以下三者之一（按优先级取先命中者）：
+//   - 内联形态：数据行末尾直接带 `) ON CONFLICT ... DO NOTHING;`（已加固，幂等）；
+//   - 独立成行：`    ON CONFLICT ... DO NOTHING;` 单独占一行（已加固，幂等）；
+//   - pg_dump 行末 `);`（未加固语句的最后一行数据行）。
 //
-// 末行数据行以 `)` 结尾（无分号）后接 ON CONFLICT 终止行的形态由前者捕获，
-// 故先判 onConflictEndRe、再判 rowEndRe。
+// 顺序很关键：先判内联，再判独立行，最后才认未加固的 `);`，否则会把内联结尾
+// 误判成"找不到终止行"而把整个文件吃成一条 INSERT。
 func parsePublicInserts(t *testing.T) []publicInsert {
 	t.Helper()
 
@@ -69,6 +77,12 @@ func parsePublicInserts(t *testing.T) []publicInsert {
 		end := i
 		hasOnConf := false
 		for end < len(lines) {
+			// 内联形态优先：行末为 `) ON CONFLICT ... DO NOTHING;`。
+			if inlineOnConflictEndRe.MatchString(lines[end]) {
+				hasOnConf = true
+				break
+			}
+			// 独立成行形态：整行就是 `ON CONFLICT ... DO NOTHING;`。
 			if onConflictEndRe.MatchString(lines[end]) {
 				hasOnConf = true
 				break
