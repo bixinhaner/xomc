@@ -23,6 +23,8 @@ export interface IndicatorInfo {
   operatorCode?: string;
   isEnabled?: boolean;
   deviceType: DeviceType;
+  // 内置指标判定（后端 is_build_in === '1'）：编辑时「归属分组」只读（XML 真相源覆盖）。
+  isBuildIn?: boolean;
 }
 
 export interface IndicatorListFilter {
@@ -45,6 +47,8 @@ export interface IndicatorGroup {
   description?: string;
   operatorCode?: string;
   deviceType: DeviceType;
+  // 内置组判定（后端 is_build_in === '1'）：内置组禁删、禁编辑。
+  isBuildIn?: boolean;
   children?: IndicatorGroup[];
 }
 
@@ -67,9 +71,24 @@ export interface CreateIndicatorInput {
   description?: string;
   productClass?: string;
   operatorCode?: string;
+  // 后端 CreateIndicatorRequest 直收字段（model.go）：data_type / statis_type /
+  // arithmetic / is_counter（'0'|'1' 字符串，与 mapIndicator 归一化一致）/
+  // en_description / cn_description。
+  dataType?: string;
+  statisType?: string;
+  arithmetic?: string;
+  isCounter?: string;
+  enDescription?: string;
+  cnDescription?: string;
+  // 详情态（URL ?platform= 锁定）新建必须把当前 platform 透传给后端，否则
+  // perf_formulas_<dt> 无关联行 → 列表 EXISTS 过滤会把刚建的指标过滤掉，
+  // 表现为“保存成功但查不到”。列表态（主页全局新建）不传，保持原行为。
+  platform?: string;
 }
 
-export type UpdateIndicatorInput = Partial<Omit<CreateIndicatorInput, 'id'>>;
+// platform 仅 Create 路径有意义（创建时同事务写占位 formula）；后端
+// UpdateIndicatorRequest 无 Platform 字段，update 不能也不应携带 platform。
+export type UpdateIndicatorInput = Partial<Omit<CreateIndicatorInput, 'id' | 'platform'>>;
 
 export interface CreateGroupInput {
   id: string;

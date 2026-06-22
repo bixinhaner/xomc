@@ -8,12 +8,28 @@ import {
   ChevronRight,
   RefreshCcw,
   Activity,
+  FolderCog,
+  Plus,
+  Pencil,
+  Trash2,
+  AlertTriangle,
+  X,
 } from 'lucide-react'
 
 import { PageShell } from '@/components/shell/PageShell'
+import { GlassPanel } from '@/components/ui/GlassPanel'
 import { NeonButton } from '@/components/ui/NeonButton'
 import { StatusBadge } from '@/components/ui/StatusBadge'
-import { useIndicatorSummary, useIndicatorList } from '@core/hooks/api/useIndicatorsLibrary'
+import { useT } from '@/hooks/useT'
+import {
+  useIndicatorSummary,
+  useIndicatorList,
+  useDeleteIndicator,
+  useEnabledIndicators,
+  useSetEnabledIndicators,
+} from '@core/hooks/api/useIndicatorsLibrary'
+import GroupsManageModal from './GroupsManageModal'
+import IndicatorFormModal from './IndicatorFormModal'
 import type {
   DeviceType,
   TechLower,
@@ -21,6 +37,9 @@ import type {
   IndicatorInfo,
 } from '@core/types/indicatorLibrary'
 import { techToDeviceType } from '@core/types/indicatorLibrary'
+
+// 启用状态走 default 行（XML 真相源；运营商覆盖能力后端保留但 UI 不暴露选择器）。
+const OPERATOR_CODE = 'default'
 
 const VALID_TECHS: TechLower[] = ['enb', 'gsm', 'gnb']
 
@@ -200,10 +219,20 @@ function IndicatorsView({
   platform: string
   onBack: () => void
 }) {
+  const t = useT()
   const deviceType: DeviceType = techToDeviceType(tech)
   const [draft, setDraft] = useState('')
   const [keyword, setKeyword] = useState('')
   const [page, setPage] = useState(1)
+  const [groupsOpen, setGroupsOpen] = useState(false)
+  // 新建/编辑指标浮层:undefined=关闭;null=新建;有值=编辑该行。
+  const [formOpen, setFormOpen] = useState(false)
+  const [editing, setEditing] = useState<IndicatorInfo | null>(null)
+  // 待删除指标(手写二次确认浮层,v3 无 Popconfirm)。
+  const [pendingDelete, setPendingDelete] = useState<IndicatorInfo | null>(null)
+  // 启用开关 inflight 行 id(单行 loading 态)。
+  const [pendingEnableId, setPendingEnableId] = useState<string | null>(null)
+  const [banner, setBanner] = useState<string | null>(null)
 
   const { data, isLoading, isError, error, isFetching } = useIndicatorList(deviceType, {
     keyword: keyword || undefined,
@@ -211,8 +240,12 @@ function IndicatorsView({
     page,
     pageSize: PAGE_SIZE,
   })
+  const { data: enabledData } = useEnabledIndicators(deviceType, OPERATOR_CODE)
+  const setEnabledMut = useSetEnabledIndicators()
+  const deleteMut = useDeleteIndicator()
 
   const rows = useMemo<IndicatorInfo[]>(() => data?.items ?? [], [data])
+  const enabledSet = useMemo(() => new Set(enabledData?.items ?? []), [enabledData])
   const total = data?.total ?? 0
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const isGnb = deviceType === 'GNB'
@@ -222,9 +255,42 @@ function IndicatorsView({
     setPage(1)
   }
 
+  const openCreate = () => {
+    setEditing(null)
+    setFormOpen(true)
+  }
+  const openEdit = (ind: IndicatorInfo) => {
+    setEditing(ind)
+    setFormOpen(true)
+  }
+
+  const toggleEnable = (id: string, enable: boolean) => {
+    setPendingEnableId(id)
+    setEnabledMut.mutate(
+      { deviceType, operatorCode: OPERATOR_CODE, indicatorIds: [id], enable },
+      {
+        onSettled: () => setPendingEnableId(null),
+        onError: (e) => setBanner(e instanceof Error ? e.message : String(e)),
+      },
+    )
+  }
+
+  const confirmDelete = async () => {
+    if (!pendingDelete) return
+    try {
+      await deleteMut.mutateAsync({ deviceType, id: pendingDelete.id })
+      setBanner(t('product.kpi.indicator.deleteSuccess'))
+      setPendingDelete(null)
+    } catch (e) {
+      setBanner(e instanceof Error ? e.message : String(e))
+      setPendingDelete(null)
+    }
+  }
+
+  // 列布局:增 ENABLE + ACTIONS 两列(ENB 多一个 LEVEL 列)。
   const cols = isGnb
-    ? 'grid-cols-[1.1fr_1.4fr_1.8fr_1fr_0.9fr]'
-    : 'grid-cols-[1.1fr_1.4fr_1.6fr_1fr_0.7fr_0.9fr]'
+    ? 'grid-cols-[1.1fr_1.3fr_1.5fr_1fr_0.6fr_0.7fr_150px]'
+    : 'grid-cols-[1.1fr_1.3fr_1.4fr_1fr_0.6fr_0.6fr_0.7fr_150px]'
 
   return (
     <PageShell
@@ -253,9 +319,43 @@ function IndicatorsView({
           <NeonButton icon={<Search />} onClick={applySearch}>
             SEARCH
           </NeonButton>
+          <NeonButton icon={<Plus />} onClick={openCreate}>
+            {t('product.kpi.indicator.newIndicator')}
+          </NeonButton>
+          <NeonButton icon={<FolderCog />} onClick={() => setGroupsOpen(true)}>
+            {t('product.kpi.group.manage')}
+          </NeonButton>
         </>
       }
     >
+      <GroupsManageModal
+        open={groupsOpen}
+        onClose={() => setGroupsOpen(false)}
+        deviceType={deviceType}
+      />
+      <IndicatorFormModal
+        open={formOpen}
+        onClose={() => setFormOpen(false)}
+        deviceType={deviceType}
+        operatorCode={OPERATOR_CODE}
+        // 二级详情态由 URL ?platform= 锁定,新建时透传 → 后端同事务写占位 formula,
+        // 避免详情列表 platform_name EXISTS 过滤把刚建的指标过滤掉。
+        platform={platform}
+        indicator={editing}
+      />
+      {banner ? (
+        <div className="mb-2 flex items-center justify-between rounded-sm border border-cyan-500/20 bg-cyan-500/5 px-3 py-1.5">
+          <span className="font-mono text-[11px] text-emerald-300/85">{banner}</span>
+          <button
+            type="button"
+            onClick={() => setBanner(null)}
+            aria-label="dismiss"
+            className="text-cyan-300/50 hover:text-cyan-200"
+          >
+            <X className="size-3.5" />
+          </button>
+        </div>
+      ) : null}
       {rows.length > 0 && (
         <div className={`mb-1 grid ${cols} items-center gap-3 px-3 font-mono text-[10px] uppercase tracking-[0.16em] text-cyan-300/45`}>
           <span>ID</span>
@@ -264,6 +364,8 @@ function IndicatorsView({
           <span>GROUP</span>
           {!isGnb && <span>LEVEL</span>}
           <span className="text-right">TYPE</span>
+          <span className="text-center">{t('common.enable')}</span>
+          <span className="text-right">{t('common.operation')}</span>
         </div>
       )}
 
@@ -305,10 +407,102 @@ function IndicatorsView({
                   className="scale-90"
                 />
               </div>
+              {/* 启用开关 */}
+              <div className="flex justify-center">
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={enabledSet.has(ind.id)}
+                  disabled={pendingEnableId === ind.id}
+                  title={enabledSet.has(ind.id) ? t('common.disable') : t('common.enable')}
+                  onClick={() => toggleEnable(ind.id, !enabledSet.has(ind.id))}
+                  className={
+                    'relative h-4 w-8 shrink-0 rounded-full border transition-colors disabled:opacity-50 ' +
+                    (enabledSet.has(ind.id)
+                      ? 'border-cyan-400/70 bg-cyan-500/30'
+                      : 'border-cyan-500/25 bg-cyan-950/40')
+                  }
+                >
+                  {pendingEnableId === ind.id ? (
+                    <Loader2 className="absolute left-1/2 top-1/2 size-2.5 -translate-x-1/2 -translate-y-1/2 animate-spin text-cyan-200" />
+                  ) : (
+                    <span
+                      className={
+                        'absolute top-0.5 size-3 rounded-full bg-cyan-200 transition-all ' +
+                        (enabledSet.has(ind.id) ? 'left-4 shadow-[0_0_5px_#00f0ff]' : 'left-0.5')
+                      }
+                    />
+                  )}
+                </button>
+              </div>
+              {/* 操作:编辑 / 删除 */}
+              <div className="flex justify-end gap-1.5">
+                <NeonButton icon={<Pencil />} onClick={() => openEdit(ind)}>
+                  {t('common.edit')}
+                </NeonButton>
+                <NeonButton
+                  tone="danger"
+                  icon={<Trash2 />}
+                  disabled={deleteMut.isPending}
+                  onClick={() => setPendingDelete(ind)}
+                >
+                  {t('common.delete')}
+                </NeonButton>
+              </div>
             </div>
           ))
         )}
       </div>
+
+      {/* 删除二次确认浮层(v3 无 Popconfirm,手写) */}
+      {pendingDelete ? (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-[#02040a]/72 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setPendingDelete(null)
+          }}
+        >
+          <GlassPanel strong className="warp-in overflow-hidden" style={{ width: 460 }}>
+            <div className="flex items-center justify-between border-b border-cyan-500/15 px-4 py-3">
+              <div className="font-display text-base text-cyan-100">{t('common.delete')}</div>
+              <button
+                type="button"
+                onClick={() => setPendingDelete(null)}
+                aria-label="close"
+                className="rounded-sm border border-cyan-500/25 p-1 text-cyan-300/60 transition-colors hover:border-cyan-400/60 hover:bg-cyan-500/10 hover:text-cyan-200"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+            <div className="flex items-start gap-3 px-4 py-4">
+              <AlertTriangle className="mt-0.5 size-5 shrink-0 text-amber-300" />
+              <div className="space-y-1">
+                <div className="text-sm text-cyan-100">
+                  {pendingDelete.cnName || pendingDelete.name || pendingDelete.id}
+                </div>
+                <div className="font-mono text-xs text-cyan-300/70">
+                  {t('product.kpi.confirmDeleteIndicator', { id: pendingDelete.id })}
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 border-t border-cyan-500/15 px-4 py-3">
+              <NeonButton onClick={() => setPendingDelete(null)} disabled={deleteMut.isPending}>
+                {t('common.cancel')}
+              </NeonButton>
+              <NeonButton
+                tone="danger"
+                onClick={() => void confirmDelete()}
+                disabled={deleteMut.isPending}
+              >
+                {deleteMut.isPending ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                {t('common.yes')}
+              </NeonButton>
+            </div>
+          </GlassPanel>
+        </div>
+      ) : null}
 
       <div className="mt-4 flex items-center justify-between">
         <span className="font-mono text-[11px] text-cyan-300/55">

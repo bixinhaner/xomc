@@ -13,7 +13,7 @@
  *     表明 IndicatorDrawer 内含公式 CRUD 支持修改
  */
 import { useEffect, useMemo, useState } from 'react';
-import { Card, Table, Switch, Button, Tag, message } from 'antd';
+import { Card, Table, Switch, Button, Tag, Tooltip, message } from 'antd';
 import { EditOutlined } from '@ant-design/icons';
 import {
   useIndicatorList,
@@ -114,16 +114,19 @@ export default function IndicatorsByTech({ deviceType, filter }: Props) {
     },
     {
       title: t('common.action'),
-      width: 90,
+      width: 130,
       render: (_: unknown, row: IndicatorInfo) => (
-        <Button
-          size="small"
-          icon={<EditOutlined />}
-          onClick={() => {
-            setSelected(row);
-            setDrawerOpen(true);
-          }}
-        />
+        // 单一入口:详情抽屉(含基础信息编辑 + 全平台公式 CRUD)。Issue #535 收口,去掉第二个编辑按钮。
+        <Tooltip title={t('common.detail')}>
+          <Button
+            size="small"
+            icon={<EditOutlined />}
+            onClick={() => {
+              setSelected(row);
+              setDrawerOpen(true);
+            }}
+          />
+        </Tooltip>
       ),
     },
   ];

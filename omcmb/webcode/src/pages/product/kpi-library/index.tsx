@@ -11,19 +11,22 @@
  *
  * URL 状态:?tech=enb&platform=ALL — F5 留二级 + 平台粒度
  */
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Card, Button, Space, Select } from 'antd';
+import { Card, Button, Space } from 'antd';
 import {
   ArrowLeftOutlined,
   InboxOutlined,
+  PlusOutlined,
 } from '@ant-design/icons';
-import { useIndicatorGroups } from '@core/hooks/api/useIndicatorsLibrary';
 import type { DeviceType, TechLower } from '@core/types/indicatorLibrary';
 import { techToDeviceType } from '@core/types/indicatorLibrary';
 import SummaryTab from './SummaryTab';
 import IndicatorsByTech from './IndicatorsByTech';
 import UploadXmlModal from './UploadXmlModal';
+import GroupsManageModal from './GroupsManageModal';
+import IndicatorFormModal from './IndicatorFormModal';
+import GroupTreeSelect from './GroupTreeSelect';
 import SearchInput from '@/components/SearchInput';
 import { useT } from '@/hooks/useT';
 
@@ -86,29 +89,16 @@ export default function KpiLibraryPage() {
 
   // ── 公共状态 ────────────────────────────────────────────────
   const [uploadOpen, setUploadOpen] = useState(false);
+  // Issue #525:指标分组(功能集)维护 Modal(仅详情态工具栏可开)
+  const [groupsOpen, setGroupsOpen] = useState(false);
+  // Issue #535:指标新建 Modal(详情态工具栏「新建指标」打开 create 模式)
+  const [createOpen, setCreateOpen] = useState(false);
   // 2026-06-03:一级 SummaryTab 搜索上提到 toolbar(与「导入 XML」同行)
   const [summaryQuery, setSummaryQuery] = useState('');
 
-  // 2026-05-29 详情态分组筛选数据源 — 平台过滤,只显示当前 platform 涉及的分组,
-  // 避免下拉里 23 个 group 中 ~16 个选了返空。selectedPlatform 不存在(列表态)时
-  // 传 undefined → 后端返全量 23 个,本组件也不会用到(只渲在详情态)。
-  const { data: groupData } = useIndicatorGroups(
-    selectedDeviceType ?? 'ENB',
-    OPERATOR_CODE,
-    selectedPlatform || undefined,
-  );
-  const groupOptions = useMemo(() => {
-    if (!selectedDeviceType) return [];
-    const flat: { label: string; value: string }[] = [];
-    const walk = (nodes: { id: string; name: string; children?: typeof nodes }[] | undefined) => {
-      (nodes || []).forEach((n) => {
-        flat.push({ label: n.name || n.id, value: n.id });
-        if (n.children) walk(n.children);
-      });
-    };
-    walk(groupData?.items as never);
-    return flat;
-  }, [groupData, selectedDeviceType]);
+  // 2026-06-22:分组筛选改用 GroupTreeSelect(真·树形,可展开收起),
+  // 数据源 useIndicatorGroups 内移到组件里,platform 过滤(只显示当前 platform 涉及
+  // 的分组,避免下拉里 23 个 group 中 ~16 个选了返空)经 GroupTreeSelect props 透传。
 
   // 全局操作按钮(列表态 toolbar 右侧)。
   // 2026-06-03 用户决策:合并「导入 XML / 重载 XML / 刷新缓存」为单个「导入 XML」—
@@ -145,16 +135,28 @@ export default function KpiLibraryPage() {
                   style={{ width: 320 }}
                   enterButton
                 />
-                <Select
-                  placeholder={t('product.kpi.groupFilterPh')}
-                  allowClear
-                  value={detailGroupId}
-                  onChange={(v) => setDetailGroupId(v)}
-                  options={groupOptions}
-                  style={{ width: 180 }}
-                  showSearch
-                  optionFilterProp="label"
-                />
+                {selectedDeviceType ? (
+                  <GroupTreeSelect
+                    deviceType={selectedDeviceType}
+                    operatorCode={OPERATOR_CODE}
+                    platform={selectedPlatform || undefined}
+                    value={detailGroupId}
+                    onChange={(v) => setDetailGroupId(v)}
+                    placeholder={t('product.kpi.groupFilterPh')}
+                    allowClear
+                    style={{ width: 220 }}
+                  />
+                ) : null}
+                <Button onClick={() => setGroupsOpen(true)}>
+                  {t('product.kpi.group.manage')}
+                </Button>
+                <Button
+                  type="primary"
+                  icon={<PlusOutlined />}
+                  onClick={() => setCreateOpen(true)}
+                >
+                  {t('product.kpi.indicator.newIndicator')}
+                </Button>
               </Space>
             </>
           ) : (
@@ -189,6 +191,26 @@ export default function KpiLibraryPage() {
 
       {/* 抽屉与弹窗 */}
       <UploadXmlModal open={uploadOpen} onClose={() => setUploadOpen(false)} />
+      {selectedDeviceType && (
+        <GroupsManageModal
+          open={groupsOpen}
+          onClose={() => setGroupsOpen(false)}
+          deviceType={selectedDeviceType}
+          operatorCode={OPERATOR_CODE}
+        />
+      )}
+      {selectedDeviceType && (
+        <IndicatorFormModal
+          open={createOpen}
+          onClose={() => setCreateOpen(false)}
+          deviceType={selectedDeviceType}
+          operatorCode={OPERATOR_CODE}
+          // 详情态(selectedPlatform 非空)时透传→后端同事务写占位 formula；
+          // 列表态不传（不写公式，保持向后兼容行为）。
+          platform={selectedPlatform || undefined}
+          indicator={null}
+        />
+      )}
     </div>
   );
 }

@@ -98,6 +98,17 @@ export const indicatorLibraryService = {
       deviceType,
     };
     indicators[deviceType].push(created);
+    // 详情态 platform 注入 → mock 同步写一行占位公式，保持与后端行为一致
+    // （否则前端 mock 模式下也会复现“保存成功但查不到”）。
+    if (input.platform) {
+      const arr = formulas[input.id] || [];
+      arr.push({
+        platformName: input.platform,
+        indicatorId: input.id,
+        formula: input.arithmetic ?? '',
+      });
+      formulas[input.id] = arr;
+    }
     return clone(created);
   },
 

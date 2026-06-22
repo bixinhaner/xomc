@@ -245,6 +245,20 @@ func (s *IndicatorManagementService) CreateIndicator(ctx context.Context, req *C
 		return nil, fmt.Errorf("create indicator: %w", err)
 	}
 
+	// Platform 非空 → 同事务内向 perf_formulas_<dt> 写一行占位(Formula=Arithmetic,允许空),
+	// 否则详情态(?platform=)的 EXISTS 过滤会把新建的指标过滤掉,看起来"保存成功但查不到"。
+	// 列表态(主页全局新建,未锁 platform)走 req.Platform=="" 分支,保持原行为不写公式。
+	if req.Platform != "" {
+		formula := &PlatformFormula{
+			PlatformName: req.Platform,
+			IndicatorID:  id,
+			Formula:      req.Arithmetic,
+		}
+		if err := s.platformRepo.BatchCreate(ctx, dt, []*PlatformFormula{formula}, tx); err != nil {
+			return nil, fmt.Errorf("create platform formula placeholder: %w", err)
+		}
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit create indicator: %w", err)
 	}

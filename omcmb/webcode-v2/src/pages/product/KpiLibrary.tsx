@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { RefreshCcw, Search, X } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
+import { Layers, RefreshCcw, Search, X } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -22,7 +22,13 @@ import {
 } from '@/components/layout/PageShell'
 
 import { useIndicatorSummary } from '@core/hooks/api/useIndicatorsLibrary'
+import type { DeviceType } from '@core/types/indicatorLibrary'
 import type { IndicatorPlatformSummary, TechLower } from '@core/types/indicatorLibrary'
+
+import { useT } from '@/hooks/useT'
+
+import { KpiGroupsDialog } from './KpiGroupsDialog'
+import { KpiIndicatorsDetail } from './KpiIndicatorsDetail'
 
 // ============================================================
 // KPI 指标库 — 对照 v1 webcode/src/pages/product/kpi-library SummaryTab。
@@ -35,16 +41,48 @@ const TECH_LABEL: Record<TechLower, string> = {
   gnb: 'GNB (5G NR)',
 }
 
+// TechLower(平台行制式) → DeviceType(分组维护用)。
+const TECH_TO_DEVICE: Record<TechLower, DeviceType> = {
+  enb: 'ENB',
+  gsm: 'GSM',
+  gnb: 'GNB',
+}
+
 function basename(path: string): string {
   if (!path) return '—'
   return path.split('/').pop() || path
 }
 
 export function KpiLibraryPage() {
-  const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const t = useT()
   const [keyword, setKeyword] = useState('')
+  const [groupsOpen, setGroupsOpen] = useState(false)
 
   const { data, isLoading, isError, error, isFetching, refetch } = useIndicatorSummary()
+
+  // drill-down：URL ?tech=&platform= 即进二级指标详情视图（可分享/可后退）。
+  const techParam = searchParams.get('tech') as TechLower | null
+  const platformParam = searchParams.get('platform')
+  const detailTech: TechLower | null =
+    techParam && techParam in TECH_TO_DEVICE ? techParam : null
+
+  const openDetail = (tech: TechLower, platform: string) => {
+    const next = new URLSearchParams(searchParams)
+    next.set('tech', tech)
+    next.set('platform', platform)
+    setSearchParams(next)
+  }
+
+  const backToSummary = () => {
+    const next = new URLSearchParams(searchParams)
+    next.delete('tech')
+    next.delete('platform')
+    setSearchParams(next)
+  }
+
+  // 一级列表无选中行，按首行制式推断分组维护的默认制式（弹窗内仍可切换）。
+  const defaultDeviceType: DeviceType = TECH_TO_DEVICE[data?.items?.[0]?.tech ?? 'enb'] ?? 'ENB'
 
   const items = useMemo(() => {
     const raw = data?.items ?? []
@@ -56,6 +94,17 @@ export function KpiLibraryPage() {
   }, [data, keyword])
 
   const colCount = 5
+
+  // drill-down 早返回必须放在所有 hook 之后(否则详情态少调 useMemo → "Rendered fewer hooks")。
+  if (detailTech && platformParam) {
+    return (
+      <KpiIndicatorsDetail
+        deviceType={TECH_TO_DEVICE[detailTech]}
+        platform={platformParam}
+        onBack={backToSummary}
+      />
+    )
+  }
 
   return (
     <PageShell
@@ -78,7 +127,10 @@ export function KpiLibraryPage() {
               <X className="size-4" /> 重置
             </Button>
           )}
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => setGroupsOpen(true)}>
+              <Layers className="size-4" /> {t('product.kpi.group.manage')}
+            </Button>
             <Button variant="outline" size="sm" onClick={() => void refetch()}>
               <RefreshCcw className="size-4" /> 刷新
             </Button>
@@ -108,22 +160,32 @@ export function KpiLibraryPage() {
               </EmptyRow>
             ) : (
               items.map((row) => (
-                <SummaryRow key={`${row.tech}__${row.platform}`} row={row} navigate={navigate} />
+                <SummaryRow
+                  key={`${row.tech}__${row.platform}`}
+                  row={row}
+                  onOpen={openDetail}
+                />
               ))
             )}
           </TableBody>
         </Table>
       </TableCard>
+
+      <KpiGroupsDialog
+        open={groupsOpen}
+        onClose={() => setGroupsOpen(false)}
+        initialDeviceType={defaultDeviceType}
+      />
     </PageShell>
   )
 }
 
 function SummaryRow({
   row,
-  navigate,
+  onOpen,
 }: {
   row: IndicatorPlatformSummary
-  navigate: ReturnType<typeof useNavigate>
+  onOpen: (tech: TechLower, platform: string) => void
 }) {
   return (
     <TableRow>
@@ -134,9 +196,7 @@ function SummaryRow({
         <button
           type="button"
           className="font-medium text-primary hover:underline"
-          onClick={() =>
-            navigate(`/product/kpi-library`)
-          }
+          onClick={() => onOpen(row.tech, row.platform)}
         >
           {row.platform}
         </button>

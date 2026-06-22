@@ -21,6 +21,7 @@ import {
 } from '@core/hooks/api/useIndicatorsLibrary';
 import type { DeviceType, IndicatorInfo, PlatformFormula } from '@core/types/indicatorLibrary';
 import { useT } from '@/hooks/useT';
+import IndicatorFormModal from './IndicatorFormModal';
 
 interface Props {
   open: boolean;
@@ -45,6 +46,8 @@ export default function IndicatorDrawer({ open, deviceType, indicator, enabled, 
 
   const [editing, setEditing] = useState<PlatformFormula | null>(null);
   const [creating, setCreating] = useState(false);
+  // Issue #535 收口:把「编辑基础信息」并进详情抽屉,列表操作列不再有第二个编辑按钮。
+  const [editBasicOpen, setEditBasicOpen] = useState(false);
   const [form] = Form.useForm<FormulaFormValues>();
 
   const formulas = formulasData?.items || [];
@@ -121,6 +124,7 @@ export default function IndicatorDrawer({ open, deviceType, indicator, enabled, 
   };
 
   return (
+    <>
     <Drawer
       title={indicator ? t('product.kpi.indicatorDetailFull', { id: indicator.id, name: indicator.cnName || indicator.name }) : t('product.kpi.indicatorDetail')}
       placement="right"
@@ -128,6 +132,13 @@ export default function IndicatorDrawer({ open, deviceType, indicator, enabled, 
       open={open}
       onClose={onClose}
       destroyOnHidden
+      extra={
+        indicator ? (
+          <Button icon={<EditOutlined />} onClick={() => setEditBasicOpen(true)}>
+            {t('common.edit')}
+          </Button>
+        ) : null
+      }
     >
       {!indicator ? (
         <Empty />
@@ -218,5 +229,12 @@ export default function IndicatorDrawer({ open, deviceType, indicator, enabled, 
         </>
       )}
     </Drawer>
+    <IndicatorFormModal
+      open={editBasicOpen}
+      deviceType={deviceType}
+      indicator={indicator}
+      onClose={() => setEditBasicOpen(false)}
+    />
+    </>
   );
 }

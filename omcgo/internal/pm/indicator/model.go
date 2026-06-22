@@ -81,14 +81,14 @@ type IndicatorGroup struct {
 }
 
 type PerfIndicator struct {
-	ID                string    `json:"id"`
-	EnName            string    `json:"en_name"`
-	CnName            *string   `json:"cn_name,omitempty"`
-	EnDescription     *string   `json:"en_description,omitempty"`
-	CnDescription     *string   `json:"cn_description,omitempty"`
-	GroupID           string    `json:"group_id"`
-	OperatorCode      *string   `json:"operator_code,omitempty"`
-	DataType          *string   `json:"data_type,omitempty"`
+	ID            string  `json:"id"`
+	EnName        string  `json:"en_name"`
+	CnName        *string `json:"cn_name,omitempty"`
+	EnDescription *string `json:"en_description,omitempty"`
+	CnDescription *string `json:"cn_description,omitempty"`
+	GroupID       string  `json:"group_id"`
+	OperatorCode  *string `json:"operator_code,omitempty"`
+	DataType      *string `json:"data_type,omitempty"`
 	// DataTypeLabel 是 data_type 受控码（int/real/float）按请求 locale 映射出的 i18n
 	// 显示标签（issue #67 §4）；由 handler 输出侧填充，落库/过滤仍用 DataType 码。
 	DataTypeLabel     *string   `json:"data_type_label,omitempty"`
@@ -222,7 +222,10 @@ type IndicatorListItem struct {
 }
 
 type CreateIndicatorRequest struct {
-	DeviceType     string `json:"device_type" binding:"required,oneof=ENB GSM GNB"`
+	// DeviceType 由 REST handler 从 query 注入(CreateIndicator: req.DeviceType=dt)，bind 在注入前
+	// 执行，故不可 binding:required(否则 body 无 device_type 时校验早于注入→400)。与
+	// CreateGroupRequest.DeviceType 同范式;空值/非法由 service.CreateIndicator → ParseDeviceType 兜底。
+	DeviceType     string `json:"device_type" binding:"omitempty,oneof=ENB GSM GNB"`
 	EnName         string `json:"en_name" binding:"required"`
 	CnName         string `json:"cn_name" binding:"required"`
 	EnDescription  string `json:"en_description"`
@@ -237,6 +240,11 @@ type CreateIndicatorRequest struct {
 	ProductTypes   string `json:"product_types"`
 	IndicatorLevel string `json:"indicator_level"`
 	OperatorCode   string `json:"operator_code"`
+	// Platform 可选:KPI 指标库详情页(IndicatorsByTech)由 URL ?platform= 锁定,新建指标必须落到该
+	// platform 才能被详情列表的 platform_name EXISTS 过滤命中(否则保存成功但查不到)。前端从父级
+	// 透传当前 selectedPlatform;非空时 service 在同事务内向 perf_formulas_<dt> 写一行占位
+	// (Formula=Arithmetic,允许为空),与 indicator 创建原子。列表态不传(全量新建,后续在抽屉里挂公式)。
+	Platform string `json:"platform"`
 }
 
 type UpdateIndicatorRequest struct {

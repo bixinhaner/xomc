@@ -38,9 +38,13 @@ interface BackendIndicator {
   // PM-P3:编号版公式(perf_indicators_*.arithmetic),后端 PerfIndicator JSON 已带 arithmetic。
   arithmetic?: string;
   product_type?: string;
+  // 后端 PerfIndicator 实际字段是 product_types（复数）；product_type 为旧别名兼容。
+  product_types?: string;
   operator_code?: string;
   is_enabled?: boolean;
   device_type?: DeviceType;
+  // 后端下发字符串 '0'/'1'：'1' 表示内置指标（编辑时归属分组只读，XML 真相源覆盖）。
+  is_build_in?: string;
 }
 
 interface BackendGroup {
@@ -56,6 +60,8 @@ interface BackendGroup {
   description?: string;
   operator_code?: string;
   device_type?: DeviceType;
+  // 后端下发字符串 '0'/'1'：'1' 表示内置组（禁删、禁编辑）。
+  is_build_in?: string;
   children?: BackendGroup[];
 }
 
@@ -85,10 +91,12 @@ function mapIndicator(b: BackendIndicator, deviceType: DeviceType): IndicatorInf
     // 归一化：后端发 '0'/'1' 字符串（与 indicatorApi.ts 一致），不能直接当布尔用
     isCounter: b.is_counter === true || b.is_counter === 1 || b.is_counter === '1' || b.is_counter === 'true',
     arithmetic: b.arithmetic,
-    productClass: b.product_type,
+    productClass: b.product_types ?? b.product_type,
     operatorCode: b.operator_code,
     isEnabled: b.is_enabled,
     deviceType: b.device_type ?? deviceType,
+    // 归一化：后端发 '0'/'1' 字符串，'1' = 内置指标（编辑时归属分组只读）。
+    isBuildIn: b.is_build_in === '1' || b.is_build_in === 'true',
   };
 }
 
@@ -103,8 +111,76 @@ function mapGroup(b: BackendGroup, deviceType: DeviceType): IndicatorGroup {
     description: b.description,
     operatorCode: b.operator_code,
     deviceType: b.device_type ?? deviceType,
+    isBuildIn: b.is_build_in === '1',
     children: b.children?.map((c) => mapGroup(c, deviceType)),
   };
+}
+
+/**
+ * 把分组树拍平为「带缩进层级」的下拉选项 —— 所有选择分组的位置(分组筛选 / 归属分组 /
+ * 父分组)统一用它，按树结构(缩进)展示而非扁平列表。label 以全角空格按 depth 缩进。
+ * excludeId:排除该节点**及其整棵子树**(父分组下拉用，避免把自己/后代选作父，形成环)。
+ *
+ * 2026-06-22 起,UI 三皮肤改用真·树形选择器(可展开收起,见 groupTreeData),本函数
+ * 仅作为兼容备份保留;新代码请用 groupTreeData。
+ */
+export function groupTreeOptions(
+  nodes: IndicatorGroup[] | undefined,
+  opts?: { excludeId?: string },
+): { label: string; value: string; depth: number }[] {
+  const out: { label: string; value: string; depth: number }[] = [];
+  const walk = (list: IndicatorGroup[] | undefined, depth: number) => {
+    (list || []).forEach((n) => {
+      if (opts?.excludeId && n.id === opts.excludeId) return; // 跳过自身及其子树(不递归)
+      out.push({ value: n.id, depth, label: '　'.repeat(depth) + (n.name || n.id) });
+      if (n.children) walk(n.children, depth + 1);
+    });
+  };
+  walk(nodes, 0);
+  return out;
+}
+
+/**
+ * 通用「分组树节点」结构 — 三皮肤的 GroupTreeSelect / TreeSelect 共用:
+ *   · v1 (Antd) 直接喂给 `<TreeSelect treeData={...} />`(字段名天然对齐)。
+ *   · v2 (shadcn) / v3 (HUD) 自制 Popover + 递归 Tree,按 children 渲展开/收起。
+ *
+ * excludeId:排除该节点**及其整棵子树** — 编辑「父分组」下拉用,避免把自己/后代选作父
+ * (形成环);整棵子树跳过(剪枝,不递归子代),与 groupTreeOptions 行为一致。
+ */
+export interface GroupTreeNode {
+  /** 显示文本(优先中文名,fallback 英文名/id) */
+  title: string;
+  /** 选中值(group.id) */
+  value: string;
+  /** React key(同 value) */
+  key: string;
+  /** 子节点;无则不下设(让 UI 不出展开箭头) */
+  children?: GroupTreeNode[];
+}
+
+export function groupTreeData(
+  nodes: IndicatorGroup[] | undefined,
+  opts?: { excludeId?: string },
+): GroupTreeNode[] {
+  const walk = (list: IndicatorGroup[] | undefined): GroupTreeNode[] => {
+    const out: GroupTreeNode[] = [];
+    (list || []).forEach((n) => {
+      if (opts?.excludeId && n.id === opts.excludeId) return; // 剪枝:自身及子树都不出现
+      const node: GroupTreeNode = {
+        title: n.name || n.id,
+        value: n.id,
+        key: n.id,
+      };
+      if (n.children && n.children.length > 0) {
+        const kids = walk(n.children);
+        if (kids.length > 0) node.children = kids;
+      }
+      out.push(node);
+    });
+    return out;
+  };
+  return walk(nodes);
 }
 
 function mapFormula(b: BackendFormula): PlatformFormula {
@@ -116,28 +192,45 @@ function mapFormula(b: BackendFormula): PlatformFormula {
   };
 }
 
+// 对齐后端 CreateIndicatorRequest / UpdateIndicatorRequest（model.go）字段名：
+//   en_name←enName, cn_name←cnName, group_id←groupId(必填三件套，device_type 由 query 注入),
+//   data_type←dataType, unit_id←unit, is_counter←isCounter, arithmetic←arithmetic,
+//   statis_type←statisType, product_types←productClass, indicator_level←indicatorLevel,
+//   en_description/cn_description←enDescription/cnDescription, operator_code←operatorCode, id←id。
+// 旧 bug：发了 counter_type/unit/product_type/name（后端不识别）→ 建/改必失败。
+// undefined 字段不发，保持向后兼容（PUT 部分更新）。
 function indicatorPayload(
   input: CreateIndicatorInput | UpdateIndicatorInput
 ): Record<string, unknown> {
   const p: Record<string, unknown> = {};
   if ('id' in input && input.id !== undefined) p.id = input.id;
-  if (input.name !== undefined) p.name = input.name;
   if (input.cnName !== undefined) p.cn_name = input.cnName;
   if (input.enName !== undefined) p.en_name = input.enName;
   if (input.groupId !== undefined) p.group_id = input.groupId;
-  if (input.counterType !== undefined) p.counter_type = input.counterType;
+  if (input.dataType !== undefined) p.data_type = input.dataType;
+  if (input.unit !== undefined) p.unit_id = input.unit;
+  if (input.isCounter !== undefined) p.is_counter = input.isCounter;
+  if (input.arithmetic !== undefined) p.arithmetic = input.arithmetic;
+  if (input.statisType !== undefined) p.statis_type = input.statisType;
   if (input.indicatorLevel !== undefined) p.indicator_level = input.indicatorLevel;
-  if (input.unit !== undefined) p.unit = input.unit;
-  if (input.description !== undefined) p.description = input.description;
-  if (input.productClass !== undefined) p.product_type = input.productClass;
+  if (input.productClass !== undefined) p.product_types = input.productClass;
+  if (input.enDescription !== undefined) p.en_description = input.enDescription;
+  if (input.cnDescription !== undefined) p.cn_description = input.cnDescription;
   if (input.operatorCode !== undefined) p.operator_code = input.operatorCode;
+  // platform 仅 CreateIndicatorInput 有（UpdateIndicatorInput 是 Partial<Omit<..., 'id'>>
+  // 但实际 update 不写公式，TS 类型检查不报错就放过；undefined 不下发）。
+  if ('platform' in input && input.platform !== undefined) p.platform = input.platform;
   return p;
 }
 
 function groupPayload(input: CreateGroupInput | UpdateGroupInput): Record<string, unknown> {
   const p: Record<string, unknown> = {};
   if ('id' in input && input.id !== undefined) p.id = input.id;
-  if (input.name !== undefined) p.name = input.name;
+  // 后端 Create/UpdateGroupRequest 用 en_name/cn_name（无 name 字段）；name 同时写入两者。
+  if (input.name !== undefined) {
+    p.en_name = input.name;
+    p.cn_name = input.name;
+  }
   if (input.parentId !== undefined) p.parent_id = input.parentId;
   if (input.description !== undefined) p.description = input.description;
   if (input.operatorCode !== undefined) p.operator_code = input.operatorCode;
