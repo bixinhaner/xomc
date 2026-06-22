@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/internal/pm/metrics"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -376,12 +377,48 @@ func TestExtractCellID(t *testing.T) {
 		{"SubNetwork=1,CellId=Cell2", "Cell2"},
 		// Fallback: return whole string when no known key
 		{"SomeObj=value", "SomeObj=value"},
+		// 三制式样本：与 metrics.ParseObjectLDN.BaseCellID 一致（单一真值源）
+		{"Cellid=66", "66"},
+		{"Cellid=66,PLMN=46001", "66"},
+		{"Type=Cell,Mode=SA,gNBID=350251605,NrCGI=15153,CUID=1", "15153"},
+		{"Type=Cell,Mode=SA,gNBID=350251605,NrCGI=15153,CUID=1,PLMNID=00101", "15153"},
+		{"Uid=4002-1", "4002-1"},
+		{"Uid=1110-101", "1110-101"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.measObjLdn, func(t *testing.T) {
 			got := extractCellID(tt.measObjLdn)
 			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// extractCellID 与 metrics.ParseObjectLDN.BaseCellID 必须同源：
+// 凡 ParseObjectLDN 能识别的串，extractCellID 必须返回与 BaseCellID 完全相等的值。
+// 这是阶段 A "单一真值源" 死判。
+func TestExtractCellID_UnifiedWithParseObjectLDN(t *testing.T) {
+	samples := []string{
+		"Cellid=66",
+		"Cellid=66,PLMN=46001",
+		"Cellid=654321",
+		"Cellid=654321,PLMN=46068",
+		"Type=gNB,Mode=SA,gNBID=350251605",
+		"Type=Cell,Mode=SA,gNBID=350251605,NrCGI=15153,CUID=1",
+		"Type=Cell,Mode=SA,gNBID=350251605,NrCGI=15153,CUID=1,PLMNID=00101",
+		"Type=Cell,Mode=SA,gNBID=350251605,NrCGI=15153,DUID=1",
+		"Uid=4002-1",
+		"Uid=1110-101",
+	}
+	for _, s := range samples {
+		t.Run(s, func(t *testing.T) {
+			wantBase := metrics.ParseObjectLDN(s).BaseCellID()
+			if wantBase == "" {
+				// 设备级行（如 gNBID 单独出现，无 NrCGI）：BaseCellID 为空 → extractCellID 回退原串
+				assert.Equal(t, s, extractCellID(s))
+			} else {
+				assert.Equal(t, wantBase, extractCellID(s))
+			}
 		})
 	}
 }
