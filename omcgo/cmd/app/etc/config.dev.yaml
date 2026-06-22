@@ -51,8 +51,10 @@ nats:
 
 minio:
   endpoint: "minio:9000"
-  # L-8：浏览器从宿主机访问预签名 URL 用的 host。dev 用 localhost:9000（docker
-  # 端口映射出来的），生产改成对外域名 / SLB VIP。留空 → 用 endpoint 签发
+  # 浏览器 / 外部 SDK 可达的 MinIO 地址，用于签发预签名下载 URL。
+  # 【主流用法】部署后进「系统配置 → 存储」填写对外可达地址（热生效不需重启，
+  # issue #548 订阅桥）。下面的字面量 / env 仅作启动期兜底；dev 用 localhost:9000
+  # （docker 端口映射出来的），生产改成对外域名 / SLB VIP。留空 → 用 endpoint 签发
   # （适合后端 + MinIO 同主机部署）。
   public_endpoint: "localhost:9000"
   access_key: "minioadmin"
