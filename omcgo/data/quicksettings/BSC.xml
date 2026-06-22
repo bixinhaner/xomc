@@ -23,10 +23,14 @@
   <group id="bsc-bts-config" titleZh="BTS 配置" titleEn="BTS Config">
     <param name="ID" titleZh="BTS ID" titleEn="ID"
            standardPath="DeviceGSM.Bts.{i}.ID" readonly="true"/>
+    <!-- BSC 设备约定: osmo-bsc 把 NumofTrxChannel / OmlConnectState 这两个 BSC 全局只读状态量
+         暴露在 DeviceGSM.Bts.0 实例(固定索引 0)上，所有 BTS 实例共享同一份值。
+         standardPath 固定写 Bts.0，applyInstanceContext 对不含 {i} 的 path 原样返回，
+         所有 BTS 行都会读到同一根 leaf —— 满足"所有 BTS 显示这两个共享值"的需求。 -->
     <param name="NumofTrxChannel" titleZh="TRX 信道数" titleEn="NumofTrxChannel"
-           standardPath="DeviceGSM.Bts.{i}.NumofTrxChannel" readonly="true"/>
+           standardPath="DeviceGSM.Bts.0.NumofTrxChannel" readonly="true"/>
     <param name="OmlConnectState" titleZh="OML 连接状态" titleEn="OmlConnectState"
-           standardPath="DeviceGSM.Bts.{i}.OmlConnectState" readonly="true"/>
+           standardPath="DeviceGSM.Bts.0.OmlConnectState" readonly="true"/>
 
     <param name="LocationAreaCode" titleZh="位置区码 (LAC)" titleEn="LocationAreaCode"
            standardPath="DeviceGSM.Bts.{i}.LocationAreaCode"/>

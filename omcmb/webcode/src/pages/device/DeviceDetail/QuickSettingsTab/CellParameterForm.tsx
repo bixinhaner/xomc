@@ -545,15 +545,12 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
   const setDraftField = useQuickSettingsFeedbackStore((s) => s.setDraftField);
   const clearDraft = useQuickSettingsFeedbackStore((s) => s.clearDraft);
 
-  // osmo-bsc 这两个 DeviceGSM.Bts.{i}.<leaf> 字段实际只在第一个实例 (Bts.0.) 上报,
-  // 业务侧约定所有 BTS 实例统一展示同一份值,这里把读取 path 强制重写到 Bts.0.<leaf>。
-  // 写入路径不需要,这两个字段都是 READ_ONLY,UI 也不会触发保存。
+  // 注: osmo-bsc 把 NumofTrxChannel / OmlConnectState 这两个 BSC 全局只读状态量
+  // 暴露在 DeviceGSM.Bts.0 实例(固定索引 0)上,所有 BTS 实例共享同一份值。
+  // 前端配置 (quicksettings/BSC.xml) 中 standardPath 固定写 Bts.0,
+  // applyInstanceContext 对不含 {i} 的 path 原样返回,切换 BTS 实例时仍读到同一根 leaf。
   const resolveReadPath = useCallback(
-    (standardPath: string) => {
-      const m = /^DeviceGSM\.Bts\.\{i\}\.(NumofTrxChannel|OmlConnectState)$/.exec(standardPath || '');
-      if (m) return `DeviceGSM.Bts.0.${m[1]}`;
-      return applyInstanceContext(standardPath || '', instanceContext);
-    },
+    (standardPath: string) => applyInstanceContext(standardPath || '', instanceContext),
     [instanceContext],
   );
 

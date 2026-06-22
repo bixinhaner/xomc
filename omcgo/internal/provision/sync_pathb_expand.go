@@ -16,8 +16,13 @@ package provision
 //
 // hint 估算策略(优先级从高到低):
 //  1. DB 已有 max instance 号 + 25% 裕量(滚动学习,首次同步后越来越准)
-//  2. hintFloor=32 (首次同步无 DB 历史的兜底)
+//  2. hintFloor=256 (首次同步无 DB 历史的兜底; 覆盖 BSC 物理上限 256 BTS)
 //  3. 硬上限 maxHintCap=512 (防 estimate 异常膨胀)
+//
+// hintFloor=256 的副作用过滤: expand 触发条件是 estBytes >= 600KB,即
+// fields × 256 × 60B >= 600KB → fields >= 40。小对象(<40 字段)即使 hintFloor=256
+// 也不会展开,不产生 SoapFault 9005 浪费。BSC `DeviceGSM.Bts.` (~50 字段) 自然
+// 命中展开,首次同步即可工作。
 //
 // 不存在的 instance prefix CPE 返回 SoapFault 9005,ACS handler.tryRecoverGPVFault
 // 自然容错,不阻塞同步。
@@ -50,9 +55,16 @@ const (
 	expandThreshold = 600 * 1024
 
 	// hintFloor: 首次同步无 DB 历史时,instance 展开数兜底值。
-	// 32 来源: BSC 早期典型部署 24 BTS,留点裕量;同时控制首次同步 task 数量(避免
-	// 1024 个 fault 全部走 ACS recover 路径浪费时间)。
-	hintFloor = 32
+	//
+	// 取值 256 来源:
+	//  - BSC 物理上限 256 BTS,首次同步必须能覆盖;
+	//  - 历史曾用 32,导致 BSC `DeviceGSM.Bts.` cold-start estBytes ≈ 96KB << 600KB
+	//    阈值 → 不展开 → CPE 一次返回 ~1.5MB SOAP body → ACS publishRPCResponseEvent
+	//    触发 NATS `maximum payload exceeded` → 事件丢失 → device_parameters 无 BTS
+	//    实例参数 → 前端 BSC QuickSettings 临区/TRX 空白(死锁: DB 永远学不到 hint);
+	//  - 副作用受 expandThreshold 联合过滤: 小对象(<40 字段)仍不展开,不会产生
+	//    SoapFault 9005 浪费 round-trip。
+	hintFloor = 256
 
 	// maxHintCap: instance 展开数硬上限,防 DB 历史异常(如残留古老脏数据)导致估算
 	// 膨胀到几千个 task。BSC 物理上限 256 BTS,留 2 倍裕量。

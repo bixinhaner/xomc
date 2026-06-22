@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"strconv"
 	"testing"
 
 	"github.com/google/uuid"
@@ -203,7 +204,8 @@ func (f *fakeRepoWithHint) GetByFAPInstanceAndGroup(_ context.Context, _ uuid.UU
 }
 
 func TestExpandLargeObjectPrefixes_SmallObjectsKeptAsIs(t *testing.T) {
-	// 小对象: fields=5, hintFloor=32 → est = 60 * 5 * 32 = 9600 << 600KB → 不展开
+	// 小对象: fields=5, hintFloor=256 → est = 60 * 5 * 256 = 76800 << 600KB → 不展开
+	// 这验证了 "hintFloor 括到 256 后小对象仍不会被误展开" 的门槛。
 	mappings := []parammodel.ParamMapping{
 		{PrivatePath: "Dev.WiFi.SSID.{i}.Enabled", IsStorable: true, IsSupported: true},
 		{PrivatePath: "Dev.WiFi.SSID.{i}.Name", IsStorable: true, IsSupported: true},
@@ -212,7 +214,7 @@ func TestExpandLargeObjectPrefixes_SmallObjectsKeptAsIs(t *testing.T) {
 		{PrivatePath: "Dev.WiFi.SSID.{i}.MaxBitRate", IsStorable: true, IsSupported: true},
 	}
 	svc := &SyncService{
-		paramRepo: &fakeRepoWithHint{maxByPrefix: map[string]int{}}, // 无 DB 历史 → hintFloor=32
+		paramRepo: &fakeRepoWithHint{maxByPrefix: map[string]int{}}, // 无 DB 历史 → hintFloor=256
 		logger:    zap.NewNop(),
 	}
 	got := svc.expandLargeObjectPrefixes(context.Background(), uuid.New(), mappings,
@@ -246,15 +248,14 @@ func TestExpandLargeObjectPrefixes_LargeObjectExpandedToInstances(t *testing.T) 
 }
 
 func TestExpandLargeObjectPrefixes_FirstTimeSyncUsesHintFloor(t *testing.T) {
-	// 首次同步 DB 无历史 → maxByPrefix 返回 0 → hint=hintFloor=32
-	// 70 字段 × 32 × 60 = 134400 < 600KB → 此 case 不展开
-	// 我们用更大的 200 字段触发: 200 × 32 × 60 = 384000 < 600KB 仍不展开
-	// 必须 fields × hintFloor × 60 > 600 * 1024 → fields > 600*1024/(32*60) ≈ 320
-	// 用 400 字段
-	mappings := make([]parammodel.ParamMapping, 0, 400)
-	for i := 0; i < 400; i++ {
+	// BSC cold-start 回归: 首次同步 DB 无 BTS 历史 → maxByPrefix 返回 0 →
+	// hint=hintFloor=256。BSC `DeviceGSM.Bts.{i}.*` 实测 70 字段:
+	//   estBytes = 60 * 70 * 256 = 1,075,200 > 600KB → 展开 256 个 instance prefix
+	// 保证首次同步 即可 避免 NATS "maximum payload exceeded"。
+	mappings := make([]parammodel.ParamMapping, 0, 70)
+	for i := 0; i < 70; i++ {
 		mappings = append(mappings, parammodel.ParamMapping{
-			PrivatePath: "DeviceGiant.{i}.Field_" + string(rune('A'+i%26)) + "_" + string(rune('0'+i%10)),
+			PrivatePath: "DeviceGSM.Bts.{i}.F" + string(rune('A'+i%26)) + string(rune('0'+i%10)),
 			IsStorable:  true,
 			IsSupported: true,
 		})
@@ -264,18 +265,38 @@ func TestExpandLargeObjectPrefixes_FirstTimeSyncUsesHintFloor(t *testing.T) {
 		logger:    zap.NewNop(),
 	}
 	got := svc.expandLargeObjectPrefixes(context.Background(), uuid.New(), mappings,
-		[]string{"DeviceGiant."})
-	// hint = hintFloor = 32; 期望展开 32 个
-	require.Len(t, got, 32)
-	assert.Equal(t, "DeviceGiant.1.", got[0])
-	assert.Equal(t, "DeviceGiant.32.", got[31])
+		[]string{"DeviceGSM.Bts."})
+	require.Len(t, got, hintFloor, "BSC cold-start 展开数应等于 hintFloor")
+	assert.Equal(t, "DeviceGSM.Bts.1.", got[0])
+	assert.Equal(t, "DeviceGSM.Bts."+strconv.Itoa(hintFloor)+".", got[hintFloor-1])
+}
+
+func TestExpandLargeObjectPrefixes_FirstTimeSyncMidSizedObjectNotExpanded(t *testing.T) {
+	// 首次同步 + 中等对象(fields < 40): estBytes = 60 * 30 * 256 = 460800 < 600KB
+	// → 不展开。验证 hintFloor=256 不会误伤中小对象。
+	mappings := make([]parammodel.ParamMapping, 0, 30)
+	for i := 0; i < 30; i++ {
+		mappings = append(mappings, parammodel.ParamMapping{
+			PrivatePath: "Device.MidObj.{i}.F" + string(rune('A'+i%26)),
+			IsStorable:  true,
+			IsSupported: true,
+		})
+	}
+	svc := &SyncService{
+		paramRepo: &fakeRepoWithHint{maxByPrefix: map[string]int{}},
+		logger:    zap.NewNop(),
+	}
+	got := svc.expandLargeObjectPrefixes(context.Background(), uuid.New(), mappings,
+		[]string{"Device.MidObj."})
+	assert.Equal(t, []string{"Device.MidObj."}, got, "中等对象应原样保留")
 }
 
 func TestExpandLargeObjectPrefixes_DBLookupErrorFallsBackToHintFloor(t *testing.T) {
-	mappings := make([]parammodel.ParamMapping, 0, 400)
-	for i := 0; i < 400; i++ {
+	// DB 失败也要走 hintFloor 兜底,确保 BSC 类大对象不会因 DB 短暂故障而退化为不展开。
+	mappings := make([]parammodel.ParamMapping, 0, 70)
+	for i := 0; i < 70; i++ {
 		mappings = append(mappings, parammodel.ParamMapping{
-			PrivatePath: "DeviceGiant.{i}.F" + string(rune('a'+i%26)) + string(rune('0'+i%10)),
+			PrivatePath: "DeviceGSM.Bts.{i}.F" + string(rune('a'+i%26)) + string(rune('0'+i%10)),
 			IsStorable:  true,
 			IsSupported: true,
 		})
@@ -285,8 +306,8 @@ func TestExpandLargeObjectPrefixes_DBLookupErrorFallsBackToHintFloor(t *testing.
 		logger:    zap.NewNop(),
 	}
 	got := svc.expandLargeObjectPrefixes(context.Background(), uuid.New(), mappings,
-		[]string{"DeviceGiant."})
-	require.Len(t, got, 32, "DB 错误应回退 hintFloor=32")
+		[]string{"DeviceGSM.Bts."})
+	require.Len(t, got, hintFloor, "DB 错误应回退 hintFloor")
 }
 
 func TestExpandLargeObjectPrefixes_NonObjectPrefixUnchanged(t *testing.T) {
