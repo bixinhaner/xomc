@@ -102,7 +102,7 @@ func (m *execDeviceRepo) ListActiveByLastInform(_ context.Context, _ *time.Time,
 func (m *execDeviceRepo) ListGeo(_ context.Context, _ device.GeoDeviceFilter) ([]device.GeoDevice, int64, error) {
 	return nil, 0, nil
 }
-func (m *execDeviceRepo) GetGeoStats(_ context.Context, _ []string, _ []uuid.UUID) (*device.GeoStats, error) {
+func (m *execDeviceRepo) GetGeoStats(_ context.Context, _ device.GeoStatsFilter) (*device.GeoStats, error) {
 	return &device.GeoStats{}, nil
 }
 func (m *execDeviceRepo) SearchDevices(_ context.Context, _ string, _ int, _ []uuid.UUID) ([]device.GeoDevice, error) {
