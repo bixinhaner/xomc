@@ -55,7 +55,7 @@ func newFakeSyncStarter(defaultUsed bool) *fakeSyncStarter {
 	return &fakeSyncStarter{defaultUsed: defaultUsed, perDevice: map[uuid.UUID]syncResult{}}
 }
 
-func (f *fakeSyncStarter) StartPathBSync(_ context.Context, dev *model.Device, sourceID string, opts ...PathBOption) (bool, error) {
+func (f *fakeSyncStarter) StartPathBSync(_ context.Context, dev *model.Device, sourceID string, opts ...PathBOption) (bool, int, error) {
 	var pb pathBOptions
 	for _, opt := range opts {
 		opt(&pb)
@@ -64,9 +64,9 @@ func (f *fakeSyncStarter) StartPathBSync(_ context.Context, dev *model.Device, s
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, syncCall{deviceID: dev.ID, sourceID: sourceID, reason: pb.reason})
 	if r, ok := f.perDevice[dev.ID]; ok {
-		return r.used, r.err
+		return r.used, 0, r.err
 	}
-	return f.defaultUsed, f.defaultErr
+	return f.defaultUsed, 0, f.defaultErr
 }
 
 func (f *fakeSyncStarter) callCount() int {
@@ -342,9 +342,9 @@ type trackingSyncStarter struct {
 	onCall func()
 }
 
-func (t *trackingSyncStarter) StartPathBSync(_ context.Context, _ *model.Device, _ string, _ ...PathBOption) (bool, error) {
+func (t *trackingSyncStarter) StartPathBSync(_ context.Context, _ *model.Device, _ string, _ ...PathBOption) (bool, int, error) {
 	if t.onCall != nil {
 		t.onCall()
 	}
-	return true, nil
+	return true, 0, nil
 }

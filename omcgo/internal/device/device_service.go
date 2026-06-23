@@ -273,27 +273,29 @@ func (s *DeviceService) RebootDevice(ctx context.Context, id uuid.UUID) error {
 //
 // sourceID 由 caller 构造（"manual:UUID"），供 HandleSyncResultPathB 写差异日志时
 // 通过 Redis hint 读取 reason 标签。
-func (s *DeviceService) SyncDeviceParamsManual(ctx context.Context, deviceID uuid.UUID, sourceID string) (used bool, dev *model.Device, err error) {
+func (s *DeviceService) SyncDeviceParamsManual(ctx context.Context, deviceID uuid.UUID, sourceID string, parameterPaths []string) (used bool, dev *model.Device, gpvTaskCount int, err error) {
 	dev, err = s.deviceRepo.GetByID(ctx, deviceID)
 	if err != nil {
-		return false, nil, fmt.Errorf("get device for manual sync: %w", err)
+		return false, nil, 0, fmt.Errorf("get device for manual sync: %w", err)
 	}
 	if dev == nil {
-		return false, nil, commonerrors.ErrNotFound
+		return false, nil, 0, commonerrors.ErrNotFound
 	}
 	if s.paramSyncStarter == nil {
-		return false, dev, fmt.Errorf("paramSyncStarter not configured")
+		return false, dev, 0, fmt.Errorf("paramSyncStarter not configured")
 	}
 
-	used, err = s.paramSyncStarter.StartManualSync(ctx, dev, sourceID)
+	used, gpvTaskCount, err = s.paramSyncStarter.StartManualSync(ctx, dev, sourceID, parameterPaths)
 	if err != nil {
-		return used, dev, fmt.Errorf("start manual sync: %w", err)
+		return used, dev, gpvTaskCount, fmt.Errorf("start manual sync: %w", err)
 	}
 
 	s.logger.Info("manual sync requested",
 		zap.String("device_id", deviceID.String()),
 		zap.String("serial_number", dev.SerialNumber),
 		zap.String("source_id", sourceID),
+		zap.Int("parameter_paths", len(parameterPaths)),
+		zap.Int("gpv_tasks", gpvTaskCount),
 		zap.Bool("path_b_used", used))
 
 	// 唤醒设备（与旧 TriggerParamSync 一致；Connection Request 仅在 Path B 入队成功后发起）
@@ -305,7 +307,7 @@ func (s *DeviceService) SyncDeviceParamsManual(ctx context.Context, deviceID uui
 		}()
 	}
 
-	return used, dev, nil
+	return used, dev, gpvTaskCount, nil
 }
 
 // SetParamSyncStarter T-0126: 注入 Path B 同步 starter（消费者驱动 narrow interface）。

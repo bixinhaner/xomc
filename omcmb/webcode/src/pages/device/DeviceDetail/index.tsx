@@ -1118,6 +1118,10 @@ export default function DeviceDetail() {
   const { data: paramSyncStatus, refetch: refetchParamSyncStatus } = useSyncStatus(device?.id ?? '');
   const [quickSettingsSyncPending, setQuickSettingsSyncPending] = useState(false);
   const quickSettingsSyncBaselineRef = useRef<{ lastParamSyncAt?: string; lastParamSyncFailedAt?: string }>({});
+  const quickSettingsSyncTargetCountRef = useRef(0);
+  const quickSettingsSyncGpvTaskCountRef = useRef(0);
+  const [quickSettingsSyncTargetPaths, setQuickSettingsSyncTargetPaths] = useState<string[]>([]);
+  const [lastQuickSettingsParamSync, setLastQuickSettingsParamSync] = useState<{ targetCount: number; gpvTaskCount: number; completedAt?: string } | null>(null);
   const { data: detailComposite } = useQuery({
     queryKey: ['devices', 'detail-composite-v2', device?.id],
     queryFn: async () => {
@@ -1277,7 +1281,14 @@ export default function DeviceDetail() {
     void queryClient.invalidateQueries({ queryKey: ['devices', 'detail-composite-v2', deviceId] });
     void queryClient.invalidateQueries({ queryKey: ['quicksettings', 'groups', deviceId] });
     void queryClient.invalidateQueries({ queryKey: ['devices', 'parameter-schema', deviceId] });
-    message.success(t('device.detail.deviceFetchLatest'));
+    const targetCount = quickSettingsSyncTargetCountRef.current;
+    const gpvTaskCount = quickSettingsSyncGpvTaskCountRef.current || paramSyncStatus.lastSyncGpv?.taskCount || 0;
+    setLastQuickSettingsParamSync(targetCount > 0
+      ? { targetCount, gpvTaskCount, completedAt: paramSyncStatus.lastParamSyncAt }
+      : null);
+    message.success(targetCount > 0
+      ? t('device.detail.deviceFetchLatestScoped', { count: targetCount, gpvCount: gpvTaskCount })
+      : t('device.detail.deviceFetchLatest'));
   }, [activeTab, device?.id, message, paramSyncStatus, queryClient, quickSettingsSyncPending, t]);
 
   const handleHeaderRefresh = useCallback(() => {
@@ -1303,12 +1314,20 @@ export default function DeviceDetail() {
             lastParamSyncAt: paramSyncStatus?.lastParamSyncAt,
             lastParamSyncFailedAt: paramSyncStatus?.lastParamSyncFailedAt,
           };
+          quickSettingsSyncTargetCountRef.current = quickSettingsSyncTargetPaths.length;
+          quickSettingsSyncGpvTaskCountRef.current = 0;
           setQuickSettingsSyncPending(true);
           syncMutation.mutate(
-            { deviceId },
+            { deviceId, parameterPaths: quickSettingsSyncTargetPaths },
             {
               onSuccess: (data) => {
-                message.success(t('device.detail.deviceFetchQueued', { id: data.sourceId }));
+                const targetCount = data.parameterPathsCount ?? quickSettingsSyncTargetPaths.length;
+                const gpvTaskCount = data.gpvTaskCount ?? 0;
+                quickSettingsSyncTargetCountRef.current = targetCount;
+                quickSettingsSyncGpvTaskCountRef.current = gpvTaskCount;
+                message.success(targetCount > 0
+                  ? t('device.detail.deviceFetchQueuedScoped', { id: data.sourceId, count: targetCount, gpvCount: gpvTaskCount })
+                  : t('device.detail.deviceFetchQueued', { id: data.sourceId }));
                 void refetchParamSyncStatus();
               },
               onError: (err) => {
@@ -1323,7 +1342,7 @@ export default function DeviceDetail() {
       default:
         break;
     }
-  }, [activeTab, device?.id, message, paramSyncStatus?.lastParamSyncAt, paramSyncStatus?.lastParamSyncFailedAt, queryClient, refetch, refetchParamSyncStatus, syncMutation, t]);
+  }, [activeTab, device?.id, message, paramSyncStatus?.lastParamSyncAt, paramSyncStatus?.lastParamSyncFailedAt, queryClient, quickSettingsSyncTargetPaths, refetch, refetchParamSyncStatus, syncMutation, t]);
 
   const SEVERITY_LABEL: Record<string, string> = useMemo(() => ({
     critical: t('alarm.severity.critical'),
@@ -1665,8 +1684,8 @@ export default function DeviceDetail() {
             )}
           </div>
           <Space>
-            {/* license tab 自带"刷新"按钮，此处头部刷新隐藏，避免同页两个刷新按钮 */}
-            {activeTab !== 'license' && (
+            {/* license/parameters tab 自带明确操作入口，此处头部刷新隐藏，避免语义重复或误导 */}
+            {activeTab !== 'license' && activeTab !== 'parameters' && (
               <Button
                 icon={<ReloadOutlined />}
                 onClick={handleHeaderRefresh}
@@ -1739,7 +1758,11 @@ export default function DeviceDetail() {
               // 不连累设备头部与其他页签。
               children: (
                 <ErrorBoundary>
-                  <ParameterTreeTab deviceId={device.id} />
+                  <ParameterTreeTab
+                    deviceId={device.id}
+                    lastScopedSync={lastQuickSettingsParamSync}
+                    onFullSyncStarted={() => setLastQuickSettingsParamSync(null)}
+                  />
                 </ErrorBoundary>
               ),
             },
@@ -1752,7 +1775,11 @@ export default function DeviceDetail() {
                   forceRender: true,
                   children: (
                     <ErrorBoundary>
-                      <QuickSettingsTab deviceId={device.id} networkType={device.networkType} />
+                      <QuickSettingsTab
+                        deviceId={device.id}
+                        networkType={device.networkType}
+                        onSyncTargetPathsChange={setQuickSettingsSyncTargetPaths}
+                      />
                     </ErrorBoundary>
                   ),
                 }]

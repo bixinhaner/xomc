@@ -31,20 +31,20 @@ const (
 // Task 表示一个设备任务
 type Task struct {
 	// 基本信息
-	ID         string          `json:"id"`         // UUID
-	DeviceSN   string          `json:"device_sn"`  // 设备序列号
-	Method     string          `json:"method"`     // RPC 方法名
-	Params     json.RawMessage `json:"params"`     // 方法参数
-	Priority   int             `json:"priority"`   // 优先级 (0=最高, 默认=10)
+	ID       string          `json:"id"`        // UUID
+	DeviceSN string          `json:"device_sn"` // 设备序列号
+	Method   string          `json:"method"`    // RPC 方法名
+	Params   json.RawMessage `json:"params"`    // 方法参数
+	Priority int             `json:"priority"`  // 优先级 (0=最高, 默认=10)
 
 	// TR069 相关
 	CommandKey string `json:"command_key,omitempty"` // TR069 CommandKey
 	CWMPID     string `json:"cwmp_id,omitempty"`     // SOAP Header ID
 
 	// 状态管理
-	Status     TaskStatus `json:"status"`               // 当前状态
-	RetryCount int        `json:"retry_count"`          // 当前重试次数
-	MaxRetries int        `json:"max_retries"`          // 最大重试次数
+	Status     TaskStatus `json:"status"`      // 当前状态
+	RetryCount int        `json:"retry_count"` // 当前重试次数
+	MaxRetries int        `json:"max_retries"` // 最大重试次数
 
 	// 时间戳
 	CreatedAt   time.Time  `json:"created_at"`             // 创建时间
@@ -80,17 +80,17 @@ type Task struct {
 
 // CreateTaskRequest 创建任务请求
 type CreateTaskRequest struct {
-	DeviceSN    string          `json:"device_sn" binding:"required"`
-	Method      string          `json:"method" binding:"required"`
-	Params      json.RawMessage `json:"params"`
-	Priority    int             `json:"priority"`
-	ExpiresIn   int             `json:"expires_in"`  // 过期时间（秒）
+	DeviceSN  string          `json:"device_sn" binding:"required"`
+	Method    string          `json:"method" binding:"required"`
+	Params    json.RawMessage `json:"params"`
+	Priority  int             `json:"priority"`
+	ExpiresIn int             `json:"expires_in"` // 过期时间（秒）
 	// MaxRetries 用指针区分"未设置"（nil → 默认 3）与"显式 0"（禁止重试）。
 	// 旧实现用 int + (>0) 判定，无法表达"调用方显式要 0 次重试"，0 被静默改回 3。
-	MaxRetries  *int            `json:"max_retries"` // 最大重试次数（nil=默认 3，0=禁止重试）
-	Source      TaskSource      `json:"source"`
-	CreatorID   string          `json:"creator_id"`
-	Description string          `json:"description"`
+	MaxRetries  *int       `json:"max_retries"` // 最大重试次数（nil=默认 3，0=禁止重试）
+	Source      TaskSource `json:"source"`
+	CreatorID   string     `json:"creator_id"`
+	Description string     `json:"description"`
 
 	// TR069 CommandKey（预设的命令标识）
 	CommandKey string `json:"command_key,omitempty"`
@@ -123,22 +123,31 @@ type TaskListResponse struct {
 	PageSize int     `json:"page_size,omitempty"`
 }
 
+// SyncGPVSummary summarizes the latest Path B GetParameterValues sync task group for a device.
+type SyncGPVSummary struct {
+	SourceID         string     `json:"source_id"`
+	TaskCount        int        `json:"task_count"`
+	FirstCreatedAt   time.Time  `json:"first_created_at"`
+	LastCompletedAt  *time.Time `json:"last_completed_at,omitempty"`
+	WallClockSeconds float64    `json:"wall_clock_seconds"`
+}
+
 // NewTask 创建新任务
 func NewTask(req *CreateTaskRequest) *Task {
 	now := time.Now()
 	task := &Task{
-		ID:           generateUUID(),
-		DeviceSN:     req.DeviceSN,
-		Method:       req.Method,
-		Params:       req.Params,
-		Priority:     req.Priority,
-		CommandKey:   req.CommandKey,
-		Status:       TaskStatusPending,
-		MaxRetries:   3,
-		CreatedAt:    now,
-		Source:       TaskSourceAPI,
-		CreatorID:    req.CreatorID,
-		Description:  req.Description,
+		ID:                       generateUUID(),
+		DeviceSN:                 req.DeviceSN,
+		Method:                   req.Method,
+		Params:                   req.Params,
+		Priority:                 req.Priority,
+		CommandKey:               req.CommandKey,
+		Status:                   TaskStatusPending,
+		MaxRetries:               3,
+		CreatedAt:                now,
+		Source:                   TaskSourceAPI,
+		CreatorID:                req.CreatorID,
+		Description:              req.Description,
 		SourceID:                 req.SourceID,
 		CommandIndex:             req.CommandIndex,
 		DeviceIndex:              req.DeviceIndex,

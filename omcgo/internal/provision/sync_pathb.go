@@ -3,7 +3,6 @@ package provision
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -16,8 +15,6 @@ import (
 	"github.com/omcgo/omcgo/pkg/tr069"
 )
 
-// WithParamRegistry 启用 T-0098 P2-04 dual-stack 模式（新栈 Path B）。
-//
 // enabled=false 或 paramReg/prodReg 任一为 nil → 等价于不调用本方法（沿用 datamodel
 // 旧栈，零行为差异）。
 func (s *SyncService) WithParamRegistry(paramReg *parammodel.Registry, prodReg *product.Registry, enabled bool) *SyncService {
@@ -27,8 +24,6 @@ func (s *SyncService) WithParamRegistry(paramReg *parammodel.Registry, prodReg *
 	return s
 }
 
-// PathBEnabled 返回是否对当前 device 走新栈 Path B。
-//
 // 调用方典型用法：handleAutoSync(ctx, dev, dm) 先 PathBEnabled(ctx, dev) 判断；
 // 命中 → 走 StartPathBSync，否则走 StartTwoPhaseSync。
 //
@@ -51,24 +46,33 @@ func (s *SyncService) PathBEnabled(ctx context.Context, dev *model.Device) bool 
 //
 // 返回 (true, nil) 表示已切到 Path B；(false, nil) 表示无法走新栈，调用方应降级旧栈；
 // (false, err) 表示新栈选中后执行出错（不再降级，由 engine 处理）。
-func (s *SyncService) StartPathBSync(ctx context.Context, dev *model.Device, sourceID string, opts ...PathBOption) (bool, error) {
+func (s *SyncService) StartPathBSync(ctx context.Context, dev *model.Device, sourceID string, opts ...PathBOption) (bool, int, error) {
 	set, ok := s.resolveMappingSet(ctx, dev)
 	if !ok {
-		return false, nil
+		return false, 0, nil
+	}
+
+	var pbOpts pathBOptions
+	for _, opt := range opts {
+		opt(&pbOpts)
 	}
 
 	prefixes := extractStorablePrefixes(set.Mappings)
+	if len(pbOpts.parameterPaths) > 0 {
+		prefixes = extractStorablePrefixesForStandardPaths(set.Mappings, pbOpts.parameterPaths)
+	}
 	if len(prefixes) == 0 {
 		s.logger.Info("path-b sync skipped: no storable prefixes",
 			zap.String("device_sn", dev.SerialNumber),
 			zap.String("source", string(set.Source)),
+			zap.Int("requested_paths", len(pbOpts.parameterPaths)),
 		)
 		// 仍标 syncing → completed，避免下游 stuck
 		log, _ := s.discoveryRepo.GetByDeviceID(ctx, dev.ID)
 		if log != nil {
 			_ = s.discoveryRepo.UpdateStatus(ctx, log.ID, DiscoveryCompleted, "")
 		}
-		return true, nil
+		return true, 0, nil
 	}
 
 	// T-NATS-PAYLOAD: instance-level expansion 防大对象 GPV 响应撑爆 NATS 单事件上限。
@@ -78,10 +82,6 @@ func (s *SyncService) StartPathBSync(ctx context.Context, dev *model.Device, sou
 	prefixes = s.expandLargeObjectPrefixes(ctx, dev.ID, set.Mappings, prefixes)
 
 	// T-0123: 提取 reason 写 Redis 临时映射供 HandleSyncResultPathB 完成时读取（TTL=10min 覆盖 GPV 上界）。
-	var pbOpts pathBOptions
-	for _, opt := range opts {
-		opt(&pbOpts)
-	}
 	if pbOpts.reason != "" && s.redisClient != nil {
 		key := fmt.Sprintf("provision:syncreason:%s", dev.ID.String())
 		if err := s.redisClient.Set(ctx, key, pbOpts.reason, 10*time.Minute).Err(); err != nil {
@@ -93,19 +93,21 @@ func (s *SyncService) StartPathBSync(ctx context.Context, dev *model.Device, sou
 		}
 	}
 
+	gpvTaskCount := len(buildGPVBatches(prefixes, s.batchSize))
 	if err := s.enqueueGPVPrefixes(ctx, dev, prefixes, sourceID); err != nil {
-		return true, fmt.Errorf("enqueue path-b GPV: %w", err)
+		return true, gpvTaskCount, fmt.Errorf("enqueue path-b GPV: %w", err)
 	}
-	s.recordPathBSyncPendingBatches(ctx, dev.ID, len(buildGPVBatches(prefixes, s.batchSize)))
+	s.recordPathBSyncPendingBatches(ctx, dev.ID, gpvTaskCount)
 
 	s.logger.Info("path-b sync started",
 		zap.String("device_sn", dev.SerialNumber),
 		zap.String("source", string(set.Source)),
 		zap.String("reason", pbOpts.reason),
+		zap.Int("requested_paths", len(pbOpts.parameterPaths)),
 		zap.Int("prefixes", len(prefixes)),
 		zap.Int("total_mappings", len(set.Mappings)),
 	)
-	return true, nil
+	return true, gpvTaskCount, nil
 }
 
 // HandleSyncResultPathB 处理新栈 GPV 响应。
@@ -140,7 +142,7 @@ func (s *SyncService) HandleSyncResultPathB(ctx context.Context, dev *model.Devi
 			return false, nil
 		}
 		if finalizeSync {
-			s.finalizeOrDebouncePathBSync(dev, fullSyncTrigger)
+			s.finalizePathBSyncAndLog(dev, fullSyncTrigger)
 		}
 		return true, nil
 	}
@@ -240,7 +242,7 @@ func (s *SyncService) HandleSyncResultPathB(ctx context.Context, dev *model.Devi
 	// 仅在 BatchUpsert 成功（含本次未变化时 len(params)=0 也算成功）后回写；
 	// GPV 部分失败 / 超时 / 取消时不回写，让下一轮周期或上线重试自动覆盖。
 	if finalizeSync {
-		s.finalizeOrDebouncePathBSync(dev, fullSyncTrigger)
+		s.finalizePathBSyncAndLog(dev, fullSyncTrigger)
 	}
 
 	return true, nil
@@ -248,14 +250,8 @@ func (s *SyncService) HandleSyncResultPathB(ctx context.Context, dev *model.Devi
 
 const pathBSyncPendingBatchesTTL = 10 * time.Minute
 
-var pathBSyncFinalizeDebounce = 15 * time.Second
-
 func pathBSyncPendingBatchesKey(deviceID uuid.UUID) string {
 	return fmt.Sprintf("provision:pathb:pending:%s", deviceID.String())
-}
-
-func pathBSyncFinalizeDebounceKey(deviceID uuid.UUID) string {
-	return fmt.Sprintf("provision:pathb:finalize:%s", deviceID.String())
 }
 
 func (s *SyncService) recordPathBSyncPendingBatches(ctx context.Context, deviceID uuid.UUID, totalBatches int) {
@@ -333,61 +329,14 @@ func (s *SyncService) finalizePathBSync(ctx context.Context, dev *model.Device) 
 	return nil
 }
 
-func (s *SyncService) finalizeOrDebouncePathBSync(dev *model.Device, fullSyncTrigger bool) {
-	if !fullSyncTrigger {
-		if err := s.finalizePathBSync(context.Background(), dev); err != nil {
-			s.logger.Warn("finalize path-b sync failed",
-				zap.String("device_id", dev.ID.String()),
-				zap.String("device_sn", dev.SerialNumber),
-				zap.Error(err))
-		}
-		return
-	}
-	s.scheduleDeferredPathBSyncFinalize(dev)
-}
-
-func (s *SyncService) scheduleDeferredPathBSyncFinalize(dev *model.Device) {
-	if dev == nil || dev.ID == uuid.Nil {
-		return
-	}
-	if s.redisClient == nil {
-		if err := s.finalizePathBSync(context.Background(), dev); err != nil {
-			s.logger.Warn("finalize path-b sync without debounce failed",
-				zap.String("device_id", dev.ID.String()),
-				zap.String("device_sn", dev.SerialNumber),
-				zap.Error(err))
-		}
-		return
-	}
-	key := pathBSyncFinalizeDebounceKey(dev.ID)
-	token := strconv.FormatInt(time.Now().UnixNano(), 10)
-	if err := s.redisClient.Set(context.Background(), key, token, pathBSyncPendingBatchesTTL).Err(); err != nil {
-		s.logger.Warn("schedule deferred path-b finalize failed",
+func (s *SyncService) finalizePathBSyncAndLog(dev *model.Device, fullSyncTrigger bool) {
+	if err := s.finalizePathBSync(context.Background(), dev); err != nil {
+		s.logger.Warn("finalize path-b sync failed",
 			zap.String("device_id", dev.ID.String()),
 			zap.String("device_sn", dev.SerialNumber),
+			zap.Bool("full_sync_trigger", fullSyncTrigger),
 			zap.Error(err))
-		return
 	}
-	go func(expectedToken string, deviceSnapshot model.Device) {
-		<-time.After(pathBSyncFinalizeDebounce)
-		ctx := context.Background()
-		currentToken, err := s.redisClient.Get(ctx, key).Result()
-		if err != nil || currentToken != expectedToken {
-			return
-		}
-		if err := s.redisClient.Del(ctx, key).Err(); err != nil {
-			s.logger.Warn("delete deferred path-b finalize key failed",
-				zap.String("device_id", deviceSnapshot.ID.String()),
-				zap.String("device_sn", deviceSnapshot.SerialNumber),
-				zap.Error(err))
-		}
-		if err := s.finalizePathBSync(ctx, &deviceSnapshot); err != nil {
-			s.logger.Warn("deferred finalize path-b sync failed",
-				zap.String("device_id", deviceSnapshot.ID.String()),
-				zap.String("device_sn", deviceSnapshot.SerialNumber),
-				zap.Error(err))
-		}
-	}(token, *dev)
 }
 
 // snapshotStandardPaths 拉取 device_parameters 中本设备的 standardPath 集合（T-0127 差异日志用）。
@@ -618,7 +567,7 @@ func nearestObjectPrefix(path string) string {
 // 算法同 nearestObjectPrefix(取最深数字段),并额外返回"含数字段+尾点"的 instance prefix:
 //   - "DeviceGSM.Bts.5.CellId"             → ("DeviceGSM.Bts.", "DeviceGSM.Bts.5.")
 //   - "DeviceGSM.Bts.5.Trx.1.Rf"           → ("DeviceGSM.Bts.5.Trx.", "DeviceGSM.Bts.5.Trx.1.")
-//                                            (最深数字段是 Trx 下的 "1",不是 Bts.5)
+//     (最深数字段是 Trx 下的 "1",不是 Bts.5)
 //   - "Device.System.Mode"                 → ("", "")
 //   - 数字段位置 < minPrefixSegments(4)     → ("", "")
 //
@@ -651,8 +600,9 @@ func splitObjectAndInstancePrefix(path string) (string, string) {
 //     (不会越界删兄弟 Bts.1..4 / 6..N 的字段)
 //
 // 算法:按 (objectPrefix → set{instancePrefix}) 分组,每组:
-//   |set| == 1 → 输出 instancePrefix (单实例,精化)
-//   |set| > 1  → 输出 objectPrefix   (多实例,沿用原逻辑)
+//
+//	|set| == 1 → 输出 instancePrefix (单实例,精化)
+//	|set| > 1  → 输出 objectPrefix   (多实例,沿用原逻辑)
 //
 // 弱化语义提示: instance batch 模式下 instance 整体被 CPE 删除(没有任何字段返回)
 // 是"幽灵实例"残留场景,本算法无法感知;由 Phase 2 哨兵 GPN 同步处理。
@@ -760,11 +710,11 @@ func (s *SyncService) resolveMappingSet(ctx context.Context, dev *model.Device) 
 // extractStorablePrefixes 从 ParamMapping 列表抽出可下发的 GPV path 列表。
 //
 // 算法（设计 §1.11 Path B）：
-//   1. 过滤 is_storable=true && is_supported=true（T-0103 后者剔除固件不支持的 path）
-//   2. basePrefix 处理每条 privatePath：
-//      - 含 "{i}" 模板段 → 截到第一个 "{i}" 前的对象前缀（让 CPE 枚举实例）
-//      - 叶子参数、末尾带点对象 → 原样
-//   3. 去重排序输出
+//  1. 过滤 is_storable=true && is_supported=true（T-0103 后者剔除固件不支持的 path）
+//  2. basePrefix 处理每条 privatePath：
+//     - 含 "{i}" 模板段 → 截到第一个 "{i}" 前的对象前缀（让 CPE 枚举实例）
+//     - 叶子参数、末尾带点对象 → 原样
+//  3. 去重排序输出
 //
 // 设计原则："只查 XML 字典里实际列出的 path"，不从叶子自动派生父对象前缀。
 // 历史教训：
@@ -798,6 +748,87 @@ func extractStorablePrefixes(mappings []parammodel.ParamMapping) []string {
 		}
 	}
 	return out
+}
+
+func extractStorablePrefixesForStandardPaths(mappings []parammodel.ParamMapping, standardPaths []string) []string {
+	seen := make(map[string]struct{}, len(mappings))
+	for _, m := range mappings {
+		if !m.IsStorable || !m.IsSupported {
+			continue
+		}
+		if !matchesAnyStandardPath(m.StandardPath, standardPaths) {
+			continue
+		}
+		prefix := basePrefix(normalizeSingletonFAPServicePath(m.PrivatePath))
+		if prefix == "" {
+			continue
+		}
+		seen[prefix] = struct{}{}
+	}
+	out := make([]string, 0, len(seen))
+	for p := range seen {
+		out = append(out, p)
+	}
+	for i := 0; i < len(out); i++ {
+		for j := i + 1; j < len(out); j++ {
+			if out[i] > out[j] {
+				out[i], out[j] = out[j], out[i]
+			}
+		}
+	}
+	return out
+}
+
+func matchesAnyStandardPath(template string, targets []string) bool {
+	for _, target := range targets {
+		if standardPathMatches(template, strings.TrimSpace(target)) {
+			return true
+		}
+	}
+	return false
+}
+
+func standardPathMatches(template, target string) bool {
+	if template == "" || target == "" {
+		return false
+	}
+	if template == target {
+		return true
+	}
+	if strings.HasSuffix(target, ".") {
+		return standardPathPrefixMatches(template, target)
+	}
+	templateParts := strings.Split(strings.TrimSuffix(template, "."), ".")
+	targetParts := strings.Split(strings.TrimSuffix(target, "."), ".")
+	if len(templateParts) != len(targetParts) {
+		return false
+	}
+	for i := range templateParts {
+		if templateParts[i] == "{i}" || targetParts[i] == "{i}" {
+			continue
+		}
+		if templateParts[i] != targetParts[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func standardPathPrefixMatches(template, targetPrefix string) bool {
+	templateParts := strings.Split(strings.TrimSuffix(template, "."), ".")
+	targetParts := strings.Split(strings.TrimSuffix(targetPrefix, "."), ".")
+	if len(targetParts) > len(templateParts) {
+		return false
+	}
+	for i := range targetParts {
+		if templateParts[i] == "{i}" || targetParts[i] == "{i}" {
+			continue
+		}
+		if templateParts[i] != targetParts[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // normalizeSingletonFAPServicePath replaces the leading FAPService instance
@@ -842,10 +873,10 @@ func basePrefix(privatePath string) string {
 // instantiateStandardPath 把 template standardPath 中的 {i} 占位符按 actualPrivate 中
 // 对应位置的实例号填充。
 //
-//   actualPrivate    = "Dev.WiFi.SSID.7.Enabled"
-//   templatePrivate  = "Dev.WiFi.SSID.{i}.Enabled"
-//   templateStandard = "Device.WiFi.SSID.{i}.Enable"
-//   返回             = "Device.WiFi.SSID.7.Enable"
+//	actualPrivate    = "Dev.WiFi.SSID.7.Enabled"
+//	templatePrivate  = "Dev.WiFi.SSID.{i}.Enabled"
+//	templateStandard = "Device.WiFi.SSID.{i}.Enable"
+//	返回             = "Device.WiFi.SSID.7.Enable"
 //
 // 段数不一致或位置不匹配 → 直接返回 templateStandard（容错）。
 func instantiateStandardPath(actualPrivate, templatePrivate, templateStandard string) string {
@@ -865,4 +896,3 @@ func instantiateStandardPath(actualPrivate, templatePrivate, templateStandard st
 	}
 	return out
 }
-

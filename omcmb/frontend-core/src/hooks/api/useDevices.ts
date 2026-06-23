@@ -213,8 +213,8 @@ export function useRebootDevice() {
 export function useSyncDeviceParams() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ deviceId, force }: { deviceId: string; force?: boolean }) =>
-      api.syncDeviceParams(deviceId, force !== undefined ? { force } : undefined),
+    mutationFn: ({ deviceId, force, parameterPaths }: { deviceId: string; force?: boolean; parameterPaths?: string[] }) =>
+      api.syncDeviceParams(deviceId, force !== undefined || parameterPaths !== undefined ? { force, parameterPaths } : undefined),
     onSuccess: (_data, variables) => {
       // 失效设备参数缓存让前端在 Path B 完成后展示新值
       void queryClient.invalidateQueries({ queryKey: ['device-parameters', variables.deviceId] });
