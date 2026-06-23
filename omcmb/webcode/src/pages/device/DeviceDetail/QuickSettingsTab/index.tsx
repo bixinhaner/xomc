@@ -1,14 +1,18 @@
-import { useMemo, useState } from 'react';
-import { Alert, Button, Empty, Popconfirm, Select, Space, Spin, Typography, message } from 'antd';
-import { MinusOutlined, PlusOutlined } from '@ant-design/icons';
+import { useEffect, useMemo, useState } from 'react';
+import { Alert, Button, Empty, Popconfirm, Select, Space, Spin, Tag, Tooltip, Typography, message } from 'antd';
+import { ExclamationCircleOutlined, MinusOutlined, PlusOutlined } from '@ant-design/icons';
 import { useIntl } from 'react-intl';
+import { useQueryClient } from '@tanstack/react-query';
 import { useQuickSettingsGroups } from '@core/hooks/api/useQuickSettings';
 import { useResolvedCellInstances } from '@core/hooks/api/useResolvedCellInstances';
-import { useAddObject, useDeleteObject, useParameterSchema } from '@core/hooks/api/useDeviceParameters';
-import { useQuickSettingsFeedbackStore } from '@core/store/quickSettingsFeedbackStore';
+import { useDeleteObject, useParameterSchema } from '@core/hooks/api/useDeviceParameters';
+import { useDeviceTaskStatus } from '@core/hooks/api/useDeviceTask';
+import { feedbackKey, useQuickSettingsFeedbackStore } from '@core/store/quickSettingsFeedbackStore';
 import CellParameterForm from './CellParameterForm';
 import InstanceSelectorForm from './InstanceSelectorForm';
-import MultiInstanceTable from './MultiInstanceTable';
+import MultiInstanceTable, { formatDeviceFaultBrief, formatTime, statusTagSpec } from './MultiInstanceTable';
+import BscBtsAddModal from './BscBtsAddModal';
+import { BSC_BTS_FEEDBACK_GROUP_ID } from './bscBtsFeedback';
 import type { QuickSettingsInstanceContext } from './validators';
 import { useT } from '@/hooks/useT';
 
@@ -63,6 +67,8 @@ export default function QuickSettingsTab({ deviceId, networkType }: QuickSetting
   // LTE 选择 FAPService，NR 选择 CellConfig 小区实例。
   const [userPickedInstance, setUserPickedInstance] = useState<number | null>(null);
   const [bmTech, setBmTech] = useState<'LTE' | 'GSM'>('LTE');
+  // BSC「新增 BTS」弹窗开关 — 见 BscBtsAddModal.tsx,内部完成 AddObject + SetParameterValues。
+  const [btsAddModalOpen, setBtsAddModalOpen] = useState(false);
 
   // 头部"刷新"按钮 bump 的 tick → 拼进子组件 key 强制 remount，清掉 form/rowEdits 等组件内 state
   const refreshTick = useQuickSettingsFeedbackStore((s) => s.refreshTicks[deviceId] ?? 0);
@@ -172,11 +178,10 @@ export default function QuickSettingsTab({ deviceId, networkType }: QuickSetting
     ? `${instanceContext.fapInstance}-${instanceContext.cellInstance ?? 1}`
     : String(instanceContext.fapInstance);
 
-  // BSC BTS 实例增删：复用 useAddObject/useDeleteObject，成功后由 hook
-  // 自动 invalidate parameter-schema 查询，useResolvedCellInstances 会重拉。
-  const addObjectMutation = useAddObject();
+  // BSC BTS 实例删除：复用 useDeleteObject;新增走 BscBtsAddModal 内部的 useAddObject。
   const deleteObjectMutation = useDeleteObject();
-  const btsAddPending = addObjectMutation.isPending;
+  // 新增按钮本身不再表示 pending — AddObject/SetParameterValues 由 Modal 内部的 confirmLoading 反映。
+  const btsAddPending = false;
   const btsDeletePending = deleteObjectMutation.isPending;
 
   // BSC 下拉显示 "实例号 · IpaUnitId=xxx"，让运维能直接看出 BTS 与 IPA 单元映射。
@@ -197,24 +202,120 @@ export default function QuickSettingsTab({ deviceId, networkType }: QuickSetting
     return m;
   }, [isBSC, bscBtsSchema]);
 
-  const handleAddBts = async () => {
-    try {
-      await addObjectMutation.mutateAsync({ deviceId, objectPath: BSC_BTS_OBJECT_PREFIX });
-      message.success(t('device.quickSettings.btsAddSubmitted'));
-    } catch (err) {
-      message.error(t('device.quickSettings.btsAddFailed', { reason: String(err) }));
+  const queryClient = useQueryClient();
+
+  // BSC 顶部"上次操作"反馈:与 Trx 行级 Tag 同一份 store。Modal 在 SPV 入队后写入
+  // taskId,QuickSettingsTab 顶层用 useDeviceTaskStatus 轮询,Tag 自动从队列中 → 已发送
+  // → 成功/失败/超时 滚动展示;失败时附被拒原因摘要 + Tooltip 全文。
+  const bscFbKey = useMemo(
+    () => feedbackKey(deviceId, BSC_BTS_FEEDBACK_GROUP_ID, 0),
+    [deviceId],
+  );
+  const bscLastAction = useQuickSettingsFeedbackStore((s) => {
+    const f = s.entries[bscFbKey];
+    return f && f.kind === 'multi' ? f : null;
+  });
+  const setBscFeedback = useQuickSettingsFeedbackStore((s) => s.setFeedback);
+  const patchBscFeedback = useQuickSettingsFeedbackStore((s) => s.patchFeedback);
+  const { data: bscLastTask } = useDeviceTaskStatus(bscLastAction?.taskId);
+
+  // 任务终态(completed/failed/expired/cancelled)→ 让 schema/parameters/tree 都过期,
+  // 触发实例下拉重新拉取(看到新增/已删的实例号)。
+  // 额外:add 动作 + SPV 终态 failed + 有 param_faults + 已知 instanceNumber → 自动触发
+  // DeleteObject 回滚刚才创建的 BTS,避免设备侧残留"半成品"实例。
+  useEffect(() => {
+    if (!isBSC || !bscLastAction?.taskId || !bscLastTask) return;
+    if (bscLastTask.status !== 'completed' && bscLastTask.status !== 'failed'
+      && bscLastTask.status !== 'expired' && bscLastTask.status !== 'cancelled') return;
+    if (bscLastAction.invalidatedForTaskId === bscLastTask.id) return;
+    void queryClient.invalidateQueries({ queryKey: ['devices', 'parameter-schema', deviceId] });
+    void queryClient.invalidateQueries({ queryKey: ['devices', 'parameters', deviceId] });
+    void queryClient.invalidateQueries({ queryKey: ['devices', 'parameter-tree', deviceId] });
+    patchBscFeedback(bscFbKey, { invalidatedForTaskId: bscLastTask.id });
+
+    // 自动回滚:仅当 action==='add' 且 SPV 任务 failed 且有具体 param_faults 且记得新增的实例号时触发
+    const faults = (bscLastTask.result as { param_faults?: Array<{ parameter_name?: string; fault_string?: string }> } | undefined)?.param_faults ?? [];
+    if (
+      bscLastAction.action === 'add'
+      && bscLastTask.status === 'failed'
+      && faults.length > 0
+      && typeof bscLastAction.instanceNumber === 'number'
+      && bscLastAction.instanceNumber > 0
+    ) {
+      const inst = bscLastAction.instanceNumber;
+      const brief = formatDeviceFaultBrief(bscLastTask.errorMessage);
+      (async () => {
+        try {
+          const { taskId: rollbackTaskId } = await deleteObjectMutation.mutateAsync({
+            deviceId,
+            objectPath: `${BSC_BTS_OBJECT_PREFIX}${inst}.`,
+          });
+          setBscFeedback(bscFbKey, {
+            kind: 'multi',
+            action: 'add_rollback',
+            submitStatus: 'queued',
+            taskId: rollbackTaskId,
+            detail: `BTS #${inst}`,
+            at: Date.now(),
+            instanceNumber: inst,
+            originFaultBrief: brief,
+          });
+          // 当前下拉若停在被回滚的实例上,清掉让 selector 自动落回首条存活实例
+          setUserPickedInstance((prev) => (prev === inst ? null : prev));
+        } catch (err) {
+          setBscFeedback(bscFbKey, {
+            kind: 'multi',
+            action: 'add_rollback',
+            submitStatus: 'failed_to_queue',
+            detail: `BTS #${inst} · 自动删除入队失败:${String(err)},请手动删除`,
+            at: Date.now(),
+            instanceNumber: inst,
+            originFaultBrief: brief,
+          });
+          message.error(`BTS #${inst} 新增失败,自动回滚入队失败:${String(err)}`);
+        }
+      })();
     }
+  }, [
+    isBSC, bscLastAction, bscLastTask, queryClient, deviceId, bscFbKey,
+    patchBscFeedback, setBscFeedback, deleteObjectMutation,
+  ]);
+
+  const handleAddBts = () => {
+    // 弹出参数填写 Modal,确认后由 BscBtsAddModal 内部完成 AddObject + SetParameterValues 与提示。
+    setBtsAddModalOpen(true);
+  };
+  const handleBtsAddSuccess = (instanceNumber: number) => {
+    // 新增成功后切到新实例,便于继续编辑。
+    // Tag 的状态/查询失效由顶层 useEffect 监听 bscLastTask 终态统一处理。
+    setUserPickedInstance(instanceNumber);
   };
   const handleDeleteBts = async () => {
     if (!Number.isFinite(selectedInstance) || selectedInstance <= 0) return;
     try {
-      await deleteObjectMutation.mutateAsync({
+      const { taskId } = await deleteObjectMutation.mutateAsync({
         deviceId,
         objectPath: `${BSC_BTS_OBJECT_PREFIX}${selectedInstance}.`,
       });
-      message.success(t('device.quickSettings.btsDeleteSubmitted', { id: selectedInstance }));
+      // 入队成功 — 写 feedback 让顶部 Tag 立即显示"删除 队列中 · BTS #N";
+      // useDeviceTaskStatus(taskId) 自动轮询,终态由顶层 useEffect 触发刷新。
+      setBscFeedback(bscFbKey, {
+        kind: 'multi',
+        action: 'delete',
+        submitStatus: 'queued',
+        taskId,
+        detail: `BTS #${selectedInstance}`,
+        at: Date.now(),
+      });
       setUserPickedInstance(null);
     } catch (err) {
+      setBscFeedback(bscFbKey, {
+        kind: 'multi',
+        action: 'delete',
+        submitStatus: 'failed_to_queue',
+        detail: `BTS #${selectedInstance} · 入队失败:${String(err)}`,
+        at: Date.now(),
+      });
       message.error(t('device.quickSettings.btsDeleteFailed', { reason: String(err) }));
     }
   };
@@ -311,6 +412,52 @@ export default function QuickSettingsTab({ deviceId, networkType }: QuickSetting
                   {t('device.quickSettings.btsDelete')}
                 </Button>
               </Popconfirm>
+              {bscLastAction && (() => {
+                // 普通新增/保存/删除走 statusTagSpec(失败时由外层渲染附加 briefFault + Tooltip 全文)。
+                // add_rollback 是 SPV 部分被拒后自动 DeleteObject 的反馈:
+                //  - 入队失败:红色"自动回滚入队失败,请手动删除"
+                //  - delete completed:橙色"新增失败已自动回滚"
+                //  - delete failed/expired/cancelled:红色"回滚未完成,请手动删除"
+                //  - 其余进行中态:蓝色"正在自动回滚..."
+                let spec: { color: string; icon: React.ReactNode; label: string };
+                if (bscLastAction.action === 'add_rollback') {
+                  if (bscLastAction.submitStatus === 'failed_to_queue') {
+                    spec = { color: 'error', icon: <ExclamationCircleOutlined />, label: '新增失败 · 自动回滚入队失败' };
+                  } else {
+                    switch (bscLastTask?.status) {
+                      case 'completed':
+                        spec = { color: 'warning', icon: <ExclamationCircleOutlined />, label: '新增失败已自动回滚' };
+                        break;
+                      case 'failed':
+                      case 'expired':
+                      case 'cancelled':
+                        spec = { color: 'error', icon: <ExclamationCircleOutlined />, label: '新增失败 · 自动回滚未完成,请手动删除' };
+                        break;
+                      default:
+                        spec = { color: 'processing', icon: <ExclamationCircleOutlined />, label: '新增失败,正在自动回滚...' };
+                    }
+                  }
+                } else {
+                  spec = statusTagSpec(bscLastAction, bscLastTask?.status, t);
+                }
+
+                const isFailedTooltip = bscLastTask?.status === 'failed' && Boolean(bscLastTask?.errorMessage);
+                const briefFault = bscLastAction.action === 'add_rollback'
+                  ? (bscLastAction.originFaultBrief ?? '')
+                  : (isFailedTooltip ? formatDeviceFaultBrief(bscLastTask?.errorMessage) : '');
+                const tag = (
+                  <Tag icon={spec.icon} color={spec.color}>
+                    {spec.label} · {bscLastAction.detail}
+                    {briefFault ? ` · ${briefFault}` : ''} · {formatTime(bscLastAction.at)}
+                  </Tag>
+                );
+                // Tooltip 仅在普通失败时挂(回滚分支无完整 errorMessage)
+                return isFailedTooltip && bscLastAction.action !== 'add_rollback' ? (
+                  <Tooltip title={bscLastTask?.errorMessage} placement="bottomRight">
+                    {tag}
+                  </Tooltip>
+                ) : tag;
+              })()}
             </>
           )}
           <Text type="secondary">{selectorHint}</Text>
@@ -352,6 +499,18 @@ export default function QuickSettingsTab({ deviceId, networkType }: QuickSetting
           />
         );
       })}
+
+      {isBSC && (
+        <BscBtsAddModal
+          open={btsAddModalOpen}
+          deviceId={deviceId}
+          locale={locale}
+          configGroup={visibleGroups.find((g) => g.id === 'bsc-bts-config')}
+          handoverGroup={visibleGroups.find((g) => g.id === 'bsc-bts-handover')}
+          onClose={() => setBtsAddModalOpen(false)}
+          onSuccess={handleBtsAddSuccess}
+        />
+      )}
     </div>
   );
 }
