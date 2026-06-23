@@ -6,7 +6,7 @@
  *   - 默认全勾 = 该设备全部小区（= 不过滤，向后兼容）。
  *   - value 是 Record<deviceSn, objectLdn[]>：承载用户在某设备下的显式勾选。
  *     某设备缺席 = 该设备未动过（默认全选，不过滤）。
- *   - 友好名走共享工具 formatObjectLdn（小区X · PLMNY），与设备列表分线同源。
+ *   - label 直接显示原始 object_ldn，避免格式化后 CU/DU/NBRCID 等字段丢失导致重名。
  *
  * 输出最终白名单走 cellDrilldownUtils.getEffectiveLdns（拍平+去重，全选设备不贡献过滤项）。
  * 列小区接口本身不返回 device_sn，故按设备分别取（useMetricObjectsByDevices）。
@@ -15,7 +15,6 @@
 import { useIntl } from 'react-intl';
 import { Alert, Checkbox, Collapse, Empty, Space, Spin, Tag, Typography } from 'antd';
 import { useMetricObjectsByDevices } from '@core/hooks/api/usePmQuery';
-import { formatObjectLdn } from '@core/types/pmObject';
 import type { CellSelection } from './cellDrilldownUtils';
 
 interface CellDrilldownSelectorProps {
@@ -82,7 +81,7 @@ export default function CellDrilldownSelector({
             onChange={(vals) => onChange({ ...value, [sn]: vals as string[] })}
             style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingLeft: 8 }}
             options={objects.map((o) => ({
-              label: formatObjectLdn(o.objectLdn),
+              label: o.objectLdn,
               value: o.objectLdn,
             }))}
           />

@@ -15,7 +15,7 @@
  */
 
 import type { AggregatedRow } from '@core/types/pmDashboard';
-import { buildDeviceSeriesName, deviceSnTail } from '@core/types/pmObject';
+import { deviceSnTail } from '@core/types/pmObject';
 import type { MetricChart, MetricSeries, MetricSeriesValue } from './taskDashboardUtils';
 
 export type { MetricChart, MetricSeries, MetricSeriesValue } from './taskDashboardUtils';
@@ -73,8 +73,8 @@ export function buildDeviceMetricCharts(
     const key = ldn ? `${sn}|${ldn}` : sn;
     let s = m.series.get(key);
     if (!s) {
-      // 系列名：有小区 → 「尾号 · 小区X · PLMNY」；无小区 → 仅尾号（兜底单线）。
-      const name = ldn ? buildDeviceSeriesName(sn, ldn) : deviceSnTail(sn) || sn;
+      // 系列名：有小区 → 「尾号 · 原始LDN」；无小区 → 仅尾号（兜底单线）。
+      const name = ldn ? `${deviceSnTail(sn) || sn} · ${ldn}` : deviceSnTail(sn) || sn;
       s = { name, points: new Map() };
       m.series.set(key, s);
       m.seriesOrder.push(key);
