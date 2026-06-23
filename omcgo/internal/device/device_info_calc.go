@@ -151,29 +151,40 @@ func CalcSyncStatus(params map[string]string) string {
 		return tfcsSync
 	}
 
-	gpsStatus := params["Device.DeviceInfo.X_COM_GPS_Status"]
-	bdsStatus := params["Device.DeviceInfo.X_COM_BDS_Status"]
-	ieee1588Status := params["Device.DeviceInfo.X_COM_1588_Status"]
+	gpsStatus := firstNonEmpty(
+		params["Device.DeviceInfo.X_COM_GPS_Status"],
+		params["Device.DeviceInfo.GPS_Status"],
+		params["Device.FAP.GPS.SyncStatus"],
+	)
+	bdsStatus := firstNonEmpty(
+		params["Device.DeviceInfo.X_COM_BDS_Status"],
+		params["Device.DeviceInfo.BDS_Status"],
+	)
+	ieee1588Status := firstNonEmpty(
+		params["Device.DeviceInfo.X_COM_1588_Status"],
+		params["Device.DeviceInfo.1588_Status"],
+		params["Device.FAP.PTP1588.SyncStatus"],
+	)
 
 	// If tfcsSync indicates locked/synced, determine the source
 	if isTrueValue(tfcsSync) || tfcsSync == "1" {
-		if isTrueValue(gpsStatus) || gpsStatus == "1" {
+		if isTrueValue(gpsStatus) || gpsStatus == "1" || isSynchronizedValue(gpsStatus) {
 			return "gps"
 		}
-		if isTrueValue(bdsStatus) || bdsStatus == "1" {
+		if isTrueValue(bdsStatus) || bdsStatus == "1" || isSynchronizedValue(bdsStatus) {
 			return "beidou"
 		}
-		if isTrueValue(ieee1588Status) || ieee1588Status == "1" {
+		if isTrueValue(ieee1588Status) || ieee1588Status == "1" || isSynchronizedValue(ieee1588Status) {
 			return "ntp"
 		}
 		return "gps" // default sync source when locked
 	}
 
 	// Not synced — check individual sources for partial status
-	if isTrueValue(gpsStatus) || gpsStatus == "1" {
+	if isTrueValue(gpsStatus) || gpsStatus == "1" || isSynchronizedValue(gpsStatus) {
 		return "gps"
 	}
-	if isTrueValue(bdsStatus) || bdsStatus == "1" {
+	if isTrueValue(bdsStatus) || bdsStatus == "1" || isSynchronizedValue(bdsStatus) {
 		return "beidou"
 	}
 
@@ -239,6 +250,10 @@ func CalcNumOfCells(params map[string]string) int {
 // isTrueValue checks if a TR069 parameter value represents a boolean true.
 func isTrueValue(v string) bool {
 	return v == "1" || strings.EqualFold(v, "true")
+}
+
+func isSynchronizedValue(v string) bool {
+	return strings.EqualFold(strings.TrimSpace(v), "synchronized") || strings.EqualFold(strings.TrimSpace(v), "synced")
 }
 
 func isCellActiveForIndex(params map[string]string, index int) (bool, bool) {

@@ -203,9 +203,27 @@ func TestLookupGPSHeight(t *testing.T) {
 			want:  "200", ok: true,
 		},
 		{
-			name:  "fallback to Height when both missing",
+			name:  "fallback to BaiBNQ locked altitude",
+			paths: map[string]string{"Device.FAP.GPS.LockedAltitude": "168"},
+			want:  "168", ok: true,
+		},
+		{
+			name: "BaiBNQ locked altitude wins over synchronization altitude",
+			paths: map[string]string{
+				"Device.FAP.GPS.LockedAltitude":            "168",
+				"Device.FAP.Synchronization.Altitude": "514.49",
+			},
+			want: "168", ok: true,
+		},
+		{
+			name:  "fallback to Height when GPS altitude paths missing",
 			paths: map[string]string{"Device.FAP.GPS.Height": "150"},
 			want:  "150", ok: true,
+		},
+		{
+			name:  "fallback to BaiBNQ synchronization altitude",
+			paths: map[string]string{"Device.FAP.Synchronization.Altitude": "514.49"},
+			want:  "514.49", ok: true,
 		},
 		{
 			name:  "empty value is skipped",
