@@ -58,12 +58,16 @@ func (m *PolicyMonitor) SetTaskIDLister(l TaskIDLister) {
 }
 
 // backupFilenameRe extracts the {taskID8} hex prefix from a backup
-// object key. Object keys are full bucket paths such as
-// "config_backup/backup/2026/03/29/backup-aabbccdd-SN999.xml.gz", so the
-// regex tolerates an arbitrary leading path segment via .* before the
-// "backup-" marker. Two optional dotted suffixes cover the
-// .compressed (.gz/.zst) and/or .enc combinations T-0074 / T-0075 emit.
-var backupFilenameRe = regexp.MustCompile(`^.*backup-([0-9a-f]{8})-.+?\.xml(\.[a-z0-9]+)?(\.[a-z0-9]+)?$`)
+// object key. Object keys are full bucket paths laid down by ACS upload
+// handler as:
+//
+//	{category}/YYYY/MM/DD/{taskID8}/{SN}_CFG.{xml|nv}
+//
+// taskID8 is the directory segment immediately before the canonical
+// filename. issue #585 dropped the legacy `backup-{taskID8}-{SN}.{ext}`
+// naming entirely (no compression/.enc suffixes either) — historical
+// objects under that scheme are not considered.
+var backupFilenameRe = regexp.MustCompile(`(?:^|/)([0-9a-f]{8})/[^/]+_CFG\.(?:xml|nv)$`)
 
 // parseBackupFilename returns the (lowercase) taskID8 prefix when the
 // object key matches the canonical backup naming convention. ok=false
