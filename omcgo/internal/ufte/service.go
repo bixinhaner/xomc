@@ -1398,14 +1398,17 @@ func (s *Service) mapTask(ctx context.Context, catalog []TaskType, task *softwar
 		ExecutionMode:   executionModeForTask(task.Status, task.CreateStatus),
 		CreateUser:      task.CreateUser,
 		CreatedAt:       formatTime(time.Time(task.CreatedAt)),
-		ScheduledAt:     scheduledAtToString(task.ScheduledAt),
+		StartedAt:       modelTimePtrToString(task.StartedAt),
+		EndedAt:         modelTimePtrToString(task.EndedAt),
+		ScheduledAt:     modelTimePtrToString(task.ScheduledAt),
 		OperatorScope:   task.CreateUser,
 	}, nil
 }
 
-// scheduledAtToString 把 *model.Time 格式化成前端期望的 ISO 字符串（formatTime 与
-// CreatedAt 一致），nil 时返回空串 → JSON omitempty 不输出。
-func scheduledAtToString(t *coremodel.Time) string {
+// modelTimePtrToString 把 *model.Time 格式化成前端期望的 ISO 字符串
+// （与 CreatedAt 同款 formatTime 路径），nil 时返回空串 → JSON omitempty 不输出。
+// 用于 Task.StartedAt / EndedAt / ScheduledAt 这类可空时间字段统一序列化。
+func modelTimePtrToString(t *coremodel.Time) string {
 	if t == nil {
 		return ""
 	}

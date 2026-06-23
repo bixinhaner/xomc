@@ -328,7 +328,7 @@ function TaskTable({
   hasActiveFilter: boolean
   onOpen: (id: string) => void
 }) {
-  const cols = 8
+  const cols = 9
   return (
     <TableCard>
       <Table>
@@ -342,6 +342,7 @@ function TaskTable({
             <TableHead>进度 (成功/失败/总)</TableHead>
             <TableHead>执行方式</TableHead>
             <TableHead>创建时间</TableHead>
+            <TableHead>结束时间</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -396,6 +397,11 @@ function TaskTable({
                 <TableCell>
                   <span className="text-xs text-muted-foreground">
                     {formatTime(task.createdAt)}
+                  </span>
+                </TableCell>
+                <TableCell>
+                  <span className="text-xs text-muted-foreground">
+                    {task.endedAt ? formatTime(task.endedAt) : '—'}
                   </span>
                 </TableCell>
               </TableRow>

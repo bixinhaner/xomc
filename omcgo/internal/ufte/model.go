@@ -82,8 +82,12 @@ type Task struct {
 	ExecutionMode   string `json:"executionMode"`
 	CreateUser      string `json:"createUser"`
 	CreatedAt       string `json:"createdAt"`
-	ScheduledAt     string `json:"scheduledAt,omitempty"`
-	OperatorScope   string `json:"operatorScope"`
+	// StartedAt 任务真正开始下发（状态首次进入 in_progress 时由 PG repo 自动写入 upgrade_tasks.started_at）；未开始时为空 → JSON omitempty 不输出。
+	StartedAt     string `json:"startedAt,omitempty"`
+	// EndedAt 任务到达终态（ended / 含成功/失败/终止）时由 PG repo 自动写入 upgrade_tasks.ended_at；未结束时为空。
+	EndedAt       string `json:"endedAt,omitempty"`
+	ScheduledAt   string `json:"scheduledAt,omitempty"`
+	OperatorScope string `json:"operatorScope"`
 }
 
 type DeviceItem struct {

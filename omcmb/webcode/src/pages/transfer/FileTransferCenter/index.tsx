@@ -978,13 +978,17 @@ export default function FileTransferCenter() {
           title: t('ufte.col.startTime'),
           key: 'startTime',
           width: 180,
-          render: (_, record) => record.executionMode === 'scheduled' && record.scheduledAt ? formatSystemTime(record.scheduledAt) : '-',
+          render: (_, record) => {
+            if (record.startedAt) return formatSystemTime(record.startedAt);
+            if (record.executionMode === 'scheduled' && record.scheduledAt) return formatSystemTime(record.scheduledAt);
+            return '-';
+          },
         },
         {
           title: t('ufte.col.endTime'),
           key: 'endTime',
           width: 180,
-          render: (_, record) => record.status === 'ended' ? formatSystemTime(record.createdAt) : '-',
+          render: (_, record) => (record.endedAt ? formatSystemTime(record.endedAt) : '-'),
         },
       ];
     }
@@ -1058,6 +1062,12 @@ export default function FileTransferCenter() {
         key: 'createdAt',
         width: 180,
         render: (value: string) => formatSystemTime(value),
+      },
+      {
+        title: t('ufte.col.endTime'),
+        key: 'endTime',
+        width: 180,
+        render: (_, record) => (record.endedAt ? formatSystemTime(record.endedAt) : '-'),
       },
     ];
   }, [isUpgradeLikeCategory, taskTypes, t]);
