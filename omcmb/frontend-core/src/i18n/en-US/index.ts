@@ -1121,6 +1121,7 @@ const messages: Record<string, string> = {
   'device.multi.actionSave':              'Save',
   'device.multi.actionAdd':               'Add',
   'device.multi.actionDelete':            'Delete',
+  'device.multi.actionAddRollback':       'Auto-delete',
   'device.multi.tagQueueFailed':          '{action} enqueue failed',
   'device.multi.tagQueued':               '{action} enqueued',
   'device.multi.tagSuccess':              '{action} succeeded',
@@ -1158,6 +1159,8 @@ const messages: Record<string, string> = {
   'device.multi.addQueueFailed':          'Add-instance enqueue failed ({group})',
   'device.multi.rowQueueFailed':          'Row {instId} enqueue failed ({group})',
   'device.multi.queueFailedDesc':         '{count} change(s) failed to enqueue: {err}. Inputs are preserved; fix and retry.',
+  'device.multi.addRollbackFailed':       'Auto-rollback for failed add instance {instId} could not be enqueued ({group})',
+  'device.multi.addRollbackQueueFailedDesc': 'Auto-rollback of instance {instId} failed: {err}. Please delete it manually.',
   'device.multi.detailFailed':            '{target}: {err}',
   'device.multi.instance':                'Instance',
   // BSC packed-scalar neighbor table (PackedScalarNeighborTable)

@@ -72,7 +72,9 @@ export function statusTagSpec(action: MultiFeedback, taskStatus: DeviceTaskStatu
     ? t('device.multi.actionSave')
     : action.action === 'add'
       ? t('device.multi.actionAdd')
-      : t('device.multi.actionDelete');
+      : action.action === 'add_rollback'
+        ? t('device.multi.actionAddRollback')
+        : t('device.multi.actionDelete');
   if (action.submitStatus === 'failed_to_queue') {
     return { color: 'error', icon: <CloseCircleOutlined />, label: t('device.multi.tagQueueFailed', { action: actionLabel }) };
   }
@@ -336,7 +338,7 @@ function PackedScalarNeighborTable({
     while (Date.now() < timeoutAt) {
       const task = await deviceTaskApi.getTask(taskId);
       if (isDeviceTaskTerminal(task.status)) return task;
-      await new Promise((resolve) => window.setTimeout(resolve, 1000));
+      await new Promise((resolve) => window.setTimeout(resolve, 400));
     }
     throw new Error(t('device.multi.waitTaskTimeout'));
   }, [t]);
@@ -550,7 +552,7 @@ function PackedScalarNeighborTable({
       size="small"
       extra={
         <Space>
-          {lastAction && (() => {
+          {lastAction && lastAction.action !== 'add_rollback' && (() => {
             const tagSpec = statusTagSpec(lastAction, lastTask?.status, t);
             const isFailed = lastTask?.status === 'failed' && Boolean(lastTask?.errorMessage);
             const briefFault = isFailed ? formatDeviceFaultBrief(lastTask?.errorMessage) : '';
@@ -691,6 +693,10 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
   const addMutation = useAddObject();
   const deleteMutation = useDeleteObject();
   const queryClient = useQueryClient();
+  // 乐观删除集合:Add 流程 SPV 失败时立刻把对应实例号加进来,渲染层过滤掉。
+  // 与 schema cache 解耦 — 不受 deleteMutation onSuccess invalidate 触发的 refetch 干扰,
+  // 等设备真删 ACK 且 refetch 拉到不含该实例的 schema 后再从集合移除。
+  const [optimisticallyRemoved, setOptimisticallyRemoved] = useState<Set<number>>(() => new Set());
   const specialColumns = BM_SPECIAL_COLUMNS[group.id] ?? null;
   const [editModal, setEditModal] = useState<EditModalState | null>(null);
   // 状态包住整段 handleSaveEditModal(含 AddObject mutation 后的 waitForTaskTerminal 轮询),
@@ -738,8 +744,11 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
   // 实例号列表直接从 schema 派生（不再走 setState in effect）
   const instanceIds = useMemo(() => {
     if (!objectEntry) return [] as string[];
-    return objectEntry.currentInstances.map((n) => String(n)).sort((a, b) => Number(a) - Number(b));
-  }, [objectEntry]);
+    return objectEntry.currentInstances
+      .filter((n) => !optimisticallyRemoved.has(n))
+      .map((n) => String(n))
+      .sort((a, b) => Number(a) - Number(b));
+  }, [objectEntry, optimisticallyRemoved]);
 
   const paramSchemaByLeaf = useMemo(() => {
     const map = new Map<string, ParameterSchemaItem>();
@@ -845,7 +854,7 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
     while (Date.now() < timeoutAt) {
       const task = await deviceTaskApi.getTask(taskId);
       if (isDeviceTaskTerminal(task.status)) return task;
-      await new Promise((resolve) => window.setTimeout(resolve, 1000));
+      await new Promise((resolve) => window.setTimeout(resolve, 400));
     }
     throw new Error(t('device.multi.waitTaskTimeout'));
   }, [t]);
@@ -855,10 +864,15 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
   // Tag 只显示"入队成功/失败"语义。
   const { data: lastTask } = useDeviceTaskStatus(lastAction?.taskId);
 
-  // 任务进入任一终态后再次刷新 schema:
-  //  - DeleteObject:摘掉已删实例(原始用途)
+  // 任务进入任一终态后再刷新当前多实例 schema:
+  //  - DeleteObject:摘掉已删实例(原始用途)。handleDelete 里 API ACK 时已 refetch 一次，
+  //    但设备尚未真删 → schema 仍含该实例。在这里 task 终态后再 refetch 一次当前表 schema
+  //    即可与设备侧一致（只 GET 当前多实例，不做跨 device 全量 invalidate）。
   //  - SPV save:completed 时拿到新值；failed/expired/cancelled 时回到设备侧真实值，
   //    同步清掉该行 rowEdits + draft，避免页面继续显示乐观输入。
+  //  - Add 流程的 SPV 失败 → 自动 DeleteObject 回滚刚创建的空实例，避免设备侧残留"半成品":
+  //    判断条件 = action==='save' 且 lastAction.instanceNumber>0 且 task.status==='failed'
+  //    且 还未为该 taskId 做过回滚(invalidatedForTaskId 去重)。与 index.tsx BSC 须知一致。
   useEffect(() => {
     if (!lastTask || !isDeviceTaskTerminal(lastTask.status)) return;
     let cancelled = false;
@@ -887,6 +901,70 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
           return next;
         });
         for (const id of ids) clearDraftPrefix(fbKey, `${id}.`);
+      }
+
+      // Add 流程的 SPV 失败 → 静默自动 DeleteObject 回滚刚创建的空实例。
+      // 用户感知:只看到 T-0146 弹的"基站应答失败"通知 + Tag(由原 save+failed 渲染);
+      //          表格里既不会出现"自动删除"Tag,也不会出现残留的空实例行。
+      // 实现要点:
+      //   1) 先把 inst 加入 optimisticallyRemoved → instanceIds useMemo 过滤掉该行,
+      //      表格立刻去掉它。该集合是 UI 层过滤,不受 deleteMutation onSuccess invalidate
+      //      触发的 schema refetch 干扰(否则乐观删除会被立即覆盖回来)。
+      //   2) 后台 deleteMutation 真删 + 等任务终态后再 refetch + 从集合移除,
+      //      此时设备侧已不含该实例,schema 与 UI 一致。
+      //   3) 不调 setFeedback(避免 Tag 变成 add_rollback)。
+      if (
+        lastAction
+        && lastAction.action === 'save'
+        && lastTask.status === 'failed'
+        && typeof lastAction.instanceNumber === 'number'
+        && lastAction.instanceNumber > 0
+        && lastAction.invalidatedForTaskId !== lastTask.id
+      ) {
+        const inst = lastAction.instanceNumber;
+        // 去重标记必须在 await 之前写 — 避免 React StrictMode 等重复调度中双发。
+        patchFeedback(fbKey, { invalidatedForTaskId: lastTask.id });
+        // 1) UI 层立刻乐观删除该行。
+        setOptimisticallyRemoved((prev) => {
+          if (prev.has(inst)) return prev;
+          const next = new Set(prev);
+          next.add(inst);
+          return next;
+        });
+        // 清掉被回滚实例可能残留的 rowEdits + draft（这些都是用户感知不到的内部状态）。
+        clearDraftPrefix(fbKey, `${inst}.`);
+        setRowEdits((prev) => {
+          const next = new Map(prev);
+          next.delete(String(inst));
+          return next;
+        });
+        try {
+          const { taskId: rollbackTaskId } = await deleteMutation.mutateAsync({
+            deviceId,
+            objectPath: `${objectPath}${inst}.`,
+          });
+          // 等设备真删完再 refetch + 撤回乐观过滤,让本地 schema 与设备侧最终对账。
+          // 失败/超时仅 warn,且保留过滤状态(用户仍看不到该行,直到下次主动刷新)。
+          try {
+            await waitForTaskTerminal(rollbackTaskId);
+            if (!cancelled) {
+              await refetch();
+              setOptimisticallyRemoved((prev) => {
+                if (!prev.has(inst)) return prev;
+                const next = new Set(prev);
+                next.delete(inst);
+                return next;
+              });
+            }
+          } catch (waitErr) {
+            // eslint-disable-next-line no-console
+            console.warn('[MultiInstanceTable] silent add-rollback wait failed', { inst, waitErr });
+          }
+        } catch (err) {
+          // 静默策略:回滚入队失败也不打扰用户,只在 console 里留痕便于排查。
+          // eslint-disable-next-line no-console
+          console.warn('[MultiInstanceTable] silent add-rollback enqueue failed', { inst, err });
+        }
       }
     })();
     return () => {
@@ -1040,7 +1118,7 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
         } else {
           // 拿到 instance_number 后仍主动 refetch 一次,让 schemaByPath 有该实例的默认值供后续 SPV 对比；
           // 但不阻塞:即使 refetch 还没看到新实例,SPV 也能按用户填值直接发。
-          await refetch();
+          void refetch();
         }
 
         if (!targetInstanceId) {
@@ -1118,6 +1196,11 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
         submitStatus: 'queued',
         taskId: result.taskId,
         savedInstId: targetInstanceId,
+        // Add 流程的 SPV 入队 — 记录刚 AddObject 创建出的实例号，一旦 SPV failed,
+        // lastTask 终态 useEffect 会据此自动 DeleteObject 回滚该实例(与 BSC 须知一致)。
+        instanceNumber: editModal.mode === 'add' && /^\d+$/.test(targetInstanceId)
+          ? Number(targetInstanceId)
+          : undefined,
         detail: editModal.mode === 'add' ? t('device.multi.detailAdd', { instId: targetInstanceId, count: updates.length }) : t('device.multi.detailRow', { instId: targetInstanceId, count: updates.length }),
         at: Date.now(),
       });
@@ -1242,7 +1325,7 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
       size="small"
       extra={
         <Space>
-          {lastAction && (() => {
+          {lastAction && lastAction.action !== 'add_rollback' && (() => {
             const spec = statusTagSpec(lastAction, lastTask?.status, t);
             const isFailed = lastTask?.status === 'failed' && Boolean(lastTask?.errorMessage);
             const briefFault = isFailed ? formatDeviceFaultBrief(lastTask?.errorMessage) : '';

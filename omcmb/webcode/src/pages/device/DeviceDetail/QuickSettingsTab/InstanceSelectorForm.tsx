@@ -498,7 +498,9 @@ export default function InstanceSelectorForm({
 
   const { data: lastTask } = useDeviceTaskStatus(lastAction?.taskId);
 
-  // 任务进入终态 → 刷新 schema，并清掉乐观编辑值（保留 selectedInstId）
+  // 任务进入终态 → 只刷新当前多实例的 schema(精确到 objectPath 该一份查询),
+  // 并清掉乐观编辑值（保留 selectedInstId）。不作跨 device 的全量 invalidate，
+  // 避免领居/顶层 selector 等无关查询被动重拉。
   useEffect(() => {
     if (!lastTask || !isDeviceTaskTerminal(lastTask.status)) return;
     let cancelled = false;

@@ -1123,6 +1123,7 @@ const messages: Record<string, string> = {
   'device.multi.actionSave':              '保存',
   'device.multi.actionAdd':               '新增',
   'device.multi.actionDelete':            '删除',
+  'device.multi.actionAddRollback':       '自动删除',
   'device.multi.tagQueueFailed':          '{action}入队失败',
   'device.multi.tagQueued':               '{action}已入队',
   'device.multi.tagSuccess':              '{action}成功',
@@ -1160,6 +1161,8 @@ const messages: Record<string, string> = {
   'device.multi.addQueueFailed':          '新增实例入队失败({group})',
   'device.multi.rowQueueFailed':          '第 {instId} 行入队失败({group})',
   'device.multi.queueFailedDesc':         '{count} 项变更入队失败:{err}。输入值已保留,可修正后重试。',
+  'device.multi.addRollbackFailed':       '新增实例 {instId} 失败后自动回滚入队失败({group})',
+  'device.multi.addRollbackQueueFailedDesc': '实例 {instId} 自动回滚失败:{err},请手动删除',
   'device.multi.detailFailed':            '{target}:{err}',
   'device.multi.instance':                '实例',
   // BSC 邻区打包标量表 (PackedScalarNeighborTable) 专用

@@ -854,6 +854,8 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
   // T-0146:Save 后用 task_id 轮询真实 CPE 应答状态;到终态后停轮询。
   const { data: lastTask } = useDeviceTaskStatus(lastSubmit?.taskId);
 
+  // 任务终态后只 refetch 当前实例的 schema(精确到 commonPrefix 该份查询),
+  // 拿到设备侧最新值后回填表单。不做跨 device 的全量 invalidate。
   useEffect(() => {
     if (!lastTask || !['completed', 'failed', 'expired', 'cancelled'].includes(lastTask.status)) return;
     let cancelled = false;
