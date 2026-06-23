@@ -146,6 +146,41 @@ func (c *NATSClient) EnsureStreams(ctx context.Context, allowRebuild bool) error
 			return err
 		}
 	}
+
+	// 消费者位点健康检查（issue #567）：
+	// stream rebuild 后消费者可能保留旧 stream 实例的位点（delivered.stream_seq
+	// 远大于新 stream 的 last_seq），导致 NATS 认为所有消息已处理、新消息被静默丢弃。
+	// 检测到错位消费者后删除，QueueSubscribe 会自动重建。
+	for _, def := range DefaultStreams() {
+		info, err := c.JS.StreamInfo(def.Name)
+		if err != nil {
+			c.logger.Warn("consumer health check: cannot get stream info, skipping",
+				zap.String("stream", def.Name), zap.Error(err))
+			continue
+		}
+
+		lastSeq := info.State.LastSeq
+		for cn := range c.JS.ConsumerNames(def.Name) {
+			ci, err := c.JS.ConsumerInfo(def.Name, cn)
+			if err != nil {
+				c.logger.Warn("consumer health check: cannot get consumer info, skipping",
+					zap.String("stream", def.Name), zap.String("consumer", cn), zap.Error(err))
+				continue
+			}
+			if ci.Delivered.Stream > lastSeq {
+				c.logger.Warn("consumer position ahead of stream last_seq — deleting stale consumer (will auto-recreate on next subscribe)",
+					zap.String("stream", def.Name),
+					zap.String("consumer", cn),
+					zap.Uint64("delivered_stream_seq", ci.Delivered.Stream),
+					zap.Uint64("stream_last_seq", lastSeq))
+				if err := c.JS.DeleteConsumer(def.Name, cn); err != nil {
+					c.logger.Error("failed to delete stale consumer",
+						zap.String("stream", def.Name), zap.String("consumer", cn), zap.Error(err))
+				}
+			}
+		}
+	}
+
 	return nil
 }
 
