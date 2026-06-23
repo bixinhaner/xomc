@@ -24,6 +24,7 @@ import {
 import { cn } from '@/lib/utils'
 
 import { useQueryTemplates, useAggregatedMetricsByDevices } from '@core/hooks/api/usePmQuery'
+import { pivotLongToWide, formatPivotNumber } from '@core/utils/pmPivotTransform'
 import type { QueryTemplate } from '@core/types/pmQuery'
 import type { AggregatedRow, Granularity } from '@core/types/pmDashboard'
 import { useT, type TranslateFn } from '@/hooks/useT'
@@ -62,30 +63,7 @@ function presetToRange(preset: QueryTemplate['payload']['timeRangePreset'], payl
   }
 }
 
-// 聚合行透视：行键=time，列=metricPath（用 displayName 展示），单元格=metricValue。
-function pivot(rows: AggregatedRow[]): {
-  times: string[]
-  metrics: { path: string; label: string }[]
-  cell: Map<string, number | null>
-} {
-  const times: string[] = []
-  const timeSeen = new Set<string>()
-  const metricMap = new Map<string, string>()
-  const cell = new Map<string, number | null>()
-  for (const r of rows) {
-    if (!timeSeen.has(r.time)) {
-      timeSeen.add(r.time)
-      times.push(r.time)
-    }
-    if (!metricMap.has(r.metricPath)) {
-      metricMap.set(r.metricPath, r.displayName || r.metricPath)
-    }
-    cell.set(`${r.time}|${r.metricPath}`, r.metricValue)
-  }
-  times.sort((a, b) => a.localeCompare(b))
-  const metrics = Array.from(metricMap.entries()).map(([path, label]) => ({ path, label }))
-  return { times, metrics, cell }
-}
+// 聚合行透视：用 pivotLongToWide 将 long format 转 wide format。
 
 function ResultTable({
   rows,
@@ -104,8 +82,8 @@ function ResultTable({
   errors: unknown[]
   t: TranslateFn
 }) {
-  const { times, metrics, cell } = useMemo(() => pivot(rows), [rows])
-  const colCount = metrics.length + 1
+  const pivoted = useMemo(() => pivotLongToWide(rows), [rows])
+  const colCount = pivoted.columns.length + 5
 
   return (
     <div>
@@ -117,9 +95,13 @@ function ResultTable({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>{t('perf.kpiQuery.colTime')}</TableHead>
-              {metrics.map((m) => (
-                <TableHead key={m.path}>{m.label}</TableHead>
+              <TableHead>{t('perf.kpiQuery.pivot.startTime')}</TableHead>
+              <TableHead>{t('perf.kpiQuery.pivot.deviceSn')}</TableHead>
+              <TableHead>Cell ID</TableHead>
+              <TableHead>PLMN</TableHead>
+              <TableHead>{t('perf.kpiQuery.pivot.measObject')}</TableHead>
+              {pivoted.columns.map((c) => (
+                <TableHead key={c.key}>{c.title}</TableHead>
               ))}
             </TableRow>
           </TableHeader>
@@ -128,22 +110,23 @@ function ResultTable({
               <LoadingRow colSpan={colCount} />
             ) : isError ? (
               <ErrorRow colSpan={colCount} error={errors[0] ?? new Error(t('perf.kpiQuery.queryFailedShort'))} />
-            ) : times.length === 0 ? (
+            ) : pivoted.rows.length === 0 ? (
               <EmptyRow colSpan={colCount}>{t('perf.kpiQuery.noResults')}</EmptyRow>
             ) : (
-              times.map((time) => (
-                <TableRow key={time}>
+              pivoted.rows.map((row) => (
+                <TableRow key={row.key}>
                   <TableCell className="text-xs text-muted-foreground">
-                    {formatTime(time)}
+                    {formatTime(row.time)}
                   </TableCell>
-                  {metrics.map((m) => {
-                    const v = cell.get(`${time}|${m.path}`)
-                    return (
-                      <TableCell key={m.path} className="tabular-nums">
-                        {v === null || v === undefined ? '—' : v}
-                      </TableCell>
-                    )
-                  })}
+                  <TableCell className="text-xs">{row.deviceSn ?? '—'}</TableCell>
+                  <TableCell className="text-xs">{row.cellId ?? '—'}</TableCell>
+                  <TableCell className="text-xs">{row.plmn ?? '—'}</TableCell>
+                  <TableCell className="text-xs">{row.measObject ?? '—'}</TableCell>
+                  {pivoted.columns.map((c) => (
+                    <TableCell key={c.key} className="tabular-nums">
+                      {formatPivotNumber(row.cells[c.key])}
+                    </TableCell>
+                  ))}
                 </TableRow>
               ))
             )}

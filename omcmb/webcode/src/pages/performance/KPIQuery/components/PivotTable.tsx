@@ -37,6 +37,7 @@ const FIXED_COL_WIDTHS = {
   deviceSn: 180,
   cellId: 100,
   plmn: 80,
+  measObject: 160,
 } as const;
 
 // 拖拽时的最小列宽，避免拖没了
@@ -172,6 +173,13 @@ export default function PivotTable({ rows, loading, emptyDescription }: PivotTab
         dataIndex: 'plmn',
         key: 'plmn',
         width: FIXED_COL_WIDTHS.plmn,
+        render: (v?: string) => v ?? '-',
+      },
+      {
+        title: t('perf.kpiQuery.pivot.measObject'),
+        dataIndex: 'measObject',
+        key: 'measObject',
+        width: FIXED_COL_WIDTHS.measObject,
         render: (v?: string) => v ?? '-',
       },
       ...pivoted.columns.map((c: PivotColumn) => ({
