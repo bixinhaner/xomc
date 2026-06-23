@@ -8,6 +8,7 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 import { cn } from '@/lib/utils'
 import { useIndicatorList } from '@core/hooks/api/useIndicatorsLibrary'
 import { useAggregatedMetricsByDevices } from '@core/hooks/api/usePmQuery'
+import { formatObjectLdn } from '@core/utils/pmPivotTransform'
 import { useDeviceList } from '@core/hooks/api/useDevices'
 import type { DeviceType } from '@core/types/indicatorLibrary'
 import type { Granularity } from '@core/types/pmDashboard'
@@ -136,6 +137,18 @@ export default function PerformanceQuery() {
       return { metricPath: mp, displayName, rows: sub }
     })
   }, [aggRows, submitted, metricLabels])
+
+  const measObjects = useMemo(() => {
+    if (!submitted || aggRows.length === 0) return [] as string[]
+    const seen = new Set<string>()
+    aggRows.forEach((r) => {
+      if (r.objectLdn) {
+        const formatted = formatObjectLdn(r.objectLdn)
+        if (formatted) seen.add(formatted)
+      }
+    })
+    return Array.from(seen).sort()
+  }, [aggRows, submitted])
 
   const toggleMetric = (id: string) => {
     setSelectedMetrics((prev) => {
@@ -377,6 +390,9 @@ export default function PerformanceQuery() {
                       {t('perf.kpiQuery.truncatedShown', { shown: aggRows.length, total })}
                     </span>
                   ) : null}
+                  {measObjects.map((mo) => (
+                    <span key={mo} className="chip text-cyan-300/70">{mo}</span>
+                  ))}
                 </div>
               </GlassPanel>
               <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
