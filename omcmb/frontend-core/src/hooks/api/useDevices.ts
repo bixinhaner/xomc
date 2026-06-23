@@ -84,12 +84,17 @@ export function useDeviceGroups() {
   });
 }
 
+function invalidateDeviceGroupCaches(queryClient: ReturnType<typeof useQueryClient>) {
+  void queryClient.invalidateQueries({ queryKey: ['devices', 'groups'] });
+  void queryClient.invalidateQueries({ queryKey: ['system', 'deviceGroups', 'all'] });
+}
+
 export function useCreateGroup() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: CreateGroupRequest) => api.createGroup(data),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['devices', 'groups'] });
+      invalidateDeviceGroupCaches(queryClient);
     },
   });
 }
@@ -100,7 +105,7 @@ export function useUpdateGroup() {
     mutationFn: ({ id, data }: { id: string; data: UpdateGroupRequest }) =>
       api.updateGroup(id, data),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['devices', 'groups'] });
+      invalidateDeviceGroupCaches(queryClient);
       // 分组「设备匹配规则」改动后后端会异步重算归属，必须同时失效设备列表
       // 缓存，否则用户在 DeviceGrouping 页面里看到的还是旧的归属结果。
       // （仅改名也 invalidate 一次代价可忽略——分组更新本身就是低频操作。）
@@ -114,7 +119,7 @@ export function useDeleteGroup() {
   return useMutation({
     mutationFn: (id: string) => api.deleteGroup(id),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['devices', 'groups'] });
+      invalidateDeviceGroupCaches(queryClient);
     },
   });
 }
