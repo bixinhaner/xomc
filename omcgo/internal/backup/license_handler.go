@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/minio/minio-go/v7"
 
 	"github.com/omcgo/omcgo/internal/admin"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
@@ -213,17 +214,9 @@ func (h *Handler) ImportLicenses(c *gin.Context) {
 	response.OK(c, result)
 }
 
-// LicenseDownloadResponse 同 SnapshotDownloadResponse 形态。
-type LicenseDownloadResponse struct {
-	SerialNumber string `json:"serial_number"`
-	FileName     string `json:"file_name"`
-	DownloadURL  string `json:"download_url"`
-	ExpiresIn    int    `json:"expires_in_seconds"`
-}
-
 // DownloadLicense GET /api/v1/backup/device-licenses/:sn/download
 func (h *Handler) DownloadLicense(c *gin.Context) {
-	if h.licenseService == nil || h.minioClient == nil {
+	if h.licenseService == nil || h.objectClient == nil {
 		commonerrors.AbortWithError(c, http.StatusServiceUnavailable,
 			errors.New("license download not configured"))
 		return
@@ -243,19 +236,22 @@ func (h *Handler) DownloadLicense(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
 		return
 	}
-	presigned, presignErr := h.presignClient().PresignedGetObject(
-		c.Request.Context(), lic.ObjectBucket, lic.ObjectPath, time.Hour, nil,
+	obj, getErr := h.objectClient.GetObject(
+		c.Request.Context(), lic.ObjectBucket, lic.ObjectPath, minio.GetObjectOptions{},
 	)
-	if presignErr != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, presignErr)
+	if getErr != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, getErr)
 		return
 	}
-	response.OK(c, LicenseDownloadResponse{
-		SerialNumber: sn,
-		FileName:     lic.FileName,
-		DownloadURL:  presigned.String(),
-		ExpiresIn:    3600,
-	})
+	defer obj.Close()
+
+	stat, statErr := obj.Stat()
+	if statErr != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, statErr)
+		return
+	}
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", lic.FileName))
+	c.DataFromReader(http.StatusOK, stat.Size, "application/octet-stream", obj, nil)
 }
 
 // DeleteLicense DELETE /api/v1/backup/device-licenses/:sn

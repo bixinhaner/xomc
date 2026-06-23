@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -39,6 +42,7 @@ type Handler struct {
 	svc             *Service
 	presigner       Presigner             // 启动期默认；nil 时下载端点返 503
 	presignProvider PresignClientProvider // issue #548 切片 4：sys_configs 热改 endpoint 后下次 Download 即生效
+	objectClient    *minio.Client         // app 内部可达的 MinIO client；默认用于文件管理同源流式下载
 	logger          *zap.Logger
 }
 
@@ -59,6 +63,14 @@ func (h *Handler) SetPresignProvider(p PresignClientProvider) {
 	h.presignProvider = p
 }
 
+// SetObjectClient 注入内部对象存储 client，用于默认同源流式下载。
+func (h *Handler) SetObjectClient(c *minio.Client) {
+	if h == nil {
+		return
+	}
+	h.objectClient = c
+}
+
 // currentPresigner 返回当前 Download 该用的 Presigner：优先 provider.Get()、其次 h.presigner。
 func (h *Handler) currentPresigner() Presigner {
 	if h.presignProvider != nil {
@@ -76,7 +88,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		g.POST("", h.Create)               // 建导出任务
 		g.GET("", h.List)                  // 列导出任务（任务管理 Tab）
 		g.GET("/files", h.ListFiles)       // 列已成功的导出文件（文件管理 Tab）
-		g.GET("/:id/download", h.Download) // 下载（签名链接）
+		g.GET("/:id/download", h.Download) // 下载（默认同源流式；?mode=url 返回签名链接）
 		g.DELETE("/:id", h.Delete)         // 删除任务记录
 	}
 }
@@ -184,7 +196,9 @@ func (h *Handler) ListFiles(c *gin.Context) {
 	response.OK(c, gin.H{"items": tasksToDTO(tasks)})
 }
 
-// Download GET /pm/exports/:id/download — 生成对象存储签名 GET 链接返回。
+// Download GET /pm/exports/:id/download — 默认同源流式下载 KPI 导出 CSV。
+//
+// 兼容旧调用：?mode=url 仍返回对象存储签名 GET 链接。
 //
 // 文件未就绪（非 succeeded 或 file_path 为空）返 4xx，不 500 崩溃。
 func (h *Handler) Download(c *gin.Context) {
@@ -207,11 +221,43 @@ func (h *Handler) Download(c *gin.Context) {
 		response.Fail(c, http.StatusConflict, "export file not ready")
 		return
 	}
-	if h.presigner == nil && (h.presignProvider == nil || h.presignProvider.Get() == nil) {
+	if c.Query("mode") == "url" {
+		h.respondDownloadURL(c, id, task)
+		return
+	}
+	if h.objectClient == nil {
 		response.Fail(c, http.StatusServiceUnavailable, "object storage not available")
 		return
 	}
-	u, err := h.currentPresigner().PresignedGetObject(c.Request.Context(), task.Bucket, task.FilePath, presignURLTTL, url.Values{})
+	obj, err := h.objectClient.GetObject(c.Request.Context(), task.Bucket, task.FilePath, minio.GetObjectOptions{})
+	if err != nil {
+		h.logger.Warn("open export object failed",
+			zap.String("task_id", id.String()), zap.Error(err))
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	defer obj.Close()
+
+	stat, err := obj.Stat()
+	if err != nil {
+		h.logger.Warn("stat export object failed",
+			zap.String("task_id", id.String()), zap.Error(err))
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	filename := exportDownloadFilename(task)
+	c.Header("Content-Disposition", exportContentDisposition(filename))
+	c.DataFromReader(http.StatusOK, stat.Size, "text/csv; charset=utf-8", obj, nil)
+}
+
+func (h *Handler) respondDownloadURL(c *gin.Context, id uuid.UUID, task *Task) {
+	presigner := h.currentPresigner()
+	if presigner == nil {
+		response.Fail(c, http.StatusServiceUnavailable, "object storage not available")
+		return
+	}
+	u, err := presigner.PresignedGetObject(c.Request.Context(), task.Bucket, task.FilePath, presignURLTTL, url.Values{})
 	if err != nil {
 		h.logger.Warn("presign export download url failed",
 			zap.String("task_id", id.String()), zap.Error(err))
@@ -262,6 +308,47 @@ func (h *Handler) parseListFilter(c *gin.Context) ListFilter {
 		}
 	}
 	return f
+}
+
+func exportDownloadFilename(task *Task) string {
+	name := strings.TrimSpace(task.TaskName)
+	if name == "" {
+		name = "kpi_export_" + task.ID.String()
+	}
+	name = strings.ReplaceAll(name, "\\", "/")
+	name = strings.TrimSpace(filepath.Base(name))
+	if name == "" || name == "." || name == "/" {
+		name = "kpi_export_" + task.ID.String()
+	}
+	if strings.ToLower(filepath.Ext(name)) != ".csv" {
+		name += ".csv"
+	}
+	return name
+}
+
+func exportContentDisposition(filename string) string {
+	ascii := asciiAttachmentFilename(filename)
+	return fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`, ascii, url.PathEscape(filename))
+}
+
+func asciiAttachmentFilename(filename string) string {
+	var b strings.Builder
+	for _, r := range filename {
+		if r <= 31 || r == 127 || r == '"' || r == '\\' || r == ';' || r == '/' {
+			b.WriteByte('_')
+			continue
+		}
+		if r > 126 {
+			b.WriteByte('_')
+			continue
+		}
+		b.WriteRune(r)
+	}
+	name := strings.TrimSpace(b.String())
+	if name == "" {
+		return "kpi_export.csv"
+	}
+	return name
 }
 
 func tasksToDTO(tasks []Task) []taskResponseDTO {

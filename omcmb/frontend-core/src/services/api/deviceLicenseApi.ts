@@ -8,6 +8,7 @@
  */
 import http from '../http';
 import type { PageRequest, PageResponse } from '../../types/pagination';
+import { filenameFromContentDisposition, saveBlob } from '../../utils/saveBlob';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Backend shapes
@@ -248,22 +249,14 @@ export const deviceLicenseApi = {
   },
 
   async download(sn: string): Promise<void> {
-    // 同 configSnapshotApi.download：后端 LicenseDownloadResponse 用 snake_case json tag，
-    // http.ts 不做命名转换 → 必须按 snake_case 读，否则 file_name / download_url 全 undefined。
-    const { data } = await http.get<{
-      serial_number: string;
-      file_name: string;
-      download_url: string;
-      expires_in_seconds: number;
-    }>(`/backup/device-licenses/${encodeURIComponent(sn)}/download`);
-    const a = document.createElement('a');
-    a.href = data.download_url;
-    a.target = '_blank';
-    a.rel = 'noopener';
-    a.download = data.file_name;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    const response = await http.get(`/backup/device-licenses/${encodeURIComponent(sn)}/download`, {
+      responseType: 'blob',
+    });
+    const filename = filenameFromContentDisposition(
+      response.headers['content-disposition'] as string | undefined,
+      `${sn}.lic`,
+    );
+    saveBlob(response.data as BlobPart, filename);
   },
 
   async delete(sn: string): Promise<void> {

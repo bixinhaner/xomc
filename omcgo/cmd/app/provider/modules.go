@@ -1085,6 +1085,7 @@ func initBackupModule(c *Container) error {
 	// M4: ExportFile 依赖（按 SN 列文件 + 生成 MinIO presigned URL）
 	backupHandler.SetFileRepository(backup.NewPgFileRepository(c.PgPool))
 	if c.MinIO != nil {
+		backupHandler.SetObjectClient(c.MinIO)
 		// 注入 PresignClient 而不是内部 client —— 内部 client 的 endpoint 是
 		// `minio:9000`（docker 服务名），签出来的 presigned URL 浏览器解析不了
 		// 会报 ERR_NAME_NOT_RESOLVED。PresignClient 用 minio.public_endpoint
@@ -1092,11 +1093,11 @@ func initBackupModule(c *Container) error {
 		// 与 UFTE 模块 SetDownloadURLLookup 同一套逻辑（见上方 line 207-213）。
 		//
 		// issue #548 切片 4：同时注入 PresignBridge 作运行时 provider，sys_configs
-		// 写入 storage.minio_public_endpoint 后下一次签名 URL 立即用新 endpoint，
-		// 无需重启容器（备份 / license / 快照下载）。原 SetMinioClient 路径作启动期兜底。
+		// 写入 storage.minio_public_endpoint 后下一次 M4 ExportFile 签名 URL 立即用新 endpoint，
+		// 无需重启容器。License / 快照下载已改为同源流式返回，走上面的 objectClient。
 		presignSigner := c.MinIO
 		// 传入 logger：public_endpoint 为空回退内部 endpoint 时会打 Warn（qa-614 #377），
-		// 让运维知道 License / ExportFile 等预签名下载 URL 浏览器可能解析失败。
+		// 让运维知道 ExportFile 预签名下载 URL 浏览器可能解析失败。
 		if pc, perr := minioinfra.NewPresignClient(c.Cfg.MinIO, logger); perr != nil {
 			logger.Warn("create MinIO presign client failed for backupHandler; download URLs may be unreachable",
 				zap.Error(perr))

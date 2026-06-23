@@ -26,6 +26,10 @@ type Handler struct {
 	// M4: ExportFile presigned URL support
 	fileRepo    FileRepository // nil-safe (ExportFile returns 503 if unset)
 	minioClient *minio.Client  // nil-safe (ExportFile returns 503 if unset)
+	// objectClient is the internal MinIO client used for same-origin streaming downloads
+	// (license/config snapshot). It must use the backend-reachable endpoint (e.g. minio:9000),
+	// not the public presign endpoint.
+	objectClient *minio.Client
 	// issue #548 切片 4：sys_configs 写入 storage.minio_public_endpoint 后
 	// presignProvider.Get() 返回新 endpoint 对应的 client；优先级高于 minioClient。
 	// 由 provider/modules.go 注入 PresignBridge；nil 时回退 minioClient。
@@ -70,6 +74,13 @@ func (h *Handler) SetFileRepository(r FileRepository) {
 // in ExportFile (M4). When nil, ExportFile returns 503.
 func (h *Handler) SetMinioClient(c *minio.Client) {
 	h.minioClient = c
+}
+
+// SetObjectClient wires the internal MinIO client used for streaming file
+// content through the authenticated API origin. It must not be a public
+// presign-only client because it performs real GetObject calls from the app.
+func (h *Handler) SetObjectClient(c *minio.Client) {
+	h.objectClient = c
 }
 
 // PresignClientProvider 抽象"按需取当前 MinIO 预签名 client"的能力（issue #548 切片 4）。
