@@ -43,7 +43,7 @@ type TFn = (id: string, values?: Record<string, string | number>) => string;
 // 把后端任务 ErrorMessage(`[Client] Invalid arguments — path faults: [<path>: <code> <path>:  <reason>] [...]`)
 // 提取为简短设备原因列表(如 `Value must be even; Invalid arfcn value`),用于 Tag 内联展示。
 // 解析失败时退化为整段截断。完整原文仍通过 Tooltip 提供。
-function formatDeviceFaultBrief(msg: string | undefined | null): string {
+export function formatDeviceFaultBrief(msg: string | undefined | null): string {
   if (!msg) return '';
   const reasons: string[] = [];
   const re = /9\d{3}\s+[^:]+:\s+([^\]]+?)\]/g;
@@ -55,7 +55,7 @@ function formatDeviceFaultBrief(msg: string | undefined | null): string {
   return joined.length > 80 ? `${joined.slice(0, 77)}...` : joined;
 }
 
-function formatTime(at: number): string {
+export function formatTime(at: number): string {
   const d = new Date(at);
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
@@ -67,7 +67,7 @@ interface StatusTagSpec {
   icon: React.ReactNode;
   label: string;
 }
-function statusTagSpec(action: MultiFeedback, taskStatus: DeviceTaskStatus | undefined, t: TFn): StatusTagSpec {
+export function statusTagSpec(action: MultiFeedback, taskStatus: DeviceTaskStatus | undefined, t: TFn): StatusTagSpec {
   const actionLabel = action.action === 'save'
     ? t('device.multi.actionSave')
     : action.action === 'add'

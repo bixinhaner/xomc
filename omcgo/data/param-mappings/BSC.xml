@@ -21,6 +21,10 @@
                         同时把字符串反解析为 `Neighbor4G.{i}.<leaf>` 子参数登记入 DB。
                在任何一项落地前不在此暴露 READ_WRITE 容器，避免前端 schema 返回 can_add=true
                但点击实际无效（无 standard <param>、无设备 AddObject 入口）。-->
+        <!-- DeviceGSM.Bts. 多实例根容器：用于「新增 BTS」(AddObject)。
+             osmo-bsc 设备允许在该路径下 AddObject/DeleteObject 来增删 BTS 实例。
+             不声明会导致 MappingValidator.ValidateAddObject 返回 not_found，POST /objects/add 直接 400。 -->
+        <object name="DeviceGSM.Bts." standardPath="DeviceGSM.Bts." access="READ_WRITE" changeApplies="Immediate"/>
         <object name="DeviceGSM.Bts.{i}.Trx." standardPath="DeviceGSM.Bts.{i}.Trx." access="READ_WRITE" changeApplies="Immediate"/>
     </objects>
     <parameters>
