@@ -402,7 +402,7 @@ export default function HistoricalAlarms() {
 
       {/* 列表头 */}
       {rows.length > 0 && (
-        <div className="mb-1 grid grid-cols-[28px_28px_2fr_1.4fr_1fr_1fr_140px_88px] items-center gap-3 px-3 font-mono text-[10px] uppercase tracking-[0.16em] text-cyan-300/45">
+        <div className="mb-1 grid grid-cols-[24px_24px_1.7fr_2fr_0.9fr_1fr_140px_72px] items-center gap-3 px-3 font-mono text-[10px] uppercase tracking-[0.16em] text-cyan-300/45">
           <button
             type="button"
             onClick={toggleSelectAll}
@@ -448,7 +448,7 @@ export default function HistoricalAlarms() {
             return (
               <div
                 key={a.id}
-                className="fleet-row grid grid-cols-[28px_28px_2fr_1.4fr_1fr_1fr_140px_88px] items-center gap-3 rounded-sm px-3 py-2.5"
+                className="fleet-row grid grid-cols-[24px_24px_1.7fr_2fr_0.9fr_1fr_140px_72px] items-center gap-3 rounded-sm px-3 py-2.5"
                 style={{ ['--row-color' as never]: SEV_COLOR[a.severity] }}
               >
                 <button

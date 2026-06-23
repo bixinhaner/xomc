@@ -1449,7 +1449,7 @@ export default function DeviceDetail() {
       {
         key: 'actions',
         title: t('common.operation'),
-        width: 72,
+        width: 56,
         fixed: 'left',
         render: (_val, record) => {
           const isConfirmed = record.dealState === '1' || record.dealState === '3';
@@ -1480,6 +1480,13 @@ export default function DeviceDetail() {
             </Dropdown>
           );
         },
+      },
+      {
+        key: 'deviceSn',
+        title: t('alarm.deviceSn'),
+        dataIndex: 'deviceSn',
+        width: 240,
+        mono: true,
       },
       {
         key: 'severity',

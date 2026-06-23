@@ -465,7 +465,7 @@ export default function HistoricalAlarms() {
       {
         key: 'actions',
         title: t('common.operation'),
-        width: 72,
+        width: 56,
         fixed: 'left',
         render: (_val: unknown, record) => {
           const isConfirmed = record.dealState === '1' || record.dealState === '3';
@@ -501,7 +501,7 @@ export default function HistoricalAlarms() {
         key: 'deviceSn',
         title: t('alarm.deviceSn'),
         dataIndex: 'deviceSn',
-        width: 160,
+        width: 240,
         render: (val: unknown, record) =>
           renderSnWithTooltip(
             val,
