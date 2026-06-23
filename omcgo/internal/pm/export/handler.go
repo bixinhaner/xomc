@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -39,6 +41,7 @@ type Handler struct {
 	svc             *Service
 	presigner       Presigner             // 启动期默认；nil 时下载端点返 503
 	presignProvider PresignClientProvider // issue #548 切片 4：sys_configs 热改 endpoint 后下次 Download 即生效
+	objectClient    *minio.Client         // 内部 MinIO client，用于同源流式下载
 	logger          *zap.Logger
 }
 
@@ -57,6 +60,14 @@ func (h *Handler) SetPresignProvider(p PresignClientProvider) {
 		return
 	}
 	h.presignProvider = p
+}
+
+// SetObjectClient 注入内部 MinIO client，用于通过 API 同源流式返回导出文件。
+func (h *Handler) SetObjectClient(c *minio.Client) {
+	if h == nil {
+		return
+	}
+	h.objectClient = c
 }
 
 // currentPresigner 返回当前 Download 该用的 Presigner：优先 provider.Get()、其次 h.presigner。
@@ -184,7 +195,9 @@ func (h *Handler) ListFiles(c *gin.Context) {
 	response.OK(c, gin.H{"items": tasksToDTO(tasks)})
 }
 
-// Download GET /pm/exports/:id/download — 生成对象存储签名 GET 链接返回。
+// Download GET /pm/exports/:id/download — 默认同源流式返回导出文件。
+//
+// 兼容旧调试脚本：?mode=url 时仍返回短时效对象存储签名 GET 链接。
 //
 // 文件未就绪（非 succeeded 或 file_path 为空）返 4xx，不 500 崩溃。
 func (h *Handler) Download(c *gin.Context) {
@@ -207,18 +220,80 @@ func (h *Handler) Download(c *gin.Context) {
 		response.Fail(c, http.StatusConflict, "export file not ready")
 		return
 	}
-	if h.presigner == nil && (h.presignProvider == nil || h.presignProvider.Get() == nil) {
+	if c.Query("mode") == "url" {
+		if h.presigner == nil && (h.presignProvider == nil || h.presignProvider.Get() == nil) {
+			response.Fail(c, http.StatusServiceUnavailable, "object storage not available")
+			return
+		}
+		u, err := h.currentPresigner().PresignedGetObject(c.Request.Context(), task.Bucket, task.FilePath, presignURLTTL, url.Values{})
+		if err != nil {
+			h.logger.Warn("presign export download url failed",
+				zap.String("task_id", id.String()), zap.Error(err))
+			commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+			return
+		}
+		response.OK(c, gin.H{"download_url": u.String()})
+		return
+	}
+	if h.objectClient == nil {
 		response.Fail(c, http.StatusServiceUnavailable, "object storage not available")
 		return
 	}
-	u, err := h.currentPresigner().PresignedGetObject(c.Request.Context(), task.Bucket, task.FilePath, presignURLTTL, url.Values{})
+	obj, err := h.objectClient.GetObject(c.Request.Context(), task.Bucket, task.FilePath, minio.GetObjectOptions{})
 	if err != nil {
-		h.logger.Warn("presign export download url failed",
+		h.logger.Warn("get export object failed",
 			zap.String("task_id", id.String()), zap.Error(err))
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	response.OK(c, gin.H{"download_url": u.String()})
+	defer obj.Close()
+
+	stat, err := obj.Stat()
+	if err != nil {
+		h.logger.Warn("stat export object failed",
+			zap.String("task_id", id.String()), zap.Error(err))
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	filename := exportDownloadFilename(task)
+	c.Header("Content-Disposition", exportContentDisposition(filename))
+	c.DataFromReader(http.StatusOK, stat.Size, "application/octet-stream", obj, nil)
+}
+
+func exportContentDisposition(filename string) string {
+	fallback := strings.Map(func(r rune) rune {
+		if r < 0x20 || r > 0x7e || r == '"' || r == '\\' || r == ';' {
+			return '_'
+		}
+		return r
+	}, filename)
+	if strings.TrimSpace(fallback) == "" {
+		fallback = "kpi_export.csv"
+	}
+	return fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`, fallback, url.PathEscape(filename))
+}
+
+func exportDownloadFilename(task *Task) string {
+	base := strings.TrimSpace(task.TaskName)
+	if base == "" {
+		base = "kpi_export_" + task.ID.String()
+	}
+	base = strings.NewReplacer(
+		"\\", "_",
+		"/", "_",
+		":", "_",
+		"*", "_",
+		"?", "_",
+		"\"", "_",
+		"<", "_",
+		">", "_",
+		"|", "_",
+	).Replace(base)
+	if !strings.HasSuffix(strings.ToLower(base), ".csv") {
+		base += ".csv"
+	}
+	return base
 }
 
 // Delete DELETE /pm/exports/:id — 删除任务记录。

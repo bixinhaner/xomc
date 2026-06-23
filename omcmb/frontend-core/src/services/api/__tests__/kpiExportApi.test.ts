@@ -2,7 +2,7 @@
  * kpiExportApi 契约测试：
  *   - create 发 source_type/params（snake_case），task_name 仅非空才带。
  *   - listTasks/listFiles 打对端点 + 解析 envelope.items。
- *   - download 拿 download_url 后用 <a download> 触发，空 URL 抛错（失败路径）。
+ *   - download 拿 blob 后按 Content-Disposition 文件名触发保存。
  *   - retry 用原任务 source/params 重新 create（后端无独立重试端点）。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -87,24 +87,45 @@ describe('kpiExportApi.listTasks / listFiles', () => {
 });
 
 describe('kpiExportApi.download', () => {
-  it('拿 download_url 后用 <a> 触发下载', async () => {
-    getMock.mockResolvedValue({ data: { download_url: 'https://minio/kpi.csv?sig=x' } });
+  it('拿 blob 后按 Content-Disposition 文件名触发下载', async () => {
+    getMock.mockResolvedValue({
+      data: new Blob(['a,b\n1,2\n'], { type: 'text/csv' }),
+      headers: { 'content-disposition': 'attachment; filename="server.csv"' },
+    });
     const clickSpy = vi.fn();
+    const originalCreateObjectURL = window.URL.createObjectURL;
+    const originalRevokeObjectURL = window.URL.revokeObjectURL;
+    const createObjectURLSpy = vi.fn(() => 'blob:kpi-export');
+    const revokeObjectURLSpy = vi.fn();
+    Object.defineProperty(window.URL, 'createObjectURL', { configurable: true, value: createObjectURLSpy });
+    Object.defineProperty(window.URL, 'revokeObjectURL', { configurable: true, value: revokeObjectURLSpy });
+
     const realCreate = document.createElement.bind(document);
+    let anchor: HTMLAnchorElement | undefined;
     const createSpy = vi.spyOn(document, 'createElement').mockImplementation((tag: string) => {
       const el = realCreate(tag) as HTMLAnchorElement;
-      if (tag === 'a') el.click = clickSpy;
+      if (tag === 'a') {
+        anchor = el;
+        el.click = clickSpy;
+      }
       return el;
     });
+
     await kpiExportApi.download('task-1', 'my.csv');
-    expect(getMock.mock.calls[0][0]).toBe('/pm/exports/task-1/download');
+
+    expect(getMock.mock.calls[0]).toEqual(['/pm/exports/task-1/download', { responseType: 'blob' }]);
+    expect(createObjectURLSpy).toHaveBeenCalledOnce();
     expect(clickSpy).toHaveBeenCalledOnce();
+    expect(anchor?.download).toBe('server.csv');
+    expect(revokeObjectURLSpy).toHaveBeenCalledWith('blob:kpi-export');
     createSpy.mockRestore();
+    Object.defineProperty(window.URL, 'createObjectURL', { configurable: true, value: originalCreateObjectURL });
+    Object.defineProperty(window.URL, 'revokeObjectURL', { configurable: true, value: originalRevokeObjectURL });
   });
 
-  it('空 download_url 抛错（失败路径）', async () => {
-    getMock.mockResolvedValue({ data: { download_url: '' } });
-    await expect(kpiExportApi.download('task-1')).rejects.toThrow('empty download url');
+  it('下载请求失败时透传错误', async () => {
+    getMock.mockRejectedValue(new Error('download failed'));
+    await expect(kpiExportApi.download('task-1')).rejects.toThrow('download failed');
   });
 });
 

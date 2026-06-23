@@ -94,10 +94,10 @@ func initPMModule(c *Container) error {
 	pmQueryTemplateHandler := querytemplate.NewHandler(pmQueryTemplateRepo, logger.Named("querytemplate"))
 
 	// KPI-EXPORT T1：KPI 数据导出 REST 入口（建任务落表 + 入队 pm_kpi_export job）。
-	// 下载用 presign client（对外可达 host 签链接）；构造失败降级 nil，下载端点返 503。
+	// 默认下载通过 app 同源流式返回；presign client 仅保留给 ?mode=url 兼容路径。
 	//
 	// issue #548 切片 4：同时注入 PresignBridge，sys_configs 写入
-	// storage.minio_public_endpoint 后下一次 Download 立即用新 endpoint，无需重启容器。
+	// storage.minio_public_endpoint 后下一次兼容 URL 下载立即用新 endpoint，无需重启容器。
 	// 原 NewPresignClient 路径作启动期兜底。
 	pmExportRepo := pmexport.NewPgRepository(c.PgPool)
 	pmExportSvc := pmexport.NewService(pmExportRepo, pmAsyncJobRepo)
@@ -108,6 +108,7 @@ func initPMModule(c *Container) error {
 		exportPresigner = presignClient
 	}
 	pmExportHandler := pmexport.NewHandler(pmExportSvc, exportPresigner, logger.Named("export"))
+	pmExportHandler.SetObjectClient(c.MinIO)
 	if c.PresignBridge != nil {
 		pmExportHandler.SetPresignProvider(c.PresignBridge)
 	}
@@ -186,7 +187,7 @@ func initPMModule(c *Container) error {
 // 注入到这里的 repo——新建持续任务初始游标 = 建任务时刻当前对应水位桶起点（从「现在」起算，
 // 不回扫历史，结果表不冒出史前空格批量行）。水位表在主库（pgPool），与上游 runner 写水位、
 // cron/executor 读水位同库同源；业务时区与全局响应、cron 调度读同一 sys_configs 源
-//（category='basic', key='timezoneCode'）。
+// （category='basic', key='timezoneCode'）。
 //
 // 抽成包级函数供装配回归测试（pm_adhoc_wiring_test.go）以 nil pool 直接调用，钉死注入链路。
 func buildPMAdhocRepo(pgPool, tsPool *pgxpool.Pool, logger *zap.Logger) *adhoc.PgRepository {
@@ -219,17 +220,17 @@ func (r *indicatorReloader) ReloadOne(ctx context.Context, name string) error {
 }
 
 type pmHandlerDeps struct {
-	pmCounterRepo   *counter.PgCounterRepository
-	pmKPIRepo       *kpi.PgKPIRepository
-	pmKPIEngine     *kpi.KPIEngine
-	pmTaskRepo      *pm.PgTaskRepository
-	pmFileStore     *pm.PgPMFileStore
-	pmIndicatorRepo indicator.IndicatorRepository // T-0164-P1 ListKPIDefinitions 数据源
-	pmAggregator    *aggregator.Aggregator        // T-0164-P5 ListAggregatedMetrics 数据源
-	pmAsyncJobRepo  asyncjob.Repository           // T-0164 收尾 G5-Gap-2 手动重算端点
-	pmAdhocHandler         *adhoc.Handler         // T-0164-P7 自定义聚合任务 REST 入口
-	pmQueryTemplateHandler *querytemplate.Handler // T-0174 指标查询模板 REST 入口
-	pmExportHandler        *pmexport.Handler      // KPI-EXPORT T1 KPI 导出 REST 入口
+	pmCounterRepo          *counter.PgCounterRepository
+	pmKPIRepo              *kpi.PgKPIRepository
+	pmKPIEngine            *kpi.KPIEngine
+	pmTaskRepo             *pm.PgTaskRepository
+	pmFileStore            *pm.PgPMFileStore
+	pmIndicatorRepo        indicator.IndicatorRepository // T-0164-P1 ListKPIDefinitions 数据源
+	pmAggregator           *aggregator.Aggregator        // T-0164-P5 ListAggregatedMetrics 数据源
+	pmAsyncJobRepo         asyncjob.Repository           // T-0164 收尾 G5-Gap-2 手动重算端点
+	pmAdhocHandler         *adhoc.Handler                // T-0164-P7 自定义聚合任务 REST 入口
+	pmQueryTemplateHandler *querytemplate.Handler        // T-0174 指标查询模板 REST 入口
+	pmExportHandler        *pmexport.Handler             // KPI-EXPORT T1 KPI 导出 REST 入口
 
 	// Indicator management handler
 	indicatorHandler     *indicator.IndicatorHandler

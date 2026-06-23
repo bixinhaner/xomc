@@ -6,7 +6,7 @@
  *   POST   /pm/exports            建导出任务
  *   GET    /pm/exports            列导出任务（任务管理 Tab）
  *   GET    /pm/exports/files      列已成功的导出文件（文件管理 Tab，强制 OnlyReady）
- *   GET    /pm/exports/:id/download  生成对象存储签名下载链接
+ *   GET    /pm/exports/:id/download  同源流式下载导出文件
  *   DELETE /pm/exports/:id        删除任务记录
  *
  * 说明：后端无独立"重试"端点；失败任务的"重试"由前端用原 sourceType + params 重新 create 实现。
@@ -21,6 +21,7 @@ import type {
   BackendKpiExportTask,
 } from '../../types/kpiExport';
 import { mapBackendKpiExportTask } from '../../types/kpiExport';
+import { filenameFromContentDisposition, saveBlob } from '../../utils/saveBlob';
 
 interface ListResponse {
   items: BackendKpiExportTask[];
@@ -71,23 +72,16 @@ export const kpiExportApi = {
     return (data.items ?? []).map(mapBackendKpiExportTask);
   },
 
-  /**
-   * 下载导出文件：拿签名 URL，再用 <a download> 触发浏览器下载。
-   * 不能直接 window.open 下载端点——该端点要 Bearer Token，新 tab 不带。
-   */
   async download(id: string, fileName?: string): Promise<void> {
-    const { data } = await http.get<{ download_url: string }>(
+    const response = await http.get(
       `/pm/exports/${encodeURIComponent(id)}/download`,
+      { responseType: 'blob' },
     );
-    if (!data.download_url) throw new Error('empty download url');
-    const a = document.createElement('a');
-    a.href = data.download_url;
-    a.target = '_blank';
-    a.rel = 'noopener';
-    if (fileName) a.download = fileName;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    const filename = filenameFromContentDisposition(
+      response.headers['content-disposition'] as string | undefined,
+      fileName || `kpi_export_${id}.csv`,
+    );
+    saveBlob(response.data as BlobPart, filename, 'text/csv;charset=utf-8');
   },
 
   /** 删除任务记录。 */
