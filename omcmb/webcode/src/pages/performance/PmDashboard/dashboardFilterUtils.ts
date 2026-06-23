@@ -11,6 +11,9 @@
 
 import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
+import utc from 'dayjs/plugin/utc';
+
+dayjs.extend(utc);
 import type { AdhocDimension } from '@core/types/pmAdhoc';
 import type { MetricChart, MetricSeries, MetricSeriesValue } from './taskDashboardUtils';
 
@@ -385,6 +388,18 @@ export function extendChartAxis(chart: MetricChart, opts: AxisFillOptions): Metr
     (a, b) => a - b,
   );
 
+  // 6.5 从第一个有效真实桶字符串提取 UTC offset 分钟数，用于空刻度保持同时区。
+  const firstRealBucket = chart.buckets.find((b) => dayjs(b).isValid());
+  let fillOffsetMin = 0;
+  if (firstRealBucket) {
+    const tzMatch = firstRealBucket.match(/([+-])(\d{2}):(\d{2})$/);
+    if (tzMatch) {
+      const sign = tzMatch[1] === '+' ? 1 : -1;
+      fillOffsetMin = sign * (parseInt(tzMatch[2], 10) * 60 + parseInt(tzMatch[3], 10));
+    }
+    // 'Z' 后缀 → offset 0（默认值已满足）
+  }
+
   // 7. 按新轴 ms 重对齐。
   const nextStepEndMs = (ms: number, idx: number): number => {
     const next = axisMs[idx + 1];
@@ -401,8 +416,8 @@ export function extendChartAxis(chart: MetricChart, opts: AxisFillOptions): Metr
       buckets.push(chart.buckets[realIdx]);
       bucketEnds.push(chart.bucketEnds[realIdx] ?? '');
     } else {
-      buckets.push(dayjs(ms).toISOString());
-      bucketEnds.push(dayjs(nextStepEndMs(ms, idx)).toISOString());
+      buckets.push(dayjs(ms).utcOffset(fillOffsetMin).format('YYYY-MM-DDTHH:mm:ssZ'));
+      bucketEnds.push(dayjs(nextStepEndMs(ms, idx)).utcOffset(fillOffsetMin).format('YYYY-MM-DDTHH:mm:ssZ'));
     }
   });
   const series: MetricSeries[] = chart.series.map((s) => ({
