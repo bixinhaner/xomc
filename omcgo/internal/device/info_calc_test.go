@@ -323,6 +323,14 @@ func TestCalcSyncStatus(t *testing.T) {
 			want: "SYNCED",
 		},
 		{
+			name: "BaiBNQ clock source sync state takes precedence over GPS status",
+			params: map[string]string{
+				"Device.FAP.Synchronization.ClockSourceSyncState": "Synchronized",
+				"Device.DeviceInfo.GPS_Status":                         "Synchronized",
+			},
+			want: "Synchronized",
+		},
+		{
 			name: "LTE management server tfcs sync state",
 			params: map[string]string{
 				"Device.ManagementServer.tfcsSyncState": "1",
@@ -345,6 +353,13 @@ func TestCalcSyncStatus(t *testing.T) {
 			params: map[string]string{
 				"Device.Services.FAPService.1.FAPControl.LTE.Gateway.X_COM_tfcsSyncState": "1",
 				"Device.DeviceInfo.X_COM_GPS_Status": "1",
+			},
+			want: "gps",
+		},
+		{
+			name: "standard GPS status synchronized",
+			params: map[string]string{
+				"Device.DeviceInfo.GPS_Status": "Synchronized",
 			},
 			want: "gps",
 		},

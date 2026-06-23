@@ -244,7 +244,7 @@ interface DeviceDetailInfo {
   specialSubframe?: string;
   rootIndex?: string;
   gpsSatellites?: number;
-  gpsHeight?: number;
+  gpsHeight?: number | null;
   lockStatus?: string;
   enbId?: string;
   networkModel?: string;
@@ -299,7 +299,7 @@ interface BackendDeviceDetailInfo {
   special_subframe?: string;
   root_index?: string;
   gps_satellites?: number;
-  gps_height?: number;
+  gps_height?: number | null;
   lock_status?: string;
   enb_id?: string;
   network_model?: string;
@@ -515,6 +515,20 @@ const renderStatusTag = (value: string | undefined, map: Record<string, { label:
   return <Tag color={entry.color}>{entry.label}</Tag>;
 };
 
+const renderDeviceSyncStatus = (value: string | undefined, t: ReturnType<typeof useT>) =>
+  renderStatusTag(value, {
+    synchronized: { label: t('status.synchronized'), color: 'success' },
+    'gps synchronized': { label: `GPS ${t('status.synchronized')}`, color: 'success' },
+    '1588 synchronized': { label: `1588 ${t('status.synchronized')}`, color: 'success' },
+    'rem synchronized': { label: `REM ${t('status.synchronized')}`, color: 'success' },
+    gps: { label: `GPS ${t('status.synchronized')}`, color: 'success' },
+    beidou: { label: `北斗${t('status.synchronized')}`, color: 'success' },
+    ntp: { label: `NTP/1588 ${t('status.synchronized')}`, color: 'success' },
+    error: { label: t('status.notSynchronized'), color: 'error' },
+    not_synchronized: { label: t('status.notSynchronized'), color: 'error' },
+    'not synchronized': { label: t('status.notSynchronized'), color: 'error' },
+  });
+
 // ─── 基站信息组 ────────────────────────────────────────────────────────
 
 const getStationFields = (t: ReturnType<typeof useT>, networkType: string): FieldGroup => {
@@ -611,7 +625,7 @@ const getStatusFields = (t: ReturnType<typeof useT>, networkType: string): Field
   const fields: FieldItem[] = [
     // 公共字段
     { key: 'ueCount', label: t('device.ueCount'), render: (d) => d.ueCount ?? '-' },
-    { key: 'syncStatus', label: t('device.syncStatus'), render: (d) => d.syncStatus || '-' },
+    { key: 'syncStatus', label: t('device.syncStatus'), render: (d) => renderDeviceSyncStatus(d.syncStatus, t) },
   ];
 
   // eNB 独有字段

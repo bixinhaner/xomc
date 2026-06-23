@@ -141,7 +141,7 @@ interface BackendDevice {
   oml_remote_ip_bak?: string;
 
   // Location
-  gps_height?: number;
+  gps_height?: number | null;
   mechanical_downtilt?: string;
   electronic_downtilt?: string;
   vertical_beam_width?: string;
@@ -384,7 +384,7 @@ function mapBackendDevice(bd: BackendDevice): Device {
     omlRemoteIp: bd.oml_remote_ip || '',
     omlRemoteIpBak: bd.oml_remote_ip_bak || '',
 
-    gpsHeight: bd.gps_height ?? 0,
+    gpsHeight: bd.gps_height ?? null,
     mechanicalDowntilt: bd.mechanical_downtilt || '',
     electronicDowntilt: bd.electronic_downtilt || '',
     verticalBeamWidth: bd.vertical_beam_width || '',

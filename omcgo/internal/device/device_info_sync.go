@@ -270,6 +270,8 @@ var universalInformMapping = map[string]string{
 var gpsHeightCandidatePaths = []string{
 	"Device.FAP.GPS.altidute", // Baicells BaiBLQ 实测拼写
 	"Device.FAP.GPS.Altitude", // TR-181 spec 标准拼写
+	"Device.FAP.GPS.LockedAltitude",
+	"Device.FAP.Synchronization.Altitude",
 	"Device.FAP.GPS.Height",
 }
 
