@@ -20,15 +20,6 @@ import (
 	"github.com/omcgo/omcgo/internal/ufte"
 )
 
-// taskIDPrefix returns the first 8 hex characters of a backup_task UUID with
-// dashes stripped — embedded in the Upload target_file_name so the upload
-// handler can route the resulting MinIO object back to the originating task
-// via SubjectBackupFileReceived (T-0079). 8 hex chars = 32 bits, collision
-// risk < 50% under ~65k concurrent backup tasks (acceptable for MVP).
-func taskIDPrefix(id uuid.UUID) string {
-	return strings.ReplaceAll(id.String(), "-", "")[:8]
-}
-
 // BackupTypeSpec 是配置备份类型的路由表条目。
 // 仅保存"选哪个 UFTE 模板"所需的路由信息（TypeCode + ProductClass 前缀）和
 // URL/文件命名辅助参数。
@@ -298,12 +289,13 @@ func (e *BackupExecutor) handleTaskCreated(ctx context.Context, evt event.Event)
 		//   {baseURL}{path}?fileType=CONFIGBACKUP_XML|CONFIGBACKUP_NV&sn={sn}&taskId={taskID}&filename={file}
 		//   upload handler 通过 fileType query 参数路由到 config_backup bucket。
 		//
-		// T-0079: 文件名嵌入 backup_task UUID prefix，上传 handler 通过
-		// `backup.file.received` 事件将 MinIO 对象路由回对应任务。
-		// CommandKey + SourceID 也可用于 TransferComplete 回调定位。
-		idPrefix := taskIDPrefix(task.ID)
+		// issue #585: 真实落盘文件名由 ACS upload handler 在收 POST 时
+		// 强制覆写为 {sn}_CFG.{xml|nv}（TR-069 Upload RPC 无 TargetFileName
+		// 字段，设备端无法控制）。这里仅作为 URL query 中的 filename=
+		// 提示传给设备/handler，handler 完全忽略并按 sn+fileType 重命名。
+		// task_id 仍由 URL query taskId= 透传，event 兜底从 query 抽 prefix。
 		spec := selectBackupType(dev.ProductClass)
-		targetFilename := fmt.Sprintf("backup-%s-%s%s", idPrefix, dev.SerialNumber, spec.FileExtension)
+		targetFilename := fmt.Sprintf("%s_CFG%s", dev.SerialNumber, spec.FileExtension)
 
 		uploadURL, uploadUsername, uploadPassword, uploadErr := e.resolveUploadTarget(ctx, spec, dev, task, targetFilename)
 		if uploadErr != nil {

@@ -466,8 +466,12 @@ func builtInTaskTypes() []TaskType {
 			FileType:               "10 {OUI} Configuration File",
 			FileTypeLabel:          "10 {OUI} Configuration File",
 			FileTypeEditable:       false,
-			TargetFileNameTemplate: "backup-{task_id8}-{sn}.xml",
-			FileNameTemplate:       "backup-{task_id8}-{sn}.xml",
+			// issue #585: 配置文件备份对象名规范化为 {sn}_CFG.xml。
+			// 真实文件名由 ACS upload handler 在收报文时强制覆写（设备
+			// 在 TR-069 Upload RPC 中无法选定上传文件名），这里 Template
+			// 仅作为 UI 展示与 executor 兜底拼接，保持与 ACS 一致。
+			TargetFileNameTemplate: "{sn}_CFG.xml",
+			FileNameTemplate:       "{sn}_CFG.xml",
 			// URL `filename=` 留空：详见 RUNTIME_LOG_COLLECT 同名说明。
 			TransportPath:    "/smallcell/FileUploadService?fileType=CONFIGBACKUP_XML&sn={sn}&taskId={taskId}&filename=",
 			LastEditor:       "system",
@@ -490,8 +494,9 @@ func builtInTaskTypes() []TaskType {
 			FileType:               "12 {OUI} Configuration File",
 			FileTypeLabel:          "12 {OUI} Configuration File",
 			FileTypeEditable:       false,
-			TargetFileNameTemplate: "backup-{task_id8}-{sn}.nv",
-			FileNameTemplate:       "backup-{task_id8}-{sn}.nv",
+			// issue #585: 同 CONFIG_BACKUP_XML，对象名规范化为 {sn}_CFG.nv。
+			TargetFileNameTemplate: "{sn}_CFG.nv",
+			FileNameTemplate:       "{sn}_CFG.nv",
 			// URL `filename=` 留空：详见 RUNTIME_LOG_COLLECT 同名说明。
 			TransportPath:    "/smallcell/FileUploadService?fileType=CONFIGBACKUP_NV&sn={sn}&taskId={taskId}&filename=",
 			LastEditor:       "system",

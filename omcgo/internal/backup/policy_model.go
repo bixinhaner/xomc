@@ -73,7 +73,12 @@ func DefaultPolicy() *BackupPolicy {
 		CleanupTime:           "03:00",
 		CleanupDayOfWeek:      -1,
 		KeepLastN:             5,
-		EnableCompression:     true,
+		// issue #585：配置备份默认不再压缩。只有 PM / MR 才走压缩链路
+		// （PM 由 ACS pmSyncGzip / MR 由 worker 压缩），配置备份原始字节直存，
+		// 避免任务管理 presigned URL 出现 .xml.gz 命名 / 浏览器侧 Content-Encoding
+		// 透明解压行为不一致。CompressionLevel/CompressionFormat 仍保留默认值
+		// 仅作 schema 兼容，运维即使在 UI 勾选启用，ACS 也已不再装配压缩链路。
+		EnableCompression:     false,
 		CompressionLevel:      6,
 		CompressionFormat:     "gzip",
 		StorageBackend:        "local",
