@@ -295,7 +295,7 @@ func (r *PgRepository) List(ctx context.Context, filter ListFilter) ([]Task, err
 	qb := storage.Psql.Select(taskCols...).
 		From("pm_tasks").
 		Where(sq.Eq{"task_subtype": TaskSubtype}).
-		OrderBy("created_at DESC")
+		OrderBy("task_name ASC")
 	if filter.Mode != nil {
 		qb = qb.Where(sq.Eq{"mode": string(*filter.Mode)})
 	}
