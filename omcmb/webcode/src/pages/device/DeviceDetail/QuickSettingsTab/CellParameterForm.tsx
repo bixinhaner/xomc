@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, Fragment } from 'react';
-import { Button, Card, Col, Form, Input, Row, Select, Space, Spin, Table, Tag, Typography, message, notification } from 'antd';
+import { Button, Card, Col, Form, Input, Row, Select, Space, Spin, Table, Tag, Tooltip, Typography, message, notification } from 'antd';
 import type { FormInstance } from 'antd';
 import { CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, DeleteOutlined, PlusOutlined, SendOutlined, SyncOutlined } from '@ant-design/icons';
 import { useQueryClient } from '@tanstack/react-query';
@@ -15,6 +15,7 @@ import type { DeviceParameter, ParameterSchemaItem, ParameterUpdateRequest } fro
 import type { DeviceTaskStatus } from '@core/types/deviceTask';
 import type { QuickSettingsGroup } from '@core/types/quicksettings';
 import { applyInstanceContext, getEffectiveEnumMeta, validateValue, type QuickSettingsInstanceContext } from './validators';
+import { formatDeviceFaultBrief } from './MultiInstanceTable';
 import { useT } from '@/hooks/useT';
 
 const { Text } = Typography;
@@ -755,6 +756,11 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
     const errors: Record<string, string> = {};
 
     for (const p of group.params) {
+      // readonly leaf(如 BTS ID / 共享只读状态量)不参与下发:它们的 path 在 param-mappings
+      // 里多为 not_found / access=READ_ONLY,带进 SetParameterValues 会被后端 MappingValidator
+      // 整批拒成 400,导致用户改任何字段都"入队失败"。
+      if (p.readonly) continue;
+
       const special = specialConfigByName.get(p.name);
       const path = special?.configPath ?? resolveReadPath(p.standardPath || '');
       const item = schemaByPath.get(path);
@@ -921,11 +927,21 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
         <Space>
           {visibleLastSubmit && (() => {
             const spec = statusTagSpec(visibleLastSubmit, lastTask?.status, t);
-            return (
+            // 任务终态 failed 且设备给了原因 → 在 Tag 上附加简要原因(护舉61~80字截取),
+            // 同时 Tooltip 挂完整 errorMessage,避免用户只看到"保存应答失败"看不到为什么。
+            const isFailed = lastTask?.status === 'failed' && Boolean(lastTask?.errorMessage);
+            const briefFault = isFailed ? formatDeviceFaultBrief(lastTask?.errorMessage) : '';
+            const tag = (
               <Tag icon={spec.icon} color={spec.color}>
-                {spec.label} · {t('device.cell.itemsCount', { count: visibleLastSubmit.count })} · {formatTime(visibleLastSubmit.at)}
+                {spec.label} · {t('device.cell.itemsCount', { count: visibleLastSubmit.count })}
+                {briefFault ? ` · ${briefFault}` : ''} · {formatTime(visibleLastSubmit.at)}
               </Tag>
             );
+            return isFailed ? (
+              <Tooltip title={lastTask?.errorMessage} placement="bottomRight">
+                {tag}
+              </Tooltip>
+            ) : tag;
           })()}
           <Button type="primary" onClick={handleSave} loading={updateMutation.isPending}>
             {updateMutation.isPending ? t('device.cell.dispatching') : t('common.save')}

@@ -13,17 +13,24 @@ export interface CellFeedback {
 
 export interface MultiFeedback {
   kind: 'multi';
-  action: 'save' | 'add' | 'delete';
+  /** add_rollback:add 阶段 AddObject 成功但 SPV 部分参数被拒,顶层 useEffect 触发的自动 DeleteObject。 */
+  action: 'save' | 'add' | 'delete' | 'add_rollback';
   submitStatus: 'queued' | 'failed_to_queue';
   taskId?: string;
   detail: string;
   at: number;
   notifiedFailedTaskId?: string;
+  /** 终态 task → 查询失效仅做一次的去重标记(避免 useEffect 反复触发)。 */
+  invalidatedForTaskId?: string;
   /** save 动作专用:记录被保存的实例号,task=completed 时据此清掉对应行的 rowEdits + draft,
       避免切 tab 走回后乐观显示的旧用户输入覆盖 schema 新值。 */
   savedInstId?: string;
   /** 批量 save 动作:一次保存多个新增实例时,在任务完成后一起清掉乐观编辑态。 */
   savedInstIds?: string[];
+  /** BSC add 动作:AddObject 创建出来的实例号,用于 SPV 失败时自动回滚 DeleteObject。 */
+  instanceNumber?: number;
+  /** add_rollback 动作:从被回滚的原 SPV 失败任务中提取的简短被拒原因,用于 Tag 文案。 */
+  originFaultBrief?: string;
 }
 
 export type Feedback = CellFeedback | MultiFeedback;

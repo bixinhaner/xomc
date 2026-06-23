@@ -33,9 +33,11 @@
            standardPath="DeviceGSM.Bts.0.OmlConnectState" readonly="true"/>
 
     <param name="LocationAreaCode" titleZh="位置区码 (LAC)" titleEn="LocationAreaCode"
-           standardPath="DeviceGSM.Bts.{i}.LocationAreaCode"/>
+           standardPath="DeviceGSM.Bts.{i}.LocationAreaCode"
+           type="int" required="true" minValue="0" maxValue="65535"/>
     <param name="Bsic" titleZh="基站识别码 (BSIC)" titleEn="Bsic"
-           standardPath="DeviceGSM.Bts.{i}.Bsic"/>
+           standardPath="DeviceGSM.Bts.{i}.Bsic"
+           type="int" required="true" minValue="0" maxValue="63"/>
     <param name="IpaUnitId" titleZh="IPA 单元 ID" titleEn="IpaUnitId"
            standardPath="DeviceGSM.Bts.{i}.IpaUnitId"/>
 
@@ -47,9 +49,11 @@
            standardPath="DeviceGSM.Bts.{i}.Band"/>
 
     <param name="CellId" titleZh="小区 ID" titleEn="CellId"
-           standardPath="DeviceGSM.Bts.{i}.CellId"/>
+           standardPath="DeviceGSM.Bts.{i}.CellId"
+           type="int" required="true" minValue="0" maxValue="65535"/>
     <param name="MsMaxPower" titleZh="终端最大功率" titleEn="MsMaxPower"
-           standardPath="DeviceGSM.Bts.{i}.MsMaxPower"/>
+           standardPath="DeviceGSM.Bts.{i}.MsMaxPower"
+           type="int" required="true" minValue="0" maxValue="40"/>
     <param name="GprsMode" titleZh="GPRS 模式" titleEn="GprsMode"
            standardPath="DeviceGSM.Bts.{i}.GprsMode" type="enum">
       <option value="egprs"/>
@@ -112,12 +116,15 @@
       <option value="2"/>
     </param>
     <param name="handover1.maximum.distance" titleZh="算法1 最大距离" titleEn="handover1.maximum.distance"
-           standardPath="DeviceGSM.Bts.{i}.handover1.maximum.distance"/>
+           standardPath="DeviceGSM.Bts.{i}.handover1.maximum.distance"
+           type="int" required="true" minValue="0" maxValue="9999"/>
 
     <param name="handover1.power.budget.hysteresis" titleZh="算法1 功率预算迟滞" titleEn="handover1.power.budget.hysteresis"
-           standardPath="DeviceGSM.Bts.{i}.handover1.power.budget.hysteresis"/>
+           standardPath="DeviceGSM.Bts.{i}.handover1.power.budget.hysteresis"
+           type="int" required="true" minValue="0" maxValue="999"/>
     <param name="handover1.power.budget.interval" titleZh="算法1 功率预算评估间隔" titleEn="handover1.power.budget.interval"
-           standardPath="DeviceGSM.Bts.{i}.handover1.power.budget.interval"/>
+           standardPath="DeviceGSM.Bts.{i}.handover1.power.budget.interval"
+           type="int" required="true" minValue="1" maxValue="99"/>
     <param name="handover1.window.rxlev.averaging" titleZh="算法1 RXLEV 平均窗" titleEn="handover1.window.rxlev.averaging" type="enum"
            standardPath="DeviceGSM.Bts.{i}.handover1.window.rxlev.averaging">
       <option value="1"/><option value="2"/><option value="3"/><option value="4"/>
