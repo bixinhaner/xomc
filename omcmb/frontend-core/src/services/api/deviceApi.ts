@@ -721,13 +721,15 @@ export const deviceApi = {
   // force: 预留供未来节流绕过；当前 manual 端点天然不走节流。
   async syncDeviceParams(
     id: string,
-    options?: { force?: boolean }
+    options?: { force?: boolean; parameterPaths?: string[] }
   ): Promise<{
     status: string;
     sourceId: string;
     deviceId: string;
     serialNumber: string;
     force: boolean;
+    parameterPathsCount?: number;
+    gpvTaskCount?: number;
   }> {
     const { data } = await http.post<{
       status: string;
@@ -735,13 +737,19 @@ export const deviceApi = {
       device_id: string;
       serial_number: string;
       force: boolean;
-    }>(`/devices/${id}/sync-params`, options ?? {});
+      parameter_paths_count?: number;
+      gpv_task_count?: number;
+    }>(`/devices/${id}/sync-params`, options
+      ? { force: options.force, parameter_paths: options.parameterPaths }
+      : {});
     return {
       status: data.status,
       sourceId: data.source_id,
       deviceId: data.device_id,
       serialNumber: data.serial_number,
       force: data.force,
+      parameterPathsCount: data.parameter_paths_count,
+      gpvTaskCount: data.gpv_task_count,
     };
   },
 

@@ -130,7 +130,7 @@ func TestDeriveReconcilePrefixes_MixedObjects(t *testing.T) {
 	sort.Strings(got)
 	want := []string{
 		"Device.Services.FAPService.1.CellConfig.LTE.RAN.NeighborList.LTECell.2.", // 单实例 → instance prefix
-		"Device.Services.FAPService.1.CellConfig.LTE.RAN.NeighborList.WCDMA.",      // 多实例 → object prefix
+		"Device.Services.FAPService.1.CellConfig.LTE.RAN.NeighborList.WCDMA.",     // 多实例 → object prefix
 	}
 	sort.Strings(want)
 	assert.Equal(t, want, got)
@@ -139,10 +139,10 @@ func TestDeriveReconcilePrefixes_MixedObjects(t *testing.T) {
 func TestDeriveReconcilePrefixes_DropsShallowAndLeaf(t *testing.T) {
 	// 数字段位置浅 / 无数字段 / 空 都被丢弃
 	params := []model.DeviceParameter{
-		{ParameterPath: "DeviceGSM.Bts.5.CellId"},      // i=2 < 4 → drop
-		{ParameterPath: "Device.System.Mode"},          // 无数字段 → drop
+		{ParameterPath: "DeviceGSM.Bts.5.CellId"},       // i=2 < 4 → drop
+		{ParameterPath: "Device.System.Mode"},           // 无数字段 → drop
 		{ParameterPath: "Device.DeviceInfo.2.UE_Count"}, // i=2 < 4 → drop
-		{ParameterPath: ""},                            // 空 → drop
+		{ParameterPath: ""},                             // 空 → drop
 	}
 	got := deriveReconcilePrefixes(params)
 	assert.Empty(t, got, "全部应被丢弃,不参与 reconcile")
@@ -241,10 +241,33 @@ func TestExpandLargeObjectPrefixes_LargeObjectExpandedToInstances(t *testing.T) 
 	}
 	got := svc.expandLargeObjectPrefixes(context.Background(), uuid.New(), mappings,
 		[]string{"DeviceGSM.Bts."})
-	// hint = 254 + 254/4 = 317; expand 出 317 个 instance prefix
-	require.Len(t, got, 317)
+	// hint = DB 已知最大实例数 254; expand 出 254 个 instance prefix
+	require.Len(t, got, 254)
 	assert.Equal(t, "DeviceGSM.Bts.1.", got[0])
-	assert.Equal(t, "DeviceGSM.Bts.317.", got[316])
+	assert.Equal(t, "DeviceGSM.Bts.254.", got[253])
+}
+
+func TestExpandLargeObjectPrefixes_UsesKnownMaxInstanceBelowHintFloor(t *testing.T) {
+	mappings := make([]parammodel.ParamMapping, 0, 81)
+	for i := 0; i < 81; i++ {
+		mappings = append(mappings, parammodel.ParamMapping{
+			PrivatePath: "Device.Services.FAPService.{i}.CellConfig.{i}.F" + string(rune('A'+i%26)),
+			IsStorable:  true,
+			IsSupported: true,
+		})
+	}
+	svc := &SyncService{
+		paramRepo: &fakeRepoWithHint{maxByPrefix: map[string]int{
+			"Device.Services.FAPService.1.CellConfig.": 1,
+		}},
+		logger: zap.NewNop(),
+	}
+
+	got := svc.expandLargeObjectPrefixes(context.Background(), uuid.New(), mappings,
+		[]string{"Device.Services.FAPService.1.CellConfig."})
+
+	assert.Equal(t, []string{"Device.Services.FAPService.1.CellConfig."}, got,
+		"已知最大实例数为 1 时不应被 hintFloor 强制展开成 256 个任务")
 }
 
 func TestExpandLargeObjectPrefixes_FirstTimeSyncUsesHintFloor(t *testing.T) {
@@ -322,7 +345,7 @@ func TestExpandLargeObjectPrefixes_NonObjectPrefixUnchanged(t *testing.T) {
 }
 
 func TestExpandLargeObjectPrefixes_MaxHintCap(t *testing.T) {
-	// 历史里出现异常 1000 个实例,放大 25% = 1250,但 maxHintCap=512 → 截断
+	// 历史里出现异常 1000 个实例,但 maxHintCap=512 → 截断
 	mappings := make([]parammodel.ParamMapping, 0, 100)
 	for i := 0; i < 100; i++ {
 		mappings = append(mappings, parammodel.ParamMapping{
@@ -363,6 +386,6 @@ func TestExpandLargeObjectPrefixes_LogsExpansion(t *testing.T) {
 	fields := logs[0].ContextMap()
 	assert.Equal(t, "DeviceGSM.Bts.", fields["object_prefix"])
 	assert.EqualValues(t, 70, fields["fields_per_instance"])
-	assert.EqualValues(t, 317, fields["max_instance_hint"])
-	assert.EqualValues(t, 317, fields["expanded_count"])
+	assert.EqualValues(t, 254, fields["max_instance_hint"])
+	assert.EqualValues(t, 254, fields["expanded_count"])
 }

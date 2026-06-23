@@ -19,11 +19,19 @@ import { useT } from '@/hooks/useT';
 dayjs.extend(relativeTime);
 dayjs.locale('zh-cn');
 
-interface ParameterTreeTabProps {
-  deviceId: string;
+function formatDuration(seconds?: number) {
+  if (seconds === undefined || !Number.isFinite(seconds) || seconds < 0) return undefined;
+  if (seconds < 10) return `${seconds.toFixed(1)}s`;
+  return `${Math.round(seconds)}s`;
 }
 
-export default function ParameterTreeTab({ deviceId }: ParameterTreeTabProps) {
+interface ParameterTreeTabProps {
+  deviceId: string;
+  lastScopedSync?: { targetCount: number; gpvTaskCount: number; completedAt?: string } | null;
+  onFullSyncStarted?: () => void;
+}
+
+export default function ParameterTreeTab({ deviceId, lastScopedSync, onFullSyncStarted }: ParameterTreeTabProps) {
   const t = useT();
   const { token } = theme.useToken();
   const [selectedPath, setSelectedPath] = useState<string>('');
@@ -65,6 +73,9 @@ export default function ParameterTreeTab({ deviceId }: ParameterTreeTabProps) {
   const childrenQuery = useDirectChildren(deviceId, selectedPath, page, pageSize);
   const { data: syncStatus, refetch: refetchSyncStatus } = useSyncStatus(deviceId);
   const isSyncing = syncStatus?.status === 'syncing';
+  const isLastScopedSync = Boolean(
+    lastScopedSync?.count && lastScopedSync.completedAt === syncStatus?.lastParamSyncAt,
+  );
 
   // Mutations
   // T-0126: 切换到 useSyncDeviceParams（Path B + reason="manual"），替代旧 useSyncParameters (Path A)
@@ -76,6 +87,7 @@ export default function ParameterTreeTab({ deviceId }: ParameterTreeTabProps) {
   // 入队成功后立即 refetch 一次 sync-status,让 status 尽快变 syncing
   // (避免按钮 disabled 跟 sync-status 联动期间的微小迟滞)。
   const handleSync = useCallback(() => {
+    onFullSyncStarted?.();
     syncMutation.mutate(
       { deviceId },
       {
@@ -90,7 +102,7 @@ export default function ParameterTreeTab({ deviceId }: ParameterTreeTabProps) {
         },
       }
     );
-  }, [deviceId, syncMutation, refetchSyncStatus, t]);
+  }, [deviceId, syncMutation, refetchSyncStatus, onFullSyncStarted, t]);
 
   const handleSelectNode = useCallback((path: string) => {
     setSelectedPath(path);
@@ -166,9 +178,18 @@ export default function ParameterTreeTab({ deviceId }: ParameterTreeTabProps) {
               </Typography.Text>
             ) : syncStatus.lastParamSyncAt ? (
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                {t('device.paramTree.lastSync', { time: dayjs(syncStatus.lastParamSyncAt).fromNow() })}
-                {syncStatus.totalParameters > 0
-                  ? t('device.paramTree.syncTotal', { count: syncStatus.totalParameters })
+                {isLastScopedSync
+                  ? t('device.paramTree.lastScopedSync', {
+                    time: dayjs(syncStatus.lastParamSyncAt).fromNow(),
+                    count: lastScopedSync?.targetCount ?? 0,
+                    gpvCount: lastScopedSync?.gpvTaskCount ?? 0,
+                  })
+                  : t('device.paramTree.lastSync', { time: dayjs(syncStatus.lastParamSyncAt).fromNow() })}
+                {!isLastScopedSync && syncStatus.lastSyncGpv?.taskCount
+                  ? t('device.paramTree.lastSyncGpvSummary', {
+                    count: syncStatus.lastSyncGpv.taskCount,
+                    duration: formatDuration(syncStatus.lastSyncGpv.wallClockSeconds) ?? '-',
+                  })
                   : ''}
               </Typography.Text>
             ) : (

@@ -405,7 +405,7 @@ func (e *ProvisioningEngine) HandleDeviceOnline(ctx context.Context, evt device.
 	// SourceID 是裸 UUID（写入 device_tasks.source_id UUID 列做溯源）；reason="device_online"
 	// 通过 WithReason 走 Redis 通道传给 HandleSyncResultPathB 打差异日志（T-0127）。
 	sourceID := evt.DeviceID.String()
-	used, err := e.syncService.StartPathBSync(ctx, dev, sourceID, WithReason("device_online"))
+	used, _, err := e.syncService.StartPathBSync(ctx, dev, sourceID, WithReason("device_online"))
 	if err != nil {
 		e.logger.Warn("device.online: StartPathBSync failed",
 			zap.String("device_id", evt.DeviceID.String()),
@@ -521,7 +521,7 @@ func (e *ProvisioningEngine) HandleFirmwareChanged(ctx context.Context, evt devi
 				zap.String("device_id", evt.DeviceID.String()))
 			return nil
 		}
-		used, syncErr := e.syncService.StartPathBSync(ctx, dev, sourceID, WithReason("firmware_changed"))
+		used, _, syncErr := e.syncService.StartPathBSync(ctx, dev, sourceID, WithReason("firmware_changed"))
 		if syncErr != nil {
 			e.logger.Warn("firmware.changed: direct Path B fallback failed",
 				zap.String("device_id", evt.DeviceID.String()),
@@ -724,7 +724,7 @@ func (e *ProvisioningEngine) handleAutoSync(ctx context.Context, task *Provision
 		return e.failTask(ctx, task, fmt.Errorf("transition to syncing: %w", err))
 	}
 
-	used, err := e.syncService.StartPathBSync(ctx, dev, task.ID.String())
+	used, _, err := e.syncService.StartPathBSync(ctx, dev, task.ID.String())
 	if err != nil {
 		return e.failTask(ctx, task, fmt.Errorf("start path-b sync: %w", err))
 	}
@@ -972,7 +972,7 @@ func (e *ProvisioningEngine) handleDataModelFileReceived(ctx context.Context, ev
 		if pt, _ := e.taskRepo.GetByDeviceID(ctx, dev.ID); pt != nil {
 			sourceID = pt.ID.String()
 		}
-		if used, syncErr := e.syncService.StartPathBSync(ctx, dev, sourceID); syncErr != nil {
+		if used, _, syncErr := e.syncService.StartPathBSync(ctx, dev, sourceID); syncErr != nil {
 			e.logger.Warn("path-b auto-sync after model upload failed",
 				zap.Error(syncErr),
 				zap.String("device_sn", payload.DeviceSN),

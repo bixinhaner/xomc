@@ -1129,11 +1129,6 @@ func TestHandleDeviceOnline_RedisDown_StillProceeds(t *testing.T) {
 func TestHandleGPVResponse_EmptySyncGPVStillFinalizesPathB(t *testing.T) {
 	deviceID := uuid.New()
 	deviceSN := "SN-NR-EMPTY-GPV"
-	originalDebounce := pathBSyncFinalizeDebounce
-	pathBSyncFinalizeDebounce = 50 * time.Millisecond
-	defer func() {
-		pathBSyncFinalizeDebounce = originalDebounce
-	}()
 	mr, err := miniredis.Run()
 	require.NoError(t, err)
 	defer mr.Close()
@@ -1168,9 +1163,7 @@ func TestHandleGPVResponse_EmptySyncGPVStillFinalizesPathB(t *testing.T) {
 
 	err = h.engine.handleGPVResponse(context.Background(), evt)
 	require.NoError(t, err)
-	require.Eventually(t, func() bool {
-		return writer.callCount() == 1
-	}, time.Second, 20*time.Millisecond, "empty sync-gpv response should still finalize Path B after debounce")
+	assert.Equal(t, 1, writer.callCount(), "empty final sync-gpv response should finalize Path B immediately")
 	_, redisErr := rdb.Get(context.Background(), pathBSyncPendingBatchesKey(deviceID)).Result()
 	assert.Error(t, redisErr, "pending batch key should be cleared after final empty sync-gpv response")
 }

@@ -290,10 +290,15 @@ func (r *PgTaskRepository) GetPendingByDevice(ctx context.Context, deviceSN stri
 func (r *PgTaskRepository) HasIncompleteSyncGPVTasksByDevice(ctx context.Context, deviceSN string) (bool, error) {
 	prefix := fmt.Sprintf("sync-gpv-%s", deviceSN)
 	query, args, err := storage.Psql.Select("COUNT(*)").
-		From("device_tasks").
-		Where(sq.Eq{"device_sn": deviceSN}).
-		Where(sq.Like{"command_key": prefix + "%"}).
-		Where(sq.Eq{"status": []TaskStatus{TaskStatusPending, TaskStatusSent}}).
+		From("device_tasks t").
+		Where(sq.Eq{"t.device_sn": deviceSN}).
+		Where(sq.Like{"t.command_key": prefix + "%"}).
+		Where(sq.Eq{"t.status": []TaskStatus{TaskStatusPending, TaskStatusSent}}).
+		Where(`NOT EXISTS (
+			SELECT 1 FROM device_tasks failed
+			WHERE failed.source_id = t.source_id
+			  AND failed.status IN ('failed', 'expired', 'cancelled')
+		)`).
 		ToSql()
 	if err != nil {
 		return false, fmt.Errorf("build incomplete sync-gpv query: %w", err)
@@ -303,6 +308,50 @@ func (r *PgTaskRepository) HasIncompleteSyncGPVTasksByDevice(ctx context.Context
 		return false, fmt.Errorf("query incomplete sync-gpv tasks: %w", err)
 	}
 	return count > 0, nil
+}
+
+func (r *PgTaskRepository) LatestSyncGPVSummaryByDevice(ctx context.Context, deviceSN string) (*SyncGPVSummary, error) {
+	const query = `
+WITH latest AS (
+  SELECT source_id
+  FROM device_tasks
+  WHERE device_sn = $1
+    AND method = 'GetParameterValues'
+    AND command_key LIKE 'sync-gpv-%'
+    AND source_id IS NOT NULL
+  ORDER BY created_at DESC
+  LIMIT 1
+)
+SELECT
+  source_id::text,
+  COUNT(*)::int,
+  MIN(created_at),
+  MAX(completed_at),
+  EXTRACT(EPOCH FROM (COALESCE(MAX(completed_at), NOW()) - MIN(created_at)))::float8
+FROM device_tasks
+WHERE device_sn = $1
+  AND method = 'GetParameterValues'
+  AND source_id = (SELECT source_id FROM latest)
+GROUP BY source_id`
+
+	var summary SyncGPVSummary
+	var completed sql.NullTime
+	if err := r.pool.QueryRow(ctx, query, deviceSN).Scan(
+		&summary.SourceID,
+		&summary.TaskCount,
+		&summary.FirstCreatedAt,
+		&completed,
+		&summary.WallClockSeconds,
+	); err != nil {
+		if err == pgx.ErrNoRows || err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("query latest sync-gpv summary: %w", err)
+	}
+	if completed.Valid {
+		summary.LastCompletedAt = &completed.Time
+	}
+	return &summary, nil
 }
 
 // ListOpenByDeviceAndMethods 列出指定设备的 pending/sent 状态任务（用于 RebootCloser）。

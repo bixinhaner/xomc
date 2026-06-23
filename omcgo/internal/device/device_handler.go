@@ -671,9 +671,11 @@ func (h *Handler) SyncDeviceParams(c *gin.Context) {
 		return
 	}
 
-	// force 字段可选，当前 no-op 但 log 记录供未来扩展
+	// force 字段可选，当前 no-op 但 log 记录供未来扩展。
+	// parameter_paths 为空时保持全量同步；非空时只同步指定 standardPath 对应的参数。
 	var req struct {
-		Force bool `json:"force"`
+		Force          bool     `json:"force"`
+		ParameterPaths []string `json:"parameter_paths"`
 	}
 	_ = c.ShouldBindJSON(&req) // 容错：body 为空仍 OK
 
@@ -682,7 +684,7 @@ func (h *Handler) SyncDeviceParams(c *gin.Context) {
 	// 给前端 toast 与 API 契约。
 	sourceID := uuid.New().String()
 	displaySourceID := fmt.Sprintf("manual:%s", sourceID)
-	used, dev, err := h.service.SyncDeviceParamsManual(c.Request.Context(), id, sourceID)
+	used, dev, gpvTaskCount, err := h.service.SyncDeviceParamsManual(c.Request.Context(), id, sourceID, req.ParameterPaths)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
@@ -702,11 +704,13 @@ func (h *Handler) SyncDeviceParams(c *gin.Context) {
 		deviceSN = dev.SerialNumber
 	}
 	response.OKWithStatus(c, http.StatusAccepted, gin.H{
-		"status":        "queued",
-		"source_id":     displaySourceID,
-		"device_id":     id.String(),
-		"serial_number": deviceSN,
-		"force":         req.Force,
+		"status":                "queued",
+		"source_id":             displaySourceID,
+		"device_id":             id.String(),
+		"serial_number":         deviceSN,
+		"force":                 req.Force,
+		"parameter_paths_count": len(req.ParameterPaths),
+		"gpv_task_count":        gpvTaskCount,
 	})
 }
 

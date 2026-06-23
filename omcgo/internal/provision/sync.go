@@ -99,18 +99,19 @@ func (s *SyncService) SetPathBSyncTaskReader(r PathBSyncTaskReader) *SyncService
 	return s
 }
 
-// StartManualSync 用户手动触发 Path B 全量同步的便捷 wrapper（T-0126 设计 §4）。
+// StartManualSync 用户手动触发 Path B 同步的便捷 wrapper（T-0126 设计 §4）。
 //
 // 等价于 StartPathBSync(WithReason("manual"))，存在的意义：让 device 包能通过
 // 消费者驱动的 narrow interface（ParamSyncStarter，1 方法）注入本服务，
 // 不需要 device 包 import provision.PathBOption 类型（避免 device → provision 循环依赖）。
-func (s *SyncService) StartManualSync(ctx context.Context, dev *model.Device, sourceID string) (bool, error) {
-	return s.StartPathBSync(ctx, dev, sourceID, WithReason("manual"))
+func (s *SyncService) StartManualSync(ctx context.Context, dev *model.Device, sourceID string, parameterPaths []string) (bool, int, error) {
+	return s.StartPathBSync(ctx, dev, sourceID, WithReason("manual"), WithParameterPaths(parameterPaths))
 }
 
 // pathBOptions 收集 StartPathBSync 的可选配置（T-0123 引入）。
 type pathBOptions struct {
-	reason string // "device_online" / "periodic" / "firmware_changed" / "manual" / ""
+	reason         string // "device_online" / "periodic" / "firmware_changed" / "manual" / ""
+	parameterPaths []string
 }
 
 // PathBOption 是 StartPathBSync 的 functional option。
@@ -121,6 +122,14 @@ type PathBOption func(*pathBOptions)
 func WithReason(reason string) PathBOption {
 	return func(o *pathBOptions) {
 		o.reason = reason
+	}
+}
+
+// WithParameterPaths scopes a manual Path B sync to the given standard paths.
+// Empty means full sync, preserving the historical behavior for other callers.
+func WithParameterPaths(paths []string) PathBOption {
+	return func(o *pathBOptions) {
+		o.parameterPaths = append([]string(nil), paths...)
 	}
 }
 

@@ -19,7 +19,7 @@ type StaleDeviceLister interface {
 // PathBSyncStarter 是 PeriodicSyncer 需要的"启动 Path B 同步"能力（消费者驱动接口，
 // *SyncService 自然满足）。
 type PathBSyncStarter interface {
-	StartPathBSync(ctx context.Context, dev *model.Device, sourceID string, opts ...PathBOption) (bool, error)
+	StartPathBSync(ctx context.Context, dev *model.Device, sourceID string, opts ...PathBOption) (bool, int, error)
 }
 
 // PeriodicSyncer 周期性参数同步兜底（T-0124 设计 §2）。
@@ -183,7 +183,7 @@ func (p *PeriodicSyncer) enqueueBatch(ctx context.Context, devices []*model.Devi
 
 			// SourceID 是裸 UUID 写入 device_tasks.source_id；reason="periodic" 走 Redis 通道。
 			sourceID := d.ID.String()
-			used, err := p.syncer.StartPathBSync(ctx, d, sourceID, WithReason("periodic"))
+			used, _, err := p.syncer.StartPathBSync(ctx, d, sourceID, WithReason("periodic"))
 
 			countMu.Lock()
 			defer countMu.Unlock()

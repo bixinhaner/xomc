@@ -21,5 +21,5 @@ import (
 // 返回 (used, err)：used=true 表示已入队 Path B；used=false 表示 Path B 不可用
 // （MappingSet 缺失，设备 productClass 未路由），调用方应返 503/N/A 状态码。
 type ParamSyncStarter interface {
-	StartManualSync(ctx context.Context, dev *model.Device, sourceID string) (bool, error)
+	StartManualSync(ctx context.Context, dev *model.Device, sourceID string, parameterPaths []string) (bool, int, error)
 }
