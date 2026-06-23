@@ -835,7 +835,11 @@ JOIN device_dim d
   ON d.oui = m.device_oui AND d.serial_number = m.device_sn
 JOIN cell_band_dim cb
   ON cb.device_id = d.id
- AND cb.cell_id = substring(m.object_ldn FROM 'Cellid=([0-9]+)')
+ AND cb.cell_id = COALESCE(
+     substring(m.object_ldn FROM 'Cellid=([0-9]+)'),
+     substring(m.object_ldn FROM 'NrCGI=([0-9]+)'),
+     substring(m.object_ldn FROM 'Uid=([^,]+)')
+ )
 %s
 GROUP BY cb.band, m.metric_path, m.granularity, m.time
 ORDER BY m.time DESC%s`,

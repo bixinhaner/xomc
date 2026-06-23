@@ -237,9 +237,8 @@ func (r *SyncRunner) syncDeviceGroupDim(ctx context.Context) (int64, error) {
 //
 // 主库无 cell_band 表：从 device_parameters 按参数路径后缀提取，
 // 每个小区实例 (device_id, fap_instance) 取两行配对：
-//   - cell_id = CellIdentity 参数值（路径后缀 .CellConfig.LTE.RAN.Common.CellIdentity）
-//   - band    = FreqBandIndicator(LTE) / FreqBandIndicatorNR(NR) 参数值
-//     （路径后缀 .CellConfig.LTE.RAN.RF.FreqBandIndicator 或 .FreqBandIndicatorNR）
+//   - cell_id = CellIdentity(LTE) / NrcellIdentity(NR) / IpaUnitId(GSM)
+//   - band    = FreqBandIndicator(LTE) / FreqBandIndicatorNR(NR) / DeviceGSM.Bts.%.Band(GSM)
 //
 // 语义参考 internal/pm/aggregator/query.go 的 bandPathSuffixes / cellIDPathSuffixes。
 // 两参数同属一个 (device_id, fap_instance) → INNER JOIN 配成一行；band 缺失的小区不产出
@@ -251,9 +250,24 @@ func (r *SyncRunner) syncCellBandDim(ctx context.Context) (int64, error) {
 	// LIKE 后缀匹配（{i} 实例号在路径中已实例化为具体数字，故用 '%suffix'）。
 	const q = `
 WITH cell_id AS (
+    -- LTE
     SELECT device_id, fap_instance, parameter_value AS cell_id
     FROM device_parameters
     WHERE parameter_path LIKE '%.CellConfig.LTE.RAN.Common.CellIdentity'
+      AND parameter_value IS NOT NULL
+      AND parameter_value <> ''
+    UNION ALL
+    -- NR
+    SELECT device_id, fap_instance, parameter_value AS cell_id
+    FROM device_parameters
+    WHERE parameter_path LIKE '%.NrcellIdentity'
+      AND parameter_value IS NOT NULL
+      AND parameter_value <> ''
+    UNION ALL
+    -- GSM (PM Uid= corresponds to IpaUnitId)
+    SELECT device_id, fap_instance, parameter_value AS cell_id
+    FROM device_parameters
+    WHERE parameter_path LIKE '%IpaUnitId'
       AND parameter_value IS NOT NULL
       AND parameter_value <> ''
 ),
@@ -261,7 +275,8 @@ band AS (
     SELECT device_id, fap_instance, parameter_value AS band
     FROM device_parameters
     WHERE (parameter_path LIKE '%.CellConfig.LTE.RAN.RF.FreqBandIndicator'
-           OR parameter_path LIKE '%.FreqBandIndicatorNR')
+           OR parameter_path LIKE '%.FreqBandIndicatorNR'
+           OR parameter_path LIKE 'DeviceGSM.Bts.%.Band')
       AND parameter_value IS NOT NULL
       AND parameter_value <> ''
 )
