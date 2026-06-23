@@ -332,7 +332,12 @@ export default function TransferCenterPage() {
                 <div className="font-mono text-[11px] text-cyan-300/75">
                   {EXEC_MODE_LABEL[task.executionMode]}
                 </div>
-                <div className="font-mono text-[11px] text-cyan-300/75">{formatTime(task.createdAt)}</div>
+                <div className="flex flex-col gap-0.5 font-mono text-[11px] text-cyan-300/75">
+                  <span title="创建时间">{formatTime(task.createdAt)}</span>
+                  <span className="text-cyan-300/55" title="结束时间">
+                    {task.endedAt ? `END · ${formatTime(task.endedAt)}` : 'END · —'}
+                  </span>
+                </div>
                 <div className="flex items-center justify-end gap-1.5">
                   {canStart && (
                     <RowAction
