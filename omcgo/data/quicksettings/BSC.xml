@@ -44,7 +44,7 @@
     <param name="OmlIpaStreamId" titleZh="OML IPA 流 ID" titleEn="OmlIpaStreamId"
            standardPath="DeviceGSM.Bts.{i}.OmlIpaStreamId"/>
     <param name="Band" titleZh="频段" titleEn="Band"
-           standardPath="DeviceGSM.Bts.{i}.Band" readonly="true"/>
+           standardPath="DeviceGSM.Bts.{i}.Band"/>
 
     <param name="CellId" titleZh="小区 ID" titleEn="CellId"
            standardPath="DeviceGSM.Bts.{i}.CellId"/>
@@ -152,7 +152,7 @@
       <option value="4"/><option value="5"/><option value="6"/><option value="7"/>
     </param>
     <param name="handover2_assignment" titleZh="算法2 指配触发" titleEn="handover2_assignment" type="enum"
-           standardPath="DeviceGSM.Bts.{i}.handover2_assignment">
+           standardPath="DeviceGSM.Bts.{i}.handover2.assignment">
       <option value="0"/>
       <option value="1"/>
     </param>

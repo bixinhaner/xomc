@@ -139,6 +139,9 @@ ORDER BY object_ldn`
 
 // parseObjectLDN 从原始 object_ldn 拆出 cell_id / plmn（缺段则留空）。
 // 委托给 metrics.ParseObjectLDN 单一真值源（与 aggregator KPI 跨层级配对同口径），不另造解析。
+// 对 5G/GSM 行：cellID/plmn 留空（设计上 metrics 包不把 NrCGI/Uid 塞这两个字段），
+// MetricObject 仍能用 BaseCellID 取天然小区标识，但本服务暴露的 (cellID, plmn) 维持 4G 语义。
 func parseObjectLDN(ldn string) (cellID, plmn string) {
-	return metrics.ParseObjectLDN(ldn)
+	r := metrics.ParseObjectLDN(ldn)
+	return r.CellID, r.Plmn
 }

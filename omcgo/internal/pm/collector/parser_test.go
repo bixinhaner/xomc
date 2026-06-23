@@ -69,7 +69,7 @@ func TestPMXMLParser_Parse(t *testing.T) {
 			wantDeviceSN:    "eNB001",
 			wantCounters:    6, // 2 counters * 2 cells + ISSUE-389 注入每小区 1 条统计时长（2 cells）
 			wantGranularity: 15,
-			wantCells:       []string{"Cell1", "Cell2"},
+			wantCells:       []string{"CellId=Cell1", "CellId=Cell2"},
 		},
 		{
 			name: "valid PM XML with multiple measInfo blocks",
@@ -99,7 +99,7 @@ func TestPMXMLParser_Parse(t *testing.T) {
 			wantErr:      false,
 			wantDeviceSN: "gNB002",
 			wantCounters: 4, // 1 + 2 counters for 1 cell + ISSUE-389 注入 1 条统计时长（NRCell1 跨 2 measInfo 去重为 1）
-			wantCells:    []string{"NRCell1"},
+			wantCells:    []string{"CellId=NRCell1"},
 		},
 		{
 			name:       "empty file",
@@ -226,7 +226,7 @@ func TestPMXMLParser_ParseCounterValues(t *testing.T) {
 
 	// Verify metadata
 	for _, c := range result.Counters {
-		assert.Equal(t, "Cell1", c.CellID)
+		assert.Equal(t, "CellId=Cell1", c.CellID)
 		assert.Equal(t, "PM_Counters", c.CounterGroup)
 		assert.Equal(t, 15, c.Granularity)
 		assert.Equal(t, deviceID, c.DeviceID)
@@ -270,8 +270,8 @@ func TestPMXMLParser_InjectsStatisDuration(t *testing.T) {
 		}
 	}
 	require.Len(t, statisByCell, 2, "每个小区各注入一条统计时长")
-	assert.Equal(t, float64(900), statisByCell["Cell1"], "Cell1 统计时长 = 采集周期 900s")
-	assert.Equal(t, float64(900), statisByCell["Cell2"], "Cell2 统计时长 = 采集周期 900s")
+	assert.Equal(t, float64(900), statisByCell["CellId=Cell1"], "Cell1 统计时长 = 采集周期 900s")
+	assert.Equal(t, float64(900), statisByCell["CellId=Cell2"], "Cell2 统计时长 = 采集周期 900s")
 }
 
 // TestPMXMLParser_StatisDurationFollowsRealPeriod 验证统计时长取文件实际采集周期、非写死。
@@ -338,7 +338,7 @@ func TestPMXMLParser_StatisDurationDedupAcrossMeasInfo(t *testing.T) {
 
 	count := 0
 	for _, c := range result.Counters {
-		if c.CounterName == StatisDurationReportKey && c.CellID == "Cell1" {
+		if c.CounterName == StatisDurationReportKey && c.CellID == "CellId=Cell1" {
 			count++
 		}
 	}
@@ -371,11 +371,17 @@ func TestExtractCellID(t *testing.T) {
 		measObjLdn string
 		want       string
 	}{
-		{"CellId=Cell1", "Cell1"},
-		{"CellId=NRCell-01", "NRCell-01"},
-		{"SubNetwork=1,CellId=Cell2", "Cell2"},
-		// Fallback: return whole string when no known key
+		// extractCellID 透传完整 LDN 原串，保留 PLMN 等层级信息
+		{"CellId=Cell1", "CellId=Cell1"},
+		{"CellId=NRCell-01", "CellId=NRCell-01"},
+		{"SubNetwork=1,CellId=Cell2", "SubNetwork=1,CellId=Cell2"},
 		{"SomeObj=value", "SomeObj=value"},
+		{"Cellid=66", "Cellid=66"},
+		{"Cellid=66,PLMN=46001", "Cellid=66,PLMN=46001"},
+		{"Type=Cell,Mode=SA,gNBID=350251605,NrCGI=15153,CUID=1", "Type=Cell,Mode=SA,gNBID=350251605,NrCGI=15153,CUID=1"},
+		{"Type=Cell,Mode=SA,gNBID=350251605,NrCGI=15153,CUID=1,PLMNID=00101", "Type=Cell,Mode=SA,gNBID=350251605,NrCGI=15153,CUID=1,PLMNID=00101"},
+		{"Uid=4002-1", "Uid=4002-1"},
+		{"Uid=1110-101", "Uid=1110-101"},
 	}
 
 	for _, tt := range tests {
@@ -385,6 +391,8 @@ func TestExtractCellID(t *testing.T) {
 		})
 	}
 }
+
+
 
 func TestParseDuration(t *testing.T) {
 	tests := []struct {

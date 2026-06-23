@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Card, Input, Modal, Popconfirm, Select, Space, Table, Tag, Tooltip, Typography, message, notification } from 'antd';
 import { CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, DeleteOutlined, EditOutlined, PlusOutlined, SendOutlined, SyncOutlined } from '@ant-design/icons';
 import type { ColumnType } from 'antd/es/table';
+import { useParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   useAddObject,
@@ -12,6 +13,7 @@ import {
 import { useDeviceTaskStatus } from '@core/hooks/api/useDeviceTask';
 import { notificationKeys } from '@core/hooks/api/useNotificationCenter';
 import { deviceTaskApi } from '@core/services/api/deviceTaskApi';
+import { configSyncApi } from '@core/services/api/configSyncApi';
 import {
   feedbackKey,
   useQuickSettingsFeedbackStore,
@@ -37,6 +39,21 @@ type TFn = (id: string, values?: Record<string, string | number>) => string;
 
 // "上次操作"状态形状由 frontend-core/store/quickSettingsFeedbackStore (MultiFeedback) 定义,
 // 提升至 store 持久化,顶层 TabBar 切走再切回不丢反馈。
+
+// 把后端任务 ErrorMessage(`[Client] Invalid arguments — path faults: [<path>: <code> <path>:  <reason>] [...]`)
+// 提取为简短设备原因列表(如 `Value must be even; Invalid arfcn value`),用于 Tag 内联展示。
+// 解析失败时退化为整段截断。完整原文仍通过 Tooltip 提供。
+function formatDeviceFaultBrief(msg: string | undefined | null): string {
+  if (!msg) return '';
+  const reasons: string[] = [];
+  const re = /9\d{3}\s+[^:]+:\s+([^\]]+?)\]/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(msg)) !== null) {
+    reasons.push(match[1].trim());
+  }
+  const joined = reasons.length > 0 ? reasons.join('; ') : msg;
+  return joined.length > 80 ? `${joined.slice(0, 77)}...` : joined;
+}
 
 function formatTime(at: number): string {
   const d = new Date(at);
@@ -144,26 +161,54 @@ const BM_SPECIAL_COLUMNS: Record<string, SpecialColumnSpec[]> = {
 };
 
 /**
- * BSC 邻区打包标量映射：把 quicksettings XML 中的“多实例邻区表”映射到 BTS 父对象上的单标量字符串。
- * 设备实际不上报 `DeviceGSM.Bts.{i}.Neighbor{2G,4G}.{j}.<leaf>` 子对象，而是把整张邻区列表
- * 拼成一个字符串放在 `DeviceGSM.Bts.{i}.<scalarLeaf>` 上，多条由空白分隔、单条字段由 `-` 分隔。
+ * BSC 邻区打包标量映射：把 quicksettings XML 中的“多实例邻区表”映射到 BTS 父对象上的两个单标量字符串。
+ * 设备实际不上报 `DeviceGSM.Bts.{i}.Neighbor{2G,4G}.{j}.<leaf>` 子对象，而是：
  *
- *   2G (NeighborCgiAdd)         : MCC-MNC-LAC-CI-ARFCN-BSIC
- *   4G (Si2quaterNeighborListAdd): EARFCN-thresh_hi-thresh_lo-prio-qrxlv-meas
+ *   GET <listLeaf>            → 设备返回当前整张邻区表（多条空白分隔，单条字段用 `-` 分隔）
+ *   SET <addLeaf> = "<one>"  → 设备追加一条邻区（整条 EARFCN-thr_hi-thr_lo-prio-qrxlv-meas）
+ *   SET <delLeaf> = "<key>"  → 设备从表中删除一条匹配项（注意：Del 仅接受单字段作为 key，不是整条！）
  *
- * 命中该映射的 group 走只读“打包标量解析”渲染分支，不调用 AddObject / SetParameterValues。
+ *   2G  list/add/del : NeighborCgiAdd  / NeighborCgiAdd  / NeighborCgiDel
+ *                       （读取与追加使用同一个 Add 字段）
+ *                       Add 格式: MCC-MNC-LAC-CI-ARFCN-BSIC
+ *                       Del key : CI（cells[3]）
+ *   4G  list/add/del : Si2quaterNeighborListAdd / Si2quaterNeighborListAdd / Si2quaterNeighborListDel
+ *                       Add 格式: EARFCN-thresh_hi-thresh_lo-prio-qrxlv-meas
+ *                       Del key : EARFCN（cells[0]）
+ *
+ * 实测：Del 发整条字符串会被设备解释为 "EARFCN=整条" 而返回 9007 Invalid EARFCN value；
+ * 因此 spec 提供 delKey(cells) 把行内单元抽出作为 Del 字段的 key。
+ *
+ * 本组件不拼接整张表完整覆盖（设备不接受多条拼接的 SET），不走 AddObject/DeleteObject。
  */
 const PACKED_NEIGHBOR_TABLE_BY_GROUP_ID: Record<
   string,
-  { parentObjectPath: string; scalarLeaf: string }
+  {
+    parentObjectPath: string;
+    listLeaf: string;
+    addLeaf: string;
+    delLeaf: string;
+    /** 从已解析的行 cells 中提取“删除”SPV 所需的单字段 key（设备 Del 字段只接受单 key，不是整条）。 */
+    delKey: (cells: string[]) => string;
+  }
 > = {
   'bsc-bts-neighbor2g': {
     parentObjectPath: 'DeviceGSM.Bts.{i}.',
-    scalarLeaf: 'NeighborCgiAdd',
+    listLeaf: 'NeighborCgiAdd',
+    addLeaf: 'NeighborCgiAdd',
+    delLeaf: 'NeighborCgiDel',
+    // leaf 名 NeighborCgiDel → osmo-bsc `neighbor del cgi <mcc> <mnc> <lac> <ci>`
+    // 完整 entry 是 MCC-MNC-LAC-CI-ARFCN-BSIC，del key 取前 4 段。
+    delKey: (cells) =>
+      `${(cells[0] ?? '').trim()}-${(cells[1] ?? '').trim()}-${(cells[2] ?? '').trim()}-${(cells[3] ?? '').trim()}`,
   },
   'bsc-bts-neighbor4g': {
     parentObjectPath: 'DeviceGSM.Bts.{i}.',
-    scalarLeaf: 'Si2quaterNeighborListAdd',
+    listLeaf: 'Si2quaterNeighborListAdd',
+    addLeaf: 'Si2quaterNeighborListAdd',
+    delLeaf: 'Si2quaterNeighborListDel',
+    // EARFCN-thr_hi-thr_lo-prio-qrxlv-meas → EARFCN
+    delKey: (cells) => (cells[0] ?? '').trim(),
   },
 };
 
@@ -176,17 +221,35 @@ function parsePackedNeighborList(packed: string): string[][] {
     .map((entry) => entry.split('-'));
 }
 
+/** 单条邻区转字符串：字段用 `-` 拼接，与设备格式一致；cells 中任何字段都不能含空白/`-`。 */
+function serializeNeighborEntry(cells: string[]): string {
+  return cells.map((c) => c.trim()).join('-');
+}
+
 interface PackedScalarNeighborTableProps {
   deviceId: string;
   group: QuickSettingsGroup;
   instanceContext: QuickSettingsInstanceContext;
   locale: 'zh-CN' | 'en-US';
-  spec: { parentObjectPath: string; scalarLeaf: string };
+  spec: {
+    parentObjectPath: string;
+    listLeaf: string;
+    addLeaf: string;
+    delLeaf: string;
+    delKey: (cells: string[]) => string;
+  };
 }
 
 /**
- * 打包标量邻区表：只读展示从 BTS 父对象单标量解析出的邻区列表。
- * 不支持新增/修改/删除（设备不提供 AddObject 入口，编辑需在 MML 直接改父标量字符串）。
+ * 打包标量邻区表：从 BTS 父对象单标量解析出邻区列表展示，并支持新增/删除。
+ *
+ * 写入路径（不走 AddObject / DeleteObject —— 设备未实现）：
+ *   1. 用户在 Modal 中填字段 / 点击行删除
+ *   2. 前端在内存里维护 cellsList，按 `serializePackedNeighborList` 重拼成完整字符串
+ *   3. 调用 `useUpdateParameters` 对 `scalarPath` 整体 SetParameterValues
+ *   4. 成功后 refetch 父路径 schema，重新解析展示
+ *
+ * 字段约束：必填、不含 `-` 与空白（避免破坏分隔符），其他校验依赖设备侧。
  */
 function PackedScalarNeighborTable({
   deviceId,
@@ -196,6 +259,9 @@ function PackedScalarNeighborTable({
   spec,
 }: PackedScalarNeighborTableProps) {
   const t = useT();
+  // 后端 /config/sync/pull/:deviceId 用设备 SN 查找（ensureDeviceExists by SN），不接受 UUID。
+  // URL 形如 /device/detail/{sn}?tab=... ，从路由参数拿。
+  const { sn: deviceSn = '' } = useParams<{ sn: string }>();
   // 解析 BTS 实例号（占位符为 {i}），得到父对象路径，e.g. "DeviceGSM.Bts.1."
   const parentPath = useMemo(() => {
     const resolved = applyInstanceContext(spec.parentObjectPath, instanceContext, {
@@ -205,10 +271,13 @@ function PackedScalarNeighborTable({
     return resolved.replace(/\{i\}\.$/, `${instanceContext.fapInstance}.`);
   }, [spec.parentObjectPath, instanceContext]);
 
-  const scalarPath = `${parentPath}${spec.scalarLeaf}`;
+  const scalarPath = `${parentPath}${spec.listLeaf}`;
+  const addPath = `${parentPath}${spec.addLeaf}`;
+  const delPath = `${parentPath}${spec.delLeaf}`;
 
   // 拉父路径下的所有参数，从中找出打包标量。父路径粒度命中只读 schema 已足够。
   const { data: schemaResp, isLoading, refetch, isFetching } = useParameterSchema(deviceId, parentPath);
+  const updateMutation = useUpdateParameters();
 
   const packedValue = useMemo(() => {
     const item = schemaResp?.parameters.find((p) => p.path === scalarPath);
@@ -220,10 +289,218 @@ function PackedScalarNeighborTable({
     return item?.lastSyncedAt ?? null;
   }, [schemaResp, scalarPath]);
 
-  const rows = useMemo(() => {
-    const cellsList = parsePackedNeighborList(packedValue);
-    return cellsList.map((cells, idx) => ({ key: idx + 1, id: idx + 1, cells }));
-  }, [packedValue]);
+  const cellsList = useMemo(() => parsePackedNeighborList(packedValue), [packedValue]);
+  const rows = useMemo(
+    () => cellsList.map((cells, idx) => ({ key: idx + 1, id: idx + 1, cells })),
+    [cellsList],
+  );
+
+  // 列定义中字段顺序严格跟随 group.params（来自 quicksettings XML），对应打包条目内 `-` 分隔字段的下标。
+  const fieldLeaves = useMemo(
+    () => group.params.map((param) => param.leaf || param.name),
+    [group.params],
+  );
+
+  // 新增弹窗状态：null = 关闭；values 以 leaf 为 key。
+  const [addModal, setAddModal] = useState<{
+    values: Record<string, string>;
+    errors: Record<string, string>;
+  } | null>(null);
+
+  const maxInstances = group.maxInstances && group.maxInstances > 0 ? group.maxInstances : undefined;
+  const reachedMax = maxInstances !== undefined && rows.length >= maxInstances;
+  const canMutate = fieldLeaves.length > 0; // 没有字段定义就退回纯只读视图（兜底）
+
+  // 与多实例表一致：ref 同步防重点，state 驱动按钮 loading。
+  // 覆盖整个 writeSingleEntry 生命周期（mutation + task 轮询 + pullConfig + refetch）。
+  const submittingRef = useRef(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const queryClient = useQueryClient();
+  const fbKey = feedbackKey(
+    deviceId,
+    group.id,
+    instanceContext.fapInstance,
+    instanceContext.networkType === 'nr' ? instanceContext.cellInstance : undefined,
+  );
+  const lastAction = useQuickSettingsFeedbackStore((s) => {
+    const f = s.entries[fbKey];
+    return f && f.kind === 'multi' ? f : null;
+  });
+  const setFeedback = useQuickSettingsFeedbackStore((s) => s.setFeedback);
+  const patchFeedback = useQuickSettingsFeedbackStore((s) => s.patchFeedback);
+  const { data: lastTask } = useDeviceTaskStatus(lastAction?.taskId);
+
+  const waitForTaskTerminal = useCallback(async (taskId: string) => {
+    const timeoutAt = Date.now() + 60000;
+    while (Date.now() < timeoutAt) {
+      const task = await deviceTaskApi.getTask(taskId);
+      if (isDeviceTaskTerminal(task.status)) return task;
+      await new Promise((resolve) => window.setTimeout(resolve, 1000));
+    }
+    throw new Error(t('device.multi.waitTaskTimeout'));
+  }, [t]);
+
+  // 任务终态为 failed 时弹一次通知（与外部 MultiInstanceTable 一致的田崯避免重复玄象）。
+  useEffect(() => {
+    if (
+      lastTask &&
+      lastTask.status === 'failed' &&
+      lastAction &&
+      lastAction.notifiedFailedTaskId !== lastTask.id
+    ) {
+      const actionLabel = lastAction.action === 'add'
+        ? t('device.multi.actionAdd')
+        : t('device.multi.actionDelete');
+      notification.error({
+        message: t('device.multi.tagNackFailed', { action: actionLabel }),
+        description: lastTask.errorMessage || t('device.multi.unknownErrorHint'),
+        duration: ERROR_FEEDBACK_DURATION_SECONDS,
+      });
+      patchFeedback(fbKey, { notifiedFailedTaskId: lastTask.id });
+    }
+  }, [lastTask, lastAction, patchFeedback, fbKey, t]);
+
+  /**
+   * 调用设备侧“单条 Add”或“单条 Del”。设备不接受多条拼接覆盖；Add 在父 list 上 append，
+   * Del 从父 list 中移除匹配项。注意 Add 发送整条字段串，Del 仅发送 spec.delKey 抽出的单字段 key
+   * （EARFCN 或 CI），实测发整条 Del 会被设备误解析为 "EARFCN=整条" 返回 9007。
+   * 写完后 refetch 拉回设备侧最新完整表。
+   *
+   * 后端会在 SPV 完成后自动 GPV 同步请求 path 的 leaf，但 UI 读的是 listLeaf=Add。
+   * Del 操作时要额外 pullConfig(listLeaf) 让 device_parameters 中 Add 行刷新。
+   */
+  const writeSingleEntry = useCallback(
+    async (opType: 'add' | 'del', cells: string[], opSuccessMsg: string) => {
+      if (submittingRef.current) return; // 同 tick 双击 / 任务轮询期重点击 都被驳回
+      submittingRef.current = true;
+      setIsSubmitting(true);
+      const value = opType === 'add' ? serializeNeighborEntry(cells) : spec.delKey(cells);
+      const parameterPath = opType === 'add' ? addPath : delPath;
+      const actionLabel = opType === 'add' ? t('device.multi.actionAdd') : t('device.multi.actionDelete');
+      try {
+        const result = await updateMutation.mutateAsync({
+          deviceId,
+          parameters: [{ parameterPath, parameterValue: value, parameterType: 'string' }],
+        });
+        setFeedback(fbKey, {
+          kind: 'multi',
+          action: opType === 'add' ? 'add' : 'delete',
+          submitStatus: 'queued',
+          taskId: result.taskId,
+          detail: opSuccessMsg,
+          at: Date.now(),
+        });
+        message.success(opSuccessMsg);
+        // 等设备侧任务终态，防止按钮提前释放后用户双击造成重复 Add/Del。
+        if (result.taskId) {
+          try {
+            await waitForTaskTerminal(result.taskId);
+          } catch {
+            // 超时不阻断：Tag 后续仍会随 useDeviceTaskStatus 轮询更新。
+          }
+        }
+        // Del 后额外拉一次 listLeaf，同步最新设备状态到 DB。Add 不需要（listLeaf===addLeaf）。
+        // 注意：configSyncApi.pullConfig 后端按 SN 预检，不接受 UUID。
+        if (opType === 'del' && spec.listLeaf !== spec.delLeaf && deviceSn) {
+          try {
+            await configSyncApi.pullConfig(deviceSn, [scalarPath]);
+            // GPV 是异步任务，给 ACS+设备 一点时间完成后再 refetch，避免 device_parameters 滞后导致 UI 仍显示已删行。
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+          } catch (pullErr) {
+            // 同步失败不阻断主流程；UI 表头计数可能滞后，下次手动刷新会拼正。
+            // eslint-disable-next-line no-console
+            console.warn('[PackedScalarNeighborTable] pullConfig listLeaf failed', pullErr);
+          }
+        }
+        await refetch();
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        setFeedback(fbKey, {
+          kind: 'multi',
+          action: opType === 'add' ? 'add' : 'delete',
+          submitStatus: 'failed_to_queue',
+          detail: t('device.multi.detailFailed', { target: actionLabel, err: detail }),
+          at: Date.now(),
+        });
+        notification.error({
+          message: t('device.multi.tagQueueFailed', { action: actionLabel }),
+          description: detail,
+          duration: ERROR_FEEDBACK_DURATION_SECONDS,
+        });
+      } finally {
+        void queryClient.invalidateQueries({ queryKey: notificationKeys.all });
+        submittingRef.current = false;
+        setIsSubmitting(false);
+      }
+    },
+    [addPath, delPath, deviceId, deviceSn, fbKey, queryClient, refetch, scalarPath, setFeedback, spec, t, updateMutation, waitForTaskTerminal],
+  );
+
+  const openAddModal = useCallback(() => {
+    if (!canMutate || reachedMax) return;
+    setAddModal({
+      values: Object.fromEntries(fieldLeaves.map((leaf) => [leaf, ''])),
+      errors: {},
+    });
+  }, [canMutate, fieldLeaves, reachedMax]);
+
+  const closeAddModal = useCallback(() => setAddModal(null), []);
+
+  const setAddModalValue = useCallback((leaf: string, value: string) => {
+    setAddModal((prev) => {
+      if (!prev) return prev;
+      const nextErrors = { ...prev.errors };
+      delete nextErrors[leaf];
+      return { values: { ...prev.values, [leaf]: value }, errors: nextErrors };
+    });
+  }, []);
+
+  const handleAddSubmit = useCallback(async () => {
+    if (!addModal) return;
+    const errors: Record<string, string> = {};
+    const cells: string[] = [];
+    for (const leaf of fieldLeaves) {
+      const raw = (addModal.values[leaf] ?? '').trim();
+      if (!raw) {
+        errors[leaf] = t('device.multi.packed.fieldRequired');
+        cells.push('');
+        continue;
+      }
+      if (/[\s-]/.test(raw)) {
+        // `-` 是字段分隔符，空白是条目分隔符，两者都不能出现在字段值里。
+        errors[leaf] = t('device.multi.packed.fieldInvalidChar');
+        cells.push(raw);
+        continue;
+      }
+      cells.push(raw);
+    }
+    if (Object.keys(errors).length > 0) {
+      setAddModal((prev) => (prev ? { ...prev, errors } : prev));
+      return;
+    }
+    const nextEntryNumber = cellsList.length + 1;
+    setAddModal(null);
+    await writeSingleEntry(
+      'add',
+      cells,
+      t('device.multi.detailAdd', { instId: String(nextEntryNumber), count: cells.length }),
+    );
+  }, [addModal, cellsList.length, fieldLeaves, t, writeSingleEntry]);
+
+  const handleDeleteRow = useCallback(
+    async (rowIdx: number) => {
+      if (!canMutate) return;
+      const target = cellsList[rowIdx];
+      if (!target) return;
+      await writeSingleEntry(
+        'del',
+        target,
+        t('device.multi.deleteDispatched', { instId: String(rowIdx + 1) }),
+      );
+    },
+    [canMutate, cellsList, t, writeSingleEntry],
+  );
 
   const columns: ColumnType<{ key: number; id: number; cells: string[] }>[] = [
     {
@@ -241,9 +518,28 @@ function PackedScalarNeighborTable({
       render: (_v: unknown, row) => <Text>{row.cells[colIdx] ?? '-'}</Text>,
     })),
   ];
+  if (canMutate) {
+    columns.push({
+      title: t('device.multi.packed.colActions'),
+      key: '__op',
+      width: 90,
+      fixed: 'right',
+      render: (_v: unknown, row) => (
+        <Popconfirm
+          title={t('device.multi.deleteConfirm')}
+          description={t('device.multi.detailInstance', { instId: String(row.id) })}
+          okButtonProps={{ danger: true, loading: updateMutation.isPending || isSubmitting }}
+          onConfirm={() => void handleDeleteRow(row.id - 1)}
+        >
+          <Button size="small" type="link" danger icon={<DeleteOutlined />} disabled={isSubmitting}>
+            {t('device.multi.actionDelete')}
+          </Button>
+        </Popconfirm>
+      ),
+    });
+  }
 
   const title = locale === 'zh-CN' ? group.titleZh : group.titleEn;
-  const maxInstances = group.maxInstances && group.maxInstances > 0 ? group.maxInstances : undefined;
   const cardTitle = maxInstances !== undefined
     ? `${title}（${rows.length}/${maxInstances}）`
     : `${title}（${rows.length}）`;
@@ -254,7 +550,37 @@ function PackedScalarNeighborTable({
       size="small"
       extra={
         <Space>
-          <Tag color="default">{t('device.multi.packed.readonlyTag')}</Tag>
+          {lastAction && (() => {
+            const tagSpec = statusTagSpec(lastAction, lastTask?.status, t);
+            const isFailed = lastTask?.status === 'failed' && Boolean(lastTask?.errorMessage);
+            const briefFault = isFailed ? formatDeviceFaultBrief(lastTask?.errorMessage) : '';
+            const tag = (
+              <Tag icon={tagSpec.icon} color={tagSpec.color}>
+                {tagSpec.label} · {lastAction.detail}
+                {briefFault ? ` · ${briefFault}` : ''} · {formatTime(lastAction.at)}
+              </Tag>
+            );
+            return isFailed ? (
+              <Tooltip title={lastTask?.errorMessage} placement="bottomRight">
+                {tag}
+              </Tooltip>
+            ) : tag;
+          })()}
+          {canMutate ? (
+            <Tooltip title={reachedMax ? t('device.multi.reachedMaxTooltip', { max: String(maxInstances ?? '') }) : ''}>
+              <Button
+                size="small"
+                type="primary"
+                icon={<PlusOutlined />}
+                disabled={reachedMax || updateMutation.isPending || isSubmitting}
+                onClick={openAddModal}
+              >
+                {t('device.multi.actionAdd')}
+              </Button>
+            </Tooltip>
+          ) : (
+            <Tag color="default">{t('device.multi.packed.readonlyTag')}</Tag>
+          )}
           <Button
             size="small"
             icon={<SyncOutlined spin={isFetching} />}
@@ -282,6 +608,43 @@ function PackedScalarNeighborTable({
         {t('device.multi.packed.sourceLabel')}{scalarPath}
         {lastSyncedAt ? ` · ${t('device.multi.packed.lastSynced', { time: formatTime(new Date(lastSyncedAt).getTime()) })}` : ''}
       </div>
+
+      <Modal
+        title={t('device.multi.modalAddTitle', { title })}
+        open={!!addModal}
+        onCancel={closeAddModal}
+        onOk={() => void handleAddSubmit()}
+        okText={t('device.multi.confirmAdd')}
+        confirmLoading={updateMutation.isPending || isSubmitting}
+        destroyOnClose
+        maskClosable={false}
+      >
+        {addModal && (
+          <Space direction="vertical" size="small" style={{ width: '100%' }}>
+            {group.params.map((param) => {
+              const leaf = param.leaf || param.name;
+              const label = locale === 'zh-CN' ? param.titleZh : param.titleEn;
+              const err = addModal.errors[leaf];
+              return (
+                <div key={leaf}>
+                  <div style={{ marginBottom: 4, fontSize: 12 }}>
+                    <Text strong>{label}</Text>
+                    <Text type="secondary" style={{ marginLeft: 8 }}>{leaf}</Text>
+                  </div>
+                  <Input
+                    size="small"
+                    value={addModal.values[leaf] ?? ''}
+                    status={err ? 'error' : undefined}
+                    onChange={(e) => setAddModalValue(leaf, e.target.value)}
+                    placeholder={label}
+                  />
+                  {err && <Text type="danger" style={{ fontSize: 12 }}>{err}</Text>}
+                </div>
+              );
+            })}
+          </Space>
+        )}
+      </Modal>
     </Card>
   );
 }
@@ -330,6 +693,11 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
   const queryClient = useQueryClient();
   const specialColumns = BM_SPECIAL_COLUMNS[group.id] ?? null;
   const [editModal, setEditModal] = useState<EditModalState | null>(null);
+  // 状态包住整段 handleSaveEditModal(含 AddObject mutation 后的 waitForTaskTerminal 轮询),
+  // 避免用户在任务未终止时以为“没反应”重复点击导致重复 AddObject。
+  // ref 同步起效(防同 tick 双击); state 为 Modal confirmLoading 提供视觉反馈。
+  const submittingRef = useRef(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // 行编辑状态：以 instanceId 为 key，仅保留用户编辑过的字段（避免 effect 同步 schema 触发级联 render）
   const [rowEdits, setRowEdits] = useState<Map<string, RowEditState>>(new Map());
@@ -632,12 +1000,16 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
   }, [leafSchemaByLeaf, objectPath, schemaByPath]);
 
   const closeEditModal = useCallback(() => {
-    if (updateMutation.isPending) return;
+    if (updateMutation.isPending || isSubmitting) return;
     setEditModal(null);
-  }, [updateMutation.isPending]);
+  }, [updateMutation.isPending, isSubmitting]);
 
   const handleSaveEditModal = useCallback(async () => {
     if (!editModal) return;
+    if (submittingRef.current) return; // 同步幂等守卫: 同 tick 双击 以及 task 轮询窗口内重点
+    submittingRef.current = true;
+    setIsSubmitting(true);
+    try {
 
     const errors: Record<string, string> = {};
     const updates: ParameterUpdateRequest[] = [];
@@ -652,10 +1024,25 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
           throw new Error(addTask.errorMessage || t('device.multi.addInstanceFailed', { status: addTask.status }));
         }
 
-        const refreshed = await refetch();
-        const nextObject = refreshed.data?.objects.find((o) => o.path === objectPath);
-        const knownInstances = new Set(instanceIds);
-        targetInstanceId = nextObject?.currentInstances.map((n) => String(n)).find((instId) => !knownInstances.has(instId));
+        // 优先从 AddObject task.result.instance_number 取新实例号（后端 acs/handler.go::handleAddObjectResponse
+        // 解析 SOAP AddObjectResponse 写入)。该字段最权威,不受 schema endpoint 同步延迟影响。
+        const instNumberRaw = addTask.result?.instance_number;
+        if (typeof instNumberRaw === 'number' && instNumberRaw > 0) {
+          targetInstanceId = String(instNumberRaw);
+        }
+
+        // 后备：schema diff 兜底（旧路径,与 BS 后端 GPV 写库存在 race;仅在 result 缺失时使用）。
+        if (!targetInstanceId) {
+          const refreshed = await refetch();
+          const nextObject = refreshed.data?.objects.find((o) => o.path === objectPath);
+          const knownInstances = new Set(instanceIds);
+          targetInstanceId = nextObject?.currentInstances.map((n) => String(n)).find((instId) => !knownInstances.has(instId));
+        } else {
+          // 拿到 instance_number 后仍主动 refetch 一次,让 schemaByPath 有该实例的默认值供后续 SPV 对比；
+          // 但不阻塞:即使 refetch 还没看到新实例,SPV 也能按用户填值直接发。
+          await refetch();
+        }
+
         if (!targetInstanceId) {
           throw new Error(t('device.multi.addInstanceNoId'));
         }
@@ -760,6 +1147,10 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
     } finally {
       void queryClient.invalidateQueries({ queryKey: notificationKeys.all });
     }
+    } finally {
+      submittingRef.current = false;
+      setIsSubmitting(false);
+    }
   }, [addMutation, deviceId, displayColumns, editModal, fbKey, group.titleZh, groupParamLeafSet, instanceIds, leafSchemaByLeaf, objectPath, queryClient, refetch, schemaByPath, setDraftField, setFeedback, updateMutation, waitForTaskTerminal, t]);
 
   const columns: ColumnType<TableRow>[] = [
@@ -853,11 +1244,19 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
         <Space>
           {lastAction && (() => {
             const spec = statusTagSpec(lastAction, lastTask?.status, t);
-            return (
+            const isFailed = lastTask?.status === 'failed' && Boolean(lastTask?.errorMessage);
+            const briefFault = isFailed ? formatDeviceFaultBrief(lastTask?.errorMessage) : '';
+            const tag = (
               <Tag icon={spec.icon} color={spec.color}>
-                {spec.label} · {lastAction.detail} · {formatTime(lastAction.at)}
+                {spec.label} · {lastAction.detail}
+                {briefFault ? ` · ${briefFault}` : ''} · {formatTime(lastAction.at)}
               </Tag>
             );
+            return isFailed ? (
+              <Tooltip title={lastTask?.errorMessage} placement="bottomRight">
+                {tag}
+              </Tooltip>
+            ) : tag;
           })()}
           {reachedMax ? (
             <Tooltip title={t('device.multi.reachedMaxTooltip', { max: maxInstances ?? 0 })}>
@@ -887,7 +1286,7 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
         onCancel={closeEditModal}
         okText={editModal?.mode === 'add' ? t('device.multi.confirmAdd') : t('device.paramEdit.confirmDispatch')}
         cancelText={t('common.cancel')}
-        confirmLoading={updateMutation.isPending || addMutation.isPending}
+        confirmLoading={updateMutation.isPending || addMutation.isPending || isSubmitting}
         width={960}
         destroyOnHidden
       >

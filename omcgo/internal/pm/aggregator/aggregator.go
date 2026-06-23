@@ -143,10 +143,10 @@ const kpiInsertBatchSize = 1000
 //  2. #516 批量化：把"逐设备一次取计数器"改为"按设备分批整桶载入"——每批一次查询拿该批
 //     全设备全 object_ldn 的 counter，在内存按 设备→实体→指标 组织（分批控内存，避免一次性
 //     吞整桶）；KPI 路由仍按设备 LookupByDevice（已缓存则复用，不重复查）
-//  3. 对每个实体：按本 object_ldn 精确取计数器，对 PLMN 实体做跨层级配对
-//     （合并同 cellID 基础小区行的小区级计数器）→ 自身层级门槛过滤（KPI 公式须引用本实体
-//     自身行至少一个计数器，纯小区级 KPI 因此不泄漏到 PLMN 行）→ expr.Evaluate →
-//     KPI 行累积
+//  3. 对每个实体：按本 object_ldn 精确取计数器（每个 object_ldn 整串只用本行计数器算 KPI，
+//     不合并同 cellID 基础小区行的小区级计数器）→ expr.Evaluate → KPI 行累积。求值层对缺
+//     计数器的处理：公式依赖某 counter 不在 counters 表（本行未上报 / 跨层级公式在错误层级
+//     行缺入参）→ Evaluate 返回 err → **skip 不落库**（既无 NaN 也无 0 写入）
 //  4. #516 批量化：全桶 KPI 行累积后**批量插入**（单条多行 VALUES，按 kpiInsertBatchSize 分条），
 //     替代逐实体单条 INSERT（往返从"每实体一次（上万次）"降到"每千行一次"）
 //
@@ -222,11 +222,7 @@ func (a *Aggregator) AggregateKPIs(ctx context.Context, target string, w WindowS
 
 			for _, ent := range devEntities[dk] {
 				counters := countersForEntity(byObjectLdn, ent.objectLdn)
-				// 自身层级门槛：实体本行（未经跨层级合并）的计数器集合。
-				// 仅当 KPI 公式依赖与该集合有交集时才在本实体落库——纯小区级 KPI 不引用任何
-				// PLMN 自身计数 → 在 PLMN 实体门槛不过 → 不落（修掉「device 级 KPI 泄漏到 PLMN 行」）。
-				ownSet := byObjectLdn[ent.objectLdn]
-				rows := a.evalKPIs(ent, route.KPIs, counters, ownSet)
+				rows := a.evalKPIs(ent, route.KPIs, counters)
 				for _, r := range rows {
 					pending = append(pending, entityRow{ent: ent, row: r})
 				}
@@ -336,57 +332,24 @@ func (a *Aggregator) loadCountersForDevices(ctx context.Context, target string, 
 	return out, rows.Err()
 }
 
-// countersForEntity 组装某实体（object_ldn）算 KPI 的入参：
-//   - 设备级实体（object_ldn==""）：取空串行的计数器（无配对）。
-//   - 基础小区实体（Cellid=N，无 PLMN）：取本行小区级计数器（无需配 PLMN）。
-//   - PLMN 实体（Cellid=N,PLMN=M）：取本 PLMN 行的 PLMN 级计数器
-//     ∪ 同 cellID=N 基础小区行的小区级计数器（跨层级配对）。
+// countersForEntity 组装某实体（object_ldn）算 KPI 的入参：每个 object_ldn 整串只取本行
+// 计数器，无论它是设备级（object_ldn==""）/ 基础小区
+// （Cellid=N，无 PLMN）/ PLMN 实体（Cellid=N,PLMN=M）/ 5G 切片 / GSM Uid 行——全部一视同仁。
 //
-// 两类计数器 metric_path 互斥（真机实测重叠 0），合并不撞键；防御上让实体自身的值优先。
-// NR/空小区实体（cellID 提取为空）不 panic：plmn=="" 时按基础/设备级处理，仅返回本行计数器。
+// 设计依据：
+//   - 真机实测三制式数据「零重叠」（PLMN 级计数器在基础小区行不出现、反之亦然）——
+//     跨层级合并并非必需，反而把 PLMN 实体的 KPI 算成全小区错口径。
+//   - 求值层对缺计数器的处理：公式依赖某 counter 不在 counters 表 → Evaluate 返回 err
+//     → evalKPIs 中 skip 不落库（既不写 NaN 也不写 0）；偷懒跨层级公式在错误层级行
+//     天然被求值器过滤，由此让指标库 XML 保持不动。
+//
+// NR/空小区 / 无法解析的 LDN 串：不 panic、按本行降级（设备级 / 不可解析行行为不变）。
 func countersForEntity(byObjectLdn map[string]map[string]float64, objectLdn string) map[string]float64 {
-	out := make(map[string]float64)
-
-	cellID, plmn := metrics.ParseObjectLDN(objectLdn)
-	// PLMN 实体先铺基础小区行的小区级计数器（再被本行覆盖，确保自身优先）。
-	if plmn != "" && cellID != "" {
-		for baseLdn, vals := range byObjectLdn {
-			bCell, bPlmn := metrics.ParseObjectLDN(baseLdn)
-			if bPlmn == "" && bCell == cellID {
-				for k, v := range vals {
-					out[k] = v
-				}
-			}
-		}
-	}
-	// 本实体自身行计数器（优先级最高）。
+	out := make(map[string]float64, len(byObjectLdn[objectLdn]))
 	for k, v := range byObjectLdn[objectLdn] {
 		out[k] = v
 	}
 	return out
-}
-
-// kpiDependsOnOwnCounters 判定一个 KPI 是否「引用了该实体自身层级（本行未经跨层级合并）
-// 的至少一个计数器」——自身层级门槛的判据。
-//
-//   - 用 router.KPIDef.Dependencies（从公式 arithmetic 提取的计数器编号清单，与公式同源）
-//     与实体自身行计数器 ownSet 求交集，非空即门槛过。
-//   - 纯小区级 KPI 在 PLMN 实体：依赖全在基础小区行、不在 PLMN 自身集 → 交集空 → 门槛不过 →
-//     不在 PLMN 落库（跨层级配对的合并仅用于给混合公式补小区级入参，不让纯小区级 KPI 现身 PLMN）。
-//   - 混合公式（同时引用小区级 + PLMN 级）在 PLMN 实体：引用了 PLMN 自身计数 → 门槛过 → 落库，
-//     并经配对补到小区级入参算出正确值。
-//   - 设备级实体（object_ldn=''）ownSet 即空串行计数器，行为不变。
-//   - Dependencies 为空（无法判定层级归属）→ 保守放行，保持原行为不被门槛误杀。
-func kpiDependsOnOwnCounters(k router.KPIDef, ownSet map[string]float64) bool {
-	if len(k.Dependencies) == 0 {
-		return true
-	}
-	for _, dep := range k.Dependencies {
-		if _, ok := ownSet[dep]; ok {
-			return true
-		}
-	}
-	return false
 }
 
 // entityRow 把一条求值后的 KPI 行与其所属实体绑定，供全桶累积后批量写（#516）。
@@ -397,21 +360,17 @@ type entityRow struct {
 
 // evalKPIs 在内存对单实体逐 KPI 求值（无 DB 往返）——#516 把求值与写入解耦：
 // 求值结果不再立刻 INSERT，而是返回给调用方累积，最后全桶批量写。
-// 公式解析/求值/门槛过滤语义与原 evalAndInsertKPIs 完全一致（KPI 公式求值保持不动）。
+//
+// 求值层对缺计数器的处理：Evaluate 缺依赖 → 返回 err → 本 KPI skip 不落库；
+// 跨层级偷懒公式在错误层级行天然被求值器过滤（指标库 XML 不动）。
 func (a *Aggregator) evalKPIs(
 	ent entityKey,
 	kpis []router.KPIDef,
 	counters map[string]float64,
-	ownSet map[string]float64,
 ) []kpiRow {
 	var rows []kpiRow
 	for _, k := range kpis {
 		if k.Formula == "" {
-			continue
-		}
-		// 自身层级门槛：公式必须引用本实体自身层级至少一个计数器才在此实体落库
-		// （否则纯小区级 KPI 会因跨层级合并的 map 里依赖齐全而泄漏到 PLMN 行）。
-		if !kpiDependsOnOwnCounters(k, ownSet) {
 			continue
 		}
 		f, err := expr.Parse(k.Formula)
@@ -423,7 +382,8 @@ func (a *Aggregator) evalKPIs(
 		}
 		val, err := f.Evaluate(counters)
 		if err != nil {
-			// 公式依赖某 counter 不在 counters 表（设备未上报 / 未聚合）— 跳过该 KPI 不报错
+			// 公式依赖某 counter 不在 counters 表（设备未上报 / 跨层级公式在错误层级行
+			// 缺入参）→ skip 不报错、不落库
 			continue
 		}
 		statis := k.StatisType

@@ -325,15 +325,12 @@ func extractDeviceSN(localDn string) string {
 	return localDn
 }
 
-// extractCellID extracts the cell ID from a measObjLdn string.
+// extractCellID returns the measObjLdn as-is for use as the object_ldn DB column.
+//
+// object_ldn 必须保留完整 LDN 原串（如 Cellid=111172245,PLMN=46068），
+// 下游需要 PLMN 等层级信息做频段映射、去重、前端友好显示等。
+// 需要裸小区号的场景（频段映射等）应在读取时调用 ParseObjectLDN().BaseCellID()。
 func extractCellID(measObjLdn string) string {
-	parts := strings.Split(measObjLdn, ",")
-	for _, part := range parts {
-		kv := strings.SplitN(part, "=", 2)
-		if len(kv) == 2 && (kv[0] == "CellId" || kv[0] == "NRCellDU" || kv[0] == "NRCellCU") {
-			return kv[1]
-		}
-	}
 	return measObjLdn
 }
 
