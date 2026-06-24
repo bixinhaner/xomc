@@ -17,7 +17,7 @@ import type { Granularity } from './pmDashboard';
 export type TemplateVisibility = 'public' | 'private';
 
 // 时间窗预设：前端选预设后转 RFC3339 区间下发后端，预设原值仍保留方便回显。
-export type TimeRangePreset = 'last_1h' | 'last_24h' | 'last_7d' | 'last_30d' | 'custom';
+export type TimeRangePreset = 'last_1h' | 'last_3h' | 'last_24h' | 'last_7d' | 'last_30d' | 'last_6m' | 'custom';
 
 // 模板 payload — 前端定义的 JSON 结构，后端 JSONB 原样存储。
 export interface QueryTemplatePayload {

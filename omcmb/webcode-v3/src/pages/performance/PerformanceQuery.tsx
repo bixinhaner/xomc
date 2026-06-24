@@ -13,6 +13,7 @@ import { useDeviceList } from '@core/hooks/api/useDevices'
 import type { DeviceType } from '@core/types/indicatorLibrary'
 import type { Granularity } from '@core/types/pmDashboard'
 import type { Device } from '@core/types/device'
+import { getDefaultRangeHoursForGranularity } from '@core/utils/granularityTimeRange'
 import { MetricTrendChart } from './MetricTrendChart'
 import { useT } from '@/hooks/useT'
 
@@ -41,6 +42,7 @@ const GRAN_OPTS: { labelKey: string; value: Granularity }[] = [
 
 const RANGE_OPTS: { labelKey: string; hours: number }[] = [
   { labelKey: 'perf.kpiQuery.range.last1h', hours: 1 },
+  { labelKey: 'perf.kpiQuery.range.last3h', hours: 3 },
   { labelKey: 'perf.kpiQuery.range.last24h', hours: 24 },
   { labelKey: 'perf.kpiQuery.range.last7d', hours: 24 * 7 },
   { labelKey: 'perf.kpiQuery.range.last30d', hours: 24 * 30 },
@@ -63,6 +65,8 @@ export default function PerformanceQuery() {
   const [deviceSn, setDeviceSn] = useState('')
   const [granularity, setGranularity] = useState<Granularity>('15min')
   const [rangeHours, setRangeHours] = useState(24)
+  // #595: 用户手动修改过时间范围后标记 dirty，粒度切换不再覆盖
+  const [rangeHoursDirty, setRangeHoursDirty] = useState(false)
   const [selectedMetrics, setSelectedMetrics] = useState<string[]>([])
   const [metricKeyword, setMetricKeyword] = useState('')
   const [deviceKeyword, setDeviceKeyword] = useState('')
@@ -72,6 +76,7 @@ export default function PerformanceQuery() {
     setDeviceSn('')
     setSelectedMetrics([])
     setSubmitted(null)
+    setRangeHoursDirty(false)
   }, [tech])
 
   // 外层选中制式是设备清单的唯一来源（#443）：把 tech(lte/nr/gsm) 带进 networkType，
@@ -315,7 +320,13 @@ export default function PerformanceQuery() {
                   <button
                     key={g.value}
                     type="button"
-                    onClick={() => setGranularity(g.value)}
+                    onClick={() => {
+                      setGranularity(g.value)
+                      // #595: 粒度切换时，若用户未手动修改过时间范围，自动联动
+                      if (!rangeHoursDirty) {
+                        setRangeHours(getDefaultRangeHoursForGranularity(g.value))
+                      }
+                    }}
                     className={cn(
                       'chip transition-all',
                       granularity === g.value
@@ -332,7 +343,10 @@ export default function PerformanceQuery() {
                   <button
                     key={r.hours}
                     type="button"
-                    onClick={() => setRangeHours(r.hours)}
+                    onClick={() => {
+                      setRangeHours(r.hours)
+                      setRangeHoursDirty(true)
+                    }}
                     className={cn(
                       'chip transition-all',
                       rangeHours === r.hours

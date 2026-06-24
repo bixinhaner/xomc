@@ -74,6 +74,7 @@ import type {
   TemplateVisibility,
   TimeRangePreset,
 } from '@core/types/pmQuery';
+import { getDefaultTimeRangeForGranularity } from '@core/utils/granularityTimeRange';
 import DevicePickerModal from './components/DevicePickerModal';
 import MetricPickerModal from '@/components/MetricPickerModal';
 import PivotTable from './components/PivotTable';
@@ -91,9 +92,11 @@ const GRANULARITY_OPTIONS: { labelKey: string; value: Granularity }[] = [
 
 const TIME_RANGE_OPTIONS: { labelKey: string; value: TimeRangePreset }[] = [
   { labelKey: 'perf.kpiQuery.range.last1h', value: 'last_1h' },
+  { labelKey: 'perf.kpiQuery.range.last3h', value: 'last_3h' },
   { labelKey: 'perf.kpiQuery.range.last24h', value: 'last_24h' },
   { labelKey: 'perf.kpiQuery.range.last7d', value: 'last_7d' },
   { labelKey: 'perf.kpiQuery.range.last30d', value: 'last_30d' },
+  { labelKey: 'perf.kpiQuery.range.last6m', value: 'last_6m' },
   { labelKey: 'perf.kpiQuery.range.custom', value: 'custom' },
 ];
 
@@ -176,12 +179,16 @@ function presetToRange(preset: TimeRangePreset): { start: string; end: string } 
   switch (preset) {
     case 'last_1h':
       return { start: now.subtract(1, 'hour').toISOString(), end: now.toISOString() };
+    case 'last_3h':
+      return { start: now.subtract(3, 'hour').toISOString(), end: now.toISOString() };
     case 'last_24h':
       return { start: now.subtract(24, 'hour').toISOString(), end: now.toISOString() };
     case 'last_7d':
       return { start: now.subtract(7, 'day').toISOString(), end: now.toISOString() };
     case 'last_30d':
       return { start: now.subtract(30, 'day').toISOString(), end: now.toISOString() };
+    case 'last_6m':
+      return { start: now.subtract(6, 'month').toISOString(), end: now.toISOString() };
     case 'custom':
       return null;
   }
@@ -198,6 +205,8 @@ export default function KPIQuery() {
   // ── 查询表单状态 ─────────────────────────────────────────────────
   const [payload, setPayload] = useState<QueryTemplatePayload>(DEFAULT_PAYLOAD);
   const [customRange, setCustomRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(null);
+  // #595: 用户手动修改过时间范围后标记 dirty，粒度切换不再覆盖
+  const [timeRangeDirty, setTimeRangeDirty] = useState(false);
   // 指标选中值（KPI=编号）→ 友好名，供「已选 N 个」摘要展示，避免露出 K 编号。
   const [metricLabels, setMetricLabels] = useState<Record<string, string>>({});
   const [devicePickerOpen, setDevicePickerOpen] = useState(false);
@@ -345,6 +354,7 @@ export default function KPIQuery() {
 
   const handleSelectTemplate = async (tpl: QueryTemplate) => {
     setActiveTemplateId(tpl.id);
+    setTimeRangeDirty(false);
     if (tpl.payload.timeRangePreset === 'custom' && tpl.payload.absoluteStart && tpl.payload.absoluteEnd) {
       setCustomRange([dayjs(tpl.payload.absoluteStart), dayjs(tpl.payload.absoluteEnd)]);
     } else {
@@ -730,7 +740,15 @@ export default function KPIQuery() {
               <Form.Item label={t('perf.granularity')} style={{ marginBottom: 0 }}>
                 <Radio.Group
                   value={payload.granularity}
-                  onChange={(e) => setPayload({ ...payload, granularity: e.target.value })}
+                  onChange={(e) => {
+                    const g = e.target.value as Granularity;
+                    const next: QueryTemplatePayload = { ...payload, granularity: g };
+                    // #595: 粒度切换时，若用户未手动修改过时间范围，自动联动
+                    if (!timeRangeDirty) {
+                      next.timeRangePreset = getDefaultTimeRangeForGranularity(g);
+                    }
+                    setPayload(next);
+                  }}
                   options={granularityOptions}
                   optionType="button"
                   buttonStyle="solid"
@@ -742,7 +760,10 @@ export default function KPIQuery() {
                   <Select
                     style={{ width: 140 }}
                     value={payload.timeRangePreset}
-                    onChange={(v) => setPayload({ ...payload, timeRangePreset: v })}
+                    onChange={(v) => {
+                      setPayload({ ...payload, timeRangePreset: v });
+                      setTimeRangeDirty(true);
+                    }}
                     options={timeRangeOptions}
                     suffixIcon={<ClockCircleOutlined />}
                   />
@@ -750,7 +771,10 @@ export default function KPIQuery() {
                     <RangePicker
                       showTime
                       value={customRange}
-                      onChange={(v) => setCustomRange(v as [dayjs.Dayjs, dayjs.Dayjs] | null)}
+                      onChange={(v) => {
+                        setCustomRange(v as [dayjs.Dayjs, dayjs.Dayjs] | null);
+                        setTimeRangeDirty(true);
+                      }}
                     />
                   )}
                 </Space>
@@ -781,6 +805,7 @@ export default function KPIQuery() {
                   onClick={() => {
                     setPayload(DEFAULT_PAYLOAD);
                     setCustomRange(null);
+                    setTimeRangeDirty(false);
                     setActiveTemplateId(undefined);
                     setSubmittedPayload(null);
                     setSubmittedRange(null);
