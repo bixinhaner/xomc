@@ -427,6 +427,20 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 	if v := c.Query("hours"); v != "" {
 		req.Hours = parseCSVInts(v)
 	}
+	// #619：测量对象（object_ldn）后端过滤。
+	// LDN 值自身合法含逗号（如 Cellid=x,PLMN=y），不能 CSV split——
+	// 前端以「重复键」形态发 ?object_ldns=a&object_ldns=b（与 #401 修复同模式），后端用 QueryArray 整值取回。
+	if vs := c.QueryArray("object_ldns"); len(vs) > 0 {
+		ldns := make([]string, 0, len(vs))
+		for _, p := range vs {
+			if p = strings.TrimSpace(p); p != "" {
+				ldns = append(ldns, p)
+			}
+		}
+		if len(ldns) > 0 {
+			req.ObjectLDNs = ldns
+		}
+	}
 
 	rows, err := h.aggr.Query(c.Request.Context(), req)
 	if err != nil {

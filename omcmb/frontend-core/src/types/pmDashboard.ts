@@ -34,6 +34,8 @@ export interface AggregatedQueryParams {
   weekdays?: number[];
   // #599：小时段过滤（0..23）。全选/空 = 不过滤。
   hours?: number[];
+  // #619：测量对象过滤（原始 object_ldn 串）。空 = 不过滤。
+  objectLdns?: string[];
 }
 
 // 后端 aggregator.Row JSON（已加 snake_case json tag）。

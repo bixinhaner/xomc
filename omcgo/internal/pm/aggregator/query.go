@@ -46,8 +46,11 @@ type QueryRequest struct {
 	// Technologies 是制式过滤（lte/nr/gsm，小写对齐 devices.technology）。
 	// 非空时所有维度（device/product 等需 JOIN devices 的路径）只取该制式的设备。
 	Technologies []string
-	StartTime    time.Time
-	EndTime      time.Time
+	// ObjectLDNs 是测量对象过滤（原始 object_ldn 串，如 "Cellid=111,PLMN=46068"）。
+	// 非空时只返回匹配的行；空 = 不过滤（向后兼容）。
+	ObjectLDNs []string
+	StartTime  time.Time
+	EndTime    time.Time
 	// VisibleGroups 是 #64 设备组数据权限的三态可见分组（nil=超管不过滤 / []=fail-closed 空集 /
 	// [g...]=仅这些组）。device/aggregate_group/network/product/band 维度按 device_sn 收口
 	// （authz.ApplyDeviceSNVisibilityFilter / VisibleSNSubquerySQL）；device_group 维度直接对
@@ -983,6 +986,10 @@ func applyScalarFilters(qb sq.SelectBuilder, q QueryRequest) sq.SelectBuilder {
 	}
 	if len(q.Hours) > 0 && len(q.Hours) < 24 {
 		qb = qb.Where("EXTRACT(hour FROM start_time)::int = ANY(?)", q.Hours)
+	}
+	// #619：测量对象（object_ldn）后端过滤（空 = 不过滤，向后兼容）。
+	if len(q.ObjectLDNs) > 0 {
+		qb = qb.Where(sq.Eq{"object_ldn": q.ObjectLDNs})
 	}
 	return qb
 }

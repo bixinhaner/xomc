@@ -7,12 +7,14 @@ import { NeonButton } from '@/components/ui/NeonButton'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { cn } from '@/lib/utils'
 import { useIndicatorList } from '@core/hooks/api/useIndicatorsLibrary'
-import { useAggregatedMetricsByDevices } from '@core/hooks/api/usePmQuery'
+import { useAggregatedMetricsByDevices, useMetricObjectsByDevices } from '@core/hooks/api/usePmQuery'
 import { useDeviceList } from '@core/hooks/api/useDevices'
 import type { DeviceType } from '@core/types/indicatorLibrary'
+import { deviceTypeToNetworkTech } from '@core/types/indicatorLibrary'
 import type { Granularity } from '@core/types/pmDashboard'
 import type { Device } from '@core/types/device'
 import { getDefaultRangeHoursForGranularity } from '@core/utils/granularityTimeRange'
+import { getEffectiveLdns, type CellSelection } from '@core/utils/cellDrilldownUtils'
 import { MetricTrendChart } from './MetricTrendChart'
 import { useT } from '@/hooks/useT'
 
@@ -71,12 +73,18 @@ export default function PerformanceQuery() {
   const [metricKeyword, setMetricKeyword] = useState('')
   const [deviceKeyword, setDeviceKeyword] = useState('')
   const [submitted, setSubmitted] = useState<Submitted | null>(null)
+  // #619：测量对象下钻。
+  const [cellSel, setCellSel] = useState<CellSelection>({})
+  // #619：提交后才生效的快照——勾选变化不立即重查，等点「查询」才同步。
+  const [submittedCellSel, setSubmittedCellSel] = useState<CellSelection>({})
 
   useEffect(() => {
     setDeviceSn('')
     setSelectedMetrics([])
     setSubmitted(null)
     setRangeHoursDirty(false)
+    setCellSel({})
+    setSubmittedCellSel({})
   }, [tech])
 
   // 外层选中制式是设备清单的唯一来源（#443）：把 tech(lte/nr/gsm) 带进 networkType，
@@ -92,6 +100,13 @@ export default function PerformanceQuery() {
   )
   const { data: deviceData, isLoading: devLoading, isError: devError } = useDeviceList(deviceParams)
   const devices: Device[] = deviceData?.items ?? []
+
+  // #619：加载可用小区列表 + 计算有效白名单。
+  // 用 submittedCellSel（快照）而非实时 cellSel，避免勾选变化立即触发查询。
+  const cellDeviceSns = useMemo(() => (deviceSn ? [deviceSn] : []), [deviceSn])
+  const cellTech = deviceTypeToNetworkTech(deviceType)
+  const { byDevice } = useMetricObjectsByDevices(cellDeviceSns, cellTech)
+  const effectiveLdns = useMemo(() => getEffectiveLdns(submittedCellSel, byDevice), [submittedCellSel, byDevice])
 
   const metricFilter = useMemo(
     () => ({ pageSize: 300, ...(metricKeyword.trim() ? { keyword: metricKeyword.trim() } : {}) }),
@@ -114,10 +129,11 @@ export default function PerformanceQuery() {
       metricPaths: submitted.metricPaths,
       startTime: submitted.startTime,
       endTime: submitted.endTime,
+      objectLdns: effectiveLdns.length > 0 ? effectiveLdns : undefined,
       limit: 5000,
       fillEmpty: true,
     }
-  }, [submitted])
+  }, [submitted, effectiveLdns])
 
   const {
     data: aggRows,
@@ -166,6 +182,8 @@ export default function PerformanceQuery() {
     if (!canQuery) return
     const end = new Date()
     const start = new Date(end.getTime() - rangeHours * 3600_000)
+    // #619：点查询时才把勾选起到快照。
+    setSubmittedCellSel(cellSel)
     setSubmitted({
       deviceSn,
       metricPaths: [...selectedMetrics],
@@ -249,6 +267,36 @@ export default function PerformanceQuery() {
               </div>
             </div>
           </GlassPanel>
+
+          {/* #619：测量对象下钻 */}
+          {deviceSn && Object.keys(byDevice).length > 0 && (
+            <GlassPanel title={`${t('perf.kpiQuery.pivot.measObject')} · CELL`} meta={effectiveLdns.length > 0 ? String(effectiveLdns.length) : 'ALL'}>
+              <div className="max-h-48 overflow-auto p-3">
+                {(byDevice[deviceSn] ?? []).map((obj) => {
+                  const sel = cellSel[deviceSn]
+                  const allLdns = (byDevice[deviceSn] ?? []).map((o) => o.objectLdn)
+                  const checked = sel ? sel.includes(obj.objectLdn) : true
+                  return (
+                    <label key={obj.objectLdn} className="flex cursor-pointer items-center gap-2 border-b border-cyan-500/8 px-2 py-1 text-[11px] text-cyan-100 hover:bg-cyan-500/5">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => {
+                          const prev = sel ?? allLdns
+                          const next = e.target.checked
+                            ? [...prev.filter((l) => l !== obj.objectLdn), obj.objectLdn]
+                            : prev.filter((l) => l !== obj.objectLdn)
+                          setCellSel({ ...cellSel, [deviceSn]: next })
+                        }}
+                        className="accent-cyan-400"
+                      />
+                      <span className="truncate font-mono">{obj.objectLdn}</span>
+                    </label>
+                  )
+                })}
+              </div>
+            </GlassPanel>
+          )}
 
           <GlassPanel title={`${t('perf.kpiQuery.metric')} · METRIC`} meta={`${selectedMetrics.length}/${MAX_METRICS}`}>
             <div className="p-3">
