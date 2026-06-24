@@ -308,9 +308,9 @@ func annotateLoginNotice(policy *securityPolicyValues, tp *TokenPair) {
 // annotatePasswordPolicyState 把"是否必须改密 / 离过期还剩几天"两个派生字段
 // 填入 TokenPair 响应。规则：
 //
-//   ① must_change_password=true              → 用户首次登录 / 管理员重置
-//   ④ password_expires_at <= now             → 已过期 → 一并要求改密
-//   ④ password_expires_at - now <= prompt    → 不强制但附 days 让 FE 弹提示
+//	① must_change_password=true              → 用户首次登录 / 管理员重置
+//	④ password_expires_at <= now             → 已过期 → 一并要求改密
+//	④ password_expires_at - now <= prompt    → 不强制但附 days 让 FE 弹提示
 //
 // 任何字段未启用（expires=false）或 policy 未注入时，函数无副作用。
 func annotatePasswordPolicyState(_ context.Context, user *User, policy *securityPolicyValues, tp *TokenPair) {
@@ -722,24 +722,73 @@ func (s *AdminService) enrichOperatorUsernames(ctx context.Context, users []User
 			idSet[*u.UpdatedBy] = struct{}{}
 		}
 	}
-	if len(idSet) == 0 {
-		return
-	}
-	ids := make([]uuid.UUID, 0, len(idSet))
-	for id := range idSet {
-		ids = append(ids, id)
-	}
-	nameMap, err := s.userRepo.GetUsernamesByIDs(ctx, ids)
-	if err != nil {
-		s.logger.Warn("enrich operator usernames", zap.Error(err))
-		return
+	nameMap := map[uuid.UUID]string{}
+	if len(idSet) > 0 {
+		ids := make([]uuid.UUID, 0, len(idSet))
+		for id := range idSet {
+			ids = append(ids, id)
+		}
+		var err error
+		nameMap, err = s.userRepo.GetUsernamesByIDs(ctx, ids)
+		if err != nil {
+			s.logger.Warn("enrich operator usernames", zap.Error(err))
+			nameMap = map[uuid.UUID]string{}
+		}
 	}
 	for i := range users {
 		if users[i].CreatedBy != nil {
 			users[i].CreatorUsername = nameMap[*users[i].CreatedBy]
+		} else if users[i].Source == UserSourceAdmin {
+			users[i].CreatorUsername = "admin"
 		}
 		if users[i].UpdatedBy != nil {
 			users[i].UpdaterUsername = nameMap[*users[i].UpdatedBy]
+		} else if users[i].Source == UserSourceAdmin {
+			users[i].UpdaterUsername = "admin"
+		}
+	}
+}
+
+// enrichRoleOperatorUsernames 与用户列表同口径，给角色列表/详情派生创建人、更新人 username。
+// 历史自建角色若 created_by / updated_by 为空，按管理员创建兜底显示 admin；内置角色留空，前端按 builtIn 渲染"内置"。
+func (s *AdminService) enrichRoleOperatorUsernames(ctx context.Context, roles []Role) {
+	if len(roles) == 0 {
+		return
+	}
+	idSet := make(map[uuid.UUID]struct{}, len(roles)*2)
+	for _, role := range roles {
+		if role.CreatedBy != nil {
+			idSet[*role.CreatedBy] = struct{}{}
+		}
+		if role.UpdatedBy != nil {
+			idSet[*role.UpdatedBy] = struct{}{}
+		}
+	}
+	nameMap := map[uuid.UUID]string{}
+	if len(idSet) > 0 {
+		ids := make([]uuid.UUID, 0, len(idSet))
+		for id := range idSet {
+			ids = append(ids, id)
+		}
+		var err error
+		nameMap, err = s.userRepo.GetUsernamesByIDs(ctx, ids)
+		if err != nil {
+			s.logger.Warn("enrich role operator usernames", zap.Error(err))
+			nameMap = map[uuid.UUID]string{}
+		}
+	}
+	for i := range roles {
+		if roles[i].CreatedBy != nil {
+			roles[i].CreatorUsername = nameMap[*roles[i].CreatedBy]
+		}
+		if roles[i].CreatorUsername == "" && !roles[i].IsSystem {
+			roles[i].CreatorUsername = "admin"
+		}
+		if roles[i].UpdatedBy != nil {
+			roles[i].UpdaterUsername = nameMap[*roles[i].UpdatedBy]
+		}
+		if roles[i].UpdaterUsername == "" && !roles[i].IsSystem {
+			roles[i].UpdaterUsername = "admin"
 		}
 	}
 }
@@ -777,12 +826,22 @@ func (s *AdminService) CheckPermission(ctx context.Context, userID uuid.UUID, re
 
 // ListRoles returns all roles (legacy, for backward compatibility).
 func (s *AdminService) ListRoles(ctx context.Context) ([]Role, error) {
-	return s.roleRepo.List(ctx)
+	roles, err := s.roleRepo.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.enrichRoleOperatorUsernames(ctx, roles)
+	return roles, nil
 }
 
 // ListRolesPaginated returns roles with pagination support.
 func (s *AdminService) ListRolesPaginated(ctx context.Context, filter RoleFilter) (*model.ListResponse[Role], error) {
-	return s.roleRepo.ListWithPagination(ctx, filter)
+	result, err := s.roleRepo.ListWithPagination(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	s.enrichRoleOperatorUsernames(ctx, result.Items)
+	return result, nil
 }
 
 // ResetPassword resets a user's password to the provided new password.
@@ -885,6 +944,10 @@ func (s *AdminService) GetRole(ctx context.Context, id uuid.UUID) (*Role, error)
 	if err != nil {
 		return nil, fmt.Errorf("get role: %w", err)
 	}
+	roles := []Role{*role}
+	s.enrichRoleOperatorUsernames(ctx, roles)
+	role.CreatorUsername = roles[0].CreatorUsername
+	role.UpdaterUsername = roles[0].UpdaterUsername
 	return role, nil
 }
 
@@ -1412,6 +1475,7 @@ type ChangePasswordRequest struct {
 // T-0120：去掉 `required` tag — handler 内做二选一校验：
 //   - 加密路径（secure context）：EncryptedOldPassword + EncryptedNewPassword + KeyID 同时非空
 //   - 明文路径（仅 LoginCrypto.AllowPlaintext=true 时启用）：OldPassword + NewPassword 非空
+//
 // 两路径都不满足 → handler 返 400 missing password。
 type ChangePasswordHTTPRequest struct {
 	EncryptedOldPassword string `json:"encrypted_old_password"`

@@ -19,14 +19,15 @@ import (
 // --- Mock Repositories ---
 
 type mockUserRepo struct {
-	createFn          func(ctx context.Context, user *User) error
-	getByIDFn         func(ctx context.Context, id uuid.UUID) (*User, error)
-	getByUsernameFn   func(ctx context.Context, username string) (*User, error)
-	updateFn          func(ctx context.Context, user *User) error
-	updatePasswordFn  func(ctx context.Context, id uuid.UUID, passwordHash string) error
-	deleteFn          func(ctx context.Context, id uuid.UUID) error
-	listFn            func(ctx context.Context, filter UserFilter) (*model.ListResponse[User], error)
-	updateLastLoginFn func(ctx context.Context, id uuid.UUID) error
+	createFn            func(ctx context.Context, user *User) error
+	getByIDFn           func(ctx context.Context, id uuid.UUID) (*User, error)
+	getByUsernameFn     func(ctx context.Context, username string) (*User, error)
+	updateFn            func(ctx context.Context, user *User) error
+	updatePasswordFn    func(ctx context.Context, id uuid.UUID, passwordHash string) error
+	deleteFn            func(ctx context.Context, id uuid.UUID) error
+	listFn              func(ctx context.Context, filter UserFilter) (*model.ListResponse[User], error)
+	getUsernamesByIDsFn func(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]string, error)
+	updateLastLoginFn   func(ctx context.Context, id uuid.UUID) error
 }
 
 func (m *mockUserRepo) Create(ctx context.Context, user *User) error {
@@ -87,7 +88,10 @@ func (m *mockUserRepo) UpdateLastLogin(ctx context.Context, id uuid.UUID) error 
 }
 
 // GetUsernamesByIDs：mockUserRepo 默认返回空 map（测试不关心 enrich 结果时 no-op）。
-func (m *mockUserRepo) GetUsernamesByIDs(_ context.Context, _ []uuid.UUID) (map[uuid.UUID]string, error) {
+func (m *mockUserRepo) GetUsernamesByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]string, error) {
+	if m.getUsernamesByIDsFn != nil {
+		return m.getUsernamesByIDsFn(ctx, ids)
+	}
 	return map[uuid.UUID]string{}, nil
 }
 
@@ -98,6 +102,7 @@ type mockRoleRepo struct {
 	updateFn               func(ctx context.Context, role *Role) error
 	deleteFn               func(ctx context.Context, id uuid.UUID) error
 	listFn                 func(ctx context.Context) ([]Role, error)
+	listWithPaginationFn   func(ctx context.Context, filter RoleFilter) (*model.ListResponse[Role], error)
 	assignRoleFn           func(ctx context.Context, userID, roleID uuid.UUID) error
 	removeRoleFn           func(ctx context.Context, userID, roleID uuid.UUID) error
 	getUserRolesFn         func(ctx context.Context, userID uuid.UUID) ([]Role, error)
@@ -210,7 +215,10 @@ func (m *mockRoleRepo) RemoveAllPermissions(ctx context.Context, roleID uuid.UUI
 func (m *mockRoleRepo) GetUserRolesBatch(_ context.Context, _ []uuid.UUID) (map[uuid.UUID][]Role, error) {
 	return nil, nil
 }
-func (m *mockRoleRepo) ListWithPagination(_ context.Context, _ RoleFilter) (*model.ListResponse[Role], error) {
+func (m *mockRoleRepo) ListWithPagination(ctx context.Context, filter RoleFilter) (*model.ListResponse[Role], error) {
+	if m.listWithPaginationFn != nil {
+		return m.listWithPaginationFn(ctx, filter)
+	}
 	return model.NewListResponse([]Role{}, 0, 1, 20), nil
 }
 func (m *mockRoleRepo) GetDefaultRoleID(_ context.Context, _ uuid.UUID) (*uuid.UUID, error) {
@@ -445,6 +453,7 @@ func TestAdminService_RefreshToken_DisabledUser(t *testing.T) {
 
 func TestAdminService_CreateUser_Success(t *testing.T) {
 	roleID := uuid.New()
+	operatorID := uuid.New()
 	var createdUser *User
 
 	userRepo := &mockUserRepo{
@@ -464,7 +473,8 @@ func TestAdminService_CreateUser_Success(t *testing.T) {
 
 	svc := newTestService(userRepo, roleRepo, &mockAuditRepo{})
 
-	user, err := svc.CreateUser(context.Background(), CreateUserRequest{
+	ctx := context.WithValue(context.Background(), CtxKeyUserID, operatorID)
+	user, err := svc.CreateUser(ctx, CreateUserRequest{
 		Username:    "newuser",
 		Password:    "password123",
 		DisplayName: "New User",
@@ -476,7 +486,71 @@ func TestAdminService_CreateUser_Success(t *testing.T) {
 	assert.Equal(t, "newuser", user.Username)
 	assert.Equal(t, UserStatusActive, user.Status)
 	assert.NotEmpty(t, createdUser.PasswordHash)
+	require.NotNil(t, createdUser.CreatedBy)
+	require.NotNil(t, createdUser.UpdatedBy)
+	assert.Equal(t, operatorID, *createdUser.CreatedBy)
+	assert.Equal(t, operatorID, *createdUser.UpdatedBy)
 	assert.NoError(t, bcrypt.CompareHashAndPassword([]byte(createdUser.PasswordHash), []byte("password123")))
+}
+
+func TestAdminService_ListUsers_AdminSourceWithoutOperatorShowsAdmin(t *testing.T) {
+	userRepo := &mockUserRepo{
+		listFn: func(ctx context.Context, filter UserFilter) (*model.ListResponse[User], error) {
+			return &model.ListResponse[User]{
+				Items:      []User{{ID: uuid.New(), Username: "verify_system_user", Source: UserSourceAdmin}},
+				Total:      1,
+				Page:       1,
+				PageSize:   20,
+				TotalPages: 1,
+			}, nil
+		},
+	}
+	svc := newTestService(userRepo, &mockRoleRepo{}, &mockAuditRepo{})
+
+	result, err := svc.ListUsers(context.Background(), UserFilter{})
+
+	require.NoError(t, err)
+	require.Len(t, result.Items, 1)
+	assert.Equal(t, "admin", result.Items[0].CreatorUsername)
+	assert.Equal(t, "admin", result.Items[0].UpdaterUsername)
+}
+
+func TestAdminService_ListRolesPaginated_EnrichesOperatorUsernames(t *testing.T) {
+	operatorID := uuid.New()
+	legacyRoleID := uuid.New()
+	roleRepo := &mockRoleRepo{
+		listWithPaginationFn: func(ctx context.Context, filter RoleFilter) (*model.ListResponse[Role], error) {
+			return &model.ListResponse[Role]{
+				Items: []Role{
+					{ID: uuid.New(), Name: "custom", CreatedBy: &operatorID, UpdatedBy: &operatorID},
+					{ID: legacyRoleID, Name: "legacy_custom"},
+					{ID: uuid.New(), Name: "admin", IsSystem: true},
+				},
+				Total:      3,
+				Page:       1,
+				PageSize:   20,
+				TotalPages: 1,
+			}, nil
+		},
+	}
+	userRepo := &mockUserRepo{
+		getUsernamesByIDsFn: func(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]string, error) {
+			assert.Contains(t, ids, operatorID)
+			return map[uuid.UUID]string{operatorID: "admin"}, nil
+		},
+	}
+	svc := newTestService(userRepo, roleRepo, &mockAuditRepo{})
+
+	result, err := svc.ListRolesPaginated(context.Background(), RoleFilter{})
+
+	require.NoError(t, err)
+	require.Len(t, result.Items, 3)
+	assert.Equal(t, "admin", result.Items[0].CreatorUsername)
+	assert.Equal(t, "admin", result.Items[0].UpdaterUsername)
+	assert.Equal(t, "admin", result.Items[1].CreatorUsername)
+	assert.Equal(t, "admin", result.Items[1].UpdaterUsername)
+	assert.Empty(t, result.Items[2].CreatorUsername)
+	assert.Empty(t, result.Items[2].UpdaterUsername)
 }
 
 func TestAdminService_UpdateUser_Success(t *testing.T) {

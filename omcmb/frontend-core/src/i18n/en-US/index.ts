@@ -1799,6 +1799,7 @@ const messages: Record<string, string> = {
   'role.updTime':             'Update Time',
   'role.builtIn':             'Built-in',
   'role.builtInCannotDelete': 'Built-in roles cannot be deleted',
+  'role.deleteInUse':         'This role is still assigned to users. Remove it from those users before deleting it.',
   'role.noRolesToDelete':     'No roles to delete (built-in roles cannot be deleted)',
   'role.selectedBuiltIn':     'Selected roles include',
   'role.builtInSkipped':      'built-in roles that will be skipped',
