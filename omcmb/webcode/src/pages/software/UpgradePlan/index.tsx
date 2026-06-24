@@ -755,7 +755,7 @@ export default function UpgradePlan() {
     {
       key: 'progress',
       title: t('software.upgrade.upgradeProgress'),
-      width: 120,
+      width: 160,
       render: (_: unknown, record: UpgradeTaskInfo) => {
         const val = computeProgress(record);
         const statusCode = mapTaskStatusToCode(record.status);
@@ -768,7 +768,17 @@ export default function UpgradePlan() {
         } else if (statusCode === 2) {
           progressStatus = 'active';
         }
-        return <Progress percent={val} size="small" status={progressStatus} />;
+        // #626：进度条下方露出绝对数（已完成/总数 · 失败 N），
+        // 测试/运维一眼能看出任务升了多少台、完成多少、失败多少。
+        const done = record.successCount + record.failCount;
+        return (
+          <div>
+            <Progress percent={val} size="small" status={progressStatus} />
+            <div style={{ fontSize: 11, color: '#8c8c8c', fontFamily: 'monospace', marginTop: 2 }}>
+              {t('software.upgrade.progressDetail', { done, total: record.totalCount, fail: record.failCount })}
+            </div>
+          </div>
+        );
       },
     },
     {
