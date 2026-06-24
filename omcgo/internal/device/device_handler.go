@@ -265,8 +265,16 @@ func (h *Handler) ListDevices(c *gin.Context) {
 		filter.Carrier = &cc
 	}
 	if tech := c.Query("technology"); tech != "" {
-		t := model.Technology(tech)
-		filter.Technology = &t
+		techValues := SplitCSV(tech)
+		if len(techValues) == 1 {
+			t := model.Technology(techValues[0])
+			filter.Technology = &t
+		} else {
+			filter.Technologies = make([]model.Technology, 0, len(techValues))
+			for _, techValue := range techValues {
+				filter.Technologies = append(filter.Technologies, model.Technology(techValue))
+			}
+		}
 	}
 	// T-0162: 老 ?status= 兼容入口，DeviceFilter.Status 会在 Repository 层翻译
 	// 为 lifecycle_state + is_online。新前端代码请走 ?lifecycle_state= / ?is_online=。

@@ -21,8 +21,9 @@ import (
 
 // DeviceFilter specifies criteria for listing devices.
 type DeviceFilter struct {
-	Carrier    *model.CarrierCode
-	Technology *model.Technology
+	Carrier      *model.CarrierCode
+	Technology   *model.Technology
+	Technologies []model.Technology
 
 	// DEPRECATED (T-0162): 用 LifecycleState / IsOnline 替代。保留过渡期供
 	// 老 query 参数自动翻译；handler 收到 `?status=` 会派生到 LifecycleState +

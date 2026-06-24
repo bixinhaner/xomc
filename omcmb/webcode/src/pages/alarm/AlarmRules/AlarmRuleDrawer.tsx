@@ -16,7 +16,7 @@ import {
 } from 'antd';
 import type { TableProps } from 'antd';
 import { useT } from '@/hooks/useT';
-import { useDeviceList, useDeviceGroups, useDevicesByIds } from '@core/hooks/api/useDevices';
+import { useDeviceList, useDeviceGroups } from '@core/hooks/api/useDevices';
 import { useAllAlarmDefinitions } from '@core/hooks/api/useAlarmDefinitions';
 import type { AlarmRule } from '@core/types/alarm';
 import type { AlarmDefinition } from '@core/types/alarmDefinition';
@@ -57,6 +57,14 @@ const DEVICE_TYPE_OPTIONS = [
   { label: 'gNB', value: 'gNB' },
   { label: 'GSM', value: 'GSM' },
 ];
+
+const DEVICE_TYPE_TO_NETWORK_TYPE: Record<string, string> = {
+  eNB: 'lte',
+  gNB: 'nr',
+  GSM: 'gsm',
+};
+
+const DEVICE_TABLE_DEFAULT_PAGE_SIZE = 5;
 
 const MAX_VISIBLE_SELECTED_ALARMS = 5;
 
@@ -227,6 +235,8 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
   const t = useT();
   const [form] = Form.useForm<AlarmRuleFormData>();
   const [loading, setLoading] = useState(false);
+  const [deviceTablePage, setDeviceTablePage] = useState(1);
+  const [deviceTablePageSize, setDeviceTablePageSize] = useState(DEVICE_TABLE_DEFAULT_PAGE_SIZE);
   const [alarmTablePage, setAlarmTablePage] = useState(1);
   const [alarmTablePageSize, setAlarmTablePageSize] = useState(5);
   const [deviceSelectionMode, setDeviceSelectionMode] = useState<'devices' | 'groups'>('devices');
@@ -247,20 +257,23 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
     snKeyword: '',
   });
 
-  // 获取设备列表
-  const { data: deviceData, isLoading: deviceLoading } = useDeviceList({
-    page: 1,
-    pageSize: 100,
-  });
-  const loadedDeviceIds = useMemo(
-    () => new Set((deviceData?.items || []).map((device) => device.id)),
-    [deviceData]
-  );
-  const missingSelectedDeviceIds = useMemo(
-    () => selectedDevices.filter((deviceId) => !loadedDeviceIds.has(deviceId)),
-    [selectedDevices, loadedDeviceIds]
-  );
-  const selectedDeviceQueries = useDevicesByIds(missingSelectedDeviceIds);
+  const deviceListParams = useMemo(() => {
+    const keyword = deviceFilter.snKeyword.trim();
+    const networkType = deviceFilter.deviceTypes
+      .map((deviceType) => DEVICE_TYPE_TO_NETWORK_TYPE[deviceType])
+      .filter(Boolean)
+      .join(',');
+
+    return {
+      page: deviceTablePage,
+      pageSize: deviceTablePageSize,
+      ...(keyword ? { searchText: keyword } : {}),
+      ...(networkType ? { networkType } : {}),
+    };
+  }, [deviceFilter.deviceTypes, deviceFilter.snKeyword, deviceTablePage, deviceTablePageSize]);
+
+  // 获取设备列表：按表格分页请求，避免只加载前 100 条导致最多 20 页。
+  const { data: deviceData, isLoading: deviceLoading } = useDeviceList(deviceListParams);
 
   // 获取设备组列表
   const { data: groupsData, isLoading: groupsLoading } = useDeviceGroups();
@@ -284,26 +297,9 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
   );
 
   // 处理设备数据，添加设备类型
-  const selectedDeviceRecords = useMemo(
-    () => selectedDeviceQueries.flatMap((query) => (query.data ? [query.data] : [])),
-    [selectedDeviceQueries]
-  );
-
   const devicesWithType: DeviceWithType[] = useMemo(() => {
-    const deviceMap = new Map<string, DeviceWithType>();
-
-    (deviceData?.items || []).forEach((device) => {
-      deviceMap.set(device.id, attachDeviceType(device));
-    });
-
-    selectedDeviceRecords.forEach((device) => {
-      if (!deviceMap.has(device.id)) {
-        deviceMap.set(device.id, attachDeviceType(device));
-      }
-    });
-
-    return Array.from(deviceMap.values());
-  }, [deviceData, selectedDeviceRecords]);
+    return (deviceData?.items || []).map(attachDeviceType);
+  }, [deviceData]);
 
   // 处理设备组数据，构建层级结构
   const groupsWithLevel: DeviceGroupWithLevel[] = useMemo(() => {
@@ -353,26 +349,8 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
     return result;
   }, [groupsData]);
 
-  // 根据筛选条件过滤设备
-  const filteredDevices = useMemo(() => {
-    let result = devicesWithType;
-
-    // 按设备类型筛选
-    if (deviceFilter.deviceTypes.length > 0) {
-      result = result.filter(d => deviceFilter.deviceTypes.includes(d.deviceType));
-    }
-
-    // 按SN搜索
-    if (deviceFilter.snKeyword) {
-      const kw = deviceFilter.snKeyword.toLowerCase();
-      result = result.filter(d =>
-        d.sn?.toLowerCase().includes(kw) ||
-        d.name?.toLowerCase().includes(kw)
-      );
-    }
-
-    return result;
-  }, [devicesWithType, deviceFilter]);
+  const filteredDevices = devicesWithType;
+  const deviceTableTotal = deviceData?.total ?? 0;
 
   // 初始化表单数据
   useEffect(() => {
@@ -404,10 +382,16 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
     }
     setAlarmTablePage(1);
     setAlarmTablePageSize(5);
+    setDeviceTablePage(1);
+    setDeviceTablePageSize(DEVICE_TABLE_DEFAULT_PAGE_SIZE);
     setAlarmError(null);
     setAlarmFilter({ keyword: '', eventType: undefined, severity: undefined });
     setDeviceFilter({ deviceTypes: [], snKeyword: '' });
   }, [open, rule, form]);
+
+  useEffect(() => {
+    setDeviceTablePage(1);
+  }, [deviceFilter]);
 
   useEffect(() => {
     setAlarmTablePage(1);
@@ -759,7 +743,22 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
                   rowKey="id"
                   size="small"
                   loading={deviceLoading}
-                  pagination={{ pageSize: 5, size: 'small', showSizeChanger: false }}
+                  pagination={{
+                    current: deviceTablePage,
+                    pageSize: deviceTablePageSize,
+                    total: deviceTableTotal,
+                    size: 'small',
+                    showSizeChanger: true,
+                    pageSizeOptions: [5, 10, 20, 50],
+                    onChange: (page, nextPageSize) => {
+                      setDeviceTablePage(page);
+                      setDeviceTablePageSize(nextPageSize);
+                    },
+                    onShowSizeChange: (_current, nextPageSize) => {
+                      setDeviceTablePage(1);
+                      setDeviceTablePageSize(nextPageSize);
+                    },
+                  }}
                   scroll={{ y: 180 }}
                 />
                 {selectedDevices.length > 0 && (
