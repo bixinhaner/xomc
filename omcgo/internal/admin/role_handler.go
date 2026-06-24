@@ -63,7 +63,7 @@ func (h *Handler) CreateRole(c *gin.Context) {
 		return
 	}
 
-	role, err := h.service.CreateRole(c.Request.Context(), req)
+	role, err := h.service.CreateRole(userContextWithOperator(c), req)
 	if err != nil {
 		status := commonerrors.HTTPStatusFromError(err)
 		commonerrors.AbortWithError(c, status, err)
@@ -86,7 +86,7 @@ func (h *Handler) UpdateRole(c *gin.Context) {
 		return
 	}
 
-	role, err := h.service.UpdateRole(c.Request.Context(), id, req)
+	role, err := h.service.UpdateRole(userContextWithOperator(c), id, req)
 	if err != nil {
 		status := commonerrors.HTTPStatusFromError(err)
 		commonerrors.AbortWithError(c, status, err)
@@ -122,7 +122,7 @@ func (h *Handler) CopyRole(c *gin.Context) {
 		return
 	}
 
-	role, err := h.service.CopyRole(c.Request.Context(), id)
+	role, err := h.service.CopyRole(userContextWithOperator(c), id)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return

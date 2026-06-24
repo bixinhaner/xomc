@@ -1804,6 +1804,7 @@ const messages: Record<string, string> = {
   'role.updTime':             '更新时间',
   'role.builtIn':             '内置',
   'role.builtInCannotDelete': '内置角色无法删除',
+  'role.deleteInUse':         '该角色仍有用户在使用，请先移除用户的该角色后再删除',
   'role.noRolesToDelete':     '没有可删除的角色（内置角色不可删除）',
   'role.selectedBuiltIn':     '选中的角色中有',
   'role.builtInSkipped':      '个内置角色将被跳过',
