@@ -9,7 +9,7 @@ import { App } from 'antd';
 import { IntlProvider } from 'react-intl';
 import { zhCN } from '@core/i18n';
 import type { AlarmRule } from '@core/types/alarm';
-import type { Device } from '@core/types/device';
+import type { Device, DeviceListResponse } from '@core/types/device';
 
 const deviceHooks = vi.hoisted(() => ({
   useDeviceList: vi.fn(() => ({ data: { items: [], total: 0 }, isLoading: false })),
@@ -35,6 +35,21 @@ const visibleDevice = {
   networkType: 'lte',
   connStatus: 'online',
 } as Device;
+
+function makeDeviceListResponse(items: Device[], total = items.length): DeviceListResponse {
+  return {
+    items,
+    total,
+    page: 1,
+    pageSize: 5,
+    stats: {
+      total,
+      online_count: items.filter((device) => device.isOnline).length,
+      offline_count: items.filter((device) => !device.isOnline).length,
+      alarmed: 0,
+    },
+  };
+}
 
 function makeDevice(index: number): Device {
   return {
@@ -65,7 +80,7 @@ function makeRule(selectedDevices: string[]): AlarmRule {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  deviceHooks.useDeviceList.mockReturnValue({ data: { items: [], total: 0 }, isLoading: false });
+  deviceHooks.useDeviceList.mockReturnValue({ data: makeDeviceListResponse([]), isLoading: false });
   deviceHooks.useDeviceGroups.mockReturnValue({ data: { groups: [] }, isLoading: false });
   deviceHooks.useDevicesByIds.mockReturnValue([]);
 });
@@ -94,9 +109,18 @@ describe('AlarmRuleDrawer 规则名必填 (#236)', () => {
     expect(input).toHaveAttribute('maxlength', '100');
   });
 
-  it('编辑规则时只补查当前设备列表缺失的已选设备', () => {
+  it('设备列表按表格分页参数请求后端，避免只加载前 100 条', () => {
+    renderDrawer();
+
+    expect(deviceHooks.useDeviceList).toHaveBeenLastCalledWith({
+      page: 1,
+      pageSize: 5,
+    });
+  });
+
+  it('编辑规则时不会把当前页缺失的已选设备插入设备表', () => {
     deviceHooks.useDeviceList.mockReturnValue({
-      data: { items: [visibleDevice], total: 1 },
+      data: makeDeviceListResponse([visibleDevice]),
       isLoading: false,
     });
 
@@ -105,12 +129,13 @@ describe('AlarmRuleDrawer 规则名必填 (#236)', () => {
       rule: makeRule(['visible-device', 'missing-device']),
     });
 
-    expect(deviceHooks.useDevicesByIds).toHaveBeenLastCalledWith(['missing-device']);
+    expect(screen.getByText('SN-visible-device')).toBeInTheDocument();
+    expect(screen.queryByText('SN-missing-device')).not.toBeInTheDocument();
   });
 
   it('已选设备保持原列表顺序，不会被移动到第一页', () => {
     deviceHooks.useDeviceList.mockReturnValue({
-      data: { items: [1, 2, 3, 4, 5, 6].map(makeDevice), total: 6 },
+      data: makeDeviceListResponse([1, 2, 3, 4, 5].map(makeDevice), 6),
       isLoading: false,
     });
 
