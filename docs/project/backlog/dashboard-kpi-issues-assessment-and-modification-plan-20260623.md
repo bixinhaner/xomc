@@ -225,11 +225,248 @@ WHERE tech IN ('lte','nr','gsm');
 
 ---
 
-## Issue B（占位 / TBD）
+## Issue B（P2, Feature）
 
-后续仪表板 KPI 相关问题在此追加。每条 Issue 沿用 Issue A 的结构（标题 / Issue 提交稿 / 当前评估结论 / 代码证据 / 根因 / 修改方案 / 验收标准 / 风险与回滚 / 工作量预估）。
+### 标题
+首页 KPI 折线图下拉框由单选改多选，支持一张图同时画多个指标的对比曲线
+
+### Issue 提交稿（可直接用于 GitHub Feature 模板）
+
+#### 背景与动机
+当前首页 KPI 折线图（业务量 / 可用性 / 利用率 / 接入性 等 Panel）的指标下拉框是**单选**：
+
+- 管理员在系统管理 → KPI 配置页给 panel 配置了多个指标（如 traffic panel 配了 `LTE_PDCP_VOLUME_DL` / `LTE_PDCP_VOLUME_UL` / `LTE_PDCP_RATE_DL` / `LTE_PDCP_RATE_UL` 4 条），首页用户却只能一次看一条。
+- 想做"上下行对比"、"主副指标关联趋势"等典型场景，必须切两次下拉、心算对比，UX 体验差。
+- 同时性能管理（PM）模块的图表已经支持多 KPI 多色对比（见 `webcode-v3/src/pages/performance/PerformanceCharts.tsx`），首页和 PM 体验割裂。
+
+#### 期望行为
+- 折线图下拉框改为**多选**（带勾选 + 计数 + "全选/清空"快捷操作），默认勾选 panel 配置的全部指标（与管理员配置语义一致）。
+- 选中 N 个指标后，图表同时画 N 条主线（今日）；对比线（昨日/上周）按 Issue B-子方案的策略决定是否一起画。
+- 切语言、切制式、切对比类型时多选状态稳定。
+- 配套：legend 多行/滚动、按指标固定配色、单位不一致时的处理策略。
+
+#### 不在本 Issue 范围
+- 管理员配置页 KPI 选择器的搜索/分页/缓存（→ 后续 Issue）。
+- 持久化"用户首页多选偏好"到后端（→ 后续 Issue，本期只做 URL/zustand 内存态）。
+- 跨 panel 拖拽指标 / 自定义新增图。
+
+#### 严重等级
+P2（功能增强；无功能阻塞，但显著提升首页价值密度）。
+
+### 当前评估结论
+**强烈推荐做，且改动量小。** 通过架构盘点确认：90% 的基础设施已就位，几乎所有难活早就在数据层 / 图表层 / 管理员配置侧做完了，首页是历史遗留的"UI 单选阉割"。
+
+| 层面 | 现状 | 是否需要改 |
+| --- | --- | --- |
+| 后端趋势接口 `/api/v1/dashboard/kpi-time-series` | 已支持 `kpi_names=A,B,C` 逗号分隔，批量返回 `{ "A": [...], "B": [...] }` 字典 | 🟢 0 改动 |
+| 后端 `kpi_layout` 存储 | `metrics` 字段已经是 `string[]`；`SaveKPILayout` 原样透传 | 🟢 0 改动 |
+| 前端 hook `useMultiKPITrendComparison(string[], compareWith, enabled)` | 已存在并已返回 `MultiTrendComparisonData = { [name]: TrendComparisonData }` | 🟢 0 改动 |
+| 前端 `<LineChart>` | `series: LineSeries[]` 早就支持 N 条 series；legend `type: 'scroll'` 已开 | 🟢 0 改动 |
+| 类型 `KPILayoutPanel.metrics: string[]` + `layoutMapping.collectMetrics()` | 已数组化、已去重 | 🟢 0 改动 |
+| 管理员配置页 `MetricPickerModal` | 已多选 + 校验"至少 1 个" | 🟢 0 改动 |
+| **首页 `LayoutKPIPanel.tsx` 下拉框 + `buildSeries()`** | 状态 `selectedMetric: string`、`buildSeries` 只吃单 key、调用 `useKPITrendComparisonV2` | 🟡 **需要改造（核心改动点）** |
+| i18n | 指标名 `dashboard.kpi.*` 已有；legend 自动由指标名拼接 | 🟢 0 改动；只需要新增"全选/清空"几个文案 |
+
+### 代码证据（现状）
+
+- 下拉框单选状态：
+  - [goomc/omcmb/webcode/src/components/dashboard/LayoutKPIPanel.tsx](goomc/omcmb/webcode/src/components/dashboard/LayoutKPIPanel.tsx#L155-L162)
+
+    ```tsx
+    const [selectedMetric, setSelectedMetric] = useState<string>(panel.metrics[0] ?? '');
+    // ...
+    <Select value={selectedMetric} onChange={setSelectedMetric} options={indicatorOptions} />
+    ```
+
+- 单 metric → 双 series（今日 + 昨日）：
+  - [goomc/omcmb/webcode/src/components/dashboard/LayoutKPIPanel.tsx](goomc/omcmb/webcode/src/components/dashboard/LayoutKPIPanel.tsx#L118-L123)
+
+    ```ts
+    const { series } = useMemo(
+      () => buildSeries(selectedMetric, trendData, xData, todayLabel, yesterdayLabel, selectedMeta.conversion),
+      [selectedMetric, trendData, xData, todayLabel, yesterdayLabel, selectedMeta.conversion],
+    );
+    ```
+
+- 已具备批量能力（被调用方只用了单 key 路径）：
+  - [goomc/omcmb/frontend-core/src/hooks/api/useDashboard.ts](goomc/omcmb/frontend-core/src/hooks/api/useDashboard.ts#L475-L520) — `useMultiKPITrendComparison`
+  - [goomc/omcmb/frontend-core/src/services/api/dashboardApi.ts](goomc/omcmb/frontend-core/src/services/api/dashboardApi.ts#L480-L496) — `getKPITimeSeries`，`kpi_names: names.join(',')`
+  - [goomc/omcgo/internal/dashboard/handler.go](goomc/omcgo/internal/dashboard/handler.go#L177-L208) — `parseKPINames` 解析逗号分隔
+
+- 图表组件早就支持多 series：
+  - [goomc/omcmb/webcode/src/components/Charts/LineChart.tsx](goomc/omcmb/webcode/src/components/Charts/LineChart.tsx#L7-L47) — `series: LineSeries[]`，含 `name / data / color / dashed`
+
+- 现成的多 KPI 对比参考实现：
+  - [goomc/omcmb/webcode-v3/src/pages/performance/PerformanceCharts.tsx](goomc/omcmb/webcode-v3/src/pages/performance/PerformanceCharts.tsx#L1-L25) — `selectedKpis: string[]` + `useMultipleKPISeries` + 颜色循环
+
+### 根因（为何是历史遗留 UI 单选）
+追溯起来不是 bug 而是渐进实现：
+
+1. 最早 panel 模型是"一图一指标"，`selectedMetric: string` 直接绑 `panel.metrics[0]`。
+2. 后来管理员配置页（issue #213 S3）演进出"一图多指标"语义，并升级了类型与存储。
+3. 数据 hook 重构出 `useMultiKPITrendComparison` 用于 PM 模块。
+4. 首页折线图组件没跟上演进，仍保留单选 UI 与 `useKPITrendComparisonV2(selectedMetric)` 的单 key 调用路径。
+
+### 修改方案（按分层 + 单选→多选切换点拆解）
+
+总策略：**只动首页 `LayoutKPIPanel.tsx` 一个组件 + 重写 `buildSeries`**，其他层全部复用现有能力。先做"行为正确"，再做"UX 打磨"。
+
+#### 0. 设计决策（先决定，再写代码）
+
+> 这些决策影响行为，建议在 issue 评论里先对齐后再开 PR。
+
+- **D1 默认选中策略**：默认勾选 panel 全部 metrics vs 只勾第一项？
+  - **决策（已实施）**：仅勾第一项。理由：默认进入单指标 today+yesterday 对比视图（与旧版单选行为完全一致，无回归感知），用户主动叠加才进入多选；同时下拉框头部 tag 不爆炸、视觉负担小。
+- **D2 多选时是否还画对比线（昨日/上周）**：
+  - 候选 a：选 1 个 → 画今日+对比；选 ≥ 2 个 → **只画今日**（避免 2N 条线视觉爆炸）。
+  - 候选 b：始终画今日+对比（虚线），N 大时图很乱。
+  - 候选 c：单独加一个"显示对比"开关。
+  - **建议 a**，最简单稳健；后续可以做 c 升级。
+- **D3 单位不一致**：业务量是 KB、速率是 Mbps、可用性是 %，混选时 Y 轴怎么处理？
+  - 候选 a：双 Y 轴（≤ 2 种单位时启用）；3+ 种单位时禁用混选并 toast。
+  - 候选 b：始终单 Y 轴 + tooltip 显示各自单位；用户自负责。
+  - 候选 c：按单位自动分组到不同子图（改动大）。
+  - **建议 b**，本期实现成本最低；D3 升级单独排期。
+- **D4 颜色管理**：
+  - 候选 a：按 `panel.metrics` 顺序在固定调色板里循环取色（与 PM 模块一致，简单）。
+  - 候选 b：每个 K 编号在 `KPI_CATALOG` 里固定一个 `color`（一致性强，但要求填表）。
+  - **建议 a** 起步，把"是否固定色"留给 D4 升级。
+- **D5 选择数量上限/下限**：是否强制最少/最多？
+  - **决策（已实施）**：**不设硬下限**。理由：调研 Grafana / DataDog / Kibana 等同类运维监控产品的多选过滤器均允许 0 选，"清空"是用户的明确意图，强行拦截反而产生"为什么删不掉"的困惑。0 选时显示 `请至少选择一个指标` 友好占位即可。tag 渲染采用 `tagRender` 去掉逐个 ×，反选靠"下拉点 ✓"标准心智，避免选 N 个时 N 个 × 的视觉负担；保留 `allowClear` 提供一键清空入口。软上限 6 + toast 暂未实施，留待后续。
+- **D6 状态持久化范围**：
+  - 候选 a：纯组件内 `useState`（刷新丢）。
+  - 候选 b：URL query（可分享）。
+  - 候选 c：zustand 全局（跨页面保留）。
+  - **建议 a** 起步；URL 持久化作单独 issue。
+
+#### 1. 前端 — `LayoutKPIPanel.tsx`（核心改动）
+
+- 状态从单 key 改成 key 数组：
+
+  ```ts
+  // 原
+  const [selectedMetric, setSelectedMetric] = useState<string>(panel.metrics[0] ?? '');
+  // 改
+  const [selectedMetrics, setSelectedMetrics] = useState<string[]>(panel.metrics);
+  ```
+
+- 下拉组件改成 antd `Select mode="multiple"`（或 `mode="tags"`）：
+
+  ```tsx
+  <Select
+    mode="multiple"
+    maxTagCount="responsive"
+    value={selectedMetrics}
+    onChange={setSelectedMetrics}
+    options={indicatorOptions}
+    style={{ minWidth: 200 }}
+    size="small"
+    allowClear
+    placeholder={t('dashboard.kpi.selectMetricsPlaceholder')}
+  />
+  ```
+
+- 趋势取数从 `useKPITrendComparisonV2(selectedMetric)` 切到 `useMultiKPITrendComparison(selectedMetrics, compareWith, enabled)`，复用其字典返回。
+
+- `buildSeries` 重写为多 metric 入参；按决策 D2，根据 `selectedMetrics.length` 决定是否产出对比线：
+
+  ```ts
+  function buildSeries(
+    metrics: string[],
+    multiData: MultiTrendComparisonData | undefined,
+    xData: string[],
+    todayLabel: (name: string) => string,
+    yesterdayLabel: (name: string) => string,
+    metaResolver: (key: string) => ResolvedMetricMeta,
+    palette: string[],
+  ): { series: LineSeries[] } {
+    if (!multiData || metrics.length === 0) return { series: [] };
+    const showCompare = metrics.length === 1; // D2
+    const out: LineSeries[] = [];
+    metrics.forEach((key, idx) => {
+      const meta = metaResolver(key);
+      const color = palette[idx % palette.length];
+      const cur = multiData[key]?.currentSeries ?? [];
+      out.push({ name: todayLabel(meta.name), data: cur, color });
+      if (showCompare) {
+        const prev = multiData[key]?.compareSeries ?? [];
+        out.push({ name: yesterdayLabel(meta.name), data: prev, color, dashed: true });
+      }
+    });
+    return { series: out };
+  }
+  ```
+
+- 颜色调色板与 PM 模块对齐：
+  `const PALETTE = ['#1677FF', '#52C41A', '#FA8C16', '#722ED1', '#13C2C2', '#EB2F96'];`
+
+- 空选择 / 全部反选时图区显示"请至少选一个指标"占位（沿用现有 `Empty` 组件）。
+
+#### 2. 前端 — i18n 新增 key（只新增，不动现存）
+
+`frontend-core/src/i18n/{zh-CN,en-US}/index.ts` 在 `dashboard.kpi.*` 下追加：
+- `selectMetricsPlaceholder`: "请选择指标" / "Select metrics"
+- `noMetricSelected`: "请至少选择一个指标" / "Select at least one metric"
+- `tooManyMetricsWarn`: "已选 {count} 项，建议不超过 {max} 项以保持图表可读" / "{count} selected; for chart readability we recommend at most {max}"
+
+#### 3. 前端 — 单测（`__tests__/LayoutKPIPanel.test.tsx` 新增）
+
+- 多选 1 个 → series 长度 = 2（today + yesterday，dashed）
+- 多选 2 个 → series 长度 = 2（only today，分别用 palette[0] / palette[1]）
+- 多选 0 个 → 显示占位、不发起 trend 请求
+- 颜色按 idx 循环、单位回退正确（沿用 `resolveMetricMeta`）
+
+#### 4. 后端 — 0 改动
+
+确认 `parseKPINames` 在传入 6+ 个 metric 时正常工作（已是 `strings.Split`）。如需保险，可加一道软上限（如 max 16），但不在本 Issue 必做。
+
+#### 5. 文档
+
+- 用户文档：仪表板使用手册补"多指标对比"小节。
+- 本文件 Issue B 持续更新决策结论。
+
+### 验收标准
+- 任一 panel 下拉默认勾选其 `panel.metrics` 全部项，图表立刻渲染 N 条曲线。
+- 取消勾选某项 → 对应曲线立即从图中消失；legend 同步更新。
+- 全部取消 → 图区显示"请至少选择一个指标"占位，不发起趋势请求。
+- 选 1 个 → 同时画今日 + 昨日（昨日虚线）。
+- 选 ≥ 2 个 → 只画今日 N 条；颜色按调色板循环、每条曲线一色。
+- 切语言：legend 文案随之切换；选择状态保留。
+- 切制式 (LTE → NR → GSM)：下拉重置为新 panel 的全选；图表重渲染。
+- 兼容 Issue A：旧 symbolic alias 在多选下也能正确显示中文名。
+- 选 6 项以上：toast 提示"建议不超过 6 项"但不阻塞。
+- 单测 4/4 通过。
+
+### 风险与回滚
+- 风险 1：单位混选时单 Y 轴 + 不同量纲并存（如 % 和 Mbps），数值幅度差距大导致小值曲线被压扁不可见。
+  - 缓解：tooltip 显示各自单位+原始值；在文档注明此为已知限制，D3 升级单独排期。
+- 风险 2：选择数量过多时图表可读性差（≥ 8 条线）。
+  - 缓解：D5 软上限 + toast；legend 已是 scroll 模式不会爆框。
+- 风险 3：`useMultiKPITrendComparison` 对未在指标库的 key（如本期仍残留的 `LTE_PDCP_RATE_DL` 符号）发请求会拿到空数据。
+  - 缓解：Issue A 的 catalog 兜底已覆盖；fallback 时该曲线显示空但不报错。
+- 回滚：单 commit 集中在 `LayoutKPIPanel.tsx` + 新增测试，`git revert` 即可。
+
+### 工作量预估
+- 前端核心改动（LayoutKPIPanel + buildSeries + 调色板）：0.5 人日
+- i18n 新增 key + 中英文翻译：0.1 人日
+- 单测：0.2 人日
+- 联调验证 + 截图：0.2 人日
+- **合计：约 1 人日**
+
+### 实施顺序与依赖
+- **依赖 Issue A 已合入**（catalog + alias 兜底，否则多选场景下 raw key 漏出更明显）。
+- 决策项 D1~D6 在 PR 提交前需在 issue 评论里收敛。
+- 建议分支：`feat/dashboard-kpi-multi-select`
+
+---
+
+## Issue C+（占位 / TBD）
+
+后续仪表板 KPI 相关问题在此追加。每条 Issue 沿用 Issue A / B 的结构。
 
 候选项（待用户确认是否纳入）：
+- 用户级"首页多选偏好"持久化到后端（user-scoped settings）。
+- 多选下的单位不一致 → 双 Y 轴 / 单位分组子图（Issue B 决策 D3 的升级版）。
 - KPI 选择器（管理员配置页）放开全部指标后，搜索 / 分页 / 缓存策略。
 - 趋势接口在选中"暂无 K 编号"指标时的空数据提示与降级。
 - KPI Panel 在小屏 / 高密度下的图表压缩与 tooltip 互斥。
@@ -254,9 +491,14 @@ WHERE tech IN ('lte','nr','gsm');
 ## 6. 分支与 PR 切片建议
 
 - PR-A（Issue A）
-  - 建议分支：`fix/dashboard-kpi-layout-migrate-to-k-codes`
-  - 涉及：`omcgo`（default layout + migration + seed） + `omcmb`（兼容层 + 测试） — 跨栈
-- PR-B 起：按 Issue 单独切
+  - 建议分支：`fix/600-dashboard-kpi-i18n-catalog`（已合入主线为准，否则按此命名）
+  - 涉及：`omcmb`（catalog + alias 兜底 + 测试） + `goomc/docs`（本文档）— 前端单栈
+  - 持久化层迁移（default layout / seed / migration）拆为后续 Issue。
+- PR-B（Issue B）
+  - 建议分支：`feat/dashboard-kpi-multi-select`
+  - 涉及：`omcmb/webcode/src/components/dashboard/LayoutKPIPanel.tsx` + `frontend-core/src/i18n/*` + 新增组件单测
+  - **依赖 PR-A 合入**（catalog 兜底是多选场景下中英文显示的前置条件）
+- 后续 PR：按 Issue C+ 单独切
 
 ---
 
