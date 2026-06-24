@@ -913,7 +913,12 @@ func (h *ParameterTreeHandler) GetParameterSchema(c *gin.Context) {
 		return
 	}
 
-	params, err := h.paramRepo.GetByDevice(c.Request.Context(), id)
+	var params []model.DeviceParameter
+	if pathPrefix != "" {
+		params, err = h.paramRepo.GetByPathPrefix(c.Request.Context(), id, pathPrefix)
+	} else {
+		params, err = h.paramRepo.GetByDevice(c.Request.Context(), id)
+	}
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return

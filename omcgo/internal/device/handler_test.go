@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -216,8 +217,19 @@ func (m *fakeParamRepo) DeleteByPathPrefix(_ context.Context, _ uuid.UUID, _ str
 	return 0, nil
 }
 
-func (m *fakeParamRepo) GetByPathPrefix(_ context.Context, _ uuid.UUID, _ string) ([]model.DeviceParameter, error) {
-	return nil, nil
+func (m *fakeParamRepo) GetByPathPrefix(_ context.Context, deviceID uuid.UUID, prefix string) ([]model.DeviceParameter, error) {
+	if prefix == "" {
+		out := make([]model.DeviceParameter, len(m.params[deviceID]))
+		copy(out, m.params[deviceID])
+		return out, nil
+	}
+	var out []model.DeviceParameter
+	for _, p := range m.params[deviceID] {
+		if strings.HasPrefix(p.ParameterPath, prefix) {
+			out = append(out, p)
+		}
+	}
+	return out, nil
 }
 
 func (m *fakeParamRepo) CountByPathPrefix(_ context.Context, _ uuid.UUID, _ string) (int, error) {

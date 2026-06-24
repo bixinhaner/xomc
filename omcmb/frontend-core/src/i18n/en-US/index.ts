@@ -1056,7 +1056,7 @@ const messages: Record<string, string> = {
   'device.paramTree.syncing':             'Syncing',
   'device.paramTree.syncPending':         ' · {count} GPV request(s) pending',
   'device.paramTree.lastSync':            'Last sync: {time}',
-  'device.paramTree.lastScopedSync':      'Last quick-settings sync: {time} · {gpvCount} GPV request(s) · {count} target paths',
+  'device.paramTree.lastScopedSync':      'Last quick-settings sync: {time} · {gpvCount} GPV request(s) · {duration} · {count} target paths',
   'device.paramTree.lastSyncGpvSummary':  ' · {count} GPV request(s) · {duration}',
   'device.paramTree.syncTotal':           ' · {count} parameters in store',
   'device.paramTree.neverSynced':         'Never synced',

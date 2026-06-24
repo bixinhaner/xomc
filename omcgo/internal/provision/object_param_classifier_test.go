@@ -1,6 +1,7 @@
 package provision
 
 import (
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -77,13 +78,33 @@ func TestClassifyPrefixes_Empty(t *testing.T) {
 	assert.Empty(t, objects)
 }
 
-// ── buildGPVBatches: scalar 批量 + object 单发 ─────────────────────────────
+func TestIsExpandedInstanceObjectPath_Cases(t *testing.T) {
+	cases := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{"expanded_instance", "DeviceGSM.Bts.1.", true},
+		{"expanded_large_instance", "DeviceGSM.Bts.256.", true},
+		{"plain_object", "DeviceGSM.Bts.", false},
+		{"placeholder_object", "DeviceGSM.Bts.{i}.", false},
+		{"scalar_numeric_leaf", "DeviceGSM.Bts.1.Enable", false},
+		{"non_numeric_tail", "DeviceGSM.Bts.foo.", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, isExpandedInstanceObjectPath(c.path))
+		})
+	}
+}
+
+// ── buildGPVBatches: scalar 批量 + object 自适应分批 ────────────────────────
 
 func TestBuildGPVBatches_MixedScalarAndObject(t *testing.T) {
 	// 5 scalar + 3 object, batchSize=2
-	// 期望：scalar 拆成 3 批 (2+2+1)；object 3 个独立批
+	// 期望：scalar 拆成 3 批 (2+2+1)；普通 object 单发；实例级 object 合批
 	input := []string{
-		"s1", "obj1.", "s2", "obj2.", "s3", "obj3.", "s4", "s5",
+		"s1", "obj1.", "s2", "DeviceGSM.Bts.1.", "s3", "DeviceGSM.Bts.2.", "s4", "s5",
 	}
 	batches := buildGPVBatches(input, 2)
 
@@ -92,8 +113,7 @@ func TestBuildGPVBatches_MixedScalarAndObject(t *testing.T) {
 		{"s3", "s4"},
 		{"s5"},
 		{"obj1."},
-		{"obj2."},
-		{"obj3."},
+		{"DeviceGSM.Bts.1.", "DeviceGSM.Bts.2."},
 	}
 	assert.Equal(t, want, batches)
 }
@@ -108,7 +128,7 @@ func TestBuildGPVBatches_AllScalar_NormalBatching(t *testing.T) {
 	assert.Equal(t, want, batches)
 }
 
-func TestBuildGPVBatches_AllObject_EachIsOwnBatch(t *testing.T) {
+func TestBuildGPVBatches_AllPlainObject_EachIsOwnBatch(t *testing.T) {
 	input := []string{"obj1.", "obj2.", "obj3."}
 	batches := buildGPVBatches(input, 50)
 	want := [][]string{
@@ -117,6 +137,37 @@ func TestBuildGPVBatches_AllObject_EachIsOwnBatch(t *testing.T) {
 		{"obj3."},
 	}
 	assert.Equal(t, want, batches)
+}
+
+func TestBuildGPVBatches_ExpandedObjects_AdaptivePayloadBudget(t *testing.T) {
+	input := make([]string, 0, 130)
+	for i := 1; i <= 130; i++ {
+		input = append(input, "DeviceGSM.Bts."+strconv.Itoa(i)+".")
+	}
+	batches := buildGPVBatches(input, 50)
+
+	assert.Greater(t, len(batches), 1)
+	for _, batch := range batches {
+		assert.LessOrEqual(t, estimatedGPVNATSPayloadBytes(batch), gpvNATSPayloadBudgetBytes)
+		assert.Less(t, estimatedGPVNATSPayloadBytes(batch), natsMaxPayloadBytes)
+	}
+	assert.Len(t, batches[0], maxExpandedObjectPrefixesPerGPV())
+}
+
+func TestBuildGPVBatches_ExpandedObjects_FlushBeforePlainObject(t *testing.T) {
+	input := []string{
+		"DeviceGSM.Bts.1.",
+		"DeviceGSM.Bts.2.",
+		"DeviceGSM.Msc.",
+		"DeviceGSM.Bts.3.",
+	}
+	batches := buildGPVBatches(input, 50)
+
+	assert.Equal(t, [][]string{
+		{"DeviceGSM.Bts.1.", "DeviceGSM.Bts.2."},
+		{"DeviceGSM.Msc."},
+		{"DeviceGSM.Bts.3."},
+	}, batches)
 }
 
 func TestBuildGPVBatches_Empty(t *testing.T) {

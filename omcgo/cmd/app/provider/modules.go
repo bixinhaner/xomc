@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -726,6 +727,7 @@ func initTaskModule(c *Container) error {
 	udpSender := connreq.NewUDPSender(c.StunStore, c.Cfg.ConnReq.SharedSecret, c.Logger)
 	crDispatcher := connreq.NewDispatcher(c.ConnReqClient, udpSender, c.Logger)
 	crDispatcher.SetMetrics(connreq.NewDispatcherMetrics(c.MetricsReg))
+	crDispatcher.SetLANPortLookup(newSTUNServerPortLookup(c.DeviceRepo, c.ParamRepo, c.Logger))
 	taskService.SetConnectionRequester(
 		&taskDeviceLookup{repo: c.DeviceRepo},
 		&taskCRSender{dispatcher: crDispatcher, serverAddr: c.Cfg.ConnReq.ServerAddr},
@@ -2237,6 +2239,59 @@ type taskCRSender struct {
 
 func (a *taskCRSender) Send(ctx context.Context, deviceSN, httpURL string) error {
 	return a.dispatcher.Send(ctx, deviceSN, httpURL, a.serverAddr, true)
+}
+
+// stunServerPortParamPath is the TR-069 parameter that, when present in
+// device_parameters, overrides the hard-coded UDP LAN CR fallback port (3478).
+// Annex G lets vendors pick this freely; for example the empirically tested
+// BAICELLS BSC7041C243 and Dengyo BSC7079B243 both report 3478, but other
+// firmware can ship different values that would silently break LAN-direct wake.
+const stunServerPortParamPath = "Device.ManagementServer.STUNServerPort"
+
+// newSTUNServerPortLookup returns a connreq.LANPortLookup that reads
+// Device.ManagementServer.STUNServerPort for the given SN. It logs and
+// returns (0, false) on any lookup miss / parse failure so the dispatcher
+// falls back to the UDPSender's hard-coded default port.
+//
+// Resolution path: SN → device row (DeviceReader.GetBySerialNumber) →
+// device_parameters[STUNServerPort] (DeviceParameterRepository.GetByPath).
+// Both repos are already constructed for other purposes — no new schema.
+func newSTUNServerPortLookup(
+	repo device.DeviceReader,
+	paramRepo device.DeviceParameterRepository,
+	logger *zap.Logger,
+) connreq.LANPortLookup {
+	if repo == nil || paramRepo == nil {
+		return nil
+	}
+	return func(ctx context.Context, deviceSN string) (int, bool) {
+		dev, err := repo.GetBySerialNumber(ctx, deviceSN)
+		if err != nil {
+			logger.Debug("stun server port lookup: device fetch failed",
+				zap.String("device_sn", deviceSN), zap.Error(err))
+			return 0, false
+		}
+		if dev == nil {
+			return 0, false
+		}
+		param, err := paramRepo.GetByPath(ctx, dev.ID, stunServerPortParamPath)
+		if err != nil {
+			logger.Debug("stun server port lookup: param fetch failed",
+				zap.String("device_sn", deviceSN), zap.Error(err))
+			return 0, false
+		}
+		if param == nil || param.ParameterValue == "" {
+			return 0, false
+		}
+		port, err := strconv.Atoi(param.ParameterValue)
+		if err != nil || port <= 0 || port > 65535 {
+			logger.Debug("stun server port lookup: invalid value",
+				zap.String("device_sn", deviceSN),
+				zap.String("raw", param.ParameterValue))
+			return 0, false
+		}
+		return port, true
+	}
 }
 
 // mmlPathMissAdapter 把 task.TaskService 的 AggregatePathTranslationMissBySourceID

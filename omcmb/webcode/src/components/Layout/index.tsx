@@ -12,6 +12,7 @@ import Header from './Header';
 import Sidebar from './Sidebar';
 import TabBar from './TabBar';
 import TaskPanel from './TaskPanel';
+import QuickSettingsSyncWatcher from './QuickSettingsSyncWatcher';
 import ParticleCanvas from '@/components/Effects/ParticleCanvas';
 import DynamicLightSource from '@/components/Effects/DynamicLightSource';
 import styles from './AppShell.module.css';
@@ -90,6 +91,7 @@ export default function AppShell() {
           isTop ? undefined : { '--current-sidebar-width': `${sidebarWidth}px` } as React.CSSProperties
         }
       >
+        <QuickSettingsSyncWatcher />
         <div className={styles.header}>
           <Header />
         </div>

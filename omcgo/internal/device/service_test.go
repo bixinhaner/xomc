@@ -434,6 +434,86 @@ func TestDeviceService_UpdateFromInform_FallsBackToConnectionRequestURLHost(t *t
 	assert.True(t, updatedDevice.IsOnline)
 }
 
+func TestDeviceService_UpdateFromInform_IgnoresUnspecifiedUDPAddress(t *testing.T) {
+	deviceID := uuid.New()
+	var updatedDevice *model.Device
+
+	deviceRepo := &mockDeviceRepo{
+		getBySerialNumberFn: func(ctx context.Context, sn string) (*model.Device, error) {
+			return &model.Device{
+				ID:             deviceID,
+				SerialNumber:   sn,
+				Technology:     model.TechLTE,
+				LifecycleState: model.LifecycleCommissioned,
+				Status:         model.DeviceActive,
+				InformInterval: 300,
+			}, nil
+		},
+		updateFn: func(ctx context.Context, device *model.Device) error {
+			updatedDevice = device
+			return nil
+		},
+	}
+
+	svc := newTestDeviceService(deviceRepo, &mockParamRepo{})
+	inform := sampleInform("SN002-STUN")
+	inform.ParameterList = []tr069.ParameterValueStruct{
+		{Name: "Device.DeviceInfo.SoftwareVersion", Value: "1.0.0"},
+		{Name: "Device.ManagementServer.ConnectionRequestURL", Value: "http://172.17.1.14:7547/AB48F15B575B64B43D3F8830CFCF8277"},
+		{Name: "Device.ManagementServer.UDPConnectionRequestAddress", Value: "0.0.0.0"},
+		{Name: "Device.ManagementServer.STUNServerPort", Value: "3478"},
+	}
+
+	device, err := svc.UpdateFromInform(context.Background(), inform)
+	require.NoError(t, err)
+	require.NotNil(t, device)
+	require.NotNil(t, updatedDevice)
+
+	assert.Empty(t, updatedDevice.UDPConnectionRequestAddress)
+	assert.Equal(t, "172.17.1.14", updatedDevice.IPAddress)
+	assert.False(t, updatedDevice.NatDetected)
+	assert.True(t, updatedDevice.IsOnline)
+}
+
+func TestDeviceService_UpdateFromInform_DoesNotDeriveUDPAddressFromCachedSTUNPort(t *testing.T) {
+	deviceID := uuid.New()
+	var updatedDevice *model.Device
+
+	deviceRepo := &mockDeviceRepo{
+		getBySerialNumberFn: func(ctx context.Context, sn string) (*model.Device, error) {
+			return &model.Device{
+				ID:             deviceID,
+				SerialNumber:   sn,
+				Technology:     model.TechLTE,
+				LifecycleState: model.LifecycleCommissioned,
+				Status:         model.DeviceActive,
+				InformInterval: 300,
+			}, nil
+		},
+		updateFn: func(ctx context.Context, device *model.Device) error {
+			updatedDevice = device
+			return nil
+		},
+	}
+	svc := newTestDeviceService(deviceRepo, &mockParamRepo{})
+	inform := sampleInform("SN002-STUN-CACHED")
+	inform.ParameterList = []tr069.ParameterValueStruct{
+		{Name: "Device.DeviceInfo.SoftwareVersion", Value: "1.0.0"},
+		{Name: "Device.ManagementServer.ConnectionRequestURL", Value: "http://172.17.1.14:7547/AB48F15B575B64B43D3F8830CFCF8277"},
+		{Name: "Device.ManagementServer.UDPConnectionRequestAddress", Value: "0.0.0.0"},
+	}
+
+	device, err := svc.UpdateFromInform(context.Background(), inform)
+	require.NoError(t, err)
+	require.NotNil(t, device)
+	require.NotNil(t, updatedDevice)
+
+	assert.Empty(t, updatedDevice.UDPConnectionRequestAddress)
+	assert.Equal(t, "172.17.1.14", updatedDevice.IPAddress)
+	assert.False(t, updatedDevice.NatDetected)
+	assert.True(t, updatedDevice.IsOnline)
+}
+
 func TestDeviceService_UpdateFromInform_NotFound(t *testing.T) {
 	deviceRepo := &mockDeviceRepo{
 		getBySerialNumberFn: func(ctx context.Context, sn string) (*model.Device, error) {
