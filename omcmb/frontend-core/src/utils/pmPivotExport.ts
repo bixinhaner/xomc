@@ -2,7 +2,7 @@
  * PM 透视数据导出：AggregatedRow[] → Excel 行对象数组。
  *
  * 列集合 / 列名 / 时间&数值格式与「指标查询页」透视表 (KPIQuery/PivotTable) 完全一致：
- *   固定维度列：开始时间 / 结束时间 / 设备 SN / Cell ID / PLMN
+ *   固定维度列：开始时间 / 结束时间 / 设备 SN / 测量对象（原始 object_ldn）
  *   动态指标列：每个 metricPath 一列（列名 = metricPath）
  * 仪表盘普通 Panel 导出复用此函数，保证导出表与指标查询页同款。
  */
@@ -16,8 +16,7 @@ export const PIVOT_FIXED_HEADERS = {
   startTime: '开始时间',
   endTime: '结束时间',
   deviceSn: '设备 SN',
-  cellId: 'Cell ID',
-  plmn: 'PLMN',
+  measObject: '测量对象',
 } as const;
 
 const TIME_FMT = 'YYYY-MM-DD HH:mm';
@@ -32,8 +31,7 @@ export function pivotRowsToSheet(rows: AggregatedRow[]): Array<Record<string, st
       [PIVOT_FIXED_HEADERS.startTime]: dayjs(r.startTime ?? r.time).format(TIME_FMT),
       [PIVOT_FIXED_HEADERS.endTime]: r.endTime ? dayjs(r.endTime).format(TIME_FMT) : '-',
       [PIVOT_FIXED_HEADERS.deviceSn]: r.deviceSn ?? '-',
-      [PIVOT_FIXED_HEADERS.cellId]: r.cellId ?? '-',
-      [PIVOT_FIXED_HEADERS.plmn]: r.plmn ?? '-',
+      [PIVOT_FIXED_HEADERS.measObject]: r.objectLdn ?? '-',
     };
     columns.forEach((c) => {
       out[c.title] = formatPivotNumber(r.cells[c.key]);

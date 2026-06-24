@@ -8,7 +8,6 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 import { cn } from '@/lib/utils'
 import { useIndicatorList } from '@core/hooks/api/useIndicatorsLibrary'
 import { useAggregatedMetricsByDevices } from '@core/hooks/api/usePmQuery'
-import { formatObjectLdn } from '@core/utils/pmPivotTransform'
 import { useDeviceList } from '@core/hooks/api/useDevices'
 import type { DeviceType } from '@core/types/indicatorLibrary'
 import type { Granularity } from '@core/types/pmDashboard'
@@ -148,10 +147,7 @@ export default function PerformanceQuery() {
     if (!submitted || aggRows.length === 0) return [] as string[]
     const seen = new Set<string>()
     aggRows.forEach((r) => {
-      if (r.objectLdn) {
-        const formatted = formatObjectLdn(r.objectLdn)
-        if (formatted) seen.add(formatted)
-      }
+      if (r.objectLdn) seen.add(r.objectLdn)
     })
     return Array.from(seen).sort()
   }, [aggRows, submitted])

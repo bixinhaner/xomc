@@ -53,10 +53,7 @@ export interface PivotRow {
   startTime?: string;      // 桶开始时间（RFC3339）
   endTime?: string;        // 桶结束时间（RFC3339）
   deviceSn?: string;
-  cellId?: string;         // 从 object_ldn 解析
-  plmn?: string;           // 从 object_ldn 解析
-  measObject?: string;     // formatObjectLdn() 人类可读摘要
-  objectLdn?: string;      // 原始 LDN（备用 tooltip）
+  objectLdn?: string;      // 原始 object_ldn（直接展示，不格式化）
   cells: Record<string, number | null>;  // metricPath → value
 }
 
@@ -215,16 +212,12 @@ export function pivotLongToWide(rows: AggregatedRow[]): PivotResult {
     const key = `${r.time}||${sn}||${ldn}`;
     let row = rowMap.get(key);
     if (!row) {
-      const parsed = parseObjectLdn(ldn);
       row = {
         key,
         time: r.time,
         startTime: r.startTime,
         endTime: r.endTime,
         deviceSn: r.deviceSn,
-        cellId: baseCellId(parsed),
-        plmn: basePlmn(parsed),
-        measObject: formatObjectLdn(ldn) || undefined,
         objectLdn: ldn || undefined,
         cells: {},
       };

@@ -87,7 +87,7 @@ function ResultTable({
   t: TranslateFn
 }) {
   const pivoted = useMemo(() => pivotLongToWide(rows), [rows])
-  const colCount = pivoted.columns.length + 5
+  const colCount = pivoted.columns.length + 3
 
   return (
     <div>
@@ -101,8 +101,6 @@ function ResultTable({
             <TableRow>
               <TableHead>{t('perf.kpiQuery.pivot.startTime')}</TableHead>
               <TableHead>{t('perf.kpiQuery.pivot.deviceSn')}</TableHead>
-              <TableHead>Cell ID</TableHead>
-              <TableHead>PLMN</TableHead>
               <TableHead>{t('perf.kpiQuery.pivot.measObject')}</TableHead>
               {pivoted.columns.map((c) => (
                 <TableHead key={c.key}>{c.title}</TableHead>
@@ -123,9 +121,7 @@ function ResultTable({
                     {formatTime(row.time)}
                   </TableCell>
                   <TableCell className="text-xs">{row.deviceSn ?? '—'}</TableCell>
-                  <TableCell className="text-xs">{row.cellId ?? '—'}</TableCell>
-                  <TableCell className="text-xs">{row.plmn ?? '—'}</TableCell>
-                  <TableCell className="text-xs">{row.measObject ?? '—'}</TableCell>
+                  <TableCell className="text-xs">{row.objectLdn ?? '—'}</TableCell>
                   {pivoted.columns.map((c) => (
                     <TableCell key={c.key} className="tabular-nums">
                       {formatPivotNumber(row.cells[c.key])}
