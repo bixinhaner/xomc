@@ -2083,11 +2083,6 @@ export default function FileTransferCenter() {
               >
                 <List.Item.Meta
                   title={<Text>{item.deviceSn}</Text>}
-                  description={(
-                    <Text type="secondary" style={{ fontSize: 12 }}>
-                      {[item.deviceName, item.productType].filter(Boolean).join(' · ') || '—'}
-                    </Text>
-                  )}
                 />
               </List.Item>
             )}
