@@ -1762,7 +1762,6 @@ export default function FileTransferCenter() {
                 >
                   {t('ufte.action.batchSnInput')}
                 </Button>
-                <Text type="secondary">{t('ufte.form.deviceTotal', { count: drawerDeviceTotal })}</Text>
                 <Button
                   type="link"
                   size="small"
@@ -2084,11 +2083,6 @@ export default function FileTransferCenter() {
               >
                 <List.Item.Meta
                   title={<Text>{item.deviceSn}</Text>}
-                  description={(
-                    <Text type="secondary" style={{ fontSize: 12 }}>
-                      {[item.deviceName, item.productType].filter(Boolean).join(' · ') || '—'}
-                    </Text>
-                  )}
                 />
               </List.Item>
             )}
