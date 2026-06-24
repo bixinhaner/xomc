@@ -4963,6 +4963,7 @@ const messages: Record<string, string> = {
   'ufte.form.deviceTotal':                    '共 {count} 台',
   'ufte.selectedModal.title':                 '已选设备（{count} 台）',
   'ufte.selectedModal.empty':                 '暂无已选设备',
+  'ufte.selectedModal.searchPlaceholder':     '按 SN 模糊搜索',
   'ufte.msg.selectionPrunedByClass':          '已移除 {count} 台不匹配所选产品类型的设备',
   'ufte.form.licenseSource':                  'License 文件来源（按设备最新 license）',
   'ufte.form.openLicenseManager':             '打开 License 文件管理',
