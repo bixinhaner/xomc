@@ -2152,9 +2152,106 @@ export default function FileTransferCenter() {
                 </Space>
               </Space>
             </Card>
+            {/* #615：任务详情抽屉补「已选设备列表」——按 taskId 走 /ufte/devices 拉子任务，
+                10s 自动刷新（与外层「执行明细」共用 hook）。lazy 渲染，不阻塞抽屉打开。 */}
+            <TaskDetailDevicesPanel taskId={detailTask.id} />
           </Space>
         ) : null}
       </Drawer>
     </ListPageLayout>
+  );
+}
+
+// TaskDetailDevicesPanel —— 详情抽屉内嵌「已选设备 / 执行明细」表。
+// 与外层「执行明细」页签共用 useUnifiedFileTransferDevices，仅多传 taskId 收窄到当前任务。
+// 后端 matchesDeviceFilter 按 DeviceItem.TaskID 精确匹配；空 taskId 不会发生（detailTask 必有 id）。
+function TaskDetailDevicesPanel({ taskId }: { taskId: string }) {
+  const t = useT();
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const { data, isLoading } = useUnifiedFileTransferDevices({
+    taskId,
+    page,
+    pageSize,
+  });
+  const rows = data?.items ?? [];
+  const total = data?.total ?? 0;
+
+  const columns: ColumnsType<UnifiedFileTransferDeviceItem> = [
+    {
+      title: t('ufte.col.deviceSn'),
+      dataIndex: 'deviceSn',
+      key: 'deviceSn',
+      width: 150,
+      ellipsis: true,
+      render: (sn: string) => <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{sn || '-'}</Text>,
+    },
+    {
+      title: t('ufte.col.productType'),
+      dataIndex: 'productName',
+      key: 'productName',
+      width: 110,
+      ellipsis: true,
+      render: (_, record) => <Text style={{ fontSize: 12 }}>{record.productName || record.productType || '-'}</Text>,
+    },
+    {
+      title: t('common.status'),
+      dataIndex: 'status',
+      key: 'status',
+      width: 110,
+      render: (_, record) => renderDeviceStatus(record.status, t),
+    },
+    {
+      title: t('ufte.col.progress'),
+      dataIndex: 'progress',
+      key: 'progress',
+      width: 90,
+      render: (p: number) => <Progress percent={p} size="small" />,
+    },
+    {
+      title: t('software.failureReason'),
+      dataIndex: 'failureReason',
+      key: 'failureReason',
+      ellipsis: true,
+      render: (reason: string | undefined, record) =>
+        reason ? (
+          <Tooltip title={record.failureDetail || reason}>
+            <Text type="danger" style={{ fontSize: 12 }}>{reason}</Text>
+          </Tooltip>
+        ) : (
+          <Text type="secondary" style={{ fontSize: 12 }}>-</Text>
+        ),
+    },
+  ];
+
+  return (
+    <Card
+      title={t('ufte.tab.deviceList')}
+      size="small"
+      extra={<Text type="secondary" style={{ fontSize: 12 }}>{t('ufte.tag.totalCount', { count: total })}</Text>}
+    >
+      <Table<UnifiedFileTransferDeviceItem>
+        rowKey="id"
+        size="small"
+        loading={isLoading}
+        columns={columns}
+        dataSource={rows}
+        pagination={{
+          current: page,
+          pageSize,
+          total,
+          showSizeChanger: true,
+          pageSizeOptions: ['10', '20', '50', '100'],
+          size: 'small',
+          onChange: (nextPage, nextSize) => {
+            setPage(nextPage);
+            if (nextSize && nextSize !== pageSize) {
+              setPageSize(nextSize);
+            }
+          },
+        }}
+        scroll={{ x: 600 }}
+      />
+    </Card>
   );
 }
