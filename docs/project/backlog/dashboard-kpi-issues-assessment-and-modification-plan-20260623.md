@@ -460,6 +460,232 @@ P2（功能增强；无功能阻塞，但显著提升首页价值密度）。
 
 ---
 
+## Issue C（P3, Refactor）
+
+### 标题
+首页"网络制式" Segmented 与 KPI 配置页 Tabs 改为字典驱动，去除前端硬编码
+
+### Issue 提交稿（可直接用于 GitHub Feature 模板）
+
+#### 背景与动机
+首页仪表板顶部的"网络制式"切换器（LTE / NR / GSM）目前是**前端硬编码**：
+
+- 三项 label 与 value 都写死在 [dashboard/index.tsx](goomc/omcmb/webcode/src/pages/dashboard/index.tsx) 与 [dashboard/kpi-config.ts](goomc/omcmb/webcode/src/pages/dashboard/kpi-config.ts) 的 `TECH_LABELS`。
+- 后端早已存在通用字典体系（`sys_dictionaries` + `sys_dictionary_details`），并且已有 `type='network_type'` 字典（id=15，含 `lte` / `nr` 两行，label 分别为 "eNB(LTE)" / "gNB(NR)"）作为"设备网络制式"的统一来源；设备列表 / 回收站等模块已通过 `useDictionaryBatch(['network_type'])` 消费。
+- 当前管理员若想增删一个制式（例如临时屏蔽某项）或者改显示文案，必须改前端代码并发版；与字典管理页"运行时可改"的承诺不一致。
+- 同一概念"网络制式"在系统里出现两套展示真相：设备模块按字典展示 `eNB(LTE) / gNB(NR)`，Dashboard 与 KPI 配置页按 `TECH_LABELS` 展示 `LTE / NR / GSM`。
+
+本 Issue 让首页 Segmented 与 KPI 配置页 Tabs 改为运行时从字典读取，**直接复用字典原 label**，与设备模块的展示对齐。
+
+#### 期望行为
+- 字典管理页 `network_type` 字典里**启用 + 排序**的明细决定首页 Segmented / KPI 配置 Tabs 的**选项集合、顺序、显示文案**。
+- 编辑某项的 label / 切换 `status` 启用状态 / 调 `sort` → 刷新页面即可见，无需发版。
+- 首页 Segmented 与 KPI 配置 Tabs 仍只渲染前端 `TechnologyType = 'lte' | 'nr' | 'gsm'` 已知的 value，未知 value 自动过滤（前端 KPI 配置静态契约本期不动）。
+- loading / error / 空字典 → 返回空数组，UI 显示空 Segmented / 空 Tabs，让运维感知字典缺失；**不再注入前端硬编码 fallback**。
+
+#### 不在本 Issue 范围
+- 取消 / 放开 TypeScript 静态契约 `TechnologyType`（涉及 PM 模块 / 后端 CHECK 约束，独立 Issue）。
+- 后端 5 张表（`pm_dashboards` / `pm_tasks` / `pm_user_dashboard_preferences` / `dashboard_kpi_layouts` 等）的 `technology` 列 CHECK 约束改为软引用字典（独立 Issue）。
+- 字典 seed / migration 改动（本期不动数据库；基线字典已有 `lte` / `nr`，是否补 `gsm` / 调 label 全由运维通过字典管理页决定）。
+- 字典管理页本身的 UI / CRUD（已上线，无需改）。
+
+#### 严重等级
+P3（重构 / 配置外置；无功能阻塞，但消除一处硬编码、为后续多制式扩展铺路）。
+
+### 当前评估结论
+**强烈推荐做，且改动量极小。** 字典体系、消费 hook 均已就位；本期**纯前端改动，0 SQL 改动**：新建 1 个收敛 hook + 改 2 个接入点（首页 Segmented、KPI 配置 Tabs）+ 删除 `TECH_LABELS` 常量。
+
+| 层面 | 现状 | 是否需要改 |
+| --- | --- | --- |
+| 后端字典接口 `GET /admin/sysDictionary/findSysDictionary?type=network_type` | 已就位 | 🟢 0 改动 |
+| 字典表 `sys_dictionaries id=15 (type='network_type')` | 已存在 | 🟢 0 改动 |
+| 字典明细 seed | 含 `lte` / `nr` 两行，label 为 "eNB(LTE)" / "gNB(NR)" | 🟢 0 改动（GSM 是否补由运维决定） |
+| 前端 hook `useDictionary(code)` / `useDictionaryBatch(codes)` | 已就位 | 🟢 0 改动 |
+| 现成消费方参考 [RecycleBin/index.tsx#L55-L56](goomc/omcmb/webcode/src/pages/device/RecycleBin/index.tsx#L55-L56) | 已上线 | 🟢 0 改动 |
+| **首页 [dashboard/index.tsx](goomc/omcmb/webcode/src/pages/dashboard/index.tsx) Segmented options** | 硬编码 `TECH_LABELS.lte/.nr/.gsm` | 🔴 **改为 `useTechnologyDictionary()`** |
+| **KPI 配置页 [system/KpiConfig/index.tsx](goomc/omcmb/webcode/src/pages/system/KpiConfig/index.tsx) Tabs** | 硬编码 | 🔴 同步改 |
+| `dashboard/kpi-config.ts` 的 `TECH_LABELS` 常量 | 仅 hook fallback 与硬编码 Segmented 使用 | 🔴 **删除常量定义**（保留 `TechnologyType` 类型 export） |
+| `dashboard/kpi-config.ts` 的 `TechnologyType` 类型 | 静态联合类型 | 🟢 不动（本期不打开契约） |
+| 后端 5 张表 `CHECK (technology IN ('lte','nr','gsm'))` | 与字典脱钩 | 🟢 本期不动（决策 D3） |
+
+### 代码证据（现状）
+
+**1. 前端硬编码点（已改造点的旧状态，供 PR diff 参考）**
+
+- 首页 Segmented 选项：原 [dashboard/index.tsx](goomc/omcmb/webcode/src/pages/dashboard/index.tsx) 硬编码 `[{label:TECH_LABELS.lte,value:'lte'}, ...]`。
+- KPI 配置 Tabs：原 [system/KpiConfig/index.tsx](goomc/omcmb/webcode/src/pages/system/KpiConfig/index.tsx) 硬编码 `items=[{key:'lte',label:TECH_LABELS.lte}, ...]`。
+- 静态 label 表 + 静态联合类型：
+  - [kpi-config.ts](goomc/omcmb/webcode/src/pages/dashboard/kpi-config.ts) `TECH_LABELS = { lte: 'LTE', nr: 'NR', gsm: 'GSM' }`（本期删）
+  - [kpi-config.ts](goomc/omcmb/webcode/src/pages/dashboard/kpi-config.ts) `type TechnologyType = 'lte' | 'nr' | 'gsm'`（本期保留）
+
+**2. 现成基建（无需改造）**
+
+- 字典 hook：
+  - [useSystem.ts](goomc/omcmb/frontend-core/src/hooks/api/useSystem.ts) — `useDictionary(dictType)` + `useDictionaryBatch(codes)`
+- 字典 API 端点：
+  - [adminApi.ts](goomc/omcmb/frontend-core/src/services/api/adminApi.ts) — `findDictionaryByType(type)` → 返回 `{ ..., sysDictionaryDetails: [{label, value, sort, status, labelI18n, ...}] }`
+- 现成消费方：
+  - [device/RecycleBin/index.tsx](goomc/omcmb/webcode/src/pages/device/RecycleBin/index.tsx) — `useDictionaryBatch(['network_type'])` 调用样板
+
+**3. 字典 baseline 现状（无需改动）**
+
+- 字典本体 `id=15, type='network_type', name='设备网络制式'`。
+- 字典明细：
+  - `(45, label='eNB(LTE)', value='lte', sort=1, status=true)`
+  - `(46, label='gNB(NR)',  value='nr',  sort=2, status=true)`
+- 是否需要 GSM 行：由运维通过字典管理页按需新增；前端不预设、不 seed。
+
+**4. 后端 CHECK 约束（本期不动，备忘）**
+
+- [000001_init_schema.sql:5036](goomc/omcgo/migrations/000001_init_schema.sql#L5036) — `pm_dashboards_technology_check CHECK (technology = ANY (ARRAY['lte','nr','gsm']))`
+- [000001_init_schema.sql:5171](goomc/omcgo/migrations/000001_init_schema.sql#L5171) — `chk_pm_tasks_technology`
+- [000001_init_schema.sql:5194](goomc/omcgo/migrations/000001_init_schema.sql#L5194) — `pm_user_dashboard_preferences_technology_check`
+- [000001_init_schema.sql:17732](goomc/omcgo/migrations/000001_init_schema.sql#L17732) — `dashboard_kpi_layouts_tech_check`
+
+### 根因
+- 历史实现把"网络制式"当作前端常量看待（仅 LTE / NR / GSM 三类），未走通用字典体系。
+- 设备模块后来引入字典（commit `2d8d0dc`、设备列表性能优化），但首页 dashboard 与 KPI 配置页没跟上。
+- 结果：同一概念"网络制式"在系统里有两套展示真相（字典原文案 vs 前端 `TECH_LABELS`），且 dashboard 这套不可运行时编辑。
+
+### 设计决策（已与用户对齐）
+
+- **D1 字典源策略**：复用现有 `network_type` 字典（id=15）；**显示文案直接复用字典 label**（基线即 "eNB(LTE)" / "gNB(NR)"），与设备模块对齐。**不引入 `extend` 短码**作为 dashboard 专属展示文案 —— "同一字典两套消费方需要两套展示文案"是伪需求，运维若要改文案直接改字典 label，两边同步更新。
+- **D2（已撤销）**：~~补 GSM 字典项~~ —— 本期不 seed 任何字典行。基线 `lte` / `nr` 是否够用、是否补 GSM，由运维通过字典管理页按需决定。
+- **D3 后端 CHECK 约束**：本期**不动**。短期保留 5 张表硬编码 `ARRAY['lte','nr','gsm']` 的耦合。后续若要真正"字典驱动制式扩展"再单独 Issue 处理（迁移到 reference table 或软校验）。
+- **D4 加载策略**：loading / error / 字典空 → 返回空数组，UI 显示空 Segmented / 空 Tabs，让运维**感知字典缺失**。**不再注入前端硬编码 fallback** —— fallback 与"字典驱动"的精神相悖（fallback 会掩盖真实的字典缺失故障）。下游图表组件本就支持"无 technology / 无 layout"的退化渲染，不会因为空 Segmented 而崩溃。
+- **D5 i18n 入口收敛**：新建 `useTechnologyDictionary()` hook 统一 label 解析逻辑：`labelI18n[locale] → label → value.toUpperCase()`（最终兜底防御 NPE）。**不再引入 `extend` 优先链**。
+- **D6 排序**：按字典 `sort` 字段升序渲染 Segmented / Tabs；前端不再保留 LTE→NR→GSM 的硬编码顺序。
+- **D7 范围**：除首页 Segmented 外，**KPI 配置页**（[system/KpiConfig/index.tsx](goomc/omcmb/webcode/src/pages/system/KpiConfig/index.tsx)）的 tech Tabs 也一并纳入本 Issue，避免遗留第二处硬编码。
+
+### 修改方案（按分层）
+
+总策略：**前端一收敛点（`useTechnologyDictionary` hook）+ 两接入点（首页 Segmented、KPI 配置 Tabs）+ 删除 `TECH_LABELS` 常量**。0 SQL 改动，0 后端改动。TypeScript 静态契约与后端 CHECK 约束本期不动，留待后续放开制式集合的 Issue 单独处理。
+
+#### 1. 前端 — 新建收敛 hook
+
+新建 [goomc/omcmb/webcode/src/components/dashboard/useTechnologyDictionary.ts](goomc/omcmb/webcode/src/components/dashboard/useTechnologyDictionary.ts)：
+
+```ts
+import { useMemo } from 'react';
+import { useIntl } from 'react-intl';
+import { useDictionary } from '@core/hooks/api/useSystem';
+import type { TechnologyType } from '@/pages/dashboard/kpi-config';
+
+const KNOWN_TECHS: ReadonlySet<TechnologyType> = new Set(['lte', 'nr', 'gsm']);
+
+export interface TechnologyOption {
+  value: TechnologyType;
+  label: string;
+  sort: number;
+}
+
+const pickLabel = (...candidates: Array<string | undefined | null>): string | undefined => {
+  for (const c of candidates) {
+    const s = (c ?? '').trim();
+    if (s) return s;
+  }
+  return undefined;
+};
+
+export function useTechnologyDictionary(): {
+  options: TechnologyOption[];
+  isLoading: boolean;
+} {
+  const { data, isLoading } = useDictionary('network_type');
+  const { locale } = useIntl();
+
+  const options = useMemo<TechnologyOption[]>(() => {
+    const details = data?.sysDictionaryDetails;
+    if (!details?.length) return [];
+
+    return details
+      .filter((d) => d.status !== false)
+      .filter((d) => KNOWN_TECHS.has(d.value as TechnologyType))
+      .map<TechnologyOption>((d) => {
+        const tech = d.value as TechnologyType;
+        const label = pickLabel(d.labelI18n?.[locale], d.label) ?? tech.toUpperCase();
+        return { value: tech, label, sort: d.sort ?? 0 };
+      })
+      .sort((a, b) => a.sort - b.sort);
+  }, [data, locale]);
+
+  return { options, isLoading };
+}
+```
+
+#### 2. 前端 — 接入点 1：首页 Segmented
+
+修改 [goomc/omcmb/webcode/src/pages/dashboard/index.tsx](goomc/omcmb/webcode/src/pages/dashboard/index.tsx)：
+
+```tsx
+import { useTechnologyDictionary } from '@/components/dashboard/useTechnologyDictionary';
+// ...
+const { options: techOptions } = useTechnologyDictionary();
+
+// 越界回退：当前选中 technology 不在 techOptions 中（字典禁用了当前项）→ 切到第一项
+useEffect(() => {
+  if (techOptions.length && !techOptions.some((o) => o.value === technology)) {
+    setTechnology(techOptions[0].value);
+  }
+}, [techOptions, technology]);
+
+// ...
+<Segmented value={technology} onChange={(v) => setTechnology(v as TechnologyType)} options={techOptions} />
+```
+
+#### 3. 前端 — 接入点 2：KPI 配置 Tabs
+
+修改 [goomc/omcmb/webcode/src/pages/system/KpiConfig/index.tsx](goomc/omcmb/webcode/src/pages/system/KpiConfig/index.tsx)，同样以 `useTechnologyDictionary` 提供的 options 生成 Tabs `items`，并带同样的越界回退。
+
+#### 4. 前端 — 删除 `TECH_LABELS` 常量
+
+从 [kpi-config.ts](goomc/omcmb/webcode/src/pages/dashboard/kpi-config.ts) 删除 `TECH_LABELS` 定义与 export（hook 简化后已无消费者）。`TechnologyType` 类型保留 export（hook 与 KPI panel 配置仍引用）。
+
+#### 5. 前端 — 单测（`useTechnologyDictionary.test.tsx` 新增）
+
+7 个 case：
+- loading 时返回空数组（无 fallback）
+- 字典空列表 → 返回空数组
+- 使用字典原 label（"eNB(LTE)" / "gNB(NR)"）
+- `labelI18n[locale]` 优先于 `label`
+- `labelI18n` / `label` 全为空 → 兜底到 `value.toUpperCase()`
+- 未知 value（如 `'cdma'`） → 过滤
+- `status=false` → 过滤；按 `sort` 升序
+
+#### 6. 文档
+
+- 本文件 Issue C 段持续记录决策与验收。
+
+### 验收标准
+- 字典管理页 → `network_type` 字典 → 改某项 label / 切换启用状态 / 调 sort → 刷新页面，首页 Segmented 与 KPI 配置 Tabs 立即反映变化，无需发版。
+- 首页 Segmented / KPI 配置 Tabs 的显示文案与设备模块对齐（基线即 "eNB(LTE)" / "gNB(NR)"）。
+- 临时禁用某项（status=false） → Segmented / Tabs 自动隐藏该项；若禁用项正是当前选中项，自动回退到第一项。
+- 字典接口 timeout / 500 → 返回空数组，UI 显示空 Segmented / 空 Tabs，下游 KPI 面板按"无 layout"退化渲染；运维可见、可定位。
+- 设备列表 / 回收站的"网络制式"列与筛选下拉显示不变（不受 Dashboard 改造影响 —— 二者本就消费同一字典）。
+- 单测 7/7 通过；`tsc --noEmit` 0 错。
+
+### 风险与回滚
+- 风险 1：字典误删全部 `network_type` 明细 → 首页 / KPI 配置页空 Segmented / Tabs。
+  - **这是预期行为**（决策 D4），让运维感知字典缺失。建议字典管理页后续加"内置字典不可删"的保护（独立 Issue）。
+- 风险 2：管理员把字典 label 改成超长文案 → Segmented 单 tab 撑宽布局。
+  - 缓解：`useTechnologyDictionary` 对 label 做 trim；UI 层可加 `max-width` 截断 + tooltip 显示完整文案（按需）。
+- 风险 3：管理员新增 value 不在 `'lte' | 'nr' | 'gsm'` 联合类型里（如 `'wifi'`） → 被前端过滤，不展示。
+  - 这是**预期行为**（本期不放开静态契约），管理员需通过独立 Issue 走"放开类型 + 后端 CHECK"流程。
+- 回滚：单 commit revert 即可恢复硬编码 Segmented / Tabs；0 数据库改动 → 无数据回滚成本。
+
+### 工作量预估
+- 前端（hook + 两接入点 + 删 TECH_LABELS）：0.3 人日
+- 单测：0.2 人日
+- 联调验证 + 截图：0.2 人日
+- **合计：约 0.7 人日**
+
+### 实施顺序与依赖
+- **独立于 Issue A / B**，可单独切 PR；建议在 A、B 之后做，避免与 Dashboard 同区域改动并发冲突。
+- 决策 D1~D7 已对齐。
+- 建议分支：`feat/dashboard-tech-from-dictionary`
+
+---
+
 ## Issue C+（占位 / TBD）
 
 后续仪表板 KPI 相关问题在此追加。每条 Issue 沿用 Issue A / B 的结构。
@@ -498,6 +724,10 @@ P2（功能增强；无功能阻塞，但显著提升首页价值密度）。
   - 建议分支：`feat/dashboard-kpi-multi-select`
   - 涉及：`omcmb/webcode/src/components/dashboard/LayoutKPIPanel.tsx` + `frontend-core/src/i18n/*` + 新增组件单测
   - **依赖 PR-A 合入**（catalog 兜底是多选场景下中英文显示的前置条件）
+- PR-C（Issue C）
+  - 建议分支：`feat/dashboard-tech-from-dictionary`
+  - 涉及：`omcmb/webcode/src/components/dashboard/useTechnologyDictionary.ts`（新增）+ `omcmb/webcode/src/pages/dashboard/index.tsx`（接入）+ `omcmb/webcode/src/pages/system/KPIConfig/*`（如有 tech tab） + `omcgo/migrations/seed/000001_init_seed.sql`（GSM + extend）+ 新增 migration + 单测
+  - **独立于 PR-A/B**，可并行；建议排在 A/B 后避免同区域并发冲突
 - 后续 PR：按 Issue C+ 单独切
 
 ---

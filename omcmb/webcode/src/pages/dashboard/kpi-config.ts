@@ -82,15 +82,6 @@ export interface TechnologyKPIConfig {
 // ============================================================================
 
 /**
- * 制式显示名称
- */
-export const TECH_LABELS: Record<TechnologyType, string> = {
-  lte: 'LTE',
-  nr: 'NR',
-  gsm: 'GSM',
-} as const;
-
-/**
  * Panel类型显示名称
  */
 export const PANEL_LABELS: Record<PanelType, string> = {
