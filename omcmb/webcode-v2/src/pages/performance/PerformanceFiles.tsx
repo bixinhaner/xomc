@@ -5,6 +5,13 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
   Table,
   TableBody,
   TableCell,
@@ -27,6 +34,7 @@ import {
   usePMFileDevices,
   useBatchDeletePMFiles,
 } from '@core/hooks/api/usePerformance'
+import { useProductList, useProductNameResolver } from '@core/hooks/api/useProducts'
 import type { PageRequest } from '@core/types/pagination'
 
 // ============================================================
@@ -64,17 +72,33 @@ export function PerformanceFilesPage() {
   const [page, setPage] = useState(1)
   const [keyword, setKeyword] = useState('')
   const [input, setInput] = useState('')
+  // #602：产品名称下拉过滤，传 product.id
+  const [productId, setProductId] = useState('')
   const [pendingSn, setPendingSn] = useState<string | null>(null)
 
   const params = useMemo<
-    { keyword?: string; siteName?: string; productClass?: string } & PageRequest
+    { keyword?: string; siteName?: string; productClass?: string; productId?: string } & PageRequest
   >(
-    () => ({ page, pageSize: PAGE_SIZE, ...(keyword.trim() ? { keyword: keyword.trim() } : {}) }),
-    [page, keyword]
+    () => ({
+      page,
+      pageSize: PAGE_SIZE,
+      ...(keyword.trim() ? { keyword: keyword.trim() } : {}),
+      ...(productId ? { productId } : {}),
+    }),
+    [page, keyword, productId]
   )
 
   const { data, isLoading, isError, error, isFetching, refetch } = usePMFileDevices(params)
   const batchDelete = useBatchDeletePMFiles()
+  const { data: productsData } = useProductList()
+  const productNameOptions = useMemo(
+    () =>
+      (productsData?.items ?? [])
+        .map((p) => ({ label: `${p.name} (${p.tech})`, value: p.id }))
+        .sort((a, b) => a.label.localeCompare(b.label, 'zh-CN')),
+    [productsData]
+  )
+  const resolveProductName = useProductNameResolver()
 
   const rows = data?.items ?? []
   const total = data?.total ?? 0
@@ -93,7 +117,7 @@ export function PerformanceFilesPage() {
     batchDelete.mutate([sn], { onSettled: () => setPendingSn(null) })
   }
 
-  const cols = ['设备 SN', '基站名称', '产品类', '文件数', '首次采集', '最近采集', '上报', '操作']
+  const cols = ['设备 SN', '基站名称', '产品名称', '文件数', '首次采集', '最近采集', '上报', '操作']
 
   return (
     <PageShell
@@ -124,6 +148,25 @@ export function PerformanceFilesPage() {
         <Button variant="outline" size="sm" onClick={submitSearch}>
           搜索
         </Button>
+        <Select
+          value={productId || 'all'}
+          onValueChange={(v) => {
+            setProductId(v === 'all' ? '' : v)
+            setPage(1)
+          }}
+        >
+          <SelectTrigger className="w-56">
+            <SelectValue placeholder="产品名称" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">全部产品</SelectItem>
+            {productNameOptions.map((opt) => (
+              <SelectItem key={opt.value} value={opt.value}>
+                {opt.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <Button
           variant="outline"
           size="sm"
@@ -159,7 +202,11 @@ export function PerformanceFilesPage() {
                     <TableCell className="font-mono text-xs">{r.deviceSn}</TableCell>
                     <TableCell className="font-medium">{r.siteName || '—'}</TableCell>
                     <TableCell className="text-xs">
-                      {r.productClass ? <Badge variant="outline">{r.productClass}</Badge> : '—'}
+                      {(() => {
+                        const name = resolveProductName(r.productClass)
+                        if (!name) return '—'
+                        return <Badge variant="outline">{name}</Badge>
+                      })()}
                     </TableCell>
                     <TableCell className="tabular-nums">{r.fileCount}</TableCell>
                     <TableCell className="text-xs text-muted-foreground">

@@ -65,6 +65,17 @@ const DATA_NETWORK_TYPE_OPTIONS = [
   { label: 'eGW', value: 'egw' },
 ];
 
+function getRoleDeleteErrorMessage(err: unknown, fallback: string, inUseMessage: string): string {
+  const error = err as { bizCode?: number; userMessage?: string; message?: string } | undefined;
+  if (error?.bizCode === 7008) return inUseMessage;
+  return error?.userMessage || error?.message || fallback;
+}
+
+function renderRoleOperator(value: unknown, role: Role, builtInText: string): string {
+  if (value) return String(value);
+  return role.builtIn > 0 ? builtInText : '-';
+}
+
 // 基站制式选项
 const buildNetworkTypeOptions = (t: (id: string) => string) => [
   { label: t('role.all'), value: '' },
@@ -657,6 +668,11 @@ export default function RoleManagement() {
       onOk: () => {
         deleteRoles.mutate([role.id], {
           onSuccess: () => message.success(t('common.deleteSuccess')),
+          onError: (err) => {
+            message.error(
+              getRoleDeleteErrorMessage(err, t('common.deleteFailed'), t('role.deleteInUse'))
+            );
+          },
         });
       },
     });
@@ -710,6 +726,11 @@ export default function RoleManagement() {
           onSuccess: () => {
             message.success(t('common.deleteSuccess'));
             setSelectedKeys([]);
+          },
+          onError: (err) => {
+            message.error(
+              getRoleDeleteErrorMessage(err, t('common.deleteFailed'), t('role.deleteInUse'))
+            );
           },
         });
       },
@@ -964,7 +985,7 @@ export default function RoleManagement() {
       },
     },
     { key: 'description', title: t('role.roleDescription'), dataIndex: 'description', width: 150, ellipsis: true, render: (v) => (v as string) || '-' },
-    { key: 'createUser', title: t('role.createUser'), dataIndex: 'createUser', width: 100, render: (v) => (v as string) || '-' },
+    { key: 'createUser', title: t('role.createUser'), dataIndex: 'createUser', width: 100, render: (v, record) => renderRoleOperator(v, record, t('role.builtIn')) },
     {
       key: 'createTime',
       title: t('role.createTime'),
@@ -972,7 +993,7 @@ export default function RoleManagement() {
       width: 160,
       render: (val) => (val ? formatSystemTime(String(val)) : '-') as string,
     },
-    { key: 'updateUser', title: t('role.updateUser'), dataIndex: 'updateUser', width: 100, render: (v) => (v as string) || '-' },
+    { key: 'updateUser', title: t('role.updateUser'), dataIndex: 'updateUser', width: 100, render: (v, record) => renderRoleOperator(v, record, t('role.builtIn')) },
     {
       key: 'updateTime',
       title: t('role.updateTime'),
@@ -1660,13 +1681,13 @@ export default function RoleManagement() {
           <span>{selectedRole?.userCount ?? 0}</span>
         </Form.Item>
         <Form.Item label={t('role.createUser')}>
-          <span>{selectedRole?.createUser ?? '-'}</span>
+          <span>{selectedRole ? renderRoleOperator(selectedRole.createUser, selectedRole, t('role.builtIn')) : '-'}</span>
         </Form.Item>
         <Form.Item label={t('role.createTime')}>
           <span>{selectedRole?.createTime ? formatSystemTime(selectedRole.createTime) : '-'}</span>
         </Form.Item>
         <Form.Item label={t('role.updateUser')}>
-          <span>{selectedRole?.updateUser ?? '-'}</span>
+          <span>{selectedRole ? renderRoleOperator(selectedRole.updateUser, selectedRole, t('role.builtIn')) : '-'}</span>
         </Form.Item>
         <Form.Item label={t('role.updateTime')}>
           <span>{selectedRole?.updateTime ? formatSystemTime(selectedRole.updateTime) : '-'}</span>

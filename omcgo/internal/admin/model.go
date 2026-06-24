@@ -48,15 +48,15 @@ type User struct {
 	// P1-④ 密码最近修改时间；UpdatePassword 同步刷新。Login 时与
 	// sys_configs.security.validPeriod 比较判断密码过期。
 	PasswordChangedAt *time.Time `json:"password_changed_at,omitempty"`
-	CreatedBy           *uuid.UUID `json:"created_by,omitempty"`
-	UpdatedBy           *uuid.UUID `json:"updated_by,omitempty"`
+	CreatedBy         *uuid.UUID `json:"created_by,omitempty"`
+	UpdatedBy         *uuid.UUID `json:"updated_by,omitempty"`
 	// CreatorUsername / UpdaterUsername 是 ListUsers / GetUser 派生字段：
 	// 用 created_by / updated_by 反查 users.username，省去前端二次拉全量用户表。
 	// 当对应 ID 为 NULL（seed 写入 / 内置）时为空字符串；前端按空值渲染"内置"。
-	CreatorUsername     string     `json:"creator_username,omitempty"`
-	UpdaterUsername     string     `json:"updater_username,omitempty"`
-	CreatedAt           time.Time  `json:"created_at"`
-	UpdatedAt           time.Time  `json:"updated_at"`
+	CreatorUsername string    `json:"creator_username,omitempty"`
+	UpdaterUsername string    `json:"updater_username,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 // IsSuperAdmin reports whether the user is a system built-in user (UserSourceBuiltIn).
@@ -74,18 +74,20 @@ func (u *User) IsSuperAdmin() bool {
 //   - CreatedBy   : 创建者 user_id；NULL 表示 seed 写入（内置角色）
 //   - UpdatedBy   : 最近一次修改者 user_id
 type Role struct {
-	ID             uuid.UUID    `json:"id"`
-	Name           string       `json:"name"`
-	Code           string       `json:"code,omitempty"`
-	Description    string       `json:"description"`
-	IsSystem       bool         `json:"is_system"`
-	Permissions    []Permission `json:"permissions,omitempty"`
-	DeviceGroupIDs []uuid.UUID  `json:"device_group_ids,omitempty"`
-	UserCount      int          `json:"user_count"`
-	CreatedBy      *uuid.UUID   `json:"created_by,omitempty"`
-	UpdatedBy      *uuid.UUID   `json:"updated_by,omitempty"`
-	CreatedAt      time.Time    `json:"created_at"`
-	UpdatedAt      time.Time    `json:"updated_at"`
+	ID              uuid.UUID    `json:"id"`
+	Name            string       `json:"name"`
+	Code            string       `json:"code,omitempty"`
+	Description     string       `json:"description"`
+	IsSystem        bool         `json:"is_system"`
+	Permissions     []Permission `json:"permissions,omitempty"`
+	DeviceGroupIDs  []uuid.UUID  `json:"device_group_ids,omitempty"`
+	UserCount       int          `json:"user_count"`
+	CreatedBy       *uuid.UUID   `json:"created_by,omitempty"`
+	UpdatedBy       *uuid.UUID   `json:"updated_by,omitempty"`
+	CreatorUsername string       `json:"creator_username,omitempty"`
+	UpdaterUsername string       `json:"updater_username,omitempty"`
+	CreatedAt       time.Time    `json:"created_at"`
+	UpdatedAt       time.Time    `json:"updated_at"`
 }
 
 // Permission represents a resource-action pair bound to a role.
@@ -228,6 +230,7 @@ type UpdateUserRequest struct {
 // T-0120：EncryptedPassword + KeyID 去掉 `required` tag，handler 内做二选一校验:
 //   - 加密路径（secure context）：EncryptedPassword + KeyID 必须同时非空
 //   - 明文路径（仅 LoginCrypto.AllowPlaintext=true 时启用）：Password 非空
+//
 // 两路径都不满足 → handler 返 400 missing password。
 type LoginRequest struct {
 	Username          string `json:"username" binding:"required"`
@@ -323,25 +326,26 @@ const (
 //     菜单管理 UI 编辑后写入；nil 表示未配置多语言，前端回退到 Name。
 //
 // 前端渲染优先级（参 frontend-core/src/types/menu.ts 与 NavMenu.tsx）：
-//   NameI18n[locale] > NameI18n["zh-CN"] > Name
+//
+//	NameI18n[locale] > NameI18n["zh-CN"] > Name
 type Menu struct {
-	ID             uuid.UUID         `json:"id"`
-	Name           string            `json:"name"`
-	NameI18n       map[string]string `json:"name_i18n,omitempty"`
-	Type           string            `json:"type"`
-	PermissionKey  string            `json:"permission_key"`
-	ParentID       *uuid.UUID        `json:"parent_id,omitempty"`
-	SortOrder      int               `json:"sort_order"`
-	RoutePath      string            `json:"route_path,omitempty"`
-	ComponentPath  string            `json:"component_path,omitempty"`
-	Icon           string            `json:"icon,omitempty"`
-	ShowStatus     MenuShowStatus    `json:"show_status"`
-	Status         MenuStatus        `json:"status"`
-	CreatedBy      *uuid.UUID        `json:"created_by,omitempty"`
-	CreatedAt      time.Time         `json:"created_at"`
-	UpdatedBy      *uuid.UUID        `json:"updated_by,omitempty"`
-	UpdatedAt      time.Time         `json:"updated_at"`
-	Children       []Menu            `json:"children,omitempty"`
+	ID            uuid.UUID         `json:"id"`
+	Name          string            `json:"name"`
+	NameI18n      map[string]string `json:"name_i18n,omitempty"`
+	Type          string            `json:"type"`
+	PermissionKey string            `json:"permission_key"`
+	ParentID      *uuid.UUID        `json:"parent_id,omitempty"`
+	SortOrder     int               `json:"sort_order"`
+	RoutePath     string            `json:"route_path,omitempty"`
+	ComponentPath string            `json:"component_path,omitempty"`
+	Icon          string            `json:"icon,omitempty"`
+	ShowStatus    MenuShowStatus    `json:"show_status"`
+	Status        MenuStatus        `json:"status"`
+	CreatedBy     *uuid.UUID        `json:"created_by,omitempty"`
+	CreatedAt     time.Time         `json:"created_at"`
+	UpdatedBy     *uuid.UUID        `json:"updated_by,omitempty"`
+	UpdatedAt     time.Time         `json:"updated_at"`
+	Children      []Menu            `json:"children,omitempty"`
 }
 
 // MenuFilter provides filtering options for listing menus.

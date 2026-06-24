@@ -102,7 +102,7 @@ func TestBuiltInTaskTypes_CoversRequiredTemplates(t *testing.T) {
 		"RUNTIME_LOG_COLLECT": {},
 		"FAULT_LOG_COLLECT":   {},
 		"CONFIG_BACKUP_XML":   {},
-			"CONFIG_BACKUP_NV":    {},
+		"CONFIG_BACKUP_NV":    {},
 		"CONFIG_RESTORE":      {},
 	}
 
@@ -424,8 +424,8 @@ func TestStartDirectDispatch_RejectsNonResumableStatus(t *testing.T) {
 func TestMatchesDeviceFilter_ByProductName(t *testing.T) {
 	item := DeviceItem{
 		DeviceSN:    "ENB00001",
-		ProductType: "QAFA",   // productClass
-		ProductName: "甲产品", // 由 mapDeviceItem 回填
+		ProductType: "QAFA", // productClass
+		ProductName: "甲产品",  // 由 mapDeviceItem 回填
 	}
 
 	tests := []struct {
@@ -446,6 +446,63 @@ func TestMatchesDeviceFilter_ByProductName(t *testing.T) {
 			assert.Equal(t, tc.want, matchesDeviceFilter(item, tc.filter))
 		})
 	}
+}
+
+// #615：任务详情抽屉「已选设备列表」走 GET /ufte/devices?taskId=...，
+// matchesDeviceFilter 按 DeviceItem.TaskID（来自 upgrade_sub_tasks.task_id）
+// 精确匹配；空 TaskID ≡ 全量「执行明细」入口语义不变，保证向后兼容。
+func TestMatchesDeviceFilter_ByTaskID(t *testing.T) {
+	item := DeviceItem{
+		DeviceSN:    "ENB00001",
+		TaskID:      "task-aaa",
+		Status:      "downloading",
+		Category:    "enb_upgrade",
+		TypeCode:    "ENB_IMG_UPGRADE",
+		ProductType: "QAFA",
+	}
+
+	tests := []struct {
+		name   string
+		filter DeviceListFilter
+		want   bool
+	}{
+		{"任务命中", DeviceListFilter{TaskID: "task-aaa"}, true},
+		{"任务不命中", DeviceListFilter{TaskID: "task-bbb"}, false},
+		{"空 taskId 全放行（保留旧行为）", DeviceListFilter{}, true},
+		{"任务+状态都命中", DeviceListFilter{TaskID: "task-aaa", Status: "downloading"}, true},
+		{"任务命中但状态不命中→排除", DeviceListFilter{TaskID: "task-aaa", Status: "ended"}, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, matchesDeviceFilter(item, tc.filter))
+		})
+	}
+}
+
+// #615 后续：parseTaskIDFilter 是 DeviceListFilter.TaskID(string) → AllSubTaskFilter.TaskID(*uuid.UUID)
+// 的 SQL 下推参数适配器。空串=不下推（保留旧行为），合法 UUID=下推，非法格式→ErrInvalidInput(400)。
+func TestParseTaskIDFilter(t *testing.T) {
+	valid := uuid.New()
+
+	t.Run("空串 → 不下推", func(t *testing.T) {
+		got, err := parseTaskIDFilter("")
+		assert.NoError(t, err)
+		assert.Nil(t, got)
+	})
+
+	t.Run("合法 UUID → 透传", func(t *testing.T) {
+		got, err := parseTaskIDFilter(valid.String())
+		assert.NoError(t, err)
+		if assert.NotNil(t, got) {
+			assert.Equal(t, valid, *got)
+		}
+	})
+
+	t.Run("非法格式 → ErrInvalidInput", func(t *testing.T) {
+		got, err := parseTaskIDFilter("not-a-uuid")
+		assert.Nil(t, got)
+		assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+	})
 }
 
 func TestService_DeleteTaskType_DeletesCustomTypeOnly(t *testing.T) {

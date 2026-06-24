@@ -46,8 +46,8 @@ var allowedSortColumnsWithInfo = map[string]string{
 	"gps_status":      "di.gps_status",
 	// #361: 告警级别排序随显示口径切到聚合派生值 aa.top_sev（1=critical..4=warning，
 	// NULL=无告警）。OrderBy 处对该列追加 NULLS LAST，使无告警设备恒排末尾。
-	"alarm_severity":  "aa.top_sev",
-	"license_status":  "di.license_status",
+	"alarm_severity": "aa.top_sev",
+	"license_status": "di.license_status",
 }
 
 // PgDeviceInfoRepository implements DeviceInfoRepository using PostgreSQL.
@@ -277,6 +277,10 @@ func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter
 	if filter.Technology != nil {
 		builder = builder.Where(sq.Eq{"d.technology": *filter.Technology})
 		countBuilder = countBuilder.Where(sq.Eq{"d.technology": *filter.Technology})
+	}
+	if len(filter.Technologies) > 0 {
+		builder = builder.Where(sq.Eq{"d.technology": filter.Technologies})
+		countBuilder = countBuilder.Where(sq.Eq{"d.technology": filter.Technologies})
 	}
 	// T-0162: filter.Status 老字段过渡兼容——翻译为 lifecycle_state + is_online
 	if filter.Status != nil {
@@ -565,6 +569,9 @@ func applyDeviceFilters(b sq.SelectBuilder, filter DeviceFilter) sq.SelectBuilde
 	}
 	if filter.Technology != nil {
 		b = b.Where(sq.Eq{"d.technology": *filter.Technology})
+	}
+	if len(filter.Technologies) > 0 {
+		b = b.Where(sq.Eq{"d.technology": filter.Technologies})
 	}
 	if filter.Status != nil {
 		lifecycle, isOnline := DeriveLifecycleFromStatus(*filter.Status)

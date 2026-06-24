@@ -285,6 +285,8 @@ function FirmwareDrawer({
   const [recommend, setRecommend] = useState(Boolean(file?.recommend))
   const [description, setDescription] = useState(file?.description ?? file?.releaseNotes ?? '')
   const [err, setErr] = useState('')
+  // #624：上传进度（0-100），driven by axios onUploadProgress。
+  const [progress, setProgress] = useState(0)
 
   const pending = upload.isPending || update.isPending
 
@@ -309,6 +311,7 @@ function FirmwareDrawer({
       setErr('请选择固件文件')
       return
     }
+    setProgress(0)
     upload.mutate(
       {
         file: selectedFile,
@@ -320,8 +323,15 @@ function FirmwareDrawer({
           recommend,
           description,
         },
+        onProgress: setProgress,
       },
-      { onSuccess: onClose, onError: (e) => setErr(e instanceof Error ? e.message : '上传失败') }
+      {
+        onSuccess: onClose,
+        onError: (e) => {
+          setProgress(0)
+          setErr(e instanceof Error ? e.message : '上传失败')
+        },
+      }
     )
   }
 
@@ -385,6 +395,21 @@ function FirmwareDrawer({
         </label>
 
         {err ? <div className="font-mono text-[11px] text-rose-300">{err}</div> : null}
+
+        {mode === 'add' && (upload.isPending || progress > 0) ? (
+          <div className="space-y-1">
+            <div className="flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.18em] text-cyan-300/60">
+              <span>UPLOAD · 上传进度</span>
+              <span className="text-cyan-200/90">{progress}%</span>
+            </div>
+            <div className="h-1.5 w-full overflow-hidden rounded-sm border border-cyan-500/20 bg-cyan-500/[0.04]">
+              <div
+                className="h-full bg-gradient-to-r from-cyan-400/80 to-cyan-300 transition-[width] duration-150"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+          </div>
+        ) : null}
 
         <div className="flex justify-end gap-2">
           <NeonButton onClick={onClose}>取消</NeonButton>

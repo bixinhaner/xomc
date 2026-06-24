@@ -16,7 +16,7 @@ type ApiEndpointDB struct {
 	Description string    `json:"description"`
 	ApiGroup    string    `json:"api_group"`
 	IsAuto      bool      `json:"is_auto"`
-	// IsUserModified 为 true 表示该端点的 name/api_group 被用户手工改过，
+	// IsUserModified 为 true 表示该端点的 name/description/api_group 被用户手工改过，
 	// Sync 扫描时不再用自动推断值覆盖（保护用户已保存的修改）。
 	IsUserModified bool      `json:"is_user_modified"`
 	CreatedAt      time.Time `json:"created_at"`

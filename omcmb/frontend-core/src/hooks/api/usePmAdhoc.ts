@@ -94,6 +94,9 @@ export function usePmAdhocResults(
     // PM-DASH-DIMFILTER 维度子集过滤：product 维度走 productIds，device_group/band 维度走 objectLdns。
     productIds?: string[];
     objectLdns?: string[];
+    // #599：星期/小时段后端过滤（全选/空 = 不传 = 不过滤）。
+    weekdays?: number[];
+    hours?: number[];
   },
 ) {
   // T-0187 仪表盘自动出图要取更多结果行（默认 100 保持 AdhocResultPanel 现状）。
@@ -103,6 +106,8 @@ export function usePmAdhocResults(
   const endTime = opts?.endTime;
   const productIds = opts?.productIds;
   const objectLdns = opts?.objectLdns;
+  const weekdays = opts?.weekdays;
+  const hours = opts?.hours;
   // locale 并入查询键：切语言后图表标题指标名随后端本地化重取（pm-name-i18n）。
   const locale = useAppStore((s) => s.locale);
   return useQuery({
@@ -111,10 +116,10 @@ export function usePmAdhocResults(
       ...ADHOC_KEY,
       'results',
       taskId,
-      { limit, startTime, endTime, productIds, objectLdns, locale },
+      { limit, startTime, endTime, productIds, objectLdns, weekdays, hours, locale },
     ],
     queryFn: () =>
-      api.results(taskId as string, limit, 0, startTime, endTime, productIds, objectLdns),
+      api.results(taskId as string, limit, 0, startTime, endTime, productIds, objectLdns, weekdays, hours),
     enabled: Boolean(taskId),
   });
 }

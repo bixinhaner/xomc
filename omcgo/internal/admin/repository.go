@@ -144,7 +144,7 @@ type ApiEndpointRepository interface {
 	Delete(ctx context.Context, id uuid.UUID) error
 	DeleteByIDs(ctx context.Context, ids []uuid.UUID) error
 	List(ctx context.Context, filter ApiEndpointFilter) (*model.ListResponse[ApiEndpointDB], error)
-	Upsert(ctx context.Context, path, method, name, apiGroup string) (created bool, err error)
+	Upsert(ctx context.Context, path, method, name, description, apiGroup string) (created bool, err error)
 	GetGroups(ctx context.Context) ([]string, error)
 }
 

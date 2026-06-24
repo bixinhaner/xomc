@@ -122,9 +122,27 @@ func (r *PgPlatformFormulaRepository) DeleteByIndicatorIDs(ctx context.Context, 
 
 func (r *PgPlatformFormulaRepository) ListByPlatform(ctx context.Context, dt DeviceType, platformName string) ([]*PlatformFormula, error) {
 	table := dt.FormulaTable()
+
+	// 平台过滤：除了产品自身绑定的 platformName，并入「ALL」约定平台（PlatformAll，
+	// XML 字典如 enb/ALL.xml 即用 platform="ALL" 声明跨平台共用公式集；UI 新建公式时
+	// 选「所有平台」也写入此值）。传入本就是 ALL 时只查 ALL，避免 IN ('ALL','ALL') 冗余。
+	var platforms []string
+	if platformName == PlatformAll {
+		platforms = []string{PlatformAll}
+	} else {
+		platforms = []string{platformName, PlatformAll}
+	}
+
+	// ORDER BY 让具体平台行先出（0 < 1），保证下方 first-wins 去重时具体平台覆盖 ALL。
+	// 二级排序 platform_name + indicator_id 仅为确定性结果（同平台内顺序稳定）。
 	query, args, err := storage.Psql.Select(formulaColumns...).
 		From(table).
-		Where(sq.Eq{"platform_name": platformName}).
+		Where(sq.Eq{"platform_name": platforms}).
+		OrderBy(
+			"CASE WHEN platform_name = '"+PlatformAll+"' THEN 1 ELSE 0 END",
+			"platform_name",
+			"indicator_id",
+		).
 		ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build list %s by platform SQL: %w", table, err)
@@ -136,12 +154,19 @@ func (r *PgPlatformFormulaRepository) ListByPlatform(ctx context.Context, dt Dev
 	}
 	defer rows.Close()
 
+	// First-wins 去重：同一 indicator_id 在「具体平台」与「ALL」两处都有公式时，
+	// 具体平台的公式优先（已由 ORDER BY 排在前面）；ALL 仅作兜底，不覆盖具体平台。
+	seen := make(map[string]struct{})
 	var formulas []*PlatformFormula
 	for rows.Next() {
 		f, err := scanFormula(rows)
 		if err != nil {
 			return nil, err
 		}
+		if _, dup := seen[f.IndicatorID]; dup {
+			continue
+		}
+		seen[f.IndicatorID] = struct{}{}
 		formulas = append(formulas, f)
 	}
 	if err := rows.Err(); err != nil {

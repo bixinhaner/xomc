@@ -105,19 +105,20 @@ export default function ApiManagement() {
               emptyLabel="NO ENDPOINTS · 无接口"
             >
               <div className="space-y-1.5">
-                <RowHeader cols="0.7fr_2.4fr_1.6fr_1fr_1fr">
+                <RowHeader cols="0.7fr_2.1fr_1.3fr_1fr_1fr_2fr">
                   <span>方法</span>
                   <span>路径 · PATH</span>
                   <span>名称 · NAME</span>
                   <span>分组</span>
                   <span>模块</span>
+                  <span>描述 · DESC</span>
                 </RowHeader>
                 {rows.map((api: ApiEndpoint) => {
                   const color = METHOD_COLOR[api.method?.toUpperCase()] ?? '#6b86b6'
                   return (
                     <div
                       key={api.id}
-                      className="fleet-row grid grid-cols-[0.7fr_2.4fr_1.6fr_1fr_1fr] items-center gap-3 rounded-sm px-3 py-2.5"
+                      className="fleet-row grid grid-cols-[0.7fr_2.1fr_1.3fr_1fr_1fr_2fr] items-center gap-3 rounded-sm px-3 py-2.5"
                       style={{ ['--row-color' as never]: color }}
                     >
                       <div>
@@ -132,6 +133,9 @@ export default function ApiManagement() {
                       </div>
                       <div className="truncate font-mono text-[11px] text-cyan-300/70">
                         {api.module || '—'}
+                      </div>
+                      <div className="truncate text-[11px] text-cyan-100/70" title={api.description}>
+                        {api.description || '—'}
                       </div>
                     </div>
                   )

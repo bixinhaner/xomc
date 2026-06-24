@@ -47,6 +47,8 @@ func TestRequireAuth_ValidToken(t *testing.T) {
 	var capturedUsername string
 	var capturedIsSuper bool
 	var capturedRoles []string
+	var capturedContextUserID uuid.UUID
+	var capturedContextUsername string
 
 	r := gin.New()
 	r.Use(RequireAuth(jwtService))
@@ -63,6 +65,12 @@ func TestRequireAuth_ValidToken(t *testing.T) {
 		if roles, exists := c.Get(CtxKeyRoles); exists {
 			capturedRoles = roles.([]string)
 		}
+		if uid, ok := c.Request.Context().Value(CtxKeyUserID).(uuid.UUID); ok {
+			capturedContextUserID = uid
+		}
+		if username, ok := c.Request.Context().Value(CtxKeyUsername).(string); ok {
+			capturedContextUsername = username
+		}
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
@@ -76,6 +84,8 @@ func TestRequireAuth_ValidToken(t *testing.T) {
 	assert.Equal(t, "testuser", capturedUsername)
 	assert.True(t, capturedIsSuper)
 	assert.Equal(t, []string{"admin"}, capturedRoles)
+	assert.Equal(t, userID, capturedContextUserID)
+	assert.Equal(t, "testuser", capturedContextUsername)
 }
 
 func TestRequireAuth_MissingHeader(t *testing.T) {

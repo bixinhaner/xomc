@@ -597,6 +597,11 @@ func (r *PgSubTaskRepository) ListAll(ctx context.Context, filter AllSubTaskFilt
 		base = base.Where(pred)
 		countBase = countBase.Where(pred)
 	}
+	if filter.TaskID != nil {
+		pred := sq.Eq{"ust.task_id": *filter.TaskID}
+		base = base.Where(pred)
+		countBase = countBase.Where(pred)
+	}
 
 	countSQL, countArgs, err := countBase.ToSql()
 	if err != nil {

@@ -2,6 +2,7 @@ package mr
 
 import (
 	"bufio"
+	"context"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -21,17 +22,29 @@ import (
 
 // Handler provides REST API endpoints for MR data.
 type Handler struct {
-	store       MRStore
-	indRepo     IndicatorRepository
-	mapRepo     MappingRepository
-	minioClient *minio.Client
-	bucket      string
-	logger      *zap.Logger
+	store           MRStore
+	indRepo         IndicatorRepository
+	mapRepo         MappingRepository
+	minioClient     *minio.Client
+	bucket          string
+	productResolver ProductPatternResolver // #602; nil-safe (product_id 过滤参数被忽略)
+	logger          *zap.Logger
+}
+
+// ProductPatternResolver 把 product_id 解析为该产品的 product_class 模式字面量集合。
+// 由 cmd/app/provider 将 *product.Registry 以接口注入，避免 mr 包直接依赖 product 包。
+type ProductPatternResolver interface {
+	GetPatternsByProductID(ctx context.Context, productID uuid.UUID) ([]string, error)
 }
 
 // NewHandler creates a new MR handler.
 func NewHandler(store MRStore, indRepo IndicatorRepository, mapRepo MappingRepository, minioClient *minio.Client, bucket string, logger *zap.Logger) *Handler {
 	return &Handler{store: store, indRepo: indRepo, mapRepo: mapRepo, minioClient: minioClient, bucket: bucket, logger: logger}
+}
+
+// SetProductPatternResolver 装配「产品名称下拉」过滤能力。未装配时 product_id 查询参数被忽略。
+func (h *Handler) SetProductPatternResolver(r ProductPatternResolver) {
+	h.productResolver = r
 }
 
 // RegisterRoutes registers MR API routes.
@@ -123,6 +136,23 @@ func (h *Handler) ListFileDevices(c *gin.Context) {
 	}
 	if pc := c.Query("product_class"); pc != "" {
 		filter.ProductClass = &pc
+	}
+	if raw := strings.TrimSpace(c.Query("product_id")); raw != "" && h.productResolver != nil {
+		pid, perr := uuid.Parse(raw)
+		if perr != nil {
+			coreerrors.AbortWithError(c, http.StatusBadRequest, fmt.Errorf("invalid product_id: %w", perr))
+			return
+		}
+		patterns, rerr := h.productResolver.GetPatternsByProductID(c.Request.Context(), pid)
+		if rerr != nil {
+			coreerrors.AbortWithError(c, http.StatusInternalServerError, fmt.Errorf("resolve product patterns: %w", rerr))
+			return
+		}
+		if len(patterns) == 0 {
+			response.OK(c, model.NewListResponse[MRFileDeviceAggregate](nil, 0, filter.Page, filter.PageSize))
+			return
+		}
+		filter.ProductClasses = patterns
 	}
 	result, err := h.store.ListFileDeviceAggregates(c.Request.Context(), filter)
 	if err != nil {

@@ -754,10 +754,14 @@ export const unifiedFileTransferService = {
   },
 
   async getDevices(
-    params: { status?: string; typeCode?: string; keyword?: string; category?: string; productType?: string } & PageRequest,
+    params: { status?: string; typeCode?: string; keyword?: string; category?: string; productType?: string; taskId?: string } & PageRequest,
   ): Promise<PageResponse<UnifiedFileTransferDeviceItem>> {
     await delay(120, 260);
     let filtered = [...deviceItems].sort((left, right) => right.lastReportAt.localeCompare(left.lastReportAt));
+    // #615：mock 同步真实后端按 taskId 收窄设备列表（任务详情抽屉「已选设备」用）。
+    if (params.taskId) {
+      filtered = filtered.filter((item) => item.taskId === params.taskId);
+    }
     if (params.category) {
       filtered = filtered.filter((item) => item.category === params.category);
     }

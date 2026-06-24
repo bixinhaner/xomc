@@ -268,6 +268,9 @@ type AllSubTaskFilter struct {
 	DeviceSN *string       `form:"device_sn"`
 	Status   *UpgradeState `form:"status"`
 	TaskType *TaskType     `form:"task_type"`
+	// TaskID 精确按主任务 ID 收窄。#615 ufte 任务详情 Drawer 走「单任务设备列表」
+	// 时下推到 SQL（WHERE ust.task_id = ?），避免内存层全 type 扫描。
+	TaskID *uuid.UUID `form:"-"`
 	model.ListRequest
 }
 

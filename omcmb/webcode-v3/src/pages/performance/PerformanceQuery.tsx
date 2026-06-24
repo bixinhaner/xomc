@@ -7,12 +7,14 @@ import { NeonButton } from '@/components/ui/NeonButton'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { cn } from '@/lib/utils'
 import { useIndicatorList } from '@core/hooks/api/useIndicatorsLibrary'
-import { useAggregatedMetricsByDevices } from '@core/hooks/api/usePmQuery'
-import { formatObjectLdn } from '@core/utils/pmPivotTransform'
+import { useAggregatedMetricsByDevices, useMetricObjectsByDevices } from '@core/hooks/api/usePmQuery'
 import { useDeviceList } from '@core/hooks/api/useDevices'
 import type { DeviceType } from '@core/types/indicatorLibrary'
+import { deviceTypeToNetworkTech } from '@core/types/indicatorLibrary'
 import type { Granularity } from '@core/types/pmDashboard'
 import type { Device } from '@core/types/device'
+import { getDefaultRangeHoursForGranularity } from '@core/utils/granularityTimeRange'
+import { getEffectiveLdns, type CellSelection } from '@core/utils/cellDrilldownUtils'
 import { MetricTrendChart } from './MetricTrendChart'
 import { useT } from '@/hooks/useT'
 
@@ -41,6 +43,7 @@ const GRAN_OPTS: { labelKey: string; value: Granularity }[] = [
 
 const RANGE_OPTS: { labelKey: string; hours: number }[] = [
   { labelKey: 'perf.kpiQuery.range.last1h', hours: 1 },
+  { labelKey: 'perf.kpiQuery.range.last3h', hours: 3 },
   { labelKey: 'perf.kpiQuery.range.last24h', hours: 24 },
   { labelKey: 'perf.kpiQuery.range.last7d', hours: 24 * 7 },
   { labelKey: 'perf.kpiQuery.range.last30d', hours: 24 * 30 },
@@ -62,16 +65,26 @@ export default function PerformanceQuery() {
   const deviceType = TECH_OPTS.find((t) => t.value === tech)!.deviceType
   const [deviceSn, setDeviceSn] = useState('')
   const [granularity, setGranularity] = useState<Granularity>('15min')
-  const [rangeHours, setRangeHours] = useState(24)
+  // 默认值与 #595 联动表保持一致：15min → 近 3 小时
+  const [rangeHours, setRangeHours] = useState(getDefaultRangeHoursForGranularity('15min'))
+  // #595: 用户手动修改过时间范围后标记 dirty，粒度切换不再覆盖
+  const [rangeHoursDirty, setRangeHoursDirty] = useState(false)
   const [selectedMetrics, setSelectedMetrics] = useState<string[]>([])
   const [metricKeyword, setMetricKeyword] = useState('')
   const [deviceKeyword, setDeviceKeyword] = useState('')
   const [submitted, setSubmitted] = useState<Submitted | null>(null)
+  // #619：测量对象下钻。
+  const [cellSel, setCellSel] = useState<CellSelection>({})
+  // #619：提交后才生效的快照——勾选变化不立即重查，等点「查询」才同步。
+  const [submittedCellSel, setSubmittedCellSel] = useState<CellSelection>({})
 
   useEffect(() => {
     setDeviceSn('')
     setSelectedMetrics([])
     setSubmitted(null)
+    setRangeHoursDirty(false)
+    setCellSel({})
+    setSubmittedCellSel({})
   }, [tech])
 
   // 外层选中制式是设备清单的唯一来源（#443）：把 tech(lte/nr/gsm) 带进 networkType，
@@ -87,6 +100,13 @@ export default function PerformanceQuery() {
   )
   const { data: deviceData, isLoading: devLoading, isError: devError } = useDeviceList(deviceParams)
   const devices: Device[] = deviceData?.items ?? []
+
+  // #619：加载可用小区列表 + 计算有效白名单。
+  // 用 submittedCellSel（快照）而非实时 cellSel，避免勾选变化立即触发查询。
+  const cellDeviceSns = useMemo(() => (deviceSn ? [deviceSn] : []), [deviceSn])
+  const cellTech = deviceTypeToNetworkTech(deviceType)
+  const { byDevice } = useMetricObjectsByDevices(cellDeviceSns, cellTech)
+  const effectiveLdns = useMemo(() => getEffectiveLdns(submittedCellSel, byDevice), [submittedCellSel, byDevice])
 
   const metricFilter = useMemo(
     () => ({ pageSize: 300, ...(metricKeyword.trim() ? { keyword: metricKeyword.trim() } : {}) }),
@@ -109,10 +129,11 @@ export default function PerformanceQuery() {
       metricPaths: submitted.metricPaths,
       startTime: submitted.startTime,
       endTime: submitted.endTime,
+      objectLdns: effectiveLdns.length > 0 ? effectiveLdns : undefined,
       limit: 5000,
       fillEmpty: true,
     }
-  }, [submitted])
+  }, [submitted, effectiveLdns])
 
   const {
     data: aggRows,
@@ -142,10 +163,7 @@ export default function PerformanceQuery() {
     if (!submitted || aggRows.length === 0) return [] as string[]
     const seen = new Set<string>()
     aggRows.forEach((r) => {
-      if (r.objectLdn) {
-        const formatted = formatObjectLdn(r.objectLdn)
-        if (formatted) seen.add(formatted)
-      }
+      if (r.objectLdn) seen.add(r.objectLdn)
     })
     return Array.from(seen).sort()
   }, [aggRows, submitted])
@@ -164,6 +182,8 @@ export default function PerformanceQuery() {
     if (!canQuery) return
     const end = new Date()
     const start = new Date(end.getTime() - rangeHours * 3600_000)
+    // #619：点查询时才把勾选起到快照。
+    setSubmittedCellSel(cellSel)
     setSubmitted({
       deviceSn,
       metricPaths: [...selectedMetrics],
@@ -248,6 +268,36 @@ export default function PerformanceQuery() {
             </div>
           </GlassPanel>
 
+          {/* #619：测量对象下钻 */}
+          {deviceSn && Object.keys(byDevice).length > 0 && (
+            <GlassPanel title={`${t('perf.kpiQuery.pivot.measObject')} · CELL`} meta={effectiveLdns.length > 0 ? String(effectiveLdns.length) : 'ALL'}>
+              <div className="max-h-48 overflow-auto p-3">
+                {(byDevice[deviceSn] ?? []).map((obj) => {
+                  const sel = cellSel[deviceSn]
+                  const allLdns = (byDevice[deviceSn] ?? []).map((o) => o.objectLdn)
+                  const checked = sel ? sel.includes(obj.objectLdn) : true
+                  return (
+                    <label key={obj.objectLdn} className="flex cursor-pointer items-center gap-2 border-b border-cyan-500/8 px-2 py-1 text-[11px] text-cyan-100 hover:bg-cyan-500/5">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => {
+                          const prev = sel ?? allLdns
+                          const next = e.target.checked
+                            ? [...prev.filter((l) => l !== obj.objectLdn), obj.objectLdn]
+                            : prev.filter((l) => l !== obj.objectLdn)
+                          setCellSel({ ...cellSel, [deviceSn]: next })
+                        }}
+                        className="accent-cyan-400"
+                      />
+                      <span className="truncate font-mono">{obj.objectLdn}</span>
+                    </label>
+                  )
+                })}
+              </div>
+            </GlassPanel>
+          )}
+
           <GlassPanel title={`${t('perf.kpiQuery.metric')} · METRIC`} meta={`${selectedMetrics.length}/${MAX_METRICS}`}>
             <div className="p-3">
               <div className="relative mb-2">
@@ -315,7 +365,13 @@ export default function PerformanceQuery() {
                   <button
                     key={g.value}
                     type="button"
-                    onClick={() => setGranularity(g.value)}
+                    onClick={() => {
+                      setGranularity(g.value)
+                      // #595: 粒度切换时，若用户未手动修改过时间范围，自动联动
+                      if (!rangeHoursDirty) {
+                        setRangeHours(getDefaultRangeHoursForGranularity(g.value))
+                      }
+                    }}
                     className={cn(
                       'chip transition-all',
                       granularity === g.value
@@ -332,7 +388,10 @@ export default function PerformanceQuery() {
                   <button
                     key={r.hours}
                     type="button"
-                    onClick={() => setRangeHours(r.hours)}
+                    onClick={() => {
+                      setRangeHours(r.hours)
+                      setRangeHoursDirty(true)
+                    }}
                     className={cn(
                       'chip transition-all',
                       rangeHours === r.hours

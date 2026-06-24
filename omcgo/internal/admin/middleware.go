@@ -27,6 +27,25 @@ const (
 	CtxKeyClaims       = "claims"
 )
 
+func attachAuthContext(c *gin.Context, userID uuid.UUID, username string, isSuperAdmin bool, roles []string, claims *Claims) {
+	c.Set(CtxKeyUserID, userID)
+	c.Set(CtxKeyUsername, username)
+	c.Set(CtxKeyIsSuperAdmin, isSuperAdmin)
+	c.Set(CtxKeyRoles, roles)
+	if claims != nil {
+		c.Set(CtxKeyClaims, claims)
+	}
+
+	ctx := context.WithValue(c.Request.Context(), CtxKeyUserID, userID)
+	ctx = context.WithValue(ctx, CtxKeyUsername, username)
+	ctx = context.WithValue(ctx, CtxKeyIsSuperAdmin, isSuperAdmin)
+	ctx = context.WithValue(ctx, CtxKeyRoles, roles)
+	if claims != nil {
+		ctx = context.WithValue(ctx, CtxKeyClaims, claims)
+	}
+	c.Request = c.Request.WithContext(ctx)
+}
+
 // RequireAuth returns a Gin middleware that validates JWT access tokens
 // and sets user information in the request context.
 // It also supports X-API-Key header for programmatic access.
@@ -58,10 +77,6 @@ func RequireAuthWithAPIKey(jwt *JWTService, apiKeySvc *APIKeyService, userRepo U
 				return
 			}
 
-			c.Set(CtxKeyUserID, user.ID)
-			c.Set(CtxKeyUsername, user.Username)
-			c.Set(CtxKeyIsSuperAdmin, user.IsSuperAdmin())
-
 			// Load roles for API key user when roleReader is available
 			var roleNames []string
 			if roleReader != nil {
@@ -73,7 +88,7 @@ func RequireAuthWithAPIKey(jwt *JWTService, apiKeySvc *APIKeyService, userRepo U
 					}
 				}
 			}
-			c.Set(CtxKeyRoles, roleNames)
+			attachAuthContext(c, user.ID, user.Username, user.IsSuperAdmin(), roleNames, nil)
 			c.Next()
 			return
 		}
@@ -121,11 +136,7 @@ func RequireAuthWithAPIKey(jwt *JWTService, apiKeySvc *APIKeyService, userRepo U
 			}
 		}
 
-		c.Set(CtxKeyUserID, claims.UserID)
-		c.Set(CtxKeyUsername, claims.Username)
-		c.Set(CtxKeyIsSuperAdmin, claims.IsSuperAdmin)
-		c.Set(CtxKeyRoles, claims.Roles)
-		c.Set(CtxKeyClaims, claims)
+		attachAuthContext(c, claims.UserID, claims.Username, claims.IsSuperAdmin, claims.Roles, claims)
 		c.Next()
 	}
 }
@@ -192,7 +203,7 @@ func RequirePermission(roleRepo PermissionChecker, resource, action string) gin.
 // 与 RequirePermission 的差异：
 //   - RequirePermission(roleRepo, resource, action) → 硬编码业务字符串（粗粒度）
 //   - RequireAPIPermission(roleRepo)               → 自动读 c.Request.URL.Path /
-//                                                     c.Request.Method（端点级）
+//     c.Request.Method（端点级）
 //
 // 超管旁路：claims.IsSuperAdmin（user.source='builtIn' 派生）一致。
 // 详见 docs/prd/system/menu-dynamic-loading.md §4.2.4 (B3-Phase1/Phase2)。

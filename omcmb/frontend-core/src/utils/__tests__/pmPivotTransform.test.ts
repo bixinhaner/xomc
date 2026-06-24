@@ -75,8 +75,7 @@ describe('pivotLongToWide', () => {
     expect(result.rows[0]).toMatchObject({
       time: '2026-05-26T10:00:00Z',
       deviceSn: 'DEV-A',
-      cellId: '111',
-      plmn: undefined,
+      objectLdn: 'Cellid=111',
     });
     expect(result.rows[0].cells['PHY.NbrCqi6']).toBe(5);
   });
@@ -113,15 +112,14 @@ describe('pivotLongToWide', () => {
       row({ objectLdn: 'Cellid=2', metricValue: 2 }),
     ]);
     expect(r.rows).toHaveLength(2);
-    expect(r.rows.map((x) => x.cellId).sort()).toEqual(['1', '2']);
+    expect(r.rows.map((x) => x.objectLdn).sort()).toEqual(['Cellid=1', 'Cellid=2']);
   });
 
   it('PLMN 解析', () => {
     const r = pivotLongToWide([
       row({ objectLdn: 'Cellid=111,PLMN=46068', metricValue: 1 }),
     ]);
-    expect(r.rows[0].cellId).toBe('111');
-    expect(r.rows[0].plmn).toBe('46068');
+    expect(r.rows[0].objectLdn).toBe('Cellid=111,PLMN=46068');
   });
 
   it('缺采桶 cell = null', () => {

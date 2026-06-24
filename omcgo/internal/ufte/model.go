@@ -20,18 +20,18 @@ type Overview struct {
 }
 
 type TaskType struct {
-	TypeCode               string             `json:"typeCode"`
-	Category               string             `json:"category"`
-	CategoryLabel          string             `json:"categoryLabel"`
-	DisplayName            string             `json:"displayName"`
-	Description            string             `json:"description"`
-	RPCType                string             `json:"rpcType"`
-	BuiltIn                bool               `json:"builtIn"`
-	Enabled                bool               `json:"enabled"`
-	StepChain              []string           `json:"stepChain"`
-	PostTCEventCode        string             `json:"postTcEventCode,omitempty"`
-	PermissionCode         string             `json:"permissionCode"`
-	PlatformScope          []string           `json:"platformScope"`
+	TypeCode        string   `json:"typeCode"`
+	Category        string   `json:"category"`
+	CategoryLabel   string   `json:"categoryLabel"`
+	DisplayName     string   `json:"displayName"`
+	Description     string   `json:"description"`
+	RPCType         string   `json:"rpcType"`
+	BuiltIn         bool     `json:"builtIn"`
+	Enabled         bool     `json:"enabled"`
+	StepChain       []string `json:"stepChain"`
+	PostTCEventCode string   `json:"postTcEventCode,omitempty"`
+	PermissionCode  string   `json:"permissionCode"`
+	PlatformScope   []string `json:"platformScope"`
 	// Products 是「适用产品」= 产品英文名列表（引用 products.product_name，#492）。
 	// 非空时设备候选匹配走产品目录精确匹配（deviceMatchesTaskType），制式由所选产品 tech 派生；
 	// 空则回退旧 PlatformScope 子串 + techHint 关键字匹配（灰度兼容）。
@@ -83,7 +83,7 @@ type Task struct {
 	CreateUser      string `json:"createUser"`
 	CreatedAt       string `json:"createdAt"`
 	// StartedAt 任务真正开始下发（状态首次进入 in_progress 时由 PG repo 自动写入 upgrade_tasks.started_at）；未开始时为空 → JSON omitempty 不输出。
-	StartedAt     string `json:"startedAt,omitempty"`
+	StartedAt string `json:"startedAt,omitempty"`
 	// EndedAt 任务到达终态（ended / 含成功/失败/终止）时由 PG repo 自动写入 upgrade_tasks.ended_at；未结束时为空。
 	EndedAt       string `json:"endedAt,omitempty"`
 	ScheduledAt   string `json:"scheduledAt,omitempty"`
@@ -103,9 +103,9 @@ type DeviceItem struct {
 	ProductType     string `json:"productType"`
 	// ProductName 是设备 productClass 经 ProductRegistry 解析出的产品英文名（#492）。
 	// 前端候选/设备列表展示产品名（取代裸 productClass）；解析不到（孤儿/未注册）时为空。
-	ProductName     string `json:"productName,omitempty"`
-	CurrentVersion  string `json:"currentVersion"`
-	TargetVersion   string `json:"targetVersion"`
+	ProductName    string `json:"productName,omitempty"`
+	CurrentVersion string `json:"currentVersion"`
+	TargetVersion  string `json:"targetVersion"`
 	// TargetFile 是"OUTPUT 文件类"（备份 / 日志采集 / 配置恢复，softwareTaskType=LogCollect）
 	// 的目标文件名（如 "backup-a1b2c3d4-SN001.nv"），由 {task_id8}/{sn} 模板按运行时渲染。
 	// 升级 / 回滚类不写本字段。
@@ -150,15 +150,15 @@ type CreateTaskRequest struct {
 }
 
 type TaskTypeWriteRequest struct {
-	Category               string             `json:"category" binding:"required"`
-	CategoryLabel          string             `json:"categoryLabel" binding:"required"`
-	DisplayName            string             `json:"displayName" binding:"required"`
-	Description            string             `json:"description"`
-	RPCType                string             `json:"rpcType" binding:"required"`
-	StepChain              []string           `json:"stepChain" binding:"required,min=1"`
-	PostTCEventCode        string             `json:"postTcEventCode"`
-	Enabled                bool               `json:"enabled"`
-	PlatformScope          []string           `json:"platformScope"`
+	Category        string   `json:"category" binding:"required"`
+	CategoryLabel   string   `json:"categoryLabel" binding:"required"`
+	DisplayName     string   `json:"displayName" binding:"required"`
+	Description     string   `json:"description"`
+	RPCType         string   `json:"rpcType" binding:"required"`
+	StepChain       []string `json:"stepChain" binding:"required,min=1"`
+	PostTCEventCode string   `json:"postTcEventCode"`
+	Enabled         bool     `json:"enabled"`
+	PlatformScope   []string `json:"platformScope"`
 	// Products「适用产品」= 产品英文名列表（#492）。前端模板编辑改为产品名多选后提交此字段；
 	// 留空则沿用 PlatformScope 旧口径。
 	Products               []string           `json:"products"`
@@ -195,8 +195,12 @@ type DeviceListFilter struct {
 	// 经 productNameLookup 回填）。前端「产品名称」下拉传此参数；与 ProductType(productClass)
 	// 二选一，优先 ProductName。列表与 CSV 导出共用本过滤器，故两条路径同时生效。
 	ProductName string `form:"productName"`
-	Page        int    `form:"page"`
-	PageSize    int    `form:"page_size"`
+	// TaskID #615：按主任务 ID 精确收窄（任务详情抽屉「已选设备列表」用）。
+	// 复用 /ufte/devices 端点 + matchesDeviceFilter，不新增路由；空值 ≡ 原有"全量"行为，
+	// 完全向后兼容。底层来自 upgrade_sub_tasks.task_id（mapDeviceItem 已回填到 DeviceItem.TaskID）。
+	TaskID   string `form:"taskId"`
+	Page     int    `form:"page"`
+	PageSize int    `form:"page_size"`
 }
 
 type DeviceCandidateFilter struct {
@@ -451,21 +455,21 @@ func builtInTaskTypes() []TaskType {
 			softwareTaskType: software.TaskTypeLogCollect,
 		},
 		{
-			TypeCode:               "CONFIG_BACKUP_XML",
-			SortOrder:              40,
-			Category:               "config_backup",
-			CategoryLabel:          "配置文件备份",
-			DisplayName:            "配置文件备份（XML）",
-			Description:            "标准平台（BLQ/QLS 等）配置文件备份，TR-069 Upload FileType=10 {OUI} Configuration File。",
-			RPCType:                "UPLOAD",
-			BuiltIn:                true,
-			Enabled:                true,
-			StepChain:              []string{"CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "PRE_VALIDATE", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_TRANSFER_COMPLETE"},
-			PermissionCode:         "CODE_CONFIG_BACKUP",
-			PlatformScope:          []string{"4G eNB", "5G gNB", "QAFA", "QAFB", "BBU-XSS", "BBU-QSS"},
-			FileType:               "10 {OUI} Configuration File",
-			FileTypeLabel:          "10 {OUI} Configuration File",
-			FileTypeEditable:       false,
+			TypeCode:         "CONFIG_BACKUP_XML",
+			SortOrder:        40,
+			Category:         "config_backup",
+			CategoryLabel:    "配置文件备份",
+			DisplayName:      "配置文件备份（XML）",
+			Description:      "标准平台（BLQ/QLS 等）配置文件备份，TR-069 Upload FileType=10 {OUI} Configuration File。",
+			RPCType:          "UPLOAD",
+			BuiltIn:          true,
+			Enabled:          true,
+			StepChain:        []string{"CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "PRE_VALIDATE", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_TRANSFER_COMPLETE"},
+			PermissionCode:   "CODE_CONFIG_BACKUP",
+			PlatformScope:    []string{"4G eNB", "5G gNB", "QAFA", "QAFB", "BBU-XSS", "BBU-QSS"},
+			FileType:         "10 {OUI} Configuration File",
+			FileTypeLabel:    "10 {OUI} Configuration File",
+			FileTypeEditable: false,
 			// issue #585: 配置文件备份对象名规范化为 {sn}_CFG.xml。
 			// 真实文件名由 ACS upload handler 在收报文时强制覆写（设备
 			// 在 TR-069 Upload RPC 中无法选定上传文件名），这里 Template
@@ -479,21 +483,21 @@ func builtInTaskTypes() []TaskType {
 			softwareTaskType: software.TaskTypeLogCollect,
 		},
 		{
-			TypeCode:               "CONFIG_BACKUP_NV",
-			SortOrder:              45,
-			Category:               "config_backup",
-			CategoryLabel:          "配置文件备份",
-			DisplayName:            "配置文件备份（NV）",
-			Description:            "NV 平台（MLQ/MLN/BM 等）配置文件备份，TR-069 Upload FileType=12 {OUI} Configuration File。",
-			RPCType:                "UPLOAD",
-			BuiltIn:                true,
-			Enabled:                true,
-			StepChain:              []string{"CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "PRE_VALIDATE", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_TRANSFER_COMPLETE"},
-			PermissionCode:         "CODE_CONFIG_BACKUP",
-			PlatformScope:          []string{"MLQ", "MLN", "BM"},
-			FileType:               "12 {OUI} Configuration File",
-			FileTypeLabel:          "12 {OUI} Configuration File",
-			FileTypeEditable:       false,
+			TypeCode:         "CONFIG_BACKUP_NV",
+			SortOrder:        45,
+			Category:         "config_backup",
+			CategoryLabel:    "配置文件备份",
+			DisplayName:      "配置文件备份（NV）",
+			Description:      "NV 平台（MLQ/MLN/BM 等）配置文件备份，TR-069 Upload FileType=12 {OUI} Configuration File。",
+			RPCType:          "UPLOAD",
+			BuiltIn:          true,
+			Enabled:          true,
+			StepChain:        []string{"CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "PRE_VALIDATE", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_TRANSFER_COMPLETE"},
+			PermissionCode:   "CODE_CONFIG_BACKUP",
+			PlatformScope:    []string{"MLQ", "MLN", "BM"},
+			FileType:         "12 {OUI} Configuration File",
+			FileTypeLabel:    "12 {OUI} Configuration File",
+			FileTypeEditable: false,
 			// issue #585: 同 CONFIG_BACKUP_XML，对象名规范化为 {sn}_CFG.nv。
 			TargetFileNameTemplate: "{sn}_CFG.nv",
 			FileNameTemplate:       "{sn}_CFG.nv",

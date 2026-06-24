@@ -97,8 +97,8 @@ func (r *PgApiEndpointRepository) Update(ctx context.Context, id uuid.UUID, req 
 	if req.ApiGroup != nil {
 		setter = setter.Set("api_group", *req.ApiGroup)
 	}
-	// 用户改了 name 或 api_group 时打标，后续 Sync 扫描不再覆盖这些字段。
-	if req.Name != nil || req.ApiGroup != nil {
+	// 用户改了展示元数据时打标，后续 Sync 扫描不再覆盖这些字段。
+	if req.Name != nil || req.Description != nil || req.ApiGroup != nil {
 		setter = setter.Set("is_user_modified", true)
 	}
 
@@ -230,11 +230,11 @@ func (r *PgApiEndpointRepository) List(ctx context.Context, filter ApiEndpointFi
 
 // Upsert inserts or updates an API endpoint (path+method as unique key).
 // 当扫描到已存在的路由时：
-//   - is_user_modified=true 的行（name/api_group 被用户手工改过）保留原值，不被自动推断值覆盖；
-//   - 否则用扫描值刷新 name/api_group。
+//   - is_user_modified=true 的行（name/description/api_group 被用户手工改过）保留原值，不被自动推断值覆盖；
+//   - 否则用扫描值刷新 name/description/api_group。
 //
 // is_auto=false（UI 手工新建）的行同样不被覆盖（WHERE 限定）。
-func (r *PgApiEndpointRepository) Upsert(ctx context.Context, path, method, name, apiGroup string) (created bool, err error) {
+func (r *PgApiEndpointRepository) Upsert(ctx context.Context, path, method, name, description, apiGroup string) (created bool, err error) {
 	// Check existence first
 	checkSQL := `SELECT COUNT(*) FROM api_endpoints WHERE path = $1 AND method = $2`
 	var count int
@@ -243,16 +243,20 @@ func (r *PgApiEndpointRepository) Upsert(ctx context.Context, path, method, name
 	}
 
 	upsertSQL := `
-INSERT INTO api_endpoints (path, method, name, api_group, is_auto)
-VALUES ($1, $2, $3, $4, TRUE)
+INSERT INTO api_endpoints (path, method, name, description, api_group, is_auto)
+VALUES ($1, $2, $3, $4, $5, TRUE)
 ON CONFLICT (path, method)
 DO UPDATE SET
     name = CASE WHEN api_endpoints.is_user_modified THEN api_endpoints.name ELSE EXCLUDED.name END,
+	description = CASE
+		WHEN api_endpoints.is_user_modified OR COALESCE(api_endpoints.description, '') <> '' THEN api_endpoints.description
+		ELSE EXCLUDED.description
+	END,
     api_group = CASE WHEN api_endpoints.is_user_modified THEN api_endpoints.api_group ELSE EXCLUDED.api_group END,
     updated_at = NOW()
 WHERE api_endpoints.is_auto = TRUE`
 
-	_, err = r.pool.Exec(ctx, upsertSQL, path, method, name, apiGroup)
+	_, err = r.pool.Exec(ctx, upsertSQL, path, method, name, description, apiGroup)
 	if err != nil {
 		return false, fmt.Errorf("upsert api_endpoint: %w", err)
 	}

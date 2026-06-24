@@ -1,7 +1,8 @@
 /**
  * 首页 KPI 配置页（issue #213 S3，管理员）
  *
- * 系统管理下的管理员编辑页：制式分 tab（LTE / NR / GSM），每套布局互不影响。
+ * 系统管理下的管理员编辑页：制式 tab 由字典 `network_type` 动态生成（仅保留前端已知
+ * KNOWN_TECHS = LTE/NR/GSM 之交集），每套布局互不影响。
  * 主体一块拖拽网格画布（react-grid-layout）：每张图可拖动、可拉伸。
  * 「新增图」出空卡，起标题 + 从指标库勾指标（多选 = 一图多指标）；指标选择器按当前
  * 制式过滤（LTE tab 只列 4G/ENB 指标），库内不可用的置灰。「保存」把当前制式整套布局
@@ -44,7 +45,7 @@ import {
 } from '@core/utils/kpiPanelValidation';
 import { resolveLayout } from '@/pages/dashboard/layoutMapping';
 import type { TechnologyType } from '@/pages/dashboard/kpi-config';
-import { TECH_LABELS } from '@/pages/dashboard/kpi-config';
+import { useTechnologyDictionary } from '@/components/dashboard/useTechnologyDictionary';
 import {
   addPanel,
   applyGridLayout,
@@ -59,9 +60,6 @@ import {
 } from '@/pages/dashboard/kpiConfigLogic';
 
 const { Text } = Typography;
-
-/** 制式 tab 顺序（与首页一致）。 */
-const TECHS: TechnologyType[] = ['lte', 'nr', 'gsm'];
 
 /**
  * 制式 → 指标库设备类型（弹窗按制式锁定取数）。
@@ -282,12 +280,20 @@ function TechEditor({ tech }: { tech: TechnologyType }) {
 export default function KpiConfigPage() {
   const t = useT();
   const [activeTech, setActiveTech] = useState<TechnologyType>('lte');
+  const { options: techOptions } = useTechnologyDictionary();
 
-  const items = TECHS.map((tech) => ({
-    key: tech,
-    label: TECH_LABELS[tech],
+  // 字典禁用了当前 tab → 回退首项（防止 children 取不到布局）
+  useEffect(() => {
+    if (techOptions.length && !techOptions.some((o) => o.value === activeTech)) {
+      setActiveTech(techOptions[0].value);
+    }
+  }, [techOptions, activeTech]);
+
+  const items = techOptions.map((opt) => ({
+    key: opt.value,
+    label: opt.label,
     // 仅在选中的 tab 挂载编辑器，避免一次性读三套布局 / 三套状态互相干扰。
-    children: activeTech === tech ? <TechEditor tech={tech} /> : null,
+    children: activeTech === opt.value ? <TechEditor tech={opt.value} /> : null,
   }));
 
   return (

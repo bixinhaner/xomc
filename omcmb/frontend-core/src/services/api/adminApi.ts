@@ -353,6 +353,8 @@ interface BackendRole {
   user_count?: number;
   created_by?: string;
   updated_by?: string;
+  creator_username?: string;
+  updater_username?: string;
 }
 
 // Backend menu model
@@ -529,8 +531,8 @@ function mapBackendRole(br: BackendRole): Role {
     deviceGroupIds: br.device_group_ids ?? [],
     userCount: br.user_count ?? 0,
     builtIn: br.is_system ? 1 : 0,
-    createUser: br.created_by,
-    updateUser: br.updated_by,
+    createUser: br.creator_username || br.created_by,
+    updateUser: br.updater_username || br.updated_by,
     createTime: br.created_at,
     updateTime: br.updated_at,
   };

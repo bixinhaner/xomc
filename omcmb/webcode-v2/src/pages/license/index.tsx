@@ -45,6 +45,7 @@ import { cn } from '@/lib/utils'
 
 import { useSystemLicense, useSystemLicenseHistory } from '@core/hooks/api/useSystemLicense'
 import { useDeviceLicenses } from '@core/hooks/api/useDeviceLicense'
+import { useProductList, useProductNameResolver } from '@core/hooks/api/useProducts'
 import {
   SystemLicenseErrorCodes,
   extractLicenseErrorCode,
@@ -56,6 +57,13 @@ import {
   type DeviceLicense,
   type LicenseListParams,
 } from '@core/services/api/deviceLicenseApi'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 
 import { formatSystemTime } from '@core/utils/systemTime'
 import { FeatureList } from './FeatureList'
@@ -450,7 +458,8 @@ function DeviceLicenseTab() {
   const [pageSize] = useState(20)
   const [searchSn, setSearchSn] = useState('')
   const [searchEnb, setSearchEnb] = useState('')
-  const [productType, setProductType] = useState('')
+  // #602：产品名称下拉过滤，传 product.id
+  const [productId, setProductId] = useState('')
 
   const params = useMemo<LicenseListParams>(
     () => ({
@@ -458,13 +467,22 @@ function DeviceLicenseTab() {
       pageSize,
       ...(searchSn.trim() ? { serialNumber: searchSn.trim() } : {}),
       ...(searchEnb.trim() ? { enbName: searchEnb.trim() } : {}),
-      ...(productType.trim() ? { productType: productType.trim() } : {}),
+      ...(productId ? { productId } : {}),
     }),
-    [page, pageSize, searchSn, searchEnb, productType],
+    [page, pageSize, searchSn, searchEnb, productId],
   )
 
   const { data, isLoading, isError, error, isFetching, refetch } =
     useDeviceLicenses(params)
+  const { data: productsData } = useProductList()
+  const productNameOptions = useMemo(
+    () =>
+      (productsData?.items ?? [])
+        .map((p) => ({ label: `${p.name} (${p.tech})`, value: p.id }))
+        .sort((a, b) => a.label.localeCompare(b.label, 'zh-CN')),
+    [productsData]
+  )
+  const resolveProductName = useProductNameResolver()
 
   const rows = data?.items ?? []
   const total = data?.total ?? 0
@@ -501,15 +519,25 @@ function DeviceLicenseTab() {
             setPage(1)
           }}
         />
-        <Input
-          className="w-48"
-          placeholder="产品型号"
-          value={productType}
-          onChange={(e) => {
-            setProductType(e.target.value)
+        <Select
+          value={productId || 'all'}
+          onValueChange={(v) => {
+            setProductId(v === 'all' ? '' : v)
             setPage(1)
           }}
-        />
+        >
+          <SelectTrigger className="w-56">
+            <SelectValue placeholder="产品名称" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">全部产品</SelectItem>
+            {productNameOptions.map((opt) => (
+              <SelectItem key={opt.value} value={opt.value}>
+                {opt.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
           {isFetching && <Loader2 className="size-3.5 animate-spin" />}
           <span>共 {total} 份</span>
@@ -526,7 +554,7 @@ function DeviceLicenseTab() {
             <TableRow>
               <TableHead>序列号 SN</TableHead>
               <TableHead>基站名称</TableHead>
-              <TableHead>产品型号</TableHead>
+              <TableHead>产品名称</TableHead>
               <TableHead>文件名</TableHead>
               <TableHead>大小</TableHead>
               <TableHead>来源</TableHead>
@@ -562,11 +590,11 @@ function DeviceLicenseTab() {
                   </TableCell>
                   <TableCell>{lic.enbName ?? '—'}</TableCell>
                   <TableCell>
-                    {lic.productType ? (
-                      <Badge variant="muted">{lic.productType}</Badge>
-                    ) : (
-                      '—'
-                    )}
+                    {(() => {
+                      const display = resolveProductName(lic.productType)
+                      if (!display) return '—'
+                      return <Badge variant="muted">{display}</Badge>
+                    })()}
                   </TableCell>
                   <TableCell className="text-xs">{lic.fileName}</TableCell>
                   <TableCell className="tabular-nums">

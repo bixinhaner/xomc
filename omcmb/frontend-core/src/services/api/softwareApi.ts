@@ -344,7 +344,8 @@ export const softwareApi = {
       uploader?: string;
       manufacturer?: string;
       description?: string;
-    }
+    },
+    onProgress?: (percent: number) => void,
   ): Promise<SoftwareVersion> {
     const formData = new FormData();
     formData.append('file', file);
@@ -373,6 +374,16 @@ export const softwareApi = {
       {
         headers: { 'Content-Type': 'multipart/form-data' },
         timeout: 120000,
+        // #623：上传进度回调驱动页面 Progress。multipart/form-data 下
+        // axios 能拿到 progressEvent.total；network 发完后还有后端
+        // 落MinIO/打指纹等处理时间，进n度会在 100% 处略顶一会儿，不是 bug。
+        onUploadProgress: onProgress
+          ? (evt) => {
+              if (!evt.total) return;
+              const percent = Math.min(100, Math.round((evt.loaded * 100) / evt.total));
+              onProgress(percent);
+            }
+          : undefined,
       }
     );
     return mapFirmware(data);
