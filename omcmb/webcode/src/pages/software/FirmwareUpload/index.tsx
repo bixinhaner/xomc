@@ -246,6 +246,8 @@ export default function FirmwareUpload({ embedded = false }: FirmwareUploadProps
             recommend: values.recommend === '1',
             description: values.description ?? '',
           },
+          // #623：把 axios onUploadProgress 透传到本地 state，驱动进度条实时更新。
+          onProgress: setUploadProgress,
         },
         {
           onSuccess: () => {
