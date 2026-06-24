@@ -979,7 +979,7 @@ func (s *Service) ListTasks(ctx context.Context, filter TaskListFilter, visibleG
 func (s *Service) visibleTaskIDSet(
 	ctx context.Context, catalog []TaskType, filter TaskListFilter, visibleGroups []uuid.UUID,
 ) (map[uuid.UUID]struct{}, error) {
-	subTasks, err := s.loadAllSubTasks(ctx, catalog, filter.Category, filter.TypeCode)
+	subTasks, err := s.loadAllSubTasks(ctx, catalog, filter.Category, filter.TypeCode, "")
 	if err != nil {
 		return nil, err
 	}
@@ -1029,6 +1029,10 @@ func (s *Service) StreamDeviceItems(
 	if len(typeSet) == 0 {
 		return nil
 	}
+	taskIDPtr, err := parseTaskIDFilter(filter.TaskID)
+	if err != nil {
+		return err
+	}
 	vis := s.newDeviceVisibility(visibleGroups) // #63 租户隔离
 	deviceCache := make(map[uuid.UUID]*coremodel.Device)
 	parentCache := make(map[uuid.UUID]*software.UpgradeTask)
@@ -1039,6 +1043,7 @@ func (s *Service) StreamDeviceItems(
 		for {
 			pageResult, err := s.subTaskRepo.ListAll(ctx, software.AllSubTaskFilter{
 				TaskType: taskTypePtr(taskType),
+				TaskID:   taskIDPtr, // #615 SQL 下推：空 = 不过滤；非空 = WHERE ust.task_id = ?
 				ListRequest: coremodel.ListRequest{
 					Page: page, PageSize: batchSize,
 				},
@@ -1088,7 +1093,7 @@ func (s *Service) collectFilteredDeviceItems(ctx context.Context, filter DeviceL
 	if err != nil {
 		return nil, err
 	}
-	subTasks, err := s.loadAllSubTasks(ctx, catalog, filter.Category, filter.TypeCode)
+	subTasks, err := s.loadAllSubTasks(ctx, catalog, filter.Category, filter.TypeCode, filter.TaskID)
 	if err != nil {
 		return nil, err
 	}
@@ -1259,7 +1264,7 @@ func (s *Service) loadAllTasks(ctx context.Context, catalog []TaskType, filter T
 	return items, nil
 }
 
-func (s *Service) loadAllSubTasks(ctx context.Context, catalog []TaskType, category, typeCode string) ([]software.UpgradeSubTaskWithTaskName, error) {
+func (s *Service) loadAllSubTasks(ctx context.Context, catalog []TaskType, category, typeCode, taskIDStr string) ([]software.UpgradeSubTaskWithTaskName, error) {
 	typeSet, err := deviceTypeFilterKeys(catalog, category, typeCode)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", commonerrors.ErrInvalidInput, err)
@@ -1267,12 +1272,17 @@ func (s *Service) loadAllSubTasks(ctx context.Context, catalog []TaskType, categ
 	if len(typeSet) == 0 {
 		return []software.UpgradeSubTaskWithTaskName{}, nil
 	}
+	taskIDPtr, err := parseTaskIDFilter(taskIDStr)
+	if err != nil {
+		return nil, err
+	}
 	items := make([]software.UpgradeSubTaskWithTaskName, 0)
 	for taskType := range typeSet {
 		page := 1
 		for {
 			pageResult, err := s.subTaskRepo.ListAll(ctx, software.AllSubTaskFilter{
 				TaskType: taskTypePtr(taskType),
+				TaskID:   taskIDPtr, // #615 SQL 下推：空 = 不过滤；非空 = WHERE ust.task_id = ?
 				ListRequest: coremodel.ListRequest{
 					Page:     page,
 					PageSize: 200,
@@ -1289,6 +1299,19 @@ func (s *Service) loadAllSubTasks(ctx context.Context, catalog []TaskType, categ
 		}
 	}
 	return items, nil
+}
+
+// parseTaskIDFilter 把 DeviceListFilter.TaskID（前端 query 形态：UUID 字符串）转成 *uuid.UUID。
+// 空串 ≡ 不下推（保留原全 type 扫描语义）；非空但格式错 → ErrInvalidInput（→ 400）。
+func parseTaskIDFilter(s string) (*uuid.UUID, error) {
+	if s == "" {
+		return nil, nil
+	}
+	id, err := uuid.Parse(s)
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid taskId: %v", commonerrors.ErrInvalidInput, err)
+	}
+	return &id, nil
 }
 
 // deviceMatchesTaskType 判断 device 的 productClass 是否落在 taskType 的可选范围。
