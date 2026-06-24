@@ -47,12 +47,16 @@ function presetToRange(preset: QueryTemplate['payload']['timeRangePreset'], payl
   switch (preset) {
     case 'last_1h':
       return { start: ms(3600_000), end }
+    case 'last_3h':
+      return { start: ms(3 * 3600_000), end }
     case 'last_24h':
       return { start: ms(24 * 3600_000), end }
     case 'last_7d':
       return { start: ms(7 * 24 * 3600_000), end }
     case 'last_30d':
       return { start: ms(30 * 24 * 3600_000), end }
+    case 'last_6m':
+      return { start: ms(180 * 24 * 3600_000), end }
     case 'custom':
       return {
         start: payload.absoluteStart ?? ms(24 * 3600_000),

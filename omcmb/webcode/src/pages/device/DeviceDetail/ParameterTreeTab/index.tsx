@@ -74,7 +74,7 @@ export default function ParameterTreeTab({ deviceId, lastScopedSync, onFullSyncS
   const { data: syncStatus, refetch: refetchSyncStatus } = useSyncStatus(deviceId);
   const isSyncing = syncStatus?.status === 'syncing';
   const isLastScopedSync = Boolean(
-    lastScopedSync?.count && lastScopedSync.completedAt === syncStatus?.lastParamSyncAt,
+    lastScopedSync?.targetCount && lastScopedSync.completedAt === syncStatus?.lastParamSyncAt,
   );
 
   // Mutations
