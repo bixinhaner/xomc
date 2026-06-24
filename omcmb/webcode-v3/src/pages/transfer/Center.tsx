@@ -520,16 +520,17 @@ function TaskDetailDrawer({
   task: UnifiedFileTransferTask
   onClose: () => void
 }) {
-  const PAGE_SIZE = 20
+  const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
+  const [pageSize, setPageSize] = useState(20)
   const [page, setPage] = useState(1)
   const { data, isLoading, isError } = useUnifiedFileTransferDevices({
     taskId: task.id,
     page,
-    pageSize: PAGE_SIZE,
+    pageSize,
   })
   const rows = data?.items ?? []
   const total = data?.total ?? 0
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
   const statusBadge = STATUS_BADGE[task.status]
   const resultBadge = task.result ? RESULT_BADGE[task.result] : undefined
@@ -592,9 +593,26 @@ function TaskDetailDrawer({
             <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-cyan-300/65">
               DEVICES · 已选设备 / 执行明细
             </div>
-            <span className="font-mono text-[10px] text-cyan-300/55">
-              TOTAL {total}
-            </span>
+            <div className="flex items-center gap-3">
+              <span className="font-mono text-[10px] text-cyan-300/55">
+                TOTAL {total}
+              </span>
+              <select
+                value={pageSize}
+                onChange={(e) => {
+                  setPageSize(Number(e.target.value))
+                  setPage(1)
+                }}
+                className="h-6 cursor-pointer rounded-sm border border-cyan-500/30 bg-[#020611] px-2 font-mono text-[10px] uppercase tracking-[0.16em] text-cyan-200/85 outline-none hover:border-cyan-400/60 focus:border-cyan-400/70"
+                aria-label="每页条数"
+              >
+                {PAGE_SIZE_OPTIONS.map((n) => (
+                  <option key={n} value={n}>
+                    {n} / PAGE
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {isLoading ? (
@@ -668,7 +686,7 @@ function TaskDetailDrawer({
             </div>
           )}
 
-          {total > PAGE_SIZE ? (
+          {total > pageSize ? (
             <div className="mt-3 flex items-center justify-between">
               <span className="font-mono text-[10px] text-cyan-300/55">
                 PAGE {page} / {totalPages}

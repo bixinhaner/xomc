@@ -2168,11 +2168,11 @@ export default function FileTransferCenter() {
 function TaskDetailDevicesPanel({ taskId }: { taskId: string }) {
   const t = useT();
   const [page, setPage] = useState(1);
-  const PAGE_SIZE = 20;
+  const [pageSize, setPageSize] = useState(20);
   const { data, isLoading } = useUnifiedFileTransferDevices({
     taskId,
     page,
-    pageSize: PAGE_SIZE,
+    pageSize,
   });
   const rows = data?.items ?? [];
   const total = data?.total ?? 0;
@@ -2238,11 +2238,17 @@ function TaskDetailDevicesPanel({ taskId }: { taskId: string }) {
         dataSource={rows}
         pagination={{
           current: page,
-          pageSize: PAGE_SIZE,
+          pageSize,
           total,
-          showSizeChanger: false,
+          showSizeChanger: true,
+          pageSizeOptions: ['10', '20', '50', '100'],
           size: 'small',
-          onChange: setPage,
+          onChange: (nextPage, nextSize) => {
+            setPage(nextPage);
+            if (nextSize && nextSize !== pageSize) {
+              setPageSize(nextSize);
+            }
+          },
         }}
         scroll={{ x: 600 }}
       />

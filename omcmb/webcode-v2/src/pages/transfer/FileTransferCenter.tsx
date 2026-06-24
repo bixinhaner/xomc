@@ -517,16 +517,17 @@ function TaskDetailDrawer({
   task: UnifiedFileTransferTask
   onClose: () => void
 }) {
-  const PAGE_SIZE = 20
+  const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
+  const [pageSize, setPageSize] = useState(20)
   const [page, setPage] = useState(1)
   const { data, isLoading, isError } = useUnifiedFileTransferDevices({
     taskId: task.id,
     page,
-    pageSize: PAGE_SIZE,
+    pageSize,
   })
   const rows = data?.items ?? []
   const total = data?.total ?? 0
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true">
@@ -565,9 +566,29 @@ function TaskDetailDrawer({
             <div className="text-xs uppercase tracking-wider text-muted-foreground">
               已选设备 / 执行明细
             </div>
-            <span className="font-mono text-[11px] text-muted-foreground">
-              共 {total} 台
-            </span>
+            <div className="flex items-center gap-3">
+              <span className="font-mono text-[11px] text-muted-foreground">
+                共 {total} 台
+              </span>
+              <Select
+                value={String(pageSize)}
+                onValueChange={(v) => {
+                  setPageSize(Number(v))
+                  setPage(1)
+                }}
+              >
+                <SelectTrigger className="h-7 w-24 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PAGE_SIZE_OPTIONS.map((n) => (
+                    <SelectItem key={n} value={String(n)}>
+                      {n} 条/页
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
           <TableCard>
             <Table>
@@ -628,11 +649,11 @@ function TaskDetailDrawer({
               </TableBody>
             </Table>
           </TableCard>
-          {total > PAGE_SIZE ? (
+          {total > pageSize ? (
             <Pagination
               page={page}
               totalPages={totalPages}
-              pageSize={PAGE_SIZE}
+              pageSize={pageSize}
               onChange={setPage}
             />
           ) : null}
