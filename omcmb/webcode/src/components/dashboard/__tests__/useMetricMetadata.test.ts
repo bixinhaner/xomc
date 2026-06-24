@@ -1,9 +1,9 @@
 /**
- * resolveMetricMeta 单测（KPI-ALL-IND 阶段4）。
+ * resolveMetricMeta 单测。
  *
- * 覆盖三条解析路径：
- *   1) 指标库命中（编号）→ 名字/单位来自库、换算系数 1、无 i18n 单位 key；
- *   2) 库未命中 + 旧 symbolic 别名 → i18n label/unit + 换算系数 + i18n 单位 key；
+ * 重构后采「可控源优先」三层 fallback：
+ *   1) KPI_CATALOG 命中（含旧 symbolic 桥接到主键）→ 直接走 dashboard.kpi.* i18n；
+ *   2) 指标库元数据（按 canonicalized key 查）→ 名字/单位来自库；
  *   3) 都未命中 → 名字回退编号本身、无单位、换算 1。
  */
 
@@ -11,7 +11,6 @@ import { describe, it, expect } from 'vitest';
 import { resolveMetricMeta } from '../useMetricMetadata';
 import type { MetricMeta, MetricMetadataResult } from '../useMetricMetadata';
 
-// 假元数据查询器：仅识别预置编号。
 function fakeMeta(table: Record<string, MetricMeta>): MetricMetadataResult {
   return {
     getMeta: (code: string) => table[code],
@@ -19,11 +18,59 @@ function fakeMeta(table: Record<string, MetricMeta>): MetricMetadataResult {
   };
 }
 
-// 测试用 t()：原样回显 i18n key（断言映射结果即可，不依赖真实语料）。
 const echoT = (key: string) => key;
 
 describe('resolveMetricMeta', () => {
-  it('指标库命中：名字/单位取自库，换算 1、无 i18n 单位 key', () => {
+  it('catalog 主键（K 编号）命中：走 i18n，即便库里同时有该编号也优先 i18n', () => {
+    const meta = fakeMeta({
+      K900010015: { name: 'KPI.PdcpUpOctDl', unit: '', isCounter: false },
+    });
+    const r = resolveMetricMeta('K900010015', meta, echoT);
+    expect(r.name).toBe('dashboard.kpi.totalDataVolumeDl');
+    expect(r.unit).toBe('unit.gb');
+    expect(r.conversion).toBe(1);
+  });
+
+  it('旧 symbolic 别名（LTE）→ 桥接到主键、走 i18n', () => {
+    const meta = fakeMeta({});
+    const r = resolveMetricMeta('LTE_PDCP_VOLUME_DL', meta, echoT);
+    expect(r.name).toBe('dashboard.kpi.totalDataVolumeDl');
+    expect(r.unit).toBe('unit.gb');
+  });
+
+  it('旧 symbolic 别名（NR）→ 走 i18n', () => {
+    const meta = fakeMeta({});
+    const r = resolveMetricMeta('NR_PDCP_VOLUME_DL', meta, echoT);
+    expect(r.name).toBe('dashboard.kpi.totalDataVolumeDl');
+    expect(r.unit).toBe('unit.gb');
+  });
+
+  it('旧 symbolic 别名（GSM）→ 走 i18n', () => {
+    const meta = fakeMeta({});
+    const r = resolveMetricMeta('GSM_CALL_SETUP_SR', meta, echoT);
+    expect(r.name).toBe('dashboard.kpi.callSetupSr');
+    expect(r.unit).toBe('unit.percent');
+  });
+
+  it('alias label override：LTE_CELL_AVAILABLE 与 WIRELESS_SETUP_SR 同指主键 K900010006 但显示名不同', () => {
+    // K900010006 catalog 默认 label 是 wirelessSetupSr（接入侧主语义）。
+    // LTE_CELL_AVAILABLE 沿用老的「小区可用性」语义 → alias 表 override label。
+    // WIRELESS_SETUP_SR 与主键默认一致 → 不 override，跟随。
+    const meta = fakeMeta({});
+    const cellAvail = resolveMetricMeta('LTE_CELL_AVAILABLE', meta, echoT);
+    expect(cellAvail.name).toBe('dashboard.kpi.cellAvailable');
+    const wirelessSr = resolveMetricMeta('WIRELESS_SETUP_SR', meta, echoT);
+    expect(wirelessSr.name).toBe('dashboard.kpi.wirelessSetupSr');
+  });
+
+  it('无 K 编号 symbolic（LTE_PDCP_RATE_DL）作 catalog 主键 → 走 i18n', () => {
+    const meta = fakeMeta({});
+    const r = resolveMetricMeta('LTE_PDCP_RATE_DL', meta, echoT);
+    expect(r.name).toBe('dashboard.kpi.throughputDl');
+    expect(r.unit).toBe('unit.mbps');
+  });
+
+  it('catalog 未登记的编号 + 库命中：走库元数据', () => {
     const meta = fakeMeta({
       C000010012: { name: '小区下行PRB占用数', unit: 'number', isCounter: true },
     });
@@ -31,34 +78,23 @@ describe('resolveMetricMeta', () => {
     expect(r.name).toBe('小区下行PRB占用数');
     expect(r.unit).toBe('number');
     expect(r.conversion).toBe(1);
-    expect(r.unitI18nKey).toBeUndefined();
   });
 
-  it('库未命中但是旧 symbolic 别名：回退老配置，名字/单位经 t() 映射 + i18n 单位 key', () => {
-    const meta = fakeMeta({});
-    const r = resolveMetricMeta('LTE_PDCP_VOLUME_DL', meta, echoT);
-    // 老配置 label/unit 是 i18n key，echoT 原样回显
-    expect(r.name).toBe('dashboard.kpi.totalDataVolumeDl');
-    expect(r.unit).toBe('unit.gb');
-    expect(r.unitI18nKey).toBe('unit.gb');
+  it('catalog 未登记的 symbolic 别名 + 库按 canonicalized key 命中：走库元数据', () => {
+    // canonicalizeMetricKey 对未登记 key 原样返回，所以库可按 raw key 命中。
+    const meta = fakeMeta({
+      UNKNOWN_SYMBOLIC: { name: 'FROM_LIBRARY', unit: 'ms', isCounter: false },
+    });
+    const r = resolveMetricMeta('UNKNOWN_SYMBOLIC', meta, echoT);
+    expect(r.name).toBe('FROM_LIBRARY');
+    expect(r.unit).toBe('ms');
   });
 
-  it('库与老配置都未命中：名字回退编号本身、无单位、换算 1', () => {
+  it('catalog 与库都未命中：名字回退编号本身、无单位、换算 1', () => {
     const meta = fakeMeta({});
     const r = resolveMetricMeta('C999999999', meta, echoT);
     expect(r.name).toBe('C999999999');
     expect(r.unit).toBe('');
-    expect(r.conversion).toBe(1);
-    expect(r.unitI18nKey).toBeUndefined();
-  });
-
-  it('库优先于旧别名：同时存在时取库元数据', () => {
-    const meta = fakeMeta({
-      LTE_PDCP_VOLUME_DL: { name: 'FROM_LIBRARY', unit: 'GB', isCounter: false },
-    });
-    const r = resolveMetricMeta('LTE_PDCP_VOLUME_DL', meta, echoT);
-    expect(r.name).toBe('FROM_LIBRARY');
-    expect(r.unit).toBe('GB');
     expect(r.conversion).toBe(1);
   });
 });
