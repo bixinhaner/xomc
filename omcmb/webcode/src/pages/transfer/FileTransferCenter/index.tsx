@@ -1762,7 +1762,6 @@ export default function FileTransferCenter() {
                 >
                   {t('ufte.action.batchSnInput')}
                 </Button>
-                <Text type="secondary">{t('ufte.form.deviceTotal', { count: drawerDeviceTotal })}</Text>
                 <Button
                   type="link"
                   size="small"

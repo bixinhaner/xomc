@@ -9,7 +9,7 @@ import { expectPageRenders, smokeLogin } from './helpers';
  *       标题 nav.mr.indicators（MR指标 / MR Indicators）+ 副标题 mr.indicatorsSubtitle，
  *       FilterBar(.ant-form) + DataTable(.ant-table)，列头 mr.indicatorName / mr.indicatorCode
  *   - /mr/files          → src/pages/mr/Files/index.tsx
- *       搜索框 placeholder mr.searchDeviceSn（搜索设备SN / Search device SN），
+ *       搜索框 placeholder mr.searchDeviceSn（设备 SN / Device SN），
  *       批量下载按钮 bundle.batchDownload（批量下载 / Batch Download），DataTable(.ant-table)
  *   - /mr/device-mapping → src/pages/mr/DeviceMapping/index.tsx
  *       标题/副标题/列头为硬编码中文（无 i18n），FilterBar(.ant-form) + DataTable(.ant-table)
@@ -52,7 +52,7 @@ test.describe('测量报告冒烟（真实后端）', { tag: '@smoke' }, () => {
     const main = page.locator('main');
     // 顶部筛选区：设备SN 搜索框（placeholder 来自 mr.searchDeviceSn）
     await expect(
-      main.getByPlaceholder(/搜索设备SN|Search device SN/).first(),
+      main.getByPlaceholder(/设备\s?SN|Device SN/).first(),
     ).toBeVisible();
 
     // 工具栏：批量下载按钮（bundle.batchDownload，未勾选时 disabled 但可见）
