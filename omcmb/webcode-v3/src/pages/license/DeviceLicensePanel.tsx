@@ -19,7 +19,7 @@ import {
   useImportDeviceLicenses,
   useDeleteDeviceLicense,
 } from '@core/hooks/api/useDeviceLicense'
-import { useProductList } from '@core/hooks/api/useProducts'
+import { useProductList, useProductNameResolver } from '@core/hooks/api/useProducts'
 import { deviceLicenseApi } from '@core/services/api/deviceLicenseApi'
 import type { LicenseImportResult } from '@core/services/api/deviceLicenseApi'
 
@@ -65,13 +65,7 @@ export function DeviceLicensePanel({
         .sort((a, b) => a.label.localeCompare(b.label, 'zh-CN')),
     [productsData]
   )
-  const productNameByPattern = useMemo(() => {
-    const map = new Map<string, string>()
-    ;(productsData?.items ?? []).forEach((p) => {
-      ;(p.patterns ?? []).forEach((pat) => map.set(pat, p.name))
-    })
-    return map
-  }, [productsData])
+  const resolveProductName = useProductNameResolver()
 
   const rows = data?.items ?? []
   const total = data?.total ?? 0
@@ -192,9 +186,8 @@ export function DeviceLicensePanel({
               <span className="truncate text-xs text-cyan-100/80">{r.enbName ?? '—'}</span>
               <span className="truncate font-mono text-[11px] text-cyan-300/70">
                 {(() => {
-                  const raw = r.productType ?? ''
-                  if (!raw) return '—'
-                  return productNameByPattern.get(raw) ?? raw
+                  const display = resolveProductName(r.productType)
+                  return display ? display : '—'
                 })()}
               </span>
               <span className="font-mono text-[11px] text-cyan-300/70">

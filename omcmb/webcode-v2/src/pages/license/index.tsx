@@ -45,7 +45,7 @@ import { cn } from '@/lib/utils'
 
 import { useSystemLicense, useSystemLicenseHistory } from '@core/hooks/api/useSystemLicense'
 import { useDeviceLicenses } from '@core/hooks/api/useDeviceLicense'
-import { useProductList } from '@core/hooks/api/useProducts'
+import { useProductList, useProductNameResolver } from '@core/hooks/api/useProducts'
 import {
   SystemLicenseErrorCodes,
   extractLicenseErrorCode,
@@ -482,13 +482,7 @@ function DeviceLicenseTab() {
         .sort((a, b) => a.label.localeCompare(b.label, 'zh-CN')),
     [productsData]
   )
-  const productNameByPattern = useMemo(() => {
-    const map = new Map<string, string>()
-    ;(productsData?.items ?? []).forEach((p) => {
-      ;(p.patterns ?? []).forEach((pat) => map.set(pat, p.name))
-    })
-    return map
-  }, [productsData])
+  const resolveProductName = useProductNameResolver()
 
   const rows = data?.items ?? []
   const total = data?.total ?? 0
@@ -597,10 +591,9 @@ function DeviceLicenseTab() {
                   <TableCell>{lic.enbName ?? '—'}</TableCell>
                   <TableCell>
                     {(() => {
-                      const raw = lic.productType ?? ''
-                      if (!raw) return '—'
-                      const name = productNameByPattern.get(raw)
-                      return <Badge variant="muted">{name ?? raw}</Badge>
+                      const display = resolveProductName(lic.productType)
+                      if (!display) return '—'
+                      return <Badge variant="muted">{display}</Badge>
                     })()}
                   </TableCell>
                   <TableCell className="text-xs">{lic.fileName}</TableCell>

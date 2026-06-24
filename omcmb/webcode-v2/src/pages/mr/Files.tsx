@@ -31,7 +31,7 @@ import {
 } from '@/components/layout/PageShell'
 
 import { useMRFileDevices, useBatchDeleteMRFiles } from '@core/hooks/api/useMR'
-import { useProductList } from '@core/hooks/api/useProducts'
+import { useProductList, useProductNameResolver } from '@core/hooks/api/useProducts'
 
 // ============================================================
 // 测量报告 → 采集文件（按设备聚合）
@@ -73,13 +73,7 @@ export default function Files() {
         .sort((a, b) => a.label.localeCompare(b.label, 'zh-CN')),
     [productsData]
   )
-  const productNameByPattern = useMemo(() => {
-    const map = new Map<string, string>()
-    ;(productsData?.items ?? []).forEach((p) => {
-      ;(p.patterns ?? []).forEach((pat) => map.set(pat, p.name))
-    })
-    return map
-  }, [productsData])
+  const resolveProductName = useProductNameResolver()
 
   const rows = data?.items ?? []
   const total = data?.total ?? 0
@@ -226,9 +220,8 @@ export default function Files() {
                   <TableCell className="text-xs">{d.siteName || '—'}</TableCell>
                   <TableCell className="text-xs">
                     {(() => {
-                      const raw = d.productClass || ''
-                      if (!raw) return '—'
-                      return productNameByPattern.get(raw) ?? raw
+                      const display = resolveProductName(d.productClass)
+                      return display ? display : '—'
                     })()}
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">

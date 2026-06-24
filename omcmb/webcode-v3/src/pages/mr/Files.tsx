@@ -7,7 +7,7 @@ import { NeonButton } from '@/components/ui/NeonButton'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { formatTime } from '@/lib/format'
 import { useMRFileDevices, useBatchDeleteMRFiles } from '@core/hooks/api/useMR'
-import { useProductList } from '@core/hooks/api/useProducts'
+import { useProductList, useProductNameResolver } from '@core/hooks/api/useProducts'
 import type { MRFileDeviceItem } from '@core/services/api/mrApi'
 
 const PAGE_SIZE = 20
@@ -45,13 +45,7 @@ export default function Files() {
         .sort((a, b) => a.label.localeCompare(b.label, 'zh-CN')),
     [productsData]
   )
-  const productNameByPattern = useMemo(() => {
-    const map = new Map<string, string>()
-    ;(productsData?.items ?? []).forEach((p) => {
-      ;(p.patterns ?? []).forEach((pat) => map.set(pat, p.name))
-    })
-    return map
-  }, [productsData])
+  const resolveProductName = useProductNameResolver()
 
   const rows = data?.items ?? []
   const total = data?.total ?? 0
@@ -161,9 +155,8 @@ export default function Files() {
                 <div className="min-w-0">
                   <div className="truncate text-xs text-cyan-100/80">
                     {(() => {
-                      const raw = d.productClass || ''
-                      if (!raw) return '—'
-                      return productNameByPattern.get(raw) ?? raw
+                      const display = resolveProductName(d.productClass)
+                      return display ? display : '—'
                     })()}
                   </div>
                   <div className="font-mono text-[10px] text-cyan-300/55">PRODUCT NAME</div>

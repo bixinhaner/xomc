@@ -17,7 +17,7 @@ import {
   useBatchDeletePMFiles,
   usePMFileDevices,
 } from '@core/hooks/api/usePerformance';
-import { useProductList } from '@core/hooks/api/useProducts';
+import { useProductList, useProductNameResolver } from '@core/hooks/api/useProducts';
 import { useBatchDownloadWithMessage } from '@/hooks/useBatchDownloadWithMessage';
 import type { PMFileDeviceItem } from '@core/services/api/pmApi';
 import DeviceFilesDrawer from './DeviceFilesDrawer';
@@ -56,13 +56,7 @@ export default function PMFilesPage({ embedded }: Props) {
       .sort((a, b) => a.label.localeCompare(b.label, 'zh-CN')),
     [productsData],
   );
-  const productNameByPattern = useMemo(() => {
-    const map = new Map<string, string>();
-    (productsData?.items ?? []).forEach((p) => {
-      (p.patterns ?? []).forEach((pat) => map.set(pat, p.name));
-    });
-    return map;
-  }, [productsData]);
+  const resolveProductName = useProductNameResolver();
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
   const bundle = useBatchDownloadWithMessage();
   const batchDelete = useBatchDeletePMFiles();
@@ -139,7 +133,7 @@ export default function PMFilesPage({ embedded }: Props) {
         render: (v) => {
           const raw = v ? String(v) : '';
           if (!raw) return '—';
-          return productNameByPattern.get(raw) ?? raw;
+          return resolveProductName(raw);
         },
       },
       {
@@ -187,7 +181,7 @@ export default function PMFilesPage({ embedded }: Props) {
           ),
       },
     ],
-    [t, productNameByPattern],
+    [t, resolveProductName],
   );
 
   const body = (

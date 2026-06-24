@@ -19,7 +19,7 @@ import {
   useConfigSnapshots,
   useBatchDeleteConfigSnapshots,
 } from '@core/hooks/api/useConfigSnapshot'
-import { useProductList } from '@core/hooks/api/useProducts'
+import { useProductList, useProductNameResolver } from '@core/hooks/api/useProducts'
 import {
   configSnapshotApi,
   type ConfigSnapshot,
@@ -85,13 +85,7 @@ export default function ConfigSnapshotLibraryPage() {
         .sort((a, b) => a.label.localeCompare(b.label, 'zh-CN')),
     [productsData]
   )
-  const productNameByPattern = useMemo(() => {
-    const map = new Map<string, string>()
-    ;(productsData?.items ?? []).forEach((p) => {
-      ;(p.patterns ?? []).forEach((pat) => map.set(pat, p.name))
-    })
-    return map
-  }, [productsData])
+  const resolveProductName = useProductNameResolver()
 
   const items = query.data?.items ?? []
   const total = query.data?.total ?? 0
@@ -294,10 +288,8 @@ export default function ConfigSnapshotLibraryPage() {
                     <div className="truncate font-mono text-[10px] text-cyan-300/55">
                       {s.enbName || '—'}
                       {(() => {
-                        const raw = s.productType || ''
-                        if (!raw) return ''
-                        const name = productNameByPattern.get(raw) ?? raw
-                        return ` · ${name}`
+                        const name = resolveProductName(s.productType)
+                        return name ? ` · ${name}` : ''
                       })()}
                     </div>
                   </div>

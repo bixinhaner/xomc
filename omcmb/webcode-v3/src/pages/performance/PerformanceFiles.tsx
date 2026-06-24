@@ -7,7 +7,7 @@ import { NeonButton } from '@/components/ui/NeonButton'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { formatTime } from '@/lib/format'
 import { usePMFileDevices, useBatchDeletePMFiles } from '@core/hooks/api/usePerformance'
-import { useProductList } from '@core/hooks/api/useProducts'
+import { useProductList, useProductNameResolver } from '@core/hooks/api/useProducts'
 import type { PMFileDeviceItem } from '@core/services/api/pmApi'
 
 /**
@@ -45,13 +45,7 @@ export default function PerformanceFiles() {
         .sort((a, b) => a.label.localeCompare(b.label, 'zh-CN')),
     [productsData]
   )
-  const productNameByPattern = useMemo(() => {
-    const map = new Map<string, string>()
-    ;(productsData?.items ?? []).forEach((p) => {
-      ;(p.patterns ?? []).forEach((pat) => map.set(pat, p.name))
-    })
-    return map
-  }, [productsData])
+  const resolveProductName = useProductNameResolver()
 
   const rows: PMFileDeviceItem[] = data?.items ?? []
   const total = data?.total ?? 0
@@ -192,9 +186,8 @@ export default function PerformanceFiles() {
                   </span>
                   <span className="truncate font-mono text-[11px] text-cyan-300/70" title={r.productClass}>
                     {(() => {
-                      const raw = r.productClass || ''
-                      if (!raw) return '—'
-                      return productNameByPattern.get(raw) ?? raw
+                      const display = resolveProductName(r.productClass)
+                      return display ? display : '—'
                     })()}
                   </span>
                   <span className="text-right font-display text-sm font-bold text-cyan-200">

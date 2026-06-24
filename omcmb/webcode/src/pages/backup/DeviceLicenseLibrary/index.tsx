@@ -20,7 +20,7 @@ import {
   useDeviceLicenses,
   useBatchDeleteDeviceLicenses,
 } from '@core/hooks/api/useDeviceLicense';
-import { useProductList } from '@core/hooks/api/useProducts';
+import { useProductList, useProductNameResolver } from '@core/hooks/api/useProducts';
 import type { DeviceLicense } from '@core/services/api/deviceLicenseApi';
 import { deviceLicenseApi } from '@core/services/api/deviceLicenseApi';
 import { useBatchDownloadWithMessage } from '@/hooks/useBatchDownloadWithMessage';
@@ -66,13 +66,7 @@ export default function DeviceLicenseLibraryPage() {
       .sort((a, b) => a.label.localeCompare(b.label, 'zh-CN')),
     [productsData],
   );
-  const productNameByPattern = useMemo(() => {
-    const map = new Map<string, string>();
-    (productsData?.items ?? []).forEach((p) => {
-      (p.patterns ?? []).forEach((pat) => map.set(pat, p.name));
-    });
-    return map;
-  }, [productsData]);
+  const resolveProductName = useProductNameResolver();
 
   const columns: DataTableColumn<DeviceLicense>[] = [
     { key: 'serialNumber', title: t('transfer.fileLib.col.serialNumber'), dataIndex: 'serialNumber', width: 200, copyable: true, mono: true },
@@ -89,10 +83,8 @@ export default function DeviceLicenseLibraryPage() {
       dataIndex: 'productType',
       width: 160,
       render: (v) => {
-        const raw = v ? String(v) : '';
-        const name = raw ? productNameByPattern.get(raw) : undefined;
-        if (name) return name;
-        return raw ? raw : <span style={{ color: '#999' }}>—</span>;
+        const display = resolveProductName(v as string | null | undefined);
+        return display ? display : <span style={{ color: '#999' }}>—</span>;
       },
     },
     { key: 'fileName', title: t('transfer.fileLib.col.licenseFile'), dataIndex: 'fileName', width: 260, mono: true },

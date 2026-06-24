@@ -11,7 +11,7 @@ import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import { useT } from '@/hooks/useT';
 import { useBatchDeleteMRFiles, useMRFileDevices } from '@core/hooks/api/useMR';
-import { useProductList } from '@core/hooks/api/useProducts';
+import { useProductList, useProductNameResolver } from '@core/hooks/api/useProducts';
 import { useBatchDownloadWithMessage } from '@/hooks/useBatchDownloadWithMessage';
 import type { MRFileDeviceItem } from '@core/services/api/mrApi';
 import DeviceFilesDrawer from './DeviceFilesDrawer';
@@ -50,13 +50,7 @@ export default function MRFilesPage({ embedded }: Props) {
       .sort((a, b) => a.label.localeCompare(b.label, 'zh-CN')),
     [productsData],
   );
-  const productNameByPattern = useMemo(() => {
-    const map = new Map<string, string>();
-    (productsData?.items ?? []).forEach((p) => {
-      (p.patterns ?? []).forEach((pat) => map.set(pat, p.name));
-    });
-    return map;
-  }, [productsData]);
+  const resolveProductName = useProductNameResolver();
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
   const bundle = useBatchDownloadWithMessage();
   const batchDelete = useBatchDeleteMRFiles();
@@ -132,7 +126,7 @@ export default function MRFilesPage({ embedded }: Props) {
         render: (v) => {
           const raw = v ? String(v) : '';
           if (!raw) return '—';
-          return productNameByPattern.get(raw) ?? raw;
+          return resolveProductName(raw);
         },
       },
       {
@@ -170,7 +164,7 @@ export default function MRFilesPage({ embedded }: Props) {
           ),
       },
     ],
-    [t, productNameByPattern],
+    [t, resolveProductName],
   );
 
   const body = (

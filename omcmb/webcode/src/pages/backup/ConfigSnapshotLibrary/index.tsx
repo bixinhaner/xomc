@@ -22,7 +22,7 @@ import {
   useConfigSnapshots,
   useBatchDeleteConfigSnapshots,
 } from '@core/hooks/api/useConfigSnapshot';
-import { useProductList } from '@core/hooks/api/useProducts';
+import { useProductList, useProductNameResolver } from '@core/hooks/api/useProducts';
 import type {
   ConfigSnapshot,
   SnapshotSource,
@@ -80,13 +80,7 @@ export default function ConfigSnapshotLibraryPage() {
       .sort((a, b) => a.label.localeCompare(b.label, 'zh-CN')),
     [productsData],
   );
-  const productNameByPattern = useMemo(() => {
-    const map = new Map<string, string>();
-    (productsData?.items ?? []).forEach((p) => {
-      (p.patterns ?? []).forEach((pat) => map.set(pat, p.name));
-    });
-    return map;
-  }, [productsData]);
+  const resolveProductName = useProductNameResolver();
 
   const columns: DataTableColumn<ConfigSnapshot>[] = [
     { key: 'serialNumber', title: t('transfer.fileLib.col.serialNumber'), dataIndex: 'serialNumber', width: 200, copyable: true, mono: true },
@@ -103,10 +97,8 @@ export default function ConfigSnapshotLibraryPage() {
       dataIndex: 'productType',
       width: 160,
       render: (v) => {
-        const raw = v ? String(v) : '';
-        const name = raw ? productNameByPattern.get(raw) : undefined;
-        if (name) return name;
-        return raw ? raw : <span style={{ color: '#999' }}>—</span>;
+        const display = resolveProductName(v as string | null | undefined);
+        return display ? display : <span style={{ color: '#999' }}>—</span>;
       },
     },
     { key: 'fileName', title: t('transfer.fileLib.col.snapshotFile'), dataIndex: 'fileName', width: 260, mono: true },

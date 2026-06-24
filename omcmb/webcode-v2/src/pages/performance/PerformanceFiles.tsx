@@ -34,7 +34,7 @@ import {
   usePMFileDevices,
   useBatchDeletePMFiles,
 } from '@core/hooks/api/usePerformance'
-import { useProductList } from '@core/hooks/api/useProducts'
+import { useProductList, useProductNameResolver } from '@core/hooks/api/useProducts'
 import type { PageRequest } from '@core/types/pagination'
 
 // ============================================================
@@ -98,13 +98,7 @@ export function PerformanceFilesPage() {
         .sort((a, b) => a.label.localeCompare(b.label, 'zh-CN')),
     [productsData]
   )
-  const productNameByPattern = useMemo(() => {
-    const map = new Map<string, string>()
-    ;(productsData?.items ?? []).forEach((p) => {
-      ;(p.patterns ?? []).forEach((pat) => map.set(pat, p.name))
-    })
-    return map
-  }, [productsData])
+  const resolveProductName = useProductNameResolver()
 
   const rows = data?.items ?? []
   const total = data?.total ?? 0
@@ -209,9 +203,8 @@ export function PerformanceFilesPage() {
                     <TableCell className="font-medium">{r.siteName || '—'}</TableCell>
                     <TableCell className="text-xs">
                       {(() => {
-                        const raw = r.productClass || ''
-                        if (!raw) return '—'
-                        const name = productNameByPattern.get(raw) ?? raw
+                        const name = resolveProductName(r.productClass)
+                        if (!name) return '—'
                         return <Badge variant="outline">{name}</Badge>
                       })()}
                     </TableCell>
