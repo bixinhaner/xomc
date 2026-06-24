@@ -2735,6 +2735,11 @@ const messages: Record<string, string> = {
   'dashboard.kpi.callDropRate':         '呼叫掉线率',
   'dashboard.kpi.handoverSr':           '切换成功率',
 
+  // Issue B: 首页 KPI 折线图下拉多选相关文案
+  'dashboard.kpi.selectMetricsPlaceholder': '请选择指标',
+  'dashboard.kpi.noMetricSelected':         '请在右上角选择要查看的指标',
+  'dashboard.kpi.moreMetricsCount':         '+ {count} 项',
+
   // Dashboard视图模式 - v2.0新增
   'dashboard.viewMode.day':    '天',
   'dashboard.viewMode.week':   '周',

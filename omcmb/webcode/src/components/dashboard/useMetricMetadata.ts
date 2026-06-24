@@ -72,7 +72,7 @@ export function useMetricMetadata(technology: TechnologyType): MetricMetadataRes
     [metaByCode],
   );
 
-  return { getMeta, isLoading };
+  return useMemo(() => ({ getMeta, isLoading }), [getMeta, isLoading]);
 }
 
 /** 指标的展示元数据（已本地化的名字 + 单位 + 数值换算系数）。 */

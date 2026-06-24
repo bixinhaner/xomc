@@ -2718,6 +2718,11 @@ const messages: Record<string, string> = {
   'dashboard.kpi.callDropRate':         'Call Drop Rate',
   'dashboard.kpi.handoverSr':           'Handover Success Rate',
 
+  // Issue B: dashboard KPI multi-select dropdown copy
+  'dashboard.kpi.selectMetricsPlaceholder': 'Select metrics',
+  'dashboard.kpi.noMetricSelected':         'Select metrics from the top right to view',
+  'dashboard.kpi.moreMetricsCount':         '+ {count} more',
+
   // Dashboard视图模式 - v2.0新增
   'dashboard.viewMode.day':    'Day',
   'dashboard.viewMode.week':   'Week',
