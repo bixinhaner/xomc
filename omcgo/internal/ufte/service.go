@@ -1641,6 +1641,10 @@ func matchesDeviceFilter(item DeviceItem, filter DeviceListFilter) bool {
 	if filter.TypeCode != "" && item.TypeCode != filter.TypeCode {
 		return false
 	}
+	// #615：按主任务 ID 精确收窄。空值 ≡ 不过滤（原有「执行明细」全量入口语义）。
+	if filter.TaskID != "" && item.TaskID != filter.TaskID {
+		return false
+	}
 	if filter.ProductType != "" && !strings.EqualFold(item.ProductType, filter.ProductType) {
 		return false
 	}

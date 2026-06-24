@@ -100,7 +100,7 @@ export const unifiedFileTransferApi = {
   },
 
   async getDevices(
-    params: { status?: string; typeCode?: string; keyword?: string; category?: string; productType?: string; productName?: string } & PageRequest,
+    params: { status?: string; typeCode?: string; keyword?: string; category?: string; productType?: string; productName?: string; taskId?: string } & PageRequest,
   ): Promise<PageResponse<UnifiedFileTransferDeviceItem>> {
     const { data } = await http.get<PageResponse<BackendUnifiedFileTransferDeviceItem>>('/ufte/devices', {
       params: {
@@ -112,6 +112,9 @@ export const unifiedFileTransferApi = {
         productType: params.productType,
         // #524：设备列表「产品名称」筛选改传产品名（后端 matchesDeviceFilter 按 ProductName 过滤）。
         productName: params.productName,
+        // #615：任务详情抽屉「已选设备列表」收窄到单个任务（后端 matchesDeviceFilter 按 TaskID 精确匹配）。
+        // 不传 ≡ 旧行为，「执行明细」全量入口不受影响。
+        taskId: params.taskId,
         keyword: params.keyword,
       },
     });

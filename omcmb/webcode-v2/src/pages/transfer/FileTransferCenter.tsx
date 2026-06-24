@@ -35,6 +35,7 @@ import {
   useUnifiedFileTransferDevices,
 } from '@core/hooks/api/useUnifiedFileTransfer'
 import type { PageRequest } from '@core/types/pagination'
+import type { UnifiedFileTransferTask } from '@core/types/unifiedFileTransfer'
 import {
   DEVICE_UPGRADE_CATEGORY,
   aggregateCategoryOptions,
@@ -70,6 +71,8 @@ export default function FileTransferCenter() {
   const [category, setCategory] = useState<string>('all')
   const [typeCode, setTypeCode] = useState<string>('all')
   const [status, setStatus] = useState<string>('all')
+  // #615 任务详情抽屉：Task 列表点击任务名开抽屉看详情+已选设备。
+  const [viewingTask, setViewingTask] = useState<UnifiedFileTransferTask | null>(null)
 
   const overviewQuery = useUnifiedFileTransferOverview()
   const { data: taskTypes = [] } = useUnifiedFileTransferTaskTypes()
@@ -290,7 +293,7 @@ export default function FileTransferCenter() {
           error={tasksQuery.error}
           rows={tasksQuery.data?.items ?? []}
           hasActiveFilter={hasActiveFilter}
-          onOpen={() => navigate(`/transfer/center`)}
+          onOpen={(task) => setViewingTask(task)}
         />
       ) : (
         <DeviceTable
@@ -309,6 +312,10 @@ export default function FileTransferCenter() {
         pageSize={PAGE_SIZE}
         onChange={setPage}
       />
+
+      {viewingTask ? (
+        <TaskDetailDrawer task={viewingTask} onClose={() => setViewingTask(null)} />
+      ) : null}
     </PageShell>
   )
 }
@@ -326,7 +333,7 @@ function TaskTable({
   error: unknown
   rows: import('@core/types/unifiedFileTransfer').UnifiedFileTransferTask[]
   hasActiveFilter: boolean
-  onOpen: (id: string) => void
+  onOpen: (task: import('@core/types/unifiedFileTransfer').UnifiedFileTransferTask) => void
 }) {
   const cols = 9
   return (
@@ -362,7 +369,7 @@ function TaskTable({
                     type="button"
                     className="max-w-[220px] truncate text-left text-sm font-medium text-primary hover:underline"
                     title={task.taskName}
-                    onClick={() => onOpen(task.id)}
+                    onClick={() => onOpen(task)}
                   >
                     {task.taskName || task.id}
                   </button>
@@ -498,5 +505,150 @@ function DeviceTable({
         </TableBody>
       </Table>
     </TableCard>
+  )
+}
+
+// #615 任务详情抽屉：v2 风格右侧 fixed-inset 抽屉（参考 mml/TaskRecord.tsx 同款），
+// 上半部分展示任务元信息，下半部分按 taskId 拉「已选设备 / 执行明细」表（10s 自动刷新）。
+function TaskDetailDrawer({
+  task,
+  onClose,
+}: {
+  task: UnifiedFileTransferTask
+  onClose: () => void
+}) {
+  const PAGE_SIZE = 20
+  const [page, setPage] = useState(1)
+  const { data, isLoading, isError } = useUnifiedFileTransferDevices({
+    taskId: task.id,
+    page,
+    pageSize: PAGE_SIZE,
+  })
+  const rows = data?.items ?? []
+  const total = data?.total ?? 0
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} aria-hidden />
+      <div className="relative flex h-full w-full max-w-[820px] flex-col overflow-hidden border-l bg-background shadow-xl">
+        <div className="flex items-center justify-between border-b px-4 py-3">
+          <div className="min-w-0">
+            <div className="truncate text-base font-semibold" title={task.taskName}>
+              {task.taskName || '任务详情'}
+            </div>
+            <div className="truncate font-mono text-[11px] text-muted-foreground">
+              {task.id}
+            </div>
+          </div>
+          <Button variant="ghost" size="icon" onClick={onClose} aria-label="关闭">
+            <X />
+          </Button>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 border-b px-4 py-3 sm:grid-cols-4">
+          <DrawerField label="业务分类" value={task.categoryLabel || task.category || '—'} />
+          <DrawerField label="任务类型" value={task.typeDisplayName || task.typeCode} />
+          <DrawerField label="状态" value={<TaskStatusBadge status={task.status} />} />
+          <DrawerField label="结果" value={<TaskResultBadge result={task.result} />} />
+          <DrawerField label="执行方式" value={EXEC_MODE_LABEL[task.executionMode] ?? task.executionMode} />
+          <DrawerField label="创建人" value={task.createUser || '—'} />
+          <DrawerField label="创建时间" value={formatTime(task.createdAt)} />
+          <DrawerField
+            label="进度"
+            value={`${task.successCount} / ${task.failCount} / ${task.totalCount}`}
+          />
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-auto px-4 py-3">
+          <div className="mb-2 flex items-center justify-between">
+            <div className="text-xs uppercase tracking-wider text-muted-foreground">
+              已选设备 / 执行明细
+            </div>
+            <span className="font-mono text-[11px] text-muted-foreground">
+              共 {total} 台
+            </span>
+          </div>
+          <TableCard>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>设备 SN</TableHead>
+                  <TableHead>产品</TableHead>
+                  <TableHead>版本 (当前→目标)</TableHead>
+                  <TableHead>状态</TableHead>
+                  <TableHead>进度</TableHead>
+                  <TableHead>失败原因</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {isLoading ? (
+                  <LoadingRow colSpan={6} />
+                ) : isError ? (
+                  <ErrorRow colSpan={6} error={null} />
+                ) : rows.length === 0 ? (
+                  <EmptyRow colSpan={6}>暂无设备</EmptyRow>
+                ) : (
+                  rows.map((d) => (
+                    <TableRow key={d.id}>
+                      <TableCell>
+                        <span className="font-mono text-xs">{d.deviceSn || '—'}</span>
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-xs text-muted-foreground">
+                          {d.productName || d.productType || '—'}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <span className="font-mono text-[11px] text-muted-foreground">
+                          {(d.currentVersion || '—') + (d.targetVersion ? ` → ${d.targetVersion}` : '')}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <DeviceStatusBadge status={d.status} />
+                      </TableCell>
+                      <TableCell>
+                        <ProgressBar percent={d.progress} />
+                      </TableCell>
+                      <TableCell>
+                        {d.failureReason ? (
+                          <span
+                            className="text-[11px] text-destructive"
+                            title={d.failureDetail || d.failureReason}
+                          >
+                            {d.failureReason}
+                          </span>
+                        ) : (
+                          <span className="text-[11px] text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </TableCard>
+          {total > PAGE_SIZE ? (
+            <Pagination
+              page={page}
+              totalPages={totalPages}
+              pageSize={PAGE_SIZE}
+              onChange={setPage}
+            />
+          ) : null}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function DrawerField({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-xs uppercase tracking-wider text-muted-foreground">
+        {label}
+      </div>
+      <div className="mt-0.5 truncate text-sm">{value}</div>
+    </div>
   )
 }

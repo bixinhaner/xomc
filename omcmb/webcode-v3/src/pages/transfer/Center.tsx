@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import {
   Search,
   RefreshCcw,
@@ -14,6 +13,7 @@ import {
   Activity,
   Layers3,
   CheckCircle2,
+  X,
 } from 'lucide-react'
 
 import { PageShell } from '@/components/shell/PageShell'
@@ -26,6 +26,7 @@ import {
   useUnifiedFileTransferOverview,
   useUnifiedFileTransferTaskTypes,
   useUnifiedFileTransferTasks,
+  useUnifiedFileTransferDevices,
   useStartUfteTask,
   useSuspendUfteTask,
   useTerminateUfteTask,
@@ -36,6 +37,7 @@ import type {
   UnifiedFileTransferTask,
   TransferTaskStatus,
   TransferTaskResult,
+  UnifiedFileTransferDeviceStatus,
 } from '@core/types/unifiedFileTransfer'
 import {
   DEVICE_UPGRADE_CATEGORY,
@@ -67,12 +69,13 @@ const EXEC_MODE_LABEL: Record<UnifiedFileTransferTask['executionMode'], string> 
 }
 
 export default function TransferCenterPage() {
-  const navigate = useNavigate()
   const [page, setPage] = useState(1)
   const [keyword, setKeyword] = useState('')
   const [status, setStatus] = useState<TransferTaskStatus | ''>('')
   const [category, setCategory] = useState<string>('')
   const [opError, setOpError] = useState<string | null>(null)
+  // #615 任务详情抽屉：任务名与「详情」按钮打开抽屉展示任务+已选设备（原 跳转 /transfer/center/${id} 为死链）。
+  const [viewingTask, setViewingTask] = useState<UnifiedFileTransferTask | null>(null)
 
   const { data: overview, isFetching: overviewFetching } = useUnifiedFileTransferOverview()
   const { data: taskTypes } = useUnifiedFileTransferTaskTypes()
@@ -309,7 +312,7 @@ export default function TransferCenterPage() {
                 <button
                   type="button"
                   className="min-w-0 text-left"
-                  onClick={() => navigate(`/transfer/center/${encodeURIComponent(task.id)}`)}
+                  onClick={() => setViewingTask(task)}
                 >
                   <div className="truncate font-display text-sm font-bold text-cyan-100">
                     {task.taskName}
@@ -382,7 +385,7 @@ export default function TransferCenterPage() {
                   <RowAction
                     title="详情"
                     icon={<ChevronRight className="size-3.5" />}
-                    onClick={() => navigate(`/transfer/center/${encodeURIComponent(task.id)}`)}
+                    onClick={() => setViewingTask(task)}
                   />
                 </div>
               </div>
@@ -408,6 +411,10 @@ export default function TransferCenterPage() {
           </NeonButton>
         </div>
       </div>
+
+      {viewingTask ? (
+        <TaskDetailDrawer task={viewingTask} onClose={() => setViewingTask(null)} />
+      ) : null}
     </PageShell>
   )
 }
@@ -490,5 +497,208 @@ function RowAction({
     >
       {icon}
     </button>
+  )
+}
+
+// #615 任务详情抽屉：v3 HUD 风格右侧 fixed-inset 抽屉（不新增路由，对齐 v1/v2）。
+// 上半部分展示任务元 KV，下半部分按 taskId 拉「已选设备 / 执行明细」列表（10s 自动刷新）。
+const DEVICE_STATUS_BADGE: Record<UnifiedFileTransferDeviceStatus, { status: string; label: string }> = {
+  pending: { status: 'unknown', label: '待执行' },
+  downloading: { status: 'active', label: '下载中' },
+  uploading: { status: 'active', label: '上传中' },
+  awaiting_tc: { status: 'warning', label: '等待 TC' },
+  verifying: { status: 'active', label: '校验中' },
+  suspended: { status: 'warning', label: '已挂起' },
+  ended: { status: 'ok', label: '已完成' },
+  failed: { status: 'critical', label: '失败' },
+}
+
+function TaskDetailDrawer({
+  task,
+  onClose,
+}: {
+  task: UnifiedFileTransferTask
+  onClose: () => void
+}) {
+  const PAGE_SIZE = 20
+  const [page, setPage] = useState(1)
+  const { data, isLoading, isError } = useUnifiedFileTransferDevices({
+    taskId: task.id,
+    page,
+    pageSize: PAGE_SIZE,
+  })
+  const rows = data?.items ?? []
+  const total = data?.total ?? 0
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+
+  const statusBadge = STATUS_BADGE[task.status]
+  const resultBadge = task.result ? RESULT_BADGE[task.result] : undefined
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true">
+      <div
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        onClick={onClose}
+        aria-hidden
+      />
+      <div className="relative flex h-full w-full max-w-[860px] flex-col overflow-hidden border-l border-cyan-500/30 bg-[#020611] shadow-[0_0_40px_rgba(0,240,255,0.15)]">
+        <div className="flex items-center justify-between border-b border-cyan-500/20 px-4 py-3">
+          <div className="min-w-0">
+            <div className="truncate font-display text-base font-bold text-cyan-100" title={task.taskName}>
+              {task.taskName || 'TASK DETAIL'}
+            </div>
+            <div className="truncate font-mono text-[10px] text-cyan-300/55">
+              {task.id}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex size-7 items-center justify-center rounded-sm border border-cyan-500/30 text-cyan-300/75 hover:border-cyan-400/60 hover:text-cyan-100"
+            aria-label="关闭"
+          >
+            <X className="size-3.5" />
+          </button>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 border-b border-cyan-500/10 px-4 py-3 sm:grid-cols-4">
+          <DrawerField label="CATEGORY" value={task.categoryLabel || task.category || '—'} />
+          <DrawerField label="TYPE" value={task.typeDisplayName || task.typeCode} />
+          <DrawerField
+            label="STATUS"
+            value={<StatusBadge status={statusBadge.status} label={statusBadge.label} className="scale-90" />}
+          />
+          <DrawerField
+            label="RESULT"
+            value={
+              resultBadge ? (
+                <StatusBadge status={resultBadge.status} label={resultBadge.label} className="scale-90" />
+              ) : (
+                '—'
+              )
+            }
+          />
+          <DrawerField label="EXEC MODE" value={EXEC_MODE_LABEL[task.executionMode]} />
+          <DrawerField label="OPERATOR" value={task.createUser || '—'} />
+          <DrawerField label="CREATED" value={formatTime(task.createdAt)} />
+          <DrawerField
+            label="PROGRESS"
+            value={`${task.successCount} / ${task.failCount} / ${task.totalCount}`}
+          />
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-auto px-4 py-3">
+          <div className="mb-2 flex items-center justify-between">
+            <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-cyan-300/65">
+              DEVICES · 已选设备 / 执行明细
+            </div>
+            <span className="font-mono text-[10px] text-cyan-300/55">
+              TOTAL {total}
+            </span>
+          </div>
+
+          {isLoading ? (
+            <div className="flex items-center justify-center gap-2 py-12 text-cyan-300/60">
+              <Loader2 className="size-3.5 animate-spin" />
+              <span className="font-mono text-xs uppercase tracking-[0.2em]">SYNCING…</span>
+            </div>
+          ) : isError ? (
+            <div className="border border-rose-500/40 bg-rose-500/5 px-3 py-4 font-mono text-xs text-rose-300">
+              FAILURE · 设备列表加载失败
+            </div>
+          ) : rows.length === 0 ? (
+            <div className="flex flex-col items-center gap-2 py-12 text-cyan-300/55">
+              <PackageSearch className="size-8 text-cyan-400/50" />
+              <div className="font-mono text-[10px] uppercase tracking-[0.2em]">NO DEVICES · 暂无设备</div>
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              <div className="grid grid-cols-[1.4fr_1fr_1.4fr_120px_1fr_1.2fr] items-center gap-3 px-3 font-mono text-[10px] uppercase tracking-[0.16em] text-cyan-300/45">
+                <span>SN</span>
+                <span>PRODUCT</span>
+                <span>VERSION</span>
+                <span>STATUS</span>
+                <span>PROGRESS</span>
+                <span>FAIL REASON</span>
+              </div>
+              {rows.map((d) => {
+                const sb = DEVICE_STATUS_BADGE[d.status] ?? { status: 'unknown', label: d.status }
+                return (
+                  <div
+                    key={d.id}
+                    className="grid grid-cols-[1.4fr_1fr_1.4fr_120px_1fr_1.2fr] items-center gap-3 rounded-sm border border-cyan-500/10 bg-cyan-500/[0.02] px-3 py-2"
+                  >
+                    <span className="truncate font-mono text-xs text-cyan-100/85" title={d.deviceSn}>
+                      {d.deviceSn || '—'}
+                    </span>
+                    <span className="truncate font-mono text-[11px] text-cyan-300/70">
+                      {d.productName || d.productType || '—'}
+                    </span>
+                    <span className="truncate font-mono text-[11px] text-cyan-300/70">
+                      {(d.currentVersion || '—') + (d.targetVersion ? ` → ${d.targetVersion}` : '')}
+                    </span>
+                    <StatusBadge status={sb.status} label={sb.label} className="scale-90" />
+                    <div>
+                      <div className="mb-1 flex items-center justify-between font-mono text-[10px] text-cyan-300/55">
+                        <span>{Math.round(d.progress)}%</span>
+                      </div>
+                      <div className="h-1 overflow-hidden rounded-full bg-cyan-500/10">
+                        <div
+                          className="h-full rounded-full bg-cyan-400 transition-all"
+                          style={{
+                            width: `${Math.max(0, Math.min(100, Math.round(d.progress)))}%`,
+                            boxShadow: '0 0 4px #00f0ff',
+                          }}
+                        />
+                      </div>
+                    </div>
+                    {d.failureReason ? (
+                      <span
+                        className="truncate font-mono text-[11px] text-rose-300/85"
+                        title={d.failureDetail || d.failureReason}
+                      >
+                        {d.failureReason}
+                      </span>
+                    ) : (
+                      <span className="font-mono text-[11px] text-cyan-300/40">—</span>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {total > PAGE_SIZE ? (
+            <div className="mt-3 flex items-center justify-between">
+              <span className="font-mono text-[10px] text-cyan-300/55">
+                PAGE {page} / {totalPages}
+              </span>
+              <div className="flex gap-2">
+                <NeonButton onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>
+                  ◂ PREV
+                </NeonButton>
+                <NeonButton
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page >= totalPages}
+                >
+                  NEXT ▸
+                </NeonButton>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function DrawerField({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-cyan-300/45">
+        {label}
+      </div>
+      <div className="mt-1 truncate text-sm text-cyan-100/90">{value}</div>
+    </div>
   )
 }

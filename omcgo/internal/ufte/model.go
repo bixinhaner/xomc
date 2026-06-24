@@ -195,8 +195,12 @@ type DeviceListFilter struct {
 	// 经 productNameLookup 回填）。前端「产品名称」下拉传此参数；与 ProductType(productClass)
 	// 二选一，优先 ProductName。列表与 CSV 导出共用本过滤器，故两条路径同时生效。
 	ProductName string `form:"productName"`
-	Page        int    `form:"page"`
-	PageSize    int    `form:"page_size"`
+	// TaskID #615：按主任务 ID 精确收窄（任务详情抽屉「已选设备列表」用）。
+	// 复用 /ufte/devices 端点 + matchesDeviceFilter，不新增路由；空值 ≡ 原有"全量"行为，
+	// 完全向后兼容。底层来自 upgrade_sub_tasks.task_id（mapDeviceItem 已回填到 DeviceItem.TaskID）。
+	TaskID   string `form:"taskId"`
+	Page     int    `form:"page"`
+	PageSize int    `form:"page_size"`
 }
 
 type DeviceCandidateFilter struct {
