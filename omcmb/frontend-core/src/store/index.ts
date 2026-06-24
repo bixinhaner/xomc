@@ -24,4 +24,4 @@ export {
 export type { SyncSource } from './mmlConsoleStore';
 
 export { useQuickSettingsFeedbackStore, feedbackKey } from './quickSettingsFeedbackStore';
-export type { Feedback, CellFeedback, MultiFeedback } from './quickSettingsFeedbackStore';
+export type { Feedback, CellFeedback, MultiFeedback, QuickSettingsScopedSyncResult, QuickSettingsSyncMonitor } from './quickSettingsFeedbackStore';

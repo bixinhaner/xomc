@@ -756,10 +756,10 @@ func extractStorablePrefixesForStandardPaths(mappings []parammodel.ParamMapping,
 		if !m.IsStorable || !m.IsSupported {
 			continue
 		}
-		if !matchesAnyStandardPath(m.StandardPath, standardPaths) {
+		prefix, ok := scopedPrefixForStandardPaths(m.PrivatePath, m.StandardPath, standardPaths)
+		if !ok {
 			continue
 		}
-		prefix := basePrefix(normalizeSingletonFAPServicePath(m.PrivatePath))
 		if prefix == "" {
 			continue
 		}
@@ -779,13 +779,63 @@ func extractStorablePrefixesForStandardPaths(mappings []parammodel.ParamMapping,
 	return out
 }
 
-func matchesAnyStandardPath(template string, targets []string) bool {
+func scopedPrefixForStandardPaths(privatePath, standardPath string, targets []string) (string, bool) {
 	for _, target := range targets {
-		if standardPathMatches(template, strings.TrimSpace(target)) {
-			return true
+		target = strings.TrimSpace(target)
+		if !standardPathMatches(standardPath, target) {
+			continue
+		}
+		return scopedPrivatePrefixForStandardTarget(privatePath, standardPath, target), true
+	}
+	return "", false
+}
+
+func scopedPrivatePrefixForStandardTarget(privatePath, standardPath, target string) string {
+	privatePath = normalizeSingletonFAPServicePath(privatePath)
+	if target == "" {
+		return ""
+	}
+	if strings.HasSuffix(target, ".") {
+		return basePrefix(instantiatePrivateObjectPrefix(privatePath, standardPath, target))
+	}
+	resolved := instantiatePrivatePathFromStandardTarget(privatePath, standardPath, target)
+	if strings.Contains(resolved, "{i}") {
+		return basePrefix(resolved)
+	}
+	return resolved
+}
+
+func instantiatePrivateObjectPrefix(privatePath, standardPath, targetPrefix string) string {
+	privateParts := strings.Split(strings.TrimSuffix(privatePath, "."), ".")
+	standardParts := strings.Split(strings.TrimSuffix(standardPath, "."), ".")
+	targetParts := strings.Split(strings.TrimSuffix(targetPrefix, "."), ".")
+	if len(targetParts) > len(privateParts) || len(targetParts) > len(standardParts) {
+		return privatePath
+	}
+	out := make([]string, len(targetParts))
+	for i := range targetParts {
+		out[i] = privateParts[i]
+		if standardParts[i] == "{i}" && targetParts[i] != "{i}" {
+			out[i] = targetParts[i]
 		}
 	}
-	return false
+	return strings.Join(out, ".") + "."
+}
+
+func instantiatePrivatePathFromStandardTarget(privatePath, standardPath, target string) string {
+	privateParts := strings.Split(privatePath, ".")
+	standardParts := strings.Split(standardPath, ".")
+	targetParts := strings.Split(target, ".")
+	if len(privateParts) != len(standardParts) || len(standardParts) != len(targetParts) {
+		return privatePath
+	}
+	out := append([]string(nil), privateParts...)
+	for i := range standardParts {
+		if standardParts[i] == "{i}" && targetParts[i] != "{i}" {
+			out[i] = targetParts[i]
+		}
+	}
+	return strings.Join(out, ".")
 }
 
 func standardPathMatches(template, target string) bool {

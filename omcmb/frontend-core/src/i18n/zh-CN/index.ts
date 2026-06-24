@@ -1038,7 +1038,7 @@ const messages: Record<string, string> = {
   'device.paramTree.syncing':             '同步中',
   'device.paramTree.syncPending':         ' · 待处理 {count} 次 GPV 请求',
   'device.paramTree.lastSync':            '上次同步：{time}',
-  'device.paramTree.lastScopedSync':      '上次快速设置同步：{time} · GPV 请求 {gpvCount} 次 · 目标路径 {count} 条',
+  'device.paramTree.lastScopedSync':      '上次快速设置同步：{time} · GPV 请求 {gpvCount} 次 · 耗时 {duration} · 目标路径 {count} 条',
   'device.paramTree.lastSyncGpvSummary':  ' · GPV 请求 {count} 次 · 耗时 {duration}',
   'device.paramTree.syncTotal':           ' · 参数库共 {count} 项',
   'device.paramTree.neverSynced':         '从未同步',

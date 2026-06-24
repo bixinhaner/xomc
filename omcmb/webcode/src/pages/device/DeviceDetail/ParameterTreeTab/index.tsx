@@ -27,11 +27,12 @@ function formatDuration(seconds?: number) {
 
 interface ParameterTreeTabProps {
   deviceId: string;
-  lastScopedSync?: { targetCount: number; gpvTaskCount: number; completedAt?: string } | null;
+  lastScopedSync?: { targetCount: number; gpvTaskCount: number; completedAt?: string; wallClockSeconds?: number } | null;
+  syncBusy?: boolean;
   onFullSyncStarted?: () => void;
 }
 
-export default function ParameterTreeTab({ deviceId, lastScopedSync, onFullSyncStarted }: ParameterTreeTabProps) {
+export default function ParameterTreeTab({ deviceId, lastScopedSync, syncBusy: externalSyncBusy = false, onFullSyncStarted }: ParameterTreeTabProps) {
   const t = useT();
   const { token } = theme.useToken();
   const [selectedPath, setSelectedPath] = useState<string>('');
@@ -73,13 +74,14 @@ export default function ParameterTreeTab({ deviceId, lastScopedSync, onFullSyncS
   const childrenQuery = useDirectChildren(deviceId, selectedPath, page, pageSize);
   const { data: syncStatus, refetch: refetchSyncStatus } = useSyncStatus(deviceId);
   const isSyncing = syncStatus?.status === 'syncing';
-  const isLastScopedSync = Boolean(
-    lastScopedSync?.count && lastScopedSync.completedAt === syncStatus?.lastParamSyncAt,
-  );
 
   // Mutations
   // T-0126: 切换到 useSyncDeviceParams（Path B + reason="manual"），替代旧 useSyncParameters (Path A)
   const syncMutation = useSyncDeviceParams();
+  const syncBusy = externalSyncBusy || isSyncing || syncMutation.isPending;
+  const isLastScopedSync = Boolean(
+    lastScopedSync?.targetCount && lastScopedSync.completedAt === syncStatus?.lastParamSyncAt,
+  );
   const addObjectMutation = useAddObject();
   const deleteObjectMutation = useDeleteObject();
 
@@ -183,6 +185,7 @@ export default function ParameterTreeTab({ deviceId, lastScopedSync, onFullSyncS
                     time: dayjs(syncStatus.lastParamSyncAt).fromNow(),
                     count: lastScopedSync?.targetCount ?? 0,
                     gpvCount: lastScopedSync?.gpvTaskCount ?? 0,
+                    duration: formatDuration(lastScopedSync?.wallClockSeconds) ?? '-',
                   })
                   : t('device.paramTree.lastSync', { time: dayjs(syncStatus.lastParamSyncAt).fromNow() })}
                 {!isLastScopedSync && syncStatus.lastSyncGpv?.taskCount
@@ -202,8 +205,8 @@ export default function ParameterTreeTab({ deviceId, lastScopedSync, onFullSyncS
             <Button
               icon={<SyncOutlined />}
               onClick={handleSync}
-              loading={syncMutation.isPending}
-              disabled={isSyncing}
+              loading={syncMutation.isPending || externalSyncBusy}
+              disabled={syncBusy}
             >
               {t('device.paramTree.syncParams')}
             </Button>

@@ -61,6 +61,9 @@ func initDeviceModule(c *Container) error {
 	// Shared infrastructure
 	connReqClient := connreq.NewClient(c.Redis, logger)
 	stunStore := stun.NewStore(c.Redis, logger)
+	udpSender := connreq.NewUDPSender(stunStore, c.Cfg.ConnReq.SharedSecret, c.Logger)
+	crDispatcher := connreq.NewDispatcher(connReqClient, udpSender, c.Logger)
+	crDispatcher.SetLANPortLookup(newSTUNServerPortLookup(deviceRepo, paramRepo, c.Logger))
 
 	// DeviceService
 	deviceCache := device.NewDeviceCache(c.Redis, logger)
@@ -81,7 +84,7 @@ func initDeviceModule(c *Container) error {
 	if c.ProductRepo != nil {
 		deviceService.SetProductBinder(c.ProductRepo)
 	}
-	deviceService.SetConnectionRequester(connReqClient)
+	deviceService.SetConnectionRequester(&taskCRSender{dispatcher: crDispatcher, serverAddr: c.Cfg.ConnReq.ServerAddr})
 	deviceService.SetStunAddressUpdater(stunStore)
 	deviceMetrics := device.NewDeviceMetrics(c.MetricsReg)
 	deviceService.SetMetrics(deviceMetrics)

@@ -128,6 +128,28 @@ func TestExtractStorablePrefixes_UnsupportedFiltered(t *testing.T) {
 	assert.Equal(t, []string{"Dev.A.Good"}, got)
 }
 
+func TestExtractStorablePrefixesForStandardPaths_KeepsConcreteBSCInstance(t *testing.T) {
+	mappings := []parammodel.ParamMapping{
+		{PrivatePath: "DeviceGSM.Bts.{i}.Band", StandardPath: "DeviceGSM.Bts.{i}.Band", IsStorable: true, IsSupported: true, EntryType: "parameter"},
+		{PrivatePath: "DeviceGSM.Bts.{i}.handover1.target.rxlev.threshold", StandardPath: "DeviceGSM.Bts.{i}.handover1.target.rxlev.threshold", IsStorable: true, IsSupported: true, EntryType: "parameter"},
+		{PrivatePath: "DeviceGSM.Bts.{i}.Trx.{i}.Arfcn", StandardPath: "DeviceGSM.Bts.{i}.Trx.{i}.Arfcn", IsStorable: true, IsSupported: true, EntryType: "parameter"},
+	}
+
+	got := extractStorablePrefixesForStandardPaths(mappings, []string{
+		"DeviceGSM.Bts.255.Band",
+		"DeviceGSM.Bts.255.handover1.target.rxlev.threshold",
+		"DeviceGSM.Bts.255.Trx.{i}.",
+	})
+	sort.Strings(got)
+
+	assert.Equal(t, []string{
+		"DeviceGSM.Bts.255.Band",
+		"DeviceGSM.Bts.255.Trx.",
+		"DeviceGSM.Bts.255.handover1.target.rxlev.threshold",
+	}, got)
+	assert.NotContains(t, got, "DeviceGSM.Bts.")
+}
+
 func TestExtractStorablePrefixes_AllUnsupported_Empty(t *testing.T) {
 	mappings := []parammodel.ParamMapping{
 		{PrivatePath: "Dev.X", IsStorable: true, IsSupported: false},

@@ -15,6 +15,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/storage"
+	"github.com/omcgo/omcgo/internal/netutil"
 	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/pkg/tr069"
 	"github.com/redis/go-redis/v9"
@@ -512,26 +513,28 @@ func (p *BatchInformProcessor) batchRedisOps(ctx context.Context, updates []*inf
 				pipe.Set(ctx, deviceCacheKey(dev.SerialNumber), data, deviceCacheTTL)
 			}
 		}
-
-		// STUN 地址同步
-		if dev.UDPConnectionRequestAddress != "" && p.stunUpdater != nil {
-			// STUN 通过接口更新，不走 pipeline（接口不暴露 pipeline）
-			// 延迟到 pipeline 执行后单独处理
-		}
 	}
 
 	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
 		p.logger.Warn("batch redis pipeline", zap.Error(err))
 	}
 
-	// STUN 地址单独处理（StunAddressUpdater 接口不支持 pipeline）
+	// STUN 地址单独处理（StunAddressUpdater 接口不支持 pipeline）。
+	// 注意：UDPConnectionRequestAddress 可能是 DB 里残留的脏值（历史派生兜底写入）。
+	// 这里必须用与 prepareDeviceUpdate 同口径的 unspecified 守卫，否则 0.0.0.0
+	// 或派生的 host:port 会被反复刷回 Redis acs:stun:<SN>，污染 dispatcher。
 	for _, u := range updates {
 		dev := u.device
-		if dev.UDPConnectionRequestAddress != "" && p.stunUpdater != nil {
-			if err := p.stunUpdater.SetFromInform(ctx, dev.SerialNumber, dev.UDPConnectionRequestAddress); err != nil {
-				p.logger.Warn("batch stun address sync",
-					zap.String("device_sn", dev.SerialNumber), zap.Error(err))
-			}
+		if p.stunUpdater == nil {
+			continue
+		}
+		addr := dev.UDPConnectionRequestAddress
+		if addr == "" || netutil.IsUnspecifiedUDPAddress(addr) {
+			continue
+		}
+		if err := p.stunUpdater.SetFromInform(ctx, dev.SerialNumber, addr); err != nil {
+			p.logger.Warn("batch stun address sync",
+				zap.String("device_sn", dev.SerialNumber), zap.Error(err))
 		}
 	}
 }
@@ -556,13 +559,18 @@ func prepareDeviceUpdate(device *model.Device, inform *tr069.InformMessage) ([]m
 	// 此前批处理路径漏掉这一步，导致已上线 7+ 小时的 TR-069 设备 ip_address 仍为空。
 	device.IPAddress = deriveInformIPAddress("", device.ConnectionRequestURL)
 
-	udpAddr := findParamValue(inform.ParameterList, "Device.ManagementServer.UDPConnectionRequestAddress")
+	udpAddr := deriveUDPConnectionRequestAddress(inform.ParameterList)
 	stunChanged := false
 	if udpAddr != "" {
-		device.IPAddress = udpAddr
+		device.IPAddress = deriveInformIPAddress(udpAddr, device.ConnectionRequestURL)
 		device.UDPConnectionRequestAddress = udpAddr
 		device.NatDetected = true
 		stunChanged = true
+	} else {
+		// 与 DeviceService.UpdateFromInform 同步：本次 Inform 未上报有效 UDP 地址 →
+		// 清空残留脏值，避免 batchRedisOps 把 cache/DB 老值刷回 Redis acs:stun:<SN>。
+		device.UDPConnectionRequestAddress = ""
+		device.NatDetected = false
 	}
 
 	// T-0162: 收到 Inform 即视为在线 —— 必须显式写新字段 IsOnline，因为

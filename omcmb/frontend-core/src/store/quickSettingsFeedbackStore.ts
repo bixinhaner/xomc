@@ -35,6 +35,22 @@ export interface MultiFeedback {
 
 export type Feedback = CellFeedback | MultiFeedback;
 
+export interface QuickSettingsSyncMonitor {
+  sourceId?: string;
+  lastParamSyncAt?: string;
+  lastParamSyncFailedAt?: string;
+  targetCount: number;
+  gpvTaskCount: number;
+  startedAt: number;
+}
+
+export interface QuickSettingsScopedSyncResult {
+  targetCount: number;
+  gpvTaskCount: number;
+  completedAt?: string;
+  wallClockSeconds?: number;
+}
+
 export type QuickSettingsDraftValue =
   | string
   | number
@@ -68,6 +84,8 @@ interface FeedbackState {
    * 整体重挂载，让 form.touched / rowEdits 等组件内 state 全部归零，回到 schema 服务器值。
    */
   refreshTicks: Record<string, number>;
+  quickSettingsSyncs: Record<string, QuickSettingsSyncMonitor>;
+  lastScopedSyncs: Record<string, QuickSettingsScopedSyncResult>;
 
   setFeedback: (key: string, feedback: Feedback) => void;
   patchFeedback: (key: string, patch: Partial<Feedback>) => void;
@@ -82,6 +100,10 @@ interface FeedbackState {
   clearDraftPrefix: (key: string, prefix: string) => void;
 
   bumpRefreshTick: (deviceId: string) => void;
+  startQuickSettingsSync: (deviceId: string, sync: QuickSettingsSyncMonitor) => void;
+  patchQuickSettingsSync: (deviceId: string, patch: Partial<QuickSettingsSyncMonitor>) => void;
+  finishQuickSettingsSync: (deviceId: string, result?: QuickSettingsScopedSyncResult) => void;
+  clearLastScopedSync: (deviceId: string) => void;
 }
 
 export const useQuickSettingsFeedbackStore = create<FeedbackState>()(
@@ -90,6 +112,8 @@ export const useQuickSettingsFeedbackStore = create<FeedbackState>()(
       entries: {},
       drafts: {},
       refreshTicks: {},
+      quickSettingsSyncs: {},
+      lastScopedSyncs: {},
 
       setFeedback: (key, feedback) => {
         set({ entries: { ...get().entries, [key]: feedback } });
@@ -145,10 +169,48 @@ export const useQuickSettingsFeedbackStore = create<FeedbackState>()(
         const cur = get().refreshTicks[deviceId] ?? 0;
         set({ refreshTicks: { ...get().refreshTicks, [deviceId]: cur + 1 } });
       },
+
+      startQuickSettingsSync: (deviceId, sync) => {
+        set({
+          quickSettingsSyncs: { ...get().quickSettingsSyncs, [deviceId]: sync },
+        });
+      },
+
+      patchQuickSettingsSync: (deviceId, patch) => {
+        const cur = get().quickSettingsSyncs[deviceId];
+        if (!cur) return;
+        set({ quickSettingsSyncs: { ...get().quickSettingsSyncs, [deviceId]: { ...cur, ...patch } } });
+      },
+
+      finishQuickSettingsSync: (deviceId, result) => {
+        const nextSyncs = { ...get().quickSettingsSyncs };
+        delete nextSyncs[deviceId];
+        const nextLast = { ...get().lastScopedSyncs };
+        if (result?.targetCount) {
+          nextLast[deviceId] = result;
+        }
+        set({ quickSettingsSyncs: nextSyncs, lastScopedSyncs: nextLast });
+      },
+
+      clearLastScopedSync: (deviceId) => {
+        const next = { ...get().lastScopedSyncs };
+        delete next[deviceId];
+        set({ lastScopedSyncs: next });
+      },
     }),
     {
       name: 'omc-quicksettings-feedback',
       storage: createJSONStorage(() => sessionStorage),
+      // quickSettingsSyncs 是"正在运行的任务监控"，刷新页面后这些 monitor 已失效；
+      // 让 QuickSettingsSyncWatcher 重水合时拿到 startedAt 远早于实际终态时间戳，
+      // 会按时钟容差误判一次 success → 弹无关 toast。partialize 显式排除该字段，
+      // 让它只在内存中存在；其它字段（entries/drafts/refreshTicks/lastScopedSyncs）继续持久化。
+      partialize: (state) => ({
+        entries: state.entries,
+        drafts: state.drafts,
+        refreshTicks: state.refreshTicks,
+        lastScopedSyncs: state.lastScopedSyncs,
+      }),
     },
   ),
 );
