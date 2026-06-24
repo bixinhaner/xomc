@@ -7,6 +7,7 @@ import { NeonButton } from '@/components/ui/NeonButton'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { formatTime } from '@/lib/format'
 import { useMRFileDevices, useBatchDeleteMRFiles } from '@core/hooks/api/useMR'
+import { useProductList } from '@core/hooks/api/useProducts'
 import type { MRFileDeviceItem } from '@core/services/api/mrApi'
 
 const PAGE_SIZE = 20
@@ -20,7 +21,8 @@ export default function Files() {
   const [page, setPage] = useState(1)
   const [keyword, setKeyword] = useState('')
   const [siteName, setSiteName] = useState('')
-  const [productClass, setProductClass] = useState('')
+  // #602：产品名称下拉过滤，传 product.id
+  const [productId, setProductId] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
 
   const params = useMemo(
@@ -29,12 +31,27 @@ export default function Files() {
       pageSize: PAGE_SIZE,
       keyword: keyword.trim() || undefined,
       siteName: siteName.trim() || undefined,
-      productClass: productClass.trim() || undefined,
+      productId: productId || undefined,
     }),
-    [page, keyword, siteName, productClass],
+    [page, keyword, siteName, productId],
   )
   const { data, isLoading, isError, error, isFetching, refetch } = useMRFileDevices(params)
   const batchDelete = useBatchDeleteMRFiles()
+  const { data: productsData } = useProductList()
+  const productNameOptions = useMemo(
+    () =>
+      (productsData?.items ?? [])
+        .map((p) => ({ label: `${p.name} (${p.tech})`, value: p.id }))
+        .sort((a, b) => a.label.localeCompare(b.label, 'zh-CN')),
+    [productsData]
+  )
+  const productNameByPattern = useMemo(() => {
+    const map = new Map<string, string>()
+    ;(productsData?.items ?? []).forEach((p) => {
+      ;(p.patterns ?? []).forEach((pat) => map.set(pat, p.name))
+    })
+    return map
+  }, [productsData])
 
   const rows = data?.items ?? []
   const total = data?.total ?? 0
@@ -72,7 +89,16 @@ export default function Files() {
         <>
           <SearchBox placeholder="设备 SN" value={keyword} onChange={(v) => { setKeyword(v); setPage(1) }} />
           <SearchBox placeholder="基站名称" value={siteName} onChange={(v) => { setSiteName(v); setPage(1) }} />
-          <SearchBox placeholder="产品类" value={productClass} onChange={(v) => { setProductClass(v); setPage(1) }} />
+          <select
+            className="neon-input w-48"
+            value={productId}
+            onChange={(e) => { setProductId(e.target.value); setPage(1) }}
+          >
+            <option value="">产品名称 · 全部</option>
+            {productNameOptions.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
           <NeonButton
             tone="danger"
             icon={<Trash2 />}
@@ -133,8 +159,14 @@ export default function Files() {
                   </div>
                 </button>
                 <div className="min-w-0">
-                  <div className="truncate text-xs text-cyan-100/80">{d.productClass || '—'}</div>
-                  <div className="font-mono text-[10px] text-cyan-300/55">PRODUCT CLASS</div>
+                  <div className="truncate text-xs text-cyan-100/80">
+                    {(() => {
+                      const raw = d.productClass || ''
+                      if (!raw) return '—'
+                      return productNameByPattern.get(raw) ?? raw
+                    })()}
+                  </div>
+                  <div className="font-mono text-[10px] text-cyan-300/55">PRODUCT NAME</div>
                 </div>
                 <div>
                   <div

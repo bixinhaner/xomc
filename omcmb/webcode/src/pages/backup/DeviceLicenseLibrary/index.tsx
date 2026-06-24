@@ -6,7 +6,7 @@
  * 只支持手动导入（无自动 promote）。
  */
 import { useMemo, useState } from 'react';
-import { Button, Card, Input, Space, message, Modal } from 'antd';
+import { Button, Card, Input, Select, Space, message, Modal } from 'antd';
 import {
   PlusOutlined,
   DownloadOutlined,
@@ -20,6 +20,7 @@ import {
   useDeviceLicenses,
   useBatchDeleteDeviceLicenses,
 } from '@core/hooks/api/useDeviceLicense';
+import { useProductList } from '@core/hooks/api/useProducts';
 import type { DeviceLicense } from '@core/services/api/deviceLicenseApi';
 import { deviceLicenseApi } from '@core/services/api/deviceLicenseApi';
 import { useBatchDownloadWithMessage } from '@/hooks/useBatchDownloadWithMessage';
@@ -32,7 +33,8 @@ export default function DeviceLicenseLibraryPage() {
   const [pageSize, setPageSize] = useState(20);
   const [serialFilter, setSerialFilter] = useState('');
   const [enbFilter, setEnbFilter] = useState('');
-  const [productFilter, setProductFilter] = useState('');
+  // #602：按产品名称下拉过滤
+  const [productId, setProductId] = useState('');
   const [importOpen, setImportOpen] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
   const bundle = useBatchDownloadWithMessage();
@@ -50,13 +52,27 @@ export default function DeviceLicenseLibraryPage() {
       pageSize,
       serialNumber: serialFilter || undefined,
       enbName: enbFilter || undefined,
-      productType: productFilter || undefined,
+      productId: productId || undefined,
     }),
-    [page, pageSize, serialFilter, enbFilter, productFilter],
+    [page, pageSize, serialFilter, enbFilter, productId],
   );
 
   const { data, isLoading, refetch } = useDeviceLicenses(queryParams);
   const batchDelete = useBatchDeleteDeviceLicenses();
+  const { data: productsData } = useProductList();
+  const productNameOptions = useMemo(
+    () => (productsData?.items ?? [])
+      .map((p) => ({ label: `${p.name} (${p.tech})`, value: p.id }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'zh-CN')),
+    [productsData],
+  );
+  const productNameByPattern = useMemo(() => {
+    const map = new Map<string, string>();
+    (productsData?.items ?? []).forEach((p) => {
+      (p.patterns ?? []).forEach((pat) => map.set(pat, p.name));
+    });
+    return map;
+  }, [productsData]);
 
   const columns: DataTableColumn<DeviceLicense>[] = [
     { key: 'serialNumber', title: t('transfer.fileLib.col.serialNumber'), dataIndex: 'serialNumber', width: 200, copyable: true, mono: true },
@@ -72,7 +88,12 @@ export default function DeviceLicenseLibraryPage() {
       title: t('transfer.fileLib.col.productType'),
       dataIndex: 'productType',
       width: 160,
-      render: (v) => (v ? String(v) : <span style={{ color: '#999' }}>—</span>),
+      render: (v) => {
+        const raw = v ? String(v) : '';
+        const name = raw ? productNameByPattern.get(raw) : undefined;
+        if (name) return name;
+        return raw ? raw : <span style={{ color: '#999' }}>—</span>;
+      },
     },
     { key: 'fileName', title: t('transfer.fileLib.col.licenseFile'), dataIndex: 'fileName', width: 260, mono: true },
     {
@@ -171,12 +192,15 @@ export default function DeviceLicenseLibraryPage() {
             onChange={(e) => setEnbFilter(e.target.value)}
             style={{ width: 180 }}
           />
-          <Input
-            placeholder={t('transfer.fileLib.filter.productType')}
+          <Select<string>
+            showSearch
             allowClear
-            value={productFilter}
-            onChange={(e) => setProductFilter(e.target.value)}
-            style={{ width: 180 }}
+            optionFilterProp="label"
+            placeholder={t('transfer.fileLib.filter.productType')}
+            value={productId || undefined}
+            onChange={(v) => setProductId(v ?? '')}
+            options={productNameOptions}
+            style={{ width: 220 }}
           />
           <Button icon={<ReloadOutlined />} onClick={() => refetch()}>{t('transfer.fileLib.action.refresh')}</Button>
         </Space>

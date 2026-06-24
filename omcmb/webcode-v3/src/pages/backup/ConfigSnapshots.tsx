@@ -19,6 +19,7 @@ import {
   useConfigSnapshots,
   useBatchDeleteConfigSnapshots,
 } from '@core/hooks/api/useConfigSnapshot'
+import { useProductList } from '@core/hooks/api/useProducts'
 import {
   configSnapshotApi,
   type ConfigSnapshot,
@@ -59,6 +60,8 @@ function formatTime(iso?: string): string {
 export default function ConfigSnapshotLibraryPage() {
   const [page, setPage] = useState(1)
   const [serialNumber, setSerialNumber] = useState('')
+  // #602：产品名称下拉过滤，传 product.id
+  const [productId, setProductId] = useState('')
   const [sourceFilter, setSourceFilter] = useState<SnapshotSource | ''>('')
 
   const params = useMemo(
@@ -66,13 +69,29 @@ export default function ConfigSnapshotLibraryPage() {
       page,
       pageSize: PAGE_SIZE,
       ...(serialNumber.trim() ? { serialNumber: serialNumber.trim() } : {}),
+      ...(productId ? { productId } : {}),
       ...(sourceFilter ? { source: sourceFilter } : {}),
     }),
-    [page, serialNumber, sourceFilter]
+    [page, serialNumber, productId, sourceFilter]
   )
 
   const query = useConfigSnapshots(params)
   const batchDelete = useBatchDeleteConfigSnapshots()
+  const { data: productsData } = useProductList()
+  const productNameOptions = useMemo(
+    () =>
+      (productsData?.items ?? [])
+        .map((p) => ({ label: `${p.name} (${p.tech})`, value: p.id }))
+        .sort((a, b) => a.label.localeCompare(b.label, 'zh-CN')),
+    [productsData]
+  )
+  const productNameByPattern = useMemo(() => {
+    const map = new Map<string, string>()
+    ;(productsData?.items ?? []).forEach((p) => {
+      ;(p.patterns ?? []).forEach((pat) => map.set(pat, p.name))
+    })
+    return map
+  }, [productsData])
 
   const items = query.data?.items ?? []
   const total = query.data?.total ?? 0
@@ -179,6 +198,16 @@ export default function ConfigSnapshotLibraryPage() {
             }}
           />
         </div>
+        <select
+          className="neon-input w-56"
+          value={productId}
+          onChange={(e) => { setProductId(e.target.value); setPage(1) }}
+        >
+          <option value="">产品名称 · 全部</option>
+          {productNameOptions.map((opt) => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          ))}
+        </select>
         {sourceOptions.map((s) => (
           <button
             key={s || 'all'}
@@ -264,7 +293,12 @@ export default function ConfigSnapshotLibraryPage() {
                     </div>
                     <div className="truncate font-mono text-[10px] text-cyan-300/55">
                       {s.enbName || '—'}
-                      {s.productType ? ` · ${s.productType}` : ''}
+                      {(() => {
+                        const raw = s.productType || ''
+                        if (!raw) return ''
+                        const name = productNameByPattern.get(raw) ?? raw
+                        return ` · ${name}`
+                      })()}
                     </div>
                   </div>
                   <div className="min-w-0 font-mono text-[11px] text-cyan-200/85">

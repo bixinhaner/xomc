@@ -35,6 +35,7 @@ import {
   useConfigSnapshots,
   useBatchDeleteConfigSnapshots,
 } from '@core/hooks/api/useConfigSnapshot'
+import { useProductList } from '@core/hooks/api/useProducts'
 import {
   configSnapshotApi,
   type ConfigSnapshot,
@@ -67,7 +68,8 @@ export default function ConfigSnapshotLibrary() {
   const [pageSize] = useState(20)
   const [serialFilter, setSerialFilter] = useState('')
   const [enbFilter, setEnbFilter] = useState('')
-  const [productFilter, setProductFilter] = useState('')
+  // #602：产品名称下拉过滤，传 product.id。
+  const [productId, setProductId] = useState('')
   const [sourceFilter, setSourceFilter] = useState<SnapshotSource | ''>('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [confirmDelete, setConfirmDelete] = useState<string[] | null>(null)
@@ -79,21 +81,36 @@ export default function ConfigSnapshotLibrary() {
       pageSize,
       ...(serialFilter ? { serialNumber: serialFilter } : {}),
       ...(enbFilter ? { enbName: enbFilter } : {}),
-      ...(productFilter ? { productType: productFilter } : {}),
+      ...(productId ? { productId } : {}),
       ...(sourceFilter ? { source: sourceFilter } : {}),
     }),
-    [page, pageSize, serialFilter, enbFilter, productFilter, sourceFilter]
+    [page, pageSize, serialFilter, enbFilter, productId, sourceFilter]
   )
 
   const { data, isLoading, isError, error, isFetching, refetch } =
     useConfigSnapshots(params)
   const batchDelete = useBatchDeleteConfigSnapshots()
+  const { data: productsData } = useProductList()
+  const productNameOptions = useMemo(
+    () =>
+      (productsData?.items ?? [])
+        .map((p) => ({ label: `${p.name} (${p.tech})`, value: p.id }))
+        .sort((a, b) => a.label.localeCompare(b.label, 'zh-CN')),
+    [productsData]
+  )
+  const productNameByPattern = useMemo(() => {
+    const map = new Map<string, string>()
+    ;(productsData?.items ?? []).forEach((p) => {
+      ;(p.patterns ?? []).forEach((pat) => map.set(pat, p.name))
+    })
+    return map
+  }, [productsData])
 
   const rows = data?.items ?? []
   const total = data?.total ?? 0
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
-  const cols = ['', 'SN', '基站名', '产品型号', '快照文件', '大小', '来源', '更新时间', '操作']
+  const cols = ['', 'SN', '基站名', '产品名称', '快照文件', '大小', '来源', '更新时间', '操作']
 
   const flash = (kind: 'ok' | 'err', msg: string) => {
     setToast({ kind, msg })
@@ -124,13 +141,13 @@ export default function ConfigSnapshotLibrary() {
   const resetFilters = () => {
     setSerialFilter('')
     setEnbFilter('')
-    setProductFilter('')
+    setProductId('')
     setSourceFilter('')
     setPage(1)
   }
 
   const hasFilter =
-    Boolean(serialFilter || enbFilter || productFilter || sourceFilter)
+    Boolean(serialFilter || enbFilter || productId || sourceFilter)
 
   const handleDownload = async (sn: string) => {
     try {
@@ -190,15 +207,25 @@ export default function ConfigSnapshotLibrary() {
               setPage(1)
             }}
           />
-          <Input
-            className="w-40"
-            placeholder="产品型号"
-            value={productFilter}
-            onChange={(e) => {
-              setProductFilter(e.target.value)
+          <Select
+            value={productId || 'all'}
+            onValueChange={(v) => {
+              setProductId(v === 'all' ? '' : v)
               setPage(1)
             }}
-          />
+          >
+            <SelectTrigger className="w-48">
+              <SelectValue placeholder="产品名称" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部产品</SelectItem>
+              {productNameOptions.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>
+                  {opt.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Select
             value={sourceFilter || 'all'}
             onValueChange={(v) => {
@@ -316,7 +343,13 @@ export default function ConfigSnapshotLibrary() {
                   </TableCell>
                   <TableCell className="font-mono text-xs">{r.serialNumber}</TableCell>
                   <TableCell className="text-xs">{r.enbName || '—'}</TableCell>
-                  <TableCell className="text-xs">{r.productType || '—'}</TableCell>
+                  <TableCell className="text-xs">
+                    {(() => {
+                      const raw = r.productType || ''
+                      if (!raw) return '—'
+                      return productNameByPattern.get(raw) ?? raw
+                    })()}
+                  </TableCell>
                   <TableCell
                     className="max-w-[16rem] truncate font-mono text-xs"
                     title={r.fileName}

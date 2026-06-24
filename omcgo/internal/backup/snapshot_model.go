@@ -81,7 +81,8 @@ type ConfigSnapshot struct {
 type SnapshotFilter struct {
 	SerialNumber   string          // 模糊匹配（ILIKE）
 	EnbName        string          // 模糊匹配
-	ProductType    string          // 精确匹配
+	ProductType    string          // 精确匹配（向后兼容；与 ProductTypes 互斥优先后者）
+	ProductTypes   []string        // 多值精确匹配（IN），用于按产品名称下拉过滤时把 product_id 解析为该产品全部 patterns
 	Source         *SnapshotSource // 可选
 	UpdatedAfter   *time.Time
 	UpdatedBefore  *time.Time

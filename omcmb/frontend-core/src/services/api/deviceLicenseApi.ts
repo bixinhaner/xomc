@@ -103,6 +103,8 @@ export interface LicenseListParams extends PageRequest {
   serialNumber?: string;
   enbName?: string;
   productType?: string;
+  /** #602：按产品名称下拉过滤，传 product.id。 */
+  productId?: string;
   updatedAfter?: string;
   updatedBefore?: string;
 }
@@ -183,6 +185,7 @@ export const deviceLicenseApi = {
     if (params.serialNumber) query.serial_number = params.serialNumber;
     if (params.enbName) query.enb_name = params.enbName;
     if (params.productType) query.product_type = params.productType;
+    if (params.productId) query.product_id = params.productId;
     if (params.updatedAfter) query.updated_after = params.updatedAfter;
     if (params.updatedBefore) query.updated_before = params.updatedBefore;
 

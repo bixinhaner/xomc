@@ -106,6 +106,8 @@ export interface SnapshotListParams extends PageRequest {
   serialNumber?: string;
   enbName?: string;
   productType?: string;
+  /** #602：按产品名称下拉过滤，传 product.id；后端按产品 patterns 展开成 product_type IN (...)。 */
+  productId?: string;
   source?: SnapshotSource;
   updatedAfter?: string;
   updatedBefore?: string;
@@ -190,6 +192,7 @@ export const configSnapshotApi = {
     if (params.serialNumber) query.serial_number = params.serialNumber;
     if (params.enbName) query.enb_name = params.enbName;
     if (params.productType) query.product_type = params.productType;
+    if (params.productId) query.product_id = params.productId;
     if (params.source) query.source = params.source;
     if (params.updatedAfter) query.updated_after = params.updatedAfter;
     if (params.updatedBefore) query.updated_before = params.updatedBefore;

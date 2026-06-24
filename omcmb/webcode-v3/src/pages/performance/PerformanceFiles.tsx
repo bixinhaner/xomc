@@ -7,6 +7,7 @@ import { NeonButton } from '@/components/ui/NeonButton'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { formatTime } from '@/lib/format'
 import { usePMFileDevices, useBatchDeletePMFiles } from '@core/hooks/api/usePerformance'
+import { useProductList } from '@core/hooks/api/useProducts'
 import type { PMFileDeviceItem } from '@core/services/api/pmApi'
 
 /**
@@ -20,15 +21,37 @@ const PAGE_SIZE = 20
 export default function PerformanceFiles() {
   const [page, setPage] = useState(1)
   const [keyword, setKeyword] = useState('')
+  // #602：产品名称下拉过滤，传 product.id
+  const [productId, setProductId] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
 
   const params = useMemo(
-    () => ({ page, pageSize: PAGE_SIZE, ...(keyword.trim() ? { keyword: keyword.trim() } : {}) }),
-    [page, keyword],
+    () => ({
+      page,
+      pageSize: PAGE_SIZE,
+      ...(keyword.trim() ? { keyword: keyword.trim() } : {}),
+      ...(productId ? { productId } : {}),
+    }),
+    [page, keyword, productId],
   )
 
   const { data, isLoading, isError, error, isFetching, refetch } = usePMFileDevices(params)
   const batchDelete = useBatchDeletePMFiles()
+  const { data: productsData } = useProductList()
+  const productNameOptions = useMemo(
+    () =>
+      (productsData?.items ?? [])
+        .map((p) => ({ label: `${p.name} (${p.tech})`, value: p.id }))
+        .sort((a, b) => a.label.localeCompare(b.label, 'zh-CN')),
+    [productsData]
+  )
+  const productNameByPattern = useMemo(() => {
+    const map = new Map<string, string>()
+    ;(productsData?.items ?? []).forEach((p) => {
+      ;(p.patterns ?? []).forEach((pat) => map.set(pat, p.name))
+    })
+    return map
+  }, [productsData])
 
   const rows: PMFileDeviceItem[] = data?.items ?? []
   const total = data?.total ?? 0
@@ -88,6 +111,16 @@ export default function PerformanceFiles() {
               }}
             />
           </div>
+          <select
+            className="neon-input w-56"
+            value={productId}
+            onChange={(e) => { setProductId(e.target.value); setPage(1) }}
+          >
+            <option value="">产品名称 · 全部</option>
+            {productNameOptions.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
           <NeonButton icon={<RefreshCcw />} onClick={() => refetch()}>
             REFRESH
           </NeonButton>
@@ -120,7 +153,7 @@ export default function PerformanceFiles() {
             <input type="checkbox" checked={allSelected} onChange={toggleAll} className="accent-cyan-400" aria-label="select all" />
             <span>SN · 序列号</span>
             <span>SITE · 基站名</span>
-            <span>PRODUCT · 产品</span>
+            <span>PRODUCT NAME · 产品名称</span>
             <span className="text-right">FILES</span>
             <span>LAST COLLECT</span>
             <span>STATUS</span>
@@ -158,7 +191,11 @@ export default function PerformanceFiles() {
                     {r.siteName || '—'}
                   </span>
                   <span className="truncate font-mono text-[11px] text-cyan-300/70" title={r.productClass}>
-                    {r.productClass || '—'}
+                    {(() => {
+                      const raw = r.productClass || ''
+                      if (!raw) return '—'
+                      return productNameByPattern.get(raw) ?? raw
+                    })()}
                   </span>
                   <span className="text-right font-display text-sm font-bold text-cyan-200">
                     {(r.fileCount ?? 0).toLocaleString()}

@@ -179,7 +179,9 @@ func (r *PgSnapshotRepository) List(
 		if filter.EnbName != "" {
 			q = q.Where(sq.ILike{"enb_name": "%" + filter.EnbName + "%"})
 		}
-		if filter.ProductType != "" {
+		if len(filter.ProductTypes) > 0 {
+			q = q.Where(sq.Eq{"product_type": filter.ProductTypes})
+		} else if filter.ProductType != "" {
 			q = q.Where(sq.Eq{"product_type": filter.ProductType})
 		}
 		if filter.Source != nil {

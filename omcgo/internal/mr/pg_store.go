@@ -123,7 +123,14 @@ func (s *PgMRStore) ListFileDeviceAggregates(ctx context.Context, filter MRFileD
 		args = append(args, "%"+*filter.SiteName+"%")
 		wherePieces = append(wherePieces, fmt.Sprintf("d.site_name ILIKE $%d", len(args)))
 	}
-	if filter.ProductClass != nil && *filter.ProductClass != "" {
+	if len(filter.ProductClasses) > 0 {
+		placeholders := make([]string, 0, len(filter.ProductClasses))
+		for _, pc := range filter.ProductClasses {
+			args = append(args, pc)
+			placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)))
+		}
+		wherePieces = append(wherePieces, "d.product_class IN ("+strings.Join(placeholders, ",")+")")
+	} else if filter.ProductClass != nil && *filter.ProductClass != "" {
 		args = append(args, "%"+*filter.ProductClass+"%")
 		wherePieces = append(wherePieces, fmt.Sprintf("d.product_class ILIKE $%d", len(args)))
 	}

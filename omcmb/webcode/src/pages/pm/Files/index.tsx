@@ -8,7 +8,7 @@
  * 判定，PM 无 MR 那样的订阅任务表。
  */
 import { useMemo, useState } from 'react';
-import { Badge, Button, Card, Input, Modal, Space, message } from 'antd';
+import { Badge, Button, Card, Input, Modal, Select, Space, message } from 'antd';
 import { DeleteOutlined, DownloadOutlined, ReloadOutlined } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
@@ -17,6 +17,7 @@ import {
   useBatchDeletePMFiles,
   usePMFileDevices,
 } from '@core/hooks/api/usePerformance';
+import { useProductList } from '@core/hooks/api/useProducts';
 import { useBatchDownloadWithMessage } from '@/hooks/useBatchDownloadWithMessage';
 import type { PMFileDeviceItem } from '@core/services/api/pmApi';
 import DeviceFilesDrawer from './DeviceFilesDrawer';
@@ -33,7 +34,8 @@ export default function PMFilesPage({ embedded }: Props) {
   const [pageSize, setPageSize] = useState(20);
   const [keyword, setKeyword] = useState('');
   const [siteName, setSiteName] = useState('');
-  const [productClass, setProductClass] = useState('');
+  // #602：产品名称下拉过滤，传 product.id。
+  const [productId, setProductId] = useState('');
   const [activeDevice, setActiveDevice] = useState<PMFileDeviceItem | null>(null);
 
   const params = useMemo(
@@ -42,11 +44,25 @@ export default function PMFilesPage({ embedded }: Props) {
       pageSize,
       keyword: keyword || undefined,
       siteName: siteName || undefined,
-      productClass: productClass || undefined,
+      productId: productId || undefined,
     }),
-    [page, pageSize, keyword, siteName, productClass],
+    [page, pageSize, keyword, siteName, productId],
   );
   const { data, isLoading, refetch } = usePMFileDevices(params);
+  const { data: productsData } = useProductList();
+  const productNameOptions = useMemo(
+    () => (productsData?.items ?? [])
+      .map((p) => ({ label: `${p.name} (${p.tech})`, value: p.id }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'zh-CN')),
+    [productsData],
+  );
+  const productNameByPattern = useMemo(() => {
+    const map = new Map<string, string>();
+    (productsData?.items ?? []).forEach((p) => {
+      (p.patterns ?? []).forEach((pat) => map.set(pat, p.name));
+    });
+    return map;
+  }, [productsData]);
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
   const bundle = useBatchDownloadWithMessage();
   const batchDelete = useBatchDeletePMFiles();
@@ -120,7 +136,11 @@ export default function PMFilesPage({ embedded }: Props) {
         dataIndex: 'productClass',
         width: 160,
         ellipsis: true,
-        render: (v) => (v ? String(v) : '—'),
+        render: (v) => {
+          const raw = v ? String(v) : '';
+          if (!raw) return '—';
+          return productNameByPattern.get(raw) ?? raw;
+        },
       },
       {
         // 测量周期目前是固定值：CPE 默认 PM 上传间隔 900s = 15 分钟（worker
@@ -167,7 +187,7 @@ export default function PMFilesPage({ embedded }: Props) {
           ),
       },
     ],
-    [t],
+    [t, productNameByPattern],
   );
 
   const body = (
@@ -194,15 +214,18 @@ export default function PMFilesPage({ embedded }: Props) {
               setPage(1);
             }}
           />
-          <Input
+          <Select<string>
+            showSearch
             allowClear
+            optionFilterProp="label"
             placeholder={t('pm.searchProductClass')}
-            style={{ width: 180 }}
-            value={productClass}
-            onChange={(e) => {
-              setProductClass(e.target.value);
+            style={{ width: 220 }}
+            value={productId || undefined}
+            onChange={(v) => {
+              setProductId(v ?? '');
               setPage(1);
             }}
+            options={productNameOptions}
           />
           <Button icon={<ReloadOutlined />} onClick={() => void refetch()}>
             {t('transfer.fileLib.action.refresh')}

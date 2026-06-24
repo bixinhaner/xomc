@@ -22,6 +22,7 @@ import {
   useConfigSnapshots,
   useBatchDeleteConfigSnapshots,
 } from '@core/hooks/api/useConfigSnapshot';
+import { useProductList } from '@core/hooks/api/useProducts';
 import type {
   ConfigSnapshot,
   SnapshotSource,
@@ -43,7 +44,8 @@ export default function ConfigSnapshotLibraryPage() {
   const [pageSize, setPageSize] = useState(20);
   const [serialFilter, setSerialFilter] = useState('');
   const [enbFilter, setEnbFilter] = useState('');
-  const [productFilter, setProductFilter] = useState('');
+  // #602：按产品名称下拉过滤，后端按 product.id 展开 patterns IN (...)。
+  const [productId, setProductId] = useState('');
   const [sourceFilter, setSourceFilter] = useState<SnapshotSource | ''>('');
   const [importOpen, setImportOpen] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
@@ -62,14 +64,29 @@ export default function ConfigSnapshotLibraryPage() {
       pageSize,
       serialNumber: serialFilter || undefined,
       enbName: enbFilter || undefined,
-      productType: productFilter || undefined,
+      productId: productId || undefined,
       source: sourceFilter || undefined,
     }),
-    [page, pageSize, serialFilter, enbFilter, productFilter, sourceFilter],
+    [page, pageSize, serialFilter, enbFilter, productId, sourceFilter],
   );
 
   const { data, isLoading, refetch } = useConfigSnapshots(queryParams);
   const batchDelete = useBatchDeleteConfigSnapshots();
+  // #602：产品名称下拉 + pattern → 产品名反查，列表列以名称展示。
+  const { data: productsData } = useProductList();
+  const productNameOptions = useMemo(
+    () => (productsData?.items ?? [])
+      .map((p) => ({ label: `${p.name} (${p.tech})`, value: p.id }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'zh-CN')),
+    [productsData],
+  );
+  const productNameByPattern = useMemo(() => {
+    const map = new Map<string, string>();
+    (productsData?.items ?? []).forEach((p) => {
+      (p.patterns ?? []).forEach((pat) => map.set(pat, p.name));
+    });
+    return map;
+  }, [productsData]);
 
   const columns: DataTableColumn<ConfigSnapshot>[] = [
     { key: 'serialNumber', title: t('transfer.fileLib.col.serialNumber'), dataIndex: 'serialNumber', width: 200, copyable: true, mono: true },
@@ -85,7 +102,12 @@ export default function ConfigSnapshotLibraryPage() {
       title: t('transfer.fileLib.col.productType'),
       dataIndex: 'productType',
       width: 160,
-      render: (v) => (v ? String(v) : <span style={{ color: '#999' }}>—</span>),
+      render: (v) => {
+        const raw = v ? String(v) : '';
+        const name = raw ? productNameByPattern.get(raw) : undefined;
+        if (name) return name;
+        return raw ? raw : <span style={{ color: '#999' }}>—</span>;
+      },
     },
     { key: 'fileName', title: t('transfer.fileLib.col.snapshotFile'), dataIndex: 'fileName', width: 260, mono: true },
     {
@@ -187,12 +209,15 @@ export default function ConfigSnapshotLibraryPage() {
             onChange={(e) => setEnbFilter(e.target.value)}
             style={{ width: 180 }}
           />
-          <Input
-            placeholder={t('transfer.fileLib.filter.productType')}
+          <Select<string>
+            showSearch
             allowClear
-            value={productFilter}
-            onChange={(e) => setProductFilter(e.target.value)}
-            style={{ width: 180 }}
+            optionFilterProp="label"
+            placeholder={t('transfer.fileLib.filter.productType')}
+            value={productId || undefined}
+            onChange={(v) => setProductId(v ?? '')}
+            options={productNameOptions}
+            style={{ width: 220 }}
           />
           <Select<SnapshotSource | ''>
             placeholder={t('transfer.fileLib.filter.source')}

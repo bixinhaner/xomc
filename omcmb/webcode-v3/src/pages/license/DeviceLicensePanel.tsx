@@ -19,6 +19,7 @@ import {
   useImportDeviceLicenses,
   useDeleteDeviceLicense,
 } from '@core/hooks/api/useDeviceLicense'
+import { useProductList } from '@core/hooks/api/useProducts'
 import { deviceLicenseApi } from '@core/services/api/deviceLicenseApi'
 import type { LicenseImportResult } from '@core/services/api/deviceLicenseApi'
 
@@ -41,14 +42,36 @@ export function DeviceLicensePanel({
   const [page, setPage] = useState(1)
   const [snInput, setSnInput] = useState('')
   const [sn, setSn] = useState('')
+  // #602：产品名称下拉过滤，传 product.id
+  const [productId, setProductId] = useState('')
   const [importOpen, setImportOpen] = useState(false)
 
   const params = useMemo(
-    () => ({ page, pageSize: PAGE_SIZE, ...(sn.trim() ? { serialNumber: sn.trim() } : {}) }),
-    [page, sn],
+    () => ({
+      page,
+      pageSize: PAGE_SIZE,
+      ...(sn.trim() ? { serialNumber: sn.trim() } : {}),
+      ...(productId ? { productId } : {}),
+    }),
+    [page, sn, productId],
   )
   const { data, isLoading, isError, error, isFetching, refetch } = useDeviceLicenses(params)
   const del = useDeleteDeviceLicense()
+  const { data: productsData } = useProductList()
+  const productNameOptions = useMemo(
+    () =>
+      (productsData?.items ?? [])
+        .map((p) => ({ label: `${p.name} (${p.tech})`, value: p.id }))
+        .sort((a, b) => a.label.localeCompare(b.label, 'zh-CN')),
+    [productsData]
+  )
+  const productNameByPattern = useMemo(() => {
+    const map = new Map<string, string>()
+    ;(productsData?.items ?? []).forEach((p) => {
+      ;(p.patterns ?? []).forEach((pat) => map.set(pat, p.name))
+    })
+    return map
+  }, [productsData])
 
   const rows = data?.items ?? []
   const total = data?.total ?? 0
@@ -104,6 +127,16 @@ export function DeviceLicensePanel({
         <NeonButton icon={<Search />} onClick={applySearch}>
           SEARCH
         </NeonButton>
+        <select
+          className="neon-input w-56"
+          value={productId}
+          onChange={(e) => { setProductId(e.target.value); setPage(1) }}
+        >
+          <option value="">产品名称 · 全部</option>
+          {productNameOptions.map((opt) => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          ))}
+        </select>
         <NeonButton
           icon={<RefreshCcw />}
           onClick={() => refetch()}
@@ -121,7 +154,7 @@ export function DeviceLicensePanel({
       <div className="grid grid-cols-[1.4fr_1.2fr_0.9fr_0.7fr_1fr_140px] gap-3 border-b border-cyan-500/10 px-3.5 py-2 font-mono text-[10px] uppercase tracking-[0.18em] text-cyan-300/55">
         <span>SERIAL NO.</span>
         <span>eNB NAME</span>
-        <span>PRODUCT</span>
+        <span>PRODUCT NAME · 产品名称</span>
         <span>SIZE</span>
         <span>UPDATED</span>
         <span className="text-right">ACTIONS</span>
@@ -158,7 +191,11 @@ export function DeviceLicensePanel({
               <span className="truncate font-mono text-xs text-cyan-100">{r.serialNumber}</span>
               <span className="truncate text-xs text-cyan-100/80">{r.enbName ?? '—'}</span>
               <span className="truncate font-mono text-[11px] text-cyan-300/70">
-                {r.productType ?? '—'}
+                {(() => {
+                  const raw = r.productType ?? ''
+                  if (!raw) return '—'
+                  return productNameByPattern.get(raw) ?? raw
+                })()}
               </span>
               <span className="font-mono text-[11px] text-cyan-300/70">
                 {formatBytes(r.fileSize)}

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
 
 	"github.com/omcgo/omcgo/internal/admin"
@@ -46,6 +47,23 @@ func (h *Handler) ListLicenses(c *gin.Context) {
 	filter.SerialNumber = strings.TrimSpace(c.Query("serial_number"))
 	filter.EnbName = strings.TrimSpace(c.Query("enb_name"))
 	filter.ProductType = strings.TrimSpace(c.Query("product_type"))
+	if raw := strings.TrimSpace(c.Query("product_id")); raw != "" && h.productResolver != nil {
+		pid, perr := uuid.Parse(raw)
+		if perr != nil {
+			commonerrors.AbortWithError(c, http.StatusBadRequest, fmt.Errorf("invalid product_id: %w", perr))
+			return
+		}
+		patterns, rerr := h.productResolver.GetPatternsByProductID(c.Request.Context(), pid)
+		if rerr != nil {
+			commonerrors.AbortWithError(c, http.StatusInternalServerError, fmt.Errorf("resolve product patterns: %w", rerr))
+			return
+		}
+		if len(patterns) == 0 {
+			response.OK(c, model.NewListResponse([]DeviceLicense{}, 0, filter.Page, filter.PageSize))
+			return
+		}
+		filter.ProductTypes = patterns
+	}
 	if v := strings.TrimSpace(c.Query("updated_after")); v != "" {
 		if t, err := time.Parse(time.RFC3339, v); err == nil {
 			filter.UpdatedAfter = &t

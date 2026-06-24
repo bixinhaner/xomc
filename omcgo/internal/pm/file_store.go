@@ -53,9 +53,10 @@ type PMFileDeviceAggregate struct {
 
 // PMFileDeviceFilter 给 ListFileDeviceAggregates 用。
 type PMFileDeviceFilter struct {
-	Keyword      *string // 按 device_sn ILIKE
-	SiteName     *string // 按 devices.site_name ILIKE
-	ProductClass *string // 按 devices.product_class ILIKE
+	Keyword        *string  // 按 device_sn ILIKE
+	SiteName       *string  // 按 devices.site_name ILIKE
+	ProductClass   *string  // 按 devices.product_class ILIKE（向后兼容）
+	ProductClasses []string // 多值精确匹配（IN），按产品名称下拉过滤时由 handler 解析 product_id 写入
 	model.ListRequest
 }
 
