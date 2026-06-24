@@ -10,7 +10,6 @@ import {
   Form,
   Input,
   InputNumber,
-  List,
   Modal,
   Popconfirm,
   Progress,
@@ -2052,40 +2051,18 @@ export default function FileTransferCenter() {
           </Form>
         </Modal>
 
-        {/* #215: 已选设备清单 —— 点"已选 N 台"打开，逐台可删除。 */}
+        {/* #215 + 已选清单升级：Modal 内用 Table，前端模糊搜索 SN + 分页 10/20/50/100，子组件配合 destroyOnHidden 重置状态。 */}
         <Modal
           title={t('ufte.selectedModal.title', { count: drawerSelectedDevices.length })}
           open={selectedDevicesModalOpen}
           onCancel={() => setSelectedDevicesModalOpen(false)}
           footer={null}
-          width={520}
+          width={720}
           destroyOnHidden
         >
-          <List<UnifiedFileTransferDeviceItem>
-            size="small"
-            dataSource={drawerSelectedDevices}
-            locale={{ emptyText: t('ufte.selectedModal.empty') }}
-            style={{ maxHeight: 420, overflow: 'auto' }}
-            renderItem={(item) => (
-              <List.Item
-                actions={[
-                  <Button
-                    key="remove"
-                    type="link"
-                    size="small"
-                    danger
-                    icon={<DeleteOutlined />}
-                    onClick={() => handleRemoveSelectedDevice(item.id)}
-                  >
-                    {t('common.delete')}
-                  </Button>,
-                ]}
-              >
-                <List.Item.Meta
-                  title={<Text>{item.deviceSn}</Text>}
-                />
-              </List.Item>
-            )}
+          <SelectedDevicesPanel
+            devices={drawerSelectedDevices}
+            onRemove={handleRemoveSelectedDevice}
           />
         </Modal>
       </Drawer>
@@ -2253,5 +2230,98 @@ function TaskDetailDevicesPanel({ taskId }: { taskId: string }) {
         scroll={{ x: 600 }}
       />
     </Card>
+  );
+}
+
+// SelectedDevicesPanel —— 已选清单 Modal 内嵌面板：SN 模糊搜索 + 分页 10/20/50/100 + 单台移除。
+// 数据源是父组件 selectedDeviceMap → drawerSelectedDevices 数组（in-memory），无后端请求。
+// Modal destroyOnHidden 时本组件卸载，搜索词/页码自动重置。
+function SelectedDevicesPanel({
+  devices,
+  onRemove,
+}: {
+  devices: UnifiedFileTransferDeviceItem[];
+  onRemove: (id: string) => void;
+}) {
+  const t = useT();
+  const [keyword, setKeyword] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+
+  const filtered = useMemo(() => {
+    const kw = keyword.trim().toLowerCase();
+    if (!kw) return devices;
+    return devices.filter((d) => (d.deviceSn || '').toLowerCase().includes(kw));
+  }, [devices, keyword]);
+
+  const columns: ColumnsType<UnifiedFileTransferDeviceItem> = [
+    {
+      title: t('ufte.col.deviceSn'),
+      dataIndex: 'deviceSn',
+      key: 'deviceSn',
+      ellipsis: true,
+      render: (sn: string) => <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{sn || '-'}</Text>,
+    },
+    {
+      title: t('ufte.col.productType'),
+      dataIndex: 'productName',
+      key: 'productName',
+      width: 180,
+      ellipsis: true,
+      render: (_, record) => <Text style={{ fontSize: 12 }}>{record.productName || record.productType || '-'}</Text>,
+    },
+    {
+      title: t('common.action'),
+      key: 'action',
+      width: 90,
+      align: 'right',
+      render: (_, record) => (
+        <Button
+          type="link"
+          size="small"
+          danger
+          icon={<DeleteOutlined />}
+          onClick={() => onRemove(record.id)}
+        >
+          {t('common.delete')}
+        </Button>
+      ),
+    },
+  ];
+
+  return (
+    <Space direction="vertical" size={8} style={{ width: '100%' }}>
+      <Input.Search
+        allowClear
+        size="small"
+        placeholder={t('ufte.selectedModal.searchPlaceholder')}
+        value={keyword}
+        onChange={(e) => {
+          setKeyword(e.target.value);
+          setPage(1);
+        }}
+      />
+      <Table<UnifiedFileTransferDeviceItem>
+        rowKey="id"
+        size="small"
+        columns={columns}
+        dataSource={filtered}
+        locale={{ emptyText: t('ufte.selectedModal.empty') }}
+        pagination={{
+          current: page,
+          pageSize,
+          total: filtered.length,
+          showSizeChanger: true,
+          pageSizeOptions: ['10', '20', '50', '100'],
+          size: 'small',
+          onChange: (nextPage, nextSize) => {
+            setPage(nextPage);
+            if (nextSize && nextSize !== pageSize) {
+              setPageSize(nextSize);
+            }
+          },
+        }}
+      />
+    </Space>
   );
 }

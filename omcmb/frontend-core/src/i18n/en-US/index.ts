@@ -4932,6 +4932,7 @@ const messages: Record<string, string> = {
   'ufte.form.deviceTotal':                    '{count} total',
   'ufte.selectedModal.title':                 'Selected devices ({count})',
   'ufte.selectedModal.empty':                 'No devices selected',
+  'ufte.selectedModal.searchPlaceholder':     'Search by SN',
   'ufte.msg.selectionPrunedByClass':          'Removed {count} device(s) not matching the selected product type',
   'ufte.form.licenseSource':                  'License source (latest license per device)',
   'ufte.form.openLicenseManager':             'Open License File Management',
