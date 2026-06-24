@@ -55,7 +55,9 @@ export function useUploadFirmware() {
         manufacturer?: string;
         description?: string;
       };
-    }) => api.uploadFirmware(params.file, params.metadata),
+      // #623：透传上传进度回调给调用方（驱动 Progress UI）。
+      onProgress?: (percent: number) => void;
+    }) => api.uploadFirmware(params.file, params.metadata, params.onProgress),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['software', 'versions'] });
     },
