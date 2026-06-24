@@ -2,6 +2,7 @@ package pm
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -37,13 +38,25 @@ type Handler struct {
 	pmBucket    string
 	// deviceQuery 收敛 #18：Handler 原先直连 SQL 池（h.pool）反查 devices /
 	// 读 pm_metrics，现统一经 DeviceQueryService（handler → service → repository）。
-	deviceQuery   DeviceQueryService
-	indicatorRepo indicator.IndicatorRepository // T-0164-P1：/pm/kpi/definitions 数据源（替代旧 carrier KPIDefinitions 列表）
-	aggr          *aggregator.Aggregator        // T-0164-P5 / G5：按粒度路由聚合表查询（hourly/daily/weekly/monthly + device_group）
-	asyncJobRepo  asyncjob.Repository           // T-0164 收尾 G5-Gap-2：手动重算入口入队 async_jobs
-	resolver      *authz.Resolver               // #64 设备组数据权限：PM 读链路按调用者可见分组过滤
-	metrics       *PMMetrics
-	logger        *zap.Logger
+	deviceQuery     DeviceQueryService
+	indicatorRepo   indicator.IndicatorRepository // T-0164-P1：/pm/kpi/definitions 数据源（替代旧 carrier KPIDefinitions 列表）
+	aggr            *aggregator.Aggregator        // T-0164-P5 / G5：按粒度路由聚合表查询（hourly/daily/weekly/monthly + device_group）
+	asyncJobRepo    asyncjob.Repository           // T-0164 收尾 G5-Gap-2：手动重算入口入队 async_jobs
+	resolver        *authz.Resolver               // #64 设备组数据权限：PM 读链路按调用者可见分组过滤
+	productResolver ProductPatternResolver        // #602; nil-safe (product_id 过滤参数被忽略)
+	metrics         *PMMetrics
+	logger          *zap.Logger
+}
+
+// ProductPatternResolver 把 product_id 解析为该产品的 product_class 模式字面量集合。
+// 由 cmd/app/provider 将 *product.Registry 以接口注入，避免 pm 包直接依赖 product 包。
+type ProductPatternResolver interface {
+	GetPatternsByProductID(ctx context.Context, productID uuid.UUID) ([]string, error)
+}
+
+// SetProductPatternResolver 装配「产品名称下拉」过滤能力。未装配时 product_id 查询参数被忽略。
+func (h *Handler) SetProductPatternResolver(r ProductPatternResolver) {
+	h.productResolver = r
 }
 
 // SetPermissionService 注入数据权限解析器（#64 统一强制层），使 PM 读链路按调用者可见设备组
@@ -968,6 +981,23 @@ func (h *Handler) ListPMFileDevices(c *gin.Context) {
 	}
 	if pc := c.Query("product_class"); pc != "" {
 		filter.ProductClass = &pc
+	}
+	if raw := strings.TrimSpace(c.Query("product_id")); raw != "" && h.productResolver != nil {
+		pid, perr := uuid.Parse(raw)
+		if perr != nil {
+			commonerrors.AbortWithError(c, http.StatusBadRequest, fmt.Errorf("invalid product_id: %w", perr))
+			return
+		}
+		patterns, rerr := h.productResolver.GetPatternsByProductID(c.Request.Context(), pid)
+		if rerr != nil {
+			commonerrors.AbortWithError(c, http.StatusInternalServerError, fmt.Errorf("resolve product patterns: %w", rerr))
+			return
+		}
+		if len(patterns) == 0 {
+			response.OK(c, model.NewListResponse[PMFileDeviceAggregate](nil, 0, filter.Page, filter.PageSize))
+			return
+		}
+		filter.ProductClasses = patterns
 	}
 	result, err := h.fileStore.ListFileDeviceAggregates(c.Request.Context(), filter)
 	if err != nil {

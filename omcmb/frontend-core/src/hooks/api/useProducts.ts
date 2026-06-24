@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { productApi } from '../../services/api/productApi';
 import { productService } from '../../mock/services/productService';
@@ -226,3 +227,38 @@ export function useAlarmNeTypes() {
     staleTime: 5 * 60 * 1000,
   });
 }
+
+// #602：产品名称反解析。后端表里 device.product_class 是上报字面值（如 `FAP/BSQ7258L254`），
+// product.patterns[] 是**正则字符串**（如 `^FAP/BSQ7258L254$`）。文件管理列表把
+// product_class 渲染为「产品名称」时必须用 RegExp.test 匹配，不能 Map.get 字面比对。
+// 用法：
+//   const resolveProductName = useProductNameResolver()
+//   <span>{resolveProductName(row.productClass) || '—'}</span>
+export function useProductNameResolver(): (raw: string | null | undefined) => string {
+  const { data } = useProductList();
+  return useMemo(() => {
+    const compiled = (data?.items ?? []).map((p) => ({
+      name: p.name,
+      regexes: (p.patterns ?? [])
+        .map((pat) => {
+          try {
+            return new RegExp(pat);
+          } catch {
+            return null;
+          }
+        })
+        .filter((r): r is RegExp => r !== null),
+    }));
+    return (raw: string | null | undefined): string => {
+      const v = (raw ?? '').trim();
+      if (!v) return '';
+      for (const { name, regexes } of compiled) {
+        for (const re of regexes) {
+          if (re.test(v)) return name;
+        }
+      }
+      return v; // 无匹配回退原始 product_class，避免空白
+    };
+  }, [data]);
+}
+

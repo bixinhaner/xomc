@@ -179,7 +179,11 @@ func (r *PgSnapshotRepository) List(
 		if filter.EnbName != "" {
 			q = q.Where(sq.ILike{"enb_name": "%" + filter.EnbName + "%"})
 		}
-		if filter.ProductType != "" {
+		if len(filter.ProductTypes) > 0 {
+			// #602：ProductTypes 是产品的 product_class 正则模式集合（如 ^FAP/BSQ7258L254$），
+			// 需用 PostgreSQL 正则匹配符 ~ 比对设备实际上报的 product_type 值。
+			q = q.Where(sq.Expr("product_type ~ ANY(?)", filter.ProductTypes))
+		} else if filter.ProductType != "" {
 			q = q.Where(sq.Eq{"product_type": filter.ProductType})
 		}
 		if filter.Source != nil {

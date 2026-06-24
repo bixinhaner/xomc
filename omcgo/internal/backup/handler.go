@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -23,6 +24,7 @@ type Handler struct {
 	snapshotService *SnapshotService     // T-0164; nil-safe (config-snapshot endpoints return 503 if unset)
 	licenseService  *LicenseService      // T-0165; nil-safe (device-license endpoints return 503 if unset)
 	ftpTester       *FTPConnectionTester // T-0032; nil-safe (TestFTPConnection returns stub when unset)
+	productResolver ProductPatternResolver // #602; nil-safe (product_id 过滤参数被忽略)
 	// M4: ExportFile presigned URL support
 	fileRepo    FileRepository // nil-safe (ExportFile returns 503 if unset)
 	minioClient *minio.Client  // nil-safe (ExportFile returns 503 if unset)
@@ -62,6 +64,18 @@ func (h *Handler) SetPolicyService(s *PolicyService) {
 // instead of running a real probe.
 func (h *Handler) SetFTPTester(t *FTPConnectionTester) {
 	h.ftpTester = t
+}
+
+// ProductPatternResolver 把 product_id 解析为该产品的 product_class 模式字面量集合。
+// 由 cmd/app/provider 将 *product.Registry 以接口注入，避免 backup 包直接依赖 product 包。
+type ProductPatternResolver interface {
+	GetPatternsByProductID(ctx context.Context, productID uuid.UUID) ([]string, error)
+}
+
+// SetProductPatternResolver 装配「产品名称下拉」过滤能力。未装配时，
+// ListSnapshots / ListLicenses 中的 product_id 查询参数被静默忽略。
+func (h *Handler) SetProductPatternResolver(r ProductPatternResolver) {
+	h.productResolver = r
 }
 
 // SetFileRepository wires the BackupRestoreFile metadata repo used by

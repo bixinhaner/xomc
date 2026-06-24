@@ -6,6 +6,13 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
   Table,
   TableBody,
   TableCell,
@@ -24,6 +31,7 @@ import {
 } from '@/components/layout/PageShell'
 
 import { useMRFileDevices, useBatchDeleteMRFiles } from '@core/hooks/api/useMR'
+import { useProductList, useProductNameResolver } from '@core/hooks/api/useProducts'
 
 // ============================================================
 // 测量报告 → 采集文件（按设备聚合）
@@ -40,7 +48,8 @@ export default function Files() {
   const [page, setPage] = useState(1)
   const [keyword, setKeyword] = useState('')
   const [siteName, setSiteName] = useState('')
-  const [productClass, setProductClass] = useState('')
+  // #602：产品名称下拉过滤，传 product.id
+  const [productId, setProductId] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
 
   const params = useMemo(
@@ -49,13 +58,22 @@ export default function Files() {
       pageSize: PAGE_SIZE,
       ...(keyword.trim() ? { keyword: keyword.trim() } : {}),
       ...(siteName.trim() ? { siteName: siteName.trim() } : {}),
-      ...(productClass.trim() ? { productClass: productClass.trim() } : {}),
+      ...(productId ? { productId } : {}),
     }),
-    [page, keyword, siteName, productClass],
+    [page, keyword, siteName, productId],
   )
 
   const { data, isLoading, isError, error, isFetching, refetch } = useMRFileDevices(params)
   const batchDelete = useBatchDeleteMRFiles()
+  const { data: productsData } = useProductList()
+  const productNameOptions = useMemo(
+    () =>
+      (productsData?.items ?? [])
+        .map((p) => ({ label: `${p.name} (${p.tech})`, value: p.id }))
+        .sort((a, b) => a.label.localeCompare(b.label, 'zh-CN')),
+    [productsData]
+  )
+  const resolveProductName = useProductNameResolver()
 
   const rows = data?.items ?? []
   const total = data?.total ?? 0
@@ -87,7 +105,7 @@ export default function Files() {
   }
 
   const allChecked = rows.length > 0 && selected.size === rows.length
-  const cols = ['', '设备 SN', '基站名称', '产品类', '首次采集', '最近采集', '文件数', '上报状态']
+  const cols = ['', '设备 SN', '基站名称', '产品名称', '首次采集', '最近采集', '文件数', '上报状态']
 
   return (
     <PageShell
@@ -117,15 +135,25 @@ export default function Files() {
               setPage(1)
             }}
           />
-          <Input
-            className="w-40"
-            placeholder="产品类"
-            value={productClass}
-            onChange={(e) => {
-              setProductClass(e.target.value)
+          <Select
+            value={productId || 'all'}
+            onValueChange={(v) => {
+              setProductId(v === 'all' ? '' : v)
               setPage(1)
             }}
-          />
+          >
+            <SelectTrigger className="w-48">
+              <SelectValue placeholder="产品名称" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部产品</SelectItem>
+              {productNameOptions.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>
+                  {opt.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Button
             variant="outline"
             size="sm"
@@ -190,7 +218,12 @@ export default function Files() {
                     </button>
                   </TableCell>
                   <TableCell className="text-xs">{d.siteName || '—'}</TableCell>
-                  <TableCell className="text-xs">{d.productClass || '—'}</TableCell>
+                  <TableCell className="text-xs">
+                    {(() => {
+                      const display = resolveProductName(d.productClass)
+                      return display ? display : '—'
+                    })()}
+                  </TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     {formatTime(d.firstCollectTime)}
                   </TableCell>

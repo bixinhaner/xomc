@@ -747,6 +747,9 @@ func initBackupModule(c *Container) error {
 	ftpRepo := backup.NewPgFTPConfigRepository(c.PgPool)
 	backupService := backup.NewService(backupTaskRepo, backupScheduleRepo, c.EventBus, logger)
 	backupHandler := backup.NewHandler(backupService, ftpRepo, logger)
+	if c.ProductRegistry != nil {
+		backupHandler.SetProductPatternResolver(c.ProductRegistry) // #602 配置快照/许可按产品名称下拉过滤
+	}
 
 	// T-0071 / R-102 followup: singleton BackupPolicy persistence.
 	policyRepo := backup.NewPgPolicyRepository(c.PgPool)

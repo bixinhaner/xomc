@@ -123,7 +123,11 @@ func (s *PgMRStore) ListFileDeviceAggregates(ctx context.Context, filter MRFileD
 		args = append(args, "%"+*filter.SiteName+"%")
 		wherePieces = append(wherePieces, fmt.Sprintf("d.site_name ILIKE $%d", len(args)))
 	}
-	if filter.ProductClass != nil && *filter.ProductClass != "" {
+	if len(filter.ProductClasses) > 0 {
+		// #602：ProductClasses 是产品的 product_class 正则模式集合，用 ~ ANY 正则匹配。
+		args = append(args, filter.ProductClasses)
+		wherePieces = append(wherePieces, fmt.Sprintf("d.product_class ~ ANY($%d)", len(args)))
+	} else if filter.ProductClass != nil && *filter.ProductClass != "" {
 		args = append(args, "%"+*filter.ProductClass+"%")
 		wherePieces = append(wherePieces, fmt.Sprintf("d.product_class ILIKE $%d", len(args)))
 	}
