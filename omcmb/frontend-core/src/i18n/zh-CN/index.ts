@@ -2398,6 +2398,7 @@ const messages: Record<string, string> = {
   'device.kpi.byWeek':         '按周',
   'device.kpi.deviceLevel':    '设备级（全部）',
   'device.kpi.object':         '对象',
+  'device.kpi.objectPlaceholder': '选择对象（默认全选）',
   'device.kpi.loadFailed':     'KPI 数据加载失败',
   'device.kpi.noConfig':       '暂无 {networkType} 制式的 KPI 指标配置',
 

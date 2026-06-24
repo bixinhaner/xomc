@@ -2391,6 +2391,7 @@ const messages: Record<string, string> = {
   'device.kpi.byWeek':         'By Week',
   'device.kpi.deviceLevel':    'Device level (all)',
   'device.kpi.object':         'Object',
+  'device.kpi.objectPlaceholder': 'Select objects (all selected by default)',
   'device.kpi.loadFailed':     'Failed to load KPI data',
   'device.kpi.noConfig':       'No KPI indicator config for {networkType}',
 
