@@ -41,6 +41,10 @@ export interface DashboardExportSelection {
   endTime: string;
   /** A1：小区/PLMN 下钻白名单（空/缺席=不过滤，导全部小区/PLMN）。 */
   objectLdns?: string[];
+  /** #599：星期过滤（0=周日..6=周六）。全选/缺席 = 不过滤。 */
+  weekdays?: number[];
+  /** #599：小时段过滤（0..23）。全选/缺席 = 不过滤。 */
+  hours?: number[];
 }
 
 /** adhoc 导出的当前筛选快照。 */
@@ -72,6 +76,13 @@ export function buildDashboardExportParams(
   };
   if (sel.objectLdns && sel.objectLdns.length > 0) {
     params.object_ldns = sel.objectLdns;
+  }
+  // #599：导出与出图同口径——星期/小时段传入导出 params。
+  if (sel.weekdays && sel.weekdays.length > 0 && sel.weekdays.length < 7) {
+    params.weekdays = sel.weekdays;
+  }
+  if (sel.hours && sel.hours.length > 0 && sel.hours.length < 24) {
+    params.hours = sel.hours;
   }
   return params;
 }

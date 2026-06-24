@@ -55,7 +55,6 @@ import {
   ALL_WEEKDAYS,
   attachCompareSeries,
   extendChartsAxis,
-  filterRowsByWeekdayHour,
   previousWindow,
 } from './dashboardFilterUtils';
 import {
@@ -166,6 +165,9 @@ export default function DeviceListPane() {
       endTime: submitted.endTime,
       limit: 5000,
       fillEmpty: true,
+      // #599：星期/小时段后端过滤（全选不传 = 不过滤，向后兼容）。
+      weekdays: submitted.weekdays.length < 7 ? submitted.weekdays : undefined,
+      hours: submitted.hours.length < 24 ? submitted.hours : undefined,
     };
   }, [submitted]);
 
@@ -193,6 +195,9 @@ export default function DeviceListPane() {
       endTime: submitted.prevEndTime,
       limit: 5000,
       fillEmpty: true,
+      // #599：周期对比同口径传 weekdays/hours。
+      weekdays: submitted.weekdays.length < 7 ? submitted.weekdays : undefined,
+      hours: submitted.hours.length < 24 ? submitted.hours : undefined,
     };
   }, [submitted]);
 
@@ -221,17 +226,13 @@ export default function DeviceListPane() {
     }
   }, [errors, message, intl]);
 
-  // 星期/小时段=纯前端在已取行里筛命中点（全选不过滤），当前与上一周期套同口径。
+  // 星期/小时段已由后端过滤（#599），前端只需按小区/PLMN 白名单即席过滤 + 转置分线。
   const charts = useMemo(() => {
     if (!submitted) return [];
     const wd = new Set(submitted.weekdays);
     const hr = new Set(submitted.hours);
-    // T-0193：先按小区/PLMN 白名单即席过滤，再套星期/小时段，再转置分线。
-    const curRows = filterRowsByWeekdayHour(
-      filterRowsByObjectLdns(rawRows, submitted.allowedLdns),
-      wd,
-      hr,
-    );
+    // T-0193：按小区/PLMN 白名单即席过滤，再转置分线。
+    const curRows = filterRowsByObjectLdns(rawRows, submitted.allowedLdns);
     // T-AXISFILL：转置出当前图集后立即扩轴（按 submitted 范围+粒度连续铺刻度、套星期/小时筛选、并集真实桶），
     // 空刻度补 '-'，再挂周期对比（compare 按毫秒对齐到已扩展的 cur.buckets，prev 不单独扩轴）。
     const cur = extendChartsAxis(buildDeviceMetricCharts(curRows, submitted.granularity), {
@@ -242,12 +243,8 @@ export default function DeviceListPane() {
       granularity: submitted.granularity,
     });
     if (!submitted.compare) return cur;
-    const prevRows = filterRowsByWeekdayHour(
-      filterRowsByObjectLdns(rawPrevRows, submitted.allowedLdns),
-      wd,
-      hr,
-    );
-    const prev = buildDeviceMetricCharts(prevRows, submitted.granularity);
+    const prevFilteredRows = filterRowsByObjectLdns(rawPrevRows, submitted.allowedLdns);
+    const prev = buildDeviceMetricCharts(prevFilteredRows, submitted.granularity);
     return attachCompareSeries(cur, prev, submitted.offsetMs, submitted.granularity);
   }, [rawRows, rawPrevRows, submitted]);
 
@@ -262,7 +259,7 @@ export default function DeviceListPane() {
   // ── 导出（T4 dashboard 来源）：带当前筛选 POST 建任务，不卡页面 ──────────
   const createExport = useCreateKpiExport();
 
-  // 组装当前筛选快照（与 handleQuery 同口径：设备/指标/粒度/时间/小区下钻白名单）。
+  // 组装当前筛选快照（与 handleQuery 同口径：设备/指标/粒度/时间/小区下钻白名单/星期/小时段）。
   // A1：下钻定格的小区/PLMN 白名单一并带进导出（复用 handleQuery 的 getEffectiveLdns，空=不过滤）。
   const buildExportSelection = (): DashboardExportSelection => {
     const [start, end] = filter.range;
@@ -274,6 +271,9 @@ export default function DeviceListPane() {
       startTime: start.toISOString(),
       endTime: end.toISOString(),
       objectLdns: getEffectiveLdns(cellSel, objectsByDevice),
+      // #599：导出与出图同口径。
+      weekdays: filter.weekdays,
+      hours: filter.hours,
     };
   };
 

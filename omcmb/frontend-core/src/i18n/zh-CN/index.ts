@@ -7244,6 +7244,7 @@ const messages: Record<string, string> = {
   'perf.dashboard.maxDevicesTruncated':  '最多选择 {max} 个设备，已自动截取前 {max} 个',
   'perf.dashboard.emptyPickConditions':  '选择制式 / 设备 / 指标后点「出图」',
   'perf.dashboard.emptyNoDataForCondition':'所选条件下暂无数据',
+  'perf.dashboard.clickQueryToStart':    '请选择筛选条件后点击「出图」',
   'perf.dashboard.deviceListSummary':    '设备列表出图',
   'perf.dashboard.truncatedTip':         '结果已截断：仅显示最新 {shown} / 共 {total} 行，请缩小时间范围或减少指标数',
   'perf.dashboard.deviceUnit':           '{count} 设备',

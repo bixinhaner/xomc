@@ -59,6 +59,27 @@ func (h *Handler) resolveVisibleGroups(c *gin.Context) (groups []uuid.UUID, ok b
 	return h.resolver.FromContext(c)
 }
 
+// parseCSVInts 解析逗号分隔的整数列表（如 "0,1,2"）。非法值静默跳过；空返回 nil。
+func parseCSVInts(raw string) []int {
+	parts := strings.Split(raw, ",")
+	out := make([]int, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			continue
+		}
+		out = append(out, n)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 // requestedDeviceInScope 在请求带 device_id 时预检其是否在可见分组内。
 // visibleGroups==nil（超管）放行；[] 直接拒；否则查该设备的分组与可见集合是否有交集。
 // 复用 deviceQuery 的连接池查 device_group_members，避免 PM handler 反向 import device。
@@ -385,6 +406,13 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
 			req.Offset = n
 		}
+	}
+	// #599：星期/小时段后端过滤（逗号分隔 int 列表，全选/空 = 不过滤）。
+	if v := c.Query("weekdays"); v != "" {
+		req.Weekdays = parseCSVInts(v)
+	}
+	if v := c.Query("hours"); v != "" {
+		req.Hours = parseCSVInts(v)
 	}
 
 	rows, err := h.aggr.Query(c.Request.Context(), req)

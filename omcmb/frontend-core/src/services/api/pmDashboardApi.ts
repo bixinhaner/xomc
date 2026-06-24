@@ -40,6 +40,13 @@ export const pmDashboardApi = {
       limit: params.limit,
       offset: params.offset,
       fill_empty: params.fillEmpty ? 'true' : undefined,
+      // #599：星期/小时段后端过滤（全选/空不传 = 不过滤，向后兼容）。
+      weekdays: params.weekdays?.length && params.weekdays.length < 7
+        ? params.weekdays.join(',')
+        : undefined,
+      hours: params.hours?.length && params.hours.length < 24
+        ? params.hours.join(',')
+        : undefined,
     };
     const { data } = await http.get<{ items: BackendAggregatedRow[] | null; total: number }>(
       '/pm/metrics/aggregated',

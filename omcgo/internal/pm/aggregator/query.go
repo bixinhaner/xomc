@@ -55,6 +55,12 @@ type QueryRequest struct {
 	VisibleGroups []uuid.UUID
 	Limit         int
 	Offset        int
+	// Weekdays #599：星期过滤（0=周日..6=周六，对齐 PostgreSQL EXTRACT(dow)）。
+	// 空/全选 = 不过滤。筛的是 start_time 的星期几。
+	Weekdays []int
+	// Hours #599：小时段过滤（0..23，对齐 PostgreSQL EXTRACT(hour)）。
+	// 空/全选 = 不过滤。筛的是 start_time 的整点小时。
+	Hours []int
 	// RecomputeAllKPIs（KPI-ALL-IND）：全网/全聚任务放开到全库时置 true。聚合层在汇总
 	// 全部 counter 的同时，额外从指标库加载全库「派生 KPI」按公式重算并产出 KPI 行，
 	// 使「首页读现成全网预聚合表」时 KPI 也有线（否则全聚只产 counter 行、KPI 面板空线）。
@@ -78,14 +84,14 @@ type QueryRequest struct {
 // Filled=true 表示该行是 handler 的 fill_empty 补齐占位（DB 实际无样本），MetricValue
 // 字段被忽略；前端 mapper 见 filled=true 时把 metricValue 设为 null 以渲染"-"。
 type Row struct {
-	DeviceOUI     string              `json:"device_oui,omitempty"`
-	DeviceSN      string              `json:"device_sn,omitempty"`
-	DeviceGroupID uuid.UUID           `json:"device_group_id,omitempty"`
+	DeviceOUI     string    `json:"device_oui,omitempty"`
+	DeviceSN      string    `json:"device_sn,omitempty"`
+	DeviceGroupID uuid.UUID `json:"device_group_id,omitempty"`
 	// Technology 是 device_group 维度的制式拆分键（lte/nr/gsm）。设备组快表按「组 × 制式」拆行，
 	// queryGroupTable 带出该列；其它维度恒空。
-	Technology    string              `json:"technology,omitempty"`
-	ProductID     uuid.UUID           `json:"product_id,omitempty"` // product 维度填该产品 id
-	MetricPath    string              `json:"metric_path"`
+	Technology string    `json:"technology,omitempty"`
+	ProductID  uuid.UUID `json:"product_id,omitempty"` // product 维度填该产品 id
+	MetricPath string    `json:"metric_path"`
 	// DisplayName 是给前端展示的友好名：KPI 行按 metric_path(=K 编号)回填指标库 cn_name；
 	// counter 行 = metric_path 本身。前端列头/系列名用它，避免露出 K 编号。
 	DisplayName string             `json:"display_name,omitempty"`
@@ -93,16 +99,16 @@ type Row struct {
 	// MetricValue 用 jsonx.Float（底层 float64）兜底非有限值（NaN/Inf → null），
 	// 避免单个 NaN 行致整批 JSON 编码失败、返回空 body（issue #387）。
 	// 「平均型/比率型」KPI 分母为 0 时合法地算出 NaN，是真实聚合数据普遍会踩的坑。
-	MetricValue   jsonx.Float         `json:"metric_value"`
-	StatisType    *metrics.StatisType `json:"statis_type,omitempty"`
-	Granularity   metrics.Granularity `json:"granularity"`
-	Time          time.Time           `json:"time"`
-	StartTime     time.Time           `json:"start_time"`
-	EndTime       time.Time           `json:"end_time"`
-	IngestTime    time.Time           `json:"ingest_time"`
-	ObjectLDN     *string             `json:"object_ldn,omitempty"`
-	Extra         map[string]any      `json:"extra,omitempty"`
-	Filled        bool                `json:"filled,omitempty"`
+	MetricValue jsonx.Float         `json:"metric_value"`
+	StatisType  *metrics.StatisType `json:"statis_type,omitempty"`
+	Granularity metrics.Granularity `json:"granularity"`
+	Time        time.Time           `json:"time"`
+	StartTime   time.Time           `json:"start_time"`
+	EndTime     time.Time           `json:"end_time"`
+	IngestTime  time.Time           `json:"ingest_time"`
+	ObjectLDN   *string             `json:"object_ldn,omitempty"`
+	Extra       map[string]any      `json:"extra,omitempty"`
+	Filled      bool                `json:"filled,omitempty"`
 }
 
 // Query 根据 (Granularity, Dimension) 路由到对应聚合表查询。
@@ -970,6 +976,13 @@ func applyScalarFilters(qb sq.SelectBuilder, q QueryRequest) sq.SelectBuilder {
 	}
 	if !q.EndTime.IsZero() {
 		qb = qb.Where(sq.LtOrEq{"time": q.EndTime})
+	}
+	// #599：星期/小时段后端过滤（全选/空 = 不加条件，向后兼容）。
+	if len(q.Weekdays) > 0 && len(q.Weekdays) < 7 {
+		qb = qb.Where("EXTRACT(dow FROM start_time)::int = ANY(?)", q.Weekdays)
+	}
+	if len(q.Hours) > 0 && len(q.Hours) < 24 {
+		qb = qb.Where("EXTRACT(hour FROM start_time)::int = ANY(?)", q.Hours)
 	}
 	return qb
 }

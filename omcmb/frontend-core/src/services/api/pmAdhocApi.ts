@@ -130,6 +130,8 @@ export const pmAdhocApi = {
     endTime?: string,
     productIds?: string[],
     objectLdns?: string[],
+    weekdays?: number[],
+    hours?: number[],
   ): Promise<{ rows: AdhocResultRow[]; total: number }> {
     // 大时间段（页签1 仪表盘）：startTime/endTime 为 RFC3339，透传为 start_time/end_time query 参数。
     // PM-DASH-DIMFILTER：维度子集过滤——本端点 query 是手动 snake_case 构造（不靠 Axios 自动转换），故新参数手写 snake_case。
@@ -146,6 +148,9 @@ export const pmAdhocApi = {
     if (endTime) params.end_time = endTime;
     if (productIds?.length) params.product_ids = productIds.join(',');
     if (objectLdns?.length) params.object_ldns = objectLdns;
+    // #599：星期/小时段后端过滤（逗号分隔 int，全选/空不传 = 不过滤，向后兼容）。
+    if (weekdays?.length && weekdays.length < 7) params.weekdays = weekdays.join(',');
+    if (hours?.length && hours.length < 24) params.hours = hours.join(',');
     const { data } = await http.get<ResultsResponse>(`/pm/adhoc/tasks/${id}/results`, {
       params,
       // 数组按重复键序列化（object_ldns=a&object_ldns=b），标量原样拼接——不引第三方 qs 依赖。

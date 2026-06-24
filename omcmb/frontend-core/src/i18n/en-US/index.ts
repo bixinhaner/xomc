@@ -7207,6 +7207,7 @@ const messages: Record<string, string> = {
   'perf.dashboard.maxDevicesTruncated':  'At most {max} devices can be selected; the first {max} have been kept automatically',
   'perf.dashboard.emptyPickConditions':  'Select technology / device / metric, then click "Plot"',
   'perf.dashboard.emptyNoDataForCondition':'No data under the selected conditions',
+  'perf.dashboard.clickQueryToStart':    'Select filters and click "Plot" to start',
   'perf.dashboard.deviceListSummary':    'Device list plot',
   'perf.dashboard.truncatedTip':         'Results truncated: showing latest {shown} of {total} rows. Narrow the time range or reduce metrics.',
   'perf.dashboard.deviceUnit':           '{count} devices',
