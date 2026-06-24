@@ -2,8 +2,11 @@
  * IndicatorFormModal — KPI 指标新建/编辑 UI (Issue #535, v3 webcode-v3 / STARFORGE HUD)。
  *
  * 指标全生命周期管理统一进 产品中心→KPI指标库。本 HUD 浮层承载「新建/编辑指标」:
- *   · 字段:中文名(必填) / 英文名(必填) / 归属分组(必填) / 单位 / 数据类型 /
- *     级别(GNB 无) / 计数器(开关) / 描述。
+ *   · 字段:中文名(必填) / 英文名(必填) / 归属分组(必填) / 单位 / 统计类型(statisType) /
+ *     级别(GNB 无) / 指标类型(直接采集/公式计算) / 公式(仅公式计算类型显示) / 描述。
+ *   · 指标类型替代旧「计数器」开关：HUD radio 二选一，选「公式计算」后下方实时展开公式输入。
+ *   · 统计类型对齐老 OMC perf_indicators.statis_type 业务：sum/avg/max/min/pct 下拉选择，
+ *     驱动后端 G5 cron 聚合（见 omcgo/internal/pm/kpi/calculator.go::AggregateByStatisType）。
  *   · 归属分组 Select 选项来自 useIndicatorGroups(把分组树拍平),必填。
  *   · create 模式:id 由 crypto.randomUUID().replace(/-/g,'') 生成,默认是自定义指标,可选组。
  *   · edit 模式且 indicator.isBuildIn 为真 → 归属分组 Select disabled + 提示
@@ -29,11 +32,19 @@ import {
   useFormulas,
   useUpsertFormula,
   useDeleteFormula,
+  usePlatformList,
 } from '@core/hooks/api/useIndicatorsLibrary'
 import type {
   DeviceType,
   IndicatorInfo,
+  IndicatorTypeValue,
   PlatformFormula,
+} from '@core/types/indicatorLibrary'
+import {
+  STATIS_TYPE_VALUES,
+  INDICATOR_UNIT_OPTIONS,
+  INDICATOR_LEVEL_OPTIONS,
+  INDICATOR_TYPE_OPTIONS,
 } from '@core/types/indicatorLibrary'
 import GroupTreeSelect from './GroupTreeSelect'
 
@@ -151,10 +162,25 @@ function PlatformFormulaSection({
 }) {
   const t = useT()
   const { data: formulasData, isLoading } = useFormulas(deviceType, indicatorId)
+  // 平台下拉数据源：后端 GET /api/v1/indicators/platforms 返回该 deviceType 下公式表里 distinct 出来的全部 platform_name。
+  const { data: platformsData } = usePlatformList(deviceType)
   const upsertMut = useUpsertFormula()
   const deleteMut = useDeleteFormula()
 
   const formulas: PlatformFormula[] = formulasData?.items ?? []
+
+  // 平台选项：ALL 常驻顶部（对应后端 indicator.PlatformAll 约定、表示跨平台共用），
+  // 其余从后端返回的 distinct 名单中拼接。
+  const platformOptions: string[] = (() => {
+    const fromApi = platformsData?.items ?? []
+    const ordered = ['ALL', ...fromApi.filter((p) => p !== 'ALL')]
+    const seen = new Set<string>()
+    return ordered.filter((p) => {
+      if (seen.has(p)) return false
+      seen.add(p)
+      return true
+    })
+  })()
 
   // 编辑器:'create' | 编辑中的 platformName | null(关闭)。
   const [editorMode, setEditorMode] = useState<'create' | string | null>(null)
@@ -315,13 +341,27 @@ function PlatformFormulaSection({
           </div>
           <label className="block">
             <FieldLabel required>{t('product.kpi.indicator.platformName')}</FieldLabel>
-            <input
+            {/* 平台下拉：ALL = 对所有平台共用（同指标在具体平台另有公式时以具体平台为准）。
+                编辑现有公式时 platform 是主键不可改 → disabled；老数据 platform 不在下拉集里时额外
+                补一个 option 以避免丢带。 */}
+            <select
               className="neon-input w-full disabled:cursor-not-allowed disabled:opacity-50"
               value={platform}
-              maxLength={128}
               disabled={isEditingExisting}
               onChange={(e) => setPlatform(e.target.value)}
-            />
+            >
+              <option value="" disabled>
+                {t('product.kpi.indicator.platformName')}
+              </option>
+              {platform && !platformOptions.includes(platform) ? (
+                <option value={platform}>{platform}</option>
+              ) : null}
+              {platformOptions.map((p) => (
+                <option key={p} value={p}>
+                  {p === 'ALL' ? `${p}${t('product.kpi.platformAllSuffix')}` : p}
+                </option>
+              ))}
+            </select>
             <span className="mt-1 block font-mono text-[10px] text-cyan-300/45">
               {t('product.kpi.platformExtra')}
             </span>
@@ -366,13 +406,16 @@ export default function IndicatorFormModal({
   deviceType,
   operatorCode,
   platform,
-  indicator,
+  indicator: propIndicator,
 }: Props) {
   const t = useT()
 
-  const isEdit = Boolean(indicator)
+  // currentIndicator 本地态：新建起点 null，create 成功后注入返回值 → 转「编辑态」。
+  // 这样新建与编辑公式维护方式完全一致（都用 PlatformFormulaSection）。
+  const [currentIndicator, setCurrentIndicator] = useState<IndicatorInfo | null>(propIndicator ?? null)
+  const isEdit = Boolean(currentIndicator)
   // 内置指标(is_build_in==='1')编辑时归属分组只读 — XML 真相源会覆盖,改了也无效。
-  const builtinGroupReadonly = isEdit && Boolean(indicator?.isBuildIn)
+  const builtinGroupReadonly = isEdit && Boolean(currentIndicator?.isBuildIn)
 
   // 归属分组下拉改用 GroupTreeSelect(真·树形,可展开收起),列出该制式全部分组
   // (不按 platform 过滤),数据源由组件内部 useIndicatorGroups 获取。
@@ -384,37 +427,41 @@ export default function IndicatorFormModal({
   const [enName, setEnName] = useState('')
   const [groupId, setGroupId] = useState('')
   const [unit, setUnit] = useState('')
-  const [dataType, setDataType] = useState('')
+  const [statisType, setStatisType] = useState('')
   const [indicatorLevel, setIndicatorLevel] = useState('')
-  const [isCounter, setIsCounter] = useState(false)
+  // 指标类型（替代旧 isCounter Switch）：默认 kpi，选 kpi 后 保存下 转编辑态 PlatformFormulaSection 出现。
+  const [indicatorType, setIndicatorType] = useState<IndicatorTypeValue>('kpi')
   const [description, setDescription] = useState('')
   const [formError, setFormError] = useState<string | null>(null)
 
-  // open 切换 / 目标指标变化时同步表单初值(编辑预填,新建清空)。
+  // open 切换 / 目标指标变化时同步本地态 + 表单初值。
   useEffect(() => {
     if (!open) return
     setFormError(null)
-    if (indicator) {
-      setCnName(indicator.cnName ?? '')
-      setEnName(indicator.enName ?? '')
-      setGroupId(indicator.groupId ?? '')
-      setUnit(indicator.unit ?? '')
-      // 编辑预填数据类型用列表行的 counterType(后端 data_type_label/data_type)。
-      setDataType(indicator.counterType ?? '')
-      setIndicatorLevel(indicator.indicatorLevel ?? '')
-      setIsCounter(Boolean(indicator.isCounter))
-      setDescription(indicator.description ?? '')
+    setCurrentIndicator(propIndicator ?? null)
+    if (propIndicator) {
+      setCnName(propIndicator.cnName ?? '')
+      setEnName(propIndicator.enName ?? '')
+      setGroupId(propIndicator.groupId ?? '')
+      setUnit(propIndicator.unit ?? '')
+      // 编辑预填统计类型，后端 BackendIndicator.statis_type 原始透传。
+      setStatisType(propIndicator.statisType ?? '')
+      setIndicatorLevel(propIndicator.indicatorLevel ?? '')
+      // 按后端 isCounter 字段反推指标类型。
+      setIndicatorType(propIndicator.isCounter ? 'counter' : 'kpi')
+      setDescription(propIndicator.description ?? '')
     } else {
       setCnName('')
       setEnName('')
       setGroupId('')
       setUnit('')
-      setDataType('')
+      setStatisType('')
       setIndicatorLevel('')
-      setIsCounter(false)
+      // 新建默认 kpi（公式计算），老 OMC 自定义指标几乎都是派生 KPI。
+      setIndicatorType('kpi')
       setDescription('')
     }
-  }, [open, indicator])
+  }, [open, propIndicator])
 
   if (!open) return null
 
@@ -435,26 +482,30 @@ export default function IndicatorFormModal({
       return
     }
     setFormError(null)
+    // 指标类型 → isCounter 映射（counter='1' / kpi='0'）。arithmetic 不再由本表单携带 —
+    // 公式统一走下方 PlatformFormulaSection（perf_formulas_<dt> 多平台 CRUD）。
+    const isCounterFlag: '0' | '1' = indicatorType === 'counter' ? '1' : '0'
     try {
-      if (indicator) {
-        await updateMut.mutateAsync({
+      if (currentIndicator) {
+        const updated = await updateMut.mutateAsync({
           deviceType,
-          id: indicator.id,
+          id: currentIndicator.id,
           input: {
             cnName: cn,
             enName: en,
             // 内置指标归属由 XML 决定,不下发 group_id(避免无效写)。
             ...(builtinGroupReadonly ? {} : { groupId }),
             unit: unit.trim() || undefined,
-            dataType: dataType.trim() || undefined,
+            statisType: statisType || undefined,
             indicatorLevel: indicatorLevel.trim() || undefined,
-            isCounter: isCounter ? '1' : '0',
+            isCounter: isCounterFlag,
             cnDescription: description.trim() || undefined,
             enDescription: description.trim() || undefined,
           },
         })
+        setCurrentIndicator(updated)
       } else {
-        await createMut.mutateAsync({
+        const created = await createMut.mutateAsync({
           deviceType,
           input: {
             id: crypto.randomUUID().replace(/-/g, ''),
@@ -465,9 +516,9 @@ export default function IndicatorFormModal({
             enName: en,
             groupId,
             unit: unit.trim() || undefined,
-            dataType: dataType.trim() || undefined,
+            statisType: statisType || undefined,
             indicatorLevel: indicatorLevel.trim() || undefined,
-            isCounter: isCounter ? '1' : '0',
+            isCounter: isCounterFlag,
             cnDescription: description.trim() || undefined,
             enDescription: description.trim() || undefined,
             operatorCode,
@@ -475,8 +526,10 @@ export default function IndicatorFormModal({
             platform: platform || undefined,
           },
         })
+        // 创建成功 → 本地态注入，弹窗不关、转「编辑态」。
+        // PlatformFormulaSection 自动出现（仅 indicatorType='kpi'）供用户配公式。
+        setCurrentIndicator(created)
       }
-      onClose()
     } catch (e) {
       setFormError(errMsg(e))
     }
@@ -497,7 +550,7 @@ export default function IndicatorFormModal({
       footer={
         <>
           <NeonButton onClick={onClose} disabled={saving}>
-            {t('common.cancel')}
+            {currentIndicator ? t('common.close') : t('common.cancel')}
           </NeonButton>
           <NeonButton onClick={() => void handleSubmit()} disabled={saving}>
             {saving ? <Loader2 className="size-3.5 animate-spin" /> : null}
@@ -549,58 +602,92 @@ export default function IndicatorFormModal({
         <div className="grid grid-cols-2 gap-3">
           <label className="block">
             <FieldLabel>{t('product.kpi.indicator.unitLabel')}</FieldLabel>
-            <input
+            {/* Unit 下拉 — 选项集见 frontend-core INDICATOR_UNIT_OPTIONS。老数据值不在集合时以
+                额外 option 允许回显（原生 select 容忍未列出的 value，用户选其他后不可逆则会丢）。 */}
+            <select
               className="neon-input w-full"
               value={unit}
-              maxLength={64}
               onChange={(e) => setUnit(e.target.value)}
-            />
+            >
+              <option value="">—</option>
+              {INDICATOR_UNIT_OPTIONS.map((v) => (
+                <option key={v} value={v}>{v}</option>
+              ))}
+            </select>
           </label>
           <label className="block">
-            <FieldLabel>{t('product.kpi.indicator.dataTypeLabel')}</FieldLabel>
-            <input
+            <FieldLabel>{t('product.kpi.indicator.statisTypeLabel')}</FieldLabel>
+            <select
               className="neon-input w-full"
-              value={dataType}
-              maxLength={64}
-              onChange={(e) => setDataType(e.target.value)}
-            />
+              value={statisType}
+              onChange={(e) => setStatisType(e.target.value)}
+            >
+              <option value="">—</option>
+              {STATIS_TYPE_VALUES.map((v) => (
+                <option key={v} value={v}>
+                  {t(`product.kpi.indicator.statisType.${v}`)}
+                </option>
+              ))}
+            </select>
           </label>
         </div>
 
         {!isGnb ? (
           <label className="block">
             <FieldLabel>{t('product.kpi.indicator.levelLabel')}</FieldLabel>
-            <input
+            {/* Level 下拉 — 仅 Device / PLMN；老数据 'both' 允许回显（不作为可选项）。 */}
+            <select
               className="neon-input w-full"
               value={indicatorLevel}
-              maxLength={64}
               onChange={(e) => setIndicatorLevel(e.target.value)}
-            />
+            >
+              <option value="">—</option>
+              {INDICATOR_LEVEL_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
           </label>
         ) : null}
 
-        <label className="flex items-center justify-between gap-3">
-          <FieldLabel>{t('product.kpi.indicator.isCounterLabel')}</FieldLabel>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={isCounter}
-            onClick={() => setIsCounter((v) => !v)}
-            className={
-              'relative h-5 w-10 shrink-0 rounded-full border transition-colors ' +
-              (isCounter
-                ? 'border-cyan-400/70 bg-cyan-500/30'
-                : 'border-cyan-500/25 bg-cyan-950/40')
-            }
-          >
-            <span
-              className={
-                'absolute top-0.5 size-3.5 rounded-full bg-cyan-200 transition-all ' +
-                (isCounter ? 'left-5 shadow-[0_0_6px_#00f0ff]' : 'left-0.5')
-              }
-            />
-          </button>
-        </label>
+        <div>
+          <FieldLabel>{t('product.kpi.indicator.typeLabel')}</FieldLabel>
+          {/* HUD radio 二选一（替代旧「计数器」Switch）— button 梧棭状选中高亮。 */}
+          <div role="radiogroup" className="grid grid-cols-2 gap-2">
+            {INDICATOR_TYPE_OPTIONS.map((o) => {
+              const labelKey = o.value === 'counter' ? 'typeCounter' : 'typeKpi'
+              const hintKey = o.value === 'counter' ? 'typeCounterHint' : 'typeKpiHint'
+              const selected = indicatorType === o.value
+              return (
+                <button
+                  key={o.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  onClick={() => setIndicatorType(o.value)}
+                  className={
+                    'flex flex-col items-start gap-1 rounded-sm border px-3 py-2 text-left transition-colors ' +
+                    (selected
+                      ? 'border-cyan-400/70 bg-cyan-500/15 text-cyan-100 shadow-[0_0_10px_rgba(0,240,255,0.15)]'
+                      : 'border-cyan-500/20 bg-cyan-950/30 text-cyan-300/70 hover:border-cyan-400/40 hover:bg-cyan-500/5')
+                  }
+                >
+                  <span className="font-mono text-xs uppercase tracking-wider">
+                    {t(`product.kpi.indicator.${labelKey}`)}
+                  </span>
+                  <span className="font-mono text-[10px] leading-snug text-cyan-300/55">
+                    {t(`product.kpi.indicator.${hintKey}`)}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+
+        {indicatorType === 'kpi' && currentIndicator ? (
+          // 公式维护区 — 与修改页面完全一致的 PlatformFormulaSection（按 platform 多条 CRUD）。
+          // 需要 indicatorId 才能调 useFormulas 等 API，所以新建模式下要先保存基础信息（currentIndicator!=null）。
+          <PlatformFormulaSection deviceType={deviceType} indicatorId={currentIndicator.id} />
+        ) : null}
 
         <label className="block">
           <FieldLabel>{t('product.kpi.indicator.descLabel')}</FieldLabel>
@@ -620,10 +707,7 @@ export default function IndicatorFormModal({
           </div>
         ) : null}
 
-        {/* 每平台公式 CRUD:仅编辑已存在指标时显示(需 indicatorId);新建态不渲染。 */}
-        {indicator ? (
-          <PlatformFormulaSection deviceType={deviceType} indicatorId={indicator.id} />
-        ) : null}
+        {/* 每平台公式 CRUD 上移至 indicatorType='kpi' && currentIndicator 条件区，这里不再重复渲染。 */}
       </div>
     </HudOverlay>
   )

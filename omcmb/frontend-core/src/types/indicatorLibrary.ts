@@ -15,6 +15,9 @@ export interface IndicatorInfo {
   unit?: string;
   description?: string;
   isCounter?: boolean;
+  // 统计类型（对齐老 OMC perf_indicators.statis_type）。取值枚举见 STATIS_TYPE_VALUES；
+  // KPI 新建/编辑表单用下拉渲染。后端 BackendIndicator.statis_type 下发，mapIndicator 透传。
+  statisType?: string;
   // PM-P3:编号版公式(perf_indicators_*.arithmetic)。派生 KPI 为编号算术式(如
   // (C000060011+C000060022)/1000),原始计数为自身编号。界面公式展示用此字段
   // (对运维编号才是工作语言);标准名版 formula 表退为工程内部物,不再用于展示。
@@ -89,6 +92,63 @@ export interface CreateIndicatorInput {
 // platform 仅 Create 路径有意义（创建时同事务写占位 formula）；后端
 // UpdateIndicatorRequest 无 Platform 字段，update 不能也不应携带 platform。
 export type UpdateIndicatorInput = Partial<Omit<CreateIndicatorInput, 'id' | 'platform'>>;
+
+// 统计类型枚举（与后端 perf_indicators.statis_type / pm_metrics.statis_type CHECK 约束对齐）。
+// UI 下拉选择项取该数组；各皮肤渲染时可用 i18n key `product.kpi.indicator.statisType.<value>` 本地化。
+export const STATIS_TYPE_VALUES = ['sum', 'avg', 'max', 'min', 'pct'] as const;
+export type StatisTypeValue = (typeof STATIS_TYPE_VALUES)[number];
+
+// 指标单位字典（对齐老 OMC indicator_unit 表 + 现有 data/indicator-library/*.xml unitId 全集）。
+// UI 「单位」字段渲染为下拉，选项值与后端 unit_id 直传一致；显示文本即为值本身（如 "%" / "Byte/s" /
+// "Kbps"），不做本地化（运维语言）。如需追加新单位，扩展本数组即可——保持单一事实源。
+export const INDICATOR_UNIT_OPTIONS = [
+  '%',
+  'bit',
+  'Byte',
+  'Byte/s',
+  'char',
+  'dBm',
+  'Erl',
+  'Gbit',
+  'GByte',
+  'Kb/PRB',
+  'Kbit',
+  'KByte',
+  'KByte/s',
+  'Kbps',
+  'MByte',
+  'Mbps',
+  'milliseconds',
+  'ms',
+  'no',
+  'number',
+  'ppm',
+  's',
+  'seconds',
+  'time',
+  'W',
+] as const;
+export type IndicatorUnitValue = (typeof INDICATOR_UNIT_OPTIONS)[number];
+
+// 指标等级（对齐老 OMC perf_indicators.indicator_level）：仅 device / plmn 两个对外可选项；
+// 老数据存量值 'both' 仍允许回显（UI 用「额外当前值并入选项」模式兼容），新建/编辑只能从这两项中选。
+export const INDICATOR_LEVEL_OPTIONS = [
+  { value: 'device', label: 'Device' },
+  { value: 'plmn', label: 'PLMN' },
+] as const;
+export type IndicatorLevelValue = (typeof INDICATOR_LEVEL_OPTIONS)[number]['value'];
+
+// 指标类型（替代旧「计数器」Switch，命名更贴用户语义 — 数据来源维度）：
+//   counter = 直接采集：设备 PM 文件上报的原始计数器（落库即用，arithmetic 一般为空）
+//   kpi     = 公式计算：派生 KPI，必须有 arithmetic 编号公式（如 (C000060011+C000060022)/1000）
+// 与后端字段映射：counter ⇄ is_counter='1'；kpi ⇄ is_counter='0'。
+// 注：后端 service.CreateIndicator 会按公式自动校验 — 若 kpi 类型的 arithmetic 解析后只引用单个
+//   指标 ID 且无运算符，会自动改回 is_counter='1'（这是合理的双保险，避免用户误把原始计数当 KPI）。
+export const INDICATOR_TYPE_OPTIONS = [
+  { value: 'counter', isCounter: '1' as const },
+  { value: 'kpi', isCounter: '0' as const },
+] as const;
+export type IndicatorTypeValue = (typeof INDICATOR_TYPE_OPTIONS)[number]['value'];
 
 export interface CreateGroupInput {
   id: string;

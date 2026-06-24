@@ -309,6 +309,7 @@ func Test_Constants_Stable(t *testing.T) {
 	assert.Equal(t, "sum", string(StatisSum))
 	assert.Equal(t, "avg", string(StatisAvg))
 	assert.Equal(t, "max", string(StatisMax))
+	assert.Equal(t, "min", string(StatisMin))
 	assert.Equal(t, "pct", string(StatisPct))
 	assert.Equal(t, "15min", string(Granularity15Min))
 	assert.Equal(t, "hourly", string(GranularityHourly))

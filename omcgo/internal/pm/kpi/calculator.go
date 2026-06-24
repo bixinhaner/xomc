@@ -7,10 +7,12 @@ import (
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
 
-// AggregateByStatisType 按 counter 元数据驱动的聚合方式（sum/avg/max/pct）合并多条原始 counter 值。
+// AggregateByStatisType 按 counter 元数据驱动的聚合方式（sum/avg/max/min/pct）合并多条原始 counter 值。
 //
 // 设计依据：docs/design/pm-kpi-pipeline-improvements.md §4.5 G5 自然桶预聚合。
 // T-0098 的 perf_indicators_* 表已落 statis_type 字段，本函数是 G5 cron 消费它的核心算子。
+// 对齐老 OMC 系统 perf_indicators.statis_type 五个业务枚举（sum/avg/max/min/pct），
+// DB CHECK 约束（pm_metrics*.statis_type）亦同。
 //
 // G3 阶段本函数尚不在实时计算链路上调用（KPIEngine.Calculate 现走 SUM(counter_value) GROUP BY
 // 在 SQL 层做聚合，过渡期保留）；G5 cron 启用后，counter 按粒度落 pm_metrics 后由此函数
@@ -39,6 +41,14 @@ func AggregateByStatisType(values []float64, stype metrics.StatisType) (float64,
 		m := values[0]
 		for _, v := range values[1:] {
 			if v > m {
+				m = v
+			}
+		}
+		return m, nil
+	case metrics.StatisMin:
+		m := values[0]
+		for _, v := range values[1:] {
+			if v < m {
 				m = v
 			}
 		}

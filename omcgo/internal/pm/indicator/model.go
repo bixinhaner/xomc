@@ -42,6 +42,14 @@ func (dt DeviceType) FormulaTable() string {
 	return fmt.Sprintf("rela_platform_indicator_formula_%s", dt.Suffix())
 }
 
+// PlatformAll 是「所有平台共用」的约定平台名（ALL）。
+//
+// XML 字典里 enb/ALL.xml 等文件即用 platform="ALL" 声明跨平台公式集；UI 新建公式时
+// 选「ALL」也写入此值。KPIRoute 装配（pm/kpi/router）查公式时按 (具体平台, ALL) 并查，
+// 应用层去重——同 indicator_id 在两处都存在时具体平台优先（见
+// PgPlatformFormulaRepository.ListByPlatform）。
+const PlatformAll = "ALL"
+
 func (dt DeviceType) EnabledTable() string {
 	return fmt.Sprintf("enabled_pm_indicators_%s", dt.Suffix())
 }
@@ -225,18 +233,21 @@ type CreateIndicatorRequest struct {
 	// DeviceType 由 REST handler 从 query 注入(CreateIndicator: req.DeviceType=dt)，bind 在注入前
 	// 执行，故不可 binding:required(否则 body 无 device_type 时校验早于注入→400)。与
 	// CreateGroupRequest.DeviceType 同范式;空值/非法由 service.CreateIndicator → ParseDeviceType 兜底。
-	DeviceType     string `json:"device_type" binding:"omitempty,oneof=ENB GSM GNB"`
-	EnName         string `json:"en_name" binding:"required"`
-	CnName         string `json:"cn_name" binding:"required"`
-	EnDescription  string `json:"en_description"`
-	CnDescription  string `json:"cn_description"`
-	GroupID        string `json:"group_id" binding:"required"`
-	DataType       string `json:"data_type"`
-	UnitID         string `json:"unit_id"`
-	Updator        string `json:"updator"`
-	IsCounter      string `json:"is_counter"`
-	Arithmetic     string `json:"arithmetic"`
-	StatisType     string `json:"statis_type"`
+	DeviceType    string `json:"device_type" binding:"omitempty,oneof=ENB GSM GNB"`
+	EnName        string `json:"en_name" binding:"required"`
+	CnName        string `json:"cn_name" binding:"required"`
+	EnDescription string `json:"en_description"`
+	CnDescription string `json:"cn_description"`
+	GroupID       string `json:"group_id" binding:"required"`
+	DataType      string `json:"data_type"`
+	UnitID        string `json:"unit_id"`
+	Updator       string `json:"updator"`
+	IsCounter     string `json:"is_counter"`
+	Arithmetic    string `json:"arithmetic"`
+	// StatisType 对齐老 OMC perf_indicators.statis_type 业务枚举（sum/avg/max/min/pct）。
+	// 与 DB CHECK 约束（pm_metrics*.statis_type）一致；驱动后端 G5 cron 聚合算子（见
+	// internal/pm/kpi/calculator.go::AggregateByStatisType）。空字符串表示不指定（可选）。
+	StatisType     string `json:"statis_type" binding:"omitempty,oneof=sum avg max min pct"`
 	ProductTypes   string `json:"product_types"`
 	IndicatorLevel string `json:"indicator_level"`
 	OperatorCode   string `json:"operator_code"`
@@ -248,16 +259,17 @@ type CreateIndicatorRequest struct {
 }
 
 type UpdateIndicatorRequest struct {
-	EnName            *string `json:"en_name"`
-	CnName            *string `json:"cn_name"`
-	EnDescription     *string `json:"en_description"`
-	CnDescription     *string `json:"cn_description"`
-	GroupID           *string `json:"group_id"`
-	DataType          *string `json:"data_type"`
-	UnitID            *string `json:"unit_id"`
-	Updator           *string `json:"updator"`
-	Arithmetic        *string `json:"arithmetic"`
-	StatisType        *string `json:"statis_type"`
+	EnName        *string `json:"en_name"`
+	CnName        *string `json:"cn_name"`
+	EnDescription *string `json:"en_description"`
+	CnDescription *string `json:"cn_description"`
+	GroupID       *string `json:"group_id"`
+	DataType      *string `json:"data_type"`
+	UnitID        *string `json:"unit_id"`
+	Updator       *string `json:"updator"`
+	Arithmetic    *string `json:"arithmetic"`
+	// 枚举同 CreateIndicatorRequest.StatisType；nil 表示不变更，非 nil 时需是 sum/avg/max/min/pct 之一。
+	StatisType        *string `json:"statis_type" binding:"omitempty,oneof=sum avg max min pct"`
 	ProductTypes      *string `json:"product_types"`
 	IndicatorLevel    *string `json:"indicator_level"`
 	CalculatingStatus *string `json:"calculating_status"`
