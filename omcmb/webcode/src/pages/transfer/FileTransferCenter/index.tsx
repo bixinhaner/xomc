@@ -956,9 +956,14 @@ export default function FileTransferCenter() {
           title: t('ufte.col.upgradeProgress'),
           dataIndex: 'progress',
           key: 'progress',
-          width: 150,
+          width: 180,
+          // #628：升级类原本只画 Progress 条，看不出"一共多少台/完成多少/失败多少"。
+          // 改为与非升级类同款两行布局，复用 ufte.col.statsBrief。
           render: (value: number, record) => (
-            <Progress percent={value} size="small" status={record.status === 'ended' ? 'success' : record.status === 'in_progress' ? 'active' : 'normal'} />
+            <Space direction="vertical" size={4} style={{ width: '100%' }}>
+              <Progress percent={value} size="small" status={record.status === 'ended' ? 'success' : record.status === 'in_progress' ? 'active' : 'normal'} />
+              <Text type="secondary">{t('ufte.col.statsBrief', { ok: record.successCount, fail: record.failCount, total: record.totalCount })}</Text>
+            </Space>
           ),
         },
         {
