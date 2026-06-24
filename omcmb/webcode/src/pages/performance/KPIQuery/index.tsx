@@ -110,7 +110,8 @@ const DEFAULT_PAYLOAD: QueryTemplatePayload = {
   deviceSns: [],
   metricPaths: [],
   granularity: '15min',
-  timeRangePreset: 'last_1h',
+  // 与 #595 联动表保持一致：15min → 近 3 小时
+  timeRangePreset: getDefaultTimeRangeForGranularity('15min'),
   deviceType: 'ENB',
 };
 

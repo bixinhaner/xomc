@@ -64,7 +64,8 @@ export default function PerformanceQuery() {
   const deviceType = TECH_OPTS.find((t) => t.value === tech)!.deviceType
   const [deviceSn, setDeviceSn] = useState('')
   const [granularity, setGranularity] = useState<Granularity>('15min')
-  const [rangeHours, setRangeHours] = useState(24)
+  // 默认值与 #595 联动表保持一致：15min → 近 3 小时
+  const [rangeHours, setRangeHours] = useState(getDefaultRangeHoursForGranularity('15min'))
   // #595: 用户手动修改过时间范围后标记 dirty，粒度切换不再覆盖
   const [rangeHoursDirty, setRangeHoursDirty] = useState(false)
   const [selectedMetrics, setSelectedMetrics] = useState<string[]>([])
