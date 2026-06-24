@@ -163,7 +163,8 @@ func (r *PgLicenseRepository) List(
 			q = q.Where(sq.ILike{"enb_name": "%" + filter.EnbName + "%"})
 		}
 		if len(filter.ProductTypes) > 0 {
-			q = q.Where(sq.Eq{"product_type": filter.ProductTypes})
+			// #602：ProductTypes 是产品的 product_class 正则模式集合，需用 PostgreSQL ~ ANY 正则匹配。
+			q = q.Where(sq.Expr("product_type ~ ANY(?)", filter.ProductTypes))
 		} else if filter.ProductType != "" {
 			q = q.Where(sq.Eq{"product_type": filter.ProductType})
 		}
