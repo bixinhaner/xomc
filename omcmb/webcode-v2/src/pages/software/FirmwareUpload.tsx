@@ -320,6 +320,8 @@ function FirmwareImportPanel({
   const [recommend, setRecommend] = useState(false)
   const [description, setDescription] = useState('')
   const [err, setErr] = useState('')
+  // #624：上传进度（0-100），driven by axios onUploadProgress。
+  const [progress, setProgress] = useState(0)
 
   const handleSubmit = () => {
     setErr('')
@@ -331,6 +333,7 @@ function FirmwareImportPanel({
       setErr('请选择固件文件')
       return
     }
+    setProgress(0)
     upload.mutate(
       {
         file,
@@ -342,11 +345,15 @@ function FirmwareImportPanel({
           recommend,
           description,
         },
+        onProgress: setProgress,
       },
       {
         onSuccess,
         // qa-614 #372/#379：透出后端真实失败原因（如重复导入 → 409 文案）。
-        onError: (e) => setErr(e instanceof Error && e.message ? e.message : '导入失败'),
+        onError: (e) => {
+          setProgress(0)
+          setErr(e instanceof Error && e.message ? e.message : '导入失败')
+        },
       }
     )
   }
@@ -422,6 +429,21 @@ function FirmwareImportPanel({
         </label>
 
         {err ? <div className="text-xs text-destructive">{err}</div> : null}
+
+        {upload.isPending || progress > 0 ? (
+          <div className="space-y-1">
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>上传进度</span>
+              <span>{progress}%</span>
+            </div>
+            <div className="h-2 w-full overflow-hidden rounded bg-muted">
+              <div
+                className="h-full bg-primary transition-[width] duration-150"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+          </div>
+        ) : null}
 
         <div className="flex justify-end gap-2">
           <Button variant="outline" size="sm" onClick={onClose}>
