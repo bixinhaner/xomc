@@ -259,6 +259,17 @@ func (r *PgTaskRepository) List(ctx context.Context, filter UpgradeTaskFilter) (
 		base = base.Where(sq.Eq{"create_user": *filter.CreateUser})
 		countBase = countBase.Where(sq.Eq{"create_user": *filter.CreateUser})
 	}
+	if filter.ProductID != "" {
+		// #638：升级任务表无 product_id 列，按"任务所选固件适用任一产品=:pid"过滤。
+		// 子查询写法避免 JOIN 引入列歧义（taskColumns 未带表别名）：
+		// firmware_id IN (SELECT id FROM firmware_versions WHERE :pid = ANY(product_ids))。
+		// 解析失败则忽略该过滤（与 firmware ProductID 行为对齐，避免 400）。
+		if pid, err := uuid.Parse(filter.ProductID); err == nil {
+			sub := "firmware_id IN (SELECT id FROM firmware_versions WHERE ? = ANY(product_ids))"
+			base = base.Where(sub, pid)
+			countBase = countBase.Where(sub, pid)
+		}
+	}
 
 	countSQL, countArgs, err := countBase.ToSql()
 	if err != nil {

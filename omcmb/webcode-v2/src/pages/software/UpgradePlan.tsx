@@ -47,6 +47,7 @@ import {
   useRetryTask,
 } from '@core/hooks/api/useSoftware'
 import { useProductClasses } from '@core/hooks/api/useDevices'
+import { useProductList } from '@core/hooks/api/useProducts'
 import type { TaskStatusType, UpgradeTaskInfo } from '@core/mock/data/software'
 
 import { TASK_RESULT, TASK_STATUS, TASK_TYPE, progressPct } from './_shared'
@@ -70,8 +71,11 @@ export default function UpgradePlan() {
   const [pageSize] = useState(20)
   const [status, setStatus] = useState<'' | TaskStatusType>('')
   const [productClass, setProductClass] = useState('')
+  // #638：按“产品名”过滤升级任务。productId 使用产品中心创建的 products.id。
+  const [productId, setProductId] = useState('')
 
   const { data: productClasses } = useProductClasses()
+  const { data: productsData } = useProductList()
 
   const params = useMemo(
     () => ({
@@ -80,8 +84,9 @@ export default function UpgradePlan() {
       taskType: 1,
       ...(status ? { status } : {}),
       ...(productClass ? { productClass } : {}),
+      ...(productId ? { productId } : {}),
     }),
-    [page, pageSize, status, productClass]
+    [page, pageSize, status, productClass, productId]
   )
 
   const { data, isLoading, isError, error, isFetching, refetch } = useUpgradeTasks(params)
@@ -125,6 +130,26 @@ export default function UpgradePlan() {
       </div>
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
+        {/* #638：产品名过滤（v1 对齐），选产品 → 后端以任务选中固件的 product_ids 包含该 pid 为判据。 */}
+        <Select
+          value={productId || 'all'}
+          onValueChange={(v) => {
+            setProductId(v === 'all' ? '' : v)
+            setPage(1)
+          }}
+        >
+          <SelectTrigger className="w-44">
+            <SelectValue placeholder="产品名称" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">全部产品</SelectItem>
+            {(productsData?.items ?? []).map((p) => (
+              <SelectItem key={p.id} value={p.id}>
+                {p.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <Select
           value={productClass || 'all'}
           onValueChange={(v) => {

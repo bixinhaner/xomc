@@ -232,7 +232,16 @@ export default function FirmwareUpload() {
                     <TableCell className="max-w-[200px] truncate text-xs" title={v.fileName}>
                       {v.fileName || '—'}
                     </TableCell>
-                    <TableCell>{(v.productId && productNameById.get(v.productId)) || v.deviceType || '—'}</TableCell>
+                    {/* #638：多产品按名拼接显示；productIds 优先，回退旧 productId，再回退 deviceType。 */}
+                    <TableCell>{(() => {
+                      const ids = (v.productIds && v.productIds.length > 0)
+                        ? v.productIds
+                        : (v.productId ? [v.productId] : [])
+                      const names = ids
+                        .map((id) => productNameById.get(id))
+                        .filter((n): n is string => Boolean(n))
+                      return names.length > 0 ? names.join(', ') : (v.deviceType || '—')
+                    })()}</TableCell>
                     <TableCell>{v.vendor || v.manufacturer || '—'}</TableCell>
                     <TableCell>
                       <Badge variant={st.variant}>{st.label}</Badge>
@@ -315,8 +324,10 @@ function FirmwareImportPanel({
   const upload = useUploadFirmware()
   const [file, setFile] = useState<File | null>(null)
   const [version, setVersion] = useState('')
-  // #492：固件所属产品 = 选产品名，提交 product_id。
-  const [productId, setProductId] = useState('')
+  // #492 / #638：固件适用产品改为多选。Badge toggle 列表趋近 shadcn 风格，避免引入 multi-select 组件依赖。
+  const [productIds, setProductIds] = useState<string[]>([])
+  const toggleProduct = (id: string) =>
+    setProductIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
   const [recommend, setRecommend] = useState(false)
   const [description, setDescription] = useState('')
   const [err, setErr] = useState('')
@@ -339,7 +350,8 @@ function FirmwareImportPanel({
         file,
         metadata: {
           version: version.trim(),
-          productId: productId || undefined,
+          // #492 / #638：productIds 优先（多产品复选）；未选任何产品时 undefined 留后端默认。
+          productIds: productIds.length > 0 ? productIds : undefined,
           releaseNotes: description,
           fileType: FILE_TYPE_PARAM[fileType],
           recommend,
@@ -371,21 +383,31 @@ function FirmwareImportPanel({
         </div>
 
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <div className="space-y-1.5">
-            <Label htmlFor="fw-product-name">产品名称</Label>
-            {/* #492：固件所属产品 = 选产品名（产品中心目录），提交 product_id。 */}
-            <Select value={productId || undefined} onValueChange={setProductId}>
-              <SelectTrigger id="fw-product-name">
-                <SelectValue placeholder="选择产品名称" />
-              </SelectTrigger>
-              <SelectContent>
-                {products.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className="space-y-1.5 md:col-span-2">
+            <Label>产品名称（可多选）</Label>
+            {/* #492 / #638：固件适用产品改为多选。Badge 点击 toggle，已选高亮。产品为空时提示去产品中心创建。 */}
+            {products.length === 0 ? (
+              <div className="text-xs text-muted-foreground">暂无产品，请先在产品中心创建。</div>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {products.map((p) => {
+                  const active = productIds.includes(p.id)
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => toggleProduct(p.id)}
+                      className="focus:outline-none"
+                      aria-pressed={active}
+                    >
+                      <Badge variant={active ? 'default' : 'outline'} className="cursor-pointer">
+                        {p.name}
+                      </Badge>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
           </div>
 
           <div className="space-y-1.5">
