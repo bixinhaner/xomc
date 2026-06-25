@@ -436,7 +436,8 @@ function DeviceTable({
   onOpenTask: (id: string) => void
 }) {
   // #529：去掉独立「设备名称」列，跟齐 v1 标准皮肤(设备名并入「所属任务」上下文，不作独立列)。
-  const cols = 7
+  // issue #655：原「最近上报」单列 → 「开始时间」+「结束时间」两列，cols 由 7 增至 8。
+  const cols = 8
   return (
     <TableCard>
       <Table>
@@ -448,7 +449,8 @@ function DeviceTable({
             <TableHead>版本 (当前→目标)</TableHead>
             <TableHead>状态</TableHead>
             <TableHead>进度</TableHead>
-            <TableHead>最近上报</TableHead>
+            <TableHead>开始时间</TableHead>
+            <TableHead>结束时间</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -496,7 +498,13 @@ function DeviceTable({
                 </TableCell>
                 <TableCell>
                   <span className="text-xs text-muted-foreground">
-                    {formatTime(d.lastReportAt)}
+                    {/* issue #655: 三皮肤统一为「开始时间 / 结束时间」，未达对应状态显示 '-'。 */}
+                    {d.startedAt ? formatTime(d.startedAt) : '—'}
+                  </span>
+                </TableCell>
+                <TableCell>
+                  <span className="text-xs text-muted-foreground">
+                    {d.endedAt ? formatTime(d.endedAt) : '—'}
                   </span>
                 </TableCell>
               </TableRow>

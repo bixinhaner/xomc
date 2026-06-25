@@ -128,6 +128,16 @@ export interface UnifiedFileTransferDeviceItem {
   status: UnifiedFileTransferDeviceStatus;
   result?: TransferTaskResult;
   progress: number;
+  /** 子任务首次进入执行态（downloading/uploading/rebooting/verifying）时由后端 PG repo
+   *  写入 upgrade_sub_tasks.started_at；未开始时后端 omitempty 不返回。issue #655 起前端
+   *  三皮肤设备列表「开始时间」列展示。 */
+  startedAt?: string;
+  /** 子任务到达终态（completed/failed/terminated）时由后端 PG repo 写入
+   *  upgrade_sub_tasks.completed_at；未结束时后端 omitempty 不返回。issue #655 起前端
+   *  三皮肤设备列表「结束时间」列展示。 */
+  endedAt?: string;
+  /** 旧字段：仅在子任务到达 ended 终态时填 sub_task.updated_at。issue #655 起前端三皮肤
+   *  设备列表已改用 startedAt + endedAt 展示，本字段仍保留兼容 CSV / 北向 API。 */
   lastReportAt: string;
   operatorScope: string;
   failureReason?: string;

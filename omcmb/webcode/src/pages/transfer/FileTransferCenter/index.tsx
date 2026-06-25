@@ -1152,16 +1152,21 @@ export default function FileTransferCenter() {
         },
         failureReasonColumn,
         {
-          title: t('ufte.col.operationTime'),
-          dataIndex: 'lastReportAt',
-          key: 'lastReportAt',
+          // issue #655：原「操作时间」实际是 lastReportAt（文件上报成功终态才有值），命名歧义、
+          // 中间态无任何时间信息。改为「开始时间 / 结束时间」两列直读 sub_task.started_at /
+          // completed_at，执行中也能看到首次进入执行态的时刻。
+          title: t('ufte.col.startTime'),
+          dataIndex: 'startedAt',
+          key: 'startedAt',
           width: 180,
-          render: (value: string) => {
-            // 上报时间只在文件上报成功的终态才有值；未上报时为空，直接显示 '-'，
-            // 不要把空值丢给 new Date()（会渲染成 "Invalid Date"）。
-            if (!value) return '-';
-            return formatSystemTime(value);
-          },
+          render: (value?: string) => (value ? formatSystemTime(value) : '-'),
+        },
+        {
+          title: t('ufte.col.endTime'),
+          dataIndex: 'endedAt',
+          key: 'endedAt',
+          width: 180,
+          render: (value?: string) => (value ? formatSystemTime(value) : '-'),
         },
       ];
     }
@@ -1242,11 +1247,19 @@ export default function FileTransferCenter() {
       { title: t('ufte.col.progress'), dataIndex: 'progress', key: 'progress', width: 180, render: (value: number) => <Progress percent={value} size="small" status={value === 100 ? 'success' : 'active'} /> },
       failureReasonColumn,
       {
-        title: t('ufte.col.reportTime'),
-        dataIndex: 'lastReportAt',
-        key: 'lastReportAt',
+        // issue #655：与升级类同款，「上报时间」单列改为「开始时间 / 结束时间」两列，三皮肤统一。
+        title: t('ufte.col.startTime'),
+        dataIndex: 'startedAt',
+        key: 'startedAt',
         width: 180,
-        render: (value: string) => formatSystemTime(value),
+        render: (value?: string) => (value ? formatSystemTime(value) : '-'),
+      },
+      {
+        title: t('ufte.col.endTime'),
+        dataIndex: 'endedAt',
+        key: 'endedAt',
+        width: 180,
+        render: (value?: string) => (value ? formatSystemTime(value) : '-'),
       },
     ];
   }, [isUpgradeLikeCategory, t]);
