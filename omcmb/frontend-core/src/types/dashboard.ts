@@ -45,18 +45,21 @@ export interface KPIOverview {
 /**
  * KPI 趋势增量数据
  * 用于 KPI 卡片显示趋势（上升/下降/稳定）
+ *
+ * 字段采用前端 camelCase；后端响应 snake_case 形态见 [`BackendKPIDelta`]，
+ * 由 `mapBackendSummary` 做一次性转换收敛。
  */
 export interface KPIDelta {
   /** 当前值 */
-  current_value: number;
+  currentValue: number;
   /** 对比周期的值 */
-  previous_value: number;
+  previousValue: number;
   /** 变化百分比（正数表示增长） */
-  change_percent: number;
+  changePercent: number;
   /** 趋势方向: "up" | "down" | "stable" */
   trend: 'up' | 'down' | 'stable';
   /** 对比类型: "yesterday" | "last_week" */
-  compare_type: 'yesterday' | 'last_week';
+  compareType: 'yesterday' | 'last_week';
 }
 
 /**

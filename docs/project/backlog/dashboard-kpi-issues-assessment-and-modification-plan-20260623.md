@@ -686,17 +686,459 @@ useEffect(() => {
 
 ---
 
+## Issue D（P1, Bug）
+
+### 标题
+首页 KPI 卡 `delta` / `deltaLabel` 永远不显示（`KPIDelta` 字段命名 snake/camel 错位）
+
+### Issue 提交稿（可直接用于 GitHub Bug 模板）
+
+#### 现状描述
+首页"总设备数 / 活跃告警 / 活跃 UE"3 张 KPI 卡的趋势区只显示箭头，**百分比数字与"vs 昨日 / vs 上周"文字标签全部不渲染**。
+
+#### 复现步骤
+1. 启动后端 + 前端，确保 `/api/v1/dashboard/summary` 的响应里 `kpi_deltas.total_devices.change_percent` 非 0。
+2. 打开仪表板首页。
+3. 观察"总设备数 / 活跃告警 / 活跃 UE"卡片右下角。
+
+#### 期望行为
+- 显示"↑ 3.2% vs 昨日"（或上周）形式：方向箭头 + 百分比 + 对比周期文案。
+- 切语言 / 刷新 / 切制式时正确刷新。
+
+#### 实际行为
+- 仅渲染方向箭头（trend 用的就是 snake_case `trend` 字段，凑巧两边同名）。
+- 百分比与"vs 昨日 / vs 上周"两段都为空。
+
+#### 影响面
+- 所有进入仪表板首页的用户。
+- 本地 / staging / 任何环境都可复现。
+- 影响功能域：F02 Dashboard / KPI 卡。
+
+#### 初步定位
+- 后端 [`service.go`](goomc/omcgo/internal/dashboard/service.go#L405-L450) `calculateKPIDeltas` 产出的字段名是 snake_case：`current_value` / `previous_value` / `change_percent` / `trend` / `compare_type`。
+- 前端 [`types/dashboard.ts`](goomc/omcmb/frontend-core/src/types/dashboard.ts#L49-L60) `KPIDelta` 接口与 [`dashboardApi.ts`](goomc/omcmb/frontend-core/src/services/api/dashboardApi.ts#L178-L187) `mapBackendSummary` 1:1 透传，**也是 snake_case**。
+- 但 [`pages/dashboard/index.tsx`](goomc/omcmb/webcode/src/pages/dashboard/index.tsx#L290-L334) 4 张卡都按 camelCase 访问：
+  ```tsx
+  delta={totalDevicesDelta?.changePercent !== undefined ? `${totalDevicesDelta.changePercent.toFixed(1)}%` : undefined}
+  deltaLabel={totalDevicesDelta?.compareType === 'last_week' ? t('dashboard.vsLastWeek') : t('dashboard.vsYesterday')}
+  ```
+- `KPIDelta` 类型上不存在 `.changePercent` / `.compareType`，但因为 `?.` 可选链 + 索引签名宽松，TS 没报错，运行时永远 `undefined`。
+
+#### 严重等级
+P1（首页可见的明显信息缺失，影响所有用户）
+
+#### 关联
+- 关联文档：本文件 Issue D。
+- 衍生：与 Issue E 叠加，UE 卡同时丢值 + 丢趋势。
+- 建议分支：`fix/dashboard-kpi-delta-camelcase`
+
+### 当前评估结论
+确认存在。属于前后端字段命名约定不一致的低级 bug，但因可选链 + 索引签名宽松而**未被类型系统拦下**。修复成本极低，建议作为 P1 第一批合入。
+
+### 代码证据（现状）
+
+后端：
+- [goomc/omcgo/internal/dashboard/service.go](goomc/omcgo/internal/dashboard/service.go#L405-L450) — `KPIDelta` Go struct 用 `json:"change_percent"` 等 snake_case tag。
+- 同文件 `calculateKPIDeltas` 只产 `total_devices`（vs last_week）+ `active_alarms`（vs yesterday）两个 key。
+
+前端类型与映射：
+- [goomc/omcmb/frontend-core/src/types/dashboard.ts](goomc/omcmb/frontend-core/src/types/dashboard.ts#L49-L60) — `KPIDelta` 使用 snake_case 字段：
+  ```ts
+  export interface KPIDelta {
+    current_value: number;
+    previous_value: number;
+    change_percent: number;
+    trend: 'up' | 'down' | 'stable';
+    compare_type: 'yesterday' | 'last_week';
+  }
+  ```
+- [goomc/omcmb/frontend-core/src/services/api/dashboardApi.ts](goomc/omcmb/frontend-core/src/services/api/dashboardApi.ts#L178-L187) — `mapBackendSummary` 把后端 snake_case 字段原样写进 `KPIDelta`。
+
+前端 UI 消费点：
+- [goomc/omcmb/webcode/src/pages/dashboard/index.tsx](goomc/omcmb/webcode/src/pages/dashboard/index.tsx#L290-L334) — `totalDevicesDelta?.changePercent` / `?.compareType` / `activeAlarmsDelta?.changePercent` / ... 共 4 张卡 8 处错位访问。
+
+### 根因
+前端在 hooks/UI 层默认按"前端命名规范用 camelCase"实施，但 `KPIDelta` 类型与 mapping 层却把后端 snake_case 直接吃进契约。**没有任何一层做转换或类型对齐**，UI 写错时也未被编译器拦下，于是趋势百分比与对比周期标签长期静默缺失。
+
+### 修改方案（按分层）
+
+总策略：**契约层一次性 camelCase 化**（前端单边修复，零后端改动），转换收敛在 `mapBackendSummary`。
+
+#### 1. 前端 — 修改 `KPIDelta` 类型
+
+[`frontend-core/src/types/dashboard.ts`](goomc/omcmb/frontend-core/src/types/dashboard.ts#L49-L60)：
+
+```ts
+export interface KPIDelta {
+  currentValue: number;
+  previousValue: number;
+  changePercent: number;
+  trend: 'up' | 'down' | 'stable';
+  compareType: 'yesterday' | 'last_week';
+}
+```
+
+`BackendKPIDelta` 接口（同文件 L209-L215）保留 snake_case 不动 —— 它是后端响应的真实形状。
+
+#### 2. 前端 — `mapBackendSummary` 显式转换
+
+[`dashboardApi.ts`](goomc/omcmb/frontend-core/src/services/api/dashboardApi.ts#L178-L187)：
+
+```ts
+kpiDeltas: Object.fromEntries(
+  Object.entries(b.kpi_deltas ?? {}).map(([k, d]) => [k, {
+    currentValue: d.current_value,
+    previousValue: d.previous_value,
+    changePercent: d.change_percent,
+    trend: d.trend as 'up' | 'down' | 'stable',
+    compareType: d.compare_type as 'yesterday' | 'last_week',
+  }]),
+),
+```
+
+#### 3. 前端 — 其它消费者同步
+
+grep `change_percent|compare_type|previous_value|current_value` 在 frontend-core / webcode / mock 全量替换。已知点：
+- [`mock/services/dashboardService.ts`](goomc/omcmb/frontend-core/src/mock/services/dashboardService.ts) — mock 产出也需用 camelCase（否则切 mock 后回归）。
+- [`types/dashboard.ts`](goomc/omcmb/frontend-core/src/types/dashboard.ts) 中 `KPITimeSeriesResponse` / `TrendComparisonMeta` 等含 `compare_type / change_percent` 处需评估是否同步（其它接口若仍 snake_case，单独 issue 处理；本期只动 KPIDelta 链）。
+
+#### 4. 前端 — UI 移除"全部走 fallback"的兜底
+[`pages/dashboard/index.tsx`](goomc/omcmb/webcode/src/pages/dashboard/index.tsx#L290-L334) 不需要再改（字段名一致后即可正确显示），但建议把"UE 卡"的 `deltaLabel` 兜底分支显式化：
+
+```tsx
+deltaLabel={ueTrendDelta?.compareType === 'last_week' ? t('dashboard.vsLastWeek') : t('dashboard.vsYesterday')}
+```
+
+（原代码 line 334 用 `changePercent !== undefined` 作 deltaLabel 判定，语义有歧义，顺手改齐。）
+
+#### 5. 前端 — 单测
+
+`dashboardApi.test.ts` 新增：
+- 给 `mapBackendSummary` 喂 `{ kpi_deltas: { total_devices: { change_percent: 3.2, compare_type: 'last_week', trend: 'up', ... }}}` → 断言 `result.kpiDeltas.total_devices.changePercent === 3.2 && .compareType === 'last_week'`。
+- 喂空 `kpi_deltas` → 断言 `kpiDeltas` 为 `{}` 不报错。
+
+### 验收标准
+- 总设备数 / 活跃告警卡显示"↑ 3.2% vs 上周"和"↓ 1.1% vs 昨日"形式。
+- mock 数据切换下行为一致。
+- 切语言 zh-CN ↔ en-US 文案随之切换。
+- `tsc --noEmit` 0 错；vitest dashboard 相关测试全过 + 新增测试通过。
+- 无任何文件残留 `.changePercent` / `.compareType` 访问点（一次 grep 验证）。
+
+### 风险与回滚
+- 风险 1：其它页面（PM / Alarm 模块）有引用 `KPIDelta.change_percent` 字段名的代码 → grep 后一并改。
+- 风险 2：未通过 mock 测试覆盖到所有调用点 → grep 即可穷举。
+- 回滚：单 PR revert；后端契约未动，回滚无副作用。
+
+### 工作量预估
+- 前端类型 + mapping + grep 替换：0.2 人日
+- 单测：0.1 人日
+- 联调验证 + 截图：0.1 人日
+- **合计：约 0.4 人日**
+
+### 实施顺序与依赖
+- **独立于 Issue A/B/C，可单切 PR**；建议作为 P1 第一批合入。
+- 与 Issue E 解耦：UE 卡显示数值需要 E 修复，但本 Issue 的 delta 修复对 4 张卡都有立竿见影效果。
+- 建议分支：`fix/dashboard-kpi-delta-camelcase`
+
+---
+
+## Issue E（P1, Bug）
+
+### 标题
+首页"活跃 UE" KPI 卡永远显示 0（`mapBackendSummary` 拍平时丢字段；后端数据源待确认）
+
+### Issue 提交稿（可直接用于 GitHub Bug 模板）
+
+#### 现状描述
+仪表板第 4 张 KPI 卡"活跃 UE"长期显示 `0`，无趋势百分比；与"在线设备 / 活跃告警"等卡片对比明显失真。
+
+#### 复现步骤
+1. 后端在 `pm_metrics` 表中插入一条 `kpi_name = 'UE_ACTIVE'` 的数据（或 mock 同名字段）。
+2. 调 `GET /api/v1/dashboard/summary`，确认响应里 `kpi_overview.UE_ACTIVE` 非 0。
+3. 打开仪表板首页，"活跃 UE"卡依然显示 0。
+
+#### 期望行为
+显示当前在网 UE 数（业务定义待确认是"RRC connected UE 总数"还是其它口径），并支持 vs 昨日 / vs 上周对比。
+
+#### 实际行为
+卡片数值固定为 0；趋势 % 与文字标签均为空（叠加 Issue D 的字段命名错位）。
+
+#### 影响面
+- 所有进入仪表板首页的用户。
+- 任何环境都可复现（包括 mock 与真实环境）。
+- 影响功能域：F02 Dashboard。
+
+#### 初步定位
+
+**根因 1（前端契约层）**：[`dashboardApi.ts`](goomc/omcmb/frontend-core/src/services/api/dashboardApi.ts#L160-L175) `mapBackendSummary` 把后端 `kpi_overview: Record<string, number>` 拍平到 8 个固定字段（`rrcSuccRate` / `erabSuccRate` / `hoSuccRate` / `dlThroughput` / `ulThroughput` / `radioDrop` / `prbUtil` / `voLteSuccRate`），**没有 `UE_ACTIVE` 也没有透传 dynamic key**。
+
+**根因 2（前端 UI 取数）**：[`pages/dashboard/index.tsx:179-180`](goomc/omcmb/webcode/src/pages/dashboard/index.tsx#L179-L180)：
+```ts
+const kpiSummary = dashboardData?.summary?.kpiSummary ?? {};
+const currentActiveUE = Math.floor(kpiSummary['UE_ACTIVE'] ?? 0);
+```
+即使后端有该字段，前端契约里也已被丢掉，永远 `undefined → 0`。
+
+**根因 3（后端可能根本没产）**：[`service.go GetSummary`](goomc/omcgo/internal/dashboard/service.go) 把 `rawKPIValues` 按 `KPIName` 写进 `KPIOverview`，但 `rawKPIValues = kpiRepo.Query(last24h, top10)` —— **`UE_ACTIVE` 这条指标 PM 是否真的存在、是哪条 K 编号、是否在 Top10 内**，需要业务/PM 团队确认。
+
+#### 严重等级
+P1（首页 4 大 KPI 卡之一长期失效，体感重）
+
+#### 关联
+- 关联：Issue D（KPI 卡 delta 字段名错位），叠加导致 UE 卡同时丢值 + 丢趋势。
+- 建议分支：`fix/dashboard-active-ue-summary`
+
+### 当前评估结论
+确认存在。**前端契约层是确定要修的（透传 kpi_overview）**；后端 + 业务侧需另开评审讨论 UE_ACTIVE 的数据源与口径，三步走（详见修改方案）。
+
+### 代码证据（现状）
+
+前端：
+- [`dashboardApi.ts:160-175`](goomc/omcmb/frontend-core/src/services/api/dashboardApi.ts#L160-L175) — `kpiSummary` 拍平到 8 个固定字段，无 `UE_ACTIVE`：
+  ```ts
+  kpiSummary: {
+    rrcSuccRate: b.kpi_overview.RRC_CONN_SETUP_SR ?? 0,
+    erabSuccRate: b.kpi_overview.ERAB_SETUP_SR ?? 0,
+    hoSuccRate: b.kpi_overview.NR_SA_HO_SR ?? 0,
+    dlThroughput: b.kpi_overview.NR_PDCP_RATE_DL ?? 0,
+    ulThroughput: 0,         // 数据库中暂无上行速率KPI
+    radioDrop: b.kpi_overview.CALL_DROP_RATE ?? 0,
+    prbUtil: b.kpi_overview.NR_PRB_UTIL_DL ?? 0,
+    voLteSuccRate: 0,        // 数据库中暂无 VoLTE KPI
+  },
+  ```
+- [`pages/dashboard/index.tsx:179-180`](goomc/omcmb/webcode/src/pages/dashboard/index.tsx#L179-L180) — 取 `kpiSummary['UE_ACTIVE']`，必然 miss。
+
+类型：
+- [`types/dashboard.ts`](goomc/omcmb/frontend-core/src/types/dashboard.ts#L40-L44) — `KPIOverview` 类型已是 `Record<string, number | undefined>`，**类型层面早就支持 dynamic key**，问题在 mapping 层强行降级。
+
+后端：
+- [`service.go GetSummary`](goomc/omcgo/internal/dashboard/service.go) — `summary.KPIOverview` 是 `map[string]float64`，会写入所有 Top10 KPI；但是否包含 `UE_ACTIVE` 取决于 PM 表是否真有这条数据。
+- [`calculateKPIDeltas`](goomc/omcgo/internal/dashboard/service.go#L407-L450) — 只产 `total_devices` / `active_alarms`，**没有 UE_ACTIVE 的 delta**。
+
+### 根因
+**两层叠加**：
+1. 前端 mapping 写死 8 个固定字段（历史 v1 设计），未跟 KPI 体系从 Top10 动态化的演进同步。
+2. 后端是否产 `UE_ACTIVE` 取决于 PM 表，业务上"活跃 UE"是否就是某条已有 K 编号（如 NR `KGNB05xx`）的别名，需要确认。
+
+### 设计决策（待与业务/PM 团队确认）
+
+- **D1 UE_ACTIVE 的业务口径**：
+  - 候选 a：RRC Connected UE 数（实时）
+  - 候选 b：E-RAB 激活数
+  - 候选 c：DRB 激活数
+  - **建议先确认 a / b / c 中哪一项 → 对应到 PM 现有 K 编号**。
+- **D2 后端数据源**：
+  - 候选 a：直接复用 `pm_adhoc_aggregation_results` / `pm_metrics` 中某条已有 K 编号的最新值。
+  - 候选 b：从设备测量上报字段汇总。
+  - 候选 c：当前 PM 暂无对应指标 → **下线"活跃 UE"卡 or 替换为有数据的指标**。
+- **D3 趋势对比**：依赖 Issue D 修复 + 后端 `calculateKPIDeltas` 新增 `deltas["UE_ACTIVE"]`，对比上周同时段；注意先解掉 `T-0164-P4` TODO（否则 `change_percent=0`、`trend='stable'`，KPI 卡显示无意义）。
+
+### 修改方案（按分层 + 三步走）
+
+#### 1. 前端契约层（可立即合入，与 D2/D3 解耦）
+
+[`dashboardApi.ts`](goomc/omcmb/frontend-core/src/services/api/dashboardApi.ts#L160-L175) 把 `kpiSummary` 改成"透传 + 命名快捷字段"：
+
+```ts
+const overview = b.kpi_overview ?? {};
+return {
+  ...,
+  kpiSummary: {
+    ...overview,                                          // 透传所有 dynamic key
+    rrcSuccRate: overview.RRC_CONN_SETUP_SR ?? 0,         // 兼容老调用点（后续可逐步废弃）
+    erabSuccRate: overview.ERAB_SETUP_SR ?? 0,
+    hoSuccRate:   overview.NR_SA_HO_SR ?? 0,
+    dlThroughput: overview.NR_PDCP_RATE_DL ?? 0,
+    radioDrop:    overview.CALL_DROP_RATE ?? 0,
+    prbUtil:      overview.NR_PRB_UTIL_DL ?? 0,
+    ulThroughput: 0,
+    voLteSuccRate: 0,
+  },
+  ...,
+};
+```
+
+这样 `kpiSummary['UE_ACTIVE']` 一旦后端给值，前端立刻能取到。
+
+[`pages/dashboard/index.tsx:179-180`](goomc/omcmb/webcode/src/pages/dashboard/index.tsx#L179-L180) 顺手把"无数据时"从 `0` 改成 `--`，避免假数据：
+
+```tsx
+const ueRaw = kpiSummary['UE_ACTIVE'];
+const currentActiveUE = ueRaw !== undefined ? Math.floor(ueRaw) : undefined;
+// KPICard value 支持 string，显示 '--'
+<KPICard value={currentActiveUE ?? '--'} ... />
+```
+
+#### 2. 后端 — 补 UE_ACTIVE 取数（**依赖 D1/D2 业务对齐**）
+
+依据决策 D2 的选项：
+- 选项 a：在 `GetSummary` 的 KPIOverview 装填阶段，显式查询 PM 表对应 K 编号的最新值，强制写入 `summary.KPIOverview["UE_ACTIVE"]`。
+- 选项 c：**移除/替换 KPI 卡**：在 `pages/dashboard/index.tsx` 把第 4 张卡从"活跃 UE"换成其它有真实数据的指标（如"在线小区数"），并在文档说明。
+
+#### 3. 后端 — 补 UE_ACTIVE delta（依赖 1 + 2）
+
+[`calculateKPIDeltas`](goomc/omcgo/internal/dashboard/service.go#L407-L450) 新增 `deltas["UE_ACTIVE"]` —— **先把 `T-0164-P4` 解掉**（见独立 issue F-derivative，本文件后续追加），否则趋势永远 stable。
+
+### 验收标准
+- **第 1 步合入后**：数据库存在 `UE_ACTIVE` 值时，KPI 卡实时显示该值；无数据时显示 `--` 而不是 `0`。
+- **第 2 步合入后**：业务环境下 KPI 卡显示非 0 实际值。
+- **第 3 步合入后**：KPI 卡显示"↑ 3.2% vs 上周"形式。
+- mock 数据切换时行为一致。
+- 单测：`mapBackendSummary({ kpi_overview: { UE_ACTIVE: 1234, ... } })` → `result.kpiSummary.UE_ACTIVE === 1234`。
+
+### 风险与回滚
+- 风险 1：第 1 步合入但 D1/D2 未确定 → KPI 卡仍显示 `--`（无回归，只是没修完）。
+- 风险 2：D2 选项 a 误用错误 K 编号 → 显示数值与业务不符 → 业务侧巡检。
+- 风险 3：若选 D2 选项 c（下线卡），需更新文档与截图。
+- 回滚：第 1 步可独立 revert；第 2/3 步若已合入则各自单 PR 回滚。
+
+### 工作量预估
+- 第 1 步前端契约：0.2 人日
+- 第 2 步后端数据源（取决于 D2）：0.3~0.5 人日
+- 第 3 步后端 delta：依赖独立 issue（修 `T-0164-P4`），见 Issue F-derivative。
+- **合计：第 1 步约 0.2 人日 + 业务对齐 + 后续 PR**
+
+### 实施顺序与依赖
+- **第 1 步独立合入**（与 Issue D 同批，单纯前端契约）。
+- 第 2/3 步等业务对齐 D1/D2 后再排期。
+- 建议分支：`fix/dashboard-active-ue-summary`
+
+---
+
+## Issue F（P1, Bug）
+
+### 标题
+首页"在线设备"KPI 卡在 totalDevices=0 时显示 `NaN%`（除零未保护）
+
+### Issue 提交稿（可直接用于 GitHub Bug 模板）
+
+#### 现状描述
+仪表板"在线设备数"卡的趋势区显示字面量 `NaN%`，发生在系统中无设备记录（新环境 / 首次启动 / `summary` 接口失败回退 0）的场景。
+
+#### 复现步骤
+1. 清空 devices 表（或断网 / mock 返回 `device_stats.total = 0`）。
+2. 刷新仪表板。
+3. "在线设备数"卡右下角显示 `NaN%`。
+
+#### 期望行为
+显示 `--` 或保留"在线率"标签但数值为 `0%`；不出现 `NaN`。
+
+#### 实际行为
+显示 `NaN%`。
+
+#### 影响面
+- 新部署 / 空环境 / 后端故障兜底场景所有用户。
+- 影响功能域：F02 Dashboard。
+
+#### 初步定位
+[`pages/dashboard/index.tsx:307-312`](goomc/omcmb/webcode/src/pages/dashboard/index.tsx#L307-L312):
+
+```tsx
+delta={`${Math.round((onlineDevices / totalDevices) * 100)}%`}
+```
+
+`totalDevices === 0` → `0 / 0 → NaN` → `Math.round(NaN) → NaN` → 模板字符串拼出 `"NaN%"`。
+
+#### 严重等级
+P1（用户首次接触系统就能看到的明显错误；新部署体验差）
+
+#### 关联
+- 建议分支：`fix/dashboard-online-rate-divzero`
+
+### 当前评估结论
+确认存在。最小改动，单行兜底；归类为 good-first-issue。
+
+### 代码证据（现状）
+- [`pages/dashboard/index.tsx:307-312`](goomc/omcmb/webcode/src/pages/dashboard/index.tsx#L307-L312)：
+  ```tsx
+  <KPICard
+    title={t('dashboard.onlineDevices')}
+    value={onlineDevices}
+    ...
+    delta={`${Math.round((onlineDevices / totalDevices) * 100)}%`}
+    deltaLabel={t('dashboard.onlineRate')}
+  />
+  ```
+
+### 根因
+单条无除零保护的纯算术表达式。
+
+### 修改方案（按分层）
+
+#### 1. 前端 — 单点修复
+
+[`pages/dashboard/index.tsx`](goomc/omcmb/webcode/src/pages/dashboard/index.tsx#L307-L312)：
+
+```tsx
+delta={totalDevices > 0
+  ? `${Math.round((onlineDevices / totalDevices) * 100)}%`
+  : '--'}
+```
+
+或抽 helper（如其它卡也复用）：
+
+```ts
+// pages/dashboard/utils.ts
+export const formatRate = (num: number, den: number): string =>
+  den > 0 ? `${Math.round((num / den) * 100)}%` : '--';
+```
+
+#### 2. 前端 — 单测
+
+`__tests__/dashboard.test.tsx` 新增：
+- `totalDevices=0` → KPI 卡 delta 文本为 `--`，**不含 `NaN`**。
+- `totalDevices=100, onlineDevices=50` → delta 为 `50%`。
+- `totalDevices=100, onlineDevices=0` → delta 为 `0%`。
+
+### 验收标准
+- 空环境下 KPI 卡显示 `--`，不出现 `NaN%`。
+- 正常数据下显示 `50%` 等百分比，行为不变。
+- 单测 3/3 通过。
+
+### 风险与回滚
+- 风险：抽 helper 时其它卡复用可能引入新分支 → 本期只动 onlineRate 一处，helper 与否二选一。
+- 回滚：单 commit revert。
+
+### 工作量预估
+- 前端 + 单测：0.1 人日
+
+### 实施顺序与依赖
+- **独立于 Issue A/B/C/D/E，可单切 PR**，最快可合入。
+- 建议分支：`fix/dashboard-online-rate-divzero`
+
+---
+
 ## Issue C+（占位 / TBD）
 
 后续仪表板 KPI 相关问题在此追加。每条 Issue 沿用 Issue A / B 的结构。
 
 候选项（待用户确认是否纳入）：
-- 用户级"首页多选偏好"持久化到后端（user-scoped settings）。
-- 多选下的单位不一致 → 双 Y 轴 / 单位分组子图（Issue B 决策 D3 的升级版）。
-- KPI 选择器（管理员配置页）放开全部指标后，搜索 / 分页 / 缓存策略。
-- 趋势接口在选中"暂无 K 编号"指标时的空数据提示与降级。
-- KPI Panel 在小屏 / 高密度下的图表压缩与 tooltip 互斥。
-- 多制式同 K 编号场景下的"重复指标去重"语义。
+- **F-derivative (P2, Bug)**: `service.countDevicesAtTime / countAlarmsAtTime` 始终返回当前值（`TODO(T-0164-P4)`），KPI 卡趋势永远 `stable` / `change_percent=0`。修 Issue D 后浮出水面，需真实历史查询（建议 `alarms_history` + 设备生命周期事件）。
+- **P2, Bug**: 仪表板 KPI 卡"总设备数"未带 `deleted_at IS NULL`，与设备状态柱图口径漂移（同一页两数对不上）。
+- **P3, Refactor**: 设备状态柱图 X 轴接 `useTechnologyDictionary`，与首页 Segmented 同源（沿用 Issue C hook）。
+- **P3, Feature**: KPI 折线图区加 Day/Week 切换入口（`DashboardKPIModules` 写死 `'yesterday'`，hook 已支持 `'last_week'`）。
+- **P3, Bug**: hour 桶时区不一致（前端 `getHours()` 用浏览器本地，后端聚合可能 UTC）。
+- **P3, Refactor**: `K900010006` 在 alias 表里被映为 `LTE_CELL_AVAILABLE` 与 `WIRELESS_SETUP_SR` 两种 KPI，需拆分或去歧义。
+- **P3, Task**: 推进 alias 表 4 项 `NeedsReview` 复核（`WIRELESS_SETUP_SR / HO_INTRA_*_SR / NR_PDCP_VOLUME_*`）。
+- **P3, Refactor**: 设备状态柱图 alarm 段与 online/offline 维度叠加，易误读为"三段相加 = 总数"。建议改 stacked。
+- **P3, Bug**: 4 等级告警柱图 sum 与 `alarmCounts.total` 在 `unknown` severity 下不一致（unknown 不进 4 等级字段）。
+- **P3, Feature**: 快捷入口 11 项接菜单权限源过滤，避免普通用户点进 403。
+- **P3, Feature**: KPI 配置页并发编辑冲突检测（version / ETag），避免双管理员互踩。
+- **P4, Refactor**: `taskSummary` 死代码全套（前端 type + mapping + UI + 后端无对应接口）。
+- **P4, Refactor**: `DASHBOARD_CONFIG` 三个开关 (`showRunningTasks` / `showRefreshControls` / `showDeviceMap`) 长期 false，决定删或激活。
+- **P4, Refactor**: `useKPIPanelData` / `KPIPanel` / `KPITrendChart` / `MultiKPITrendChart` 双轨残留。
+- **P4, Refactor**: `formatLastLogin` locale 硬编码 `'zh-CN'`，应接 store。
+- **P4, Task**: 后端 6 个 dashboard 端点首页未消费（`alarm-trend / alarm-type-pie / alarm-efficiency / alarm-heatmap * 2 / region-stats / widgets`），需归档或文档化用途。
+- **原候选项**：
+  - 用户级"首页多选偏好"持久化到后端（user-scoped settings）。
+  - 多选下的单位不一致 → 双 Y 轴 / 单位分组子图（Issue B 决策 D3 的升级版）。
+  - KPI 选择器（管理员配置页）放开全部指标后，搜索 / 分页 / 缓存策略。
+  - 趋势接口在选中"暂无 K 编号"指标时的空数据提示与降级。
+  - KPI Panel 在小屏 / 高密度下的图表压缩与 tooltip 互斥。
+  - 多制式同 K 编号场景下的"重复指标去重"语义。
+
+> 详细分析与定位见 [docs/analysis/dashboard-functional-business-alignment-analysis.md](../../../docs/analysis/dashboard-functional-business-alignment-analysis.md)。
 
 ---
 
@@ -709,12 +1151,43 @@ useEffect(() => {
 
 ## 5. 实施顺序建议
 
-1. Issue A（P1）：先发，影响所有用户、修复成本低、风险可控。
-2. Issue B 起后续问题按 P 级和受影响范围排序，逐项 PR 切片。
+按 P 级与受影响范围排序：
+
+1. **P1 第一批（最高优先 / 最小成本，可并行合入）**
+   - Issue F：在线率除零 → 0.1 人日，single-line fix
+   - Issue D：KPI 卡 delta 字段名错位 → 0.4 人日，纯前端契约改造
+   - Issue E 第 1 步：mapBackendSummary 透传 kpi_overview → 0.2 人日
+2. **P1 第二批（需业务对齐）**
+   - Issue E 第 2/3 步：UE_ACTIVE 后端数据源 + delta（依赖 D1/D2 业务对齐 + 修 `T-0164-P4`）
+3. **P1 历史项**
+   - Issue A：KPI 下拉翻译缺失（catalog 已合 / default layout 迁移待跟进）
+4. **P2 / P3**
+   - Issue B：折线图多选（依赖 A）
+   - Issue C：Segmented 字典驱动（独立，已合 PR #623）
+   - Issue C+ 候选项：按 P 级与受影响范围逐项 PR 切片
 
 ---
 
 ## 6. 分支与 PR 切片建议
+
+- **PR-F（Issue F，可立即合）**
+  - 建议分支：`fix/dashboard-online-rate-divzero`
+  - 涉及：`omcmb/webcode/src/pages/dashboard/index.tsx` 单点 + 1 个单测
+  - 无依赖
+
+- **PR-D（Issue D，与 PR-F 并行）**
+  - 建议分支：`fix/dashboard-kpi-delta-camelcase`
+  - 涉及：`frontend-core/src/types/dashboard.ts` + `services/api/dashboardApi.ts` + `mock/services/dashboardService.ts` + 单测
+  - 无后端改动
+
+- **PR-E1（Issue E 第 1 步，与 D 同批）**
+  - 建议分支：`fix/dashboard-active-ue-summary-passthrough`
+  - 涉及：`frontend-core/src/services/api/dashboardApi.ts`（透传 kpi_overview）+ `pages/dashboard/index.tsx`（`'--'` 兜底）+ 单测
+  - 无后端改动
+
+- **PR-E2 / PR-E3（Issue E 第 2/3 步）**
+  - 待业务对齐 D1/D2 后再切
+  - 涉及后端 `omcgo/internal/dashboard/service.go`
 
 - PR-A（Issue A）
   - 建议分支：`fix/600-dashboard-kpi-i18n-catalog`（已合入主线为准，否则按此命名）
