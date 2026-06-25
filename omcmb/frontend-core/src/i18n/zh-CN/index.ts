@@ -4718,6 +4718,8 @@ const messages: Record<string, string> = {
   'software.upgrade.targetVersion':          '升级版本',
   'software.upgrade.upgradeType':            '升级类型',
   'software.upgrade.upgradeProgress':        '升级进度',
+  // #626：主任务列表进度列下方额外一行，露绝对数给测试/运维看。
+  'software.upgrade.progressDetail':         '完成 {done}/{total} · 失败 {fail}',
   'software.upgrade.immediateUpgrade':       '立即升级',
   'software.upgrade.scheduledUpgrade':       '定时升级',
   'software.upgrade.manualUpgrade':          '手动升级',

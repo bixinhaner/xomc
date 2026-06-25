@@ -4687,6 +4687,8 @@ const messages: Record<string, string> = {
   'software.upgrade.targetVersion':          'Target Version',
   'software.upgrade.upgradeType':            'Upgrade Type',
   'software.upgrade.upgradeProgress':        'Upgrade Progress',
+  // #626：second line in main task list progress column, exposes absolute counts.
+  'software.upgrade.progressDetail':         'Done {done}/{total} · Failed {fail}',
   'software.upgrade.immediateUpgrade':       'Immediate Upgrade',
   'software.upgrade.scheduledUpgrade':       'Scheduled Upgrade',
   'software.upgrade.manualUpgrade':          'Manual Upgrade',
