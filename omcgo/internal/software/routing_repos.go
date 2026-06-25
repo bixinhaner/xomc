@@ -145,31 +145,57 @@ func (r *RoutingTaskRepository) Delete(ctx context.Context, id uuid.UUID) error 
 }
 
 // List 跨业务列表查询：fan-out 各表 list，合并后按 created_at DESC 排序。
-// 这是 SoftwareService.ListTasks 走的路径（UFTE 列表跨业务用 List + filter）。
+// 这是 SoftwareService.ListTasks 与 ufte.Service.loadAllTasks 走的路径
+// （UFTE 任务管理 Tab「任务列表」跨业务用 List + filter）。
+//
+// #653 同类：每张 task 表内部循环翻页拉全量。早期实现把 filter 原样下发到每张表，
+// 然后按 union 后的 total 算 totalPages 给外层切片——但底层 PgTaskRepository.List
+// 硬 cap pageSize=100，导致单业务任务数 > 100 时只拿到前 100 条，第 101 条起
+// 静默丢失（外层 loadAllTasks 看到 page >= totalPages 就 break）。
+// 修复策略与 RoutingSubTaskRepository.ListAll 一致：单表内 cap=100 循环翻页拉全，
+// 累加 total 一次，再 union + sort + 应用层切片。
 func (r *RoutingTaskRepository) List(ctx context.Context, filter UpgradeTaskFilter) (*model.ListResponse[UpgradeTask], error) {
-	repos := r.allTaskRepos()
-	merged := make([]UpgradeTask, 0)
-	var total int64
-	for _, repo := range repos {
-		page, err := repo.List(ctx, filter)
-		if err != nil {
-			return nil, err
-		}
-		merged = append(merged, page.Items...)
-		total += page.Total
-	}
-	// 应用层排序（各表已 ORDER BY created_at DESC，merge 再排）
-	sortTasksByCreatedDesc(merged)
-	// 分页：filter 已经被各 repo 内部应用，但 union 后总数变了 → 这里粗糙处理
-	// 因为 UFTE 跨业务列表实际通过 SubTaskRepository.ListAll 取，main task List 调用频率低
-	pageSize := filter.PageSize
-	if pageSize < 1 {
-		pageSize = 20
-	}
 	page := filter.Page
 	if page < 1 {
 		page = 1
 	}
+	pageSize := filter.PageSize
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+
+	// 每张表内部循环翻页拉全量。单表分页大小跟 PgTaskRepository 的硬 cap 100 对齐。
+	const perTablePageSize = 100
+	merged := make([]UpgradeTask, 0)
+	var total int64
+	for _, repo := range r.allTaskRepos() {
+		repoTotalSeen := false
+		for subPage := 1; ; subPage++ {
+			sub := filter
+			sub.Page = subPage
+			sub.PageSize = perTablePageSize
+			res, err := repo.List(ctx, sub)
+			if err != nil {
+				return nil, err
+			}
+			if !repoTotalSeen {
+				// 每张表只累加一次 total（res.Total 是该表过滤后的全行数，与 page 无关）
+				total += res.Total
+				repoTotalSeen = true
+			}
+			merged = append(merged, res.Items...)
+			if subPage >= res.TotalPages || len(res.Items) == 0 {
+				break
+			}
+		}
+	}
+
+	// 应用层排序（各表已 ORDER BY created_at DESC，merge 再排）
+	sortTasksByCreatedDesc(merged)
+
 	start := (page - 1) * pageSize
 	end := start + pageSize
 	if start > len(merged) {
