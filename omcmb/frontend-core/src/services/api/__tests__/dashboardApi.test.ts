@@ -73,9 +73,12 @@ describe('dashboardApi.getSummary — Backend → DashboardSummary 映射', () =
     // 缺键兜 0（不是 undefined）
     expect(s.kpiSummary.radioDrop).toBe(0);
     expect(s.kpiSummary.prbUtil).toBe(0);
-    // 后端字符串 trend/compare_type 被断言为字面量类型，值透传
+    // 后端 snake_case 被 mapBackendSummary 转为前端 camelCase 契约（Issue D 修复）
     expect(s.kpiDeltas.RRC_CONN_SETUP_SR.trend).toBe('up');
-    expect(s.kpiDeltas.RRC_CONN_SETUP_SR.compare_type).toBe('yesterday');
+    expect(s.kpiDeltas.RRC_CONN_SETUP_SR.compareType).toBe('yesterday');
+    expect(s.kpiDeltas.RRC_CONN_SETUP_SR.changePercent).toBe(0.5);
+    expect(s.kpiDeltas.RRC_CONN_SETUP_SR.currentValue).toBe(99.5);
+    expect(s.kpiDeltas.RRC_CONN_SETUP_SR.previousValue).toBe(99.0);
   });
 
   it('kpi_deltas 缺省（null）时不崩，返空对象', async () => {
