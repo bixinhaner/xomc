@@ -369,12 +369,15 @@ func (r *RoutingSubTaskRepository) ListByTaskID(ctx context.Context, taskID uuid
 // 内部按 created_at DESC 排好序的页 → merge 全部 items → 按 created_at DESC 重排 →
 // 应用 page/pageSize 切片。total 是 sum，分页是新的 total 上的页。
 //
+// #653：早期实现把每张表的 wideFilter 硬编码 page=1、pageSize=100，**不翻页**，
+// 单任务 sub_task > 100 时第 101 条起永远拉不到（UFTE 设备列表/导出丢一半）。
+// 现在循环翻页拉每张表全量，再 union + 切片。
+//
 // 性能：每张子表当前最坏只有数百行（未来到 10 万级时单表也只是  万级 hypertable
 // 早做分区即可），全 union 加载到内存可控。如需更严格性能，后续可改成数据库
 // VIEW (CREATE VIEW v_all_sub_tasks AS SELECT ... FROM upgrade_sub_tasks UNION ALL
 // SELECT ... FROM config_backup_sub_tasks ...) + 单次分页查询。
 func (r *RoutingSubTaskRepository) ListAll(ctx context.Context, filter AllSubTaskFilter) (*model.ListResponse[UpgradeSubTaskWithTaskName], error) {
-	// 拉每张表的全量（去掉 pagination，但保留 filter 过滤条件）
 	page := filter.Page
 	if page < 1 {
 		page = 1
@@ -386,19 +389,32 @@ func (r *RoutingSubTaskRepository) ListAll(ctx context.Context, filter AllSubTas
 	if pageSize > 100 {
 		pageSize = 100
 	}
-	wideFilter := filter
-	wideFilter.Page = 1
-	wideFilter.PageSize = 100 // 每张表上限 100 行 — 跟原 software 实现 cap 对齐
 
+	// 每张表内部循环翻页拉全量。单表分页大小跟 PgSubTaskRepository 的硬 cap 100 对齐
+	// （子层 pageSize>100 会被截到 100，所以这里直接用 100 一次最多拉一页）。
+	const perTablePageSize = 100
 	merged := make([]UpgradeSubTaskWithTaskName, 0)
 	var total int64
 	for _, repo := range r.allSubTaskRepos() {
-		res, err := repo.ListAll(ctx, wideFilter)
-		if err != nil {
-			return nil, err
+		repoTotalSeen := false
+		for subPage := 1; ; subPage++ {
+			sub := filter
+			sub.Page = subPage
+			sub.PageSize = perTablePageSize
+			res, err := repo.ListAll(ctx, sub)
+			if err != nil {
+				return nil, err
+			}
+			if !repoTotalSeen {
+				// 每张表只累加一次 total（res.Total 是该表过滤后的全行数，与 page 无关）
+				total += res.Total
+				repoTotalSeen = true
+			}
+			merged = append(merged, res.Items...)
+			if subPage >= res.TotalPages || len(res.Items) == 0 {
+				break
+			}
 		}
-		merged = append(merged, res.Items...)
-		total += res.Total
 	}
 
 	sortSubTasksByCreatedDesc(merged)
