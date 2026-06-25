@@ -4381,7 +4381,8 @@ const messages: Record<string, string> = {
   'system.security.defaultPassword':         'Default Password',
   // Issue #649: hardened to mandatory rule (admin-injected = always force change),
   // i18n key 'system.security.forcePasswordChangeOnFirstLogin' removed
-  'system.security.useAsDefaultPassword':    'Use as default password for login and password reset',
+  // Issue #649: copy aligned with backend hard rule — admin-injected users are forced to change on first login
+  'system.security.useAsDefaultPassword':    'Used as the default password when creating users or resetting passwords; users assigned this password are forced to change it on first login',
   'system.security.defaultPasswordDriftWarning': 'Before tightening password strength rules below, ensure the current default password still satisfies the new rules.',
   // Issue #649: default-password related user management i18n (System Config → Security linkage)
   'system.user.useDefaultPassword':          'Use system default password',

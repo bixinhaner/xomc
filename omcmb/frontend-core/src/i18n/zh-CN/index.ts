@@ -4410,7 +4410,8 @@ const messages: Record<string, string> = {
   'system.security.defaultPassword':         '默认密码',
   // Issue #649：废弃硬规则化（管理员注入即强制改密），i18n 同步删除该文案
   // 'system.security.forcePasswordChangeOnFirstLogin' 已下线
-  'system.security.useAsDefaultPassword':    '将...作为默认密码登录，用户被密码重置后使用此密码',
+  // Issue #649：文案对齐后端硬规则 — 管理员注入此密码的用户首次登录强制改密
+  'system.security.useAsDefaultPassword':    '创建用户和重置密码时可使用此密码；使用此密码的用户首次登录将被强制修改',
   'system.security.defaultPasswordDriftWarning': '调整下方密码强度规则前，请确保当前默认密码仍满足新规则',
   // Issue #649：默认密码相关用户管理文案（系统配置 → 安全设置 联动）
   'system.user.useDefaultPassword':          '使用系统默认密码',

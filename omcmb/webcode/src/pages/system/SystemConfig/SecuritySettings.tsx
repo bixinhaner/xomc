@@ -1,4 +1,4 @@
-import { Form, Input, InputNumber, Checkbox, Card, Space, theme } from 'antd';
+import { Form, Input, InputNumber, Checkbox, Card, Space, Alert, theme } from 'antd';
 import { useT } from '@/hooks/useT';
 
 interface SecuritySettingsProps {
@@ -26,7 +26,6 @@ export default function SecuritySettings({ form }: SecuritySettingsProps) {
 
   return (
     <Form form={form} layout="vertical" size="small" initialValues={{
-      modifyPWD: false,
       defaultPasswd: 'OMC@123456',
       passwordContent: false,
       pwdMinLength: 10,
@@ -53,14 +52,19 @@ export default function SecuritySettings({ form }: SecuritySettingsProps) {
       {/* 默认密码 */}
       <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.security.defaultPassword')}</span>} style={{ marginBottom: 16 }}>
         <div style={settingRowStyle}>
-          <Form.Item name="modifyPWD" valuePropName="checked" noStyle>
-            <Checkbox>{t('system.security.forcePasswordChangeOnFirstLogin')}</Checkbox>
-          </Form.Item>
+          {/* Issue #649：modifyPWD 按设计废弃（管理员注入密码已改为后端硬规则强制首次改密）。
+              下方 Alert 提示密码强度规则调整后要检查默认密码是否仍满足，避免 drift。 */}
+          <Alert
+            type="info"
+            showIcon
+            message={t('system.security.defaultPasswordDriftWarning')}
+            style={{ marginBottom: 12 }}
+          />
           <div style={subSettingStyle}>
             <Space>
               {t('system.security.useAsDefaultPassword')}
               <Form.Item name="defaultPasswd" noStyle>
-                <Input style={{ width: 120 }} maxLength={50} />
+                <Input style={{ width: 160 }} maxLength={50} />
               </Form.Item>
             </Space>
           </div>
