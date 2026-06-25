@@ -31,6 +31,7 @@ func initDeviceModule(c *Container) error {
 	//      在线设备,事务性翻 is_online=false + 累加 cumulative_online_duration +
 	//      publish device.offline。
 	reconciler := device.NewDeviceStatusReconciler(c.Redis, deviceRepo, c.EventBus, logger)
+	reconciler.SetOfflineAlarmSink(c.AlarmEngine)
 	// issue #203：离线阈值接 sys_configs (category='device') 实时配置。
 	//   - key=enbTimeout → 基站类阈值（秒，默认 100）
 	//   - key=cpeTimeout → CPE 类阈值（秒，默认 600）
@@ -68,6 +69,7 @@ func initDeviceModule(c *Container) error {
 	// DeviceService
 	deviceCache := device.NewDeviceCache(c.Redis, logger)
 	deviceService := device.NewDeviceService(deviceRepo, paramRepo, reconciler, c.EventBus, logger)
+	deviceService.SetDisconnectedAlarmCleaner(c.AlarmPgStore, c.AlarmEngine)
 	deviceService.SetDeviceCache(deviceCache)
 	deviceService.SetDeviceInfoRepo(deviceInfoRepo)
 	// IDOR 防护：按 ID 直读端点据此判定调用者对设备所属设备组的归属。

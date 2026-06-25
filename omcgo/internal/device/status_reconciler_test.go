@@ -58,6 +58,19 @@ func (m *mockReconcilerRepo) MarkOfflineWithAccounting(ctx context.Context, devi
 	return m.markFn(ctx, deviceID, reason, now)
 }
 
+type capturingOfflineAlarmSink struct {
+	alarms []*model.Alarm
+	err    error
+}
+
+func (s *capturingOfflineAlarmSink) Process(_ context.Context, alarm *model.Alarm) error {
+	if s.err != nil {
+		return s.err
+	}
+	s.alarms = append(s.alarms, alarm)
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -191,6 +204,88 @@ func TestMarkOffline_PublishesEventOnTransition(t *testing.T) {
 	case <-time.After(1 * time.Second):
 		t.Fatal("expected device.offline event not received")
 	}
+}
+
+func TestMarkOffline_RaisesDisconnectedAlarmByTechnology(t *testing.T) {
+	tests := []struct {
+		name       string
+		tech       model.Technology
+		wantID     string
+		wantSource string
+	}{
+		{name: "LTE eNB", tech: model.TechLTE, wantID: "7", wantSource: "OMC"},
+		{name: "NR gNB", tech: model.TechNR, wantID: "23", wantSource: "OMC"},
+		{name: "GSM", tech: model.TechGSM, wantID: "4", wantSource: "OMC"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stale := &model.Device{
+				ID:           uuid.New(),
+				SerialNumber: "SN-" + tt.wantID,
+				Carrier:      model.CarrierCMCC,
+				Technology:   tt.tech,
+			}
+			sink := &capturingOfflineAlarmSink{}
+			repo := &mockReconcilerRepo{
+				markFn: func(_ context.Context, _ uuid.UUID, _ string, _ time.Time) (bool, error) {
+					return true, nil
+				},
+			}
+			r, _ := newTestReconciler(t, repo, nil)
+			r.SetOfflineAlarmSink(sink)
+
+			transitioned, err := r.markOffline(context.Background(), stale)
+
+			require.NoError(t, err)
+			assert.True(t, transitioned)
+			require.Len(t, sink.alarms, 1)
+			alarm := sink.alarms[0]
+			assert.Equal(t, tt.wantID, alarm.AlarmIdentifier)
+			require.NotNil(t, alarm.AlarmSource)
+			assert.Equal(t, tt.wantSource, *alarm.AlarmSource)
+			assert.Equal(t, stale.ID, alarm.DeviceID)
+			assert.Equal(t, stale.SerialNumber, alarm.DeviceSN)
+			assert.Equal(t, model.AlarmCritical, alarm.Severity)
+			require.NotNil(t, alarm.Technology)
+			assert.Equal(t, string(tt.tech), *alarm.Technology)
+		})
+	}
+}
+
+func TestMarkOffline_DoesNotRaiseDisconnectedAlarmWhenAlreadyOffline(t *testing.T) {
+	stale := &model.Device{ID: uuid.New(), SerialNumber: "SN-IDEM-ALARM", Technology: model.TechLTE}
+	sink := &capturingOfflineAlarmSink{}
+	repo := &mockReconcilerRepo{
+		markFn: func(_ context.Context, _ uuid.UUID, _ string, _ time.Time) (bool, error) {
+			return false, nil
+		},
+	}
+	r, _ := newTestReconciler(t, repo, nil)
+	r.SetOfflineAlarmSink(sink)
+
+	transitioned, err := r.markOffline(context.Background(), stale)
+
+	require.NoError(t, err)
+	assert.False(t, transitioned)
+	assert.Empty(t, sink.alarms)
+}
+
+func TestMarkOffline_AlarmFailureDoesNotFailOfflineTransition(t *testing.T) {
+	stale := &model.Device{ID: uuid.New(), SerialNumber: "SN-ALARM-FAIL", Technology: model.TechLTE}
+	sink := &capturingOfflineAlarmSink{err: errors.New("alarm store down")}
+	repo := &mockReconcilerRepo{
+		markFn: func(_ context.Context, _ uuid.UUID, _ string, _ time.Time) (bool, error) {
+			return true, nil
+		},
+	}
+	r, _ := newTestReconciler(t, repo, nil)
+	r.SetOfflineAlarmSink(sink)
+
+	transitioned, err := r.markOffline(context.Background(), stale)
+
+	require.NoError(t, err)
+	assert.True(t, transitioned)
 }
 
 func TestMarkOffline_NoEventWhenAlreadyOffline(t *testing.T) {

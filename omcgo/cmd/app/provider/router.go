@@ -57,7 +57,7 @@ func Setup(r *gin.Engine, c *Container) error {
 		// 才能回填 devices.model_name；ModuleGraph 必须保证 productregistry 先于
 		// device 初始化。漏掉此依赖会让 SetProductMatcher 跳过 → productMatcher=nil
 		// → applyProductMetadata 第一行 return → 永远不调 MatchProductClass。
-		Depends: []string{"topology", "productregistry"},
+		Depends: []string{"topology", "productregistry", "alarm"},
 		Init:    func() error { return initDeviceModule(c) },
 	})
 	graph.Add(components.ModuleInitializer{

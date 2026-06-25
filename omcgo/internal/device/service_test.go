@@ -116,6 +116,20 @@ func (m *mockDeviceRepo) CountByStatus(ctx context.Context, carrier *model.Carri
 	return map[model.DeviceStatus]int64{}, nil
 }
 
+type mockDisconnectedAlarmCleaner struct {
+	active  map[string]*model.Alarm
+	cleared []*model.Alarm
+}
+
+func (m *mockDisconnectedAlarmCleaner) GetActiveByDeviceAndIdentifier(_ context.Context, deviceSN string, alarmIdentifier string) (*model.Alarm, error) {
+	return m.active[deviceSN+":"+alarmIdentifier], nil
+}
+
+func (m *mockDisconnectedAlarmCleaner) ClearBySync(_ context.Context, alarm *model.Alarm) error {
+	m.cleared = append(m.cleared, alarm)
+	return nil
+}
+
 func (m *mockDeviceRepo) ListActiveByLastInform(_ context.Context, _ *time.Time, _ *uuid.UUID, _ int) ([]model.Device, error) {
 	return []model.Device{}, nil
 }
@@ -1111,6 +1125,73 @@ func TestUpdateFromInform_OfflineToActive_PublishesOnlineEvent(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("expected device.online event not published within 2s")
 	}
+}
+
+func TestUpdateFromInform_OfflineToActive_ClearsDisconnectedAlarm(t *testing.T) {
+	deviceID := uuid.New()
+	omc := "OMC"
+	disconnectedAlarm := &model.Alarm{
+		ID:              uuid.New(),
+		DeviceID:        deviceID,
+		DeviceSN:        "SN-ONLINE-ALARM",
+		AlarmIdentifier: "7",
+		AlarmSource:     &omc,
+	}
+	cleaner := &mockDisconnectedAlarmCleaner{active: map[string]*model.Alarm{
+		"SN-ONLINE-ALARM:7": disconnectedAlarm,
+	}}
+	deviceRepo := &mockDeviceRepo{
+		getBySerialNumberFn: func(_ context.Context, sn string) (*model.Device, error) {
+			return &model.Device{
+				ID:              deviceID,
+				SerialNumber:    sn,
+				Status:          model.DeviceOffline,
+				Technology:      model.TechLTE,
+				FirmwareVersion: "1.0.0",
+				InformInterval:  300,
+			}, nil
+		},
+		updateFn: func(_ context.Context, _ *model.Device) error { return nil },
+	}
+	svc := NewDeviceService(deviceRepo, &mockParamRepo{}, nil, nil, zap.NewNop())
+	svc.SetDisconnectedAlarmCleaner(cleaner, cleaner)
+
+	dev, err := svc.UpdateFromInform(context.Background(), sampleInform("SN-ONLINE-ALARM"))
+
+	require.NoError(t, err)
+	require.NotNil(t, dev)
+	require.Len(t, cleaner.cleared, 1)
+	assert.Equal(t, disconnectedAlarm.ID, cleaner.cleared[0].ID)
+	require.NotNil(t, cleaner.cleared[0].ClearedBy)
+	assert.Equal(t, "system:device_online", *cleaner.cleared[0].ClearedBy)
+	require.NotNil(t, cleaner.cleared[0].ClearNote)
+	assert.Equal(t, "device reported online", *cleaner.cleared[0].ClearNote)
+}
+
+func TestUpdateFromInform_ActiveStaysActive_DoesNotClearDisconnectedAlarm(t *testing.T) {
+	cleaner := &mockDisconnectedAlarmCleaner{active: map[string]*model.Alarm{
+		"SN-STILL-ACTIVE-ALARM:7": {ID: uuid.New(), DeviceSN: "SN-STILL-ACTIVE-ALARM", AlarmIdentifier: "7"},
+	}}
+	deviceRepo := &mockDeviceRepo{
+		getBySerialNumberFn: func(_ context.Context, sn string) (*model.Device, error) {
+			return &model.Device{
+				ID:              uuid.New(),
+				SerialNumber:    sn,
+				Status:          model.DeviceActive,
+				Technology:      model.TechLTE,
+				FirmwareVersion: "1.0.0",
+				InformInterval:  300,
+			}, nil
+		},
+		updateFn: func(_ context.Context, _ *model.Device) error { return nil },
+	}
+	svc := NewDeviceService(deviceRepo, &mockParamRepo{}, nil, nil, zap.NewNop())
+	svc.SetDisconnectedAlarmCleaner(cleaner, cleaner)
+
+	_, err := svc.UpdateFromInform(context.Background(), sampleInform("SN-STILL-ACTIVE-ALARM"))
+
+	require.NoError(t, err)
+	assert.Empty(t, cleaner.cleared)
 }
 
 func TestUpdateFromInform_FirmwareChangedSuppressesOnlineEvent(t *testing.T) {

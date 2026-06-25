@@ -37,6 +37,8 @@ type DeviceService struct {
 	deviceRepo        DeviceRepository
 	paramRepo         DeviceParameterRepository
 	deviceInfoRepo    DeviceInfoRepository
+	disconnectAlarms  disconnectedAlarmStore
+	disconnectClearer disconnectedAlarmClearer
 	regRepo           RegistrationRepository
 	groupAssigner     GroupAssigner
 	infoSyncer        *InfoSyncer
@@ -56,6 +58,14 @@ type DeviceService struct {
 	productBinder     ProductBinder            // T-0176-PR-D：CreateDevice inline match 后写回 product_id（nil = 禁用）
 	groupReader       DeviceGroupReader        // 越权校验：读设备组归属（nil = 退化为不校验，见 AuthorizeDeviceGroupAccess）
 	logger            *zap.Logger
+}
+
+type disconnectedAlarmStore interface {
+	GetActiveByDeviceAndIdentifier(ctx context.Context, deviceSN string, alarmIdentifier string) (*model.Alarm, error)
+}
+
+type disconnectedAlarmClearer interface {
+	ClearBySync(ctx context.Context, alarm *model.Alarm) error
 }
 
 // LicenseEnforcer is the narrow interface DeviceService consumes from the
@@ -111,6 +121,12 @@ func (s *DeviceService) SetTaskService(t task.Enqueuer) {
 // than queue an unkeyed SetParameterValues.
 func (s *DeviceService) SetCarrierRegistry(r *carrier.CarrierRegistry) {
 	s.carrierRegistry = r
+}
+
+// SetDisconnectedAlarmCleaner wires OMC disconnected-alarm cleanup for offline→online recovery.
+func (s *DeviceService) SetDisconnectedAlarmCleaner(store disconnectedAlarmStore, clearer disconnectedAlarmClearer) {
+	s.disconnectAlarms = store
+	s.disconnectClearer = clearer
 }
 
 // SetConnectionRequester sets the connection request client.
@@ -857,6 +873,9 @@ func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.Info
 	newVersion := device.FirmwareVersion
 	firmwareChanged := oldVersion != "" && newVersion != "" && oldVersion != newVersion
 	becameOnline := oldStatus == model.DeviceOffline && device.Status == model.DeviceActive
+	if becameOnline {
+		s.clearDisconnectedAlarmOnOnline(ctx, device)
+	}
 	if firmwareChanged {
 		s.PublishDeviceFirmwareChangedEvent(ctx, device, oldVersion, newVersion, becameOnline)
 	} else if becameOnline {
@@ -864,6 +883,42 @@ func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.Info
 	}
 
 	return device, nil
+}
+
+func (s *DeviceService) clearDisconnectedAlarmOnOnline(ctx context.Context, device *model.Device) {
+	if s.disconnectAlarms == nil || s.disconnectClearer == nil || device == nil {
+		return
+	}
+	identifier, _, ok := disconnectedAlarmForTechnology(device.Technology)
+	if !ok {
+		return
+	}
+	alarm, err := s.disconnectAlarms.GetActiveByDeviceAndIdentifier(ctx, device.SerialNumber, identifier)
+	if err != nil {
+		s.logger.Warn("lookup disconnected alarm on device online failed",
+			zap.Error(err),
+			zap.String("device_id", device.ID.String()),
+			zap.String("serial_number", device.SerialNumber),
+			zap.String("alarm_identifier", identifier))
+		return
+	}
+	if alarm == nil {
+		return
+	}
+	if alarm.AlarmSource != nil && strings.TrimSpace(*alarm.AlarmSource) != "" && strings.TrimSpace(*alarm.AlarmSource) != "OMC" {
+		return
+	}
+	clearedBy := "system:device_online"
+	clearNote := "device reported online"
+	alarm.ClearedBy = &clearedBy
+	alarm.ClearNote = &clearNote
+	if err := s.disconnectClearer.ClearBySync(ctx, alarm); err != nil {
+		s.logger.Warn("clear disconnected alarm on device online failed",
+			zap.Error(err),
+			zap.String("device_id", device.ID.String()),
+			zap.String("serial_number", device.SerialNumber),
+			zap.String("alarm_identifier", identifier))
+	}
 }
 
 // TransitionStatus validates and executes a device state transition.
