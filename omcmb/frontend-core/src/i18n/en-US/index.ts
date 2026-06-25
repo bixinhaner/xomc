@@ -1985,6 +1985,9 @@ const messages: Record<string, string> = {
   // P1+P2 security policy
   'login.notifyTitle':          'System Notice',
   'login.mustChangePassword':   'Please change your password before continuing',
+  'login.mustChangePassword.title':   'Password Change Required',
+  'login.mustChangePassword.content': 'To keep your account secure, please change your password now. The system cannot be used until your password is changed.',
+  'login.mustChangePassword.confirm': 'Change password now',
   'login.passwordExpiringSoon': 'Your password will expire in {days} day(s); please update it soon',
 
   // -------------------------------------------------------------------------

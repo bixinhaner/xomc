@@ -1991,6 +1991,9 @@ const messages: Record<string, string> = {
   // P1+P2 安全策略相关
   'login.notifyTitle':           '系统通知',
   'login.mustChangePassword':    '请先修改密码后再使用系统',
+  'login.mustChangePassword.title':   '需修改密码',
+  'login.mustChangePassword.content': '为保障账号安全，请立即修改密码。修改完成前无法继续使用系统。',
+  'login.mustChangePassword.confirm': '立即修改密码',
   'login.passwordExpiringSoon':  '您的密码将在 {days} 天后过期，请尽快修改',
 
   // -------------------------------------------------------------------------
