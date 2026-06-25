@@ -112,10 +112,10 @@ type DeviceItem struct {
 	TargetFile string `json:"targetFile,omitempty"`
 	// DownloadURL 是 CPE 上传完成、ACS 落 MinIO 后的 1h presigned GET 链接；
 	// 仅当子任务已 ended 且 backup_restore_file 元数据存在时填充，否则留空。
-	DownloadURL  string `json:"downloadUrl,omitempty"`
-	Status       string `json:"status"`
-	Result       string `json:"result,omitempty"`
-	Progress     int    `json:"progress"`
+	DownloadURL string `json:"downloadUrl,omitempty"`
+	Status      string `json:"status"`
+	Result      string `json:"result,omitempty"`
+	Progress    int    `json:"progress"`
 	// StartedAt 子任务首次进入执行态（downloading/uploading/rebooting/verifying）时由 PG repo
 	// 写入 upgrade_sub_tasks.started_at；未开始为空 → JSON omitempty 不输出。
 	// 三皮肤设备列表「开始时间」列展示。

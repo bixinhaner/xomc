@@ -40,14 +40,14 @@ func newServiceForMap(t *testing.T) *Service {
 func makeRestoreSubTask(taskID uuid.UUID, destFileName string) software.UpgradeSubTaskWithTaskName {
 	return software.UpgradeSubTaskWithTaskName{
 		UpgradeSubTask: software.UpgradeSubTask{
-			ID:           uuid.New(),
-			TaskID:       taskID,
-			DeviceID:     uuid.New(),
-			DeviceSN:     "SN-001",
-			Status:       software.UpgradeCompleted,
-			DestVersion:  destFileName,
-			OriVersion:   "v1.0",
-			CommandKey:   software.BuildDirectDispatchCommandKey("CONFIG_RESTORE", taskID, "SN-001"),
+			ID:          uuid.New(),
+			TaskID:      taskID,
+			DeviceID:    uuid.New(),
+			DeviceSN:    "SN-001",
+			Status:      software.UpgradeCompleted,
+			DestVersion: destFileName,
+			OriVersion:  "v1.0",
+			CommandKey:  software.BuildDirectDispatchCommandKey("CONFIG_RESTORE", taskID, "SN-001"),
 		},
 		TaskName: "restore-task",
 	}
@@ -300,4 +300,82 @@ func TestMapDeviceItem_StartedAndEndedAt_Pending(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, item.StartedAt, "pending 态 StartedAt 必须为空")
 	assert.Empty(t, item.EndedAt, "pending 态 EndedAt 必须为空")
+}
+
+// issue #655 追加：被操作者主动终止的子任务在执行态之前被叫停 → repo 只写了
+// completed_at(=EndedAt)，started_at 为空。mapDeviceItem 应兜底 StartedAt = EndedAt，
+// 同时 FailureReason 在 sub_task 为空时兜底为「终止」（与前端列展示对齐）。
+func TestMapDeviceItem_Terminated_StartedAtFallbackAndFailureReason(t *testing.T) {
+	svc := newServiceForMap(t)
+	catalog := mustCatalog(t, "RUNTIME_LOG_COLLECT")
+	parent := &software.UpgradeTask{
+		ID:       uuid.New(),
+		TaskName: "log-task",
+		TaskType: software.TaskTypeLogCollect,
+	}
+	completedAt := time.Date(2026, 6, 25, 14, 52, 58, 0, time.UTC)
+	completedAtModel := coremodel.Time(completedAt)
+	sub := software.UpgradeSubTaskWithTaskName{
+		UpgradeSubTask: software.UpgradeSubTask{
+			ID:            uuid.New(),
+			TaskID:        parent.ID,
+			DeviceID:      uuid.New(),
+			DeviceSN:      "SN-655T",
+			Status:        software.UpgradeTerminated,
+			StartedAt:     nil, // 未进入执行态就被终止
+			CompletedAt:   &completedAtModel,
+			UpdatedAt:     coremodel.Time(completedAt),
+			FailureReason: "", // TerminateUpgrade 只写 ErrorMessage 不写 FailureReason
+			ErrorMessage:  "task terminated by operator",
+		},
+		TaskName: "log-task",
+	}
+	cache := map[uuid.UUID]*coremodel.Device{
+		sub.DeviceID: {ID: sub.DeviceID, SerialNumber: "SN-655T"},
+	}
+	item, err := svc.mapDeviceItem(context.Background(), catalog, sub, parent, cache)
+	require.NoError(t, err)
+	assert.Equal(t, "terminated", item.Result, "前置：terminated 走的是 result=terminated 分支")
+	assert.Equal(t, completedAt.Format(time.RFC3339), item.EndedAt)
+	assert.Equal(t, item.EndedAt, item.StartedAt, "terminated 且 StartedAt 空时应兜底 = EndedAt")
+	assert.Equal(t, "终止", item.FailureReason, "terminated 且 FailureReason 空时应兜底为「终止」")
+	assert.Equal(t, "task terminated by operator", item.FailureDetail, "FailureDetail 保持设备原始 ErrorMessage 不动")
+}
+
+// issue #655 追加：terminated 但 repo 已写过 started_at（执行中被中断）→ StartedAt
+// 应保留 repo 真实值，不被 EndedAt 覆盖。
+func TestMapDeviceItem_Terminated_PreserveExistingStartedAt(t *testing.T) {
+	svc := newServiceForMap(t)
+	catalog := mustCatalog(t, "RUNTIME_LOG_COLLECT")
+	parent := &software.UpgradeTask{
+		ID:       uuid.New(),
+		TaskName: "log-task",
+		TaskType: software.TaskTypeLogCollect,
+	}
+	startedAt := time.Date(2026, 6, 25, 14, 50, 0, 0, time.UTC)
+	completedAt := startedAt.Add(2 * time.Minute)
+	startedAtModel := coremodel.Time(startedAt)
+	completedAtModel := coremodel.Time(completedAt)
+	sub := software.UpgradeSubTaskWithTaskName{
+		UpgradeSubTask: software.UpgradeSubTask{
+			ID:           uuid.New(),
+			TaskID:       parent.ID,
+			DeviceID:     uuid.New(),
+			DeviceSN:     "SN-655U",
+			Status:       software.UpgradeTerminated,
+			StartedAt:    &startedAtModel,
+			CompletedAt:  &completedAtModel,
+			UpdatedAt:    coremodel.Time(completedAt),
+			ErrorMessage: "task terminated by operator",
+		},
+		TaskName: "log-task",
+	}
+	cache := map[uuid.UUID]*coremodel.Device{
+		sub.DeviceID: {ID: sub.DeviceID, SerialNumber: "SN-655U"},
+	}
+	item, err := svc.mapDeviceItem(context.Background(), catalog, sub, parent, cache)
+	require.NoError(t, err)
+	assert.Equal(t, startedAt.Format(time.RFC3339), item.StartedAt, "已有真实 started_at 时不应被 endedAt 覆盖")
+	assert.Equal(t, completedAt.Format(time.RFC3339), item.EndedAt)
+	assert.NotEqual(t, item.StartedAt, item.EndedAt)
 }
