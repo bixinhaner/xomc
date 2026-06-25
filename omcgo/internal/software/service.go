@@ -196,6 +196,10 @@ func NewSoftwareService(
 
 // UploadFirmware stores a firmware file to MinIO and creates a firmware version record.
 func (s *SoftwareService) UploadFirmware(ctx context.Context, fw *FirmwareVersion, file io.Reader, fileSize int64) error {
+	// #638：把 ProductID（旧单值）与 ProductIDs（新多值）双向打齐，保证：
+	//  · DB 唯一索引 (product_id, version, file_type) 仍能命中"主产品"
+	//  · ProductIDs 列存全部适用产品，列表/任务过滤走 ANY(product_ids)
+	normalizeFirmwareProductIDs(fw)
 	category := "img"
 	switch fw.FileType {
 	case FileTypePATCH:
@@ -1881,7 +1885,25 @@ func (s *SoftwareService) DeleteFirmware(ctx context.Context, id uuid.UUID) erro
 
 // UpdateFirmwareMetadata updates a firmware version's metadata.
 func (s *SoftwareService) UpdateFirmwareMetadata(ctx context.Context, fw *FirmwareVersion) error {
+	normalizeFirmwareProductIDs(fw)
 	return s.firmwareRepo.Update(ctx, fw)
+}
+
+// normalizeFirmwareProductIDs 把 ProductID（旧单值）与 ProductIDs（#638 新多值）双向同步：
+//   - ProductIDs 非空 → ProductID = &ProductIDs[0]（"主产品"=列表首项，喂给老唯一索引）
+//   - ProductIDs 为空 且 ProductID 非空 → ProductIDs = [ProductID]（老调用路径自动升格）
+//   - 两者皆空 → 保持空（历史"未关联产品"语义）
+//
+// 任何写入固件元数据的入口（Upload / Update）都应先过这里，确保两列恒等价。
+func normalizeFirmwareProductIDs(fw *FirmwareVersion) {
+	if len(fw.ProductIDs) > 0 {
+		primary := fw.ProductIDs[0]
+		fw.ProductID = &primary
+		return
+	}
+	if fw.ProductID != nil {
+		fw.ProductIDs = []uuid.UUID{*fw.ProductID}
+	}
 }
 
 // ---------------------------------------------------------------------------

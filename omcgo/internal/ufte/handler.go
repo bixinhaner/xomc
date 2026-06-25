@@ -185,19 +185,19 @@ func (h *Handler) ListDevices(c *gin.Context) {
 // 后端不维护多语言资源；只针对当前已知 code 给出 zh-CN 显示。前端 i18n bundle
 // 仍是真值源，本表只在 CSV 导出场景"近似还原"显示文本。
 var failureReasonZH = map[string]string{
-	"DEVICE_NOT_FOUND":              "任务无法启动，设备不存在",
-	"DEVICE_LOCKED":                 "任务无法启动，设备已在其他任务中运行",
-	"DEVICE_OFFLINE":                "任务无法启动，设备离线",
-	"COMMAND_PUSH_FAILED":           "任务无法启动，下发命令失败",
-	"DOWNLOAD_TIMEOUT":              "下载未启动，未收到设备 DownloadResponse",
-	"DOWNLOAD_FILE_ERROR":           "下载失败，找不到目标文件",
-	"DOWNLOAD_FAULT":                "下载失败，设备拒绝 Download 请求",
-	"UPLOAD_FAULT":                  "上传失败，设备拒绝 Upload / SetParameterValues 请求",
-	"TC_FAULT":                      "文件传输失败，设备 TransferComplete 异常",
-	"UPGRADE_5G_FAILED":             "升级失败，5G 升级状态异常",
-	"TASK_TIMEOUT":                  "任务超时，未收到设备 TransferComplete",
-	"FIRMWARE_NOT_FOUND":            "任务无法启动，固件文件不存在",
-	"INTERNAL_ERROR":                "系统内部错误",
+	"DEVICE_NOT_FOUND":    "任务无法启动，设备不存在",
+	"DEVICE_LOCKED":       "任务无法启动，设备已在其他任务中运行",
+	"DEVICE_OFFLINE":      "任务无法启动，设备离线",
+	"COMMAND_PUSH_FAILED": "任务无法启动，下发命令失败",
+	"DOWNLOAD_TIMEOUT":    "下载未启动，未收到设备 DownloadResponse",
+	"DOWNLOAD_FILE_ERROR": "下载失败，找不到目标文件",
+	"DOWNLOAD_FAULT":      "下载失败，设备拒绝 Download 请求",
+	"UPLOAD_FAULT":        "上传失败，设备拒绝 Upload / SetParameterValues 请求",
+	"TC_FAULT":            "文件传输失败，设备 TransferComplete 异常",
+	"UPGRADE_5G_FAILED":   "升级失败，5G 升级状态异常",
+	"TASK_TIMEOUT":        "任务超时，未收到设备 TransferComplete",
+	"FIRMWARE_NOT_FOUND":  "任务无法启动，固件文件不存在",
+	"INTERNAL_ERROR":      "系统内部错误",
 	// SoftwareService.TerminateUpgrade 给被终止 sub_task 写的固定字符串
 	"task terminated by operator": "被操作者终止",
 }
@@ -279,14 +279,19 @@ func (h *Handler) ExportDevices(c *gin.Context) {
 	if upgrade {
 		headers = []string{
 			"基站编码", "任务名称", "源版本", "目标版本", "升级类型",
-			"产品名称", "升级进度(%)", "结果", "操作人", "失败原因", "操作时间",
+			"产品名称", "升级进度(%)", "结果", "操作人", "失败原因",
+			// issue #655：三皮肤设备列表统一为「开始时间 / 结束时间」，CSV 同步加两列；
+			// 保留旧「操作时间」列（= LastReportAt）避免破坏老脚本/北向消费。
+			"开始时间", "结束时间", "操作时间",
 		}
 	} else {
 		headers = []string{
 			// #529：去掉独立「设备名称」列——v1 标准皮肤设备列表非升级视图把设备名
 			// 并进「任务/设备」组合列(不作独立列展示)，CSV 据此对齐，避免「导出比页面多一列」。
 			"任务名称", "设备 SN", "产品名称", "当前版本",
-			"目标版本/目标文件", "状态", "进度(%)", "失败原因", "上报时间",
+			"目标版本/目标文件", "状态", "进度(%)", "失败原因",
+			// issue #655：同上，加「开始时间 / 结束时间」并保留旧「上报时间」。
+			"开始时间", "结束时间", "上报时间",
 		}
 	}
 	_ = csvW.Write(headers)
@@ -316,7 +321,8 @@ func (h *Handler) ExportDevices(c *gin.Context) {
 					it.DeviceSN, it.TaskName, it.CurrentVersion, it.TargetVersion, upType,
 					productName, fmt.Sprintf("%d", it.Progress),
 					translateDeviceStatus(it.Status), it.OperatorScope,
-					translateFailureReason(it.FailureReason), it.LastReportAt,
+					translateFailureReason(it.FailureReason),
+					it.StartedAt, it.EndedAt, it.LastReportAt,
 				}
 			} else {
 				// "目标版本/目标文件" 在 UI 优先显示 targetFile，回退 targetVersion
@@ -329,7 +335,8 @@ func (h *Handler) ExportDevices(c *gin.Context) {
 					it.TaskName, it.DeviceSN, productName, it.CurrentVersion,
 					tgt, translateDeviceStatus(it.Status),
 					fmt.Sprintf("%d", it.Progress),
-					translateFailureReason(it.FailureReason), it.LastReportAt,
+					translateFailureReason(it.FailureReason),
+					it.StartedAt, it.EndedAt, it.LastReportAt,
 				}
 			}
 			if err := csvW.Write(row); err != nil {

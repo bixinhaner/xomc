@@ -20,6 +20,8 @@ import { softwareService } from '../../mock/services/softwareService';
 interface BackendFirmwareVersion {
   id: string;
   product_id?: string;
+  // #638：后端从单产品扩到多产品，product_id 保留作为"主产品"（= product_ids[0]）兼容旧唯一索引，product_ids 才是完整适用范围。以它为准。
+  product_ids?: string[];
   product_class: string;
   version: string;
   file_name: string;
@@ -139,6 +141,8 @@ function mapFirmware(bf: BackendFirmwareVersion): SoftwareVersion {
     fileName: bf.file_name,
     deviceType: bf.product_class || '',
     productId: bf.product_id,
+    // #638：多产品完整列表（可能与 product_id 重叠：product_id = productIds[0]，后端保证）。前端上传/编辑表单预填/列表列均读此字段。
+    productIds: bf.product_ids,
     vendor: bf.compatible_oui?.[0] || '',
     releaseDate: bf.created_at,
     status: mapFirmwareStatus(bf.status),
@@ -317,7 +321,10 @@ export const softwareApi = {
     const formData = new FormData();
     formData.append('version', data.versionCode);
     // #492：上传按产品名 → 提交 product_id 作为产品归属权威；product_class 兼容保留。
-    if (data.productId) formData.append('product_id', data.productId);
+    // #638：多产品优先走 productIds（逗号拼接传入 form-data）；productId 为旧调用留后路。
+    if (data.productIds && data.productIds.length > 0)
+      formData.append('product_ids', data.productIds.join(','));
+    else if (data.productId) formData.append('product_id', data.productId);
     if (data.deviceType) formData.append('product_class', data.deviceType);
     if (data.releaseNotes) formData.append('release_notes', data.releaseNotes);
 
@@ -337,6 +344,8 @@ export const softwareApi = {
     metadata: {
       version: string;
       productId?: string;
+      // #638：多产品复选的主路径（以 form-data 逗号串发送）。传了它后端志愿 product_id = ids[0]。
+      productIds?: string[];
       productClass?: string;
       releaseNotes?: string;
       fileType?: number;
@@ -350,8 +359,10 @@ export const softwareApi = {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('version', metadata.version);
-    // #492：上传按产品名 → 提交 product_id 作为产品归属权威；product_class 兼容保留。
-    if (metadata.productId)
+    // #492 / #638：多产品 productIds 优先，无则回退到单 productId；product_class 兼容保留。
+    if (metadata.productIds && metadata.productIds.length > 0)
+      formData.append('product_ids', metadata.productIds.join(','));
+    else if (metadata.productId)
       formData.append('product_id', metadata.productId);
     if (metadata.productClass)
       formData.append('product_class', metadata.productClass);
@@ -433,6 +444,9 @@ export const softwareApi = {
 
   async updateFirmware(id: string, metadata: {
     productId?: string;
+    // #638：编辑产品归属同样收收 productIds（为空数组 ≡ 如果原本有多产品、现在清空只留主产品，需明确传空数组才会生效）。
+    // 未传（undefined）= 不动；传了 productIds 后端会同步主产品 product_id = ids[0]。
+    productIds?: string[];
     productClass?: string;
     version?: string;
     recommend?: boolean;
@@ -440,8 +454,10 @@ export const softwareApi = {
     releaseNotes?: string;
   }): Promise<SoftwareVersion> {
     const { data } = await http.put<BackendFirmwareVersion>(`/firmware/${id}`, {
-      // #492：改产品归属（产品名 → product_id）。
-      product_id: metadata.productId,
+      // #492 / #638：产品归属改写优先走 product_ids（JSON 数组），product_id 仅在未传 productIds 时作为旧路径兼容。
+      product_ids: metadata.productIds,
+      product_id:
+        metadata.productIds === undefined ? metadata.productId : undefined,
       product_class: metadata.productClass,
       version: metadata.version,
       recommend: metadata.recommend,
@@ -454,7 +470,7 @@ export const softwareApi = {
   // ---- Upgrade Tasks (主任务) ----
 
   async getUpgradeTasks(
-    params: { taskType?: number; status?: string; productClass?: string; createUser?: string } & PageRequest
+    params: { taskType?: number; status?: string; productClass?: string; productId?: string; createUser?: string } & PageRequest
   ): Promise<PageResponse<UpgradeTaskInfo>> {
     const query: Record<string, unknown> = {
       page: params.page,
@@ -463,6 +479,8 @@ export const softwareApi = {
     if (params.taskType !== undefined) query.task_type = params.taskType;
     if (params.status) query.status = params.status;
     if (params.productClass) query.product_class = params.productClass;
+    // #638：按产品名过滤升级任务列表。后端走“任务选中的固件其 product_ids 包含该 pid”语义（子查询）。
+    if (params.productId) query.product_id = params.productId;
     if (params.createUser) query.create_user = params.createUser;
 
     const { data } = await http.get<BackendListResponse<BackendUpgradeTask>>(

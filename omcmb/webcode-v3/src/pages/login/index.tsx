@@ -12,6 +12,9 @@ export function LoginPage() {
   const navigate = useNavigate()
   const setTokenPair = useUserStore((s) => s.setTokenPair)
   const login = useUserStore((s) => s.login)
+  // Issue #649：标记必须改密，登录后阻塞 + 强制 logout（v3 暂无内置改密入口）。
+  const setMustChangePassword = useUserStore((s) => s.setMustChangePassword)
+  const logout = useUserStore((s) => s.logout)
 
   // 登录页品牌标题跟随「OMC 名称」配置（免登录公开通道），空回退 'STARFORGE · OMC v3'。
   const { omcName } = usePublicOmcName()
@@ -21,6 +24,8 @@ export function LoginPage() {
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Issue #649：必须改密时显示阻塞提示卡片，点确认 → 退出登录回登录页。
+  const [mustChangeOpen, setMustChangeOpen] = useState(false)
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -31,6 +36,13 @@ export function LoginPage() {
       setTokenPair(tokens)
       const me = await authApi.getMe()
       login(me)
+      // Issue #649：v3 没有内置改密 Modal/页面（历史欠债），仅阻塞登录入口并强制
+      // 用户退回登录页，告知“请到 v1 修改密码后再来”。后端硬规则仍会拒绝任何业务调用。
+      if (tokens.must_change_password) {
+        setMustChangePassword(true)
+        setMustChangeOpen(true)
+        return
+      }
       navigate('/dashboard')
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'AUTH FAILED'
@@ -166,6 +178,30 @@ export function LoginPage() {
             <span>BRIDGE-04 · CHANNEL 7547</span>
             <span className="animate-flicker">SIGNAL ◉ STRONG</span>
           </div>
+
+          {mustChangeOpen && (
+            <div
+              className="relative mt-4 rounded-sm border border-red-400/60 bg-red-500/10 p-4 font-mono text-xs text-red-200"
+              role="alert"
+            >
+              <div className="mb-2 font-display text-sm font-bold tracking-[0.2em] text-red-200">
+                CREDENTIAL ROTATION REQUIRED · 需修改密码
+              </div>
+              <p className="leading-relaxed">
+                为保障账号安全，请立即修改密码。请使用主控制台（v1 皮肤）完成修改后再登录。
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setMustChangeOpen(false)
+                  logout()
+                }}
+                className="mt-3 w-full rounded-sm border border-red-400/60 bg-red-500/20 px-3 py-2 font-display text-sm tracking-[0.2em] text-red-100 transition hover:bg-red-500/30"
+              >
+                RETURN · 返回登录
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

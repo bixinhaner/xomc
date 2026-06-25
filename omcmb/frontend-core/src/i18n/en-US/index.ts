@@ -416,7 +416,7 @@ const messages: Record<string, string> = {
   'product.kpi.indicator.disabledTag':'Disabled',
   'product.kpi.indicator.platformName':'Platform name (platform_name)',
   'product.kpi.indicator.formulaLabel':'Formula (formula)',
-  'product.kpi.indicator.formulaPh':  'e.g. C1 / (C1 + C2) * 100',
+  'product.kpi.indicator.formulaPh':  'e.g. C000200015 / (C000200015 + C000200022) * 100; must reference existing counter/indicator IDs for this device type',
   'product.kpi.indicator.formulasTitle':'All Platforms Formulas / Per-Platform Formulas',
   'product.kpi.indicator.arithmetic': 'Numbered Formula (arithmetic)',
   // Indicator create/edit form (full lifecycle management, issue #535)
@@ -449,6 +449,7 @@ const messages: Record<string, string> = {
   'product.kpi.indicator.arithmeticHelp':     'Use indicator IDs with operators + - * / ( ); Duration represents period seconds',
   'product.kpi.indicator.arithmeticRequired': 'Formula is required for Formula type',
   'product.kpi.indicator.formulaBracketMismatch': 'Formula brackets are not balanced',
+  'product.kpi.indicator.formulaAtLeastOne': 'Formula type requires at least 1 platform formula',
   'product.kpi.indicator.descLabel':          'Description',
   'product.kpi.indicator.groupRequired':      'Group is required',
   'product.kpi.indicator.nameRequired':       'Name required',
@@ -1985,6 +1986,9 @@ const messages: Record<string, string> = {
   // P1+P2 security policy
   'login.notifyTitle':          'System Notice',
   'login.mustChangePassword':   'Please change your password before continuing',
+  'login.mustChangePassword.title':   'Password Change Required',
+  'login.mustChangePassword.content': 'To keep your account secure, please change your password now. The system cannot be used until your password is changed.',
+  'login.mustChangePassword.confirm': 'Change password now',
   'login.passwordExpiringSoon': 'Your password will expire in {days} day(s); please update it soon',
 
   // -------------------------------------------------------------------------
@@ -4379,8 +4383,18 @@ const messages: Record<string, string> = {
 
   // System - Security Settings
   'system.security.defaultPassword':         'Default Password',
-  'system.security.forcePasswordChangeOnFirstLogin': 'Users must change default password on first login',
-  'system.security.useAsDefaultPassword':    'Use as default password for login and password reset',
+  // Issue #649: hardened to mandatory rule (admin-injected = always force change),
+  // i18n key 'system.security.forcePasswordChangeOnFirstLogin' removed
+  // Issue #649: copy aligned with backend hard rule — admin-injected users are forced to change on first login
+  'system.security.useAsDefaultPassword':    'Used as the default password when creating users or resetting passwords; users assigned this password are forced to change it on first login',
+  'system.security.defaultPasswordDriftWarning': 'Before tightening password strength rules below, ensure the current default password still satisfies the new rules.',
+  // Issue #649: default-password related user management i18n (System Config → Security linkage)
+  'system.user.useDefaultPassword':          'Use system default password',
+  'system.user.resetToDefault':              'Reset to system default password',
+  'system.user.resetToDefaultConfirm':       'Reset this user\'s password to the system default? The user must change it at next login, and existing sessions will be invalidated immediately.',
+  'system.user.defaultPasswordNotSet':       'System default password is not set. Please configure it in System Config → Security Settings first.',
+  'system.user.ldapResetDisabledTip':        'LDAP users\' passwords are managed by the LDAP system and cannot be reset here.',
+  'system.user.builtInResetDisabledTip':     'Built-in users must be reset via the omcctl CLI.',
   'system.security.passwordStrength':        'Password Strength',
   'system.security.passwordComplexityRequirement': 'Password must contain numbers, lowercase, uppercase and special characters (.!@#$%^&*?)',
   'system.security.userPasswordLength':      'User Password Length:',
@@ -6308,6 +6322,11 @@ const messages: Record<string, string> = {
   'alarm.selectAllDeviceGroupsCount':         'Select All ({count} available device groups)',
   'alarm.totalCount':                         'Total {count}',
   'alarm.totalCountUnit':                     'Total {count}',
+  'alarm.rule.selectCurrentPageDevices':      'Select current page ({count})',
+  'alarm.rule.selectFilteredAlarms':          'Select filtered alarms ({count})',
+  'alarm.rule.selectedDevicesButton':         'Selected Devices ({count})',
+  'alarm.rule.selectedDevicesTitle':          'Selected Devices ({count})',
+  'alarm.rule.deviceTableSummary':            'Total {total} devices, {current} on this page, {selected} selected',
   'alarm.addAlarmTitle':                      'Add Alarm',
   'alarm.searchAlarmPlaceholder':             'Search alarm identifier, source or possible cause',
   'alarm.selectAllAlarmsCount':               'Select All ({count} available alarms)',
@@ -6985,7 +7004,8 @@ const messages: Record<string, string> = {
   'product.kpi.editFormulaTitle': 'Edit formula: {name}',
   'product.kpi.editUnitTitle': 'Edit unit: {id}',
   'product.kpi.formulaBracketMismatch': 'Formula bracket mismatch',
-  'product.kpi.formulaExtra': 'Supports basic arithmetic, brackets, counter names. Frontend validates brackets; backend validates full syntax.',
+  // 2026-06-25:enumerate suffixes instead of `<dt>` to avoid react-intl ICU treating `<dt>` as an XML tag (UNCLOSED_TAG crash on 新增公式 modal).
+  'product.kpi.formulaExtra': 'Supports basic arithmetic + - * /, brackets, and counter IDs. IDs must already exist in this device type table (perf_indicators_enb/gsm/gnb) — placeholders like C1/C2 are not accepted. Backend performs full syntax validation.',
   'product.kpi.indicatorDetail': 'Indicator detail',
   'product.kpi.indicatorDetailFull': 'Indicator detail: {id} {name}',
   'product.kpi.indicatorsByDevice': '{deviceType} indicators',

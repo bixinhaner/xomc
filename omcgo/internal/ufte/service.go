@@ -1571,6 +1571,24 @@ func (s *Service) mapDeviceItem(
 		}
 	}
 
+	startedAt := modelTimePtrToString(subTask.StartedAt)
+	endedAt := modelTimePtrToString(subTask.CompletedAt)
+	failureReason := subTask.FailureReason
+	// issue #655 追加：被操作者主动终止的子任务，多半在「未进入执行态」前就被叫停，
+	// 因此 sub_task.started_at 一般为空。前端列「开始时间 / 结束时间」只有结束、没开始
+	// 显示别扭——补一个 startedAt = endedAt 让两端对齐（语义上"在结束的同一刻被终止"）。
+	// failure_reason 同理：TerminateUpgrade 只写 error_message="task terminated by operator"，
+	// failure_reason 留空，前端「失败原因」列空着不够直观——补「终止」短标，CSV 走
+	// translateFailureReason 找不到映射会原样返回，三端口径一致。
+	if result == "terminated" {
+		if startedAt == "" && endedAt != "" {
+			startedAt = endedAt
+		}
+		if failureReason == "" {
+			failureReason = "终止"
+		}
+	}
+
 	return &DeviceItem{
 		ID:              subTask.ID.String(),
 		TaskID:          subTask.TaskID.String(),
@@ -1590,11 +1608,17 @@ func (s *Service) mapDeviceItem(
 		Status:          status,
 		Result:          result,
 		Progress:        progressForDeviceStatus(status),
-		LastReportAt:    formatTime(lastReport),
-		CreatedAt:       formatTime(time.Time(subTask.CreatedAt)),
-		OperatorScope:   parent.CreateUser,
-		FailureReason:   subTask.FailureReason,
-		FailureDetail:   subTask.ErrorMessage,
+		// issue #655：StartedAt / EndedAt 直接透传 PG repo 写入的 sub_task.started_at /
+		// completed_at（见 pg_upgrade_repository.go UpdateStatusWithCode，COALESCE 守卫
+		// 首次执行态写一次后不再覆盖）。LastReportAt 保留兼容 CSV / 北向 API。
+		// terminated 特例：startedAt 兜底 = endedAt，failureReason 兜底 = "终止"。
+		StartedAt:     startedAt,
+		EndedAt:       endedAt,
+		LastReportAt:  formatTime(lastReport),
+		CreatedAt:     formatTime(time.Time(subTask.CreatedAt)),
+		OperatorScope: parent.CreateUser,
+		FailureReason: failureReason,
+		FailureDetail: subTask.ErrorMessage,
 	}, nil
 }
 

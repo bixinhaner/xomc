@@ -38,10 +38,11 @@ const (
 //     避免中间崩溃留下 is_online=false 但 cumulative_online_duration 没累加的脏数据。
 //   - 幂等:MarkOfflineWithAccounting 仅在 is_online=true 时翻转;事件只在真翻转后发布。
 type DeviceStatusReconciler struct {
-	redis    redis.UniversalClient
-	repo     statusReconcilerRepo
-	eventBus event.EventBus
-	logger   *zap.Logger
+	redis     redis.UniversalClient
+	repo      statusReconcilerRepo
+	eventBus  event.EventBus
+	alarmSink offlineAlarmSink
+	logger    *zap.Logger
 
 	// onlineIndex acs:online 在线索引（issue #397 根治片）。离线判定在把 last_inform_at
 	// 超阈值的候选标离线之前，用此索引（ACS 同步写、免 NATS）做二次确认：候选若 score
@@ -72,6 +73,10 @@ type DeviceStatusReconciler struct {
 type statusReconcilerRepo interface {
 	FindStaleDevicesByClass(ctx context.Context, enbThresholdSec, cpeThresholdSec, limit int) ([]*model.Device, error)
 	MarkOfflineWithAccounting(ctx context.Context, deviceID uuid.UUID, reason string, now time.Time) (bool, error)
+}
+
+type offlineAlarmSink interface {
+	Process(ctx context.Context, alarm *model.Alarm) error
 }
 
 // DeviceOfflineEvent 设备离线事件载荷。
@@ -116,6 +121,11 @@ func NewDeviceStatusReconciler(
 // 仅在 wiring 阶段调用，nil 安全（不注入则全程用默认阈值 100/600）。
 func (r *DeviceStatusReconciler) SetThresholdLookup(lookup OfflineThresholdLookup) {
 	r.thresholdLookup = lookup
+}
+
+// SetOfflineAlarmSink 注入 OMC 源设备断连告警写入器。nil 时仅维护在线状态和发布事件。
+func (r *DeviceStatusReconciler) SetOfflineAlarmSink(sink offlineAlarmSink) {
+	r.alarmSink = sink
 }
 
 // currentThresholds 读取本轮扫描使用的两类离线阈值（每轮实时读，改配置即生效）。
@@ -362,6 +372,15 @@ func (r *DeviceStatusReconciler) markOffline(ctx context.Context, device *model.
 		}
 	}
 
+	if err := r.raiseOfflineAlarm(ctx, device, now); err != nil {
+		r.logger.Warn("raise device disconnected alarm failed",
+			zap.Error(err),
+			zap.String("device_id", device.ID.String()),
+			zap.String("serial", device.SerialNumber),
+			zap.String("technology", string(device.Technology)),
+		)
+	}
+
 	r.logger.Info("device marked offline",
 		zap.String("device_id", device.ID.String()),
 		zap.String("serial", device.SerialNumber),
@@ -370,6 +389,47 @@ func (r *DeviceStatusReconciler) markOffline(ctx context.Context, device *model.
 		zap.Time("offline_time", now),
 	)
 	return true, nil
+}
+
+func (r *DeviceStatusReconciler) raiseOfflineAlarm(ctx context.Context, device *model.Device, raisedAt time.Time) error {
+	if r.alarmSink == nil {
+		return nil
+	}
+	identifier, description, ok := disconnectedAlarmForTechnology(device.Technology)
+	if !ok {
+		return nil
+	}
+	omcSource := "OMC"
+	eventType := "30000"
+	technology := string(device.Technology)
+	alarm := &model.Alarm{
+		DeviceID:        device.ID,
+		DeviceSN:        device.SerialNumber,
+		Carrier:         device.Carrier,
+		Severity:        model.AlarmCritical,
+		AlarmType:       "communication",
+		AlarmIdentifier: identifier,
+		Description:     description,
+		Status:          model.AlarmActive,
+		RaisedAt:        raisedAt,
+		AlarmSource:     &omcSource,
+		EventType:       &eventType,
+		Technology:      &technology,
+	}
+	return r.alarmSink.Process(ctx, alarm)
+}
+
+func disconnectedAlarmForTechnology(tech model.Technology) (identifier string, description string, ok bool) {
+	switch tech {
+	case model.TechLTE:
+		return "7", "eNB Disconnected", true
+	case model.TechNR:
+		return "23", "gNB Disconnected", true
+	case model.TechGSM:
+		return "4", "GSM Disconnected", true
+	default:
+		return "", "", false
+	}
 }
 
 // SetCheckInterval 显式覆盖扫描周期（仅用于测试或运行时调优）。

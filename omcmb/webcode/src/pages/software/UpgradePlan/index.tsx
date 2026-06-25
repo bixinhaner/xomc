@@ -47,6 +47,7 @@ import {
   useAbortCanary,
 } from '@core/hooks/api/useSoftware';
 import { useDeviceList, useProductClasses } from '@core/hooks/api/useDevices';
+import { useProductList } from '@core/hooks/api/useProducts';
 import type { UpgradeTaskInfo, UpgradeSubTaskInfo } from '@core/mock/data/software';
 import { formatSystemTime } from '@core/utils/systemTime';
 
@@ -90,6 +91,8 @@ export default function UpgradePlan() {
 
   // ---- Dynamic product type options from API ----
   const { data: productClassesData } = useProductClasses();
+  // #638：用产品中心-产品列表渲染"产品名"选项；同 FirmwareUpload 取数源，保证名称一致。
+  const { data: productsData } = useProductList();
   const productClassOptions = useMemo(() => {
     if (productClassesData && productClassesData.length > 0) {
       return productClassesData.map((c) => ({ label: c, value: c }));
@@ -105,7 +108,8 @@ export default function UpgradePlan() {
   // ---- Pagination & filter state ----
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
-  const [, setFilters] = useState<Record<string, unknown>>({});
+  // #638：filters 需被读取才能传入 useUpgradeTasks（之前 setFilters 写了不读走丢了过滤语义，顺便修复）。
+  const [filters, setFilters] = useState<Record<string, unknown>>({});
 
   // ---- Tab state ----
   const [activeTab, setActiveTab] = useState<'task' | 'device'>('task');
@@ -115,6 +119,8 @@ export default function UpgradePlan() {
     page,
     pageSize,
     taskType: 1, // Only show upgrade tasks (not rollback)
+    // #638：按“产品名”过滤。后端以任务选中固件的 product_ids 包含该 pid 为判据，不需修改 upgrade_tasks 表。
+    productId: (filters.productId as string) || undefined,
   });
 
   // ---- Device list tab: pagination & filter ----
@@ -303,15 +309,30 @@ export default function UpgradePlan() {
   // ---- Filter definitions ----
 
   // Task list filter fields (only task name and time)
+  // #638：增加“产品名”选项，选产品名 → 传 product_id → 后端以固件适用产品集合包含为准过滤。
+  const productNameOptions = useMemo(
+    () =>
+      (productsData?.items ?? [])
+        .map((p) => ({ label: p.name, value: p.id }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
+    [productsData],
+  );
   const taskFilterFields: FilterField[] = useMemo(() => [
     { name: 'keyword', label: t('software.taskName'), type: 'input', placeholder: t('software.upgrade.inputTaskName') },
+    {
+      name: 'productId',
+      label: t('software.firmware.productClass'),
+      type: 'select',
+      placeholder: t('common.pleaseSelect'),
+      options: [{ label: t('common.all'), value: '' }, ...productNameOptions],
+    },
     {
       name: 'timeRange',
       label: t('common.timeRange') ?? '时间范围',
       type: 'date-range',
       placeholder: t('common.selectTimeRange') ?? '请选择时间范围',
     },
-  ], [t]);
+  ], [t, productNameOptions]);
 
   // Device list filter fields
   const deviceFilterFields: FilterField[] = useMemo(() => [

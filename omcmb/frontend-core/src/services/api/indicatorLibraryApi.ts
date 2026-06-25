@@ -225,6 +225,14 @@ function indicatorPayload(
   // platform 仅 CreateIndicatorInput 有（UpdateIndicatorInput 是 Partial<Omit<..., 'id'>>
   // 但实际 update 不写公式，TS 类型检查不报错就放过；undefined 不下发）。
   if ('platform' in input && input.platform !== undefined) p.platform = input.platform;
+  // formulas（issue #640 C 方案）：仅 CreateIndicatorInput 有；序列化为后端 FormulaInput
+  // (json: platform_name / formula)。空数组不下发（后端 omitempty 节省字节）。
+  if ('formulas' in input && input.formulas && input.formulas.length > 0) {
+    p.formulas = input.formulas.map((f) => ({
+      platform_name: f.platformName,
+      formula: f.formula,
+    }));
+  }
   return p;
 }
 

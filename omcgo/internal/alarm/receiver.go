@@ -311,16 +311,9 @@ func (r *AlarmReceiver) lookupDeviceBySN(ctx context.Context, deviceSN string) (
 	return device, nil
 }
 
-func currentAlarmPayloads(device *model.Device, alarms []TR069Alarm, fallbackRaisedAt time.Time) []AlarmPayload {
+func currentAlarmPayloads(device *model.Device, alarms []TR069Alarm, _ time.Time) []AlarmPayload {
 	result := make([]AlarmPayload, 0, len(alarms))
 	for _, alarm := range alarms {
-		raisedAt := alarm.AlarmRaisedTime
-		if raisedAt.IsZero() {
-			raisedAt = alarm.AlarmChangedTime
-		}
-		if raisedAt.IsZero() {
-			raisedAt = fallbackRaisedAt
-		}
 		description := firstNonEmpty(alarm.SpecificProblem, alarm.ProbableCause, alarm.AlarmIdentifier)
 		additional := map[string]string{}
 		if alarm.AdditionalInformation != "" {
@@ -344,20 +337,15 @@ func currentAlarmPayloads(device *model.Device, alarms []TR069Alarm, fallbackRai
 			EventType:       alarm.EventType,
 			Description:     description,
 			Severity:        int(mapSeverity(alarm.PerceivedSeverity)),
-			RaisedAt:        raisedAt,
 			Additional:      additional,
 		})
 	}
 	return result
 }
 
-func alarmInfoPayloads(device *model.Device, alarms []alarmInfoEvent, fallbackRaisedAt time.Time) []AlarmPayload {
+func alarmInfoPayloads(device *model.Device, alarms []alarmInfoEvent, _ time.Time) []AlarmPayload {
 	result := make([]AlarmPayload, 0, len(alarms))
 	for _, alarm := range alarms {
-		raisedAt := alarm.EventTime
-		if raisedAt.IsZero() {
-			raisedAt = fallbackRaisedAt
-		}
 		additional := map[string]string{}
 		if alarm.AdditionalInformation != "" {
 			additional["additional_information"] = alarm.AdditionalInformation
@@ -383,20 +371,15 @@ func alarmInfoPayloads(device *model.Device, alarms []alarmInfoEvent, fallbackRa
 			EventType:       alarm.EventType,
 			Description:     firstNonEmpty(alarm.SpecificProblem, alarm.ProbableCause, alarm.AlarmIdentifier),
 			Severity:        int(mapSeverity(alarm.PerceivedSeverity)),
-			RaisedAt:        raisedAt,
 			Additional:      additional,
 		})
 	}
 	return result
 }
 
-func expeditedEventPayloads(device *model.Device, alarms []ExpeditedEvent, fallbackRaisedAt time.Time) []AlarmPayload {
+func expeditedEventPayloads(device *model.Device, alarms []ExpeditedEvent, _ time.Time) []AlarmPayload {
 	result := make([]AlarmPayload, 0, len(alarms))
 	for _, alarm := range alarms {
-		raisedAt := alarm.EventTime
-		if raisedAt.IsZero() {
-			raisedAt = fallbackRaisedAt
-		}
 		additional := map[string]string{}
 		if alarm.AdditionalInformation != "" {
 			additional["additional_information"] = alarm.AdditionalInformation
@@ -426,7 +409,6 @@ func expeditedEventPayloads(device *model.Device, alarms []ExpeditedEvent, fallb
 			EventType:       alarm.EventType,
 			Description:     firstNonEmpty(alarm.SpecificProblem, alarm.ProbableCause, alarm.AlarmIdentifier),
 			Severity:        int(mapSeverity(alarm.PerceivedSeverity)),
-			RaisedAt:        raisedAt,
 			Additional:      additional,
 		})
 	}

@@ -57,8 +57,9 @@ type securityPolicyValues struct {
 	PasswordPromptDays     int64 // FE: promptBeforeDays
 
 	// ① 默认密码
-	MustChangePasswordOnFirstLogin bool   // FE: modifyPWD
-	DefaultPassword                string // FE: defaultPasswd
+	// 字段 MustChangePasswordOnFirstLogin（FE: modifyPWD）于 issue #649 删除：
+	// 硬规则「管理员创建/重置用户 → 一律强制首次改密」覆盖后无消费点。
+	DefaultPassword string // FE: defaultPasswd
 
 	// ⑦ 屏幕锁定
 	IdleLockMinutes int64 // FE: userSessionExpirationMin（0=禁用）
@@ -224,11 +225,12 @@ func (v *securityPolicyValues) loadFromSysConfig(ctx context.Context, q SysConfi
 	}
 
 	// ① 默认密码
-	if b, ok := readBool(ctx, q, "security", "modifyPWD"); ok {
-		v.MustChangePasswordOnFirstLogin = b
-	}
-	if s := readString(ctx, q, "security", "defaultPasswd"); s != "" {
-		v.DefaultPassword = s
+	// modifyPWD 配置项已废弃（issue #649 硬规则覆盖）：老库残留行忽略，不再消费。
+	// 默认密码读取区分"未配置" vs "显式清空"：管理员显式清空 → DefaultPassword=""，
+	// service 层消费时返"系统默认密码未设置"错误、重置走手填 fallback（设计 §3.2 矩阵）；
+	// 首次部署未配置 → 保留 defaultPolicy() 的 fail-safe 兜底常量 "OMC@123456"。
+	if cfg, err := q.GetByKey(ctx, "security", "defaultPasswd"); err == nil && cfg != nil {
+		v.DefaultPassword = cfg.Value
 	}
 
 	// ⑦ 屏幕锁定

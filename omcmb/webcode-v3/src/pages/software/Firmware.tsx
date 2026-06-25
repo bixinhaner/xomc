@@ -181,7 +181,12 @@ export default function Firmware() {
                 )}
                 <span className="truncate font-mono text-xs text-cyan-100">{v.versionCode}</span>
               </div>
-              <span className="truncate font-mono text-[11px] text-cyan-300/70">{(v.productId && productNameById.get(v.productId)) || v.deviceType || '—'}</span>
+              <span className="truncate font-mono text-[11px] text-cyan-300/70">{(() => {
+                // #638：多产品名拼接显示；productIds 优先，回退旧单 productId，再回退 deviceType。
+                const ids = (v.productIds && v.productIds.length > 0) ? v.productIds : (v.productId ? [v.productId] : [])
+                const names = ids.map((id) => productNameById.get(id)).filter((n): n is string => Boolean(n))
+                return names.length > 0 ? names.join(', ') : (v.deviceType || '—')
+              })()}</span>
               <span className="font-mono text-[11px] text-cyan-100/80">{formatFileSize(v.fileSize)}</span>
               <span className="font-mono text-[10px] text-cyan-300/60">{v.releaseDate ? formatTime(v.releaseDate) : '—'}</span>
               <div className="flex items-center justify-end gap-1.5">
@@ -281,7 +286,14 @@ function FirmwareDrawer({
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [version, setVersion] = useState(file?.versionCode ?? '')
-  const [productId, setProductId] = useState(file?.productId ?? '')
+  // #492 / #638：固件适用产品改为多选；预填优先用 productIds，历史单产品足付送成单元素数组。
+  const [productIds, setProductIds] = useState<string[]>(
+    (file?.productIds && file.productIds.length > 0)
+      ? file.productIds
+      : (file?.productId ? [file.productId] : []),
+  )
+  const toggleProduct = (id: string) =>
+    setProductIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
   const [recommend, setRecommend] = useState(Boolean(file?.recommend))
   const [description, setDescription] = useState(file?.description ?? file?.releaseNotes ?? '')
   const [err, setErr] = useState('')
@@ -301,7 +313,8 @@ function FirmwareDrawer({
       update.mutate(
         {
           id: file.id,
-          metadata: { productId: productId || undefined, version: version.trim(), recommend, description },
+          // #492 / #638：产品归属改写优先走 productIds（多产品）；后端同步主产品 product_id = ids[0]。
+          metadata: { productIds, version: version.trim(), recommend, description },
         },
         { onSuccess: onClose, onError: (e) => setErr(e instanceof Error ? e.message : '修改失败') }
       )
@@ -317,7 +330,8 @@ function FirmwareDrawer({
         file: selectedFile,
         metadata: {
           version: version.trim(),
-          productId: productId || undefined,
+          // #492 / #638：productIds 优先；未选传 undefined。
+          productIds: productIds.length > 0 ? productIds : undefined,
           releaseNotes: description,
           fileType: FILE_TYPE_PARAM[fileType],
           recommend,
@@ -363,20 +377,33 @@ function FirmwareDrawer({
         )}
 
         <label className="block">
-          <span className="mb-1 block font-mono text-[10px] uppercase tracking-[0.18em] text-cyan-300/55">产品名称 · PRODUCT</span>
-          {/* #492：固件所属产品 = 选产品名（产品中心目录），提交 product_id。 */}
-          <select
-            className="neon-input w-full"
-            value={productId}
-            onChange={(e) => setProductId(e.target.value)}
-          >
-            <option value="">选择产品名称</option>
-            {products.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
+          <span className="mb-1 block font-mono text-[10px] uppercase tracking-[0.18em] text-cyan-300/55">产品名称 · PRODUCT（可多选）</span>
+          {/* #492 / #638：固件适用产品改为多选。点击 chip 切换选中，产品为空提示去产品中心创建。 */}
+          {products.length === 0 ? (
+            <div className="font-mono text-[11px] text-cyan-300/55">暂无产品，请先在产品中心创建。</div>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {products.map((p) => {
+                const active = productIds.includes(p.id)
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => toggleProduct(p.id)}
+                    aria-pressed={active}
+                    className={
+                      'rounded-sm border px-2 py-0.5 font-mono text-[11px] transition-colors ' +
+                      (active
+                        ? 'border-cyan-300/70 bg-cyan-500/20 text-cyan-100'
+                        : 'border-cyan-500/25 bg-cyan-500/[0.04] text-cyan-200/75 hover:border-cyan-400/55')
+                    }
+                  >
+                    {p.name}
+                  </button>
+                )
+              })}
+            </div>
+          )}
         </label>
 
         <label className="block">

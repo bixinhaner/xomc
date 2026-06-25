@@ -19,7 +19,7 @@
  * 复用 frontend-core 同一套 hook 与 i18n key(product.kpi.indicator.*),不引入 Antd。
  */
 import type { ReactNode } from 'react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { X, Loader2, AlertTriangle, Lock, Plus, Pencil, Trash2 } from 'lucide-react'
 import type { AxiosError } from 'axios'
 
@@ -36,6 +36,7 @@ import {
 } from '@core/hooks/api/useIndicatorsLibrary'
 import type {
   DeviceType,
+  FormulaDraft,
   IndicatorInfo,
   IndicatorTypeValue,
   PlatformFormula,
@@ -153,21 +154,37 @@ function bracketsBalanced(formula: string): boolean {
  * 仅编辑已存在指标时渲染(需要 indicatorId)。真调 useFormulas / useUpsertFormula /
  * useDeleteFormula;删除走手写二次确认行内卡片;新增/编辑走内嵌 platform+formula 编辑器。
  */
-function PlatformFormulaSection({
-  deviceType,
-  indicatorId,
-}: {
-  deviceType: DeviceType
-  indicatorId: string
-}) {
+function PlatformFormulaSection(
+  props:
+    | {
+        // server 模式(默认/编辑态)— 直接走后端 CRUD。
+        mode?: 'server'
+        deviceType: DeviceType
+        indicatorId: string
+      }
+    | {
+        // local 模式(issue #640 新建态)— drafts 父组件持有,本组件只做 UI 增删改回写,不调任何 API。
+        mode: 'local'
+        deviceType: DeviceType
+        value: FormulaDraft[]
+        onChange: (next: FormulaDraft[]) => void
+      },
+) {
   const t = useT()
-  const { data: formulasData, isLoading } = useFormulas(deviceType, indicatorId)
+  const isLocal = props.mode === 'local'
+  // server 模式专用 — local 模式 indicatorId 给 undefined,useFormulas 内部 enabled
+  // 守卫不发请求(保 Hook 调用顺序稳定)。
+  const serverIndicatorId = isLocal ? undefined : props.indicatorId
+  const { data: formulasData, isLoading } = useFormulas(props.deviceType, serverIndicatorId)
   // 平台下拉数据源：后端 GET /api/v1/indicators/platforms 返回该 deviceType 下公式表里 distinct 出来的全部 platform_name。
-  const { data: platformsData } = usePlatformList(deviceType)
+  const { data: platformsData } = usePlatformList(props.deviceType)
   const upsertMut = useUpsertFormula()
   const deleteMut = useDeleteFormula()
 
-  const formulas: PlatformFormula[] = formulasData?.items ?? []
+  // 列表数据源:local 模式来自 props.value;server 模式来自 useFormulas。
+  const formulas: Array<PlatformFormula | FormulaDraft> = isLocal
+    ? props.value
+    : (formulasData?.items ?? [])
 
   // 平台选项：ALL 常驻顶部（对应后端 indicator.PlatformAll 约定、表示跨平台共用），
   // 其余从后端返回的 distinct 名单中拼接。
@@ -199,7 +216,7 @@ function PlatformFormulaSection({
     setFormula('')
     setEditorError(null)
   }
-  const openEdit = (row: PlatformFormula) => {
+  const openEdit = (row: PlatformFormula | FormulaDraft) => {
     setEditorMode(row.platformName)
     setPlatform(row.platformName)
     setFormula(row.formula)
@@ -224,8 +241,23 @@ function PlatformFormulaSection({
       return
     }
     setEditorError(null)
+    if (isLocal) {
+      // local 模式:同 platform 已存在则覆盖(与 server upsert 同语义),否则追加。
+      const exists = props.value.some((d) => d.platformName === p)
+      const next = exists
+        ? props.value.map((d) => (d.platformName === p ? { platformName: p, formula: f } : d))
+        : [...props.value, { platformName: p, formula: f }]
+      props.onChange(next)
+      closeEditor()
+      return
+    }
     try {
-      await upsertMut.mutateAsync({ deviceType, indicatorId, platform: p, formula: f })
+      await upsertMut.mutateAsync({
+        deviceType: props.deviceType,
+        indicatorId: props.indicatorId,
+        platform: p,
+        formula: f,
+      })
       closeEditor()
     } catch (e) {
       setEditorError(errMsg(e))
@@ -234,8 +266,18 @@ function PlatformFormulaSection({
 
   const handleDelete = async (platformName: string) => {
     setRowError(null)
+    if (isLocal) {
+      // local 模式:从 drafts 数组按 platformName 删除。
+      props.onChange(props.value.filter((d) => d.platformName !== platformName))
+      setConfirmDelete(null)
+      return
+    }
     try {
-      await deleteMut.mutateAsync({ deviceType, indicatorId, platform: platformName })
+      await deleteMut.mutateAsync({
+        deviceType: props.deviceType,
+        indicatorId: props.indicatorId,
+        platform: platformName,
+      })
       setConfirmDelete(null)
     } catch (e) {
       setRowError(errMsg(e))
@@ -305,16 +347,16 @@ function PlatformFormulaSection({
                   <div className="mt-1.5 flex items-center justify-end gap-1.5">
                     <NeonButton
                       onClick={() => setConfirmDelete(null)}
-                      disabled={deleteMut.isPending}
+                      disabled={!isLocal && deleteMut.isPending}
                     >
                       {t('common.cancel')}
                     </NeonButton>
                     <NeonButton
                       tone="danger"
                       onClick={() => void handleDelete(row.platformName)}
-                      disabled={deleteMut.isPending}
+                      disabled={!isLocal && deleteMut.isPending}
                     >
-                      {deleteMut.isPending ? <Loader2 className="size-3 animate-spin" /> : null}
+                      {!isLocal && deleteMut.isPending ? <Loader2 className="size-3 animate-spin" /> : null}
                       {t('common.delete')}
                     </NeonButton>
                   </div>
@@ -386,11 +428,11 @@ function PlatformFormulaSection({
             </div>
           ) : null}
           <div className="mt-3 flex items-center justify-end gap-2">
-            <NeonButton onClick={closeEditor} disabled={upsertMut.isPending}>
+            <NeonButton onClick={closeEditor} disabled={!isLocal && upsertMut.isPending}>
               {t('common.cancel')}
             </NeonButton>
-            <NeonButton onClick={() => void handleSaveFormula()} disabled={upsertMut.isPending}>
-              {upsertMut.isPending ? <Loader2 className="size-3 animate-spin" /> : null}
+            <NeonButton onClick={() => void handleSaveFormula()} disabled={!isLocal && upsertMut.isPending}>
+              {!isLocal && upsertMut.isPending ? <Loader2 className="size-3 animate-spin" /> : null}
               {t('common.save')}
             </NeonButton>
           </div>
@@ -413,6 +455,12 @@ export default function IndicatorFormModal({
   // currentIndicator 本地态：新建起点 null，create 成功后注入返回值 → 转「编辑态」。
   // 这样新建与编辑公式维护方式完全一致（都用 PlatformFormulaSection）。
   const [currentIndicator, setCurrentIndicator] = useState<IndicatorInfo | null>(propIndicator ?? null)
+  // drafts(issue #640 C 方案)— 新建态 + kpi 类型的本地公式草稿,提交时随 createIndicator
+  // 一并下发,后端事务原子写入。
+  const [drafts, setDrafts] = useState<FormulaDraft[]>([])
+  // openedInCreateRef — 本次开弹是否新建态(propIndicator==null),锁定本次生命周期不变。
+  // 与 v1/v2 同口径:新建态下公式区立刻可见(local 模式),不必等保存。
+  const openedInCreateRef = useRef<boolean>(propIndicator == null)
   const isEdit = Boolean(currentIndicator)
   // 内置指标(is_build_in==='1')编辑时归属分组只读 — XML 真相源会覆盖,改了也无效。
   const builtinGroupReadonly = isEdit && Boolean(currentIndicator?.isBuildIn)
@@ -438,6 +486,7 @@ export default function IndicatorFormModal({
   useEffect(() => {
     if (!open) return
     setFormError(null)
+    openedInCreateRef.current = propIndicator == null
     setCurrentIndicator(propIndicator ?? null)
     if (propIndicator) {
       setCnName(propIndicator.cnName ?? '')
@@ -460,6 +509,8 @@ export default function IndicatorFormModal({
       // 新建默认 kpi（公式计算），老 OMC 自定义指标几乎都是派生 KPI。
       setIndicatorType('kpi')
       setDescription('')
+      // 新建态每次开弹清空 drafts(避免上次未提交的草稿污染本次)。
+      setDrafts([])
     }
   }, [open, propIndicator])
 
@@ -505,6 +556,11 @@ export default function IndicatorFormModal({
         })
         setCurrentIndicator(updated)
       } else {
+        // C 方案(issue #640):kpi 类型新建必须至少配 1 条公式。
+        if (indicatorType === 'kpi' && drafts.length === 0) {
+          setFormError(t('product.kpi.indicator.formulaAtLeastOne'))
+          return
+        }
         const created = await createMut.mutateAsync({
           deviceType,
           input: {
@@ -522,13 +578,16 @@ export default function IndicatorFormModal({
             cnDescription: description.trim() || undefined,
             enDescription: description.trim() || undefined,
             operatorCode,
-            // 详情态新建 → 透传 platform，后端同事务写占位 formula（避免“保存后查不到”）。
-            platform: platform || undefined,
+            // kpi 类型走 formulas(真实公式集合,事务原子写入);counter 类型保留旧的
+            // platform 占位逻辑(详情列表 platform_name EXISTS 过滤需要关联行)。
+            ...(indicatorType === 'kpi' && drafts.length > 0
+              ? { formulas: drafts }
+              : { platform: platform || undefined }),
           },
         })
-        // 创建成功 → 本地态注入，弹窗不关、转「编辑态」。
-        // PlatformFormulaSection 自动出现（仅 indicatorType='kpi'）供用户配公式。
+        // 创建成功 → 公式已经原子写入,直接关弹回详情列表。
         setCurrentIndicator(created)
+        onClose()
       }
     } catch (e) {
       setFormError(errMsg(e))
@@ -683,10 +742,26 @@ export default function IndicatorFormModal({
           </div>
         </div>
 
-        {indicatorType === 'kpi' && currentIndicator ? (
-          // 公式维护区 — 与修改页面完全一致的 PlatformFormulaSection（按 platform 多条 CRUD）。
-          // 需要 indicatorId 才能调 useFormulas 等 API，所以新建模式下要先保存基础信息（currentIndicator!=null）。
-          <PlatformFormulaSection deviceType={deviceType} indicatorId={currentIndicator.id} />
+        {indicatorType === 'kpi' ? (
+          // 公式维护区(issue #640 C 方案):
+          //   · 新建态(openedInCreateRef=true)→ local 模式,drafts 父组件持有,提交时
+          //     随 createIndicator 一并下发,后端事务原子写入。
+          //   · 编辑态(openedInCreateRef=false 且 currentIndicator!=null)→ server 模式,
+          //     直接走 useFormulas/useUpsertFormula/useDeleteFormula。
+          openedInCreateRef.current ? (
+            <PlatformFormulaSection
+              mode="local"
+              deviceType={deviceType}
+              value={drafts}
+              onChange={setDrafts}
+            />
+          ) : currentIndicator ? (
+            <PlatformFormulaSection
+              mode="server"
+              deviceType={deviceType}
+              indicatorId={currentIndicator.id}
+            />
+          ) : null
         ) : null}
 
         <label className="block">

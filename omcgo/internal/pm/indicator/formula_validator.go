@@ -35,9 +35,15 @@ type ValidationResult struct {
 //  3. Recombine and parse as numeric expression via kpi.ParseFormula + Evaluate
 //  4. Must reference at least 1 indicator ID (no pure constant formulas)
 //  5. If formula is a single indicator ID with no operators, mark IsCounter=true
+//
+// 错误信息约定（2026-06-25）：所有失败分支返回的 ErrorMsg 必须包含具体原因——
+// 历史上一律返 "Expression is invalid" 导致用户照着 placeholder 抄伪 ID（如 C1）后
+// 完全不知道是哪个 token 不识别，反复试错。统一改为「unknown token "X" / formula
+// must reference …」等可定位提示，由 service.go 拼成 `formula validation failed
+// (platform=ALL): unknown token "C1"` 抛给前端。
 func (v *FormulaValidator) Validate(arithmetic string) ValidationResult {
 	if arithmetic == "" {
-		return ValidationResult{IsValid: false, ErrorMsg: "Expression is invalid"}
+		return ValidationResult{IsValid: false, ErrorMsg: "formula is empty"}
 	}
 
 	tokens := tokenize(arithmetic)
@@ -71,7 +77,7 @@ func (v *FormulaValidator) Validate(arithmetic string) ValidationResult {
 		if strings.Contains(tok, "K90000") {
 			expanded, err := v.expandCustomKPI(tok, make(map[string]bool))
 			if err != nil {
-				return ValidationResult{IsValid: false, ErrorMsg: "Expression is invalid"}
+				return ValidationResult{IsValid: false, ErrorMsg: fmt.Sprintf("custom KPI %q expand failed: %v", tok, err)}
 			}
 			indicatorCount++
 			rebuilt.WriteString(expanded)
@@ -88,20 +94,22 @@ func (v *FormulaValidator) Validate(arithmetic string) ValidationResult {
 			continue
 		}
 
-		// Unknown token → invalid
-		return ValidationResult{IsValid: false, ErrorMsg: "Expression is invalid"}
+		// Unknown token → invalid。带上 token 名 + 设备类型语义提示，让用户知道
+		// 需要引用「本设备类型表（perf_indicators_<dt>）里真实存在的 ID」，避免照
+		// 着 placeholder 抄 C1/C2 这种伪 ID。
+		return ValidationResult{IsValid: false, ErrorMsg: fmt.Sprintf("unknown token %q (must reference an existing indicator/counter ID under this device type)", tok)}
 	}
 
 	// Must reference at least 1 indicator
 	if indicatorCount == 0 {
-		return ValidationResult{IsValid: false, ErrorMsg: "Expression is invalid"}
+		return ValidationResult{IsValid: false, ErrorMsg: "formula must reference at least one indicator/counter ID (pure constants not allowed)"}
 	}
 
 	// Parse and evaluate the numeric expression
 	rebuiltExpr := rebuilt.String()
 	formula, err := expr.Parse(rebuiltExpr)
 	if err != nil {
-		return ValidationResult{IsValid: false, ErrorMsg: "Expression is invalid"}
+		return ValidationResult{IsValid: false, ErrorMsg: fmt.Sprintf("parse failed: %v", err)}
 	}
 	if _, err := formula.Evaluate(map[string]float64{}); err != nil {
 		// Division by zero etc. is acceptable for validation (runtime behavior).

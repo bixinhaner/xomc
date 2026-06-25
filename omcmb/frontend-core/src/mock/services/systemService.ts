@@ -36,7 +36,13 @@ export const systemService = {
     return users.find((u) => u.id === id) ?? null;
   },
 
-  async createUser(data: Omit<User, 'id' | 'createTime' | 'lastLoginTime'>): Promise<User> {
+  // Issue #649：Omit 同步加可选 password/useDefaultPassword（mock 不校验密码逻辑）。
+  async createUser(
+    data: Omit<User, 'id' | 'createTime' | 'lastLoginTime'> & {
+      password?: string;
+      useDefaultPassword?: boolean;
+    },
+  ): Promise<User> {
     await delay(200, 400);
     const newUser: User = {
       ...data,
@@ -61,10 +67,14 @@ export const systemService = {
     users = users.filter((u) => !ids.includes(u.id));
   },
 
-  async resetPassword(id: string, _newPassword: string): Promise<void> {
+  // Issue #649：签名对象化，mock 仅 noop（真实加密由后端在生产路径处理）。
+  async resetPassword(
+    id: string,
+    _opts: { newPassword?: string; useDefaultPassword?: boolean },
+  ): Promise<void> {
     await delay(300, 600);
     void id;
-    void _newPassword;
+    void _opts;
   },
 
   async lockUser(id: string): Promise<void> {

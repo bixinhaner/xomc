@@ -112,10 +112,20 @@ type DeviceItem struct {
 	TargetFile string `json:"targetFile,omitempty"`
 	// DownloadURL 是 CPE 上传完成、ACS 落 MinIO 后的 1h presigned GET 链接；
 	// 仅当子任务已 ended 且 backup_restore_file 元数据存在时填充，否则留空。
-	DownloadURL  string `json:"downloadUrl,omitempty"`
-	Status       string `json:"status"`
-	Result       string `json:"result,omitempty"`
-	Progress     int    `json:"progress"`
+	DownloadURL string `json:"downloadUrl,omitempty"`
+	Status      string `json:"status"`
+	Result      string `json:"result,omitempty"`
+	Progress    int    `json:"progress"`
+	// StartedAt 子任务首次进入执行态（downloading/uploading/rebooting/verifying）时由 PG repo
+	// 写入 upgrade_sub_tasks.started_at；未开始为空 → JSON omitempty 不输出。
+	// 三皮肤设备列表「开始时间」列展示。
+	StartedAt string `json:"startedAt,omitempty"`
+	// EndedAt 子任务到达终态（completed/failed/terminated）时由 PG repo 写入
+	// upgrade_sub_tasks.completed_at；未结束为空。三皮肤设备列表「结束时间」列展示。
+	EndedAt string `json:"endedAt,omitempty"`
+	// LastReportAt 仅在子任务到达上报成功终态（ended）时填 sub_task.updated_at；
+	// 历史字段，CSV 导出 / 北向 API 仍依赖，前端三皮肤设备列表已改用 StartedAt + EndedAt
+	// 展示，不再直接用本字段（见 issue #655）。
 	LastReportAt string `json:"lastReportAt"`
 	// CreatedAt 是设备子任务的创建时刻（设备加入任务的时间），仅用于列表稳定排序。
 	// 不能用 LastReportAt 排序：它只在上报成功终态才有值（见 mapDeviceItem / issue #195），

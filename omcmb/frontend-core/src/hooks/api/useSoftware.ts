@@ -47,6 +47,8 @@ export function useUploadFirmware() {
       metadata: {
         version: string;
         productId?: string;
+        // #638：多产品复选。传了它后端会同步主产品 product_id = ids[0]。
+        productIds?: string[];
         productClass?: string;
         releaseNotes?: string;
         fileType?: number;
@@ -98,6 +100,8 @@ export function useUpdateFirmware() {
       id: string;
       metadata: {
         productId?: string;
+        // #638：产品归属改为多选。传了 productIds 后端会重写主产品 product_id = ids[0]；未传（undefined）代表不动，传空数组代表清空。
+        productIds?: string[];
         productClass?: string;
         version?: string;
         recommend?: boolean;
@@ -118,7 +122,7 @@ export function useUpdateFirmware() {
 const SUB_TASK_TERMINAL = new Set(['completed', 'failed', 'terminated']);
 
 export function useUpgradeTasks(
-  params: { taskType?: number; status?: string; productClass?: string; createUser?: string } & PageRequest
+  params: { taskType?: number; status?: string; productClass?: string; productId?: string; createUser?: string } & PageRequest
 ) {
   return useQuery({
     queryKey: ['software', 'upgrade-tasks', params],

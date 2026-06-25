@@ -48,8 +48,13 @@ export function useUserById(id: string) {
 export function useCreateUser() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (data: Omit<User, 'id' | 'createTime' | 'lastLoginTime'> & { password: string; roleIds?: string[] }) =>
-      useMock ? systemService.createUser(data) : adminApi.createUser(data),
+    mutationFn: (
+      data: Omit<User, 'id' | 'createTime' | 'lastLoginTime'> & {
+        password?: string;
+        useDefaultPassword?: boolean;
+        roleIds?: string[];
+      },
+    ) => (useMock ? systemService.createUser(data) : adminApi.createUser(data)),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['system', 'users'] });
     },
@@ -79,10 +84,21 @@ export function useDeleteUsers() {
   });
 }
 
+// Issue #649：参数对象化，支持 useDefaultPassword 开关；newPassword 二选一。
 export function useResetPassword() {
   return useMutation({
-    mutationFn: ({ id, newPassword }: { id: string; newPassword: string }) =>
-      useMock ? systemService.resetPassword(id, newPassword) : adminApi.resetPassword(id, newPassword),
+    mutationFn: ({
+      id,
+      newPassword,
+      useDefaultPassword,
+    }: {
+      id: string;
+      newPassword?: string;
+      useDefaultPassword?: boolean;
+    }) =>
+      useMock
+        ? systemService.resetPassword(id, { newPassword, useDefaultPassword })
+        : adminApi.resetPassword(id, { newPassword, useDefaultPassword }),
   });
 }
 

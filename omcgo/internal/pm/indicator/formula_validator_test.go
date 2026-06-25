@@ -1,6 +1,7 @@
 package indicator
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -48,7 +49,11 @@ func TestValidate_InvalidUnknownToken(t *testing.T) {
 	if result.IsValid {
 		t.Error("should be invalid for unknown token")
 	}
-	if result.ErrorMsg != "Expression is invalid" {
+	// 2026-06-25:ErrorMsg 改成可定位提示（带 token 名 + 设备类型语义），
+	// 不再是模糊的 "Expression is invalid"。这里断言包含 unknown token 与具体名字即可，
+	// 完整文案见 formula_validator.go::Validate 注释。
+	if !strings.Contains(result.ErrorMsg, "unknown token") ||
+		!strings.Contains(result.ErrorMsg, `"UNKNOWN_COUNTER"`) {
 		t.Errorf("unexpected error: %s", result.ErrorMsg)
 	}
 }

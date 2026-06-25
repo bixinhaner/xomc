@@ -255,7 +255,23 @@ type CreateIndicatorRequest struct {
 	// platform 才能被详情列表的 platform_name EXISTS 过滤命中(否则保存成功但查不到)。前端从父级
 	// 透传当前 selectedPlatform;非空时 service 在同事务内向 perf_formulas_<dt> 写一行占位
 	// (Formula=Arithmetic,允许为空),与 indicator 创建原子。列表态不传(全量新建,后续在抽屉里挂公式)。
+	//
+	// 与 Formulas 并存（向后兼容）：若 Formulas 非空，service 优先走 Formulas 批量分支，
+	// 忽略本字段；若 Formulas 为空但本字段非空，走单条占位旧逻辑（保持已部署前端的行为）。
 	Platform string `json:"platform"`
+	// Formulas 可选:新建指标时一并提交的多平台公式集合（issue #640 C 方案）。
+	// 非空时 service 在同事务内为每条 (platform_name, formula) 跑 FormulaValidator → BatchCreate;
+	// 任一公式语法非法或事务任一环节失败 → 整体回滚（指标 + 已批公式都不落库）。
+	// 同 PlatformName 重复在 service 入口校验阻断（400），不靠 DB 唯一约束兜底。
+	// 与 Platform 单字段并存：Formulas 非空时优先走批量分支并忽略 Platform。
+	Formulas []FormulaInput `json:"formulas" binding:"omitempty,dive"`
+}
+
+// FormulaInput 是 CreateIndicatorRequest.Formulas 的元素，对齐前端 drafts 的 (platformName, formula)。
+// platform_name 与 formula 都必填；语法校验在 service 层走 FormulaValidator。
+type FormulaInput struct {
+	PlatformName string `json:"platform_name" binding:"required"`
+	Formula      string `json:"formula" binding:"required"`
 }
 
 type UpdateIndicatorRequest struct {

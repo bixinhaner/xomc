@@ -245,10 +245,44 @@ func (s *IndicatorManagementService) CreateIndicator(ctx context.Context, req *C
 		return nil, fmt.Errorf("create indicator: %w", err)
 	}
 
-	// Platform 非空 → 同事务内向 perf_formulas_<dt> 写一行占位(Formula=Arithmetic,允许空),
-	// 否则详情态(?platform=)的 EXISTS 过滤会把新建的指标过滤掉,看起来"保存成功但查不到"。
-	// 列表态(主页全局新建,未锁 platform)走 req.Platform=="" 分支,保持原行为不写公式。
-	if req.Platform != "" {
+	// 公式批量分支（issue #640 C 方案）：Formulas 非空时同事务批量写入，校验失败整体回滚。
+	// 与单条 Platform 占位分支二选一 —— Formulas 优先（与 model.go FormulaInput 注释一致）。
+	if len(req.Formulas) > 0 {
+		// 同 platform_name 重复校验（前端阻断后兜底；DB 无唯一约束，必须在 service 层挡住）。
+		seen := make(map[string]struct{}, len(req.Formulas))
+		for _, f := range req.Formulas {
+			if _, dup := seen[f.PlatformName]; dup {
+				return nil, fmt.Errorf("duplicate platform in formulas: %s", f.PlatformName)
+			}
+			seen[f.PlatformName] = struct{}{}
+		}
+		// 单条语法校验：每条都跑 FormulaValidator，任一失败整体回滚。
+		// validator 复用 buildIDMap 的结果（前面 Arithmetic 校验已建好，但当时可能为空跳过），
+		// 这里无条件重建以兼容 Arithmetic 为空但 Formulas 非空的场景。
+		idMap, err := s.buildIDMap(ctx, dt)
+		if err != nil {
+			return nil, fmt.Errorf("build ID map for formulas validation: %w", err)
+		}
+		validator := NewFormulaValidator(idMap)
+		batch := make([]*PlatformFormula, 0, len(req.Formulas))
+		for _, f := range req.Formulas {
+			result := validator.Validate(f.Formula)
+			if !result.IsValid {
+				return nil, fmt.Errorf("formula validation failed (platform=%s): %s", f.PlatformName, result.ErrorMsg)
+			}
+			batch = append(batch, &PlatformFormula{
+				PlatformName: f.PlatformName,
+				IndicatorID:  id,
+				Formula:      f.Formula,
+			})
+		}
+		if err := s.platformRepo.BatchCreate(ctx, dt, batch, tx); err != nil {
+			return nil, fmt.Errorf("batch create platform formulas: %w", err)
+		}
+	} else if req.Platform != "" {
+		// 旧前端兼容路径：Platform 非空时同事务内向 perf_formulas_<dt> 写一行占位
+		// (Formula=Arithmetic,允许空),否则详情态(?platform=)的 EXISTS 过滤会把新建的指标过滤掉,
+		// 看起来"保存成功但查不到"。列表态(主页全局新建,未锁 platform)两个字段都空 → 不写公式。
 		formula := &PlatformFormula{
 			PlatformName: req.Platform,
 			IndicatorID:  id,

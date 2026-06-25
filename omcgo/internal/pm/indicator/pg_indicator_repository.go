@@ -296,7 +296,12 @@ func (r *PgIndicatorRepository) GetIDsByGroupID(ctx context.Context, dt DeviceTy
 
 func (r *PgIndicatorRepository) GetNextKPIID(ctx context.Context, dt DeviceType, operatorCode string) (string, error) {
 	table := dt.IndicatorTable()
-	prefix := operatorCode + "K90000"
+	// 2026-06-25:KPI 自定义指标 ID 去掉运营商前缀,统一为 K90000xxxx,与 counter
+	// D000xxxx 视觉对齐（用户反馈 #3）。当前实际部署仅 default 一个运营商,旧的
+	// defaultK90000xxxx 通过 formula_validator 的 K90000 子串匹配仍能识别,序号
+	// 空间共享避免新旧 ID 撞车。
+	_ = operatorCode
+	const newPrefix = "K90000"
 
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
@@ -310,31 +315,45 @@ func (r *PgIndicatorRepository) GetNextKPIID(ctx context.Context, dt DeviceType,
 		return "", fmt.Errorf("acquire advisory lock for KPI ID: %w", err)
 	}
 
-	var maxID *string
-	query, args, err := storage.Psql.Select("MAX(id)").
+	// 扫所有包含 K90000 的 ID（含旧 defaultK90000xxxx + 新 K90000xxxx 两种格式）,
+	// 取末 4 位作为 sequence,共享同一序号空间。
+	query, args, err := storage.Psql.Select("id").
 		From(table).
-		Where(sq.Like{"id": prefix + "%"}).
+		Where(sq.Like{"id": "%K90000%"}).
 		ToSql()
 	if err != nil {
-		return "", fmt.Errorf("build max KPI ID SQL: %w", err)
+		return "", fmt.Errorf("build KPI ID scan SQL: %w", err)
 	}
-
-	if err := tx.QueryRow(ctx, query, args...).Scan(&maxID); err != nil {
-		return "", fmt.Errorf("query max KPI ID: %w", err)
+	rows, err := tx.Query(ctx, query, args...)
+	if err != nil {
+		return "", fmt.Errorf("scan KPI IDs: %w", err)
 	}
+	defer rows.Close()
 
-	seq := 1
-	if maxID != nil && len(*maxID) > len(prefix) {
-		numStr := (*maxID)[len(prefix):]
+	maxSeq := 0
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return "", fmt.Errorf("scan KPI ID row: %w", err)
+		}
+		if len(id) < 4 {
+			continue
+		}
+		tail := id[len(id)-4:]
 		var n int
-		if _, err := fmt.Sscanf(numStr, "%d", &n); err == nil && n >= seq {
-			seq = n + 1
+		if _, err := fmt.Sscanf(tail, "%d", &n); err == nil && n > maxSeq {
+			maxSeq = n
 		}
 	}
-	if seq > 9999 {
-		return "", fmt.Errorf("KPI ID sequence overflow for prefix %s", prefix)
+	if err := rows.Err(); err != nil {
+		return "", fmt.Errorf("iterate KPI IDs: %w", err)
 	}
-	return fmt.Sprintf("%s%04d", prefix, seq), tx.Commit(ctx)
+
+	seq := maxSeq + 1
+	if seq > 9999 {
+		return "", fmt.Errorf("KPI ID sequence overflow for prefix %s", newPrefix)
+	}
+	return fmt.Sprintf("%s%04d", newPrefix, seq), tx.Commit(ctx)
 }
 
 func (r *PgIndicatorRepository) GetNextCounterID(ctx context.Context) (string, error) {
@@ -510,10 +529,18 @@ func applyIndicatorFilters(builder sq.SelectBuilder, f IndicatorListFilter, dt D
 		}
 	}
 	if f.PlatformName != nil && *f.PlatformName != "" {
-		builder = builder.Where(sq.Expr(
-			fmt.Sprintf("EXISTS (SELECT 1 FROM %s f WHERE f.indicator_id = i.id AND f.platform_name = ?)", dt.FormulaTable()),
-			*f.PlatformName,
-		))
+		// 2026-06-25:counter(is_counter='1') 是原始计数器,跨 platform 全局可见,
+		// 不应被 platform_name EXISTS 过滤排除 —— 否则详情态 ?platform=ALL 列表会
+		// 看不到任何计数器（counter 在 perf_formulas_<dt> 没有公式行）。
+		// 修复方案:counter 直通 OR 派生 KPI 必须有公式行命中当前 platform。
+		// 同步去掉了 IndicatorFormModal 在 counter 新建时下发的 platform 占位（用户反馈 #2）。
+		builder = builder.Where(sq.Or{
+			sq.Eq{"i.is_counter": "1"},
+			sq.Expr(
+				fmt.Sprintf("EXISTS (SELECT 1 FROM %s f WHERE f.indicator_id = i.id AND f.platform_name = ?)", dt.FormulaTable()),
+				*f.PlatformName,
+			),
+		})
 	}
 	return builder
 }

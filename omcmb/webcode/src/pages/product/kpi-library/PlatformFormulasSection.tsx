@@ -5,14 +5,19 @@
  * 保证新建态与编辑态公式维护方式完全一致：按 platform 维度的多条公式 CRUD（不是单条
  * arithmetic textarea）。
  *
- * 数据契约：
- *   · 列表/CRUD 数据源 = rela_platform_indicator_formula_<dt>（按 platform 多行）
- *   · useFormulas(deviceType, indicatorId) → { items: PlatformFormula[] }
- *   · useUpsertFormula() → 按 platform 主键 upsert（同 platform 第二次保存即覆盖）
- *   · useDeleteFormula() → 按 platform 删除
+ * 双模式（issue #640 C 方案）：
+ *   · mode='server'（默认）：编辑态，indicator 已存在，直接走后端单条 upsert/delete。
+ *     数据契约：rela_platform_indicator_formula_<dt>（按 platform 多行）。
+ *     useFormulas(deviceType, indicatorId) → { items: PlatformFormula[] }；
+ *     useUpsertFormula() 按 platform 主键 upsert（同 platform 第二次保存即覆盖）；
+ *     useDeleteFormula() 按 platform 删除。
+ *   · mode='local'：新建态，indicator 尚未落库，公式作为 draft 集合放在父组件 state，
+ *     父组件在提交 createIndicator 时把 drafts 一并发到后端（formulas 字段，事务原子写入）。
+ *     不调用任何 mutation；platform 下拉照常拉。
  *
- * 前置条件：必须有 indicatorId。新建模式调用方应在 createIndicator 成功后把返回的
- *   indicator 注入本地 state，再渲染本组件（弹窗不关闭、转入「编辑态」）。
+ * 平台下拉数据源（两模式共用）：usePlatformList(deviceType) — 后端
+ * GET /api/v1/indicators/platforms 返回该 deviceType 下公式表里 distinct 出来的全部
+ * platform_name（不含未使用过的产品 platform）；ALL 永远置首位。
  */
 import { useMemo, useState } from 'react';
 import {
@@ -34,7 +39,11 @@ import {
   useDeleteFormula,
   usePlatformList,
 } from '@core/hooks/api/useIndicatorsLibrary';
-import type { DeviceType, PlatformFormula } from '@core/types/indicatorLibrary';
+import type {
+  DeviceType,
+  PlatformFormula,
+  FormulaDraft,
+} from '@core/types/indicatorLibrary';
 import { useT } from '@/hooks/useT';
 
 // 「所有平台共用」约定值，与后端 indicator.PlatformAll 常量保持一致（XML 字典里
@@ -46,25 +55,42 @@ interface FormulaFormValues {
   formula: string;
 }
 
-interface Props {
-  deviceType: DeviceType;
-  indicatorId: string;
-}
+type Props =
+  | {
+      // server 模式（默认 — 编辑态/详情态）：indicator 已存在，直接走后端。
+      mode?: 'server';
+      deviceType: DeviceType;
+      indicatorId: string;
+    }
+  | {
+      // local 模式（新建态）：drafts 由父组件 state 持有，提交时一并落库。
+      mode: 'local';
+      deviceType: DeviceType;
+      value: FormulaDraft[];
+      onChange: (next: FormulaDraft[]) => void;
+    };
 
-export default function PlatformFormulasSection({ deviceType, indicatorId }: Props) {
+export default function PlatformFormulasSection(props: Props) {
   const t = useT();
-  const { data: formulasData } = useFormulas(deviceType, indicatorId);
-  // 平台下拉数据源：后端 GET /api/v1/indicators/platforms 返回该 deviceType 下公式表里
-  // distinct 出来的全部 platform_name（不含未使用过的产品 platform）。
-  const { data: platformsData } = usePlatformList(deviceType);
+  const isLocal = props.mode === 'local';
+  // server 模式专用 — local 模式 indicatorId 给 undefined,useFormulas 内部 enabled
+  // 守卫不会发请求(保 Hook 调用顺序稳定)。
+  const serverIndicatorId = isLocal ? undefined : props.indicatorId;
+  const { data: formulasData } = useFormulas(props.deviceType, serverIndicatorId);
+  // 平台下拉数据源:两模式共用。
+  const { data: platformsData } = usePlatformList(props.deviceType);
   const upsertMut = useUpsertFormula();
   const deleteMut = useDeleteFormula();
 
-  const [editing, setEditing] = useState<PlatformFormula | null>(null);
+  const [editing, setEditing] = useState<PlatformFormula | FormulaDraft | null>(null);
   const [creating, setCreating] = useState(false);
   const [form] = Form.useForm<FormulaFormValues>();
 
-  const formulas = formulasData?.items || [];
+  // 列表数据源:local 模式来自 props.value;server 模式来自 useFormulas。
+  // 字段名统一成 { platformName, formula } 给表格用(FormulaDraft 已经是这种形状)。
+  const formulas: Array<PlatformFormula | FormulaDraft> = isLocal
+    ? props.value
+    : formulasData?.items || [];
 
   // 平台选项：始终把 ALL 放在第一位（即使数据库里还没人选过 ALL，也要可选）；
   // 其余按后端返回的 distinct platform_name 列出。Set 兜底去重。
@@ -103,7 +129,7 @@ export default function PlatformFormulasSection({ deviceType, indicatorId }: Pro
     {
       title: t('common.action'),
       width: 120,
-      render: (_: unknown, row: PlatformFormula) => (
+      render: (_: unknown, row: PlatformFormula | FormulaDraft) => (
         <Space>
           <Button
             size="small"
@@ -115,12 +141,24 @@ export default function PlatformFormulasSection({ deviceType, indicatorId }: Pro
           />
           <Popconfirm
             title={t('product.kpi.confirmDeletePlatformFormula', { name: row.platformName })}
-            onConfirm={() =>
-              deleteMut
-                .mutateAsync({ deviceType, indicatorId, platform: row.platformName })
+            onConfirm={() => {
+              if (isLocal) {
+                // local 模式:从 drafts 数组里按 platformName 删除,onChange 通知父级。
+                props.onChange(
+                  props.value.filter((d) => d.platformName !== row.platformName),
+                );
+                message.success(t('common.deleted'));
+                return;
+              }
+              return deleteMut
+                .mutateAsync({
+                  deviceType: props.deviceType,
+                  indicatorId: props.indicatorId,
+                  platform: row.platformName,
+                })
                 .then(() => message.success(t('common.deleted')))
-                .catch((e) => message.error((e as Error).message))
-            }
+                .catch((e) => message.error((e as Error).message));
+            }}
           >
             <Button size="small" danger icon={<DeleteOutlined />} />
           </Popconfirm>
@@ -132,7 +170,7 @@ export default function PlatformFormulasSection({ deviceType, indicatorId }: Pro
   const handleSave = async () => {
     try {
       const v = await form.validateFields();
-      // 基础校验：括号匹配（后端 service 还会做完整语法校验）。
+      // 基础校验:括号匹配(后端 service 还会做完整语法校验)。
       let depth = 0;
       for (const ch of v.formula) {
         if (ch === '(') depth++;
@@ -140,13 +178,28 @@ export default function PlatformFormulasSection({ deviceType, indicatorId }: Pro
         if (depth < 0) throw new Error(t('product.kpi.formulaBracketMismatch'));
       }
       if (depth !== 0) throw new Error(t('product.kpi.formulaBracketMismatch'));
-      await upsertMut.mutateAsync({
-        deviceType,
-        indicatorId,
-        platform: v.platform.trim(),
-        formula: v.formula.trim(),
-      });
-      message.success(editing ? t('common.updated') : t('common.created'));
+      const platform = v.platform.trim();
+      const formula = v.formula.trim();
+      if (isLocal) {
+        // local 模式:直接维护本地数组。同 platform 已存在则覆盖(与 server upsert 语义一致),
+        // 不存在则追加。注意 editing 时 platform 是 disabled 不会变。
+        const exists = props.value.some((d) => d.platformName === platform);
+        const next = exists
+          ? props.value.map((d) =>
+              d.platformName === platform ? { platformName: platform, formula } : d,
+            )
+          : [...props.value, { platformName: platform, formula }];
+        props.onChange(next);
+        message.success(editing ? t('common.updated') : t('common.created'));
+      } else {
+        await upsertMut.mutateAsync({
+          deviceType: props.deviceType,
+          indicatorId: props.indicatorId,
+          platform,
+          formula,
+        });
+        message.success(editing ? t('common.updated') : t('common.created'));
+      }
       setEditing(null);
       setCreating(false);
       form.resetFields();
@@ -174,7 +227,7 @@ export default function PlatformFormulasSection({ deviceType, indicatorId }: Pro
         </Button>
       </Space>
 
-      <Table<PlatformFormula>
+      <Table<PlatformFormula | FormulaDraft>
         rowKey="platformName"
         columns={formulaColumns}
         dataSource={formulas}
@@ -195,7 +248,7 @@ export default function PlatformFormulasSection({ deviceType, indicatorId }: Pro
           setCreating(false);
           form.resetFields();
         }}
-        confirmLoading={upsertMut.isPending}
+        confirmLoading={isLocal ? false : upsertMut.isPending}
         destroyOnHidden
         width={620}
       >

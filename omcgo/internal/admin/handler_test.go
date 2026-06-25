@@ -789,3 +789,99 @@ func TestHandler_ListRoles(t *testing.T) {
 	var resp model.ListResponse[Role]
 	response.DecodeData(t, w.Body, &resp)
 }
+
+// ===================== issue #649 「默认密码」接通 — handler 层 =====================
+//
+// service 层行为矩阵已在 service_test.go 充分覆盖；本处仅验 handler 分支语义：
+//   - UseDefaultPassword=true → 跳过密码字段必填校验、不解密、透传 service
+//   - UseDefaultPassword=false / 缺省 → 走现有 T-0120 双路径
+//
+// 默认密码兜底来源：handlerNewTestEnv 未注入 SecurityPolicy，service.policySnapshot()
+// 退化到 defaultPolicy() 的 fail-safe 常量 "OMC@123456"，足以覆盖 happy path。
+
+func TestHandler_CreateUser_UseDefaultPassword_Succeeds(t *testing.T) {
+	var created *User
+	userRepo := &handlerMockUserRepo{
+		createFn: func(_ context.Context, user *User) error {
+			user.ID = uuid.New()
+			user.CreatedAt = time.Now()
+			user.UpdatedAt = time.Now()
+			created = user
+			return nil
+		},
+	}
+	env := handlerNewTestEnv(t, userRepo, &handlerMockRoleRepo{})
+
+	// 注意：use_default_password=true 时不带 encrypted_password / password / key_id。
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/users",
+		handlerJSON(CreateUserHTTPRequest{
+			Username:           "newuser",
+			UseDefaultPassword: true,
+			DisplayName:        "New User",
+		}))
+	req.Header.Set("Content-Type", "application/json")
+	env.Engine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusCreated, w.Code)
+	require.NotNil(t, created)
+	assert.True(t, created.MustChangePassword, "硬规则：默认密码创建即强制首次改密")
+}
+
+func TestHandler_CreateUser_MissingPassword_NoUseDefault_Rejects(t *testing.T) {
+	env := handlerNewTestEnv(t, &handlerMockUserRepo{}, &handlerMockRoleRepo{})
+
+	// 三个密码字段全空 + 未启用 use_default_password → handler 400 "missing password"
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/users",
+		handlerJSON(CreateUserHTTPRequest{Username: "newuser"}))
+	req.Header.Set("Content-Type", "application/json")
+	env.Engine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "missing password")
+}
+
+func TestHandler_ResetPassword_UseDefaultPassword_Succeeds(t *testing.T) {
+	target := uuid.New()
+	updateCalled := false
+	userRepo := &handlerMockUserRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*User, error) {
+			return &User{ID: target, Username: "alice", Source: UserSourceAdmin}, nil
+		},
+		updatePasswordFn: func(_ context.Context, _ uuid.UUID, _ string) error {
+			updateCalled = true
+			return nil
+		},
+	}
+	env := handlerNewTestEnv(t, userRepo, &handlerMockRoleRepo{})
+
+	// use_default_password=true 时不带 encrypted_new_password / new_password / key_id。
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/users/"+target.String()+"/reset-password",
+		handlerJSON(ResetPasswordRequest{UseDefaultPassword: true}))
+	req.Header.Set("Content-Type", "application/json")
+	env.Engine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.True(t, updateCalled, "service 应消费默认密码并调 UpdatePassword")
+}
+
+func TestHandler_ResetPassword_MissingPassword_NoUseDefault_Rejects(t *testing.T) {
+	target := uuid.New()
+	userRepo := &handlerMockUserRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*User, error) {
+			return &User{ID: target, Username: "alice", Source: UserSourceAdmin}, nil
+		},
+	}
+	env := handlerNewTestEnv(t, userRepo, &handlerMockRoleRepo{})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/users/"+target.String()+"/reset-password",
+		handlerJSON(ResetPasswordRequest{}))
+	req.Header.Set("Content-Type", "application/json")
+	env.Engine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "missing password")
+}

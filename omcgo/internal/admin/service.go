@@ -397,15 +397,25 @@ func (s *AdminService) RefreshToken(ctx context.Context, refreshToken string) (*
 
 // CreateUser creates a new user account with role assignments.
 // If role assignment fails, the created user is rolled back to maintain consistency.
+//
+// issue #649 默认密码接通：
+//   - req.UseDefaultPassword=true → 从 sys_configs.security.defaultPasswd 取值，跳过强度校验；
+//   - false → 走现有 ValidatePassword（依赖 sys_configs security.pwdMinLength / pwdMaxLength /
+//     passwordContent；policy nil 时 fail-open）。
+//
+// 落库 MustChangePassword 强制为 true（硬规则：管理员注入凭据 → 用户下次登录一律强制改密），
+// 不再受 sys_configs.security.modifyPWD 配置开关影响（该开关已废弃）。
+//
+// 审计：成功/失败均写一条 audit.ActionUserCreate（details.used_default_password 标识路径）。
 func (s *AdminService) CreateUser(ctx context.Context, req CreateUserRequest) (*User, error) {
-	// P1-② 密码强度校验（sys_configs security.pwdMinLength / pwdMaxLength /
-	// passwordContent）。policy nil 时 ValidatePassword 安全降级（fail-open）。
-	pwdPolicy := PasswordPolicySnapshotFromSecurityPolicy(s.policySnapshot(ctx))
-	if err := ValidatePassword(req.Password, pwdPolicy); err != nil {
-		return nil, fmt.Errorf("%w: %w", err, commonerrors.ErrInvalidInput)
+	policy := s.policySnapshot(ctx)
+	plainPwd, err := s.resolveAdminInjectedPassword(req.UseDefaultPassword, req.Password, policy, "密码")
+	if err != nil {
+		s.auditUserCreateFailure(ctx, req, err)
+		return nil, err
 	}
 
-	hash, err := hashSecret([]byte(req.Password))
+	hash, err := hashSecret([]byte(plainPwd))
 	if err != nil {
 		return nil, fmt.Errorf("hash password: %w", err)
 	}
@@ -423,8 +433,8 @@ func (s *AdminService) CreateUser(ctx context.Context, req CreateUserRequest) (*
 		ExpireAt:     req.ExpireAt,
 		Status:       UserStatusActive,
 		Source:       UserSourceAdmin,
-		// P1-① 首次登录强制改密：按 sys_configs.security.modifyPWD 决定初始值。
-		MustChangePassword: s.policySnapshot(ctx).MustChangePasswordOnFirstLogin,
+		// issue #649 硬规则：管理员创建即强制首次改密（无论手填还是默认密码）。
+		MustChangePassword: true,
 		// P1-④ 让密码有效期从创建时刻起计；NULL 会被 Login 视为初始密码立刻过期。
 		PasswordChangedAt: &now,
 	}
@@ -434,6 +444,7 @@ func (s *AdminService) CreateUser(ctx context.Context, req CreateUserRequest) (*
 	}
 
 	if err := s.userRepo.Create(ctx, user); err != nil {
+		s.auditUserCreateFailure(ctx, req, err)
 		return nil, fmt.Errorf("create user: %w", err)
 	}
 
@@ -446,13 +457,73 @@ func (s *AdminService) CreateUser(ctx context.Context, req CreateUserRequest) (*
 					zap.Error(delErr),
 				)
 			}
+			s.auditUserCreateFailure(ctx, req, err)
 			return nil, fmt.Errorf("assign role %s: %w", roleID, err)
 		}
 	}
 
 	roles, _ := s.roleRepo.GetUserRoles(ctx, user.ID)
 	user.Roles = roles
+	s.auditUserCreateSuccess(ctx, req, user)
 	return user, nil
+}
+
+// resolveAdminInjectedPassword 解析「管理员注入密码」场景下实际要写库的明文密码。
+//
+// 严格按 useDefault 标志位分支（设计 §3.2 拍板，避免「字段为空即走默认密码」推断歧义）：
+//   - useDefault=true  → 取 policy.DefaultPassword；空则返 ErrInvalidInput「系统默认密码未设置」；
+//     **跳过 ValidatePassword**（defaultPasswd 在写入侧已校验，是受信任的运维设定值；
+//     强度规则调高不影响存量默认密码的可用性，避免 UX 死结，设计 §3.2 方案 A）。
+//   - useDefault=false + plain 非空 → 跑 ValidatePassword 强度校验。
+//   - useDefault=false + plain 空 → 业务错误「<fieldLabel>不能为空」。
+//
+// fieldLabel 用于错误消息（CreateUser 传"密码"，ResetPassword 传"新密码"）。
+func (s *AdminService) resolveAdminInjectedPassword(useDefault bool, plain string, policy *securityPolicyValues, fieldLabel string) (string, error) {
+	if useDefault {
+		if policy == nil || policy.DefaultPassword == "" {
+			return "", fmt.Errorf("%w: 系统默认密码未设置", commonerrors.ErrInvalidInput)
+		}
+		return policy.DefaultPassword, nil
+	}
+	if plain == "" {
+		return "", fmt.Errorf("%w: %s不能为空", commonerrors.ErrInvalidInput, fieldLabel)
+	}
+	if err := ValidatePassword(plain, PasswordPolicySnapshotFromSecurityPolicy(policy)); err != nil {
+		return "", fmt.Errorf("%w: %w", err, commonerrors.ErrInvalidInput)
+	}
+	return plain, nil
+}
+
+// auditUserCreateSuccess 写一条用户创建成功的审计日志。
+// details.used_default_password 让审计端可区分两条路径，便于合规追溯。
+func (s *AdminService) auditUserCreateSuccess(ctx context.Context, req CreateUserRequest, user *User) {
+	audit.Log(ctx, audit.Entry{
+		UserID:       operatorIDFromContext(ctx),
+		Action:       audit.ActionUserCreate,
+		ResourceType: audit.ResourceUser,
+		ResourceID:   user.ID.String(),
+		Success:      true,
+		Details: map[string]interface{}{
+			"used_default_password": req.UseDefaultPassword,
+			"target_user_id":        user.ID.String(),
+			"target_username":       req.Username,
+		},
+	})
+}
+
+// auditUserCreateFailure 写一条用户创建失败的审计日志（密码强度/默认密码未设置/落库失败等）。
+func (s *AdminService) auditUserCreateFailure(ctx context.Context, req CreateUserRequest, err error) {
+	audit.Log(ctx, audit.Entry{
+		UserID:       operatorIDFromContext(ctx),
+		Action:       audit.ActionUserCreate,
+		ResourceType: audit.ResourceUser,
+		Success:      false,
+		ErrorMessage: err.Error(),
+		Details: map[string]interface{}{
+			"used_default_password": req.UseDefaultPassword,
+			"target_username":       req.Username,
+		},
+	})
 }
 
 // UpdateUser updates an existing user.
@@ -844,47 +915,104 @@ func (s *AdminService) ListRolesPaginated(ctx context.Context, filter RoleFilter
 	return result, nil
 }
 
-// ResetPassword resets a user's password to the provided new password.
-// LDAP 用户（source=LDAP）密码归属外部域，拒绝重置 → HTTP 409。
-// 重置成功后同时清除登录失败计数与锁定状态，避免管理员重置后仍处于锁定。
-func (s *AdminService) ResetPassword(ctx context.Context, id uuid.UUID, newPassword string) error {
+// ResetPassword resets a user's password using the admin-initiated path.
+//
+// 拦截顺序（短路）：
+//  1. LDAP 用户（source=LDAP）密码归属外部域 → ErrLDAPPasswordExternal（HTTP 409）。
+//  2. 内置用户（source=builtIn，issue #649 新增）→ ErrBuiltInUserProtected（HTTP 409）；
+//     与 LockUser/DeleteUser/ForceLogout 拦截策略对齐，内置 admin 忘密走 omcctl CLI / DB 手工。
+//  3. 按 req.UseDefaultPassword 解析密码来源（resolveAdminInjectedPassword）。
+//
+// 写库成功后：
+//   - 硬规则置 must_change_password=true（issue #649：管理员注入凭据 → 用户下次登录强制改密；
+//     UpdatePassword 已自动清零该字段，此处 setter 回 true）；
+//   - 清登录失败计数与锁定状态，避免管理员重置后用户仍处锁定；
+//   - **revoker.Revoke(id)**（issue #649 新增，OWASP A07）：旧 access/refresh token 立即失效，
+//     与 LockUser 既有行为对齐；revoker 未注入（测试场景）时 warn 不阻断业务。
+//
+// 审计：成功/失败均写一条 audit.ActionPasswordReset。
+func (s *AdminService) ResetPassword(ctx context.Context, id uuid.UUID, req ResetPasswordRequest) error {
 	user, err := s.userRepo.GetByID(ctx, id)
 	if err != nil {
+		s.auditPasswordResetFailure(ctx, id, "", req.UseDefaultPassword, err)
 		return fmt.Errorf("get user for reset password: %w", err)
 	}
 	if user.Source == UserSourceLDAP {
+		s.auditPasswordResetFailure(ctx, id, user.Username, req.UseDefaultPassword, ErrLDAPPasswordExternal)
 		return ErrLDAPPasswordExternal
 	}
-	// P1-② 密码强度校验
-	policy := s.policySnapshot(ctx)
-	if err := ValidatePassword(newPassword, PasswordPolicySnapshotFromSecurityPolicy(policy)); err != nil {
-		return fmt.Errorf("%w: %w", err, commonerrors.ErrInvalidInput)
+	if user.Source == UserSourceBuiltIn {
+		s.auditPasswordResetFailure(ctx, id, user.Username, req.UseDefaultPassword, ErrBuiltInUserProtected)
+		return ErrBuiltInUserProtected
 	}
-	hash, err := hashSecret([]byte(newPassword))
+	policy := s.policySnapshot(ctx)
+	plainPwd, err := s.resolveAdminInjectedPassword(req.UseDefaultPassword, req.NewPassword, policy, "新密码")
+	if err != nil {
+		s.auditPasswordResetFailure(ctx, id, user.Username, req.UseDefaultPassword, err)
+		return err
+	}
+	hash, err := hashSecret([]byte(plainPwd))
 	if err != nil {
 		return fmt.Errorf("hash password: %w", err)
 	}
 	if err := s.userRepo.UpdatePassword(ctx, id, string(hash)); err != nil {
+		s.auditPasswordResetFailure(ctx, id, user.Username, req.UseDefaultPassword, err)
 		return fmt.Errorf("update password: %w", err)
 	}
-	// P1-① ResetPassword（admin 重置）后按 sys_configs.security.modifyPWD 决定
-	// 是否要求用户下次登录改密。UpdatePassword 已把 must_change_password 清零，
-	// 此处仅当 policy=true 时再 setter 重置回 true。
-	if policy.MustChangePasswordOnFirstLogin {
-		if repo, ok := s.userRepo.(*PgUserRepository); ok {
-			if err := repo.SetMustChangePassword(ctx, id, true); err != nil {
-				s.logger.Warn("set must_change_password after reset", zap.Error(err))
-			}
-		}
-	}
-	// 与 LockUserByUsername 保持一致：ResetLoginSecurity 不在 UserRepository 接口上，
+	// issue #649 硬规则：管理员重置后下次登录必须改密。UpdatePassword 已清零，此处再 setter 回 true。
+	// SetMustChangePassword / ResetLoginSecurity 不在 UserRepository 接口上，
 	// 通过类型断言直接调具体实现，失败仅警告（密码已成功重置）。
 	if repo, ok := s.userRepo.(*PgUserRepository); ok {
+		if err := repo.SetMustChangePassword(ctx, id, true); err != nil {
+			s.logger.Warn("set must_change_password after reset", zap.Error(err))
+		}
 		if err := repo.ResetLoginSecurity(ctx, id); err != nil {
 			s.logger.Warn("reset login security after password reset", zap.Error(err))
 		}
 	}
+	// issue #649 OWASP A07：旧 access/refresh token 立即失效，对齐 LockUser 既有行为。
+	// revoker 未注入（测试场景）时退化为 no-op，业务返回 nil。
+	if s.revoker != nil {
+		if err := s.revoker.Revoke(ctx, id); err != nil {
+			s.logger.Error("revoke tokens after password reset failed",
+				zap.String("user_id", id.String()), zap.Error(err))
+		}
+	}
+	s.auditPasswordResetSuccess(ctx, id, user.Username, req.UseDefaultPassword)
 	return nil
+}
+
+// auditPasswordResetSuccess 写一条管理员重置密码成功的审计日志。
+func (s *AdminService) auditPasswordResetSuccess(ctx context.Context, targetID uuid.UUID, username string, usedDefault bool) {
+	audit.Log(ctx, audit.Entry{
+		UserID:       operatorIDFromContext(ctx),
+		Action:       audit.ActionPasswordReset,
+		ResourceType: audit.ResourceUser,
+		ResourceID:   targetID.String(),
+		Success:      true,
+		Details: map[string]interface{}{
+			"used_default_password": usedDefault,
+			"target_user_id":        targetID.String(),
+			"target_username":       username,
+		},
+	})
+}
+
+// auditPasswordResetFailure 写一条管理员重置密码失败的审计日志
+// （LDAP 拒绝 / 内置用户拒绝 / 默认密码未设置 / 强度不通过 / 落库失败等）。
+func (s *AdminService) auditPasswordResetFailure(ctx context.Context, targetID uuid.UUID, username string, usedDefault bool, err error) {
+	audit.Log(ctx, audit.Entry{
+		UserID:       operatorIDFromContext(ctx),
+		Action:       audit.ActionPasswordReset,
+		ResourceType: audit.ResourceUser,
+		ResourceID:   targetID.String(),
+		Success:      false,
+		ErrorMessage: err.Error(),
+		Details: map[string]interface{}{
+			"used_default_password": usedDefault,
+			"target_username":       username,
+		},
+	})
 }
 
 // LockUser disables a user account by setting its status to disabled.

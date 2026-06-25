@@ -176,11 +176,11 @@ function mapBackendSummary(b: BackendDashboardSummary): DashboardSummary {
     },
     kpiDeltas: Object.entries(b.kpi_deltas || {}).reduce((acc, [kpiName, delta]) => {
       acc[kpiName] = {
-        current_value: delta.current_value,
-        previous_value: delta.previous_value,
-        change_percent: delta.change_percent,
+        currentValue: delta.current_value,
+        previousValue: delta.previous_value,
+        changePercent: delta.change_percent,
         trend: delta.trend as 'up' | 'down' | 'stable',
-        compare_type: delta.compare_type as 'yesterday' | 'last_week',
+        compareType: delta.compare_type as 'yesterday' | 'last_week',
       };
       return acc;
     }, {} as Record<string, KPIDelta>),

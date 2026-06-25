@@ -85,8 +85,23 @@ export interface CreateIndicatorInput {
   cnDescription?: string;
   // 详情态（URL ?platform= 锁定）新建必须把当前 platform 透传给后端，否则
   // perf_formulas_<dt> 无关联行 → 列表 EXISTS 过滤会把刚建的指标过滤掉，
-  // 表现为“保存成功但查不到”。列表态（主页全局新建）不传，保持原行为。
+  // 表现为"保存成功但查不到"。列表态（主页全局新建）不传，保持原行为。
+  //
+  // 与 formulas 并存（向后兼容）：当 formulas 非空时，service 优先走批量分支并忽略 platform；
+  // formulas 为空但 platform 非空时，service 走旧的单条占位逻辑（保持已部署旧前端的行为）。
   platform?: string;
+  // formulas：issue #640 C 方案，新建时一并提交的多平台公式集合。
+  // 非空时后端在同事务内为每条 (platformName, formula) 跑 FormulaValidator + BatchCreate；
+  // 任一公式语法非法或事务任一环节失败 → 整体回滚（指标 + 已批公式都不落库）。
+  // 同 platformName 重复在前端阻断，service 层兜底校验。
+  formulas?: FormulaDraft[];
+}
+
+// FormulaDraft 是新建态本地草稿条目，对齐后端 FormulaInput（json: platform_name / formula）。
+// 与持久化的 PlatformFormula 区分：drafts 还没 indicatorId（尚未创建），只在 Modal 内 state 持有。
+export interface FormulaDraft {
+  platformName: string;
+  formula: string;
 }
 
 // platform 仅 Create 路径有意义（创建时同事务写占位 formula）；后端

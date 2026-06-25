@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Avatar, Space, Modal, Form, Input, App } from 'antd';
+import { Avatar, Space, Modal, Form, Input, App, Alert, Button } from 'antd';
 import {
   UserOutlined,
   LockOutlined,
@@ -20,6 +20,10 @@ export default function UserDropdown() {
   const token = useThemeToken();
   const currentUser = useUserStore((s) => s.currentUser);
   const logout = useUserStore((s) => s.logout);
+  // Issue #649：后端 must_change_password=true 时，login 页会 setMustChangePassword(true)；
+  // 进入首页后本组件唤醒自动弹改密 Modal、且以不可关闭模式呈现。
+  const mustChangePassword = useUserStore((s) => s.mustChangePassword);
+  const setMustChangePassword = useUserStore((s) => s.setMustChangePassword);
   const toggleLocale = useAppStore((s) => s.toggleLocale);
   const locale = useAppStore((s) => s.locale);
   const t = useT();
@@ -27,6 +31,13 @@ export default function UserDropdown() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [changePwdVisible, setChangePwdVisible] = useState(false);
   const [pwdForm] = Form.useForm();
+
+  // Issue #649：进入首页后若 store 标记还是 true，强制打开改密 Modal。
+  useEffect(() => {
+    if (mustChangePassword) {
+      setChangePwdVisible(true);
+    }
+  }, [mustChangePassword]);
 
   const displayName = currentUser?.displayName ?? currentUser?.username ?? t('user.notLoggedIn');
   const avatarText = displayName.charAt(0).toUpperCase();
@@ -39,6 +50,8 @@ export default function UserDropdown() {
       message.success(t('user.passwordChanged'));
       setChangePwdVisible(false);
       pwdForm.resetFields();
+      // Issue #649：改密成功后清除标记 + 强制 logout（后端已吚销旧 token）
+      setMustChangePassword(false);
       // 欢迎重新登录
       setTimeout(() => logout(), 1500);
     },
@@ -165,18 +178,43 @@ export default function UserDropdown() {
         )}
       </span>
 
-      {/* 修改密码 Modal */}
+      {/* 修改密码 Modal
+          Issue #649：mustChangePassword=true 时走阐塞模式：不可关闭 / 不可点遮罩 /
+          不可 ESC / 只有“确认修改”一个按钮，另外提供“退出登录”辅助按钮。 */}
       <Modal
         title={t('user.changePassword')}
         open={changePwdVisible}
         onOk={handleChangePwdOk}
         onCancel={() => {
+          if (mustChangePassword) return; // 阐塞模式下不响应关闭
           setChangePwdVisible(false);
           pwdForm.resetFields();
         }}
         confirmLoading={changePasswordMutation.isPending}
         destroyOnHidden
+        closable={!mustChangePassword}
+        maskClosable={!mustChangePassword}
+        keyboard={!mustChangePassword}
+        okText={mustChangePassword ? t('login.mustChangePassword.confirm') : undefined}
+        cancelButtonProps={mustChangePassword ? { style: { display: 'none' } } : undefined}
+        footer={mustChangePassword ? (_close, { OkBtn }) => (
+          <Space>
+            <Button danger onClick={() => { setMustChangePassword(false); logout(); }}>
+              {t('user.logout')}
+            </Button>
+            <OkBtn />
+          </Space>
+        ) : undefined}
       >
+        {mustChangePassword && (
+          <Alert
+            type="warning"
+            showIcon
+            message={t('login.mustChangePassword.title')}
+            description={t('login.mustChangePassword.content')}
+            style={{ marginBottom: 16 }}
+          />
+        )}
         <Form form={pwdForm} layout="vertical" style={{ marginTop: 16 }}>
           <Form.Item
             name="oldPassword"

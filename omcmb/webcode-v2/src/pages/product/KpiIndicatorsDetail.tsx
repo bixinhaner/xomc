@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, Pencil, Plus, RefreshCcw, Search, Trash2, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -41,6 +41,7 @@ import {
 } from '@core/hooks/api/useIndicatorsLibrary'
 import type {
   DeviceType,
+  FormulaDraft,
   IndicatorInfo,
   IndicatorTypeValue,
   PlatformFormula,
@@ -436,6 +437,12 @@ function IndicatorForm({
   // currentIndicator 本地态：新建起点 null，create 成功后注入返回值 → 转「编辑态」，
   // FormulaSection 自动出现，与修改页面完全一致。
   const [currentIndicator, setCurrentIndicator] = useState<IndicatorInfo | null>(propIndicator)
+  // drafts(issue #640 C 方案)— 新建态 + kpi 类型的本地公式草稿,提交时随 createIndicator
+  // 一并下发,后端事务原子写入。
+  const [drafts, setDrafts] = useState<FormulaDraft[]>([])
+  // openedInCreateRef — 本次开弹是否新建态(propIndicator==null),锁定本次生命周期不变。
+  // 与 v1 IndicatorFormModal 同口径:新建态下公式区立刻可见(local 模式),不必等保存。
+  const openedInCreateRef = useRef<boolean>(propIndicator == null)
   const isEdit = Boolean(currentIndicator)
   // 内置指标（is_build_in==='1'）编辑时归属分组只读 — XML 真相源会覆盖，改了也无效。
   const builtinGroupReadonly = isEdit && Boolean(currentIndicator?.isBuildIn)
@@ -510,6 +517,11 @@ function IndicatorForm({
         }
       )
     } else {
+      // C 方案(issue #640):kpi 类型新建必须至少配 1 条公式。
+      if (indicatorType === 'kpi' && drafts.length === 0) {
+        setErr(t('product.kpi.indicator.formulaAtLeastOne'))
+        return
+      }
       createMut.mutate(
         {
           deviceType,
@@ -528,13 +540,16 @@ function IndicatorForm({
             cnDescription: desc,
             enDescription: desc,
             operatorCode,
-            // 详情态锁定的 platform，后端同事务写占位 formula。
-            platform: platform || undefined,
+            // kpi 类型走 formulas(真实公式集合,事务原子写入);counter 类型保留旧
+            // platform 占位逻辑(详情列表 platform_name EXISTS 过滤需要关联行)。
+            ...(indicatorType === 'kpi' && drafts.length > 0
+              ? { formulas: drafts }
+              : { platform: platform || undefined }),
           },
         },
         {
           onSuccess: (data) => {
-            // 创建成功 → 本地态注入，弹窗不关、转「编辑态」，FormulaSection 自动出现供用户配公式。
+            // 创建成功 → 公式已经原子写入,直接关弹回详情列表(由 onDone 触发刷新)。
             setCurrentIndicator(data)
             onDone(t('product.kpi.indicator.createSuccess'))
           },
@@ -716,10 +731,26 @@ function IndicatorForm({
             </div>
           </div>
 
-          {indicatorType === 'kpi' && currentIndicator ? (
-            // 公式维护区 — 与修改页面完全一致的 FormulaSection（按 platform 多条 CRUD）。
-            // 需要 indicatorId 才能调 useFormulas 等 API，所以新建模式下要先保存基础信息（currentIndicator!=null）。
-            <FormulaSection deviceType={deviceType} indicatorId={currentIndicator.id} />
+          {indicatorType === 'kpi' ? (
+            // 公式维护区(issue #640 C 方案):
+            //   · 新建态(openedInCreateRef=true)→ local 模式,drafts 父组件持有,提交时
+            //     随 createIndicator 一并下发,后端事务原子写入。
+            //   · 编辑态(openedInCreateRef=false 且 currentIndicator!=null)→ server 模式,
+            //     直接走 useFormulas/useUpsertFormula/useDeleteFormula。
+            openedInCreateRef.current ? (
+              <FormulaSection
+                mode="local"
+                deviceType={deviceType}
+                value={drafts}
+                onChange={setDrafts}
+              />
+            ) : currentIndicator ? (
+              <FormulaSection
+                mode="server"
+                deviceType={deviceType}
+                indicatorId={currentIndicator.id}
+              />
+            ) : null
           ) : null}
 
           <div className="space-y-1.5">
@@ -749,9 +780,9 @@ function IndicatorForm({
 }
 
 // ── 每平台公式 CRUD（编辑指标弹窗内嵌区，对齐 v1 IndicatorDrawer「全平台公式」） ───────────
-//   · useFormulas 列出 platformName → formula；每行 编辑 / 删除（删除二次确认 AlertDialog）。
-//   · 新增 / 编辑：platform + formula 两输入 → useUpsertFormula（按 platform 覆盖）。
-//   · 前端做括号匹配校验，后端做完整语法验证（对齐 v1）。i18n key 复用 v1。
+//   · server 模式(默认/编辑态)→ useFormulas + useUpsertFormula/useDeleteFormula 直接走后端。
+//   · local 模式(issue #640 新建态)→ drafts 父组件持有,本组件只做 UI 增删改回写,不调任何 API。
+//   · 新增 / 编辑：platform + formula 两输入。前端做括号匹配校验，后端做完整语法验证。i18n key 复用 v1。
 function checkBrackets(formula: string): boolean {
   let depth = 0
   for (const ch of formula) {
@@ -762,22 +793,37 @@ function checkBrackets(formula: string): boolean {
   return depth === 0
 }
 
-function FormulaSection({
-  deviceType,
-  indicatorId,
-}: {
-  deviceType: DeviceType
-  indicatorId: string
-}) {
+type FormulaSectionProps =
+  | {
+      mode?: 'server'
+      deviceType: DeviceType
+      indicatorId: string
+    }
+  | {
+      mode: 'local'
+      deviceType: DeviceType
+      value: FormulaDraft[]
+      onChange: (next: FormulaDraft[]) => void
+    }
+
+function FormulaSection(props: FormulaSectionProps) {
   const t = useT()
-  const { data, isLoading } = useFormulas(deviceType, indicatorId)
-  // 平台下拉数据源：后端 GET /api/v1/indicators/platforms 返回该 deviceType 下公式
-  // 表里 distinct 出来的全部 platform_name；UI 在顶部永远添加 ALL所有平台选项。
-  const { data: platformsData } = usePlatformList(deviceType)
+  const isLocal = props.mode === 'local'
+  // server 模式专用 — local 模式 indicatorId 给 undefined 让 useFormulas 内部 enabled
+  // 守卫不发请求(保 Hook 调用顺序稳定)。
+  const serverIndicatorId = isLocal ? undefined : props.indicatorId
+  const { data, isLoading } = useFormulas(props.deviceType, serverIndicatorId)
+  // 平台下拉数据源:两模式共用。
+  const { data: platformsData } = usePlatformList(props.deviceType)
   const upsertMut = useUpsertFormula()
   const deleteMut = useDeleteFormula()
 
-  const formulas = useMemo<PlatformFormula[]>(() => data?.items ?? [], [data])
+  // 列表数据源:local 模式来自 props.value;server 模式来自 useFormulas。
+  // PlatformFormula 与 FormulaDraft 均含 platformName/formula,union 兼容表格渲染。
+  const formulas = useMemo<Array<PlatformFormula | FormulaDraft>>(
+    () => (isLocal ? props.value : (data?.items ?? [])),
+    [isLocal, props, data],
+  )
 
   // 平台选项：ALL 常驻顶部（对应后端 indicator.PlatformAll 约定、表示跨平台共用），
   // 其余从后端返回的 distinct 名单中拼接。原生 <select> 允许受控外值为老数据回显。
@@ -793,12 +839,12 @@ function FormulaSection({
   }, [platformsData])
 
   // 编辑器状态：editing=正在编辑的平台公式；creating=新增态。两者互斥。
-  const [editing, setEditing] = useState<PlatformFormula | null>(null)
+  const [editing, setEditing] = useState<PlatformFormula | FormulaDraft | null>(null)
   const [creating, setCreating] = useState(false)
   const [platform, setPlatform] = useState('')
   const [formula, setFormula] = useState('')
   const [fErr, setFErr] = useState<string | null>(null)
-  const [pendingDelete, setPendingDelete] = useState<PlatformFormula | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<PlatformFormula | FormulaDraft | null>(null)
 
   const editorOpen = creating || Boolean(editing)
 
@@ -810,7 +856,7 @@ function FormulaSection({
     setFErr(null)
   }
 
-  const openEdit = (row: PlatformFormula) => {
+  const openEdit = (row: PlatformFormula | FormulaDraft) => {
     setCreating(false)
     setEditing(row)
     setPlatform(row.platformName)
@@ -827,7 +873,7 @@ function FormulaSection({
   }
 
   const submit = () => {
-    if (upsertMut.isPending) return
+    if (!isLocal && upsertMut.isPending) return
     const p = platform.trim()
     const f = formula.trim()
     if (!p || !f) {
@@ -839,8 +885,18 @@ function FormulaSection({
       return
     }
     setFErr(null)
+    if (isLocal) {
+      // local 模式:同 platform 已存在则覆盖(与 server upsert 同语义),否则追加。
+      const exists = props.value.some((d) => d.platformName === p)
+      const next = exists
+        ? props.value.map((d) => (d.platformName === p ? { platformName: p, formula: f } : d))
+        : [...props.value, { platformName: p, formula: f }]
+      props.onChange(next)
+      closeEditor()
+      return
+    }
     upsertMut.mutate(
-      { deviceType, indicatorId, platform: p, formula: f },
+      { deviceType: props.deviceType, indicatorId: props.indicatorId, platform: p, formula: f },
       {
         onSuccess: () => closeEditor(),
         onError: (e) => setFErr(errMsg(e)),
@@ -850,8 +906,18 @@ function FormulaSection({
 
   const confirmDelete = () => {
     if (!pendingDelete) return
+    if (isLocal) {
+      // local 模式:从 drafts 数组按 platformName 删除,onChange 通知父级。
+      props.onChange(props.value.filter((d) => d.platformName !== pendingDelete.platformName))
+      setPendingDelete(null)
+      return
+    }
     deleteMut.mutate(
-      { deviceType, indicatorId, platform: pendingDelete.platformName },
+      {
+        deviceType: props.deviceType,
+        indicatorId: props.indicatorId,
+        platform: pendingDelete.platformName,
+      },
       { onSettled: () => setPendingDelete(null) }
     )
   }
@@ -997,7 +1063,7 @@ function FormulaSection({
                 size="sm"
                 variant="destructive"
                 onClick={confirmDelete}
-                disabled={deleteMut.isPending}
+                disabled={!isLocal && deleteMut.isPending}
               >
                 {t('common.yes')}
               </Button>

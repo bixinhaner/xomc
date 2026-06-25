@@ -137,10 +137,13 @@ const (
 // FirmwareVersion represents a firmware image stored in MinIO.
 type FirmwareVersion struct {
 	ID uuid.UUID `json:"id"`
-	// ProductID #492：固件所属产品（products.id）。上传选产品名 → 存此列，作为产品归属权威；
-	// 历史行为 nil。前端按 product_id 关联产品管理目录展示/选择产品名。
-	ProductID     *uuid.UUID `json:"product_id,omitempty"`
-	ProductClass  string     `json:"product_class"`
+	// ProductID #492：固件主产品（products.id），= ProductIDs 列表首项。保留为兼容字段，
+	// 旧唯一索引 (product_id, version, file_type) 与现有引用照旧；新逻辑应优先使用 ProductIDs。
+	ProductID *uuid.UUID `json:"product_id,omitempty"`
+	// ProductIDs #638：固件适用的多个产品 ID 列表（products.id）。上传支持多选；列表/任务
+	// 按产品过滤命中条件 :pid = ANY(product_ids)。写入时由 service 同步 ProductID = ProductIDs[0]。
+	ProductIDs    []uuid.UUID `json:"product_ids,omitempty"`
+	ProductClass  string      `json:"product_class"`
 	Version       string     `json:"version"`
 	FileName      string     `json:"file_name"`
 	FileSize      int64      `json:"file_size"`
@@ -250,6 +253,10 @@ type UpgradeTaskFilter struct {
 	TaskType     *TaskType   `form:"task_type"`
 	Status       *TaskStatus `form:"status"`
 	ProductClass *string     `form:"product_class"`
+	// ProductID #638：按产品名过滤升级任务。任务本身不存 product_id（来自 firmware），
+	// repository 用 JOIN firmware_versions 命中 :pid = ANY(fv.product_ids)；用 string 而非
+	// *uuid.UUID —— gin query 绑定不支持 uuid，repository 层再 uuid.Parse，解析失败跳过。
+	ProductID    string      `form:"product_id"`
 	CreateUser   *string     `form:"create_user"`
 	model.ListRequest
 }

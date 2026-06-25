@@ -129,7 +129,7 @@ func TestMapSeverity(t *testing.T) {
 		{"warning", 4},
 		{"WARNING", 4},
 		{"unknown", 2}, // default to Major
-		{"", 2},       // default to Major
+		{"", 2},        // default to Major
 	}
 
 	for _, tt := range tests {
@@ -211,7 +211,8 @@ func TestToModel(t *testing.T) {
 	assert.Equal(t, "slot=1", alarm.AdditionalInfo["additional_information"])
 	assert.Equal(t, "Critical temperature alert", alarm.AdditionalInfo["additional_text"])
 	assert.Equal(t, "Device.Radio.1", alarm.AdditionalInfo["managed_object_instance"])
-	assert.False(t, alarm.LastUpdatedAt.IsZero())
+	assert.True(t, alarm.RaisedAt.IsZero())
+	assert.True(t, alarm.LastUpdatedAt.IsZero())
 }
 
 func TestFormatAlarmParamsForGPV(t *testing.T) {
@@ -270,14 +271,14 @@ func TestComputeDiff(t *testing.T) {
 
 	t.Run("mixed scenario", func(t *testing.T) {
 		remote := []*model.Alarm{
-			makeAlarm("ALM-001", "desc", 1),      // unchanged
-			makeAlarm("ALM-002", "new desc", 2),   // updated
-			makeAlarm("ALM-003", "desc", 3),        // new
+			makeAlarm("ALM-001", "desc", 1),     // unchanged
+			makeAlarm("ALM-002", "new desc", 2), // updated
+			makeAlarm("ALM-003", "desc", 3),     // new
 		}
 		local := []*model.Alarm{
-			makeAlarm("ALM-001", "desc", 1),      // unchanged
-			makeAlarm("ALM-002", "old desc", 2),   // updated
-			makeAlarm("ALM-999", "desc", 1),       // cleared
+			makeAlarm("ALM-001", "desc", 1),     // unchanged
+			makeAlarm("ALM-002", "old desc", 2), // updated
+			makeAlarm("ALM-999", "desc", 1),     // cleared
 		}
 		diff := ComputeDiff(remote, local)
 		assert.Len(t, diff.ToAdd, 1)
@@ -540,15 +541,15 @@ func TestExpeditedEvent_ToModel(t *testing.T) {
 	assert.Equal(t, "Device.FaultMgmt.ExpeditedEvent.", alarm.AdditionalInfo["managed_object_instance"])
 	assert.Equal(t, "NewAlarm", alarm.AdditionalInfo["notification_type"])
 	assert.Equal(t, model.AlarmActive, alarm.Status)
-	assert.False(t, alarm.RaisedAt.IsZero())
-	assert.False(t, alarm.LastUpdatedAt.IsZero())
+	assert.True(t, alarm.RaisedAt.IsZero())
+	assert.True(t, alarm.LastUpdatedAt.IsZero())
 }
 
 func TestExpeditedEvent_ToModel_ProbableCauseFallback(t *testing.T) {
 	t.Run("no probable cause, falls back to specific problem", func(t *testing.T) {
 		ev := &ExpeditedEvent{
-			AlarmIdentifier:  "ALM-001",
-			SpecificProblem:  "Board failure",
+			AlarmIdentifier:   "ALM-001",
+			SpecificProblem:   "Board failure",
 			PerceivedSeverity: "Major",
 		}
 		alarm := ev.ToModel(uuid.UUID{}, "SN", model.CarrierCMCC)
@@ -557,7 +558,7 @@ func TestExpeditedEvent_ToModel_ProbableCauseFallback(t *testing.T) {
 
 	t.Run("no probable cause or specific problem, falls back to identifier", func(t *testing.T) {
 		ev := &ExpeditedEvent{
-			AlarmIdentifier:  "ALM-002",
+			AlarmIdentifier:   "ALM-002",
 			PerceivedSeverity: "Minor",
 		}
 		alarm := ev.ToModel(uuid.UUID{}, "SN", model.CarrierCMCC)

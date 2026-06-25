@@ -21,6 +21,9 @@ export function LoginPage() {
   const navigate = useNavigate()
   const setTokenPair = useUserStore((s) => s.setTokenPair)
   const login = useUserStore((s) => s.login)
+  // Issue #649：标记必须改密，登录后阻塞 + 强制 logout（v2 暂无内置改密入口）。
+  const setMustChangePassword = useUserStore((s) => s.setMustChangePassword)
+  const logout = useUserStore((s) => s.logout)
 
   // 登录页品牌标题跟随「OMC 名称」配置（免登录公开通道），空回退 'OMC · v2'。
   const { omcName } = usePublicOmcName()
@@ -30,6 +33,8 @@ export function LoginPage() {
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Issue #649：必须改密时显示阻塞提示卡片，点确认 → 退出登录回登录页。
+  const [mustChangeOpen, setMustChangeOpen] = useState(false)
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -40,6 +45,13 @@ export function LoginPage() {
       setTokenPair(tokens)
       const me = await authApi.getMe()
       login(me)
+      // Issue #649：v2 没有内置改密 Modal/页面（历史欠债），仅阻塞登录入口并强制
+      // 用户退回登录页，告知"请到 v1 修改密码后再来"。后端硬规则仍会拒绝任何业务调用。
+      if (tokens.must_change_password) {
+        setMustChangePassword(true)
+        setMustChangeOpen(true)
+        return
+      }
       navigate('/dashboard')
     } catch (err) {
       const msg = err instanceof Error ? err.message : '登录失败'
@@ -100,6 +112,28 @@ export function LoginPage() {
               )}
             </Button>
           </form>
+
+          {mustChangeOpen && (
+            <div
+              className="mt-4 rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm"
+              role="alert"
+            >
+              <p className="font-semibold text-destructive">需修改密码</p>
+              <p className="mt-2 text-foreground">
+                为保障账号安全，请立即修改密码。请使用主控制台（v1 皮肤）完成修改后再登录。
+              </p>
+              <Button
+                className="mt-3 w-full"
+                variant="destructive"
+                onClick={() => {
+                  setMustChangeOpen(false)
+                  logout()
+                }}
+              >
+                返回登录
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
