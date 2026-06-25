@@ -132,6 +132,9 @@ export default function UserManagement() {
   // 新建用户表单：Form.useWatch 实时监听「使用系统默认密码」开关 → 密码框
   // disabled / rules 联动。Form.useWatch 必须在 form 实例存在后调用。
   const useDefaultPwdInForm = Form.useWatch('useDefaultPassword', form) === true;
+  // 重置密码弹窗：同样跟新建表单走 Switch；初值 = hasDefaultPasswd（有默认密码就
+  // 默认走「重置为默认」一键路径，否则手动输入）。
+  const useDefaultPwdInResetForm = Form.useWatch('useDefaultPassword', pwdForm) === true;
 
   // 内置用户判定：后端 users.source === 'builtIn'（迁移 000053 / PRD §11.3）。
   const isBuiltIn = useCallback((user: User) => isBuiltInUser(user), []);
@@ -261,18 +264,21 @@ export default function UserManagement() {
   const handleResetPassword = () => {
     if (!selectedUser) return;
     pwdForm.validateFields().then((vals) => {
-      resetPassword.mutate(
-        { id: selectedUser.id, newPassword: vals.newPassword as string },
-        {
-          onSuccess: () => {
-            message.success(t('common.save'));
-            setResetPwdVisible(false);
-            pwdForm.resetFields();
-            setSelectedUser(null);
-          },
-          onError: (err) => toast.error(err, t('common.error')),
+      // Issue #649：根据 Switch 分两路 — ON 走 {useDefaultPassword:true}，
+      // OFF 走 {newPassword}。后端会调 revoker.Revoke 立即吊销旧 token。
+      const useDefault = vals.useDefaultPassword === true;
+      const payload = useDefault
+        ? { id: selectedUser.id, useDefaultPassword: true }
+        : { id: selectedUser.id, newPassword: vals.newPassword as string };
+      resetPassword.mutate(payload, {
+        onSuccess: () => {
+          message.success(t('common.save'));
+          setResetPwdVisible(false);
+          pwdForm.resetFields();
+          setSelectedUser(null);
         },
-      );
+        onError: (err) => toast.error(err, t('common.error')),
+      });
     });
   };
 
@@ -412,14 +418,15 @@ export default function UserManagement() {
       render: (_, record) => {
         const user = record as User;
         // PRD §4.1：内置（builtIn）禁止删除/禁用；LDAP 禁止重置密码。
-        // 编辑 / 强制下线 / 改密 在内置用户上 v0.2 起已放开（紧急通道）。
+        // 编辑 / 强制下线 在内置用户上 v0.2 起已放开（紧急通道）。
+        // Issue #649：内置用户改密走 omcctl CLI，UI 改密一律拦截（不接默认密码也不开手动输入）。
         const builtIn = isBuiltIn(user);
         const ldap = isLdapUser(user);
         const canEdit = true;
         const canDelete = !builtIn;
         const canChangeStatus = !builtIn;
         const canForceLogout = true;
-        const canResetPwd = !ldap;
+        const canResetPwd = !ldap && !builtIn;
 
         const moreItems: MenuProps['items'] = [
           {
@@ -496,7 +503,14 @@ export default function UserManagement() {
           {
             key: 'resetPwd',
             label: !canResetPwd ? (
-              <Tooltip title={t('user.tooltip.ldapNoReset')} placement="left">
+              <Tooltip
+                title={
+                  builtIn
+                    ? t('system.user.builtInResetDisabledTip')
+                    : t('user.tooltip.ldapNoReset')
+                }
+                placement="left"
+              >
                 <span>{t('user.resetPassword')}</span>
               </Tooltip>
             ) : (
@@ -506,6 +520,9 @@ export default function UserManagement() {
             disabled: !canResetPwd,
             onClick: () => {
               setSelectedUser(user);
+              // Issue #649：弹窗打开前 refetch 一次安全设置，避免 30s 缓存窗口内
+              // 默认密码刚改完拿到旧值。
+              void refetchSecurity();
               setResetPwdVisible(true);
             },
           },
@@ -1089,39 +1106,93 @@ export default function UserManagement() {
         title={`${t('user.resetPassword')} - ${selectedUser?.username ?? ''}`}
         open={resetPwdVisible}
         onOk={handleResetPassword}
+        confirmLoading={resetPassword.isPending}
         onCancel={() => {
           setResetPwdVisible(false);
           pwdForm.resetFields();
           setSelectedUser(null);
         }}
-        width={420}
+        width={460}
       >
-        <Form form={pwdForm} layout="vertical">
+        <Form
+          form={pwdForm}
+          layout="vertical"
+          // Issue #649：初值 = hasDefaultPasswd（有默认密码就默认走「重置为默认」
+          // 一键路径，零字段提交；没设就回退手动输入路径）。
+          initialValues={{ useDefaultPassword: hasDefaultPasswd }}
+        >
+          <Form.Item
+            name="useDefaultPassword"
+            label={t('system.user.resetToDefault')}
+            valuePropName="checked"
+            extra={
+              useDefaultPwdInResetForm
+                ? hasDefaultPasswd
+                  ? t('system.user.resetToDefaultConfirm')
+                  : t('system.user.defaultPasswordNotSet')
+                : undefined
+            }
+          >
+            <Tooltip
+              title={
+                hasDefaultPasswd
+                  ? undefined
+                  : t('system.user.defaultPasswordNotSet')
+              }
+              placement="right"
+            >
+              <Switch disabled={!hasDefaultPasswd} />
+            </Tooltip>
+          </Form.Item>
           <Form.Item
             name="newPassword"
             label={t('user.newPassword')}
-            rules={[
-              { required: true, message: t('user.pleaseInputPassword') },
-              { min: 8, message: t('user.passwordMinLength') },
-            ]}
+            rules={
+              useDefaultPwdInResetForm
+                ? []
+                : [
+                    { required: true, message: t('user.pleaseInputPassword') },
+                    { min: 8, message: t('user.passwordMinLength') },
+                  ]
+            }
           >
-            <Input.Password placeholder={t('user.newPassword')} maxLength={20} />
+            <Input.Password
+              placeholder={
+                useDefaultPwdInResetForm
+                  ? defaultPasswd || t('user.newPassword')
+                  : t('user.newPassword')
+              }
+              maxLength={20}
+              disabled={useDefaultPwdInResetForm}
+            />
           </Form.Item>
           <Form.Item
             name="confirmPassword"
             label={t('user.confirmPassword')}
             dependencies={['newPassword']}
-            rules={[
-              { required: true, message: t('user.pleaseConfirmPassword') },
-              ({ getFieldValue }) => ({
-                validator(_, value) {
-                  if (!value || getFieldValue('newPassword') === value) return Promise.resolve();
-                  return Promise.reject(new Error(t('user.passwordMismatch')));
-                },
-              }),
-            ]}
+            rules={
+              useDefaultPwdInResetForm
+                ? []
+                : [
+                    { required: true, message: t('user.pleaseConfirmPassword') },
+                    ({ getFieldValue }) => ({
+                      validator(_, value) {
+                        if (!value || getFieldValue('newPassword') === value) return Promise.resolve();
+                        return Promise.reject(new Error(t('user.passwordMismatch')));
+                      },
+                    }),
+                  ]
+            }
           >
-            <Input.Password placeholder={t('user.confirmPassword')} maxLength={20} />
+            <Input.Password
+              placeholder={
+                useDefaultPwdInResetForm
+                  ? defaultPasswd || t('user.confirmPassword')
+                  : t('user.confirmPassword')
+              }
+              maxLength={20}
+              disabled={useDefaultPwdInResetForm}
+            />
           </Form.Item>
         </Form>
       </Modal>
