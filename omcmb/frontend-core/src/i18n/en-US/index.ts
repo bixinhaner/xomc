@@ -416,7 +416,7 @@ const messages: Record<string, string> = {
   'product.kpi.indicator.disabledTag':'Disabled',
   'product.kpi.indicator.platformName':'Platform name (platform_name)',
   'product.kpi.indicator.formulaLabel':'Formula (formula)',
-  'product.kpi.indicator.formulaPh':  'e.g. C1 / (C1 + C2) * 100',
+  'product.kpi.indicator.formulaPh':  'e.g. C000200015 / (C000200015 + C000200022) * 100; must reference existing counter/indicator IDs for this device type',
   'product.kpi.indicator.formulasTitle':'All Platforms Formulas / Per-Platform Formulas',
   'product.kpi.indicator.arithmetic': 'Numbered Formula (arithmetic)',
   // Indicator create/edit form (full lifecycle management, issue #535)
@@ -7004,7 +7004,8 @@ const messages: Record<string, string> = {
   'product.kpi.editFormulaTitle': 'Edit formula: {name}',
   'product.kpi.editUnitTitle': 'Edit unit: {id}',
   'product.kpi.formulaBracketMismatch': 'Formula bracket mismatch',
-  'product.kpi.formulaExtra': 'Supports basic arithmetic, brackets, counter names. Frontend validates brackets; backend validates full syntax.',
+  // 2026-06-25:enumerate suffixes instead of `<dt>` to avoid react-intl ICU treating `<dt>` as an XML tag (UNCLOSED_TAG crash on 新增公式 modal).
+  'product.kpi.formulaExtra': 'Supports basic arithmetic + - * /, brackets, and counter IDs. IDs must already exist in this device type table (perf_indicators_enb/gsm/gnb) — placeholders like C1/C2 are not accepted. Backend performs full syntax validation.',
   'product.kpi.indicatorDetail': 'Indicator detail',
   'product.kpi.indicatorDetailFull': 'Indicator detail: {id} {name}',
   'product.kpi.indicatorsByDevice': '{deviceType} indicators',

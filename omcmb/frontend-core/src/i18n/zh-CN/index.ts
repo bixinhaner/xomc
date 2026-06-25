@@ -416,7 +416,7 @@ const messages: Record<string, string> = {
   'product.kpi.indicator.disabledTag':'未启用',
   'product.kpi.indicator.platformName':'平台名 (platform_name)',
   'product.kpi.indicator.formulaLabel':'公式 (formula)',
-  'product.kpi.indicator.formulaPh':  '如 C1 / (C1 + C2) * 100',
+  'product.kpi.indicator.formulaPh':  '如 C000200015 / (C000200015 + C000200022) * 100；必须引用本设备类型下已存在的计数器/指标 ID',
   'product.kpi.indicator.formulasTitle':'全平台公式 / Per-Platform Formulas',
   'product.kpi.indicator.arithmetic': '编号公式 (arithmetic)',
   // 指标新建/编辑表单（指标全生命周期管理，issue #535）
@@ -7041,7 +7041,8 @@ const messages: Record<string, string> = {
   'product.kpi.editFormulaTitle': '编辑公式：{name}',
   'product.kpi.editUnitTitle': '编辑单位：{id}',
   'product.kpi.formulaBracketMismatch': '公式括号不匹配',
-  'product.kpi.formulaExtra': '支持基础四则、括号、计数器名；前端做括号匹配校验，后端做完整语法验证',
+  // 2026-06-25:`perf_indicators_{dt}` 里的 `{dt}` 改为字面下划线 + 占位词,避免 `<dt>` 被 react-intl ICU 解析成 XML tag 触发 UNCLOSED_TAG (PlatformFormulasSection 新增公式时崩溃)。
+  'product.kpi.formulaExtra': '支持基础四则 + - * /、括号、计数器 ID;ID 必须是本设备类型表（perf_indicators_enb/gsm/gnb）里已存在的,不能是占位符,后端会全语法校验',
   'product.kpi.indicatorDetail': '指标详情',
   'product.kpi.indicatorDetailFull': '指标详情：{id} {name}',
   'product.kpi.indicatorsByDevice': '{deviceType} 指标列表',

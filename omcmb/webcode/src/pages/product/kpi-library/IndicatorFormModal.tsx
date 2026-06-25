@@ -56,9 +56,11 @@ interface Props {
   onClose: () => void;
   deviceType: DeviceType;
   operatorCode?: string;
-  // 详情态（URL ?platform= 锁定）时从父级透传；新建时会随 payload 下发给后端，后端
-  // 同事务内写一行占位公式 → 避免详情列表 platform_name EXISTS 过滤掉刚建的指标。
-  // 列表态（主页全局新建、IndicatorDrawer 里的“编辑基本信息”）不传 → 向后兼容不写公式。
+  // 2026-06-25:platform prop \u4fdd\u7559\u4ec5\u4e3a\u5411\u540e\u517c\u5bb9\u8c03\u7528\u65b9\u7b7e\u540d\uff08\u4e0a\u5c42\u9875\u9762\u4ecd\u4f1a\u4ece URL ?platform=
+  // \u900f\u4f20\uff09\uff0c\u5185\u90e8\u4e0d\u518d\u4f7f\u7528 \u2014\u2014 \u539f\u8bbe\u8ba1\u662f counter \u65b0\u5efa\u65f6\u4e0b\u53d1 platform \u8ba9\u540e\u7aef\u5728
+  // perf_formulas_<dt> \u5199\u4e00\u884c\u7a7a\u516c\u5f0f\u5360\u4f4d\uff0c\u907f\u514d\u8be6\u60c5\u6001 EXISTS \u8fc7\u6ee4\u8fc7\u6ee4\u6389\u521a\u5efa\u7684\u6307\u6807\u3002
+  // \u73b0\u5728 applyIndicatorFilters \u5df2\u6539\u6210 counter \u76f4\u901a\uff08counter \u8de8 platform \u5168\u5c40\u53ef\u89c1\uff09\uff0c
+  // \u4e0d\u518d\u9700\u8981\u8fd9\u4e2a\u5360\u4f4d\u884c\uff08\u7528\u6237\u53cd\u9988 #2\uff09\u3002
   platform?: string;
   // null/undefined → 新建模式;有值 → 编辑模式(预填该行)。
   indicator?: IndicatorInfo | null;
@@ -91,7 +93,8 @@ export default function IndicatorFormModal({
   onClose,
   deviceType,
   operatorCode,
-  platform,
+  // platform 仅保留 prop 兼容外部传参,内部不再使用（见上方 Props 注释）。
+  platform: _platform,
   indicator: propIndicator,
 }: Props) {
   const t = useT();
@@ -210,12 +213,14 @@ export default function IndicatorFormModal({
             cnDescription: values.description?.trim() || undefined,
             enDescription: values.description?.trim() || undefined,
             operatorCode,
-            // kpi 类型走 formulas(真实公式集合,事务原子写入);counter 类型保留旧的
-            // platform 占位逻辑 — 详情态进入时 URL ?platform= 已锁定,占位让该平台下
-            // 详情列表的 platform_name EXISTS 过滤能查到刚建的 counter 指标。
+            // 2026-06-25:counter(\u76f4\u91c7) \u7c7b\u578b\u4e0d\u518d\u4e0b\u53d1 platform \u5360\u4f4d\uff0c\u7531\u540e\u7aef applyIndicatorFilters
+            // \u5728 platform_name \u8fc7\u6ee4\u5206\u652f\u7ed9 counter \u76f4\u901a\uff08counter \u8de8 platform \u5168\u5c40\u53ef\u89c1\uff09\u3002
+            // \u4ee5\u524d\u4e0b\u53d1 platform \u4f1a\u8ba9\u540e\u7aef\u5728 perf_formulas_<dt> \u5199\u4e00\u884c
+            // {platform_name=ALL, formula=""} \u7684\u7a7a\u516c\u5f0f\uff0c\u8be6\u60c5\u62bd\u5c49\u516c\u5f0f\u533a\u7559\u4e0b\u7a7a\u884c\uff08\u7528\u6237\u53cd\u9988 #2\uff09\u3002
+            // kpi \u7c7b\u578b\uff1adrafts \u975e\u7a7a \u2192 formulas \u4e8b\u52a1\u539f\u5b50\u5199\uff1bdrafts \u4e3a\u7a7a\u4e5f\u4e0d\u4e0b\u53d1 platform \u3002
             ...(indicatorType === 'kpi' && drafts.length > 0
               ? { formulas: drafts }
-              : { platform: platform || undefined }),
+              : {}),
           },
         });
         // 创建成功 → 通知父级刷新 + 关弹。drafts 已经在同一事务里落库,无需再转编辑态补。
