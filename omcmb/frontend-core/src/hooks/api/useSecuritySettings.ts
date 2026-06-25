@@ -30,12 +30,16 @@ export interface SecuritySettings {
  * 已用 useSysConfigsByCategory 的 30s staleTime 做缓存；多个组件调用复用同一份。
  *
  * enabled=false 时不发请求 — 给登录页（用户未登录态可能拉不到）一个旁路。
+ *
+ * Issue #649：暴露 refetch，让重置密码弹窗 onClick 时强制拿最新 defaultPasswd
+ * （绕开缓存避免管理员刚清空后弹错弹窗的 UX bug）。
  */
 export function useSecuritySettings(enabled = true): {
   settings: SecuritySettings | undefined;
   isFetching: boolean;
+  refetch: () => Promise<unknown>;
 } {
-  const { data, isFetching } = useSysConfigsByCategory('security', enabled);
+  const { data, isFetching, refetch } = useSysConfigsByCategory('security', enabled);
 
   const settings = useMemo<SecuritySettings | undefined>(() => {
     if (!data) return undefined;
@@ -52,7 +56,7 @@ export function useSecuritySettings(enabled = true): {
     };
   }, [data]);
 
-  return { settings, isFetching };
+  return { settings, isFetching, refetch };
 }
 
 function parseIntSafe(raw: string | undefined, fallback: number): number {

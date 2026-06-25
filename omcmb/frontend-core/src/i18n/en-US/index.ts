@@ -4379,8 +4379,17 @@ const messages: Record<string, string> = {
 
   // System - Security Settings
   'system.security.defaultPassword':         'Default Password',
-  'system.security.forcePasswordChangeOnFirstLogin': 'Users must change default password on first login',
+  // Issue #649: hardened to mandatory rule (admin-injected = always force change),
+  // i18n key 'system.security.forcePasswordChangeOnFirstLogin' removed
   'system.security.useAsDefaultPassword':    'Use as default password for login and password reset',
+  'system.security.defaultPasswordDriftWarning': 'Before tightening password strength rules below, ensure the current default password still satisfies the new rules.',
+  // Issue #649: default-password related user management i18n (System Config → Security linkage)
+  'system.user.useDefaultPassword':          'Use system default password',
+  'system.user.resetToDefault':              'Reset to system default password',
+  'system.user.resetToDefaultConfirm':       'Reset this user\'s password to the system default? The user must change it at next login, and existing sessions will be invalidated immediately.',
+  'system.user.defaultPasswordNotSet':       'System default password is not set. Please configure it in System Config → Security Settings first.',
+  'system.user.ldapResetDisabledTip':        'LDAP users\' passwords are managed by the LDAP system and cannot be reset here.',
+  'system.user.builtInResetDisabledTip':     'Built-in users must be reset via the omcctl CLI.',
   'system.security.passwordStrength':        'Password Strength',
   'system.security.passwordComplexityRequirement': 'Password must contain numbers, lowercase, uppercase and special characters (.!@#$%^&*?)',
   'system.security.userPasswordLength':      'User Password Length:',

@@ -668,13 +668,15 @@ export const adminApi = {
     }
   },
 
+  // Issue #649：password 可选 + useDefaultPassword 开关。开关为 true 时跳过加密、
+  // 不传 encrypted_password / key_id，由后端从 sys_configs.security.defaultPasswd 取。
   async createUser(
     data: Omit<User, 'id' | 'createTime' | 'lastLoginTime'> & {
-      password: string;
+      password?: string;
+      useDefaultPassword?: boolean;
       roleIds?: string[];
     }
   ): Promise<User> {
-    const { encryptedPassword, keyId } = await preparePasswordPayload(data.password);
     const body: Record<string, unknown> = {
       username: data.username,
       email: data.email || undefined,
@@ -684,9 +686,17 @@ export const adminApi = {
       display_name: data.displayName || data.username,
       status: data.status,
       role_ids: data.roleIds && data.roleIds.length > 0 ? data.roleIds : undefined,
-      encrypted_password: encryptedPassword,
-      key_id: keyId,
     };
+    if (data.useDefaultPassword) {
+      body.use_default_password = true;
+    } else {
+      if (!data.password) {
+        throw new Error('createUser: password is required when useDefaultPassword is false');
+      }
+      const { encryptedPassword, keyId } = await preparePasswordPayload(data.password);
+      body.encrypted_password = encryptedPassword;
+      body.key_id = keyId;
+    }
     const { data: bu } = await http.post<BackendUser>('/admin/users', body);
     return mapBackendUser(bu);
   },
@@ -706,12 +716,24 @@ export const adminApi = {
     }
   },
 
-  async resetPassword(id: string, newPassword: string): Promise<void> {
-    const { encryptedPassword, keyId } = await preparePasswordPayload(newPassword);
-    await http.post(`/admin/users/${id}/reset-password`, {
-      encrypted_new_password: encryptedPassword,
-      key_id: keyId,
-    });
+  // Issue #649：签名改为对象参数（向后兼容：webcode 调用方原本只传 newPassword）。
+  // useDefaultPassword=true 时不传加密载荷，由后端取 defaultPasswd；为 false 时走原加密路径。
+  async resetPassword(
+    id: string,
+    opts: { newPassword?: string; useDefaultPassword?: boolean },
+  ): Promise<void> {
+    const body: Record<string, unknown> = {};
+    if (opts.useDefaultPassword) {
+      body.use_default_password = true;
+    } else {
+      if (!opts.newPassword) {
+        throw new Error('resetPassword: newPassword is required when useDefaultPassword is false');
+      }
+      const { encryptedPassword, keyId } = await preparePasswordPayload(opts.newPassword);
+      body.encrypted_new_password = encryptedPassword;
+      body.key_id = keyId;
+    }
+    await http.post(`/admin/users/${id}/reset-password`, body);
   },
 
   async lockUser(id: string): Promise<void> {
