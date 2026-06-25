@@ -59,6 +59,7 @@ export default function LoginPage() {
   const location = useLocation();
   const login = useUserStore((s) => s.login);
   const setTokenPair = useUserStore((s) => s.setTokenPair);
+  const setMustChangePassword = useUserStore((s) => s.setMustChangePassword);
 
   // PrivateRoute 把未登录用户从任意路径（含 /403 错误页）弹到 /login 时会把
   // 原 location 塞进 state.from。错误页不是合法的登录返回目的地，直接降级到
@@ -149,10 +150,22 @@ export default function LoginPage() {
         6,
       );
     }
-    // P1-①/④ 必须改密 — 后端已置位 must_change_password=true 时，跳到改密页
+    // Issue #649：必须改密 — 后端 must_change_password=true 时用阻塞 Modal 拦住，
+    // 用户必须点确认；Modal 关闭后进入首页时 UserDropdown 会读 store.mustChangePassword
+    // 自动弹出改密 Modal（不可关闭，必须改完才能用系统）。
+    // 旧实现 message.warning + navigate('/change-password') 是死路由 + toast 一闪
+    // 即逝，等于把硬规则降级成软提示。
     if (tokenPair.must_change_password) {
-      message.warning(t('login.mustChangePassword'));
-      navigate('/change-password?force=1', { replace: true });
+      setMustChangePassword(true);
+      Modal.warning({
+        title: t('login.mustChangePassword.title'),
+        content: t('login.mustChangePassword.content'),
+        okText: t('login.mustChangePassword.confirm'),
+        closable: false,
+        maskClosable: false,
+        keyboard: false,
+        onOk: () => navigate(from, { replace: true }),
+      });
       return;
     }
 

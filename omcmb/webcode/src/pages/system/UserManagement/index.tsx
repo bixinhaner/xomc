@@ -14,6 +14,7 @@ import {
   Radio,
   DatePicker,
   Space,
+  Switch,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -47,6 +48,7 @@ import {
   useResetPassword,
   useBatchAssignRoles,
 } from '@core/hooks/api/useSystem';
+import { useSecuritySettings } from '@core/hooks/api/useSecuritySettings';
 import type { User, UserRole, UserStatus } from '@core/types/system';
 import { isBuiltInUser, isLdapUser } from '@core/types/system';
 import { useT } from '@/hooks/useT';
@@ -65,6 +67,13 @@ export default function UserManagement() {
   const [resetPwdVisible, setResetPwdVisible] = useState(false);
   const [moveGroupVisible, setMoveGroupVisible] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  // Issue #649：「使用系统默认密码」开关用 React state 控制，靠父组件 re-render
+  // 驱动密码 Form.Item rules / disabled / placeholder 切换。曾试过 Form.Item
+  // noStyle + shouldUpdate render-prop，但在 Drawer / Modal 内嵌 Form 场景下
+  // shouldUpdate 不能可靠触发 children 重渲染（bundle 已部署但 disabled / rules
+  // 仍是初值），故改走最朴素的父组件 useState。
+  const [createUseDefault, setCreateUseDefault] = useState(false);
+  const [resetUseDefault, setResetUseDefault] = useState(false);
   const [form] = Form.useForm();
   const [pwdForm] = Form.useForm();
   const [moveGroupForm] = Form.useForm();
@@ -120,6 +129,15 @@ export default function UserManagement() {
   const copyUser = useCopyUser();
   const batchAssignRoles = useBatchAssignRoles();
   const resetPassword = useResetPassword();
+
+  // Issue #649：拉安全设置取 defaultPasswd，决定「使用系统默认密码」开关
+  // 是否可用 + 占位文本。useSecuritySettings 走 30s 缓存（多组件共用）。
+  const { settings: securitySettings, refetch: refetchSecurity } = useSecuritySettings();
+  const defaultPasswd = securitySettings?.raw.get('defaultPasswd') ?? '';
+  const hasDefaultPasswd = defaultPasswd !== '';
+
+  // Issue #649：useDefaultPassword 联动改走 createUseDefault / resetUseDefault
+  // 两个父组件 useState，Switch 受控 + 父组件 re-render 自然驱动密码字段 props 刷新。
 
   // 内置用户判定：后端 users.source === 'builtIn'（迁移 000053 / PRD §11.3）。
   const isBuiltIn = useCallback((user: User) => isBuiltInUser(user), []);
@@ -185,12 +203,15 @@ export default function UserManagement() {
       // role 用占位值满足 hook 类型；真实角色分配走 roleIds（→ 后端 role_ids）。
       const roleIds = (vals.roleIds as string[]) ?? [];
       const expire = vals.expireTime as dayjs.Dayjs | undefined;
+      // Issue #649：开启「使用系统默认密码」时不传 password，由后端从
+      // sys_configs.security.defaultPasswd 取值；硬规则要求 must_change_password=true。
+      const useDefault = createUseDefault;
       const userData: Omit<User, 'id' | 'createTime' | 'lastLoginTime'> & {
-        password: string;
+        password?: string;
+        useDefaultPassword?: boolean;
         roleIds?: string[];
       } = {
         username: vals.username as string,
-        password: vals.password as string,
         displayName: ((vals.displayName as string) || (vals.username as string)) ?? '',
         email: (vals.email as string) || '',
         phone: (vals.phone as string) || undefined,
@@ -199,11 +220,15 @@ export default function UserManagement() {
         role: 'viewer' as UserRole,
         status: (vals.status as UserStatus) ?? 'active',
         roleIds: roleIds.length > 0 ? roleIds : undefined,
+        ...(useDefault
+          ? { useDefaultPassword: true }
+          : { password: vals.password as string }),
       };
       createUser.mutate(userData, {
         onSuccess: () => {
           toast.success(t('common.save'));
           setCreateVisible(false);
+          setCreateUseDefault(false);
           form.resetFields();
         },
         onError: (err) => toast.error(err, t('user.createFailed')),
@@ -243,18 +268,22 @@ export default function UserManagement() {
   const handleResetPassword = () => {
     if (!selectedUser) return;
     pwdForm.validateFields().then((vals) => {
-      resetPassword.mutate(
-        { id: selectedUser.id, newPassword: vals.newPassword as string },
-        {
-          onSuccess: () => {
-            message.success(t('common.save'));
-            setResetPwdVisible(false);
-            pwdForm.resetFields();
-            setSelectedUser(null);
-          },
-          onError: (err) => toast.error(err, t('common.error')),
+      // Issue #649：根据 Switch 分两路 — ON 走 {useDefaultPassword:true}，
+      // OFF 走 {newPassword}。后端会调 revoker.Revoke 立即吊销旧 token。
+      const useDefault = resetUseDefault;
+      const payload = useDefault
+        ? { id: selectedUser.id, useDefaultPassword: true }
+        : { id: selectedUser.id, newPassword: vals.newPassword as string };
+      resetPassword.mutate(payload, {
+        onSuccess: () => {
+          message.success(t('common.save'));
+          setResetPwdVisible(false);
+          setResetUseDefault(false);
+          pwdForm.resetFields();
+          setSelectedUser(null);
         },
-      );
+        onError: (err) => toast.error(err, t('common.error')),
+      });
     });
   };
 
@@ -375,6 +404,7 @@ export default function UserManagement() {
   }, [copyUser, t, modal]);
 
   const openCreateDrawer = () => {
+    setCreateUseDefault(false);
     setCreateVisible(true);
     form.resetFields();
   };
@@ -394,14 +424,15 @@ export default function UserManagement() {
       render: (_, record) => {
         const user = record as User;
         // PRD §4.1：内置（builtIn）禁止删除/禁用；LDAP 禁止重置密码。
-        // 编辑 / 强制下线 / 改密 在内置用户上 v0.2 起已放开（紧急通道）。
+        // 编辑 / 强制下线 在内置用户上 v0.2 起已放开（紧急通道）。
+        // Issue #649：内置用户改密走 omcctl CLI，UI 改密一律拦截（不接默认密码也不开手动输入）。
         const builtIn = isBuiltIn(user);
         const ldap = isLdapUser(user);
         const canEdit = true;
         const canDelete = !builtIn;
         const canChangeStatus = !builtIn;
         const canForceLogout = true;
-        const canResetPwd = !ldap;
+        const canResetPwd = !ldap && !builtIn;
 
         const moreItems: MenuProps['items'] = [
           {
@@ -478,7 +509,14 @@ export default function UserManagement() {
           {
             key: 'resetPwd',
             label: !canResetPwd ? (
-              <Tooltip title={t('user.tooltip.ldapNoReset')} placement="left">
+              <Tooltip
+                title={
+                  builtIn
+                    ? t('system.user.builtInResetDisabledTip')
+                    : t('user.tooltip.ldapNoReset')
+                }
+                placement="left"
+              >
                 <span>{t('user.resetPassword')}</span>
               </Tooltip>
             ) : (
@@ -488,6 +526,12 @@ export default function UserManagement() {
             disabled: !canResetPwd,
             onClick: () => {
               setSelectedUser(user);
+              // Issue #649：弹窗打开前 refetch 一次安全设置，避免 30s 缓存窗口内
+              // 默认密码刚改完拿到旧值。
+              void refetchSecurity();
+              // Issue #649：Switch 初值依赖当前 hasDefaultPasswd（有默认密码就默认
+              // 走「重置为默认」一键路径）。
+              setResetUseDefault(hasDefaultPasswd);
               setResetPwdVisible(true);
             },
           },
@@ -750,6 +794,7 @@ export default function UserManagement() {
         open={createVisible}
         onClose={() => {
           setCreateVisible(false);
+          setCreateUseDefault(false);
           form.resetFields();
         }}
         size={520}
@@ -759,6 +804,7 @@ export default function UserManagement() {
               style={{ marginRight: 8 }}
               onClick={() => {
                 setCreateVisible(false);
+                setCreateUseDefault(false);
                 form.resetFields();
               }}
             >
@@ -787,31 +833,82 @@ export default function UserManagement() {
             >
               <Input placeholder={t('user.form.username')} maxLength={32} />
             </Form.Item>
+            {/* Issue #649：使用系统默认密码开关。默认关；ON 时下方两个密码框 disabled
+                + 不校验 rules；defaultPasswd 为空时开关 disabled + tooltip 引导。
+                Switch 用 React useState 控制（不放进 Form.Item.name），靠父组件
+                re-render 驱动下方密码 Form.Item rules / disabled / placeholder 切换。 */}
+            <Form.Item
+              label={t('system.user.useDefaultPassword')}
+              extra={
+                hasDefaultPasswd
+                  ? undefined
+                  : t('system.user.defaultPasswordNotSet')
+              }
+            >
+              <Tooltip
+                title={
+                  hasDefaultPasswd
+                    ? undefined
+                    : t('system.user.defaultPasswordNotSet')
+                }
+                placement="right"
+              >
+                <Switch
+                  checked={createUseDefault}
+                  onChange={setCreateUseDefault}
+                  disabled={!hasDefaultPasswd}
+                />
+              </Tooltip>
+            </Form.Item>
             <Form.Item
               name="password"
               label={t('user.password')}
-              rules={[
-                { required: true, message: t('user.pleaseInputPassword') },
-                { min: 8, message: t('user.passwordMinLength') },
-              ]}
+              rules={
+                createUseDefault
+                  ? []
+                  : [
+                      { required: true, message: t('user.pleaseInputPassword') },
+                      { min: 8, message: t('user.passwordMinLength') },
+                    ]
+              }
             >
-              <Input.Password placeholder={t('user.password')} maxLength={20} />
+              <Input.Password
+                placeholder={
+                  createUseDefault
+                    ? defaultPasswd || t('user.password')
+                    : t('user.password')
+                }
+                maxLength={20}
+                disabled={createUseDefault}
+              />
             </Form.Item>
             <Form.Item
               name="confirmPassword"
               label={t('user.confirmPassword')}
               dependencies={['password']}
-              rules={[
-                { required: true, message: t('user.pleaseConfirmPassword') },
-                ({ getFieldValue }) => ({
-                  validator(_, value) {
-                    if (!value || getFieldValue('password') === value) return Promise.resolve();
-                    return Promise.reject(new Error(t('user.passwordMismatch')));
-                  },
-                }),
-              ]}
+              rules={
+                createUseDefault
+                  ? []
+                  : [
+                      { required: true, message: t('user.pleaseConfirmPassword') },
+                      ({ getFieldValue: gfv }) => ({
+                        validator(_, value) {
+                          if (!value || gfv('password') === value) return Promise.resolve();
+                          return Promise.reject(new Error(t('user.passwordMismatch')));
+                        },
+                      }),
+                    ]
+              }
             >
-              <Input.Password placeholder={t('user.confirmPassword')} maxLength={20} />
+              <Input.Password
+                placeholder={
+                  createUseDefault
+                    ? defaultPasswd || t('user.confirmPassword')
+                    : t('user.confirmPassword')
+                }
+                maxLength={20}
+                disabled={createUseDefault}
+              />
             </Form.Item>
             <Form.Item name="displayName" label={t('user.form.displayName')}>
               <Input placeholder={t('user.form.displayNamePlaceholder')} maxLength={64} />
@@ -1023,39 +1120,93 @@ export default function UserManagement() {
         title={`${t('user.resetPassword')} - ${selectedUser?.username ?? ''}`}
         open={resetPwdVisible}
         onOk={handleResetPassword}
+        confirmLoading={resetPassword.isPending}
         onCancel={() => {
           setResetPwdVisible(false);
+          setResetUseDefault(false);
           pwdForm.resetFields();
           setSelectedUser(null);
         }}
-        width={420}
+        width={460}
       >
-        <Form form={pwdForm} layout="vertical">
+        <Form
+          form={pwdForm}
+          layout="vertical"
+        >
+          {/* Issue #649：Switch 用 React state 控制，
+              靠父组件 re-render 驱动下方密码 Form.Item rules / disabled / placeholder 切换。 */}
+          <Form.Item
+            label={t('system.user.resetToDefault')}
+            extra={
+              hasDefaultPasswd
+                ? t('system.user.resetToDefaultConfirm')
+                : t('system.user.defaultPasswordNotSet')
+            }
+          >
+            <Tooltip
+              title={
+                hasDefaultPasswd
+                  ? undefined
+                  : t('system.user.defaultPasswordNotSet')
+              }
+              placement="right"
+            >
+              <Switch
+                checked={resetUseDefault}
+                onChange={setResetUseDefault}
+                disabled={!hasDefaultPasswd}
+              />
+            </Tooltip>
+          </Form.Item>
           <Form.Item
             name="newPassword"
             label={t('user.newPassword')}
-            rules={[
-              { required: true, message: t('user.pleaseInputPassword') },
-              { min: 8, message: t('user.passwordMinLength') },
-            ]}
+            rules={
+              resetUseDefault
+                ? []
+                : [
+                    { required: true, message: t('user.pleaseInputPassword') },
+                    { min: 8, message: t('user.passwordMinLength') },
+                  ]
+            }
           >
-            <Input.Password placeholder={t('user.newPassword')} maxLength={20} />
+            <Input.Password
+              placeholder={
+                resetUseDefault
+                  ? defaultPasswd || t('user.newPassword')
+                  : t('user.newPassword')
+              }
+              maxLength={20}
+              disabled={resetUseDefault}
+            />
           </Form.Item>
           <Form.Item
             name="confirmPassword"
             label={t('user.confirmPassword')}
             dependencies={['newPassword']}
-            rules={[
-              { required: true, message: t('user.pleaseConfirmPassword') },
-              ({ getFieldValue }) => ({
-                validator(_, value) {
-                  if (!value || getFieldValue('newPassword') === value) return Promise.resolve();
-                  return Promise.reject(new Error(t('user.passwordMismatch')));
-                },
-              }),
-            ]}
+            rules={
+              resetUseDefault
+                ? []
+                : [
+                    { required: true, message: t('user.pleaseConfirmPassword') },
+                    ({ getFieldValue: gfv }) => ({
+                      validator(_, value) {
+                        if (!value || gfv('newPassword') === value) return Promise.resolve();
+                        return Promise.reject(new Error(t('user.passwordMismatch')));
+                      },
+                    }),
+                  ]
+            }
           >
-            <Input.Password placeholder={t('user.confirmPassword')} maxLength={20} />
+            <Input.Password
+              placeholder={
+                resetUseDefault
+                  ? defaultPasswd || t('user.confirmPassword')
+                  : t('user.confirmPassword')
+              }
+              maxLength={20}
+              disabled={resetUseDefault}
+            />
           </Form.Item>
         </Form>
       </Modal>

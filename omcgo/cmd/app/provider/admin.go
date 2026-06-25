@@ -196,6 +196,8 @@ func initAdminModule(c *Container) error {
 			securityPolicy.InvalidateCache()
 		}
 	})
+	// issue #649：注册安全设置类 BatchUpsert 前置校验器（含 defaultPasswd 强度校验）。
+	admin.RegisterSecurityValidators(sysConfigService, securityPolicy)
 	if c.EventBus != nil {
 		sysConfigService.RegisterSavedHook(func(ctx context.Context, category string) {
 			evt, err := event.NewEvent(event.SubjectSysConfigSaved, event.SysConfigSavedPayload{Category: category})

@@ -29,6 +29,9 @@ interface UserState {
   isAuthenticated: boolean;
   permissions: string[];
   loading: boolean;
+  // Issue #649：必须修改密码标记（后端 login 响应 must_change_password=true 时置位）。
+  // UI 层读取该标记决定是否弹阐塞改密 Modal。
+  mustChangePassword: boolean;
 
   // JWT token pair methods
   setTokenPair: (pair: TokenPairResponse) => void;
@@ -42,6 +45,8 @@ interface UserState {
   setToken: (token: string) => void; // Legacy compat — sets accessToken
   setLoading: (loading: boolean) => void;
   hasPermission: (permission: string) => boolean;
+  // Issue #649：设置 mustChangePassword 标记。
+  setMustChangePassword: (v: boolean) => void;
   // Legacy alias
   setUser: (user: User) => void;
 }
@@ -56,9 +61,12 @@ export const useUserStore = create<UserState>()(
       isAuthenticated: false,
       permissions: [],
       loading: false,
+      mustChangePassword: false,
 
       login: (user) => set({ currentUser: user, isAuthenticated: true }),
       setUser: (user) => set({ currentUser: user, isAuthenticated: true }),
+
+      setMustChangePassword: (v: boolean) => set({ mustChangePassword: v }),
 
       setTokenPair: (pair: TokenPairResponse) => {
         if (!pair?.access_token || !pair?.refresh_token || !pair?.expires_at) {
@@ -84,6 +92,7 @@ export const useUserStore = create<UserState>()(
           tokenExpiresAt: null,
           isAuthenticated: false,
           permissions: [],
+          mustChangePassword: false,
         });
         localStorage.removeItem('omc-user-store');
         // 退出 / Token 失效时同步清空菜单缓存，防止下一个用户登录时
@@ -131,6 +140,9 @@ export const useUserStore = create<UserState>()(
         tokenExpiresAt: state.tokenExpiresAt,
         isAuthenticated: state.isAuthenticated,
         permissions: state.permissions,
+        // Issue #649：持久化 mustChangePassword，防止用户刷新页面或关闭浏览器
+        // 后未改密就继续使用系统（token 还在有效期内会被静默放行）。
+        mustChangePassword: state.mustChangePassword,
       }),
     }
   )

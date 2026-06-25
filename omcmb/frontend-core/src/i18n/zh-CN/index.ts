@@ -1992,6 +1992,9 @@ const messages: Record<string, string> = {
   // P1+P2 安全策略相关
   'login.notifyTitle':           '系统通知',
   'login.mustChangePassword':    '请先修改密码后再使用系统',
+  'login.mustChangePassword.title':   '需修改密码',
+  'login.mustChangePassword.content': '为保障账号安全，请立即修改密码。修改完成前无法继续使用系统。',
+  'login.mustChangePassword.confirm': '立即修改密码',
   'login.passwordExpiringSoon':  '您的密码将在 {days} 天后过期，请尽快修改',
 
   // -------------------------------------------------------------------------
@@ -4409,8 +4412,18 @@ const messages: Record<string, string> = {
 
   // System - Security Settings
   'system.security.defaultPassword':         '默认密码',
-  'system.security.forcePasswordChangeOnFirstLogin': '用户需要在首次登录时修改默认密码',
-  'system.security.useAsDefaultPassword':    '将...作为默认密码登录，用户被密码重置后使用此密码',
+  // Issue #649：废弃硬规则化（管理员注入即强制改密），i18n 同步删除该文案
+  // 'system.security.forcePasswordChangeOnFirstLogin' 已下线
+  // Issue #649：文案对齐后端硬规则 — 管理员注入此密码的用户首次登录强制改密
+  'system.security.useAsDefaultPassword':    '创建用户和重置密码时可使用此密码；使用此密码的用户首次登录将被强制修改',
+  'system.security.defaultPasswordDriftWarning': '调整下方密码强度规则前，请确保当前默认密码仍满足新规则',
+  // Issue #649：默认密码相关用户管理文案（系统配置 → 安全设置 联动）
+  'system.user.useDefaultPassword':          '使用系统默认密码',
+  'system.user.resetToDefault':              '重置为系统默认密码',
+  'system.user.resetToDefaultConfirm':       '确定将该用户密码重置为系统默认密码？用户下次登录需立即修改密码，旧登录态将立即失效。',
+  'system.user.defaultPasswordNotSet':       '系统默认密码未设置，请先到系统配置 → 安全设置中设置',
+  'system.user.ldapResetDisabledTip':        'LDAP 用户密码由 LDAP 系统管理，无法在此重置',
+  'system.user.builtInResetDisabledTip':     '内置用户请通过 omcctl CLI 重置密码',
   'system.security.passwordStrength':        '密码强度',
   'system.security.passwordComplexityRequirement': '密码需要包含数字、小写字母、大写字母和特殊字符(.!@#$%^&*?)',
   'system.security.userPasswordLength':      '用户密码长度：',
