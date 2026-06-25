@@ -1,14 +1,16 @@
 /**
- * IndicatorFormModal — KPI 指标新建/编辑 UI (Issue #535, v1 webcode/Antd5)。
+ * IndicatorFormModal — KPI 指标新建/编辑 UI (Issue #535 + #640, v1 webcode/Antd5)。
  *
  * 指标全生命周期管理统一进 产品中心→KPI指标库。本 Modal 承载「新建/编辑指标」:
  *   · 字段:中文名(必填) / 英文名(必填) / 归属分组(必填) / 单位 / 统计类型(statisType) /
  *     级别 / 指标类型(indicatorType：直接采集/公式计算) / 描述。
  *   · 公式维护区「PlatformFormulasSection」的可见性按「本次开弹是否为新建」区分：
- *     · 新建态（入场 propIndicator=null）：保存后不关弹、转编辑态 → 公式区出现（仅 kpi 类型）供用户配公式 → 手动「关闭」。
- *       原因：新建入口（主页「＋新建指标」）背后无 Drawer，本 Modal 是唯一公式入口。
+ *     · 新建态（入场 propIndicator=null）+ kpi 类型：公式区立刻出现（local 模式）。
+ *       用户在 drafts 里配 1~N 条平台公式 → 点保存 → 后端在同一事务里把指标 + 全部公式
+ *       原子写入（model.CreateIndicatorRequest.Formulas + service.BatchCreate）→ Modal 关闭。
+ *       校验：kpi 类型至少配 1 条公式（issue #640）。
  *     · 编辑态（入场 propIndicator 有值，由 IndicatorDrawer 右上「编辑」打开）：始终不显示公式区，保存后
- *       自动关闭 Modal 回到 Drawer；Drawer 已有 PlatformFormulasSection，避免两处重复。
+ *       自动关闭 Modal 回到 Drawer；Drawer 已有 PlatformFormulasSection（server 模式），避免两处重复。
  *     区分使用 useRef 在 open rising edge 时锁定，本次打开期间不变。
  *   · 指标类型替代旧「计数器」Switch：Radio 二选一，语义更贴近用户认知（「数据从哪来」而非
  *     「是不是计数器」）。后端映射 isCounter='1'(counter) / '0'(kpi)。
@@ -24,6 +26,7 @@
  *   没有 name 字段 → 建/改用 enName + cnName + groupId(不要只传 name)。
  *   statis_type 后端接受为可选、传受控枚举值，本 UI 限定为 STATIS_TYPE_VALUES。
  *   arithmetic 不再由本表单维护 — 公式统一走 perf_formulas_<dt> 的多平台 CRUD。
+ *   formulas（issue #640）：仅 kpi 类型新建时下发，FormulaInput[]，后端事务原子写入。
  */
 import { useEffect, useRef, useState } from 'react';
 import { Modal, Form, Input, Select, Radio, Tooltip, Divider, Button, message } from 'antd';
@@ -32,7 +35,12 @@ import {
   useCreateIndicator,
   useUpdateIndicator,
 } from '@core/hooks/api/useIndicatorsLibrary';
-import type { DeviceType, IndicatorInfo, IndicatorTypeValue } from '@core/types/indicatorLibrary';
+import type {
+  DeviceType,
+  FormulaDraft,
+  IndicatorInfo,
+  IndicatorTypeValue,
+} from '@core/types/indicatorLibrary';
 import {
   STATIS_TYPE_VALUES,
   INDICATOR_UNIT_OPTIONS,
@@ -94,6 +102,11 @@ export default function IndicatorFormModal({
     propIndicator ?? null,
   );
 
+  // drafts — 新建态 + kpi 类型时的本地公式草稿(issue #640 C 方案)。父组件持有,
+  // PlatformFormulasSection 以 mode='local' 渲染、增删改回写。提交时随 createIndicator
+  // 一并下发,后端在同一事务里把指标 + 全部公式原子写入。
+  const [drafts, setDrafts] = useState<FormulaDraft[]>([]);
+
   // openedInCreate：本次「开弹」是否以新建态入场（propIndicator == null）。
   // ref 锁定本次打开期间不变 — create 成功后 currentIndicator 转编辑态时仍让公式区可见；
   // 编辑态（从 IndicatorDrawer 点「编辑」进来）始终为 false → 公式区不出现，避免与 Drawer 重复。
@@ -134,6 +147,8 @@ export default function IndicatorFormModal({
       // 新建默认 kpi（公式计算）—老 OMC 自定义指标几乎都是派生 KPI，Counter 需与设备硬件埋点对齐不可随意新建。
       form.resetFields();
       form.setFieldsValue({ indicatorType: 'kpi' });
+      // 新建态每次开弹清空 drafts(避免上次未提交的草稿污染本次)。
+      setDrafts([]);
     }
   }, [open, propIndicator, form]);
 
@@ -172,6 +187,12 @@ export default function IndicatorFormModal({
           onClose();
         }
       } else {
+        // C 方案(issue #640):kpi 类型新建必须至少配 1 条公式 — 避免「直接采集」之外
+        // 的派生 KPI 落库时无任何公式可算,后续在详情页才发现需要回头补。
+        if (indicatorType === 'kpi' && drafts.length === 0) {
+          message.error(t('product.kpi.indicator.formulaAtLeastOne'));
+          return;
+        }
         const created = await createMut.mutateAsync({
           deviceType,
           input: {
@@ -189,14 +210,18 @@ export default function IndicatorFormModal({
             cnDescription: values.description?.trim() || undefined,
             enDescription: values.description?.trim() || undefined,
             operatorCode,
-            // 详情态新建 → 下发 platform，后端同事务写占位 formula（避免“保存后查不到” bug）。
-            platform: platform || undefined,
+            // kpi 类型走 formulas(真实公式集合,事务原子写入);counter 类型保留旧的
+            // platform 占位逻辑 — 详情态进入时 URL ?platform= 已锁定,占位让该平台下
+            // 详情列表的 platform_name EXISTS 过滤能查到刚建的 counter 指标。
+            ...(indicatorType === 'kpi' && drafts.length > 0
+              ? { formulas: drafts }
+              : { platform: platform || undefined }),
           },
         });
-        // 创建成功 → 本地态注入转「编辑态」，弹窗不关。
-        // openedInCreateRef 仍为 true → PlatformFormulasSection 会出现（仅 indicatorType='kpi'）供用户配公式。
+        // 创建成功 → 通知父级刷新 + 关弹。drafts 已经在同一事务里落库,无需再转编辑态补。
         setCurrentIndicator(created);
         message.success(t('product.kpi.indicator.createSuccess'));
+        onClose();
       }
     } catch (e) {
       message.error(errMsg(e));
@@ -204,10 +229,13 @@ export default function IndicatorFormModal({
   };
 
   const submitting = createMut.isPending || updateMut.isPending;
-  // 公式区可见性：仅「本次入场是新建」+ 已创建（有 indicatorId）+ kpi 类型。
-  // 编辑态（从 Drawer 进来）始终不显示 — 避免与 Drawer 背后的 PlatformFormulasSection 重复。
-  const showFormulas =
-    openedInCreateRef.current && currentIndicator !== null && watchedType === 'kpi';
+  // 公式区可见性(issue #640 C 方案):
+  //   · 新建态(openedInCreateRef.current=true) + kpi 类型 → 立刻渲染 local 模式公式区,
+  //     用户随建随配,提交时随 createIndicator 一并原子写入。
+  //   · 编辑态(openedInCreateRef.current=false) → 始终不渲染 — 避免与 Drawer 背后的
+  //     PlatformFormulasSection(server 模式)重复。
+  //   · counter 类型不需公式,隐藏。
+  const showFormulasLocal = openedInCreateRef.current && watchedType === 'kpi';
 
   return (
     <Modal
@@ -321,14 +349,20 @@ export default function IndicatorFormModal({
         </Form.Item>
       </Form>
 
-      {/* 公式维护区 — 仅「新建态入场 + 已创建 + kpi 类型」同时成立时出现。
-          编辑态（从 IndicatorDrawer 进来）背后的 Drawer 已有同一份 PlatformFormulasSection，
-          这里不再重复渲染 —— 这是本 Modal 「新建态才有公式区」的原因。
-          counter 类型不需要公式，也隐藏本区。 */}
-      {showFormulas ? (
+      {/* 公式维护区(issue #640 C 方案) — 新建态 + kpi 类型时以 local 模式立刻出现,
+          drafts 由本组件 state 持有,PlatformFormulasSection 内部增删改回写;提交时
+          createIndicator 会把 drafts 序列化到 formulas 字段,后端事务原子写入。
+          编辑态(IndicatorDrawer 进入)始终不渲染本区 — 编辑路径的公式由 Drawer 背后的
+          PlatformFormulasSection(server 模式)维护,避免重复。 */}
+      {showFormulasLocal ? (
         <>
           <Divider style={{ margin: '12px 0' }} />
-          <PlatformFormulasSection deviceType={deviceType} indicatorId={currentIndicator.id} />
+          <PlatformFormulasSection
+            mode="local"
+            deviceType={deviceType}
+            value={drafts}
+            onChange={setDrafts}
+          />
         </>
       ) : null}
     </Modal>

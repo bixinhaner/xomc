@@ -449,6 +449,7 @@ const messages: Record<string, string> = {
   'product.kpi.indicator.arithmeticHelp':     '使用指标 ID 与运算符 + - * / ( )；Duration 代表统计周期秒数',
   'product.kpi.indicator.arithmeticRequired': '公式计算类型必须填写计算公式',
   'product.kpi.indicator.formulaBracketMismatch': '公式括号不匹配',
+  'product.kpi.indicator.formulaAtLeastOne': '公式计算类型必须至少配置 1 条平台公式',
   'product.kpi.indicator.descLabel':          '描述',
   'product.kpi.indicator.groupRequired':      '请选择归属分组',
   'product.kpi.indicator.nameRequired':       '名称必填',

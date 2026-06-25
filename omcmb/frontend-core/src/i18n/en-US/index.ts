@@ -449,6 +449,7 @@ const messages: Record<string, string> = {
   'product.kpi.indicator.arithmeticHelp':     'Use indicator IDs with operators + - * / ( ); Duration represents period seconds',
   'product.kpi.indicator.arithmeticRequired': 'Formula is required for Formula type',
   'product.kpi.indicator.formulaBracketMismatch': 'Formula brackets are not balanced',
+  'product.kpi.indicator.formulaAtLeastOne': 'Formula type requires at least 1 platform formula',
   'product.kpi.indicator.descLabel':          'Description',
   'product.kpi.indicator.groupRequired':      'Group is required',
   'product.kpi.indicator.nameRequired':       'Name required',
