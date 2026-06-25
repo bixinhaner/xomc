@@ -53,6 +53,13 @@ const (
 	ActionReboot = "reboot"
 	// ActionDelete covers any resource deletion (device, template, license, etc).
 	ActionDelete = "delete"
+	// ActionUserCreate covers admin-initiated user account creation (issue #649).
+	// 非 W3.G.2 charter 原列类目，为「默认密码接通」合规追溯新增：details.used_default_password
+	// 区分「手填 vs 默认密码」两条路径。
+	ActionUserCreate = "user_create"
+	// ActionPasswordReset covers admin-initiated password reset (issue #649).
+	// 区别于用户自助改密（不入 audit）；含硬规则强制改密 + 旧 token 立即失效（OWASP A07）。
+	ActionPasswordReset = "password_reset"
 )
 
 // ResourceType constants identify the entity an action targets.

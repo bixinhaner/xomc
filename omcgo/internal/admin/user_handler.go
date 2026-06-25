@@ -248,7 +248,7 @@ func (h *Handler) ResetPassword(c *gin.Context) {
 		return
 	}
 
-	if err := h.service.ResetPassword(ctx, id, plainPwd); err != nil {
+	if err := h.service.ResetPassword(ctx, id, ResetPasswordRequest{NewPassword: plainPwd}); err != nil {
 		status := commonerrors.HTTPStatusFromError(err)
 		commonerrors.AbortWithError(c, status, err)
 		return

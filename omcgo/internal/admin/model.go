@@ -175,15 +175,19 @@ type AuditLogFilter struct {
 //   - xlsx 批量导入路径 ImportUsers 的内部入参（导入文件本身在管理员可信范围内）
 //
 // v1.0：移除 Carrier 字段（users.carrier 已删）。
+// issue #649：Password 改为可选（UseDefaultPassword=true 时可留空，service 从
+// sys_configs.security.defaultPasswd 取值）；service 层会根据 UseDefaultPassword 严格分
+// 支，不依赖字段是否为空推断（避免旧客户端意外走默认密码路径）。
 type CreateUserRequest struct {
-	Username    string      `json:"username" binding:"required,min=3,max=64"`
-	Password    string      `json:"password" binding:"required,min=6"`
-	DisplayName string      `json:"display_name"`
-	Email       string      `json:"email" binding:"omitempty,email"`
-	Phone       string      `json:"phone"`
-	Description string      `json:"description"`
-	ExpireAt    *time.Time  `json:"expire_at"`
-	RoleIDs     []uuid.UUID `json:"role_ids"`
+	Username           string      `json:"username" binding:"required,min=3,max=64"`
+	Password           string      `json:"password" binding:"omitempty,min=6"`
+	UseDefaultPassword bool        `json:"use_default_password"`
+	DisplayName        string      `json:"display_name"`
+	Email              string      `json:"email" binding:"omitempty,email"`
+	Phone              string      `json:"phone"`
+	Description        string      `json:"description"`
+	ExpireAt           *time.Time  `json:"expire_at"`
+	RoleIDs            []uuid.UUID `json:"role_ids"`
 }
 
 // CreateUserHTTPRequest 是 POST /api/v1/admin/users 的请求体（密码加密传输）。
@@ -191,18 +195,21 @@ type CreateUserRequest struct {
 // 前端先调 GET /auth/public-key 拉公钥，把 {password, ts, nonce} JSON 用
 // RSA-OAEP/SHA-256 加密 → base64 → 填入 encrypted_password；同时回传 key_id。
 // 后端 handler 解密后构造 CreateUserRequest 调 service。
-// T-0120 同 LoginRequest：去 required，handler 内做二选一校验
+// T-0120 同 LoginRequest：去 required，handler 内做二选一校验。
+// issue #649：新增 use_default_password 开关，为 true 时 handler 跳过密码解密，service
+// 从默认密码取值。
 type CreateUserHTTPRequest struct {
-	Username          string      `json:"username" binding:"required,min=3,max=64"`
-	EncryptedPassword string      `json:"encrypted_password"`
-	KeyID             string      `json:"key_id"`
-	Password          string      `json:"password"` // T-0120 plaintext fallback
-	DisplayName       string      `json:"display_name"`
-	Email             string      `json:"email" binding:"omitempty,email"`
-	Phone             string      `json:"phone"`
-	Description       string      `json:"description"`
-	ExpireAt          *time.Time  `json:"expire_at"`
-	RoleIDs           []uuid.UUID `json:"role_ids"`
+	Username           string      `json:"username" binding:"required,min=3,max=64"`
+	EncryptedPassword  string      `json:"encrypted_password"`
+	KeyID              string      `json:"key_id"`
+	Password           string      `json:"password"` // T-0120 plaintext fallback
+	UseDefaultPassword bool        `json:"use_default_password"`
+	DisplayName        string      `json:"display_name"`
+	Email              string      `json:"email" binding:"omitempty,email"`
+	Phone              string      `json:"phone"`
+	Description        string      `json:"description"`
+	ExpireAt           *time.Time  `json:"expire_at"`
+	RoleIDs            []uuid.UUID `json:"role_ids"`
 }
 
 // UpdateUserRequest is the input for updating an existing user.
@@ -253,10 +260,13 @@ type AssignRoleRequest struct {
 
 // ResetPasswordRequest 是 POST /api/v1/admin/users/:id/reset-password 的请求体。
 // T-0120 双路径：加密 vs 明文 fallback。
+// issue #649：新增 use_default_password 开关，为 true 时 handler 跳过密码解密，service
+// 从 sys_configs.security.defaultPasswd 取值。
 type ResetPasswordRequest struct {
 	EncryptedNewPassword string `json:"encrypted_new_password"`
 	KeyID                string `json:"key_id"`
 	NewPassword          string `json:"new_password"` // T-0120 plaintext fallback
+	UseDefaultPassword   bool   `json:"use_default_password"`
 }
 
 // CreateRoleRequest is the input for creating a new role.

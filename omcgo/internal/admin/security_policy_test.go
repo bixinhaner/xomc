@@ -46,8 +46,7 @@ func TestSecurityPolicy_AllFieldsDecoded(t *testing.T) {
 			"security.expires":          "true",
 			"security.validPeriod":      "30",
 			"security.promptBeforeDays": "3",
-			// ①
-			"security.modifyPWD":     "true",
+			// ①（modifyPWD 已废弃 — issue #649 硬规则覆盖）
 			"security.defaultPasswd": "MyDefault@2026",
 			// ⑦
 			"security.userSessionExpirationMin": "10",
@@ -83,8 +82,7 @@ func TestSecurityPolicy_AllFieldsDecoded(t *testing.T) {
 	assert.True(t, v.PasswordExpiresEnabled)
 	assert.Equal(t, int64(30), v.PasswordValidDays)
 	assert.Equal(t, int64(3), v.PasswordPromptDays)
-	// ①
-	assert.True(t, v.MustChangePasswordOnFirstLogin)
+	// ①（modifyPWD 字段已删 — issue #649 硬规则覆盖）
 	assert.Equal(t, "MyDefault@2026", v.DefaultPassword)
 	// ⑦
 	assert.Equal(t, int64(10), v.IdleLockMinutes)

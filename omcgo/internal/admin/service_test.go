@@ -857,3 +857,381 @@ func TestAdminService_Login_SingleSession_RevokerError_DoesNotFailLogin(t *testi
 	require.NoError(t, err, "revoker 抛错时登录应仍成功（fail-safe — 单点登录失败比锁死用户风险低）")
 	assert.NotEmpty(t, tp.AccessToken)
 }
+
+// ===================== issue #649 「默认密码」接通 — service 层 =====================
+//
+// 覆盖 CreateUser / ResetPassword 的全部行为矩阵 + 内置用户拦截 + LDAP 拦截 +
+// 默认密码消费跳过强度校验 + revoker.Revoke 联动 + audit 写入。
+//
+// 设计权威：~/Documents/notes/tmp/默认密码配置接通-修改方案.md §1 + §3.2
+
+// newServiceWithPolicyAndRevoker 注入 policy + revoker（用 miniredis）的测试 helper。
+// auditRepo 也回传给 caller 用于断言审计日志写入。
+func newServiceWithPolicyAndRevoker(
+	t *testing.T,
+	userRepo *mockUserRepo,
+	roleRepo *mockRoleRepo,
+	policyEntries map[string]string,
+) (*AdminService, *mockAuditRepo, *miniredis.Miniredis) {
+	t.Helper()
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+
+	jwt, err := NewJWTService("test-secret-minimum-32-characters!!")
+	require.NoError(t, err)
+
+	auditRepo := &mockAuditRepo{}
+	svc := NewAdminService(userRepo, roleRepo, &mockMenuRepo{}, auditRepo, jwt, zap.NewNop())
+	if policyEntries != nil {
+		svc.SetSecurityPolicy(NewSecurityPolicy(&policyMockQuerier{entries: policyEntries}))
+	}
+	svc.SetTokenRevoker(NewTokenRevoker(client, time.Hour))
+	return svc, auditRepo, mr
+}
+
+// auditCollector 把 mockAuditRepo.createFn 装成"收集所有写入"的轻量记录器。
+func auditCollector() (*[]*AuditLog, func(ctx context.Context, log *AuditLog) error) {
+	var logs []*AuditLog
+	return &logs, func(_ context.Context, log *AuditLog) error {
+		logs = append(logs, log)
+		return nil
+	}
+}
+
+// --- CreateUser ---
+
+func TestAdminService_CreateUser_UseDefaultPassword_Succeeds(t *testing.T) {
+	var created *User
+	userRepo := &mockUserRepo{createFn: func(_ context.Context, u *User) error {
+		u.ID = uuid.New()
+		u.CreatedAt = time.Now()
+		u.UpdatedAt = time.Now()
+		created = u
+		return nil
+	}}
+	logs, fn := auditCollector()
+	svc, auditRepo, _ := newServiceWithPolicyAndRevoker(t, userRepo, &mockRoleRepo{}, map[string]string{
+		"security.defaultPasswd":   "OMC@123456",
+		"security.passwordContent": "true",
+		"security.pwdMinLength":    "8",
+		"security.pwdMaxLength":    "32",
+	})
+	auditRepo.createFn = fn
+
+	user, err := svc.CreateUser(context.Background(), CreateUserRequest{
+		Username:           "newuser",
+		UseDefaultPassword: true,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, created)
+	assert.NoError(t, bcrypt.CompareHashAndPassword([]byte(created.PasswordHash), []byte("OMC@123456")),
+		"应落库 sys_configs 配的默认密码 hash")
+	assert.True(t, created.MustChangePassword, "硬规则：管理员创建即强制首次改密")
+	require.NotNil(t, user)
+	require.Len(t, *logs, 1)
+	assert.Equal(t, "user_create", (*logs)[0].Action)
+	assert.Equal(t, true, (*logs)[0].Details["used_default_password"])
+}
+
+func TestAdminService_CreateUser_UseDefaultPassword_PolicyEmpty_Rejects(t *testing.T) {
+	userRepo := &mockUserRepo{createFn: func(_ context.Context, _ *User) error {
+		t.Fatal("DefaultPassword 为空时 service 不应创建用户")
+		return nil
+	}}
+	logs, fn := auditCollector()
+	svc, auditRepo, _ := newServiceWithPolicyAndRevoker(t, userRepo, &mockRoleRepo{}, map[string]string{
+		"security.defaultPasswd": "", // 显式清空 → 重置走 fallback
+	})
+	auditRepo.createFn = fn
+
+	_, err := svc.CreateUser(context.Background(), CreateUserRequest{
+		Username:           "newuser",
+		UseDefaultPassword: true,
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+	require.Len(t, *logs, 1)
+	assert.Equal(t, "user_create_failed", (*logs)[0].Action, "失败路径 sink 自动追加 _failed 后缀")
+}
+
+func TestAdminService_CreateUser_ManualPassword_StrengthEnforced(t *testing.T) {
+	userRepo := &mockUserRepo{createFn: func(_ context.Context, _ *User) error {
+		t.Fatal("强度不通过的密码不应落库")
+		return nil
+	}}
+	svc, _, _ := newServiceWithPolicyAndRevoker(t, userRepo, &mockRoleRepo{}, map[string]string{
+		"security.passwordContent": "true",
+		"security.pwdMinLength":    "8",
+	})
+	_, err := svc.CreateUser(context.Background(), CreateUserRequest{
+		Username: "newuser",
+		Password: "abc", // 太短
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrPasswordTooShort)
+	assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+}
+
+func TestAdminService_CreateUser_ManualPassword_HardRuleMustChange(t *testing.T) {
+	var created *User
+	userRepo := &mockUserRepo{createFn: func(_ context.Context, u *User) error {
+		u.ID = uuid.New()
+		created = u
+		return nil
+	}}
+	svc, _, _ := newServiceWithPolicyAndRevoker(t, userRepo, &mockRoleRepo{}, map[string]string{
+		"security.passwordContent": "true",
+		"security.pwdMinLength":    "8",
+	})
+	_, err := svc.CreateUser(context.Background(), CreateUserRequest{
+		Username: "newuser",
+		Password: "Abc@12345678", // 满足强度
+	})
+	require.NoError(t, err)
+	assert.True(t, created.MustChangePassword,
+		"硬规则：手填强密码也必须强制首次改密")
+}
+
+func TestAdminService_CreateUser_EmptyPassword_NotUsingDefault_Rejects(t *testing.T) {
+	svc, _, _ := newServiceWithPolicyAndRevoker(t, &mockUserRepo{}, &mockRoleRepo{}, nil)
+	_, err := svc.CreateUser(context.Background(), CreateUserRequest{
+		Username:           "newuser",
+		Password:           "",
+		UseDefaultPassword: false,
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+}
+
+func TestAdminService_CreateUser_UseDefaultPassword_SkipsStrengthValidation(t *testing.T) {
+	// 设计 §3.2 方案 A：消费默认密码时跳过 ValidatePassword（受信任运维设定值；
+	// 避免管理员调高强度规则后存量默认密码触发 UX 死结）。
+	var created *User
+	userRepo := &mockUserRepo{createFn: func(_ context.Context, u *User) error {
+		u.ID = uuid.New()
+		created = u
+		return nil
+	}}
+	svc, _, _ := newServiceWithPolicyAndRevoker(t, userRepo, &mockRoleRepo{}, map[string]string{
+		"security.defaultPasswd":   "OMC@1", // 5 位，故意违反 pwdMinLength=8
+		"security.passwordContent": "true",
+		"security.pwdMinLength":    "8",
+	})
+	_, err := svc.CreateUser(context.Background(), CreateUserRequest{
+		Username:           "newuser",
+		UseDefaultPassword: true,
+	})
+	require.NoError(t, err, "消费默认密码应跳过强度校验")
+	require.NotNil(t, created)
+	assert.NoError(t, bcrypt.CompareHashAndPassword([]byte(created.PasswordHash), []byte("OMC@1")))
+}
+
+// --- ResetPassword ---
+
+func TestAdminService_ResetPassword_LDAP_Rejects(t *testing.T) {
+	target := uuid.New()
+	userRepo := &mockUserRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*User, error) {
+			return &User{ID: target, Username: "ldap_alice", Source: UserSourceLDAP}, nil
+		},
+		updatePasswordFn: func(_ context.Context, _ uuid.UUID, _ string) error {
+			t.Fatal("LDAP 拦截后不应调用 UpdatePassword")
+			return nil
+		},
+	}
+	svc, _, mr := newServiceWithPolicyAndRevoker(t, userRepo, &mockRoleRepo{}, nil)
+
+	err := svc.ResetPassword(context.Background(), target, ResetPasswordRequest{NewPassword: "Abc@12345678"})
+	assert.ErrorIs(t, err, ErrLDAPPasswordExternal)
+	assert.False(t, mr.Exists("auth:revoked_at:user:"+target.String()),
+		"LDAP 拦截后 revoker.Revoke 不应被调用")
+}
+
+func TestAdminService_ResetPassword_BuiltInUser_Rejects(t *testing.T) {
+	// issue #649：新增内置用户拦截，与 LockUser/DeleteUser/ForceLogout 对齐。
+	target := uuid.New()
+	userRepo := &mockUserRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*User, error) {
+			return &User{ID: target, Username: "admin", Source: UserSourceBuiltIn}, nil
+		},
+		updatePasswordFn: func(_ context.Context, _ uuid.UUID, _ string) error {
+			t.Fatal("内置用户拦截后不应调用 UpdatePassword")
+			return nil
+		},
+	}
+	svc, _, mr := newServiceWithPolicyAndRevoker(t, userRepo, &mockRoleRepo{}, nil)
+
+	err := svc.ResetPassword(context.Background(), target, ResetPasswordRequest{NewPassword: "Abc@12345678"})
+	assert.ErrorIs(t, err, ErrBuiltInUserProtected)
+	assert.False(t, mr.Exists("auth:revoked_at:user:"+target.String()),
+		"内置用户拦截后 revoker.Revoke 不应被调用")
+}
+
+func TestAdminService_ResetPassword_UseDefaultPassword_Succeeds(t *testing.T) {
+	target := uuid.New()
+	var updatedHash string
+	userRepo := &mockUserRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*User, error) {
+			return &User{ID: target, Username: "alice", Source: UserSourceAdmin}, nil
+		},
+		updatePasswordFn: func(_ context.Context, _ uuid.UUID, h string) error {
+			updatedHash = h
+			return nil
+		},
+	}
+	logs, fn := auditCollector()
+	svc, auditRepo, mr := newServiceWithPolicyAndRevoker(t, userRepo, &mockRoleRepo{}, map[string]string{
+		"security.defaultPasswd": "OMC@123456",
+	})
+	auditRepo.createFn = fn
+
+	err := svc.ResetPassword(context.Background(), target, ResetPasswordRequest{UseDefaultPassword: true})
+	require.NoError(t, err)
+	assert.NoError(t, bcrypt.CompareHashAndPassword([]byte(updatedHash), []byte("OMC@123456")))
+	assert.True(t, mr.Exists("auth:revoked_at:user:"+target.String()),
+		"OWASP A07：重置成功后 revoker.Revoke 应被调用，旧 token 立即失效")
+	require.Len(t, *logs, 1)
+	assert.Equal(t, "password_reset", (*logs)[0].Action)
+	assert.Equal(t, true, (*logs)[0].Details["used_default_password"])
+}
+
+func TestAdminService_ResetPassword_UseDefaultPassword_PolicyEmpty_Rejects(t *testing.T) {
+	target := uuid.New()
+	userRepo := &mockUserRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*User, error) {
+			return &User{ID: target, Username: "alice", Source: UserSourceAdmin}, nil
+		},
+		updatePasswordFn: func(_ context.Context, _ uuid.UUID, _ string) error {
+			t.Fatal("默认密码为空时不应调用 UpdatePassword")
+			return nil
+		},
+	}
+	svc, _, mr := newServiceWithPolicyAndRevoker(t, userRepo, &mockRoleRepo{}, map[string]string{
+		"security.defaultPasswd": "", // 显式清空
+	})
+
+	err := svc.ResetPassword(context.Background(), target, ResetPasswordRequest{UseDefaultPassword: true})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+	assert.False(t, mr.Exists("auth:revoked_at:user:"+target.String()),
+		"默认密码为空被拒后 revoker.Revoke 不应被调用")
+}
+
+func TestAdminService_ResetPassword_ManualPassword_StrengthEnforcedAndRevoked(t *testing.T) {
+	target := uuid.New()
+	called := false
+	userRepo := &mockUserRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*User, error) {
+			return &User{ID: target, Username: "alice", Source: UserSourceAdmin}, nil
+		},
+		updatePasswordFn: func(_ context.Context, _ uuid.UUID, _ string) error {
+			called = true
+			return nil
+		},
+	}
+	svc, _, mr := newServiceWithPolicyAndRevoker(t, userRepo, &mockRoleRepo{}, map[string]string{
+		"security.passwordContent": "true",
+		"security.pwdMinLength":    "8",
+	})
+
+	err := svc.ResetPassword(context.Background(), target, ResetPasswordRequest{NewPassword: "Abc@12345678"})
+	require.NoError(t, err)
+	assert.True(t, called)
+	assert.True(t, mr.Exists("auth:revoked_at:user:"+target.String()),
+		"手填强密码重置成功后 revoker.Revoke 也应被调用")
+}
+
+func TestAdminService_ResetPassword_ManualPassword_WeakRejected(t *testing.T) {
+	target := uuid.New()
+	userRepo := &mockUserRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*User, error) {
+			return &User{ID: target, Username: "alice", Source: UserSourceAdmin}, nil
+		},
+		updatePasswordFn: func(_ context.Context, _ uuid.UUID, _ string) error {
+			t.Fatal("弱密码不应落库")
+			return nil
+		},
+	}
+	svc, _, mr := newServiceWithPolicyAndRevoker(t, userRepo, &mockRoleRepo{}, map[string]string{
+		"security.passwordContent": "true",
+		"security.pwdMinLength":    "8",
+	})
+
+	err := svc.ResetPassword(context.Background(), target, ResetPasswordRequest{NewPassword: "abc"})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrPasswordTooShort)
+	assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+	assert.False(t, mr.Exists("auth:revoked_at:user:"+target.String()))
+}
+
+func TestAdminService_ResetPassword_ManualPassword_Empty_Rejects(t *testing.T) {
+	target := uuid.New()
+	userRepo := &mockUserRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*User, error) {
+			return &User{ID: target, Username: "alice", Source: UserSourceAdmin}, nil
+		},
+	}
+	svc, _, _ := newServiceWithPolicyAndRevoker(t, userRepo, &mockRoleRepo{}, nil)
+	err := svc.ResetPassword(context.Background(), target, ResetPasswordRequest{
+		NewPassword:        "",
+		UseDefaultPassword: false,
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+}
+
+func TestAdminService_ResetPassword_RevokerNotInjected_StillSucceeds(t *testing.T) {
+	// revoker nil → warn 不阻断业务（与 LockUser 既有行为对齐，便于单元测试无需 Redis 也能跑）。
+	target := uuid.New()
+	userRepo := &mockUserRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*User, error) {
+			return &User{ID: target, Username: "alice", Source: UserSourceAdmin}, nil
+		},
+	}
+	// 不走 newServiceWithPolicyAndRevoker —— 直接 newTestService（不注入 revoker）。
+	svc := newTestService(userRepo, &mockRoleRepo{}, &mockAuditRepo{})
+	svc.SetSecurityPolicy(NewSecurityPolicy(&policyMockQuerier{entries: map[string]string{
+		"security.defaultPasswd": "OMC@123456",
+	}}))
+
+	err := svc.ResetPassword(context.Background(), target, ResetPasswordRequest{UseDefaultPassword: true})
+	require.NoError(t, err, "revoker 未注入时仍应成功（fail-safe）")
+}
+
+// --- sys_config validator ---
+
+func TestRegisterSecurityValidators_DefaultPasswd(t *testing.T) {
+	// 设计 §3.1：写入侧强校验，与 service 消费侧"跳过强度校验"形成互补。
+	policy := NewSecurityPolicy(&policyMockQuerier{entries: map[string]string{
+		"security.passwordContent": "true",
+		"security.pwdMinLength":    "8",
+	}})
+	svc := NewSysConfigService(&stubSysConfigRepo{})
+	RegisterSecurityValidators(svc, policy)
+
+	t.Run("空字符串放行（允许清空）", func(t *testing.T) {
+		_, err := svc.BatchUpsert(context.Background(), BatchUpdateSysConfigRequest{
+			Category: "security",
+			Items:    []BatchItem{{Key: "defaultPasswd", Value: ""}},
+		})
+		assert.NoError(t, err)
+	})
+
+	t.Run("非空但不满足强度被拒", func(t *testing.T) {
+		_, err := svc.BatchUpsert(context.Background(), BatchUpdateSysConfigRequest{
+			Category: "security",
+			Items:    []BatchItem{{Key: "defaultPasswd", Value: "abc"}},
+		})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+	})
+
+	t.Run("非空且满足强度放行", func(t *testing.T) {
+		_, err := svc.BatchUpsert(context.Background(), BatchUpdateSysConfigRequest{
+			Category: "security",
+			Items:    []BatchItem{{Key: "defaultPasswd", Value: "Abc@12345678"}},
+		})
+		assert.NoError(t, err)
+	})
+}
