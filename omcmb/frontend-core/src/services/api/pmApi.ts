@@ -453,7 +453,7 @@ export const pmApi = {
 
   // 按设备聚合（File Management → PM Tab 主列表）
   async getFileDevices(
-    params: { keyword?: string; siteName?: string; productClass?: string } & PageRequest,
+    params: { keyword?: string; siteName?: string; productClass?: string; productId?: string } & PageRequest,
   ): Promise<PageResponse<PMFileDeviceItem>> {
     const query: Record<string, unknown> = {
       page: params.page,
@@ -462,6 +462,7 @@ export const pmApi = {
     if (params.keyword) query.keyword = params.keyword;
     if (params.siteName) query.site_name = params.siteName;
     if (params.productClass) query.product_class = params.productClass;
+    if (params.productId) query.product_id = params.productId;
     const { data } = await http.get<BackendListResponse<BackendPMFileDevice>>(
       '/pm/files/devices',
       { params: query },

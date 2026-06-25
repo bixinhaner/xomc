@@ -293,8 +293,17 @@ export const softwareService = {
       manufacturer?: string;
       description?: string;
     },
+    onProgress?: (percent: number) => void,
   ): Promise<SoftwareVersion> {
-    await delay(500, 1500);
+    // #623：mock 下跳五步模拟进度，让页面 Progress 能走起来。
+    if (onProgress) {
+      for (const p of [10, 30, 55, 80, 100]) {
+        await delay(80, 220);
+        onProgress(p);
+      }
+    } else {
+      await delay(500, 1500);
+    }
     return {
       id: `mock-firmware-${Date.now()}`,
       versionName: metadata.version,

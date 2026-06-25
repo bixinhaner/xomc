@@ -128,6 +128,28 @@ func TestExtractStorablePrefixes_UnsupportedFiltered(t *testing.T) {
 	assert.Equal(t, []string{"Dev.A.Good"}, got)
 }
 
+func TestExtractStorablePrefixesForStandardPaths_KeepsConcreteBSCInstance(t *testing.T) {
+	mappings := []parammodel.ParamMapping{
+		{PrivatePath: "DeviceGSM.Bts.{i}.Band", StandardPath: "DeviceGSM.Bts.{i}.Band", IsStorable: true, IsSupported: true, EntryType: "parameter"},
+		{PrivatePath: "DeviceGSM.Bts.{i}.handover1.target.rxlev.threshold", StandardPath: "DeviceGSM.Bts.{i}.handover1.target.rxlev.threshold", IsStorable: true, IsSupported: true, EntryType: "parameter"},
+		{PrivatePath: "DeviceGSM.Bts.{i}.Trx.{i}.Arfcn", StandardPath: "DeviceGSM.Bts.{i}.Trx.{i}.Arfcn", IsStorable: true, IsSupported: true, EntryType: "parameter"},
+	}
+
+	got := extractStorablePrefixesForStandardPaths(mappings, []string{
+		"DeviceGSM.Bts.255.Band",
+		"DeviceGSM.Bts.255.handover1.target.rxlev.threshold",
+		"DeviceGSM.Bts.255.Trx.{i}.",
+	})
+	sort.Strings(got)
+
+	assert.Equal(t, []string{
+		"DeviceGSM.Bts.255.Band",
+		"DeviceGSM.Bts.255.Trx.",
+		"DeviceGSM.Bts.255.handover1.target.rxlev.threshold",
+	}, got)
+	assert.NotContains(t, got, "DeviceGSM.Bts.")
+}
+
 func TestExtractStorablePrefixes_AllUnsupported_Empty(t *testing.T) {
 	mappings := []parammodel.ParamMapping{
 		{PrivatePath: "Dev.X", IsStorable: true, IsSupported: false},
@@ -396,12 +418,12 @@ func TestReconcileDeletedPaths_DeletesMissingInstances(t *testing.T) {
 	// CPE 返回 LTECell.1、LTECell.3；DB 中还有 LTECell.2、LTECell.4（被 CPE 删了）+ 其他范围数据
 	lt := "Device.Services.FAPService.1.CellConfig.LTE.RAN.NeighborList.LTECell."
 	prev := map[string]struct{}{
-		lt + "1.Pci":                   {},
-		lt + "2.Pci":                   {},
-		lt + "3.Pci":                   {},
-		lt + "4.Pci":                   {},
-		"Device.WiFi.SSID.1.Enable":    {}, // 浅 prefix（3 段）不在 reconcile 范围
-		"Device.System.Mode":           {}, // 叶子
+		lt + "1.Pci":                {},
+		lt + "2.Pci":                {},
+		lt + "3.Pci":                {},
+		lt + "4.Pci":                {},
+		"Device.WiFi.SSID.1.Enable": {}, // 浅 prefix（3 段）不在 reconcile 范围
+		"Device.System.Mode":        {}, // 叶子
 	}
 	params := []model.DeviceParameter{
 		{ParameterPath: lt + "1.Pci"},
@@ -431,7 +453,7 @@ func TestReconcileDeletedPaths_AllLeavesNoOp(t *testing.T) {
 	svc := &SyncService{paramRepo: repo, logger: zap.NewNop()}
 	dev := &model.Device{ID: uuid.New(), SerialNumber: "BLQ-001"}
 	prev := map[string]struct{}{
-		"Device.System.Mode":                                                            {},
+		"Device.System.Mode": {},
 		"Device.Services.FAPService.1.CellConfig.LTE.RAN.NeighborList.LTECell.5.Stale": {},
 	}
 	params := []model.DeviceParameter{{ParameterPath: "Device.System.Mode"}}
@@ -723,13 +745,7 @@ func TestShouldFinalizePathBSync_UsesTaskReaderWhenAvailable(t *testing.T) {
 }
 
 func TestHandleSyncResultPathB_EmptyFullSyncWaitsForRemainingTasks(t *testing.T) {
-	originalDebounce := pathBSyncFinalizeDebounce
-	pathBSyncFinalizeDebounce = 50 * time.Millisecond
-	defer func() {
-		pathBSyncFinalizeDebounce = originalDebounce
-	}()
-
-	svc, _, mr := newDiffTestService(t, nil, nil)
+	svc, _, _ := newDiffTestService(t, nil, nil)
 	writer := &fakeParamSyncWriter{}
 	svc.SetParamSyncWriter(writer)
 	reader := &fakePathBSyncTaskReader{hasOpen: true}
@@ -743,8 +759,4 @@ func TestHandleSyncResultPathB_EmptyFullSyncWaitsForRemainingTasks(t *testing.T)
 	assert.Never(t, func() bool {
 		return writer.callCount() > 0
 	}, 200*time.Millisecond, 20*time.Millisecond, "empty full-sync response must not finalize while sync-gpv tasks remain open")
-	if mr != nil {
-		_, redisErr := mr.Get(pathBSyncFinalizeDebounceKey(dev.ID))
-		assert.Error(t, redisErr, "should not schedule deferred finalize while tasks remain open")
-	}
 }

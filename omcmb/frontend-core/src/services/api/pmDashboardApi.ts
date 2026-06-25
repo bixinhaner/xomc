@@ -16,6 +16,7 @@ import type {
   BackendAggregatedRow,
 } from '../../types/pmDashboard';
 import { mapBackendAggregatedRow } from '../../types/pmDashboard';
+import { serializeRepeatedParams } from '../../utils/queryParams';
 
 // ── 真实 API 服务对象 ────────────────────────────────────────────────
 
@@ -25,7 +26,7 @@ export const pmDashboardApi = {
     params: AggregatedQueryParams,
   ): Promise<{ rows: AggregatedRow[]; total: number }> {
     // metricPaths 后端期望 comma-separated；其它 snake_case 参数手工拼，避免被 http 拦截器误转。
-    const qp: Record<string, string | number | undefined> = {
+    const qp: Record<string, unknown> = {
       granularity: params.granularity,
       dimension: params.dimension,
       device_oui: params.deviceOui,
@@ -40,10 +41,25 @@ export const pmDashboardApi = {
       limit: params.limit,
       offset: params.offset,
       fill_empty: params.fillEmpty ? 'true' : undefined,
+      // #599：星期/小时段后端过滤（全选/空不传 = 不过滤，向后兼容）。
+      weekdays: params.weekdays?.length && params.weekdays.length < 7
+        ? params.weekdays.join(',')
+        : undefined,
+      hours: params.hours?.length && params.hours.length < 24
+        ? params.hours.join(',')
+        : undefined,
+      // #619：测量对象后端过滤（空不传 = 不过滤，向后兼容）。
+      // LDN 值自身合法含逗号（如 Cellid=x,PLMN=y），不能 CSV-join——
+      // 走「重复键」形态 ?object_ldns=a&object_ldns=b（值整体 encode），后端 QueryArray 取回（与 #401 修复同模式）。
+      object_ldns: params.objectLdns?.length ? params.objectLdns : undefined,
     };
     const { data } = await http.get<{ items: BackendAggregatedRow[] | null; total: number }>(
       '/pm/metrics/aggregated',
-      { params: qp },
+      {
+        params: qp,
+        // 数组按重复键序列化（object_ldns=a&object_ldns=b），标量原样——保留 LDN 值内逗号。
+        paramsSerializer: (p: Record<string, unknown>) => serializeRepeatedParams(p),
+      },
     );
     const rows = (data.items ?? []).map(mapBackendAggregatedRow);
     // T-0194：total 是后端真实 COUNT（命中 limit 时 > rows.length），前端据此提示截断。

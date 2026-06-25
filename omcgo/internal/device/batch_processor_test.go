@@ -42,8 +42,29 @@ func TestPrepareDeviceUpdate_DerivesIPFromConnectionRequestURL(t *testing.T) {
 				{Name: "Device.ManagementServer.UDPConnectionRequestAddress", Value: "203.0.113.5:9999"},
 			},
 			initialIP:  "10.0.0.1",
-			wantIP:     "203.0.113.5:9999",
+			wantIP:     "203.0.113.5",
 			wantNATted: true,
+		},
+		{
+			name: "invalid UDP address keeps ConnectionRequestURL host without NAT",
+			params: []tr069.ParameterValueStruct{
+				{Name: "Device.ManagementServer.ConnectionRequestURL", Value: "http://172.17.1.14:7547/AB48F15B575B64B43D3F8830CFCF8277"},
+				{Name: "Device.ManagementServer.UDPConnectionRequestAddress", Value: "0.0.0.0"},
+				{Name: "Device.ManagementServer.STUNServerPort", Value: "3478"},
+			},
+			initialIP:  "",
+			wantIP:     "172.17.1.14",
+			wantNATted: false,
+		},
+		{
+			name: "invalid UDP address ignores cached STUN port",
+			params: []tr069.ParameterValueStruct{
+				{Name: "Device.ManagementServer.ConnectionRequestURL", Value: "http://172.17.1.14:7547/AB48F15B575B64B43D3F8830CFCF8277"},
+				{Name: "Device.ManagementServer.UDPConnectionRequestAddress", Value: "0.0.0.0"},
+			},
+			initialIP:  "",
+			wantIP:     "172.17.1.14",
+			wantNATted: false,
 		},
 		{
 			name: "empty ConnectionRequestURL keeps IP empty (no override of stale value either)",

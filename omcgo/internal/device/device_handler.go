@@ -265,8 +265,16 @@ func (h *Handler) ListDevices(c *gin.Context) {
 		filter.Carrier = &cc
 	}
 	if tech := c.Query("technology"); tech != "" {
-		t := model.Technology(tech)
-		filter.Technology = &t
+		techValues := SplitCSV(tech)
+		if len(techValues) == 1 {
+			t := model.Technology(techValues[0])
+			filter.Technology = &t
+		} else {
+			filter.Technologies = make([]model.Technology, 0, len(techValues))
+			for _, techValue := range techValues {
+				filter.Technologies = append(filter.Technologies, model.Technology(techValue))
+			}
+		}
 	}
 	// T-0162: 老 ?status= 兼容入口，DeviceFilter.Status 会在 Repository 层翻译
 	// 为 lifecycle_state + is_online。新前端代码请走 ?lifecycle_state= / ?is_online=。
@@ -671,9 +679,11 @@ func (h *Handler) SyncDeviceParams(c *gin.Context) {
 		return
 	}
 
-	// force 字段可选，当前 no-op 但 log 记录供未来扩展
+	// force 字段可选，当前 no-op 但 log 记录供未来扩展。
+	// parameter_paths 为空时保持全量同步；非空时只同步指定 standardPath 对应的参数。
 	var req struct {
-		Force bool `json:"force"`
+		Force          bool     `json:"force"`
+		ParameterPaths []string `json:"parameter_paths"`
 	}
 	_ = c.ShouldBindJSON(&req) // 容错：body 为空仍 OK
 
@@ -682,7 +692,7 @@ func (h *Handler) SyncDeviceParams(c *gin.Context) {
 	// 给前端 toast 与 API 契约。
 	sourceID := uuid.New().String()
 	displaySourceID := fmt.Sprintf("manual:%s", sourceID)
-	used, dev, err := h.service.SyncDeviceParamsManual(c.Request.Context(), id, sourceID)
+	used, dev, gpvTaskCount, err := h.service.SyncDeviceParamsManual(c.Request.Context(), id, sourceID, req.ParameterPaths)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
@@ -702,11 +712,13 @@ func (h *Handler) SyncDeviceParams(c *gin.Context) {
 		deviceSN = dev.SerialNumber
 	}
 	response.OKWithStatus(c, http.StatusAccepted, gin.H{
-		"status":        "queued",
-		"source_id":     displaySourceID,
-		"device_id":     id.String(),
-		"serial_number": deviceSN,
-		"force":         req.Force,
+		"status":                "queued",
+		"source_id":             displaySourceID,
+		"device_id":             id.String(),
+		"serial_number":         deviceSN,
+		"force":                 req.Force,
+		"parameter_paths_count": len(req.ParameterPaths),
+		"gpv_task_count":        gpvTaskCount,
 	})
 }
 

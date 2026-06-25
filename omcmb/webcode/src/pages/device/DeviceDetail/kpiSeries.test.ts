@@ -151,6 +151,8 @@ describe('buildKpiCompareData（周期对比对齐，T-0194 回归）', () => {
       xData,
       xEnds: xEnds ?? xData,
       values,
+      // 多 series 模型：单对象（设备级）helper 默认产出一条 ldn='' 的 series。
+      series: [{ objectLdn: '', name: 'd', values }],
       displayName: 'd',
       isEmpty: values.every((v) => v == null),
     };
@@ -264,5 +266,147 @@ describe('buildKpiCompareData（周期对比对齐，T-0194 回归）', () => {
     const out = buildKpiCompareData(current, prev, 24 * HOUR, 'hourly');
     expect(out.compareBuckets).toEqual(['2026-06-01T00:00:00.000Z']);
     expect(out.compareBucketEnds).toEqual(['2026-06-01T01:00:00.000Z']);
+  });
+});
+
+// ─── 多对象 series（设备详情 KPI tab 对象下拉多选默认全选）─────────────────
+//
+// 5 类新增覆盖：
+// ① 多对象多 series：一个 metricPath、两个 objectLdn → 两条 series，xData 取并集
+// ② 全空：所有选中对象都无数据 → isEmpty=true
+// ③ 空集合 / 老语义兼容：objectLdns=null/'' / []  仍走单对象设备级老语义
+// ④ 部分对象无数据：该对象 series 全 null（UI 据此过滤不出线），其它对象正常
+// ⑤ 同期对比 × 多对象按 (metricPath, objectLdn) 二维对齐：守 T-0194 偏移带零头回归在多对象场景不复发
+
+describe('buildKpiChartData（多对象 series）', () => {
+  it('① 多对象：两个 ldn 分别出 series，xData 取并集', () => {
+    const rows: AggregatedRow[] = [
+      row({ metricPath: 'K1', time: 't1', metricValue: 10, objectLdn: 'A' }),
+      row({ metricPath: 'K1', time: 't2', metricValue: 20, objectLdn: 'A' }),
+      row({ metricPath: 'K1', time: 't2', metricValue: 200, objectLdn: 'B' }),
+      row({ metricPath: 'K1', time: 't3', metricValue: 300, objectLdn: 'B' }),
+      // 干扰：未选中对象 C，不应进入
+      row({ metricPath: 'K1', time: 't1', metricValue: 999, objectLdn: 'C' }),
+    ];
+    const out = buildKpiChartData(rows, 'K1', ['A', 'B'], 'fb');
+    expect(out.xData).toEqual(['t1', 't2', 't3']);
+    expect(out.series).toHaveLength(2);
+    expect(out.series[0]).toEqual({ objectLdn: 'A', name: 'A', values: [10, 20, null] });
+    expect(out.series[1]).toEqual({ objectLdn: 'B', name: 'B', values: [null, 200, 300] });
+    expect(out.isEmpty).toBe(false);
+  });
+
+  it('② 全空：所有选中对象都无数据 → isEmpty=true，series 长度仍 == 入参 ldn 数', () => {
+    const rows: AggregatedRow[] = [
+      row({ metricPath: 'K1', time: 't1', metricValue: 999, objectLdn: 'X' }),
+    ];
+    const out = buildKpiChartData(rows, 'K1', ['A', 'B'], 'fb');
+    expect(out.series).toHaveLength(2);
+    expect(out.series[0].values).toEqual([]);
+    expect(out.series[1].values).toEqual([]);
+    expect(out.isEmpty).toBe(true);
+  });
+
+  it('③ 空集合 / null：兼容老「设备级」单对象语义，series 长度 1，ldn=""', () => {
+    const rows: AggregatedRow[] = [
+      row({ metricPath: 'K1', time: 't1', metricValue: 5, objectLdn: null }),
+      row({ metricPath: 'K1', time: 't1', metricValue: 88, objectLdn: 'A' }),
+    ];
+    for (const ldns of [null, undefined, '', []] as const) {
+      const out = buildKpiChartData(rows, 'K1', ldns, 'fb');
+      expect(out.series).toHaveLength(1);
+      expect(out.series[0].objectLdn).toBe('');
+      expect(out.series[0].values).toEqual([5]);
+      // 设备级回退 fallback 作为 series 名
+      expect(out.series[0].name).toBe('fb');
+      expect(out.values).toEqual([5]); // 向后兼容字段不变
+    }
+  });
+
+  it('④ 部分对象无数据：该对象 series 全 null，其它对象正常', () => {
+    const rows: AggregatedRow[] = [
+      row({ metricPath: 'K1', time: 't1', metricValue: 10, objectLdn: 'A' }),
+      row({ metricPath: 'K1', time: 't2', metricValue: 20, objectLdn: 'A' }),
+      // B 完全没数据
+    ];
+    const out = buildKpiChartData(rows, 'K1', ['A', 'B'], 'fb');
+    expect(out.xData).toEqual(['t1', 't2']);
+    expect(out.series[0]).toEqual({ objectLdn: 'A', name: 'A', values: [10, 20] });
+    expect(out.series[1]).toEqual({ objectLdn: 'B', name: 'B', values: [null, null] });
+    expect(out.isEmpty).toBe(false);
+    // UI 侧：series[1].values.every(v => v == null) 为 true → 不出线
+    expect(out.series[1].values.every((v) => v == null)).toBe(true);
+  });
+
+  it('⑥ 后端 displayName 不顶 LDN：series.name 始终取原始 LDN，避免「下行用户平均速率」之类友好名顶掉对象区分力', () => {
+    // 后端给行回填了友好名（指标中文名），但 legend 要的是 LDN 用于区分多对象。
+    const rows: AggregatedRow[] = [
+      row({
+        metricPath: 'K1',
+        time: 't1',
+        metricValue: 10,
+        objectLdn: 'Type=Cell,NrCGI=801,PLMNID=46001',
+        displayName: '下行用户平均速率',
+      }),
+      row({
+        metricPath: 'K1',
+        time: 't1',
+        metricValue: 20,
+        objectLdn: 'Type=Cell,NrCGI=802,PLMNID=46001',
+        displayName: '下行用户平均速率',
+      }),
+    ];
+    const out = buildKpiChartData(
+      rows,
+      'K1',
+      ['Type=Cell,NrCGI=801,PLMNID=46001', 'Type=Cell,NrCGI=802,PLMNID=46001'],
+      'fb',
+    );
+    // series.name 必须是原始 LDN，不能是 displayName。
+    expect(out.series[0].name).toBe('Type=Cell,NrCGI=801,PLMNID=46001');
+    expect(out.series[1].name).toBe('Type=Cell,NrCGI=802,PLMNID=46001');
+    // 图标题仍可走 displayName（用于卡片标题，不影响 legend 区分力）。
+    expect(out.displayName).toBe('下行用户平均速率');
+  });
+});
+
+describe('buildKpiCompareData（多对象 × 同期对比，T-0194 二维回归）', () => {
+  it('⑤ 多对象偏移带零头：按 (metricPath, objectLdn) 二维对齐，每对象虚线落到本对象上周期值', () => {
+    const HOUR = 3_600_000;
+    // 当前周期：两对象 A、B，各 2 桶。
+    const current = buildKpiChartData(
+      [
+        row({ metricPath: 'K1', time: '2026-06-02T00:00:00.000Z', metricValue: 10, objectLdn: 'A' }),
+        row({ metricPath: 'K1', time: '2026-06-02T01:00:00.000Z', metricValue: 20, objectLdn: 'A' }),
+        row({ metricPath: 'K1', time: '2026-06-02T00:00:00.000Z', metricValue: 100, objectLdn: 'B' }),
+        row({ metricPath: 'K1', time: '2026-06-02T01:00:00.000Z', metricValue: 200, objectLdn: 'B' }),
+      ],
+      'K1',
+      ['A', 'B'],
+      'fb',
+    );
+    // 上一周期：同 ldn、平移 24h；A=1,2，B=11,22。
+    const prev = buildKpiChartData(
+      [
+        row({ metricPath: 'K1', time: '2026-06-01T00:00:00.000Z', metricValue: 1, objectLdn: 'A' }),
+        row({ metricPath: 'K1', time: '2026-06-01T01:00:00.000Z', metricValue: 2, objectLdn: 'A' }),
+        row({ metricPath: 'K1', time: '2026-06-01T00:00:00.000Z', metricValue: 11, objectLdn: 'B' }),
+        row({ metricPath: 'K1', time: '2026-06-01T01:00:00.000Z', metricValue: 22, objectLdn: 'B' }),
+      ],
+      'K1',
+      ['A', 'B'],
+      'fb',
+    );
+    // 窗口长带 37.123 秒零头，必须靠 snapOffsetMs 吸附到整 24h 才能精确对齐（T-0194）。
+    const out = buildKpiCompareData(current, prev, 24 * HOUR + 37_123, 'hourly');
+    expect(out.series).toHaveLength(2);
+    // 关键：A 虚线只能拿 A 的上周期值，不能跟 B 串味。
+    expect(out.series[0].objectLdn).toBe('A');
+    expect(out.series[0].values).toEqual([1, 2]);
+    expect(out.series[1].objectLdn).toBe('B');
+    expect(out.series[1].values).toEqual([11, 22]);
+    // 向后兼容首条字段 = series[0]
+    expect(out.values).toEqual([1, 2]);
+    expect(out.isEmpty).toBe(false);
   });
 });

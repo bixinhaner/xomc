@@ -45,7 +45,7 @@ import EmptyState from '@/components/common/EmptyState';
 import { useDashboardData, useDeviceStatusByType } from '@core/hooks/api/useDashboard';
 import { DashboardKPIModules } from './DashboardKPIModules';
 import type { TechnologyType } from './kpi-config';
-import { TECH_LABELS } from './kpi-config';
+import { useTechnologyDictionary } from '@/components/dashboard/useTechnologyDictionary';
 import { useUserStore } from '@core/store/userStore';
 import { useT } from '@/hooks/useT';
 import { useThemeToken } from '@/hooks/useThemeToken';
@@ -109,6 +109,19 @@ export default function DashboardPage() {
 
   // 制式切换状态 - 默认使用LTE（符合验收标准：LTE 6个Panel作为主要展示）
   const [technology, setTechnology] = useState<TechnologyType>('lte');
+
+  // 网络制式 Segmented 选项来自字典 `network_type`：字典有几项显示几项；
+  // hook 内已过滤掉 LTE/NR/GSM 之外的 value（前端 KPI 静态契约暂未放开），
+  // 也过滤 status=false 项，并按 sort 升序。字典空 / loading / error → 空数组，
+  // UI 显示空 Segmented，让运维感知字典缺失（决策 D4）。
+  const { options: techOptions } = useTechnologyDictionary();
+
+  // 字典禁用了当前选中项 → 回退到 options 首项，避免下方图表区找不到 panel
+  useEffect(() => {
+    if (techOptions.length && !techOptions.some((o) => o.value === technology)) {
+      setTechnology(techOptions[0].value);
+    }
+  }, [techOptions, technology]);
 
   // 刷新提示状态
   const [lastUpdateTime, setLastUpdateTime] = useState<Date>(new Date());
@@ -348,11 +361,7 @@ export default function DashboardPage() {
               <Segmented
                 value={technology}
                 onChange={(value) => setTechnology(value as TechnologyType)}
-                options={[
-                  { label: TECH_LABELS.lte, value: 'lte' },
-                  { label: TECH_LABELS.nr, value: 'nr' },
-                  { label: TECH_LABELS.gsm, value: 'gsm' },
-                ]}
+                options={techOptions}
               />
             </Space>
           </Space>

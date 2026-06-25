@@ -10,7 +10,6 @@ import {
   Form,
   Input,
   InputNumber,
-  List,
   Modal,
   Popconfirm,
   Progress,
@@ -957,9 +956,14 @@ export default function FileTransferCenter() {
           title: t('ufte.col.upgradeProgress'),
           dataIndex: 'progress',
           key: 'progress',
-          width: 150,
+          width: 180,
+          // #628：升级类原本只画 Progress 条，看不出"一共多少台/完成多少/失败多少"。
+          // 改为与非升级类同款两行布局，复用 ufte.col.statsBrief。
           render: (value: number, record) => (
-            <Progress percent={value} size="small" status={record.status === 'ended' ? 'success' : record.status === 'in_progress' ? 'active' : 'normal'} />
+            <Space direction="vertical" size={4} style={{ width: '100%' }}>
+              <Progress percent={value} size="small" status={record.status === 'ended' ? 'success' : record.status === 'in_progress' ? 'active' : 'normal'} />
+              <Text type="secondary">{t('ufte.col.statsBrief', { ok: record.successCount, fail: record.failCount, total: record.totalCount })}</Text>
+            </Space>
           ),
         },
         {
@@ -978,13 +982,17 @@ export default function FileTransferCenter() {
           title: t('ufte.col.startTime'),
           key: 'startTime',
           width: 180,
-          render: (_, record) => record.executionMode === 'scheduled' && record.scheduledAt ? formatSystemTime(record.scheduledAt) : '-',
+          render: (_, record) => {
+            if (record.startedAt) return formatSystemTime(record.startedAt);
+            if (record.executionMode === 'scheduled' && record.scheduledAt) return formatSystemTime(record.scheduledAt);
+            return '-';
+          },
         },
         {
           title: t('ufte.col.endTime'),
           key: 'endTime',
           width: 180,
-          render: (_, record) => record.status === 'ended' ? formatSystemTime(record.createdAt) : '-',
+          render: (_, record) => (record.endedAt ? formatSystemTime(record.endedAt) : '-'),
         },
       ];
     }
@@ -1058,6 +1066,12 @@ export default function FileTransferCenter() {
         key: 'createdAt',
         width: 180,
         render: (value: string) => formatSystemTime(value),
+      },
+      {
+        title: t('ufte.col.endTime'),
+        key: 'endTime',
+        width: 180,
+        render: (_, record) => (record.endedAt ? formatSystemTime(record.endedAt) : '-'),
       },
     ];
   }, [isUpgradeLikeCategory, taskTypes, t]);
@@ -1752,7 +1766,6 @@ export default function FileTransferCenter() {
                 >
                   {t('ufte.action.batchSnInput')}
                 </Button>
-                <Text type="secondary">{t('ufte.form.deviceTotal', { count: drawerDeviceTotal })}</Text>
                 <Button
                   type="link"
                   size="small"
@@ -2043,45 +2056,18 @@ export default function FileTransferCenter() {
           </Form>
         </Modal>
 
-        {/* #215: 已选设备清单 —— 点"已选 N 台"打开，逐台可删除。 */}
+        {/* #215 + 已选清单升级：Modal 内用 Table，前端模糊搜索 SN + 分页 10/20/50/100，子组件配合 destroyOnHidden 重置状态。 */}
         <Modal
           title={t('ufte.selectedModal.title', { count: drawerSelectedDevices.length })}
           open={selectedDevicesModalOpen}
           onCancel={() => setSelectedDevicesModalOpen(false)}
           footer={null}
-          width={520}
+          width={720}
           destroyOnHidden
         >
-          <List<UnifiedFileTransferDeviceItem>
-            size="small"
-            dataSource={drawerSelectedDevices}
-            locale={{ emptyText: t('ufte.selectedModal.empty') }}
-            style={{ maxHeight: 420, overflow: 'auto' }}
-            renderItem={(item) => (
-              <List.Item
-                actions={[
-                  <Button
-                    key="remove"
-                    type="link"
-                    size="small"
-                    danger
-                    icon={<DeleteOutlined />}
-                    onClick={() => handleRemoveSelectedDevice(item.id)}
-                  >
-                    {t('common.delete')}
-                  </Button>,
-                ]}
-              >
-                <List.Item.Meta
-                  title={<Text>{item.deviceSn}</Text>}
-                  description={(
-                    <Text type="secondary" style={{ fontSize: 12 }}>
-                      {[item.deviceName, item.productType].filter(Boolean).join(' · ') || '—'}
-                    </Text>
-                  )}
-                />
-              </List.Item>
-            )}
+          <SelectedDevicesPanel
+            devices={drawerSelectedDevices}
+            onRemove={handleRemoveSelectedDevice}
           />
         </Modal>
       </Drawer>
@@ -2148,9 +2134,199 @@ export default function FileTransferCenter() {
                 </Space>
               </Space>
             </Card>
+            {/* #615：任务详情抽屉补「已选设备列表」——按 taskId 走 /ufte/devices 拉子任务，
+                10s 自动刷新（与外层「执行明细」共用 hook）。lazy 渲染，不阻塞抽屉打开。 */}
+            <TaskDetailDevicesPanel taskId={detailTask.id} />
           </Space>
         ) : null}
       </Drawer>
     </ListPageLayout>
+  );
+}
+
+// TaskDetailDevicesPanel —— 详情抽屉内嵌「已选设备 / 执行明细」表。
+// 与外层「执行明细」页签共用 useUnifiedFileTransferDevices，仅多传 taskId 收窄到当前任务。
+// 后端 matchesDeviceFilter 按 DeviceItem.TaskID 精确匹配；空 taskId 不会发生（detailTask 必有 id）。
+function TaskDetailDevicesPanel({ taskId }: { taskId: string }) {
+  const t = useT();
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const { data, isLoading } = useUnifiedFileTransferDevices({
+    taskId,
+    page,
+    pageSize,
+  });
+  const rows = data?.items ?? [];
+  const total = data?.total ?? 0;
+
+  const columns: ColumnsType<UnifiedFileTransferDeviceItem> = [
+    {
+      title: t('ufte.col.deviceSn'),
+      dataIndex: 'deviceSn',
+      key: 'deviceSn',
+      width: 150,
+      ellipsis: true,
+      render: (sn: string) => <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{sn || '-'}</Text>,
+    },
+    {
+      title: t('ufte.col.productType'),
+      dataIndex: 'productName',
+      key: 'productName',
+      width: 110,
+      ellipsis: true,
+      render: (_, record) => <Text style={{ fontSize: 12 }}>{record.productName || record.productType || '-'}</Text>,
+    },
+    {
+      title: t('common.status'),
+      dataIndex: 'status',
+      key: 'status',
+      width: 110,
+      render: (_, record) => renderDeviceStatus(record.status, t),
+    },
+    {
+      title: t('ufte.col.progress'),
+      dataIndex: 'progress',
+      key: 'progress',
+      width: 90,
+      render: (p: number) => <Progress percent={p} size="small" />,
+    },
+    {
+      title: t('software.failureReason'),
+      dataIndex: 'failureReason',
+      key: 'failureReason',
+      ellipsis: true,
+      render: (reason: string | undefined, record) =>
+        reason ? (
+          <Tooltip title={record.failureDetail || reason}>
+            <Text type="danger" style={{ fontSize: 12 }}>{reason}</Text>
+          </Tooltip>
+        ) : (
+          <Text type="secondary" style={{ fontSize: 12 }}>-</Text>
+        ),
+    },
+  ];
+
+  return (
+    <Card
+      title={t('ufte.tab.deviceList')}
+      size="small"
+      extra={<Text type="secondary" style={{ fontSize: 12 }}>{t('ufte.tag.totalCount', { count: total })}</Text>}
+    >
+      <Table<UnifiedFileTransferDeviceItem>
+        rowKey="id"
+        size="small"
+        loading={isLoading}
+        columns={columns}
+        dataSource={rows}
+        pagination={{
+          current: page,
+          pageSize,
+          total,
+          showSizeChanger: true,
+          pageSizeOptions: ['10', '20', '50', '100'],
+          size: 'small',
+          onChange: (nextPage, nextSize) => {
+            setPage(nextPage);
+            if (nextSize && nextSize !== pageSize) {
+              setPageSize(nextSize);
+            }
+          },
+        }}
+        scroll={{ x: 600 }}
+      />
+    </Card>
+  );
+}
+
+// SelectedDevicesPanel —— 已选清单 Modal 内嵌面板：SN 模糊搜索 + 分页 10/20/50/100 + 单台移除。
+// 数据源是父组件 selectedDeviceMap → drawerSelectedDevices 数组（in-memory），无后端请求。
+// Modal destroyOnHidden 时本组件卸载，搜索词/页码自动重置。
+function SelectedDevicesPanel({
+  devices,
+  onRemove,
+}: {
+  devices: UnifiedFileTransferDeviceItem[];
+  onRemove: (id: string) => void;
+}) {
+  const t = useT();
+  const [keyword, setKeyword] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+
+  const filtered = useMemo(() => {
+    const kw = keyword.trim().toLowerCase();
+    if (!kw) return devices;
+    return devices.filter((d) => (d.deviceSn || '').toLowerCase().includes(kw));
+  }, [devices, keyword]);
+
+  const columns: ColumnsType<UnifiedFileTransferDeviceItem> = [
+    {
+      title: t('ufte.col.deviceSn'),
+      dataIndex: 'deviceSn',
+      key: 'deviceSn',
+      ellipsis: true,
+      render: (sn: string) => <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{sn || '-'}</Text>,
+    },
+    {
+      title: t('ufte.col.productType'),
+      dataIndex: 'productName',
+      key: 'productName',
+      width: 180,
+      ellipsis: true,
+      render: (_, record) => <Text style={{ fontSize: 12 }}>{record.productName || record.productType || '-'}</Text>,
+    },
+    {
+      title: t('common.action'),
+      key: 'action',
+      width: 90,
+      align: 'right',
+      render: (_, record) => (
+        <Button
+          type="link"
+          size="small"
+          danger
+          icon={<DeleteOutlined />}
+          onClick={() => onRemove(record.id)}
+        >
+          {t('common.delete')}
+        </Button>
+      ),
+    },
+  ];
+
+  return (
+    <Space direction="vertical" size={8} style={{ width: '100%' }}>
+      <Input.Search
+        allowClear
+        size="small"
+        placeholder={t('ufte.selectedModal.searchPlaceholder')}
+        value={keyword}
+        onChange={(e) => {
+          setKeyword(e.target.value);
+          setPage(1);
+        }}
+      />
+      <Table<UnifiedFileTransferDeviceItem>
+        rowKey="id"
+        size="small"
+        columns={columns}
+        dataSource={filtered}
+        locale={{ emptyText: t('ufte.selectedModal.empty') }}
+        pagination={{
+          current: page,
+          pageSize,
+          total: filtered.length,
+          showSizeChanger: true,
+          pageSizeOptions: ['10', '20', '50', '100'],
+          size: 'small',
+          onChange: (nextPage, nextSize) => {
+            setPage(nextPage);
+            if (nextSize && nextSize !== pageSize) {
+              setPageSize(nextSize);
+            }
+          },
+        }}
+      />
+    </Space>
   );
 }

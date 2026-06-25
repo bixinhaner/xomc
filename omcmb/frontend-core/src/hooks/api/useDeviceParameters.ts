@@ -120,6 +120,22 @@ export function useParameterSchema(deviceId: string, pathPrefix?: string, enable
   });
 }
 
+// 把 objectPath 归一到 useParameterSchema 用的"父路径"前缀:
+//  - AddObject 传入的本身就是父路径,例如 "DeviceGSM.Bts.1.Trx." —— 保持不变。
+//  - DeleteObject 传入的是带实例号的路径,例如 "DeviceGSM.Bts.1.Trx.6." —— 剥掉末尾数字段还原为父路径。
+// 这样 invalidateQueries 的 queryKey 能精准命中调用方表格的 ['devices','parameter-schema', deviceId, '<父路径>'],
+// 不再波及同页其它表(BSC 邻区、Si2quater 等)。
+function schemaParentPrefix(objectPath: string): string {
+  const trimmed = objectPath.endsWith('.') ? objectPath.slice(0, -1) : objectPath;
+  const lastDot = trimmed.lastIndexOf('.');
+  if (lastDot < 0) return objectPath;
+  const lastSeg = trimmed.slice(lastDot + 1);
+  if (/^\d+$/.test(lastSeg)) {
+    return `${trimmed.slice(0, lastDot)}.`;
+  }
+  return objectPath.endsWith('.') ? objectPath : `${objectPath}.`;
+}
+
 export function useAddObject() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -130,15 +146,16 @@ export function useAddObject() {
       deviceId: string;
       objectPath: string;
     }) => api.addObject(deviceId, objectPath),
-    onSuccess: (_result, { deviceId }) => {
+    onSuccess: (_result, { deviceId, objectPath }) => {
       void queryClient.invalidateQueries({
         queryKey: ['devices', 'parameter-tree', deviceId],
       });
       void queryClient.invalidateQueries({
         queryKey: ['devices', 'parameters', deviceId],
       });
+      // 仅作废本次新增涉及的父路径 schema(例如 TRX),避免连带刷新整页所有表。
       void queryClient.invalidateQueries({
-        queryKey: ['devices', 'parameter-schema', deviceId],
+        queryKey: ['devices', 'parameter-schema', deviceId, schemaParentPrefix(objectPath)],
       });
     },
   });
@@ -154,15 +171,16 @@ export function useDeleteObject() {
       deviceId: string;
       objectPath: string;
     }) => api.deleteObject(deviceId, objectPath),
-    onSuccess: (_result, { deviceId }) => {
+    onSuccess: (_result, { deviceId, objectPath }) => {
       void queryClient.invalidateQueries({
         queryKey: ['devices', 'parameter-tree', deviceId],
       });
       void queryClient.invalidateQueries({
         queryKey: ['devices', 'parameters', deviceId],
       });
+      // 仅作废本次删除涉及的父路径 schema(例如 TRX),避免连带刷新整页所有表。
       void queryClient.invalidateQueries({
-        queryKey: ['devices', 'parameter-schema', deviceId],
+        queryKey: ['devices', 'parameter-schema', deviceId, schemaParentPrefix(objectPath)],
       });
     },
   });

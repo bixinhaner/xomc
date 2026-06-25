@@ -15,6 +15,33 @@
 
 import type { AggregatedRow } from '../types/pmDashboard';
 
+// ─── object_ldn 解析（对齐后端 metrics/object_ldn.go） ───
+
+export type ObjectLdnTech = '' | 'lte' | 'nr' | 'gsm';
+
+/**
+ * object_ldn 串拆出的全部维度键，与后端 ObjectLDNFields 一一对应。
+ * 按制式补缺段留 undefined（不赋空串），用 baseCellId / basePlmn 取跨制式统一值。
+ */
+export interface ObjectLdnFields {
+  tech: ObjectLdnTech;
+  // 4G / LTE
+  cellId?: string;
+  plmn?: string;
+  // 5G / NR
+  gnbId?: string;
+  nrCgi?: string;
+  cuid?: string;
+  duid?: string;
+  plmnId?: string;
+  nssai?: string;
+  sliceGroup?: string;
+  // GSM
+  uid?: string;
+}
+
+// ─── Pivot 表类型 ───
+
 export interface PivotColumn {
   key: string;        // = metricPath（稳定标识：KPI 为 K 编号，counter 为点分名）；用于单元格取值 + 列宽持久化
   title: string;      // = displayName 友好名（KPI 友好名 / PLMN 级带标记），回退 metricPath
@@ -26,9 +53,7 @@ export interface PivotRow {
   startTime?: string;      // 桶开始时间（RFC3339）
   endTime?: string;        // 桶结束时间（RFC3339）
   deviceSn?: string;
-  cellId?: string;         // 从 object_ldn 解析
-  plmn?: string;           // 从 object_ldn 解析
-  objectLdn?: string;      // 原始 LDN（备用 tooltip）
+  objectLdn?: string;      // 原始 object_ldn（直接展示，不格式化）
   cells: Record<string, number | null>;  // metricPath → value
 }
 
@@ -38,30 +63,111 @@ export interface PivotResult {
 }
 
 /**
- * 解析 object_ldn 字符串 → { cellId, plmn }。
+ * 解析 object_ldn 字符串 → ObjectLdnFields（对齐后端 ParseObjectLDN）。
  *
- * 支持格式（大小写不敏感）：
- *   "Cellid=111172245"                  → { cellId: "111172245" }
- *   "Cellid=111172245,PLMN=46068"       → { cellId: "111172245", plmn: "46068" }
- *   "PLMN=46068,Cellid=111172245"       → { cellId: "111172245", plmn: "46068" } (顺序无关)
- *   ""  / null / undefined              → {}
+ * 支持三种制式（大小写不敏感，逗号分隔 Key=Value）：
+ *   4G / LTE: "Cellid=N" | "Cellid=N,PLMN=M"
+ *   5G / NR:  "Type=Cell,Mode=SA,gNBID=N,NrCGI=N,CUID=N" | ...PLMNID=M | ...DUID=N | ...NSSAI=... | ...SCLICEGROUP=...
+ *   GSM:      "Uid=N-N"
+ *   空/null/undefined → { tech: '' }
  */
-export function parseObjectLdn(ldn: string | null | undefined): { cellId?: string; plmn?: string } {
-  if (!ldn) return {};
-  const out: { cellId?: string; plmn?: string } = {};
-  ldn.split(',').forEach((kv) => {
-    const idx = kv.indexOf('=');
+export function parseObjectLdn(ldn: string | null | undefined): ObjectLdnFields {
+  if (!ldn) return { tech: '' };
+  const kv: Record<string, string> = {};
+  ldn.split(',').forEach((part) => {
+    const idx = part.indexOf('=');
     if (idx < 0) return;
-    const key = kv.slice(0, idx).trim().toLowerCase();
-    const value = kv.slice(idx + 1).trim();
-    if (!value) return;
-    if (key === 'cellid') {
-      out.cellId = value;
-    } else if (key === 'plmn') {
-      out.plmn = value;
-    }
+    const key = part.slice(0, idx).trim().toLowerCase();
+    const value = part.slice(idx + 1).trim();
+    if (value) kv[key] = value;
   });
+
+  const out: ObjectLdnFields = { tech: '' };
+  // 4G
+  if (kv['cellid']) out.cellId = kv['cellid'];
+  if (kv['plmn']) out.plmn = kv['plmn'];
+  // 5G
+  if (kv['gnbid']) out.gnbId = kv['gnbid'];
+  if (kv['nrcgi']) out.nrCgi = kv['nrcgi'];
+  if (kv['cuid']) out.cuid = kv['cuid'];
+  if (kv['duid']) out.duid = kv['duid'];
+  if (kv['plmnid']) out.plmnId = kv['plmnid'];
+  if (kv['nssai']) out.nssai = kv['nssai'];
+  if (kv['sclicegroup']) out.sliceGroup = kv['sclicegroup'];
+  // GSM
+  if (kv['uid']) out.uid = kv['uid'];
+
+  // 制式判定（优先级与后端一致：gNBID/NrCGI → NR；Uid → GSM；Cellid → LTE）
+  if (out.gnbId || out.nrCgi) {
+    out.tech = 'nr';
+    delete out.cellId;
+    delete out.plmn;
+  } else if (out.uid) {
+    out.tech = 'gsm';
+    delete out.cellId;
+    delete out.plmn;
+  } else if (out.cellId) {
+    out.tech = 'lte';
+  }
+
   return out;
+}
+
+/**
+ * 按制式返回基础小区标识（对齐后端 BaseCellID()）。
+ *   4G → cellId, 5G → nrCgi, GSM → uid
+ */
+export function baseCellId(fields: ObjectLdnFields): string | undefined {
+  switch (fields.tech) {
+    case 'lte': return fields.cellId;
+    case 'nr':  return fields.nrCgi;
+    case 'gsm': return fields.uid;
+    default:    return undefined;
+  }
+}
+
+/**
+ * 按制式返回 PLMN（对齐后端字段名差异：4G PLMN / 5G PLMNID）。
+ */
+export function basePlmn(fields: ObjectLdnFields): string | undefined {
+  switch (fields.tech) {
+    case 'lte': return fields.plmn;
+    case 'nr':  return fields.plmnId;
+    default:    return undefined;
+  }
+}
+
+/**
+ * 输出人类可读测量对象摘要。
+ *   5G: "Cell(NrCGI=801)" / "Cell(NrCGI=801) PLMN=46001" / "DU(DUID=1)"
+ *   GSM: "GSM(Uid=1-2)"
+ *   4G: "Cell(111172245)" / "Cell(111172245) PLMN=46068"
+ *   未知: 原串
+ */
+export function formatObjectLdn(ldn: string | null | undefined): string {
+  if (!ldn) return '';
+  const f = parseObjectLdn(ldn);
+  switch (f.tech) {
+    case 'nr': {
+      const typeMatch = ldn.match(/\bType=([^,]+)/i);
+      const type = typeMatch?.[1] ?? 'NR';
+      let label = type;
+      if (f.nrCgi) label += `(NrCGI=${f.nrCgi})`;
+      else if (f.duid) label += `(DUID=${f.duid})`;
+      else if (f.gnbId) label += `(gNBID=${f.gnbId})`;
+      if (f.plmnId) label += ` PLMN=${f.plmnId}`;
+      return label;
+    }
+    case 'gsm':
+      return `GSM(Uid=${f.uid})`;
+    case 'lte': {
+      let label = f.cellId ? `Cell(${f.cellId})` : 'Cell';
+      if (f.plmn) label += ` PLMN=${f.plmn}`;
+      return label;
+    }
+    default:
+      return ldn;
+  }
 }
 
 /**
@@ -106,15 +212,12 @@ export function pivotLongToWide(rows: AggregatedRow[]): PivotResult {
     const key = `${r.time}||${sn}||${ldn}`;
     let row = rowMap.get(key);
     if (!row) {
-      const parsed = parseObjectLdn(ldn);
       row = {
         key,
         time: r.time,
         startTime: r.startTime,
         endTime: r.endTime,
         deviceSn: r.deviceSn,
-        cellId: parsed.cellId,
-        plmn: parsed.plmn,
         objectLdn: ldn || undefined,
         cells: {},
       };

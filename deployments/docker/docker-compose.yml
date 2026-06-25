@@ -307,6 +307,7 @@ services:
     ports:
       - "9095:9090"   # metrics — 宿主 9095，容器内仍为 9090（让出 9090 给 Prometheus 服务）
       - "7557:7557"
+      - "3478:3478/udp" # STUN/UDP Connection Request discovery
     environment:
       OMCGO_ENV: "${OMCGO_ENV:-dev}"
       # Go 运行时上限（resources.env 注入）；ACS TR-069 长连接堆压力最大，GOMEMLIMIT 价值最高。

@@ -447,6 +447,9 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 		WithAsyncJobRepo(ph.pmAsyncJobRepo)
 	pmHandler.SetMetrics(pm.NewPMMetrics(c.MetricsReg))
 	pmHandler.SetPermissionService(c.PermService) // #64 设备组可见性数据权限
+	if c.ProductRegistry != nil {
+		pmHandler.SetProductPatternResolver(c.ProductRegistry) // #602 按产品名称下拉过滤
+	}
 	pmHandler.RegisterRoutes(permGroup("pm"))
 	// T-0164-P7 / G7：adhoc 自定义聚合任务 REST 路由（同 pm 权限组）
 	if ph.pmAdhocHandler != nil {
@@ -530,6 +533,9 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 
 	// ----- MR routes → resource "pm" -----
 	mrHandler := mr.NewHandler(md.mrStore, md.mrIndRepo, md.mrMapRepo, c.MinIO, c.Cfg.MinIO.Buckets.MRFiles, c.Logger)
+	if c.ProductRegistry != nil {
+		mrHandler.SetProductPatternResolver(c.ProductRegistry) // #602 按产品名称下拉过滤
+	}
 	mrHandler.RegisterRoutes(permGroup("pm"))
 
 	// ----- MR Task management (F05 测量任务) → resource "pm" -----

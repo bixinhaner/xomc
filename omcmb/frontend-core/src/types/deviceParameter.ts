@@ -54,6 +54,13 @@ export interface ParameterSyncStatus {
   status: 'idle' | 'syncing';
   totalParameters: number;
   pendingCommands: number;
+  lastSyncGpv?: {
+    sourceId: string;
+    taskCount: number;
+    firstCreatedAt?: string;
+    lastCompletedAt?: string;
+    wallClockSeconds?: number;
+  };
   /** 上次同步成功时刻 (ISO timestamp); 与 lastParamSyncFailedAt 互斥,任一非空表示上次终态 */
   lastParamSyncAt?: string;
   /** 上次同步失败时刻 (ISO timestamp); 非空时前端展示红色"上次同步失败" */

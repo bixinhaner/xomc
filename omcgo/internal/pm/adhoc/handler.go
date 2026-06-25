@@ -52,8 +52,8 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		adhoc.DELETE("/tasks/:id/definition", h.Delete) // #392：硬删终态自建任务定义行
 		adhoc.GET("/tasks/:id/results", h.Results)
 		adhoc.GET("/tasks/:id/filter-options", h.FilterOptions) // PM-DASH-DIMFILTER：按维度列出可筛子集选项
-		adhoc.GET("/tasks/:id/runs", h.Runs) // T-0186：运行历史
-		adhoc.GET("/tasks/:id/progress", h.Progress) // SSE
+		adhoc.GET("/tasks/:id/runs", h.Runs)                    // T-0186：运行历史
+		adhoc.GET("/tasks/:id/progress", h.Progress)            // SSE
 	}
 }
 
@@ -65,12 +65,12 @@ type createRequestDTO struct {
 	CronExpr string `json:"cron_expr"`
 	// T-0185：device_sns 仅在 device/aggregate_group 维度必填（向导期放宽）；
 	// network/product/band/device_group 维度按制式全量聚合，不限设备，device_sns 可空。
-	DeviceSNs     []string  `json:"device_sns"`
-	MetricPaths   []string  `json:"metric_paths" binding:"required,min=1"`
-	Granularities []string  `json:"granularities" binding:"required,min=1"`
+	DeviceSNs     []string `json:"device_sns"`
+	MetricPaths   []string `json:"metric_paths" binding:"required,min=1"`
+	Granularities []string `json:"granularities" binding:"required,min=1"`
 	// T-0193：小区/PLMN 白名单（完整 object_ldn 字符串）。可选，不传/空 = 全小区（向后兼容）。
 	// 仅 device/aggregate_group 维度生效；其他维度忽略（不落库、不报错）。
-	ObjectLDNs    []string  `json:"object_ldns"`
+	ObjectLDNs []string `json:"object_ldns"`
 	// T-0185：window 仅 oneshot 必填；continuous 不填 → 存 NULL 开窗滚动聚合（与内置任务同语义）。
 	WindowStart time.Time `json:"window_start"`
 	WindowEnd   time.Time `json:"window_end"`
@@ -559,17 +559,23 @@ type resultsFilter struct {
 	EndTime     string // RFC3339；非法/空则忽略
 	// ObjectLDNs T-0193：任务自带的小区/PLMN 白名单。非空时叠加 object_ldn = ANY(...) 过滤；
 	// 空 = 不过滤（全小区）。与"只看 N 指标"同一层查看级收口。
-	ObjectLDNs  []string
+	ObjectLDNs []string
 	// ProductIDs PM-DASH-DIMFILTER：product 维度仪表盘按选中产品子集过滤（product_id = ANY，uuid 数组）。
 	// 空 = 不过滤。独立于 T-0193 的 ObjectLDNs（那是任务白名单），两者作为独立 WHERE 子句叠加（AND 取交集）。
-	ProductIDs  []string
+	ProductIDs []string
 	// SubsetLDNs PM-DASH-DIMFILTER：device_group/band 维度仪表盘按选中子集过滤（object_ldn = ANY，text 数组，
 	// 值形态 'DeviceGroup=<uuid>' / 'Band=<值>'）。空 = 不过滤。与 ObjectLDNs（任务白名单）各自独立成子句。
-	SubsetLDNs  []string
+	SubsetLDNs []string
 	// TaskMetricPaths #532：任务配置的指标集（task.MetricPaths）。显示侧收口——把「配置指标=显示范围」
 	// 真正落在显示阶段。非空时叠加 metric_path = ANY(...)，与用户临时选的单指标/子集（MetricPath）各自独立成子句、
 	// AND 取交集；空 = 不过滤（历史/边界任务向后兼容）。P2 落库全存已启用指标后，这道闸防止把全部指标铺满仪表盘。
 	TaskMetricPaths []string
+	// Weekdays #599：星期过滤（0=周日..6=周六，对齐 PostgreSQL EXTRACT(dow)）。
+	// 空/全选 = 不过滤。筛的是 start_time 的星期几（与前端 dayjs().day() 同义）。
+	Weekdays []int
+	// Hours #599：小时段过滤（0..23，对齐 PostgreSQL EXTRACT(hour)）。
+	// 空/全选 = 不过滤。筛的是 start_time 的整点小时。
+	Hours []int
 }
 
 // buildResultsQuery 纯函数：拼 adhoc results 查询 SQL + 占位参数。
@@ -646,6 +652,18 @@ WHERE r.task_id = $1`
 		args = append(args, f.TaskMetricPaths)
 		pos++
 	}
+	// #599：星期/小时段后端过滤（EXTRACT(dow/hour FROM start_time)）。
+	// 全选（7 天/24 时）或空 = 不加条件（向后兼容）。
+	if len(f.Weekdays) > 0 && len(f.Weekdays) < 7 {
+		q += fmt.Sprintf(" AND EXTRACT(dow FROM r.start_time)::int = ANY($%d)", pos)
+		args = append(args, f.Weekdays)
+		pos++
+	}
+	if len(f.Hours) > 0 && len(f.Hours) < 24 {
+		q += fmt.Sprintf(" AND EXTRACT(hour FROM r.start_time)::int = ANY($%d)", pos)
+		args = append(args, f.Hours)
+		pos++
+	}
 	q += fmt.Sprintf(" ORDER BY r.time DESC LIMIT $%d OFFSET $%d", pos, pos+1)
 	args = append(args, limit, offset)
 	return q, args
@@ -710,6 +728,17 @@ func buildResultsCountQuery(taskID uuid.UUID, f resultsFilter) (string, []any) {
 		args = append(args, f.TaskMetricPaths)
 		pos++
 	}
+	// #599：与 buildResultsQuery 同口径——星期/小时段过滤。
+	if len(f.Weekdays) > 0 && len(f.Weekdays) < 7 {
+		q += fmt.Sprintf(" AND EXTRACT(dow FROM r.start_time)::int = ANY($%d)", pos)
+		args = append(args, f.Weekdays)
+		pos++
+	}
+	if len(f.Hours) > 0 && len(f.Hours) < 24 {
+		q += fmt.Sprintf(" AND EXTRACT(hour FROM r.start_time)::int = ANY($%d)", pos)
+		args = append(args, f.Hours)
+		pos++
+	}
 	return q, args
 }
 
@@ -762,6 +791,9 @@ func (h *Handler) Results(c *gin.Context) {
 		// #532：任务配置指标集（显示侧收口）。让「配置指标=显示范围」落在显示阶段——
 		// 与用户临时选的 metric_path 各自独立成子句、AND 取交集。空（历史/边界任务）= 不过滤（向后兼容）。
 		TaskMetricPaths: task.MetricPaths,
+		// #599：星期/小时段后端过滤（全选/空 = 不过滤，向后兼容）。
+		Weekdays: parseCSVIntQuery(c, "weekdays"),
+		Hours:    parseCSVIntQuery(c, "hours"),
 	}
 	q, args := buildResultsQuery(id, filter, limit, offset)
 
@@ -773,30 +805,30 @@ func (h *Handler) Results(c *gin.Context) {
 	defer rows.Close()
 
 	type resultDTO struct {
-		ID          string    `json:"id"`
-		TaskID      string    `json:"task_id"`
-		DeviceOUI   string    `json:"device_oui"`
-		DeviceSN    string    `json:"device_sn"`
+		ID        string `json:"id"`
+		TaskID    string `json:"task_id"`
+		DeviceOUI string `json:"device_oui"`
+		DeviceSN  string `json:"device_sn"`
 		// product 维度结果的分组键（T-0182-fix）；device/aggregate_group 维度为空。
-		ProductID   string    `json:"product_id,omitempty"`
+		ProductID string `json:"product_id,omitempty"`
 		// PM-线名解析：读时 LEFT JOIN 解析出的可读名。product 任务才有 ProductName，
 		// device_group 任务才有 DeviceGroupName；缺失（已删/脏数据）则空，前端回退 id 前 8 位。
 		ProductName     string `json:"product_name,omitempty"`
 		DeviceGroupName string `json:"device_group_name,omitempty"`
-		MetricPath  string    `json:"metric_path"`
+		MetricPath      string `json:"metric_path"`
 		// KPI 行 metric_path 是 K 编号；display_name 为按编号回填的友好名（PLMN 级带标记）。counter 行 = metric_path。
-		DisplayName string    `json:"display_name,omitempty"`
-		MetricType  string    `json:"metric_type"`
+		DisplayName string `json:"display_name,omitempty"`
+		MetricType  string `json:"metric_type"`
 		// MetricValue 用 jsonx.Float（底层 float64）兜底非有限值（NaN/Inf → null），
 		// 避免单个 NaN 行致整批 JSON 编码失败、返回空 body（issue #387）。
 		MetricValue jsonx.Float `json:"metric_value"`
-		StatisType  *string   `json:"statis_type,omitempty"`
-		Granularity string    `json:"granularity"`
-		Time        time.Time `json:"time"`
-		StartTime   time.Time `json:"start_time"`
-		EndTime     time.Time `json:"end_time"`
-		IngestTime  time.Time `json:"ingest_time"`
-		ObjectLDN   *string   `json:"object_ldn,omitempty"`
+		StatisType  *string     `json:"statis_type,omitempty"`
+		Granularity string      `json:"granularity"`
+		Time        time.Time   `json:"time"`
+		StartTime   time.Time   `json:"start_time"`
+		EndTime     time.Time   `json:"end_time"`
+		IngestTime  time.Time   `json:"ingest_time"`
+		ObjectLDN   *string     `json:"object_ldn,omitempty"`
 	}
 	items := make([]resultDTO, 0)
 	for rows.Next() {
@@ -877,6 +909,32 @@ func parseCSVQuery(c *gin.Context, key string) []string {
 				out = append(out, p)
 			}
 		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// parseCSVIntQuery 读取逗号分隔的整数列表 query（如 ?weekdays=0,1,2）。
+// 非法值静默跳过；无有效值返回 nil（不过滤）。
+func parseCSVIntQuery(c *gin.Context, key string) []int {
+	raw := c.Query(key)
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]int, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			continue
+		}
+		out = append(out, n)
 	}
 	if len(out) == 0 {
 		return nil

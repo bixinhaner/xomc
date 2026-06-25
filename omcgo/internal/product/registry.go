@@ -412,6 +412,26 @@ func (r *Registry) ValidateReferences(ctx context.Context) (*ValidationReport, e
 	return report, nil
 }
 
+// GetPatternsByProductID 返回某产品当前 active 的全部 product_class 模式字面量。
+// 用于 file-manager 列表页按「产品名称」过滤时,把 product_id 解析为该产品的
+// pattern 集合,SQL 层再 IN (...) 过滤。无匹配返回空切片(调用方可据此返回空结果)。
+func (r *Registry) GetPatternsByProductID(ctx context.Context, productID uuid.UUID) ([]string, error) {
+	if err := r.ensureFresh(ctx); err != nil {
+		return nil, err
+	}
+	p := r.patterns.Load()
+	if p == nil {
+		return nil, nil
+	}
+	out := make([]string, 0, 4)
+	for _, cp := range *p {
+		if cp.productID == productID {
+			out = append(out, cp.raw)
+		}
+	}
+	return out, nil
+}
+
 // PatternCount 返回当前快照中已编译的 pattern 数量；供 healthz / debug 端点使用。
 func (r *Registry) PatternCount() int {
 	if p := r.patterns.Load(); p != nil {

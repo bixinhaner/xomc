@@ -502,7 +502,7 @@ export default function HistoricalAlarms() {
             <TableRow>
               {cols.map((c, i) =>
                 i === 0 ? (
-                  <TableHead key="select" className="w-10">
+                  <TableHead key="select" className="w-8">
                     <input
                       type="checkbox"
                       className="size-4 cursor-pointer"
@@ -510,6 +510,14 @@ export default function HistoricalAlarms() {
                       onChange={toggleAll}
                       aria-label="全选"
                     />
+                  </TableHead>
+                ) : c === 'SN' ? (
+                  <TableHead key={c} className="min-w-56">
+                    {c}
+                  </TableHead>
+                ) : c === '操作' ? (
+                  <TableHead key={c} className="w-40">
+                    {c}
                   </TableHead>
                 ) : (
                   <TableHead key={c}>{c}</TableHead>
@@ -538,16 +546,16 @@ export default function HistoricalAlarms() {
                         aria-label="选择行"
                       />
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="min-w-56">
                       <button
                         type="button"
-                        className="flex items-center gap-1.5 font-mono text-xs hover:underline"
+                        className="flex max-w-56 items-center gap-1.5 font-mono text-xs hover:underline"
                         onClick={() => openDetail(a)}
                       >
                         {a.unread === '1' ? (
                           <span className="inline-block size-1.5 rounded-full bg-destructive" />
                         ) : null}
-                        {a.deviceSn}
+                        <span className="truncate" title={a.deviceSn}>{a.deviceSn}</span>
                       </button>
                       {a.deviceName && a.deviceName !== a.deviceSn ? (
                         <div className="text-xs text-muted-foreground">
@@ -584,8 +592,8 @@ export default function HistoricalAlarms() {
                       {formatTime(a.clearTime)}
                     </TableCell>
                     <TableCell className="tabular-nums">{a.alarmCount}</TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1">
+                    <TableCell className="w-40">
+                      <div className="flex items-center gap-0.5">
                         <Button
                           variant="ghost"
                           size="sm"

@@ -38,6 +38,10 @@ type ParameterTreeHandler struct {
 	logger          *zap.Logger
 }
 
+type syncGPVSummaryReader interface {
+	LatestSyncGPVSummaryByDevice(ctx context.Context, deviceSN string) (*task.SyncGPVSummary, error)
+}
+
 // NewParameterTreeHandler creates a new parameter tree handler.
 func NewParameterTreeHandler(
 	deviceService *DeviceService,
@@ -480,6 +484,22 @@ func (h *ParameterTreeHandler) GetSyncStatus(c *gin.Context) {
 		"total_parameters": len(params),
 		"pending_commands": pendingCommands,
 	}
+	if taskSvc := h.deviceService.GetTaskService(); taskSvc != nil && dev != nil {
+		if summaryReader, ok := taskSvc.(syncGPVSummaryReader); ok {
+			if summary, err := summaryReader.LatestSyncGPVSummaryByDevice(c.Request.Context(), dev.SerialNumber); err == nil && summary != nil {
+				lastSync := gin.H{
+					"source_id":          summary.SourceID,
+					"task_count":         summary.TaskCount,
+					"first_created_at":   summary.FirstCreatedAt,
+					"wall_clock_seconds": summary.WallClockSeconds,
+				}
+				if summary.LastCompletedAt != nil {
+					lastSync["last_completed_at"] = summary.LastCompletedAt
+				}
+				resp["last_sync_gpv"] = lastSync
+			}
+		}
+	}
 	// migration 000146 互斥语义:last_param_sync_at / last_param_sync_failed_at 任一非空,
 	// 前端据此判定"上次成功"还是"上次失败"(失败时一并展示 error 文案)。
 	if dev != nil && dev.LastParamSyncAt != nil {
@@ -893,7 +913,12 @@ func (h *ParameterTreeHandler) GetParameterSchema(c *gin.Context) {
 		return
 	}
 
-	params, err := h.paramRepo.GetByDevice(c.Request.Context(), id)
+	var params []model.DeviceParameter
+	if pathPrefix != "" {
+		params, err = h.paramRepo.GetByPathPrefix(c.Request.Context(), id, pathPrefix)
+	} else {
+		params, err = h.paramRepo.GetByDevice(c.Request.Context(), id)
+	}
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return

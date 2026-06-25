@@ -5,16 +5,24 @@
  * 而是接收「布局里这张图的 metrics（指标编号 / 旧 symbolic key）」+「整页一次批量取数得到的对比数据」，
  * 只负责渲染。
  *
- * KPI-ALL-IND 阶段4：放开全部指标后面板存的是指标编号（K/C 编号），名字/单位改从
- * 指标库元数据取（中文名 + 单位）；线色用默认色。旧存量 symbolic 别名在库里查不到时
- * 回退老的 getKPIConfigByKey（i18n label + 单位 + 换算系数）。
+ * KPI-ALL-IND 阶圻4：放开全部指标后面板存的是指标编号（K/C 编号），名字/单位优先从 KPI_CATALOG
+ * （kpi-config.ts 单一数据源，含 dashboard.kpi.* i18n + i18n unit）取，未录入 catalog 的新
+ * 指标回退指标库元数据；都缺时名字回退编号本身。
+ *
+ * Issue B（多指标对比）：下拉支持多选，默认仅选 panel.metrics 第一项。
+ *  - 选 1 个 → 同时画今日 + 昨日（昨日虚线），与旧单选行为对齐（默认即此态）。
+ *  - 选 ≥ 2 个 → 仅画今日 N 条，按调色板循环上色，避免 2N 条线视觉爆炸（决策 D2）。
+ *  - 选 0 个 → 显示“请选择指标”占位，不渲图（与 Grafana/DataDog 同类产品一致，不强制最少 1 个）。
+ *  - tag 不带单个 ×：反选走下拉点 ✓，避免选 N 个时 N 个 × 的视觉杂象；保留 allowClear 一键清空。
+ *  - 单位混选时，Y 轴单位留空（决策 D3 起步版，未来可升级双 Y 轴）。
  *
  * 容错：某指标在批量取数结果里缺失（指标库下线 / 无数据）时，那条线跳过、不让整图崩。
  * 首页只读不可拖。
  */
 
-import React, { useMemo, useState } from 'react';
-import { Card, Select, Spin, Empty, Typography } from 'antd';
+import { useCallback, useMemo, useState, useEffect, useRef } from 'react';
+import type { ComponentProps, ReactNode } from 'react';
+import { Card, Select, Spin, Empty, Typography, Tooltip, Tag } from 'antd';
 import { LoadingOutlined } from '@ant-design/icons';
 import LineChart from '@/components/Charts/LineChart';
 import { useT } from '@/hooks/useT';
@@ -24,12 +32,9 @@ import type { KPILayoutPanel } from '@core/types/dashboard';
 import type { MultiTrendComparisonData } from '@core/types/dashboard';
 import type { TechnologyType } from '@/pages/dashboard/kpi-config';
 import { useMetricMetadata, resolveMetricMeta } from './useMetricMetadata';
+import { buildSeries } from './LayoutKPIPanel.helpers';
 
 const { Text } = Typography;
-
-// 折线默认色：今日主色、昨日灰（KPI-ALL-IND 阶段4：线色用默认色，不再按指标取配置色）。
-const COLOR_TODAY = '#1677FF';
-const COLOR_YESTERDAY = '#999999';
 
 export interface LayoutKPIPanelProps {
   /** 当前制式（用于稳定 key + 按制式拉指标库元数据）。 */
@@ -44,49 +49,6 @@ export interface LayoutKPIPanelProps {
   height?: number;
 }
 
-/**
- * 把一个指标的 current/compare 序列折算成 Day 模式（24 整点）两条线。
- */
-function buildSeries(
-  metricKey: string,
-  trendData: MultiTrendComparisonData | undefined,
-  xData: string[],
-  todayLabel: string,
-  yesterdayLabel: string,
-  conversion: number,
-): { series: Array<{ name: string; data: (number | null)[]; color: string }>; currentValue: number | null } {
-  const comparison = trendData?.[metricKey];
-
-  const todayValues = new Array<number | null>(xData.length).fill(null);
-  const yesterdayValues = new Array<number | null>(xData.length).fill(null);
-
-  if (comparison) {
-    comparison.current.forEach((point) => {
-      const date = new Date(point.time);
-      const timeStr = `${date.getHours().toString().padStart(2, '0')}:00`;
-      const index = xData.indexOf(timeStr);
-      if (index >= 0) todayValues[index] = point.value * conversion;
-    });
-    comparison.compare.forEach((point) => {
-      const date = new Date(point.time);
-      const timeStr = `${date.getHours().toString().padStart(2, '0')}:00`;
-      const index = xData.indexOf(timeStr);
-      if (index >= 0) yesterdayValues[index] = point.value * conversion;
-    });
-  }
-
-  const nonEmptyToday = todayValues.filter((v): v is number => v !== null && !Number.isNaN(v));
-  const currentValue = nonEmptyToday.length > 0 ? nonEmptyToday[nonEmptyToday.length - 1] : null;
-
-  return {
-    series: [
-      { name: todayLabel, data: todayValues, color: COLOR_TODAY },
-      { name: yesterdayLabel, data: yesterdayValues, color: COLOR_YESTERDAY },
-    ],
-    currentValue,
-  };
-}
-
 export function LayoutKPIPanel({ technology, panel, trendData, isLoading, height = 280 }: LayoutKPIPanelProps) {
   const t = useT();
   const token = useThemeToken();
@@ -94,21 +56,52 @@ export function LayoutKPIPanel({ technology, panel, trendData, isLoading, height
   // 按制式拉指标库元数据（编号 → 名字/单位）。放开全部指标后名字/单位来源在此。
   const meta = useMetricMetadata(technology);
 
-  // 默认选中第一条指标。
-  const [selectedMetric, setSelectedMetric] = useState<string>(panel.metrics[0] ?? '');
+  // 默认仅选 panel.metrics 第一项（决策 D1 修订：默认就是单指标 today+yesterday 对比视图，
+  // 用户主动添加才进入多选叠加态，符合大多数日常巡检场景）。
+  const [selectedMetrics, setSelectedMetrics] = useState<string[]>(() =>
+    panel.metrics.length > 0 ? [panel.metrics[0]] : [],
+  );
 
-  // 布局变化（制式切换 / 配置变化）时把选中指标复位到首条。
-  React.useEffect(() => {
-    /* eslint-disable react-hooks/set-state-in-effect -- Intentional reset when panel metrics change */
-    setSelectedMetric(panel.metrics[0] ?? '');
-    /* eslint-enable react-hooks/set-state-in-effect */
+  const hasDataRef = useRef(panel.metrics.length > 0);
+
+  // 应对异步 Layout 数据的更新：从内置兜底配置（例如 K编号）切换到接口返回的真实配置（可能带别名或删减了指标）
+  useEffect(() => {
+    // 场景一：初始兜底为空，现在接口首次返回有效指标。直接选第一项；
+    // ref 修改放在 setState 之外，避免 StrictMode 下 updater 双调导致副作用重复。
+    if (panel.metrics.length > 0 && !hasDataRef.current) {
+      hasDataRef.current = true;
+      setSelectedMetrics([panel.metrics[0]]);
+      return;
+    }
+
+    // 场景二：接口返回的指标列表跟当前选中不一致（别名替换 / 删减）。
+    // 纯函数过滤，updater 不带副作用。
+    setSelectedMetrics((prev) => {
+      const valid = prev.filter((m) => panel.metrics.includes(m));
+      if (valid.length === prev.length) return prev;
+      if (valid.length > 0) return valid;
+      // 全军覆没且原本有选中：自动回退到新的第一项，避免 0 选空图态。
+      if (prev.length > 0 && panel.metrics.length > 0) return [panel.metrics[0]];
+      return prev;
+    });
   }, [panel.metrics]);
 
-  // 当前选中指标的展示元数据（名字/单位/换算）。
-  const selectedMeta = useMemo(
-    () => resolveMetricMeta(selectedMetric, meta, t),
-    [selectedMetric, meta, t],
+  // 单 metric 解析器（在 buildSeries 与 unit 推断里共用）。
+  const resolveOne = useCallback(
+    (key: string) => resolveMetricMeta(key, meta, t),
+    [meta, t],
   );
+
+  // Y 轴单位：仅当所有选中指标单位相同时才显示（决策 D3 起步版，避免不同量纲共用一个单位标签误导）。
+  const sharedUnit = useMemo(() => {
+    if (selectedMetrics.length === 0) return '';
+    const units = new Set(selectedMetrics.map((k) => resolveOne(k).unit));
+    return units.size === 1 ? [...units][0] : '';
+  }, [selectedMetrics, resolveOne]);
+
+  // 卡片标题 fallback：未配 title 时，选 1 个用该指标名，选多个用 panel.metrics 第一个的名。
+  const titleFallbackKey = selectedMetrics[0] ?? panel.metrics[0] ?? '';
+  const titleFallback = titleFallbackKey ? resolveOne(titleFallbackKey).name : '';
 
   const todayLabel = t('dashboard.timeRange.today');
   const yesterdayLabel = t('dashboard.timeRange.yesterday');
@@ -117,42 +110,81 @@ export function LayoutKPIPanel({ technology, panel, trendData, isLoading, height
   const xDataFull = useMemo(() => generateDayAxisTimestamps(), []);
 
   const { series } = useMemo(
-    () => buildSeries(selectedMetric, trendData, xData, todayLabel, yesterdayLabel, selectedMeta.conversion),
-    [selectedMetric, trendData, xData, todayLabel, yesterdayLabel, selectedMeta.conversion],
+    () => buildSeries(selectedMetrics, trendData, xData, todayLabel, yesterdayLabel, resolveOne),
+    [selectedMetrics, trendData, xData, todayLabel, yesterdayLabel, resolveOne],
   );
 
-  // 选中指标在今日/昨日两条线里是否有任一真实数据点（issue #359）。
-  // 全网线优先读每小时预聚合表、缺数据时后端已回退原始明细；若两边都拿不到（聚合任务尚未跑过且
-  // 原表也无可聚数据），不再画裸空图，而是给出"暂无聚合数据/每小时整点更新"的明确提示，
-  // 避免被误判为故障。
+  // 至少一条 series 有真实数据点？无任何点时给"暂无聚合数据"提示（issue #359 保留）。
   const hasSeriesData = useMemo(
     () => series.some((s) => s.data.some((v) => v !== null && !Number.isNaN(v))),
     [series],
   );
 
   // 指标下拉：按编号取指标库名字；存量旧别名回退老配置 label；都缺退回编号本身。
-  const indicatorOptions = panel.metrics.map((key) => ({
-    label: resolveMetricMeta(key, meta, t).name,
-    value: key,
-  }));
+  const indicatorOptions = useMemo(
+    () => panel.metrics.map((key) => ({ label: resolveOne(key).name, value: key })),
+    [panel.metrics, resolveOne],
+  );
+
+  // 自定义 tag：去掉逐个 ×，与 Grafana / Kibana 多选 trigger 一致，避免选 N 个时 N 个 × 的视觉杂象。
+  // 反选走“打开下拉 → 点选中项 ✓”；底部还有 allowClear 提供“一键清空”。
+  const tagRender = useCallback<NonNullable<ComponentProps<typeof Select>['tagRender']>>(
+    (props) => <Tag style={{ marginInlineEnd: 4, marginInlineStart: 0 }}>{props.label}</Tag>,
+    [],
+  );
+
+  // 超出可见 tag 数量时的占位渲染：用 Tooltip 暴露完整名单，避免 "+2 ..." 用户不知道选了啥。
+  const renderMaxTagPlaceholder = useCallback(
+    (omittedValues: { label?: ReactNode; value?: string | number }[]) => {
+      const names = omittedValues.map((o) =>
+        typeof o.label === 'string' ? o.label : resolveOne(String(o.value ?? '')).name,
+      );
+      return (
+        <Tooltip title={names.join('、')} placement="top">
+          <span>{t('dashboard.kpi.moreMetricsCount', { count: omittedValues.length })}</span>
+        </Tooltip>
+      );
+    },
+    [resolveOne, t],
+  );
 
   return (
     <Card
       style={{ width: '100%', height: '100%' }}
       styles={{ body: { padding: '8px 16px 0', display: 'flex', flexDirection: 'column', height: '100%' } }}
       title={
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-          <Text style={{ fontSize: 15, fontWeight: 600, color: token.colorText }}>
-            {/* 卡片标题只显示配置的图标题（管理员在配置页起的名；默认图的 title 是 i18n key，
-                t() 译成「流量/可用性」等用途名）。未设标题时回退展示当前选中指标的名字。
-                不再在标题旁拼当前选中指标的「最新值」。 */}
-            {panel.title ? t(panel.title) : selectedMeta.name}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            minHeight: 32,
+          }}
+        >
+          <Text
+            style={{ fontSize: 15, fontWeight: 600, color: token.colorText, flexShrink: 0 }}
+          >
+            {panel.title ? t(panel.title) : titleFallback}
           </Text>
+          {/*
+           * 宽度分档 + responsive tag：
+           *  - 只有 1 个可选项（如可用性/移动性）→ 160px，避免“只装一个 tag 却拉很长”的空荡感。
+           *  - ≥2 个可选项 → 260px，够容 1–2 个 tag + “+N 项”折叠占位。
+           *  - allowClear 保留：用户主动清空是明确意图，不拦截，0 选时画面给友好占位。
+           *  - tagRender：去掉逐 tag 的 ×，反选靠下拉点 ✓，与 Grafana / Kibana 一致的心智模型。
+           */}
           <Select
-            value={selectedMetric}
-            onChange={setSelectedMetric}
+            mode="multiple"
+            value={selectedMetrics}
+            onChange={setSelectedMetrics}
             options={indicatorOptions}
-            style={{ minWidth: 120 }}
+            tagRender={tagRender}
+            maxTagCount="responsive"
+            maxTagPlaceholder={renderMaxTagPlaceholder}
+            allowClear
+            placeholder={t('dashboard.kpi.selectMetricsPlaceholder')}
+            style={{ width: panel.metrics.length <= 1 ? 160 : 260, flexShrink: 0 }}
             size="small"
           />
         </div>
@@ -171,8 +203,16 @@ export function LayoutKPIPanel({ technology, panel, trendData, isLoading, height
           <div style={{ height: height - 70, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Empty description={t('common.noData')} image={Empty.PRESENTED_IMAGE_SIMPLE} />
           </div>
+        ) : selectedMetrics.length === 0 ? (
+          // 用户主动清空选择：与 Grafana/DataDog 一致允许 0 选态，给友好提示而非拦截。
+          <div style={{ height: height - 70, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Empty
+              description={t('dashboard.kpi.noMetricSelected')}
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+            />
+          </div>
         ) : !hasSeriesData ? (
-          // 有指标但无任何数据点：区分"暂无聚合数据/每小时整点更新"与裸空白（issue #359）。
+          // 有选择但无任何数据点：区分"暂无聚合数据/每小时整点更新"与裸空白（issue #359）。
           <div style={{ height: height - 70, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Empty
               image={Empty.PRESENTED_IMAGE_SIMPLE}
@@ -188,7 +228,8 @@ export function LayoutKPIPanel({ technology, panel, trendData, isLoading, height
           </div>
         ) : (
           <LineChart
-            key={`${technology}-${panel.title}-${selectedMetric}`}
+            // 仅制式 / 面板身份变化时 remount；selectedMetrics 变化走 echarts 自身的 series diff，避免增减 tag 就销毁重建 echarts 实例。
+            key={`${technology}-${panel.title}`}
             title=""
             xData={xData}
             xDataFull={xDataFull}
@@ -196,7 +237,7 @@ export function LayoutKPIPanel({ technology, panel, trendData, isLoading, height
             height={height - 70}
             smooth
             showLegend={true}
-            unit={selectedMeta.unit}
+            unit={sharedUnit}
           />
         )}
       </div>

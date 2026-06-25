@@ -100,6 +100,17 @@ export const CLUSTER_CONFIG = {
   mediumThreshold: 50,
   /** 大型聚合阈值 (100+) */
   largeThreshold: 100,
+  /**
+   * 点击聚合时用于判定“散不开”的屏幕像素对角线阈值。
+   * features bbox 的屏幕像素对角线 > 该值 → 说明放大能散开，走 view.fit 下钻；
+   * ≤ 该值 → 说明几乎同坐标，走 spiderfy 或列表。
+   */
+  clickExpandThresholdPx: 50,
+  /**
+   * “散不开”场景下仍然合适用 spiderfy 展开的最大节点数。
+   * 超过该值会优先触发 onClusterShowList 回调由父层弹列表；未接则退化为 spiderfy + maxNodes 截断。
+   */
+  spiderfyMaxCount: 20,
 };
 
 /**
@@ -325,7 +336,35 @@ export const ANIMATION_CONFIG = {
    * 当前zoom与目标zoom差值小于此值时，使用单次动画（避免不必要的多级动画）
    */
   progressiveZoomThreshold: 3,
+  /**
+   * 搜索两段定位的中间停靠 zoom。
+   * 命中聚合时停留在能分辨 cluster 的高度，避免一口气飞到最大 zoom
+   * 导致同坐标聚合被打散、目标 feature 找不到。
+   */
+  searchIntermediateZoom: 13,
 };
+
+/**
+ * 从 PROGRESSIVE_ZOOM_STEPS 里挑出严格大于 currentZoom 且 < targetZoom 的中间档位。
+ * 最后一步会被替换成实际的 targetZoom，从而让用户传入的目标 zoom（例如 18）保持精确。
+ *
+ * 返回空数组表示不需要中间分段，调用方应回退到单段动画。
+ */
+export function pickProgressiveSteps(
+  currentZoom: number,
+  targetZoom: number,
+): ProgressiveZoomStep[] {
+  if (!(targetZoom > currentZoom)) return [];
+  const middle = PROGRESSIVE_ZOOM_STEPS.filter(
+    (s) => s.zoom > currentZoom + 0.5 && s.zoom < targetZoom - 0.5,
+  );
+  if (middle.length === 0) return [];
+  const last = PROGRESSIVE_ZOOM_STEPS[PROGRESSIVE_ZOOM_STEPS.length - 1];
+  return [
+    ...middle,
+    { zoom: targetZoom, duration: last.duration, pause: 0 },
+  ];
+}
 
 /**
  * 中国边界范围（用于初始视图）
@@ -371,6 +410,16 @@ export const SPIDERFY_CONFIG = {
   minZoom: 4,
   /** 展开动画时长（ms） */
   animationDuration: 300,
+  /**
+   * 单次最多展开的节点数（防爆屏）。
+   * 同坐标 100+ 设备时全部画出会导致主线程阻塞、网络请求假死。
+   * 多出的设备保留在中心 count 显示，搜索目标会被强制提权到可视集中。
+   */
+  maxNodes: 60,
+  /** 同圈相邻节点之间的弧长间隔（像素），用于多圈分布算容量 */
+  ringArcSpacing: 28,
+  /** 多圈展开时每外推一圈的半径增量（像素） */
+  ringRadiusStep: 45,
 };
 
 /**

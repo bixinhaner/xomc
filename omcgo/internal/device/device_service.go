@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,6 +19,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/tracing"
+	"github.com/omcgo/omcgo/internal/netutil"
 	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/pkg/tr069"
@@ -273,27 +276,29 @@ func (s *DeviceService) RebootDevice(ctx context.Context, id uuid.UUID) error {
 //
 // sourceID 由 caller 构造（"manual:UUID"），供 HandleSyncResultPathB 写差异日志时
 // 通过 Redis hint 读取 reason 标签。
-func (s *DeviceService) SyncDeviceParamsManual(ctx context.Context, deviceID uuid.UUID, sourceID string) (used bool, dev *model.Device, err error) {
+func (s *DeviceService) SyncDeviceParamsManual(ctx context.Context, deviceID uuid.UUID, sourceID string, parameterPaths []string) (used bool, dev *model.Device, gpvTaskCount int, err error) {
 	dev, err = s.deviceRepo.GetByID(ctx, deviceID)
 	if err != nil {
-		return false, nil, fmt.Errorf("get device for manual sync: %w", err)
+		return false, nil, 0, fmt.Errorf("get device for manual sync: %w", err)
 	}
 	if dev == nil {
-		return false, nil, commonerrors.ErrNotFound
+		return false, nil, 0, commonerrors.ErrNotFound
 	}
 	if s.paramSyncStarter == nil {
-		return false, dev, fmt.Errorf("paramSyncStarter not configured")
+		return false, dev, 0, fmt.Errorf("paramSyncStarter not configured")
 	}
 
-	used, err = s.paramSyncStarter.StartManualSync(ctx, dev, sourceID)
+	used, gpvTaskCount, err = s.paramSyncStarter.StartManualSync(ctx, dev, sourceID, parameterPaths)
 	if err != nil {
-		return used, dev, fmt.Errorf("start manual sync: %w", err)
+		return used, dev, gpvTaskCount, fmt.Errorf("start manual sync: %w", err)
 	}
 
 	s.logger.Info("manual sync requested",
 		zap.String("device_id", deviceID.String()),
 		zap.String("serial_number", dev.SerialNumber),
 		zap.String("source_id", sourceID),
+		zap.Int("parameter_paths", len(parameterPaths)),
+		zap.Int("gpv_tasks", gpvTaskCount),
 		zap.Bool("path_b_used", used))
 
 	// 唤醒设备（与旧 TriggerParamSync 一致；Connection Request 仅在 Path B 入队成功后发起）
@@ -305,7 +310,7 @@ func (s *DeviceService) SyncDeviceParamsManual(ctx context.Context, deviceID uui
 		}()
 	}
 
-	return used, dev, nil
+	return used, dev, gpvTaskCount, nil
 }
 
 // SetParamSyncStarter T-0126: 注入 Path B 同步 starter（消费者驱动 narrow interface）。
@@ -512,8 +517,8 @@ func (s *DeviceService) RegisterFromInform(ctx context.Context, inform *tr069.In
 		zap.String("technology", string(tech)))
 
 	now := time.Now()
-	udpAddr := findParamValue(inform.ParameterList, "Device.ManagementServer.UDPConnectionRequestAddress")
 	connReqURL := findParamValue(inform.ParameterList, "Device.ManagementServer.ConnectionRequestURL")
+	udpAddr := deriveUDPConnectionRequestAddress(inform.ParameterList)
 
 	device := &model.Device{
 		ID:                          uuid.New(),
@@ -653,6 +658,9 @@ func (s *DeviceService) RegisterFromInform(ctx context.Context, inform *tr069.In
 
 func deriveInformIPAddress(udpAddr, connReqURL string) string {
 	if udpAddr != "" {
+		if host, _, err := net.SplitHostPort(udpAddr); err == nil {
+			return host
+		}
 		return udpAddr
 	}
 	if connReqURL == "" {
@@ -663,6 +671,14 @@ func deriveInformIPAddress(udpAddr, connReqURL string) string {
 		return ""
 	}
 	return parsed.Hostname()
+}
+
+func deriveUDPConnectionRequestAddress(params []tr069.ParameterValueStruct) string {
+	udpAddr := strings.TrimSpace(findParamValue(params, "Device.ManagementServer.UDPConnectionRequestAddress"))
+	if udpAddr != "" && !netutil.IsUnspecifiedUDPAddress(udpAddr) {
+		return udpAddr
+	}
+	return ""
 }
 
 // UpdateFromInform updates an existing device from a periodic Inform message.
@@ -721,9 +737,9 @@ func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.Info
 	device.IsOnline = true
 	device.IPAddress = deriveInformIPAddress("", device.ConnectionRequestURL)
 
-	udpAddr := findParamValue(inform.ParameterList, "Device.ManagementServer.UDPConnectionRequestAddress")
+	udpAddr := deriveUDPConnectionRequestAddress(inform.ParameterList)
 	if udpAddr != "" {
-		device.IPAddress = udpAddr
+		device.IPAddress = deriveInformIPAddress(udpAddr, device.ConnectionRequestURL)
 		device.UDPConnectionRequestAddress = udpAddr
 		device.NatDetected = true
 
@@ -735,8 +751,12 @@ func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.Info
 					zap.Error(err))
 			}
 		}
+	} else {
+		// 用户原则：UDP CR 地址只信设备本次 Inform 上报或 ACS STUN UDP 包源地址。
+		// 本次 Inform 未上报有效地址 → 主动清除残留脏值（DB cache 可能携带历史派生兜底）。
+		device.UDPConnectionRequestAddress = ""
+		device.NatDetected = false
 	}
-
 	// Auto-transition to active when device informs (it's communicating, so it's online)
 	// This provides fault tolerance for various non-active states:
 	// - discovered: new device sending first heartbeat
@@ -938,13 +958,25 @@ func (s *DeviceService) ListDevicesWithInfo(ctx context.Context, filter DeviceFi
 		}
 		return model.NewListResponse(items, result.Total, result.Page, result.PageSize), nil
 	}
+	var (
+		stats    *DeviceListStats
+		statsErr error
+		wg       sync.WaitGroup
+	)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		stats, statsErr = s.deviceInfoRepo.ComputeListStats(ctx, filter)
+	}()
+
 	result, err := s.deviceInfoRepo.ListDevicesWithInfo(ctx, filter)
+	wg.Wait()
 	if err != nil {
 		return nil, err
 	}
 	// T-0162: 同筛选条件下跑全量统计；stats 失败不阻断主 list 返回（降级返回
 	// items + Stats=nil，前端会回退到老 fallback 行为，与现状等价）。
-	if stats, statsErr := s.deviceInfoRepo.ComputeListStats(ctx, filter); statsErr == nil {
+	if statsErr == nil {
 		result.Stats = stats
 	}
 	return result, nil

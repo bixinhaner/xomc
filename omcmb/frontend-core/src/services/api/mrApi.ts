@@ -223,7 +223,7 @@ export const mrApi = {
   // MR file download (blob)
   // 设备聚合视图（File Management → MR Tab 主列表）
   async getFileDevices(
-    params: { keyword?: string; siteName?: string; productClass?: string } & PageRequest,
+    params: { keyword?: string; siteName?: string; productClass?: string; productId?: string } & PageRequest,
   ): Promise<PageResponse<MRFileDeviceItem>> {
     const query: Record<string, unknown> = {
       page: params.page,
@@ -232,6 +232,7 @@ export const mrApi = {
     if (params.keyword) query.keyword = params.keyword;
     if (params.siteName) query.site_name = params.siteName;
     if (params.productClass) query.product_class = params.productClass;
+    if (params.productId) query.product_id = params.productId;
     interface BackendMRFileDevice {
       device_sn: string;
       site_name: string;

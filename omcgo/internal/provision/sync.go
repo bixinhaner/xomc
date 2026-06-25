@@ -99,18 +99,19 @@ func (s *SyncService) SetPathBSyncTaskReader(r PathBSyncTaskReader) *SyncService
 	return s
 }
 
-// StartManualSync 用户手动触发 Path B 全量同步的便捷 wrapper（T-0126 设计 §4）。
+// StartManualSync 用户手动触发 Path B 同步的便捷 wrapper（T-0126 设计 §4）。
 //
 // 等价于 StartPathBSync(WithReason("manual"))，存在的意义：让 device 包能通过
 // 消费者驱动的 narrow interface（ParamSyncStarter，1 方法）注入本服务，
 // 不需要 device 包 import provision.PathBOption 类型（避免 device → provision 循环依赖）。
-func (s *SyncService) StartManualSync(ctx context.Context, dev *model.Device, sourceID string) (bool, error) {
-	return s.StartPathBSync(ctx, dev, sourceID, WithReason("manual"))
+func (s *SyncService) StartManualSync(ctx context.Context, dev *model.Device, sourceID string, parameterPaths []string) (bool, int, error) {
+	return s.StartPathBSync(ctx, dev, sourceID, WithReason("manual"), WithParameterPaths(parameterPaths))
 }
 
 // pathBOptions 收集 StartPathBSync 的可选配置（T-0123 引入）。
 type pathBOptions struct {
-	reason string // "device_online" / "periodic" / "firmware_changed" / "manual" / ""
+	reason         string // "device_online" / "periodic" / "firmware_changed" / "manual" / ""
+	parameterPaths []string
 }
 
 // PathBOption 是 StartPathBSync 的 functional option。
@@ -121,6 +122,14 @@ type PathBOption func(*pathBOptions)
 func WithReason(reason string) PathBOption {
 	return func(o *pathBOptions) {
 		o.reason = reason
+	}
+}
+
+// WithParameterPaths scopes a manual Path B sync to the given standard paths.
+// Empty means full sync, preserving the historical behavior for other callers.
+func WithParameterPaths(paths []string) PathBOption {
+	return func(o *pathBOptions) {
+		o.parameterPaths = append([]string(nil), paths...)
 	}
 }
 
@@ -166,12 +175,17 @@ func (s *SyncService) StartSync(ctx context.Context, dev *model.Device, paramPat
 //
 // 批次划分（object_param_classifier 引入）：
 //   - 标量参数（无尾点）按 s.batchSize 批量打包，效率优先
-//   - 对象前缀（尾点 "."，CPE 枚举实例）每条独立成批 size=1
+//   - 已展开的实例级对象前缀（如 DeviceGSM.Bts.1.）按 NATS payload 预算自适应合批
+//   - 其它对象前缀（尾点 "."，CPE 枚举实例）每条独立成批 size=1
 //
-// 对象前缀单独成批的原因：CPE 展开对象前缀返回所有当前实例的所有参数，单个对象就可能
+// 普通对象前缀单独成批的原因：CPE 展开对象前缀返回所有当前实例的所有参数，单个对象就可能
 // 是几十上百个参数；且对象 0 实例时 CPE 回 9005 拒绝整批。混批等同于"一个对象 fault
 // 拖垮 49 个兄弟标量参数"。事后有 ACS handler.tryRecoverGPVFault 自愈兜底（处理对象
 // 有实例但其中某参数不支持等场景），事前 size=1 是对最常见 fault 模式的预防。
+//
+// 已展开实例级对象不同：DeviceGSM.Bts.1. 这种 path 只会返回单实例子树，响应规模稳定，
+// 可按保守字节估算合批以降低 BSC 256 BTS 场景的串行往返数，同时把估算 NATS payload
+// 控制在 1MB 以下。
 //
 // commandKey 一律用 "sync-gpv-{sn}-{i}" 前缀。该前缀同时是 ACS handler 判定
 // "本任务允许 Fault 自愈"和 Path B "允许 reconcile" 的关键标识。
@@ -282,22 +296,65 @@ func (s *SyncService) CompleteSyncLog(ctx context.Context, deviceID uuid.UUID) e
 	return nil
 }
 
+const (
+	// natsMaxPayloadBytes 对齐 NATS 默认 max_payload=1MB。GPV 批量估算必须低于该值。
+	natsMaxPayloadBytes = 1 << 20
+
+	// gpvNATSPayloadBudgetBytes 只使用 75% 的 NATS 默认上限，给事件 envelope、JSON 元数据、
+	// 参数名长度波动和设备返回值波动留余量。
+	gpvNATSPayloadBudgetBytes = 768 * 1024
+
+	// expandedObjectPrefixPayloadEstimateBytes 是单个已展开实例级 object GPV 响应的保守估算。
+	// BSC BTS 实测约 70 字段，按 avgFieldBytes=60 约 4KB；这里按 12KB 计，64 个实例
+	// 约 768KB，仍低于 1MB 并保留 envelope/JSON 元数据余量。
+	expandedObjectPrefixPayloadEstimateBytes = 12 * 1024
+)
+
 // buildGPVBatches 把 prefixes 划分为 GPV 批次：
 //   - scalar 参数合并到 batchSize 大小的批
-//   - object 前缀（尾点 "."）每条独立成批（size=1）—— 见 object_param_classifier.go 的说明
+//   - 已展开实例级 object 前缀按 NATS payload 预算合批
+//   - 其它 object 前缀（尾点 "."）每条独立成批（size=1）—— 见 object_param_classifier.go 的说明
 //
-// 输出 [scalar 批... , object 单 path 批...]。空切片返回 nil（与 batchPaths 一致）。
+// 输出 [scalar 批... , instance object 批... , object 单 path 批...]。空切片返回 nil（与 batchPaths 一致）。
 func buildGPVBatches(prefixes []string, batchSize int) [][]string {
 	scalars, objects := classifyPrefixes(prefixes)
 	if batchSize <= 0 {
 		batchSize = 50
 	}
+	instanceObjectBatchSize := maxExpandedObjectPrefixesPerGPV()
 	var batches [][]string
 	batches = append(batches, batchPaths(scalars, batchSize)...)
+	var instanceObjects []string
 	for _, p := range objects {
+		if isExpandedInstanceObjectPath(p) {
+			instanceObjects = append(instanceObjects, p)
+			continue
+		}
+		batches = append(batches, batchPaths(instanceObjects, instanceObjectBatchSize)...)
+		instanceObjects = nil
 		batches = append(batches, []string{p})
 	}
+	batches = append(batches, batchPaths(instanceObjects, instanceObjectBatchSize)...)
 	return batches
+}
+
+func maxExpandedObjectPrefixesPerGPV() int {
+	if expandedObjectPrefixPayloadEstimateBytes <= 0 {
+		return 1
+	}
+	budget := gpvNATSPayloadBudgetBytes
+	if budget <= 0 || budget > natsMaxPayloadBytes {
+		budget = natsMaxPayloadBytes
+	}
+	maxPrefixes := budget / expandedObjectPrefixPayloadEstimateBytes
+	if maxPrefixes < 1 {
+		return 1
+	}
+	return maxPrefixes
+}
+
+func estimatedGPVNATSPayloadBytes(prefixes []string) int {
+	return len(prefixes) * expandedObjectPrefixPayloadEstimateBytes
 }
 
 // batchPaths splits parameter paths into batches of the given size.

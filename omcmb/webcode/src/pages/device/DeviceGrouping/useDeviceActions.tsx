@@ -58,7 +58,7 @@ export function useDeviceActions(deps: {
         engStatus: device.engStatus,
         longitude: device.longitude,
         latitude: device.latitude,
-        gpsHeight: device.gpsHeight,
+        gpsHeight: device.gpsHeight ?? undefined,
         remark: device.remark || '',
       });
       setEditDeviceModalOpen(true);

@@ -7,7 +7,7 @@
  *
  * - 名字：按界面语言取中文名 / 英文名（缺则回退另一种 / 编号）。
  * - 单位：取指标库的原始单位串（如 %/ms/KByte/number），非 i18n key。
- * - 旧 symbolic 别名（存量配置）在库里查不到 → 调用方回退老的 getKPIConfigByKey。
+ * - 旧 symbolic 别名（存量配置）在库里查不到→ 调用方回退 KPI_CATALOG（kpi-config）。
  */
 
 import { useMemo } from 'react';
@@ -15,7 +15,7 @@ import { useAllIndicators } from '@core/hooks/api/useIndicatorsLibrary';
 import { useAppStore } from '@core/store/appStore';
 import type { DeviceType, IndicatorInfo } from '@core/types/indicatorLibrary';
 import type { TechnologyType } from '@/pages/dashboard/kpi-config';
-import { getKPIConfigByKey } from '@/pages/dashboard/kpi-config';
+import { canonicalizeMetricKey, getKPIDisplayMeta } from '@/pages/dashboard/kpi-config';
 
 /** 制式 → 指标库设备类型（与配置页 KpiConfig 的 TECH_TO_DEVICE_TYPE 一致）。 */
 const TECH_TO_DEVICE_TYPE: Record<TechnologyType, DeviceType> = {
@@ -72,44 +72,45 @@ export function useMetricMetadata(technology: TechnologyType): MetricMetadataRes
     [metaByCode],
   );
 
-  return { getMeta, isLoading };
+  return useMemo(() => ({ getMeta, isLoading }), [getMeta, isLoading]);
 }
 
-/** 指标的展示元数据（名字 + 单位 + 数值换算系数）。 */
+/** 指标的展示元数据（已本地化的名字 + 单位 + 数值换算系数）。 */
 export interface ResolvedMetricMeta {
   /** 已本地化的显示名（可直接渲染，不再过 t()）。 */
   name: string;
   /** 已本地化的单位串（可直接渲染，不再过 t()）；空串表示无单位。 */
   unit: string;
-  /** 数值换算系数（仅旧精选 key 有，库指标恒为 1）。 */
+  /** 数值换算系数（仅 catalog 路径有，库路径恒为 1）。 */
   conversion: number;
-  /** 取值/格式化用的 i18n 单位 key（仅旧精选 key 有，库指标为空 → 走原始单位串）。 */
-  unitI18nKey?: string;
 }
 
 /**
- * 解析一个指标的展示元数据：
- *   1) 优先指标库元数据（编号命中）→ 名字/单位来自库，换算系数 1、无 i18n 单位 key；
- *   2) 回退老 getKPIConfigByKey（存量 symbolic 别名）→ i18n label/unit + 换算系数；
- *   3) 都查不到 → 名字回退编号本身，无单位、换算 1。
+ * 解析一个指标的展示元数据。优先级从高到低（采“可控源优先”原则）：
+ *
+ *   1) KPI_CATALOG 命中 → 走 dashboard.kpi.* i18n + i18n unit（前端可控，质量优于
+ *      指标库 enName 缩写如 `KPI.PdcpUpOctDl`）。旧 symbolic 别名被 canonicalize
+ *      桥接到主键，也在这一层命中。
+ *   2) 指标库元数据 → 名字/单位来自库（放开全部指标后未录入 catalog 的新指标
+ *      依赖这一层）。查库时先 canonicalize，避免旧 symbolic 别名拿不到库里的 K 编号记录。
+ *   3) 都查不到 → 名字回退 metricKey 本身，无单位、换算 1。
  */
 export function resolveMetricMeta(
   metricKey: string,
   meta: MetricMetadataResult,
   t: (key: string) => string,
 ): ResolvedMetricMeta {
-  const libMeta = meta.getMeta(metricKey);
+  const catalog = getKPIDisplayMeta(metricKey);
+  if (catalog) {
+    return {
+      name: t(catalog.label),
+      unit: catalog.unit ? t(catalog.unit) : '',
+      conversion: catalog.unitConversion ?? 1,
+    };
+  }
+  const libMeta = meta.getMeta(canonicalizeMetricKey(metricKey));
   if (libMeta) {
     return { name: libMeta.name, unit: libMeta.unit, conversion: 1 };
-  }
-  const legacy = getKPIConfigByKey(metricKey);
-  if (legacy) {
-    return {
-      name: t(legacy.label),
-      unit: legacy.unit ? t(legacy.unit) : '',
-      conversion: legacy.unitConversion ?? 1,
-      unitI18nKey: legacy.unit,
-    };
   }
   return { name: metricKey, unit: '', conversion: 1 };
 }

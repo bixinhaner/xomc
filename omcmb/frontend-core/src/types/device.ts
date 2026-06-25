@@ -213,7 +213,7 @@ export interface Device {
   omlRemoteIpBak: string;
 
   // 位置信息组 (Location)
-  gpsHeight: number;
+  gpsHeight: number | null;
   mechanicalDowntilt: string;
   electronicDowntilt: string;
   verticalBeamWidth: string;

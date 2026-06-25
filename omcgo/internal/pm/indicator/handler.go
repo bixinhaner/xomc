@@ -109,20 +109,21 @@ type indicatorInfoRequest struct {
 // addOrModifyIndicatorRequest is the request body for addOrModifyIndicator.
 // If ID is provided, it's an update; otherwise it's a create.
 type addOrModifyIndicatorRequest struct {
-	ID             string `json:"id"`
-	DeviceType     string `json:"device_type" binding:"required,oneof=ENB GSM GNB"`
-	EnName         string `json:"en_name" binding:"required"`
-	CnName         string `json:"cn_name" binding:"required"`
-	EnDescription  string `json:"en_description"`
-	CnDescription  string `json:"cn_description"`
-	GroupID        string `json:"group_id" binding:"required"`
-	OperatorCode   string `json:"operator_code"`
-	DataType       string `json:"data_type"`
-	UnitID         string `json:"unit_id"`
-	Updator        string `json:"updator"`
-	IsCounter      string `json:"is_counter"`
-	Arithmetic     string `json:"arithmetic"`
-	StatisType     string `json:"statis_type"`
+	ID            string `json:"id"`
+	DeviceType    string `json:"device_type" binding:"required,oneof=ENB GSM GNB"`
+	EnName        string `json:"en_name" binding:"required"`
+	CnName        string `json:"cn_name" binding:"required"`
+	EnDescription string `json:"en_description"`
+	CnDescription string `json:"cn_description"`
+	GroupID       string `json:"group_id" binding:"required"`
+	OperatorCode  string `json:"operator_code"`
+	DataType      string `json:"data_type"`
+	UnitID        string `json:"unit_id"`
+	Updator       string `json:"updator"`
+	IsCounter     string `json:"is_counter"`
+	Arithmetic    string `json:"arithmetic"`
+	// 对齐老 OMC perf_indicators.statis_type 业务枚举（sum/avg/max/min/pct），驱动 G5 cron 聚合算子。
+	StatisType     string `json:"statis_type" binding:"omitempty,oneof=sum avg max min pct"`
 	ProductTypes   string `json:"product_types"`
 	IndicatorLevel string `json:"indicator_level"`
 }

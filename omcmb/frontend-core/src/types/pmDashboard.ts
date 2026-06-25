@@ -30,6 +30,12 @@ export interface AggregatedQueryParams {
   // 后端按 (时间桶 × 指标) 补齐占位行（filled=true，metric_value 前端 mapper 设 null）。
   // 适用 device 维度单设备查询；未启用时后端不补行。
   fillEmpty?: boolean;
+  // #599：星期过滤（0=周日..6=周六）。全选/空 = 不过滤。
+  weekdays?: number[];
+  // #599：小时段过滤（0..23）。全选/空 = 不过滤。
+  hours?: number[];
+  // #619：测量对象过滤（原始 object_ldn 串）。空 = 不过滤。
+  objectLdns?: string[];
 }
 
 // 后端 aggregator.Row JSON（已加 snake_case json tag）。

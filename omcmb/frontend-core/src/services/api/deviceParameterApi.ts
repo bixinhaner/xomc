@@ -65,6 +65,13 @@ interface BackendSyncStatus {
   status: string;
   total_parameters?: number;
   pending_commands?: number;
+  last_sync_gpv?: {
+    source_id?: string;
+    task_count?: number;
+    first_created_at?: string;
+    last_completed_at?: string;
+    wall_clock_seconds?: number;
+  };
   last_param_sync_at?: string;
   last_param_sync_failed_at?: string;
   last_param_sync_error?: string;
@@ -238,6 +245,13 @@ function mapBackendSyncStatus(bs: BackendSyncStatus): ParameterSyncStatus {
     status: bs.status === 'syncing' ? 'syncing' : 'idle',
     totalParameters: bs.total_parameters ?? 0,
     pendingCommands: bs.pending_commands ?? 0,
+    lastSyncGpv: bs.last_sync_gpv ? {
+      sourceId: bs.last_sync_gpv.source_id ?? '',
+      taskCount: bs.last_sync_gpv.task_count ?? 0,
+      firstCreatedAt: bs.last_sync_gpv.first_created_at,
+      lastCompletedAt: bs.last_sync_gpv.last_completed_at,
+      wallClockSeconds: bs.last_sync_gpv.wall_clock_seconds,
+    } : undefined,
     lastParamSyncAt: bs.last_param_sync_at,
     lastParamSyncFailedAt: bs.last_param_sync_failed_at,
     lastParamSyncError: bs.last_param_sync_error,

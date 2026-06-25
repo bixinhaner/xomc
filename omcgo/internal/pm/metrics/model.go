@@ -14,14 +14,16 @@ const (
 	MetricTypeKPI     MetricType = "kpi"
 )
 
-// StatisType 是 counter 类指标的聚合方式提示，驱动 G5 自然桶聚合（sum/avg/max/pct 四路）。
+// StatisType 是 counter 类指标的聚合方式提示，驱动 G5 自然桶聚合（sum/avg/max/min/pct 五路）。
 // KPI 类不填（由 perf 平台公式决定），存 NULL。
+// 与老 OMC 系统 perf_indicators.statis_type 五个枚举一一对应；DB CHECK 约束亦同。
 type StatisType string
 
 const (
 	StatisSum StatisType = "sum"
 	StatisAvg StatisType = "avg"
 	StatisMax StatisType = "max"
+	StatisMin StatisType = "min"
 	StatisPct StatisType = "pct" // 百分比 / 比率，arithmetic 上下文（G5 cron 用）
 )
 
@@ -45,7 +47,7 @@ const (
 // 唯一性维度（自然键）：(DeviceOUI, DeviceSN, MetricPath, Granularity, EndTime, Time, ObjectLDN)
 // 唯一索引 uq_pm_metrics_natural 上挂 ON CONFLICT DO UPDATE 保证补传幂等。
 // （TimescaleDB 要求 UNIQUE 索引必须含分区列 Time；业务上 Time = EndTime，约束意义不变）
-// ObjectLDN 在 DB 层 NOT NULL DEFAULT ''（migration 000171），Go 端 *string nil → ''
+// ObjectLDN 在 DB 层 NOT NULL DEFAULT ”（migration 000171），Go 端 *string nil → ”
 // 落盘。原因：UNIQUE 中 NULL ≠ NULL，必须强制非空才能严格唯一；BUG-6 即由此触发：
 // 同 PM 文件中同 MetricPath 跨多个 cell（不同 ObjectLDN）撞自然键二次命中同行。
 //

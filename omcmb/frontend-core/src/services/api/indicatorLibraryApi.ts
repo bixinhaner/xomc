@@ -30,6 +30,9 @@ interface BackendIndicator {
   // 旧前端读 counter_type/unit 两个后端从不存在的字段，故详情恒显"—"。
   data_type?: string;
   data_type_label?: string;
+  // 统计类型（老 OMC perf_indicators.statis_type 业务字段：sum/avg/max/min/pct），
+  // 后端 PerfIndicator JSON 原始下发，用于编辑预填与索引过滤。
+  statis_type?: string;
   indicator_level?: string;
   unit_id?: string;
   description?: string;
@@ -84,6 +87,8 @@ function mapIndicator(b: BackendIndicator, deviceType: DeviceType): IndicatorInf
     // （XML 无 dataType → data_type=NULL），抽屉据 isCounter 决定是否展示该字段。
     counterType: b.data_type_label ?? b.data_type,
     indicatorLevel: b.indicator_level,
+    // 统计类型后端原始透传，编辑预填用。
+    statisType: b.statis_type,
     // #193：详情接口当前只回原始 unit_id 码（%/ppm/number），先显示原始码消除"—"；
     // 本地化（百分比/百万分比/个）为后续 UX 增强（需后端 +unit_label 字段）。
     unit: b.unit_id,

@@ -93,6 +93,8 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
   const highlightTimerRef = useRef<NodeJS.Timeout | null>(null);
   const highlightWithCardTimerRef = useRef<NodeJS.Timeout | null>(null);
   const highlightWithCardInnerTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // 记录最后一次已触发定位的设备 id，避免同一次搜索被反复重启动画
+  const lastHighlightedIdRef = useRef<string | null>(null);
 
   const [hoveredDevice, setHoveredDevice] = useState<MapDevice | null>(null);
   const [popupPosition, setPopupPosition] = useState<{ x: number; y: number } | null>(null);
@@ -176,14 +178,22 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
 
   // 当搜索结果设备变化时，自动高亮并定位
   useEffect(() => {
-    if (searchResultDevice && isReady) {
-      // 延迟执行，确保设备已添加到地图
-      const timer = setTimeout(() => {
-        // 搜索定位时需要飞行到目标位置（skipFlyTo = false）
-        highlightAndSpiderfyIfNeeded(searchResultDevice, false);
-      }, 100);
-      return () => clearTimeout(timer);
+    if (!searchResultDevice) {
+      lastHighlightedIdRef.current = null;
+      return;
     }
+    if (!isReady) return;
+    if (lastHighlightedIdRef.current === searchResultDevice.id) {
+      // 同一个搜索结果已经触发过，不要重复跳转（拖动/zoom 变化会重运行 effect）
+      return;
+    }
+    lastHighlightedIdRef.current = searchResultDevice.id;
+    // 延迟执行，确保设备已添加到地图
+    const timer = setTimeout(() => {
+      // 搜索定位时需要飞行到目标位置（skipFlyTo = false）
+      highlightAndSpiderfyIfNeeded(searchResultDevice, false);
+    }, 100);
+    return () => clearTimeout(timer);
   }, [searchResultDevice, isReady, highlightAndSpiderfyIfNeeded]);
 
   // 元数据加载完成日志（用于调试）

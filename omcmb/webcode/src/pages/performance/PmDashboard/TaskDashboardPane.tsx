@@ -9,11 +9,11 @@
  * 自动出图、固定布局，无手工拖拽。
  */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useIntl } from 'react-intl';
 import { Alert, App, Button, Card, Empty, Segmented, Space, Tag, Typography } from 'antd';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
-import { ExportOutlined } from '@ant-design/icons';
+import { ExportOutlined, LineChartOutlined } from '@ant-design/icons';
 import {
   usePmAdhocDetail,
   usePmAdhocFilterOptions,
@@ -32,7 +32,6 @@ import {
   attachCompareSeries,
   dimSelectionToParams,
   extendChartsAxis,
-  filterRowsByWeekdayHour,
   previousWindow,
 } from './dashboardFilterUtils';
 
@@ -88,46 +87,79 @@ export default function TaskDashboardPane({ taskId }: Props) {
   // 维度→入参映射（纯函数，便于单测）：product→productIds；device_group/band→objectLdns；空选不过滤。
   const { productIds, objectLdns } = dimSelectionToParams(dimension, dimSelected);
 
-  const [start, end] = filter.range;
-  // #563：把用户选的系统时区钟面按系统时区偏移序列化，而非浏览器本地时区。
-  const startISO = toSystemTimezoneRFC3339(start, systemTimezone) ?? start.toISOString();
-  const endISO = toSystemTimezoneRFC3339(end, systemTimezone) ?? end.toISOString();
-  const offsetMs = end.valueOf() - start.valueOf();
-  const [prevStart, prevEnd] = previousWindow(filter.range);
+  // #599：改为「点出图才查」模式——所有条件变化只更新本地暂存 state，
+  // 点「出图」按钮时把暂存条件一次性提交（提交快照驱动 usePmAdhocResults）。
+  const [submitted, setSubmitted] = useState<{
+    startISO: string;
+    endISO: string;
+    productIds?: string[];
+    objectLdns?: string[];
+    weekdays: number[];
+    hours: number[];
+    compare: boolean;
+    offsetMs: number;
+    prevStartISO: string;
+    prevEndISO: string;
+    rangeStartMs: number;
+    rangeEndMs: number;
+  } | null>(null);
 
-  // 大时间段驱动取数（后端按 time 窗口过滤）。仪表盘取较多结果行用于画线。
-  const { data: rowsResp, isLoading: rowsLoading } = usePmAdhocResults(taskId, {
-    limit: RESULTS_LIMIT,
-    startTime: startISO,
-    endTime: endISO,
-    productIds,
-    objectLdns,
-  });
-  const rawRows = rowsResp?.rows ?? [];
-  // 周期对比开关打开时再拉一次上一周期（同任务、上一周期窗口）。
-  const { data: prevResp, isLoading: prevLoading } = usePmAdhocResults(
-    filter.compare ? taskId : undefined,
-    {
-      limit: RESULTS_LIMIT,
-      startTime: toSystemTimezoneRFC3339(prevStart, systemTimezone) ?? prevStart.toISOString(),
-      endTime: toSystemTimezoneRFC3339(prevEnd, systemTimezone) ?? prevEnd.toISOString(),
+  const handleQuery = () => {
+    const [s, e] = filter.range;
+    const sISO = toSystemTimezoneRFC3339(s, systemTimezone) ?? s.toISOString();
+    const eISO = toSystemTimezoneRFC3339(e, systemTimezone) ?? e.toISOString();
+    const [ps, pe] = previousWindow(filter.range);
+    setSubmitted({
+      startISO: sISO,
+      endISO: eISO,
       productIds,
       objectLdns,
+      weekdays: filter.weekdays,
+      hours: filter.hours,
+      compare: filter.compare,
+      offsetMs: e.valueOf() - s.valueOf(),
+      prevStartISO: toSystemTimezoneRFC3339(ps, systemTimezone) ?? ps.toISOString(),
+      prevEndISO: toSystemTimezoneRFC3339(pe, systemTimezone) ?? pe.toISOString(),
+      rangeStartMs: s.valueOf(),
+      rangeEndMs: e.valueOf(),
+    });
+  };
+
+  // #599：选中任务后自动触发一次出图（用当前默认筛选条件查一次）。
+  // taskId 变化时（含首次加载）自动提交，用户不用手动点「出图」就能看到图。
+  useEffect(() => {
+    handleQuery();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [taskId]);
+
+  // 大时间段驱动取数（后端按 time 窗口 + weekdays/hours 过滤）。仪表盘取较多结果行用于画线。
+  const { data: rowsResp, isLoading: rowsLoading } = usePmAdhocResults(
+    submitted ? taskId : undefined,
+    {
+      limit: RESULTS_LIMIT,
+      startTime: submitted?.startISO,
+      endTime: submitted?.endISO,
+      productIds: submitted?.productIds,
+      objectLdns: submitted?.objectLdns,
+      weekdays: submitted?.weekdays,
+      hours: submitted?.hours,
+    },
+  );
+  const rawRows = rowsResp?.rows ?? [];
+  // 周期对比开关打开时再拉一次上一周期（同任务、上一周期窗口、同 weekdays/hours）。
+  const { data: prevResp, isLoading: prevLoading } = usePmAdhocResults(
+    submitted?.compare ? taskId : undefined,
+    {
+      limit: RESULTS_LIMIT,
+      startTime: submitted?.prevStartISO,
+      endTime: submitted?.prevEndISO,
+      productIds: submitted?.productIds,
+      objectLdns: submitted?.objectLdns,
+      weekdays: submitted?.weekdays,
+      hours: submitted?.hours,
     },
   );
   const rawPrevRows = prevResp?.rows ?? [];
-
-  // 星期/小时段=纯前端在已取行里筛命中点（全选不过滤），当前与上一周期套同口径。
-  const weekdaySet = useMemo(() => new Set(filter.weekdays), [filter.weekdays]);
-  const hourSet = useMemo(() => new Set(filter.hours), [filter.hours]);
-  const rows = useMemo(
-    () => filterRowsByWeekdayHour(rawRows, weekdaySet, hourSet),
-    [rawRows, weekdaySet, hourSet],
-  );
-  const prevRows = useMemo(
-    () => filterRowsByWeekdayHour(rawPrevRows, weekdaySet, hourSet),
-    [rawPrevRows, weekdaySet, hourSet],
-  );
 
   // 触顶提示：结果接口 LIMIT 上限，触顶可能截断 → 给可见提示，不静默。
   const truncated = rawRows.length >= RESULTS_LIMIT;
@@ -140,54 +172,60 @@ export default function TaskDashboardPane({ taskId }: Props) {
   const effectiveGran = activeGran && granularities.includes(activeGran) ? activeGran : granularities[0];
 
   const charts = useMemo(() => {
-    if (!taskQuery.data || !effectiveGran) return [];
+    if (!taskQuery.data || !effectiveGran || !submitted) return [];
     // T-0194：按任务已选指标清单过滤出图（空清单则不过滤，兜底全画），让"指标数 X"与出图数一致。
     const metricPaths = taskQuery.data.metricPaths;
-    // T-AXISFILL：转置出当前图集后立即扩轴（按范围+粒度连续铺刻度、套星期/小时筛选、并集真实桶），
-    // 空刻度补 '-'，再挂周期对比（compare 按毫秒对齐到已扩展的 cur.buckets，prev 不单独扩轴）。
+    // #599：后端已按 weekdays/hours 过滤，前端只需扩轴（轴刻度仍按完整范围铺、再套星期/小时剔除空桶）。
+    const weekdaySet = new Set(submitted.weekdays);
+    const hourSet = new Set(submitted.hours);
     const cur = extendChartsAxis(
       filterChartsByMetricPaths(
-        buildMetricCharts(rows, taskQuery.data.dimension, effectiveGran),
+        buildMetricCharts(rawRows, taskQuery.data.dimension, effectiveGran),
         metricPaths,
       ),
       {
-        rangeStartMs: start.valueOf(),
-        rangeEndMs: end.valueOf(),
+        rangeStartMs: submitted.rangeStartMs,
+        rangeEndMs: submitted.rangeEndMs,
         weekdays: weekdaySet,
         hours: hourSet,
         granularity: effectiveGran,
       },
     );
-    if (!filter.compare) return cur;
+    if (!submitted.compare) return cur;
     const prev = filterChartsByMetricPaths(
-      buildMetricCharts(prevRows, taskQuery.data.dimension, effectiveGran),
+      buildMetricCharts(rawPrevRows, taskQuery.data.dimension, effectiveGran),
       metricPaths,
     );
-    return attachCompareSeries(cur, prev, offsetMs, effectiveGran);
+    return attachCompareSeries(cur, prev, submitted.offsetMs, effectiveGran);
   }, [
-    rows,
-    prevRows,
+    rawRows,
+    rawPrevRows,
     taskQuery.data,
     effectiveGran,
-    filter.compare,
-    offsetMs,
-    start,
-    end,
-    weekdaySet,
-    hourSet,
+    submitted,
   ]);
 
-  // ── 导出（T4 adhoc 来源）：带 task_id + 当前大时间段 POST 建任务 ──────────
+  // ── 导出（T4 adhoc 来源）：带 task_id + 当前筛选条件 POST 建任务 ──────────
   const createExport = useCreateKpiExport();
   const handleExport = () => {
+    // #599：导出与出图同口径——用提交态的筛选快照（未出图时用当前 filter）。
+    const [s, e] = filter.range;
+    const exportStart = submitted?.startISO ?? (toSystemTimezoneRFC3339(s, systemTimezone) ?? s.toISOString());
+    const exportEnd = submitted?.endISO ?? (toSystemTimezoneRFC3339(e, systemTimezone) ?? e.toISOString());
+    const exportParams = buildAdhocExportParams({
+      taskId,
+      startTime: exportStart,
+      endTime: exportEnd,
+    });
+    // #599：weekdays/hours 传入导出 params（后端导出时按同口径过滤）。
+    const wd = submitted?.weekdays ?? filter.weekdays;
+    const hr = submitted?.hours ?? filter.hours;
+    if (wd.length > 0 && wd.length < 7) exportParams.weekdays = wd;
+    if (hr.length > 0 && hr.length < 24) exportParams.hours = hr;
     createExport.mutate(
       {
         sourceType: 'adhoc',
-        params: buildAdhocExportParams({
-          taskId,
-          startTime: startISO,
-          endTime: endISO,
-        }),
+        params: exportParams,
         taskName: defaultExportTaskName('adhoc'),
       },
       {
@@ -280,6 +318,15 @@ export default function TaskDashboardPane({ taskId }: Props) {
           dimSelected={dimSelected}
           onDimChange={setDimSelected}
         />
+        <Button
+          type="primary"
+          icon={<LineChartOutlined />}
+          onClick={handleQuery}
+          loading={rowsLoading}
+          style={{ marginTop: 8 }}
+        >
+          {intl.formatMessage({ id: 'perf.dashboard.btnPlot' })}
+        </Button>
       </Card>
 
       {truncated && (
@@ -295,9 +342,15 @@ export default function TaskDashboardPane({ taskId }: Props) {
         />
       )}
 
-      {rowsLoading || (filter.compare && prevLoading) ? (
+      {rowsLoading || (submitted?.compare && prevLoading) ? (
         <Card>
           <LoadingSpinner tip={intl.formatMessage({ id: 'perf.dashboard.loadingResult' })} />
+        </Card>
+      ) : !submitted ? (
+        <Card>
+          <Empty
+            description={intl.formatMessage({ id: 'perf.dashboard.clickQueryToStart' })}
+          />
         </Card>
       ) : charts.length === 0 ? (
         <Card>

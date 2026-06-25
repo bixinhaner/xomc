@@ -23,10 +23,13 @@ import {
 } from '@/components/layout/PageShell'
 import { cn } from '@/lib/utils'
 
-import { useQueryTemplates, useAggregatedMetricsByDevices } from '@core/hooks/api/usePmQuery'
+import { useQueryTemplates, useAggregatedMetricsByDevices, useMetricObjectsByDevices } from '@core/hooks/api/usePmQuery'
+import { pivotLongToWide, formatPivotNumber } from '@core/utils/pmPivotTransform'
 import type { QueryTemplate } from '@core/types/pmQuery'
 import type { AggregatedRow, Granularity } from '@core/types/pmDashboard'
 import { useT, type TranslateFn } from '@/hooks/useT'
+import { deviceTypeToNetworkTech } from '@core/types/indicatorLibrary'
+import { getEffectiveLdns, type CellSelection } from '@core/utils/cellDrilldownUtils'
 
 // ============================================================
 // 指标查询 — 对齐 v1 /performance/query
@@ -46,12 +49,16 @@ function presetToRange(preset: QueryTemplate['payload']['timeRangePreset'], payl
   switch (preset) {
     case 'last_1h':
       return { start: ms(3600_000), end }
+    case 'last_3h':
+      return { start: ms(3 * 3600_000), end }
     case 'last_24h':
       return { start: ms(24 * 3600_000), end }
     case 'last_7d':
       return { start: ms(7 * 24 * 3600_000), end }
     case 'last_30d':
       return { start: ms(30 * 24 * 3600_000), end }
+    case 'last_6m':
+      return { start: ms(180 * 24 * 3600_000), end }
     case 'custom':
       return {
         start: payload.absoluteStart ?? ms(24 * 3600_000),
@@ -62,30 +69,7 @@ function presetToRange(preset: QueryTemplate['payload']['timeRangePreset'], payl
   }
 }
 
-// 聚合行透视：行键=time，列=metricPath（用 displayName 展示），单元格=metricValue。
-function pivot(rows: AggregatedRow[]): {
-  times: string[]
-  metrics: { path: string; label: string }[]
-  cell: Map<string, number | null>
-} {
-  const times: string[] = []
-  const timeSeen = new Set<string>()
-  const metricMap = new Map<string, string>()
-  const cell = new Map<string, number | null>()
-  for (const r of rows) {
-    if (!timeSeen.has(r.time)) {
-      timeSeen.add(r.time)
-      times.push(r.time)
-    }
-    if (!metricMap.has(r.metricPath)) {
-      metricMap.set(r.metricPath, r.displayName || r.metricPath)
-    }
-    cell.set(`${r.time}|${r.metricPath}`, r.metricValue)
-  }
-  times.sort((a, b) => a.localeCompare(b))
-  const metrics = Array.from(metricMap.entries()).map(([path, label]) => ({ path, label }))
-  return { times, metrics, cell }
-}
+// 聚合行透视：用 pivotLongToWide 将 long format 转 wide format。
 
 function ResultTable({
   rows,
@@ -104,8 +88,8 @@ function ResultTable({
   errors: unknown[]
   t: TranslateFn
 }) {
-  const { times, metrics, cell } = useMemo(() => pivot(rows), [rows])
-  const colCount = metrics.length + 1
+  const pivoted = useMemo(() => pivotLongToWide(rows), [rows])
+  const colCount = pivoted.columns.length + 3
 
   return (
     <div>
@@ -117,9 +101,11 @@ function ResultTable({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>{t('perf.kpiQuery.colTime')}</TableHead>
-              {metrics.map((m) => (
-                <TableHead key={m.path}>{m.label}</TableHead>
+              <TableHead>{t('perf.kpiQuery.pivot.startTime')}</TableHead>
+              <TableHead>{t('perf.kpiQuery.pivot.deviceSn')}</TableHead>
+              <TableHead>{t('perf.kpiQuery.pivot.measObject')}</TableHead>
+              {pivoted.columns.map((c) => (
+                <TableHead key={c.key}>{c.title}</TableHead>
               ))}
             </TableRow>
           </TableHeader>
@@ -128,22 +114,21 @@ function ResultTable({
               <LoadingRow colSpan={colCount} />
             ) : isError ? (
               <ErrorRow colSpan={colCount} error={errors[0] ?? new Error(t('perf.kpiQuery.queryFailedShort'))} />
-            ) : times.length === 0 ? (
+            ) : pivoted.rows.length === 0 ? (
               <EmptyRow colSpan={colCount}>{t('perf.kpiQuery.noResults')}</EmptyRow>
             ) : (
-              times.map((time) => (
-                <TableRow key={time}>
+              pivoted.rows.map((row) => (
+                <TableRow key={row.key}>
                   <TableCell className="text-xs text-muted-foreground">
-                    {formatTime(time)}
+                    {formatTime(row.time)}
                   </TableCell>
-                  {metrics.map((m) => {
-                    const v = cell.get(`${time}|${m.path}`)
-                    return (
-                      <TableCell key={m.path} className="tabular-nums">
-                        {v === null || v === undefined ? '—' : v}
-                      </TableCell>
-                    )
-                  })}
+                  <TableCell className="text-xs">{row.deviceSn ?? '—'}</TableCell>
+                  <TableCell className="text-xs">{row.objectLdn ?? '—'}</TableCell>
+                  {pivoted.columns.map((c) => (
+                    <TableCell key={c.key} className="tabular-nums">
+                      {formatPivotNumber(row.cells[c.key])}
+                    </TableCell>
+                  ))}
                 </TableRow>
               ))
             )}
@@ -159,6 +144,10 @@ export function KPIQueryPage() {
   const [keyword, setKeyword] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [run, setRun] = useState(false)
+  // #619：测量对象下钻选择。
+  const [cellSel, setCellSel] = useState<CellSelection>({})
+  // #619：提交后才生效的快照——勾选变化不立即重查，等点「查询」才同步。
+  const [submittedCellSel, setSubmittedCellSel] = useState<CellSelection>({})
 
   const {
     data: templates,
@@ -190,12 +179,19 @@ export function KPIQueryPage() {
   const deviceSns = selected?.payload.deviceSns ?? []
   const metricPaths = selected?.payload.metricPaths ?? []
 
+  // #619：加载可用小区列表 + 计算有效白名单。
+  // 用 submittedCellSel（快照）而非实时 cellSel，避免勾选变化立即触发查询。
+  const tech = selected?.payload.deviceType ? deviceTypeToNetworkTech(selected.payload.deviceType as 'ENB' | 'GNB' | 'GSM') : undefined
+  const { byDevice } = useMetricObjectsByDevices(deviceSns, tech)
+  const effectiveLdns = useMemo(() => getEffectiveLdns(submittedCellSel, byDevice), [submittedCellSel, byDevice])
+
   const agg = useAggregatedMetricsByDevices(
     {
       granularity,
       metricPaths,
       startTime: range?.start,
       endTime: range?.end,
+      objectLdns: effectiveLdns.length > 0 ? effectiveLdns : undefined,
     },
     deviceSns,
     run && Boolean(selected) && deviceSns.length > 0
@@ -204,6 +200,8 @@ export function KPIQueryPage() {
   const onSelect = (id: string) => {
     setSelectedId(id)
     setRun(false)
+    setCellSel({})
+    setSubmittedCellSel({})
   }
 
   return (
@@ -294,6 +292,8 @@ export function KPIQueryPage() {
                     size="sm"
                     disabled={deviceSns.length === 0 || metricPaths.length === 0}
                     onClick={() => {
+                      // #619：点查询时才把勾选起到快照。
+                      setSubmittedCellSel(cellSel)
                       setRun(true)
                       if (run) agg.refetch()
                     }}
@@ -310,6 +310,41 @@ export function KPIQueryPage() {
                 {deviceSns.length === 0 && (
                   <div className="mt-2 text-xs text-amber-600 dark:text-amber-400">
                     {t('perf.kpiQuery.noDeviceLinked')}
+                  </div>
+                )}
+                {/* #619：测量对象下钻 */}
+                {deviceSns.length > 0 && Object.keys(byDevice).length > 0 && (
+                  <div className="mt-3 border-t pt-3">
+                    <div className="mb-1 text-xs font-medium text-muted-foreground">{t('perf.kpiQuery.pivot.measObject')}</div>
+                    {deviceSns.map((sn) => {
+                      const objects = byDevice[sn] ?? []
+                      if (objects.length === 0) return null
+                      const allLdns = objects.map((o) => o.objectLdn)
+                      const sel = cellSel[sn]
+                      const checkedLdns = sel ?? allLdns
+                      return (
+                        <details key={sn} className="mb-1">
+                          <summary className="cursor-pointer text-xs">{sn} ({sel && sel.length < allLdns.length ? `${sel.length}/${allLdns.length}` : t('perf.drilldown.headerAll')})</summary>
+                          <div className="ml-4 mt-1 space-y-0.5">
+                            {allLdns.map((ldn) => (
+                              <label key={ldn} className="flex items-center gap-1.5 text-xs">
+                                <input
+                                  type="checkbox"
+                                  checked={checkedLdns.includes(ldn)}
+                                  onChange={(e) => {
+                                    const next = e.target.checked
+                                      ? [...(sel ?? allLdns).filter((l) => l !== ldn), ldn]
+                                      : (sel ?? allLdns).filter((l) => l !== ldn)
+                                    setCellSel({ ...cellSel, [sn]: next })
+                                  }}
+                                />
+                                <span className="truncate">{ldn}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </details>
+                      )
+                    })}
                   </div>
                 )}
               </Card>

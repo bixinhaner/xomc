@@ -26,6 +26,12 @@ func Test_AggregateByStatisType_Max(t *testing.T) {
 	assert.Equal(t, 9.0, got)
 }
 
+func Test_AggregateByStatisType_Min(t *testing.T) {
+	got, err := AggregateByStatisType([]float64{3, 7, 1, 9, 4}, metrics.StatisMin)
+	require.NoError(t, err)
+	assert.Equal(t, 1.0, got)
+}
+
 func Test_AggregateByStatisType_Pct_ReturnsError(t *testing.T) {
 	_, err := AggregateByStatisType([]float64{50, 50}, metrics.StatisPct)
 	require.Error(t, err)
@@ -45,7 +51,7 @@ func Test_AggregateByStatisType_Unknown_ReturnsError(t *testing.T) {
 }
 
 func Test_AggregateByStatisType_SingleValue(t *testing.T) {
-	for _, stype := range []metrics.StatisType{metrics.StatisSum, metrics.StatisAvg, metrics.StatisMax} {
+	for _, stype := range []metrics.StatisType{metrics.StatisSum, metrics.StatisAvg, metrics.StatisMax, metrics.StatisMin} {
 		got, err := AggregateByStatisType([]float64{42}, stype)
 		require.NoError(t, err, "stype=%s", stype)
 		assert.Equal(t, 42.0, got, "stype=%s", stype)

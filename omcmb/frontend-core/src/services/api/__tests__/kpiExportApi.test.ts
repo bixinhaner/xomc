@@ -2,7 +2,7 @@
  * kpiExportApi 契约测试：
  *   - create 发 source_type/params（snake_case），task_name 仅非空才带。
  *   - listTasks/listFiles 打对端点 + 解析 envelope.items。
- *   - download 拿 download_url 后用 <a download> 触发，空 URL 抛错（失败路径）。
+ *   - download 以 blob 请求同源端点，并优先使用 Content-Disposition 文件名。
  *   - retry 用原任务 source/params 重新 create（后端无独立重试端点）。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -87,24 +87,61 @@ describe('kpiExportApi.listTasks / listFiles', () => {
 });
 
 describe('kpiExportApi.download', () => {
-  it('拿 download_url 后用 <a> 触发下载', async () => {
-    getMock.mockResolvedValue({ data: { download_url: 'https://minio/kpi.csv?sig=x' } });
+  it('按 blob 下载并使用服务端文件名', async () => {
+    getMock.mockResolvedValue({
+      data: new Blob(['a,b\n1,2\n'], { type: 'text/csv' }),
+      headers: { 'content-disposition': 'attachment; filename="server.csv"' },
+    });
     const clickSpy = vi.fn();
     const realCreate = document.createElement.bind(document);
+    let anchor: HTMLAnchorElement | undefined;
     const createSpy = vi.spyOn(document, 'createElement').mockImplementation((tag: string) => {
       const el = realCreate(tag) as HTMLAnchorElement;
-      if (tag === 'a') el.click = clickSpy;
+      if (tag === 'a') {
+        anchor = el;
+        el.click = clickSpy;
+      }
       return el;
     });
+    const createObjectURL = vi.fn(() => 'blob:kpi-export');
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(window.URL, 'createObjectURL', { configurable: true, value: createObjectURL });
+    Object.defineProperty(window.URL, 'revokeObjectURL', { configurable: true, value: revokeObjectURL });
+
     await kpiExportApi.download('task-1', 'my.csv');
-    expect(getMock.mock.calls[0][0]).toBe('/pm/exports/task-1/download');
+
+    expect(getMock.mock.calls[0]).toEqual([
+      '/pm/exports/task-1/download',
+      { responseType: 'blob' },
+    ]);
+    expect(anchor?.download).toBe('server.csv');
     expect(clickSpy).toHaveBeenCalledOnce();
+    expect(createObjectURL).toHaveBeenCalledOnce();
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:kpi-export');
     createSpy.mockRestore();
   });
 
-  it('空 download_url 抛错（失败路径）', async () => {
-    getMock.mockResolvedValue({ data: { download_url: '' } });
-    await expect(kpiExportApi.download('task-1')).rejects.toThrow('empty download url');
+  it('无 Content-Disposition 时使用调用方文件名', async () => {
+    getMock.mockResolvedValue({ data: new Blob(['x']), headers: {} });
+    const clickSpy = vi.fn();
+    const realCreate = document.createElement.bind(document);
+    let anchor: HTMLAnchorElement | undefined;
+    const createSpy = vi.spyOn(document, 'createElement').mockImplementation((tag: string) => {
+      const el = realCreate(tag) as HTMLAnchorElement;
+      if (tag === 'a') {
+        anchor = el;
+        el.click = clickSpy;
+      }
+      return el;
+    });
+    Object.defineProperty(window.URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:fallback') });
+    Object.defineProperty(window.URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
+
+    await kpiExportApi.download('task-2', 'fallback.csv');
+
+    expect(anchor?.download).toBe('fallback.csv');
+    expect(clickSpy).toHaveBeenCalledOnce();
+    createSpy.mockRestore();
   });
 });
 

@@ -24,17 +24,18 @@ function row(partial: Partial<AggregatedRow>): AggregatedRow {
 
 describe('parseObjectLdn', () => {
   it('空输入', () => {
-    expect(parseObjectLdn(null)).toEqual({});
-    expect(parseObjectLdn(undefined)).toEqual({});
-    expect(parseObjectLdn('')).toEqual({});
+    expect(parseObjectLdn(null)).toEqual({ tech: '' });
+    expect(parseObjectLdn(undefined)).toEqual({ tech: '' });
+    expect(parseObjectLdn('')).toEqual({ tech: '' });
   });
 
   it('仅 Cellid', () => {
-    expect(parseObjectLdn('Cellid=111172245')).toEqual({ cellId: '111172245' });
+    expect(parseObjectLdn('Cellid=111172245')).toEqual({ tech: 'lte', cellId: '111172245' });
   });
 
   it('Cellid + PLMN', () => {
     expect(parseObjectLdn('Cellid=111172245,PLMN=46068')).toEqual({
+      tech: 'lte',
       cellId: '111172245',
       plmn: '46068',
     });
@@ -42,17 +43,18 @@ describe('parseObjectLdn', () => {
 
   it('顺序无关', () => {
     expect(parseObjectLdn('PLMN=00101,Cellid=222')).toEqual({
+      tech: 'lte',
       cellId: '222',
       plmn: '00101',
     });
   });
 
   it('大小写不敏感', () => {
-    expect(parseObjectLdn('CELLID=1,plmn=2')).toEqual({ cellId: '1', plmn: '2' });
+    expect(parseObjectLdn('CELLID=1,plmn=2')).toEqual({ tech: 'lte', cellId: '1', plmn: '2' });
   });
 
   it('未知键名忽略', () => {
-    expect(parseObjectLdn('Cellid=1,Foo=bar')).toEqual({ cellId: '1' });
+    expect(parseObjectLdn('Cellid=1,Foo=bar')).toEqual({ tech: 'lte', cellId: '1' });
   });
 });
 
@@ -73,8 +75,7 @@ describe('pivotLongToWide', () => {
     expect(result.rows[0]).toMatchObject({
       time: '2026-05-26T10:00:00Z',
       deviceSn: 'DEV-A',
-      cellId: '111',
-      plmn: undefined,
+      objectLdn: 'Cellid=111',
     });
     expect(result.rows[0].cells['PHY.NbrCqi6']).toBe(5);
   });
@@ -111,15 +112,14 @@ describe('pivotLongToWide', () => {
       row({ objectLdn: 'Cellid=2', metricValue: 2 }),
     ]);
     expect(r.rows).toHaveLength(2);
-    expect(r.rows.map((x) => x.cellId).sort()).toEqual(['1', '2']);
+    expect(r.rows.map((x) => x.objectLdn).sort()).toEqual(['Cellid=1', 'Cellid=2']);
   });
 
   it('PLMN 解析', () => {
     const r = pivotLongToWide([
       row({ objectLdn: 'Cellid=111,PLMN=46068', metricValue: 1 }),
     ]);
-    expect(r.rows[0].cellId).toBe('111');
-    expect(r.rows[0].plmn).toBe('46068');
+    expect(r.rows[0].objectLdn).toBe('Cellid=111,PLMN=46068');
   });
 
   it('缺采桶 cell = null', () => {

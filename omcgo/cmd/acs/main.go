@@ -242,15 +242,13 @@ func runACS(cmd *cobra.Command, args []string) error {
 			return nil
 		})
 
-		// T-0074: enable streaming compression for FileTypeConfig backup uploads.
-		// PolicyGetter pulls live policy from PG; metrics track ratio/duration.
-		// Both args are nil-safe — PolicyService.Get always returns DefaultPolicy
-		// when the row does not exist, so compression activates only when the
-		// operator has explicitly set EnableCompression=true.
-		backupPolicyRepo := backup.NewPgPolicyRepository(inf.PgPool)
-		backupPolicySvc := backup.NewPolicyService(backupPolicyRepo, inf.Logger)
+		// issue #585：T-0074 引入的 ACS 端配置备份压缩链路已下线。
+		// 业务约定只有 PM / MR 才需压缩（PM 走 pmSyncGzip / MR 由 worker 侧处理），
+		// 配置备份保留原始字节存入 MinIO —— 任务管理 <a href=presigned URL> 下载
+		// 由此不再出现 .xml.gz 命名 / Content-Encoding 透明解压不一致的问题；
+		// promote / DownloadHandler 仍保留对历史 .gz/.zst 对象的解压兜底。
+		// 这里仅保留 PolicyMetrics 创建，下方 backupEncryptor 解密链路复用同一份指标。
 		backupPolicyMetrics := backup.NewPolicyMetrics(inf.MetricsReg)
-		uploadHandler.SetCompression(backupPolicySvc, backupPolicyMetrics)
 
 		// T-0075: optional backup encryption (AES-256-GCM envelope). The KEK
 		// comes from OMC_BACKUP_ENCRYPTION_KEY env var (64 hex chars / 32B).
@@ -277,7 +275,7 @@ func runACS(cmd *cobra.Command, args []string) error {
 
 		deps.UploadHandler = uploadHandler
 		deps.UploadConfig = &cfg.Upload
-		inf.Logger.Info("upload handler enabled with backup compression",
+		inf.Logger.Info("upload handler enabled (config backup compression disabled, issue #585)",
 			zap.String("username", cfg.Upload.Username))
 
 		// Setup download handler for CPE file download (MinIO -> CPE proxy).

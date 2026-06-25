@@ -3,12 +3,12 @@
  *
  * 列宽：默认按 max(标题, 内容) 估算；表头分隔线可拖拽手动调整，
  *       列宽偏好按用户存 localStorage（换页/重查/刷新后保留，不同用户互不影响）。
- * 固定左 5 列：开始时间 / 结束时间 / 设备 SN / Cell ID / PLMN（因为 (sn, time, object_ldn) 才是唯一键）。
+ * 固定左 4 列：开始时间 / 结束时间 / 设备 SN / 测量对象（原始 object_ldn）。
  * 动态右列：用户选的 N 个指标。缺采单元格显示 "-"。
  */
 
 import { useCallback, useMemo, useState } from 'react';
-import { Table, Tooltip, Empty, Typography } from 'antd';
+import { Table, Empty, Typography } from 'antd';
 import type { ColumnsType, ColumnType } from 'antd/es/table';
 import { Resizable, type ResizeCallbackData } from 'react-resizable';
 import { useT } from '@/hooks/useT';
@@ -30,13 +30,12 @@ interface PivotTableProps {
   emptyDescription?: React.ReactNode;
 }
 
-// 固定 5 列默认宽度（开始时间 / 结束时间 / 设备 SN / Cell ID / PLMN）
+// 固定列默认宽度（开始时间 / 结束时间 / 设备 SN / 测量对象）
 const FIXED_COL_WIDTHS = {
   startTime: 160,
   endTime: 160,
   deviceSn: 180,
-  cellId: 100,
-  plmn: 80,
+  measObject: 220,
 } as const;
 
 // 拖拽时的最小列宽，避免拖没了
@@ -156,22 +155,10 @@ export default function PivotTable({ rows, loading, emptyDescription }: PivotTab
         render: (v?: string) => v ?? '-',
       },
       {
-        title: 'Cell ID',
-        dataIndex: 'cellId',
-        key: 'cellId',
-        width: FIXED_COL_WIDTHS.cellId,
-        render: (v?: string, r?: PivotRow) =>
-          v ?? (
-            <Tooltip title={r?.objectLdn ? t('perf.kpiQuery.pivot.rawLdn', { ldn: r.objectLdn }) : t('perf.kpiQuery.pivot.noLdn')}>
-              <span>-</span>
-            </Tooltip>
-          ),
-      },
-      {
-        title: 'PLMN',
-        dataIndex: 'plmn',
-        key: 'plmn',
-        width: FIXED_COL_WIDTHS.plmn,
+        title: t('perf.kpiQuery.pivot.measObject'),
+        dataIndex: 'objectLdn',
+        key: 'measObject',
+        width: FIXED_COL_WIDTHS.measObject,
         render: (v?: string) => v ?? '-',
       },
       ...pivoted.columns.map((c: PivotColumn) => ({

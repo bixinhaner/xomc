@@ -8,6 +8,7 @@
  */
 import http from '../http';
 import type { PageRequest, PageResponse } from '../../types/pagination';
+import { filenameFromContentDisposition, saveBlob } from '../../utils/saveBlob';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Backend shapes
@@ -102,6 +103,8 @@ export interface LicenseListParams extends PageRequest {
   serialNumber?: string;
   enbName?: string;
   productType?: string;
+  /** #602：按产品名称下拉过滤，传 product.id。 */
+  productId?: string;
   updatedAfter?: string;
   updatedBefore?: string;
 }
@@ -182,6 +185,7 @@ export const deviceLicenseApi = {
     if (params.serialNumber) query.serial_number = params.serialNumber;
     if (params.enbName) query.enb_name = params.enbName;
     if (params.productType) query.product_type = params.productType;
+    if (params.productId) query.product_id = params.productId;
     if (params.updatedAfter) query.updated_after = params.updatedAfter;
     if (params.updatedBefore) query.updated_before = params.updatedBefore;
 
@@ -248,22 +252,14 @@ export const deviceLicenseApi = {
   },
 
   async download(sn: string): Promise<void> {
-    // 同 configSnapshotApi.download：后端 LicenseDownloadResponse 用 snake_case json tag，
-    // http.ts 不做命名转换 → 必须按 snake_case 读，否则 file_name / download_url 全 undefined。
-    const { data } = await http.get<{
-      serial_number: string;
-      file_name: string;
-      download_url: string;
-      expires_in_seconds: number;
-    }>(`/backup/device-licenses/${encodeURIComponent(sn)}/download`);
-    const a = document.createElement('a');
-    a.href = data.download_url;
-    a.target = '_blank';
-    a.rel = 'noopener';
-    a.download = data.file_name;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    const response = await http.get(`/backup/device-licenses/${encodeURIComponent(sn)}/download`, {
+      responseType: 'blob',
+    });
+    const filename = filenameFromContentDisposition(
+      response.headers['content-disposition'] as string | undefined,
+      `${sn}.lic`,
+    );
+    saveBlob(response.data as BlobPart, filename);
   },
 
   async delete(sn: string): Promise<void> {

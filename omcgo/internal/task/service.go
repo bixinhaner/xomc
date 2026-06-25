@@ -365,6 +365,13 @@ func (s *TaskService) GetQueueLength(ctx context.Context, deviceSN string) (int6
 	return s.queue.Len(ctx, deviceSN)
 }
 
+func (s *TaskService) LatestSyncGPVSummaryByDevice(ctx context.Context, deviceSN string) (*SyncGPVSummary, error) {
+	if s.repo == nil {
+		return nil, nil
+	}
+	return s.repo.LatestSyncGPVSummaryByDevice(ctx, deviceSN)
+}
+
 // MarkTaskSent 标记任务已发送
 func (s *TaskService) MarkTaskSent(ctx context.Context, taskID, cwmpID string) error {
 	// 更新 Redis

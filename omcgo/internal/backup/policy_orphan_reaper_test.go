@@ -72,7 +72,7 @@ func obj(key string, ageDays int) minio.ObjectInfo {
 func TestOrphanReaper_V1_SuccessPath(t *testing.T) {
 	mon, remover := makeReaper(t, 30,
 		[]minio.ObjectInfo{
-			obj("backup/2026/03/29/backup-aabbccdd-SN999.xml.gz", 35),
+			obj("backup/2026/03/29/aabbccdd/SN999_CFG.xml", 35),
 		},
 		map[string]struct{}{},
 	)
@@ -82,7 +82,7 @@ func TestOrphanReaper_V1_SuccessPath(t *testing.T) {
 	assert.Equal(t, 1, reaped)
 	require.Len(t, remover.calls, 1)
 	assert.Equal(t, "config_backup", remover.calls[0].bucket)
-	assert.Equal(t, "backup/2026/03/29/backup-aabbccdd-SN999.xml.gz", remover.calls[0].object)
+	assert.Equal(t, "backup/2026/03/29/aabbccdd/SN999_CFG.xml", remover.calls[0].object)
 }
 
 // ---------------------------------------------------------------------------
@@ -92,7 +92,7 @@ func TestOrphanReaper_V1_SuccessPath(t *testing.T) {
 func TestOrphanReaper_V2_LiveTaskSkipped(t *testing.T) {
 	mon, remover := makeReaper(t, 30,
 		[]minio.ObjectInfo{
-			obj("backup/2026/03/29/backup-11223344-SN001.xml.gz", 60),
+			obj("backup/2026/03/29/11223344/SN001_CFG.xml", 60),
 		},
 		map[string]struct{}{"11223344": {}},
 	)
@@ -110,7 +110,7 @@ func TestOrphanReaper_V2_LiveTaskSkipped(t *testing.T) {
 func TestOrphanReaper_V3_AgeRecentSkipped(t *testing.T) {
 	mon, remover := makeReaper(t, 30,
 		[]minio.ObjectInfo{
-			obj("backup/2026/04/29/backup-deadbeef-SN777.xml.gz", 5),
+			obj("backup/2026/04/29/deadbeef/SN777_CFG.xml", 5),
 		},
 		map[string]struct{}{},
 	)
@@ -130,7 +130,8 @@ func TestOrphanReaper_V4_PatternMismatchSkipped(t *testing.T) {
 		[]minio.ObjectInfo{
 			obj("unrelated/manual-upload.xml", 60),
 			obj("backup/garbage.txt", 60),
-			obj("backup/2026/03/29/backup-XYZ-SN.xml", 60), // hex-only required
+			obj("backup/2026/03/29/XYZINVHX/SN001_CFG.xml", 60),     // taskID8 must be hex
+			obj("backup/2026/03/29/aabbccdd/SN001_log.xml", 60),     // non-CFG payload ignored
 		},
 		map[string]struct{}{},
 	)
@@ -148,7 +149,7 @@ func TestOrphanReaper_V4_PatternMismatchSkipped(t *testing.T) {
 func TestOrphanReaper_V5_MaxKCap(t *testing.T) {
 	objs := make([]minio.ObjectInfo, 1500)
 	for i := range objs {
-		objs[i] = obj(fmt.Sprintf("backup/2026/03/29/backup-%08x-SN%04d.xml.gz", i, i), 60)
+		objs[i] = obj(fmt.Sprintf("backup/2026/03/29/%08x/SN%04d_CFG.xml", i, i), 60)
 	}
 	mon, remover := makeReaper(t, 30, objs, map[string]struct{}{})
 
@@ -164,9 +165,9 @@ func TestOrphanReaper_V5_MaxKCap(t *testing.T) {
 
 func TestOrphanReaper_V6_RemoveObjectErrorContinues(t *testing.T) {
 	objs := []minio.ObjectInfo{
-		obj("backup/2026/03/29/backup-aaaaaaaa-SN1.xml.gz", 60),
-		obj("backup/2026/03/29/backup-bbbbbbbb-SN2.xml.gz", 60),
-		obj("backup/2026/03/29/backup-cccccccc-SN3.xml.gz", 60),
+		obj("backup/2026/03/29/aaaaaaaa/SN1_CFG.xml", 60),
+		obj("backup/2026/03/29/bbbbbbbb/SN2_CFG.xml", 60),
+		obj("backup/2026/03/29/cccccccc/SN3_CFG.xml", 60),
 	}
 	policySvc := NewPolicyService(&monPolicyRepo{current: reaperTestPolicy(30)}, zap.NewNop())
 	mon := NewPolicyMonitor(policySvc, &monTaskRepo{}, NewPolicyMetrics(nil), zap.NewNop())
@@ -287,14 +288,18 @@ func TestParseBackupFilename(t *testing.T) {
 		want string
 		ok   bool
 	}{
-		{"backup/2026/03/29/backup-aabbccdd-SN999.xml.gz", "aabbccdd", true},
-		{"backup/2026/03/29/backup-aabbccdd-SN999.xml.zst", "aabbccdd", true},
-		{"backup/2026/03/29/backup-aabbccdd-SN999.xml.gz.enc", "aabbccdd", true},
-		{"backup-deadbeef-SN001.xml", "deadbeef", true},
+		// issue #585 canonical naming: <category>/YYYY/MM/DD/{taskID8}/{SN}_CFG.{xml|nv}
+		{"config_backup/2026/06/23/aabbccdd/SN999_CFG.xml", "aabbccdd", true},
+		{"config_backup/2026/06/23/aabbccdd/SN999_CFG.nv", "aabbccdd", true},
+		{"aabbccdd/SN001_CFG.xml", "aabbccdd", true},
+		// 旧 backup-{taskID8}-{SN}.xml(.gz|.zst|.enc) 命名已下线（不考虑历史数据）。
+		{"backup/2026/03/29/backup-aabbccdd-SN999.xml.gz", "", false},
+		{"backup-deadbeef-SN001.xml", "", false},
+		// 非 CFG 命名 / 缺 taskID8 目录 / 非 hex / 大写 hex 均拒绝。
 		{"manual-upload.xml", "", false},
-		{"backup/2026/03/29/backup-XYZ-SN.xml", "", false},      // hex-only required
-		{"backup-aabbccdd-.xml", "", false},                     // empty deviceSN segment (.+? non-greedy needs ≥1)
-		{"backup/2026/03/29/backup-AABBCCDD-SN.xml", "", false}, // case-sensitive lowercase
+		{"config_backup/2026/06/23/SN999_CFG.xml", "", false},      // missing taskID8 segment
+		{"config_backup/2026/06/23/aabbccdd/SN999_log.xml", "", false},
+		{"config_backup/2026/06/23/AABBCCDD/SN999_CFG.xml", "", false}, // case-sensitive lowercase
 	}
 	for _, c := range cases {
 		t.Run(c.key, func(t *testing.T) {

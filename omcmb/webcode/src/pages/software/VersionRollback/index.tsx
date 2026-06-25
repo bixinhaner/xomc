@@ -614,10 +614,19 @@ export default function VersionRollback() {
     {
       key: 'progress',
       title: t('software.rollback.rollbackProgress'),
-      width: 120,
+      width: 160,
       render: (_: unknown, record: UpgradeTaskInfo) => {
         const val = computeProgress(record);
-        return <Progress percent={val} size="small" status={val === 100 ? 'success' : 'active'} />;
+        // #626：同 v1 升级计划，进度条下方露出绝对数。
+        const done = record.successCount + record.failCount;
+        return (
+          <div>
+            <Progress percent={val} size="small" status={val === 100 ? 'success' : 'active'} />
+            <div style={{ fontSize: 11, color: '#8c8c8c', fontFamily: 'monospace', marginTop: 2 }}>
+              {t('software.upgrade.progressDetail', { done, total: record.totalCount, fail: record.failCount })}
+            </div>
+          </div>
+        );
       },
     },
     {

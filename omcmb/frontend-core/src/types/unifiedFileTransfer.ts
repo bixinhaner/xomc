@@ -86,6 +86,10 @@ export interface UnifiedFileTransferTask {
   executionMode: TransferExecutionMode;
   createUser: string;
   createdAt: string;
+  /** 任务真正开始下发的时间（首次进入 in_progress 时后端 PG repo 写入 upgrade_tasks.started_at）。未开始时后端 omitempty 不返回。 */
+  startedAt?: string;
+  /** 任务到达终态（ended：成功/失败/终止）时后端 PG repo 写入 upgrade_tasks.ended_at。未结束时后端 omitempty 不返回。 */
+  endedAt?: string;
   scheduledAt?: string;
   operatorScope: string;
 }

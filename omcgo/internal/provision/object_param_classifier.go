@@ -55,3 +55,20 @@ func classifyPrefixes(prefixes []string) (scalars, objects []string) {
 	}
 	return scalars, objects
 }
+
+func isExpandedInstanceObjectPath(path string) bool {
+	if !isObjectPath(path) {
+		return false
+	}
+	trimmed := strings.TrimSuffix(path, ".")
+	lastDot := strings.LastIndex(trimmed, ".")
+	if lastDot < 0 || lastDot == len(trimmed)-1 {
+		return false
+	}
+	for _, ch := range trimmed[lastDot+1:] {
+		if ch < '0' || ch > '9' {
+			return false
+		}
+	}
+	return true
+}

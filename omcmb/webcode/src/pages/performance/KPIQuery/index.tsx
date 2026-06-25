@@ -55,6 +55,7 @@ import {
   useUpdateQueryTemplate,
   useDeleteQueryTemplate,
   useAggregatedMetricsByDevices,
+  useMetricObjectsByDevices,
 } from '@core/hooks/api/usePmQuery';
 import { useUserStore } from '@core/store/userStore';
 import { useSystemTimezoneValue } from '@core/hooks/api/useSystemTimezone';
@@ -74,9 +75,12 @@ import type {
   TemplateVisibility,
   TimeRangePreset,
 } from '@core/types/pmQuery';
+import { getDefaultTimeRangeForGranularity } from '@core/utils/granularityTimeRange';
 import DevicePickerModal from './components/DevicePickerModal';
 import MetricPickerModal from '@/components/MetricPickerModal';
 import PivotTable from './components/PivotTable';
+import CellDrilldownSelector from '../PmDashboard/CellDrilldownSelector';
+import { getEffectiveLdns, type CellSelection } from '../PmDashboard/cellDrilldownUtils';
 
 const { Text, Title } = Typography;
 const { RangePicker } = DatePicker;
@@ -91,9 +95,11 @@ const GRANULARITY_OPTIONS: { labelKey: string; value: Granularity }[] = [
 
 const TIME_RANGE_OPTIONS: { labelKey: string; value: TimeRangePreset }[] = [
   { labelKey: 'perf.kpiQuery.range.last1h', value: 'last_1h' },
+  { labelKey: 'perf.kpiQuery.range.last3h', value: 'last_3h' },
   { labelKey: 'perf.kpiQuery.range.last24h', value: 'last_24h' },
   { labelKey: 'perf.kpiQuery.range.last7d', value: 'last_7d' },
   { labelKey: 'perf.kpiQuery.range.last30d', value: 'last_30d' },
+  { labelKey: 'perf.kpiQuery.range.last6m', value: 'last_6m' },
   { labelKey: 'perf.kpiQuery.range.custom', value: 'custom' },
 ];
 
@@ -107,7 +113,8 @@ const DEFAULT_PAYLOAD: QueryTemplatePayload = {
   deviceSns: [],
   metricPaths: [],
   granularity: '15min',
-  timeRangePreset: 'last_1h',
+  // 与 #595 联动表保持一致：15min → 近 3 小时
+  timeRangePreset: getDefaultTimeRangeForGranularity('15min'),
   deviceType: 'ENB',
 };
 
@@ -176,12 +183,16 @@ function presetToRange(preset: TimeRangePreset): { start: string; end: string } 
   switch (preset) {
     case 'last_1h':
       return { start: now.subtract(1, 'hour').toISOString(), end: now.toISOString() };
+    case 'last_3h':
+      return { start: now.subtract(3, 'hour').toISOString(), end: now.toISOString() };
     case 'last_24h':
       return { start: now.subtract(24, 'hour').toISOString(), end: now.toISOString() };
     case 'last_7d':
       return { start: now.subtract(7, 'day').toISOString(), end: now.toISOString() };
     case 'last_30d':
       return { start: now.subtract(30, 'day').toISOString(), end: now.toISOString() };
+    case 'last_6m':
+      return { start: now.subtract(6, 'month').toISOString(), end: now.toISOString() };
     case 'custom':
       return null;
   }
@@ -198,6 +209,12 @@ export default function KPIQuery() {
   // ── 查询表单状态 ─────────────────────────────────────────────────
   const [payload, setPayload] = useState<QueryTemplatePayload>(DEFAULT_PAYLOAD);
   const [customRange, setCustomRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(null);
+  // #595: 用户手动修改过时间范围后标记 dirty，粒度切换不再覆盖
+  const [timeRangeDirty, setTimeRangeDirty] = useState(false);
+  // #619：测量对象（小区）下钻选择，按设备勾选要查的小区子集。
+  const [cellSel, setCellSel] = useState<CellSelection>({});
+  // #619: 提交后才生效的快照——勾选变化不立即重查，等点「查询」才同步。
+  const [submittedCellSel, setSubmittedCellSel] = useState<CellSelection>({});
   // 指标选中值（KPI=编号）→ 友好名，供「已选 N 个」摘要展示，避免露出 K 编号。
   const [metricLabels, setMetricLabels] = useState<Record<string, string>>({});
   const [devicePickerOpen, setDevicePickerOpen] = useState(false);
@@ -253,6 +270,19 @@ export default function KPIQuery() {
   const [submittedPayload, setSubmittedPayload] = useState<QueryTemplatePayload | null>(null);
   const [submittedRange, setSubmittedRange] = useState<{ start: string; end: string } | null>(null);
 
+  // #619：加载当前选中设备的可用小区列表（供 CellDrilldownSelector 展示选项）。
+  const { byDevice } = useMetricObjectsByDevices(
+    payload.deviceSns,
+    payload.deviceType ? deviceTypeToNetworkTech(payload.deviceType) : undefined,
+  );
+
+  // #619：计算用户勾选的有效 object_ldn 白名单（全选/未选 = 空数组 = 不过滤）。
+  // 用 submittedCellSel（快照）而非实时 cellSel，避免勾选变化立即触发查询。
+  const effectiveLdns = useMemo(
+    () => getEffectiveLdns(submittedCellSel, byDevice),
+    [submittedCellSel, byDevice],
+  );
+
   const baseAggParams = useMemo(() => {
     if (!submittedPayload || !submittedRange) return null;
     return {
@@ -263,8 +293,10 @@ export default function KPIQuery() {
       limit: 5000,
       // 让后端按 (时间桶 × 指标) 补齐占位行，避免该设备此时段全空时整张表"暂无数据"
       fillEmpty: true,
+      // #619：测量对象后端过滤（空 = 不过滤）。
+      objectLdns: effectiveLdns.length > 0 ? effectiveLdns : undefined,
     };
-  }, [submittedPayload, submittedRange]);
+  }, [submittedPayload, submittedRange, effectiveLdns]);
 
   const {
     data: aggregatedRows,
@@ -322,6 +354,11 @@ export default function KPIQuery() {
     }
     setSubmittedPayload(payload);
     setSubmittedRange(range);
+    // #619：点查询时才把勾选起到快照，之后过滤才生效。
+    setSubmittedCellSel(cellSel);
+    // 「查询」兼并旧「刷新」按钮的强刷语义：同条件再次点击也强制重拉一次最新数据
+    // （react-query 默认 30s staleTime，同 key 不会重发——这里显式 refetch 覆盖）。
+    void refetchAgg();
   };
 
   // 导出取「最近一次实际查询」的快照（submittedPayload/submittedRange），而非表单实时值，
@@ -345,6 +382,7 @@ export default function KPIQuery() {
 
   const handleSelectTemplate = async (tpl: QueryTemplate) => {
     setActiveTemplateId(tpl.id);
+    setTimeRangeDirty(false);
     if (tpl.payload.timeRangePreset === 'custom' && tpl.payload.absoluteStart && tpl.payload.absoluteEnd) {
       setCustomRange([dayjs(tpl.payload.absoluteStart), dayjs(tpl.payload.absoluteEnd)]);
     } else {
@@ -730,7 +768,15 @@ export default function KPIQuery() {
               <Form.Item label={t('perf.granularity')} style={{ marginBottom: 0 }}>
                 <Radio.Group
                   value={payload.granularity}
-                  onChange={(e) => setPayload({ ...payload, granularity: e.target.value })}
+                  onChange={(e) => {
+                    const g = e.target.value as Granularity;
+                    const next: QueryTemplatePayload = { ...payload, granularity: g };
+                    // #595: 粒度切换时，若用户未手动修改过时间范围，自动联动
+                    if (!timeRangeDirty) {
+                      next.timeRangePreset = getDefaultTimeRangeForGranularity(g);
+                    }
+                    setPayload(next);
+                  }}
                   options={granularityOptions}
                   optionType="button"
                   buttonStyle="solid"
@@ -742,7 +788,10 @@ export default function KPIQuery() {
                   <Select
                     style={{ width: 140 }}
                     value={payload.timeRangePreset}
-                    onChange={(v) => setPayload({ ...payload, timeRangePreset: v })}
+                    onChange={(v) => {
+                      setPayload({ ...payload, timeRangePreset: v });
+                      setTimeRangeDirty(true);
+                    }}
                     options={timeRangeOptions}
                     suffixIcon={<ClockCircleOutlined />}
                   />
@@ -750,20 +799,32 @@ export default function KPIQuery() {
                     <RangePicker
                       showTime
                       value={customRange}
-                      onChange={(v) => setCustomRange(v as [dayjs.Dayjs, dayjs.Dayjs] | null)}
+                      onChange={(v) => {
+                        setCustomRange(v as [dayjs.Dayjs, dayjs.Dayjs] | null);
+                        setTimeRangeDirty(true);
+                      }}
                     />
                   )}
                 </Space>
               </Form.Item>
             </Space>
 
+            {/* #619：测量对象下钻选择器（选完设备后可选过滤小区） */}
+            {payload.deviceSns.length > 0 && (
+              <div style={{ marginTop: 12 }}>
+                <CellDrilldownSelector
+                  deviceSns={payload.deviceSns}
+                  technology={payload.deviceType ? deviceTypeToNetworkTech(payload.deviceType) : undefined}
+                  value={cellSel}
+                  onChange={setCellSel}
+                />
+              </div>
+            )}
+
             <div style={{ marginTop: 16, borderTop: `1px dashed ${token.colorBorderSecondary}`, paddingTop: 12 }}>
               <Space>
                 <Button type="primary" icon={<TableOutlined />} loading={aggFetching} onClick={handleQuery}>
                   {t('common.query')}
-                </Button>
-                <Button icon={<ReloadOutlined />} onClick={() => void refetchAgg()} disabled={!submittedPayload}>
-                  {t('common.refresh')}
                 </Button>
                 <Button icon={<SaveOutlined />} onClick={handleOpenSaveModal}>
                   {t('perf.kpiQuery.saveAsTemplate')}
@@ -781,6 +842,9 @@ export default function KPIQuery() {
                   onClick={() => {
                     setPayload(DEFAULT_PAYLOAD);
                     setCustomRange(null);
+                    setTimeRangeDirty(false);
+                    setCellSel({});
+                    setSubmittedCellSel({});
                     setActiveTemplateId(undefined);
                     setSubmittedPayload(null);
                     setSubmittedRange(null);
@@ -830,6 +894,8 @@ export default function KPIQuery() {
               setSaveForm((s) => ({ ...s, payload: { ...s.payload, deviceSns: sns } }));
             } else {
               setPayload({ ...payload, deviceSns: sns });
+              setCellSel({}); // #619：设备变更时清空小区选择
+              setSubmittedCellSel({});
             }
           }}
           initialSelected={pickerTarget === 'modal' ? saveForm.payload.deviceSns : payload.deviceSns}

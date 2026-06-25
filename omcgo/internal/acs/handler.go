@@ -28,6 +28,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/middleware"
 	"github.com/omcgo/omcgo/internal/core/tracing"
+	"github.com/omcgo/omcgo/internal/netutil"
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/internal/trace"
 	"github.com/omcgo/omcgo/pkg/soap"
@@ -485,7 +486,7 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 
 	// 缓存 Inform 中的 Connection Request 地址，用于会话后续唤。
 	for _, p := range inform.ParameterList {
-		if strings.HasSuffix(p.Name, ".UDPConnectionRequestAddress") && p.Value != "" {
+		if strings.HasSuffix(p.Name, ".UDPConnectionRequestAddress") && p.Value != "" && !netutil.IsUnspecifiedUDPAddress(p.Value) {
 			if h.stunStore != nil {
 				if err := h.stunStore.SetFromInform(ctx, deviceSN, p.Value); err != nil {
 					log.Warn("cache STUN address from Inform",

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
@@ -130,5 +131,84 @@ func TestInferApiGroup(t *testing.T) {
 				t.Errorf("inferApiGroup(%q) = %q, want %q", tt.path, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestInferRouteMetadata(t *testing.T) {
+	tests := []struct {
+		name            string
+		method          string
+		path            string
+		wantName        string
+		wantDescription string
+	}{
+		{
+			name:            "list users",
+			method:          "GET",
+			path:            "/api/v1/admin/users",
+			wantName:        "用户 - 列表",
+			wantDescription: "用户：按筛选条件查询资源列表",
+		},
+		{
+			name:            "update role detail",
+			method:          "PUT",
+			path:            "/api/v1/admin/roles/:id",
+			wantName:        "角色 - 更新",
+			wantDescription: "角色：更新指定资源的完整配置",
+		},
+		{
+			name:            "sync api endpoints",
+			method:          "POST",
+			path:            "/api/v1/admin/api-endpoints/sync",
+			wantName:        "API 端点 - 同步",
+			wantDescription: "API 端点：从运行态或外部系统同步最新数据",
+		},
+		{
+			name:            "login",
+			method:          "POST",
+			path:            "/api/v1/auth/login",
+			wantName:        "认证 - 登录",
+			wantDescription: "认证：提交账号凭据并获取访问令牌",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := inferRouteName(tt.method, tt.path); got != tt.wantName {
+				t.Fatalf("inferRouteName(%q, %q) = %q, want %q", tt.method, tt.path, got, tt.wantName)
+			}
+			if got := inferRouteDescription(tt.method, tt.path); got != tt.wantDescription {
+				t.Fatalf("inferRouteDescription(%q, %q) = %q, want %q", tt.method, tt.path, got, tt.wantDescription)
+			}
+		})
+	}
+}
+
+func TestSyncApiEndpointsPassesReadableDescription(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	repo := NewMockApiEndpointRepository(ctrl)
+	repo.EXPECT().
+		Upsert(
+			gomock.Any(),
+			"/api/v1/admin/api-endpoints/sync",
+			"POST",
+			"API 端点 - 同步",
+			"API 端点：从运行态或外部系统同步最新数据",
+			"api-endpoints",
+		).
+		Return(true, nil)
+
+	svc := NewApiEndpointService(repo, zap.NewNop())
+	result, err := svc.SyncApiEndpoints(context.Background(), []gin.RouteInfo{{
+		Method: "POST",
+		Path:   "/api/v1/admin/api-endpoints/sync",
+	}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Created != 1 || result.Updated != 0 || result.Total != 1 {
+		t.Fatalf("unexpected sync result: %+v", result)
 	}
 }

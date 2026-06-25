@@ -143,7 +143,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// filename 留空是合法路径：厂商真实样本里 URL 末尾 `&filename=` 都是空的——
 	// 设备自身决定上传时的文件名（裸 binary PUT，无 multipart envelope）。
 	// 服务端按业务规则生成与 UFTE target_file_name_template 一致的命名：
-	//   - 备份类（FileType "3" / CONFIGBACKUP_*）：backup-{taskId8}-{sn}.nv|xml
+	//   - 配置备份（FileType "3" / CONFIGBACKUP_*）：{sn}_CFG.{xml|nv}（issue #585）
 	//   - 日志类（FileType "6"/"8" Vendor Log）：log-{taskId8}-{sn}.tar.gz
 	//   - 其它（默认兜底）：upload-{taskId8}-{sn}-{ts}
 	// 保证 ACS 落地名与 UFTE 端 DeviceItem.TargetFile 渲染结果一致——后续
@@ -153,16 +153,35 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if queryTaskID == "" {
 		queryTaskID = r.URL.Query().Get("id")
 	}
-	if filename == "" {
-		snQ := r.URL.Query().Get("sn")
-		if queryTaskID == "" || snQ == "" {
+	querySN := r.URL.Query().Get("sn")
+
+	// issue #585：配置备份强制规范命名 {sn}_CFG.{xml|nv}。
+	// 不论设备给的 filename 是什么（baicells 用 "provisioning.xml" / "mib-home-fap.nv"，
+	// 其它厂商各异），ACS 在落 MinIO 之前一律覆盖为规范名。
+	// 收益：
+	//   - 任务管理 presigned URL 末段直接是 {sn}_CFG.{ext}，不再需要 response-content-disposition 黑魔法
+	//   - 文件管理 snapshot 桶 promote 可退化为 server-side CopyObject（命名口径一致）
+	//   - MinIO 直查 / 运维定位 / 排错都用规范名
+	// 仅在 sn 可用时强制；sn 缺失则保留原 filename / derive 兜底（不应发生，OMC 派发的 URL 一定带 sn）。
+	if canonical, ok := canonicalConfigBackupFilename(fileType, querySN); ok {
+		if filename != canonical {
+			h.logger.Info("config backup filename rewritten to canonical form",
+				zap.String("file_type", fileType),
+				zap.String("sn", querySN),
+				zap.String("device_supplied", filename),
+				zap.String("canonical", canonical),
+			)
+		}
+		filename = canonical
+	} else if filename == "" {
+		if queryTaskID == "" || querySN == "" {
 			http.Error(w, "missing filename, and cannot derive: taskId/sn query params also empty", http.StatusBadRequest)
 			return
 		}
-		filename = deriveUploadFilename(fileType, queryTaskID, snQ)
+		filename = deriveUploadFilename(fileType, queryTaskID, querySN)
 		h.logger.Info("derived filename from sn+taskId (URL filename was empty)",
 			zap.String("file_type", fileType),
-			zap.String("sn", snQ),
+			zap.String("sn", querySN),
 			zap.String("task_id", queryTaskID),
 			zap.String("derived_filename", filename),
 		)
@@ -589,6 +608,13 @@ func classifyEncryptError(err error) string {
 // Both arguments may be nil to disable compression (the default state).
 // T-0074: keeps NewHandler signature backward-compatible (same pattern as
 // BackupExecutor.SetPolicyEnforcement).
+//
+// Deprecated (issue #585): production ACS wiring no longer calls SetCompression.
+// Config backup uploads must remain plaintext so the Task Management presigned
+// URL download is consistent across browsers/CLI tools. The method + the
+// downstream maybeWrapForCompression branch are kept (and unit-tested) so the
+// implementation remains audit-able, but any new caller must justify why the
+// objects on storage should diverge from the device-provided raw bytes.
 func (h *Handler) SetCompression(getter backup.PolicyGetter, metrics *backup.PolicyMetrics) {
 	h.policyGetter = getter
 	h.compressionMetrics = metrics
@@ -1070,15 +1096,11 @@ func extractDeviceSNFromFilename(filename string) string {
 	return name
 }
 
-// deriveUploadFilename 在设备 URL `filename=` 留空时，按业务规则生成与 UFTE 端
-// target_file_name_template 一致的文件名。与 software/executor.taskIDPrefix +
-// ufte_task_types.target_file_name_template 的渲染规则保持对齐：
-//   - 备份配置（FileType 3 / CONFIGBACKUP_*）→ backup-{taskId8}-{sn}.<nv|xml>
-//   - 日志采集（FileType 6 运行日志 / 8 故障日志）→ log-{taskId8}-{sn}.tar.gz
-//   - 其它/兜底 → upload-{taskId8}-{sn}-{unix}
-//
-// 一致性保证：ACS 落地的 filename 与 UFTE DeviceItem.TargetFile 渲染结果同名，
-// 后续 fileLandedLookup / downloadURLLookup 用 (sn, target_file) 反查能命中。
+// deriveUploadFilename 在设备 URL `filename=` 留空且文件类型不属于配置备份时，
+// 按业务规则生成与 UFTE target_file_name_template 一致的兜底文件名。
+// 配置备份类（FileType "3" / CONFIGBACKUP_*）不再走这里——上游已强制规范为
+// {sn}_CFG.{xml|nv}（见 canonicalConfigBackupFilename），即使设备给了 filename
+// 也会被覆盖。本函数仅服务日志类 / 默认兜底。
 func deriveUploadFilename(fileType, taskID, sn string) string {
 	taskID8 := taskID
 	if hex := strings.ReplaceAll(taskID, "-", ""); len(hex) >= 8 {
@@ -1086,15 +1108,34 @@ func deriveUploadFilename(fileType, taskID, sn string) string {
 	}
 	ft := strings.ToUpper(strings.TrimSpace(fileType))
 	switch ft {
-	case "CONFIGBACKUP_NV":
-		return fmt.Sprintf("backup-%s-%s.nv", taskID8, sn)
-	case "CONFIGBACKUP_XML", "3":
-		return fmt.Sprintf("backup-%s-%s.xml", taskID8, sn)
 	case "6", "LOG":
 		return fmt.Sprintf("runtime-%s-%s.tar.gz", taskID8, sn)
 	case "8", "RL":
 		return fmt.Sprintf("fault-%s-%s.tar.gz", taskID8, sn)
 	default:
 		return fmt.Sprintf("upload-%s-%s-%d", taskID8, sn, time.Now().Unix())
+	}
+}
+
+// canonicalConfigBackupFilename 推导配置备份上传的规范文件名 {sn}_CFG.{ext}。
+// 返回 ok=false 表示当前 fileType 不是配置备份（或 sn 缺失），调用方按其它分支处理。
+//
+// fileType 取值来源（OMC 派发 Upload RPC 时由 UFTE TransportPath 模板写死）：
+//   - "CONFIGBACKUP_XML" → .xml
+//   - "CONFIGBACKUP_NV"  → .nv
+//   - "3"               → .xml（数字编号无法区分 XML/NV，默认走 XML——
+//                          OMC 自家派发都用文本 alias，数字编号仅为协议兼容兜底）
+func canonicalConfigBackupFilename(fileType, sn string) (string, bool) {
+	sn = strings.TrimSpace(sn)
+	if sn == "" {
+		return "", false
+	}
+	switch strings.ToUpper(strings.TrimSpace(fileType)) {
+	case "CONFIGBACKUP_NV":
+		return fmt.Sprintf("%s_CFG.nv", sn), true
+	case "CONFIGBACKUP_XML", "3":
+		return fmt.Sprintf("%s_CFG.xml", sn), true
+	default:
+		return "", false
 	}
 }

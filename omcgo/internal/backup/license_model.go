@@ -57,7 +57,8 @@ type DeviceLicense struct {
 type LicenseFilter struct {
 	SerialNumber  string
 	EnbName       string
-	ProductType   string
+	ProductType   string   // 单值精确匹配（向后兼容）
+	ProductTypes  []string // 多值精确匹配（IN），按产品名称下拉过滤时由 handler 解析 product_id 写入
 	UpdatedAfter  *time.Time
 	UpdatedBefore *time.Time
 	model.ListRequest

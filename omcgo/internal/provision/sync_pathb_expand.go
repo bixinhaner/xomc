@@ -15,7 +15,7 @@ package provision
 // instance prefix 后只返回该实例的 ~70 字段(~5KB),稳稳在 1MB 之内。
 //
 // hint 估算策略(优先级从高到低):
-//  1. DB 已有 max instance 号 + 25% 裕量(滚动学习,首次同步后越来越准)
+//  1. DB 已有 max instance 号(滚动学习,首次同步后越来越准)
 //  2. hintFloor=256 (首次同步无 DB 历史的兜底; 覆盖 BSC 物理上限 256 BTS)
 //  3. 硬上限 maxHintCap=512 (防 estimate 异常膨胀)
 //
@@ -108,8 +108,7 @@ func (s *SyncService) maybeExpandSinglePrefix(
 	// CountByPathPrefix 失败 / 0 → 退到 mapping 估算(首次同步 DB 空时如此)。
 	fields := mappingFields
 	if total, err := s.paramRepo.CountByPathPrefix(ctx, deviceID, p); err == nil && total > 0 {
-		// hint 是含 25% 放大后的值,反算实例数用 hint*4/5 ≈ maxSeen
-		instApprox := hint * 4 / 5
+		instApprox := hint
 		if instApprox <= 0 {
 			instApprox = 1
 		}
@@ -149,7 +148,8 @@ func (s *SyncService) maybeExpandSinglePrefix(
 // estimateMaxInstance 估算某 object prefix 下 instance 展开数 hint。
 //
 // 通过窄接口 (instanceHintRepo) type-assertion 拿到 PG 实现的
-// MaxInstanceNumberByPrefix。任何接口不支持 / 查询失败 / 返回 0 → hintFloor 兜底。
+// MaxInstanceNumberByPrefix。DB 有历史时严格使用 maxSeen；只有接口不支持 /
+// 查询失败 / 返回 0 时才用 hintFloor 兜底。
 //
 // 这种"窄接口 + 可选"设计避免污染主 DeviceParameterRepository(所有 mock/stub 都要改),
 // 仅生产 PG 实现需要支持。
@@ -178,11 +178,10 @@ func (s *SyncService) estimateMaxInstance(
 	if maxSeen <= 0 {
 		return hintFloor
 	}
-	withMargin := maxSeen + maxSeen/4 // +25%
-	if withMargin < hintFloor {
-		return hintFloor
+	if maxSeen < 1 {
+		return 1
 	}
-	return withMargin
+	return maxSeen
 }
 
 // countStorableFieldsUnderPrefix 统计 mappings 中以 prefix+"{i}." 为路径祖先的

@@ -3,6 +3,7 @@ package connreq
 import (
 	"crypto/md5"
 	"encoding/hex"
+	"errors"
 	"strings"
 	"testing"
 
@@ -58,4 +59,86 @@ func TestRestartCommandFormat(t *testing.T) {
 	// Verify format: /restart_ + 32-char md5 hex
 	assert.True(t, strings.HasPrefix(expected, "/restart_"))
 	assert.Len(t, expected, len("/restart_")+32, "restart command should be /restart_ + 32-char md5")
+}
+
+// TestResolveLANUDPTarget covers the pure URL→UDP target translation that
+// backs UDPSender.SendLAN. The function owns the only behaviour C2 (review)
+// flagged: hard-coded port vs. caller-supplied per-device override.
+func TestResolveLANUDPTarget(t *testing.T) {
+	tests := []struct {
+		name     string
+		httpURL  string
+		port     int
+		wantAddr string
+		wantErr  error
+	}{
+		{
+			name:     "ipv4 with caller-supplied port wins over default",
+			httpURL:  "http://172.17.1.14:7547/acs",
+			port:     4789,
+			wantAddr: "172.17.1.14:4789",
+		},
+		{
+			name:     "ipv4 with port<=0 falls back to lanUDPCRDefaultPort",
+			httpURL:  "http://172.17.1.14:7547/acs",
+			port:     0,
+			wantAddr: "172.17.1.14:3478",
+		},
+		{
+			name:     "ipv4 with negative port also falls back to default",
+			httpURL:  "http://172.17.1.14:7547/acs",
+			port:     -1,
+			wantAddr: "172.17.1.14:3478",
+		},
+		{
+			name:     "ipv6 literal preserves brackets",
+			httpURL:  "http://[2001:db8::14]:7547/acs",
+			port:     3478,
+			wantAddr: "[2001:db8::14]:3478",
+		},
+		{
+			name:    "empty httpURL returns ErrNoLANTarget",
+			httpURL: "",
+			port:    3478,
+			wantErr: ErrNoLANTarget,
+		},
+		{
+			name:    "missing scheme yields empty hostname → ErrNoLANTarget",
+			httpURL: "/path-only",
+			port:    3478,
+			wantErr: ErrNoLANTarget,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			addr, err := resolveLANUDPTarget(tc.httpURL, tc.port)
+			if tc.wantErr != nil {
+				assert.ErrorIs(t, err, tc.wantErr)
+				assert.Nil(t, addr)
+				return
+			}
+			require.NoError(t, err)
+			require.NotNil(t, addr)
+			assert.Equal(t, tc.wantAddr, addr.String())
+		})
+	}
+}
+
+// TestResolveLANUDPTarget_DefaultMatches3478 locks the empirical port used
+// by BAICELLS BSC7041C243 / Dengyo BSC7079B243 — changing this constant
+// without revisiting the review doc would silently break LAN-direct wake.
+func TestResolveLANUDPTarget_DefaultMatches3478(t *testing.T) {
+	addr, err := resolveLANUDPTarget("http://10.0.0.5:7547/", 0)
+	require.NoError(t, err)
+	assert.Equal(t, "10.0.0.5:3478", addr.String())
+}
+
+// TestResolveLANUDPTarget_ParseError ensures invalid URLs surface a wrapped
+// error (not ErrNoLANTarget) so dispatcher records the failure metric.
+func TestResolveLANUDPTarget_ParseError(t *testing.T) {
+	addr, err := resolveLANUDPTarget("http://%zz", 3478)
+	require.Error(t, err)
+	assert.Nil(t, addr)
+	assert.False(t, errors.Is(err, ErrNoLANTarget))
 }

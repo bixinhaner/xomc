@@ -16,7 +16,7 @@ import Feature from 'ol/Feature';
 import Point from 'ol/geom/Point';
 import LineString from 'ol/geom/LineString';
 import { fromLonLat, toLonLat } from 'ol/proj';
-import { containsCoordinate, buffer as bufferExtent } from 'ol/extent';
+import { containsCoordinate, buffer as bufferExtent, boundingExtent } from 'ol/extent';
 import type { Extent } from 'ol/extent';
 import { defaults as defaultControls } from 'ol/control';
 import { Style, Stroke, Circle, Fill, Text } from 'ol/style';
@@ -26,10 +26,12 @@ import {
   MAP_CONFIG,
   ANIMATION_CONFIG,
   COLORS,
+  CLUSTER_CONFIG,
   DEVICE_STATUS_CONFIG,
   SPIDERFY_CONFIG,
   VIEWPORT_CULLING,
   getClusterDistanceForZoom,
+  pickProgressiveSteps,
 } from './constants';
 import {
   clusterStyleFunction,
@@ -246,6 +248,10 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
   const spiderfiedCenterRef = useRef<number[] | null>(null);
   // 高亮请求 ID（用于防止竞态条件）
   const highlightRequestIdRef = useRef(0);
+  // “程序化飞行”计数器：progressiveFlyTo / flyTo / view.fit 起始 +1、结束 -1。
+  // 在 bindMapEvents 的 moveend 处理里用它跳过中间档位的 onViewportChange，
+  // 避免一次下钻发 N 个 /devices/geo 请求。用计数器而非布尔是为了能背丝安全地处理嵌套/重入。
+  const isProgrammaticFlyingRef = useRef(0);
 
   const [isReady, setIsReady] = useState(false);
 
@@ -263,8 +269,15 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
     mapInstanceRef.current?.render();
   }, []);
 
-  // 展开 Spiderfy（扇形方式）（必须在 useEffect 之前定义，供 bindMapEvents 使用）
-  const spiderfy = useCallback((_clusterFeature: Feature, center: number[], features: Feature[]) => {
+  // 展开 Spiderfy（多圈螺旋方式）（必须在 useEffect 之前定义，供 bindMapEvents 使用）
+  // 同坐标设备数超过 SPIDERFY_CONFIG.maxNodes 时仅画前 N 个，防止数千个 Canvas 节点冻住主线程。
+  // targetDeviceId 存在时，会被强制提权进入可视集（搜索定位场景）。
+  const spiderfy = useCallback((
+    _clusterFeature: Feature,
+    center: number[],
+    features: Feature[],
+    targetDeviceId?: string,
+  ) => {
     if (!mapInstanceRef.current || !spiderfySourceRef.current) return;
 
     // 如果已经展开，先收起
@@ -275,10 +288,31 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
     const count = features.length;
     if (count <= 1) return;
 
+    // 防爆屏：最多只展开 maxNodes 个节点
+    const maxNodes = SPIDERFY_CONFIG.maxNodes ?? 60;
+    let displayFeatures = features;
+    if (count > maxNodes) {
+      displayFeatures = features.slice(0, maxNodes);
+      if (targetDeviceId) {
+        const inVisible = displayFeatures.some(
+          (f) => (f.getProperties() as MapDevice).id === targetDeviceId,
+        );
+        if (!inVisible) {
+          const targetIdx = features.findIndex(
+            (f) => (f.getProperties() as MapDevice).id === targetDeviceId,
+          );
+          if (targetIdx >= 0) {
+            displayFeatures = displayFeatures.slice();
+            displayFeatures[maxNodes - 1] = features[targetIdx];
+          }
+        }
+      }
+    }
+
     // 创建 spiderfy 图层的 feature
     const spiderfyFeatures: Feature[] = [];
 
-    // 中心点 feature
+    // 中心点 feature（count 仍使用真实总数，如 "2000"）
     const centerFeature = new Feature({
       geometry: new Point(center),
       spiderfyCenter: true,
@@ -286,49 +320,64 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
     });
     spiderfyFeatures.push(centerFeature);
 
-    // 扇形展开点
-    const angleStep = (2 * Math.PI) / count;
+    // 按弧长间隔生成多圈分布表
+    const displayCount = displayFeatures.length;
+    const ringArcSpacing = SPIDERFY_CONFIG.ringArcSpacing ?? 28;
+    const ringRadiusStep = SPIDERFY_CONFIG.ringRadiusStep ?? 45;
+    const rings: { radius: number; count: number; angleStep: number }[] = [];
+    let remaining = displayCount;
+    let currentRadius = SPIDERFY_CONFIG.radius;
+    while (remaining > 0) {
+      const capacity = Math.max(
+        12,
+        Math.floor((2 * Math.PI * currentRadius) / ringArcSpacing),
+      );
+      const pts = Math.min(remaining, capacity);
+      rings.push({
+        radius: currentRadius,
+        count: pts,
+        angleStep: (2 * Math.PI) / pts,
+      });
+      remaining -= pts;
+      currentRadius += ringRadiusStep;
+    }
+
     const startAngle = -Math.PI / 2; // 从顶部开始
+    const map = mapInstanceRef.current;
+    const resolution = map.getView().getResolution()!;
 
-    features.forEach((f, index) => {
-      const device = f.getProperties() as MapDevice;
-      const angle = startAngle + index * angleStep;
+    let cursor = 0;
+    rings.forEach((ring) => {
+      for (let k = 0; k < ring.count; k++) {
+        const f = displayFeatures[cursor];
+        const device = f.getProperties() as MapDevice;
+        const angle = startAngle + k * ring.angleStep;
+        const pixelOffset = [
+          Math.cos(angle) * ring.radius,
+          Math.sin(angle) * ring.radius,
+        ];
+        const pointCoordinate = [
+          center[0] + pixelOffset[0] * resolution,
+          center[1] - pixelOffset[1] * resolution, // Y 轴反向
+        ];
 
-      // 计算展开点的坐标（像素偏移转换为地图坐标）
-      const pixelOffset = [
-        Math.cos(angle) * SPIDERFY_CONFIG.radius,
-        Math.sin(angle) * SPIDERFY_CONFIG.radius,
-      ];
+        const lineFeature = new Feature({
+          geometry: new LineString([center, pointCoordinate]),
+          spiderfyLine: true,
+        });
+        spiderfyFeatures.push(lineFeature);
 
-      // 将像素偏移转换为地图坐标偏移
-      const map = mapInstanceRef.current!;
-      const resolution = map.getView().getResolution()!;
-      const coordinateOffset = [
-        pixelOffset[0] * resolution,
-        pixelOffset[1] * resolution,
-      ];
+        const pointFeature = new Feature({
+          geometry: new Point(pointCoordinate),
+          spiderfyPoint: true,
+          device: device,
+          index: cursor,
+          total: count,
+        });
+        spiderfyFeatures.push(pointFeature);
 
-      const pointCoordinate = [
-        center[0] + coordinateOffset[0],
-        center[1] - coordinateOffset[1], // Y 轴反向
-      ];
-
-      // 创建连线 feature
-      const lineFeature = new Feature({
-        geometry: new LineString([center, pointCoordinate]),
-        spiderfyLine: true,
-      });
-      spiderfyFeatures.push(lineFeature);
-
-      // 创建展开点 feature
-      const pointFeature = new Feature({
-        geometry: new Point(pointCoordinate),
-        spiderfyPoint: true,
-        device: device,
-        index: index,
-        total: count,
-      });
-      spiderfyFeatures.push(pointFeature);
+        cursor++;
+      }
     });
 
     // 添加所有 feature 到 spiderfy 图层
@@ -455,6 +504,7 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
         onSpiderfy: spiderfy,
         onUnspiderfy: unspiderfy,
         onMapClick,
+        isProgrammaticFlyingRef,
       },
       deviceLayerRef.current,
       spiderfyLayerRef.current
@@ -621,6 +671,15 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
     const view = map.getView();
     const currentZoom = view.getZoom() ?? MAP_CONFIG.defaultZoom;
 
+    // 进入程序化飞行：防止中间 moveend 触发一串 /devices/geo 请求
+    isProgrammaticFlyingRef.current += 1;
+    let flyingExited = false;
+    const exitFlying = () => {
+      if (flyingExited) return;
+      flyingExited = true;
+      isProgrammaticFlyingRef.current = Math.max(0, isProgrammaticFlyingRef.current - 1);
+    };
+
     // 智能判断：如果zoom差值太小，使用单次动画
     if (Math.abs(currentZoom - targetZoom) < ANIMATION_CONFIG.progressiveZoomThreshold) {
       const animateOptions = {
@@ -630,34 +689,67 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
         easing: Easing.easeOutCubic,
       };
 
-      if (onComplete) {
-        view.animate(animateOptions, () => onComplete());
-      } else {
-        view.animate(animateOptions);
-      }
+      view.animate(animateOptions, () => {
+        exitFlying();
+        onComplete?.();
+      });
       return;
     }
 
-    // 渐进式缩放：使用单次长动画 + 平滑 easing 曲线
-    // 模拟从宏观到微观的自然减速效果，避免分段感
+    // 渐进式缩放：按 PROGRESSIVE_ZOOM_STEPS 挑出的中间档位串接多段动画。
+    // 如果中间档位为空（跳跃太小），则退化为单次动画。
     const targetCoord = fromLonLat([lng, lat]);
     const zoomDiff = targetZoom - currentZoom;
+    const steps = pickProgressiveSteps(currentZoom, targetZoom);
 
-    // 根据缩放幅度动态调整时长，稍微慢一点
-    const totalDuration = Math.min(1400, Math.max(900, zoomDiff * 90));
-
-    const animateOptions = {
-      center: targetCoord,
-      zoom: targetZoom,
-      duration: totalDuration,
-      easing: Easing.progressive,
-    };
-
-    if (onComplete) {
-      view.animate(animateOptions, () => onComplete());
-    } else {
-      view.animate(animateOptions);
+    if (steps.length === 0) {
+      const fallbackDuration = Math.min(1400, Math.max(900, zoomDiff * 90));
+      const animateOptions = {
+        center: targetCoord,
+        zoom: targetZoom,
+        duration: fallbackDuration,
+        easing: Easing.progressive,
+      };
+      view.animate(animateOptions, () => {
+        exitFlying();
+        onComplete?.();
+      });
+      return;
     }
+
+    let i = 0;
+    let finished = false;
+    const runStep = () => {
+      if (finished) return;
+      if (i >= steps.length) {
+        finished = true;
+        exitFlying();
+        onComplete?.();
+        return;
+      }
+      const step = steps[i++];
+      view.animate(
+        {
+          center: targetCoord,
+          zoom: step.zoom,
+          duration: step.duration,
+          easing: Easing.easeOutCubic,
+        },
+        (complete: boolean) => {
+          if (!complete) {
+            // 被用户拖动 / 新 animate 打断：放弃后续 step，但仍触发 onComplete
+            // 让外层（如 search 探测流程）能拿到回调继续推进。
+            if (finished) return;
+            finished = true;
+            exitFlying();
+            onComplete?.();
+            return;
+          }
+          runStep();
+        },
+      );
+    };
+    runStep();
   }, [MAP_CONFIG.defaultZoom]);
 
   // 飞行到指定位置
@@ -687,19 +779,24 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
 
     // 使用单次动画（保持向后兼容）
     const view = mapInstanceRef.current.getView();
-    if (onComplete) {
-      view.animate({
+    isProgrammaticFlyingRef.current += 1;
+    let exited = false;
+    const exitFlying = () => {
+      if (exited) return;
+      exited = true;
+      isProgrammaticFlyingRef.current = Math.max(0, isProgrammaticFlyingRef.current - 1);
+    };
+    view.animate(
+      {
         center: fromLonLat([lng, lat]),
         zoom: finalZoom,
         duration: ANIMATION_CONFIG.flyDuration,
-      }, () => onComplete());
-    } else {
-      view.animate({
-        center: fromLonLat([lng, lat]),
-        zoom: finalZoom,
-        duration: ANIMATION_CONFIG.flyDuration,
-      });
-    }
+      },
+      () => {
+        exitFlying();
+        onComplete?.();
+      },
+    );
   }, [progressiveFlyTo]);
 
   // 取消高亮（必须在 highlightDevice 之前定义）
@@ -836,8 +933,28 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
   }, []);
 
   // 高亮设备并在需要时展开聚合（用于搜索定位）
+  //
+  // 设计要点（修复 Issue D：search-progressive-locate 主线程冻结）：
+  //   1. 两段飞行：先 flyTo 到 searchIntermediateZoom（约 13）让聚合可分辨，
+  //      再决定是否飞到 maxHighlightZoom。一口气到 18 会跨过聚合可见区间，
+  //      clusterSource 在该 zoom 下可能完全没有目标 feature，落到下面的 "找不到"
+  //      分支导致静默失败。
+  //   2. 全程用 flyTo onComplete 串接，废弃旧的 moveend + setTimeout(150) 模式，
+  //      避免 moveend 因为渐进多段动画连发或被拖拽抢占而错过时机。
+  //   3. clusterSource.getFeatures() 不是同步保证最新的，所以加重试循环：
+  //      最多 12 次 × 50ms。每次 tick 前用 highlightRequestIdRef 校验请求是否过期。
   const highlightAndSpiderfyIfNeeded = useCallback((device: MapDevice, skipFlyTo = false) => {
     if (!mapInstanceRef.current || !clusterSourceRef.current || !spiderfySourceRef.current) return;
+
+    // 校验坐标，避免 NaN/null 直接喂给 fromLonLat
+    if (
+      typeof device.lng !== 'number' ||
+      typeof device.lat !== 'number' ||
+      !Number.isFinite(device.lng) ||
+      !Number.isFinite(device.lat)
+    ) {
+      return;
+    }
 
     // 性能 #15：把搜索/定位目标 pin 住并立即重算裁剪，
     // 确保即便目标当前落在视口外，也已渲染进 deviceSource，
@@ -849,6 +966,7 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
 
     // 递增请求 ID，用于防止竞态条件
     const currentRequestId = ++highlightRequestIdRef.current;
+    const isStale = () => currentRequestId !== highlightRequestIdRef.current;
 
     // 先清除之前的高亮和展开
     clearHighlight();
@@ -856,47 +974,71 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
       unspiderfy();
     }
 
-    // 记录当前 zoom，用于判断是否需要等待聚合稳定
-    const currentZoom = mapInstanceRef.current.getView().getZoom() ?? 0;
-    const targetZoom = ANIMATION_CONFIG.maxHighlightZoom || 18;
-    const needsZoomChange = Math.abs(currentZoom - targetZoom) > 0.5;
+    const intermediateZoom = ANIMATION_CONFIG.searchIntermediateZoom ?? 13;
+    const maxZoom = ANIMATION_CONFIG.maxHighlightZoom || 18;
 
-    // 飞行到设备位置（如果 skipFlyTo 为 true 则跳过，避免打断渐进式动画）
-    if (!skipFlyTo) {
-      flyTo(device.lng, device.lat, targetZoom);
-    }
+    // 给目标 feature 上水波纹高亮的副作用
+    const applyRippleHighlight = (feature: Feature) => {
+      highlightFeatureRef.current = feature;
+      rippleWavesRef.current = [];
 
-    // 使用 moveend 事件确保在地图完全稳定后执行
-    // 这样可以避免时序问题：聚合计算完成、zoom 变化检测等都已完成
-    const doHighlightAndSpiderfy = () => {
-      // 检查是否是最新的请求，防止竞态条件
-      if (currentRequestId !== highlightRequestIdRef.current) return;
+      const createRipple = () => {
+        if (!highlightFeatureRef.current) return;
+        rippleWavesRef.current.push({ radius: 0, opacity: 0.6 });
+      };
+      createRipple();
 
-      if (!clusterSourceRef.current || !spiderfySourceRef.current || !mapInstanceRef.current) return;
+      rippleCreateRef.current = setInterval(() => {
+        createRipple();
+        if (rippleWavesRef.current.length > 2) {
+          rippleWavesRef.current.shift();
+        }
+      }, 800);
 
-      // 强制刷新聚合源，确保获取最新的聚合结果
-      clusterSourceRef.current.refresh();
+      pulseAnimationRef.current = setInterval(() => {
+        if (!highlightFeatureRef.current) {
+          if (pulseAnimationRef.current) {
+            clearInterval(pulseAnimationRef.current);
+            pulseAnimationRef.current = null;
+          }
+          return;
+        }
+        rippleWavesRef.current = rippleWavesRef.current
+          .map((wave) => ({
+            radius: wave.radius + 0.4,
+            opacity: wave.opacity - 0.008,
+          }))
+          .filter((wave) => wave.opacity > 0);
+        highlightFeatureRef.current.set('rippleWaves', [...rippleWavesRef.current]);
+        if (mapInstanceRef.current) {
+          mapInstanceRef.current.render();
+        }
+      }, 40);
+    };
 
-      // 使用 requestAnimationFrame 确保在下一帧渲染时执行
-      requestAnimationFrame(() => {
-        // 再次检查是否是最新的请求
-        if (currentRequestId !== highlightRequestIdRef.current) return;
+    // 在 cluster source 中重试查找目标设备所在聚合
+    // 重试是必要的：渐进式 flyTo 完成时 clusterSource 可能尚未发出 'change'
+    const detectClusterAndAct = (
+      onClusterFound: (clusterFeature: Feature, deviceFeature: Feature) => void,
+    ) => {
+      let attempts = 0;
+      const maxAttempts = 12;
 
-        if (!clusterSourceRef.current || !spiderfySourceRef.current || !mapInstanceRef.current) return;
+      const tick = () => {
+        if (isStale()) return;
+        if (!clusterSourceRef.current || !mapInstanceRef.current) return;
 
-        // 获取所有聚合 features
         const clusterFeatures = clusterSourceRef.current.getFeatures();
         let targetClusterFeature: Feature | null = null;
         let targetDeviceFeature: Feature | null = null;
 
-        // 查找包含目标设备的聚合
-        for (const clusterFeature of clusterFeatures) {
-          const features = clusterFeature.get('features');
+        for (const cf of clusterFeatures) {
+          const features = cf.get('features');
           if (features && Array.isArray(features)) {
             for (const f of features as Feature[]) {
               const props = f.getProperties() as MapDevice;
               if (props.id === device.id) {
-                targetClusterFeature = clusterFeature;
+                targetClusterFeature = cf;
                 targetDeviceFeature = f;
                 break;
               }
@@ -905,170 +1047,109 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
           if (targetClusterFeature) break;
         }
 
-        if (!targetClusterFeature) return;
+        if (targetClusterFeature && targetDeviceFeature) {
+          onClusterFound(targetClusterFeature, targetDeviceFeature);
+          return;
+        }
 
-        const featuresInCluster = targetClusterFeature.get('features') as Feature[] | undefined;
-        const count = featuresInCluster?.length || 1;
+        attempts++;
+        if (attempts < maxAttempts) {
+          setTimeout(tick, 50);
+        }
+      };
+      tick();
+    };
+
+    // 阶段二：到位后判断聚合 / 单点，再决定 spiderfy 或直接高亮
+    const onArrivedAtFinalZoom = () => {
+      if (isStale()) return;
+      detectClusterAndAct((clusterFeature, deviceFeature) => {
+        if (isStale()) return;
+        const featuresInCluster = clusterFeature.get('features') as Feature[] | undefined;
+        const count = featuresInCluster?.length ?? 1;
 
         if (count > 1 && featuresInCluster) {
-          // 多个设备在同一聚合中，需要展开 spiderfy
-          const geometry = targetClusterFeature.getGeometry();
-          if (geometry) {
-            const center = (geometry as Point).getCoordinates();
+          const geometry = clusterFeature.getGeometry();
+          if (!geometry) return;
+          const center = (geometry as Point).getCoordinates();
+          spiderfy(clusterFeature, center, featuresInCluster, device.id);
 
-            // 先展开 spiderfy
-            spiderfy(targetClusterFeature, center, featuresInCluster);
-
-            // 延迟应用高亮到 spiderfy 点上
-            requestAnimationFrame(() => {
-              // 检查是否是最新的请求
-              if (currentRequestId !== highlightRequestIdRef.current) return;
-
-              if (!spiderfySourceRef.current || !mapInstanceRef.current) return;
-
-              // 找到目标设备的 spiderfy 点
-              const spiderfyFeatures = spiderfySourceRef.current.getFeatures();
-              for (const sf of spiderfyFeatures) {
-                if (sf.get('spiderfyPoint')) {
-                  const sfDevice = sf.get('device') as MapDevice;
-                  if (sfDevice.id === device.id) {
-                    // 在 spiderfy 点上应用高亮
-                    highlightFeatureRef.current = sf as Feature;
-
-                    // 初始化波纹状态 - 简约风格：最多2个波纹
-                    rippleWavesRef.current = [];
-
-                    // 创建新波纹的函数
-                    const createRipple = () => {
-                      if (!highlightFeatureRef.current) return;
-                      rippleWavesRef.current.push({
-                        radius: 0,
-                        opacity: 0.6,
-                      });
-                    };
-
-                    // 立即创建第一个波纹
-                    createRipple();
-
-                    // 定时创建新波纹（每 800ms）
-                    rippleCreateRef.current = setInterval(() => {
-                      createRipple();
-                      if (rippleWavesRef.current.length > 2) {
-                        rippleWavesRef.current.shift();
-                      }
-                    }, 800);
-
-                    // 波纹扩散动画（每 40ms）
-                    pulseAnimationRef.current = setInterval(() => {
-                      if (!highlightFeatureRef.current) {
-                        if (pulseAnimationRef.current) {
-                          clearInterval(pulseAnimationRef.current);
-                          pulseAnimationRef.current = null;
-                        }
-                        return;
-                      }
-
-                      rippleWavesRef.current = rippleWavesRef.current
-                        .map(wave => ({
-                          radius: wave.radius + 0.4,
-                          opacity: wave.opacity - 0.008,
-                        }))
-                        .filter(wave => wave.opacity > 0);
-
-                      highlightFeatureRef.current.set('rippleWaves', [...rippleWavesRef.current]);
-
-                      if (mapInstanceRef.current) {
-                        mapInstanceRef.current.render();
-                      }
-                    }, 40);
-
-                    break;
-                  }
+          requestAnimationFrame(() => {
+            if (isStale() || !spiderfySourceRef.current) return;
+            const spiderfyFeatures = spiderfySourceRef.current.getFeatures();
+            for (const sf of spiderfyFeatures) {
+              if (sf.get('spiderfyPoint')) {
+                const sfDevice = sf.get('device') as MapDevice;
+                if (sfDevice.id === device.id) {
+                  applyRippleHighlight(sf as Feature);
+                  break;
                 }
               }
-            });
-          }
-        } else if (targetDeviceFeature) {
-          // 单个设备，直接高亮
-          targetDeviceFeature.set('highlighted', true);
-          highlightFeatureRef.current = targetDeviceFeature as Feature;
-
-          // 初始化波纹状态 - 简约风格：最多2个波纹
-          rippleWavesRef.current = [];
-
-          // 创建新波纹的函数
-          const createRipple = () => {
-            if (!highlightFeatureRef.current) return;
-            rippleWavesRef.current.push({
-              radius: 0,
-              opacity: 0.6,
-            });
-          };
-
-          // 立即创建第一个波纹
-          createRipple();
-
-          // 定时创建新波纹（每 800ms）
-          rippleCreateRef.current = setInterval(() => {
-            createRipple();
-            if (rippleWavesRef.current.length > 2) {
-              rippleWavesRef.current.shift();
             }
-          }, 800);
-
-          // 波纹扩散动画（每 40ms）
-          pulseAnimationRef.current = setInterval(() => {
-            if (!highlightFeatureRef.current) {
-              if (pulseAnimationRef.current) {
-                clearInterval(pulseAnimationRef.current);
-                pulseAnimationRef.current = null;
-              }
-              return;
-            }
-
-            rippleWavesRef.current = rippleWavesRef.current
-              .map(wave => ({
-                radius: wave.radius + 0.4,
-                opacity: wave.opacity - 0.008,
-              }))
-              .filter(wave => wave.opacity > 0);
-
-            highlightFeatureRef.current.set('rippleWaves', [...rippleWavesRef.current]);
-
-            if (mapInstanceRef.current) {
-              mapInstanceRef.current.render();
-            }
-          }, 40);
+          });
+        } else {
+          deviceFeature.set('highlighted', true);
+          applyRippleHighlight(deviceFeature);
         }
       });
     };
 
-    if (needsZoomChange) {
-      // 需要 zoom 变化，监听 moveend 事件确保地图完全稳定
-      const map = mapInstanceRef.current;
-      let handled = false;
+    // 阶段一：飞到中间 zoom，看是否仍然落在聚合中
+    const onArrivedAtIntermediate = () => {
+      if (isStale() || !mapInstanceRef.current) return;
+      detectClusterAndAct((clusterFeature, deviceFeature) => {
+        if (isStale()) return;
+        const featuresInCluster = clusterFeature.get('features') as Feature[] | undefined;
+        const count = featuresInCluster?.length ?? 1;
 
-      const onMoveEnd = () => {
-        if (handled) return;
-        handled = true;
-        map.un('moveend', onMoveEnd);
-        // 额外延迟确保聚合计算完成
-        setTimeout(doHighlightAndSpiderfy, 150);
-      };
+        if (count > 1 && featuresInCluster) {
+          // 仍在聚合中：直接 spiderfy，无需再爬到 zoom 18，
+          // 避免把同坐标设备拆散后反而找不到。
+          const geometry = clusterFeature.getGeometry();
+          if (!geometry) return;
+          const center = (geometry as Point).getCoordinates();
+          spiderfy(clusterFeature, center, featuresInCluster, device.id);
 
-      map.on('moveend', onMoveEnd);
-
-      // 安全超时：如果 moveend 没触发（不应该发生），也执行
-      setTimeout(() => {
-        if (!handled) {
-          handled = true;
-          map.un('moveend', onMoveEnd);
-          doHighlightAndSpiderfy();
+          requestAnimationFrame(() => {
+            if (isStale() || !spiderfySourceRef.current) return;
+            const spiderfyFeatures = spiderfySourceRef.current.getFeatures();
+            for (const sf of spiderfyFeatures) {
+              if (sf.get('spiderfyPoint')) {
+                const sfDevice = sf.get('device') as MapDevice;
+                if (sfDevice.id === device.id) {
+                  applyRippleHighlight(sf as Feature);
+                  break;
+                }
+              }
+            }
+          });
+          return;
         }
-      }, ANIMATION_CONFIG.flyDuration + 500);
+
+        // 单点：可以放心继续推到最大 zoom；但若调用方明确 skipFlyTo，则尊重契约直接高亮。
+        const view = mapInstanceRef.current!.getView();
+        const nowZoom = view.getZoom() ?? intermediateZoom;
+        if (!skipFlyTo && nowZoom < maxZoom - 0.5) {
+          flyTo(device.lng, device.lat, maxZoom, { onComplete: onArrivedAtFinalZoom });
+        } else {
+          deviceFeature.set('highlighted', true);
+          applyRippleHighlight(deviceFeature);
+        }
+      });
+    };
+
+    if (skipFlyTo) {
+      // 由调用方负责飞行（如轨迹播放），这里只跑探测/高亮逻辑
+      onArrivedAtIntermediate();
+      return;
+    }
+
+    const currentZoom = mapInstanceRef.current.getView().getZoom() ?? 0;
+    if (currentZoom >= intermediateZoom - 0.5) {
+      // 已经在中间 zoom 或更高：跳过第一段，直接探测/上推
+      onArrivedAtIntermediate();
     } else {
-      // 不需要 zoom 变化，直接执行（但稍作延迟确保状态稳定）
-      setTimeout(doHighlightAndSpiderfy, 100);
+      flyTo(device.lng, device.lat, intermediateZoom, { onComplete: onArrivedAtIntermediate });
     }
   }, [flyTo, clearHighlight, unspiderfy, spiderfy, cullDevicesToViewport]);
 
@@ -1191,14 +1272,24 @@ function bindMapEvents(
     onViewportChange?: (viewport: MapViewport) => void;
     onClusterClick?: (devices: MapDevice[]) => void;
     onZoomChange?: (zoom: number) => void;
-    onSpiderfy?: (clusterFeature: Feature, center: number[], features: Feature[]) => void;
+    onSpiderfy?: (clusterFeature: Feature, center: number[], features: Feature[], targetDeviceId?: string) => void;
     onUnspiderfy?: () => void;
     onMapClick?: () => void;
+    /**
+     * “散不开 + 数量太多”时触发，由父层弹出设备列表 Drawer。
+     * 未提供时退化为 spiderfy（受 SPIDERFY_CONFIG.maxNodes 截断保护）。
+     */
+    onClusterShowList?: (devices: MapDevice[], pixel: { x: number; y: number }) => void;
+    /**
+     * “程序化飞行中”计数器的 ref。为 >0 时，表示中间动画档位，
+     * moveend 不应在此时上报 viewport，避免引起外部重复拉取 /devices/geo。
+     */
+    isProgrammaticFlyingRef?: React.MutableRefObject<number>;
   },
   deviceLayer: VectorLayer<VectorSource>,
   spiderfyLayer: VectorLayer<VectorSource>
 ): void {
-  const { onDeviceClick, onDeviceHover, onViewportChange, onClusterClick, onZoomChange, onSpiderfy, onUnspiderfy, onMapClick } = callbacks;
+  const { onDeviceClick, onDeviceHover, onViewportChange, onClusterClick, onZoomChange, onSpiderfy, onUnspiderfy, onMapClick, onClusterShowList, isProgrammaticFlyingRef } = callbacks;
 
   // Spiderfy 状态（在 bindMapEvents 作用域内）
   let isSpiderfied = false;
@@ -1253,15 +1344,89 @@ function bindMapEvents(
           const devices = featuresProp.map((f: Feature) => f.getProperties() as MapDevice);
           onClusterClick?.(devices);
 
-          // 获取当前 zoom 级别
-          const currentZoom = map.getView().getZoom() ?? 0;
-
           // 如果已经展开，收起
           if (isSpiderfied) {
             onUnspiderfy?.();
             isSpiderfied = false;
-          } else if (currentZoom >= SPIDERFY_CONFIG.minZoom) {
-            // 高缩放级别：使用 spiderfy 展开
+            return;
+          }
+
+          // 智能路由：看 features 的屏幕 bbox 对角线
+          //   1) > clickExpandThresholdPx → 散得开，view.fit 下钻（类 Google Maps）
+          //   2) ≤ 阈值 且 count ≤ spiderfyMaxCount → spiderfy
+          //   3) ≤ 阈值 且 count > spiderfyMaxCount → onClusterShowList 回调（弹 Drawer）
+          //      未接时退化到 spiderfy + maxNodes 截断保证不崩
+          const ptsArr = featuresProp as Feature[];
+          const coords: number[][] = [];
+          for (const f of ptsArr) {
+            const g = f.getGeometry();
+            if (g) coords.push((g as Point).getCoordinates());
+          }
+          let pixelDiagonal = 0;
+          if (coords.length > 1) {
+            let minX = Infinity;
+            let minY = Infinity;
+            let maxX = -Infinity;
+            let maxY = -Infinity;
+            for (const c of coords) {
+              const px = map.getPixelFromCoordinate(c);
+              if (!px) continue;
+              if (px[0] < minX) minX = px[0];
+              if (px[0] > maxX) maxX = px[0];
+              if (px[1] < minY) minY = px[1];
+              if (px[1] > maxY) maxY = px[1];
+            }
+            if (Number.isFinite(minX)) {
+              const dx = maxX - minX;
+              const dy = maxY - minY;
+              pixelDiagonal = Math.sqrt(dx * dx + dy * dy);
+            }
+          }
+
+          const currentZoom = map.getView().getZoom() ?? 0;
+          const canExpand = pixelDiagonal > CLUSTER_CONFIG.clickExpandThresholdPx && coords.length > 1;
+
+          if (canExpand) {
+            // 下钻：适配到 bbox，限上不超过 maxHighlightZoom，避免一口气捆到最大级
+            const extent = boundingExtent(coords);
+            const view = map.getView();
+            const targetMaxZoom = Math.min(
+              (view.getMaxZoom?.() ?? 20),
+              ANIMATION_CONFIG.maxHighlightZoom ?? 18,
+            );
+            // 与 flyTo/progressiveFlyTo 同机制：进入“程序化飞行”计数，
+            // 让 moveend 只在最后一个档位上报 viewport。双插锐拍防护用 setTimeout 兑底。
+            if (isProgrammaticFlyingRef) {
+              isProgrammaticFlyingRef.current += 1;
+              const decay = () => {
+                isProgrammaticFlyingRef.current = Math.max(
+                  0,
+                  isProgrammaticFlyingRef.current - 1,
+                );
+              };
+              // view.fit 没有 callback，按动画 duration + 小量 buffer 释放计数
+              setTimeout(decay, 450);
+            }
+            view.fit(extent, {
+              padding: [80, 80, 80, 80],
+              duration: 400,
+              maxZoom: targetMaxZoom,
+              easing: Easing.easeOutCubic,
+            });
+            return;
+          }
+
+          // 散不开：判断走 spiderfy 还是列表
+          if (
+            featuresProp.length > CLUSTER_CONFIG.spiderfyMaxCount &&
+            onClusterShowList
+          ) {
+            const [x, y] = evt.pixel;
+            onClusterShowList(devices, { x, y });
+            return;
+          }
+
+          if (currentZoom >= SPIDERFY_CONFIG.minZoom) {
             const geometry = feature.getGeometry();
             if (geometry) {
               const center = (geometry as Point).getCoordinates();
@@ -1269,7 +1434,7 @@ function bindMapEvents(
               isSpiderfied = true;
             }
           } else {
-            // 低缩放级别：放大地图展开聚合
+            // zoom 太低，不适合 spiderfy，先推一档
             const view = map.getView();
             view.animate({
               center: evt.coordinate,
@@ -1389,9 +1554,15 @@ function bindMapEvents(
       const currentZoom = view.getZoom() ?? 0;
 
       // 缩放级别变化时通知（用于动态调整聚合距离）
+      // 即使处于程序化飞行中也需要触发，这样聚合距离才能随 zoom 缩放同步变化
       if (currentZoom !== lastZoom) {
         lastZoom = currentZoom;
         onZoomChange?.(currentZoom);
+      }
+
+      // 中间档位跳过 viewport 上报：避免一次下钻/飞行发 N 个 /devices/geo
+      if (isProgrammaticFlyingRef && isProgrammaticFlyingRef.current > 0) {
+        return;
       }
 
       if (onViewportChange) {

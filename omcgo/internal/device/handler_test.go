@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -216,8 +217,19 @@ func (m *fakeParamRepo) DeleteByPathPrefix(_ context.Context, _ uuid.UUID, _ str
 	return 0, nil
 }
 
-func (m *fakeParamRepo) GetByPathPrefix(_ context.Context, _ uuid.UUID, _ string) ([]model.DeviceParameter, error) {
-	return nil, nil
+func (m *fakeParamRepo) GetByPathPrefix(_ context.Context, deviceID uuid.UUID, prefix string) ([]model.DeviceParameter, error) {
+	if prefix == "" {
+		out := make([]model.DeviceParameter, len(m.params[deviceID]))
+		copy(out, m.params[deviceID])
+		return out, nil
+	}
+	var out []model.DeviceParameter
+	for _, p := range m.params[deviceID] {
+		if strings.HasPrefix(p.ParameterPath, prefix) {
+			out = append(out, p)
+		}
+	}
+	return out, nil
 }
 
 func (m *fakeParamRepo) CountByPathPrefix(_ context.Context, _ uuid.UUID, _ string) (int, error) {
@@ -575,24 +587,26 @@ func TestHandler_GetStats(t *testing.T) {
 
 // fakeParamSyncStarter 实现 ParamSyncStarter 接口供 SyncDeviceParams 单测使用。
 type fakeParamSyncStarter struct {
-	calls       []syncStarterCall
-	defaultUsed bool
-	defaultErr  error
+	calls               []syncStarterCall
+	defaultUsed         bool
+	defaultGPVTaskCount int
+	defaultErr          error
 }
 
 type syncStarterCall struct {
-	deviceID uuid.UUID
-	sourceID string
+	deviceID       uuid.UUID
+	sourceID       string
+	parameterPaths []string
 }
 
-func (f *fakeParamSyncStarter) StartManualSync(_ context.Context, dev *model.Device, sourceID string) (bool, error) {
-	f.calls = append(f.calls, syncStarterCall{deviceID: dev.ID, sourceID: sourceID})
-	return f.defaultUsed, f.defaultErr
+func (f *fakeParamSyncStarter) StartManualSync(_ context.Context, dev *model.Device, sourceID string, parameterPaths []string) (bool, int, error) {
+	f.calls = append(f.calls, syncStarterCall{deviceID: dev.ID, sourceID: sourceID, parameterPaths: parameterPaths})
+	return f.defaultUsed, f.defaultGPVTaskCount, f.defaultErr
 }
 
 func TestHandler_SyncDeviceParams_Success(t *testing.T) {
 	h, deviceRepo, _ := newTestHandler()
-	starter := &fakeParamSyncStarter{defaultUsed: true}
+	starter := &fakeParamSyncStarter{defaultUsed: true, defaultGPVTaskCount: 7}
 	h.service.SetParamSyncStarter(starter)
 	router := setupRouter(h)
 
@@ -601,7 +615,7 @@ func TestHandler_SyncDeviceParams_Success(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/devices/"+id.String()+"/sync-params",
-		bytes.NewReader([]byte(`{"force": false}`)))
+		bytes.NewReader([]byte(`{"force": false, "parameter_paths": ["Device.DeviceInfo.SoftwareVersion"]}`)))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
 
@@ -612,6 +626,7 @@ func TestHandler_SyncDeviceParams_Success(t *testing.T) {
 	assert.Equal(t, "queued", resp["status"])
 	assert.Equal(t, id.String(), resp["device_id"])
 	assert.Equal(t, "SN-SYNC-001", resp["serial_number"])
+	assert.EqualValues(t, 7, resp["gpv_task_count"])
 	assert.Contains(t, resp["source_id"].(string), "manual:", "source_id 应以 manual: 前缀")
 
 	require.Len(t, starter.calls, 1, "应调一次 StartManualSync")
@@ -620,6 +635,7 @@ func TestHandler_SyncDeviceParams_Success(t *testing.T) {
 	// 响应里的 source_id 才是 manual:<uuid> display 形式
 	_, parseErr := uuid.Parse(starter.calls[0].sourceID)
 	assert.NoError(t, parseErr, "传给 service 的 sourceID 必须是合法 UUID")
+	assert.Equal(t, []string{"Device.DeviceInfo.SoftwareVersion"}, starter.calls[0].parameterPaths)
 }
 
 func TestHandler_SyncDeviceParams_NoBody_OK(t *testing.T) {

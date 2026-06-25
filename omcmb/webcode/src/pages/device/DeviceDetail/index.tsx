@@ -244,7 +244,7 @@ interface DeviceDetailInfo {
   specialSubframe?: string;
   rootIndex?: string;
   gpsSatellites?: number;
-  gpsHeight?: number;
+  gpsHeight?: number | null;
   lockStatus?: string;
   enbId?: string;
   networkModel?: string;
@@ -299,7 +299,7 @@ interface BackendDeviceDetailInfo {
   special_subframe?: string;
   root_index?: string;
   gps_satellites?: number;
-  gps_height?: number;
+  gps_height?: number | null;
   lock_status?: string;
   enb_id?: string;
   network_model?: string;
@@ -515,6 +515,20 @@ const renderStatusTag = (value: string | undefined, map: Record<string, { label:
   return <Tag color={entry.color}>{entry.label}</Tag>;
 };
 
+const renderDeviceSyncStatus = (value: string | undefined, t: ReturnType<typeof useT>) =>
+  renderStatusTag(value, {
+    synchronized: { label: t('status.synchronized'), color: 'success' },
+    'gps synchronized': { label: `GPS ${t('status.synchronized')}`, color: 'success' },
+    '1588 synchronized': { label: `1588 ${t('status.synchronized')}`, color: 'success' },
+    'rem synchronized': { label: `REM ${t('status.synchronized')}`, color: 'success' },
+    gps: { label: `GPS ${t('status.synchronized')}`, color: 'success' },
+    beidou: { label: `北斗${t('status.synchronized')}`, color: 'success' },
+    ntp: { label: `NTP/1588 ${t('status.synchronized')}`, color: 'success' },
+    error: { label: t('status.notSynchronized'), color: 'error' },
+    not_synchronized: { label: t('status.notSynchronized'), color: 'error' },
+    'not synchronized': { label: t('status.notSynchronized'), color: 'error' },
+  });
+
 // ─── 基站信息组 ────────────────────────────────────────────────────────
 
 const getStationFields = (t: ReturnType<typeof useT>, networkType: string): FieldGroup => {
@@ -611,7 +625,7 @@ const getStatusFields = (t: ReturnType<typeof useT>, networkType: string): Field
   const fields: FieldItem[] = [
     // 公共字段
     { key: 'ueCount', label: t('device.ueCount'), render: (d) => d.ueCount ?? '-' },
-    { key: 'syncStatus', label: t('device.syncStatus'), render: (d) => d.syncStatus || '-' },
+    { key: 'syncStatus', label: t('device.syncStatus'), render: (d) => renderDeviceSyncStatus(d.syncStatus, t) },
   ];
 
   // eNB 独有字段
@@ -859,8 +873,12 @@ interface KPITabContentProps {
 
 function KPITabContent({ device, t }: KPITabContentProps) {
   const [timeMode, setTimeMode] = useState<'day' | 'week'>('day');
-  // 下钻对象：'' = 设备级（全部）；否则为某 objectLdn。客户端侧按 objectLdn 过滤聚合行。
-  const [objectLdn, setObjectLdn] = useState<string>('');
+  // 下钻对象集（多选，默认全选）：'' = 设备级伪项 + metricObjects 返回的实实在在 ldn。
+  // 设备级行 (object_ldn='') 不在后端 metricObjects 返回集里（SQL 有 `object_ldn <> ''`），
+  // 但 5G KGNB05xx 这类 KPI 原生在设备级行，不带上会全选后什么都不出，所以手动在集首加个 '' 伪项。
+  const [objectLdns, setObjectLdns] = useState<string[]>([]);
+  // 初始化一次全选；后续用户主动清空后不被 effect 覆盖。
+  const objectLdnsInitializedRef = useRef(false);
 
   const networkType = device.networkType ?? '';
   const kpiConfig = useMemo(() => getKPIConfig(networkType, t), [networkType, t]);
@@ -875,6 +893,20 @@ function KPITabContent({ device, t }: KPITabContentProps) {
     sn ? [sn] : [],
     technology || undefined,
   );
+
+  // 全选集 = 设备级伪项 '' + metricObjects 全部 ldn。
+  const allObjectLdns = useMemo(
+    () => ['', ...metricObjects.map((o) => o.objectLdn)],
+    [metricObjects],
+  );
+
+  // 首次成功拿到下拉项后默认全选（仅执行一次，不覆盖用户后续手动取消）。
+  useEffect(() => {
+    if (!objectLdnsInitializedRef.current && metricObjects.length > 0) {
+      setObjectLdns(allObjectLdns);
+      objectLdnsInitializedRef.current = true;
+    }
+  }, [metricObjects.length, allObjectLdns]);
 
   // 真实聚合查询：单设备传 [sn]，dimension=device、metricType=kpi、fillEmpty=true。
   const enabled = Boolean(sn) && kpiConfig.length > 0;
@@ -909,15 +941,15 @@ function KPITabContent({ device, t }: KPITabContentProps) {
   );
   const { data: prevRows } = useAggregatedMetricsByDevices(prevParams, sn ? [sn] : [], enabled);
 
-  // 聚合行 → 每 K 编号一张图（纯函数，按 objectLdn 过滤、null 占位不画点）。
+  // 聚合行 → 每 K 编号一张图（纯函数，按 objectLdns 集合过滤 + 多对象 series，null 占位不画点）。
   const charts = useMemo(
-    () => buildKpiCharts(rows, kpiConfig, objectLdn || null),
-    [rows, kpiConfig, objectLdn],
+    () => buildKpiCharts(rows, kpiConfig, objectLdns),
+    [rows, kpiConfig, objectLdns],
   );
-  // 上一周期图（同口径、同 objectLdn 过滤），再吸附对齐到当前周期 X 轴。
+  // 上一周期图（同口径、同 objectLdns 过滤），再吸附对齐到当前周期 X 轴。
   const prevCharts = useMemo(
-    () => buildKpiCharts(prevRows, kpiConfig, objectLdn || null),
-    [prevRows, kpiConfig, objectLdn],
+    () => buildKpiCharts(prevRows, kpiConfig, objectLdns),
+    [prevRows, kpiConfig, objectLdns],
   );
   const compareDatas = useMemo(
     () =>
@@ -943,6 +975,7 @@ function KPITabContent({ device, t }: KPITabContentProps) {
   const objectOptions = [
     { label: t('device.kpi.deviceLevel'), value: '' },
     ...metricObjects.map((o) => ({
+      // 下拉标签走 formatObjectLdn 友好名；legend / series.name 却按拍板决定显示原始 LDN。
       label: formatObjectLdn(o.objectLdn),
       value: o.objectLdn,
     })),
@@ -964,11 +997,17 @@ function KPITabContent({ device, t }: KPITabContentProps) {
         <Space size={4}>
           <Text type="secondary" style={{ fontSize: 13 }}>{t('device.kpi.object')}</Text>
           <Select
+            mode="multiple"
             size="small"
-            value={objectLdn}
+            value={objectLdns}
             options={objectOptions}
-            onChange={setObjectLdn}
-            style={{ minWidth: 200 }}
+            onChange={setObjectLdns}
+            allowClear
+            maxTagCount="responsive"
+            placeholder={t('device.kpi.objectPlaceholder')}
+            // 工具栏 flex-end 不让 Select 自然撑开 → 用固定 width 给足空间显示 LDN tag；
+            // 窄屏靠 flexWrap 触发整行换行，不破布局。
+            style={{ width: 720 }}
           />
         </Space>
         <Radio.Group
@@ -1012,20 +1051,48 @@ function KPITabContent({ device, t }: KPITabContentProps) {
           const chart = charts[idx];
           const compare = compareDatas[idx];
           const xLabels = chart.xData.map((iso) => formatKpiAxisLabel(iso, queryWindow.granularity));
-          // 上一周期 tooltip 文案（每点对应上周期真实起止），仅当上周期有数据时挂线。
-          const hasCompare = !compare.isEmpty;
-          const compareLabels = hasCompare
-            ? compare.compareBuckets.map((s, i) =>
-                formatCompareLabel(s, compare.compareBucketEnds[i] ?? '', queryWindow.granularity),
+          // 多对象：过滤掉「该对象本图全 null」的索引，无数据对象不出线。
+          const visibleIdx = chart.series
+            .map((s, i) => (s.values.every((v) => v == null) ? -1 : i))
+            .filter((i) => i >= 0);
+          // 上周期 tooltip 文案（首条可见对象的桶，多对象时不并出多行以保清爽）：
+          // snapped 后多对象 buckets 一致，拿首条不失真。
+          const hasCompareGlobal = !compare.isEmpty;
+          const firstCompareIdx = hasCompareGlobal
+            ? visibleIdx.find(
+                (i) => !(compare.series[i]?.values ?? []).every((v) => v == null),
               )
             : undefined;
-          const seriesName = chart.displayName || kpi.label;
-          const lineSeries = hasCompare
-            ? [
-                { name: seriesName, data: chart.values },
-                { name: t('device.detail.kpiPrevPeriod', { name: seriesName }), data: compare.values, dashed: true },
-              ]
-            : [{ name: seriesName, data: chart.values }];
+          const compareLabels =
+            firstCompareIdx != null
+              ? compare.series[firstCompareIdx].compareBuckets.map((s, i) =>
+                  formatCompareLabel(
+                    s,
+                    compare.series[firstCompareIdx].compareBucketEnds[i] ?? '',
+                    queryWindow.granularity,
+                  ),
+                )
+              : undefined;
+          // 实线 × 多对象；虚线 × 多对象（仅本对象上周期非全空才出）。
+          const realSeries = visibleIdx.map((i) => ({
+            name: chart.series[i].name,
+            data: chart.series[i].values,
+          }));
+          const compareSeriesArr = hasCompareGlobal
+            ? visibleIdx
+                .filter(
+                  (i) => !(compare.series[i]?.values ?? []).every((v) => v == null),
+                )
+                .map((i) => ({
+                  name: t('device.detail.kpiPrevPeriod', { name: chart.series[i].name }),
+                  data: compare.series[i].values,
+                  dashed: true as const,
+                  // 多对象时 legend 已经被实线占满；虚线只通过线型表达「上一周期」，不再
+                  // 单独占 legend 项（避免与实线名重复 + 项过多触发 echart 翻页）。
+                  showInLegend: false,
+                }))
+            : [];
+          const lineSeries = [...realSeries, ...compareSeriesArr];
 
           return (
             <Col key={kpi.key} xs={24} sm={12}>
@@ -1102,8 +1169,11 @@ export default function DeviceDetail() {
   const { data: device, isLoading, refetch } = useDeviceBySn(sn);
   const syncMutation = useSyncDeviceParams();
   const { data: paramSyncStatus, refetch: refetchParamSyncStatus } = useSyncStatus(device?.id ?? '');
-  const [quickSettingsSyncPending, setQuickSettingsSyncPending] = useState(false);
-  const quickSettingsSyncBaselineRef = useRef<{ lastParamSyncAt?: string; lastParamSyncFailedAt?: string }>({});
+  const [quickSettingsSyncTargetPaths, setQuickSettingsSyncTargetPaths] = useState<string[]>([]);
+  const quickSettingsSync = useQuickSettingsFeedbackStore((s) => (device?.id ? s.quickSettingsSyncs[device.id] : undefined));
+  const quickSettingsSyncPending = Boolean(quickSettingsSync);
+  const lastQuickSettingsParamSync = useQuickSettingsFeedbackStore((s) => (device?.id ? s.lastScopedSyncs[device.id] : undefined)) ?? null;
+  const isDeviceParamSyncBusy = paramSyncStatus?.status === 'syncing' || quickSettingsSyncPending || syncMutation.isPending;
   const { data: detailComposite } = useQuery({
     queryKey: ['devices', 'detail-composite-v2', device?.id],
     queryFn: async () => {
@@ -1226,46 +1296,6 @@ export default function DeviceDetail() {
   const detailQuickSettingsCellInstances = detailResolved.instances;
   const detailQuickSettingsRuleReady = showQuickSettingsTab && detailResolved.ready;
 
-  useEffect(() => {
-    if (activeTab !== 'quickSettings' || !quickSettingsSyncPending) return;
-    const timer = window.setInterval(() => {
-      void refetchParamSyncStatus();
-    }, 2000);
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [activeTab, quickSettingsSyncPending, refetchParamSyncStatus]);
-
-  useEffect(() => {
-    const deviceId = device?.id;
-    if (!deviceId || activeTab !== 'quickSettings' || !quickSettingsSyncPending || !paramSyncStatus) return;
-    if (paramSyncStatus.status === 'syncing') return;
-
-    const { lastParamSyncAt: baselineSyncAt, lastParamSyncFailedAt: baselineFailedAt } = quickSettingsSyncBaselineRef.current;
-    const hasNewSuccess = Boolean(
-      paramSyncStatus.lastParamSyncAt && paramSyncStatus.lastParamSyncAt !== baselineSyncAt,
-    );
-    const hasNewFailure = Boolean(
-      paramSyncStatus.lastParamSyncFailedAt && paramSyncStatus.lastParamSyncFailedAt !== baselineFailedAt,
-    );
-
-    if (!hasNewSuccess && !hasNewFailure) return;
-
-    setQuickSettingsSyncPending(false);
-
-    if (hasNewFailure && !hasNewSuccess) {
-      message.error(paramSyncStatus.lastParamSyncError || t('device.detail.deviceFetchFailed'));
-      return;
-    }
-
-    useQuickSettingsFeedbackStore.getState().clearByDevice(deviceId);
-    useQuickSettingsFeedbackStore.getState().bumpRefreshTick(deviceId);
-    void queryClient.invalidateQueries({ queryKey: ['devices', 'detail-composite-v2', deviceId] });
-    void queryClient.invalidateQueries({ queryKey: ['quicksettings', 'groups', deviceId] });
-    void queryClient.invalidateQueries({ queryKey: ['devices', 'parameter-schema', deviceId] });
-    message.success(t('device.detail.deviceFetchLatest'));
-  }, [activeTab, device?.id, message, paramSyncStatus, queryClient, quickSettingsSyncPending, t]);
-
   const handleHeaderRefresh = useCallback(() => {
     void refetch();
     const deviceId = device?.id;
@@ -1285,20 +1315,31 @@ export default function DeviceDetail() {
         break;
       case 'quickSettings':
         if (deviceId) {
-          quickSettingsSyncBaselineRef.current = {
+          useQuickSettingsFeedbackStore.getState().startQuickSettingsSync(deviceId, {
             lastParamSyncAt: paramSyncStatus?.lastParamSyncAt,
             lastParamSyncFailedAt: paramSyncStatus?.lastParamSyncFailedAt,
-          };
-          setQuickSettingsSyncPending(true);
+            targetCount: quickSettingsSyncTargetPaths.length,
+            gpvTaskCount: 0,
+            startedAt: Date.now(),
+          });
           syncMutation.mutate(
-            { deviceId },
+            { deviceId, parameterPaths: quickSettingsSyncTargetPaths },
             {
               onSuccess: (data) => {
-                message.success(t('device.detail.deviceFetchQueued', { id: data.sourceId }));
+                const targetCount = data.parameterPathsCount ?? quickSettingsSyncTargetPaths.length;
+                const gpvTaskCount = data.gpvTaskCount ?? 0;
+                useQuickSettingsFeedbackStore.getState().patchQuickSettingsSync(deviceId, {
+                  sourceId: data.sourceId,
+                  targetCount,
+                  gpvTaskCount,
+                });
+                message.success(targetCount > 0
+                  ? t('device.detail.deviceFetchQueuedScoped', { id: data.sourceId, count: targetCount, gpvCount: gpvTaskCount })
+                  : t('device.detail.deviceFetchQueued', { id: data.sourceId }));
                 void refetchParamSyncStatus();
               },
               onError: (err) => {
-                setQuickSettingsSyncPending(false);
+                useQuickSettingsFeedbackStore.getState().finishQuickSettingsSync(deviceId);
                 const errMsg = err instanceof Error ? err.message : t('device.detail.deviceFetchTriggerFailed');
                 message.error(errMsg);
               },
@@ -1309,7 +1350,7 @@ export default function DeviceDetail() {
       default:
         break;
     }
-  }, [activeTab, device?.id, message, paramSyncStatus?.lastParamSyncAt, paramSyncStatus?.lastParamSyncFailedAt, queryClient, refetch, refetchParamSyncStatus, syncMutation, t]);
+  }, [activeTab, device?.id, message, paramSyncStatus?.lastParamSyncAt, paramSyncStatus?.lastParamSyncFailedAt, queryClient, quickSettingsSyncTargetPaths, refetch, refetchParamSyncStatus, syncMutation, t]);
 
   const SEVERITY_LABEL: Record<string, string> = useMemo(() => ({
     critical: t('alarm.severity.critical'),
@@ -1435,7 +1476,7 @@ export default function DeviceDetail() {
       {
         key: 'actions',
         title: t('common.operation'),
-        width: 72,
+        width: 56,
         fixed: 'left',
         render: (_val, record) => {
           const isConfirmed = record.dealState === '1' || record.dealState === '3';
@@ -1466,6 +1507,13 @@ export default function DeviceDetail() {
             </Dropdown>
           );
         },
+      },
+      {
+        key: 'deviceSn',
+        title: t('alarm.deviceSn'),
+        dataIndex: 'deviceSn',
+        width: 240,
+        mono: true,
       },
       {
         key: 'severity',
@@ -1644,12 +1692,13 @@ export default function DeviceDetail() {
             )}
           </div>
           <Space>
-            {/* license tab 自带"刷新"按钮，此处头部刷新隐藏，避免同页两个刷新按钮 */}
-            {activeTab !== 'license' && (
+            {/* license/parameters tab 自带明确操作入口，此处头部刷新隐藏，避免语义重复或误导 */}
+            {activeTab !== 'license' && activeTab !== 'parameters' && (
               <Button
                 icon={<ReloadOutlined />}
                 onClick={handleHeaderRefresh}
-                loading={activeTab === 'quickSettings' && (quickSettingsSyncPending || syncMutation.isPending)}
+                loading={activeTab === 'quickSettings' && isDeviceParamSyncBusy}
+                disabled={isDeviceParamSyncBusy}
               >
                 {t('common.refresh')}
               </Button>
@@ -1718,7 +1767,14 @@ export default function DeviceDetail() {
               // 不连累设备头部与其他页签。
               children: (
                 <ErrorBoundary>
-                  <ParameterTreeTab deviceId={device.id} />
+                  <ParameterTreeTab
+                    deviceId={device.id}
+                    lastScopedSync={lastQuickSettingsParamSync}
+                    syncBusy={isDeviceParamSyncBusy}
+                    onFullSyncStarted={() => {
+                      if (device?.id) useQuickSettingsFeedbackStore.getState().clearLastScopedSync(device.id);
+                    }}
+                  />
                 </ErrorBoundary>
               ),
             },
@@ -1731,7 +1787,11 @@ export default function DeviceDetail() {
                   forceRender: true,
                   children: (
                     <ErrorBoundary>
-                      <QuickSettingsTab deviceId={device.id} networkType={device.networkType} />
+                      <QuickSettingsTab
+                        deviceId={device.id}
+                        networkType={device.networkType}
+                        onSyncTargetPathsChange={setQuickSettingsSyncTargetPaths}
+                      />
                     </ErrorBoundary>
                   ),
                 }]

@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"github.com/minio/minio-go/v7"
 
 	"github.com/omcgo/omcgo/internal/admin"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
@@ -62,6 +64,24 @@ func (h *Handler) ListSnapshots(c *gin.Context) {
 	filter.SerialNumber = strings.TrimSpace(c.Query("serial_number"))
 	filter.EnbName = strings.TrimSpace(c.Query("enb_name"))
 	filter.ProductType = strings.TrimSpace(c.Query("product_type"))
+	if raw := strings.TrimSpace(c.Query("product_id")); raw != "" && h.productResolver != nil {
+		pid, perr := uuid.Parse(raw)
+		if perr != nil {
+			commonerrors.AbortWithError(c, http.StatusBadRequest, fmt.Errorf("invalid product_id: %w", perr))
+			return
+		}
+		patterns, rerr := h.productResolver.GetPatternsByProductID(c.Request.Context(), pid)
+		if rerr != nil {
+			commonerrors.AbortWithError(c, http.StatusInternalServerError, fmt.Errorf("resolve product patterns: %w", rerr))
+			return
+		}
+		if len(patterns) == 0 {
+			// 产品无任何 active pattern：直接返回空集，避免脱 IN 表达式泛查。
+			response.OK(c, model.NewListResponse([]ConfigSnapshot{}, 0, filter.Page, filter.PageSize))
+			return
+		}
+		filter.ProductTypes = patterns
+	}
 	if src := strings.TrimSpace(c.Query("source")); src != "" {
 		ss := SnapshotSource(src)
 		filter.Source = &ss
@@ -247,22 +267,11 @@ func (h *Handler) ImportSnapshots(c *gin.Context) {
 	response.OK(c, result)
 }
 
-// SnapshotDownloadResponse 是 DownloadSnapshot 的响应体。
-type SnapshotDownloadResponse struct {
-	SerialNumber string `json:"serial_number"`
-	FileName     string `json:"file_name"`
-	DownloadURL  string `json:"download_url"`
-	ExpiresIn    int    `json:"expires_in_seconds"`
-}
-
-// DownloadSnapshot handles GET /api/v1/backup/config-snapshots/:sn/download
-//
-// **返回 JSON**（不是 302 重定向）—— 因为客户端 fetch 带 Bearer Token，
-// 但 MinIO presigned URL 不接受 Authorization header；如果 302 跳转后浏览器
-// 把 token 透传到 MinIO，MinIO 会拒 + CORS 报错。所以返回 URL 给前端，
-// 前端拿到后用 `window.open(url)` 或 `<a href=url>` 触发下载即可。
+// DownloadSnapshot handles GET /api/v1/backup/config-snapshots/:sn/download.
+// It streams the object through the authenticated API origin so browsers do not
+// need direct access to the MinIO public endpoint.
 func (h *Handler) DownloadSnapshot(c *gin.Context) {
-	if h.snapshotService == nil || h.minioClient == nil {
+	if h.snapshotService == nil || h.objectClient == nil {
 		commonerrors.AbortWithError(c, http.StatusServiceUnavailable,
 			errors.New("snapshot download not configured"))
 		return
@@ -281,19 +290,22 @@ func (h *Handler) DownloadSnapshot(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
 		return
 	}
-	presigned, presignErr := h.presignClient().PresignedGetObject(
-		c.Request.Context(), snap.ObjectBucket, snap.ObjectPath, time.Hour, nil,
+	obj, getErr := h.objectClient.GetObject(
+		c.Request.Context(), snap.ObjectBucket, snap.ObjectPath, minio.GetObjectOptions{},
 	)
-	if presignErr != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, presignErr)
+	if getErr != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, getErr)
 		return
 	}
-	response.OK(c, SnapshotDownloadResponse{
-		SerialNumber: sn,
-		FileName:     snap.FileName,
-		DownloadURL:  presigned.String(),
-		ExpiresIn:    3600,
-	})
+	defer obj.Close()
+
+	stat, statErr := obj.Stat()
+	if statErr != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, statErr)
+		return
+	}
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", snap.FileName))
+	c.DataFromReader(http.StatusOK, stat.Size, "application/octet-stream", obj, nil)
 }
 
 // DeleteSnapshot handles DELETE /api/v1/backup/config-snapshots/:sn

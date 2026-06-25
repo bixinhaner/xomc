@@ -801,6 +801,11 @@
         <param name="Device.Services.FAPService.{i}.AmfsStatus" standardPath="Device.Services.FAPService.{i}.AmfsStatus" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <param name="Device.Services.FAPService.{i}.FAPControl.PLLSyncState" standardPath="Device.Services.FAPService.{i}.FAPControl.PLLSyncState" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <param name="Device.FAP.Synchronization.ClockSourceSyncState" standardPath="Device.FAP.Synchronization.ClockSourceSyncState" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.FAP.Synchronization.AntennaStatus" standardPath="Device.FAP.Synchronization.AntennaStatus" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.FAP.Synchronization.Longitude" standardPath="Device.FAP.Synchronization.Longitude" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.FAP.Synchronization.Latitude" standardPath="Device.FAP.Synchronization.Latitude" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.FAP.Synchronization.Altitude" standardPath="Device.FAP.Synchronization.Altitude" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.FAP.Synchronization.NumberOfSatellites" standardPath="Device.FAP.Synchronization.NumberOfSatellites" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
         <param name="Device.Services.FAPService.{i}.FAPControl.NR.MultiPlmnEnable" standardPath="Device.Services.FAPService.{i}.FAPControl.NR.MultiPlmnEnable" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param name="Device.Services.FAPService.{i}.FAPControl.NR.NgapDscp.Dscp" standardPath="Device.Services.FAPService.{i}.FAPControl.NR.NgapDscp.Dscp" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param name="Device.Services.FAPService.{i}.FAPControl.NR.NgapDscp.VlanPrio" standardPath="Device.Services.FAPService.{i}.FAPControl.NR.NgapDscp.VlanPrio" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>

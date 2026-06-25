@@ -13,7 +13,7 @@ import InstanceSelectorForm from './InstanceSelectorForm';
 import MultiInstanceTable, { formatDeviceFaultBrief, formatTime, statusTagSpec } from './MultiInstanceTable';
 import BscBtsAddModal from './BscBtsAddModal';
 import { BSC_BTS_FEEDBACK_GROUP_ID } from './bscBtsFeedback';
-import type { QuickSettingsInstanceContext } from './validators';
+import { applyInstanceContext, type QuickSettingsInstanceContext } from './validators';
 import { useT } from '@/hooks/useT';
 
 const { Text } = Typography;
@@ -24,6 +24,7 @@ interface QuickSettingsTabProps {
    * 设备详情页传入的 networkType 兼容历史值 eNB/gNB 和技术值 lte/nr。
    */
   networkType: string;
+  onSyncTargetPathsChange?: (paths: string[]) => void;
 }
 
 function normalizeQuickSettingsNetworkType(networkType: string): string {
@@ -58,7 +59,7 @@ const BSC_BTS_OBJECT_PREFIX = 'DeviceGSM.Bts.';
  * 小区实例解析（lte/nr/BM/cellModeIdx/InUse 联合规则）已统一到
  * useResolvedCellInstances，DeviceDetail 概览页与本组件共享同一计算路径。
  */
-export default function QuickSettingsTab({ deviceId, networkType }: QuickSettingsTabProps) {
+export default function QuickSettingsTab({ deviceId, networkType, onSyncTargetPathsChange }: QuickSettingsTabProps) {
   const intl = useIntl();
   const t = useT();
   const locale: 'zh-CN' | 'en-US' = intl.locale === 'en-US' ? 'en-US' : 'zh-CN';
@@ -150,14 +151,14 @@ export default function QuickSettingsTab({ deviceId, networkType }: QuickSetting
       ? userPickedInstance
       : selectableInstances[0] ?? 1;
 
-  const instanceContext: QuickSettingsInstanceContext = {
+  const instanceContext: QuickSettingsInstanceContext = useMemo(() => ({
     networkType: normalizedNetworkType,
     // BSC 重用 fapInstance 字段。applyInstanceContext 的非-NR 分支会把第一个 {i}
     // 替换为 fapInstance,而 BSC 的 standardPath 只含一个 {i}(DeviceGSM.Bts.{i}.<leaf>),
     // 正好被完整替换为选中的 BTS 实例号,无需新增独立的 btsInstance 字段。
     fapInstance: (isENB || isBSC) ? selectedInstance : 1,
     cellInstance: isNR ? selectedInstance : undefined,
-  };
+  }), [normalizedNetworkType, isENB, isBSC, isNR, selectedInstance]);
   const selectorLabel = isENB
     ? (isBM
       ? (activeBmTech === 'GSM' ? t('device.quickSettings.cellInstanceGsm') : t('device.quickSettings.cellInstanceLte'))
@@ -177,6 +178,28 @@ export default function QuickSettingsTab({ deviceId, networkType }: QuickSetting
   const selectedKey = isNR
     ? `${instanceContext.fapInstance}-${instanceContext.cellInstance ?? 1}`
     : String(instanceContext.fapInstance);
+
+  const syncTargetPaths = useMemo(() => {
+    const paths = new Set<string>();
+    for (const group of visibleGroups) {
+      if (group.objectPath) {
+        paths.add(applyInstanceContext(group.objectPath, instanceContext, { preserveTrailingInstance: true }));
+      }
+      for (const param of group.params) {
+        if (param.standardPath) {
+          paths.add(applyInstanceContext(param.standardPath, instanceContext));
+        }
+        if (param.extraInfoPath) {
+          paths.add(applyInstanceContext(param.extraInfoPath, instanceContext));
+        }
+      }
+    }
+    return Array.from(paths).filter(Boolean).sort();
+  }, [visibleGroups, instanceContext]);
+
+  useEffect(() => {
+    onSyncTargetPathsChange?.(syncTargetPaths);
+  }, [onSyncTargetPathsChange, syncTargetPaths]);
 
   // BSC BTS 实例删除：复用 useDeleteObject;新增走 BscBtsAddModal 内部的 useAddObject。
   const deleteObjectMutation = useDeleteObject();

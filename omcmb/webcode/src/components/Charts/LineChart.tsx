@@ -12,6 +12,11 @@ export interface LineSeries {
   color?: string;
   /** 为 true 时该线强制画虚线（lineStyle.type='dashed'），用于「上一周期」对比线。默认按索引走原样式。 */
   dashed?: boolean;
+  /**
+   * 为 false 时该 series 不进 legend（但照画、在 tooltip 里仍可见）。
+   * 默认 true。应用场景：上一周期虚线、阈值辅助线等“带、位但不需要 legend 项」的线。
+   */
+  showInLegend?: boolean;
 }
 
 /**
@@ -120,6 +125,10 @@ export function buildLineChartOption({
 
     const baseLegend = base.legend as object;
 
+    // 只列出 showInLegend 非 false 的 series；全都不隐藏时不传 data（保持 echart 默认能收集全量 series）。
+    const visibleNames = series.filter((s) => s.showInLegend !== false).map((s) => s.name);
+    const hasHidden = visibleNames.length !== series.length;
+
     return {
       ...baseLegend,
       top: title ? 28 : 8,
@@ -129,6 +138,7 @@ export function buildLineChartOption({
       // Allow multiple rows with scroll
       pageButtonItemGap: 2,
       pageButtonGap: 4,
+      ...(hasHidden ? { data: visibleNames } : {}),
     };
   };
 

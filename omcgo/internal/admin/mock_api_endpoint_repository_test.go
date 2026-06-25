@@ -145,16 +145,16 @@ func (mr *MockApiEndpointRepositoryMockRecorder) Update(ctx, id, req any) *gomoc
 }
 
 // Upsert mocks base method.
-func (m *MockApiEndpointRepository) Upsert(ctx context.Context, path, method, name, apiGroup string) (bool, error) {
+func (m *MockApiEndpointRepository) Upsert(ctx context.Context, path, method, name, description, apiGroup string) (bool, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Upsert", ctx, path, method, name, apiGroup)
+	ret := m.ctrl.Call(m, "Upsert", ctx, path, method, name, description, apiGroup)
 	ret0, _ := ret[0].(bool)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // Upsert indicates an expected call of Upsert.
-func (mr *MockApiEndpointRepositoryMockRecorder) Upsert(ctx, path, method, name, apiGroup any) *gomock.Call {
+func (mr *MockApiEndpointRepositoryMockRecorder) Upsert(ctx, path, method, name, description, apiGroup any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Upsert", reflect.TypeOf((*MockApiEndpointRepository)(nil).Upsert), ctx, path, method, name, apiGroup)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Upsert", reflect.TypeOf((*MockApiEndpointRepository)(nil).Upsert), ctx, path, method, name, description, apiGroup)
 }

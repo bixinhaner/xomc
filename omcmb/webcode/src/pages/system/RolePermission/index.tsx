@@ -65,6 +65,17 @@ const DATA_NETWORK_TYPE_OPTIONS = [
   { label: 'eGW', value: 'egw' },
 ];
 
+function getRoleDeleteErrorMessage(err: unknown, fallback: string, inUseMessage: string): string {
+  const error = err as { bizCode?: number; userMessage?: string; message?: string } | undefined;
+  if (error?.bizCode === 7008) return inUseMessage;
+  return error?.userMessage || error?.message || fallback;
+}
+
+function renderRoleOperator(value: unknown, role: Role, builtInText: string): string {
+  if (value) return String(value);
+  return role.builtIn > 0 ? builtInText : '-';
+}
+
 // 基站制式选项
 const buildNetworkTypeOptions = (t: (id: string) => string) => [
   { label: t('role.all'), value: '' },
@@ -80,6 +91,63 @@ const buildProductTypeOptions = (t: (id: string) => string) => [
   { label: t('role.smallCell'), value: 'Small Cell' },
   { label: t('role.picoBaseStation'), value: 'Pico' },
 ];
+
+const READ_API_GROUPS_BY_MENU_KEY: Record<string, string[]> = {
+  'system:user': ['users', 'roles'],
+  'system:role': ['roles', 'menus', 'api-endpoints', 'device-groups', 'groups'],
+  'system:menu': ['menus'],
+  'system:operation-log': ['audit-logs'],
+  'system:config': ['sysConfig', 'public'],
+  'system:api-management': ['api-endpoints'],
+  'system:data-dict': ['sysDictionary', 'sysDictionaryDetail'],
+  'system:ui-custom': ['sysConfig'],
+  'system:kpi-config': ['dashboard'],
+  'mml:admin:catalog': ['mml_admin'],
+};
+
+function flattenMenus(menus: Menu[]): Menu[] {
+  const result: Menu[] = [];
+  const walk = (list: Menu[]) => {
+    for (const menu of list) {
+      result.push(menu);
+      if (menu.children?.length) walk(menu.children);
+    }
+  };
+  walk(menus);
+  return result;
+}
+
+function collectMenuAndDescendantIds(menuIds: string[], menus: Menu[]): Set<string> {
+  const selected = new Set(menuIds);
+  const result = new Set(menuIds);
+  const walk = (menu: Menu, inherited: boolean) => {
+    const active = inherited || selected.has(menu.id);
+    if (active) result.add(menu.id);
+    for (const child of menu.children ?? []) walk(child, active);
+  };
+  for (const menu of menus) walk(menu, false);
+  return result;
+}
+
+function menuReadApiGroups(menu: Menu): string[] {
+  const key = menu.permissionKey;
+  if (READ_API_GROUPS_BY_MENU_KEY[key]) return READ_API_GROUPS_BY_MENU_KEY[key];
+  const pageKey = key.split(':').slice(0, 2).join(':');
+  return READ_API_GROUPS_BY_MENU_KEY[pageKey] ?? [];
+}
+
+function inferReadApiEndpointIds(menuIds: string[], menus: Menu[], endpoints: ApiEndpoint[]): string[] {
+  const effectiveMenuIds = collectMenuAndDescendantIds(menuIds, menus);
+  const groups = new Set<string>();
+  for (const menu of flattenMenus(menus)) {
+    if (!effectiveMenuIds.has(menu.id)) continue;
+    for (const group of menuReadApiGroups(menu)) groups.add(group);
+  }
+  if (groups.size === 0) return [];
+  return endpoints
+    .filter((endpoint) => endpoint.method.toUpperCase() === 'GET' && endpoint.apiGroup && groups.has(endpoint.apiGroup))
+    .map((endpoint) => endpoint.id);
+}
 
 // 构建设备组树形数据（带筛选）
 const buildDeviceGroupTreeData = (
@@ -547,6 +615,20 @@ export default function RoleManagement() {
     return [...menuIds, ...preservedButtons];
   }, [allMenuIds, originalButtonIds, menuTree]);
 
+  const apiEndpointIdsToSave = useCallback((menuIds: string[]): string[] => {
+    const inferred = inferReadApiEndpointIds(menuIds, menuTree, apiEndpoints ?? []);
+    return Array.from(new Set([...selectedApiEndpointIds, ...inferred]));
+  }, [apiEndpoints, menuTree, selectedApiEndpointIds]);
+
+  const resolveApiEndpointIdsToSave = useCallback(async (menuIds: string[]): Promise<string[]> => {
+    const current = apiEndpointIdsToSave(menuIds);
+    if (menuIds.length === 0 || current.length > selectedApiEndpointIds.length) return current;
+
+    const freshEndpoints = await apiPermissionApi.listEndpoints();
+    const inferred = inferReadApiEndpointIds(menuIds, menuTree, freshEndpoints);
+    return Array.from(new Set([...selectedApiEndpointIds, ...inferred]));
+  }, [apiEndpointIdsToSave, menuTree, selectedApiEndpointIds]);
+
   // 至少选了一个菜单（无论目录/菜单/按钮）即视为有权限。
   const hasAnyPermission = useMemo(
     () => permissionsToMenuIds(checkedPermissionKeys).length > 0,
@@ -586,6 +668,11 @@ export default function RoleManagement() {
       onOk: () => {
         deleteRoles.mutate([role.id], {
           onSuccess: () => message.success(t('common.deleteSuccess')),
+          onError: (err) => {
+            message.error(
+              getRoleDeleteErrorMessage(err, t('common.deleteFailed'), t('role.deleteInUse'))
+            );
+          },
         });
       },
     });
@@ -640,6 +727,11 @@ export default function RoleManagement() {
             message.success(t('common.deleteSuccess'));
             setSelectedKeys([]);
           },
+          onError: (err) => {
+            message.error(
+              getRoleDeleteErrorMessage(err, t('common.deleteFailed'), t('role.deleteInUse'))
+            );
+          },
         });
       },
     });
@@ -661,6 +753,7 @@ export default function RoleManagement() {
 
     form.validateFields().then(async (vals) => {
       const menuIds = permissionsToMenuIds(checkedPermissionKeys);
+      const endpointIds = await resolveApiEndpointIdsToSave(menuIds);
       try {
         const newRole = await createRole.mutateAsync(
           {
@@ -684,10 +777,10 @@ export default function RoleManagement() {
             deviceGroupIds: selectedDeviceGroupIds,
             networkTypes: selectedNetworkTypes,
           });
-          if (selectedApiEndpointIds.length > 0) {
+          if (endpointIds.length > 0) {
             await setRoleApiPermissions.mutateAsync({
               roleId: newRole.id,
-              endpointIds: selectedApiEndpointIds,
+              endpointIds,
             });
           }
         }
@@ -711,7 +804,7 @@ export default function RoleManagement() {
         message.error(msg);
       }
     });
-  }, [form, createRole, checkedPermissionKeys, selectedDeviceGroupIds, selectedNetworkTypes, selectedApiEndpointIds, hasAnyPermission, allSecondLevelIds, permissionsToMenuIds, setRoleMenusMut, setRoleDeviceGroupsMut, setRoleApiPermissions, invalidateUserMenus, refetch, message, t]);
+  }, [form, createRole, checkedPermissionKeys, selectedDeviceGroupIds, selectedNetworkTypes, hasAnyPermission, allSecondLevelIds, permissionsToMenuIds, resolveApiEndpointIdsToSave, setRoleMenusMut, setRoleDeviceGroupsMut, setRoleApiPermissions, invalidateUserMenus, refetch, message, t]);
 
   // doEditSubmit 拆出实际提交逻辑，配合下方"清空设备分组二次确认"复用。
   // 必须先于 handleEdit 声明，否则 React 的 useCallback 会触发 react-hooks/refs：
@@ -720,6 +813,7 @@ export default function RoleManagement() {
     if (!selectedRole) return;
     form.validateFields().then(async (vals) => {
       const menuIds = permissionsToMenuIds(checkedPermissionKeys);
+      const endpointIds = await resolveApiEndpointIdsToSave(menuIds);
       try {
         await updateRole.mutateAsync({
           id: selectedRole.id,
@@ -744,7 +838,7 @@ export default function RoleManagement() {
         });
         await setRoleApiPermissions.mutateAsync({
           roleId: selectedRole.id,
-          endpointIds: selectedApiEndpointIds,
+          endpointIds,
         });
         // 让当前用户的侧边栏菜单立即刷新（非 builtIn 用户）。
         await invalidateUserMenus();
@@ -767,7 +861,7 @@ export default function RoleManagement() {
         message.error(msg);
       }
     });
-  }, [selectedRole, form, updateRole, checkedPermissionKeys, selectedDeviceGroupIds, selectedNetworkTypes, selectedApiEndpointIds, permissionsToMenuIds, setRoleMenusMut, setRoleDeviceGroupsMut, setRoleApiPermissions, invalidateUserMenus, refetch, message, t]);
+  }, [selectedRole, form, updateRole, checkedPermissionKeys, selectedDeviceGroupIds, selectedNetworkTypes, permissionsToMenuIds, resolveApiEndpointIdsToSave, setRoleMenusMut, setRoleDeviceGroupsMut, setRoleApiPermissions, invalidateUserMenus, refetch, message, t]);
 
   // 校验并提交编辑
   const handleEdit = useCallback(() => {
@@ -891,7 +985,7 @@ export default function RoleManagement() {
       },
     },
     { key: 'description', title: t('role.roleDescription'), dataIndex: 'description', width: 150, ellipsis: true, render: (v) => (v as string) || '-' },
-    { key: 'createUser', title: t('role.createUser'), dataIndex: 'createUser', width: 100, render: (v) => (v as string) || '-' },
+    { key: 'createUser', title: t('role.createUser'), dataIndex: 'createUser', width: 100, render: (v, record) => renderRoleOperator(v, record, t('role.builtIn')) },
     {
       key: 'createTime',
       title: t('role.createTime'),
@@ -899,7 +993,7 @@ export default function RoleManagement() {
       width: 160,
       render: (val) => (val ? formatSystemTime(String(val)) : '-') as string,
     },
-    { key: 'updateUser', title: t('role.updateUser'), dataIndex: 'updateUser', width: 100, render: (v) => (v as string) || '-' },
+    { key: 'updateUser', title: t('role.updateUser'), dataIndex: 'updateUser', width: 100, render: (v, record) => renderRoleOperator(v, record, t('role.builtIn')) },
     {
       key: 'updateTime',
       title: t('role.updateTime'),
@@ -1587,13 +1681,13 @@ export default function RoleManagement() {
           <span>{selectedRole?.userCount ?? 0}</span>
         </Form.Item>
         <Form.Item label={t('role.createUser')}>
-          <span>{selectedRole?.createUser ?? '-'}</span>
+          <span>{selectedRole ? renderRoleOperator(selectedRole.createUser, selectedRole, t('role.builtIn')) : '-'}</span>
         </Form.Item>
         <Form.Item label={t('role.createTime')}>
           <span>{selectedRole?.createTime ? formatSystemTime(selectedRole.createTime) : '-'}</span>
         </Form.Item>
         <Form.Item label={t('role.updateUser')}>
-          <span>{selectedRole?.updateUser ?? '-'}</span>
+          <span>{selectedRole ? renderRoleOperator(selectedRole.updateUser, selectedRole, t('role.builtIn')) : '-'}</span>
         </Form.Item>
         <Form.Item label={t('role.updateTime')}>
           <span>{selectedRole?.updateTime ? formatSystemTime(selectedRole.updateTime) : '-'}</span>

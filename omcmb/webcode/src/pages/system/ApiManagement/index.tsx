@@ -395,7 +395,7 @@ export default function ApiManagement() {
         title={editingEndpoint ? t('api.editEndpoint') : t('api.addEndpoint')}
         open={drawerVisible}
         onClose={() => setDrawerVisible(false)}
-        size={520}
+        width={520}
         footer={
           <Space style={{ justifyContent: 'flex-end', display: 'flex' }}>
             <Button onClick={() => setDrawerVisible(false)}>{t('common.cancel')}</Button>
