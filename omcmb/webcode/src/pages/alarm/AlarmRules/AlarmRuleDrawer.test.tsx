@@ -4,7 +4,7 @@
  * 故断言该 class 即等价验证了「规则名称必填」这一改动。
  */
 import { beforeEach, describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { App } from 'antd';
 import { IntlProvider } from 'react-intl';
 import { zhCN } from '@core/i18n';
@@ -14,8 +14,10 @@ import type { Device, DeviceListResponse } from '@core/types/device';
 const deviceHooks = vi.hoisted(() => ({
   useDeviceList: vi.fn(() => ({ data: { items: [], total: 0 }, isLoading: false })),
   useDeviceGroups: vi.fn(() => ({ data: { groups: [] }, isLoading: false })),
-  useDevicesByIds: vi.fn(() => []),
+  useDevicesByIds: vi.fn(),
 }));
+
+const emptyDeviceQueries: unknown[] = [];
 
 vi.mock('@core/hooks/api/useDevices', () => ({
   useDeviceList: deviceHooks.useDeviceList,
@@ -82,7 +84,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   deviceHooks.useDeviceList.mockReturnValue({ data: makeDeviceListResponse([]), isLoading: false });
   deviceHooks.useDeviceGroups.mockReturnValue({ data: { groups: [] }, isLoading: false });
-  deviceHooks.useDevicesByIds.mockReturnValue([]);
+  deviceHooks.useDevicesByIds.mockReturnValue(emptyDeviceQueries);
 });
 
 function renderDrawer(props: Partial<React.ComponentProps<typeof AlarmRuleDrawer>> = {}) {
@@ -148,4 +150,46 @@ describe('AlarmRuleDrawer 规则名必填 (#236)', () => {
     expect(screen.getByText('SN-device-5')).toBeInTheDocument();
     expect(screen.queryByText('SN-device-6')).not.toBeInTheDocument();
   });
+
+  it('设备列表展示总数、批量勾选入口和已选设备按钮', () => {
+    deviceHooks.useDeviceList.mockReturnValue({
+      data: makeDeviceListResponse([1, 2, 3].map(makeDevice), 12),
+      isLoading: false,
+    });
+
+    renderDrawer();
+
+    expect(screen.getByText('批量勾选当前页（3 台）')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '已选设备（0 台）' })).toBeInTheDocument();
+    expect(screen.getByText('设备总数 12 台，当前页 3 台，已选 0 台')).toBeInTheDocument();
+  }, 10000);
+
+  it('已选设备弹窗显示当前页外的已选设备明细', () => {
+    deviceHooks.useDeviceList.mockReturnValue({
+      data: makeDeviceListResponse([visibleDevice], 2),
+      isLoading: false,
+    });
+    deviceHooks.useDevicesByIds.mockImplementation((ids: string[]) => ids.map((id) => ({
+      data: id === 'missing-device'
+        ? {
+            id: 'missing-device',
+            sn: 'SN-missing-device',
+            name: 'missing-device',
+            networkType: 'nr',
+            connStatus: 'online',
+          } as Device
+        : undefined,
+      isLoading: false,
+    })));
+
+    renderDrawer({
+      mode: 'edit',
+      rule: makeRule(['visible-device', 'missing-device']),
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '已选设备（2 台）' }));
+
+    expect(screen.getByText('SN-missing-device')).toBeInTheDocument();
+    expect(screen.getByText('设备总数 2 台，当前页 1 台，已选 2 台')).toBeInTheDocument();
+  }, 12000);
 });
