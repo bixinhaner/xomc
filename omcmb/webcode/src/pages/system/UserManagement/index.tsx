@@ -14,6 +14,7 @@ import {
   Radio,
   DatePicker,
   Space,
+  Switch,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -47,6 +48,7 @@ import {
   useResetPassword,
   useBatchAssignRoles,
 } from '@core/hooks/api/useSystem';
+import { useSecuritySettings } from '@core/hooks/api/useSecuritySettings';
 import type { User, UserRole, UserStatus } from '@core/types/system';
 import { isBuiltInUser, isLdapUser } from '@core/types/system';
 import { useT } from '@/hooks/useT';
@@ -121,6 +123,16 @@ export default function UserManagement() {
   const batchAssignRoles = useBatchAssignRoles();
   const resetPassword = useResetPassword();
 
+  // Issue #649：拉安全设置取 defaultPasswd，决定「使用系统默认密码」开关
+  // 是否可用 + 占位文本。useSecuritySettings 走 30s 缓存（多组件共用）。
+  const { settings: securitySettings, refetch: refetchSecurity } = useSecuritySettings();
+  const defaultPasswd = securitySettings?.raw.get('defaultPasswd') ?? '';
+  const hasDefaultPasswd = defaultPasswd !== '';
+
+  // 新建用户表单：Form.useWatch 实时监听「使用系统默认密码」开关 → 密码框
+  // disabled / rules 联动。Form.useWatch 必须在 form 实例存在后调用。
+  const useDefaultPwdInForm = Form.useWatch('useDefaultPassword', form) === true;
+
   // 内置用户判定：后端 users.source === 'builtIn'（迁移 000053 / PRD §11.3）。
   const isBuiltIn = useCallback((user: User) => isBuiltInUser(user), []);
 
@@ -185,12 +197,15 @@ export default function UserManagement() {
       // role 用占位值满足 hook 类型；真实角色分配走 roleIds（→ 后端 role_ids）。
       const roleIds = (vals.roleIds as string[]) ?? [];
       const expire = vals.expireTime as dayjs.Dayjs | undefined;
+      // Issue #649：开启「使用系统默认密码」时不传 password，由后端从
+      // sys_configs.security.defaultPasswd 取值；硬规则要求 must_change_password=true。
+      const useDefault = vals.useDefaultPassword === true;
       const userData: Omit<User, 'id' | 'createTime' | 'lastLoginTime'> & {
-        password: string;
+        password?: string;
+        useDefaultPassword?: boolean;
         roleIds?: string[];
       } = {
         username: vals.username as string,
-        password: vals.password as string,
         displayName: ((vals.displayName as string) || (vals.username as string)) ?? '',
         email: (vals.email as string) || '',
         phone: (vals.phone as string) || undefined,
@@ -199,6 +214,9 @@ export default function UserManagement() {
         role: 'viewer' as UserRole,
         status: (vals.status as UserStatus) ?? 'active',
         roleIds: roleIds.length > 0 ? roleIds : undefined,
+        ...(useDefault
+          ? { useDefaultPassword: true }
+          : { password: vals.password as string }),
       };
       createUser.mutate(userData, {
         onSuccess: () => {
@@ -787,31 +805,79 @@ export default function UserManagement() {
             >
               <Input placeholder={t('user.form.username')} maxLength={32} />
             </Form.Item>
+            {/* Issue #649：使用系统默认密码开关。默认关；ON 时下方两个密码框 disabled
+                + 不校验 rules；defaultPasswd 为空时开关 disabled + tooltip 引导。 */}
+            <Form.Item
+              name="useDefaultPassword"
+              label={t('system.user.useDefaultPassword')}
+              valuePropName="checked"
+              initialValue={false}
+              extra={
+                hasDefaultPasswd
+                  ? undefined
+                  : t('system.user.defaultPasswordNotSet')
+              }
+            >
+              <Tooltip
+                title={
+                  hasDefaultPasswd
+                    ? undefined
+                    : t('system.user.defaultPasswordNotSet')
+                }
+                placement="right"
+              >
+                <Switch disabled={!hasDefaultPasswd} />
+              </Tooltip>
+            </Form.Item>
             <Form.Item
               name="password"
               label={t('user.password')}
-              rules={[
-                { required: true, message: t('user.pleaseInputPassword') },
-                { min: 8, message: t('user.passwordMinLength') },
-              ]}
+              rules={
+                useDefaultPwdInForm
+                  ? []
+                  : [
+                      { required: true, message: t('user.pleaseInputPassword') },
+                      { min: 8, message: t('user.passwordMinLength') },
+                    ]
+              }
             >
-              <Input.Password placeholder={t('user.password')} maxLength={20} />
+              <Input.Password
+                placeholder={
+                  useDefaultPwdInForm
+                    ? defaultPasswd || t('user.password')
+                    : t('user.password')
+                }
+                maxLength={20}
+                disabled={useDefaultPwdInForm}
+              />
             </Form.Item>
             <Form.Item
               name="confirmPassword"
               label={t('user.confirmPassword')}
               dependencies={['password']}
-              rules={[
-                { required: true, message: t('user.pleaseConfirmPassword') },
-                ({ getFieldValue }) => ({
-                  validator(_, value) {
-                    if (!value || getFieldValue('password') === value) return Promise.resolve();
-                    return Promise.reject(new Error(t('user.passwordMismatch')));
-                  },
-                }),
-              ]}
+              rules={
+                useDefaultPwdInForm
+                  ? []
+                  : [
+                      { required: true, message: t('user.pleaseConfirmPassword') },
+                      ({ getFieldValue }) => ({
+                        validator(_, value) {
+                          if (!value || getFieldValue('password') === value) return Promise.resolve();
+                          return Promise.reject(new Error(t('user.passwordMismatch')));
+                        },
+                      }),
+                    ]
+              }
             >
-              <Input.Password placeholder={t('user.confirmPassword')} maxLength={20} />
+              <Input.Password
+                placeholder={
+                  useDefaultPwdInForm
+                    ? defaultPasswd || t('user.confirmPassword')
+                    : t('user.confirmPassword')
+                }
+                maxLength={20}
+                disabled={useDefaultPwdInForm}
+              />
             </Form.Item>
             <Form.Item name="displayName" label={t('user.form.displayName')}>
               <Input placeholder={t('user.form.displayNamePlaceholder')} maxLength={64} />
