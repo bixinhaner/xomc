@@ -72,6 +72,87 @@ func TestTerminateUpgrade_CancelsExecutionContext(t *testing.T) {
 	assert.Error(t, execCtx.Err(), "TerminateUpgrade must cancel the task's execution context")
 }
 
+// TestTerminateUpgrade_IncrementsFailCountForTransitionedSubTasks 锁 #634:
+// 终止时把"非终态 → terminated"的子任务计入 fail_count,前端不再卡 0/0/N。
+// 已是终态(completed/failed/terminated)的子任务不重复计数。
+func TestTerminateUpgrade_IncrementsFailCountForTransitionedSubTasks(t *testing.T) {
+	taskID := uuid.New()
+	// 5 个子任务：2 个已 completed、1 个已 failed、2 个 pending（应被终止并计入 fail_count）
+	subItems := []UpgradeSubTaskWithTaskName{
+		{UpgradeSubTask: UpgradeSubTask{ID: uuid.New(), TaskID: taskID, Status: UpgradeCompleted}},
+		{UpgradeSubTask: UpgradeSubTask{ID: uuid.New(), TaskID: taskID, Status: UpgradeCompleted}},
+		{UpgradeSubTask: UpgradeSubTask{ID: uuid.New(), TaskID: taskID, Status: UpgradeFailed}},
+		{UpgradeSubTask: UpgradeSubTask{ID: uuid.New(), TaskID: taskID, Status: UpgradePending}},
+		{UpgradeSubTask: UpgradeSubTask{ID: uuid.New(), TaskID: taskID, Status: UpgradeDownloading}},
+	}
+
+	var incSuccess, incFail int
+	var incCalls int
+	taskRepo := &svcMockTaskRepo{
+		getByIDFn: func(_ context.Context, id uuid.UUID) (*UpgradeTask, error) {
+			return &UpgradeTask{ID: id, Status: TaskInProgress}, nil
+		},
+		incrementCountsFn: func(_ context.Context, _ uuid.UUID, s, f int) error {
+			incCalls++
+			incSuccess += s
+			incFail += f
+			return nil
+		},
+	}
+	subRepo := &svcMockSubTaskRepo{
+		listByTaskIDFn: func(_ context.Context, _ uuid.UUID, f SubTaskFilter) (*model.ListResponse[UpgradeSubTaskWithTaskName], error) {
+			// 单页返回全部，TotalPages=1 让 terminate 循环走一次就退出
+			return model.NewListResponse(subItems, int64(len(subItems)), f.Page, 100), nil
+		},
+	}
+	svc := NewSoftwareService(
+		&svcMockFirmwareRepo{}, taskRepo, subRepo,
+		&svcMockDeviceRepo{}, &svcMockCmdQueue{},
+		nil, nil, "test-bucket",
+		&svcMockEventBus{}, nil, zap.NewNop(),
+	)
+
+	require.NoError(t, svc.TerminateUpgrade(context.Background(), taskID))
+
+	assert.Equal(t, 1, incCalls, "IncrementCounts 应只调一次(批量累加)")
+	assert.Equal(t, 0, incSuccess, "success_count 不应被终止动作增加")
+	assert.Equal(t, 2, incFail, "fail_count 应 +2(只算 pending+downloading 这 2 个被终止的子任务,已终态的不重复)")
+}
+
+// TestTerminateUpgrade_NoCounterUpdateWhenAllSubTasksAlreadyTerminal 锁 #634:
+// 所有子任务都已终态时,终止动作不应再调 IncrementCounts(避免空写)。
+func TestTerminateUpgrade_NoCounterUpdateWhenAllSubTasksAlreadyTerminal(t *testing.T) {
+	taskID := uuid.New()
+	subItems := []UpgradeSubTaskWithTaskName{
+		{UpgradeSubTask: UpgradeSubTask{ID: uuid.New(), TaskID: taskID, Status: UpgradeCompleted}},
+		{UpgradeSubTask: UpgradeSubTask{ID: uuid.New(), TaskID: taskID, Status: UpgradeFailed}},
+	}
+	var incCalls int
+	taskRepo := &svcMockTaskRepo{
+		getByIDFn: func(_ context.Context, id uuid.UUID) (*UpgradeTask, error) {
+			return &UpgradeTask{ID: id, Status: TaskInProgress}, nil
+		},
+		incrementCountsFn: func(_ context.Context, _ uuid.UUID, _, _ int) error {
+			incCalls++
+			return nil
+		},
+	}
+	subRepo := &svcMockSubTaskRepo{
+		listByTaskIDFn: func(_ context.Context, _ uuid.UUID, f SubTaskFilter) (*model.ListResponse[UpgradeSubTaskWithTaskName], error) {
+			return model.NewListResponse(subItems, int64(len(subItems)), f.Page, 100), nil
+		},
+	}
+	svc := NewSoftwareService(
+		&svcMockFirmwareRepo{}, taskRepo, subRepo,
+		&svcMockDeviceRepo{}, &svcMockCmdQueue{},
+		nil, nil, "test-bucket",
+		&svcMockEventBus{}, nil, zap.NewNop(),
+	)
+
+	require.NoError(t, svc.TerminateUpgrade(context.Background(), taskID))
+	assert.Equal(t, 0, incCalls, "全部已终态时不应调 IncrementCounts")
+}
+
 // recordingSuspender records SuspendUpgrade calls so the test can assert the
 // canary threshold path actually triggers a real suspend (#59 Problem 3.3).
 type recordingSuspender struct {

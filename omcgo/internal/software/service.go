@@ -1443,6 +1443,13 @@ func (s *SoftwareService) TerminateUpgrade(ctx context.Context, taskID uuid.UUID
 		s.cancelReg.cancel(taskID)
 	}
 
+	// #634：统计本次主动终止"由非终态 → terminated"的子任务数。
+	// 旧实现只改子任务 status,没动 upgrade_tasks.{success,fail}_count,
+	// 导致前端"成功 N / 失败 M / 总数 K"显示 0/0/K,且 (success+fail)/total 进度卡 0%。
+	// 终止的子任务计入 fail_count——语义"未完成 ≈ 失败",且主任务 result=terminated
+	// 已在 UI 上以"已终止"标签区分,不会与"失败"主结果混淆。
+	terminatedDelta := 0
+
 	for page := 1; ; page++ {
 		subResult, err := s.subTaskRepo.ListByTaskID(ctx, taskID, SubTaskFilter{
 			TaskID: taskID,
@@ -1462,6 +1469,7 @@ func (s *SoftwareService) TerminateUpgrade(ctx context.Context, taskID uuid.UUID
 			if err := s.subTaskRepo.UpdateStatus(ctx, subTask.ID, UpgradeTerminated, "task terminated by operator"); err != nil {
 				return fmt.Errorf("terminate sub-task %s: %w", subTask.ID.String(), err)
 			}
+			terminatedDelta++
 			// 释放设备级 Redis 锁，否则用户终止后 1 小时（lock TTL）内重试都会撞
 			// "升级无法启动，设备不能运行多个升级任务"。failSubTask 路径会顺带 Del 是巧合，
 			// 不能依赖。注意 sub_task 行刚拿出来时 DeviceSN 可能为空（还没进 ExecuteOne）→
@@ -1478,6 +1486,14 @@ func (s *SoftwareService) TerminateUpgrade(ctx context.Context, taskID uuid.UUID
 		}
 		if len(subResult.Items) == 0 || page >= subResult.TotalPages {
 			break
+		}
+	}
+
+	// #634：把本次终止的子任务计入 fail_count。先于 UpdateStatus 调用——
+	// 即使后续状态更新失败,计数也已写入,前端不再卡 0/0/N。
+	if terminatedDelta > 0 {
+		if err := s.taskRepo.IncrementCounts(ctx, taskID, 0, terminatedDelta); err != nil {
+			return fmt.Errorf("increment fail_count on terminate: %w", err)
 		}
 	}
 
