@@ -18,10 +18,10 @@ import (
 
 // handlerStubRepo 仅实现 Create/List/Get/Cancel/Update，不依赖 DB。
 type handlerStubRepo struct {
-	mu     sync.Mutex
-	tasks  map[uuid.UUID]*Task
-	create func(CreateRequest) (uuid.UUID, error)
-	cancel func(uuid.UUID) error
+	mu       sync.Mutex
+	tasks    map[uuid.UUID]*Task
+	create   func(CreateRequest) (uuid.UUID, error)
+	cancel   func(uuid.UUID) error
 	get      func(uuid.UUID) (*Task, error)       // T-0194：注入既有任务（含 is_builtin/mode/technology）
 	update   func(uuid.UUID, UpdateRequest) error // T-0194：捕获更新入参
 	deleteFn func(uuid.UUID) error                // #392：注入删除结果（区分终态/内置/非终态）
@@ -99,7 +99,7 @@ func (s *handlerStubRepo) LockNextPending(context.Context, string) (*Task, error
 func (s *handlerStubRepo) UpdateStatus(context.Context, uuid.UUID, Status, *int, string) error {
 	return nil
 }
-func (s *handlerStubRepo) InsertResults(context.Context, []ResultRow) error { return nil }
+func (s *handlerStubRepo) InsertResults(context.Context, []ResultRow) error   { return nil }
 func (s *handlerStubRepo) NextRunSeq(context.Context, uuid.UUID) (int, error) { return 1, nil }
 func (s *handlerStubRepo) InsertRun(context.Context, TaskRun) (uuid.UUID, error) {
 	return uuid.New(), nil
@@ -141,11 +141,11 @@ func Test_Handler_Create_Success(t *testing.T) {
 
 	body := map[string]any{
 		"name": "test", "mode": "oneshot",
-		"device_sns":     []string{"S1"},
-		"metric_paths":   []string{"M1"},
-		"granularities":  []string{"hourly"},
-		"window_start":   "2026-05-22T10:00:00Z",
-		"window_end":     "2026-05-22T11:00:00Z",
+		"device_sns":    []string{"S1"},
+		"metric_paths":  []string{"M1"},
+		"granularities": []string{"hourly"},
+		"window_start":  "2026-05-22T10:00:00Z",
+		"window_end":    "2026-05-22T11:00:00Z",
 	}
 	jsonBody, _ := json.Marshal(body)
 	w := httptest.NewRecorder()
@@ -439,4 +439,80 @@ func Test_Handler_Cancel_BuiltinTask_SkipsOwnerCheck(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.True(t, cancelled)
+}
+
+// Results：非 owner 普通用户读他人自建任务结果 → 403。
+// 归属权检查在 repo.Get 之后立即触发，handler 不会走到后续 SQL 查询，所以无需 stub pool。
+func Test_Handler_Results_NonOwner_Forbidden(t *testing.T) {
+	taskID := uuid.New()
+	repo := &handlerStubRepo{
+		get: func(id uuid.UUID) (*Task, error) {
+			return &Task{ID: taskID, IsBuiltin: false, Creator: "alice"}, nil
+		},
+	}
+	r := newTestRouterWithUser(repo, "bob", false)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/pm/adhoc/tasks/"+taskID.String()+"/results", nil)
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+}
+
+// Results：内置任务全员可读（IsBuiltin 短路在权限判断里优先级最高）。
+// 该测试只验证权限放行，不验证后续数据查询；handler 走到 SQL 时 pool=nil 会 panic，
+// 但权限通过即可证明 canViewResults 的内置短路正确（403 ≠ panic 区分得开）。
+// 用 defer recover 屏蔽预期 panic，仅断言"未在权限层被 403 挡住"。
+func Test_Handler_Results_BuiltinTask_PermissionPasses(t *testing.T) {
+	taskID := uuid.New()
+	repo := &handlerStubRepo{
+		get: func(id uuid.UUID) (*Task, error) {
+			return &Task{ID: taskID, IsBuiltin: true, Creator: "system"}, nil
+		},
+	}
+	r := newTestRouterWithUser(repo, "bob", false) // 普通用户
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/pm/adhoc/tasks/"+taskID.String()+"/results", nil)
+	defer func() {
+		// pool=nil 会在 SQL 段 panic；权限层（canViewResults）放行视为通过本测试目标。
+		_ = recover()
+		assert.NotEqual(t, http.StatusForbidden, w.Code,
+			"内置任务普通用户读应放行，不应被 403 挡住")
+	}()
+	r.ServeHTTP(w, req)
+}
+
+// FilterOptions：非 owner 普通用户访问他人自建任务的筛选选项 → 403。
+func Test_Handler_FilterOptions_NonOwner_Forbidden(t *testing.T) {
+	taskID := uuid.New()
+	repo := &handlerStubRepo{
+		get: func(id uuid.UUID) (*Task, error) {
+			return &Task{ID: taskID, IsBuiltin: false, Creator: "alice"}, nil
+		},
+	}
+	r := newTestRouterWithUser(repo, "bob", false)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/pm/adhoc/tasks/"+taskID.String()+"/filter-options", nil)
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+}
+
+// Runs：非 owner 普通用户读他人自建任务的运行历史 → 403。
+func Test_Handler_Runs_NonOwner_Forbidden(t *testing.T) {
+	taskID := uuid.New()
+	repo := &handlerStubRepo{
+		get: func(id uuid.UUID) (*Task, error) {
+			return &Task{ID: taskID, IsBuiltin: false, Creator: "alice"}, nil
+		},
+	}
+	r := newTestRouterWithUser(repo, "bob", false)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/pm/adhoc/tasks/"+taskID.String()+"/runs", nil)
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
 }
