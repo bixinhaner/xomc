@@ -98,6 +98,39 @@ describe('dashboardApi.getSummary — Backend → DashboardSummary 映射', () =
     expect(s.kpiSummary.rrcSuccRate).toBe(0);
   });
 
+  it('kpi_overview 动态键（如 UE_ACTIVE）按原 key 透传到 kpiSummary（Issue E）', async () => {
+    getMock.mockResolvedValue({
+      data: {
+        device_stats: { total: 0, online: 0, offline: 0, alarm: 0 },
+        alarm_stats: { critical: 0, major: 0, minor: 0, warning: 0, total: 0 },
+        kpi_overview: { UE_ACTIVE: 1234, RRC_CONN_SETUP_SR: 99.5 },
+        kpi_deltas: {},
+        recent_alarms: [],
+        timestamp: '2026-06-10T00:00:00Z',
+      },
+    });
+    const s = await dashboardApi.getSummary();
+    // 动态键原样透传 —— 不被 mapBackendSummary 丢掉（Issue E 回归用例）
+    expect(s.kpiSummary['UE_ACTIVE']).toBe(1234);
+    // 命名快捷字段同时仍可用
+    expect(s.kpiSummary.rrcSuccRate).toBe(99.5);
+  });
+
+  it('kpi_overview 无 UE_ACTIVE 时 kpiSummary 中无该键，区分"真 0"与"无数据"（Issue E）', async () => {
+    getMock.mockResolvedValue({
+      data: {
+        device_stats: { total: 0, online: 0, offline: 0, alarm: 0 },
+        alarm_stats: { critical: 0, major: 0, minor: 0, warning: 0, total: 0 },
+        kpi_overview: { RRC_CONN_SETUP_SR: 99.5 },
+        kpi_deltas: {},
+        recent_alarms: [],
+        timestamp: '2026-06-10T00:00:00Z',
+      },
+    });
+    const s = await dashboardApi.getSummary();
+    expect(s.kpiSummary['UE_ACTIVE']).toBeUndefined();
+  });
+
   it('500 错误原样抛（不吞错）', async () => {
     getMock.mockRejectedValue({ response: { status: 500 } });
     await expect(dashboardApi.getSummary()).rejects.toEqual({ response: { status: 500 } });

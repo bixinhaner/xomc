@@ -223,24 +223,41 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 		return nil
 	})
 
-	// 3. Recent KPI values (last 24h, top 10)
+	// 3. Latest KPI value per metric_path (last 24h)
+	//
+	// 历史实现走 kpiRepo.Query(PageSize=10, SortBy=time desc)，是"top-10 行"上限不是"每指标取最新"，
+	// 当全网指标 >> 10 时 UE_ACTIVE 等会被截断 → 首页活跃 UE 卡常驻 0（issue HD01 根因）。
+	// 改走 DISTINCT ON (metric_path) ORDER BY metric_path, time DESC，确保每个指标编号都拿到最新值。
 	g.Go(func() error {
 		now := time.Now()
-		filter := kpi.KPIFilter{
-			StartTime: now.Add(-24 * time.Hour),
-			EndTime:   now,
-		}
-		filter.Page = 1
-		filter.PageSize = 10
-		filter.SortBy = "time"
-		filter.SortDir = "desc"
-		result, err := s.kpiRepo.Query(ctx, filter)
+		query, args, err := buildLatestKPIPerNameQuery(now.Add(-24*time.Hour), now)
 		if err != nil {
-			s.logger.Warn("dashboard: kpi query failed", zap.Error(err))
-			rawKPIValues = []model.KPIValue{}
+			s.logger.Warn("dashboard: build latest kpi query failed", zap.Error(err))
 			return nil
 		}
-		rawKPIValues = result.Items
+		rows, err := s.tsPool.Query(ctx, query, args...)
+		if err != nil {
+			s.logger.Warn("dashboard: latest kpi query failed", zap.Error(err))
+			return nil
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var path string
+			var val float64
+			if err := rows.Scan(&path, &val); err != nil {
+				s.logger.Warn("dashboard: scan latest kpi row failed", zap.Error(err))
+				return nil
+			}
+			// 仅填 KPIName/IndicatorID/KPIValue —— 下游只读这三项映射进 KPIOverview。
+			rawKPIValues = append(rawKPIValues, model.KPIValue{
+				KPIName:     path,
+				IndicatorID: path,
+				KPIValue:    val,
+			})
+		}
+		if err := rows.Err(); err != nil {
+			s.logger.Warn("dashboard: iterate latest kpi rows failed", zap.Error(err))
+		}
 		return nil
 	})
 

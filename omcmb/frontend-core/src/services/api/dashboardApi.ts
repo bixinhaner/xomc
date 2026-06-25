@@ -150,6 +150,9 @@ type ApiEnvelope<T> = {
 // --- Mapping functions ---
 
 function mapBackendSummary(b: BackendDashboardSummary): DashboardSummary {
+  // 透传 kpi_overview 全部动态键（如 UE_ACTIVE），再叠加命名快捷字段保持老调用点兼容。
+  // 注意：'in' 探测保留 number 0 与 undefined 的区别（前者是真值，后者表示该 KPI 无数据）。
+  const overview = b.kpi_overview ?? {};
   return {
     deviceCounts: {
       total: b.device_stats.total,
@@ -165,13 +168,14 @@ function mapBackendSummary(b: BackendDashboardSummary): DashboardSummary {
       total: b.alarm_stats.total,
     },
     kpiSummary: {
-      rrcSuccRate: b.kpi_overview.RRC_CONN_SETUP_SR ?? 0,
-      erabSuccRate: b.kpi_overview.ERAB_SETUP_SR ?? 0,
-      hoSuccRate: b.kpi_overview.NR_SA_HO_SR ?? 0,
-      dlThroughput: b.kpi_overview.NR_PDCP_RATE_DL ?? 0,
+      ...overview,
+      rrcSuccRate: overview.RRC_CONN_SETUP_SR ?? 0,
+      erabSuccRate: overview.ERAB_SETUP_SR ?? 0,
+      hoSuccRate: overview.NR_SA_HO_SR ?? 0,
+      dlThroughput: overview.NR_PDCP_RATE_DL ?? 0,
       ulThroughput: 0, // 数据库中暂无上行速率KPI
-      radioDrop: b.kpi_overview.CALL_DROP_RATE ?? 0,
-      prbUtil: b.kpi_overview.NR_PRB_UTIL_DL ?? 0,
+      radioDrop: overview.CALL_DROP_RATE ?? 0,
+      prbUtil: overview.NR_PRB_UTIL_DL ?? 0,
       voLteSuccRate: 0, // 数据库中暂无VoLTE KPI
     },
     kpiDeltas: Object.entries(b.kpi_deltas || {}).reduce((acc, [kpiName, delta]) => {
