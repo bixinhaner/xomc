@@ -161,7 +161,7 @@ func Test_Handler_Update_DeviceGroup15Min_Rejected(t *testing.T) {
 	var updated bool
 	repo := &handlerStubRepo{
 		get: func(uuid.UUID) (*Task, error) {
-			return &Task{ID: id, IsBuiltin: false, Mode: ModeContinuous, Dimension: DimensionDeviceGroup}, nil
+			return &Task{ID: id, IsBuiltin: false, Mode: ModeContinuous, Dimension: DimensionDeviceGroup, Creator: "anonymous"}, nil
 		},
 		update: func(uuid.UUID, UpdateRequest) error { updated = true; return nil },
 	}
@@ -309,7 +309,7 @@ func Test_Handler_Update_Adhoc_Success(t *testing.T) {
 	var captured UpdateRequest
 	repo := &handlerStubRepo{
 		get: func(uuid.UUID) (*Task, error) {
-			return &Task{ID: id, IsBuiltin: false, Mode: ModeOneshot, Dimension: DimensionDevice, Technology: ""}, nil
+			return &Task{ID: id, IsBuiltin: false, Mode: ModeOneshot, Dimension: DimensionDevice, Technology: "", Creator: "anonymous"}, nil
 		},
 		update: func(_ uuid.UUID, req UpdateRequest) error { captured = req; return nil },
 	}
@@ -336,7 +336,7 @@ func Test_Handler_Update_Adhoc_EmptyDeviceSNs_Rejected(t *testing.T) {
 	id := uuid.New()
 	repo := &handlerStubRepo{
 		get: func(uuid.UUID) (*Task, error) {
-			return &Task{ID: id, IsBuiltin: false, Mode: ModeOneshot, Dimension: DimensionDevice}, nil
+			return &Task{ID: id, IsBuiltin: false, Mode: ModeOneshot, Dimension: DimensionDevice, Creator: "anonymous"}, nil
 		},
 	}
 	b := map[string]any{
@@ -355,7 +355,7 @@ func Test_Handler_Update_Adhoc_InvalidWindow_Rejected(t *testing.T) {
 	id := uuid.New()
 	repo := &handlerStubRepo{
 		get: func(uuid.UUID) (*Task, error) {
-			return &Task{ID: id, IsBuiltin: false, Mode: ModeOneshot, Dimension: DimensionNetwork}, nil
+			return &Task{ID: id, IsBuiltin: false, Mode: ModeOneshot, Dimension: DimensionNetwork, Creator: "anonymous"}, nil
 		},
 	}
 	b := map[string]any{
@@ -373,7 +373,7 @@ func Test_Handler_Update_Adhoc_MultiGranularity_Rejected(t *testing.T) {
 	id := uuid.New()
 	repo := &handlerStubRepo{
 		get: func(uuid.UUID) (*Task, error) {
-			return &Task{ID: id, IsBuiltin: false, Mode: ModeOneshot, Dimension: DimensionNetwork}, nil
+			return &Task{ID: id, IsBuiltin: false, Mode: ModeOneshot, Dimension: DimensionNetwork, Creator: "anonymous"}, nil
 		},
 	}
 	b := map[string]any{

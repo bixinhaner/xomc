@@ -432,6 +432,14 @@ func (h *Handler) Update(c *gin.Context) {
 		return
 	}
 
+	// #652：自建任务归属权校验（编辑）—— 仅创建者或超管可编辑。
+	if !existing.IsBuiltin {
+		if !canOperate(existing, extractCreator(c), isAdmin(c)) {
+			response.Fail(c, http.StatusForbidden, "permission denied: not task owner")
+			return
+		}
+	}
+
 	upd := UpdateRequest{
 		IsBuiltin:   existing.IsBuiltin,
 		MetricPaths: req.MetricPaths,
@@ -507,6 +515,22 @@ func (h *Handler) Cancel(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, "invalid id")
 		return
 	}
+	// #652：先取任务做归属权校验（取消）—— 自建任务仅创建者或超管可取消。
+	existing, err := h.repo.Get(c.Request.Context(), id)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			response.Fail(c, http.StatusNotFound, "not found")
+			return
+		}
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if !existing.IsBuiltin {
+		if !canOperate(existing, extractCreator(c), isAdmin(c)) {
+			response.Fail(c, http.StatusForbidden, "permission denied: not task owner")
+			return
+		}
+	}
 	if err := h.repo.Cancel(c.Request.Context(), id); err != nil {
 		switch {
 		case errors.Is(err, ErrNotFound):
@@ -533,6 +557,24 @@ func (h *Handler) Delete(c *gin.Context) {
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, "invalid id")
 		return
+	}
+	// #652：先取任务做归属权校验（删除）—— 自建任务仅创建者或超管可删除。
+	existing, err := h.repo.Get(c.Request.Context(), id)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			response.Fail(c, http.StatusNotFound, "not found")
+			return
+		}
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	// #652：自建任务归属权校验（删除）—— 仅创建者或超管可删除。
+	// 内置任务不做归属权校验（由 repo.Delete 的 is_builtin 守门拦截）。
+	if !existing.IsBuiltin {
+		if !canOperate(existing, extractCreator(c), isAdmin(c)) {
+			response.Fail(c, http.StatusForbidden, "permission denied: not task owner")
+			return
+		}
 	}
 	if err := h.repo.Delete(c.Request.Context(), id); err != nil {
 		switch {
@@ -757,6 +799,11 @@ func (h *Handler) Results(c *gin.Context) {
 			return
 		}
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	// #652：自建任务结果读权限校验 —— 内置任务全员可读，自建任务仅创建者或超管可读。
+	if !canViewResults(task, extractCreator(c), isAdmin(c)) {
+		response.Fail(c, http.StatusForbidden, "permission denied: not task owner")
 		return
 	}
 
@@ -1026,6 +1073,11 @@ func (h *Handler) FilterOptions(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
+	// #652：筛选选项属于结果数据的衍生视图，与 Results 同口径做读权限校验。
+	if !canViewResults(task, extractCreator(c), isAdmin(c)) {
+		response.Fail(c, http.StatusForbidden, "permission denied: not task owner")
+		return
+	}
 
 	dim := task.Dimension
 	if dim == "" {
@@ -1165,13 +1217,18 @@ func (h *Handler) Runs(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, "invalid id")
 		return
 	}
-	// 任务存在校验
-	if _, err := h.repo.Get(c.Request.Context(), id); err != nil {
+	// 任务存在校验 + #652 读权限校验
+	task, err := h.repo.Get(c.Request.Context(), id)
+	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			response.Fail(c, http.StatusNotFound, "task not found")
 			return
 		}
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if !canViewResults(task, extractCreator(c), isAdmin(c)) {
+		response.Fail(c, http.StatusForbidden, "permission denied: not task owner")
 		return
 	}
 	limit := 50
@@ -1277,6 +1334,27 @@ func (h *Handler) writeSSE(w io.Writer, eventName string, data []byte) {
 	_, _ = w.Write([]byte("data: "))
 	_, _ = w.Write(data)
 	_, _ = w.Write([]byte("\n\n"))
+}
+
+// canOperate 判断当前用户对自建任务有无操作权限（编辑/取消/删除）。
+// 超管可操作任意自建任务；普通用户只能操作自己创建的任务。
+func canOperate(task *Task, currentUser string, admin bool) bool {
+	if admin {
+		return true
+	}
+	return task.Creator == currentUser
+}
+
+// canViewResults 判断当前用户对任务结果有无读权限。
+// 内置任务全员可读；自建任务仅创建者或超管可读。
+func canViewResults(task *Task, currentUser string, admin bool) bool {
+	if task.IsBuiltin {
+		return true
+	}
+	if admin {
+		return true
+	}
+	return task.Creator == currentUser
 }
 
 // extractCreator 从 gin context 取登录用户名（如有 middleware 注入）。否则用 "anonymous"。
