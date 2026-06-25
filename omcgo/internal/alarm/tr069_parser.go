@@ -15,10 +15,10 @@ import (
 )
 
 const (
-	currentAlarmDevicePrefix       = "Device.FaultMgmt.CurrentAlarm."
-	currentAlarmIGDPrefix          = "InternetGatewayDevice.FaultMgmt.CurrentAlarm."
-	expeditedEventDevicePrefix     = "Device.FaultMgmt.ExpeditedEvent."
-	expeditedEventIGDPrefix        = "InternetGatewayDevice.FaultMgmt.ExpeditedEvent."
+	currentAlarmDevicePrefix   = "Device.FaultMgmt.CurrentAlarm."
+	currentAlarmIGDPrefix      = "InternetGatewayDevice.FaultMgmt.CurrentAlarm."
+	expeditedEventDevicePrefix = "Device.FaultMgmt.ExpeditedEvent."
+	expeditedEventIGDPrefix    = "InternetGatewayDevice.FaultMgmt.ExpeditedEvent."
 )
 
 // TR069Alarm represents a single alarm parsed from Device.FaultMgmt.CurrentAlarm.{i}.* parameters.
@@ -76,13 +76,13 @@ func ParseCurrentAlarmParams(params []tr069.ParameterValueStruct) ([]TR069Alarm,
 		case "ProbableCause":
 			alarm.ProbableCause = p.Value
 		case "SpecificProblem":
-		alarm.SpecificProblem = p.Value
+			alarm.SpecificProblem = p.Value
 		case "AdditionalInformation":
 			alarm.AdditionalInformation = p.Value
 		case "AdditionalText":
 			alarm.AdditionalText = p.Value
 		case "ManagedObjectInstance":
-		alarm.ManagedObjectInstance = p.Value
+			alarm.ManagedObjectInstance = p.Value
 		}
 	}
 
@@ -154,16 +154,8 @@ func (t *TR069Alarm) ToModel(deviceID uuid.UUID, deviceSN string, carrier model.
 		EventType:       strPtr(t.EventType),
 		AlarmSource:     strPtr("TR069"),
 		Severity:        mapSeverity(t.PerceivedSeverity),
-		RaisedAt:        t.AlarmRaisedTime,
 		Status:          model.AlarmActive,
-		AdditionalInfo:   make(map[string]string),
-	}
-
-	// Use AlarmRaisedTime as LastUpdatedAt; fall back to AlarmChangedTime.
-	if !t.AlarmRaisedTime.IsZero() {
-		alarm.LastUpdatedAt = t.AlarmRaisedTime
-	} else if !t.AlarmChangedTime.IsZero() {
-		alarm.LastUpdatedAt = t.AlarmChangedTime
+		AdditionalInfo:  make(map[string]string),
 	}
 
 	// Store additional info
@@ -222,9 +214,9 @@ func (t *TR069Alarm) Validate() error {
 
 // NotificationType constants for Device.FaultMgmt.ExpeditedEvent.{i}.NotificationType.
 const (
-	NotificationNewAlarm      = "NewAlarm"
-	NotificationChangedAlarm  = "ChangedAlarm"
-	NotificationClearedAlarm  = "ClearedAlarm"
+	NotificationNewAlarm     = "NewAlarm"
+	NotificationChangedAlarm = "ChangedAlarm"
+	NotificationClearedAlarm = "ClearedAlarm"
 )
 
 // ExpeditedEvent represents a single real-time alarm notification parsed from
@@ -357,11 +349,6 @@ func (e *ExpeditedEvent) ToModel(deviceID uuid.UUID, deviceSN string, carrier mo
 		Severity:        mapSeverity(e.PerceivedSeverity),
 		Status:          model.AlarmActive,
 		AdditionalInfo:  make(map[string]string),
-	}
-
-	if !e.EventTime.IsZero() {
-		alarm.RaisedAt = e.EventTime
-		alarm.LastUpdatedAt = e.EventTime
 	}
 
 	pc := e.ProbableCause

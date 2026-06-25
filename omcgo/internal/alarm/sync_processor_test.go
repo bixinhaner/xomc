@@ -256,7 +256,9 @@ func TestProcessSync_PreservesFirstRaisedAtOnUpdate(t *testing.T) {
 		{Name: "Device.FaultMgmt.CurrentAlarm.1.PerceivedSeverity", Value: "Critical"},
 	}
 
+	beforeSync := time.Now().Add(-1 * time.Second)
 	result := processor.processSync(context.Background(), "SN-SYNC-004", params)
+	afterSync := time.Now().Add(1 * time.Second)
 	require.Equal(t, 1, result.Updated)
 	require.Zero(t, result.FailedUpdate)
 
@@ -265,6 +267,8 @@ func TestProcessSync_PreservesFirstRaisedAtOnUpdate(t *testing.T) {
 	require.NotNil(t, alarm)
 	assert.Equal(t, firstRaisedAt, alarm.RaisedAt)
 	assert.Equal(t, firstRaisedAt, alarm.FirstRaisedAt)
-	assert.Equal(t, updatedRaisedAt, alarm.LastUpdatedAt)
+	assert.NotEqual(t, updatedRaisedAt, alarm.LastUpdatedAt)
+	assert.False(t, alarm.LastUpdatedAt.Before(beforeSync))
+	assert.False(t, alarm.LastUpdatedAt.After(afterSync))
 	assert.Equal(t, model.AlarmCritical, alarm.Severity)
 }
