@@ -30,50 +30,54 @@ func (h *Handler) CreateUser(c *gin.Context) {
 		return
 	}
 
-	// T-0120 双路径密码解析
-	var (
-		plainPwd string
-		err      error
-	)
-	if httpReq.EncryptedPassword != "" && httpReq.KeyID != "" {
-		if h.loginCipher == nil {
-			commonerrors.AbortWithError(c, http.StatusInternalServerError,
-				errors.New("login password cipher not configured"))
-			return
-		}
-		plainPwd, err = h.loginCipher.Decrypt(c.Request.Context(), httpReq.KeyID, httpReq.EncryptedPassword)
-		if err != nil {
+	// issue #649：UseDefaultPassword=true 时跳过密码字段解析与必填校验。
+	// service 层会从 sys_configs.security.defaultPasswd 取值并跳过强度校验（设计方案 A，
+	// 避免强度规则调高后存量默认密码触发 UX 死结）。
+	var plainPwd string
+	if !httpReq.UseDefaultPassword {
+		// T-0120 双路径密码解析
+		var err error
+		if httpReq.EncryptedPassword != "" && httpReq.KeyID != "" {
+			if h.loginCipher == nil {
+				commonerrors.AbortWithError(c, http.StatusInternalServerError,
+					errors.New("login password cipher not configured"))
+				return
+			}
+			plainPwd, err = h.loginCipher.Decrypt(c.Request.Context(), httpReq.KeyID, httpReq.EncryptedPassword)
+			if err != nil {
+				commonerrors.AbortWithError(c, http.StatusBadRequest,
+					fmt.Errorf("decrypt password: %w", err))
+				return
+			}
+		} else if httpReq.Password != "" {
+			if !h.allowPlaintextPwd {
+				commonerrors.AbortWithError(c, http.StatusBadRequest,
+					errors.New("plaintext password is disabled; please use encrypted_password+key_id or deploy TLS"))
+				return
+			}
+			plainPwd = httpReq.Password
+		} else {
 			commonerrors.AbortWithError(c, http.StatusBadRequest,
-				fmt.Errorf("decrypt password: %w", err))
+				errors.New("missing password: provide encrypted_password+key_id, password, or set use_default_password=true"))
 			return
 		}
-	} else if httpReq.Password != "" {
-		if !h.allowPlaintextPwd {
+		if len(plainPwd) < 6 {
 			commonerrors.AbortWithError(c, http.StatusBadRequest,
-				errors.New("plaintext password is disabled; please use encrypted_password+key_id or deploy TLS"))
+				errors.New("password must be at least 6 characters"))
 			return
 		}
-		plainPwd = httpReq.Password
-	} else {
-		commonerrors.AbortWithError(c, http.StatusBadRequest,
-			errors.New("missing password: provide encrypted_password+key_id or (if allow_plaintext) password"))
-		return
-	}
-	if len(plainPwd) < 6 {
-		commonerrors.AbortWithError(c, http.StatusBadRequest,
-			errors.New("password must be at least 6 characters"))
-		return
 	}
 
 	req := CreateUserRequest{
-		Username:    httpReq.Username,
-		Password:    plainPwd,
-		DisplayName: httpReq.DisplayName,
-		Email:       httpReq.Email,
-		Phone:       httpReq.Phone,
-		Description: httpReq.Description,
-		ExpireAt:    httpReq.ExpireAt,
-		RoleIDs:     httpReq.RoleIDs,
+		Username:           httpReq.Username,
+		Password:           plainPwd,
+		UseDefaultPassword: httpReq.UseDefaultPassword,
+		DisplayName:        httpReq.DisplayName,
+		Email:              httpReq.Email,
+		Phone:              httpReq.Phone,
+		Description:        httpReq.Description,
+		ExpireAt:           httpReq.ExpireAt,
+		RoleIDs:            httpReq.RoleIDs,
 	}
 	user, err := h.service.CreateUser(userContextWithOperator(c), req)
 	if err != nil {
@@ -216,39 +220,46 @@ func (h *Handler) ResetPassword(c *gin.Context) {
 
 	ctx := c.Request.Context()
 
-	// T-0120 双路径（reuse outer err declared at func top）
+	// issue #649：UseDefaultPassword=true 时跳过密码字段解析与必填校验。
+	// service 层会从 sys_configs.security.defaultPasswd 取值并跳过强度校验。
 	var plainPwd string
-	if req.EncryptedNewPassword != "" && req.KeyID != "" {
-		if h.loginCipher == nil {
-			commonerrors.AbortWithError(c, http.StatusInternalServerError,
-				errors.New("login password cipher not configured"))
-			return
-		}
-		plainPwd, err = h.loginCipher.Decrypt(ctx, req.KeyID, req.EncryptedNewPassword)
-		if err != nil {
+	if !req.UseDefaultPassword {
+		// T-0120 双路径（reuse outer err declared at func top）
+		if req.EncryptedNewPassword != "" && req.KeyID != "" {
+			if h.loginCipher == nil {
+				commonerrors.AbortWithError(c, http.StatusInternalServerError,
+					errors.New("login password cipher not configured"))
+				return
+			}
+			plainPwd, err = h.loginCipher.Decrypt(ctx, req.KeyID, req.EncryptedNewPassword)
+			if err != nil {
+				commonerrors.AbortWithError(c, http.StatusBadRequest,
+					fmt.Errorf("decrypt new password: %w", err))
+				return
+			}
+		} else if req.NewPassword != "" {
+			if !h.allowPlaintextPwd {
+				commonerrors.AbortWithError(c, http.StatusBadRequest,
+					errors.New("plaintext password is disabled; please use encrypted_new_password+key_id or deploy TLS"))
+				return
+			}
+			plainPwd = req.NewPassword
+		} else {
 			commonerrors.AbortWithError(c, http.StatusBadRequest,
-				fmt.Errorf("decrypt new password: %w", err))
+				errors.New("missing password: provide encrypted_new_password+key_id, new_password, or set use_default_password=true"))
 			return
 		}
-	} else if req.NewPassword != "" {
-		if !h.allowPlaintextPwd {
+		if len(plainPwd) < 6 {
 			commonerrors.AbortWithError(c, http.StatusBadRequest,
-				errors.New("plaintext password is disabled; please use encrypted_new_password+key_id or deploy TLS"))
+				errors.New("new password must be at least 6 characters"))
 			return
 		}
-		plainPwd = req.NewPassword
-	} else {
-		commonerrors.AbortWithError(c, http.StatusBadRequest,
-			errors.New("missing password: provide encrypted_new_password+key_id or (if allow_plaintext) new_password"))
-		return
-	}
-	if len(plainPwd) < 6 {
-		commonerrors.AbortWithError(c, http.StatusBadRequest,
-			errors.New("new password must be at least 6 characters"))
-		return
 	}
 
-	if err := h.service.ResetPassword(ctx, id, ResetPasswordRequest{NewPassword: plainPwd}); err != nil {
+	if err := h.service.ResetPassword(ctx, id, ResetPasswordRequest{
+		NewPassword:        plainPwd,
+		UseDefaultPassword: req.UseDefaultPassword,
+	}); err != nil {
 		status := commonerrors.HTTPStatusFromError(err)
 		commonerrors.AbortWithError(c, status, err)
 		return
