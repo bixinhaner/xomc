@@ -31,6 +31,7 @@ import {
   useResumeCanary,
   useAbortCanary,
 } from '@core/hooks/api/useSoftware'
+import { useProductList } from '@core/hooks/api/useProducts'
 import type { UpgradeTaskInfo, TaskStatusType } from '@core/mock/data/software'
 
 import { NEON, TASK_STATUS, TASK_TYPE, RESULT_COLOR, StatCard, Syncing, ErrorBlock, EmptyBlock, Pager } from './_shared'
@@ -53,7 +54,11 @@ export default function UpgradePlan() {
   const [page, setPage] = useState(1)
   const pageSize = 12
   const [statusFilter, setStatusFilter] = useState<TaskStatusType | ''>('')
+  // #638：按“产品名”过滤升级任务。''=全部；productId 使用产品中心 products.id。
+  const [productId, setProductId] = useState('')
   const [keyword, setKeyword] = useState('')
+
+  const { data: productsData } = useProductList()
 
   const params = useMemo(
     () => ({
@@ -61,8 +66,9 @@ export default function UpgradePlan() {
       pageSize,
       taskType: UPGRADE_TASK_TYPE,
       ...(statusFilter ? { status: statusFilter } : {}),
+      ...(productId ? { productId } : {}),
     }),
-    [page, statusFilter]
+    [page, statusFilter, productId]
   )
 
   const { data, isLoading, isError, error, isFetching, refetch } = useUpgradeTasks(params)
@@ -137,6 +143,17 @@ export default function UpgradePlan() {
 
       {/* 筛选 */}
       <div className="mb-3 flex flex-wrap items-center gap-2">
+        {/* #638：产品名过滤（v1/v2 对齐）。原生 select 保持 HUD 边框风格与该页一致。 */}
+        <select
+          className="neon-input w-44"
+          value={productId}
+          onChange={(e) => { setProductId(e.target.value); setPage(1) }}
+        >
+          <option value="">全部产品 · ALL PRODUCTS</option>
+          {(productsData?.items ?? []).map((p) => (
+            <option key={p.id} value={p.id}>{p.name}</option>
+          ))}
+        </select>
         {STATUS_FILTERS.map((s) => (
           <button
             key={s || 'all'}

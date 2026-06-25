@@ -161,7 +161,14 @@ export default function FirmwareUpload({ embedded = false }: FirmwareUploadProps
     setSelectedFile(file ?? null);
     if (file) {
       form.setFieldsValue({
-        product: file.productId,
+        // #638：优先用 productIds（多产品完整列表）预填。历史单产品固件只有 productId 时，
+        //   提升为单元素数组，Antd Select multiple 仍能正常展示；两者都空 → undefined（占位同原）。
+        product:
+          file.productIds && file.productIds.length > 0
+            ? file.productIds
+            : file.productId
+              ? [file.productId]
+              : undefined,
         version: file.versionCode,
         recommend: file.recommend ? '1' : '0',
         description: file.description ?? '',
@@ -197,8 +204,8 @@ export default function FirmwareUpload({ embedded = false }: FirmwareUploadProps
           {
             id: selectedFile.id,
             metadata: {
-              // #492：产品归属以 product_id 为权威（product 字段值即所选产品 id）。
-              productId: values.product,
+              // #492 / #638：产品归属改为多选（string[]）。后端同步写 product_ids + 主产品 product_id = ids[0]。
+              productIds: Array.isArray(values.product) ? values.product : [],
               version: values.version ?? '',
               recommend: values.recommend === '1',
               description: values.description ?? '',
@@ -239,8 +246,8 @@ export default function FirmwareUpload({ embedded = false }: FirmwareUploadProps
           file: rawFile,
           metadata: {
             version: values.version ?? '',
-            // #492：产品归属以 product_id 为权威（product 字段值即所选产品 id）。
-            productId: values.product,
+            // #492 / #638：产品归属优先走 productIds（多产品）；productId 作为旧路径在 productIds 为空时不会生效。
+            productIds: Array.isArray(values.product) ? values.product : [],
             releaseNotes: values.description ?? '',
             fileType: fileTypeParamMap[fileType],
             recommend: values.recommend === '1',
@@ -362,9 +369,16 @@ export default function FirmwareUpload({ embedded = false }: FirmwareUploadProps
       title: t('software.firmware.productClass'),
       width: 250,
       ellipsis: true,
-      // #492：展示产品名（product_id→名），解析不到回退裸 productClass(deviceType)。
-      render: (_: unknown, record: SoftwareVersion) =>
-        (record.productId && productNameById.get(record.productId)) || record.deviceType || '-',
+      // #492 / #638：列表列展示适用产品名。productIds 优先（多产品逗号拼接），回退旧单产品 productId，再回退 deviceType。
+      render: (_: unknown, record: SoftwareVersion) => {
+        const ids = (record.productIds && record.productIds.length > 0)
+          ? record.productIds
+          : (record.productId ? [record.productId] : []);
+        const names = ids
+          .map((id) => productNameById.get(id))
+          .filter((n): n is string => Boolean(n));
+        return names.length > 0 ? names.join(', ') : (record.deviceType || '-');
+      },
     },
     {
       key: 'size',
@@ -518,13 +532,15 @@ export default function FirmwareUpload({ embedded = false }: FirmwareUploadProps
           size="small"
           disabled={importMode === 'view'}
         >
-          {/* #492：固件所属产品 = 选产品名（产品中心-产品管理目录），提交 product_id。 */}
+          {/* #492 / #638：固件适用产品改为多选（mode=multiple）。表单值为 string[]，提交时映射 productIds。 */}
           <Form.Item
               name="product"
               label={t('software.firmware.productClass')}
               rules={[{ required: true, message: t('software.firmware.selectProductClass') }]}
             >
               <Select
+                mode="multiple"
+                allowClear
                 showSearch
                 optionFilterProp="label"
                 placeholder={t('software.firmware.selectProductClass')}

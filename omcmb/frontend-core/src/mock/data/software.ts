@@ -20,6 +20,9 @@ export interface SoftwareVersion {
   deviceType: string;
   /** #492 固件所属产品（products.id）。上传选产品名 → 存此；前端按 useProductList 映射展示产品名。历史固件为空。 */
   productId?: string;
+  /** #638 固件适用的全部产品列表（products.id[]）。product_id = productIds[0]（"主产品"，唯一索引仍走它）。
+   *  上传/编辑表单按多选写入；列表与编辑回填以此为准。历史固件为空数组或未带。 */
+  productIds?: string[];
   vendor: string;
   releaseDate: string;
   status: VersionStatus;

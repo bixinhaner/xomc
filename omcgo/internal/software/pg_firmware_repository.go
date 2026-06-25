@@ -19,7 +19,7 @@ import (
 )
 
 var firmwareColumns = []string{
-	"id", "product_id", "product_class", "version", "file_name", "file_size",
+	"id", "product_id", "product_ids", "product_class", "version", "file_name", "file_size",
 	"file_type", "minio_path", "compatible_oui", "md5_val", "recommend",
 	"uploader", "manufacturer", "release_notes", "description", "status",
 	"created_at", "updated_at",
@@ -46,9 +46,10 @@ func scanFirmware(row pgx.Row) (*FirmwareVersion, error) {
 	var sha256Val, signature, signatureAlg, publicKeyID sqlNilString
 	var recommend sqlNilBool
 	var createdAt, updatedAt time.Time
+	var productIDs []uuid.UUID
 
 	err := row.Scan(
-		&fw.ID, &fw.ProductID, &fw.ProductClass, &fw.Version,
+		&fw.ID, &fw.ProductID, &productIDs, &fw.ProductClass, &fw.Version,
 		&fw.FileName, &fw.FileSize, &fw.FileType, &fw.MinIOPath,
 		&ouiJSON, &md5Val, &recommend, &uploader,
 		&manufacturer, &fw.ReleaseNotes, &description, &fw.Status,
@@ -61,6 +62,7 @@ func scanFirmware(row pgx.Row) (*FirmwareVersion, error) {
 	if ouiJSON != nil {
 		_ = json.Unmarshal(ouiJSON, &fw.CompatibleOUI)
 	}
+	fw.ProductIDs = productIDs
 	fw.MD5Val = md5Val.string
 	fw.SHA256Val = sha256Val.string
 	fw.Signature = signature.string
@@ -77,13 +79,19 @@ func scanFirmware(row pgx.Row) (*FirmwareVersion, error) {
 
 func (r *PgFirmwareRepository) Create(ctx context.Context, fw *FirmwareVersion) error {
 	ouiJSON, _ := json.Marshal(fw.CompatibleOUI)
+	// #638：product_ids 列不允许 nil（DEFAULT '{}'但 explicit NULL 会走 NOT NULL 报错），
+	// nil 转空切片 → pgx 编码为 '{}'::uuid[]。
+	productIDs := fw.ProductIDs
+	if productIDs == nil {
+		productIDs = []uuid.UUID{}
+	}
 
 	query, args, err := storage.Psql.Insert("firmware_versions").
-		Columns("product_id", "product_class", "version", "file_name", "file_size",
+		Columns("product_id", "product_ids", "product_class", "version", "file_name", "file_size",
 			"file_type", "minio_path", "compatible_oui", "md5_val", "recommend",
 			"uploader", "manufacturer", "release_notes", "description", "status",
 			"sha256_val", "signature", "signature_alg", "public_key_id").
-		Values(fw.ProductID, fw.ProductClass, fw.Version, fw.FileName, fw.FileSize,
+		Values(fw.ProductID, productIDs, fw.ProductClass, fw.Version, fw.FileName, fw.FileSize,
 			fw.FileType, fw.MinIOPath, ouiJSON, fw.MD5Val, fw.Recommend,
 			fw.Uploader, fw.Manufacturer, fw.ReleaseNotes, fw.Description, fw.Status,
 			// 空字符串落 NULL：保持"无可用 SHA-256 / 无签名"语义清晰，
@@ -137,11 +145,12 @@ func (r *PgFirmwareRepository) List(ctx context.Context, filter FirmwareFilter) 
 	countBase := storage.Psql.Select("COUNT(*)").From("firmware_versions")
 
 	if filter.ProductID != "" {
-		// #492：gin 绑进来的是 uuid 字符串，解析为 uuid.UUID 再比较（pgx 按 uuid 编码，
-		// 避免 "operator does not exist: uuid = text"）。解析失败则跳过该过滤。
+		// #492 #638：gin 绑进来是 uuid 字符串，解析为 uuid.UUID。过滤命中语义从“主产品=:pid”
+		// 改为“:pid 在 product_ids 任一项”（:pid = ANY(product_ids)），多产品固件能被所有适用产品命中。
+		// 历史行已由 000002 迁移 backfill，product_ids = ARRAY[product_id]，誓不漏。
 		if pid, err := uuid.Parse(filter.ProductID); err == nil {
-			base = base.Where(sq.Eq{"product_id": pid})
-			countBase = countBase.Where(sq.Eq{"product_id": pid})
+			base = base.Where("? = ANY(product_ids)", pid)
+			countBase = countBase.Where("? = ANY(product_ids)", pid)
 		}
 	}
 	if filter.ProductClass != nil {
@@ -214,8 +223,14 @@ func (r *PgFirmwareRepository) List(ctx context.Context, filter FirmwareFilter) 
 }
 
 func (r *PgFirmwareRepository) Update(ctx context.Context, fw *FirmwareVersion) error {
+	// #638：product_ids 走 NOT NULL DEFAULT '{}'，nil 转空切片避免写入 NULL。
+	productIDs := fw.ProductIDs
+	if productIDs == nil {
+		productIDs = []uuid.UUID{}
+	}
 	builder := storage.Psql.Update("firmware_versions").
 		Set("product_id", fw.ProductID).
+		Set("product_ids", productIDs).
 		Set("product_class", fw.ProductClass).
 		Set("version", fw.Version).
 		Set("recommend", fw.Recommend).
@@ -265,9 +280,10 @@ func scanFirmwareRow(rows pgx.Rows) (*FirmwareVersion, error) {
 	var sha256Val, signature, signatureAlg, publicKeyID sqlNilString
 	var recommend sqlNilBool
 	var createdAt, updatedAt time.Time
+	var productIDs []uuid.UUID
 
 	err := rows.Scan(
-		&fw.ID, &fw.ProductID, &fw.ProductClass, &fw.Version,
+		&fw.ID, &fw.ProductID, &productIDs, &fw.ProductClass, &fw.Version,
 		&fw.FileName, &fw.FileSize, &fw.FileType, &fw.MinIOPath,
 		&ouiJSON, &md5Val, &recommend, &uploader,
 		&manufacturer, &fw.ReleaseNotes, &description, &fw.Status,
@@ -280,6 +296,7 @@ func scanFirmwareRow(rows pgx.Rows) (*FirmwareVersion, error) {
 	if ouiJSON != nil {
 		_ = json.Unmarshal(ouiJSON, &fw.CompatibleOUI)
 	}
+	fw.ProductIDs = productIDs
 	fw.MD5Val = md5Val.string
 	fw.SHA256Val = sha256Val.string
 	fw.Signature = signature.string

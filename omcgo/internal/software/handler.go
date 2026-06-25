@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -149,6 +150,11 @@ func (h *Handler) UploadFirmware(c *gin.Context) {
 			fw.ProductID = &id
 		}
 	}
+	// #638：多产品上传。前端提交 product_ids 为逗号分隔的 UUID 串（FormData
+	// 交互最友好）；service 层会根据 ProductIDs[0] 同步 ProductID 作为兼容主产品。
+	if pids := c.PostForm("product_ids"); pids != "" {
+		fw.ProductIDs = parseProductIDsCSV(pids)
+	}
 
 	if fw.Version == "" {
 		commonerrors.AbortWithError(c, http.StatusBadRequest,
@@ -249,12 +255,13 @@ func (h *Handler) UpdateFirmware(c *gin.Context) {
 	}
 
 	var req struct {
-		ProductID    string `json:"product_id"`
-		ProductClass string `json:"product_class"`
-		Version      string `json:"version"`
-		Recommend    *bool  `json:"recommend"`
-		Description  string `json:"description"`
-		ReleaseNotes string `json:"release_notes"`
+		ProductID    string   `json:"product_id"`
+		ProductIDs   []string `json:"product_ids"`
+		ProductClass string   `json:"product_class"`
+		Version      string   `json:"version"`
+		Recommend    *bool    `json:"recommend"`
+		Description  string   `json:"description"`
+		ReleaseNotes string   `json:"release_notes"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
@@ -266,6 +273,11 @@ func (h *Handler) UpdateFirmware(c *gin.Context) {
 		if id, err := uuid.Parse(req.ProductID); err == nil {
 			fw.ProductID = &id
 		}
+	}
+	// #638：修改适用多产品。前端限制“同时传 product_ids 才走多产品路径”，不传则保留原有数组，
+	// 避免老前端只提交 product_id 时误清多产品。service 层会同步 ProductID = ProductIDs[0]。
+	if req.ProductIDs != nil {
+		fw.ProductIDs = parseProductIDsList(req.ProductIDs)
 	}
 	if req.ProductClass != "" {
 		fw.ProductClass = req.ProductClass
@@ -542,4 +554,58 @@ func (h *Handler) transitionCanary(c *gin.Context, fn func(ctx context.Context, 
 		return
 	}
 	response.OK(c, gin.H{"task_id": id.String(), "operation": op, "result": "ok"})
+}
+
+// parseProductIDsCSV 把表单字段里的逗号分隔 UUID 串解析为去重后的 uuid 切片，跳过
+// 解析失败项（避免 1 个错误 UUID 导致整批 400）。空串返回 nil（语义=不传）。
+// 用于 multipart/form-data 上传场景（#638 升级文件多产品复选）。
+func parseProductIDsCSV(s string) []uuid.UUID {
+	parts := strings.Split(s, ",")
+	out := make([]uuid.UUID, 0, len(parts))
+	seen := make(map[uuid.UUID]struct{}, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		id, err := uuid.Parse(p)
+		if err != nil {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// parseProductIDsList 是 parseProductIDsCSV 的 JSON 字符串数组版本（用于 PUT 接口）。
+// 语义与 CSV 版一致：去重、跳过解析失败项、空 → nil。
+func parseProductIDsList(in []string) []uuid.UUID {
+	out := make([]uuid.UUID, 0, len(in))
+	seen := make(map[uuid.UUID]struct{}, len(in))
+	for _, p := range in {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		id, err := uuid.Parse(p)
+		if err != nil {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
