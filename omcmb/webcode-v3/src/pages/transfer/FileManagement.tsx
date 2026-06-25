@@ -183,7 +183,7 @@ export default function TransferFileManagementPage() {
           <span>TYPE · 类型</span>
           <span>STATUS</span>
           <span>FILE · 文件</span>
-          <span>TIME · 时间</span>
+          <span>START / END · 开始 / 结束</span>
         </div>
       )}
 
@@ -262,7 +262,11 @@ export default function TransferFileManagementPage() {
                     <span className="text-cyan-300/40">—</span>
                   )}
                 </div>
-                <div className="font-mono text-[11px] text-cyan-300/75">{formatTime(d.lastReportAt)}</div>
+                {/* issue #655: 「最近上报」单值改为「开始 / 结束」双行，未达对应状态显示 '—'。 */}
+                <div className="flex flex-col gap-0.5 font-mono text-[11px] leading-tight text-cyan-300/75">
+                  <span title="开始时间">▶ {d.startedAt ? formatTime(d.startedAt) : '—'}</span>
+                  <span title="结束时间" className="text-cyan-300/55">■ {d.endedAt ? formatTime(d.endedAt) : '—'}</span>
+                </div>
               </div>
             )
           })

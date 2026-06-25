@@ -206,7 +206,7 @@ export default function ConfigDistribution() {
             <span>TASK</span>
             <span>STATUS</span>
             <span>PROGRESS</span>
-            <span>LAST REPORT</span>
+            <span>START / END</span>
             <span className="text-right">DETAIL</span>
           </div>
           <div className="mt-1.5 space-y-1.5">
@@ -249,7 +249,11 @@ export default function ConfigDistribution() {
                       </div>
                       <div className="mt-0.5 font-mono text-[10px] text-cyan-300/55">{d.progress}%</div>
                     </div>
-                    <div className="font-mono text-[11px] text-cyan-300/75">{formatTime(d.lastReportAt)}</div>
+                    <div className="font-mono text-[11px] leading-tight text-cyan-300/75">
+                      {/* issue #655: 单值改双行：开始时间 / 结束时间。 */}
+                      <div title="开始时间">▶ {d.startedAt ? formatTime(d.startedAt) : '—'}</div>
+                      <div className="text-cyan-300/55" title="结束时间">■ {d.endedAt ? formatTime(d.endedAt) : '—'}</div>
+                    </div>
                     <div className="flex justify-end">
                       <NeonButton icon={<ChevronRight />} onClick={() => navigate(`/file/config-distribution/${d.taskId}`)}>
                         任务

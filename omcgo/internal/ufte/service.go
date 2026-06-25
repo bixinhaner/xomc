@@ -1590,6 +1590,11 @@ func (s *Service) mapDeviceItem(
 		Status:          status,
 		Result:          result,
 		Progress:        progressForDeviceStatus(status),
+		// issue #655：StartedAt / EndedAt 直接透传 PG repo 写入的 sub_task.started_at /
+		// completed_at（见 pg_upgrade_repository.go UpdateStatusWithCode，COALESCE 守卫
+		// 首次执行态写一次后不再覆盖）。LastReportAt 保留兼容 CSV / 北向 API。
+		StartedAt:       modelTimePtrToString(subTask.StartedAt),
+		EndedAt:         modelTimePtrToString(subTask.CompletedAt),
 		LastReportAt:    formatTime(lastReport),
 		CreatedAt:       formatTime(time.Time(subTask.CreatedAt)),
 		OperatorScope:   parent.CreateUser,
