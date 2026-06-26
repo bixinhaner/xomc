@@ -49,6 +49,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		adhoc.GET("/tasks/:id", h.Get)
 		adhoc.PATCH("/tasks/:id", h.Update) // T-0194：编辑任务定义
 		adhoc.DELETE("/tasks/:id", h.Cancel)
+		adhoc.POST("/tasks/:id/resume", h.Resume)       // #674：恢复已取消任务
 		adhoc.DELETE("/tasks/:id/definition", h.Delete) // #392：硬删终态自建任务定义行
 		adhoc.GET("/tasks/:id/results", h.Results)
 		adhoc.GET("/tasks/:id/filter-options", h.FilterOptions) // PM-DASH-DIMFILTER：按维度列出可筛子集选项
@@ -544,6 +545,49 @@ func (h *Handler) Cancel(c *gin.Context) {
 		return
 	}
 	response.OK(c, gin.H{"id": id.String(), "status": string(StatusCanceled)})
+}
+
+// Resume POST /pm/adhoc/tasks/:id/resume
+//
+// 恢复已取消的 adhoc 任务（#674）：
+//   - continuous → scheduled（让 ContinuousScheduler 下次 sweep 推 pending）
+//   - oneshot → pending（让 worker 直接捞）
+//   - 非 canceled 状态调用返回 409 Conflict。
+func (h *Handler) Resume(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Fail(c, http.StatusBadRequest, "invalid id")
+		return
+	}
+	// #652：先取任务做归属权校验（恢复）—— 自建任务仅创建者或超管可恢复。
+	existing, err := h.repo.Get(c.Request.Context(), id)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			response.Fail(c, http.StatusNotFound, "not found")
+			return
+		}
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if !existing.IsBuiltin {
+		if !canOperate(existing, extractCreator(c), isAdmin(c)) {
+			response.Fail(c, http.StatusForbidden, "permission denied: not task owner")
+			return
+		}
+	}
+	newStatus, err := h.repo.Resume(c.Request.Context(), id)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrNotFound):
+			response.Fail(c, http.StatusNotFound, "not found")
+		case errors.Is(err, ErrNotCanceled):
+			response.Fail(c, http.StatusConflict, "task is not canceled, cannot resume")
+		default:
+			commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		}
+		return
+	}
+	response.OK(c, gin.H{"id": id.String(), "status": string(newStatus)})
 }
 
 // Delete DELETE /pm/adhoc/tasks/:id/definition

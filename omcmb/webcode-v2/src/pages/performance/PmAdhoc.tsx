@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Pencil, Plus, RefreshCcw, Trash2, XCircle } from 'lucide-react'
+import { Pencil, Play, Plus, RefreshCcw, Trash2, XCircle } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -22,7 +22,7 @@ import {
 } from '@/components/layout/PageShell'
 import { cn } from '@/lib/utils'
 
-import { usePmAdhocList, useCancelPmAdhoc, useDeletePmAdhoc } from '@core/hooks/api/usePmAdhoc'
+import { usePmAdhocList, useCancelPmAdhoc, useDeletePmAdhoc, useResumePmAdhoc } from '@core/hooks/api/usePmAdhoc'
 import {
   useAdhocProgressStream,
   type AdhocLiveProgress,
@@ -83,6 +83,7 @@ function AdhocTable({
   onEdit,
   onCancel,
   onDelete,
+  onResume,
   cancelingId,
   deletingId,
   builtin,
@@ -98,6 +99,8 @@ function AdhocTable({
   onCancel: (id: string) => void
   // issue #392：删除终态自建任务（仅自建区传入；内置区不传，按钮恒不渲染）。
   onDelete?: (id: string) => void
+  // #674：恢复已取消任务。
+  onResume?: (id: string) => void
   cancelingId: string | null
   deletingId: string | null
   builtin: boolean
@@ -222,6 +225,19 @@ function AdhocTable({
                             <XCircle className="size-4" />
                           </Button>
                         )}
+                        {/* #674：已取消任务给「启用」恢复执行 */}
+                        {onResume && t.status === 'canceled' && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={busy}
+                            className="text-primary hover:text-primary"
+                            onClick={() => onResume(t.id)}
+                            aria-label="启用任务"
+                          >
+                            <Play className="size-4" /> 启用
+                          </Button>
+                        )}
                         {/* issue #392：终态自建任务给「删除」（onDelete 仅自建区传入） */}
                         {!builtin && terminal && onDelete && (
                           <Button
@@ -257,6 +273,7 @@ export function PmAdhocPage() {
   const custom = usePmAdhocList({ isBuiltin: false, refetchInterval: ADHOC_POLL_FALLBACK_MS })
   const cancel = useCancelPmAdhoc()
   const del = useDeletePmAdhoc()
+  const resume = useResumePmAdhoc()
 
   const builtinRows = useMemo(() => builtin.data ?? [], [builtin.data])
   const customRows = useMemo(() => custom.data ?? [], [custom.data])
@@ -285,7 +302,15 @@ export function PmAdhocPage() {
     del.mutate(id, { onSettled: () => setDeletingId(null) })
   }
 
-  const fetching = builtin.isFetching || custom.isFetching || cancel.isPending || del.isPending
+  // #674：恢复已取消任务。
+  const onResume = (id: string) => {
+    if (!window.confirm('恢复已取消的任务，任务将重新参与调度执行。确认启用？')) {
+      return
+    }
+    resume.mutate(id)
+  }
+
+  const fetching = builtin.isFetching || custom.isFetching || cancel.isPending || del.isPending || resume.isPending
 
   return (
     <PageShell
@@ -321,6 +346,7 @@ export function PmAdhocPage() {
           liveProgress={liveProgress}
           onEdit={onEdit}
           onCancel={onCancel}
+          onResume={onResume}
           cancelingId={cancelingId}
           deletingId={deletingId}
           builtin
@@ -335,6 +361,7 @@ export function PmAdhocPage() {
           onEdit={onEdit}
           onCancel={onCancel}
           onDelete={onDelete}
+          onResume={onResume}
           cancelingId={cancelingId}
           deletingId={deletingId}
           builtin={false}

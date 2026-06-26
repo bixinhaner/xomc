@@ -71,6 +71,20 @@ export function useCancelPmAdhoc() {
 }
 
 /**
+ * #674：恢复已取消的 adhoc 任务。恢复成功后失效列表使其刷新（状态变更可见）。
+ * 仅对 canceled 状态任务调用；非 canceled 由 UI 不渲染启用按钮拦在前面，后端以 409 二次守门。
+ */
+export function useResumePmAdhoc() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.resume(id),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ADHOC_KEY });
+    },
+  });
+}
+
+/**
  * issue #392：硬删终态自建任务的定义行。删除成功后失效自定义聚合任务列表使其刷新（任务消失）。
  * 仅对终态(成功/失败/已取消) + 自建任务调用；非终态/内置由 UI 不渲染删除按钮拦在前面，
  * 后端也会以 409/403 二次守门。

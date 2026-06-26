@@ -117,6 +117,11 @@ export const pmAdhocApi = {
   async cancel(id: string): Promise<void> {
     await http.delete(`/pm/adhoc/tasks/${id}`);
   },
+  // #674：恢复已取消的 adhoc 任务。
+  async resume(id: string): Promise<{ id: string; status: string }> {
+    const { data } = await http.post<{ id: string; status: string }>(`/pm/adhoc/tasks/${id}/resume`);
+    return data;
+  },
   // issue #392：硬删终态自建任务的定义行（与取消软删区分子路径 /definition，避免与取消端点冲突）。
   // 后端守门：非终态→409 / 内置→403 / 不存在→404；只删 pm_tasks 定义行，结果交 retention 自然过期。
   async deleteTask(id: string): Promise<void> {
@@ -254,6 +259,12 @@ export const pmAdhocMock: typeof pmAdhocApi = {
   async cancel(id) {
     const t = mockTasks.find((x) => x.id === id);
     if (t) t.status = 'canceled';
+  },
+  async resume(id) {
+    const t = mockTasks.find((x) => x.id === id);
+    if (!t) throw new Error('not found');
+    t.status = t.mode === 'continuous' ? 'scheduled' : 'pending';
+    return { id, status: t.status };
   },
   async deleteTask(id) {
     const i = mockTasks.findIndex((x) => x.id === id);

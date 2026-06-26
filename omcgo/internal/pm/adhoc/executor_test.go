@@ -30,8 +30,8 @@ func (s *stubAggr) Query(_ context.Context, req aggregator.QueryRequest) ([]aggr
 }
 
 type stubRepo struct {
-	mu           sync.Mutex
-	insertedRows []ResultRow
+	mu            sync.Mutex
+	insertedRows  []ResultRow
 	statusUpdates []struct {
 		id       uuid.UUID
 		status   Status
@@ -44,6 +44,7 @@ func (s *stubRepo) Update(context.Context, uuid.UUID, UpdateRequest) error   { r
 func (s *stubRepo) Get(context.Context, uuid.UUID) (*Task, error)            { return nil, nil }
 func (s *stubRepo) List(context.Context, ListFilter) ([]Task, error)         { return nil, nil }
 func (s *stubRepo) Cancel(context.Context, uuid.UUID) error                  { return nil }
+func (s *stubRepo) Resume(context.Context, uuid.UUID) (Status, error)        { return "", nil }
 func (s *stubRepo) Delete(context.Context, uuid.UUID) error                  { return nil }
 func (s *stubRepo) LockNextPending(context.Context, string) (*Task, error)   { return nil, nil }
 
@@ -65,7 +66,7 @@ func (s *stubRepo) InsertResults(_ context.Context, rows []ResultRow) error {
 	return nil
 }
 
-func (s *stubRepo) NextRunSeq(context.Context, uuid.UUID) (int, error)  { return 1, nil }
+func (s *stubRepo) NextRunSeq(context.Context, uuid.UUID) (int, error) { return 1, nil }
 func (s *stubRepo) InsertRun(context.Context, TaskRun) (uuid.UUID, error) {
 	return uuid.New(), nil
 }
@@ -312,7 +313,7 @@ func Test_Executor_NetworkDimension_RoutesAndPassesTechnology(t *testing.T) {
 	aggr := &stubAggr{
 		rowsByGran: map[metrics.Granularity][]aggregator.Row{
 			metrics.GranularityHourly: {{
-				DeviceSN: "AGGREGATED",
+				DeviceSN:   "AGGREGATED",
 				MetricPath: "C000060011", MetricType: metrics.MetricTypeCounter,
 				MetricValue: 99999, StatisType: &stype, Granularity: metrics.GranularityHourly,
 				Time: time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),

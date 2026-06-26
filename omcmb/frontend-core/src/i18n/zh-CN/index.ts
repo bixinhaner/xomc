@@ -7340,6 +7340,12 @@ const messages: Record<string, string> = {
   'perf.adhoc.cancelTaskTitle':          '取消任务',
   'perf.adhoc.cancelTaskContent':        '已在运行的任务取消后不会回滚已写入结果',
   'perf.adhoc.canceled':                 '已取消',
+  // #674：恢复已取消任务
+  'perf.adhoc.btnResume':                '启用',
+  'perf.adhoc.resumeTaskTitle':          '启用任务',
+  'perf.adhoc.resumeTaskContent':        '恢复已取消的任务，任务将重新参与调度执行。确认启用？',
+  'perf.adhoc.resumed':                  '已启用',
+  'perf.adhoc.resumeFailed':             '启用失败：{msg}',
   // issue #392：删除终态自建任务
   'perf.adhoc.btnDelete':                '删除',
   'perf.adhoc.deleteTaskTitle':          '删除任务',

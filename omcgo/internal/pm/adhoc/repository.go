@@ -41,6 +41,12 @@ type Repository interface {
 	// 已 succeeded/failed 行调用返 ErrTerminalState。
 	Cancel(ctx context.Context, id uuid.UUID) error
 
+	// Resume 把 canceled 行恢复为可执行状态（#674）。
+	//   - continuous → scheduled（让 ContinuousScheduler 下次 sweep 推 pending）
+	//   - oneshot → pending（让 worker 直接捞）
+	// 非 canceled 行调用返 ErrNotCanceled。
+	Resume(ctx context.Context, id uuid.UUID) (Status, error)
+
 	// Delete 硬删一行 adhoc 任务【定义行】（#392）。
 	//   - 仅删终态（succeeded/failed/canceled）+ 自建（is_builtin=false）+ task_subtype='adhoc_aggregation' 行。
 	//   - 复用过期清理的删除语义（只删 pm_tasks 定义行，绝不触碰结果表，结果交 TimescaleDB retention 自然过期），
@@ -83,6 +89,8 @@ var (
 	ErrNotTerminal = errors.New("adhoc: task not in terminal state, cannot delete")
 	// ErrBuiltinNotDeletable #392：删除端点对内置任务返回——内置任务由 seed 维护，永不可删。
 	ErrBuiltinNotDeletable = errors.New("adhoc: builtin task cannot be deleted")
+	// ErrNotCanceled #674：Resume 端点对非 canceled 任务返回——只有已取消的任务才能恢复。
+	ErrNotCanceled = errors.New("adhoc: task is not canceled, cannot resume")
 )
 
 // PgRepository 是 Repository 的 pgxpool 实现。
@@ -366,6 +374,37 @@ RETURNING status`
 	return nil
 }
 
+// Resume 把 canceled 行恢复为可执行状态（#674）。
+//
+// continuous → scheduled（让 ContinuousScheduler 下次 sweep 推 pending）；
+// oneshot → pending（让 worker 直接捞）。
+// 同时清 window_end（避免 cancel 留下的 NOW() 把窗口卡死）+ 清 last_fire_at（避免恢复后狂追历史）。
+func (r *PgRepository) Resume(ctx context.Context, id uuid.UUID) (Status, error) {
+	const q = `
+UPDATE pm_tasks
+SET status       = CASE WHEN mode = 'continuous' THEN 'scheduled' ELSE 'pending' END,
+    window_end   = CASE WHEN mode = 'continuous' THEN NULL ELSE window_end END,
+    last_fire_at = NULL,
+    updated_at   = NOW()
+WHERE id = $1
+  AND task_subtype = $2
+  AND status = 'canceled'
+RETURNING status`
+	var newStatus string
+	err := r.pool.QueryRow(ctx, q, id, TaskSubtype).Scan(&newStatus)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			check, _ := r.Get(ctx, id)
+			if check == nil {
+				return "", ErrNotFound
+			}
+			return "", ErrNotCanceled
+		}
+		return "", fmt.Errorf("adhoc.Resume: %w", err)
+	}
+	return Status(newStatus), nil
+}
+
 // Delete 硬删一行终态自建 adhoc 任务定义行（#392）。
 //
 // 复用 ExpireCleanup 的删除语义（只删 pm_tasks 定义行，绝不触碰结果表 pm_adhoc_aggregation_results——
@@ -461,7 +500,7 @@ func (r *PgRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status St
 }
 
 // resultBusinessKey 是结果行的业务唯一键（与 migrations/000018 的唯一索引 8 列一致）。
-// 可空列统一兜空串，对齐索引里的 COALESCE(...,'')，保证「两条空值行」也判同键。
+// 可空列统一兜空串，对齐索引里的 COALESCE(...,”)，保证「两条空值行」也判同键。
 type resultBusinessKey struct {
 	TaskID      uuid.UUID
 	Granularity string
