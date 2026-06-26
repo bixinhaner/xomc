@@ -188,6 +188,36 @@ func (r *PgSubTaskRepo) UpdateStatusWithCode(ctx context.Context, id uuid.UUID, 
 	return nil
 }
 
+// UpdateStatusByOperator 与 UpdateStatusWithCode 一致，唯一区别是 **不写 started_at**。
+// transfer 类业务（备份 / 配置恢复 / 日志采集）目前没有 operator suspend 路径，
+// 但为了与 BasicSubTaskRepo 接口对齐（RoutingSubTaskRepository 按 ID 路由到该实现时需一致
+// 签名）补齐。语义：若未来 transfer 业务引入 operator suspend，默认不干扰 started_at。
+func (r *PgSubTaskRepo) UpdateStatusByOperator(ctx context.Context, id uuid.UUID, status software.UpgradeState, errorMsg string) error {
+	builder := storage.Psql.Update(r.subTaskTable).
+		Set("status", status).
+		Where(sq.Eq{"id": id})
+
+	if errorMsg != "" {
+		builder = builder.Set("error_message", errorMsg)
+	}
+	if status == software.UpgradeCompleted || status == software.UpgradeFailed || status == software.UpgradeTerminated {
+		builder = builder.Set("completed_at", time.Now())
+	}
+
+	query, args, err := builder.ToSql()
+	if err != nil {
+		return fmt.Errorf("build update %s status SQL: %w", r.subTaskTable, err)
+	}
+	result, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("update %s status: %w", r.subTaskTable, err)
+	}
+	if result.RowsAffected() == 0 {
+		return commonerrors.ErrNotFound
+	}
+	return nil
+}
+
 func (r *PgSubTaskRepo) Update(ctx context.Context, task *software.UpgradeSubTask) error {
 	builder := storage.Psql.Update(r.subTaskTable).
 		Set("status", task.Status).
