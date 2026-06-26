@@ -110,6 +110,9 @@ export default function DashboardPage() {
   // 制式切换状态 - 默认使用LTE（符合验收标准：LTE 6个Panel作为主要展示）
   const [technology, setTechnology] = useState<TechnologyType>('lte');
 
+  // KPI 折线图区对比时窗切换（vs 昨日 / vs 上周）
+  const [compareWindow, setCompareWindow] = useState<'yesterday' | 'last_week'>('yesterday');
+
   // 网络制式 Segmented 选项来自字典 `network_type`：字典有几项显示几项；
   // hook 内已过滤掉 LTE/NR/GSM 之外的 value（前端 KPI 静态契约暂未放开），
   // 也过滤 status=false 项，并按 sort 升序。字典空 / loading / error → 空数组，
@@ -367,12 +370,23 @@ export default function DashboardPage() {
                 options={techOptions}
               />
             </Space>
+            <Space size="middle">
+              <Text type="secondary">{t('dashboard.compareWindow.label')}:</Text>
+              <Segmented
+                value={compareWindow}
+                onChange={(value) => setCompareWindow(value as 'yesterday' | 'last_week')}
+                options={[
+                  { label: t('dashboard.compareWindow.yesterday'), value: 'yesterday' },
+                  { label: t('dashboard.compareWindow.lastWeek'), value: 'last_week' },
+                ]}
+              />
+            </Space>
           </Space>
         </Col>
       </Row>
 
       {/* KPI Panel区域 - v2.0 Panel化设计 */}
-      <DashboardKPIModules technology={technology} />
+      <DashboardKPIModules technology={technology} compareWindow={compareWindow} />
 
       {/* Row 3: Device Status + Alarm Statistics */}
       <Row gutter={[16, 16]} align="stretch" className="omc-scroll-reveal" data-delay="2">

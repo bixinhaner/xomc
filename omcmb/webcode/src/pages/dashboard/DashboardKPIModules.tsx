@@ -17,6 +17,8 @@ import { resolveLayout, collectMetrics, layoutToRows } from './layoutMapping';
 interface DashboardKPIModulesProps {
   /** 当前制式 */
   technology: TechnologyType;
+  /** 趋势对比时窗，默认 'yesterday' */
+  compareWindow?: 'yesterday' | 'last_week';
   /** 是否启用滚动显示动画 */
   enableScrollReveal?: boolean;
   /** 动画起始延迟值（在整个页面中的起始位置） */
@@ -26,7 +28,12 @@ interface DashboardKPIModulesProps {
 /**
  * Dashboard KPI Panel区域组件
  */
-export function DashboardKPIModules({ technology, enableScrollReveal = true, startDelay = 2 }: DashboardKPIModulesProps) {
+export function DashboardKPIModules({
+  technology,
+  compareWindow = 'yesterday',
+  enableScrollReveal = true,
+  startDelay = 2,
+}: DashboardKPIModulesProps) {
   const [isInitialLoad, setIsInitialLoad] = useState(true);
 
   // 读全局布局（按制式）；读不到 / 为空 / 出错由 resolveLayout 回退内置默认。
@@ -36,9 +43,9 @@ export function DashboardKPIModules({ technology, enableScrollReveal = true, sta
     [technology, remoteLayout],
   );
 
-  // 汇总当前制式所有图要画的指标，去重，做一次批量取数（今日 vs 昨日）。
+  // 汇总当前制式所有图要画的指标，去重，做一次批量取数（今日 vs compareWindow）。
   const metrics = useMemo(() => collectMetrics(layout.panels), [layout.panels]);
-  const { data: trendData, isLoading } = useMultiKPITrendComparison(metrics, 'yesterday', metrics.length > 0);
+  const { data: trendData, isLoading } = useMultiKPITrendComparison(metrics, compareWindow, metrics.length > 0);
 
   // 按网格坐标把图排成行（首页只读不可拖）。
   const rows = useMemo(() => layoutToRows(layout.panels), [layout.panels]);
