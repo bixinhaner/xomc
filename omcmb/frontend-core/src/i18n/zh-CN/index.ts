@@ -4261,6 +4261,8 @@ const messages: Record<string, string> = {
   'api.pathPlaceholder':       '请输入API路径，如 /api/v1/users',
   'api.namePlaceholder':       '请输入API简介',
   'api.groupPlaceholder':      '请选择或输入分组',
+  'api.groupFilterPlaceholder':'请选择分组',
+  'api.methodFilterPlaceholder':'请选择请求方法',
   'api.descriptionPlaceholder':'请输入API描述',
   'api.pathRequired':          '请输入API路径',
   'api.methodRequired':        '请选择请求方法',

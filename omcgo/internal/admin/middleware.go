@@ -464,7 +464,7 @@ func AuditLogger(auditRepo AuditRepository) gin.HandlerFunc {
 			Username:  usernameStr,
 			Action:    method,
 			Resource:  c.FullPath(),
-			IPAddress: c.ClientIP(),
+			IPAddress: auditClientIP(c),
 			UserAgent: c.Request.UserAgent(),
 		}
 
@@ -531,7 +531,7 @@ func OperLogger(logRepo OperLogWriter, logger *zap.Logger) gin.HandlerFunc {
 			Module:    operModuleFromPath(c.FullPath()),
 			Target:    c.FullPath(),
 			Detail:    method + " " + c.Request.URL.Path,
-			IPAddress: c.ClientIP(),
+			IPAddress: auditClientIP(c),
 			UserAgent: c.Request.UserAgent(),
 			Status:    status < 400,
 			CostMs:    int(time.Since(start).Milliseconds()),
