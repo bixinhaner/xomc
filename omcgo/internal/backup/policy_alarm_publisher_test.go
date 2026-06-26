@@ -59,6 +59,9 @@ func (b *pubEventBus) Subscribe(_ string, _ event.EventHandler) (event.Subscript
 func (b *pubEventBus) QueueSubscribe(_, _ string, _ event.EventHandler) (event.Subscription, error) {
 	return nil, nil
 }
+func (b *pubEventBus) PullSubscribe(_, _ string, _ event.EventHandler) (event.Subscription, error) {
+	return nil, nil
+}
 func (b *pubEventBus) Close() error { return nil }
 
 // ---------------------------------------------------------------------------

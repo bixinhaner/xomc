@@ -158,6 +158,10 @@ func (b *mockEventBus) QueueSubscribe(subject string, _ string, handler event.Ev
 	return &mockSub{}, nil
 }
 
+func (b *mockEventBus) PullSubscribe(subject string, queue string, handler event.EventHandler) (event.Subscription, error) {
+	return b.QueueSubscribe(subject, queue, handler)
+}
+
 func (b *mockEventBus) Close() error { return nil }
 
 func (b *mockEventBus) publishedBySubject(subject string) []publishedEvent {

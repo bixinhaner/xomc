@@ -250,6 +250,10 @@ func (b *captureEventBus) QueueSubscribe(_ string, _ string, _ event.EventHandle
 	return nil, nil
 }
 
+func (b *captureEventBus) PullSubscribe(_ string, _ string, _ event.EventHandler) (event.Subscription, error) {
+	return nil, nil
+}
+
 func (b *captureEventBus) Close() error { return nil }
 
 func TestServerService_SetActive_PublishesEvent(t *testing.T) {

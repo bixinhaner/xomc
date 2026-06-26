@@ -19,6 +19,15 @@ type EventBus interface {
 	// Events are load-balanced across handlers in the same queue group.
 	QueueSubscribe(subject string, queue string, handler EventHandler) (Subscription, error)
 
+	// PullSubscribe registers a handler using a pull consumer.
+	// The consumer fetches messages on demand instead of receiving push deliveries,
+	// providing natural backpressure via MaxAckPending.
+	//
+	// queue is used as the base for the durable consumer name (appended with "-pull",
+	// e.g. "provision-gpv" → durable "provision-gpv-pull"). This differs from
+	// QueueSubscribe where queue is used directly as both the group name and durable name.
+	PullSubscribe(subject string, queue string, handler EventHandler) (Subscription, error)
+
 	// Close shuts down the event bus and releases resources.
 	Close() error
 }
