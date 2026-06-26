@@ -37,7 +37,7 @@ export function buildSeries(
   trendData: MultiTrendComparisonData | undefined,
   xData: string[],
   todayLabel: string,
-  yesterdayLabel: string,
+  compareLabel: string,
   resolveMeta: (key: string) => ResolvedMetricMeta,
   palette: readonly string[] = KPI_METRIC_PALETTE,
 ): { series: LineSeries[] } {
@@ -78,7 +78,7 @@ export function buildSeries(
     out.push({ name: todayName, data: todayValues, color });
 
     if (showCompare) {
-      out.push({ name: yesterdayLabel, data: yesterdayValues, color: KPI_COMPARE_LINE_COLOR, dashed: true });
+      out.push({ name: compareLabel, data: yesterdayValues, color: KPI_COMPARE_LINE_COLOR, dashed: true });
     }
   });
 

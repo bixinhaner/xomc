@@ -2601,6 +2601,7 @@ const messages: Record<string, string> = {
 	  'dashboard.dlVolume':           '下行流量',
 	  'dashboard.ulVolume':           '上行流量',
   'dashboard.activeAlarms':      '活跃告警',
+    'dashboard.activeAlarmsEvents': '活跃告警（条）',
   'dashboard.runningTasks':      '任务执行中',
   'dashboard.vsLastWeek':        '较上周',
   'dashboard.onlineRate':        '在线率',
@@ -2612,7 +2613,11 @@ const messages: Record<string, string> = {
   'dashboard.viewAll':             '查看全部',
   'dashboard.alarmDistribution':   '告警级别分布',
   'dashboard.alarmLevelStatistics': '告警级别统计',
+  'dashboard.alarmCountEvents':   '告警条数',
+  'dashboard.alarmSeverityOther': '其他',
+  'dashboard.alarmOtherHint':     '含其他级别 {count} 条',
   'dashboard.deviceStatusByType':  '设备状态分布（按类型）',
+  'dashboard.deviceStatusAlarmHint': '告警为叠加维度，可与在线/离线重复计数',
   'dashboard.alarmTrend7d':      '近7天告警趋势',
   'dashboard.top10AlarmDevices': '高频告警设备',
   'dashboard.deviceMap':         '设备地图',
@@ -2640,6 +2645,7 @@ const messages: Record<string, string> = {
   'dashboard.chart.online':  '在线',
   'dashboard.chart.offline': '离线',
   'dashboard.chart.alarm':   '告警',
+  'dashboard.chart.alarmDevices': '告警设备',
 
   // Dashboard refresh提示
   'dashboard.lastUpdate':    '最后更新',

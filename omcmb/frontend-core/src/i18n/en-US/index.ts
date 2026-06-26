@@ -2590,6 +2590,7 @@ const messages: Record<string, string> = {
   'dashboard.onlineDevices':     'Online Devices',
   'dashboard.networkTech':       'Network Tech',
   'dashboard.activeAlarms':      'Active Alarms',
+  'dashboard.activeAlarmsEvents': 'Active Alarms (events)',
   'dashboard.runningTasks':      'Running Tasks',
   'dashboard.vsLastWeek':        'vs last week',
   'dashboard.onlineRate':        'Online Rate',
@@ -2601,7 +2602,11 @@ const messages: Record<string, string> = {
   'dashboard.viewAll':             'View All',
   'dashboard.alarmDistribution':   'Alarm Distribution',
   'dashboard.alarmLevelStatistics': 'Alarm Level Statistics',
+  'dashboard.alarmCountEvents':   'Alarm Events',
+  'dashboard.alarmSeverityOther': 'Other',
+  'dashboard.alarmOtherHint':     '{count} in other severities',
   'dashboard.deviceStatusByType':  'Device Status by Type',
+  'dashboard.deviceStatusAlarmHint': 'Alarm is an overlapping dimension and may overlap online/offline counts',
   'dashboard.alarmTrend7d':      '7-Day Alarm Trend',
   'dashboard.top10AlarmDevices': 'Top Alarm Devices',
   'dashboard.deviceMap':         'Device Map',
@@ -2631,6 +2636,7 @@ const messages: Record<string, string> = {
   'dashboard.chart.online':  'Online',
   'dashboard.chart.offline': 'Offline',
   'dashboard.chart.alarm':   'Alarm',
+  'dashboard.chart.alarmDevices': 'Alarmed Devices',
 
   // Dashboard refresh提示
   'dashboard.lastUpdate':    'Last Update',
