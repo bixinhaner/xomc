@@ -175,9 +175,10 @@ export default function DashboardPage() {
   const activeAlarmsDelta = kpiDeltas['active_alarms'];
   const ueTrendDelta = kpiDeltas['UE_ACTIVE'];
 
-  // UE 当前值
+  // UE 当前值 — 无数据时保持 undefined，UI 显示 '--' 区分"真 0"与"无数据"
   const kpiSummary = dashboardData?.summary?.kpiSummary ?? {};
-  const currentActiveUE = Math.floor(kpiSummary['UE_ACTIVE'] ?? 0);
+  const ueRaw = kpiSummary['UE_ACTIVE'];
+  const currentActiveUE = typeof ueRaw === 'number' ? Math.floor(ueRaw) : undefined;
 
   // Device status bar chart data - 按技术类型分组
   const deviceStatusData = useMemo(() => {
@@ -302,7 +303,9 @@ export default function DashboardPage() {
             iconColor="#52C41A"
             loading={isLoading}
             trend="up"
-            delta={`${Math.round((onlineDevices / totalDevices) * 100)}%`}
+            delta={totalDevices > 0
+              ? `${Math.round((onlineDevices / totalDevices) * 100)}%`
+              : '--'}
             deltaLabel={t('dashboard.onlineRate')}
             onClick={() => void navigate('/device/list')}
           />
@@ -324,7 +327,7 @@ export default function DashboardPage() {
         <Col xs={24} sm={12} lg={6}>
           <KPICard
             title={t('dashboard.activeUE')}
-            value={currentActiveUE}
+            value={currentActiveUE ?? '--'}
             icon={<TeamOutlined />}
             iconBgColor="#f6ffed"
             iconColor="#10B981"
