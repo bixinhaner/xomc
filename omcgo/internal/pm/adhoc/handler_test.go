@@ -18,10 +18,10 @@ import (
 
 // handlerStubRepo 仅实现 Create/List/Get/Cancel/Update，不依赖 DB。
 type handlerStubRepo struct {
-	mu     sync.Mutex
-	tasks  map[uuid.UUID]*Task
-	create func(CreateRequest) (uuid.UUID, error)
-	cancel func(uuid.UUID) error
+	mu       sync.Mutex
+	tasks    map[uuid.UUID]*Task
+	create   func(CreateRequest) (uuid.UUID, error)
+	cancel   func(uuid.UUID) error
 	get      func(uuid.UUID) (*Task, error)       // T-0194：注入既有任务（含 is_builtin/mode/technology）
 	update   func(uuid.UUID, UpdateRequest) error // T-0194：捕获更新入参
 	deleteFn func(uuid.UUID) error                // #392：注入删除结果（区分终态/内置/非终态）
@@ -99,7 +99,7 @@ func (s *handlerStubRepo) LockNextPending(context.Context, string) (*Task, error
 func (s *handlerStubRepo) UpdateStatus(context.Context, uuid.UUID, Status, *int, string) error {
 	return nil
 }
-func (s *handlerStubRepo) InsertResults(context.Context, []ResultRow) error { return nil }
+func (s *handlerStubRepo) InsertResults(context.Context, []ResultRow) error   { return nil }
 func (s *handlerStubRepo) NextRunSeq(context.Context, uuid.UUID) (int, error) { return 1, nil }
 func (s *handlerStubRepo) InsertRun(context.Context, TaskRun) (uuid.UUID, error) {
 	return uuid.New(), nil
@@ -120,17 +120,32 @@ func newTestRouter(repo Repository) *gin.Engine {
 	return r
 }
 
+// newTestRouterWithUser 构造注入了用户身份的 test router（#652 权限测试用）。
+func newTestRouterWithUser(repo Repository, username string, superAdmin bool) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		c.Set("username", username)
+		c.Set("is_super_admin", superAdmin)
+		c.Next()
+	})
+	h := NewHandler(repo, nil, nil, nil)
+	g := r.Group("")
+	h.RegisterRoutes(g)
+	return r
+}
+
 func Test_Handler_Create_Success(t *testing.T) {
 	repo := &handlerStubRepo{}
 	r := newTestRouter(repo)
 
 	body := map[string]any{
 		"name": "test", "mode": "oneshot",
-		"device_sns":     []string{"S1"},
-		"metric_paths":   []string{"M1"},
-		"granularities":  []string{"hourly"},
-		"window_start":   "2026-05-22T10:00:00Z",
-		"window_end":     "2026-05-22T11:00:00Z",
+		"device_sns":    []string{"S1"},
+		"metric_paths":  []string{"M1"},
+		"granularities": []string{"hourly"},
+		"window_start":  "2026-05-22T10:00:00Z",
+		"window_end":    "2026-05-22T11:00:00Z",
 	}
 	jsonBody, _ := json.Marshal(body)
 	w := httptest.NewRecorder()
@@ -185,12 +200,16 @@ func Test_Handler_Get_NotFound(t *testing.T) {
 }
 
 func Test_Handler_Cancel_Conflict(t *testing.T) {
+	taskID := uuid.New()
 	repo := &handlerStubRepo{
+		get: func(id uuid.UUID) (*Task, error) {
+			return &Task{ID: taskID, IsBuiltin: false, Creator: "anonymous"}, nil
+		},
 		cancel: func(_ uuid.UUID) error { return ErrTerminalState },
 	}
 	r := newTestRouter(repo)
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodDelete, "/pm/adhoc/tasks/"+uuid.New().String(), nil)
+	req := httptest.NewRequest(http.MethodDelete, "/pm/adhoc/tasks/"+taskID.String(), nil)
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusConflict, w.Code)
 }
@@ -202,7 +221,7 @@ func Test_Handler_Delete_TerminalSelfBuilt_Success(t *testing.T) {
 	id := uuid.New()
 	repo := &handlerStubRepo{
 		tasks: map[uuid.UUID]*Task{
-			id: {ID: id, Status: StatusSucceeded, IsBuiltin: false},
+			id: {ID: id, Status: StatusSucceeded, IsBuiltin: false, Creator: "anonymous"},
 		},
 	}
 	r := newTestRouter(repo)
@@ -222,19 +241,27 @@ func Test_Handler_Delete_TerminalSelfBuilt_Success(t *testing.T) {
 
 // 失败路径之一：内置任务被拒，返回 403，行仍在。
 func Test_Handler_Delete_Builtin_Forbidden(t *testing.T) {
+	taskID := uuid.New()
 	repo := &handlerStubRepo{
+		get: func(id uuid.UUID) (*Task, error) {
+			return &Task{ID: taskID, IsBuiltin: true, Creator: "system"}, nil
+		},
 		deleteFn: func(_ uuid.UUID) error { return ErrBuiltinNotDeletable },
 	}
 	r := newTestRouter(repo)
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodDelete, "/pm/adhoc/tasks/"+uuid.New().String()+"/definition", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/pm/adhoc/tasks/"+taskID.String()+"/definition", nil)
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusForbidden, w.Code)
 }
 
 // 失败路径之二：非终态任务被拒，返回 409 冲突，行仍在。
 func Test_Handler_Delete_NonTerminal_Conflict(t *testing.T) {
+	taskID := uuid.New()
 	repo := &handlerStubRepo{
+		get: func(id uuid.UUID) (*Task, error) {
+			return &Task{ID: taskID, IsBuiltin: false, Creator: "anonymous", Status: StatusRunning}, nil
+		},
 		deleteFn: func(_ uuid.UUID) error { return ErrNotTerminal },
 	}
 	r := newTestRouter(repo)
@@ -254,4 +281,238 @@ func Test_Handler_Delete_NotFound(t *testing.T) {
 	req := httptest.NewRequest(http.MethodDelete, "/pm/adhoc/tasks/"+uuid.New().String()+"/definition", nil)
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+// ── #652 权限控制 ─────────────────────────────────────────────────────────
+
+// Update：非 owner 普通用户编辑他人自建任务 → 403。
+func Test_Handler_Update_NonOwner_Forbidden(t *testing.T) {
+	taskID := uuid.New()
+	repo := &handlerStubRepo{
+		get: func(id uuid.UUID) (*Task, error) {
+			return &Task{
+				ID: taskID, Name: "other-user-task", Mode: ModeOneshot,
+				Dimension: DimensionDevice, IsBuiltin: false, Creator: "alice",
+				MetricPaths: []string{"M1"}, Granularities: []string{"hourly"},
+				DeviceSNs: []string{"S1"},
+			}, nil
+		},
+	}
+	r := newTestRouterWithUser(repo, "bob", false) // bob 不是 owner
+
+	body := map[string]any{
+		"metric_paths":  []string{"M2"},
+		"granularities": []string{"hourly"},
+		"device_sns":    []string{"S1"},
+		"window_start":  "2026-05-22T10:00:00Z",
+		"window_end":    "2026-05-22T11:00:00Z",
+	}
+	jsonBody, _ := json.Marshal(body)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/pm/adhoc/tasks/"+taskID.String(), bytes.NewReader(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+}
+
+// Update：超管可编辑他人自建任务 → 通过。
+func Test_Handler_Update_Admin_Allowed(t *testing.T) {
+	taskID := uuid.New()
+	var updated bool
+	repo := &handlerStubRepo{
+		get: func(id uuid.UUID) (*Task, error) {
+			return &Task{
+				ID: taskID, Name: "other-user-task", Mode: ModeOneshot,
+				Dimension: DimensionDevice, IsBuiltin: false, Creator: "alice",
+				MetricPaths: []string{"M1"}, Granularities: []string{"hourly"},
+				DeviceSNs: []string{"S1"},
+			}, nil
+		},
+		update: func(_ uuid.UUID, _ UpdateRequest) error {
+			updated = true
+			return nil
+		},
+	}
+	r := newTestRouterWithUser(repo, "admin-user", true) // 超管
+
+	body := map[string]any{
+		"metric_paths":  []string{"M2"},
+		"granularities": []string{"hourly"},
+		"device_sns":    []string{"S1"},
+		"window_start":  "2026-05-22T10:00:00Z",
+		"window_end":    "2026-05-22T11:00:00Z",
+	}
+	jsonBody, _ := json.Marshal(body)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/pm/adhoc/tasks/"+taskID.String(), bytes.NewReader(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.True(t, updated)
+}
+
+// Cancel：非 owner 取消他人自建任务 → 403。
+func Test_Handler_Cancel_NonOwner_Forbidden(t *testing.T) {
+	taskID := uuid.New()
+	repo := &handlerStubRepo{
+		get: func(id uuid.UUID) (*Task, error) {
+			return &Task{
+				ID: taskID, IsBuiltin: false, Creator: "alice",
+			}, nil
+		},
+	}
+	r := newTestRouterWithUser(repo, "bob", false)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/pm/adhoc/tasks/"+taskID.String(), nil)
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+}
+
+// Delete：非 owner 删除他人自建任务 → 403。
+func Test_Handler_Delete_NonOwner_Forbidden(t *testing.T) {
+	taskID := uuid.New()
+	repo := &handlerStubRepo{
+		get: func(id uuid.UUID) (*Task, error) {
+			return &Task{
+				ID: taskID, IsBuiltin: false, Creator: "alice", Status: StatusSucceeded,
+			}, nil
+		},
+	}
+	r := newTestRouterWithUser(repo, "bob", false)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/pm/adhoc/tasks/"+taskID.String()+"/definition", nil)
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+}
+
+// Cancel：owner 取消自己的任务 → 通过。
+func Test_Handler_Cancel_Owner_Allowed(t *testing.T) {
+	taskID := uuid.New()
+	var cancelled bool
+	repo := &handlerStubRepo{
+		get: func(id uuid.UUID) (*Task, error) {
+			return &Task{
+				ID: taskID, IsBuiltin: false, Creator: "alice",
+			}, nil
+		},
+		cancel: func(_ uuid.UUID) error {
+			cancelled = true
+			return nil
+		},
+	}
+	r := newTestRouterWithUser(repo, "alice", false)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/pm/adhoc/tasks/"+taskID.String(), nil)
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.True(t, cancelled)
+}
+
+// Cancel：内置任务不做归属权校验，直接走 repo 逻辑（内置任务的取消由 repo 层守门）。
+func Test_Handler_Cancel_BuiltinTask_SkipsOwnerCheck(t *testing.T) {
+	taskID := uuid.New()
+	var cancelled bool
+	repo := &handlerStubRepo{
+		get: func(id uuid.UUID) (*Task, error) {
+			return &Task{
+				ID: taskID, IsBuiltin: true, Creator: "system",
+			}, nil
+		},
+		cancel: func(_ uuid.UUID) error {
+			cancelled = true
+			return nil
+		},
+	}
+	r := newTestRouterWithUser(repo, "bob", false) // 普通用户
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/pm/adhoc/tasks/"+taskID.String(), nil)
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.True(t, cancelled)
+}
+
+// Results：非 owner 普通用户读他人自建任务结果 → 403。
+// 归属权检查在 repo.Get 之后立即触发，handler 不会走到后续 SQL 查询，所以无需 stub pool。
+func Test_Handler_Results_NonOwner_Forbidden(t *testing.T) {
+	taskID := uuid.New()
+	repo := &handlerStubRepo{
+		get: func(id uuid.UUID) (*Task, error) {
+			return &Task{ID: taskID, IsBuiltin: false, Creator: "alice"}, nil
+		},
+	}
+	r := newTestRouterWithUser(repo, "bob", false)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/pm/adhoc/tasks/"+taskID.String()+"/results", nil)
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+}
+
+// Results：内置任务全员可读（IsBuiltin 短路在权限判断里优先级最高）。
+// 该测试只验证权限放行，不验证后续数据查询；handler 走到 SQL 时 pool=nil 会 panic，
+// 但权限通过即可证明 canViewResults 的内置短路正确（403 ≠ panic 区分得开）。
+// 用 defer recover 屏蔽预期 panic，仅断言"未在权限层被 403 挡住"。
+func Test_Handler_Results_BuiltinTask_PermissionPasses(t *testing.T) {
+	taskID := uuid.New()
+	repo := &handlerStubRepo{
+		get: func(id uuid.UUID) (*Task, error) {
+			return &Task{ID: taskID, IsBuiltin: true, Creator: "system"}, nil
+		},
+	}
+	r := newTestRouterWithUser(repo, "bob", false) // 普通用户
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/pm/adhoc/tasks/"+taskID.String()+"/results", nil)
+	defer func() {
+		// pool=nil 会在 SQL 段 panic；权限层（canViewResults）放行视为通过本测试目标。
+		_ = recover()
+		assert.NotEqual(t, http.StatusForbidden, w.Code,
+			"内置任务普通用户读应放行，不应被 403 挡住")
+	}()
+	r.ServeHTTP(w, req)
+}
+
+// FilterOptions：非 owner 普通用户访问他人自建任务的筛选选项 → 403。
+func Test_Handler_FilterOptions_NonOwner_Forbidden(t *testing.T) {
+	taskID := uuid.New()
+	repo := &handlerStubRepo{
+		get: func(id uuid.UUID) (*Task, error) {
+			return &Task{ID: taskID, IsBuiltin: false, Creator: "alice"}, nil
+		},
+	}
+	r := newTestRouterWithUser(repo, "bob", false)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/pm/adhoc/tasks/"+taskID.String()+"/filter-options", nil)
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+}
+
+// Runs：非 owner 普通用户读他人自建任务的运行历史 → 403。
+func Test_Handler_Runs_NonOwner_Forbidden(t *testing.T) {
+	taskID := uuid.New()
+	repo := &handlerStubRepo{
+		get: func(id uuid.UUID) (*Task, error) {
+			return &Task{ID: taskID, IsBuiltin: false, Creator: "alice"}, nil
+		},
+	}
+	r := newTestRouterWithUser(repo, "bob", false)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/pm/adhoc/tasks/"+taskID.String()+"/runs", nil)
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
 }
