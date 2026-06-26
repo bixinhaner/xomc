@@ -541,7 +541,11 @@ export default function PmAdhocWizard() {
             intl.formatMessage({ id: 'perf.adhoc.transferAvailableMetric' }),
             intl.formatMessage({ id: 'perf.adhoc.transferSelectedMetric' }),
           ]}
-          listStyle={{ width: 360, height: 380 }}
+          // #665：让两个列表横向撑满父容器、左右等分（antd Transfer 内部 flex 布局）。
+          // 原 360×380 写死宽度导致长指标名挤掉/换行；改为 flex:1 + minWidth:0
+          // 大屏看到完整名称、小屏自动收缩不出横向滚动条。高度保持 480 让一屏多看几行。
+          style={{ width: '100%' }}
+          listStyle={{ flex: '1 1 0', minWidth: 0, height: 480 }}
         />
       </Spin>
       <div style={{ color: '#888' }}>
