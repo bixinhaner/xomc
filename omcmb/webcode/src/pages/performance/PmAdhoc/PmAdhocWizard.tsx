@@ -29,7 +29,6 @@ import {
   Spin,
   Steps,
   Tag,
-  Tooltip,
   Transfer,
   message,
 } from 'antd';
@@ -124,9 +123,9 @@ export default function PmAdhocWizard() {
     [intl],
   );
 
+  // #669：自定义聚合任务下线 15min，最细粒度限定 hourly（详见 pmAdhocConstraints.ts）。
   const GRANULARITY_OPTIONS = useMemo(
     () => [
-      { label: intl.formatMessage({ id: 'perf.adhoc.granular15min' }), value: '15min' },
       { label: intl.formatMessage({ id: 'perf.adhoc.granularHourly' }), value: 'hourly' },
       { label: intl.formatMessage({ id: 'perf.adhoc.granularDaily' }), value: 'daily' },
       { label: intl.formatMessage({ id: 'perf.adhoc.granularWeekly' }), value: 'weekly' },
@@ -259,7 +258,7 @@ export default function PmAdhocWizard() {
   const step3Valid = metricPaths.length >= 1;
   const step4Valid =
     granularity.length > 0 &&
-    // #363：(粒度, 维度) 组合守门——15min × 设备组不支持，禁用提交不发注定失败请求。
+    // #669：兜底——15min 已从粒度选项删除，但编辑模式遇旧任务仍可能传入 15min，由此拦截。
     isGranularityDimensionSupported(granularity, dimension) &&
     (mode === 'continuous' || (window[0] && window[1] && window[1].isAfter(window[0])));
 
@@ -413,7 +412,7 @@ export default function PmAdhocWizard() {
             onChange={(e) => {
               const next = e.target.value as AdhocDimension;
               setDimension(next);
-              // #363：切到设备组若当前粒度是 15min（不支持）→ 自动回落 hourly。
+              // #669：编辑模式遇旧 15min 任务，切维度时一并回落 hourly（新建路径已无 15min 选项）。
               if (!isGranularityDimensionSupported(granularity, next)) {
                 setGranularity('hourly');
               }
@@ -558,28 +557,18 @@ export default function PmAdhocWizard() {
     <Space orientation="vertical" size="large" style={{ width: '100%', maxWidth: 560 }}>
       <div>
         <div style={{ marginBottom: 8, fontWeight: 500 }}>{intl.formatMessage({ id: 'perf.adhoc.fieldGranReq' })}</div>
-        {/* #363：维度为设备组时 15min 选项禁用 + tooltip 说明（设备组维度最细为小时）。 */}
+        {/* #669：自定义聚合任务最细粒度限定 hourly，15min 选项已从数组中移除。 */}
         <Radio.Group
           optionType="button"
           buttonStyle="solid"
           value={granularity}
           onChange={(e) => setGranularity(e.target.value)}
         >
-          {GRANULARITY_OPTIONS.map((g) => {
-            const disabled = !isGranularityDimensionSupported(g.value, dimension);
-            const btn = (
-              <Radio.Button key={g.value} value={g.value} disabled={disabled}>
-                {g.label}
-              </Radio.Button>
-            );
-            return disabled ? (
-              <Tooltip key={g.value} title={intl.formatMessage({ id: 'perf.adhoc.granDeviceGroupNo15min' })}>
-                {btn}
-              </Tooltip>
-            ) : (
-              btn
-            );
-          })}
+          {GRANULARITY_OPTIONS.map((g) => (
+            <Radio.Button key={g.value} value={g.value}>
+              {g.label}
+            </Radio.Button>
+          ))}
         </Radio.Group>
       </div>
       {mode === 'oneshot' ? (
