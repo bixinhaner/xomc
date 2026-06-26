@@ -362,6 +362,14 @@ func (r *RoutingSubTaskRepository) UpdateStatusWithCode(ctx context.Context, id 
 	return repo.UpdateStatusWithCode(ctx, id, status, errorMsg, code)
 }
 
+func (r *RoutingSubTaskRepository) UpdateStatusByOperator(ctx context.Context, id uuid.UUID, status UpgradeState, errorMsg string) error {
+	repo, _, err := r.pickByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	return repo.UpdateStatusByOperator(ctx, id, status, errorMsg)
+}
+
 func (r *RoutingSubTaskRepository) Update(ctx context.Context, task *UpgradeSubTask) error {
 	repo, _, err := r.pickByID(ctx, task.ID)
 	if err != nil {

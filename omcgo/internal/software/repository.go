@@ -53,6 +53,11 @@ type SubTaskRepository interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*UpgradeSubTask, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, status UpgradeState, errorMsg string) error
 	UpdateStatusWithCode(ctx context.Context, id uuid.UUID, status UpgradeState, errorMsg string, code FailureCode) error
+	// UpdateStatusByOperator 是 operator 主动操作（暂停 / 恢复等）的 status 更新路径，
+	// 与 UpdateStatusWithCode 唯一区别是 **不写 started_at**——避免 SuspendUpgrade 把 pending
+	// sub_task 翻成 Suspended 时把 started_at 错写成 operator 操作时刻（应为 executor 真正
+	// 挑中该设备的时刻）。详见 PgSubTaskRepository.UpdateStatusByOperator 的注释。
+	UpdateStatusByOperator(ctx context.Context, id uuid.UUID, status UpgradeState, errorMsg string) error
 	Update(ctx context.Context, task *UpgradeSubTask) error
 	List(ctx context.Context, filter SubTaskFilter) (*model.ListResponse[UpgradeSubTaskWithTaskName], error)
 	ListByTaskID(ctx context.Context, taskID uuid.UUID, filter SubTaskFilter) (*model.ListResponse[UpgradeSubTaskWithTaskName], error)

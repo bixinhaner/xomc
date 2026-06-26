@@ -219,7 +219,13 @@ func shouldSetSubTaskStartedAt(status UpgradeState) bool {
 	return false
 }
 
-func (r *PgSubTaskRepository) UpdateStatusWithCode(ctx context.Context, id uuid.UUID, status UpgradeState, errorMsg string, code FailureCode) error {
+// buildUpdateSubTaskStatusSQL 构造 upgrade_sub_tasks 状态更新 SQL。
+// applyStartedAt 控制是否对 shouldSetSubTaskStartedAt(status) 命中的状态写入
+// `started_at = COALESCE(started_at, now())`：
+//   - true（调度器自然推进 UpdateStatusWithCode）：写入 started_at，COALESCE 防覆盖；
+//   - false（operator 主动操作 UpdateStatusByOperator）：完全不动 started_at，
+//     等真正轮到该设备被 executor 挑出来时再写入。
+func buildUpdateSubTaskStatusSQL(id uuid.UUID, status UpgradeState, errorMsg string, code FailureCode, applyStartedAt bool) (string, []interface{}, error) {
 	builder := storage.Psql.Update("upgrade_sub_tasks").
 		Set("status", status).
 		Where(sq.Eq{"id": id})
@@ -232,18 +238,16 @@ func (r *PgSubTaskRepository) UpdateStatusWithCode(ctx context.Context, id uuid.
 	}
 	// 用 COALESCE(started_at, now()) 守卫：仅当 started_at 仍为 NULL 时写入，避免多次
 	// 状态翻转把先前已记录的开始时间覆盖。触发状态集见 shouldSetSubTaskStartedAt 注释。
-	if shouldSetSubTaskStartedAt(status) {
+	if applyStartedAt && shouldSetSubTaskStartedAt(status) {
 		builder = builder.Set("started_at", sq.Expr("COALESCE(started_at, now())"))
 	}
 	if status == UpgradeCompleted || status == UpgradeFailed || status == UpgradeTerminated {
 		builder = builder.Set("completed_at", time.Now())
 	}
+	return builder.ToSql()
+}
 
-	query, args, err := builder.ToSql()
-	if err != nil {
-		return fmt.Errorf("build update sub-task status SQL: %w", err)
-	}
-
+func (r *PgSubTaskRepository) execUpdateSubTaskStatus(ctx context.Context, query string, args []interface{}) error {
 	result, err := r.pool.Exec(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("update sub-task status: %w", err)
@@ -252,6 +256,34 @@ func (r *PgSubTaskRepository) UpdateStatusWithCode(ctx context.Context, id uuid.
 		return commonerrors.ErrNotFound
 	}
 	return nil
+}
+
+func (r *PgSubTaskRepository) UpdateStatusWithCode(ctx context.Context, id uuid.UUID, status UpgradeState, errorMsg string, code FailureCode) error {
+	query, args, err := buildUpdateSubTaskStatusSQL(id, status, errorMsg, code, true)
+	if err != nil {
+		return fmt.Errorf("build update sub-task status SQL: %w", err)
+	}
+	return r.execUpdateSubTaskStatus(ctx, query, args)
+}
+
+// UpdateStatusByOperator 是 operator 主动操作（暂停 / 恢复等）走的 status 更新路径，
+// 与 UpdateStatusWithCode 的唯一区别是 **不写 started_at**。
+//
+// 为什么单独拆一个方法（issue #667 后续改进）：
+// SuspendUpgrade 会把所有 active sub_task（含 pending）整体翻成 Suspended，
+// 此时 pending sub_task 还**没被 executor 挑中**——按 #667 语义「真的轮到设备级别
+// 升级了才更新 started_at」，operator 暂停不该触发 started_at 写入。
+// 否则用户场景：10:00 创建任务（pending），10:01 运维点暂停 → 11:00 恢复 → executor
+// 真正开始处理 11:00。新方案保证 started_at = 11:00（被挑中时刻），而非 10:01。
+//
+// 设计上 errorMsg "by operator" 这类字符串约定太脆弱，因此通过独立方法把 operator
+// vs scheduler 两类语义在调用层显式区分。
+func (r *PgSubTaskRepository) UpdateStatusByOperator(ctx context.Context, id uuid.UUID, status UpgradeState, errorMsg string) error {
+	query, args, err := buildUpdateSubTaskStatusSQL(id, status, errorMsg, "", false)
+	if err != nil {
+		return fmt.Errorf("build update sub-task status SQL: %w", err)
+	}
+	return r.execUpdateSubTaskStatus(ctx, query, args)
 }
 
 func (r *PgSubTaskRepository) Update(ctx context.Context, task *UpgradeSubTask) error {

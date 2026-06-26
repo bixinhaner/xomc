@@ -47,6 +47,7 @@ type BasicSubTaskRepo interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*UpgradeSubTask, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, status UpgradeState, errorMsg string) error
 	UpdateStatusWithCode(ctx context.Context, id uuid.UUID, status UpgradeState, errorMsg string, code FailureCode) error
+	UpdateStatusByOperator(ctx context.Context, id uuid.UUID, status UpgradeState, errorMsg string) error
 	Update(ctx context.Context, task *UpgradeSubTask) error
 	List(ctx context.Context, filter SubTaskFilter) (*model.ListResponse[UpgradeSubTaskWithTaskName], error)
 	ListByTaskID(ctx context.Context, taskID uuid.UUID, filter SubTaskFilter) (*model.ListResponse[UpgradeSubTaskWithTaskName], error)
