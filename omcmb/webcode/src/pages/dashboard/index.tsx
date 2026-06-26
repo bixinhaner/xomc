@@ -56,13 +56,6 @@ import { formatTimeAgo } from '@core/utils/format';
 
 const { Title, Text } = Typography;
 
-// Technology display name mapping
-const TECH_DISPLAY_NAME: Record<string, string> = {
-  lte: 'LTE',
-  nr: '5G NR',
-  gsm: 'GSM',
-};
-
 // Dashboard feature visibility configuration
 const DASHBOARD_CONFIG = {
   showRunningTasks: false,        // 任务执行中
@@ -181,16 +174,17 @@ export default function DashboardPage() {
   const currentActiveUE = typeof ueRaw === 'number' ? Math.floor(ueRaw) : undefined;
 
   // Device status bar chart data - 按技术类型分组
+  // X 轴文案与上方 Segmented 同源 useTechnologyDictionary（字典 network_type），
+  // 字典未命中时 fallback 到 key.toUpperCase()，避免后端返回字典未配的 tech 时柱图轴标签为空。
   const deviceStatusData = useMemo(() => {
     if (!deviceStatusByTypeData || Object.keys(deviceStatusByTypeData).length === 0) {
       return { isEmpty: true, xData: [], series: [] };
     }
 
-    const xData = Object.keys(deviceStatusByTypeData).map(
-      key => TECH_DISPLAY_NAME[key] || key
-    );
-
+    const techLabelMap = new Map(techOptions.map((o) => [o.value, o.label]));
     const technologyKeys = Object.keys(deviceStatusByTypeData);
+    const xData = technologyKeys.map((key) => techLabelMap.get(key as TechnologyType) ?? key.toUpperCase());
+
     const onlineData = technologyKeys.map(key => deviceStatusByTypeData[key]?.online ?? 0);
     const offlineData = technologyKeys.map(key => deviceStatusByTypeData[key]?.offline ?? 0);
     const alarmData = technologyKeys.map(key => deviceStatusByTypeData[key]?.alarm ?? 0);
@@ -202,7 +196,7 @@ export default function DashboardPage() {
     ];
 
     return { isEmpty: false, xData, series };
-  }, [deviceStatusByTypeData, t]);
+  }, [deviceStatusByTypeData, techOptions, t]);
 
   // Alarm distribution bar chart data - 按告警等级分组统计
   const alarmDistributionData = useMemo(() => {
