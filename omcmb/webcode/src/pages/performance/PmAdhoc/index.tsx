@@ -30,12 +30,13 @@ import {
   message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { PlusOutlined, DeleteOutlined, EditOutlined, StopOutlined } from '@ant-design/icons';
+import { PlusOutlined, DeleteOutlined, EditOutlined, StopOutlined, PlayCircleOutlined } from '@ant-design/icons';
 import {
   usePmAdhocList,
   usePmAdhocRuns,
   useCancelPmAdhoc,
   useDeletePmAdhoc,
+  useResumePmAdhoc,
 } from '@core/hooks/api/usePmAdhoc';
 import {
   useAdhocProgressStream,
@@ -229,6 +230,7 @@ function TaskTable({
   onCancel,
   onEdit,
   onDelete,
+  onResume,
 }: {
   tasks: AdhocTask[];
   loading: boolean;
@@ -241,6 +243,8 @@ function TaskTable({
   onEdit: (t: AdhocTask) => void;
   // issue #392：删除终态自建任务（仅自建区传入；内置区不传，按钮恒不渲染）。
   onDelete?: (t: AdhocTask) => void;
+  // #674：恢复已取消任务。
+  onResume?: (id: string) => void;
 }) {
   const intl = useIntl();
   const columns: ColumnsType<AdhocTask> = useMemo(
@@ -305,6 +309,12 @@ function TaskTable({
                 {intl.formatMessage({ id: 'perf.adhoc.btnCancel' })}
               </Button>
             )}
+            {/* #674：已取消任务给「启用」恢复执行。 */}
+            {onResume && r.status === 'canceled' && (
+              <Button size="small" type="primary" ghost icon={<PlayCircleOutlined />} onClick={() => onResume(r.id)}>
+                {intl.formatMessage({ id: 'perf.adhoc.btnResume' })}
+              </Button>
+            )}
             {/* issue #392：终态(成功/失败/已取消)自建任务给「删除」（onDelete 仅自建区传入）。 */}
             {onDelete &&
               (r.status === 'succeeded' || r.status === 'failed' || r.status === 'canceled') && (
@@ -321,7 +331,7 @@ function TaskTable({
         ),
       },
     ],
-    [intl, isBuiltinArea, liveProgress, onView, onCancel, onEdit, onDelete],
+    [intl, isBuiltinArea, liveProgress, onView, onCancel, onEdit, onDelete, onResume],
   );
 
   return (
@@ -360,6 +370,7 @@ export default function PmAdhocPage() {
 
   const cancelMut = useCancelPmAdhoc();
   const deleteMut = useDeletePmAdhoc();
+  const resumeMut = useResumePmAdhoc();
   const navigate = useNavigate();
 
   const [searchParams, setSearchParams] = useSearchParams();
@@ -420,6 +431,27 @@ export default function PmAdhocPage() {
     });
   };
 
+  // #674：恢复已取消任务（二次确认 → resume → 列表自动刷新，状态变更）。
+  const handleResume = (id: string) => {
+    Modal.confirm({
+      title: intl.formatMessage({ id: 'perf.adhoc.resumeTaskTitle' }),
+      content: intl.formatMessage({ id: 'perf.adhoc.resumeTaskContent' }),
+      onOk: async () => {
+        try {
+          await resumeMut.mutateAsync(id);
+          message.success(intl.formatMessage({ id: 'perf.adhoc.resumed' }));
+        } catch (e) {
+          message.error(
+            intl.formatMessage(
+              { id: 'perf.adhoc.resumeFailed' },
+              { msg: (e as Error).message },
+            ),
+          );
+        }
+      },
+    });
+  };
+
   // issue #392：删除终态自建任务（二次确认 → 删除 → 列表自动刷新，任务消失）。
   const handleDelete = (t: AdhocTask) => {
     Modal.confirm({
@@ -457,6 +489,7 @@ export default function PmAdhocPage() {
           onView={setSelectedTask}
           onCancel={handleCancel}
           onEdit={handleEditBuiltin}
+          onResume={handleResume}
         />
       </Card>
 
@@ -482,6 +515,7 @@ export default function PmAdhocPage() {
           onCancel={handleCancel}
           onEdit={handleEditCustom}
           onDelete={handleDelete}
+          onResume={handleResume}
         />
       </Card>
 

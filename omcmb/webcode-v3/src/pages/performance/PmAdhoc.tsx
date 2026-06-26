@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Ban, Loader2, Pencil, Plus, RefreshCcw, Trash2 } from 'lucide-react'
+import { Ban, Loader2, Pencil, Play, Plus, RefreshCcw, Trash2 } from 'lucide-react'
 
 import { PageShell } from '@/components/shell/PageShell'
 import { GlassPanel } from '@/components/ui/GlassPanel'
@@ -8,7 +8,7 @@ import { NeonButton } from '@/components/ui/NeonButton'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { formatTime } from '@/lib/format'
 import { cn } from '@/lib/utils'
-import { usePmAdhocList, useCancelPmAdhoc, useDeletePmAdhoc } from '@core/hooks/api/usePmAdhoc'
+import { usePmAdhocList, useCancelPmAdhoc, useDeletePmAdhoc, useResumePmAdhoc } from '@core/hooks/api/usePmAdhoc'
 import {
   useAdhocProgressStream,
   type AdhocLiveProgress,
@@ -64,6 +64,7 @@ export default function PmAdhoc() {
     usePmAdhocList({ refetchInterval: ADHOC_POLL_FALLBACK_MS, isBuiltin: false })
   const cancelMut = useCancelPmAdhoc()
   const deleteMut = useDeletePmAdhoc()
+  const resumeMut = useResumePmAdhoc()
 
   // issue #399：收集两区运行中（含 pending）任务 id，订阅进度 SSE；终态/scheduled 不订阅。
   const runningIds = useMemo(
@@ -81,6 +82,14 @@ export default function PmAdhoc() {
       return
     }
     deleteMut.mutate(id)
+  }
+
+  // #674：恢复已取消任务。
+  const onResume = (id: string) => {
+    if (!window.confirm('恢复已取消的任务，任务将重新参与调度执行。确认启用？')) {
+      return
+    }
+    resumeMut.mutate(id)
   }
 
   const isFetching = builtinLoading || customLoading
@@ -119,6 +128,7 @@ export default function PmAdhoc() {
           liveProgress={liveProgress}
           onCancel={(id) => cancelMut.mutate(id)}
           onEdit={(t) => navigate(`/performance/pm-adhoc/${t.id}/edit`)}
+          onResume={onResume}
           cancelling={cancelMut.isPending}
         />
         <TaskTable
@@ -132,6 +142,7 @@ export default function PmAdhoc() {
           onCancel={(id) => cancelMut.mutate(id)}
           onEdit={(t) => navigate(`/performance/pm-adhoc/${t.id}/edit`)}
           onDelete={onDelete}
+          onResume={onResume}
           cancelling={cancelMut.isPending}
           deleting={deleteMut.isPending}
         />
@@ -151,6 +162,7 @@ function TaskTable({
   onCancel,
   onEdit,
   onDelete,
+  onResume,
   cancelling,
   deleting,
 }: {
@@ -166,6 +178,8 @@ function TaskTable({
   onEdit: (t: AdhocTask) => void
   // issue #392：删除终态自建任务（仅自建区传入；内置区不传，按钮恒不渲染）。
   onDelete?: (id: string) => void
+  // #674：恢复已取消任务。
+  onResume?: (id: string) => void
   cancelling: boolean
   deleting?: boolean
 }) {
@@ -246,6 +260,12 @@ function TaskTable({
                     {cancellable ? (
                       <NeonButton tone="danger" icon={<Ban />} disabled={cancelling} onClick={() => onCancel(t.id)}>
                         取消
+                      </NeonButton>
+                    ) : null}
+                    {/* #674：已取消任务给「启用」恢复执行 */}
+                    {onResume && t.status === 'canceled' ? (
+                      <NeonButton icon={<Play />} onClick={() => onResume(t.id)}>
+                        启用
                       </NeonButton>
                     ) : null}
                     {/* issue #392：终态自建任务给「删除」（onDelete 仅自建区传入） */}

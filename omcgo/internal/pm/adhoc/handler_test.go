@@ -25,6 +25,7 @@ type handlerStubRepo struct {
 	get      func(uuid.UUID) (*Task, error)       // T-0194：注入既有任务（含 is_builtin/mode/technology）
 	update   func(uuid.UUID, UpdateRequest) error // T-0194：捕获更新入参
 	deleteFn func(uuid.UUID) error                // #392：注入删除结果（区分终态/内置/非终态）
+	resumeFn func(uuid.UUID) (Status, error)      // #674：注入恢复结果
 }
 
 func (s *handlerStubRepo) Create(_ context.Context, req CreateRequest) (uuid.UUID, error) {
@@ -94,6 +95,25 @@ func (s *handlerStubRepo) Delete(_ context.Context, id uuid.UUID) error {
 		return nil
 	}
 	return ErrNotFound
+}
+func (s *handlerStubRepo) Resume(_ context.Context, id uuid.UUID) (Status, error) {
+	if s.resumeFn != nil {
+		return s.resumeFn(id)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if t, ok := s.tasks[id]; ok {
+		if t.Status != StatusCanceled {
+			return "", ErrNotCanceled
+		}
+		if t.Mode == "continuous" {
+			t.Status = StatusScheduled
+		} else {
+			t.Status = StatusPending
+		}
+		return t.Status, nil
+	}
+	return "", ErrNotFound
 }
 func (s *handlerStubRepo) LockNextPending(context.Context, string) (*Task, error) { return nil, nil }
 func (s *handlerStubRepo) UpdateStatus(context.Context, uuid.UUID, Status, *int, string) error {
@@ -512,6 +532,93 @@ func Test_Handler_Runs_NonOwner_Forbidden(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/pm/adhoc/tasks/"+taskID.String()+"/runs", nil)
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+}
+
+// ── #674 Resume 端点 ──────────────────────────────────────────────────────
+
+// 成功路径：canceled continuous 任务恢复为 scheduled。
+func Test_Handler_Resume_ContinuousSuccess(t *testing.T) {
+	taskID := uuid.New()
+	repo := &handlerStubRepo{
+		get: func(id uuid.UUID) (*Task, error) {
+			return &Task{ID: taskID, IsBuiltin: false, Creator: "alice", Status: StatusCanceled, Mode: "continuous"}, nil
+		},
+		resumeFn: func(_ uuid.UUID) (Status, error) {
+			return StatusScheduled, nil
+		},
+	}
+	r := newTestRouterWithUser(repo, "alice", false)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/pm/adhoc/tasks/"+taskID.String()+"/resume", nil)
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	data := resp["data"].(map[string]any)
+	assert.Equal(t, "scheduled", data["status"])
+}
+
+// 成功路径：canceled oneshot 任务恢复为 pending。
+func Test_Handler_Resume_OneshotSuccess(t *testing.T) {
+	taskID := uuid.New()
+	repo := &handlerStubRepo{
+		get: func(id uuid.UUID) (*Task, error) {
+			return &Task{ID: taskID, IsBuiltin: false, Creator: "alice", Status: StatusCanceled, Mode: "oneshot"}, nil
+		},
+		resumeFn: func(_ uuid.UUID) (Status, error) {
+			return StatusPending, nil
+		},
+	}
+	r := newTestRouterWithUser(repo, "alice", false)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/pm/adhoc/tasks/"+taskID.String()+"/resume", nil)
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	data := resp["data"].(map[string]any)
+	assert.Equal(t, "pending", data["status"])
+}
+
+// 失败路径：非 canceled 状态的任务尝试 resume → 409 Conflict。
+func Test_Handler_Resume_NotCanceled_Conflict(t *testing.T) {
+	taskID := uuid.New()
+	repo := &handlerStubRepo{
+		get: func(id uuid.UUID) (*Task, error) {
+			return &Task{ID: taskID, IsBuiltin: false, Creator: "alice", Status: StatusRunning}, nil
+		},
+		resumeFn: func(_ uuid.UUID) (Status, error) {
+			return "", ErrNotCanceled
+		},
+	}
+	r := newTestRouterWithUser(repo, "alice", false)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/pm/adhoc/tasks/"+taskID.String()+"/resume", nil)
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusConflict, w.Code)
+}
+
+// 权限：非 owner 普通用户恢复他人自建任务 → 403。
+func Test_Handler_Resume_NonOwner_Forbidden(t *testing.T) {
+	taskID := uuid.New()
+	repo := &handlerStubRepo{
+		get: func(id uuid.UUID) (*Task, error) {
+			return &Task{ID: taskID, IsBuiltin: false, Creator: "alice", Status: StatusCanceled}, nil
+		},
+	}
+	r := newTestRouterWithUser(repo, "bob", false)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/pm/adhoc/tasks/"+taskID.String()+"/resume", nil)
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusForbidden, w.Code)

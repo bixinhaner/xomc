@@ -7303,6 +7303,12 @@ const messages: Record<string, string> = {
   'perf.adhoc.cancelTaskTitle':          'Cancel Task',
   'perf.adhoc.cancelTaskContent':        'Canceling a running task will not roll back results already written',
   'perf.adhoc.canceled':                 'Canceled',
+  // #674: resume canceled task
+  'perf.adhoc.btnResume':                'Enable',
+  'perf.adhoc.resumeTaskTitle':          'Enable Task',
+  'perf.adhoc.resumeTaskContent':        'Resume a canceled task so it participates in scheduling again. Confirm?',
+  'perf.adhoc.resumed':                  'Enabled',
+  'perf.adhoc.resumeFailed':             'Enable failed: {msg}',
   // issue #392: delete terminal custom task
   'perf.adhoc.btnDelete':                'Delete',
   'perf.adhoc.deleteTaskTitle':          'Delete Task',

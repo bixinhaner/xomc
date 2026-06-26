@@ -42,12 +42,15 @@ type finishedRunRecord struct {
 	errMsg    string
 }
 
-func (s *workerStubRepo) Create(context.Context, CreateRequest) (uuid.UUID, error) { return uuid.Nil, nil }
-func (s *workerStubRepo) Update(context.Context, uuid.UUID, UpdateRequest) error   { return nil }
-func (s *workerStubRepo) Get(context.Context, uuid.UUID) (*Task, error)            { return nil, nil }
-func (s *workerStubRepo) List(context.Context, ListFilter) ([]Task, error)         { return nil, nil }
-func (s *workerStubRepo) Cancel(context.Context, uuid.UUID) error                  { return nil }
-func (s *workerStubRepo) Delete(context.Context, uuid.UUID) error                  { return nil }
+func (s *workerStubRepo) Create(context.Context, CreateRequest) (uuid.UUID, error) {
+	return uuid.Nil, nil
+}
+func (s *workerStubRepo) Update(context.Context, uuid.UUID, UpdateRequest) error { return nil }
+func (s *workerStubRepo) Get(context.Context, uuid.UUID) (*Task, error)          { return nil, nil }
+func (s *workerStubRepo) List(context.Context, ListFilter) ([]Task, error)       { return nil, nil }
+func (s *workerStubRepo) Cancel(context.Context, uuid.UUID) error                { return nil }
+func (s *workerStubRepo) Resume(context.Context, uuid.UUID) (Status, error)      { return "", nil }
+func (s *workerStubRepo) Delete(context.Context, uuid.UUID) error                { return nil }
 
 func (s *workerStubRepo) LockNextPending(context.Context, string) (*Task, error) {
 	s.mu.Lock()
@@ -379,7 +382,8 @@ func (g *gateStub) CompletedBucketStart(_ context.Context, _ metrics.Granularity
 // 用每小时 cron，last_fire_at 在 4 小时前，墙钟 now 已过去很久（墙钟不挡）；水位停在 T=02:00。
 // fire 02:00 处理桶 [01:00,02:00) 起点 01:00 ≤ 水位 02:00 → 放行；
 // （下一 sweep 会 fire 03:00 处理桶 [02:00,03:00) 起点 02:00 ≤ 水位 02:00 → 仍放行；
-//  再下一 sweep fire 04:00 处理桶 [03:00,04:00) 起点 03:00 > 水位 02:00 → 挡住，即追平终点 = 水位 T）。
+//
+//	再下一 sweep fire 04:00 处理桶 [03:00,04:00) 起点 03:00 > 水位 02:00 → 挡住，即追平终点 = 水位 T）。
 func Test_ContinuousScheduler_P3_CatchupBoundedByWatermark(t *testing.T) {
 	now := time.Date(2026, 5, 23, 10, 0, 0, 0, time.UTC) // 墙钟远超水位，确保上界由水位卡而非墙钟
 	watermarkT := time.Date(2026, 5, 23, 2, 0, 0, 0, time.UTC)
