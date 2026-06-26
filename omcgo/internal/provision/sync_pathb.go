@@ -313,7 +313,10 @@ func (s *SyncService) finalizePathBSync(ctx context.Context, dev *model.Device) 
 	}
 	if s.deviceInfoRefresher != nil {
 		if _, err := s.deviceInfoRefresher.SyncFromParameters(ctx, dev.ID, dev.Carrier, dev.Technology); err != nil {
-			return fmt.Errorf("refresh device_info from parameters: %w", err)
+			s.logger.Warn("refresh device_info from parameters failed (non-fatal)",
+				zap.String("device_id", dev.ID.String()),
+				zap.String("device_sn", dev.SerialNumber),
+				zap.Error(err))
 		}
 	}
 	if s.paramSyncWriter != nil {
