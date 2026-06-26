@@ -31,6 +31,8 @@ export interface BarChartProps {
   tooltipFormatter?: (params: CallbackDataParams | CallbackDataParams[]) => string;
   /** 点击事件回调 */
   onClick?: (index: number, name: string) => void;
+  /** 最小柱高，处理数值极小时渲染展示点，只针对需要的图表显式传入即可 */
+  minBarHeight?: number;
 }
 
 const BarChart: React.FC<BarChartProps> = ({
@@ -45,6 +47,7 @@ const BarChart: React.FC<BarChartProps> = ({
   showLegend = true,
   tooltipFormatter,
   onClick,
+  minBarHeight,
 }) => {
   const isDark = useIsDark();
   const appTheme = useAppStore((s) => s.theme);
@@ -138,6 +141,15 @@ const BarChart: React.FC<BarChartProps> = ({
       xAxis: (horizontal ? valueAxis : categoryAxis) as EChartsOption['xAxis'],
       yAxis: (horizontal ? categoryAxis : valueAxis) as EChartsOption['yAxis'],
       series: series.map((s, i) => {
+        // 计算该系列最大值，用于后续判断是否为极小值
+        const maxVal = Math.max(
+          1, // 避免为0
+          ...s.data.map(item => {
+            if (typeof item === 'object' && item !== null) return item.value || 0;
+            return (item as number) || 0;
+          })
+        );
+
         // 计算该系列的圆角：优先使用系列自身的 borderRadius，否则使用全局 borderRadius
         let seriesBorderRadius: number | [number, number, number, number];
         if (s.borderRadius !== undefined) {
@@ -151,9 +163,38 @@ const BarChart: React.FC<BarChartProps> = ({
         return {
           name: s.name,
           type: 'bar',
-          data: s.data,
+          data: minBarHeight !== undefined ? s.data.map(item => {
+            const val = typeof item === 'object' && item !== null ? item.value : (item || 0);
+            const baseObj = typeof item === 'object' && item !== null ? item : { value: val };
+            
+            // 对于完全为 0 的柱子，将其变为完全透明，使得 minBarHeight 不会让其出现
+            if (val === 0) {
+              return {
+                ...baseObj,
+                itemStyle: { ...(baseObj as any).itemStyle, opacity: 0 },
+              };
+            }
+
+            // 对于极小值（比如高度不足最大值的 2%），为了避免阴影和圆角导致它“悬浮”
+            // 我们强制去掉圆角和底部的阴影，让它老老实实贴在 X 轴上
+            if (val / maxVal <= 0.02) {
+              return {
+                ...baseObj,
+                itemStyle: { 
+                  ...(baseObj as any).itemStyle, 
+                  borderRadius: 0, 
+                  shadowBlur: 0, 
+                  shadowOffsetY: 0, 
+                  shadowColor: 'transparent' 
+                },
+              };
+            }
+
+            return item;
+          }) : s.data,
           stack: s.stack,
           barWidth: barWidth ?? 'auto',
+          barMinHeight: minBarHeight,
           itemStyle: {
             color: s.color ?? palette[i % palette.length],
             borderRadius: seriesBorderRadius,
@@ -171,7 +212,7 @@ const BarChart: React.FC<BarChartProps> = ({
         };
       }),
     };
-  }, [title, xData, series, horizontal, yAxisName, barWidth, borderRadius, isDark, appTheme, palette, tooltipFormatter]);
+  }, [title, xData, series, horizontal, yAxisName, barWidth, borderRadius, isDark, appTheme, palette, tooltipFormatter, minBarHeight]);
 
   return (
     <div ref={containerRef} style={{ height: typeof height === 'string' ? height : undefined, width: '100%', minHeight: 0 }}>
