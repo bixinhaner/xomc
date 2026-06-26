@@ -22,7 +22,7 @@
 
 import { useCallback, useMemo, useState, useEffect, useRef } from 'react';
 import type { ComponentProps, ReactNode } from 'react';
-import { Card, Select, Spin, Empty, Typography, Tooltip, Tag } from 'antd';
+import { Card, Select, Segmented, Spin, Empty, Typography, Tooltip, Tag } from 'antd';
 import { LoadingOutlined } from '@ant-design/icons';
 import LineChart from '@/components/Charts/LineChart';
 import { useT } from '@/hooks/useT';
@@ -45,11 +45,23 @@ export interface LayoutKPIPanelProps {
   trendData: MultiTrendComparisonData | undefined;
   /** 批量取数是否加载中。 */
   isLoading: boolean;
+  /** 当前卡片的趋势对比时窗。 */
+  compareWindow: 'yesterday' | 'last_week';
+  /** 当前卡片切换趋势对比时窗。 */
+  onCompareWindowChange: (compareWindow: 'yesterday' | 'last_week') => void;
   /** 图表高度。 */
   height?: number;
 }
 
-export function LayoutKPIPanel({ technology, panel, trendData, isLoading, height = 280 }: LayoutKPIPanelProps) {
+export function LayoutKPIPanel({
+  technology,
+  panel,
+  trendData,
+  isLoading,
+  compareWindow,
+  onCompareWindowChange,
+  height = 280,
+}: LayoutKPIPanelProps) {
   const t = useT();
   const token = useThemeToken();
 
@@ -104,14 +116,16 @@ export function LayoutKPIPanel({ technology, panel, trendData, isLoading, height
   const titleFallback = titleFallbackKey ? resolveOne(titleFallbackKey).name : '';
 
   const todayLabel = t('dashboard.timeRange.today');
-  const yesterdayLabel = t('dashboard.timeRange.yesterday');
+  const compareLabel = compareWindow === 'last_week'
+    ? t('dashboard.timeRange.lastWeek')
+    : t('dashboard.timeRange.yesterday');
 
   const xData = useMemo(() => generateDayAxisLabels(), []);
   const xDataFull = useMemo(() => generateDayAxisTimestamps(), []);
 
   const { series } = useMemo(
-    () => buildSeries(selectedMetrics, trendData, xData, todayLabel, yesterdayLabel, resolveOne),
-    [selectedMetrics, trendData, xData, todayLabel, yesterdayLabel, resolveOne],
+    () => buildSeries(selectedMetrics, trendData, xData, todayLabel, compareLabel, resolveOne),
+    [selectedMetrics, trendData, xData, todayLabel, compareLabel, resolveOne],
   );
 
   // 至少一条 series 有真实数据点？无任何点时给"暂无聚合数据"提示（issue #359 保留）。
@@ -167,6 +181,15 @@ export function LayoutKPIPanel({ technology, panel, trendData, isLoading, height
           >
             {panel.title ? t(panel.title) : titleFallback}
           </Text>
+          <Segmented
+            size="small"
+            value={compareWindow}
+            onChange={(value) => onCompareWindowChange(value as 'yesterday' | 'last_week')}
+            options={[
+              { label: t('dashboard.compareWindow.yesterday'), value: 'yesterday' },
+              { label: t('dashboard.compareWindow.lastWeek'), value: 'last_week' },
+            ]}
+          />
           {/*
            * 宽度分档 + responsive tag：
            *  - 只有 1 个可选项（如可用性/移动性）→ 160px，避免“只装一个 tag 却拉很长”的空荡感。

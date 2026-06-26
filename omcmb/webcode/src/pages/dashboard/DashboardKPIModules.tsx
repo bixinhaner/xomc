@@ -13,12 +13,13 @@ import { useKPILayout } from '@core/hooks/api/useDashboard';
 import { useMultiKPITrendComparison } from '@core/hooks/api/useDashboard';
 import { LayoutKPIPanel } from '@/components/dashboard/LayoutKPIPanel';
 import { resolveLayout, collectMetrics, layoutToRows } from './layoutMapping';
+import type { KPILayoutPanel } from '@core/types/dashboard';
+
+type CompareWindow = 'yesterday' | 'last_week';
 
 interface DashboardKPIModulesProps {
   /** 当前制式 */
   technology: TechnologyType;
-  /** 趋势对比时窗，默认 'yesterday' */
-  compareWindow?: 'yesterday' | 'last_week';
   /** 是否启用滚动显示动画 */
   enableScrollReveal?: boolean;
   /** 动画起始延迟值（在整个页面中的起始位置） */
@@ -30,11 +31,11 @@ interface DashboardKPIModulesProps {
  */
 export function DashboardKPIModules({
   technology,
-  compareWindow = 'yesterday',
   enableScrollReveal = true,
   startDelay = 2,
 }: DashboardKPIModulesProps) {
   const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [compareWindows, setCompareWindows] = useState<Record<string, CompareWindow>>({});
 
   // 读全局布局（按制式）；读不到 / 为空 / 出错由 resolveLayout 回退内置默认。
   const { data: remoteLayout } = useKPILayout(technology);
@@ -43,9 +44,22 @@ export function DashboardKPIModules({
     [technology, remoteLayout],
   );
 
-  // 汇总当前制式所有图要画的指标，去重，做一次批量取数（今日 vs compareWindow）。
+  // 汇总当前制式所有图要画的指标，去重；默认拉 yesterday，last_week 按需启用。
   const metrics = useMemo(() => collectMetrics(layout.panels), [layout.panels]);
-  const { data: trendData, isLoading } = useMultiKPITrendComparison(metrics, compareWindow, metrics.length > 0);
+  const needsLastWeekData = useMemo(
+    () => Object.values(compareWindows).some((window) => window === 'last_week'),
+    [compareWindows],
+  );
+  const { data: yesterdayTrendData, isLoading: isYesterdayLoading } = useMultiKPITrendComparison(
+    metrics,
+    'yesterday',
+    metrics.length > 0,
+  );
+  const { data: lastWeekTrendData, isLoading: isLastWeekLoading } = useMultiKPITrendComparison(
+    metrics,
+    'last_week',
+    metrics.length > 0 && needsLastWeekData,
+  );
 
   // 按网格坐标把图排成行（首页只读不可拖）。
   const rows = useMemo(() => layoutToRows(layout.panels), [layout.panels]);
@@ -59,6 +73,9 @@ export function DashboardKPIModules({
 
   const shouldAnimate = enableScrollReveal && isInitialLoad;
 
+  const getPanelKey = (panel: KPILayoutPanel) =>
+    `${technology}:${panel.x}:${panel.y}:${panel.title}`;
+
   return (
     <>
       {rows.map((row, rowIndex) => (
@@ -68,7 +85,15 @@ export function DashboardKPIModules({
           className={shouldAnimate ? 'omc-scroll-reveal omc-visible' : ''}
           data-delay={startDelay + rowIndex}
         >
-          {row.panels.map((panel) => (
+          {row.panels.map((panel) => {
+              const panelKey = getPanelKey(panel);
+              const compareWindow = compareWindows[panelKey] ?? 'yesterday';
+              const trendData = compareWindow === 'last_week' ? lastWeekTrendData : yesterdayTrendData;
+              const isLoading = compareWindow === 'last_week'
+                ? isLastWeekLoading
+                : isYesterdayLoading;
+
+              return (
             <Col
               key={`${rowIndex}-${panel.x}-${panel.title}`}
               xs={24}
@@ -82,10 +107,17 @@ export function DashboardKPIModules({
                 panel={panel}
                 trendData={trendData}
                 isLoading={isLoading}
+                compareWindow={compareWindow}
+                onCompareWindowChange={(nextWindow) => {
+                  setCompareWindows((prev) => (
+                    prev[panelKey] === nextWindow ? prev : { ...prev, [panelKey]: nextWindow }
+                  ));
+                }}
                 height={280}
               />
             </Col>
-          ))}
+              );
+          })}
         </Row>
       ))}
     </>
