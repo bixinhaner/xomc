@@ -889,6 +889,9 @@ export default function FileTransferCenter() {
   };
 
   const getTaskProductClass = (record: UnifiedFileTransferTask) => {
+    if (record.productName) {
+      return record.productName;
+    }
     if (record.productType) {
       return record.productType;
     }

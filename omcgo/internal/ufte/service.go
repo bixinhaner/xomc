@@ -1410,6 +1410,7 @@ func (s *Service) mapTask(ctx context.Context, catalog []TaskType, task *softwar
 		FirmwareID:      firmwareID,
 		TargetVersion:   taskTargetVersion,
 		ProductType:     task.ProductClass,
+		ProductName:     s.resolveTaskProductName(ctx, task),
 		IsKeepConfig:    task.IsKeepConfig,
 		Status:          string(task.Status),
 		Result:          normalizeTaskResult(task.Result),
@@ -1426,6 +1427,49 @@ func (s *Service) mapTask(ctx context.Context, catalog []TaskType, task *softwar
 		ScheduledAt:     modelTimePtrToString(task.ScheduledAt),
 		OperatorScope:   task.CreateUser,
 	}, nil
+}
+
+// resolveTaskProductName 解析任务的产品英文名（与 DeviceItem.ProductName 同口径）。
+// 升级类任务的 task.product_class 历史上写入的是 firmware.product_class（如「4G eNB」
+// 这种宽泛类别），ProductRegistry 索引的是产品名（如「QAFA」→「甲产品」），直接 lookup 必 miss；
+// 只有回滚类把 device.product_class 正确写入 task.product_class，能直接命中。
+// 因此先按 task.product_class 直接 lookup（命中即返回 → 回滚/已正确写入场景），
+// miss 时 fallback 查任意一个子任务的 device.product_class 再 lookup（升级/备份/license 场景）。
+// productNameLookup 未注入或两条路径全 miss → 返回空串，前端 fallback 到 productType。
+//
+// 性能取舍：list 路径每个 task fallback 触发 1 次 sub_task 查询 + 1 次 device 查询，
+// 单页 20-100 task 量级可接受；如压测确认是瓶颈再做 batch 预解析（独立 perf issue）。
+func (s *Service) resolveTaskProductName(ctx context.Context, task *software.UpgradeTask) string {
+	if s.productNameLookup == nil {
+		return ""
+	}
+	if task.ProductClass != "" {
+		if name, ok := s.productNameLookup(ctx, task.ProductClass); ok {
+			return name
+		}
+	}
+	if s.subTaskRepo == nil || s.deviceRepo == nil {
+		return ""
+	}
+	res, err := s.subTaskRepo.ListByTaskID(ctx, task.ID, software.SubTaskFilter{
+		TaskID:      task.ID,
+		ListRequest: coremodel.ListRequest{Page: 1, PageSize: 1},
+	})
+	if err != nil || res == nil || len(res.Items) == 0 {
+		return ""
+	}
+	deviceID := res.Items[0].DeviceID
+	if deviceID == uuid.Nil {
+		return ""
+	}
+	dev, err := s.deviceRepo.GetByID(ctx, deviceID)
+	if err != nil || dev == nil || dev.ProductClass == "" {
+		return ""
+	}
+	if name, ok := s.productNameLookup(ctx, dev.ProductClass); ok {
+		return name
+	}
+	return ""
 }
 
 // modelTimePtrToString 把 *model.Time 格式化成前端期望的 ISO 字符串
