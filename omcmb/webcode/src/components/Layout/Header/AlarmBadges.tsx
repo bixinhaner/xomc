@@ -1,6 +1,7 @@
 import { memo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAlarmStore } from '@core/store/alarmStore';
+import { useShallow } from 'zustand/react/shallow';
 import type { AlarmSeverity } from '@core/store/alarmStore';
 import { useTabStore } from '@core/store/tabStore';
 import { useT } from '@/hooks/useT';
@@ -24,7 +25,7 @@ const SEVERITY_CONFIG: SeverityConfig[] = [
 // 主题/侧栏/响应式等无关原因频繁重渲染——memo 让它在 Header 重渲染时跳过，
 // 只在自身 counts 选择值变化时才更新。
 function AlarmBadges() {
-  const counts = useAlarmStore((s) => s.counts);
+  const counts = useAlarmStore(useShallow((s) => s.counts));
   const navigate = useNavigate();
   const openTab = useTabStore((s) => s.openTab);
   const t = useT();

@@ -49,6 +49,8 @@ import { useTechnologyDictionary } from '@/components/dashboard/useTechnologyDic
 import { useAppStore } from '@core/store/appStore';
 import { useMenuStore } from '@core/store/menuStore';
 import { useUserStore } from '@core/store/userStore';
+import { useAlarmStore } from '@core/store/alarmStore';
+import { useShallow } from 'zustand/react/shallow';
 import { isRouteAllowed } from '@core/utils/routeAccess';
 import { useT } from '@/hooks/useT';
 import { useThemeToken } from '@/hooks/useThemeToken';
@@ -100,6 +102,7 @@ const QUICK_ACCESS_ITEMS = [
 export default function DashboardPage() {
   const navigate = useNavigate();
   const { data: dashboardData, isLoading } = useDashboardData();
+  const alarmStoreCounts = useAlarmStore(useShallow((s) => s.counts));
   const t = useT();
   const locale = useAppStore((state) => state.locale);
   const token = useThemeToken();
@@ -220,7 +223,7 @@ export default function DashboardPage() {
 
   // Alarm distribution bar chart data - 按告警等级分组统计
   const alarmDistributionData = useMemo(() => {
-    const alarmCounts = dashboardData?.summary?.alarmCounts;
+    const alarmCounts = alarmStoreCounts;
 
     if (!alarmCounts) {
       return { isEmpty: true, xData: [], series: [] };
@@ -228,7 +231,8 @@ export default function DashboardPage() {
 
     const knownTotal = (alarmCounts.critical ?? 0) + (alarmCounts.major ?? 0) +
       (alarmCounts.minor ?? 0) + (alarmCounts.warning ?? 0);
-    const overallTotal = alarmCounts.total ?? knownTotal;
+    // 从 global store 里可能没有 total，所以只用 knownTotal
+    const overallTotal = alarmCounts.total_active ?? knownTotal;
     const otherCount = Math.max(overallTotal - knownTotal, 0);
     const hasAlarms = overallTotal > 0;
 
@@ -244,26 +248,26 @@ export default function DashboardPage() {
     ];
 
     const data = [
-      { value: alarmCounts.critical, name: t('alarm.severity.critical') },
-      { value: alarmCounts.major, name: t('alarm.severity.major') },
-      { value: alarmCounts.minor, name: t('alarm.severity.minor') },
-      { value: alarmCounts.warning, name: t('alarm.severity.warning') },
+      { value: alarmCounts.critical, name: t('alarm.severity.critical'), itemStyle: { color: '#F5222D' } },
+      { value: alarmCounts.major, name: t('alarm.severity.major'), itemStyle: { color: '#FA8C16' } },
+      { value: alarmCounts.minor, name: t('alarm.severity.minor'), itemStyle: { color: '#FADB14' } },
+      { value: alarmCounts.warning, name: t('alarm.severity.warning'), itemStyle: { color: '#1677FF' } },
     ];
 
     if (otherCount > 0) {
       xData.push(t('dashboard.alarmSeverityOther'));
-      data.push({ value: otherCount, name: t('dashboard.alarmSeverityOther') });
+      data.push({ value: otherCount, name: t('dashboard.alarmSeverityOther'), itemStyle: { color: '#8C8C8C' } });
     }
 
     const series = [
       {
         name: t('dashboard.alarmCountEvents'),
-        data: data as Array<{ value: number; name: string }>,
+        data: data as Array<{ value: number; name: string; itemStyle: { color: string } }>,
       },
     ];
 
     return { isEmpty: false, xData, series, otherCount };
-  }, [dashboardData, t]);
+  }, [alarmStoreCounts, t]);
 
   const dashboardRef = useRef<HTMLDivElement>(null);
   useScrollReveal(dashboardRef);
@@ -421,6 +425,7 @@ export default function DashboardPage() {
                 series={deviceStatusData.series}
                 height={260}
                 barWidth={32}
+                minBarHeight={1}
               />
             )}
           </Card>
@@ -464,6 +469,7 @@ export default function DashboardPage() {
                 height={260}
                 barWidth={32}
                 showLegend={false}
+                minBarHeight={1}
                 onClick={handleAlarmChartClick}
               />
             )}
