@@ -187,7 +187,8 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 	}
 
 	var (
-		rawDeviceCounts  map[model.DeviceStatus]int64
+		totalDevices     int64
+		onlineDevices    int64
 		rawAlarmStats    *alarm.AlarmStatistics
 		rawKPIValues     []model.KPIValue
 		rawAlarms        []model.Alarm
@@ -196,15 +197,16 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 
 	g, gctx := errgroup.WithContext(ctx)
 
-	// 1. Device counts by status
+	// 1. Device total / online counts —— 与设备状态柱图同源（T-0162：在线语义 = is_online=TRUE，
+	// 与 lifecycle 解耦）。原走 deviceService.CountByStatus + DeriveStatusFromLifecycle 派生
+	// DeviceActive 桶，会把 Maintenance/Discovered/... 但 is_online=TRUE 的设备从"在线"中漏掉，
+	// 导致 KPI 卡与同页柱图数字漂移。
 	g.Go(func() error {
-		counts, err := s.deviceService.CountByStatus(gctx, nil)
-		if err != nil {
-			s.logger.Warn("dashboard: device count failed", zap.Error(err))
-			rawDeviceCounts = make(map[model.DeviceStatus]int64)
-			return nil
+		if err := s.pgPool.QueryRow(gctx, summaryDeviceCountsQuery).Scan(&totalDevices, &onlineDevices); err != nil {
+			s.logger.Warn("dashboard: device counts query failed", zap.Error(err))
+			totalDevices = 0
+			onlineDevices = 0
 		}
-		rawDeviceCounts = counts
 		return nil
 	})
 
@@ -298,17 +300,10 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 		return nil, err
 	}
 
-	// Map device counts to frontend format
-	var total int64
-	for _, cnt := range rawDeviceCounts {
-		total += cnt
-	}
-	online := rawDeviceCounts[model.DeviceActive]
-	offline := total - online
 	summary.DeviceStats = FrontendDeviceStats{
-		Total:   total,
-		Online:  online,
-		Offline: offline,
+		Total:   totalDevices,
+		Online:  onlineDevices,
+		Offline: totalDevices - onlineDevices,
 		Alarm:   alarmDeviceCount,
 	}
 
@@ -357,7 +352,7 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 	}
 
 	// Calculate KPI deltas (trend data for cards)
-	summary.KPIDeltas = s.calculateKPIDeltas(ctx, total, summary.AlarmStats.Total)
+	summary.KPIDeltas = s.calculateKPIDeltas(ctx, totalDevices, summary.AlarmStats.Total)
 
 	return summary, nil
 }
@@ -461,6 +456,17 @@ func (s *Service) calculateKPIDeltas(ctx context.Context, currentTotalDevices in
 
 	return deltas
 }
+
+// summaryDeviceCountsQuery 给 dashboard /summary 接口的 KPI 卡用：取设备总数 +
+// 在线数（is_online=TRUE）。"在线"语义与生命周期解耦（T-0162），与 device 模块
+// DeviceListStats.OnlineCount、设备状态柱图 GetDeviceStatusByType 同源。
+const summaryDeviceCountsQuery = `
+	SELECT
+		COUNT(*) AS total,
+		COUNT(*) FILTER (WHERE is_online = TRUE) AS online
+	FROM devices
+	WHERE deleted_at IS NULL
+`
 
 // countDevicesAtTimeQuery 重建时刻 t 的设备总数：created_at 在 t 之前，且
 // 截至 t 尚未软删除。devices 是主库分区表（按 carrier 分区），父表查询即可贯穿所有分区。
