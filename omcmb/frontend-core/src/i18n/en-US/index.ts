@@ -2590,6 +2590,7 @@ const messages: Record<string, string> = {
   'dashboard.onlineDevices':     'Online Devices',
   'dashboard.networkTech':       'Network Tech',
   'dashboard.activeAlarms':      'Active Alarms',
+  'dashboard.activeAlarmsEvents': 'Active Alarms (events)',
   'dashboard.runningTasks':      'Running Tasks',
   'dashboard.vsLastWeek':        'vs last week',
   'dashboard.onlineRate':        'Online Rate',
@@ -2597,11 +2598,21 @@ const messages: Record<string, string> = {
   'dashboard.compareWindow.label':     'Compare with',
   'dashboard.compareWindow.yesterday': 'Yesterday',
   'dashboard.compareWindow.lastWeek':  'Last week',
+  'dashboard.compareWindow.day':       'Day',
+  'dashboard.compareWindow.week':      'Week',
+  'dashboard.compareWindow.todayOnly': 'Today only',
+  'dashboard.compareWindow.thisWeekOnly': 'This week only',
+  'dashboard.compareWindow.multiMetricHint': 'Multi-metric mode hides the comparison line and shows today only',
+  'dashboard.compareWindow.multiMetricWeekHint': 'Multi-metric mode hides the comparison line and shows this week only',
   'dashboard.alarmSummary':      'Alarm Summary',
   'dashboard.viewAll':             'View All',
   'dashboard.alarmDistribution':   'Alarm Distribution',
   'dashboard.alarmLevelStatistics': 'Alarm Level Statistics',
+  'dashboard.alarmCountEvents':   'Alarm Events',
+  'dashboard.alarmSeverityOther': 'Other',
+  'dashboard.alarmOtherHint':     '{count} in other severities',
   'dashboard.deviceStatusByType':  'Device Status by Type',
+  'dashboard.deviceStatusAlarmHint': 'Alarm is an overlapping dimension and may overlap online/offline counts',
   'dashboard.alarmTrend7d':      '7-Day Alarm Trend',
   'dashboard.top10AlarmDevices': 'Top Alarm Devices',
   'dashboard.deviceMap':         'Device Map',
@@ -2631,6 +2642,7 @@ const messages: Record<string, string> = {
   'dashboard.chart.online':  'Online',
   'dashboard.chart.offline': 'Offline',
   'dashboard.chart.alarm':   'Alarm',
+  'dashboard.chart.alarmDevices': 'Alarmed Devices',
 
   // Dashboard refresh提示
   'dashboard.lastUpdate':    'Last Update',
@@ -7697,6 +7709,7 @@ const messages: Record<string, string> = {
   // qa-614 c2 — homepage KPI line-chart empty state (issue #359: distinguish "no aggregated data yet / hourly refresh" from a blank chart)
   'dashboard.kpiPanel.empty.title':      'No aggregated data yet',
   'dashboard.kpiPanel.empty.hint':       'Network-wide metrics refresh hourly on the hour; freshly ingested data appears after the next hour mark or once raw-detail fallback kicks in.',
+  'dashboard.kpiPanel.empty.lastWeekHint': 'No historical aggregated data for the selected comparison period; please check with ops to confirm last week\'s batch job completed.',
 
   // qa-614 c5 — software firmware/upgrade (#369 / #371 / #379)
   'software.firmware.selectOrInputProductClass': 'Select or enter product type',

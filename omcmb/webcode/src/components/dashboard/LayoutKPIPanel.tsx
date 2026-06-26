@@ -22,7 +22,7 @@
 
 import { useCallback, useMemo, useState, useEffect, useRef } from 'react';
 import type { ComponentProps, ReactNode } from 'react';
-import { Card, Select, Spin, Empty, Typography, Tooltip, Tag } from 'antd';
+import { Card, Select, Segmented, Spin, Empty, Typography, Tooltip, Tag } from 'antd';
 import { LoadingOutlined } from '@ant-design/icons';
 import LineChart from '@/components/Charts/LineChart';
 import { useT } from '@/hooks/useT';
@@ -45,11 +45,23 @@ export interface LayoutKPIPanelProps {
   trendData: MultiTrendComparisonData | undefined;
   /** 批量取数是否加载中。 */
   isLoading: boolean;
+  /** 当前卡片的趋势对比时窗。 */
+  compareWindow: 'yesterday' | 'last_week';
+  /** 当前卡片切换趋势对比时窗。 */
+  onCompareWindowChange: (compareWindow: 'yesterday' | 'last_week') => void;
   /** 图表高度。 */
   height?: number;
 }
 
-export function LayoutKPIPanel({ technology, panel, trendData, isLoading, height = 280 }: LayoutKPIPanelProps) {
+export function LayoutKPIPanel({
+  technology,
+  panel,
+  trendData,
+  isLoading,
+  compareWindow,
+  onCompareWindowChange,
+  height = 280,
+}: LayoutKPIPanelProps) {
   const t = useT();
   const token = useThemeToken();
 
@@ -103,16 +115,25 @@ export function LayoutKPIPanel({ technology, panel, trendData, isLoading, height
   const titleFallbackKey = selectedMetrics[0] ?? panel.metrics[0] ?? '';
   const titleFallback = titleFallbackKey ? resolveOne(titleFallbackKey).name : '';
 
+  // 单选时图例的主线名称：结合业务习惯，无论天/周都叫"今日"代表当前周期。
   const todayLabel = t('dashboard.timeRange.today');
-  const yesterdayLabel = t('dashboard.timeRange.yesterday');
+
+  // 对比线名称：结合业务习惯，天模式对比"昨日"，周模式对比线叫"本周"。
+  const compareLabel = compareWindow === 'last_week'
+    ? t('dashboard.timeRange.thisWeek')
+    : t('dashboard.timeRange.yesterday');
 
   const xData = useMemo(() => generateDayAxisLabels(), []);
   const xDataFull = useMemo(() => generateDayAxisTimestamps(), []);
 
-  const { series } = useMemo(
-    () => buildSeries(selectedMetrics, trendData, xData, todayLabel, yesterdayLabel, resolveOne),
-    [selectedMetrics, trendData, xData, todayLabel, yesterdayLabel, resolveOne],
+  const { series, weekXData, weekXDataFull } = useMemo(
+    () => buildSeries(selectedMetrics, trendData, xData, todayLabel, compareLabel, resolveOne, undefined, compareWindow),
+    [selectedMetrics, trendData, xData, todayLabel, compareLabel, resolveOne, compareWindow],
   );
+
+  // last_week 模式用按天聚合后的日期轴（由 buildSeries 返回），yesterday 用固定 24h 轴。
+  const chartXData = compareWindow === 'last_week' ? (weekXData ?? []) : xData;
+  const chartXDataFull = compareWindow === 'last_week' ? (weekXDataFull ?? []) : xDataFull;
 
   // 至少一条 series 有真实数据点？无任何点时给"暂无聚合数据"提示（issue #359 保留）。
   const hasSeriesData = useMemo(
@@ -157,16 +178,44 @@ export function LayoutKPIPanel({ technology, panel, trendData, isLoading, height
           style={{
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'space-between',
             gap: 12,
             minHeight: 32,
+            flexWrap: 'wrap',
           }}
         >
-          <Text
-            style={{ fontSize: 15, fontWeight: 600, color: token.colorText, flexShrink: 0 }}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              flexWrap: 'wrap',
+              minWidth: 0,
+              flex: '1 1 auto',
+            }}
           >
-            {panel.title ? t(panel.title) : titleFallback}
-          </Text>
+            <Text
+              style={{ fontSize: 15, fontWeight: 600, color: token.colorText, flexShrink: 0 }}
+            >
+              {panel.title ? t(panel.title) : titleFallback}
+            </Text>
+            {selectedMetrics.length <= 1 ? (
+              <Segmented
+                size="small"
+                value={compareWindow}
+                onChange={(value) => onCompareWindowChange(value as 'yesterday' | 'last_week')}
+                options={[
+                  { label: t('dashboard.compareWindow.day'), value: 'yesterday' },
+                  { label: t('dashboard.compareWindow.week'), value: 'last_week' },
+                ]}
+              />
+            ) : (
+              <Tooltip title={compareWindow === 'last_week' ? t('dashboard.compareWindow.multiMetricWeekHint') : t('dashboard.compareWindow.multiMetricHint')}>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {compareWindow === 'last_week' ? t('dashboard.compareWindow.thisWeekOnly') : t('dashboard.compareWindow.todayOnly')}
+                </Text>
+              </Tooltip>
+            )}
+          </div>
           {/*
            * 宽度分档 + responsive tag：
            *  - 只有 1 个可选项（如可用性/移动性）→ 160px，避免“只装一个 tag 却拉很长”的空荡感。
@@ -184,7 +233,7 @@ export function LayoutKPIPanel({ technology, panel, trendData, isLoading, height
             maxTagPlaceholder={renderMaxTagPlaceholder}
             allowClear
             placeholder={t('dashboard.kpi.selectMetricsPlaceholder')}
-            style={{ width: panel.metrics.length <= 1 ? 160 : 260, flexShrink: 0 }}
+            style={{ width: panel.metrics.length <= 1 ? 180 : 240, flexShrink: 0, marginLeft: 'auto' }}
             size="small"
           />
         </div>
@@ -220,7 +269,9 @@ export function LayoutKPIPanel({ technology, panel, trendData, isLoading, height
                 <div style={{ textAlign: 'center' }}>
                   <div style={{ color: token.colorText }}>{t('dashboard.kpiPanel.empty.title')}</div>
                   <Text type="secondary" style={{ fontSize: 12 }}>
-                    {t('dashboard.kpiPanel.empty.hint')}
+                    {compareWindow === 'last_week'
+                      ? t('dashboard.kpiPanel.empty.lastWeekHint')
+                      : t('dashboard.kpiPanel.empty.hint')}
                   </Text>
                 </div>
               }
@@ -228,11 +279,11 @@ export function LayoutKPIPanel({ technology, panel, trendData, isLoading, height
           </div>
         ) : (
           <LineChart
-            // 仅制式 / 面板身份变化时 remount；selectedMetrics 变化走 echarts 自身的 series diff，避免增减 tag 就销毁重建 echarts 实例。
-            key={`${technology}-${panel.title}`}
+            // compareWindow 变化时 x 轴格式从 HH:mm 切换到 MM/DD，需强制 remount 清空旧 ECharts 实例。
+            key={`${technology}-${panel.title}-${compareWindow}`}
             title=""
-            xData={xData}
-            xDataFull={xDataFull}
+            xData={chartXData}
+            xDataFull={chartXDataFull}
             series={series}
             height={height - 70}
             smooth

@@ -46,11 +46,15 @@ import { useDashboardData, useDeviceStatusByType } from '@core/hooks/api/useDash
 import { DashboardKPIModules } from './DashboardKPIModules';
 import type { TechnologyType } from './kpi-config';
 import { useTechnologyDictionary } from '@/components/dashboard/useTechnologyDictionary';
+import { useAppStore } from '@core/store/appStore';
+import { useMenuStore } from '@core/store/menuStore';
 import { useUserStore } from '@core/store/userStore';
+import { isRouteAllowed } from '@core/utils/routeAccess';
 import { useT } from '@/hooks/useT';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import { useQueryClient } from '@tanstack/react-query';
 import { TiltCard } from '@/components/Effects';
+import { isDynamicMenuEnabled } from '@/components/MenuBootstrap/featureFlag';
 import { useScrollReveal } from '@/hooks/useScrollReveal';
 import { formatTimeAgo } from '@core/utils/format';
 
@@ -64,7 +68,7 @@ const DASHBOARD_CONFIG = {
 } as const;
 
 /** 格式化最后登录时间 */
-function formatLastLogin(lastLoginTime?: string): string {
+function formatLastLogin(lastLoginTime: string | undefined, locale: 'zh-CN' | 'en-US'): string {
   if (!lastLoginTime) {
     return '--';
   }
@@ -72,7 +76,7 @@ function formatLastLogin(lastLoginTime?: string): string {
   if (Number.isNaN(parsed.getTime())) {
     return '--';
   }
-  return parsed.toLocaleTimeString('zh-CN', {
+  return parsed.toLocaleTimeString(locale, {
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
@@ -97,14 +101,12 @@ export default function DashboardPage() {
   const navigate = useNavigate();
   const { data: dashboardData, isLoading } = useDashboardData();
   const t = useT();
+  const locale = useAppStore((state) => state.locale);
   const token = useThemeToken();
   const queryClient = useQueryClient();
 
   // 制式切换状态 - 默认使用LTE（符合验收标准：LTE 6个Panel作为主要展示）
   const [technology, setTechnology] = useState<TechnologyType>('lte');
-
-  // KPI 折线图区对比时窗切换（vs 昨日 / vs 上周）
-  const [compareWindow, setCompareWindow] = useState<'yesterday' | 'last_week'>('yesterday');
 
   // 网络制式 Segmented 选项来自字典 `network_type`：字典有几项显示几项；
   // hook 内已过滤掉 LTE/NR/GSM 之外的 value（前端 KPI 静态契约暂未放开），
@@ -112,11 +114,11 @@ export default function DashboardPage() {
   // UI 显示空 Segmented，让运维感知字典缺失（决策 D4）。
   const { options: techOptions } = useTechnologyDictionary();
 
-  // 字典禁用了当前选中项 → 回退到 options 首项，避免下方图表区找不到 panel
-  useEffect(() => {
-    if (techOptions.length && !techOptions.some((o) => o.value === technology)) {
-      setTechnology(techOptions[0].value);
+  const effectiveTechnology = useMemo(() => {
+    if (techOptions.length === 0) {
+      return technology;
     }
+    return techOptions.some((o) => o.value === technology) ? technology : techOptions[0].value;
   }, [techOptions, technology]);
 
   // 刷新提示状态
@@ -154,6 +156,8 @@ export default function DashboardPage() {
 
   // 获取当前登录用户信息
   const currentUser = useUserStore((state) => state.currentUser);
+  const menuLoaded = useMenuStore((state) => state.loaded);
+  const routePaths = useMenuStore((state) => state.routePaths);
 
   // 获取设备按技术类型分组的状态数据
   const { data: deviceStatusByTypeData, isLoading: isDeviceStatusLoading } = useDeviceStatusByType();
@@ -176,6 +180,19 @@ export default function DashboardPage() {
   const ueRaw = kpiSummary['UE_ACTIVE'];
   const currentActiveUE = typeof ueRaw === 'number' ? Math.floor(ueRaw) : undefined;
 
+  const quickAccessItems = useMemo(
+    () => QUICK_ACCESS_ITEMS.filter((item) =>
+      isRouteAllowed(item.path, {
+        role: currentUser?.role,
+        isSuperAdmin: currentUser?.isSuperAdmin,
+        routePaths,
+        dynamicEnabled: isDynamicMenuEnabled(),
+        menuLoaded,
+      })
+    ),
+    [currentUser?.role, currentUser?.isSuperAdmin, routePaths, menuLoaded]
+  );
+
   // Device status bar chart data - 按技术类型分组
   // X 轴文案与上方 Segmented 同源 useTechnologyDictionary（字典 network_type），
   // 字典未命中时 fallback 到 key.toUpperCase()，避免后端返回字典未配的 tech 时柱图轴标签为空。
@@ -195,7 +212,7 @@ export default function DashboardPage() {
     const series = [
       { name: t('dashboard.chart.online'), data: onlineData, color: '#52C41A' },
       { name: t('dashboard.chart.offline'), data: offlineData, color: '#8C8C8C' },
-      { name: t('dashboard.chart.alarm'), data: alarmData, color: '#FA8C16' },
+      { name: t('dashboard.chart.alarmDevices'), data: alarmData, color: '#FA8C16' },
     ];
 
     return { isEmpty: false, xData, series };
@@ -209,11 +226,14 @@ export default function DashboardPage() {
       return { isEmpty: true, xData: [], series: [] };
     }
 
-    const hasAlarms = alarmCounts.critical > 0 || alarmCounts.major > 0 ||
-                      alarmCounts.minor > 0 || alarmCounts.warning > 0;
+    const knownTotal = (alarmCounts.critical ?? 0) + (alarmCounts.major ?? 0) +
+      (alarmCounts.minor ?? 0) + (alarmCounts.warning ?? 0);
+    const overallTotal = alarmCounts.total ?? knownTotal;
+    const otherCount = Math.max(overallTotal - knownTotal, 0);
+    const hasAlarms = overallTotal > 0;
 
     if (!hasAlarms) {
-      return { isEmpty: true, xData: [], series: [] };
+      return { isEmpty: true, xData: [], series: [], otherCount: 0 };
     }
 
     const xData = [
@@ -230,14 +250,19 @@ export default function DashboardPage() {
       { value: alarmCounts.warning, name: t('alarm.severity.warning') },
     ];
 
+    if (otherCount > 0) {
+      xData.push(t('dashboard.alarmSeverityOther'));
+      data.push({ value: otherCount, name: t('dashboard.alarmSeverityOther') });
+    }
+
     const series = [
       {
-        name: t('dashboard.alarmCount'),
+        name: t('dashboard.alarmCountEvents'),
         data: data as Array<{ value: number; name: string }>,
       },
     ];
 
-    return { isEmpty: false, xData, series };
+    return { isEmpty: false, xData, series, otherCount };
   }, [dashboardData, t]);
 
   const dashboardRef = useRef<HTMLDivElement>(null);
@@ -309,7 +334,7 @@ export default function DashboardPage() {
         </Col>
         <Col xs={24} sm={12} lg={6}>
           <KPICard
-            title={t('dashboard.activeAlarms')}
+            title={t('dashboard.activeAlarmsEvents')}
             value={activeAlarms}
             icon={<AlertOutlined />}
             iconBgColor="#fff2f0"
@@ -355,32 +380,19 @@ export default function DashboardPage() {
       {/* 制式切换栏 */}
       <Row gutter={[16, 16]} className="omc-scroll-reveal" data-delay="1">
         <Col span={24}>
-          <Space size="middle" style={{ width: '100%', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Space size="middle">
-              <Text type="secondary">{t('dashboard.networkTech')}:</Text>
-              <Segmented
-                value={technology}
-                onChange={(value) => setTechnology(value as TechnologyType)}
-                options={techOptions}
-              />
-            </Space>
-            <Space size="middle">
-              <Text type="secondary">{t('dashboard.compareWindow.label')}:</Text>
-              <Segmented
-                value={compareWindow}
-                onChange={(value) => setCompareWindow(value as 'yesterday' | 'last_week')}
-                options={[
-                  { label: t('dashboard.compareWindow.yesterday'), value: 'yesterday' },
-                  { label: t('dashboard.compareWindow.lastWeek'), value: 'last_week' },
-                ]}
-              />
-            </Space>
+          <Space size="middle" style={{ width: '100%', alignItems: 'center' }}>
+            <Text type="secondary">{t('dashboard.networkTech')}:</Text>
+            <Segmented
+              value={effectiveTechnology}
+              onChange={(value) => setTechnology(value as TechnologyType)}
+              options={techOptions}
+            />
           </Space>
         </Col>
       </Row>
 
       {/* KPI Panel区域 - v2.0 Panel化设计 */}
-      <DashboardKPIModules technology={technology} compareWindow={compareWindow} />
+      <DashboardKPIModules technology={effectiveTechnology} />
 
       {/* Row 3: Device Status + Alarm Statistics */}
       <Row gutter={[16, 16]} align="stretch" className="omc-scroll-reveal" data-delay="2">
@@ -389,7 +401,7 @@ export default function DashboardPage() {
           <Card
             title={t('dashboard.deviceStatusByType')}
             size="small"
-            extra={<span style={{ visibility: 'hidden', fontSize: 13 }}>……</span>}
+            extra={<Text type="secondary" style={{ fontSize: 12 }}>{t('dashboard.deviceStatusAlarmHint')}</Text>}
             styles={{ body: { padding: '8px 0 0', flex: 1, display: 'flex', flexDirection: 'column' } }}
             style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
           >
@@ -421,9 +433,16 @@ export default function DashboardPage() {
             title={t('dashboard.alarmLevelStatistics')}
             size="small"
             extra={
-              <a onClick={() => void navigate('/alarm/current')} style={{ fontSize: 13 }}>
-                {t('dashboard.viewAll')}
-              </a>
+              <Space size={8}>
+                {(alarmDistributionData.otherCount ?? 0) > 0 && (
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {t('dashboard.alarmOtherHint', { count: alarmDistributionData.otherCount ?? 0 })}
+                  </Text>
+                )}
+                <a onClick={() => void navigate('/alarm/current')} style={{ fontSize: 13 }}>
+                  {t('dashboard.viewAll')}
+                </a>
+              </Space>
             }
             styles={{ body: { padding: '8px 0 0', flex: 1, display: 'flex', flexDirection: 'column' } }}
             style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
@@ -486,7 +505,7 @@ export default function DashboardPage() {
                   style={{ fontSize: 12 }}
                 />
                 <Text type="secondary" style={{ fontSize: 12 }}>
-                  {t('dashboard.lastLogin')} {formatLastLogin(currentUser?.lastLoginTime)}
+                  {t('dashboard.lastLogin')} {formatLastLogin(currentUser?.lastLoginTime, locale)}
                 </Text>
               </div>
               <div
@@ -536,7 +555,12 @@ export default function DashboardPage() {
                 gap: 12,
               }}
             >
-              {QUICK_ACCESS_ITEMS.map((item) => (
+              {quickAccessItems.length === 0 ? (
+                <EmptyState
+                  variant="no-permission"
+                  style={{ padding: '24px 16px', width: '100%' }}
+                />
+              ) : quickAccessItems.map((item) => (
                 <div
                   key={item.path}
                   onClick={() => void navigate(item.path)}

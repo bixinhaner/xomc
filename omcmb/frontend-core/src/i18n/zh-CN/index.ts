@@ -2601,6 +2601,7 @@ const messages: Record<string, string> = {
 	  'dashboard.dlVolume':           '下行流量',
 	  'dashboard.ulVolume':           '上行流量',
   'dashboard.activeAlarms':      '活跃告警',
+    'dashboard.activeAlarmsEvents': '活跃告警（条）',
   'dashboard.runningTasks':      '任务执行中',
   'dashboard.vsLastWeek':        '较上周',
   'dashboard.onlineRate':        '在线率',
@@ -2608,11 +2609,21 @@ const messages: Record<string, string> = {
   'dashboard.compareWindow.label':     '对比时窗',
   'dashboard.compareWindow.yesterday': '昨日',
   'dashboard.compareWindow.lastWeek':  '上周',
+  'dashboard.compareWindow.day':       '天',
+  'dashboard.compareWindow.week':      '周',
+  'dashboard.compareWindow.todayOnly': '仅展示今日',
+  'dashboard.compareWindow.thisWeekOnly': '仅展示本周',
+  'dashboard.compareWindow.multiMetricHint': '多指标模式不展示对比线，仅展示今日数据',
+  'dashboard.compareWindow.multiMetricWeekHint': '多指标模式不展示对比线，仅展示本周数据',
   'dashboard.alarmSummary':      '告警汇总',
   'dashboard.viewAll':             '查看全部',
   'dashboard.alarmDistribution':   '告警级别分布',
   'dashboard.alarmLevelStatistics': '告警级别统计',
+  'dashboard.alarmCountEvents':   '告警条数',
+  'dashboard.alarmSeverityOther': '其他',
+  'dashboard.alarmOtherHint':     '含其他级别 {count} 条',
   'dashboard.deviceStatusByType':  '设备状态分布（按类型）',
+  'dashboard.deviceStatusAlarmHint': '告警为叠加维度，可与在线/离线重复计数',
   'dashboard.alarmTrend7d':      '近7天告警趋势',
   'dashboard.top10AlarmDevices': '高频告警设备',
   'dashboard.deviceMap':         '设备地图',
@@ -2640,6 +2651,7 @@ const messages: Record<string, string> = {
   'dashboard.chart.online':  '在线',
   'dashboard.chart.offline': '离线',
   'dashboard.chart.alarm':   '告警',
+  'dashboard.chart.alarmDevices': '告警设备',
 
   // Dashboard refresh提示
   'dashboard.lastUpdate':    '最后更新',
@@ -7734,6 +7746,7 @@ const messages: Record<string, string> = {
   // qa-614 c2 — 首页 KPI 折线图空状态文案（issue #359：区分"暂无聚合数据/每小时整点更新"与裸空白）
   'dashboard.kpiPanel.empty.title':      '暂无聚合数据',
   'dashboard.kpiPanel.empty.hint':       '全网指标每小时整点更新；刚灌入的数据将在下个整点后或回退原始明细后显示。',
+  'dashboard.kpiPanel.empty.lastWeekHint': '所选对比周期暂无历史聚合数据；请联系运维确认上周数据是否已完成跑批。',
 
   // qa-614 c5 — software 固件/升级（#369 / #371 / #379）
   'software.firmware.selectOrInputProductClass': '请选择或输入产品类型',
