@@ -1588,6 +1588,19 @@ func (s *Service) mapDeviceItem(
 			failureReason = "终止"
 		}
 	}
+	// issue #667：result=='failure' 且 started_at 空 → 用 created_at 兜底。
+	// 触发场景（共同点：sub-task 从未进入 4 种执行态写过 started_at）：
+	//   · TASK_TIMEOUT：卡在 suspended 等设备上线，reaper FailStale 直接
+	//     UPDATE status='failed' + completed_at=NOW()，never touch started_at；
+	//   · DEVICE_OFFLINE / COMMAND_PUSH_FAILED / FIRMWARE_NOT_FOUND：派发前从 pending
+	//     直跳 failed，不经 downloading/uploading/rebooting/verifying。
+	// 选 createdAt 而非 endedAt（与 #655 terminated 分支不同）：失败类跨度长（TC 超时
+	// 30min、DeviceOnline 10min），endedAt 兜底会让前端「耗时=0」严重失真；createdAt
+	// = sub-task 入队列时刻，最贴近用户「子任务开始」心智，且 created_at 是 DB 非空
+	// 字段，永远有值。
+	if result == "failure" && startedAt == "" {
+		startedAt = formatTime(time.Time(subTask.CreatedAt))
+	}
 
 	return &DeviceItem{
 		ID:              subTask.ID.String(),
@@ -1612,6 +1625,7 @@ func (s *Service) mapDeviceItem(
 		// completed_at（见 pg_upgrade_repository.go UpdateStatusWithCode，COALESCE 守卫
 		// 首次执行态写一次后不再覆盖）。LastReportAt 保留兼容 CSV / 北向 API。
 		// terminated 特例：startedAt 兜底 = endedAt，failureReason 兜底 = "终止"。
+		// issue #667 failure 特例：startedAt 空时兜底 = createdAt（覆盖 TASK_TIMEOUT 等）。
 		StartedAt:     startedAt,
 		EndedAt:       endedAt,
 		LastReportAt:  formatTime(lastReport),

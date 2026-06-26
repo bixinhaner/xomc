@@ -379,3 +379,91 @@ func TestMapDeviceItem_Terminated_PreserveExistingStartedAt(t *testing.T) {
 	assert.Equal(t, completedAt.Format(time.RFC3339), item.EndedAt)
 	assert.NotEqual(t, item.StartedAt, item.EndedAt)
 }
+
+// issue #667 追加：result=='failure' 但 started_at 为空（如 TASK_TIMEOUT、DEVICE_OFFLINE、
+// COMMAND_PUSH_FAILED 等"未进入执行态就失败"场景）→ mapDeviceItem 应兜底 StartedAt = CreatedAt。
+// 与 #655 terminated 分支选 endedAt 不同——失败类跨度长（TC 超时 30min、DeviceOnline 10min），
+// endedAt 兜底会让前端「耗时=0」严重失真；createdAt = sub-task 入队列时刻，最贴近用户「子任务
+// 开始」心智，且 created_at 是 DB 非空字段，永远有值。
+func TestMapDeviceItem_Failure_StartedAtFallbackUsingCreatedAt(t *testing.T) {
+	svc := newServiceForMap(t)
+	catalog := mustCatalog(t, "RUNTIME_LOG_COLLECT")
+	parent := &software.UpgradeTask{
+		ID:       uuid.New(),
+		TaskName: "log-task",
+		TaskType: software.TaskTypeLogCollect,
+	}
+	// 模拟 TASK_TIMEOUT 时序：sub-task 14:00 入队列等设备上线，10min 后 14:10 被 reaper
+	// 直接标 failed + completed_at=14:10，started_at 全程为 nil。
+	createdAt := time.Date(2026, 6, 25, 14, 0, 0, 0, time.UTC)
+	completedAt := time.Date(2026, 6, 25, 14, 10, 0, 0, time.UTC)
+	completedAtModel := coremodel.Time(completedAt)
+	sub := software.UpgradeSubTaskWithTaskName{
+		UpgradeSubTask: software.UpgradeSubTask{
+			ID:            uuid.New(),
+			TaskID:        parent.ID,
+			DeviceID:      uuid.New(),
+			DeviceSN:      "SN-667A",
+			Status:        software.UpgradeFailed,
+			StartedAt:     nil, // 卡 suspended，从未进入执行态
+			CompletedAt:   &completedAtModel,
+			CreatedAt:     coremodel.Time(createdAt),
+			UpdatedAt:     coremodel.Time(completedAt),
+			FailureReason: string(software.FailureTaskTimeout),
+			ErrorMessage:  "Timed out waiting for device to come online.",
+		},
+		TaskName: "log-task",
+	}
+	cache := map[uuid.UUID]*coremodel.Device{
+		sub.DeviceID: {ID: sub.DeviceID, SerialNumber: "SN-667A"},
+	}
+	item, err := svc.mapDeviceItem(context.Background(), catalog, sub, parent, cache)
+	require.NoError(t, err)
+	assert.Equal(t, "failure", item.Result, "前置：non-terminated failed 走 result=failure 分支")
+	assert.Equal(t, createdAt.Format(time.RFC3339), item.StartedAt, "failure 且 StartedAt 空时应兜底 = CreatedAt（不是 EndedAt）")
+	assert.Equal(t, completedAt.Format(time.RFC3339), item.EndedAt)
+	assert.NotEqual(t, item.StartedAt, item.EndedAt, "兜底后 StartedAt 与 EndedAt 应有真实跨度，不能 0 耗时")
+	assert.Equal(t, "TASK_TIMEOUT", item.FailureReason, "FailureReason 透传，不被 failure 分支改动")
+}
+
+// issue #667 追加：failure 但 repo 已写过 started_at（执行中失败，如 DOWNLOAD_FAULT、
+// TC_FAULT、UPGRADE_5G_FAILED）→ StartedAt 应保留 repo 真实值，不被 CreatedAt 覆盖。
+func TestMapDeviceItem_Failure_PreserveExistingStartedAt(t *testing.T) {
+	svc := newServiceForMap(t)
+	catalog := mustCatalog(t, "RUNTIME_LOG_COLLECT")
+	parent := &software.UpgradeTask{
+		ID:       uuid.New(),
+		TaskName: "log-task",
+		TaskType: software.TaskTypeLogCollect,
+	}
+	createdAt := time.Date(2026, 6, 25, 10, 0, 0, 0, time.UTC)
+	startedAt := time.Date(2026, 6, 25, 10, 0, 30, 0, time.UTC) // 入队 30s 后开始下载
+	completedAt := startedAt.Add(2 * time.Minute)
+	startedAtModel := coremodel.Time(startedAt)
+	completedAtModel := coremodel.Time(completedAt)
+	sub := software.UpgradeSubTaskWithTaskName{
+		UpgradeSubTask: software.UpgradeSubTask{
+			ID:            uuid.New(),
+			TaskID:        parent.ID,
+			DeviceID:      uuid.New(),
+			DeviceSN:      "SN-667B",
+			Status:        software.UpgradeFailed,
+			StartedAt:     &startedAtModel,
+			CompletedAt:   &completedAtModel,
+			CreatedAt:     coremodel.Time(createdAt),
+			UpdatedAt:     coremodel.Time(completedAt),
+			FailureReason: "DOWNLOAD_FAULT",
+			ErrorMessage:  "device rejected Download request",
+		},
+		TaskName: "log-task",
+	}
+	cache := map[uuid.UUID]*coremodel.Device{
+		sub.DeviceID: {ID: sub.DeviceID, SerialNumber: "SN-667B"},
+	}
+	item, err := svc.mapDeviceItem(context.Background(), catalog, sub, parent, cache)
+	require.NoError(t, err)
+	assert.Equal(t, "failure", item.Result)
+	assert.Equal(t, startedAt.Format(time.RFC3339), item.StartedAt, "已有真实 started_at 时不应被 createdAt 覆盖")
+	assert.NotEqual(t, createdAt.Format(time.RFC3339), item.StartedAt, "防御：确认兜底没误把 createdAt 写进去")
+	assert.Equal(t, completedAt.Format(time.RFC3339), item.EndedAt)
+}
