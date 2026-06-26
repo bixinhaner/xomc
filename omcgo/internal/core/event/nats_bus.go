@@ -14,6 +14,13 @@ import (
 
 const maxDeliveries = 5
 
+const (
+	defaultPendingMsgLimit   = 65536
+	defaultPendingBytesLimit = 64 * 1024 * 1024
+	gpvPendingMsgLimit       = 200000
+	gpvPendingBytesLimit     = 256 * 1024 * 1024
+)
+
 // NATSEventBus 是基于 NATS JetStream 的生产级事件总线实现。
 // 每个事件通过 JetStream 持久化存储，支持 At-Least-Once 交付语义。
 // QueueSubscribe 使用 Durable Consumer，各实例彺负载均衡，适用于多实例水平扩展。
@@ -87,11 +94,30 @@ func (b *NATSEventBus) QueueSubscribe(subject string, queue string, handler Even
 		return nil, fmt.Errorf("queue subscribe to %s (queue=%s): %w", subject, queue, err)
 	}
 
+	msgLimit, bytesLimit := pendingLimitsForSubject(subject)
+	if err := sub.SetPendingLimits(msgLimit, bytesLimit); err != nil {
+		_ = sub.Unsubscribe()
+		return nil, fmt.Errorf("set pending limits for %s (queue=%s): %w", subject, queue, err)
+	}
+	b.logger.Info("queue subscription pending limits applied",
+		zap.String("subject", subject),
+		zap.String("queue", queue),
+		zap.Int("pending_msgs", msgLimit),
+		zap.Int("pending_bytes", bytesLimit),
+	)
+
 	b.mu.Lock()
 	b.subs = append(b.subs, sub)
 	b.mu.Unlock()
 
 	return &natsSubscription{sub: sub}, nil
+}
+
+func pendingLimitsForSubject(subject string) (msgLimit int, bytesLimit int) {
+	if subject == SubjectCommandGetParamsResponse {
+		return gpvPendingMsgLimit, gpvPendingBytesLimit
+	}
+	return defaultPendingMsgLimit, defaultPendingBytesLimit
 }
 
 func (b *NATSEventBus) Close() error {

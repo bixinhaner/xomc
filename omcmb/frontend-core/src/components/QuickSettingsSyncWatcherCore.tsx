@@ -1,20 +1,14 @@
 import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { App } from 'antd';
 import { useQuickSettingsFeedbackStore } from '@core/store/quickSettingsFeedbackStore';
 import { deviceParameterApi } from '@core/services/api/deviceParameterApi';
 import type { QuickSettingsSyncMonitor } from '@core/store/quickSettingsFeedbackStore';
 import type { ParameterSyncStatus } from '@core/types/deviceParameter';
-import { useT } from '@/hooks/useT';
 
 const terminalClockSkewMs = 5000;
+const staleMonitorTimeoutMs = 60 * 1000;
 const congestionHintAfterMs = 15 * 1000;
 const congestionPendingThreshold = 8;
-
-// staleMonitorTimeoutMs：sync monitor 启动后超过该时长仍未拿到终态（既无 success 也无 failure）
-// 视为悬挂状态自动回收并提示用户。P0 止血阶段收敛到 60s，避免长期 loading。
-// 触发场景：API mutate 的 onSuccess/onError 因极端网络情况未回调，导致 monitor 长期占位。
-const staleMonitorTimeoutMs = 60 * 1000;
 
 function comparableSourceId(sourceId: string | undefined) {
   return sourceId?.startsWith('manual:') ? sourceId.slice('manual:'.length) : sourceId;
@@ -50,9 +44,7 @@ function shouldHintCongestion(status: ParameterSyncStatus, sync: QuickSettingsSy
   return Date.now() - sync.startedAt >= congestionHintAfterMs;
 }
 
-export default function QuickSettingsSyncWatcher() {
-  const t = useT();
-  const { message } = App.useApp();
+export default function QuickSettingsSyncWatcherCore() {
   const queryClient = useQueryClient();
   const quickSettingsSyncs = useQuickSettingsFeedbackStore((s) => s.quickSettingsSyncs);
 
@@ -62,37 +54,18 @@ export default function QuickSettingsSyncWatcher() {
       if (entries.length === 0) return;
 
       await Promise.all(entries.map(async ([deviceId, sync]) => {
-        // 悬挂 monitor 自动回收：拒绝把过期 sync 当作仍在运行。
         if (Date.now() - sync.startedAt > staleMonitorTimeoutMs) {
-          let timeoutMsg = t('device.detail.deviceFetchWaitingPersist');
-          let timeoutAsError = false;
-          try {
-            const timeoutStatus = await deviceParameterApi.getSyncStatus(deviceId);
-            queryClient.setQueryData(['devices', 'sync-status', deviceId], timeoutStatus);
-            if (isCurrentSyncFailure(timeoutStatus, sync)) {
-              timeoutMsg = timeoutStatus.lastParamSyncError || t('device.detail.deviceFetchFailed');
-              timeoutAsError = true;
-            } else if (timeoutStatus.status === 'syncing' || timeoutStatus.pendingCommands > 0) {
-              timeoutMsg = t('device.detail.deviceFetchTimeoutQueue', { pending: timeoutStatus.pendingCommands });
-            }
-          } catch {
-            // Keep default timeout message.
-          }
+          // Core watcher only maintains sync state and cache; UI notification is skin-owned.
           useQuickSettingsFeedbackStore.getState().finishQuickSettingsSync(deviceId);
-          if (timeoutAsError) {
-            message.error(timeoutMsg);
-          } else {
-            message.warning(timeoutMsg);
-          }
           return;
         }
+
         try {
           const status = await deviceParameterApi.getSyncStatus(deviceId);
           queryClient.setQueryData(['devices', 'sync-status', deviceId], status);
 
           if (shouldHintCongestion(status, sync)) {
             useQuickSettingsFeedbackStore.getState().patchQuickSettingsSync(deviceId, { congestionHinted: true });
-            message.warning(t('device.detail.deviceFetchQueueBusy', { pending: status.pendingCommands }));
           }
 
           if (status.status === 'syncing') return;
@@ -103,7 +76,6 @@ export default function QuickSettingsSyncWatcher() {
 
           if (hasNewFailure && !hasNewSuccess) {
             useQuickSettingsFeedbackStore.getState().finishQuickSettingsSync(deviceId);
-            message.error(status.lastParamSyncError || t('device.detail.deviceFetchFailed'));
             return;
           }
 
@@ -123,14 +95,8 @@ export default function QuickSettingsSyncWatcher() {
               wallClockSeconds: status.lastSyncGpv?.wallClockSeconds,
             }
             : undefined);
-          message.success(sync.targetCount > 0
-            ? t('device.detail.deviceFetchLatestScoped', {
-              count: sync.targetCount,
-              gpvCount: sync.gpvTaskCount || status.lastSyncGpv?.taskCount || 0,
-            })
-            : t('device.detail.deviceFetchLatest'));
         } catch {
-          // Keep the pending marker; the next interval or mounted detail page can retry.
+          // Keep pending marker and retry on next interval.
         }
       }));
     };
@@ -139,8 +105,9 @@ export default function QuickSettingsSyncWatcher() {
     const timer = window.setInterval(() => {
       void poll();
     }, 2000);
+
     return () => window.clearInterval(timer);
-  }, [message, queryClient, quickSettingsSyncs, t]);
+  }, [queryClient, quickSettingsSyncs]);
 
   return null;
 }

@@ -42,6 +42,7 @@ export interface QuickSettingsSyncMonitor {
   targetCount: number;
   gpvTaskCount: number;
   startedAt: number;
+  congestionHinted?: boolean;
 }
 
 export interface QuickSettingsScopedSyncResult {

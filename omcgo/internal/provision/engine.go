@@ -3,6 +3,8 @@ package provision
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -68,6 +70,9 @@ type ProvisioningEngine struct {
 	metrics     *Metrics
 	config      appconfig.ProvisionConfig
 	logger      *zap.Logger
+
+	gpvWorkersOnce sync.Once
+	gpvWorkerChans []chan gpvWorkItem
 }
 
 // NewProvisioningEngine creates a new ProvisioningEngine with all dependencies.
@@ -301,8 +306,9 @@ func (e *ProvisioningEngine) Subscribe(bus event.EventBus) error {
 	}
 
 	// Subscribe to GPV response for parameter sync processing.
+	e.ensureGPVWorkersStarted()
 	if _, err := bus.QueueSubscribe(event.SubjectCommandGetParamsResponse, "provision-gpv", func(ctx context.Context, evt event.Event) error {
-		return e.handleGPVResponse(ctx, evt)
+		return e.enqueueGPVResponseEvent(ctx, evt)
 	}); err != nil {
 		e.logger.Warn("failed to subscribe to GPV response", zap.Error(err))
 	} else {
@@ -999,6 +1005,91 @@ type gpvResponsePayload struct {
 	ParameterValues []tr069.ParameterValueStruct `json:"parameter_values"`
 }
 
+type gpvWorkItem struct {
+	ctx     context.Context
+	payload gpvResponsePayload
+}
+
+const (
+	defaultGPVWorkerShardCount = 8
+	defaultGPVWorkerQueueDepth = 256
+)
+
+func (e *ProvisioningEngine) ensureGPVWorkersStarted() {
+	e.gpvWorkersOnce.Do(func() {
+		shards := defaultGPVWorkerShardCount
+		if e.config.AutoSync.MaxConcurrent > 0 {
+			shards = e.config.AutoSync.MaxConcurrent
+		}
+		if shards < 1 {
+			shards = 1
+		}
+		if shards > 32 {
+			shards = 32
+		}
+
+		e.gpvWorkerChans = make([]chan gpvWorkItem, shards)
+		for i := 0; i < shards; i++ {
+			ch := make(chan gpvWorkItem, defaultGPVWorkerQueueDepth)
+			e.gpvWorkerChans[i] = ch
+			go e.runGPVWorker(i, ch)
+		}
+		e.logger.Info("gpv workers started",
+			zap.Int("shards", shards),
+			zap.Int("queue_depth", defaultGPVWorkerQueueDepth))
+	})
+}
+
+func (e *ProvisioningEngine) runGPVWorker(shard int, ch <-chan gpvWorkItem) {
+	for item := range ch {
+		ctx := item.ctx
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		if err := e.handleGPVPayload(ctx, item.payload); err != nil {
+			e.logger.Error("gpv worker failed",
+				zap.Int("shard", shard),
+				zap.String("device_sn", item.payload.DeviceSN),
+				zap.Error(err))
+		}
+	}
+}
+
+func (e *ProvisioningEngine) enqueueGPVResponseEvent(ctx context.Context, evt event.Event) error {
+	var payload gpvResponsePayload
+	if err := evt.DecodePayload(&payload); err != nil {
+		e.logger.Error("decode GPV response event", zap.Error(err))
+		return nil
+	}
+	if payload.DeviceSN == "" {
+		e.logger.Warn("GPV response event missing device SN, skipping")
+		return nil
+	}
+
+	e.ensureGPVWorkersStarted()
+	if len(e.gpvWorkerChans) == 0 {
+		return fmt.Errorf("gpv workers not initialized")
+	}
+	shard := gpvShardIndex(payload.DeviceSN, len(e.gpvWorkerChans))
+	item := gpvWorkItem{ctx: ctx, payload: payload}
+
+	select {
+	case e.gpvWorkerChans[shard] <- item:
+		return nil
+	default:
+		return fmt.Errorf("gpv worker queue full: shard=%d device_sn=%s", shard, payload.DeviceSN)
+	}
+}
+
+func gpvShardIndex(deviceSN string, shardCount int) int {
+	if shardCount <= 1 {
+		return 0
+	}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(deviceSN))
+	return int(h.Sum32() % uint32(shardCount))
+}
+
 // handleGPVResponse processes GetParameterValuesResponse events from ACS.
 //
 // T-0098 P5-01：先尝试 Path B 翻译落库（standardPath）；命中即返回，否则
@@ -1009,7 +1100,10 @@ func (e *ProvisioningEngine) handleGPVResponse(ctx context.Context, evt event.Ev
 		e.logger.Error("decode GPV response event", zap.Error(err))
 		return nil
 	}
+	return e.handleGPVPayload(ctx, payload)
+}
 
+func (e *ProvisioningEngine) handleGPVPayload(ctx context.Context, payload gpvResponsePayload) error {
 	e.logger.Info("received GPV response",
 		zap.String("device_sn", payload.DeviceSN),
 		zap.Int("parameter_count", len(payload.ParameterValues)),
