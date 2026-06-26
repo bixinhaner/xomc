@@ -41,11 +41,13 @@ export default function OperationLogPage() {
   // 查询日志
   const { data, isLoading, refetch } = useOperationLogs({
     operator: filters.operator as string | undefined,
+    clientIp: filters.operateIp as string | undefined,
     module: filters.logName as string | undefined,
+    reason: filters.reason as string | undefined,
     keyword: filters.searchText as string | undefined,
-    result: filters.result as 'success' | 'failure' | undefined,
-    timeRange: filters.startTime && filters.endTime
-      ? [filters.startTime as string, filters.endTime as string]
+    result: (filters.result as 'success' | 'failure' | undefined),
+    timeRange: Array.isArray(filters.timeRange) && filters.timeRange.length === 2
+      ? [filters.timeRange[0] as string, filters.timeRange[1] as string]
       : undefined,
     page,
     pageSize,
@@ -106,12 +108,16 @@ export default function OperationLogPage() {
   const resultColorMap: Record<string, string> = {
     '1': 'success',
     '0': 'error',
+    success: 'success',
+    failure: 'error',
   };
 
   // 结果文本映射
   const resultTextMap = useMemo(() => ({
     '1': t('log.success'),
     '0': t('log.failure'),
+    success: t('log.success'),
+    failure: t('log.failure'),
   }), [t]);
 
   // Mock 用户选项 - 实际应从 API 获取
@@ -131,13 +137,13 @@ export default function OperationLogPage() {
       label: t('log.result'),
       type: 'select',
       options: [
-        { label: t('log.success'), value: '1' },
-        { label: t('log.failure'), value: '0' },
+        { label: t('log.success'), value: 'success' },
+        { label: t('log.failure'), value: 'failure' },
       ],
       width: 160,
     },
     { name: 'reason', label: t('log.reason'), type: 'input', width: 160 },
-    { name: 'timeRange', label: t('log.timeRange'), type: 'date-range', width: 260 },
+    { name: 'timeRange', label: t('log.timeRange'), type: 'date-range', showTime: true, width: 320 },
   ], [t, mockUserOptions, getOperationLogNameOptions]);
 
   // 安全日志筛选字段
@@ -151,12 +157,12 @@ export default function OperationLogPage() {
       label: t('log.result'),
       type: 'select',
       options: [
-        { label: t('log.success'), value: '1' },
-        { label: t('log.failure'), value: '0' },
+        { label: t('log.success'), value: 'success' },
+        { label: t('log.failure'), value: 'failure' },
       ],
       width: 160,
     },
-    { name: 'timeRange', label: t('log.timeRange'), type: 'date-range', width: 260 },
+    { name: 'timeRange', label: t('log.timeRange'), type: 'date-range', showTime: true, width: 320 },
   ], [t, mockUserOptions, getSecurityLogNameOptions]);
 
   // 系统日志筛选字段
@@ -168,12 +174,12 @@ export default function OperationLogPage() {
       label: t('log.result'),
       type: 'select',
       options: [
-        { label: t('log.success'), value: '1' },
-        { label: t('log.failure'), value: '0' },
+        { label: t('log.success'), value: 'success' },
+        { label: t('log.failure'), value: 'failure' },
       ],
       width: 160,
     },
-    { name: 'timeRange', label: t('log.timeRange'), type: 'date-range', width: 260 },
+    { name: 'timeRange', label: t('log.timeRange'), type: 'date-range', showTime: true, width: 320 },
   ], [t, getSystemLogNameOptions]);
 
   // 根据当前 tab 获取筛选字段

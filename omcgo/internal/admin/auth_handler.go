@@ -62,6 +62,7 @@ func (h *Handler) Login(c *gin.Context) {
 	ctx := c.Request.Context()
 	log := logger.L(ctx)
 	userAgent := c.Request.UserAgent()
+	auditIP := auditClientIP(c)
 
 	// ⑤ 图形验证码（sys_configs security.verifyEnable + attemptTimes）：
 	//   LoginGuard.RequiresCaptcha 内部已读 verifyEnable 总开关；只有当
@@ -69,23 +70,23 @@ func (h *Handler) Login(c *gin.Context) {
 	//   captchaService nil 时跳过（部署不带验证码服务的容错降级）。
 	if h.loginGuard != nil && h.captcha != nil && h.loginGuard.RequiresCaptcha(ctx, req.Username) {
 		if req.CaptchaID == "" || req.CaptchaAnswer == "" {
-			h.recordAuthAuditLog(auditActionLoginFailed, req.Username, nil, clientIP, userAgent, "captcha_required")
-			h.recordLoginLog(req.Username, clientIP, userAgent, false, "captcha_required")
+			h.recordAuthAuditLog(auditActionLoginFailed, req.Username, nil, auditIP, userAgent, "captcha_required")
+			h.recordLoginLog(req.Username, auditIP, userAgent, false, "captcha_required")
 			c.AbortWithStatusJSON(http.StatusPreconditionRequired, gin.H{
-				"ret":  0,
-				"msg":  "captcha required due to multiple failed attempts",
-				"data": nil,
+				"ret":      0,
+				"msg":      "captcha required due to multiple failed attempts",
+				"data":     nil,
 				"biz_code": 7010,
 			})
 			return
 		}
 		if !h.captcha.Verify(ctx, req.CaptchaID, req.CaptchaAnswer) {
-			h.recordAuthAuditLog(auditActionLoginFailed, req.Username, nil, clientIP, userAgent, "captcha_invalid")
-			h.recordLoginLog(req.Username, clientIP, userAgent, false, "captcha_invalid")
+			h.recordAuthAuditLog(auditActionLoginFailed, req.Username, nil, auditIP, userAgent, "captcha_invalid")
+			h.recordLoginLog(req.Username, auditIP, userAgent, false, "captcha_invalid")
 			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
-				"ret":  0,
-				"msg":  "invalid captcha answer",
-				"data": nil,
+				"ret":      0,
+				"msg":      "invalid captcha answer",
+				"data":     nil,
 				"biz_code": 7011,
 			})
 			return
@@ -116,8 +117,8 @@ func (h *Handler) Login(c *gin.Context) {
 				zap.Error(err),
 			)
 			// 对外仅以 401 暴露失败原因，不区分"密钥错"/"重放"/"过期"，避免给攻击者反馈。
-			h.recordAuthAuditLog(auditActionLoginFailed, req.Username, nil, clientIP, userAgent, "decrypt_failed")
-			h.recordLoginLog(req.Username, clientIP, userAgent, false, "decrypt_failed")
+			h.recordAuthAuditLog(auditActionLoginFailed, req.Username, nil, auditIP, userAgent, "decrypt_failed")
+			h.recordLoginLog(req.Username, auditIP, userAgent, false, "decrypt_failed")
 			commonerrors.AbortWithError(c, http.StatusUnauthorized,
 				commonerrors.NewBusinessError(7003, "登录凭据无效，请重试", err))
 			return
@@ -128,8 +129,8 @@ func (h *Handler) Login(c *gin.Context) {
 				zap.String("username", req.Username),
 				zap.String("ip", clientIP),
 			)
-			h.recordAuthAuditLog(auditActionLoginFailed, req.Username, nil, clientIP, userAgent, "plaintext_disabled")
-			h.recordLoginLog(req.Username, clientIP, userAgent, false, "plaintext_disabled")
+			h.recordAuthAuditLog(auditActionLoginFailed, req.Username, nil, auditIP, userAgent, "plaintext_disabled")
+			h.recordLoginLog(req.Username, auditIP, userAgent, false, "plaintext_disabled")
 			commonerrors.AbortWithError(c, http.StatusBadRequest,
 				commonerrors.NewBusinessError(7004, "明文密码登录已禁用，请使用 HTTPS 或 localhost 访问", nil))
 			return
@@ -160,8 +161,8 @@ func (h *Handler) Login(c *gin.Context) {
 		// which writes "login_failed" — a sub-action of audit.ActionLogin —
 		// directly through the AuditRepository. Avoid double-emission via
 		// audit.LogAsync; both paths share the same repo.
-		h.recordAuthAuditLog(auditActionLoginFailed, req.Username, nil, clientIP, userAgent, reason)
-		h.recordLoginLog(req.Username, clientIP, userAgent, false, reason)
+		h.recordAuthAuditLog(auditActionLoginFailed, req.Username, nil, auditIP, userAgent, reason)
+		h.recordLoginLog(req.Username, auditIP, userAgent, false, reason)
 
 		if h.loginGuard != nil {
 			count, _ := h.loginGuard.RecordFailure(ctx, req.Username)
@@ -211,8 +212,8 @@ func (h *Handler) Login(c *gin.Context) {
 
 	// W3.G.2 ActionLogin / category 1 of 5: see comment in failure branch.
 	// T-0120：plaintext 路径在 reason 标记 plaintext_login 供合规追溯。
-	h.recordAuthAuditLog(auditActionLoginSuccess, req.Username, nil, clientIP, userAgent, pwdSourceReason)
-	h.recordLoginLog(req.Username, clientIP, userAgent, true, pwdSourceReason)
+	h.recordAuthAuditLog(auditActionLoginSuccess, req.Username, nil, auditIP, userAgent, pwdSourceReason)
+	h.recordLoginLog(req.Username, auditIP, userAgent, true, pwdSourceReason)
 
 	response.OK(c, tokenPair)
 }

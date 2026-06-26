@@ -30,6 +30,42 @@ func setupRouter(middlewares ...gin.HandlerFunc) *gin.Engine {
 	return r
 }
 
+func TestAuditClientIP_PrefersForwardedForAndNormalizes(t *testing.T) {
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/test", nil)
+	c.Request.RemoteAddr = "172.18.0.1:54321"
+	c.Request.Header.Set("X-Forwarded-For", "203.0.113.10, 172.18.0.1")
+
+	assert.Equal(t, "203.0.113.10", auditClientIP(c))
+}
+
+func TestNormalizeAuditIP_StripsCIDRAndPort(t *testing.T) {
+	assert.Equal(t, "173.18.0.1", normalizeAuditIP("173.18.0.1/32"))
+	assert.Equal(t, "198.51.100.7", normalizeAuditIP("198.51.100.7:12345"))
+	assert.Equal(t, "2001:db8::1", normalizeAuditIP("[2001:db8::1]:443"))
+}
+
+func TestAuditClientIP_PrefersPublicWhenMixedWithPrivate(t *testing.T) {
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/test", nil)
+	c.Request.RemoteAddr = "172.18.0.1:54321"
+	c.Request.Header.Set("X-Forwarded-For", "172.18.0.1, 203.0.113.55")
+
+	assert.Equal(t, "203.0.113.55", auditClientIP(c))
+}
+
+func TestAuditClientIP_FallsBackToPrivateWhenNoPublicAvailable(t *testing.T) {
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/test", nil)
+	c.Request.RemoteAddr = "172.18.0.1:54321"
+	c.Request.Header.Set("X-Forwarded-For", "172.18.0.1, 10.0.0.8")
+
+	assert.Equal(t, "172.18.0.1", auditClientIP(c))
+}
+
 func TestRequireAuth_ValidToken(t *testing.T) {
 	jwtService, err := NewJWTService("test-secret-minimum-32-characters!!")
 	require.NoError(t, err)

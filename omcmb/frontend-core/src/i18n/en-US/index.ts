@@ -4238,6 +4238,8 @@ const messages: Record<string, string> = {
   'api.pathPlaceholder':       'e.g. /api/v1/users',
   'api.namePlaceholder':       'Enter API name',
   'api.groupPlaceholder':      'Select or enter a group',
+  'api.groupFilterPlaceholder':'Select group',
+  'api.methodFilterPlaceholder':'Select request method',
   'api.descriptionPlaceholder':'Enter API description',
   'api.pathRequired':          'Please enter the API path',
   'api.methodRequired':        'Please select a request method',
