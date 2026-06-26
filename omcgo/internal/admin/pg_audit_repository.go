@@ -51,7 +51,7 @@ func (r *PgAuditRepository) Create(ctx context.Context, log *AuditLog) error {
 }
 
 func (r *PgAuditRepository) List(ctx context.Context, filter AuditLogFilter) (*model.ListResponse[AuditLog], error) {
-	base := storage.Psql.Select("id", "user_id", "username", "action", "resource", "resource_id", "details", "ip_address::text", "user_agent", "created_at").
+	base := storage.Psql.Select("id", "user_id", "username", "action", "resource", "resource_id", "details", "host(ip_address)", "user_agent", "created_at").
 		From("audit_logs")
 	countBase := storage.Psql.Select("COUNT(*)").From("audit_logs")
 
@@ -59,13 +59,52 @@ func (r *PgAuditRepository) List(ctx context.Context, filter AuditLogFilter) (*m
 		base = base.Where(sq.Eq{"user_id": *filter.UserID})
 		countBase = countBase.Where(sq.Eq{"user_id": *filter.UserID})
 	}
+	if filter.Username != nil && *filter.Username != "" {
+		pattern := "%" + *filter.Username + "%"
+		base = base.Where(sq.ILike{"username": pattern})
+		countBase = countBase.Where(sq.ILike{"username": pattern})
+	}
 	if filter.Action != nil && *filter.Action != "" {
 		base = base.Where(sq.Eq{"action": *filter.Action})
 		countBase = countBase.Where(sq.Eq{"action": *filter.Action})
 	}
 	if filter.Resource != nil && *filter.Resource != "" {
-		base = base.Where(sq.Eq{"resource": *filter.Resource})
-		countBase = countBase.Where(sq.Eq{"resource": *filter.Resource})
+		pattern := "%" + *filter.Resource + "%"
+		base = base.Where(sq.Or{sq.ILike{"resource": pattern}, sq.ILike{"action": pattern}})
+		countBase = countBase.Where(sq.Or{sq.ILike{"resource": pattern}, sq.ILike{"action": pattern}})
+	}
+	if filter.IPAddress != nil && *filter.IPAddress != "" {
+		pattern := "%" + *filter.IPAddress + "%"
+		base = base.Where(sq.Expr("host(ip_address) ILIKE ?", pattern))
+		countBase = countBase.Where(sq.Expr("host(ip_address) ILIKE ?", pattern))
+	}
+	if filter.Result != nil && *filter.Result != "" {
+		switch *filter.Result {
+		case "failure":
+			base = base.Where(sq.ILike{"action": "%fail%"})
+			countBase = countBase.Where(sq.ILike{"action": "%fail%"})
+		case "success":
+			base = base.Where(sq.NotLike{"action": "%fail%"})
+			countBase = countBase.Where(sq.NotLike{"action": "%fail%"})
+		}
+	}
+	if filter.Reason != nil && *filter.Reason != "" {
+		pattern := "%" + *filter.Reason + "%"
+		base = base.Where(sq.Expr("details::text ILIKE ?", pattern))
+		countBase = countBase.Where(sq.Expr("details::text ILIKE ?", pattern))
+	}
+	if filter.Keyword != nil && *filter.Keyword != "" {
+		pattern := "%" + *filter.Keyword + "%"
+		cond := sq.Or{
+			sq.ILike{"username": pattern},
+			sq.ILike{"action": pattern},
+			sq.ILike{"resource": pattern},
+			sq.ILike{"resource_id": pattern},
+			sq.Expr("host(ip_address) ILIKE ?", pattern),
+			sq.Expr("details::text ILIKE ?", pattern),
+		}
+		base = base.Where(cond)
+		countBase = countBase.Where(cond)
 	}
 	if filter.StartTime != nil && *filter.StartTime != "" {
 		if t, err := time.Parse(time.RFC3339, *filter.StartTime); err == nil {

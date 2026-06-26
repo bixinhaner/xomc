@@ -59,7 +59,7 @@ func AuditContextFromGin(c *gin.Context) audit.Entry {
 	}
 
 	e := audit.Entry{
-		IPAddress: c.ClientIP(),
+		IPAddress: auditClientIP(c),
 		UserAgent: c.Request.UserAgent(),
 	}
 

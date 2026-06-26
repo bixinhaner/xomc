@@ -546,6 +546,14 @@ function mapBackendRole(br: BackendRole): Role {
 function mapBackendAuditLog(ba: BackendAuditLog): OperationLog {
   const createdAt = ba.created_at ?? ba.createdAt ?? '';
   const resourceId = ba.resource_id ?? ba.resourceId ?? '';
+  const action = (ba.action || '').toLowerCase();
+  const detailsText = JSON.stringify(ba.details || {}).toLowerCase();
+  const isFailure =
+    /fail|error|denied|forbid|unauthor|invalid/.test(action) ||
+    /"status"\s*:\s*false|"success"\s*:\s*false|fail|error|denied|forbid/.test(detailsText);
+  const reason = ba.details && typeof ba.details === 'object' && typeof (ba.details as Record<string, unknown>).reason === 'string'
+    ? (ba.details as Record<string, unknown>).reason as string
+    : '';
 
   return {
     id: ba.id,
@@ -555,15 +563,36 @@ function mapBackendAuditLog(ba: BackendAuditLog): OperationLog {
     operationType: (ba.action || 'query') as OperationType,
     target: resourceId,
     content: ba.details ? JSON.stringify(ba.details) : '',
-    result: 'success',
+    result: isFailure ? 'failure' : 'success',
     message: '',
     operationTime: createdAt,
     logName: `${ba.action} ${ba.resource}`.trim(),
     detail: ba.details ? JSON.stringify(ba.details) : '',
-    reason: '',
+    reason,
     startTime: createdAt,
     endTime: createdAt,
   };
+}
+
+function applyOperationLogNameFilter(query: Record<string, unknown>, logName: string) {
+  const mappings: Record<string, { action?: string; resource?: string; keyword?: string }> = {
+    user_login: { action: 'login_success', resource: 'auth' },
+    user_logout: { action: 'logout', resource: 'auth' },
+    device_add: { action: 'POST', resource: 'device' },
+    device_delete: { action: 'DELETE', resource: 'device' },
+    config_modify: { resource: 'config' },
+    software_upgrade: { resource: 'software' },
+    data_export: { keyword: 'export' },
+    data_import: { keyword: 'import' },
+  };
+  const mapped = mappings[logName];
+  if (!mapped) {
+    query.resource = logName;
+    return;
+  }
+  if (mapped.action) query.action = mapped.action;
+  if (mapped.resource) query.resource = mapped.resource;
+  if (mapped.keyword) query.keyword = mapped.keyword;
 }
 
 function mapBackendGroup(bg: BackendGroup): Group {
@@ -953,9 +982,11 @@ export const adminApi = {
   async getOperationLogs(
     params: {
       operator?: string;
+      clientIp?: string;
       module?: string;
       operationType?: OperationType;
       result?: string;
+      reason?: string;
       timeRange?: [string, string];
       keyword?: string;
     } & PageRequest
@@ -964,11 +995,16 @@ export const adminApi = {
       page: params.page,
       pageSize: params.pageSize,
     };
-    if (params.module) query.resource = params.module;
+    if (params.operator) query.username = params.operator;
+    if (params.clientIp) query.ip_address = params.clientIp;
+    if (params.module) applyOperationLogNameFilter(query, params.module);
     if (params.operationType) query.action = params.operationType;
+    if (params.result) query.result = params.result;
+    if (params.reason) query.reason = params.reason;
+    if (params.keyword) query.keyword = params.keyword;
     if (params.timeRange) {
-      query.startTime = params.timeRange[0];
-      query.endTime = params.timeRange[1];
+      query.start_time = params.timeRange[0];
+      query.end_time = params.timeRange[1];
     }
 
     const { data } = await http.get<BackendListResponse<BackendAuditLog>>(

@@ -10,9 +10,11 @@ import { useMock } from '../../services/apiSwitch';
 export function useOperationLogs(
   params: {
     operator?: string;
+    clientIp?: string;
     module?: string;
     operationType?: OperationType;
     result?: OperationResult;
+    reason?: string;
     timeRange?: [string, string];
     keyword?: string;
   } & PageRequest
