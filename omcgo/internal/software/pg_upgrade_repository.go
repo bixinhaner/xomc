@@ -193,7 +193,39 @@ func (r *PgSubTaskRepository) UpdateStatus(ctx context.Context, id uuid.UUID, st
 	return r.UpdateStatusWithCode(ctx, id, status, errorMsg, "")
 }
 
-func (r *PgSubTaskRepository) UpdateStatusWithCode(ctx context.Context, id uuid.UUID, status UpgradeState, errorMsg string, code FailureCode) error {
+// shouldSetSubTaskStartedAt 决定 status 跃迁是否触发 started_at 写入。语义：
+// 「调度器已实际开始处理这个 sub_task」就写。设计原则：
+//   - 包含 suspended —— issue #667：executor 把 sub_task 从 pending 挑出来发现设备
+//     离线、转 suspended 时，就是用户视角「轮到该设备级别开始升级」的精确时刻；不写
+//     started_at 会导致任务里 N 个离线设备的「开始时间」全部用 createdAt 兜底显示
+//     同一时刻（任务下发时刻），与并发调度（max_concurrent）实际行为不符；
+//   - 包含 4 种执行态 downloading/uploading/rebooting/verifying —— qa-614 #371
+//     的原有逻辑（5G 手动回退 RollbackNeedsEnableCheck=false 从 pending 直跳 rebooting）；
+//   - 包含 failed —— pre-flight 失败（FIRMWARE_NOT_FOUND / DEVICE_NOT_FOUND /
+//     COMMAND_PUSH_FAILED）从 pending 直跳 failed，但 executor 已经"处理过"该 sub_task，
+//     started_at 应记录为「调度器处理时刻」（CompletedAt 几乎同一刻，但语义清晰）；
+//   - 排除 pending —— sub_task 排队中，调度器尚未挑出来，没有「开始」概念；
+//   - 排除 terminated —— 操作员主动叫停，不是调度器自然推进；若停在 pending 即
+//     未被调度过，started_at 留空由 mapDeviceItem 兜底显示为 endedAt（issue #655）；
+//     若停在已开始的状态，started_at 已被先前转换写入，COALESCE 守卫不会被覆盖。
+//   - 排除 completed —— 终态必然先经过 verifying/uploading 等执行态，started_at
+//     已写；为防御诡异路径（直接 pending→completed），不主动补写避免覆盖语义。
+func shouldSetSubTaskStartedAt(status UpgradeState) bool {
+	switch status {
+	case UpgradeSuspended, UpgradeDownloading, UpgradeUploading,
+		UpgradeRebooting, UpgradeVerifying, UpgradeFailed:
+		return true
+	}
+	return false
+}
+
+// buildUpdateSubTaskStatusSQL 构造 upgrade_sub_tasks 状态更新 SQL。
+// applyStartedAt 控制是否对 shouldSetSubTaskStartedAt(status) 命中的状态写入
+// `started_at = COALESCE(started_at, now())`：
+//   - true（调度器自然推进 UpdateStatusWithCode）：写入 started_at，COALESCE 防覆盖；
+//   - false（operator 主动操作 UpdateStatusByOperator）：完全不动 started_at，
+//     等真正轮到该设备被 executor 挑出来时再写入。
+func buildUpdateSubTaskStatusSQL(id uuid.UUID, status UpgradeState, errorMsg string, code FailureCode, applyStartedAt bool) (string, []interface{}, error) {
 	builder := storage.Psql.Update("upgrade_sub_tasks").
 		Set("status", status).
 		Where(sq.Eq{"id": id})
@@ -204,24 +236,18 @@ func (r *PgSubTaskRepository) UpdateStatusWithCode(ctx context.Context, id uuid.
 	if code != "" && status == UpgradeFailed {
 		builder = builder.Set("failure_reason", string(code))
 	}
-	// qa-614 #371: 子任务"起始时间"在首次进入任一执行态时记录（含 rebooting/verifying），
-	// 而非只在 downloading/uploading。5G 手动回退 RollbackNeedsEnableCheck=false，状态从
-	// pending 直跳 rebooting（既不经 downloading 也不经 uploading），原条件导致 started_at 恒
-	// NULL → 前端"开始时间"恒显示"-"。用 COALESCE(started_at, now()) 守卫：仅当 started_at
-	// 仍为 NULL 时写入，避免 4G 多次状态翻转把先前已记录的开始时间覆盖（4G 行为不回归）。
-	if status == UpgradeDownloading || status == UpgradeUploading ||
-		status == UpgradeRebooting || status == UpgradeVerifying {
+	// 用 COALESCE(started_at, now()) 守卫：仅当 started_at 仍为 NULL 时写入，避免多次
+	// 状态翻转把先前已记录的开始时间覆盖。触发状态集见 shouldSetSubTaskStartedAt 注释。
+	if applyStartedAt && shouldSetSubTaskStartedAt(status) {
 		builder = builder.Set("started_at", sq.Expr("COALESCE(started_at, now())"))
 	}
 	if status == UpgradeCompleted || status == UpgradeFailed || status == UpgradeTerminated {
 		builder = builder.Set("completed_at", time.Now())
 	}
+	return builder.ToSql()
+}
 
-	query, args, err := builder.ToSql()
-	if err != nil {
-		return fmt.Errorf("build update sub-task status SQL: %w", err)
-	}
-
+func (r *PgSubTaskRepository) execUpdateSubTaskStatus(ctx context.Context, query string, args []interface{}) error {
 	result, err := r.pool.Exec(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("update sub-task status: %w", err)
@@ -230,6 +256,34 @@ func (r *PgSubTaskRepository) UpdateStatusWithCode(ctx context.Context, id uuid.
 		return commonerrors.ErrNotFound
 	}
 	return nil
+}
+
+func (r *PgSubTaskRepository) UpdateStatusWithCode(ctx context.Context, id uuid.UUID, status UpgradeState, errorMsg string, code FailureCode) error {
+	query, args, err := buildUpdateSubTaskStatusSQL(id, status, errorMsg, code, true)
+	if err != nil {
+		return fmt.Errorf("build update sub-task status SQL: %w", err)
+	}
+	return r.execUpdateSubTaskStatus(ctx, query, args)
+}
+
+// UpdateStatusByOperator 是 operator 主动操作（暂停 / 恢复等）走的 status 更新路径，
+// 与 UpdateStatusWithCode 的唯一区别是 **不写 started_at**。
+//
+// 为什么单独拆一个方法（issue #667 后续改进）：
+// SuspendUpgrade 会把所有 active sub_task（含 pending）整体翻成 Suspended，
+// 此时 pending sub_task 还**没被 executor 挑中**——按 #667 语义「真的轮到设备级别
+// 升级了才更新 started_at」，operator 暂停不该触发 started_at 写入。
+// 否则用户场景：10:00 创建任务（pending），10:01 运维点暂停 → 11:00 恢复 → executor
+// 真正开始处理 11:00。新方案保证 started_at = 11:00（被挑中时刻），而非 10:01。
+//
+// 设计上 errorMsg "by operator" 这类字符串约定太脆弱，因此通过独立方法把 operator
+// vs scheduler 两类语义在调用层显式区分。
+func (r *PgSubTaskRepository) UpdateStatusByOperator(ctx context.Context, id uuid.UUID, status UpgradeState, errorMsg string) error {
+	query, args, err := buildUpdateSubTaskStatusSQL(id, status, errorMsg, "", false)
+	if err != nil {
+		return fmt.Errorf("build update sub-task status SQL: %w", err)
+	}
+	return r.execUpdateSubTaskStatus(ctx, query, args)
 }
 
 func (r *PgSubTaskRepository) Update(ctx context.Context, task *UpgradeSubTask) error {
@@ -517,6 +571,12 @@ func (r *PgSubTaskRepository) FailStale(ctx context.Context, cutoffs StaleTimeou
 	//     —— 文件上传 + CPE 内部安装 / 回写 TC 都属于"已派发 RPC，等事务完成"阶段，时间窗较长。
 	// 这里把 'uploading' 归入第三段而不是 'downloading' 同款 RPCResponse 短超时，是 fix 顺手修的 BUG：
 	// 旧实现把 Upload 也算成 'downloading'，5min 内卡死的大文件备份 / 日志采集会被误判超时。
+	//
+	// issue #667：started_at = COALESCE(started_at, NOW()) 兜底——理论上 sub_task 走到
+	// downloading/suspended/uploading/... 这几个状态时 UpdateStatusWithCode 已写过 started_at
+	// （shouldSetSubTaskStartedAt 覆盖），但 reaper 是直接 SQL 不走 ORM；万一未来有路径
+	// 绕过 UpdateStatusWithCode 直接 UPDATE 状态，这里兜底保证「被 reaper 处理过的 sub_task
+	// 一定有 started_at」，避免前端「开始时间」空列。COALESCE 守卫不会覆盖已有值。
 	query := `WITH failed AS (
 		UPDATE upgrade_sub_tasks ust
 		SET status = 'failed', error_message = CASE
@@ -524,7 +584,7 @@ func (r *PgSubTaskRepository) FailStale(ctx context.Context, cutoffs StaleTimeou
 		    WHEN ust.status = 'uploading'   THEN 'Timed out waiting for upload / TransferComplete from device.'
 		    WHEN ust.status = 'suspended'   THEN 'Timed out waiting for device to come online.'
 		    ELSE                                 'Timed out waiting for TransferComplete from device.'
-		END, completed_at = NOW(), updated_at = NOW()
+		END, started_at = COALESCE(ust.started_at, NOW()), completed_at = NOW(), updated_at = NOW()
 		FROM upgrade_tasks ut
 		WHERE ust.task_id = ut.id
 		  AND ut.status NOT IN ('pending', 'suspended')

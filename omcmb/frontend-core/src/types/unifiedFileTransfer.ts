@@ -73,6 +73,8 @@ export interface UnifiedFileTransferTask {
   firmwareId?: string;
   targetVersion?: string;
   productType?: string;
+  /** 产品英文名（后端由 productClass 解析，优先展示；为空时前端回退 productType）。 */
+  productName?: string;
   isKeepConfig?: boolean;
   status: TransferTaskStatus;
   result?: TransferTaskResult;

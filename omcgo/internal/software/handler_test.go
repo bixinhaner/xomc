@@ -124,6 +124,9 @@ func (m *swHSubTaskRepo) ListAll(_ context.Context, _ AllSubTaskFilter) (*model.
 func (m *swHSubTaskRepo) UpdateStatusWithCode(_ context.Context, _ uuid.UUID, _ UpgradeState, _ string, _ FailureCode) error {
 	return nil
 }
+func (m *swHSubTaskRepo) UpdateStatusByOperator(_ context.Context, _ uuid.UUID, _ UpgradeState, _ string) error {
+	return nil
+}
 func (m *swHSubTaskRepo) UpdateFailureReasonByTask(_ context.Context, _ uuid.UUID, _ FailureCode) error {
 	return nil
 }

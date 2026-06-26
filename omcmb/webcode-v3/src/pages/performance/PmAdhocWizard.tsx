@@ -48,8 +48,8 @@ const DIMENSIONS: { value: AdhocDimension; label: string; hint: string }[] = [
   { value: 'aggregate_group', label: '自选设备组', hint: 'N 个设备临时组聚合一条' },
 ]
 
+// #669：自定义聚合任务下线 15min，最细粒度限定 hourly（详见 pmAdhocConstraints.ts）。
 const GRAN_OPTS: { value: string; label: string }[] = [
-  { value: '15min', label: '15分钟' },
   { value: 'hourly', label: '小时' },
   { value: 'daily', label: '天' },
 ]
@@ -164,7 +164,7 @@ export default function PmAdhocWizard() {
   const step1Valid = name.trim().length > 0
   const step2Valid = needsDevicePick ? selectedSns.length > 0 : true
   const step3Valid = metricPaths.length >= 1
-  // #363：(粒度, 维度) 组合守门——15min × 设备组不支持，禁用提交不发注定失败请求。
+  // #669：兜底——15min 已从粒度选项删除，但编辑模式遇旧任务仍可能传入 15min，由此拦截。
   const granDimSupported = isGranularityDimensionSupported(granularity, dimension)
   const step4Valid =
     granularity.length > 0 &&
@@ -349,7 +349,7 @@ export default function PmAdhocWizard() {
                     disabled={isEdit}
                     onClick={() => {
                       setDimension(d.value)
-                      // #363：切到设备组若当前粒度 15min（不支持）→ 自动回落 hourly。
+                      // #669：编辑模式遇旧 15min 任务，切维度时一并回落 hourly（新建路径已无 15min 选项）。
                       if (!isGranularityDimensionSupported(granularity, d.value)) {
                         setGranularity('hourly')
                       }
@@ -491,31 +491,26 @@ export default function PmAdhocWizard() {
             <div className="space-y-4 p-4">
               <Field label="粒度 · GRANULARITY">
                 <div className="flex gap-1.5">
-                  {GRAN_OPTS.map((g) => {
-                    // #363：设备组维度不支持 15min 粒度，禁用该 chip + title 提示。
-                    const disabled = !isGranularityDimensionSupported(g.value, dimension)
-                    return (
-                      <button
-                        key={g.value}
-                        type="button"
-                        disabled={disabled}
-                        title={disabled ? '设备组维度最细为小时，不支持 15 分钟粒度' : undefined}
-                        onClick={() => setGranularity(g.value)}
-                        className={cn(
-                          'chip transition-all disabled:cursor-not-allowed disabled:opacity-30',
-                          granularity === g.value
-                            ? 'text-cyan-200 shadow-[0_0_10px_currentColor]'
-                            : 'text-cyan-300/55 opacity-70 hover:opacity-100',
-                        )}
-                      >
-                        {g.label}
-                      </button>
-                    )
-                  })}
+                  {/* #669：自定义聚合任务最细粒度限定 hourly，15min 选项已从数组中移除。 */}
+                  {GRAN_OPTS.map((g) => (
+                    <button
+                      key={g.value}
+                      type="button"
+                      onClick={() => setGranularity(g.value)}
+                      className={cn(
+                        'chip transition-all',
+                        granularity === g.value
+                          ? 'text-cyan-200 shadow-[0_0_10px_currentColor]'
+                          : 'text-cyan-300/55 opacity-70 hover:opacity-100',
+                      )}
+                    >
+                      {g.label}
+                    </button>
+                  ))}
                 </div>
                 {!granDimSupported && (
                   <div className="mt-1.5 font-mono text-[10px] text-rose-300/80">
-                    设备组维度最细为小时，不支持 15 分钟粒度，请改用小时及以上。
+                    当前粒度已下线（如 15min），请改选小时及以上粒度。
                   </div>
                 )}
               </Field>

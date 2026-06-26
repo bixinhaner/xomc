@@ -2591,6 +2591,9 @@ const messages: Record<string, string> = {
   'dashboard.vsLastWeek':        'vs last week',
   'dashboard.onlineRate':        'Online Rate',
   'dashboard.vsYesterday':       'vs yesterday',
+  'dashboard.compareWindow.label':     'Compare with',
+  'dashboard.compareWindow.yesterday': 'Yesterday',
+  'dashboard.compareWindow.lastWeek':  'Last week',
   'dashboard.alarmSummary':      'Alarm Summary',
   'dashboard.viewAll':             'View All',
   'dashboard.alarmDistribution':   'Alarm Distribution',
@@ -7303,6 +7306,12 @@ const messages: Record<string, string> = {
   'perf.adhoc.cancelTaskTitle':          'Cancel Task',
   'perf.adhoc.cancelTaskContent':        'Canceling a running task will not roll back results already written',
   'perf.adhoc.canceled':                 'Canceled',
+  // #674: resume canceled task
+  'perf.adhoc.btnResume':                'Enable',
+  'perf.adhoc.resumeTaskTitle':          'Enable Task',
+  'perf.adhoc.resumeTaskContent':        'Resume a canceled task so it participates in scheduling again. Confirm?',
+  'perf.adhoc.resumed':                  'Enabled',
+  'perf.adhoc.resumeFailed':             'Enable failed: {msg}',
   // issue #392: delete terminal custom task
   'perf.adhoc.btnDelete':                'Delete',
   'perf.adhoc.deleteTaskTitle':          'Delete Task',
@@ -7389,7 +7398,6 @@ const messages: Record<string, string> = {
   'perf.adhoc.metricTagKpi':             'KPI',
   'perf.adhoc.metricTagCounter':         'Counter',
   'perf.adhoc.fieldGranReq':             'Aggregation Granularity *',
-  'perf.adhoc.granular15min':            '15 min',
   'perf.adhoc.granularHourly':           'Hourly',
   'perf.adhoc.granularDaily':            'Daily',
   'perf.adhoc.granularWeekly':           'Weekly',
@@ -7684,8 +7692,6 @@ const messages: Record<string, string> = {
   // qa-614 c2 — homepage KPI line-chart empty state (issue #359: distinguish "no aggregated data yet / hourly refresh" from a blank chart)
   'dashboard.kpiPanel.empty.title':      'No aggregated data yet',
   'dashboard.kpiPanel.empty.hint':       'Network-wide metrics refresh hourly on the hour; freshly ingested data appears after the next hour mark or once raw-detail fallback kicks in.',
-  // qa-614 c3 #363: device_group dimension does not support 15min granularity
-  'perf.adhoc.granDeviceGroupNo15min':   'Device group dimension is hourly at finest; 15-minute granularity is not supported',
 
   // qa-614 c5 — software firmware/upgrade (#369 / #371 / #379)
   'software.firmware.selectOrInputProductClass': 'Select or enter product type',

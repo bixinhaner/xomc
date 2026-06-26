@@ -187,30 +187,32 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 	}
 
 	var (
-		rawDeviceCounts  map[model.DeviceStatus]int64
+		totalDevices     int64
+		onlineDevices    int64
 		rawAlarmStats    *alarm.AlarmStatistics
 		rawKPIValues     []model.KPIValue
 		rawAlarms        []model.Alarm
 		alarmDeviceCount int64
 	)
 
-	g, ctx := errgroup.WithContext(ctx)
+	g, gctx := errgroup.WithContext(ctx)
 
-	// 1. Device counts by status
+	// 1. Device total / online counts —— 与设备状态柱图同源（T-0162：在线语义 = is_online=TRUE，
+	// 与 lifecycle 解耦）。原走 deviceService.CountByStatus + DeriveStatusFromLifecycle 派生
+	// DeviceActive 桶，会把 Maintenance/Discovered/... 但 is_online=TRUE 的设备从"在线"中漏掉，
+	// 导致 KPI 卡与同页柱图数字漂移。
 	g.Go(func() error {
-		counts, err := s.deviceService.CountByStatus(ctx, nil)
-		if err != nil {
-			s.logger.Warn("dashboard: device count failed", zap.Error(err))
-			rawDeviceCounts = make(map[model.DeviceStatus]int64)
-			return nil
+		if err := s.pgPool.QueryRow(gctx, summaryDeviceCountsQuery).Scan(&totalDevices, &onlineDevices); err != nil {
+			s.logger.Warn("dashboard: device counts query failed", zap.Error(err))
+			totalDevices = 0
+			onlineDevices = 0
 		}
-		rawDeviceCounts = counts
 		return nil
 	})
 
 	// 2. Alarm statistics
 	g.Go(func() error {
-		stats, err := s.alarmStore.Statistics(ctx, alarm.AlarmFilter{})
+		stats, err := s.alarmStore.Statistics(gctx, alarm.AlarmFilter{})
 		if err != nil {
 			s.logger.Warn("dashboard: alarm stats failed", zap.Error(err))
 			rawAlarmStats = &alarm.AlarmStatistics{
@@ -223,24 +225,41 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 		return nil
 	})
 
-	// 3. Recent KPI values (last 24h, top 10)
+	// 3. Latest KPI value per metric_path (last 24h)
+	//
+	// 历史实现走 kpiRepo.Query(PageSize=10, SortBy=time desc)，是"top-10 行"上限不是"每指标取最新"，
+	// 当全网指标 >> 10 时 UE_ACTIVE 等会被截断 → 首页活跃 UE 卡常驻 0（issue HD01 根因）。
+	// 改走 DISTINCT ON (metric_path) ORDER BY metric_path, time DESC，确保每个指标编号都拿到最新值。
 	g.Go(func() error {
 		now := time.Now()
-		filter := kpi.KPIFilter{
-			StartTime: now.Add(-24 * time.Hour),
-			EndTime:   now,
-		}
-		filter.Page = 1
-		filter.PageSize = 10
-		filter.SortBy = "time"
-		filter.SortDir = "desc"
-		result, err := s.kpiRepo.Query(ctx, filter)
+		query, args, err := buildLatestKPIPerNameQuery(now.Add(-24*time.Hour), now)
 		if err != nil {
-			s.logger.Warn("dashboard: kpi query failed", zap.Error(err))
-			rawKPIValues = []model.KPIValue{}
+			s.logger.Warn("dashboard: build latest kpi query failed", zap.Error(err))
 			return nil
 		}
-		rawKPIValues = result.Items
+		rows, err := s.tsPool.Query(gctx, query, args...)
+		if err != nil {
+			s.logger.Warn("dashboard: latest kpi query failed", zap.Error(err))
+			return nil
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var path string
+			var val float64
+			if err := rows.Scan(&path, &val); err != nil {
+				s.logger.Warn("dashboard: scan latest kpi row failed", zap.Error(err))
+				return nil
+			}
+			// 仅填 KPIName/IndicatorID/KPIValue —— 下游只读这三项映射进 KPIOverview。
+			rawKPIValues = append(rawKPIValues, model.KPIValue{
+				KPIName:     path,
+				IndicatorID: path,
+				KPIValue:    val,
+			})
+		}
+		if err := rows.Err(); err != nil {
+			s.logger.Warn("dashboard: iterate latest kpi rows failed", zap.Error(err))
+		}
 		return nil
 	})
 
@@ -251,7 +270,7 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 		filter.PageSize = 5
 		filter.SortBy = "raised_at"
 		filter.SortDir = "desc"
-		result, err := s.alarmStore.ListActive(ctx, filter)
+		result, err := s.alarmStore.ListActive(gctx, filter)
 		if err != nil {
 			s.logger.Warn("dashboard: recent alarms failed", zap.Error(err))
 			rawAlarms = []model.Alarm{}
@@ -271,7 +290,7 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 			s.logger.Warn("dashboard: build alarm device count query failed", zap.Error(err))
 			return nil
 		}
-		if err := s.pgPool.QueryRow(ctx, query, args...).Scan(&alarmDeviceCount); err != nil {
+		if err := s.pgPool.QueryRow(gctx, query, args...).Scan(&alarmDeviceCount); err != nil {
 			s.logger.Warn("dashboard: alarm device count failed", zap.Error(err))
 		}
 		return nil
@@ -281,17 +300,10 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 		return nil, err
 	}
 
-	// Map device counts to frontend format
-	var total int64
-	for _, cnt := range rawDeviceCounts {
-		total += cnt
-	}
-	online := rawDeviceCounts[model.DeviceActive]
-	offline := total - online
 	summary.DeviceStats = FrontendDeviceStats{
-		Total:   total,
-		Online:  online,
-		Offline: offline,
+		Total:   totalDevices,
+		Online:  onlineDevices,
+		Offline: totalDevices - onlineDevices,
 		Alarm:   alarmDeviceCount,
 	}
 
@@ -340,7 +352,7 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 	}
 
 	// Calculate KPI deltas (trend data for cards)
-	summary.KPIDeltas = s.calculateKPIDeltas(ctx, total, summary.AlarmStats.Total)
+	summary.KPIDeltas = s.calculateKPIDeltas(ctx, totalDevices, summary.AlarmStats.Total)
 
 	return summary, nil
 }
@@ -445,62 +457,59 @@ func (s *Service) calculateKPIDeltas(ctx context.Context, currentTotalDevices in
 	return deltas
 }
 
-// countDevicesAtTime counts total devices at a specific point in time.
-//
-// TODO(T-0164-P4): Implement historical device count query.
-// Current implementation returns current device count regardless of time parameter,
-// which means trend comparison data is not accurate.
-//
-// Future implementation options:
-//
-//	Option 1: Add device_history table to track device status changes over time
-//	Option 2: Use time-series database (TimescaleDB) to store historical device counts
-//	Option 3: Query device lifecycle events to reconstruct historical counts
-//
-// For now, this serves as a baseline implementation for UI development.
-func (s *Service) countDevicesAtTime(ctx context.Context, t time.Time) (int64, error) {
-	// Log warning that this is not accurate historical data
-	s.logger.Warn(
-		"countDevicesAtTime: returning current count, historical data not available",
-		zap.String("requested_time", t.Format(time.RFC3339)),
-		zap.String("note", "TODO: implement historical device count query (see T-0164-P4)"),
-	)
+// summaryDeviceCountsQuery 给 dashboard /summary 接口的 KPI 卡用：取设备总数 +
+// 在线数（is_online=TRUE）。"在线"语义与生命周期解耦（T-0162），与 device 模块
+// DeviceListStats.OnlineCount、设备状态柱图 GetDeviceStatusByType 同源。
+const summaryDeviceCountsQuery = `
+	SELECT
+		COUNT(*) AS total,
+		COUNT(*) FILTER (WHERE is_online = TRUE) AS online
+	FROM devices
+	WHERE deleted_at IS NULL
+`
 
-	counts, err := s.deviceService.CountByStatus(ctx, nil)
-	if err != nil {
-		return 0, err
+// countDevicesAtTimeQuery 重建时刻 t 的设备总数：created_at 在 t 之前，且
+// 截至 t 尚未软删除。devices 是主库分区表（按 carrier 分区），父表查询即可贯穿所有分区。
+const countDevicesAtTimeQuery = `
+	SELECT COUNT(*)
+	FROM devices
+	WHERE created_at <= $1
+	  AND (deleted_at IS NULL OR deleted_at > $1)
+`
+
+// countAlarmsAtTimeQuery 重建时刻 t 的活跃告警数：raised_at 在 t 之前，且
+// 截至 t 未被清除。alarms_history 在时序库（tsPool）上，是 7d chunk 的超表。
+const countAlarmsAtTimeQuery = `
+	SELECT COUNT(*)
+	FROM alarms_history
+	WHERE raised_at <= $1
+	  AND (cleared_at IS NULL OR cleared_at > $1)
+`
+
+// countDevicesAtTime 返回时刻 t 在网设备总数（含历史已下线但当时尚在网的）。
+// 用于 dashboard KPI 卡片的同环比对比。
+func (s *Service) countDevicesAtTime(ctx context.Context, t time.Time) (int64, error) {
+	if s.pgPool == nil {
+		return 0, fmt.Errorf("countDevicesAtTime: pgPool not configured")
 	}
-	var total int64
-	for _, cnt := range counts {
-		total += cnt
+	var n int64
+	if err := s.pgPool.QueryRow(ctx, countDevicesAtTimeQuery, t).Scan(&n); err != nil {
+		return 0, fmt.Errorf("countDevicesAtTime: %w", err)
 	}
-	return total, nil
+	return n, nil
 }
 
-// countAlarmsAtTime counts active alarms at a specific point in time.
-//
-// TODO(T-0164-P4): Implement historical alarm count query using alarm_history table.
-// Current implementation returns current alarm count regardless of time parameter,
-// which means trend comparison data is not accurate.
-//
-// Future implementation:
-//
-//	Query alarm_history table with time filter: raised_at <= t AND (cleared_at IS NULL OR cleared_at > t)
-//
-// For now, this serves as a baseline implementation for UI development.
+// countAlarmsAtTime 返回时刻 t 的活跃告警数（已 raise 未 clear）。
+// 用于 dashboard KPI 卡片的同环比对比。
 func (s *Service) countAlarmsAtTime(ctx context.Context, t time.Time) (int64, error) {
-	// Log warning that this is not accurate historical data
-	s.logger.Warn(
-		"countAlarmsAtTime: returning current count, historical data not available",
-		zap.String("requested_time", t.Format(time.RFC3339)),
-		zap.String("note", "TODO: implement historical alarm count query (see T-0164-P4)"),
-	)
-
-	stats, err := s.alarmStore.Statistics(ctx, alarm.AlarmFilter{})
-	if err != nil {
-		return 0, err
+	if s.tsPool == nil {
+		return 0, fmt.Errorf("countAlarmsAtTime: tsPool not configured")
 	}
-	return stats.TotalActive, nil
+	var n int64
+	if err := s.tsPool.QueryRow(ctx, countAlarmsAtTimeQuery, t).Scan(&n); err != nil {
+		return 0, fmt.Errorf("countAlarmsAtTime: %w", err)
+	}
+	return n, nil
 }
 
 // computeKPIDelta calculates delta values for a single KPI metric.

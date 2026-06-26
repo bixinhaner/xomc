@@ -159,3 +159,37 @@ func TestDerefOrEmpty(t *testing.T) {
 		})
 	}
 }
+
+// ---------------------------------------------------------------------------
+// 历史快照查询（Issue D / 同环比对比）
+// countDevicesAtTime / countAlarmsAtTime 的 SQL 必须满足两点：
+//   1. 时间过滤覆盖「在 t 之前出现且截至 t 仍存活」语义；
+//   2. devices 查询打到主库（pgPool），alarms_history 查询打到时序库（tsPool）。
+// 这里仅断言 SQL 文本，避免起容器；与既有 alarmTrendByDateQuery 断言风格一致。
+// ---------------------------------------------------------------------------
+
+func TestCountDevicesAtTimeQuery(t *testing.T) {
+	assert.Contains(t, countDevicesAtTimeQuery, "FROM devices")
+	assert.Contains(t, countDevicesAtTimeQuery, "created_at <= $1")
+	assert.Contains(t, countDevicesAtTimeQuery, "deleted_at IS NULL OR deleted_at > $1")
+}
+
+func TestCountAlarmsAtTimeQuery(t *testing.T) {
+	assert.Contains(t, countAlarmsAtTimeQuery, "FROM alarms_history")
+	assert.Contains(t, countAlarmsAtTimeQuery, "raised_at <= $1")
+	assert.Contains(t, countAlarmsAtTimeQuery, "cleared_at IS NULL OR cleared_at > $1")
+}
+
+// summaryDeviceCountsQuery 是 /summary 接口 KPI 卡的设备总数 + 在线数取数 SQL。
+// 必须满足：
+//   1. 取自 devices 父表（按 carrier 分区，父表查询贯穿所有分区）；
+//   2. "在线"语义 = is_online=TRUE（T-0162 后与 lifecycle 解耦，与设备状态柱图同源）；
+//   3. 排除软删（deleted_at IS NULL）。
+// 任何 SQL 改动只要破坏上述三条，本测试立即失败。
+
+func TestSummaryDeviceCountsQuery(t *testing.T) {
+	assert.Contains(t, summaryDeviceCountsQuery, "FROM devices")
+	assert.Contains(t, summaryDeviceCountsQuery, "COUNT(*) FILTER (WHERE is_online = TRUE)")
+	assert.Contains(t, summaryDeviceCountsQuery, "deleted_at IS NULL")
+}
+

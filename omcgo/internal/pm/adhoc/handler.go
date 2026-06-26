@@ -49,6 +49,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		adhoc.GET("/tasks/:id", h.Get)
 		adhoc.PATCH("/tasks/:id", h.Update) // T-0194：编辑任务定义
 		adhoc.DELETE("/tasks/:id", h.Cancel)
+		adhoc.POST("/tasks/:id/resume", h.Resume)       // #674：恢复已取消任务
 		adhoc.DELETE("/tasks/:id/definition", h.Delete) // #392：硬删终态自建任务定义行
 		adhoc.GET("/tasks/:id/results", h.Results)
 		adhoc.GET("/tasks/:id/filter-options", h.FilterOptions) // PM-DASH-DIMFILTER：按维度列出可筛子集选项
@@ -156,10 +157,9 @@ func (h *Handler) Create(c *gin.Context) {
 	if dim == "" {
 		dim = DimensionDevice
 	}
-	// #363：(粒度, 维度) 组合前置守门——把 aggregator 唯一不支持的组合
-	// (15min × device_group，无 15min 级 group 聚合源) 在落库前拦下，给友好提示，
-	// 避免「任务建得成、跑起来才失败」。
-	if msg := unsupportedGranularityDimension(req.Granularities[0], dim); msg != "" {
+	// #669：粒度前置守门——15min 已整组下线（详见 unsupportedGranularity 注释）。
+	// 保留 dim 入参以便日后扩展新的（粒度,维度）限制。
+	if msg := unsupportedGranularity(req.Granularities[0], dim); msg != "" {
 		response.Fail(c, http.StatusBadRequest, msg)
 		return
 	}
@@ -229,10 +229,11 @@ func (h *Handler) Create(c *gin.Context) {
 //
 // 各档都在桶边界之后留几分钟，等下级数据落齐再聚合（hourly 对齐内置任务的 '5 * * * *'）。
 // 未知粒度兜底按小时滚动。
+//
+// #669：15min 档已下线（自定义聚合任务最细粒度限定 hourly，详见 unsupportedGranularity），
+// 这里不再保留 15min 分支——上游守门已拒，不可能走到。
 func cronForGranularity(g string) string {
 	switch g {
-	case "15min":
-		return "5,20,35,50 * * * *" // 每刻钟过 5 分
 	case "hourly":
 		return "5 * * * *" // 每小时第 5 分
 	case "daily":
@@ -246,18 +247,20 @@ func cronForGranularity(g string) string {
 	}
 }
 
-// unsupportedGranularityDimension 校验 (粒度, 维度) 组合是否被聚合器支持。
+// unsupportedGranularity 校验粒度是否被自定义聚合任务支持。
 //
-// 唯一不支持的组合：15min × device_group——设备组维度只物化了 hourly/daily/weekly/monthly
-// 四档预聚合快表 (pm_group_metrics_*)，没有 15min 级设备组聚合源（见
-// aggregator.SelectTable / query.go 的 ErrUnsupportedQuery 注释）。该约束原本只在最底层
-// aggregator 硬拒，导致任务建得成、worker 跑起来才失败（#363）。这里把约束前移到创建/编辑
-// 守门，命中返回面向用户的友好错误消息；不命中返回空串。
+// #669（取代旧 #363 特例）：15min 档整组下线，无论维度都不再支持。
+// 前因：原 #363 只在「device_group + 15min」做了前置拦截（其他维度 + 15min 一律放行）；
+// 但实际「continuous + 15min」存在「创建放行、调度器水位闸门永久拒绝放行」的半成品行为
+// （pm_completion_watermarks 表只覆盖 hourly/daily/weekly/monthly 四档，无 15min 行）。
+// 权衡过「补水位接通」与「缩范围下线」两条路（见 #669），采纳缩范围：自定义聚合任务
+// 最细粒度限定 hourly，15min 数据走「指标查询 / 数据提取」即可，不再走流式聚合管线。
 //
-// 采用轻量自包含判定（与 handler 内其它内联校验风格一致），不引入 aggregator 跨层依赖。
-func unsupportedGranularityDimension(granularity string, dim Dimension) string {
-	if dim == DimensionDeviceGroup && granularity == "15min" {
-		return "device_group dimension does not support 15min granularity (group aggregation is hourly at finest; use hourly or coarser, or use 15min under the device dimension)"
+// 命中返回面向用户的友好错误消息；不命中返回空串。dim 入参保留是为日后再有新组合限制时
+// 扩展用（当前所有维度对 15min 一视同仁，dim 未参与判定）。
+func unsupportedGranularity(granularity string, _ Dimension) string {
+	if granularity == "15min" {
+		return "15min granularity is no longer supported for ad-hoc aggregation tasks; use hourly or coarser, or query 15min raw data via metric-query / data-extraction"
 	}
 	return ""
 }
@@ -432,6 +435,14 @@ func (h *Handler) Update(c *gin.Context) {
 		return
 	}
 
+	// #652：自建任务归属权校验（编辑）—— 仅创建者或超管可编辑。
+	if !existing.IsBuiltin {
+		if !canOperate(existing, extractCreator(c), isAdmin(c)) {
+			response.Fail(c, http.StatusForbidden, "permission denied: not task owner")
+			return
+		}
+	}
+
 	upd := UpdateRequest{
 		IsBuiltin:   existing.IsBuiltin,
 		MetricPaths: req.MetricPaths,
@@ -449,9 +460,8 @@ func (h *Handler) Update(c *gin.Context) {
 		if dim == "" {
 			dim = DimensionDevice
 		}
-		// #363：编辑自建任务时同样守门 (粒度, 维度) 组合（维度沿用既有不可改，
-		// 但粒度可改 → 改成 15min 落到 device_group 任务上同样要拦）。
-		if msg := unsupportedGranularityDimension(req.Granularities[0], dim); msg != "" {
+		// #669：编辑自建任务时同样守门粒度——15min 已整组下线，不允许把任意维度的任务粒度改回 15min。
+		if msg := unsupportedGranularity(req.Granularities[0], dim); msg != "" {
 			response.Fail(c, http.StatusBadRequest, msg)
 			return
 		}
@@ -507,6 +517,22 @@ func (h *Handler) Cancel(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, "invalid id")
 		return
 	}
+	// #652：先取任务做归属权校验（取消）—— 自建任务仅创建者或超管可取消。
+	existing, err := h.repo.Get(c.Request.Context(), id)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			response.Fail(c, http.StatusNotFound, "not found")
+			return
+		}
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if !existing.IsBuiltin {
+		if !canOperate(existing, extractCreator(c), isAdmin(c)) {
+			response.Fail(c, http.StatusForbidden, "permission denied: not task owner")
+			return
+		}
+	}
 	if err := h.repo.Cancel(c.Request.Context(), id); err != nil {
 		switch {
 		case errors.Is(err, ErrNotFound):
@@ -521,6 +547,49 @@ func (h *Handler) Cancel(c *gin.Context) {
 	response.OK(c, gin.H{"id": id.String(), "status": string(StatusCanceled)})
 }
 
+// Resume POST /pm/adhoc/tasks/:id/resume
+//
+// 恢复已取消的 adhoc 任务（#674）：
+//   - continuous → scheduled（让 ContinuousScheduler 下次 sweep 推 pending）
+//   - oneshot → pending（让 worker 直接捞）
+//   - 非 canceled 状态调用返回 409 Conflict。
+func (h *Handler) Resume(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Fail(c, http.StatusBadRequest, "invalid id")
+		return
+	}
+	// #652：先取任务做归属权校验（恢复）—— 自建任务仅创建者或超管可恢复。
+	existing, err := h.repo.Get(c.Request.Context(), id)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			response.Fail(c, http.StatusNotFound, "not found")
+			return
+		}
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if !existing.IsBuiltin {
+		if !canOperate(existing, extractCreator(c), isAdmin(c)) {
+			response.Fail(c, http.StatusForbidden, "permission denied: not task owner")
+			return
+		}
+	}
+	newStatus, err := h.repo.Resume(c.Request.Context(), id)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrNotFound):
+			response.Fail(c, http.StatusNotFound, "not found")
+		case errors.Is(err, ErrNotCanceled):
+			response.Fail(c, http.StatusConflict, "task is not canceled, cannot resume")
+		default:
+			commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		}
+		return
+	}
+	response.OK(c, gin.H{"id": id.String(), "status": string(newStatus)})
+}
+
 // Delete DELETE /pm/adhoc/tasks/:id/definition
 //
 // 硬删终态（succeeded/failed/canceled）自建（is_builtin=false）adhoc 任务的定义行（#392）。
@@ -533,6 +602,24 @@ func (h *Handler) Delete(c *gin.Context) {
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, "invalid id")
 		return
+	}
+	// #652：先取任务做归属权校验（删除）—— 自建任务仅创建者或超管可删除。
+	existing, err := h.repo.Get(c.Request.Context(), id)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			response.Fail(c, http.StatusNotFound, "not found")
+			return
+		}
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	// #652：自建任务归属权校验（删除）—— 仅创建者或超管可删除。
+	// 内置任务不做归属权校验（由 repo.Delete 的 is_builtin 守门拦截）。
+	if !existing.IsBuiltin {
+		if !canOperate(existing, extractCreator(c), isAdmin(c)) {
+			response.Fail(c, http.StatusForbidden, "permission denied: not task owner")
+			return
+		}
 	}
 	if err := h.repo.Delete(c.Request.Context(), id); err != nil {
 		switch {
@@ -757,6 +844,11 @@ func (h *Handler) Results(c *gin.Context) {
 			return
 		}
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	// #652：自建任务结果读权限校验 —— 内置任务全员可读，自建任务仅创建者或超管可读。
+	if !canViewResults(task, extractCreator(c), isAdmin(c)) {
+		response.Fail(c, http.StatusForbidden, "permission denied: not task owner")
 		return
 	}
 
@@ -1026,6 +1118,11 @@ func (h *Handler) FilterOptions(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
+	// #652：筛选选项属于结果数据的衍生视图，与 Results 同口径做读权限校验。
+	if !canViewResults(task, extractCreator(c), isAdmin(c)) {
+		response.Fail(c, http.StatusForbidden, "permission denied: not task owner")
+		return
+	}
 
 	dim := task.Dimension
 	if dim == "" {
@@ -1165,13 +1262,18 @@ func (h *Handler) Runs(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, "invalid id")
 		return
 	}
-	// 任务存在校验
-	if _, err := h.repo.Get(c.Request.Context(), id); err != nil {
+	// 任务存在校验 + #652 读权限校验
+	task, err := h.repo.Get(c.Request.Context(), id)
+	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			response.Fail(c, http.StatusNotFound, "task not found")
 			return
 		}
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if !canViewResults(task, extractCreator(c), isAdmin(c)) {
+		response.Fail(c, http.StatusForbidden, "permission denied: not task owner")
 		return
 	}
 	limit := 50
@@ -1277,6 +1379,27 @@ func (h *Handler) writeSSE(w io.Writer, eventName string, data []byte) {
 	_, _ = w.Write([]byte("data: "))
 	_, _ = w.Write(data)
 	_, _ = w.Write([]byte("\n\n"))
+}
+
+// canOperate 判断当前用户对自建任务有无操作权限（编辑/取消/删除）。
+// 超管可操作任意自建任务；普通用户只能操作自己创建的任务。
+func canOperate(task *Task, currentUser string, admin bool) bool {
+	if admin {
+		return true
+	}
+	return task.Creator == currentUser
+}
+
+// canViewResults 判断当前用户对任务结果有无读权限。
+// 内置任务全员可读；自建任务仅创建者或超管可读。
+func canViewResults(task *Task, currentUser string, admin bool) bool {
+	if task.IsBuiltin {
+		return true
+	}
+	if admin {
+		return true
+	}
+	return task.Creator == currentUser
 }
 
 // extractCreator 从 gin context 取登录用户名（如有 middleware 注入）。否则用 "anonymous"。

@@ -118,10 +118,10 @@ func Test_Handler_Create_DeviceGroupDimension_OK(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, w.Code)
 }
 
-// ── #363：(粒度, 维度) 组合守门 ────────────────────────────────────────────
+// ── #669：15min 粒度整组下线（取代旧 #363 仅拦 device_group + 15min 的特例）─────
 
-// 失败路径：dimension=device_group + granularities=['15min'] → 400（无 15min 级设备组聚合源，
-// 前置守门拦下，不再落库等 worker 跑才失败）。错误消息明确指向设备组不支持 15min。
+// 失败路径：dimension=device_group + granularities=['15min'] → 400（原 #363 场景，
+// #669 后由通用 15min 拦截覆盖；错误消息不再点名维度）。
 func Test_Handler_Create_DeviceGroup15Min_Rejected(t *testing.T) {
 	var created bool
 	repo := &handlerStubRepo{
@@ -132,7 +132,6 @@ func Test_Handler_Create_DeviceGroup15Min_Rejected(t *testing.T) {
 	b["dimension"] = "device_group"
 	w := postCreateWithRepo(t, repo, b)
 	require.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), "device_group")
 	assert.Contains(t, w.Body.String(), "15min")
 	assert.False(t, created, "非法组合不应落库")
 }
@@ -146,22 +145,49 @@ func Test_Handler_Create_DeviceGroupHourly_OK(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, w.Code)
 }
 
-// 成功路径：dimension=device（默认）+ granularities=['15min'] → 201（设备维度 15min 合法）。
-func Test_Handler_Create_Device15Min_OK(t *testing.T) {
+// 失败路径：dimension=device（默认）+ granularities=['15min'] → 400（#669：设备维度 15min 也不再支持）。
+func Test_Handler_Create_Device15Min_Rejected(t *testing.T) {
+	var created bool
+	repo := &handlerStubRepo{
+		create: func(CreateRequest) (uuid.UUID, error) { created = true; return uuid.New(), nil },
+	}
 	b := baseCreateBody()
 	b["granularities"] = []string{"15min"}
 	// dimension 不填 → 默认 device
-	w := postCreate(t, b)
-	assert.Equal(t, http.StatusCreated, w.Code)
+	w := postCreateWithRepo(t, repo, b)
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "15min")
+	assert.False(t, created, "15min 不应落库")
 }
 
-// 失败路径：编辑自建 device_group 任务，把粒度改成 15min → 400（编辑分支同样守门）。
+// 失败路径：network/product/band/aggregate_group 其它维度 + 15min 同样被拒（#669 全维度拦截）。
+func Test_Handler_Create_OtherDimensions_15Min_Rejected(t *testing.T) {
+	cases := []string{"network", "product", "band", "aggregate_group"}
+	for _, dim := range cases {
+		t.Run(dim, func(t *testing.T) {
+			var created bool
+			repo := &handlerStubRepo{
+				create: func(CreateRequest) (uuid.UUID, error) { created = true; return uuid.New(), nil },
+			}
+			b := baseCreateBody()
+			// aggregate_group/device 需 device_sns；baseCreateBody 已带，对其它维度无副作用（handler 容忍）。
+			b["granularities"] = []string{"15min"}
+			b["dimension"] = dim
+			w := postCreateWithRepo(t, repo, b)
+			require.Equal(t, http.StatusBadRequest, w.Code, "%s + 15min 应被拒", dim)
+			assert.Contains(t, w.Body.String(), "15min")
+			assert.False(t, created, "%s + 15min 不应落库", dim)
+		})
+	}
+}
+
+// 失败路径：编辑自建 device_group 任务把粒度改成 15min → 400（#669 编辑分支同样拦截；错误消息不再点名维度）。
 func Test_Handler_Update_DeviceGroup15Min_Rejected(t *testing.T) {
 	id := uuid.New()
 	var updated bool
 	repo := &handlerStubRepo{
 		get: func(uuid.UUID) (*Task, error) {
-			return &Task{ID: id, IsBuiltin: false, Mode: ModeContinuous, Dimension: DimensionDeviceGroup}, nil
+			return &Task{ID: id, IsBuiltin: false, Mode: ModeContinuous, Dimension: DimensionDeviceGroup, Creator: "anonymous"}, nil
 		},
 		update: func(uuid.UUID, UpdateRequest) error { updated = true; return nil },
 	}
@@ -171,7 +197,7 @@ func Test_Handler_Update_DeviceGroup15Min_Rejected(t *testing.T) {
 	}
 	w := patchUpdate(t, repo, id, b)
 	require.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), "device_group")
+	assert.Contains(t, w.Body.String(), "15min")
 	assert.False(t, updated, "非法组合不应更新")
 }
 
@@ -309,7 +335,7 @@ func Test_Handler_Update_Adhoc_Success(t *testing.T) {
 	var captured UpdateRequest
 	repo := &handlerStubRepo{
 		get: func(uuid.UUID) (*Task, error) {
-			return &Task{ID: id, IsBuiltin: false, Mode: ModeOneshot, Dimension: DimensionDevice, Technology: ""}, nil
+			return &Task{ID: id, IsBuiltin: false, Mode: ModeOneshot, Dimension: DimensionDevice, Technology: "", Creator: "anonymous"}, nil
 		},
 		update: func(_ uuid.UUID, req UpdateRequest) error { captured = req; return nil },
 	}
@@ -336,7 +362,7 @@ func Test_Handler_Update_Adhoc_EmptyDeviceSNs_Rejected(t *testing.T) {
 	id := uuid.New()
 	repo := &handlerStubRepo{
 		get: func(uuid.UUID) (*Task, error) {
-			return &Task{ID: id, IsBuiltin: false, Mode: ModeOneshot, Dimension: DimensionDevice}, nil
+			return &Task{ID: id, IsBuiltin: false, Mode: ModeOneshot, Dimension: DimensionDevice, Creator: "anonymous"}, nil
 		},
 	}
 	b := map[string]any{
@@ -355,7 +381,7 @@ func Test_Handler_Update_Adhoc_InvalidWindow_Rejected(t *testing.T) {
 	id := uuid.New()
 	repo := &handlerStubRepo{
 		get: func(uuid.UUID) (*Task, error) {
-			return &Task{ID: id, IsBuiltin: false, Mode: ModeOneshot, Dimension: DimensionNetwork}, nil
+			return &Task{ID: id, IsBuiltin: false, Mode: ModeOneshot, Dimension: DimensionNetwork, Creator: "anonymous"}, nil
 		},
 	}
 	b := map[string]any{
@@ -373,7 +399,7 @@ func Test_Handler_Update_Adhoc_MultiGranularity_Rejected(t *testing.T) {
 	id := uuid.New()
 	repo := &handlerStubRepo{
 		get: func(uuid.UUID) (*Task, error) {
-			return &Task{ID: id, IsBuiltin: false, Mode: ModeOneshot, Dimension: DimensionNetwork}, nil
+			return &Task{ID: id, IsBuiltin: false, Mode: ModeOneshot, Dimension: DimensionNetwork, Creator: "anonymous"}, nil
 		},
 	}
 	b := map[string]any{

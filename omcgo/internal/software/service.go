@@ -1362,7 +1362,10 @@ func (s *SoftwareService) SuspendUpgrade(ctx context.Context, taskID uuid.UUID) 
 			if IsUpgradeTerminal(subTask.Status) || subTask.Status == UpgradeSuspended {
 				continue
 			}
-			if err := s.subTaskRepo.UpdateStatus(ctx, subTask.ID, UpgradeSuspended, "task suspended by operator"); err != nil {
+			// 用 UpdateStatusByOperator（不写 started_at）—— operator 主动暂停
+			// 不等同于「轮到设备升级」语义；若 sub_task 此时仍是 pending（未被 executor
+			// 挑过），started_at 应保持 NULL，待 Resume 后 executor 真正调度时再写入。
+			if err := s.subTaskRepo.UpdateStatusByOperator(ctx, subTask.ID, UpgradeSuspended, "task suspended by operator"); err != nil {
 				return fmt.Errorf("suspend sub-task %s: %w", subTask.ID.String(), err)
 			}
 			suspendedCount++

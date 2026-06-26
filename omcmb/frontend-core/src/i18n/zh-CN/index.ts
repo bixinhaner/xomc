@@ -2602,6 +2602,9 @@ const messages: Record<string, string> = {
   'dashboard.vsLastWeek':        '较上周',
   'dashboard.onlineRate':        '在线率',
   'dashboard.vsYesterday':       '较昨日',
+  'dashboard.compareWindow.label':     '对比时窗',
+  'dashboard.compareWindow.yesterday': '昨日',
+  'dashboard.compareWindow.lastWeek':  '上周',
   'dashboard.alarmSummary':      '告警汇总',
   'dashboard.viewAll':             '查看全部',
   'dashboard.alarmDistribution':   '告警级别分布',
@@ -7340,6 +7343,12 @@ const messages: Record<string, string> = {
   'perf.adhoc.cancelTaskTitle':          '取消任务',
   'perf.adhoc.cancelTaskContent':        '已在运行的任务取消后不会回滚已写入结果',
   'perf.adhoc.canceled':                 '已取消',
+  // #674：恢复已取消任务
+  'perf.adhoc.btnResume':                '启用',
+  'perf.adhoc.resumeTaskTitle':          '启用任务',
+  'perf.adhoc.resumeTaskContent':        '恢复已取消的任务，任务将重新参与调度执行。确认启用？',
+  'perf.adhoc.resumed':                  '已启用',
+  'perf.adhoc.resumeFailed':             '启用失败：{msg}',
   // issue #392：删除终态自建任务
   'perf.adhoc.btnDelete':                '删除',
   'perf.adhoc.deleteTaskTitle':          '删除任务',
@@ -7426,7 +7435,6 @@ const messages: Record<string, string> = {
   'perf.adhoc.metricTagKpi':             'KPI',
   'perf.adhoc.metricTagCounter':         'Counter',
   'perf.adhoc.fieldGranReq':             '聚合粒度 *',
-  'perf.adhoc.granular15min':            '15 分钟',
   'perf.adhoc.granularHourly':           '小时',
   'perf.adhoc.granularDaily':            '天',
   'perf.adhoc.granularWeekly':           '周',
@@ -7721,8 +7729,6 @@ const messages: Record<string, string> = {
   // qa-614 c2 — 首页 KPI 折线图空状态文案（issue #359：区分"暂无聚合数据/每小时整点更新"与裸空白）
   'dashboard.kpiPanel.empty.title':      '暂无聚合数据',
   'dashboard.kpiPanel.empty.hint':       '全网指标每小时整点更新；刚灌入的数据将在下个整点后或回退原始明细后显示。',
-  // qa-614 c3 #363：设备组维度不支持 15min 粒度提示
-  'perf.adhoc.granDeviceGroupNo15min':   '设备组维度最细为小时，不支持 15 分钟粒度',
 
   // qa-614 c5 — software 固件/升级（#369 / #371 / #379）
   'software.firmware.selectOrInputProductClass': '请选择或输入产品类型',

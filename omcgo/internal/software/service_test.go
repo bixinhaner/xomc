@@ -179,6 +179,12 @@ func (m *svcMockSubTaskRepo) UpdateStatusWithCode(_ context.Context, id uuid.UUI
 	}
 	return nil
 }
+func (m *svcMockSubTaskRepo) UpdateStatusByOperator(_ context.Context, id uuid.UUID, status UpgradeState, msg string) error {
+	if m.updateStatusFn != nil {
+		return m.updateStatusFn(context.Background(), id, status, msg)
+	}
+	return nil
+}
 func (m *svcMockSubTaskRepo) UpdateFailureReasonByTask(_ context.Context, _ uuid.UUID, _ FailureCode) error {
 	return nil
 }

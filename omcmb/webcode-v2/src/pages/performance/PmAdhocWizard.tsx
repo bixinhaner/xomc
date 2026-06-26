@@ -50,7 +50,8 @@ const DIMENSION_OPTIONS: { label: string; value: AdhocDimension }[] = [
   { label: '按设备组', value: 'device_group' },
 ]
 
-const GRANULARITY_OPTIONS = ['15min', 'hourly', 'daily']
+// #669：自定义聚合任务下线 15min，最细粒度限定 hourly（详见 pmAdhocConstraints.ts）。
+const GRANULARITY_OPTIONS = ['hourly', 'daily']
 const TECH_OPTIONS: { label: string; value: string }[] = [
   { label: '不限', value: '' },
   { label: 'LTE', value: 'lte' },
@@ -79,7 +80,7 @@ export function PmAdhocWizardPage() {
   const [mode, setMode] = useState<AdhocMode>('oneshot')
   const [dimension, setDimension] = useState<AdhocDimension>('device')
   const [technology, setTechnology] = useState('')
-  const [granularity, setGranularity] = useState('15min')
+  const [granularity, setGranularity] = useState('hourly')
   const [deviceSnsText, setDeviceSnsText] = useState('')
   const [metricPathsText, setMetricPathsText] = useState('')
   const [windowStart, setWindowStart] = useState('')
@@ -94,7 +95,7 @@ export function PmAdhocWizardPage() {
     setMode(task.mode)
     setDimension(task.dimension)
     setTechnology(task.technology ?? '')
-    setGranularity(task.granularities[0] ?? '15min')
+    setGranularity(task.granularities[0] ?? 'hourly')
     setDeviceSnsText(task.deviceSns.join(', '))
     setMetricPathsText(task.metricPaths.join(', '))
     setWindowStart(task.windowStart ? task.windowStart.slice(0, 16) : '')
@@ -111,9 +112,9 @@ export function PmAdhocWizardPage() {
     return Number.isNaN(d.getTime()) ? undefined : d.toISOString()
   }
 
-  // #363：编辑模式维度不可改，取任务原维度做组合校验；新建模式取表单维度。
+  // #669：编辑模式维度不可改，取任务原维度做组合校验；新建模式取表单维度。
   const effectiveDimension: AdhocDimension = isEdit ? (task?.dimension ?? dimension) : dimension
-  // #363：(粒度, 维度) 组合守门——15min × 设备组不支持。
+  // #669：兜底——15min 已从粒度选项删除，但编辑模式遇旧任务仍可能传入 15min，由此拦截。
   const granDimSupported = isGranularityDimensionSupported(granularity, effectiveDimension)
 
   const canSubmit =
@@ -236,7 +237,7 @@ export function PmAdhocWizardPage() {
                 onValueChange={(v) => {
                   const next = v as AdhocDimension
                   setDimension(next)
-                  // #363：切到设备组若当前粒度 15min（不支持）→ 自动回落 hourly。
+                  // #669：编辑模式遇旧 15min 任务，切维度时一并回落 hourly（新建路径已无 15min 选项）。
                   if (!isGranularityDimensionSupported(granularity, next)) {
                     setGranularity('hourly')
                   }
@@ -292,20 +293,17 @@ export function PmAdhocWizardPage() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {GRANULARITY_OPTIONS.map((g) => {
-                // #363：设备组维度不支持 15min 粒度，禁用该选项。
-                const disabled = !isGranularityDimensionSupported(g, effectiveDimension)
-                return (
-                  <SelectItem key={g} value={g} disabled={disabled}>
-                    {disabled ? `${g}（设备组不支持）` : g}
-                  </SelectItem>
-                )
-              })}
+              {/* #669：自定义聚合任务最细粒度限定 hourly，15min 选项已从数组中移除。 */}
+              {GRANULARITY_OPTIONS.map((g) => (
+                <SelectItem key={g} value={g}>
+                  {g}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
           {!granDimSupported && (
             <span className="text-xs text-destructive">
-              设备组维度最细为小时，不支持 15 分钟粒度，请改用小时及以上。
+              当前粒度已下线（如 15min），请改选小时及以上粒度。
             </span>
           )}
         </div>
