@@ -180,3 +180,16 @@ func TestCountAlarmsAtTimeQuery(t *testing.T) {
 	assert.Contains(t, countAlarmsAtTimeQuery, "cleared_at IS NULL OR cleared_at > $1")
 }
 
+// summaryDeviceCountsQuery 是 /summary 接口 KPI 卡的设备总数 + 在线数取数 SQL。
+// 必须满足：
+//   1. 取自 devices 父表（按 carrier 分区，父表查询贯穿所有分区）；
+//   2. "在线"语义 = is_online=TRUE（T-0162 后与 lifecycle 解耦，与设备状态柱图同源）；
+//   3. 排除软删（deleted_at IS NULL）。
+// 任何 SQL 改动只要破坏上述三条，本测试立即失败。
+
+func TestSummaryDeviceCountsQuery(t *testing.T) {
+	assert.Contains(t, summaryDeviceCountsQuery, "FROM devices")
+	assert.Contains(t, summaryDeviceCountsQuery, "COUNT(*) FILTER (WHERE is_online = TRUE)")
+	assert.Contains(t, summaryDeviceCountsQuery, "deleted_at IS NULL")
+}
+
