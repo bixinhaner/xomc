@@ -126,6 +126,7 @@ type mockEventBus struct {
 	PublishFn        func(ctx context.Context, subject string, evt event.Event) error
 	SubscribeFn      func(subject string, handler event.EventHandler) (event.Subscription, error)
 	QueueSubscribeFn func(subject string, queue string, handler event.EventHandler) (event.Subscription, error)
+	PullSubscribeFn  func(subject string, queue string, handler event.EventHandler) (event.Subscription, error)
 	CloseFn          func() error
 
 	// Capture published events for assertions.
@@ -155,6 +156,13 @@ func (m *mockEventBus) Subscribe(subject string, handler event.EventHandler) (ev
 func (m *mockEventBus) QueueSubscribe(subject string, queue string, handler event.EventHandler) (event.Subscription, error) {
 	if m.QueueSubscribeFn != nil {
 		return m.QueueSubscribeFn(subject, queue, handler)
+	}
+	return &mockSubscription{}, nil
+}
+
+func (m *mockEventBus) PullSubscribe(subject string, queue string, handler event.EventHandler) (event.Subscription, error) {
+	if m.PullSubscribeFn != nil {
+		return m.PullSubscribeFn(subject, queue, handler)
 	}
 	return &mockSubscription{}, nil
 }
@@ -210,6 +218,26 @@ func newEngineHarness(deviceRepo device.DeviceRepository) *engineHarness {
 		cmdQueue: cmdQueue,
 		eventBus: evtBus,
 	}
+}
+
+func TestProvisioningEngine_Subscribe_GPVUsesPullSubscribe(t *testing.T) {
+	devRepo := &mockDeviceRepo{}
+	h := newEngineHarness(devRepo)
+
+	var pullSubject, pullQueue string
+	var pullCalled int
+	h.eventBus.PullSubscribeFn = func(subject string, queue string, handler event.EventHandler) (event.Subscription, error) {
+		pullCalled++
+		pullSubject = subject
+		pullQueue = queue
+		return &mockSubscription{}, nil
+	}
+
+	err := h.engine.Subscribe(h.eventBus)
+	require.NoError(t, err)
+	require.Equal(t, 1, pullCalled, "GPV should be subscribed via pull consumer")
+	assert.Equal(t, event.SubjectCommandGetParamsResponse, pullSubject)
+	assert.Equal(t, "provision-gpv", pullQueue)
 }
 
 // ---------------------------------------------------------------------------

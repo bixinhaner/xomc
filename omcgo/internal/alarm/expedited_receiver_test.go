@@ -63,6 +63,10 @@ func (m *mockEventBus) QueueSubscribe(_ string, _ string, handler event.EventHan
 	return nil, nil
 }
 
+func (m *mockEventBus) PullSubscribe(_ string, _ string, handler event.EventHandler) (event.Subscription, error) {
+	return nil, nil
+}
+
 func (m *mockEventBus) Close() error { return nil }
 
 func newTestDevice() *model.Device {

@@ -361,3 +361,31 @@ func TestSubjectConstants_DotSeparated(t *testing.T) {
 		assert.Contains(t, subject, ".", "%s subject should be dot-separated: %s", name, subject)
 	}
 }
+
+// --- pullDurableName tests ---
+
+func TestPullDurableName_EmptyQueue_ReturnsPull(t *testing.T) {
+	assert.Equal(t, "pull", pullDurableName(""))
+}
+
+func TestPullDurableName_AlreadyHasSuffix_ReturnsSame(t *testing.T) {
+	assert.Equal(t, "provision-gpv-pull", pullDurableName("provision-gpv-pull"))
+}
+
+func TestPullDurableName_AppendsSuffix(t *testing.T) {
+	assert.Equal(t, "provision-gpv-pull", pullDurableName("provision-gpv"))
+}
+
+func TestPullDurableName_ShortName(t *testing.T) {
+	assert.Equal(t, "foo-pull", pullDurableName("foo"))
+}
+
+// --- pullBatchSizeForSubject tests ---
+
+func TestPullBatchSizeForSubject_GPVSubject_Returns64(t *testing.T) {
+	assert.Equal(t, gpvPullBatchSize, pullBatchSizeForSubject(SubjectCommandGetParamsResponse))
+}
+
+func TestPullBatchSizeForSubject_OtherSubject_Returns32(t *testing.T) {
+	assert.Equal(t, 32, pullBatchSizeForSubject("some.other.subject"))
+}

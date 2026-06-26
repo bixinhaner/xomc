@@ -273,6 +273,9 @@ func (b *capturingEventBus) Subscribe(_ string, _ event.EventHandler) (event.Sub
 func (b *capturingEventBus) QueueSubscribe(_ string, _ string, _ event.EventHandler) (event.Subscription, error) {
 	return &noopSub{}, nil
 }
+func (b *capturingEventBus) PullSubscribe(_ string, _ string, _ event.EventHandler) (event.Subscription, error) {
+	return &noopSub{}, nil
+}
 func (b *capturingEventBus) Close() error { return nil }
 
 type noopSub struct{}

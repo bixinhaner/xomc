@@ -78,10 +78,25 @@ func (m *MockEventBus) QueueSubscribe(subject, queue string, handler event.Event
 	return ret0, ret1
 }
 
+// PullSubscribe mocks base method.
+func (m *MockEventBus) PullSubscribe(subject, queue string, handler event.EventHandler) (event.Subscription, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PullSubscribe", subject, queue, handler)
+	ret0, _ := ret[0].(event.Subscription)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
 // QueueSubscribe indicates an expected call of QueueSubscribe.
 func (mr *MockEventBusMockRecorder) QueueSubscribe(subject, queue, handler any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "QueueSubscribe", reflect.TypeOf((*MockEventBus)(nil).QueueSubscribe), subject, queue, handler)
+}
+
+// PullSubscribe indicates an expected call of PullSubscribe.
+func (mr *MockEventBusMockRecorder) PullSubscribe(subject, queue, handler any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PullSubscribe", reflect.TypeOf((*MockEventBus)(nil).PullSubscribe), subject, queue, handler)
 }
 
 // Subscribe mocks base method.

@@ -108,6 +108,9 @@ func (m *acsHEventBus) Subscribe(_ string, _ event.EventHandler) (event.Subscrip
 func (m *acsHEventBus) QueueSubscribe(_ string, _ string, _ event.EventHandler) (event.Subscription, error) {
 	return &acsHSubscription{}, nil
 }
+func (m *acsHEventBus) PullSubscribe(_ string, _ string, _ event.EventHandler) (event.Subscription, error) {
+	return &acsHSubscription{}, nil
+}
 func (m *acsHEventBus) Close() error { return nil }
 
 type acsHSubscription struct{}

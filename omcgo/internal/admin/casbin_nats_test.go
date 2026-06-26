@@ -144,6 +144,9 @@ func (b *capturingBus) Subscribe(_ string, _ event.EventHandler) (event.Subscrip
 func (b *capturingBus) QueueSubscribe(_ string, _ string, _ event.EventHandler) (event.Subscription, error) {
 	return &noopCasbinSub{}, nil
 }
+func (b *capturingBus) PullSubscribe(_ string, _ string, _ event.EventHandler) (event.Subscription, error) {
+	return &noopCasbinSub{}, nil
+}
 func (b *capturingBus) Close() error { return nil }
 
 type noopCasbinSub struct{}
@@ -167,6 +170,9 @@ func (erroringBus) Subscribe(_ string, _ event.EventHandler) (event.Subscription
 	return &noopCasbinSub{}, nil
 }
 func (erroringBus) QueueSubscribe(_ string, _ string, _ event.EventHandler) (event.Subscription, error) {
+	return &noopCasbinSub{}, nil
+}
+func (erroringBus) PullSubscribe(_ string, _ string, _ event.EventHandler) (event.Subscription, error) {
 	return &noopCasbinSub{}, nil
 }
 func (erroringBus) Close() error { return nil }

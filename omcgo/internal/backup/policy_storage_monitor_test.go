@@ -79,6 +79,10 @@ func (b *fakeEventBus) QueueSubscribe(_ string, _ string, _ event.EventHandler) 
 	return nil, errors.New("QueueSubscribe not used in storage monitor tests")
 }
 
+func (b *fakeEventBus) PullSubscribe(_ string, _ string, _ event.EventHandler) (event.Subscription, error) {
+	return nil, errors.New("PullSubscribe not used in storage monitor tests")
+}
+
 func (b *fakeEventBus) Close() error { return nil }
 
 func (b *fakeEventBus) snapshot() []capturedEvent {

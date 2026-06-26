@@ -25,6 +25,11 @@ func (b *countingBus) QueueSubscribe(_ string, queue string, _ event.EventHandle
 	b.lastQueue = queue
 	return noopSub{}, nil
 }
+func (b *countingBus) PullSubscribe(_ string, queue string, _ event.EventHandler) (event.Subscription, error) {
+	b.queueSubs++
+	b.lastQueue = queue
+	return noopSub{}, nil
+}
 func (b *countingBus) Close() error { return nil }
 
 type noopSub struct{}

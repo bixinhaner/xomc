@@ -307,7 +307,7 @@ func (e *ProvisioningEngine) Subscribe(bus event.EventBus) error {
 
 	// Subscribe to GPV response for parameter sync processing.
 	e.ensureGPVWorkersStarted()
-	if _, err := bus.QueueSubscribe(event.SubjectCommandGetParamsResponse, "provision-gpv", func(ctx context.Context, evt event.Event) error {
+	if _, err := bus.PullSubscribe(event.SubjectCommandGetParamsResponse, "provision-gpv", func(ctx context.Context, evt event.Event) error {
 		return e.enqueueGPVResponseEvent(ctx, evt)
 	}); err != nil {
 		e.logger.Warn("failed to subscribe to GPV response", zap.Error(err))
