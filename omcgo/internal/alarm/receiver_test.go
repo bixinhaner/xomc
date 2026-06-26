@@ -45,6 +45,9 @@ func (b *rcvMockEventBus) QueueSubscribe(subject, queue string, handler event.Ev
 	}
 	return &rcvMockSubscription{}, nil
 }
+func (b *rcvMockEventBus) PullSubscribe(subject, queue string, handler event.EventHandler) (event.Subscription, error) {
+	return b.QueueSubscribe(subject, queue, handler)
+}
 func (b *rcvMockEventBus) Close() error { return nil }
 
 type rcvMockDeviceReader struct {

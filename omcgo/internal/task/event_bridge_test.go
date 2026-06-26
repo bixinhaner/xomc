@@ -30,6 +30,9 @@ func (b *fakeEventBus) QueueSubscribe(subject, group string, _ event.EventHandle
 	b.queueGroups = append(b.queueGroups, group)
 	return &fakeSub{}, nil
 }
+func (b *fakeEventBus) PullSubscribe(subject, group string, handler event.EventHandler) (event.Subscription, error) {
+	return b.QueueSubscribe(subject, group, handler)
+}
 func (b *fakeEventBus) Close() error { return nil }
 
 type fakeSub struct{}

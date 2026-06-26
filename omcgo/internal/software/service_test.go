@@ -342,6 +342,9 @@ func (m *svcMockEventBus) Subscribe(_ string, _ event.EventHandler) (event.Subsc
 func (m *svcMockEventBus) QueueSubscribe(_ string, _ string, _ event.EventHandler) (event.Subscription, error) {
 	return &svcMockSub{}, nil
 }
+func (m *svcMockEventBus) PullSubscribe(_ string, _ string, _ event.EventHandler) (event.Subscription, error) {
+	return &svcMockSub{}, nil
+}
 func (m *svcMockEventBus) Close() error { return nil }
 
 type svcMockSub struct{}

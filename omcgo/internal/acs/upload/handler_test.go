@@ -199,6 +199,10 @@ func (c *captureBus) QueueSubscribe(string, string, event.EventHandler) (event.S
 	return nil, nil
 }
 
+func (c *captureBus) PullSubscribe(string, string, event.EventHandler) (event.Subscription, error) {
+	return nil, nil
+}
+
 func (c *captureBus) Close() error { return nil }
 
 func TestPublishPMFileReceivedEvent_emptySNSkipsPublish(t *testing.T) {

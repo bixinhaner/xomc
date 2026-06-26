@@ -115,6 +115,10 @@ func (b *ChannelEventBus) QueueSubscribe(subject string, queue string, handler E
 	return b.subscribe(subject, queue, handler)
 }
 
+func (b *ChannelEventBus) PullSubscribe(subject string, queue string, handler EventHandler) (Subscription, error) {
+	return b.subscribe(subject, queue, handler)
+}
+
 func (b *ChannelEventBus) subscribe(subject, queue string, handler EventHandler) (Subscription, error) {
 	if b.closed.Load() {
 		return nil, ErrBusClosed
