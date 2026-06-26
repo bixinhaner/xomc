@@ -432,15 +432,20 @@ interface BackendGroup {
 // Backend audit log model
 interface BackendAuditLog {
   id: string;
+  user_id?: string;
   userId?: string;
   username: string;
   action: string;
   resource: string;
+  resource_id?: string;
   resourceId?: string;
   details?: Record<string, unknown>;
+  ip_address?: string;
   ipAddress?: string;
+  user_agent?: string;
   userAgent?: string;
-  createdAt: string;
+  created_at?: string;
+  createdAt?: string;
 }
 
 interface BackendListResponse<T> {
@@ -539,22 +544,25 @@ function mapBackendRole(br: BackendRole): Role {
 }
 
 function mapBackendAuditLog(ba: BackendAuditLog): OperationLog {
+  const createdAt = ba.created_at ?? ba.createdAt ?? '';
+  const resourceId = ba.resource_id ?? ba.resourceId ?? '';
+
   return {
     id: ba.id,
     operator: ba.username,
-    clientIp: ba.ipAddress || '',
+    clientIp: ba.ip_address ?? ba.ipAddress ?? '',
     module: ba.resource || '',
     operationType: (ba.action || 'query') as OperationType,
-    target: ba.resourceId || '',
+    target: resourceId,
     content: ba.details ? JSON.stringify(ba.details) : '',
     result: 'success',
     message: '',
-    operationTime: ba.createdAt,
+    operationTime: createdAt,
     logName: `${ba.action} ${ba.resource}`.trim(),
     detail: ba.details ? JSON.stringify(ba.details) : '',
     reason: '',
-    startTime: ba.createdAt,
-    endTime: ba.createdAt,
+    startTime: createdAt,
+    endTime: createdAt,
   };
 }
 
