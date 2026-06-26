@@ -115,18 +115,25 @@ export function LayoutKPIPanel({
   const titleFallbackKey = selectedMetrics[0] ?? panel.metrics[0] ?? '';
   const titleFallback = titleFallbackKey ? resolveOne(titleFallbackKey).name : '';
 
+  // 单选时图例的主线名称：结合业务习惯，无论天/周都叫"今日"代表当前周期。
   const todayLabel = t('dashboard.timeRange.today');
+
+  // 对比线名称：结合业务习惯，天模式对比"昨日"，周模式对比线叫"本周"。
   const compareLabel = compareWindow === 'last_week'
-    ? t('dashboard.timeRange.lastWeek')
+    ? t('dashboard.timeRange.thisWeek')
     : t('dashboard.timeRange.yesterday');
 
   const xData = useMemo(() => generateDayAxisLabels(), []);
   const xDataFull = useMemo(() => generateDayAxisTimestamps(), []);
 
-  const { series } = useMemo(
-    () => buildSeries(selectedMetrics, trendData, xData, todayLabel, compareLabel, resolveOne),
-    [selectedMetrics, trendData, xData, todayLabel, compareLabel, resolveOne],
+  const { series, weekXData, weekXDataFull } = useMemo(
+    () => buildSeries(selectedMetrics, trendData, xData, todayLabel, compareLabel, resolveOne, undefined, compareWindow),
+    [selectedMetrics, trendData, xData, todayLabel, compareLabel, resolveOne, compareWindow],
   );
+
+  // last_week 模式用按天聚合后的日期轴（由 buildSeries 返回），yesterday 用固定 24h 轴。
+  const chartXData = compareWindow === 'last_week' ? (weekXData ?? []) : xData;
+  const chartXDataFull = compareWindow === 'last_week' ? (weekXDataFull ?? []) : xDataFull;
 
   // 至少一条 series 有真实数据点？无任何点时给"暂无聚合数据"提示（issue #359 保留）。
   const hasSeriesData = useMemo(
@@ -171,25 +178,44 @@ export function LayoutKPIPanel({
           style={{
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'space-between',
             gap: 12,
             minHeight: 32,
+            flexWrap: 'wrap',
           }}
         >
-          <Text
-            style={{ fontSize: 15, fontWeight: 600, color: token.colorText, flexShrink: 0 }}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              flexWrap: 'wrap',
+              minWidth: 0,
+              flex: '1 1 auto',
+            }}
           >
-            {panel.title ? t(panel.title) : titleFallback}
-          </Text>
-          <Segmented
-            size="small"
-            value={compareWindow}
-            onChange={(value) => onCompareWindowChange(value as 'yesterday' | 'last_week')}
-            options={[
-              { label: t('dashboard.compareWindow.yesterday'), value: 'yesterday' },
-              { label: t('dashboard.compareWindow.lastWeek'), value: 'last_week' },
-            ]}
-          />
+            <Text
+              style={{ fontSize: 15, fontWeight: 600, color: token.colorText, flexShrink: 0 }}
+            >
+              {panel.title ? t(panel.title) : titleFallback}
+            </Text>
+            {selectedMetrics.length <= 1 ? (
+              <Segmented
+                size="small"
+                value={compareWindow}
+                onChange={(value) => onCompareWindowChange(value as 'yesterday' | 'last_week')}
+                options={[
+                  { label: t('dashboard.compareWindow.day'), value: 'yesterday' },
+                  { label: t('dashboard.compareWindow.week'), value: 'last_week' },
+                ]}
+              />
+            ) : (
+              <Tooltip title={compareWindow === 'last_week' ? t('dashboard.compareWindow.multiMetricWeekHint') : t('dashboard.compareWindow.multiMetricHint')}>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {compareWindow === 'last_week' ? t('dashboard.compareWindow.thisWeekOnly') : t('dashboard.compareWindow.todayOnly')}
+                </Text>
+              </Tooltip>
+            )}
+          </div>
           {/*
            * 宽度分档 + responsive tag：
            *  - 只有 1 个可选项（如可用性/移动性）→ 160px，避免“只装一个 tag 却拉很长”的空荡感。
@@ -207,7 +233,7 @@ export function LayoutKPIPanel({
             maxTagPlaceholder={renderMaxTagPlaceholder}
             allowClear
             placeholder={t('dashboard.kpi.selectMetricsPlaceholder')}
-            style={{ width: panel.metrics.length <= 1 ? 160 : 260, flexShrink: 0 }}
+            style={{ width: panel.metrics.length <= 1 ? 180 : 240, flexShrink: 0, marginLeft: 'auto' }}
             size="small"
           />
         </div>
@@ -243,7 +269,9 @@ export function LayoutKPIPanel({
                 <div style={{ textAlign: 'center' }}>
                   <div style={{ color: token.colorText }}>{t('dashboard.kpiPanel.empty.title')}</div>
                   <Text type="secondary" style={{ fontSize: 12 }}>
-                    {t('dashboard.kpiPanel.empty.hint')}
+                    {compareWindow === 'last_week'
+                      ? t('dashboard.kpiPanel.empty.lastWeekHint')
+                      : t('dashboard.kpiPanel.empty.hint')}
                   </Text>
                 </div>
               }
@@ -251,11 +279,11 @@ export function LayoutKPIPanel({
           </div>
         ) : (
           <LineChart
-            // 仅制式 / 面板身份变化时 remount；selectedMetrics 变化走 echarts 自身的 series diff，避免增减 tag 就销毁重建 echarts 实例。
-            key={`${technology}-${panel.title}`}
+            // compareWindow 变化时 x 轴格式从 HH:mm 切换到 MM/DD，需强制 remount 清空旧 ECharts 实例。
+            key={`${technology}-${panel.title}-${compareWindow}`}
             title=""
-            xData={xData}
-            xDataFull={xDataFull}
+            xData={chartXData}
+            xDataFull={chartXDataFull}
             series={series}
             height={height - 70}
             smooth
