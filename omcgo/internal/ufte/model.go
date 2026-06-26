@@ -71,17 +71,22 @@ type Task struct {
 	FirmwareID      string `json:"firmwareId,omitempty"`
 	TargetVersion   string `json:"targetVersion,omitempty"`
 	ProductType     string `json:"productType,omitempty"`
-	IsKeepConfig    bool   `json:"isKeepConfig,omitempty"`
-	Status          string `json:"status"`
-	Result          string `json:"result,omitempty"`
-	Progress        int    `json:"progress"`
-	TotalCount      int    `json:"totalCount"`
-	SuccessCount    int    `json:"successCount"`
-	FailCount       int    `json:"failCount"`
-	CurrentStep     string `json:"currentStep"`
-	ExecutionMode   string `json:"executionMode"`
-	CreateUser      string `json:"createUser"`
-	CreatedAt       string `json:"createdAt"`
+	// ProductName 是 task.product_class 经 ProductRegistry 解析出的产品英文名（如「甲产品」），
+	// 与 DeviceItem.ProductName 同口径；解析不到（task.product_class 是「4G eNB」这种宽泛
+	// 类别 / 未注册）时由 mapTask 回退查任一子任务设备的 productClass 再解析，仍无果则空串
+	// → 前端 fallback 到 ProductType。修复 #682：任务列表「产品名称」误显示 firmware.product_class。
+	ProductName   string `json:"productName,omitempty"`
+	IsKeepConfig  bool   `json:"isKeepConfig,omitempty"`
+	Status        string `json:"status"`
+	Result        string `json:"result,omitempty"`
+	Progress      int    `json:"progress"`
+	TotalCount    int    `json:"totalCount"`
+	SuccessCount  int    `json:"successCount"`
+	FailCount     int    `json:"failCount"`
+	CurrentStep   string `json:"currentStep"`
+	ExecutionMode string `json:"executionMode"`
+	CreateUser    string `json:"createUser"`
+	CreatedAt     string `json:"createdAt"`
 	// StartedAt 任务真正开始下发（状态首次进入 in_progress 时由 PG repo 自动写入 upgrade_tasks.started_at）；未开始时为空 → JSON omitempty 不输出。
 	StartedAt string `json:"startedAt,omitempty"`
 	// EndedAt 任务到达终态（ended / 含成功/失败/终止）时由 PG repo 自动写入 upgrade_tasks.ended_at；未结束时为空。
