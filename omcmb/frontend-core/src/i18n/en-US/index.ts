@@ -1993,6 +1993,12 @@ const messages: Record<string, string> = {
   'login.mustChangePassword.content': 'To keep your account secure, please change your password now. The system cannot be used until your password is changed.',
   'login.mustChangePassword.confirm': 'Change password now',
   'login.passwordExpiringSoon': 'Your password will expire in {days} day(s); please update it soon',
+  // Issue #687: captcha
+  'login.captcha.required':      'Please enter the captcha',
+  'login.captcha.placeholder':   'Enter characters shown',
+  'login.captcha.refresh':       'Can\'t read? Click to refresh',
+  'login.captcha.invalid':       'Invalid captcha, please try again',
+  'login.captcha.loadFailed':    'Captcha load failed, click to retry',
 
   // -------------------------------------------------------------------------
   // Task panel

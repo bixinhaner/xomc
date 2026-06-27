@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Activity, Loader2 } from 'lucide-react'
+import { Activity, Loader2, RefreshCw, ShieldCheck } from 'lucide-react'
+import type { AxiosError } from 'axios'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -14,6 +15,7 @@ import {
 } from '@/components/ui/card'
 
 import { authApi } from '@core/services/api/authApi'
+import type { CaptchaChallenge, CaptchaCredentials } from '@core/services/api/authApi'
 import { useUserStore } from '@core/store/userStore'
 import { usePublicOmcName, resolveOmcName } from '@core/hooks/api/useOmcName'
 
@@ -35,14 +37,57 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   // Issue #649：必须改密时显示阻塞提示卡片，点确认 → 退出登录回登录页。
   const [mustChangeOpen, setMustChangeOpen] = useState(false)
+  // Issue #687: 图形验证码状态
+  const [captchaRequired, setCaptchaRequired] = useState(false)
+  const [captchaData, setCaptchaData] = useState<CaptchaChallenge | null>(null)
+  const [captchaLoading, setCaptchaLoading] = useState(false)
+  const [captchaError, setCaptchaError] = useState(false)
+  const [captchaInput, setCaptchaInput] = useState('')
+
+  // Issue #687: 加载验证码图片
+  const loadCaptcha = useCallback(async () => {
+    setCaptchaLoading(true)
+    setCaptchaError(false)
+    try {
+      const data = await authApi.getCaptcha()
+      setCaptchaData(data)
+      setCaptchaInput('')
+    } catch {
+      setCaptchaError(true)
+      setCaptchaData(null)
+    } finally {
+      setCaptchaLoading(false)
+    }
+  }, [])
+
+  // 验证码状态变为“需要”时自动拉取
+  useEffect(() => {
+    if (captchaRequired && !captchaData && !captchaLoading) {
+      loadCaptcha()
+    }
+  }, [captchaRequired, captchaData, captchaLoading, loadCaptcha])
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
     setLoading(true)
     try {
-      const tokens = await authApi.login(username, password)
+      // Issue #687: 若验证码已触发，附带 captcha 参数
+      let captchaCreds: CaptchaCredentials | undefined
+      if (captchaRequired && captchaData && captchaInput) {
+        captchaCreds = {
+          captchaId: captchaData.captchaId,
+          captchaAnswer: captchaInput,
+        }
+      }
+
+      const tokens = await authApi.login(username, password, captchaCreds)
       setTokenPair(tokens)
+
+      // 登录成功后清除验证码状态
+      setCaptchaRequired(false)
+      setCaptchaData(null)
+
       const me = await authApi.getMe()
       login(me)
       // Issue #649：v2 没有内置改密 Modal/页面（历史欠债），仅阻塞登录入口并强制
@@ -54,6 +99,22 @@ export function LoginPage() {
       }
       navigate('/dashboard')
     } catch (err) {
+      // Issue #687: 检测 biz_code=7010（需要验证码）或 7011（验证码错误）
+      // http 拦截器将 biz_code 暴露为 err.bizCode（而非 response.data.biz_code）
+      const axiosErr = err as AxiosError<{ biz_code?: number }> & { bizCode?: number }
+      const bizCode = axiosErr.bizCode ?? axiosErr.response?.data?.biz_code
+
+      if (bizCode === 7010) {
+        setCaptchaRequired(true)
+        setError('需要输入验证码')
+        return
+      }
+      if (bizCode === 7011) {
+        loadCaptcha()
+        setError('验证码错误，请重新输入')
+        return
+      }
+
       const msg = err instanceof Error ? err.message : '登录失败'
       setError(msg)
     } finally {
@@ -95,6 +156,47 @@ export function LoginPage() {
                 required
               />
             </div>
+
+            {/* Issue #687: 验证码（仅当后端要求时显示） */}
+            {captchaRequired && (
+              <div className="space-y-2">
+                <Label htmlFor="captcha">验证码</Label>
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <ShieldCheck className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                    <Input
+                      id="captcha"
+                      className="pl-9"
+                      placeholder="请输入图中字符"
+                      maxLength={5}
+                      value={captchaInput}
+                      onChange={(e) => setCaptchaInput(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={loadCaptcha}
+                    className="w-[120px] h-10 border rounded-md overflow-hidden flex items-center justify-center bg-muted/50 hover:bg-muted transition-colors"
+                    title="点击刷新验证码"
+                  >
+                    {captchaLoading ? (
+                      <Loader2 className="size-5 animate-spin text-muted-foreground" />
+                    ) : captchaError ? (
+                      <RefreshCw className="size-5 text-destructive" />
+                    ) : captchaData ? (
+                      <img
+                        src={captchaData.image}
+                        alt="captcha"
+                        className="w-full h-full object-contain"
+                      />
+                    ) : (
+                      <RefreshCw className="size-5 text-muted-foreground" />
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
 
             {error && (
               <p className="text-sm text-destructive" role="alert">
