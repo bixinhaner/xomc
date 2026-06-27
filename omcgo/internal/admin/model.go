@@ -184,7 +184,7 @@ type AuditLogFilter struct {
 // sys_configs.security.defaultPasswd 取值）；service 层会根据 UseDefaultPassword 严格分
 // 支，不依赖字段是否为空推断（避免旧客户端意外走默认密码路径）。
 type CreateUserRequest struct {
-	Username           string      `json:"username" binding:"required,min=3,max=64"`
+	Username           string      `json:"username" binding:"required,min=3,max=32"`
 	Password           string      `json:"password" binding:"omitempty,min=6"`
 	UseDefaultPassword bool        `json:"use_default_password"`
 	DisplayName        string      `json:"display_name"`
@@ -204,7 +204,7 @@ type CreateUserRequest struct {
 // issue #649：新增 use_default_password 开关，为 true 时 handler 跳过密码解密，service
 // 从默认密码取值。
 type CreateUserHTTPRequest struct {
-	Username           string      `json:"username" binding:"required,min=3,max=64"`
+	Username           string      `json:"username" binding:"required,min=3,max=32"`
 	EncryptedPassword  string      `json:"encrypted_password"`
 	KeyID              string      `json:"key_id"`
 	Password           string      `json:"password"` // T-0120 plaintext fallback

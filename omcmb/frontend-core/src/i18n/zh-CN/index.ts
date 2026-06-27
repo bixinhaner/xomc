@@ -4448,7 +4448,7 @@ const messages: Record<string, string> = {
   'system.security.passwordComplexityRequirement': '密码需要包含数字、小写字母、大写字母和特殊字符(.!@#$%^&*?)',
   'system.security.userPasswordLength':      '用户密码长度：',
   'system.security.user':                    '用户',
-  'system.security.usernameRule':            '用户名称：只能包含数字、26个小写字母、大写字母和减号(-)、下划线(_)、破折号(-)',
+  'system.security.usernameRule':            '用户名称：3-32个字符，只能包含字母、数字、下划线(_)、减号(-)',
   'system.security.passwordExpiration':      '密码有效期',
   'system.security.passwordValidFor':        '密码有效期为',
   'system.security.daysBeforeExpiry':        '天修改一次密码，系统将在到期前',

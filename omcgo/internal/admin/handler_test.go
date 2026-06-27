@@ -474,6 +474,39 @@ func TestHandler_CreateUser_Success(t *testing.T) {
 	assert.Equal(t, "newuser", resp.Username)
 }
 
+// TestHandler_CreateUser_InvalidUsername_Rejects 验证 issue #686 修复：
+// 用户名格式校验（只允许字母、数字、下划线、减号）。
+func TestHandler_CreateUser_InvalidUsername_Rejects(t *testing.T) {
+	userRepo := &handlerMockUserRepo{}
+	env := handlerNewTestEnv(t, userRepo, &handlerMockRoleRepo{})
+
+	testCases := []struct {
+		name     string
+		username string
+	}{
+		{"中文用户名", "测试用户"},
+		{"含空格", "user name"},
+		{"含特殊字符", "user@name"},
+		{"含点号", "user.name"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/users",
+				handlerJSON(CreateUserHTTPRequest{
+					Username:          tc.username,
+					EncryptedPassword: env.encryptPassword(t, "password123"),
+					KeyID:             env.KeyID,
+				}))
+			req.Header.Set("Content-Type", "application/json")
+			env.Engine.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusBadRequest, w.Code, "用户名 %q 应该被拒绝", tc.username)
+		})
+	}
+}
+
 func TestHandler_GetUser_Success(t *testing.T) {
 	userID := uuid.New()
 	userRepo := &handlerMockUserRepo{

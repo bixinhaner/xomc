@@ -4419,7 +4419,7 @@ const messages: Record<string, string> = {
   'system.security.passwordComplexityRequirement': 'Password must contain numbers, lowercase, uppercase and special characters (.!@#$%^&*?)',
   'system.security.userPasswordLength':      'User Password Length:',
   'system.security.user':                    'User',
-  'system.security.usernameRule':            'Username: can only contain numbers, lowercase letters, hyphens (-), underscores (_)',
+  'system.security.usernameRule':            'Username: 3-32 characters, letters, numbers, underscores (_), hyphens (-) only',
   'system.security.passwordExpiration':      'Password Expiration',
   'system.security.passwordValidFor':        'Password valid for',
   'system.security.daysBeforeExpiry':        'days, remind before expiry for',
