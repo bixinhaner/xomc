@@ -6,6 +6,18 @@ import {
   invalidatePublicKeyCache,
 } from '../crypto/passwordCipher';
 
+/** 验证码挑战响应（后端 CaptchaChallenge） */
+export interface CaptchaChallenge {
+  captchaId: string;
+  image: string; // data:image/png;base64,...
+}
+
+/** 登录时附带的验证码参数 */
+export interface CaptchaCredentials {
+  captchaId: string;
+  captchaAnswer: string;
+}
+
 interface BackendUser {
   id: string;
   username: string;
@@ -39,13 +51,26 @@ function mapBackendUserToFrontend(bu: BackendUser): User {
 }
 
 export const authApi = {
-  async login(username: string, password: string): Promise<TokenPairResponse> {
+  /**
+   * 登录接口
+   * @param captcha 可选，当后端要求验证码时（biz_code=7010）附带
+   */
+  async login(
+    username: string,
+    password: string,
+    captcha?: CaptchaCredentials,
+  ): Promise<TokenPairResponse> {
     const { encryptedPassword, keyId } = await preparePasswordPayload(password);
     const body: Record<string, unknown> = {
       username,
       encrypted_password: encryptedPassword,
       key_id: keyId,
     };
+    // 附带验证码（snake_case 给后端）
+    if (captcha) {
+      body.captcha_id = captcha.captchaId;
+      body.captcha_answer = captcha.captchaAnswer;
+    }
     try {
       const { data } = await http.post<TokenPairResponse>('/auth/login', body);
       return data;
@@ -70,5 +95,14 @@ export const authApi = {
   async getMe(): Promise<User> {
     const { data } = await http.get<BackendUser>('/auth/me');
     return mapBackendUserToFrontend(data);
+  },
+
+  /** 获取验证码图片（免登录） */
+  async getCaptcha(): Promise<CaptchaChallenge> {
+    const { data } = await http.get<{ captcha_id: string; image: string }>('/auth/captcha');
+    return {
+      captchaId: data.captcha_id,
+      image: data.image,
+    };
   },
 };

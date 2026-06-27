@@ -1,11 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { App, Form, Input, Button, Checkbox, Modal } from 'antd';
-import { UserOutlined, LockOutlined } from '@ant-design/icons';
+import { App, Form, Input, Button, Checkbox, Modal, Spin } from 'antd';
+import { UserOutlined, LockOutlined, SafetyCertificateOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useUserStore } from '@core/store/userStore';
 import { useT } from '@/hooks/useT';
 import { useMock } from '@core/services/apiSwitch';
 import { authApi } from '@core/services/api/authApi';
+import type { CaptchaChallenge, CaptchaCredentials } from '@core/services/api/authApi';
 import { usePublicSecuritySettings } from '@core/hooks/api/useSecuritySettings';
 import { usePublicOmcName, resolveOmcName } from '@core/hooks/api/useOmcName';
 import type { User } from '@core/types/system';
@@ -16,6 +17,7 @@ interface LoginFormValues {
   username: string;
   password: string;
   remember: boolean;
+  captcha?: string; // Issue #687: 验证码输入
 }
 
 const REMEMBER_KEY = 'omc-remember-credentials';
@@ -61,6 +63,12 @@ export default function LoginPage() {
   const setTokenPair = useUserStore((s) => s.setTokenPair);
   const setMustChangePassword = useUserStore((s) => s.setMustChangePassword);
 
+  // Issue #687: 图形验证码状态
+  const [captchaRequired, setCaptchaRequired] = useState(false);
+  const [captchaData, setCaptchaData] = useState<CaptchaChallenge | null>(null);
+  const [captchaLoading, setCaptchaLoading] = useState(false);
+  const [captchaError, setCaptchaError] = useState(false);
+
   // PrivateRoute 把未登录用户从任意路径（含 /403 错误页）弹到 /login 时会把
   // 原 location 塞进 state.from。错误页不是合法的登录返回目的地，直接降级到
   // /dashboard，避免"admin 登录后又被踢回 /403"的体感 bug。
@@ -87,6 +95,29 @@ export default function LoginPage() {
       });
     }
   }, [form]);
+
+  // Issue #687: 加载验证码图片
+  const loadCaptcha = useCallback(async () => {
+    setCaptchaLoading(true);
+    setCaptchaError(false);
+    try {
+      const data = await authApi.getCaptcha();
+      setCaptchaData(data);
+      form.setFieldValue('captcha', ''); // 清空旧输入
+    } catch {
+      setCaptchaError(true);
+      setCaptchaData(null);
+    } finally {
+      setCaptchaLoading(false);
+    }
+  }, [form]);
+
+  // 验证码状态变为“需要”时自动拉取
+  useEffect(() => {
+    if (captchaRequired && !captchaData && !captchaLoading) {
+      loadCaptcha();
+    }
+  }, [captchaRequired, captchaData, captchaLoading, loadCaptcha]);
 
   const handleMockLogin = async (values: LoginFormValues) => {
     await new Promise<void>((resolve) => setTimeout(resolve, 600));
@@ -123,9 +154,22 @@ export default function LoginPage() {
   };
 
   const handleRealLogin = async (values: LoginFormValues) => {
+    // Issue #687: 若验证码已触发，附带 captcha 参数
+    let captchaCreds: CaptchaCredentials | undefined;
+    if (captchaRequired && captchaData && values.captcha) {
+      captchaCreds = {
+        captchaId: captchaData.captchaId,
+        captchaAnswer: values.captcha,
+      };
+    }
+
     // Step 1: Authenticate and get token pair
-    const tokenPair = await authApi.login(values.username, values.password);
+    const tokenPair = await authApi.login(values.username, values.password, captchaCreds);
     setTokenPair(tokenPair);
+
+    // 登录成功后清除验证码状态
+    setCaptchaRequired(false);
+    setCaptchaData(null);
 
     // Step 2: Fetch current user info
     const user = await authApi.getMe();
@@ -189,13 +233,30 @@ export default function LoginPage() {
         await handleRealLogin(values);
       }
     } catch (err) {
+      // Issue #687: 检测 biz_code=7010（需要验证码）或 7011（验证码错误）
+      // http 拦截器将 biz_code 暴露为 err.bizCode（而非 response.data.biz_code）
+      const axiosErr = err as AxiosError<{ biz_code?: number }> & { bizCode?: number; userMessage?: string };
+      const bizCode = axiosErr.bizCode ?? axiosErr.response?.data?.biz_code;
+
+      if (bizCode === 7010) {
+        // 需要验证码 — 触发验证码流程
+        setCaptchaRequired(true);
+        message.warning(t('login.captcha.required'));
+        return;
+      }
+      if (bizCode === 7011) {
+        // 验证码错误 — 刷新验证码重试
+        loadCaptcha();
+        message.error(t('login.captcha.invalid'));
+        return;
+      }
+
       // T-0119: error 显示优先级修复（T-0117 follow-up）
       //   1. axios userMessage — 拦截器从后端 envelope 解出的友好业务文本（401/403/...）
       //   2. client-side Error.message — passwordCipher 等前端抛的中文诊断（如 T-0117
       //      "当前访问非安全上下文..."），仅当 err 不是 axios error 时使用，避免
       //      "Request failed with status code 401" 渗透到 toast
       //   3. i18n fallback 'login.failed'
-      const axiosErr = err as AxiosError & { userMessage?: string };
       const isAxiosError = !!axiosErr.response;
       const clientErrMsg =
         !isAxiosError && err instanceof Error && err.message
@@ -251,6 +312,53 @@ export default function LoginPage() {
                 autoComplete={passwordAutocomplete}
               />
             </Form.Item>
+
+            {/* Issue #687: 验证码（仅当后端要求时显示） */}
+            {captchaRequired && (
+              <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
+                <Form.Item
+                  name="captcha"
+                  rules={[{ required: true, message: t('login.captcha.required') }]}
+                  style={{ flex: 1, marginBottom: 0 }}
+                >
+                  <Input
+                    prefix={<SafetyCertificateOutlined style={{ color: 'var(--login-input-icon)' }} />}
+                    placeholder={t('login.captcha.placeholder')}
+                    maxLength={5}
+                  />
+                </Form.Item>
+                <div
+                  style={{
+                    width: 120,
+                    height: 40,
+                    border: '1px solid var(--login-input-border, #d9d9d9)',
+                    borderRadius: 6,
+                    overflow: 'hidden',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    background: 'var(--login-captcha-bg, #f5f5f5)',
+                  }}
+                  onClick={loadCaptcha}
+                  title={t('login.captcha.refresh')}
+                >
+                  {captchaLoading ? (
+                    <Spin size="small" />
+                  ) : captchaError ? (
+                    <ReloadOutlined style={{ fontSize: 18, color: '#ff4d4f' }} />
+                  ) : captchaData ? (
+                    <img
+                      src={captchaData.image}
+                      alt="captcha"
+                      style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                    />
+                  ) : (
+                    <ReloadOutlined style={{ fontSize: 18, color: '#999' }} />
+                  )}
+                </div>
+              </div>
+            )}
 
             <Form.Item>
               <div className={styles.rememberRow}>

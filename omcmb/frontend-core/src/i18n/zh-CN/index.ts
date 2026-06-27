@@ -1999,6 +1999,12 @@ const messages: Record<string, string> = {
   'login.mustChangePassword.content': '为保障账号安全，请立即修改密码。修改完成前无法继续使用系统。',
   'login.mustChangePassword.confirm': '立即修改密码',
   'login.passwordExpiringSoon':  '您的密码将在 {days} 天后过期，请尽快修改',
+  // Issue #687: 图形验证码
+  'login.captcha.required':      '请输入验证码',
+  'login.captcha.placeholder':   '请输入图中字符',
+  'login.captcha.refresh':       '看不清？点击刷新',
+  'login.captcha.invalid':       '验证码错误，请重新输入',
+  'login.captcha.loadFailed':    '验证码加载失败，点击重试',
 
   // -------------------------------------------------------------------------
   // Task panel
