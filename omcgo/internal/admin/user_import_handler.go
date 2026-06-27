@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -215,6 +216,13 @@ func parseImportRow(row []string) (CreateUserRequest, error) {
 	password := get(1)
 	if username == "" || password == "" {
 		return CreateUserRequest{}, fmt.Errorf("username/password 必填")
+	}
+	// issue #686：用户名格式校验（只允许字母、数字、下划线、减号，3-32 字符）。
+	if len(username) < 3 || len(username) > 32 {
+		return CreateUserRequest{}, fmt.Errorf("username 长度须 3-32 字符")
+	}
+	if matched, _ := regexp.MatchString(`^[a-zA-Z0-9_-]+$`, username); !matched {
+		return CreateUserRequest{}, fmt.Errorf("username 只能包含字母、数字、下划线、减号")
 	}
 	if len(password) < 6 {
 		return CreateUserRequest{}, fmt.Errorf("password 长度须 >=6")
