@@ -646,8 +646,13 @@ func TestLoginErrorToFriendlyError(t *testing.T) {
 			wantCode:    7099,
 			wantMsg:     "登录失败，请稍后重试",
 			shouldMatch: true,
-		},
-	}
+		},		{
+			name:        "#690：已有 BusinessError 直接透传",
+			err:         commonerrors.NewBusinessError(7012, "该账号已锁定，请 5 分钟后重试", commonerrors.ErrForbidden),
+			wantCode:    7012,
+			wantMsg:     "该账号已锁定，请 5 分钟后重试",
+			shouldMatch: true,
+		},	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			friendly := loginErrorToFriendlyError(tt.err)
