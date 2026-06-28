@@ -48,6 +48,7 @@ import {
   useResetPassword,
   useBatchAssignRoles,
 } from '@core/hooks/api/useSystem';
+import { createPasswordComplexityRule, createPasswordLengthRule } from '@core/utils/passwordValidator';
 import { useSecuritySettings } from '@core/hooks/api/useSecuritySettings';
 import type { User, UserRole, UserStatus } from '@core/types/system';
 import { isBuiltInUser, isLdapUser } from '@core/types/system';
@@ -135,6 +136,9 @@ export default function UserManagement() {
   const { settings: securitySettings, refetch: refetchSecurity } = useSecuritySettings();
   const defaultPasswd = securitySettings?.raw.get('defaultPasswd') ?? '';
   const hasDefaultPasswd = defaultPasswd !== '';
+  // Issue #689: 动态密码长度校验，从 sys_configs 获取 pwdMinLength/pwdMaxLength
+  const pwdMinLength = securitySettings?.pwdMinLength ?? 8;
+  const pwdMaxLength = securitySettings?.pwdMaxLength ?? 32;
 
   // Issue #649：useDefaultPassword 联动改走 createUseDefault / resetUseDefault
   // 两个父组件 useState，Switch 受控 + 父组件 re-render 自然驱动密码字段 props 刷新。
@@ -868,7 +872,12 @@ export default function UserManagement() {
                   ? []
                   : [
                       { required: true, message: t('user.pleaseInputPassword') },
-                      { min: 8, message: t('user.passwordMinLength') },
+                      createPasswordLengthRule(
+                        t('system.security.passwordLengthRequirement', { min: pwdMinLength, max: pwdMaxLength }),
+                        pwdMinLength,
+                        pwdMaxLength,
+                      ),
+                      createPasswordComplexityRule(t('system.security.passwordComplexityRequirement')),
                     ]
               }
             >
@@ -878,7 +887,7 @@ export default function UserManagement() {
                     ? defaultPasswd || t('user.password')
                     : t('user.password')
                 }
-                maxLength={20}
+                maxLength={pwdMaxLength}
                 disabled={createUseDefault}
               />
             </Form.Item>
@@ -1166,7 +1175,12 @@ export default function UserManagement() {
                 ? []
                 : [
                     { required: true, message: t('user.pleaseInputPassword') },
-                    { min: 8, message: t('user.passwordMinLength') },
+                    createPasswordLengthRule(
+                      t('system.security.passwordLengthRequirement', { min: pwdMinLength, max: pwdMaxLength }),
+                      pwdMinLength,
+                      pwdMaxLength,
+                    ),
+                    createPasswordComplexityRule(t('system.security.passwordComplexityRequirement')),
                   ]
             }
           >
@@ -1176,7 +1190,7 @@ export default function UserManagement() {
                   ? defaultPasswd || t('user.newPassword')
                   : t('user.newPassword')
               }
-              maxLength={20}
+              maxLength={pwdMaxLength}
               disabled={resetUseDefault}
             />
           </Form.Item>

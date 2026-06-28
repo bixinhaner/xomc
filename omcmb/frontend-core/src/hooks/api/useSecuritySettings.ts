@@ -21,6 +21,9 @@ export interface SecuritySettings {
   // ⑪ 登录提示（仅 FE 知道是否启用，文案由 Login 响应附带）
   loginNotifyEnabled: boolean;
   loginNotifyMsg: string;
+  // 密码长度策略（动态从 sys_configs 获取）
+  pwdMinLength: number;
+  pwdMaxLength: number;
   // 其余字段以 raw 暴露，便于设置页消费
   raw: Map<string, string>;
 }
@@ -52,6 +55,8 @@ export function useSecuritySettings(enabled = true): {
       preventBrowserAutofill: parseBoolSafe(raw.get('isBrowserAutoRecordPass'), false),
       loginNotifyEnabled: parseBoolSafe(raw.get('enabledFlag'), false),
       loginNotifyMsg: raw.get('msg') ?? '',
+      pwdMinLength: parseIntSafe(raw.get('pwdMinLength'), 8),
+      pwdMaxLength: parseIntSafe(raw.get('pwdMaxLength'), 32),
       raw,
     };
   }, [data]);
@@ -107,6 +112,9 @@ export function usePublicSecuritySettings(enabled = true): {
       preventBrowserAutofill: parseBoolSafe(raw.get('isBrowserAutoRecordPass'), false),
       loginNotifyEnabled: parseBoolSafe(raw.get('enabledFlag'), false),
       loginNotifyMsg: raw.get('msg') ?? '',
+      // 公开 API 不返回密码策略，用默认值
+      pwdMinLength: parseIntSafe(raw.get('pwdMinLength'), 8),
+      pwdMaxLength: parseIntSafe(raw.get('pwdMaxLength'), 32),
       raw,
     };
   }, [data]);
