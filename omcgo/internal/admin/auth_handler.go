@@ -461,6 +461,11 @@ func classifyLoginFailure(err error) string {
 // 直接返 *BusinessError 让 AbortWithError 走 BizCode + Message 分支，
 // 不再泄露 errors.Wrap 链字符串。
 func loginErrorToFriendlyError(err error) error {
+	// #690：业务层若已返回 BusinessError（如账号锁定），直接透传，不覆盖为通用文案。
+	var bErr *commonerrors.BusinessError
+	if errors.As(err, &bErr) {
+		return err
+	}
 	switch {
 	case errors.Is(err, errLoginUserNotFound):
 		return commonerrors.NewBusinessError(7001, "用户不存在", err)

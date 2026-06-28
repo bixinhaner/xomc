@@ -225,7 +225,9 @@ func (s *AdminService) Login(ctx context.Context, username, password string) (*T
 	if user.LockedUntil != nil && time.Now().Before(*user.LockedUntil) {
 		// issue #220：账号锁定文案与"IP 限流"文案刻意拆开，让用户能区分
 		// 是"自己这个账号被锁"还是"来源网络被整体限流"。
-		return nil, commonerrors.NewBusinessError(7012, "该账号已锁定，请稍后再试或联系管理员", commonerrors.ErrForbidden)
+		// issue #690：显示剩余锁定分钟数，帮助用户知道等多久。
+		remainMinutes := int(time.Until(*user.LockedUntil).Minutes()) + 1 // 向上取整
+		return nil, commonerrors.NewBusinessError(7012, fmt.Sprintf("该账号已锁定，请 %d 分钟后重试", remainMinutes), commonerrors.ErrForbidden)
 	}
 
 	// PRD §7 P1：账号过期校验。expire_at <= now → 拒绝登录。
