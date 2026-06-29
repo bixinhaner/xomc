@@ -20,6 +20,10 @@ import { activationStatusOf } from '@core/utils/activationStatus'
 import type { Device } from '@core/types/device'
 import { KV, StatCard, StateGate, formatDuration } from './_shared'
 
+function openClassicQuickSettings(sn: string) {
+  window.location.assign(`/device/detail/${sn}?tab=quickSettings`)
+}
+
 export default function FleetDeviceDetail() {
   const { sn = '' } = useParams<{ sn: string }>()
   const navigate = useNavigate()
@@ -37,6 +41,11 @@ export default function FleetDeviceDetail() {
           <NeonButton icon={<ArrowLeft />} onClick={() => navigate('/device/list')}>
             FLEET
           </NeonButton>
+          {sn ? (
+            <NeonButton icon={<Radio />} onClick={() => openClassicQuickSettings(sn)}>
+              QUICK SETTINGS
+            </NeonButton>
+          ) : null}
           <NeonButton icon={<RefreshCcw />} onClick={() => refetch()}>
             REFRESH
           </NeonButton>

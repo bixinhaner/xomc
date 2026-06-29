@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { App, Button, Card, Drawer, Input, Modal, Popconfirm, Popover, Progress, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -20,7 +21,7 @@ import type { FilterField } from '@/components/FilterBar';
 import StatisticsPanel from '@/components/StatisticsPanel';
 import StatusIndicator from '@/components/StatusIndicator';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
-import { useDeviceList, useBatchRebootDevices, useDeviceGroups } from '@core/hooks/api/useDevices';
+import { prefetchDeviceDetailContext, useDeviceList, useBatchRebootDevices, useDeviceGroups } from '@core/hooks/api/useDevices';
 import { useProductList } from '@core/hooks/api/useProducts';
 import { useDictionaryBatch } from '@core/hooks/api/useSystem';
 import { resolveNetworkTypeLabel } from '@core/utils/networkType';
@@ -153,8 +154,20 @@ function parseUrlValue(key: string, value: string): unknown {
 export default function DeviceList() {
   const t = useT();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const { message, modal } = App.useApp();
+
+  const prefetchDeviceDetailEntry = useCallback((device: Device) => {
+    void import('@/pages/device/DeviceDetail');
+    void prefetchDeviceDetailContext(queryClient, device);
+  }, [queryClient]);
+
+  const openDeviceDetail = useCallback((device: Device, tab?: string) => {
+    prefetchDeviceDetailEntry(device);
+    const suffix = tab ? `?tab=${tab}` : '';
+    void navigate(`/device/detail/${device.sn}${suffix}`);
+  }, [navigate, prefetchDeviceDetailEntry]);
 
   // 从 URL 恢复搜索条件和分页
   const [currentPage, setCurrentPage] = useState(() => {
@@ -891,7 +904,9 @@ export default function DeviceList() {
         render: (_val, record) => (
           <Link
             style={{ fontFamily: 'monospace' }}
-            onClick={() => void navigate(`/device/detail/${record.sn}`)}
+            onMouseEnter={() => prefetchDeviceDetailEntry(record)}
+            onFocus={() => prefetchDeviceDetailEntry(record)}
+            onClick={() => openDeviceDetail(record)}
           >
             {record.sn}
           </Link>
@@ -932,7 +947,12 @@ export default function DeviceList() {
             const display = count > 0 ? `${label} · ${count}` : label;
             // 点击告警跳转到设备详情告警 tab
             return (
-              <Tag color={color} style={{ cursor: 'pointer' }} onClick={() => void navigate(`/device/detail/${record.sn}?tab=alarm`)}>
+              <Tag
+                color={color}
+                style={{ cursor: 'pointer' }}
+                onMouseEnter={() => prefetchDeviceDetailEntry(record)}
+                onClick={() => openDeviceDetail(record, 'alarm')}
+              >
                 {display}
               </Tag>
             );
@@ -1241,7 +1261,17 @@ export default function DeviceList() {
           const v = record.gpsSatelliteCount;
           if (v === null || v === undefined) return '-';
           // TODO: 判断 hasSatelliteDetail 并点击打开卫星详情面板 (getSatellitesDataList.action)
-          return v > 0 ? <Link onClick={() => void navigate(`/device/detail/${record.sn}?tab=gps`)}>{v}</Link> : String(v);
+          return v > 0
+            ? (
+              <Link
+                onMouseEnter={() => prefetchDeviceDetailEntry(record)}
+                onFocus={() => prefetchDeviceDetailEntry(record)}
+                onClick={() => openDeviceDetail(record, 'gps')}
+              >
+                {v}
+              </Link>
+            )
+            : String(v);
         },
       },
       { key: 'installAddress', title: t('device.installAddress'), dataIndex: 'installAddress', width: 180, hidden: true, ellipsis: true, group: 'common' },

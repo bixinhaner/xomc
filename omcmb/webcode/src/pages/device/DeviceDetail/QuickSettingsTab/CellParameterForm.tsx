@@ -6,6 +6,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useParameterSchema, useSearchParameters, useUpdateParameters } from '@core/hooks/api/useDeviceParameters';
 import { useDeviceTaskStatus } from '@core/hooks/api/useDeviceTask';
 import { notificationKeys } from '@core/hooks/api/useNotificationCenter';
+import { buildTimezoneOptions } from '@core/utils/timezoneOptions';
 import {
   feedbackKey,
   useQuickSettingsFeedbackStore,
@@ -13,7 +14,7 @@ import {
 } from '@core/store/quickSettingsFeedbackStore';
 import type { DeviceParameter, ParameterSchemaItem, ParameterUpdateRequest } from '@core/types/deviceParameter';
 import type { DeviceTaskStatus } from '@core/types/deviceTask';
-import type { QuickSettingsGroup } from '@core/types/quicksettings';
+import type { QuickSettingsGroup, QuickSettingsParam } from '@core/types/quicksettings';
 import { applyInstanceContext, getEffectiveEnumMeta, validateValue, type QuickSettingsInstanceContext } from './validators';
 import { formatDeviceFaultBrief } from './MultiInstanceTable';
 import { useT } from '@/hooks/useT';
@@ -241,6 +242,35 @@ function statusTagSpec(submit: CellFeedback, taskStatus: DeviceTaskStatus | unde
       // pending, or task not yet fetched (just after mutateAsync)
       return { color: 'processing', icon: <SyncOutlined spin />, label: t('device.cell.tagPending') };
   }
+}
+
+function appendCurrentOption(
+  options: Array<{ value: string; label: string }>,
+  currentValue: string,
+): Array<{ value: string; label: string }> {
+  if (!currentValue || options.some((option) => option.value === currentValue)) {
+    return options;
+  }
+  return [{ value: currentValue, label: currentValue }, ...options];
+}
+
+function inferDeviceTimeMode(
+  rawParameterByPath: Map<string, DeviceParameter>,
+  schemaByPath: Map<string, ParameterSchemaItem>,
+): string {
+  const current = rawParameterByPath.get('Device.Time.Enable')?.parameterValue
+    ?? schemaByPath.get('Device.Time.Enable')?.currentValue;
+  const normalized = String(current ?? '').trim().toLowerCase();
+  if (normalized === '1' || normalized === 'true') return '1';
+  if (normalized === '0' || normalized === 'false') return '0';
+
+  const hasNtpServers = ['Device.Time.NTPServer1', 'Device.Time.NTPServer2', 'Device.Time.NTPServer3', 'Device.Time.NTPServer4', 'Device.Time.NTPServer5']
+    .some((path) => String(
+      rawParameterByPath.get(path)?.parameterValue
+        ?? schemaByPath.get(path)?.currentValue
+        ?? '',
+    ).trim() !== '');
+  return hasNtpServers ? '0' : '1';
 }
 
 interface CellParameterFormProps {
@@ -528,6 +558,7 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
   const updateMutation = useUpdateParameters();
   const queryClient = useQueryClient();
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const timezoneOptions = useMemo(() => buildTimezoneOptions(), []);
 
   // lastSubmit 由 zustand store 托管 —— DeviceDetail 整个被卸载(切顶层 tab)也保留反馈。
   const fbKey = feedbackKey(
@@ -545,6 +576,25 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
   const draft = useQuickSettingsFeedbackStore((s) => s.drafts[fbKey]);
   const setDraftField = useQuickSettingsFeedbackStore((s) => s.setDraftField);
   const clearDraft = useQuickSettingsFeedbackStore((s) => s.clearDraft);
+  const isDeviceTimeGroup = group.id === 'device-time';
+  const effectiveParams = useMemo<QuickSettingsParam[]>(() => {
+    if (!isDeviceTimeGroup || group.params.some((param) => param.name === 'Enable')) {
+      return group.params;
+    }
+    return [
+      {
+        name: 'Enable',
+        titleZh: 'NTP 模式',
+        titleEn: 'NTP Mode',
+        standardPath: 'Device.Time.Enable',
+        enumOptions: [
+          { value: '1', label: 'NTP Server' },
+          { value: '0', label: 'NTP Client' },
+        ],
+      },
+      ...group.params,
+    ];
+  }, [group.params, isDeviceTimeGroup]);
 
   // 注: osmo-bsc 把 NumofTrxChannel / OmlConnectState 这两个 BSC 全局只读状态量
   // 暴露在 DeviceGSM.Bts.0 实例(固定索引 0)上,所有 BTS 实例共享同一份值。
@@ -559,8 +609,8 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
   // 注：useParameterSchema 接受 pathPrefix，前缀匹配即可；这里以分组共用前缀粗查再过滤
   // 为简化，取 group 中 standardPath 的公共前缀作 pathPrefix
   const commonPrefix = useMemo(
-    () => commonPathPrefix(group.params.map((p) => resolveReadPath(p.standardPath || ''))),
-    [group, resolveReadPath],
+    () => commonPathPrefix(effectiveParams.map((p) => resolveReadPath(p.standardPath || ''))),
+    [effectiveParams, resolveReadPath],
   );
   const { data: schemaResp, isLoading, refetch } = useParameterSchema(deviceId, commonPrefix);
   const { data: ethernetSchemaResp } = useParameterSchema(
@@ -597,11 +647,11 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
   // 把 currentValue 按 [lo ~ hi] 格式渲染到对应 Form.Item 的 extra 槽位。
   const extraInfoPaths = useMemo(() => {
     const set = new Set<string>();
-    for (const p of group.params) {
+    for (const p of effectiveParams) {
       if (p.extraInfoPath) set.add(p.extraInfoPath);
     }
     return Array.from(set);
-  }, [group.params]);
+  }, [effectiveParams]);
   const extraInfoCommonPrefix = useMemo(() => {
     if (extraInfoPaths.length === 0) return '';
     if (extraInfoPaths.length === 1) return extraInfoPaths[0];
@@ -632,14 +682,14 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
   // "24,30" / "24~30" / "24-30" 都拆成两端;非两段或非数字时返回 null,跳过校验。
   const extraInfoBoundsByName = useMemo(() => {
     const m = new Map<string, [number, number]>();
-    for (const p of group.params) {
+    for (const p of effectiveParams) {
       if (!p.extraInfoPath) continue;
       const raw = extraInfoValueByPath.get(p.extraInfoPath);
       const bounds = parseExtraInfoBounds(raw ?? '');
       if (bounds) m.set(p.name, bounds);
     }
     return m;
-  }, [group.params, extraInfoValueByPath]);
+  }, [effectiveParams, extraInfoValueByPath]);
 
   // BM GSM 专属:并行拉 RU 节点 schema,用于在 gsm-cell 表单中展示"绑定 RU 的 Route Index"。
   // 拉取与主 schema 解耦,避免污染 commonPrefix 退化成 Device. 触发全量拉取。
@@ -687,31 +737,31 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
   }, [bindSelectOptions]);
   const specialConfigByName = useMemo(() => {
     const map = new Map<string, SpecialFieldConfig>();
-    for (const param of group.params) {
+    for (const param of effectiveParams) {
       const config = buildSpecialFieldConfig(group.id, param.name, instanceContext);
       if (config) {
         map.set(param.name, config);
       }
     }
     return map;
-  }, [group.id, group.params, instanceContext]);
+  }, [effectiveParams, group.id, instanceContext]);
 
   // T-0159: 交叉镜像 — 反查表 resolved standardPath → form field name，
   // 让 onValuesChange 时能据 constraints.mirrorWith 找到对端 form field 并 setFieldValue 同步。
   const paramNameByPath = useMemo(() => {
     const map = new Map<string, string>();
-    for (const p of group.params) {
+    for (const p of effectiveParams) {
       const path = resolveReadPath(p.standardPath || '');
       map.set(path, p.name);
     }
     return map;
-  }, [group, instanceContext]);
+  }, [effectiveParams, instanceContext, resolveReadPath]);
 
   // 初始化字段值 —— 优先级：store draft > 当前会话已 touched > schema 原值。
   // 未保存草稿在跨顶层 TabBar 切换后恢复；任务终态回读后再 clearDraft，统一回到设备侧值。
   useEffect(() => {
     if (!schemaResp) return;
-    group.params.forEach((p) => {
+    effectiveParams.forEach((p) => {
       if (draft && draft[p.name] !== undefined) {
         if (specialConfigByName.get(p.name)?.kind === 'mme-ip-plmn-table') {
           form.setFieldValue(p.name, toMmeIpPlmnRows(draft[p.name]));
@@ -736,6 +786,9 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
         form.setFieldValue(p.name, toMmeIpPlmnRows(rawItem?.parameterValue ?? item?.currentValue ?? ''));
       } else {
         let raw = rawItem?.parameterValue ?? item?.currentValue ?? '';
+        if (isDeviceTimeGroup && p.name === 'Enable' && (raw === '' || raw == null)) {
+          raw = inferDeviceTimeMode(rawParameterByPath, schemaByPath);
+        }
         // BSC osmo-bsc 不上报 DeviceGSM.Bts.{i}.ID,该字段语义即为 BTS 实例号本身,
         // 此处按实例号派生填充,避免显示"未上报"。
         if (
@@ -748,14 +801,14 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
         form.setFieldValue(p.name, normalizeEnumValue(raw, p.enumOptions));
       }
     });
-  }, [schemaResp, group, instanceContext, form, schemaByPath, rawParameterByPath, draft, specialConfigByName]);
+  }, [schemaResp, effectiveParams, instanceContext, form, schemaByPath, rawParameterByPath, draft, specialConfigByName, mmeIpPlmnParams, nrNguParams]);
 
   const handleSave = async () => {
     const values = form.getFieldsValue() as Record<string, unknown>;
     const updates: ParameterUpdateRequest[] = [];
     const errors: Record<string, string> = {};
 
-    for (const p of group.params) {
+    for (const p of effectiveParams) {
       // readonly leaf(如 BTS ID / 共享只读状态量)不参与下发:它们的 path 在 param-mappings
       // 里多为 not_found / access=READ_ONLY,带进 SetParameterValues 会被后端 MappingValidator
       // 整批拒成 400,导致用户改任何字段都"入队失败"。
@@ -877,7 +930,7 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
       if (cancelled) return;
       const nextValues: Record<string, unknown> = {};
       const refreshedSchemaByPath = new Map((refreshed.data?.parameters ?? []).map((item) => [item.path, item]));
-      for (const p of group.params) {
+      for (const p of effectiveParams) {
         const special = specialConfigByName.get(p.name);
         const path = special?.configPath ?? resolveReadPath(p.standardPath || '');
         const refreshedValue = refreshedSchemaByPath.get(path)?.currentValue ?? '';
@@ -892,7 +945,7 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
     return () => {
       cancelled = true;
     };
-  }, [lastTask?.id, lastTask?.status, refetch, group.params, instanceContext, form, clearDraft, fbKey, group.titleZh, specialConfigByName, t]);
+  }, [lastTask?.id, lastTask?.status, refetch, effectiveParams, instanceContext, form, clearDraft, fbKey, group.titleZh, specialConfigByName, t]);
 
   // T-0146:基站应答失败时弹一次 notification(只在 status 第一次变成 failed 时触发,避免重复弹)
   // notifiedFailedTaskId 同样存 store —— 切顶层 tab 再切回不会重复弹。
@@ -959,7 +1012,7 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
         onValuesChange={(changedValues) => {
           // 同步到 store draft，跨顶层 TabBar 切走切回可恢复
           for (const [name, value] of Object.entries(changedValues)) {
-            const p = group.params.find((q) => q.name === name);
+            const p = effectiveParams.find((q) => q.name === name);
             const special = p ? specialConfigByName.get(p.name) : undefined;
             if (special?.kind === 'mme-ip-plmn-table') {
               setDraftField(fbKey, name, toMmeIpPlmnRows(value));
@@ -970,7 +1023,7 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
           // T-0159: 交叉镜像 — 改 A 字段时把 A 的新值同步写入镜像字段 B（如 TDD 上下行带宽必须相等）。
           // antd Form.setFieldValue 不会触发 onValuesChange，故不会无限递归。
           for (const [name, value] of Object.entries(changedValues)) {
-            const p = group.params.find((q) => q.name === name);
+            const p = effectiveParams.find((q) => q.name === name);
             if (!p) continue;
             const special = specialConfigByName.get(name);
             const path = special?.configPath ?? resolveReadPath(p.standardPath || '');
@@ -989,7 +1042,7 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
           setFieldErrors((prev) => {
             const next = { ...prev };
             for (const [name, value] of Object.entries(changedValues)) {
-              const p = group.params.find((q) => q.name === name);
+              const p = effectiveParams.find((q) => q.name === name);
               if (!p) continue;
               const special = specialConfigByName.get(name);
               const path = special?.configPath ?? resolveReadPath(p.standardPath || '');
@@ -1032,8 +1085,50 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
           });
         }}
       >
+        {(() => {
+          if (!isDeviceTimeGroup) return null;
+          const modeParam = effectiveParams.find((param) => param.name === 'Enable');
+          const modePath = modeParam ? resolveReadPath(modeParam.standardPath || '') : '';
+          const modeItem = modePath ? schemaByPath.get(modePath) : undefined;
+          const modeRawItem = modePath ? getRawValueByPath(rawParameterByPath, modePath) : undefined;
+          const modeWritable = modeItem?.writable ?? modeRawItem?.writable ?? true;
+          const modeOptions = modeParam?.enumOptions?.length
+            ? modeParam.enumOptions
+            : [
+                { value: '1', label: 'NTP Server' },
+                { value: '0', label: 'NTP Client' },
+              ];
+          return (
+            <Row gutter={16}>
+              <Col span={12}>
+                <Form.Item label="NTP" name="Enable">
+                  <Select
+                    disabled={!modeWritable}
+                    options={modeOptions}
+                  />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item label="Time Zone" name="LocalTimeZoneName">
+                  <Select
+                    options={appendCurrentOption(
+                      timezoneOptions,
+                      String(form.getFieldValue('LocalTimeZoneName') ?? ''),
+                    )}
+                    showSearch
+                    optionFilterProp="label"
+                    placeholder="Select time zone"
+                  />
+                </Form.Item>
+              </Col>
+            </Row>
+          );
+        })()}
         <Row gutter={16}>
-          {group.params.map((p) => {
+          {effectiveParams.map((p) => {
+            if (isDeviceTimeGroup && (p.name === 'LocalTimeZoneName' || p.name === 'Enable')) {
+              return null;
+            }
             const special = specialConfigByName.get(p.name);
             const path = special?.configPath ?? resolveReadPath(p.standardPath || '');
             const item = schemaByPath.get(path);
@@ -1065,10 +1160,15 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
             const renderCellIdAfter = isLteCell && p.name === 'ECI';
             const render2T4RAfter = isLteCell && p.name === 'AntennaPortsCount';
             const isDeviceTimeParam = group.id === 'device-time';
-            const writable = special?.forceWritable
-              ?? rawItem?.writable
-              ?? item?.writable
-              ?? (isDeviceTimeParam ? true : false);
+            const writable = isDeviceTimeParam
+              ? (special?.forceWritable
+                ?? item?.writable
+                ?? rawItem?.writable
+                ?? true)
+              : (special?.forceWritable
+                ?? rawItem?.writable
+                ?? item?.writable
+                ?? false);
             const error = fieldErrors[p.name];
             // XML hideRangeHint="true" 时不在 label 后展示 schema 推导的 [min ~ max]
             // (字典范围与业务允许值不一致的字段如 Band:字典 1..maxInt,业务允许集只有少数频段)。

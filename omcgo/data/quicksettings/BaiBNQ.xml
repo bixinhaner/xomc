@@ -86,7 +86,12 @@
     <param name="Pat2NrofUplinkSymbols" titleZh="Pattern2 上行特殊符号数" titleEn="Pattern2 UL Symbols"
            standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.TddULDLConfigurationCommon.pattern2.NrofUplinkSymbols"/>
   </group>
-  <group id="device-time" titleZh="时间设置" titleEn="Time Settings">
+       <group id="device-time" titleZh="NTP" titleEn="NTP">
+        <param name="Enable" titleZh="NTP 模式" titleEn="NTP Mode"
+                       standardPath="Device.Time.Enable">
+              <option value="1" label="NTP Server"/>
+              <option value="0" label="NTP Client"/>
+        </param>
     <param name="LocalTimeZoneName" titleZh="本地时区" titleEn="Local Time Zone"
            standardPath="Device.Time.LocalTimeZoneName"/>
     <param name="NTPServer1" titleZh="NTP 服务器 1" titleEn="NTP Server 1"

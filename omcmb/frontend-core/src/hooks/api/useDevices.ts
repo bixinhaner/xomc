@@ -1,11 +1,49 @@
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
-import type { DeviceFilter, NameFilterItem } from '../../types/device';
+import type { QueryClient } from '@tanstack/react-query';
+import type { Device, DeviceFilter, DeviceListResponse, NameFilterItem } from '../../types/device';
 import type { PageRequest } from '../../types/pagination';
 import { deviceService } from '../../mock/services/deviceService';
 import { deviceApi } from '../../services/api/deviceApi';
+import { quicksettingsApi } from '../../services/api/quicksettingsApi';
 import { createApiSwitchWithMock } from '../../services/apiSwitch';
 
 const api = createApiSwitchWithMock(deviceService, deviceApi);
+const DEVICE_DETAIL_STALE_TIME_MS = 10 * 60 * 1000;
+
+function findDeviceInListCaches(queryClient: QueryClient, sn: string): Device | undefined {
+  const cachedLists = queryClient.getQueriesData<DeviceListResponse>({
+    queryKey: ['devices', 'list'],
+  });
+
+  for (const [, data] of cachedLists) {
+    const device = data?.items.find((item) => item.sn === sn);
+    if (device) return device;
+  }
+
+  return undefined;
+}
+
+function seedDeviceCaches(queryClient: QueryClient, device: Device) {
+  queryClient.setQueryData(['devices', 'sn', device.sn], device);
+  queryClient.setQueryData(['devices', 'detail', device.id], device);
+}
+
+export function prefetchDeviceDetailContext(queryClient: QueryClient, device: Device) {
+  seedDeviceCaches(queryClient, device);
+
+  return Promise.allSettled([
+    queryClient.prefetchQuery({
+      queryKey: ['devices', 'sn', device.sn],
+      queryFn: () => api.getBySn(device.sn),
+      staleTime: DEVICE_DETAIL_STALE_TIME_MS,
+    }),
+    queryClient.prefetchQuery({
+      queryKey: ['quicksettings', 'groups', device.id],
+      queryFn: () => quicksettingsApi.getGroups(device.id),
+      staleTime: DEVICE_DETAIL_STALE_TIME_MS,
+    }),
+  ]);
+}
 
 // 创建分组的请求类型
 export interface CreateGroupRequest {
@@ -69,10 +107,16 @@ export function useDevicesByIds(ids: string[]) {
 }
 
 export function useDeviceBySn(sn: string) {
+  const queryClient = useQueryClient();
+  const cachedDevice = sn ? findDeviceInListCaches(queryClient, sn) : undefined;
+
   return useQuery({
     queryKey: ['devices', 'sn', sn],
     queryFn: () => api.getBySn(sn),
     enabled: Boolean(sn),
+    initialData: cachedDevice,
+    initialDataUpdatedAt: cachedDevice ? Date.now() : undefined,
+    staleTime: DEVICE_DETAIL_STALE_TIME_MS,
   });
 }
 
