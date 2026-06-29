@@ -528,9 +528,10 @@ export const topologyApi = {
   /**
    * 搜索设备（节点查找）
    */
-  async searchDevices(keyword: string): Promise<DeviceSearchResult[]> {
+  async searchDevices(keyword: string, signal?: AbortSignal): Promise<DeviceSearchResult[]> {
     const { data } = await http.get<{ items: BackendSearchResult[] }>('/devices/search', {
       params: { keyword },
+      signal,
     });
     return (data.items || []).map(mapBackendSearchResult);
   },
@@ -589,7 +590,8 @@ function mapBackendStats(bs: BackendMapStats): MapStats {
   // 旧格式：{ online: number, offline: number } (后端统计不完整)
   let statusCount: Record<DeviceStatus, number>;
 
-  const rawCount = bs.status_count as Record<string, number>;
+  // 防御性空值处理：后端可能返回 null 或缺省 status_count
+  const rawCount = (bs.status_count ?? {}) as Record<string, number>;
   if ('onlineActive' in rawCount) {
     // 新格式：直接使用
     statusCount = rawCount as unknown as Record<DeviceStatus, number>;
@@ -636,9 +638,9 @@ function mapBackendStats(bs: BackendMapStats): MapStats {
   }
 
   return {
-    total: bs.total,
+    total: bs.total ?? 0,
     statusCount,
-    alarmCount: bs.alarm_count,
+    alarmCount: bs.alarm_count ?? 0,
     typeCount: bs.type_count as Record<DeviceType, number> | undefined,
     viewportCount: bs.viewport_count,
     center: bs.center ? { lat: bs.center.lat, lng: bs.center.lng } : undefined,

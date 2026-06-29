@@ -305,6 +305,12 @@ export interface GISMapProps {
   showControls?: boolean;
   /** 是否显示元数据加载提示（默认 true，仪表板小地图可设为 false） */
   showMetadataTip?: boolean;
+  /**
+   * 中心点就绪信号。默认 true（向后兼容）。
+   * 传 false 时 OL 地图延迟初始化，等待可靠中心点（stats/离线地图元数据）到达后再创建地图实例。
+   * 这样可保证地图首屏直接定位到设备所在区域，而不是从无意义的默认坐标飞过去。
+   */
+  centerReady?: boolean;
   /** 自定义样式 */
   className?: string;
   /** 自定义样式对象 */
@@ -317,10 +323,31 @@ export interface GISMapProps {
 export interface GISMapRef {
   /** 高亮设备并飞行到指定位置（以最大放大程度显示） */
   highlightAndFlyTo: (device: MapDevice) => void;
+  /**
+   * 高亮设备并飞行到指定位置，同时显示该设备的卡片
+   * 使用场景：搜索定位时，用户希望看到目标设备的详细信息
+   */
+  highlightAndFlyToWithCard: (device: MapDevice, options?: {
+    /** 是否自动关闭旧卡片，默认 true */
+    autoCloseOldCard?: boolean;
+    /** 动画模式（默认 progressive） */
+    animationMode?: 'progressive' | 'smooth' | 'fast' | 'direct';
+  }) => void;
   /** 飞行到指定坐标 */
-  flyTo: (lng: number, lat: number, zoom?: number) => void;
+  flyTo: (lng: number, lat: number, zoom?: number, options?: {
+    progressive?: boolean;
+    maxZoom?: number;
+    onComplete?: () => void;
+  }) => void;
   /** 获取当前视图状态 */
   getViewport: () => MapViewport | null;
+  /** 关闭当前锁定的卡片 */
+  closeClickedCard: () => void;
+  /**
+   * 动态调整瓦片并发上限（0 = 暂停队列，正常值为 3）
+   * 搜索时调低，为 API 请求让出连接；搜索完成后恢复
+   */
+  setTileConcurrency: (n: number) => void;
 }
 
 /**
