@@ -2,6 +2,7 @@ import http from '../http';
 import { preparePasswordPayload } from '../crypto/passwordCipher';
 import type {
   User,
+  UserListParams,
   UserRole,
   UserStatus,
   UserSource,
@@ -184,6 +185,8 @@ export interface DictBatchResponse {
 interface BackendDictionary {
   id: number;
   name: string;
+  name_i18n?: Record<string, string> | null;
+  description_i18n?: Record<string, string> | null;
   type: string;
   status: boolean;
   desc: string;
@@ -202,6 +205,7 @@ interface BackendDictionary {
 interface BackendDictionaryDetail {
   id: number;
   label: string;
+  label_i18n?: Record<string, string> | null;
   value: string;
   extend: string;
   status: boolean;
@@ -220,6 +224,8 @@ function mapBackendDictionary(b: BackendDictionary): Dictionary {
   return {
     id: b.id,
     name: b.name,
+    nameI18n: b.name_i18n ?? undefined,
+    descriptionI18n: b.description_i18n ?? undefined,
     type: b.type,
     status: b.status,
     desc: b.desc || '',
@@ -239,6 +245,7 @@ function mapBackendDictionaryDetail(b: BackendDictionaryDetail): DictionaryDetai
   return {
     id: b.id,
     label: b.label,
+    labelI18n: b.label_i18n ?? undefined,
     value: b.value,
     extend: b.extend || '',
     status: b.status,
@@ -671,13 +678,15 @@ function mapBackendSysConfig(b: BackendSysConfig): SysConfigItem {
 export const adminApi = {
   // Users
   async getUsers(
-    params: { userName?: string } & PageRequest
+    params: UserListParams & PageRequest
   ): Promise<PageResponse<User>> {
     const query: Record<string, unknown> = {
       page: params.page,
       pageSize: params.pageSize,
     };
     if (params.userName) query.search = params.userName;
+    if (params.roleId) query.roleId = params.roleId;
+    if (params.status) query.status = params.status;
 
     const { data } = await http.get<BackendListResponse<BackendUser>>(
       '/admin/users',

@@ -73,7 +73,7 @@
         <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.Version" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Version" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <param name="Device.SoftwareCtrl.SystemBackupVersion" standardPath="Device.SoftwareCtrl.SystemBackupVersion" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <!-- 以下参数来源：MySQL small_cell_param，MongoDB 中无对应映射 -->
-        <param name="Device.DeviceInfo.GSM.BtsRfPower" standardPath="Device.DeviceInfo.GSM.BtsRfPower" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="24" max="43"/>
+        <param name="Device.DeviceInfo.GSM.BtsRfPower" standardPath="Device.DeviceInfo.GSM.BtsRfPower" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="24" max="43"/>
         <param name="Device.DeviceInfo.HOST_CONFIG_DNS1" standardPath="Device.DeviceInfo.HOST_CONFIG_DNS1" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <param name="Device.DeviceInfo.HOST_CONFIG_DNS2" standardPath="Device.DeviceInfo.HOST_CONFIG_DNS2" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <param name="Device.DeviceInfo.ROUTE_CONFIG10_GW" standardPath="Device.DeviceInfo.ROUTE_CONFIG10_GW" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="256"/>
@@ -200,7 +200,7 @@
         <param name="Device.DeviceInfo.WAN_CONFIG12_V6_PREFIX" standardPath="Device.DeviceInfo.WAN_CONFIG12_V6_PREFIX" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="128"/>
         <param name="Device.DeviceInfo.WAN_CONFIG12_VLAN" standardPath="Device.DeviceInfo.WAN_CONFIG12_VLAN" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="4094"/>
         <param name="Device.DeviceInfo.WAN_CONFIG1_DEFAULTGW" standardPath="Device.DeviceInfo.WAN_CONFIG1_DEFAULTGW" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="256"/>
-        <param name="Device.DeviceInfo.WAN_CONFIG1_IPADDR" standardPath="Device.DeviceInfo.WAN_CONFIG1_IPADDR" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="256"/>
+        <param name="Device.DeviceInfo.WAN_CONFIG1_IPADDR" standardPath="Device.DeviceInfo.WAN_CONFIG1_IPADDR" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="256"/>
         <param name="Device.DeviceInfo.WAN_CONFIG1_IPMODE" standardPath="Device.DeviceInfo.WAN_CONFIG1_IPMODE" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="0,1,3,4" enumLabels="DHCP,Static IP,IPV6 DHCP,IPV6 Static IP"/>
         <param name="Device.DeviceInfo.WAN_CONFIG1_NETMASK" standardPath="Device.DeviceInfo.WAN_CONFIG1_NETMASK" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="256"/>
         <param name="Device.DeviceInfo.WAN_CONFIG1_V6_GW" standardPath="Device.DeviceInfo.WAN_CONFIG1_V6_GW" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
@@ -280,8 +280,8 @@
         <param name="Device.DeviceInfo.WAN_CONFIG9_V6_PREFIX" standardPath="Device.DeviceInfo.WAN_CONFIG9_V6_PREFIX" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="128"/>
         <param name="Device.DeviceInfo.WAN_CONFIG9_VLAN" standardPath="Device.DeviceInfo.WAN_CONFIG9_VLAN" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="4094"/>
         <param name="DeviceGSM.BscSelect" standardPath="DeviceGSM.BscSelect" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="0,1" enumLabels="Master,Backup"/>
-        <param name="DeviceGSM.IpaUnitId" standardPath="DeviceGSM.IpaUnitId" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="16"/>
-        <param name="DeviceGSM.OmlRemoteIp" standardPath="DeviceGSM.OmlRemoteIp" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="256"/>
-        <param name="DeviceGSM.OmlRemoteIpBak" standardPath="DeviceGSM.OmlRemoteIpBak" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="256"/>
+        <param name="DeviceGSM.IpaUnitId" standardPath="DeviceGSM.IpaUnitId" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="16"/>
+        <param name="DeviceGSM.OmlRemoteIp" standardPath="DeviceGSM.OmlRemoteIp" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="256"/>
+        <param name="DeviceGSM.OmlRemoteIpBak" standardPath="DeviceGSM.OmlRemoteIpBak" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="256"/>
     </parameters>
 </parameterModel>

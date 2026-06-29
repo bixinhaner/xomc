@@ -9,6 +9,7 @@ import { authApi } from '@core/services/api/authApi';
 import type { CaptchaChallenge, CaptchaCredentials } from '@core/services/api/authApi';
 import { usePublicSecuritySettings } from '@core/hooks/api/useSecuritySettings';
 import { usePublicOmcName, resolveOmcName } from '@core/hooks/api/useOmcName';
+import { getI18nKeyByBizCode } from '@core/i18n/bizCodeMessages';
 import type { User } from '@core/types/system';
 import type { AxiosError } from 'axios';
 import styles from './Login.module.css';
@@ -248,6 +249,25 @@ export default function LoginPage() {
         // 验证码错误 — 刷新验证码重试
         loadCaptcha();
         message.error(t('login.captcha.invalid'));
+        return;
+      }
+
+      // Issue #730: 按 biz_code 查语料，fallback 后端 msg 或默认语料
+      const i18nKey = getI18nKeyByBizCode(bizCode);
+      if (i18nKey) {
+        // 带参数的错误码（7012 账号临时锁定 / 7014 IP 限流）：从后端 msg 提取数字
+        if (bizCode === 7012) {
+          const match = axiosErr.userMessage?.match(/(\d+)/);
+          message.error(t(i18nKey, { minutes: match ? match[1] : '?' }));
+          return;
+        }
+        if (bizCode === 7014) {
+          const match = axiosErr.userMessage?.match(/(\d+)/);
+          message.error(t(i18nKey, { seconds: match ? match[1] : '?' }));
+          return;
+        }
+        // 无参数的错误码 — 直接用前端语料
+        message.error(t(i18nKey));
         return;
       }
 

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { App, Button, Card, Drawer, Input, Modal, Popconfirm, Popover, Progress, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -20,11 +21,11 @@ import type { FilterField } from '@/components/FilterBar';
 import StatisticsPanel from '@/components/StatisticsPanel';
 import StatusIndicator from '@/components/StatusIndicator';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
-import { useDeviceList, useBatchRebootDevices, useDeviceGroups } from '@core/hooks/api/useDevices';
+import { prefetchDeviceDetailContext, useDeviceList, useBatchRebootDevices, useDeviceGroups } from '@core/hooks/api/useDevices';
 import { useProductList } from '@core/hooks/api/useProducts';
 import { useDictionaryBatch } from '@core/hooks/api/useSystem';
 import { resolveNetworkTypeLabel } from '@core/utils/networkType';
-import { activationStatusOf } from '@core/utils/activationStatus';
+import { activationStatusLabelOf, activationStatusOf } from '@core/utils/activationStatus';
 import { useTriggerAlarmSync } from '@core/hooks/api/useAlarms';
 import { useCreateUnifiedFileTransferTask } from '@core/hooks/api/useUnifiedFileTransfer';
 import { useDownloadStationLog } from '@core/hooks/api/useStationLog';
@@ -153,8 +154,20 @@ function parseUrlValue(key: string, value: string): unknown {
 export default function DeviceList() {
   const t = useT();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const { message, modal } = App.useApp();
+
+  const prefetchDeviceDetailEntry = useCallback((device: Device) => {
+    void import('@/pages/device/DeviceDetail');
+    void prefetchDeviceDetailContext(queryClient, device);
+  }, [queryClient]);
+
+  const openDeviceDetail = useCallback((device: Device, tab?: string) => {
+    prefetchDeviceDetailEntry(device);
+    const suffix = tab ? `?tab=${tab}` : '';
+    void navigate(`/device/detail/${device.sn}${suffix}`);
+  }, [navigate, prefetchDeviceDetailEntry]);
 
   // 从 URL 恢复搜索条件和分页
   const [currentPage, setCurrentPage] = useState(() => {
@@ -871,8 +884,12 @@ export default function DeviceList() {
     const status = activationStatusOf(opState);
     if (status == null) return '-';
     const isActive = status === 'active';
-    return <Tag color={isActive ? 'success' : 'error'}>{isActive ? t('status.active') : t('status.inactive')}</Tag>;
-  }, [t]);
+    const label = activationStatusLabelOf(opState, opStateDict?.sysDictionaryDetails, {
+      active: t('status.active'),
+      inactive: t('status.inactive'),
+    }, appLocale);
+    return <Tag color={isActive ? 'success' : 'error'}>{label}</Tag>;
+  }, [appLocale, opStateDict?.sysDictionaryDetails, t]);
 
   const columns = useMemo(
     (): DataTableColumn<Device>[] => [
@@ -891,7 +908,9 @@ export default function DeviceList() {
         render: (_val, record) => (
           <Link
             style={{ fontFamily: 'monospace' }}
-            onClick={() => void navigate(`/device/detail/${record.sn}`)}
+            onMouseEnter={() => prefetchDeviceDetailEntry(record)}
+            onFocus={() => prefetchDeviceDetailEntry(record)}
+            onClick={() => openDeviceDetail(record)}
           >
             {record.sn}
           </Link>
@@ -932,7 +951,12 @@ export default function DeviceList() {
             const display = count > 0 ? `${label} · ${count}` : label;
             // 点击告警跳转到设备详情告警 tab
             return (
-              <Tag color={color} style={{ cursor: 'pointer' }} onClick={() => void navigate(`/device/detail/${record.sn}?tab=alarm`)}>
+              <Tag
+                color={color}
+                style={{ cursor: 'pointer' }}
+                onMouseEnter={() => prefetchDeviceDetailEntry(record)}
+                onClick={() => openDeviceDetail(record, 'alarm')}
+              >
                 {display}
               </Tag>
             );
@@ -1241,7 +1265,17 @@ export default function DeviceList() {
           const v = record.gpsSatelliteCount;
           if (v === null || v === undefined) return '-';
           // TODO: 判断 hasSatelliteDetail 并点击打开卫星详情面板 (getSatellitesDataList.action)
-          return v > 0 ? <Link onClick={() => void navigate(`/device/detail/${record.sn}?tab=gps`)}>{v}</Link> : String(v);
+          return v > 0
+            ? (
+              <Link
+                onMouseEnter={() => prefetchDeviceDetailEntry(record)}
+                onFocus={() => prefetchDeviceDetailEntry(record)}
+                onClick={() => openDeviceDetail(record, 'gps')}
+              >
+                {v}
+              </Link>
+            )
+            : String(v);
         },
       },
       { key: 'installAddress', title: t('device.installAddress'), dataIndex: 'installAddress', width: 180, hidden: true, ellipsis: true, group: 'common' },
@@ -1356,10 +1390,10 @@ export default function DeviceList() {
           return v === -1 || v == null ? '--' : String(v);
         }
         case 'opState': {
-          // 激活状态 = 曾上线(op_state '1'/'0')，映射为"激活/未激活"文本（与列表列同口径）。
-          const os = record.opState;
-          if (os == null || os === '' || os === 'unknown') return '-';
-          return os === '1' ? t('status.active') : t('status.inactive');
+          return activationStatusLabelOf(record.opState, opStateDict?.sysDictionaryDetails, {
+            active: t('status.active'),
+            inactive: t('status.inactive'),
+          }, appLocale) || '-';
         }
         default: {
           const v = dataIndex ? (record as unknown as Record<string, unknown>)[dataIndex] : undefined;
@@ -1368,7 +1402,7 @@ export default function DeviceList() {
         }
       }
     },
-    [mapConnStatus, getSeverityLabel, fmtTime, fmtDuration, t]
+    [appLocale, mapConnStatus, getSeverityLabel, fmtTime, fmtDuration, opStateDict?.sysDictionaryDetails, t]
   );
 
   // 按当前筛选条件并发分页拉取全部命中数据(不受列表当前页/页大小限制)。

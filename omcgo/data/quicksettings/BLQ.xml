@@ -53,6 +53,14 @@
            standardPath="Device.Time.LocalTimeZoneName"/>
   </group>
 
+       <group id="device-ipsec-control" titleZh="IPSec 配置" titleEn="IPSec Config">
+              <param name="IPSEC_ENABLE" titleZh="IPSec 开关" titleEn="IPSec Enable"
+                                    standardPath="Device.Services.FAPService.Ipsec.IPSEC_ENABLE">
+                     <option value="1" label="开启"/>
+                     <option value="0" label="关闭"/>
+              </param>
+       </group>
+
   <group id="device-ipsec" titleZh="IPSec 参数" titleEn="IPSec Settings"
          multiInstance="true" maxInstances="4"
          objectPath="Device.FAP.Ipsec.{i}.">

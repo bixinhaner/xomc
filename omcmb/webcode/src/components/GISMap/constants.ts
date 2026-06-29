@@ -85,7 +85,7 @@ export const CLUSTER_CONFIG = {
    * 形成洲→国→省→市→区→街道的逐级分散视觉过渡。
    */
   distanceTiers: [
-    { maxZoom: 5, distance: 60 },
+    { maxZoom: 5, distance: 90 },
     { maxZoom: 7, distance: 50 },
     { maxZoom: 9, distance: 40 },
     { maxZoom: 11, distance: 30 },

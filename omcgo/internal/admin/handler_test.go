@@ -426,8 +426,13 @@ func TestHandler_Login_BadRequest(t *testing.T) {
 }
 
 func TestHandler_ListUsers(t *testing.T) {
+	roleID := uuid.New()
 	userRepo := &handlerMockUserRepo{
-		listFn: func(_ context.Context, _ UserFilter) (*model.ListResponse[User], error) {
+		listFn: func(_ context.Context, filter UserFilter) (*model.ListResponse[User], error) {
+			require.NotNil(t, filter.Status)
+			assert.Equal(t, UserStatusDisabled, *filter.Status)
+			require.NotNil(t, filter.RoleID)
+			assert.Equal(t, roleID.String(), *filter.RoleID)
 			return model.NewListResponse([]User{
 				{ID: uuid.New(), Username: "user1", Status: UserStatusActive, CreatedAt: time.Now(), UpdatedAt: time.Now()},
 				{ID: uuid.New(), Username: "user2", Status: UserStatusActive, CreatedAt: time.Now(), UpdatedAt: time.Now()},
@@ -437,7 +442,7 @@ func TestHandler_ListUsers(t *testing.T) {
 	r := handlerNewTestRouter(userRepo, &handlerMockRoleRepo{})
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/users?page=1&page_size=20", nil)
+	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/users?page=1&page_size=20&status=disabled&role_id=%s", roleID), nil)
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)

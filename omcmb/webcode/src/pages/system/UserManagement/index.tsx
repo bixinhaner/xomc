@@ -82,6 +82,8 @@ export default function UserManagement() {
 
   const { data, isLoading, refetch } = useUsers({
     userName: filters.userName as string | undefined,
+    roleId: filters.roleId as string | undefined,
+    status: filters.status as UserStatus | undefined,
     page,
     pageSize,
   });
@@ -95,6 +97,13 @@ export default function UserManagement() {
   const renderOperator = useCallback((username: unknown) => {
     if (!username) return t('user.builtIn');
     return String(username);
+  }, [t]);
+
+  const summarizeUsernames = useCallback((users: User[]) => {
+    if (users.length === 0) return '';
+    const names = users.map((u) => u.username);
+    if (names.length <= 5) return names.join('、');
+    return `${names.slice(0, 5).join('、')} ${t('common.more').toLowerCase()} ${names.length - 5}`;
   }, [t]);
 
   // PRD §11.7 决议 ①：未绑定任何设备分组的角色，下拉 option 追加 ⚠️ 标记，
@@ -120,6 +129,17 @@ export default function UserManagement() {
         ),
       };
     }), [allRoles, t]);
+
+  const filterRoleOptions = useMemo(() =>
+    (allRoles ?? []).map((r) => ({ value: r.id, label: r.roleName })),
+  [allRoles]);
+
+  const statusOptions = useMemo(() => [
+    { value: 'active', label: t('user.form.statusActive') },
+    { value: 'disabled', label: t('user.form.statusDisabled') },
+    { value: 'inactive', label: t('status.inactive') },
+    { value: 'locked', label: t('status.locked') },
+  ], [t]);
 
   const createUser = useCreateUser();
   const updateUser = useUpdateUser();
@@ -175,21 +195,30 @@ export default function UserManagement() {
 
   const handleBatchDelete = useCallback(() => {
     const keys = selectedKeys;
-    const usersToDelete = (data?.items || []).filter(
-      (u) => keys.includes(u.id) && !isBuiltIn(u)
-    );
+    const selectedUsers = (data?.items || []).filter((u) => keys.includes(u.id));
+    const builtInUsers = selectedUsers.filter((u) => isBuiltIn(u));
+    const usersToDelete = selectedUsers.filter((u) => !isBuiltIn(u));
     if (usersToDelete.length === 0) {
       modal.warning({
         title: t('common.warning'),
-        content: t('user.noUsersToDelete'),
+        content: builtInUsers.length > 0
+          ? t('user.noUsersToDeleteNamed', { names: summarizeUsernames(builtInUsers) })
+          : t('user.noUsersToDelete'),
       });
       return;
     }
     modal.confirm({
       title: t('common.confirmDelete'),
-      content: usersToDelete.length < keys.length
-        ? t('user.selectedBuiltInSkipped')
-        : undefined,
+      content: (
+        <div>
+          <div>{t('user.batchDeleteFilteredTotal', { total: data?.total ?? 0 })}</div>
+          <div>{t('user.batchDeleteSelectedCount', { total: selectedUsers.length })}</div>
+          <div>{t('user.batchDeleteWillDeleteCount', { total: usersToDelete.length })}</div>
+          {builtInUsers.length > 0 ? (
+            <div>{t('user.selectedBuiltInSkippedNamed', { names: summarizeUsernames(builtInUsers) })}</div>
+          ) : null}
+        </div>
+      ),
       onOk: () => {
         deleteUsers.mutate(usersToDelete.map((u) => u.id), {
           onSuccess: () => {
@@ -199,7 +228,7 @@ export default function UserManagement() {
         });
       },
     });
-  }, [data?.items, selectedKeys, isBuiltIn, t, deleteUsers, modal, message]);
+  }, [data?.items, data?.total, selectedKeys, isBuiltIn, summarizeUsernames, t, deleteUsers, modal, message]);
 
   const handleCreate = () => {
     form.validateFields().then((vals) => {
@@ -415,7 +444,9 @@ export default function UserManagement() {
 
   const filterFields: FilterField[] = useMemo(() => [
     { name: 'userName', label: t('user.userName'), type: 'input', placeholder: t('user.userName'), width: 240 },
-  ], [t]);
+    { name: 'roleId', label: t('user.role'), type: 'select', placeholder: t('user.filter.allRoles'), options: filterRoleOptions, width: 180, minWidth: 160 },
+    { name: 'status', label: t('user.status'), type: 'select', placeholder: t('user.filter.allStatuses'), options: statusOptions, width: 160, minWidth: 140 },
+  ], [filterRoleOptions, statusOptions, t]);
 
   const columns: DataTableColumn<User & Record<string, unknown>>[] = useMemo(() => [
     // 操作列放在最前面
@@ -602,10 +633,24 @@ export default function UserManagement() {
       dataIndex: 'status',
       width: 90,
       render: (val) => {
-        const isActive = val === 'active';
+        const status = String(val ?? 'disabled');
+        const color = status === 'active'
+          ? 'success'
+          : status === 'locked'
+            ? 'error'
+            : status === 'inactive'
+              ? 'warning'
+              : 'default';
+        const label = status === 'active'
+          ? t('user.form.statusActive')
+          : status === 'locked'
+            ? t('status.locked')
+            : status === 'inactive'
+              ? t('status.inactive')
+              : t('user.form.statusDisabled');
         return (
-          <Tag color={isActive ? 'success' : 'error'}>
-            {isActive ? t('user.form.statusActive') : t('user.form.statusDisabled')}
+          <Tag color={color}>
+            {label}
           </Tag>
         );
       },

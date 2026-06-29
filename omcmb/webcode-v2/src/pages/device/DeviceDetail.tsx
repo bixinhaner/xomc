@@ -37,7 +37,9 @@ import {
   useSyncDeviceParams,
 } from '@core/hooks/api/useDevices'
 import { useDeviceParameters } from '@core/hooks/api/useDeviceParameters'
-import { activationStatusOf } from '@core/utils/activationStatus'
+import { useAppStore } from '@core/store/appStore'
+import { useDictionary } from '@core/hooks/api/useSystem'
+import { activationStatusLabelOf } from '@core/utils/activationStatus'
 import type { Device } from '@core/types/device'
 import type { AlarmSeverity } from '@core/types/common'
 
@@ -49,6 +51,10 @@ import type { AlarmSeverity } from '@core/types/common'
 // ============================================================
 
 type TabKey = 'basic' | 'status' | 'cell' | 'params'
+
+function openClassicQuickSettings(sn: string) {
+  window.location.assign(`/device/detail/${sn}?tab=quickSettings`)
+}
 
 const ALARM_VARIANT: Record<
   AlarmSeverity | 'none',
@@ -228,10 +234,12 @@ const TABS: { key: TabKey; label: string }[] = [
 export default function DeviceDetail() {
   const { sn = '' } = useParams<{ sn: string }>()
   const navigate = useNavigate()
+  const appLocale = useAppStore((s) => s.locale)
   const [tab, setTab] = useState<TabKey>('basic')
 
   const { data: device, isLoading, isError, error, isFetching, refetch } =
     useDeviceBySn(sn)
+  const { data: opStateDict } = useDictionary('op_state')
   const reboot = useRebootDevice()
   const syncParams = useSyncDeviceParams()
 
@@ -260,10 +268,11 @@ export default function DeviceDetail() {
     // 「激活状态」判定走 frontend-core/utils/activationStatus——与 webcode/webcode-v3 同口径。
     {
       label: '激活状态',
-      value: (() => {
-        const s = activationStatusOf(d.opState)
-        return s === 'active' ? '激活' : s === 'inactive' ? '未激活' : '-'
-      })(),
+      value:
+        activationStatusLabelOf(d.opState, opStateDict?.sysDictionaryDetails, {
+          active: '激活',
+          inactive: '未激活',
+        }, appLocale) || '-',
     },
     { label: '同步状态', value: d.syncStatus },
     { label: 'RF 状态', value: d.rfStatus },
@@ -325,6 +334,11 @@ export default function DeviceDetail() {
           <Button variant="ghost" size="sm" onClick={() => navigate('/device/list')}>
             <ArrowLeft className="size-4" /> 返回
           </Button>
+          {sn ? (
+            <Button variant="outline" size="sm" onClick={() => openClassicQuickSettings(sn)}>
+              快速设置
+            </Button>
+          ) : null}
           {device && (
             <>
               <Badge variant={device.isOnline ? 'success' : 'muted'}>

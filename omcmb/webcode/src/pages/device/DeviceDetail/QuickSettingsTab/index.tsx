@@ -8,6 +8,7 @@ import { useResolvedCellInstances } from '@core/hooks/api/useResolvedCellInstanc
 import { useDeleteObject, useParameterSchema } from '@core/hooks/api/useDeviceParameters';
 import { useDeviceTaskStatus } from '@core/hooks/api/useDeviceTask';
 import { feedbackKey, useQuickSettingsFeedbackStore } from '@core/store/quickSettingsFeedbackStore';
+import type { QuickSettingsGroup } from '@core/types/quicksettings';
 import CellParameterForm from './CellParameterForm';
 import InstanceSelectorForm from './InstanceSelectorForm';
 import MultiInstanceTable, { formatDeviceFaultBrief, formatTime, statusTagSpec } from './MultiInstanceTable';
@@ -17,6 +18,44 @@ import { applyInstanceContext, type QuickSettingsInstanceContext } from './valid
 import { useT } from '@/hooks/useT';
 
 const { Text } = Typography;
+
+const ENB_IPSEC_CONTROL_GROUP: QuickSettingsGroup = {
+  id: 'device-ipsec-control',
+  titleZh: 'IPSec 配置',
+  titleEn: 'IPSec Config',
+  multiInstance: false,
+  params: [
+    {
+      name: 'IPSEC_ENABLE',
+      titleZh: 'IPSec 开关',
+      titleEn: 'IPSec Enable',
+      standardPath: 'Device.Services.FAPService.Ipsec.IPSEC_ENABLE',
+      enumOptions: [
+        { value: '1', label: '开启' },
+        { value: '0', label: '关闭' },
+      ],
+    },
+  ],
+};
+
+const GNB_IPSEC_CONTROL_GROUP: QuickSettingsGroup = {
+  id: 'device-ipsec-control',
+  titleZh: 'IPSec 配置',
+  titleEn: 'IPSec Config',
+  multiInstance: false,
+  params: [
+    {
+      name: 'IPSEC_ENABLE',
+      titleZh: 'IPSec 开关',
+      titleEn: 'IPSec Enable',
+      standardPath: 'Device.IPsec.Enable',
+      enumOptions: [
+        { value: '1', label: 'ON' },
+        { value: '0', label: 'OFF' },
+      ],
+    },
+  ],
+};
 
 interface QuickSettingsTabProps {
   deviceId: string;
@@ -39,7 +78,9 @@ function normalizeQuickSettingsNetworkType(networkType: string): string {
 }
 
 const LTE_NUM_OF_CELLS_PATH = 'Device.Services.FAPService.1.CellConfig.LTE.RAN.CA.PARAMS.NumOfCells';
-const HIDDEN_GROUP_IDS = new Set(['device-time', 'device-sync']);
+const HIDDEN_GROUP_IDS = new Set(['device-sync']);
+const DEVICE_LEVEL_IPSEC_GROUP_IDS = new Set(['device-ipsec', 'gnb-ipsec']);
+const OUTER_GROUP_IDS = new Set(['device-time', 'device-ipsec-control', 'device-ipsec', 'gnb-ipsec']);
 // BSC 设备 BTS 多实例父路径。额外的顶部 ＋/✖ 按钮调用 AddObject/DeleteObject
 // 在该路径下管理 BTS 实例。
 const BSC_BTS_OBJECT_PREFIX = 'DeviceGSM.Bts.';
@@ -121,17 +162,23 @@ export default function QuickSettingsTab({ deviceId, networkType, onSyncTargetPa
     bmTechOptions,
     loading: selectorLoading,
   } = resolved;
+  const hasDeviceIpsecGroup = useMemo(
+    () => (data?.groups ?? []).some((group) => DEVICE_LEVEL_IPSEC_GROUP_IDS.has(group.id)),
+    [data?.groups],
+  );
 
   const activeBmTech = bmTechOptions.includes(bmTech)
     ? bmTech
     : (bmTechOptions[0] ?? (bmHasGsmGroups && !bmHasLteGroups ? 'GSM' : 'LTE'));
 
   const visibleGroups = useMemo(() => {
-    const groups = (data?.groups ?? []).filter((group) => !HIDDEN_GROUP_IDS.has(group.id));
-    if (!isENB || !isBM) {
-      return groups;
-    }
-    return groups.filter((group) => {
+    const groups = (data?.groups ?? []).filter((group) => {
+      if (HIDDEN_GROUP_IDS.has(group.id)) return false;
+      return true;
+    });
+    const filteredGroups = (!isENB || !isBM)
+      ? groups
+      : groups.filter((group) => {
       const paths = [group.objectPath ?? '', ...group.params.map((param) => param.standardPath ?? '')];
       const hasGsmScopedPath = paths.some((path) => path.startsWith('Device.Services.GsmBTSCellDT.'));
       const hasLteScopedPath = paths.some((path) => path.startsWith('Device.Services.FAPService.'));
@@ -144,7 +191,36 @@ export default function QuickSettingsTab({ deviceId, networkType, onSyncTargetPa
       }
       return hasLteScopedPath;
     });
-  }, [data?.groups, isENB, isBM, activeBmTech]);
+
+    const needsBlqIpsecControl = hasDeviceIpsecGroup
+      && filteredGroups.some((group) => DEVICE_LEVEL_IPSEC_GROUP_IDS.has(group.id))
+      && !filteredGroups.some((group) => group.id === 'device-ipsec-control');
+    if (!needsBlqIpsecControl) {
+      return filteredGroups;
+    }
+    const deviceIpsecIndex = filteredGroups.findIndex((group) => DEVICE_LEVEL_IPSEC_GROUP_IDS.has(group.id));
+    if (deviceIpsecIndex < 0) {
+      return filteredGroups;
+    }
+    const nextGroups = [...filteredGroups];
+    const targetIpsecGroup = filteredGroups[deviceIpsecIndex];
+    nextGroups.splice(
+      deviceIpsecIndex,
+      0,
+      targetIpsecGroup?.id === 'gnb-ipsec' ? GNB_IPSEC_CONTROL_GROUP : ENB_IPSEC_CONTROL_GROUP,
+    );
+    return nextGroups;
+  }, [data?.groups, isENB, isBM, activeBmTech, hasDeviceIpsecGroup]);
+
+  const outerGroups = useMemo(
+    () => visibleGroups.filter((group) => OUTER_GROUP_IDS.has(group.id)),
+    [visibleGroups],
+  );
+
+  const instanceScopedGroups = useMemo(
+    () => visibleGroups.filter((group) => !OUTER_GROUP_IDS.has(group.id)),
+    [visibleGroups],
+  );
 
   const selectedInstance =
     userPickedInstance !== null && selectableInstances.includes(userPickedInstance)
@@ -178,6 +254,40 @@ export default function QuickSettingsTab({ deviceId, networkType, onSyncTargetPa
   const selectedKey = isNR
     ? `${instanceContext.fapInstance}-${instanceContext.cellInstance ?? 1}`
     : String(instanceContext.fapInstance);
+
+  const renderGroup = (group: typeof visibleGroups[number], keySuffix: string) => {
+    const childGroups = instanceScopedGroups.filter((g) => g.parentSelector === group.id);
+    if (group.style === 'table' && childGroups.length > 0) {
+      return (
+        <InstanceSelectorForm
+          key={`${group.id}::${refreshTick}::${keySuffix}`}
+          deviceId={deviceId}
+          selectorGroup={group}
+          childGroups={childGroups}
+          instanceContext={instanceContext}
+          locale={locale}
+        />
+      );
+    }
+    if (group.parentSelector) return null;
+    return group.multiInstance ? (
+      <MultiInstanceTable
+        key={`${group.id}::${refreshTick}::${keySuffix}`}
+        deviceId={deviceId}
+        group={group}
+        instanceContext={instanceContext}
+        locale={locale}
+      />
+    ) : (
+      <CellParameterForm
+        key={`${group.id}::${refreshTick}::${keySuffix}`}
+        deviceId={deviceId}
+        group={group}
+        instanceContext={instanceContext}
+        locale={locale}
+      />
+    );
+  };
 
   const syncTargetPaths = useMemo(() => {
     const paths = new Set<string>();
@@ -373,6 +483,8 @@ export default function QuickSettingsTab({ deviceId, networkType, onSyncTargetPa
 
   return (
     <div style={{ padding: 16 }}>
+      {outerGroups.map((group) => renderGroup(group, 'outer'))}
+
       {(isENB || isNR || isBSC) && (
         <Space style={{ marginBottom: 16 }}>
           {isENB && isBM && bmTechOptions.length > 1 && (
@@ -487,41 +599,7 @@ export default function QuickSettingsTab({ deviceId, networkType, onSyncTargetPa
         </Space>
       )}
 
-      {visibleGroups.map((group) => {
-        // 若该 group 是其他 group 的 parentSelector，则把对应子 groups 嵌入到 InstanceSelectorForm 中渲染。
-        const childGroups = visibleGroups.filter((g) => g.parentSelector === group.id);
-        if (group.style === 'table' && childGroups.length > 0) {
-          return (
-            <InstanceSelectorForm
-              key={`${group.id}::${refreshTick}::${selectedKey}`}
-              deviceId={deviceId}
-              selectorGroup={group}
-              childGroups={childGroups}
-              instanceContext={instanceContext}
-              locale={locale}
-            />
-          );
-        }
-        // 子 groups (parentSelector 非空) 已嵌入到上面的 selector，这里跳过独立渲染。
-        if (group.parentSelector) return null;
-        return group.multiInstance ? (
-          <MultiInstanceTable
-            key={`${group.id}::${refreshTick}::${selectedKey}`}
-            deviceId={deviceId}
-            group={group}
-            instanceContext={instanceContext}
-            locale={locale}
-          />
-        ) : (
-          <CellParameterForm
-            key={`${group.id}::${refreshTick}::${selectedKey}`}
-            deviceId={deviceId}
-            group={group}
-            instanceContext={instanceContext}
-            locale={locale}
-          />
-        );
-      })}
+      {instanceScopedGroups.map((group) => renderGroup(group, selectedKey))}
 
       {isBSC && (
         <BscBtsAddModal

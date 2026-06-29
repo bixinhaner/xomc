@@ -86,7 +86,12 @@
     <param name="Pat2NrofUplinkSymbols" titleZh="Pattern2 上行特殊符号数" titleEn="Pattern2 UL Symbols"
            standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.TddULDLConfigurationCommon.pattern2.NrofUplinkSymbols"/>
   </group>
-  <group id="device-time" titleZh="时间设置" titleEn="Time Settings">
+       <group id="device-time" titleZh="NTP" titleEn="NTP">
+        <param name="Enable" titleZh="NTP 模式" titleEn="NTP Mode"
+                       standardPath="Device.Time.Enable">
+              <option value="1" label="NTP Server"/>
+              <option value="0" label="NTP Client"/>
+        </param>
     <param name="LocalTimeZoneName" titleZh="本地时区" titleEn="Local Time Zone"
            standardPath="Device.Time.LocalTimeZoneName"/>
     <param name="NTPServer1" titleZh="NTP 服务器 1" titleEn="NTP Server 1"
@@ -100,6 +105,15 @@
     <param name="NTPServer5" titleZh="NTP 服务器 5" titleEn="NTP Server 5"
            standardPath="Device.Time.NTPServer5"/>
   </group>
+
+       <group id="device-ipsec-control" titleZh="IPSec 配置" titleEn="IPSec Config">
+              <param name="IPSEC_ENABLE" titleZh="IPSec 开关" titleEn="IPSec Enable"
+                                    standardPath="Device.IPsec.Enable">
+                     <option value="1" label="开启"/>
+                     <option value="0" label="关闭"/>
+              </param>
+       </group>
+
   <group id="gnb-ipsec" titleZh="IPSec 参数" titleEn="IPSec Settings"
          multiInstance="true" maxInstances="4"
          objectPath="Device.FAP.Ipsec.{i}.">

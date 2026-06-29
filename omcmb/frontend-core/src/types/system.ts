@@ -5,6 +5,12 @@ export type UserRole = 'admin' | 'operator' | 'viewer' | 'auditor';
 // 详见 omcgo/docs/prd/system/users.md §1.1 / §11.3。
 export type UserSource = 'builtIn' | 'admin' | 'LDAP';
 
+export interface UserListParams {
+  userName?: string;
+  roleId?: string;
+  status?: UserStatus;
+}
+
 export interface User {
   id: string;
   username: string;

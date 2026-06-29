@@ -18,7 +18,24 @@ import (
 
 	"github.com/omcgo/omcgo/internal/config/parammodel"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/mml"
 )
+
+type fakeUnsupportedPathRepo struct {
+	items []mml.UnsupportedPath
+	err   error
+}
+
+func (f *fakeUnsupportedPathRepo) Record(_ context.Context, _ uuid.UUID, _ string, _, _ bool, _ int, _ string) error {
+	return nil
+}
+
+func (f *fakeUnsupportedPathRepo) ListByProduct(_ context.Context, _ uuid.UUID) ([]mml.UnsupportedPath, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return append([]mml.UnsupportedPath(nil), f.items...), nil
+}
 
 func TestExtractStorablePrefixes_HappyPath(t *testing.T) {
 	mappings := []parammodel.ParamMapping{
@@ -157,6 +174,64 @@ func TestExtractStorablePrefixes_AllUnsupported_Empty(t *testing.T) {
 	}
 	got := extractStorablePrefixes(mappings)
 	assert.Empty(t, got)
+}
+
+func TestFilterReadUnsupportedMappings_RemovesReadUnsupportedStandardPaths(t *testing.T) {
+	productID := uuid.New()
+	svc := &SyncService{
+		unsupportedPathRepo: &fakeUnsupportedPathRepo{items: []mml.UnsupportedPath{
+			{Path: "Device.A.Bad", ReadUnsupported: true},
+			{Path: "Device.B.WriteOnly", WriteUnsupported: true},
+		}},
+		logger: zap.NewNop(),
+	}
+	mappings := []parammodel.ParamMapping{
+		{StandardPath: "Device.A.Bad", PrivatePath: "Device.A.Bad", IsStorable: true, IsSupported: true},
+		{StandardPath: "Device.A.Good", PrivatePath: "Device.A.Good", IsStorable: true, IsSupported: true},
+		{StandardPath: "Device.B.WriteOnly", PrivatePath: "Device.B.WriteOnly", IsStorable: true, IsSupported: true},
+	}
+
+	filtered := svc.filterReadUnsupportedMappings(context.Background(), productID, mappings)
+	require.Len(t, filtered, 2)
+	assert.Equal(t, "Device.A.Good", filtered[0].StandardPath)
+	assert.Equal(t, "Device.B.WriteOnly", filtered[1].StandardPath)
+}
+
+func TestFilterReadUnsupportedMappings_FallsBackOnRepoError(t *testing.T) {
+	svc := &SyncService{
+		unsupportedPathRepo: &fakeUnsupportedPathRepo{err: errors.New("boom")},
+		logger:              zap.NewNop(),
+	}
+	mappings := []parammodel.ParamMapping{{StandardPath: "Device.A.Good", PrivatePath: "Device.A.Good", IsStorable: true, IsSupported: true}}
+
+	filtered := svc.filterReadUnsupportedMappings(context.Background(), uuid.New(), mappings)
+	assert.Equal(t, mappings, filtered)
+}
+
+func TestFilterReadUnsupportedPathSet_RemovesReadUnsupportedStandardPaths(t *testing.T) {
+	productID := uuid.New()
+	svc := &SyncService{
+		unsupportedPathRepo: &fakeUnsupportedPathRepo{items: []mml.UnsupportedPath{{Path: "Device.A.Bad", ReadUnsupported: true}}},
+		logger:              zap.NewNop(),
+	}
+	paths := map[string]struct{}{
+		"Device.A.Bad":  {},
+		"Device.A.Good": {},
+	}
+
+	filtered := svc.filterReadUnsupportedPathSet(context.Background(), productID, paths)
+	assert.Equal(t, map[string]struct{}{"Device.A.Good": {}}, filtered)
+}
+
+func TestFilterReadUnsupportedPathSet_FallsBackOnRepoError(t *testing.T) {
+	paths := map[string]struct{}{"Device.A.Good": {}}
+	svc := &SyncService{
+		unsupportedPathRepo: &fakeUnsupportedPathRepo{err: errors.New("boom")},
+		logger:              zap.NewNop(),
+	}
+
+	filtered := svc.filterReadUnsupportedPathSet(context.Background(), uuid.New(), paths)
+	assert.Equal(t, paths, filtered)
 }
 
 func TestBasePrefix_Cases(t *testing.T) {

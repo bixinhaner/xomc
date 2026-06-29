@@ -35,7 +35,8 @@ import LineChart from '@/components/Charts/LineChart';
 import ErrorBoundary from '@/components/common/ErrorBoundary';
 import { useSyncStatus } from '@core/hooks/api/useDeviceParameters';
 import { useDeviceBySn, useSyncDeviceParams } from '@core/hooks/api/useDevices';
-import { activationStatusOf } from '@core/utils/activationStatus';
+import { useDictionary } from '@core/hooks/api/useSystem';
+import { activationStatusLabelOf, activationStatusOf } from '@core/utils/activationStatus';
 import { useQuickSettingsGroups } from '@core/hooks/api/useQuickSettings';
 import { useResolvedCellInstances } from '@core/hooks/api/useResolvedCellInstances';
 import { useAcknowledgeAlarms, useClearAlarms, useCurrentAlarms, useUnacknowledgeAlarms } from '@core/hooks/api/useAlarms';
@@ -53,6 +54,7 @@ import AlarmDetail from '@/pages/alarm/AlarmDetail';
 import AutoRefreshDropdown from '@/pages/alarm/components/AutoRefreshDropdown';
 import ConfirmWithNoteModal from '@/pages/alarm/components/ConfirmWithNoteModal';
 import { formatSystemTime } from '@core/utils/systemTime';
+import { useAppStore } from '@core/store/appStore';
 
 const { Title, Text } = Typography;
 
@@ -758,15 +760,20 @@ const buildCellRecords = (device: Device, detailCells?: DeviceDetailCell[]): Cel
   }));
 };
 
-const renderCellOpState = (value: string | undefined, t: ReturnType<typeof useT>) =>
-  renderStatusTag(value, {
-    '1': { label: t('status.active'), color: 'success' },
-    '0': { label: t('status.inactive'), color: 'error' },
-    true: { label: t('status.active'), color: 'success' },
-    false: { label: t('status.inactive'), color: 'error' },
-    active: { label: t('status.active'), color: 'success' },
-    inactive: { label: t('status.inactive'), color: 'error' },
-  });
+const renderCellOpState = (
+  value: string | undefined,
+  t: ReturnType<typeof useT>,
+  details?: { label?: string; value?: string; status?: boolean }[],
+  locale: 'zh-CN' | 'en-US' = 'zh-CN',
+) => {
+  const status = activationStatusOf(value);
+  if (status == null) return '-';
+  const label = activationStatusLabelOf(value, details, {
+    active: t('status.active'),
+    inactive: t('status.inactive'),
+  }, locale);
+  return <Tag color={status === 'active' ? 'success' : 'error'}>{label}</Tag>;
+};
 
 const renderCellRfStatus = (value: string | undefined, t: ReturnType<typeof useT>) =>
   renderStatusTag(value, {
@@ -1162,11 +1169,13 @@ export default function DeviceDetail() {
   const location = useLocation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const appLocale = useAppStore((s) => s.locale);
   const openTab = useTabStore((s) => s.openTab);
   const closeTab = useTabStore((s) => s.closeTab);
   const [searchParams, setSearchParams] = useSearchParams();
 
   const { data: device, isLoading, refetch } = useDeviceBySn(sn);
+  const { data: opStateDict } = useDictionary('op_state');
   const syncMutation = useSyncDeviceParams();
   const { data: paramSyncStatus, refetch: refetchParamSyncStatus } = useSyncStatus(device?.id ?? '');
   const [quickSettingsSyncTargetPaths, setQuickSettingsSyncTargetPaths] = useState<string[]>([]);
@@ -1174,6 +1183,7 @@ export default function DeviceDetail() {
   const quickSettingsSyncPending = Boolean(quickSettingsSync);
   const lastQuickSettingsParamSync = useQuickSettingsFeedbackStore((s) => (device?.id ? s.lastScopedSyncs[device.id] : undefined)) ?? null;
   const isDeviceParamSyncBusy = paramSyncStatus?.status === 'syncing' || quickSettingsSyncPending || syncMutation.isPending;
+  const isQuickSettingsRefreshSubmitting = syncMutation.isPending;
   const { data: detailComposite } = useQuery({
     queryKey: ['devices', 'detail-composite-v2', device?.id],
     queryFn: async () => {
@@ -1607,7 +1617,12 @@ export default function DeviceDetail() {
       return {
         ...column,
         render: column.key === 'opState'
-          ? (_: unknown, row: CellRecord) => renderCellOpState(row.values.opState as string | undefined, t)
+          ? (_: unknown, row: CellRecord) => renderCellOpState(
+            row.values.opState as string | undefined,
+            t,
+            opStateDict?.sysDictionaryDetails,
+            appLocale,
+          )
           : column.key === 'adminState'
             ? (_: unknown, row: CellRecord) => renderCellAdminState(
               row.values.adminState as string | undefined,
@@ -1621,7 +1636,7 @@ export default function DeviceDetail() {
             : (value: string | number | undefined) => value ?? '-',
       };
     }),
-    [displayCellNetworkType, t],
+    [appLocale, displayCellNetworkType, opStateDict?.sysDictionaryDetails, t],
   );
 
   if (isLoading) {
@@ -1679,9 +1694,13 @@ export default function DeviceDetail() {
               const status = activationStatusOf(displayDevice.opState);
               if (status == null) return '-';
               const isActive = status === 'active';
+              const label = activationStatusLabelOf(displayDevice.opState, opStateDict?.sysDictionaryDetails, {
+                active: t('status.active'),
+                inactive: t('status.inactive'),
+              }, appLocale);
               return (
                 <Tag color={isActive ? 'success' : 'error'}>
-                  {isActive ? t('status.active') : t('status.inactive')}
+                  {label}
                 </Tag>
               );
             })()}
@@ -1697,7 +1716,7 @@ export default function DeviceDetail() {
               <Button
                 icon={<ReloadOutlined />}
                 onClick={handleHeaderRefresh}
-                loading={activeTab === 'quickSettings' && isDeviceParamSyncBusy}
+                loading={activeTab === 'quickSettings' && isQuickSettingsRefreshSubmitting}
                 disabled={isDeviceParamSyncBusy}
               >
                 {t('common.refresh')}

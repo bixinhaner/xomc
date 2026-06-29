@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   flexRender,
   getCoreRowModel,
@@ -47,7 +48,9 @@ import {
 } from '@/components/layout/PageShell'
 import { cn } from '@/lib/utils'
 
+import { useAppStore } from '@core/store/appStore'
 import {
+  prefetchDeviceDetailContext,
   useDeviceList,
   useDeviceGroups,
   useBatchRebootDevices,
@@ -55,7 +58,8 @@ import {
 } from '@core/hooks/api/useDevices'
 import { useProductList } from '@core/hooks/api/useProducts'
 import { useAlarmCount, useTriggerAlarmSync } from '@core/hooks/api/useAlarms'
-import { activationStatusOf } from '@core/utils/activationStatus'
+import { useDictionary } from '@core/hooks/api/useSystem'
+import { activationStatusLabelOf, activationStatusOf } from '@core/utils/activationStatus'
 import type { Device, DeviceFilter } from '@core/types/device'
 import type { PageRequest } from '@core/types/pagination'
 import type { AlarmSeverity } from '@core/types/common'
@@ -108,17 +112,30 @@ function AlarmBadge({ level, count }: { level: AlarmSeverity | 'none'; count?: n
   return <Badge variant={ALARM_VARIANT[level]}>{label}</Badge>
 }
 
-function ActivationBadge({ opState }: { opState: string }) {
+function ActivationBadge({
+  opState,
+  details,
+  locale,
+}: {
+  opState: string | undefined | null
+  details?: { label?: string; value?: string; status?: boolean }[]
+  locale: 'zh-CN' | 'en-US'
+}) {
   // 「激活状态」判定走 frontend-core/utils/activationStatus —— 与 webcode/webcode-v3
   // 同一来源,后端兜底的 'unknown' 与空值一律显示 '—',不再回显 raw 字符串。
   const status = activationStatusOf(opState)
-  if (status === 'active') return <Badge variant="success">激活</Badge>
-  if (status === 'inactive') return <Badge variant="muted">未激活</Badge>
+  const label = activationStatusLabelOf(opState, details, {
+    active: '激活',
+    inactive: '未激活',
+  }, locale)
+  if (status === 'active') return <Badge variant="success">{label}</Badge>
+  if (status === 'inactive') return <Badge variant="muted">{label}</Badge>
   return <span className="text-xs text-muted-foreground">—</span>
 }
 
 export function DevicesPage() {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const [page, setPage] = useState(1)
   const [pageSize] = useState(20)
   const [searchText, setSearchText] = useState('')
@@ -129,11 +146,23 @@ export function DevicesPage() {
   const [groupId, setGroupId] = useState<string>('all')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
+  const prefetchDeviceDetailEntry = (device: Device) => {
+    void import('@/pages/device/DeviceDetail')
+    void prefetchDeviceDetailContext(queryClient, device)
+  }
+
+  const openDeviceDetail = (device: Device) => {
+    prefetchDeviceDetailEntry(device)
+    void navigate(`/device/detail/${device.sn}`)
+  }
+
   // ---- 辅助下拉数据 ----
   const groupsQuery = useDeviceGroups()
   const productsQuery = useProductList()
   // 全量在线告警计数（与列表 stats.alarmed 占位字段相比更准确，v1 同此做法）
   const alarmCountQuery = useAlarmCount()
+  const appLocale = useAppStore((s) => s.locale)
+  const { data: opStateDict } = useDictionary('op_state')
 
   const groupOptions = useMemo(
     () => (groupsQuery.data?.groups ?? []).filter((g) => g.parentId !== null),
@@ -284,7 +313,9 @@ export function DevicesPage() {
           <button
             type="button"
             className="font-mono text-xs text-primary hover:underline"
-            onClick={() => navigate(`/device/detail/${row.original.sn}`)}
+            onMouseEnter={() => prefetchDeviceDetailEntry(row.original)}
+            onFocus={() => prefetchDeviceDetailEntry(row.original)}
+            onClick={() => openDeviceDetail(row.original)}
           >
             {row.original.sn || '—'}
           </button>
@@ -357,7 +388,7 @@ export function DevicesPage() {
       {
         accessorKey: 'opState',
         header: '激活状态',
-        cell: ({ row }) => <ActivationBadge opState={row.original.opState} />,
+        cell: ({ row }) => <ActivationBadge opState={row.original.opState} details={opStateDict?.sysDictionaryDetails} locale={appLocale} />,
       },
       {
         accessorKey: 'lastOnlineTime',
@@ -391,7 +422,7 @@ export function DevicesPage() {
         },
       },
     ],
-    [allOnPageSelected, someOnPageSelected, selectedIds]
+    [allOnPageSelected, appLocale, opStateDict?.sysDictionaryDetails, selectedIds, someOnPageSelected]
   )
 
   const table = useReactTable({

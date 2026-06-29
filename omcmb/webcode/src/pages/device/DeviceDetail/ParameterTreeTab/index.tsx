@@ -79,6 +79,7 @@ export default function ParameterTreeTab({ deviceId, lastScopedSync, syncBusy: e
   // T-0126: 切换到 useSyncDeviceParams（Path B + reason="manual"），替代旧 useSyncParameters (Path A)
   const syncMutation = useSyncDeviceParams();
   const syncBusy = externalSyncBusy || isSyncing || syncMutation.isPending;
+  const syncControlLoading = syncMutation.isPending;
   const isLastScopedSync = Boolean(
     lastScopedSync?.targetCount && lastScopedSync.completedAt === syncStatus?.lastParamSyncAt,
   );
@@ -205,7 +206,7 @@ export default function ParameterTreeTab({ deviceId, lastScopedSync, syncBusy: e
             <Button
               icon={<SyncOutlined />}
               onClick={handleSync}
-              loading={syncMutation.isPending || externalSyncBusy}
+              loading={syncControlLoading}
               disabled={syncBusy}
             >
               {t('device.paramTree.syncParams')}

@@ -95,8 +95,8 @@ export function createClusterStyle(count: number): Style {
 }
 
 /**
- * 创建高亮设备样式（搜索定位）
- * 简约清爽风格：适中数量的波纹、优雅的扩散、中心点发光
+ * 创建高亮设备样式（搜索定位水波纹）
+ * rAF 驱动：3 个波纹交错扩散，easeOutQuad，60fps
  */
 export function createHighlightStyle(
   device: MapDevice,
@@ -108,39 +108,37 @@ export function createHighlightStyle(
 
   const styles: Style[] = [];
 
-  // 中心点外发光效果（增强选中感）
+  // 水波纹圆环（按半径从大到小压栈，确保小波纹显示在最上层）
+  const sortedWaves = [...rippleWaves].sort((a, b) => b.radius - a.radius);
+  for (const wave of sortedWaves) {
+    const rippleRadius = baseRadius + wave.radius;
+    if (rippleRadius <= baseRadius) continue;
+    styles.push(new Style({
+      image: new Circle({
+        radius: rippleRadius,
+        fill: new Fill({ color: 'transparent' }),
+        stroke: new Stroke({
+          color: `rgba(24, 144, 255, ${Math.max(0, Math.min(1, wave.opacity))})`,
+          width: 2.5,
+        }),
+      }),
+    }));
+  }
+
+  // 中心节点：蓝色加粗边框 + 外发光晕
   styles.push(new Style({
     image: new Circle({
-      radius: baseRadius + 4,
-      fill: new Fill({ color: 'rgba(24, 144, 255, 0.15)' }), // 淡淡的外发光
+      radius: baseRadius + 3,
+      fill: new Fill({ color: 'rgba(24, 144, 255, 0.18)' }),
     }),
   }));
-
-  // 水波纹样式：简约清爽的圆环
-  rippleWaves.forEach(wave => {
-    const rippleRadius = baseRadius + wave.radius;
-    if (rippleRadius > baseRadius) {
-      styles.push(new Style({
-        image: new Circle({
-          radius: rippleRadius,
-          fill: new Fill({ color: 'transparent' }),
-          stroke: new Stroke({
-            color: `rgba(24, 144, 255, ${wave.opacity})`, // 清爽的蓝色
-            width: 2, // 适中线条宽度
-          }),
-        }),
-      }));
-    }
-  });
-
-  // 基础样式：原始大小的节点（最上层）
   styles.push(new Style({
     image: new Circle({
       radius: baseRadius,
       fill: new Fill({ color: config.color }),
       stroke: new Stroke({
         color: COLORS.primary,
-        width: 3, // 加粗边框增强选中感
+        width: 3,
       }),
     }),
   }));
@@ -197,6 +195,19 @@ export function clusterStyleFunction(feature: Feature, _resolution: number): Sty
   const features = feature.get('features') as Feature[] | undefined;
   const count = features?.length || 1;
 
+  // Cluster 出生动画：新 cluster 形成后从 0.6 → 1.0 缩放（easeOutCubic，250ms）
+  const BIRTH_ANIM_DURATION = 250;
+  const birthTime = feature.get('_birthTime') as number | undefined;
+  let imageScale = 1;
+  if (birthTime !== undefined) {
+    const elapsed = performance.now() - birthTime;
+    if (elapsed < BIRTH_ANIM_DURATION) {
+      const t = elapsed / BIRTH_ANIM_DURATION;
+      const eased = 1 - Math.pow(1 - t, 3); // easeOutCubic
+      imageScale = 0.6 + 0.4 * eased; // 0.6 → 1.0
+    }
+  }
+
   if (count === 1 && features) {
     // 单个设备
     const singleFeature = features[0];
@@ -216,10 +227,16 @@ export function clusterStyleFunction(feature: Feature, _resolution: number): Sty
       return createHoverStyle(device, 15);
     }
 
-    return createDeviceStyle(device, 15);
+    const style = createDeviceStyle(device, 15);
+    const img = style.getImage();
+    if (img && imageScale < 1) img.setScale(imageScale);
+    return style;
   }
 
-  return createClusterStyle(count);
+  const clusterStyle = createClusterStyle(count);
+  const img = clusterStyle.getImage();
+  if (img && imageScale < 1) img.setScale(imageScale);
+  return clusterStyle;
 }
 
 /**

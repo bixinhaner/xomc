@@ -8,8 +8,9 @@ import React, { useState, useEffect, useMemo, useCallback, forwardRef, useImpera
 import { Spin, Alert } from 'antd';
 import { LoadingOutlined, InfoCircleOutlined } from '@ant-design/icons';
 import { useIntl } from 'react-intl';
+import { fromLonLat } from 'ol/proj';
 import { useThemeToken } from '@/hooks/useThemeToken';
-import type { GISMapProps, MapDevice, MapViewport, MapStats } from '@core/types/map';
+import type { GISMapProps, MapDevice, MapViewport, MapStats, MapBounds } from '@core/types/map';
 import { MAP_CONFIG, ANIMATION_CONFIG } from './constants';
 import { useOLMap } from './useOLMap';
 import MapPopup from './MapPopup';
@@ -62,8 +63,17 @@ interface GISMapRef {
   }) => void;
   /** 获取当前视图状态 */
   getViewport: () => MapViewport | null;
+  /** 自适应显示指定包围盒（OL view.fit，自动计算 zoom，带 padding） */
+  fitBounds: (bounds: MapBounds, options?: { duration?: number }) => void;
+  /** 清除所有设备数据（筛选条件变化时调用，彻底重置） */
+  clearDevices: () => void;
   /** 关闭当前锁定的卡片 */
   closeClickedCard: () => void;
+  /**
+   * 动态调整瓦片并发上限（0 = 暂停队列，正常值为 3）
+   * 搜索时调低，为 API 请求让出连接；搜索完成后恢复
+   */
+  setTileConcurrency: (n: number) => void;
 }
 
 /**
@@ -83,6 +93,7 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
   showStats = true,
   showControls = true,
   showMetadataTip = true,
+  centerReady = true,
   className,
   style,
 }, ref) => {
@@ -110,17 +121,21 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
     mapRef,
     mapInstanceRef,
     updateDevices,
+    clearDevices,
     getViewport,
     flyTo,
+    fitBounds,
     clearHighlight,
     isReady,
     updateSize,
     highlightAndSpiderfyIfNeeded,
     metadata,
+    setTileConcurrency,
   } = useOLMap({
     center: defaultCenter,
     zoom: defaultZoom,
     tileUrl,
+    centerReady,
     onDeviceClick: (device, pixel) => {
       // 点击设备时锁定弹窗
       setClickedDevice(device);
@@ -196,10 +211,8 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
     return () => clearTimeout(timer);
   }, [searchResultDevice, isReady, highlightAndSpiderfyIfNeeded]);
 
-  // 元数据加载完成日志（用于调试）
   useEffect(() => {
     if (metadata && showMetadataTip) {
-      console.log('[GISMap] Metadata loaded:', metadata.region, metadata.bounds);
       // 显示短暂的元数据加载提示
       setShouldShowMetadataAlert(true);
       const timer = setTimeout(() => setShouldShowMetadataAlert(false), 3000);
@@ -288,8 +301,8 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
     const map = mapRef.current;
     if (!map) return null;
     try {
-      const coords = [lng, lat];
-      const pixel = map.getPixelFromCoordinate(coords);
+      // OL 内部坐标系为 EPSG:3857，必须通过 fromLonLat 转换再取像素坐标
+      const pixel = map.getPixelFromCoordinate(fromLonLat([lng, lat]));
       return pixel ? { x: pixel[0], y: pixel[1] } : null;
     } catch {
       return null;
@@ -343,18 +356,18 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
     );
 
     // 3. 计算动画总时长（用于延迟显示卡片）
-    let totalDuration = 0;
+    let totalDuration: number;
 
     // 4. 根据动画模式执行定位
     if (animationMode === 'direct') {
       // 直接跳转模式
-      view.setCenter([device.lng, device.lat]);
+      view.setCenter(fromLonLat([device.lng, device.lat]));
       view.setZoom(safeTargetZoom);
       totalDuration = 50;
     } else if (animationMode === 'fast') {
       // 快速单阶段动画
       view.animate({
-        center: [device.lng, device.lat],
+        center: fromLonLat([device.lng, device.lat]),
         zoom: safeTargetZoom,
         duration: 500,
       });
@@ -362,7 +375,7 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
     } else if (animationMode === 'smooth') {
       // smooth 模式：直接平滑动画到目标位置
       view.animate({
-        center: [device.lng, device.lat],
+        center: fromLonLat([device.lng, device.lat]),
         zoom: safeTargetZoom,
         duration: 800,
         easing: (t) => {
@@ -428,7 +441,7 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
     calculateDevicePixelPosition,
     mapInstanceRef,
     metadata,
-    defaultZoom,
+    flyTo,
   ]);
 
   // 关闭当前锁定的卡片
@@ -443,8 +456,11 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
     highlightAndFlyToWithCard,
     flyTo,
     getViewport,
+    fitBounds,
+    clearDevices,
     closeClickedCard,
-  }), [highlightAndFlyTo, highlightAndFlyToWithCard, flyTo, getViewport, closeClickedCard]);
+    setTileConcurrency,
+  }), [highlightAndFlyTo, highlightAndFlyToWithCard, flyTo, getViewport, fitBounds, clearDevices, closeClickedCard, setTileConcurrency]);
 
   // 计算统计数据
   const stats = useMemo<MapStats>(() => {

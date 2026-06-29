@@ -17,9 +17,51 @@
  *     (按"未激活"展示比按原值回显更安全 —— 避免详情页打出 raw "unknown"/"active" 等
  *      内部字符串与列表 Tag 表现脱节)
  */
+import { getI18nText, type Locale } from './i18nText';
+
 export type ActivationStatus = 'active' | 'inactive' | null;
 
 export function activationStatusOf(opState: string | undefined | null): ActivationStatus {
   if (opState == null || opState === '' || opState === 'unknown') return null;
   return opState === '1' ? 'active' : 'inactive';
+}
+
+interface ActivationStatusDetailLike {
+  label?: string;
+  labelI18n?: Record<string, string>;
+  value?: string;
+  status?: boolean;
+}
+
+interface ActivationStatusFallbackLabels {
+  active: string;
+  inactive: string;
+}
+
+export function activationStatusLabelOf(
+  opState: string | undefined | null,
+  details: ReadonlyArray<ActivationStatusDetailLike> | null | undefined,
+  fallback: ActivationStatusFallbackLabels,
+  locale: Locale = 'zh-CN',
+): string | null {
+  const status = activationStatusOf(opState);
+  if (status == null) return null;
+
+  const findLabel = (value: string) => {
+    const detail = details?.find((item) => item?.status !== false && item?.value === value);
+    if (!detail) return null;
+    const label = getI18nText(detail.labelI18n, locale, detail.label).trim();
+    return label || null;
+  };
+
+  if (opState != null && opState !== '') {
+    const exact = findLabel(opState);
+    if (exact) return exact;
+  }
+
+  if (status === 'active') {
+    return findLabel('1') || fallback.active;
+  }
+
+  return findLabel('0') || fallback.inactive;
 }
