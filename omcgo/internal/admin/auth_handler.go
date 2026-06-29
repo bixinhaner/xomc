@@ -487,17 +487,29 @@ func loginErrorToFriendlyError(err error) error {
 func (h *Handler) ChangePassword(c *gin.Context) {
 	userID := getUserID(c)
 	if userID == uuid.Nil {
+		h.logger.Warn("change-password: user_id is nil, unauthorized")
 		commonerrors.AbortWithError(c, http.StatusUnauthorized, commonerrors.ErrUnauthorized)
 		return
 	}
 
 	var httpReq ChangePasswordHTTPRequest
 	if err := c.ShouldBindJSON(&httpReq); err != nil {
+		h.logger.Warn("change-password: JSON bind failed", zap.Error(err))
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 
 	ctx := c.Request.Context()
+
+	// Issue #695：记录请求参数便于诊断解密失败
+	h.logger.Debug("change-password: received request",
+		zap.String("user_id", userID.String()),
+		zap.Bool("has_encrypted_old", httpReq.EncryptedOldPassword != ""),
+		zap.Bool("has_encrypted_new", httpReq.EncryptedNewPassword != ""),
+		zap.Bool("has_key_id", httpReq.KeyID != ""),
+		zap.Bool("has_plain_old", httpReq.OldPassword != ""),
+		zap.Bool("has_plain_new", httpReq.NewPassword != ""),
+	)
 
 	// T-0120 双路径：加密 vs 明文 fallback
 	var (
@@ -507,18 +519,25 @@ func (h *Handler) ChangePassword(c *gin.Context) {
 	)
 	if httpReq.EncryptedOldPassword != "" && httpReq.EncryptedNewPassword != "" && httpReq.KeyID != "" {
 		if h.loginCipher == nil {
+			h.logger.Error("change-password: loginCipher not configured")
 			commonerrors.AbortWithError(c, http.StatusInternalServerError,
 				errors.New("login password cipher not configured"))
 			return
 		}
 		oldPlain, err = h.loginCipher.Decrypt(ctx, httpReq.KeyID, httpReq.EncryptedOldPassword)
 		if err != nil {
+			h.logger.Warn("change-password: decrypt old password failed",
+				zap.String("key_id", httpReq.KeyID),
+				zap.Error(err))
 			commonerrors.AbortWithError(c, http.StatusBadRequest,
 				fmt.Errorf("decrypt old password: %w", err))
 			return
 		}
 		newPlain, err = h.loginCipher.Decrypt(ctx, httpReq.KeyID, httpReq.EncryptedNewPassword)
 		if err != nil {
+			h.logger.Warn("change-password: decrypt new password failed",
+				zap.String("key_id", httpReq.KeyID),
+				zap.Error(err))
 			commonerrors.AbortWithError(c, http.StatusBadRequest,
 				fmt.Errorf("decrypt new password: %w", err))
 			return
