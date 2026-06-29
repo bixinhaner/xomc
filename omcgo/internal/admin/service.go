@@ -256,9 +256,10 @@ func (s *AdminService) Login(ctx context.Context, username, password string) (*T
 	// ⑩ 单点登录（sys_configs security.isOnlyOneUserLoginEnable）：
 	//   FE 字段语义为"允许多端并发登录"，true=允许多端 / false=单点登录。
 	//   policy.AllowConcurrent=false 时，新登录前先把该用户所有现存 token 标
-	//   记为撤销（写 redis revokedAt=now-1，见 TokenRevoker.Revoke）。新 token
-	//   iat==now，IsRevoked 用 `iat<=revokedAt` 比较即 `now<=now-1` 为假 → 新 token
-	//   不会被自己踢；旧 token iat<=now-1 一定被踢（issue #139）。
+	//   记为撤销（写 Redis revokedAt=now_us，见 TokenRevoker.Revoke），再签发
+	//   带 issued_at_us 的新 token。IsRevoked 用严格小于比较：旧 token
+	//   issued_at_us < revokedAt → 被踢；新 token issued_at_us >= revokedAt →
+	//   不会被自己踢下线。
 	//   Revoker / Policy 任一未注入则跳过（fail-safe — 不阻塞登录）。
 	if s.policy != nil && s.revoker != nil {
 		if !s.policy.Get(ctx).AllowConcurrent {
@@ -369,7 +370,7 @@ func (s *AdminService) RefreshToken(ctx context.Context, refreshToken string) (*
 	// 检查用户级撤销（单点登录踢出）—— refresh token 也需要被撤销机制覆盖，
 	// 否则旧设备可以通过 refresh 绕过单点登录限制（issue #698 根因）
 	if s.revoker != nil {
-		revoked, err := s.revoker.IsRevoked(ctx, claims.UserID, claims.IssuedAt)
+		revoked, err := s.revoker.IsRevoked(ctx, claims.UserID, claims.IssuedAt, claims.IssuedAtMicros)
 		if err != nil {
 			s.logger.Warn("check token revocation failed", zap.Error(err))
 			// fail-open: 不阻塞 refresh，但记录错误

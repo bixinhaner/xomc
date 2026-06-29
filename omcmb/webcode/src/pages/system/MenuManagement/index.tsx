@@ -136,6 +136,14 @@ const buildMenuStatusOptions = (t: (id: string) => string) => [
   { label: t('menu.radio.disabled'), value: 'disabled' },
 ];
 
+function buildShowStatusLabel(t: (id: string) => string): React.ReactNode {
+  return `${t('menu.form.showStatus')}（只影响导航是否显示）`;
+}
+
+function buildMenuStatusLabel(t: (id: string) => string): React.ReactNode {
+  return `${t('menu.form.status')}（影响菜单是否生效，停用后普通用户直链不可用）`;
+}
+
 // DEFAULT_OPERATIONS 占位常量已拆到同级 ./constants.ts
 // （react-refresh/only-export-components：页面文件只导出组件）。
 
@@ -751,13 +759,12 @@ export default function MenuManagement() {
                     <Form.Item
                       name="routePath"
                       label={t('menu.form.routePath')}
-                      rules={[{ required: true, message: t('menu.validation.routePath') }]}
                     >
                       <Input placeholder={t('menu.placeholder.routePath')} maxLength={200} />
                     </Form.Item>
                     <Form.Item
                       name="showStatus"
-                      label={t('menu.form.showStatus')}
+                      label={buildShowStatusLabel(t)}
                       rules={[{ required: true, message: t('menu.validation.showStatus') }]}
                     >
                       <Radio.Group>
@@ -767,7 +774,7 @@ export default function MenuManagement() {
                     </Form.Item>
                     <Form.Item
                       name="status"
-                      label={t('menu.form.status')}
+                      label={buildMenuStatusLabel(t)}
                       rules={[{ required: true, message: t('menu.validation.status') }]}
                     >
                       <Radio.Group>
@@ -820,7 +827,6 @@ export default function MenuManagement() {
                     <Form.Item
                       name="routePath"
                       label={t('menu.form.routePath')}
-                      rules={[{ required: true, message: t('menu.validation.routePath') }]}
                     >
                       <Input placeholder={t('menu.placeholder.routePath')} maxLength={200} />
                     </Form.Item>
@@ -844,7 +850,7 @@ export default function MenuManagement() {
                     </Form.Item>
                     <Form.Item
                       name="showStatus"
-                      label={t('menu.form.showStatus')}
+                      label={buildShowStatusLabel(t)}
                       rules={[{ required: true, message: t('menu.validation.showStatus') }]}
                     >
                       <Radio.Group>
@@ -854,7 +860,7 @@ export default function MenuManagement() {
                     </Form.Item>
                     <Form.Item
                       name="status"
-                      label={t('menu.form.status')}
+                      label={buildMenuStatusLabel(t)}
                       rules={[{ required: true, message: t('menu.validation.status') }]}
                     >
                       <Radio.Group>
@@ -895,7 +901,7 @@ export default function MenuManagement() {
                     </Form.Item>
                     <Form.Item
                       name="status"
-                      label={t('menu.form.status')}
+                      label={buildMenuStatusLabel(t)}
                       rules={[{ required: true, message: t('menu.validation.status') }]}
                     >
                       <Radio.Group>
@@ -1011,13 +1017,12 @@ export default function MenuManagement() {
                     <Form.Item
                       name="routePath"
                       label={t('menu.form.routePath')}
-                      rules={[{ required: true, message: t('menu.validation.routePath') }]}
                     >
                       <Input placeholder={t('menu.placeholder.routePath')} maxLength={200} />
                     </Form.Item>
                     <Form.Item
                       name="showStatus"
-                      label={t('menu.form.showStatus')}
+                      label={buildShowStatusLabel(t)}
                       rules={[{ required: true, message: t('menu.validation.showStatus') }]}
                       initialValue="show"
                     >
@@ -1028,7 +1033,7 @@ export default function MenuManagement() {
                     </Form.Item>
                     <Form.Item
                       name="status"
-                      label={t('menu.form.status')}
+                      label={buildMenuStatusLabel(t)}
                       rules={[{ required: true, message: t('menu.validation.status') }]}
                       initialValue="normal"
                     >
@@ -1085,7 +1090,6 @@ export default function MenuManagement() {
                     <Form.Item
                       name="routePath"
                       label={t('menu.form.routePath')}
-                      rules={[{ required: true, message: t('menu.validation.routePath') }]}
                     >
                       <Input placeholder={t('menu.placeholder.routePath')} maxLength={200} />
                     </Form.Item>
@@ -1109,7 +1113,7 @@ export default function MenuManagement() {
                     </Form.Item>
                     <Form.Item
                       name="showStatus"
-                      label={t('menu.form.showStatus')}
+                      label={buildShowStatusLabel(t)}
                       rules={[{ required: true, message: t('menu.validation.showStatus') }]}
                       initialValue="show"
                     >
@@ -1120,7 +1124,7 @@ export default function MenuManagement() {
                     </Form.Item>
                     <Form.Item
                       name="status"
-                      label={t('menu.form.status')}
+                      label={buildMenuStatusLabel(t)}
                       rules={[{ required: true, message: t('menu.validation.status') }]}
                       initialValue="normal"
                     >
@@ -1164,7 +1168,7 @@ export default function MenuManagement() {
                     </Form.Item>
                     <Form.Item
                       name="status"
-                      label={t('menu.form.status')}
+                      label={buildMenuStatusLabel(t)}
                       rules={[{ required: true, message: t('menu.validation.status') }]}
                       initialValue="normal"
                     >

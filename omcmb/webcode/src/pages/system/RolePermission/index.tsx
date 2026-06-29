@@ -705,22 +705,40 @@ export default function RoleManagement() {
   }, [copyRoleMut, modal, message, refetch, t]);
 
   const handleBatchDelete = useCallback((keys: React.Key[]) => {
-    const rolesToDelete = (data?.items || []).filter(
-      (r) => keys.includes(r.id) && !isBuiltIn(r)
+    const selectedRoles = (data?.items || []).filter((r) => keys.includes(r.id));
+    const builtInRoles = selectedRoles.filter((r) => isBuiltIn(r));
+    const inUseRoles = selectedRoles.filter((r) => !isBuiltIn(r) && (r.userCount ?? 0) > 0);
+    const rolesToDelete = selectedRoles.filter(
+      (r) => !isBuiltIn(r) && (r.userCount ?? 0) === 0
     );
     if (rolesToDelete.length === 0) {
+      const messages = [
+        builtInRoles.length > 0
+          ? `${t('role.selectedBuiltIn')} ${builtInRoles.length} ${t('role.builtInSkipped')}`
+          : '',
+        inUseRoles.length > 0
+          ? t('role.deleteInUseNamed', { names: inUseRoles.map((r) => r.roleName).join('、') })
+          : '',
+      ].filter(Boolean);
       modal.warning({
         title: t('common.warning'),
-        content: t('role.noRolesToDelete'),
+        content: messages.length > 0 ? messages.join('；') : t('role.noRolesToDelete'),
       });
       return;
     }
-    const builtInCount = keys.length - rolesToDelete.length;
+    const builtInCount = builtInRoles.length;
     modal.confirm({
       title: t('common.confirmDelete'),
-      content: builtInCount > 0
-        ? `${t('role.selectedBuiltIn')} ${builtInCount} ${t('role.builtInSkipped')}`
-        : undefined,
+      content: (
+        <div>
+          {builtInCount > 0 ? (
+            <div>{`${t('role.selectedBuiltIn')} ${builtInCount} ${t('role.builtInSkipped')}`}</div>
+          ) : null}
+          {inUseRoles.length > 0 ? (
+            <div>{t('role.deleteWillSkipInUse', { names: inUseRoles.map((r) => r.roleName).join('、') })}</div>
+          ) : null}
+        </div>
+      ),
       onOk: () => {
         deleteRoles.mutate(rolesToDelete.map((r) => r.id), {
           onSuccess: () => {
@@ -985,6 +1003,13 @@ export default function RoleManagement() {
       },
     },
     { key: 'description', title: t('role.roleDescription'), dataIndex: 'description', width: 150, ellipsis: true, render: (v) => (v as string) || '-' },
+    {
+      key: 'userCount',
+      title: t('role.userCount'),
+      dataIndex: 'userCount',
+      width: 100,
+      render: (val) => String((val as number | undefined) ?? 0),
+    },
     { key: 'createUser', title: t('role.createUser'), dataIndex: 'createUser', width: 100, render: (v, record) => renderRoleOperator(v, record, t('role.builtIn')) },
     {
       key: 'createTime',

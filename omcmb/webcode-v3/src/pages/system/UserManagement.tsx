@@ -1,14 +1,15 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Users, Wifi, Lock, ShieldCheck, ChevronRight } from 'lucide-react'
+import { Users, Wifi, Lock, ShieldCheck, ChevronRight, Search, RefreshCcw } from 'lucide-react'
 
 import { PageShell } from '@/components/shell/PageShell'
 import { StatusBadge } from '@/components/ui/StatusBadge'
+import { NeonButton } from '@/components/ui/NeonButton'
 import { formatTime } from '@/lib/format'
-import { useUsers } from '@core/hooks/api/useSystem'
+import { useAllRoles, useUsers } from '@core/hooks/api/useSystem'
 import type { User, UserStatus } from '@core/types/system'
 
-import { StateBlock, MiniStat, RowHeader, KeywordToolbar, Pager } from './_shared'
+import { StateBlock, MiniStat, RowHeader, Pager } from './_shared'
 
 const USER_STATUS_MAP: Record<UserStatus, { label: string; badge: string }> = {
   active: { label: '启用', badge: 'active' },
@@ -22,14 +23,20 @@ export default function UserManagement() {
   const [page, setPage] = useState(1)
   const pageSize = 20
   const [keyword, setKeyword] = useState('')
+  const [roleId, setRoleId] = useState('all')
+  const [status, setStatus] = useState<'all' | UserStatus>('all')
+
+  const { data: allRoles } = useAllRoles()
 
   const params = useMemo(
     () => ({
       page,
       pageSize,
       ...(keyword.trim() ? { userName: keyword.trim() } : {}),
+      ...(roleId !== 'all' ? { roleId } : {}),
+      ...(status !== 'all' ? { status } : {}),
     }),
-    [page, keyword]
+    [keyword, page, pageSize, roleId, status]
   )
   const { data, isLoading, isError, error, isFetching, refetch } = useUsers(params)
   const rows = data?.items ?? []
@@ -51,15 +58,52 @@ export default function UserManagement() {
       isFetching={isFetching}
       bare
       toolbar={
-        <KeywordToolbar
-          placeholder="账号 / 用户名"
-          value={keyword}
-          onChange={(v) => {
-            setKeyword(v)
-            setPage(1)
-          }}
-          onRefresh={() => refetch()}
-        />
+        <div className="flex w-full flex-wrap items-center gap-2">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-cyan-300/50" />
+            <input
+              className="neon-input w-72 pl-9"
+              placeholder="账号 / 用户名"
+              value={keyword}
+              onChange={(e) => {
+                setKeyword(e.target.value)
+                setPage(1)
+              }}
+            />
+          </div>
+          <select
+            className="neon-input w-44"
+            value={roleId}
+            onChange={(e) => {
+              setRoleId(e.target.value)
+              setPage(1)
+            }}
+          >
+            <option value="all">全部角色</option>
+            {(allRoles ?? []).map((role) => (
+              <option key={role.id} value={role.id}>
+                {role.roleName}
+              </option>
+            ))}
+          </select>
+          <select
+            className="neon-input w-36"
+            value={status}
+            onChange={(e) => {
+              setStatus(e.target.value as 'all' | UserStatus)
+              setPage(1)
+            }}
+          >
+            <option value="all">全部状态</option>
+            <option value="active">启用</option>
+            <option value="disabled">禁用</option>
+            <option value="inactive">未激活</option>
+            <option value="locked">锁定</option>
+          </select>
+          <NeonButton className="ml-auto" icon={<RefreshCcw />} onClick={() => refetch()}>
+            REFRESH
+          </NeonButton>
+        </div>
       }
     >
       <div className="flex h-full flex-col gap-3">

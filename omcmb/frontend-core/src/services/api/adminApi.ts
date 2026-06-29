@@ -2,6 +2,7 @@ import http from '../http';
 import { preparePasswordPayload } from '../crypto/passwordCipher';
 import type {
   User,
+  UserListParams,
   UserRole,
   UserStatus,
   UserSource,
@@ -677,13 +678,15 @@ function mapBackendSysConfig(b: BackendSysConfig): SysConfigItem {
 export const adminApi = {
   // Users
   async getUsers(
-    params: { userName?: string } & PageRequest
+    params: UserListParams & PageRequest
   ): Promise<PageResponse<User>> {
     const query: Record<string, unknown> = {
       page: params.page,
       pageSize: params.pageSize,
     };
     if (params.userName) query.search = params.userName;
+    if (params.roleId) query.roleId = params.roleId;
+    if (params.status) query.status = params.status;
 
     const { data } = await http.get<BackendListResponse<BackendUser>>(
       '/admin/users',

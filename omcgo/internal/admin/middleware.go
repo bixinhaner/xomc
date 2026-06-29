@@ -128,7 +128,7 @@ func RequireAuthWithAPIKey(jwt *JWTService, apiKeySvc *APIKeyService, userRepo U
 
 		// 强制下线检查：token 签发时间早于用户最近一次 ForceLogout 时拒绝。
 		if revoker != nil {
-			revoked, err := revoker.IsRevoked(c.Request.Context(), claims.UserID, claims.IssuedAt)
+			revoked, err := revoker.IsRevoked(c.Request.Context(), claims.UserID, claims.IssuedAt, claims.IssuedAtMicros)
 			if err == nil && revoked {
 				commonerrors.AbortWithError(c, http.StatusUnauthorized,
 					errors.New("session was forcibly terminated, please re-login"))

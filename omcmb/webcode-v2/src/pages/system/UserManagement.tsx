@@ -6,6 +6,13 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
   Table,
   TableBody,
   TableCell,
@@ -23,7 +30,7 @@ import {
   formatTime,
 } from '@/components/layout/PageShell'
 
-import { useUsers } from '@core/hooks/api/useSystem'
+import { useAllRoles, useUsers } from '@core/hooks/api/useSystem'
 import type { UserStatus } from '@core/types/system'
 
 // ============================================================
@@ -53,14 +60,20 @@ export default function UserManagement() {
   const navigate = useNavigate()
   const [page, setPage] = useState(1)
   const [userName, setUserName] = useState('')
+  const [roleId, setRoleId] = useState('all')
+  const [status, setStatus] = useState<'all' | UserStatus>('all')
+
+  const { data: allRoles } = useAllRoles()
 
   const params = useMemo(
     () => ({
       page,
       pageSize: PAGE_SIZE,
       ...(userName.trim() ? { userName: userName.trim() } : {}),
+      ...(roleId !== 'all' ? { roleId } : {}),
+      ...(status !== 'all' ? { status } : {}),
     }),
-    [page, userName]
+    [page, roleId, status, userName]
   )
 
   const { data, isLoading, isError, error, isFetching, refetch } = useUsers(params)
@@ -89,6 +102,43 @@ export default function UserManagement() {
               }}
             />
           </div>
+          <Select
+            value={roleId}
+            onValueChange={(value) => {
+              setRoleId(value)
+              setPage(1)
+            }}
+          >
+            <SelectTrigger className="w-44">
+              <SelectValue placeholder="全部角色" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部角色</SelectItem>
+              {(allRoles ?? []).map((role) => (
+                <SelectItem key={role.id} value={role.id}>
+                  {role.roleName}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={status}
+            onValueChange={(value) => {
+              setStatus(value as 'all' | UserStatus)
+              setPage(1)
+            }}
+          >
+            <SelectTrigger className="w-36">
+              <SelectValue placeholder="全部状态" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部状态</SelectItem>
+              <SelectItem value="active">启用</SelectItem>
+              <SelectItem value="disabled">禁用</SelectItem>
+              <SelectItem value="inactive">未激活</SelectItem>
+              <SelectItem value="locked">已锁定</SelectItem>
+            </SelectContent>
+          </Select>
           <div className="ml-auto">
             <Button variant="outline" size="sm" onClick={() => refetch()}>
               <RefreshCcw className="size-4" /> 刷新

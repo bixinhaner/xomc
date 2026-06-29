@@ -1,4 +1,4 @@
-import type { User, Role, Permission, Group } from '../../types/system';
+import type { User, Role, Permission, Group, UserListParams } from '../../types/system';
 import type { PageRequest, PageResponse } from '../../types/pagination';
 import { mockUsers, mockRoles, mockPermissions, mockGroups } from '../data/system';
 import { delay, paginate, generateId } from '../utils';
@@ -10,7 +10,7 @@ let groups = [...mockGroups];
 export const systemService = {
   // Users
   async getUsers(
-    params: { userName?: string } & PageRequest
+    params: UserListParams & PageRequest
   ): Promise<PageResponse<User>> {
     await delay(100, 200);
     let filtered = [...users];
@@ -22,6 +22,12 @@ export const systemService = {
           u.displayName.toLowerCase().includes(kw) ||
           u.email.toLowerCase().includes(kw)
       );
+    }
+    if (params.roleId) {
+      filtered = filtered.filter((u) => (u.roleIds ?? []).includes(params.roleId as string));
+    }
+    if (params.status) {
+      filtered = filtered.filter((u) => u.status === params.status);
     }
     return paginate(filtered, params.page, params.pageSize);
   },
