@@ -56,6 +56,26 @@ export interface QuickSettingsInstanceContext {
   cellInstance?: number;
 }
 
+const DEVICE_LEVEL_QUICK_SETTINGS_GROUP_IDS = new Set([
+  'device-time',
+  'device-ipsec-control',
+  'device-ipsec',
+  'gnb-ipsec',
+]);
+
+export function getFeedbackScopeContext(
+  groupId: string,
+  context: QuickSettingsInstanceContext,
+): QuickSettingsInstanceContext {
+  if (!DEVICE_LEVEL_QUICK_SETTINGS_GROUP_IDS.has(groupId)) {
+    return context;
+  }
+  return {
+    networkType: context.networkType,
+    fapInstance: 1,
+  };
+}
+
 /**
  * 校验单个参数输入值。返回错误信息字符串或 null（表示通过）。
  *

@@ -10,6 +10,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/internal/mml"
 	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/pkg/tr069"
@@ -46,6 +47,7 @@ type SyncService struct {
 	paramRegistry        *parammodel.Registry
 	productRegistry      *product.Registry
 	paramRegistryEnabled bool
+	unsupportedPathRepo  mml.ProductUnsupportedPathRepository
 	redisClient          redis.UniversalClient
 	paramSyncWriter      ParamSyncWriter
 	deviceInfoRefresher  DeviceInfoRefresher
@@ -96,6 +98,11 @@ func (s *SyncService) SetDeviceInfoRefresher(r DeviceInfoRefresher) *SyncService
 
 func (s *SyncService) SetPathBSyncTaskReader(r PathBSyncTaskReader) *SyncService {
 	s.pathBSyncTaskReader = r
+	return s
+}
+
+func (s *SyncService) SetUnsupportedPathRepo(r mml.ProductUnsupportedPathRepository) *SyncService {
+	s.unsupportedPathRepo = r
 	return s
 }
 

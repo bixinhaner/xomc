@@ -1635,6 +1635,9 @@ func initMiscModules(c *Container) error {
 		return &pid, nil
 	}
 	mmlConsoleSvc.SetUnsupportedPathsProvider(unsupportedPathRepo, productIDByDevice)
+	if c.SyncSvc != nil {
+		c.SyncSvc.SetUnsupportedPathRepo(unsupportedPathRepo)
+	}
 
 	// T-0172: 注入 productClass → SupportedSet 反查（catalog 按产品过滤命令树）。
 	// 方案 X：supported set 仅取 default param_mappings（不掺杂 discovered）；
