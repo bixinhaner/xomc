@@ -184,6 +184,8 @@ export interface DictBatchResponse {
 interface BackendDictionary {
   id: number;
   name: string;
+  name_i18n?: Record<string, string> | null;
+  description_i18n?: Record<string, string> | null;
   type: string;
   status: boolean;
   desc: string;
@@ -202,6 +204,7 @@ interface BackendDictionary {
 interface BackendDictionaryDetail {
   id: number;
   label: string;
+  label_i18n?: Record<string, string> | null;
   value: string;
   extend: string;
   status: boolean;
@@ -220,6 +223,8 @@ function mapBackendDictionary(b: BackendDictionary): Dictionary {
   return {
     id: b.id,
     name: b.name,
+    nameI18n: b.name_i18n ?? undefined,
+    descriptionI18n: b.description_i18n ?? undefined,
     type: b.type,
     status: b.status,
     desc: b.desc || '',
@@ -239,6 +244,7 @@ function mapBackendDictionaryDetail(b: BackendDictionaryDetail): DictionaryDetai
   return {
     id: b.id,
     label: b.label,
+    labelI18n: b.label_i18n ?? undefined,
     value: b.value,
     extend: b.extend || '',
     status: b.status,

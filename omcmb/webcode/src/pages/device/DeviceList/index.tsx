@@ -25,7 +25,7 @@ import { prefetchDeviceDetailContext, useDeviceList, useBatchRebootDevices, useD
 import { useProductList } from '@core/hooks/api/useProducts';
 import { useDictionaryBatch } from '@core/hooks/api/useSystem';
 import { resolveNetworkTypeLabel } from '@core/utils/networkType';
-import { activationStatusOf } from '@core/utils/activationStatus';
+import { activationStatusLabelOf, activationStatusOf } from '@core/utils/activationStatus';
 import { useTriggerAlarmSync } from '@core/hooks/api/useAlarms';
 import { useCreateUnifiedFileTransferTask } from '@core/hooks/api/useUnifiedFileTransfer';
 import { useDownloadStationLog } from '@core/hooks/api/useStationLog';
@@ -884,8 +884,12 @@ export default function DeviceList() {
     const status = activationStatusOf(opState);
     if (status == null) return '-';
     const isActive = status === 'active';
-    return <Tag color={isActive ? 'success' : 'error'}>{isActive ? t('status.active') : t('status.inactive')}</Tag>;
-  }, [t]);
+    const label = activationStatusLabelOf(opState, opStateDict?.sysDictionaryDetails, {
+      active: t('status.active'),
+      inactive: t('status.inactive'),
+    }, appLocale);
+    return <Tag color={isActive ? 'success' : 'error'}>{label}</Tag>;
+  }, [appLocale, opStateDict?.sysDictionaryDetails, t]);
 
   const columns = useMemo(
     (): DataTableColumn<Device>[] => [
@@ -1386,10 +1390,10 @@ export default function DeviceList() {
           return v === -1 || v == null ? '--' : String(v);
         }
         case 'opState': {
-          // 激活状态 = 曾上线(op_state '1'/'0')，映射为"激活/未激活"文本（与列表列同口径）。
-          const os = record.opState;
-          if (os == null || os === '' || os === 'unknown') return '-';
-          return os === '1' ? t('status.active') : t('status.inactive');
+          return activationStatusLabelOf(record.opState, opStateDict?.sysDictionaryDetails, {
+            active: t('status.active'),
+            inactive: t('status.inactive'),
+          }, appLocale) || '-';
         }
         default: {
           const v = dataIndex ? (record as unknown as Record<string, unknown>)[dataIndex] : undefined;
@@ -1398,7 +1402,7 @@ export default function DeviceList() {
         }
       }
     },
-    [mapConnStatus, getSeverityLabel, fmtTime, fmtDuration, t]
+    [appLocale, mapConnStatus, getSeverityLabel, fmtTime, fmtDuration, opStateDict?.sysDictionaryDetails, t]
   );
 
   // 按当前筛选条件并发分页拉取全部命中数据(不受列表当前页/页大小限制)。

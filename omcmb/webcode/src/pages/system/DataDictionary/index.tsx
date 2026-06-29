@@ -29,6 +29,7 @@ import {
 } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
+import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useT } from '@/hooks/useT';
 import { useI18nText } from '@/hooks/useI18nText';
 import { adminApi } from '@core/services/api/adminApi';
@@ -73,6 +74,7 @@ function DictListPanel({ selectedId, onSelect }: DictListPanelProps) {
     mutationFn: (payload: CreateDictionaryPayload) => adminApi.createDictionary(payload),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['dictionaries'] });
+      void queryClient.invalidateQueries({ queryKey: ['dictionary'] });
       void message.success(t('common.save'));
       setDictModalOpen(false);
       dictForm.resetFields();
@@ -84,6 +86,7 @@ function DictListPanel({ selectedId, onSelect }: DictListPanelProps) {
     mutationFn: (payload: UpdateDictionaryPayload) => adminApi.updateDictionary(payload),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['dictionaries'] });
+      void queryClient.invalidateQueries({ queryKey: ['dictionary'] });
       void message.success(t('common.save'));
       setDictModalOpen(false);
       dictForm.resetFields();
@@ -98,6 +101,7 @@ function DictListPanel({ selectedId, onSelect }: DictListPanelProps) {
     onSettled: () => setRefreshingId(null),
     onSuccess: (res) => {
       void queryClient.invalidateQueries({ queryKey: ['dictionaries'] });
+      void queryClient.invalidateQueries({ queryKey: ['dictionary'] });
       // 字典项列表也要刷新(同步可能改了 auto 项)
       void queryClient.invalidateQueries({ queryKey: ['dictionary-details'] });
       void message.success(
@@ -118,6 +122,7 @@ function DictListPanel({ selectedId, onSelect }: DictListPanelProps) {
     mutationFn: (id: number) => adminApi.deleteDictionary(id),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['dictionaries'] });
+      void queryClient.invalidateQueries({ queryKey: ['dictionary'] });
       void message.success(t('common.deleteSuccess'));
     },
     onError: () => void message.error(t('common.deleteFailed')),
@@ -462,6 +467,7 @@ function DictDetailPanel({ selectedDict }: DictDetailPanelProps) {
     mutationFn: (payload: CreateDictionaryDetailPayload) => adminApi.createDictionaryDetail(payload),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['dictionary-details', selectedDict?.id] });
+      void queryClient.invalidateQueries({ queryKey: ['dictionary'] });
       void message.success(t('common.save'));
       setDetailModalOpen(false);
       detailForm.resetFields();
@@ -473,6 +479,7 @@ function DictDetailPanel({ selectedDict }: DictDetailPanelProps) {
     mutationFn: (payload: UpdateDictionaryDetailPayload) => adminApi.updateDictionaryDetail(payload),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['dictionary-details', selectedDict?.id] });
+      void queryClient.invalidateQueries({ queryKey: ['dictionary'] });
       void message.success(t('common.save'));
       setDetailModalOpen(false);
       detailForm.resetFields();
@@ -484,6 +491,7 @@ function DictDetailPanel({ selectedDict }: DictDetailPanelProps) {
     mutationFn: (id: number) => adminApi.deleteDictionaryDetail(id),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['dictionary-details', selectedDict?.id] });
+      void queryClient.invalidateQueries({ queryKey: ['dictionary'] });
       void message.success(t('common.deleteSuccess'));
     },
     onError: () => void message.error(t('common.deleteFailed')),
@@ -901,21 +909,23 @@ export default function DataDictionary() {
   const [selectedDict, setSelectedDict] = useState<Dictionary | null>(null);
 
   return (
-    <App>
-      <div style={{ display: 'flex', height: '100%', background: token.colorBgContainer }}>
-        {/* Left panel - dict list */}
-        <div style={{ width: 300, flexShrink: 0, height: '100%', overflow: 'hidden' }}>
-          <DictListPanel
-            selectedId={selectedDict?.id ?? null}
-            onSelect={(dict) => setSelectedDict(dict)}
-          />
-        </div>
+    <App style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <ListPageLayout>
+        <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden', background: token.colorBgContainer }}>
+          {/* Left panel - dict list */}
+          <div style={{ width: 300, flexShrink: 0, minHeight: 0, overflow: 'hidden' }}>
+            <DictListPanel
+              selectedId={selectedDict?.id ?? null}
+              onSelect={(dict) => setSelectedDict(dict)}
+            />
+          </div>
 
-        {/* Right panel - dict details */}
-        <div style={{ flex: 1, height: '100%', overflow: 'hidden' }}>
-          <DictDetailPanel selectedDict={selectedDict} />
+          {/* Right panel - dict details */}
+          <div style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
+            <DictDetailPanel selectedDict={selectedDict} />
+          </div>
         </div>
-      </div>
+      </ListPageLayout>
     </App>
   );
 }

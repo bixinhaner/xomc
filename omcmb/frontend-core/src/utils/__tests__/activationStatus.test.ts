@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { activationStatusOf } from '../activationStatus';
+import { activationStatusLabelOf, activationStatusOf } from '../activationStatus';
 
 describe('activationStatusOf — 三皮肤共享的"激活状态"判定单一来源', () => {
   it('严格 === "1" → active', () => {
@@ -23,5 +23,35 @@ describe('activationStatusOf — 三皮肤共享的"激活状态"判定单一来
     expect(activationStatusOf('active')).toBe('inactive');
     expect(activationStatusOf('inactive')).toBe('inactive');
     expect(activationStatusOf('foo')).toBe('inactive');
+  });
+
+  it('优先使用字典标签渲染激活状态展示值', () => {
+    const details = [
+      { value: '0', label: '未开通', status: true },
+      { value: '1', label: '已开通', status: true },
+    ];
+
+    expect(activationStatusLabelOf('1', details, { active: '激活', inactive: '未激活' })).toBe('已开通');
+    expect(activationStatusLabelOf('0', details, { active: '激活', inactive: '未激活' })).toBe('未开通');
+  });
+
+  it('字典缺项时回退到默认标签，unknown 仍返回空', () => {
+    expect(
+      activationStatusLabelOf('2', [{ value: '1', label: '已开通', status: true }], {
+        active: '激活',
+        inactive: '未激活',
+      }),
+    ).toBe('未激活');
+    expect(activationStatusLabelOf('unknown', [], { active: '激活', inactive: '未激活' })).toBeNull();
+  });
+
+  it('英文 locale 优先使用 labelI18n，缺失时回退中文 label', () => {
+    const details = [
+      { value: '0', label: '未开通', labelI18n: { 'en-US': 'Not Activated' }, status: true },
+      { value: '1', label: '已开通', labelI18n: { 'en-US': 'Activated' }, status: true },
+    ];
+
+    expect(activationStatusLabelOf('1', details, { active: 'Active', inactive: 'Inactive' }, 'en-US')).toBe('Activated');
+    expect(activationStatusLabelOf('0', details, { active: 'Active', inactive: 'Inactive' }, 'en-US')).toBe('Not Activated');
   });
 });
