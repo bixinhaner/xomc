@@ -2008,6 +2008,16 @@ const messages: Record<string, string> = {
   'login.captcha.refresh':       'Can\'t read? Click to refresh',
   'login.captcha.invalid':       'Invalid captcha, please try again',
   'login.captcha.loadFailed':    'Captcha load failed, click to retry',
+  // Issue #730: Login error i18n (biz_code 7000-7099)
+  'login.error.invalidCredentials':  'Invalid credentials, please try again',
+  'login.error.userNotFound':        'User not found',
+  'login.error.accountLocked':       'Account is locked, please contact administrator',
+  'login.error.plaintextDisabled':   'Plaintext password is disabled, use HTTPS or localhost',
+  'login.error.wrongPassword':       'Wrong password',
+  'login.error.accountTempLocked':   'Account is locked, please retry in {minutes} minutes',
+  'login.error.accountExpired':      'Account has expired',
+  'login.error.ipRateLimited':       'Too many requests, please retry in {seconds} seconds',
+  'login.error.unknown':             'Login failed, please try again later',
 
   // -------------------------------------------------------------------------
   // Task panel

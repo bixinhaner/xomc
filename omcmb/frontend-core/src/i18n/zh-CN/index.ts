@@ -2014,6 +2014,16 @@ const messages: Record<string, string> = {
   'login.captcha.refresh':       '看不清？点击刷新',
   'login.captcha.invalid':       '验证码错误，请重新输入',
   'login.captcha.loadFailed':    '验证码加载失败，点击重试',
+  // Issue #730: 登录错误码国际化（biz_code 7000-7099）
+  'login.error.invalidCredentials':  '登录凭据无效，请重试',
+  'login.error.userNotFound':        '用户不存在',
+  'login.error.accountLocked':       '账号已被锁定，请联系管理员',
+  'login.error.plaintextDisabled':   '明文密码登录已禁用，请使用 HTTPS 或 localhost 访问',
+  'login.error.wrongPassword':       '密码错误',
+  'login.error.accountTempLocked':   '该账号已锁定，请 {minutes} 分钟后重试',
+  'login.error.accountExpired':      '账号已过期',
+  'login.error.ipRateLimited':       '当前网络访问过于频繁，请 {seconds} 秒后重试',
+  'login.error.unknown':             '登录失败，请稍后重试',
 
   // -------------------------------------------------------------------------
   // Task panel

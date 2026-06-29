@@ -4,14 +4,17 @@ import { Lock, ScanLine, Loader2, ChevronRight, Rocket, RefreshCw, Shield } from
 import type { AxiosError } from 'axios'
 
 import { NeonButton } from '@/components/ui/NeonButton'
+import { useT } from '@/hooks/useT'
 import { authApi } from '@core/services/api/authApi'
 import type { CaptchaChallenge, CaptchaCredentials } from '@core/services/api/authApi'
 import { useUserStore } from '@core/store/userStore'
 import { usePublicOmcName, resolveOmcName } from '@core/hooks/api/useOmcName'
+import { getI18nKeyByBizCode } from '@core/i18n/bizCodeMessages'
 import type { User } from '@core/types/system'
 
 export function LoginPage() {
   const navigate = useNavigate()
+  const t = useT()
   const setTokenPair = useUserStore((s) => s.setTokenPair)
   const login = useUserStore((s) => s.login)
   // Issue #649：标记必须改密，登录后阻塞 + 强制 logout（v3 暂无内置改密入口）。
@@ -92,22 +95,39 @@ export function LoginPage() {
     } catch (err) {
       // Issue #687: 检测 biz_code=7010（需要验证码）或 7011（验证码错误）
       // http 拦截器将 biz_code 暴露为 err.bizCode（而非 response.data.biz_code）
-      const axiosErr = err as AxiosError<{ biz_code?: number }> & { bizCode?: number }
+      const axiosErr = err as AxiosError<{ biz_code?: number }> & { bizCode?: number; userMessage?: string }
       const bizCode = axiosErr.bizCode ?? axiosErr.response?.data?.biz_code
 
       if (bizCode === 7010) {
         setCaptchaRequired(true)
-        setError('CAPTCHA REQUIRED · 需要验证码')
+        setError(t('login.captcha.required'))
         return
       }
       if (bizCode === 7011) {
         loadCaptcha()
-        setError('CAPTCHA INVALID · 验证码错误')
+        setError(t('login.captcha.invalid'))
         return
       }
 
-      const msg = err instanceof Error ? err.message : 'AUTH FAILED'
-      setError(msg)
+      // Issue #730: 按 biz_code 查语料，fallback 后端 msg 或默认语料
+      const i18nKey = getI18nKeyByBizCode(bizCode)
+      if (i18nKey) {
+        // 带参数的错误码（7012 账号临时锁定 / 7014 IP 限流）：从后端 msg 提取数字
+        if (bizCode === 7012) {
+          const match = axiosErr.userMessage?.match(/(\d+)/)
+          setError(t(i18nKey, { minutes: match ? match[1] : '?' }))
+          return
+        }
+        if (bizCode === 7014) {
+          const match = axiosErr.userMessage?.match(/(\d+)/)
+          setError(t(i18nKey, { seconds: match ? match[1] : '?' }))
+          return
+        }
+        // 无参数的错误码 — 直接用前端语料
+        setError(t(i18nKey))
+        return
+      }
+      setError(axiosErr.userMessage || t('login.failed'))
     } finally {
       setLoading(false)
     }
