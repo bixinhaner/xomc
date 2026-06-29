@@ -55,8 +55,11 @@ export default function UserDropdown() {
       // 欢迎重新登录
       setTimeout(() => logout(), 1500);
     },
-    onError: () => {
-      message.error(t('common.operationFailed'));
+    onError: (err: Error & { userMessage?: string }) => {
+      // Issue #695：显示后端返回的具体错误信息，便于用户了解失败原因
+      // http 拦截器会把后端响应的 msg 字段提取到 err.userMessage
+      const errorMsg = err.userMessage || err.message || t('common.operationFailed');
+      message.error(errorMsg);
     },
   });
 
