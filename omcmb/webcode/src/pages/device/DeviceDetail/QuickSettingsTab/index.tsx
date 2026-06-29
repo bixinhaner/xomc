@@ -39,7 +39,7 @@ function normalizeQuickSettingsNetworkType(networkType: string): string {
 }
 
 const LTE_NUM_OF_CELLS_PATH = 'Device.Services.FAPService.1.CellConfig.LTE.RAN.CA.PARAMS.NumOfCells';
-const HIDDEN_GROUP_IDS = new Set(['device-time', 'device-sync']);
+const HIDDEN_GROUP_IDS = new Set(['device-sync']);
 // BSC 设备 BTS 多实例父路径。额外的顶部 ＋/✖ 按钮调用 AddObject/DeleteObject
 // 在该路径下管理 BTS 实例。
 const BSC_BTS_OBJECT_PREFIX = 'DeviceGSM.Bts.';

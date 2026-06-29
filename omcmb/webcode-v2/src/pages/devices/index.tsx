@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   flexRender,
   getCoreRowModel,
@@ -48,6 +49,7 @@ import {
 import { cn } from '@/lib/utils'
 
 import {
+  prefetchDeviceDetailContext,
   useDeviceList,
   useDeviceGroups,
   useBatchRebootDevices,
@@ -119,6 +121,7 @@ function ActivationBadge({ opState }: { opState: string }) {
 
 export function DevicesPage() {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const [page, setPage] = useState(1)
   const [pageSize] = useState(20)
   const [searchText, setSearchText] = useState('')
@@ -128,6 +131,16 @@ export function DevicesPage() {
   const [productId, setProductId] = useState<string>('all')
   const [groupId, setGroupId] = useState<string>('all')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+
+  const prefetchDeviceDetailEntry = (device: Device) => {
+    void import('@/pages/device/DeviceDetail')
+    void prefetchDeviceDetailContext(queryClient, device)
+  }
+
+  const openDeviceDetail = (device: Device) => {
+    prefetchDeviceDetailEntry(device)
+    void navigate(`/device/detail/${device.sn}`)
+  }
 
   // ---- 辅助下拉数据 ----
   const groupsQuery = useDeviceGroups()
@@ -284,7 +297,9 @@ export function DevicesPage() {
           <button
             type="button"
             className="font-mono text-xs text-primary hover:underline"
-            onClick={() => navigate(`/device/detail/${row.original.sn}`)}
+            onMouseEnter={() => prefetchDeviceDetailEntry(row.original)}
+            onFocus={() => prefetchDeviceDetailEntry(row.original)}
+            onClick={() => openDeviceDetail(row.original)}
           >
             {row.original.sn || '—'}
           </button>

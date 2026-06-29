@@ -50,6 +50,10 @@ import type { AlarmSeverity } from '@core/types/common'
 
 type TabKey = 'basic' | 'status' | 'cell' | 'params'
 
+function openClassicQuickSettings(sn: string) {
+  window.location.assign(`/device/detail/${sn}?tab=quickSettings`)
+}
+
 const ALARM_VARIANT: Record<
   AlarmSeverity | 'none',
   'destructive' | 'warning' | 'default' | 'muted'
@@ -325,6 +329,11 @@ export default function DeviceDetail() {
           <Button variant="ghost" size="sm" onClick={() => navigate('/device/list')}>
             <ArrowLeft className="size-4" /> 返回
           </Button>
+          {sn ? (
+            <Button variant="outline" size="sm" onClick={() => openClassicQuickSettings(sn)}>
+              快速设置
+            </Button>
+          ) : null}
           {device && (
             <>
               <Badge variant={device.isOnline ? 'success' : 'muted'}>

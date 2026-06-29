@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import { Search, RefreshCcw, Power, Loader2 } from 'lucide-react'
 
 import { PageShell } from '@/components/shell/PageShell'
@@ -7,7 +8,7 @@ import { NeonButton } from '@/components/ui/NeonButton'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Sparkline } from '@/components/viz/Sparkline'
 import { formatTime } from '@/lib/format'
-import { useDeviceList } from '@core/hooks/api/useDevices'
+import { prefetchDeviceDetailContext, useDeviceList } from '@core/hooks/api/useDevices'
 import type { Device } from '@core/types/device'
 
 const STATUS_COLOR: Record<string, string> = {
@@ -17,6 +18,7 @@ const STATUS_COLOR: Record<string, string> = {
 
 export function FleetPage() {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const [page, setPage] = useState(1)
   const pageSize = 20
   const [keyword, setKeyword] = useState('')
@@ -33,6 +35,16 @@ export function FleetPage() {
   const { data, isFetching, isLoading, isError, error, refetch } = useDeviceList(params)
   const items: Device[] = data?.items ?? []
   const total = data?.total ?? 0
+
+  const prefetchDeviceDetailEntry = (device: Device) => {
+    void import('@/pages/fleet/DeviceDetail')
+    void prefetchDeviceDetailContext(queryClient, device)
+  }
+
+  const openDeviceDetail = (device: Device) => {
+    prefetchDeviceDetailEntry(device)
+    void navigate(`/device/detail/${device.sn}`)
+  }
 
   return (
     <PageShell
@@ -173,7 +185,9 @@ export function FleetPage() {
                 <NeonButton
                   tone="cyan"
                   className="!py-1 !px-2"
-                  onClick={() => navigate(`/device/detail/${d.sn}`)}
+                  onMouseEnter={() => prefetchDeviceDetailEntry(d)}
+                  onFocus={() => prefetchDeviceDetailEntry(d)}
+                  onClick={() => openDeviceDetail(d)}
                 >
                   DETAIL
                 </NeonButton>
