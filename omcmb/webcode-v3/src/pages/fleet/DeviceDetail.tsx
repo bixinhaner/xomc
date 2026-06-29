@@ -16,7 +16,9 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 import { RadialGauge } from '@/components/viz/RadialGauge'
 import { formatTime } from '@/lib/format'
 import { useDeviceBySn, useRebootDevice } from '@core/hooks/api/useDevices'
-import { activationStatusOf } from '@core/utils/activationStatus'
+import { useAppStore } from '@core/store/appStore'
+import { useDictionary } from '@core/hooks/api/useSystem'
+import { activationStatusLabelOf } from '@core/utils/activationStatus'
 import type { Device } from '@core/types/device'
 import { KV, StatCard, StateGate, formatDuration } from './_shared'
 
@@ -68,7 +70,13 @@ export default function FleetDeviceDetail() {
 }
 
 function DetailBody({ d, onUe }: { d: Device; onUe: () => void }) {
+  const appLocale = useAppStore((s) => s.locale)
+  const { data: opStateDict } = useDictionary('op_state')
   const gps = d.gpsSatelliteCount > 0 ? Math.min(100, (d.gpsSatelliteCount / 12) * 100) : 0
+  const opStateLabel = activationStatusLabelOf(d.opState, opStateDict?.sysDictionaryDetails, {
+    active: '激活',
+    inactive: '未激活',
+  }, appLocale)
   return (
     <div className="space-y-4">
       {/* 头部状态条 */}
@@ -170,11 +178,7 @@ function DetailBody({ d, onUe }: { d: Device; onUe: () => void }) {
             </div>
           </div>
           <KV label="CELL STATUS">{d.cellStatus}</KV>
-          {/*
-            HUD raw 风保留 ('1'/'0' 直接显示)，仅把后端兜底值 'unknown' 与空值同步
-            显示为 '—'——口径走 frontend-core/utils/activationStatus，与 v1/v2 同一来源。
-          */}
-          <KV label="OP / ADMIN STATE">{`${activationStatusOf(d.opState) ? d.opState : '—'} · ${d.adminState || '—'}`}</KV>
+          <KV label="OP / ADMIN STATE">{`${opStateLabel || '—'} · ${d.adminState || '—'}`}</KV>
           <KV label="RF / SYNC">{`${d.rfStatus || '—'} · ${d.syncStatus || '—'}`}</KV>
           <KV label="SERVICE STATUS">{d.serviceStatus}</KV>
           <KV label="LAST ONLINE">{formatTime(d.lastOnlineTime)}</KV>
