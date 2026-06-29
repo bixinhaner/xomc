@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type {
   User,
+  UserListParams,
   Role,
   Group,
   ApiEndpointListParams,
@@ -19,7 +20,7 @@ import { deviceService } from '../../mock/services/deviceService';
 import { useMock } from '../../services/apiSwitch';
 
 // Users
-export function useUsers(params: { userName?: string } & PageRequest) {
+export function useUsers(params: UserListParams & PageRequest) {
   return useQuery({
     queryKey: ['system', 'users', params],
     queryFn: () =>

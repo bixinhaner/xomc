@@ -23,6 +23,7 @@ type jwtClaims struct {
 	IsSuperAdmin  bool       `json:"is_super_admin,omitempty"`
 	Roles         []string   `json:"roles"`
 	CurrentRoleID *uuid.UUID `json:"current_role_id,omitempty"`
+	IssuedAtMicros int64     `json:"iat_us,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -59,6 +60,7 @@ func NewJWTServiceWithTTL(secret string, accessTTL, refreshTTL time.Duration) (*
 // GenerateTokenPair creates a new access/refresh token pair.
 func (s *JWTService) GenerateTokenPair(claims *Claims) (*TokenPair, error) {
 	now := time.Now()
+	issuedAtMicros := now.UnixMicro()
 
 	accessClaims := &jwtClaims{
 		UserID:        claims.UserID,
@@ -66,6 +68,7 @@ func (s *JWTService) GenerateTokenPair(claims *Claims) (*TokenPair, error) {
 		IsSuperAdmin:  claims.IsSuperAdmin,
 		Roles:         claims.Roles,
 		CurrentRoleID: claims.CurrentRoleID,
+		IssuedAtMicros: issuedAtMicros,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   "access",
 			IssuedAt:  jwt.NewNumericDate(now),
@@ -85,6 +88,7 @@ func (s *JWTService) GenerateTokenPair(claims *Claims) (*TokenPair, error) {
 		Username:     claims.Username,
 		IsSuperAdmin: claims.IsSuperAdmin,
 		Roles:        claims.Roles,
+		IssuedAtMicros: issuedAtMicros,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   "refresh",
 			IssuedAt:  jwt.NewNumericDate(now),
@@ -149,5 +153,6 @@ func (s *JWTService) validateToken(tokenString, expectedSubject string) (*Claims
 		Roles:         claims.Roles,
 		CurrentRoleID: claims.CurrentRoleID,
 		IssuedAt:      issuedAt,
+		IssuedAtMicros: claims.IssuedAtMicros,
 	}, nil
 }

@@ -18,6 +18,7 @@ const paramKeyMap: Record<string, string> = {
   sortField: 'sort_by',
   sortOrder: 'sort_dir',
   apiGroup: 'api_group',
+  roleId: 'role_id',
 };
 
 const sortOrderMap: Record<string, string> = {

@@ -162,6 +162,12 @@ func (h *Handler) ListUsers(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
+	if filter.RoleID != nil {
+		if _, err := uuid.Parse(*filter.RoleID); err != nil {
+			commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+			return
+		}
+	}
 
 	result, err := h.service.ListUsers(c.Request.Context(), filter)
 	if err != nil {

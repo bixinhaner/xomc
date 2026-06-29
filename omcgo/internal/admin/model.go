@@ -147,6 +147,8 @@ type Claims struct {
 	CurrentRoleID *uuid.UUID `json:"current_role_id,omitempty"`
 	// IssuedAt 是 JWT iat（Unix 秒），用于配合 TokenRevoker 判定 token 是否被强制下线。
 	IssuedAt int64 `json:"iat,omitempty"`
+	// IssuedAtMicros 是自定义微秒级签发时间，用于消除 force-logout 的同秒边界歧义。
+	IssuedAtMicros int64 `json:"iat_us,omitempty"`
 }
 
 // UserFilter provides filtering options for listing users.
@@ -154,6 +156,7 @@ type Claims struct {
 type UserFilter struct {
 	Status *UserStatus `form:"status"`
 	Search *string     `form:"search"`
+	RoleID *string     `form:"role_id"`
 	model.ListRequest
 }
 

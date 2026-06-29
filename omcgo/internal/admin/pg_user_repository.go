@@ -210,6 +210,18 @@ func (r *PgUserRepository) List(ctx context.Context, filter UserFilter) (*model.
 		base = base.Where(sq.Eq{"status": *filter.Status})
 		countBase = countBase.Where(sq.Eq{"status": *filter.Status})
 	}
+	if filter.RoleID != nil {
+		roleID, err := uuid.Parse(*filter.RoleID)
+		if err != nil {
+			return nil, fmt.Errorf("parse role_id: %w", err)
+		}
+		roleCond := sq.Expr(
+			"EXISTS (SELECT 1 FROM user_roles ur WHERE ur.user_id = users.id AND ur.role_id = ?)",
+			roleID,
+		)
+		base = base.Where(roleCond)
+		countBase = countBase.Where(roleCond)
+	}
 	if filter.Search != nil && *filter.Search != "" {
 		like := "%" + *filter.Search + "%"
 		cond := sq.Or{
