@@ -8,6 +8,7 @@ import {
   useAddObject,
   useDeleteObject,
   useParameterSchema,
+  useSearchParameters,
   useUpdateParameters,
 } from '@core/hooks/api/useDeviceParameters';
 import { useDeviceTaskStatus } from '@core/hooks/api/useDeviceTask';
@@ -26,6 +27,7 @@ import {
   applyInstanceContext,
   formatEnumDisplayValue,
   getEffectiveEnumMeta,
+  getFeedbackScopeContext,
   validateValue,
   type QuickSettingsInstanceContext,
 } from './validators';
@@ -34,8 +36,31 @@ import { useT } from '@/hooks/useT';
 
 const { Text } = Typography;
 const ERROR_FEEDBACK_DURATION_SECONDS = 2;
+const IPSEC_GROUP_IDS = new Set(['device-ipsec', 'gnb-ipsec']);
+const IPSEC_ENABLE_LEAF = 'TUNNEL_ENABLE';
+const IPSEC_GLOBAL_ENABLE_PATH_BY_GROUP: Record<string, string> = {
+  'device-ipsec': 'Device.Services.FAPService.Ipsec.IPSEC_ENABLE',
+  'gnb-ipsec': 'Device.IPsec.Enable',
+};
+const IPSEC_GLOBAL_ENABLE_QUERY_BY_GROUP: Record<string, string> = {
+  'device-ipsec': 'IPSEC_ENABLE',
+  'gnb-ipsec': 'Device.IPsec.Enable',
+};
 
 type TFn = (id: string, values?: Record<string, string | number>) => string;
+
+function isEnabledValue(value: unknown): boolean {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'on' || normalized === 'enable' || normalized === 'enabled';
+}
+
+function normalizeIpsecEnableValue(value: unknown): string {
+  return isEnabledValue(value) ? 'true' : 'false';
+}
+
+function toDeviceIpsecEnableValue(value: unknown): string {
+  return isEnabledValue(value) ? '1' : '0';
+}
 
 // "上次操作"状态形状由 frontend-core/store/quickSettingsFeedbackStore (MultiFeedback) 定义,
 // 提升至 store 持久化,顶层 TabBar 切走再切回不丢反馈。
@@ -665,6 +690,29 @@ function PackedScalarNeighborTable({
  */
 export default function MultiInstanceTable({ deviceId, group, instanceContext, locale }: MultiInstanceTableProps) {
   const t = useT();
+  const feedbackScope = useMemo(() => getFeedbackScopeContext(group.id, instanceContext), [group.id, instanceContext]);
+  const isIpsecGroup = IPSEC_GROUP_IDS.has(group.id);
+  const ipsecGlobalEnablePath = IPSEC_GLOBAL_ENABLE_PATH_BY_GROUP[group.id] ?? '';
+  const ipsecGlobalEnableQuery = IPSEC_GLOBAL_ENABLE_QUERY_BY_GROUP[group.id] ?? 'IPSEC_ENABLE';
+  const { data: ipsecGlobalParams } = useSearchParameters(deviceId, ipsecGlobalEnableQuery, 20, isIpsecGroup);
+  const ipsecControlDraftKey = useMemo(
+    () => feedbackKey(
+      deviceId,
+      'device-ipsec-control',
+      1,
+      undefined,
+    ),
+    [deviceId],
+  );
+  const ipsecControlDraft = useQuickSettingsFeedbackStore((s) => s.drafts[ipsecControlDraftKey]?.IPSEC_ENABLE);
+  const ipsecGlobalEnabled = useMemo(() => {
+    if (!isIpsecGroup) return true;
+    if (ipsecControlDraft !== undefined) {
+      return isEnabledValue(ipsecControlDraft);
+    }
+    const currentValue = ipsecGlobalParams?.find((item) => item.parameterPath === ipsecGlobalEnablePath)?.parameterValue;
+    return isEnabledValue(currentValue);
+  }, [isIpsecGroup, ipsecControlDraft, ipsecGlobalEnablePath, ipsecGlobalParams]);
   // BSC 邻区兼容：部分 GSM 设备不按 TR-181 子对象上报，而是把整张邻区列表打包到 BTS 父对象单标量。
   // 这种 group 不存在 currentInstances，常规多实例渲染会出现「暂无数据」。改走打包标量解析路径。
   const packedSpec = PACKED_NEIGHBOR_TABLE_BY_GROUP_ID[group.id];
@@ -712,8 +760,8 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
   const fbKey = feedbackKey(
     deviceId,
     group.id,
-    instanceContext.fapInstance,
-    instanceContext.networkType === 'nr' ? instanceContext.cellInstance : undefined,
+    feedbackScope.fapInstance,
+    feedbackScope.networkType === 'nr' ? feedbackScope.cellInstance : undefined,
   );
   const lastAction = useQuickSettingsFeedbackStore((s) => {
     const f = s.entries[fbKey];
@@ -993,6 +1041,9 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
 
   // 单层确认：外层 Popconfirm 已二次确认，这里直接执行删除逻辑（原 Modal.confirm 套层移除）。
   const handleDelete = async (instId: string) => {
+    if (isIpsecGroup && !ipsecGlobalEnabled) {
+      return;
+    }
     try {
       // T-0157 C7: 后端现返回 { taskId } → 消费 taskId 让 Tag 走完整状态机
       const result = await deleteMutation.mutateAsync({ deviceId, objectPath: `${objectPath}${instId}.` });
@@ -1053,14 +1104,20 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
     const values: Record<string, string> = {};
     displayColumns.forEach((column) => {
       if (!column.leaf) return;
-      values[column.leaf] = cellValue(row.instanceId!, column.leaf);
+      values[column.leaf] = isIpsecGroup && column.leaf === IPSEC_ENABLE_LEAF
+        ? normalizeIpsecEnableValue(cellValue(row.instanceId!, column.leaf))
+        : cellValue(row.instanceId!, column.leaf);
     });
     setEditModal({ mode: 'edit', instanceId: row.instanceId, values, errors: {} });
   }, [cellValue, displayColumns]);
 
   const openAddModal = useCallback(() => {
-    setEditModal({ mode: 'add', values: buildInitialEditValues(), errors: {} });
-  }, [buildInitialEditValues]);
+    const initialValues = buildInitialEditValues();
+    if (isIpsecGroup) {
+      initialValues[IPSEC_ENABLE_LEAF] = normalizeIpsecEnableValue(initialValues[IPSEC_ENABLE_LEAF]);
+    }
+    setEditModal({ mode: 'add', values: initialValues, errors: {} });
+  }, [buildInitialEditValues, isIpsecGroup]);
 
   const setEditModalValue = useCallback((leaf: string, value: string) => {
     setEditModal((prev) => {
@@ -1068,14 +1125,17 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
       const item = prev.instanceId
         ? (schemaByPath.get(`${objectPath}${prev.instanceId}.${leaf}`) ?? leafSchemaByLeaf.get(leaf))
         : leafSchemaByLeaf.get(leaf);
-      const err = validateValue(value, (item?.type as never) ?? 'string', item?.constraints) ?? '';
+      const normalizedValue = isIpsecGroup && leaf === IPSEC_ENABLE_LEAF
+        ? toDeviceIpsecEnableValue(value)
+        : value;
+      const err = validateValue(normalizedValue, (item?.type as never) ?? 'string', item?.constraints) ?? '';
       return {
         ...prev,
         values: { ...prev.values, [leaf]: value },
         errors: { ...prev.errors, [leaf]: err },
       };
     });
-  }, [leafSchemaByLeaf, objectPath, schemaByPath]);
+  }, [isIpsecGroup, leafSchemaByLeaf, objectPath, schemaByPath]);
 
   const closeEditModal = useCallback(() => {
     if (updateMutation.isPending || isSubmitting) return;
@@ -1148,7 +1208,10 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
       const leaf = column.leaf || '';
       if (!leaf || !groupParamLeafSet.has(leaf) || column.readOnly) continue;
 
-      const value = editModal.values[leaf] ?? '';
+      const rawValue = editModal.values[leaf] ?? '';
+      const value = isIpsecGroup && leaf === IPSEC_ENABLE_LEAF
+        ? toDeviceIpsecEnableValue(rawValue)
+        : rawValue;
       const path = `${objectPath}${targetInstanceId}.${leaf}`;
       const item = schemaByPath.get(path) ?? leafSchemaByLeaf.get(leaf);
       const err = validateValue(value, (item?.type as never) ?? 'string', item?.constraints);
@@ -1293,11 +1356,17 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
       fixed: 'right',
       render: (_v: unknown, row: TableRow) => (
         <Space size={4}>
-          <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEditModal(row)}>
+          <Button
+            type="link"
+            size="small"
+            icon={<EditOutlined />}
+            onClick={() => openEditModal(row)}
+            disabled={isIpsecGroup && !ipsecGlobalEnabled}
+          >
             {t('common.edit')}
           </Button>
-          <Popconfirm title={t('device.multi.deleteConfirm')} onConfirm={() => row.instanceId && void handleDelete(row.instanceId)} disabled={!canDelete}>
-            <Button type="link" size="small" danger icon={<DeleteOutlined />} disabled={!canDelete}>
+          <Popconfirm title={t('device.multi.deleteConfirm')} onConfirm={() => row.instanceId && void handleDelete(row.instanceId)} disabled={!canDelete || (isIpsecGroup && !ipsecGlobalEnabled)}>
+            <Button type="link" size="small" danger icon={<DeleteOutlined />} disabled={!canDelete || (isIpsecGroup && !ipsecGlobalEnabled)}>
               {t('common.delete')}
             </Button>
           </Popconfirm>
@@ -1312,7 +1381,8 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
   const cardTitle = maxInstances !== undefined
     ? `${title}（${instanceIds.length}/${maxInstances}）`
     : title;
-  const addDisabled = !canAdd || reachedMax || updateMutation.isPending || addMutation.isPending;
+  const addDisabled = !canAdd || reachedMax || updateMutation.isPending || addMutation.isPending || (isIpsecGroup && !ipsecGlobalEnabled);
+  const editModalIpsecEnabled = !isIpsecGroup || ipsecGlobalEnabled;
   const addBtn = (
     <Button type="default" icon={<PlusOutlined />} onClick={openAddModal} disabled={addDisabled}>
       {t('common.add')}
@@ -1370,6 +1440,7 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
         okText={editModal?.mode === 'add' ? t('device.multi.confirmAdd') : t('device.paramEdit.confirmDispatch')}
         cancelText={t('common.cancel')}
         confirmLoading={updateMutation.isPending || addMutation.isPending || isSubmitting}
+        okButtonProps={{ disabled: Boolean(editModal) && isIpsecGroup && !ipsecGlobalEnabled }}
         width={960}
         destroyOnHidden
       >
@@ -1391,8 +1462,20 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
               ? (editModal.values[leaf] ?? '')
               : (editModal.instanceId ? (column.getValue?.({ key: editModal.instanceId, instanceId: editModal.instanceId }, instanceContext) ?? '') : '');
             const item = leaf && editModal.instanceId ? (schemaByPath.get(`${objectPath}${editModal.instanceId}.${leaf}`) ?? leafSchemaByLeaf.get(leaf)) : leafSchemaByLeaf.get(leaf);
-            const isEditable = Boolean(leaf) && groupParamLeafSet.has(leaf) && !column.readOnly && (editModal.mode === 'add' ? true : (item?.writable ?? true));
+            const isIpsecToggleField = isIpsecGroup && leaf === IPSEC_ENABLE_LEAF;
+            const canEditByToggle = !isIpsecGroup || isIpsecToggleField || editModalIpsecEnabled;
+            const isEditable = Boolean(leaf)
+              && groupParamLeafSet.has(leaf)
+              && !column.readOnly
+              && canEditByToggle
+              && (editModal.mode === 'add' ? true : (item?.writable ?? true));
             const enumMeta = getEffectiveEnumMeta(item?.constraints, item?.path);
+            const effectiveEnumOptions = isIpsecToggleField
+              ? {
+                  values: ['true', 'false'],
+                  labels: locale === 'zh-CN' ? ['开启', '关闭'] : ['Enabled', 'Disabled'],
+                }
+              : enumMeta;
             const error = leaf ? editModal.errors[leaf] : '';
             const label = column.titleKey ? t(column.titleKey) : (locale === 'zh-CN' ? (column.titleZh ?? column.titleEn) : column.titleEn);
             // 同列渲染：column.formatValue 收原始值；未提供则退到 enum 兜底。
@@ -1403,13 +1486,13 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
             return (
               <div key={column.key} style={{ minWidth: 0 }}>
                 <div style={{ marginBottom: 6, fontWeight: 500 }}>{label}</div>
-                {isEditable && enumMeta && enumMeta.values.length > 0 ? (
+                {isEditable && effectiveEnumOptions && effectiveEnumOptions.values.length > 0 ? (
                   <Select
-                    value={value || undefined}
+                    value={(isIpsecToggleField ? normalizeIpsecEnableValue(value) : value) || undefined}
                     onChange={(next) => leaf && setEditModalValue(leaf, String(next))}
                     style={{ width: '100%' }}
                     status={error ? 'error' : undefined}
-                    options={enumMeta.values.map((enumValue, idx) => ({ value: enumValue, label: enumMeta.labels[idx] ?? enumValue }))}
+                    options={effectiveEnumOptions.values.map((enumValue, idx) => ({ value: enumValue, label: effectiveEnumOptions.labels[idx] ?? enumValue }))}
                   />
                 ) : isEditable ? (
                   <Input

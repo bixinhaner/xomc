@@ -1174,6 +1174,7 @@ export default function DeviceDetail() {
   const quickSettingsSyncPending = Boolean(quickSettingsSync);
   const lastQuickSettingsParamSync = useQuickSettingsFeedbackStore((s) => (device?.id ? s.lastScopedSyncs[device.id] : undefined)) ?? null;
   const isDeviceParamSyncBusy = paramSyncStatus?.status === 'syncing' || quickSettingsSyncPending || syncMutation.isPending;
+  const isQuickSettingsRefreshSubmitting = syncMutation.isPending;
   const { data: detailComposite } = useQuery({
     queryKey: ['devices', 'detail-composite-v2', device?.id],
     queryFn: async () => {
@@ -1697,7 +1698,7 @@ export default function DeviceDetail() {
               <Button
                 icon={<ReloadOutlined />}
                 onClick={handleHeaderRefresh}
-                loading={activeTab === 'quickSettings' && isDeviceParamSyncBusy}
+                loading={activeTab === 'quickSettings' && isQuickSettingsRefreshSubmitting}
                 disabled={isDeviceParamSyncBusy}
               >
                 {t('common.refresh')}

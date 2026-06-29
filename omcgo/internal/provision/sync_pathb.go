@@ -47,6 +47,10 @@ func (s *SyncService) PathBEnabled(ctx context.Context, dev *model.Device) bool 
 // 返回 (true, nil) 表示已切到 Path B；(false, nil) 表示无法走新栈，调用方应降级旧栈；
 // (false, err) 表示新栈选中后执行出错（不再降级，由 engine 处理）。
 func (s *SyncService) StartPathBSync(ctx context.Context, dev *model.Device, sourceID string, opts ...PathBOption) (bool, int, error) {
+	matchedProduct, ok := s.resolveMatchedProduct(ctx, dev)
+	if !ok {
+		return false, 0, nil
+	}
 	set, ok := s.resolveMappingSet(ctx, dev)
 	if !ok {
 		return false, 0, nil
@@ -57,7 +61,12 @@ func (s *SyncService) StartPathBSync(ctx context.Context, dev *model.Device, sou
 		opt(&pbOpts)
 	}
 
-	prefixes := extractStorablePrefixes(set.Mappings)
+	effectiveMappings := set.Mappings
+	if len(pbOpts.parameterPaths) == 0 {
+		effectiveMappings = s.filterReadUnsupportedMappings(ctx, matchedProduct.ID, effectiveMappings)
+	}
+
+	prefixes := extractStorablePrefixes(effectiveMappings)
 	if len(pbOpts.parameterPaths) > 0 {
 		prefixes = extractStorablePrefixesForStandardPaths(set.Mappings, pbOpts.parameterPaths)
 	}
@@ -106,6 +115,7 @@ func (s *SyncService) StartPathBSync(ctx context.Context, dev *model.Device, sou
 		zap.Int("requested_paths", len(pbOpts.parameterPaths)),
 		zap.Int("prefixes", len(prefixes)),
 		zap.Int("total_mappings", len(set.Mappings)),
+		zap.Int("effective_mappings", len(effectiveMappings)),
 	)
 	return true, gpvTaskCount, nil
 }
@@ -133,8 +143,10 @@ func (s *SyncService) HandleSyncResultPathB(ctx context.Context, dev *model.Devi
 	paramValues []tr069.ParameterValueStruct, triggerCommandKey string) (bool, error) {
 	fullSyncTrigger := isFullSyncTrigger(triggerCommandKey)
 	finalizeSync := true
+	var matchedProduct *product.Product
 	if fullSyncTrigger {
 		finalizeSync = s.shouldFinalizePathBSync(ctx, dev, triggerCommandKey)
+		matchedProduct, _ = s.resolveMatchedProduct(ctx, dev)
 	}
 
 	if len(paramValues) == 0 {
@@ -158,6 +170,9 @@ func (s *SyncService) HandleSyncResultPathB(ctx context.Context, dev *model.Devi
 
 	// T-0127: 同步前 snapshot 现有 standardPath 集合 B（供差集计算）。
 	prevPaths := s.snapshotStandardPaths(ctx, dev.ID)
+	if fullSyncTrigger && matchedProduct != nil {
+		prevPaths = s.filterReadUnsupportedPathSet(ctx, matchedProduct.ID, prevPaths)
+	}
 
 	params := make([]model.DeviceParameter, 0, len(paramValues))
 	now := time.Now()
@@ -687,11 +702,8 @@ func (s *SyncService) ResolveTranslator(ctx context.Context, dev *model.Device) 
 	return t, true
 }
 
-// resolveMappingSet 在 dual-stack 启用时尝试解析 device 对应的 MappingSet。
-//
-// 任何前置条件失败 → 返回 (nil, false)。
-func (s *SyncService) resolveMappingSet(ctx context.Context, dev *model.Device) (*parammodel.MappingSet, bool) {
-	if !s.paramRegistryEnabled || s.paramRegistry == nil || s.productRegistry == nil {
+func (s *SyncService) resolveMatchedProduct(ctx context.Context, dev *model.Device) (*product.Product, bool) {
+	if !s.paramRegistryEnabled || s.productRegistry == nil {
 		return nil, false
 	}
 	if dev == nil || dev.ProductClass == "" {
@@ -701,11 +713,87 @@ func (s *SyncService) resolveMappingSet(ctx context.Context, dev *model.Device) 
 	if err != nil || match == nil || match.Product == nil {
 		return nil, false
 	}
-	set, err := s.paramRegistry.GetByProduct(ctx, match.Product.ID, dev.FirmwareVersion)
+	return match.Product, true
+}
+
+// resolveMappingSet 在 dual-stack 启用时尝试解析 device 对应的 MappingSet。
+//
+// 任何前置条件失败 → 返回 (nil, false)。
+func (s *SyncService) resolveMappingSet(ctx context.Context, dev *model.Device) (*parammodel.MappingSet, bool) {
+	if !s.paramRegistryEnabled || s.paramRegistry == nil {
+		return nil, false
+	}
+	matchedProduct, ok := s.resolveMatchedProduct(ctx, dev)
+	if !ok {
+		return nil, false
+	}
+	set, err := s.paramRegistry.GetByProduct(ctx, matchedProduct.ID, dev.FirmwareVersion)
 	if err != nil || set == nil {
 		return nil, false
 	}
 	return set, true
+}
+
+func (s *SyncService) filterReadUnsupportedMappings(ctx context.Context, productID uuid.UUID, mappings []parammodel.ParamMapping) []parammodel.ParamMapping {
+	blocked := s.readUnsupportedPathSet(ctx, productID)
+	if len(blocked) == 0 || len(mappings) == 0 {
+		return mappings
+	}
+	filtered := make([]parammodel.ParamMapping, 0, len(mappings))
+	skipped := 0
+	for _, mapping := range mappings {
+		if _, ok := blocked[mapping.StandardPath]; ok {
+			skipped++
+			continue
+		}
+		filtered = append(filtered, mapping)
+	}
+	if skipped > 0 {
+		s.logger.Info("path-b sync filtered read-unsupported mappings",
+			zap.String("product_id", productID.String()),
+			zap.Int("filtered_mappings", skipped),
+			zap.Int("remaining_mappings", len(filtered)))
+	}
+	return filtered
+}
+
+func (s *SyncService) filterReadUnsupportedPathSet(ctx context.Context, productID uuid.UUID, paths map[string]struct{}) map[string]struct{} {
+	blocked := s.readUnsupportedPathSet(ctx, productID)
+	if len(blocked) == 0 || len(paths) == 0 {
+		return paths
+	}
+	filtered := make(map[string]struct{}, len(paths))
+	for path := range paths {
+		if _, ok := blocked[path]; ok {
+			continue
+		}
+		filtered[path] = struct{}{}
+	}
+	return filtered
+}
+
+func (s *SyncService) readUnsupportedPathSet(ctx context.Context, productID uuid.UUID) map[string]struct{} {
+	if s.unsupportedPathRepo == nil || productID == uuid.Nil {
+		return nil
+	}
+	unsupported, err := s.unsupportedPathRepo.ListByProduct(ctx, productID)
+	if err != nil {
+		s.logger.Warn("load product unsupported paths failed",
+			zap.String("product_id", productID.String()),
+			zap.Error(err))
+		return nil
+	}
+	blocked := make(map[string]struct{}, len(unsupported))
+	for _, item := range unsupported {
+		if !item.ReadUnsupported || item.Path == "" {
+			continue
+		}
+		blocked[item.Path] = struct{}{}
+	}
+	if len(blocked) == 0 {
+		return nil
+	}
+	return blocked
 }
 
 // ── 纯函数辅助（便于单测） ─────────────────────────────────────────────

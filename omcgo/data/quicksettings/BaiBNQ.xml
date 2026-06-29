@@ -105,6 +105,15 @@
     <param name="NTPServer5" titleZh="NTP 服务器 5" titleEn="NTP Server 5"
            standardPath="Device.Time.NTPServer5"/>
   </group>
+
+       <group id="device-ipsec-control" titleZh="IPSec 配置" titleEn="IPSec Config">
+              <param name="IPSEC_ENABLE" titleZh="IPSec 开关" titleEn="IPSec Enable"
+                                    standardPath="Device.IPsec.Enable">
+                     <option value="1" label="开启"/>
+                     <option value="0" label="关闭"/>
+              </param>
+       </group>
+
   <group id="gnb-ipsec" titleZh="IPSec 参数" titleEn="IPSec Settings"
          multiInstance="true" maxInstances="4"
          objectPath="Device.FAP.Ipsec.{i}.">

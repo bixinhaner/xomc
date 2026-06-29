@@ -1,0 +1,1862 @@
+[
+  {
+    "iana": "Africa/Abidjan",
+    "deviceValue": "GMT0",
+    "displayValue": "Africa/Abidjan"
+  },
+  {
+    "iana": "Africa/Algiers",
+    "deviceValue": "CET-1",
+    "displayValue": "Africa/Algiers"
+  },
+  {
+    "iana": "Africa/Asmara",
+    "deviceValue": "EAT-3",
+    "displayValue": "Africa/Asmara"
+  },
+  {
+    "iana": "Africa/Bangui",
+    "deviceValue": "WAT-1",
+    "displayValue": "Africa/Bangui"
+  },
+  {
+    "iana": "Africa/Blantyre",
+    "deviceValue": "CAT-2",
+    "displayValue": "Africa/Blantyre"
+  },
+  {
+    "iana": "Africa/Cairo",
+    "deviceValue": "EET-2",
+    "displayValue": "Africa/Cairo"
+  },
+  {
+    "iana": "Africa/Casablanca",
+    "deviceValue": "WET0WEST,M3.5.0,M10.5.0/3",
+    "displayValue": "Africa/Casablanca"
+  },
+  {
+    "iana": "Africa/Ceuta",
+    "deviceValue": "CET-1CEST,M3.5.0,M10.5.0/3",
+    "displayValue": "Africa/Ceuta"
+  },
+  {
+    "iana": "Africa/El_Aaiun",
+    "deviceValue": "WET0WEST,M3.5.0,M10.5.0/3",
+    "displayValue": "Africa/El_Aaiun"
+  },
+  {
+    "iana": "Africa/Johannesburg",
+    "deviceValue": "SAST-2",
+    "displayValue": "Africa/Johannesburg"
+  },
+  {
+    "iana": "Africa/Lusaka",
+    "deviceValue": "CAT-2",
+    "displayValue": "Africa/Lusaka"
+  },
+  {
+    "iana": "Africa/Tripoli",
+    "deviceValue": "EET-2",
+    "displayValue": "Africa/Tripoli"
+  },
+  {
+    "iana": "Africa/Windhoek",
+    "deviceValue": "WAT-1WAST,M9.1.0,M4.1.0",
+    "displayValue": "Africa/Windhoek"
+  },
+  {
+    "iana": "America/Adak",
+    "deviceValue": "HST10HDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Adak"
+  },
+  {
+    "iana": "America/Anchorage",
+    "deviceValue": "AKST9AKDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Anchorage"
+  },
+  {
+    "iana": "America/Anguilla",
+    "deviceValue": "AST4",
+    "displayValue": "America/Anguilla"
+  },
+  {
+    "iana": "America/Antigua",
+    "deviceValue": "AST4",
+    "displayValue": "America/Antigua"
+  },
+  {
+    "iana": "America/Araguaina",
+    "deviceValue": "BRT3",
+    "displayValue": "America/Araguaina"
+  },
+  {
+    "iana": "America/Argentina/Buenos_Aires",
+    "deviceValue": "ART3",
+    "displayValue": "America/Argentina/Buenos_Aires"
+  },
+  {
+    "iana": "America/Argentina/Catamarca",
+    "deviceValue": "ART3",
+    "displayValue": "America/Argentina/Catamarca"
+  },
+  {
+    "iana": "America/Argentina/Cordoba",
+    "deviceValue": "ART3",
+    "displayValue": "America/Argentina/Cordoba"
+  },
+  {
+    "iana": "America/Argentina/Jujuy",
+    "deviceValue": "ART3",
+    "displayValue": "America/Argentina/Jujuy"
+  },
+  {
+    "iana": "America/Argentina/La_Rioja",
+    "deviceValue": "ART3",
+    "displayValue": "America/Argentina/La_Rioja"
+  },
+  {
+    "iana": "America/Argentina/Mendoza",
+    "deviceValue": "ART3",
+    "displayValue": "America/Argentina/Mendoza"
+  },
+  {
+    "iana": "America/Argentina/Rio_Gallegos",
+    "deviceValue": "ART3",
+    "displayValue": "America/Argentina/Rio_Gallegos"
+  },
+  {
+    "iana": "America/Argentina/Salta",
+    "deviceValue": "ART3",
+    "displayValue": "America/Argentina/Salta"
+  },
+  {
+    "iana": "America/Argentina/San_Juan",
+    "deviceValue": "ART3",
+    "displayValue": "America/Argentina/San_Juan"
+  },
+  {
+    "iana": "America/Argentina/San_Luis",
+    "deviceValue": "ART3",
+    "displayValue": "America/Argentina/San_Luis"
+  },
+  {
+    "iana": "America/Argentina/Tucuman",
+    "deviceValue": "ART3",
+    "displayValue": "America/Argentina/Tucuman"
+  },
+  {
+    "iana": "America/Argentina/Ushuaia",
+    "deviceValue": "ART3",
+    "displayValue": "America/Argentina/Ushuaia"
+  },
+  {
+    "iana": "America/Aruba",
+    "deviceValue": "AST4",
+    "displayValue": "America/Aruba"
+  },
+  {
+    "iana": "America/Asuncion",
+    "deviceValue": "PYT4PYST,M10.1.0/0,M3.4.0/0",
+    "displayValue": "America/Asuncion"
+  },
+  {
+    "iana": "America/Atikokan",
+    "deviceValue": "EST5",
+    "displayValue": "America/Atikokan"
+  },
+  {
+    "iana": "America/Bahia",
+    "deviceValue": "BRT3",
+    "displayValue": "America/Bahia"
+  },
+  {
+    "iana": "America/Bahia_Banderas",
+    "deviceValue": "CST6CDT,M4.1.0,M10.5.0",
+    "displayValue": "America/Bahia_Banderas"
+  },
+  {
+    "iana": "America/Barbados",
+    "deviceValue": "AST4",
+    "displayValue": "America/Barbados"
+  },
+  {
+    "iana": "America/Belem",
+    "deviceValue": "BRT3",
+    "displayValue": "America/Belem"
+  },
+  {
+    "iana": "America/Belize",
+    "deviceValue": "CST6",
+    "displayValue": "America/Belize"
+  },
+  {
+    "iana": "America/Blanc-Sablon",
+    "deviceValue": "AST4",
+    "displayValue": "America/Blanc-Sablon"
+  },
+  {
+    "iana": "America/Boa_Vista",
+    "deviceValue": "AMT4",
+    "displayValue": "America/Boa_Vista"
+  },
+  {
+    "iana": "America/Bogota",
+    "deviceValue": "COT5",
+    "displayValue": "America/Bogota"
+  },
+  {
+    "iana": "America/Boise",
+    "deviceValue": "MST7MDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Boise"
+  },
+  {
+    "iana": "America/Cambridge_Bay",
+    "deviceValue": "MST7MDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Cambridge_Bay"
+  },
+  {
+    "iana": "America/Campo_Grande",
+    "deviceValue": "AMT4AMST,M10.3.0/0,M2.3.0/0",
+    "displayValue": "America/Campo_Grande"
+  },
+  {
+    "iana": "America/Cancun",
+    "deviceValue": "EST5",
+    "displayValue": "America/Cancun"
+  },
+  {
+    "iana": "America/Caracas",
+    "deviceValue": "VET4:30",
+    "displayValue": "America/Caracas"
+  },
+  {
+    "iana": "America/Cayenne",
+    "deviceValue": "GFT3",
+    "displayValue": "America/Cayenne"
+  },
+  {
+    "iana": "America/Cayman",
+    "deviceValue": "EST5EDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Cayman"
+  },
+  {
+    "iana": "America/Chicago",
+    "deviceValue": "CST6CDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Chicago"
+  },
+  {
+    "iana": "America/Chihuahua",
+    "deviceValue": "MST7MDT,M4.1.0,M10.5.0",
+    "displayValue": "America/Chihuahua"
+  },
+  {
+    "iana": "America/Costa_Rica",
+    "deviceValue": "CST6",
+    "displayValue": "America/Costa_Rica"
+  },
+  {
+    "iana": "America/Creston",
+    "deviceValue": "MST7",
+    "displayValue": "America/Creston"
+  },
+  {
+    "iana": "America/Cuiaba",
+    "deviceValue": "AMT4AMST,M10.3.0/0,M2.3.0/0",
+    "displayValue": "America/Cuiaba"
+  },
+  {
+    "iana": "America/Curacao",
+    "deviceValue": "AST4",
+    "displayValue": "America/Curacao"
+  },
+  {
+    "iana": "America/Dawson",
+    "deviceValue": "PST8PDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Dawson"
+  },
+  {
+    "iana": "America/Dawson_Creek",
+    "deviceValue": "MST7",
+    "displayValue": "America/Dawson_Creek"
+  },
+  {
+    "iana": "America/Denver",
+    "deviceValue": "MST7MDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Denver"
+  },
+  {
+    "iana": "America/Detroit",
+    "deviceValue": "EST5EDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Detroit"
+  },
+  {
+    "iana": "America/Dominica",
+    "deviceValue": "AST4",
+    "displayValue": "America/Dominica"
+  },
+  {
+    "iana": "America/Edmonton",
+    "deviceValue": "MST7MDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Edmonton"
+  },
+  {
+    "iana": "America/Eirunepe",
+    "deviceValue": "ACT5",
+    "displayValue": "America/Eirunepe"
+  },
+  {
+    "iana": "America/El_Salvador",
+    "deviceValue": "CST6",
+    "displayValue": "America/El_Salvador"
+  },
+  {
+    "iana": "America/Fortaleza",
+    "deviceValue": "BRT3",
+    "displayValue": "America/Fortaleza"
+  },
+  {
+    "iana": "America/Glace_Bay",
+    "deviceValue": "AST4ADT,M3.2.0,M11.1.0",
+    "displayValue": "America/Glace_Bay"
+  },
+  {
+    "iana": "America/Godthab",
+    "deviceValue": "WGT3WGST,M3.5.0/-2,M10.5.0/-1",
+    "displayValue": "America/Godthab"
+  },
+  {
+    "iana": "America/Goose_Bay",
+    "deviceValue": "AST4ADT,M3.2.0,M11.1.0",
+    "displayValue": "America/Goose_Bay"
+  },
+  {
+    "iana": "America/Grand_Turk",
+    "deviceValue": "AST4",
+    "displayValue": "America/Grand_Turk"
+  },
+  {
+    "iana": "America/Grenada",
+    "deviceValue": "AST4",
+    "displayValue": "America/Grenada"
+  },
+  {
+    "iana": "America/Guadeloupe",
+    "deviceValue": "AST4",
+    "displayValue": "America/Guadeloupe"
+  },
+  {
+    "iana": "America/Guatemala",
+    "deviceValue": "CST6",
+    "displayValue": "America/Guatemala"
+  },
+  {
+    "iana": "America/Guayaquil",
+    "deviceValue": "ECT5",
+    "displayValue": "America/Guayaquil"
+  },
+  {
+    "iana": "America/Guyana",
+    "deviceValue": "GYT4",
+    "displayValue": "America/Guyana"
+  },
+  {
+    "iana": "America/Halifax",
+    "deviceValue": "AST4ADT,M3.2.0,M11.1.0",
+    "displayValue": "America/Halifax"
+  },
+  {
+    "iana": "America/Havana",
+    "deviceValue": "CST5CDT,M3.2.0/0,M11.1.0/1",
+    "displayValue": "America/Havana"
+  },
+  {
+    "iana": "America/Hermosillo",
+    "deviceValue": "MST7",
+    "displayValue": "America/Hermosillo"
+  },
+  {
+    "iana": "America/Indiana/Indianapolis",
+    "deviceValue": "EST5EDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Indiana/Indianapolis"
+  },
+  {
+    "iana": "America/Indiana/Knox",
+    "deviceValue": "CST6CDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Indiana/Knox"
+  },
+  {
+    "iana": "America/Indiana/Marengo",
+    "deviceValue": "EST5EDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Indiana/Marengo"
+  },
+  {
+    "iana": "America/Indiana/Petersburg",
+    "deviceValue": "EST5EDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Indiana/Petersburg"
+  },
+  {
+    "iana": "America/Indiana/Tell_City",
+    "deviceValue": "CST6CDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Indiana/Tell_City"
+  },
+  {
+    "iana": "America/Indiana/Vevay",
+    "deviceValue": "EST5EDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Indiana/Vevay"
+  },
+  {
+    "iana": "America/Indiana/Vincennes",
+    "deviceValue": "EST5EDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Indiana/Vincennes"
+  },
+  {
+    "iana": "America/Indiana/Winamac",
+    "deviceValue": "EST5EDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Indiana/Winamac"
+  },
+  {
+    "iana": "America/Inuvik",
+    "deviceValue": "MST7MDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Inuvik"
+  },
+  {
+    "iana": "America/Iqaluit",
+    "deviceValue": "EST5EDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Iqaluit"
+  },
+  {
+    "iana": "America/Jamaica",
+    "deviceValue": "EST5",
+    "displayValue": "America/Jamaica"
+  },
+  {
+    "iana": "America/Juneau",
+    "deviceValue": "AKST9AKDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Juneau"
+  },
+  {
+    "iana": "America/Kentucky/Louisville",
+    "deviceValue": "EST5EDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Kentucky/Louisville"
+  },
+  {
+    "iana": "America/Kentucky/Monticello",
+    "deviceValue": "EST5EDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Kentucky/Monticello"
+  },
+  {
+    "iana": "America/Kralendijk",
+    "deviceValue": "AST4",
+    "displayValue": "America/Kralendijk"
+  },
+  {
+    "iana": "America/La_Paz",
+    "deviceValue": "BOT4",
+    "displayValue": "America/La_Paz"
+  },
+  {
+    "iana": "America/Lima",
+    "deviceValue": "PET5",
+    "displayValue": "America/Lima"
+  },
+  {
+    "iana": "America/Los_Angeles",
+    "deviceValue": "PST8PDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Los_Angeles"
+  },
+  {
+    "iana": "America/Lower_Princes",
+    "deviceValue": "AST4",
+    "displayValue": "America/Lower_Princes"
+  },
+  {
+    "iana": "America/Maceio",
+    "deviceValue": "BRT3",
+    "displayValue": "America/Maceio"
+  },
+  {
+    "iana": "America/Managua",
+    "deviceValue": "CST6",
+    "displayValue": "America/Managua"
+  },
+  {
+    "iana": "America/Manaus",
+    "deviceValue": "AMT4",
+    "displayValue": "America/Manaus"
+  },
+  {
+    "iana": "America/Marigot",
+    "deviceValue": "AST4",
+    "displayValue": "America/Marigot"
+  },
+  {
+    "iana": "America/Martinique",
+    "deviceValue": "AST4",
+    "displayValue": "America/Martinique"
+  },
+  {
+    "iana": "America/Matamoros",
+    "deviceValue": "CST6CDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Matamoros"
+  },
+  {
+    "iana": "America/Mazatlan",
+    "deviceValue": "MST7MDT,M4.1.0,M10.5.0",
+    "displayValue": "America/Mazatlan"
+  },
+  {
+    "iana": "America/Menominee",
+    "deviceValue": "CST6CDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Menominee"
+  },
+  {
+    "iana": "America/Merida",
+    "deviceValue": "CST6CDT,M4.1.0,M10.5.0",
+    "displayValue": "America/Merida"
+  },
+  {
+    "iana": "America/Metlakatla",
+    "deviceValue": "PST8",
+    "displayValue": "America/Metlakatla"
+  },
+  {
+    "iana": "America/Mexico_City",
+    "deviceValue": "CST6CDT,M4.1.0,M10.5.0",
+    "displayValue": "America/Mexico_City"
+  },
+  {
+    "iana": "America/Miquelon",
+    "deviceValue": "PMST3PMDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Miquelon"
+  },
+  {
+    "iana": "America/Moncton",
+    "deviceValue": "AST4ADT,M3.2.0,M11.1.0",
+    "displayValue": "America/Moncton"
+  },
+  {
+    "iana": "America/Monterrey",
+    "deviceValue": "CST6CDT,M4.1.0,M10.5.0",
+    "displayValue": "America/Monterrey"
+  },
+  {
+    "iana": "America/Montevideo",
+    "deviceValue": "UYT3",
+    "displayValue": "America/Montevideo"
+  },
+  {
+    "iana": "America/Montserrat",
+    "deviceValue": "AST4",
+    "displayValue": "America/Montserrat"
+  },
+  {
+    "iana": "America/Nassau",
+    "deviceValue": "EST5EDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Nassau"
+  },
+  {
+    "iana": "America/New_York",
+    "deviceValue": "EST5EDT,M3.2.0,M11.1.0",
+    "displayValue": "America/New_York"
+  },
+  {
+    "iana": "America/Nipigon",
+    "deviceValue": "EST5EDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Nipigon"
+  },
+  {
+    "iana": "America/Nome",
+    "deviceValue": "AKST9AKDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Nome"
+  },
+  {
+    "iana": "America/Noronha",
+    "deviceValue": "FNT2",
+    "displayValue": "America/Noronha"
+  },
+  {
+    "iana": "America/North_Dakota/Beulah",
+    "deviceValue": "CST6CDT,M3.2.0,M11.1.0",
+    "displayValue": "America/North_Dakota/Beulah"
+  },
+  {
+    "iana": "America/North_Dakota/Center",
+    "deviceValue": "CST6CDT,M3.2.0,M11.1.0",
+    "displayValue": "America/North_Dakota/Center"
+  },
+  {
+    "iana": "America/North_Dakota/New_Salem",
+    "deviceValue": "CST6CDT,M3.2.0,M11.1.0",
+    "displayValue": "America/North_Dakota/New_Salem"
+  },
+  {
+    "iana": "America/Ojinaga",
+    "deviceValue": "MST7MDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Ojinaga"
+  },
+  {
+    "iana": "America/Panama",
+    "deviceValue": "EST5",
+    "displayValue": "America/Panama"
+  },
+  {
+    "iana": "America/Pangnirtung",
+    "deviceValue": "EST5EDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Pangnirtung"
+  },
+  {
+    "iana": "America/Paramaribo",
+    "deviceValue": "SRT3",
+    "displayValue": "America/Paramaribo"
+  },
+  {
+    "iana": "America/Phoenix",
+    "deviceValue": "MST7",
+    "displayValue": "America/Phoenix"
+  },
+  {
+    "iana": "America/Port_of_Spain",
+    "deviceValue": "AST4",
+    "displayValue": "America/Port_of_Spain"
+  },
+  {
+    "iana": "America/Port-au-Prince",
+    "deviceValue": "EST5EDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Port-au-Prince"
+  },
+  {
+    "iana": "America/Porto_Velho",
+    "deviceValue": "AMT4",
+    "displayValue": "America/Porto_Velho"
+  },
+  {
+    "iana": "America/Puerto_Rico",
+    "deviceValue": "AST4",
+    "displayValue": "America/Puerto_Rico"
+  },
+  {
+    "iana": "America/Rainy_River",
+    "deviceValue": "CST6CDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Rainy_River"
+  },
+  {
+    "iana": "America/Rankin_Inlet",
+    "deviceValue": "CST6CDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Rankin_Inlet"
+  },
+  {
+    "iana": "America/Recife",
+    "deviceValue": "BRT3",
+    "displayValue": "America/Recife"
+  },
+  {
+    "iana": "America/Regina",
+    "deviceValue": "CST6",
+    "displayValue": "America/Regina"
+  },
+  {
+    "iana": "America/Resolute",
+    "deviceValue": "CST6CDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Resolute"
+  },
+  {
+    "iana": "America/Rio_Branco",
+    "deviceValue": "ACT5",
+    "displayValue": "America/Rio_Branco"
+  },
+  {
+    "iana": "America/Santa_Isabel",
+    "deviceValue": "PST8PDT,M4.1.0,M10.5.0",
+    "displayValue": "America/Santa_Isabel"
+  },
+  {
+    "iana": "America/Santarem",
+    "deviceValue": "BRT3",
+    "displayValue": "America/Santarem"
+  },
+  {
+    "iana": "America/Santiago",
+    "deviceValue": "CLT3",
+    "displayValue": "America/Santiago"
+  },
+  {
+    "iana": "America/Santo_Domingo",
+    "deviceValue": "AST4",
+    "displayValue": "America/Santo_Domingo"
+  },
+  {
+    "iana": "America/Sao_Paulo",
+    "deviceValue": "BRT3BRST,M10.3.0/0,M2.3.0/0",
+    "displayValue": "America/Sao_Paulo"
+  },
+  {
+    "iana": "America/Scoresbysund",
+    "deviceValue": "EGT1EGST,M3.5.0/0,M10.5.0/1",
+    "displayValue": "America/Scoresbysund"
+  },
+  {
+    "iana": "America/Sitka",
+    "deviceValue": "AKST9AKDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Sitka"
+  },
+  {
+    "iana": "America/St_Barthelemy",
+    "deviceValue": "AST4",
+    "displayValue": "America/St_Barthelemy"
+  },
+  {
+    "iana": "America/St_Johns",
+    "deviceValue": "NST3:30NDT,M3.2.0,M11.1.0",
+    "displayValue": "America/St_Johns"
+  },
+  {
+    "iana": "America/St_Kitts",
+    "deviceValue": "AST4",
+    "displayValue": "America/St_Kitts"
+  },
+  {
+    "iana": "America/St_Lucia",
+    "deviceValue": "AST4",
+    "displayValue": "America/St_Lucia"
+  },
+  {
+    "iana": "America/St_Thomas",
+    "deviceValue": "AST4",
+    "displayValue": "America/St_Thomas"
+  },
+  {
+    "iana": "America/St_Vincent",
+    "deviceValue": "AST4",
+    "displayValue": "America/St_Vincent"
+  },
+  {
+    "iana": "America/Swift_Current",
+    "deviceValue": "CST6",
+    "displayValue": "America/Swift_Current"
+  },
+  {
+    "iana": "America/Tegucigalpa",
+    "deviceValue": "CST6",
+    "displayValue": "America/Tegucigalpa"
+  },
+  {
+    "iana": "America/Thule",
+    "deviceValue": "AST4ADT,M3.2.0,M11.1.0",
+    "displayValue": "America/Thule"
+  },
+  {
+    "iana": "America/Thunder_Bay",
+    "deviceValue": "EST5EDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Thunder_Bay"
+  },
+  {
+    "iana": "America/Tijuana",
+    "deviceValue": "PST8PDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Tijuana"
+  },
+  {
+    "iana": "America/Toronto",
+    "deviceValue": "EST5EDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Toronto"
+  },
+  {
+    "iana": "America/Tortola",
+    "deviceValue": "AST4",
+    "displayValue": "America/Tortola"
+  },
+  {
+    "iana": "America/Vancouver",
+    "deviceValue": "PST8PDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Vancouver"
+  },
+  {
+    "iana": "America/Whitehorse",
+    "deviceValue": "PST8PDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Whitehorse"
+  },
+  {
+    "iana": "America/Winnipeg",
+    "deviceValue": "CST6CDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Winnipeg"
+  },
+  {
+    "iana": "America/Yakutat",
+    "deviceValue": "AKST9AKDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Yakutat"
+  },
+  {
+    "iana": "America/Yellowknife",
+    "deviceValue": "MST7MDT,M3.2.0,M11.1.0",
+    "displayValue": "America/Yellowknife"
+  },
+  {
+    "iana": "Antarctica/Casey",
+    "deviceValue": "AWST-8",
+    "displayValue": "Antarctica/Casey"
+  },
+  {
+    "iana": "Antarctica/Davis",
+    "deviceValue": "DAVT-7",
+    "displayValue": "Antarctica/Davis"
+  },
+  {
+    "iana": "Antarctica/DumontDUrville",
+    "deviceValue": "DDUT-10",
+    "displayValue": "Antarctica/DumontDUrville"
+  },
+  {
+    "iana": "Antarctica/Macquarie",
+    "deviceValue": "MIST-11",
+    "displayValue": "Antarctica/Macquarie"
+  },
+  {
+    "iana": "Antarctica/Mawson",
+    "deviceValue": "MAWT-5",
+    "displayValue": "Antarctica/Mawson"
+  },
+  {
+    "iana": "Antarctica/McMurdo",
+    "deviceValue": "NZST-12NZDT,M9.5.0,M4.1.0/3",
+    "displayValue": "Antarctica/McMurdo"
+  },
+  {
+    "iana": "Antarctica/Palmer",
+    "deviceValue": "CLT3",
+    "displayValue": "Antarctica/Palmer"
+  },
+  {
+    "iana": "Antarctica/Rothera",
+    "deviceValue": "ROTT3",
+    "displayValue": "Antarctica/Rothera"
+  },
+  {
+    "iana": "Antarctica/Syowa",
+    "deviceValue": "SYOT-3",
+    "displayValue": "Antarctica/Syowa"
+  },
+  {
+    "iana": "Antarctica/Troll",
+    "deviceValue": "UTC0CEST-2,M3.5.0/1,M10.5.0/3",
+    "displayValue": "Antarctica/Troll"
+  },
+  {
+    "iana": "Antarctica/Vostok",
+    "deviceValue": "VOST-6",
+    "displayValue": "Antarctica/Vostok"
+  },
+  {
+    "iana": "Arctic/Longyearbyen",
+    "deviceValue": "CET-1CEST,M3.5.0,M10.5.0/3",
+    "displayValue": "Arctic/Longyearbyen"
+  },
+  {
+    "iana": "Asia/Aden",
+    "deviceValue": "AST-3",
+    "displayValue": "Asia/Aden"
+  },
+  {
+    "iana": "Asia/Almaty",
+    "deviceValue": "ALMT-6",
+    "displayValue": "Asia/Almaty"
+  },
+  {
+    "iana": "Asia/Amman",
+    "deviceValue": "EET-2EEST,M3.5.4/24,M10.5.5/1",
+    "displayValue": "Asia/Amman"
+  },
+  {
+    "iana": "Asia/Anadyr",
+    "deviceValue": "ANAT-12",
+    "displayValue": "Asia/Anadyr"
+  },
+  {
+    "iana": "Asia/Aqtau",
+    "deviceValue": "AQTT-5",
+    "displayValue": "Asia/Aqtau"
+  },
+  {
+    "iana": "Asia/Aqtobe",
+    "deviceValue": "AQTT-5",
+    "displayValue": "Asia/Aqtobe"
+  },
+  {
+    "iana": "Asia/Ashgabat",
+    "deviceValue": "TMT-5",
+    "displayValue": "Asia/Ashgabat"
+  },
+  {
+    "iana": "Asia/Baghdad",
+    "deviceValue": "AST-3",
+    "displayValue": "Asia/Baghdad"
+  },
+  {
+    "iana": "Asia/Bahrain",
+    "deviceValue": "AST-3",
+    "displayValue": "Asia/Bahrain"
+  },
+  {
+    "iana": "Asia/Baku",
+    "deviceValue": "AZT-4AZST,M3.5.0/4,M10.5.0/5",
+    "displayValue": "Asia/Baku"
+  },
+  {
+    "iana": "Asia/Bangkok",
+    "deviceValue": "ICT-7",
+    "displayValue": "Asia/Bangkok"
+  },
+  {
+    "iana": "Asia/Beirut",
+    "deviceValue": "EET-2EEST,M3.5.0/0,M10.5.0/0",
+    "displayValue": "Asia/Beirut"
+  },
+  {
+    "iana": "Asia/Bishkek",
+    "deviceValue": "KGT-6",
+    "displayValue": "Asia/Bishkek"
+  },
+  {
+    "iana": "Asia/Brunei",
+    "deviceValue": "BNT-8",
+    "displayValue": "Asia/Brunei"
+  },
+  {
+    "iana": "Asia/Chita",
+    "deviceValue": "IRKT-8",
+    "displayValue": "Asia/Chita"
+  },
+  {
+    "iana": "Asia/Choibalsan",
+    "deviceValue": "CHOT-8CHOST,M3.5.6,M9.5.6/0",
+    "displayValue": "Asia/Choibalsan"
+  },
+  {
+    "iana": "Asia/Colombo",
+    "deviceValue": "IST-5:30",
+    "displayValue": "Asia/Colombo"
+  },
+  {
+    "iana": "Asia/Damascus",
+    "deviceValue": "EET-2EEST,M3.5.5/0,M10.5.5/0",
+    "displayValue": "Asia/Damascus"
+  },
+  {
+    "iana": "Asia/Dhaka",
+    "deviceValue": "BDT-6",
+    "displayValue": "Asia/Dhaka"
+  },
+  {
+    "iana": "Asia/Dili",
+    "deviceValue": "TLT-9",
+    "displayValue": "Asia/Dili"
+  },
+  {
+    "iana": "Asia/Dubai",
+    "deviceValue": "GST-4",
+    "displayValue": "Asia/Dubai"
+  },
+  {
+    "iana": "Asia/Dushanbe",
+    "deviceValue": "TJT-5",
+    "displayValue": "Asia/Dushanbe"
+  },
+  {
+    "iana": "Asia/Gaza",
+    "deviceValue": "EET-2EEST,M3.5.5/24,M10.3.6/144",
+    "displayValue": "Asia/Gaza"
+  },
+  {
+    "iana": "Asia/Hebron",
+    "deviceValue": "EET-2EEST,M3.5.5/24,M10.3.6/144",
+    "displayValue": "Asia/Hebron"
+  },
+  {
+    "iana": "Asia/Ho_Chi_Minh",
+    "deviceValue": "ICT-7",
+    "displayValue": "Asia/Ho_Chi_Minh"
+  },
+  {
+    "iana": "Asia/Hong_Kong",
+    "deviceValue": "HKT-8",
+    "displayValue": "Asia/Hong_Kong"
+  },
+  {
+    "iana": "Asia/Hovd",
+    "deviceValue": "HOVT-7HOVST,M3.5.6,M9.5.6/0",
+    "displayValue": "Asia/Hovd"
+  },
+  {
+    "iana": "Asia/Irkutsk",
+    "deviceValue": "IRKT-8",
+    "displayValue": "Asia/Irkutsk"
+  },
+  {
+    "iana": "Asia/Jakarta",
+    "deviceValue": "WIB-7",
+    "displayValue": "Asia/Jakarta"
+  },
+  {
+    "iana": "Asia/Jayapura",
+    "deviceValue": "WIT-9",
+    "displayValue": "Asia/Jayapura"
+  },
+  {
+    "iana": "Asia/Jerusalem",
+    "deviceValue": "IST-2IDT,M3.4.4/26,M10.5.0",
+    "displayValue": "Asia/Jerusalem"
+  },
+  {
+    "iana": "Asia/Kabul",
+    "deviceValue": "AFT-4:30",
+    "displayValue": "Asia/Kabul"
+  },
+  {
+    "iana": "Asia/Kamchatka",
+    "deviceValue": "PETT-12",
+    "displayValue": "Asia/Kamchatka"
+  },
+  {
+    "iana": "Asia/Karachi",
+    "deviceValue": "PKT-5",
+    "displayValue": "Asia/Karachi"
+  },
+  {
+    "iana": "Asia/Kathmandu",
+    "deviceValue": "NPT-5:45",
+    "displayValue": "Asia/Kathmandu"
+  },
+  {
+    "iana": "Asia/Khandyga",
+    "deviceValue": "YAKT-9",
+    "displayValue": "Asia/Khandyga"
+  },
+  {
+    "iana": "Asia/Kolkata",
+    "deviceValue": "IST-5:30",
+    "displayValue": "Asia/Kolkata"
+  },
+  {
+    "iana": "Asia/Krasnoyarsk",
+    "deviceValue": "KRAT-7",
+    "displayValue": "Asia/Krasnoyarsk"
+  },
+  {
+    "iana": "Asia/Kuala_Lumpur",
+    "deviceValue": "MYT-8",
+    "displayValue": "Asia/Kuala_Lumpur"
+  },
+  {
+    "iana": "Asia/Kuching",
+    "deviceValue": "MYT-8",
+    "displayValue": "Asia/Kuching"
+  },
+  {
+    "iana": "Asia/Kuwait",
+    "deviceValue": "AST-3",
+    "displayValue": "Asia/Kuwait"
+  },
+  {
+    "iana": "Asia/Magadan",
+    "deviceValue": "MAGT-10",
+    "displayValue": "Asia/Magadan"
+  },
+  {
+    "iana": "Asia/Makassar",
+    "deviceValue": "WITA-8",
+    "displayValue": "Asia/Makassar"
+  },
+  {
+    "iana": "Asia/Manila",
+    "deviceValue": "PHT-8",
+    "displayValue": "Asia/Manila"
+  },
+  {
+    "iana": "Asia/Muscat",
+    "deviceValue": "GST-4",
+    "displayValue": "Asia/Muscat"
+  },
+  {
+    "iana": "Asia/Nicosia",
+    "deviceValue": "EET-2EEST,M3.5.0/3,M10.5.0/4",
+    "displayValue": "Asia/Nicosia"
+  },
+  {
+    "iana": "Asia/Novokuznetsk",
+    "deviceValue": "KRAT-7",
+    "displayValue": "Asia/Novokuznetsk"
+  },
+  {
+    "iana": "Asia/Novosibirsk",
+    "deviceValue": "NOVT-6",
+    "displayValue": "Asia/Novosibirsk"
+  },
+  {
+    "iana": "Asia/Omsk",
+    "deviceValue": "OMST-6",
+    "displayValue": "Asia/Omsk"
+  },
+  {
+    "iana": "Asia/Oral",
+    "deviceValue": "ORAT-5",
+    "displayValue": "Asia/Oral"
+  },
+  {
+    "iana": "Asia/Phnom_Penh",
+    "deviceValue": "ICT-7",
+    "displayValue": "Asia/Phnom_Penh"
+  },
+  {
+    "iana": "Asia/Pontianak",
+    "deviceValue": "WIB-7",
+    "displayValue": "Asia/Pontianak"
+  },
+  {
+    "iana": "Asia/Pyongyang",
+    "deviceValue": "KST-8:30",
+    "displayValue": "Asia/Pyongyang"
+  },
+  {
+    "iana": "Asia/Qatar",
+    "deviceValue": "AST-3",
+    "displayValue": "Asia/Qatar"
+  },
+  {
+    "iana": "Asia/Qyzylorda",
+    "deviceValue": "QYZT-6",
+    "displayValue": "Asia/Qyzylorda"
+  },
+  {
+    "iana": "Asia/Rangoon",
+    "deviceValue": "MMT-6:30",
+    "displayValue": "Asia/Rangoon"
+  },
+  {
+    "iana": "Asia/Riyadh",
+    "deviceValue": "AST-3",
+    "displayValue": "Asia/Riyadh"
+  },
+  {
+    "iana": "Asia/Sakhalin",
+    "deviceValue": "SAKT-10",
+    "displayValue": "Asia/Sakhalin"
+  },
+  {
+    "iana": "Asia/Samarkand",
+    "deviceValue": "UZT-5",
+    "displayValue": "Asia/Samarkand"
+  },
+  {
+    "iana": "Asia/Seoul",
+    "deviceValue": "KST-9",
+    "displayValue": "Asia/Seoul"
+  },
+  {
+    "iana": "Asia/Shanghai",
+    "deviceValue": "CST-8",
+    "displayValue": "Asia/Shanghai"
+  },
+  {
+    "iana": "Asia/Singapore",
+    "deviceValue": "SGT-8",
+    "displayValue": "Asia/Singapore"
+  },
+  {
+    "iana": "Asia/Srednekolymsk",
+    "deviceValue": "SRET-11",
+    "displayValue": "Asia/Srednekolymsk"
+  },
+  {
+    "iana": "Asia/Taipei",
+    "deviceValue": "CST-8",
+    "displayValue": "Asia/Taipei"
+  },
+  {
+    "iana": "Asia/Tashkent",
+    "deviceValue": "UZT-5",
+    "displayValue": "Asia/Tashkent"
+  },
+  {
+    "iana": "Asia/Tbilisi",
+    "deviceValue": "GET-4",
+    "displayValue": "Asia/Tbilisi"
+  },
+  {
+    "iana": "Asia/Thimphu",
+    "deviceValue": "BTT-6",
+    "displayValue": "Asia/Thimphu"
+  },
+  {
+    "iana": "Asia/Tokyo",
+    "deviceValue": "JST-9",
+    "displayValue": "Asia/Tokyo"
+  },
+  {
+    "iana": "Asia/Ulaanbaatar",
+    "deviceValue": "ULAT-8ULAST,M3.5.6,M9.5.6/0",
+    "displayValue": "Asia/Ulaanbaatar"
+  },
+  {
+    "iana": "Asia/Urumqi",
+    "deviceValue": "XJT-6",
+    "displayValue": "Asia/Urumqi"
+  },
+  {
+    "iana": "Asia/Ust-Nera",
+    "deviceValue": "VLAT-10",
+    "displayValue": "Asia/Ust-Nera"
+  },
+  {
+    "iana": "Asia/Vientiane",
+    "deviceValue": "ICT-7",
+    "displayValue": "Asia/Vientiane"
+  },
+  {
+    "iana": "Asia/Vladivostok",
+    "deviceValue": "VLAT-10",
+    "displayValue": "Asia/Vladivostok"
+  },
+  {
+    "iana": "Asia/Yakutsk",
+    "deviceValue": "YAKT-9",
+    "displayValue": "Asia/Yakutsk"
+  },
+  {
+    "iana": "Asia/Yekaterinburg",
+    "deviceValue": "YEKT-5",
+    "displayValue": "Asia/Yekaterinburg"
+  },
+  {
+    "iana": "Asia/Yerevan",
+    "deviceValue": "AMT-4",
+    "displayValue": "Asia/Yerevan"
+  },
+  {
+    "iana": "Atlantic/Azores",
+    "deviceValue": "AZOT1AZOST,M3.5.0/0,M10.5.0/1",
+    "displayValue": "Atlantic/Azores"
+  },
+  {
+    "iana": "Atlantic/Bermuda",
+    "deviceValue": "AST4ADT,M3.2.0,M11.1.0",
+    "displayValue": "Atlantic/Bermuda"
+  },
+  {
+    "iana": "Atlantic/Canary",
+    "deviceValue": "WET0WEST,M3.5.0/1,M10.5.0",
+    "displayValue": "Atlantic/Canary"
+  },
+  {
+    "iana": "Atlantic/Cape_Verde",
+    "deviceValue": "CVT1",
+    "displayValue": "Atlantic/Cape_Verde"
+  },
+  {
+    "iana": "Atlantic/Faroe",
+    "deviceValue": "WET0WEST,M3.5.0/1,M10.5.0",
+    "displayValue": "Atlantic/Faroe"
+  },
+  {
+    "iana": "Atlantic/Madeira",
+    "deviceValue": "WET0WEST,M3.5.0/1,M10.5.0",
+    "displayValue": "Atlantic/Madeira"
+  },
+  {
+    "iana": "Atlantic/South_Georgia",
+    "deviceValue": "GST2",
+    "displayValue": "Atlantic/South_Georgia"
+  },
+  {
+    "iana": "Atlantic/Stanley",
+    "deviceValue": "FKST3",
+    "displayValue": "Atlantic/Stanley"
+  },
+  {
+    "iana": "Australia/Adelaide",
+    "deviceValue": "ACST-9:30ACDT,M10.1.0,M4.1.0/3",
+    "displayValue": "Australia/Adelaide"
+  },
+  {
+    "iana": "Australia/Brisbane",
+    "deviceValue": "AEST-10",
+    "displayValue": "Australia/Brisbane"
+  },
+  {
+    "iana": "Australia/Broken_Hill",
+    "deviceValue": "ACST-9:30ACDT,M10.1.0,M4.1.0/3",
+    "displayValue": "Australia/Broken_Hill"
+  },
+  {
+    "iana": "Australia/Currie",
+    "deviceValue": "AEST-10AEDT,M10.1.0,M4.1.0/3",
+    "displayValue": "Australia/Currie"
+  },
+  {
+    "iana": "Australia/Darwin",
+    "deviceValue": "ACST-9:30",
+    "displayValue": "Australia/Darwin"
+  },
+  {
+    "iana": "Australia/Eucla",
+    "deviceValue": "ACWST-8:45",
+    "displayValue": "Australia/Eucla"
+  },
+  {
+    "iana": "Australia/Hobart",
+    "deviceValue": "AEST-10AEDT,M10.1.0,M4.1.0/3",
+    "displayValue": "Australia/Hobart"
+  },
+  {
+    "iana": "Australia/Lindeman",
+    "deviceValue": "AEST-10",
+    "displayValue": "Australia/Lindeman"
+  },
+  {
+    "iana": "Australia/Lord_Howe",
+    "deviceValue": "LHST-10:30LHDT-11,M10.1.0,M4.1.0",
+    "displayValue": "Australia/Lord_Howe"
+  },
+  {
+    "iana": "Australia/Melbourne",
+    "deviceValue": "AEST-10AEDT,M10.1.0,M4.1.0/3",
+    "displayValue": "Australia/Melbourne"
+  },
+  {
+    "iana": "Australia/Perth",
+    "deviceValue": "AWST-8",
+    "displayValue": "Australia/Perth"
+  },
+  {
+    "iana": "Australia/Sydney",
+    "deviceValue": "AEST-10AEDT,M10.1.0,M4.1.0/3",
+    "displayValue": "Australia/Sydney"
+  },
+  {
+    "iana": "Europe/Amsterdam",
+    "deviceValue": "CET-1CEST,M3.5.0,M10.5.0/3",
+    "displayValue": "Europe/Amsterdam"
+  },
+  {
+    "iana": "Europe/Andorra",
+    "deviceValue": "CET-1CEST,M3.5.0,M10.5.0/3",
+    "displayValue": "Europe/Andorra"
+  },
+  {
+    "iana": "Europe/Athens",
+    "deviceValue": "EET-2EEST,M3.5.0/3,M10.5.0/4",
+    "displayValue": "Europe/Athens"
+  },
+  {
+    "iana": "Europe/Belgrade",
+    "deviceValue": "CET-1CEST,M3.5.0,M10.5.0/3",
+    "displayValue": "Europe/Belgrade"
+  },
+  {
+    "iana": "Europe/Berlin",
+    "deviceValue": "CET-1CEST,M3.5.0,M10.5.0/3",
+    "displayValue": "Europe/Berlin"
+  },
+  {
+    "iana": "Europe/Bratislava",
+    "deviceValue": "CET-1CEST,M3.5.0,M10.5.0/3",
+    "displayValue": "Europe/Bratislava"
+  },
+  {
+    "iana": "Europe/Brussels",
+    "deviceValue": "CET-1CEST,M3.5.0,M10.5.0/3",
+    "displayValue": "Europe/Brussels"
+  },
+  {
+    "iana": "Europe/Bucharest",
+    "deviceValue": "EET-2EEST,M3.5.0/3,M10.5.0/4",
+    "displayValue": "Europe/Bucharest"
+  },
+  {
+    "iana": "Europe/Budapest",
+    "deviceValue": "CET-1CEST,M3.5.0,M10.5.0/3",
+    "displayValue": "Europe/Budapest"
+  },
+  {
+    "iana": "Europe/Busingen",
+    "deviceValue": "CET-1CEST,M3.5.0,M10.5.0/3",
+    "displayValue": "Europe/Busingen"
+  },
+  {
+    "iana": "Europe/Chisinau",
+    "deviceValue": "EET-2EEST,M3.5.0,M10.5.0/3",
+    "displayValue": "Europe/Chisinau"
+  },
+  {
+    "iana": "Europe/Copenhagen",
+    "deviceValue": "CET-1CEST,M3.5.0,M10.5.0/3",
+    "displayValue": "Europe/Copenhagen"
+  },
+  {
+    "iana": "Europe/Dublin",
+    "deviceValue": "GMT0IST,M3.5.0/1,M10.5.0",
+    "displayValue": "Europe/Dublin"
+  },
+  {
+    "iana": "Europe/Gibraltar",
+    "deviceValue": "CET-1CEST,M3.5.0,M10.5.0/3",
+    "displayValue": "Europe/Gibraltar"
+  },
+  {
+    "iana": "Europe/Guernsey",
+    "deviceValue": "GMT0BST,M3.5.0/1,M10.5.0",
+    "displayValue": "Europe/Guernsey"
+  },
+  {
+    "iana": "Europe/Helsinki",
+    "deviceValue": "EET-2EEST,M3.5.0/3,M10.5.0/4",
+    "displayValue": "Europe/Helsinki"
+  },
+  {
+    "iana": "Europe/Isle_of_Man",
+    "deviceValue": "GMT0BST,M3.5.0/1,M10.5.0",
+    "displayValue": "Europe/Isle_of_Man"
+  },
+  {
+    "iana": "Europe/Istanbul",
+    "deviceValue": "EET-2EEST,M3.5.0/3,M10.5.0/4",
+    "displayValue": "Europe/Istanbul"
+  },
+  {
+    "iana": "Europe/Jersey",
+    "deviceValue": "GMT0BST,M3.5.0/1,M10.5.0",
+    "displayValue": "Europe/Jersey"
+  },
+  {
+    "iana": "Europe/Kaliningrad",
+    "deviceValue": "EET-2",
+    "displayValue": "Europe/Kaliningrad"
+  },
+  {
+    "iana": "Europe/Kiev",
+    "deviceValue": "EET-2EEST,M3.5.0/3,M10.5.0/4",
+    "displayValue": "Europe/Kiev"
+  },
+  {
+    "iana": "Europe/Lisbon",
+    "deviceValue": "WET0WEST,M3.5.0/1,M10.5.0",
+    "displayValue": "Europe/Lisbon"
+  },
+  {
+    "iana": "Europe/Ljubljana",
+    "deviceValue": "CET-1CEST,M3.5.0,M10.5.0/3",
+    "displayValue": "Europe/Ljubljana"
+  },
+  {
+    "iana": "Europe/London",
+    "deviceValue": "GMT0BST,M3.5.0/1,M10.5.0",
+    "displayValue": "Europe/London"
+  },
+  {
+    "iana": "Europe/Luxembourg",
+    "deviceValue": "CET-1CEST,M3.5.0,M10.5.0/3",
+    "displayValue": "Europe/Luxembourg"
+  },
+  {
+    "iana": "Europe/Madrid",
+    "deviceValue": "CET-1CEST,M3.5.0,M10.5.0/3",
+    "displayValue": "Europe/Madrid"
+  },
+  {
+    "iana": "Europe/Malta",
+    "deviceValue": "CET-1CEST,M3.5.0,M10.5.0/3",
+    "displayValue": "Europe/Malta"
+  },
+  {
+    "iana": "Europe/Mariehamn",
+    "deviceValue": "EET-2EEST,M3.5.0/3,M10.5.0/4",
+    "displayValue": "Europe/Mariehamn"
+  },
+  {
+    "iana": "Europe/Minsk",
+    "deviceValue": "MSK-3",
+    "displayValue": "Europe/Minsk"
+  },
+  {
+    "iana": "Europe/Monaco",
+    "deviceValue": "CET-1CEST,M3.5.0,M10.5.0/3",
+    "displayValue": "Europe/Monaco"
+  },
+  {
+    "iana": "Europe/Moscow",
+    "deviceValue": "MSK-3",
+    "displayValue": "Europe/Moscow"
+  },
+  {
+    "iana": "Europe/Oslo",
+    "deviceValue": "CET-1CEST,M3.5.0,M10.5.0/3",
+    "displayValue": "Europe/Oslo"
+  },
+  {
+    "iana": "Europe/Paris",
+    "deviceValue": "CET-1CEST,M3.5.0,M10.5.0/3",
+    "displayValue": "Europe/Paris"
+  },
+  {
+    "iana": "Europe/Podgorica",
+    "deviceValue": "CET-1CEST,M3.5.0,M10.5.0/3",
+    "displayValue": "Europe/Podgorica"
+  },
+  {
+    "iana": "Europe/Prague",
+    "deviceValue": "CET-1CEST,M3.5.0,M10.5.0/3",
+    "displayValue": "Europe/Prague"
+  },
+  {
+    "iana": "Europe/Riga",
+    "deviceValue": "EET-2EEST,M3.5.0/3,M10.5.0/4",
+    "displayValue": "Europe/Riga"
+  },
+  {
+    "iana": "Europe/Rome",
+    "deviceValue": "CET-1CEST,M3.5.0,M10.5.0/3",
+    "displayValue": "Europe/Rome"
+  },
+  {
+    "iana": "Europe/Samara",
+    "deviceValue": "SAMT-4",
+    "displayValue": "Europe/Samara"
+  },
+  {
+    "iana": "Europe/San_Marino",
+    "deviceValue": "CET-1CEST,M3.5.0,M10.5.0/3",
+    "displayValue": "Europe/San_Marino"
+  },
+  {
+    "iana": "Europe/Sarajevo",
+    "deviceValue": "CET-1CEST,M3.5.0,M10.5.0/3",
+    "displayValue": "Europe/Sarajevo"
+  },
+  {
+    "iana": "Europe/Simferopol",
+    "deviceValue": "MSK-3",
+    "displayValue": "Europe/Simferopol"
+  },
+  {
+    "iana": "Europe/Skopje",
+    "deviceValue": "CET-1CEST,M3.5.0,M10.5.0/3",
+    "displayValue": "Europe/Skopje"
+  },
+  {
+    "iana": "Europe/Sofia",
+    "deviceValue": "EET-2EEST,M3.5.0/3,M10.5.0/4",
+    "displayValue": "Europe/Sofia"
+  },
+  {
+    "iana": "Europe/Stockholm",
+    "deviceValue": "CET-1CEST,M3.5.0,M10.5.0/3",
+    "displayValue": "Europe/Stockholm"
+  },
+  {
+    "iana": "Europe/Tallinn",
+    "deviceValue": "EET-2EEST,M3.5.0/3,M10.5.0/4",
+    "displayValue": "Europe/Tallinn"
+  },
+  {
+    "iana": "Europe/Tirane",
+    "deviceValue": "CET-1CEST,M3.5.0,M10.5.0/3",
+    "displayValue": "Europe/Tirane"
+  },
+  {
+    "iana": "Europe/Uzhgorod",
+    "deviceValue": "EET-2EEST,M3.5.0/3,M10.5.0/4",
+    "displayValue": "Europe/Uzhgorod"
+  },
+  {
+    "iana": "Europe/Vaduz",
+    "deviceValue": "CET-1CEST,M3.5.0,M10.5.0/3",
+    "displayValue": "Europe/Vaduz"
+  },
+  {
+    "iana": "Europe/Vatican",
+    "deviceValue": "CET-1CEST,M3.5.0,M10.5.0/3",
+    "displayValue": "Europe/Vatican"
+  },
+  {
+    "iana": "Europe/Vienna",
+    "deviceValue": "CET-1CEST,M3.5.0,M10.5.0/3",
+    "displayValue": "Europe/Vienna"
+  },
+  {
+    "iana": "Europe/Vilnius",
+    "deviceValue": "EET-2EEST,M3.5.0/3,M10.5.0/4",
+    "displayValue": "Europe/Vilnius"
+  },
+  {
+    "iana": "Europe/Volgograd",
+    "deviceValue": "MSK-3",
+    "displayValue": "Europe/Volgograd"
+  },
+  {
+    "iana": "Europe/Warsaw",
+    "deviceValue": "CET-1CEST,M3.5.0,M10.5.0/3",
+    "displayValue": "Europe/Warsaw"
+  },
+  {
+    "iana": "Europe/Zagreb",
+    "deviceValue": "CET-1CEST,M3.5.0,M10.5.0/3",
+    "displayValue": "Europe/Zagreb"
+  },
+  {
+    "iana": "Europe/Zaporozhye",
+    "deviceValue": "EET-2EEST,M3.5.0/3,M10.5.0/4",
+    "displayValue": "Europe/Zaporozhye"
+  },
+  {
+    "iana": "Europe/Zurich",
+    "deviceValue": "CET-1CEST,M3.5.0,M10.5.0/3",
+    "displayValue": "Europe/Zurich"
+  },
+  {
+    "iana": "Indian/Antananarivo",
+    "deviceValue": "EAT-3",
+    "displayValue": "Indian/Antananarivo"
+  },
+  {
+    "iana": "Indian/Chagos",
+    "deviceValue": "IOT-6",
+    "displayValue": "Indian/Chagos"
+  },
+  {
+    "iana": "Indian/Christmas",
+    "deviceValue": "CXT-7",
+    "displayValue": "Indian/Christmas"
+  },
+  {
+    "iana": "Indian/Cocos",
+    "deviceValue": "CCT-6:30",
+    "displayValue": "Indian/Cocos"
+  },
+  {
+    "iana": "Indian/Comoro",
+    "deviceValue": "EAT-3",
+    "displayValue": "Indian/Comoro"
+  },
+  {
+    "iana": "Indian/Kerguelen",
+    "deviceValue": "TFT-5",
+    "displayValue": "Indian/Kerguelen"
+  },
+  {
+    "iana": "Indian/Mahe",
+    "deviceValue": "SCT-4",
+    "displayValue": "Indian/Mahe"
+  },
+  {
+    "iana": "Indian/Maldives",
+    "deviceValue": "MVT-5",
+    "displayValue": "Indian/Maldives"
+  },
+  {
+    "iana": "Indian/Mauritius",
+    "deviceValue": "MUT-4",
+    "displayValue": "Indian/Mauritius"
+  },
+  {
+    "iana": "Indian/Mayotte",
+    "deviceValue": "EAT-3",
+    "displayValue": "Indian/Mayotte"
+  },
+  {
+    "iana": "Indian/Reunion",
+    "deviceValue": "RET-4",
+    "displayValue": "Indian/Reunion"
+  },
+  {
+    "iana": "Pacific/Apia",
+    "deviceValue": "WSST-13WSDT,M9.5.0/3,M4.1.0/4",
+    "displayValue": "Pacific/Apia"
+  },
+  {
+    "iana": "Pacific/Auckland",
+    "deviceValue": "NZST-12NZDT,M9.5.0,M4.1.0/3",
+    "displayValue": "Pacific/Auckland"
+  },
+  {
+    "iana": "Pacific/Bougainville",
+    "deviceValue": "BST-11",
+    "displayValue": "Pacific/Bougainville"
+  },
+  {
+    "iana": "Pacific/Chatham",
+    "deviceValue": "CHAST-12:45CHADT,M9.5.0/2:45,M4.1.0/3:45",
+    "displayValue": "Pacific/Chatham"
+  },
+  {
+    "iana": "Pacific/Chuuk",
+    "deviceValue": "CHUT-10",
+    "displayValue": "Pacific/Chuuk"
+  },
+  {
+    "iana": "Pacific/Easter",
+    "deviceValue": "EAST5",
+    "displayValue": "Pacific/Easter"
+  },
+  {
+    "iana": "Pacific/Efate",
+    "deviceValue": "VUT-11",
+    "displayValue": "Pacific/Efate"
+  },
+  {
+    "iana": "Pacific/Enderbury",
+    "deviceValue": "PHOT-13",
+    "displayValue": "Pacific/Enderbury"
+  },
+  {
+    "iana": "Pacific/Fakaofo",
+    "deviceValue": "TKT-13",
+    "displayValue": "Pacific/Fakaofo"
+  },
+  {
+    "iana": "Pacific/Fiji",
+    "deviceValue": "FJT-12FJST,M11.1.0,M1.3.4/75",
+    "displayValue": "Pacific/Fiji"
+  },
+  {
+    "iana": "Pacific/Funafuti",
+    "deviceValue": "TVT-12",
+    "displayValue": "Pacific/Funafuti"
+  },
+  {
+    "iana": "Pacific/Galapagos",
+    "deviceValue": "GALT6",
+    "displayValue": "Pacific/Galapagos"
+  },
+  {
+    "iana": "Pacific/Gambier",
+    "deviceValue": "GAMT9",
+    "displayValue": "Pacific/Gambier"
+  },
+  {
+    "iana": "Pacific/Guadalcanal",
+    "deviceValue": "SBT-11",
+    "displayValue": "Pacific/Guadalcanal"
+  },
+  {
+    "iana": "Pacific/Guam",
+    "deviceValue": "ChST-10",
+    "displayValue": "Pacific/Guam"
+  },
+  {
+    "iana": "Pacific/Honolulu",
+    "deviceValue": "HST10",
+    "displayValue": "Pacific/Honolulu"
+  },
+  {
+    "iana": "Pacific/Johnston",
+    "deviceValue": "HST10",
+    "displayValue": "Pacific/Johnston"
+  },
+  {
+    "iana": "Pacific/Kiritimati",
+    "deviceValue": "LINT-14",
+    "displayValue": "Pacific/Kiritimati"
+  },
+  {
+    "iana": "Pacific/Kosrae",
+    "deviceValue": "KOST-11",
+    "displayValue": "Pacific/Kosrae"
+  },
+  {
+    "iana": "Pacific/Kwajalein",
+    "deviceValue": "MHT-12",
+    "displayValue": "Pacific/Kwajalein"
+  },
+  {
+    "iana": "Pacific/Majuro",
+    "deviceValue": "MHT-12",
+    "displayValue": "Pacific/Majuro"
+  },
+  {
+    "iana": "Pacific/Marquesas",
+    "deviceValue": "MART9:30",
+    "displayValue": "Pacific/Marquesas"
+  },
+  {
+    "iana": "Pacific/Midway",
+    "deviceValue": "SST11",
+    "displayValue": "Pacific/Midway"
+  },
+  {
+    "iana": "Pacific/Nauru",
+    "deviceValue": "NRT-12",
+    "displayValue": "Pacific/Nauru"
+  },
+  {
+    "iana": "Pacific/Niue",
+    "deviceValue": "NUT11",
+    "displayValue": "Pacific/Niue"
+  },
+  {
+    "iana": "Pacific/Norfolk",
+    "deviceValue": "NFT-11:30",
+    "displayValue": "Pacific/Norfolk"
+  },
+  {
+    "iana": "Pacific/Noumea",
+    "deviceValue": "NCT-11",
+    "displayValue": "Pacific/Noumea"
+  },
+  {
+    "iana": "Pacific/Pago_Pago",
+    "deviceValue": "SST11",
+    "displayValue": "Pacific/Pago_Pago"
+  },
+  {
+    "iana": "Pacific/Palau",
+    "deviceValue": "PWT-9",
+    "displayValue": "Pacific/Palau"
+  },
+  {
+    "iana": "Pacific/Pitcairn",
+    "deviceValue": "PST8",
+    "displayValue": "Pacific/Pitcairn"
+  },
+  {
+    "iana": "Pacific/Pohnpei",
+    "deviceValue": "PONT-11",
+    "displayValue": "Pacific/Pohnpei"
+  },
+  {
+    "iana": "Pacific/Port_Moresby",
+    "deviceValue": "PGT-10",
+    "displayValue": "Pacific/Port_Moresby"
+  },
+  {
+    "iana": "Pacific/Rarotonga",
+    "deviceValue": "CKT10",
+    "displayValue": "Pacific/Rarotonga"
+  },
+  {
+    "iana": "Pacific/Saipan",
+    "deviceValue": "ChST-10",
+    "displayValue": "Pacific/Saipan"
+  },
+  {
+    "iana": "Pacific/Tahiti",
+    "deviceValue": "TAHT10",
+    "displayValue": "Pacific/Tahiti"
+  },
+  {
+    "iana": "Pacific/Tarawa",
+    "deviceValue": "GILT-12",
+    "displayValue": "Pacific/Tarawa"
+  },
+  {
+    "iana": "Pacific/Tongatapu",
+    "deviceValue": "TOT-13",
+    "displayValue": "Pacific/Tongatapu"
+  },
+  {
+    "iana": "Pacific/Wake",
+    "deviceValue": "WAKT-12",
+    "displayValue": "Pacific/Wake"
+  },
+  {
+    "iana": "Pacific/Wallis",
+    "deviceValue": "WFT-12",
+    "displayValue": "Pacific/Wallis"
+  }
+]

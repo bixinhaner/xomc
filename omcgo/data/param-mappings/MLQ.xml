@@ -165,9 +165,18 @@
         <param name="Device.HaltReason.MainReason" standardPath="Device.HaltReason.MainReason" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param name="Device.IP.Interface.{i}.IPv4Address.{i}.IPAddress" standardPath="Device.IP.Interface.{i}.IPv4Address.{i}.IPAddress" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <param name="Device.ManagementServer.ConnectionRequestURL" standardPath="Device.ManagementServer.ConnectionRequestURL" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="256"/>
+        <param name="Device.ManagementServer.NATDetected" standardPath="Device.ManagementServer.NATDetected" access="READ_ONLY" type="BOOLEAN" changeApplies="Immediate"/>
         <param name="Device.ManagementServer.ParameterKey" standardPath="Device.ManagementServer.ParameterKey" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="1" max="32"/>
         <param name="Device.ManagementServer.PeriodicInformEnable" standardPath="Device.ManagementServer.PeriodicInformEnable" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate"/>
         <param name="Device.ManagementServer.PeriodicInformInterval" standardPath="Device.ManagementServer.PeriodicInformInterval" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param name="Device.ManagementServer.STUNEnable" standardPath="Device.ManagementServer.STUNEnable" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate"/>
+        <param name="Device.ManagementServer.STUNMaximumKeepAlivePeriod" standardPath="Device.ManagementServer.STUNMaximumKeepAlivePeriod" access="READ_WRITE" type="INT" changeApplies="Immediate"/>
+        <param name="Device.ManagementServer.STUNMinimumKeepAlivePeriod" standardPath="Device.ManagementServer.STUNMinimumKeepAlivePeriod" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param name="Device.ManagementServer.STUNPassword" standardPath="Device.ManagementServer.STUNPassword" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.ManagementServer.STUNServerAddress" standardPath="Device.ManagementServer.STUNServerAddress" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.ManagementServer.STUNServerPort" standardPath="Device.ManagementServer.STUNServerPort" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param name="Device.ManagementServer.STUNUsername" standardPath="Device.ManagementServer.STUNUsername" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.ManagementServer.UDPConnectionRequestAddress" standardPath="Device.ManagementServer.UDPConnectionRequestAddress" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <param name="Device.ManagementServer.URL" standardPath="Device.ManagementServer.URL" access="READ_ONLY" type="STRING" changeApplies="OnReboot" max="120"/>
         <param name="Device.ManagementServer.X_COM_ssl_enable" standardPath="Device.Https.HttpsEnable" access="READ_ONLY" type="BOOLEAN" changeApplies="Immediate" enumValues="true,false" enumLabels="true,false"/>
         <param name="Device.ManagementServer.sslStatus.endDate" standardPath="Device.ManagementServer.sslStatus.endDate" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
