@@ -775,8 +775,9 @@ ALTER TABLE public.api_endpoints ENABLE TRIGGER ALL;
 
 ALTER TABLE public.users DISABLE TRIGGER ALL;
 
+-- admin 默认密码: admin123
 INSERT INTO public.users VALUES
-	('20000000-0000-0000-0000-000000000001', 'admin', '$2a$10$5feKmwxvoxEyqIo5DaYQNuNcPFWZnRdNytomGLrXDnv0e5MgnEJT6', 'System Admin', NULL, 'active', '2026-05-31 12:19:27.546454+08', 0, NULL, NULL, '2026-05-31 11:28:45.998778+08', '2026-05-31 12:19:27.546688+08', NULL, 'builtIn', NULL, NULL, NULL, NULL, false, NULL),
+	('20000000-0000-0000-0000-000000000001', 'admin', '$2a$10$KxHw25lKPU24F.B/5KBYkurxRGey.E2oUpiZkW2wTt6lGoUbyyxWy', 'System Admin', NULL, 'active', '2026-05-31 12:19:27.546454+08', 0, NULL, NULL, '2026-05-31 11:28:45.998778+08', '2026-05-31 12:19:27.546688+08', NULL, 'builtIn', NULL, NULL, NULL, NULL, false, NULL),
 	('00000000-0000-0000-0000-000000000001', 'system', '!disabled-no-password-login!', 'OMC System Internal', 'system@omcgo.internal', 'active', NULL, 0, NULL, NULL, '2026-05-31 11:28:49.175405+08', '2026-06-12 18:16:52.397973+08', NULL, 'admin', NULL, NULL, NULL, NULL, false, NULL) ON CONFLICT DO NOTHING;
 
 

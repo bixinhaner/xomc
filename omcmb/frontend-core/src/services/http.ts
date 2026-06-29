@@ -45,15 +45,40 @@ function transformParams(
 // --- Token refresh queue ---
 
 let isRefreshing = false;
-let refreshSubscribers: Array<(token: string) => void> = [];
+let refreshSubscribers: Array<{
+  resolve: (token: string) => void;
+  reject: (error: Error) => void;
+}> = [];
 
 function onTokenRefreshed(token: string) {
-  refreshSubscribers.forEach((cb) => cb(token));
+  refreshSubscribers.forEach((sub) => sub.resolve(token));
   refreshSubscribers = [];
 }
 
-function addRefreshSubscriber(cb: (token: string) => void) {
-  refreshSubscribers.push(cb);
+/** refresh 失败时 reject 所有排队请求，避免它们永远 pending */
+function onTokenRefreshFailed(error: Error) {
+  refreshSubscribers.forEach((sub) => sub.reject(error));
+  refreshSubscribers = [];
+}
+
+function addRefreshSubscriber(
+  resolve: (token: string) => void,
+  reject: (error: Error) => void
+) {
+  refreshSubscribers.push({ resolve, reject });
+}
+
+/**
+ * 安全地清除 auth 状态并跳转登录页。
+ * 即使 clearAuth 内部抛错（如 zustand store 未初始化），也确保跳转执行。
+ */
+function forceLogoutAndRedirect() {
+  try {
+    useUserStore.getState().clearAuth();
+  } catch (e) {
+    console.error('[HTTP] clearAuth failed, forcing redirect anyway:', e);
+  }
+  window.location.href = loginUrl();
 }
 
 // --- Axios instance ---
@@ -160,24 +185,26 @@ http.interceptors.response.use(
       if (reqURL.endsWith('/auth/login') || reqURL.includes('/auth/login?')) {
         // fall through to message extraction below — 不走 token refresh / 不跳转
       } else {
-      const { refreshToken, clearAuth } = useUserStore.getState();
+      const { refreshToken } = useUserStore.getState();
 
       // No refresh token or this was already a refresh attempt → logout
       if (!refreshToken || (originalRequest as unknown as Record<string, unknown>)._isRetry) {
-        clearAuth();
-        window.location.href = loginUrl();
+        forceLogoutAndRedirect();
         return Promise.reject(error);
       }
 
       if (isRefreshing) {
         // Queue this request until the refresh completes
-        return new Promise<AxiosResponse>((resolve) => {
-          addRefreshSubscriber((newToken: string) => {
-            if (originalRequest.headers) {
-              originalRequest.headers.Authorization = `Bearer ${newToken}`;
-            }
-            resolve(http(originalRequest));
-          });
+        return new Promise<AxiosResponse>((resolve, reject) => {
+          addRefreshSubscriber(
+            (newToken: string) => {
+              if (originalRequest.headers) {
+                originalRequest.headers.Authorization = `Bearer ${newToken}`;
+              }
+              resolve(http(originalRequest));
+            },
+            (err: Error) => reject(err)
+          );
         });
       }
 
@@ -214,9 +241,14 @@ http.interceptors.response.use(
           originalRequest.headers.Authorization = `Bearer ${tokenPair.access_token}`;
         }
         return http(originalRequest);
-      } catch {
-        clearAuth();
-        window.location.href = loginUrl();
+      } catch (refreshError) {
+        // 通知所有排队的请求 refresh 失败
+        onTokenRefreshFailed(
+          refreshError instanceof Error
+            ? refreshError
+            : new Error('Token refresh failed')
+        );
+        forceLogoutAndRedirect();
         return Promise.reject(error);
       } finally {
         isRefreshing = false;

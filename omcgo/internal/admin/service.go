@@ -366,6 +366,18 @@ func (s *AdminService) RefreshToken(ctx context.Context, refreshToken string) (*
 		return nil, commonerrors.ErrUnauthorized
 	}
 
+	// 检查用户级撤销（单点登录踢出）—— refresh token 也需要被撤销机制覆盖，
+	// 否则旧设备可以通过 refresh 绕过单点登录限制（issue #698 根因）
+	if s.revoker != nil {
+		revoked, err := s.revoker.IsRevoked(ctx, claims.UserID, claims.IssuedAt)
+		if err != nil {
+			s.logger.Warn("check token revocation failed", zap.Error(err))
+			// fail-open: 不阻塞 refresh，但记录错误
+		} else if revoked {
+			return nil, commonerrors.ErrUnauthorized
+		}
+	}
+
 	// Verify user still exists and is active
 	user, err := s.userRepo.GetByID(ctx, claims.UserID)
 	if err != nil {
