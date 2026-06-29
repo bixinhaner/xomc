@@ -39,7 +39,7 @@ export interface UseDeviceSearchOptions {
  * ```
  */
 export function useDeviceSearch(
-  searchFn: (keyword: string) => Promise<DeviceSearchResult[]>,
+  searchFn: (keyword: string, signal?: AbortSignal) => Promise<DeviceSearchResult[]>,
   options: UseDeviceSearchOptions = {}
 ) {
   const {
@@ -101,8 +101,9 @@ export function useDeviceSearch(
   // 搜索请求
   const { data: results, isLoading } = useQuery({
     queryKey: ['device-search', debouncedKeyword],
-    queryFn: () => searchFn(debouncedKeyword),
+    queryFn: ({ signal }) => searchFn(debouncedKeyword, signal),
     enabled: debouncedKeyword.length >= minLength,
+    staleTime: 30 * 1000,
   });
 
   // 清空搜索
