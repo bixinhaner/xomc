@@ -38,9 +38,11 @@ func isCPEClass(productClass string) bool {
 		strings.Contains(pc, "indoor")
 }
 
-// 默认阈值（与 seed 迁移种子值一致：基站 100s、CPE 600s）。
+// 默认阈值（BUG-05 修复：基站从 100s 调整为 600s，与 CPE 一致。
+// 原 100s 阈值与 3GPP TS 32.583 推荐的 inform_interval 1800s 严重不匹配。
+// CMCC 规范也是 5-30 分钟级别，100s 会导致频繁虚假离线告警。
 const (
-	defaultENBOfflineSec = 100
+	defaultENBOfflineSec = 600
 	defaultCPEOfflineSec = 600
 )
 
