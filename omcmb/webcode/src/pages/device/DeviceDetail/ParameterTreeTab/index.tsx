@@ -74,6 +74,7 @@ export default function ParameterTreeTab({ deviceId, lastScopedSync, syncBusy: e
   const childrenQuery = useDirectChildren(deviceId, selectedPath, page, pageSize);
   const { data: syncStatus, refetch: refetchSyncStatus } = useSyncStatus(deviceId);
   const isSyncing = syncStatus?.status === 'syncing';
+  const effectiveLastParamSyncAt = syncStatus?.lastParamSyncAt ?? syncStatus?.lastSyncGpv?.lastCompletedAt;
 
   // Mutations
   // T-0126: 切换到 useSyncDeviceParams（Path B + reason="manual"），替代旧 useSyncParameters (Path A)
@@ -81,7 +82,7 @@ export default function ParameterTreeTab({ deviceId, lastScopedSync, syncBusy: e
   const syncBusy = externalSyncBusy || isSyncing || syncMutation.isPending;
   const syncControlLoading = syncMutation.isPending;
   const isLastScopedSync = Boolean(
-    lastScopedSync?.targetCount && lastScopedSync.completedAt === syncStatus?.lastParamSyncAt,
+    lastScopedSync?.targetCount && lastScopedSync.completedAt === effectiveLastParamSyncAt,
   );
   const addObjectMutation = useAddObject();
   const deleteObjectMutation = useDeleteObject();
@@ -179,16 +180,16 @@ export default function ParameterTreeTab({ deviceId, lastScopedSync, syncBusy: e
                   ? t('device.paramTree.syncPending', { count: syncStatus.pendingCommands })
                   : ''}
               </Typography.Text>
-            ) : syncStatus.lastParamSyncAt ? (
+            ) : effectiveLastParamSyncAt ? (
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                 {isLastScopedSync
                   ? t('device.paramTree.lastScopedSync', {
-                    time: dayjs(syncStatus.lastParamSyncAt).fromNow(),
+                    time: dayjs(effectiveLastParamSyncAt).fromNow(),
                     count: lastScopedSync?.targetCount ?? 0,
                     gpvCount: lastScopedSync?.gpvTaskCount ?? 0,
                     duration: formatDuration(lastScopedSync?.wallClockSeconds) ?? '-',
                   })
-                  : t('device.paramTree.lastSync', { time: dayjs(syncStatus.lastParamSyncAt).fromNow() })}
+                  : t('device.paramTree.lastSync', { time: dayjs(effectiveLastParamSyncAt).fromNow() })}
                 {!isLastScopedSync && syncStatus.lastSyncGpv?.taskCount
                   ? t('device.paramTree.lastSyncGpvSummary', {
                     count: syncStatus.lastSyncGpv.taskCount,

@@ -576,7 +576,7 @@ func (s *InfoSyncer) SyncFromParameters(ctx context.Context, deviceID uuid.UUID,
 			fields[infoColumn] = val
 		}
 	}
-	if tech == model.TechNR {
+	if _, exists := fields["mac"]; !exists {
 		if mac, ok := lookupWANMAC(paramValues); ok {
 			fields["mac"] = mac
 		}

@@ -130,6 +130,7 @@ interface MultiInstanceTableProps {
   group: QuickSettingsGroup;
   instanceContext: QuickSettingsInstanceContext;
   locale: 'zh-CN' | 'en-US';
+  ipsecControlValue?: string;
 }
 
 interface RowEditState {
@@ -691,7 +692,7 @@ function PackedScalarNeighborTable({
  *  6. 删除：DeleteObject
  *  7. 失败标红保留输入值，"重试"按钮原值重发
  */
-export default function MultiInstanceTable({ deviceId, active = true, group, instanceContext, locale }: MultiInstanceTableProps) {
+export default function MultiInstanceTable({ deviceId, active = true, group, instanceContext, locale, ipsecControlValue }: MultiInstanceTableProps) {
   const t = useT();
   const feedbackScope = useMemo(() => getFeedbackScopeContext(group.id, instanceContext), [group.id, instanceContext]);
   const isIpsecGroup = IPSEC_GROUP_IDS.has(group.id);
@@ -710,12 +711,15 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
   const ipsecControlDraft = useQuickSettingsFeedbackStore((s) => s.drafts[ipsecControlDraftKey]?.IPSEC_ENABLE);
   const ipsecGlobalEnabled = useMemo(() => {
     if (!isIpsecGroup) return true;
+    if (ipsecControlValue !== undefined) {
+      return isEnabledValue(ipsecControlValue);
+    }
     if (ipsecControlDraft !== undefined) {
       return isEnabledValue(ipsecControlDraft);
     }
     const currentValue = ipsecGlobalParams?.find((item) => item.parameterPath === ipsecGlobalEnablePath)?.parameterValue;
     return isEnabledValue(currentValue);
-  }, [isIpsecGroup, ipsecControlDraft, ipsecGlobalEnablePath, ipsecGlobalParams]);
+  }, [isIpsecGroup, ipsecControlDraft, ipsecControlValue, ipsecGlobalEnablePath, ipsecGlobalParams]);
   // BSC 邻区兼容：部分 GSM 设备不按 TR-181 子对象上报，而是把整张邻区列表打包到 BTS 父对象单标量。
   // 这种 group 不存在 currentInstances，常规多实例渲染会出现「暂无数据」。改走打包标量解析路径。
   const packedSpec = PACKED_NEIGHBOR_TABLE_BY_GROUP_ID[group.id];

@@ -100,6 +100,13 @@ func (s *SyncService) maybeExpandSinglePrefix(
 	if !strings.HasSuffix(p, ".") {
 		return []string{p}
 	}
+	// 当前仅保留 BTS 类大对象的实例级展开保护。其它对象（如 Ethernet.Interface）
+	// 优先整对象 GPV：让 CPE 直接返回真实实例集合，避免冷启动 hintFloor=256 导致
+	// 1..256 的坏路径盲扫风暴。BTS 仍保留展开,因为其整对象响应已被真机验证会打爆
+	// NATS max_payload。
+	if !shouldExpandByInstance(p) {
+		return []string{p}
+	}
 	mappingFields := countStorableFieldsUnderPrefix(mappings, p)
 	hint := s.estimateMaxInstance(ctx, deviceID, p)
 
@@ -143,6 +150,15 @@ func (s *SyncService) maybeExpandSinglePrefix(
 		)
 	}
 	return expanded
+}
+
+func shouldExpandByInstance(prefix string) bool {
+	switch prefix {
+	case "DeviceGSM.Bts.":
+		return true
+	default:
+		return false
+	}
 }
 
 // estimateMaxInstance 估算某 object prefix 下 instance 展开数 hint。
