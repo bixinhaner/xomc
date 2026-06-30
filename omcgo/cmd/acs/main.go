@@ -174,6 +174,23 @@ func runACS(cmd *cobra.Command, args []string) error {
 	// 但这里独立组装是为了让 ACS HTTP server（非 metrics 端口）也能直接探测。
 	deps.ReadinessCheckers = buildACSReadinessCheckers(inf)
 	deps.PathTranslator = pathTranslator
+
+	// #746: 心跳周期自动调整策略 — BOOTSTRAP/BOOT 时 GPV 查询当前值，与配置目标比较后 SPV 调整。
+	// 依赖 sys_configs(device.enbInformPeriodAdjustEnable/enbInformPeriod/cpeInformPeriodAdjustEnable/cpeInformPeriod)。
+	// PgPool 为 nil 时 lookup 返回 (_, false) → 策略 LoadConfig 全取默认值（关闭）。
+	if inf.PgPool != nil {
+		informPeriodSysCfg := admin.NewPgSysConfigRepository(inf.PgPool)
+		informPeriodLookup := func(ctx context.Context, category, key string) (string, bool) {
+			row, lookupErr := informPeriodSysCfg.GetByKey(ctx, category, key)
+			if lookupErr != nil || row == nil {
+				return "", false
+			}
+			return row.Value, true
+		}
+		deps.InformPeriodPolicy = acs.NewInformPeriodPolicy(informPeriodLookup, taskService, inf.Logger.Named("inform-period"))
+		inf.Logger.Info("inform period auto-adjustment enabled (#746)")
+	}
+
 	transferPolicy := transfercfg.NewPolicy(
 		transfercfg.DefaultsFromACSConfig(cfg),
 		newTransferSysConfigLookup(admin.NewPgSysConfigRepository(inf.PgPool)),

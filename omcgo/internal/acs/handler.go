@@ -109,6 +109,9 @@ type Handler struct {
 	// 实例都能读到设备上一个 sessionID 并清理。nil 时退化为不做跨实例孤儿检测（单实例
 	// 仍由 SessionStore TTL + 准入槽位 TTL 兜底，不泄漏）。
 	deviceSessionStore DeviceSessionStore
+	// #746: 心跳周期自动调整策略。设备 BOOTSTRAP/BOOT 时入队 GPV 查询当前心跳周期，
+	// 与配置目标值比较后决定是否入队 SPV 调整。nil 时功能关闭（不影响 Inform 处理）。
+	informPeriodPolicy *InformPeriodPolicy
 }
 
 // sessionRPCLimitReached 判断会话是否已达到单会话 RPC 上限。
@@ -566,6 +569,16 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 	// 发布事件
 	h.publishInformEvents(r.Context(), inform, eventCodes, log)
 
+	// #746: 心跳周期自动调整 — BOOTSTRAP/BOOT 事件时入队 GPV 查询当前心跳周期。
+	// GPV 响应后由 handleRPCResponse 中的 processInformPeriodGPV 比较并决定是否 SPV。
+	if h.informPeriodPolicy.ShouldTrigger(eventCodes) {
+		if err := h.informPeriodPolicy.EnqueueGPVTask(r.Context(), deviceSN, inform.DeviceId.ProductClass); err != nil {
+			log.Warn("enqueue inform period GPV task failed (non-blocking)",
+				zap.String("device_sn", deviceSN),
+				zap.Error(err))
+		}
+	}
+
 	// 重置连续唤醒计数器 —— 设备已连接，允许新的唤醒周期。
 	h.resetContinuousWake(r.Context(), deviceSN)
 
@@ -876,6 +889,10 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 			// 入队 GPV,由已有 handleGPVResponse 写库。
 			if method == soap.MethodAddObjectResp {
 				h.queueAutoGPVAfterAddObject(r.Context(), taskItem, body, log)
+			}
+			// #746: 心跳周期 GPV 响应处理 — 比较当前值与配置目标值，不一致则入队 SPV。
+			if method == soap.MethodGetParameterValuesResp {
+				h.processInformPeriodGPV(r.Context(), taskItem, body, log)
 			}
 		}
 	}
@@ -1940,6 +1957,61 @@ func (h *Handler) queueAutoGPVAfterAddObject(ctx context.Context, addObjTask *ta
 		zap.String("add_obj_task_id", addObjTask.ID),
 		zap.String("gpv_task_id", gpvTask.ID),
 		zap.String("new_instance_path", newInstancePath))
+}
+
+// processInformPeriodGPV 处理心跳周期 GPV 响应。
+//
+// #746: 识别心跳周期 GPV 任务（通过 Description 标识），解析响应中的 PeriodicInformInterval，
+// 与配置目标值比较，不一致则入队 SPV 调整。
+func (h *Handler) processInformPeriodGPV(ctx context.Context, gpvTask *task.Task, body []byte, log *zap.Logger) {
+	if h.informPeriodPolicy == nil || !h.informPeriodPolicy.Enabled() {
+		return
+	}
+	if gpvTask == nil {
+		return
+	}
+
+	// 检查是否是心跳周期 GPV 任务
+	if !IsInformPeriodGPVTask(gpvTask.Description) {
+		return
+	}
+
+	// 从 Description 中提取 productClass
+	productClass := ExtractProductClassFromDescription(gpvTask.Description)
+	if productClass == "" {
+		log.Warn("inform period GPV: cannot extract product class from description",
+			zap.String("task_id", gpvTask.ID),
+			zap.String("description", gpvTask.Description))
+		return
+	}
+
+	// 解析 GPV 响应
+	pvs, _, err := soap.DecodeGetParameterValuesResponse(bytes.NewReader(body))
+	if err != nil {
+		log.Warn("inform period GPV: decode response failed",
+			zap.String("task_id", gpvTask.ID),
+			zap.Error(err))
+		return
+	}
+	if len(pvs) == 0 {
+		log.Debug("inform period GPV: empty response",
+			zap.String("task_id", gpvTask.ID))
+		return
+	}
+
+	// 转换为 ParameterValue 类型
+	paramValues := make([]ParameterValue, len(pvs))
+	for i, pv := range pvs {
+		paramValues[i] = ParameterValue{Name: pv.Name, Value: pv.Value}
+	}
+
+	// 调用策略处理响应
+	enqueuedSPV := h.informPeriodPolicy.ProcessGPVResponse(ctx, gpvTask.DeviceSN, productClass, paramValues)
+	if enqueuedSPV {
+		log.Info("inform period GPV processed: SPV enqueued to adjust",
+			zap.String("device_sn", gpvTask.DeviceSN),
+			zap.String("product_class", productClass))
+	}
 }
 
 func (h *Handler) sendInformResponse(w http.ResponseWriter, cwmpID string, log *zap.Logger) {

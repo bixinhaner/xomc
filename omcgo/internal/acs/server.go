@@ -73,7 +73,9 @@ type ServerDeps struct {
 	// PathTranslator: ACS 端 standardPath → privatePath 翻译服务。
 	// 任一底层依赖（ProductRegistry / ParamRegistry / DeviceRepo）未配置时 → nil-safe
 	// 退化为透传（task.Params 原样下发，等价于改造前行为）。
-	PathTranslator          *PathTranslationService
+	PathTranslator *PathTranslationService
+	// #746: 心跳周期自动调整策略。nil 时功能关闭（不影响 Inform 处理）。
+	InformPeriodPolicy      *InformPeriodPolicy
 	Logger                  *zap.Logger
 	RequestIDPrefix         string // prefix for request IDs, e.g., "acs"
 	EnableTestTaskInjection bool   // enable random test task injection (for testing only)
@@ -113,6 +115,7 @@ func NewACSServer(cfg appconfig.ACSConfig, deps ServerDeps) *ACSServer {
 		traceWhitelist:          deps.TraceWhitelist,
 		traceService:            deps.TraceService,
 		pathTranslator:          deps.PathTranslator,
+		informPeriodPolicy:      deps.InformPeriodPolicy,
 	}
 
 	mux := http.NewServeMux()
