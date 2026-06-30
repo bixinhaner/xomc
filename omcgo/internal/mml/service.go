@@ -685,28 +685,35 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 		commands = []map[string]interface{}{}
 	}
 
-	// If a script_id is provided, resolve its content into commands
+	// If a script_id is provided, save it in the task and optionally parse content.
+	// BUG-06 fix (#706)：前端在脚本「执行」Drawer 中同时发送 script_id 和
+	// 前端本地解析好的 commands 数组时，只需保存 script_id 引用即可，
+	// 不应再次解析脚本内容（否则会产生重复命令）。
+	// 当 commands 为空时（仅传 script_id 无 commands），才从库读取脚本内容展开。
 	var scriptID *uuid.UUID
 	if req.ScriptID != nil && *req.ScriptID != "" {
 		sid, err := uuid.Parse(*req.ScriptID)
 		if err != nil {
 			return nil, fmt.Errorf("parse script_id %q: %w", *req.ScriptID, err)
 		}
-		script, err := s.scriptRepo.GetByID(ctx, sid)
-		if err != nil {
-			return nil, fmt.Errorf("resolve script %s: %w", sid, err)
-		}
 		scriptID = &sid
-		// Parse script content into command entries (one command per line)
-		for _, line := range splitScriptLines(script.Content) {
-			if line == "" {
-				continue
+		// 只在调用方未提供 commands 时，才从库解析脚本内容（向后兼容 /mml/execute 直传 script_id）
+		if len(commands) == 0 {
+			script, err := s.scriptRepo.GetByID(ctx, sid)
+			if err != nil {
+				return nil, fmt.Errorf("resolve script %s: %w", sid, err)
 			}
-			commands = append(commands, map[string]interface{}{
-				"command_code": line,
-				"source":       "script",
-				"script_name":  script.ScriptName,
-			})
+			// Parse script content into command entries (one command per line)
+			for _, line := range splitScriptLines(script.Content) {
+				if line == "" {
+					continue
+				}
+				commands = append(commands, map[string]interface{}{
+					"command_code": line,
+					"source":       "script",
+					"script_name":  script.ScriptName,
+				})
+			}
 		}
 	}
 
@@ -1103,7 +1110,11 @@ func (s *Service) resolveRPCMethods(ctx context.Context, commands []map[string]i
 			continue
 		}
 		rawCode, _ := entry["command_code"].(string)
-		code := strings.TrimSpace(rawCode)
+		// BUG-01 fix (#706)：用户在脚本 textarea 里写 "LST DEVICE_INFO;" 带尾部分号，
+		// 前端直接提交 command_code 字符串时分号会跟进来；mml_commands 字典存的是无分号形式，
+		// 需要在查库前 trim，否则两次候选查找都 miss，rpc_method 留空，fanout 跳过整条命令。
+		code := strings.TrimRight(strings.TrimSpace(rawCode), ";")
+		code = strings.TrimSpace(code)
 		if code == "" {
 			continue
 		}

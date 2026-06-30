@@ -48,6 +48,13 @@ export interface ScriptTaskDrawerProps {
    * 避免用户在 Drawer 里重复输入一次。
    */
   prefillDeviceSns?: string[];
+  /**
+   * 脚本任务页「执行」入口传入已存脚本的 ID（UUID）。
+   * 提交时随 commands 一同发送给后端，后端将其保存在 mml_tasks.script_id，
+   * 用于脚本执行历史关联及 last_run_status 回写。
+   * BUG-06 fix (#706)
+   */
+  scriptId?: string;
   /** 创建成功后回调（例如刷新外层列表、关闭父级 Modal 等） */
   onSuccess?: () => void;
 }
@@ -88,6 +95,7 @@ export default function ScriptTaskDrawer({
   prefillContent,
   prefillTaskName,
   prefillDeviceSns,
+  scriptId,
   onSuccess,
 }: ScriptTaskDrawerProps) {
   const t = useT();
@@ -204,6 +212,9 @@ export default function ScriptTaskDrawer({
           taskName: values.taskName.trim(),
           deviceSns,
           commands: parsedCommands,
+          // BUG-06 fix (#706)：脚本任务页传入 scriptId 时随 commands 一同提交，
+          // 后端保存 mml_tasks.script_id 用于历史关联与 last_run_status 回写。
+          scriptId: scriptId ?? undefined,
           creator: '',
           executeType: values.executeType,
           offlineRetry: values.offlineRetryEnable,
@@ -245,6 +256,7 @@ export default function ScriptTaskDrawer({
     form,
     deviceSns,
     parsedCommands,
+    scriptId,
     createTaskMutation,
     onSuccess,
     onClose,
@@ -498,5 +510,7 @@ function splitScriptLines(content: string): string[] {
   return content
     .split(/\r?\n/)
     .map((line) => line.trim())
+    // BUG-01 防御：trim 尾部分号，保持与后端 mml_commands.command_code 格式一致
+    .map((line) => line.replace(/;+$/, '').trimEnd())
     .filter((line) => line && !line.startsWith('#'));
 }

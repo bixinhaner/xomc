@@ -290,6 +290,7 @@ export default function ScriptTask() {
             ? `${execScript.scriptName}_${dayjs().format('YYYYMMDD_HHmmss')}`
             : undefined
         }
+        scriptId={execScript?.id ?? undefined}
         onSuccess={() => void refetch()}
       />
     </ListPageLayout>
