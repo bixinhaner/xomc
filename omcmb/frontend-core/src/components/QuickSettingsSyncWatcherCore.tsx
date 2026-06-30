@@ -80,7 +80,7 @@ export default function QuickSettingsSyncWatcherCore() {
           }
 
           if (hasNewSuccess) {
-            useQuickSettingsFeedbackStore.getState().clearByDevice(deviceId);
+            useQuickSettingsFeedbackStore.getState().clearDraftsByDevice(deviceId);
             useQuickSettingsFeedbackStore.getState().bumpRefreshTick(deviceId);
             void queryClient.invalidateQueries({ queryKey: ['devices', 'detail-composite-v2', deviceId] });
             void queryClient.invalidateQueries({ queryKey: ['quicksettings', 'groups', deviceId] });
