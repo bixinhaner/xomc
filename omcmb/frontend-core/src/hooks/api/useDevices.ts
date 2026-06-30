@@ -1,5 +1,4 @@
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
-import type { QueryClient } from '@tanstack/react-query';
 import type { Device, DeviceFilter, DeviceListResponse, NameFilterItem } from '../../types/device';
 import type { PageRequest } from '../../types/pagination';
 import { deviceService } from '../../mock/services/deviceService';
@@ -7,10 +6,22 @@ import { deviceApi } from '../../services/api/deviceApi';
 import { quicksettingsApi } from '../../services/api/quicksettingsApi';
 import { createApiSwitchWithMock } from '../../services/apiSwitch';
 
+// 避免在多工作区/多 node_modules 情况下因 QueryClient 私有字段导致名义类型不兼容。
+// 这里使用结构化接口，仅声明预取逻辑实际依赖的方法。
+type QueryClientLike = {
+  getQueriesData: <TData = unknown>(filters: { queryKey: unknown[] }) => Array<[unknown, TData | undefined]>;
+  setQueryData: <TData = unknown>(queryKey: unknown[], updater: TData) => void;
+  prefetchQuery: <TData = unknown>(options: {
+    queryKey: unknown[];
+    queryFn: () => Promise<TData>;
+    staleTime?: number;
+  }) => Promise<unknown>;
+};
+
 const api = createApiSwitchWithMock(deviceService, deviceApi);
 const DEVICE_DETAIL_STALE_TIME_MS = 10 * 60 * 1000;
 
-function findDeviceInListCaches(queryClient: QueryClient, sn: string): Device | undefined {
+function findDeviceInListCaches(queryClient: QueryClientLike, sn: string): Device | undefined {
   const cachedLists = queryClient.getQueriesData<DeviceListResponse>({
     queryKey: ['devices', 'list'],
   });
@@ -23,12 +34,12 @@ function findDeviceInListCaches(queryClient: QueryClient, sn: string): Device | 
   return undefined;
 }
 
-function seedDeviceCaches(queryClient: QueryClient, device: Device) {
+function seedDeviceCaches(queryClient: QueryClientLike, device: Device) {
   queryClient.setQueryData(['devices', 'sn', device.sn], device);
   queryClient.setQueryData(['devices', 'detail', device.id], device);
 }
 
-export function prefetchDeviceDetailContext(queryClient: QueryClient, device: Device) {
+export function prefetchDeviceDetailContext(queryClient: QueryClientLike, device: Device) {
   seedDeviceCaches(queryClient, device);
 
   return Promise.allSettled([

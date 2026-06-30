@@ -90,10 +90,10 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
   onDeviceClick,
   onViewportChange,
   onMapClick,
+  onClusterShowList: _onClusterShowList,
   showStats = true,
   showControls = true,
   showMetadataTip = true,
-  centerReady = true,
   className,
   style,
 }, ref) => {
@@ -104,12 +104,12 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
   const highlightTimerRef = useRef<NodeJS.Timeout | null>(null);
   const highlightWithCardTimerRef = useRef<NodeJS.Timeout | null>(null);
   const highlightWithCardInnerTimerRef = useRef<NodeJS.Timeout | null>(null);
-  // 记录最后一次已触发定位的设备 id，避免同一次搜索被反复重启动画
-  const lastHighlightedIdRef = useRef<string | null>(null);
+  // 记录最后一次已触发定位的设备对象引用，避免同一次 React 渲染被反复重启动画
+  // 使用对象引用而非 id：用户重新点击同一设备时会创建新对象，可正常再次定位
+  const lastHighlightedIdRef = useRef<MapDevice | null>(null);
 
   const [hoveredDevice, setHoveredDevice] = useState<MapDevice | null>(null);
   const [popupPosition, setPopupPosition] = useState<{ x: number; y: number } | null>(null);
-  const [, setHighlightedId] = useState<string | null>(null);
   const [viewport, setViewport] = useState<MapViewport | null>(null);
   const [shouldShowMetadataAlert, setShouldShowMetadataAlert] = useState(false);
   // 点击锁定的设备（优先显示，支持复制）
@@ -135,7 +135,6 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
     center: defaultCenter,
     zoom: defaultZoom,
     tileUrl,
-    centerReady,
     onDeviceClick: (device, pixel) => {
       // 点击设备时锁定弹窗
       setClickedDevice(device);
@@ -198,11 +197,11 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
       return;
     }
     if (!isReady) return;
-    if (lastHighlightedIdRef.current === searchResultDevice.id) {
-      // 同一个搜索结果已经触发过，不要重复跳转（拖动/zoom 变化会重运行 effect）
+    if (lastHighlightedIdRef.current === searchResultDevice) {
+      // 完全相同的对象引用：effect 因其它 dep 变化重跑，无需重复定位
       return;
     }
-    lastHighlightedIdRef.current = searchResultDevice.id;
+    lastHighlightedIdRef.current = searchResultDevice;
     // 延迟执行，确保设备已添加到地图
     const timer = setTimeout(() => {
       // 搜索定位时需要飞行到目标位置（skipFlyTo = false）
@@ -276,12 +275,10 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
 
     // 使用新函数：自动展开聚合并显示脉冲效果
     highlightAndSpiderfyIfNeeded(device);
-    setHighlightedId(device.id);
 
     // 5秒后取消高亮（延长时间以便用户查看）
     highlightTimerRef.current = setTimeout(() => {
       clearHighlight();
-      setHighlightedId(null);
       highlightTimerRef.current = null;
     }, 5000);
   }, [highlightAndSpiderfyIfNeeded, clearHighlight]);
@@ -340,7 +337,6 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
       setClickedDevice(null);
       setClickedPosition(null);
     }
-    setHighlightedId(null);
 
     const map = mapInstanceRef.current;
     if (!map) return;
@@ -417,7 +413,6 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
         // 高亮设备（展开聚合、脉冲动画）
         // skipFlyTo: true 避免打断渐进式动画（动画由外层的 flyTo 完成）
         highlightAndSpiderfyIfNeeded(device, true);
-        setHighlightedId(device.id);
 
         // 计算屏幕位置并显示卡片
         highlightWithCardInnerTimerRef.current = setTimeout(() => {
@@ -430,7 +425,6 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
           // 5秒后取消高亮（卡片保持显示）
           setTimeout(() => {
             clearHighlight();
-            setHighlightedId(null);
           }, 5000);
         }, 100);
       }, delay);

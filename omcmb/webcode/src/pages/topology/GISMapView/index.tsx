@@ -17,15 +17,11 @@ import GISMap from '@/components/GISMap';
 import { MAP_CONFIG } from '@/components/GISMap/constants';
 import { useMapConfig } from '@/components/GISMap/useMapConfig';
 import { calculateCenterFromDevices, parseEnvCenter } from '@/utils/mapValidation';
-
-// 环境变量在运行期不变，解析一次即可，避免每次 useMemo 重跑并重复打日志
-const ENV_CENTER = parseEnvCenter();
 import type { GISMapRef } from '@/components/GISMap';
 import type { MapDevice, DeviceGroupNode, DeviceGeo, MapViewport } from '@core/types/map';
 import type { Domain } from '@core/types/topology';
 import { useThemeToken } from '@/hooks/useThemeToken';
 // import { useMapDeviceCache } from '@/hooks/useMapDeviceCache'; // 暂未使用
-import MapStatsPanel from '@/components/GISMap/MapStatsPanel';
 import {
   useDomainTree,
   useMapDevicesGeo,
@@ -36,6 +32,9 @@ import { topologyApi } from '@core/services/api/topologyApi';
 import { SPACING, RADIUS, SHADOWS, COLORS, transitionString, DURATION, EASING } from './styles';
 import { hasValidCoord } from './coord';
 import './animations.css';
+
+// 环境变量在运行期不变，解析一次即可，避免每次 useMemo 重跑并重复打日志
+const ENV_CENTER = parseEnvCenter();
 
 /**
  * 将 DeviceGeo 转换为 MapDevice
@@ -177,6 +176,9 @@ export default function GISMapView() {
   //   ttl: 5 * 60 * 1000, // 5 分钟过期
   // });
 
+  // 用于防抖的定时器
+  const viewportChangeTimerRef = useRef<NodeJS.Timeout | null>(null);
+
   // ========== API Hooks ==========
 
   // 获取设备组树
@@ -281,7 +283,6 @@ export default function GISMapView() {
   const { data: devicesGeoData } = useMapDevicesGeo(filterParams);
 
   // 加载地图元数据（离线瓦片配置）
-  // 用于判断是否有可用的离线地图，从而决定是否等待 stats 中心点
   const mapConfigData = useMapConfig();
 
   // 获取地图统计数据（与 useMapDevicesGeo 共用同一套 group/status 过滤口径，
@@ -312,13 +313,6 @@ export default function GISMapView() {
     _handleSearchClear();
     setSearchResultDevice(null); // 同时清除地图上的高亮设备
   }, [_handleSearchClear]);
-
-  // 搜索时临时降低瓦片并发（从 3 降到 1），为 API 请求让出连接；
-  // 搜索完成后恢复正常并发（3）。
-  // 这样可避免浏览器 HTTP/1.1 连接池（6个）被瓦片打满，导致搜索请求排队等待。
-  useEffect(() => {
-    mapRef.current?.setTileConcurrency(isSearching ? 1 : 3);
-  }, [isSearching]);
 
   // ========== 数据转换 ==========
 
@@ -359,131 +353,84 @@ export default function GISMapView() {
   // 使用稳定引用避免频繁重新计算
   const deviceItems = devicesGeoData?.items;
 
-  // ========== OL 地图中心点就绪信号 ==========
-  //
-  // 设计意图（对应用户需求）：
-  //   1. 有离线地图 → tiles.json 加载成功即为可靠中心（metadata.center）
-  //   2. 无离线地图 → /devices/geo/stats 返回设备几何中心即为可靠中心
-  //   3. 2s 超时兜底 → 允许 OL 以默认坐标初始化，auto-fit 作为最后手段
-  //
-  // 核心保证：OL 只有在 centerReady=true 时才创建地图实例，从而确保
-  // 地图以正确的中心坐标初始化，用户打开页面即能看到设备节点。
-
-  // 离线地图已确认可用（tiles-metadata 成功且非降级）
-  const hasOfflineMap = mapConfigData.status === 'success' && !mapConfigData.isUsingDefault;
-  // 已有可靠设备中心点（stats 返回 OR 设备列表有数据）
-  const hasReliableCenter = Boolean(mapStatsData?.center) || Boolean(deviceItems && deviceItems.length > 0);
-  // 2 秒超时兜底：避免 stats/tiles 异常时页面永远白屏
-  const [centerFallback, setCenterFallback] = useState(false);
-  useEffect(() => {
-    const t = setTimeout(() => setCenterFallback(true), 2000);
-    return () => clearTimeout(t);
-  }, []);
-  // centerReady：三个条件任意一个满足即可初始化 OL
-  const centerReady = hasOfflineMap || hasReliableCenter || centerFallback;
-
   /**
-   * 计算初始地图中心点和缩放级别
-   *
+   * 计算初始地图中心点和缩放级别（4层决策逻辑）
+   * 
    * 优先级：
-   * 1. 离线地图元数据中心点（tiles.json，若离线地图可用）
-   * 2. stats 接口返回的设备几何中心（后端 AVG 经纬度，不带 bounds，页面挂载即发）
-   * 3. 设备列表计算的中心点
-   * 4. 环境变量配置
-   * 5. 代码默认值（兜底，此时 centerReady 已通过 2s 超时触发）
+   * 1. tiles.json 元数据中心点（如果离线瓦片可用）
+   * 2. 设备数据计算的中心点（如果元数据不可用但设备存在）
+   * 3. 环境变量配置的中心点（支持多地区部署）
+   * 4. 代码默认值（全球默认）
    */
   const { initialCenter, initialZoom } = useMemo(() => {
-    // 第一层：离线地图元数据中心点（用户明确部署了离线地图）
-    if (hasOfflineMap && mapConfigData.metadata) {
-      return {
-        initialCenter: [mapConfigData.metadata.center.lon, mapConfigData.metadata.center.lat] as [number, number],
-        initialZoom: mapConfigData.metadata.zoom.default || 8,
-      };
+    // 第一层：优先使用 tiles.json 元数据中心点
+    if (mapConfigData.metadata && !mapConfigData.isUsingDefault && mapConfigData.status === 'success') {
+      const metadataCenter: [number, number] = [
+        mapConfigData.metadata.center.lon,
+        mapConfigData.metadata.center.lat,
+      ];
+      const metadataZoom = mapConfigData.metadata.zoom.default || 8;
+      return { initialCenter: metadataCenter, initialZoom: metadataZoom };
     }
 
-    // 第二层：stats 接口返回的设备几何中心（最能反映用户设备实际位置）
-    const statsCenter = mapStatsData?.center;
-    if (statsCenter) {
-      return { initialCenter: [statsCenter.lng, statsCenter.lat] as [number, number], initialZoom: 8 };
-    }
-
-    // 第三层：从设备列表计算中心点
+    // 第二层：如果元数据不可用但有设备数据，计算设备范围的中心点
     if (deviceItems && deviceItems.length > 0) {
       const result = calculateCenterFromDevices(deviceItems);
       return { initialCenter: result.center, initialZoom: result.zoom };
     }
 
-    // 第四层：环境变量配置（支持多地区部署）
+    // 第三层：尝试使用环境变量配置（模块级缓存，无重复解析开销）
     if (ENV_CENTER) {
       return { initialCenter: ENV_CENTER.center, initialZoom: ENV_CENTER.zoom };
     }
 
-    // 第五层：代码默认值（2s 超时兜底时到达此处）
+    // 第四层：使用代码默认值
     return { initialCenter: MAP_CONFIG.defaultCenter, initialZoom: MAP_CONFIG.defaultZoom };
-  }, [hasOfflineMap, mapConfigData.metadata, mapStatsData, deviceItems]);
+  }, [
+    mapConfigData.metadata,
+    mapConfigData.isUsingDefault,
+    mapConfigData.status,
+    deviceItems,
+  ]);
 
-  // 首屏自动对齐：等设备数据到达后，飞到主群设备的包围盒中心。
-  //
-  // 竞态说明：centerReady=true 时 OL 开始初始化，但 GISMap（子）的 effect 和
-  // GISMapView（父）的 effect 在同一批次 flush，顺序不保证。
-  // 通过 fitBounds 内部的 mapInstanceRef.current 判空兜底：
-  //   OL 未就绪 → fitBounds 静默 return（hasFittedToDevicesRef 不置位）
-  //   下次 deps 变化（mapDevices 或 centerReady）→ effect 重跑 → OL 已就绪 → 成功执行
-  const hasFittedToDevicesRef = useRef(false);
+  // 首屏兜底：若 4 层中心点策略落点（通常是 metadata.center）与实际设备分布不在同一区域，
+  // 用户首屏会看不到任何设备点。这里在地图就绪、设备数据到货后做一次性 fit：
+  // - 若当前视口已经包含至少一个设备 → 标记完成，不动；
+  // - 若一个都没有 → flyTo 到设备 bounds 中心。
+  // 仅触发一次（hasAutoFittedRef 守卫），后续用户拖动/缩放不再被覆盖。
+  const hasAutoFittedRef = useRef(false);
   useEffect(() => {
-    if (hasFittedToDevicesRef.current) return;
-    if (mapDevices.length === 0) return;
+    if (hasAutoFittedRef.current) return;
+    if (!mapDevices.length) return;
 
     const map = mapRef.current;
     if (!map) return;
 
-    const validDevices = mapDevices.filter(
-      (d) => Number.isFinite(d.lng) && Number.isFinite(d.lat),
-    );
-    if (validDevices.length === 0) return;
-
-    // IQR（Tukey fence 3x）过滤坐标离群值，防止测试数据跨大洲导致视口缩到全球级别
-    const sortedLngs = validDevices.map((d) => d.lng).sort((a, b) => a - b);
-    const sortedLats = validDevices.map((d) => d.lat).sort((a, b) => a - b);
-    const q1i = Math.floor(validDevices.length * 0.25);
-    const q3i = Math.floor(validDevices.length * 0.75);
-    const iqrLng = sortedLngs[q3i] - sortedLngs[q1i];
-    const iqrLat = sortedLats[q3i] - sortedLats[q1i];
-    const coreDevices = validDevices.filter(
-      (d) =>
-        d.lng >= sortedLngs[q1i] - 3 * iqrLng &&
-        d.lng <= sortedLngs[q3i] + 3 * iqrLng &&
-        d.lat >= sortedLats[q1i] - 3 * iqrLat &&
-        d.lat <= sortedLats[q3i] + 3 * iqrLat,
-    );
-    const devicesToFit = coreDevices.length > 0 ? coreDevices : validDevices;
-    const fitTarget = calculateCenterFromDevices(
-      devicesToFit.map((d) => ({ longitude: d.lng, latitude: d.lat })),
-    );
-
-    // fitBounds 内部有 mapInstanceRef.current 判空：OL 未就绪时静默 return
-    // hasFittedToDevicesRef 只在成功执行后置位
     const vp = map.getViewport();
-    if (!vp) return; // OL 未就绪，等下次 deps 变化重跑
+    if (!vp?.bounds) return;
 
-    // duration:0 → 无动画即时定位，避免 1 秒飞行动画干扰用户后续缩放操作
-    map.fitBounds(fitTarget.bounds, { duration: 0 });
-    hasFittedToDevicesRef.current = true;
-  }, [mapDevices, centerReady]);
+    const { bounds } = vp;
+    const hasAnyInView = mapDevices.some(
+      (d) =>
+        d.lng >= bounds.minLng &&
+        d.lng <= bounds.maxLng &&
+        d.lat >= bounds.minLat &&
+        d.lat <= bounds.maxLat,
+    );
 
-  // 筛选条件变化监听（groupIds / status 变化时清除设备缓存，排除视口/zoom 变化）
-  // 确保切换设备组或状态过滤时地图上不会残留旧过滤条件的数据。
-  const filterKey = useMemo(
-    () => JSON.stringify({ groupIds: filterParams.groupIds, status: filterParams.status }),
-    [filterParams.groupIds, filterParams.status],
-  );
-  const prevFilterKeyRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (prevFilterKeyRef.current !== null && prevFilterKeyRef.current !== filterKey) {
-      mapRef.current?.clearDevices();
+    if (hasAnyInView) {
+      hasAutoFittedRef.current = true;
+      return;
     }
-    prevFilterKeyRef.current = filterKey;
-  }, [filterKey]);
+
+    const fitTarget = calculateCenterFromDevices(
+      mapDevices.map((d) => ({ longitude: d.lng, latitude: d.lat })),
+    );
+    map.flyTo(fitTarget.center[0], fitTarget.center[1], fitTarget.zoom, {
+      progressive: false,
+    });
+    hasAutoFittedRef.current = true;
+  }, [mapDevices]);
 
   // ========== 搜索处理 ==========
 
@@ -1150,9 +1097,7 @@ export default function GISMapView() {
           defaultZoom={initialZoom}
           showStats={false}
           showControls={false}
-          showMetadataTip={false}
-          centerReady={centerReady}
-          tileUrl={MAP_CONFIG.tileUrl}
+          tileUrl={mapConfigData.status === 'success' && !mapConfigData.isUsingDefault ? MAP_CONFIG.tileUrl : undefined}
           onDeviceClick={undefined}
           onMapClick={() => {
             // 点击地图时收起搜索结果面板
@@ -1162,9 +1107,20 @@ export default function GISMapView() {
             // setSearchResultDevice(null);
           }}
           onViewportChange={(viewport) => {
-            // useOLMap 内部 moveend 已做 250ms 防抖，此处直接更新视口状态。
-            // 旧请求会被 React Query 自动 abort（queryFn 已打通 signal）
-            setMapViewport(viewport);
+            // 视口变化防抖（默认 300ms，可通过 MAP_CONFIG.viewportDebounce 调整）
+            // 需要这里防抖是因为 useOLMap 内部的 moveend 只做了 100ms 偏轻的合并，
+            // 拖动过程中仍会频繁调出；再叠一层防抖避免拖动期间堆 setState。
+            if (viewportChangeTimerRef.current) {
+              clearTimeout(viewportChangeTimerRef.current);
+            }
+
+            viewportChangeTimerRef.current = setTimeout(() => {
+              // 更新视口状态，触发设备数据重新请求
+              // 旧请求会被 React Query 自动 abort（queryFn 已打通 signal）
+              setMapViewport(viewport);
+
+              // TODO(P2): 预加载周边区域，待后端支持批量 bounds 查询时实施
+            }, MAP_CONFIG.viewportDebounce);
           }}
         />
 
@@ -1392,10 +1348,10 @@ export default function GISMapView() {
             }}
             onClick={() => {
               const view = mapRef.current?.getViewport();
-              const currentZoom = view?.zoom ?? 6;
+              const currentZoom = view?.zoom ?? MAP_CONFIG.defaultZoom;
               mapRef.current?.flyTo(
-                view?.centerLng ?? 28.221,
-                view?.centerLat ?? -14.607,
+                view?.centerLng ?? MAP_CONFIG.defaultCenter[0],
+                view?.centerLat ?? MAP_CONFIG.defaultCenter[1],
                 Math.min(currentZoom + 1, 18)
               );
             }}
@@ -1415,10 +1371,10 @@ export default function GISMapView() {
             }}
             onClick={() => {
               const view = mapRef.current?.getViewport();
-              const currentZoom = view?.zoom ?? 6;
+              const currentZoom = view?.zoom ?? MAP_CONFIG.defaultZoom;
               mapRef.current?.flyTo(
-                view?.centerLng ?? 28.221,
-                view?.centerLat ?? -14.607,
+                view?.centerLng ?? MAP_CONFIG.defaultCenter[0],
+                view?.centerLat ?? MAP_CONFIG.defaultCenter[1],
                 Math.max(currentZoom - 1, 3)
               );
             }}
@@ -1427,23 +1383,6 @@ export default function GISMapView() {
           </button>
         </div>
 
-        {/* 统计面板 */}
-        <MapStatsPanel stats={stats} visible={false} />
-
-        {/* Footer */}
-        <div
-          style={{
-            position: 'absolute',
-            bottom: 8,
-            left: '50%',
-            transform: 'translateX(-50%)',
-            fontSize: 11,
-            color: '#BFBFBF',
-            width: 'fit-content',
-          }}
-        >
-          OMC GIS Map - Topology View v2.0 (Real API)
-        </div>
       </div>
     </div>
   );

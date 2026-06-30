@@ -52,6 +52,7 @@ export function useDeviceSearch(
   const [keyword, setKeyword] = useState('');
   const [debouncedKeyword, setDebouncedKeyword] = useState(keyword);
   const [expanded, setExpanded] = useState(false);
+  const normalizedDebouncedKeyword = debouncedKeyword.trim();
 
   // 防抖处理
   useEffect(() => {
@@ -86,9 +87,11 @@ export function useDeviceSearch(
 
       setKeyword(value);
 
+      const normalizedValue = value.trim();
+
       // 自动展开/收起
       if (autoExpand) {
-        if (value.length >= minLength) {
+        if (normalizedValue.length >= minLength) {
           setExpanded(true);
         } else {
           setExpanded(false);
@@ -100,10 +103,12 @@ export function useDeviceSearch(
 
   // 搜索请求
   const { data: results, isLoading } = useQuery({
-    queryKey: ['device-search', debouncedKeyword],
-    queryFn: ({ signal }) => searchFn(debouncedKeyword, signal),
-    enabled: debouncedKeyword.length >= minLength,
-    staleTime: 30 * 1000,
+    queryKey: ['device-search', normalizedDebouncedKeyword],
+    queryFn: ({ signal }) => searchFn(normalizedDebouncedKeyword, signal),
+    enabled: normalizedDebouncedKeyword.length >= minLength,
+    staleTime: 30 * 1000, // 同关键词 30s 内不重发，复用缓存
+    retry: false, // 搜索失败不自动重试，避免弱网/慢接口时长时间 pending
+    refetchOnReconnect: false,
   });
 
   // 清空搜索
@@ -121,6 +126,8 @@ export function useDeviceSearch(
     keyword,
     /** 防抖后的输入值 */
     debouncedKeyword,
+    /** 规范化后的防抖输入值（trim） */
+    normalizedDebouncedKeyword,
     /** 输入处理函数（含自动展开） */
     handleChange,
     /** 清空输入 */
