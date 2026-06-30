@@ -1,0 +1,6 @@
+<?xml version="1.0" ?>
+<parameterModel paramModel="TEST" totalEntries="1">
+    <parameters>
+        <param name="device.test.test" standardPath="device.test.test" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+    </parameters>
+</parameterModel>

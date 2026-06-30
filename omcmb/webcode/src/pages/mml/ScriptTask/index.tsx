@@ -104,8 +104,10 @@ export default function ScriptTask() {
     form
       .validateFields()
       .then((vals) => {
+        // BUG-13 修复：确保 onSuccess 中刷新列表 + 关闭弹窗
         const onDone = () => {
           void message.success(t('mml.scriptSaved'));
+          void refetch(); // 刷新列表
           closeForm();
         };
         const onFail = (err: unknown) =>
@@ -144,7 +146,7 @@ export default function ScriptTask() {
         }
       })
       .catch(() => undefined);
-  }, [form, editing, username, createScriptMutation, updateScriptMutation, closeForm, t]);
+  }, [form, editing, username, createScriptMutation, updateScriptMutation, closeForm, refetch, t]);
 
   // 删除脚本：敏感操作，走 Modal.confirm 二次确认。
   const handleDelete = useCallback((script: MMLScript) => {
@@ -225,6 +227,7 @@ export default function ScriptTask() {
       />
 
       {/* 新增 / 编辑脚本弹窗 */}
+      {/* BUG-04 修复：mutation pending 时禁止 ESC/点击遮罩关闭，防止用户误以为取消但数据已提交 */}
       <Modal
         title={editing ? t('mml.editScript') : t('mml.newScript')}
         open={formVisible}
@@ -234,6 +237,8 @@ export default function ScriptTask() {
         cancelText={t('common.cancel')}
         width={680}
         confirmLoading={createScriptMutation.isPending || updateScriptMutation.isPending}
+        maskClosable={!createScriptMutation.isPending && !updateScriptMutation.isPending}
+        closable={!createScriptMutation.isPending && !updateScriptMutation.isPending}
       >
         <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
           <Form.Item
