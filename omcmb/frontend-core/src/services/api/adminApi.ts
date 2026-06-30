@@ -554,13 +554,17 @@ function mapBackendAuditLog(ba: BackendAuditLog): OperationLog {
   const createdAt = ba.created_at ?? ba.createdAt ?? '';
   const resourceId = ba.resource_id ?? ba.resourceId ?? '';
   const action = (ba.action || '').toLowerCase();
-  const detailsText = JSON.stringify(ba.details || {}).toLowerCase();
+  const details = ba.details && Object.keys(ba.details).length > 0 ? ba.details : undefined;
+  const detailsText = JSON.stringify(details || {}).toLowerCase();
   const isFailure =
     /fail|error|denied|forbid|unauthor|invalid/.test(action) ||
     /"status"\s*:\s*false|"success"\s*:\s*false|fail|error|denied|forbid/.test(detailsText);
-  const reason = ba.details && typeof ba.details === 'object' && typeof (ba.details as Record<string, unknown>).reason === 'string'
+  const reason = isFailure && ba.details && typeof ba.details === 'object' && typeof (ba.details as Record<string, unknown>).reason === 'string'
     ? (ba.details as Record<string, unknown>).reason as string
     : '';
+  const summaryParts = [ba.username, ba.action, ba.resource, resourceId].map((part) => String(part || '').trim()).filter(Boolean);
+  const fallbackSummary = summaryParts.length > 0 ? summaryParts.join(' · ') : '审计日志';
+  const detailText = details ? JSON.stringify(details, null, 2) : fallbackSummary;
 
   return {
     id: ba.id,
@@ -569,12 +573,12 @@ function mapBackendAuditLog(ba: BackendAuditLog): OperationLog {
     module: ba.resource || '',
     operationType: (ba.action || 'query') as OperationType,
     target: resourceId,
-    content: ba.details ? JSON.stringify(ba.details) : '',
+    content: detailText,
     result: isFailure ? 'failure' : 'success',
-    message: '',
+    message: reason || fallbackSummary,
     operationTime: createdAt,
     logName: `${ba.action} ${ba.resource}`.trim(),
-    detail: ba.details ? JSON.stringify(ba.details) : '',
+    detail: detailText,
     reason,
     startTime: createdAt,
     endTime: createdAt,
@@ -583,14 +587,17 @@ function mapBackendAuditLog(ba: BackendAuditLog): OperationLog {
 
 function applyOperationLogNameFilter(query: Record<string, unknown>, logName: string) {
   const mappings: Record<string, { action?: string; resource?: string; keyword?: string }> = {
-    user_login: { action: 'login_success', resource: 'auth' },
-    user_logout: { action: 'logout', resource: 'auth' },
-    device_add: { action: 'POST', resource: 'device' },
+    config_modify: { action: 'PUT', resource: 'config' },
     device_delete: { action: 'DELETE', resource: 'device' },
-    config_modify: { resource: 'config' },
-    software_upgrade: { resource: 'software' },
-    data_export: { keyword: 'export' },
-    data_import: { keyword: 'import' },
+    user_create: { action: 'POST', resource: 'user' },
+    password_reset: { action: 'password_reset', resource: 'user' },
+    login_success: { action: 'login_success', resource: 'auth' },
+    login_failure: { action: 'login_failed', resource: 'auth' },
+    logout: { action: 'logout', resource: 'auth' },
+    software_upgrade: { action: 'upgrade', resource: 'software' },
+    reboot: { action: 'reboot', resource: 'device' },
+    password_change: { keyword: 'password' },
+    permission_change: { keyword: 'permission' },
   };
   const mapped = mappings[logName];
   if (!mapped) {
@@ -993,6 +1000,7 @@ export const adminApi = {
       operator?: string;
       clientIp?: string;
       module?: string;
+      action?: string;
       operationType?: OperationType;
       result?: string;
       reason?: string;
@@ -1007,6 +1015,7 @@ export const adminApi = {
     if (params.operator) query.username = params.operator;
     if (params.clientIp) query.ip_address = params.clientIp;
     if (params.module) applyOperationLogNameFilter(query, params.module);
+    if (params.action) query.action = params.action;
     if (params.operationType) query.action = params.operationType;
     if (params.result) query.result = params.result;
     if (params.reason) query.reason = params.reason;
