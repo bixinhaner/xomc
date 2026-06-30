@@ -7,6 +7,7 @@ import { useQuickSettingsGroups } from '@core/hooks/api/useQuickSettings';
 import { useResolvedCellInstances } from '@core/hooks/api/useResolvedCellInstances';
 import { useDeleteObject, useParameterSchema } from '@core/hooks/api/useDeviceParameters';
 import { useDeviceTaskStatus } from '@core/hooks/api/useDeviceTask';
+import { deviceParameterApi } from '@core/services/api/deviceParameterApi';
 import { feedbackKey, useQuickSettingsFeedbackStore } from '@core/store/quickSettingsFeedbackStore';
 import type { QuickSettingsGroup } from '@core/types/quicksettings';
 import CellParameterForm from './CellParameterForm';
@@ -63,6 +64,7 @@ interface QuickSettingsTabProps {
    * 设备详情页传入的 networkType 兼容历史值 eNB/gNB 和技术值 lte/nr。
    */
   networkType: string;
+  active?: boolean;
   onSyncTargetPathsChange?: (paths: string[]) => void;
 }
 
@@ -100,11 +102,12 @@ const BSC_BTS_OBJECT_PREFIX = 'DeviceGSM.Bts.';
  * 小区实例解析（lte/nr/BM/cellModeIdx/InUse 联合规则）已统一到
  * useResolvedCellInstances，DeviceDetail 概览页与本组件共享同一计算路径。
  */
-export default function QuickSettingsTab({ deviceId, networkType, onSyncTargetPathsChange }: QuickSettingsTabProps) {
+export default function QuickSettingsTab({ deviceId, networkType, active = true, onSyncTargetPathsChange }: QuickSettingsTabProps) {
   const intl = useIntl();
   const t = useT();
   const locale: 'zh-CN' | 'en-US' = intl.locale === 'en-US' ? 'en-US' : 'zh-CN';
   const normalizedNetworkType = normalizeQuickSettingsNetworkType(networkType);
+  const [ipsecControlValue, setIpsecControlValue] = useState<string | undefined>(undefined);
 
   // LTE 选择 FAPService，NR 选择 CellConfig 小区实例。
   const [userPickedInstance, setUserPickedInstance] = useState<number | null>(null);
@@ -146,6 +149,7 @@ export default function QuickSettingsTab({ deviceId, networkType, onSyncTargetPa
     bmTech,
     hasBmGsmGroups: bmHasGsmGroups,
     hasBmLteGroups: bmHasLteGroups,
+    enabled: active,
   });
 
   const {
@@ -166,6 +170,10 @@ export default function QuickSettingsTab({ deviceId, networkType, onSyncTargetPa
     () => (data?.groups ?? []).some((group) => DEVICE_LEVEL_IPSEC_GROUP_IDS.has(group.id)),
     [data?.groups],
   );
+
+  useEffect(() => {
+    setIpsecControlValue(undefined);
+  }, [deviceId, refreshTick]);
 
   const activeBmTech = bmTechOptions.includes(bmTech)
     ? bmTech
@@ -217,6 +225,12 @@ export default function QuickSettingsTab({ deviceId, networkType, onSyncTargetPa
     [visibleGroups],
   );
 
+  useEffect(() => {
+    if (!visibleGroups.some((group) => group.id === 'device-ipsec-control')) {
+      setIpsecControlValue(undefined);
+    }
+  }, [visibleGroups]);
+
   const instanceScopedGroups = useMemo(
     () => visibleGroups.filter((group) => !OUTER_GROUP_IDS.has(group.id)),
     [visibleGroups],
@@ -262,6 +276,7 @@ export default function QuickSettingsTab({ deviceId, networkType, onSyncTargetPa
         <InstanceSelectorForm
           key={`${group.id}::${refreshTick}::${keySuffix}`}
           deviceId={deviceId}
+          active={active}
           selectorGroup={group}
           childGroups={childGroups}
           instanceContext={instanceContext}
@@ -274,17 +289,21 @@ export default function QuickSettingsTab({ deviceId, networkType, onSyncTargetPa
       <MultiInstanceTable
         key={`${group.id}::${refreshTick}::${keySuffix}`}
         deviceId={deviceId}
+        active={active}
         group={group}
         instanceContext={instanceContext}
         locale={locale}
+        ipsecControlValue={ipsecControlValue}
       />
     ) : (
       <CellParameterForm
         key={`${group.id}::${refreshTick}::${keySuffix}`}
         deviceId={deviceId}
+        active={active}
         group={group}
         instanceContext={instanceContext}
         locale={locale}
+        onIpsecControlChange={group.id === 'device-ipsec-control' ? setIpsecControlValue : undefined}
       />
     );
   };
@@ -320,7 +339,7 @@ export default function QuickSettingsTab({ deviceId, networkType, onSyncTargetPa
   // BSC 下拉显示 "实例号 · IpaUnitId=xxx"，让运维能直接看出 BTS 与 IPA 单元映射。
   // 复用 useResolvedCellInstances 已经发过的同一份 schema 查询（react-query
   // 按 (deviceId, 'DeviceGSM.Bts.') key 去重，不会额外触发请求）。
-  const { data: bscBtsSchema } = useParameterSchema(deviceId, BSC_BTS_OBJECT_PREFIX, isBSC);
+  const { data: bscBtsSchema } = useParameterSchema(deviceId, BSC_BTS_OBJECT_PREFIX, active && isBSC);
   const bscBtsIpaUnitIdByInstance = useMemo(() => {
     const m = new Map<number, string>();
     if (!isBSC || !bscBtsSchema) return m;
@@ -361,6 +380,7 @@ export default function QuickSettingsTab({ deviceId, networkType, onSyncTargetPa
     if (bscLastTask.status !== 'completed' && bscLastTask.status !== 'failed'
       && bscLastTask.status !== 'expired' && bscLastTask.status !== 'cancelled') return;
     if (bscLastAction.invalidatedForTaskId === bscLastTask.id) return;
+    deviceParameterApi.invalidateParameterSchemaCache(deviceId);
     void queryClient.invalidateQueries({ queryKey: ['devices', 'parameter-schema', deviceId] });
     void queryClient.invalidateQueries({ queryKey: ['devices', 'parameters', deviceId] });
     void queryClient.invalidateQueries({ queryKey: ['devices', 'parameter-tree', deviceId] });

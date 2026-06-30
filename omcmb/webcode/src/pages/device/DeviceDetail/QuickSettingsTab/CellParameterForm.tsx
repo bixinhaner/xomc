@@ -286,9 +286,11 @@ function inferDeviceTimeMode(
 
 interface CellParameterFormProps {
   deviceId: string;
+  active?: boolean;
   group: QuickSettingsGroup;
   instanceContext: QuickSettingsInstanceContext;
   locale: 'zh-CN' | 'en-US';
+  onIpsecControlChange?: (value: string | undefined) => void;
 }
 
 interface BindSelectOption {
@@ -563,11 +565,12 @@ function findRawValueBySuffix(parameters: DeviceParameter[] | undefined, suffix:
  *  4. 顶部"保存"按钮收集本表单全部脏字段，一次性 SetParameterValues
  *  5. Save 部分失败时按字段标红保留输入值（继承 Antd Form 校验/状态行为）
  */
-export default function CellParameterForm({ deviceId, group, instanceContext, locale }: CellParameterFormProps) {
+export default function CellParameterForm({ deviceId, active = true, group, instanceContext, locale, onIpsecControlChange }: CellParameterFormProps) {
   const t = useT();
   const [form] = Form.useForm();
   const latestLocalEditAtRef = useRef(0);
   const watchedLocalTimeZoneName = Form.useWatch('LocalTimeZoneName', form);
+  const watchedIpsecEnable = Form.useWatch('IPSEC_ENABLE', form);
   const updateMutation = useUpdateParameters();
   const queryClient = useQueryClient();
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -622,44 +625,62 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
   // 注：useParameterSchema 接受 pathPrefix，前缀匹配即可；这里以分组共用前缀粗查再过滤
   // 为简化，取 group 中 standardPath 的公共前缀作 pathPrefix
   const commonPrefix = useMemo(
-    () => commonPathPrefix(effectiveParams.map((p) => resolveReadPath(p.standardPath || ''))),
-    [effectiveParams, resolveReadPath],
+    () => (isDeviceTimeGroup ? '' : commonPathPrefix(effectiveParams.map((p) => resolveReadPath(p.standardPath || '')))),
+    [isDeviceTimeGroup, effectiveParams, resolveReadPath],
   );
-  const { data: schemaResp, isLoading, refetch } = useParameterSchema(deviceId, commonPrefix);
+  const { data: schemaResp, isLoading: isCommonSchemaLoading, refetch: refetchCommonSchema } = useParameterSchema(
+    deviceId,
+    commonPrefix,
+    active && !isDeviceTimeGroup,
+  );
+  const { data: deviceTimeSchemaResp, isLoading: isDeviceTimeSchemaLoading, refetch: refetchDeviceTimeSchema } = useParameterSchema(
+    deviceId,
+    'Device.Time.',
+    active && isDeviceTimeGroup,
+  );
+  const {
+    data: managementServerSchemaResp,
+    isLoading: isManagementServerSchemaLoading,
+    refetch: refetchManagementServerSchema,
+  } = useParameterSchema(
+    deviceId,
+    'Device.ManagementServer.',
+    active && isDeviceTimeGroup,
+  );
   const { data: ethernetSchemaResp } = useParameterSchema(
     deviceId,
     'Device.Ethernet.Interface.',
-    group.id === 'gsm-abis' || group.id === 'gnb-core',
+    active && (group.id === 'gsm-abis' || group.id === 'gnb-core'),
   );
   const { data: mmeIpPlmnParams } = useSearchParameters(
     deviceId,
     group.id === 'enb-mme' ? 'MmeIpPlmnList' : '',
     50,
-    group.id === 'enb-mme',
+    active && group.id === 'enb-mme',
   );
   const { data: nrCommonParams } = useSearchParameters(
     deviceId,
     group.id === 'gnb-core' ? 'Device.Services.FAPService.1.FAPControl.NR.RAN.Common.' : '',
     50,
-    group.id === 'gnb-core',
+    active && group.id === 'gnb-core',
   );
   const { data: nrNguParams } = useSearchParameters(
     deviceId,
     group.id === 'gnb-core' ? 'Device.FAP.NguIpBind' : '',
     200,
-    group.id === 'gnb-core',
+    active && group.id === 'gnb-core',
   );
   const { data: deviceTimeParams } = useSearchParameters(
     deviceId,
     group.id === 'device-time' ? 'Device.Time.' : '',
     200,
-    group.id === 'device-time',
+    active && group.id === 'device-time',
   );
   const { data: ipsecControlParams } = useSearchParameters(
     deviceId,
     group.id === 'device-ipsec-control' ? (effectiveParams[0]?.standardPath || 'IPSEC_ENABLE') : '',
     20,
-    group.id === 'device-ipsec-control',
+    active && group.id === 'device-ipsec-control',
   );
   const visibleParams = useMemo(() => {
     if (!isDeviceTimeGroup || deviceTimeParams === undefined) {
@@ -699,7 +720,7 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
   const { data: extraInfoSchemaResp } = useParameterSchema(
     deviceId,
     extraInfoCommonPrefix,
-    extraInfoPaths.length > 0,
+    active && extraInfoPaths.length > 0,
   );
   const extraInfoValueByPath = useMemo(() => {
     const m = new Map<string, string>();
@@ -729,8 +750,23 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
   const { data: ruSchemaResp } = useParameterSchema(
     deviceId,
     'Device.DeviceInfo.RU.',
-    isGsmCell,
+    active && isGsmCell,
   );
+  const effectiveSchemaParameters = useMemo(
+    () => (isDeviceTimeGroup
+      ? [
+        ...(deviceTimeSchemaResp?.parameters ?? []),
+        ...(managementServerSchemaResp?.parameters ?? []),
+      ]
+      : (schemaResp?.parameters ?? [])),
+    [isDeviceTimeGroup, deviceTimeSchemaResp, managementServerSchemaResp, schemaResp],
+  );
+  const isSchemaLoading = isDeviceTimeGroup
+    ? (isDeviceTimeSchemaLoading || isManagementServerSchemaLoading)
+    : isCommonSchemaLoading;
+  const hasSchemaData = isDeviceTimeGroup
+    ? Boolean(deviceTimeSchemaResp && managementServerSchemaResp)
+    : Boolean(schemaResp);
   const ruRouteByIdx = useMemo(() => {
     const map = new Map<string, string>();
     ruSchemaResp?.parameters.forEach((p) => {
@@ -746,9 +782,9 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
 
   const schemaByPath = useMemo(() => {
     const map = new Map<string, ParameterSchemaItem>();
-    schemaResp?.parameters.forEach((p) => map.set(p.path, p));
+    effectiveSchemaParameters.forEach((p) => map.set(p.path, p));
     return map;
-  }, [schemaResp]);
+  }, [effectiveSchemaParameters]);
   const rawParameterByPath = useMemo(() => {
     const map = new Map<string, DeviceParameter>();
     for (const item of [...(mmeIpPlmnParams ?? []), ...(nrCommonParams ?? []), ...(nrNguParams ?? []), ...(deviceTimeParams ?? []), ...(ipsecControlParams ?? [])]) {
@@ -828,7 +864,7 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
   // 初始化字段值 —— 优先级：store draft > 当前会话已 touched > schema 原值。
   // 未保存草稿在跨顶层 TabBar 切换后恢复；任务终态回读后再 clearDraft，统一回到设备侧值。
   useEffect(() => {
-    if (!schemaResp) return;
+    if (!hasSchemaData) return;
     visibleParams.forEach((p) => {
       if (draft && draft[p.name] !== undefined) {
         if (specialConfigByName.get(p.name)?.kind === 'mme-ip-plmn-table') {
@@ -875,7 +911,7 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
         );
       }
     });
-  }, [schemaResp, visibleParams, instanceContext, form, schemaByPath, rawParameterByPath, draft, specialConfigByName, mmeIpPlmnParams, nrNguParams, isDeviceTimeGroup, deviceTimeModeOptions]);
+  }, [hasSchemaData, visibleParams, instanceContext, form, schemaByPath, rawParameterByPath, draft, specialConfigByName, mmeIpPlmnParams, nrNguParams, isDeviceTimeGroup, deviceTimeModeOptions]);
 
   const handleSave = async () => {
     const values = form.getFieldsValue() as Record<string, unknown>;
@@ -980,18 +1016,35 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
   };
 
   // T-0146:Save 后用 task_id 轮询真实 CPE 应答状态;到终态后停轮询。
-  const { data: lastTask } = useDeviceTaskStatus(lastSubmit?.taskId);
+  const { data: lastTask } = useDeviceTaskStatus(active ? lastSubmit?.taskId : undefined);
 
   // 任务终态后只 refetch 当前实例的 schema(精确到 commonPrefix 该份查询),
   // 拿到设备侧最新值后回填表单。不做跨 device 的全量 invalidate。
   useEffect(() => {
+    if (!active) return;
     if (!lastTask || !['completed', 'failed', 'expired', 'cancelled'].includes(lastTask.status)) return;
     if ((lastSubmit?.at ?? 0) < latestLocalEditAtRef.current) return;
     let cancelled = false;
     void (async () => {
-      let refreshed;
+      const refreshedSchemaByPath = new Map<string, ParameterSchemaItem>();
       try {
-        refreshed = await refetch();
+        if (isDeviceTimeGroup) {
+          const [refreshedDeviceTime, refreshedManagementServer] = await Promise.all([
+            refetchDeviceTimeSchema(),
+            refetchManagementServerSchema(),
+          ]);
+          for (const item of refreshedDeviceTime.data?.parameters ?? []) {
+            refreshedSchemaByPath.set(item.path, item);
+          }
+          for (const item of refreshedManagementServer.data?.parameters ?? []) {
+            refreshedSchemaByPath.set(item.path, item);
+          }
+        } else {
+          const refreshed = await refetchCommonSchema();
+          for (const item of refreshed.data?.parameters ?? []) {
+            refreshedSchemaByPath.set(item.path, item);
+          }
+        }
       } catch (err) {
         if (!cancelled) {
           const errMsg = err instanceof Error ? err.message : String(err);
@@ -1005,7 +1058,6 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
       }
       if (cancelled) return;
       const nextValues: Record<string, unknown> = {};
-      const refreshedSchemaByPath = new Map((refreshed.data?.parameters ?? []).map((item) => [item.path, item]));
       for (const p of effectiveParams) {
         const special = specialConfigByName.get(p.name);
         const path = special?.configPath ?? resolveReadPath(p.standardPath || '');
@@ -1024,7 +1076,7 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
     return () => {
       cancelled = true;
     };
-  }, [lastTask?.id, lastTask?.status, lastSubmit?.at, refetch, effectiveParams, instanceContext, form, clearDraft, fbKey, group.titleZh, specialConfigByName, t, isDeviceTimeGroup, deviceTimeModeOptions]);
+  }, [active, lastTask?.id, lastTask?.status, lastSubmit?.at, refetchCommonSchema, refetchDeviceTimeSchema, refetchManagementServerSchema, effectiveParams, instanceContext, form, clearDraft, fbKey, group.titleZh, specialConfigByName, t, isDeviceTimeGroup, deviceTimeModeOptions, queryClient, deviceId]);
 
   // T-0146:基站应答失败时弹一次 notification(只在 status 第一次变成 failed 时触发,避免重复弹)
   // notifiedFailedTaskId 同样存 store —— 切顶层 tab 再切回不会重复弹。
@@ -1052,6 +1104,11 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
     }
     return lastSubmit;
   }, [lastSubmit]);
+
+  useEffect(() => {
+    if (group.id !== 'device-ipsec-control') return;
+    onIpsecControlChange?.(watchedIpsecEnable === undefined ? undefined : String(watchedIpsecEnable));
+  }, [group.id, onIpsecControlChange, watchedIpsecEnable]);
 
   return (
     <Card
@@ -1084,7 +1141,7 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
       }
       style={{ marginBottom: 16 }}
     >
-      <Spin spinning={isLoading}>
+      <Spin spinning={isSchemaLoading}>
       <Form
         form={form}
         layout="vertical"

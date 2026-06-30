@@ -91,6 +91,7 @@ interface FeedbackState {
   setFeedback: (key: string, feedback: Feedback) => void;
   patchFeedback: (key: string, patch: Partial<Feedback>) => void;
   clearByDevice: (deviceId: string) => void;
+  clearDraftsByDevice: (deviceId: string) => void;
 
   setDraftField: (key: string, name: string, value: QuickSettingsDraftValue) => void;
   clearDraft: (key: string) => void;
@@ -137,6 +138,15 @@ export const useQuickSettingsFeedbackStore = create<FeedbackState>()(
           if (!k.startsWith(prefix)) nextDrafts[k] = v;
         }
         set({ entries: next, drafts: nextDrafts });
+      },
+
+      clearDraftsByDevice: (deviceId) => {
+        const nextDrafts: Record<string, Record<string, QuickSettingsDraftValue>> = {};
+        const prefix = `${deviceId}::`;
+        for (const [k, v] of Object.entries(get().drafts)) {
+          if (!k.startsWith(prefix)) nextDrafts[k] = v;
+        }
+        set({ drafts: nextDrafts });
       },
 
       setDraftField: (key, name, value) => {

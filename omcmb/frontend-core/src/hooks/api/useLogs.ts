@@ -12,6 +12,7 @@ export function useOperationLogs(
     operator?: string;
     clientIp?: string;
     module?: string;
+    action?: string;
     operationType?: OperationType;
     result?: OperationResult;
     reason?: string;

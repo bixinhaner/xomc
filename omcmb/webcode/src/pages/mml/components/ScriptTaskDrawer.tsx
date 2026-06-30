@@ -13,7 +13,7 @@ import {
   Space,
   Upload,
 } from 'antd';
-import { DownloadOutlined, UploadOutlined } from '@ant-design/icons';
+import { DownloadOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
 import type { UploadFile } from 'antd';
 import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
@@ -22,6 +22,7 @@ import { useCreateMMLTask } from '@core/hooks/api/useMML';
 import type { MMLExecuteType } from '@core/types/mml';
 import { useT } from '@/hooks/useT';
 import { toast } from '@/utils/toast';
+import DeviceSelectModal from '../Console/components/DeviceSelectModal';
 
 // -----------------------------------------------------------------------------
 // "新建 MML 脚本任务" Drawer —— 由 任务记录（TaskRecord）页"新建任务"入口调用；
@@ -48,6 +49,13 @@ export interface ScriptTaskDrawerProps {
    * 避免用户在 Drawer 里重复输入一次。
    */
   prefillDeviceSns?: string[];
+  /**
+   * 脚本任务页「执行」入口传入已存脚本的 ID（UUID）。
+   * 提交时随 commands 一同发送给后端，后端将其保存在 mml_tasks.script_id，
+   * 用于脚本执行历史关联及 last_run_status 回写。
+   * BUG-06 fix (#706)
+   */
+  scriptId?: string;
   /** 创建成功后回调（例如刷新外层列表、关闭父级 Modal 等） */
   onSuccess?: () => void;
 }
@@ -88,6 +96,7 @@ export default function ScriptTaskDrawer({
   prefillContent,
   prefillTaskName,
   prefillDeviceSns,
+  scriptId,
   onSuccess,
 }: ScriptTaskDrawerProps) {
   const t = useT();
@@ -100,6 +109,8 @@ export default function ScriptTaskDrawer({
   // Console 入口预填的命令文本同样允许用户手动调整（to-do-list 当轮 #6）。
   // 文件入口下，scriptContent 仅在解析完成后用于本地展示，不直接提交。
   const [scriptContent, setScriptContent] = useState('');
+  // BUG-19：设备选择弹框控制
+  const [deviceSelectOpen, setDeviceSelectOpen] = useState(false);
 
   const createTaskMutation = useCreateMMLTask();
   const submitting = createTaskMutation.isPending;
@@ -129,6 +140,12 @@ export default function ScriptTaskDrawer({
   const handleScriptContentChange = useCallback((value: string) => {
     setScriptContent(value);
     setParsedCommands(splitScriptLines(value));
+  }, []);
+
+  // BUG-19：设备选择弹框确认回调——把选中的 SN 追加进来（去重）。
+  const handleDeviceSelect = useCallback((sns: string[], _productId: string) => {
+    setDeviceSns((prev) => Array.from(new Set([...prev, ...sns])));
+    setDeviceSelectOpen(false);
   }, []);
 
   const parseUploadedFile = useCallback((file: File) => {
@@ -204,6 +221,9 @@ export default function ScriptTaskDrawer({
           taskName: values.taskName.trim(),
           deviceSns,
           commands: parsedCommands,
+          // BUG-06 fix (#706)：脚本任务页传入 scriptId 时随 commands 一同提交，
+          // 后端保存 mml_tasks.script_id 用于历史关联与 last_run_status 回写。
+          scriptId: scriptId ?? undefined,
           creator: '',
           executeType: values.executeType,
           offlineRetry: values.offlineRetryEnable,
@@ -245,6 +265,7 @@ export default function ScriptTaskDrawer({
     form,
     deviceSns,
     parsedCommands,
+    scriptId,
     createTaskMutation,
     onSuccess,
     onClose,
@@ -252,6 +273,7 @@ export default function ScriptTaskDrawer({
   ]);
 
   return (
+    <>
     <Drawer
       title={t('mml.newMmlTask')}
       open={open}
@@ -297,21 +319,26 @@ export default function ScriptTaskDrawer({
           <label style={{ display: 'block', marginBottom: 4, fontSize: 14 }}>
             {t('mml.deviceSn')}
           </label>
-          <Select
-            mode="tags"
-            value={deviceSns}
-            onChange={setDeviceSns}
-            placeholder={t('mml.inputDeviceSn')}
-            style={{ width: '100%' }}
-            tokenSeparators={[',', ';', '\n']}
-            open={false}
-          />
+          <Space.Compact style={{ width: '100%' }}>
+            <Select
+              mode="tags"
+              value={deviceSns}
+              onChange={setDeviceSns}
+              placeholder={t('mml.inputDeviceSn')}
+              style={{ flex: 1 }}
+              tokenSeparators={[',', ';', '\n']}
+              open={false}
+            />
+            <Button icon={<PlusOutlined />} onClick={() => setDeviceSelectOpen(true)}>
+              {t('mml.selectDevice')}
+            </Button>
+          </Space.Compact>
           <span style={{ color: '#999', fontSize: 12 }}>{t('mml.deviceSnTip')}</span>
         </div>
 
         {prefillContent !== undefined ? (
           // MML Console 入口：预填的命令也允许用户手动微调（to-do-list 当轮 #6）。
-          <Form.Item label={t('mml.selectScript')} style={{ marginLeft: 12 }}>
+          <Form.Item label={t('mml.scriptContent')} style={{ marginLeft: 12 }}>
             <Input.TextArea
               rows={5}
               value={scriptContent}
@@ -490,6 +517,15 @@ export default function ScriptTaskDrawer({
         </div>
       </Form>
     </Drawer>
+
+    {/* BUG-19：设备选择弹框 */}
+    <DeviceSelectModal
+      open={deviceSelectOpen}
+      value={deviceSns}
+      onCancel={() => setDeviceSelectOpen(false)}
+      onConfirm={handleDeviceSelect}
+    />
+  </>
   );
 }
 
@@ -498,5 +534,7 @@ function splitScriptLines(content: string): string[] {
   return content
     .split(/\r?\n/)
     .map((line) => line.trim())
+    // BUG-01 防御：trim 尾部分号，保持与后端 mml_commands.command_code 格式一致
+    .map((line) => line.replace(/;+$/, '').trimEnd())
     .filter((line) => line && !line.startsWith('#'));
 }

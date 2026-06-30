@@ -26,6 +26,7 @@ export default function OperationLog() {
   const pageSize = 30
   const [keyword, setKeyword] = useState('')
   const [result, setResult] = useState<OperationResult | ''>('')
+  const [selectedLogId, setSelectedLogId] = useState<string | null>(null)
 
   const params = useMemo(
     () => ({
@@ -40,6 +41,7 @@ export default function OperationLog() {
   const rows = data?.items ?? []
   const total = data?.total ?? 0
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
+  const selectedLog = rows.find((log) => log.id === selectedLogId) ?? null
 
   const okCount = useMemo(() => rows.filter((l) => l.result === 'success').length, [rows])
   const failCount = useMemo(() => rows.filter((l) => l.result === 'failure').length, [rows])
@@ -47,8 +49,8 @@ export default function OperationLog() {
   return (
     <PageShell
       code="F06"
-      title="AUDIT · 操作日志"
-      subtitle="OPERATION AUDIT LOG"
+      title="AUDIT · 审计日志"
+      subtitle="操作日志 / 安全日志 / 系统日志共用同一数据源"
       isFetching={isFetching}
       bare
       toolbar={
@@ -123,7 +125,16 @@ export default function OperationLog() {
                   return (
                     <div
                       key={l.id}
-                      className="fleet-row grid grid-cols-[1.5fr_1fr_1fr_2fr_1fr_1.4fr] items-center gap-3 rounded-sm px-3 py-2.5"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setSelectedLogId(l.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          setSelectedLogId(l.id)
+                        }
+                      }}
+                      className="fleet-row grid grid-cols-[1.5fr_1fr_1fr_2fr_1fr_1.4fr] items-center gap-3 rounded-sm px-3 py-2.5 cursor-pointer"
                       style={{
                         ['--row-color' as never]:
                           l.result === 'failure'
@@ -167,6 +178,46 @@ export default function OperationLog() {
               </div>
             </StateBlock>
           </div>
+        </div>
+
+        <div className="glass-strong rounded-sm border border-cyan-500/15 p-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <div className="font-display text-sm font-bold text-cyan-100">DETAIL</div>
+              <div className="text-xs text-cyan-300/60">点击一条记录查看完整内容；若后端未返回 details，则展示摘要。</div>
+            </div>
+            {selectedLog ? (
+              <button
+                type="button"
+                className="rounded-sm border border-cyan-500/25 px-3 py-1 text-xs text-cyan-100/80 transition-colors hover:bg-cyan-500/10"
+                onClick={() => setSelectedLogId(null)}
+              >
+                CLOSE
+              </button>
+            ) : null}
+          </div>
+
+          {selectedLog ? (
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-2 text-sm text-cyan-50/90">
+                <div><span className="text-cyan-300/55">操作人：</span>{selectedLog.operator || '—'}</div>
+                <div><span className="text-cyan-300/55">IP：</span><span className="font-mono">{selectedLog.clientIp || '—'}</span></div>
+                <div><span className="text-cyan-300/55">模块：</span>{selectedLog.module || '—'}</div>
+                <div><span className="text-cyan-300/55">类型：</span>{selectedLog.operationType || '—'}</div>
+                <div><span className="text-cyan-300/55">目标：</span>{selectedLog.target || '—'}</div>
+                <div><span className="text-cyan-300/55">结果：</span>{selectedLog.result || '—'}</div>
+                <div><span className="text-cyan-300/55">时间：</span>{formatTime(selectedLog.operationTime)}</div>
+              </div>
+              <div className="space-y-2 text-sm text-cyan-50/90">
+                <div className="text-cyan-300/55">内容</div>
+                <pre className="max-h-64 overflow-auto rounded-sm bg-cyan-950/40 p-3 text-xs leading-5 whitespace-pre-wrap break-all text-cyan-100/90">
+                  {selectedLog.content || selectedLog.detail || selectedLog.message || '暂无详情内容'}
+                </pre>
+              </div>
+            </div>
+          ) : (
+            <div className="text-sm text-cyan-300/60">当前没有选中记录。</div>
+          )}
         </div>
 
         <Pager page={page} totalPages={totalPages} total={total} pageSize={pageSize} onPage={setPage} />

@@ -399,7 +399,7 @@ func TestDetect_FallsBackToDefaultsAndNoFalsePositive(t *testing.T) {
 		},
 	}
 	r, _ := newTestReconciler(t, repo, nil)
-	// 非法值（非数字）+ 缺失 key → 全退默认 100 / 600。
+	// 非法值（非数字）+ 缺失 key → 全退默认 600 / 600（BUG-05 修复后 ENB 默认也是 600）。
 	r.SetThresholdLookup(func(_ context.Context, _, key string) (string, bool) {
 		if key == offlineConfigKeyENB {
 			return "not-a-number", true
@@ -410,7 +410,7 @@ func TestDetect_FallsBackToDefaultsAndNoFalsePositive(t *testing.T) {
 	r.detect(context.Background())
 
 	require.Len(t, repo.findCalls, 1)
-	assert.Equal(t, defaultENBOfflineSec, repo.findCalls[0].ENBThresholdSec, "非法值退默认 100")
+	assert.Equal(t, defaultENBOfflineSec, repo.findCalls[0].ENBThresholdSec, "非法值退默认 600")
 	assert.Equal(t, defaultCPEOfflineSec, repo.findCalls[0].CPEThresholdSec, "缺失退默认 600")
 	assert.Empty(t, repo.markCalls, "无过期设备不应误判离线")
 }
@@ -484,7 +484,7 @@ func TestNextScanInterval_ExplicitOverridesDynamic(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // resolveOfflineThresholds 在 lookup=nil / 缺失 / 非数字 / 非正数时一律退默认
-// （enb=100, cpe=600）——guard 默认值的纯函数源头。
+// （enb=600, cpe=600，BUG-05 修复后 ENB 也是 600）——guard 默认值的纯函数源头。
 func TestResolveOfflineThresholds_GuardDefaults(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -493,7 +493,7 @@ func TestResolveOfflineThresholds_GuardDefaults(t *testing.T) {
 		wantCPE int
 	}{
 		{
-			name:    "nil lookup → 全退默认 100/600",
+			name:    "nil lookup → 全退默认 600/600",
 			lookup:  nil,
 			wantENB: defaultENBOfflineSec,
 			wantCPE: defaultCPEOfflineSec,
@@ -551,13 +551,13 @@ func TestResolveOfflineThresholds_GuardDefaults(t *testing.T) {
 	}
 }
 
-// 默认常量本身就是 100/600——FindStaleDevicesByClass 的 guard 默认值同源。
+// 默认常量本身就是 600/600（BUG-05 修复后 ENB 也是 600）——FindStaleDevicesByClass 的 guard 默认值同源。
 func TestOfflineDefaultConstants(t *testing.T) {
-	assert.Equal(t, 100, defaultENBOfflineSec, "enb 默认阈值 100")
+	assert.Equal(t, 600, defaultENBOfflineSec, "enb 默认阈值 600（BUG-05 修复）")
 	assert.Equal(t, 600, defaultCPEOfflineSec, "cpe 默认阈值 600")
 }
 
-// 端到端：未注入 lookup 时，一轮扫描下传给仓库的阈值是默认 100/600，limit 是默认
+// 端到端：未注入 lookup 时，一轮扫描下传给仓库的阈值是默认 600/600（BUG-05 修复后），limit 是默认
 // 1000（reconciler batchSize 默认值）——三个 guard 默认值在 detect→Find 链路上兑现。
 func TestDetect_GuardDefaultsHonoredEndToEnd(t *testing.T) {
 	repo := &mockReconcilerRepo{
@@ -568,7 +568,7 @@ func TestDetect_GuardDefaultsHonoredEndToEnd(t *testing.T) {
 	r.detect(context.Background())
 
 	require.Len(t, repo.findCalls, 1)
-	assert.Equal(t, 100, repo.findCalls[0].ENBThresholdSec, "enb 默认 100")
+	assert.Equal(t, 600, repo.findCalls[0].ENBThresholdSec, "enb 默认 600（BUG-05 修复）")
 	assert.Equal(t, 600, repo.findCalls[0].CPEThresholdSec, "cpe 默认 600")
 	assert.Equal(t, 1000, repo.findCalls[0].Limit, "limit 默认 1000（batchSize 默认值）")
 }

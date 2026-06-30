@@ -80,6 +80,7 @@ func (c *CTCCCarrier) GetInfoParamMapping(tech model.Technology) map[string]stri
 		return map[string]string{
 			"Device.Services.FAPService.1.CellConfig.LTE.RAN.Common.CellIdentity":     "eci",
 			"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.PhyCellID":            "pci",
+			"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.EARFCNDL":             "freq_point",
 			"Device.Services.FAPService.1.CellConfig.LTE.RAN.Common.EARFCNDL":         "freq_point",
 			"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.DLBandwidth":          "bandwidth",
 			"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.ReferenceSignalPower": "transmit_power",

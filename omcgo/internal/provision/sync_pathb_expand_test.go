@@ -314,6 +314,47 @@ func TestExpandLargeObjectPrefixes_FirstTimeSyncMidSizedObjectNotExpanded(t *tes
 	assert.Equal(t, []string{"Device.MidObj."}, got, "中等对象应原样保留")
 }
 
+func TestExpandLargeObjectPrefixes_EthernetInterfaceBypassesColdStartExpansion(t *testing.T) {
+	// 非 BTS 对象（如 Device.Ethernet.Interface.）即使字段数足以跨过阈值,也不应按
+	// hintFloor=256 展开成实例盲扫；应优先整对象 GPV,避免 1..256 的坏路径风暴。
+	mappings := make([]parammodel.ParamMapping, 0, 60)
+	for i := 0; i < 60; i++ {
+		mappings = append(mappings, parammodel.ParamMapping{
+			PrivatePath: "Device.Ethernet.Interface.{i}.F" + string(rune('A'+i%26)),
+			IsStorable:  true,
+			IsSupported: true,
+		})
+	}
+	svc := &SyncService{
+		paramRepo: &fakeRepoWithHint{maxByPrefix: map[string]int{}},
+		logger:    zap.NewNop(),
+	}
+	got := svc.expandLargeObjectPrefixes(context.Background(), uuid.New(), mappings,
+		[]string{"Device.Ethernet.Interface."})
+	assert.Equal(t, []string{"Device.Ethernet.Interface."}, got,
+		"Ethernet.Interface 应跳过 cold-start 256 实例展开")
+}
+
+func TestExpandLargeObjectPrefixes_NonBTSLargeObjectBypassesExpansion(t *testing.T) {
+	// 用户要求：久只把 BTS 做实例分批，其它大对象也走整对象 GPV。
+	mappings := make([]parammodel.ParamMapping, 0, 70)
+	for i := 0; i < 70; i++ {
+		mappings = append(mappings, parammodel.ParamMapping{
+			PrivatePath: "Device.OtherLarge.{i}.F" + string(rune('A'+i%26)),
+			IsStorable:  true,
+			IsSupported: true,
+		})
+	}
+	svc := &SyncService{
+		paramRepo: &fakeRepoWithHint{maxByPrefix: map[string]int{}},
+		logger:    zap.NewNop(),
+	}
+	got := svc.expandLargeObjectPrefixes(context.Background(), uuid.New(), mappings,
+		[]string{"Device.OtherLarge."})
+	assert.Equal(t, []string{"Device.OtherLarge."}, got,
+		"非 BTS 大对象应直接整对象 GPV,不做实例展开")
+}
+
 func TestExpandLargeObjectPrefixes_DBLookupErrorFallsBackToHintFloor(t *testing.T) {
 	// DB 失败也要走 hintFloor 兜底,确保 BSC 类大对象不会因 DB 短暂故障而退化为不展开。
 	mappings := make([]parammodel.ParamMapping, 0, 70)
@@ -344,22 +385,22 @@ func TestExpandLargeObjectPrefixes_NonObjectPrefixUnchanged(t *testing.T) {
 	assert.Equal(t, []string{"Device.System.Mode"}, got)
 }
 
-func TestExpandLargeObjectPrefixes_MaxHintCap(t *testing.T) {
-	// 历史里出现异常 1000 个实例,但 maxHintCap=512 → 截断
+func TestExpandLargeObjectPrefixes_BtsExpansionCapsAtMaxHintCap(t *testing.T) {
+	// 仅 BTS 类对象允许实例展开；当历史实例数异常大时，仍要受 maxHintCap 截断保护。
 	mappings := make([]parammodel.ParamMapping, 0, 100)
 	for i := 0; i < 100; i++ {
 		mappings = append(mappings, parammodel.ParamMapping{
-			PrivatePath: "Huge.{i}.F" + string(rune('a'+i%26)),
+			PrivatePath: "DeviceGSM.Bts.{i}.F" + string(rune('a'+i%26)),
 			IsStorable:  true,
 			IsSupported: true,
 		})
 	}
 	svc := &SyncService{
-		paramRepo: &fakeRepoWithHint{maxByPrefix: map[string]int{"Huge.": 1000}},
+		paramRepo: &fakeRepoWithHint{maxByPrefix: map[string]int{"DeviceGSM.Bts.": 1000}},
 		logger:    zap.NewNop(),
 	}
 	got := svc.expandLargeObjectPrefixes(context.Background(), uuid.New(), mappings,
-		[]string{"Huge."})
+		[]string{"DeviceGSM.Bts."})
 	require.Len(t, got, maxHintCap, "超过 maxHintCap 应截断")
 }
 

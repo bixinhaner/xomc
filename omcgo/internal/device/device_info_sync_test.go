@@ -353,7 +353,49 @@ func TestLookupWANMAC(t *testing.T) {
 	}
 }
 
-func TestInfoSyncer_SyncFromParameters_OnlyNRUsesWANMACTraversal(t *testing.T) {
+func TestLookupDeviceInfoMAC(t *testing.T) {
+	cases := []struct {
+		name  string
+		paths map[string]string
+		want  string
+		ok    bool
+	}{
+		{
+			name: "uses x_com device info mac",
+			paths: map[string]string{
+				"Device.DeviceInfo.X_COM_MACAddress": "48:BF:74:2B:C5:D4",
+			},
+			want: "48:BF:74:2B:C5:D4",
+			ok:   true,
+		},
+		{
+			name: "ignores eu instance mac",
+			paths: map[string]string{
+				"Device.DeviceInfo.EU.1.Mac": "00:11:22:33:44:55",
+			},
+			want: "",
+			ok:   false,
+		},
+		{
+			name: "ignores ru instance mac",
+			paths: map[string]string{
+				"Device.DeviceInfo.EU.1.RU.1.Mac": "66:77:88:99:AA:BB",
+			},
+			want: "",
+			ok:   false,
+		},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := lookupDeviceInfoMAC(tt.paths)
+			assert.Equal(t, tt.want, got)
+			assert.Equal(t, tt.ok, ok)
+		})
+	}
+}
+
+func TestInfoSyncer_SyncFromParameters_BackfillsMACFromWANTraversalWhenDirectPathMissing(t *testing.T) {
 	deviceID := uuid.New()
 	params := []model.DeviceParameter{
 		{ParameterPath: "Device.Ethernet.Interface.1.MACAddress", ParameterValue: "00:11:22:33:44:55"},
@@ -365,7 +407,7 @@ func TestInfoSyncer_SyncFromParameters_OnlyNRUsesWANMACTraversal(t *testing.T) {
 	registry := carrier.NewRegistry()
 	registry.Register(testCarrier{})
 
-	t.Run("nr overrides mac with WAN traversal", func(t *testing.T) {
+	t.Run("nr uses WAN traversal", func(t *testing.T) {
 		infoRepo := stubDeviceInfoRepo{updateSyncFields: func(_ context.Context, _ uuid.UUID, fields map[string]interface{}) error {
 			assert.Equal(t, "66:77:88:99:AA:BB", fields["mac"])
 			return nil
@@ -377,10 +419,9 @@ func TestInfoSyncer_SyncFromParameters_OnlyNRUsesWANMACTraversal(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("lte keeps legacy fixed-path behavior", func(t *testing.T) {
+	t.Run("lte also backfills from WAN traversal", func(t *testing.T) {
 		infoRepo := stubDeviceInfoRepo{updateSyncFields: func(_ context.Context, _ uuid.UUID, fields map[string]interface{}) error {
-			_, exists := fields["mac"]
-			assert.False(t, exists)
+			assert.Equal(t, "66:77:88:99:AA:BB", fields["mac"])
 			return nil
 		}}
 		paramRepo := stubDeviceParamRepo{params: params}
@@ -389,6 +430,70 @@ func TestInfoSyncer_SyncFromParameters_OnlyNRUsesWANMACTraversal(t *testing.T) {
 		_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechLTE)
 		assert.NoError(t, err)
 	})
+}
+
+func TestInfoSyncer_SyncFromParameters_PrefersDirectMACPathOverTraversal(t *testing.T) {
+	deviceID := uuid.New()
+	params := []model.DeviceParameter{
+		{ParameterPath: "Device.Ethernet.Interface.MACAddress", ParameterValue: "48:BF:74:2B:C5:D4"},
+		{ParameterPath: "Device.Ethernet.Interface.1.MACAddress", ParameterValue: "00:11:22:33:44:55"},
+		{ParameterPath: "Device.Ethernet.Interface.2.MACAddress", ParameterValue: "66:77:88:99:AA:BB"},
+		{ParameterPath: "Device.Ethernet.Interface.2.IPv4Address.1.PortType", ParameterValue: "WAN"},
+	}
+
+	registry := carrier.NewRegistry()
+	registry.Register(testCarrier{})
+
+	infoRepo := stubDeviceInfoRepo{updateSyncFields: func(_ context.Context, _ uuid.UUID, fields map[string]interface{}) error {
+		assert.Equal(t, "48:BF:74:2B:C5:D4", fields["mac"])
+		return nil
+	}}
+	paramRepo := stubDeviceParamRepo{params: params}
+	syncer := NewInfoSyncer(infoRepo, paramRepo, nil, registry, zap.NewNop())
+
+	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechLTE)
+	assert.NoError(t, err)
+}
+
+func TestInfoSyncer_SyncFromParameters_BackfillsMACFromXCOMWhenStandardPathMissing(t *testing.T) {
+	deviceID := uuid.New()
+	params := []model.DeviceParameter{
+		{ParameterPath: "Device.DeviceInfo.X_COM_MACAddress", ParameterValue: "48:BF:74:2B:C5:D4"},
+	}
+
+	registry := carrier.NewRegistry()
+	registry.Register(testCarrier{})
+
+	infoRepo := stubDeviceInfoRepo{updateSyncFields: func(_ context.Context, _ uuid.UUID, fields map[string]interface{}) error {
+		assert.Equal(t, "48:BF:74:2B:C5:D4", fields["mac"])
+		return nil
+	}}
+	paramRepo := stubDeviceParamRepo{params: params}
+	syncer := NewInfoSyncer(infoRepo, paramRepo, nil, registry, zap.NewNop())
+
+	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechLTE)
+	assert.NoError(t, err)
+}
+
+func TestInfoSyncer_SyncFromParameters_DoesNotUseEUInstanceMAC(t *testing.T) {
+	deviceID := uuid.New()
+	params := []model.DeviceParameter{
+		{ParameterPath: "Device.DeviceInfo.EU.1.Mac", ParameterValue: "00:11:22:33:44:55"},
+	}
+
+	registry := carrier.NewRegistry()
+	registry.Register(testCarrier{})
+
+	infoRepo := stubDeviceInfoRepo{updateSyncFields: func(_ context.Context, _ uuid.UUID, fields map[string]interface{}) error {
+		_, exists := fields["mac"]
+		assert.False(t, exists)
+		return nil
+	}}
+	paramRepo := stubDeviceParamRepo{params: params}
+	syncer := NewInfoSyncer(infoRepo, paramRepo, nil, registry, zap.NewNop())
+
+	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechLTE)
+	assert.NoError(t, err)
 }
 
 func TestInfoSyncer_SyncFromParameters_BackfillsCoordinates(t *testing.T) {
@@ -454,16 +559,17 @@ func (txPowerCarrier) GetInfoParamMapping(tech model.Technology) map[string]stri
 	return nil
 }
 
-// TestInfoSyncer_SyncFromParameters_TransmitPowerSource 锁定 #362：
-// 4G(LTE) 设备的 transmit_power 必须取 carrier adapter 的 ReferenceSignalPower
-// （与 LMT 口径一致），且 universalInformMapping 不再用 Capabilities.MaxTxPower
-// 覆盖它（删除 MaxTxPower→transmit_power 后，单一权威来源生效）。
+// TestInfoSyncer_SyncFromParameters_TransmitPowerSource 锁定设备列表/快速设置统一口径：
+// 优先取可写配置功率 X_COM_MaxTxPowerExpanded；缺失时再退回有效的
+// ReferenceSignalPower；占位值(-1 等)不得写进 device_info.transmit_power。
 func TestInfoSyncer_SyncFromParameters_TransmitPowerSource(t *testing.T) {
 	deviceID := uuid.New()
 	registry := carrier.NewRegistry()
 	registry.Register(txPowerCarrier{})
 
 	const refSignalPath = "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.ReferenceSignalPower"
+	const xcomMaxTxPath = "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.X_COM_MaxTxPowerExpanded"
+	const supportedRangePath = "Device.DeviceInfo.SupportedPowerRange"
 	const maxTxPath = "Device.Services.FAPService.1.Capabilities.MaxTxPower"
 
 	cases := []struct {
@@ -479,6 +585,24 @@ func TestInfoSyncer_SyncFromParameters_TransmitPowerSource(t *testing.T) {
 			want: "18.2",
 		},
 		{
+			name: "X_COM 配置功率优先于 ReferenceSignalPower",
+			params: []model.DeviceParameter{
+				{ParameterPath: refSignalPath, ParameterValue: "18.2"},
+				{ParameterPath: xcomMaxTxPath, ParameterValue: "24"},
+				{ParameterPath: supportedRangePath, ParameterValue: "0,46"},
+			},
+			want: "24",
+		},
+		{
+			name: "ReferenceSignalPower 占位值 -1 时回退到 X_COM 配置功率",
+			params: []model.DeviceParameter{
+				{ParameterPath: refSignalPath, ParameterValue: "-1"},
+				{ParameterPath: xcomMaxTxPath, ParameterValue: "30"},
+				{ParameterPath: supportedRangePath, ParameterValue: "0,46"},
+			},
+			want: "30",
+		},
+		{
 			name: "only MaxTxPower → 不再投影到 transmit_power（#362 已删 universal 映射）",
 			params: []model.DeviceParameter{
 				{ParameterPath: maxTxPath, ParameterValue: "46"},
@@ -486,12 +610,12 @@ func TestInfoSyncer_SyncFromParameters_TransmitPowerSource(t *testing.T) {
 			want: nil,
 		},
 		{
-			name: "both present → 仍取 ReferenceSignalPower，不被 MaxTxPower 覆盖",
+			name: "负数 ReferenceSignalPower 且无 X_COM 时不写 transmit_power",
 			params: []model.DeviceParameter{
-				{ParameterPath: refSignalPath, ParameterValue: "18.2"},
-				{ParameterPath: maxTxPath, ParameterValue: "46"},
+				{ParameterPath: refSignalPath, ParameterValue: "-21"},
+				{ParameterPath: supportedRangePath, ParameterValue: "0,46"},
 			},
-			want: "18.2",
+			want: nil,
 		},
 	}
 
@@ -533,6 +657,9 @@ func TestUniversalInformMapping_NRBandAndULEARFCN(t *testing.T) {
 	assert.Contains(t, instanceTemplatesFor(t, "band"),
 		"Device.Services.FAPService.{f}.CellConfig.{c}.NR.RAN.RF.FreqBandIndicator",
 		"NR FreqBandIndicator 必须在 band 列的实例聚合模板中")
+	assert.Contains(t, instanceTemplatesFor(t, "freq_point"),
+		"Device.Services.FAPService.{f}.CellConfig.LTE.RAN.RF.EARFCNDL",
+		"LTE RAN.RF.EARFCNDL 必须在 freq_point 列的实例聚合模板中，避免列表与详情页频点路径分叉")
 	assert.Contains(t, instanceTemplatesFor(t, "ul_earfcn"),
 		"Device.Services.FAPService.{f}.CellConfig.{c}.NR.RAN.RF.NRARFCNUL",
 		"NR NRARFCNUL 必须在 ul_earfcn 列的实例聚合模板中")
@@ -664,6 +791,43 @@ func TestAggregateInstanceFields_NoMatch(t *testing.T) {
 	assert.Equal(t, "21", fields["pci"], "无命中时单值字段不变")
 	_, hasTac := fields["tac"]
 	assert.False(t, hasTac, "无命中时不引入新字段")
+}
+
+func TestEnforceDeviceInfoFieldSizeLimits_TrimsCSVInsteadOfFailingWholeSync(t *testing.T) {
+	fields := map[string]interface{}{
+		"ipsec_addr": "baicells-epc.cloudapp.net,baicells-east-epc.eastus.cloudapp.azure.com",
+		"pci":        "241,503",
+	}
+
+	enforceDeviceInfoFieldSizeLimits(fields)
+
+	assert.Equal(t, "baicells-epc.cloudapp.net", fields["ipsec_addr"], "超长 CSV 应保留能装进 device_info 列宽的前缀值")
+	assert.Equal(t, "241,503", fields["pci"])
+}
+
+func TestInfoSyncer_SyncFromParameters_OverlongIpsecCSVDoesNotAbortOtherFields(t *testing.T) {
+	deviceID := uuid.New()
+	params := []model.DeviceParameter{
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.LTE.EPC.TAC", ParameterValue: "1"},
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.PhyCellID", ParameterValue: "241"},
+		{ParameterPath: "Device.FAP.Ipsec.1.TUNNEL_GATEWAY", ParameterValue: "baicells-epc.cloudapp.net"},
+		{ParameterPath: "Device.FAP.Ipsec.2.TUNNEL_GATEWAY", ParameterValue: "baicells-east-epc.eastus.cloudapp.azure.com"},
+	}
+
+	registry := carrier.NewRegistry()
+	registry.Register(testCarrier{})
+
+	infoRepo := stubDeviceInfoRepo{updateSyncFields: func(_ context.Context, _ uuid.UUID, fields map[string]interface{}) error {
+		assert.Equal(t, "1", fields["tac"])
+		assert.Equal(t, "241", fields["pci"])
+		assert.Equal(t, "baicells-epc.cloudapp.net", fields["ipsec_addr"])
+		return nil
+	}}
+	paramRepo := stubDeviceParamRepo{params: params}
+	syncer := NewInfoSyncer(infoRepo, paramRepo, nil, registry, zap.NewNop())
+
+	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechLTE)
+	assert.NoError(t, err)
 }
 
 func TestParseRunTimeToSeconds(t *testing.T) {

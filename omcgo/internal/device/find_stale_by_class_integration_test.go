@@ -46,7 +46,8 @@ func TestFindStaleByClass_NullProductClass_UsesENBThreshold_RealPG(t *testing.T)
 	pool := openPoolOrSkipDevice(t)
 	ctx := context.Background()
 
-	// 直接在 PG 上求值与生产同形的 CASE：NULL product_class → 走 ELSE（返回 enb=100）。
+	// 直接在 PG 上求值与生产同形的 CASE：NULL product_class → 走 ELSE（ENB 分支）。
+	// 测试使用 100/600 作为哨兵值区分分支，验证的是 CASE 选择逻辑，不是默认阈值常量。
 	// d 是单行子查询，product_class 列取 NULL，复刻 cpeProductClassPredicate 的判定。
 	const q = `
 SELECT CASE WHEN (
@@ -60,7 +61,7 @@ FROM (SELECT NULL::text AS product_class) d`
 	var chosen int
 	require.NoError(t, pool.QueryRow(ctx, q).Scan(&chosen))
 	assert.Equal(t, 100, chosen,
-		"NULL product_class 应落 ELSE（基站 eNB）阈值 100，而非 CPE 阈值 600")
+		"NULL product_class 应落 ELSE（ENB 分支）返回 100，而非 THEN（CPE 分支）的 600")
 
 	// 对照：显式 CPE product_class 应命中 CPE 分支（600）。
 	const qCPE = `

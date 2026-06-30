@@ -123,8 +123,8 @@ export default function DeviceSelectModal({
     [snListFilter, snKeyword, productApplied, classApplied],
   );
 
-  // 分页表格数据（服务端分页）。
-  const { data: pageResp, isFetching } = useDeviceList(
+  // 分页表格数据（服务端分页）。BUG-03：需要 refetch 供搜索按钮显式触发刷新。
+  const { data: pageResp, isFetching, refetch } = useDeviceList(
     { page, pageSize, ...filterParams },
     { enabled: open },
   );
@@ -146,12 +146,15 @@ export default function DeviceSelectModal({
   const someSelected = selected.length > 0 && !allFilteredSelected;
 
   // 点「搜索」才把草稿筛选条件应用到查询（输入/选择不实时触发，§需求 1）。
+  // BUG-03 修复：显式调用 refetch() 强制重新请求，绕过 React Query staleTime 缓存。
   const doSearch = (): void => {
     setSnKeyword(snInput.trim());
     setProductApplied(productFilter);
     setClassApplied(classFilter);
     setSnListFilter([]); // 普通搜索退出批量输入模式
     setPage(1);
+    // 强制刷新，即使 filterParams 未变也重新请求（用户体感：点搜索必有反应）。
+    void refetch();
   };
 
   // 批量输入：清空已选与 SN/类型筛选，但**保留所选产品**（设备列表强制同一产品，批量也限定在产品内）。

@@ -2,6 +2,7 @@ package provision
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"hash/fnv"
 	"sync"
@@ -823,6 +824,10 @@ func (e *ProvisioningEngine) OnTaskCompleted(ctx context.Context, t *task.Task) 
 	if t == nil || t.SourceID == "" {
 		return
 	}
+	if t.Status == task.TaskStatusCompleted {
+		e.maybeFinalizeRecoveredSyncGPV(ctx, t)
+		return
+	}
 	if t.Status != task.TaskStatusFailed && t.Status != task.TaskStatusExpired {
 		return
 	}
@@ -857,6 +862,51 @@ func (e *ProvisioningEngine) OnTaskCompleted(ctx context.Context, t *task.Task) 
 		zap.String("device_task_id", t.ID),
 		zap.String("device_sn", t.DeviceSN),
 		zap.Int("error_code", t.ErrorCode))
+}
+
+func (e *ProvisioningEngine) maybeFinalizeRecoveredSyncGPV(ctx context.Context, t *task.Task) {
+	if e == nil || e.syncService == nil || e.deviceService == nil || t == nil {
+		return
+	}
+	if t.Method != "GetParameterValues" || !isFullSyncTrigger(t.CommandKey) || len(t.Result) == 0 {
+		return
+	}
+	var result struct {
+		Recovered    bool `json:"recovered"`
+		RemainingCnt int  `json:"remaining_cnt"`
+	}
+	if err := json.Unmarshal(t.Result, &result); err != nil {
+		return
+	}
+	if !result.Recovered || result.RemainingCnt != 0 {
+		return
+	}
+	dev, err := e.deviceService.GetBySerialNumber(ctx, t.DeviceSN)
+	if err != nil {
+		e.logger.Warn("OnTaskCompleted: lookup device for recovered sync finalize failed",
+			zap.String("device_sn", t.DeviceSN),
+			zap.String("device_task_id", t.ID),
+			zap.Error(err))
+		return
+	}
+	if dev == nil {
+		return
+	}
+	if !e.syncService.shouldFinalizePathBSync(ctx, dev, t.CommandKey) {
+		return
+	}
+	if err := e.syncService.finalizePathBSync(ctx, dev); err != nil {
+		e.logger.Warn("OnTaskCompleted: finalize recovered sync-gpv failed",
+			zap.String("device_sn", t.DeviceSN),
+			zap.String("device_task_id", t.ID),
+			zap.String("command_key", t.CommandKey),
+			zap.Error(err))
+		return
+	}
+	e.logger.Info("recovered sync-gpv finalized via completion callback",
+		zap.String("device_sn", t.DeviceSN),
+		zap.String("device_task_id", t.ID),
+		zap.String("command_key", t.CommandKey))
 }
 
 func (e *ProvisioningEngine) failTask(ctx context.Context, task *ProvisioningTask, cause error) error {

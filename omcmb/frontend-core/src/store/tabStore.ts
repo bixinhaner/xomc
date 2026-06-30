@@ -44,6 +44,12 @@ interface TabState {
    * 带同基础路由守卫：仅当 pathname 一致时才更新（避免把别的路由 URL 误写进当前 tab）。
    */
   syncActiveTabPath: (fullPath: string) => void;
+  /**
+   * 路由变化时根据 pathname 激活对应的 tab（若存在）。
+   * 修复 BUG-11：通过侧边栏导航切换页面时 tab 高亮不跟随 URL 的问题。
+   * @returns 是否成功激活了一个已存在的 tab
+   */
+  activateByPath: (pathname: string) => boolean;
   moveTab: (fromIndex: number, toIndex: number) => void;
   // Legacy alias
   setActiveKey: (key: string) => void;
@@ -149,6 +155,17 @@ export const useTabStore = create<TabState>()(
         const next = tabs.slice();
         next[idx] = { ...cur, path: fullPath };
         set({ tabs: next });
+      },
+
+      activateByPath: (pathname) => {
+        const { tabs, activeTabKey } = get();
+        // 查找 path 的 pathname 部分与传入 pathname 匹配的 tab
+        const matchedTab = tabs.find((t) => t.path.split('?')[0] === pathname);
+        if (!matchedTab) return false;
+        // 如果已经是激活状态，不需要更新
+        if (matchedTab.key === activeTabKey) return true;
+        set({ activeTabKey: matchedTab.key });
+        return true;
       },
 
       moveTab: (fromIndex, toIndex) => {

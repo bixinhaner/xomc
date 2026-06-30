@@ -89,6 +89,7 @@ var universalInformInstanceMappings = []struct {
 	}},
 	// 频点 EARFCN / NRARFCNDL（小区级）
 	{column: "freq_point", templates: []string{
+		"Device.Services.FAPService.{f}.CellConfig.LTE.RAN.RF.EARFCNDL",
 		"Device.Services.FAPService.{f}.CellConfig.{c}.NR.RAN.RF.NRARFCNDL",
 		"Device.Services.FAPService.{f}.CellConfig.LTE.RAN.Common.EARFCNDL",
 	}},
@@ -133,6 +134,18 @@ var compiledInstanceAggregationRules []instanceAggregationRule
 // instancePlaceholderRegex 匹配模板字符串中的 `{x}` 通配符（QuoteMeta 后变成
 // `\{x\}`），运行时替换为 `(\d+)` 形成捕获组。
 var instancePlaceholderRegex = regexp.MustCompile(`\\\{[a-zA-Z_]\\\}`)
+
+var deviceInfoVarcharLimits = map[string]int{
+	"admin_state": 16,
+	"band":        16,
+	"cell_id":     64,
+	"freq_point":  32,
+	"ipsec_addr":  64,
+	"lock_status": 16,
+	"pci":         64,
+	"tac":         16,
+	"ul_earfcn":   32,
+}
 
 func init() {
 	for _, m := range universalInformInstanceMappings {
@@ -216,6 +229,48 @@ func aggregateInstanceFields(paramValues map[string]string, fields map[string]in
 			continue
 		}
 		fields[col] = strings.Join(vals, ",")
+	}
+}
+
+func fitCSVWithinLimit(value string, maxLen int) string {
+	if len(value) <= maxLen {
+		return value
+	}
+
+	parts := strings.Split(value, ",")
+	kept := make([]string, 0, len(parts))
+	currentLen := 0
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		nextLen := currentLen + len(part)
+		if len(kept) > 0 {
+			nextLen++
+		}
+		if nextLen > maxLen {
+			break
+		}
+		kept = append(kept, part)
+		currentLen = nextLen
+	}
+	return strings.Join(kept, ",")
+}
+
+func enforceDeviceInfoFieldSizeLimits(fields map[string]interface{}) {
+	for column, maxLen := range deviceInfoVarcharLimits {
+		value, ok := fields[column].(string)
+		if !ok || value == "" || len(value) <= maxLen {
+			continue
+		}
+
+		trimmed := fitCSVWithinLimit(value, maxLen)
+		if trimmed == "" {
+			delete(fields, column)
+			continue
+		}
+		fields[column] = trimmed
 	}
 }
 
@@ -370,6 +425,14 @@ type ethernetInterfaceCandidate struct {
 	score int
 }
 
+func lookupDeviceInfoMAC(paramValues map[string]string) (string, bool) {
+	if v, ok := paramValues["Device.DeviceInfo.X_COM_MACAddress"]; ok && v != "" {
+		return v, true
+	}
+
+	return "", false
+}
+
 func lookupWANMAC(paramValues map[string]string) (string, bool) {
 	if v, ok := paramValues["Device.Ethernet.Interface.MACAddress"]; ok && v != "" {
 		return v, true
@@ -416,6 +479,80 @@ func lookupWANMAC(paramValues map[string]string) (string, bool) {
 	})
 
 	return candidates[0].mac, true
+}
+
+func lookupFirstParamValue(paramValues map[string]string, suffix *regexp.Regexp) string {
+	paths := make([]string, 0, len(paramValues))
+	for path, value := range paramValues {
+		if value == "" || !suffix.MatchString(path) {
+			continue
+		}
+		paths = append(paths, path)
+	}
+	if len(paths) == 0 {
+		return ""
+	}
+	sort.Strings(paths)
+	return strings.TrimSpace(paramValues[paths[0]])
+}
+
+func lookupTransmitPowerBounds(paramValues map[string]string) (float64, float64, bool) {
+	raw := lookupFirstParamValue(paramValues, regexp.MustCompile(`(^|\.)SupportedPower(Range|Level)$`))
+	if raw == "" {
+		return 0, 0, false
+	}
+
+	parts := strings.FieldsFunc(raw, func(r rune) bool {
+		switch r {
+		case ',', '~', '-', ' ':
+			return true
+		default:
+			return false
+		}
+	})
+	if len(parts) != 2 {
+		return 0, 0, false
+	}
+
+	left, errLeft := strconv.ParseFloat(parts[0], 64)
+	right, errRight := strconv.ParseFloat(parts[1], 64)
+	if errLeft != nil || errRight != nil {
+		return 0, 0, false
+	}
+	if left > right {
+		left, right = right, left
+	}
+	return left, right, true
+}
+
+func pickTransmitPowerCandidate(paramValues map[string]string, suffix *regexp.Regexp, minBound, maxBound float64, hasBounds bool) (string, bool) {
+	raw := lookupFirstParamValue(paramValues, suffix)
+	if raw == "" {
+		return "", false
+	}
+	value, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return "", false
+	}
+	if hasBounds {
+		if value < minBound || value > maxBound {
+			return "", false
+		}
+	} else if value < 0 {
+		return "", false
+	}
+	return raw, true
+}
+
+func lookupTransmitPower(paramValues map[string]string) (string, bool) {
+	minBound, maxBound, hasBounds := lookupTransmitPowerBounds(paramValues)
+	if value, ok := pickTransmitPowerCandidate(paramValues, regexp.MustCompile(`(^|\.)X_COM_MaxTxPowerExpanded$`), minBound, maxBound, hasBounds); ok {
+		return value, true
+	}
+	if value, ok := pickTransmitPowerCandidate(paramValues, regexp.MustCompile(`(^|\.)ReferenceSignalPower$`), minBound, maxBound, hasBounds); ok {
+		return value, true
+	}
+	return "", false
 }
 
 func scoreEthernetInterface(index string, paramValues map[string]string) int {
@@ -576,10 +713,17 @@ func (s *InfoSyncer) SyncFromParameters(ctx context.Context, deviceID uuid.UUID,
 			fields[infoColumn] = val
 		}
 	}
-	if tech == model.TechNR {
-		if mac, ok := lookupWANMAC(paramValues); ok {
+	if _, exists := fields["mac"]; !exists {
+		if mac, ok := lookupDeviceInfoMAC(paramValues); ok {
+			fields["mac"] = mac
+		} else if mac, ok := lookupWANMAC(paramValues); ok {
 			fields["mac"] = mac
 		}
+	}
+	if txPower, ok := lookupTransmitPower(paramValues); ok {
+		fields["transmit_power"] = txPower
+	} else {
+		delete(fields, "transmit_power")
 	}
 
 	// PLMN fallback：carrier mapping 一般用 EPC.PLMNList.{n}.PLMNID 路径，
@@ -637,6 +781,7 @@ func (s *InfoSyncer) SyncFromParameters(ctx context.Context, deviceID uuid.UUID,
 	// 必须在所有 carrier mapping + universalInformMapping 写入之后执行,
 	// 单实例设备聚合结果与之前单值等价,多实例设备 list 直接显示 csv 串。
 	aggregateInstanceFields(paramValues, fields)
+	enforceDeviceInfoFieldSizeLimits(fields)
 
 	latitude, longitude, hasCoordinates := lookupGPSCoordinates(paramValues)
 

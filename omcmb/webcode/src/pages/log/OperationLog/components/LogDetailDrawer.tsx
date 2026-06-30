@@ -12,18 +12,26 @@ interface LogDetailDrawerProps {
 const resultColorMap: Record<string, string> = {
   '1': 'success',
   '0': 'error',
+  success: 'success',
+  failure: 'error',
 };
 
 // 结果文本映射
 const resultTextMap: Record<string, string> = {
   '1': '成功',
   '0': '失败',
+  success: '成功',
+  failure: '失败',
 };
 
 export default function LogDetailDrawer({ open, log, onClose }: LogDetailDrawerProps) {
   const t = useT();
 
   if (!log) return null;
+
+  const detailText = log.detail || log.content || log.message || log.reason || '暂无详情内容';
+  const isFailure = String(log.result).toLowerCase() === 'failure' || String(log.result) === '0';
+  const reasonText = isFailure ? (log.reason || log.message || '-') : '-';
 
   return (
     <Drawer
@@ -50,7 +58,7 @@ export default function LogDetailDrawer({ open, log, onClose }: LogDetailDrawerP
         </Descriptions.Item>
         <Descriptions.Item label={t('log.detail')}>
           <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-            {log.detail || log.content || '-'}
+            {detailText}
           </div>
         </Descriptions.Item>
         <Descriptions.Item label={t('log.result')}>
@@ -59,8 +67,8 @@ export default function LogDetailDrawer({ open, log, onClose }: LogDetailDrawerP
           </Tag>
         </Descriptions.Item>
         <Descriptions.Item label={t('log.reason')}>
-          <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all', color: log.result === 'failure' ? '#ff4d4f' : undefined }}>
-            {log.reason || log.message || '-'}
+          <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all', color: isFailure ? '#ff4d4f' : undefined }}>
+            {reasonText}
           </div>
         </Descriptions.Item>
         <Descriptions.Item label={t('log.startTime')}>

@@ -54,6 +54,7 @@ const COLS = 'grid-cols-[150px_110px_120px_1.4fr_90px_140px]'
 
 export default function OperationLogPage() {
   const [page, setPage] = useState(1)
+  const [operator, setOperator] = useState('')
   const [keyword, setKeyword] = useState('')
   const [operationType, setOperationType] = useState<OperationType | ''>('')
   const [result, setResult] = useState<OperationResult | ''>('')
@@ -63,11 +64,12 @@ export default function OperationLogPage() {
     () => ({
       page,
       pageSize: LOG_PAGE_SIZE,
+      ...(operator.trim() ? { operator: operator.trim() } : {}),
       ...(operationType ? { operationType } : {}),
       ...(result ? { result } : {}),
       ...(keyword.trim() ? { keyword: keyword.trim() } : {}),
     }),
-    [page, operationType, result, keyword],
+    [page, operator, operationType, result, keyword],
   )
 
   const { data, isLoading, isError, error, isFetching, refetch } = useOperationLogs(params)
@@ -106,12 +108,21 @@ export default function OperationLogPage() {
 
         <div className="flex flex-wrap items-center gap-2">
           <FilterInput
+            value={operator}
+            onChange={(v) => {
+              setOperator(v)
+              setPage(1)
+            }}
+            placeholder="操作人"
+            icon={<Search />}
+          />
+          <FilterInput
             value={keyword}
             onChange={(v) => {
               setKeyword(v)
               setPage(1)
             }}
-            placeholder="操作员 / 目标 / 内容"
+            placeholder="目标 / 内容"
             icon={<Search />}
           />
           <select

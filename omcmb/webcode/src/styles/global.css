@@ -992,3 +992,22 @@ html, body, #root {
 .ant-table .ant-tag {
   border: none;
 }
+
+/* ===========================================================================
+   Code element — inline code styling for light/dark themes
+   =========================================================================== */
+code {
+  font-family: var(--font-family-mono);
+  padding: 0.2em 0.4em;
+  margin: 0 0.1em;
+  font-size: 0.9em;
+  border-radius: 4px;
+  background-color: var(--color-neutral-100);
+  color: var(--color-neutral-700);
+}
+
+/* Dark theme (tech) code styling — ensure readability */
+[data-theme="tech"] code {
+  background-color: var(--color-neutral-400);
+  color: var(--color-neutral-900);
+}

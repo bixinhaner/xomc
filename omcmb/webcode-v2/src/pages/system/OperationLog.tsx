@@ -68,6 +68,7 @@ export default function OperationLog() {
   const [operator, setOperator] = useState('')
   const [keyword, setKeyword] = useState('')
   const [result, setResult] = useState<ResultFilter>('all')
+  const [selectedLogId, setSelectedLogId] = useState<string | null>(null)
 
   const params = useMemo(
     () => ({
@@ -85,6 +86,7 @@ export default function OperationLog() {
   const rows = data?.items ?? []
   const total = data?.total ?? 0
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const selectedLog = rows.find((log) => log.id === selectedLogId) ?? null
 
   const hasFilter =
     Boolean(operator.trim()) || Boolean(keyword.trim()) || result !== 'all'
@@ -100,8 +102,8 @@ export default function OperationLog() {
 
   return (
     <PageShell
-      title="操作日志"
-      description={`审计日志 · 共 ${total} 条`}
+      title="审计日志"
+      description={`操作日志 / 安全日志 / 系统日志共用同一数据源 · 共 ${total} 条`}
       isFetching={isFetching}
       toolbar={
         <div className="flex w-full flex-wrap items-center gap-2">
@@ -179,7 +181,11 @@ export default function OperationLog() {
                 const rm = RESULT_META[log.result] ?? RESULT_META.failure
                 const opType = log.operationType as OperationType
                 return (
-                  <TableRow key={log.id}>
+                    <TableRow
+                      key={log.id}
+                      className="cursor-pointer"
+                      onClick={() => setSelectedLogId(log.id)}
+                    >
                     <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
                       {formatTime(log.operationTime)}
                     </TableCell>
@@ -219,6 +225,48 @@ export default function OperationLog() {
           </TableBody>
         </Table>
       </TableCard>
+
+      <div className="glass-strong rounded-md border border-border/40 p-4">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div>
+            <div className="text-sm font-semibold text-foreground">详情</div>
+            <div className="text-xs text-muted-foreground">
+              点击上方任一记录查看完整字段；若后端未返回 details，则展示摘要信息。
+            </div>
+          </div>
+          {selectedLog ? (
+            <button
+              type="button"
+              className="rounded-md border border-border px-3 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted"
+              onClick={() => setSelectedLogId(null)}
+            >
+              关闭
+            </button>
+          ) : null}
+        </div>
+
+        {selectedLog ? (
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="space-y-2 text-sm">
+              <div><span className="text-muted-foreground">操作人：</span>{selectedLog.operator || '—'}</div>
+              <div><span className="text-muted-foreground">IP：</span><span className="font-mono">{selectedLog.clientIp || '—'}</span></div>
+              <div><span className="text-muted-foreground">模块：</span>{selectedLog.module || '—'}</div>
+              <div><span className="text-muted-foreground">类型：</span>{selectedLog.operationType || '—'}</div>
+              <div><span className="text-muted-foreground">目标：</span>{selectedLog.target || '—'}</div>
+              <div><span className="text-muted-foreground">结果：</span>{selectedLog.result || '—'}</div>
+              <div><span className="text-muted-foreground">时间：</span>{formatTime(selectedLog.operationTime)}</div>
+            </div>
+            <div className="space-y-2 text-sm">
+              <div className="text-muted-foreground">内容</div>
+              <pre className="max-h-60 overflow-auto rounded-md bg-muted/40 p-3 text-xs leading-5 text-foreground whitespace-pre-wrap break-all">
+                {selectedLog.content || selectedLog.detail || selectedLog.message || '暂无详情内容'}
+              </pre>
+            </div>
+          </div>
+        ) : (
+          <div className="text-sm text-muted-foreground">当前没有选中记录。</div>
+        )}
+      </div>
 
       <Pagination
         page={page}

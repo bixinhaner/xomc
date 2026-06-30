@@ -21,6 +21,12 @@ import { useT } from '@/hooks/useT';
 // 待后端补北向报文日志端点后再恢复（另开 issue）。
 type LogType = 'operation' | 'security' | 'system';
 
+const TAB_ACTION_FILTERS: Record<LogType, string> = {
+  operation: 'config,delete,user_create,password_reset',
+  security: 'login_success,login_failure,logout,password_change,permission_change',
+  system: 'software_upgrade,reboot',
+};
+
 function truncate(str: string, maxLen = 50): string {
   if (!str) return '-';
   if (str.length <= maxLen) return str;
@@ -43,6 +49,7 @@ export default function OperationLogPage() {
     operator: filters.operator as string | undefined,
     clientIp: filters.operateIp as string | undefined,
     module: filters.logName as string | undefined,
+    action: TAB_ACTION_FILTERS[activeTab],
     reason: filters.reason as string | undefined,
     keyword: filters.searchText as string | undefined,
     result: (filters.result as 'success' | 'failure' | undefined),
@@ -76,14 +83,10 @@ export default function OperationLogPage() {
 
   // 获取操作日志名称选项
   const getOperationLogNameOptions = useMemo(() => [
-    { label: t('log.userLogin'), value: 'user_login' },
-    { label: t('log.userLogout'), value: 'user_logout' },
-    { label: t('log.addDevice'), value: 'device_add' },
-    { label: t('log.deleteDevice'), value: 'device_delete' },
     { label: t('log.modifyConfig'), value: 'config_modify' },
-    { label: t('log.softwareUpgrade'), value: 'software_upgrade' },
-    { label: t('log.exportData'), value: 'data_export' },
-    { label: t('log.importData'), value: 'data_import' },
+    { label: t('log.deleteDevice'), value: 'device_delete' },
+    { label: '用户创建', value: 'user_create' },
+    { label: '密码重置', value: 'password_reset' },
   ], [t]);
 
   // 获取安全日志名称选项
@@ -97,11 +100,8 @@ export default function OperationLogPage() {
 
   // 获取系统日志名称选项
   const getSystemLogNameOptions = useMemo(() => [
-    { label: t('log.systemStart'), value: 'system_start' },
-    { label: t('log.systemStop'), value: 'system_stop' },
-    { label: t('log.configBackup'), value: 'config_backup' },
-    { label: t('log.configRestore'), value: 'config_restore' },
-    { label: t('log.dbBackup'), value: 'db_backup' },
+    { label: t('log.softwareUpgrade'), value: 'software_upgrade' },
+    { label: '重启', value: 'reboot' },
   ], [t]);
 
   // 结果颜色映射
@@ -148,7 +148,6 @@ export default function OperationLogPage() {
 
   // 安全日志筛选字段
   const securityFilterFields: FilterField[] = useMemo(() => [
-    { name: 'id', label: 'ID', type: 'input', width: 160 },
     { name: 'operator', label: t('log.operator'), type: 'select', options: mockUserOptions, width: 160 },
     { name: 'operateIp', label: t('log.clientIp'), type: 'input', width: 160 },
     { name: 'logName', label: t('log.logName'), type: 'select', options: getSecurityLogNameOptions, width: 160 },
@@ -167,7 +166,8 @@ export default function OperationLogPage() {
 
   // 系统日志筛选字段
   const systemFilterFields: FilterField[] = useMemo(() => [
-    { name: 'id', label: 'ID', type: 'input', width: 160 },
+    { name: 'operator', label: t('log.operator'), type: 'select', options: mockUserOptions, width: 160 },
+    { name: 'operateIp', label: t('log.clientIp'), type: 'input', width: 160 },
     { name: 'logName', label: t('log.logName'), type: 'select', options: getSystemLogNameOptions, width: 160 },
     {
       name: 'result',
@@ -180,7 +180,7 @@ export default function OperationLogPage() {
       width: 160,
     },
     { name: 'timeRange', label: t('log.timeRange'), type: 'date-range', showTime: true, width: 320 },
-  ], [t, getSystemLogNameOptions]);
+  ], [t, mockUserOptions, getSystemLogNameOptions]);
 
   // 根据当前 tab 获取筛选字段
   const getFilterFields = useCallback(() => {
@@ -196,12 +196,6 @@ export default function OperationLogPage() {
 
   // 操作日志表格列
   const operationColumns: DataTableColumn<OperationLog & Record<string, unknown>>[] = useMemo(() => [
-    {
-      key: 'id',
-      title: 'ID',
-      dataIndex: 'id',
-      width: 80,
-    },
     {
       key: 'operator',
       title: t('log.operator'),
@@ -281,7 +275,7 @@ export default function OperationLogPage() {
       case 'security':
         return operationColumns.filter((col) => col.key !== 'endTime');
       case 'system':
-        return operationColumns.filter((col) => !['operator', 'clientIp', 'endTime'].includes(col.key as string));
+        return operationColumns.filter((col) => col.key !== 'endTime');
       default:
         return operationColumns;
     }
@@ -294,9 +288,9 @@ export default function OperationLogPage() {
         activeKey={activeTab}
         onChange={handleTabChange}
         items={[
-          { key: 'operation', label: t('log.operationLog') },
-          { key: 'security', label: t('log.securityLog') },
-          { key: 'system', label: t('log.systemLog') },
+          { key: 'operation', label: `${t('log.operationLog')}（配置/删除/用户管理）` },
+          { key: 'security', label: `${t('log.securityLog')}（登录/退出）` },
+          { key: 'system', label: '系统管理审计（升级/重启）' },
         ]}
       />
 

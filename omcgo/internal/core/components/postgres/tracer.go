@@ -15,6 +15,22 @@ type querySQLKey struct{}
 type queryArgsKey struct{}
 type batchStartTimeKey struct{}
 
+// sanitizeParams converts []byte to string for better log readability.
+// JSON/JSONB arguments are often []byte and would otherwise be base64-encoded.
+func sanitizeParams(args []any) []any {
+	result := make([]any, len(args))
+	for i, arg := range args {
+		switch v := arg.(type) {
+		case []byte:
+			// Convert byte slice to string for readable JSON/JSONB output
+			result[i] = string(v)
+		default:
+			result[i] = arg
+		}
+	}
+	return result
+}
+
 // SQLTracer implements pgx.Tracer for SQL logging with request_id support.
 type SQLTracer struct {
 	logger        *zap.Logger
@@ -70,7 +86,7 @@ func (t *SQLTracer) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data pgx.Tra
 	// Log parameters if enabled
 	if t.logParams {
 		if args, ok := ctx.Value(queryArgsKey{}).([]any); ok && len(args) > 0 {
-			fields = append(fields, zap.Any("params", args))
+			fields = append(fields, zap.Any("params", sanitizeParams(args)))
 		}
 	}
 

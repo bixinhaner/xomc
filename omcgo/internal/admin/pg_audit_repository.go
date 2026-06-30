@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
@@ -65,8 +66,19 @@ func (r *PgAuditRepository) List(ctx context.Context, filter AuditLogFilter) (*m
 		countBase = countBase.Where(sq.ILike{"username": pattern})
 	}
 	if filter.Action != nil && *filter.Action != "" {
-		base = base.Where(sq.Eq{"action": *filter.Action})
-		countBase = countBase.Where(sq.Eq{"action": *filter.Action})
+		rawActions := strings.Split(*filter.Action, ",")
+		conditions := make(sq.Or, 0, len(rawActions))
+		for _, rawAction := range rawActions {
+			action := strings.TrimSpace(rawAction)
+			if action == "" {
+				continue
+			}
+			conditions = append(conditions, sq.ILike{"action": ilikePattern(action)})
+		}
+		if len(conditions) > 0 {
+			base = base.Where(conditions)
+			countBase = countBase.Where(conditions)
+		}
 	}
 	if filter.Resource != nil && *filter.Resource != "" {
 		pattern := "%" + *filter.Resource + "%"

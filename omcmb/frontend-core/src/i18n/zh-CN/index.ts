@@ -6088,6 +6088,7 @@ const messages: Record<string, string> = {
   'mml.deviceSn':                            '设备SN',
   'mml.inputDeviceSn':                       '输入设备SN，按回车添加',
   'mml.deviceSnTip':                         '输入SN后按回车确认，支持逗号分隔',
+  'mml.selectDevice':                        '选择设备',
   'mml.executionTime':                       '执行时间',
   'mml.output':                              '输出',
 
@@ -6213,6 +6214,7 @@ const messages: Record<string, string> = {
   'mml.console.commandName':                 '命令名称',
   'mml.console.inputCommandName':            '请输入命令名称',
   'mml.console.commandCode':                 '命令编码（命令编码必须自定义，且全局唯一，建议输入自定义前缀）',
+  'mml.console.commandCodeLabel':            '命令编码',
   'mml.console.commandCodeRequired':         '请输入命令编码',
   'mml.console.commandCodeTextareaPlaceholder': '请输入自定义命令编码',
   'mml.console.commandCodeTextareaTip':      '',

@@ -137,6 +137,14 @@ interface BackendUpdateResponse {
   task_id?: string; // T-0146:后端任务 ID,前端用 useTaskStatus 轮询真实 CPE 应答状态
 }
 
+const PARAMETER_SCHEMA_CACHE_TTL_MS = 5 * 60 * 1000;
+const parameterSchemaInflight = new Map<string, Promise<ParameterSchemaResponse>>();
+const parameterSchemaCache = new Map<string, { expiresAt: number; value: ParameterSchemaResponse }>();
+
+function parameterSchemaCacheKey(deviceId: string, pathPrefix?: string) {
+  return `${deviceId}::${pathPrefix ?? ''}`;
+}
+
 // Mappers
 function mapBackendConstraints(bc: BackendConstraints | undefined): ParameterConstraints | undefined {
   if (!bc) return undefined;
@@ -259,6 +267,33 @@ function mapBackendSyncStatus(bs: BackendSyncStatus): ParameterSyncStatus {
 }
 
 export const deviceParameterApi = {
+  invalidateParameterSchemaCache(deviceId?: string, pathPrefix?: string) {
+    if (!deviceId) {
+      parameterSchemaInflight.clear();
+      parameterSchemaCache.clear();
+      return;
+    }
+
+    if (pathPrefix !== undefined) {
+      const key = parameterSchemaCacheKey(deviceId, pathPrefix);
+      parameterSchemaInflight.delete(key);
+      parameterSchemaCache.delete(key);
+      return;
+    }
+
+    const deviceKeyPrefix = `${deviceId}::`;
+    for (const key of parameterSchemaInflight.keys()) {
+      if (key.startsWith(deviceKeyPrefix)) {
+        parameterSchemaInflight.delete(key);
+      }
+    }
+    for (const key of parameterSchemaCache.keys()) {
+      if (key.startsWith(deviceKeyPrefix)) {
+        parameterSchemaCache.delete(key);
+      }
+    }
+  },
+
   async getParameters(
     deviceId: string,
     params?: ParameterFilter & PageRequest
@@ -349,15 +384,29 @@ export const deviceParameterApi = {
     deviceId: string,
     pathPrefix?: string
   ): Promise<ParameterSchemaResponse> {
+    const inflightKey = parameterSchemaCacheKey(deviceId, pathPrefix);
+    const cached = parameterSchemaCache.get(inflightKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.value;
+    }
+    if (cached) {
+      parameterSchemaCache.delete(inflightKey);
+    }
+
+    const existing = parameterSchemaInflight.get(inflightKey);
+    if (existing) {
+      return existing;
+    }
+
     const params: Record<string, string> = {};
     if (pathPrefix) params.path_prefix = pathPrefix;
 
-    const { data } = await http.get<BackendSchemaResponse>(
+    const request = http.get<BackendSchemaResponse>(
       `/devices/${deviceId}/parameters/schema`,
       { params }
-    );
-    return {
-      parameters: (data.parameters || []).map((p) => ({
+    ).then(({ data }) => {
+      const mapped = {
+        parameters: (data.parameters || []).map((p) => ({
         path: p.path,
         type: normalizeParameterType(p.type),
         writable: p.writable,
@@ -372,7 +421,7 @@ export const deviceParameterApi = {
         currentValue: p.current_value,
         lastSyncedAt: p.last_synced_at,
       })),
-      objects: (data.objects || []).map((o) => ({
+        objects: (data.objects || []).map((o) => ({
         path: o.path,
         access: o.access,
         maxInstances: o.max_instances,
@@ -382,8 +431,19 @@ export const deviceParameterApi = {
         canDeleteAny: o.can_delete_any,
         isList: o.is_list,
       })),
-      total: data.total,
-    };
+        total: data.total,
+      };
+      parameterSchemaCache.set(inflightKey, {
+        expiresAt: Date.now() + PARAMETER_SCHEMA_CACHE_TTL_MS,
+        value: mapped,
+      });
+      return mapped;
+    }).finally(() => {
+      parameterSchemaInflight.delete(inflightKey);
+    });
+
+    parameterSchemaInflight.set(inflightKey, request);
+    return request;
   },
 
   async getObjectTree(deviceId: string): Promise<ParameterTreeNode[]> {

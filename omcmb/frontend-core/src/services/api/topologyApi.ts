@@ -532,6 +532,7 @@ export const topologyApi = {
     const { data } = await http.get<{ items: BackendSearchResult[] }>('/devices/search', {
       params: { keyword },
       signal,
+      timeout: 10_000,
     });
     return (data.items || []).map(mapBackendSearchResult);
   },
@@ -590,7 +591,7 @@ function mapBackendStats(bs: BackendMapStats): MapStats {
   // 旧格式：{ online: number, offline: number } (后端统计不完整)
   let statusCount: Record<DeviceStatus, number>;
 
-  // 防御性空值处理：后端可能返回 null 或缺省 status_count
+  // 防御性空值处理：后端可能在极端情况下返回 null 或缺省字段
   const rawCount = (bs.status_count ?? {}) as Record<string, number>;
   if ('onlineActive' in rawCount) {
     // 新格式：直接使用
@@ -638,9 +639,9 @@ function mapBackendStats(bs: BackendMapStats): MapStats {
   }
 
   return {
-    total: bs.total ?? 0,
+    total: bs.total,
     statusCount,
-    alarmCount: bs.alarm_count ?? 0,
+    alarmCount: bs.alarm_count,
     typeCount: bs.type_count as Record<DeviceType, number> | undefined,
     viewportCount: bs.viewport_count,
     center: bs.center ? { lat: bs.center.lat, lng: bs.center.lng } : undefined,
