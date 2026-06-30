@@ -119,26 +119,68 @@ export function createHighlightStyle(
         fill: new Fill({ color: 'transparent' }),
         stroke: new Stroke({
           color: `rgba(24, 144, 255, ${Math.max(0, Math.min(1, wave.opacity))})`,
-          width: 2.5,
+          width: 6,
         }),
       }),
     }));
   }
 
-  // 中心节点：蓝色加粗边框 + 外发光晕
+  // ── 选中环：白色衬底（确保蓝环在任何背景下均清晰可见）──
   styles.push(new Style({
     image: new Circle({
-      radius: baseRadius + 3,
-      fill: new Fill({ color: 'rgba(24, 144, 255, 0.18)' }),
+      radius: baseRadius + 18,
+      fill: new Fill({ color: 'transparent' }),
+      stroke: new Stroke({
+        color: 'rgba(255, 255, 255, 0.90)',
+        width: 7,
+      }),
     }),
   }));
+
+  // ── 选中环：蓝色（在白色衬底上方）──
+  styles.push(new Style({
+    image: new Circle({
+      radius: baseRadius + 18,
+      fill: new Fill({ color: 'transparent' }),
+      stroke: new Stroke({
+        color: 'rgba(24, 144, 255, 1.0)',
+        width: 3.5,
+      }),
+    }),
+  }));
+
+  // ── 外发光晕（大范围柔光）──
+  styles.push(new Style({
+    image: new Circle({
+      radius: baseRadius + 11,
+      fill: new Fill({ color: 'rgba(24, 144, 255, 0.40)' }),
+    }),
+  }));
+
+  // ── 内发光晕（紧贴节点）──
+  styles.push(new Style({
+    image: new Circle({
+      radius: baseRadius + 5,
+      fill: new Fill({ color: 'rgba(24, 144, 255, 0.65)' }),
+    }),
+  }));
+
+  // ── 白色衬底（让彩色节点中心在深色/浅色地图上都清晰）──
+  styles.push(new Style({
+    image: new Circle({
+      radius: baseRadius + 1,
+      fill: new Fill({ color: 'rgba(255, 255, 255, 0.95)' }),
+    }),
+  }));
+
+  // ── 中心节点：状态色 + 加粗蓝边框 ──
   styles.push(new Style({
     image: new Circle({
       radius: baseRadius,
       fill: new Fill({ color: config.color }),
       stroke: new Stroke({
         color: COLORS.primary,
-        width: 3,
+        width: 4,
       }),
     }),
   }));
@@ -176,7 +218,8 @@ export function deviceStyleFunction(feature: Feature, resolution: number): Style
   // 检查是否高亮
   const isHighlighted = feature.get('highlighted');
   if (isHighlighted) {
-    return createHighlightStyle(device, zoom);
+    const rippleWaves = feature.get('rippleWaves') || [];
+    return createHighlightStyle(device, zoom, rippleWaves);
   }
 
   // 检查是否悬停
@@ -218,7 +261,9 @@ export function clusterStyleFunction(feature: Feature, _resolution: number): Sty
     if (isHighlighted) {
       // 获取水波纹数据
       const rippleWaves = singleFeature.get('rippleWaves') || [];
-      return createHighlightStyle(device, 15, rippleWaves);
+      // 使用实际 zoom 而非硬编码 15，确保各缩放级别的选中环大小与 marker 相称
+      const actualZoom = Math.round(Math.log2(40075016.686 / (_resolution * 256)));
+      return createHighlightStyle(device, actualZoom, rippleWaves);
     }
 
     // 检查是否悬停

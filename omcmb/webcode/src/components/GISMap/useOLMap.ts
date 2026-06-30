@@ -12,7 +12,6 @@ import VectorLayer from 'ol/layer/Vector';
 import VectorSource from 'ol/source/Vector';
 import Cluster from 'ol/source/Cluster';
 import XYZ from 'ol/source/XYZ';
-import type ImageTile from 'ol/ImageTile';
 import Feature from 'ol/Feature';
 import Point from 'ol/geom/Point';
 import LineString from 'ol/geom/LineString';
@@ -20,8 +19,6 @@ import { fromLonLat, toLonLat } from 'ol/proj';
 import { containsCoordinate, buffer as bufferExtent, boundingExtent } from 'ol/extent';
 import type { Extent } from 'ol/extent';
 import { defaults as defaultControls } from 'ol/control';
-import { unByKey } from 'ol/Observable';
-import type { EventsKey } from 'ol/events';
 import { Style, Stroke, Circle, Fill, Text } from 'ol/style';
 import type { StyleLike } from 'ol/style/Style';
 import type { MapDevice, MapViewport, MapBounds } from '@core/types/map';
@@ -110,12 +107,6 @@ interface UseOLMapOptions {
   onZoomChange?: (zoom: number) => void;
   /** 地图点击回调（点击任意位置时触发） */
   onMapClick?: () => void;
-  /**
-   * 中心点就绪信号（默认 true，向后兼容）。
-   * false 时 OL 延迟初始化，等待可靠中心点到达（stats/离线地图元数据加载完成）后才创建地图实例。
-   * 这样可保证 OL 首次以正确坐标初始化，设备首屏即在可视范围内，无需 flyTo 修正。
-   */
-  centerReady?: boolean;
 }
 
 interface UseOLMapReturn {
@@ -125,7 +116,7 @@ interface UseOLMapReturn {
   mapInstanceRef: React.MutableRefObject<Map | null>;
   /** 更新设备数据 */
   updateDevices: (devices: MapDevice[]) => void;
-  /** 清除所有设备数据（筛选条件变化时调用） */
+  /** 清除所有设备数据并重置图层 */
   clearDevices: () => void;
   /** 获取当前视图状态 */
   getViewport: () => MapViewport | null;
@@ -157,8 +148,9 @@ interface UseOLMapReturn {
   /** 元数据加载状态 */
   metadataLoading: boolean;
   /**
-   * 动态调整瓦片并发数（0 = 暂停队列，正常为 3）
-   * 搜索时可临时降低，为 API 请求让出连接
+   * 动态调整瓦片并发上限（0 = 暂停队列，正常值建议 3-6）
+   * 搜索期间调低可为 API 请求让出 TCP 连接；搜索完成后恢复
+   * 注：当前为占位实现，OL 瓦片并发控制待后续版本落地
    */
   setTileConcurrency: (n: number) => void;
 }
@@ -235,7 +227,6 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
     onMapClick,
     defaultCenter,
     defaultZoom,
-    centerReady = true,
   } = options;
 
   const mapRef = useRef<HTMLDivElement>(null);
@@ -245,6 +236,8 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
   const allDevicesRef = useRef<MapDevice[]>([]);
   // 视口裁剪函数引用（在 moveend 中调用，避免 bindMapEvents 签名漂移）
   const cullDevicesRef = useRef<(() => void) | null>(null);
+  // 批量渲染 ID（用于取消上一批未完成的 rAF 渲染，防止并发写入 VectorSource）
+  const renderBatchIdRef = useRef(0);
   // 强制保留渲染的设备 id（如搜索定位目标）：即便落在视口外也始终渲染，
   // 避免裁剪把搜索高亮的目标点剔除导致定位失败。
   const pinnedDeviceIdsRef = useRef<Set<string>>(new Set());
@@ -256,37 +249,21 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
   const pulseAnimationRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // 波纹创建定时器
   const rippleCreateRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  // 波纹状态数组（已废弃，保留字段以防旧代码引用）
+  // 波纹状态数组
   const rippleWavesRef = useRef<{ radius: number; opacity: number }[]>([]);
-  // rAF 水波纹动画 ID（新实现）
-  const rippleRafRef = useRef<number | null>(null);
-  // 水波纹开始时间戳
-  const rippleStartTimeRef = useRef<number>(0);
+  // 当前高亮设备的 ID（用于 renderDeviceFeatures 重建 feature 时恢复高亮状态）
+  const highlightedDeviceIdRef = useRef<string | null>(null);
   // Spiderfy 状态
   const spiderfyLayerRef = useRef<VectorLayer<VectorSource> | null>(null);
   const spiderfySourceRef = useRef<VectorSource | null>(null);
   const isSpiderfiedRef = useRef(false);
   const spiderfiedCenterRef = useRef<number[] | null>(null);
-  // zoom 刷新 spiderfy 所需的快照：展开时保存，zoom 变化时用新 resolution 重算坐标
-  const spiderfyDisplayFeaturesRef = useRef<Feature[]>([]);
-  // 真实聚合总数（含截断部分）：refresh 时保持中心球数字与展示总数一致
-  const spiderfyTotalCountRef = useRef<number>(0);
-  // 瓦片并发控制（可动态调整，搜索时降低以让出连接给 API）
-  const tileConcurrencyRef = useRef<number>(3);
-  const activeTileCountRef = useRef<number>(0);
-  const tileLoadQueueRef = useRef<Array<() => void>>([]);
-  // drainTileQueue 用 ref 保存，供瓦片加载回调和 setTileConcurrency 共用，避免逻辑重复
-  const drainTileQueueRef = useRef<() => void>(() => {});
   // 高亮请求 ID（用于防止竞态条件）
   const highlightRequestIdRef = useRef(0);
   // “程序化飞行”计数器：progressiveFlyTo / flyTo / view.fit 起始 +1、结束 -1。
   // 在 bindMapEvents 的 moveend 处理里用它跳过中间档位的 onViewportChange，
   // 避免一次下钻发 N 个 /devices/geo 请求。用计数器而非布尔是为了能背丝安全地处理嵌套/重入。
   const isProgrammaticFlyingRef = useRef(0);
-  // Cluster distance 过渡动画 rAF ID（进行中时非 null）
-  const clusterAnimRafRef = useRef<number | null>(null);
-  // true = 正在执行 cluster distance 过渡动画，change 监听器期间跳过 birthTime 标记
-  const clusterDistAnimActiveRef = useRef(false);
 
   const [isReady, setIsReady] = useState(false);
 
@@ -298,9 +275,6 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
     spiderfySourceRef.current.clear();
     isSpiderfiedRef.current = false;
     spiderfiedCenterRef.current = null;
-    // 同步清理快照，避免内存泄漏
-    spiderfyDisplayFeaturesRef.current = [];
-    spiderfyTotalCountRef.current = 0;
 
     // 注意：VectorSource.clear() 会自动触发渲染，手动调用 render() 可能冗余
     // 保留此行以确保兼容性，后续可移除并测试验证
@@ -423,146 +397,22 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
 
     isSpiderfiedRef.current = true;
     spiderfiedCenterRef.current = center;
-    // 保存快照，供 zoom 变化时 refreshSpiderfy 重算坐标
-    // totalCount 保留真实聚合总数（含截断部分），保证中心球数字始终正确
-    spiderfyDisplayFeaturesRef.current = displayFeatures;
-    spiderfyTotalCountRef.current = count;
 
     // 触发地图重新渲染
     mapInstanceRef.current.render();
   }, [unspiderfy]);
 
-  /**
-   * zoom 变化时，用新的 resolution 重算 spiderfy 节点坐标并刷新图层，
-   * 使子节点的屏幕间距保持不变（始终约 SPIDERFY_CONFIG.radius 像素）。
-   * 替代原先的 unspiderfy()，避免用户放大查看节点时展开被销毁。
-   */
-  const refreshSpiderfy = useCallback(() => {
-    if (
-      !isSpiderfiedRef.current ||
-      !spiderfySourceRef.current ||
-      !spiderfiedCenterRef.current ||
-      !mapInstanceRef.current
-    ) return;
-
-    const center = spiderfiedCenterRef.current;
-    const displayFeatures = spiderfyDisplayFeaturesRef.current;
-    if (!displayFeatures.length) return;
-
-    const displayCount = displayFeatures.length;
-    // totalCount = 真实聚合总数（含截断部分），用于中心球数字和 pointFeature.total，
-    // 保证 zoom 变化后语义与初次展开完全一致。
-    const totalCount = spiderfyTotalCountRef.current || displayCount;
-    // 注意：center 是 spiderfy 展开时的聚合中心，不变；
-    // 只有 resolution 随 zoom 变化，重算各节点的地图坐标。
-    const resolution = mapInstanceRef.current.getView().getResolution()!;
-
-    const ringArcSpacing = SPIDERFY_CONFIG.ringArcSpacing ?? 28;
-    const ringRadiusStep = SPIDERFY_CONFIG.ringRadiusStep ?? 45;
-    const rings: { radius: number; count: number; angleStep: number }[] = [];
-    let remaining = displayCount;
-    let currentRadius = SPIDERFY_CONFIG.radius;
-    while (remaining > 0) {
-      const capacity = Math.max(
-        12,
-        Math.floor((2 * Math.PI * currentRadius) / ringArcSpacing),
-      );
-      const pts = Math.min(remaining, capacity);
-      rings.push({
-        radius: currentRadius,
-        count: pts,
-        angleStep: (2 * Math.PI) / pts,
-      });
-      remaining -= pts;
-      currentRadius += ringRadiusStep;
-    }
-
-    const newFeatures: Feature[] = [];
-    const startAngle = -Math.PI / 2;
-
-    // 中心点 count 始终用真实总数，保证放大/缩小时蓝球数字不变
-    const centerFeature = new Feature({
-      geometry: new Point(center),
-      spiderfyCenter: true,
-      count: totalCount,
-    });
-    newFeatures.push(centerFeature);
-
-    let cursor = 0;
-    rings.forEach((ring) => {
-      for (let k = 0; k < ring.count; k++) {
-        const f = displayFeatures[cursor];
-        const device = f.getProperties() as MapDevice;
-        const angle = startAngle + k * ring.angleStep;
-        const pixelOffset = [
-          Math.cos(angle) * ring.radius,
-          Math.sin(angle) * ring.radius,
-        ];
-        const pointCoordinate = [
-          center[0] + pixelOffset[0] * resolution,
-          center[1] - pixelOffset[1] * resolution,
-        ];
-
-        newFeatures.push(new Feature({
-          geometry: new LineString([center, pointCoordinate]),
-          spiderfyLine: true,
-        }));
-
-        newFeatures.push(new Feature({
-          geometry: new Point(pointCoordinate),
-          spiderfyPoint: true,
-          device,
-          index: cursor,
-          total: totalCount,
-        }));
-
-        cursor++;
-      }
-    });
-
-    // 原子替换：clear + addFeatures 在同一同步帧内，避免闪烁
-    spiderfySourceRef.current.clear();
-    spiderfySourceRef.current.addFeatures(newFeatures);
-    mapInstanceRef.current.render();
-  }, []);
-
-  // 根据缩放级别动态调整聚合距离（缓动过渡，避免瞬间跳变）
+  // 根据缩放级别动态调整聚合距离（按 CLUSTER_CONFIG.distanceTiers 查表）
   const updateClusterDistance = useCallback((zoom: number) => {
     if (!clusterSourceRef.current) return;
 
     const newDistance = getClusterDistanceForZoom(zoom);
-    const fromDistance = clusterSourceRef.current.getDistance();
-    if (fromDistance === newDistance) return;
 
-    // 取消上一帧动画，从当前中间值重新开始（防止快速缩放时动画叠加）
-    if (clusterAnimRafRef.current != null) {
-      cancelAnimationFrame(clusterAnimRafRef.current);
-      clusterAnimRafRef.current = null;
-    }
-
-    const DURATION = 250; // ms，easeOutCubic
-    const startTime = performance.now();
-    clusterDistAnimActiveRef.current = true;
-
-    const step = (now: number) => {
-      const t = Math.min(1, (now - startTime) / DURATION);
-      const eased = 1 - Math.pow(1 - t, 3); // easeOutCubic
-      const currentDistance = fromDistance + (newDistance - fromDistance) * eased;
-
-      clusterSourceRef.current?.setDistance(currentDistance);
+    if (clusterSourceRef.current.getDistance() !== newDistance) {
+      clusterSourceRef.current.setDistance(newDistance);
+      clusterSourceRef.current.refresh();
       mapInstanceRef.current?.render();
-
-      if (t < 1) {
-        clusterAnimRafRef.current = requestAnimationFrame(step);
-      } else {
-        clusterAnimRafRef.current = null;
-        clusterDistAnimActiveRef.current = false;
-        // 确保最终值精确，消除浮点误差
-        clusterSourceRef.current?.setDistance(newDistance);
-      }
-    };
-
-    clusterAnimRafRef.current = requestAnimationFrame(step);
+    }
   }, []);
 
   // 使用 ref 跟踪地图是否已初始化（避免依赖项导致的重复初始化）
@@ -577,16 +427,18 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
     if (!mapRef.current || mapInstanceRef.current) return;
     // 等待元数据加载完成
     if (metadataLoading) return;
-    // 等待可靠中心点就绪（stats 或离线地图元数据），保证 OL 以正确坐标初始化。
-    // 默认 true（向后兼容），GISMapView 在有设备中心点数据后才传 true。
-    if (!centerReady) return;
+    // 等待瓦片可用性检查完成（null = 检查进行中）
+    // 需要确认结果后再初始化，才能根据可用性选择正确的瓦片 URL
+    if (tilesAvailable === null) return;
 
     // 标记初始化开始
     isMapInitializedRef.current = true;
 
-    // 创建瓦片图层
-    // 优先级：传入的 tileUrl > 环境变量 > 元数据配置 > 默认 OSM
-    const finalTileUrl = tileUrl || import.meta.env.VITE_MAP_TILE_URL || config.tileUrl;
+    // 瓦片地址决策：只有确认离线瓦片可用时才走离线路径
+    // 否则强制使用在线 OSM，避免 VITE_MAP_TILE_URL 的高优先级覆盖降级逻辑导致 502 报错
+    const finalTileUrl = tilesAvailable === true
+      ? (tileUrl || import.meta.env.VITE_MAP_TILE_URL || '/tiles/{z}/{x}/{y}.png')
+      : MAP_CONFIG.osmTileUrl;
     const layers: BaseLayer[] = [];
 
     // 瓦片数据源
@@ -597,35 +449,6 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
       tileSize: 256,
       minZoom: config.minZoom || 6,
       maxZoom: config.maxZoom || 15,
-      // wrapX 保持默认 true：瓦片背景横向连续，缩小时地图不出现空白区域
-    });
-
-    // 限制瓦片并发数，避免 OpenLayers 一次打满浏览器 6 个 HTTP/1.1 连接，
-    // 留出至少 2~3 个连接给 API 请求（设备搜索、geo 数据等）。
-    // 并发上限由 tileConcurrencyRef 控制，可在搜索时动态降低。
-    drainTileQueueRef.current = () => {
-      while (
-        activeTileCountRef.current < tileConcurrencyRef.current &&
-        tileLoadQueueRef.current.length > 0
-      ) {
-        const load = tileLoadQueueRef.current.shift()!;
-        activeTileCountRef.current++;
-        load();
-      }
-    };
-    tileSource.setTileLoadFunction((tile, src) => {
-      const img = (tile as ImageTile).getImage() as HTMLImageElement;
-      const doLoad = () => {
-        img.onload = () => { activeTileCountRef.current--; drainTileQueueRef.current(); };
-        img.onerror = () => { activeTileCountRef.current--; drainTileQueueRef.current(); };
-        img.src = src;
-      };
-      if (activeTileCountRef.current < tileConcurrencyRef.current) {
-        activeTileCountRef.current++;
-        doLoad();
-      } else {
-        tileLoadQueueRef.current.push(doLoad);
-      }
     });
 
     const tileLayer = new TileLayer({
@@ -635,12 +458,10 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
     });
     layers.push(tileLayer);
 
-    // 创建设备数据源（wrapX: false 防止 feature 在多个世界副本中重复显示）
-    deviceSourceRef.current = new VectorSource({ wrapX: false });
+    // 创建设备数据源
+    deviceSourceRef.current = new VectorSource();
 
     // 创建聚合数据源（初始 distance 按初始 zoom 查表，避免首帧聚合距离不匹配）
-    // wrapX 不在此设置：VectorSource 已有 wrapX:false，Cluster 基于其 features 计算，
-    // 对 Cluster 设 wrapX:false 会影响动态 distance 更新时的空间索引重建，影响缩放体验
     clusterSourceRef.current = new Cluster({
       source: deviceSourceRef.current,
       distance: getClusterDistanceForZoom(zoom ?? defaultZoom ?? config.defaultZoom),
@@ -653,29 +474,6 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
       zIndex: 10,
     });
     layers.push(deviceLayerRef.current);
-
-    // Cluster feature 出生动画：为新形成的 cluster feature 打时间戳
-    // distance 动画进行时跳过，避免每帧重打导致 birthTime 被刷新、弹出动画无法完成
-    const clusterChangeKey: EventsKey = clusterSourceRef.current.on('change', () => {
-      if (clusterDistAnimActiveRef.current) return;
-      const now = performance.now();
-      for (const f of (clusterSourceRef.current?.getFeatures() ?? [])) {
-        if (f.get('_birthTime') === undefined) {
-          f.set('_birthTime', now, true); // silent=true：不触发 feature 自身 change 事件
-        }
-      }
-    }) as EventsKey;
-
-    // postrender 驱动：只要有 cluster 还在弹出动画窗口内就持续触发下一帧
-    const BIRTH_ANIM_DURATION = 250;
-    const postrenderKey: EventsKey = deviceLayerRef.current.on('postrender', () => {
-      const now = performance.now();
-      const needsFrame = (clusterSourceRef.current?.getFeatures() ?? []).some(f => {
-        const birth = f.get('_birthTime') as number | undefined;
-        return birth !== undefined && (now - birth) < BIRTH_ANIM_DURATION;
-      });
-      if (needsFrame) mapInstanceRef.current?.render();
-    }) as EventsKey;
 
     // 创建 Spiderfy 图层（用于展开重叠设备点）
     spiderfySourceRef.current = new VectorSource();
@@ -715,17 +513,15 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
         onClusterClick,
         onZoomChange: (zoom) => {
           updateClusterDistance(zoom);
-          // zoom 变化时用新 resolution 重算 spiderfy 节点坐标，
-          // 保持子节点的屏幕间距稳定，让用户放大/缩小后仍能看到展开状态。
+          // 缩放级别变化时收起 spiderfy
           if (isSpiderfiedRef.current) {
-            refreshSpiderfy();
+            unspiderfy();
           }
         },
         onSpiderfy: spiderfy,
         onUnspiderfy: unspiderfy,
         onMapClick,
         isProgrammaticFlyingRef,
-        isSpiderfiedRef,
       },
       deviceLayerRef.current,
       spiderfyLayerRef.current
@@ -747,13 +543,6 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
 
     // 清理函数
     return () => {
-      unByKey(clusterChangeKey);
-      unByKey(postrenderKey);
-      if (clusterAnimRafRef.current != null) {
-        cancelAnimationFrame(clusterAnimRafRef.current);
-        clusterAnimRafRef.current = null;
-      }
-      clusterDistAnimActiveRef.current = false;
       if (mapInstanceRef.current) {
         mapInstanceRef.current.setTarget(undefined);
         mapInstanceRef.current = null;
@@ -766,40 +555,64 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
       // 重置初始化标记，允许重新初始化
       isMapInitializedRef.current = false;
     };
-  // centerReady：从 false→true 时触发，确保 OL 以正确中心点创建（而非赞比亚默认坐标）
-  }, [metadataLoading, centerReady]);
+  }, [metadataLoading, tilesAvailable]);
 
-  // 把一组设备渲染进 VectorSource（增量 diff：只删除消失的、只添加新增的）
-  // 避免 clear() → addFeatures() 中间的单帧空白，消除聚合数字跳变和节点闪烁。
+  // 把一组设备渲染进 VectorSource
+  // 分批策略：设备数 > BATCH_SIZE 时用 rAF 逐批写入，避免单帧构造大量 Feature 阻塞主线程。
+  // 每批 500 条约耗时 5ms，60fps 内不丢帧；同时用 batchId 保证后来的调用能取消前批。
+  const RENDER_BATCH_SIZE = 500;
   const renderDeviceFeatures = useCallback((devices: MapDevice[]) => {
-    const source = deviceSourceRef.current;
-    if (!source) return;
+    if (!deviceSourceRef.current) return;
 
-    // 快照当前已渲染的 features（在任何增删之前）
-    const existingFeatures = source.getFeatures();
-    const existingIdSet = new Set(existingFeatures.map(f => f.getId() as string));
-    const newIdSet = new Set(devices.map(d => d.id));
+    // 递增 batchId，旧批次检测到 id 不匹配时自动放弃
+    const batchId = ++renderBatchIdRef.current;
 
-    // 1. 移除不再出现在新集合里的 feature
-    for (const f of existingFeatures) {
-      if (!newIdSet.has(f.getId() as string)) {
-        source.removeFeature(f);
-      }
-    }
+    // 在 clear() 之前快照高亮信息：clear() 会移除旧 feature，
+    // 重建后需要把 highlighted/rippleWaves 恢复到新 feature 上，
+    // 否则 moveend 触发的 cullDevicesToViewport 会让水波纹凭空消失。
+    const highlightedId = highlightedDeviceIdRef.current;
+    const currentWaves = highlightedId ? [...rippleWavesRef.current] : [];
 
-    // 2. 添加尚未渲染的新 feature
-    const toAdd = devices.filter(d => !existingIdSet.has(d.id));
-    if (toAdd.length > 0) {
-      const features = toAdd.map((device) => {
-        const feature = new Feature({
-          geometry: new Point(fromLonLat([device.lng, device.lat])),
-          ...device,
-        });
-        feature.setId(device.id);
-        return feature;
+    deviceSourceRef.current.clear();
+    if (devices.length === 0) return;
+
+    const makeFeature = (device: MapDevice) => {
+      const feature = new Feature({
+        geometry: new Point(fromLonLat([device.lng, device.lat])),
+        ...device,
       });
-      source.addFeatures(features);
+      feature.setId(device.id);
+      // 恢复高亮状态：moveend 重建 feature 后脉冲 interval 仍能正确写入
+      if (highlightedId && device.id === highlightedId) {
+        feature.set('highlighted', true, true);
+        if (currentWaves.length > 0) {
+          feature.set('rippleWaves', currentWaves, true);
+        }
+        // 更新引用，下一个 pulse tick 直接写入新 feature
+        highlightFeatureRef.current = feature;
+      }
+      return feature;
+    };
+
+    // 小数据集：同步写入，无额外调度开销
+    if (devices.length <= RENDER_BATCH_SIZE) {
+      deviceSourceRef.current.addFeatures(devices.map(makeFeature));
+      return;
     }
+
+    // 大数据集：rAF 分批写入，每帧处理 RENDER_BATCH_SIZE 条
+    let offset = 0;
+    const source = deviceSourceRef.current;
+    const flush = () => {
+      if (renderBatchIdRef.current !== batchId || !source) return; // 已被新批次取消
+      const slice = devices.slice(offset, offset + RENDER_BATCH_SIZE);
+      source.addFeatures(slice.map(makeFeature));
+      offset += RENDER_BATCH_SIZE;
+      if (offset < devices.length) {
+        requestAnimationFrame(flush);
+      }
+    };
+    requestAnimationFrame(flush);
   }, []);
 
   // 视口裁剪：只渲染当前可视范围（带缓冲）内的设备（性能 #15）
@@ -845,12 +658,6 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
     cullDevicesRef.current = cullDevicesToViewport;
   }, [cullDevicesToViewport]);
 
-  // 清除所有设备数据（筛选条件变化时调用，彻底重置）
-  const clearDevices = useCallback(() => {
-    allDevicesRef.current = [];
-    deviceSourceRef.current?.clear();
-  }, []);
-
   // 更新设备数据
   const updateDevices = useCallback((devices: MapDevice[]) => {
     if (!deviceSourceRef.current) return;
@@ -860,22 +667,51 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
       unspiderfy();
     }
 
-    // 累积策略：将新数据与 allDevicesRef 合并（按 id 去重，更新已有设备数据）。
-    // 目的：zoom-out 时新 geo 请求尚未返回期间，allDevicesRef 仍持有之前宽视口的数据，
-    // 避免"节点消失 → 等待 → 重新出现"的抖动和聚合数字跳变。
-    // 只有调用 clearDevices()（筛选条件真实变化）时才真正清空。
-    const existing = allDevicesRef.current;
-    if (existing.length === 0) {
-      allDevicesRef.current = devices;
-    } else {
-      const idMap: Record<string, MapDevice> = {};
-      for (const d of existing) { idMap[d.id] = d; }
-      for (const d of devices) { idMap[d.id] = d; }
-      allDevicesRef.current = Object.keys(idMap).map(k => idMap[k]);
-    }
-
+    // 保存完整列表，随后按当前视口裁剪渲染
+    allDevicesRef.current = devices;
     cullDevicesToViewport();
   }, [unspiderfy, cullDevicesToViewport]);
+
+  /** 清除所有设备数据并重置图层（外部调用：切换群组/全量刷新前先清空，避免残影） */
+  const clearDevices = useCallback(() => {
+    // 先收起 Spiderfy 展开状态
+    if (isSpiderfiedRef.current) {
+      unspiderfy();
+    }
+
+    // 停止水波纹动画，防止动画 tick 在 clear 之后继续读取已删除的 feature
+    if (pulseAnimationRef.current) {
+      clearInterval(pulseAnimationRef.current);
+      pulseAnimationRef.current = null;
+    }
+    if (rippleCreateRef.current) {
+      clearInterval(rippleCreateRef.current);
+      rippleCreateRef.current = null;
+    }
+    rippleWavesRef.current = [];
+    highlightFeatureRef.current = null;
+    highlightedDeviceIdRef.current = null;
+
+    // 取消进行中的批量渲染
+    renderBatchIdRef.current++;
+
+    // 清空设备数据和图层
+    allDevicesRef.current = [];
+    pinnedDeviceIdsRef.current.clear();
+    deviceSourceRef.current?.clear();
+
+    mapInstanceRef.current?.render();
+  }, [unspiderfy]);
+
+  /**
+   * 动态调整瓦片并发上限
+   * 占位实现：当前 OpenLayers XYZ source 不暴露并发数 API，此处记录期望值，
+   * 待后续接入自定义 TileQueue 时落地真实控制逻辑。
+   */
+  const tileConcurrencyRef = useRef(6);
+  const setTileConcurrency = useCallback((n: number) => {
+    tileConcurrencyRef.current = Math.max(0, n);
+  }, []);
 
   // 获取当前视图状态
   const getViewport = useCallback((): MapViewport | null => {
@@ -1061,34 +897,37 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
 
   // 取消高亮（必须在 highlightDevice 之前定义）
   const clearHighlight = useCallback(() => {
-    // 取消 rAF 水波纹动画
-    if (rippleRafRef.current != null) {
-      cancelAnimationFrame(rippleRafRef.current);
-      rippleRafRef.current = null;
-    }
-
-    // 兼容旧 setInterval 路径（如 highlightDevice 还在用）
+    // 清除波纹动画定时器
     if (pulseAnimationRef.current) {
       clearInterval(pulseAnimationRef.current);
       pulseAnimationRef.current = null;
     }
+
+    // 清除波纹创建定时器
     if (rippleCreateRef.current) {
       clearInterval(rippleCreateRef.current);
       rippleCreateRef.current = null;
     }
+
+    // 清除波纹状态 & 设备 ID 记录
     rippleWavesRef.current = [];
+    highlightedDeviceIdRef.current = null;
 
     if (highlightFeatureRef.current) {
-      highlightFeatureRef.current.set('highlighted', false);
-      highlightFeatureRef.current.set('rippleWaves', undefined);
-      highlightFeatureRef.current.set('_rippleStart', undefined);
+      // silent=true：不触发 Cluster 重聚合
+      highlightFeatureRef.current.set('highlighted', false, true);
+      highlightFeatureRef.current.set('rippleWaves', undefined, true);
       highlightFeatureRef.current = null;
     }
 
-    // 取消搜索定位 pin（性能 #15）：高亮结束后该设备恢复受裁剪约束
+    // 取消搜索定位 pin（性能 #15）：高亮结束后该设备恢复受裁剪约束，
+    // 避免 pin 集合无界增长。下次正常裁剪会按视口决定是否渲染。
     if (pinnedDeviceIdsRef.current.size > 0) {
       pinnedDeviceIdsRef.current.clear();
     }
+
+    // 触发一次重绘，确保高亮立即消失（silent 不会自动触发 Cluster 重绘）
+    mapInstanceRef.current?.render();
   }, []);
 
   // 高亮设备（水波纹动画）
@@ -1100,6 +939,11 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
 
     const feature = deviceSourceRef.current.getFeatureById(deviceId);
     if (feature) {
+      // silent=true：不触发 Cluster 重聚合；flyTo 动画会在每帧调 render，高亮会立即可见
+      feature.set('highlighted', true, true);
+      highlightFeatureRef.current = feature as Feature;
+      highlightedDeviceIdRef.current = deviceId;
+
       // 飞行到设备位置
       const geometry = feature.getGeometry();
       if (geometry) {
@@ -1108,39 +952,56 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
         flyTo(lonLat[0], lonLat[1]);
       }
 
-      // rAF 水波纹动画（与 highlightAndSpiderfyIfNeeded 共用同一逻辑）
-      const WAVE_COUNT = 3;
-      const WAVE_INTERVAL = 600;
-      const WAVE_LIFETIME = 1800;
-      const WAVE_MAX_RADIUS = 28;
+      // 初始化波纹状态：最多 3 个波纹
+      rippleWavesRef.current = [];
 
-      feature.set('highlighted', true);
-      highlightFeatureRef.current = feature as Feature;
-      rippleStartTimeRef.current = performance.now();
-      feature.set('_rippleStart', rippleStartTimeRef.current);
-
-      const animate = () => {
+      // 创建新波纹的函数
+      const createRipple = () => {
         if (!highlightFeatureRef.current) return;
-        const now = performance.now();
-        const elapsed = now - rippleStartTimeRef.current;
-        const waves: { radius: number; opacity: number }[] = [];
-        for (let i = 0; i < WAVE_COUNT; i++) {
-          const offset = i * WAVE_INTERVAL;
-          const cycle = WAVE_COUNT * WAVE_INTERVAL;
-          const waveAge = ((elapsed - offset) % cycle + cycle) % cycle;
-          if (waveAge < WAVE_LIFETIME) {
-            const progress = waveAge / WAVE_LIFETIME;
-            const eased = 1 - Math.pow(1 - progress, 2);
-            waves.push({ radius: eased * WAVE_MAX_RADIUS, opacity: 0.75 * (1 - progress) });
-          }
-        }
-        highlightFeatureRef.current.set('rippleWaves', waves);
-        mapInstanceRef.current?.render();
-        rippleRafRef.current = requestAnimationFrame(animate);
+        rippleWavesRef.current.push({
+          radius: 0,    // 从中心开始
+          opacity: 0.9, // 高初始透明度，让波纹一出现就明显
+        });
       };
 
-      if (rippleRafRef.current != null) cancelAnimationFrame(rippleRafRef.current);
-      rippleRafRef.current = requestAnimationFrame(animate);
+      // 立即创建第一个波纹
+      createRipple();
+
+      // 定时创建新波纹（每 480ms）
+      rippleCreateRef.current = setInterval(() => {
+        createRipple();
+        // 最多同时存在 4 个波纹
+        if (rippleWavesRef.current.length > 4) {
+          rippleWavesRef.current.shift();
+        }
+      }, 600);
+
+      // 波纹扩散动画（每 40ms 更新）
+      pulseAnimationRef.current = setInterval(() => {
+        if (!highlightFeatureRef.current) {
+          if (pulseAnimationRef.current) {
+            clearInterval(pulseAnimationRef.current);
+            pulseAnimationRef.current = null;
+          }
+          return;
+        }
+
+        // 更新所有波纹的状态（半径缩小：max ~36px，衰减加快避免视觉过大）
+        rippleWavesRef.current = rippleWavesRef.current
+          .map(wave => ({
+            radius: wave.radius + 0.6,
+            opacity: wave.opacity - 0.017,
+          }))
+          .filter(wave => wave.opacity > 0);
+
+        // silent=true：不触发 source change 事件，避免 Cluster 每帧重新聚合
+        // （map.render() 会直接重绘图层，style 函数会读到最新的 rippleWaves 值）
+        highlightFeatureRef.current.set('rippleWaves', [...rippleWavesRef.current], true);
+
+        if (mapInstanceRef.current) {
+          mapInstanceRef.current.render();
+        }
+      }, 40);
     }
   }, [flyTo, clearHighlight]);
 
@@ -1157,7 +1018,7 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
   }, [zoom, defaultZoom, config.defaultZoom]);
 
   // 适配边界
-  const fitBounds = useCallback((bounds: MapBounds, options?: { duration?: number }) => {
+  const fitBounds = useCallback((bounds: MapBounds) => {
     if (!mapInstanceRef.current) return;
 
     const view = mapInstanceRef.current.getView();
@@ -1170,7 +1031,7 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
 
     view.fit(extent, {
       padding: [50, 50, 50, 50],
-      duration: options?.duration ?? ANIMATION_CONFIG.flyDuration,
+      duration: ANIMATION_CONFIG.flyDuration,
     });
   }, []);
 
@@ -1220,52 +1081,54 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
     const maxZoom = ANIMATION_CONFIG.maxHighlightZoom || 18;
 
     // 给目标 feature 上水波纹高亮的副作用
-    // 全新 rAF 驱动的水波纹动画
-    // 3 个波纹交错，间隔 600ms；每个波纹独立生命周期 1800ms：
-    //   0ms 出生，半径 0 → 30px，透明度 0.7 → 0（基于真实时间，帧率无关）
-    const WAVE_COUNT = 3;
-    const WAVE_INTERVAL = 600;  // ms，两波之间的间隔
-    const WAVE_LIFETIME = 1800; // ms，单波扩散总时长
-    const WAVE_MAX_RADIUS = 28; // px，波纹最大半径（相对节点外边）
-
     const applyRippleHighlight = (feature: Feature) => {
-      feature.set('highlighted', true);
-      highlightFeatureRef.current = feature;
-      rippleStartTimeRef.current = performance.now();
-      feature.set('_rippleStart', rippleStartTimeRef.current);
-
-      const animate = () => {
-        if (!highlightFeatureRef.current) return; // 已被 clearHighlight
-        const now = performance.now();
-        const elapsed = now - rippleStartTimeRef.current;
-
-        // 计算 3 个波的当前状态（交错偏移）
-        const waves: { radius: number; opacity: number }[] = [];
-        for (let i = 0; i < WAVE_COUNT; i++) {
-          const offset = i * WAVE_INTERVAL;
-          // 每个波在 elapsed 时间轴上的位置（循环周期 = WAVE_INTERVAL * WAVE_COUNT）
-          const cycle = WAVE_COUNT * WAVE_INTERVAL;
-          const waveAge = ((elapsed - offset) % cycle + cycle) % cycle; // 0 ~ cycle
-          if (waveAge < WAVE_LIFETIME) {
-            const progress = waveAge / WAVE_LIFETIME; // 0 → 1
-            const eased = 1 - Math.pow(1 - progress, 2); // easeOutQuad：快扩慢收
-            waves.push({
-              radius: eased * WAVE_MAX_RADIUS,
-              opacity: 0.75 * (1 - progress),
-            });
-          }
-        }
-
-        highlightFeatureRef.current.set('rippleWaves', waves);
-        mapInstanceRef.current?.render();
-        rippleRafRef.current = requestAnimationFrame(animate);
-      };
-
-      // 取消之前可能残留的 rAF
-      if (rippleRafRef.current != null) {
-        cancelAnimationFrame(rippleRafRef.current);
+      // 防御性清理：确保没有旧定时器残留（调用方通常已 clearHighlight，此处双重保险）
+      if (pulseAnimationRef.current) {
+        clearInterval(pulseAnimationRef.current);
+        pulseAnimationRef.current = null;
       }
-      rippleRafRef.current = requestAnimationFrame(animate);
+      if (rippleCreateRef.current) {
+        clearInterval(rippleCreateRef.current);
+        rippleCreateRef.current = null;
+      }
+      highlightFeatureRef.current = feature;
+      // 记录设备 ID：renderDeviceFeatures 重建 feature 时用此 ID 恢复高亮引用
+      highlightedDeviceIdRef.current = device.id;
+      rippleWavesRef.current = [];
+
+      const createRipple = () => {
+        if (!highlightFeatureRef.current) return;
+        rippleWavesRef.current.push({ radius: 0, opacity: 1.0 });
+      };
+      createRipple();
+
+      rippleCreateRef.current = setInterval(() => {
+        createRipple();
+        if (rippleWavesRef.current.length > 4) {
+          rippleWavesRef.current.shift();
+        }
+      }, 480);
+
+      pulseAnimationRef.current = setInterval(() => {
+        if (!highlightFeatureRef.current) {
+          if (pulseAnimationRef.current) {
+            clearInterval(pulseAnimationRef.current);
+            pulseAnimationRef.current = null;
+          }
+          return;
+        }
+        rippleWavesRef.current = rippleWavesRef.current
+          .map((wave) => ({
+            radius: wave.radius + 0.6,   // 扩散速度：0.6px/40ms = 15px/s
+            opacity: wave.opacity - 0.017, // 衰减加快：寿命约 2.5s，max radius ≈ 35px
+          }))
+          .filter((wave) => wave.opacity > 0);
+        // silent=true：不触发 source change，避免 Cluster 每帧重聚合
+        highlightFeatureRef.current.set('rippleWaves', [...rippleWavesRef.current], true);
+        if (mapInstanceRef.current) {
+          mapInstanceRef.current.render();
+        }
+      }, 40);
     };
 
     // 在 cluster source 中重试查找目标设备所在聚合
@@ -1340,7 +1203,9 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
             }
           });
         } else {
-          deviceFeature.set('highlighted', true);
+          // silent=true + 立即 render：不触发 Cluster 重聚合，且选中环在波纹出现之前就可见
+          deviceFeature.set('highlighted', true, true);
+          mapInstanceRef.current?.render();
           applyRippleHighlight(deviceFeature);
         }
       });
@@ -1384,7 +1249,9 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
         if (!skipFlyTo && nowZoom < maxZoom - 0.5) {
           flyTo(device.lng, device.lat, maxZoom, { onComplete: onArrivedAtFinalZoom });
         } else {
-          deviceFeature.set('highlighted', true);
+          // silent=true + 立即 render：不触发 Cluster 重聚合，且选中环立即可见
+          deviceFeature.set('highlighted', true, true);
+          mapInstanceRef.current?.render();
           applyRippleHighlight(deviceFeature);
         }
       });
@@ -1421,11 +1288,7 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
     highlightAndSpiderfyIfNeeded,
     metadata,
     metadataLoading,
-    setTileConcurrency: (n: number) => {
-      // 更新并发上限，立即触发排队中的任务以填满新空余连接
-      tileConcurrencyRef.current = Math.max(0, n);
-      drainTileQueueRef.current();
-    },
+    setTileConcurrency,
   };
 }
 
@@ -1452,22 +1315,15 @@ function spiderfyStyleFunction(feature: Feature): Style | Style[] {
     const isHovered = feature.get('hovered');
     const rippleWaves = feature.get('rippleWaves') as { radius: number; opacity: number }[] | undefined;
 
-    // 如果有波纹效果（高亮状态）- 简约清爽风格
+    // 如果有波纹效果（高亮状态）
     if (rippleWaves && rippleWaves.length > 0) {
       const styles: Style[] = [];
       const config = DEVICE_STATUS_CONFIG[device.status] || DEVICE_STATUS_CONFIG.offline;
       const baseRadius = SPIDERFY_CONFIG_REF.pointRadius;
 
-      // 中心点外发光效果
-      styles.push(new Style({
-        image: new Circle({
-          radius: baseRadius + 4,
-          fill: new Fill({ color: 'rgba(24, 144, 255, 0.15)' }),
-        }),
-      }));
-
-      // 波纹样式：简约清爽的圆环
-      rippleWaves.forEach(wave => {
+      // 波纹样式（按半径大到小压栈，小波纹在最上层）
+      const sortedSpiderfyWaves = [...rippleWaves].sort((a, b) => b.radius - a.radius);
+      sortedSpiderfyWaves.forEach(wave => {
         const rippleRadius = baseRadius + wave.radius;
         if (rippleRadius > baseRadius) {
           styles.push(new Style({
@@ -1475,13 +1331,61 @@ function spiderfyStyleFunction(feature: Feature): Style | Style[] {
               radius: rippleRadius,
               fill: new Fill({ color: 'transparent' }),
               stroke: new Stroke({
-                color: `rgba(24, 144, 255, ${wave.opacity})`,
-                width: 2,
+                color: `rgba(24, 144, 255, ${Math.max(0, Math.min(1, wave.opacity))})`,
+                width: 4,
               }),
             }),
           }));
         }
       });
+
+      // 选中环：白色衬底
+      styles.push(new Style({
+        image: new Circle({
+          radius: baseRadius + 14,
+          fill: new Fill({ color: 'transparent' }),
+          stroke: new Stroke({
+            color: 'rgba(255, 255, 255, 0.85)',
+            width: 6,
+          }),
+        }),
+      }));
+
+      // 选中环：蓝色
+      styles.push(new Style({
+        image: new Circle({
+          radius: baseRadius + 14,
+          fill: new Fill({ color: 'transparent' }),
+          stroke: new Stroke({
+            color: 'rgba(24, 144, 255, 0.95)',
+            width: 2.5,
+          }),
+        }),
+      }));
+
+      // 外发光晕
+      styles.push(new Style({
+        image: new Circle({
+          radius: baseRadius + 7,
+          fill: new Fill({ color: 'rgba(24, 144, 255, 0.30)' }),
+        }),
+      }));
+
+      // 内发光晕
+      styles.push(new Style({
+        image: new Circle({
+          radius: baseRadius + 3,
+          fill: new Fill({ color: 'rgba(24, 144, 255, 0.50)' }),
+        }),
+      }));
+
+      // 白色衬底
+      styles.push(new Style({
+        image: new Circle({
+          radius: baseRadius + 1,
+          fill: new Fill({ color: 'rgba(255, 255, 255, 0.95)' }),
+        }),
+      }));
 
       // 基础样式：原始大小的节点（最上层）
       styles.push(new Style({
@@ -1490,7 +1394,7 @@ function spiderfyStyleFunction(feature: Feature): Style | Style[] {
           fill: new Fill({ color: config.color }),
           stroke: new Stroke({
             color: COLORS.primary,
-            width: 3,
+            width: 4,
           }),
         }),
         text: new Text({
@@ -1534,27 +1438,18 @@ function bindMapEvents(
     onUnspiderfy?: () => void;
     onMapClick?: () => void;
     /**
-     * “散不开 + 数量太多”时触发，由父层弹出设备列表 Drawer。
-     * 未提供时退化为 spiderfy（受 SPIDERFY_CONFIG.maxNodes 截断保护）。
-     */
-    onClusterShowList?: (devices: MapDevice[], pixel: { x: number; y: number }) => void;
-    /**
      * “程序化飞行中”计数器的 ref。为 >0 时，表示中间动画档位，
      * moveend 不应在此时上报 viewport，避免引起外部重复拉取 /devices/geo。
      */
     isProgrammaticFlyingRef?: React.MutableRefObject<number>;
-    /**
-     * useOLMap 维护的 spiderfy 状态 ref。传入后 bindMapEvents 直接读写该 ref，
-     * 消除闭包局部变量与外层 ref 双写不同步的竞态问题。
-     */
-    isSpiderfiedRef: React.MutableRefObject<boolean>;
   },
   deviceLayer: VectorLayer<VectorSource>,
   spiderfyLayer: VectorLayer<VectorSource>
 ): void {
-  const { onDeviceClick, onDeviceHover, onViewportChange, onClusterClick, onZoomChange, onSpiderfy, onUnspiderfy, onMapClick, onClusterShowList, isProgrammaticFlyingRef, isSpiderfiedRef } = callbacks;
+  const { onDeviceClick, onDeviceHover, onViewportChange, onClusterClick, onZoomChange, onSpiderfy, onUnspiderfy, onMapClick, isProgrammaticFlyingRef } = callbacks;
 
-  // isSpiderfied 直接读写外层 ref，消除闭包局部变量与 ref 双写竞态
+  // Spiderfy 状态（在 bindMapEvents 作用域内）
+  let isSpiderfied = false;
 
   // 点击事件
   map.on('click', (evt) => {
@@ -1580,7 +1475,7 @@ function bindMapEvents(
       // 点击了中心点，收起展开
       if (feature.get('spiderfyCenter')) {
         onUnspiderfy?.();
-        isSpiderfiedRef.current = false;
+        isSpiderfied = false;
         return;
       }
     }
@@ -1607,17 +1502,15 @@ function bindMapEvents(
           onClusterClick?.(devices);
 
           // 如果已经展开，收起
-          if (isSpiderfiedRef.current) {
+          if (isSpiderfied) {
             onUnspiderfy?.();
-            isSpiderfiedRef.current = false;
+            isSpiderfied = false;
             return;
           }
 
           // 智能路由：看 features 的屏幕 bbox 对角线
           //   1) > clickExpandThresholdPx → 散得开，view.fit 下钻（类 Google Maps）
-          //   2) ≤ 阈值 且 count ≤ spiderfyMaxCount → spiderfy
-          //   3) ≤ 阈值 且 count > spiderfyMaxCount → onClusterShowList 回调（弹 Drawer）
-          //      未接时退化到 spiderfy + maxNodes 截断保证不崩
+          //   2) ≤ 阈值 → spiderfy
           const ptsArr = featuresProp as Feature[];
           const coords: number[][] = [];
           for (const f of ptsArr) {
@@ -1657,43 +1550,34 @@ function bindMapEvents(
               ANIMATION_CONFIG.maxHighlightZoom ?? 18,
             );
             // 与 flyTo/progressiveFlyTo 同机制：进入“程序化飞行”计数，
-            // 让 moveend 只在最后一个档位上报 viewport。
+            // 让 moveend 只在最后一个档位上报 viewport。双插锐拍防护用 setTimeout 兑底。
             if (isProgrammaticFlyingRef) {
               isProgrammaticFlyingRef.current += 1;
+              const decay = () => {
+                isProgrammaticFlyingRef.current = Math.max(
+                  0,
+                  isProgrammaticFlyingRef.current - 1,
+                );
+              };
+              // view.fit 没有 callback，按动画 duration + 小量 buffer 释放计数
+              setTimeout(decay, 450);
             }
             view.fit(extent, {
               padding: [80, 80, 80, 80],
               duration: 400,
               maxZoom: targetMaxZoom,
               easing: Easing.easeOutCubic,
-              callback: () => {
-                if (isProgrammaticFlyingRef) {
-                  isProgrammaticFlyingRef.current = Math.max(
-                    0,
-                    isProgrammaticFlyingRef.current - 1,
-                  );
-                }
-              },
             });
             return;
           }
 
-          // 散不开：判断走 spiderfy 还是列表
-          if (
-            featuresProp.length > CLUSTER_CONFIG.spiderfyMaxCount &&
-            onClusterShowList
-          ) {
-            const [x, y] = evt.pixel;
-            onClusterShowList(devices, { x, y });
-            return;
-          }
-
+          // 散不开：走 spiderfy
           if (currentZoom >= SPIDERFY_CONFIG.minZoom) {
             const geometry = feature.getGeometry();
             if (geometry) {
               const center = (geometry as Point).getCoordinates();
               onSpiderfy?.(feature, center, featuresProp as Feature[]);
-              isSpiderfiedRef.current = true;
+              isSpiderfied = true;
             }
           } else {
             // zoom 太低，不适合 spiderfy，先推一档
@@ -1711,10 +1595,10 @@ function bindMapEvents(
         const [x, y] = evt.pixel;
         onDeviceClick?.(device, { x, y });
       }
-    } else if (isSpiderfiedRef.current) {
+    } else if (isSpiderfied) {
       // 点击空白区域，收起展开
       onUnspiderfy?.();
-      isSpiderfiedRef.current = false;
+      isSpiderfied = false;
     }
   });
 
@@ -1845,7 +1729,7 @@ function bindMapEvents(
           },
         });
       }
-    }, 250);
+    }, 100);
   });
 }
 
