@@ -13,7 +13,7 @@ import {
   Space,
   Upload,
 } from 'antd';
-import { DownloadOutlined, UploadOutlined } from '@ant-design/icons';
+import { DownloadOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
 import type { UploadFile } from 'antd';
 import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
@@ -22,6 +22,7 @@ import { useCreateMMLTask } from '@core/hooks/api/useMML';
 import type { MMLExecuteType } from '@core/types/mml';
 import { useT } from '@/hooks/useT';
 import { toast } from '@/utils/toast';
+import DeviceSelectModal from '../Console/components/DeviceSelectModal';
 
 // -----------------------------------------------------------------------------
 // "新建 MML 脚本任务" Drawer —— 由 任务记录（TaskRecord）页"新建任务"入口调用；
@@ -108,6 +109,8 @@ export default function ScriptTaskDrawer({
   // Console 入口预填的命令文本同样允许用户手动调整（to-do-list 当轮 #6）。
   // 文件入口下，scriptContent 仅在解析完成后用于本地展示，不直接提交。
   const [scriptContent, setScriptContent] = useState('');
+  // BUG-19：设备选择弹框控制
+  const [deviceSelectOpen, setDeviceSelectOpen] = useState(false);
 
   const createTaskMutation = useCreateMMLTask();
   const submitting = createTaskMutation.isPending;
@@ -137,6 +140,12 @@ export default function ScriptTaskDrawer({
   const handleScriptContentChange = useCallback((value: string) => {
     setScriptContent(value);
     setParsedCommands(splitScriptLines(value));
+  }, []);
+
+  // BUG-19：设备选择弹框确认回调——把选中的 SN 追加进来（去重）。
+  const handleDeviceSelect = useCallback((sns: string[], _productId: string) => {
+    setDeviceSns((prev) => Array.from(new Set([...prev, ...sns])));
+    setDeviceSelectOpen(false);
   }, []);
 
   const parseUploadedFile = useCallback((file: File) => {
@@ -264,6 +273,7 @@ export default function ScriptTaskDrawer({
   ]);
 
   return (
+    <>
     <Drawer
       title={t('mml.newMmlTask')}
       open={open}
@@ -309,15 +319,20 @@ export default function ScriptTaskDrawer({
           <label style={{ display: 'block', marginBottom: 4, fontSize: 14 }}>
             {t('mml.deviceSn')}
           </label>
-          <Select
-            mode="tags"
-            value={deviceSns}
-            onChange={setDeviceSns}
-            placeholder={t('mml.inputDeviceSn')}
-            style={{ width: '100%' }}
-            tokenSeparators={[',', ';', '\n']}
-            open={false}
-          />
+          <Space.Compact style={{ width: '100%' }}>
+            <Select
+              mode="tags"
+              value={deviceSns}
+              onChange={setDeviceSns}
+              placeholder={t('mml.inputDeviceSn')}
+              style={{ flex: 1 }}
+              tokenSeparators={[',', ';', '\n']}
+              open={false}
+            />
+            <Button icon={<PlusOutlined />} onClick={() => setDeviceSelectOpen(true)}>
+              {t('mml.selectDevice')}
+            </Button>
+          </Space.Compact>
           <span style={{ color: '#999', fontSize: 12 }}>{t('mml.deviceSnTip')}</span>
         </div>
 
@@ -502,6 +517,15 @@ export default function ScriptTaskDrawer({
         </div>
       </Form>
     </Drawer>
+
+    {/* BUG-19：设备选择弹框 */}
+    <DeviceSelectModal
+      open={deviceSelectOpen}
+      value={deviceSns}
+      onCancel={() => setDeviceSelectOpen(false)}
+      onConfirm={handleDeviceSelect}
+    />
+  </>
   );
 }
 

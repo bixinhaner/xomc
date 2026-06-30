@@ -6059,6 +6059,7 @@ const messages: Record<string, string> = {
   'mml.deviceSn':                            'Device SN',
   'mml.inputDeviceSn':                       'Enter device SN, press Enter to add',
   'mml.deviceSnTip':                         'Press Enter after SN, comma separated',
+  'mml.selectDevice':                        'Select Device',
   'mml.executionTime':                       'Execution Time',
   'mml.output':                              'Output',
 

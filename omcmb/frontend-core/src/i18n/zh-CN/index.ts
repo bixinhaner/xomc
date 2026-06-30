@@ -6088,6 +6088,7 @@ const messages: Record<string, string> = {
   'mml.deviceSn':                            '设备SN',
   'mml.inputDeviceSn':                       '输入设备SN，按回车添加',
   'mml.deviceSnTip':                         '输入SN后按回车确认，支持逗号分隔',
+  'mml.selectDevice':                        '选择设备',
   'mml.executionTime':                       '执行时间',
   'mml.output':                              '输出',
 
