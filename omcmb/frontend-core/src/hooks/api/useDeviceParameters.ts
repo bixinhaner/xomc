@@ -52,6 +52,7 @@ export function useUpdateParameters() {
       parameters: ParameterUpdateRequest[];
     }) => api.updateParameters(deviceId, parameters),
     onSuccess: (_result, { deviceId }) => {
+      deviceParameterApi.invalidateParameterSchemaCache(deviceId);
       void queryClient.invalidateQueries({
         queryKey: ['devices', 'parameters', deviceId],
       });
@@ -117,6 +118,9 @@ export function useParameterSchema(deviceId: string, pathPrefix?: string, enable
     queryKey: ['devices', 'parameter-schema', deviceId, pathPrefix],
     queryFn: () => api.getParameterSchema(deviceId, pathPrefix),
     enabled: Boolean(deviceId) && enabled,
+    // 设备详情的参数树 / 快速设置会频繁在内部 tab 间切换；这里给 schema 查询一个短期缓存，
+    // 避免每次切 tab 都把同一批 path_prefix 重新打满。真正需要最新值的场景仍通过显式 invalidate 触发。
+    staleTime: 5 * 60 * 1000,
   });
 }
 
@@ -147,6 +151,7 @@ export function useAddObject() {
       objectPath: string;
     }) => api.addObject(deviceId, objectPath),
     onSuccess: (_result, { deviceId, objectPath }) => {
+      deviceParameterApi.invalidateParameterSchemaCache(deviceId, schemaParentPrefix(objectPath));
       void queryClient.invalidateQueries({
         queryKey: ['devices', 'parameter-tree', deviceId],
       });
@@ -172,6 +177,7 @@ export function useDeleteObject() {
       objectPath: string;
     }) => api.deleteObject(deviceId, objectPath),
     onSuccess: (_result, { deviceId, objectPath }) => {
+      deviceParameterApi.invalidateParameterSchemaCache(deviceId, schemaParentPrefix(objectPath));
       void queryClient.invalidateQueries({
         queryKey: ['devices', 'parameter-tree', deviceId],
       });

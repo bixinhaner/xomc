@@ -119,6 +119,8 @@ export interface ResolvedCellInstancesOptions {
   /** 给 QuickSettingsTab 用：BM 制式切换提示是否需要根据 quicksettings groups 决定可见性。*/
   hasBmGsmGroups?: boolean;
   hasBmLteGroups?: boolean;
+  /** 隐藏 quick settings 页签保活时关闭 schema 查询，避免切 tab 触发 fan-out。 */
+  enabled?: boolean;
 }
 
 export interface ResolvedCellInstances {
@@ -148,6 +150,7 @@ export function useResolvedCellInstances({
   bmTech = 'LTE',
   hasBmGsmGroups = false,
   hasBmLteGroups = false,
+  enabled = true,
 }: ResolvedCellInstancesOptions): ResolvedCellInstances {
   const isENB = networkType === 'lte';
   const isNR = networkType === 'nr';
@@ -158,37 +161,37 @@ export function useResolvedCellInstances({
   const { data: fapSchema, isLoading: fapSchemaLoading } = useParameterSchema(
     deviceId,
     LTE_FAPSERVICE_PREFIX,
-    Boolean(deviceId) && isENB,
+    enabled && Boolean(deviceId) && isENB,
   );
 
   const { data: lteNumOfCellsSchema, isLoading: lteNumOfCellsLoading } = useParameterSchema(
     deviceId,
     LTE_NUM_OF_CELLS_PREFIX,
-    Boolean(deviceId) && isENB && !isBM,
+    enabled && Boolean(deviceId) && isENB && !isBM,
   );
 
   const { data: bmDeviceInfoSchema, isLoading: bmDeviceInfoLoading } = useParameterSchema(
     deviceId,
     BM_DEVICE_INFO_PREFIX,
-    Boolean(deviceId) && isENB && isBM,
+    enabled && Boolean(deviceId) && isENB && isBM,
   );
 
   const { data: bmGsmSchema, isLoading: bmGsmSchemaLoading } = useParameterSchema(
     deviceId,
     BM_GSM_CELL_PREFIX,
-    Boolean(deviceId) && isENB && isBM,
+    enabled && Boolean(deviceId) && isENB && isBM,
   );
 
   const { data: nrCellSchema, isLoading: nrCellSchemaLoading } = useParameterSchema(
     deviceId,
     NR_CELLCONFIG_PREFIX,
-    Boolean(deviceId) && isNR,
+    enabled && Boolean(deviceId) && isNR,
   );
 
   const { data: bscBtsSchema, isLoading: bscBtsSchemaLoading } = useParameterSchema(
     deviceId,
     BSC_BTS_PREFIX,
-    Boolean(deviceId) && isBSC,
+    enabled && Boolean(deviceId) && isBSC,
   );
 
   const lteInstances = useMemo<number[]>(() => {

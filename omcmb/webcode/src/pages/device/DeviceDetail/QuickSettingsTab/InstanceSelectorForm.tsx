@@ -109,6 +109,7 @@ const ERROR_FEEDBACK_DURATION_SECONDS = 2;
 
 interface InstanceSelectorFormProps {
   deviceId: string;
+  active?: boolean;
   /** 顶层多实例选择器 group（style="table"），如 bsc-bts-access。 */
   selectorGroup: QuickSettingsGroup;
   /** 嵌入到该选择器下的子 group 列表（style="form" 或 style="subtable"，parentSelector === selectorGroup.id）。 */
@@ -381,6 +382,7 @@ function renderSubTable(
  */
 export default function InstanceSelectorForm({
   deviceId,
+  active = true,
   selectorGroup,
   childGroups,
   instanceContext,
@@ -393,7 +395,7 @@ export default function InstanceSelectorForm({
     return resolved.replace(/\{i\}\.$/, '');
   }, [selectorGroup, instanceContext]);
 
-  const { data: schemaResp, isLoading, isFetching, refetch } = useParameterSchema(deviceId, objectPath);
+  const { data: schemaResp, isLoading, isFetching, refetch } = useParameterSchema(deviceId, objectPath, active);
   const updateMutation = useUpdateParameters();
   const addMutation = useAddObject();
   const deleteMutation = useDeleteObject();
@@ -496,12 +498,13 @@ export default function InstanceSelectorForm({
   const setFeedback = useQuickSettingsFeedbackStore((s) => s.setFeedback);
   const patchFeedback = useQuickSettingsFeedbackStore((s) => s.patchFeedback);
 
-  const { data: lastTask } = useDeviceTaskStatus(lastAction?.taskId);
+  const { data: lastTask } = useDeviceTaskStatus(active ? lastAction?.taskId : undefined);
 
   // 任务进入终态 → 只刷新当前多实例的 schema(精确到 objectPath 该一份查询),
   // 并清掉乐观编辑值（保留 selectedInstId）。不作跨 device 的全量 invalidate，
   // 避免领居/顶层 selector 等无关查询被动重拉。
   useEffect(() => {
+    if (!active) return;
     if (!lastTask || !isDeviceTaskTerminal(lastTask.status)) return;
     let cancelled = false;
     void (async () => {
@@ -528,7 +531,7 @@ export default function InstanceSelectorForm({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lastTask?.id, lastTask?.status]);
+  }, [active, lastTask?.id, lastTask?.status]);
 
   // 基站应答失败 → notification（只首次提示）
   useEffect(() => {

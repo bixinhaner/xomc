@@ -1809,6 +1809,7 @@ export default function DeviceDetail() {
                       <QuickSettingsTab
                         deviceId={device.id}
                         networkType={device.networkType}
+                        active={activeTab === 'quickSettings'}
                         onSyncTargetPathsChange={setQuickSettingsSyncTargetPaths}
                       />
                     </ErrorBoundary>
