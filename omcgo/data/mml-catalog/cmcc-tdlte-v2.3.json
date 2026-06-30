@@ -13,7 +13,7 @@
         {
           "standard_path": "Device.DeviceInfo.UserLabel",
           "param_name": "UserLabel",
-          "chinese_name": "用户友好名",
+          "chinese_name": "用户标签",
           "access": "READ_WRITE",
           "data_type": "string"
         },
@@ -1768,7 +1768,7 @@
         {
           "standard_path": "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.UserLabel",
           "param_name": "UserLabel",
-          "chinese_name": "用户友好名",
+          "chinese_name": "用户标签",
           "access": "READ_WRITE",
           "data_type": "string"
         },
@@ -3923,7 +3923,7 @@
         {
           "standard_path": "Device.Ethernet.Interface.{i}.UserLabel",
           "param_name": "UserLabel",
-          "chinese_name": "用户友好名",
+          "chinese_name": "用户标签",
           "access": "READ_WRITE",
           "data_type": "string"
         },
@@ -4742,7 +4742,7 @@
         {
           "standard_path": "Device.DeviceInfo.MU.{i}.UserLabel",
           "param_name": "UserLabel",
-          "chinese_name": "用户友好名",
+          "chinese_name": "用户标签",
           "access": "READ_WRITE",
           "data_type": "string"
         },

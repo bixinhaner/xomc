@@ -271,7 +271,7 @@ export default function TaskRecord() {
       />
 
       <Modal
-        title={viewing ? t('mml.executionResult', { name: viewing.taskName }) : t('common.view')}
+        title={viewRecord ? t('mml.executionResult', { name: viewRecord.commandName }) : t('common.view')}
         open={Boolean(viewing)}
         onCancel={() => setViewing(null)}
         footer={<Button onClick={() => setViewing(null)}>{t('common.close')}</Button>}
