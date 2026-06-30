@@ -148,6 +148,7 @@ func Test_GetInfoParamMapping_LTE(t *testing.T) {
 	// CMCC LTE uses X_CMCC_MACAddress
 	_, hasMAC := m["Device.DeviceInfo.X_CMCC_MACAddress"]
 	assert.True(t, hasMAC, "expected CMCC LTE mapping to include X_CMCC_MACAddress")
+	assert.Equal(t, "freq_point", m["Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.EARFCNDL"])
 }
 
 func Test_GetInfoParamMapping_NR(t *testing.T) {

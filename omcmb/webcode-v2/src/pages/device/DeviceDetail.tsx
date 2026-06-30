@@ -40,6 +40,7 @@ import { useDeviceParameters } from '@core/hooks/api/useDeviceParameters'
 import { useAppStore } from '@core/store/appStore'
 import { useDictionary } from '@core/hooks/api/useSystem'
 import { activationStatusLabelOf } from '@core/utils/activationStatus'
+import { DEVICE_SYNC_STATUS_LABELS_ZH, formatDeviceSyncStatus } from '@core/utils/deviceSyncStatus'
 import type { Device } from '@core/types/device'
 import type { AlarmSeverity } from '@core/types/common'
 
@@ -274,7 +275,7 @@ export default function DeviceDetail() {
           inactive: '未激活',
         }, appLocale) || '-',
     },
-    { label: '同步状态', value: d.syncStatus },
+    { label: '同步状态', value: formatDeviceSyncStatus(d.syncStatus, DEVICE_SYNC_STATUS_LABELS_ZH) || d.syncStatus },
     { label: 'RF 状态', value: d.rfStatus },
     { label: 'MME/AMF', value: d.mmeStatus || d.amfStatus },
     { label: 'UE 数', value: d.ueCount },

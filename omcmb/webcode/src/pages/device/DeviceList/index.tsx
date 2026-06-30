@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { App, Button, Card, Drawer, Input, Modal, Popconfirm, Popover, Progress, Space, Table, Tag, Tooltip, Typography } from 'antd';
@@ -21,11 +21,13 @@ import type { FilterField } from '@/components/FilterBar';
 import StatisticsPanel from '@/components/StatisticsPanel';
 import StatusIndicator from '@/components/StatusIndicator';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
+import AutoRefreshDropdown from '@/pages/alarm/components/AutoRefreshDropdown';
 import { prefetchDeviceDetailContext, useDeviceList, useBatchRebootDevices, useDeviceGroups } from '@core/hooks/api/useDevices';
 import { useProductList } from '@core/hooks/api/useProducts';
 import { useDictionaryBatch } from '@core/hooks/api/useSystem';
 import { resolveNetworkTypeLabel } from '@core/utils/networkType';
 import { activationStatusLabelOf, activationStatusOf } from '@core/utils/activationStatus';
+import { formatDeviceSyncStatus, getDeviceSyncStatusKind, normalizeDeviceSyncStatus } from '@core/utils/deviceSyncStatus';
 import { useTriggerAlarmSync } from '@core/hooks/api/useAlarms';
 import { useCreateUnifiedFileTransferTask } from '@core/hooks/api/useUnifiedFileTransfer';
 import { useDownloadStationLog } from '@core/hooks/api/useStationLog';
@@ -253,6 +255,7 @@ export default function DeviceList() {
   // 历史 bug：只解构出 [autoRefresh] 没拿 setter，导致按钮翻不动这个值，
   // refetchInterval 永远是 undefined → 实时刷新等于摆设。
   const [autoRefresh, setAutoRefresh] = useState(false);
+  const [refreshInterval, setRefreshInterval] = useState(30);
 
   // 收集任务抽屉状态
   const [collectDrawerOpen, setCollectDrawerOpen] = useState(false);
@@ -343,9 +346,12 @@ export default function DeviceList() {
     [filterParams, currentPage, pageSize]
   );
 
-  const { data, isLoading, refetch } = useDeviceList(queryParams, {
-    refetchInterval: autoRefresh ? 5000 : undefined,
+  const { data, isLoading, isFetching, refetch } = useDeviceList(queryParams, {
+    refetchInterval: autoRefresh ? refreshInterval * 1000 : undefined,
   });
+  const [refreshSpinnerActive, setRefreshSpinnerActive] = useState(false);
+  const refreshSpinStartedAtRef = useRef<number | null>(null);
+  const refreshSpinTimeoutRef = useRef<number | null>(null);
   const batchReboot = useBatchRebootDevices();
   const triggerAlarmSync = useTriggerAlarmSync();
   const createUfteTask = useCreateUnifiedFileTransferTask();
@@ -357,6 +363,64 @@ export default function DeviceList() {
   const devices = useMemo(() => data?.items ?? [], [data?.items]);
   const total = data?.total ?? 0;
   const stats = useMemo(() => data?.stats ?? { total: 0, online: 0, offline: 0, alarmed: 0, online_count: 0, offline_count: 0 }, [data?.stats]);
+
+  useEffect(() => {
+    if (!autoRefresh) return;
+    void refetch();
+  }, [autoRefresh, refreshInterval, refetch]);
+
+  const handleManualRefresh = useCallback(() => {
+    if (refreshSpinTimeoutRef.current !== null) {
+      window.clearTimeout(refreshSpinTimeoutRef.current);
+      refreshSpinTimeoutRef.current = null;
+    }
+    if (refreshSpinStartedAtRef.current === null) {
+      refreshSpinStartedAtRef.current = Date.now();
+    }
+    setRefreshSpinnerActive(true);
+    void refetch();
+  }, [refetch]);
+
+  useEffect(() => {
+    if (isFetching) {
+      if (refreshSpinTimeoutRef.current !== null) {
+        window.clearTimeout(refreshSpinTimeoutRef.current);
+        refreshSpinTimeoutRef.current = null;
+      }
+      if (refreshSpinStartedAtRef.current === null) {
+        refreshSpinStartedAtRef.current = Date.now();
+      }
+      setRefreshSpinnerActive(true);
+      return;
+    }
+
+    if (refreshSpinStartedAtRef.current === null) {
+      setRefreshSpinnerActive(false);
+      return;
+    }
+
+    const elapsedMs = Date.now() - refreshSpinStartedAtRef.current;
+    const remainingMs = Math.max(0, 1000 - elapsedMs);
+
+    refreshSpinTimeoutRef.current = window.setTimeout(() => {
+      refreshSpinStartedAtRef.current = null;
+      refreshSpinTimeoutRef.current = null;
+      setRefreshSpinnerActive(false);
+    }, remainingMs);
+
+    return () => {
+      if (refreshSpinTimeoutRef.current !== null) {
+        window.clearTimeout(refreshSpinTimeoutRef.current);
+        refreshSpinTimeoutRef.current = null;
+      }
+    };
+  }, [isFetching]);
+
+  useEffect(() => () => {
+    if (refreshSpinTimeoutRef.current !== null) {
+      window.clearTimeout(refreshSpinTimeoutRef.current);
+    }
+  }, []);
 
   // R6b: 设备分组下拉接入 device/group API（device-list-and-group-improvements-20260520.md R6b）
   const { data: groupsResp } = useDeviceGroups();
@@ -1105,17 +1169,22 @@ export default function DeviceList() {
         hidden: true,
         group: 'common',
         render: (_val, record) => {
-          const v = record.syncStatus;
-          if (!v) return '-';
-          if (v === 'not synchronized') {
-            return <Tag color="error" style={{ fontWeight: 600 }}>{t('status.notSynchronized')}</Tag>;
-          }
-          return fmtStatus(v, {
-            synchronized: { label: t('status.synchronized'), color: 'success' },
-            'GPS synchronized': { label: 'GPS ' + t('status.synchronized'), color: 'success' },
-            '1588 synchronized': { label: '1588 ' + t('status.synchronized'), color: 'success' },
-            'REM synchronized': { label: 'REM ' + t('status.synchronized'), color: 'success' },
-          });
+          const normalized = normalizeDeviceSyncStatus(record.syncStatus);
+          if (!normalized) return '-';
+          const kind = getDeviceSyncStatusKind(normalized);
+          if (!kind) return normalized;
+          return (
+            <Tag color={kind === 'error' ? 'error' : 'success'} style={{ fontWeight: 600 }}>
+              {formatDeviceSyncStatus(normalized, {
+                synchronized: t('status.synchronized'),
+                gps: `GPS ${t('status.synchronized')}`,
+                beidou: `北斗${t('status.synchronized')}`,
+                ntp: `NTP/1588 ${t('status.synchronized')}`,
+                rem: `REM ${t('status.synchronized')}`,
+                error: t('status.notSynchronized'),
+              })}
+            </Tag>
+          );
         },
       },
       {
@@ -1672,11 +1741,32 @@ export default function DeviceList() {
                 setPageSize(size);
               }}
               batchActions={batchActions}
-              onRefresh={() => void refetch()}
+              onRefresh={handleManualRefresh}
+              extraToolbarRight={(
+                <Space size={8}>
+                  <Button
+                    size="small"
+                    icon={<ReloadOutlined />}
+                    loading={refreshSpinnerActive}
+                    onClick={handleManualRefresh}
+                  >
+                    {t('common.refresh')}
+                  </Button>
+                  <AutoRefreshDropdown
+                    enabled={autoRefresh}
+                    intervalSeconds={refreshInterval}
+                    onEnabledChange={setAutoRefresh}
+                    onIntervalChange={setRefreshInterval}
+                    spinning={autoRefresh && refreshSpinnerActive}
+                    size="small"
+                  />
+                </Space>
+              )}
               defaultDensity="default"
               scroll={{ x: 'max-content' }}
               autoFitHeight
-              onRealtimeRefreshChange={setAutoRefresh}
+              hideRealtime
+              hideRefresh
               showRowNumber
               rowNumberTitle={t('table.rowNumber')}
             />

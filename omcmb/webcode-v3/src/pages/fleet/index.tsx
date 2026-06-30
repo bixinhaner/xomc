@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
-import { Search, RefreshCcw, Power, Loader2 } from 'lucide-react'
+import { Search, RefreshCw, Power, Loader2 } from 'lucide-react'
 
 import { PageShell } from '@/components/shell/PageShell'
 import { NeonButton } from '@/components/ui/NeonButton'
@@ -16,12 +16,22 @@ const STATUS_COLOR: Record<string, string> = {
   offline: '#525a78',
 }
 
+const AUTO_REFRESH_OPTIONS = [
+  { label: 'AUTO REFRESH', value: 'off' },
+  { label: '15S', value: '15' },
+  { label: '30S', value: '30' },
+  { label: '1MIN', value: '60' },
+  { label: '5MIN', value: '300' },
+] as const
+
 export function FleetPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [page, setPage] = useState(1)
   const pageSize = 20
   const [keyword, setKeyword] = useState('')
+  const [autoRefresh, setAutoRefresh] = useState(false)
+  const [refreshInterval, setRefreshInterval] = useState(30)
 
   const params = useMemo(
     () => ({
@@ -32,9 +42,16 @@ export function FleetPage() {
     [page, keyword]
   )
 
-  const { data, isFetching, isLoading, isError, error, refetch } = useDeviceList(params)
+  const { data, isFetching, isLoading, isError, error, refetch } = useDeviceList(params, {
+    refetchInterval: autoRefresh ? refreshInterval * 1000 : 0,
+  })
   const items: Device[] = data?.items ?? []
   const total = data?.total ?? 0
+
+  useEffect(() => {
+    if (!autoRefresh) return
+    void refetch()
+  }, [autoRefresh, refreshInterval, refetch])
 
   const prefetchDeviceDetailEntry = (device: Device) => {
     void import('@/pages/fleet/DeviceDetail')
@@ -45,6 +62,8 @@ export function FleetPage() {
     prefetchDeviceDetailEntry(device)
     void navigate(`/device/detail/${device.sn}`)
   }
+
+  const autoRefreshValue = autoRefresh ? String(refreshInterval) : 'off'
 
   return (
     <PageShell
@@ -67,9 +86,31 @@ export function FleetPage() {
               }}
             />
           </div>
-          <NeonButton icon={<RefreshCcw />} onClick={() => refetch()}>
+          <NeonButton icon={<RefreshCw />} onClick={() => refetch()}>
             REFRESH
           </NeonButton>
+          <label className="flex items-center gap-2 rounded-sm border border-cyan-400/30 bg-slate-950/70 px-3 py-2 text-[10px] uppercase tracking-[0.22em] text-cyan-200/80">
+            <RefreshCw className={autoRefresh ? 'size-3.5 animate-spin text-cyan-200' : 'size-3.5 text-cyan-300/65'} />
+            <select
+              className="bg-transparent text-[10px] uppercase tracking-[0.22em] text-cyan-100 outline-none"
+              value={autoRefreshValue}
+              onChange={(e) => {
+                const value = e.target.value
+                if (value === 'off') {
+                  setAutoRefresh(false)
+                  return
+                }
+                setRefreshInterval(Number(value))
+                setAutoRefresh(true)
+              }}
+            >
+              {AUTO_REFRESH_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value} className="bg-slate-950 text-cyan-100">
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
         </>
       }
     >

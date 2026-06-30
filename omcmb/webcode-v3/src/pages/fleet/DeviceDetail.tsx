@@ -19,6 +19,7 @@ import { useDeviceBySn, useRebootDevice } from '@core/hooks/api/useDevices'
 import { useAppStore } from '@core/store/appStore'
 import { useDictionary } from '@core/hooks/api/useSystem'
 import { activationStatusLabelOf } from '@core/utils/activationStatus'
+import { DEVICE_SYNC_STATUS_LABELS_EN, formatDeviceSyncStatus } from '@core/utils/deviceSyncStatus'
 import type { Device } from '@core/types/device'
 import { KV, StatCard, StateGate, formatDuration } from './_shared'
 
@@ -188,7 +189,7 @@ function DetailBody({ d, onUe }: { d: Device; onUe: () => void }) {
           </div>
           <KV label="CELL STATUS">{d.cellStatus}</KV>
           <KV label="OP / ADMIN STATE">{`${opStateLabel || '—'} · ${d.adminState || '—'}`}</KV>
-          <KV label="RF / SYNC">{`${d.rfStatus || '—'} · ${d.syncStatus || '—'}`}</KV>
+          <KV label="RF / SYNC">{`${d.rfStatus || '—'} · ${formatDeviceSyncStatus(d.syncStatus, DEVICE_SYNC_STATUS_LABELS_EN) || '—'}`}</KV>
           <KV label="SERVICE STATUS">{d.serviceStatus}</KV>
           <KV label="LAST ONLINE">{formatTime(d.lastOnlineTime)}</KV>
           <KV label="LAST INFORM">{formatTime(d.lastInformTime)}</KV>

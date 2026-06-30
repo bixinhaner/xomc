@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import {
@@ -12,7 +12,6 @@ import {
   CheckCircle2,
   Loader2,
   Power,
-  RefreshCcw,
   RefreshCw,
   Search,
   Users,
@@ -71,6 +70,14 @@ import type { AlarmSeverity } from '@core/types/common'
 
 type OnlineFilter = 'all' | 'online' | 'offline'
 type OpStateFilter = 'all' | '1' | '0'
+
+const AUTO_REFRESH_OPTIONS = [
+  { label: '自动刷新', value: 'off' },
+  { label: '15秒', value: '15' },
+  { label: '30秒', value: '30' },
+  { label: '1分钟', value: '60' },
+  { label: '5分钟', value: '300' },
+] as const
 
 const ALARM_VARIANT: Record<
   AlarmSeverity | 'none',
@@ -138,6 +145,8 @@ export function DevicesPage() {
   const queryClient = useQueryClient()
   const [page, setPage] = useState(1)
   const [pageSize] = useState(20)
+  const [autoRefresh, setAutoRefresh] = useState(false)
+  const [refreshInterval, setRefreshInterval] = useState(30)
   const [searchText, setSearchText] = useState('')
   const [onlineFilter, setOnlineFilter] = useState<OnlineFilter>('all')
   const [opState, setOpState] = useState<OpStateFilter>('all')
@@ -186,7 +195,12 @@ export function DevicesPage() {
   )
 
   const { data, isLoading, isError, error, isFetching, refetch } =
-    useDeviceList(queryParams)
+    useDeviceList(queryParams, { refetchInterval: autoRefresh ? refreshInterval * 1000 : 0 })
+
+  useEffect(() => {
+    if (!autoRefresh) return
+    void refetch()
+  }, [autoRefresh, refreshInterval, refetch])
 
   // ---- 批量操作 mutations ----
   const batchReboot = useBatchRebootDevices()
@@ -278,6 +292,8 @@ export function DevicesPage() {
     networkType !== 'all' ||
     productId !== 'all' ||
     groupId !== 'all'
+
+  const autoRefreshValue = autoRefresh ? String(refreshInterval) : 'off'
 
   // ---- 列定义 ----
   const columns = useMemo<ColumnDef<Device>[]>(
@@ -557,10 +573,32 @@ export function DevicesPage() {
             </Button>
           )}
 
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={() => refetch()}>
-              <RefreshCcw className="size-4" /> 刷新
+              <RefreshCw className="size-4" /> 刷新
             </Button>
+            <Select
+              value={autoRefreshValue}
+              onValueChange={(value) => {
+                if (value === 'off') {
+                  setAutoRefresh(false)
+                  return
+                }
+                setRefreshInterval(Number(value))
+                setAutoRefresh(true)
+              }}
+            >
+              <SelectTrigger className="w-32">
+                <SelectValue placeholder="自动刷新" />
+              </SelectTrigger>
+              <SelectContent>
+                {AUTO_REFRESH_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
       }

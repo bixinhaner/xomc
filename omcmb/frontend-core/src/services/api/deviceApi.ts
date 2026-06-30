@@ -2,6 +2,7 @@ import http from '../http';
 import type { Device, NE, DeviceFilter, DeviceGroup, DeviceListResponse, DeviceListStats, DeviceStats, DeviceParameter, CreateDeviceInput, NameFilterItem, BatchImportRequest, BatchImportResponse } from '../../types/device';
 import type { AlarmSeverity } from '../../types/common';
 import type { PageRequest, PageResponse } from '../../types/pagination';
+import { normalizeDeviceSyncStatus } from '../../utils/deviceSyncStatus';
 
 // Backend device model from Go struct
 interface BackendDevice {
@@ -339,8 +340,9 @@ function mapBackendDevice(bd: BackendDevice): Device {
     ulEarfcn: bd.ul_earfcn || '',
     networkModel: bd.network_model || '',
     // T-XXX (Phase 5)：transmit_power 是后端实际字段 (NUMERIC 转 number)
+    // 部分设备用 -1 表示未知/未上报，列表不应把占位值展示成真实 Tx Power。
     // tx_power 兼容旧字段名；fmtDuration 等渲染器接受 string，转字符串展示。
-    txPower: bd.transmit_power != null ? String(bd.transmit_power) : (bd.tx_power || ''),
+    txPower: bd.transmit_power != null && bd.transmit_power >= 0 ? String(bd.transmit_power) : (bd.tx_power || ''),
     band: bd.band || '',
     lac: bd.lac || '',
     arfcn: bd.arfcn || '',
@@ -356,7 +358,7 @@ function mapBackendDevice(bd: BackendDevice): Device {
     rfStatus: bd.rf_status || '',
     pmReportStatus: bd.pm_report_status || '',
     halobFlag: bd.halob_enabled ?? false,
-    syncStatus: bd.sync_status || '',
+    syncStatus: normalizeDeviceSyncStatus(bd.sync_status),
     validity: bd.validity || '',
     lockStatus: bd.lock_status || '',
     ueCount: bd.ue_count ?? 0,

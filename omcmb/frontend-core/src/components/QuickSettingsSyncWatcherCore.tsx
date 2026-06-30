@@ -83,6 +83,7 @@ export default function QuickSettingsSyncWatcherCore() {
             useQuickSettingsFeedbackStore.getState().clearDraftsByDevice(deviceId);
             useQuickSettingsFeedbackStore.getState().bumpRefreshTick(deviceId);
             deviceParameterApi.invalidateParameterSchemaCache(deviceId);
+            void queryClient.invalidateQueries({ queryKey: ['devices', 'list'] });
             void queryClient.invalidateQueries({ queryKey: ['devices', 'detail-composite-v2', deviceId] });
             void queryClient.invalidateQueries({ queryKey: ['quicksettings', 'groups', deviceId] });
             void queryClient.invalidateQueries({ queryKey: ['devices', 'parameter-schema', deviceId] });

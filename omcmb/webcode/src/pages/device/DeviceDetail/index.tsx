@@ -55,6 +55,7 @@ import AutoRefreshDropdown from '@/pages/alarm/components/AutoRefreshDropdown';
 import ConfirmWithNoteModal from '@/pages/alarm/components/ConfirmWithNoteModal';
 import { formatSystemTime } from '@core/utils/systemTime';
 import { useAppStore } from '@core/store/appStore';
+import { formatDeviceSyncStatus, getDeviceSyncStatusKind, normalizeDeviceSyncStatus } from '@core/utils/deviceSyncStatus';
 
 const { Title, Text } = Typography;
 
@@ -341,7 +342,7 @@ function mapDeviceDetailInfo(info?: BackendDeviceDetailInfo): DeviceDetailInfo |
     rfStatus: info.rf_status,
     mmeStatus: info.mme_status,
     amfStatus: info.amf_status,
-    syncStatus: info.sync_status,
+    syncStatus: normalizeDeviceSyncStatus(info.sync_status),
     firstOnlineTime: info.first_online_time,
     lastOnlineTime: info.last_online_time,
     lastOfflineTime: info.last_offline_time,
@@ -517,19 +518,23 @@ const renderStatusTag = (value: string | undefined, map: Record<string, { label:
   return <Tag color={entry.color}>{entry.label}</Tag>;
 };
 
-const renderDeviceSyncStatus = (value: string | undefined, t: ReturnType<typeof useT>) =>
-  renderStatusTag(value, {
-    synchronized: { label: t('status.synchronized'), color: 'success' },
-    'gps synchronized': { label: `GPS ${t('status.synchronized')}`, color: 'success' },
-    '1588 synchronized': { label: `1588 ${t('status.synchronized')}`, color: 'success' },
-    'rem synchronized': { label: `REM ${t('status.synchronized')}`, color: 'success' },
-    gps: { label: `GPS ${t('status.synchronized')}`, color: 'success' },
-    beidou: { label: `北斗${t('status.synchronized')}`, color: 'success' },
-    ntp: { label: `NTP/1588 ${t('status.synchronized')}`, color: 'success' },
-    error: { label: t('status.notSynchronized'), color: 'error' },
-    not_synchronized: { label: t('status.notSynchronized'), color: 'error' },
-    'not synchronized': { label: t('status.notSynchronized'), color: 'error' },
-  });
+const renderDeviceSyncStatus = (value: string | undefined, t: ReturnType<typeof useT>) => {
+  if (!value) return '-';
+  const kind = getDeviceSyncStatusKind(value);
+  if (!kind) return value;
+  return (
+    <Tag color={kind === 'error' ? 'error' : 'success'}>
+      {formatDeviceSyncStatus(value, {
+        synchronized: t('status.synchronized'),
+        gps: `GPS ${t('status.synchronized')}`,
+        beidou: `北斗${t('status.synchronized')}`,
+        ntp: `NTP/1588 ${t('status.synchronized')}`,
+        rem: `REM ${t('status.synchronized')}`,
+        error: t('status.notSynchronized'),
+      })}
+    </Tag>
+  );
+};
 
 // ─── 基站信息组 ────────────────────────────────────────────────────────
 

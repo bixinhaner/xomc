@@ -9,6 +9,7 @@ export interface AutoRefreshDropdownProps {
   intervalSeconds: number;
   onEnabledChange: (enabled: boolean) => void;
   onIntervalChange: (seconds: number) => void;
+  spinning?: boolean;
   size?: ButtonProps['size'];
 }
 
@@ -17,6 +18,7 @@ export default function AutoRefreshDropdown({
   intervalSeconds,
   onEnabledChange,
   onIntervalChange,
+  spinning,
   size,
 }: AutoRefreshDropdownProps) {
   const t = useT();
@@ -67,7 +69,7 @@ export default function AutoRefreshDropdown({
 
   return (
     <Dropdown menu={{ items: menuItems, onClick: handleMenuClick }}>
-      <Button icon={<SyncOutlined spin={enabled} />} size={size} type={enabled ? 'primary' : 'default'}>
+      <Button icon={<SyncOutlined spin={spinning ?? enabled} />} size={size} type={enabled ? 'primary' : 'default'}>
         {enabled ? currentLabel : t('alarm.stats.autoRefresh')}
       </Button>
     </Dropdown>
