@@ -1,10 +1,11 @@
 <?xml version="1.0" ?>
-<parameterModel paramModel="BaiBNQ" totalEntries="839">
+<parameterModel paramModel="BaiBNQ" totalEntries="840">
     <objects>
         <object name="Device.FAP.License." standardPath="Device.FAP.License." access="READ_ONLY" changeApplies="Immediate"/>
         <object name="Device.FAP.License.LicenseItem." standardPath="Device.FAP.License.LicenseItem." access="READ_ONLY" changeApplies="Immediate"/>
         <object name="Device.FaultMgmt.CurrentAlarm." standardPath="Device.FaultMgmt.CurrentAlarm." access="READ_ONLY" changeApplies="Immediate"/>
         <object name="Device.FaultMgmt.ExpeditedEvent." standardPath="Device.FaultMgmt.ExpeditedEvent." access="READ_ONLY" changeApplies="Immediate"/>
+        <object name="Device.FAP.Ipsec." standardPath="Device.FAP.Ipsec." access="READ_WRITE" changeApplies="Immediate"/>
         <object name="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.EUTRA.Carrier." standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier." access="READ_WRITE" changeApplies="Immediate"/>
         <object name="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.InterFreq.Carrier." standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.InterFreq.Carrier." access="READ_WRITE" changeApplies="Immediate"/>
         <object name="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.LTECell." standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell." access="READ_WRITE" changeApplies="Immediate"/>

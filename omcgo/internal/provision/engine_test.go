@@ -1196,6 +1196,68 @@ func TestHandleGPVResponse_EmptySyncGPVStillFinalizesPathB(t *testing.T) {
 	assert.Error(t, redisErr, "pending batch key should be cleared after final empty sync-gpv response")
 }
 
+func TestOnTaskCompleted_RecoveredSyncGPVExhausted_FinalizesPathB(t *testing.T) {
+	deviceID := uuid.New()
+	deviceSN := "SN-GPV-RECOVERED"
+	deviceRepo := &mockDeviceRepo{
+		GetBySerialNumberFn: func(_ context.Context, sn string) (*model.Device, error) {
+			if sn != deviceSN {
+				return nil, nil
+			}
+			return &model.Device{
+				ID:           deviceID,
+				SerialNumber: deviceSN,
+				Carrier:      model.CarrierCMCC,
+				Technology:   model.TechNR,
+			}, nil
+		},
+	}
+	h := newEngineHarness(deviceRepo)
+	writer := &fakeParamSyncWriter{}
+	h.engine.SetSyncService((&SyncService{logger: zap.NewNop()}).
+		SetParamSyncWriter(writer).
+		SetPathBSyncTaskReader(&fakePathBSyncTaskReader{hasOpen: false}))
+
+	h.engine.OnTaskCompleted(context.Background(), &task.Task{
+		ID:         "task-recovered-final",
+		DeviceSN:   deviceSN,
+		Method:     "GetParameterValues",
+		Status:     task.TaskStatusCompleted,
+		CommandKey: "sync-gpv-sn-recovered-0-r-r",
+		SourceID:   uuid.New().String(),
+		Result:     json.RawMessage(`{"recovered":true,"bad_path":"Device.Ethernet.Interface.8.","remaining_cnt":0}`),
+	})
+
+	assert.Equal(t, 1, writer.callCount(), "exhausted recovered sync-gpv should finalize Path B via completion callback")
+}
+
+func TestOnTaskCompleted_RecoveredSyncGPVWithRemaining_DoesNotFinalize(t *testing.T) {
+	deviceSN := "SN-GPV-STILL-OPEN"
+	deviceRepo := &mockDeviceRepo{
+		GetBySerialNumberFn: func(_ context.Context, sn string) (*model.Device, error) {
+			if sn != deviceSN {
+				return nil, nil
+			}
+			return &model.Device{ID: uuid.New(), SerialNumber: deviceSN}, nil
+		},
+	}
+	h := newEngineHarness(deviceRepo)
+	writer := &fakeParamSyncWriter{}
+	h.engine.SetSyncService((&SyncService{logger: zap.NewNop()}).SetParamSyncWriter(writer))
+
+	h.engine.OnTaskCompleted(context.Background(), &task.Task{
+		ID:         "task-recovered-mid",
+		DeviceSN:   deviceSN,
+		Method:     "GetParameterValues",
+		Status:     task.TaskStatusCompleted,
+		CommandKey: "sync-gpv-sn-open-0-r",
+		SourceID:   uuid.New().String(),
+		Result:     json.RawMessage(`{"recovered":true,"bad_path":"Device.Ethernet.Interface.9.","remaining_cnt":3}`),
+	})
+
+	assert.Equal(t, 0, writer.callCount(), "recovered sync-gpv with remaining paths must not finalize early")
+}
+
 // ---------------------------------------------------------------------------
 // Tests: T-0125 HandleFirmwareChanged — Redis 串行锁 + reason hint + fallback Path B
 // ---------------------------------------------------------------------------

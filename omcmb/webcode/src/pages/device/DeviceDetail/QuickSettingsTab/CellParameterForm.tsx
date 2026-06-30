@@ -290,6 +290,7 @@ interface CellParameterFormProps {
   group: QuickSettingsGroup;
   instanceContext: QuickSettingsInstanceContext;
   locale: 'zh-CN' | 'en-US';
+  onIpsecControlChange?: (value: string | undefined) => void;
 }
 
 interface BindSelectOption {
@@ -564,11 +565,12 @@ function findRawValueBySuffix(parameters: DeviceParameter[] | undefined, suffix:
  *  4. 顶部"保存"按钮收集本表单全部脏字段，一次性 SetParameterValues
  *  5. Save 部分失败时按字段标红保留输入值（继承 Antd Form 校验/状态行为）
  */
-export default function CellParameterForm({ deviceId, active = true, group, instanceContext, locale }: CellParameterFormProps) {
+export default function CellParameterForm({ deviceId, active = true, group, instanceContext, locale, onIpsecControlChange }: CellParameterFormProps) {
   const t = useT();
   const [form] = Form.useForm();
   const latestLocalEditAtRef = useRef(0);
   const watchedLocalTimeZoneName = Form.useWatch('LocalTimeZoneName', form);
+  const watchedIpsecEnable = Form.useWatch('IPSEC_ENABLE', form);
   const updateMutation = useUpdateParameters();
   const queryClient = useQueryClient();
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -1102,6 +1104,11 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
     }
     return lastSubmit;
   }, [lastSubmit]);
+
+  useEffect(() => {
+    if (group.id !== 'device-ipsec-control') return;
+    onIpsecControlChange?.(watchedIpsecEnable === undefined ? undefined : String(watchedIpsecEnable));
+  }, [group.id, onIpsecControlChange, watchedIpsecEnable]);
 
   return (
     <Card

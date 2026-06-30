@@ -107,6 +107,7 @@ export default function QuickSettingsTab({ deviceId, networkType, active = true,
   const t = useT();
   const locale: 'zh-CN' | 'en-US' = intl.locale === 'en-US' ? 'en-US' : 'zh-CN';
   const normalizedNetworkType = normalizeQuickSettingsNetworkType(networkType);
+  const [ipsecControlValue, setIpsecControlValue] = useState<string | undefined>(undefined);
 
   // LTE 选择 FAPService，NR 选择 CellConfig 小区实例。
   const [userPickedInstance, setUserPickedInstance] = useState<number | null>(null);
@@ -170,6 +171,10 @@ export default function QuickSettingsTab({ deviceId, networkType, active = true,
     [data?.groups],
   );
 
+  useEffect(() => {
+    setIpsecControlValue(undefined);
+  }, [deviceId, refreshTick]);
+
   const activeBmTech = bmTechOptions.includes(bmTech)
     ? bmTech
     : (bmTechOptions[0] ?? (bmHasGsmGroups && !bmHasLteGroups ? 'GSM' : 'LTE'));
@@ -219,6 +224,12 @@ export default function QuickSettingsTab({ deviceId, networkType, active = true,
     () => visibleGroups.filter((group) => OUTER_GROUP_IDS.has(group.id)),
     [visibleGroups],
   );
+
+  useEffect(() => {
+    if (!visibleGroups.some((group) => group.id === 'device-ipsec-control')) {
+      setIpsecControlValue(undefined);
+    }
+  }, [visibleGroups]);
 
   const instanceScopedGroups = useMemo(
     () => visibleGroups.filter((group) => !OUTER_GROUP_IDS.has(group.id)),
@@ -282,6 +293,7 @@ export default function QuickSettingsTab({ deviceId, networkType, active = true,
         group={group}
         instanceContext={instanceContext}
         locale={locale}
+        ipsecControlValue={ipsecControlValue}
       />
     ) : (
       <CellParameterForm
@@ -291,6 +303,7 @@ export default function QuickSettingsTab({ deviceId, networkType, active = true,
         group={group}
         instanceContext={instanceContext}
         locale={locale}
+        onIpsecControlChange={group.id === 'device-ipsec-control' ? setIpsecControlValue : undefined}
       />
     );
   };

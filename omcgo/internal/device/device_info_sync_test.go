@@ -353,7 +353,7 @@ func TestLookupWANMAC(t *testing.T) {
 	}
 }
 
-func TestInfoSyncer_SyncFromParameters_OnlyNRUsesWANMACTraversal(t *testing.T) {
+func TestInfoSyncer_SyncFromParameters_BackfillsMACFromWANTraversalWhenDirectPathMissing(t *testing.T) {
 	deviceID := uuid.New()
 	params := []model.DeviceParameter{
 		{ParameterPath: "Device.Ethernet.Interface.1.MACAddress", ParameterValue: "00:11:22:33:44:55"},
@@ -365,7 +365,7 @@ func TestInfoSyncer_SyncFromParameters_OnlyNRUsesWANMACTraversal(t *testing.T) {
 	registry := carrier.NewRegistry()
 	registry.Register(testCarrier{})
 
-	t.Run("nr overrides mac with WAN traversal", func(t *testing.T) {
+	t.Run("nr uses WAN traversal", func(t *testing.T) {
 		infoRepo := stubDeviceInfoRepo{updateSyncFields: func(_ context.Context, _ uuid.UUID, fields map[string]interface{}) error {
 			assert.Equal(t, "66:77:88:99:AA:BB", fields["mac"])
 			return nil
@@ -377,10 +377,9 @@ func TestInfoSyncer_SyncFromParameters_OnlyNRUsesWANMACTraversal(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("lte keeps legacy fixed-path behavior", func(t *testing.T) {
+	t.Run("lte also backfills from WAN traversal", func(t *testing.T) {
 		infoRepo := stubDeviceInfoRepo{updateSyncFields: func(_ context.Context, _ uuid.UUID, fields map[string]interface{}) error {
-			_, exists := fields["mac"]
-			assert.False(t, exists)
+			assert.Equal(t, "66:77:88:99:AA:BB", fields["mac"])
 			return nil
 		}}
 		paramRepo := stubDeviceParamRepo{params: params}
@@ -389,6 +388,29 @@ func TestInfoSyncer_SyncFromParameters_OnlyNRUsesWANMACTraversal(t *testing.T) {
 		_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechLTE)
 		assert.NoError(t, err)
 	})
+}
+
+func TestInfoSyncer_SyncFromParameters_PrefersDirectMACPathOverTraversal(t *testing.T) {
+	deviceID := uuid.New()
+	params := []model.DeviceParameter{
+		{ParameterPath: "Device.Ethernet.Interface.MACAddress", ParameterValue: "48:BF:74:2B:C5:D4"},
+		{ParameterPath: "Device.Ethernet.Interface.1.MACAddress", ParameterValue: "00:11:22:33:44:55"},
+		{ParameterPath: "Device.Ethernet.Interface.2.MACAddress", ParameterValue: "66:77:88:99:AA:BB"},
+		{ParameterPath: "Device.Ethernet.Interface.2.IPv4Address.1.PortType", ParameterValue: "WAN"},
+	}
+
+	registry := carrier.NewRegistry()
+	registry.Register(testCarrier{})
+
+	infoRepo := stubDeviceInfoRepo{updateSyncFields: func(_ context.Context, _ uuid.UUID, fields map[string]interface{}) error {
+		assert.Equal(t, "48:BF:74:2B:C5:D4", fields["mac"])
+		return nil
+	}}
+	paramRepo := stubDeviceParamRepo{params: params}
+	syncer := NewInfoSyncer(infoRepo, paramRepo, nil, registry, zap.NewNop())
+
+	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechLTE)
+	assert.NoError(t, err)
 }
 
 func TestInfoSyncer_SyncFromParameters_BackfillsCoordinates(t *testing.T) {
