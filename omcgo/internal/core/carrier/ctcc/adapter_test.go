@@ -132,6 +132,7 @@ func Test_GetInfoParamMapping_LTE(t *testing.T) {
 	c := New()
 	m := c.GetInfoParamMapping(model.TechLTE)
 	assert.NotEmpty(t, m)
+	assert.Equal(t, "freq_point", m["Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.EARFCNDL"])
 }
 
 func Test_GetInfoParamMapping_NR(t *testing.T) {
