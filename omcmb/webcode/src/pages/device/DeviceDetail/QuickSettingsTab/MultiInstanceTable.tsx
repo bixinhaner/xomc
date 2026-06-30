@@ -126,6 +126,7 @@ export function statusTagSpec(action: MultiFeedback, taskStatus: DeviceTaskStatu
 
 interface MultiInstanceTableProps {
   deviceId: string;
+  active?: boolean;
   group: QuickSettingsGroup;
   instanceContext: QuickSettingsInstanceContext;
   locale: 'zh-CN' | 'en-US';
@@ -255,6 +256,7 @@ function serializeNeighborEntry(cells: string[]): string {
 
 interface PackedScalarNeighborTableProps {
   deviceId: string;
+  active?: boolean;
   group: QuickSettingsGroup;
   instanceContext: QuickSettingsInstanceContext;
   locale: 'zh-CN' | 'en-US';
@@ -280,6 +282,7 @@ interface PackedScalarNeighborTableProps {
  */
 function PackedScalarNeighborTable({
   deviceId,
+  active = true,
   group,
   instanceContext,
   locale,
@@ -303,7 +306,7 @@ function PackedScalarNeighborTable({
   const delPath = `${parentPath}${spec.delLeaf}`;
 
   // 拉父路径下的所有参数，从中找出打包标量。父路径粒度命中只读 schema 已足够。
-  const { data: schemaResp, isLoading, refetch, isFetching } = useParameterSchema(deviceId, parentPath);
+  const { data: schemaResp, isLoading, refetch, isFetching } = useParameterSchema(deviceId, parentPath, active);
   const updateMutation = useUpdateParameters();
 
   const packedValue = useMemo(() => {
@@ -356,7 +359,7 @@ function PackedScalarNeighborTable({
   });
   const setFeedback = useQuickSettingsFeedbackStore((s) => s.setFeedback);
   const patchFeedback = useQuickSettingsFeedbackStore((s) => s.patchFeedback);
-  const { data: lastTask } = useDeviceTaskStatus(lastAction?.taskId);
+  const { data: lastTask } = useDeviceTaskStatus(active ? lastAction?.taskId : undefined);
 
   const waitForTaskTerminal = useCallback(async (taskId: string) => {
     const timeoutAt = Date.now() + 60000;
@@ -688,13 +691,13 @@ function PackedScalarNeighborTable({
  *  6. 删除：DeleteObject
  *  7. 失败标红保留输入值，"重试"按钮原值重发
  */
-export default function MultiInstanceTable({ deviceId, group, instanceContext, locale }: MultiInstanceTableProps) {
+export default function MultiInstanceTable({ deviceId, active = true, group, instanceContext, locale }: MultiInstanceTableProps) {
   const t = useT();
   const feedbackScope = useMemo(() => getFeedbackScopeContext(group.id, instanceContext), [group.id, instanceContext]);
   const isIpsecGroup = IPSEC_GROUP_IDS.has(group.id);
   const ipsecGlobalEnablePath = IPSEC_GLOBAL_ENABLE_PATH_BY_GROUP[group.id] ?? '';
   const ipsecGlobalEnableQuery = IPSEC_GLOBAL_ENABLE_QUERY_BY_GROUP[group.id] ?? 'IPSEC_ENABLE';
-  const { data: ipsecGlobalParams } = useSearchParameters(deviceId, ipsecGlobalEnableQuery, 20, isIpsecGroup);
+  const { data: ipsecGlobalParams } = useSearchParameters(deviceId, ipsecGlobalEnableQuery, 20, active && isIpsecGroup);
   const ipsecControlDraftKey = useMemo(
     () => feedbackKey(
       deviceId,
@@ -720,6 +723,7 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
     return (
       <PackedScalarNeighborTable
         deviceId={deviceId}
+        active={active}
         group={group}
         instanceContext={instanceContext}
         locale={locale}
@@ -736,7 +740,7 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
     });
     return resolved.replace(/\{i\}\.$/, '');
   }, [group, instanceContext]);
-  const { data: schemaResp, isLoading, refetch } = useParameterSchema(deviceId, objectPath);
+  const { data: schemaResp, isLoading, refetch } = useParameterSchema(deviceId, objectPath, active);
   const updateMutation = useUpdateParameters();
   const addMutation = useAddObject();
   const deleteMutation = useDeleteObject();
@@ -910,7 +914,7 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
   // T-0146:Save 后用 task_id 轮询真实 CPE 应答状态;到终态后停轮询。
   // AddObject / DeleteObject 暂不走 taskId(后端 useAddObject/useDeleteObject 未返 task),
   // Tag 只显示"入队成功/失败"语义。
-  const { data: lastTask } = useDeviceTaskStatus(lastAction?.taskId);
+  const { data: lastTask } = useDeviceTaskStatus(active ? lastAction?.taskId : undefined);
 
   // 任务进入任一终态后再刷新当前多实例 schema:
   //  - DeleteObject:摘掉已删实例(原始用途)。handleDelete 里 API ACK 时已 refetch 一次，
@@ -922,6 +926,7 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
   //    判断条件 = action==='save' 且 lastAction.instanceNumber>0 且 task.status==='failed'
   //    且 还未为该 taskId 做过回滚(invalidatedForTaskId 去重)。与 index.tsx BSC 须知一致。
   useEffect(() => {
+    if (!active) return;
     if (!lastTask || !isDeviceTaskTerminal(lastTask.status)) return;
     let cancelled = false;
     void (async () => {
@@ -1019,7 +1024,7 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lastTask?.id, lastTask?.status]);
+  }, [active, lastTask?.id, lastTask?.status]);
 
   // T-0146:基站应答失败时弹一次 notification(仅在 status 第一次变成 failed 时触发)
   // notifiedFailedTaskId 同样存 store —— 切顶层 tab 再切回不会重复弹。
