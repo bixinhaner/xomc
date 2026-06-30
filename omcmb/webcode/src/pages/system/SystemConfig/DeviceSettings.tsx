@@ -1,4 +1,4 @@
-import { Form, InputNumber, Checkbox, Select, Card, Space, Typography, Divider, theme } from 'antd';
+import { Form, InputNumber, Checkbox, Select, Card, Space, Typography, theme } from 'antd';
 import { useT } from '@/hooks/useT';
 
 const { Option } = Select;
@@ -21,9 +21,6 @@ export default function DeviceSettings({ form }: DeviceSettingsProps) {
       enbInformPeriodAdjustEnable: true,
       enbInformPeriod: 60,
       enbTimeout: 100,
-      cpeInformPeriodAdjustEnable: false,
-      cpeInformPeriod: 60,
-      cpeTimeout: 600,
       nameSettingEnable: true,
       prompt: false,
       accessContralEnable: false,
@@ -66,35 +63,6 @@ export default function DeviceSettings({ form }: DeviceSettingsProps) {
               <Checkbox>{t('system.device.ifSystemIn')}</Checkbox>
             </Form.Item>
             <Form.Item name="enbTimeout" noStyle>
-              <InputNumber min={60} max={7200} style={{ width: 70 }} />
-            </Form.Item>
-            <span>{t('system.device.noHeartbeatThenOffline')}</span>
-          </Space>
-        </div>
-
-        <Divider style={{ margin: '12px 0' }} />
-
-        {/* CPE 类 */}
-        <Typography.Text strong style={{ display: 'block', marginBottom: 12 }}>
-          {t('system.device.informGroup.cpe')}
-        </Typography.Text>
-        <div style={settingRowStyle}>
-          <Space wrap>
-            <Form.Item name="cpeInformPeriodAdjustEnable" valuePropName="checked" noStyle>
-              <Checkbox>{t('system.device.adjustCpePrefix')}</Checkbox>
-            </Form.Item>
-            <Form.Item name="cpeInformPeriod" noStyle>
-              <InputNumber min={60} max={3600} style={{ width: 70 }} />
-            </Form.Item>
-            <span>{t('system.device.adjustSuffix')}</span>
-          </Space>
-        </div>
-        <div style={settingRowStyle}>
-          <Space wrap>
-            <Form.Item name="cpeTimeoutEnable" valuePropName="checked" noStyle>
-              <Checkbox>{t('system.device.ifSystemIn')}</Checkbox>
-            </Form.Item>
-            <Form.Item name="cpeTimeout" noStyle>
               <InputNumber min={60} max={7200} style={{ width: 70 }} />
             </Form.Item>
             <span>{t('system.device.noHeartbeatThenOffline')}</span>
