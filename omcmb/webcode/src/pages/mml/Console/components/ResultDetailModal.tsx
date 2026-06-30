@@ -275,8 +275,11 @@ export default function ResultDetailModal({
                   label: t('mml.consoleV2.detail.execCommand'),
                   children: (
                     <Space size={6} wrap>
+                      {/* BUG-10 修复：若 commandName 已以操作类型中文开头（如「查询 设备基本信息」），
+                          Tag 只显示操作类型码（如 LST），避免「LST 查询 查询 设备基本信息」叠词 */}
                       <Tag color={opColor(execMeta.operationType)} style={{ marginInlineEnd: 0 }}>
-                        {execMeta.operationType} {opLabel(execMeta.operationType)}
+                        {execMeta.operationType}
+                        {!(execMeta.commandName ?? execMeta.label)?.startsWith(opLabel(execMeta.operationType)) && ` ${opLabel(execMeta.operationType)}`}
                       </Tag>
                       <Text strong>{execMeta.commandName ?? execMeta.label}</Text>
                       {columns.length > 0 && (

@@ -72,4 +72,15 @@
       0 0 0 1px rgba(0, 240, 255, 0.4),
       0 0 18px rgba(0, 240, 255, 0.25);
   }
+
+  /* Inline code styling — neon HUD */
+  code {
+    padding: 0.2em 0.5em;
+    font-size: 0.9em;
+    border-radius: 4px;
+    background: var(--bg-soft);
+    color: var(--neon-cyan);
+    border: 1px solid var(--line);
+    font-family: inherit; /* 已是 monospace */
+  }
 }
