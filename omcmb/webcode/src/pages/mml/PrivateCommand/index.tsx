@@ -99,12 +99,12 @@ export default function PrivateCommand() {
           </Space>
         ),
       },
-      { key: 'commandName', title: t('mml.console.commandName'), dataIndex: 'commandName', ellipsis: true },
+      { key: 'commandName', title: t('mml.console.commandName'), dataIndex: 'commandName', width: 200, ellipsis: true },
       {
         key: 'commandCode',
-        title: t('mml.console.commandCode'),
+        title: t('mml.console.commandCodeLabel'),
         dataIndex: 'commandCode',
-        width: 240,
+        width: 200,
         ellipsis: true,
         render: (val: unknown) => <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{String(val ?? '')}</span>,
       },

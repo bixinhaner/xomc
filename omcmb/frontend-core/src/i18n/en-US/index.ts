@@ -5701,6 +5701,7 @@ const messages: Record<string, string> = {
   'mml.newMmlTask':                          'New MML Script Task',
   'mml.basicInfo':                           'Basic Information',
   'mml.selectScript':                        'Select Script',
+  'mml.console.commandCodeLabel':            'Command Code',
   'mml.inputTaskName':                       'Enter new task name',
   'mml.selectFileFirst':                     'Please select a file first',
   'mml.selectFile':                          'Select File',

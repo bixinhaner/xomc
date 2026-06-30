@@ -323,7 +323,7 @@ export default function ScriptTaskDrawer({
 
         {prefillContent !== undefined ? (
           // MML Console 入口：预填的命令也允许用户手动微调（to-do-list 当轮 #6）。
-          <Form.Item label={t('mml.selectScript')} style={{ marginLeft: 12 }}>
+          <Form.Item label={t('mml.scriptContent')} style={{ marginLeft: 12 }}>
             <Input.TextArea
               rows={5}
               value={scriptContent}
