@@ -30,6 +30,8 @@ import { activationStatusLabelOf, activationStatusOf } from '@core/utils/activat
 import { formatDeviceSyncStatus, getDeviceSyncStatusKind, normalizeDeviceSyncStatus } from '@core/utils/deviceSyncStatus';
 import { expandSelectedGroupIds } from '@core/utils/deviceGroupFilter';
 import { withDeviceGroupDisplayName } from '@core/utils/deviceGroupDisplay';
+import { hasAlarmSeverity } from '@core/utils/alarmSeverity';
+import { useAlarmCountWithDeviceListInvalidation } from '@core/hooks/api/useAlarms';
 import { useTriggerAlarmSync } from '@core/hooks/api/useAlarms';
 import { useCreateUnifiedFileTransferTask } from '@core/hooks/api/useUnifiedFileTransfer';
 import { useDownloadStationLog } from '@core/hooks/api/useStationLog';
@@ -370,6 +372,7 @@ export default function DeviceList() {
   const batchReboot = useBatchRebootDevices();
   const updateDevice = useUpdateDevice();
   const triggerAlarmSync = useTriggerAlarmSync();
+  useAlarmCountWithDeviceListInvalidation();
   const createUfteTask = useCreateUnifiedFileTransferTask();
   const downloadStationLog = useDownloadStationLog();
   const taskNameUser = currentUser?.username || currentUser?.displayName || 'user';
@@ -1082,7 +1085,7 @@ export default function DeviceList() {
         render: (_val, record) => {
           const color = SEVERITY_COLOR[record.alarmLevel] ?? 'default';
           const label = getSeverityLabel(record.alarmLevel);
-          if (record.alarmLevel && record.alarmLevel !== 'none') {
+          if (hasAlarmSeverity(record.alarmLevel)) {
             // #361: 告警级别 Tag 旁拼接活动告警数（如「重要 · 3」）。
             const count = record.activeAlarmCount ?? 0;
             const display = count > 0 ? `${label} · ${count}` : label;

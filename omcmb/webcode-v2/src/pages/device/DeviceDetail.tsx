@@ -40,9 +40,9 @@ import { useDeviceParameters } from '@core/hooks/api/useDeviceParameters'
 import { useAppStore } from '@core/store/appStore'
 import { useDictionary } from '@core/hooks/api/useSystem'
 import { activationStatusLabelOf } from '@core/utils/activationStatus'
+import { DEFAULT_ALARM_SEVERITY_LABELS_ZH, formatAlarmSeverityBadgeLabel, getAlarmSeverityBadgeVariant } from '@core/utils/alarmSeverity'
 import { DEVICE_SYNC_STATUS_LABELS_ZH, formatDeviceSyncStatus } from '@core/utils/deviceSyncStatus'
 import type { Device } from '@core/types/device'
-import type { AlarmSeverity } from '@core/types/common'
 
 // ============================================================
 // 设备详情 — 按 SN 查单设备，分 Tab 展示基本信息/状态/小区/参数
@@ -55,25 +55,6 @@ type TabKey = 'basic' | 'status' | 'cell' | 'params'
 
 function openClassicQuickSettings(sn: string) {
   window.location.assign(`/device/detail/${sn}?tab=quickSettings`)
-}
-
-const ALARM_VARIANT: Record<
-  AlarmSeverity | 'none',
-  'destructive' | 'warning' | 'default' | 'muted'
-> = {
-  critical: 'destructive',
-  major: 'destructive',
-  minor: 'warning',
-  warning: 'warning',
-  none: 'muted',
-}
-
-const ALARM_LABEL: Record<AlarmSeverity | 'none', string> = {
-  critical: '紧急',
-  major: '重要',
-  minor: '次要',
-  warning: '警告',
-  none: '无',
 }
 
 function fmtDuration(seconds?: number | null) {
@@ -337,8 +318,8 @@ export default function DeviceDetail() {
                 />
                 {device.isOnline ? '在线' : '离线'}
               </Badge>
-              <Badge variant={ALARM_VARIANT[device.alarmLevel]}>
-                告警：{ALARM_LABEL[device.alarmLevel]}
+              <Badge variant={getAlarmSeverityBadgeVariant(device.alarmLevel)}>
+                告警：{formatAlarmSeverityBadgeLabel(device.alarmLevel, 0, DEFAULT_ALARM_SEVERITY_LABELS_ZH)}
               </Badge>
             </>
           )}

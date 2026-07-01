@@ -443,6 +443,7 @@ func (e *AlarmEngine) archiveAutoClearedAlarm(ctx context.Context, alarm *model.
 // UpdateFromSync updates an existing alarm's attributes during sync without publishing events.
 // Used by the sync processor when remote alarm properties have changed.
 func (e *AlarmEngine) UpdateFromSync(ctx context.Context, alarm *model.Alarm) error {
+	alarm.AckCount = max(alarm.AckCount, 1) + 1
 	alarm.LastUpdatedAt = resolveAlarmBusinessTime(alarm, time.Now())
 	if err := e.store.UpdateActive(ctx, alarm); err != nil {
 		return fmt.Errorf("sync update alarm: %w", err)
@@ -515,6 +516,7 @@ func (e *AlarmEngine) UpdateByEvent(ctx context.Context, alarm *model.Alarm) err
 	existing.Description = alarm.Description
 	existing.EventType = alarm.EventType
 	existing.ProbableCause = alarm.ProbableCause
+	existing.AckCount = max(existing.AckCount, 1) + 1
 	existing.LastUpdatedAt = resolveAlarmBusinessTime(alarm, time.Now())
 	if alarm.AdditionalInfo != nil {
 		if existing.AdditionalInfo == nil {

@@ -1,24 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, Search, X } from 'lucide-react'
 
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+import { NeonButton } from '@/components/ui/NeonButton'
 import { cn } from '@/lib/utils'
 
 import { useAllAlarmDefinitions } from '@core/hooks/api/useAlarmDefinitions'
@@ -38,6 +21,14 @@ const RULE_TYPE_OPTIONS = [
   { value: 'auto_acknowledge', label: '自动确认' },
   { value: 'auto_clear', label: '自动清除' },
 ] as const
+
+type AlarmDefinitionItem = {
+  identifier: string
+  cnName?: string
+  cnProbableCause?: string
+  enName?: string
+  enProbableCause?: string
+}
 
 export interface AlarmRuleFormValue {
   ruleName: string
@@ -60,7 +51,7 @@ function inferDeviceType(device: Device): string {
   return 'eNB'
 }
 
-function normalizeAlarmName(item: { identifier: string; cnName?: string; cnProbableCause?: string; enName?: string; enProbableCause?: string }) {
+function normalizeAlarmName(item: AlarmDefinitionItem) {
   return item.cnProbableCause || item.cnName || item.enProbableCause || item.enName || item.identifier
 }
 
@@ -174,11 +165,11 @@ export function AlarmRuleDialog({
     [alarmItems, alarmPage],
   )
 
-  const selectedAlarmItems = useMemo(() => {
-    const itemMap = new Map((alarmDefsQuery.data?.items ?? []).map((item) => [item.identifier, item]))
+  const selectedAlarmItems = useMemo<AlarmDefinitionItem[]>(() => {
+    const itemMap = new Map<string, AlarmDefinitionItem>((alarmDefsQuery.data?.items ?? []).map((item) => [item.identifier, item]))
     return selectedAlarms
       .map((identifier) => itemMap.get(identifier))
-      .filter((item): item is NonNullable<typeof itemMap extends Map<string, infer T> ? T : never> => Boolean(item))
+      .filter((item): item is AlarmDefinitionItem => Boolean(item))
   }, [alarmDefsQuery.data?.items, selectedAlarms])
 
   const visibleDeviceSelectedCount = deviceItems.filter((item) => selectedDeviceSet.has(item.id)).length
@@ -187,7 +178,6 @@ export function AlarmRuleDialog({
   const allVisibleDevicesSelected = deviceItems.length > 0 && visibleDeviceSelectedCount === deviceItems.length
   const allVisibleAlarmsSelected = pagedAlarms.length > 0 && visibleAlarmSelectedCount === pagedAlarms.length
   const allGroupsSelected = groups.length > 0 && selectedGroups.length === groups.length
-
   const canSubmit = ruleName.trim().length > 0 && selectedAlarms.length > 0 && !loading
 
   if (!open) return null
@@ -206,85 +196,94 @@ export function AlarmRuleDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/40" onClick={onCancel} aria-hidden />
-      <div className="relative flex max-h-[88vh] w-full max-w-6xl flex-col rounded-lg border bg-background p-5 shadow-xl">
-        <div className="flex items-start justify-between gap-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 px-4 py-6 backdrop-blur-sm">
+      <div className="glass flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-sm border border-cyan-500/25">
+        <div className="flex items-start justify-between gap-4 border-b border-cyan-500/15 px-5 py-4">
           <div>
-            <h2 className="text-base font-semibold">
+            <div className="font-mono text-[11px] uppercase tracking-[0.22em] text-cyan-300/55">
+              Alarm Rule Editor
+            </div>
+            <h2 className="font-display text-2xl font-bold text-cyan-100">
               {mode === 'add' ? '新建告警规则' : mode === 'edit' ? '编辑告警规则' : '查看告警规则'}
             </h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              设备列表、告警列表与 v1 抽屉保持同一选择口径
+            <p className="mt-1 text-sm text-cyan-300/60">
+              设备列表、告警列表和 v1 抽屉采用同一筛选与选择口径
             </p>
           </div>
-          <Button variant="ghost" size="icon" onClick={onCancel}>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="flex size-8 items-center justify-center rounded-sm border border-cyan-500/20 text-cyan-300/70 transition hover:border-cyan-400/60 hover:text-cyan-100"
+          >
             <X className="size-4" />
-          </Button>
+          </button>
         </div>
 
-        <div className="mt-4 grid gap-4 md:grid-cols-3">
-          <div className="space-y-1.5 md:col-span-1">
-            <Label htmlFor="rule-name">规则名称</Label>
-            <Input
-              id="rule-name"
-              value={ruleName}
-              placeholder="输入规则名称"
-              maxLength={50}
-              onChange={(e) => setRuleName(e.target.value)}
-              autoFocus
-              disabled={loading || isViewMode}
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="rule-type">执行动作</Label>
-            <Select value={ruleType} onValueChange={setRuleType} disabled={loading || isViewMode}>
-              <SelectTrigger id="rule-type">
-                <SelectValue placeholder="选择执行动作" />
-              </SelectTrigger>
-              <SelectContent>
-                {RULE_TYPE_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="flex items-center justify-between rounded-md border px-3 py-2 md:mt-6">
-            <Label htmlFor="rule-enabled">立即启用</Label>
-            <button
-              id="rule-enabled"
-              type="button"
-              onClick={() => !isViewMode && setEnabled((value) => !value)}
-              disabled={isViewMode}
-              className={cn(
-                'relative inline-flex h-5 w-9 items-center rounded-full transition-colors',
-                enabled ? 'bg-primary' : 'bg-muted',
-                isViewMode && 'cursor-not-allowed opacity-70',
-              )}
-              aria-label="切换启用"
-            >
-              <span
-                className={cn(
-                  'inline-block size-3.5 transform rounded-full bg-white transition-transform',
-                  enabled ? 'translate-x-4' : 'translate-x-1',
-                )}
+        <div className="space-y-4 overflow-auto px-5 py-4">
+          <div className="grid gap-4 md:grid-cols-3">
+            <label className="block">
+              <span className="mb-1.5 block font-mono text-[11px] uppercase tracking-[0.16em] text-cyan-300/60">
+                规则名称
+              </span>
+              <input
+                className="neon-input w-full"
+                value={ruleName}
+                maxLength={50}
+                placeholder="输入规则名称"
+                onChange={(e) => setRuleName(e.target.value)}
+                disabled={loading || isViewMode}
               />
-            </button>
-          </div>
-        </div>
+            </label>
 
-        <div className="mt-4 flex-1 space-y-4 overflow-auto pr-1">
-          <section className="rounded-lg border p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h3 className="text-sm font-semibold">设备范围</h3>
-                <p className="text-xs text-muted-foreground">按设备或设备组限定规则生效范围</p>
+            <label className="block">
+              <span className="mb-1.5 block font-mono text-[11px] uppercase tracking-[0.16em] text-cyan-300/60">
+                执行动作
+              </span>
+              <select
+                className="neon-input w-full"
+                value={ruleType}
+                onChange={(e) => setRuleType(e.target.value)}
+                disabled={loading || isViewMode}
+              >
+                {RULE_TYPE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <div className="glass rounded-sm border border-cyan-500/15 px-3 py-2.5">
+              <div className="font-mono text-[11px] uppercase tracking-[0.16em] text-cyan-300/60">
+                立即启用
               </div>
-              <div className="flex rounded-md border bg-muted/40 p-1">
+              <button
+                type="button"
+                onClick={() => !isViewMode && setEnabled((value) => !value)}
+                disabled={isViewMode}
+                className={cn(
+                  'mt-3 flex w-full items-center justify-between rounded-sm border px-3 py-2 text-sm transition',
+                  enabled ? 'border-emerald-400/50 text-emerald-300' : 'border-cyan-500/15 text-cyan-300/70',
+                  isViewMode && 'cursor-not-allowed opacity-70',
+                )}
+              >
+                <span>{enabled ? '启用中' : '未启用'}</span>
+                <span className={cn('chip', enabled ? 'text-emerald-300' : 'text-cyan-300/60')}>
+                  {enabled ? 'ON' : 'OFF'}
+                </span>
+              </button>
+            </div>
+          </div>
+
+          <section className="glass rounded-sm border border-cyan-500/15 px-4 py-4">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <div className="font-mono text-[11px] uppercase tracking-[0.16em] text-cyan-300/60">
+                  Device Scope
+                </div>
+                <div className="text-sm text-cyan-100">设备范围</div>
+              </div>
+              <div className="flex gap-2">
                 {(['devices', 'groups'] as const).map((value) => (
                   <button
                     key={value}
@@ -292,8 +291,8 @@ export function AlarmRuleDialog({
                     disabled={isViewMode}
                     onClick={() => setDeviceSelectionMode(value)}
                     className={cn(
-                      'rounded px-3 py-1 text-xs transition-colors',
-                      deviceSelectionMode === value ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground',
+                      'chip transition-all',
+                      deviceSelectionMode === value ? 'text-cyan-100 shadow-[0_0_10px_currentColor]' : 'text-cyan-300/45',
                     )}
                   >
                     {value === 'devices' ? '设备列表' : '设备组'}
@@ -306,21 +305,21 @@ export function AlarmRuleDialog({
               <>
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
                   <div className="relative w-full max-w-xs">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      className="pl-9"
-                      placeholder="搜索设备 SN/名称"
+                    <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-cyan-300/45" />
+                    <input
+                      className="neon-input w-full pl-9"
                       value={deviceKeyword}
                       onChange={(e) => setDeviceKeyword(e.target.value)}
+                      placeholder="搜索设备 SN/名称"
                     />
                   </div>
-                  <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
+                  <div className="flex flex-wrap items-center gap-4 font-mono text-[11px] text-cyan-300/60">
                     <span>已选 {selectedDevices.length} 台</span>
                     <span>共 {deviceTotal} 台</span>
-                    <label className="flex items-center gap-2 text-foreground">
+                    <label className="flex items-center gap-2 text-cyan-100">
                       <input
                         type="checkbox"
-                        className="size-4"
+                        className="size-4 accent-cyan-400"
                         checked={allVisibleDevicesSelected}
                         onChange={(e) => {
                           const visibleIds = deviceItems.map((item) => item.id)
@@ -337,37 +336,33 @@ export function AlarmRuleDialog({
                   </div>
                 </div>
 
-                <div className="mt-3 overflow-hidden rounded-md border">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-12">选择</TableHead>
-                        <TableHead>SN</TableHead>
-                        <TableHead>名称</TableHead>
-                        <TableHead>制式</TableHead>
-                        <TableHead>状态</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
+                <div className="mt-3 overflow-hidden rounded-sm border border-cyan-500/15">
+                  <table className="w-full text-sm">
+                    <thead className="border-b border-cyan-500/10 bg-cyan-500/5">
+                      <tr className="font-mono text-[10px] uppercase tracking-[0.16em] text-cyan-300/50">
+                        <th className="px-3 py-2 text-left">选</th>
+                        <th className="px-3 py-2 text-left">SN</th>
+                        <th className="px-3 py-2 text-left">名称</th>
+                        <th className="px-3 py-2 text-left">制式</th>
+                        <th className="px-3 py-2 text-left">状态</th>
+                      </tr>
+                    </thead>
+                    <tbody>
                       {deviceQuery.isLoading ? (
-                        <TableRow>
-                          <TableCell colSpan={5} className="text-center text-sm text-muted-foreground">
-                            正在加载设备…
-                          </TableCell>
-                        </TableRow>
+                        <tr>
+                          <td colSpan={5} className="px-3 py-6 text-center text-cyan-300/55">正在加载设备…</td>
+                        </tr>
                       ) : deviceItems.length === 0 ? (
-                        <TableRow>
-                          <TableCell colSpan={5} className="text-center text-sm text-muted-foreground">
-                            暂无可选设备
-                          </TableCell>
-                        </TableRow>
+                        <tr>
+                          <td colSpan={5} className="px-3 py-6 text-center text-cyan-300/55">暂无可选设备</td>
+                        </tr>
                       ) : (
                         deviceItems.map((device) => (
-                          <TableRow key={device.id}>
-                            <TableCell>
+                          <tr key={device.id} className="border-b border-cyan-500/8 last:border-b-0 hover:bg-cyan-500/5">
+                            <td className="px-3 py-2.5">
                               <input
                                 type="checkbox"
-                                className="size-4"
+                                className="size-4 accent-cyan-400"
                                 checked={selectedDeviceSet.has(device.id)}
                                 onChange={(e) => {
                                   setSelectedDevices((prev) =>
@@ -378,37 +373,47 @@ export function AlarmRuleDialog({
                                 }}
                                 disabled={isViewMode}
                               />
-                            </TableCell>
-                            <TableCell className="font-medium">{device.sn}</TableCell>
-                            <TableCell>{device.name || '—'}</TableCell>
-                            <TableCell>{inferDeviceType(device)}</TableCell>
-                            <TableCell>{device.isOnline ? '在线' : '离线'}</TableCell>
-                          </TableRow>
+                            </td>
+                            <td className="px-3 py-2.5 font-mono text-cyan-100">{device.sn}</td>
+                            <td className="px-3 py-2.5 text-cyan-300/80">{device.name || '—'}</td>
+                            <td className="px-3 py-2.5 text-cyan-300/80">{inferDeviceType(device)}</td>
+                            <td className="px-3 py-2.5 text-cyan-300/80">{device.isOnline ? '在线' : '离线'}</td>
+                          </tr>
                         ))
                       )}
-                    </TableBody>
-                  </Table>
+                    </tbody>
+                  </table>
                 </div>
 
-                <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
+                <div className="mt-3 flex items-center justify-between font-mono text-[11px] text-cyan-300/60">
                   <span>共 {deviceTotal} 台</span>
                   <div className="flex items-center gap-2">
-                    <Button variant="outline" size="sm" onClick={() => setDevicePage((page) => Math.max(1, page - 1))} disabled={devicePage <= 1}>
-                      <ChevronLeft className="size-4" />
-                    </Button>
+                    <button
+                      type="button"
+                      className="chip"
+                      onClick={() => setDevicePage((page) => Math.max(1, page - 1))}
+                      disabled={devicePage <= 1}
+                    >
+                      <ChevronLeft className="size-3.5" />
+                    </button>
                     <span>{devicePage}/{devicePageCount}</span>
-                    <Button variant="outline" size="sm" onClick={() => setDevicePage((page) => Math.min(devicePageCount, page + 1))} disabled={devicePage >= devicePageCount}>
-                      <ChevronRight className="size-4" />
-                    </Button>
+                    <button
+                      type="button"
+                      className="chip"
+                      onClick={() => setDevicePage((page) => Math.min(devicePageCount, page + 1))}
+                      disabled={devicePage >= devicePageCount}
+                    >
+                      <ChevronRight className="size-3.5" />
+                    </button>
                   </div>
                 </div>
 
                 {selectedDeviceRows.length > 0 && (
                   <div className="mt-3 flex flex-wrap gap-2">
                     {selectedDeviceRows.map((device) => (
-                      <span key={device.id} className="inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs">
-                        <span className="font-medium">{device.sn}</span>
-                        <span className="text-muted-foreground">{device.name || '未命名设备'}</span>
+                      <span key={device.id} className="chip inline-flex items-center gap-2 text-cyan-100">
+                        <span className="font-mono">{device.sn}</span>
+                        <span className="text-cyan-300/60">{device.name || '未命名设备'}</span>
                         {!isViewMode && (
                           <button type="button" onClick={() => setSelectedDevices((prev) => prev.filter((id) => id !== device.id))}>
                             <X className="size-3" />
@@ -421,47 +426,44 @@ export function AlarmRuleDialog({
               </>
             ) : (
               <>
-                <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-3 font-mono text-[11px] text-cyan-300/60">
                   <div className="flex items-center gap-4">
                     <span>已选 {selectedGroups.length} 组</span>
                     <span>共 {groups.length} 组</span>
                   </div>
-                  <label className="flex items-center gap-2 text-foreground">
+                  <label className="flex items-center gap-2 text-cyan-100">
                     <input
                       type="checkbox"
-                      className="size-4"
+                      className="size-4 accent-cyan-400"
                       checked={allGroupsSelected}
-                      onChange={(e) => {
-                        setSelectedGroups(e.target.checked ? groups.map((group) => group.id) : [])
-                      }}
+                      onChange={(e) => setSelectedGroups(e.target.checked ? groups.map((group) => group.id) : [])}
                       disabled={isViewMode || groups.length === 0}
                     />
                     全选设备组
                   </label>
                 </div>
-                <div className="mt-3 overflow-hidden rounded-md border">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-12">选择</TableHead>
-                        <TableHead>设备组名称</TableHead>
-                        <TableHead className="w-24">设备数</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
+
+                <div className="mt-3 overflow-hidden rounded-sm border border-cyan-500/15">
+                  <table className="w-full text-sm">
+                    <thead className="border-b border-cyan-500/10 bg-cyan-500/5">
+                      <tr className="font-mono text-[10px] uppercase tracking-[0.16em] text-cyan-300/50">
+                        <th className="px-3 py-2 text-left">选</th>
+                        <th className="px-3 py-2 text-left">设备组名称</th>
+                        <th className="px-3 py-2 text-left">设备数</th>
+                      </tr>
+                    </thead>
+                    <tbody>
                       {groups.length === 0 ? (
-                        <TableRow>
-                          <TableCell colSpan={3} className="text-center text-sm text-muted-foreground">
-                            暂无设备组
-                          </TableCell>
-                        </TableRow>
+                        <tr>
+                          <td colSpan={3} className="px-3 py-6 text-center text-cyan-300/55">暂无设备组</td>
+                        </tr>
                       ) : (
                         groups.map((group: DeviceGroup) => (
-                          <TableRow key={group.id}>
-                            <TableCell>
+                          <tr key={group.id} className="border-b border-cyan-500/8 last:border-b-0 hover:bg-cyan-500/5">
+                            <td className="px-3 py-2.5">
                               <input
                                 type="checkbox"
-                                className="size-4"
+                                className="size-4 accent-cyan-400"
                                 checked={selectedGroupSet.has(group.id)}
                                 onChange={(e) => {
                                   setSelectedGroups((prev) =>
@@ -472,41 +474,44 @@ export function AlarmRuleDialog({
                                 }}
                                 disabled={isViewMode}
                               />
-                            </TableCell>
-                            <TableCell>{group.name}</TableCell>
-                            <TableCell>{group.deviceCount}</TableCell>
-                          </TableRow>
+                            </td>
+                            <td className="px-3 py-2.5 text-cyan-100">{group.name}</td>
+                            <td className="px-3 py-2.5 text-cyan-300/80">{group.deviceCount}</td>
+                          </tr>
                         ))
                       )}
-                    </TableBody>
-                  </Table>
+                    </tbody>
+                  </table>
                 </div>
               </>
             )}
           </section>
 
-          <section className="rounded-lg border p-4">
+          <section className="glass rounded-sm border border-cyan-500/15 px-4 py-4">
             <div>
-              <h3 className="text-sm font-semibold">告警范围</h3>
-              <p className="text-xs text-muted-foreground">至少选择一条告警标识作为命中条件</p>
+              <div className="font-mono text-[11px] uppercase tracking-[0.16em] text-cyan-300/60">
+                Alarm Scope
+              </div>
+              <div className="text-sm text-cyan-100">告警范围</div>
             </div>
+
             <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
               <div className="relative w-full max-w-xs">
-                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  className="pl-9"
-                  placeholder="搜索告警标识或可能原因"
+                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-cyan-300/45" />
+                <input
+                  className="neon-input w-full pl-9"
                   value={alarmKeyword}
                   onChange={(e) => setAlarmKeyword(e.target.value)}
+                  placeholder="搜索告警标识或可能原因"
                 />
               </div>
-              <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
+              <div className="flex flex-wrap items-center gap-4 font-mono text-[11px] text-cyan-300/60">
                 <span>已选 {selectedAlarms.length} 条</span>
                 <span>共 {alarmTotal} 条</span>
-                <label className="flex items-center gap-2 text-foreground">
+                <label className="flex items-center gap-2 text-cyan-100">
                   <input
                     type="checkbox"
-                    className="size-4"
+                    className="size-4 accent-cyan-400"
                     checked={allVisibleAlarmsSelected}
                     onChange={(e) => {
                       const visibleIds = pagedAlarms.map((item) => item.identifier)
@@ -523,35 +528,31 @@ export function AlarmRuleDialog({
               </div>
             </div>
 
-            <div className="mt-3 overflow-hidden rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-12">选择</TableHead>
-                    <TableHead>告警标识</TableHead>
-                    <TableHead>可能原因</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
+            <div className="mt-3 overflow-hidden rounded-sm border border-cyan-500/15">
+              <table className="w-full text-sm">
+                <thead className="border-b border-cyan-500/10 bg-cyan-500/5">
+                  <tr className="font-mono text-[10px] uppercase tracking-[0.16em] text-cyan-300/50">
+                    <th className="px-3 py-2 text-left">选</th>
+                    <th className="px-3 py-2 text-left">告警标识</th>
+                    <th className="px-3 py-2 text-left">可能原因</th>
+                  </tr>
+                </thead>
+                <tbody>
                   {alarmDefsQuery.isLoading ? (
-                    <TableRow>
-                      <TableCell colSpan={3} className="text-center text-sm text-muted-foreground">
-                        正在加载告警…
-                      </TableCell>
-                    </TableRow>
+                    <tr>
+                      <td colSpan={3} className="px-3 py-6 text-center text-cyan-300/55">正在加载告警…</td>
+                    </tr>
                   ) : pagedAlarms.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={3} className="text-center text-sm text-muted-foreground">
-                        暂无可选告警
-                      </TableCell>
-                    </TableRow>
+                    <tr>
+                      <td colSpan={3} className="px-3 py-6 text-center text-cyan-300/55">暂无可选告警</td>
+                    </tr>
                   ) : (
                     pagedAlarms.map((alarm) => (
-                      <TableRow key={alarm.identifier}>
-                        <TableCell>
+                      <tr key={alarm.identifier} className="border-b border-cyan-500/8 last:border-b-0 hover:bg-cyan-500/5">
+                        <td className="px-3 py-2.5">
                           <input
                             type="checkbox"
-                            className="size-4"
+                            className="size-4 accent-cyan-400"
                             checked={selectedAlarmSet.has(alarm.identifier)}
                             onChange={(e) => {
                               setSelectedAlarms((prev) =>
@@ -562,35 +563,45 @@ export function AlarmRuleDialog({
                             }}
                             disabled={isViewMode}
                           />
-                        </TableCell>
-                        <TableCell className="font-medium">{alarm.identifier}</TableCell>
-                        <TableCell>{normalizeAlarmName(alarm)}</TableCell>
-                      </TableRow>
+                        </td>
+                        <td className="px-3 py-2.5 font-mono text-cyan-100">{alarm.identifier}</td>
+                        <td className="px-3 py-2.5 text-cyan-300/80">{normalizeAlarmName(alarm)}</td>
+                      </tr>
                     ))
                   )}
-                </TableBody>
-              </Table>
+                </tbody>
+              </table>
             </div>
 
-            <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
+            <div className="mt-3 flex items-center justify-between font-mono text-[11px] text-cyan-300/60">
               <span>共 {alarmTotal} 条</span>
               <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={() => setAlarmPage((page) => Math.max(1, page - 1))} disabled={alarmPage <= 1}>
-                  <ChevronLeft className="size-4" />
-                </Button>
+                <button
+                  type="button"
+                  className="chip"
+                  onClick={() => setAlarmPage((page) => Math.max(1, page - 1))}
+                  disabled={alarmPage <= 1}
+                >
+                  <ChevronLeft className="size-3.5" />
+                </button>
                 <span>{alarmPage}/{alarmPageCount}</span>
-                <Button variant="outline" size="sm" onClick={() => setAlarmPage((page) => Math.min(alarmPageCount, page + 1))} disabled={alarmPage >= alarmPageCount}>
-                  <ChevronRight className="size-4" />
-                </Button>
+                <button
+                  type="button"
+                  className="chip"
+                  onClick={() => setAlarmPage((page) => Math.min(alarmPageCount, page + 1))}
+                  disabled={alarmPage >= alarmPageCount}
+                >
+                  <ChevronRight className="size-3.5" />
+                </button>
               </div>
             </div>
 
             {selectedAlarmItems.length > 0 && (
               <div className="mt-3 flex flex-wrap gap-2">
                 {selectedAlarmItems.map((alarm) => (
-                  <span key={alarm.identifier} className="inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs">
-                    <span className="font-medium">{alarm.identifier}</span>
-                    <span className="text-muted-foreground">{normalizeAlarmName(alarm)}</span>
+                  <span key={alarm.identifier} className="chip inline-flex items-center gap-2 text-cyan-100">
+                    <span className="font-mono">{alarm.identifier}</span>
+                    <span className="text-cyan-300/60">{normalizeAlarmName(alarm)}</span>
                     {!isViewMode && (
                       <button type="button" onClick={() => setSelectedAlarms((prev) => prev.filter((id) => id !== alarm.identifier))}>
                         <X className="size-3" />
@@ -603,14 +614,12 @@ export function AlarmRuleDialog({
           </section>
         </div>
 
-        <div className="mt-5 flex justify-end gap-2">
-          <Button variant="outline" size="sm" onClick={onCancel} disabled={loading}>
-            {isViewMode ? '关闭' : '取消'}
-          </Button>
+        <div className="flex justify-end gap-2 border-t border-cyan-500/15 px-5 py-4">
+          <NeonButton onClick={onCancel}>{isViewMode ? '关闭' : '取消'}</NeonButton>
           {!isViewMode && (
-            <Button size="sm" onClick={submit} disabled={!canSubmit}>
+            <NeonButton onClick={submit} disabled={!canSubmit}>
               {mode === 'edit' ? '保存' : '创建'}
-            </Button>
+            </NeonButton>
           )}
         </div>
       </div>

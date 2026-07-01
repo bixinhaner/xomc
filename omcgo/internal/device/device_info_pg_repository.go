@@ -737,13 +737,17 @@ func deviceWithInfoSelectColumns() []string {
 		"di.num_of_cells", "di.gps_status",
 		// #361: 告警级别不再读 di.alarm_severity（该冗余列仅 Radisys 自报路径写、
 		// 与 OMC 告警引擎无关、从无人维护）。改实时 JOIN alarms_active 子查询 aa，
-		// 取每设备未 cleared 活动告警最严重级别(MIN(severity)，1=critical..4=warning)
+		// 取每设备未 cleared 活动告警最严重级别(MIN(severity)，兼容 1/31001..4/31004)
 		// 映成文本；无活动告警 → NULL → 前端归 'none'。
 		`CASE aa.top_sev
 			WHEN 1 THEN 'critical'
+			WHEN 31001 THEN 'critical'
 			WHEN 2 THEN 'major'
+			WHEN 31002 THEN 'major'
 			WHEN 3 THEN 'minor'
+			WHEN 31003 THEN 'minor'
 			WHEN 4 THEN 'warning'
+			WHEN 31004 THEN 'warning'
 			ELSE NULL
 		END AS alarm_severity`,
 		"di.license_status",
@@ -819,34 +823,35 @@ const alarmsActiveAggJoin = `(
 	GROUP BY device_id
 ) aa ON aa.device_id = d.id`
 
-// alarmSeverityTextToNum 把前端 AlarmSeverity 文本映成 alarms_active.severity
-// (smallint 1=critical..4=warning)。未知文本返回 0（调用方据此跳过过滤）。
-func alarmSeverityTextToNum(text string) int {
+	// alarmSeverityTextToCodes 把前端 AlarmSeverity 文本映成 alarms_active.severity。
+	// 兼容历史 1..4 与现行 31001..31004 两套编码。未知文本返回空切片（跳过过滤）。
+func alarmSeverityTextToCodes(text string) []int {
 	switch strings.ToLower(strings.TrimSpace(text)) {
 	case "critical":
-		return 1
+		return []int{1, 31001}
 	case "major":
-		return 2
+		return []int{2, 31002}
 	case "minor":
-		return 3
+		return []int{3, 31003}
 	case "warning":
-		return 4
+		return []int{4, 31004}
 	default:
-		return 0
+		return nil
 	}
 }
 
 // alarmSeverityFilterCond 构造「该设备未 cleared 活动告警最严重级别 = 请求级别」
 // 的相关子查询条件（#361，与列表展示口径一致）。未知级别返回 nil（不过滤）。
 func alarmSeverityFilterCond(text string) sq.Sqlizer {
-	num := alarmSeverityTextToNum(text)
-	if num == 0 {
+	codes := alarmSeverityTextToCodes(text)
+	if len(codes) == 0 {
 		return nil
 	}
 	return sq.Expr(
 		`(SELECT MIN(aaf.severity) FROM alarms_active aaf
-		   WHERE aaf.device_id = d.id AND aaf.status <> 'cleared') = ?`,
-		num,
+		   WHERE aaf.device_id = d.id AND aaf.status <> 'cleared') IN (?, ?)`,
+		codes[0],
+		codes[1],
 	)
 }
 

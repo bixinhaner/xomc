@@ -307,6 +307,16 @@ func (s *PgAlarmStore) Statistics(ctx context.Context, filter AlarmFilter) (*Ala
 		return nil, fmt.Errorf("count unread: %w", err)
 	}
 
+	versionSQL, versionArgs, err := activeStatsBase(filter).
+		Column("COALESCE(SUM((EXTRACT(EPOCH FROM alarms_active.updated_at))::bigint), 0)::bigint AS state_version").
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build state version: %w", err)
+	}
+	if err := s.pool.QueryRow(ctx, versionSQL, versionArgs...).Scan(&stats.StateVersion); err != nil {
+		return nil, fmt.Errorf("count state version: %w", err)
+	}
+
 	sevSQL, sevArgs, err := activeStatsBase(filter).
 		Columns("alarms_active.severity", "COUNT(*)").
 		GroupBy("alarms_active.severity").ToSql()
@@ -420,6 +430,16 @@ func (s *PgAlarmStore) HistoryStatistics(ctx context.Context, filter AlarmFilter
 	}
 	if err := s.tsPool.QueryRow(ctx, totalSQL, totalArgs...).Scan(&stats.TotalActive); err != nil {
 		return nil, fmt.Errorf("count history: %w", err)
+	}
+
+	versionSQL, versionArgs, err := historyStatsBase(filter).
+		Column("COALESCE(SUM((EXTRACT(EPOCH FROM alarms_history.updated_at))::bigint), 0)::bigint AS state_version").
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build history state version: %w", err)
+	}
+	if err := s.tsPool.QueryRow(ctx, versionSQL, versionArgs...).Scan(&stats.StateVersion); err != nil {
+		return nil, fmt.Errorf("count history state version: %w", err)
 	}
 
 	sevSQL, sevArgs, err := historyStatsBase(filter).
