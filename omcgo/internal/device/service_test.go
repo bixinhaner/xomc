@@ -154,6 +154,10 @@ func (m *mockDeviceRepo) UpdateLastParamSyncFailed(_ context.Context, _ uuid.UUI
 	return nil
 }
 
+func (m *mockDeviceRepo) UpdateSiteName(_ context.Context, _ uuid.UUID, _ string) error {
+	return nil
+}
+
 func (m *mockDeviceRepo) FindStaleDevices(_ context.Context, _ time.Time, _ int) ([]*model.Device, error) {
 	return nil, nil
 }

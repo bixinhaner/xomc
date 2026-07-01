@@ -639,6 +639,24 @@ func initProvisionModule(c *Container) error {
 			SetParamSyncWriter(c.DeviceRepo).
 			SetPathBSyncTaskReader(task.NewPgTaskRepository(c.PgPool)).
 			SetDeviceInfoRefresher(device.NewInfoSyncer(c.DeviceInfoRepo, c.ParamRepo, device.NewPgDeviceRepository(c.PgPool), c.Carriers, logger)) // Path B 参数落库后立即刷新 device_info 快照
+
+		// Issue #758: 设备名称同步钩子装配
+		// Path B 同步完成后比对 LMT 设备名与网管名，按配置方向自动同步或标记待确认。
+		nameSyncCfgRepo := admin.NewPgSysConfigRepository(c.PgPool)
+		nameSyncConfigLookup := provision.NameSyncConfigLookup(func(ctx context.Context, cat, key string) (string, bool) {
+			cfg, err := nameSyncCfgRepo.GetByKey(ctx, cat, key)
+			if err != nil || cfg == nil {
+				return "", false
+			}
+			return cfg.Value, true
+		})
+		deviceNameSyncHook := provision.NewDeviceNameSyncHook(
+			nameSyncConfigLookup, c.ParamRepo, c.DeviceInfoRepo, c.DeviceInfoRepo, logger,
+		).SetSiteUpdater(device.NewPgDeviceRepository(c.PgPool)) // P1-1: 自动路径同步 devices.site_name
+		// TODO: 当配置方向为 omc_to_lmt 时，需注入 SPVSender 和 Translator 以支持下发
+		syncSvc.SetDeviceNameSyncHook(deviceNameSyncHook)
+		logger.Info("device name sync hook enabled (Issue #758)")
+
 		c.SyncSvc = syncSvc
 		provisionEngine.SetSyncService(syncSvc)
 		// T-0126: 注入 ParamSyncStarter 让 device.handler.SyncDeviceParams 调 Path B 手动同步（reason="manual"）

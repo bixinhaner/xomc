@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { App, Button, Card, Drawer, Input, Modal, Popconfirm, Popover, Progress, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import { App, Badge, Button, Card, Drawer, Input, Modal, Popconfirm, Popover, Progress, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   AlertOutlined,
@@ -1105,7 +1105,27 @@ export default function DeviceList() {
         },
       },
       // "名称" 列绑定 device_name（设备名称），而非 host_name。
-      { key: 'hostName', title: t('device.hostName'), dataIndex: 'deviceName', width: 150, ellipsis: true, group: 'common' },
+      // Issue #758: nameSyncPending=true 时显示小红点提示名称待同步
+      {
+        key: 'hostName',
+        title: t('device.hostName'),
+        dataIndex: 'deviceName',
+        width: 170,
+        ellipsis: true,
+        group: 'common',
+        render: (_val, record) => (
+          <Space size={4}>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {record.deviceName || '-'}
+            </span>
+            {record.nameSyncPending && (
+              <Tooltip title={t('device.nameSyncPending')}>
+                <Badge status="error" />
+              </Tooltip>
+            )}
+          </Space>
+        ),
+      },
       {
         key: 'networkType',
         title: t('device.radioMode'),

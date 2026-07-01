@@ -69,6 +69,10 @@ interface BackendDevice {
   remark?: string;
   gnb_id?: string;
 
+  // Issue #758：设备名称同步
+  name_sync_pending?: boolean;
+  lmt_device_name?: string;
+
   // Cell
   enb_id?: string;
   cell_id?: string;
@@ -327,6 +331,10 @@ function mapBackendDevice(bd: BackendDevice): Device {
     rom: bd.rom || '',
     remark: bd.remark || '',
     gnbId: bd.gnb_id || '',
+
+    // Issue #758：设备名称同步
+    nameSyncPending: bd.name_sync_pending ?? false,
+    lmtDeviceName: bd.lmt_device_name || '',
 
     enbId: bd.enb_id || '',
     cellId: bd.cell_id || '',
@@ -868,5 +876,10 @@ export const deviceApi = {
   async getProductClasses(): Promise<string[]> {
     const { data } = await http.get<string[]>('/devices/product-classes');
     return data;
+  },
+
+  // Issue #758: 设备名称同步 - 解决名称差异
+  async resolveNameSync(deviceId: string, action: 'use_lmt' | 'use_omc' | 'ignore'): Promise<void> {
+    await http.post(`/devices/${deviceId}/resolve-name-sync`, { action });
   },
 };

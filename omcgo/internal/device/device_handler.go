@@ -126,6 +126,8 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		// T-0126: 旧 /param-sync (Path A) 已下线，替换为 /sync-params (Path B + reason="manual")
 		devices.POST("/:id/sync-params", h.SyncDeviceParams)
 		devices.PUT("/:id/rf-switch", h.SetRFSwitch)
+		// Issue #758: 设备名称同步人工处理端点
+		devices.POST("/:id/resolve-name-sync", h.ResolveNameSync)
 	}
 }
 
@@ -1073,4 +1075,46 @@ func (h *Handler) PermanentDeleteDevices(c *gin.Context) {
 	}
 
 	response.OKWithMsg(c, gin.H{"deleted": deleted}, "Devices permanently deleted")
+}
+
+// ResolveNameSyncRequest 定义设备名称同步人工处理请求体。
+type ResolveNameSyncRequest struct {
+	// Action 处理动作：use_lmt（使用 LMT 名称）/ use_omc（使用网管名称）/ ignore（忽略）
+	Action string `json:"action" binding:"required,oneof=use_lmt use_omc ignore"`
+}
+
+// ResolveNameSync Issue #758: 设备名称同步人工处理端点。
+//
+// POST /api/v1/devices/:id/resolve-name-sync
+// Body: {"action": "use_lmt" | "use_omc" | "ignore"}
+// 响应 200: {"success": true}
+// 响应 400: 无效参数
+// 响应 404: 设备不存在
+//
+// 当设备名称同步配置为 prompt=true 时，LMT 名称与网管名称不一致会标记
+// name_sync_pending=true（前端显示小红点）。用户通过此端点人工确认处理方式。
+func (h *Handler) ResolveNameSync(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	// 越权检查
+	if !authorizeDeviceAccess(c, h.service, h.permService, id) {
+		return
+	}
+
+	var req ResolveNameSyncRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	if err := h.service.ResolveNameSync(c.Request.Context(), id, req.Action); err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	response.OK(c, gin.H{"success": true})
 }

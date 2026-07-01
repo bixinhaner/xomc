@@ -178,6 +178,51 @@ func (r *PgDeviceInfoRepository) UpdateSyncFields(ctx context.Context, deviceID 
 	return nil
 }
 
+// UpdateNameSyncFields 更新设备名称同步相关字段（Issue #758）。
+// pending: name_sync_pending 标记（true=需人工确认）
+// lmtName: lmt_device_name 缓存的 LMT 设备名称
+func (r *PgDeviceInfoRepository) UpdateNameSyncFields(ctx context.Context, deviceID uuid.UUID, pending bool, lmtName string) error {
+	query, args, err := storage.Psql.Update("device_info").
+		Set("name_sync_pending", pending).
+		Set("lmt_device_name", lmtName).
+		Set("updated_at", time.Now()).
+		Where(sq.Eq{"device_id": deviceID}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build name sync update query: %w", err)
+	}
+
+	tag, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("update name sync fields: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("device_info not found for device %s: %w", deviceID, commonerrors.ErrNotFound)
+	}
+	return nil
+}
+
+// UpdateDeviceName 更新 device_info.device_name（LMT→OMC 自动同步时使用）。
+func (r *PgDeviceInfoRepository) UpdateDeviceName(ctx context.Context, deviceID uuid.UUID, name string) error {
+	query, args, err := storage.Psql.Update("device_info").
+		Set("device_name", name).
+		Set("updated_at", time.Now()).
+		Where(sq.Eq{"device_id": deviceID}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build device name update query: %w", err)
+	}
+
+	tag, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("update device_name: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("device_info not found for device %s: %w", deviceID, commonerrors.ErrNotFound)
+	}
+	return nil
+}
+
 // GetTopologyAttributes returns lac / tac for a device. NULL or empty cells
 // are omitted from the map so callers can use `_, ok := m[col]` to detect
 // "this column had no value before".
@@ -704,6 +749,8 @@ func deviceInfoColumns() []string {
 		"enb_id", "network_model",
 		// migration 000003：GSM/BTS 专属（DeviceGSM.* TR069 同步）
 		"bsc_select", "oml_remote_ip", "oml_remote_ip_bak", "ipa_unit_id",
+		// Issue #758：设备名称同步
+		"name_sync_pending", "lmt_device_name",
 		"creator", "updater", "created_at", "updated_at",
 	}
 }
@@ -763,6 +810,8 @@ func deviceWithInfoSelectColumns() []string {
 		"di.enb_id", "di.network_model",
 		// migration 000003：GSM/BTS 专属字段（DeviceGSM.* TR069 同步）
 		"di.bsc_select", "di.oml_remote_ip", "di.oml_remote_ip_bak", "di.ipa_unit_id",
+		// Issue #758：设备名称同步
+		"di.name_sync_pending", "di.lmt_device_name",
 		// bsc_link_status 派生：oml_remote_ip 非空 + 设备在线 → connected，否则 disconnected。
 		// 前端 BackendDevice.bsc_link_status 直接消费此派生值（无需独立物理列）。
 		`CASE
@@ -857,6 +906,9 @@ func alarmSeverityFilterCond(text string) sq.Sqlizer {
 
 func scanDeviceInfoFromRow(row pgx.Row) (*DeviceInfo, error) {
 	var info DeviceInfo
+	// Issue #758: lmt_device_name 列可为 NULL（新设备从未触发过名称同步），
+	// pgx v5 不能直接将 NULL 扫描到 string，用临时 *string 接收后安全解引用。
+	var lmtDeviceName *string
 	err := row.Scan(
 		&info.DeviceID,
 		&info.DeviceName, &info.Address, &info.Remark, &info.ProjectStatus, &info.Height,
@@ -875,10 +927,15 @@ func scanDeviceInfoFromRow(row pgx.Row) (*DeviceInfo, error) {
 		&info.EnbID, &info.NetworkModel,
 		// migration 000003：GSM/BTS 专属字段
 		&info.BscSelect, &info.OmlRemoteIp, &info.OmlRemoteIpBak, &info.IpaUnitId,
+		// Issue #758：设备名称同步
+		&info.NameSyncPending, &lmtDeviceName,
 		&info.Creator, &info.Updater, &info.CreatedAt, &info.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
+	}
+	if lmtDeviceName != nil {
+		info.LMTDeviceName = *lmtDeviceName
 	}
 	return &info, nil
 }
@@ -942,7 +999,10 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 		diOmlRemoteIp    *string
 		diOmlRemoteIpBak *string
 		diIpaUnitId      *string
-		diBscLinkStatus  *string // SELECT 派生，非物理列
+		// Issue #758：设备名称同步
+		diNameSyncPending *bool
+		diLMTDeviceName   *string
+		diBscLinkStatus   *string // SELECT 派生，非物理列
 		// 在线时长派生（SQL计算，设计文档 §13）
 		onlineDuration *int64
 		// 离线时长（SQL计算）
@@ -984,8 +1044,9 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 		&diGPSSatellites, &diGPSHeight, &diLockStatus,
 		&diAdminState, &diIpsecAddr,
 		&diEnbID, &diNetworkModel,
-		// migration 000003：GSM/BTS 专属 4 列 + bsc_link_status 派生列（顺序与 SELECT 一致）
+		// migration 000003：GSM/BTS 专属 4 列 + Issue #758 名称同步 2 列 + bsc_link_status 派生列（顺序与 SELECT 一致）
 		&diBscSelect, &diOmlRemoteIp, &diOmlRemoteIpBak, &diIpaUnitId,
+		&diNameSyncPending, &diLMTDeviceName,
 		&diBscLinkStatus,
 		// 在线时长派生
 		&onlineDuration,
@@ -1084,6 +1145,9 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 	d.OmlRemoteIp = diOmlRemoteIp
 	d.OmlRemoteIpBak = diOmlRemoteIpBak
 	d.IpaUnitId = diIpaUnitId
+	// Issue #758：设备名称同步
+	d.NameSyncPending = diNameSyncPending
+	d.LMTDeviceName = diLMTDeviceName
 	d.BscLinkStatus = diBscLinkStatus
 	d.OnlineDuration = onlineDuration
 	// 离线时长

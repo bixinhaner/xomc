@@ -407,3 +407,17 @@ func (mr *MockDeviceRepositoryMockRecorder) UpdateOnlineStatus(ctx, id, isOnline
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateOnlineStatus", reflect.TypeOf((*MockDeviceRepository)(nil).UpdateOnlineStatus), ctx, id, isOnline)
 }
+
+// UpdateSiteName mocks base method.
+func (m *MockDeviceRepository) UpdateSiteName(ctx context.Context, id uuid.UUID, name string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateSiteName", ctx, id, name)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpdateSiteName indicates an expected call of UpdateSiteName.
+func (mr *MockDeviceRepositoryMockRecorder) UpdateSiteName(ctx, id, name any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateSiteName", reflect.TypeOf((*MockDeviceRepository)(nil).UpdateSiteName), ctx, id, name)
+}

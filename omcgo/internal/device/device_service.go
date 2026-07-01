@@ -2153,3 +2153,126 @@ func (s *DeviceService) PermanentDeleteDevices(ctx context.Context, ids []uuid.U
 func (s *DeviceService) GetProductClasses(ctx context.Context) ([]string, error) {
 	return s.deviceRepo.ListProductClasses(ctx)
 }
+
+// ===== Device Name Sync (Issue #758) =====
+
+// hnbNameStandardPath 是 HNBName（设备名称）的标准 TR-069 路径。
+// 用于 use_omc 动作下发网管名称到设备。
+const hnbNameStandardPath = "Device.Services.FAPService.1.AccessMgmt.LTE.HNBName"
+
+// ResolveNameSync 处理设备名称同步人工确认。
+//
+// action:
+//   - "use_lmt": 使用 LMT 名称覆盖网管名称
+//   - "use_omc": 使用网管名称下发到 LMT
+//   - "ignore": 忽略差异（清标记，保持各自名称不变）
+func (s *DeviceService) ResolveNameSync(ctx context.Context, deviceID uuid.UUID, action string) error {
+	if s.deviceInfoRepo == nil {
+		return fmt.Errorf("device info repository not configured")
+	}
+
+	// 获取当前 device_info
+	info, err := s.deviceInfoRepo.GetByDeviceID(ctx, deviceID)
+	if err != nil {
+		return fmt.Errorf("get device info: %w", err)
+	}
+	if info == nil {
+		return commonerrors.ErrNotFound
+	}
+
+	switch action {
+	case "use_lmt":
+		// 使用 LMT 名称：同时更新 device_info.device_name（详情页口径）
+		// 和 devices.site_name（列表页口径），保证前端两处显示一致（P1-1 修复）。
+		if info.LMTDeviceName != "" {
+			if err := s.deviceInfoRepo.UpdateDeviceName(ctx, deviceID, info.LMTDeviceName); err != nil {
+				return fmt.Errorf("update device_info.device_name: %w", err)
+			}
+			if err := s.deviceRepo.UpdateSiteName(ctx, deviceID, info.LMTDeviceName); err != nil {
+				// 列表名更新失败降级警告，不阻断主流程（详情页已更新）
+				s.logger.Warn("update devices.site_name failed after use_lmt",
+					zap.String("device_id", deviceID.String()),
+					zap.Error(err))
+			}
+			// 清 cache，让列表下次读到新 site_name
+			if s.cache != nil {
+				if dev, _ := s.deviceRepo.GetByID(ctx, deviceID); dev != nil {
+					s.cache.Delete(ctx, dev.SerialNumber)
+				}
+			}
+		}
+		if err := s.deviceInfoRepo.UpdateNameSyncFields(ctx, deviceID, false, info.LMTDeviceName); err != nil {
+			return fmt.Errorf("clear name_sync_pending: %w", err)
+		}
+		s.logger.Info("device name sync resolved: use_lmt",
+			zap.String("device_id", deviceID.String()),
+			zap.String("lmt_name", info.LMTDeviceName))
+
+	case "use_omc":
+		// 使用网管名称：下发 SPV 到设备，成功后清 pending 标记
+		if info.DeviceName == "" {
+			return fmt.Errorf("omc device_name is empty, cannot push to device")
+		}
+
+		// 获取设备 SN 用于下发任务
+		dev, err := s.deviceRepo.GetByID(ctx, deviceID)
+		if err != nil {
+			return fmt.Errorf("get device: %w", err)
+		}
+		if dev == nil {
+			return commonerrors.ErrNotFound
+		}
+
+		// 构建 SPV 参数并下发
+		if s.taskSvc == nil {
+			return fmt.Errorf("task service not configured, cannot push name to device")
+		}
+
+		spvParams := []map[string]string{{
+			"name":  hnbNameStandardPath,
+			"value": info.DeviceName,
+			"type":  "xsd:string",
+		}}
+		paramsJSON, err := json.Marshal(map[string]interface{}{
+			"values":        spvParams,
+			"parameter_key": fmt.Sprintf("name-sync-%d", time.Now().Unix()),
+		})
+		if err != nil {
+			return fmt.Errorf("marshal SPV params: %w", err)
+		}
+
+		createdTask, err := s.taskSvc.CreateTask(ctx, &task.CreateTaskRequest{
+			DeviceSN:   dev.SerialNumber,
+			Method:     "SetParameterValues",
+			Params:     paramsJSON,
+			Priority:   5,
+			CommandKey: fmt.Sprintf("name-sync-%s", uuid.New().String()[:8]),
+			Source:     task.TaskSourceAPI,
+		})
+		if err != nil {
+			return fmt.Errorf("queue name sync SPV: %w", err)
+		}
+
+		// SPV 已入队，清除 pending 标记
+		if err := s.deviceInfoRepo.UpdateNameSyncFields(ctx, deviceID, false, info.LMTDeviceName); err != nil {
+			return fmt.Errorf("clear name_sync_pending: %w", err)
+		}
+		s.logger.Info("device name sync resolved: use_omc (SPV queued)",
+			zap.String("device_id", deviceID.String()),
+			zap.String("omc_name", info.DeviceName),
+			zap.String("task_id", createdTask.ID))
+
+	case "ignore":
+		// 忽略差异：清除 pending 标记
+		if err := s.deviceInfoRepo.UpdateNameSyncFields(ctx, deviceID, false, info.LMTDeviceName); err != nil {
+			return fmt.Errorf("clear name_sync_pending: %w", err)
+		}
+		s.logger.Info("device name sync resolved: ignore",
+			zap.String("device_id", deviceID.String()))
+
+	default:
+		return fmt.Errorf("invalid action: %s", action)
+	}
+
+	return nil
+}

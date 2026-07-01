@@ -1,4 +1,4 @@
-import { Form, InputNumber, Checkbox, Select, Card, Space, Typography, theme } from 'antd';
+import { Form, InputNumber, Checkbox, Select, Radio, Card, Space, Typography, theme } from 'antd';
 import { useT } from '@/hooks/useT';
 
 const { Option } = Select;
@@ -21,8 +21,7 @@ export default function DeviceSettings({ form }: DeviceSettingsProps) {
       enbInformPeriodAdjustEnable: true,
       enbInformPeriod: 60,
       enbTimeout: 100,
-      nameSettingEnable: true,
-      prompt: false,
+      nameSyncMode: 'off',
       accessContralEnable: false,
       rsrpVal0: -100,
       rsrpVal1: -80,
@@ -70,20 +69,41 @@ export default function DeviceSettings({ form }: DeviceSettingsProps) {
         </div>
       </Card>
 
-      {/* 设备名称同步 */}
+      {/* 设备名称同步 —— 四选一策略（页面选项与存储值 nameSyncMode 一一对应） */}
       <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.device.deviceNameSync')}</span>} style={{ marginBottom: 16 }}>
-        <div style={settingRowStyle}>
-          <Form.Item name="nameSettingEnable" valuePropName="checked" noStyle>
-            <Checkbox>{t('system.device.checkAndSetDeviceName')}</Checkbox>
-          </Form.Item>
-        </div>
-        <div style={settingRowStyle}>
-          <div style={{ marginLeft: 24 }}>
-            <Form.Item name="prompt" valuePropName="checked" noStyle>
-              <Checkbox>{t('system.device.promptManualSync')}</Checkbox>
-            </Form.Item>
-          </div>
-        </div>
+        <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
+          {t('system.device.nameSync.desc')}
+        </Typography.Text>
+        <Form.Item name="nameSyncMode" noStyle>
+          <Radio.Group>
+            <Space direction="vertical" size={12}>
+              <Radio value="off">
+                {t('system.device.nameSync.mode.off')}
+                <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 2 }}>
+                  {t('system.device.nameSync.mode.off.hint')}
+                </Typography.Text>
+              </Radio>
+              <Radio value="auto_lmt_to_omc">
+                {t('system.device.nameSync.mode.autoLmtToOmc')}
+                <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 2 }}>
+                  {t('system.device.nameSync.mode.autoLmtToOmc.hint')}
+                </Typography.Text>
+              </Radio>
+              <Radio value="auto_omc_to_lmt">
+                {t('system.device.nameSync.mode.autoOmcToLmt')}
+                <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 2 }}>
+                  {t('system.device.nameSync.mode.autoOmcToLmt.hint')}
+                </Typography.Text>
+              </Radio>
+              <Radio value="prompt">
+                {t('system.device.nameSync.mode.prompt')}
+                <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 2 }}>
+                  {t('system.device.nameSync.mode.prompt.hint')}
+                </Typography.Text>
+              </Radio>
+            </Space>
+          </Radio.Group>
+        </Form.Item>
       </Card>
 
       {/* 设备接入控制 */}

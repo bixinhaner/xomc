@@ -215,6 +215,9 @@ type DeviceWriter interface {
 	// UpdateLastParamSyncFailed 由 sync 失败订阅者在 Path B GPV task 失败时调用,
 	// 写 last_param_sync_failed_at + last_param_sync_error 并清空 last_param_sync_at。
 	UpdateLastParamSyncFailed(ctx context.Context, id uuid.UUID, failedAt time.Time, errMsg string) error
+	// UpdateSiteName 仅更新 devices.site_name（设备主名称），供名称同步 use_lmt 使用。
+	// 比 Update() 轻量：不需要完整设备对象，不清 cache（调用方按需清）。
+	UpdateSiteName(ctx context.Context, id uuid.UUID, name string) error
 	// RecordBoot atomically increments boot_count and sets last_boot_at for the device
 	// identified by serial number. Invoked when the ACS receives a "1 BOOT" or
 	// "M Reboot" Inform. Returns the updated boot_count.
@@ -411,6 +414,24 @@ func (r *PgDeviceRepository) Update(ctx context.Context, device *model.Device) e
 	// so the caller can fall back to register / cache invalidation.
 	if ct.RowsAffected() == 0 {
 		return commonerrors.ErrNotFound
+	}
+	return nil
+}
+
+// UpdateSiteName 仅更新 devices.site_name，比 Update() 轻量，不处理全量字段。
+func (r *PgDeviceRepository) UpdateSiteName(ctx context.Context, id uuid.UUID, name string) error {
+	query, args, err := storage.Psql.Update("devices").
+		Set("site_name", name).
+		Set("updated_at", time.Now()).
+		Where(sq.Eq{"id": id}).
+		Where(sq.Eq{"deleted_at": nil}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build update site_name query: %w", err)
+	}
+	_, err = r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("update site_name: %w", err)
 	}
 	return nil
 }

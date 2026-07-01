@@ -139,6 +139,10 @@ function generateDevice(index: number): Device {
     remark: index % 5 === 0 ? `备注-${index}` : '',
     gnbId: gnbIdVal,
 
+    // Issue #758: 设备名称同步
+    nameSyncPending: index % 10 === 0, // 每 10 个设备模拟一个待同步
+    lmtDeviceName: index % 10 === 0 ? `LMT-${city.name}-${index}` : '',
+
     enbId: enbIdVal,
     cellId: String(Math.floor(Math.random() * 256)),
     eci: isLTE ? `${enbIdVal}${String(Math.floor(Math.random() * 256)).padStart(2, '0')}` : '',
@@ -331,6 +335,10 @@ const beijingDevices: Device[] = Array.from({ length: 50 }, (_, i) => {
     rom: isLTE ? `ROM-${Math.floor(Math.random() * 100)}` : '',
     remark: i % 5 === 0 ? `备注-北京-${i}` : '',
     gnbId: gnbIdVal,
+
+    // Issue #758: 设备名称同步
+    nameSyncPending: i % 10 === 0,
+    lmtDeviceName: i % 10 === 0 ? `LMT-北京-${i}` : '',
 
     enbId: enbIdVal,
     cellId: String(Math.floor(Math.random() * 256)),

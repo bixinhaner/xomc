@@ -133,6 +133,10 @@ func (m *infMockDeviceRepo) UpdateLastParamSyncFailed(_ context.Context, _ uuid.
 	return nil
 }
 
+func (m *infMockDeviceRepo) UpdateSiteName(_ context.Context, _ uuid.UUID, _ string) error {
+	return nil
+}
+
 func (m *infMockDeviceRepo) FindStaleDevices(_ context.Context, _ time.Time, _ int) ([]*model.Device, error) {
 	return nil, nil
 }
@@ -235,11 +239,11 @@ func (c *infMockCarrier) MapUnifiedToParameter(_ string) string { return "" }
 func (c *infMockCarrier) ProvisioningTemplates(_ model.Technology) []*carrier.ProvisionTemplate {
 	return nil
 }
-func (c *infMockCarrier) AlarmSeverityMapping(_ string) model.AlarmSeverity          { return 0 }
-func (c *infMockCarrier) ValidateParameter(_ string, _ string) error                 { return nil }
-func (c *infMockCarrier) GetInfoParamMapping(_ model.Technology) map[string]string   { return nil }
-func (c *infMockCarrier) RFControlPath(_ model.Technology) string                    { return "" }
-func (c *infMockCarrier) SupportsMRType(_ model.MRType) bool                         { return true }
+func (c *infMockCarrier) AlarmSeverityMapping(_ string) model.AlarmSeverity        { return 0 }
+func (c *infMockCarrier) ValidateParameter(_ string, _ string) error               { return nil }
+func (c *infMockCarrier) GetInfoParamMapping(_ model.Technology) map[string]string { return nil }
+func (c *infMockCarrier) RFControlPath(_ model.Technology) string                  { return "" }
+func (c *infMockCarrier) SupportsMRType(_ model.MRType) bool                       { return true }
 
 // ---------------------------------------------------------------------------
 // Helpers

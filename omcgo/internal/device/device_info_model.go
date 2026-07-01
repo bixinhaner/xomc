@@ -243,6 +243,17 @@ type DeviceInfo struct {
 	// 详情接口由 GetDeviceDetailComposite 填充；列表接口前端可直接用 device.is_online。
 	OmcStatus string `json:"omc_status,omitempty"`
 
+	// ===== 设备名称同步（Issue #758）=====
+
+	// NameSyncPending 设备名称同步待处理标记。
+	// true = LMT 名称与网管名称不一致且 prompt=true，需人工确认（前端显示小红点）。
+	// Path B 同步时检测不一致且配置为人工确认时置 true；用户确认或下次同步名称一致时自动清 false。
+	NameSyncPending bool `json:"name_sync_pending"`
+
+	// LMTDeviceName 从 LMT 读取的设备名称（HNBName / gNBName）缓存。
+	// 供前端在名称冲突时对比展示"LMT 名称"与"网管名称"。
+	LMTDeviceName string `json:"lmt_device_name,omitempty"`
+
 	// ===== 审计字段 =====
 
 	// UECount 当前接入 UE 数。
