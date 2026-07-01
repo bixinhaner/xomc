@@ -93,12 +93,14 @@ export function DashboardKPIModules({
                 ? isLastWeekLoading
                 : isYesterdayLoading;
 
+              const isOnlyOneInRow = row.panels.length === 1;
+              const colSpan = isOnlyOneInRow ? 24 : Math.min(24, panel.w * 2);
+
               return (
             <Col
               key={`${rowIndex}-${panel.x}-${panel.title}`}
               xs={24}
-              // 12 列网格 → antd 24 栅格：lg = w*2（满宽 12→24，半宽 6→12）。
-              lg={Math.min(24, panel.w * 2)}
+              lg={colSpan}
               style={{ display: 'flex' }}
             >
               <LayoutKPIPanel
