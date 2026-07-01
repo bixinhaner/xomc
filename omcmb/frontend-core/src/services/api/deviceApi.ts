@@ -149,6 +149,7 @@ interface BackendDevice {
   vertical_beam_width?: string;
   horizontal_azimuth?: string;
   install_address?: string;
+  device_address?: string;
   // T-XXX (Phase 5): gps_satellites 是后端实际字段（migration 000181 列名）；
   // gps_satellite_count 是旧前端假定名，保留兼容，mapper 优先 gps_satellites。
   gps_satellites?: number;
@@ -183,6 +184,18 @@ export interface RestoreDevicesResult {
   skipped: number;
   conflicts: RestoreConflict[];
 }
+
+function buildUpdatedDeviceFallback(id: string, data: Partial<Device>, fallbackDevice?: Partial<Device>): Device {
+  return {
+    ...(fallbackDevice ?? {}),
+    ...data,
+    id,
+    sn: data.sn ?? fallbackDevice?.sn ?? '',
+    installAddress: data.installAddress ?? fallbackDevice?.installAddress ?? '',
+    remark: data.remark ?? fallbackDevice?.remark ?? '',
+  } as Device;
+}
+
 // 后端 handler 返回的 JSON 形态（key 与 Go gin.H / 结构体 json tag 一致）。
 interface BackendRestoreResult {
   restored?: number;
@@ -393,7 +406,7 @@ function mapBackendDevice(bd: BackendDevice): Device {
     electronicDowntilt: bd.electronic_downtilt || '',
     verticalBeamWidth: bd.vertical_beam_width || '',
     horizontalAzimuth: bd.horizontal_azimuth || '',
-    installAddress: bd.install_address || '',
+    installAddress: bd.install_address || bd.device_address || '',
     // T-XXX (Phase 5)：gps_satellites 是后端实际字段；gps_satellite_count 兜底
     gpsSatelliteCount: bd.gps_satellites ?? bd.gps_satellite_count ?? 0,
 
@@ -565,24 +578,43 @@ export const deviceApi = {
     return mapBackendDevice(created);
   },
 
-  async update(id: string, data: Partial<Device>): Promise<Device> {
-    const payload: Record<string, unknown> = {};
-    if (data.sn !== undefined) payload.serial_number = data.sn;
-    if (data.vendor !== undefined) payload.manufacturer = data.vendor;
-    if (data.productClass !== undefined) payload.product_class = data.productClass;
-    if (data.networkType !== undefined) payload.technology = data.networkType;
-    if (data.deviceModel !== undefined) payload.model_name = data.deviceModel;
-    if (data.connStatus !== undefined) payload.status = data.connStatus === 'online' ? 'active' : 'offline';
-    if (data.softwareVersion !== undefined) payload.firmware_version = data.softwareVersion;
-    if (data.ipAddress !== undefined) payload.ip_address = data.ipAddress;
-    if (data.site !== undefined) payload.device_name = data.site;
-    if (data.name !== undefined) payload.device_name = data.name;
-    if (data.stationId !== undefined) payload.site_id = data.stationId;
-    if (data.latitude !== undefined) payload.latitude = data.latitude;
-    if (data.longitude !== undefined) payload.longitude = data.longitude;
-    if (data.remark !== undefined) payload.remark = data.remark;
-    const { data: updated } = await http.put<BackendDevice>(`/devices/${id}`, payload);
-    return mapBackendDevice(updated);
+  async update(id: string, data: Partial<Device>, fallbackDevice?: Partial<Device>): Promise<Device> {
+    const devicePayload: Record<string, unknown> = {};
+    const deviceInfoPayload: Record<string, unknown> = {};
+
+    if (data.sn !== undefined) devicePayload.serial_number = data.sn;
+    if (data.vendor !== undefined) devicePayload.manufacturer = data.vendor;
+    if (data.productClass !== undefined) devicePayload.product_class = data.productClass;
+    if (data.networkType !== undefined) devicePayload.technology = data.networkType;
+    if (data.deviceModel !== undefined) devicePayload.model_name = data.deviceModel;
+    if (data.connStatus !== undefined) devicePayload.status = data.connStatus === 'online' ? 'active' : 'offline';
+    if (data.softwareVersion !== undefined) devicePayload.firmware_version = data.softwareVersion;
+    if (data.ipAddress !== undefined) devicePayload.ip_address = data.ipAddress;
+    if (data.site !== undefined) devicePayload.device_name = data.site;
+    if (data.name !== undefined) devicePayload.device_name = data.name;
+    if (data.stationId !== undefined) devicePayload.site_id = data.stationId;
+    if (data.latitude !== undefined) devicePayload.latitude = data.latitude;
+    if (data.longitude !== undefined) devicePayload.longitude = data.longitude;
+
+    if (data.remark !== undefined) deviceInfoPayload.remark = data.remark;
+    if (data.installAddress !== undefined) deviceInfoPayload.address = data.installAddress;
+
+    if (Object.keys(devicePayload).length > 0) {
+      await http.put<BackendDevice>(`/devices/${id}`, devicePayload);
+    }
+    if (Object.keys(deviceInfoPayload).length > 0) {
+      await http.put(`/devices/${id}/info`, deviceInfoPayload);
+    }
+
+    try {
+      const { data: updated } = await http.get<BackendDevice>(`/devices/${id}`);
+      return mapBackendDevice(updated);
+    } catch {
+      if (Object.keys(devicePayload).length > 0 || Object.keys(deviceInfoPayload).length > 0) {
+        return buildUpdatedDeviceFallback(id, data, fallbackDevice);
+      }
+      throw new Error(`device ${id} update was skipped`);
+    }
   },
 
   async delete(ids: string[]): Promise<BatchOperationResult> {

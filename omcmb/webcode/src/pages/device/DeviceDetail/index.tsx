@@ -685,6 +685,7 @@ const getOtherFields = (t: ReturnType<typeof useT>, networkType: string, device:
     { key: 'lastInformTime', label: t('device.lastInformTime'), render: (d) => fmtTime(d.lastInformTime) },
     // 站址信息
     { key: 'siteName', label: t('device.siteName'), render: (d) => d.deviceName || '-' },
+    { key: 'installAddress', label: t('device.installAddress'), render: (d) => d.installAddress || '-' },
   ];
 
   if (shouldShowGpsLocation(device)) {

@@ -481,77 +481,30 @@ func lookupWANMAC(paramValues map[string]string) (string, bool) {
 	return candidates[0].mac, true
 }
 
-func lookupFirstParamValue(paramValues map[string]string, suffix *regexp.Regexp) string {
-	paths := make([]string, 0, len(paramValues))
-	for path, value := range paramValues {
-		if value == "" || !suffix.MatchString(path) {
+func lookupTransmitPower(paramValues map[string]string, mappedValue string) (string, bool) {
+	for _, suffix := range []string{
+		".X_COM_MaxTxPowerExpanded",
+		".PowerModify",
+		".ReferenceSignalPower",
+	} {
+		paths := make([]string, 0, len(paramValues))
+		for path, value := range paramValues {
+			if value == "" || !strings.HasSuffix(path, suffix) {
+				continue
+			}
+			paths = append(paths, path)
+		}
+		if len(paths) == 0 {
 			continue
 		}
-		paths = append(paths, path)
-	}
-	if len(paths) == 0 {
-		return ""
-	}
-	sort.Strings(paths)
-	return strings.TrimSpace(paramValues[paths[0]])
-}
-
-func lookupTransmitPowerBounds(paramValues map[string]string) (float64, float64, bool) {
-	raw := lookupFirstParamValue(paramValues, regexp.MustCompile(`(^|\.)SupportedPower(Range|Level)$`))
-	if raw == "" {
-		return 0, 0, false
+		sort.Strings(paths)
+		return strings.TrimSpace(paramValues[paths[0]]), true
 	}
 
-	parts := strings.FieldsFunc(raw, func(r rune) bool {
-		switch r {
-		case ',', '~', '-', ' ':
-			return true
-		default:
-			return false
-		}
-	})
-	if len(parts) != 2 {
-		return 0, 0, false
+	if mappedValue != "" {
+		return mappedValue, true
 	}
 
-	left, errLeft := strconv.ParseFloat(parts[0], 64)
-	right, errRight := strconv.ParseFloat(parts[1], 64)
-	if errLeft != nil || errRight != nil {
-		return 0, 0, false
-	}
-	if left > right {
-		left, right = right, left
-	}
-	return left, right, true
-}
-
-func pickTransmitPowerCandidate(paramValues map[string]string, suffix *regexp.Regexp, minBound, maxBound float64, hasBounds bool) (string, bool) {
-	raw := lookupFirstParamValue(paramValues, suffix)
-	if raw == "" {
-		return "", false
-	}
-	value, err := strconv.ParseFloat(raw, 64)
-	if err != nil {
-		return "", false
-	}
-	if hasBounds {
-		if value < minBound || value > maxBound {
-			return "", false
-		}
-	} else if value < 0 {
-		return "", false
-	}
-	return raw, true
-}
-
-func lookupTransmitPower(paramValues map[string]string) (string, bool) {
-	minBound, maxBound, hasBounds := lookupTransmitPowerBounds(paramValues)
-	if value, ok := pickTransmitPowerCandidate(paramValues, regexp.MustCompile(`(^|\.)X_COM_MaxTxPowerExpanded$`), minBound, maxBound, hasBounds); ok {
-		return value, true
-	}
-	if value, ok := pickTransmitPowerCandidate(paramValues, regexp.MustCompile(`(^|\.)ReferenceSignalPower$`), minBound, maxBound, hasBounds); ok {
-		return value, true
-	}
 	return "", false
 }
 
@@ -720,7 +673,8 @@ func (s *InfoSyncer) SyncFromParameters(ctx context.Context, deviceID uuid.UUID,
 			fields["mac"] = mac
 		}
 	}
-	if txPower, ok := lookupTransmitPower(paramValues); ok {
+	mappedTransmitPower, _ := fields["transmit_power"].(string)
+	if txPower, ok := lookupTransmitPower(paramValues, mappedTransmitPower); ok {
 		fields["transmit_power"] = txPower
 	} else {
 		delete(fields, "transmit_power")

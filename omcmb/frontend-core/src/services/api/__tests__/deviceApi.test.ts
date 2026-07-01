@@ -11,12 +11,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { UNASSIGNED_GROUP_ID } from '../../../utils/deviceGroupTargets';
 
-const { getMock, postMock } = vi.hoisted(() => ({
+const { getMock, postMock, putMock } = vi.hoisted(() => ({
   getMock: vi.fn(),
   postMock: vi.fn(),
+  putMock: vi.fn(),
 }));
 vi.mock('../../http', () => ({
-  default: { get: getMock, post: postMock, put: vi.fn(), patch: vi.fn(), delete: vi.fn() },
+  default: { get: getMock, post: postMock, put: putMock, patch: vi.fn(), delete: vi.fn() },
 }));
 
 import { deviceApi } from '../deviceApi';
@@ -52,6 +53,7 @@ function backendDevice(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   getMock.mockReset();
   postMock.mockReset();
+  putMock.mockReset();
   getMock.mockResolvedValue({ data: { items: [], total: 0, page: 1, page_size: 20, total_pages: 0 } });
 });
 
@@ -109,6 +111,21 @@ describe('deviceApi.getList — filter → query 映射', () => {
     expect(d.groupName).toBe('默认设备组');
     // 后端 stats 直读（不靠 items.filter 估算）
     expect(out.stats.online_count).toBe(1);
+  });
+
+  it('列表接口返回 device_address 时也能映射成 installAddress', async () => {
+    getMock.mockResolvedValue({
+      data: {
+        items: [backendDevice({ install_address: undefined, device_address: '南京市雨花台区软件大道 1 号' })],
+        total: 1,
+        page: 1,
+        page_size: 20,
+        total_pages: 1,
+      },
+    });
+
+    const out = await deviceApi.getList({ page: 1, pageSize: 20 });
+    expect(out.items[0].installAddress).toBe('南京市雨花台区软件大道 1 号');
   });
 
   it('映射后的 Device 不含 platformType（#177：该字段及关联逻辑已移除）', async () => {
@@ -184,6 +201,51 @@ describe('deviceApi.getById', () => {
     getMock.mockRejectedValue({ response: { status: 404 } });
     const d = await deviceApi.getById('missing');
     expect(d).toBeNull();
+  });
+});
+
+describe('deviceApi.update', () => {
+  it('安装详细地址与备注走 /devices/:id/info，并在更新后回读设备', async () => {
+    putMock.mockResolvedValue({ data: null });
+    getMock.mockResolvedValue({
+      data: backendDevice({
+        install_address: '南京市雨花台区软件大道 1 号',
+        remark: '现场已核对',
+      }),
+    });
+
+    const out = await deviceApi.update('d1', {
+      installAddress: '南京市雨花台区软件大道 1 号',
+      remark: '现场已核对',
+    });
+
+    expect(putMock).toHaveBeenCalledTimes(1);
+    expect(putMock).toHaveBeenCalledWith('/devices/d1/info', {
+      address: '南京市雨花台区软件大道 1 号',
+      remark: '现场已核对',
+    });
+    expect(getMock).toHaveBeenCalledWith('/devices/d1');
+    expect(out.installAddress).toBe('南京市雨花台区软件大道 1 号');
+    expect(out.remark).toBe('现场已核对');
+  });
+
+  it('写成功但回读失败时，使用 fallbackDevice 与当前变更降级返回，不误报失败', async () => {
+    putMock.mockResolvedValue({ data: null });
+    getMock.mockRejectedValueOnce(new Error('temporary readback failure'));
+
+    const out = await deviceApi.update(
+      'd1',
+      { installAddress: '南京市雨花台区软件大道 2 号' },
+      { id: 'd1', sn: 'SN001', installAddress: '', remark: '旧备注' }
+    );
+
+    expect(putMock).toHaveBeenCalledWith('/devices/d1/info', {
+      address: '南京市雨花台区软件大道 2 号',
+    });
+    expect(out.id).toBe('d1');
+    expect(out.sn).toBe('SN001');
+    expect(out.installAddress).toBe('南京市雨花台区软件大道 2 号');
+    expect(out.remark).toBe('旧备注');
   });
 });
 

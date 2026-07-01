@@ -217,10 +217,15 @@ export function useCreateDevice() {
 export function useUpdateDevice() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Parameters<typeof api.update>[1] }) =>
-      api.update(id, data),
-    onSuccess: (_result, { id }) => {
+    mutationFn: ({ id, data, fallbackDevice }: { id: string; data: Parameters<typeof api.update>[1]; fallbackDevice?: Partial<Device> }) =>
+      api.update(id, data, fallbackDevice),
+    onSuccess: (result, { id, fallbackDevice }) => {
       void queryClient.invalidateQueries({ queryKey: ['devices', 'detail', id] });
+      void queryClient.invalidateQueries({ queryKey: ['devices', 'detail-composite-v2', id] });
+      const sn = result.sn || fallbackDevice?.sn;
+      if (sn) {
+        void queryClient.invalidateQueries({ queryKey: ['devices', 'sn', sn] });
+      }
       void queryClient.invalidateQueries({ queryKey: ['devices', 'list'] });
     },
   });

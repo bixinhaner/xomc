@@ -55,6 +55,7 @@ import {
   useDeviceGroups,
   useBatchRebootDevices,
   useSyncDeviceParams,
+  useUpdateDevice,
 } from '@core/hooks/api/useDevices'
 import { useProductList } from '@core/hooks/api/useProducts'
 import { useAlarmCount, useTriggerAlarmSync } from '@core/hooks/api/useAlarms'
@@ -209,8 +210,15 @@ export function DevicesPage() {
   const batchReboot = useBatchRebootDevices()
   const syncParams = useSyncDeviceParams()
   const alarmSync = useTriggerAlarmSync()
+  const updateDevice = useUpdateDevice()
+  const [editingInstallAddressId, setEditingInstallAddressId] = useState<string | null>(null)
+  const [editingInstallAddressValue, setEditingInstallAddressValue] = useState('')
+  const [savingInstallAddressId, setSavingInstallAddressId] = useState<string | null>(null)
 
-  const rows = data?.items ?? []
+  const rows = useMemo(
+    () => data?.items ?? [],
+    [data?.items]
+  )
   const total = data?.total ?? 0
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
   const stats = data?.stats
@@ -297,6 +305,60 @@ export function DevicesPage() {
     groupId !== 'all'
 
   const autoRefreshValue = autoRefresh ? String(refreshInterval) : 'off'
+
+  function startInstallAddressEdit(device: Device) {
+    setEditingInstallAddressId(device.id)
+    setEditingInstallAddressValue(device.installAddress || '')
+  }
+
+  function cancelInstallAddressEdit() {
+    setEditingInstallAddressId(null)
+    setEditingInstallAddressValue('')
+    setSavingInstallAddressId(null)
+  }
+
+  function saveInstallAddressEdit(device: Device) {
+    const nextValue = editingInstallAddressValue.trim()
+    const currentValue = (device.installAddress || '').trim()
+    if (savingInstallAddressId === device.id) return
+    if (nextValue === currentValue) {
+      cancelInstallAddressEdit()
+      return
+    }
+
+    setSavingInstallAddressId(device.id)
+    updateDevice.mutate(
+      {
+        id: device.id,
+        data: { installAddress: nextValue },
+        fallbackDevice: {
+          id: device.id,
+          sn: device.sn,
+          installAddress: device.installAddress,
+          remark: device.remark,
+        },
+      },
+      {
+        onSuccess: (updatedDevice) => {
+          queryClient.setQueryData(['devices', 'list', queryParams], (prev: typeof data) => {
+            if (!prev) return prev
+            return {
+              ...prev,
+              items: prev.items.map((item) =>
+                item.id === updatedDevice.id ? { ...item, installAddress: updatedDevice.installAddress } : item
+              ),
+            }
+          })
+          setEditingInstallAddressId(null)
+          setEditingInstallAddressValue('')
+          setSavingInstallAddressId(null)
+        },
+        onError: () => {
+          setSavingInstallAddressId(null)
+        },
+      }
+    )
+  }
 
   // ---- 列定义 ----
   const columns = useMemo<ColumnDef<Device>[]>(
@@ -405,6 +467,57 @@ export function DevicesPage() {
         ),
       },
       {
+        accessorKey: 'installAddress',
+        header: '安装详细地址',
+        cell: ({ row }) => {
+          const device = row.original
+          const isEditing = editingInstallAddressId === device.id
+          const isSaving = savingInstallAddressId === device.id
+          const isEmptyAddress = !device.installAddress
+
+          if (isEditing) {
+            return (
+              <Input
+                autoFocus
+                className="h-8"
+                maxLength={256}
+                value={editingInstallAddressValue}
+                placeholder="安装详细地址"
+                onClick={(e) => e.stopPropagation()}
+                onChange={(e) => setEditingInstallAddressValue(e.target.value)}
+                onBlur={() => saveInstallAddressEdit(device)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') saveInstallAddressEdit(device)
+                  if (e.key === 'Escape') cancelInstallAddressEdit()
+                }}
+              />
+            )
+          }
+
+          return (
+            <div
+              title={device.installAddress || '双击编辑安装详细地址'}
+              onDoubleClick={(e) => {
+                e.stopPropagation()
+                startInstallAddressEdit(device)
+              }}
+              className={cn('min-h-[22px] text-sm', isEmptyAddress && 'text-muted-foreground')}
+            >
+              {isSaving ? '保存中…' : device.installAddress || '双击编辑安装详细地址'}
+            </div>
+          )
+        },
+      },
+      {
+        accessorKey: 'txPower',
+        header: 'Tx Power',
+        cell: ({ row }) => (
+          <span className="font-mono text-xs text-muted-foreground">
+            {row.original.txPower || '—'}
+          </span>
+        ),
+      },
+      {
         accessorKey: 'opState',
         header: '激活状态',
         cell: ({ row }) => <ActivationBadge opState={row.original.opState} details={opStateDict?.sysDictionaryDetails} locale={appLocale} />,
@@ -441,7 +554,7 @@ export function DevicesPage() {
         },
       },
     ],
-    [allOnPageSelected, appLocale, opStateDict?.sysDictionaryDetails, selectedIds, someOnPageSelected]
+    [allOnPageSelected, appLocale, editingInstallAddressId, editingInstallAddressValue, opStateDict?.sysDictionaryDetails, savingInstallAddressId, selectedIds, someOnPageSelected]
   )
 
   const table = useReactTable({
