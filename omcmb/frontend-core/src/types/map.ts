@@ -249,6 +249,8 @@ export interface DeviceSearchResult {
   device_name?: string;
   /** 当前接入 UE 数 */
   ueCount?: number;
+  /** 当前活跃告警数 */
+  alarmCount?: number;
 }
 
 /**
@@ -506,4 +508,6 @@ export interface BackendSearchResult {
   device_name?: string;
   /** 当前接入 UE 数 */
   ue_count?: number;
+  /** 当前活跃告警数 */
+  alarm_count?: number;
 }
