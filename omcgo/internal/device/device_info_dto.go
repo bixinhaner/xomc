@@ -17,6 +17,9 @@ type DeviceWithInfo struct {
 
 	// ===== 设备分组信息（可能为空）=====
 
+	// GroupID 设备分组 ID
+	GroupID *uuid.UUID `json:"group_id,omitempty"`
+
 	// GroupName 设备分组名称
 	GroupName *string `json:"group_name"`
 

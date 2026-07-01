@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { Search, RefreshCw, Power, Loader2 } from 'lucide-react'
 
@@ -8,8 +8,9 @@ import { NeonButton } from '@/components/ui/NeonButton'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Sparkline } from '@/components/viz/Sparkline'
 import { formatTime } from '@/lib/format'
-import { prefetchDeviceDetailContext, useDeviceList } from '@core/hooks/api/useDevices'
+import { prefetchDeviceDetailContext, useDeviceGroups, useDeviceList } from '@core/hooks/api/useDevices'
 import type { Device } from '@core/types/device'
+import { expandSelectedGroupIds } from '@core/utils/deviceGroupFilter'
 
 const STATUS_COLOR: Record<string, string> = {
   online: '#00ff88',
@@ -26,21 +27,26 @@ const AUTO_REFRESH_OPTIONS = [
 
 export function FleetPage() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const queryClient = useQueryClient()
   const [page, setPage] = useState(1)
   const pageSize = 20
   const [keyword, setKeyword] = useState('')
   const [autoRefresh, setAutoRefresh] = useState(false)
   const [refreshInterval, setRefreshInterval] = useState(30)
+  const { data: groupsResp } = useDeviceGroups()
 
-  const params = useMemo(
-    () => ({
+  const params = useMemo(() => {
+    const rawGroupID = searchParams.get('groupId') ?? undefined
+    const expandedGroupIDs = expandSelectedGroupIds(rawGroupID, groupsResp?.groups ?? [])
+
+    return {
       page,
       pageSize,
       ...(keyword.trim() ? { searchText: keyword.trim() } : {}),
-    }),
-    [page, keyword]
-  )
+      ...(expandedGroupIDs ? { groupId: expandedGroupIDs } : {}),
+    }
+  }, [page, keyword, searchParams, groupsResp?.groups])
 
   const { data, isFetching, isLoading, isError, error, refetch } = useDeviceList(params, {
     refetchInterval: autoRefresh ? refreshInterval * 1000 : 0,

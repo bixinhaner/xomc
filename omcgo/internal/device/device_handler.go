@@ -358,12 +358,25 @@ func (h *Handler) ListDevices(c *gin.Context) {
 		filter.OpState = &opState
 	}
 	if groupID := c.Query("group_id"); groupID != "" {
-		gid, err := uuid.Parse(groupID)
-		if err != nil {
-			commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
-			return
+		groupIDs := SplitCSV(groupID)
+		if len(groupIDs) == 1 {
+			gid, err := uuid.Parse(groupIDs[0])
+			if err != nil {
+				commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+				return
+			}
+			filter.GroupID = &gid
+		} else {
+			filter.GroupIDs = make([]uuid.UUID, 0, len(groupIDs))
+			for _, rawID := range groupIDs {
+				gid, err := uuid.Parse(rawID)
+				if err != nil {
+					commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+					return
+				}
+				filter.GroupIDs = append(filter.GroupIDs, gid)
+			}
 		}
-		filter.GroupID = &gid
 	}
 
 	// Inject data permission: restrict to user-visible groups.

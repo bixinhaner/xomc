@@ -1015,7 +1015,7 @@ ALTER TABLE public.device_groups DISABLE TRIGGER ALL;
 
 INSERT INTO public.device_groups VALUES
 	('00000000-0000-0000-0000-000000000001', '默认设备组', NULL, NULL, NULL, 0, 'active', '系统默认一级设备组，不可修改删除', true, 1, 'system', NULL, NULL, NULL, NULL, NULL, '2026-05-31 11:28:45.998778+08', '2026-06-12 18:16:52.394787+08', NULL, '{"en-US": "Default Group", "zh-CN": "默认设备组"}', '{}', '{"en-US": "System default L1 group, cannot be modified or deleted", "zh-CN": "系统默认一级设备组，不可修改删除"}'),
-	('00000000-0000-0000-0000-000000000002', '未分组设备', '00000000-0000-0000-0000-000000000001', NULL, NULL, 0, 'active', '系统默认二级设备组，删除组后设备自动归入此组', true, 2, 'system', NULL, NULL, NULL, NULL, NULL, '2026-05-31 11:28:45.998778+08', '2026-06-12 18:16:52.394787+08', NULL, '{"en-US": "Ungrouped Devices", "zh-CN": "未分组设备"}', '{}', '{"en-US": "System default L2 group, devices auto-fallback here when their group is deleted", "zh-CN": "系统默认二级设备组，删除组后设备自动归入此组"}') ON CONFLICT DO NOTHING;
+	('00000000-0000-0000-0000-000000000002', '默认设备组', '00000000-0000-0000-0000-000000000001', NULL, NULL, 0, 'active', '系统默认二级设备组，删除组后设备自动归入此组', true, 2, 'system', NULL, NULL, NULL, NULL, NULL, '2026-05-31 11:28:45.998778+08', '2026-06-12 18:16:52.394787+08', NULL, '{"en-US": "Default Group", "zh-CN": "默认设备组"}', '{}', '{"en-US": "System default L2 group, devices auto-fallback here when their group is deleted", "zh-CN": "系统默认二级设备组，删除组后设备自动归入此组"}') ON CONFLICT DO NOTHING;
 
 
 ALTER TABLE public.device_groups ENABLE TRIGGER ALL;

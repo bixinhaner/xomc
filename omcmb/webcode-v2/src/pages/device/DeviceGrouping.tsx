@@ -44,6 +44,7 @@ import {
 } from '@core/hooks/api/useDevices'
 import type { DeviceGroup, DeviceFilter } from '@core/types/device'
 import type { PageRequest } from '@core/types/pagination'
+import { expandSelectedGroupIds } from '@core/utils/deviceGroupFilter'
 
 // ============================================================
 // 设备分组 — 分组树（一级/二级）+ 分组内设备列表 + 分组增删改
@@ -322,15 +323,17 @@ export default function DeviceGrouping() {
     [groups, selectedGroupId]
   )
 
-  const deviceParams = useMemo<DeviceFilter & PageRequest>(
-    () => ({
+  const deviceParams = useMemo<DeviceFilter & PageRequest>(() => {
+    const expandedGroupIDs =
+      selectedGroupId ? expandSelectedGroupIds(selectedGroupId, groups) : undefined
+
+    return {
       page,
       pageSize,
-      ...(selectedGroupId ? { groupId: selectedGroupId } : {}),
+      ...(expandedGroupIDs ? { groupId: expandedGroupIDs } : {}),
       ...(deviceSearch.trim() ? { searchText: deviceSearch.trim() } : {}),
-    }),
-    [page, pageSize, selectedGroupId, deviceSearch]
-  )
+    }
+  }, [page, pageSize, selectedGroupId, deviceSearch, groups])
   const deviceQuery = useDeviceList(deviceParams, {
     enabled: Boolean(selectedGroupId),
   })

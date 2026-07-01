@@ -28,6 +28,8 @@ import { useDictionaryBatch } from '@core/hooks/api/useSystem';
 import { resolveNetworkTypeLabel } from '@core/utils/networkType';
 import { activationStatusLabelOf, activationStatusOf } from '@core/utils/activationStatus';
 import { formatDeviceSyncStatus, getDeviceSyncStatusKind, normalizeDeviceSyncStatus } from '@core/utils/deviceSyncStatus';
+import { expandSelectedGroupIds } from '@core/utils/deviceGroupFilter';
+import { withDeviceGroupDisplayName } from '@core/utils/deviceGroupDisplay';
 import { useTriggerAlarmSync } from '@core/hooks/api/useAlarms';
 import { useCreateUnifiedFileTransferTask } from '@core/hooks/api/useUnifiedFileTransfer';
 import { useDownloadStationLog } from '@core/hooks/api/useStationLog';
@@ -341,10 +343,19 @@ export default function DeviceList() {
   // 此处显式引用消除 TS6133「声明未使用」，恢复 remark 列时删除本行即可。
   void remarkHeaderRender;
 
-  const queryParams = useMemo(
-    () => ({ ...filterParams, page: currentPage, pageSize } as Parameters<typeof useDeviceList>[0]),
-    [filterParams, currentPage, pageSize]
-  );
+  const currentUser = useUserStore((s) => s.currentUser);
+  const appLocale = useAppStore((s) => s.locale);
+  // R6b: 设备分组下拉接入 device/group API（device-list-and-group-improvements-20260520.md R6b）
+  const { data: groupsResp } = useDeviceGroups();
+  const queryParams = useMemo(() => {
+    const expandedGroupIDs = expandSelectedGroupIds(filterParams.groupId as string | string[] | undefined, groupsResp?.groups ?? []);
+    return {
+      ...filterParams,
+      ...(expandedGroupIDs ? { groupId: expandedGroupIDs } : {}),
+      page: currentPage,
+      pageSize,
+    } as Parameters<typeof useDeviceList>[0];
+  }, [filterParams, groupsResp?.groups, currentPage, pageSize]);
 
   const { data, isLoading, isFetching, refetch } = useDeviceList(queryParams, {
     refetchInterval: autoRefresh ? refreshInterval * 1000 : undefined,
@@ -356,11 +367,12 @@ export default function DeviceList() {
   const triggerAlarmSync = useTriggerAlarmSync();
   const createUfteTask = useCreateUnifiedFileTransferTask();
   const downloadStationLog = useDownloadStationLog();
-  const currentUser = useUserStore((s) => s.currentUser);
-  const appLocale = useAppStore((s) => s.locale);
   const taskNameUser = currentUser?.username || currentUser?.displayName || 'user';
   // 性能优化：使用 useMemo 避免每次渲染创建新引用，防止下游 callback/useMemo 依赖变化
-  const devices = useMemo(() => data?.items ?? [], [data?.items]);
+  const devices = useMemo(
+    () => withDeviceGroupDisplayName(data?.items ?? [], groupsResp?.groups ?? [], appLocale),
+    [data?.items, groupsResp?.groups, appLocale]
+  );
   const total = data?.total ?? 0;
   const stats = useMemo(() => data?.stats ?? { total: 0, online: 0, offline: 0, alarmed: 0, online_count: 0, offline_count: 0 }, [data?.stats]);
 
@@ -421,9 +433,6 @@ export default function DeviceList() {
       window.clearTimeout(refreshSpinTimeoutRef.current);
     }
   }, []);
-
-  // R6b: 设备分组下拉接入 device/group API（device-list-and-group-improvements-20260520.md R6b）
-  const { data: groupsResp } = useDeviceGroups();
   const groupOptions = useMemo(() => {
     const groups = groupsResp?.groups ?? [];
     // 仅 L2 子分组可作为设备过滤目标（L1 是容器）；用 parentName / name 双层展示便于辨识
