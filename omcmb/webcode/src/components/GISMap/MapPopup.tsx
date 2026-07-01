@@ -40,7 +40,7 @@ const MapPopup: React.FC<MapPopupProps> = ({
   if (!visible || !device) return null;
 
   const statusConfig = DEVICE_STATUS_CONFIG[device.status] || DEVICE_STATUS_CONFIG.offline;
-  const hasAlarm = device.status !== 'offline' && device.alarmCount && device.alarmCount > 0;
+  const hasAlarm = (device.alarmCount ?? 0) > 0;
 
   // 卡片容器样式
   const containerStyle: React.CSSProperties = {

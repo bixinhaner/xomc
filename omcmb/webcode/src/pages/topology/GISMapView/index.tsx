@@ -1264,7 +1264,7 @@ export default function GISMapView() {
                                 sn: result.sn,
                                 groupName: result.groupName,
                                 address: '',
-                                alarmCount: 0,
+                                alarmCount: result.alarmCount ?? 0,
                                 type: undefined,
                                 ip_address: result.ip_address,
                                 mac: result.mac,

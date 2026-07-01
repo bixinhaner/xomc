@@ -665,5 +665,6 @@ function mapBackendSearchResult(bs: BackendSearchResult): DeviceSearchResult {
     pci: bs.pci,
     device_name: bs.device_name,
     ueCount: bs.ue_count,
+    alarmCount: bs.alarm_count,
   };
 }

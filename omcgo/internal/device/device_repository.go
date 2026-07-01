@@ -1127,7 +1127,7 @@ func (r *PgDeviceRepository) ListGeo(ctx context.Context, filter GeoDeviceFilter
 		"d.id", "d.serial_number", "d.serial_number as name",
 		"d.lifecycle_state", "d.is_online",
 		"d.latitude", "d.longitude", "dg.id as group_id", "dg.name as group_name",
-		"d.site_name as address", "0 as alarm_count", "d.model_name as type",
+		"d.site_name as address", "COALESCE(di.active_alarm_count, 0) as alarm_count", "d.model_name as type",
 		"COALESCE(host(d.ip_address), '')", "COALESCE(di.mac, '')", "COALESCE(di.pci, '')", "COALESCE(di.device_name, '')",
 		"COALESCE(di.ue_count, 0)",
 	).From("devices d").
@@ -1369,7 +1369,7 @@ func (r *PgDeviceRepository) SearchDevices(ctx context.Context, keyword string, 
 		"d.id", "d.serial_number", "d.serial_number as name",
 		"d.lifecycle_state", "d.is_online",
 		"d.latitude", "d.longitude", "dg.id as group_id", "dg.name as group_name",
-		"d.site_name as address", "0 as alarm_count", "d.model_name as type",
+		"d.site_name as address", "COALESCE(di.active_alarm_count, 0) as alarm_count", "d.model_name as type",
 		"COALESCE(host(d.ip_address), '')", "COALESCE(di.mac, '')", "COALESCE(di.pci, '')", "COALESCE(di.device_name, '')",
 		"COALESCE(di.ue_count, 0)",
 	).From("devices d").
