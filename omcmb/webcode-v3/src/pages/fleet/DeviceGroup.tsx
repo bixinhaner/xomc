@@ -7,6 +7,7 @@ import { GlassPanel } from '@/components/ui/GlassPanel'
 import { NeonButton } from '@/components/ui/NeonButton'
 import { useDeviceGroups } from '@core/hooks/api/useDevices'
 import type { DeviceGroup } from '@core/types/device'
+import { buildDeviceGroupSubtreeCountMap } from '@core/utils/deviceGroupCounts'
 import { StateGate, StatCard } from './_shared'
 
 export default function FleetDeviceGroup() {
@@ -26,6 +27,10 @@ export default function FleetDeviceGroup() {
 
   const totalDevices = useMemo(
     () => groups.reduce((acc, g) => (g.parentId ? acc + g.deviceCount : acc), 0),
+    [groups]
+  )
+  const subtreeCounts = useMemo(
+    () => buildDeviceGroupSubtreeCountMap(groups),
     [groups]
   )
 
@@ -65,7 +70,7 @@ export default function FleetDeviceGroup() {
                   {root.name}
                 </span>
               }
-              meta={`${root.deviceCount} DEV${root.builtIn ? ' · 内置' : ''}`}
+              meta={`${subtreeCounts.get(root.id) ?? root.deviceCount} DEV${root.builtIn ? ' · 内置' : ''}`}
             >
               {children.length === 0 ? (
                 <div className="px-3 py-3 font-mono text-[11px] text-cyan-300/40">

@@ -44,6 +44,7 @@ import {
 } from '@core/hooks/api/useDevices'
 import type { DeviceGroup, DeviceFilter } from '@core/types/device'
 import type { PageRequest } from '@core/types/pagination'
+import { buildDeviceGroupSubtreeCountMap } from '@core/utils/deviceGroupCounts'
 import { expandSelectedGroupIds } from '@core/utils/deviceGroupFilter'
 
 // ============================================================
@@ -62,6 +63,7 @@ type DialogMode =
 function GroupNode({
   group,
   childGroups,
+  groupCount,
   selectedId,
   onSelect,
   onAddChild,
@@ -70,6 +72,7 @@ function GroupNode({
 }: {
   group: DeviceGroup
   childGroups: DeviceGroup[]
+  groupCount: number
   selectedId: string | null
   onSelect: (id: string) => void
   onAddChild: (parent: DeviceGroup) => void
@@ -107,7 +110,7 @@ function GroupNode({
           <FolderTree className="size-3.5 shrink-0 opacity-70" />
           <span className="truncate">{group.name}</span>
           <span className="shrink-0 text-xs text-muted-foreground">
-            ({group.deviceCount})
+            ({groupCount})
           </span>
         </button>
         <div className="hidden shrink-0 items-center gap-0.5 group-hover:flex">
@@ -290,6 +293,10 @@ export default function DeviceGrouping() {
     }
     return map
   }, [groups])
+  const subtreeCounts = useMemo(
+    () => buildDeviceGroupSubtreeCountMap(groups),
+    [groups]
+  )
 
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null)
   const [treeSearch, setTreeSearch] = useState('')
@@ -426,6 +433,7 @@ export default function DeviceGrouping() {
                   key={root.id}
                   group={root}
                   childGroups={childrenOf.get(root.id) ?? []}
+                    groupCount={subtreeCounts.get(root.id) ?? root.deviceCount}
                   selectedId={selectedGroupId}
                   onSelect={(id) => {
                     setSelectedGroupId(id)

@@ -13,6 +13,7 @@ import {
 import type { MenuProps } from 'antd';
 import type { DataNode } from 'antd/es/tree';
 import type { GroupItem } from './types';
+import { buildDeviceGroupSubtreeCountMap } from '@core/utils/deviceGroupCounts';
 import { getRecordI18n, type Locale } from '@core/utils/i18nText';
 import { useAppStore } from '@core/store/appStore';
 import styles from './DeviceGrouping.module.css';
@@ -32,22 +33,13 @@ export interface GroupTreePanelProps {
   t: (id: string, values?: Record<string, string | number>) => string;
 }
 
-// 计算分组在当前(可能已被搜索过滤的)集合下的设备数:叶子层(无子分组)取自身
-// deviceCount;有子分组则递归取所有子分组之和。搜索态用它让上级分组(及「全部」)
-// 徽标显示「当前搜索命中的子树合计」,而非后端全量 deviceCount。
-function subtreeDeviceCount(group: GroupItem, groups: GroupItem[]): number {
-  const children = groups.filter((g) => g.parentId === group.id);
-  if (children.length === 0) return group.deviceCount;
-  return children.reduce((sum, c) => sum + subtreeDeviceCount(c, groups), 0);
-}
-
 function buildTreeData(
   groups: GroupItem[],
   _selectedId: string | null,
   onContextMenu: (groupId: string) => void,
   t: (id: string, values?: Record<string, string | number>) => string,
   locale: Locale,
-  isSearching: boolean
+  countMap: Map<string, number>
 ): DataNode[] {
   const rootGroups = groups.filter((g) => !g.parentId);
   const displayName = (g: GroupItem) => getRecordI18n(g as unknown as Record<string, unknown>, 'name', locale) || g.name;
@@ -163,7 +155,7 @@ function buildTreeData(
             </span>
           </Tooltip>
           <span className={styles.groupCountBadge}>
-            {isSearching ? subtreeDeviceCount(group, groups) : group.deviceCount}
+            {countMap.get(group.id) ?? group.deviceCount}
           </span>
           <span className={styles.treeNodeActions}>
             <Dropdown
@@ -206,9 +198,13 @@ export default function GroupTreePanel({
   const locale = useAppStore((s) => s.locale);
 
   const isSearching = groupSearchText.trim() !== '';
+  const displayCountMap = useMemo(
+    () => buildDeviceGroupSubtreeCountMap(isSearching ? filteredGroups : groups),
+    [filteredGroups, groups, isSearching]
+  );
   const filteredTreeData = useMemo(
-    () => buildTreeData(filteredGroups, selectedGroupId, onContextMenu, t, locale, isSearching),
-    [filteredGroups, selectedGroupId, onContextMenu, t, locale, isSearching]
+    () => buildTreeData(filteredGroups, selectedGroupId, onContextMenu, t, locale, displayCountMap),
+    [filteredGroups, selectedGroupId, onContextMenu, t, locale, displayCountMap]
   );
   // 「全部」徽标:搜索态显示当前命中子树合计(各根分组子树之和),否则后端全量 total。
   const displayTotal = useMemo(
@@ -216,9 +212,9 @@ export default function GroupTreePanel({
       isSearching
         ? filteredGroups
             .filter((g) => !g.parentId)
-            .reduce((s, g) => s + subtreeDeviceCount(g, filteredGroups), 0)
+            .reduce((s, g) => s + (displayCountMap.get(g.id) ?? g.deviceCount), 0)
         : total,
-    [isSearching, filteredGroups, total]
+    [isSearching, filteredGroups, total, displayCountMap]
   );
 
   return (
