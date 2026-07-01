@@ -370,3 +370,29 @@ func firstNonEmpty(values ...string) string {
 	}
 	return ""
 }
+// CalcUECount 从 device_parameters 读取当前接入 UE 数。
+//
+// 读取优先级：
+//  1. Device.DeviceInfo.UE_Count          （通用标准路径，param_models 已收录）
+//  2. Device.Services.FAPService.1.X_COM_ConnectedUECount  （LTE 厂商扩展路径）
+//  3. 返回 0                              （参数缺失或解析失败）
+//
+// 返回值保证 >= 0；非数字字符串或负数均视为 0。
+func CalcUECount(params map[string]string) int {
+	candidates := []string{
+		"Device.DeviceInfo.UE_Count",
+		"Device.Services.FAPService.1.X_COM_ConnectedUECount",
+	}
+	for _, path := range candidates {
+		v, ok := params[path]
+		if !ok || v == "" {
+			continue
+		}
+		n, err := strconv.Atoi(strings.TrimSpace(v))
+		if err != nil || n < 0 {
+			continue
+		}
+		return n
+	}
+	return 0
+}

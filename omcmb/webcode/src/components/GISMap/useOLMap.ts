@@ -236,6 +236,8 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
   const allDevicesRef = useRef<MapDevice[]>([]);
   // 视口裁剪函数引用（在 moveend 中调用，避免 bindMapEvents 签名漂移）
   const cullDevicesRef = useRef<(() => void) | null>(null);
+  // clearHighlight 的 ref，供 moveend 等闭包内安全调用（避免 stale closure）
+  const clearHighlightRef = useRef<(() => void) | null>(null);
   // 批量渲染 ID（用于取消上一批未完成的 rAF 渲染，防止并发写入 VectorSource）
   const renderBatchIdRef = useRef(0);
   // 强制保留渲染的设备 id（如搜索定位目标）：即便落在视口外也始终渲染，
@@ -249,6 +251,8 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
   const pulseAnimationRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // 波纹创建定时器
   const rippleCreateRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // 搜索定位高亮自动清除定时器
+  const highlightAutoClearRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 波纹状态数组
   const rippleWavesRef = useRef<{ radius: number; opacity: number }[]>([]);
   // 当前高亮设备的 ID（用于 renderDeviceFeatures 重建 feature 时恢复高亮状态）
@@ -530,11 +534,53 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
     // 视口裁剪重算（性能 #15）：地图平移/缩放结束后，按新视口重新喂点。
     // 带防抖，避免连续 moveend 频繁重建 feature。
     let cullTimeout: ReturnType<typeof setTimeout>;
+    // 记录上一次 moveend 时的中心点，用于判断是否发生了「主动拖动」
+    let lastMoveCenter: number[] | null = null;
+    // 记录高亮时的 zoom，用于判断缩放幅度
+    let highlightZoomLevel: number | null = null;
     mapInstanceRef.current.on('moveend', () => {
       clearTimeout(cullTimeout);
       cullTimeout = setTimeout(() => {
         cullDevicesRef.current?.();
       }, 150);
+
+      // 仅「用户手动拖动/缩放」时清除搜索高亮，程序化 flyTo 产生的 moveend 不处理
+      const view = mapInstanceRef.current?.getView();
+      if (view && highlightedDeviceIdRef.current && !(isProgrammaticFlyingRef.current > 0)) {
+        const currentCenter = view.getCenter();
+        const currentZoom = view.getZoom() ?? 0;
+
+        // 记录高亮时的 zoom（第一次非程序化 moveend 时记录）
+        if (highlightZoomLevel === null) {
+          highlightZoomLevel = currentZoom;
+        }
+
+        // 条件1：中心点位移 > 120px（主动平移）
+        let shouldClear = false;
+        if (lastMoveCenter && currentCenter) {
+          const dx = currentCenter[0] - lastMoveCenter[0];
+          const dy = currentCenter[1] - lastMoveCenter[1];
+          const resolution = view.getResolution() ?? 1;
+          const pixelDist = Math.sqrt(dx * dx + dy * dy) / resolution;
+          if (pixelDist > 120) shouldClear = true;
+        }
+
+        // 条件2：从高亮时的 zoom 缩小超过 2 级（用户明显缩小了地图）
+        if (currentZoom < (highlightZoomLevel ?? currentZoom) - 2) {
+          shouldClear = true;
+        }
+
+        if (shouldClear) {
+          clearHighlightRef.current?.();
+          highlightZoomLevel = null;
+        }
+
+        lastMoveCenter = currentCenter ? [...currentCenter] : null;
+      } else if (view && !(isProgrammaticFlyingRef.current > 0)) {
+        // 无高亮时重置 zoom 记录
+        highlightZoomLevel = null;
+        lastMoveCenter = view.getCenter() ? [...(view.getCenter()!)] : null;
+      }
     });
 
     // 延迟设置 isReady，避免在 effect 中同步调用 setState 导致级联渲染
@@ -897,6 +943,11 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
 
   // 取消高亮（必须在 highlightDevice 之前定义）
   const clearHighlight = useCallback(() => {
+    // 清除自动清除定时器
+    if (highlightAutoClearRef.current) {
+      clearTimeout(highlightAutoClearRef.current);
+      highlightAutoClearRef.current = null;
+    }
     // 清除波纹动画定时器
     if (pulseAnimationRef.current) {
       clearInterval(pulseAnimationRef.current);
@@ -929,6 +980,9 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
     // 触发一次重绘，确保高亮立即消失（silent 不会自动触发 Cluster 重绘）
     mapInstanceRef.current?.render();
   }, []);
+
+  // 挂到 ref，让 moveend 闭包可安全调用最新版本（避免 stale closure）
+  clearHighlightRef.current = clearHighlight;
 
   // 高亮设备（水波纹动画）
   const highlightDevice = useCallback((deviceId: string) => {
@@ -967,12 +1021,24 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
       // 立即创建第一个波纹
       createRipple();
 
-      // 定时创建新波纹（每 480ms）
+      // 定时创建新波纹（每 600ms）
+      // 最多创建 3 个波纹（1.8s），之后停止创建，让最后一个波纹自然消散（~2.3s）
+      // 总体动画约 3-4s，符合「搜索定位高亮」的最佳实践时长。
+      const MAX_RIPPLE_CREATE_COUNT = 3;
+      let rippleCreateCount = 0;
       rippleCreateRef.current = setInterval(() => {
+        rippleCreateCount++;
         createRipple();
         // 最多同时存在 4 个波纹
         if (rippleWavesRef.current.length > 4) {
           rippleWavesRef.current.shift();
+        }
+        // 达到上限后停止创建，让最后一批波纹自然衰减消失
+        if (rippleCreateCount >= MAX_RIPPLE_CREATE_COUNT) {
+          if (rippleCreateRef.current) {
+            clearInterval(rippleCreateRef.current);
+            rippleCreateRef.current = null;
+          }
         }
       }, 600);
 
@@ -1102,10 +1168,17 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
       };
       createRipple();
 
+      // 只再创建 1 个额外波纹，共 2 个波，之后停止
+      let extraCreated = 0;
       rippleCreateRef.current = setInterval(() => {
+        extraCreated++;
         createRipple();
         if (rippleWavesRef.current.length > 4) {
           rippleWavesRef.current.shift();
+        }
+        if (extraCreated >= 1) {
+          clearInterval(rippleCreateRef.current!);
+          rippleCreateRef.current = null;
         }
       }, 480);
 
@@ -1119,16 +1192,27 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
         }
         rippleWavesRef.current = rippleWavesRef.current
           .map((wave) => ({
-            radius: wave.radius + 0.6,   // 扩散速度：0.6px/40ms = 15px/s
-            opacity: wave.opacity - 0.017, // 衰减加快：寿命约 2.5s，max radius ≈ 35px
+            radius: wave.radius + 0.4,    // 扩散速度放慢：10px/s，波纹更小
+            opacity: wave.opacity - 0.030, // 衰减加快：~1.3s 消失，不长期驻留
           }))
           .filter((wave) => wave.opacity > 0);
-        // silent=true：不触发 source change，避免 Cluster 每帧重聚合
         highlightFeatureRef.current.set('rippleWaves', [...rippleWavesRef.current], true);
         if (mapInstanceRef.current) {
           mapInstanceRef.current.render();
         }
+        // 所有波纹消散后自动停止 pulseAnimation
+        if (rippleWavesRef.current.length === 0 && !rippleCreateRef.current) {
+          clearInterval(pulseAnimationRef.current!);
+          pulseAnimationRef.current = null;
+        }
       }, 40);
+
+      // 2s 后强制清除高亮（无论波纹是否消散完毕）
+      if (highlightAutoClearRef.current) clearTimeout(highlightAutoClearRef.current);
+      highlightAutoClearRef.current = setTimeout(() => {
+        highlightAutoClearRef.current = null;
+        clearHighlight();
+      }, 2000);
     };
 
     // 在 cluster source 中重试查找目标设备所在聚合
