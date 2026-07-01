@@ -421,3 +421,18 @@ func (mr *MockDeviceRepositoryMockRecorder) UpdateSiteName(ctx, id, name any) *g
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateSiteName", reflect.TypeOf((*MockDeviceRepository)(nil).UpdateSiteName), ctx, id, name)
 }
+
+// ListProductClasses mocks base method.
+func (m *MockDeviceRepository) ListProductClasses(ctx context.Context) ([]string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListProductClasses", ctx)
+	ret0, _ := ret[0].([]string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListProductClasses indicates an expected call of ListProductClasses.
+func (mr *MockDeviceRepositoryMockRecorder) ListProductClasses(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListProductClasses", reflect.TypeOf((*MockDeviceRepository)(nil).ListProductClasses), ctx)
+}

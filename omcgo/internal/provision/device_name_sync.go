@@ -40,10 +40,9 @@ const (
 
 // 名称同步策略枚举（nameSyncMode 的取值）。
 const (
-	NameSyncModeOff         = "off"              // 不处理：既不修改也不提示
 	NameSyncModeAutoLMTToOMC = "auto_lmt_to_omc" // 自动修改：LMT 名称覆盖网管
 	NameSyncModeAutoOMCToLMT = "auto_omc_to_lmt" // 自动修改：网管名称下发到 LMT
-	NameSyncModePrompt      = "prompt"           // 仅提示：标记待人工确认，不自动改
+	NameSyncModePrompt       = "prompt"           // 仅提示：标记待人工确认，不自动改（默认）
 )
 
 // 同步方向常量（内部使用，标准路径翻译等仍按方向区分）。
@@ -156,11 +155,6 @@ func (h *DeviceNameSyncHook) Execute(ctx context.Context, dev *model.Device) err
 
 	// 1. 读取配置
 	cfg := h.loadConfig(ctx)
-	if cfg.Mode == NameSyncModeOff {
-		h.logger.Debug("device name sync disabled (mode=off)",
-			zap.String("device_sn", dev.SerialNumber))
-		return nil
-	}
 
 	// 2. 从 device_parameters 读取 HNBName
 	lmtName, err := h.getLMTDeviceName(ctx, dev.ID)
@@ -229,8 +223,8 @@ func (h *DeviceNameSyncHook) Execute(ctx context.Context, dev *model.Device) err
 
 // loadConfig 从 sys_configs 加载设备名称同步配置。
 func (h *DeviceNameSyncHook) loadConfig(ctx context.Context) DeviceNameSyncConfig {
-	// 默认 off：配置缺失时不处理，避免未配置就自动改名。
-	cfg := DeviceNameSyncConfig{Mode: NameSyncModeOff}
+	// 默认 prompt：配置缺失时仅标记不一致，不自动改名（最保守安全底线）。
+	cfg := DeviceNameSyncConfig{Mode: NameSyncModePrompt}
 
 	if h.configLookup == nil {
 		return cfg
@@ -238,7 +232,7 @@ func (h *DeviceNameSyncHook) loadConfig(ctx context.Context) DeviceNameSyncConfi
 
 	if v, ok := h.configLookup(ctx, nameSyncConfigCategory, nameSyncConfigMode); ok {
 		switch v {
-		case NameSyncModeOff, NameSyncModeAutoLMTToOMC, NameSyncModeAutoOMCToLMT, NameSyncModePrompt:
+		case NameSyncModeAutoLMTToOMC, NameSyncModeAutoOMCToLMT, NameSyncModePrompt:
 			cfg.Mode = v
 		}
 	}

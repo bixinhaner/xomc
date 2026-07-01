@@ -128,6 +128,8 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		devices.PUT("/:id/rf-switch", h.SetRFSwitch)
 		// Issue #758: 设备名称同步人工处理端点
 		devices.POST("/:id/resolve-name-sync", h.ResolveNameSync)
+		// 网管侧手动改基站名（即时下发）
+		devices.POST("/:id/rename", h.RenameDevice)
 	}
 }
 
@@ -1112,6 +1114,43 @@ func (h *Handler) ResolveNameSync(c *gin.Context) {
 	}
 
 	if err := h.service.ResolveNameSync(c.Request.Context(), id, req.Action); err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	response.OK(c, gin.H{"success": true})
+}
+
+// RenameDeviceRequest 定义 POST /api/v1/devices/:id/rename 的请求体。
+type RenameDeviceRequest struct {
+	// Name 新的设备名称（网管侧）
+	Name string `json:"name" binding:"required"`
+}
+
+// RenameDevice handles POST /api/v1/devices/:id/rename.
+//
+// 按 nameSyncMode 策略决定行为：
+//   - auto_omc_to_lmt → 双写网管库 + SPV 下发到基站 + 清 pending
+//   - prompt          → 双写网管库 + 置 pending（不下发）
+//   - auto_lmt_to_omc → 403 拒绝（请在 LMT 侧改名）
+func (h *Handler) RenameDevice(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	if !authorizeDeviceAccess(c, h.service, h.permService, id) {
+		return
+	}
+
+	var req RenameDeviceRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	if err := h.service.RenameDevice(c.Request.Context(), id, req.Name); err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}

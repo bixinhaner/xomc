@@ -21,7 +21,7 @@ export default function DeviceSettings({ form }: DeviceSettingsProps) {
       enbInformPeriodAdjustEnable: true,
       enbInformPeriod: 60,
       enbTimeout: 100,
-      nameSyncMode: 'off',
+      nameSyncMode: 'prompt',
       accessContralEnable: false,
       rsrpVal0: -100,
       rsrpVal1: -80,
@@ -77,12 +77,6 @@ export default function DeviceSettings({ form }: DeviceSettingsProps) {
         <Form.Item name="nameSyncMode" noStyle>
           <Radio.Group>
             <Space direction="vertical" size={12}>
-              <Radio value="off">
-                {t('system.device.nameSync.mode.off')}
-                <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 2 }}>
-                  {t('system.device.nameSync.mode.off.hint')}
-                </Typography.Text>
-              </Radio>
               <Radio value="auto_lmt_to_omc">
                 {t('system.device.nameSync.mode.autoLmtToOmc')}
                 <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 2 }}>

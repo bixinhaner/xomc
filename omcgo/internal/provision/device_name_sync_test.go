@@ -20,8 +20,8 @@ func newConfigOnlyHook(lookup NameSyncConfigLookup) *DeviceNameSyncHook {
 	return &DeviceNameSyncHook{configLookup: lookup, logger: zap.NewNop()}
 }
 
-// #758 收尾：名称同步策略改为单字段 nameSyncMode（四值枚举），
-// loadConfig 应正确解析四值、缺失时默认 off、未知值退回 off。
+// #758 收尾 / rename P0：名称同步策略收敛为三值枚举（删除 off），
+// loadConfig 应正确解析三值、缺失时默认 prompt、未知值退回 prompt。
 func TestDeviceNameSync_LoadConfig_Mode(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -29,12 +29,12 @@ func TestDeviceNameSync_LoadConfig_Mode(t *testing.T) {
 		hasKey   bool
 		wantMode string
 	}{
-		{"缺失默认off", "", false, NameSyncModeOff},
-		{"不处理", NameSyncModeOff, true, NameSyncModeOff},
+		{"缺失默认prompt", "", false, NameSyncModePrompt},
 		{"自动LMT覆盖网管", NameSyncModeAutoLMTToOMC, true, NameSyncModeAutoLMTToOMC},
 		{"自动网管下发LMT", NameSyncModeAutoOMCToLMT, true, NameSyncModeAutoOMCToLMT},
 		{"仅提示", NameSyncModePrompt, true, NameSyncModePrompt},
-		{"未知值退回off", "garbage", true, NameSyncModeOff},
+		{"未知值退回prompt", "garbage", true, NameSyncModePrompt},
+		{"脏值off退回prompt", "off", true, NameSyncModePrompt},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -49,9 +49,9 @@ func TestDeviceNameSync_LoadConfig_Mode(t *testing.T) {
 	}
 }
 
-// configLookup 为 nil（未注入配置源）时应安全退回 off，不 panic。
+// configLookup 为 nil（未注入配置源）时应安全退回 prompt，不 panic。
 func TestDeviceNameSync_LoadConfig_NilLookup(t *testing.T) {
 	h := newConfigOnlyHook(nil)
 	cfg := h.loadConfig(context.Background())
-	assert.Equal(t, NameSyncModeOff, cfg.Mode)
+	assert.Equal(t, NameSyncModePrompt, cfg.Mode)
 }

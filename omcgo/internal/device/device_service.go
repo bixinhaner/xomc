@@ -27,6 +27,11 @@ import (
 	"go.uber.org/zap"
 )
 
+// SysConfigLookup 读取系统配置的函数类型（(category, key) → value）。
+// 与 provision.NameSyncConfigLookup 签名相同，在 device 包独立定义避免 import cycle
+// （provision 依赖 device，device 不能反过来依赖 provision）。
+type SysConfigLookup func(ctx context.Context, category, key string) (value string, found bool)
+
 // GroupAssigner assigns a device to a group.
 type GroupAssigner interface {
 	BatchAddDevices(ctx context.Context, groupID uuid.UUID, deviceIDs []uuid.UUID) (int64, error)
@@ -57,6 +62,7 @@ type DeviceService struct {
 	productMatcher    ProductClassMatcher      // Phase 6 ModelName 回填（nil = 禁用）
 	productBinder     ProductBinder            // T-0176-PR-D：CreateDevice inline match 后写回 product_id（nil = 禁用）
 	groupReader       DeviceGroupReader        // 越权校验：读设备组归属（nil = 退化为不校验，见 AuthorizeDeviceGroupAccess）
+	sysConfigLookup  SysConfigLookup          // 读系统配置（nameSyncMode 等）
 	logger            *zap.Logger
 }
 
@@ -2274,5 +2280,141 @@ func (s *DeviceService) ResolveNameSync(ctx context.Context, deviceID uuid.UUID,
 		return fmt.Errorf("invalid action: %s", action)
 	}
 
+	return nil
+}
+
+// SetSysConfigLookup 注入系统配置查询函数（nameSyncMode 读取用）。
+func (s *DeviceService) SetSysConfigLookup(fn SysConfigLookup) {
+	s.sysConfigLookup = fn
+}
+
+// loadNameSyncMode 从 sys_configs 读取 nameSyncMode，未配置或未知值均回落 "prompt"。
+func (s *DeviceService) loadNameSyncMode(ctx context.Context) string {
+	if s.sysConfigLookup == nil {
+		return "prompt"
+	}
+	v, ok := s.sysConfigLookup(ctx, "device", "nameSyncMode")
+	if !ok {
+		return "prompt"
+	}
+	switch v {
+	case "auto_lmt_to_omc", "auto_omc_to_lmt", "prompt":
+		return v
+	default:
+		return "prompt"
+	}
+}
+
+// RenameDevice 从网管侧修改设备名称并按 nameSyncMode 策略决定是否下发到基站。
+//
+// 行为矩阵（见设计文档 §2.1）：
+//   - auto_lmt_to_omc → 拒绝（LMT 覆盖策略下禁止从网管改名）
+//   - auto_omc_to_lmt → 双写网管库 + 建 SPV 下发任务 + 清 pending
+//   - prompt          → 双写网管库 + 置 pending=true（lmtName 取旧值原样回写）
+//
+// 下发失败不回滚网管库（与现有人工下发语义一致）。
+func (s *DeviceService) RenameDevice(ctx context.Context, id uuid.UUID, newName string) error {
+	if strings.TrimSpace(newName) == "" {
+		return fmt.Errorf("%w: name cannot be empty", commonerrors.ErrInvalidInput)
+	}
+
+	mode := s.loadNameSyncMode(ctx)
+
+	// 1. auto_lmt_to_omc → 直接拒绝
+	if mode == "auto_lmt_to_omc" {
+		return commonerrors.NewBusinessError(
+			global.ErrCodeDeviceRenameNotAllowed,
+			"当前命名策略以基站为准，请在 LMT 侧修改名称",
+			commonerrors.ErrForbidden,
+		)
+	}
+
+	// 2. 读设备（需要 SN 做缓存清理和 SPV 下发）
+	dev, err := s.deviceRepo.GetByID(ctx, id)
+	if err != nil {
+		return fmt.Errorf("get device: %w", err)
+	}
+	if dev == nil {
+		return commonerrors.ErrNotFound
+	}
+
+	// 3. 读 device_info（prompt 模式下需要 lmt_device_name 旧值防止污染缓存）
+	info, err := s.deviceInfoRepo.GetByDeviceID(ctx, id)
+	if err != nil {
+		return fmt.Errorf("get device info: %w", err)
+	}
+	if info == nil {
+		return commonerrors.ErrNotFound
+	}
+
+	// 4. 双写：device_info.device_name（详情口径）+ devices.site_name（列表口径）
+	if err := s.deviceInfoRepo.UpdateDeviceName(ctx, id, newName); err != nil {
+		return fmt.Errorf("update device_info.device_name: %w", err)
+	}
+	if err := s.deviceRepo.UpdateSiteName(ctx, id, newName); err != nil {
+		// 列表名更新失败降级警告，不全量回滚（详情页已更新）
+		s.logger.Warn("rename: update devices.site_name failed",
+			zap.String("device_id", id.String()),
+			zap.Error(err))
+	}
+	// 清缓存，让列表下次读到新 site_name
+	if s.cache != nil {
+		s.cache.Delete(ctx, dev.SerialNumber)
+	}
+	// 触发分组重匹配（名称规则）
+	dev.DeviceName = newName
+	s.PublishDeviceAttributesChangedEvent(ctx, dev, []string{"site_name"})
+
+	// 5. 按策略决定下发与 pending
+	const hnbNameStdPath = "Device.Services.FAPService.1.AccessMgmt.LTE.HNBName"
+	lmtName := info.LMTDeviceName // 旧值，用于 pending 时回写和 auto 路径清 pending
+
+	switch mode {
+	case "auto_omc_to_lmt":
+		// 建 SPV 下发任务（标准路径 HNBName，ACS 侧翻私有路径）
+		if s.taskSvc != nil {
+			spvParams := []map[string]string{{
+				"name":  hnbNameStdPath,
+				"value": newName,
+				"type":  "xsd:string",
+			}}
+			paramsJSON, merr := json.Marshal(map[string]interface{}{
+				"values":        spvParams,
+				"parameter_key": fmt.Sprintf("rename-%d", time.Now().Unix()),
+			})
+			if merr == nil {
+				if _, derr := s.taskSvc.CreateTask(ctx, &task.CreateTaskRequest{
+					DeviceSN:   dev.SerialNumber,
+					Method:     "SetParameterValues",
+					Params:     paramsJSON,
+					Priority:   5,
+					CommandKey: fmt.Sprintf("rename-%s", uuid.New().String()[:8]),
+					Source:     task.TaskSourceAPI,
+				}); derr != nil {
+					// 下发失败不回滚网管库，仅 Warn
+					s.logger.Warn("rename: SPV dispatch failed (network name already updated)",
+						zap.String("device_id", id.String()),
+						zap.Error(derr))
+				}
+			}
+		}
+		// 清 pending（lmtName 传旧值，不污染"基站侧最后上报名"缓存）
+		if cerr := s.deviceInfoRepo.UpdateNameSyncFields(ctx, id, false, lmtName); cerr != nil {
+			s.logger.Warn("rename: clear name_sync_pending failed",
+				zap.String("device_id", id.String()),
+				zap.Error(cerr))
+		}
+
+	case "prompt":
+		// 不下发，置 pending=true；lmtName 必须传当前数据库旧值，不能传新名或空
+		if perr := s.deviceInfoRepo.UpdateNameSyncFields(ctx, id, true, lmtName); perr != nil {
+			return fmt.Errorf("rename: set name_sync_pending: %w", perr)
+		}
+	}
+
+	s.logger.Info("device renamed",
+		zap.String("device_id", id.String()),
+		zap.String("new_name", newName),
+		zap.String("mode", mode))
 	return nil
 }

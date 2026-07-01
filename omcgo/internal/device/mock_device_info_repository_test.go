@@ -142,3 +142,46 @@ func (mr *MockDeviceInfoRepositoryMockRecorder) UpdateSyncFields(ctx, deviceID, 
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateSyncFields", reflect.TypeOf((*MockDeviceInfoRepository)(nil).UpdateSyncFields), ctx, deviceID, fields)
 }
+
+// UpdateNameSyncFields mocks base method.
+func (m *MockDeviceInfoRepository) UpdateNameSyncFields(ctx context.Context, deviceID uuid.UUID, pending bool, lmtName string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateNameSyncFields", ctx, deviceID, pending, lmtName)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpdateNameSyncFields indicates an expected call of UpdateNameSyncFields.
+func (mr *MockDeviceInfoRepositoryMockRecorder) UpdateNameSyncFields(ctx, deviceID, pending, lmtName any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateNameSyncFields", reflect.TypeOf((*MockDeviceInfoRepository)(nil).UpdateNameSyncFields), ctx, deviceID, pending, lmtName)
+}
+
+// UpdateDeviceName mocks base method.
+func (m *MockDeviceInfoRepository) UpdateDeviceName(ctx context.Context, deviceID uuid.UUID, name string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateDeviceName", ctx, deviceID, name)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpdateDeviceName indicates an expected call of UpdateDeviceName.
+func (mr *MockDeviceInfoRepositoryMockRecorder) UpdateDeviceName(ctx, deviceID, name any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateDeviceName", reflect.TypeOf((*MockDeviceInfoRepository)(nil).UpdateDeviceName), ctx, deviceID, name)
+}
+
+// GetTopologyAttributes mocks base method.
+func (m *MockDeviceInfoRepository) GetTopologyAttributes(ctx context.Context, deviceID uuid.UUID) (map[string]string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetTopologyAttributes", ctx, deviceID)
+	ret0, _ := ret[0].(map[string]string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetTopologyAttributes indicates an expected call of GetTopologyAttributes.
+func (mr *MockDeviceInfoRepositoryMockRecorder) GetTopologyAttributes(ctx, deviceID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetTopologyAttributes", reflect.TypeOf((*MockDeviceInfoRepository)(nil).GetTopologyAttributes), ctx, deviceID)
+}

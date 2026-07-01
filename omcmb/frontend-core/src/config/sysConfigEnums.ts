@@ -21,10 +21,9 @@ export interface SysConfigEnumSpec {
 
 // key 形如 "<category>.<key>"，与通用编辑器按 category 拉取后的单个 key 拼接匹配。
 export const SYS_CONFIG_ENUMS: Record<string, SysConfigEnumSpec> = {
-  // 设备名称同步策略（Issue #758）：四值枚举，与 v1 四选一单选组、后端 loadConfig 一致。
+  // 设备名称同步策略（Issue #758）：三值枚举（已删 off），与 v1 三选一单选组、后端 loadConfig 一致。
   'device.nameSyncMode': {
     options: [
-      { value: 'off', labelKey: 'system.device.nameSync.mode.off' },
       { value: 'auto_lmt_to_omc', labelKey: 'system.device.nameSync.mode.autoLmtToOmc' },
       { value: 'auto_omc_to_lmt', labelKey: 'system.device.nameSync.mode.autoOmcToLmt' },
       { value: 'prompt', labelKey: 'system.device.nameSync.mode.prompt' },

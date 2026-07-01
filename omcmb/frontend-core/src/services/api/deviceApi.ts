@@ -882,4 +882,9 @@ export const deviceApi = {
   async resolveNameSync(deviceId: string, action: 'use_lmt' | 'use_omc' | 'ignore'): Promise<void> {
     await http.post(`/devices/${deviceId}/resolve-name-sync`, { action });
   },
+
+  // 网管侧手动改基站名（即时下发）- 按 nameSyncMode 策略决定是否下发
+  async renameDevice(deviceId: string, name: string): Promise<void> {
+    await http.post(`/devices/${deviceId}/rename`, { name });
+  },
 };
