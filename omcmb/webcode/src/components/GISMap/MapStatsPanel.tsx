@@ -18,6 +18,8 @@ interface MapStatsPanelProps {
   stats?: MapStats;
   /** 是否可见 */
   visible?: boolean;
+  /** 点击「UE=0 基站」统计行的回调 */
+  onUEZeroClick?: () => void;
 }
 
 /**
@@ -146,6 +148,7 @@ const collapsedBadgeStyle: React.CSSProperties = {
 const MapStatsPanel: React.FC<MapStatsPanelProps> = ({
   stats,
   visible = true,
+  onUEZeroClick,
 }) => {
   const t = useT();
   const [isExpanded, setIsExpanded] = useState(true);
@@ -361,6 +364,88 @@ const MapStatsPanel: React.FC<MapStatsPanelProps> = ({
               </span>
             </div>
           ))}
+
+          {/* UE=0 基站统计行（可点击触发过滤） */}
+          {(stats?.ueZeroCount ?? 0) > 0 && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '10px 14px',
+                marginTop: 6,
+                background: 'linear-gradient(135deg, rgba(250, 173, 20, 0.08) 0%, rgba(250, 173, 20, 0.04) 100%)',
+                borderRadius: 12,
+                border: '1px solid rgba(250, 173, 20, 0.15)',
+                cursor: onUEZeroClick ? 'pointer' : 'default',
+                transition: 'all 0.2s ease',
+              }}
+              onClick={onUEZeroClick}
+              onMouseEnter={(e) => {
+                if (onUEZeroClick) {
+                  e.currentTarget.style.transform = 'translateX(4px)';
+                  e.currentTarget.style.borderColor = 'rgba(250, 173, 20, 0.35)';
+                }
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'translateX(0)';
+                e.currentTarget.style.borderColor = 'rgba(250, 173, 20, 0.15)';
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#FAAD14' }} />
+                <span style={{ fontSize: 13, color: '#7c5b00', fontWeight: 500 }}>UE=0 基站</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ fontSize: 15, fontWeight: 700, color: '#D48806' }}>
+                  {formatNumber(stats?.ueZeroCount ?? 0)}
+                </span>
+                {onUEZeroClick && (
+                  <span style={{ fontSize: 10, color: '#FAAD14' }}>›</span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* UE=0 基站统计行 */}
+          {(stats?.ueZeroCount ?? 0) >= 0 && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '10px 14px',
+                marginTop: 6,
+                background: 'linear-gradient(135deg, rgba(250,219,20,0.08) 0%, rgba(250,173,20,0.06) 100%)',
+                borderRadius: 10,
+                border: '1px solid rgba(250,173,20,0.15)',
+                cursor: onUEZeroClick ? 'pointer' : 'default',
+                transition: 'all 0.2s ease',
+              }}
+              onClick={onUEZeroClick}
+              onMouseEnter={(e) => {
+                if (onUEZeroClick) {
+                  e.currentTarget.style.transform = 'translateX(4px)';
+                  e.currentTarget.style.borderColor = 'rgba(250,173,20,0.4)';
+                }
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'translateX(0)';
+                e.currentTarget.style.borderColor = 'rgba(250,173,20,0.15)';
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#FAAD14', boxShadow: '0 0 0 3px rgba(250,173,20,0.2)' }} />
+                <span style={{ fontSize: 13, color: '#4a4a4a', fontWeight: 500 }}>UE为0基站</span>
+                {onUEZeroClick && (
+                  <span style={{ fontSize: 11, color: '#FAAD14' }}>→</span>
+                )}
+              </div>
+              <span style={{ fontSize: 15, fontWeight: 700, color: '#D48806' }}>
+                {formatNumber(stats?.ueZeroCount ?? 0)}
+              </span>
+            </div>
+          )}
         </div>
       )}
     </div>

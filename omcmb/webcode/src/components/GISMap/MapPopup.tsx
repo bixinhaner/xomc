@@ -222,6 +222,14 @@ const MapPopup: React.FC<MapPopupProps> = ({
             </span>
           </div>
 
+          {/* UE 数 */}
+          <div style={detailRowStyle}>
+            <span style={labelStyle}>UE 数:</span>
+            <span style={{ ...valueStyle, fontFamily: 'monospace', color: (device.ueCount ?? 0) > 0 ? '#52C41A' : '#8C8C8C' }}>
+              {device.ueCount ?? 0}
+            </span>
+          </div>
+
           {/* 位置信息 */}
           {device.groupName && (
             <div style={detailRowStyle}>

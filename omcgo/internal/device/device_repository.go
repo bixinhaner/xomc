@@ -94,6 +94,8 @@ type GeoDeviceFilter struct {
 	// [g...]=仅这些组下设备）。GIS 地图读链路按调用者可见分组 fail-closed 收口，过滤经
 	// authz.ApplyDeviceVisibilityFilter 在 d.id 上做相关子查询（避免与已有 LEFT JOIN 行翻倍）。
 	VisibleGroups []uuid.UUID
+	// UECountMax 过滤接入 UE 数：nil=不过滤，指向0=只返回 UE=0 的基站。
+	UECountMax *int
 }
 
 // GeoStatsFilter specifies criteria for /devices/geo/stats.
@@ -132,14 +134,17 @@ type GeoDevice struct {
 	MAC        *string `json:"mac,omitempty"`         // device_info.mac
 	PCI        *string `json:"pci,omitempty"`         // device_info.pci
 	DeviceName *string `json:"device_name,omitempty"` // device_info.device_name
+	// GIS 地图字段
+	UECount int `json:"ue_count"` // 当前接入 UE 数
 }
 
 // GeoStats represents device statistics for map display.
 type GeoStats struct {
-	Total       int64                        `json:"total"`
-	StatusCount map[model.DeviceStatus]int64 `json:"status_count"`
-	AlarmCount  int64                        `json:"alarm_count"`
-	Center      *GeoCenter                   `json:"center,omitempty"` // 平均经纬度中心点
+	Total        int64                        `json:"total"`
+	StatusCount  map[model.DeviceStatus]int64 `json:"status_count"`
+	AlarmCount   int64                        `json:"alarm_count"`
+	Center       *GeoCenter                   `json:"center,omitempty"` // 平均经纬度中心点
+	UEZeroCount  int64                        `json:"ue_zero_count"`    // UE数为0的基站数
 }
 
 // GeoCenter represents the geographic center point of all devices.
@@ -1025,6 +1030,7 @@ func scanGeoDeviceRow(row scannable) (GeoDevice, error) {
 	var groupName, address, deviceType *string
 	var alarmCount int
 	var ipAddress, mac, pci, deviceName string // COALESCE 保证非 NULL
+	var ueCount int                            // COALESCE 保证非 NULL
 
 	err := row.Scan(
 		&d.ID, &d.SerialNumber, &d.Name,
@@ -1032,6 +1038,7 @@ func scanGeoDeviceRow(row scannable) (GeoDevice, error) {
 		&latitude, &longitude, &groupID, &groupName,
 		&address, &alarmCount, &deviceType,
 		&ipAddress, &mac, &pci, &deviceName,
+		&ueCount,
 	)
 	if err != nil {
 		return GeoDevice{}, err
@@ -1070,6 +1077,7 @@ func scanGeoDeviceRow(row scannable) (GeoDevice, error) {
 	if deviceName != "" {
 		d.DeviceName = &deviceName
 	}
+	d.UECount = ueCount
 	return d, nil
 }
 
@@ -1122,6 +1130,7 @@ func (r *PgDeviceRepository) ListGeo(ctx context.Context, filter GeoDeviceFilter
 		"d.latitude", "d.longitude", "dg.id as group_id", "dg.name as group_name",
 		"d.site_name as address", "0 as alarm_count", "d.model_name as type",
 		"COALESCE(host(d.ip_address), '')", "COALESCE(di.mac, '')", "COALESCE(di.pci, '')", "COALESCE(di.device_name, '')",
+		"COALESCE(di.ue_count, 0)",
 	).From("devices d").
 		LeftJoin("device_group_members dgm ON d.id = dgm.device_id").
 		LeftJoin("device_groups dg ON dgm.group_id = dg.id").
@@ -1151,6 +1160,9 @@ func (r *PgDeviceRepository) ListGeo(ctx context.Context, filter GeoDeviceFilter
 	// #64 设备组数据权限：按 d.id 相关子查询三态 fail-closed 收口（nil 超管不过滤 /
 	// [] WHERE FALSE / [g...] 限定到可见分组下设备），避免与已有 LEFT JOIN dgm 行翻倍。
 	builder = authz.ApplyDeviceVisibilityFilter(builder, "d.id", filter.VisibleGroups)
+	if filter.UECountMax != nil {
+		builder = builder.Where(sq.LtOrEq{"COALESCE(di.ue_count, 0)": *filter.UECountMax})
+	}
 
 	// Get total count with a separate query
 	// 注意：去掉 DISTINCT，因为 device 与 device_info 是 1:1 关系
@@ -1182,6 +1194,9 @@ func (r *PgDeviceRepository) ListGeo(ctx context.Context, filter GeoDeviceFilter
 	}
 	// #64 设备组数据权限：count 与 list 同口径施加可见分组收口。
 	countBuilder = authz.ApplyDeviceVisibilityFilter(countBuilder, "d.id", filter.VisibleGroups)
+	if filter.UECountMax != nil {
+		countBuilder = countBuilder.Where(sq.LtOrEq{"COALESCE(di.ue_count, 0)": *filter.UECountMax})
+	}
 
 	countQuery, countArgs, _ := countBuilder.ToSql()
 	var total int64
@@ -1308,6 +1323,24 @@ func (r *PgDeviceRepository) GetGeoStats(ctx context.Context, filter GeoStatsFil
 		}
 	}
 
+	// Query 3: UE=0 基站数（JOIN device_info 统计 ue_count=0 的设备）
+	ueZeroBuilder := storage.Psql.Select("COUNT(DISTINCT d.id)").
+		From("devices d").
+		LeftJoin("device_group_members dgm ON d.id = dgm.device_id").
+		LeftJoin("device_groups dg ON dgm.group_id = dg.id").
+		LeftJoin("device_info di ON d.id = di.device_id").
+		Where(baseCondition).
+		Where(sq.LtOrEq{"COALESCE(di.ue_count, 0)": 0})
+
+	ueZeroBuilder = applyGeoGroupFilter(ueZeroBuilder, filter.GroupIDs, filter.IncludeUngrouped)
+	ueZeroBuilder = applyGeoStatusFilter(ueZeroBuilder, filter.Status)
+	ueZeroBuilder = authz.ApplyDeviceVisibilityFilter(ueZeroBuilder, "d.id", filter.VisibleGroups)
+
+	ueZeroQuery, ueZeroArgs, _ := ueZeroBuilder.ToSql()
+	if err := r.pool.QueryRow(ctx, ueZeroQuery, ueZeroArgs...).Scan(&stats.UEZeroCount); err != nil {
+		return nil, fmt.Errorf("get geo ue zero count: %w", err)
+	}
+
 	return stats, nil
 }
 
@@ -1339,6 +1372,7 @@ func (r *PgDeviceRepository) SearchDevices(ctx context.Context, keyword string, 
 		"d.latitude", "d.longitude", "dg.id as group_id", "dg.name as group_name",
 		"d.site_name as address", "0 as alarm_count", "d.model_name as type",
 		"COALESCE(host(d.ip_address), '')", "COALESCE(di.mac, '')", "COALESCE(di.pci, '')", "COALESCE(di.device_name, '')",
+		"COALESCE(di.ue_count, 0)",
 	).From("devices d").
 		LeftJoin("device_group_members dgm ON d.id = dgm.device_id").
 		LeftJoin("device_groups dg ON dgm.group_id = dg.id").

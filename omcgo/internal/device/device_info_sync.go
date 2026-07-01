@@ -716,6 +716,7 @@ func (s *InfoSyncer) SyncFromParameters(ctx context.Context, deviceID uuid.UUID,
 	fields["gps_status"] = CalcGPSStatus(paramValues)
 	fields["num_of_cells"] = CalcNumOfCells(paramValues)
 	fields["license_status"] = CalcLicenseStatus(paramValues)
+	fields["ue_count"] = CalcUECount(paramValues)
 
 	// Phase 3 派生字段（设计文档 §4.2 Layer C）：
 	if v, ok := lookupGPSHeight(paramValues); ok {

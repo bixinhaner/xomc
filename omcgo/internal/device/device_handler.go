@@ -573,6 +573,13 @@ func (h *Handler) ListGeo(c *gin.Context) {
 	}
 	filter.VisibleGroups = visibleGroups
 
+	// Parse ue_count_max：用于过滤 UE=0 基站（如 ue_count_max=0）
+	if v := c.Query("ue_count_max"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			filter.UECountMax = &n
+		}
+	}
+
 	devices, total, err := h.service.ListGeo(c.Request.Context(), filter)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
@@ -639,6 +646,8 @@ func (h *Handler) GetGeoStats(c *gin.Context) {
 			"lng": stats.Center.Longitude,
 		}
 	}
+	// Add UE=0 count
+	result["ue_zero_count"] = stats.UEZeroCount
 
 	response.OK(c, result)
 }

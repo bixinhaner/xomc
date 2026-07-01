@@ -245,6 +245,11 @@ type DeviceInfo struct {
 
 	// ===== 审计字段 =====
 
+	// UECount 当前接入 UE 数。
+	// 由 InfoSyncer.CalcUECount 从 device_parameters 投影（优先 Device.DeviceInfo.UE_Count）。
+	// GIS 地图「UE=0 基站」统计与过滤使用此字段。
+	UECount int `json:"ue_count"`
+
 	// Creator 创建人用户名
 	Creator string `json:"creator"`
 
