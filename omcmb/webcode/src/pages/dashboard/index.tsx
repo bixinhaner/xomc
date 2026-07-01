@@ -50,6 +50,7 @@ import { useAppStore } from '@core/store/appStore';
 import { useMenuStore } from '@core/store/menuStore';
 import { useUserStore } from '@core/store/userStore';
 import { useAlarmStore } from '@core/store/alarmStore';
+import { useTabStore } from '@core/store/tabStore';
 import { useShallow } from 'zustand/react/shallow';
 import { isRouteAllowed } from '@core/utils/routeAccess';
 import { useT } from '@/hooks/useT';
@@ -101,6 +102,7 @@ const QUICK_ACCESS_ITEMS = [
 
 export default function DashboardPage() {
   const navigate = useNavigate();
+  const openTab = useTabStore((s) => s.openTab);
   const { data: dashboardData, isLoading } = useDashboardData();
   const alarmStoreCounts = useAlarmStore(useShallow((s) => s.counts));
   const t = useT();
@@ -274,9 +276,10 @@ export default function DashboardPage() {
 
   const handleAlarmChartClick = useCallback(
     (_index: number, _name: string) => {
+      openTab({ key: '/alarm/current', label: 'nav.alarm.current', path: '/alarm/current', closable: true, labelRaw: false });
       void navigate('/alarm/current');
     },
-    [navigate]
+    [navigate, openTab]
   );
 
   return (
@@ -317,7 +320,10 @@ export default function DashboardPage() {
             trend={totalDevicesDelta?.trend ?? 'stable'}
             delta={totalDevicesDelta?.changePercent !== undefined ? `${totalDevicesDelta.changePercent.toFixed(1)}%` : undefined}
             deltaLabel={totalDevicesDelta?.compareType === 'last_week' ? t('dashboard.vsLastWeek') : t('dashboard.vsYesterday')}
-            onClick={() => void navigate('/device/list')}
+            onClick={() => {
+              openTab({ key: '/device/list', label: 'nav.device.list', path: '/device/list', closable: true, labelRaw: false });
+              void navigate('/device/list');
+            }}
           />
         </Col>
         <Col xs={24} sm={12} lg={6}>
@@ -333,7 +339,10 @@ export default function DashboardPage() {
               ? `${Math.round((onlineDevices / totalDevices) * 100)}%`
               : '--'}
             deltaLabel={t('dashboard.onlineRate')}
-            onClick={() => void navigate('/device/list')}
+            onClick={() => {
+              openTab({ key: '/device/list', label: 'nav.device.list', path: '/device/list', closable: true, labelRaw: false });
+              void navigate('/device/list');
+            }}
           />
         </Col>
         <Col xs={24} sm={12} lg={6}>
@@ -347,7 +356,10 @@ export default function DashboardPage() {
             trend={activeAlarmsDelta?.trend ?? 'stable'}
             delta={activeAlarmsDelta?.changePercent !== undefined ? `${activeAlarmsDelta.changePercent.toFixed(1)}%` : undefined}
             deltaLabel={activeAlarmsDelta?.compareType === 'yesterday' ? t('dashboard.vsYesterday') : t('dashboard.vsLastWeek')}
-            onClick={() => void navigate('/alarm/current')}
+            onClick={() => {
+              openTab({ key: '/alarm/current', label: 'nav.alarm.current', path: '/alarm/current', closable: true, labelRaw: false });
+              void navigate('/alarm/current');
+            }}
           />
         </Col>
         <Col xs={24} sm={12} lg={6}>
@@ -444,7 +456,10 @@ export default function DashboardPage() {
                     {t('dashboard.alarmOtherHint', { count: alarmDistributionData.otherCount ?? 0 })}
                   </Text>
                 )}
-                <a onClick={() => void navigate('/alarm/current')} style={{ fontSize: 13 }}>
+                <a onClick={() => {
+                  openTab({ key: '/alarm/current', label: 'nav.alarm.current', path: '/alarm/current', closable: true, labelRaw: false });
+                  void navigate('/alarm/current');
+                }} style={{ fontSize: 13 }}>
                   {t('dashboard.viewAll')}
                 </a>
               </Space>
