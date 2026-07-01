@@ -94,38 +94,23 @@ interface Field {
   mono?: boolean
 }
 
-function InfoGrid({ fields }: { fields: Field[] }) {
-  return (
-    <div className="grid grid-cols-1 gap-x-8 gap-y-0 sm:grid-cols-2 lg:grid-cols-3">
-      {fields.map((f) => (
-        <div
-          key={f.label}
-          className="flex items-center justify-between gap-4 border-b py-2.5 text-sm"
-        >
-          <span className="shrink-0 text-muted-foreground">{f.label}</span>
-          <span
-            className={cn(
-              'truncate text-right',
-              f.mono && 'font-mono text-xs'
-            )}
-            title={f.value != null ? String(f.value) : undefined}
-          >
-            {f.value === '' || f.value == null ? '—' : f.value}
-          </span>
-        </div>
-      ))}
-    </div>
-  )
-}
-
 function GroupCard({ title, fields }: { title: string; fields: Field[] }) {
   return (
     <Card>
-      <CardHeader className="p-4 pb-2">
-        <CardTitle className="text-base font-medium">{title}</CardTitle>
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
       </CardHeader>
-      <CardContent className="p-4 pt-2">
-        <InfoGrid fields={fields} />
+      <CardContent>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {fields.map((field) => (
+            <div key={`${title}-${field.label}`} className="rounded-lg border bg-muted/20 px-3 py-2">
+              <div className="text-xs text-muted-foreground">{field.label}</div>
+              <div className={cn('mt-1 text-sm', field.mono ? 'font-mono' : '')}>
+                {field.value === '' || field.value == null ? '—' : String(field.value)}
+              </div>
+            </div>
+          ))}
+        </div>
       </CardContent>
     </Card>
   )
@@ -258,6 +243,7 @@ export default function DeviceDetail() {
     { label: '分组', value: d.groupName },
     { label: '运营商', value: d.carrier },
     { label: '站点', value: d.site || d.installAddress },
+    { label: '安装详细地址', value: d.installAddress },
     { label: '经度', value: d.longitude != null ? d.longitude.toFixed(4) : '' },
     { label: '纬度', value: d.latitude != null ? d.latitude.toFixed(4) : '' },
     { label: '创建时间', value: formatTime(d.createTime) },

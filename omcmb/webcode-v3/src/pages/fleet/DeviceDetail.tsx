@@ -159,6 +159,7 @@ function DetailBody({ d, onUe }: { d: Device; onUe: () => void }) {
           <KV label="IP ADDRESS">{d.ipAddress}</KV>
           <KV label="GROUP">{d.groupName}</KV>
           <KV label="REGION / SITE">{`${d.region || '—'} · ${d.site || '—'}`}</KV>
+          <KV label="INSTALL ADDRESS">{d.installAddress || '—'}</KV>
         </GlassPanel>
 
         {/* 小区信息 */}

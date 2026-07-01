@@ -8,7 +8,7 @@ import { NeonButton } from '@/components/ui/NeonButton'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Sparkline } from '@/components/viz/Sparkline'
 import { formatTime } from '@/lib/format'
-import { prefetchDeviceDetailContext, useDeviceGroups, useDeviceList } from '@core/hooks/api/useDevices'
+import { prefetchDeviceDetailContext, useDeviceGroups, useDeviceList, useUpdateDevice } from '@core/hooks/api/useDevices'
 import type { Device } from '@core/types/device'
 import { expandSelectedGroupIds } from '@core/utils/deviceGroupFilter'
 
@@ -24,7 +24,6 @@ const AUTO_REFRESH_OPTIONS = [
   { label: '1MIN', value: '60' },
   { label: '5MIN', value: '300' },
 ] as const
-
 export function FleetPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -34,7 +33,11 @@ export function FleetPage() {
   const [keyword, setKeyword] = useState('')
   const [autoRefresh, setAutoRefresh] = useState(false)
   const [refreshInterval, setRefreshInterval] = useState(30)
+  const [editingInstallAddressId, setEditingInstallAddressId] = useState<string | null>(null)
+  const [editingInstallAddressValue, setEditingInstallAddressValue] = useState('')
+  const [savingInstallAddressId, setSavingInstallAddressId] = useState<string | null>(null)
   const { data: groupsResp } = useDeviceGroups()
+  const updateDevice = useUpdateDevice()
 
   const params = useMemo(() => {
     const rawGroupID = searchParams.get('groupId') ?? undefined
@@ -51,7 +54,10 @@ export function FleetPage() {
   const { data, isFetching, isLoading, isError, error, refetch } = useDeviceList(params, {
     refetchInterval: autoRefresh ? refreshInterval * 1000 : 0,
   })
-  const items: Device[] = data?.items ?? []
+  const items: Device[] = useMemo(
+    () => data?.items ?? [],
+    [data?.items]
+  )
   const total = data?.total ?? 0
 
   useEffect(() => {
@@ -67,6 +73,60 @@ export function FleetPage() {
   const openDeviceDetail = (device: Device) => {
     prefetchDeviceDetailEntry(device)
     void navigate(`/device/detail/${device.sn}`)
+  }
+
+  function startInstallAddressEdit(device: Device) {
+    setEditingInstallAddressId(device.id)
+    setEditingInstallAddressValue(device.installAddress || '')
+  }
+
+  function cancelInstallAddressEdit() {
+    setEditingInstallAddressId(null)
+    setEditingInstallAddressValue('')
+    setSavingInstallAddressId(null)
+  }
+
+  function saveInstallAddressEdit(device: Device) {
+    const nextValue = editingInstallAddressValue.trim()
+    const currentValue = (device.installAddress || '').trim()
+    if (savingInstallAddressId === device.id) return
+    if (nextValue === currentValue) {
+      cancelInstallAddressEdit()
+      return
+    }
+
+    setSavingInstallAddressId(device.id)
+    updateDevice.mutate(
+      {
+        id: device.id,
+        data: { installAddress: nextValue },
+        fallbackDevice: {
+          id: device.id,
+          sn: device.sn,
+          installAddress: device.installAddress,
+          remark: device.remark,
+        },
+      },
+      {
+        onSuccess: (updatedDevice) => {
+          queryClient.setQueryData(['devices', 'list', params], (prev: typeof data) => {
+            if (!prev) return prev
+            return {
+              ...prev,
+              items: prev.items.map((item) =>
+                item.id === updatedDevice.id ? { ...item, installAddress: updatedDevice.installAddress } : item
+              ),
+            }
+          })
+          setEditingInstallAddressId(null)
+          setEditingInstallAddressValue('')
+          setSavingInstallAddressId(null)
+        },
+        onError: () => {
+          setSavingInstallAddressId(null)
+        },
+      }
+    )
   }
 
   const autoRefreshValue = autoRefresh ? String(refreshInterval) : 'off'
@@ -208,12 +268,40 @@ export function FleetPage() {
                 <div className="truncate font-mono text-[10px] text-cyan-300/55">
                   {d.subnet || '—'} · {d.ipAddress || '—'}
                 </div>
+                {editingInstallAddressId === d.id ? (
+                  <input
+                    autoFocus
+                    maxLength={256}
+                    value={editingInstallAddressValue}
+                    placeholder="双击编辑安装详细地址"
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => setEditingInstallAddressValue(e.target.value)}
+                    onBlur={() => saveInstallAddressEdit(d)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') saveInstallAddressEdit(d)
+                      if (e.key === 'Escape') cancelInstallAddressEdit()
+                    }}
+                    className="mt-1 w-full rounded-sm border border-cyan-400/30 bg-slate-950/70 px-2 py-1 text-[10px] text-cyan-100 outline-none"
+                  />
+                ) : (
+                  <div
+                    title={d.installAddress || '双击编辑安装详细地址'}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation()
+                      startInstallAddressEdit(d)
+                    }}
+                    className={`mt-1 truncate text-[10px] ${d.installAddress ? 'text-cyan-200/75' : 'text-cyan-300/45'}`}
+                  >
+                    {savingInstallAddressId === d.id ? 'SAVING…' : d.installAddress || '双击编辑安装详细地址'}
+                  </div>
+                )}
               </div>
 
               {/* 最后在线 */}
               <div className="font-mono text-[10px] text-cyan-300/65">
                 <div className="text-cyan-100/85">{formatTime(d.lastOnlineTime)}</div>
                 <div>{d.softwareVersion ? `FW ${d.softwareVersion}` : '—'}</div>
+                <div>{`TX ${d.txPower || '—'}`}</div>
               </div>
 
               {/* 信号 sparkline */}

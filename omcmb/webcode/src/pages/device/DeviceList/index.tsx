@@ -22,7 +22,7 @@ import StatisticsPanel from '@/components/StatisticsPanel';
 import StatusIndicator from '@/components/StatusIndicator';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import AutoRefreshDropdown from '@/pages/alarm/components/AutoRefreshDropdown';
-import { prefetchDeviceDetailContext, useDeviceList, useBatchRebootDevices, useDeviceGroups } from '@core/hooks/api/useDevices';
+import { prefetchDeviceDetailContext, useDeviceList, useBatchRebootDevices, useDeviceGroups, useUpdateDevice } from '@core/hooks/api/useDevices';
 import { useProductList } from '@core/hooks/api/useProducts';
 import { useDictionaryBatch } from '@core/hooks/api/useSystem';
 import { resolveNetworkTypeLabel } from '@core/utils/networkType';
@@ -295,6 +295,10 @@ export default function DeviceList() {
     setEditingRemark(false);
   }, []);
 
+  const [editingInstallAddressId, setEditingInstallAddressId] = useState<string | null>(null);
+  const [editingInstallAddressValue, setEditingInstallAddressValue] = useState('');
+  const [savingInstallAddressId, setSavingInstallAddressId] = useState<string | null>(null);
+
   // remarkHeaderRender 保持 useMemo，因为 headerRender 需要 ReactNode 而非函数
   // 编辑状态变化不频繁，性能开销可接受
   const remarkHeaderRender = useMemo(() => {
@@ -364,13 +368,18 @@ export default function DeviceList() {
   const refreshSpinStartedAtRef = useRef<number | null>(null);
   const refreshSpinTimeoutRef = useRef<number | null>(null);
   const batchReboot = useBatchRebootDevices();
+  const updateDevice = useUpdateDevice();
   const triggerAlarmSync = useTriggerAlarmSync();
   const createUfteTask = useCreateUnifiedFileTransferTask();
   const downloadStationLog = useDownloadStationLog();
   const taskNameUser = currentUser?.username || currentUser?.displayName || 'user';
   // 性能优化：使用 useMemo 避免每次渲染创建新引用，防止下游 callback/useMemo 依赖变化
   const devices = useMemo(
-    () => withDeviceGroupDisplayName(data?.items ?? [], groupsResp?.groups ?? [], appLocale),
+    () => withDeviceGroupDisplayName(
+      data?.items ?? [],
+      groupsResp?.groups ?? [],
+      appLocale,
+    ),
     [data?.items, groupsResp?.groups, appLocale]
   );
   const total = data?.total ?? 0;
@@ -380,6 +389,61 @@ export default function DeviceList() {
     if (!autoRefresh) return;
     void refetch();
   }, [autoRefresh, refreshInterval, refetch]);
+
+  const startInstallAddressEdit = useCallback((device: Device) => {
+    setEditingInstallAddressId(device.id);
+    setEditingInstallAddressValue(device.installAddress || '');
+  }, []);
+
+  const cancelInstallAddressEdit = useCallback(() => {
+    setEditingInstallAddressId(null);
+    setEditingInstallAddressValue('');
+    setSavingInstallAddressId(null);
+  }, []);
+
+  const saveInstallAddressEdit = useCallback((device: Device) => {
+    const nextValue = editingInstallAddressValue.trim();
+    const currentValue = (device.installAddress || '').trim();
+    if (savingInstallAddressId === device.id) return;
+    if (nextValue === currentValue) {
+      cancelInstallAddressEdit();
+      return;
+    }
+
+    setSavingInstallAddressId(device.id);
+    updateDevice.mutate(
+      {
+        id: device.id,
+        data: { installAddress: nextValue },
+        fallbackDevice: {
+          id: device.id,
+          sn: device.sn,
+          installAddress: device.installAddress,
+          remark: device.remark,
+        },
+      },
+      {
+        onSuccess: (updatedDevice) => {
+          queryClient.setQueryData(['devices', 'list', queryParams], (prev: typeof data) => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              items: prev.items.map((item) => item.id === updatedDevice.id ? { ...item, installAddress: updatedDevice.installAddress } : item),
+            };
+          });
+          void queryClient.invalidateQueries({ queryKey: ['devices', 'sn', updatedDevice.sn] });
+          void message.success(t('common.saveSuccess'));
+          setEditingInstallAddressId(null);
+          setEditingInstallAddressValue('');
+          setSavingInstallAddressId(null);
+        },
+        onError: (err) => {
+          setSavingInstallAddressId(null);
+          void message.error(err instanceof Error ? err.message : t('common.saveFailed'));
+        },
+      },
+    );
+  }, [cancelInstallAddressEdit, data, editingInstallAddressValue, message, queryClient, queryParams, savingInstallAddressId, t, updateDevice]);
 
   const handleManualRefresh = useCallback(() => {
     if (refreshSpinTimeoutRef.current !== null) {
@@ -1356,7 +1420,59 @@ export default function DeviceList() {
             : String(v);
         },
       },
-      { key: 'installAddress', title: t('device.installAddress'), dataIndex: 'installAddress', width: 180, hidden: true, ellipsis: true, group: 'common' },
+      {
+        key: 'installAddress',
+        title: t('device.installAddress'),
+        dataIndex: 'installAddress',
+        width: 180,
+        hidden: true,
+        ellipsis: true,
+        group: 'common',
+        render: (_val, record) => {
+          const isEditing = editingInstallAddressId === record.id;
+          const isSaving = savingInstallAddressId === record.id;
+          const isEmptyAddress = !record.installAddress;
+          if (isEditing) {
+            return (
+              <Input
+                size="small"
+                value={editingInstallAddressValue}
+                autoFocus
+                maxLength={256}
+                placeholder={t('device.installAddress')}
+                onClick={(e) => e.stopPropagation()}
+                onChange={(e) => setEditingInstallAddressValue(e.target.value)}
+                onPressEnter={() => saveInstallAddressEdit(record)}
+                onBlur={() => saveInstallAddressEdit(record)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    cancelInstallAddressEdit();
+                  }
+                }}
+                suffix={isSaving ? <ReloadOutlined spin /> : null}
+              />
+            );
+          }
+
+          return (
+            <div
+              title={record.installAddress || '双击编辑安装详细地址'}
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                startInstallAddressEdit(record);
+              }}
+              style={{
+                cursor: 'text',
+                minHeight: 22,
+                color: isEmptyAddress ? 'rgba(0, 0, 0, 0.45)' : undefined,
+              }}
+            >
+              {record.installAddress || '双击编辑安装详细地址'}
+            </div>
+          );
+        },
+      },
       { key: 'pci', title: 'PCI', dataIndex: 'pci', width: 80, hidden: true, group: 'common' },
       { key: 'tac', title: 'TAC', dataIndex: 'tac', width: 80, hidden: true, group: 'common' },
       { key: 'band', title: 'Band', dataIndex: 'band', width: 100, hidden: true, group: 'common' },
@@ -1421,7 +1537,7 @@ export default function DeviceList() {
 
     ],
     // remarkHeaderRender 暂从 dep 列表移除：remark 列定义已注释，恢复时同步加回。
-    [navigate, t, fmtTime, fmtDuration, fmtStatus, renderMultiCellStatus, renderActivationStatus, message, downloadStationLog, mapConnStatus, getSeverityLabel, networkTypeDict?.sysDictionaryDetails]
+    [navigate, t, fmtTime, fmtDuration, fmtStatus, renderMultiCellStatus, renderActivationStatus, message, downloadStationLog, mapConnStatus, getSeverityLabel, networkTypeDict?.sysDictionaryDetails, editingInstallAddressId, editingInstallAddressValue, savingInstallAddressId, saveInstallAddressEdit, cancelInstallAddressEdit, startInstallAddressEdit]
   );
 
   // ─── 列表导出(用户决策 2026-06-02) ──────────────────────────────────────
