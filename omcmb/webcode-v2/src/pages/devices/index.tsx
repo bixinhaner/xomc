@@ -48,6 +48,7 @@ import {
 import { cn } from '@/lib/utils'
 
 import { useAppStore } from '@core/store/appStore'
+import { expandSelectedGroupIds } from '@core/utils/deviceGroupFilter'
 import {
   prefetchDeviceDetailContext,
   useDeviceList,
@@ -180,8 +181,11 @@ export function DevicesPage() {
   const productOptions = productsQuery.data?.items ?? []
 
   // ---- 列表查询参数 ----
-  const queryParams = useMemo<DeviceFilter & PageRequest>(
-    () => ({
+  const queryParams = useMemo<DeviceFilter & PageRequest>(() => {
+    const expandedGroupIDs =
+      groupId !== 'all' ? expandSelectedGroupIds(groupId, groupsQuery.data?.groups ?? []) : undefined
+
+    return {
       page,
       pageSize,
       ...(searchText.trim() ? { searchText: searchText.trim() } : {}),
@@ -189,10 +193,9 @@ export function DevicesPage() {
       ...(opState !== 'all' ? { opState } : {}),
       ...(networkType !== 'all' ? { networkType } : {}),
       ...(productId !== 'all' ? { productId } : {}),
-      ...(groupId !== 'all' ? { groupId } : {}),
-    }),
-    [page, pageSize, searchText, onlineFilter, opState, networkType, productId, groupId]
-  )
+      ...(expandedGroupIDs ? { groupId: expandedGroupIDs } : {}),
+    }
+  }, [page, pageSize, searchText, onlineFilter, opState, networkType, productId, groupId, groupsQuery.data?.groups])
 
   const { data, isLoading, isError, error, isFetching, refetch } =
     useDeviceList(queryParams, { refetchInterval: autoRefresh ? refreshInterval * 1000 : 0 })

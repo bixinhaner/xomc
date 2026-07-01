@@ -252,16 +252,11 @@ func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter
 		// User has no group permissions — short-circuit to empty result.
 		builder = builder.Where("FALSE")
 		countBuilder = countBuilder.Where("FALSE")
-	} else if filter.GroupID != nil || len(filter.VisibleGroups) > 0 {
+	} else if filter.GroupID != nil || len(filter.GroupIDs) > 0 || len(filter.VisibleGroups) > 0 {
 		// dgm is already joined, just add WHERE conditions
-		if filter.GroupID != nil {
-			if filter.GroupID.String() == global.DefaultLevel2GroupID {
-				builder = builder.Where(ungroupedDevicesWhere)
-				countBuilder = countBuilder.Where(ungroupedDevicesWhere)
-			} else {
-				builder = builder.Where(sq.Eq{"dgm.group_id": *filter.GroupID})
-				countBuilder = countBuilder.Where(sq.Eq{"dgm.group_id": *filter.GroupID})
-			}
+		if filter.GroupID != nil || len(filter.GroupIDs) > 0 {
+			builder = applyDeviceGroupFilter(builder, filter)
+			countBuilder = applyDeviceGroupFilter(countBuilder, filter)
 		}
 		if len(filter.VisibleGroups) > 0 {
 			builder = builder.Where(sq.Eq{"dgm.group_id": filter.VisibleGroups})
@@ -617,12 +612,8 @@ func applyDeviceFilters(b sq.SelectBuilder, filter DeviceFilter) sq.SelectBuilde
 	if filter.ProductClass != nil && *filter.ProductClass != "" {
 		b = b.Where(sq.Eq{"d.product_class": SplitCSV(*filter.ProductClass)})
 	}
-	if filter.GroupID != nil {
-		if filter.GroupID.String() == global.DefaultLevel2GroupID {
-			b = b.Where(ungroupedDevicesWhere)
-		} else {
-			b = b.Where(sq.Eq{"dgm.group_id": *filter.GroupID})
-		}
+	if filter.GroupID != nil || len(filter.GroupIDs) > 0 {
+		b = applyDeviceGroupFilter(b, filter)
 	}
 	if filter.VisibleGroups != nil && len(filter.VisibleGroups) == 0 {
 		b = b.Where("FALSE")
@@ -638,6 +629,38 @@ func applyDeviceFilters(b sq.SelectBuilder, filter DeviceFilter) sq.SelectBuilde
 		if cond := opStateFilterCond(*filter.OpState); cond != nil {
 			b = b.Where(cond)
 		}
+	}
+	return b
+}
+
+func applyDeviceGroupFilter(b sq.SelectBuilder, filter DeviceFilter) sq.SelectBuilder {
+	selectedGroupIDs := make([]uuid.UUID, 0, len(filter.GroupIDs)+1)
+	if filter.GroupID != nil {
+		selectedGroupIDs = append(selectedGroupIDs, *filter.GroupID)
+	}
+	selectedGroupIDs = append(selectedGroupIDs, filter.GroupIDs...)
+
+	realGroupIDs := make([]uuid.UUID, 0, len(selectedGroupIDs))
+	includeUngrouped := false
+	for _, groupID := range selectedGroupIDs {
+		if groupID.String() == global.DefaultLevel2GroupID {
+			includeUngrouped = true
+			continue
+		}
+		realGroupIDs = append(realGroupIDs, groupID)
+	}
+
+	if includeUngrouped && len(realGroupIDs) > 0 {
+		return b.Where(sq.Or{
+			sq.Eq{"dgm.group_id": realGroupIDs},
+			sq.Expr(ungroupedDevicesWhere),
+		})
+	}
+	if includeUngrouped {
+		return b.Where(ungroupedDevicesWhere)
+	}
+	if len(realGroupIDs) > 0 {
+		return b.Where(sq.Eq{"dgm.group_id": realGroupIDs})
 	}
 	return b
 }
@@ -705,6 +728,7 @@ func deviceWithInfoSelectColumns() []string {
 		"d.extension_data", "d.created_at", "d.updated_at",
 		"d.last_offline_reason", // T-0173: 离线原因诊断（migration 000184)
 		// device_groups columns
+		"dg.id as group_id",
 		"dg.name as group_name",
 		// device_info columns
 		"di.device_name", "di.address", "di.remark", "di.project_status", "di.height",
@@ -939,6 +963,7 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 		&extData, &d.CreatedAt, &d.UpdatedAt,
 		&d.LastOfflineReason, // T-0173: 离线原因（migration 000184)
 		// device_groups field (nullable from LEFT JOIN)
+		&d.GroupID,
 		&d.GroupName,
 		// device_info fields (all nullable from LEFT JOIN)
 		&diDeviceName, &diAddress, &diRemark, &diProjectStatus, &diHeight,

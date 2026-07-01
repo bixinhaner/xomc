@@ -41,6 +41,7 @@ type DeviceFilter struct {
 
 	// Group filters
 	GroupID       *uuid.UUID  // filter by specific device group
+	GroupIDs      []uuid.UUID // filter by any of these device groups (OR semantics)
 	VisibleGroups []uuid.UUID // data permission: restrict to these groups (nil = no restriction)
 
 	// Extended filters (device_info / devices additional fields)

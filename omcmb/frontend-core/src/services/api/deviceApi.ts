@@ -45,6 +45,7 @@ interface BackendDevice {
   // 旧 *? 字段保留作为兼容（Mock / 自填值场景），mapper 优先读正确字段。
   mac?: string;
   mac_address?: string;
+  group_id?: string;
   group_name?: string;
   // T-XXX (Phase 0)：字段名对齐后端 DeviceWithInfo DTO（json tag），
   // 修复"其他信息组"接入/断开/首次接入/运行时长 5 字段全空白 bug。
@@ -304,6 +305,7 @@ function mapBackendDevice(bd: BackendDevice): Device {
     firmwareVersion: bd.firmware_version || '',
     // T-XXX (Phase 5)：优先后端实际字段 mac，兜底旧 mac_address
     macAddress: bd.mac || bd.mac_address || '',
+    groupId: bd.group_id || undefined,
     groupName: bd.group_name || '',
     // T-XXX (Phase 0)：字段名对齐后端 DTO。设计文档 §13。
     onlineTime: bd.last_online_time || '',
@@ -469,9 +471,6 @@ export const deviceApi = {
       const tech = legacyMap[params.networkType] ?? params.networkType;
       query.technology = tech;
     }
-    // groupId → group_id (device group filter)
-    if (params.groupId) query.group_id = params.groupId;
-
     // T-0162: 新筛选维度，直接 1:1 传给后端，前端不再翻译
     if (params.lifecycleState && params.lifecycleState.length > 0) {
       query.lifecycle_state = params.lifecycleState.join(','); // CSV 多选
@@ -495,6 +494,9 @@ export const deviceApi = {
       if (Array.isArray(v)) return v.length > 0 ? v.join(',') : undefined;
       return v ? String(v) : undefined;
     };
+    // groupId 多选 → CSV。FilterBar 的 multi-select 运行时返回数组，若直接透传
+    // axios 会序列化成 group_id[]=a&group_id[]=b，后端 c.Query("group_id") 读不到。
+    if (params.groupId) query.group_id = csv(params.groupId);
     if (params.modelName) query.model_name = csv(params.modelName);
     if (params.softwareVersion) query.software_version = csv(params.softwareVersion);
     if (params.firmwareVersion) query.firmware_version = csv(params.firmwareVersion);
