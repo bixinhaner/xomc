@@ -22,11 +22,6 @@ export default function DeviceSettings({ form }: DeviceSettingsProps) {
       enbInformPeriod: 60,
       enbTimeout: 100,
       nameSyncMode: 'prompt',
-      accessContralEnable: false,
-      rsrpVal0: -100,
-      rsrpVal1: -80,
-      uersrpVal0: -100,
-      uersrpVal1: -80,
       uploadSelected: '3',
       deviceOfflineEnable: false,
       deviceOfflineSaveDay: 90,
@@ -98,69 +93,6 @@ export default function DeviceSettings({ form }: DeviceSettingsProps) {
             </Space>
           </Radio.Group>
         </Form.Item>
-      </Card>
-
-      {/* 设备接入控制 */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.device.accessControl')}</span>} style={{ marginBottom: 16 }}>
-        <div style={settingRowStyle}>
-          <Space>
-            <Form.Item name="accessContralEnable" valuePropName="checked" noStyle>
-              <Checkbox>{t('system.device.onlyAllowMatching')}</Checkbox>
-            </Form.Item>
-            <a href="#">{t('common.rules')}</a>
-            <span>{t('system.device.connectToOmc')}</span>
-          </Space>
-        </div>
-      </Card>
-
-      {/* CPE信号强度 */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.device.cpeSignalStrength')}</span>} style={{ marginBottom: 16 }}>
-        <div style={settingRowStyle}>
-          <span style={{ marginRight: 16 }}>{t('system.device.displaySignalByRange')}</span>
-          <span style={{ marginRight: 16, display: 'inline-flex', alignItems: 'center', padding: '4px 12px', backgroundColor: token.colorErrorBg, borderRadius: 4 }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: token.colorError, marginRight: 8 }} />
-            {t('system.device.signal.weak')}(&lt;
-            <Form.Item name="rsrpVal0" noStyle style={{ marginLeft: 4, marginRight: 4 }}>
-              <InputNumber min={-150} max={0} style={{ width: 60 }} />
-            </Form.Item>
-          </span>
-          <span style={{ marginRight: 16, display: 'inline-flex', alignItems: 'center', padding: '4px 12px', backgroundColor: token.colorWarningBg, borderRadius: 4 }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: token.colorWarning, marginRight: 8 }} />
-            {t('system.device.signal.normal')}&lt;
-            <Form.Item name="rsrpVal1" noStyle style={{ marginLeft: 4, marginRight: 4 }}>
-              <InputNumber min={-150} max={0} style={{ width: 60 }} />
-            </Form.Item>
-          </span>
-          <span style={{ display: 'inline-flex', alignItems: 'center', padding: '4px 12px', backgroundColor: token.colorSuccessBg, borderRadius: 4 }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: token.colorSuccess, marginRight: 8 }} />
-            {t('system.device.signal.strong')}
-          </span>
-        </div>
-      </Card>
-
-      {/* UE信号强度 */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.device.ueSignalStrength')}</span>} style={{ marginBottom: 16 }}>
-        <div style={settingRowStyle}>
-          <span style={{ marginRight: 16 }}>{t('system.device.displaySignalByRange')}</span>
-          <span style={{ marginRight: 16, display: 'inline-flex', alignItems: 'center', padding: '4px 12px', backgroundColor: token.colorErrorBg, borderRadius: 4 }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: token.colorError, marginRight: 8 }} />
-            {t('system.device.signal.weak')}&lt;
-            <Form.Item name="uersrpVal0" noStyle style={{ marginLeft: 4, marginRight: 4 }}>
-              <InputNumber min={-150} max={0} style={{ width: 60 }} />
-            </Form.Item>
-          </span>
-          <span style={{ marginRight: 16, display: 'inline-flex', alignItems: 'center', padding: '4px 12px', backgroundColor: token.colorWarningBg, borderRadius: 4 }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: token.colorWarning, marginRight: 8 }} />
-            {t('system.device.signal.normal')}&lt;
-            <Form.Item name="uersrpVal1" noStyle style={{ marginLeft: 4, marginRight: 4 }}>
-              <InputNumber min={-150} max={0} style={{ width: 60 }} />
-            </Form.Item>
-          </span>
-          <span style={{ display: 'inline-flex', alignItems: 'center', padding: '4px 12px', backgroundColor: token.colorSuccessBg, borderRadius: 4 }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: token.colorSuccess, marginRight: 8 }} />
-            {t('system.device.signal.strong')}
-          </span>
-        </div>
       </Card>
 
       {/* 基站文件上传协议 */}
