@@ -40,9 +40,9 @@ import { useDeviceParameters } from '@core/hooks/api/useDeviceParameters'
 import { useAppStore } from '@core/store/appStore'
 import { useDictionary } from '@core/hooks/api/useSystem'
 import { activationStatusLabelOf } from '@core/utils/activationStatus'
+import { DEFAULT_ALARM_SEVERITY_LABELS_ZH, formatAlarmSeverityBadgeLabel, getAlarmSeverityBadgeVariant } from '@core/utils/alarmSeverity'
 import { DEVICE_SYNC_STATUS_LABELS_ZH, formatDeviceSyncStatus } from '@core/utils/deviceSyncStatus'
 import type { Device } from '@core/types/device'
-import type { AlarmSeverity } from '@core/types/common'
 
 // ============================================================
 // 设备详情 — 按 SN 查单设备，分 Tab 展示基本信息/状态/小区/参数
@@ -55,25 +55,6 @@ type TabKey = 'basic' | 'status' | 'cell' | 'params'
 
 function openClassicQuickSettings(sn: string) {
   window.location.assign(`/device/detail/${sn}?tab=quickSettings`)
-}
-
-const ALARM_VARIANT: Record<
-  AlarmSeverity | 'none',
-  'destructive' | 'warning' | 'default' | 'muted'
-> = {
-  critical: 'destructive',
-  major: 'destructive',
-  minor: 'warning',
-  warning: 'warning',
-  none: 'muted',
-}
-
-const ALARM_LABEL: Record<AlarmSeverity | 'none', string> = {
-  critical: '紧急',
-  major: '重要',
-  minor: '次要',
-  warning: '警告',
-  none: '无',
 }
 
 function fmtDuration(seconds?: number | null) {
@@ -94,38 +75,23 @@ interface Field {
   mono?: boolean
 }
 
-function InfoGrid({ fields }: { fields: Field[] }) {
-  return (
-    <div className="grid grid-cols-1 gap-x-8 gap-y-0 sm:grid-cols-2 lg:grid-cols-3">
-      {fields.map((f) => (
-        <div
-          key={f.label}
-          className="flex items-center justify-between gap-4 border-b py-2.5 text-sm"
-        >
-          <span className="shrink-0 text-muted-foreground">{f.label}</span>
-          <span
-            className={cn(
-              'truncate text-right',
-              f.mono && 'font-mono text-xs'
-            )}
-            title={f.value != null ? String(f.value) : undefined}
-          >
-            {f.value === '' || f.value == null ? '—' : f.value}
-          </span>
-        </div>
-      ))}
-    </div>
-  )
-}
-
 function GroupCard({ title, fields }: { title: string; fields: Field[] }) {
   return (
     <Card>
-      <CardHeader className="p-4 pb-2">
-        <CardTitle className="text-base font-medium">{title}</CardTitle>
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
       </CardHeader>
-      <CardContent className="p-4 pt-2">
-        <InfoGrid fields={fields} />
+      <CardContent>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {fields.map((field) => (
+            <div key={`${title}-${field.label}`} className="rounded-lg border bg-muted/20 px-3 py-2">
+              <div className="text-xs text-muted-foreground">{field.label}</div>
+              <div className={cn('mt-1 text-sm', field.mono ? 'font-mono' : '')}>
+                {field.value === '' || field.value == null ? '—' : String(field.value)}
+              </div>
+            </div>
+          ))}
+        </div>
       </CardContent>
     </Card>
   )
@@ -258,6 +224,7 @@ export default function DeviceDetail() {
     { label: '分组', value: d.groupName },
     { label: '运营商', value: d.carrier },
     { label: '站点', value: d.site || d.installAddress },
+    { label: '安装详细地址', value: d.installAddress },
     { label: '经度', value: d.longitude != null ? d.longitude.toFixed(4) : '' },
     { label: '纬度', value: d.latitude != null ? d.latitude.toFixed(4) : '' },
     { label: '创建时间', value: formatTime(d.createTime) },
@@ -351,8 +318,8 @@ export default function DeviceDetail() {
                 />
                 {device.isOnline ? '在线' : '离线'}
               </Badge>
-              <Badge variant={ALARM_VARIANT[device.alarmLevel]}>
-                告警：{ALARM_LABEL[device.alarmLevel]}
+              <Badge variant={getAlarmSeverityBadgeVariant(device.alarmLevel)}>
+                告警：{formatAlarmSeverityBadgeLabel(device.alarmLevel, 0, DEFAULT_ALARM_SEVERITY_LABELS_ZH)}
               </Badge>
             </>
           )}

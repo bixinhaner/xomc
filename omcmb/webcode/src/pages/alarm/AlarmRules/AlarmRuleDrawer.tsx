@@ -253,6 +253,7 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
   const [selectedGroups, setSelectedGroups] = useState<string[]>([]);
   const [selectedAlarms, setSelectedAlarms] = useState<string[]>([]);
   const [selectedDeviceModalOpen, setSelectedDeviceModalOpen] = useState(false);
+  const [selectedDeviceKeyword, setSelectedDeviceKeyword] = useState('');
   const [timeRange, setTimeRange] = useState<[Dayjs, Dayjs] | null>(null);
   const [alarmFilter, setAlarmFilter] = useState({
     keyword: '',
@@ -384,6 +385,18 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
 
   const selectedDeviceLoading = selectedDeviceQueries.some((query) => query.isLoading);
 
+  const filteredSelectedDeviceRows = useMemo(() => {
+    const keyword = selectedDeviceKeyword.trim().toLowerCase();
+    if (!keyword) {
+      return selectedDeviceRows;
+    }
+
+    return selectedDeviceRows.filter((device) =>
+      device.sn.toLowerCase().includes(keyword) ||
+      (device.name ?? '').toLowerCase().includes(keyword),
+    );
+  }, [selectedDeviceKeyword, selectedDeviceRows]);
+
   // 初始化表单数据
   useEffect(() => {
     if (open && rule) {
@@ -417,6 +430,7 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
     setDeviceTablePage(1);
     setDeviceTablePageSize(DEVICE_TABLE_DEFAULT_PAGE_SIZE);
     setAlarmError(null);
+    setSelectedDeviceKeyword('');
     setAlarmFilter({ keyword: '', eventType: undefined, severity: undefined });
     setDeviceFilter({ deviceTypes: [], snKeyword: '' });
   }, [open, rule, form]);
@@ -781,7 +795,7 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
 
             {deviceSelectionMode === 'devices' ? (
               <>
-                {/* 设备类型筛选 + SN搜索 + 全选 */}
+                {/* 设备类型筛选 + 搜索 + 选择摘要 */}
                 <Space wrap size="small" style={{ width: '100%', justifyContent: 'space-between' }}>
                   <Space wrap size="small">
                     <Checkbox.Group
@@ -797,18 +811,26 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
                       allowClear
                       size="small"
                     />
+                  </Space>
+                  <Space wrap size="small">
                     <Checkbox
                       checked={isAllDevicesSelected}
                       indeterminate={isIndeterminateDevices}
                       onChange={(e) => handleDeviceSelectAll(e.target.checked)}
                       disabled={isViewMode || filteredDevices.length === 0}
                     >
-                      {t('alarm.rule.selectCurrentPageDevices', { count: filteredDevices.length })}
+                      {t('alarm.rule.selectCurrentPageDevices')}
                     </Checkbox>
+                    <Button
+                      type="link"
+                      size="small"
+                      style={{ padding: 0 }}
+                      disabled={selectedDevices.length === 0}
+                      onClick={() => setSelectedDeviceModalOpen(true)}
+                    >
+                      {t('alarm.rule.selectedDeviceCount', { count: selectedDevices.length })}
+                    </Button>
                   </Space>
-                  <Button size="small" onClick={() => setSelectedDeviceModalOpen(true)}>
-                    {t('alarm.rule.selectedDevicesButton', { count: selectedDevices.length })}
-                  </Button>
                 </Space>
                 <Table
                   rowSelection={deviceRowSelection}
@@ -823,6 +845,7 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
                     total: deviceTableTotal,
                     size: 'small',
                     showSizeChanger: true,
+                    showTotal: (total) => t('alarm.rule.deviceTotal', { count: total }),
                     pageSizeOptions: [5, 10, 20, 50],
                     onChange: (page, nextPageSize) => {
                       setDeviceTablePage(page);
@@ -835,13 +858,6 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
                   }}
                   scroll={{ y: 180 }}
                 />
-                <div style={{ color: 'rgba(0,0,0,0.45)', fontSize: 12 }}>
-                  {t('alarm.rule.deviceTableSummary', {
-                    total: deviceTableTotal,
-                    current: filteredDevices.length,
-                    selected: selectedDevices.length,
-                  })}
-                </div>
               </>
             ) : (
               <>
@@ -886,38 +902,45 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
           help={alarmError}
         >
           <Space direction="vertical" style={{ width: '100%' }} size="small">
-            <Space wrap size="small">
-              <Input.Search
-                placeholder={t('alarm.librarySearchPlaceholder')}
-                style={{ width: 200 }}
-                onChange={(e) => setAlarmFilter(prev => ({ ...prev, keyword: e.target.value }))}
-                allowClear
-                size="small"
-              />
-              <Select
-                placeholder={t('alarm.eventType')}
-                style={{ width: 130 }}
-                options={eventTypeOptions}
-                onChange={(v) => setAlarmFilter(prev => ({ ...prev, eventType: v }))}
-                allowClear
-                size="small"
-              />
-              <Select
-                placeholder={t('alarm.severity')}
-                style={{ width: 90 }}
-                options={severityOptions}
-                onChange={(v) => setAlarmFilter(prev => ({ ...prev, severity: v }))}
-                allowClear
-                size="small"
-              />
-              <Checkbox
-                checked={isAllAlarmsSelected}
-                indeterminate={isIndeterminateAlarms}
-                onChange={(e) => handleAlarmSelectAll(e.target.checked)}
-                disabled={isViewMode || filteredAlarms.length === 0}
-              >
-                  {t('alarm.rule.selectFilteredAlarms', { count: filteredAlarms.length })}
-              </Checkbox>
+            <Space wrap size="small" style={{ width: '100%', justifyContent: 'space-between' }}>
+              <Space wrap size="small">
+                <Input.Search
+                  placeholder={t('alarm.librarySearchPlaceholder')}
+                  style={{ width: 220 }}
+                  onChange={(e) => setAlarmFilter(prev => ({ ...prev, keyword: e.target.value }))}
+                  allowClear
+                  size="small"
+                />
+                <Select
+                  placeholder={t('alarm.eventType')}
+                  style={{ width: 130 }}
+                  options={eventTypeOptions}
+                  onChange={(v) => setAlarmFilter(prev => ({ ...prev, eventType: v }))}
+                  allowClear
+                  size="small"
+                />
+                <Select
+                  placeholder={t('alarm.severity')}
+                  style={{ width: 90 }}
+                  options={severityOptions}
+                  onChange={(v) => setAlarmFilter(prev => ({ ...prev, severity: v }))}
+                  allowClear
+                  size="small"
+                />
+              </Space>
+              <Space wrap size="small">
+                <span style={{ color: 'rgba(0,0,0,0.45)', fontSize: 12 }}>
+                  {t('alarm.rule.selectedAlarmCount', { count: selectedAlarms.length })}
+                </span>
+                <Checkbox
+                  checked={isAllAlarmsSelected}
+                  indeterminate={isIndeterminateAlarms}
+                  onChange={(e) => handleAlarmSelectAll(e.target.checked)}
+                  disabled={isViewMode || filteredAlarms.length === 0}
+                >
+                    {t('alarm.rule.selectFilteredAlarms')}
+                </Checkbox>
+              </Space>
             </Space>
             {selectedAlarmItems.length > 0 && (
               <div style={{
@@ -962,6 +985,7 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
                 pageSize: alarmTablePageSize,
                 size: 'small',
                 showSizeChanger: true,
+                showTotal: (total) => t('alarm.rule.alarmTotal', { count: total }),
                 pageSizeOptions: ['5', '10', '20', '50', '100'],
                 onChange: (page, size) => {
                   setAlarmTablePage(page);
@@ -974,11 +998,6 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
               }}
               scroll={{ y: 180 }}
             />
-            {selectedAlarms.length > 0 && (
-              <div style={{ color: 'rgba(0,0,0,0.45)', fontSize: 12 }}>
-                {t('table.selected', { count: selectedAlarms.length })}
-              </div>
-            )}
           </Space>
         </Form.Item>
 
@@ -1000,18 +1019,44 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
         <Modal
           title={t('alarm.rule.selectedDevicesTitle', { count: selectedDevices.length })}
           open={selectedDeviceModalOpen}
-          onCancel={() => setSelectedDeviceModalOpen(false)}
-          footer={<Button type="primary" onClick={() => setSelectedDeviceModalOpen(false)}>{t('common.confirm')}</Button>}
+          onCancel={() => {
+            setSelectedDeviceModalOpen(false);
+            setSelectedDeviceKeyword('');
+          }}
+          footer={<Button type="primary" onClick={() => {
+            setSelectedDeviceModalOpen(false);
+            setSelectedDeviceKeyword('');
+          }}>{t('common.confirm')}</Button>}
           width={640}
           destroyOnHidden
         >
+          <Space direction="vertical" size={12} style={{ width: '100%', marginBottom: 12 }}>
+            <Space style={{ width: '100%', justifyContent: 'space-between' }} wrap>
+              <Input.Search
+                placeholder={t('alarm.searchDeviceSnPlaceholder')}
+                allowClear
+                style={{ width: 240 }}
+                value={selectedDeviceKeyword}
+                onChange={(e) => setSelectedDeviceKeyword(e.target.value)}
+              />
+              <Space size={16} style={{ color: 'rgba(0,0,0,0.45)', fontSize: 12 }}>
+                <span>{t('alarm.rule.selectedDeviceCount', { count: selectedDevices.length })}</span>
+                <span>{t('alarm.rule.deviceTotal', { count: selectedDeviceRows.length })}</span>
+              </Space>
+            </Space>
+          </Space>
           <Table<SelectedDeviceRow>
             columns={selectedDeviceColumns}
-            dataSource={selectedDeviceRows}
+            dataSource={filteredSelectedDeviceRows}
             rowKey="id"
             size="small"
             loading={selectedDeviceLoading}
-            pagination={{ pageSize: 8, size: 'small', showSizeChanger: false }}
+            pagination={{
+              pageSize: 8,
+              size: 'small',
+              showSizeChanger: false,
+              showTotal: (total) => t('alarm.rule.deviceTotal', { count: total }),
+            }}
           />
         </Modal>
       )}

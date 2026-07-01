@@ -4,11 +4,12 @@ package global
 
 // Device Management (1000-1999)
 const (
-	ErrCodeDeviceNotFound     = 1001
-	ErrCodeDeviceDuplicate    = 1002
-	ErrCodeDeviceInvalidInput = 1003
-	ErrCodeDeviceOffline      = 1004
-	ErrCodeDeviceRebootFailed = 1005
+	ErrCodeDeviceNotFound        = 1001
+	ErrCodeDeviceDuplicate       = 1002
+	ErrCodeDeviceInvalidInput    = 1003
+	ErrCodeDeviceOffline         = 1004
+	ErrCodeDeviceRebootFailed    = 1005
+	ErrCodeDeviceRenameNotAllowed = 1006 // auto_lmt_to_omc 策略下禁止从网管侧改名
 )
 
 // Device Group (1100-1199)

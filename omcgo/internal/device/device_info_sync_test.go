@@ -66,6 +66,14 @@ func (s stubDeviceInfoRepo) ComputeListStats(context.Context, DeviceFilter) (*De
 	return nil, nil
 }
 
+func (s stubDeviceInfoRepo) UpdateNameSyncFields(context.Context, uuid.UUID, bool, string) error {
+	return nil
+}
+
+func (s stubDeviceInfoRepo) UpdateDeviceName(context.Context, uuid.UUID, string) error {
+	return nil
+}
+
 type stubDeviceParamRepo struct {
 	params []model.DeviceParameter
 }
@@ -559,9 +567,8 @@ func (txPowerCarrier) GetInfoParamMapping(tech model.Technology) map[string]stri
 	return nil
 }
 
-// TestInfoSyncer_SyncFromParameters_TransmitPowerSource 锁定设备列表/快速设置统一口径：
-// 优先取可写配置功率 X_COM_MaxTxPowerExpanded；缺失时再退回有效的
-// ReferenceSignalPower；占位值(-1 等)不得写进 device_info.transmit_power。
+// TestInfoSyncer_SyncFromParameters_TransmitPowerSource 锁定快速设置/列表统一口径：
+// transmit_power 直接取快速设置同源参数的已落库值，不再做范围或占位值判断。
 func TestInfoSyncer_SyncFromParameters_TransmitPowerSource(t *testing.T) {
 	deviceID := uuid.New()
 	registry := carrier.NewRegistry()
@@ -569,7 +576,7 @@ func TestInfoSyncer_SyncFromParameters_TransmitPowerSource(t *testing.T) {
 
 	const refSignalPath = "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.ReferenceSignalPower"
 	const xcomMaxTxPath = "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.X_COM_MaxTxPowerExpanded"
-	const supportedRangePath = "Device.DeviceInfo.SupportedPowerRange"
+	const nrPowerModifyPath = "Device.Services.FAPService.1.CellConfig.1.NR.RAN.PowerModify"
 	const maxTxPath = "Device.Services.FAPService.1.Capabilities.MaxTxPower"
 
 	cases := []struct {
@@ -589,16 +596,13 @@ func TestInfoSyncer_SyncFromParameters_TransmitPowerSource(t *testing.T) {
 			params: []model.DeviceParameter{
 				{ParameterPath: refSignalPath, ParameterValue: "18.2"},
 				{ParameterPath: xcomMaxTxPath, ParameterValue: "24"},
-				{ParameterPath: supportedRangePath, ParameterValue: "0,46"},
 			},
 			want: "24",
 		},
 		{
-			name: "ReferenceSignalPower 占位值 -1 时回退到 X_COM 配置功率",
+			name: "NR PowerModify 应直接落到 transmit_power",
 			params: []model.DeviceParameter{
-				{ParameterPath: refSignalPath, ParameterValue: "-1"},
-				{ParameterPath: xcomMaxTxPath, ParameterValue: "30"},
-				{ParameterPath: supportedRangePath, ParameterValue: "0,46"},
+				{ParameterPath: nrPowerModifyPath, ParameterValue: "30"},
 			},
 			want: "30",
 		},
@@ -610,12 +614,11 @@ func TestInfoSyncer_SyncFromParameters_TransmitPowerSource(t *testing.T) {
 			want: nil,
 		},
 		{
-			name: "负数 ReferenceSignalPower 且无 X_COM 时不写 transmit_power",
+			name: "ReferenceSignalPower 原始值直接落库",
 			params: []model.DeviceParameter{
 				{ParameterPath: refSignalPath, ParameterValue: "-21"},
-				{ParameterPath: supportedRangePath, ParameterValue: "0,46"},
 			},
-			want: nil,
+			want: "-21",
 		},
 	}
 

@@ -24,9 +24,9 @@ import {
 import { cn } from '@/lib/utils'
 
 import { useDeviceList } from '@core/hooks/api/useDevices'
+import { DEFAULT_ALARM_SEVERITY_LABELS_ZH, formatAlarmSeverityBadgeLabel, getAlarmSeverityBadgeVariant } from '@core/utils/alarmSeverity'
 import type { DeviceFilter } from '@core/types/device'
 import type { PageRequest } from '@core/types/pagination'
-import type { AlarmSeverity } from '@core/types/common'
 
 // ============================================================
 // 系统管理 / 设备分类 — 对齐 v1 webcode/src/pages/system/DeviceClassification
@@ -45,25 +45,6 @@ const CATEGORIES: Category[] = [
   { key: 'gnb', label: '5G 设备 (gNB / NR)', networkType: 'gNB' },
   { key: 'gsm', label: '2G 设备 (GSM)', networkType: 'GSM' },
 ]
-
-const ALARM_LABEL: Record<AlarmSeverity | 'none', string> = {
-  critical: '紧急',
-  major: '重要',
-  minor: '次要',
-  warning: '警告',
-  none: '无',
-}
-
-const ALARM_VARIANT: Record<
-  AlarmSeverity | 'none',
-  'destructive' | 'warning' | 'muted'
-> = {
-  critical: 'destructive',
-  major: 'destructive',
-  minor: 'warning',
-  warning: 'warning',
-  none: 'muted',
-}
 
 export default function DeviceClassification() {
   const navigate = useNavigate()
@@ -208,8 +189,8 @@ export default function DeviceClassification() {
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        <Badge variant={ALARM_VARIANT[d.alarmLevel]}>
-                          {ALARM_LABEL[d.alarmLevel]}
+                        <Badge variant={getAlarmSeverityBadgeVariant(d.alarmLevel)}>
+                          {formatAlarmSeverityBadgeLabel(d.alarmLevel, 0, DEFAULT_ALARM_SEVERITY_LABELS_ZH)}
                         </Badge>
                       </TableCell>
                       <TableCell className="font-mono text-xs text-muted-foreground">

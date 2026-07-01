@@ -5,6 +5,13 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { PageShell } from '@/components/layout/PageShell'
 
 import {
@@ -16,6 +23,7 @@ import type {
   SysConfigItem,
   SysConfigValueType,
 } from '@core/types/system'
+import { getSysConfigEnum } from '@core/config/sysConfigEnums'
 import { useT } from '@/hooks/useT'
 
 // ============================================================
@@ -191,6 +199,7 @@ function CategoryEditor({ category }: { category: string }) {
           <div className="overflow-hidden rounded-lg border bg-card divide-y">
             {group.items.map((it) => {
               const isBool = it.valueType === 'bool'
+              const enumSpec = getSysConfigEnum(category, it.key)
               const cur = edits[it.key] ?? ''
               return (
                 <div
@@ -210,7 +219,25 @@ function CategoryEditor({ category }: { category: string }) {
                       ) : null}
                     </div>
                   </div>
-                  {isBool ? (
+                  {enumSpec ? (
+                    <Select
+                      value={cur}
+                      onValueChange={(v) =>
+                        setEdits((prev) => ({ ...prev, [it.key]: v }))
+                      }
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {enumSpec.options.map((opt) => (
+                          <SelectItem key={opt.value} value={opt.value}>
+                            {t(opt.labelKey)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : isBool ? (
                     <div className="flex items-center gap-2">
                       <input
                         type="checkbox"

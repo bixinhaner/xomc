@@ -122,6 +122,7 @@ export interface Device {
   productName: string;
   firmwareVersion: string;
   macAddress: string;
+  groupId?: string;
   groupName: string;
   // T-0027 D9：分组归属来源（PRD §12.6 跨模块联合变更）
   // backend 通过 device_group_members.source_type 列传出（snake_case → camelCase 自动）
@@ -151,6 +152,10 @@ export interface Device {
   rom: string;
   remark: string;
   gnbId: string;
+
+  // Issue #758：设备名称同步
+  nameSyncPending: boolean;
+  lmtDeviceName: string;
 
   // 小区信息组 (Cell)
   enbId: string;
@@ -310,7 +315,7 @@ export interface DeviceFilter {
   region?: string;
   subnet?: string;
   engStatus?: EngStatus;
-  groupId?: string;
+  groupId?: string | string[];
   /** 激活状态：'1'=激活，'0'=未激活 */
   opState?: string;
   /** 产品装配件 UUID（下拉来自 /products），对应后端 ?product_id= → devices.product_id */

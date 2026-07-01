@@ -48,17 +48,20 @@ import {
 import { cn } from '@/lib/utils'
 
 import { useAppStore } from '@core/store/appStore'
+import { expandSelectedGroupIds } from '@core/utils/deviceGroupFilter'
 import {
   prefetchDeviceDetailContext,
   useDeviceList,
   useDeviceGroups,
   useBatchRebootDevices,
   useSyncDeviceParams,
+  useUpdateDevice,
 } from '@core/hooks/api/useDevices'
 import { useProductList } from '@core/hooks/api/useProducts'
-import { useAlarmCount, useTriggerAlarmSync } from '@core/hooks/api/useAlarms'
+import { useAlarmCountWithDeviceListInvalidation, useTriggerAlarmSync } from '@core/hooks/api/useAlarms'
 import { useDictionary } from '@core/hooks/api/useSystem'
 import { activationStatusLabelOf, activationStatusOf } from '@core/utils/activationStatus'
+import { DEFAULT_ALARM_SEVERITY_LABELS_ZH, formatAlarmSeverityBadgeLabel, getAlarmSeverityBadgeVariant } from '@core/utils/alarmSeverity'
 import type { Device, DeviceFilter } from '@core/types/device'
 import type { PageRequest } from '@core/types/pagination'
 import type { AlarmSeverity } from '@core/types/common'
@@ -79,25 +82,6 @@ const AUTO_REFRESH_OPTIONS = [
   { label: '5分钟', value: '300' },
 ] as const
 
-const ALARM_VARIANT: Record<
-  AlarmSeverity | 'none',
-  'destructive' | 'warning' | 'default' | 'muted'
-> = {
-  critical: 'destructive',
-  major: 'destructive',
-  minor: 'warning',
-  warning: 'warning',
-  none: 'muted',
-}
-
-const ALARM_LABEL: Record<AlarmSeverity | 'none', string> = {
-  critical: '紧急',
-  major: '重要',
-  minor: '次要',
-  warning: '警告',
-  none: '无',
-}
-
 function ConnStatusBadge({ online }: { online: boolean }) {
   return (
     <Badge variant={online ? 'success' : 'muted'}>
@@ -114,9 +98,11 @@ function ConnStatusBadge({ online }: { online: boolean }) {
 
 function AlarmBadge({ level, count }: { level: AlarmSeverity | 'none'; count?: number }) {
   // #361: 有活动告警时把告警数拼进 label（如「重要 · 3」）。
-  const label =
-    level !== 'none' && (count ?? 0) > 0 ? `${ALARM_LABEL[level]} · ${count}` : ALARM_LABEL[level]
-  return <Badge variant={ALARM_VARIANT[level]}>{label}</Badge>
+  return (
+    <Badge variant={getAlarmSeverityBadgeVariant(level)}>
+      {formatAlarmSeverityBadgeLabel(level, count, DEFAULT_ALARM_SEVERITY_LABELS_ZH)}
+    </Badge>
+  )
 }
 
 function ActivationBadge({
@@ -169,7 +155,7 @@ export function DevicesPage() {
   const groupsQuery = useDeviceGroups()
   const productsQuery = useProductList()
   // 全量在线告警计数（与列表 stats.alarmed 占位字段相比更准确，v1 同此做法）
-  const alarmCountQuery = useAlarmCount()
+  const alarmCountQuery = useAlarmCountWithDeviceListInvalidation()
   const appLocale = useAppStore((s) => s.locale)
   const { data: opStateDict } = useDictionary('op_state')
 
@@ -180,8 +166,11 @@ export function DevicesPage() {
   const productOptions = productsQuery.data?.items ?? []
 
   // ---- 列表查询参数 ----
-  const queryParams = useMemo<DeviceFilter & PageRequest>(
-    () => ({
+  const queryParams = useMemo<DeviceFilter & PageRequest>(() => {
+    const expandedGroupIDs =
+      groupId !== 'all' ? expandSelectedGroupIds(groupId, groupsQuery.data?.groups ?? []) : undefined
+
+    return {
       page,
       pageSize,
       ...(searchText.trim() ? { searchText: searchText.trim() } : {}),
@@ -189,10 +178,9 @@ export function DevicesPage() {
       ...(opState !== 'all' ? { opState } : {}),
       ...(networkType !== 'all' ? { networkType } : {}),
       ...(productId !== 'all' ? { productId } : {}),
-      ...(groupId !== 'all' ? { groupId } : {}),
-    }),
-    [page, pageSize, searchText, onlineFilter, opState, networkType, productId, groupId]
-  )
+      ...(expandedGroupIDs ? { groupId: expandedGroupIDs } : {}),
+    }
+  }, [page, pageSize, searchText, onlineFilter, opState, networkType, productId, groupId, groupsQuery.data?.groups])
 
   const { data, isLoading, isError, error, isFetching, refetch } =
     useDeviceList(queryParams, { refetchInterval: autoRefresh ? refreshInterval * 1000 : 0 })
@@ -206,8 +194,15 @@ export function DevicesPage() {
   const batchReboot = useBatchRebootDevices()
   const syncParams = useSyncDeviceParams()
   const alarmSync = useTriggerAlarmSync()
+  const updateDevice = useUpdateDevice()
+  const [editingInstallAddressId, setEditingInstallAddressId] = useState<string | null>(null)
+  const [editingInstallAddressValue, setEditingInstallAddressValue] = useState('')
+  const [savingInstallAddressId, setSavingInstallAddressId] = useState<string | null>(null)
 
-  const rows = data?.items ?? []
+  const rows = useMemo(
+    () => data?.items ?? [],
+    [data?.items]
+  )
   const total = data?.total ?? 0
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
   const stats = data?.stats
@@ -294,6 +289,60 @@ export function DevicesPage() {
     groupId !== 'all'
 
   const autoRefreshValue = autoRefresh ? String(refreshInterval) : 'off'
+
+  function startInstallAddressEdit(device: Device) {
+    setEditingInstallAddressId(device.id)
+    setEditingInstallAddressValue(device.installAddress || '')
+  }
+
+  function cancelInstallAddressEdit() {
+    setEditingInstallAddressId(null)
+    setEditingInstallAddressValue('')
+    setSavingInstallAddressId(null)
+  }
+
+  function saveInstallAddressEdit(device: Device) {
+    const nextValue = editingInstallAddressValue.trim()
+    const currentValue = (device.installAddress || '').trim()
+    if (savingInstallAddressId === device.id) return
+    if (nextValue === currentValue) {
+      cancelInstallAddressEdit()
+      return
+    }
+
+    setSavingInstallAddressId(device.id)
+    updateDevice.mutate(
+      {
+        id: device.id,
+        data: { installAddress: nextValue },
+        fallbackDevice: {
+          id: device.id,
+          sn: device.sn,
+          installAddress: device.installAddress,
+          remark: device.remark,
+        },
+      },
+      {
+        onSuccess: (updatedDevice) => {
+          queryClient.setQueryData(['devices', 'list', queryParams], (prev: typeof data) => {
+            if (!prev) return prev
+            return {
+              ...prev,
+              items: prev.items.map((item) =>
+                item.id === updatedDevice.id ? { ...item, installAddress: updatedDevice.installAddress } : item
+              ),
+            }
+          })
+          setEditingInstallAddressId(null)
+          setEditingInstallAddressValue('')
+          setSavingInstallAddressId(null)
+        },
+        onError: () => {
+          setSavingInstallAddressId(null)
+        },
+      }
+    )
+  }
 
   // ---- 列定义 ----
   const columns = useMemo<ColumnDef<Device>[]>(
@@ -402,6 +451,57 @@ export function DevicesPage() {
         ),
       },
       {
+        accessorKey: 'installAddress',
+        header: '安装详细地址',
+        cell: ({ row }) => {
+          const device = row.original
+          const isEditing = editingInstallAddressId === device.id
+          const isSaving = savingInstallAddressId === device.id
+          const isEmptyAddress = !device.installAddress
+
+          if (isEditing) {
+            return (
+              <Input
+                autoFocus
+                className="h-8"
+                maxLength={256}
+                value={editingInstallAddressValue}
+                placeholder="安装详细地址"
+                onClick={(e) => e.stopPropagation()}
+                onChange={(e) => setEditingInstallAddressValue(e.target.value)}
+                onBlur={() => saveInstallAddressEdit(device)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') saveInstallAddressEdit(device)
+                  if (e.key === 'Escape') cancelInstallAddressEdit()
+                }}
+              />
+            )
+          }
+
+          return (
+            <div
+              title={device.installAddress || '双击编辑安装详细地址'}
+              onDoubleClick={(e) => {
+                e.stopPropagation()
+                startInstallAddressEdit(device)
+              }}
+              className={cn('min-h-[22px] text-sm', isEmptyAddress && 'text-muted-foreground')}
+            >
+              {isSaving ? '保存中…' : device.installAddress || '双击编辑安装详细地址'}
+            </div>
+          )
+        },
+      },
+      {
+        accessorKey: 'txPower',
+        header: 'Tx Power',
+        cell: ({ row }) => (
+          <span className="font-mono text-xs text-muted-foreground">
+            {row.original.txPower || '—'}
+          </span>
+        ),
+      },
+      {
         accessorKey: 'opState',
         header: '激活状态',
         cell: ({ row }) => <ActivationBadge opState={row.original.opState} details={opStateDict?.sysDictionaryDetails} locale={appLocale} />,
@@ -438,7 +538,7 @@ export function DevicesPage() {
         },
       },
     ],
-    [allOnPageSelected, appLocale, opStateDict?.sysDictionaryDetails, selectedIds, someOnPageSelected]
+    [allOnPageSelected, appLocale, editingInstallAddressId, editingInstallAddressValue, opStateDict?.sysDictionaryDetails, savingInstallAddressId, selectedIds, someOnPageSelected]
   )
 
   const table = useReactTable({

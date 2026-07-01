@@ -40,7 +40,7 @@ const MapPopup: React.FC<MapPopupProps> = ({
   if (!visible || !device) return null;
 
   const statusConfig = DEVICE_STATUS_CONFIG[device.status] || DEVICE_STATUS_CONFIG.offline;
-  const hasAlarm = device.status !== 'offline' && device.alarmCount && device.alarmCount > 0;
+  const hasAlarm = (device.alarmCount ?? 0) > 0;
 
   // 卡片容器样式
   const containerStyle: React.CSSProperties = {
@@ -219,6 +219,14 @@ const MapPopup: React.FC<MapPopupProps> = ({
             <span style={labelStyle}>PCI:</span>
             <span style={{ ...valueStyle, fontFamily: 'monospace' }}>
               {device.pci || <span style={{ color: '#BFBFBF' }}>--</span>}
+            </span>
+          </div>
+
+          {/* UE 数 */}
+          <div style={detailRowStyle}>
+            <span style={labelStyle}>UE 数:</span>
+            <span style={{ ...valueStyle, fontFamily: 'monospace', color: (device.ueCount ?? 0) > 0 ? '#52C41A' : '#8C8C8C' }}>
+              {device.ueCount ?? 0}
             </span>
           </div>
 

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { App, Button, Card, Drawer, Input, Modal, Popconfirm, Popover, Progress, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import { App, Badge, Button, Card, Drawer, Input, Modal, Popconfirm, Popover, Progress, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   AlertOutlined,
@@ -22,12 +22,16 @@ import StatisticsPanel from '@/components/StatisticsPanel';
 import StatusIndicator from '@/components/StatusIndicator';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import AutoRefreshDropdown from '@/pages/alarm/components/AutoRefreshDropdown';
-import { prefetchDeviceDetailContext, useDeviceList, useBatchRebootDevices, useDeviceGroups } from '@core/hooks/api/useDevices';
+import { prefetchDeviceDetailContext, useDeviceList, useBatchRebootDevices, useDeviceGroups, useUpdateDevice } from '@core/hooks/api/useDevices';
 import { useProductList } from '@core/hooks/api/useProducts';
 import { useDictionaryBatch } from '@core/hooks/api/useSystem';
 import { resolveNetworkTypeLabel } from '@core/utils/networkType';
 import { activationStatusLabelOf, activationStatusOf } from '@core/utils/activationStatus';
 import { formatDeviceSyncStatus, getDeviceSyncStatusKind, normalizeDeviceSyncStatus } from '@core/utils/deviceSyncStatus';
+import { expandSelectedGroupIds } from '@core/utils/deviceGroupFilter';
+import { withDeviceGroupDisplayName } from '@core/utils/deviceGroupDisplay';
+import { hasAlarmSeverity } from '@core/utils/alarmSeverity';
+import { useAlarmCountWithDeviceListInvalidation } from '@core/hooks/api/useAlarms';
 import { useTriggerAlarmSync } from '@core/hooks/api/useAlarms';
 import { useCreateUnifiedFileTransferTask } from '@core/hooks/api/useUnifiedFileTransfer';
 import { useDownloadStationLog } from '@core/hooks/api/useStationLog';
@@ -293,6 +297,10 @@ export default function DeviceList() {
     setEditingRemark(false);
   }, []);
 
+  const [editingInstallAddressId, setEditingInstallAddressId] = useState<string | null>(null);
+  const [editingInstallAddressValue, setEditingInstallAddressValue] = useState('');
+  const [savingInstallAddressId, setSavingInstallAddressId] = useState<string | null>(null);
+
   // remarkHeaderRender 保持 useMemo，因为 headerRender 需要 ReactNode 而非函数
   // 编辑状态变化不频繁，性能开销可接受
   const remarkHeaderRender = useMemo(() => {
@@ -341,10 +349,19 @@ export default function DeviceList() {
   // 此处显式引用消除 TS6133「声明未使用」，恢复 remark 列时删除本行即可。
   void remarkHeaderRender;
 
-  const queryParams = useMemo(
-    () => ({ ...filterParams, page: currentPage, pageSize } as Parameters<typeof useDeviceList>[0]),
-    [filterParams, currentPage, pageSize]
-  );
+  const currentUser = useUserStore((s) => s.currentUser);
+  const appLocale = useAppStore((s) => s.locale);
+  // R6b: 设备分组下拉接入 device/group API（device-list-and-group-improvements-20260520.md R6b）
+  const { data: groupsResp } = useDeviceGroups();
+  const queryParams = useMemo(() => {
+    const expandedGroupIDs = expandSelectedGroupIds(filterParams.groupId as string | string[] | undefined, groupsResp?.groups ?? []);
+    return {
+      ...filterParams,
+      ...(expandedGroupIDs ? { groupId: expandedGroupIDs } : {}),
+      page: currentPage,
+      pageSize,
+    } as Parameters<typeof useDeviceList>[0];
+  }, [filterParams, groupsResp?.groups, currentPage, pageSize]);
 
   const { data, isLoading, isFetching, refetch } = useDeviceList(queryParams, {
     refetchInterval: autoRefresh ? refreshInterval * 1000 : undefined,
@@ -353,14 +370,21 @@ export default function DeviceList() {
   const refreshSpinStartedAtRef = useRef<number | null>(null);
   const refreshSpinTimeoutRef = useRef<number | null>(null);
   const batchReboot = useBatchRebootDevices();
+  const updateDevice = useUpdateDevice();
   const triggerAlarmSync = useTriggerAlarmSync();
+  useAlarmCountWithDeviceListInvalidation();
   const createUfteTask = useCreateUnifiedFileTransferTask();
   const downloadStationLog = useDownloadStationLog();
-  const currentUser = useUserStore((s) => s.currentUser);
-  const appLocale = useAppStore((s) => s.locale);
   const taskNameUser = currentUser?.username || currentUser?.displayName || 'user';
   // 性能优化：使用 useMemo 避免每次渲染创建新引用，防止下游 callback/useMemo 依赖变化
-  const devices = useMemo(() => data?.items ?? [], [data?.items]);
+  const devices = useMemo(
+    () => withDeviceGroupDisplayName(
+      data?.items ?? [],
+      groupsResp?.groups ?? [],
+      appLocale,
+    ),
+    [data?.items, groupsResp?.groups, appLocale]
+  );
   const total = data?.total ?? 0;
   const stats = useMemo(() => data?.stats ?? { total: 0, online: 0, offline: 0, alarmed: 0, online_count: 0, offline_count: 0 }, [data?.stats]);
 
@@ -368,6 +392,61 @@ export default function DeviceList() {
     if (!autoRefresh) return;
     void refetch();
   }, [autoRefresh, refreshInterval, refetch]);
+
+  const startInstallAddressEdit = useCallback((device: Device) => {
+    setEditingInstallAddressId(device.id);
+    setEditingInstallAddressValue(device.installAddress || '');
+  }, []);
+
+  const cancelInstallAddressEdit = useCallback(() => {
+    setEditingInstallAddressId(null);
+    setEditingInstallAddressValue('');
+    setSavingInstallAddressId(null);
+  }, []);
+
+  const saveInstallAddressEdit = useCallback((device: Device) => {
+    const nextValue = editingInstallAddressValue.trim();
+    const currentValue = (device.installAddress || '').trim();
+    if (savingInstallAddressId === device.id) return;
+    if (nextValue === currentValue) {
+      cancelInstallAddressEdit();
+      return;
+    }
+
+    setSavingInstallAddressId(device.id);
+    updateDevice.mutate(
+      {
+        id: device.id,
+        data: { installAddress: nextValue },
+        fallbackDevice: {
+          id: device.id,
+          sn: device.sn,
+          installAddress: device.installAddress,
+          remark: device.remark,
+        },
+      },
+      {
+        onSuccess: (updatedDevice) => {
+          queryClient.setQueryData(['devices', 'list', queryParams], (prev: typeof data) => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              items: prev.items.map((item) => item.id === updatedDevice.id ? { ...item, installAddress: updatedDevice.installAddress } : item),
+            };
+          });
+          void queryClient.invalidateQueries({ queryKey: ['devices', 'sn', updatedDevice.sn] });
+          void message.success(t('common.saveSuccess'));
+          setEditingInstallAddressId(null);
+          setEditingInstallAddressValue('');
+          setSavingInstallAddressId(null);
+        },
+        onError: (err) => {
+          setSavingInstallAddressId(null);
+          void message.error(err instanceof Error ? err.message : t('common.saveFailed'));
+        },
+      },
+    );
+  }, [cancelInstallAddressEdit, data, editingInstallAddressValue, message, queryClient, queryParams, savingInstallAddressId, t, updateDevice]);
 
   const handleManualRefresh = useCallback(() => {
     if (refreshSpinTimeoutRef.current !== null) {
@@ -421,9 +500,6 @@ export default function DeviceList() {
       window.clearTimeout(refreshSpinTimeoutRef.current);
     }
   }, []);
-
-  // R6b: 设备分组下拉接入 device/group API（device-list-and-group-improvements-20260520.md R6b）
-  const { data: groupsResp } = useDeviceGroups();
   const groupOptions = useMemo(() => {
     const groups = groupsResp?.groups ?? [];
     // 仅 L2 子分组可作为设备过滤目标（L1 是容器）；用 parentName / name 双层展示便于辨识
@@ -1009,7 +1085,7 @@ export default function DeviceList() {
         render: (_val, record) => {
           const color = SEVERITY_COLOR[record.alarmLevel] ?? 'default';
           const label = getSeverityLabel(record.alarmLevel);
-          if (record.alarmLevel && record.alarmLevel !== 'none') {
+          if (hasAlarmSeverity(record.alarmLevel)) {
             // #361: 告警级别 Tag 旁拼接活动告警数（如「重要 · 3」）。
             const count = record.activeAlarmCount ?? 0;
             const display = count > 0 ? `${label} · ${count}` : label;
@@ -1029,7 +1105,27 @@ export default function DeviceList() {
         },
       },
       // "名称" 列绑定 device_name（设备名称），而非 host_name。
-      { key: 'hostName', title: t('device.hostName'), dataIndex: 'deviceName', width: 150, ellipsis: true, group: 'common' },
+      // Issue #758: nameSyncPending=true 时显示小红点提示名称待同步
+      {
+        key: 'hostName',
+        title: t('device.hostName'),
+        dataIndex: 'deviceName',
+        width: 170,
+        ellipsis: true,
+        group: 'common',
+        render: (_val, record) => (
+          <Space size={4}>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {record.deviceName || '-'}
+            </span>
+            {record.nameSyncPending && (
+              <Tooltip title={t('device.nameSyncPending')}>
+                <Badge status="error" />
+              </Tooltip>
+            )}
+          </Space>
+        ),
+      },
       {
         key: 'networkType',
         title: t('device.radioMode'),
@@ -1347,7 +1443,59 @@ export default function DeviceList() {
             : String(v);
         },
       },
-      { key: 'installAddress', title: t('device.installAddress'), dataIndex: 'installAddress', width: 180, hidden: true, ellipsis: true, group: 'common' },
+      {
+        key: 'installAddress',
+        title: t('device.installAddress'),
+        dataIndex: 'installAddress',
+        width: 180,
+        hidden: true,
+        ellipsis: true,
+        group: 'common',
+        render: (_val, record) => {
+          const isEditing = editingInstallAddressId === record.id;
+          const isSaving = savingInstallAddressId === record.id;
+          const isEmptyAddress = !record.installAddress;
+          if (isEditing) {
+            return (
+              <Input
+                size="small"
+                value={editingInstallAddressValue}
+                autoFocus
+                maxLength={256}
+                placeholder={t('device.installAddress')}
+                onClick={(e) => e.stopPropagation()}
+                onChange={(e) => setEditingInstallAddressValue(e.target.value)}
+                onPressEnter={() => saveInstallAddressEdit(record)}
+                onBlur={() => saveInstallAddressEdit(record)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    cancelInstallAddressEdit();
+                  }
+                }}
+                suffix={isSaving ? <ReloadOutlined spin /> : null}
+              />
+            );
+          }
+
+          return (
+            <div
+              title={record.installAddress || '双击编辑安装详细地址'}
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                startInstallAddressEdit(record);
+              }}
+              style={{
+                cursor: 'text',
+                minHeight: 22,
+                color: isEmptyAddress ? 'rgba(0, 0, 0, 0.45)' : undefined,
+              }}
+            >
+              {record.installAddress || '双击编辑安装详细地址'}
+            </div>
+          );
+        },
+      },
       { key: 'pci', title: 'PCI', dataIndex: 'pci', width: 80, hidden: true, group: 'common' },
       { key: 'tac', title: 'TAC', dataIndex: 'tac', width: 80, hidden: true, group: 'common' },
       { key: 'band', title: 'Band', dataIndex: 'band', width: 100, hidden: true, group: 'common' },
@@ -1412,7 +1560,7 @@ export default function DeviceList() {
 
     ],
     // remarkHeaderRender 暂从 dep 列表移除：remark 列定义已注释，恢复时同步加回。
-    [navigate, t, fmtTime, fmtDuration, fmtStatus, renderMultiCellStatus, renderActivationStatus, message, downloadStationLog, mapConnStatus, getSeverityLabel, networkTypeDict?.sysDictionaryDetails]
+    [navigate, t, fmtTime, fmtDuration, fmtStatus, renderMultiCellStatus, renderActivationStatus, message, downloadStationLog, mapConnStatus, getSeverityLabel, networkTypeDict?.sysDictionaryDetails, editingInstallAddressId, editingInstallAddressValue, savingInstallAddressId, saveInstallAddressEdit, cancelInstallAddressEdit, startInstallAddressEdit]
   );
 
   // ─── 列表导出(用户决策 2026-06-02) ──────────────────────────────────────

@@ -102,22 +102,11 @@ export const deviceService = {
     if (params.region) filtered = filtered.filter((d) => d.region === params.region);
     if (params.subnet) filtered = filtered.filter((d) => d.subnet === params.subnet);
     if (params.engStatus) filtered = filtered.filter((d) => d.engStatus === params.engStatus);
-    // 按 groupId 过滤（模拟：基于分组名称匹配城市）
+    // 按 groupId 过滤：与真实接口保持一致，按 membership 做多选 OR。
     if (params.groupId) {
-      const { groups } = await this.getGroups();
-      const group = groups.find((g) => g.id === params.groupId);
-      if (group) {
-        // 根据分组名称过滤设备（通过设备名称包含城市名来判断）
-        const groupCityMap: Record<string, string> = {
-          'grp-bj': '北京',
-          'grp-sh': '上海',
-          'grp-gz': '广州',
-        };
-        const cityName = groupCityMap[params.groupId];
-        if (cityName) {
-          filtered = filtered.filter((d) => d.name.includes(cityName));
-        }
-      }
+      const selectedGroupIDs = Array.isArray(params.groupId) ? params.groupId : [params.groupId];
+      const selectedSet = new Set(selectedGroupIDs);
+      filtered = filtered.filter((d) => d.groupId && selectedSet.has(d.groupId));
     }
 
     if (params.sortField) {

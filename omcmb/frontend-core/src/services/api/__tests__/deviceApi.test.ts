@@ -9,13 +9,15 @@
  * 用 vi.mock 替换 http 客户端（参照 alarmApi.test.ts 既有模式）。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { UNASSIGNED_GROUP_ID } from '../../../utils/deviceGroupTargets';
 
-const { getMock, postMock } = vi.hoisted(() => ({
+const { getMock, postMock, putMock } = vi.hoisted(() => ({
   getMock: vi.fn(),
   postMock: vi.fn(),
+  putMock: vi.fn(),
 }));
 vi.mock('../../http', () => ({
-  default: { get: getMock, post: postMock, put: vi.fn(), patch: vi.fn(), delete: vi.fn() },
+  default: { get: getMock, post: postMock, put: putMock, patch: vi.fn(), delete: vi.fn() },
 }));
 
 import { deviceApi } from '../deviceApi';
@@ -34,6 +36,8 @@ function backendDevice(overrides: Record<string, unknown> = {}) {
     is_online: true,
     firmware_version: 'v1.0',
     ip_address: '10.0.0.1',
+    group_id: 'group-1',
+    group_name: '默认设备组',
     connection_request_url: '',
     inform_interval: 300,
     device_name: '基站A',
@@ -49,6 +53,7 @@ function backendDevice(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   getMock.mockReset();
   postMock.mockReset();
+  putMock.mockReset();
   getMock.mockResolvedValue({ data: { items: [], total: 0, page: 1, page_size: 20, total_pages: 0 } });
 });
 
@@ -102,8 +107,25 @@ describe('deviceApi.getList — filter → query 映射', () => {
     expect(d.networkType).toBe('gNB'); // nr → gNB
     expect(d.connStatus).toBe('online'); // is_online → online
     expect(d.isOnline).toBe(true);
+    expect(d.groupId).toBe('group-1');
+    expect(d.groupName).toBe('默认设备组');
     // 后端 stats 直读（不靠 items.filter 估算）
     expect(out.stats.online_count).toBe(1);
+  });
+
+  it('列表接口返回 device_address 时也能映射成 installAddress', async () => {
+    getMock.mockResolvedValue({
+      data: {
+        items: [backendDevice({ install_address: undefined, device_address: '南京市雨花台区软件大道 1 号' })],
+        total: 1,
+        page: 1,
+        page_size: 20,
+        total_pages: 1,
+      },
+    });
+
+    const out = await deviceApi.getList({ page: 1, pageSize: 20 });
+    expect(out.items[0].installAddress).toBe('南京市雨花台区软件大道 1 号');
   });
 
   it('映射后的 Device 不含 platformType（#177：该字段及关联逻辑已移除）', async () => {
@@ -182,12 +204,99 @@ describe('deviceApi.getById', () => {
   });
 });
 
+describe('deviceApi.update', () => {
+  it('安装详细地址与备注走 /devices/:id/info，并在更新后回读设备', async () => {
+    putMock.mockResolvedValue({ data: null });
+    getMock.mockResolvedValue({
+      data: backendDevice({
+        install_address: '南京市雨花台区软件大道 1 号',
+        remark: '现场已核对',
+      }),
+    });
+
+    const out = await deviceApi.update('d1', {
+      installAddress: '南京市雨花台区软件大道 1 号',
+      remark: '现场已核对',
+    });
+
+    expect(putMock).toHaveBeenCalledTimes(1);
+    expect(putMock).toHaveBeenCalledWith('/devices/d1/info', {
+      address: '南京市雨花台区软件大道 1 号',
+      remark: '现场已核对',
+    });
+    expect(getMock).toHaveBeenCalledWith('/devices/d1');
+    expect(out.installAddress).toBe('南京市雨花台区软件大道 1 号');
+    expect(out.remark).toBe('现场已核对');
+  });
+
+  it('写成功但回读失败时，使用 fallbackDevice 与当前变更降级返回，不误报失败', async () => {
+    putMock.mockResolvedValue({ data: null });
+    getMock.mockRejectedValueOnce(new Error('temporary readback failure'));
+
+    const out = await deviceApi.update(
+      'd1',
+      { installAddress: '南京市雨花台区软件大道 2 号' },
+      { id: 'd1', sn: 'SN001', installAddress: '', remark: '旧备注' }
+    );
+
+    expect(putMock).toHaveBeenCalledWith('/devices/d1/info', {
+      address: '南京市雨花台区软件大道 2 号',
+    });
+    expect(out.id).toBe('d1');
+    expect(out.sn).toBe('SN001');
+    expect(out.installAddress).toBe('南京市雨花台区软件大道 2 号');
+    expect(out.remark).toBe('旧备注');
+  });
+});
+
+describe('deviceApi.getGroups', () => {
+  it('保持后端返回的分组名称与 i18n 原样透传', async () => {
+    getMock.mockResolvedValue({
+      data: {
+        items: [
+          {
+            id: 'root-group',
+            name: '默认设备组',
+            parent_id: null,
+            device_count: 0,
+            description: '',
+            remark: '',
+            is_default: true,
+            level: 1,
+            children: [
+              {
+                id: UNASSIGNED_GROUP_ID,
+                name: '默认设备组',
+                parent_id: 'root-group',
+                device_count: 6,
+                description: '',
+                remark: '',
+                is_default: true,
+                level: 2,
+                name_i18n: { 'zh-CN': '默认设备组', 'en-US': 'Default Group' },
+              },
+            ],
+          },
+        ],
+        stats: { grouped_devices: 0, ungrouped_devices: 6 },
+      },
+    });
+
+    const out = await deviceApi.getGroups();
+    const group = out.groups.find((item) => item.id === UNASSIGNED_GROUP_ID);
+
+    expect(group?.name).toBe('默认设备组');
+    expect(group?.nameI18n).toEqual({ 'zh-CN': '默认设备组', 'en-US': 'Default Group' });
+    expect(out.stats.totalDevices).toBe(6);
+  });
+});
+
 describe('deviceApi.getStats / getProductClasses — 端点透传', () => {
   it('getStats 打 /devices/stats', async () => {
-    getMock.mockResolvedValue({ data: { total: 5, online: 3, offline: 2, alarm: 0 } });
+    getMock.mockResolvedValue({ data: { counts: { total: 5, online: 3, offline: 2, alarm: 0 } } });
     const s = await deviceApi.getStats();
     expect(getMock.mock.calls[0][0]).toBe('/devices/stats');
-    expect(s.total).toBe(5);
+    expect(s.counts.total).toBe(5);
   });
 
   it('getProductClasses 打 /devices/product-classes', async () => {

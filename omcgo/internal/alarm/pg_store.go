@@ -32,7 +32,15 @@ func NewPgAlarmStore(pool *pgxpool.Pool, tsPool *pgxpool.Pool) *PgAlarmStore {
 
 func (s *PgAlarmStore) SaveActive(ctx context.Context, alarm *model.Alarm) error {
 	additionalJSON, _ := json.Marshal(alarm.AdditionalInfo)
-	_, err := s.pool.Exec(ctx,
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin save active tx: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	_, err = tx.Exec(ctx,
 		`INSERT INTO alarms_active (id, device_id, device_sn, carrier, severity, alarm_type, alarm_identifier, description, status, raised_at, acknowledged_at, acknowledged_by, ack_note, additional_info, created_at, updated_at,
 			 device_name, technology, alarm_source, event_type, network_location, explicit_cause, is_read, ack_count, first_raised_at, last_updated_at, probable_cause, is_unknown)
 			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)`,
@@ -45,6 +53,21 @@ func (s *PgAlarmStore) SaveActive(ctx context.Context, alarm *model.Alarm) error
 	)
 	if err != nil {
 		return fmt.Errorf("insert alarms_active: %w", err)
+	}
+	// 同事务维护 device_info.active_alarm_count 冗余列（新增告警 +1）
+	if alarm.DeviceID != (uuid.UUID{}) {
+		if _, err = tx.Exec(ctx,
+			`UPDATE device_info
+			    SET active_alarm_count = GREATEST(0, active_alarm_count + 1)
+			  WHERE device_id = $1`,
+			alarm.DeviceID,
+		); err != nil {
+			return fmt.Errorf("adjust active_alarm_count (+1) for device %s: %w", alarm.DeviceID, err)
+		}
+	}
+
+	if err = tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit save active tx: %w", err)
 	}
 	return nil
 }
@@ -128,9 +151,51 @@ func (s *PgAlarmStore) UpdateActive(ctx context.Context, alarm *model.Alarm) err
 }
 
 func (s *PgAlarmStore) RemoveActive(ctx context.Context, id uuid.UUID) error {
-	_, err := s.pool.Exec(ctx, "DELETE FROM alarms_active WHERE id = $1", id)
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin remove active tx: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	// 获取 device_id，供删除后同事务维护计数。
+	var deviceID uuid.UUID
+	if err = tx.QueryRow(ctx, "SELECT device_id FROM alarms_active WHERE id = $1", id).Scan(&deviceID); err != nil {
+		if gerr.Is(err, pgx.ErrNoRows) {
+			if commitErr := tx.Commit(ctx); commitErr != nil {
+				return fmt.Errorf("commit remove active tx (no rows): %w", commitErr)
+			}
+			return nil
+		}
+		return fmt.Errorf("get device_id for alarm %s: %w", id, err)
+	}
+
+	res, err := tx.Exec(ctx, "DELETE FROM alarms_active WHERE id = $1", id)
 	if err != nil {
 		return fmt.Errorf("delete alarms_active: %w", err)
+	}
+	if res.RowsAffected() == 0 {
+		if commitErr := tx.Commit(ctx); commitErr != nil {
+			return fmt.Errorf("commit remove active tx (delete no rows): %w", commitErr)
+		}
+		return nil
+	}
+
+	// 同事务维护 device_info.active_alarm_count 冗余列（告警清除 -1）
+	if deviceID != (uuid.UUID{}) {
+		if _, err = tx.Exec(ctx,
+			`UPDATE device_info
+			    SET active_alarm_count = GREATEST(0, active_alarm_count - 1)
+			  WHERE device_id = $1`,
+			deviceID,
+		); err != nil {
+			return fmt.Errorf("adjust active_alarm_count (-1) for device %s: %w", deviceID, err)
+		}
+	}
+
+	if err = tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit remove active tx: %w", err)
 	}
 	return nil
 }
@@ -307,6 +372,16 @@ func (s *PgAlarmStore) Statistics(ctx context.Context, filter AlarmFilter) (*Ala
 		return nil, fmt.Errorf("count unread: %w", err)
 	}
 
+	versionSQL, versionArgs, err := activeStatsBase(filter).
+		Column("COALESCE(SUM((EXTRACT(EPOCH FROM alarms_active.updated_at))::bigint), 0)::bigint AS state_version").
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build state version: %w", err)
+	}
+	if err := s.pool.QueryRow(ctx, versionSQL, versionArgs...).Scan(&stats.StateVersion); err != nil {
+		return nil, fmt.Errorf("count state version: %w", err)
+	}
+
 	sevSQL, sevArgs, err := activeStatsBase(filter).
 		Columns("alarms_active.severity", "COUNT(*)").
 		GroupBy("alarms_active.severity").ToSql()
@@ -420,6 +495,16 @@ func (s *PgAlarmStore) HistoryStatistics(ctx context.Context, filter AlarmFilter
 	}
 	if err := s.tsPool.QueryRow(ctx, totalSQL, totalArgs...).Scan(&stats.TotalActive); err != nil {
 		return nil, fmt.Errorf("count history: %w", err)
+	}
+
+	versionSQL, versionArgs, err := historyStatsBase(filter).
+		Column("COALESCE(SUM((EXTRACT(EPOCH FROM alarms_history.updated_at))::bigint), 0)::bigint AS state_version").
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build history state version: %w", err)
+	}
+	if err := s.tsPool.QueryRow(ctx, versionSQL, versionArgs...).Scan(&stats.StateVersion); err != nil {
+		return nil, fmt.Errorf("count history state version: %w", err)
 	}
 
 	sevSQL, sevArgs, err := historyStatsBase(filter).

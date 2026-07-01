@@ -73,11 +73,13 @@ export const useTabStore = create<TabState>()(
         const { tabs } = get();
         // 兼容动态菜单：动态菜单使用 routePath（'/dashboard'）作为 key，
         // 静态菜单使用 'dashboard' 作为 key。通过 path 匹配确保两者指向同一个 tab。
+        // 注意：syncActiveTabPath 会把 search params 写进 tab.path（如 /alarm/current?severity=2），
+        // 因此这里用 basename（去掉 ?...）做匹配，避免同一路由因 search params 不同而重复建 tab。
+        const tabBasePath = tab.path.split('?')[0];
         const existsIdx = tabs.findIndex(
           (t) =>
             t.key === tab.key ||
-            t.path === tab.path ||
-            (tab.path === '/dashboard' && t.path === '/dashboard'),
+            t.path.split('?')[0] === tabBasePath,
         );
         if (existsIdx !== -1) {
           // 命中同 key（或同 path 的 /dashboard）时，同步 path/label/labelRaw/closable，

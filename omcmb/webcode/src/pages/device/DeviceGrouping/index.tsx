@@ -13,6 +13,9 @@ import {
   useBatchRebootDevices,
   useUpdateDevice,
 } from '@core/hooks/api/useDevices';
+import { useAppStore } from '@core/store/appStore';
+import { expandSelectedGroupIds } from '@core/utils/deviceGroupFilter';
+import { withDeviceGroupDisplayName } from '@core/utils/deviceGroupDisplay';
 import { useT } from '@/hooks/useT';
 import { useI18nText } from '@/hooks/useI18nText';
 import type { Device } from '@core/types/device';
@@ -39,6 +42,7 @@ import { buildGroupTargetOptions } from '@core/utils/deviceGroupTargets';
 export default function DeviceGrouping() {
   const t = useT();
   const { fromRecord } = useI18nText();
+  const locale = useAppStore((s) => s.locale);
   const { modal, message } = App.useApp();
   const { data: groupsData, refetch: refetchGroups } = useDeviceGroups();
   const groups = groupsData?.groups ?? [];
@@ -72,18 +76,21 @@ export default function DeviceGrouping() {
   const editLevel2NameFilters = useNameFilters();
 
   // ── Data fetching ──
-  const queryParams = useMemo(
-    () => ({
+  const queryParams = useMemo(() => {
+    const expandedGroupIDs = expandSelectedGroupIds(selectedGroupId ?? undefined, groups);
+    return {
       page: currentPage,
       pageSize,
-      groupId: selectedGroupId ?? undefined,
+      ...(expandedGroupIDs ? { groupId: expandedGroupIDs } : {}),
       // searchText → getList 映射为后端 ?search=（覆盖 SN/设备名称等，逗号分隔多关键字）
       searchText: searchText.trim() || undefined,
-    } as Parameters<typeof useDeviceList>[0]),
-    [currentPage, pageSize, selectedGroupId, searchText]
-  );
+    } as Parameters<typeof useDeviceList>[0];
+  }, [currentPage, pageSize, selectedGroupId, searchText, groups]);
   const { data: deviceData, isLoading, refetch } = useDeviceList(queryParams);
-  const devices: Device[] = deviceData?.items ?? [];
+  const devices: Device[] = useMemo(
+    () => withDeviceGroupDisplayName(deviceData?.items ?? [], groups, locale),
+    [deviceData?.items, groups, locale]
+  );
   const total = deviceData?.total ?? 0;
 
   const selectedGroup = useMemo(

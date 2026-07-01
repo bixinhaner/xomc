@@ -5,6 +5,7 @@ import { PageShell } from '@/components/shell/PageShell'
 import { NeonButton } from '@/components/ui/NeonButton'
 import { useSysConfigsByCategory } from '@core/hooks/api/useSystem'
 import type { SysConfigItem } from '@core/types/system'
+import { getSysConfigEnum } from '@core/config/sysConfigEnums'
 
 import { StateBlock, MiniStat, RowHeader } from './_shared'
 import { useT } from '@/hooks/useT'
@@ -125,7 +126,14 @@ export default function SystemConfig() {
                           {cfg.isPublic ? <span className="chip text-[#00ff88]">PUBLIC</span> : null}
                         </div>
                         <div className="min-w-0 truncate font-mono text-xs text-cyan-200">
-                          {cfg.value || '—'}
+                          {(() => {
+                            // 枚举型配置项：只读展示时把存储值映射为友好文案（如
+                            // auto_lmt_to_omc → 自动修改：LMT 名称覆盖网管），与 v1/v2 一致。
+                            const enumSpec = getSysConfigEnum(cfg.category, cfg.key)
+                            const opt = enumSpec?.options.find((o) => o.value === cfg.value)
+                            if (opt) return t(opt.labelKey)
+                            return cfg.value || '—'
+                          })()}
                         </div>
                         <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-cyan-300/65">
                           {cfg.valueType || 'string'}

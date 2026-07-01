@@ -217,10 +217,15 @@ export function useCreateDevice() {
 export function useUpdateDevice() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Parameters<typeof api.update>[1] }) =>
-      api.update(id, data),
-    onSuccess: (_result, { id }) => {
+    mutationFn: ({ id, data, fallbackDevice }: { id: string; data: Parameters<typeof api.update>[1]; fallbackDevice?: Partial<Device> }) =>
+      api.update(id, data, fallbackDevice),
+    onSuccess: (result, { id, fallbackDevice }) => {
       void queryClient.invalidateQueries({ queryKey: ['devices', 'detail', id] });
+      void queryClient.invalidateQueries({ queryKey: ['devices', 'detail-composite-v2', id] });
+      const sn = result.sn || fallbackDevice?.sn;
+      if (sn) {
+        void queryClient.invalidateQueries({ queryKey: ['devices', 'sn', sn] });
+      }
       void queryClient.invalidateQueries({ queryKey: ['devices', 'list'] });
     },
   });
@@ -340,5 +345,18 @@ export function useProductClasses() {
     queryKey: ['devices', 'product-classes'],
     queryFn: () => deviceApi.getProductClasses(),
     staleTime: 5 * 60 * 1000,
+  });
+}
+
+// 网管侧手动改基站名（即时下发）
+// 成功后 invalidate 设备详情缓存，让列表/详情刷新新名称
+export function useRenameDevice(deviceId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => deviceApi.renameDevice(deviceId, name),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['devices', deviceId] });
+      void queryClient.invalidateQueries({ queryKey: ['devices', 'list'] });
+    },
   });
 }

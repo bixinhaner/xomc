@@ -1,8 +1,8 @@
 import http from '../http';
 import type { Device, NE, DeviceFilter, DeviceGroup, DeviceListResponse, DeviceListStats, DeviceStats, DeviceParameter, CreateDeviceInput, NameFilterItem, BatchImportRequest, BatchImportResponse } from '../../types/device';
-import type { AlarmSeverity } from '../../types/common';
 import type { PageRequest, PageResponse } from '../../types/pagination';
 import { normalizeDeviceSyncStatus } from '../../utils/deviceSyncStatus';
+import { normalizeAlarmSeverity } from '../../utils/alarmSeverity';
 
 // Backend device model from Go struct
 interface BackendDevice {
@@ -45,6 +45,7 @@ interface BackendDevice {
   // 旧 *? 字段保留作为兼容（Mock / 自填值场景），mapper 优先读正确字段。
   mac?: string;
   mac_address?: string;
+  group_id?: string;
   group_name?: string;
   // T-XXX (Phase 0)：字段名对齐后端 DeviceWithInfo DTO（json tag），
   // 修复"其他信息组"接入/断开/首次接入/运行时长 5 字段全空白 bug。
@@ -67,6 +68,10 @@ interface BackendDevice {
   rom?: string;
   remark?: string;
   gnb_id?: string;
+
+  // Issue #758：设备名称同步
+  name_sync_pending?: boolean;
+  lmt_device_name?: string;
 
   // Cell
   enb_id?: string;
@@ -148,6 +153,7 @@ interface BackendDevice {
   vertical_beam_width?: string;
   horizontal_azimuth?: string;
   install_address?: string;
+  device_address?: string;
   // T-XXX (Phase 5): gps_satellites 是后端实际字段（migration 000181 列名）；
   // gps_satellite_count 是旧前端假定名，保留兼容，mapper 优先 gps_satellites。
   gps_satellites?: number;
@@ -182,6 +188,18 @@ export interface RestoreDevicesResult {
   skipped: number;
   conflicts: RestoreConflict[];
 }
+
+function buildUpdatedDeviceFallback(id: string, data: Partial<Device>, fallbackDevice?: Partial<Device>): Device {
+  return {
+    ...(fallbackDevice ?? {}),
+    ...data,
+    id,
+    sn: data.sn ?? fallbackDevice?.sn ?? '',
+    installAddress: data.installAddress ?? fallbackDevice?.installAddress ?? '',
+    remark: data.remark ?? fallbackDevice?.remark ?? '',
+  } as Device;
+}
+
 // 后端 handler 返回的 JSON 形态（key 与 Go gin.H / 结构体 json tag 一致）。
 interface BackendRestoreResult {
   restored?: number;
@@ -243,15 +261,6 @@ function toRadioMode(technology: string): string {
   }
 }
 
-// #361: 把后端 alarm_severity 文本归一化到 AlarmSeverity | 'none'。
-// 后端已把 alarms_active.severity(smallint 1..4) 映成 critical/major/minor/warning
-// 文本；无活动告警时为 null/空/未知 → 归 'none'（灰色）。
-const VALID_ALARM_SEVERITIES: ReadonlyArray<AlarmSeverity> = ['critical', 'major', 'minor', 'warning'];
-function normalizeAlarmLevel(raw?: string | null): AlarmSeverity | 'none' {
-  const v = (raw ?? '').toLowerCase().trim();
-  return (VALID_ALARM_SEVERITIES as readonly string[]).includes(v) ? (v as AlarmSeverity) : 'none';
-}
-
 function mapBackendDevice(bd: BackendDevice): Device {
   // 兼容旧后端：若尚未升级到 T-0162 双字段，回退到 status 口径。
   const lifecycleState = (bd.lifecycle_state || deriveLegacyLifecycle(bd.status)) as Device['lifecycleState'];
@@ -285,7 +294,7 @@ function mapBackendDevice(bd: BackendDevice): Device {
 
     // #361: 读后端 alarm_severity（alarms_active 实时聚合的文本），归一化到
     // AlarmSeverity | 'none'；不再无条件写死 'none'。
-    alarmLevel: normalizeAlarmLevel(bd.alarm_severity),
+    alarmLevel: normalizeAlarmSeverity(bd.alarm_severity),
     activeAlarmCount: bd.active_alarm_count ?? 0,
     engStatus: 'commissioned',
     mgmtStatus: 'managed',
@@ -304,6 +313,7 @@ function mapBackendDevice(bd: BackendDevice): Device {
     firmwareVersion: bd.firmware_version || '',
     // T-XXX (Phase 5)：优先后端实际字段 mac，兜底旧 mac_address
     macAddress: bd.mac || bd.mac_address || '',
+    groupId: bd.group_id || undefined,
     groupName: bd.group_name || '',
     // T-XXX (Phase 0)：字段名对齐后端 DTO。设计文档 §13。
     onlineTime: bd.last_online_time || '',
@@ -321,6 +331,10 @@ function mapBackendDevice(bd: BackendDevice): Device {
     rom: bd.rom || '',
     remark: bd.remark || '',
     gnbId: bd.gnb_id || '',
+
+    // Issue #758：设备名称同步
+    nameSyncPending: bd.name_sync_pending ?? false,
+    lmtDeviceName: bd.lmt_device_name || '',
 
     enbId: bd.enb_id || '',
     cellId: bd.cell_id || '',
@@ -391,7 +405,7 @@ function mapBackendDevice(bd: BackendDevice): Device {
     electronicDowntilt: bd.electronic_downtilt || '',
     verticalBeamWidth: bd.vertical_beam_width || '',
     horizontalAzimuth: bd.horizontal_azimuth || '',
-    installAddress: bd.install_address || '',
+    installAddress: bd.install_address || bd.device_address || '',
     // T-XXX (Phase 5)：gps_satellites 是后端实际字段；gps_satellite_count 兜底
     gpsSatelliteCount: bd.gps_satellites ?? bd.gps_satellite_count ?? 0,
 
@@ -469,9 +483,6 @@ export const deviceApi = {
       const tech = legacyMap[params.networkType] ?? params.networkType;
       query.technology = tech;
     }
-    // groupId → group_id (device group filter)
-    if (params.groupId) query.group_id = params.groupId;
-
     // T-0162: 新筛选维度，直接 1:1 传给后端，前端不再翻译
     if (params.lifecycleState && params.lifecycleState.length > 0) {
       query.lifecycle_state = params.lifecycleState.join(','); // CSV 多选
@@ -495,6 +506,9 @@ export const deviceApi = {
       if (Array.isArray(v)) return v.length > 0 ? v.join(',') : undefined;
       return v ? String(v) : undefined;
     };
+    // groupId 多选 → CSV。FilterBar 的 multi-select 运行时返回数组，若直接透传
+    // axios 会序列化成 group_id[]=a&group_id[]=b，后端 c.Query("group_id") 读不到。
+    if (params.groupId) query.group_id = csv(params.groupId);
     if (params.modelName) query.model_name = csv(params.modelName);
     if (params.softwareVersion) query.software_version = csv(params.softwareVersion);
     if (params.firmwareVersion) query.firmware_version = csv(params.firmwareVersion);
@@ -563,24 +577,43 @@ export const deviceApi = {
     return mapBackendDevice(created);
   },
 
-  async update(id: string, data: Partial<Device>): Promise<Device> {
-    const payload: Record<string, unknown> = {};
-    if (data.sn !== undefined) payload.serial_number = data.sn;
-    if (data.vendor !== undefined) payload.manufacturer = data.vendor;
-    if (data.productClass !== undefined) payload.product_class = data.productClass;
-    if (data.networkType !== undefined) payload.technology = data.networkType;
-    if (data.deviceModel !== undefined) payload.model_name = data.deviceModel;
-    if (data.connStatus !== undefined) payload.status = data.connStatus === 'online' ? 'active' : 'offline';
-    if (data.softwareVersion !== undefined) payload.firmware_version = data.softwareVersion;
-    if (data.ipAddress !== undefined) payload.ip_address = data.ipAddress;
-    if (data.site !== undefined) payload.device_name = data.site;
-    if (data.name !== undefined) payload.device_name = data.name;
-    if (data.stationId !== undefined) payload.site_id = data.stationId;
-    if (data.latitude !== undefined) payload.latitude = data.latitude;
-    if (data.longitude !== undefined) payload.longitude = data.longitude;
-    if (data.remark !== undefined) payload.remark = data.remark;
-    const { data: updated } = await http.put<BackendDevice>(`/devices/${id}`, payload);
-    return mapBackendDevice(updated);
+  async update(id: string, data: Partial<Device>, fallbackDevice?: Partial<Device>): Promise<Device> {
+    const devicePayload: Record<string, unknown> = {};
+    const deviceInfoPayload: Record<string, unknown> = {};
+
+    if (data.sn !== undefined) devicePayload.serial_number = data.sn;
+    if (data.vendor !== undefined) devicePayload.manufacturer = data.vendor;
+    if (data.productClass !== undefined) devicePayload.product_class = data.productClass;
+    if (data.networkType !== undefined) devicePayload.technology = data.networkType;
+    if (data.deviceModel !== undefined) devicePayload.model_name = data.deviceModel;
+    if (data.connStatus !== undefined) devicePayload.status = data.connStatus === 'online' ? 'active' : 'offline';
+    if (data.softwareVersion !== undefined) devicePayload.firmware_version = data.softwareVersion;
+    if (data.ipAddress !== undefined) devicePayload.ip_address = data.ipAddress;
+    if (data.site !== undefined) devicePayload.device_name = data.site;
+    if (data.name !== undefined) devicePayload.device_name = data.name;
+    if (data.stationId !== undefined) devicePayload.site_id = data.stationId;
+    if (data.latitude !== undefined) devicePayload.latitude = data.latitude;
+    if (data.longitude !== undefined) devicePayload.longitude = data.longitude;
+
+    if (data.remark !== undefined) deviceInfoPayload.remark = data.remark;
+    if (data.installAddress !== undefined) deviceInfoPayload.address = data.installAddress;
+
+    if (Object.keys(devicePayload).length > 0) {
+      await http.put<BackendDevice>(`/devices/${id}`, devicePayload);
+    }
+    if (Object.keys(deviceInfoPayload).length > 0) {
+      await http.put(`/devices/${id}/info`, deviceInfoPayload);
+    }
+
+    try {
+      const { data: updated } = await http.get<BackendDevice>(`/devices/${id}`);
+      return mapBackendDevice(updated);
+    } catch {
+      if (Object.keys(devicePayload).length > 0 || Object.keys(deviceInfoPayload).length > 0) {
+        return buildUpdatedDeviceFallback(id, data, fallbackDevice);
+      }
+      throw new Error(`device ${id} update was skipped`);
+    }
   },
 
   async delete(ids: string[]): Promise<BatchOperationResult> {
@@ -843,5 +876,15 @@ export const deviceApi = {
   async getProductClasses(): Promise<string[]> {
     const { data } = await http.get<string[]>('/devices/product-classes');
     return data;
+  },
+
+  // Issue #758: 设备名称同步 - 解决名称差异
+  async resolveNameSync(deviceId: string, action: 'use_lmt' | 'use_omc' | 'ignore'): Promise<void> {
+    await http.post(`/devices/${deviceId}/resolve-name-sync`, { action });
+  },
+
+  // 网管侧手动改基站名（即时下发）- 按 nameSyncMode 策略决定是否下发
+  async renameDevice(deviceId: string, name: string): Promise<void> {
+    await http.post(`/devices/${deviceId}/rename`, { name });
   },
 };

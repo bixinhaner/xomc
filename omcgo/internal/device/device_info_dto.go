@@ -17,6 +17,9 @@ type DeviceWithInfo struct {
 
 	// ===== 设备分组信息（可能为空）=====
 
+	// GroupID 设备分组 ID
+	GroupID *uuid.UUID `json:"group_id,omitempty"`
+
 	// GroupName 设备分组名称
 	GroupName *string `json:"group_name"`
 
@@ -122,9 +125,9 @@ type DeviceWithInfo struct {
 	// 前端 device list 'Admin State' 列；LTE 设备为 NULL。
 	AdminState *string `json:"admin_state"`
 	// IpsecAddr Device.DeviceInfo.SERVING_UNIT1_IPSEC_Address，前端 'IPSec 地址' 列。
-	IpsecAddr  *string `json:"ipsec_addr"`
-	EnbID              *string  `json:"enb_id"`
-	NetworkModel       *string  `json:"network_model"`
+	IpsecAddr    *string `json:"ipsec_addr"`
+	EnbID        *string `json:"enb_id"`
+	NetworkModel *string `json:"network_model"`
 
 	// ===== GSM/BTS 专属（migration 000003，DeviceGSM.* TR069 路径同步）=====
 	// 前端 mapBackendDevice 早已声明 bd.bsc_select / bd.oml_remote_ip 等并消费，
@@ -139,6 +142,16 @@ type DeviceWithInfo struct {
 	// BscLinkStatus 由 SELECT 派生（oml_remote_ip 非空 + d.is_online → "connected"
 	// 否则 "disconnected"），不对应物理列。前端 Tag 映射 connected/disconnected。
 	BscLinkStatus *string `json:"bsc_link_status,omitempty"`
+
+	// ===== 设备名称同步（Issue #758）=====
+
+	// NameSyncPending 设备名称同步待处理标记。
+	// true = LMT 名称与网管名称不一致且 prompt=true，需人工确认（前端显示小红点）。
+	NameSyncPending *bool `json:"name_sync_pending,omitempty"`
+
+	// LMTDeviceName 从 LMT 读取的设备名称（HNBName / gNBName）缓存。
+	// 供前端在名称冲突时对比展示"LMT 名称"与"网管名称"。
+	LMTDeviceName *string `json:"lmt_device_name,omitempty"`
 
 	// ===== device_info 时间信息（可能为空）=====
 

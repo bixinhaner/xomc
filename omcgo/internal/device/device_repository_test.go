@@ -287,17 +287,17 @@ func TestFindStaleDevicesByClass_NullProductClass_FallsIntoENBBranch(t *testing.
 	assert.EqualValues(t, 100, args[2], "ELSE（NULL/eNB）分支用 enbThresholdSec（$3）")
 }
 
-// TestAlarmSeverityTextToNum 锁定 #361 文本↔severity 数值映射：
-// 1=critical / 2=major / 3=minor / 4=warning（最严重=数值最小），未知→0。
-func TestAlarmSeverityTextToNum(t *testing.T) {
-	cases := map[string]int{
-		"critical": 1, "major": 2, "minor": 3, "warning": 4,
-		"CRITICAL": 1, " Major ": 2, // 大小写/空白容错
-		"none": 0, "": 0, "bogus": 0,
+// TestAlarmSeverityTextToCodes 锁定 #361 文本↔severity 编码映射：
+// critical/major/minor/warning 同时兼容历史 1~4 与现行 31001~31004，未知→nil。
+func TestAlarmSeverityTextToCodes(t *testing.T) {
+	cases := map[string][]int{
+		"critical": {1, 31001}, "major": {2, 31002}, "minor": {3, 31003}, "warning": {4, 31004},
+		"CRITICAL": {1, 31001}, " Major ": {2, 31002}, // 大小写/空白容错
+		"none": nil, "": nil, "bogus": nil,
 	}
 	for text, want := range cases {
-		assert.Equalf(t, want, alarmSeverityTextToNum(text),
-			"alarmSeverityTextToNum(%q)", text)
+		assert.Equalf(t, want, alarmSeverityTextToCodes(text),
+			"alarmSeverityTextToCodes(%q)", text)
 	}
 }
 
@@ -313,8 +313,10 @@ func TestAlarmSeverityFilterCond_SQLShape(t *testing.T) {
 	assert.Contains(t, sqlStr, "FROM alarms_active")
 	assert.Contains(t, sqlStr, "MIN(aaf.severity)")
 	assert.Contains(t, sqlStr, "status <> 'cleared'")
-	require.Len(t, args, 1)
-	assert.EqualValues(t, 2, args[0], "major → severity=2")
+	assert.Contains(t, sqlStr, "IN (")
+	require.Len(t, args, 2)
+	assert.EqualValues(t, 2, args[0], "major → legacy severity=2")
+	assert.EqualValues(t, 31002, args[1], "major → dictionary severity=31002")
 
 	// 未知级别：不过滤。
 	assert.Nil(t, alarmSeverityFilterCond("none"))
@@ -329,6 +331,10 @@ func TestDeviceWithInfoSelectColumns_AlarmAggregation(t *testing.T) {
 	joined := strings.Join(cols, " || ")
 
 	assert.Contains(t, joined, "CASE aa.top_sev", "告警级别列必须来自聚合派生 CASE")
+	assert.Contains(t, joined, "31001", "critical 需兼容 31001 编码")
+	assert.Contains(t, joined, "31002", "major 需兼容 31002 编码")
+	assert.Contains(t, joined, "31003", "minor 需兼容 31003 编码")
+	assert.Contains(t, joined, "31004", "warning 需兼容 31004 编码")
 	assert.Contains(t, joined, "AS alarm_severity", "派生列别名仍为 alarm_severity（前端契约不变）")
 	assert.Contains(t, joined, "aa.active_alarm_count", "必须暴露活动告警数列")
 	assert.NotContains(t, joined, "di.alarm_severity",

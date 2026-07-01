@@ -59,6 +59,7 @@ function deviceGeoToMapDevice(device: DeviceGeo): MapDevice {
     mac: device.mac,
     pci: device.pci,
     device_name: device.device_name,
+    ueCount: device.ueCount,
   };
 }
 
@@ -1263,8 +1264,13 @@ export default function GISMapView() {
                                 sn: result.sn,
                                 groupName: result.groupName,
                                 address: '',
-                                alarmCount: 0,
+                                alarmCount: result.alarmCount ?? 0,
                                 type: undefined,
+                                ip_address: result.ip_address,
+                                mac: result.mac,
+                                pci: result.pci,
+                                device_name: result.device_name,
+                                ueCount: result.ueCount,
                               };
                               // 设置搜索结果设备，让地图组件独立显示
                               setSearchResultDevice(mapDevice);

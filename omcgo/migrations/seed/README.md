@@ -21,7 +21,7 @@
 - **菜单 / API 权限**：`menus`、`api_endpoints`
 - **系统字典 / 配置**：`sys_dictionaries`、`sys_dictionary_details`、`sys_configs`
 - **基础参考**：`alarm_severity_levels`、`mr_indicators`、`ufte_task_types`、`ops_templates`、`pm_tasks`（全网内置任务）、`dashboard_kpi_layouts`
-- **设备分组**：仅两个系统内置组 `默认设备组`（一级）+ `未分组设备`（二级）
+- **设备分组**：仅两个系统内置组 `默认设备组`（一级）+ `默认设备组`（二级未分组视图）
 - **MML 命令树 + 标准参数**：`mml_param_versions`、`mml_command_groups`、`mml_commands`、`mml_command_sub_fields`、`standard_params`（MML 命令的元属性引用；由 cmcc_tdlte 标准派生）
 
 **不内置**的两类数据：

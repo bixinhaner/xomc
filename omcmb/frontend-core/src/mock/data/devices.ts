@@ -42,6 +42,17 @@ const rfStatuses = ['on', 'off', ''];
 const syncStatuses = ['synchronized', 'not synchronized', ''];
 const bands = ['Band 1', 'Band 3', 'Band 5', 'Band 7', 'Band 38', 'Band 40', 'Band 41', 'n41', 'n78', 'n79'];
 
+const cityGroupIDs: Record<string, string> = {
+  北京: 'grp-bj',
+  上海: 'grp-sh',
+  南京: 'grp-nj',
+  杭州: 'grp-hz',
+  广州: 'grp-gz',
+  深圳: 'grp-sz',
+  成都: 'grp-cd',
+  西安: 'grp-xa',
+};
+
 function randomOffset(base: number, range: number): number {
   return parseFloat((base + (Math.random() - 0.5) * range).toFixed(6));
 }
@@ -62,6 +73,7 @@ function generateMAC(): string {
 
 function generateDevice(index: number): Device {
   const city = cities[index % cities.length];
+  const groupId = cityGroupIDs[city.name] ?? 'grp-default';
   const type = networkTypes[index % networkTypes.length];
   const vendor = vendors[index % vendors.length];
   const sn = generateSN(type) + String(index).padStart(3, '0');
@@ -109,7 +121,8 @@ function generateDevice(index: number): Device {
     productName: `${vendor} ${model}`,
     firmwareVersion: pickRandom(firmwareVersions),
     macAddress: generateMAC(),
-    groupName: pickRandom(groupNames),
+    groupId,
+    groupName: city.name,
     onlineTime: isOnline ? randomDate(7) : '',
     offlineTime: isOnline ? '' : randomDate(3),
     onlineDuration: isOnline ? Math.floor(Math.random() * 864000) : 0,
@@ -125,6 +138,10 @@ function generateDevice(index: number): Device {
     rom: isLTE ? `ROM-${Math.floor(Math.random() * 100)}` : '',
     remark: index % 5 === 0 ? `备注-${index}` : '',
     gnbId: gnbIdVal,
+
+    // Issue #758: 设备名称同步
+    nameSyncPending: index % 10 === 0, // 每 10 个设备模拟一个待同步
+    lmtDeviceName: index % 10 === 0 ? `LMT-${city.name}-${index}` : '',
 
     enbId: enbIdVal,
     cellId: String(Math.floor(Math.random() * 256)),
@@ -318,6 +335,10 @@ const beijingDevices: Device[] = Array.from({ length: 50 }, (_, i) => {
     rom: isLTE ? `ROM-${Math.floor(Math.random() * 100)}` : '',
     remark: i % 5 === 0 ? `备注-北京-${i}` : '',
     gnbId: gnbIdVal,
+
+    // Issue #758: 设备名称同步
+    nameSyncPending: i % 10 === 0,
+    lmtDeviceName: i % 10 === 0 ? `LMT-北京-${i}` : '',
 
     enbId: enbIdVal,
     cellId: String(Math.floor(Math.random() * 256)),

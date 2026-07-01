@@ -51,6 +51,7 @@ type SyncService struct {
 	redisClient          redis.UniversalClient
 	paramSyncWriter      ParamSyncWriter
 	deviceInfoRefresher  DeviceInfoRefresher
+	deviceNameSyncHook   *DeviceNameSyncHook // Issue #758: 设备名称同步钩子
 	config               appconfig.AutoSyncConfig
 	batchSize            int
 	logger               *zap.Logger
@@ -103,6 +104,13 @@ func (s *SyncService) SetPathBSyncTaskReader(r PathBSyncTaskReader) *SyncService
 
 func (s *SyncService) SetUnsupportedPathRepo(r mml.ProductUnsupportedPathRepository) *SyncService {
 	s.unsupportedPathRepo = r
+	return s
+}
+
+// SetDeviceNameSyncHook 注入设备名称同步钩子（Issue #758）。
+// 在 Path B 同步完成后自动检测 LMT 名称与网管名称是否一致，按配置方向同步。
+func (s *SyncService) SetDeviceNameSyncHook(h *DeviceNameSyncHook) *SyncService {
+	s.deviceNameSyncHook = h
 	return s
 }
 

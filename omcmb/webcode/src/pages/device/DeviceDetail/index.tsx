@@ -35,6 +35,7 @@ import LineChart from '@/components/Charts/LineChart';
 import ErrorBoundary from '@/components/common/ErrorBoundary';
 import { useSyncStatus } from '@core/hooks/api/useDeviceParameters';
 import { useDeviceBySn, useSyncDeviceParams } from '@core/hooks/api/useDevices';
+import { deviceApi } from '@core/services/api/deviceApi';
 import { useDictionary } from '@core/hooks/api/useSystem';
 import { activationStatusLabelOf, activationStatusOf } from '@core/utils/activationStatus';
 import { useQuickSettingsGroups } from '@core/hooks/api/useQuickSettings';
@@ -538,11 +539,50 @@ const renderDeviceSyncStatus = (value: string | undefined, t: ReturnType<typeof 
 
 // ─── 基站信息组 ────────────────────────────────────────────────────────
 
-const getStationFields = (t: ReturnType<typeof useT>, networkType: string): FieldGroup => {
+const getStationFields = (
+  t: ReturnType<typeof useT>,
+  networkType: string,
+  onResolveNameSync?: (action: 'use_lmt' | 'use_omc' | 'ignore') => void,
+): FieldGroup => {
   const fields: FieldItem[] = [
     // 公共字段
     { key: 'sn', label: t('device.sn'), render: (d) => <Text style={{ fontFamily: 'monospace' }}>{d.sn}</Text> },
-    { key: 'name', label: t('device.hostName'), render: (d) => d.name || '-' },
+    {
+      key: 'name',
+      label: t('device.hostName'),
+      render: (d) => {
+        // Issue #758: 名称同步待处理时显示对比 + 操作按钮
+        if (d.nameSyncPending && d.lmtDeviceName) {
+          return (
+            <Space direction="vertical" size={4} style={{ width: '100%' }}>
+              <Space>
+                <Badge status="processing" />
+                <Text strong>{d.name || '-'}</Text>
+                <Text type="secondary">({t('device.nameSyncPending.omcName')})</Text>
+              </Space>
+              <Space>
+                <Text>{d.lmtDeviceName}</Text>
+                <Text type="secondary">({t('device.nameSyncPending.lmtName')})</Text>
+              </Space>
+              {onResolveNameSync && (
+                <Space size={4}>
+                  <Button size="small" type="primary" onClick={() => onResolveNameSync('use_lmt')}>
+                    {t('device.nameSyncPending.useLmt')}
+                  </Button>
+                  <Button size="small" onClick={() => onResolveNameSync('use_omc')}>
+                    {t('device.nameSyncPending.useOmc')}
+                  </Button>
+                  <Button size="small" onClick={() => onResolveNameSync('ignore')}>
+                    {t('device.nameSyncPending.ignore')}
+                  </Button>
+                </Space>
+              )}
+            </Space>
+          );
+        }
+        return d.name || '-';
+      },
+    },
     { key: 'networkType', label: t('device.radioMode'), render: (d) => <Tag color={{ eNB: 'blue', gNB: 'green', GSM: 'orange' }[d.networkType ?? '']}>{d.networkType || '-'}</Tag> },
     { key: 'productClass', label: t('device.productClass'), render: (d) => d.productClass || '-' },
     { key: 'deviceModel', label: t('device.model'), render: (d) => d.deviceModel || '-' },
@@ -685,6 +725,7 @@ const getOtherFields = (t: ReturnType<typeof useT>, networkType: string, device:
     { key: 'lastInformTime', label: t('device.lastInformTime'), render: (d) => fmtTime(d.lastInformTime) },
     // 站址信息
     { key: 'siteName', label: t('device.siteName'), render: (d) => d.deviceName || '-' },
+    { key: 'installAddress', label: t('device.installAddress'), render: (d) => d.installAddress || '-' },
   ];
 
   if (shouldShowGpsLocation(device)) {
@@ -1566,19 +1607,35 @@ export default function DeviceDetail() {
     [SEVERITY_LABEL, handleAcknowledgeAlarm, handleClearAlarm, handleShowAlarmDetail, handleUnacknowledgeAlarm, t]
   );
 
+  // Issue #758: 设备名称同步 - 解决名称差异
+  const handleResolveNameSync = useCallback(
+    async (action: 'use_lmt' | 'use_omc' | 'ignore') => {
+      if (!displayDevice?.id) return;
+      try {
+        await deviceApi.resolveNameSync(displayDevice.id, action);
+        void message.success(t('common.operationSuccess'));
+        // 刷新设备详情
+        void queryClient.invalidateQueries({ queryKey: ['device'] });
+      } catch (err) {
+        void message.error(t('common.operationFailed'));
+      }
+    },
+    [displayDevice?.id, message, queryClient, t]
+  );
+
   // 根据设备制式获取字段组
   const detailGroups = useMemo((): FieldGroup[] => {
     if (!displayDevice) return [];
     const networkType = normalizeNetworkType(displayDevice.networkType);
 
     // BSC（独立 GSM 设备，paramModel === 'BSC'）按需求隐藏「状态信息」组；BTS 保留显示。
-    const groups: FieldGroup[] = [getStationFields(t, networkType)];
+    const groups: FieldGroup[] = [getStationFields(t, networkType, handleResolveNameSync)];
     if (!detailResolved.isBSC) {
       groups.push(getStatusFields(t, networkType));
     }
     groups.push(getOtherFields(t, networkType, displayDevice));
     return groups;
-  }, [detailResolved.isBSC, displayDevice, t]);
+  }, [detailResolved.isBSC, displayDevice, handleResolveNameSync, t]);
 
   const cellGroup = useMemo((): FieldGroup | null => {
     if (!displayDevice) return null;

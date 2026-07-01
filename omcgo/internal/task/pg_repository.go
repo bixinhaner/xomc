@@ -294,6 +294,7 @@ func (r *PgTaskRepository) HasIncompleteSyncGPVTasksByDevice(ctx context.Context
 		Where(sq.Eq{"t.device_sn": deviceSN}).
 		Where(sq.Like{"t.command_key": prefix + "%"}).
 		Where(sq.Eq{"t.status": []TaskStatus{TaskStatusPending, TaskStatusSent}}).
+		Where(sq.Expr("t.created_at > now() - interval '24 hours'")).
 		Where(`NOT EXISTS (
 			SELECT 1 FROM device_tasks failed
 			WHERE failed.source_id = t.source_id
