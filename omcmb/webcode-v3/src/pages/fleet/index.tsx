@@ -9,6 +9,8 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Sparkline } from '@/components/viz/Sparkline'
 import { formatTime } from '@/lib/format'
 import { prefetchDeviceDetailContext, useDeviceGroups, useDeviceList, useUpdateDevice } from '@core/hooks/api/useDevices'
+import { formatAlarmSeverityBadgeLabel } from '@core/utils/alarmSeverity'
+import { useAlarmCountWithDeviceListInvalidation } from '@core/hooks/api/useAlarms'
 import type { Device } from '@core/types/device'
 import { expandSelectedGroupIds } from '@core/utils/deviceGroupFilter'
 
@@ -28,6 +30,7 @@ export function FleetPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const queryClient = useQueryClient()
+  useAlarmCountWithDeviceListInvalidation()
   const [page, setPage] = useState(1)
   const pageSize = 20
   const [keyword, setKeyword] = useState('')
@@ -255,7 +258,13 @@ export function FleetPage() {
                   // #361: 把活动告警数拼进 HUD 徽标（如「ALM · major · 3」）。
                   <StatusBadge
                     status={d.alarmLevel}
-                    label={`ALM · ${d.alarmLevel}${(d.activeAlarmCount ?? 0) > 0 ? ` · ${d.activeAlarmCount}` : ''}`}
+                    label={`ALM · ${formatAlarmSeverityBadgeLabel(d.alarmLevel, d.activeAlarmCount, {
+                      critical: 'critical',
+                      major: 'major',
+                      minor: 'minor',
+                      warning: 'warning',
+                      none: 'none',
+                    })}`}
                   />
                 ) : (
                   <span className="font-mono text-[10px] text-cyan-300/40">NO ALARM</span>

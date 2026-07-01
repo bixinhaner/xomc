@@ -1,8 +1,8 @@
 import http from '../http';
 import type { Device, NE, DeviceFilter, DeviceGroup, DeviceListResponse, DeviceListStats, DeviceStats, DeviceParameter, CreateDeviceInput, NameFilterItem, BatchImportRequest, BatchImportResponse } from '../../types/device';
-import type { AlarmSeverity } from '../../types/common';
 import type { PageRequest, PageResponse } from '../../types/pagination';
 import { normalizeDeviceSyncStatus } from '../../utils/deviceSyncStatus';
+import { normalizeAlarmSeverity } from '../../utils/alarmSeverity';
 
 // Backend device model from Go struct
 interface BackendDevice {
@@ -257,15 +257,6 @@ function toRadioMode(technology: string): string {
   }
 }
 
-// #361: 把后端 alarm_severity 文本归一化到 AlarmSeverity | 'none'。
-// 后端已把 alarms_active.severity(smallint 1..4) 映成 critical/major/minor/warning
-// 文本；无活动告警时为 null/空/未知 → 归 'none'（灰色）。
-const VALID_ALARM_SEVERITIES: ReadonlyArray<AlarmSeverity> = ['critical', 'major', 'minor', 'warning'];
-function normalizeAlarmLevel(raw?: string | null): AlarmSeverity | 'none' {
-  const v = (raw ?? '').toLowerCase().trim();
-  return (VALID_ALARM_SEVERITIES as readonly string[]).includes(v) ? (v as AlarmSeverity) : 'none';
-}
-
 function mapBackendDevice(bd: BackendDevice): Device {
   // 兼容旧后端：若尚未升级到 T-0162 双字段，回退到 status 口径。
   const lifecycleState = (bd.lifecycle_state || deriveLegacyLifecycle(bd.status)) as Device['lifecycleState'];
@@ -299,7 +290,7 @@ function mapBackendDevice(bd: BackendDevice): Device {
 
     // #361: 读后端 alarm_severity（alarms_active 实时聚合的文本），归一化到
     // AlarmSeverity | 'none'；不再无条件写死 'none'。
-    alarmLevel: normalizeAlarmLevel(bd.alarm_severity),
+    alarmLevel: normalizeAlarmSeverity(bd.alarm_severity),
     activeAlarmCount: bd.active_alarm_count ?? 0,
     engStatus: 'commissioned',
     mgmtStatus: 'managed',

@@ -1,5 +1,4 @@
 import { useCallback, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { Plus, RefreshCcw, Search, Trash2 } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
@@ -38,6 +37,11 @@ import {
   useUpdateAlarmRule,
 } from '@core/hooks/api/useAlarms'
 import type { AlarmRule } from '@core/types/alarm'
+import {
+  buildAlarmRuleActions,
+  buildAlarmRuleConditions,
+  type AlarmRuleSelectionMode,
+} from '@core/utils/alarmRuleConditions'
 
 import { AlarmRuleDialog } from './AlarmRuleDialog'
 
@@ -54,7 +58,6 @@ function ruleTypeMeta(t: string) {
 }
 
 export default function AlarmRules() {
-  const navigate = useNavigate()
   const [page, setPage] = useState(1)
   const [pageSize] = useState(20)
   const [keyword, setKeyword] = useState('')
@@ -63,6 +66,7 @@ export default function AlarmRules() {
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingRule, setEditingRule] = useState<AlarmRule | null>(null)
+  const [dialogMode, setDialogMode] = useState<'add' | 'edit' | 'view'>('add')
   const [togglingId, setTogglingId] = useState<string | null>(null)
 
   const params = useMemo(() => {
@@ -121,11 +125,19 @@ export default function AlarmRules() {
   )
 
   const openCreate = useCallback(() => {
+    setDialogMode('add')
     setEditingRule(null)
     setDialogOpen(true)
   }, [])
 
   const openEdit = useCallback((rule: AlarmRule) => {
+    setDialogMode('edit')
+    setEditingRule(rule)
+    setDialogOpen(true)
+  }, [])
+
+  const openView = useCallback((rule: AlarmRule) => {
+    setDialogMode('view')
     setEditingRule(rule)
     setDialogOpen(true)
   }, [])
@@ -135,27 +147,18 @@ export default function AlarmRules() {
       ruleName: string
       ruleType: string
       enabled: boolean
-      alarmIdentifiers: string[]
+      deviceSelectionMode: AlarmRuleSelectionMode
+      selectedDevices: string[]
+      selectedGroups: string[]
+      selectedAlarms: string[]
     }) => {
-      const conditions = form.alarmIdentifiers.length
-        ? [
-            {
-              field: 'alarm_identifier',
-              operator: 'contains' as const,
-              value: form.alarmIdentifiers,
-            },
-          ]
-        : []
-      const actions = form.ruleType
-        ? [{ type: 'suppress' as const, target: form.ruleType }]
-        : []
       const payload = {
         ruleName: form.ruleName,
         ruleType: form.ruleType,
         enabled: form.enabled,
         severity: 'warning' as const,
-        conditions,
-        actions,
+        conditions: buildAlarmRuleConditions(form),
+        actions: buildAlarmRuleActions(form.ruleType),
       }
       if (editingRule) {
         await updateRule.mutateAsync({ id: editingRule.id, data: payload })
@@ -286,7 +289,7 @@ export default function AlarmRules() {
                       <button
                         type="button"
                         className="flex items-center gap-2 hover:underline"
-                        onClick={() => navigate(`/alarm/rules`)}
+                        onClick={() => openView(r)}
                       >
                         {r.isDefault ? (
                           <Badge variant="secondary">默认</Badge>
@@ -307,7 +310,7 @@ export default function AlarmRules() {
                           variant="ghost"
                           size="sm"
                           className="h-7 px-2 text-xs"
-                          onClick={() => navigate(`/alarm/rules`)}
+                          onClick={() => openView(r)}
                         >
                           查看
                         </Button>
@@ -348,6 +351,7 @@ export default function AlarmRules() {
 
       <AlarmRuleDialog
         open={dialogOpen}
+        mode={dialogMode}
         rule={editingRule}
         loading={createRule.isPending || updateRule.isPending}
         onSubmit={handleSubmit}

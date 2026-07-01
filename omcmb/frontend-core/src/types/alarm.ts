@@ -98,6 +98,7 @@ export interface AlarmCount {
   total_active: number;
   unacknowledged: number;
   unread: number;
+  stateVersion?: number;
   critical: number;
   major: number;
   minor: number;

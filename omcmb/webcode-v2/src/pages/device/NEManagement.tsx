@@ -32,7 +32,7 @@ import { cn } from '@/lib/utils'
 
 import { useNEList } from '@core/hooks/api/useDevices'
 import type { NE } from '@core/types/device'
-import type { AlarmSeverity } from '@core/types/common'
+import { DEFAULT_ALARM_SEVERITY_LABELS_ZH, formatAlarmSeverityBadgeLabel, getAlarmSeverityBadgeVariant } from '@core/utils/alarmSeverity'
 
 // ============================================================
 // 网元管理 — NE 列表 + 关键字筛选 + 类型/连接状态过滤
@@ -41,25 +41,6 @@ import type { AlarmSeverity } from '@core/types/common'
 
 type NeTypeFilter = 'all' | 'eNB' | 'gNB' | 'CPE' | 'eGW'
 type ConnFilter = 'all' | 'online' | 'offline'
-
-const ALARM_VARIANT: Record<
-  AlarmSeverity | 'none',
-  'destructive' | 'warning' | 'default' | 'muted'
-> = {
-  critical: 'destructive',
-  major: 'destructive',
-  minor: 'warning',
-  warning: 'warning',
-  none: 'muted',
-}
-
-const ALARM_LABEL: Record<AlarmSeverity | 'none', string> = {
-  critical: '紧急',
-  major: '重要',
-  minor: '次要',
-  warning: '警告',
-  none: '无',
-}
 
 function ConnStatusBadge({ online }: { online: boolean }) {
   return (
@@ -234,8 +215,8 @@ export default function NEManagement() {
                     <ConnStatusBadge online={ne.connStatus === 'online'} />
                   </TableCell>
                   <TableCell>
-                    <Badge variant={ALARM_VARIANT[ne.alarmLevel]}>
-                      {ALARM_LABEL[ne.alarmLevel]}
+                    <Badge variant={getAlarmSeverityBadgeVariant(ne.alarmLevel)}>
+                      {formatAlarmSeverityBadgeLabel(ne.alarmLevel, 0, DEFAULT_ALARM_SEVERITY_LABELS_ZH)}
                     </Badge>
                   </TableCell>
                   <TableCell className="text-right">

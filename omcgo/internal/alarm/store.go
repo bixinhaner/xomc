@@ -40,6 +40,7 @@ type AlarmStatistics struct {
 	TotalActive     int64                         `json:"total_active"`
 	Unacknowledged int64                         `json:"unacknowledged"`
 	Unread          int64                         `json:"unread"`
+	StateVersion    int64                         `json:"state_version"`
 	BySeverity      map[model.AlarmSeverity]int64 `json:"by_severity"`
 	ByType          map[string]int64              `json:"by_type"`
 }

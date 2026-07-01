@@ -56,6 +56,7 @@ interface BackendAlarmStatistics {
   total_active: number;
   unacknowledged?: number;
   unread?: number;
+  state_version?: number;
   by_severity: Record<string, number>;
   by_type: Record<string, number>;
 }
@@ -534,6 +535,7 @@ export const alarmApi = {
       total_active: data.total_active || 0,
       unacknowledged: data.unacknowledged || 0,
       unread: data.unread || 0,
+      stateVersion: data.state_version || 0,
       critical: bySeverity['1'] || 0,
       major: bySeverity['2'] || 0,
       minor: bySeverity['3'] || 0,
@@ -550,6 +552,7 @@ export const alarmApi = {
       total_active: data.total_active || 0,
       unacknowledged: 0,
       unread: 0,
+      stateVersion: data.state_version || 0,
       critical: bySeverity['1'] || 0,
       major: bySeverity['2'] || 0,
       minor: bySeverity['3'] || 0,
