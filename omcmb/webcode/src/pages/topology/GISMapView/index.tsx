@@ -11,6 +11,7 @@
  */
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useIntl } from 'react-intl';
+import { useNavigate } from 'react-router-dom';
 import { Checkbox, Spin, Empty, Collapse, Input, Tooltip, message } from 'antd';
 import { SearchOutlined, PlusOutlined, MinusOutlined, CaretDownOutlined } from '@ant-design/icons';
 import GISMap from '@/components/GISMap';
@@ -153,6 +154,7 @@ export default function GISMapView() {
 
   // 地图组件引用
   const mapRef = useRef<GISMapRef>(null);
+  const navigate = useNavigate();
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchContainerRef = useRef<HTMLDivElement>(null);
 
@@ -1116,6 +1118,7 @@ export default function GISMapView() {
           showControls={false}
           tileUrl={mapConfigData.status === 'success' && !mapConfigData.isUsingDefault ? MAP_CONFIG.tileUrl : undefined}
           onDeviceClick={undefined}
+          onAlarmClick={(sn) => navigate(`/alarm/current?deviceSN=${encodeURIComponent(sn)}`)}
           onMapClick={() => {
             // 点击地图时收起搜索结果面板
             setDeviceSearchExpanded(false);
