@@ -32,11 +32,11 @@ function groupDeviceItems(
 }
 
 // 后端 7 个 category（参 frontend-core/src/types/system.ts SysConfigItem 注释）。
+// notify tab 已隐藏（#781）：邮件/短信后端未真实打通前不展示。
 const CONFIG_CATEGORIES: { key: string; label: string }[] = [
   { key: 'basic', label: '基础' },
   { key: 'security', label: '安全' },
   { key: 'device', label: '设备' },
-  { key: 'notify', label: '通知' },
   { key: 'storage', label: '存储' },
   { key: 'omc', label: 'OMC' },
   { key: 'northbound', label: '北向' },
