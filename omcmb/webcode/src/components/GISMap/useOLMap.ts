@@ -285,6 +285,10 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
   const measureDrawRef = useRef<Draw | null>(null);
   const isMeasuringRef = useRef(false);
   const measureOverlaysRef = useRef<Overlay[]>([]);
+  // 新 API 数据到达标志：区分「视口移动触发的 cull（可能过渡态）」和「新数据权威 cull」
+  // - true  → updateDevices 刚更新 allDevicesRef，必须执行全量重算（权威态）
+  // - false → 仅视口移动，若 visible=0 说明是过渡态，保留旧 feature 不闪白
+  const allDevicesChangedRef = useRef(false);
   // 高亮请求 ID（用于防止竞态条件）
   const highlightRequestIdRef = useRef(0);
   // “程序化飞行”计数器：progressiveFlyTo / flyTo / view.fit 起始 +1、结束 -1。
@@ -564,6 +568,8 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
     let highlightZoomLevel: number | null = null;
     mapInstanceRef.current.on('moveend', () => {
       clearTimeout(cullTimeout);
+      // 程序化飞行中跳过 cull，飞行结束后 moveend（counter=0）自然触发一次，避免双重 cull
+      if (isProgrammaticFlyingRef.current > 0) return;
       cullTimeout = setTimeout(() => {
         cullDevicesRef.current?.();
       }, 150);
@@ -642,8 +648,9 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
 
   // 把一组设备渲染进 VectorSource
   // 分批策略：设备数 > BATCH_SIZE 时用 rAF 逐批写入，避免单帧构造大量 Feature 阻塞主线程。
-  // 每批 500 条约耗时 5ms，60fps 内不丢帧；同时用 batchId 保证后来的调用能取消前批。
-  const RENDER_BATCH_SIZE = 500;
+  // RENDER_BATCH_SIZE 设为 3000，覆盖典型 pageSize（≤2000），使其走同步路径，
+  // 避免 rAF 批次被 moveend/exitFlying 等多个触发点取消导致节点反复消失。
+  const RENDER_BATCH_SIZE = 3000;
   const renderDeviceFeatures = useCallback((devices: MapDevice[]) => {
     if (!deviceSourceRef.current) return;
 
@@ -733,6 +740,50 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
         containsCoordinate(bufferedExtent, fromLonLat([device.lng, device.lat]))
     );
 
+    const source = deviceSourceRef.current;
+    const currentFeatures = source.getFeatures();
+
+    // ── 过渡态保护 ──────────────────────────────────────────────────────────
+    // 区分两种调用场景：
+    //   A. 视口移动（moveend）触发：allDevicesChangedRef=false
+    //      旧数据是宽视口的稀疏采样，缩放到新区域后可能 visible=0。
+    //      此时不清空 source，保留旧 feature 显示，等待新 API 数据到达。
+    //   B. updateDevices（新 API 数据）触发：allDevicesChangedRef=true
+    //      数据是权威的，必须执行全量重算，不跳过。
+    const isDataUpdate = allDevicesChangedRef.current;
+    allDevicesChangedRef.current = false;
+
+    if (!isDataUpdate && visible.length === 0 && currentFeatures.length > 0) {
+      // 过渡态：视口已移动但新数据未到，保留旧 feature 防止空白闪烁
+      return;
+    }
+
+    // visible=0 且是权威数据（新 API 确认该区域无设备）：直接全量清空
+    if (visible.length === 0) {
+      renderDeviceFeatures([]);
+      return;
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // 增量更新策略：避免 clear() 产生空帧闪烁
+    // 仅在删除量较小时使用增量删除（每次 removeFeature 触发一次 Cluster 重聚合）；
+    // 删除量超过阈值时回退到全量 renderDeviceFeatures
+    const INCREMENTAL_REMOVE_THRESHOLD = 200;
+    if (currentFeatures.length > 0) {
+      const visibleIds = new Set(visible.map(d => d.id));
+      const currentIds = new Set(currentFeatures.map(f => String(f.getId())));
+
+      const toAdd = visible.filter(d => !currentIds.has(d.id));
+      const toRemove = currentFeatures.filter(f => !visibleIds.has(String(f.getId())));
+
+      if (toAdd.length === 0 && toRemove.length <= INCREMENTAL_REMOVE_THRESHOLD) {
+        // 纯删除且量小：逐个 removeFeature，不经过 clear()，无空帧
+        toRemove.forEach(f => source.removeFeature(f));
+        return;
+      }
+    }
+
+    // 有新增 feature、删除量大、或 source 还是空的：走全量渲染
     renderDeviceFeatures(visible);
   }, [renderDeviceFeatures]);
 
@@ -751,7 +802,9 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
     }
 
     // 保存完整列表，随后按当前视口裁剪渲染
+    // 标记为权威数据更新：cullDevicesToViewport 必须全量重算，不跳过
     allDevicesRef.current = devices;
+    allDevicesChangedRef.current = true;
     cullDevicesToViewport();
   }, [unspiderfy, cullDevicesToViewport]);
 
