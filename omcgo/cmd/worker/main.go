@@ -725,9 +725,17 @@ func startAutoRecycleCron(w *workerInfra, logger *zap.Logger) {
 	deviceOps := device.NewPgDeviceRepository(w.PgPool)
 	job := device.NewAutoRecycleJob(lookup, deviceOps, 0, logger.Named("auto-recycle"))
 
+	// recycleCtx 绑定 worker 生命周期：GS 触发时取消，catch-up goroutine 可感知 shutdown。
+	// 对标 archiverCtx / pipeCtx 的 GS.Register 模式。
+	recycleCtx, recycleCancel := context.WithCancel(context.Background())
+	w.GS.Register("auto-recycle", 4, func(context.Context) error {
+		recycleCancel()
+		return nil
+	})
+
 	c := cron.New()
 	if _, err := c.AddFunc(device.DefaultAutoRecycleCron, func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		ctx, cancel := context.WithTimeout(recycleCtx, 10*time.Minute)
 		defer cancel()
 		if _, runErr := job.Run(ctx); runErr != nil {
 			logger.Warn("auto recycle run failed", zap.Error(runErr))
@@ -735,16 +743,22 @@ func startAutoRecycleCron(w *workerInfra, logger *zap.Logger) {
 	}); err != nil {
 		logger.Warn("invalid auto recycle cron; skipping",
 			zap.String("cron", device.DefaultAutoRecycleCron), zap.Error(err))
+		recycleCancel()
 		return
 	}
 	c.Start()
 	logger.Info("auto recycle cron started",
 		zap.String("cron", device.DefaultAutoRecycleCron))
 
-	// 启动期延迟 catch-up（给 app + 字典加载 30s 缓冲）
+	// 启动期延迟 catch-up（给 app + 字典加载 30s 缓冲）。
+	// 用 select 替代裸 time.Sleep，SIGTERM 时可立即退出，不污染 graceful shutdown 日志。
 	go func() {
-		time.Sleep(30 * time.Second)
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		select {
+		case <-time.After(30 * time.Second):
+		case <-recycleCtx.Done():
+			return
+		}
+		ctx, cancel := context.WithTimeout(recycleCtx, 10*time.Minute)
 		defer cancel()
 		deleted, err := job.Run(ctx)
 		if err != nil {
