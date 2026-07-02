@@ -1932,6 +1932,39 @@ func (r *PgDeviceRepository) ListSerialsByIDs(ctx context.Context, ids []uuid.UU
 	return out, rows.Err()
 }
 
+// FindOfflineForRecycle 查询已离线且 last_inform_at < olderThan、尚未软删除的设备 ID 列表。
+// 返回 ID 列表供调用方批量软删除（BatchDelete）。
+// limit <= 0 时回退到 500 防止单批过大。
+func (r *PgDeviceRepository) FindOfflineForRecycle(ctx context.Context, olderThan time.Time, limit int) ([]uuid.UUID, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+	rows, err := r.pool.Query(ctx,
+		`SELECT id FROM devices
+		 WHERE is_online = FALSE
+		   AND last_inform_at IS NOT NULL
+		   AND last_inform_at < $1
+		   AND deleted_at IS NULL
+		 ORDER BY last_inform_at ASC
+		 LIMIT $2`,
+		olderThan, limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("find offline for recycle: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan device id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // ListProductClasses returns distinct product_class values, sorted alphabetically.
 //
 // qa-614 #379：合并 devices ∪ firmware_versions 两个来源。固件上传抽屉的"产品类型标识"
