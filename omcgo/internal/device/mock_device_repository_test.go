@@ -204,6 +204,21 @@ func (mr *MockDeviceRepositoryMockRecorder) GetBySerialNumber(ctx, sn any) *gomo
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetBySerialNumber", reflect.TypeOf((*MockDeviceRepository)(nil).GetBySerialNumber), ctx, sn)
 }
 
+// GetDeletedBySerialNumber mocks base method.
+func (m *MockDeviceRepository) GetDeletedBySerialNumber(ctx context.Context, sn string, carrier model.CarrierCode) (*model.Device, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetDeletedBySerialNumber", ctx, sn, carrier)
+	ret0, _ := ret[0].(*model.Device)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetDeletedBySerialNumber indicates an expected call of GetDeletedBySerialNumber.
+func (mr *MockDeviceRepositoryMockRecorder) GetDeletedBySerialNumber(ctx, sn, carrier any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetDeletedBySerialNumber", reflect.TypeOf((*MockDeviceRepository)(nil).GetDeletedBySerialNumber), ctx, sn, carrier)
+}
+
 // GetGeoStats mocks base method.
 func (m *MockDeviceRepository) GetGeoStats(ctx context.Context, filter GeoStatsFilter) (*GeoStats, error) {
 	m.ctrl.T.Helper()

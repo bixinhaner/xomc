@@ -2,11 +2,13 @@ package device
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/carrier"
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/pkg/tr069"
@@ -138,6 +140,12 @@ func (h *InformHandler) handleBootstrap(ctx context.Context, evt event.Event) er
 		zap.String("serial_number", payload.DeviceId.SerialNumber))
 
 	device, err := h.service.RegisterFromInform(ctx, inform, carrierCode)
+	if errors.Is(err, commonerrors.ErrNotFound) {
+		h.logger.Info("handleBootstrap: device is in recycle bin, skipping auto-register",
+			zap.String("serial_number", payload.DeviceId.SerialNumber),
+			zap.String("carrier", string(carrierCode)))
+		return nil
+	}
 	if err != nil {
 		h.logger.Error("handleBootstrap: RegisterFromInform failed",
 			zap.Error(err),
@@ -198,6 +206,12 @@ func (h *InformHandler) handleRebootComplete(ctx context.Context, evt event.Even
 			zap.String("serial_number", sn))
 		carrierCode := h.resolveCarrier(payload.DeviceId.OUI)
 		registered, regErr := h.service.RegisterFromInform(ctx, inform, carrierCode)
+		if errors.Is(regErr, commonerrors.ErrNotFound) {
+			h.logger.Info("handleRebootComplete: device is in recycle bin, skipping auto-register",
+				zap.String("serial_number", sn),
+				zap.String("carrier", string(carrierCode)))
+			return nil
+		}
 		if regErr != nil {
 			h.logger.Error("handleRebootComplete: auto-register failed",
 				zap.Error(regErr), zap.String("serial_number", sn))
@@ -270,6 +284,12 @@ func (h *InformHandler) handlePeriodic(ctx context.Context, evt event.Event) err
 
 		carrierCode := h.resolveCarrier(payload.DeviceId.OUI)
 		registered, regErr := h.service.RegisterFromInform(ctx, inform, carrierCode)
+		if errors.Is(regErr, commonerrors.ErrNotFound) {
+			h.logger.Info("handlePeriodic: device is in recycle bin, skipping auto-register",
+				zap.String("serial_number", sn),
+				zap.String("carrier", string(carrierCode)))
+			return nil
+		}
 		if regErr != nil {
 			h.logger.Error("handlePeriodic: auto-register failed",
 				zap.Error(regErr), zap.String("serial_number", sn))
@@ -319,6 +339,12 @@ func (h *InformHandler) handlePeriodic(ctx context.Context, evt event.Event) err
 			zap.String("serial_number", sn))
 		carrierCode := h.resolveCarrier(payload.DeviceId.OUI)
 		registered, regErr := h.service.RegisterFromInform(ctx, inform, carrierCode)
+		if errors.Is(regErr, commonerrors.ErrNotFound) {
+			h.logger.Info("handlePeriodic: recycle-bin device skipped during stale-cache fall-through",
+				zap.String("serial_number", sn),
+				zap.String("carrier", string(carrierCode)))
+			return nil
+		}
 		if regErr != nil {
 			h.logger.Error("handlePeriodic: stale-cache fall-through register failed",
 				zap.Error(regErr), zap.String("serial_number", sn))

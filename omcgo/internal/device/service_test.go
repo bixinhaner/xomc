@@ -24,6 +24,7 @@ type mockDeviceRepo struct {
 	createFn            func(ctx context.Context, device *model.Device) error
 	getByIDFn           func(ctx context.Context, id uuid.UUID) (*model.Device, error)
 	getBySerialNumberFn func(ctx context.Context, sn string) (*model.Device, error)
+	getDeletedBySerialNumberFn func(ctx context.Context, sn string, carrier model.CarrierCode) (*model.Device, error)
 	updateFn            func(ctx context.Context, device *model.Device) error
 	deleteFn            func(ctx context.Context, id uuid.UUID) error
 	listFn              func(ctx context.Context, filter DeviceFilter) (*model.ListResponse[model.Device], error)
@@ -31,6 +32,7 @@ type mockDeviceRepo struct {
 	updateLastInformFn  func(ctx context.Context, sn string, at time.Time, events []string) error
 	recordBootFn        func(ctx context.Context, sn string, at time.Time) (int, error)
 	countByStatusFn     func(ctx context.Context, carrier *model.CarrierCode) (map[model.DeviceStatus]int64, error)
+	restoreDevicesFn    func(ctx context.Context, ids []uuid.UUID) (*RestoreResult, error)
 }
 
 func (m *mockDeviceRepo) Create(ctx context.Context, device *model.Device) error {
@@ -50,6 +52,13 @@ func (m *mockDeviceRepo) GetByID(ctx context.Context, id uuid.UUID) (*model.Devi
 func (m *mockDeviceRepo) GetBySerialNumber(ctx context.Context, sn string) (*model.Device, error) {
 	if m.getBySerialNumberFn != nil {
 		return m.getBySerialNumberFn(ctx, sn)
+	}
+	return nil, nil
+}
+
+func (m *mockDeviceRepo) GetDeletedBySerialNumber(ctx context.Context, sn string, carrier model.CarrierCode) (*model.Device, error) {
+	if m.getDeletedBySerialNumberFn != nil {
+		return m.getDeletedBySerialNumberFn(ctx, sn, carrier)
 	}
 	return nil, nil
 }
@@ -167,7 +176,10 @@ func (m *mockDeviceRepo) ListSerialsByIDs(_ context.Context, _ []uuid.UUID) (map
 func (m *mockDeviceRepo) ListRecycleBin(_ context.Context, _ RecycleBinFilter) (*model.ListResponse[DeviceWithInfo], error) {
 	return model.NewListResponse([]DeviceWithInfo{}, 0, 1, 20), nil
 }
-func (m *mockDeviceRepo) RestoreDevices(_ context.Context, _ []uuid.UUID) (*RestoreResult, error) {
+func (m *mockDeviceRepo) RestoreDevices(ctx context.Context, ids []uuid.UUID) (*RestoreResult, error) {
+	if m.restoreDevicesFn != nil {
+		return m.restoreDevicesFn(ctx, ids)
+	}
 	return &RestoreResult{}, nil
 }
 func (m *mockDeviceRepo) PermanentDelete(_ context.Context, _ []uuid.UUID) (int64, error) {
@@ -356,6 +368,44 @@ func TestDeviceService_RegisterFromInform_ExistingDevice(t *testing.T) {
 	// Should have delegated to UpdateFromInform, which calls repo.Update
 	assert.True(t, updateCalled, "expected Update to be called for existing device")
 	assert.Equal(t, existingID, device.ID)
+}
+
+func TestDeviceService_RegisterFromInform_DeletedDeviceSkipped(t *testing.T) {
+	deletedID := uuid.New()
+	createCalled := false
+	updateCalled := false
+
+	deviceRepo := &mockDeviceRepo{
+		getBySerialNumberFn: func(ctx context.Context, sn string) (*model.Device, error) {
+			return nil, nil
+		},
+		getDeletedBySerialNumberFn: func(ctx context.Context, sn string, carrier model.CarrierCode) (*model.Device, error) {
+			assert.Equal(t, model.CarrierCMCC, carrier)
+			return &model.Device{
+				ID:           deletedID,
+				SerialNumber: sn,
+				Status:       model.DeviceOffline,
+			}, nil
+		},
+		createFn: func(ctx context.Context, device *model.Device) error {
+			createCalled = true
+			return nil
+		},
+		updateFn: func(ctx context.Context, device *model.Device) error {
+			updateCalled = true
+			return nil
+		},
+	}
+
+	svc := newTestDeviceService(deviceRepo, &mockParamRepo{})
+	inform := sampleInform("SN001")
+
+	device, err := svc.RegisterFromInform(context.Background(), inform, model.CarrierCMCC)
+	require.ErrorIs(t, err, commonerrors.ErrNotFound)
+	require.Nil(t, device)
+
+	assert.False(t, updateCalled, "expected Update not to be called for recycle-bin device")
+	assert.False(t, createCalled, "expected Create not to be called for recycle-bin device")
 }
 
 // ---------------------------------------------------------------------------
