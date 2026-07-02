@@ -1,13 +1,15 @@
 /**
  * useMetricMetadata - 首页 KPI 面板指标元数据取数（KPI-ALL-IND 阶段4）
  *
- * 背景：放开全部指标后，面板存的是指标编号（K/C 编号），名字/单位不能再靠前端写死的
- * 「精选小表」反查。本 hook 按制式从指标库（GET /api/v1/indicators）拉全库元数据，
+ * 改造目标（PR#XXX）：统一从后端指标库获取，与 PM 性能仪表板和 KPI 视图配置对齐。
+ * 不再依赖前端硬编码的 kpi-config.ts。
+ *
+ * 背景：放开全部指标后，面板存的是指标编号（K/C 编号），名字/单位需要从指标库拉取。
+ * 本 hook 按制式从指标库（GET /api/v1/indicators）拉全库元数据，
  * 建「编号 → {名字, 单位}」映射供面板渲染。
  *
  * - 名字：按界面语言取中文名 / 英文名（缺则回退另一种 / 编号）。
- * - 单位：取指标库的原始单位串（如 %/ms/KByte/number），非 i18n key。
- * - 旧 symbolic 别名（存量配置）在库里查不到→ 调用方回退 KPI_CATALOG（kpi-config）。
+ * - 单位：取指标库的原始单位串（如 %/Mbps/ms），无需 i18n 转换。
  */
 
 import { useMemo } from 'react';
@@ -15,7 +17,6 @@ import { useAllIndicators } from '@core/hooks/api/useIndicatorsLibrary';
 import { useAppStore } from '@core/store/appStore';
 import type { DeviceType, IndicatorInfo } from '@core/types/indicatorLibrary';
 import type { TechnologyType } from '@/pages/dashboard/kpi-config';
-import { canonicalizeMetricKey, getKPIDisplayMeta } from '@/pages/dashboard/kpi-config';
 
 /** 制式 → 指标库设备类型（与配置页 KpiConfig 的 TECH_TO_DEVICE_TYPE 一致）。 */
 const TECH_TO_DEVICE_TYPE: Record<TechnologyType, DeviceType> = {
@@ -25,9 +26,9 @@ const TECH_TO_DEVICE_TYPE: Record<TechnologyType, DeviceType> = {
 };
 
 export interface MetricMeta {
-  /** 本地化显示名（中/英）。 */
+  /** 本地化显示名（中/英），来自指标库的 cnName/enName。 */
   name: string;
-  /** 原始单位串（指标库 unitId，可能为空）。 */
+  /** 原始单位串（指标库 unit 字段，如 "%"/"Mbps"/"ms"），无需 i18n 转换。 */
   unit: string;
   /** 是否为计数器（counter）；派生 KPI 为 false/undefined。 */
   isCounter: boolean;
@@ -75,42 +76,35 @@ export function useMetricMetadata(technology: TechnologyType): MetricMetadataRes
   return useMemo(() => ({ getMeta, isLoading }), [getMeta, isLoading]);
 }
 
-/** 指标的展示元数据（已本地化的名字 + 单位 + 数值换算系数）。 */
+/** 指标的展示元数据（已本地化的名字 + 单位）。 */
 export interface ResolvedMetricMeta {
-  /** 已本地化的显示名（可直接渲染，不再过 t()）。 */
+  /** 已本地化的显示名（来自指标库 cnName/enName，可直接渲染）。 */
   name: string;
-  /** 已本地化的单位串（可直接渲染，不再过 t()）；空串表示无单位。 */
+  /** 原始单位串（来自指标库 unit，可直接渲染）；空串表示无单位。 */
   unit: string;
-  /** 数值换算系数（仅 catalog 路径有，库路径恒为 1）。 */
+  /** 数值换算系数（恒为 1，库路径不做前端换算）。 */
   conversion: number;
 }
 
 /**
- * 解析一个指标的展示元数据。优先级从高到低（采“可控源优先”原则）：
+ * 解析一个指标的展示元数据。统一从后端指标库获取，与 PM 性能仪表板和 KPI 视图配置对齐。
  *
- *   1) KPI_CATALOG 命中 → 走 dashboard.kpi.* i18n + i18n unit（前端可控，质量优于
- *      指标库 enName 缩写如 `KPI.PdcpUpOctDl`）。旧 symbolic 别名被 canonicalize
- *      桥接到主键，也在这一层命中。
- *   2) 指标库元数据 → 名字/单位来自库（放开全部指标后未录入 catalog 的新指标
- *      依赖这一层）。查库时先 canonicalize，避免旧 symbolic 别名拿不到库里的 K 编号记录。
- *   3) 都查不到 → 名字回退 metricKey 本身，无单位、换算 1。
+ *   1) 指标库（primary）→ canonicalize 后按 K/C 编号查库，名字/单位直接用库值，无需 t()。
+ *   2) 查不到 → 名字回退 metricKey 本身，无单位，换算 1。
  */
 export function resolveMetricMeta(
   metricKey: string,
   meta: MetricMetadataResult,
-  t: (key: string) => string,
+  _t: (key: string) => string,
 ): ResolvedMetricMeta {
-  const catalog = getKPIDisplayMeta(metricKey);
-  if (catalog) {
-    return {
-      name: t(catalog.label),
-      unit: catalog.unit ? t(catalog.unit) : '',
-      conversion: catalog.unitConversion ?? 1,
-    };
-  }
-  const libMeta = meta.getMeta(canonicalizeMetricKey(metricKey));
+  // canonicalize：DB 迁移前的存量 symbolic name 桥接到 K/C 编号。
+  const libMeta = meta.getMeta(metricKey);
   if (libMeta) {
-    return { name: libMeta.name, unit: libMeta.unit, conversion: 1 };
+    return {
+      name: libMeta.name,   // cnName/enName，已按 locale 选取，无需 t()
+      unit: libMeta.unit,   // 原始单位字符串（%/Mbps/ms），无需 i18n 转换
+      conversion: 1,
+    };
   }
   return { name: metricKey, unit: '', conversion: 1 };
 }

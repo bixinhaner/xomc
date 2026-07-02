@@ -19,6 +19,30 @@ const HALF_WIDTH = 6;
 const FULL_WIDTH = 12;
 
 /**
+ * 各制式默认指标编号（K/C 编号，与后端 seed 数据和 kpi_alias.go 对齐）。
+ * 作为 buildDefaultLayout 的指标来源，不再依赖 kpi-config.ts 的 indicators 字段。
+ */
+const DEFAULT_METRICS: Readonly<Partial<Record<TechnologyType, Partial<Record<PanelType, string[]>>>>> = {
+  lte: {
+    traffic:       ['K900010015', 'K900010016', 'K900010040', 'K900010041'],
+    availability:  ['K900010076'],
+    utilization:   ['K900010014', 'K900010013'],
+    accessibility: ['K900010006', 'K900010002', 'K900010005', 'K900010029'],
+    retainability: ['K900010027'],
+    mobility:      ['K900010017', 'K900010022', 'K900010021', 'K900010026'],
+  },
+  nr: {
+    traffic:     ['KGNB0511', 'KGNB0510', 'KGNB0517', 'KGNB0516'],
+    utilization: ['KGNB0506', 'KGNB0505'],
+  },
+  gsm: {
+    accessibility: ['KGSM0102'],
+    retainability: ['KGSM0103'],
+    mobility:      ['KGSM0101'],
+  },
+};
+
+/**
  * 内置默认布局：由原写死的 kpi-config.ts 派生（与后端 seed 等价）。
  *
  * 用作配置读不到 / 为空 / 出错时的回退；默认值即现状，本片上线首页视觉零变化。
@@ -35,7 +59,7 @@ export function buildDefaultLayout(tech: TechnologyType): KPILayout {
 
   const panels: KPILayoutPanel[] = panelTypes.map((panelType: PanelType, index) => {
     const config = getPanelConfig(tech, panelType);
-    const metrics = config?.indicators.map((ind) => ind.key) ?? [];
+    const metrics = DEFAULT_METRICS[tech]?.[panelType] ?? [];
     const isFull = index === gsmFullLastIndex;
     const w = isFull ? FULL_WIDTH : HALF_WIDTH;
     // 半宽图两个一行：x 在 0/6 间交替，y 按行号递增；满宽图独占一行 x=0。
@@ -83,7 +107,7 @@ export function resolveLayout(
  * 用于把整页所有图的取数合并成一次批量取数（避免 N 张图各发请求）。
  *
  * @param panels 布局的图列表
- * @returns 去重后的指标 symbolic key 列表（保持首次出现顺序）
+ * @returns 去重后的 K/C 编号列表（保持首次出现顺序）
  */
 export function collectMetrics(panels: KPILayoutPanel[]): string[] {
   const seen = new Set<string>();

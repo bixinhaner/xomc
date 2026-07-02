@@ -162,59 +162,59 @@ const KPI_CONFIG = {
   // ============================================================================
 
   // Traffic Panel (4个) - 业务量
-  LTE_PDCP_VOLUME_DL: { base: 450, variance: 80 },    // LTE PDCP 下行流量 (GB)
-  LTE_PDCP_VOLUME_UL: { base: 85, variance: 20 },     // LTE PDCP 上行流量 (GB)
-  LTE_PDCP_RATE_DL: { base: 125, variance: 25 },     // LTE PDCP 下行速率 (Mbps)
-  LTE_PDCP_RATE_UL: { base: 35, variance: 10 },      // LTE PDCP 上行速率 (Mbps)
+  K900010015: { base: 450, variance: 80 },    // LTE PDCP 下行流量 (GB)
+  K900010016: { base: 85, variance: 20 },     // LTE PDCP 上行流量 (GB)
+  K900010040: { base: 125, variance: 25 },    // LTE PDCP 下行速率 (Mbps)
+  K900010041: { base: 35, variance: 10 },     // LTE PDCP 上行速率 (Mbps)
 
   // Availability Panel (1个) - 可用性
-  LTE_CELL_AVAILABLE: { base: 99.5, variance: 0.3 }, // LTE 小区可用率 (%)
+  K900010076: { base: 99.5, variance: 0.3 },  // LTE 小区可用率 (%)
 
   // Utilization Panel (2个) - 利用率
-  LTE_PRB_UTIL_DL: { base: 55, variance: 15 },        // LTE 下行PRB利用率 (%)
-  LTE_PRB_UTIL_UL: { base: 35, variance: 12 },        // LTE 上行PRB利用率 (%)
+  K900010014: { base: 55, variance: 15 },     // LTE 下行PRB利用率 (%)
+  K900010013: { base: 35, variance: 12 },     // LTE 上行PRB利用率 (%)
 
   // Accessibility Panel (4个) - 接入性
-  WIRELESS_SETUP_SR: { base: 98.5, variance: 1.5 },  // 无线建立成功率 (%)
-  RRC_CONN_SETUP_SR: { base: 98, variance: 2 },      // RRC 建立成功率 (%)
-  ERAB_SETUP_SR: { base: 97, variance: 3 },         // E-RAB 建立成功率 (%)
-  CSFB_SR: { base: 96, variance: 4 },               // CSFB 成功率 (%)
+  K900010006: { base: 98.5, variance: 1.5 },  // 无线建立成功率 (%)
+  K900010002: { base: 98, variance: 2 },      // RRC 建立成功率 (%)
+  K900010005: { base: 97, variance: 3 },      // E-RAB 建立成功率 (%)
+  K900010029: { base: 96, variance: 4 },      // CSFB 成功率 (%)
 
   // Retainability Panel (1个) - 保持性
-  ERAB_DROP_RATE: { base: 0.15, variance: 0.2 },     // E-RAB 掉线率 (%)
+  K900010027: { base: 0.15, variance: 0.2 },  // E-RAB 掉线率 (%)
 
   // Mobility Panel (4个) - 移动性
-  HO_INTRA_ENB_OUT_SR: { base: 98, variance: 2 },    // 同基站切换-切出成功率 (%)
-  HO_INTRA_ENB_IN_SR: { base: 98, variance: 2 },     // 同基站切换-切入成功率 (%)
-  HO_INTER_ENB_OUT_SR: { base: 97, variance: 3 },    // 异基站切换-切出成功率 (%)
-  HO_INTER_ENB_IN_SR: { base: 97, variance: 3 },     // 异基站切换-切入成功率 (%)
+  K900010017: { base: 98, variance: 2 },      // 同基站切换-切出成功率 (%)
+  K900010022: { base: 98, variance: 2 },      // 同基站切换-切入成功率 (%)
+  K900010021: { base: 97, variance: 3 },      // 异基站切换-切出成功率 (%)
+  K900010026: { base: 97, variance: 3 },      // 异基站切换-切入成功率 (%)
 
   // ============================================================================
   // NR (gNB) 指标 - 2个Panel共6个指标
   // ============================================================================
 
   // Traffic Panel (4个)
-  NR_PDCP_VOLUME_DL: { base: 650, variance: 120 },   // NR PDCP 下行流量 (GB)
-  NR_PDCP_VOLUME_UL: { base: 120, variance: 30 },    // NR PDCP 上行流量 (GB)
-  NR_PDCP_RATE_DL: { base: 85, variance: 20 },       // NR PDCP 下行速率 (Mbps)
-  NR_PDCP_RATE_UL: { base: 35, variance: 10 },       // NR PDCP 上行速率 (Mbps)
+  KGNB0511: { base: 650, variance: 120 },     // NR PDCP 下行流量 (GB)
+  KGNB0510: { base: 120, variance: 30 },      // NR PDCP 上行流量 (GB)
+  KGNB0517: { base: 85, variance: 20 },       // NR PDCP 下行速率 (Mbps)
+  KGNB0516: { base: 35, variance: 10 },       // NR PDCP 上行速率 (Mbps)
 
   // Utilization Panel (2个)
-  NR_PRB_UTIL_DL: { base: 60, variance: 15 },        // NR PRB 下行利用率 (%)
-  NR_PRB_UTIL_UL: { base: 40, variance: 12 },        // NR PRB 上行利用率 (%)
+  KGNB0506: { base: 60, variance: 15 },       // NR PRB 下行利用率 (%)
+  KGNB0505: { base: 40, variance: 12 },       // NR PRB 上行利用率 (%)
 
   // ============================================================================
   // GSM (2G) 指标 - 3个Panel共3个指标
   // ============================================================================
 
   // Accessibility Panel (1个)
-  GSM_CALL_SETUP_SR: { base: 97, variance: 2.5 },    // GSM 呼叫建立成功率 (%)
+  KGSM0102: { base: 97, variance: 2.5 },      // GSM 呼叫建立成功率 (%)
 
   // Retainability Panel (1个)
-  GSM_CALL_DROP_RATE: { base: 0.8, variance: 0.4 },  // GSM 呼叫掉线率 (%)
+  KGSM0103: { base: 0.8, variance: 0.4 },     // GSM 呼叫掉线率 (%)
 
   // Mobility Panel (1个)
-  GSM_HO_SR: { base: 96, variance: 3 },              // GSM 切换成功率 (%)
+  KGSM0101: { base: 96, variance: 3 },        // GSM 切换成功率 (%)
 } as const;
 
 /**

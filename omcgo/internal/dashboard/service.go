@@ -906,9 +906,7 @@ func (s *Service) GetAlarmTypePie(ctx context.Context) ([]AlarmTypePieEntry, err
 // pm_adhoc_aggregation_results（network 维度）」——3 条内置全网任务每小时把全库指标
 // （counter 求和、KPI 重算）汇成全网总线，首页直接拿口径正确的全网线。详见 kpi_network_query.go。
 //
-// 查询键：前端可直接传指标编号（K/C 编号）；老的精选 symbolic 别名（如 LTE_PDCP_VOLUME_DL）
-// 经别名层（kpi_alias.go）映射成编号（存量兼容），返回时按原 key 回填；库内无对应编号的
-// none 项（如 LTE_CELL_AVAILABLE）返回空序列。
+// 查询键：前端传指标编号（K/C 编号），直接查 metric_path。
 func (s *Service) GetKPITimeSeries(ctx context.Context, kpiNames []string, startTime, endTime time.Time) (KPITimeSeriesResponse, error) {
 	result := make(KPITimeSeriesResponse, len(kpiNames))
 
@@ -921,11 +919,14 @@ func (s *Service) GetKPITimeSeries(ctx context.Context, kpiNames []string, start
 		result[name] = []KPITimeSeriesEntry{}
 	}
 
-	// 别名解析：symbolic 别名 → 指标编号（去重，含原样透传的裸编号），并保留 编号→key 反查表用于回填。
-	kcodes, reverse := resolveKPIAliases(kpiNames)
-	if len(kcodes) == 0 {
-		// 全部是 none 项或解析后无可查编号 → 直接返回（全空序列）。
-		return result, nil
+	// 去重：前端直接传指标编号（K/C 编号），去重后作为查询 kcodes。
+	seen := make(map[string]struct{}, len(kpiNames))
+	var kcodes []string
+	for _, k := range kpiNames {
+		if _, dup := seen[k]; !dup {
+			seen[k] = struct{}{}
+			kcodes = append(kcodes, k)
+		}
 	}
 
 	// 取全网时序：优先读每小时预聚合表，缺数据时回退 15min 直读原始明细（见 fetchNetworkKCodeSeries）。
@@ -939,10 +940,8 @@ func (s *Service) GetKPITimeSeries(ctx context.Context, kpiNames []string, start
 			Time:  p.time.Format(time.RFC3339),
 			Value: p.value,
 		}
-		// 按原 symbolic key 回填（一个 K 编号可能被多个 symbolic 请求引用）。
-		for _, symbolic := range reverse[p.code] {
-			result[symbolic] = append(result[symbolic], entry)
-		}
+		// 按指标编号直接回填。
+		result[p.code] = append(result[p.code], entry)
 	}
 
 	return result, nil
@@ -1016,15 +1015,9 @@ func (s *Service) scanNetworkSeries(ctx context.Context, query string, args []an
 
 // queryNetworkKPISeries 读单个指标在某时窗内的全网预聚合时序（供 GetKPITrendComparison 用）。
 //
-// kpiName 可为老精选 symbolic 别名（经 resolveKPIAliases 映射成编号）或裸指标编号（原样透传）；
-// none 项（无对应编号）或解析后无编号 → 返回空序列（不报错）。读 pm_adhoc_aggregation_results
-// （network 维度，3 条全网任务覆盖全制式），与 GetKPITimeSeries 同源。
+// kpiName 为指标编号（K/C 编号），读 pm_adhoc_aggregation_results（network 维度），与 GetKPITimeSeries 同源。
 func (s *Service) queryNetworkKPISeries(ctx context.Context, kpiName string, startTime, endTime time.Time) ([]KPITrendEntry, error) {
-	kcodes, _ := resolveKPIAliases([]string{kpiName})
-	if len(kcodes) == 0 {
-		// none 项或无可查编号 → 空序列。
-		return []KPITrendEntry{}, nil
-	}
+	kcodes := []string{kpiName}
 
 	// 与 GetKPITimeSeries 同源：优先读每小时预聚合表，缺数据时回退 15min 直读原始明细（issue #359）。
 	points, err := s.fetchNetworkKCodeSeries(ctx, kcodes, startTime, endTime)
