@@ -114,14 +114,34 @@ func (s *Service) GetAll(ctx context.Context) map[PolicyKey]int {
 
 // Reload 强制重新读取 sys_configs 全部 5 键，更新缓存，并通知 listener 变化项。
 // 在 wiring 阶段调一次预热缓存；在 SysConfigSaved hook（category=pm.retention）触发时再调。
+//
+// 读取某键失败时，优先保留上次已知好值（缓存命中），避免暂时性 DB 故障把用户配置的天数
+// 重置为默认值并传播给 listener（进而错误地重写 TimescaleDB retention policy）。
+// 仅在缓存为空（首次启动）时才降级到 DefaultDays。
 func (s *Service) Reload(ctx context.Context) error {
+	// 快照当前缓存，用于读取失败时的降级策略（不持锁做 readOne 避免长时间锁住）。
+	s.mu.RLock()
+	cacheSnapshot := make(map[PolicyKey]int, len(s.cache))
+	for k, v := range s.cache {
+		cacheSnapshot[k] = v
+	}
+	s.mu.RUnlock()
+
 	newVals := make(map[PolicyKey]int, len(AllKeys()))
 	for _, k := range AllKeys() {
 		v, err := s.readOne(ctx, k)
 		if err != nil {
-			s.logger.Warn("retention.Reload fallback to default for one key",
-				zap.String("key", string(k)), zap.Error(err))
-			v = DefaultDays[k]
+			if cached, ok := cacheSnapshot[k]; ok {
+				// 保留上次已知好值，不通知 listener，避免覆盖用户配置。
+				s.logger.Warn("retention.Reload: preserving cached value on read error",
+					zap.String("key", string(k)), zap.Int("cached_days", cached), zap.Error(err))
+				v = cached
+			} else {
+				// 首次启动缓存为空，降级到默认值（TimescaleDB policy 尚未被用户配置过）。
+				s.logger.Warn("retention.Reload: fallback to default (no cache yet)",
+					zap.String("key", string(k)), zap.Int("default_days", DefaultDays[k]), zap.Error(err))
+				v = DefaultDays[k]
+			}
 		}
 		newVals[k] = v
 	}
