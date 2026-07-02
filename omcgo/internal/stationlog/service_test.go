@@ -3,11 +3,15 @@ package stationlog
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/url"
+	"sort"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/minio/minio-go/v7"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -178,6 +182,46 @@ func (m *memRepo) LatestByDevice(_ context.Context, deviceID uuid.UUID) (*LogFil
 	return nil, nil
 }
 
+// CountByDevice 统计指定设备未删除记录数（#798 每设备配额单测支持）。故障日志表口径
+// 与 ListOldest 一致：只算 file_received（detected 占位不计入配额）。
+func (m *memRepo) CountByDevice(_ context.Context, deviceID uuid.UUID) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var n int64
+	for _, r := range m.rows {
+		if r.IsDeleted || r.DeviceID == nil || *r.DeviceID != deviceID {
+			continue
+		}
+		if m.isFault && r.RecordStatus != FaultRecordStatusFileReceived {
+			continue
+		}
+		n++
+	}
+	return n, nil
+}
+
+// ListOldestByDevice 按采集时间升序返回指定设备未删除记录（#798 每设备配额单测支持）。
+func (m *memRepo) ListOldestByDevice(_ context.Context, deviceID uuid.UUID, limit int) ([]*LogFile, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var candidates []*LogFile
+	for _, r := range m.rows {
+		if r.IsDeleted || r.DeviceID == nil || *r.DeviceID != deviceID {
+			continue
+		}
+		if m.isFault && r.RecordStatus != FaultRecordStatusFileReceived {
+			continue
+		}
+		clone := *r
+		candidates = append(candidates, &clone)
+	}
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].CollectedAt.Before(candidates[j].CollectedAt) })
+	if len(candidates) > limit {
+		candidates = candidates[:limit]
+	}
+	return candidates, nil
+}
+
 func (m *memRepo) UpdateFile(_ context.Context, id uuid.UUID, fileName, objectPath, bucket string, size int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -216,12 +260,32 @@ func (stubDeviceLookup) GetBySerialNumber(_ context.Context, _ string) (*model.D
 	return nil, nil
 }
 
-// newTestService 不接 MinIO；HandleLogFileReceived 的 fault 路径会走 detected
-// 补全分支，不需要落 MinIO；运行日志路径写 repository 即可。
+// fakeMinioClient 是单测用的 minioObjectClient 替身：不真连对象存储，只记录调用，
+// 避免 nil *minio.Client 在触发真实删除路径时空指针崩溃。
+type fakeMinioClient struct {
+	mu      sync.Mutex
+	removed []string
+}
+
+func (f *fakeMinioClient) RemoveObject(_ context.Context, bucket, object string, _ minio.RemoveObjectOptions) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.removed = append(f.removed, bucket+"/"+object)
+	return nil
+}
+
+func (f *fakeMinioClient) PresignedGetObject(_ context.Context, bucket, object string, _ time.Duration, _ url.Values) (*url.URL, error) {
+	return url.Parse("https://minio.local/" + bucket + "/" + object)
+}
+
+// newTestService 用 fakeMinioClient 替身接住 MinIO 调用；HandleLogFileReceived 的 fault
+// 路径会走 detected 补全分支，运行日志路径写 repository 即可，两者都可能触发配额清理
+// 从而调用到 minioClient，用真实 nil 会 panic，故用 fake 替身。
 func newTestService() (*Service, *memRepo, *memRepo) {
 	runRepo := newMemRunRepo()
 	faultRepo := newMemFaultRepo()
 	svc := NewService(runRepo, faultRepo, stubDeviceLookup{}, nil, appconfig.BucketConfig{}, zap.NewNop())
+	svc.minioClient = &fakeMinioClient{}
 	return svc, runRepo, faultRepo
 }
 
@@ -403,6 +467,112 @@ func TestServiceDownloadURL_NotFoundMapsToSentinel(t *testing.T) {
 			assert.ErrorIs(t, err, commonerrors.ErrNotFound)
 		})
 	}
+}
+
+// TestEnforceFaultLogQuota_PerDeviceLimitIndependentOfOtherDevices 锁定 #798：每设备故障日志
+// 配额（默认 5）与全局配额并存、互不替代。设备 A 连续 6 次异常重启+文件到达，超出后应只清理
+// 设备 A 自己最旧的一条，设备 B 的记录不受影响。
+func TestEnforceFaultLogQuota_PerDeviceLimitIndependentOfOtherDevices(t *testing.T) {
+	svc, _, faultRepo := newTestService()
+
+	deviceA := uuid.New()
+	base := time.Now().Add(-time.Hour)
+	for i := 0; i < 6; i++ {
+		require.NoError(t, svc.RecordAbnormalReboot(context.Background(), device.AbnormalRebootSnapshot{
+			DeviceID:       deviceA,
+			DeviceSN:       "SN-DEVICE-A",
+			HaltMainReason: "halt_reboot",
+			DetectedAt:     base.Add(time.Duration(i) * time.Minute),
+		}))
+		require.NoError(t, svc.HandleLogFileReceived(context.Background(), newEventPayload(LogFileReceivedPayload{
+			DeviceSN:   "SN-DEVICE-A",
+			FileType:   "8",
+			FileName:   fmt.Sprintf("abnormalLog_A_%d.tar.gz", i),
+			ObjectPath: fmt.Sprintf("fault/A/%d.tar.gz", i),
+			Bucket:     "logs",
+			FileSize:   1024,
+		})))
+	}
+
+	deviceB := uuid.New()
+	require.NoError(t, svc.RecordAbnormalReboot(context.Background(), device.AbnormalRebootSnapshot{
+		DeviceID:       deviceB,
+		DeviceSN:       "SN-DEVICE-B",
+		HaltMainReason: "halt_reboot",
+		DetectedAt:     time.Now(),
+	}))
+	require.NoError(t, svc.HandleLogFileReceived(context.Background(), newEventPayload(LogFileReceivedPayload{
+		DeviceSN:   "SN-DEVICE-B",
+		FileType:   "8",
+		FileName:   "abnormalLog_B_0.tar.gz",
+		ObjectPath: "fault/B/0.tar.gz",
+		Bucket:     "logs",
+		FileSize:   1024,
+	})))
+
+	var aliveA, aliveB int
+	var oldestAStillAlive bool
+	for _, r := range faultRepo.rows {
+		if r.IsDeleted {
+			continue
+		}
+		switch r.DeviceSN {
+		case "SN-DEVICE-A":
+			aliveA++
+			if r.FileName == "abnormalLog_A_0.tar.gz" {
+				oldestAStillAlive = true
+			}
+		case "SN-DEVICE-B":
+			aliveB++
+		}
+	}
+	assert.Equal(t, DefaultMaxFileCountPerDevice, aliveA, "设备 A 未删除记录数应等于每设备配额默认值")
+	assert.False(t, oldestAStillAlive, "设备 A 最旧的一条应被配额清理淘汰")
+	assert.Equal(t, 1, aliveB, "设备 B 记录不应受设备 A 配额清理影响")
+}
+
+// TestEnforceFaultLogQuota_PerDeviceDisabledSkipsCleanup 锁定 #798：每设备配额显式配成 0
+// 表示禁用，此时超过默认值 5 条也不应触发设备维度清理（失败路径，与上一条成功路径对照）。
+func TestEnforceFaultLogQuota_PerDeviceDisabledSkipsCleanup(t *testing.T) {
+	svc, _, faultRepo := newTestService()
+	values := map[string]string{
+		KeyMaxFileCount:          "1000", // 全局配额调大，避免掩盖本测试关注的设备维度行为
+		KeyMaxFileCountPerDevice: "0",    // 0 = 禁用设备维度配额
+	}
+	svc.SetRetentionPolicy(NewRetentionPolicy(func(_ context.Context, category, key string) (string, bool) {
+		if category != RetentionCategory {
+			return "", false
+		}
+		v, ok := values[key]
+		return v, ok
+	}, nil))
+
+	deviceA := uuid.New()
+	base := time.Now().Add(-time.Hour)
+	for i := 0; i < 6; i++ {
+		require.NoError(t, svc.RecordAbnormalReboot(context.Background(), device.AbnormalRebootSnapshot{
+			DeviceID:       deviceA,
+			DeviceSN:       "SN-DEVICE-DISABLED",
+			HaltMainReason: "halt_reboot",
+			DetectedAt:     base.Add(time.Duration(i) * time.Minute),
+		}))
+		require.NoError(t, svc.HandleLogFileReceived(context.Background(), newEventPayload(LogFileReceivedPayload{
+			DeviceSN:   "SN-DEVICE-DISABLED",
+			FileType:   "8",
+			FileName:   fmt.Sprintf("abnormalLog_D_%d.tar.gz", i),
+			ObjectPath: fmt.Sprintf("fault/D/%d.tar.gz", i),
+			Bucket:     "logs",
+			FileSize:   1024,
+		})))
+	}
+
+	var alive int
+	for _, r := range faultRepo.rows {
+		if !r.IsDeleted {
+			alive++
+		}
+	}
+	assert.Equal(t, 6, alive, "设备维度配额禁用后 6 条记录都不应被清理")
 }
 
 // TestServiceDownloadURL_DeletedMapsToConflict 已软删的记录下载按冲突态返回

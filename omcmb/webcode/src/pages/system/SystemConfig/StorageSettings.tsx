@@ -40,10 +40,6 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
 
   return (
     <Form form={form} layout="vertical" size="small" initialValues={{
-      logDataSaveDays: 90,
-      rebootLogDataSaveDays: 60,
-      rebootLogSaveCount: 2,
-      sysOperateLogDataSaveDays: 90,
       // MinIO 对外可达 endpoint：issue #548 切片 3。空 = 走 env / 派生回退（后端订阅桥处理）
       minio_public_endpoint: '',
       alarmHisMaxHoldTime: 365,
@@ -53,79 +49,12 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
       kpiStorge60DataDays: 30,
       kpiStorge1440DataDays: 365,
       kpiWeekAndMonthSwitch: true,
-      mrFileSaveDays: 3,
       signalingTraceSaveDays: 7,
       varDiskAlarmThresHold: '10%',
       homeDiskAlarmThresHold: '10%',
       usrDiskAlarmThresHold: '10%',
       rootDiskAlarmThresHold: '10%',
     }}>
-      {/* 日志设置 */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.storage.logSettings')}</span>} style={{ marginBottom: 16 }}>
-        <div style={settingRowStyle}>
-          <Space>
-            <span>{t('sysconfig.storage.rawFileLabel')}</span>
-            <Form.Item name="logDataSaveDays" noStyle>
-              <Select style={{ width: 70 }}>
-                <Option value={30}>1</Option>
-                <Option value={90}>3</Option>
-                <Option value={180}>6</Option>
-              </Select>
-            </Form.Item>
-            <span>{t('sysconfig.storage.unit.month')}</span>
-          </Space>
-        </div>
-
-        <div style={settingRowStyle}>
-          <Space>
-            <span>{t('sysconfig.storage.errorLogLabel')}</span>
-            <Form.Item name="rebootLogDataSaveDays" noStyle>
-              <Select style={{ width: 70 }}>
-                <Option value={1}>1</Option>
-                <Option value={7}>7</Option>
-                <Option value={30}>30</Option>
-                <Option value={60}>60</Option>
-                <Option value={90}>90</Option>
-              </Select>
-            </Form.Item>
-            <span>{t('sysconfig.storage.unit.day')}</span>
-          </Space>
-        </div>
-
-        <div style={settingRowStyle}>
-          <Space>
-            <span>{t('sysconfig.storage.devErrorLogPrefix')}</span>
-            <Form.Item name="rebootLogSaveCount" noStyle>
-              <Select style={{ width: 70 }}>
-                <Option value={1}>1</Option>
-                <Option value={2}>2</Option>
-                <Option value={3}>3</Option>
-                <Option value={4}>4</Option>
-                <Option value={5}>5</Option>
-              </Select>
-            </Form.Item>
-            <span>{t('sysconfig.storage.devErrorLogSuffix')}</span>
-          </Space>
-        </div>
-
-        <div style={settingRowStyle}>
-          <Space>
-            <span>{t('sysconfig.storage.userOpLogLabel')}</span>
-            <Form.Item name="sysOperateLogDataSaveDays" noStyle>
-              <Select style={{ width: 70 }}>
-                <Option value={90}>3</Option>
-                <Option value={180}>6</Option>
-                <Option value={360}>12</Option>
-                <Option value={720}>24</Option>
-                <Option value={1080}>36</Option>
-              </Select>
-            </Form.Item>
-            <span>{t('sysconfig.storage.unit.month')}</span>
-          </Space>
-        </div>
-
-      </Card>
-
       {/* MinIO 对象存储 — issue #548 切片 3 收敛：
            只暴露 `MinIO 对外可达 endpoint`（sys_configs.storage.minio_public_endpoint）
            一字段；其他 endpoint/port/accessKey/secret/bucket/region/pathStyle/useSSL/enable
@@ -243,19 +172,6 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
           <Form.Item name="kpiWeekAndMonthSwitch" valuePropName="checked" noStyle>
             <Checkbox>{t('sysconfig.storage.weekMonthGranularity')}</Checkbox>
           </Form.Item>
-        </div>
-      </Card>
-
-      {/* MR */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.storage.mr')}</span>} style={{ marginBottom: 16 }}>
-        <div style={settingRowStyle}>
-          <Space>
-            <span>{t('sysconfig.storage.mrRawLabel')}</span>
-            <Form.Item name="mrFileSaveDays" noStyle>
-              <InputNumber min={1} max={365} style={{ width: 70 }} disabled />
-            </Form.Item>
-            <span>{t('sysconfig.storage.unit.day')}</span>
-          </Space>
         </div>
       </Card>
 

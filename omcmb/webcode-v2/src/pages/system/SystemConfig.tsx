@@ -61,6 +61,13 @@ const KNOWN_KEYS_BY_CATEGORY: Record<
         'MinIO 对外可达 endpoint（浏览器/外部 SDK 用，host[:port]）。建议在此填写运维可达地址；留空仅演示 / 开发环境使用，会回退到启动配置中的内部 host',
     },
   ],
+  'stationlog.retention': [
+    {
+      key: 'max_file_count_per_device',
+      valueType: 'int',
+      description: '每设备故障日志文件数配额，0=禁用（#798）',
+    },
+  ],
 }
 
 // mergeKnownKeys：DB 拉到的 items + 已知 key 占位行（未出现的）合并。

@@ -3,7 +3,7 @@
 // 后端 sys_configs 分类（seed migrations/seed/000004，各模块热加载）：
 //   acs.backpressure     #318 PM 上传背压 watchdog（ACS 每采样周期轮询刷新）
 //   minio.retention      #319 原始件 ILM 保留天数（app RegisterSavedHook 重应用 lifecycle）
-//   stationlog.retention #320 基站日志按时间保留 + 文件数配额（worker TTL 缓存）
+//   stationlog.retention #320+#798 基站日志按时间保留 + 全局/每设备文件数配额（worker TTL 缓存）
 //   raw_archive          #321 入库后压缩回写开关（worker TTL 缓存）
 //
 // 接入方式与 PmRetentionSection 一致：复用 useSysConfigsByCategory + useBatchUpdateSysConfigs，
@@ -62,6 +62,7 @@ const CARDS: CardSpec[] = [
     fields: [
       { key: 'max_retention_days', type: 'int', min: 1, max: 3650 },
       { key: 'max_file_count', type: 'int', min: 0, max: 100000 },
+      { key: 'max_file_count_per_device', type: 'int', min: 0, max: 100000 },
     ],
   },
   {

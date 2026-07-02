@@ -154,7 +154,6 @@ mr:
   omc_name: "Baicells-OMC"
   url_base: ""             # 空 → 用 OMC 主地址；启用独立服务器时填完整 http(s):// 前缀
   independent_enable: false
-  file_save_days: 3
   scheduler_interval_seconds: 30
   heartbeat_miss_threshold: 2
 
