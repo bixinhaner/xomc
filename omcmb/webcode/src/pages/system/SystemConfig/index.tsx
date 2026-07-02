@@ -14,7 +14,6 @@ import BasicSettings from './BasicSettings';
 import SecuritySettings from './SecuritySettings';
 import DeviceSettings from './DeviceSettings';
 import StorageSettings from './StorageSettings';
-import OmcSettings from './OmcSettings';
 import NorthboundSettings from './NorthboundSettings';
 import TransferSettings from './TransferSettings';
 import PmRetentionSection from './PmRetentionSection';
@@ -29,7 +28,8 @@ import { buildBatchItems } from './sysConfigSerialize';
 
 // 设置子页签类型（v1.0：移除 sas / ldap，参 omgo/docs/prd/system/config.md）
 // notify tab 已隐藏（#781）：邮件/短信后端未真实打通前不展示，避免误导用户
-type SettingsTab = 'basic' | 'security' | 'device' | 'storage' | 'omc' | 'acs_transfer' | 'northbound' | 'pm_retention' | 'retention_bp' | 'log_cfg';
+// omc tab 已隐藏（#802）：rsyslog/磁盘告警后端未实现，两个卡片均为空壳
+type SettingsTab = 'basic' | 'security' | 'device' | 'storage' | 'acs_transfer' | 'northbound' | 'pm_retention' | 'retention_bp' | 'log_cfg';
 
 // 设置子页签配置
 const settingsTabs: { key: SettingsTab; labelKey: string }[] = [
@@ -37,7 +37,6 @@ const settingsTabs: { key: SettingsTab; labelKey: string }[] = [
   { key: 'security', labelKey: 'system.config.security' },
   { key: 'device', labelKey: 'system.config.device' },
   { key: 'storage', labelKey: 'system.config.storage' },
-  { key: 'omc', labelKey: 'system.config.omc' },
   { key: 'acs_transfer', labelKey: 'system.config.acsTransfer' },
   { key: 'northbound', labelKey: 'system.config.northbound' },
   // T-0164 收尾 G2-Gap-1：PM 数据保留策略页签
@@ -86,7 +85,6 @@ export default function SystemConfig() {
   const [securityForm] = Form.useForm();
   const [deviceForm] = Form.useForm();
   const [storageForm] = Form.useForm();
-  const [omcForm] = Form.useForm();
   const [transferForm] = Form.useForm();
   const [northboundForm] = Form.useForm();
 
@@ -100,11 +98,10 @@ export default function SystemConfig() {
       security: securityForm,
       device: deviceForm,
       storage: storageForm,
-      omc: omcForm,
       acs_transfer: transferForm,
       northbound: northboundForm,
     }),
-    [basicForm, securityForm, deviceForm, storageForm, omcForm, transferForm, northboundForm],
+    [basicForm, securityForm, deviceForm, storageForm, transferForm, northboundForm],
   );
 
   // 拉当前 tab 的所有 KV（按 category）。切 tab 自动重发请求。
@@ -164,8 +161,6 @@ export default function SystemConfig() {
         return <DeviceSettings form={deviceForm} />;
       case 'storage':
         return <StorageSettings form={storageForm} />;
-      case 'omc':
-        return <OmcSettings form={omcForm} />;
       case 'acs_transfer':
 		return <TransferSettings form={transferForm} />;
       case 'northbound':

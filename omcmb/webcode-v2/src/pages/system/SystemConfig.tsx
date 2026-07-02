@@ -41,7 +41,6 @@ const CATEGORIES: { key: string; label: string }[] = [
   { key: 'security', label: '安全' },
   { key: 'device', label: '设备' },
   { key: 'storage', label: '存储' },
-  { key: 'omc', label: 'OMC' },
   { key: 'northbound', label: '北向' },
 ]
 
