@@ -194,12 +194,6 @@ const messages: Record<string, string> = {
   // Storage settings
   'sysconfig.storage.unit.day':            '天',
   'sysconfig.storage.alarmHistoryLabel':   '历史告警存储：历史告警在数据库最多存储',
-  'sysconfig.storage.kpiFileLabel':        'KPI文件存储：设备上报的原始文件在服务器最多存储',
-  'sysconfig.storage.kpiReportLabel':      'KPI报表文件存储：根据KPI查询模板生成的报表文件将在服务器最多存储',
-  'sysconfig.storage.kpiRawLabel':         'KPI原始数据存储：KPI原始数据在服务器最多存储',
-  'sysconfig.storage.kpiHourLabel':        'KPI小时数据存储：KPI小时数据在服务器最多存储',
-  'sysconfig.storage.kpiDayLabel':         'KPI天数据存储：KPI天数据在服务器最多存储',
-  'sysconfig.storage.weekMonthGranularity':'支持周和月统计粒度',
   'sysconfig.storage.traceLabel':          '信令追踪文件存储：设备上报的原始文件在服务器最多存储',
   'sysconfig.storage.diskLog':             '日志目录磁盘可用存储百分比',
   'sysconfig.storage.diskData':            '数据目录磁盘可用存储百分比',
@@ -4592,7 +4586,6 @@ const messages: Record<string, string> = {
   'system.storage.forwardLogsToRemote':      '日志文件将转发到远端地址',
   'system.storage.uploadPath':               '上传路径',
   'system.storage.alarm':                    '告警',
-  'system.storage.kpi':                      'KPI',
   'system.storage.signalingTrace':           '信令追踪',
   'system.storage.diskAlarm':                '磁盘告警',
   // MinIO 对象存储

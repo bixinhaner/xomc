@@ -1,4 +1,4 @@
-import { Form, Input, InputNumber, Checkbox, Select, Card, Space, theme } from 'antd';
+import { Form, Input, InputNumber, Select, Card, Space, theme } from 'antd';
 import { useT } from '@/hooks/useT';
 
 const { Option } = Select;
@@ -43,12 +43,6 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
       // MinIO 对外可达 endpoint：issue #548 切片 3。空 = 走 env / 派生回退（后端订阅桥处理）
       minio_public_endpoint: '',
       alarmHisMaxHoldTime: 365,
-      kpiFilesSaveDays: 7,
-      kpiReportDataSaveDays: 7,
-      kpiStorge15DataDays: 30,
-      kpiStorge60DataDays: 30,
-      kpiStorge1440DataDays: 365,
-      kpiWeekAndMonthSwitch: true,
       signalingTraceSaveDays: 7,
       varDiskAlarmThresHold: '10%',
       homeDiskAlarmThresHold: '10%',
@@ -113,65 +107,6 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
             </Form.Item>
             <span>{t('sysconfig.storage.unit.day')}</span>
           </Space>
-        </div>
-      </Card>
-
-      {/* KPI */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.storage.kpi')}</span>} style={{ marginBottom: 16 }}>
-        <div style={settingRowStyle}>
-          <Space>
-            <span>{t('sysconfig.storage.kpiFileLabel')}</span>
-            <Form.Item name="kpiFilesSaveDays" noStyle>
-              <InputNumber min={1} max={365} style={{ width: 70 }} disabled />
-            </Form.Item>
-            <span>{t('sysconfig.storage.unit.day')}</span>
-          </Space>
-        </div>
-
-        <div style={settingRowStyle}>
-          <Space>
-            <span>{t('sysconfig.storage.kpiReportLabel')}</span>
-            <Form.Item name="kpiReportDataSaveDays" noStyle>
-              <InputNumber min={1} max={365} style={{ width: 70 }} disabled />
-            </Form.Item>
-            <span>{t('sysconfig.storage.unit.day')}</span>
-          </Space>
-        </div>
-
-        <div style={settingRowStyle}>
-          <Space>
-            <span>{t('sysconfig.storage.kpiRawLabel')}</span>
-            <Form.Item name="kpiStorge15DataDays" noStyle>
-              <InputNumber min={1} max={365} style={{ width: 70 }} disabled />
-            </Form.Item>
-            <span>{t('sysconfig.storage.unit.day')}</span>
-          </Space>
-        </div>
-
-        <div style={settingRowStyle}>
-          <Space>
-            <span>{t('sysconfig.storage.kpiHourLabel')}</span>
-            <Form.Item name="kpiStorge60DataDays" noStyle>
-              <InputNumber min={1} max={365} style={{ width: 70 }} />
-            </Form.Item>
-            <span>{t('sysconfig.storage.unit.day')}</span>
-          </Space>
-        </div>
-
-        <div style={settingRowStyle}>
-          <Space>
-            <span>{t('sysconfig.storage.kpiDayLabel')}</span>
-            <Form.Item name="kpiStorge1440DataDays" noStyle>
-              <InputNumber min={1} max={730} style={{ width: 70 }} disabled />
-            </Form.Item>
-            <span>{t('sysconfig.storage.unit.day')}</span>
-          </Space>
-        </div>
-
-        <div style={settingRowStyle}>
-          <Form.Item name="kpiWeekAndMonthSwitch" valuePropName="checked" noStyle>
-            <Checkbox>{t('sysconfig.storage.weekMonthGranularity')}</Checkbox>
-          </Form.Item>
         </div>
       </Card>
 
