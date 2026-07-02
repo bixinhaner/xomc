@@ -464,9 +464,7 @@ services:
         # 本地构建默认空串 → 前端回退 'dev'；可 `APP_VERSION=1.2.3 docker compose build web` 覆盖。
         # 正式发布版本号由 deployments/release/build-release.sh -v 注入（带时间戳）。
         APP_VERSION: ${APP_VERSION:-}
-    ports:
-      - "8080:8080"
-      - "8081:8081"
+    network_mode: host
     environment:
       TZ: "Asia/Shanghai"
     # 提升容器级文件描述符上限，匹配 nginx worker_rlimit_nofile
