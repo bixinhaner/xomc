@@ -308,12 +308,14 @@ function mapBackendDevice(bd: BackendDevice): Device {
     createTime: bd.created_at,
 
     // 监控扩展字段
-    hostName: bd.host_name || '',
+    // 回收站/列表等页面部分列读取 hostName；后端主字段是 device_name，需兜底避免空白。
+    hostName: bd.host_name || bd.device_name || bd.serial_number || '',
     productName: bd.product_name || '',
     firmwareVersion: bd.firmware_version || '',
     // T-XXX (Phase 5)：优先后端实际字段 mac，兜底旧 mac_address
     macAddress: bd.mac || bd.mac_address || '',
     groupId: bd.group_id || undefined,
+    // 分组未命中时前端统一按空值展示占位符；这里保留字符串兜底，避免 undefined。
     groupName: bd.group_name || '',
     // T-XXX (Phase 0)：字段名对齐后端 DTO。设计文档 §13。
     onlineTime: bd.last_online_time || '',

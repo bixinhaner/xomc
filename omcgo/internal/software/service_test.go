@@ -295,11 +295,14 @@ func (m *svcMockDeviceRepo) UpdateLastParamSyncAt(_ context.Context, _ uuid.UUID
 func (m *svcMockDeviceRepo) UpdateLastParamSyncFailed(_ context.Context, _ uuid.UUID, _ time.Time, _ string) error {
 	return nil
 }
+func (m *svcMockDeviceRepo) UpdateSiteName(_ context.Context, _ uuid.UUID, _ string) error {
+	return nil
+}
 func (m *svcMockDeviceRepo) ListSerialsByIDs(_ context.Context, _ []uuid.UUID) (map[uuid.UUID]string, error) {
 	return map[uuid.UUID]string{}, nil
 }
-func (m *svcMockDeviceRepo) ListRecycleBin(_ context.Context, _ device.RecycleBinFilter) (*model.ListResponse[model.Device], error) {
-	return model.NewListResponse([]model.Device{}, 0, 1, 20), nil
+func (m *svcMockDeviceRepo) ListRecycleBin(_ context.Context, _ device.RecycleBinFilter) (*model.ListResponse[device.DeviceWithInfo], error) {
+	return model.NewListResponse([]device.DeviceWithInfo{}, 0, 1, 20), nil
 }
 func (m *svcMockDeviceRepo) RestoreDevices(_ context.Context, _ []uuid.UUID) (*device.RestoreResult, error) {
 	return &device.RestoreResult{}, nil
