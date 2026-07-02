@@ -106,26 +106,6 @@ const EVENT_TYPE_LABEL: Record<EventType, string> = {
 // 告警源（网元类型）下拉
 const NE_TYPE_OPTIONS = ['ENB', 'GNB', 'CPE', 'UPS', 'WCG', 'GSM']
 
-// 快捷筛选 pill
-type QuickFilterKey =
-  | 'all'
-  | 'critical'
-  | 'major'
-  | 'minor'
-  | 'warning'
-  | 'unacked'
-  | 'unread'
-
-const QUICK_FILTERS: { key: QuickFilterKey; label: string }[] = [
-  { key: 'all', label: '全部' },
-  { key: 'critical', label: '紧急' },
-  { key: 'major', label: '重要' },
-  { key: 'minor', label: '次要' },
-  { key: 'warning', label: '警告' },
-  { key: 'unacked', label: '未确认' },
-  { key: 'unread', label: '未读' },
-]
-
 type AlarmTab = 'active' | 'history'
 
 // ---------------------------------------------------------------------------
@@ -180,7 +160,6 @@ export function AlarmsPage() {
   const [dealState, setDealState] = useState<'' | '0' | '1'>('')
   const [neType, setNeType] = useState('')
   const [unread, setUnread] = useState<'' | '0' | '1'>('')
-  const [quick, setQuick] = useState<QuickFilterKey>('all')
 
   // 选择 & 弹窗
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -211,7 +190,6 @@ export function AlarmsPage() {
     setDealState('')
     setNeType('')
     setUnread('')
-    setQuick(drillDown.severity || drillDown.keyword ? (drillDown.severity || 'all') as QuickFilterKey : 'all')
     setPage(1)
     setSelected(new Set())
   }, [drillDown])
@@ -308,24 +286,6 @@ export function AlarmsPage() {
     setTab(next)
     setPage(1)
     setSelected(new Set())
-    setQuick('all')
-  }, [])
-
-  const applyQuick = useCallback((key: QuickFilterKey) => {
-    setQuick(key)
-    setPage(1)
-    // 先清掉受快捷筛选影响的维度
-    setSeverity('')
-    setUnread('')
-    if (key === 'critical' || key === 'major' || key === 'minor' || key === 'warning') {
-      setSeverity(key)
-    } else if (key === 'unacked') {
-      setDealState('0')
-    } else if (key === 'unread') {
-      setUnread('1')
-    } else {
-      setDealState('')
-    }
   }, [])
 
   const openAck = useCallback((ids: string[]) => {
@@ -493,7 +453,6 @@ export function AlarmsPage() {
             value={severity || 'all'}
             onValueChange={(v) => {
               setSeverity(v === 'all' ? '' : (v as AlarmSeverity))
-              setQuick('all')
               setPage(1)
             }}
           >
@@ -554,7 +513,6 @@ export function AlarmsPage() {
               value={dealState || 'all'}
               onValueChange={(v) => {
                 setDealState(v === 'all' ? '' : (v as '0' | '1'))
-                setQuick('all')
                 setPage(1)
               }}
             >
@@ -591,26 +549,8 @@ export function AlarmsPage() {
         <Stat label="未读" value={stats.unread} tone="amber" />
       </div>
 
-      {/* 快捷筛选 + 批量操作 */}
+      {/* 批量操作 */}
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <div className="flex flex-wrap items-center gap-1">
-          {QUICK_FILTERS.map((q) => (
-            <button
-              key={q.key}
-              type="button"
-              onClick={() => applyQuick(q.key)}
-              className={cn(
-                'rounded-full border px-3 py-1 text-xs transition-colors',
-                quick === q.key
-                  ? 'border-primary bg-primary/10 text-primary'
-                  : 'border-transparent bg-muted text-muted-foreground hover:text-foreground'
-              )}
-            >
-              {q.label}
-            </button>
-          ))}
-        </div>
-
         <div className="ml-auto flex items-center gap-2">
           {selectedIds.length > 0 ? (
             <span className="text-xs text-muted-foreground">

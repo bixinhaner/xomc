@@ -74,6 +74,10 @@ interface GISMapRef {
    * 搜索时调低，为 API 请求让出连接；搜索完成后恢复
    */
   setTileConcurrency: (n: number) => void;
+  /** 开启测距模式 */
+  startMeasure: () => void;
+  /** 退出测距模式并清除折线 */
+  stopMeasure: () => void;
 }
 
 /**
@@ -96,6 +100,7 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
   showMetadataTip = true,
   className,
   style,
+  onAlarmClick,
 }, ref) => {
   const intl = useIntl();
   const token = useThemeToken();
@@ -115,6 +120,10 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
   // 点击锁定的设备（优先显示，支持复制）
   const [clickedDevice, setClickedDevice] = useState<MapDevice | null>(null);
   const [clickedPosition, setClickedPosition] = useState<{ x: number; y: number } | null>(null);
+  // 测距模式状态（仅用于 showControls=true 场景下的 MapControls 按钮联动）
+  // 通过 mapRef.current?.startMeasure() 外部调用时不同步此 state，
+  // 但 ESC 由调用方（如 GISMapView）自行监听处理。
+  const [isMeasuring, setIsMeasuring] = useState(false);
 
   // 使用 OpenLayers Hook
   const {
@@ -131,6 +140,8 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
     highlightAndSpiderfyIfNeeded,
     metadata,
     setTileConcurrency,
+    startMeasure,
+    stopMeasure,
   } = useOLMap({
     center: defaultCenter,
     zoom: defaultZoom,
@@ -265,6 +276,33 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
       });
     }
   }, [mapInstanceRef, defaultZoom]);
+
+  // 切换测距模式
+  const handleMeasureToggle = useCallback(() => {
+    if (isMeasuring) {
+      stopMeasure();
+      setIsMeasuring(false);
+    } else {
+      // 进入测距模式时关闭锁定的弹窗，避免遮挡
+      setClickedDevice(null);
+      setClickedPosition(null);
+      startMeasure();
+      setIsMeasuring(true);
+    }
+  }, [isMeasuring, startMeasure, stopMeasure]);
+
+  // ESC 退出测距模式
+  useEffect(() => {
+    if (!isMeasuring) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        stopMeasure();
+        setIsMeasuring(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isMeasuring, stopMeasure]);
 
   // 高亮设备（用于搜索定位）
   const highlightAndFlyTo = useCallback((device: MapDevice) => {
@@ -454,7 +492,9 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
     clearDevices,
     closeClickedCard,
     setTileConcurrency,
-  }), [highlightAndFlyTo, highlightAndFlyToWithCard, flyTo, getViewport, fitBounds, clearDevices, closeClickedCard, setTileConcurrency]);
+    startMeasure,
+    stopMeasure,
+  }), [highlightAndFlyTo, highlightAndFlyToWithCard, flyTo, getViewport, fitBounds, clearDevices, closeClickedCard, setTileConcurrency, startMeasure, stopMeasure]);
 
   // 计算统计数据
   const stats = useMemo<MapStats>(() => {
@@ -567,6 +607,8 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
           onZoomOut={handleZoomOut}
           zoomInDisabled={viewport?.zoom !== undefined && viewport.zoom >= MAP_CONFIG.maxZoom}
           zoomOutDisabled={viewport?.zoom !== undefined && viewport.zoom <= MAP_CONFIG.minZoom}
+          isMeasuring={isMeasuring}
+          onMeasureToggle={handleMeasureToggle}
         />
       )}
 
@@ -579,6 +621,7 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
           device={clickedDevice ?? hoveredDevice!}
           visible
           position={clickedPosition ?? popupPosition!}
+          onAlarmClick={onAlarmClick}
           onClose={() => {
             setClickedDevice(null);
             setClickedPosition(null);

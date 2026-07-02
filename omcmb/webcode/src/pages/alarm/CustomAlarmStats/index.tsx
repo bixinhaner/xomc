@@ -69,17 +69,6 @@ const NE_TYPE_CONFIG: Record<string, string> = {
   'GSM': 'GSM',
 };
 
-// 快捷筛选选项 - use i18n keys
-const QUICK_FILTER_KEYS = [
-  { labelKey: 'alarm.quickFilter.all', key: 'all' },
-  { labelKey: 'alarm.quickFilter.critical', key: 'critical', severity: ['critical'] },
-  { labelKey: 'alarm.quickFilter.major', key: 'major', severity: ['major'] },
-  { labelKey: 'alarm.quickFilter.minor', key: 'minor', severity: ['minor'] },
-  { labelKey: 'alarm.quickFilter.warning', key: 'warning', severity: ['warning'] },
-  { labelKey: 'alarm.quickFilter.unacked', key: 'unacked', dealState: ['0'] },
-  { labelKey: 'alarm.quickFilter.unread', key: 'unread', unread: '1' },
-];
-
 // 筛选模板存储 key
 const FILTER_TEMPLATES_KEY = 'custom-alarm-filter-templates';
 const LAST_FILTER_KEY = 'custom-alarm-last-filter';
@@ -133,9 +122,6 @@ export default function CustomAlarmStats() {
   const [groups, setGroups] = useState<CustomAlarmGroup[]>(DEFAULT_GROUPS);
   const [selectedGroupId, setSelectedGroupId] = useState<string>('group-beijing');
   const [searchText, setSearchText] = useState('');
-
-  // 快捷筛选状态
-  const [activeQuickFilter, setActiveQuickFilter] = useState<string>('all');
 
   // 筛选模板状态
   const [filterTemplates, setFilterTemplates] = useState<FilterTemplate[]>([]);
@@ -406,27 +392,6 @@ export default function CustomAlarmStats() {
     );
   }, [groups, searchText]);
 
-  // 快捷筛选处理
-  const handleQuickFilter = useCallback((key: string) => {
-    setActiveQuickFilter(key);
-    const option = QUICK_FILTER_KEYS.find((o) => o.key === key);
-    if (option && option.key !== 'all') {
-      setFilterParams((prev) => ({
-        ...prev,
-        severity: option.severity as AlarmFilter['severity'],
-        dealState: option.dealState as AlarmFilter['dealState'],
-        unread: option.unread as '0' | '1',
-      }));
-    } else {
-      setFilterParams((prev) => {
-         
-        const { severity, dealState, unread, ...rest } = prev;
-        return rest;
-      });
-    }
-    setCurrentPage(1);
-  }, []);
-
   // 保存筛选模板
   const handleSaveTemplate = useCallback(async () => {
     try {
@@ -681,7 +646,6 @@ export default function CustomAlarmStats() {
   const handleReset = useCallback(() => {
     setFilterParams({});
     setCurrentPage(1);
-    setActiveQuickFilter('all');
   }, []);
 
   const handleAcknowledge = useCallback((ids: string[]) => {
@@ -988,7 +952,6 @@ export default function CustomAlarmStats() {
               setFilterParams({});
               setCurrentPage(1);
               setSelectedRowKeys([]);
-              setActiveQuickFilter('all');
             }
           }}
           blockNode
@@ -1028,31 +991,12 @@ export default function CustomAlarmStats() {
         </Space>
       </div>
 
-      {/* 统计卡片 - Pill Tabs 风格 */}
+      {/* 统计卡片 */}
       <Card size="small" styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column' } }}>
         <div className={styles.cardHeader}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
             <Space size={16}>
               <Text className={styles.cardHeaderTitle}>{t('alarm.statistics.title')}</Text>
-              <div className={styles.pillTabs}>
-                {[
-                  { key: 'all', label: t('alarm.stat.total') },
-                  { key: 'active', label: t('alarm.stat.activeAlarm') },
-                  { key: 'historical', label: t('alarm.stat.historicalAlarm') },
-                  { key: 'critical', label: t('alarm.stat.critical') },
-                  { key: 'major', label: t('alarm.stat.major') },
-                  { key: 'minor', label: t('alarm.stat.minor') },
-                  { key: 'warning', label: t('alarm.stat.warning') },
-                ].map(item => (
-                  <span
-                    key={item.key}
-                    className={`${styles.pillTab} ${activeQuickFilter === item.key ? styles.pillTabActive : styles.pillTabInactive}`}
-                    onClick={() => handleQuickFilter(item.key)}
-                  >
-                    {item.label}
-                  </span>
-                ))}
-              </div>
             </Space>
             <Space size={8}>
               <div className={`${styles.statsBadge} ${styles.statsActive}`}>

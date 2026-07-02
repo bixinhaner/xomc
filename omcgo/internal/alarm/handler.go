@@ -500,11 +500,16 @@ func (h *Handler) TriggerSync(c *gin.Context) {
 		return
 	}
 
-	if err := h.syncService.TriggerSync(c.Request.Context(), deviceSN); err != nil {
+	syncTask, err := h.syncService.TriggerSync(c.Request.Context(), deviceSN)
+	if err != nil {
 		h.logger.Error("trigger alarm sync", zap.Error(err), zap.String("device_sn", deviceSN))
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
 
-	response.OKWithMsg(c, gin.H{"device_sn": deviceSN}, "alarm sync triggered")
+	resp := gin.H{"device_sn": deviceSN}
+	if syncTask != nil {
+		resp["task_id"] = syncTask.ID
+	}
+	response.OKWithMsg(c, resp, "alarm sync triggered")
 }

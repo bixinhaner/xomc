@@ -61,6 +61,18 @@ interface BackendAlarmStatistics {
   by_type: Record<string, number>;
 }
 
+interface BackendAlarmSyncTriggerResponse {
+  device_sn?: string;
+  deviceSn?: string;
+  task_id?: string;
+  taskId?: string;
+}
+
+export interface AlarmSyncTriggerResult {
+  deviceSn: string;
+  taskId?: string;
+}
+
 // ---------------------------------------------------------------------------
 // T-0098-P5-06：旧 alarm_libraries 接口已下线，改由 alarmDefinitionApi（P4-01）
 // 提供 /alarms/alarm-definitions CRUD（super_admin 治理）。
@@ -625,7 +637,11 @@ export const alarmApi = {
 
   // -- Alarm sync ----------------------------------------------------------
 
-  async triggerAlarmSync(deviceSN: string): Promise<void> {
-    await http.post(`/alarms/sync/${deviceSN}`);
+  async triggerAlarmSync(deviceSN: string): Promise<AlarmSyncTriggerResult> {
+    const { data } = await http.post<BackendAlarmSyncTriggerResponse>(`/alarms/sync/${deviceSN}`);
+    return {
+      deviceSn: data.deviceSn ?? data.device_sn ?? deviceSN,
+      taskId: data.taskId ?? data.task_id,
+    };
   },
 };

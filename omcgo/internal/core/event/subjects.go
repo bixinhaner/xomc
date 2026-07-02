@@ -330,6 +330,11 @@ const (
 	// 发布者：internal/task.TaskService.MarkTaskFailed；
 	// 订阅者：worker.taskEventBridge → mml.ResultAggregator.OnTaskCompleted。
 	SubjectTaskFailed = "task.failed"
+
+	// SubjectTaskCancelled 是 device_tasks 任务被取消时发布（status=cancelled）。
+	// 发布者：internal/task.TaskService.CancelTask；
+	// 订阅者：按需订阅终态清理逻辑（如告警同步锁释放）。
+	SubjectTaskCancelled = "task.cancelled"
 )
 
 // Software/Firmware events

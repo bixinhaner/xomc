@@ -1684,6 +1684,9 @@ func (h *Handler) publishRPCResponseEvent(ctx context.Context, deviceSN string, 
 		"device_sn": deviceSN,
 		"method":    string(method),
 	}
+	if taskItem != nil && taskItem.ID != "" {
+		payload["task_id"] = taskItem.ID
+	}
 
 	// command_key 让下游订阅者(如 Path B reconcile)按入队方约定区分触发上下文,
 	// 避免局部 follow-up GPV(如 auto-gpv-after-addobject-*)被当作"全量同步"

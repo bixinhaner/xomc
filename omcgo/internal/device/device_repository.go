@@ -223,8 +223,9 @@ type DeviceWriter interface {
 	// "M Reboot" Inform. Returns the updated boot_count.
 	RecordBoot(ctx context.Context, sn string, at time.Time) (int, error)
 	// RecycleBin operations
-	// ListRecycleBin returns soft-deleted devices with filtering.
-	ListRecycleBin(ctx context.Context, filter RecycleBinFilter) (*model.ListResponse[model.Device], error)
+	// ListRecycleBin returns soft-deleted devices with filtering, including device_info fields.
+	// T-2026-07-02: 返回 DeviceWithInfo 以支持完整的设备信息（MAC、GPS、项目状态等）。
+	ListRecycleBin(ctx context.Context, filter RecycleBinFilter) (*model.ListResponse[DeviceWithInfo], error)
 	// RestoreDevices restores soft-deleted devices (sets deleted_at to NULL).
 	// #378: 可部分成功——返回恢复数 + 因 SN 冲突被跳过的明细，避免整批回滚 500。
 	RestoreDevices(ctx context.Context, ids []uuid.UUID) (*RestoreResult, error)
@@ -471,8 +472,9 @@ func (r *PgDeviceRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-// BatchDelete soft-deletes multiple devices and removes related device_group_members
-// and device_info records within a single transaction.
+// BatchDelete soft-deletes multiple devices within a single transaction.
+// It intentionally keeps device_group_members and device_info rows so recycle
+// bin can still display historical group and extended info.
 // Returns the number of devices actually soft-deleted.
 func (r *PgDeviceRepository) BatchDelete(ctx context.Context, ids []uuid.UUID, deletedBy string) (int64, error) {
 	if len(ids) == 0 {
@@ -485,23 +487,8 @@ func (r *PgDeviceRepository) BatchDelete(ctx context.Context, ids []uuid.UUID, d
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	// Remove group memberships
-	_, err = tx.Exec(ctx,
-		`DELETE FROM device_group_members WHERE device_id = ANY($1)`,
-		ids,
-	)
-	if err != nil {
-		return 0, fmt.Errorf("delete device_group_members: %w", err)
-	}
-
-	// Remove device_info records
-	_, err = tx.Exec(ctx,
-		`DELETE FROM device_info WHERE device_id = ANY($1)`,
-		ids,
-	)
-	if err != nil {
-		return 0, fmt.Errorf("delete device_info: %w", err)
-	}
+	// T-2026-07-02: 不删除 device_info 和 device_group_members，保留历史信息供回收站显示。
+	// 删除时仅软删除 devices 表，保持参照完整性和审计日志。
 
 	// Soft-delete devices with metadata
 	now := time.Now()
@@ -1441,101 +1428,92 @@ func (r *PgDeviceRepository) SearchDevices(ctx context.Context, keyword string, 
 
 // ===== Recycle Bin Operations =====
 
-// recycleBinColumns returns column names for recycle bin query (includes group_name via JOIN).
-func recycleBinColumns() []string {
-	return append(deviceColumns(), "dg.name as group_name")
-}
-
-// scanRecycleBinRow scans a recycle bin device row including group_name.
-//
-// 2026-05-29 修复:Scan dest 漏 6 列(last_boot_at / boot_count /
-// last_param_sync_at / last_param_sync_failed_at / last_param_sync_error /
-// last_offline_reason),导致 GET /api/v1/devices/recycle 返
-// "number of field descriptions must equal number of destinations, got 34 and 28"。
-// 严格对齐 deviceColumns() 顺序 + scanDeviceFromRow,末尾追加 group_name。
-func scanRecycleBinRow(rows pgx.Rows) (*model.Device, error) {
-	var d model.Device
-	var extData, eventsData []byte
-	var ipAddr, udpAddr *string
-	// nullable string columns from devices table
-	var productClass, manufacturer, modelName, firmwareVersion, connReqURL, siteName, siteID, deletedBy *string
-	// group_name from JOIN
-	var groupName *string
-
-	err := rows.Scan(
-		&d.ID, &d.SerialNumber, &d.OUI, &productClass, &manufacturer, &modelName,
-		&d.Carrier, &d.Technology,
-		&d.LifecycleState, &d.IsOnline, // T-0162: 替代 &d.Status
-		&firmwareVersion,
-		&ipAddr, &connReqURL,
-		&d.NatDetected, &udpAddr,
-		&d.LastInformAt, &eventsData,
-		&d.LastBootAt, &d.BootCount, // T-0158: 新增的两列(deviceColumns 行 18-19)
-		&d.InformInterval, &siteName, &siteID, &d.Latitude, &d.Longitude,
-		&extData, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt, &deletedBy,
-		&d.LastParamSyncAt,                              // T-0124
-		&d.LastParamSyncFailedAt, &d.LastParamSyncError, // migration 000142
-		&d.LastOfflineReason, // T-0173 / migration 000184
-		&groupName,           // recycleBinColumns 追加的 JOIN 列
-	)
-	if err != nil {
-		return nil, err
+// recycleBinSelectColumns 回收站轻量级查询字段（无需告警聚合）。
+// 回收站主要展示：基本设备信息 + device_info + 分组；不需要活动告警数据。
+func recycleBinSelectColumns() []string {
+	return []string{
+		// devices columns
+		"d.id", "d.serial_number", "d.oui", "d.product_class", "d.manufacturer", "d.model_name",
+		"d.carrier", "d.technology",
+		"d.lifecycle_state", "d.is_online",
+		"d.firmware_version",
+		"host(d.ip_address) as ip_address", "d.connection_request_url",
+		"d.nat_detected", "d.udp_connection_request_address",
+		"d.last_inform_at", "d.last_inform_events",
+		"d.last_boot_at", "d.boot_count",
+		"d.inform_interval", "d.site_name", "d.site_id", "d.latitude", "d.longitude",
+		"d.extension_data", "d.created_at", "d.updated_at", "d.deleted_at",
+		"d.last_offline_reason",
+		// device_groups columns
+		"dg.id as group_id",
+		"dg.name as group_name",
+		// device_info columns (no alarm_severity needed for recycle bin)
+		"di.device_name", "di.address", "di.remark", "di.project_status", "di.height",
+		"di.eci", "di.pci", "di.cell_id", "di.freq_point", "di.bandwidth", "di.transmit_power", "di.plmn",
+		"di.rf_status", "di.cell_status", "di.op_state", "di.mme_status", "di.sync_status", "di.kpi_status",
+		"di.num_of_cells", "di.gps_status",
+		"NULL::text AS alarm_severity",  // Placeholder for compatibility with DeviceWithInfo
+		"di.license_status",
+		"di.mac", "di.hardware_version",
+		"di.first_online_time", "di.last_online_time", "di.last_offline_time", "di.run_time",
+		"di.cumulative_online_duration",
+		// Phase 2/3 扩展列
+		"di.tac", "di.lac", "di.band", "di.ul_earfcn",
+		"di.subframe_assignment", "di.special_subframe", "di.root_index",
+		"di.gps_satellites", "di.gps_height", "di.lock_status",
+		"di.admin_state", "di.ipsec_addr",
+		"di.enb_id", "di.network_model",
+		// GSM/BTS 专属字段
+		"di.bsc_select", "di.oml_remote_ip", "di.oml_remote_ip_bak", "di.ipa_unit_id",
+		// 设备名称同步
+		"di.name_sync_pending", "di.lmt_device_name",
+		`CASE
+			WHEN di.oml_remote_ip IS NOT NULL AND di.oml_remote_ip <> '' AND d.is_online
+			THEN 'connected'
+			WHEN di.oml_remote_ip IS NOT NULL AND di.oml_remote_ip <> ''
+			THEN 'disconnected'
+			ELSE NULL
+		END AS bsc_link_status`,
+		// 在线时长派生
+		`CASE
+			WHEN di.last_online_time IS NULL THEN NULL
+			WHEN d.is_online THEN EXTRACT(EPOCH FROM (NOW() - di.last_online_time))::bigint
+			WHEN di.last_offline_time IS NOT NULL AND di.last_offline_time > di.last_online_time
+				THEN EXTRACT(EPOCH FROM (di.last_offline_time - di.last_online_time))::bigint
+			ELSE NULL
+		END AS online_duration`,
+		// 离线时长计算
+		`CASE
+			WHEN d.lifecycle_state = 'commissioned' AND d.is_online = FALSE AND di.last_offline_time IS NOT NULL
+			THEN EXTRACT(EPOCH FROM (NOW() - di.last_offline_time))::bigint
+			ELSE NULL
+		END AS offline_seconds`,
+		`CASE
+			WHEN d.lifecycle_state = 'commissioned' AND d.is_online = FALSE AND di.last_offline_time IS NOT NULL
+			THEN FLOOR(EXTRACT(EPOCH FROM (NOW() - di.last_offline_time)) / 86400)::bigint
+			ELSE NULL
+		END AS offline_days`,
+		`CASE
+			WHEN d.lifecycle_state = 'commissioned' AND d.is_online = FALSE AND di.last_offline_time IS NOT NULL
+			THEN FLOOR((EXTRACT(EPOCH FROM (NOW() - di.last_offline_time)) % 86400) / 3600)::bigint
+			ELSE NULL
+		END AS offline_hours`,
+		`CASE
+			WHEN d.lifecycle_state = 'commissioned' AND d.is_online = FALSE AND di.last_offline_time IS NOT NULL
+			THEN FLOOR((EXTRACT(EPOCH FROM (NOW() - di.last_offline_time)) % 3600) / 60)::bigint
+			ELSE NULL
+		END AS offline_minutes`,
+		"NULL::int AS active_alarm_count",  // Placeholder for compatibility
 	}
-
-	// Assign nullable fields
-	if productClass != nil {
-		d.ProductClass = *productClass
-	}
-	if manufacturer != nil {
-		d.Manufacturer = *manufacturer
-	}
-	if modelName != nil {
-		d.ModelName = *modelName
-	}
-	if firmwareVersion != nil {
-		d.FirmwareVersion = *firmwareVersion
-	}
-	if ipAddr != nil {
-		d.IPAddress = *ipAddr
-	}
-	if connReqURL != nil {
-		d.ConnectionRequestURL = *connReqURL
-	}
-	if udpAddr != nil {
-		d.UDPConnectionRequestAddress = *udpAddr
-	}
-	if siteName != nil {
-		d.DeviceName = *siteName
-	}
-	if siteID != nil {
-		d.SiteID = *siteID
-	}
-	if deletedBy != nil {
-		d.DeletedBy = *deletedBy
-	}
-	if groupName != nil {
-		d.GroupName = *groupName
-	}
-	if len(extData) > 0 {
-		if err := json.Unmarshal(extData, &d.ExtensionData); err != nil {
-			return nil, fmt.Errorf("unmarshal extension_data: %w", err)
-		}
-	}
-	if len(eventsData) > 0 {
-		if err := json.Unmarshal(eventsData, &d.LastInformEvents); err != nil {
-			return nil, fmt.Errorf("unmarshal last_inform_events: %w", err)
-		}
-	}
-	// T-0162: 派生 Status + OpState 给老调用方
-	populateDeviceCompat(&d)
-	return &d, nil
 }
 
 // ListRecycleBin returns soft-deleted devices with filtering.
-func (r *PgDeviceRepository) ListRecycleBin(ctx context.Context, filter RecycleBinFilter) (*model.ListResponse[model.Device], error) {
-	// Build base query for deleted devices with group info
-	builder := storage.Psql.Select(recycleBinColumns()...).
+func (r *PgDeviceRepository) ListRecycleBin(ctx context.Context, filter RecycleBinFilter) (*model.ListResponse[DeviceWithInfo], error) {
+	// Build base query for deleted devices with group info and device_info
+	// T-2026-07-02: 新增 device_info LEFT JOIN 以支持完整的设备信息返回（修复缺失字段）。
+	builder := storage.Psql.Select(recycleBinSelectColumns()...).
 		From("devices d").
+		LeftJoin("device_info di ON di.device_id = d.id").
 		LeftJoin("device_group_members dgm ON d.id = dgm.device_id").
 		LeftJoin("device_groups dg ON dg.id = dgm.group_id").
 		Where(sq.NotEq{"d.deleted_at": nil})
@@ -1629,9 +1607,9 @@ func (r *PgDeviceRepository) ListRecycleBin(ctx context.Context, filter RecycleB
 	}
 	defer rows.Close()
 
-	var devices []model.Device
+	var devices []DeviceWithInfo
 	for rows.Next() {
-		d, err := scanRecycleBinRow(rows)
+		d, err := scanDeviceWithInfoRow(rows)
 		if err != nil {
 			return nil, fmt.Errorf("scan recycle bin device: %w", err)
 		}
@@ -1639,10 +1617,10 @@ func (r *PgDeviceRepository) ListRecycleBin(ctx context.Context, filter RecycleB
 	}
 
 	if devices == nil {
-		devices = []model.Device{}
+		devices = []DeviceWithInfo{}
 	}
 
-	return &model.ListResponse[model.Device]{
+	return &model.ListResponse[DeviceWithInfo]{
 		Items:    devices,
 		Total:    total,
 		Page:     page,
@@ -1930,6 +1908,39 @@ func (r *PgDeviceRepository) ListSerialsByIDs(ctx context.Context, ids []uuid.UU
 		out[id] = sn
 	}
 	return out, rows.Err()
+}
+
+// FindOfflineForRecycle 查询已离线且 last_inform_at < olderThan、尚未软删除的设备 ID 列表。
+// 返回 ID 列表供调用方批量软删除（BatchDelete）。
+// limit <= 0 时回退到 500 防止单批过大。
+func (r *PgDeviceRepository) FindOfflineForRecycle(ctx context.Context, olderThan time.Time, limit int) ([]uuid.UUID, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+	rows, err := r.pool.Query(ctx,
+		`SELECT id FROM devices
+		 WHERE is_online = FALSE
+		   AND last_inform_at IS NOT NULL
+		   AND last_inform_at < $1
+		   AND deleted_at IS NULL
+		 ORDER BY last_inform_at ASC
+		 LIMIT $2`,
+		olderThan, limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("find offline for recycle: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan device id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 // ListProductClasses returns distinct product_class values, sorted alphabetically.

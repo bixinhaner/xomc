@@ -53,6 +53,7 @@ const messages: Record<string, string> = {
   'common.recycleConfirmDesc': 'Devices in recycle bin will not be monitored (monitoring data, config, alarms, KPI, etc.)',
   'common.rebootConfirmMsg': 'Are you sure to reboot the device(s)?',
   'common.commandSent':    'Command has been sent.',
+  'common.partialSuccess': 'Partial success',
   'common.more':           'More',
   'common.loading':        'Loading...',
   'common.noData':         'No Data',
@@ -571,6 +572,7 @@ const messages: Record<string, string> = {
   'status.connected':      'Connected',
   'status.disconnected':   'Disconnected',
   'status.synchronized':   'Synchronized',
+  'status.beidouSynchronized': 'BeiDou Synchronized',
   'status.notSynchronized': 'Not Synchronized',
   'status.rfOn':           'RF On',
   'status.rfOff':          'RF Off',
@@ -1458,6 +1460,7 @@ const messages: Record<string, string> = {
   'device.verticalBeamWidth':   'Vertical Beam Width',
   'device.horizontalAzimuth':   'Horizontal Azimuth',
   'device.installAddress':      'Install Address',
+  'device.installAddress.doubleClickEdit': 'Double-click to edit install address',
   'device.latestLog':           'Runtime Log',
   'device.noLogFile':           'No log file available',
 
@@ -3014,6 +3017,9 @@ const messages: Record<string, string> = {
   'table.unlockRefresh':     'Unlock Refresh',
   'table.enableRealtimeRefresh':  'Enable Real-time Refresh',
   'table.disableRealtimeRefresh': 'Disable Real-time Refresh',
+  'device.batch.alarmSync.onlyOnline': 'Alarm sync only supports online devices. Offline devices were marked as failed.',
+  'device.batch.alarmSync.partialResult': 'Alarm sync partially completed: {success} succeeded, {failed} failed.',
+  'device.batch.alarmSync.taskUnavailable': 'Alarm sync task is unavailable. Please try again later.',
 
   // -------------------------------------------------------------------------
   // EmptyState

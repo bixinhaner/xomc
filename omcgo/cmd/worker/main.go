@@ -681,6 +681,11 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	// 只删 pm_tasks 行,绝不碰结果表 pm_adhoc_aggregation_results(两层口径分离,设计 §2.3)。
 	startPMAdhocExpireCleanup(w, logger)
 
+	// #779: 回收站自动移入 cron（每天 00:10，与 UI 配置说明对齐）。
+	// 读取 sys_configs device:deviceOfflineEnable / deviceOfflineSaveDay，
+	// 满足离线天数阈值的设备批量软删除（deleted_by='system:auto_recycle'）。
+	startAutoRecycleCron(w, logger)
+
 	// KPI/时序库物理分离：worker 把主库维度表周期刷入时序库影子维度表，
 	// 供 PM/告警时序查询本库 JOIN（device_dim / cell_band_dim / product_dim 等），
 	// 替代跨库 JOIN。仅 worker 跑同步，app 只读影子表。默认 60s 周期。
@@ -698,6 +703,73 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	} else {
 		logger.Warn("tsdb shadow-dim sync disabled: TsPool not connected")
 	}
+}
+
+// startAutoRecycleCron 启动 #779 回收站自动移入 cron（每天 00:10）。
+//
+// 行为：
+//   - 注册 cron（固定 "10 0 * * *"，与 UI 标注「每天 00:10 检查设备离线时间」对齐）
+//   - 启动期延迟 30s 跑一次 catch-up：防 worker 长期宕机后积压的离线设备未被回收
+//   - 读取 sys_configs device:deviceOfflineEnable（总开关）+ deviceOfflineSaveDay（天数阈值）
+//   - 开关 false 时直接跳过，不软删任何设备
+//   - 单实例假设（单 worker 部署），无锁保护；横扩需加 PG advisory lock
+func startAutoRecycleCron(w *workerInfra, logger *zap.Logger) {
+	sysConfigRepo := admin.NewPgSysConfigRepository(w.PgPool)
+	lookup := device.SysConfigLookupFn(func(ctx context.Context, category, key string) (string, bool) {
+		row, err := sysConfigRepo.GetByKey(ctx, category, key)
+		if err != nil || row == nil {
+			return "", false
+		}
+		return row.Value, true
+	})
+	deviceOps := device.NewPgDeviceRepository(w.PgPool)
+	job := device.NewAutoRecycleJob(lookup, deviceOps, 0, logger.Named("auto-recycle"))
+
+	// recycleCtx 绑定 worker 生命周期：GS 触发时取消，catch-up goroutine 可感知 shutdown。
+	// 对标 archiverCtx / pipeCtx 的 GS.Register 模式。
+	recycleCtx, recycleCancel := context.WithCancel(context.Background())
+	w.GS.Register("auto-recycle", 4, func(context.Context) error {
+		recycleCancel()
+		return nil
+	})
+
+	c := cron.New()
+	if _, err := c.AddFunc(device.DefaultAutoRecycleCron, func() {
+		ctx, cancel := context.WithTimeout(recycleCtx, 10*time.Minute)
+		defer cancel()
+		if _, runErr := job.Run(ctx); runErr != nil {
+			logger.Warn("auto recycle run failed", zap.Error(runErr))
+		}
+	}); err != nil {
+		logger.Warn("invalid auto recycle cron; skipping",
+			zap.String("cron", device.DefaultAutoRecycleCron), zap.Error(err))
+		recycleCancel()
+		return
+	}
+	c.Start()
+	logger.Info("auto recycle cron started",
+		zap.String("cron", device.DefaultAutoRecycleCron))
+
+	// 启动期延迟 catch-up（给 app + 字典加载 30s 缓冲）。
+	// 用 select 替代裸 time.Sleep，SIGTERM 时可立即退出，不污染 graceful shutdown 日志。
+	go func() {
+		select {
+		case <-time.After(30 * time.Second):
+		case <-recycleCtx.Done():
+			return
+		}
+		ctx, cancel := context.WithTimeout(recycleCtx, 10*time.Minute)
+		defer cancel()
+		deleted, err := job.Run(ctx)
+		if err != nil {
+			logger.Warn("auto recycle startup catch-up failed", zap.Error(err))
+			return
+		}
+		if deleted > 0 {
+			logger.Info("auto recycle startup catch-up",
+				zap.Int64("deleted", deleted))
+		}
+	}()
 }
 
 // startPMAdhocExpireCleanup 启动 T-0184 adhoc 过期任务定义清理 cron。

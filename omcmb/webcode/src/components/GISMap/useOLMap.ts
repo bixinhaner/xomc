@@ -15,6 +15,10 @@ import XYZ from 'ol/source/XYZ';
 import Feature from 'ol/Feature';
 import Point from 'ol/geom/Point';
 import LineString from 'ol/geom/LineString';
+import MultiPoint from 'ol/geom/MultiPoint';
+import Draw from 'ol/interaction/Draw';
+import Overlay from 'ol/Overlay';
+import { getLength } from 'ol/sphere';
 import { fromLonLat, toLonLat } from 'ol/proj';
 import { containsCoordinate, buffer as bufferExtent, boundingExtent } from 'ol/extent';
 import type { Extent } from 'ol/extent';
@@ -79,6 +83,15 @@ const Easing = {
     }
   },
 };
+
+/**
+ * 将米数格式化为可读距离字符串
+ * < 1000m 显示米，>= 1000m 显示千米
+ */
+function formatMeasureDistance(meters: number): string {
+  if (meters >= 1000) return `${(meters / 1000).toFixed(2)} km`;
+  return `${Math.round(meters)} m`;
+}
 
 interface UseOLMapOptions {
   /** 瓦片服务地址（离线模式） */
@@ -153,6 +166,10 @@ interface UseOLMapReturn {
    * 注：当前为占位实现，OL 瓦片并发控制待后续版本落地
    */
   setTileConcurrency: (n: number) => void;
+  /** 开启测距模式：地图进入划线量距交互，鼠标变十字 */
+  startMeasure: () => void;
+  /** 退出测距模式：清除折线和标注 */
+  stopMeasure: () => void;
 }
 
 /**
@@ -262,6 +279,16 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
   const spiderfySourceRef = useRef<VectorSource | null>(null);
   const isSpiderfiedRef = useRef(false);
   const spiderfiedCenterRef = useRef<number[] | null>(null);
+  // 测距状态
+  const measureSourceRef = useRef<VectorSource | null>(null);
+  const measureLayerRef = useRef<VectorLayer<VectorSource> | null>(null);
+  const measureDrawRef = useRef<Draw | null>(null);
+  const isMeasuringRef = useRef(false);
+  const measureOverlaysRef = useRef<Overlay[]>([]);
+  // 新 API 数据到达标志：区分「视口移动触发的 cull（可能过渡态）」和「新数据权威 cull」
+  // - true  → updateDevices 刚更新 allDevicesRef，必须执行全量重算（权威态）
+  // - false → 仅视口移动，若 visible=0 说明是过渡态，保留旧 feature 不闪白
+  const allDevicesChangedRef = useRef(false);
   // 高亮请求 ID（用于防止竞态条件）
   const highlightRequestIdRef = useRef(0);
   // “程序化飞行”计数器：progressiveFlyTo / flyTo / view.fit 起始 +1、结束 -1。
@@ -526,6 +553,7 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
         onUnspiderfy: unspiderfy,
         onMapClick,
         isProgrammaticFlyingRef,
+        isMeasuringRef,
       },
       deviceLayerRef.current,
       spiderfyLayerRef.current
@@ -540,6 +568,8 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
     let highlightZoomLevel: number | null = null;
     mapInstanceRef.current.on('moveend', () => {
       clearTimeout(cullTimeout);
+      // 程序化飞行中跳过 cull，飞行结束后 moveend（counter=0）自然触发一次，避免双重 cull
+      if (isProgrammaticFlyingRef.current > 0) return;
       cullTimeout = setTimeout(() => {
         cullDevicesRef.current?.();
       }, 150);
@@ -590,6 +620,17 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
     // 清理函数
     return () => {
       if (mapInstanceRef.current) {
+        // 清除测量图层和 Overlay
+        if (measureDrawRef.current) {
+          try { measureDrawRef.current.abortDrawing(); } catch { /* ignore */ }
+          mapInstanceRef.current.removeInteraction(measureDrawRef.current);
+          measureDrawRef.current = null;
+        }
+        measureOverlaysRef.current.forEach(o => mapInstanceRef.current?.removeOverlay(o));
+        measureOverlaysRef.current = [];
+        measureSourceRef.current?.clear();
+        isMeasuringRef.current = false;
+
         mapInstanceRef.current.setTarget(undefined);
         mapInstanceRef.current = null;
       }
@@ -598,6 +639,8 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
       deviceLayerRef.current = null;
       spiderfySourceRef.current = null;
       spiderfyLayerRef.current = null;
+      measureSourceRef.current = null;
+      measureLayerRef.current = null;
       // 重置初始化标记，允许重新初始化
       isMapInitializedRef.current = false;
     };
@@ -605,8 +648,9 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
 
   // 把一组设备渲染进 VectorSource
   // 分批策略：设备数 > BATCH_SIZE 时用 rAF 逐批写入，避免单帧构造大量 Feature 阻塞主线程。
-  // 每批 500 条约耗时 5ms，60fps 内不丢帧；同时用 batchId 保证后来的调用能取消前批。
-  const RENDER_BATCH_SIZE = 500;
+  // RENDER_BATCH_SIZE 设为 3000，覆盖典型 pageSize（≤2000），使其走同步路径，
+  // 避免 rAF 批次被 moveend/exitFlying 等多个触发点取消导致节点反复消失。
+  const RENDER_BATCH_SIZE = 3000;
   const renderDeviceFeatures = useCallback((devices: MapDevice[]) => {
     if (!deviceSourceRef.current) return;
 
@@ -696,6 +740,50 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
         containsCoordinate(bufferedExtent, fromLonLat([device.lng, device.lat]))
     );
 
+    const source = deviceSourceRef.current;
+    const currentFeatures = source.getFeatures();
+
+    // ── 过渡态保护 ──────────────────────────────────────────────────────────
+    // 区分两种调用场景：
+    //   A. 视口移动（moveend）触发：allDevicesChangedRef=false
+    //      旧数据是宽视口的稀疏采样，缩放到新区域后可能 visible=0。
+    //      此时不清空 source，保留旧 feature 显示，等待新 API 数据到达。
+    //   B. updateDevices（新 API 数据）触发：allDevicesChangedRef=true
+    //      数据是权威的，必须执行全量重算，不跳过。
+    const isDataUpdate = allDevicesChangedRef.current;
+    allDevicesChangedRef.current = false;
+
+    if (!isDataUpdate && visible.length === 0 && currentFeatures.length > 0) {
+      // 过渡态：视口已移动但新数据未到，保留旧 feature 防止空白闪烁
+      return;
+    }
+
+    // visible=0 且是权威数据（新 API 确认该区域无设备）：直接全量清空
+    if (visible.length === 0) {
+      renderDeviceFeatures([]);
+      return;
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // 增量更新策略：避免 clear() 产生空帧闪烁
+    // 仅在删除量较小时使用增量删除（每次 removeFeature 触发一次 Cluster 重聚合）；
+    // 删除量超过阈值时回退到全量 renderDeviceFeatures
+    const INCREMENTAL_REMOVE_THRESHOLD = 200;
+    if (currentFeatures.length > 0) {
+      const visibleIds = new Set(visible.map(d => d.id));
+      const currentIds = new Set(currentFeatures.map(f => String(f.getId())));
+
+      const toAdd = visible.filter(d => !currentIds.has(d.id));
+      const toRemove = currentFeatures.filter(f => !visibleIds.has(String(f.getId())));
+
+      if (toAdd.length === 0 && toRemove.length <= INCREMENTAL_REMOVE_THRESHOLD) {
+        // 纯删除且量小：逐个 removeFeature，不经过 clear()，无空帧
+        toRemove.forEach(f => source.removeFeature(f));
+        return;
+      }
+    }
+
+    // 有新增 feature、删除量大、或 source 还是空的：走全量渲染
     renderDeviceFeatures(visible);
   }, [renderDeviceFeatures]);
 
@@ -714,7 +802,9 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
     }
 
     // 保存完整列表，随后按当前视口裁剪渲染
+    // 标记为权威数据更新：cullDevicesToViewport 必须全量重算，不跳过
     allDevicesRef.current = devices;
+    allDevicesChangedRef.current = true;
     cullDevicesToViewport();
   }, [unspiderfy, cullDevicesToViewport]);
 
@@ -758,6 +848,155 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
   const setTileConcurrency = useCallback((n: number) => {
     tileConcurrencyRef.current = Math.max(0, n);
   }, []);
+
+  // 退出测距模式（先定义，供 startMeasure 调用）
+  const stopMeasure = useCallback(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    // 放弃正在绘制中的线段
+    if (measureDrawRef.current) {
+      try { measureDrawRef.current.abortDrawing(); } catch { /* ignore */ }
+      map.removeInteraction(measureDrawRef.current);
+      measureDrawRef.current = null;
+    }
+
+    // 清除所有 Overlay 标注
+    measureOverlaysRef.current.forEach(o => map.removeOverlay(o));
+    measureOverlaysRef.current = [];
+
+    // 清除测量折线
+    measureSourceRef.current?.clear();
+
+    isMeasuringRef.current = false;
+    map.getTargetElement().style.cursor = '';
+  }, []);
+
+  // 开启测距模式
+  const startMeasure = useCallback(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    // 如已在测距模式，先退出再重新开始
+    if (isMeasuringRef.current) stopMeasure();
+
+    // 创建/复用测量图层
+    if (!measureSourceRef.current) {
+      measureSourceRef.current = new VectorSource();
+    } else {
+      measureSourceRef.current.clear();
+    }
+
+    if (!measureLayerRef.current) {
+      measureLayerRef.current = new VectorLayer({
+        source: measureSourceRef.current,
+        style: (feature) => {
+          const geom = feature.getGeometry();
+          if (geom instanceof LineString) {
+            return [
+              new Style({
+                stroke: new Stroke({ color: '#1677ff', width: 2, lineDash: [6, 4] }),
+              }),
+              new Style({
+                image: new Circle({
+                  radius: 4,
+                  fill: new Fill({ color: '#fff' }),
+                  stroke: new Stroke({ color: '#1677ff', width: 2 }),
+                }),
+                geometry: () => new MultiPoint((geom as LineString).getCoordinates()),
+              }),
+            ];
+          }
+          return [];
+        },
+        zIndex: 200,
+      });
+      map.addLayer(measureLayerRef.current);
+    }
+
+    isMeasuringRef.current = true;
+    map.getTargetElement().style.cursor = 'crosshair';
+
+    // 累积已完成段的总距离（支持多段折线）
+    let accumulatedDistance = 0;
+
+    // 浮动 tooltip（跟随鼠标）
+    const tooltipEl = document.createElement('div');
+    tooltipEl.style.cssText =
+      'background:#fff;border:1px solid #d9d9d9;border-radius:4px;padding:2px 8px;font-size:12px;' +
+      'white-space:nowrap;pointer-events:none;box-shadow:0 2px 6px rgba(0,0,0,0.15);color:#333;';
+    const tooltipOverlay = new Overlay({
+      element: tooltipEl,
+      offset: [14, -14],
+      positioning: 'bottom-left' as const,
+    });
+    map.addOverlay(tooltipOverlay);
+    measureOverlaysRef.current.push(tooltipOverlay);
+
+    const draw = new Draw({
+      source: measureSourceRef.current,
+      type: 'LineString',
+      style: [
+        new Style({
+          stroke: new Stroke({ color: 'rgba(22,119,255,0.6)', width: 2, lineDash: [6, 4] }),
+        }),
+        new Style({
+          image: new Circle({
+            radius: 4,
+            fill: new Fill({ color: '#fff' }),
+            stroke: new Stroke({ color: '#1677ff', width: 2 }),
+          }),
+        }),
+      ],
+    });
+
+    // 绘制中：实时更新浮动 tooltip
+    draw.on('drawstart', (evt) => {
+      const sketchFeature = evt.feature;
+      const sketchGeom = sketchFeature.getGeometry() as LineString;
+      sketchGeom.on('change', () => {
+        const coords = sketchGeom.getCoordinates();
+        if (coords.length < 2) return;
+        tooltipOverlay.setPosition(coords[coords.length - 1]);
+        const currentLen = getLength(sketchGeom);
+        const total = accumulatedDistance + currentLen;
+        tooltipEl.textContent = total > 0
+          ? `${formatMeasureDistance(total)}${accumulatedDistance > 0 ? ' (累计)' : ''}`
+          : '';
+      });
+    });
+
+    // 双击完成一段折线
+    draw.on('drawend', (evt) => {
+      const geom = evt.feature.getGeometry() as LineString;
+      const segmentLength = getLength(geom);
+      accumulatedDistance += segmentLength;
+
+      // 在折线终点打固定标注
+      const endCoord = geom.getLastCoordinate();
+      const labelEl = document.createElement('div');
+      labelEl.style.cssText =
+        'background:#1677ff;color:#fff;border-radius:3px;padding:1px 7px;font-size:12px;' +
+        'white-space:nowrap;pointer-events:none;transform:translateX(-50%);margin-bottom:4px;';
+      labelEl.textContent = formatMeasureDistance(accumulatedDistance);
+      const labelOverlay = new Overlay({
+        element: labelEl,
+        positioning: 'bottom-center' as const,
+        stopEvent: false,
+        offset: [0, -4],
+      });
+      labelOverlay.setPosition(endCoord);
+      map.addOverlay(labelOverlay);
+      measureOverlaysRef.current.push(labelOverlay);
+
+      // 更新 tooltip 清空，等待下一段开始
+      tooltipEl.textContent = '';
+      tooltipOverlay.setPosition(undefined);
+    });
+
+    map.addInteraction(draw);
+    measureDrawRef.current = draw;
+  }, [stopMeasure]);
 
   // 获取当前视图状态
   const getViewport = useCallback((): MapViewport | null => {
@@ -1373,6 +1612,8 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
     metadata,
     metadataLoading,
     setTileConcurrency,
+    startMeasure,
+    stopMeasure,
   };
 }
 
@@ -1526,17 +1767,22 @@ function bindMapEvents(
      * moveend 不应在此时上报 viewport，避免引起外部重复拉取 /devices/geo。
      */
     isProgrammaticFlyingRef?: React.MutableRefObject<number>;
+    /** 测距模式中时为 true，此时屏蔽设备点击/hover，避免误触 */
+    isMeasuringRef?: React.MutableRefObject<boolean>;
   },
   deviceLayer: VectorLayer<VectorSource>,
   spiderfyLayer: VectorLayer<VectorSource>
 ): void {
-  const { onDeviceClick, onDeviceHover, onViewportChange, onClusterClick, onZoomChange, onSpiderfy, onUnspiderfy, onMapClick, isProgrammaticFlyingRef } = callbacks;
+  const { onDeviceClick, onDeviceHover, onViewportChange, onClusterClick, onZoomChange, onSpiderfy, onUnspiderfy, onMapClick, isProgrammaticFlyingRef, isMeasuringRef } = callbacks;
 
   // Spiderfy 状态（在 bindMapEvents 作用域内）
   let isSpiderfied = false;
 
   // 点击事件
   map.on('click', (evt) => {
+    // 测距模式：屏蔽设备点击交互，由 Draw interaction 处理
+    if (isMeasuringRef?.current) return;
+
     // 触发地图点击回调（无论点击哪里都触发）
     onMapClick?.();
 
@@ -1691,6 +1937,14 @@ function bindMapEvents(
   let hoveredSpiderfyFeature: Feature | null = null;
 
   map.on('pointermove', (evt) => {
+    // 测距模式：保持十字光标，不处理设备 hover
+    if (isMeasuringRef?.current) {
+      // 只在有悬停状态需要清除时才回调，避免每帧无条件触发
+      if (hoveredFeature) { hoveredFeature.set('hovered', false); hoveredFeature = null; onDeviceHover?.(null); }
+      if (hoveredSpiderfyFeature) { hoveredSpiderfyFeature.set('hovered', false); hoveredSpiderfyFeature = null; }
+      return;
+    }
+
     // 首先检查 spiderfy 图层的展开点
     const spiderfyFeatures = map.getFeaturesAtPixel(evt.pixel, {
       layerFilter: (layer) => layer === spiderfyLayer,

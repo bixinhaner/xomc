@@ -266,10 +266,10 @@ func (mr *MockDeviceRepositoryMockRecorder) ListGeo(ctx, filter any) *gomock.Cal
 }
 
 // ListRecycleBin mocks base method.
-func (m *MockDeviceRepository) ListRecycleBin(ctx context.Context, filter RecycleBinFilter) (*model.ListResponse[model.Device], error) {
+func (m *MockDeviceRepository) ListRecycleBin(ctx context.Context, filter RecycleBinFilter) (*model.ListResponse[DeviceWithInfo], error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ListRecycleBin", ctx, filter)
-	ret0, _ := ret[0].(*model.ListResponse[model.Device])
+	ret0, _ := ret[0].(*model.ListResponse[DeviceWithInfo])
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }

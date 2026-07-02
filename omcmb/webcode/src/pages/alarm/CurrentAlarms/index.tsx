@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Badge, Button, Card, Dropdown, Space, Tag, Typography, App } from 'antd';
+import { Badge, Button, Card, Dropdown, Space, Tag, App } from 'antd';
 import {
   CheckOutlined,
   ClearOutlined,
@@ -36,8 +36,6 @@ import { renderSnWithTooltip } from '../utils/snTooltip';
 import styles from './CurrentAlarms.module.css';
 import { formatSystemTime } from '@core/utils/systemTime';
 
-const { Text } = Typography;
-
 // 告警级别颜色 - 专业配色方案
 const SEVERITY_CONFIG: Record<string, { color: string; bgColor: string }> = {
   critical: { color: '#E53935', bgColor: '#FFEBEE' },
@@ -63,17 +61,6 @@ const EVENT_TYPE_CONFIG: Record<EventType, string> = {
   environment: 'alarm.eventType.environment',
   performance: 'alarm.eventType.performance',
 };
-
-// 快捷筛选选项（label 在渲染处经 t() 派生，此处仅保留 key 与过滤条件）
-const QUICK_FILTER_OPTIONS = [
-  { key: 'all' },
-  { key: 'critical', severity: ['critical'] },
-  { key: 'major', severity: ['major'] },
-  { key: 'minor', severity: ['minor'] },
-  { key: 'warning', severity: ['warning'] },
-  { key: 'unacked', dealState: ['0'] },
-  { key: 'unread', unread: '1' },
-];
 
 // 自动刷新间隔选项 - 移至组件内 useMemo
 
@@ -128,8 +115,6 @@ export default function CurrentAlarms() {
   const [clearTargetIds, setClearTargetIds] = useState<string[]>([]);
   const [clearLoading, setClearLoading] = useState(false);
 
-  // 快捷筛选状态
-  const [activeQuickFilter, setActiveQuickFilter] = useState<string>('all');
   // 自动刷新状态
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [refreshInterval, setRefreshInterval] = useState(30);
@@ -137,7 +122,6 @@ export default function CurrentAlarms() {
   useEffect(() => {
     setFilterParams(drillDown.filter);
     setCurrentPage(1);
-    setActiveQuickFilter('all');
   }, [drillDown]);
 
   const SEVERITY_LABEL: Record<string, string> = useMemo(() => ({
@@ -291,35 +275,10 @@ export default function CurrentAlarms() {
       timeRange: values.timeRange as [string, string] | undefined,
     });
     setCurrentPage(1);
-    setActiveQuickFilter('all');
   }, []);
 
   const handleReset = useCallback(() => {
     setFilterParams({});
-    setCurrentPage(1);
-    setActiveQuickFilter('all');
-  }, []);
-
-  // 快捷筛选处理
-  const handleQuickFilter = useCallback((key: string) => {
-    setActiveQuickFilter(key);
-    const option = QUICK_FILTER_OPTIONS.find((o) => o.key === key) as
-      | { key: string; severity?: string[]; dealState?: string[]; unread?: string }
-      | undefined;
-    if (option && option.key !== 'all') {
-      setFilterParams((prev) => ({
-        ...prev,
-        severity: option.severity as AlarmFilter['severity'],
-        dealState: option.dealState as AlarmFilter['dealState'],
-        unread: option.unread as '0' | '1',
-      }));
-    } else {
-      setFilterParams((prev) => {
-         
-        const { severity, dealState, unread, ...rest } = prev;
-        return rest;
-      });
-    }
     setCurrentPage(1);
   }, []);
 
@@ -755,29 +714,7 @@ export default function CurrentAlarms() {
         style={{ marginBottom: 12 }}
       >
         <div className={styles.cardHeader}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-            <Space size={16}>
-              <Text className={styles.cardHeaderTitle}>{t('nav.alarm.statistics')}</Text>
-              <div className={styles.pillTabs}>
-                {[
-                  { key: 'all', label: t('alarm.statistics.all') },
-                  { key: 'critical', label: t('alarm.statistics.critical') },
-                  { key: 'major', label: t('alarm.statistics.major') },
-                  { key: 'minor', label: t('alarm.statistics.minor') },
-                  { key: 'warning', label: t('alarm.statistics.warning') },
-                  { key: 'unacked', label: t('alarm.statistics.unconfirmed') },
-                  { key: 'unread', label: t('alarm.statistics.unread') },
-                ].map(item => (
-                  <span
-                    key={item.key}
-                    className={`${styles.pillTab} ${activeQuickFilter === item.key ? styles.pillTabActive : styles.pillTabInactive}`}
-                    onClick={() => handleQuickFilter(item.key)}
-                  >
-                    {item.label}
-                  </span>
-                ))}
-              </div>
-            </Space>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', width: '100%' }}>
             <Space size={8}>
               <div className={`${styles.statsBadge} ${styles.statsCritical}`}>
                 <span>{t('alarm.statistics.critical')}: {realStats.critical}</span>

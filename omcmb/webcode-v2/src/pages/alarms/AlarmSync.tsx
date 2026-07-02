@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { RefreshCcw, Search, Zap } from 'lucide-react'
 
@@ -22,6 +23,7 @@ import {
   formatTime,
 } from '@/components/layout/PageShell'
 
+import { deviceTaskApi, isAbortError } from '@core/services/api/deviceTaskApi'
 import { useTriggerAlarmSync } from '@core/hooks/api/useAlarms'
 import { useDeviceList } from '@core/hooks/api/useDevices'
 
@@ -46,10 +48,21 @@ const STATUS_META: Record<
 
 export default function AlarmSync() {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const triggerSync = useTriggerAlarmSync()
+  const [syncingDeviceSns, setSyncingDeviceSns] = useState<string[]>([])
+  const syncControllersRef = useRef(new Map<string, AbortController>())
 
   const [keyword, setKeyword] = useState('')
   const [records, setRecords] = useState<SyncRecord[]>([])
+
+  useEffect(() => {
+    const controllers = syncControllersRef.current
+    return () => {
+      controllers.forEach((controller) => controller.abort())
+      controllers.clear()
+    }
+  }, [])
 
   const params = useMemo(() => {
     const p: { page: number; pageSize: number; keyword?: string } = {
@@ -66,6 +79,7 @@ export default function AlarmSync() {
 
   const handleSync = useCallback(
     (sn: string, name: string) => {
+      if (syncingDeviceSns.includes(sn)) return
       const key = `${sn}-${Date.now()}`
       setRecords((prev) => [
         {
@@ -78,8 +92,22 @@ export default function AlarmSync() {
         },
         ...prev,
       ])
-      triggerSync.mutate(sn, {
-        onSuccess: () => {
+      setSyncingDeviceSns((prev) => [...prev, sn])
+      const abortController = new AbortController()
+      syncControllersRef.current.set(key, abortController)
+      void (async () => {
+        try {
+          const triggerResult = await triggerSync.mutateAsync(sn)
+          if (!triggerResult.taskId) {
+            throw new Error('告警同步任务不可用，请稍后重试。')
+          }
+          const task = await deviceTaskApi.waitForTerminal(triggerResult.taskId, {
+            signal: abortController.signal,
+          })
+          if (task.status !== 'completed') {
+            throw new Error(task.errorMessage || task.status)
+          }
+          await queryClient.invalidateQueries({ queryKey: ['alarms'] })
           setRecords((prev) =>
             prev.map((r) =>
               r.key === key
@@ -87,8 +115,10 @@ export default function AlarmSync() {
                 : r
             )
           )
-        },
-        onError: () => {
+        } catch (error) {
+          if (isAbortError(error)) {
+            return
+          }
           setRecords((prev) =>
             prev.map((r) =>
               r.key === key
@@ -96,10 +126,15 @@ export default function AlarmSync() {
                 : r
             )
           )
-        },
-      })
+        } finally {
+          syncControllersRef.current.delete(key)
+          if (!abortController.signal.aborted) {
+            setSyncingDeviceSns((prev) => prev.filter((item) => item !== sn))
+          }
+        }
+      })()
     },
-    [triggerSync]
+    [queryClient, syncingDeviceSns, triggerSync]
   )
 
   const deviceCols = ['设备 SN', '设备名称', '厂商', '制式', '状态', '操作']
@@ -176,7 +211,7 @@ export default function AlarmSync() {
                       variant="ghost"
                       size="sm"
                       className="h-7 px-2 text-xs"
-                      disabled={triggerSync.isPending}
+                      disabled={syncingDeviceSns.includes(d.sn) || !d.isOnline}
                       onClick={() => handleSync(d.sn, d.name)}
                     >
                       <Zap className="size-3.5" /> 同步告警

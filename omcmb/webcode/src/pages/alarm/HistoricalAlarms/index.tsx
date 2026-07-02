@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Badge, Button, Card, Dropdown, Space, Tag, Typography, App } from 'antd';
+import { Badge, Button, Card, Dropdown, Space, Tag, App } from 'antd';
 import {
   CheckOutlined,
   DeleteOutlined,
@@ -31,8 +31,6 @@ import { BASE_STATION_TYPE_OPTIONS, formatBaseStationTypeLabel } from '../utils/
 import { renderSnWithTooltip } from '../utils/snTooltip';
 import styles from './HistoricalAlarms.module.css';
 import { formatSystemTime } from '@core/utils/systemTime';
-
-const { Text } = Typography;
 
 // 告警级别颜色 - 专业配色方案
 const SEVERITY_CONFIG: Record<string, { color: string; bgColor: string }> = {
@@ -92,7 +90,6 @@ export default function HistoricalAlarms() {
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [detailAlarm, setDetailAlarm] = useState<Alarm | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
-  const [activeQuickFilter, setActiveQuickFilter] = useState<string>('all');
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [refreshInterval, setRefreshInterval] = useState(30);
 
@@ -229,36 +226,6 @@ export default function HistoricalAlarms() {
 
   const handleReset = useCallback(() => {
     setFilterParams({});
-    setCurrentPage(1);
-    setActiveQuickFilter('all');
-  }, []);
-
-  // 快捷筛选处理
-  const handleQuickFilter = useCallback((key: string) => {
-    setActiveQuickFilter(key);
-    if (key === 'all') {
-      setFilterParams((prev) => {
-         
-        const { severity, ...rest } = prev;
-        return rest;
-      });
-    } else if (key === 'cleared') {
-      setFilterParams((prev) => ({
-        ...prev,
-        dealState: ['2', '3'] as AlarmFilter['dealState'],
-      }));
-    } else if (key === 'confirmed') {
-      setFilterParams((prev) => ({
-        ...prev,
-        dealState: ['1', '3'] as AlarmFilter['dealState'],
-      }));
-    } else {
-      // severity: critical, major, minor, warning
-      setFilterParams((prev) => ({
-        ...prev,
-        severity: [key] as AlarmFilter['severity'],
-      }));
-    }
     setCurrentPage(1);
   }, []);
 
@@ -677,27 +644,7 @@ export default function HistoricalAlarms() {
         style={{ marginBottom: 12 }}
       >
         <div className={styles.cardHeader}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-            <Space size={16}>
-              <Text className={styles.cardHeaderTitle}>{t('alarm.statistics.title')}</Text>
-              <div className={styles.pillTabs}>
-                {[
-                  { key: 'all', label: t('alarm.statistics.all') },
-                  { key: 'critical', label: t('alarm.statistics.critical') },
-                  { key: 'major', label: t('alarm.statistics.major') },
-                  { key: 'minor', label: t('alarm.statistics.minor') },
-                  { key: 'warning', label: t('alarm.statistics.warning') },
-                ].map(item => (
-                  <span
-                    key={item.key}
-                    className={`${styles.pillTab} ${activeQuickFilter === item.key ? styles.pillTabActive : styles.pillTabInactive}`}
-                    onClick={() => handleQuickFilter(item.key)}
-                  >
-                    {item.label}
-                  </span>
-                ))}
-              </div>
-            </Space>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', width: '100%' }}>
             <Space size={8}>
               <div className={`${styles.statsBadge} ${styles.statsCritical}`}>
                 <span>{t('alarm.statistics.critical')}: {realStats.critical}</span>
