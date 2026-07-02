@@ -43,7 +43,6 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
       // MinIO 对外可达 endpoint：issue #548 切片 3。空 = 走 env / 派生回退（后端订阅桥处理）
       minio_public_endpoint: '',
       alarmHisMaxHoldTime: 365,
-      signalingTraceSaveDays: 7,
       varDiskAlarmThresHold: '10%',
       homeDiskAlarmThresHold: '10%',
       usrDiskAlarmThresHold: '10%',
@@ -104,19 +103,6 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
             <span>{t('sysconfig.storage.alarmHistoryLabel')}</span>
             <Form.Item name="alarmHisMaxHoldTime" noStyle>
               <InputNumber min={1} max={365} style={{ width: 70 }} />
-            </Form.Item>
-            <span>{t('sysconfig.storage.unit.day')}</span>
-          </Space>
-        </div>
-      </Card>
-
-      {/* 信令追踪 */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.storage.signalingTrace')}</span>} style={{ marginBottom: 16 }}>
-        <div style={settingRowStyle}>
-          <Space>
-            <span>{t('sysconfig.storage.traceLabel')}</span>
-            <Form.Item name="signalingTraceSaveDays" noStyle>
-              <InputNumber min={1} max={365} style={{ width: 70 }} disabled />
             </Form.Item>
             <span>{t('sysconfig.storage.unit.day')}</span>
           </Space>
