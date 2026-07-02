@@ -49,7 +49,6 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
       kpiStorge60DataDays: 30,
       kpiStorge1440DataDays: 365,
       kpiWeekAndMonthSwitch: true,
-      signalingTraceSaveDays: 7,
       varDiskAlarmThresHold: '10%',
       homeDiskAlarmThresHold: '10%',
       usrDiskAlarmThresHold: '10%',
@@ -172,19 +171,6 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
           <Form.Item name="kpiWeekAndMonthSwitch" valuePropName="checked" noStyle>
             <Checkbox>{t('sysconfig.storage.weekMonthGranularity')}</Checkbox>
           </Form.Item>
-        </div>
-      </Card>
-
-      {/* 信令追踪 */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.storage.signalingTrace')}</span>} style={{ marginBottom: 16 }}>
-        <div style={settingRowStyle}>
-          <Space>
-            <span>{t('sysconfig.storage.traceLabel')}</span>
-            <Form.Item name="signalingTraceSaveDays" noStyle>
-              <InputNumber min={1} max={365} style={{ width: 70 }} disabled />
-            </Form.Item>
-            <span>{t('sysconfig.storage.unit.day')}</span>
-          </Space>
         </div>
       </Card>
 
