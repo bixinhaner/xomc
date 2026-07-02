@@ -1,4 +1,5 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import {
   CheckCircle2,
@@ -15,6 +16,7 @@ import { GlassPanel } from '@/components/ui/GlassPanel'
 import { NeonButton } from '@/components/ui/NeonButton'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { formatHHMMSS } from '@/lib/format'
+import { deviceTaskApi, isAbortError } from '@core/services/api/deviceTaskApi'
 import { useAlarmCount, useTriggerAlarmSync } from '@core/hooks/api/useAlarms'
 
 type SyncStatus = 'running' | 'success' | 'failed'
@@ -30,14 +32,24 @@ interface SyncRecord {
 
 export default function AlarmSync() {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const triggerSync = useTriggerAlarmSync()
   const { data: cnt, isFetching: cntFetching, refetch: refetchCount } = useAlarmCount()
 
   const [sn, setSn] = useState('')
   const [records, setRecords] = useState<SyncRecord[]>([])
   const [formError, setFormError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+  const syncAbortRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    return () => {
+      syncAbortRef.current?.abort()
+    }
+  }, [])
 
   const submit = useCallback(() => {
+    if (submitting) return
     const deviceSn = sn.trim()
     if (!deviceSn) {
       setFormError('请输入设备 SN')
@@ -50,17 +62,34 @@ export default function AlarmSync() {
       ...prev,
     ])
     setSn('')
-    triggerSync.mutate(deviceSn, {
-      onSuccess: () => {
+    setSubmitting(true)
+    syncAbortRef.current?.abort()
+    const abortController = new AbortController()
+    syncAbortRef.current = abortController
+    void (async () => {
+      try {
+        const triggerResult = await triggerSync.mutateAsync(deviceSn)
+        if (!triggerResult.taskId) {
+          throw new Error('告警同步任务不可用，请稍后重试。')
+        }
+        const task = await deviceTaskApi.waitForTerminal(triggerResult.taskId, {
+          signal: abortController.signal,
+        })
+        if (task.status !== 'completed') {
+          throw new Error(task.errorMessage || task.status)
+        }
+        await queryClient.invalidateQueries({ queryKey: ['alarms'] })
         setRecords((prev) =>
           prev.map((r) =>
             r.id === id
-              ? { ...r, status: 'success', endTs: formatHHMMSS(), message: '同步请求已下发' }
+              ? { ...r, status: 'success', endTs: formatHHMMSS(), message: '同步完成并已入库' }
               : r
           )
         )
-      },
-      onError: (e) => {
+      } catch (e) {
+        if (isAbortError(e)) {
+          return
+        }
         setRecords((prev) =>
           prev.map((r) =>
             r.id === id
@@ -73,9 +102,16 @@ export default function AlarmSync() {
               : r
           )
         )
-      },
-    })
-  }, [sn, triggerSync])
+      } finally {
+        if (syncAbortRef.current === abortController) {
+          syncAbortRef.current = null
+        }
+        if (!abortController.signal.aborted) {
+          setSubmitting(false)
+        }
+      }
+    })()
+  }, [queryClient, sn, submitting, triggerSync])
 
   const runningCount = records.filter((r) => r.status === 'running').length
   const successCount = records.filter((r) => r.status === 'success').length
@@ -86,7 +122,7 @@ export default function AlarmSync() {
       code="F04"
       title="ALARM SYNC · 告警同步"
       subtitle="ON-DEMAND ALARM RESYNC FROM NETWORK ELEMENT"
-      isFetching={cntFetching || triggerSync.isPending}
+      isFetching={cntFetching || submitting}
       toolbar={
         <NeonButton icon={<RefreshCcw />} onClick={() => refetchCount()}>
           REFRESH
@@ -130,11 +166,11 @@ export default function AlarmSync() {
               <div className="font-mono text-[11px] text-rose-300">{formError}</div>
             )}
             <NeonButton
-              icon={triggerSync.isPending ? <Loader2 className="animate-spin" /> : <Send />}
+              icon={submitting ? <Loader2 className="animate-spin" /> : <Send />}
               onClick={submit}
-              disabled={triggerSync.isPending}
+              disabled={submitting}
             >
-              {triggerSync.isPending ? 'DISPATCHING…' : 'DISPATCH SYNC · 下发同步'}
+              {submitting ? 'SYNCING…' : 'DISPATCH SYNC · 下发同步'}
             </NeonButton>
           </div>
         </GlassPanel>

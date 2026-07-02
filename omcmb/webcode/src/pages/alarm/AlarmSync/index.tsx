@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Button, Modal, Space, Tag, Typography, message } from 'antd';
 import {
   PlusOutlined,
@@ -10,6 +11,7 @@ import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useT } from '@/hooks/useT';
+import { deviceTaskApi, isAbortError } from '@core/services/api/deviceTaskApi';
 import { useTriggerAlarmSync } from '@core/hooks/api/useAlarms';
 
 const { Text } = Typography;
@@ -69,6 +71,7 @@ const SYNC_TYPE_COLOR: Record<AlarmSyncTask['syncType'], string> = {
 
 export default function AlarmSync() {
   const t = useT();
+  const queryClient = useQueryClient();
   const triggerSync = useTriggerAlarmSync();
   const [tasks, setTasks] = useState<AlarmSyncTask[]>(MOCK_SYNC_TASKS);
   const [filterParams, setFilterParams] = useState<Record<string, unknown>>({});
@@ -76,6 +79,14 @@ export default function AlarmSync() {
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [newSyncSn, setNewSyncSn] = useState('');
   const [newSyncType, setNewSyncType] = useState<AlarmSyncTask['syncType']>('incremental');
+  const [submitting, setSubmitting] = useState(false);
+  const syncAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => {
+      syncAbortRef.current?.abort();
+    };
+  }, []);
 
   const SYNC_TYPE_LABEL: Record<AlarmSyncTask['syncType'], string> = useMemo(() => ({
     full: 'Full',
@@ -175,11 +186,15 @@ export default function AlarmSync() {
       void message.warning(t('common.placeholder'));
       return;
     }
+    if (submitting) {
+      return;
+    }
+    const deviceSn = newSyncSn.trim();
     const newTask: AlarmSyncTask = {
       id: String(Date.now()),
       syncId: `SYNC-${String(tasks.length + 1).padStart(3, '0')}`,
-      deviceSn: newSyncSn,
-      deviceName: `Device-${newSyncSn}`,
+      deviceSn,
+      deviceName: `Device-${deviceSn}`,
       syncType: newSyncType,
       startTime: new Date().toLocaleString('zh-CN'),
       endTime: null,
@@ -191,10 +206,24 @@ export default function AlarmSync() {
     setTasks((prev) => [newTask, ...prev]);
     setCreateModalOpen(false);
     setNewSyncSn('');
+    setSubmitting(true);
+    syncAbortRef.current?.abort();
+    const abortController = new AbortController();
+    syncAbortRef.current = abortController;
 
-    // Call real API to trigger alarm sync
-    triggerSync.mutate(newSyncSn, {
-      onSuccess: () => {
+    void (async () => {
+      try {
+        const triggerResult = await triggerSync.mutateAsync(deviceSn);
+        if (!triggerResult.taskId) {
+          throw new Error(t('device.batch.alarmSync.taskUnavailable'));
+        }
+        const task = await deviceTaskApi.waitForTerminal(triggerResult.taskId, {
+          signal: abortController.signal,
+        });
+        if (task.status !== 'completed') {
+          throw new Error(task.errorMessage || task.status);
+        }
+        await queryClient.invalidateQueries({ queryKey: ['alarms'] });
         void message.success(t('status.success'));
         setTasks((prev) =>
           prev.map((tk) =>
@@ -203,8 +232,10 @@ export default function AlarmSync() {
               : tk
           )
         );
-      },
-      onError: () => {
+      } catch (error) {
+        if (isAbortError(error)) {
+          return;
+        }
         void message.error(t('status.failed'));
         setTasks((prev) =>
           prev.map((tk) =>
@@ -213,9 +244,16 @@ export default function AlarmSync() {
               : tk
           )
         );
-      },
-    });
-  }, [newSyncSn, newSyncType, tasks.length, t, triggerSync]);
+      } finally {
+        if (syncAbortRef.current === abortController) {
+          syncAbortRef.current = null;
+        }
+        if (!abortController.signal.aborted) {
+          setSubmitting(false);
+        }
+      }
+    })();
+  }, [newSyncSn, newSyncType, queryClient, submitting, tasks.length, t, triggerSync]);
 
   const columns = useMemo(
     (): DataTableColumn<AlarmSyncTask>[] => [
@@ -335,6 +373,7 @@ export default function AlarmSync() {
             <Button
               type="primary"
               icon={<PlusOutlined />}
+              loading={submitting}
               onClick={() => setCreateModalOpen(true)}
             >
               {t('common.execute')}
@@ -370,6 +409,9 @@ export default function AlarmSync() {
         onOk={handleCreateSync}
         onCancel={() => setCreateModalOpen(false)}
         okText={t('common.execute')}
+        okButtonProps={{ loading: submitting }}
+        cancelButtonProps={{ disabled: submitting }}
+        maskClosable={!submitting}
         width={420}
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 16 }}>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import {
@@ -48,7 +48,9 @@ import {
 import { cn } from '@/lib/utils'
 
 import { useAppStore } from '@core/store/appStore'
+import { deviceTaskApi, isAbortError } from '@core/services/api/deviceTaskApi'
 import { expandSelectedGroupIds } from '@core/utils/deviceGroupFilter'
+import { mapWithConcurrencyLimit } from '@core/utils/asyncPool'
 import {
   prefetchDeviceDetailContext,
   useDeviceList,
@@ -82,6 +84,8 @@ const AUTO_REFRESH_OPTIONS = [
   { label: '5分钟', value: '300' },
 ] as const
 
+const ALARM_SYNC_BATCH_CONCURRENCY = 4
+
 function ConnStatusBadge({ online }: { online: boolean }) {
   return (
     <Badge variant={online ? 'success' : 'muted'}>
@@ -97,7 +101,6 @@ function ConnStatusBadge({ online }: { online: boolean }) {
 }
 
 function AlarmBadge({ level, count }: { level: AlarmSeverity | 'none'; count?: number }) {
-  // #361: 有活动告警时把告警数拼进 label（如「重要 · 3」）。
   return (
     <Badge variant={getAlarmSeverityBadgeVariant(level)}>
       {formatAlarmSeverityBadgeLabel(level, count, DEFAULT_ALARM_SEVERITY_LABELS_ZH)}
@@ -114,8 +117,6 @@ function ActivationBadge({
   details?: { label?: string; value?: string; status?: boolean }[]
   locale: 'zh-CN' | 'en-US'
 }) {
-  // 「激活状态」判定走 frontend-core/utils/activationStatus —— 与 webcode/webcode-v3
-  // 同一来源,后端兜底的 'unknown' 与空值一律显示 '—',不再回显 raw 字符串。
   const status = activationStatusOf(opState)
   const label = activationStatusLabelOf(opState, details, {
     active: '激活',
@@ -141,15 +142,15 @@ export function DevicesPage() {
   const [groupId, setGroupId] = useState<string>('all')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
-  const prefetchDeviceDetailEntry = (device: Device) => {
-    void import('@/pages/device/DeviceDetail')
-    void prefetchDeviceDetailContext(queryClient, device)
-  }
+    const prefetchDeviceDetailEntry = useCallback((device: Device) => {
+      void import('@/pages/device/DeviceDetail')
+      void prefetchDeviceDetailContext(queryClient, device)
+    }, [queryClient])
 
-  const openDeviceDetail = (device: Device) => {
-    prefetchDeviceDetailEntry(device)
-    void navigate(`/device/detail/${device.sn}`)
-  }
+    const openDeviceDetail = useCallback((device: Device) => {
+      prefetchDeviceDetailEntry(device)
+      void navigate(`/device/detail/${device.sn}`)
+    }, [navigate, prefetchDeviceDetailEntry])
 
   // ---- 辅助下拉数据 ----
   const groupsQuery = useDeviceGroups()
@@ -159,202 +160,281 @@ export function DevicesPage() {
   const appLocale = useAppStore((s) => s.locale)
   const { data: opStateDict } = useDictionary('op_state')
 
-  const groupOptions = useMemo(
-    () => (groupsQuery.data?.groups ?? []).filter((g) => g.parentId !== null),
-    [groupsQuery.data]
-  )
-  const productOptions = productsQuery.data?.items ?? []
-
-  // ---- 列表查询参数 ----
-  const queryParams = useMemo<DeviceFilter & PageRequest>(() => {
-    const expandedGroupIDs =
-      groupId !== 'all' ? expandSelectedGroupIds(groupId, groupsQuery.data?.groups ?? []) : undefined
-
-    return {
-      page,
-      pageSize,
-      ...(searchText.trim() ? { searchText: searchText.trim() } : {}),
-      ...(onlineFilter !== 'all' ? { isOnline: onlineFilter === 'online' } : {}),
-      ...(opState !== 'all' ? { opState } : {}),
-      ...(networkType !== 'all' ? { networkType } : {}),
-      ...(productId !== 'all' ? { productId } : {}),
-      ...(expandedGroupIDs ? { groupId: expandedGroupIDs } : {}),
-    }
-  }, [page, pageSize, searchText, onlineFilter, opState, networkType, productId, groupId, groupsQuery.data?.groups])
-
-  const { data, isLoading, isError, error, isFetching, refetch } =
-    useDeviceList(queryParams, { refetchInterval: autoRefresh ? refreshInterval * 1000 : 0 })
-
-  useEffect(() => {
-    if (!autoRefresh) return
-    void refetch()
-  }, [autoRefresh, refreshInterval, refetch])
-
-  // ---- 批量操作 mutations ----
-  const batchReboot = useBatchRebootDevices()
-  const syncParams = useSyncDeviceParams()
-  const alarmSync = useTriggerAlarmSync()
-  const updateDevice = useUpdateDevice()
-  const [editingInstallAddressId, setEditingInstallAddressId] = useState<string | null>(null)
-  const [editingInstallAddressValue, setEditingInstallAddressValue] = useState('')
-  const [savingInstallAddressId, setSavingInstallAddressId] = useState<string | null>(null)
-
-  const rows = useMemo(
-    () => data?.items ?? [],
-    [data?.items]
-  )
-  const total = data?.total ?? 0
-  const totalPages = Math.max(1, Math.ceil(total / pageSize))
-  const stats = data?.stats
-
-  const onlineCount = stats?.online_count ?? stats?.online ?? 0
-  const offlineCount = stats?.offline_count ?? stats?.offline ?? 0
-  const alarmedCount = alarmCountQuery.data?.total_active ?? stats?.alarmed ?? 0
-
-  // ---- 选择 ----
-  const pageIds = useMemo(() => rows.map((d) => d.id), [rows])
-  const allOnPageSelected =
-    pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id))
-  const someOnPageSelected = pageIds.some((id) => selectedIds.has(id))
-
-  function toggleOne(id: string) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
-
-  function toggleAllOnPage() {
-    setSelectedIds((prev) => {
-      const next = new Set(prev)
-      if (allOnPageSelected) {
-        pageIds.forEach((id) => next.delete(id))
-      } else {
-        pageIds.forEach((id) => next.add(id))
-      }
-      return next
-    })
-  }
-
-  function clearSelection() {
-    setSelectedIds(new Set())
-  }
-
-  const selectedDevices = useMemo(
-    () => rows.filter((d) => selectedIds.has(d.id)),
-    [rows, selectedIds]
-  )
-  const selectedCount = selectedIds.size
-
-  // ---- 批量操作处理 ----
-  function handleBatchReboot() {
-    if (selectedCount === 0) return
-    batchReboot.mutate(Array.from(selectedIds), {
-      onSuccess: () => clearSelection(),
-    })
-  }
-
-  function handleBatchSyncParams() {
-    // useSyncDeviceParams 是单设备 mutation；批量场景顺序触发（每设备一次 Path B）
-    selectedDevices.forEach((d) => {
-      syncParams.mutate({ deviceId: d.id })
-    })
-  }
-
-  function handleBatchAlarmSync() {
-    // alarm sync 以 SN 为入参
-    selectedDevices.forEach((d) => {
-      if (d.sn) alarmSync.mutate(d.sn)
-    })
-  }
-
-  function resetFilters() {
-    setSearchText('')
-    setOnlineFilter('all')
-    setOpState('all')
-    setNetworkType('all')
-    setProductId('all')
-    setGroupId('all')
-    setPage(1)
-  }
-
-  const hasActiveFilter =
-    Boolean(searchText.trim()) ||
-    onlineFilter !== 'all' ||
-    opState !== 'all' ||
-    networkType !== 'all' ||
-    productId !== 'all' ||
-    groupId !== 'all'
-
-  const autoRefreshValue = autoRefresh ? String(refreshInterval) : 'off'
-
-  function startInstallAddressEdit(device: Device) {
-    setEditingInstallAddressId(device.id)
-    setEditingInstallAddressValue(device.installAddress || '')
-  }
-
-  function cancelInstallAddressEdit() {
-    setEditingInstallAddressId(null)
-    setEditingInstallAddressValue('')
-    setSavingInstallAddressId(null)
-  }
-
-  function saveInstallAddressEdit(device: Device) {
-    const nextValue = editingInstallAddressValue.trim()
-    const currentValue = (device.installAddress || '').trim()
-    if (savingInstallAddressId === device.id) return
-    if (nextValue === currentValue) {
-      cancelInstallAddressEdit()
-      return
-    }
-
-    setSavingInstallAddressId(device.id)
-    updateDevice.mutate(
-      {
-        id: device.id,
-        data: { installAddress: nextValue },
-        fallbackDevice: {
-          id: device.id,
-          sn: device.sn,
-          installAddress: device.installAddress,
-          remark: device.remark,
-        },
-      },
-      {
-        onSuccess: (updatedDevice) => {
-          queryClient.setQueryData(['devices', 'list', queryParams], (prev: typeof data) => {
-            if (!prev) return prev
-            return {
-              ...prev,
-              items: prev.items.map((item) =>
-                item.id === updatedDevice.id ? { ...item, installAddress: updatedDevice.installAddress } : item
-              ),
-            }
-          })
-          setEditingInstallAddressId(null)
-          setEditingInstallAddressValue('')
-          setSavingInstallAddressId(null)
-        },
-        onError: () => {
-          setSavingInstallAddressId(null)
-        },
-      }
+    const groupOptions = useMemo(
+      () => (groupsQuery.data?.groups ?? []).filter((g) => g.parentId !== null),
+      [groupsQuery.data]
     )
-  }
+    const productOptions = productsQuery.data?.items ?? []
 
-  // ---- 列定义 ----
-  const columns = useMemo<ColumnDef<Device>[]>(
-    () => [
-      {
-        id: 'select',
-        header: () => (
-          <input
-            type="checkbox"
-            aria-label="全选本页"
-            className="size-4 cursor-pointer accent-primary"
-            checked={allOnPageSelected}
+    const queryParams = useMemo<DeviceFilter & PageRequest>(() => {
+      const expandedGroupIDs =
+        groupId !== 'all' ? expandSelectedGroupIds(groupId, groupsQuery.data?.groups ?? []) : undefined
+
+      return {
+        page,
+        pageSize,
+        ...(searchText.trim() ? { searchText: searchText.trim() } : {}),
+        ...(onlineFilter !== 'all' ? { isOnline: onlineFilter === 'online' } : {}),
+        ...(opState !== 'all' ? { opState } : {}),
+        ...(networkType !== 'all' ? { networkType } : {}),
+        ...(productId !== 'all' ? { productId } : {}),
+        ...(expandedGroupIDs ? { groupId: expandedGroupIDs } : {}),
+      }
+    }, [page, pageSize, searchText, onlineFilter, opState, networkType, productId, groupId, groupsQuery.data?.groups])
+
+    const { data, isLoading, isError, error, isFetching, refetch } =
+      useDeviceList(queryParams, { refetchInterval: autoRefresh ? refreshInterval * 1000 : 0 })
+
+    const batchReboot = useBatchRebootDevices()
+    const syncParams = useSyncDeviceParams()
+    const alarmSync = useTriggerAlarmSync()
+    const updateDevice = useUpdateDevice()
+    const batchAlarmSyncAbortRef = useRef<AbortController | null>(null)
+    const [batchAlarmSyncRunning, setBatchAlarmSyncRunning] = useState(false)
+    const [batchAlarmSyncFeedback, setBatchAlarmSyncFeedback] = useState<{
+      tone: 'success' | 'warning' | 'error'
+      text: string
+    } | null>(null)
+    const [editingInstallAddressId, setEditingInstallAddressId] = useState<string | null>(null)
+    const [editingInstallAddressValue, setEditingInstallAddressValue] = useState('')
+    const [savingInstallAddressId, setSavingInstallAddressId] = useState<string | null>(null)
+
+    useEffect(() => {
+      if (!autoRefresh) return
+      void refetch()
+    }, [autoRefresh, refreshInterval, refetch])
+
+    useEffect(() => {
+      return () => {
+        batchAlarmSyncAbortRef.current?.abort()
+      }
+    }, [])
+
+    const rows = useMemo(
+      () => data?.items ?? [],
+      [data?.items]
+    )
+    const total = data?.total ?? 0
+    const totalPages = Math.max(1, Math.ceil(total / pageSize))
+    const stats = data?.stats
+
+    const onlineCount = stats?.online_count ?? stats?.online ?? 0
+    const offlineCount = stats?.offline_count ?? stats?.offline ?? 0
+    const alarmedCount = alarmCountQuery.data?.total_active ?? stats?.alarmed ?? 0
+
+    const pageIds = useMemo(() => rows.map((d) => d.id), [rows])
+    const allOnPageSelected =
+      pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id))
+    const someOnPageSelected = pageIds.some((id) => selectedIds.has(id))
+
+    function toggleOne(id: string) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev)
+        if (next.has(id)) next.delete(id)
+        else next.add(id)
+        return next
+      })
+    }
+
+    const toggleAllOnPage = useCallback(() => {
+      setSelectedIds((prev) => {
+        const next = new Set(prev)
+        if (allOnPageSelected) {
+          pageIds.forEach((id) => next.delete(id))
+        } else {
+          pageIds.forEach((id) => next.add(id))
+        }
+        return next
+      })
+    }, [allOnPageSelected, pageIds])
+
+    function clearSelection() {
+      setSelectedIds(new Set())
+    }
+
+    const selectedDevices = useMemo(
+      () => rows.filter((d) => selectedIds.has(d.id)),
+      [rows, selectedIds]
+    )
+    const selectedCount = selectedIds.size
+
+    function handleBatchReboot() {
+      if (selectedCount === 0) return
+      batchReboot.mutate(Array.from(selectedIds), {
+        onSuccess: () => clearSelection(),
+      })
+    }
+
+    function handleBatchSyncParams() {
+      selectedDevices.forEach((d) => {
+        syncParams.mutate({ deviceId: d.id })
+      })
+    }
+
+    function handleBatchAlarmSync() {
+      if (selectedCount === 0 || batchAlarmSyncRunning) return
+      void (async () => {
+        let abortController: AbortController | null = null
+        setBatchAlarmSyncRunning(true)
+        setBatchAlarmSyncFeedback(null)
+        try {
+          const runnable = selectedDevices.filter((d) => d.isOnline && Boolean(d.sn))
+          const blockedCount = selectedDevices.length - runnable.length
+          if (runnable.length === 0) {
+            setBatchAlarmSyncFeedback({
+              tone: 'warning',
+              text: '告警同步仅支持在线设备。',
+            })
+            return
+          }
+
+          batchAlarmSyncAbortRef.current?.abort()
+          abortController = new AbortController()
+        const activeAbortController = abortController
+        batchAlarmSyncAbortRef.current = activeAbortController
+
+          const results = await mapWithConcurrencyLimit(
+            runnable,
+            ALARM_SYNC_BATCH_CONCURRENCY,
+            async (device) => {
+              const triggerResult = await alarmSync.mutateAsync(device.sn)
+              if (!triggerResult.taskId) {
+                throw new Error('告警同步任务不可用，请稍后重试。')
+              }
+              const task = await deviceTaskApi.waitForTerminal(triggerResult.taskId, {
+              signal: activeAbortController.signal,
+              })
+              if (task.status !== 'completed') {
+                throw new Error(task.errorMessage || task.status)
+              }
+            },
+          )
+
+        const aborted = activeAbortController.signal.aborted
+            || results.some((result) => result.status === 'rejected' && isAbortError(result.reason))
+          if (aborted) {
+            return
+          }
+
+          const successCount = results.filter((result) => result.status === 'fulfilled').length
+          const failedCount = runnable.length - successCount + blockedCount
+          if (successCount > 0) {
+            await queryClient.invalidateQueries({ queryKey: ['alarms'] })
+          }
+          if (successCount > 0 && failedCount === 0) {
+            setBatchAlarmSyncFeedback({ tone: 'success', text: '告警同步完成。' })
+          } else if (successCount > 0) {
+            setBatchAlarmSyncFeedback({
+              tone: 'warning',
+              text: `告警同步部分完成：成功 ${successCount} 台，失败 ${failedCount} 台。`,
+            })
+          } else {
+            setBatchAlarmSyncFeedback({ tone: 'error', text: '告警同步失败。' })
+          }
+          clearSelection()
+        } finally {
+          if (abortController && batchAlarmSyncAbortRef.current === abortController) {
+            batchAlarmSyncAbortRef.current = null
+          }
+          if (!(abortController?.signal.aborted ?? false)) {
+            setBatchAlarmSyncRunning(false)
+          }
+        }
+      })()
+    }
+
+    function resetFilters() {
+      setSearchText('')
+      setOnlineFilter('all')
+      setOpState('all')
+      setNetworkType('all')
+      setProductId('all')
+      setGroupId('all')
+      setPage(1)
+    }
+
+    const hasActiveFilter =
+      Boolean(searchText.trim()) ||
+      onlineFilter !== 'all' ||
+      opState !== 'all' ||
+      networkType !== 'all' ||
+      productId !== 'all' ||
+      groupId !== 'all'
+
+    const autoRefreshValue = autoRefresh ? String(refreshInterval) : 'off'
+
+    function startInstallAddressEdit(device: Device) {
+      setEditingInstallAddressId(device.id)
+      setEditingInstallAddressValue(device.installAddress || '')
+    }
+
+    const cancelInstallAddressEdit = useCallback(() => {
+      setEditingInstallAddressId(null)
+      setEditingInstallAddressValue('')
+      setSavingInstallAddressId(null)
+    }, [])
+
+    const saveInstallAddressEdit = useCallback((device: Device) => {
+      const nextValue = editingInstallAddressValue.trim()
+      const currentValue = (device.installAddress || '').trim()
+      if (savingInstallAddressId === device.id) return
+      if (nextValue === currentValue) {
+        cancelInstallAddressEdit()
+        return
+      }
+
+      setSavingInstallAddressId(device.id)
+      updateDevice.mutate(
+        {
+          id: device.id,
+          data: { installAddress: nextValue },
+          fallbackDevice: {
+            id: device.id,
+            sn: device.sn,
+            installAddress: device.installAddress,
+            remark: device.remark,
+          },
+        },
+        {
+          onSuccess: (updatedDevice) => {
+            queryClient.setQueryData(['devices', 'list', queryParams], (prev: typeof data) => {
+              if (!prev) return prev
+              return {
+                ...prev,
+                items: prev.items.map((item) =>
+                  item.id === updatedDevice.id ? { ...item, installAddress: updatedDevice.installAddress } : item
+                ),
+              }
+            })
+            setEditingInstallAddressId(null)
+            setEditingInstallAddressValue('')
+            setSavingInstallAddressId(null)
+          },
+          onError: () => {
+            setSavingInstallAddressId(null)
+          },
+        }
+      )
+    }, [
+      cancelInstallAddressEdit,
+      editingInstallAddressValue,
+      queryClient,
+      queryParams,
+      savingInstallAddressId,
+      updateDevice,
+    ])
+
+    // ---- 列定义 ----
+    const columns = useMemo<ColumnDef<Device>[]>(
+      () => [
+        {
+          id: 'select',
+          header: () => (
+            <input
+              type="checkbox"
+              aria-label="全选本页"
+              className="size-4 cursor-pointer accent-primary"
+              checked={allOnPageSelected}
             ref={(el) => {
               if (el) el.indeterminate = !allOnPageSelected && someOnPageSelected
             }}
@@ -538,7 +618,22 @@ export function DevicesPage() {
         },
       },
     ],
-    [allOnPageSelected, appLocale, editingInstallAddressId, editingInstallAddressValue, opStateDict?.sysDictionaryDetails, savingInstallAddressId, selectedIds, someOnPageSelected]
+    [
+      allOnPageSelected,
+      appLocale,
+      cancelInstallAddressEdit,
+      editingInstallAddressId,
+      editingInstallAddressValue,
+      navigate,
+      openDeviceDetail,
+      opStateDict?.sysDictionaryDetails,
+      prefetchDeviceDetailEntry,
+      saveInstallAddressEdit,
+      savingInstallAddressId,
+      selectedIds,
+      someOnPageSelected,
+      toggleAllOnPage,
+    ]
   )
 
   const table = useReactTable({
@@ -746,10 +841,10 @@ export function DevicesPage() {
             <Button
               variant="outline"
               size="sm"
-              disabled={alarmSync.isPending}
+              disabled={alarmSync.isPending || batchAlarmSyncRunning}
               onClick={handleBatchAlarmSync}
             >
-              {alarmSync.isPending ? (
+              {alarmSync.isPending || batchAlarmSyncRunning ? (
                 <Loader2 className="size-4 animate-spin" />
               ) : (
                 <AlertTriangle className="size-4" />
@@ -770,6 +865,18 @@ export function DevicesPage() {
           {batchReboot.error instanceof Error
             ? batchReboot.error.message
             : '未知错误'}
+        </div>
+      )}
+      {batchAlarmSyncFeedback && (
+        <div
+          className={cn(
+            'mb-3 rounded-md border px-4 py-2 text-sm',
+            batchAlarmSyncFeedback.tone === 'success' && 'border-emerald-500/30 bg-emerald-500/5 text-emerald-700',
+            batchAlarmSyncFeedback.tone === 'warning' && 'border-amber-500/30 bg-amber-500/5 text-amber-700',
+            batchAlarmSyncFeedback.tone === 'error' && 'border-destructive/30 bg-destructive/5 text-destructive',
+          )}
+        >
+          {batchAlarmSyncFeedback.text}
         </div>
       )}
 

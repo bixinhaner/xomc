@@ -365,6 +365,23 @@ func (s *TaskService) GetQueueLength(ctx context.Context, deviceSN string) (int6
 	return s.queue.Len(ctx, deviceSN)
 }
 
+func (s *TaskService) LatestOpenTaskByDeviceAndMethod(ctx context.Context, deviceSN, method, description string) (*Task, error) {
+	if s.repo == nil {
+		return nil, nil
+	}
+	openTasks, err := s.repo.ListOpenByDeviceAndMethods(ctx, deviceSN, []string{method})
+	if err != nil {
+		return nil, err
+	}
+	for idx := len(openTasks) - 1; idx >= 0; idx-- {
+		openTask := openTasks[idx]
+		if description == "" || openTask.Description == description {
+			return openTask, nil
+		}
+	}
+	return nil, nil
+}
+
 func (s *TaskService) LatestSyncGPVSummaryByDevice(ctx context.Context, deviceSN string) (*SyncGPVSummary, error) {
 	if s.repo == nil {
 		return nil, nil
@@ -579,6 +596,7 @@ func (s *TaskService) CancelTask(ctx context.Context, taskID string) error {
 	}
 
 	s.recordCompletion(task, TaskStatusCancelled)
+	s.notifyCompletion(ctx, task)
 
 	logger.L(ctx).Info("task cancelled", zap.String("task_id", taskID))
 
@@ -997,6 +1015,8 @@ func SubjectForStatus(status TaskStatus) string {
 		return event.SubjectTaskCompleted
 	case TaskStatusFailed, TaskStatusExpired:
 		return event.SubjectTaskFailed
+	case TaskStatusCancelled:
+		return event.SubjectTaskCancelled
 	default:
 		return ""
 	}

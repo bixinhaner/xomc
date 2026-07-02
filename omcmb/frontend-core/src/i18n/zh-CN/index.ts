@@ -53,6 +53,7 @@ const messages: Record<string, string> = {
   'common.recycleConfirmDesc': '回收站的设备，将不进行数据监控（监控数据、配置、警报、KPI等...）',
   'common.rebootConfirmMsg': '确定重启设备？',
   'common.commandSent':    '命令已经下发。',
+  'common.partialSuccess': '部分成功',
   'common.more':           '更多',
   'common.loading':        '加载中...',
   'common.noData':         '暂无数据',
@@ -571,6 +572,7 @@ const messages: Record<string, string> = {
   'status.connected':      '已连接',
   'status.disconnected':   '未连接',
   'status.synchronized':   '已同步',
+  'status.beidouSynchronized': '北斗已同步',
   'status.notSynchronized': '未同步',
   'status.rfOn':           '射频开',
   'status.rfOff':          '射频关',
@@ -1462,6 +1464,7 @@ const messages: Record<string, string> = {
   'device.verticalBeamWidth':   '垂直波束宽度',
   'device.horizontalAzimuth':   '水平方位角',
   'device.installAddress':      '安装详细地址',
+  'device.installAddress.doubleClickEdit': '双击编辑安装详细地址',
   'device.latestLog':           '运行日志',
   'device.noLogFile':           '暂无日志文件',
 
@@ -3030,6 +3033,9 @@ const messages: Record<string, string> = {
   'table.unlockRefresh':     '解锁刷新',
   'table.enableRealtimeRefresh':  '开启实时刷新',
   'table.disableRealtimeRefresh': '关闭实时刷新',
+  'device.batch.alarmSync.onlyOnline': '告警同步仅支持在线设备，离线设备已标记为失败。',
+  'device.batch.alarmSync.partialResult': '告警同步部分完成：成功 {success} 台，失败 {failed} 台。',
+  'device.batch.alarmSync.taskUnavailable': '告警同步任务不可用，请稍后重试。',
 
   // -------------------------------------------------------------------------
   // EmptyState

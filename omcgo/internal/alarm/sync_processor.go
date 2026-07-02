@@ -93,6 +93,7 @@ func (p *AlarmSyncProcessor) Start(ctx context.Context) error {
 // gpvResponsePayload mirrors the ACS-published GPV response structure.
 type gpvResponsePayload struct {
 	DeviceSN        string                       `json:"device_sn"`
+	TaskID          string                       `json:"task_id"`
 	Method          string                       `json:"method"`
 	Path            string                       `json:"path"`
 	ParameterValues []tr069.ParameterValueStruct `json:"parameter_values"`
@@ -121,7 +122,7 @@ func (p *AlarmSyncProcessor) handleGPVResponse(ctx context.Context, evt event.Ev
 
 	// Release the sync lock
 	if p.syncService != nil {
-		p.syncService.ReleaseLock(ctx, deviceSN)
+		p.syncService.ReleaseLock(ctx, deviceSN, payload.TaskID)
 	}
 
 	// Publish sync completed event
