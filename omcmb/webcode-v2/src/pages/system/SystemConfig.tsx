@@ -31,6 +31,7 @@ import { useT } from '@/hooks/useT'
 // 真实数据 useSysConfigsByCategory（adminApi.getSysConfigsByCategory，按分类拉 KV）
 //   + useBatchUpdateSysConfigs（POST /admin/sysConfig/batch）。
 // 后端 7 个分类：basic / security / device / notify / storage / omc / northbound。
+// notify tab 已隐藏（#781）：邮件/短信后端未真实打通前不展示。
 // v1 的强类型表单 + 保留策略页签未逐项复刻；这里用通用 KV 编辑器覆盖全部分类，
 // bool/int/float/string/json 原样回写（value_type 透传）。详见返回 notes。
 // ============================================================
@@ -39,7 +40,6 @@ const CATEGORIES: { key: string; label: string }[] = [
   { key: 'basic', label: '基础' },
   { key: 'security', label: '安全' },
   { key: 'device', label: '设备' },
-  { key: 'notify', label: '通知' },
   { key: 'storage', label: '存储' },
   { key: 'omc', label: 'OMC' },
   { key: 'northbound', label: '北向' },
