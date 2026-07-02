@@ -302,6 +302,7 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 		logger.Info("alarm-definition fallback enabled",
 			zap.Int("definitions_loaded", alarmDefRegistry.Count()))
 	}
+	scheduleAlarmDefRegistryStartupCatchUp(logger, alarmDefRegistry)
 	if err := alarmReceiver.Subscribe(w.EventBus); err != nil {
 		logger.Warn("subscribe alarm receiver", zap.Error(err))
 	}
@@ -1075,6 +1076,23 @@ func wireUnknownAlarmFallback(
 	alarmReceiver = alarmReceiver.WithAlarmDefRegistry(alarmDefRegistry, productResolver)
 	expeditedReceiver = expeditedReceiver.WithAlarmDefRegistry(alarmDefRegistry, productResolver)
 	return alarmReceiver, expeditedReceiver, productResolver
+}
+
+func scheduleAlarmDefRegistryStartupCatchUp(logger *zap.Logger, alarmDefRegistry *definition.Registry) {
+	if logger == nil || alarmDefRegistry == nil {
+		return
+	}
+	go func() {
+		time.Sleep(30 * time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := alarmDefRegistry.Refresh(ctx); err != nil {
+			logger.Warn("alarm-definition registry startup catch-up failed", zap.Error(err))
+			return
+		}
+		logger.Info("alarm-definition registry startup catch-up",
+			zap.Int("definitions_loaded", alarmDefRegistry.Count()))
+	}()
 }
 
 // parseStringSlice parses a comma-separated string into a slice.
