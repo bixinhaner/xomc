@@ -4,7 +4,7 @@
  * 根据 UI 设计图 GISMap_UI_Design_Main.svg 实现
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import type { MapDevice } from '@core/types/map';
 import { DEVICE_STATUS_CONFIG, ALARM_BADGE_CONFIG } from './constants';
@@ -18,6 +18,8 @@ interface MapPopupProps {
   position?: { x: number; y: number };
   /** 关闭回调 */
   onClose?: () => void;
+  /** 点击告警跳转回调（G-09） */
+  onAlarmClick?: (sn: string) => void;
 }
 
 /**
@@ -34,8 +36,10 @@ const MapPopup: React.FC<MapPopupProps> = ({
   device,
   visible = true,
   position,
+  onAlarmClick,
 }) => {
   const token = useThemeToken();
+  const [alarmHovered, setAlarmHovered] = useState(false);
 
   if (!visible || !device) return null;
 
@@ -174,7 +178,13 @@ const MapPopup: React.FC<MapPopupProps> = ({
           {/* 告警 */}
           <span style={{ fontSize: 12, color: 'var(--color-neutral-600)' }}>告警:</span>
           {hasAlarm ? (
-            <span style={alarmBadgeStyle}>
+            <span
+              style={{ ...alarmBadgeStyle, cursor: 'pointer', opacity: alarmHovered ? 0.75 : 1, transition: 'opacity 0.15s' }}
+              title="点击查看该设备告警"
+              onClick={() => onAlarmClick?.(device.sn)}
+              onMouseEnter={() => setAlarmHovered(true)}
+              onMouseLeave={() => setAlarmHovered(false)}
+            >
               {device.alarmCount! > 99 ? '99+' : device.alarmCount}
             </span>
           ) : (

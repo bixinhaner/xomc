@@ -100,6 +100,7 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
   showMetadataTip = true,
   className,
   style,
+  onAlarmClick,
 }, ref) => {
   const intl = useIntl();
   const token = useThemeToken();
@@ -620,6 +621,7 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
           device={clickedDevice ?? hoveredDevice!}
           visible
           position={clickedPosition ?? popupPosition!}
+          onAlarmClick={onAlarmClick}
           onClose={() => {
             setClickedDevice(null);
             setClickedPosition(null);

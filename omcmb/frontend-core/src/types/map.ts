@@ -327,6 +327,8 @@ export interface GISMapProps {
   className?: string;
   /** 自定义样式对象 */
   style?: React.CSSProperties;
+  /** GIS 卡片告警区域点击回调（G-09）：跳转到该设备的当前告警页 */
+  onAlarmClick?: (sn: string) => void;
 }
 
 /**
