@@ -267,6 +267,7 @@ func TestProcessSync_PreservesFirstRaisedAtOnUpdate(t *testing.T) {
 	require.NotNil(t, alarm)
 	assert.Equal(t, firstRaisedAt, alarm.RaisedAt)
 	assert.Equal(t, firstRaisedAt, alarm.FirstRaisedAt)
+	assert.Equal(t, 2, alarm.AckCount)
 	assert.NotEqual(t, updatedRaisedAt, alarm.LastUpdatedAt)
 	assert.False(t, alarm.LastUpdatedAt.Before(beforeSync))
 	assert.False(t, alarm.LastUpdatedAt.After(afterSync))

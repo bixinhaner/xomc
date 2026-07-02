@@ -19,6 +19,7 @@ import { useDeviceBySn, useRebootDevice } from '@core/hooks/api/useDevices'
 import { useAppStore } from '@core/store/appStore'
 import { useDictionary } from '@core/hooks/api/useSystem'
 import { activationStatusLabelOf } from '@core/utils/activationStatus'
+import { formatAlarmSeverityBadgeLabel } from '@core/utils/alarmSeverity'
 import { DEVICE_SYNC_STATUS_LABELS_EN, formatDeviceSyncStatus } from '@core/utils/deviceSyncStatus'
 import type { Device } from '@core/types/device'
 import { KV, StatCard, StateGate, formatDuration } from './_shared'
@@ -113,7 +114,16 @@ function DetailBody({ d, onUe }: { d: Device; onUe: () => void }) {
             <StatusBadge status={d.isOnline ? 'online' : 'offline'} />
             <span className="chip text-cyan-300/80">{d.lifecycleState}</span>
             {d.alarmLevel !== 'none' ? (
-              <StatusBadge status={d.alarmLevel} label={`ALM · ${d.alarmLevel}`} />
+              <StatusBadge
+                status={d.alarmLevel}
+                label={`ALM · ${formatAlarmSeverityBadgeLabel(d.alarmLevel, d.activeAlarmCount, {
+                  critical: 'critical',
+                  major: 'major',
+                  minor: 'minor',
+                  warning: 'warning',
+                  none: 'none',
+                })}`}
+              />
             ) : (
               <span className="chip text-emerald-300/70">NO ALARM</span>
             )}

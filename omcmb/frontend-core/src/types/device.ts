@@ -153,6 +153,10 @@ export interface Device {
   remark: string;
   gnbId: string;
 
+  // Issue #758：设备名称同步
+  nameSyncPending: boolean;
+  lmtDeviceName: string;
+
   // 小区信息组 (Cell)
   enbId: string;
   cellId: string;

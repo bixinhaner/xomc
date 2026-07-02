@@ -164,6 +164,10 @@ func (m *fakeDeviceRepo) UpdateLastParamSyncAt(_ context.Context, _ uuid.UUID, _
 func (m *fakeDeviceRepo) UpdateLastParamSyncFailed(_ context.Context, _ uuid.UUID, _ time.Time, _ string) error {
 	return nil
 }
+
+func (m *fakeDeviceRepo) UpdateSiteName(_ context.Context, _ uuid.UUID, _ string) error {
+	return nil
+}
 func (m *fakeDeviceRepo) ListSerialsByIDs(_ context.Context, _ []uuid.UUID) (map[uuid.UUID]string, error) {
 	return map[uuid.UUID]string{}, nil
 }

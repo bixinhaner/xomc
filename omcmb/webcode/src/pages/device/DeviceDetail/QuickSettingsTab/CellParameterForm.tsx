@@ -6,6 +6,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useParameterSchema, useSearchParameters, useUpdateParameters } from '@core/hooks/api/useDeviceParameters';
 import { useDeviceTaskStatus } from '@core/hooks/api/useDeviceTask';
 import { notificationKeys } from '@core/hooks/api/useNotificationCenter';
+import { useRenameDevice } from '@core/hooks/api/useDevices';
+import { useDeviceNameSyncMode } from '@core/hooks/api/useDeviceNameSyncMode';
 import { getTimezoneAliasOptions, mapTimezoneAliasToDisplay } from '@core/utils/timezoneAliasConfig';
 import {
   feedbackKey,
@@ -21,6 +23,9 @@ import { useT } from '@/hooks/useT';
 
 const { Text } = Typography;
 const ERROR_FEEDBACK_DURATION_SECONDS = 2;
+
+// FAPService.1 HNBName 标准路径：命中此 path 的字段走 rename 接口（不走普通 SPV 下发）
+const HNB_NAME_PATH = 'Device.Services.FAPService.1.AccessMgmt.LTE.HNBName';
 
 type TFn = (id: string, values?: Record<string, string | number>) => string;
 
@@ -572,6 +577,8 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
   const watchedLocalTimeZoneName = Form.useWatch('LocalTimeZoneName', form);
   const watchedIpsecEnable = Form.useWatch('IPSEC_ENABLE', form);
   const updateMutation = useUpdateParameters();
+  const renameMutation = useRenameDevice(deviceId);
+  const nameSyncMode = useDeviceNameSyncMode();
   const queryClient = useQueryClient();
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const feedbackScope = useMemo(() => getFeedbackScopeContext(group.id, instanceContext), [group.id, instanceContext]);
@@ -978,20 +985,38 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
     }
 
     setFieldErrors({});
+    // 识别 FAPService.1 HNBName → 改走 rename 接口（不走普通 SPV 下发）
+    const hnbUpdate = updates.find((u) => u.parameterPath === HNB_NAME_PATH);
+    const regularUpdates = hnbUpdate
+      ? updates.filter((u) => u.parameterPath !== HNB_NAME_PATH)
+      : updates;
     try {
-      const result = await updateMutation.mutateAsync({ deviceId, parameters: updates });
-      latestLocalEditAtRef.current = 0;
-      message.success({
-        content: t('device.cell.saveSuccessMsg', { count: updates.length }),
-        duration: 6,
-      });
-      setFeedback(fbKey, {
-        kind: 'cell',
-        submitStatus: 'queued',
-        taskId: result.taskId,
-        count: updates.length,
-        at: Date.now(),
-      });
+      if (hnbUpdate) {
+        await renameMutation.mutateAsync(hnbUpdate.parameterValue);
+      }
+      if (regularUpdates.length > 0) {
+        const result = await updateMutation.mutateAsync({ deviceId, parameters: regularUpdates });
+        latestLocalEditAtRef.current = 0;
+        message.success({
+          content: t('device.cell.saveSuccessMsg', { count: updates.length }),
+          duration: 6,
+        });
+        setFeedback(fbKey, {
+          kind: 'cell',
+          submitStatus: 'queued',
+          taskId: result.taskId,
+          count: updates.length,
+          at: Date.now(),
+        });
+      } else if (hnbUpdate) {
+        // 只有 rename，无普通 SPV 下发，无 taskId 轮询
+        latestLocalEditAtRef.current = 0;
+        message.success({
+          content: t('device.cell.saveSuccessMsg', { count: 1 }),
+          duration: 6,
+        });
+        setFeedback(fbKey, { kind: 'cell', submitStatus: 'queued', count: 1, at: Date.now() });
+      }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       notification.error({
@@ -1310,6 +1335,10 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
                 ?? rawItem?.writable
                 ?? item?.writable
                 ?? false);
+            // 策略联动：auto_lmt_to_omc 下 FAPService.1 HNBName 禁用（引导在 LMT 侧改名）
+            const resolvedStdPath = special?.configPath ?? resolveReadPath(p.standardPath || '');
+            const lmtLocked = resolvedStdPath === HNB_NAME_PATH && nameSyncMode === 'auto_lmt_to_omc';
+            const finalWritable = lmtLocked ? false : writable;
             const error = fieldErrors[p.name];
             // XML hideRangeHint="true" 时不在 label 后展示 schema 推导的 [min ~ max]
             // (字典范围与业务允许值不一致的字段如 Band:字典 1..maxInt,业务允许集只有少数频段)。
@@ -1325,7 +1354,8 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
                 <span style={special?.kind === 'mme-ip-plmn-table' ? { whiteSpace: 'nowrap' } : undefined}>
                   {locale === 'zh-CN' ? p.titleZh : p.titleEn}
                 </span>
-                {!writable && <Text type="secondary" style={{ fontSize: 12 }}>{t('device.cell.readonly')}</Text>}
+                {lmtLocked && <Text type="secondary" style={{ fontSize: 12 }}>{t('device.cell.lmtLockedHint')}</Text>}
+                {!lmtLocked && !writable && <Text type="secondary" style={{ fontSize: 12 }}>{t('device.cell.readonly')}</Text>}
                 {constraintHint && (
                   <Text type="secondary" style={{ fontSize: 12 }}>
                     {constraintHint}
@@ -1382,17 +1412,17 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
                 >
                   {special?.kind === 'bind-select' ? (
                     <Select
-                      disabled={!writable}
+                      disabled={!finalWritable}
                       showSearch
                       optionFilterProp="label"
                       placeholder={t('device.cell.bindSelectPlaceholder')}
                       options={effectiveBindOptions}
                     />
                   ) : special?.kind === 'mme-ip-plmn-table' ? (
-                    <MmeIpPlmnTable disabled={!writable} locale={locale} />
+                    <MmeIpPlmnTable disabled={!finalWritable} locale={locale} />
                   ) : isEnum ? (
                     <Select
-                      disabled={!writable}
+                      disabled={!finalWritable}
                       placeholder={item?.defaultValue || ''}
                       options={effectiveEnumValues.map((v, idx) => ({
                         value: v,
@@ -1400,7 +1430,7 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
                       }))}
                     />
                   ) : (
-                    <Input disabled={!writable} placeholder={special?.placeholder || item?.defaultValue || (!writable ? '未上报' : '')} />
+                    <Input disabled={!finalWritable} placeholder={special?.placeholder || item?.defaultValue || (!finalWritable ? '未上报' : '')} />
                   )}
                 </Form.Item>
               </Col>

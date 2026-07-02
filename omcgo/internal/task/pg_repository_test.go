@@ -479,3 +479,45 @@ func Test_PendingCursor_IsZero(t *testing.T) {
 	assert.False(t, PendingCursor{ID: "x"}.IsZero())
 	assert.False(t, PendingCursor{CreatedAt: time.Now()}.IsZero())
 }
+
+// #758 收尾：HasIncompleteSyncGPVTasksByDevice 只应把近 24h 内未完成的 sync-gpv
+// 任务算作阻断项；超过 24h 的历史卡死任务（如设备重连后遗留的 sent 任务）视为
+// 失效，不再永久阻断 finalize。
+func TestPgRepo_Integration_HasIncompleteSyncGPV_SkipsStaleTasks(t *testing.T) {
+	pool := newTestPool(t)
+	if pool == nil {
+		return
+	}
+	defer cleanupTestTasks(t, pool)
+	repo := NewPgTaskRepository(pool)
+	ctx := context.Background()
+	sn := testDeviceSNPrefix + "SYNCGPV"
+
+	// 造一个 48h 前创建、仍处 sent 的 sync-gpv 任务（历史卡死场景）。
+	stale := freshTaskForPG("stale", "SYNCGPV")
+	stale.DeviceSN = sn
+	stale.Method = "GetParameterValues"
+	stale.CommandKey = "sync-gpv-" + sn + "-0-r-r-r-r"
+	stale.Status = TaskStatusSent
+	stale.CreatedAt = time.Now().Add(-48 * time.Hour)
+	require.NoError(t, repo.Create(ctx, stale))
+
+	// 只有历史卡死任务时，不应被算作未完成。
+	has, err := repo.HasIncompleteSyncGPVTasksByDevice(ctx, sn)
+	require.NoError(t, err)
+	assert.False(t, has, "超过 24h 的卡死 sync-gpv 任务不应阻断 finalize")
+
+	// 再造一个刚创建、处 sent 的 sync-gpv 任务（正常进行中）。
+	fresh := freshTaskForPG("fresh", "SYNCGPV")
+	fresh.DeviceSN = sn
+	fresh.Method = "GetParameterValues"
+	fresh.CommandKey = "sync-gpv-" + sn + "-1-r-r-r-r"
+	fresh.Status = TaskStatusSent
+	fresh.CreatedAt = time.Now()
+	require.NoError(t, repo.Create(ctx, fresh))
+
+	// 存在近 24h 内的进行中任务时，应算作未完成。
+	has, err = repo.HasIncompleteSyncGPVTasksByDevice(ctx, sn)
+	require.NoError(t, err)
+	assert.True(t, has, "近 24h 内进行中的 sync-gpv 任务应阻断 finalize")
+}

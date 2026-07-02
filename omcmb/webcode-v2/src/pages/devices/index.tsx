@@ -60,9 +60,10 @@ import {
   useUpdateDevice,
 } from '@core/hooks/api/useDevices'
 import { useProductList } from '@core/hooks/api/useProducts'
-import { useAlarmCount, useTriggerAlarmSync } from '@core/hooks/api/useAlarms'
+import { useAlarmCountWithDeviceListInvalidation, useTriggerAlarmSync } from '@core/hooks/api/useAlarms'
 import { useDictionary } from '@core/hooks/api/useSystem'
 import { activationStatusLabelOf, activationStatusOf } from '@core/utils/activationStatus'
+import { DEFAULT_ALARM_SEVERITY_LABELS_ZH, formatAlarmSeverityBadgeLabel, getAlarmSeverityBadgeVariant } from '@core/utils/alarmSeverity'
 import type { Device, DeviceFilter } from '@core/types/device'
 import type { PageRequest } from '@core/types/pagination'
 import type { AlarmSeverity } from '@core/types/common'
@@ -85,25 +86,6 @@ const AUTO_REFRESH_OPTIONS = [
 
 const ALARM_SYNC_BATCH_CONCURRENCY = 4
 
-const ALARM_VARIANT: Record<
-  AlarmSeverity | 'none',
-  'destructive' | 'warning' | 'default' | 'muted'
-> = {
-  critical: 'destructive',
-  major: 'destructive',
-  minor: 'warning',
-  warning: 'warning',
-  none: 'muted',
-}
-
-const ALARM_LABEL: Record<AlarmSeverity | 'none', string> = {
-  critical: '紧急',
-  major: '重要',
-  minor: '次要',
-  warning: '警告',
-  none: '无',
-}
-
 function ConnStatusBadge({ online }: { online: boolean }) {
   return (
     <Badge variant={online ? 'success' : 'muted'}>
@@ -119,9 +101,11 @@ function ConnStatusBadge({ online }: { online: boolean }) {
 }
 
 function AlarmBadge({ level, count }: { level: AlarmSeverity | 'none'; count?: number }) {
-  const label =
-    level !== 'none' && (count ?? 0) > 0 ? `${ALARM_LABEL[level]} · ${count}` : ALARM_LABEL[level]
-  return <Badge variant={ALARM_VARIANT[level]}>{label}</Badge>
+  return (
+    <Badge variant={getAlarmSeverityBadgeVariant(level)}>
+      {formatAlarmSeverityBadgeLabel(level, count, DEFAULT_ALARM_SEVERITY_LABELS_ZH)}
+    </Badge>
+  )
 }
 
 function ActivationBadge({
@@ -168,11 +152,13 @@ export function DevicesPage() {
       void navigate(`/device/detail/${device.sn}`)
     }, [navigate, prefetchDeviceDetailEntry])
 
-    const groupsQuery = useDeviceGroups()
-    const productsQuery = useProductList()
-    const alarmCountQuery = useAlarmCount()
-    const appLocale = useAppStore((s) => s.locale)
-    const { data: opStateDict } = useDictionary('op_state')
+  // ---- 辅助下拉数据 ----
+  const groupsQuery = useDeviceGroups()
+  const productsQuery = useProductList()
+  // 全量在线告警计数（与列表 stats.alarmed 占位字段相比更准确，v1 同此做法）
+  const alarmCountQuery = useAlarmCountWithDeviceListInvalidation()
+  const appLocale = useAppStore((s) => s.locale)
+  const { data: opStateDict } = useDictionary('op_state')
 
     const groupOptions = useMemo(
       () => (groupsQuery.data?.groups ?? []).filter((g) => g.parentId !== null),

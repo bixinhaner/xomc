@@ -1,11 +1,14 @@
 import { useCallback, useMemo, useState } from 'react'
 import {
   AlertTriangle,
+  Eye,
   Loader2,
+  Plus,
   Power,
   RefreshCcw,
   Search,
   ShieldCheck,
+  SquarePen,
   Trash2,
 } from 'lucide-react'
 
@@ -15,11 +18,19 @@ import { NeonButton } from '@/components/ui/NeonButton'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { formatTime } from '@/lib/format'
 import {
+  useCreateAlarmRule,
   useAlarmRules,
   useUpdateAlarmRule,
   useDeleteAlarmRules,
 } from '@core/hooks/api/useAlarms'
 import type { AlarmRule } from '@core/types/alarm'
+import {
+  buildAlarmRuleActions,
+  buildAlarmRuleConditions,
+  type AlarmRuleSelectionMode,
+} from '@core/utils/alarmRuleConditions'
+
+import { AlarmRuleDialog } from './AlarmRuleDialog'
 
 const PAGE_SIZE = 20
 
@@ -42,6 +53,9 @@ export default function AlarmRules() {
   const [enabled, setEnabled] = useState('')
   const [busyId, setBusyId] = useState<string | null>(null)
   const [opError, setOpError] = useState<string | null>(null)
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [dialogMode, setDialogMode] = useState<'add' | 'edit' | 'view'>('add')
+  const [currentRule, setCurrentRule] = useState<AlarmRule | null>(null)
 
   const params = useMemo(
     () => ({
@@ -54,6 +68,7 @@ export default function AlarmRules() {
   )
 
   const { data, isLoading, isError, error, isFetching, refetch } = useAlarmRules(params)
+  const createRule = useCreateAlarmRule()
   const updateRule = useUpdateAlarmRule()
   const deleteRules = useDeleteAlarmRules()
 
@@ -62,6 +77,28 @@ export default function AlarmRules() {
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
   const enabledCount = useMemo(() => rules.filter((r) => r.enabled).length, [rules])
+
+  const openCreate = useCallback(() => {
+    setDialogMode('add')
+    setCurrentRule(null)
+    setDialogOpen(true)
+  }, [])
+
+  const openEdit = useCallback((rule: AlarmRule) => {
+    if (rule.enabled) {
+      setOpError('启用中的规则请先禁用再编辑')
+      return
+    }
+    setDialogMode('edit')
+    setCurrentRule(rule)
+    setDialogOpen(true)
+  }, [])
+
+  const openView = useCallback((rule: AlarmRule) => {
+    setDialogMode('view')
+    setCurrentRule(rule)
+    setDialogOpen(true)
+  }, [])
 
   const onToggle = useCallback(
     async (rule: AlarmRule) => {
@@ -103,6 +140,38 @@ export default function AlarmRules() {
     [deleteRules, refetch]
   )
 
+  const onSubmit = useCallback(
+    async (form: {
+      ruleName: string
+      ruleType: string
+      enabled: boolean
+      deviceSelectionMode: AlarmRuleSelectionMode
+      selectedDevices: string[]
+      selectedGroups: string[]
+      selectedAlarms: string[]
+    }) => {
+      const payload = {
+        ruleName: form.ruleName,
+        ruleType: form.ruleType,
+        enabled: form.enabled,
+        severity: 'warning' as const,
+        conditions: buildAlarmRuleConditions(form),
+        actions: buildAlarmRuleActions(form.ruleType),
+      }
+
+      if (dialogMode === 'edit' && currentRule) {
+        await updateRule.mutateAsync({ id: currentRule.id, data: payload })
+      } else {
+        await createRule.mutateAsync(payload)
+      }
+
+      setDialogOpen(false)
+      setCurrentRule(null)
+      await refetch()
+    },
+    [createRule, currentRule, dialogMode, refetch, updateRule],
+  )
+
   return (
     <PageShell
       code="F04"
@@ -142,6 +211,9 @@ export default function AlarmRules() {
           ))}
           <NeonButton icon={<RefreshCcw />} onClick={() => refetch()}>
             REFRESH
+          </NeonButton>
+          <NeonButton icon={<Plus />} onClick={openCreate} className="ml-auto">
+            NEW RULE
           </NeonButton>
         </>
       }
@@ -240,6 +312,17 @@ export default function AlarmRules() {
                     ) : (
                       <>
                         <RowAction
+                          title="查看"
+                          onClick={() => openView(r)}
+                          icon={<Eye className="size-3.5" />}
+                        />
+                        <RowAction
+                          title="编辑"
+                          disabled={r.enabled}
+                          onClick={() => openEdit(r)}
+                          icon={<SquarePen className="size-3.5" />}
+                        />
+                        <RowAction
                           title={r.enabled ? '禁用' : '启用'}
                           onClick={() => void onToggle(r)}
                           icon={<Power className="size-3.5" />}
@@ -278,6 +361,18 @@ export default function AlarmRules() {
           </NeonButton>
         </div>
       </div>
+
+      <AlarmRuleDialog
+        open={dialogOpen}
+        mode={dialogMode}
+        rule={currentRule}
+        loading={createRule.isPending || updateRule.isPending}
+        onSubmit={onSubmit}
+        onCancel={() => {
+          setDialogOpen(false)
+          setCurrentRule(null)
+        }}
+      />
     </PageShell>
   )
 }

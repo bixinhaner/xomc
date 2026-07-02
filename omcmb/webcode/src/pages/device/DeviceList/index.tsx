@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { App, Button, Card, Drawer, Input, Modal, Popconfirm, Popover, Progress, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import { App, Badge, Button, Card, Drawer, Input, Modal, Popconfirm, Popover, Progress, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   AlertOutlined,
@@ -30,6 +30,8 @@ import { activationStatusLabelOf, activationStatusOf } from '@core/utils/activat
 import { formatDeviceSyncStatus, getDeviceSyncStatusKind, normalizeDeviceSyncStatus } from '@core/utils/deviceSyncStatus';
 import { expandSelectedGroupIds } from '@core/utils/deviceGroupFilter';
 import { withDeviceGroupDisplayName } from '@core/utils/deviceGroupDisplay';
+import { hasAlarmSeverity } from '@core/utils/alarmSeverity';
+import { useAlarmCountWithDeviceListInvalidation } from '@core/hooks/api/useAlarms';
 import { useTriggerAlarmSync } from '@core/hooks/api/useAlarms';
 import { deviceTaskApi, isAbortError } from '@core/services/api/deviceTaskApi';
 import { useCreateUnifiedFileTransferTask } from '@core/hooks/api/useUnifiedFileTransfer';
@@ -356,6 +358,7 @@ export default function DeviceList() {
   const batchReboot = useBatchRebootDevices();
   const updateDevice = useUpdateDevice();
   const triggerAlarmSync = useTriggerAlarmSync();
+  useAlarmCountWithDeviceListInvalidation();
   const createUfteTask = useCreateUnifiedFileTransferTask();
   const downloadStationLog = useDownloadStationLog();
   const taskNameUser = currentUser?.username || currentUser?.displayName || 'user';
@@ -1160,7 +1163,7 @@ export default function DeviceList() {
         render: (_val, record) => {
           const color = SEVERITY_COLOR[record.alarmLevel] ?? 'default';
           const label = getSeverityLabel(record.alarmLevel);
-          if (record.alarmLevel && record.alarmLevel !== 'none') {
+          if (hasAlarmSeverity(record.alarmLevel)) {
             // #361: 告警级别 Tag 旁拼接活动告警数（如「重要 · 3」）。
             const count = record.activeAlarmCount ?? 0;
             const display = count > 0 ? `${label} · ${count}` : label;
@@ -1180,7 +1183,27 @@ export default function DeviceList() {
         },
       },
       // "名称" 列绑定 device_name（设备名称），而非 host_name。
-      { key: 'hostName', title: t('device.hostName'), dataIndex: 'deviceName', width: 150, ellipsis: true, group: 'common' },
+      // Issue #758: nameSyncPending=true 时显示小红点提示名称待同步
+      {
+        key: 'hostName',
+        title: t('device.hostName'),
+        dataIndex: 'deviceName',
+        width: 170,
+        ellipsis: true,
+        group: 'common',
+        render: (_val, record) => (
+          <Space size={4}>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {record.deviceName || '-'}
+            </span>
+            {record.nameSyncPending && (
+              <Tooltip title={t('device.nameSyncPending')}>
+                <Badge status="error" />
+              </Tooltip>
+            )}
+          </Space>
+        ),
+      },
       {
         key: 'networkType',
         title: t('device.radioMode'),

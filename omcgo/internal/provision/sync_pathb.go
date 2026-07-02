@@ -344,6 +344,17 @@ func (s *SyncService) finalizePathBSync(ctx context.Context, dev *model.Device) 
 				zap.String("device_id", dev.ID.String()))
 		}
 	}
+
+	// Issue #758: 设备名称同步钩子 — 检测 LMT 名称与网管名称是否一致，按配置方向同步
+	if s.deviceNameSyncHook != nil {
+		if err := s.deviceNameSyncHook.Execute(ctx, dev); err != nil {
+			s.logger.Warn("device name sync hook failed (non-fatal)",
+				zap.String("device_id", dev.ID.String()),
+				zap.String("device_sn", dev.SerialNumber),
+				zap.Error(err))
+		}
+	}
+
 	return nil
 }
 

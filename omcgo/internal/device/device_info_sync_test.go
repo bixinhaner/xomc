@@ -66,6 +66,14 @@ func (s stubDeviceInfoRepo) ComputeListStats(context.Context, DeviceFilter) (*De
 	return nil, nil
 }
 
+func (s stubDeviceInfoRepo) UpdateNameSyncFields(context.Context, uuid.UUID, bool, string) error {
+	return nil
+}
+
+func (s stubDeviceInfoRepo) UpdateDeviceName(context.Context, uuid.UUID, string) error {
+	return nil
+}
+
 type stubDeviceParamRepo struct {
 	params []model.DeviceParameter
 }

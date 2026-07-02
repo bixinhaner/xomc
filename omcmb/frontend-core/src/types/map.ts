@@ -77,6 +77,8 @@ export interface MapDevice {
   pci?: string;
   /** 运维自定义设备名称 */
   device_name?: string;
+  /** 当前接入 UE 数 */
+  ueCount?: number;
 }
 
 /**
@@ -113,6 +115,8 @@ export interface DeviceGeo {
   pci?: string;
   /** 运维自定义设备名称 */
   device_name?: string;
+  /** 当前接入 UE 数 */
+  ueCount?: number;
 }
 
 /**
@@ -179,6 +183,8 @@ export interface MapFilterParams {
   pageSize?: number;
   /** 是否启用查询 */
   enabled?: boolean;
+  /** UE 数上限过滤：0 = 只返回 UE=0 的基站 */
+  ueCountMax?: number;
 }
 
 /**
@@ -201,6 +207,8 @@ export interface MapStats {
   viewportCount?: number;
   /** 地图中心点（设备经纬度平均值） */
   center?: GeoCenter;
+  /** UE 数为 0 的基站数 */
+  ueZeroCount?: number;
 }
 
 /**
@@ -239,6 +247,10 @@ export interface DeviceSearchResult {
   pci?: string;
   /** 运维自定义设备名称 */
   device_name?: string;
+  /** 当前接入 UE 数 */
+  ueCount?: number;
+  /** 当前活跃告警数 */
+  alarmCount?: number;
 }
 
 /**
@@ -432,8 +444,8 @@ export interface BackendDeviceGeo {
   /** PCI（物理小区标识） */
   pci?: string;
   /** 运维自定义设备名称 */
-  device_name?: string;
-}
+  device_name?: string;  /** 当前接入 UE 数 */
+  ue_count?: number;}
 
 /**
  * 后端设备聚合
@@ -471,6 +483,8 @@ export interface BackendMapStats {
     lat: number;
     lng: number;
   };
+  /** UE 数为 0 的基站数 */
+  ue_zero_count?: number;
 }
 
 /**
@@ -492,4 +506,8 @@ export interface BackendSearchResult {
   pci?: string;
   /** 运维自定义设备名称 */
   device_name?: string;
+  /** 当前接入 UE 数 */
+  ue_count?: number;
+  /** 当前活跃告警数 */
+  alarm_count?: number;
 }

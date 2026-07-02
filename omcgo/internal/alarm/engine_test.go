@@ -637,6 +637,7 @@ func TestUpdateByEvent_ExistingAlarm(t *testing.T) {
 	assert.Equal(t, "equipmentAlarm", *existing.EventType)
 	assert.Equal(t, "newCause", *existing.ProbableCause)
 	assert.Equal(t, "ChangedAlarm", existing.AdditionalInfo["notification_type"])
+	assert.Equal(t, 2, existing.AckCount)
 	assert.False(t, existing.LastUpdatedAt.IsZero())
 
 	// Should still have only 1 alarm

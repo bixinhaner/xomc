@@ -91,6 +91,16 @@ func initDeviceModule(c *Container) error {
 	deviceMetrics := device.NewDeviceMetrics(c.MetricsReg)
 	deviceService.SetMetrics(deviceMetrics)
 
+	// 注入系统配置查询（nameSyncMode 读取，供 RenameDevice 按策略决定行为）
+	nameSyncCfgRepo := admin.NewPgSysConfigRepository(c.PgPool)
+	deviceService.SetSysConfigLookup(func(ctx context.Context, cat, key string) (string, bool) {
+		cfg, err := nameSyncCfgRepo.GetByKey(ctx, cat, key)
+		if err != nil || cfg == nil {
+			return "", false
+		}
+		return cfg.Value, true
+	})
+
 	// InfoSyncer
 	infoSyncer := device.NewInfoSyncer(deviceInfoRepo, paramRepo, deviceRepo, c.Carriers, logger)
 	deviceService.SetInfoSyncer(infoSyncer)

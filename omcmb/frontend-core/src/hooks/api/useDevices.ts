@@ -347,3 +347,16 @@ export function useProductClasses() {
     staleTime: 5 * 60 * 1000,
   });
 }
+
+// 网管侧手动改基站名（即时下发）
+// 成功后 invalidate 设备详情缓存，让列表/详情刷新新名称
+export function useRenameDevice(deviceId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => deviceApi.renameDevice(deviceId, name),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['devices', deviceId] });
+      void queryClient.invalidateQueries({ queryKey: ['devices', 'list'] });
+    },
+  });
+}

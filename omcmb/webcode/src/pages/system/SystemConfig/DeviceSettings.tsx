@@ -1,4 +1,4 @@
-import { Form, InputNumber, Checkbox, Select, Card, Space, Typography, theme } from 'antd';
+import { Form, InputNumber, Checkbox, Select, Radio, Card, Space, Typography, theme } from 'antd';
 import { useT } from '@/hooks/useT';
 
 const { Option } = Select;
@@ -21,13 +21,7 @@ export default function DeviceSettings({ form }: DeviceSettingsProps) {
       enbInformPeriodAdjustEnable: true,
       enbInformPeriod: 60,
       enbTimeout: 100,
-      nameSettingEnable: true,
-      prompt: false,
-      accessContralEnable: false,
-      rsrpVal0: -100,
-      rsrpVal1: -80,
-      uersrpVal0: -100,
-      uersrpVal1: -80,
+      nameSyncMode: 'prompt',
       uploadSelected: '3',
       deviceOfflineEnable: false,
       deviceOfflineSaveDay: 90,
@@ -70,83 +64,35 @@ export default function DeviceSettings({ form }: DeviceSettingsProps) {
         </div>
       </Card>
 
-      {/* 设备名称同步 */}
+      {/* 设备名称同步 —— 四选一策略（页面选项与存储值 nameSyncMode 一一对应） */}
       <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.device.deviceNameSync')}</span>} style={{ marginBottom: 16 }}>
-        <div style={settingRowStyle}>
-          <Form.Item name="nameSettingEnable" valuePropName="checked" noStyle>
-            <Checkbox>{t('system.device.checkAndSetDeviceName')}</Checkbox>
-          </Form.Item>
-        </div>
-        <div style={settingRowStyle}>
-          <div style={{ marginLeft: 24 }}>
-            <Form.Item name="prompt" valuePropName="checked" noStyle>
-              <Checkbox>{t('system.device.promptManualSync')}</Checkbox>
-            </Form.Item>
-          </div>
-        </div>
-      </Card>
-
-      {/* 设备接入控制 */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.device.accessControl')}</span>} style={{ marginBottom: 16 }}>
-        <div style={settingRowStyle}>
-          <Space>
-            <Form.Item name="accessContralEnable" valuePropName="checked" noStyle>
-              <Checkbox>{t('system.device.onlyAllowMatching')}</Checkbox>
-            </Form.Item>
-            <a href="#">{t('common.rules')}</a>
-            <span>{t('system.device.connectToOmc')}</span>
-          </Space>
-        </div>
-      </Card>
-
-      {/* CPE信号强度 */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.device.cpeSignalStrength')}</span>} style={{ marginBottom: 16 }}>
-        <div style={settingRowStyle}>
-          <span style={{ marginRight: 16 }}>{t('system.device.displaySignalByRange')}</span>
-          <span style={{ marginRight: 16, display: 'inline-flex', alignItems: 'center', padding: '4px 12px', backgroundColor: token.colorErrorBg, borderRadius: 4 }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: token.colorError, marginRight: 8 }} />
-            {t('system.device.signal.weak')}(&lt;
-            <Form.Item name="rsrpVal0" noStyle style={{ marginLeft: 4, marginRight: 4 }}>
-              <InputNumber min={-150} max={0} style={{ width: 60 }} />
-            </Form.Item>
-          </span>
-          <span style={{ marginRight: 16, display: 'inline-flex', alignItems: 'center', padding: '4px 12px', backgroundColor: token.colorWarningBg, borderRadius: 4 }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: token.colorWarning, marginRight: 8 }} />
-            {t('system.device.signal.normal')}&lt;
-            <Form.Item name="rsrpVal1" noStyle style={{ marginLeft: 4, marginRight: 4 }}>
-              <InputNumber min={-150} max={0} style={{ width: 60 }} />
-            </Form.Item>
-          </span>
-          <span style={{ display: 'inline-flex', alignItems: 'center', padding: '4px 12px', backgroundColor: token.colorSuccessBg, borderRadius: 4 }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: token.colorSuccess, marginRight: 8 }} />
-            {t('system.device.signal.strong')}
-          </span>
-        </div>
-      </Card>
-
-      {/* UE信号强度 */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.device.ueSignalStrength')}</span>} style={{ marginBottom: 16 }}>
-        <div style={settingRowStyle}>
-          <span style={{ marginRight: 16 }}>{t('system.device.displaySignalByRange')}</span>
-          <span style={{ marginRight: 16, display: 'inline-flex', alignItems: 'center', padding: '4px 12px', backgroundColor: token.colorErrorBg, borderRadius: 4 }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: token.colorError, marginRight: 8 }} />
-            {t('system.device.signal.weak')}&lt;
-            <Form.Item name="uersrpVal0" noStyle style={{ marginLeft: 4, marginRight: 4 }}>
-              <InputNumber min={-150} max={0} style={{ width: 60 }} />
-            </Form.Item>
-          </span>
-          <span style={{ marginRight: 16, display: 'inline-flex', alignItems: 'center', padding: '4px 12px', backgroundColor: token.colorWarningBg, borderRadius: 4 }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: token.colorWarning, marginRight: 8 }} />
-            {t('system.device.signal.normal')}&lt;
-            <Form.Item name="uersrpVal1" noStyle style={{ marginLeft: 4, marginRight: 4 }}>
-              <InputNumber min={-150} max={0} style={{ width: 60 }} />
-            </Form.Item>
-          </span>
-          <span style={{ display: 'inline-flex', alignItems: 'center', padding: '4px 12px', backgroundColor: token.colorSuccessBg, borderRadius: 4 }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: token.colorSuccess, marginRight: 8 }} />
-            {t('system.device.signal.strong')}
-          </span>
-        </div>
+        <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
+          {t('system.device.nameSync.desc')}
+        </Typography.Text>
+        <Form.Item name="nameSyncMode" noStyle>
+          <Radio.Group>
+            <Space direction="vertical" size={12}>
+              <Radio value="auto_lmt_to_omc">
+                {t('system.device.nameSync.mode.autoLmtToOmc')}
+                <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 2 }}>
+                  {t('system.device.nameSync.mode.autoLmtToOmc.hint')}
+                </Typography.Text>
+              </Radio>
+              <Radio value="auto_omc_to_lmt">
+                {t('system.device.nameSync.mode.autoOmcToLmt')}
+                <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 2 }}>
+                  {t('system.device.nameSync.mode.autoOmcToLmt.hint')}
+                </Typography.Text>
+              </Radio>
+              <Radio value="prompt">
+                {t('system.device.nameSync.mode.prompt')}
+                <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 2 }}>
+                  {t('system.device.nameSync.mode.prompt.hint')}
+                </Typography.Text>
+              </Radio>
+            </Space>
+          </Radio.Group>
+        </Form.Item>
       </Card>
 
       {/* 基站文件上传协议 */}

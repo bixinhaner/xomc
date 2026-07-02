@@ -94,6 +94,8 @@ type GeoDeviceFilter struct {
 	// [g...]=仅这些组下设备）。GIS 地图读链路按调用者可见分组 fail-closed 收口，过滤经
 	// authz.ApplyDeviceVisibilityFilter 在 d.id 上做相关子查询（避免与已有 LEFT JOIN 行翻倍）。
 	VisibleGroups []uuid.UUID
+	// UECountMax 过滤接入 UE 数：nil=不过滤，指向0=只返回 UE=0 的基站。
+	UECountMax *int
 }
 
 // GeoStatsFilter specifies criteria for /devices/geo/stats.
@@ -132,14 +134,17 @@ type GeoDevice struct {
 	MAC        *string `json:"mac,omitempty"`         // device_info.mac
 	PCI        *string `json:"pci,omitempty"`         // device_info.pci
 	DeviceName *string `json:"device_name,omitempty"` // device_info.device_name
+	// GIS 地图字段
+	UECount int `json:"ue_count"` // 当前接入 UE 数
 }
 
 // GeoStats represents device statistics for map display.
 type GeoStats struct {
-	Total       int64                        `json:"total"`
-	StatusCount map[model.DeviceStatus]int64 `json:"status_count"`
-	AlarmCount  int64                        `json:"alarm_count"`
-	Center      *GeoCenter                   `json:"center,omitempty"` // 平均经纬度中心点
+	Total        int64                        `json:"total"`
+	StatusCount  map[model.DeviceStatus]int64 `json:"status_count"`
+	AlarmCount   int64                        `json:"alarm_count"`
+	Center       *GeoCenter                   `json:"center,omitempty"` // 平均经纬度中心点
+	UEZeroCount  int64                        `json:"ue_zero_count"`    // UE数为0的基站数
 }
 
 // GeoCenter represents the geographic center point of all devices.
@@ -210,6 +215,9 @@ type DeviceWriter interface {
 	// UpdateLastParamSyncFailed 由 sync 失败订阅者在 Path B GPV task 失败时调用,
 	// 写 last_param_sync_failed_at + last_param_sync_error 并清空 last_param_sync_at。
 	UpdateLastParamSyncFailed(ctx context.Context, id uuid.UUID, failedAt time.Time, errMsg string) error
+	// UpdateSiteName 仅更新 devices.site_name（设备主名称），供名称同步 use_lmt 使用。
+	// 比 Update() 轻量：不需要完整设备对象，不清 cache（调用方按需清）。
+	UpdateSiteName(ctx context.Context, id uuid.UUID, name string) error
 	// RecordBoot atomically increments boot_count and sets last_boot_at for the device
 	// identified by serial number. Invoked when the ACS receives a "1 BOOT" or
 	// "M Reboot" Inform. Returns the updated boot_count.
@@ -406,6 +414,24 @@ func (r *PgDeviceRepository) Update(ctx context.Context, device *model.Device) e
 	// so the caller can fall back to register / cache invalidation.
 	if ct.RowsAffected() == 0 {
 		return commonerrors.ErrNotFound
+	}
+	return nil
+}
+
+// UpdateSiteName 仅更新 devices.site_name，比 Update() 轻量，不处理全量字段。
+func (r *PgDeviceRepository) UpdateSiteName(ctx context.Context, id uuid.UUID, name string) error {
+	query, args, err := storage.Psql.Update("devices").
+		Set("site_name", name).
+		Set("updated_at", time.Now()).
+		Where(sq.Eq{"id": id}).
+		Where(sq.Eq{"deleted_at": nil}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build update site_name query: %w", err)
+	}
+	_, err = r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("update site_name: %w", err)
 	}
 	return nil
 }
@@ -1025,6 +1051,7 @@ func scanGeoDeviceRow(row scannable) (GeoDevice, error) {
 	var groupName, address, deviceType *string
 	var alarmCount int
 	var ipAddress, mac, pci, deviceName string // COALESCE 保证非 NULL
+	var ueCount int                            // COALESCE 保证非 NULL
 
 	err := row.Scan(
 		&d.ID, &d.SerialNumber, &d.Name,
@@ -1032,6 +1059,7 @@ func scanGeoDeviceRow(row scannable) (GeoDevice, error) {
 		&latitude, &longitude, &groupID, &groupName,
 		&address, &alarmCount, &deviceType,
 		&ipAddress, &mac, &pci, &deviceName,
+		&ueCount,
 	)
 	if err != nil {
 		return GeoDevice{}, err
@@ -1070,6 +1098,7 @@ func scanGeoDeviceRow(row scannable) (GeoDevice, error) {
 	if deviceName != "" {
 		d.DeviceName = &deviceName
 	}
+	d.UECount = ueCount
 	return d, nil
 }
 
@@ -1120,8 +1149,9 @@ func (r *PgDeviceRepository) ListGeo(ctx context.Context, filter GeoDeviceFilter
 		"d.id", "d.serial_number", "d.serial_number as name",
 		"d.lifecycle_state", "d.is_online",
 		"d.latitude", "d.longitude", "dg.id as group_id", "dg.name as group_name",
-		"d.site_name as address", "0 as alarm_count", "d.model_name as type",
+		"d.site_name as address", "COALESCE(di.active_alarm_count, 0) as alarm_count", "d.model_name as type",
 		"COALESCE(host(d.ip_address), '')", "COALESCE(di.mac, '')", "COALESCE(di.pci, '')", "COALESCE(di.device_name, '')",
+		"COALESCE(di.ue_count, 0)",
 	).From("devices d").
 		LeftJoin("device_group_members dgm ON d.id = dgm.device_id").
 		LeftJoin("device_groups dg ON dgm.group_id = dg.id").
@@ -1151,6 +1181,9 @@ func (r *PgDeviceRepository) ListGeo(ctx context.Context, filter GeoDeviceFilter
 	// #64 设备组数据权限：按 d.id 相关子查询三态 fail-closed 收口（nil 超管不过滤 /
 	// [] WHERE FALSE / [g...] 限定到可见分组下设备），避免与已有 LEFT JOIN dgm 行翻倍。
 	builder = authz.ApplyDeviceVisibilityFilter(builder, "d.id", filter.VisibleGroups)
+	if filter.UECountMax != nil {
+		builder = builder.Where(sq.LtOrEq{"COALESCE(di.ue_count, 0)": *filter.UECountMax})
+	}
 
 	// Get total count with a separate query
 	// 注意：去掉 DISTINCT，因为 device 与 device_info 是 1:1 关系
@@ -1182,6 +1215,9 @@ func (r *PgDeviceRepository) ListGeo(ctx context.Context, filter GeoDeviceFilter
 	}
 	// #64 设备组数据权限：count 与 list 同口径施加可见分组收口。
 	countBuilder = authz.ApplyDeviceVisibilityFilter(countBuilder, "d.id", filter.VisibleGroups)
+	if filter.UECountMax != nil {
+		countBuilder = countBuilder.Where(sq.LtOrEq{"COALESCE(di.ue_count, 0)": *filter.UECountMax})
+	}
 
 	countQuery, countArgs, _ := countBuilder.ToSql()
 	var total int64
@@ -1308,6 +1344,24 @@ func (r *PgDeviceRepository) GetGeoStats(ctx context.Context, filter GeoStatsFil
 		}
 	}
 
+	// Query 3: UE=0 基站数（JOIN device_info 统计 ue_count=0 的设备）
+	ueZeroBuilder := storage.Psql.Select("COUNT(DISTINCT d.id)").
+		From("devices d").
+		LeftJoin("device_group_members dgm ON d.id = dgm.device_id").
+		LeftJoin("device_groups dg ON dgm.group_id = dg.id").
+		LeftJoin("device_info di ON d.id = di.device_id").
+		Where(baseCondition).
+		Where(sq.LtOrEq{"COALESCE(di.ue_count, 0)": 0})
+
+	ueZeroBuilder = applyGeoGroupFilter(ueZeroBuilder, filter.GroupIDs, filter.IncludeUngrouped)
+	ueZeroBuilder = applyGeoStatusFilter(ueZeroBuilder, filter.Status)
+	ueZeroBuilder = authz.ApplyDeviceVisibilityFilter(ueZeroBuilder, "d.id", filter.VisibleGroups)
+
+	ueZeroQuery, ueZeroArgs, _ := ueZeroBuilder.ToSql()
+	if err := r.pool.QueryRow(ctx, ueZeroQuery, ueZeroArgs...).Scan(&stats.UEZeroCount); err != nil {
+		return nil, fmt.Errorf("get geo ue zero count: %w", err)
+	}
+
 	return stats, nil
 }
 
@@ -1337,8 +1391,9 @@ func (r *PgDeviceRepository) SearchDevices(ctx context.Context, keyword string, 
 		"d.id", "d.serial_number", "d.serial_number as name",
 		"d.lifecycle_state", "d.is_online",
 		"d.latitude", "d.longitude", "dg.id as group_id", "dg.name as group_name",
-		"d.site_name as address", "0 as alarm_count", "d.model_name as type",
+		"d.site_name as address", "COALESCE(di.active_alarm_count, 0) as alarm_count", "d.model_name as type",
 		"COALESCE(host(d.ip_address), '')", "COALESCE(di.mac, '')", "COALESCE(di.pci, '')", "COALESCE(di.device_name, '')",
+		"COALESCE(di.ue_count, 0)",
 	).From("devices d").
 		LeftJoin("device_group_members dgm ON d.id = dgm.device_id").
 		LeftJoin("device_groups dg ON dgm.group_id = dg.id").

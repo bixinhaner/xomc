@@ -23,6 +23,14 @@ type DeviceInfoRepository interface {
 	// UpdateSyncFields updates fields synced from TR069 parameters or events.
 	UpdateSyncFields(ctx context.Context, deviceID uuid.UUID, fields map[string]interface{}) error
 
+	// UpdateNameSyncFields 更新设备名称同步相关字段（Issue #758）。
+	// pending: name_sync_pending 标记（true=需人工确认）
+	// lmtName: lmt_device_name 缓存的 LMT 设备名称
+	UpdateNameSyncFields(ctx context.Context, deviceID uuid.UUID, pending bool, lmtName string) error
+
+	// UpdateDeviceName 更新 device_info.device_name（LMT→OMC 自动同步时使用）。
+	UpdateDeviceName(ctx context.Context, deviceID uuid.UUID, name string) error
+
 	// GetTopologyAttributes 读取拓扑匹配相关的 device_info 列（LAC / TAC 等）
 	// 的当前值，返回 column→value（仅含 NOT NULL 的列）。供 InfoSyncer 在 UPDATE
 	// 之前 diff 新旧值用，决定是否要 publish device.attributes.changed 触发

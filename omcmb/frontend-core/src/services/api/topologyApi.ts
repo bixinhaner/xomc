@@ -462,6 +462,7 @@ export const topologyApi = {
         bounds: params?.bounds,
         page: params?.page,
         page_size: params?.pageSize,
+        ue_count_max: params?.ueCountMax,
       },
       signal,
     });
@@ -565,6 +566,7 @@ function mapBackendDeviceGeo(bd: BackendDeviceGeo): DeviceGeo {
     mac: bd.mac,
     pci: bd.pci,
     device_name: bd.device_name,
+    ueCount: bd.ue_count,
   };
 }
 
@@ -645,6 +647,7 @@ function mapBackendStats(bs: BackendMapStats): MapStats {
     typeCount: bs.type_count as Record<DeviceType, number> | undefined,
     viewportCount: bs.viewport_count,
     center: bs.center ? { lat: bs.center.lat, lng: bs.center.lng } : undefined,
+    ueZeroCount: bs.ue_zero_count,
   };
 }
 
@@ -661,5 +664,7 @@ function mapBackendSearchResult(bs: BackendSearchResult): DeviceSearchResult {
     mac: bs.mac,
     pci: bs.pci,
     device_name: bs.device_name,
+    ueCount: bs.ue_count,
+    alarmCount: bs.alarm_count,
   };
 }

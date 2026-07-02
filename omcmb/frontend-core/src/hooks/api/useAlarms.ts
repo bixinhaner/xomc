@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { AlarmFilter } from '../../types/alarm';
 import type { PageRequest } from '../../types/pagination';
@@ -75,6 +76,18 @@ export function useAlarmCount() {
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
   });
+}
+
+export function useAlarmCountWithDeviceListInvalidation() {
+  const queryClient = useQueryClient();
+  const alarmCountQuery = useAlarmCount();
+  const stateVersion = alarmCountQuery.data?.stateVersion ?? alarmCountQuery.data?.total_active ?? 0;
+
+  useEffect(() => {
+    void queryClient.invalidateQueries({ queryKey: ['devices'] });
+  }, [queryClient, stateVersion]);
+
+  return alarmCountQuery;
 }
 
 export function useHistoryAlarmCount() {
