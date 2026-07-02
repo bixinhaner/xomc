@@ -2117,7 +2117,8 @@ func (s *DeviceService) SearchDevices(ctx context.Context, keyword string, limit
 // ===== Recycle Bin Operations =====
 
 // ListRecycleBin returns soft-deleted devices with filtering.
-func (s *DeviceService) ListRecycleBin(ctx context.Context, filter RecycleBinFilter) (*model.ListResponse[model.Device], error) {
+// T-2026-07-02: 返回类型改为 DeviceWithInfo 以包含 device_info 字段（MAC、GPS、项目状态等）。
+func (s *DeviceService) ListRecycleBin(ctx context.Context, filter RecycleBinFilter) (*model.ListResponse[DeviceWithInfo], error) {
 	return s.deviceRepo.ListRecycleBin(ctx, filter)
 }
 

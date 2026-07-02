@@ -11,9 +11,11 @@ import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useT } from '@/hooks/useT';
-import { useRecycleBinList, useRestoreDevices, usePermanentDeleteDevices } from '@core/hooks/api/useDevices';
+import { useRecycleBinList, useRestoreDevices, usePermanentDeleteDevices, useDeviceGroups } from '@core/hooks/api/useDevices';
 import { useDomainTree } from '@core/hooks/api/useTopology';
 import { useDictionaryBatch } from '@core/hooks/api/useSystem';
+import { useAppStore } from '@core/store/appStore';
+import { withDeviceGroupDisplayName } from '@core/utils/deviceGroupDisplay';
 import { resolveNetworkTypeLabel } from '@core/utils/networkType';
 import type { Device } from '@core/types/device';
 import ImportModal from './ImportModal';
@@ -40,6 +42,7 @@ const getMoveTypeLabel = (t: (key: string) => string) => {
 
 export default function RecycleBin() {
   const t = useT();
+  const appLocale = useAppStore((s) => s.locale);
   const { modal, message } = App.useApp();
   const [filterParams, setFilterParams] = useState<Record<string, unknown>>({});
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
@@ -49,6 +52,7 @@ export default function RecycleBin() {
 
   // 获取设备分组树（使用树形结构避免重复数据）
   const { data: domains } = useDomainTree();
+  const { data: groupsResp } = useDeviceGroups();
 
   // issue #223: 基站制式列与设备列表 / 筛选下拉同源——走 network_type 字典
   // value→label 映射，不再用 product_class 启发式推导。
@@ -127,13 +131,18 @@ export default function RecycleBin() {
   // 转换数据格式以适配表格
   const tableData = useMemo(() => {
     if (!data?.items) return [];
-    return data.items.map((device: Device) => ({
+    const devices = withDeviceGroupDisplayName(
+      data.items as Device[],
+      groupsResp?.groups ?? [],
+      appLocale,
+    );
+    return devices.map((device: Device) => ({
       ...device,
       offlineDays: calcOfflineDays(device.lastOnlineTime, device.deletedAt || ''),
       moveTime: device.deletedAt || '',
       move_author: device.deletedBy || 'system',
     }));
-  }, [data]);
+  }, [data, groupsResp?.groups, appLocale]);
 
   // 移出回收站（带确认）
   const handleRestore = useCallback(
@@ -252,10 +261,18 @@ export default function RecycleBin() {
           );
         },
       },
-      { key: 'host_name', title: t('device.hostName'), dataIndex: 'hostName', width: 140, ellipsis: true },
+      {
+        key: 'host_name',
+        title: t('device.hostName'),
+        dataIndex: 'deviceName',
+        width: 140,
+        ellipsis: true,
+        render: (_v, record) => record.deviceName || '-',
+      },
       {
         key: 'mac',
         title: t('device.macAddress'),
+        dataIndex: 'macAddress',
         width: 130,
         mono: true,
         render: (_v, record) => record.macAddress || '-',
@@ -268,6 +285,7 @@ export default function RecycleBin() {
       {
         key: 'moveType',
         title: t('recycle.moveType'),
+        dataIndex: 'moveType',
         width: 90,
         render: () => <Tag color="blue">{getMoveTypeLabel(t)}</Tag>,
       },
