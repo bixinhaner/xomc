@@ -19,6 +19,7 @@ import (
 	"github.com/omcgo/omcgo/internal/bundle"
 	"github.com/omcgo/omcgo/internal/config"
 	"github.com/omcgo/omcgo/internal/config/baseline"
+	"github.com/omcgo/omcgo/internal/config/parammodel"
 	"github.com/omcgo/omcgo/internal/core/components"
 	minioinfra "github.com/omcgo/omcgo/internal/core/components/minio"
 	"github.com/omcgo/omcgo/internal/core/event"
@@ -1707,6 +1708,23 @@ func initMiscModules(c *Container) error {
 				Paths:           paths,
 			}, nil
 		}))
+	// deviceKey 分支：按 paramModelID 从 ParamRegistry（Redis L1→L2→DB）取 supported paths。
+	mmlConsoleSvc.SetParamModelPathsResolver(func(ctx context.Context, pmID uuid.UUID) (map[string]struct{}, error) {
+		set, err := c.ParamRegistry.GetByParamModel(ctx, pmID)
+		if err != nil {
+			if errors.Is(err, parammodel.ErrNoMapping) {
+				return map[string]struct{}{}, nil
+			}
+			return nil, fmt.Errorf("get param_model %s paths: %w", pmID, err)
+		}
+		paths := make(map[string]struct{}, len(set.Mappings))
+		for _, m := range set.Mappings {
+			if m.StandardPath != "" && m.IsActive && m.IsSupported {
+				paths[m.StandardPath] = struct{}{}
+			}
+		}
+		return paths, nil
+	})
 	// R-8.5: 独立 CompatibilityService（不耦合 ConsoleService 签名 / 测试）。
 	// T-0177：走 ProductRegistry.MatchProductClass（全局正则路由）取代旧
 	// 直查 devices LEFT JOIN products 的 raw SQL — 不再依赖 devices.product_id /
