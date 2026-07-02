@@ -156,6 +156,9 @@ export default function GISMapView() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchContainerRef = useRef<HTMLDivElement>(null);
 
+  // 测距模式状态
+  const [isMeasuring, setIsMeasuring] = useState(false);
+
   // ========== 缓存机制 ==========
 
   // 设备数据 LRU 缓存 Hook（保留但暂未集成）
@@ -529,6 +532,19 @@ export default function GISMapView() {
       setIsInitialized(true);
     }
   }, [groupTree, selectedGroupIds.length]);
+
+  // ESC 退出测距模式
+  useEffect(() => {
+    if (!isMeasuring) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        mapRef.current?.stopMeasure();
+        setIsMeasuring(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isMeasuring]);
 
   // 渲染设备组树节点
   const renderGroupNode = (node: DeviceGroupNode, depth: number = 0): React.ReactNode => {
@@ -1339,6 +1355,60 @@ export default function GISMapView() {
             )}
           </div>
         </div>
+
+        {/* 测距工具按钮（搜索框右侧） */}
+        <Tooltip
+          title={isMeasuring ? '点击退出测距（或按 ESC）' : '测距'}
+          placement="bottom"
+          mouseEnterDelay={0.3}
+        >
+          <div
+            style={{
+              position: 'absolute',
+              left: 392,
+              top: 12,
+              zIndex: 500,
+              width: 40,
+              height: 40,
+              background: isMeasuring ? '#1677ff' : '#FFF',
+              borderRadius: 10,
+              boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+              border: isMeasuring ? '2px solid #1677ff' : '2px solid #D9D9D9',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+              color: isMeasuring ? '#fff' : '#595959',
+            }}
+            onMouseEnter={(e) => {
+              if (!isMeasuring) {
+                e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+                e.currentTarget.style.background = '#F5F5F5';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!isMeasuring) {
+                e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.08)';
+                e.currentTarget.style.background = '#FFF';
+              }
+            }}
+            onClick={() => {
+              if (isMeasuring) {
+                mapRef.current?.stopMeasure();
+                setIsMeasuring(false);
+              } else {
+                mapRef.current?.startMeasure();
+                setIsMeasuring(true);
+              }
+            }}
+          >
+            {/* 尺子图标（Material Design straighten，有刻度线） */}
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+              <path d="M21 6H3c-1.1 0-2 .9-2 2v8c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 10H3V8h2v4h2V8h2v4h2V8h2v4h2V8h2v4h2V8h2v8z"/>
+            </svg>
+          </div>
+        </Tooltip>
 
         {/* 缩放控制 */}
         <div style={zoomControlsStyle}>
