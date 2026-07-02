@@ -4558,6 +4558,7 @@ const messages: Record<string, string> = {
   'system.storage.alarm':                    'Alarm',
   'system.storage.signalingTrace':           'Signaling Trace',
   'system.storage.diskAlarm':                'Disk Alarm',
+  'system.storage.diskAlarmPending':          'Backend disk monitoring not yet implemented; changes will have no effect.',
   'system.storage.minio':                    'MinIO Object Storage',
   // issue #548 slice 3: only public endpoint is exposed as runtime-editable;
   // enable/endpoint/port/accessKey/secret/bucket/region/pathStyle/useSSL are

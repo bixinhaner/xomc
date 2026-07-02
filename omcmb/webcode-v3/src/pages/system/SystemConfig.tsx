@@ -31,6 +31,14 @@ function groupDeviceItems(
   return groups
 }
 
+// 后端待实现、暂不展示的 key（#801 磁盘告警阈值后端未实现）。
+const HIDDEN_KEYS = new Set([
+  'varDiskAlarmThresHold',
+  'homeDiskAlarmThresHold',
+  'usrDiskAlarmThresHold',
+  'rootDiskAlarmThresHold',
+])
+
 // 后端 7 个 category（参 frontend-core/src/types/system.ts SysConfigItem 注释）。
 // notify tab 已隐藏（#781）：邮件/短信后端未真实打通前不展示。
 const CONFIG_CATEGORIES: { key: string; label: string }[] = [
@@ -46,7 +54,7 @@ export default function SystemConfig() {
   const t = useT()
   const [category, setCategory] = useState<string>('basic')
   const { data, isLoading, isError, error, isFetching, refetch } = useSysConfigsByCategory(category)
-  const items = data ?? []
+  const items = (data ?? []).filter((it) => !HIDDEN_KEYS.has(it.key))
   const groups = groupDeviceItems(category, items)
 
   return (

@@ -4588,6 +4588,7 @@ const messages: Record<string, string> = {
   'system.storage.alarm':                    '告警',
   'system.storage.signalingTrace':           '信令追踪',
   'system.storage.diskAlarm':                '磁盘告警',
+  'system.storage.diskAlarmPending':          '后端磁盘监控功能待实现，当前修改不生效',
   // MinIO 对象存储
   'system.storage.minio':                    'MinIO 对象存储',
   // issue #548 切片 3：只暴露对外可达 endpoint 一个运行时可改字段，其余

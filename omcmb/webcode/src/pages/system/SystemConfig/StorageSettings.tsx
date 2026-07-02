@@ -1,7 +1,5 @@
-import { Form, Input, InputNumber, Select, Card, Space, theme } from 'antd';
+import { Form, Input, InputNumber, Card, Space, theme } from 'antd';
 import { useT } from '@/hooks/useT';
-
-const { Option } = Select;
 
 interface StorageSettingsProps {
   form: ReturnType<typeof Form.useForm>[0];
@@ -19,18 +17,6 @@ const subSettingBaseStyle: React.CSSProperties = {
   borderRadius: 4,
 };
 
-// 磁盘空间选项
-const diskSpaceOptions = [
-  { text: '10%', value: '10%' },
-  { text: '20%', value: '20%' },
-  { text: '30%', value: '30%' },
-  { text: '40%', value: '40%' },
-  { text: '50%', value: '50%' },
-  { text: '60%', value: '60%' },
-  { text: '70%', value: '70%' },
-  { text: '80%', value: '80%' },
-  { text: '90%', value: '90%' },
-];
 
 export default function StorageSettings({ form }: StorageSettingsProps) {
   const t = useT();
@@ -43,10 +29,6 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
       // MinIO 对外可达 endpoint：issue #548 切片 3。空 = 走 env / 派生回退（后端订阅桥处理）
       minio_public_endpoint: '',
       alarmHisMaxHoldTime: 365,
-      varDiskAlarmThresHold: '10%',
-      homeDiskAlarmThresHold: '10%',
-      usrDiskAlarmThresHold: '10%',
-      rootDiskAlarmThresHold: '10%',
     }}>
       {/* MinIO 对象存储 — issue #548 切片 3 收敛：
            只暴露 `MinIO 对外可达 endpoint`（sys_configs.storage.minio_public_endpoint）
@@ -109,60 +91,6 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
         </div>
       </Card>
 
-      {/* 磁盘告警 */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.storage.diskAlarm')}</span>}>
-        <div style={settingRowStyle}>
-          <Space>
-            <span>{t('sysconfig.storage.diskLog')}</span>
-            <Form.Item name="varDiskAlarmThresHold" noStyle>
-              <Select style={{ width: 100 }}>
-                {diskSpaceOptions.map(opt => (
-                  <Option key={opt.value} value={opt.value}>{opt.text}</Option>
-                ))}
-              </Select>
-            </Form.Item>
-          </Space>
-        </div>
-
-        <div style={settingRowStyle}>
-          <Space>
-            <span>{t('sysconfig.storage.diskData')}</span>
-            <Form.Item name="homeDiskAlarmThresHold" noStyle>
-              <Select style={{ width: 100 }}>
-                {diskSpaceOptions.map(opt => (
-                  <Option key={opt.value} value={opt.value}>{opt.text}</Option>
-                ))}
-              </Select>
-            </Form.Item>
-          </Space>
-        </div>
-
-        <div style={settingRowStyle}>
-          <Space>
-            <span>{t('sysconfig.storage.diskApp')}</span>
-            <Form.Item name="usrDiskAlarmThresHold" noStyle>
-              <Select style={{ width: 100 }}>
-                {diskSpaceOptions.map(opt => (
-                  <Option key={opt.value} value={opt.value}>{opt.text}</Option>
-                ))}
-              </Select>
-            </Form.Item>
-          </Space>
-        </div>
-
-        <div style={settingRowStyle}>
-          <Space>
-            <span>{t('sysconfig.storage.diskRoot')}</span>
-            <Form.Item name="rootDiskAlarmThresHold" noStyle>
-              <Select style={{ width: 100 }}>
-                {diskSpaceOptions.map(opt => (
-                  <Option key={opt.value} value={opt.value}>{opt.text}</Option>
-                ))}
-              </Select>
-            </Form.Item>
-          </Space>
-        </div>
-      </Card>
     </Form>
   );
 }

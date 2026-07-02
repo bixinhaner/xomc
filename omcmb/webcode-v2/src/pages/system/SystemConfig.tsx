@@ -70,6 +70,16 @@ const KNOWN_KEYS_BY_CATEGORY: Record<
   ],
 }
 
+// 后端待实现、暂不展示的 key（#801 磁盘告警阈值后端未实现，隐藏整卡）。
+const HIDDEN_KEYS_BY_CATEGORY: Record<string, string[]> = {
+  storage: [
+    'varDiskAlarmThresHold',
+    'homeDiskAlarmThresHold',
+    'usrDiskAlarmThresHold',
+    'rootDiskAlarmThresHold',
+  ],
+}
+
 // mergeKnownKeys：DB 拉到的 items + 已知 key 占位行（未出现的）合并。
 function mergeKnownKeys(category: string, dbItems: SysConfigItem[]): SysConfigItem[] {
   const known = KNOWN_KEYS_BY_CATEGORY[category]
@@ -116,8 +126,13 @@ function CategoryEditor({ category }: { category: string }) {
     useSysConfigsByCategory(category)
   const batchUpdate = useBatchUpdateSysConfigs()
 
+  const pendingKeys = useMemo(
+    () => new Set(HIDDEN_KEYS_BY_CATEGORY[category] ?? []),
+    [category],
+  )
+
   const items = useMemo<SysConfigItem[]>(
-    () => mergeKnownKeys(category, data ?? []),
+    () => mergeKnownKeys(category, data ?? []).filter((it) => !pendingKeys.has(it.key)),
     [data, category],
   )
   const groups = useMemo(() => groupDeviceItems(category, items), [category, items])
@@ -248,8 +263,9 @@ function CategoryEditor({ category }: { category: string }) {
                     <div className="flex items-center gap-2">
                       <input
                         type="checkbox"
-                        className="size-4 cursor-pointer accent-primary"
+                        className="size-4 cursor-pointer accent-primary disabled:cursor-not-allowed disabled:opacity-50"
                         checked={cur === 'true' || cur === '1'}
+                        disabled={false}
                         onChange={(e) =>
                           setEdits((prev) => ({
                             ...prev,
