@@ -1,6 +1,7 @@
 import type { Alarm, AlarmRule, AlarmFilter } from '../../types/alarm';
 import type { AlarmSeverity } from '../../types/common';
 import type { PageRequest, PageResponse } from '../../types/pagination';
+import type { AlarmSyncTriggerResult } from '../../services/api/alarmApi';
 import { mockActiveAlarms, mockHistoricalAlarms } from '../data/alarms';
 import { delay, paginate, sortBy, generateId } from '../utils';
 
@@ -578,6 +579,14 @@ export const alarmService = {
 
   async markAlarmRead(_id: string): Promise<void> {
     await delay(50, 100);
+  },
+
+  async triggerAlarmSync(deviceSN: string): Promise<AlarmSyncTriggerResult> {
+    await delay(80, 150);
+    return {
+      deviceSn: deviceSN,
+      taskId: `mock-alarm-sync-${deviceSN}-${Date.now()}`,
+    };
   },
 
   // T-0098-P5-06：旧 alarm-library mock 已删，治理走 alarmDefinitionService（mock/services/alarmDefinitionService.ts）。

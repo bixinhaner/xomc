@@ -374,7 +374,7 @@ func Test_SubjectForStatus(t *testing.T) {
 		{TaskStatusExpired, event.SubjectTaskFailed},
 		{TaskStatusPending, ""},
 		{TaskStatusSent, ""},
-		{TaskStatusCancelled, ""},
+		{TaskStatusCancelled, event.SubjectTaskCancelled},
 	}
 	for _, tc := range tests {
 		got := SubjectForStatus(tc.status)

@@ -96,3 +96,43 @@ describe('deviceTaskApi.getTask', () => {
     await expect(deviceTaskApi.getTask('t1')).rejects.toEqual({ response: { status: 500 } });
   });
 });
+
+describe('deviceTaskApi.waitForTerminal', () => {
+  it('轮询直到任务进入终态', async () => {
+    getMock
+      .mockResolvedValueOnce({
+        data: {
+          id: 't10',
+          device_sn: 'SN010',
+          method: 'GetParameterValues',
+          status: 'pending',
+          created_at: '2026-06-10T00:00:00Z',
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          id: 't10',
+          device_sn: 'SN010',
+          method: 'GetParameterValues',
+          status: 'completed',
+          created_at: '2026-06-10T00:00:00Z',
+          completed_at: '2026-06-10T00:00:05Z',
+        },
+      });
+
+    const task = await deviceTaskApi.waitForTerminal('t10', { intervalMs: 0 });
+
+    expect(getMock).toHaveBeenCalledTimes(2);
+    expect(task.status).toBe('completed');
+  });
+
+  it('支持在开始前取消', async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      deviceTaskApi.waitForTerminal('t11', { signal: controller.signal }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(getMock).not.toHaveBeenCalled();
+  });
+});

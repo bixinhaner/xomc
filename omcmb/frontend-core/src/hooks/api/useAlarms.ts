@@ -8,16 +8,6 @@ import { createApiSwitchWithMock } from '../../services/apiSwitch';
 // Real API is the canonical surface; mock is best-effort and adapted at runtime.
 const api = createApiSwitchWithMock(alarmService, alarmApi);
 
-function scheduleAlarmRefresh(queryClient: ReturnType<typeof useQueryClient>) {
-  const retryDelays = [3_000, 8_000, 15_000, 30_000];
-
-  retryDelays.forEach((delayMs) => {
-    window.setTimeout(() => {
-      void queryClient.invalidateQueries({ queryKey: ['alarms'] });
-    }, delayMs);
-  });
-}
-
 interface AlarmQueryOptions {
   refetchIntervalMs?: number | false;
   refetchIntervalInBackground?: boolean;
@@ -221,12 +211,7 @@ export function useToggleAlarmRule() {
 // 治理 hook 走 useAlarmDefinitions（@core/hooks/api/useAlarmDefinitions）。
 
 export function useTriggerAlarmSync() {
-  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (deviceSN: string) => api.triggerAlarmSync(deviceSN),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['alarms'] });
-      scheduleAlarmRefresh(queryClient);
-    },
   });
 }

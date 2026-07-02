@@ -31,12 +31,14 @@ import { formatDeviceSyncStatus, getDeviceSyncStatusKind, normalizeDeviceSyncSta
 import { expandSelectedGroupIds } from '@core/utils/deviceGroupFilter';
 import { withDeviceGroupDisplayName } from '@core/utils/deviceGroupDisplay';
 import { useTriggerAlarmSync } from '@core/hooks/api/useAlarms';
+import { deviceTaskApi, isAbortError } from '@core/services/api/deviceTaskApi';
 import { useCreateUnifiedFileTransferTask } from '@core/hooks/api/useUnifiedFileTransfer';
 import { useDownloadStationLog } from '@core/hooks/api/useStationLog';
 import { stationLogApi } from '@core/services/api/stationLogApi';
 import { deviceApi } from '@core/services/api/deviceApi';
 import { createApiSwitch } from '@core/services/apiSwitch';
 import { deviceService } from '@core/mock/services/deviceService';
+import { mapWithConcurrencyLimit } from '@core/utils/asyncPool';
 import {
   resolveVisibleExportColumns,
   buildCsvContent,
@@ -68,6 +70,7 @@ const SEVERITY_COLOR: Record<string, string> = {
 const exportDeviceApi = createApiSwitch(deviceService as unknown as typeof deviceApi, deviceApi);
 // DataTable tableId,导出时据此读取"列设置"localStorage(须与 <DataTable tableId> 一致)。
 const DEVICE_LIST_TABLE_ID = 'device-list-table';
+const ALARM_SYNC_BATCH_CONCURRENCY = 4;
 
 // 筛选下拉框 name → 表格列 key 映射:列设置隐藏该列时,对应筛选下拉一并隐藏
 // (用户决策 2026-06-09)。searchText 无对应列、不入表 → 始终显示。
@@ -82,18 +85,8 @@ const FILTER_COLUMN_MAP: Record<string, string> = {
   groupId: 'groupName',
 };
 
-// i18n 翻译函数签名（与 useT 返回值一致）：t(id, values?) → 已格式化字符串。
-// 离线时长格式化抽离为纯文本核心 offlineDurationText，render 版仅在外面套 <Tag>，
-// 避免文案口径在两处漂移（#226：原先硬编码 `${years}年` 等不随语言切换）。
 type TFn = (id: string, values?: Record<string, string | number>) => string;
 
-/**
- * 离线时长的纯文本版(导出 + 渲染共用)——文案全部走 i18n，切语言即时生效。
- * @param t 翻译函数（来自 useT）
- * @param days 离线天数
- * @param hours 剩余小时数 (0-23)
- * @param minutes 剩余分钟数 (0-59)
- */
 function offlineDurationText(t: TFn, days?: number, hours?: number, minutes?: number): string {
   if (days === undefined || days === null) return '-';
   if (days >= 365) {
@@ -124,9 +117,6 @@ function offlineDurationText(t: TFn, days?: number, hours?: number, minutes?: nu
   return t('device.duration.lessThanMinute');
 }
 
-/**
- * 离线时长渲染版：在纯文本基础上套配色 <Tag>。颜色阈值与文本口径解耦。
- */
 function formatOfflineDuration(t: TFn, days?: number, hours?: number, minutes?: number): React.ReactNode {
   if (days === undefined || days === null) return '-';
   const text = offlineDurationText(t, days, hours, minutes);
@@ -138,12 +128,6 @@ function formatOfflineDuration(t: TFn, days?: number, hours?: number, minutes?: 
   return <Tag color={color}>{text}</Tag>;
 }
 
-// 哪些 filter 字段在 URL 里以 CSV 形式编码、需要解析回数组（与 FILTER_FIELDS
-// 中 type='multi-select' 的项一一对应）。不在这个集合里的字段（典型如
-// searchText 自由文本，用户可能用逗号分隔多关键字）保持字符串原样 ——
-// 之前用 "value.includes(',')" 一刀切会把 searchText 也 split 成数组，导致
-// axios 把 search 序列化成 search[]=a&search[]=b，后端 c.Query("search") 读
-// 不到，于是同一次"搜索"先后发两个 API、第二个还把筛选丢了。
 const URL_ARRAY_FIELDS = new Set<string>([
   'productModel',
   'modelName',
@@ -173,14 +157,12 @@ export default function DeviceList() {
     void navigate(`/device/detail/${device.sn}${suffix}`);
   }, [navigate, prefetchDeviceDetailEntry]);
 
-  // 从 URL 恢复搜索条件和分页
   const [currentPage, setCurrentPage] = useState(() => {
     const page = searchParams.get('page');
     return page ? parseInt(page, 10) : 1;
   });
   const [pageSize, setPageSize] = useState(() => {
     const size = searchParams.get('pageSize');
-    // 性能优化：默认 20 条而非 100 条，减少首屏 DOM 节点数量 80%
     return size ? parseInt(size, 10) : 20;
   });
   const [filterParams, setFilterParams] = useState<Record<string, unknown>>(() => {
@@ -193,11 +175,8 @@ export default function DeviceList() {
     return params;
   });
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
-  // 导出确认弹窗（替代原手写下拉菜单——后者在亮色主题下白底白字不可见）。
   const [exportModalOpen, setExportModalOpen] = useState(false);
 
-  // 同步 URL 参数到 filterParams（解决返回时 state 未恢复的问题）
-  // 性能优化：使用浅比较替代 JSON.stringify 深度比较，避免循环依赖
   useEffect(() => {
     const params: Record<string, unknown> = {};
     searchParams.forEach((value, key) => {
@@ -205,11 +184,9 @@ export default function DeviceList() {
         params[key] = parseUrlValue(key, value);
       }
     });
-    // 浅比较：先比较 key 数量，再逐个比较 value
     const currentKeys = Object.keys(filterParams);
     const newKeys = Object.keys(params);
     if (currentKeys.length !== newKeys.length) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setFilterParams(params);
       return;
     }
@@ -223,23 +200,8 @@ export default function DeviceList() {
     if (changed) {
       setFilterParams(params);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);  // 移除 filterParams 依赖，避免循环触发
+  }, [searchParams]);
 
-  // 不再在挂载时自动把 sessionStorage 灌回 URL —— 旧实现会让"上次会话留下的过时
-  // 筛选值"（比如 T-0162 已废弃的 connStatus、或新数据里不存在的 softwareVersion）
-  // 在用户首次进入页面时就被应用，后端返回 0 条 → 表象就是"首次进入列表没数据，
-  // 点搜索才有"。
-  //
-  // 现在的恢复策略：
-  //   - 表单视觉值：由 FilterBar 自己挂载时从 sessionStorage 回填到 form fields
-  //     （只 setFieldsValue，不触发 onSearch）—— 用户能看到上次的筛选条件
-  //   - 实际查询：首次进入页面用空 filter 拿全量数据；用户主动点"搜索"才把表单
-  //     当前值变成 filterParams 并写 URL
-  //   - 返回导航：URL 里有 ?key=value 时由上面 useEffect 同步回 filterParams，
-  //     不依赖 sessionStorage
-
-  // 本地任务面板状态
   type TaskStatus = 'pending' | 'running' | 'success' | 'failed';
   interface LocalTask {
     id: string;
@@ -250,28 +212,52 @@ export default function DeviceList() {
     progress: number;
     message?: string;
     logContent?: string;
-    hasDetail?: boolean; // 是否有详情可查看（只有收集操作才有）
+    hasDetail?: boolean;
   }
 
-  // 实时刷新状态：受 DataTable 工具栏「开启实时刷新」按钮控制。
-  // 历史 bug：只解构出 [autoRefresh] 没拿 setter，导致按钮翻不动这个值，
-  // refetchInterval 永远是 undefined → 实时刷新等于摆设。
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [refreshInterval, setRefreshInterval] = useState(30);
 
-  // 收集任务抽屉状态
   const [collectDrawerOpen, setCollectDrawerOpen] = useState(false);
   const [collectTasks, setCollectTasks] = useState<LocalTask[]>([]);
-  const [collectDrawerTitle, setCollectDrawerTitle] = useState(''); // 抽屉标题
+  const [collectDrawerTitle, setCollectDrawerTitle] = useState('');
+  const [batchAlarmSyncRunning, setBatchAlarmSyncRunning] = useState(false);
 
-  // 日志详情弹窗状态
   const [logModalOpen, setLogModalOpen] = useState(false);
   const [currentLogTask, setCurrentLogTask] = useState<LocalTask | null>(null);
+  const alarmSyncBatchAbortRef = useRef<AbortController | null>(null);
 
-  // 打开日志详情
+  useEffect(() => {
+    return () => {
+      alarmSyncBatchAbortRef.current?.abort();
+    };
+  }, []);
+
   const handleViewLog = useCallback((task: LocalTask) => {
     setCurrentLogTask(task);
     setLogModalOpen(true);
+  }, []);
+
+  const waitForDeviceTaskTerminal = useCallback(async (
+    taskId: string,
+    taskRowId: string,
+    signal?: AbortSignal,
+  ) => {
+    return deviceTaskApi.waitForTerminal(taskId, {
+      signal,
+      onPoll: (task) => {
+        setCollectTasks((prev) => prev.map((item) => {
+          if (item.id !== taskRowId) return item;
+          if (task.status === 'sent') {
+            return { ...item, status: 'running', progress: Math.max(item.progress, 70) };
+          }
+          if (task.status === 'pending') {
+            return { ...item, status: 'running', progress: Math.max(item.progress, 30) };
+          }
+          return item;
+        }));
+      },
+    });
   }, []);
 
   // Remark 列头自定义标签
@@ -757,159 +743,251 @@ export default function DeviceList() {
   // 批量操作通用确认弹窗
   const handleBatchAction = useCallback(
     (actionLabel: string, ids: React.Key[], actionKey?: string) => {
+      if (actionKey === 'batch-alarm-sync' && batchAlarmSyncRunning) {
+        void message.warning(t('task.status.running'));
+        return;
+      }
       modal.confirm({
         title: t('common.confirm'),
         content: t('device.batch.actionConfirm', { action: actionLabel, count: ids.length }),
         okText: t('common.confirm'),
         cancelText: t('common.cancel'),
-        onOk: async () => {
-          // 获取选中设备的详细信息
-          const selectedDevices = devices.filter((d) => ids.includes(d.id));
+        onOk: () => {
+          void (async () => {
+            const selectedDevices = devices.filter((d) => ids.includes(d.id));
+            const taskTypeMap = buildBatchTaskTypeMap(t);
+            const newTasks: LocalTask[] = selectedDevices.map((device, index) => ({
+              id: `${actionKey}-${device.sn}-${Date.now()}-${index}`,
+              sn: device.sn,
+              deviceName: device.name || device.hostName || device.sn,
+              type: taskTypeMap[actionKey ?? ''] || actionLabel,
+              status: 'pending' as TaskStatus,
+              progress: 0,
+              hasDetail: batchActionHasDetail(actionKey),
+            }));
+            const alarmSyncEntries = actionKey === 'batch-alarm-sync'
+              ? selectedDevices.map((device, index) => ({
+                device,
+                task: newTasks[index],
+              }))
+              : [];
+            const runnableAlarmSyncEntries = alarmSyncEntries.filter(({ device, task }) => device.isOnline && Boolean(task.sn));
+            const runnableAlarmSyncRowIds = new Set(runnableAlarmSyncEntries.map(({ task }) => task.id));
 
-          // 任务类型映射（抽到 deviceBatchTask.ts 便于单测，不含已移除的 tr069-collect）
-          const taskTypeMap = buildBatchTaskTypeMap(t);
-
-          const newTasks: LocalTask[] = selectedDevices.map((device, index) => ({
-            id: `${actionKey}-${device.sn}-${Date.now()}-${index}`,
-            sn: device.sn,
-            deviceName: device.name || device.hostName || device.sn,
-            type: taskTypeMap[actionKey ?? ''] || actionLabel,
-            status: 'pending' as TaskStatus,
-            progress: 0,
-            hasDetail: batchActionHasDetail(actionKey), // 只有日志采集才有详情
-          }));
-
-          // 日志采集：UFTE 创建 RUNTIME_LOG_COLLECT 任务后自动跳转到「文件传输 →
-          // 任务管理」的「运行日志采集」tab，让用户立刻看到刚创建的任务进度。
-          if (actionKey === 'batch-log-collect') {
-            try {
-              // 任务名遵循 UFTE 全局统一规则：<i18n prefix>_<user>_<YYYY-MM-DD HH:mm:ss>
-              // 中文环境 "运行日志_admin_..."；英文 "RuntimeLog_admin_..."
-              const taskName = buildDefaultUfteTaskName(
-                'RUNTIME_LOG_COLLECT',
-                taskNameUser,
-                appLocale,
-                dayjs().format('YYYY-MM-DD HH:mm:ss'),
-              );
-              await createUfteTask.mutateAsync({
-                taskName,
-                typeCode: 'RUNTIME_LOG_COLLECT',
-                deviceIds: selectedDevices.map((d) => d.id),
-                deviceCount: selectedDevices.length,
-                executionMode: 'immediate',
-              });
-              void message.success(t('ufte.taskCreatedAndNavigate'));
-              // category=station_log + typeCode=RUNTIME_LOG_COLLECT —— FileTransferCenter
-              // 初始化时按 URL 还原 selectedCategory + selectedTypeCode，定位到具体 tab。
-              navigate('/transfer/center?category=station_log&typeCode=RUNTIME_LOG_COLLECT');
-            } catch {
-              void message.error(t('common.operationFailed'));
+            if (actionKey === 'batch-log-collect') {
+              try {
+                const taskName = buildDefaultUfteTaskName(
+                  'RUNTIME_LOG_COLLECT',
+                  taskNameUser,
+                  appLocale,
+                  dayjs().format('YYYY-MM-DD HH:mm:ss'),
+                );
+                await createUfteTask.mutateAsync({
+                  taskName,
+                  typeCode: 'RUNTIME_LOG_COLLECT',
+                  deviceIds: selectedDevices.map((d) => d.id),
+                  deviceCount: selectedDevices.length,
+                  executionMode: 'immediate',
+                });
+                void message.success(t('ufte.taskCreatedAndNavigate'));
+                navigate('/transfer/center?category=station_log&typeCode=RUNTIME_LOG_COLLECT');
+              } catch {
+                void message.error(t('common.operationFailed'));
+              }
+              setSelectedRowKeys([]);
+              return;
             }
-            setSelectedRowKeys([]);
-            return;
-          }
 
-          {
-            // 同步/重启操作：使用右侧抽屉（TR069 抓包入口已移除，#179）
-            setCollectDrawerTitle(t('task.taskProgress')); // 任务进度
-            setCollectTasks(newTasks);
+            setCollectDrawerTitle(t('task.taskProgress'));
+            if (actionKey === 'batch-alarm-sync') {
+              const timestamp = new Date().toISOString();
+              setCollectTasks(newTasks.map((task) => {
+                if (!runnableAlarmSyncRowIds.has(task.id)) {
+                  return {
+                    ...task,
+                    status: 'failed' as TaskStatus,
+                    progress: 100,
+                    message: t('device.batch.alarmSync.onlyOnline'),
+                    logContent: `[${timestamp}] ERROR: ${t('task.log.start')}\n[${timestamp}] INFO: ${t('task.log.connect')} ${task.sn}\n[${timestamp}] ERROR: ${t('device.batch.alarmSync.onlyOnline')}`,
+                  };
+                }
+                return {
+                  ...task,
+                  status: 'running' as TaskStatus,
+                  progress: 10,
+                  message: t('task.status.running'),
+                };
+              }));
+            } else {
+              setCollectTasks(newTasks);
+            }
             setCollectDrawerOpen(true);
 
-            // 模拟任务进度
-            newTasks.forEach((task, index) => {
-              setTimeout(() => {
-                setCollectTasks((prev) => prev.map((item) =>
-                  item.id === task.id ? { ...item, status: 'running', progress: 10 } : item
-                ));
-
-                const progressInterval = setInterval(() => {
-                  setCollectTasks((prev) => prev.map((item) => {
-                    if (item.id !== task.id) return item;
-                    if (item.progress >= 100) {
-                      clearInterval(progressInterval);
-                      return item;
-                    }
-                    const randomProgress = Math.random() * 15 + 10;
-                    return { ...item, progress: Math.min(item.progress + randomProgress, 90) };
-                  }));
-                }, 200);
-
-                const completeTime = 1000 + Math.random() * 1000;
-
+            if (actionKey !== 'batch-alarm-sync') {
+              newTasks.forEach((task, index) => {
                 setTimeout(() => {
-                  clearInterval(progressInterval);
-                  const success = Math.random() > 0.1;
-                  // 生成操作日志
-                  const timestamp = new Date().toISOString();
-                  const logContent = success
-                    ? `[${timestamp}] INFO: ${t('task.log.start')}\n[${timestamp}] INFO: ${t('task.log.connect')} ${task.sn}\n[${timestamp}] INFO: ${t('task.log.success')}`
-                    : `[${timestamp}] ERROR: ${t('task.log.start')}\n[${timestamp}] INFO: ${t('task.log.connect')} ${task.sn}\n[${timestamp}] ERROR: ${t('task.log.failed')}`;
                   setCollectTasks((prev) => prev.map((item) =>
-                    item.id === task.id ? {
-                      ...item,
-                      status: success ? 'success' : 'failed',
-                      progress: 100,
-                      message: success ? t('task.status.completed') : t('common.failed'),
-                      logContent,
-                    } : item
+                    item.id === task.id ? { ...item, status: 'running', progress: 10 } : item
                   ));
-                }, completeTime);
-              }, index * 200);
-            });
-          }
 
-          if (actionKey === 'batch-reboot') {
-            try {
-              await batchReboot.mutateAsync(ids.map(String));
-              void message.success(t('common.commandSent'));
-            } catch {
-              void message.error(t('common.operationFailed'));
-            }
-          } else if (actionKey === 'batch-alarm-sync') {
-            const sns = selectedDevices.map((d) => d.sn);
-            for (const sn of sns) {
-              triggerAlarmSync.mutate(sn, {
-                onSuccess: () => {
-                  const timestamp = new Date().toISOString();
-                  const taskId = newTasks.find((t) => t.sn === sn)?.id;
-                  if (taskId) {
+                  const progressInterval = setInterval(() => {
+                    setCollectTasks((prev) => prev.map((item) => {
+                      if (item.id !== task.id) return item;
+                      if (item.progress >= 100) {
+                        clearInterval(progressInterval);
+                        return item;
+                      }
+                      const randomProgress = Math.random() * 15 + 10;
+                      return { ...item, progress: Math.min(item.progress + randomProgress, 90) };
+                    }));
+                  }, 200);
+
+                  const completeTime = 1000 + Math.random() * 1000;
+                  setTimeout(() => {
+                    clearInterval(progressInterval);
+                    const success = Math.random() > 0.1;
+                    const timestamp = new Date().toISOString();
+                    const logContent = success
+                      ? `[${timestamp}] INFO: ${t('task.log.start')}\n[${timestamp}] INFO: ${t('task.log.connect')} ${task.sn}\n[${timestamp}] INFO: ${t('task.log.success')}`
+                      : `[${timestamp}] ERROR: ${t('task.log.start')}\n[${timestamp}] INFO: ${t('task.log.connect')} ${task.sn}\n[${timestamp}] ERROR: ${t('task.log.failed')}`;
                     setCollectTasks((prev) => prev.map((item) =>
-                      item.id === taskId ? {
+                      item.id === task.id ? {
                         ...item,
-                        status: 'success',
+                        status: success ? 'success' : 'failed',
                         progress: 100,
-                        message: t('task.status.completed'),
-                        logContent: `[${timestamp}] INFO: ${t('task.log.start')}\n[${timestamp}] INFO: ${t('task.log.connect')} ${sn}\n[${timestamp}] INFO: alarm sync triggered\n[${timestamp}] INFO: ${t('task.log.success')}`,
+                        message: success ? t('task.status.completed') : t('common.failed'),
+                        logContent,
                       } : item
                     ));
-                  }
-                },
-                onError: () => {
-                  const timestamp = new Date().toISOString();
-                  const taskId = newTasks.find((t) => t.sn === sn)?.id;
-                  if (taskId) {
-                    setCollectTasks((prev) => prev.map((item) =>
-                      item.id === taskId ? {
-                        ...item,
-                        status: 'failed',
-                        progress: 100,
-                        message: t('common.failed'),
-                        logContent: `[${timestamp}] ERROR: ${t('task.log.start')}\n[${timestamp}] INFO: ${t('task.log.connect')} ${sn}\n[${timestamp}] ERROR: ${t('task.log.failed')}`,
-                      } : item
-                    ));
-                  }
-                },
+                  }, completeTime);
+                }, index * 200);
               });
             }
-            void message.success(t('common.commandSent'));
-          } else {
-            void message.success(t('common.commandSent'));
-          }
-          setSelectedRowKeys([]);
+
+            if (actionKey === 'batch-reboot') {
+              try {
+                await batchReboot.mutateAsync(ids.map(String));
+                void message.success(t('common.commandSent'));
+              } catch {
+                void message.error(t('common.operationFailed'));
+              }
+            } else if (actionKey === 'batch-alarm-sync') {
+              if (runnableAlarmSyncEntries.length === 0) {
+                void message.warning(t('device.batch.alarmSync.onlyOnline'));
+                setSelectedRowKeys([]);
+                return;
+              }
+
+		      setBatchAlarmSyncRunning(true);
+              const abortController = new AbortController();
+              alarmSyncBatchAbortRef.current = abortController;
+
+              try {
+                const results = await mapWithConcurrencyLimit(
+                  runnableAlarmSyncEntries,
+                  ALARM_SYNC_BATCH_CONCURRENCY,
+                  async ({ task }) => {
+                    const taskId = task.id;
+                    const sn = task.sn;
+                    try {
+                      const triggerResult = await triggerAlarmSync.mutateAsync(sn);
+                      if (!triggerResult.taskId || !taskId) {
+                        throw new Error(t('device.batch.alarmSync.taskUnavailable'));
+                      }
+                      setCollectTasks((prev) => prev.map((item) =>
+                        item.id === taskId ? {
+                          ...item,
+                          status: 'running',
+                          progress: 30,
+                          message: t('task.status.running'),
+                        } : item
+                      ));
+                      const completedTask = await waitForDeviceTaskTerminal(
+                        triggerResult.taskId,
+                        taskId,
+                        abortController.signal,
+                      );
+                      if (completedTask.status !== 'completed') {
+                        throw new Error(completedTask.errorMessage || completedTask.status);
+                      }
+                      const timestamp = new Date().toISOString();
+                      setCollectTasks((prev) => prev.map((item) =>
+                        item.id === taskId ? {
+                          ...item,
+                          status: 'success',
+                          progress: 100,
+                          message: t('task.status.completed'),
+                          logContent: `[${timestamp}] INFO: ${t('task.log.start')}\n[${timestamp}] INFO: ${t('task.log.connect')} ${sn}\n[${timestamp}] INFO: alarm sync completed and persisted\n[${timestamp}] INFO: ${t('task.log.success')}`,
+                        } : item
+                      ));
+                      return true;
+                    } catch (err) {
+                      if (isAbortError(err)) {
+                        throw err;
+                      }
+                      const timestamp = new Date().toISOString();
+                      const errMsg = err instanceof Error ? err.message : t('task.log.failed');
+                      setCollectTasks((prev) => prev.map((item) =>
+                        item.id === taskId ? {
+                          ...item,
+                          status: 'failed',
+                          progress: 100,
+                          message: t('common.failed'),
+                          logContent: `[${timestamp}] ERROR: ${t('task.log.start')}\n[${timestamp}] INFO: ${t('task.log.connect')} ${sn}\n[${timestamp}] ERROR: ${errMsg}`,
+                        } : item
+                      ));
+                      throw err;
+                    }
+                  },
+                );
+
+                const aborted = abortController.signal.aborted
+                  || results.some((result) => result.status === 'rejected' && isAbortError(result.reason));
+                if (aborted) {
+                  return;
+                }
+
+                const succeededCount = results.filter((result) => result.status === 'fulfilled').length;
+                const failedCount = newTasks.length - succeededCount;
+                if (succeededCount > 0) {
+                  await queryClient.invalidateQueries({ queryKey: ['alarms'] });
+                }
+                if (succeededCount > 0 && failedCount === 0) {
+                  void message.success(t('common.commandSent'));
+                } else if (succeededCount > 0) {
+                  void message.warning(t('device.batch.alarmSync.partialResult', { success: succeededCount, failed: failedCount }));
+                } else {
+                  void message.error(t('common.operationFailed'));
+                }
+              } finally {
+                setBatchAlarmSyncRunning(false);
+                if (alarmSyncBatchAbortRef.current === abortController) {
+                  alarmSyncBatchAbortRef.current = null;
+                }
+              }
+            } else {
+              void message.success(t('common.commandSent'));
+            }
+            setSelectedRowKeys([]);
+          })();
         },
       });
     },
-    [modal, message, t, batchReboot, triggerAlarmSync, createUfteTask, navigate, devices]
+    [
+      appLocale,
+      batchAlarmSyncRunning,
+      batchReboot,
+      createUfteTask,
+      devices,
+      message,
+      modal,
+      navigate,
+      queryClient,
+      t,
+      taskNameUser,
+      triggerAlarmSync,
+      waitForDeviceTaskTerminal,
+    ]
   );
 
   // 导出实现见 columns 定义之后的 handleExport(依赖 columns,需在其后声明)。
@@ -1251,7 +1329,7 @@ export default function DeviceList() {
               {formatDeviceSyncStatus(normalized, {
                 synchronized: t('status.synchronized'),
                 gps: `GPS ${t('status.synchronized')}`,
-                beidou: `北斗${t('status.synchronized')}`,
+                beidou: t('status.beidouSynchronized'),
                 ntp: `NTP/1588 ${t('status.synchronized')}`,
                 rem: `REM ${t('status.synchronized')}`,
                 error: t('status.notSynchronized'),
@@ -1457,7 +1535,7 @@ export default function DeviceList() {
 
           return (
             <div
-              title={record.installAddress || '双击编辑安装详细地址'}
+              title={record.installAddress || t('device.installAddress.doubleClickEdit')}
               onDoubleClick={(e) => {
                 e.stopPropagation();
                 startInstallAddressEdit(record);
@@ -1468,7 +1546,7 @@ export default function DeviceList() {
                 color: isEmptyAddress ? 'rgba(0, 0, 0, 0.45)' : undefined,
               }}
             >
-              {record.installAddress || '双击编辑安装详细地址'}
+              {record.installAddress || t('device.installAddress.doubleClickEdit')}
             </div>
           );
         },
@@ -1537,7 +1615,7 @@ export default function DeviceList() {
 
     ],
     // remarkHeaderRender 暂从 dep 列表移除：remark 列定义已注释，恢复时同步加回。
-    [navigate, t, fmtTime, fmtDuration, fmtStatus, renderMultiCellStatus, renderActivationStatus, message, downloadStationLog, mapConnStatus, getSeverityLabel, networkTypeDict?.sysDictionaryDetails, editingInstallAddressId, editingInstallAddressValue, savingInstallAddressId, saveInstallAddressEdit, cancelInstallAddressEdit, startInstallAddressEdit]
+    [navigate, openDeviceDetail, prefetchDeviceDetailEntry, t, fmtTime, fmtDuration, fmtStatus, renderMultiCellStatus, renderActivationStatus, message, downloadStationLog, mapConnStatus, getSeverityLabel, networkTypeDict?.sysDictionaryDetails, editingInstallAddressId, editingInstallAddressValue, savingInstallAddressId, saveInstallAddressEdit, cancelInstallAddressEdit, startInstallAddressEdit]
   );
 
   // ─── 列表导出(用户决策 2026-06-02) ──────────────────────────────────────
@@ -1690,6 +1768,7 @@ export default function DeviceList() {
       key: 'batch-alarm-sync',
       label: t('device.action.alarmSync'),
       icon: <AlertOutlined />,
+      disabled: batchAlarmSyncRunning,
       onClick: (keys) => handleBatchAction(t('device.action.alarmSync'), keys, 'batch-alarm-sync'),
     },
     // 恢复默认配置已隐藏
@@ -1700,7 +1779,7 @@ export default function DeviceList() {
     //   danger: true,
     //   onClick: (keys) => handleBatchAction(t('device.action.resetConfig'), keys, 'batch-reset-config'),
     // },
-  ], [handleBatchAction, t]);
+  ], [batchAlarmSyncRunning, handleBatchAction, t]);
 
   // 任务面板表格列定义
   const taskColumns: ColumnsType<LocalTask> = useMemo(() => [
