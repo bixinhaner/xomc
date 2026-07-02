@@ -99,26 +99,6 @@ const EVENT_TYPE_LABEL: Record<EventType, string> = {
 
 const NE_TYPE_OPTIONS = ['ENB', 'GNB', 'CPE', 'UPS', 'WCG', 'GSM']
 
-// 历史告警快捷筛选：全部 / 严重度 / 已清除态
-type QuickFilterKey =
-  | 'all'
-  | 'critical'
-  | 'major'
-  | 'minor'
-  | 'warning'
-  | 'cleared'
-  | 'confirmed'
-
-const QUICK_FILTERS: { key: QuickFilterKey; label: string }[] = [
-  { key: 'all', label: '全部' },
-  { key: 'critical', label: '紧急' },
-  { key: 'major', label: '重要' },
-  { key: 'minor', label: '次要' },
-  { key: 'warning', label: '警告' },
-  { key: 'cleared', label: '已清除' },
-  { key: 'confirmed', label: '已确认' },
-]
-
 // ---------------------------------------------------------------------------
 // 子组件
 // ---------------------------------------------------------------------------
@@ -166,7 +146,6 @@ export default function HistoricalAlarms() {
   const [eventType, setEventType] = useState<EventType | ''>('')
   const [dealState, setDealState] = useState<'' | '2' | '3'>('')
   const [neType, setNeType] = useState('')
-  const [quick, setQuick] = useState<QuickFilterKey>('all')
 
   // 选择 & 弹窗
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -182,11 +161,9 @@ export default function HistoricalAlarms() {
     if (severity) f.severity = severity
     if (eventType) f.eventType = eventType
     if (neType) f.neType = neType
-    if (quick === 'cleared') f.dealState = ['2', '3']
-    else if (quick === 'confirmed') f.dealState = ['1', '3']
-    else if (dealState) f.dealState = dealState
+    if (dealState) f.dealState = dealState
     return f
-  }, [page, pageSize, keyword, severity, eventType, neType, dealState, quick])
+  }, [page, pageSize, keyword, severity, eventType, neType, dealState])
 
   const { data, isLoading, isError, error, isFetching, refetch } =
     useHistoricalAlarms(params, { refetchIntervalMs: false })
@@ -243,16 +220,6 @@ export default function HistoricalAlarms() {
       return new Set(rows.map((r) => r.id))
     })
   }, [rows])
-
-  const applyQuick = useCallback((key: QuickFilterKey) => {
-    setQuick(key)
-    setPage(1)
-    setSeverity('')
-    setDealState('')
-    if (key === 'critical' || key === 'major' || key === 'minor' || key === 'warning') {
-      setSeverity(key)
-    }
-  }, [])
 
   const openAck = useCallback((ids: string[]) => {
     if (ids.length === 0) return
@@ -349,7 +316,6 @@ export default function HistoricalAlarms() {
             value={severity || 'all'}
             onValueChange={(v) => {
               setSeverity(v === 'all' ? '' : (v as AlarmSeverity))
-              setQuick('all')
               setPage(1)
             }}
           >
@@ -409,7 +375,6 @@ export default function HistoricalAlarms() {
             value={dealState || 'all'}
             onValueChange={(v) => {
               setDealState(v === 'all' ? '' : (v as '2' | '3'))
-              setQuick('all')
               setPage(1)
             }}
           >
@@ -443,26 +408,8 @@ export default function HistoricalAlarms() {
         <Stat label="警告" value={stats.warning} tone="warning" />
       </div>
 
-      {/* 快捷筛选 + 批量操作 */}
+      {/* 批量操作 */}
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <div className="flex flex-wrap items-center gap-1">
-          {QUICK_FILTERS.map((q) => (
-            <button
-              key={q.key}
-              type="button"
-              onClick={() => applyQuick(q.key)}
-              className={cn(
-                'rounded-full border px-3 py-1 text-xs transition-colors',
-                quick === q.key
-                  ? 'border-primary bg-primary/10 text-primary'
-                  : 'border-transparent bg-muted text-muted-foreground hover:text-foreground'
-              )}
-            >
-              {q.label}
-            </button>
-          ))}
-        </div>
-
         <div className="ml-auto flex items-center gap-2">
           {selectedIds.length > 0 ? (
             <span className="text-xs text-muted-foreground">

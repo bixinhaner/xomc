@@ -73,9 +73,6 @@ const EVENT_TYPE_OPTIONS: EventType[] = [
 ]
 const PAGE_SIZE = 30
 
-// 快捷筛选键（对照 v1 pill tabs：全部 + 四个严重度）
-type QuickKey = 'all' | AlarmSeverity
-
 interface ModalState {
   kind: 'ack' | null
   ids: string[]
@@ -114,7 +111,6 @@ const CSV_FIELDS: { label: string; get: (a: Alarm) => unknown }[] = [
 export default function HistoricalAlarms() {
   const [page, setPage] = useState(1)
   const [keyword, setKeyword] = useState('')
-  const [quick, setQuick] = useState<QuickKey>('all')
   // 高级筛选（对照 v1 FilterBar）
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [dealState, setDealState] = useState<DealState | ''>('')
@@ -130,14 +126,10 @@ export default function HistoricalAlarms() {
   const [opError, setOpError] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
 
-  // 严重度快捷筛选：选了某严重度时覆盖严重度过滤
-  const severity = quick === 'all' ? '' : quick
-
   const params = useMemo<AlarmFilter & { page: number; pageSize: number }>(
     () => ({
       page,
       pageSize: PAGE_SIZE,
-      ...(severity ? { severity } : {}),
       ...(keyword.trim() ? { keyword: keyword.trim() } : {}),
       ...(dealState ? { dealState } : {}),
       ...(eventType ? { eventType } : {}),
@@ -145,7 +137,7 @@ export default function HistoricalAlarms() {
       ...(deviceSn.trim() ? { deviceSn: deviceSn.trim() } : {}),
       ...(alarmIdentifier.trim() ? { alarmIdentifier: alarmIdentifier.trim() } : {}),
     }),
-    [page, severity, keyword, dealState, eventType, neType, deviceSn, alarmIdentifier]
+    [page, keyword, dealState, eventType, neType, deviceSn, alarmIdentifier]
   )
 
   const { data, isLoading, isError, error, isFetching, refetch } = useHistoricalAlarms(params)
@@ -159,7 +151,6 @@ export default function HistoricalAlarms() {
   const delHist = useDeleteHistoryAlarms()
 
   const resetFilters = useCallback(() => {
-    setQuick('all')
     setKeyword('')
     setDealState('')
     setEventType('')
@@ -249,19 +240,6 @@ export default function HistoricalAlarms() {
     }
   }, [rows])
 
-  const setQuickFilter = useCallback((key: QuickKey) => {
-    setQuick(key)
-    setPage(1)
-  }, [])
-
-  const QUICK_TABS: { key: QuickKey; label: string }[] = [
-    { key: 'all', label: 'ALL · 全部' },
-    { key: 'critical', label: `紧急 · ${histCnt?.critical ?? 0}` },
-    { key: 'major', label: `重要 · ${histCnt?.major ?? 0}` },
-    { key: 'minor', label: `次要 · ${histCnt?.minor ?? 0}` },
-    { key: 'warning', label: `警告 · ${histCnt?.warning ?? 0}` },
-  ]
-
   return (
     <PageShell
       code="F04"
@@ -299,25 +277,6 @@ export default function HistoricalAlarms() {
         </>
       }
     >
-      {/* 快捷筛选（对照 v1 pill tabs） */}
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        {QUICK_TABS.map((tab) => (
-          <button
-            key={tab.key}
-            type="button"
-            onClick={() => setQuickFilter(tab.key)}
-            className={`chip transition-all ${
-              quick === tab.key
-                ? 'shadow-[0_0_10px_currentColor]'
-                : 'opacity-60 hover:opacity-100'
-            }`}
-            style={{ color: tab.key === 'all' ? '#00f0ff' : SEV_COLOR[tab.key] }}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
       {/* 高级筛选行（对照 v1 FilterBar） */}
       {showAdvanced && (
         <div className="mb-3 grid grid-cols-2 gap-3 rounded-sm border border-cyan-500/15 bg-cyan-500/[0.03] p-3 md:grid-cols-3 lg:grid-cols-5">
