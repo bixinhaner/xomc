@@ -247,7 +247,6 @@ export default function ChildParamTable({
         const isEditing = editingPath === record.parameterPath;
 
         if (isEditing) {
-          // Boolean or enum → Select
           if (record.parameterType === 'boolean') {
             return (
               <div>
@@ -290,7 +289,6 @@ export default function ChildParamTable({
               </div>
             );
           }
-          // Default → Input
           return (
             <div>
               <Input
@@ -315,7 +313,6 @@ export default function ChildParamTable({
           );
         }
 
-        // Read mode
         return (
           <Text
             style={{
