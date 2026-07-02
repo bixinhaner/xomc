@@ -7,12 +7,11 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { Row, Col } from 'antd';
 import type { TechnologyType } from './kpi-config';
 import { useKPILayout } from '@core/hooks/api/useDashboard';
 import { useMultiKPITrendComparison } from '@core/hooks/api/useDashboard';
 import { LayoutKPIPanel } from '@/components/dashboard/LayoutKPIPanel';
-import { resolveLayout, collectMetrics, layoutToRows } from './layoutMapping';
+import { resolveLayout, collectMetrics } from './layoutMapping';
 import type { KPILayoutPanel } from '@core/types/dashboard';
 
 type CompareWindow = 'yesterday' | 'last_week';
@@ -62,7 +61,7 @@ export function DashboardKPIModules({
   );
 
   // 按网格坐标把图排成行（首页只读不可拖）。
-  const rows = useMemo(() => layoutToRows(layout.panels), [layout.panels]);
+  const panels = useMemo(() => layout.panels, [layout.panels]);
 
   // 第一次渲染后标记为非初始加载。
   useEffect(() => {
@@ -77,51 +76,47 @@ export function DashboardKPIModules({
     `${technology}:${panel.x}:${panel.y}:${panel.title}`;
 
   return (
-    <>
-      {rows.map((row, rowIndex) => (
-        <Row
-          key={rowIndex}
-          gutter={[16, 16]}
-          className={shouldAnimate ? 'omc-scroll-reveal omc-visible' : ''}
-          data-delay={startDelay + rowIndex}
-        >
-          {row.panels.map((panel) => {
-              const panelKey = getPanelKey(panel);
-              const compareWindow = compareWindows[panelKey] ?? 'yesterday';
-              const trendData = compareWindow === 'last_week' ? lastWeekTrendData : yesterdayTrendData;
-              const isLoading = compareWindow === 'last_week'
-                ? isLastWeekLoading
-                : isYesterdayLoading;
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(2, 1fr)',
+        gap: '16px',
+      }}
+      className={shouldAnimate ? 'omc-scroll-reveal omc-visible' : ''}
+    >
+      {panels.map((panel, index) => {
+        const panelKey = getPanelKey(panel);
+        const compareWindow = compareWindows[panelKey] ?? 'yesterday';
+        const trendData = compareWindow === 'last_week' ? lastWeekTrendData : yesterdayTrendData;
+        const isLoading = compareWindow === 'last_week'
+          ? isLastWeekLoading
+          : isYesterdayLoading;
 
-              const isOnlyOneInRow = row.panels.length === 1;
-              const colSpan = isOnlyOneInRow ? 24 : Math.min(24, panel.w * 2);
+        // 奇数个 panel 时，最后一个占满整行
+        const isLastOdd = index === panels.length - 1 && panels.length % 2 === 1;
 
-              return (
-            <Col
-              key={`${rowIndex}-${panel.x}-${panel.title}`}
-              xs={24}
-              lg={colSpan}
-              style={{ display: 'flex' }}
-            >
-              <LayoutKPIPanel
-                key={`${technology}-${panel.title}`}  // 制式切换时重新挂载，重置状态
-                technology={technology}
-                panel={panel}
-                trendData={trendData}
-                isLoading={isLoading}
-                compareWindow={compareWindow}
-                onCompareWindowChange={(nextWindow) => {
-                  setCompareWindows((prev) => (
-                    prev[panelKey] === nextWindow ? prev : { ...prev, [panelKey]: nextWindow }
-                  ));
-                }}
-                height={280}
-              />
-            </Col>
-              );
-          })}
-        </Row>
-      ))}
-    </>
+        return (
+          <div
+            key={`${technology}-${panel.x}-${panel.y}-${panel.title}`}
+            style={isLastOdd ? { gridColumn: '1 / -1' } : {}}
+            data-delay={startDelay + Math.floor(index / 2)}
+          >
+            <LayoutKPIPanel
+              technology={technology}
+              panel={panel}
+              trendData={trendData}
+              isLoading={isLoading}
+              compareWindow={compareWindow}
+              onCompareWindowChange={(nextWindow) => {
+                setCompareWindows((prev) => (
+                  prev[panelKey] === nextWindow ? prev : { ...prev, [panelKey]: nextWindow }
+                ));
+              }}
+              height={280}
+            />
+          </div>
+        );
+      })}
+    </div>
   );
 }
