@@ -15,21 +15,21 @@ import { delay } from '../utils';
 // dev:mock 下首页能按布局渲染、与真实接口同形状。
 const MOCK_KPI_LAYOUTS: Record<string, KPILayoutPanel[]> = {
   lte: [
-    { title: 'dashboard.panel.traffic', metrics: ['LTE_PDCP_VOLUME_DL', 'LTE_PDCP_VOLUME_UL', 'LTE_PDCP_RATE_DL', 'LTE_PDCP_RATE_UL'], x: 0, y: 0, w: 6, h: 8, chartType: 'line' },
-    { title: 'dashboard.panel.availability', metrics: ['LTE_CELL_AVAILABLE'], x: 6, y: 0, w: 6, h: 8, chartType: 'line' },
-    { title: 'dashboard.panel.utilization', metrics: ['LTE_PRB_UTIL_DL', 'LTE_PRB_UTIL_UL'], x: 0, y: 8, w: 6, h: 8, chartType: 'line' },
-    { title: 'dashboard.panel.accessibility', metrics: ['WIRELESS_SETUP_SR', 'RRC_CONN_SETUP_SR', 'ERAB_SETUP_SR', 'CSFB_SR'], x: 6, y: 8, w: 6, h: 8, chartType: 'line' },
-    { title: 'dashboard.panel.retainability', metrics: ['ERAB_DROP_RATE'], x: 0, y: 16, w: 6, h: 8, chartType: 'line' },
-    { title: 'dashboard.panel.mobility', metrics: ['HO_INTRA_ENB_OUT_SR', 'HO_INTRA_ENB_IN_SR', 'HO_INTER_ENB_OUT_SR', 'HO_INTER_ENB_IN_SR'], x: 6, y: 16, w: 6, h: 8, chartType: 'line' },
+    { title: 'dashboard.panel.traffic', metrics: ['K900010015', 'K900010016', 'K900010040', 'K900010041'], x: 0, y: 0, w: 6, h: 8, chartType: 'line' },
+    { title: 'dashboard.panel.availability', metrics: ['K900010076'], x: 6, y: 0, w: 6, h: 8, chartType: 'line' },
+    { title: 'dashboard.panel.utilization', metrics: ['K900010014', 'K900010013'], x: 0, y: 8, w: 6, h: 8, chartType: 'line' },
+    { title: 'dashboard.panel.accessibility', metrics: ['K900010006', 'K900010002', 'K900010005', 'K900010029'], x: 6, y: 8, w: 6, h: 8, chartType: 'line' },
+    { title: 'dashboard.panel.retainability', metrics: ['K900010027'], x: 0, y: 16, w: 6, h: 8, chartType: 'line' },
+    { title: 'dashboard.panel.mobility', metrics: ['K900010017', 'K900010022', 'K900010021', 'K900010026'], x: 6, y: 16, w: 6, h: 8, chartType: 'line' },
   ],
   nr: [
-    { title: 'dashboard.panel.traffic', metrics: ['NR_PDCP_VOLUME_DL', 'NR_PDCP_VOLUME_UL', 'NR_PDCP_RATE_DL', 'NR_PDCP_RATE_UL'], x: 0, y: 0, w: 6, h: 8, chartType: 'line' },
-    { title: 'dashboard.panel.utilization', metrics: ['NR_PRB_UTIL_DL', 'NR_PRB_UTIL_UL'], x: 6, y: 0, w: 6, h: 8, chartType: 'line' },
+    { title: 'dashboard.panel.traffic', metrics: ['KGNB0511', 'KGNB0510', 'KGNB0517', 'KGNB0516'], x: 0, y: 0, w: 6, h: 8, chartType: 'line' },
+    { title: 'dashboard.panel.utilization', metrics: ['KGNB0506', 'KGNB0505'], x: 6, y: 0, w: 6, h: 8, chartType: 'line' },
   ],
   gsm: [
-    { title: 'dashboard.panel.accessibility', metrics: ['GSM_CALL_SETUP_SR'], x: 0, y: 0, w: 6, h: 8, chartType: 'line' },
-    { title: 'dashboard.panel.retainability', metrics: ['GSM_CALL_DROP_RATE'], x: 6, y: 0, w: 6, h: 8, chartType: 'line' },
-    { title: 'dashboard.panel.mobility', metrics: ['GSM_HO_SR'], x: 0, y: 8, w: 12, h: 8, chartType: 'line' },
+    { title: 'dashboard.panel.accessibility', metrics: ['KGSM0102'], x: 0, y: 0, w: 6, h: 8, chartType: 'line' },
+    { title: 'dashboard.panel.retainability', metrics: ['KGSM0103'], x: 6, y: 0, w: 6, h: 8, chartType: 'line' },
+    { title: 'dashboard.panel.mobility', metrics: ['KGSM0101'], x: 0, y: 8, w: 12, h: 8, chartType: 'line' },
   ],
 };
 
@@ -39,35 +39,35 @@ const MOCK_KPI_LAYOUTS: Record<string, KPILayoutPanel[]> = {
 type KpiDefTuple = [string, string, string, string, string, boolean, boolean];
 const KPI_DEF_TUPLES: Record<string, KpiDefTuple[]> = {
   lte: [
-    ['LTE_PDCP_VOLUME_DL', 'K900010015', '下行数据业务流量', 'MByte', 'traffic', false, true],
-    ['LTE_PDCP_VOLUME_UL', 'K900010016', '上行数据业务流量', 'MByte', 'traffic', false, true],
-    ['LTE_PDCP_RATE_DL', 'K900010040', 'UE下行速率', 'Mbps', 'traffic', false, true],
-    ['LTE_PDCP_RATE_UL', 'K900010041', 'UE上行速率', 'Mbps', 'traffic', false, true],
-    ['LTE_CELL_AVAILABLE', '', '小区可用率', '%', 'availability', true, false],
-    ['LTE_PRB_UTIL_DL', 'K900010014', '下行PRB平均占用率', '%', 'utilization', false, true],
-    ['LTE_PRB_UTIL_UL', 'K900010013', '上行PRB平均占用率', '%', 'utilization', false, true],
-    ['WIRELESS_SETUP_SR', 'K900010006', '无线初始连接成功率', '%', 'accessibility', true, true],
-    ['RRC_CONN_SETUP_SR', 'K900010002', 'RRC连接建立成功率', '%', 'accessibility', false, true],
-    ['ERAB_SETUP_SR', 'K900010005', 'E-RAB建立成功率', '%', 'accessibility', false, true],
-    ['CSFB_SR', 'K900010029', 'CSFB成功率', '%', 'accessibility', false, true],
-    ['ERAB_DROP_RATE', 'K900010027', 'E-RAB掉线率', '%', 'retainability', false, true],
-    ['HO_INTRA_ENB_OUT_SR', 'K900010017', '同频切换成功率-切出', '%', 'mobility', true, true],
-    ['HO_INTRA_ENB_IN_SR', 'K900010022', '同频切换成功率-切入', '%', 'mobility', true, true],
-    ['HO_INTER_ENB_OUT_SR', 'K900010021', 'eNB间切换成功率-切出', '%', 'mobility', false, true],
-    ['HO_INTER_ENB_IN_SR', 'K900010026', 'eNB间切换成功率-切入', '%', 'mobility', false, true],
+    ['K900010015', 'K900010015', '下行数据业务流量', 'MByte', 'traffic', false, true],
+    ['K900010016', 'K900010016', '上行数据业务流量', 'MByte', 'traffic', false, true],
+    ['K900010040', 'K900010040', 'UE下行速率', 'Mbps', 'traffic', false, true],
+    ['K900010041', 'K900010041', 'UE上行速率', 'Mbps', 'traffic', false, true],
+    ['K900010076', 'K900010076', '小区可用率', '%', 'availability', false, true],
+    ['K900010014', 'K900010014', '下行PRB平均占用率', '%', 'utilization', false, true],
+    ['K900010013', 'K900010013', '上行PRB平均占用率', '%', 'utilization', false, true],
+    ['K900010006', 'K900010006', '无线初始连接成功率', '%', 'accessibility', false, true],
+    ['K900010002', 'K900010002', 'RRC连接建立成功率', '%', 'accessibility', false, true],
+    ['K900010005', 'K900010005', 'E-RAB建立成功率', '%', 'accessibility', false, true],
+    ['K900010029', 'K900010029', 'CSFB成功率', '%', 'accessibility', false, true],
+    ['K900010027', 'K900010027', 'E-RAB掉线率', '%', 'retainability', false, true],
+    ['K900010017', 'K900010017', '同频切换成功率-切出', '%', 'mobility', false, true],
+    ['K900010022', 'K900010022', '同频切换成功率-切入', '%', 'mobility', false, true],
+    ['K900010021', 'K900010021', 'eNB间切换成功率-切出', '%', 'mobility', false, true],
+    ['K900010026', 'K900010026', 'eNB间切换成功率-切入', '%', 'mobility', false, true],
   ],
   nr: [
-    ['NR_PDCP_VOLUME_DL', 'KGNB0511', 'PDCP下行业务字节数', 'MByte', 'traffic', true, true],
-    ['NR_PDCP_VOLUME_UL', 'KGNB0510', 'PDCP上行业务字节数', 'MByte', 'traffic', true, true],
-    ['NR_PDCP_RATE_DL', 'KGNB0517', '下行用户平均速率', 'Mbps', 'traffic', false, true],
-    ['NR_PDCP_RATE_UL', 'KGNB0516', '上行用户平均速率', 'Mbps', 'traffic', false, true],
-    ['NR_PRB_UTIL_DL', 'KGNB0506', '下行PRB平均利用率', '%', 'utilization', false, true],
-    ['NR_PRB_UTIL_UL', 'KGNB0505', '上行PRB平均利用率', '%', 'utilization', false, true],
+    ['KGNB0511', 'KGNB0511', 'PDCP下行业务字节数', 'MByte', 'traffic', false, true],
+    ['KGNB0510', 'KGNB0510', 'PDCP上行业务字节数', 'MByte', 'traffic', false, true],
+    ['KGNB0517', 'KGNB0517', '下行用户平均速率', 'Mbps', 'traffic', false, true],
+    ['KGNB0516', 'KGNB0516', '上行用户平均速率', 'Mbps', 'traffic', false, true],
+    ['KGNB0506', 'KGNB0506', '下行PRB平均利用率', '%', 'utilization', false, true],
+    ['KGNB0505', 'KGNB0505', '上行PRB平均利用率', '%', 'utilization', false, true],
   ],
   gsm: [
-    ['GSM_CALL_SETUP_SR', 'KGSM0102', '电话成功率', '%', 'accessibility', false, true],
-    ['GSM_CALL_DROP_RATE', 'KGSM0103', '电话掉线率', '%', 'retainability', false, true],
-    ['GSM_HO_SR', 'KGSM0101', 'Handover切换成功率', '%', 'mobility', false, true],
+    ['KGSM0102', 'KGSM0102', '电话成功率', '%', 'accessibility', false, true],
+    ['KGSM0103', 'KGSM0103', '电话掉线率', '%', 'retainability', false, true],
+    ['KGSM0101', 'KGSM0101', 'Handover切换成功率', '%', 'mobility', false, true],
   ],
 };
 
@@ -95,39 +95,39 @@ const mockKPIDefinitions: KPIDefinitionsResponse = (() => {
 // KPI 配置（用于动态生成数据）
 const KPI_CONFIG: Record<string, { base: number; variance: number }> = {
   // LTE Traffic
-  LTE_PDCP_VOLUME_DL: { base: 450, variance: 80 },
-  LTE_PDCP_VOLUME_UL: { base: 120, variance: 30 },
-  LTE_PDCP_RATE_DL: { base: 76, variance: 15 },
-  LTE_PDCP_RATE_UL: { base: 18, variance: 5 },
+  K900010015: { base: 450, variance: 80 },
+  K900010016: { base: 120, variance: 30 },
+  K900010040: { base: 76, variance: 15 },
+  K900010041: { base: 18, variance: 5 },
   // LTE Availability
-  LTE_CELL_AVAILABLE: { base: 99.5, variance: 0.3 },
+  K900010076: { base: 99.5, variance: 0.3 },
   // LTE Utilization
-  LTE_PRB_UTIL_DL: { base: 65, variance: 15 },
-  LTE_PRB_UTIL_UL: { base: 45, variance: 12 },
+  K900010014: { base: 65, variance: 15 },
+  K900010013: { base: 45, variance: 12 },
   // LTE Accessibility
-  WIRELESS_SETUP_SR: { base: 98.5, variance: 1.5 },
-  RRC_CONN_SETUP_SR: { base: 99.2, variance: 0.8 },
-  ERAB_SETUP_SR: { base: 98.8, variance: 1.2 },
-  CSFB_SR: { base: 97.5, variance: 2.5 },
+  K900010006: { base: 98.5, variance: 1.5 },
+  K900010002: { base: 99.2, variance: 0.8 },
+  K900010005: { base: 98.8, variance: 1.2 },
+  K900010029: { base: 97.5, variance: 2.5 },
   // LTE Retainability
-  ERAB_DROP_RATE: { base: 0.05, variance: 0.02 },
+  K900010027: { base: 0.05, variance: 0.02 },
   // LTE Mobility
-  HO_INTRA_ENB_OUT_SR: { base: 98.2, variance: 1.8 },
-  HO_INTRA_ENB_IN_SR: { base: 98.5, variance: 1.5 },
-  HO_INTER_ENB_OUT_SR: { base: 97.8, variance: 2.2 },
-  HO_INTER_ENB_IN_SR: { base: 98.0, variance: 2.0 },
+  K900010017: { base: 98.2, variance: 1.8 },
+  K900010022: { base: 98.5, variance: 1.5 },
+  K900010021: { base: 97.8, variance: 2.2 },
+  K900010026: { base: 98.0, variance: 2.0 },
   // NR Traffic
-  NR_PDCP_VOLUME_DL: { base: 650, variance: 120 },
-  NR_PDCP_VOLUME_UL: { base: 180, variance: 45 },
-  NR_PDCP_RATE_DL: { base: 120, variance: 25 },
-  NR_PDCP_RATE_UL: { base: 35, variance: 10 },
+  KGNB0511: { base: 650, variance: 120 },
+  KGNB0510: { base: 180, variance: 45 },
+  KGNB0517: { base: 120, variance: 25 },
+  KGNB0516: { base: 35, variance: 10 },
   // NR Utilization
-  NR_PRB_UTIL_DL: { base: 55, variance: 18 },
-  NR_PRB_UTIL_UL: { base: 38, variance: 15 },
+  KGNB0506: { base: 55, variance: 18 },
+  KGNB0505: { base: 38, variance: 15 },
   // GSM
-  GSM_CALL_SETUP_SR: { base: 97, variance: 2.5 },
-  GSM_CALL_DROP_RATE: { base: 0.08, variance: 0.03 },
-  GSM_HO_SR: { base: 96.5, variance: 3.0 },
+  KGSM0102: { base: 97, variance: 2.5 },
+  KGSM0103: { base: 0.08, variance: 0.03 },
+  KGSM0101: { base: 96.5, variance: 3.0 },
 };
 
 export const dashboardService = {

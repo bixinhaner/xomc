@@ -116,7 +116,7 @@ func TestSaveKPILayout_PersistsAndReadsBack(t *testing.T) {
 	repo := newFakeLayoutRepo()
 	svc := newTestService(repo)
 	uid := uuid.New()
-	body := json.RawMessage(`{"panels":[{"title":"t","metrics":["LTE_PDCP_VOLUME_DL"],"x":0,"y":0,"w":6,"h":8}]}`)
+	body := json.RawMessage(`{"panels":[{"title":"t","metrics":["K900010015"],"x":0,"y":0,"w":6,"h":8}]}`)
 
 	saved, err := svc.SaveKPILayout(context.Background(), techLTE, body, uid)
 	require.NoError(t, err)

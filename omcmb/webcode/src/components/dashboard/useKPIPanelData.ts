@@ -108,7 +108,7 @@ function normalizeKPIDataPoint(point: unknown): KPIDataPoint {
  * @example
  * ```ts
  * const { data, isLoading } = useKPIPanelData(
- *   'LTE_PDCP_VOLUME_DL',
+ *   'K900010015',
  *   ['today', 'yesterday'],
  *   'day',
  *   true
