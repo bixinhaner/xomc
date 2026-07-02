@@ -128,6 +128,10 @@ export default function RecycleBin() {
   // 永久删除
   const permanentDeleteMutation = usePermanentDeleteDevices();
 
+  const handleManualRefresh = useCallback(() => {
+    void refetch();
+  }, [refetch]);
+
   // 转换数据格式以适配表格
   const tableData = useMemo(() => {
     if (!data?.items) return [];
@@ -363,10 +367,17 @@ export default function RecycleBin() {
             if (s !== pageSize) setPageSize(s);
           }}
           batchActions={batchActions}
+          onRefresh={handleManualRefresh}
+          extraToolbarRight={(
+            <Button size="small" onClick={handleManualRefresh}>
+              {t('common.refresh')}
+            </Button>
+          )}
           defaultDensity="default"
           showRowNumber
           rowNumberTitle={t('table.rowNumber')}
           scroll={{ x: 'max-content', y: 'calc(100vh - 350px)' }}
+          hideRefresh
         />
       </Card>
 
