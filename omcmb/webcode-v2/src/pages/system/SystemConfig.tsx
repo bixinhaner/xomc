@@ -41,7 +41,7 @@ const CATEGORIES: { key: string; label: string }[] = [
   { key: 'security', label: '安全' },
   { key: 'device', label: '设备' },
   { key: 'storage', label: '存储' },
-  { key: 'northbound', label: '北向' },
+  // northbound 已隐藏（#820）：北向功能未完成，待完成后恢复
 ]
 
 // 已知 sys_configs key 占位（issue #548 切片 3）。

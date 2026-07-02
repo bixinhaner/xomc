@@ -46,7 +46,7 @@ const CONFIG_CATEGORIES: { key: string; label: string }[] = [
   { key: 'security', label: '安全' },
   { key: 'device', label: '设备' },
   { key: 'storage', label: '存储' },
-  { key: 'northbound', label: '北向' },
+  // northbound 已隐藏（#820）：北向功能未完成，待完成后恢复
 ]
 
 export default function SystemConfig() {
