@@ -61,6 +61,9 @@ func (m *fakeDeviceRepo) GetBySerialNumber(ctx context.Context, sn string) (*mod
 	}
 	return d, nil
 }
+func (m *fakeDeviceRepo) GetDeletedBySerialNumber(_ context.Context, _ string, _ model.CarrierCode) (*model.Device, error) {
+	return nil, nil
+}
 
 func (m *fakeDeviceRepo) Update(ctx context.Context, d *model.Device) error {
 	m.devices[d.ID] = d

@@ -269,6 +269,9 @@ func (m *mockDeviceRepo) GetBySerialNumber(ctx context.Context, sn string) (*mod
 	}
 	return nil, nil
 }
+func (m *mockDeviceRepo) GetDeletedBySerialNumber(_ context.Context, _ string, _ model.CarrierCode) (*model.Device, error) {
+	return nil, nil
+}
 
 func (m *mockDeviceRepo) Create(ctx context.Context, d *model.Device) error {
 	if m.CreateFn != nil {

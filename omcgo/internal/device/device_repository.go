@@ -157,6 +157,11 @@ type GeoCenter struct {
 type DeviceReader interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*model.Device, error)
 	GetBySerialNumber(ctx context.Context, sn string) (*model.Device, error)
+	// GetDeletedBySerialNumber returns the most recently soft-deleted device with
+	// the given serial number, or nil if no such row exists. Used by
+	// RegisterFromInform to detect recycle-bin devices and auto-restore them
+	// instead of creating a duplicate active row.
+	GetDeletedBySerialNumber(ctx context.Context, sn string, carrier model.CarrierCode) (*model.Device, error)
 	List(ctx context.Context, filter DeviceFilter) (*model.ListResponse[model.Device], error)
 	CountByStatus(ctx context.Context, carrier *model.CarrierCode) (map[model.DeviceStatus]int64, error)
 	// ListActiveByLastInform returns active devices ordered by last_inform_at ASC
@@ -349,6 +354,25 @@ func (r *PgDeviceRepository) GetBySerialNumber(ctx context.Context, sn string) (
 		From("devices d").
 		Where(sq.Eq{"d.serial_number": sn}).
 		Where(notDeleted).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build query: %w", err)
+	}
+	return r.scanDevice(ctx, query, args...)
+}
+
+// GetDeletedBySerialNumber returns the most recently soft-deleted device with
+// the given serial number and carrier. Returns nil when no soft-deleted row exists.
+// Called by RegisterFromInform to auto-restore recycle-bin devices instead of
+// creating a duplicate active row.
+func (r *PgDeviceRepository) GetDeletedBySerialNumber(ctx context.Context, sn string, carrier model.CarrierCode) (*model.Device, error) {
+	query, args, err := storage.Psql.Select(deviceColumns()...).
+		From("devices d").
+		Where(sq.Eq{"d.serial_number": sn}).
+		Where(sq.Eq{"d.carrier": carrier}).
+		Where(sq.NotEq{"d.deleted_at": nil}).
+		OrderBy("d.deleted_at DESC").
+		Limit(1).
 		ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build query: %w", err)

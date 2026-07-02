@@ -530,6 +530,23 @@ func (s *DeviceService) RegisterFromInform(ctx context.Context, inform *tr069.In
 		return s.UpdateFromInform(ctx, inform)
 	}
 
+	// Device not found as active — check if it's soft-deleted in the recycle bin.
+	// A recycle-bin device sending Inform means it's still operational; auto-restore
+	// it rather than creating a duplicate active row with a new UUID.
+	deletedDevice, err := s.deviceRepo.GetDeletedBySerialNumber(ctx, inform.DeviceId.SerialNumber, carrier)
+	if err != nil {
+		s.logger.Error("RegisterFromInform: GetDeletedBySerialNumber failed",
+			zap.Error(err),
+			zap.String("serial_number", inform.DeviceId.SerialNumber))
+		return nil, fmt.Errorf("lookup deleted device: %w", err)
+	}
+	if deletedDevice != nil {
+		s.logger.Info("RegisterFromInform: device found in recycle bin, skipping auto-registration",
+			zap.String("serial_number", inform.DeviceId.SerialNumber),
+			zap.String("deleted_device_id", deletedDevice.ID.String()))
+		return nil, commonerrors.ErrNotFound
+	}
+
 	modelName := findParamValue(inform.ParameterList, "Device.DeviceInfo.ModelName")
 	firmwareVersion := findParamValue(inform.ParameterList, "Device.DeviceInfo.SoftwareVersion")
 

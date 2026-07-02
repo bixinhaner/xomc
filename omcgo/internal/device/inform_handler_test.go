@@ -23,6 +23,7 @@ type infMockDeviceRepo struct {
 	createFn            func(ctx context.Context, device *model.Device) error
 	getByIDFn           func(ctx context.Context, id uuid.UUID) (*model.Device, error)
 	getBySerialNumberFn func(ctx context.Context, sn string) (*model.Device, error)
+	getDeletedFn        func(ctx context.Context, sn string, carrier model.CarrierCode) (*model.Device, error)
 	updateFn            func(ctx context.Context, device *model.Device) error
 	deleteFn            func(ctx context.Context, id uuid.UUID) error
 	listFn              func(ctx context.Context, filter DeviceFilter) (*model.ListResponse[model.Device], error)
@@ -48,6 +49,12 @@ func (m *infMockDeviceRepo) GetByID(ctx context.Context, id uuid.UUID) (*model.D
 func (m *infMockDeviceRepo) GetBySerialNumber(ctx context.Context, sn string) (*model.Device, error) {
 	if m.getBySerialNumberFn != nil {
 		return m.getBySerialNumberFn(ctx, sn)
+	}
+	return nil, nil
+}
+func (m *infMockDeviceRepo) GetDeletedBySerialNumber(ctx context.Context, sn string, carrier model.CarrierCode) (*model.Device, error) {
+	if m.getDeletedFn != nil {
+		return m.getDeletedFn(ctx, sn, carrier)
 	}
 	return nil, nil
 }
@@ -735,6 +742,35 @@ func TestHandlePeriodic_NoForcedFlipNoRebootRecord(t *testing.T) {
 	case <-time.After(150 * time.Millisecond):
 		// expected: no offline event
 	}
+}
+
+func TestHandlePeriodic_DeletedDeviceSkipsAutoRegister(t *testing.T) {
+	deletedID := uuid.New()
+	createCalled := false
+	deviceRepo := &infMockDeviceRepo{
+		getBySerialNumberFn: func(_ context.Context, _ string) (*model.Device, error) {
+			return nil, nil
+		},
+		getDeletedFn: func(_ context.Context, sn string, carrier model.CarrierCode) (*model.Device, error) {
+			return &model.Device{ID: deletedID, SerialNumber: sn, Carrier: carrier}, nil
+		},
+		createFn: func(_ context.Context, _ *model.Device) error {
+			createCalled = true
+			return nil
+		},
+	}
+
+	svc := newInfTestDeviceService(deviceRepo, &infMockParamRepo{})
+	h := NewInformHandler(svc, nil, model.CarrierCMCC, zap.NewNop())
+
+	payload := sampleInformPayload("SN-RECYCLE-001")
+	payload.Events = []string{"2 PERIODIC"}
+	evt, err := event.NewEvent(event.SubjectDevicePeriodic, payload)
+	require.NoError(t, err)
+
+	err = h.handlePeriodic(context.Background(), evt)
+	require.NoError(t, err)
+	assert.False(t, createCalled, "recycle-bin device must not be auto-registered")
 }
 
 func TestHandlePeriodic_Success(t *testing.T) {
