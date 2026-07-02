@@ -682,6 +682,7 @@ export default function DeviceList() {
   // 列设置隐藏某列 → 对应搜索下拉框一并隐藏(FILTER_COLUMN_MAP 映射;searchText 无映射,始终显示)。
   // hiddenColumnKeys 由 <DataTable onHiddenColumnsChange> 在列设置变化时抬上来。
   const [hiddenColumnKeys, setHiddenColumnKeys] = useState<string[]>([]);
+  const [tableMigrationVersion, setTableMigrationVersion] = useState(0);
   const visibleFilterFields = useMemo(
     () =>
       filterFields.filter((f) => {
@@ -690,6 +691,22 @@ export default function DeviceList() {
       }),
     [filterFields, hiddenColumnKeys]
   );
+
+  useEffect(() => {
+    const storageKey = 'omc_col_vis_device-list-table';
+    try {
+      const stored = localStorage.getItem(storageKey);
+      if (!stored) return;
+      const parsed = JSON.parse(stored) as unknown;
+      if (!Array.isArray(parsed) || !parsed.includes('offlineDuration')) return;
+      const next = parsed.filter((key): key is string => key !== 'offlineDuration');
+      localStorage.setItem(storageKey, JSON.stringify(next));
+      setHiddenColumnKeys((prev) => prev.filter((key) => key !== 'offlineDuration'));
+      setTableMigrationVersion((prev) => prev + 1);
+    } catch {
+      // ignore malformed column settings and keep current table behavior
+    }
+  }, []);
 
   // 统计面板 — 基于筛选条件的全量统计（由后端 stats 字段返回，非当前页）
   // T-0162: 优先用 online_count / offline_count（与 backend DeviceListStats 1:1）；
@@ -1284,7 +1301,6 @@ export default function DeviceList() {
         key: 'offlineDuration',
         title: t('device.offlineDuration'),
         width: 120,
-        hidden: true,
         group: 'common',
         render: (_val, record) => {
           // 仅离线设备显示
@@ -1951,6 +1967,7 @@ export default function DeviceList() {
             styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
           >
             <DataTable<Device>
+              key={tableMigrationVersion}
               tableId="device-list-table"
               columns={columns}
               onHiddenColumnsChange={setHiddenColumnKeys}
