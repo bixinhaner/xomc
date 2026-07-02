@@ -329,7 +329,7 @@
         <param name="Device.FAP.Ipsec.{i}.LEFTSOURCEIP" standardPath="Device.FAP.Ipsec.{i}.LEFTSOURCEIP" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="64"/>
         <param name="Device.FAP.Ipsec.{i}.LEFTSUBNET" standardPath="Device.FAP.Ipsec.{i}.LEFTSUBNET" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="64"/>
         <param name="Device.FAP.Ipsec.{i}.LEFT_IDENTIFIER" standardPath="Device.FAP.Ipsec.{i}.LEFT_IDENTIFIER" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="64"/>
-        <param name="Device.FAP.Ipsec.{i}.LEFT_INTERFACE" standardPath="Device.FAP.Ipsec.{i}.LEFT_INTERFACE" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="None" enumLabels="None"/>
+        <param name="Device.FAP.Ipsec.{i}.LEFT_INTERFACE" standardPath="Device.FAP.Ipsec.{i}.LEFT_INTERFACE" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param name="Device.FAP.Ipsec.{i}.REKEYMARGIN" standardPath="Device.FAP.Ipsec.{i}.REKEYMARGIN" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="64"/>
         <param name="Device.FAP.Ipsec.{i}.RIGHT_IDENTIFIER" standardPath="Device.FAP.Ipsec.{i}.RIGHT_IDENTIFIER" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="64"/>
         <param name="Device.FAP.Ipsec.{i}.RIGHT_SUBNET" standardPath="Device.FAP.Ipsec.{i}.RIGHT_SUBNET" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="64"/>

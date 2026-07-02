@@ -48,7 +48,7 @@ func TestKPILayoutRepo_RealPGRoundTrip(t *testing.T) {
 	defer cancel()
 
 	uid := uuid.New()
-	body := json.RawMessage(`{"panels":[{"title":"it-roundtrip","metrics":["LTE_PDCP_VOLUME_DL"],"x":0,"y":0,"w":12,"h":8,"chartType":"line"}]}`)
+	body := json.RawMessage(`{"panels":[{"title":"it-roundtrip","metrics":["K900010015"],"x":0,"y":0,"w":12,"h":8,"chartType":"line"}]}`)
 
 	// Upsert：RETURNING 同样要扫 updated_at(timestamptz)。
 	saved, err := repo.Upsert(ctx, techLTE, body, uid)

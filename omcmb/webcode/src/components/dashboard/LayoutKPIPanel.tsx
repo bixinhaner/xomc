@@ -26,6 +26,7 @@ import { Card, Select, Segmented, Spin, Empty, Typography, Tooltip, Tag } from '
 import { LoadingOutlined } from '@ant-design/icons';
 import LineChart from '@/components/Charts/LineChart';
 import { useT } from '@/hooks/useT';
+import { useIntl } from 'react-intl';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import { generateDayAxisLabels, generateDayAxisTimestamps } from '@core/utils/format';
 import type { KPILayoutPanel } from '@core/types/dashboard';
@@ -63,6 +64,7 @@ export function LayoutKPIPanel({
   height = 280,
 }: LayoutKPIPanelProps) {
   const t = useT();
+  const intl = useIntl();
   const token = useThemeToken();
 
   // 按制式拉指标库元数据（编号 → 名字/单位）。放开全部指标后名字/单位来源在此。
@@ -196,7 +198,11 @@ export function LayoutKPIPanel({
             <Text
               style={{ fontSize: 15, fontWeight: 600, color: token.colorText, flexShrink: 0 }}
             >
-              {panel.title ? t(panel.title) : titleFallback}
+              {panel.title
+                ? panel.title in intl.messages
+                  ? t(panel.title)
+                  : panel.title
+                : titleFallback}
             </Text>
             {selectedMetrics.length <= 1 ? (
               <Segmented

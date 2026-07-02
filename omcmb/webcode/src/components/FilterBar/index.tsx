@@ -14,8 +14,6 @@ import { DownOutlined, SearchOutlined, UpOutlined } from '@ant-design/icons';
 import styles from './FilterBar.module.css';
 
 const { RangePicker } = DatePicker;
-type FormFieldValues = Record<string, unknown>;
-
 export interface FilterField {
   name: string;
   label: string;
@@ -124,42 +122,40 @@ const FilterBar: React.FC<FilterBarProps> = ({
   const [form] = Form.useForm<Record<string, unknown>>();
   const [expanded, setExpanded] = useState(false);
   const storageKey = `${SESSION_PREFIX}${filterId}`;
-  // 标记是否已初始化（用于区分首次渲染和后续 initialValues 变化）
-  const initializedRef = React.useRef(false);
+  const fieldsRef = React.useRef(fields);
+  const initialValuesSignature = React.useMemo(() => {
+    if (initialValues === undefined) {
+      return '__undefined__';
+    }
+
+    const entries = Object.entries(initialValues).sort(([left], [right]) => left.localeCompare(right));
+    return JSON.stringify(entries);
+  }, [initialValues]);
+
+  useEffect(() => {
+    fieldsRef.current = fields;
+  }, [fields]);
 
   // Restore from initialValues (priority) or sessionStorage on mount
   // Also sync form when initialValues changes (e.g., URL params cleared)
   useEffect(() => {
+    const currentFields = fieldsRef.current;
+
     // 如果传入了 initialValues
     if (initialValues !== undefined) {
-      // 首次渲染时，如果 initialValues 为空，尝试从 sessionStorage 恢复
-      if (!initializedRef.current && Object.keys(initialValues).length === 0) {
-        try {
-          const stored = sessionStorage.getItem(storageKey);
-          if (stored) {
-            const parsed = JSON.parse(stored) as Record<string, unknown>;
-            form.setFieldsValue(hydrateFormValues(parsed, fields) as FormFieldValues);
-            initializedRef.current = true;
-            return;
-          }
-        } catch {
-          // ignore
-        }
-      }
-      // 如果 initialValues 为空对象（且不是首次渲染，或者首次渲染但没有 sessionStorage 数据）
-      // 需要清空所有表单字段
       if (Object.keys(initialValues).length === 0) {
-        // 构建一个所有字段都为 undefined 的对象来清空表单
+        // 传入空对象时，明确清空所有表单字段
         const resetValues: Record<string, undefined> = {};
-        fields.forEach((field) => {
+        currentFields.forEach((field) => {
           resetValues[field.name] = undefined;
         });
-        form.setFieldsValue(resetValues);
+        form.setFieldsValue(resetValues as Parameters<typeof form.setFieldsValue>[0]);
       } else {
         // 非空 initialValues，直接设置
-        form.setFieldsValue(hydrateFormValues(initialValues, fields) as FormFieldValues);
+        form.setFieldsValue(
+          hydrateFormValues(initialValues, currentFields) as Parameters<typeof form.setFieldsValue>[0]
+        );
       }
-      initializedRef.current = true;
       return;
     }
     // 如果没有传 initialValues，从 sessionStorage 恢复
@@ -167,13 +163,14 @@ const FilterBar: React.FC<FilterBarProps> = ({
       const stored = sessionStorage.getItem(storageKey);
       if (stored) {
         const parsed = JSON.parse(stored) as Record<string, unknown>;
-        form.setFieldsValue(hydrateFormValues(parsed, fields) as FormFieldValues);
+        form.setFieldsValue(
+          hydrateFormValues(parsed, currentFields) as Parameters<typeof form.setFieldsValue>[0]
+        );
       }
     } catch {
       // ignore
     }
-    initializedRef.current = true;
-  }, [form, storageKey, initialValues, fields]);
+  }, [form, storageKey, initialValuesSignature]);
 
   const handleSearch = useCallback(() => {
     const values = serializeFormValues(

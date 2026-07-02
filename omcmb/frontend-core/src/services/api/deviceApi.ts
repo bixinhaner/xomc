@@ -64,6 +64,10 @@ interface BackendDevice {
   // T-0173: 最近一次离线原因（诊断字段，可空）。
   // 取值：heartbeat_timeout / manual / reboot / null（从未离线或当前在线）
   last_offline_reason?: string | null;
+  offline_seconds?: number;
+  offline_days?: number;
+  offline_hours?: number;
+  offline_minutes?: number;
   gps_version?: string;
   rom?: string;
   remark?: string;
@@ -265,6 +269,21 @@ function mapBackendDevice(bd: BackendDevice): Device {
   // 兼容旧后端：若尚未升级到 T-0162 双字段，回退到 status 口径。
   const lifecycleState = (bd.lifecycle_state || deriveLegacyLifecycle(bd.status)) as Device['lifecycleState'];
   const isOnline = typeof bd.is_online === 'boolean' ? bd.is_online : bd.status === 'active';
+  const offlineSeconds = bd.offline_seconds;
+  let offlineDays = bd.offline_days;
+  let offlineHours = bd.offline_hours;
+  let offlineMinutes = bd.offline_minutes;
+
+  if (
+    offlineSeconds !== undefined &&
+    (offlineDays === undefined || offlineHours === undefined || offlineMinutes === undefined)
+  ) {
+    const totalMinutes = Math.floor(Math.max(0, offlineSeconds) / 60);
+    const totalHours = Math.floor(totalMinutes / 60);
+    offlineDays = Math.floor(totalHours / 24);
+    offlineHours = totalHours % 24;
+    offlineMinutes = totalMinutes % 60;
+  }
 
   // 设备名称统一回退：device_name 空时回落到 SN，避免设备列表 / 分组页 / 详情页
   // 在 site_name 未填的设备上显示空白（用户看到"未命名设备"会失去识别能力）。
@@ -322,6 +341,10 @@ function mapBackendDevice(bd: BackendDevice): Device {
     offlineTime: bd.last_offline_time || '',
     onlineDuration: bd.online_duration ?? null,
     upTime: bd.run_time ?? null,
+    offlineSeconds,
+    offlineDays,
+    offlineHours,
+    offlineMinutes,
     // T-0173: OMC 视角累计在线时长（秒）。后端 device_info.cumulative_online_duration。
     cumulativeOnlineDuration: bd.cumulative_online_duration ?? null,
     // T-0173: 最近一次离线原因（诊断字段)。空串 → null,与 onlineDuration 一致。
