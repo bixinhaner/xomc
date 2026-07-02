@@ -16,6 +16,10 @@ interface MapControlsProps {
   zoomInDisabled?: boolean;
   /** 是否禁用缩小 */
   zoomOutDisabled?: boolean;
+  /** 是否处于测距模式 */
+  isMeasuring?: boolean;
+  /** 测距按钮点击回调 */
+  onMeasureToggle?: () => void;
 }
 
 /**
@@ -30,6 +34,8 @@ const MapControls: React.FC<MapControlsProps> = ({
   onZoomOut,
   zoomInDisabled = false,
   zoomOutDisabled = false,
+  isMeasuring = false,
+  onMeasureToggle,
 }) => {
   const containerStyle: React.CSSProperties = {
     position: 'absolute',
@@ -70,6 +76,7 @@ const MapControls: React.FC<MapControlsProps> = ({
   };
 
   return (
+    <React.Fragment>
     <div style={containerStyle} className={styles.mapControls}>
       {/* Zoom In */}
       <button
@@ -107,6 +114,56 @@ const MapControls: React.FC<MapControlsProps> = ({
         <span style={{ fontSize: 16, fontWeight: 600, color: 'var(--color-neutral-800)' }}>−</span>
       </button>
     </div>
+
+    {/* 测距工具按钮 */}
+    {onMeasureToggle && (
+      <div
+        style={{
+          position: 'absolute',
+          right: 24,
+          top: 204,
+          width: 44,
+          height: 44,
+          zIndex: 100,
+          background: isMeasuring ? '#1677ff' : '#FFF',
+          borderRadius: 12,
+          boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+          border: isMeasuring ? '1px solid #1677ff' : '1px solid #E8E8E8',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <button
+          title={isMeasuring ? '退出测距 (ESC)' : '测距工具'}
+          style={{
+            width: 32,
+            height: 32,
+            borderRadius: '50%',
+            background: 'transparent',
+            border: 'none',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: isMeasuring ? '#fff' : 'var(--color-neutral-800)',
+          }}
+          onClick={onMeasureToggle}
+          onMouseEnter={(e) => {
+            if (!isMeasuring) e.currentTarget.style.background = 'rgba(0,0,0,0.06)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'transparent';
+          }}
+        >
+          {/* 尺子图标（Material Design straighten，带刻度线） */}
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor">
+            <path d="M21 6H3c-1.1 0-2 .9-2 2v8c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 10H3V8h2v4h2V8h2v4h2V8h2v4h2V8h2v4h2V8h2v8z"/>
+          </svg>
+        </button>
+      </div>
+    )}
+  </React.Fragment>
   );
 };
 
