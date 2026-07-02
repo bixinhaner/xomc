@@ -15,10 +15,12 @@ import {
   Space,
   Button,
   Tag,
+  Tooltip,
   Typography,
   Pagination,
   Divider,
   Select,
+  theme,
 } from 'antd';
 import { SearchOutlined, ClearOutlined } from '@ant-design/icons';
 import { useIndicatorList } from '@core/hooks/api/useIndicatorsLibrary';
@@ -48,6 +50,9 @@ interface MetricPickerModalProps {
   // labels: 选中值 → 友好名（KPI 友好名带 PLMN 标记）。调用方可用于摘要展示，不需要时可忽略。
   onConfirm: (selectedPaths: string[], labels: Record<string, string>) => void;
   initialSelected?: string[];
+  /** 初始友好名映射（调用方从指标库预加载）。弹窗首次打开时合并进 labelMap，
+   *  避免预选但未出现在当前页的指标显示原始编号。 */
+  initialLabels?: Record<string, string>;
   initialDeviceType?: DeviceType;
   // 制式联动锁定（T-0188）：true 时隐藏内部「设备类型」下拉，deviceType 固定为
   // initialDeviceType 不可手动切换；不传/false 保持原下拉可切换行为（向后兼容 KPIQuery）。
@@ -65,10 +70,12 @@ export default function MetricPickerModal({
   onClose,
   onConfirm,
   initialSelected = [],
+  initialLabels,
   initialDeviceType = 'ENB',
   lockDeviceType = false,
 }: MetricPickerModalProps) {
   const intl = useIntl();
+  const { token } = theme.useToken();
   const isEn = useAppStore((s) => s.locale) === 'en-US';
   // 非锁定态：用户可在弹窗内自行切换设备类型（KPIQuery 用法），用内部 state。
   const [deviceTypeState, setDeviceType] = useState<DeviceType>(initialDeviceType);
@@ -85,7 +92,13 @@ export default function MetricPickerModal({
   const [prevOpen, setPrevOpen] = useState(open);
   if (prevOpen !== open) {
     setPrevOpen(open);
-    if (open) setSelected(initialSelected);
+    if (open) {
+      setSelected(initialSelected);
+      // 弹窗重新打开时，把调用方预加载的指标名并入 labelMap（低优先级，不覆盖已有条目）。
+      if (initialLabels) {
+        setLabelMap((prev) => ({ ...initialLabels, ...prev }));
+      }
+    }
   }
 
   // 制式联动锁定（T-0188）：锁定态 deviceType 恒等于外部制式入参 initialDeviceType。
@@ -104,7 +117,21 @@ export default function MetricPickerModal({
 
   // 选中值 → 友好名 映射：items 变化时在渲染期幂等累积（与 PivotTable 列宽同款 render-phase sync，
   // 不用 useEffect），供「已选」面板标签显示友好名，避免露出 K 编号。
-  const [labelMap, setLabelMap] = useState<Record<string, string>>({});
+  // 初始值：优先用调用方预加载的 initialLabels（指标库全量名），否则为空 map。
+  const [labelMap, setLabelMap] = useState<Record<string, string>>(initialLabels ?? {});
+
+  // initialLabels 异步加载完成后（调用方 useAllIndicators 返回数据），同步更新 labelMap。
+  // render-phase sync：与 seenItems 同套路，幂等、不依赖 useEffect。
+  // 优先级：用户在本次弹窗内看到并确认的名称（已在 labelMap 中）优先级高于 initialLabels。
+  const [seenInitialLabels, setSeenInitialLabels] = useState(initialLabels);
+  if (seenInitialLabels !== initialLabels) {
+    setSeenInitialLabels(initialLabels);
+    if (initialLabels && Object.keys(initialLabels).length > 0) {
+      // initialLabels 作为底层兜底，prev 中已有的条目（用户本次确认的）不被覆盖。
+      setLabelMap((prev) => ({ ...initialLabels, ...prev }));
+    }
+  }
+
   const [seenItems, setSeenItems] = useState(items);
   // 语言切换时也要刷新已选标签名（pm-name-i18n）：把 isEn 并入 sync 触发条件。
   const [seenIsEn, setSeenIsEn] = useState(isEn);
@@ -253,26 +280,64 @@ export default function MetricPickerModal({
           </Space>
           <div
             style={{
-              maxHeight: 100,
-              overflowY: 'auto',
-              background: '#fafafa',
-              padding: 8,
-              borderRadius: 4,
+              minHeight: 40,
+              background: token.colorFillAlter,
+              border: `1px solid ${token.colorBorderSecondary}`,
+              padding: '6px 8px',
+              borderRadius: token.borderRadiusSM,
             }}
           >
             {selected.length === 0 ? (
-              <Text type="secondary">{intl.formatMessage({ id: 'perf.picker.noSelectedMetric' })}</Text>
+              <Text type="secondary" style={{ lineHeight: '28px' }}>
+                {intl.formatMessage({ id: 'perf.picker.noSelectedMetric' })}
+              </Text>
+            ) : selected.length <= 10 ? (
+              // ≤10 个：逐个展示可删除 tag
+              <div style={{ lineHeight: '28px' }}>
+                {selected.map((path) => {
+                  const label = labelMap[path] ?? path;
+                  return (
+                    <Tag
+                      key={path}
+                      closable
+                      onClose={() => setSelected(selected.filter((p) => p !== path))}
+                      style={{
+                        marginBottom: 4,
+                        maxWidth: 200,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        display: 'inline-block',
+                        verticalAlign: 'middle',
+                      }}
+                    >
+                      <Tooltip title={label.length > 10 ? label : undefined}>
+                        {label}
+                      </Tooltip>
+                    </Tag>
+                  );
+                })}
+              </div>
             ) : (
-              selected.map((path) => (
+              // >10 个：折叠为一个 tag，hover 展示全部名称
+              <Tooltip
+                title={
+                  <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+                    {selected.map((path, i) => (
+                      <div key={path}>{i + 1}. {labelMap[path] ?? path}</div>
+                    ))}
+                  </div>
+                }
+                overlayStyle={{ maxWidth: 320 }}
+              >
                 <Tag
-                  key={path}
-                  closable
-                  onClose={() => setSelected(selected.filter((p) => p !== path))}
-                  style={{ marginBottom: 4 }}
+                  style={{ cursor: 'default', marginBottom: 4, fontSize: 13, padding: '2px 10px' }}
+                  color="blue"
                 >
-                  {labelMap[path] ?? path}
+                  {intl.formatMessage({ id: 'perf.picker.metricTitle' }, { count: selected.length })}
+                  {' '}···
                 </Tag>
-              ))
+              </Tooltip>
             )}
           </div>
         </div>

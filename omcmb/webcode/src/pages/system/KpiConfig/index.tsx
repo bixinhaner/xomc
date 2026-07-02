@@ -39,6 +39,8 @@ import { useT } from '@/hooks/useT';
 import MetricPickerModal from '@/components/MetricPickerModal';
 import type { DeviceType } from '@core/types/indicatorLibrary';
 import { useKPILayout, useSaveKPILayout } from '@core/hooks/api/useDashboard';
+import { useAllIndicators } from '@core/hooks/api/useIndicatorsLibrary';
+import { useAppStore } from '@core/store/appStore';
 import {
   validateKpiPanels,
   formatKpiPanelViolations,
@@ -97,6 +99,19 @@ function TechEditor({ tech }: { tech: TechnologyType }) {
   // 编号 → 友好名映射：弹窗确认时累积，仅供编辑期摘要标签显示，不持久化（面板存的是编号）。
   const [metricLabels, setMetricLabels] = useState<Record<string, string>>({});
 
+  // 从指标库取当前制式全量指标，构建「编号 → 显示名」映射，用于页面加载时直接显示名称而非原始编号。
+  const isEn = useAppStore((s) => s.locale) === 'en-US';
+  const { data: allIndicatorsData } = useAllIndicators(TECH_TO_DEVICE_TYPE[tech]);
+  const indicatorNameMap = useMemo<Record<string, string>>(() => {
+    const map: Record<string, string> = {};
+    for (const item of allIndicatorsData?.items ?? []) {
+      map[item.id] = isEn
+        ? (item.enName || item.cnName || item.id)
+        : (item.cnName || item.enName || item.id);
+    }
+    return map;
+  }, [allIndicatorsData, isEn]);
+
   useEffect(() => {
     if (layoutLoading || initialized) return;
     const resolved = resolveLayout(tech, remoteLayout);
@@ -123,8 +138,11 @@ function TechEditor({ tech }: { tech: TechnologyType }) {
     const savePanels = toSavePanels(panels);
     // 保存前校验：每张图必须「标题非空 + 至少 1 指标」，否则拦截不发 PUT，弹明确提示。
     // 默认图标题是 i18n key（非空），管理员清空后才为空串——按当前 tab 译文判定可见标题是否真空。
+    // panel.title 有两种形态：i18n key（"dashboard.panel.traffic"）或用户手填纯文本（"test eNB 1"）。
+    // 只对 i18n key 走 t()，否则直接用原文本；避免把纯文本传入 t() 触发 MissingTranslationError。
+    const resolveTitle = (title: string) => title.startsWith('dashboard.') ? t(title) : title;
     const result = validateKpiPanels(
-      savePanels.map((p) => ({ title: t(p.title), metrics: p.metrics })),
+      savePanels.map((p) => ({ title: resolveTitle(p.title), metrics: p.metrics })),
     );
     if (!result.valid) {
       message.error(formatKpiPanelViolations(result.violations));
@@ -185,9 +203,10 @@ function TechEditor({ tech }: { tech: TechnologyType }) {
                     <Input
                       size="small"
                       placeholder={t('dashboard.kpiConfig.titlePlaceholder')}
-                      // 默认图的 title 是 i18n key（如 dashboard.panel.traffic），显示译文「流量」而非代号；
-                      // 不编辑则 panel.title 仍是 key（存盘保持双语），一旦编辑即变成管理员输入的纯文本。
-                      value={t(panel.title)}
+                      // panel.title 有两种形态：
+                      //   - i18n key（如 "dashboard.panel.traffic"）→ 走 t() 得译文「流量」
+                      //   - 用户手填纯文本（如 "test eNB 1"）→ 直接显示，不走 t()，避免 MissingTranslationError
+                      value={panel.title.startsWith('dashboard.') ? t(panel.title) : panel.title}
                       onMouseDown={(e) => e.stopPropagation()}
                       onChange={(e) =>
                         setPanels((prev) => updatePanelTitle(prev, panel.id, e.target.value))
@@ -220,30 +239,65 @@ function TechEditor({ tech }: { tech: TechnologyType }) {
                         ? `（${t('dashboard.kpiConfig.metricsCount', { count: panel.metrics.length })}）`
                         : ''}
                     </Button>
-                    <div style={{ maxHeight: 64, overflowY: 'auto' }}>
-                      {panel.metrics.length === 0 ? (
-                        <Text type="secondary">{t('dashboard.kpiConfig.noMetrics')}</Text>
-                      ) : (
-                        panel.metrics.map((code) => (
-                          <Tag
-                            key={code}
-                            closable
-                            onClose={() =>
-                              setPanels((prev) =>
-                                updatePanelMetrics(
-                                  prev,
-                                  panel.id,
-                                  panel.metrics.filter((m) => m !== code),
-                                ),
-                              )
-                            }
-                            style={{ marginBottom: 4 }}
-                          >
-                            {metricLabels[code] ?? code}
-                          </Tag>
-                        ))
-                      )}
-                    </div>
+                    {/* card 内指标标签：≤10 个逐个显示可删除 tag；>10 个折叠为一个占位 tag，
+                        hover Tooltip 展示全部名称列表。 */}
+                    {panel.metrics.length === 0 ? (
+                      <Text type="secondary">{t('dashboard.kpiConfig.noMetrics')}</Text>
+                    ) : panel.metrics.length <= 10 ? (
+                      <div style={{ lineHeight: '24px' }}>
+                        {panel.metrics.map((code) => {
+                          const label = metricLabels[code] ?? indicatorNameMap[code] ?? code;
+                          return (
+                            <Tooltip key={code} title={label.length > 8 ? label : undefined} mouseEnterDelay={0.5}>
+                              <Tag
+                                closable
+                                onClose={() =>
+                                  setPanels((prev) =>
+                                    updatePanelMetrics(
+                                      prev,
+                                      panel.id,
+                                      panel.metrics.filter((m) => m !== code),
+                                    ),
+                                  )
+                                }
+                                style={{
+                                  marginBottom: 4,
+                                  maxWidth: 160,
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                  display: 'inline-block',
+                                  verticalAlign: 'middle',
+                                }}
+                              >
+                                {label}
+                              </Tag>
+                            </Tooltip>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      // >10 个：折叠为单个 tag，hover 展示全部名称
+                      <Tooltip
+                        title={
+                          <div style={{ maxHeight: 260, overflowY: 'auto' }}>
+                            {panel.metrics.map((code, i) => (
+                              <div key={code}>
+                                {i + 1}. {metricLabels[code] ?? indicatorNameMap[code] ?? code}
+                              </div>
+                            ))}
+                          </div>
+                        }
+                        overlayStyle={{ maxWidth: 300 }}
+                      >
+                        <Tag
+                          color="blue"
+                          style={{ cursor: 'default', fontSize: 13, padding: '2px 10px' }}
+                        >
+                          {t('dashboard.kpiConfig.metricsCount', { count: panel.metrics.length })} ···
+                        </Tag>
+                      </Tooltip>
+                    )}
                   </Space>
                 </div>
               </Card>
@@ -267,6 +321,7 @@ function TechEditor({ tech }: { tech: TechnologyType }) {
           }
         }}
         initialSelected={pickerPanel?.metrics ?? []}
+        initialLabels={indicatorNameMap}
         initialDeviceType={TECH_TO_DEVICE_TYPE[tech]}
         lockDeviceType
       />
