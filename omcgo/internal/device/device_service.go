@@ -32,6 +32,11 @@ import (
 // （provision 依赖 device，device 不能反过来依赖 provision）。
 type SysConfigLookup func(ctx context.Context, category, key string) (value string, found bool)
 
+// RenameDeviceResult describes side effects produced by RenameDevice.
+type RenameDeviceResult struct {
+	TaskID string
+}
+
 // GroupAssigner assigns a device to a group.
 type GroupAssigner interface {
 	BatchAddDevices(ctx context.Context, groupID uuid.UUID, deviceIDs []uuid.UUID) (int64, error)
@@ -62,7 +67,7 @@ type DeviceService struct {
 	productMatcher    ProductClassMatcher      // Phase 6 ModelName 回填（nil = 禁用）
 	productBinder     ProductBinder            // T-0176-PR-D：CreateDevice inline match 后写回 product_id（nil = 禁用）
 	groupReader       DeviceGroupReader        // 越权校验：读设备组归属（nil = 退化为不校验，见 AuthorizeDeviceGroupAccess）
-	sysConfigLookup  SysConfigLookup          // 读系统配置（nameSyncMode 等）
+	sysConfigLookup   SysConfigLookup          // 读系统配置（nameSyncMode 等）
 	logger            *zap.Logger
 }
 
@@ -2337,16 +2342,17 @@ func (s *DeviceService) loadNameSyncMode(ctx context.Context) string {
 //   - prompt          → 双写网管库 + 置 pending=true（lmtName 取旧值原样回写）
 //
 // 下发失败不回滚网管库（与现有人工下发语义一致）。
-func (s *DeviceService) RenameDevice(ctx context.Context, id uuid.UUID, newName string) error {
+func (s *DeviceService) RenameDevice(ctx context.Context, id uuid.UUID, newName string, creatorID string) (*RenameDeviceResult, error) {
 	if strings.TrimSpace(newName) == "" {
-		return fmt.Errorf("%w: name cannot be empty", commonerrors.ErrInvalidInput)
+		return nil, fmt.Errorf("%w: name cannot be empty", commonerrors.ErrInvalidInput)
 	}
 
+	result := &RenameDeviceResult{}
 	mode := s.loadNameSyncMode(ctx)
 
 	// 1. auto_lmt_to_omc → 直接拒绝
 	if mode == "auto_lmt_to_omc" {
-		return commonerrors.NewBusinessError(
+		return nil, commonerrors.NewBusinessError(
 			global.ErrCodeDeviceRenameNotAllowed,
 			"当前命名策略以基站为准，请在 LMT 侧修改名称",
 			commonerrors.ErrForbidden,
@@ -2356,24 +2362,24 @@ func (s *DeviceService) RenameDevice(ctx context.Context, id uuid.UUID, newName 
 	// 2. 读设备（需要 SN 做缓存清理和 SPV 下发）
 	dev, err := s.deviceRepo.GetByID(ctx, id)
 	if err != nil {
-		return fmt.Errorf("get device: %w", err)
+		return nil, fmt.Errorf("get device: %w", err)
 	}
 	if dev == nil {
-		return commonerrors.ErrNotFound
+		return nil, commonerrors.ErrNotFound
 	}
 
 	// 3. 读 device_info（prompt 模式下需要 lmt_device_name 旧值防止污染缓存）
 	info, err := s.deviceInfoRepo.GetByDeviceID(ctx, id)
 	if err != nil {
-		return fmt.Errorf("get device info: %w", err)
+		return nil, fmt.Errorf("get device info: %w", err)
 	}
 	if info == nil {
-		return commonerrors.ErrNotFound
+		return nil, commonerrors.ErrNotFound
 	}
 
 	// 4. 双写：device_info.device_name（详情口径）+ devices.site_name（列表口径）
 	if err := s.deviceInfoRepo.UpdateDeviceName(ctx, id, newName); err != nil {
-		return fmt.Errorf("update device_info.device_name: %w", err)
+		return nil, fmt.Errorf("update device_info.device_name: %w", err)
 	}
 	if err := s.deviceRepo.UpdateSiteName(ctx, id, newName); err != nil {
 		// 列表名更新失败降级警告，不全量回滚（详情页已更新）
@@ -2407,18 +2413,22 @@ func (s *DeviceService) RenameDevice(ctx context.Context, id uuid.UUID, newName 
 				"parameter_key": fmt.Sprintf("rename-%d", time.Now().Unix()),
 			})
 			if merr == nil {
-				if _, derr := s.taskSvc.CreateTask(ctx, &task.CreateTaskRequest{
+				createdTask, derr := s.taskSvc.CreateTask(ctx, &task.CreateTaskRequest{
 					DeviceSN:   dev.SerialNumber,
 					Method:     "SetParameterValues",
 					Params:     paramsJSON,
 					Priority:   5,
 					CommandKey: fmt.Sprintf("rename-%s", uuid.New().String()[:8]),
 					Source:     task.TaskSourceAPI,
-				}); derr != nil {
+					CreatorID:  creatorID, // T-0157 C5: 让 rename 下发任务进入消息中心
+				})
+				if derr != nil {
 					// 下发失败不回滚网管库，仅 Warn
 					s.logger.Warn("rename: SPV dispatch failed (network name already updated)",
 						zap.String("device_id", id.String()),
 						zap.Error(derr))
+				} else if createdTask != nil {
+					result.TaskID = createdTask.ID
 				}
 			}
 		}
@@ -2432,7 +2442,7 @@ func (s *DeviceService) RenameDevice(ctx context.Context, id uuid.UUID, newName 
 	case "prompt":
 		// 不下发，置 pending=true；lmtName 必须传当前数据库旧值，不能传新名或空
 		if perr := s.deviceInfoRepo.UpdateNameSyncFields(ctx, id, true, lmtName); perr != nil {
-			return fmt.Errorf("rename: set name_sync_pending: %w", perr)
+			return nil, fmt.Errorf("rename: set name_sync_pending: %w", perr)
 		}
 	}
 
@@ -2440,5 +2450,5 @@ func (s *DeviceService) RenameDevice(ctx context.Context, id uuid.UUID, newName 
 		zap.String("device_id", id.String()),
 		zap.String("new_name", newName),
 		zap.String("mode", mode))
-	return nil
+	return result, nil
 }
