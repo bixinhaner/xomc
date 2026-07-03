@@ -427,7 +427,7 @@ export default function PmAdhocWizard() {
             </Space>
           </Radio.Group>
         </div>
-        <Alert type="info" showIcon message={dimHint} />
+        <Alert type="info" showIcon title={dimHint} />
         {needsDevicePick ? (
           <div>
             <div style={{ marginBottom: 8, fontWeight: 500 }}>
@@ -477,7 +477,7 @@ export default function PmAdhocWizard() {
           <Alert
             type="success"
             showIcon
-            message={intl.formatMessage({ id: 'perf.adhoc.scopeAutoMessage' })}
+            title={intl.formatMessage({ id: 'perf.adhoc.scopeAutoMessage' })}
             description={intl.formatMessage({ id: 'perf.adhoc.scopeAutoDesc' })}
           />
         )}
@@ -503,7 +503,7 @@ export default function PmAdhocWizard() {
       <Alert
         type="info"
         showIcon
-        message={intl.formatMessage(
+        title={intl.formatMessage(
           { id: 'perf.adhoc.metricHint' },
           { tech: technology.toUpperCase(), deviceType },
         )}
@@ -587,7 +587,7 @@ export default function PmAdhocWizard() {
         <Alert
           type="info"
           showIcon
-          message={intl.formatMessage({ id: 'perf.adhoc.continuousNoRange' })}
+          title={intl.formatMessage({ id: 'perf.adhoc.continuousNoRange' })}
           description={intl.formatMessage({ id: 'perf.adhoc.continuousNoRangeDesc' })}
         />
       )}

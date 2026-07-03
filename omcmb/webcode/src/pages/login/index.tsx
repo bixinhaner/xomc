@@ -207,7 +207,7 @@ export default function LoginPage() {
         content: t('login.mustChangePassword.content'),
         okText: t('login.mustChangePassword.confirm'),
         closable: false,
-        maskClosable: false,
+        mask: { closable: false },
         keyboard: false,
         onOk: () => navigate(from, { replace: true }),
       });

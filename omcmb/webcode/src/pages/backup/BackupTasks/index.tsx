@@ -1347,13 +1347,13 @@ export default function BackupTasks() {
         okButtonProps={{ disabled: selectedNewDevices.length === 0 }}
       >
         {availableDevices.length === 0 ? (
-          <Alert type="info" showIcon message={t('backup.noDeviceToAdd')} />
+          <Alert type="info" showIcon title={t('backup.noDeviceToAdd')} />
         ) : (
           <>
             <Alert
               type="info"
               showIcon
-              message={t('backup.availableDeviceCount', { total: availableDevices.length, selected: selectedNewDevices.length })}
+              title={t('backup.availableDeviceCount', { total: availableDevices.length, selected: selectedNewDevices.length })}
               style={{ marginBottom: 16 }}
             />
             <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
@@ -1433,7 +1433,7 @@ export default function BackupTasks() {
           <Alert
             type="success"
             showIcon
-            message={t('backup.matchedDeviceCount', { matched: batchInputPreview.matched.length })}
+            title={t('backup.matchedDeviceCount', { matched: batchInputPreview.matched.length })}
             style={{ marginBottom: 8 }}
           />
         )}
@@ -1442,7 +1442,7 @@ export default function BackupTasks() {
           <Alert
             type="warning"
             showIcon
-            message={
+            title={
               <div>
                 <div>{t('backup.notFoundSnCount', { count: batchInputPreview.notFound.length })}</div>
                 <div style={{ maxHeight: 80, overflow: 'auto', marginTop: 4 }}>

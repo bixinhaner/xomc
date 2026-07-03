@@ -411,7 +411,7 @@ export default function AlarmSync() {
         okText={t('common.execute')}
         okButtonProps={{ loading: submitting }}
         cancelButtonProps={{ disabled: submitting }}
-        maskClosable={!submitting}
+        mask={{ closable: !submitting }}
         width={420}
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 16 }}>

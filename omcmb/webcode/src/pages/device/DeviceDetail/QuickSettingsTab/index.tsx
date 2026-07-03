@@ -476,7 +476,7 @@ export default function QuickSettingsTab({ deviceId, networkType, active = true,
   if (error) {
     return (
       <div style={{ padding: 16 }}>
-        <Alert type="error" message={t('device.quickSettings.loadGroupsFailed')} description={String(error)} />
+        <Alert type="error" title={t('device.quickSettings.loadGroupsFailed')} description={String(error)} />
       </div>
     );
   }
