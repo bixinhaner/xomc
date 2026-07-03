@@ -826,7 +826,13 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
     return map;
   }, [group.params, instanceIds, objectPath, schemaByPath, schemaResp?.parameters]);
 
-  const groupParamLeafSet = useMemo(() => new Set(group.params.map((param) => param.leaf).filter(Boolean)), [group.params]);
+  const groupParamLeafSet = useMemo(() => {
+    const leaves = new Set<string>();
+    for (const param of group.params) {
+      if (param.leaf) leaves.add(param.leaf);
+    }
+    return leaves;
+  }, [group.params]);
 
   const leafSchemaByLeaf = useMemo(() => {
     const map = new Map<string, ParameterSchemaItem>();
@@ -1218,11 +1224,11 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
       if (!leaf || !groupParamLeafSet.has(leaf) || column.readOnly) continue;
 
       const rawValue = editModal.values[leaf] ?? '';
+      const item = schemaByPath.get(`${objectPath}${targetInstanceId}.${leaf}`) ?? leafSchemaByLeaf.get(leaf);
       const value = isIpsecGroup && leaf === IPSEC_ENABLE_LEAF
         ? toDeviceIpsecEnableValue(rawValue)
         : rawValue;
       const path = `${objectPath}${targetInstanceId}.${leaf}`;
-      const item = schemaByPath.get(path) ?? leafSchemaByLeaf.get(leaf);
       const err = validateValue(value, (item?.type as never) ?? 'string', item?.constraints);
       if (err) {
         errors[leaf] = err;
@@ -1477,7 +1483,7 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
               && groupParamLeafSet.has(leaf)
               && !column.readOnly
               && canEditByToggle
-              && (editModal.mode === 'add' ? true : (item?.writable ?? true));
+              && (editModal.mode === 'add' ? true : ((item?.writable ?? true)));
             const enumMeta = getEffectiveEnumMeta(item?.constraints, item?.path);
             const effectiveEnumOptions = isIpsecToggleField
               ? {

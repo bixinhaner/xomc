@@ -3,6 +3,7 @@ package stationlog
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"time"
 
 	"github.com/google/uuid"
@@ -22,6 +23,13 @@ type DeviceLookup interface {
 	GetBySerialNumber(ctx context.Context, sn string) (*model.Device, error)
 }
 
+// minioObjectClient 是 Service 需要的 MinIO 客户端子集（便于单测注入 fake，避免真连接对象
+// 存储 / 空指针崩溃）。*minio.Client 满足该接口。
+type minioObjectClient interface {
+	RemoveObject(ctx context.Context, bucketName, objectName string, opts minio.RemoveObjectOptions) error
+	PresignedGetObject(ctx context.Context, bucketName, objectName string, expires time.Duration, reqParams url.Values) (*url.URL, error)
+}
+
 // Service 基站日志采集服务，负责：
 //  1. 订阅 SubjectLogFileReceived 事件，按日志类型写入对应表
 //  2. 故障日志配额管理（全局最多 FaultLogMaxCount 条，超出删除最旧文件）
@@ -33,7 +41,7 @@ type Service struct {
 	runningRepo  Repository
 	faultRepo    Repository
 	deviceLookup DeviceLookup
-	minioClient  *minio.Client
+	minioClient  minioObjectClient
 	buckets      appconfig.BucketConfig
 	logger       *zap.Logger
 	// groupReader 是 #63 设备组可见性强制层的按设备归属读取器；GetByID/DownloadURL/
@@ -182,7 +190,7 @@ func (s *Service) HandleLogFileReceived(ctx context.Context, evt event.Event) er
 					zap.String("device_sn", p.DeviceSN),
 					zap.String("path", p.ObjectPath),
 				)
-				if err := s.enforceFaultLogQuota(ctx); err != nil {
+				if err := s.enforceFaultLogQuota(ctx, detected.DeviceID); err != nil {
 					s.logger.Warn("enforce fault log quota", zap.Error(err))
 				}
 				return nil
@@ -215,7 +223,7 @@ func (s *Service) HandleLogFileReceived(ctx context.Context, evt event.Event) er
 
 	// 故障日志：执行全局配额管理
 	if logType == LogTypeFault {
-		if err := s.enforceFaultLogQuota(ctx); err != nil {
+		if err := s.enforceFaultLogQuota(ctx, deviceID); err != nil {
 			// 配额清理失败不影响主流程，只记录警告
 			s.logger.Warn("enforce fault log quota", zap.Error(err))
 		}
@@ -224,21 +232,40 @@ func (s *Service) HandleLogFileReceived(ctx context.Context, evt event.Event) er
 	return nil
 }
 
-// enforceFaultLogQuota 确保 station_fault_logs 表中未删除记录不超过文件数配额。
-// 超出时从最早的文件开始清理（MinIO 删除 + 标记 is_deleted=true）。
+// enforceFaultLogQuota 确保 station_fault_logs 表中未删除记录不超过文件数配额，并额外确保
+// deviceID（若非空）对应设备自己的记录不超过每设备配额（#798）。超出时从最早的文件开始清理
+// （MinIO 删除 + 标记 is_deleted=true）。
 //
-// #320：配额值改为可配（sys_configs stationlog.retention.max_file_count，默认 20）。
+// #320：全局配额值改为可配（sys_configs stationlog.retention.max_file_count，默认 20）。
 // maxCount<=0 表示禁用文件数配额（仅靠按时间保留 cron 治理）。本配额与时间保留并存：
 // 配额管短时洪泛，时间保留管长期留存。
-func (s *Service) enforceFaultLogQuota(ctx context.Context) error {
+//
+// #798：每设备配额（sys_configs stationlog.retention.max_file_count_per_device，默认 5）与
+// 全局配额并存、互不替代——全局兜底总量失控，设备维度防止单台设备刷屏挤占其他设备的保留空间。
+// deviceID 为 nil（无法关联设备的历史兼容路径）时跳过设备维度检查。
+func (s *Service) enforceFaultLogQuota(ctx context.Context, deviceID *uuid.UUID) error {
 	maxCount := FaultLogMaxCount
+	maxPerDevice := DefaultMaxFileCountPerDevice
 	if s.retentionPolicy != nil {
 		maxCount = s.retentionPolicy.MaxFileCount(ctx)
-	}
-	if maxCount <= 0 {
-		return nil // 配额禁用：仅按时间保留
+		maxPerDevice = s.retentionPolicy.MaxFileCountPerDevice(ctx)
 	}
 
+	if maxCount > 0 {
+		if err := s.enforceGlobalFaultLogQuota(ctx, maxCount); err != nil {
+			return err
+		}
+	}
+
+	if deviceID != nil && maxPerDevice > 0 {
+		if err := s.enforcePerDeviceFaultLogQuota(ctx, *deviceID, maxPerDevice); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Service) enforceGlobalFaultLogQuota(ctx context.Context, maxCount int) error {
 	count, err := s.faultRepo.Count(ctx)
 	if err != nil {
 		return fmt.Errorf("count fault logs: %w", err)
@@ -252,7 +279,30 @@ func (s *Service) enforceFaultLogQuota(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("list oldest fault logs: %w", err)
 	}
+	s.removeOldestFaultLogs(ctx, oldest)
+	return nil
+}
 
+func (s *Service) enforcePerDeviceFaultLogQuota(ctx context.Context, deviceID uuid.UUID, maxPerDevice int) error {
+	count, err := s.faultRepo.CountByDevice(ctx, deviceID)
+	if err != nil {
+		return fmt.Errorf("count fault logs by device: %w", err)
+	}
+	if count <= int64(maxPerDevice) {
+		return nil
+	}
+
+	excess := int(count - int64(maxPerDevice))
+	oldest, err := s.faultRepo.ListOldestByDevice(ctx, deviceID, excess)
+	if err != nil {
+		return fmt.Errorf("list oldest fault logs by device: %w", err)
+	}
+	s.removeOldestFaultLogs(ctx, oldest)
+	return nil
+}
+
+// removeOldestFaultLogs 逐条删除 MinIO 对象并软删 PG 行，供全局/设备两种配额清理复用。
+func (s *Service) removeOldestFaultLogs(ctx context.Context, oldest []*LogFile) {
 	for _, old := range oldest {
 		if removeErr := s.minioClient.RemoveObject(ctx, old.Bucket, old.ObjectPath, minio.RemoveObjectOptions{}); removeErr != nil {
 			s.logger.Warn("remove fault log from minio",
@@ -274,7 +324,6 @@ func (s *Service) enforceFaultLogQuota(ctx context.Context) error {
 			)
 		}
 	}
-	return nil
 }
 
 // List 查询日志文件列表。filter.LogType 决定查哪张表（默认运行日志）。

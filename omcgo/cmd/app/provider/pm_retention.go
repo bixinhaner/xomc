@@ -9,17 +9,15 @@ import (
 	"github.com/omcgo/omcgo/internal/pm/retention"
 )
 
-// T-0164-P2 / G2 PM 保留策略 wiring。
+// T-0164-P2 / G2 + #825 PM 保留策略 wiring。
 //
 // 装配链：
 //   1. admin.PgSysConfigRepository（已有，复用）
 //   2. adminSysConfigReader adapter（本文件，把 admin.SysConfigRepository 适配为 retention.SysConfigReader 窄接口）
 //   3. retention.NewService(reader, logger) → c.PMRetentionSvc
-//   4. Reload(ctx) 预热缓存
-//   5. c.SysConfigSvc.RegisterSavedHook(svc.OnSysConfigSaved) 挂监听（chenbo01 已留 API）
-//
-// G3/G5 实施时通过 c.PMRetentionSvc.RegisterListener(...) 挂 alter_compression_policy /
-// alter_retention_policy 触发器（避免本包硬依赖 TimescaleDB / pgx）。
+//   4. retention.NewPMRetentionApplier(c.TsPool, logger) 注册 listener，驱动 TimescaleDB retention policy 更新
+//   5. Reload(ctx) 预热缓存（首次 Reload changed 包含全部键，ApplyAll 自动触发一次对齐）
+//   6. c.SysConfigSvc.RegisterSavedHook(svc.OnSysConfigSaved) 挂热重载监听
 
 // adminSysConfigReader 实现 retention.SysConfigReader 窄接口，
 // 包裹 admin.SysConfigRepository 避免 retention 包反向依赖 admin。
@@ -45,7 +43,14 @@ func initPMRetentionModule(c *Container) error {
 
 	svc := retention.NewService(reader, logger)
 
-	// 启动期预热缓存。缺失走默认（DefaultDays），不阻塞启动。
+	// 注册 PMRetentionApplier listener：UI 保存或进程启动时驱动 TimescaleDB retention policy 更新。
+	// hypertable 只有 pm_metrics / pm_metrics_hourly / pm_group_metrics_hourly（#825）；
+	// daily/weekly/monthly 为普通表，由 cleanup_runner cron 按天数清理，不经此 applier。
+	applier := retention.NewPMRetentionApplier(c.TsPool, logger)
+	svc.RegisterListener(applier.ApplyAll)
+
+	// 启动期预热缓存。首次 Reload 时 cache 从空→有值，changed 包含全部 5 键，
+	// ApplyAll 自动被触发，对齐 TimescaleDB policy 与 sys_configs，无需额外调用。
 	ctx := context.Background()
 	if err := svc.Reload(ctx); err != nil {
 		logger.Warn("retention initial Reload failed (using defaults)", zap.Error(err))

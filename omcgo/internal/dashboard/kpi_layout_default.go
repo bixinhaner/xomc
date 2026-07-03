@@ -11,21 +11,21 @@ import "encoding/json"
 // defaultLayoutJSON 是三制式默认布局体（与 seed 000002 等价）。
 var defaultLayoutJSON = map[string]string{
 	techLTE: `{"panels":[
-		{"title":"dashboard.panel.traffic","metrics":["LTE_PDCP_VOLUME_DL","LTE_PDCP_VOLUME_UL","LTE_PDCP_RATE_DL","LTE_PDCP_RATE_UL"],"x":0,"y":0,"w":6,"h":8,"chartType":"line"},
-		{"title":"dashboard.panel.availability","metrics":["LTE_CELL_AVAILABLE"],"x":6,"y":0,"w":6,"h":8,"chartType":"line"},
-		{"title":"dashboard.panel.utilization","metrics":["LTE_PRB_UTIL_DL","LTE_PRB_UTIL_UL"],"x":0,"y":8,"w":6,"h":8,"chartType":"line"},
-		{"title":"dashboard.panel.accessibility","metrics":["WIRELESS_SETUP_SR","RRC_CONN_SETUP_SR","ERAB_SETUP_SR","CSFB_SR"],"x":6,"y":8,"w":6,"h":8,"chartType":"line"},
-		{"title":"dashboard.panel.retainability","metrics":["ERAB_DROP_RATE"],"x":0,"y":16,"w":6,"h":8,"chartType":"line"},
-		{"title":"dashboard.panel.mobility","metrics":["HO_INTRA_ENB_OUT_SR","HO_INTRA_ENB_IN_SR","HO_INTER_ENB_OUT_SR","HO_INTER_ENB_IN_SR"],"x":6,"y":16,"w":6,"h":8,"chartType":"line"}
+		{"title":"dashboard.panel.traffic","metrics":["K900010015","K900010016","K900010040","K900010041"],"x":0,"y":0,"w":6,"h":8,"chartType":"line"},
+		{"title":"dashboard.panel.availability","metrics":["K900010076"],"x":6,"y":0,"w":6,"h":8,"chartType":"line"},
+		{"title":"dashboard.panel.utilization","metrics":["K900010014","K900010013"],"x":0,"y":8,"w":6,"h":8,"chartType":"line"},
+		{"title":"dashboard.panel.accessibility","metrics":["K900010006","K900010002","K900010005","K900010029"],"x":6,"y":8,"w":6,"h":8,"chartType":"line"},
+		{"title":"dashboard.panel.retainability","metrics":["K900010027"],"x":0,"y":16,"w":6,"h":8,"chartType":"line"},
+		{"title":"dashboard.panel.mobility","metrics":["K900010017","K900010022","K900010021","K900010026"],"x":6,"y":16,"w":6,"h":8,"chartType":"line"}
 	]}`,
 	techNR: `{"panels":[
-		{"title":"dashboard.panel.traffic","metrics":["NR_PDCP_VOLUME_DL","NR_PDCP_VOLUME_UL","NR_PDCP_RATE_DL","NR_PDCP_RATE_UL"],"x":0,"y":0,"w":6,"h":8,"chartType":"line"},
-		{"title":"dashboard.panel.utilization","metrics":["NR_PRB_UTIL_DL","NR_PRB_UTIL_UL"],"x":6,"y":0,"w":6,"h":8,"chartType":"line"}
+		{"title":"dashboard.panel.traffic","metrics":["KGNB0511","KGNB0510","KGNB0517","KGNB0516"],"x":0,"y":0,"w":6,"h":8,"chartType":"line"},
+		{"title":"dashboard.panel.utilization","metrics":["KGNB0506","KGNB0505"],"x":6,"y":0,"w":6,"h":8,"chartType":"line"}
 	]}`,
 	techGSM: `{"panels":[
-		{"title":"dashboard.panel.accessibility","metrics":["GSM_CALL_SETUP_SR"],"x":0,"y":0,"w":6,"h":8,"chartType":"line"},
-		{"title":"dashboard.panel.retainability","metrics":["GSM_CALL_DROP_RATE"],"x":6,"y":0,"w":6,"h":8,"chartType":"line"},
-		{"title":"dashboard.panel.mobility","metrics":["GSM_HO_SR"],"x":0,"y":8,"w":12,"h":8,"chartType":"line"}
+		{"title":"dashboard.panel.accessibility","metrics":["KGSM0102"],"x":0,"y":0,"w":6,"h":8,"chartType":"line"},
+		{"title":"dashboard.panel.retainability","metrics":["KGSM0103"],"x":6,"y":0,"w":6,"h":8,"chartType":"line"},
+		{"title":"dashboard.panel.mobility","metrics":["KGSM0101"],"x":0,"y":8,"w":12,"h":8,"chartType":"line"}
 	]}`,
 }
 

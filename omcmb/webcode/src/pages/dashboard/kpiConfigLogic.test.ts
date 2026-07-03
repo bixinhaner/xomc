@@ -27,20 +27,20 @@ const DEFINITIONS: KPITechDefinitions[] = [
   {
     tech: 'lte',
     items: [
-      { key: 'LTE_PDCP_VOLUME_DL', k_code: 'K1', cn_name: '下行流量', unit: 'MByte', panel: 'traffic', needs_review: false, available: true },
-      { key: 'LTE_CELL_AVAILABLE', k_code: '', cn_name: '小区可用率', unit: '%', panel: 'availability', needs_review: true, available: false },
+      { key: 'K900010015', k_code: 'K900010015', cn_name: '下行流量', unit: 'MByte', panel: 'traffic', needs_review: false, available: true },
+      { key: 'K900010076', k_code: 'K900010076', cn_name: '小区可用率', unit: '%', panel: 'availability', needs_review: false, available: true },
     ],
   },
   {
     tech: 'nr',
     items: [
-      { key: 'NR_PDCP_VOLUME_DL', k_code: 'KGNB1', cn_name: 'NR下行流量', unit: 'MByte', panel: 'traffic', needs_review: false, available: true },
+      { key: 'KGNB0511', k_code: 'KGNB0511', cn_name: 'NR下行流量', unit: 'MByte', panel: 'traffic', needs_review: false, available: true },
     ],
   },
   {
     tech: 'gsm',
     items: [
-      { key: 'GSM_CALL_SETUP_SR', k_code: 'KGSM1', cn_name: '电话成功率', unit: '%', panel: 'accessibility', needs_review: false, available: true },
+      { key: 'KGSM0102', k_code: 'KGSM0102', cn_name: '电话成功率', unit: '%', panel: 'accessibility', needs_review: false, available: true },
     ],
   },
 ];
@@ -62,14 +62,14 @@ describe('definitionsForTech — 按制式过滤指标库', () => {
   it('LTE tab 只返回 4G/ENB 指标，不混入 NR/GSM', () => {
     const items = definitionsForTech(DEFINITIONS, 'lte');
     const keys = items.map((i) => i.key);
-    expect(keys).toEqual(['LTE_PDCP_VOLUME_DL', 'LTE_CELL_AVAILABLE']);
-    expect(keys.some((k) => k.startsWith('NR_'))).toBe(false);
-    expect(keys.some((k) => k.startsWith('GSM_'))).toBe(false);
+    expect(keys).toEqual(['K900010015', 'K900010076']);
+    expect(keys.some((k) => k.startsWith('KGNB'))).toBe(false);
+    expect(keys.some((k) => k.startsWith('KGSM'))).toBe(false);
   });
 
   it('NR / GSM tab 各只返回自己制式指标', () => {
-    expect(definitionsForTech(DEFINITIONS, 'nr').map((i) => i.key)).toEqual(['NR_PDCP_VOLUME_DL']);
-    expect(definitionsForTech(DEFINITIONS, 'gsm').map((i) => i.key)).toEqual(['GSM_CALL_SETUP_SR']);
+    expect(definitionsForTech(DEFINITIONS, 'nr').map((i) => i.key)).toEqual(['KGNB0511']);
+    expect(definitionsForTech(DEFINITIONS, 'gsm').map((i) => i.key)).toEqual(['KGSM0102']);
   });
 
   it('技术分组缺失 / 未加载 → 返回空数组（失败路径）', () => {
@@ -82,8 +82,8 @@ describe('toMetricOptions — 选项与置灰', () => {
   it('不可用（available=false）的指标置灰 disabled，可用项不置灰', () => {
     const opts = toMetricOptions(definitionsForTech(DEFINITIONS, 'lte'));
     expect(opts).toEqual([
-      { value: 'LTE_PDCP_VOLUME_DL', label: '下行流量', unit: 'MByte', disabled: false },
-      { value: 'LTE_CELL_AVAILABLE', label: '小区可用率', unit: '%', disabled: true },
+      { value: 'K900010015', label: '下行流量', unit: 'MByte', disabled: false },
+      { value: 'K900010076', label: '小区可用率', unit: '%', disabled: false },
     ]);
   });
 

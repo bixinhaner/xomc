@@ -1,15 +1,17 @@
-import React, { useCallback, useMemo, useState } from 'react';
-import { App, Button, Card, Tag } from 'antd';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { App, Button, Card, Space, Tag } from 'antd';
 import {
   DeleteOutlined,
   ExportOutlined,
   ImportOutlined,
+  ReloadOutlined,
 } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn, BatchAction } from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
+import AutoRefreshDropdown from '@/pages/alarm/components/AutoRefreshDropdown';
 import { useT } from '@/hooks/useT';
 import { useRecycleBinList, useRestoreDevices, usePermanentDeleteDevices, useDeviceGroups } from '@core/hooks/api/useDevices';
 import { useDomainTree } from '@core/hooks/api/useTopology';
@@ -48,6 +50,8 @@ export default function RecycleBin() {
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
+  const [autoRefresh, setAutoRefresh] = useState(false);
+  const [refreshInterval, setRefreshInterval] = useState(30);
   const [importModalOpen, setImportModalOpen] = useState(false);
 
   // 获取设备分组树（使用树形结构避免重复数据）
@@ -114,19 +118,36 @@ export default function RecycleBin() {
   }, [domains]);
 
   // 获取回收站设备列表
-  const { data, isLoading, refetch } = useRecycleBinList({
-    search: filterParams.searchText as string,
-    group_id: filterParams.group_id as string,
-    deleted_by: filterParams.deleted_by as string,
-    page: currentPage,
-    pageSize,
-  });
+  const { data, isLoading, isFetching, refetch } = useRecycleBinList(
+    {
+      search: filterParams.searchText as string,
+      group_id: filterParams.group_id as string,
+      deleted_by: filterParams.deleted_by as string,
+      page: currentPage,
+      pageSize,
+    }
+  );
 
   // 恢复设备
   const restoreMutation = useRestoreDevices();
 
   // 永久删除
   const permanentDeleteMutation = usePermanentDeleteDevices();
+
+  const handleManualRefresh = useCallback(() => {
+    void refetch();
+  }, [refetch]);
+
+  useEffect(() => {
+    if (!autoRefresh) return;
+
+    void refetch();
+    const timer = window.setInterval(() => {
+      void refetch();
+    }, refreshInterval * 1000);
+
+    return () => window.clearInterval(timer);
+  }, [autoRefresh, refreshInterval, refetch]);
 
   // 转换数据格式以适配表格
   const tableData = useMemo(() => {
@@ -363,7 +384,24 @@ export default function RecycleBin() {
             if (s !== pageSize) setPageSize(s);
           }}
           batchActions={batchActions}
+          onRefresh={handleManualRefresh}
+          extraToolbarRight={(
+            <Space size={8}>
+              <Button size="small" icon={<ReloadOutlined />} loading={isFetching} onClick={handleManualRefresh}>
+                {t('common.refresh')}
+              </Button>
+              <AutoRefreshDropdown
+                enabled={autoRefresh}
+                intervalSeconds={refreshInterval}
+                onEnabledChange={setAutoRefresh}
+                onIntervalChange={setRefreshInterval}
+                spinning={autoRefresh && isFetching}
+                size="small"
+              />
+            </Space>
+          )}
           defaultDensity="default"
+          hideRealtime
           showRowNumber
           rowNumberTitle={t('table.rowNumber')}
           scroll={{ x: 'max-content', y: 'calc(100vh - 350px)' }}

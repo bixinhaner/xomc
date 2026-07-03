@@ -27,18 +27,25 @@ import (
 const (
 	// RetentionCategory 是 sys_configs 中基站日志保留策略的 category。
 	RetentionCategory = "stationlog.retention"
-	// KeyMaxRetentionDays 时间保留天数键；KeyMaxFileCount 故障日志文件数配额键（0=不限）。
-	KeyMaxRetentionDays = "max_retention_days"
-	KeyMaxFileCount     = "max_file_count"
+	// KeyMaxRetentionDays 时间保留天数键；KeyMaxFileCount 故障日志文件数配额键（0=不限）；
+	// KeyMaxFileCountPerDevice 每设备故障日志文件数配额键（0=不限，#798）。
+	KeyMaxRetentionDays      = "max_retention_days"
+	KeyMaxFileCount          = "max_file_count"
+	KeyMaxFileCountPerDevice = "max_file_count_per_device"
 
 	// DefaultMaxRetentionDays 默认按时间保留 60 天（用户场景）。
 	DefaultMaxRetentionDays = 60
 	// DefaultMaxFileCount 默认文件数配额沿用历史 FaultLogMaxCount=20。
 	DefaultMaxFileCount = FaultLogMaxCount
+	// DefaultMaxFileCountPerDevice 每设备最多保留最近 N 条故障日志的默认值（#798，已拍板 5，
+	// 不对齐老系统 RebootLogSaveCount 的默认值 2）。与全局配额并存：全局兜底总量，
+	// 本配额防止单台设备刷屏挤占其他设备的保留空间。
+	DefaultMaxFileCountPerDevice = 5
 
-	minRetentionDays = 1
-	maxRetentionDays = 3650
-	maxFileCount     = 1_000_000
+	minRetentionDays      = 1
+	maxRetentionDays      = 3650
+	maxFileCount          = 1_000_000
+	maxFileCountPerDevice = 1_000_000
 
 	policyTTL = 60 * time.Second
 )
@@ -52,10 +59,11 @@ type RetentionPolicy struct {
 	lookup ConfigLookup
 	logger *zap.Logger
 
-	mu       sync.Mutex
-	days     int
-	count    int
-	loadedAt time.Time
+	mu           sync.Mutex
+	days         int
+	count        int
+	perDeviceCnt int
+	loadedAt     time.Time
 }
 
 // NewRetentionPolicy 构造保留策略。lookup 为 nil 时恒返回默认值。
@@ -64,10 +72,11 @@ func NewRetentionPolicy(lookup ConfigLookup, logger *zap.Logger) *RetentionPolic
 		logger = zap.NewNop()
 	}
 	return &RetentionPolicy{
-		lookup: lookup,
-		logger: logger.Named("stationlog.retention"),
-		days:   DefaultMaxRetentionDays,
-		count:  DefaultMaxFileCount,
+		lookup:       lookup,
+		logger:       logger.Named("stationlog.retention"),
+		days:         DefaultMaxRetentionDays,
+		count:        DefaultMaxFileCount,
+		perDeviceCnt: DefaultMaxFileCountPerDevice,
 	}
 }
 
@@ -83,13 +92,24 @@ func (p *RetentionPolicy) MaxFileCount(ctx context.Context) int {
 	return c
 }
 
+// MaxFileCountPerDevice 返回当前生效的每设备故障日志文件数配额（0 表示不限，#798）。
+func (p *RetentionPolicy) MaxFileCountPerDevice(ctx context.Context) int {
+	_, _, pc := p.getAll(ctx)
+	return pc
+}
+
 func (p *RetentionPolicy) get(ctx context.Context) (days, count int) {
+	days, count, _ = p.getAll(ctx)
+	return days, count
+}
+
+func (p *RetentionPolicy) getAll(ctx context.Context) (days, count, perDeviceCnt int) {
 	// 快路径：仅短暂持锁读缓存，命中即返回（不在锁内做 DB IO）。
 	p.mu.Lock()
 	if !p.loadedAt.IsZero() && time.Since(p.loadedAt) < policyTTL {
-		days, count = p.days, p.count
+		days, count, perDeviceCnt = p.days, p.count, p.perDeviceCnt
 		p.mu.Unlock()
-		return days, count
+		return days, count, perDeviceCnt
 	}
 	p.mu.Unlock()
 
@@ -98,12 +118,13 @@ func (p *RetentionPolicy) get(ctx context.Context) (days, count int) {
 	// 是良性冗余，远好于持锁串行化。
 	newDays := p.readInt(ctx, KeyMaxRetentionDays, DefaultMaxRetentionDays, minRetentionDays, maxRetentionDays)
 	newCount := p.readInt(ctx, KeyMaxFileCount, DefaultMaxFileCount, 0, maxFileCount)
+	newPerDeviceCnt := p.readInt(ctx, KeyMaxFileCountPerDevice, DefaultMaxFileCountPerDevice, 0, maxFileCountPerDevice)
 
 	p.mu.Lock()
-	p.days, p.count, p.loadedAt = newDays, newCount, time.Now()
-	days, count = p.days, p.count
+	p.days, p.count, p.perDeviceCnt, p.loadedAt = newDays, newCount, newPerDeviceCnt, time.Now()
+	days, count, perDeviceCnt = p.days, p.count, p.perDeviceCnt
 	p.mu.Unlock()
-	return days, count
+	return days, count, perDeviceCnt
 }
 
 func (p *RetentionPolicy) readInt(ctx context.Context, key string, def, lo, hi int) int {

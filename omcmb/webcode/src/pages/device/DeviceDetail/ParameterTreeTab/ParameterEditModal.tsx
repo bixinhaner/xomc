@@ -26,6 +26,11 @@ const BOOLEAN_OPTIONS = [
   { label: 'false', value: 'false' },
 ];
 
+function normalizeEnumValue(value: string, constraints?: ParameterConstraints): string {
+  if (!constraints?.enumValues?.length) return value;
+  return constraints.enumValues.find((candidate) => candidate.toLowerCase() === value.toLowerCase()) ?? value;
+}
+
 function validateValue(
   value: string,
   parameterType: ParameterType,
@@ -97,16 +102,18 @@ export default function ParameterEditModal({
   onClose,
 }: ParameterEditModalProps) {
   const t = useT();
-  const [newValue, setNewValue] = useState(currentValue);
+  const [newValue, setNewValue] = useState(
+    normalizeEnumValue(currentValue, constraints)
+  );
   const [validationError, setValidationError] = useState<string | null>(null);
   const updateMutation = useUpdateParameters();
 
   useEffect(() => {
     if (open) {
-      setNewValue(currentValue);
+      setNewValue(normalizeEnumValue(currentValue, constraints));
       setValidationError(null);
     }
-  }, [open, currentValue]);
+  }, [open, currentValue, constraints]);
 
   const handleValueChange = (value: string) => {
     setNewValue(value);

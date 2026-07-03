@@ -192,21 +192,8 @@ const messages: Record<string, string> = {
   'sysconfig.omc.alarmSuffix':             '时产生告警',
 
   // Storage settings
-  'sysconfig.storage.rawFileLabel':        '原始文件：设备上报的源文件将存储',
-  'sysconfig.storage.unit.month':          '月',
   'sysconfig.storage.unit.day':            '天',
-  'sysconfig.storage.errorLogLabel':       '异常日志存储：设备上报的源文件将存储',
-  'sysconfig.storage.devErrorLogPrefix':   '每个设备最多保留最近',
-  'sysconfig.storage.devErrorLogSuffix':   '次异常日志，更多的日志则将覆盖最早的那次',
-  'sysconfig.storage.userOpLogLabel':      '用户操作日志将存储',
   'sysconfig.storage.alarmHistoryLabel':   '历史告警存储：历史告警在数据库最多存储',
-  'sysconfig.storage.kpiFileLabel':        'KPI文件存储：设备上报的原始文件在服务器最多存储',
-  'sysconfig.storage.kpiReportLabel':      'KPI报表文件存储：根据KPI查询模板生成的报表文件将在服务器最多存储',
-  'sysconfig.storage.kpiRawLabel':         'KPI原始数据存储：KPI原始数据在服务器最多存储',
-  'sysconfig.storage.kpiHourLabel':        'KPI小时数据存储：KPI小时数据在服务器最多存储',
-  'sysconfig.storage.kpiDayLabel':         'KPI天数据存储：KPI天数据在服务器最多存储',
-  'sysconfig.storage.weekMonthGranularity':'支持周和月统计粒度',
-  'sysconfig.storage.mrRawLabel':          'MR原始文件存储：设备上报的原始文件将在服务器最多存储',
   'sysconfig.storage.traceLabel':          '信令追踪文件存储：设备上报的原始文件在服务器最多存储',
   'sysconfig.storage.diskLog':             '日志目录磁盘可用存储百分比',
   'sysconfig.storage.diskData':            '数据目录磁盘可用存储百分比',
@@ -4596,14 +4583,12 @@ const messages: Record<string, string> = {
   'system.notification.testSmsSent':         '测试短信发送成功',
 
   // System - Storage Settings
-  'system.storage.logSettings':              '日志设置',
   'system.storage.forwardLogsToRemote':      '日志文件将转发到远端地址',
   'system.storage.uploadPath':               '上传路径',
   'system.storage.alarm':                    '告警',
-  'system.storage.kpi':                      'KPI',
-  'system.storage.mr':                       'MR',
   'system.storage.signalingTrace':           '信令追踪',
   'system.storage.diskAlarm':                '磁盘告警',
+  'system.storage.diskAlarmPending':          '后端磁盘监控功能待实现，当前修改不生效',
   // MinIO 对象存储
   'system.storage.minio':                    'MinIO 对象存储',
   // issue #548 切片 3：只暴露对外可达 endpoint 一个运行时可改字段，其余
@@ -6902,6 +6887,7 @@ const messages: Record<string, string> = {
   'retentionBp.field.raw_object_days':       '原始件保留天数',
   'retentionBp.field.max_retention_days':    '基站日志保留天数',
   'retentionBp.field.max_file_count':        '故障日志文件数配额（0=禁用）',
+  'retentionBp.field.max_file_count_per_device': '每设备故障日志文件数配额（0=禁用）',
   'retentionBp.field.compress_after_ingest': '入库后压缩回写',
 
   // -------------------------------------------------------------------------

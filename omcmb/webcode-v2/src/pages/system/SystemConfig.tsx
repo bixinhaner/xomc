@@ -41,8 +41,7 @@ const CATEGORIES: { key: string; label: string }[] = [
   { key: 'security', label: '安全' },
   { key: 'device', label: '设备' },
   { key: 'storage', label: '存储' },
-  { key: 'omc', label: 'OMC' },
-  { key: 'northbound', label: '北向' },
+  // northbound 已隐藏（#820）：北向功能未完成，待完成后恢复
 ]
 
 // 已知 sys_configs key 占位（issue #548 切片 3）。
@@ -60,6 +59,23 @@ const KNOWN_KEYS_BY_CATEGORY: Record<
       description:
         'MinIO 对外可达 endpoint（浏览器/外部 SDK 用，host[:port]）。建议在此填写运维可达地址；留空仅演示 / 开发环境使用，会回退到启动配置中的内部 host',
     },
+  ],
+  'stationlog.retention': [
+    {
+      key: 'max_file_count_per_device',
+      valueType: 'int',
+      description: '每设备故障日志文件数配额，0=禁用（#798）',
+    },
+  ],
+}
+
+// 后端待实现、暂不展示的 key（#801 磁盘告警阈值后端未实现，隐藏整卡）。
+const HIDDEN_KEYS_BY_CATEGORY: Record<string, string[]> = {
+  storage: [
+    'varDiskAlarmThresHold',
+    'homeDiskAlarmThresHold',
+    'usrDiskAlarmThresHold',
+    'rootDiskAlarmThresHold',
   ],
 }
 
@@ -109,8 +125,13 @@ function CategoryEditor({ category }: { category: string }) {
     useSysConfigsByCategory(category)
   const batchUpdate = useBatchUpdateSysConfigs()
 
+  const pendingKeys = useMemo(
+    () => new Set(HIDDEN_KEYS_BY_CATEGORY[category] ?? []),
+    [category],
+  )
+
   const items = useMemo<SysConfigItem[]>(
-    () => mergeKnownKeys(category, data ?? []),
+    () => mergeKnownKeys(category, data ?? []).filter((it) => !pendingKeys.has(it.key)),
     [data, category],
   )
   const groups = useMemo(() => groupDeviceItems(category, items), [category, items])
@@ -241,8 +262,9 @@ function CategoryEditor({ category }: { category: string }) {
                     <div className="flex items-center gap-2">
                       <input
                         type="checkbox"
-                        className="size-4 cursor-pointer accent-primary"
+                        className="size-4 cursor-pointer accent-primary disabled:cursor-not-allowed disabled:opacity-50"
                         checked={cur === 'true' || cur === '1'}
+                        disabled={false}
                         onChange={(e) =>
                           setEdits((prev) => ({
                             ...prev,

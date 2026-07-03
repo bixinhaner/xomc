@@ -19,6 +19,7 @@ import (
 	"github.com/omcgo/omcgo/internal/bundle"
 	"github.com/omcgo/omcgo/internal/config"
 	"github.com/omcgo/omcgo/internal/config/baseline"
+	"github.com/omcgo/omcgo/internal/config/parammodel"
 	"github.com/omcgo/omcgo/internal/core/components"
 	minioinfra "github.com/omcgo/omcgo/internal/core/components/minio"
 	"github.com/omcgo/omcgo/internal/core/event"
@@ -170,16 +171,20 @@ func initMRTaskModule(c *Container) error {
 		logger.Info("mr heartbeat subscriber started")
 	}
 
-	// Cleaner：@daily 删超期 MinIO 对象 + 同步删 mr_files PG 行
-	cleaner := mrtask.NewCleaner(c.MinIO, c.miscDeps.mrStore, mrtask.CleanerConfig{
-		Bucket:   c.Cfg.MinIO.Buckets.MRFiles,
-		SaveDays: mrCfg.FileSaveDays,
+	// Cleaner：@daily 同步删超期 mr_files PG 行。MinIO 对象本体的过期删除已并入
+	// minio.retention.raw_object_days 的原始件 ILM 生命周期规则（#798，见 minio_ilm.go）；
+	// 这里复用同一份 readMinIORetentionDays 读取逻辑，保证两端保留天数同源、不脱节。
+	mrSysCfg := admin.NewPgSysConfigRepository(c.PgPool)
+	cleaner := mrtask.NewCleaner(c.miscDeps.mrStore, mrtask.CleanerConfig{
+		Bucket: c.Cfg.MinIO.Buckets.MRFiles,
+	}, func(ctx context.Context) int {
+		return readMinIORetentionDays(ctx, mrSysCfg, logger)
 	}, logger)
 	cleaner.SetMetrics(metrics)
 	if err := cleaner.Start(context.Background()); err != nil {
 		logger.Warn("mr cleaner start failed", zap.Error(err))
 	} else {
-		logger.Info("mr cleaner started", zap.Int("save_days", mrCfg.FileSaveDays))
+		logger.Info("mr cleaner started")
 	}
 
 	// 暴露 repo 给 router.go 注册 REST handler（initMRTaskModule 也接管原 router.go
@@ -1703,6 +1708,23 @@ func initMiscModules(c *Container) error {
 				Paths:           paths,
 			}, nil
 		}))
+	// deviceKey 分支：按 paramModelID 从 ParamRegistry（Redis L1→L2→DB）取 supported paths。
+	mmlConsoleSvc.SetParamModelPathsResolver(func(ctx context.Context, pmID uuid.UUID) (map[string]struct{}, error) {
+		set, err := c.ParamRegistry.GetByParamModel(ctx, pmID)
+		if err != nil {
+			if errors.Is(err, parammodel.ErrNoMapping) {
+				return map[string]struct{}{}, nil
+			}
+			return nil, fmt.Errorf("get param_model %s paths: %w", pmID, err)
+		}
+		paths := make(map[string]struct{}, len(set.Mappings))
+		for _, m := range set.Mappings {
+			if m.StandardPath != "" && m.IsActive && m.IsSupported {
+				paths[m.StandardPath] = struct{}{}
+			}
+		}
+		return paths, nil
+	})
 	// R-8.5: 独立 CompatibilityService（不耦合 ConsoleService 签名 / 测试）。
 	// T-0177：走 ProductRegistry.MatchProductClass（全局正则路由）取代旧
 	// 直查 devices LEFT JOIN products 的 raw SQL — 不再依赖 devices.product_id /

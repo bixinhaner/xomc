@@ -1,5 +1,6 @@
 import type { Alarm, DealState, EventType } from '@core/types/alarm';
 import type { TranslateFn } from '@/hooks/useT';
+import { formatSystemTime } from '@core/utils/systemTime';
 import { formatBaseStationTypeLabel } from './baseStationType';
 
 export type AlarmExportFieldKey =
@@ -114,12 +115,12 @@ export function buildAlarmExportFieldDefinitions(
     {
       key: 'eventTime',
       label: t('alarm.eventTime'),
-      getValue: (alarm) => alarm.eventTime || '',
+      getValue: (alarm) => (alarm.eventTime ? formatSystemTime(alarm.eventTime) : ''),
     },
     {
       key: 'updTime',
       label: t('alarm.updTime'),
-      getValue: (alarm) => alarm.updTime || '',
+      getValue: (alarm) => (alarm.updTime ? formatSystemTime(alarm.updTime) : ''),
     },
     {
       key: 'dealUser',
@@ -129,7 +130,10 @@ export function buildAlarmExportFieldDefinitions(
     {
       key: 'dealTime',
       label: t('alarm.dealTime'),
-      getValue: (alarm) => alarm.dealTime || alarm.acknowledgedAt || '',
+      getValue: (alarm) => {
+        const raw = alarm.dealTime || alarm.acknowledgedAt;
+        return raw ? formatSystemTime(raw) : '';
+      },
     },
     {
       key: 'dealMemo',
@@ -144,7 +148,10 @@ export function buildAlarmExportFieldDefinitions(
     {
       key: 'clearTime',
       label: t('alarm.clearTime'),
-      getValue: (alarm) => alarm.clearTime || alarm.clearedAt || '',
+      getValue: (alarm) => {
+        const raw = alarm.clearTime || alarm.clearedAt;
+        return raw ? formatSystemTime(raw) : '';
+      },
     },
     {
       key: 'clearMemo',

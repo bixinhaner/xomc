@@ -40,6 +40,31 @@ func TestRetentionPolicy_ReadsAndValidates(t *testing.T) {
 	assert.Equal(t, DefaultMaxRetentionDays, bad.MaxRetentionDays(context.Background()))
 }
 
+func TestRetentionPolicy_MaxFileCountPerDevice_Default(t *testing.T) {
+	p := NewRetentionPolicy(nil, nil) // nil lookup → 恒默认
+	assert.Equal(t, DefaultMaxFileCountPerDevice, p.MaxFileCountPerDevice(context.Background()))
+}
+
+func TestRetentionPolicy_MaxFileCountPerDevice_ReadsAndValidates(t *testing.T) {
+	lookup := func(_ context.Context, category, key string) (string, bool) {
+		if category != RetentionCategory || key != KeyMaxFileCountPerDevice {
+			return "", false
+		}
+		return "8", true
+	}
+	p := NewRetentionPolicy(lookup, nil)
+	assert.Equal(t, 8, p.MaxFileCountPerDevice(context.Background()))
+
+	// 非法值（负数）回落默认。
+	bad := NewRetentionPolicy(func(_ context.Context, _, key string) (string, bool) {
+		if key == KeyMaxFileCountPerDevice {
+			return "-3", true
+		}
+		return "", false
+	}, nil)
+	assert.Equal(t, DefaultMaxFileCountPerDevice, bad.MaxFileCountPerDevice(context.Background()))
+}
+
 // ---- CleanupRunner ----
 
 type fakeCleanupStore struct {

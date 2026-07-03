@@ -316,6 +316,7 @@ export function useRecycleBinList(params: RecycleBinFilter) {
   return useQuery({
     queryKey: ['devices', 'recycle-bin', params],
     queryFn: () => deviceApi.listRecycleBin(params),
+    refetchOnMount: 'always',
   });
 }
 

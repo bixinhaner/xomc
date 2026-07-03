@@ -906,9 +906,7 @@ func (s *Service) GetAlarmTypePie(ctx context.Context) ([]AlarmTypePieEntry, err
 // pm_adhoc_aggregation_results（network 维度）」——3 条内置全网任务每小时把全库指标
 // （counter 求和、KPI 重算）汇成全网总线，首页直接拿口径正确的全网线。详见 kpi_network_query.go。
 //
-// 查询键：前端可直接传指标编号（K/C 编号）；老的精选 symbolic 别名（如 LTE_PDCP_VOLUME_DL）
-// 经别名层（kpi_alias.go）映射成编号（存量兼容），返回时按原 key 回填；库内无对应编号的
-// none 项（如 LTE_CELL_AVAILABLE）返回空序列。
+// 查询键：前端传指标编号（K/C 编号），直接查 metric_path。
 func (s *Service) GetKPITimeSeries(ctx context.Context, kpiNames []string, startTime, endTime time.Time) (KPITimeSeriesResponse, error) {
 	result := make(KPITimeSeriesResponse, len(kpiNames))
 
@@ -921,11 +919,14 @@ func (s *Service) GetKPITimeSeries(ctx context.Context, kpiNames []string, start
 		result[name] = []KPITimeSeriesEntry{}
 	}
 
-	// 别名解析：symbolic 别名 → 指标编号（去重，含原样透传的裸编号），并保留 编号→key 反查表用于回填。
-	kcodes, reverse := resolveKPIAliases(kpiNames)
-	if len(kcodes) == 0 {
-		// 全部是 none 项或解析后无可查编号 → 直接返回（全空序列）。
-		return result, nil
+	// 去重：前端直接传指标编号（K/C 编号），去重后作为查询 kcodes。
+	seen := make(map[string]struct{}, len(kpiNames))
+	var kcodes []string
+	for _, k := range kpiNames {
+		if _, dup := seen[k]; !dup {
+			seen[k] = struct{}{}
+			kcodes = append(kcodes, k)
+		}
 	}
 
 	// 取全网时序：优先读每小时预聚合表，缺数据时回退 15min 直读原始明细（见 fetchNetworkKCodeSeries）。
@@ -939,10 +940,8 @@ func (s *Service) GetKPITimeSeries(ctx context.Context, kpiNames []string, start
 			Time:  p.time.Format(time.RFC3339),
 			Value: p.value,
 		}
-		// 按原 symbolic key 回填（一个 K 编号可能被多个 symbolic 请求引用）。
-		for _, symbolic := range reverse[p.code] {
-			result[symbolic] = append(result[symbolic], entry)
-		}
+		// 按指标编号直接回填。
+		result[p.code] = append(result[p.code], entry)
 	}
 
 	return result, nil
@@ -955,41 +954,123 @@ type networkSeriesPoint struct {
 	value float64
 }
 
-// fetchNetworkKCodeSeries 读多个指标编号的全网时序，带容错回退（issue #359）：
-//  1. 优先读每小时预聚合表 pm_adhoc_aggregation_results（口径正确的全网线，10 万级规模成本低）。
-//  2. 预聚合表对该时窗无任何行时（刚灌数未到整点 / continuous scheduler 未起 / 聚合落后），
-//     回退 15min 直读原始明细 pm_metrics 现场汇成全网线，与性能仪表板默认模板 15min 容错对齐，
-//     避免首页裸空白被误判为故障。
+// fetchNetworkKCodeSeries 读多个指标编号的全网时序，三段式策略（issue #359 + 尾部补点）：
 //
-// 两条链路都查时序库（tsPool）。回退是「整体缺数据」才触发（而非逐指标），简单且可预期。
+//  1. 优先读每小时预聚合表 pm_adhoc_aggregation_results（口径正确的全网线，10 万级规模成本低）。
+//  2. 预聚合表对该时窗完全无任何行时（刚灌数未到整点 / continuous scheduler 未起），
+//     整体回退 15min 直读原始明细 pm_metrics 现场汇成全网线，与性能仪表板默认模板对齐容错。
+//  3. 预聚合有数据，但存在「尾部缺口」时，用 15min 原始明细补充缺失数据点
+//     （与 PM 性能仪表盘 15min 实时口径对齐）：
+//     - 当前不完整小时：17:30 时 17:00 桶未聚合，补出 17:00/17:15 打点。
+//     - 延迟的完整小时：聚合任务落后多个小时时，15min 补点同样覆盖（从缺口开始填）。
+//     - 跨制式混合指标：LTE/NR/GSM 聚合任务各自独立运行，不同制式指标可能有不同的最新桶
+//       时间；以所有 code 各自「下一桶起点」的最小值作为尾部查询起点，并在合并时按 code
+//       过滤掉与现有小时数据重叠的 15min 点，避免同一 code 同一时段双重计数。
+//
+// 两条链路都查时序库（tsPool）。策略 2 是整体缺数据时触发；策略 3 是常态下的尾部实时补充。
 func (s *Service) fetchNetworkKCodeSeries(ctx context.Context, kcodes []string, startTime, endTime time.Time) ([]networkSeriesPoint, error) {
 	// 1. 预聚合表（首选口径）。
 	aggQuery, aggArgs, err := buildNetworkKPISeriesQuery(kcodes, startTime, endTime)
 	if err != nil {
 		return nil, fmt.Errorf("build kpi time series query: %w", err)
 	}
-	points, err := s.scanNetworkSeries(ctx, aggQuery, aggArgs, "aggregated")
+	hourlyPoints, err := s.scanNetworkSeries(ctx, aggQuery, aggArgs, "aggregated")
 	if err != nil {
 		return nil, err
-	}
-	if len(points) > 0 {
-		return points, nil
 	}
 
-	// 2. 回退：15min 直读原始明细现场汇总（与性能仪表板默认模板对齐容错）。
-	rawQuery, rawArgs, err := buildRawNetworkKPISeriesQuery(kcodes, startTime, endTime)
-	if err != nil {
-		return nil, fmt.Errorf("build raw kpi time series fallback query: %w", err)
+	if len(hourlyPoints) == 0 {
+		// 2. 整体为空：整体回退 15min 直读原始明细现场汇总（与性能仪表板默认模板对齐容错）。
+		rawQuery, rawArgs, err := buildRawNetworkKPISeriesQuery(kcodes, startTime, endTime)
+		if err != nil {
+			return nil, fmt.Errorf("build raw kpi time series fallback query: %w", err)
+		}
+		rawPoints, err := s.scanNetworkSeries(ctx, rawQuery, rawArgs, "raw-fallback")
+		if err != nil {
+			return nil, err
+		}
+		if len(rawPoints) > 0 {
+			s.logger.Info("dashboard: kpi time series fell back to raw pm_metrics (hourly aggregation empty)",
+				zap.Int("codes", len(kcodes)))
+		}
+		return rawPoints, nil
 	}
-	rawPoints, err := s.scanNetworkSeries(ctx, rawQuery, rawArgs, "raw-fallback")
-	if err != nil {
-		return nil, err
+
+	// 3. 预聚合有数据，检查是否有「尾部缺口」。
+	//
+	// 按 code 分别记录各自最新小时桶时间，跨制式场景下不同制式指标的最新桶可能不同。
+	latestByCode := make(map[string]time.Time, len(kcodes))
+	for _, p := range hourlyPoints {
+		if p.time.After(latestByCode[p.code]) {
+			latestByCode[p.code] = p.time
+		}
 	}
-	if len(rawPoints) > 0 {
-		s.logger.Info("dashboard: kpi time series fell back to raw pm_metrics (hourly aggregation empty)",
-			zap.Int("codes", len(kcodes)))
+
+	// 取所有 code「下一完整小时桶起点」的最小值作为尾部查询起点。
+	// 这样一次查询可以同时覆盖不同制式指标的尾部缺口。
+	// 示例：LTE 最新桶 16:00 → 候选 17:00；GSM 最新桶 14:00 → 候选 15:00；
+	//       取 min = 15:00，查询 [15:00, now]，GSM 缺口和 LTE 缺口都被覆盖。
+	trailingStart := endTime // 初始化为 endTime，无缺口时不触发
+	for _, code := range kcodes {
+		latest := latestByCode[code]
+		if latest.IsZero() {
+			// 该 code 在本次预聚合结果中无数据（跨制式且该制式当天无上报），
+			// 以 startTime 作为候选，让 15min 从头补。
+			if startTime.Before(trailingStart) {
+				trailingStart = startTime
+			}
+			continue
+		}
+		if candidate := latest.Add(time.Hour); candidate.Before(trailingStart) {
+			trailingStart = candidate
+		}
 	}
-	return rawPoints, nil
+
+	if endTime.After(trailingStart) {
+		trailingQuery, trailingArgs, err := buildRawNetworkKPISeriesQuery(kcodes, trailingStart, endTime)
+		if err != nil {
+			return nil, fmt.Errorf("build raw kpi trailing edge query: %w", err)
+		}
+		trailingPoints, err := s.scanNetworkSeries(ctx, trailingQuery, trailingArgs, "raw-trailing-edge")
+		if err != nil {
+			return nil, err
+		}
+		if len(trailingPoints) > 0 {
+			s.logger.Debug("dashboard: appended trailing 15min points to hourly series",
+				zap.Int("trailing_count", len(trailingPoints)),
+				zap.Time("trailing_start", trailingStart),
+				zap.Time("end_time", endTime),
+			)
+			// 跨制式场景：trailingStart 取的是全局最小值，部分 code 的 15min 数据
+			// 可能与其已有小时数据时间重叠（例如 LTE 的 15:00–16:59 既有小时桶又有 15min 点）。
+			// 对每个 15min 点，只保留时间 >= 该 code 自身尾部缺口起点（latestByCode[code]+1h）的点。
+			filtered := make([]networkSeriesPoint, 0, len(trailingPoints))
+			for _, p := range trailingPoints {
+				latest := latestByCode[p.code]
+				var codeTrailingStart time.Time
+				if latest.IsZero() {
+					codeTrailingStart = startTime
+				} else {
+					codeTrailingStart = latest.Add(time.Hour)
+				}
+				if !p.time.Before(codeTrailingStart) {
+					filtered = append(filtered, p)
+				}
+			}
+			if len(filtered) > 0 {
+				hourlyPoints = append(hourlyPoints, filtered...)
+				// 重新按指标编号 + 时间排序，保持时序连续。
+				sort.Slice(hourlyPoints, func(i, j int) bool {
+					if hourlyPoints[i].code != hourlyPoints[j].code {
+						return hourlyPoints[i].code < hourlyPoints[j].code
+					}
+					return hourlyPoints[i].time.Before(hourlyPoints[j].time)
+				})
+			}
+		}
+	}
+
+	return hourlyPoints, nil
 }
 
 // scanNetworkSeries 跑一条「metric_path, time, metric_value」三列查询并扫成 networkSeriesPoint 列表。
@@ -1016,15 +1097,9 @@ func (s *Service) scanNetworkSeries(ctx context.Context, query string, args []an
 
 // queryNetworkKPISeries 读单个指标在某时窗内的全网预聚合时序（供 GetKPITrendComparison 用）。
 //
-// kpiName 可为老精选 symbolic 别名（经 resolveKPIAliases 映射成编号）或裸指标编号（原样透传）；
-// none 项（无对应编号）或解析后无编号 → 返回空序列（不报错）。读 pm_adhoc_aggregation_results
-// （network 维度，3 条全网任务覆盖全制式），与 GetKPITimeSeries 同源。
+// kpiName 为指标编号（K/C 编号），读 pm_adhoc_aggregation_results（network 维度），与 GetKPITimeSeries 同源。
 func (s *Service) queryNetworkKPISeries(ctx context.Context, kpiName string, startTime, endTime time.Time) ([]KPITrendEntry, error) {
-	kcodes, _ := resolveKPIAliases([]string{kpiName})
-	if len(kcodes) == 0 {
-		// none 项或无可查编号 → 空序列。
-		return []KPITrendEntry{}, nil
-	}
+	kcodes := []string{kpiName}
 
 	// 与 GetKPITimeSeries 同源：优先读每小时预聚合表，缺数据时回退 15min 直读原始明细（issue #359）。
 	points, err := s.fetchNetworkKCodeSeries(ctx, kcodes, startTime, endTime)

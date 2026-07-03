@@ -103,3 +103,44 @@ func TestBuildRawNetworkKPISeriesQuery_Granularity15min(t *testing.T) {
 	require.Len(t, args, 4)
 	assert.Equal(t, "15min", args[1])
 }
+
+// 尾部补点查询与整体回退查询使用相同 SQL 模板，仅时间窗不同。
+// （trailingStart = min(latestByCode + 1h)，endTime = now；由调用方 fetchNetworkKCodeSeries 计算）
+func TestBuildRawNetworkKPISeriesQuery_TrailingEdgeWindow(t *testing.T) {
+	// 模拟：最新小时桶为 16:00，尾部补点时窗为 17:00–17:30。
+	trailingStart := time.Date(2026, 6, 13, 17, 0, 0, 0, time.UTC)
+	now := time.Date(2026, 6, 13, 17, 30, 0, 0, time.UTC)
+
+	q, args, err := buildRawNetworkKPISeriesQuery([]string{"K900010015"}, trailingStart, now)
+	require.NoError(t, err)
+
+	// 与整体回退查询相同模板（读 pm_metrics 15min，按 metric_path+time GROUP BY）。
+	assert.Contains(t, q, "FROM pm_metrics")
+	assert.Contains(t, q, "GROUP BY metric_path, time")
+	assert.Contains(t, q, "granularity = ")
+
+	// 时间窗参数为 trailingStart ~ now。
+	require.Len(t, args, 4)
+	assert.Equal(t, trailingStart, args[2])
+	assert.Equal(t, now, args[3])
+}
+
+// 跨制式混合场景：不同 code 有不同的最新小时桶时间，尾部查询的 trailingStart 取各 code
+// 「下一桶起点」的最小值；合并时按 per-code 过滤，避免与现有小时数据重叠。
+// 本测验证 SQL 模板在更早的 trailingStart 下仍能正确构建（逻辑本身不变）。
+func TestBuildRawNetworkKPISeriesQuery_CrossTechEarlierTrailingStart(t *testing.T) {
+	// LTE 最新桶 16:00 → 候选 17:00
+	// GSM 最新桶 14:00 → 候选 15:00 → 全局 trailingStart 取 15:00
+	trailingStart := time.Date(2026, 6, 13, 15, 0, 0, 0, time.UTC)
+	now := time.Date(2026, 6, 13, 17, 30, 0, 0, time.UTC)
+
+	q, args, err := buildRawNetworkKPISeriesQuery([]string{"K900010015", "KGSM0101"}, trailingStart, now)
+	require.NoError(t, err)
+
+	// SQL 模板不变，时间窗覆盖两个 code 的缺口。
+	assert.Contains(t, q, "FROM pm_metrics")
+	assert.Contains(t, q, "GROUP BY metric_path, time")
+	require.Len(t, args, 4)
+	assert.Equal(t, trailingStart, args[2])
+	assert.Equal(t, now, args[3])
+}

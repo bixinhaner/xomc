@@ -29,26 +29,26 @@ function panel(p: Partial<KPILayoutPanel> & Pick<KPILayoutPanel, 'metrics'>): KP
 describe('collectMetrics（汇总指标 → 批量取数入参）', () => {
   it('把多张图的指标汇总成一份去重列表，保持首次出现顺序', () => {
     const panels: KPILayoutPanel[] = [
-      panel({ metrics: ['LTE_PDCP_VOLUME_DL', 'LTE_PDCP_VOLUME_UL'] }),
-      panel({ metrics: ['LTE_PRB_UTIL_DL', 'LTE_PRB_UTIL_UL'] }),
+      panel({ metrics: ['K900010015', 'K900010016'] }),
+      panel({ metrics: ['K900010014', 'K900010013'] }),
     ];
     expect(collectMetrics(panels)).toEqual([
-      'LTE_PDCP_VOLUME_DL',
-      'LTE_PDCP_VOLUME_UL',
-      'LTE_PRB_UTIL_DL',
-      'LTE_PRB_UTIL_UL',
+      'K900010015',
+      'K900010016',
+      'K900010014',
+      'K900010013',
     ]);
   });
 
   it('同一指标被多张图引用只取一次（去重）', () => {
     const panels: KPILayoutPanel[] = [
-      panel({ metrics: ['RRC_CONN_SETUP_SR', 'ERAB_SETUP_SR'] }),
-      panel({ metrics: ['ERAB_SETUP_SR', 'CSFB_SR'] }), // ERAB_SETUP_SR 重复
+      panel({ metrics: ['K900010002', 'K900010005'] }),
+      panel({ metrics: ['K900010005', 'K900010029'] }), // K900010005 重复
     ];
     expect(collectMetrics(panels)).toEqual([
-      'RRC_CONN_SETUP_SR',
-      'ERAB_SETUP_SR',
-      'CSFB_SR',
+      'K900010002',
+      'K900010005',
+      'K900010029',
     ]);
   });
 
@@ -73,10 +73,10 @@ describe('buildDefaultLayout（内置默认/回退）', () => {
     ]);
     // traffic 图含四条业务量/速率指标
     expect(layout.panels[0].metrics).toEqual([
-      'LTE_PDCP_VOLUME_DL',
-      'LTE_PDCP_VOLUME_UL',
-      'LTE_PDCP_RATE_DL',
-      'LTE_PDCP_RATE_UL',
+      'K900010015',
+      'K900010016',
+      'K900010040',
+      'K900010041',
     ]);
   });
 
@@ -97,7 +97,7 @@ describe('resolveLayout（有配置用配置，否则回退）', () => {
   it('全局配置非空时直接用配置', () => {
     const remote: KPILayout = {
       tech: 'lte',
-      panels: [panel({ title: 'custom', metrics: ['LTE_PDCP_RATE_DL'] })],
+      panels: [panel({ title: 'custom', metrics: ['K900010040'] })],
       updatedAt: '2026-06-13T00:00:00Z',
     };
     expect(resolveLayout('lte', remote)).toBe(remote);

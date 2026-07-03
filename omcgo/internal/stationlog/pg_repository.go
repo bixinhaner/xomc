@@ -27,6 +27,10 @@ type Repository interface {
 	Count(ctx context.Context) (int64, error)
 	// ListOldest 按采集时间升序返回未删除记录（用于配额超额时清理最旧的文件）
 	ListOldest(ctx context.Context, limit int) ([]*LogFile, error)
+	// CountByDevice 统计指定设备本表未删除记录数（用于每设备配额管理，#798）
+	CountByDevice(ctx context.Context, deviceID uuid.UUID) (int64, error)
+	// ListOldestByDevice 按采集时间升序返回指定设备未删除记录（用于每设备配额超额清理，#798）
+	ListOldestByDevice(ctx context.Context, deviceID uuid.UUID, limit int) ([]*LogFile, error)
 	// ListExpired 按入库时间(created_at)升序返回早于 cutoff 的未删除记录（用于按时间保留清理，#320）
 	ListExpired(ctx context.Context, cutoff time.Time, limit int) ([]*LogFile, error)
 	// LatestByDevice 获取指定设备最近一条未删除记录
@@ -308,6 +312,57 @@ func (r *PgRepository) ListOldest(ctx context.Context, limit int) ([]*LogFile, e
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query oldest %s: %w", r.tableName, err)
+	}
+	defer rows.Close()
+
+	var items []*LogFile
+	for rows.Next() {
+		f, err := r.scan(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, f)
+	}
+	return items, rows.Err()
+}
+
+// CountByDevice 统计指定设备本表未删除记录数（#798 每设备配额管理）。故障日志表额外限定
+// record_status=file_received，与 Count/ListOldest 的口径一致：detected 占位记录没文件，
+// 不应被算入配额。
+func (r *PgRepository) CountByDevice(ctx context.Context, deviceID uuid.UUID) (int64, error) {
+	q := storage.Psql.Select("COUNT(*)").
+		From(r.tableName).
+		Where(sq.Eq{"device_id": deviceID, "is_deleted": false})
+	if r.withFaultFields {
+		q = q.Where(sq.Eq{"record_status": FaultRecordStatusFileReceived})
+	}
+	query, args, err := q.ToSql()
+	if err != nil {
+		return 0, fmt.Errorf("build count by device %s: %w", r.tableName, err)
+	}
+	var count int64
+	err = r.pool.QueryRow(ctx, query, args...).Scan(&count)
+	return count, err
+}
+
+// ListOldestByDevice 按采集时间升序返回指定设备未删除记录（#798 每设备配额超额清理）。
+func (r *PgRepository) ListOldestByDevice(ctx context.Context, deviceID uuid.UUID, limit int) ([]*LogFile, error) {
+	q := storage.Psql.Select(r.cols()...).
+		From(r.tableName).
+		Where(sq.Eq{"device_id": deviceID, "is_deleted": false})
+	if r.withFaultFields {
+		q = q.Where(sq.Eq{"record_status": FaultRecordStatusFileReceived})
+	}
+	query, args, err := q.
+		OrderBy("collected_at ASC").
+		Limit(uint64(limit)).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build list oldest by device %s: %w", r.tableName, err)
+	}
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query oldest by device %s: %w", r.tableName, err)
 	}
 	defer rows.Close()
 

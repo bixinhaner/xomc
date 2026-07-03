@@ -14,8 +14,7 @@ import BasicSettings from './BasicSettings';
 import SecuritySettings from './SecuritySettings';
 import DeviceSettings from './DeviceSettings';
 import StorageSettings from './StorageSettings';
-import OmcSettings from './OmcSettings';
-import NorthboundSettings from './NorthboundSettings';
+// NorthboundSettings import 已移除（#820：北向功能未完成，tab 已隐藏）
 import TransferSettings from './TransferSettings';
 import PmRetentionSection from './PmRetentionSection';
 import RetentionBackpressureSection from './RetentionBackpressureSection';
@@ -29,7 +28,9 @@ import { buildBatchItems } from './sysConfigSerialize';
 
 // 设置子页签类型（v1.0：移除 sas / ldap，参 omgo/docs/prd/system/config.md）
 // notify tab 已隐藏（#781）：邮件/短信后端未真实打通前不展示，避免误导用户
-type SettingsTab = 'basic' | 'security' | 'device' | 'storage' | 'omc' | 'acs_transfer' | 'northbound' | 'pm_retention' | 'retention_bp' | 'log_cfg';
+// omc tab 已隐藏（#802）：rsyslog/磁盘告警后端未实现，两个卡片均为空壳
+// northbound tab 已隐藏（#820）：北向功能未完成（用户管理 Mock 数据、服务信息无 DB 记录），待完成后恢复
+type SettingsTab = 'basic' | 'security' | 'device' | 'storage' | 'acs_transfer' | 'pm_retention' | 'retention_bp' | 'log_cfg';
 
 // 设置子页签配置
 const settingsTabs: { key: SettingsTab; labelKey: string }[] = [
@@ -37,9 +38,8 @@ const settingsTabs: { key: SettingsTab; labelKey: string }[] = [
   { key: 'security', labelKey: 'system.config.security' },
   { key: 'device', labelKey: 'system.config.device' },
   { key: 'storage', labelKey: 'system.config.storage' },
-  { key: 'omc', labelKey: 'system.config.omc' },
   { key: 'acs_transfer', labelKey: 'system.config.acsTransfer' },
-  { key: 'northbound', labelKey: 'system.config.northbound' },
+  // northbound 已隐藏（#820）
   // T-0164 收尾 G2-Gap-1：PM 数据保留策略页签
   { key: 'pm_retention', labelKey: 'system.config.pmRetention' },
   // #318-321：资源保留与上传背压（背压 / 原始件 ILM / 基站日志保留 / 压缩回写）
@@ -86,10 +86,7 @@ export default function SystemConfig() {
   const [securityForm] = Form.useForm();
   const [deviceForm] = Form.useForm();
   const [storageForm] = Form.useForm();
-  const [omcForm] = Form.useForm();
   const [transferForm] = Form.useForm();
-  const [northboundForm] = Form.useForm();
-
   // tab → form 映射（稳定引用，因为每个 form 都来自 useForm()）。
   // 注意：自管表单的页签（如 pm_retention，PmRetentionSection 内部自带 form +
   // 保存/重置按钮）【不在此映射内】，故用 Partial —— formMap[activeTab] 可能为
@@ -100,11 +97,9 @@ export default function SystemConfig() {
       security: securityForm,
       device: deviceForm,
       storage: storageForm,
-      omc: omcForm,
       acs_transfer: transferForm,
-      northbound: northboundForm,
     }),
-    [basicForm, securityForm, deviceForm, storageForm, omcForm, transferForm, northboundForm],
+    [basicForm, securityForm, deviceForm, storageForm, transferForm],
   );
 
   // 拉当前 tab 的所有 KV（按 category）。切 tab 自动重发请求。
@@ -164,12 +159,9 @@ export default function SystemConfig() {
         return <DeviceSettings form={deviceForm} />;
       case 'storage':
         return <StorageSettings form={storageForm} />;
-      case 'omc':
-        return <OmcSettings form={omcForm} />;
       case 'acs_transfer':
 		return <TransferSettings form={transferForm} />;
-      case 'northbound':
-        return <NorthboundSettings form={northboundForm} />;
+      // northbound case 已移除（#820）
       case 'pm_retention':
         // T-0164 收尾 G2-Gap-1：PM 数据保留独立组件，内部自管 form + state（不需要 form props）
         return <PmRetentionSection />;

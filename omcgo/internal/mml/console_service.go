@@ -44,6 +44,10 @@ type ConsoleService struct {
 	// 退化为原 BuildGroupTree（不过滤）。设计同 resolveParamModelByDevice 通过闭包
 	// 解耦 product / parammodel 包依赖。
 	supportedPathsRepo SupportedPathsRepository
+	// resolvePathsByParamModel 按 paramModelID 从 ParamRegistry（Redis L1→L2→DB）
+	// 取 supported paths；用于 deviceKey 分支（productClass 分支直接用 SupportedSet.Paths）。
+	// nil 时 deviceKey 分支退化为全集（admin 视图等价）。
+	resolvePathsByParamModel func(ctx context.Context, paramModelID uuid.UUID) (map[string]struct{}, error)
 
 	// 产品（product_id）不支持 path 自学习表查询 + deviceSN→product_id 解析闭包（兼容旧入参）。
 	// 供 GetUnsupportedPaths 给前端「选择命令 / 配置参数」按读/写过滤展示；nil 时返回空集。
@@ -144,6 +148,12 @@ func pruneEmptyGroups(nodes []GroupTreeNode) []GroupTreeNode {
 // 不注入时 BuildGroupTreeFiltered 退化为 BuildGroupTree。
 func (s *ConsoleService) SetSupportedPathsRepository(repo SupportedPathsRepository) {
 	s.supportedPathsRepo = repo
+}
+
+// SetParamModelPathsResolver 注入 paramModelID → supported paths 反查，供 deviceKey 分支使用。
+// 不注入时 deviceKey 分支退化为全集（admin 视图等价）。
+func (s *ConsoleService) SetParamModelPathsResolver(fn func(ctx context.Context, paramModelID uuid.UUID) (map[string]struct{}, error)) {
+	s.resolvePathsByParamModel = fn
 }
 
 // SetFlatTreeRepo 装配 Task #4 扁平命令树仓储。不走构造函数以避免贩及
@@ -337,6 +347,9 @@ func (s *ConsoleService) GetCommandSubFields(ctx context.Context, commandID uuid
 		lang = "zh-CN"
 	}
 	var paramModelID *uuid.UUID
+	// supportedPaths 是 Redis（ParamRegistry L1→L2→DB）取出的该产品支持路径集。
+	// nil 表示 admin 全集（不过滤）；非 nil 时 Go 层做交集，不再走 SQL EXISTS 过滤。
+	var supportedPaths map[string]struct{}
 	if productClass != "" && s.supportedPathsRepo != nil {
 		set, err := s.supportedPathsRepo.ResolveByProductClass(ctx, productClass)
 		if err != nil {
@@ -349,6 +362,8 @@ func (s *ConsoleService) GetCommandSubFields(ctx context.Context, commandID uuid
 				return []SubFieldDTO{}, nil
 			}
 			paramModelID = set.ParamModelID
+			// SupportedSet.Paths 已由 ParamRegistry 经 Redis L1→L2→DB 取得，直接复用。
+			supportedPaths = set.Paths
 		}
 	}
 	if paramModelID == nil && deviceKey != "" && s.resolveParamModelByDevice != nil {
@@ -367,13 +382,30 @@ func (s *ConsoleService) GetCommandSubFields(ctx context.Context, commandID uuid
 			return []SubFieldDTO{}, nil
 		}
 		paramModelID = pmID
+		// deviceKey 分支：通过注入的 resolver 从 ParamRegistry（Redis L1→L2→DB）取路径集。
+		if paramModelID != nil && s.resolvePathsByParamModel != nil {
+			paths, pathErr := s.resolvePathsByParamModel(ctx, *paramModelID)
+			if pathErr != nil {
+				s.logger.Warn("resolve paths by param_model failed, fallback to unfiltered",
+					zap.String("param_model_id", paramModelID.String()), zap.Error(pathErr))
+			} else {
+				supportedPaths = paths
+			}
+		}
 	}
-	enriched, err := s.subFieldRepo.ListEnrichedByCommand(ctx, commandID, paramModelID)
+	// 取命令 sub_fields 全集（不带 SQL param_mappings 过滤），在 Go 层按 Redis 路径集过滤。
+	enriched, err := s.subFieldRepo.ListEnrichedByCommand(ctx, commandID, nil)
 	if err != nil {
 		return nil, fmt.Errorf("list enriched sub_fields: %w", err)
 	}
 	out := make([]SubFieldDTO, 0, len(enriched))
 	for _, e := range enriched {
+		// supportedPaths == nil 表示 admin 全集，不过滤。
+		if supportedPaths != nil {
+			if _, ok := supportedPaths[e.Tr069Path]; !ok {
+				continue
+			}
+		}
 		out = append(out, SubFieldDTO{
 			ID:                 e.ID,
 			CommandID:          e.CommandID,

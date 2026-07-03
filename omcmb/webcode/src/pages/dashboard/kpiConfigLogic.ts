@@ -105,23 +105,34 @@ export function toMetricOptions(items: KPIDefinitionItem[]): MetricOption[] {
 /**
  * 新增一张空图：追加到末尾，默认半宽、标题空、无指标。
  *
- * x/y 先放到最后一行下方（y = 当前最大底边），避免与现有图重叠；
+ * 落位策略：优先填满最后一行的右侧空位（与默认两列布局对齐），无空位再另起新行。
  * 具体落位由用户拖拽再调，存盘以最终坐标为准。
  *
  * @param panels 现有工作态 panels
- * @param title 默认标题（i18n 解析后的文案，可空）
+ * @param title 默认标题（i18n key 或用户纯文本）
  * @returns 追加新图后的新数组（不可变）
  */
 export function addPanel(panels: WorkingPanel[], title = ''): WorkingPanel[] {
   const maxBottom = panels.reduce((max, p) => Math.max(max, p.y + p.h), 0);
+
+  // 检查最后一行（y 最大的行）是否只有左侧半宽图而右侧空缺。
+  // 若是，新图摆右侧，与左侧并排；否则另起新行。
+  const maxY = panels.length > 0 ? panels.reduce((max, p) => Math.max(max, p.y), 0) : -1;
+  const lastRowHasLeft =
+    maxY >= 0 && panels.some((p) => p.y === maxY && p.x === 0 && p.w === HALF_WIDTH);
+  const lastRowHasRight = maxY >= 0 && panels.some((p) => p.y === maxY && p.x >= HALF_WIDTH);
+
+  const newX = lastRowHasLeft && !lastRowHasRight ? HALF_WIDTH : 0;
+  const newY = newX === HALF_WIDTH ? maxY : maxBottom;
+
   return [
     ...panels,
     {
       id: nextPanelId(),
       title,
       metrics: [],
-      x: 0,
-      y: maxBottom,
+      x: newX,
+      y: newY,
       w: HALF_WIDTH,
       h: DEFAULT_HEIGHT,
       chartType: 'line',
