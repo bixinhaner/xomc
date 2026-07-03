@@ -6847,8 +6847,8 @@ const messages: Record<string, string> = {
   'retentionBp.ilm.desc':                    'Expire raw PM/MR files in MinIO (pm-files/mr-files buckets) after N days. The lifecycle rule is re-applied immediately on save.',
   'retentionBp.stationlog.title':            'Base Station Log Retention (#320)',
   'retentionBp.stationlog.desc':             'Time-based retention (days) coexists with the fault-log file-count quota; set the quota to 0 to disable it and keep time-based retention only.',
-  'retentionBp.archive.title':               'Post-Ingest Compression (#321)',
-  'retentionBp.archive.desc':                'After successful ingest, gzip the plaintext PM/MR raw XML back to MinIO to save disk (already-gzipped real-device files are skipped at zero cost).',
+  'retentionBp.archive.title':               'PM/MR Post-Ingest Compression (#836)',
+  'retentionBp.archive.desc':                'For new PM/MR raw XML only, try gzip once after successful ingest; failures do not affect business processing and historical files are not scanned.',
   'retentionBp.field.enabled':               'Enable Backpressure',
   'retentionBp.field.disk_high_pct':         'Disk Usage High Watermark (%, stop above)',
   'retentionBp.field.disk_low_pct':          'Disk Usage Low Watermark (%, resume below)',
@@ -6857,7 +6857,7 @@ const messages: Record<string, string> = {
   'retentionBp.field.max_retention_days':    'Station Log Retention (days)',
   'retentionBp.field.max_file_count':        'Fault Log File Quota (0=disabled)',
   'retentionBp.field.max_file_count_per_device': 'Fault Log File Quota Per Device (0=disabled)',
-  'retentionBp.field.compress_after_ingest': 'Compress After Ingest',
+  'retentionBp.field.compress_after_ingest': 'Compress New Files After Ingest',
 
   // -------------------------------------------------------------------------
   // Log Retention & Rotation (system config log_cfg tab): log.retention + log.rotation

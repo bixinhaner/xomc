@@ -6,13 +6,13 @@
 #   #318 ACS PM 上传背压 watchdog（磁盘%+CPU 双阈迟滞，停收/恢复）
 #   #319 MinIO 原始件 ILM 保留期可配（默认 60 天）
 #   #320 基站日志按时间保留（默认 60 天）+ 文件数配额可配并存
-#   #321 入库后原始 XML 压缩回写 MinIO 省盘
+#   #836 入库后原始 XML 一次性压缩回写 MinIO 省盘
 #
 # 分层：
 #   A. 系统配置可见可改（纯 app HTTP API，任何部署形态都跑）—— 头号验收项
 #   B. #318 背压：ACS 指标暴露 + 功能 engage/release（容器栈，可达才跑）
 #   C. #319 ILM：pm-files/mr-files 桶 60 天过期规则（MinIO mc，容器可用才跑）
-#   D. #321 压缩回写：worker raw_archive 指标暴露（worker 指标口，可达才跑）
+#   D. #836 一次性压缩：worker raw_archive 指标暴露（worker 指标口，可达才跑）
 #   E. #320 基站日志保留：时间保留 + 文件数配额配置并存（纯 app HTTP API）
 #
 # 容器栈额外端点（可用环境变量覆盖）：
@@ -146,7 +146,7 @@ check_cfg_key "acs.backpressure" "cpu_low_per_core"
 check_cfg_key "acs.backpressure" "check_interval_sec"
 # #319 ILM 保留天数
 check_cfg_key "minio.retention" "raw_object_days"
-# #321 压缩回写开关
+# #836 入库后一次性压缩开关
 check_cfg_key "raw_archive" "compress_after_ingest"
 # #320 基站日志保留（时间 + 文件数配额并存）
 check_cfg_key "stationlog.retention" "max_retention_days"
@@ -260,16 +260,16 @@ else
 fi
 
 # ===========================================================================
-section "D. #321 入库后压缩回写（worker raw_archive 指标暴露）"
+section "D. #836 入库后一次性压缩（worker raw_archive 指标暴露）"
 # ===========================================================================
 if ! endpoint_up "$WORKER_METRICS_URL"; then
-    skip "#321 raw_archive 指标核查" "worker 指标不可达（$WORKER_METRICS_URL），跳过"
+    skip "#836 raw_archive 指标核查" "worker 指标不可达（$WORKER_METRICS_URL），跳过"
 else
     if metric_has "$WORKER_METRICS_URL" '^omc_raw_archive_(total|saved_bytes_total)'; then
         saved=$(metric_value "$WORKER_METRICS_URL" "omc_raw_archive_saved_bytes_total")
-        pass "#321 worker raw_archive 指标暴露（saved_bytes_total=${saved:-0}）"
+        pass "#836 worker raw_archive 指标暴露（saved_bytes_total=${saved:-0}）"
     else
-        fail "#321 raw_archive 指标暴露" "未在 worker 指标中找到 omc_raw_archive_*"
+        fail "#836 raw_archive 指标暴露" "未在 worker 指标中找到 omc_raw_archive_*"
     fi
 fi
 

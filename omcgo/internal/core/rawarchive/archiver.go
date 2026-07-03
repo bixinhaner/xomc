@@ -1,24 +1,19 @@
 // Package rawarchive 在 PM/MR 原始文件入库成功后，把仍是明文的 XML gzip 压缩回写 MinIO
-// 省盘（issue #321）。
+// 省盘（issue #836）。
 //
-// 背景：真机 CPE / cpe_simulator.py 多按 TR-069 上传 .xml.gz，MinIO 原样存压缩字节——这类
-// 对象本包零成本跳过（前 2 字节探到 gzip 魔数即跳过整文件读写）。仅合成压测等明文上传的
-// 对象才会被 gzip 后按原 key 覆盖写（设 ContentEncoding=gzip）。入库读取侧由
-// core/compress.MaybeGunzip 透明解压，故压缩态对象后续仍可正确再解析。
+// 入库读取侧由 core/compress.MaybeGunzip 透明解压，故历史 .xml.gz 或设备直接上传的
+// gzip 对象仍可正确解析。明文对象只在 PM/MR 入库成功后按开关尝试一次 gzip 回写。
 //
 // 设计取舍：压缩是纯省盘优化，绝不影响已入库数据。
 //   - 异步 + 有界并发：不阻塞 NATS 入库回调 ack；并发满则丢弃本次内联压缩（记 dropped_busy），
-//     不积压 goroutine —— 丢弃的不会漏压，由 Sweeper 兜底（见下）。
+//     不积压 goroutine；issue #836 接受漏压，不做后台补偿。
 //   - 失败只 warn + 记 metric，不回报错误。
 //   - enabled 走 sys_configs（category=raw_archive, key=compress_after_ingest，默认 true），
 //     TTL 缓存避免每文件查库。
 //
-// 保证压到（issue #321 加固）：内联 Schedule 是"快路径"，压成功后在 pm_files/mr_files
-// 标记 raw_compressed=true；Sweeper（sweeper.go）是"兜底"——周期性补压所有 raw_compressed=false
-// 的残量（内联 dropped_busy / 失败 / 崩溃前未压），直至置真。两者复用同一压缩核心 compress()，
-// 终态判定（terminal）一致：成功压缩 / 本就是 gzip / 明确无需压（no_gain/too_large/empty）/
-// 对象已删（not_found 孤儿行）皆为终态可标记；disabled / error 非终态，留待重扫。故每个原始
-// XML 最终都被压缩，不再有静默漏压，Sweeper 也不会在孤儿行处卡死。
+// issue #836：压缩是新文件入库后的 best-effort 一次性动作，不做历史补扫或重试。
+// raw_compressed=true 只表示对象实际以 gzip 存储；压缩禁用、失败、无收益、过大或对象缺失
+// 都保持 raw_compressed=false。
 package rawarchive
 
 import (
@@ -51,29 +46,28 @@ const (
 	removeOldTimeout = 10 * time.Second // 删旧明文键的独立短超时（与压缩/扫描 ctx 解耦）
 )
 
-// outcome 是单次压缩回写的结果分类。terminal 的结果意味着"该对象的压缩状态已确定"
-// （成功压缩 / 本就是 gzip / 明确决定不压）——可在 pm_files/mr_files 标记 raw_compressed=true
-// 并移出 Sweeper 待扫描集；非 terminal（disabled / error）保持未压缩，留待 Sweeper 重试。
+// outcome 是单次压缩回写的结果分类。terminal 的结果意味着对象实际已经 gzip 存储，
+// 可在 pm_files/mr_files 标记 raw_compressed=true。其他结果都保持 raw_compressed=false。
 // dropped_busy 不进入 compress()（在 Schedule 的并发门处直接丢弃），故不在此枚举。
 type outcome int
 
 const (
-	outcomeError      outcome = iota // 读/写/压缩失败（非终态，待重扫）
-	outcomeDisabled                  // 总开关关闭（非终态，开关恢复后重扫）
-	outcomeEmpty                     // 对象 0 字节（终态，无可压）
-	outcomeSkippedGz                 // 已是 gzip（终态，真机 .xml.gz 常态）
-	outcomeCompressed                // 明文压缩并覆盖回写成功（终态）
-	outcomeNoGain                    // 压不动（gzip 头开销 ≥ 收益，终态，保留明文）
-	outcomeTooLarge                  // 超 maxObjectBytes 上限（终态，保留明文防 OOM）
-	outcomeNotFound                  // 对象已不存在（孤儿行，终态，标记后移出待扫集）
+	outcomeError      outcome = iota // 读/写/压缩失败，保持 raw_compressed=false
+	outcomeDisabled                  // 总开关关闭，保持 raw_compressed=false
+	outcomeEmpty                     // 对象 0 字节，无可压，保持 raw_compressed=false
+	outcomeSkippedGz                 // 已是 gzip（真机 .xml.gz 常态），可标记 raw_compressed=true
+	outcomeCompressed                // 明文压缩并回写成功，可标记 raw_compressed=true
+	outcomeNoGain                    // 压不动（gzip 头开销 ≥ 收益），保留明文，保持 raw_compressed=false
+	outcomeTooLarge                  // 超 maxObjectBytes 上限，保留明文防 OOM，保持 raw_compressed=false
+	outcomeNotFound                  // 对象已不存在，保持 raw_compressed=false
 )
 
-// terminal 报告该结果是否表示"压缩状态已确定"，可标记 raw_compressed=true。
+// terminal 报告该结果是否表示对象实际 gzip 存储，可标记 raw_compressed=true。
 func (o outcome) terminal() bool {
 	switch o {
-	case outcomeCompressed, outcomeSkippedGz, outcomeNoGain, outcomeTooLarge, outcomeEmpty, outcomeNotFound:
+	case outcomeCompressed, outcomeSkippedGz:
 		return true
-	default: // outcomeError / outcomeDisabled
+	default:
 		return false
 	}
 }
@@ -126,11 +120,11 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m := &Metrics{
 		Total: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "omc_raw_archive_total",
-			Help: "原始文件入库后压缩回写结果计数（issue #321），label result 区分压缩/跳过/失败原因",
+			Help: "原始文件入库后一次性压缩结果计数（issue #836），label result 区分压缩/跳过/失败原因",
 		}, []string{"result"}),
 		SavedBytes: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "omc_raw_archive_saved_bytes_total",
-			Help: "原始文件压缩回写累计省盘字节数（原始大小 - 压缩后大小）",
+			Help: "原始文件入库后一次性压缩累计省盘字节数（原始大小 - 压缩后大小）",
 		}),
 	}
 	if reg != nil {
@@ -172,12 +166,12 @@ func New(baseCtx context.Context, store RawStore, lookup ConfigLookup, metrics *
 	}
 }
 
-// Schedule 非阻塞地排程一次压缩回写（内联快路径）。并发已满则丢弃本次（记 dropped_busy）——
-// 丢弃的对象不会漏压，Sweeper 会兜底补压（见包注释）。onTerminal 在压缩抵达终态后于压缩
+// Schedule 非阻塞地排程一次压缩回写。并发已满则丢弃本次（记 dropped_busy）。
+// issue #836 明确不做后台重试；错过本次压缩是可接受结果。onTerminal 在对象实际 gzip 存储后于压缩
 // goroutine 内回调，传入 (bucket, 旧键, 新键)：压缩成功改键时新键为 object+".gz"，其余终态新键==旧键。
 // 透传 bucket 是为了让调用方对正确的桶删旧键（调用方的 c.bucket 未必等于本次 Schedule 的 bucket，
 // 如 MR 用 payload.Bucket）。供调用方在 pm_files/mr_files 标记 raw_compressed=true 并把 minio_path
-// 更新为新键、再删旧键；nil-safe，非终态（error/disabled）或 dropped_busy 不回调。
+// 更新为新键、再删旧键；nil-safe，非 gzip 存储结果或 dropped_busy 不回调。
 func (a *Archiver) Schedule(bucket, object string, onTerminal func(ctx context.Context, bucket, oldObject, newObject string)) {
 	if a == nil || a.store == nil || bucket == "" || object == "" {
 		return
@@ -203,10 +197,9 @@ func (a *Archiver) Schedule(bucket, object string, onTerminal func(ctx context.C
 	}
 }
 
-// CompressNow 同步压缩一个对象并记 metric（供 Sweeper 补偿扫描用），返回 (是否终态, 压缩后对象键)。
-// 终态即可在 pm_files/mr_files 标记 raw_compressed=true 并把 minio_path 更新为返回的新键（压缩成功
-// 改键时为 object+".gz"，否则==object），随后删旧键；非终态（禁用 / 读写错误）返回 false，保持
-// raw_compressed=false 待下一轮重扫。
+// CompressNow 同步压缩一个对象并记 metric，返回 (对象是否实际 gzip 存储, 压缩后对象键)。
+// true 时可在 pm_files/mr_files 标记 raw_compressed=true 并把 minio_path 更新为返回的新键
+// （压缩成功改键时为 object+".gz"，已 gzip 时为原键）；其他结果保持 raw_compressed=false。
 func (a *Archiver) CompressNow(ctx context.Context, bucket, object string) (bool, string) {
 	if a == nil || a.store == nil || bucket == "" || object == "" {
 		return false, object
@@ -216,7 +209,7 @@ func (a *Archiver) CompressNow(ctx context.Context, bucket, object string) (bool
 	return oc.terminal(), newObject
 }
 
-// Enabled 返回压缩回写总开关（供 Sweeper 每轮扫描前短路，禁用时不空转扫描）。
+// Enabled 返回压缩回写总开关。
 func (a *Archiver) Enabled(ctx context.Context) bool {
 	if a == nil {
 		return false
@@ -250,7 +243,7 @@ func (a *Archiver) RemoveOld(ctx context.Context, bucket, object string) {
 }
 
 // compress 是压缩回写的核心逻辑（同步，返回结果分类、省下字节、压缩后对象键）——由
-// Schedule（内联快路径）、CompressNow（Sweeper 兜底）、archive（单测）共用，保证三路语义一致。
+// Schedule、CompressNow、archive（单测）共用，保证语义一致。
 // 压缩成功时回写到新键 object+".gz"（自描述，不覆盖原明文键），第三个返回值即新键；其余情况
 // 返回值==object（未改键）。原明文键由调用方在 DB minio_path 更新成功后经 RemoveOld 删除。
 func (a *Archiver) compress(ctx context.Context, bucket, object string) (outcome, int64, string) {
@@ -261,7 +254,6 @@ func (a *Archiver) compress(ctx context.Context, bucket, object string) (outcome
 	// 廉价探测：前 2 字节命中 gzip 魔数 → 对象已压缩（真机常态），跳过整文件读写。
 	head, err := a.store.ReadHead(ctx, bucket, object, probeBytes)
 	if err != nil {
-		// 对象已被删除（孤儿行）→ 终态，让 Sweeper 标记移出，不永久重扫卡死。
 		if errors.Is(err, ErrObjectNotFound) {
 			return outcomeNotFound, 0, object
 		}
@@ -309,7 +301,7 @@ func (a *Archiver) compress(ctx context.Context, bucket, object string) (outcome
 	}
 
 	// 改键回写：写到 object+".gz"（自描述），不覆盖原明文键。原键由调用方在 DB minio_path 更新
-	// 成功后删除（RemoveOld），保证「DB 永远指向已存在的对象」、崩溃可由 Sweeper 重扫自愈。
+	// 成功后删除（RemoveOld），保证「DB 永远指向已存在的对象」。
 	// 防御：object 已以 .gz 结尾（理论上明文不会）则不再追加，覆盖原键。
 	newObject := object
 	if !strings.HasSuffix(strings.ToLower(object), gzSuffix) {

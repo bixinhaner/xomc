@@ -145,7 +145,7 @@ func TestSweeper_ListErrorDoesNotMark(t *testing.T) {
 	assert.False(t, reg.isMarked("x.xml"), "列表失败时不应标记任何对象")
 }
 
-func TestSweeper_NoGainStillTerminalMarked(t *testing.T) {
+func TestSweeper_NoGainDoesNotMarkCompressed(t *testing.T) {
 	store := newFakeStore()
 	store.put("pm-files", "tiny.xml", []byte("<a/>")) // 压不动
 	reg := newFakeRegistry("tiny.xml")
@@ -156,7 +156,7 @@ func TestSweeper_NoGainStillTerminalMarked(t *testing.T) {
 
 	_, ok := store.puts[key("pm-files", "tiny.xml")]
 	assert.False(t, ok, "压不动的小文件不回写")
-	assert.True(t, reg.isMarked("tiny.xml"), "no_gain 是终态，应标记避免反复重扫")
+	assert.False(t, reg.isMarked("tiny.xml"), "no_gain 没有实际 gzip 存储，不能标记 raw_compressed")
 }
 
 type assertErr struct{}

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# 冒烟：原始 PM/MR 文件压缩回写（issue #321 + 加固）
+# 冒烟：原始 PM/MR 文件入库后一次性压缩（issue #836）
 #
-# 验证「基站上传的明文 XML，解析入库后被压缩一次回写 MinIO」这条铁律在 v 真栈成立：
+# 验证「基站上传的新明文 XML，解析入库后 best-effort 尝试一次压缩回写 MinIO」在真栈成立：
 #   1. 用真设备 SN 把明文 PM / MR 样本上传到 ACS FileUploadService（fileType=PM/MR）；
 #   2. 等 worker 入库 + 内联压缩回写；
 #   3. 直接查 MinIO 对象：首 2 字节须为 gzip 魔数 1f8b、Content-Encoding=gzip、且能解压还原
@@ -19,7 +19,7 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
-smoke_init "原始文件压缩回写(#321)" "$@"
+smoke_init "原始文件入库后一次性压缩(#836)" "$@"
 smoke_login
 
 ACS_UPLOAD_URL="${OMC_ACS_URL:-http://localhost:7557}"

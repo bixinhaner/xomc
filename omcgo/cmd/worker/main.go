@@ -163,8 +163,8 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	// KPI/时序库物理分离：pm_files 已迁时序库（与 pm_metrics 同库保 copy_ingest 原子性），文件存储走 TsPool。
 	pmFileStore := pm.NewPgPMFileStore(w.TsPool)
 
-	// issue #321：原始文件压缩回写器（PM/MR 共用一个实例，单点注册 metric）。入库成功后把
-	// 明文 XML gzip 覆盖写回 MinIO 省盘；真机已是 .xml.gz 的对象零成本跳过。开关走 sys_configs
+	// issue #836：原始文件压缩回写器（PM/MR 共用一个实例，单点注册 metric）。新文件入库成功后
+	// 对明文 XML 尝试一次 gzip 回写；真机已是 .xml.gz 的对象零成本跳过。开关走 sys_configs
 	// raw_archive.compress_after_ingest（默认 true，TTL 缓存）。异步有界并发，不阻塞入库 ack。
 	rawArchiveSysCfg := admin.NewPgSysConfigRepository(w.PgPool)
 	// 可取消的 base ctx：进程优雅关停时取消，停掉在途压缩 goroutine（对标 backpressure
@@ -234,7 +234,7 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	// KPI/时序库物理分离：pm_metrics + pm_files 同在时序库（TsPool），单事务 copy 原子入库。
 	pmCollector.SetCopyIngestor(pmmetrics.NewPgRepository(w.TsPool))
 
-	// issue #321：入库成功后压缩回写原始 PM XML 省盘。
+	// issue #836：入库成功后对原始 PM XML 尝试一次压缩回写省盘。
 	pmCollector.SetArchiver(rawArchiver)
 
 	// copy 是唯一写路径，KPI 恒用当前文件内存 counter 计算（CalculateFromCounters）；
@@ -405,30 +405,17 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	// 注入 carrier MR-type 支持判定（#17）：MRE parser 的 "运营商是否采集 MRE" 决策
 	// 走 Carrier 适配器，去除 mr/parser 里的 "if carrier == cucc" 硬编码。
 	mrCollector.SetMRTypeSupport(w.Carriers)
-	// issue #321：入库成功后压缩回写原始 MR XML 省盘（与 PM 共用同一 archiver）。
+	// issue #836：入库成功后对原始 MR XML 尝试一次压缩回写省盘（与 PM 共用同一 archiver）。
 	mrCollector.SetArchiver(rawArchiver)
 	if err := mrCollector.Subscribe(w.EventBus); err != nil {
 		logger.Warn("subscribe MR collector", zap.Error(err))
 	}
 	logger.Info("MR collector started")
 
-	// issue #321 加固「保证压到」：补偿扫描 Sweeper —— 周期性补压内联快路径遗漏的原始对象
-	// （dropped_busy / 失败 / 崩溃前未压），PM/MR 双源，直至各自 raw_compressed 置真。复用同一
-	// rawArchiver（共用总开关 + 压缩核心）。生命周期挂 archiverCtx（进程优雅关停时取消，停掉
-	// 在途扫描）。pmFileStore(TsPool) / mrStore(PgPool) 各实现 RawFileRegistry。
-	rawSweeper := rawarchive.NewSweeper(
-		rawArchiver,
-		[]rawarchive.SweepSource{
-			{Name: "pm", Bucket: cfg.MinIO.Buckets.PMFiles, Registry: pmFileStore},
-			{Name: "mr", Bucket: cfg.MinIO.Buckets.MRFiles, Registry: mrStore},
-		},
-		rawarchive.DefaultSweepInterval, rawarchive.DefaultSweepGrace,
-		rawarchive.DefaultSweepBatch, rawarchive.DefaultSweepConc,
-		rawarchive.NewSweepMetrics(w.MetricsReg),
-		logger.Named("raw-archive-sweeper"),
-	)
-	go rawSweeper.Run(archiverCtx)
-	logger.Info("raw-archive sweeper started")
+	// issue #836：PM/MR 原始文件压缩只在本次新文件入库成功后尝试一次。
+	// 不再启动 rawarchive Sweeper 扫描历史 raw_compressed=false 文件；漏压/失败可接受，
+	// 避免开关关闭后仍有后台补压或启用时产生历史 IO 峰值。
+	logger.Info("raw-archive sweeper disabled; post-ingest compression is one-shot")
 
 	// F05 MR 任务管理（scheduler / heartbeat / cleaner / completion）已迁到 app 进程，
 	// 详见 cmd/app/provider/modules.go 中的 mrtask 装配段。
