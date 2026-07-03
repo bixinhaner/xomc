@@ -207,7 +207,7 @@ func TestCompressNow_TerminalSemantics(t *testing.T) {
 	assert.True(t, okGz, "已 gzip=终态")
 	assert.Equal(t, "gz.xml.gz", newGz, "已 gzip 不改键")
 	okTiny, newTiny := a.CompressNow(context.Background(), "pm-files", "tiny.xml")
-	assert.True(t, okTiny, "no_gain=终态")
+	assert.False(t, okTiny, "no_gain 没有实际 gzip 存储，raw_compressed 必须保持 false")
 	assert.Equal(t, "tiny.xml", newTiny, "no_gain 不改键")
 
 	// 禁用 → 非终态（留待开关恢复后重扫）。
@@ -222,15 +222,15 @@ func TestCompressNow_TerminalSemantics(t *testing.T) {
 	assert.False(t, okDisabled, "禁用=非终态")
 }
 
-func TestCompressNow_NotFoundIsTerminal(t *testing.T) {
-	// 孤儿行：对象已被 retention 删除（ReadHead → ErrObjectNotFound）。须判终态，
-	// 否则 Sweeper 会永久重扫该行、卡死其后真正待压的文件。
+func TestCompressNow_NotFoundIsNotCompressed(t *testing.T) {
+	// 对象已被 retention 删除（ReadHead → ErrObjectNotFound）时没有实际 gzip 存储，
+	// 因此不能把 raw_compressed 标真。
 	store := newFakeStore()
 	store.markMissing("pm-files", "gone.xml")
 
 	a := newTestArchiver(store, nil)
 	okGone, _ := a.CompressNow(context.Background(), "pm-files", "gone.xml")
-	assert.True(t, okGone, "对象不存在=终态（标记后移出待扫集）")
+	assert.False(t, okGone, "对象不存在不代表已 gzip 存储")
 	_, putOk := store.puts[key("pm-files", "gone.xml")]
 	assert.False(t, putOk, "不存在的对象不应触发任何回写")
 }
@@ -271,4 +271,16 @@ func TestSchedule_NoCallbackWhenDisabled(t *testing.T) {
 	// 给压缩 goroutine 足够时间跑完（禁用路径会很快返回非终态）。
 	time.Sleep(200 * time.Millisecond)
 	assert.Equal(t, int32(0), atomic.LoadInt32(&called), "禁用（非终态）不应回调")
+}
+
+func TestSchedule_NoCallbackWhenNoCompressionGain(t *testing.T) {
+	store := newFakeStore()
+	store.put("pm-files", "tiny.xml", []byte("<a/>"))
+
+	a := newTestArchiver(store, nil)
+	var called int32
+	a.Schedule("pm-files", "tiny.xml", func(_ context.Context, _, _, _ string) { atomic.AddInt32(&called, 1) })
+
+	time.Sleep(200 * time.Millisecond)
+	assert.Equal(t, int32(0), atomic.LoadInt32(&called), "no_gain 未生成 gzip 对象，不能标记 raw_compressed")
 }

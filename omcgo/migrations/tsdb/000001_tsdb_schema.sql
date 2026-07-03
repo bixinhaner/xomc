@@ -86,8 +86,7 @@ CREATE TABLE public.trace_messages (
 );
 
 -- ── pm_files（普通表；pm_metrics 同库保住 copy_ingest 单事务原子性）────────────────────
--- raw_compressed（#321 加固）：原始 PM XML 是否已 gzip 压缩回写 MinIO；内联压成功置真，
--- rawarchive.Sweeper 补压内联遗漏的残量直至置真，保证压到。
+-- raw_compressed：原始 PM XML 是否实际以 gzip 存储；worker 入库后一次性压缩成功或已 gzip 时置真。
 CREATE TABLE public.pm_files (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     device_id uuid NOT NULL,
@@ -108,14 +107,14 @@ CREATE TABLE public.pm_files (
 );
 CREATE INDEX idx_pm_files_created ON public.pm_files USING btree (created_at DESC);
 CREATE INDEX idx_pm_files_device ON public.pm_files USING btree (device_id);
--- 部分索引：只索引未压行（稳态近空集），让 Sweeper 的 WHERE raw_compressed=false AND
--- created_at<cutoff 查询代价 O(待压残量)。
+-- 部分索引：只索引未压行，保留给 deprecated Sweeper/离线工具按 raw_compressed=false AND
+-- created_at<cutoff 查询。
 CREATE INDEX idx_pm_files_uncompressed ON public.pm_files USING btree (created_at) WHERE (raw_compressed = false);
 
 -- ── mr_files（普通表；与 mr_records 同库 —— MR 文件元数据落时序库，不再放主库）────────────
 -- 原在主库（PgPool），随「MR 也记录到时序库」迁来 TsPool：与 pm_files / mr_records 一致。
 -- 无外键（device 维度经 device_dim 影子表 JOIN，订阅状态经 mr_customize_task_dim 影子表）。
--- raw_compressed 语义同 pm_files（#321 加固）。
+-- raw_compressed 语义同 pm_files：对象实际以 gzip 存储时置真。
 CREATE TABLE public.mr_files (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     device_id uuid NOT NULL,

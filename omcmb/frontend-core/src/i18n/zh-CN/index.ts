@@ -6876,8 +6876,8 @@ const messages: Record<string, string> = {
   'retentionBp.ilm.desc':                    'MinIO 原始 PM/MR 文件（pm-files/mr-files 桶）按天过期清理。保存后立即重应用生命周期规则。',
   'retentionBp.stationlog.title':            '基站日志保留',
   'retentionBp.stationlog.desc':             '基站日志按时间保留（天）与故障日志文件数配额并存；文件数配额填 0 表示禁用、仅按时间保留。',
-  'retentionBp.archive.title':               '入库压缩回写',
-  'retentionBp.archive.desc':                '入库成功后把明文 PM/MR 原始 XML 压缩回写 MinIO 省盘（真机已 gzip 的零成本跳过）。',
+  'retentionBp.archive.title':               'PM/MR 入库后压缩（#836）',
+  'retentionBp.archive.desc':                '仅对新 PM/MR 原始 XML 在成功入库后尝试一次 gzip 压缩；失败不影响业务处理，不扫描历史文件。',
   'retentionBp.field.enabled':               '启用背压',
   'retentionBp.field.disk_high_pct':         '数据盘使用率高水位（%，超过停收）',
   'retentionBp.field.disk_low_pct':          '数据盘使用率低水位（%，回落恢复）',
@@ -6886,7 +6886,7 @@ const messages: Record<string, string> = {
   'retentionBp.field.max_retention_days':    '基站日志保留天数',
   'retentionBp.field.max_file_count':        '故障日志文件数配额（0=禁用）',
   'retentionBp.field.max_file_count_per_device': '每设备故障日志文件数配额（0=禁用）',
-  'retentionBp.field.compress_after_ingest': '入库后压缩回写',
+  'retentionBp.field.compress_after_ingest': '新文件入库后压缩',
 
   // -------------------------------------------------------------------------
   // 日志保留与轮转（系统配置页 log_cfg 页签）：log.retention + log.rotation

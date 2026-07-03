@@ -1,6 +1,7 @@
 import http from '../http';
 import type { PageRequest, PageResponse } from '../../types/pagination';
 import type { MRIndicator, MRDeviceMapping } from '../../mock/data/mr';
+import { resolveRawArchiveDisplayFileName } from '../../utils/rawArchiveFileName';
 
 // --- Backend response types ---
 
@@ -109,7 +110,7 @@ function mapMRFile(f: BackendMRFileInfo): MRFileItem {
     deviceSn: f.device_sn,
     carrier: f.carrier,
     mrType: f.mr_type,
-    fileName: f.file_name,
+    fileName: resolveRawArchiveDisplayFileName(f.file_name, f.minio_path),
     fileSize: f.file_size,
     collectTime: f.collect_time,
     parsed: f.parsed,

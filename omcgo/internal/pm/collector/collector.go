@@ -172,16 +172,16 @@ func (c *PMCollector) SetCopyIngestor(ci CopyIngestor) {
 	c.copyIngestor = ci
 }
 
-// SetArchiver 注入原始文件压缩回写器（issue #321）：入库成功后把明文 XML gzip 覆盖写回
+// SetArchiver 注入原始文件压缩回写器（issue #836）：入库成功后对明文 XML 尝试一次 gzip 回写
 // MinIO 省盘（已是 gzip 的真机文件零成本跳过）。Nil-safe — 未注入时不做压缩回写。
 func (c *PMCollector) SetArchiver(a *rawarchive.Archiver) {
 	c.archiver = a
 }
 
 // markRawCompressed 把已压缩回写的 PM 原始对象在 pm_files 标记 raw_compressed=true 并把 minio_path
-// 更新为压缩后的新键（issue #321 加固 + 改键 .xml→.xml.gz）。作为 archiver.Schedule 的 onTerminal
+// 更新为压缩后的新键（issue #836 + 改键 .xml→.xml.gz）。作为 archiver.Schedule 的 onTerminal
 // 回调，在压缩 goroutine 内调用；nil-safe。DB 更新成功后删旧明文键（仅改键时）；标记/删除失败只
-// warn（标记丢失最多让 Sweeper 多扫一次，幂等无害；旧键残留只占盘）。
+// warn；旧键残留只占盘，后续由 MinIO 生命周期/运维清理兜底。
 func (c *PMCollector) markRawCompressed(ctx context.Context, bucket, oldObject, newObject string) {
 	if c.fileStore == nil {
 		return
@@ -404,8 +404,7 @@ func (c *PMCollector) ingestViaCopy(
 			zap.String("path", payload.MinIOPath), zap.String("device_sn", payload.DeviceSN))
 	} else {
 		// issue #321：仅新入库时把原始 XML 压缩回写 MinIO 省盘（已 gzip 则零成本跳过）。
-		// 异步有界并发，不阻塞 ack；nil-safe。压成功后经 onTerminal 标记 pm_files.raw_compressed=true，
-		// 使 Sweeper 待扫描集只剩内联未压成功的残量（加固：保证压到）。
+		// 异步有界并发，不阻塞 ack；nil-safe。压成功后经 onTerminal 标记 pm_files.raw_compressed=true。
 		c.archiver.Schedule(c.bucket, payload.MinIOPath, c.markRawCompressed)
 	}
 	if c.metrics != nil {

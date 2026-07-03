@@ -10,9 +10,7 @@ import (
 )
 
 // ErrObjectNotFound 表示对象在 MinIO 中已不存在（如被 retention/cleanup 删除，pm_files/
-// mr_files 行尚存的孤儿）。compress() 据此把该次结果判为终态（outcomeNotFound），让 Sweeper
-// 标记其 raw_compressed=true 移出待扫集，避免对已删对象永久重扫导致 Sweeper 在孤儿行处卡死、
-// 饿死其后真正待压的文件（"保证压到"加固）。
+// mr_files 行尚存的孤儿）。compress() 据此记录 not_found，但不会把 raw_compressed 标真。
 var ErrObjectNotFound = errors.New("rawarchive: object not found")
 
 // isNotFound 判定 MinIO 错误是否为对象/桶不存在。
@@ -59,7 +57,7 @@ func (s *minioStore) ReadHead(ctx context.Context, bucket, object string, n int)
 	}
 	if rerr != nil {
 		// 对象不存在（孤儿 pm_files/mr_files 行：对象已被 retention 删，行尚存）→ 归一化为
-		// ErrObjectNotFound，让 compress 判终态、Sweeper 标记并移出待扫集（不永久重扫卡死）。
+		// ErrObjectNotFound，由 compress 记录 not_found；该结果不代表已 gzip 存储。
 		if isNotFound(rerr) {
 			return nil, ErrObjectNotFound
 		}

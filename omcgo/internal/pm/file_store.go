@@ -74,9 +74,8 @@ type PMFileStore interface {
 	// handler 在调用前后清理（参考 backup.LicenseService.BatchDelete 模式）。
 	DeleteFilesBySN(ctx context.Context, sn string) (int64, error)
 
-	// ListUncompressed / MarkCompressed 供 rawarchive.Sweeper 补偿扫描"原始 XML 压缩回写"
-	// （issue #321 加固）：列出尚未确认压缩的对象键、标记其已压缩并把 minio_path 改键为
-	// 压缩后的 .xml.gz（renames: old→new）。MarkCompressed 也被内联压缩成功后单条调用。
+	// ListUncompressed 保留给 deprecated rawarchive.Sweeper；MarkCompressed 由入库后一次性压缩成功
+	// 回调使用，把实际 gzip 存储的对象标记为已压缩并按需把 minio_path 改键为 .xml.gz。
 	ListUncompressed(ctx context.Context, olderThan time.Time, limit int) ([]string, error)
 	MarkCompressed(ctx context.Context, renames map[string]string) error
 }

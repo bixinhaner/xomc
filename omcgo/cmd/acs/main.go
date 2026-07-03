@@ -260,7 +260,7 @@ func runACS(cmd *cobra.Command, args []string) error {
 		})
 
 		// issue #585：T-0074 引入的 ACS 端配置备份压缩链路已下线。
-		// 业务约定只有 PM / MR 才需压缩（PM 走 pmSyncGzip / MR 由 worker 侧处理），
+		// 业务约定只有 PM / MR 才需压缩，且都由 worker 在成功入库后一次性处理；
 		// 配置备份保留原始字节存入 MinIO —— 任务管理 <a href=presigned URL> 下载
 		// 由此不再出现 .xml.gz 命名 / Content-Encoding 透明解压不一致的问题；
 		// promote / DownloadHandler 仍保留对历史 .gz/.zst 对象的解压兜底。
