@@ -416,7 +416,7 @@ export default function ConfigParamsModal({
         {/* 预留提醒行高度，读类(无提醒)与写类(有提醒)切换时弹框总高不抖动（§需求 1）。 */}
         <div style={{ minHeight: 40 }}>
           {!currentRead && writeReminder && (
-            <Alert type="warning" showIcon message={writeReminder} style={{ padding: '6px 12px' }} />
+            <Alert type="warning" showIcon title={writeReminder} style={{ padding: '6px 12px' }} />
           )}
         </div>
       </Space>
