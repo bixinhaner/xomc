@@ -19,10 +19,11 @@ import (
 
 // issue #318：PM 文件上传资源背压 watchdog。
 //
-// 资源最大化部署（每台独占跑全栈，CPU 不按进程切）下磁盘写满或 CPU 打满仍无脑收 PM 文件会
-// 拖垮整机。本 watchdog 周期采集「数据盘占用%」（查 MinIO 指标端点，ACS/MinIO 同栈内网可达，
-// 免鉴权）+「CPU 负载」（host /proc/loadavg ÷ 核数），带迟滞地切换背压态：超高水位 → ACS 上传
-// handler 对 fileType=PM 返回 503（TR-069 设备会重传，不丢数据）；回落到低水位 → 自动恢复。
+// 资源最大化部署（每台独占跑全栈）下磁盘写满仍无脑收 PM 文件会拖垮整机。本 watchdog 周期采集
+// 「数据盘占用%」（查 MinIO 指标端点，ACS/MinIO 同栈内网可达，免鉴权），带迟滞地切换背压态：
+// 超高水位 → ACS 上传 handler 对 fileType=PM 返回 503（TR-069 设备会重传，不丢数据）；回落到
+// 低水位 → 自动恢复。CPU 负载仍周期探测并上报 Prometheus 指标（acs_host_load_per_core），
+// 供监控告警使用，但不参与背压决策（#827）。
 //
 // 配置全部落 sys_configs（category=acs.backpressure），经 NATS SubjectSysConfigSaved 热刷新。
 // 热路径（ServeHTTP）只读一个原子标志，零额外 IO。
@@ -34,15 +35,11 @@ const (
 	bpKeyEnabled     = "enabled"
 	bpKeyDiskHighPct = "disk_high_pct"
 	bpKeyDiskLowPct  = "disk_low_pct"
-	bpKeyCPUHigh     = "cpu_high_per_core"
-	bpKeyCPULow      = "cpu_low_per_core"
 	bpKeyInterval    = "check_interval_sec"
 
 	bpDefaultEnabled     = true
 	bpDefaultDiskHighPct = 85.0
 	bpDefaultDiskLowPct  = 75.0
-	bpDefaultCPUHigh     = 0.90
-	bpDefaultCPULow      = 0.70
 	bpDefaultIntervalSec = 30
 	bpMinInterval        = 5 * time.Second
 )
@@ -57,12 +54,10 @@ type BackpressureGate interface {
 
 // BackpressureConfig 是背压判定阈值，来自 sys_configs，可热刷新。
 type BackpressureConfig struct {
-	Enabled        bool
-	DiskHighPct    float64 // 磁盘高水位%：≥ 则进入背压
-	DiskLowPct     float64 // 磁盘低水位%：≤ 才解除（迟滞）
-	CPUHighPerCore float64 // 每核负载高水位
-	CPULowPerCore  float64 // 每核负载低水位
-	Interval       time.Duration
+	Enabled     bool
+	DiskHighPct float64 // 磁盘高水位%：≥ 则进入背压
+	DiskLowPct  float64 // 磁盘低水位%：≤ 才解除（迟滞）
+	Interval    time.Duration
 }
 
 // ConfigLookup 读 sys_configs 单值（value, found）。
@@ -74,19 +69,15 @@ type DiskUsageFunc func(ctx context.Context) (pct float64, err error)
 // loadBackpressureConfig 从 sys_configs 读全部背压阈值，缺失/非法回落默认值并做迟滞防呆。
 func loadBackpressureConfig(ctx context.Context, lookup ConfigLookup) BackpressureConfig {
 	cfg := BackpressureConfig{
-		Enabled:        bpDefaultEnabled,
-		DiskHighPct:    bpDefaultDiskHighPct,
-		DiskLowPct:     bpDefaultDiskLowPct,
-		CPUHighPerCore: bpDefaultCPUHigh,
-		CPULowPerCore:  bpDefaultCPULow,
-		Interval:       time.Duration(bpDefaultIntervalSec) * time.Second,
+		Enabled:     bpDefaultEnabled,
+		DiskHighPct: bpDefaultDiskHighPct,
+		DiskLowPct:  bpDefaultDiskLowPct,
+		Interval:    time.Duration(bpDefaultIntervalSec) * time.Second,
 	}
 	if lookup != nil {
 		cfg.Enabled = bpReadBool(ctx, lookup, bpKeyEnabled, bpDefaultEnabled)
 		cfg.DiskHighPct = float64(bpReadInt(ctx, lookup, bpKeyDiskHighPct, int(bpDefaultDiskHighPct), 1, 100))
 		cfg.DiskLowPct = float64(bpReadInt(ctx, lookup, bpKeyDiskLowPct, int(bpDefaultDiskLowPct), 0, 100))
-		cfg.CPUHighPerCore = bpReadFloat(ctx, lookup, bpKeyCPUHigh, bpDefaultCPUHigh)
-		cfg.CPULowPerCore = bpReadFloat(ctx, lookup, bpKeyCPULow, bpDefaultCPULow)
 		sec := bpReadInt(ctx, lookup, bpKeyInterval, bpDefaultIntervalSec, 1, 3600)
 		cfg.Interval = time.Duration(sec) * time.Second
 	}
@@ -96,9 +87,6 @@ func loadBackpressureConfig(ctx context.Context, lookup ConfigLookup) Backpressu
 	// 迟滞防呆：low 必须 ≤ high，否则回落条件与进入条件交叠会抖动。
 	if cfg.DiskLowPct > cfg.DiskHighPct {
 		cfg.DiskLowPct = cfg.DiskHighPct
-	}
-	if cfg.CPULowPerCore > cfg.CPUHighPerCore {
-		cfg.CPULowPerCore = cfg.CPUHighPerCore
 	}
 	return cfg
 }
@@ -130,38 +118,22 @@ func bpReadInt(ctx context.Context, lookup ConfigLookup, key string, def, lo, hi
 	return n
 }
 
-func bpReadFloat(ctx context.Context, lookup ConfigLookup, key string, def float64) float64 {
-	v, found := lookup(ctx, BackpressureCategory, key)
-	if !found {
-		return def
-	}
-	f, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
-	if err != nil || f < 0 {
-		return def
-	}
-	return f
-}
-
-// decideBackpressure 是纯函数迟滞决策（便于单测）。diskPct / loadPerCore 为负表示该信号不可用
-// （探测失败），不可用信号在进入判定时忽略、在解除判定时视作已达标（fail-open，不长期误堵）。
-func decideBackpressure(current bool, diskPct, loadPerCore float64, cfg BackpressureConfig) bool {
+// decideBackpressure 是纯函数迟滞决策（便于单测）。diskPct 为负表示该信号不可用
+// （探测失败），不可用时进入判定忽略、解除判定视作已达标（fail-open，不长期误堵）。
+func decideBackpressure(current bool, diskPct float64, cfg BackpressureConfig) bool {
 	if !cfg.Enabled {
 		return false
 	}
 	if !current {
-		// 未背压：任一已知信号越高水位 → 进入背压。
+		// 未背压：磁盘越高水位 → 进入背压。
 		if diskPct >= 0 && diskPct >= cfg.DiskHighPct {
-			return true
-		}
-		if loadPerCore >= 0 && loadPerCore >= cfg.CPUHighPerCore {
 			return true
 		}
 		return false
 	}
-	// 已背压：全部已知信号回落到低水位以下才解除（迟滞）。
+	// 已背压：磁盘回落到低水位以下才解除（迟滞）。
 	diskOK := diskPct < 0 || diskPct <= cfg.DiskLowPct
-	loadOK := loadPerCore < 0 || loadPerCore <= cfg.CPULowPerCore
-	return !(diskOK && loadOK)
+	return !diskOK
 }
 
 // BackpressureMetrics 暴露背压可观测指标。
@@ -198,7 +170,8 @@ func NewBackpressureMetrics(reg prometheus.Registerer) *BackpressureMetrics {
 	return m
 }
 
-// Watchdog 周期采样磁盘/CPU，带迟滞维护背压态，并对 handler 暴露 Allowed()。
+// Watchdog 周期采样磁盘使用率，带迟滞维护背压态，并对 handler 暴露 Allowed()。
+// CPU 负载另行探测并上报 acs_host_load_per_core 指标，但不参与背压决策（#827）。
 type Watchdog struct {
 	lookup    ConfigLookup
 	diskUsage DiskUsageFunc
@@ -210,7 +183,7 @@ type Watchdog struct {
 	active atomic.Bool // true = 背压中（拒收 PM）
 }
 
-// NewWatchdog 构造 watchdog。diskUsage 为 nil 时跳过磁盘信号（仅看 CPU）。
+// NewWatchdog 构造 watchdog。diskUsage 为 nil 时跳过磁盘信号（背压始终不触发）。
 func NewWatchdog(lookup ConfigLookup, diskUsage DiskUsageFunc, metrics *BackpressureMetrics, logger *zap.Logger) *Watchdog {
 	if logger == nil {
 		logger = zap.NewNop()
@@ -289,29 +262,25 @@ func (w *Watchdog) sample(ctx context.Context) {
 		}
 	}
 
-	loadPC := -1.0
+	// CPU 负载只更新监控指标，不参与背压决策（#827）。
 	if w.loadFn != nil {
 		if l, err := w.loadFn(); err != nil {
-			w.logger.Warn("cpu load probe failed; skip cpu signal", zap.Error(err))
-		} else {
-			loadPC = l
-			if w.metrics != nil {
-				w.metrics.loadPerCore.Set(l)
-			}
+			w.logger.Warn("cpu load probe failed", zap.Error(err))
+		} else if w.metrics != nil {
+			w.metrics.loadPerCore.Set(l)
 		}
 	}
 
 	prev := w.active.Load()
-	next := decideBackpressure(prev, diskPct, loadPC, cfg)
+	next := decideBackpressure(prev, diskPct, cfg)
 	if next != prev {
 		w.active.Store(next)
 		if next {
 			w.logger.Warn("PM upload backpressure ENGAGED — rejecting PM uploads (devices will retry)",
-				zap.Float64("disk_pct", diskPct), zap.Float64("disk_high_pct", cfg.DiskHighPct),
-				zap.Float64("load_per_core", loadPC), zap.Float64("cpu_high_per_core", cfg.CPUHighPerCore))
+				zap.Float64("disk_pct", diskPct), zap.Float64("disk_high_pct", cfg.DiskHighPct))
 		} else {
 			w.logger.Info("PM upload backpressure RELEASED — resuming PM uploads",
-				zap.Float64("disk_pct", diskPct), zap.Float64("load_per_core", loadPC))
+				zap.Float64("disk_pct", diskPct))
 		}
 	}
 	w.setActiveGauge(next)

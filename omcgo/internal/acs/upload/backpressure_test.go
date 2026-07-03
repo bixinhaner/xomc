@@ -57,36 +57,30 @@ minio_node_disk_used_bytes 900`,
 
 func TestDecideBackpressure_Hysteresis(t *testing.T) {
 	cfg := BackpressureConfig{
-		Enabled: true, DiskHighPct: 85, DiskLowPct: 75, CPUHighPerCore: 0.9, CPULowPerCore: 0.7,
+		Enabled: true, DiskHighPct: 85, DiskLowPct: 75,
 	}
 
 	// 未背压：低于高水位不触发。
-	assert.False(t, decideBackpressure(false, 80, 0.5, cfg))
+	assert.False(t, decideBackpressure(false, 80, cfg))
 	// 未背压：磁盘越高水位 → 进入。
-	assert.True(t, decideBackpressure(false, 90, 0.5, cfg))
-	// 未背压：CPU 越高水位 → 进入。
-	assert.True(t, decideBackpressure(false, 50, 0.95, cfg))
+	assert.True(t, decideBackpressure(false, 90, cfg))
 	// 已背压：介于高低水位之间 → 保持（迟滞，不抖动）。
-	assert.True(t, decideBackpressure(true, 80, 0.8, cfg))
-	// 已背压：两信号都回落到低水位以下 → 解除。
-	assert.False(t, decideBackpressure(true, 70, 0.6, cfg))
-	// 已背压：磁盘回落但 CPU 仍高 → 保持。
-	assert.True(t, decideBackpressure(true, 70, 0.95, cfg))
+	assert.True(t, decideBackpressure(true, 80, cfg))
+	// 已背压：磁盘回落到低水位以下 → 解除。
+	assert.False(t, decideBackpressure(true, 70, cfg))
 
 	// disabled 恒不背压。
 	off := cfg
 	off.Enabled = false
-	assert.False(t, decideBackpressure(true, 99, 9, off))
+	assert.False(t, decideBackpressure(true, 99, off))
 }
 
 func TestDecideBackpressure_UnknownSignalsFailOpen(t *testing.T) {
-	cfg := BackpressureConfig{Enabled: true, DiskHighPct: 85, DiskLowPct: 75, CPUHighPerCore: 0.9, CPULowPerCore: 0.7}
-	// 磁盘不可用(-1) + CPU 低 → 不进入。
-	assert.False(t, decideBackpressure(false, -1, 0.5, cfg))
-	// 已背压 + 两信号都不可用 → 解除（fail-open，不长期误堵）。
-	assert.False(t, decideBackpressure(true, -1, -1, cfg))
-	// 已背压 + 磁盘不可用但 CPU 仍高 → 保持。
-	assert.True(t, decideBackpressure(true, -1, 0.95, cfg))
+	cfg := BackpressureConfig{Enabled: true, DiskHighPct: 85, DiskLowPct: 75}
+	// 磁盘不可用(-1) → 不进入背压（fail-open）。
+	assert.False(t, decideBackpressure(false, -1, cfg))
+	// 已背压 + 磁盘不可用 → 解除（fail-open，不长期误堵）。
+	assert.False(t, decideBackpressure(true, -1, cfg))
 }
 
 func TestLoadBackpressureConfig_DefaultsAndClamp(t *testing.T) {
@@ -101,9 +95,7 @@ func TestLoadBackpressureConfig_DefaultsAndClamp(t *testing.T) {
 	values := map[string]string{
 		bpKeyDiskHighPct: "80",
 		bpKeyDiskLowPct:  "90", // > high
-		bpKeyCPUHigh:     "0.8",
-		bpKeyCPULow:      "0.95", // > high
-		bpKeyInterval:    "1",    // < min 5s
+		bpKeyInterval:    "1",  // < min 5s
 		bpKeyEnabled:     "false",
 	}
 	lookup := func(_ context.Context, category, key string) (string, bool) {
@@ -117,7 +109,6 @@ func TestLoadBackpressureConfig_DefaultsAndClamp(t *testing.T) {
 	assert.False(t, cfg.Enabled)
 	assert.Equal(t, 80.0, cfg.DiskHighPct)
 	assert.Equal(t, 80.0, cfg.DiskLowPct) // clamped to high
-	assert.Equal(t, 0.8, cfg.CPULowPerCore)
 	assert.Equal(t, bpMinInterval, cfg.Interval)
 }
 
