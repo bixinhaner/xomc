@@ -53,16 +53,12 @@ function showRaw(value: string | undefined | null): string {
   return (value ?? '').trim() || '—'
 }
 
-function formatRuntime(seconds: number): string {
+function formatRuntime(seconds: number | null | undefined): string {
   if (!seconds || seconds <= 0) return '—'
-  const days = Math.floor(seconds / 86400)
-  const hours = Math.floor((seconds % 86400) / 3600)
-  const minutes = Math.floor((seconds % 3600) / 60)
-  const parts: string[] = []
-  if (days > 0) parts.push(`${days}天`)
-  if (hours > 0) parts.push(`${hours}时`)
-  if (minutes > 0 && days === 0) parts.push(`${minutes}分`)
-  return parts.length > 0 ? parts.join('') : '< 1分'
+  const d = Math.floor(seconds / 86400)
+  const h = Math.floor((seconds % 86400) / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
+  return d > 0 ? `${d}d ${h}h ${m}m` : h > 0 ? `${h}h ${m}m` : `${m}m`
 }
 
 function StatPanel({ params }: { params: RebootRecordStatParams }) {
