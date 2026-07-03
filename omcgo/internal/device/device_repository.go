@@ -135,7 +135,9 @@ type GeoDevice struct {
 	PCI        *string `json:"pci,omitempty"`         // device_info.pci
 	DeviceName *string `json:"device_name,omitempty"` // device_info.device_name
 	// GIS 地图字段
-	UECount int `json:"ue_count"` // 当前接入 UE 数
+	UECount                   int  `json:"ue_count"`                        // 当前接入 UE 数
+	HighestAlarmSeverity      *int `json:"highest_alarm_severity,omitempty"` // 最高告警级别 1=Critical..4=Warning; nil=无告警
+	HighestSeverityAlarmCount int  `json:"highest_severity_alarm_count"`    // 最高级别的告警数量
 }
 
 // GeoStats represents device statistics for map display.
@@ -1096,14 +1098,18 @@ func scanGeoDeviceRow(row scannable) (GeoDevice, error) {
 	var alarmCount int
 	var ipAddress, mac, pci, deviceName string // COALESCE 保证非 NULL
 	var ueCount int                            // COALESCE 保证非 NULL
+	var highestAlarmSeverity *int              // NULL = 无活跃告警
+	var highestSeverityAlarmCount int          // 最高级别的告警数量
 
 	err := row.Scan(
 		&d.ID, &d.SerialNumber, &d.Name,
-		&lifecycle, &isOnline, // T-0162: 替代 &d.Status
+		&lifecycle, &isOnline,
 		&latitude, &longitude, &groupID, &groupName,
 		&address, &alarmCount, &deviceType,
 		&ipAddress, &mac, &pci, &deviceName,
 		&ueCount,
+		&highestAlarmSeverity,
+		&highestSeverityAlarmCount,
 	)
 	if err != nil {
 		return GeoDevice{}, err
@@ -1143,6 +1149,8 @@ func scanGeoDeviceRow(row scannable) (GeoDevice, error) {
 		d.DeviceName = &deviceName
 	}
 	d.UECount = ueCount
+	d.HighestAlarmSeverity = highestAlarmSeverity
+	d.HighestSeverityAlarmCount = highestSeverityAlarmCount
 	return d, nil
 }
 
@@ -1196,6 +1204,8 @@ func (r *PgDeviceRepository) ListGeo(ctx context.Context, filter GeoDeviceFilter
 		"d.site_name as address", "COALESCE(di.active_alarm_count, 0) as alarm_count", "d.model_name as type",
 		"COALESCE(host(d.ip_address), '')", "COALESCE(di.mac, '')", "COALESCE(di.pci, '')", "COALESCE(di.device_name, '')",
 		"COALESCE(di.ue_count, 0)",
+		"di.highest_alarm_severity",
+		"COALESCE(di.highest_severity_alarm_count, 0)",
 	).From("devices d").
 		LeftJoin("device_group_members dgm ON d.id = dgm.device_id").
 		LeftJoin("device_groups dg ON dgm.group_id = dg.id").
@@ -1438,6 +1448,8 @@ func (r *PgDeviceRepository) SearchDevices(ctx context.Context, keyword string, 
 		"d.site_name as address", "COALESCE(di.active_alarm_count, 0) as alarm_count", "d.model_name as type",
 		"COALESCE(host(d.ip_address), '')", "COALESCE(di.mac, '')", "COALESCE(di.pci, '')", "COALESCE(di.device_name, '')",
 		"COALESCE(di.ue_count, 0)",
+		"di.highest_alarm_severity",
+		"COALESCE(di.highest_severity_alarm_count, 0)",
 	).From("devices d").
 		LeftJoin("device_group_members dgm ON d.id = dgm.device_id").
 		LeftJoin("device_groups dg ON dgm.group_id = dg.id").

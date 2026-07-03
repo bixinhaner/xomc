@@ -567,6 +567,8 @@ function mapBackendDeviceGeo(bd: BackendDeviceGeo): DeviceGeo {
     pci: bd.pci,
     device_name: bd.device_name,
     ueCount: bd.ue_count,
+    highestAlarmSeverity: bd.highest_alarm_severity ?? null,
+    highestSeverityAlarmCount: bd.highest_severity_alarm_count ?? 0,
   };
 }
 
@@ -666,5 +668,7 @@ function mapBackendSearchResult(bs: BackendSearchResult): DeviceSearchResult {
     device_name: bs.device_name,
     ueCount: bs.ue_count,
     alarmCount: bs.alarm_count,
+    highestAlarmSeverity: bs.highest_alarm_severity ?? null,
+    highestSeverityAlarmCount: bs.highest_severity_alarm_count ?? 0,
   };
 }
