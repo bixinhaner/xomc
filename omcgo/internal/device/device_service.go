@@ -897,7 +897,7 @@ func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.Info
 	firmwareChanged := oldVersion != "" && newVersion != "" && oldVersion != newVersion
 	becameOnline := oldStatus == model.DeviceOffline && device.Status == model.DeviceActive
 	if becameOnline {
-		s.clearDisconnectedAlarmOnOnline(ctx, device)
+		s.ClearDisconnectedAlarmOnOnline(ctx, device)
 	}
 	if firmwareChanged {
 		s.PublishDeviceFirmwareChangedEvent(ctx, device, oldVersion, newVersion, becameOnline)
@@ -978,8 +978,14 @@ func (s *DeviceService) TransitionStatus(ctx context.Context, deviceID uuid.UUID
 		zap.String("from", string(device.Status)),
 		zap.String("to", string(newStatus)),
 	)
-
 	return nil
+}
+
+// ClearDisconnectedAlarmOnOnline 清理设备恢复在线时的 OMC 断链告警。
+//
+// 仅对 OMC 自己抬起的断链告警生效；外部源告警保持不动。
+func (s *DeviceService) ClearDisconnectedAlarmOnOnline(ctx context.Context, device *model.Device) {
+	s.clearDisconnectedAlarmOnOnline(ctx, device)
 }
 
 // GetDevice retrieves a device by ID.
