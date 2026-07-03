@@ -79,6 +79,10 @@ export interface MapDevice {
   device_name?: string;
   /** 当前接入 UE 数 */
   ueCount?: number;
+  /** 最高告警级别 1=Critical,2=Major,3=Minor,4=Warning; null/undefined=无告警 */
+  highestAlarmSeverity?: number | null;
+  /** 最高级别的告警数量 */
+  highestSeverityAlarmCount?: number;
 }
 
 /**
@@ -117,6 +121,10 @@ export interface DeviceGeo {
   device_name?: string;
   /** 当前接入 UE 数 */
   ueCount?: number;
+  /** 最高告警级别 */
+  highestAlarmSeverity?: number | null;
+  /** 最高级别的告警数量 */
+  highestSeverityAlarmCount?: number;
 }
 
 /**
@@ -249,6 +257,10 @@ export interface DeviceSearchResult {
   device_name?: string;
   /** 当前接入 UE 数 */
   ueCount?: number;
+  /** 最高告警级别 */
+  highestAlarmSeverity?: number | null;
+  /** 最高级别的告警数量 */
+  highestSeverityAlarmCount?: number;
   /** 当前活跃告警数 */
   alarmCount?: number;
 }
@@ -447,7 +459,12 @@ export interface BackendDeviceGeo {
   pci?: string;
   /** 运维自定义设备名称 */
   device_name?: string;  /** 当前接入 UE 数 */
-  ue_count?: number;}
+  ue_count?: number;
+  /** 最高告警级别 */
+  highest_alarm_severity?: number | null;
+  /** 最高级别的告警数量 */
+  highest_severity_alarm_count?: number;
+}
 
 /**
  * 后端设备聚合
@@ -510,6 +527,10 @@ export interface BackendSearchResult {
   device_name?: string;
   /** 当前接入 UE 数 */
   ue_count?: number;
+  /** 最高告警级别 */
+  highest_alarm_severity?: number | null;
+  /** 最高级别的告警数量 */
+  highest_severity_alarm_count?: number;
   /** 当前活跃告警数 */
   alarm_count?: number;
 }
