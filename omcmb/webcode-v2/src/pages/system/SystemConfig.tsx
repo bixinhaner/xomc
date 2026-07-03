@@ -64,7 +64,7 @@ const KNOWN_KEYS_BY_CATEGORY: Record<
     {
       key: 'max_file_count_per_device',
       valueType: 'int',
-      description: '每设备故障日志文件数配额，0=禁用（#798）',
+      description: '每设备故障日志文件数配额，0=禁用',
     },
   ],
 }
