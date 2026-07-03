@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import {
   RefreshCcw,
   Loader2,
@@ -10,6 +9,7 @@ import {
   Trash2,
   ShieldCheck,
   Wrench,
+  X,
 } from 'lucide-react'
 
 import { PageShell } from '@/components/shell/PageShell'
@@ -38,10 +38,10 @@ const RPC_BADGE: Record<TransferRpcType, { status: string; label: string }> = {
 }
 
 export default function TransferTemplateManagementPage() {
-  const navigate = useNavigate()
   const [category, setCategory] = useState<string>('')
   const [opError, setOpError] = useState<string | null>(null)
   const [busyCode, setBusyCode] = useState<string | null>(null)
+  const [detailTemplate, setDetailTemplate] = useState<UnifiedFileTransferTaskType | null>(null)
 
   const { data, isLoading, isError, error, isFetching, refetch } = useUnifiedFileTransferTaskTypes({
     refetchOnMount: 'always',
@@ -121,6 +121,7 @@ export default function TransferTemplateManagementPage() {
   }
 
   return (
+    <>
     <PageShell
       code="F06"
       title="TRANSFER TEMPLATES · 模板配置"
@@ -225,7 +226,7 @@ export default function TransferTemplateManagementPage() {
                   <div className="flex items-center justify-between gap-1.5 border-t border-cyan-500/10 pt-2.5">
                     <button
                       type="button"
-                      onClick={() => navigate(`/transfer/template-management/${encodeURIComponent(t.typeCode)}`)}
+                      onClick={() => setDetailTemplate(t)}
                       className="flex items-center gap-1 font-mono text-[11px] text-cyan-300/80 hover:text-cyan-100"
                     >
                       详情 <ChevronRight className="size-3.5" />
@@ -266,5 +267,93 @@ export default function TransferTemplateManagementPage() {
         </div>
       )}
     </PageShell>
+
+    {detailTemplate && (
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-[#02030a]/75 backdrop-blur-sm"
+        onMouseDown={(e) => { if (e.target === e.currentTarget) setDetailTemplate(null) }}
+      >
+        <div className="w-[600px] max-w-[92vw]">
+          <GlassPanel strong title={detailTemplate.displayName} meta={detailTemplate.builtIn ? 'BUILTIN' : 'CUSTOM'}>
+            <div className="flex items-center justify-between border-b border-cyan-500/15 px-4 py-2">
+              <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-cyan-300/55">{detailTemplate.typeCode}</span>
+              <button
+                type="button"
+                onClick={() => setDetailTemplate(null)}
+                className="rounded-sm border border-cyan-500/25 p-1 text-cyan-300/60 transition-colors hover:border-cyan-400/60 hover:text-cyan-200"
+              >
+                <X className="size-3.5" />
+              </button>
+            </div>
+            <div className="max-h-[72vh] overflow-y-auto p-4 space-y-4">
+              <div className="grid grid-cols-2 gap-x-6 gap-y-3 font-mono text-[11px]">
+                <div>
+                  <div className="mb-0.5 uppercase tracking-[0.12em] text-cyan-300/50">业务分类</div>
+                  <div className="text-cyan-100">{detailTemplate.categoryLabel || detailTemplate.category}</div>
+                </div>
+                <div>
+                  <div className="mb-0.5 uppercase tracking-[0.12em] text-cyan-300/50">RPC 类型</div>
+                  <div className="text-cyan-100">{detailTemplate.rpcType}</div>
+                </div>
+                <div>
+                  <div className="mb-0.5 uppercase tracking-[0.12em] text-cyan-300/50">文件类型</div>
+                  <div className="text-cyan-100">{detailTemplate.fileType || '—'}</div>
+                </div>
+                <div>
+                  <div className="mb-0.5 uppercase tracking-[0.12em] text-cyan-300/50">权限码</div>
+                  <div className="text-cyan-100">{detailTemplate.permissionCode || '—'}</div>
+                </div>
+                <div>
+                  <div className="mb-0.5 uppercase tracking-[0.12em] text-cyan-300/50">文件类型可编辑</div>
+                  <div className={detailTemplate.fileTypeEditable ? 'text-emerald-400' : 'text-cyan-300/60'}>
+                    {detailTemplate.fileTypeEditable ? '可编辑' : '固定'}
+                  </div>
+                </div>
+                <div>
+                  <div className="mb-0.5 uppercase tracking-[0.12em] text-cyan-300/50">延迟秒数</div>
+                  <div className="text-cyan-100">{detailTemplate.delaySeconds ?? 0} s</div>
+                </div>
+                <div>
+                  <div className="mb-0.5 uppercase tracking-[0.12em] text-cyan-300/50">最后编辑</div>
+                  <div className="text-cyan-100">{detailTemplate.lastEditor || '—'}</div>
+                </div>
+                <div>
+                  <div className="mb-0.5 uppercase tracking-[0.12em] text-cyan-300/50">后置事件</div>
+                  <div className="text-cyan-100">{detailTemplate.postTcEventCode || '—'}</div>
+                </div>
+              </div>
+              <div>
+                <div className="mb-1 font-mono text-[10px] uppercase tracking-[0.12em] text-cyan-300/50">功能描述</div>
+                <p className="text-xs leading-relaxed text-cyan-100/80">{detailTemplate.description || '—'}</p>
+              </div>
+              <div>
+                <div className="mb-1 font-mono text-[10px] uppercase tracking-[0.12em] text-cyan-300/50">适用产品</div>
+                <p className="text-xs text-cyan-100/80">
+                  {(detailTemplate.products ?? []).length > 0
+                    ? (detailTemplate.products ?? []).join(' / ')
+                    : '全部产品'}
+                </p>
+              </div>
+              <div>
+                <div className="mb-2 font-mono text-[10px] uppercase tracking-[0.12em] text-cyan-300/50">步骤链</div>
+                <div className="flex flex-wrap gap-2">
+                  {detailTemplate.stepChain.map((stepId, i) => (
+                    <span
+                      key={stepId}
+                      className={`chip font-mono text-[10px] ${
+                        i < 2 ? 'text-cyan-300' : i === detailTemplate.stepChain.length - 1 ? 'text-fuchsia-300' : 'text-cyan-300/60'
+                      }`}
+                    >
+                      {i + 1}. {stepId}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </GlassPanel>
+        </div>
+      </div>
+    )}
+    </>
   )
 }
