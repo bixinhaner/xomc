@@ -44,8 +44,6 @@ const CARDS: CardSpec[] = [
       { key: 'enabled', type: 'bool' },
       { key: 'disk_high_pct', type: 'int', min: 1, max: 100 },
       { key: 'disk_low_pct', type: 'int', min: 0, max: 100 },
-      { key: 'cpu_high_per_core', type: 'float', min: 0, max: 100, step: 0.1 },
-      { key: 'cpu_low_per_core', type: 'float', min: 0, max: 100, step: 0.1 },
       { key: 'check_interval_sec', type: 'int', min: 1, max: 3600 },
     ],
   },
