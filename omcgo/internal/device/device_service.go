@@ -1436,10 +1436,6 @@ func (s *DeviceService) PublishDeviceRegistered(ctx context.Context, device *mod
 const (
 	HaltReasonMainPath   = "Device.HaltReason.MainReason"
 	HaltReasonDetailPath = "Device.HaltReason.DetailReason"
-	// DeviceUpTimeStandardPath is the canonical TR-181 uptime path used as a
-	// best-effort source for runtime_before_reboot. Many CPEs report it under
-	// a private alias; absence is acceptable (we store 0).
-	DeviceUpTimeStandardPath = "Device.DeviceInfo.UpTime"
 )
 
 // extractParam looks up a parameter value by exact path. Returns "" when absent.
@@ -1452,6 +1448,20 @@ func extractParam(params []tr069.ParameterValueStruct, path string) string {
 	return ""
 }
 
+// GetDevicePreRebootRunTime 返回 device_info.run_time 当前值（秒），供 1 BOOT 到来时
+// 在 UpdateFromInform 覆盖该字段之前快照重启前运行时长。
+// deviceInfoRepo 未注入或设备无 info 记录时返回 0。
+func (s *DeviceService) GetDevicePreRebootRunTime(ctx context.Context, deviceID uuid.UUID) int64 {
+	if s.deviceInfoRepo == nil {
+		return 0
+	}
+	info, err := s.deviceInfoRepo.GetByDeviceID(ctx, deviceID)
+	if err != nil || info == nil {
+		return 0
+	}
+	return info.RunTime
+}
+
 // RecordBootFromInform handles the data updates triggered by a reboot-complete
 // Inform (event codes "1 BOOT" or "M Reboot"). It:
 //   - atomically increments devices.boot_count and stamps last_boot_at;
@@ -1460,10 +1470,14 @@ func extractParam(params []tr069.ParameterValueStruct, path string) string {
 //     the ACS (i.e. "1 BOOT" without "M Reboot"), so downstream listeners
 //     (alarm engine, audit log) can react.
 //
+// preRebootRunTime 是调用方在 UpdateFromInform 覆盖 device_info.run_time 之前
+// 读取的重启前设备运行时长（秒），来源于 device_info.run_time（DB 存储的上次同步值）。
+// 新设备或 DB 无记录时传 0。
+//
 // The caller is expected to have already ensured the device row exists (via
 // UpdateFromInform or RegisterFromInform). Returns the updated boot_count; 0
 // with no error means the device could not be found and the boot was ignored.
-func (s *DeviceService) RecordBootFromInform(ctx context.Context, device *model.Device, events []string, params []tr069.ParameterValueStruct) (int, error) {
+func (s *DeviceService) RecordBootFromInform(ctx context.Context, device *model.Device, events []string, params []tr069.ParameterValueStruct, preRebootRunTime int64) (int, error) {
 	if device == nil {
 		return 0, nil
 	}
@@ -1491,8 +1505,9 @@ func (s *DeviceService) RecordBootFromInform(ctx context.Context, device *model.
 	// 优先于误判。
 	haltMainReason := extractParam(params, HaltReasonMainPath)
 	haltDetailReason := extractParam(params, HaltReasonDetailPath)
-	uptimeStr := extractParam(params, DeviceUpTimeStandardPath)
-	runtimeBeforeReboot := parseUptimeSeconds(uptimeStr)
+	// runtimeBeforeReboot 来自调用方在 UpdateFromInform 覆盖 device_info.run_time 之前
+	// 快照的旧值，即设备本次重启前的运行时长（秒）。
+	runtimeBeforeReboot := preRebootRunTime
 
 	hasBoot := hasEventCode(events, tr069.EventBoot)
 	var abnormal bool
@@ -1595,18 +1610,7 @@ func (s *DeviceService) RecordBootFromInform(ctx context.Context, device *model.
 	return bootCount, nil
 }
 
-// parseUptimeSeconds turns the TR-181 UpTime string ("seconds since boot")
-// into int64 seconds. Empty / unparseable values return 0 (= unknown).
-func parseUptimeSeconds(v string) int64 {
-	if v == "" {
-		return 0
-	}
-	var n int64
-	if _, err := fmt.Sscanf(v, "%d", &n); err != nil || n < 0 {
-		return 0
-	}
-	return n
-}
+
 
 func hasEventCode(events []string, target string) bool {
 	for _, e := range events {

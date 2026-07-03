@@ -51,16 +51,12 @@ const exportTimestamp = (): string => {
 // 重启原因 / 详因一律按设备上报原文展示，不做翻译（设备报什么就显示什么）。
 const showRaw = (value: string | undefined | null): string => (value ?? '').trim() || '-';
 
-const formatRuntime = (seconds: number, t: (key: string) => string): string => {
+const formatRuntime = (seconds: number | null | undefined): string => {
   if (!seconds || seconds <= 0) return '-';
-  const days = Math.floor(seconds / 86400);
-  const hours = Math.floor((seconds % 86400) / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const parts: string[] = [];
-  if (days > 0) parts.push(`${days}${t('common.day')}`);
-  if (hours > 0) parts.push(`${hours}${t('common.hour')}`);
-  if (minutes > 0 && days === 0) parts.push(`${minutes}${t('common.minute')}`);
-  return parts.length > 0 ? parts.join('') : '< 1m';
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return d > 0 ? `${d}d ${h}h ${m}m` : h > 0 ? `${h}h ${m}m` : `${m}m`;
 };
 
 const fmtTime = (s: string | undefined): string => s?.replace('T', ' ').slice(0, 19) ?? '-';
@@ -239,7 +235,7 @@ export default function AbnormalReboot() {
         title: t('log.exception.column.runtime'),
         dataIndex: 'runtimeBeforeReboot',
         width: 120,
-        render: (val: unknown) => formatRuntime(val as number, t),
+        render: (val: unknown) => formatRuntime(val as number),
       },
       {
         key: 'rebootTime',
@@ -271,7 +267,7 @@ export default function AbnormalReboot() {
           ? t('page.rebootRecords.type.abnormal')
           : t('page.rebootRecords.type.normal'),
         [t('page.rebootRecords.column.reason')]: r.isAbnormal ? showRaw(r.reason) : '-',
-        [t('log.exception.column.runtime')]: formatRuntime(r.runtimeBeforeReboot, t),
+        [t('log.exception.column.runtime')]: formatRuntime(r.runtimeBeforeReboot),
         [t('log.exception.column.time')]: fmtTime(r.rebootTime),
       }));
       const ws = XLSX.utils.json_to_sheet(rows);
@@ -483,7 +479,7 @@ export default function AbnormalReboot() {
                       {showRaw(selected.detailReason)}
                     </Descriptions.Item>
                     <Descriptions.Item label={t('log.exception.detail.runtime')}>
-                      {formatRuntime(selected.runtimeBeforeReboot, t)}
+                      {formatRuntime(selected.runtimeBeforeReboot)}
                     </Descriptions.Item>
                   </>
                 )}
