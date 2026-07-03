@@ -42,6 +42,7 @@ type DeviceStatusReconciler struct {
 	repo      statusReconcilerRepo
 	eventBus  event.EventBus
 	alarmSink offlineAlarmSink
+	cache     *DeviceCache
 	logger    *zap.Logger
 
 	// onlineIndex acs:online 在线索引（issue #397 根治片）。离线判定在把 last_inform_at
@@ -126,6 +127,11 @@ func (r *DeviceStatusReconciler) SetThresholdLookup(lookup OfflineThresholdLooku
 // SetOfflineAlarmSink 注入 OMC 源设备断连告警写入器。nil 时仅维护在线状态和发布事件。
 func (r *DeviceStatusReconciler) SetOfflineAlarmSink(sink offlineAlarmSink) {
 	r.alarmSink = sink
+}
+
+// SetDeviceCache 注入设备缓存，用于离线翻转后失效旧的在线快照。
+func (r *DeviceStatusReconciler) SetDeviceCache(cache *DeviceCache) {
+	r.cache = cache
 }
 
 // currentThresholds 读取本轮扫描使用的两类离线阈值（每轮实时读，改配置即生效）。
@@ -370,6 +376,10 @@ func (r *DeviceStatusReconciler) markOffline(ctx context.Context, device *model.
 				zap.Error(pubErr),
 				zap.String("device_id", device.ID.String()))
 		}
+	}
+
+	if r.cache != nil {
+		r.cache.Delete(ctx, device.SerialNumber)
 	}
 
 	if err := r.raiseOfflineAlarm(ctx, device, now); err != nil {

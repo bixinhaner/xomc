@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/global"
 	"github.com/omcgo/omcgo/internal/admin"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
@@ -108,6 +109,13 @@ func TestAuthorizeDeviceGroupAccess(t *testing.T) {
 		ungrouped := uuid.New() // not in reader.groups → empty memberships
 		err := svc.AuthorizeDeviceGroupAccess(context.Background(), ungrouped, []uuid.UUID{groupA})
 		assert.ErrorIs(t, err, commonerrors.ErrForbidden)
+	})
+
+	t.Run("ungrouped device → allowed when pseudo-group is visible", func(t *testing.T) {
+		ungrouped := uuid.New() // not in reader.groups → empty memberships
+		unassigned := uuid.MustParse(global.DefaultLevel2GroupID)
+		err := svc.AuthorizeDeviceGroupAccess(context.Background(), ungrouped, []uuid.UUID{unassigned})
+		assert.NoError(t, err)
 	})
 
 	t.Run("nil group reader degrades to allow", func(t *testing.T) {

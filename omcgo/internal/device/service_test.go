@@ -1222,7 +1222,7 @@ func TestUpdateFromInform_OfflineToActive_ClearsDisconnectedAlarm(t *testing.T) 
 	assert.Equal(t, "device reported online", *cleaner.cleared[0].ClearNote)
 }
 
-func TestUpdateFromInform_ActiveStaysActive_DoesNotClearDisconnectedAlarm(t *testing.T) {
+func TestUpdateFromInform_ActiveStaysActive_ClearsDisconnectedAlarm(t *testing.T) {
 	cleaner := &mockDisconnectedAlarmCleaner{active: map[string]*model.Alarm{
 		"SN-STILL-ACTIVE-ALARM:7": {ID: uuid.New(), DeviceSN: "SN-STILL-ACTIVE-ALARM", AlarmIdentifier: "7"},
 	}}
@@ -1245,7 +1245,8 @@ func TestUpdateFromInform_ActiveStaysActive_DoesNotClearDisconnectedAlarm(t *tes
 	_, err := svc.UpdateFromInform(context.Background(), sampleInform("SN-STILL-ACTIVE-ALARM"))
 
 	require.NoError(t, err)
-	assert.Empty(t, cleaner.cleared)
+	require.Len(t, cleaner.cleared, 1)
+	assert.Equal(t, "SN-STILL-ACTIVE-ALARM", cleaner.cleared[0].DeviceSN)
 }
 
 func TestUpdateFromInform_FirmwareChangedSuppressesOnlineEvent(t *testing.T) {

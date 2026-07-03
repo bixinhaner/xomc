@@ -24,6 +24,7 @@ import (
 	sq "github.com/Masterminds/squirrel"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/global"
 	"github.com/omcgo/omcgo/internal/admin"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 )
@@ -38,6 +39,26 @@ type VisibleGroupsResolver interface {
 // 由 device.PgDeviceGroupReader 实现——此处用结构化接口，不反向 import device。
 type GroupReader interface {
 	GetDeviceGroupIDs(ctx context.Context, deviceID uuid.UUID) ([]uuid.UUID, error)
+}
+
+// SplitVisibleGroups separates real visible group IDs from the special
+// "unassigned devices" pseudo group.
+func SplitVisibleGroups(visibleGroups []uuid.UUID) (realGroups []uuid.UUID, includeUngrouped bool) {
+	if visibleGroups == nil {
+		return nil, false
+	}
+	realGroups = make([]uuid.UUID, 0, len(visibleGroups))
+	for _, gid := range visibleGroups {
+		if gid.String() == global.DefaultLevel2GroupID {
+			includeUngrouped = true
+			continue
+		}
+		realGroups = append(realGroups, gid)
+	}
+	if len(realGroups) == 0 {
+		realGroups = nil
+	}
+	return realGroups, includeUngrouped
 }
 
 // Resolver 从 gin 请求上下文解析调用者的可见设备组，是所有 HTTP 模块的统一入口。
@@ -98,15 +119,22 @@ func AuthorizeDeviceAccess(ctx context.Context, reader GroupReader, deviceID uui
 	if reader == nil {
 		return nil
 	}
-	if len(visibleGroups) == 0 {
+	realGroups, includeUngrouped := SplitVisibleGroups(visibleGroups)
+	if len(realGroups) == 0 && !includeUngrouped {
 		return commonerrors.ErrForbidden
 	}
 	deviceGroups, err := reader.GetDeviceGroupIDs(ctx, deviceID)
 	if err != nil {
 		return fmt.Errorf("authorize device group access: %w", err)
 	}
-	visible := make(map[uuid.UUID]struct{}, len(visibleGroups))
-	for _, gid := range visibleGroups {
+	if len(deviceGroups) == 0 {
+		if includeUngrouped {
+			return nil
+		}
+		return commonerrors.ErrForbidden
+	}
+	visible := make(map[uuid.UUID]struct{}, len(realGroups))
+	for _, gid := range realGroups {
 		visible[gid] = struct{}{}
 	}
 	for _, gid := range deviceGroups {
@@ -114,7 +142,7 @@ func AuthorizeDeviceAccess(ctx context.Context, reader GroupReader, deviceID uui
 			return nil
 		}
 	}
-	// 设备未分组或所有分组都不在可见集合 → 越权。
+	// 设备所有分组都不在可见集合 → 越权。
 	return commonerrors.ErrForbidden
 }
 
@@ -151,12 +179,26 @@ func ApplyDeviceVisibilityFilter(b sq.SelectBuilder, deviceIDColumn string, visi
 	if len(visibleGroups) == 0 {
 		return b.Where(sq.Expr("FALSE"))
 	}
-	// 子查询用默认 Question(?) 占位符（非 storage.Psql 的 Dollar）：被外层 Sqlizer
-	// 内嵌时占位符随顶层 builder 统一重排为 $N，避免与外层已有 WHERE 的 $N 撞号。
-	sub := sq.Select("device_id").
-		From("device_group_members").
-		Where(sq.Eq{"group_id": visibleGroups})
-	return b.Where(sq.Expr(deviceIDColumn+" IN (?)", sub))
+	realGroups, includeUngrouped := SplitVisibleGroups(visibleGroups)
+	clauses := make(sq.Or, 0, 2)
+	if len(realGroups) > 0 {
+		// 子查询用默认 Question(?) 占位符（非 storage.Psql 的 Dollar）：被外层 Sqlizer
+		// 内嵌时占位符随顶层 builder 统一重排为 $N，避免与外层已有 WHERE 的 $N 撞号。
+		sub := sq.Select("device_id").
+			From("device_group_members").
+			Where(sq.Eq{"group_id": realGroups})
+		clauses = append(clauses, sq.Expr(deviceIDColumn+" IN (?)", sub))
+	}
+	if includeUngrouped {
+		clauses = append(clauses, sq.Expr("NOT EXISTS (SELECT 1 FROM device_group_members m WHERE m.device_id = "+deviceIDColumn+")"))
+	}
+	if len(clauses) == 0 {
+		return b.Where(sq.Expr("FALSE"))
+	}
+	if len(clauses) == 1 {
+		return b.Where(clauses[0])
+	}
+	return b.Where(clauses)
 }
 
 // ApplyDeviceSNVisibilityFilter 是 ApplyDeviceVisibilityFilter 的「按设备序列号」变体，
@@ -179,13 +221,27 @@ func ApplyDeviceSNVisibilityFilter(b sq.SelectBuilder, snColumn string, visibleG
 	if len(visibleGroups) == 0 {
 		return b.Where(sq.Expr("FALSE"))
 	}
-	sub := sq.Select("serial_number").
-		From("devices").
-		Where(sq.Expr("id IN (?)",
-			sq.Select("device_id").
-				From("device_group_members").
-				Where(sq.Eq{"group_id": visibleGroups})))
-	return b.Where(sq.Expr(snColumn+" IN (?)", sub))
+	realGroups, includeUngrouped := SplitVisibleGroups(visibleGroups)
+	clauses := make(sq.Or, 0, 2)
+	if len(realGroups) > 0 {
+		sub := sq.Select("serial_number").
+			From("devices").
+			Where(sq.Expr("id IN (?)",
+				sq.Select("device_id").
+					From("device_group_members").
+					Where(sq.Eq{"group_id": realGroups})))
+		clauses = append(clauses, sq.Expr(snColumn+" IN (?)", sub))
+	}
+	if includeUngrouped {
+		clauses = append(clauses, sq.Expr(snColumn+" IN (SELECT serial_number FROM devices d WHERE NOT EXISTS (SELECT 1 FROM device_group_members m WHERE m.device_id = d.id))"))
+	}
+	if len(clauses) == 0 {
+		return b.Where(sq.Expr("FALSE"))
+	}
+	if len(clauses) == 1 {
+		return b.Where(clauses[0])
+	}
+	return b.Where(clauses)
 }
 
 // ApplyGroupVisibilityFilter 给设备组维度表（pm_group_metrics_* 等以 device_group_id 为键的表）
@@ -224,7 +280,23 @@ func VisibleSNSubquerySQL(snColumn, paramRef string, visibleGroups []uuid.UUID) 
 	if len(visibleGroups) == 0 {
 		return "FALSE", nil
 	}
-	sql := snColumn + " IN (SELECT serial_number FROM devices WHERE id IN (" +
-		"SELECT device_id FROM device_group_members WHERE group_id = ANY(" + paramRef + ")))"
-	return sql, visibleGroups
+	realGroups, includeUngrouped := SplitVisibleGroups(visibleGroups)
+	if len(realGroups) == 0 && !includeUngrouped {
+		return "FALSE", nil
+	}
+	parts := make([]string, 0, 2)
+	if len(realGroups) > 0 {
+		parts = append(parts, snColumn+" IN (SELECT serial_number FROM devices WHERE id IN ("+
+			"SELECT device_id FROM device_group_members WHERE group_id = ANY("+paramRef+")))")
+	}
+	if includeUngrouped {
+		parts = append(parts, snColumn+" IN (SELECT serial_number FROM devices d WHERE NOT EXISTS (SELECT 1 FROM device_group_members m WHERE m.device_id = d.id))")
+	}
+	if len(parts) == 1 {
+		if len(realGroups) > 0 {
+			return parts[0], realGroups
+		}
+		return parts[0], nil
+	}
+	return "(" + parts[0] + " OR " + parts[1] + ")", realGroups
 }

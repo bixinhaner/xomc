@@ -206,6 +206,28 @@ func TestMarkOffline_PublishesEventOnTransition(t *testing.T) {
 	}
 }
 
+func TestMarkOffline_InvalidatesDeviceCacheOnTransition(t *testing.T) {
+	stale := &model.Device{
+		ID: uuid.New(), SerialNumber: "SN-CACHE", Carrier: model.CarrierCMCC, Technology: model.TechLTE,
+	}
+	repo := &mockReconcilerRepo{
+		markFn: func(_ context.Context, _ uuid.UUID, _ string, _ time.Time) (bool, error) {
+			return true, nil
+		},
+	}
+
+	r, mr := newTestReconciler(t, repo, nil)
+	cache := NewDeviceCache(redis.NewClient(&redis.Options{Addr: mr.Addr()}), zap.NewNop())
+	r.SetDeviceCache(cache)
+	cache.Set(context.Background(), stale)
+	require.True(t, mr.Exists(deviceCacheKey(stale.SerialNumber)), "precondition: cache entry must exist")
+
+	transitioned, err := r.markOffline(context.Background(), stale)
+	require.NoError(t, err)
+	assert.True(t, transitioned)
+	assert.False(t, mr.Exists(deviceCacheKey(stale.SerialNumber)), "offline transition must delete cached device snapshot")
+}
+
 func TestMarkOffline_RaisesDisconnectedAlarmByTechnology(t *testing.T) {
 	tests := []struct {
 		name       string

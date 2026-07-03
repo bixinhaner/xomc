@@ -23,6 +23,7 @@ func initDeviceModule(c *Container) error {
 	deviceRepo := device.NewPgDeviceRepository(c.PgPool)
 	paramRepo := device.NewPgDeviceParameterRepository(c.PgPool)
 	deviceInfoRepo := device.NewPgDeviceInfoRepository(c.PgPool)
+	deviceCache := device.NewDeviceCache(c.Redis, logger)
 
 	// T-0173: DeviceStatusReconciler 替代原来的 HeartbeatMonitor + OfflineDetector。
 	// 同时承担:
@@ -32,6 +33,7 @@ func initDeviceModule(c *Container) error {
 	//      publish device.offline。
 	reconciler := device.NewDeviceStatusReconciler(c.Redis, deviceRepo, c.EventBus, logger)
 	reconciler.SetOfflineAlarmSink(c.AlarmEngine)
+	reconciler.SetDeviceCache(deviceCache)
 	// issue #203：离线阈值接 sys_configs (category='device') 实时配置。
 	//   - key=enbTimeout → 基站类阈值（秒，默认 100）
 	//   - key=cpeTimeout → CPE 类阈值（秒，默认 600）
@@ -67,7 +69,6 @@ func initDeviceModule(c *Container) error {
 	crDispatcher.SetLANPortLookup(newSTUNServerPortLookup(deviceRepo, paramRepo, c.Logger))
 
 	// DeviceService
-	deviceCache := device.NewDeviceCache(c.Redis, logger)
 	deviceService := device.NewDeviceService(deviceRepo, paramRepo, reconciler, c.EventBus, logger)
 	deviceService.SetDisconnectedAlarmCleaner(c.AlarmPgStore, c.AlarmEngine)
 	deviceService.SetDeviceCache(deviceCache)

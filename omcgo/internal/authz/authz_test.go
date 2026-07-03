@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/global"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/storage"
 )
@@ -52,6 +53,14 @@ func TestAuthorizeDeviceAccess_UngroupedDeviceDenied(t *testing.T) {
 	err := AuthorizeDeviceAccess(context.Background(), fakeReader{groups: nil}, uuid.New(), []uuid.UUID{uuid.New()})
 	if err != commonerrors.ErrForbidden {
 		t.Fatalf("ungrouped device should be forbidden, got %v", err)
+	}
+}
+
+func TestAuthorizeDeviceAccess_UnassignedPseudoGroupAllowsUngroupedDevice(t *testing.T) {
+	unassigned := uuid.MustParse(global.DefaultLevel2GroupID)
+	err := AuthorizeDeviceAccess(context.Background(), fakeReader{groups: nil}, uuid.New(), []uuid.UUID{unassigned})
+	if err != nil {
+		t.Fatalf("unassigned pseudo-group should allow ungrouped device, got %v", err)
 	}
 }
 
@@ -149,6 +158,30 @@ func TestApplyDeviceSNVisibilityFilter(t *testing.T) {
 			t.Fatalf("expected 2 args (g1,g2), got %v", args)
 		}
 	})
+
+	t.Run("包含未分组伪节点时 OR NOT EXISTS", func(t *testing.T) {
+		unassigned := uuid.MustParse(global.DefaultLevel2GroupID)
+		sql, _, err := ApplyDeviceVisibilityFilter(
+			storage.Psql.Select("*").From("alarms_active"), "alarms_active.device_id", []uuid.UUID{g1, unassigned}).ToSql()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(sql, "NOT EXISTS (SELECT 1 FROM device_group_members m WHERE m.device_id = alarms_active.device_id)") {
+			t.Fatalf("expected unassigned predicate in sql: %q", sql)
+		}
+	})
+
+	t.Run("包含未分组伪节点时 OR 未分组子查询", func(t *testing.T) {
+		unassigned := uuid.MustParse(global.DefaultLevel2GroupID)
+		sql, _, err := ApplyDeviceSNVisibilityFilter(
+			storage.Psql.Select("*").From("pm_metrics"), "device_sn", []uuid.UUID{unassigned}).ToSql()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(sql, "NOT EXISTS (SELECT 1 FROM device_group_members m WHERE m.device_id = d.id)") {
+			t.Fatalf("expected unassigned device-sn predicate in sql: %q", sql)
+		}
+	})
 }
 
 func TestApplyGroupVisibilityFilter(t *testing.T) {
@@ -216,6 +249,18 @@ func TestVisibleSNSubquerySQL(t *testing.T) {
 		}
 		if len(groups) != 2 {
 			t.Fatalf("expected 2 groups returned, got %v", groups)
+		}
+	})
+
+	t.Run("未分组伪节点时返回未分组 SQL", func(t *testing.T) {
+		unassigned := uuid.MustParse(global.DefaultLevel2GroupID)
+		sql, groups := VisibleSNSubquerySQL("m.device_sn", "$3", []uuid.UUID{unassigned})
+		want := "m.device_sn IN (SELECT serial_number FROM devices d WHERE NOT EXISTS (SELECT 1 FROM device_group_members m WHERE m.device_id = d.id))"
+		if sql != want {
+			t.Fatalf("unexpected sql: %q", sql)
+		}
+		if groups != nil {
+			t.Fatalf("expected nil real groups, got %v", groups)
 		}
 	})
 }

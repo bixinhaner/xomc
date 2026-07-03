@@ -896,7 +896,7 @@ func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.Info
 	newVersion := device.FirmwareVersion
 	firmwareChanged := oldVersion != "" && newVersion != "" && oldVersion != newVersion
 	becameOnline := oldStatus == model.DeviceOffline && device.Status == model.DeviceActive
-	if becameOnline {
+	if device.Status == model.DeviceActive && device.IsOnline {
 		s.ClearDisconnectedAlarmOnOnline(ctx, device)
 	}
 	if firmwareChanged {

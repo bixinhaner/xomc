@@ -34,6 +34,7 @@ func TestBatchInformProcessor_PublishTransitionEvents_ClearsDisconnectedAlarmBef
 			ID:           uuid.New(),
 			SerialNumber: "SN-001",
 			Status:       model.DeviceActive,
+			IsOnline:     true,
 		},
 		oldStatus: model.DeviceOffline,
 	}
@@ -51,6 +52,7 @@ func TestBatchInformProcessor_PublishTransitionEvents_ClearsDisconnectedAlarmBef
 			ID:              uuid.New(),
 			SerialNumber:    "SN-002",
 			Status:          model.DeviceActive,
+			IsOnline:        true,
 			FirmwareVersion: "V2",
 		},
 		oldStatus:  model.DeviceOffline,
@@ -60,4 +62,22 @@ func TestBatchInformProcessor_PublishTransitionEvents_ClearsDisconnectedAlarmBef
 	processor.publishTransitionEvents(context.Background(), update)
 
 	require.Equal(t, []string{"clear", "firmware"}, recorder.calls)
+}
+
+func TestBatchInformProcessor_PublishTransitionEvents_ClearsDisconnectedAlarmWhenAlreadyActive(t *testing.T) {
+	recorder := &transitionPublisherRecorder{}
+	processor := &BatchInformProcessor{transitionPublisher: recorder}
+	update := &informUpdate{
+		device: &model.Device{
+			ID:           uuid.New(),
+			SerialNumber: "SN-003",
+			Status:       model.DeviceActive,
+			IsOnline:     true,
+		},
+		oldStatus: model.DeviceActive,
+	}
+
+	processor.publishTransitionEvents(context.Background(), update)
+
+	require.Equal(t, []string{"clear"}, recorder.calls)
 }
