@@ -1,7 +1,6 @@
 package upload
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"crypto/subtle"
@@ -280,35 +279,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// side (T-0072) can read it from object metadata as a backup signal
 		// to the .gz/.zst filename suffix.
 		uploadOpts.ContentEncoding = cmp.format
-	}
-
-	// issue #561：PM 文件同步 gzip 嗅探+压缩。基站规模化上报时 ACS 存 .xml →
-	// NATS 发 minio_path=.xml → rawarchive 异步改键为 .xml.gz 并删旧 .xml；
-	// Worker 在高负载积压下消费滞后 → MinIO key 已变 → "key does not exist" → DLQ。
-	// 在 ACS 上传层做同步 peek + gzip wrap，保证入库 key 从第一步起即是稳定的 .xml.gz：
-	//   - 设备已 gzip（magic=1f8b）→ 原样存，objectPath 补 .gz（若缺）
-	//   - 设备明文 → 流式 gzip wrap，objectPath 追加 .gz，Content-Encoding=gzip
-	// 失败兜底：压缩器构造失败 → 503 + Retry-After，让 CPE 自动重传，绝不回落明文
-	// （回落会再触发改键竞态，等于没修）。
-	if ft == tr069.FileTypePM {
-		pmRC, alreadyGzip, perr := pmSyncGzip(ctx, r.Body)
-		if perr != nil {
-			h.logger.Error("pm sync gzip wrap failed; abort upload to force CPE retry",
-				zap.Error(perr), zap.String("filename", filename))
-			w.Header().Set("Retry-After", "60")
-			http.Error(w, "pm compression unavailable, retry", http.StatusServiceUnavailable)
-			return
-		}
-		defer pmRC.Close()
-		body = pmRC
-		contentLength = -1 // streaming, final size unknown
-		if !strings.HasSuffix(strings.ToLower(objectPath), ".gz") {
-			objectPath += ".gz"
-		}
-		uploadOpts.ContentEncoding = "gzip"
-		h.logger.Debug("pm sync gzip applied",
-			zap.Bool("already_gzip", alreadyGzip),
-			zap.String("object_path", objectPath))
 	}
 
 	// T-0075: encryption layer (after compression). Buffers fully into memory
@@ -707,50 +677,6 @@ func (c *countingReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// pmGzipLevel — PM 同步压缩固定 gzip level（与 backup 默认策略保持一致）。
-// 取 6 = stdlib DefaultCompression，速度/压缩比的常用折中。
-const pmGzipLevel = 6
-
-// pmSyncGzip 处理 PM 文件入库前的同步 gzip 嗅探+压缩（issue #561）。
-//
-//   - 已是 gzip（前 2 字节 0x1f 0x8b）：原样返回（用 bufio 把 peek 出的字节
-//     重新放回流首），调用方在 PutObject 后不会二次压缩；
-//   - 否则（明文 / peek 失败 / 长度不足 2 字节）：用 backup.NewCompressor("gzip", 6)
-//     做流式 wrap，返回压缩流。
-//
-// 返回的 ReadCloser 由调用方负责 Close（gzip wrap 路径的 Close 会冲洗压缩器；
-// 已 gzip 路径的 Close 透传到原始 src，net/http 也会在 handler 返回时关 r.Body，
-// 多次 Close 对 net/http.Body 是安全的）。
-func pmSyncGzip(ctx context.Context, src io.ReadCloser) (io.ReadCloser, bool, error) {
-	br := bufio.NewReader(src)
-	head, peekErr := br.Peek(2)
-	isGzip := peekErr == nil && len(head) == 2 && head[0] == 0x1f && head[1] == 0x8b
-	if isGzip {
-		return &bufioReadCloser{Reader: br, src: src}, true, nil
-	}
-	// 明文 / 包过短 / peek 错误 —— 一律按"待压缩"处理。包过短场景现实里不出现
-	// （PM XML 至少几 KB），但单测要覆盖。
-	c, err := backup.NewCompressor("gzip", pmGzipLevel)
-	if err != nil {
-		return nil, false, fmt.Errorf("new gzip compressor: %w", err)
-	}
-	wrapped, err := c.Wrap(ctx, br)
-	if err != nil {
-		return nil, false, fmt.Errorf("gzip wrap: %w", err)
-	}
-	return wrapped, false, nil
-}
-
-// bufioReadCloser 把 *bufio.Reader + io.Closer 组合成 io.ReadCloser，
-// 让"原样存（已 gzip）"路径既能复用 peek 已缓存的字节、又能在调用方 Close 时
-// 关闭底层 src。
-type bufioReadCloser struct {
-	*bufio.Reader
-	src io.Closer
-}
-
-func (b *bufioReadCloser) Close() error { return b.src.Close() }
-
 // publishBackupFileReceivedEvent emits SubjectBackupFileReceived after a
 // FileType=3 (Vendor Configuration File) upload lands in MinIO. The backup
 // module subscribes to this and writes backup_tasks.file_path (T-0079). The
@@ -1124,7 +1050,7 @@ func deriveUploadFilename(fileType, taskID, sn string) string {
 //   - "CONFIGBACKUP_XML" → .xml
 //   - "CONFIGBACKUP_NV"  → .nv
 //   - "3"               → .xml（数字编号无法区分 XML/NV，默认走 XML——
-//                          OMC 自家派发都用文本 alias，数字编号仅为协议兼容兜底）
+//     OMC 自家派发都用文本 alias，数字编号仅为协议兼容兜底）
 func canonicalConfigBackupFilename(fileType, sn string) (string, bool) {
 	sn = strings.TrimSpace(sn)
 	if sn == "" {

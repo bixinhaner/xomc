@@ -366,7 +366,7 @@ export default function BscBtsAddModal({
       okText={okText}
       cancelText={cancelText}
       confirmLoading={addMutation.isPending || updateMutation.isPending}
-      maskClosable={false}
+      mask={{ closable: false }}
       destroyOnHidden
       width={760}
     >

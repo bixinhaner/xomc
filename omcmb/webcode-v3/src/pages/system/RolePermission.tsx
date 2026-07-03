@@ -7,6 +7,7 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 import { formatTime } from '@/lib/format'
 import { useRoles } from '@core/hooks/api/useSystem'
 import type { Role } from '@core/types/system'
+import { UNASSIGNED_GROUP_ID } from '@core/utils/deviceGroupTargets'
 
 import { StateBlock, MiniStat, RowHeader, KeywordToolbar, Pager } from './_shared'
 
@@ -33,7 +34,12 @@ export default function RolePermission() {
   const boundUsers = useMemo(() => rows.reduce((acc, r) => acc + (r.userCount ?? 0), 0), [rows])
   const noGroupCount = useMemo(
     () =>
-      rows.filter((r) => r.builtIn === 0 && (!r.deviceGroupIds || r.deviceGroupIds.length === 0))
+      rows.filter((r) => {
+        if (r.builtIn > 0) return false
+        const realGroupCount = (r.deviceGroupIds ?? []).filter((id) => id !== UNASSIGNED_GROUP_ID).length
+        const hasUnassigned = (r.deviceGroupIds ?? []).includes(UNASSIGNED_GROUP_ID)
+        return realGroupCount === 0 && !hasUnassigned
+      })
         .length,
     [rows]
   )
@@ -91,8 +97,9 @@ export default function RolePermission() {
                   <span />
                 </RowHeader>
                 {rows.map((r: Role) => {
-                  const noGroup =
-                    r.builtIn === 0 && (!r.deviceGroupIds || r.deviceGroupIds.length === 0)
+                  const realGroupCount = (r.deviceGroupIds ?? []).filter((id) => id !== UNASSIGNED_GROUP_ID).length
+                  const hasUnassigned = (r.deviceGroupIds ?? []).includes(UNASSIGNED_GROUP_ID)
+                  const noGroup = r.builtIn === 0 && realGroupCount === 0 && !hasUnassigned
                   return (
                     <button
                       key={r.id}
@@ -122,12 +129,16 @@ export default function RolePermission() {
                       <div className="text-xs">
                         {r.builtIn > 0 ? (
                           <span className="font-mono text-[10px] text-cyan-300/55">全部</span>
+                        ) : realGroupCount > 0 ? (
+                          <span className="font-mono text-[11px] text-cyan-200">
+                            {realGroupCount} 组{hasUnassigned ? ' + 未分组' : ''}
+                          </span>
+                        ) : hasUnassigned ? (
+                          <span className="chip text-cyan-200">未分组</span>
                         ) : noGroup ? (
                           <span className="chip text-[#ff7a1a]">未绑定</span>
                         ) : (
-                          <span className="font-mono text-[11px] text-cyan-200">
-                            {r.deviceGroupIds?.length ?? 0} 组
-                          </span>
+                          <span className="font-mono text-[11px] text-cyan-200">0 组</span>
                         )}
                       </div>
                       <div className="font-mono text-[11px] text-cyan-300/75">

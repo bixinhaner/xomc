@@ -135,7 +135,9 @@ type GeoDevice struct {
 	PCI        *string `json:"pci,omitempty"`         // device_info.pci
 	DeviceName *string `json:"device_name,omitempty"` // device_info.device_name
 	// GIS 地图字段
-	UECount int `json:"ue_count"` // 当前接入 UE 数
+	UECount                   int  `json:"ue_count"`                        // 当前接入 UE 数
+	HighestAlarmSeverity      *int `json:"highest_alarm_severity,omitempty"` // 最高告警级别 1=Critical..4=Warning; nil=无告警
+	HighestSeverityAlarmCount int  `json:"highest_severity_alarm_count"`    // 最高级别的告警数量
 }
 
 // GeoStats represents device statistics for map display.
@@ -550,10 +552,11 @@ func (r *PgDeviceRepository) List(ctx context.Context, filter DeviceFilter) (*mo
 	//   nil         → 超管，不过滤
 	//   []（非 nil）  → 非超管且无任何可见分组，短路空集（此前 len>0 判断会 fail-open 返全量）
 	//   [g1, ...]   → 限定到这些分组
+	realVisibleGroups, includeUngrouped := authz.SplitVisibleGroups(filter.VisibleGroups)
 	if filter.VisibleGroups != nil && len(filter.VisibleGroups) == 0 {
 		builder = builder.Where("FALSE")
 		countBuilder = countBuilder.Where("FALSE")
-	} else if len(filter.VisibleGroups) > 0 {
+	} else if filter.GroupID != nil || len(filter.GroupIDs) > 0 || len(realVisibleGroups) > 0 || includeUngrouped {
 		if filter.GroupID == nil {
 			// Only add JOIN if not already added by GroupID
 			builder = builder.Join("device_group_members dgm2 ON d.id = dgm2.device_id")
@@ -564,15 +567,47 @@ func (r *PgDeviceRepository) List(ctx context.Context, filter DeviceFilter) (*mo
 		if filter.GroupID != nil {
 			// Already joined with dgm, need subquery or additional condition
 			// For simplicity, we use EXISTS subquery for visible groups check
-			builder = builder.Where(sq.Eq{"d.id": sq.Select("dgm_vis.device_id").
-				From("device_group_members dgm_vis").
-				Where(sq.Eq{"dgm_vis.group_id": filter.VisibleGroups})})
-			countBuilder = countBuilder.Where(sq.Eq{"d.id": sq.Select("dgm_vis.device_id").
-				From("device_group_members dgm_vis").
-				Where(sq.Eq{"dgm_vis.group_id": filter.VisibleGroups})})
+			if len(realVisibleGroups) > 0 && includeUngrouped {
+				builder = builder.Where(sq.Or{
+					sq.Eq{"d.id": sq.Select("dgm_vis.device_id").
+						From("device_group_members dgm_vis").
+						Where(sq.Eq{"dgm_vis.group_id": realVisibleGroups})},
+					sq.Expr(ungroupedDevicesWhere),
+				})
+				countBuilder = countBuilder.Where(sq.Or{
+					sq.Eq{"d.id": sq.Select("dgm_vis.device_id").
+						From("device_group_members dgm_vis").
+						Where(sq.Eq{"dgm_vis.group_id": realVisibleGroups})},
+					sq.Expr(ungroupedDevicesWhere),
+				})
+			} else if includeUngrouped {
+				builder = builder.Where(sq.Expr(ungroupedDevicesWhere))
+				countBuilder = countBuilder.Where(sq.Expr(ungroupedDevicesWhere))
+			} else if len(realVisibleGroups) > 0 {
+				builder = builder.Where(sq.Eq{"d.id": sq.Select("dgm_vis.device_id").
+					From("device_group_members dgm_vis").
+					Where(sq.Eq{"dgm_vis.group_id": realVisibleGroups})})
+				countBuilder = countBuilder.Where(sq.Eq{"d.id": sq.Select("dgm_vis.device_id").
+					From("device_group_members dgm_vis").
+					Where(sq.Eq{"dgm_vis.group_id": realVisibleGroups})})
+			}
 		} else {
-			builder = builder.Where(sq.Eq{joinAlias + ".group_id": filter.VisibleGroups})
-			countBuilder = countBuilder.Where(sq.Eq{joinAlias + ".group_id": filter.VisibleGroups})
+			if len(realVisibleGroups) > 0 && includeUngrouped {
+				builder = builder.Where(sq.Or{
+					sq.Eq{joinAlias + ".group_id": realVisibleGroups},
+					sq.Expr(ungroupedDevicesWhere),
+				})
+				countBuilder = countBuilder.Where(sq.Or{
+					sq.Eq{joinAlias + ".group_id": realVisibleGroups},
+					sq.Expr(ungroupedDevicesWhere),
+				})
+			} else if includeUngrouped {
+				builder = builder.Where(sq.Expr(ungroupedDevicesWhere))
+				countBuilder = countBuilder.Where(sq.Expr(ungroupedDevicesWhere))
+			} else if len(realVisibleGroups) > 0 {
+				builder = builder.Where(sq.Eq{joinAlias + ".group_id": realVisibleGroups})
+				countBuilder = countBuilder.Where(sq.Eq{joinAlias + ".group_id": realVisibleGroups})
+			}
 		}
 	}
 
@@ -1063,14 +1098,18 @@ func scanGeoDeviceRow(row scannable) (GeoDevice, error) {
 	var alarmCount int
 	var ipAddress, mac, pci, deviceName string // COALESCE 保证非 NULL
 	var ueCount int                            // COALESCE 保证非 NULL
+	var highestAlarmSeverity *int              // NULL = 无活跃告警
+	var highestSeverityAlarmCount int          // 最高级别的告警数量
 
 	err := row.Scan(
 		&d.ID, &d.SerialNumber, &d.Name,
-		&lifecycle, &isOnline, // T-0162: 替代 &d.Status
+		&lifecycle, &isOnline,
 		&latitude, &longitude, &groupID, &groupName,
 		&address, &alarmCount, &deviceType,
 		&ipAddress, &mac, &pci, &deviceName,
 		&ueCount,
+		&highestAlarmSeverity,
+		&highestSeverityAlarmCount,
 	)
 	if err != nil {
 		return GeoDevice{}, err
@@ -1110,6 +1149,8 @@ func scanGeoDeviceRow(row scannable) (GeoDevice, error) {
 		d.DeviceName = &deviceName
 	}
 	d.UECount = ueCount
+	d.HighestAlarmSeverity = highestAlarmSeverity
+	d.HighestSeverityAlarmCount = highestSeverityAlarmCount
 	return d, nil
 }
 
@@ -1163,6 +1204,8 @@ func (r *PgDeviceRepository) ListGeo(ctx context.Context, filter GeoDeviceFilter
 		"d.site_name as address", "COALESCE(di.active_alarm_count, 0) as alarm_count", "d.model_name as type",
 		"COALESCE(host(d.ip_address), '')", "COALESCE(di.mac, '')", "COALESCE(di.pci, '')", "COALESCE(di.device_name, '')",
 		"COALESCE(di.ue_count, 0)",
+		"di.highest_alarm_severity",
+		"COALESCE(di.highest_severity_alarm_count, 0)",
 	).From("devices d").
 		LeftJoin("device_group_members dgm ON d.id = dgm.device_id").
 		LeftJoin("device_groups dg ON dgm.group_id = dg.id").
@@ -1405,6 +1448,8 @@ func (r *PgDeviceRepository) SearchDevices(ctx context.Context, keyword string, 
 		"d.site_name as address", "COALESCE(di.active_alarm_count, 0) as alarm_count", "d.model_name as type",
 		"COALESCE(host(d.ip_address), '')", "COALESCE(di.mac, '')", "COALESCE(di.pci, '')", "COALESCE(di.device_name, '')",
 		"COALESCE(di.ue_count, 0)",
+		"di.highest_alarm_severity",
+		"COALESCE(di.highest_severity_alarm_count, 0)",
 	).From("devices d").
 		LeftJoin("device_group_members dgm ON d.id = dgm.device_id").
 		LeftJoin("device_groups dg ON dgm.group_id = dg.id").

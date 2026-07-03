@@ -237,7 +237,7 @@ export default function ScriptTask() {
         cancelText={t('common.cancel')}
         width={680}
         confirmLoading={createScriptMutation.isPending || updateScriptMutation.isPending}
-        maskClosable={!createScriptMutation.isPending && !updateScriptMutation.isPending}
+        mask={{ closable: !createScriptMutation.isPending && !updateScriptMutation.isPending }}
         closable={!createScriptMutation.isPending && !updateScriptMutation.isPending}
       >
         <Form form={form} layout="vertical" style={{ marginTop: 16 }}>

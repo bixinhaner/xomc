@@ -49,8 +49,8 @@ func (s *PgMRStore) SaveFile(ctx context.Context, file *MRFileInfo) error {
 }
 
 // ListUncompressed 返回 raw_compressed=false 且 created_at < olderThan 的 mr_files 对应
-// MinIO 对象键（按 created_at 升序，至多 limit 条）。供 rawarchive.Sweeper 补偿扫描，命中
-// idx_mr_files_uncompressed 部分索引。
+// MinIO 对象键（按 created_at 升序，至多 limit 条）。保留给 deprecated rawarchive.Sweeper
+// 或离线工具使用；运行态 #836 不再启动补扫。
 func (s *PgMRStore) ListUncompressed(ctx context.Context, olderThan time.Time, limit int) ([]string, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT minio_path FROM mr_files
@@ -73,8 +73,8 @@ func (s *PgMRStore) ListUncompressed(ctx context.Context, olderThan time.Time, l
 }
 
 // MarkCompressed 把每个 old 键对应的 mr_files 行标记为已压缩（raw_compressed=true），并把 minio_path
-// 更新为对应 new 键（压缩改名 .xml→.xml.gz；new==old 时只置标志位）。内联压缩成功后单条调用、
-// Sweeper 补压后批量调用，二者共用。批内逐行更新（每行 new 各异，无法用单条 ANY）。
+// 更新为对应 new 键（压缩改名 .xml→.xml.gz；new==old 时只置标志位）。仅在对象实际 gzip 存储后
+// 调用；批内逐行更新（每行 new 各异，无法用单条 ANY）。
 func (s *PgMRStore) MarkCompressed(ctx context.Context, renames map[string]string) error {
 	if len(renames) == 0 {
 		return nil

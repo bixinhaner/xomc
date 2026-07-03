@@ -9,8 +9,9 @@ import (
 	"go.uber.org/zap"
 )
 
-// 补偿扫描默认参数。grace 必须 > 内联压缩典型时延，避免 Sweeper 与内联快路径在每个
-// 文件上重复竞争（内联通常秒级压完并置 raw_compressed=true，grace 后才进 Sweeper 视野）。
+// 补偿扫描默认参数。
+//
+// Deprecated: issue #836 后运行态不再启动 Sweeper；这些默认值仅保留给离线工具/历史测试。
 const (
 	DefaultSweepInterval = 5 * time.Minute // 扫描周期
 	DefaultSweepGrace    = 5 * time.Minute // 文件入库到进入扫描视野的宽限（给内联压缩先完成）
@@ -49,7 +50,7 @@ func NewSweepMetrics(reg prometheus.Registerer) *SweepMetrics {
 	m := &SweepMetrics{
 		Scanned: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "omc_raw_archive_sweep_scanned_total",
-			Help: "补偿扫描取出的待压缩原始对象数（issue #321 加固），label source 区分 pm/mr",
+			Help: "补偿扫描取出的待压缩原始对象数（deprecated after issue #836），label source 区分 pm/mr",
 		}, []string{"source"}),
 		Compressed: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "omc_raw_archive_sweep_compressed_total",
@@ -66,12 +67,14 @@ func NewSweepMetrics(reg prometheus.Registerer) *SweepMetrics {
 	return m
 }
 
-// Sweeper 周期性地把内联压缩遗漏的原始对象（dropped_busy / 失败 / 崩溃前未压）补压，
-// 直至其 raw_compressed 置真。它是"保证压到"的兜底（内联 Schedule 是快路径）。
+// Sweeper 周期性地扫描 raw_compressed=false 的原始对象并尝试补压。
+//
+// Deprecated: issue #836 的运行态不再启动 Sweeper；PM/MR 压缩只在新文件成功入库后尝试一次。
+// 该类型保留给离线工具/历史测试，但不应重新接回 worker 常驻路径。
 //
 // 调度：每 interval 跑一轮 SweepOnce；每轮先查总开关（禁用则整轮跳过，不空转），再对每个
-// 源分批 ListUncompressed → 有界并发 CompressNow → 把终态对象批量 MarkCompressed，直到该
-// 源排空或本轮无进展或达 sweepMaxRounds。零值不可用，须经 NewSweeper 构造。
+// 源分批 ListUncompressed → 有界并发 CompressNow → 把实际 gzip 存储的对象批量 MarkCompressed，
+// 直到该源排空或本轮无进展或达 sweepMaxRounds。零值不可用，须经 NewSweeper 构造。
 type Sweeper struct {
 	archiver *Archiver
 	sources  []SweepSource
@@ -107,7 +110,7 @@ func NewSweeper(a *Archiver, sources []SweepSource, interval, grace time.Duratio
 	}
 }
 
-// Run 阻塞运行扫描循环直至 ctx 取消（在 worker 里以 goroutine 启动，进程优雅关停取消 ctx）。
+// Run 阻塞运行扫描循环直至 ctx 取消。仅供历史/离线调用方使用；worker 运行态不再启动它。
 func (s *Sweeper) Run(ctx context.Context) {
 	if s == nil || s.archiver == nil || len(s.sources) == 0 {
 		return

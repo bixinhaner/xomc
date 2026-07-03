@@ -648,7 +648,7 @@ function PackedScalarNeighborTable({
         okText={t('device.multi.confirmAdd')}
         confirmLoading={updateMutation.isPending || isSubmitting}
         destroyOnClose
-        maskClosable={false}
+        mask={{ closable: false }}
       >
         {addModal && (
           <Space direction="vertical" size="small" style={{ width: '100%' }}>

@@ -196,7 +196,7 @@ export default function UserDropdown() {
         confirmLoading={changePasswordMutation.isPending}
         destroyOnHidden
         closable={!mustChangePassword}
-        maskClosable={!mustChangePassword}
+        mask={{ closable: !mustChangePassword }}
         keyboard={!mustChangePassword}
         okText={mustChangePassword ? t('login.mustChangePassword.confirm') : undefined}
         cancelButtonProps={mustChangePassword ? { style: { display: 'none' } } : undefined}

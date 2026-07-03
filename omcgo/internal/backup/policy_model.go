@@ -66,15 +66,15 @@ type BackupPolicy struct {
 // Values mirror frontend `DEFAULT_VALUES` so first-load UI matches DB defaults.
 func DefaultPolicy() *BackupPolicy {
 	return &BackupPolicy{
-		RetentionDays:         30,
-		MaxBackupCount:        100,
-		MinBackupCount:        3,
-		AutoCleanup:           true,
-		CleanupTime:           "03:00",
-		CleanupDayOfWeek:      -1,
-		KeepLastN:             5,
-		// issue #585：配置备份默认不再压缩。只有 PM / MR 才走压缩链路
-		// （PM 由 ACS pmSyncGzip / MR 由 worker 压缩），配置备份原始字节直存，
+		RetentionDays:    30,
+		MaxBackupCount:   100,
+		MinBackupCount:   3,
+		AutoCleanup:      true,
+		CleanupTime:      "03:00",
+		CleanupDayOfWeek: -1,
+		KeepLastN:        5,
+		// issue #585/#836：配置备份默认不再压缩。只有 PM / MR 才走
+		// worker 入库后一次性压缩链路，配置备份原始字节直存，
 		// 避免任务管理 presigned URL 出现 .xml.gz 命名 / 浏览器侧 Content-Encoding
 		// 透明解压行为不一致。CompressionLevel/CompressionFormat 仍保留默认值
 		// 仅作 schema 兼容，运维即使在 UI 勾选启用，ACS 也已不再装配压缩链路。

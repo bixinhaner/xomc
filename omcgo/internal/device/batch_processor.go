@@ -84,6 +84,7 @@ func (p *BatchInformProcessor) SetInfoSyncer(s *InfoSyncer) {
 // TransitionEventPublisher 是 BatchInformProcessor 调 DeviceService 发布
 // device.online / device.firmware.changed 事件的窄接口（避免反向依赖 DeviceService 整体）。
 type TransitionEventPublisher interface {
+	ClearDisconnectedAlarmOnOnline(ctx context.Context, device *model.Device)
 	PublishDeviceOnlineEvent(ctx context.Context, device *model.Device)
 	PublishDeviceFirmwareChangedEvent(ctx context.Context, device *model.Device,
 		oldVersion, newVersion string, becameOnline bool)
@@ -355,19 +356,31 @@ func (p *BatchInformProcessor) doFlush(ctx context.Context, buffer map[string]*i
 	// HandleFirmwareChanged 触发的重新交集 + Path B 覆盖 online 的能力，避免双 Path B。
 	if p.transitionPublisher != nil {
 		for _, u := range hit {
-			newVersion := u.device.FirmwareVersion
-			firmwareChanged := u.oldVersion != "" && newVersion != "" && u.oldVersion != newVersion
-			becameOnline := u.oldStatus == model.DeviceOffline && u.device.Status == model.DeviceActive
-			switch {
-			case firmwareChanged:
-				p.transitionPublisher.PublishDeviceFirmwareChangedEvent(ctx, u.device, u.oldVersion, newVersion, becameOnline)
-			case becameOnline:
-				p.transitionPublisher.PublishDeviceOnlineEvent(ctx, u.device)
-			}
+			p.publishTransitionEvents(ctx, u)
 		}
 	}
 
 	return nil
+}
+
+func (p *BatchInformProcessor) publishTransitionEvents(ctx context.Context, u *informUpdate) {
+	if p.transitionPublisher == nil || u == nil || u.device == nil {
+		return
+	}
+	if u.device.Status == model.DeviceActive && u.device.IsOnline {
+		p.transitionPublisher.ClearDisconnectedAlarmOnOnline(ctx, u.device)
+	}
+
+	newVersion := u.device.FirmwareVersion
+	firmwareChanged := u.oldVersion != "" && newVersion != "" && u.oldVersion != newVersion
+	becameOnline := u.oldStatus == model.DeviceOffline && u.device.Status == model.DeviceActive
+
+	switch {
+	case firmwareChanged:
+		p.transitionPublisher.PublishDeviceFirmwareChangedEvent(ctx, u.device, u.oldVersion, newVersion, becameOnline)
+	case becameOnline:
+		p.transitionPublisher.PublishDeviceOnlineEvent(ctx, u.device)
+	}
 }
 
 // invalidateOrphanCache DEL stale cache for devices whose PG row vanished.

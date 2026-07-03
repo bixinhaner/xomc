@@ -38,7 +38,7 @@ export default function CellDrilldownSelector({
       <Alert
         type="info"
         showIcon
-        message={intl.formatMessage({ id: 'perf.drilldown.pickDeviceFirst' })}
+        title={intl.formatMessage({ id: 'perf.drilldown.pickDeviceFirst' })}
       />
     );
   }
@@ -104,7 +104,7 @@ export default function CellDrilldownSelector({
 
   return (
     <Space orientation="vertical" size="small" style={{ width: '100%' }}>
-      <Alert type="info" showIcon message={intl.formatMessage({ id: 'perf.drilldown.hint' })} />
+      <Alert type="info" showIcon title={intl.formatMessage({ id: 'perf.drilldown.hint' })} />
       <Collapse items={items} />
     </Space>
   );

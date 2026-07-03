@@ -418,7 +418,7 @@ export default function BatchImportModal({
       onCancel={handleCancel}
       footer={null}
       width={600}
-      maskClosable={!importing}
+      mask={{ closable: !importing }}
       closable={!importing}
       destroyOnHidden
     >

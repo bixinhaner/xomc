@@ -5,9 +5,18 @@
  */
 
 import React, { useState } from 'react';
+import { useIntl } from 'react-intl';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import type { MapDevice } from '@core/types/map';
 import { DEVICE_STATUS_CONFIG, ALARM_BADGE_CONFIG } from './constants';
+
+/** 告警级别颜色配置（label 通过 i18n key 在组件内动态获取） */
+const SEVERITY_COLOR: Record<number, { i18nKey: string; color: string }> = {
+  1: { i18nKey: 'alarm.severity.critical', color: '#FF4D4F' },
+  2: { i18nKey: 'alarm.severity.major',    color: '#FA8C16' },
+  3: { i18nKey: 'alarm.severity.minor',    color: '#FADB14' },
+  4: { i18nKey: 'alarm.severity.warning',  color: '#1677FF' },
+};
 
 interface MapPopupProps {
   /** 设备数据 */
@@ -39,12 +48,29 @@ const MapPopup: React.FC<MapPopupProps> = ({
   onAlarmClick,
 }) => {
   const token = useThemeToken();
+  const intl = useIntl();
   const [alarmHovered, setAlarmHovered] = useState(false);
 
   if (!visible || !device) return null;
 
   const statusConfig = DEVICE_STATUS_CONFIG[device.status] || DEVICE_STATUS_CONFIG.offline;
   const hasAlarm = (device.alarmCount ?? 0) > 0;
+  const severityCfg = SEVERITY_COLOR[device.highestAlarmSeverity ?? 1] ?? SEVERITY_COLOR[1];
+
+  // 告警角标样式（用于无告警时的灰色占位）
+  const alarmBadgeStyle: React.CSSProperties = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    padding: '0 4px',
+    background: `linear-gradient(180deg, ${ALARM_BADGE_CONFIG.gradientStart} 0%, ${ALARM_BADGE_CONFIG.gradientEnd} 100%)`,
+    color: '#FFF',
+    fontSize: 11,
+    fontWeight: 700,
+  };
 
   // 卡片容器样式
   const containerStyle: React.CSSProperties = {
@@ -126,20 +152,6 @@ const MapPopup: React.FC<MapPopupProps> = ({
     flex: 1,
   };
 
-  // 告警角标样式
-  const alarmBadgeStyle: React.CSSProperties = {
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: 20,
-    height: 20,
-    borderRadius: '50%',
-    background: `linear-gradient(180deg, ${ALARM_BADGE_CONFIG.gradientStart} 0%, ${ALARM_BADGE_CONFIG.gradientEnd} 100%)`,
-    color: '#FFF',
-    fontSize: 11,
-    fontWeight: 700,
-  };
-
   return (
     <div style={containerStyle}>
       {/* 左侧箭头 */}
@@ -169,23 +181,35 @@ const MapPopup: React.FC<MapPopupProps> = ({
           />
           {/* 状态文字 */}
           <span style={{ fontSize: 12, color: statusConfig.color }}>
-            {device.status === 'onlineActive' ? '在线激活' : device.status === 'onlineInactive' ? '在线未激活' : '离线'}
+            {device.status === 'onlineActive'
+              ? intl.formatMessage({ id: 'gis.status.onlineActive' })
+              : device.status === 'onlineInactive'
+                ? intl.formatMessage({ id: 'gis.status.onlineInactive' })
+                : intl.formatMessage({ id: 'gis.status.offline' })}
           </span>
 
           {/* 分隔符 */}
           <span style={{ fontSize: 12, color: '#D9D9D9' }}>|</span>
 
           {/* 告警 */}
-          <span style={{ fontSize: 12, color: 'var(--color-neutral-600)' }}>告警:</span>
+          <span style={{ fontSize: 12, color: 'var(--color-neutral-600)' }}>{intl.formatMessage({ id: 'alarm.activeAlarm' })}:</span>
           {hasAlarm ? (
             <span
-              style={{ ...alarmBadgeStyle, cursor: 'pointer', opacity: alarmHovered ? 0.75 : 1, transition: 'opacity 0.15s' }}
-              title="点击查看该设备告警"
+              style={{
+                fontSize: 12,
+                fontWeight: 600,
+                color: severityCfg.color,
+                cursor: 'pointer',
+                opacity: alarmHovered ? 0.75 : 1,
+                transition: 'opacity 0.15s',
+              }}
+              title={intl.formatMessage({ id: 'gis.popup.alarmClickTip' })}
               onClick={() => onAlarmClick?.(device.sn)}
               onMouseEnter={() => setAlarmHovered(true)}
               onMouseLeave={() => setAlarmHovered(false)}
             >
-              {device.alarmCount! > 99 ? '99+' : device.alarmCount}
+              ⚠ {intl.formatMessage({ id: severityCfg.i18nKey })}
+              ({device.highestSeverityAlarmCount ?? device.alarmCount})
             </span>
           ) : (
             <span style={{ ...alarmBadgeStyle, background: '#F0F0F0', color: '#8C8C8C' }}>0</span>
@@ -199,7 +223,7 @@ const MapPopup: React.FC<MapPopupProps> = ({
         <div style={detailsStyle}>
           {/* 核心标识 */}
           <div style={detailRowStyle}>
-            <span style={labelStyle}>序列号:</span>
+            <span style={labelStyle}>{intl.formatMessage({ id: 'table.sn' })}:</span>
             <span style={{ ...valueStyle, fontFamily: 'monospace' }}>{device.sn}</span>
           </div>
 
@@ -220,7 +244,7 @@ const MapPopup: React.FC<MapPopupProps> = ({
 
           {/* 可读名称 */}
           <div style={detailRowStyle}>
-            <span style={labelStyle}>设备名称:</span>
+            <span style={labelStyle}>{intl.formatMessage({ id: 'device.name' })}:</span>
             <span style={valueStyle}>{device.device_name || <span style={{ color: '#BFBFBF' }}>--</span>}</span>
           </div>
 
@@ -234,7 +258,7 @@ const MapPopup: React.FC<MapPopupProps> = ({
 
           {/* UE 数 */}
           <div style={detailRowStyle}>
-            <span style={labelStyle}>UE 数:</span>
+            <span style={labelStyle}>{intl.formatMessage({ id: 'device.ueCount' })}:</span>
             <span style={{ ...valueStyle, fontFamily: 'monospace', color: (device.ueCount ?? 0) > 0 ? '#52C41A' : '#8C8C8C' }}>
               {device.ueCount ?? 0}
             </span>
@@ -243,20 +267,20 @@ const MapPopup: React.FC<MapPopupProps> = ({
           {/* 位置信息 */}
           {device.groupName && (
             <div style={detailRowStyle}>
-              <span style={labelStyle}>设备组:</span>
+              <span style={labelStyle}>{intl.formatMessage({ id: 'gis.popup.deviceGroup' })}:</span>
               <span style={valueStyle}>{device.groupName}</span>
             </div>
           )}
 
           {device.address && (
             <div style={detailRowStyle}>
-              <span style={labelStyle}>地址:</span>
+              <span style={labelStyle}>{intl.formatMessage({ id: 'gis.popup.address' })}:</span>
               <span style={valueStyle}>{device.address}</span>
             </div>
           )}
 
           <div style={{ ...detailRowStyle, marginBottom: 0 }}>
-            <span style={labelStyle}>坐标:</span>
+            <span style={labelStyle}>{intl.formatMessage({ id: 'gis.popup.coordinates' })}:</span>
             <span style={{ ...valueStyle, fontFamily: 'monospace', fontSize: 11 }}>
               {device.lng.toFixed(4)}, {device.lat.toFixed(4)}
             </span>

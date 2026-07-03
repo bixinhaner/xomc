@@ -1,6 +1,7 @@
 import http from '../http';
 import type { KPI, Measurement, KPISeries, PerformanceThreshold, PerformanceTask, AggregatedCounter, AggregatedCounterQuery, KPICalculationRequest, KPICalculationResult } from '../../types/performance';
 import type { PageRequest, PageResponse } from '../../types/pagination';
+import { resolveRawArchiveDisplayFileName } from '../../utils/rawArchiveFileName';
 
 // --- Backend response types ---
 
@@ -575,7 +576,7 @@ function mapPMFile(f: BackendPMFileInfo): PMFileItem {
     deviceSn: f.device_sn,
     carrier: f.carrier,
     technology: f.technology,
-    fileName: f.file_name,
+    fileName: resolveRawArchiveDisplayFileName(f.file_name, f.minio_path),
     fileSize: f.file_size,
     collectTime: f.collect_time,
     parsed: f.parsed,

@@ -201,6 +201,10 @@ func (h *InformHandler) handleRebootComplete(ctx context.Context, evt event.Even
 		return err
 	}
 
+	// preRebootRunTime：在 UpdateFromInform 覆盖 device_info.run_time 之前
+	// 读取 DB 中存储的上次同步值，作为重启前设备运行时长（秒）写入重启记录。
+	// 新设备首次入网无历史记录时为 0，正常写入（显示为 '-'）。
+	var preRebootRunTime int64
 	if device == nil {
 		h.logger.Info("handleRebootComplete: device not found, auto-registering",
 			zap.String("serial_number", sn))
@@ -223,6 +227,9 @@ func (h *InformHandler) handleRebootComplete(ctx context.Context, evt event.Even
 		// kick off Path B/C (auto-sync / model upload).
 		h.service.PublishDeviceRegistered(ctx, device)
 	} else {
+		// 读重启前 run_time（在 UpdateFromInform 写入新值之前）。
+		preRebootRunTime = h.service.GetDevicePreRebootRunTime(ctx, device.ID)
+
 		// issue #212：收到 BOOT 即无条件强制驱动一次 "下线 → 上线" 翻转。
 		// 先把设备显式置离线（即便当前显示在线），再由紧随其后的 UpdateFromInform
 		// 把它带回在线 —— 这样 oldStatus==Offline 成立、device.online 必然发出，
@@ -242,7 +249,7 @@ func (h *InformHandler) handleRebootComplete(ctx context.Context, evt event.Even
 		}
 	}
 
-	if _, err := h.service.RecordBootFromInform(ctx, device, payload.Events, payload.ParameterList); err != nil {
+	if _, err := h.service.RecordBootFromInform(ctx, device, payload.Events, payload.ParameterList, preRebootRunTime); err != nil {
 		h.logger.Error("handleRebootComplete: RecordBootFromInform failed",
 			zap.Error(err), zap.String("serial_number", sn))
 		return err

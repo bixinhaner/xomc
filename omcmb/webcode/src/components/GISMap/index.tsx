@@ -588,7 +588,7 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
           maxWidth: '80%',
         }}>
           <Alert
-            message={metadataAlert.message}
+            title={metadataAlert.message}
             description={metadataAlert.description}
             type="info"
             icon={<InfoCircleOutlined />}

@@ -84,6 +84,8 @@ export default function MetricPickerModal({
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [selected, setSelected] = useState<string[]>(initialSelected);
+  // initialLabels 预加载的指标名 map；声明须在 prevOpen 块之前（该块内调用 setLabelMap）。
+  const [labelMap, setLabelMap] = useState<Record<string, string>>(initialLabels ?? {});
 
   // 已选回显同步：与下方制式同款「组件常驻不卸载」问题——内部 selected 仅首挂载赋值一次，
   // 关闭后用新 initialSelected 重开（如切换编辑不同模板）时不会自动刷新，会残留上次打开的选择。
@@ -118,7 +120,7 @@ export default function MetricPickerModal({
   // 选中值 → 友好名 映射：items 变化时在渲染期幂等累积（与 PivotTable 列宽同款 render-phase sync，
   // 不用 useEffect），供「已选」面板标签显示友好名，避免露出 K 编号。
   // 初始值：优先用调用方预加载的 initialLabels（指标库全量名），否则为空 map。
-  const [labelMap, setLabelMap] = useState<Record<string, string>>(initialLabels ?? {});
+  // （声明已提前至 prevOpen 块之前，此处保留注释供追溯）
 
   // initialLabels 异步加载完成后（调用方 useAllIndicators 返回数据），同步更新 labelMap。
   // render-phase sync：与 seenItems 同套路，幂等、不依赖 useEffect。

@@ -12,6 +12,7 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useIntl } from 'react-intl';
 import { useNavigate } from 'react-router-dom';
+import { useTabStore } from '@core/store/tabStore';
 import { Checkbox, Spin, Empty, Collapse, Input, Tooltip, message } from 'antd';
 import { SearchOutlined, PlusOutlined, MinusOutlined, CaretDownOutlined } from '@ant-design/icons';
 import GISMap from '@/components/GISMap';
@@ -61,6 +62,8 @@ function deviceGeoToMapDevice(device: DeviceGeo): MapDevice {
     pci: device.pci,
     device_name: device.device_name,
     ueCount: device.ueCount,
+    highestAlarmSeverity: device.highestAlarmSeverity,
+    highestSeverityAlarmCount: device.highestSeverityAlarmCount,
   };
 }
 
@@ -155,6 +158,7 @@ export default function GISMapView() {
   // 地图组件引用
   const mapRef = useRef<GISMapRef>(null);
   const navigate = useNavigate();
+  const openTab = useTabStore((s) => s.openTab);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchContainerRef = useRef<HTMLDivElement>(null);
 
@@ -1118,7 +1122,11 @@ export default function GISMapView() {
           showControls={false}
           tileUrl={mapConfigData.status === 'success' && !mapConfigData.isUsingDefault ? MAP_CONFIG.tileUrl : undefined}
           onDeviceClick={undefined}
-          onAlarmClick={(sn) => navigate(`/alarm/current?deviceSN=${encodeURIComponent(sn)}`)}
+          onAlarmClick={(sn) => {
+              const path = `/alarm/current?deviceSN=${encodeURIComponent(sn)}`;
+              openTab({ key: 'alarm/current', label: intl.formatMessage({ id: 'nav.alarm.current' }), path, closable: true, labelRaw: true });
+              navigate(path);
+            }}
           onMapClick={() => {
             // 点击地图时收起搜索结果面板
             setDeviceSearchExpanded(false);
@@ -1290,6 +1298,8 @@ export default function GISMapView() {
                                 pci: result.pci,
                                 device_name: result.device_name,
                                 ueCount: result.ueCount,
+                                highestAlarmSeverity: result.highestAlarmSeverity,
+                                highestSeverityAlarmCount: result.highestSeverityAlarmCount,
                               };
                               // 设置搜索结果设备，让地图组件独立显示
                               setSearchResultDevice(mapDevice);

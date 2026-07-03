@@ -91,11 +91,24 @@ export function buildDefaultLayout(tech: TechnologyType): KPILayout {
  * @param layout 读 S1 接口得到的全局布局（可能 undefined / panels 为空）
  * @returns 实际渲染用布局
  */
+/** K/C 编号格式：K900010015 / C000010123 / KGNB0511 / KGSM0101 */
+const KC_CODE_RE = /^[KC]\d{9}$|^KGNB\d{4}$|^KGSM\d{4}$/;
+
+/**
+ * 远端 layout 是否包含合法的 K/C 编号。
+ * 若所有图的 metrics 都是别名（LTE_PDCP_VOLUME_DL 等），则视为脏数据，回退内置默认。
+ */
+function hasValidMetrics(layout: KPILayout): boolean {
+  const allMetrics = layout.panels.flatMap((p) => p.metrics);
+  if (allMetrics.length === 0) return false;
+  return allMetrics.every((m) => KC_CODE_RE.test(m));
+}
+
 export function resolveLayout(
   tech: TechnologyType,
   layout: KPILayout | undefined,
 ): KPILayout {
-  if (layout && layout.panels.length > 0) {
+  if (layout && layout.panels.length > 0 && hasValidMetrics(layout)) {
     return layout;
   }
   return buildDefaultLayout(tech);

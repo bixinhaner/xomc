@@ -122,7 +122,7 @@ const BatchInput: React.FC<BatchInputProps> = ({
         />
 
         {error && (
-          <Alert type="error" message={error} showIcon style={{ fontSize: 13 }} />
+          <Alert type="error" title={error} showIcon style={{ fontSize: 13 }} />
         )}
 
         {/* Preview */}

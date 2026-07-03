@@ -18,9 +18,10 @@ import type { UnifiedFileTransferTaskType } from '../types/unifiedFileTransfer';
 export const DEVICE_UPGRADE_CATEGORY = 'device_upgrade';
 export const DEVICE_UPGRADE_MEMBER_CATEGORIES = ['enb_upgrade', 'gnb_upgrade', 'gsm_upgrade'] as const;
 
-/** 判断某后端 category 是否属于『设备升级』成员（4G/5G/2G）。 */
+/** 判断某后端 category 是否属于『设备升级』虚拟分类（成员 4G/5G/2G，或自定义模板直接存为 device_upgrade 字面值）。 */
 export function isDeviceUpgradeMember(category: string | undefined): boolean {
-  return category === 'enb_upgrade' || category === 'gnb_upgrade' || category === 'gsm_upgrade';
+  return category === 'enb_upgrade' || category === 'gnb_upgrade' || category === 'gsm_upgrade'
+    || category === DEVICE_UPGRADE_CATEGORY;
 }
 
 export interface AggregatedCategoryOption {
@@ -66,7 +67,8 @@ export function resolveBackendCategoryParam(
   return selectedCategory || undefined;
 }
 
-/** device_upgrade 虚拟分类下取 enb_upgrade + gnb_upgrade + gsm_upgrade 三类 taskType。 */
+/** device_upgrade 虚拟分类下取 enb_upgrade + gnb_upgrade + gsm_upgrade 三类 taskType，
+ * 以及自定义模板直接存为 device_upgrade 字面值的记录。 */
 export function filterTaskTypesForCategory(
   taskTypes: ReadonlyArray<UnifiedFileTransferTaskType>,
   selectedCategory: string,

@@ -48,6 +48,7 @@ import { useMenuTree, useInvalidateUserMenus } from '@core/hooks/api/useMenus';
 import { fetchRoleMenuIds, setRoleMenus as apiSetRoleMenus } from '@core/services/api/menuApi';
 import type { Menu } from '@core/types/menu';
 import { formatSystemTime } from '@core/utils/systemTime';
+import { UNASSIGNED_GROUP_ID } from '@core/utils/deviceGroupTargets';
 
 // PERMISSION_MODULES 已删除（B3-Phase2-B + 菜单动态加载 P3）。
 // 角色菜单权限的唯一权威源是后端 menus 表（GET /admin/menus/tree）；
@@ -182,8 +183,8 @@ const buildDeviceGroupTreeData = (
           title: child.name,
         }));
 
-      // 如果没有子节点且不是自定义组，则不显示
-      if (children.length === 0 && root.builtIn === 1) {
+        // 如果没有子节点且不是「未分组设备」虚拟节点，则不显示。
+        if (children.length === 0 && root.builtIn === 1 && root.id !== UNASSIGNED_GROUP_ID) {
         return null;
       }
 
@@ -377,10 +378,19 @@ export default function RoleManagement() {
     return Array.from(parentIds) as string[];
   }, [allDeviceGroups, filteredSecondLevelIds]);
 
-  // 所有二级节点 ID（用于验证是否至少选择了一个）
-  const allSecondLevelIds = useMemo(
-    () => (allDeviceGroups ?? []).filter((g) => g.parentId).map((g) => g.id),
+  // 所有可写入数据权限的 group ID：真实二级组 + 「未分组设备」伪节点。
+  const allDataPermissionGroupIds = useMemo(
+    () => (allDeviceGroups ?? []).filter((g) => g.parentId || g.id === UNASSIGNED_GROUP_ID).map((g) => g.id),
     [allDeviceGroups]
+  );
+
+  // 当前筛选条件下可被一键全选的 group ID：真实二级组 + 「未分组设备」伪节点。
+  const filteredSelectableGroupIds = useMemo(
+    () => [
+      ...filteredSecondLevelIds,
+      ...(allDeviceGroups?.some((g) => g.id === UNASSIGNED_GROUP_ID) ? [UNASSIGNED_GROUP_ID] : []),
+    ],
+    [allDeviceGroups, filteredSecondLevelIds]
   );
 
   const createRole = useCreateRole();
@@ -763,8 +773,10 @@ export default function RoleManagement() {
       return;
     }
     // 校验设备组（至少选择一个二级节点）
-    const selectedSecondLevel = selectedDeviceGroupIds.filter((id) => allSecondLevelIds.includes(id));
-    if (selectedSecondLevel.length === 0) {
+      const selectedDataPermissions = selectedDeviceGroupIds.filter((id) =>
+        allDataPermissionGroupIds.includes(id)
+      );
+      if (selectedDataPermissions.length === 0) {
       message.warning(t('role.pleaseSelectDeviceGroup'));
       return;
     }
@@ -822,7 +834,7 @@ export default function RoleManagement() {
         message.error(msg);
       }
     });
-  }, [form, createRole, checkedPermissionKeys, selectedDeviceGroupIds, selectedNetworkTypes, hasAnyPermission, allSecondLevelIds, permissionsToMenuIds, resolveApiEndpointIdsToSave, setRoleMenusMut, setRoleDeviceGroupsMut, setRoleApiPermissions, invalidateUserMenus, refetch, message, t]);
+    }, [form, createRole, checkedPermissionKeys, selectedDeviceGroupIds, selectedNetworkTypes, hasAnyPermission, allDataPermissionGroupIds, permissionsToMenuIds, resolveApiEndpointIdsToSave, setRoleMenusMut, setRoleDeviceGroupsMut, setRoleApiPermissions, invalidateUserMenus, refetch, message, t]);
 
   // doEditSubmit 拆出实际提交逻辑，配合下方"清空设备分组二次确认"复用。
   // 必须先于 handleEdit 声明，否则 React 的 useCallback 会触发 react-hooks/refs：
@@ -894,8 +906,10 @@ export default function RoleManagement() {
     // 中层：清空设备分组二次确认 + 实际保存。
     // §11.2 决议 ① 触点 5：选 0 个二级节点不再硬阻止，改为弹 Modal 警告 → OK 才继续。
     const proceed = () => {
-      const selectedSecondLevel = selectedDeviceGroupIds.filter((id) => allSecondLevelIds.includes(id));
-      if (selectedSecondLevel.length === 0) {
+        const selectedDataPermissions = selectedDeviceGroupIds.filter((id) =>
+          allDataPermissionGroupIds.includes(id)
+        );
+        if (selectedDataPermissions.length === 0) {
         modal.confirm({
           title: t('role.clearGroupBindingTitle'),
           content: t('role.clearGroupBindingContent'),
@@ -924,7 +938,7 @@ export default function RoleManagement() {
     }
 
     proceed();
-  }, [selectedRole, hasAnyPermission, isBuiltIn, selectedDeviceGroupIds, allSecondLevelIds, doEditSubmit, message, modal, t]);
+    }, [selectedRole, hasAnyPermission, isBuiltIn, selectedDeviceGroupIds, allDataPermissionGroupIds, doEditSubmit, message, modal, t]);
 
   const filterFields: FilterField[] = useMemo(() => [
     { name: 'roleName', label: t('role.roleName'), type: 'input', placeholder: t('role.roleName'), width: 240 },
@@ -990,7 +1004,8 @@ export default function RoleManagement() {
         const role = record as Role;
         // §11.2 决议 ① 触点 1：未绑设备分组的角色，列表行加 ⚠️ Tag
         // 用 list 接口返回的 deviceGroupIds（v0.5 已填充）判定
-        const noGroups = !role.deviceGroupIds || role.deviceGroupIds.length === 0;
+        const realDeviceGroupIds = (role.deviceGroupIds ?? []).filter((id) => id !== UNASSIGNED_GROUP_ID);
+        const noGroups = realDeviceGroupIds.length === 0 && !(role.deviceGroupIds ?? []).includes(UNASSIGNED_GROUP_ID);
         return (
           <span>
             {String(val)}
@@ -1161,9 +1176,9 @@ export default function RoleManagement() {
 
   // 渲染设备组树形选择（包含网络类型权限）
   const renderDeviceGroupTree = (readOnly = false) => {
-    // 只检查二级节点是否被选中（基于筛选后的数据）
-    const selectedSecondLevelCount = selectedDeviceGroupIds.filter((id) =>
-      filteredSecondLevelIds.includes(id)
+    // 只检查真正承载设备的数据权限项是否被选中（基于筛选后的数据）
+    const selectedDataPermissionCount = selectedDeviceGroupIds.filter((id) =>
+      allDataPermissionGroupIds.includes(id)
     ).length;
 
     // 全选/取消全选
@@ -1175,25 +1190,25 @@ export default function RoleManagement() {
           // 添加一级节点
           filteredFirstLevelIds.forEach((id) => newIds.add(id));
           // 添加二级节点
-          filteredSecondLevelIds.forEach((id) => newIds.add(id));
+          filteredSelectableGroupIds.forEach((id) => newIds.add(id));
           return Array.from(newIds);
         });
       } else {
         // 取消选中所有筛选后的节点（包括一级和二级）
         setSelectedDeviceGroupIds((prev) =>
-          prev.filter((id) => !filteredSecondLevelIds.includes(id) && !filteredFirstLevelIds.includes(id))
+          prev.filter((id) => !filteredSelectableGroupIds.includes(id) && !filteredFirstLevelIds.includes(id))
         );
       }
     };
 
     // 是否全选（基于筛选后的数据）
     const isAllSelected =
-      filteredSecondLevelIds.length > 0 &&
-      filteredSecondLevelIds.every((id) => selectedDeviceGroupIds.includes(id));
+      filteredSelectableGroupIds.length > 0 &&
+      filteredSelectableGroupIds.every((id) => selectedDeviceGroupIds.includes(id));
 
     // 是否部分选中
     const isIndeterminate =
-      selectedSecondLevelCount > 0 && selectedSecondLevelCount < filteredSecondLevelIds.length;
+      selectedDataPermissionCount > 0 && selectedDataPermissionCount < filteredSelectableGroupIds.length;
 
     return (
       <div>
@@ -1227,8 +1242,8 @@ export default function RoleManagement() {
         <Form.Item
           label={t('role.dataPermission')}
           required={!readOnly}
-          help={!readOnly && selectedSecondLevelCount === 0 ? t('role.pleaseSelectDeviceGroup') : undefined}
-          validateStatus={!readOnly && selectedSecondLevelCount === 0 ? 'warning' : undefined}
+          help={!readOnly && selectedDataPermissionCount === 0 ? t('role.pleaseSelectDeviceGroup') : undefined}
+          validateStatus={!readOnly && selectedDataPermissionCount === 0 ? 'warning' : undefined}
         >
           {readOnly ? (
             <Space wrap>

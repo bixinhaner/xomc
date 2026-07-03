@@ -1,6 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { RefreshCcw } from 'lucide-react'
+import { RefreshCcw, X } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -35,6 +34,7 @@ import {
   filterTaskTypesForCategory,
 } from '@core/utils/ufteCategory'
 
+import type { UnifiedFileTransferTaskType } from '@core/types/unifiedFileTransfer'
 import { RPC_TYPE_LABEL } from './_shared'
 
 // ============================================================
@@ -45,12 +45,12 @@ import { RPC_TYPE_LABEL } from './_shared'
 const ALL = 'all'
 
 export default function TemplateManagement() {
-  const navigate = useNavigate()
   const { data: taskTypes = [], isLoading, isError, error, isFetching, refetch } =
     useUnifiedFileTransferTaskTypes({ refetchOnMount: 'always' })
 
   const [category, setCategory] = useState<string>(ALL)
   const [kind, setKind] = useState<'all' | 'builtin' | 'custom'>('all')
+  const [selectedTemplate, setSelectedTemplate] = useState<UnifiedFileTransferTaskType | null>(null)
 
   // #483：4G/5G/2G 折叠为单条『设备升级』(device_upgrade)，与任务创建页一致
   // （共享 @core/utils/ufteCategory，三皮肤同一口径）。
@@ -78,6 +78,7 @@ export default function TemplateManagement() {
   const cols = 8
 
   return (
+    <>
     <PageShell
       title="模板定义管理"
       description={`共 ${taskTypes.length} 个模板 · 内置 ${builtinCount} · 自定义 ${customCount}`}
@@ -145,9 +146,7 @@ export default function TemplateManagement() {
                     <button
                       type="button"
                       className="text-left text-sm font-medium text-primary hover:underline"
-                      onClick={() =>
-                        navigate(`/transfer/template-management`)
-                      }
+                      onClick={() => setSelectedTemplate(tt)}
                     >
                       {tt.displayName || tt.typeCode}
                     </button>
@@ -190,5 +189,105 @@ export default function TemplateManagement() {
         </Table>
       </TableCard>
     </PageShell>
+    {selectedTemplate && (
+      <>
+        <div
+          className="fixed inset-0 z-40 bg-black/40"
+          onClick={() => setSelectedTemplate(null)}
+          aria-hidden
+        />
+        <aside
+          className="fixed inset-y-0 right-0 z-50 w-[520px] max-w-[92vw] overflow-y-auto border-l bg-background shadow-xl"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="flex items-center justify-between border-b px-5 py-4">
+            <div>
+              <p className="font-semibold">{selectedTemplate.displayName || selectedTemplate.typeCode}</p>
+              <p className="font-mono text-xs text-muted-foreground">{selectedTemplate.typeCode}</p>
+            </div>
+            <Button variant="ghost" size="icon" onClick={() => setSelectedTemplate(null)}>
+              <X className="size-4" />
+            </Button>
+          </div>
+          <div className="space-y-5 p-5">
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div>
+                <p className="mb-0.5 text-xs text-muted-foreground">业务分类</p>
+                <p>{selectedTemplate.categoryLabel || selectedTemplate.category}</p>
+              </div>
+              <div>
+                <p className="mb-0.5 text-xs text-muted-foreground">RPC 类型</p>
+                <p>{RPC_TYPE_LABEL[selectedTemplate.rpcType] ?? selectedTemplate.rpcType}</p>
+              </div>
+              <div>
+                <p className="mb-0.5 text-xs text-muted-foreground">文件类型</p>
+                <p>{selectedTemplate.fileType || '—'}</p>
+              </div>
+              <div>
+                <p className="mb-0.5 text-xs text-muted-foreground">权限码</p>
+                <p className="font-mono text-xs">{selectedTemplate.permissionCode || '—'}</p>
+              </div>
+              <div>
+                <p className="mb-0.5 text-xs text-muted-foreground">文件类型可编辑</p>
+                <Badge variant={selectedTemplate.fileTypeEditable ? 'success' : 'muted'}>
+                  {selectedTemplate.fileTypeEditable ? '可编辑' : '固定'}
+                </Badge>
+              </div>
+              <div>
+                <p className="mb-0.5 text-xs text-muted-foreground">延迟秒数</p>
+                <p>{selectedTemplate.delaySeconds ?? 0} 秒</p>
+              </div>
+              <div>
+                <p className="mb-0.5 text-xs text-muted-foreground">来源</p>
+                <Badge variant={selectedTemplate.builtIn ? 'muted' : 'default'}>
+                  {selectedTemplate.builtIn ? '内置' : '自定义'}
+                </Badge>
+              </div>
+              <div>
+                <p className="mb-0.5 text-xs text-muted-foreground">状态</p>
+                <Badge variant={selectedTemplate.enabled ? 'success' : 'muted'}>
+                  {selectedTemplate.enabled ? '启用' : '停用'}
+                </Badge>
+              </div>
+              <div>
+                <p className="mb-0.5 text-xs text-muted-foreground">最后编辑</p>
+                <p>{selectedTemplate.lastEditor || '—'}</p>
+              </div>
+              <div>
+                <p className="mb-0.5 text-xs text-muted-foreground">后置事件</p>
+                <p className="font-mono text-xs">{selectedTemplate.postTcEventCode || '—'}</p>
+              </div>
+            </div>
+            <div>
+              <p className="mb-1 text-xs text-muted-foreground">功能描述</p>
+              <p className="text-sm leading-relaxed">{selectedTemplate.description || '—'}</p>
+            </div>
+            <div>
+              <p className="mb-1 text-xs text-muted-foreground">适用产品</p>
+              <p className="text-sm">
+                {(selectedTemplate.products ?? []).length > 0
+                  ? (selectedTemplate.products ?? []).join(' / ')
+                  : '全部产品'}
+              </p>
+            </div>
+            <div>
+              <p className="mb-2 text-xs text-muted-foreground">步骤链</p>
+              <div className="flex flex-wrap gap-2">
+                {selectedTemplate.stepChain.map((stepId, i) => (
+                  <Badge
+                    key={stepId}
+                    variant={i < 2 ? 'default' : i === selectedTemplate.stepChain.length - 1 ? 'secondary' : 'outline'}
+                  >
+                    {i + 1}. {stepId}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          </div>
+        </aside>
+      </>
+    )}
+  </>
   )
 }

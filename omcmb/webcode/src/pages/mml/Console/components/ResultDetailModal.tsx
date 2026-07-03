@@ -341,13 +341,13 @@ export default function ResultDetailModal({
 
           {/* 状态提示：失败原因 / 未生效 / 未核实 */}
           {status === 'failed' && row.faultCode && (
-            <Alert type="error" showIcon message={t('mml.consoleV2.detail.alert.dispatchFailed')} description={row.faultCode} />
+            <Alert type="error" showIcon title={t('mml.consoleV2.detail.alert.dispatchFailed')} description={row.faultCode} />
           )}
           {status === 'mismatch' && (
             <Alert
               type="error"
               showIcon
-              message={t('mml.consoleV2.detail.alert.mismatchTitle')}
+              title={t('mml.consoleV2.detail.alert.mismatchTitle')}
               description={t('mml.consoleV2.detail.alert.mismatchDesc')}
             />
           )}
@@ -355,7 +355,7 @@ export default function ResultDetailModal({
             <Alert
               type="warning"
               showIcon
-              message={t('mml.consoleV2.detail.alert.unverifiedTitle', { reason: row.unverifiedReason ? t(UNVERIFIED_REASON_TEXT[row.unverifiedReason]) : t('mml.consoleV2.detail.reasonUnknown') })}
+              title={t('mml.consoleV2.detail.alert.unverifiedTitle', { reason: row.unverifiedReason ? t(UNVERIFIED_REASON_TEXT[row.unverifiedReason]) : t('mml.consoleV2.detail.reasonUnknown') })}
               description={t('mml.consoleV2.detail.alert.unverifiedDesc')}
             />
           )}

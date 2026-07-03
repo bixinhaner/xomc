@@ -24,6 +24,7 @@ import {
 } from '@/components/layout/PageShell'
 
 import { useRoles } from '@core/hooks/api/useSystem'
+import { UNASSIGNED_GROUP_ID } from '@core/utils/deviceGroupTargets'
 
 // ============================================================
 // 系统管理 / 角色与权限 — 对齐 v1 webcode/src/pages/system/RolePermission
@@ -99,7 +100,8 @@ export default function RolePermission() {
             ) : (
               rows.map((r) => {
                 const isBuiltIn = r.builtIn === 1 || r.builtIn === 2
-                const groupCount = r.deviceGroupIds?.length ?? 0
+                const realGroupCount = (r.deviceGroupIds ?? []).filter((id) => id !== UNASSIGNED_GROUP_ID).length
+                const hasUnassigned = (r.deviceGroupIds ?? []).includes(UNASSIGNED_GROUP_ID)
                 return (
                   <TableRow key={r.id}>
                     <TableCell>
@@ -118,8 +120,12 @@ export default function RolePermission() {
                     <TableCell className="text-xs">
                       {isBuiltIn ? (
                         <Badge variant="default">全部设备</Badge>
-                      ) : groupCount > 0 ? (
-                        <Badge variant="outline">{groupCount} 个分组</Badge>
+                      ) : realGroupCount > 0 ? (
+                        <Badge variant="outline">
+                          {realGroupCount} 个分组{hasUnassigned ? ' + 未分组' : ''}
+                        </Badge>
+                      ) : hasUnassigned ? (
+                        <Badge variant="outline">未分组</Badge>
                       ) : (
                         <Badge variant="warning">未绑定</Badge>
                       )}

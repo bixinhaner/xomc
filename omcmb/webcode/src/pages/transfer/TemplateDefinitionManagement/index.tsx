@@ -55,7 +55,7 @@ import {
 import type { TaskTypeFormValues } from '../shared';
 import { TransferTemplateCard } from '../TransferTemplateCard';
 
-const { Paragraph, Text, Title } = Typography;
+const { Text, Title } = Typography;
 
 export default function TemplateDefinitionManagement() {
   const t = useT();
@@ -411,7 +411,18 @@ export default function TemplateDefinitionManagement() {
               <Descriptions.Item label={t('ufte.template.fileType')}>{detailType.fileType}</Descriptions.Item>
               <Descriptions.Item label={t('ufte.template.softLib')}>{getSoftwareLibraryFileTypeLabel(detailType.firmwareFileType, t)}</Descriptions.Item>
               <Descriptions.Item label={t('ufte.template.permCode')}>{detailType.permissionCode}</Descriptions.Item>
-              <Descriptions.Item label={t('ufte.template.products')}>
+              <Descriptions.Item label={t('ufte.template.fileTypeEditable')}>
+                <Tag color={detailType.fileTypeEditable ? 'green' : 'default'}>
+                  {detailType.fileTypeEditable ? t('ufte.template.fileTypeEditable.yes') : t('ufte.template.fileTypeEditable.no')}
+                </Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label={t('ufte.template.delaySeconds')}>{detailType.delaySeconds ?? 0}</Descriptions.Item>
+              <Descriptions.Item label={t('ufte.template.lastEditor')}>{detailType.lastEditor}</Descriptions.Item>
+              <Descriptions.Item label={t('ufte.template.postEvent')}>{detailType.postTcEventCode || '-'}</Descriptions.Item>
+              <Descriptions.Item label={t('ufte.template.description')} span={2}>
+                {localizeBuiltinDescription(detailType.typeCode, detailType.description, t)}
+              </Descriptions.Item>
+              <Descriptions.Item label={t('ufte.template.products')} span={2}>
                 {/* #492：空 = 适用全部产品 → 展示「全部产品」+ 全部产品名，与升级模板格式统一。 */}
                 {(detailType.products ?? []).length > 0
                   ? (detailType.products ?? []).join(' / ')
@@ -419,17 +430,6 @@ export default function TemplateDefinitionManagement() {
                       ? `${t('ufte.template.allProducts')}（${allProductNames.length}）：${allProductNames.join(' / ')}`
                       : t('ufte.template.allProducts'))}
               </Descriptions.Item>
-              <Descriptions.Item label={t('ufte.template.lastEditor')}>{detailType.lastEditor}</Descriptions.Item>
-              <Descriptions.Item label={t('ufte.template.postEvent')}>{detailType.postTcEventCode || '-'}</Descriptions.Item>
-            </Descriptions>
-            <Paragraph style={{ marginBottom: 0 }}>{localizeBuiltinDescription(detailType.typeCode, detailType.description, t)}</Paragraph>
-            <Descriptions column={2} size="small" bordered>
-              <Descriptions.Item label={t('ufte.template.fileTypeEditable')}>
-                <Tag color={detailType.fileTypeEditable ? 'green' : 'default'}>
-                  {detailType.fileTypeEditable ? t('ufte.template.fileTypeEditable.yes') : t('ufte.template.fileTypeEditable.no')}
-                </Tag>
-              </Descriptions.Item>
-              <Descriptions.Item label={t('ufte.template.delaySeconds')}>{detailType.delaySeconds ?? 0}</Descriptions.Item>
             </Descriptions>
             <div>
               <Text strong>{t('ufte.template.stepChain')}</Text>
