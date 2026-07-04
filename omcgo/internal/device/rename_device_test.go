@@ -37,9 +37,10 @@ func TestRenameDevice_AutoLMTToOMC_Rejected(t *testing.T) {
 	infoRepo := NewMockDeviceInfoRepository(ctrl)
 	svc := newRenameTestService(ctrl, devRepo, infoRepo, "auto_lmt_to_omc")
 
-	err := svc.RenameDevice(context.Background(), uuid.New(), "新名称")
+	result, err := svc.RenameDevice(context.Background(), uuid.New(), "新名称", "")
 
 	require.Error(t, err)
+	assert.Nil(t, result)
 	var bizErr *commonerrors.BusinessError
 	assert.True(t, errors.As(err, &bizErr))
 	assert.Equal(t, global.ErrCodeDeviceRenameNotAllowed, bizErr.Code)
@@ -65,8 +66,10 @@ func TestRenameDevice_Prompt_SetsPendingWithOldLMTName(t *testing.T) {
 	// prompt 模式：置 pending=true，lmtName 必须是旧值 "基站侧旧名"
 	infoRepo.EXPECT().UpdateNameSyncFields(gomock.Any(), deviceID, true, "基站侧旧名").Return(nil)
 
-	err := svc.RenameDevice(context.Background(), deviceID, "新名称")
+	result, err := svc.RenameDevice(context.Background(), deviceID, "新名称", "")
 	assert.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Empty(t, result.TaskID)
 }
 
 func TestRenameDevice_Prompt_DoesNotDispatch(t *testing.T) {
@@ -88,8 +91,10 @@ func TestRenameDevice_Prompt_DoesNotDispatch(t *testing.T) {
 	devRepo.EXPECT().UpdateSiteName(gomock.Any(), deviceID, "新名").Return(nil)
 	infoRepo.EXPECT().UpdateNameSyncFields(gomock.Any(), deviceID, true, "lmt旧名").Return(nil)
 
-	err := svc.RenameDevice(context.Background(), deviceID, "新名")
+	result, err := svc.RenameDevice(context.Background(), deviceID, "新名", "")
 	assert.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Empty(t, result.TaskID)
 }
 
 func TestRenameDevice_AutoOMCToLMT_ClearsPending(t *testing.T) {
@@ -112,8 +117,39 @@ func TestRenameDevice_AutoOMCToLMT_ClearsPending(t *testing.T) {
 	// auto_omc_to_lmt：清 pending=false，lmtName 传旧值
 	infoRepo.EXPECT().UpdateNameSyncFields(gomock.Any(), deviceID, false, "lmt旧名").Return(nil)
 
-	err := svc.RenameDevice(context.Background(), deviceID, "新名")
+	result, err := svc.RenameDevice(context.Background(), deviceID, "新名", "")
 	assert.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Empty(t, result.TaskID)
+}
+
+func TestRenameDevice_AutoOMCToLMT_ReturnsTaskID(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	deviceID := uuid.New()
+	devRepo := NewMockDeviceRepository(ctrl)
+	infoRepo := NewMockDeviceInfoRepository(ctrl)
+	svc := newRenameTestService(ctrl, devRepo, infoRepo, "auto_omc_to_lmt")
+	taskSvc := &stubSuccessTaskSvc{taskID: "rename-task-1"}
+	svc.taskSvc = taskSvc
+
+	dev := &model.Device{ID: deviceID, SerialNumber: "TEST006", DeviceName: "旧名"}
+	info := &DeviceInfo{DeviceName: "旧名", LMTDeviceName: "lmt旧名"}
+
+	devRepo.EXPECT().GetByID(gomock.Any(), deviceID).Return(dev, nil)
+	infoRepo.EXPECT().GetByDeviceID(gomock.Any(), deviceID).Return(info, nil)
+	infoRepo.EXPECT().UpdateDeviceName(gomock.Any(), deviceID, "新名").Return(nil)
+	devRepo.EXPECT().UpdateSiteName(gomock.Any(), deviceID, "新名").Return(nil)
+	infoRepo.EXPECT().UpdateNameSyncFields(gomock.Any(), deviceID, false, "lmt旧名").Return(nil)
+
+	result, err := svc.RenameDevice(context.Background(), deviceID, "新名", "user-rename")
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, "rename-task-1", result.TaskID)
+	require.NotNil(t, taskSvc.lastReq)
+	assert.Equal(t, "user-rename", taskSvc.lastReq.CreatorID)
 }
 
 func TestRenameDevice_FailedSPV_DoesNotRollback(t *testing.T) {
@@ -140,9 +176,11 @@ func TestRenameDevice_FailedSPV_DoesNotRollback(t *testing.T) {
 	// pending 清除仍继续
 	infoRepo.EXPECT().UpdateNameSyncFields(gomock.Any(), deviceID, false, "lmt旧名").Return(nil)
 
-	err := svc.RenameDevice(context.Background(), deviceID, "新名")
+	result, err := svc.RenameDevice(context.Background(), deviceID, "新名", "")
 	// 下发失败不影响整体返回
 	assert.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Empty(t, result.TaskID)
 }
 
 func TestRenameDevice_DualWrite_BothTables(t *testing.T) {
@@ -165,8 +203,10 @@ func TestRenameDevice_DualWrite_BothTables(t *testing.T) {
 	devRepo.EXPECT().UpdateSiteName(gomock.Any(), deviceID, "新名").Return(nil).Times(1)
 	infoRepo.EXPECT().UpdateNameSyncFields(gomock.Any(), deviceID, true, "lmt老名").Return(nil)
 
-	err := svc.RenameDevice(context.Background(), deviceID, "新名")
+	result, err := svc.RenameDevice(context.Background(), deviceID, "新名", "")
 	assert.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Empty(t, result.TaskID)
 }
 
 func TestRenameDevice_EmptyName_Rejected(t *testing.T) {
@@ -174,9 +214,24 @@ func TestRenameDevice_EmptyName_Rejected(t *testing.T) {
 	defer ctrl.Finish()
 
 	svc := newRenameTestService(ctrl, NewMockDeviceRepository(ctrl), NewMockDeviceInfoRepository(ctrl), "prompt")
-	err := svc.RenameDevice(context.Background(), uuid.New(), "  ")
+	result, err := svc.RenameDevice(context.Background(), uuid.New(), "  ", "")
 	require.Error(t, err)
+	assert.Nil(t, result)
 	assert.True(t, errors.Is(err, commonerrors.ErrInvalidInput))
+}
+
+type stubSuccessTaskSvc struct {
+	taskID  string
+	lastReq *task.CreateTaskRequest
+}
+
+func (s *stubSuccessTaskSvc) CreateTask(_ context.Context, req *task.CreateTaskRequest) (*task.Task, error) {
+	s.lastReq = req
+	return &task.Task{ID: s.taskID}, nil
+}
+
+func (s *stubSuccessTaskSvc) GetQueueLength(_ context.Context, _ string) (int64, error) {
+	return 0, nil
 }
 
 // stubFailTaskSvc 模拟 SPV 下发总是失败的 taskSvc。

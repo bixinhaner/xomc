@@ -143,7 +143,7 @@ func decodeTask(evt *event.Event) *task.Task {
 //	"参数设置 · 设备 SN001 · 已完成 · 3 项"
 //	"设备重启 · 设备 SN001 · 失败"
 func renderNotifTitle(t *task.Task, status NotificationStatus) string {
-	method := translateMethod(t.Method)
+	method := displayTaskMethod(t)
 	verb := statusVerb(status)
 	base := fmt.Sprintf("%s · 设备 %s · %s", method, t.DeviceSN, verb)
 	switch t.Method {
@@ -225,6 +225,35 @@ func translateMethod(method string) string {
 		return "删除对象"
 	}
 	return method
+}
+
+func displayTaskMethod(t *task.Task) string {
+	if isRenameTask(t) {
+		return "设备改名"
+	}
+	if t == nil {
+		return ""
+	}
+	return translateMethod(t.Method)
+}
+
+func isRenameTask(t *task.Task) bool {
+	if t == nil || t.Method != "SetParameterValues" {
+		return false
+	}
+	if strings.HasPrefix(t.CommandKey, "rename-") {
+		return true
+	}
+	if len(t.Params) == 0 {
+		return false
+	}
+	var wrapper struct {
+		ParameterKey string `json:"parameter_key"`
+	}
+	if err := json.Unmarshal(t.Params, &wrapper); err != nil {
+		return false
+	}
+	return strings.HasPrefix(wrapper.ParameterKey, "rename-")
 }
 
 func statusVerb(s NotificationStatus) string {

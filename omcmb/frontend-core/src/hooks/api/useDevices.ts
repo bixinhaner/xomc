@@ -5,6 +5,7 @@ import { deviceService } from '../../mock/services/deviceService';
 import { deviceApi } from '../../services/api/deviceApi';
 import { quicksettingsApi } from '../../services/api/quicksettingsApi';
 import { createApiSwitchWithMock } from '../../services/apiSwitch';
+import { notificationKeys } from './useNotificationCenter';
 
 // 避免在多工作区/多 node_modules 情况下因 QueryClient 私有字段导致名义类型不兼容。
 // 这里使用结构化接口，仅声明预取逻辑实际依赖的方法。
@@ -358,6 +359,9 @@ export function useRenameDevice(deviceId: string) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['devices', deviceId] });
       void queryClient.invalidateQueries({ queryKey: ['devices', 'list'] });
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: notificationKeys.all });
     },
   });
 }

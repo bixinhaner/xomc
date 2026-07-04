@@ -249,6 +249,25 @@ describe('deviceApi.update', () => {
   });
 });
 
+describe('deviceApi.renameDevice', () => {
+  it('maps backend task_id to optional taskId for device-side rename progress', async () => {
+    postMock.mockResolvedValue({ data: { task_id: 'task-rename-1' } });
+
+    const out = await deviceApi.renameDevice('d1', '新基站名');
+
+    expect(postMock).toHaveBeenCalledWith('/devices/d1/rename', { name: '新基站名' });
+    expect(out).toEqual({ taskId: 'task-rename-1' });
+  });
+
+  it('keeps successful rename without task_id as success without fake progress', async () => {
+    postMock.mockResolvedValue({ data: { message: 'renamed' } });
+
+    const out = await deviceApi.renameDevice('d1', '仅网管侧改名');
+
+    expect(out).toEqual({});
+  });
+});
+
 describe('deviceApi.getGroups', () => {
   it('保持后端返回的分组名称与 i18n 原样透传', async () => {
     getMock.mockResolvedValue({

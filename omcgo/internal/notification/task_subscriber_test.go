@@ -49,6 +49,37 @@ func Test_TaskSubscriber_HandleCreated_WritesQueued(t *testing.T) {
 	assert.Equal(t, "task-001", *got.DedupKey)
 }
 
+func Test_TaskSubscriber_RenameTask_UsesRenameTitle(t *testing.T) {
+	repo := newMockRepository()
+	svc := NewService(repo, nil, zap.NewNop())
+	sub := NewTaskSubscriber(svc, zap.NewNop())
+
+	tk := &task.Task{
+		ID:         "rename-task-001",
+		DeviceSN:   "SN001",
+		Method:     "SetParameterValues",
+		CommandKey: "rename-abcd1234",
+		CreatorID:  "alice",
+		Status:     task.TaskStatusPending,
+		Params:     json.RawMessage(`{"values":[{"name":"Device.Services.FAPService.1.AccessMgmt.LTE.HNBName","value":"new-name"}],"parameter_key":"rename-123"}`),
+	}
+	evt, err := event.NewEvent(event.SubjectTaskCreated, tk)
+	require.NoError(t, err)
+
+	require.NoError(t, sub.handleCreated(context.Background(), evt))
+
+	list, err := svc.List(context.Background(), NotificationFilter{UserID: "alice"})
+	require.NoError(t, err)
+	require.Len(t, list.Items, 1)
+	got := list.Items[0]
+	assert.Equal(t, StatusQueued, got.Status)
+	assert.Contains(t, got.Title, "设备改名")
+	assert.Contains(t, got.Title, "SN001")
+	assert.Contains(t, got.Title, "进行中")
+	assert.Contains(t, got.Title, "1 项")
+	assert.Contains(t, got.Content, "HNBName = new-name")
+}
+
 // Test_TaskSubscriber_Upgrade_QueuedToCompleted 验证同一 task 的 created → completed 升级走 upsert。
 func Test_TaskSubscriber_Upgrade_QueuedToCompleted(t *testing.T) {
 	repo := newMockRepository()

@@ -596,6 +596,7 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
   });
   const setFeedback = useQuickSettingsFeedbackStore((s) => s.setFeedback);
   const patchFeedback = useQuickSettingsFeedbackStore((s) => s.patchFeedback);
+  const clearFeedback = useQuickSettingsFeedbackStore((s) => s.clearFeedback);
   const draft = useQuickSettingsFeedbackStore((s) => s.drafts[fbKey]);
   const setDraftField = useQuickSettingsFeedbackStore((s) => s.setDraftField);
   const clearDraft = useQuickSettingsFeedbackStore((s) => s.clearDraft);
@@ -991,8 +992,10 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
       ? updates.filter((u) => u.parameterPath !== HNB_NAME_PATH)
       : updates;
     try {
+      let renameTaskId: string | undefined;
       if (hnbUpdate) {
-        await renameMutation.mutateAsync(hnbUpdate.parameterValue);
+        const renameResult = await renameMutation.mutateAsync(hnbUpdate.parameterValue);
+        renameTaskId = renameResult.taskId;
       }
       if (regularUpdates.length > 0) {
         const result = await updateMutation.mutateAsync({ deviceId, parameters: regularUpdates });
@@ -1009,13 +1012,24 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
           at: Date.now(),
         });
       } else if (hnbUpdate) {
-        // 只有 rename，无普通 SPV 下发，无 taskId 轮询
+        // 只有 rename：auto_omc_to_lmt 可能返回设备侧 taskId；prompt / 仅 OMC 侧成功则无任务进度。
         latestLocalEditAtRef.current = 0;
         message.success({
           content: t('device.cell.saveSuccessMsg', { count: 1 }),
           duration: 6,
         });
-        setFeedback(fbKey, { kind: 'cell', submitStatus: 'queued', count: 1, at: Date.now() });
+        if (renameTaskId) {
+          setFeedback(fbKey, {
+            kind: 'cell',
+            submitStatus: 'queued',
+            taskId: renameTaskId,
+            count: 1,
+            at: Date.now(),
+          });
+        } else {
+          clearFeedback(fbKey);
+          clearDraft(fbKey);
+        }
       }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
