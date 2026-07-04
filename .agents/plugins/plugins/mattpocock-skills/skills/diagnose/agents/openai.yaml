@@ -1,0 +1,4 @@
+interface:
+  display_name: "Diagnose"
+  short_description: "Build a repro loop and debug hard failures"
+  default_prompt: "Use $diagnose to reproduce, isolate, and fix this bug."

@@ -1,0 +1,20 @@
+{
+  "name": "omc-codex-skills",
+  "interface": {
+    "displayName": "OMC Codex 技能集"
+  },
+  "plugins": [
+    {
+      "name": "mattpocock-skills",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mattpocock-skills"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
