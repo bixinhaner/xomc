@@ -69,6 +69,7 @@ codex plugin marketplace add .agents/plugins
 - 优先改 `frontend-core/`，让三皮肤共享受益。
 - 如果改页面、路由、菜单或交互，三套皮肤都要补齐。
 - v2/v3 的可路由 path 集合和可见菜单项集合必须严格等于 v1。
+- 浏览器操作或验收时，不管源码显示什么，都必须以浏览器中的实际页面为准；先读取运行中 DOM，确认目标控件、按钮和保存行为后再操作。
 - 验收至少跑 `cd omcmb && npm run skin-parity` 和对应 typecheck。
 
 ## 运行与部署边界
