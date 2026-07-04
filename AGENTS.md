@@ -77,6 +77,14 @@ codex plugin marketplace add .agents/plugins
 - 不要用 `run/scripts/restart-all.sh` 去重启容器化服务；`run/scripts/*` 是裸进程跑法，容易和 compose 栈冲突。
 - 端口、容器名、健康检查以 `deployments/docker/README.md` 和 compose 文件为准，现查不要硬记。
 
+## 本机权限经验
+
+以下场景通常会被 sandbox 限制；需要执行时默认直接按权限规则提权，不先故意试错再重试。
+
+- GitHub 相关 `gh issue` / `gh pr`、`git push` 需要网络，直接提权执行。
+- Docker socket、Compose 部署、可见 Chrome / CDP、访问本机部署端口通常需要提权，直接提权执行。
+- `go test ./...` 中涉及 `miniredis` / `httptest` 本地监听时，普通 sandbox 可能报 `bind: operation not permitted`；直接提权复跑以区分环境问题和真实测试失败。
+
 ## 常用验证
 
 按改动范围选择验证，不能假装跑过。
