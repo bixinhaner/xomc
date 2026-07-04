@@ -1,0 +1,34 @@
+{
+  "name": "omc-codex-skills",
+  "version": "0.1.0+codex.20260704063639",
+  "description": "OMC \u9879\u76ee\u672c\u5730 Codex \u4ea4\u4ed8\u6d41\u7a0b\u6280\u80fd\u96c6\u3002",
+  "author": {
+    "name": "OMC project"
+  },
+  "license": "MIT",
+  "keywords": [
+    "codex",
+    "skills",
+    "workflow",
+    "ship",
+    "omc"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "OMC Codex \u6280\u80fd\u96c6",
+    "shortDescription": "\u6267\u884c OMC Issue \u5230 PR \u7684\u4ea4\u4ed8\u6d41\u7a0b\u3002",
+    "longDescription": "\u9879\u76ee\u672c\u5730 Codex \u63d2\u4ef6\uff0c\u63d0\u4f9b OMC \u4ece\u9700\u6c42\u3001GitHub Issue \u5230\u5b9e\u73b0\u3001\u9a8c\u8bc1\u3001\u5ba1\u67e5\u3001\u63d0\u4ea4\u548c PR \u7684\u4ea4\u4ed8\u7f16\u6392\u6d41\u7a0b\u3002",
+    "developerName": "OMC project",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write",
+      "Workflow"
+    ],
+    "defaultPrompt": [
+      "\u4f7f\u7528 ship \u4ea4\u4ed8\u5f53\u524d Issue\u3002",
+      "\u4f7f\u7528 ship audit \u5ba1\u8ba1\u5f53\u524d\u9636\u6bb5\u3002",
+      "\u4f7f\u7528 ship status \u67e5\u770b\u4ea4\u4ed8\u72b6\u6001\u3002"
+    ]
+  }
+}
