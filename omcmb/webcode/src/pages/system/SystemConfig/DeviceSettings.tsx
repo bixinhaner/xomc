@@ -25,8 +25,6 @@ export default function DeviceSettings({ form }: DeviceSettingsProps) {
       uploadSelected: '3',
       deviceOfflineEnable: false,
       deviceOfflineSaveDay: 90,
-      locationDetection: true,
-      latitudeToleranceRange: 1000,
       // 设备参数同步设置（与后端 internal/provision/periodic_sync_policy.go default 对齐）
       periodicSyncEnabled: false,
       periodicSyncIntervalHours: 24,
@@ -123,21 +121,6 @@ export default function DeviceSettings({ form }: DeviceSettingsProps) {
         </div>
         <div style={settingRowStyle}>
           <span style={{ color: token.colorTextTertiary }}>{t('system.device.dailyCheckOfflineTime')}</span>
-        </div>
-      </Card>
-
-      {/* eNB位置移动检测 */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.device.enbLocationDetection')}</span>} style={{ marginBottom: 16 }}>
-        <div style={settingRowStyle}>
-          <Space wrap>
-            <Form.Item name="locationDetection" valuePropName="checked" noStyle>
-              <Checkbox>{t('system.device.ifEnbLocationExceeds')}</Checkbox>
-            </Form.Item>
-            <Form.Item name="latitudeToleranceRange" noStyle>
-              <InputNumber min={10} max={10000} style={{ width: 70 }} />
-            </Form.Item>
-            <span>{t('system.device.thenEnbWillBeLocked')}</span>
-          </Space>
         </div>
       </Card>
 
