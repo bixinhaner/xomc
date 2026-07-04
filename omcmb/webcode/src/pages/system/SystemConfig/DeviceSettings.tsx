@@ -1,7 +1,5 @@
-import { Form, InputNumber, Checkbox, Select, Radio, Card, Space, Typography, theme } from 'antd';
+import { Form, InputNumber, Checkbox, Radio, Card, Space, Typography, theme } from 'antd';
 import { useT } from '@/hooks/useT';
-
-const { Option } = Select;
 
 interface DeviceSettingsProps {
   form: ReturnType<typeof Form.useForm>[0];
@@ -22,7 +20,6 @@ export default function DeviceSettings({ form }: DeviceSettingsProps) {
       enbInformPeriod: 60,
       enbTimeout: 100,
       nameSyncMode: 'prompt',
-      uploadSelected: '3',
       deviceOfflineEnable: false,
       deviceOfflineSaveDay: 90,
       // 设备参数同步设置（与后端 internal/provision/periodic_sync_policy.go default 对齐）
@@ -91,19 +88,6 @@ export default function DeviceSettings({ form }: DeviceSettingsProps) {
             </Space>
           </Radio.Group>
         </Form.Item>
-      </Card>
-
-      {/* 基站文件上传协议 */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.device.baseStationUploadProtocol')}</span>} style={{ marginBottom: 16 }}>
-        <div style={settingRowStyle}>
-          <Form.Item name="uploadSelected" noStyle>
-            <Select style={{ width: 160 }}>
-              <Option value="1">{t('common.protocol.http')}</Option>
-              <Option value="2">{t('common.protocol.https')}</Option>
-              <Option value="3">{t('system.device.keepBaseStationUnchanged')}</Option>
-            </Select>
-          </Form.Item>
-        </div>
       </Card>
 
       {/* 回收站 */}
