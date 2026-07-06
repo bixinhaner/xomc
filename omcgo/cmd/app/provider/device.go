@@ -70,6 +70,7 @@ func initDeviceModule(c *Container) error {
 
 	// DeviceService
 	deviceService := device.NewDeviceService(deviceRepo, paramRepo, reconciler, c.EventBus, logger)
+	deviceService.SetRedis(c.Redis)
 	deviceService.SetDisconnectedAlarmCleaner(c.AlarmPgStore, c.AlarmEngine)
 	deviceService.SetDeviceCache(deviceCache)
 	deviceService.SetDeviceInfoRepo(deviceInfoRepo)

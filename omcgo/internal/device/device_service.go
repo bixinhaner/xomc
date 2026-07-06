@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/redis/go-redis/v9"
+
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/global"
 	"github.com/omcgo/omcgo/internal/core/carrier"
@@ -44,6 +46,7 @@ type GroupAssigner interface {
 
 // DeviceService provides business logic for device management.
 type DeviceService struct {
+	redisClient       redis.UniversalClient
 	deviceRepo        DeviceRepository
 	paramRepo         DeviceParameterRepository
 	deviceInfoRepo    DeviceInfoRepository
@@ -104,6 +107,12 @@ type StunAddressUpdater interface {
 //
 // reconciler 可为 nil（dev/test 模式下不启用心跳刷新),此时所有 RefreshHeartbeat
 // 调用静默跳过,不影响 Inform 接收与 PG 写入。
+
+// SetRedis assigns the redis client to DeviceService for caching lookups.
+func (s *DeviceService) SetRedis(r redis.UniversalClient) {
+	s.redisClient = r
+}
+
 func NewDeviceService(
 	deviceRepo DeviceRepository,
 	paramRepo DeviceParameterRepository,
@@ -1618,8 +1627,6 @@ func (s *DeviceService) RecordBootFromInform(ctx context.Context, device *model.
 	return bootCount, nil
 }
 
-
-
 func hasEventCode(events []string, target string) bool {
 	for _, e := range events {
 		if e == target {
@@ -2126,7 +2133,46 @@ func splitGeoGroupIDs(ids []string) (realIDs []string, includeUngrouped bool) {
 // filter.GroupIDs 经 splitGeoGroupIDs 归一后传给 repository，确保「未分组设备」节点选中场景能命中。
 func (s *DeviceService) ListGeo(ctx context.Context, filter GeoDeviceFilter) ([]GeoDevice, int64, error) {
 	filter.GroupIDs, filter.IncludeUngrouped = splitGeoGroupIDs(filter.GroupIDs)
-	return s.deviceRepo.ListGeo(ctx, filter)
+	devices, total, err := s.deviceRepo.ListGeo(ctx, filter)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	if s.redisClient != nil && len(devices) > 0 {
+		var countCmds []*redis.StringCmd
+		var sevCmds []*redis.StringCmd
+		var sevCountCmds []*redis.StringCmd
+		pipe := s.redisClient.Pipeline()
+
+		for _, d := range devices {
+			key := "cache:device:alarm_stats:" + d.ID.String()
+			countCmds = append(countCmds, pipe.HGet(ctx, key, "active_count"))
+			sevCmds = append(sevCmds, pipe.HGet(ctx, key, "highest_severity"))
+			sevCountCmds = append(sevCountCmds, pipe.HGet(ctx, key, "highest_count"))
+		}
+		_, _ = pipe.Exec(ctx)
+
+		for i := range devices {
+			countVal, _ := countCmds[i].Int()
+			if countVal > 0 {
+				devices[i].AlarmCount = countVal
+				sevVal, err := sevCmds[i].Int()
+				if err == nil && sevVal > 0 {
+					// Copy value because &sevVal points to the loop variable causing bugs
+					sevCopy := sevVal
+					devices[i].HighestAlarmSeverity = &sevCopy
+				}
+				sevCountVal, _ := sevCountCmds[i].Int()
+				if sevCountVal > 0 {
+					devices[i].HighestSeverityAlarmCount = sevCountVal
+				}
+			} else {
+				devices[i].AlarmCount = 0
+			}
+		}
+	}
+
+	return devices, total, nil
 }
 
 // GetGeoStats returns device statistics for map display.
@@ -2136,10 +2182,10 @@ func (s *DeviceService) ListGeo(ctx context.Context, filter GeoDeviceFilter) ([]
 func (s *DeviceService) GetGeoStats(ctx context.Context, groupIDs []string, statusFilter []model.DeviceStatus, visibleGrants []model.DeviceVisibilityGrant) (*GeoStats, error) {
 	realIDs, includeUngrouped := splitGeoGroupIDs(groupIDs)
 	return s.deviceRepo.GetGeoStats(ctx, GeoStatsFilter{
-		GroupIDs:         realIDs,
-		IncludeUngrouped: includeUngrouped,
-		Status:           statusFilter,
-		VisibleGroups:    flattenVisibleGroupIDs(visibleGrants),
+		GroupIDs:            realIDs,
+		IncludeUngrouped:    includeUngrouped,
+		Status:              statusFilter,
+		VisibleGroups:       flattenVisibleGroupIDs(visibleGrants),
 		VisibleDeviceGrants: visibleGrants,
 	})
 }
@@ -2147,7 +2193,46 @@ func (s *DeviceService) GetGeoStats(ctx context.Context, groupIDs []string, stat
 // SearchDevices searches devices by keyword for map display.
 // visibleGrants 携带 #64 设备数据权限（nil 超管 / [] fail-closed / [grant...] 限定）。
 func (s *DeviceService) SearchDevices(ctx context.Context, keyword string, limit int, visibleGrants []model.DeviceVisibilityGrant) ([]GeoDevice, error) {
-	return s.deviceRepo.SearchDevices(ctx, keyword, limit, visibleGrants)
+	devices, err := s.deviceRepo.SearchDevices(ctx, keyword, limit, visibleGrants)
+	if err != nil {
+		return nil, err
+	}
+
+	if s.redisClient != nil && len(devices) > 0 {
+		var countCmds []*redis.StringCmd
+		var sevCmds []*redis.StringCmd
+		var sevCountCmds []*redis.StringCmd
+		pipe := s.redisClient.Pipeline()
+
+		for _, d := range devices {
+			key := "cache:device:alarm_stats:" + d.ID.String()
+			countCmds = append(countCmds, pipe.HGet(ctx, key, "active_count"))
+			sevCmds = append(sevCmds, pipe.HGet(ctx, key, "highest_severity"))
+			sevCountCmds = append(sevCountCmds, pipe.HGet(ctx, key, "highest_count"))
+		}
+		_, _ = pipe.Exec(ctx)
+
+		for i := range devices {
+			countVal, _ := countCmds[i].Int()
+			if countVal > 0 {
+				devices[i].AlarmCount = countVal
+				sevVal, err := sevCmds[i].Int()
+				if err == nil && sevVal > 0 {
+					// Copy value because &sevVal points to the loop variable causing bugs
+					sevCopy := sevVal
+					devices[i].HighestAlarmSeverity = &sevCopy
+				}
+				sevCountVal, _ := sevCountCmds[i].Int()
+				if sevCountVal > 0 {
+					devices[i].HighestSeverityAlarmCount = sevCountVal
+				}
+			} else {
+				devices[i].AlarmCount = 0
+			}
+		}
+	}
+
+	return devices, nil
 }
 
 // ===== Recycle Bin Operations =====

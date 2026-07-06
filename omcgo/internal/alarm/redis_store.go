@@ -56,3 +56,53 @@ func (s *RedisAlarmStore) Delete(ctx context.Context, deviceSN, alarmIdentifier 
 func (s *RedisAlarmStore) GetAll(ctx context.Context, deviceSN string) (map[string]string, error) {
 	return s.client.HGetAll(ctx, alarmKey(deviceSN)).Result()
 }
+
+// ---------------------------------------------------------
+// Below methods support the Denormalization -> Redis migration
+// for fast GIS map reads without PostgreSQL row-level locks.
+// ---------------------------------------------------------
+
+func alarmStatsKey(deviceID string) string {
+	return "cache:device:alarm_stats:" + deviceID
+}
+
+// IncrementActiveAlarmCount atomicaly increments the active alarm count for a device.
+func (s *RedisAlarmStore) IncrementActiveAlarmCount(ctx context.Context, deviceID string) error {
+	return s.client.HIncrBy(ctx, alarmStatsKey(deviceID), "active_count", 1).Err()
+}
+
+// DecrementActiveAlarmCount atomicaly decrements the active alarm count.
+func (s *RedisAlarmStore) DecrementActiveAlarmCount(ctx context.Context, deviceID string) error {
+	// Let it drop below 0 momentarily, reconciliation job will fix it.
+	return s.client.HIncrBy(ctx, alarmStatsKey(deviceID), "active_count", -1).Err()
+}
+
+// GetAlarmCountsPipeline fetches active alarm counts for multiple devices in ONE roundtrip.
+func (s *RedisAlarmStore) GetAlarmCountsPipeline(ctx context.Context, deviceIDs []string) (map[string]int, error) {
+	if len(deviceIDs) == 0 {
+		return nil, nil
+	}
+	
+	pipe := s.client.Pipeline()
+	var cmds []*redis.StringCmd
+	
+	for _, id := range deviceIDs {
+		cmds = append(cmds, pipe.HGet(ctx, alarmStatsKey(id), "active_count"))
+	}
+	
+	_, err := pipe.Exec(ctx)
+	if err != nil && err != redis.Nil {
+		// Pipeline returns redis.Nil if ANY of the keys does not exist. We can ignore it safely.
+	}
+	
+	res := make(map[string]int, len(deviceIDs))
+	for i, id := range deviceIDs {
+		val, _ := cmds[i].Int() // if error or redis.Nil, val will be 0
+		if val < 0 {
+			val = 0
+		}
+		res[id] = val
+	}
+	
+	return res, nil
+}
