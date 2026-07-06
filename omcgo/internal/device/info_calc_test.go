@@ -220,19 +220,49 @@ func TestCalcMMEStatus(t *testing.T) {
 		want   string
 	}{
 		{
-			name:   "no active MME",
+			name: "lte gateway mme status connected",
+			params: map[string]string{
+				"Device.Services.FAPService.1.FAPControl.LTE.Gateway.MmeStatus": "connected",
+			},
+			want: "connected",
+		},
+		{
+			name: "lte gateway mme status true",
+			params: map[string]string{
+				"Device.Services.FAPService.1.FAPControl.LTE.Gateway.MmeStatus": "true",
+			},
+			want: "connected",
+		},
+		{
+			name: "lte gateway mme status disconnected",
+			params: map[string]string{
+				"Device.Services.FAPService.1.FAPControl.LTE.Gateway.MmeStatus": "disconnected",
+			},
+			want: "disconnected",
+		},
+		{
+			name: "lte gateway mme status has priority over legacy pool",
+			params: map[string]string{
+				"Device.Services.FAPService.1.FAPControl.LTE.Gateway.MmeStatus":                 "disconnected",
+				"Device.Services.FAPService.1.CellConfig.LTE.EPC.MmePoolConfigParam.1.MME1Status": "1",
+				"Device.Services.FAPService.1.CellConfig.LTE.EPC.MmePoolConfigParam.2.MME1Status": "1",
+			},
+			want: "disconnected",
+		},
+		{
+			name:   "fallback no active MME",
 			params: map[string]string{},
 			want:   "disconnected",
 		},
 		{
-			name: "one active MME",
+			name: "fallback one active MME",
 			params: map[string]string{
 				"Device.Services.FAPService.1.CellConfig.LTE.EPC.MmePoolConfigParam.1.MME1Status": "1",
 			},
 			want: "partial",
 		},
 		{
-			name: "two active MMEs",
+			name: "fallback two active MMEs",
 			params: map[string]string{
 				"Device.Services.FAPService.1.CellConfig.LTE.EPC.MmePoolConfigParam.1.MME1Status": "1",
 				"Device.Services.FAPService.1.CellConfig.LTE.EPC.MmePoolConfigParam.2.MME1Status": "1",
@@ -240,7 +270,7 @@ func TestCalcMMEStatus(t *testing.T) {
 			want: "connected",
 		},
 		{
-			name: "mixed active and inactive",
+			name: "fallback mixed active and inactive",
 			params: map[string]string{
 				"Device.Services.FAPService.1.CellConfig.LTE.EPC.MmePoolConfigParam.1.MME1Status": "1",
 				"Device.Services.FAPService.1.CellConfig.LTE.EPC.MmePoolConfigParam.2.MME1Status": "0",
