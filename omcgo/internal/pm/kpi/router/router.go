@@ -51,13 +51,15 @@ type CounterDef struct {
 	IndicatorID string
 	Name        string // perf_indicators_*.en_name
 	ReportKey   string // perf_indicators_*.report_key（PM-P2：解析侧白名单据此建键，把上报名翻成编号 IndicatorID）
+	Unit        string // perf_indicators_*.unit_id（业务单位文本，如 number/%/Mbps）
 	StatisType  string // sum/avg/max/pct/...
 }
 
 // KPIDef 描述一个 KPI（is_counter='0' 的 perf_indicators 行 + arithmetic 公式）。
 type KPIDef struct {
 	IndicatorID  string
-	Name         string   // perf_indicators_*.en_name（亦用作 model.KPIValue.KPIName）
+	Name         string // perf_indicators_*.en_name（亦用作 model.KPIValue.KPIName）
+	Unit         string // perf_indicators_*.unit_id（业务单位文本，如 number/%/Mbps）
 	StatisType   string
 	Formula      string   // PM-P3：perf_indicators_*.arithmetic（编号公式，如 (C000060011+C000060022)/1000）
 	Dependencies []string // 公式里引用的 counter 编号（与编号化后 pm_metrics.metric_path 一致，用于 KPIEngine 取数）
@@ -312,11 +314,13 @@ func assembleRoute(
 
 	for _, ind := range indicators {
 		statisType := derefStr(ind.StatisType)
+		unit := derefStr(ind.UnitID)
 		if ind.IsCounter == "1" {
 			route.Counters = append(route.Counters, CounterDef{
 				IndicatorID: ind.ID,
 				Name:        ind.EnName,
 				ReportKey:   derefStr(ind.ReportKey),
+				Unit:        unit,
 				StatisType:  statisType,
 			})
 			continue
@@ -336,6 +340,7 @@ func assembleRoute(
 		route.KPIs = append(route.KPIs, KPIDef{
 			IndicatorID:  ind.ID,
 			Name:         ind.EnName,
+			Unit:         unit,
 			StatisType:   statisType,
 			Formula:      arithmetic,
 			Dependencies: deps,
