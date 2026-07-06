@@ -36,6 +36,7 @@ var DefaultQueryGroups = []QueryGroup{
 			"Device.DeviceInfo.X_COM_GPS_Status",
 			"Device.ManagementServer.tfcsSyncState",
 			"Device.Services.FAPService.1.FAPControl.LTE.Gateway.X_COM_tfcsSyncState",
+			"Device.Services.FAPService.1.FAPControl.LTE.Gateway.MmeStatus",
 			"Device.Services.FAPService.1.FAPControl.NR.Gateway.X_COM_tfcsSyncState",
 			"Device.DeviceInfo.X_COM_BDS_Status",
 			"Device.DeviceInfo.X_COM_1588_Status",
