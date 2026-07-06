@@ -57,6 +57,7 @@ import dayjs from 'dayjs';
 import { buildBatchTaskTypeMap, batchActionHasDetail } from './deviceBatchTask';
 import type { Device } from '@core/types/device';
 import { formatSystemTime } from '@core/utils/systemTime';
+import { computeCurrentOnlineDurationSeconds } from '@core/utils/onlineDuration';
 
 const { Link } = Typography;
 
@@ -1030,6 +1031,13 @@ export default function DeviceList() {
     return d > 0 ? `${d}d ${h}h ${m}m` : h > 0 ? `${h}h ${m}m` : `${m}m`;
   }, []);
 
+  const onlineDurationOf = useCallback((record: Device) => computeCurrentOnlineDurationSeconds({
+    isOnline: record.isOnline,
+    onlineTime: record.onlineTime,
+    offlineTime: record.offlineTime,
+    fallbackOnlineDuration: record.onlineDuration,
+  }), []);
+
   // 状态值渲染辅助
   const fmtStatus = useCallback(
     (value: string | number | boolean | undefined | null, map: Record<string, { label: string; color: string }>) => {
@@ -1384,7 +1392,7 @@ export default function DeviceList() {
         width: 120,
         hidden: true,
         group: 'common',
-        render: (_val, record) => fmtDuration(record.onlineDuration),
+        render: (_val, record) => fmtDuration(onlineDurationOf(record)),
       },
       { key: 'upTime', title: t('device.upTime'), dataIndex: 'upTime', width: 120, hidden: true, group: 'common', render: (_val, record) => fmtDuration(record.upTime) },
       {
@@ -1681,7 +1689,7 @@ export default function DeviceList() {
         case 'lastOnlineTime':
           return fmtTime(record.lastOnlineTime);
         case 'onlineDuration':
-          return fmtDuration(record.onlineDuration);
+          return fmtDuration(onlineDurationOf(record));
         case 'offlineDuration':
           return record.connStatus === 'offline'
             ? offlineDurationText(t, record.offlineDays, record.offlineHours, record.offlineMinutes)
@@ -1713,7 +1721,7 @@ export default function DeviceList() {
         }
       }
     },
-    [appLocale, mapConnStatus, getSeverityLabel, fmtTime, fmtDuration, opStateDict?.sysDictionaryDetails, t]
+    [appLocale, mapConnStatus, getSeverityLabel, fmtTime, fmtDuration, onlineDurationOf, opStateDict?.sysDictionaryDetails, t]
   );
 
   // 按当前筛选条件并发分页拉取全部命中数据(不受列表当前页/页大小限制)。

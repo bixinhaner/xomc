@@ -809,7 +809,7 @@ func (s *InfoSyncer) RecordOnline(ctx context.Context, deviceID uuid.UUID) error
 
 	// 检查是否首次上线，如果是则同时设置 first_online_time
 	info, err := s.infoRepo.GetByDeviceID(ctx, deviceID)
-	if err == nil && info.FirstOnlineTime == nil {
+	if err == nil && (info == nil || info.FirstOnlineTime == nil) {
 		fields["first_online_time"] = now
 	}
 

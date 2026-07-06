@@ -57,6 +57,7 @@ import ConfirmWithNoteModal from '@/pages/alarm/components/ConfirmWithNoteModal'
 import { formatSystemTime } from '@core/utils/systemTime';
 import { useAppStore } from '@core/store/appStore';
 import { formatDeviceSyncStatus, getDeviceSyncStatusKind, normalizeDeviceSyncStatus } from '@core/utils/deviceSyncStatus';
+import { computeCumulativeOnlineDurationSeconds, computeCurrentOnlineDurationSeconds } from '@core/utils/onlineDuration';
 
 const { Title, Text } = Typography;
 
@@ -491,25 +492,6 @@ const fmtDuration = (seconds: number | string | undefined | null) => {
   return d > 0 ? `${d}d ${h}h ${m}m` : h > 0 ? `${h}h ${m}m` : `${m}m`;
 };
 
-// T-0173: 计算"总在线时长"。
-//   后端 cumulativeOnlineDuration 字段在 online→offline 边沿才事务性追加,
-//   在线期间它不会随时间增长。展示时把"本次在线区间长度（NOW - onlineTime)
-//   "加上,让用户看到的总时长持续变化。
-//   onlineTime 是 ISO 字符串（device.last_online_time）。
-const computeTotalOnline = (
-  cumulative: number | null | undefined,
-  isOnline: boolean | undefined,
-  onlineTime: string | undefined,
-): number | null => {
-  const cum = typeof cumulative === 'number' ? cumulative : 0;
-  if (!isOnline || !onlineTime) return cum > 0 ? cum : null;
-  const start = Date.parse(onlineTime);
-  if (Number.isNaN(start)) return cum > 0 ? cum : null;
-  const currentSegment = Math.max(0, Math.floor((Date.now() - start) / 1000));
-  const total = cum + currentSegment;
-  return total > 0 ? total : null;
-};
-
 // 状态渲染
 const renderStatusTag = (value: string | undefined, map: Record<string, { label: string; color: string }>) => {
   if (!value) return '-';
@@ -711,13 +693,24 @@ const getOtherFields = (t: ReturnType<typeof useT>, networkType: string, device:
     // 时间信息
     { key: 'onlineTime', label: t('device.onlineTime'), render: (d) => fmtTime(d.onlineTime) },
     { key: 'offlineTime', label: t('device.offlineTime'), render: (d) => fmtTime(d.offlineTime) },
-    { key: 'onlineDuration', label: t('device.onlineDuration'), render: (d) => fmtDuration(d.onlineDuration) },
+    { key: 'onlineDuration', label: t('device.onlineDuration'), render: (d) => fmtDuration(computeCurrentOnlineDurationSeconds({
+      isOnline: d.isOnline,
+      onlineTime: d.onlineTime,
+      offlineTime: d.offlineTime,
+      fallbackOnlineDuration: d.onlineDuration,
+    })) },
     { key: 'upTime', label: t('device.upTime'), render: (d) => fmtDuration(d.upTime) },
     // T-0173: 累计在线时长 = 后端 cumulative_online_duration + 本次在线区间。
     // 在线时由 DeviceStatusReconciler 在 online→offline 边沿才追加,所以前端补一个
     // 当前段 (NOW - onlineTime) 让展示精确到当前。
     { key: 'cumulativeOnlineDuration', label: t('device.cumulativeOnlineDuration'),
-      render: (d) => fmtDuration(computeTotalOnline(d.cumulativeOnlineDuration, d.isOnline, d.onlineTime)) },
+      render: (d) => fmtDuration(computeCumulativeOnlineDurationSeconds({
+        isOnline: d.isOnline,
+        onlineTime: d.onlineTime,
+        offlineTime: d.offlineTime,
+        fallbackOnlineDuration: d.onlineDuration,
+        cumulativeOnlineDuration: d.cumulativeOnlineDuration,
+      })) },
     // T-0173: 离线原因（仅离线时显示有意义,在线时也展示便于追溯上次掉线原因)。
     { key: 'lastOfflineReason', label: t('device.lastOfflineReason'),
       render: (d) => d.lastOfflineReason ? t(`device.lastOfflineReason.${d.lastOfflineReason}`) : '-' },
