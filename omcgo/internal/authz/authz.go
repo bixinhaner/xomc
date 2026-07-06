@@ -27,6 +27,7 @@ import (
 	"github.com/omcgo/omcgo/global"
 	"github.com/omcgo/omcgo/internal/admin"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/model"
 )
 
 // VisibleGroupsResolver 从主体身份（userID + isSuperAdmin）解析可见设备组。
@@ -199,6 +200,135 @@ func ApplyDeviceVisibilityFilter(b sq.SelectBuilder, deviceIDColumn string, visi
 		return b.Where(clauses[0])
 	}
 	return b.Where(clauses)
+}
+
+// AuthorizeDeviceAccessByGrants checks whether a device's group memberships and
+// technology satisfy at least one visibility grant.
+func AuthorizeDeviceAccessByGrants(deviceGroups []uuid.UUID, deviceTechnology model.Technology, grants []model.DeviceVisibilityGrant) error {
+	if grants == nil {
+		return nil
+	}
+	if len(grants) == 0 {
+		return commonerrors.ErrForbidden
+	}
+	if len(deviceGroups) == 0 {
+		for _, grant := range grants {
+			if !grantAllowsTechnology(grant, deviceTechnology) {
+				continue
+			}
+			if grantIncludesUngrouped(grant.GroupIDs) {
+				return nil
+			}
+		}
+		return commonerrors.ErrForbidden
+	}
+	for _, grant := range grants {
+		if !grantAllowsTechnology(grant, deviceTechnology) {
+			continue
+		}
+		if intersectsGrantGroups(deviceGroups, grant.GroupIDs) {
+			return nil
+		}
+	}
+	return commonerrors.ErrForbidden
+}
+
+// ApplyDeviceVisibilityGrantsFilter constrains a SELECT to devices visible under
+// a set of group+technology grants. nil means superadmin (no filtering);
+// empty slice means authenticated but no visible device scope.
+func ApplyDeviceVisibilityGrantsFilter(b sq.SelectBuilder, deviceIDColumn, technologyColumn string, grants []model.DeviceVisibilityGrant) sq.SelectBuilder {
+	if grants == nil {
+		return b
+	}
+	if len(grants) == 0 {
+		return b.Where(sq.Expr("FALSE"))
+	}
+	clauses := make(sq.Or, 0, len(grants))
+	for _, grant := range grants {
+		if len(grant.GroupIDs) == 0 {
+			continue
+		}
+		groupIDs := make([]uuid.UUID, 0, len(grant.GroupIDs))
+		hasUngrouped := false
+		for _, groupID := range grant.GroupIDs {
+			if groupID.String() == global.DefaultLevel2GroupID {
+				hasUngrouped = true
+				continue
+			}
+			groupIDs = append(groupIDs, groupID)
+		}
+		predicates := make(sq.Or, 0, 2)
+		if len(groupIDs) > 0 {
+			sub := sq.Select("device_id").
+				From("device_group_members").
+				Where(sq.Eq{"group_id": groupIDs})
+			predicates = append(predicates, sq.Expr(deviceIDColumn+" IN (?)", sub))
+		}
+		if hasUngrouped {
+			predicates = append(predicates, sq.Expr("NOT EXISTS (SELECT 1 FROM device_group_members m WHERE m.device_id = " + deviceIDColumn + ")"))
+		}
+		if len(predicates) == 0 {
+			continue
+		}
+		expr := predicates[0]
+		if len(predicates) > 1 {
+			expr = predicates
+		}
+		if len(grant.Technologies) > 0 {
+			expr = sq.And{expr, sq.Eq{technologyColumn: grant.Technologies}}
+		}
+		clauses = append(clauses, expr)
+	}
+	if len(clauses) == 0 {
+		return b.Where(sq.Expr("FALSE"))
+	}
+	if len(clauses) == 1 {
+		return b.Where(clauses[0])
+	}
+	return b.Where(clauses)
+}
+
+func grantAllowsTechnology(grant model.DeviceVisibilityGrant, deviceTechnology model.Technology) bool {
+	if len(grant.Technologies) == 0 {
+		return true
+	}
+	for _, tech := range grant.Technologies {
+		if tech == deviceTechnology {
+			return true
+		}
+	}
+	return false
+}
+
+func intersectsGrantGroups(deviceGroups []uuid.UUID, grantGroups []uuid.UUID) bool {
+	if len(grantGroups) == 0 {
+		return false
+	}
+	if len(deviceGroups) == 0 {
+		return grantIncludesUngrouped(grantGroups)
+	}
+	visible := make(map[uuid.UUID]struct{}, len(grantGroups))
+	for _, gid := range grantGroups {
+		if gid.String() == global.DefaultLevel2GroupID {
+			continue
+		}
+		visible[gid] = struct{}{}
+	}
+	for _, gid := range deviceGroups {
+		if _, ok := visible[gid]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func grantIncludesUngrouped(grantGroups []uuid.UUID) bool {
+	for _, gid := range grantGroups {
+		if gid.String() == global.DefaultLevel2GroupID {
+			return true
+		}
+	}
+	return false
 }
 
 // ApplyDeviceSNVisibilityFilter 是 ApplyDeviceVisibilityFilter 的「按设备序列号」变体，

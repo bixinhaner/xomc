@@ -8,6 +8,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/omcgo/omcgo/internal/authz"
+	"github.com/omcgo/omcgo/global"
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/storage"
 )
 
@@ -65,19 +68,72 @@ func (r *PgDeviceGroupReader) GetDeviceGroupIDs(ctx context.Context, deviceID uu
 	return groupIDs, nil
 }
 
-// AuthorizeDeviceGroupAccess 校验调用者（由其可见设备组集合 visibleGroups 表征）
-// 是否有权按 ID 直读指定设备。语义与 ListDevicesWithInfo 的 VisibleGroups 过滤
-// 完全对齐（device_info_pg_repository.go §Data permission filter）：
+// AuthorizeDeviceGroupAccess 校验调用者（由其可见设备组 ID 表征）
+// 是否有权按 ID 直读指定设备。该方法保留给 northbound / 旧调用链使用，只看组归属。
+func (s *DeviceService) AuthorizeDeviceGroupAccess(ctx context.Context, deviceID uuid.UUID, visibleGroups []uuid.UUID) error {
+	if visibleGroups == nil {
+		return nil
+	}
+	if s.groupReader == nil || s.deviceRepo == nil {
+		return nil
+	}
+	device, err := s.deviceRepo.GetByID(ctx, deviceID)
+	if err != nil {
+		return fmt.Errorf("authorize device access: %w", err)
+	}
+	if device == nil {
+		return commonerrors.ErrForbidden
+	}
+	deviceGroups, err := s.groupReader.GetDeviceGroupIDs(ctx, deviceID)
+	if err != nil {
+		return fmt.Errorf("authorize device group access: %w", err)
+	}
+	if len(deviceGroups) == 0 {
+		for _, groupID := range visibleGroups {
+			if groupID.String() == global.DefaultLevel2GroupID {
+				return nil
+			}
+		}
+		return commonerrors.ErrForbidden
+	}
+	for _, visibleGroup := range visibleGroups {
+		for _, deviceGroup := range deviceGroups {
+			if visibleGroup == deviceGroup {
+				return nil
+			}
+		}
+	}
+	return commonerrors.ErrForbidden
+}
+
+// AuthorizeDeviceGroupAccessByGrants 校验调用者（由其可见设备数据 grants 表征）
+// 是否有权按 ID 直读指定设备。语义与 ListDevicesWithInfo 的 VisibleDeviceGrants
+// 过滤完全对齐（device_info_pg_repository.go §Data permission filter）：
 //
-//	visibleGroups == nil          → 超管（PermissionService 上游 source='builtIn'），放行
-//	len(visibleGroups) == 0       → 无任何分组权限，拒绝（ErrForbidden）
-//	[gid1, gid2, ...]             → 设备分组与 visibleGroups 有交集才放行，否则拒绝
+//	grants == nil                → 超管（PermissionService 上游 source='builtIn'），放行
+//	len(grants) == 0             → 无任何数据权限，拒绝（ErrForbidden）
+//	[grant1, grant2, ...]        → 设备分组与制式同时命中任一 grant 才放行
 //
 // 未注入 DeviceGroupReader（dev/test 退化）→ 放行（nil-safe，不降低生产安全：
 // 生产路由始终注入 reader + permService）。返回 nil 表示放行；ErrForbidden 表示
 // 越权（handler 映射为 403）。设备是否存在由调用方上层另行判定（本方法不查 devices 表）。
-func (s *DeviceService) AuthorizeDeviceGroupAccess(ctx context.Context, deviceID uuid.UUID, visibleGroups []uuid.UUID) error {
-	// #64 统一强制层：委派给 authz 包的唯一实现，避免按设备归属校验逻辑在 device/
-	// alarm/pm/ufte/interop/software 等多处各自复刻导致语义漂移。
-	return authz.AuthorizeDeviceAccess(ctx, s.groupReader, deviceID, visibleGroups)
+func (s *DeviceService) AuthorizeDeviceGroupAccessByGrants(ctx context.Context, deviceID uuid.UUID, visibleGrants []model.DeviceVisibilityGrant) error {
+	if visibleGrants == nil {
+		return nil
+	}
+	if s.groupReader == nil || s.deviceRepo == nil {
+		return nil
+	}
+	device, err := s.deviceRepo.GetByID(ctx, deviceID)
+	if err != nil {
+		return fmt.Errorf("authorize device access: %w", err)
+	}
+	if device == nil {
+		return commonerrors.ErrForbidden
+	}
+	deviceGroups, err := s.groupReader.GetDeviceGroupIDs(ctx, deviceID)
+	if err != nil {
+		return fmt.Errorf("authorize device group access: %w", err)
+	}
+	return authz.AuthorizeDeviceAccessByGrants(deviceGroups, device.Technology, visibleGrants)
 }

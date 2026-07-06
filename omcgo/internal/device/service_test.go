@@ -148,7 +148,7 @@ func (m *mockDeviceRepo) ListGeo(_ context.Context, _ GeoDeviceFilter) ([]GeoDev
 func (m *mockDeviceRepo) GetGeoStats(_ context.Context, _ GeoStatsFilter) (*GeoStats, error) {
 	return &GeoStats{}, nil
 }
-func (m *mockDeviceRepo) SearchDevices(_ context.Context, _ string, _ int, _ []uuid.UUID) ([]GeoDevice, error) {
+func (m *mockDeviceRepo) SearchDevices(_ context.Context, _ string, _ int, _ []model.DeviceVisibilityGrant) ([]GeoDevice, error) {
 	return nil, nil
 }
 func (m *mockDeviceRepo) ListStaleForParamSync(_ context.Context, _ time.Time, _ int) ([]*model.Device, error) {

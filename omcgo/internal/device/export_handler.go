@@ -63,12 +63,13 @@ func (h *ExportHandler) ExportDevices(c *gin.Context) {
 		isSuperVal, _ := c.Get(admin.CtxKeyIsSuperAdmin)
 		isSuper, _ := isSuperVal.(bool)
 		if uid, ok := userID.(uuid.UUID); ok {
-			visibleGroups, err := h.permService.GetUserVisibleGroupIDs(c.Request.Context(), uid, isSuper)
+			visibleGrants, err := h.permService.GetUserVisibleDeviceGrants(c.Request.Context(), uid, isSuper)
 			if err != nil {
 				commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 				return
 			}
-			filter.VisibleGroups = visibleGroups
+			filter.VisibleDeviceGrants = visibleGrants
+			filter.VisibleGroups = flattenVisibleGroupIDs(visibleGrants)
 		}
 	}
 

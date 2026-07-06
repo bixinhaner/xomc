@@ -40,9 +40,10 @@ type DeviceFilter struct {
 	Search *string  // fuzzy search across serial_number/site_name/manufacturer/device_name/address
 
 	// Group filters
-	GroupID       *uuid.UUID  // filter by specific device group
-	GroupIDs      []uuid.UUID // filter by any of these device groups (OR semantics)
-	VisibleGroups []uuid.UUID // data permission: restrict to these groups (nil = no restriction)
+	GroupID             *uuid.UUID                 // filter by specific device group
+	GroupIDs            []uuid.UUID               // filter by any of these device groups (OR semantics)
+	VisibleGroups       []uuid.UUID               // legacy data permission: restrict to these groups (nil = no restriction)
+	VisibleDeviceGrants []model.DeviceVisibilityGrant // grant-based device data permission
 
 	// Extended filters (device_info / devices additional fields)
 	Manufacturer  *string    // devices.manufacturer exact match
@@ -93,7 +94,8 @@ type GeoDeviceFilter struct {
 	// VisibleGroups 是 #64 设备组数据权限的三态可见分组（nil=超管不过滤 / []=fail-closed 空集 /
 	// [g...]=仅这些组下设备）。GIS 地图读链路按调用者可见分组 fail-closed 收口，过滤经
 	// authz.ApplyDeviceVisibilityFilter 在 d.id 上做相关子查询（避免与已有 LEFT JOIN 行翻倍）。
-	VisibleGroups []uuid.UUID
+	VisibleGroups      []uuid.UUID
+	VisibleDeviceGrants []model.DeviceVisibilityGrant
 	// UECountMax 过滤接入 UE 数：nil=不过滤，指向0=只返回 UE=0 的基站。
 	UECountMax *int
 }
@@ -105,7 +107,8 @@ type GeoStatsFilter struct {
 	GroupIDs         []string
 	IncludeUngrouped bool
 	Status           []model.DeviceStatus
-	VisibleGroups    []uuid.UUID
+	VisibleGroups      []uuid.UUID
+	VisibleDeviceGrants []model.DeviceVisibilityGrant
 }
 
 // GeoBounds defines a geographic bounding box.
@@ -175,11 +178,11 @@ type DeviceReader interface {
 	// ListGeo returns devices with geographic coordinates for map display.
 	ListGeo(ctx context.Context, filter GeoDeviceFilter) ([]GeoDevice, int64, error)
 	// GetGeoStats returns device statistics for map display.
-	// filter.VisibleGroups 为 #64 设备组数据权限的三态可见分组（nil 超管 / [] fail-closed / [g...] 限定）。
+	// filter.VisibleDeviceGrants 为 #64 设备数据权限的三态可见 grant（nil 超管 / [] fail-closed / [grant...] 限定）。
 	GetGeoStats(ctx context.Context, filter GeoStatsFilter) (*GeoStats, error)
 	// SearchDevices searches devices by keyword for map display.
-	// visibleGroups 为 #64 设备组数据权限的三态可见分组（nil 超管 / [] fail-closed / [g...] 限定）。
-	SearchDevices(ctx context.Context, keyword string, limit int, visibleGroups []uuid.UUID) ([]GeoDevice, error)
+	// visibleGrants 为 #64 设备数据权限的三态可见 grant（nil 超管 / [] fail-closed / [grant...] 限定）。
+	SearchDevices(ctx context.Context, keyword string, limit int, visibleGrants []model.DeviceVisibilityGrant) ([]GeoDevice, error)
 	// ListProductClasses returns distinct product_class values from devices,
 	// merged with a set of mandatory types that must always appear.
 	ListProductClasses(ctx context.Context) ([]string, error)
@@ -1233,8 +1236,12 @@ func (r *PgDeviceRepository) ListGeo(ctx context.Context, filter GeoDeviceFilter
 		}
 	}
 	// #64 设备组数据权限：按 d.id 相关子查询三态 fail-closed 收口（nil 超管不过滤 /
-	// [] WHERE FALSE / [g...] 限定到可见分组下设备），避免与已有 LEFT JOIN dgm 行翻倍。
-	builder = authz.ApplyDeviceVisibilityFilter(builder, "d.id", filter.VisibleGroups)
+	// [] WHERE FALSE / [grant...] 限定到可见分组+制式下设备），避免与已有 LEFT JOIN dgm 行翻倍。
+	if filter.VisibleDeviceGrants != nil {
+		builder = authz.ApplyDeviceVisibilityGrantsFilter(builder, "d.id", "d.technology", filter.VisibleDeviceGrants)
+	} else {
+		builder = authz.ApplyDeviceVisibilityFilter(builder, "d.id", filter.VisibleGroups)
+	}
 	if filter.UECountMax != nil {
 		builder = builder.Where(sq.LtOrEq{"COALESCE(di.ue_count, 0)": *filter.UECountMax})
 	}
@@ -1267,8 +1274,12 @@ func (r *PgDeviceRepository) ListGeo(ctx context.Context, filter GeoDeviceFilter
 			countBuilder = countBuilder.Where(cond)
 		}
 	}
-	// #64 设备组数据权限：count 与 list 同口径施加可见分组收口。
-	countBuilder = authz.ApplyDeviceVisibilityFilter(countBuilder, "d.id", filter.VisibleGroups)
+	// #64 设备组数据权限：count 与 list 同口径施加可见分组/制式收口。
+	if filter.VisibleDeviceGrants != nil {
+		countBuilder = authz.ApplyDeviceVisibilityGrantsFilter(countBuilder, "d.id", "d.technology", filter.VisibleDeviceGrants)
+	} else {
+		countBuilder = authz.ApplyDeviceVisibilityFilter(countBuilder, "d.id", filter.VisibleGroups)
+	}
 	if filter.UECountMax != nil {
 		countBuilder = countBuilder.Where(sq.LtOrEq{"COALESCE(di.ue_count, 0)": *filter.UECountMax})
 	}
@@ -1342,8 +1353,12 @@ func (r *PgDeviceRepository) GetGeoStats(ctx context.Context, filter GeoStatsFil
 
 	statusBuilder = applyGeoGroupFilter(statusBuilder, filter.GroupIDs, filter.IncludeUngrouped)
 	statusBuilder = applyGeoStatusFilter(statusBuilder, filter.Status)
-	// #64 设备组数据权限：状态统计按可见分组三态收口（子查询走 d.id 避免 LEFT JOIN 行翻倍）。
-	statusBuilder = authz.ApplyDeviceVisibilityFilter(statusBuilder, "d.id", filter.VisibleGroups)
+	// #64 设备组数据权限：状态统计按可见分组+制式三态收口（子查询走 d.id 避免 LEFT JOIN 行翻倍）。
+	if filter.VisibleDeviceGrants != nil {
+		statusBuilder = authz.ApplyDeviceVisibilityGrantsFilter(statusBuilder, "d.id", "d.technology", filter.VisibleDeviceGrants)
+	} else {
+		statusBuilder = authz.ApplyDeviceVisibilityFilter(statusBuilder, "d.id", filter.VisibleGroups)
+	}
 
 	query, args, _ := statusBuilder.ToSql()
 	rows, err := r.pool.Query(ctx, query, args...)
@@ -1382,7 +1397,11 @@ func (r *PgDeviceRepository) GetGeoStats(ctx context.Context, filter GeoStatsFil
 	// #490: center 只按 group 收口，不随 status 变化——避免用户切换在线/离线档时
 	// 地图中心漂移（center 语义是「当前组下设备的几何中心」，是定位锚点而非筛选反馈）。
 	// #64 设备组数据权限：中心点计算同口径按可见分组收口。
-	centerBuilder = authz.ApplyDeviceVisibilityFilter(centerBuilder, "d.id", filter.VisibleGroups)
+	if filter.VisibleDeviceGrants != nil {
+		centerBuilder = authz.ApplyDeviceVisibilityGrantsFilter(centerBuilder, "d.id", "d.technology", filter.VisibleDeviceGrants)
+	} else {
+		centerBuilder = authz.ApplyDeviceVisibilityFilter(centerBuilder, "d.id", filter.VisibleGroups)
+	}
 
 	centerQuery, centerArgs, _ := centerBuilder.ToSql()
 	var avgLat, avgLng *float64
@@ -1409,7 +1428,11 @@ func (r *PgDeviceRepository) GetGeoStats(ctx context.Context, filter GeoStatsFil
 
 	ueZeroBuilder = applyGeoGroupFilter(ueZeroBuilder, filter.GroupIDs, filter.IncludeUngrouped)
 	ueZeroBuilder = applyGeoStatusFilter(ueZeroBuilder, filter.Status)
-	ueZeroBuilder = authz.ApplyDeviceVisibilityFilter(ueZeroBuilder, "d.id", filter.VisibleGroups)
+	if filter.VisibleDeviceGrants != nil {
+		ueZeroBuilder = authz.ApplyDeviceVisibilityGrantsFilter(ueZeroBuilder, "d.id", "d.technology", filter.VisibleDeviceGrants)
+	} else {
+		ueZeroBuilder = authz.ApplyDeviceVisibilityFilter(ueZeroBuilder, "d.id", filter.VisibleGroups)
+	}
 
 	ueZeroQuery, ueZeroArgs, _ := ueZeroBuilder.ToSql()
 	if err := r.pool.QueryRow(ctx, ueZeroQuery, ueZeroArgs...).Scan(&stats.UEZeroCount); err != nil {
@@ -1421,7 +1444,7 @@ func (r *PgDeviceRepository) GetGeoStats(ctx context.Context, filter GeoStatsFil
 
 // SearchDevices searches devices by keyword for map display.
 // visibleGroups 是 #64 设备组数据权限的三态可见分组（nil 超管 / [] fail-closed / [g...] 限定）。
-func (r *PgDeviceRepository) SearchDevices(ctx context.Context, keyword string, limit int, visibleGroups []uuid.UUID) ([]GeoDevice, error) {
+func (r *PgDeviceRepository) SearchDevices(ctx context.Context, keyword string, limit int, visibleGrants []model.DeviceVisibilityGrant) ([]GeoDevice, error) {
 	if keyword == "" {
 		return []GeoDevice{}, nil
 	}
@@ -1461,8 +1484,12 @@ func (r *PgDeviceRepository) SearchDevices(ctx context.Context, keyword string, 
 	} else {
 		return []GeoDevice{}, nil
 	}
-	// #64 设备组数据权限：搜索结果按可见分组三态收口（子查询走 d.id 避免 LEFT JOIN 行翻倍）。
-	builder = authz.ApplyDeviceVisibilityFilter(builder, "d.id", visibleGroups)
+	// #64 设备组数据权限：搜索结果按可见分组+制式三态收口（子查询走 d.id 避免 LEFT JOIN 行翻倍）。
+	if visibleGrants != nil {
+		builder = authz.ApplyDeviceVisibilityGrantsFilter(builder, "d.id", "d.technology", visibleGrants)
+	} else {
+		builder = authz.ApplyDeviceVisibilityFilter(builder, "d.id", nil)
+	}
 
 	builder = builder.Limit(uint64(limit))
 
