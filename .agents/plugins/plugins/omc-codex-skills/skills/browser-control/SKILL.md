@@ -94,6 +94,14 @@ macOS 终端 Codex 的可见浏览器默认使用固定脚本，不要提权任�
 
 固定脚本目录：`$WORKSPACE_ROOT/.codex-tools/browser-control`
 
+这些固定脚本随 `omc-codex-skills` plugin 一起发布在 `<omc-codex-skills-plugin-root>/tools/browser-control`。如果 `$WORKSPACE_ROOT/.codex-tools/browser-control` 不存在，或缺少下面任一固定脚本，先从 plugin 安装到 workspace，再继续浏览器控制流程：
+
+```bash
+<omc-codex-skills-plugin-root>/tools/browser-control/install-browser-control-tools.sh "$WORKSPACE_ROOT"
+```
+
+安装脚本只复制 `check-cdp.sh`、`start-chrome.sh`、`list-tabs.js`、`navigate-existing-tab.js`、`stop-managed-chrome.sh` 并设置可执行权限；不安装 Playwright，不联网，也不修改业务项目依赖。`start-chrome.sh` 和 `stop-managed-chrome.sh` 会从安装后的 `$WORKSPACE_ROOT/.codex-tools/browser-control` 自动推导默认 Chrome profile：`$WORKSPACE_ROOT/.codex-tools/chrome-profile`。
+
 优先流程：
 
 1. 检查 Chrome CDP 是否已监听：
