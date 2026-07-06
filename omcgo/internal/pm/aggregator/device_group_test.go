@@ -48,7 +48,7 @@ func Test_buildDeviceGroupSQL_HourlyGroupTableHasIDAndJoins(t *testing.T) {
 
 	// issue #395：time 来自源行（m.time）后不再需要 bucketStart 占位，args 仅余
 	// granularity / whereStart / whereEnd 三参。
-	assert.Equal(t, []any{"hourly", w.Start, w.End}, args)
+	assert.Equal(t, []any{"hourly", w.Start, w.End, ""}, args)
 }
 
 // #516 分区裁剪：device_group 源筛选必须按**分区列** time 框半开窗口 [w.Start, w.End)，
@@ -104,7 +104,7 @@ func Test_buildDeviceGroupSQL_FramesBy_StartTime_AllGranularities(t *testing.T) 
 			assert.NotContains(t, sql, "AND m.end_time <  $3", "源筛选不应再按 end_time 框桶")
 			// 写入 time/start_time/end_time 仍取源行自身桶时刻（逐档对齐、无偏移；写入列不动）
 			assert.Contains(t, sql, "m.time,\n    m.start_time,\n    m.end_time,")
-			assert.Equal(t, []any{string(c.gran), w.Start, w.End}, args)
+			assert.Equal(t, []any{string(c.gran), w.Start, w.End, ""}, args)
 		})
 	}
 }
@@ -142,7 +142,7 @@ func Test_buildDeviceGroupSQL_Issue395_BucketsBySourceTime_NoOffset(t *testing.T
 	assert.NotContains(t, sql, "AND m.end_time <  $3", "源筛选不应再按 end_time 框桶")
 
 	// args 去掉了多余的 bucketStart 占位，仅 granularity + where 区间
-	assert.Equal(t, []any{"hourly", w.Start, w.End}, args)
+	assert.Equal(t, []any{"hourly", w.Start, w.End, ""}, args)
 }
 
 func Test_buildDeviceGroupSQL_DailyGroupTableNoID(t *testing.T) {
@@ -176,5 +176,5 @@ func Test_AggregateDeviceGroup_PassesThroughToExec(t *testing.T) {
 	assert.Equal(t, 2, n)
 	assert.Contains(t, db.execSQL, "INSERT INTO pm_group_metrics_hourly")
 	assert.Contains(t, db.execSQL, "JOIN device_group_member_dim dgm")
-	assert.Equal(t, []any{"hourly", w.Start, w.End}, db.execArgs)
+	assert.Equal(t, []any{"hourly", w.Start, w.End, ""}, db.execArgs)
 }
