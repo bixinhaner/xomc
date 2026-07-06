@@ -55,8 +55,8 @@ func names(cs []model.PMCounter) []string {
 // 丢 C/D（孤儿）；保留的 counter 应带正确 StatisType。
 func TestFilterByWhitelist_DropsOrphans_RewritesToIndicatorID(t *testing.T) {
 	c := collectorWithWhitelist(&fakeWhitelist{set: map[string]CounterMeta{
-		"L.Cell.Avail": {IndicatorID: "C000010001", StatisType: "avg"},
-		"RRC.AttConn":  {IndicatorID: "C000010002", StatisType: "sum"},
+		"L.Cell.Avail": {IndicatorID: "C000010001", Unit: "%", StatisType: "avg"},
+		"RRC.AttConn":  {IndicatorID: "C000010002", Unit: "number", StatisType: "sum"},
 	}})
 	in := sample("L.Cell.Avail", "MR.RIPPRB", "RRC.AttConn", "MR.RECEIVEDIPOWER")
 	out := c.filterByWhitelist(context.Background(), "SN-1", "cmcc", "lte", in)
@@ -68,6 +68,12 @@ func TestFilterByWhitelist_DropsOrphans_RewritesToIndicatorID(t *testing.T) {
 	}
 	assert.Equal(t, "avg", statisByID["C000010001"])
 	assert.Equal(t, "sum", statisByID["C000010002"])
+	unitByID := map[string]string{}
+	for _, c := range out {
+		unitByID[c.CounterName] = c.Unit
+	}
+	assert.Equal(t, "%", unitByID["C000010001"])
+	assert.Equal(t, "number", unitByID["C000010002"])
 }
 
 // PM-P2 锚点专项：上报名匹配 report_key（而非 en_name）。构造 report_key≠en_name 的桩：

@@ -162,6 +162,8 @@ func (e *KPIEngine) evaluateRoute(
 			KPIValue:    value,
 			Carrier:     carrierCode,
 			Technology:  tech,
+			StatisType:  k.StatisType,
+			Unit:        k.Unit,
 		})
 	}
 	if total := skippedMissing + skippedDivZero + skippedParse; total > 0 {

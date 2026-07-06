@@ -19,10 +19,10 @@ func sampleRoute(productID uuid.UUID) *KPIRoute {
 		IndicatorPlatform:   "BLQ-LTE-V1",
 		IndicatorDeviceType: indicator.DeviceTypeENB,
 		Counters: []CounterDef{
-			{IndicatorID: "C-001", Name: "RRC_Conn_Att", ReportKey: "RRC.AttConn", StatisType: "sum"},
+			{IndicatorID: "C-001", Name: "RRC_Conn_Att", ReportKey: "RRC.AttConn", Unit: "number", StatisType: "sum"},
 		},
 		KPIs: []KPIDef{
-			{IndicatorID: "K-001", Name: "RRC_Succ_Rate", StatisType: "pct",
+			{IndicatorID: "K-001", Name: "RRC_Succ_Rate", Unit: "%", StatisType: "pct",
 				Formula:      "RRC_Conn_Succ / RRC_Conn_Att",
 				Dependencies: []string{"RRC_Conn_Succ", "RRC_Conn_Att"}},
 		},

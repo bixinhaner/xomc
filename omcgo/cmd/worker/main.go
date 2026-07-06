@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,6 +21,7 @@ import (
 	"github.com/omcgo/omcgo/internal/backup"
 	"github.com/omcgo/omcgo/internal/config/parammodel"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/rawarchive"
 	"github.com/omcgo/omcgo/internal/core/reliability"
@@ -37,6 +39,7 @@ import (
 	"github.com/omcgo/omcgo/internal/pm/kpi"
 	"github.com/omcgo/omcgo/internal/pm/kpi/router"
 	pmmetrics "github.com/omcgo/omcgo/internal/pm/metrics"
+	"github.com/omcgo/omcgo/internal/pm/resultnorm"
 	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/internal/report"
 	"github.com/omcgo/omcgo/internal/task"
@@ -200,9 +203,21 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	// T-0164 G1 BUG-6 真根因复盘 / 方案 D：collector 用指标库白名单过滤孤儿 counter。
 	// 复用 pmKPIRouter 的 LookupByDevice：route.Counters[].ReportKey 即设备所属产品在
 	// perf_indicators_{enb,gnb,gsm} 中注册的 counter 上报名全集（PM-P2 按 report_key 建键，
-	// 命中后把上报名改写成编号 IndicatorID 落库）。fail-open（lookup 失败 / 空集合时跳过
-	// 过滤，保留全量入库），细节见 collector.filterByWhitelist。
+	// 命中后把上报名改写成编号 IndicatorID 落库，并回填 Unit/StatisType 供结果值规范化）。
+	// filterByWhitelist 本阶段 fail-open（lookup 失败 / 空集合时跳过过滤，避免误删）；#866
+	// normalizeResults 会在写入前要求 Unit/StatisType 齐全，缺失时失败并暴露。
 	pmCollector.SetCounterWhitelist(&routerCounterWhitelist{r: pmKPIRouter, log: logger})
+	pmResultNormSysCfg := admin.NewPgSysConfigRepository(w.PgPool)
+	pmCollector.SetNumberProcessLookup(func(ctx context.Context) (string, error) {
+		row, err := pmResultNormSysCfg.GetByKey(ctx, resultnorm.ConfigCategory, resultnorm.ConfigKey)
+		if err != nil {
+			if errors.Is(err, commonerrors.ErrNotFound) {
+				return "", nil
+			}
+			return "", err
+		}
+		return row.Value, nil
+	})
 
 	// Runner wires retry + DLQ instrumentation around the PM handler.
 	// dlqRepo + runnerMetrics are scoped to the worker process; admin handler
@@ -1085,8 +1100,9 @@ func scheduleAlarmDefRegistryStartupCatchUp(logger *zap.Logger, alarmDefRegistry
 // parseStringSlice parses a comma-separated string into a slice.
 // routerCounterWhitelist 把 *router.Router 包装成 collector.CounterWhitelist 接口。
 // 通过 LookupByDevice 拿设备所属产品的 KPIRoute.Counters，转
-// report_key→{编号, statis_type} 映射作为白名单。Lookup 失败时把错误透传给
-// collector，由 collector 决定 fail-open（log warn + 不过滤）。
+// report_key→{编号, statis_type, unit} 映射作为白名单。Lookup 失败时把错误透传给
+// collector，由 collector 在过滤阶段 fail-open（log warn + 不过滤），再由写入前规范化
+// 对缺失元数据 fail-fast。
 //
 // PM-P2：建键锚点改为 report_key（上报名、入库不可改的解析契约），value 带指标
 // 编号（IndicatorID），collector.filterByWhitelist 命中后把上报名改写成编号落库
@@ -1117,6 +1133,7 @@ func (a *routerCounterWhitelist) LookupCounters(ctx context.Context, deviceSN st
 		out[c.ReportKey] = collector.CounterMeta{
 			IndicatorID: c.IndicatorID,
 			StatisType:  c.StatisType,
+			Unit:        c.Unit,
 		}
 	}
 	return out, nil

@@ -30,7 +30,10 @@ type PMCounter struct {
 	// filterByWhitelist 阶段从 indicator 元数据填入，counterToMetric 透传到
 	// pm_metrics.statis_type 列，驱动 G5 自然桶聚合 (CASE WHEN m.statis_type)。
 	// 空串表示未知（白名单未注入或 lookup fail-open 场景），下游聚合会跳过该行。
-	StatisType   string    `json:"statis_type,omitempty" db:"-"`
+	StatisType string `json:"statis_type,omitempty" db:"-"`
+	// Unit 是指标库 unit_id 的业务单位文本（如 number/%/Mbps），由 collector 白名单回填，
+	// 供 15min 入库前结果值规范化使用；空串表示缺失元数据。
+	Unit string `json:"unit,omitempty" db:"-"`
 }
 
 // KPIValue 表示一个计算后的 KPI 指标值。
@@ -51,6 +54,10 @@ type KPIValue struct {
 	KPIValue    float64     `json:"kpi_value" db:"kpi_value"`
 	Carrier     CarrierCode `json:"carrier" db:"carrier"`
 	Technology  Technology  `json:"technology" db:"technology"`
+	// StatisType/Unit 来自指标库 KPI 元数据，供 15min 入库前结果值规范化使用；
+	// pm_metrics KPI 行仍不写 statis_type 列。
+	StatisType string `json:"statis_type,omitempty" db:"-"`
+	Unit       string `json:"unit,omitempty" db:"-"`
 }
 
 // KPIDefinition 描述 KPI 的计算公式和元数据。
