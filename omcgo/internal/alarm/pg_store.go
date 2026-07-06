@@ -54,33 +54,7 @@ func (s *PgAlarmStore) SaveActive(ctx context.Context, alarm *model.Alarm) error
 	if err != nil {
 		return fmt.Errorf("insert alarms_active: %w", err)
 	}
-	// 同事务维护 device_info.active_alarm_count 冗余列（新增告警 +1）
-	if alarm.DeviceID != (uuid.UUID{}) {
-		if _, err = tx.Exec(ctx,
-			`UPDATE device_info
-			    SET active_alarm_count = GREATEST(0, active_alarm_count + 1)
-			  WHERE device_id = $1`,
-			alarm.DeviceID,
-		); err != nil {
-			return fmt.Errorf("adjust active_alarm_count (+1) for device %s: %w", alarm.DeviceID, err)
-		}
-		// 维护最高告警级别及该级别数量（纯 CASE 表达式，无额外子查询）
-		if _, err = tx.Exec(ctx,
-			`UPDATE device_info
-			    SET highest_alarm_severity = LEAST(COALESCE(highest_alarm_severity, 999), $1),
-			        highest_severity_alarm_count = CASE
-			            WHEN $1 < COALESCE(highest_alarm_severity, 999) THEN 1
-			            WHEN $1 = COALESCE(highest_alarm_severity, 999)
-			                THEN COALESCE(highest_severity_alarm_count, 0) + 1
-			            ELSE COALESCE(highest_severity_alarm_count, 0)
-			        END
-			  WHERE device_id = $2`,
-			int(alarm.Severity), alarm.DeviceID,
-		); err != nil {
-			return fmt.Errorf("adjust highest_alarm_severity (+) for device %s: %w", alarm.DeviceID, err)
-		}
-	}
-
+	
 	if err = tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit save active tx: %w", err)
 	}
@@ -197,33 +171,7 @@ func (s *PgAlarmStore) RemoveActive(ctx context.Context, id uuid.UUID) error {
 		return nil
 	}
 
-	// 同事务维护 device_info.active_alarm_count 冗余列（告警清除 -1）
-	if deviceID != (uuid.UUID{}) {
-		if _, err = tx.Exec(ctx,
-			`UPDATE device_info
-			    SET active_alarm_count = GREATEST(0, active_alarm_count - 1)
-			  WHERE device_id = $1`,
-			deviceID,
-		); err != nil {
-			return fmt.Errorf("adjust active_alarm_count (-1) for device %s: %w", deviceID, err)
-		}
-		// 告警清除后用 CTE 重算最高级别及其数量（一次 GROUP BY 聚合）
-		if _, err = tx.Exec(ctx,
-			`WITH remaining AS (
-			    SELECT severity, COUNT(*) AS cnt
-			    FROM alarms_active WHERE device_id = $1
-			    GROUP BY severity ORDER BY severity ASC LIMIT 1
-			)
-			UPDATE device_info
-			    SET highest_alarm_severity        = (SELECT severity FROM remaining),
-			        highest_severity_alarm_count  = COALESCE((SELECT cnt FROM remaining), 0)
-			  WHERE device_id = $1`,
-			deviceID,
-		); err != nil {
-			return fmt.Errorf("adjust highest_alarm_severity (-) for device %s: %w", deviceID, err)
-		}
-	}
-
+	
 	if err = tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit remove active tx: %w", err)
 	}
