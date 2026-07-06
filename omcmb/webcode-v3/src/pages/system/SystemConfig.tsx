@@ -33,6 +33,9 @@ function groupDeviceItems(
 
 // 后端待实现、暂不展示的 key（#801 磁盘告警阈值后端未实现）。
 const HIDDEN_KEYS = new Set([
+  // #780: eNB 位置移动检测后端逻辑未实现，本次仅隐藏页面入口。
+  'locationDetection',
+  'latitudeToleranceRange',
   'varDiskAlarmThresHold',
   'homeDiskAlarmThresHold',
   'usrDiskAlarmThresHold',

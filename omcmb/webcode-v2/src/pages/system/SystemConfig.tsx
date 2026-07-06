@@ -71,6 +71,8 @@ const KNOWN_KEYS_BY_CATEGORY: Record<
 
 // 后端待实现、暂不展示的 key（#801 磁盘告警阈值后端未实现，隐藏整卡）。
 const HIDDEN_KEYS_BY_CATEGORY: Record<string, string[]> = {
+  // #780: eNB 位置移动检测后端逻辑未实现，本次仅隐藏页面入口。
+  device: ['locationDetection', 'latitudeToleranceRange'],
   storage: [
     'varDiskAlarmThresHold',
     'homeDiskAlarmThresHold',

@@ -90,6 +90,7 @@ interface FeedbackState {
 
   setFeedback: (key: string, feedback: Feedback) => void;
   patchFeedback: (key: string, patch: Partial<Feedback>) => void;
+  clearFeedback: (key: string) => void;
   clearByDevice: (deviceId: string) => void;
   clearDraftsByDevice: (deviceId: string) => void;
 
@@ -125,6 +126,12 @@ export const useQuickSettingsFeedbackStore = create<FeedbackState>()(
         const cur = get().entries[key];
         if (!cur) return;
         set({ entries: { ...get().entries, [key]: { ...cur, ...patch } as Feedback } });
+      },
+
+      clearFeedback: (key) => {
+        const next = { ...get().entries };
+        delete next[key];
+        set({ entries: next });
       },
 
       clearByDevice: (deviceId) => {

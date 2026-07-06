@@ -31,7 +31,7 @@ func NewCreateFailureNotifier(svc *Service, log *zap.Logger) task.CreateFailureN
 		if t == nil || t.CreatorID == "" {
 			return
 		}
-		title := fmt.Sprintf("%s · 设备 %s · 入队失败", translateMethod(t.Method), t.DeviceSN)
+		title := fmt.Sprintf("%s · 设备 %s · 入队失败", displayTaskMethod(t), t.DeviceSN)
 		content := errMsg
 		dedup := t.ID
 

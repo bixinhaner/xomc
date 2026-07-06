@@ -1,0 +1,36 @@
+{
+  "name": "mattpocock-skills",
+  "version": "0.1.0",
+  "description": "将原 Claude Code marketplace 包装本地化为 Codex 可直接加载的项目插件。",
+  "author": {
+    "name": "OMC project"
+  },
+  "repository": "https://github.com/mattpocock/skills",
+  "license": "MIT",
+  "keywords": [
+    "codex",
+    "skills",
+    "workflow",
+    "tdd",
+    "diagnosis",
+    "triage"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Matt Pocock 技能集",
+    "shortDescription": "项目本地 Codex 技能集，用于规划、诊断、TDD、分流和交接流程。",
+    "longDescription": "这是从旧 Claude Code marketplace 包装转换而来的项目本地 Codex 插件。它把本机已可用的 Matt Pocock 风格技能 vendored 到仓库中，让 Codex 可以直接从本项目加载，而不依赖 Claude marketplace 条目。",
+    "developerName": "OMC project",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write",
+      "Workflow"
+    ],
+    "defaultPrompt": [
+      "使用 diagnose 调试这个失败。",
+      "使用 tdd 实现这个改动。",
+      "使用 to-issues 拆分这个计划。"
+    ]
+  }
+}

@@ -1,7 +1,5 @@
-import { Form, InputNumber, Checkbox, Select, Radio, Card, Space, Typography, theme } from 'antd';
+import { Form, InputNumber, Checkbox, Radio, Card, Space, Typography, theme } from 'antd';
 import { useT } from '@/hooks/useT';
-
-const { Option } = Select;
 
 interface DeviceSettingsProps {
   form: ReturnType<typeof Form.useForm>[0];
@@ -22,11 +20,8 @@ export default function DeviceSettings({ form }: DeviceSettingsProps) {
       enbInformPeriod: 60,
       enbTimeout: 100,
       nameSyncMode: 'prompt',
-      uploadSelected: '3',
       deviceOfflineEnable: false,
       deviceOfflineSaveDay: 90,
-      locationDetection: true,
-      latitudeToleranceRange: 1000,
       // 设备参数同步设置（与后端 internal/provision/periodic_sync_policy.go default 对齐）
       periodicSyncEnabled: false,
       periodicSyncIntervalHours: 24,
@@ -95,19 +90,6 @@ export default function DeviceSettings({ form }: DeviceSettingsProps) {
         </Form.Item>
       </Card>
 
-      {/* 基站文件上传协议 */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.device.baseStationUploadProtocol')}</span>} style={{ marginBottom: 16 }}>
-        <div style={settingRowStyle}>
-          <Form.Item name="uploadSelected" noStyle>
-            <Select style={{ width: 160 }}>
-              <Option value="1">{t('common.protocol.http')}</Option>
-              <Option value="2">{t('common.protocol.https')}</Option>
-              <Option value="3">{t('system.device.keepBaseStationUnchanged')}</Option>
-            </Select>
-          </Form.Item>
-        </div>
-      </Card>
-
       {/* 回收站 */}
       <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.device.recycleBin')}</span>} style={{ marginBottom: 16 }}>
         <div style={settingRowStyle}>
@@ -123,21 +105,6 @@ export default function DeviceSettings({ form }: DeviceSettingsProps) {
         </div>
         <div style={settingRowStyle}>
           <span style={{ color: token.colorTextTertiary }}>{t('system.device.dailyCheckOfflineTime')}</span>
-        </div>
-      </Card>
-
-      {/* eNB位置移动检测 */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.device.enbLocationDetection')}</span>} style={{ marginBottom: 16 }}>
-        <div style={settingRowStyle}>
-          <Space wrap>
-            <Form.Item name="locationDetection" valuePropName="checked" noStyle>
-              <Checkbox>{t('system.device.ifEnbLocationExceeds')}</Checkbox>
-            </Form.Item>
-            <Form.Item name="latitudeToleranceRange" noStyle>
-              <InputNumber min={10} max={10000} style={{ width: 70 }} />
-            </Form.Item>
-            <span>{t('system.device.thenEnbWillBeLocked')}</span>
-          </Space>
         </div>
       </Card>
 

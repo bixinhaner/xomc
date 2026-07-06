@@ -1,0 +1,32 @@
+{
+  "name": "omc-codex-skills",
+  "interface": {
+    "displayName": "OMC Codex 技能集"
+  },
+  "plugins": [
+    {
+      "name": "omc-codex-skills",
+      "source": {
+        "source": "local",
+        "path": "./.agents/plugins/plugins/omc-codex-skills"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    },
+    {
+      "name": "mattpocock-skills",
+      "source": {
+        "source": "local",
+        "path": "./.agents/plugins/plugins/mattpocock-skills"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

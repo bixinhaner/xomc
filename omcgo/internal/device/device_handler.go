@@ -1150,10 +1150,15 @@ func (h *Handler) RenameDevice(c *gin.Context) {
 		return
 	}
 
-	if err := h.service.RenameDevice(c.Request.Context(), id, req.Name); err != nil {
+	result, err := h.service.RenameDevice(c.Request.Context(), id, req.Name, admin.UserIDStringFromCtx(c))
+	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
 
-	response.OK(c, gin.H{"success": true})
+	body := gin.H{"success": true}
+	if result != nil && result.TaskID != "" {
+		body["task_id"] = result.TaskID
+	}
+	response.OK(c, body)
 }

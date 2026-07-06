@@ -1,0 +1,4 @@
+interface:
+  display_name: "To PRD"
+  short_description: "Turn current context into a published PRD"
+  default_prompt: "Use $to-prd to synthesize the current context into a PRD."

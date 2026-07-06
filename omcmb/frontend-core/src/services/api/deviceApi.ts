@@ -193,6 +193,10 @@ export interface RestoreDevicesResult {
   conflicts: RestoreConflict[];
 }
 
+export interface RenameDeviceResult {
+  taskId?: string;
+}
+
 function buildUpdatedDeviceFallback(id: string, data: Partial<Device>, fallbackDevice?: Partial<Device>): Device {
   return {
     ...(fallbackDevice ?? {}),
@@ -909,7 +913,8 @@ export const deviceApi = {
   },
 
   // 网管侧手动改基站名（即时下发）- 按 nameSyncMode 策略决定是否下发
-  async renameDevice(deviceId: string, name: string): Promise<void> {
-    await http.post(`/devices/${deviceId}/rename`, { name });
+  async renameDevice(deviceId: string, name: string): Promise<RenameDeviceResult> {
+    const { data } = await http.post<{ task_id?: string }>(`/devices/${deviceId}/rename`, { name });
+    return data?.task_id ? { taskId: data.task_id } : {};
   },
 };

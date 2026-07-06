@@ -39,6 +39,29 @@ func Test_CreateFailureNotifier_WritesFailedMessage(t *testing.T) {
 	assert.Equal(t, "task-fail-001", *got.DedupKey)
 }
 
+func Test_CreateFailureNotifier_RenameTask_UsesRenameTitle(t *testing.T) {
+	repo := newMockRepository()
+	svc := NewService(repo, nil, zap.NewNop())
+	notifier := NewCreateFailureNotifier(svc, zap.NewNop())
+
+	tk := &task.Task{
+		ID:         "rename-task-fail",
+		DeviceSN:   "SN001",
+		Method:     "SetParameterValues",
+		CommandKey: "rename-abcd1234",
+		CreatorID:  "alice",
+	}
+	notifier(context.Background(), tk, "queue down")
+
+	list, err := svc.List(context.Background(), NotificationFilter{UserID: "alice"})
+	require.NoError(t, err)
+	require.Len(t, list.Items, 1)
+	got := list.Items[0]
+	assert.Equal(t, StatusFailed, got.Status)
+	assert.Contains(t, got.Title, "设备改名")
+	assert.Contains(t, got.Title, "入队失败")
+}
+
 // Test_CreateFailureNotifier_SkipsSystemTask 验证 CreatorID 空时跳过。
 func Test_CreateFailureNotifier_SkipsSystemTask(t *testing.T) {
 	repo := newMockRepository()

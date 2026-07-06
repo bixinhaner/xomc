@@ -1,0 +1,4 @@
+interface:
+  display_name: "浏览器控制"
+  short_description: "统一选择浏览器控制路径"
+  default_prompt: "使用 $browser-control 选择并验证正确的浏览器控制路径。"

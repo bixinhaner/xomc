@@ -1,0 +1,4 @@
+interface:
+  display_name: "To Issues"
+  short_description: "Break plans into vertical-slice issues"
+  default_prompt: "Use $to-issues to turn this PRD or plan into implementation issues."

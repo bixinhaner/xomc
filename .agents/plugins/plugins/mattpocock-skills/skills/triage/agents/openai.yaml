@@ -1,0 +1,4 @@
+interface:
+  display_name: "Triage"
+  short_description: "Move issues through the triage state machine"
+  default_prompt: "Use $triage to evaluate and label issues for agent or human work."

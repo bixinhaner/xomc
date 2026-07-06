@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ship"
+  short_description: "执行 OMC Issue 到 PR 的交付流程。"
+  default_prompt: "使用 $ship 将当前 OMC Issue 或分支推进到实现、验证、审查、提交和 PR。"
