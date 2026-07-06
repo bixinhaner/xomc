@@ -18,53 +18,78 @@ func TestCalcCellStatus(t *testing.T) {
 			want:   "inactive",
 		},
 		{
-			name: "single cell inactive",
+			name: "single cell inactive via strict LTE OpState path",
 			params: map[string]string{
-				"Device.Services.FAPService.1.FAPControl.LTE.CellOpState": "0",
+				"Device.Services.FAPService.1.FAPControl.LTE.OpState": "0",
 			},
 			want: "inactive",
 		},
 		{
-			name: "single cell active via fapcontrol path",
+			name: "single cell active via strict LTE OpState path",
 			params: map[string]string{
-				"Device.Services.FAPService.1.FAPControl.LTE.CellOpState": "1",
+				"Device.Services.FAPService.1.FAPControl.LTE.OpState": "1",
 			},
 			want: "normal",
 		},
 		{
-			name: "single cell active via config path",
+			name: "LTE strict path true is active",
 			params: map[string]string{
-				"Device.Services.FAPService.1.CellConfig.LTE.RAN.Common.CellOpState": "1",
+				"Device.Services.FAPService.1.FAPControl.LTE.OpState":     "true",
 			},
 			want: "normal",
 		},
 		{
-			name: "NR paths",
-			params: map[string]string{
-				"Device.Services.FAPService.1.CellConfig.NR.RAN.Common.CellOpState": "1",
-			},
-			want: "normal",
-		},
-		{
-			name: "NR indexed ran op state path matches detail page semantics",
+			name: "NR strict path",
 			params: map[string]string{
 				"Device.Services.FAPService.1.CellConfig.1.NR.RAN.OpState": "1",
 			},
 			want: "normal",
 		},
 		{
+			name: "non-strict NR path should be ignored",
+			params: map[string]string{
+				"Device.Services.FAPService.1.CellConfig.NR.RAN.OpState": "1",
+			},
+			want: "inactive",
+		},
+		{
 			name: "multi-cell any active returns normal",
 			params: map[string]string{
-				"Device.Services.FAPService.1.FAPControl.LTE.CellOpState": "0",
-				"Device.Services.FAPService.2.FAPControl.LTE.CellOpState": "1",
+				"Device.Services.FAPService.1.FAPControl.LTE.OpState": "0",
+				"Device.Services.FAPService.2.FAPControl.LTE.OpState": "1",
 			},
 			want: "normal",
 		},
 		{
 			name: "multi-cell all inactive returns inactive",
 			params: map[string]string{
-				"Device.Services.FAPService.1.FAPControl.LTE.CellOpState": "0",
-				"Device.Services.FAPService.2.FAPControl.LTE.CellOpState": "false",
+				"Device.Services.FAPService.1.FAPControl.LTE.OpState": "0",
+				"Device.Services.FAPService.2.FAPControl.LTE.OpState": "false",
+			},
+			want: "inactive",
+		},
+		{
+			name: "GSM with InUse=true and OpState=1 returns normal",
+			params: map[string]string{
+				"Device.Services.GsmBTSCellDT.1.InUse":   "true",
+				"Device.Services.GsmBTSCellDT.1.OpState": "1",
+			},
+			want: "normal",
+		},
+		{
+			name: "GSM active but InUse=false is ignored when InUse exists",
+			params: map[string]string{
+				"Device.Services.GsmBTSCellDT.1.InUse":   "false",
+				"Device.Services.GsmBTSCellDT.1.OpState": "1",
+				"Device.Services.GsmBTSCellDT.2.InUse":   "true",
+				"Device.Services.GsmBTSCellDT.2.OpState": "0",
+			},
+			want: "inactive",
+		},
+		{
+			name: "GSM active without InUse is ignored",
+			params: map[string]string{
+				"Device.Services.GsmBTSCellDT.3.OpState": "1",
 			},
 			want: "inactive",
 		},
@@ -90,42 +115,49 @@ func TestCalcOpState(t *testing.T) {
 		{
 			name: "单 cell active → 1",
 			params: map[string]string{
-				"Device.Services.FAPService.1.FAPControl.LTE.CellOpState": "1",
+				"Device.Services.FAPService.1.FAPControl.LTE.OpState": "1",
 			},
 			want: "1",
 		},
 		{
 			name: "单 cell inactive → 0",
 			params: map[string]string{
-				"Device.Services.FAPService.1.FAPControl.LTE.CellOpState": "0",
+				"Device.Services.FAPService.1.FAPControl.LTE.OpState": "0",
 			},
 			want: "0",
 		},
 		{
+			name: "OpState=true → 1（eNB 激活回归）",
+			params: map[string]string{
+				"Device.Services.FAPService.1.FAPControl.LTE.OpState":     "true",
+			},
+			want: "1",
+		},
+		{
 			name: "多 cell 任一 active → 1(用户口径)",
 			params: map[string]string{
-				"Device.Services.FAPService.1.FAPControl.LTE.CellOpState": "0",
-				"Device.Services.FAPService.2.FAPControl.LTE.CellOpState": "1",
+				"Device.Services.FAPService.1.FAPControl.LTE.OpState": "0",
+				"Device.Services.FAPService.2.FAPControl.LTE.OpState": "1",
 			},
 			want: "1",
 		},
 		{
 			name: "多 cell 全 inactive → 0",
 			params: map[string]string{
-				"Device.Services.FAPService.1.FAPControl.LTE.CellOpState": "0",
-				"Device.Services.FAPService.2.FAPControl.LTE.CellOpState": "false",
+				"Device.Services.FAPService.1.FAPControl.LTE.OpState": "0",
+				"Device.Services.FAPService.2.FAPControl.LTE.OpState": "false",
 			},
 			want: "0",
 		},
 		{
-			name: "NR 路径同样起效",
+			name: "NR 严格路径同样起效",
 			params: map[string]string{
-				"Device.Services.FAPService.1.CellConfig.NR.RAN.Common.CellOpState": "1",
+				"Device.Services.FAPService.1.CellConfig.1.NR.RAN.OpState": "1",
 			},
 			want: "1",
 		},
 		{
-			name: "兜底 FAPControl.LTE.OpState 老路径",
+			name: "LTE 严格路径 true 值",
 			params: map[string]string{
 				"Device.Services.FAPService.1.FAPControl.LTE.OpState": "true",
 			},
@@ -143,16 +175,14 @@ func TestCalcOpState(t *testing.T) {
 			name: "GSM cell 全 inactive — 设备未激活",
 			params: map[string]string{
 				"Device.Services.GsmBTSCellDT.1.OpState": "0",
-				"Device.Services.GsmBTSCellDT.1.InUse":   "true",
 				"Device.Services.GsmBTSCellDT.2.OpState": "0",
-				"Device.Services.GsmBTSCellDT.2.InUse":   "true",
 			},
 			want: "0",
 		},
 		{
-			name: "GSM 设备含 InUse=false 的 cell 应被跳过 — 仅 InUse=true 的 cell 也 inactive 时设备未激活",
+			name: "GSM 含 InUse 时仅统计 InUse=true 的 cell",
 			params: map[string]string{
-				"Device.Services.GsmBTSCellDT.1.OpState": "1", // 但 InUse=false 不计
+				"Device.Services.GsmBTSCellDT.1.OpState": "1", // InUse=false 不计
 				"Device.Services.GsmBTSCellDT.1.InUse":   "false",
 				"Device.Services.GsmBTSCellDT.2.OpState": "0",
 				"Device.Services.GsmBTSCellDT.2.InUse":   "true",
@@ -160,18 +190,18 @@ func TestCalcOpState(t *testing.T) {
 			want: "0",
 		},
 		{
-			name: "GSM 老快照(无 InUse 字段)— 任一 cell active 也算激活",
+			name: "GSM cell active 与 LTE/NR cell inactive 共存 — 任一制式 active 即激活",
 			params: map[string]string{
-				"Device.Services.GsmBTSCellDT.1.OpState": "1",
+				"Device.Services.FAPService.1.FAPControl.LTE.OpState":     "0",
+				"Device.Services.GsmBTSCellDT.1.OpState":                  "1",
+				"Device.Services.GsmBTSCellDT.1.InUse":                    "true",
 			},
 			want: "1",
 		},
 		{
-			name: "GSM cell active 与 LTE/NR cell inactive 共存 — 任一制式 active 即激活",
+			name: "NR cellConfig index two under FAPService.1 is active",
 			params: map[string]string{
-				"Device.Services.FAPService.1.FAPControl.LTE.CellOpState": "0",
-				"Device.Services.GsmBTSCellDT.1.OpState":                  "1",
-				"Device.Services.GsmBTSCellDT.1.InUse":                    "true",
+				"Device.Services.FAPService.1.CellConfig.2.NR.RAN.OpState": "true",
 			},
 			want: "1",
 		},
