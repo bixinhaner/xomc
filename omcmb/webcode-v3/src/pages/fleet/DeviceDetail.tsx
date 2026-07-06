@@ -21,6 +21,7 @@ import { useDictionary } from '@core/hooks/api/useSystem'
 import { activationStatusLabelOf } from '@core/utils/activationStatus'
 import { formatAlarmSeverityBadgeLabel } from '@core/utils/alarmSeverity'
 import { DEVICE_SYNC_STATUS_LABELS_EN, formatDeviceSyncStatus } from '@core/utils/deviceSyncStatus'
+import { computeCumulativeOnlineDurationSeconds } from '@core/utils/onlineDuration'
 import type { Device } from '@core/types/device'
 import { KV, StatCard, StateGate, formatDuration } from './_shared'
 
@@ -147,7 +148,13 @@ function DetailBody({ d, onUe }: { d: Device; onUe: () => void }) {
         />
         <StatCard
           label="ONLINE TOTAL"
-          value={formatDuration(d.cumulativeOnlineDuration)}
+          value={formatDuration(computeCumulativeOnlineDurationSeconds({
+            isOnline: d.isOnline,
+            onlineTime: d.onlineTime || d.lastOnlineTime,
+            offlineTime: d.offlineTime,
+            fallbackOnlineDuration: d.onlineDuration,
+            cumulativeOnlineDuration: d.cumulativeOnlineDuration,
+          }))}
           color="#a855f7"
           hint="OMC CUMULATIVE"
         />
