@@ -81,7 +81,7 @@ func Test_Runner_Run_PayloadParsesAndCallsAggregator(t *testing.T) {
 
 	// AggregateCounters 被调到底层 Exec 的 args 含 hourly + start + end
 	assert.Contains(t, db.execSQL, "INSERT INTO pm_metrics_hourly")
-	assert.Equal(t, []any{"hourly", start, end, start, end}, db.execArgs)
+	assert.Equal(t, []any{"hourly", start, end, start, end, ""}, db.execArgs)
 }
 
 func Test_Runner_Run_RejectsMissingPayload(t *testing.T) {
