@@ -504,12 +504,19 @@ export const deviceApi = {
     if (params.productId) query.product_id = params.productId;
     // productClass → product_class
     if (params.productClass) query.product_class = params.productClass;
-    // networkType: T-0162 后 network_type 字典已直接给 'lte'/'nr'（与后端
-    // devices.technology 字段值一致），不再需要 eNB/gNB → lte/nr 翻译。但
-    // 历史前端 / 老 link 可能仍传 eNB/gNB，做向下兼容映射。
+    // networkType 统一归一到 devices.technology canonical 值（lte/nr/gsm）。
+    // 兼容字典值（lte/nr/gsm）与历史链路值（eNB/gNB/GSM，含大小写变体）。
     if (params.networkType) {
-      const legacyMap: Record<string, string> = { eNB: 'lte', gNB: 'nr' };
-      const tech = legacyMap[params.networkType] ?? params.networkType;
+      const rawNetworkType = String(params.networkType).trim();
+      const normalized = rawNetworkType.toLowerCase();
+      let tech = rawNetworkType;
+      if (normalized === 'enb' || normalized === 'lte') {
+        tech = 'lte';
+      } else if (normalized === 'gnb' || normalized === 'nr') {
+        tech = 'nr';
+      } else if (normalized === 'gsm') {
+        tech = 'gsm';
+      }
       query.technology = tech;
     }
     // T-0162: 新筛选维度，直接 1:1 传给后端，前端不再翻译
