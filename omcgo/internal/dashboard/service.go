@@ -969,107 +969,14 @@ type networkSeriesPoint struct {
 //
 // 两条链路都查时序库（tsPool）。策略 2 是整体缺数据时触发；策略 3 是常态下的尾部实时补充。
 func (s *Service) fetchNetworkKCodeSeries(ctx context.Context, kcodes []string, startTime, endTime time.Time) ([]networkSeriesPoint, error) {
-	// 1. 预聚合表（首选口径）。
-	aggQuery, aggArgs, err := buildNetworkKPISeriesQuery(kcodes, startTime, endTime)
+	query, args, err := buildNetworkKPISeriesQuery(kcodes, startTime, endTime)
 	if err != nil {
 		return nil, fmt.Errorf("build kpi time series query: %w", err)
 	}
-	hourlyPoints, err := s.scanNetworkSeries(ctx, aggQuery, aggArgs, "aggregated")
+	hourlyPoints, err := s.scanNetworkSeries(ctx, query, args, "cagg_realtime")
 	if err != nil {
 		return nil, err
 	}
-
-	if len(hourlyPoints) == 0 {
-		// 2. 整体为空：整体回退 15min 直读原始明细现场汇总（与性能仪表板默认模板对齐容错）。
-		rawQuery, rawArgs, err := buildRawNetworkKPISeriesQuery(kcodes, startTime, endTime)
-		if err != nil {
-			return nil, fmt.Errorf("build raw kpi time series fallback query: %w", err)
-		}
-		rawPoints, err := s.scanNetworkSeries(ctx, rawQuery, rawArgs, "raw-fallback")
-		if err != nil {
-			return nil, err
-		}
-		if len(rawPoints) > 0 {
-			s.logger.Info("dashboard: kpi time series fell back to raw pm_metrics (hourly aggregation empty)",
-				zap.Int("codes", len(kcodes)))
-		}
-		return rawPoints, nil
-	}
-
-	// 3. 预聚合有数据，检查是否有「尾部缺口」。
-	//
-	// 按 code 分别记录各自最新小时桶时间，跨制式场景下不同制式指标的最新桶可能不同。
-	latestByCode := make(map[string]time.Time, len(kcodes))
-	for _, p := range hourlyPoints {
-		if p.time.After(latestByCode[p.code]) {
-			latestByCode[p.code] = p.time
-		}
-	}
-
-	// 取所有 code「下一完整小时桶起点」的最小值作为尾部查询起点。
-	// 这样一次查询可以同时覆盖不同制式指标的尾部缺口。
-	// 示例：LTE 最新桶 16:00 → 候选 17:00；GSM 最新桶 14:00 → 候选 15:00；
-	//       取 min = 15:00，查询 [15:00, now]，GSM 缺口和 LTE 缺口都被覆盖。
-	trailingStart := endTime // 初始化为 endTime，无缺口时不触发
-	for _, code := range kcodes {
-		latest := latestByCode[code]
-		if latest.IsZero() {
-			// 该 code 在本次预聚合结果中无数据（跨制式且该制式当天无上报），
-			// 以 startTime 作为候选，让 15min 从头补。
-			if startTime.Before(trailingStart) {
-				trailingStart = startTime
-			}
-			continue
-		}
-		if candidate := latest.Add(time.Hour); candidate.Before(trailingStart) {
-			trailingStart = candidate
-		}
-	}
-
-	if endTime.After(trailingStart) {
-		trailingQuery, trailingArgs, err := buildRawNetworkKPISeriesQuery(kcodes, trailingStart, endTime)
-		if err != nil {
-			return nil, fmt.Errorf("build raw kpi trailing edge query: %w", err)
-		}
-		trailingPoints, err := s.scanNetworkSeries(ctx, trailingQuery, trailingArgs, "raw-trailing-edge")
-		if err != nil {
-			return nil, err
-		}
-		if len(trailingPoints) > 0 {
-			s.logger.Debug("dashboard: appended trailing 15min points to hourly series",
-				zap.Int("trailing_count", len(trailingPoints)),
-				zap.Time("trailing_start", trailingStart),
-				zap.Time("end_time", endTime),
-			)
-			// 跨制式场景：trailingStart 取的是全局最小值，部分 code 的 15min 数据
-			// 可能与其已有小时数据时间重叠（例如 LTE 的 15:00–16:59 既有小时桶又有 15min 点）。
-			// 对每个 15min 点，只保留时间 >= 该 code 自身尾部缺口起点（latestByCode[code]+1h）的点。
-			filtered := make([]networkSeriesPoint, 0, len(trailingPoints))
-			for _, p := range trailingPoints {
-				latest := latestByCode[p.code]
-				var codeTrailingStart time.Time
-				if latest.IsZero() {
-					codeTrailingStart = startTime
-				} else {
-					codeTrailingStart = latest.Add(time.Hour)
-				}
-				if !p.time.Before(codeTrailingStart) {
-					filtered = append(filtered, p)
-				}
-			}
-			if len(filtered) > 0 {
-				hourlyPoints = append(hourlyPoints, filtered...)
-				// 重新按指标编号 + 时间排序，保持时序连续。
-				sort.Slice(hourlyPoints, func(i, j int) bool {
-					if hourlyPoints[i].code != hourlyPoints[j].code {
-						return hourlyPoints[i].code < hourlyPoints[j].code
-					}
-					return hourlyPoints[i].time.Before(hourlyPoints[j].time)
-				})
-			}
-		}
-	}
-
 	return hourlyPoints, nil
 }
 
