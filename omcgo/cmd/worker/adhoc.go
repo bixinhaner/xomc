@@ -2,14 +2,18 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/pm/adhoc"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
 	"github.com/omcgo/omcgo/internal/pm/kpi/router"
+	"github.com/omcgo/omcgo/internal/pm/resultnorm"
 )
 
 // startPMAdhocPipeline wire 起 T-0164-P7 / G7 自定义聚合任务运行环境。
@@ -52,10 +56,22 @@ func startPMAdhocPipeline(
 	// ISSUE-398：持续任务「最近一格」窗口的 daily/weekly/monthly 零点对齐用同一 PM 业务时区。
 	// #458：executor 经 SetLocationFunc 实时读当前业务时区（与 cron 调度读同一 sys_configs 源），
 	// 管理员改时区后持续任务「最近一格」窗口下次即用新时区零点对齐、无需重启。
+	pmResultNormSysCfg := admin.NewPgSysConfigRepository(w.PgPool)
 	executor := adhoc.NewExecutor(aggr, repo, publisher, logger).
 		SetStoreAllMetrics(cfg.PM.Storage.StoreAllMetrics).
 		SetLocationFunc(tz.Current).
-		SetWatermarkReader(watermarks)
+		SetWatermarkReader(watermarks).
+		SetIndicatorMetadataLookup(adhoc.NewIndicatorMetadataLookup(w.TsPool)).
+		SetNumberProcessLookup(func(ctx context.Context) (string, error) {
+			row, err := pmResultNormSysCfg.GetByKey(ctx, resultnorm.ConfigCategory, resultnorm.ConfigKey)
+			if err != nil {
+				if errors.Is(err, commonerrors.ErrNotFound) {
+					return "", nil
+				}
+				return "", err
+			}
+			return row.Value, nil
+		})
 
 	// 4 worker goroutine（共享 repo，LockNextPending SKIP LOCKED 保证不重复抢同一行）
 	hostname := buildLockOwner()
