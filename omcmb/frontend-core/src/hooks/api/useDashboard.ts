@@ -1,3 +1,4 @@
+import { useDashboardRealtime } from './useDashboardRealtime';
 import { useQuery, useQueries, useQueryClient, useMutation } from '@tanstack/react-query';
 import { dashboardService } from '../../mock/services/dashboardService';
 import { dashboardApi } from '../../services/api/dashboardApi';
@@ -32,10 +33,10 @@ export interface DashboardDataResponse {
 }
 
 export function useDashboardData() {
+  useDashboardRealtime();
   return useQuery<DashboardDataResponse>({
     queryKey: ['dashboard', 'all'],
     queryFn: () => api.getDashboardData() as unknown as Promise<DashboardDataResponse>,
-    refetchInterval: 30000,
   });
 }
 
@@ -43,7 +44,6 @@ export function useDashboardSummary() {
   return useQuery({
     queryKey: ['dashboard', 'summary'],
     queryFn: () => api.getSummary(),
-    refetchInterval: 30000,
   });
 }
 
@@ -51,7 +51,6 @@ export function useDashboardChartData() {
   return useQuery({
     queryKey: ['dashboard', 'charts'],
     queryFn: () => api.getChartData(),
-    refetchInterval: 60000,
   });
 }
 
@@ -60,7 +59,6 @@ export function useAlarmTrend(days = 7, enabled = true) {
     queryKey: ['dashboard', 'alarm-trend', days],
     queryFn: () => api.getAlarmTrend(days),
     enabled,
-    refetchInterval: 60000,
   });
 }
 
@@ -68,7 +66,6 @@ export function useDeviceStatusPie() {
   return useQuery({
     queryKey: ['dashboard', 'device-status'],
     queryFn: () => api.getDeviceStatusPie(),
-    refetchInterval: 30000,
   });
 }
 
@@ -76,7 +73,6 @@ export function useDeviceStatusByType() {
   return useQuery({
     queryKey: ['dashboard', 'device-status-by-type'],
     queryFn: () => api.getDeviceStatusByType(),
-    refetchInterval: 30000,
   });
 }
 
@@ -85,7 +81,6 @@ export function useTopAlarmDevices(enabled = true) {
     queryKey: ['dashboard', 'top-alarm-devices'],
     queryFn: () => api.getTopAlarmDevices(),
     enabled,
-    refetchInterval: 60000,
   });
 }
 
@@ -94,7 +89,6 @@ export function useKPITrend(kpiCode: string) {
     queryKey: ['dashboard', 'kpi-trend', kpiCode],
     queryFn: () => api.getKPITrend(kpiCode),
     enabled: Boolean(kpiCode),
-    refetchInterval: 60000,
   });
 }
 
@@ -102,7 +96,6 @@ export function useRegionStats() {
   return useQuery({
     queryKey: ['dashboard', 'region-stats'],
     queryFn: () => api.getRegionStats(),
-    refetchInterval: 60000,
   });
 }
 
@@ -176,7 +169,6 @@ export function useKPITimeSeries(
     queryKey: ['dashboard', 'kpi-time-series', params],
     queryFn: () => api.getKPITimeSeries(params?.kpi_names, params?.start_time, params?.end_time),
     enabled: enabled && Boolean(params?.kpi_names?.length),
-    refetchInterval: 60000,
     staleTime: 30000,
   });
 }
@@ -196,7 +188,6 @@ export function useKPITrendComparison(
     queryKey: ['dashboard', 'kpi-trend-comparison', kpiName, compareWith],
     queryFn: () => api.getKPITrendComparison(kpiName, compareWith),
     enabled: enabled && Boolean(kpiName),
-    refetchInterval: 60000, // 1分钟刷新
     staleTime: 30000,
   });
 }
@@ -372,7 +363,6 @@ export function useKPITrendComparisonV2(
             currentParams.end_time
           ),
         enabled,
-        refetchInterval: 60000,
         staleTime: 30000,
       },
       {
@@ -384,7 +374,6 @@ export function useKPITrendComparisonV2(
             compareParams.end_time
           ),
         enabled,
-        refetchInterval: 60000,
         staleTime: 30000,
       },
     ],
@@ -671,7 +660,6 @@ export function useDashboardKPIOverview(config: DashboardKPIOverviewConfig = {})
             params.currentParams.end_time
           ),
         enabled,
-        refetchInterval: 60000,
         staleTime: 30000,
       },
       {
@@ -683,7 +671,6 @@ export function useDashboardKPIOverview(config: DashboardKPIOverviewConfig = {})
             params.compareParams.end_time
           ),
         enabled,
-        refetchInterval: 60000,
         staleTime: 30000,
       },
     ]),
@@ -788,7 +775,6 @@ export function useKPIGroupTrend(
             currentParams.end_time
           ),
         enabled,
-        refetchInterval: 60000,
         staleTime: 30000,
       },
       {
@@ -800,7 +786,6 @@ export function useKPIGroupTrend(
             compareParams.end_time
           ),
         enabled,
-        refetchInterval: 60000,
         staleTime: 30000,
       },
     ],
