@@ -26,6 +26,8 @@ import (
 type fakeDeviceRepo struct {
 	devices map[uuid.UUID]*model.Device
 	bySN    map[string]*model.Device
+	lastListFilter DeviceFilter
+	lastRecycleFilter RecycleBinFilter
 
 	// #64 GIS 数据权限测试捕获位：记录最近一次 geo 查询收到的可见分组。
 	geoListVisible   []uuid.UUID
@@ -92,8 +94,27 @@ func (m *fakeDeviceRepo) BatchDelete(ctx context.Context, ids []uuid.UUID, _ str
 }
 
 func (m *fakeDeviceRepo) List(ctx context.Context, filter DeviceFilter) (*model.ListResponse[model.Device], error) {
+	m.lastListFilter = filter
 	items := make([]model.Device, 0, len(m.devices))
 	for _, d := range m.devices {
+		if filter.Carrier != nil && d.Carrier != *filter.Carrier {
+			continue
+		}
+		if filter.Technology != nil && d.Technology != *filter.Technology {
+			continue
+		}
+		if len(filter.Technologies) > 0 {
+			matched := false
+			for _, tech := range filter.Technologies {
+				if d.Technology == tech {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				continue
+			}
+		}
 		items = append(items, *d)
 	}
 	return model.NewListResponse(items, int64(len(items)), filter.Page, filter.PageSize), nil
@@ -174,8 +195,20 @@ func (m *fakeDeviceRepo) UpdateSiteName(_ context.Context, _ uuid.UUID, _ string
 func (m *fakeDeviceRepo) ListSerialsByIDs(_ context.Context, _ []uuid.UUID) (map[uuid.UUID]string, error) {
 	return map[uuid.UUID]string{}, nil
 }
-func (m *fakeDeviceRepo) ListRecycleBin(_ context.Context, _ RecycleBinFilter) (*model.ListResponse[DeviceWithInfo], error) {
-	return model.NewListResponse([]DeviceWithInfo{}, 0, 1, 20), nil
+
+func (m *fakeDeviceRepo) ListRecycleBin(_ context.Context, filter RecycleBinFilter) (*model.ListResponse[DeviceWithInfo], error) {
+	m.lastRecycleFilter = filter
+	items := make([]DeviceWithInfo, 0, len(m.devices))
+	for _, d := range m.devices {
+		if filter.Carrier != nil && d.Carrier != *filter.Carrier {
+			continue
+		}
+		if filter.Technology != nil && d.Technology != *filter.Technology {
+			continue
+		}
+		items = append(items, DeviceWithInfo{Device: *d})
+	}
+	return model.NewListResponse(items, int64(len(items)), filter.Page, filter.PageSize), nil
 }
 func (m *fakeDeviceRepo) RestoreDevices(_ context.Context, _ []uuid.UUID) (*RestoreResult, error) {
 	return &RestoreResult{}, nil
@@ -507,6 +540,50 @@ func TestHandler_ListDevices(t *testing.T) {
 	assert.Len(t, resp.Items, 2)
 	assert.Equal(t, 1, resp.Page)
 	assert.Equal(t, 20, resp.PageSize)
+}
+
+func TestHandler_ListDevices_TechnologyNormalization(t *testing.T) {
+	h, deviceRepo, _ := newTestHandler()
+	router := setupRouter(h)
+
+	seedDevice(deviceRepo, uuid.New(), "SN-LIST-GSM-001", model.CarrierCMCC, model.TechGSM, model.DeviceActive)
+	seedDevice(deviceRepo, uuid.New(), "SN-LIST-LTE-001", model.CarrierCMCC, model.TechLTE, model.DeviceActive)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/devices?page=1&page_size=20&technology=GSM", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var resp model.ListResponse[DeviceWithInfo]
+	response.DecodeData(t, w.Body, &resp)
+	if assert.Len(t, resp.Items, 1) {
+		assert.Equal(t, model.TechGSM, resp.Items[0].Technology)
+	}
+	if assert.NotNil(t, deviceRepo.lastListFilter.Technology) {
+		assert.Equal(t, model.TechGSM, *deviceRepo.lastListFilter.Technology)
+	}
+}
+
+func TestHandler_ListRecycleBin_TechnologyNormalization(t *testing.T) {
+	h, deviceRepo, _ := newTestHandler()
+	router := setupRouter(h)
+
+	seedDevice(deviceRepo, uuid.New(), "SN-RECYCLE-GSM-001", model.CarrierCMCC, model.TechGSM, model.DeviceActive)
+	seedDevice(deviceRepo, uuid.New(), "SN-RECYCLE-LTE-001", model.CarrierCMCC, model.TechLTE, model.DeviceActive)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/devices/recycle?page=1&page_size=20&technology=GSM", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var resp model.ListResponse[DeviceWithInfo]
+	response.DecodeData(t, w.Body, &resp)
+	if assert.Len(t, resp.Items, 1) {
+		assert.Equal(t, model.TechGSM, resp.Items[0].Technology)
+	}
+	if assert.NotNil(t, deviceRepo.lastRecycleFilter.Technology) {
+		assert.Equal(t, model.TechGSM, *deviceRepo.lastRecycleFilter.Technology)
+	}
 }
 
 // f64p returns a pointer to v (model.Device.Latitude/Longitude are *float64).

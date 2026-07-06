@@ -78,6 +78,14 @@ describe('deviceApi.getList — filter → query 映射', () => {
     expect(getMock.mock.calls[0][1].params.technology).toBe('nr');
   });
 
+  it('networkType GSM/gsm 都归一为 technology gsm', async () => {
+    await deviceApi.getList({ page: 1, pageSize: 20, networkType: 'GSM' });
+    expect(getMock.mock.calls[0][1].params.technology).toBe('gsm');
+
+    await deviceApi.getList({ page: 1, pageSize: 20, networkType: 'gsm' });
+    expect(getMock.mock.calls[1][1].params.technology).toBe('gsm');
+  });
+
   it('isOnline 字符串 "true"（来自字典/表单）也映射为 is_online=true', async () => {
     await deviceApi.getList({ page: 1, pageSize: 20, isOnline: 'true' as unknown as boolean });
     expect(getMock.mock.calls[0][1].params.is_online).toBe('true');

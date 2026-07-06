@@ -271,12 +271,12 @@ func (h *Handler) ListDevices(c *gin.Context) {
 	if tech := c.Query("technology"); tech != "" {
 		techValues := SplitCSV(tech)
 		if len(techValues) == 1 {
-			t := model.Technology(techValues[0])
+			t := model.NormalizeTechnology(techValues[0])
 			filter.Technology = &t
 		} else {
 			filter.Technologies = make([]model.Technology, 0, len(techValues))
 			for _, techValue := range techValues {
-				filter.Technologies = append(filter.Technologies, model.Technology(techValue))
+				filter.Technologies = append(filter.Technologies, model.NormalizeTechnology(techValue))
 			}
 		}
 	}
@@ -966,6 +966,7 @@ type RecycleBinFilterQuery struct {
 	SortDir   string `form:"sort_dir" binding:"omitempty,oneof=asc desc"`
 	Search    string `form:"search" binding:"omitempty"`
 	Carrier   string `form:"carrier" binding:"omitempty"`
+	Technology string `form:"technology" binding:"omitempty"`
 	GroupID   string `form:"group_id" binding:"omitempty,uuid"`
 	DeletedBy string `form:"deleted_by" binding:"omitempty"`
 }
@@ -994,6 +995,10 @@ func (h *Handler) ListRecycleBin(c *gin.Context) {
 	if query.Carrier != "" {
 		carrier := model.CarrierCode(query.Carrier)
 		filter.Carrier = &carrier
+	}
+	if query.Technology != "" {
+		tech := model.NormalizeTechnology(query.Technology)
+		filter.Technology = &tech
 	}
 	if query.GroupID != "" {
 		groupID, err := uuid.Parse(query.GroupID)
