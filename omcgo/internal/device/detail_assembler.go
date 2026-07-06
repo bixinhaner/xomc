@@ -393,8 +393,7 @@ func AssembleCells(params []model.DeviceParameter, numOfCells int) []CellInfo {
 	for i := 1; i <= numOfCells; i++ {
 		// Try LTE paths first, then NR
 		ltePrefix := fmt.Sprintf("Device.Services.FAPService.%d.CellConfig.LTE.", i)
-		nrPrefix := fmt.Sprintf("Device.Services.FAPService.%d.CellConfig.NR.", i)
-		nrIndexedPrefix := fmt.Sprintf("Device.Services.FAPService.%d.CellConfig.1.NR.", i)
+		nrStrictPrefix := fmt.Sprintf("Device.Services.FAPService.1.CellConfig.%d.NR.", i)
 		ctrlPrefix := fmt.Sprintf("Device.Services.FAPService.%d.FAPControl.", i)
 
 		cell := CellInfo{Index: i}
@@ -403,12 +402,9 @@ func AssembleCells(params []model.DeviceParameter, numOfCells int) []CellInfo {
 		cell.CellID = paramMap[ltePrefix+"RAN.Common.CellIdentity"]
 		cell.ECI = cell.CellID
 		if cell.ECI == "" {
-			cell.CellID = paramMap[nrIndexedPrefix+"CN.TA.1.NrcellIdentity"]
+			cell.CellID = paramMap[nrStrictPrefix+"CN.TA.1.NrcellIdentity"]
 			if cell.CellID == "" {
-				cell.CellID = paramMap[nrIndexedPrefix+"RAN.Common.CellLocalId"]
-			}
-			if cell.CellID == "" {
-				cell.CellID = paramMap[nrPrefix+"RAN.Common.CellLocalId"]
+				cell.CellID = paramMap[nrStrictPrefix+"RAN.Common.CellLocalId"]
 			}
 			cell.ECI = cell.CellID
 		}
@@ -416,10 +412,7 @@ func AssembleCells(params []model.DeviceParameter, numOfCells int) []CellInfo {
 		// PCI
 		cell.PCI = paramMap[ltePrefix+"RAN.RF.PhyCellID"]
 		if cell.PCI == "" {
-			cell.PCI = paramMap[nrIndexedPrefix+"RAN.RF.PhyCellID"]
-		}
-		if cell.PCI == "" {
-			cell.PCI = paramMap[nrPrefix+"RAN.RF.NRPCI"]
+			cell.PCI = paramMap[nrStrictPrefix+"RAN.RF.PhyCellID"]
 		}
 
 		// FreqPoint
@@ -428,78 +421,61 @@ func AssembleCells(params []model.DeviceParameter, numOfCells int) []CellInfo {
 			cell.FreqPoint = paramMap[ltePrefix+"RAN.Common.EARFCNDL"]
 		}
 		if cell.FreqPoint == "" {
-			cell.FreqPoint = paramMap[nrIndexedPrefix+"RAN.RF.NRARFCNDL"]
-		}
-		if cell.FreqPoint == "" {
-			cell.FreqPoint = paramMap[nrPrefix+"RAN.Common.NRARFCN"]
+			cell.FreqPoint = paramMap[nrStrictPrefix+"RAN.RF.NRARFCNDL"]
 		}
 
 		// Bandwidth
 		cell.Bandwidth = paramMap[ltePrefix+"RAN.RF.DLBandwidth"]
 		if cell.Bandwidth == "" {
-			cell.Bandwidth = paramMap[nrIndexedPrefix+"RAN.RF.ChannelBandwidth"]
-		}
-		if cell.Bandwidth == "" {
-			cell.Bandwidth = paramMap[nrPrefix+"RAN.RF.ChannelBandwidth"]
+			cell.Bandwidth = paramMap[nrStrictPrefix+"RAN.RF.ChannelBandwidth"]
 		}
 
 		// Band
 		cell.Band = paramMap[ltePrefix+"RAN.RF.FreqBandIndicator"]
 		if cell.Band == "" {
-			cell.Band = paramMap[nrIndexedPrefix+"RAN.PHY.FrequencyInfoDLSIB.MultiFrequencyBandListNRSIB.1.FreqBandIndicatorNR"]
+			cell.Band = paramMap[nrStrictPrefix+"RAN.PHY.FrequencyInfoDLSIB.MultiFrequencyBandListNRSIB.1.FreqBandIndicatorNR"]
 		}
 
-		// OpState — Baicells 等 BaiBLQ 设备实际上报 CellOpState（FAPControl 子树）
-		// 老 OpState 后缀保留作为向后兼容（部分设备/早期固件可能仅有 OpState）
-		// 设计文档 §3.3。
-		cell.OpState = paramMap[ctrlPrefix+"LTE.CellOpState"]
+		// OpState 严格路径口径（与 device_info_calc.go 对齐）:
+		//   LTE: FAPControl.LTE.OpState
+		//   NR:  CellConfig.{i}.NR.RAN.OpState
+		cell.OpState = paramMap[ctrlPrefix+"LTE.OpState"]
 		if cell.OpState == "" {
-			cell.OpState = paramMap[ctrlPrefix+"LTE.OpState"]
+			cell.OpState = paramMap[nrStrictPrefix+"RAN.OpState"]
 		}
-		if cell.OpState == "" {
-			cell.OpState = paramMap[nrIndexedPrefix+"RAN.OpState"]
-		}
-		if cell.OpState == "" {
-			cell.OpState = paramMap[ctrlPrefix+"NR.CellOpState"]
-		}
-		if cell.OpState == "" {
-			cell.OpState = paramMap[ctrlPrefix+"NR.OpState"]
-		}
+		isStrictNRCell := paramMap[nrStrictPrefix+"RAN.OpState"] != "" ||
+			paramMap[nrStrictPrefix+"CN.TA.1.NrcellIdentity"] != "" ||
+			paramMap[nrStrictPrefix+"RAN.Common.CellLocalId"] != "" ||
+			paramMap[nrStrictPrefix+"RAN.RF.PhyCellID"] != "" ||
+			paramMap[nrStrictPrefix+"RAN.RF.NRARFCNDL"] != "" ||
+			paramMap[nrStrictPrefix+"RAN.RF.ChannelBandwidth"] != "" ||
+			paramMap[nrStrictPrefix+"RAN.PHY.FrequencyInfoDLSIB.MultiFrequencyBandListNRSIB.1.FreqBandIndicatorNR"] != "" ||
+			paramMap[nrStrictPrefix+"RAN.rftxEnable"] != "" ||
+			paramMap[nrStrictPrefix+"RAN.CellEnable.AdminState"] != ""
 
 		// RFTxStatus — 实际位于 FAPControl 子树（非 RAN.RF）
 		// 设计文档 §3.3。
-		cell.RFTxStatus = paramMap[ctrlPrefix+"LTE.RFTxStatus"]
-		if cell.RFTxStatus == "" {
-			cell.RFTxStatus = paramMap[nrIndexedPrefix+"RAN.rftxEnable"]
-		}
-		if cell.RFTxStatus == "" {
-			cell.RFTxStatus = paramMap[ctrlPrefix+"NR.RFTxStatus"]
-		}
-		if cell.RFTxStatus == "" {
-			// 老路径兜底（保留兼容）
-			cell.RFTxStatus = paramMap[ltePrefix+"RAN.RF.RFTxStatus"]
-		}
-		if cell.RFTxStatus == "" {
-			cell.RFTxStatus = paramMap[nrPrefix+"RAN.RF.RFTxStatus"]
-		}
-		if cell.RFTxStatus == "" {
-			// 某些 LTE 设备只上报 RU 级射频状态，且无更细粒度 cell 关联；
-			// 仅当所有 RU 值一致时才回填到 cell，避免多 RU 状态冲突时误导前端。
-			cell.RFTxStatus = uniformDeviceInfoRUValue(paramMap, "RFTxStatus")
+		if isStrictNRCell {
+			cell.RFTxStatus = paramMap[nrStrictPrefix+"RAN.rftxEnable"]
+		} else {
+			cell.RFTxStatus = paramMap[ctrlPrefix+"LTE.RFTxStatus"]
+			if cell.RFTxStatus == "" {
+				// 某些 LTE 设备只上报 RU 级射频状态，且无更细粒度 cell 关联；
+				// 仅当所有 RU 值一致时才回填到 cell，避免多 RU 状态冲突时误导前端。
+				cell.RFTxStatus = uniformDeviceInfoRUValue(paramMap, "RFTxStatus")
+			}
 		}
 
 		// AdminState
-		cell.AdminState = paramMap[ctrlPrefix+"LTE.AdminState"]
-		if cell.AdminState == "" {
-			cell.AdminState = paramMap[nrIndexedPrefix+"RAN.CellEnable.AdminState"]
-		}
-		if cell.AdminState == "" {
-			cell.AdminState = paramMap[ctrlPrefix+"NR.AdminState"]
-		}
-		if cell.AdminState == "" {
-			// 某些 LTE 设备只上报一个全局 AdminState（如 FAPService.1），
-			// 多小区共享该状态时回填到所有 cell 行，避免后续小区显示为空。
-			cell.AdminState = uniformFAPControlValue(paramMap, "LTE.AdminState")
+		if isStrictNRCell {
+			cell.AdminState = paramMap[nrStrictPrefix+"RAN.CellEnable.AdminState"]
+		} else {
+			cell.AdminState = paramMap[ctrlPrefix+"LTE.AdminState"]
+			if cell.AdminState == "" {
+				// 某些 LTE 设备只上报一个全局 AdminState（如 FAPService.1），
+				// 多小区共享该状态时回填到所有 cell 行，避免后续小区显示为空。
+				cell.AdminState = uniformFAPControlValue(paramMap, "LTE.AdminState")
+			}
 		}
 
 		cells = append(cells, cell)
@@ -630,10 +606,26 @@ func detectMaxFAPServiceIndex(params []model.DeviceParameter) int {
 
 		if strings.Contains(path, ".CellConfig.LTE.") ||
 			strings.Contains(path, ".CellConfig.NR.") ||
+			(strings.Contains(path, ".CellConfig.") && strings.Contains(path, ".NR.")) ||
 			strings.Contains(path, ".FAPControl.LTE.") ||
 			strings.Contains(path, ".FAPControl.NR.") {
 			if idx > maxIdx {
 				maxIdx = idx
+			}
+		}
+
+		if strings.HasPrefix(path, "Device.Services.FAPService.1.CellConfig.") && strings.Contains(path, ".NR.") {
+			rest := strings.TrimPrefix(path, "Device.Services.FAPService.1.CellConfig.")
+			dot := strings.Index(rest, ".")
+			if dot <= 0 {
+				continue
+			}
+			cellIdx, err := strconv.Atoi(rest[:dot])
+			if err != nil || cellIdx <= 0 {
+				continue
+			}
+			if cellIdx > maxIdx {
+				maxIdx = cellIdx
 			}
 		}
 	}
