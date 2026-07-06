@@ -42,6 +42,7 @@ import { useDictionary } from '@core/hooks/api/useSystem'
 import { activationStatusLabelOf } from '@core/utils/activationStatus'
 import { DEFAULT_ALARM_SEVERITY_LABELS_ZH, formatAlarmSeverityBadgeLabel, getAlarmSeverityBadgeVariant } from '@core/utils/alarmSeverity'
 import { DEVICE_SYNC_STATUS_LABELS_ZH, formatDeviceSyncStatus } from '@core/utils/deviceSyncStatus'
+import { computeCumulativeOnlineDurationSeconds } from '@core/utils/onlineDuration'
 import type { Device } from '@core/types/device'
 
 // ============================================================
@@ -252,7 +253,16 @@ export default function DeviceDetail() {
     { label: '最近上线', value: formatTime(d.onlineTime || d.lastOnlineTime) },
     { label: '最近 Inform', value: formatTime(d.lastInformTime) },
     { label: '本次运行时长', value: fmtDuration(d.upTime) },
-    { label: '累计在线时长', value: fmtDuration(d.cumulativeOnlineDuration) },
+    {
+      label: '累计在线时长',
+      value: fmtDuration(computeCumulativeOnlineDurationSeconds({
+        isOnline: d.isOnline,
+        onlineTime: d.onlineTime || d.lastOnlineTime,
+        offlineTime: d.offlineTime,
+        fallbackOnlineDuration: d.onlineDuration,
+        cumulativeOnlineDuration: d.cumulativeOnlineDuration,
+      })),
+    },
     { label: '上次离线原因', value: d.lastOfflineReason },
   ]
 

@@ -751,6 +751,7 @@ func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.Info
 	now := time.Now()
 	// T-0123: 在覆盖字段前捕获旧值，UpdateFromInform 收尾时据此判断 firmware 变化 / offline→active。
 	oldStatus := device.Status
+	oldIsOnline := device.IsOnline
 	oldVersion := device.FirmwareVersion
 	device.OUI = inform.DeviceId.OUI
 	device.ProductClass = inform.DeviceId.ProductClass
@@ -818,15 +819,6 @@ func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.Info
 			device.Status = model.DeviceActive
 			device.OpState = model.DeriveOpState(model.DeviceActive)
 
-			// Record online time: update last_online_time, and first_online_time if this is the first time
-			if s.infoSyncer != nil {
-				if err := s.infoSyncer.RecordOnline(ctx, device.ID); err != nil {
-					s.logger.Warn("record online time failed",
-						zap.String("device_id", device.ID.String()),
-						zap.Error(err))
-				}
-			}
-
 			s.logger.Info("UpdateFromInform: device auto-transitioned to active",
 				zap.String("serial_number", device.SerialNumber),
 				zap.String("previous_status", string(oldStatus)),
@@ -838,6 +830,17 @@ func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.Info
 				zap.String("current_status", string(device.Status)),
 				zap.Error(err),
 			)
+		}
+	}
+
+	// 设备离线后再次收到 Inform 时，Status 可能已是 active（不会触发 shouldActivate），
+	// 但 is_online 会从 false 翻转到 true。该边沿必须刷新 last_online_time，
+	// 避免本次在线时长跨越离线区间。
+	if !oldIsOnline && device.IsOnline && s.infoSyncer != nil {
+		if err := s.infoSyncer.RecordOnline(ctx, device.ID); err != nil {
+			s.logger.Warn("record online time failed",
+				zap.String("device_id", device.ID.String()),
+				zap.Error(err))
 		}
 	}
 
