@@ -167,3 +167,59 @@ func TestJWTService_SuperAdminClaim(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, parsed.IsSuperAdmin)
 }
+
+func TestJWTService_AgentDelegationToken(t *testing.T) {
+	svc, err := NewJWTService("test-secret-minimum-32-characters!!")
+	require.NoError(t, err)
+	userID := uuid.New()
+
+	token, expiresAt, err := svc.GenerateAgentDelegationToken(&Claims{
+		UserID:       userID,
+		Username:     "operator",
+		IsSuperAdmin: false,
+		Roles:        []string{"operator"},
+	})
+	require.NoError(t, err)
+	assert.NotEmpty(t, token)
+	assert.True(t, expiresAt.After(time.Now()))
+	assert.True(t, expiresAt.Before(time.Now().Add(6*time.Minute)))
+
+	parsed, err := svc.ValidateAgentDelegationToken(token)
+	require.NoError(t, err)
+	assert.Equal(t, userID, parsed.UserID)
+	assert.Equal(t, "operator", parsed.Username)
+	assert.Equal(t, []string{"operator"}, parsed.Roles)
+	assert.Equal(t, []string{"agent-actions"}, parsed.Scopes)
+}
+
+func TestJWTService_AgentDelegationRejectsAccessToken(t *testing.T) {
+	svc, err := NewJWTService("test-secret-minimum-32-characters!!")
+	require.NoError(t, err)
+
+	pair, err := svc.GenerateTokenPair(&Claims{
+		UserID:   uuid.New(),
+		Username: "operator",
+		Roles:    []string{"operator"},
+	})
+	require.NoError(t, err)
+
+	_, err = svc.ValidateAgentDelegationToken(pair.AccessToken)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid token type")
+}
+
+func TestJWTService_AccessTokenRejectsAgentDelegationToken(t *testing.T) {
+	svc, err := NewJWTService("test-secret-minimum-32-characters!!")
+	require.NoError(t, err)
+
+	token, _, err := svc.GenerateAgentDelegationToken(&Claims{
+		UserID:   uuid.New(),
+		Username: "operator",
+		Roles:    []string{"operator"},
+	})
+	require.NoError(t, err)
+
+	_, err = svc.ValidateAccessToken(token)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid token type")
+}

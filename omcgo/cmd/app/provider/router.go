@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/admin"
+	"github.com/omcgo/omcgo/internal/agentaction"
 	"github.com/omcgo/omcgo/internal/alarm"
 	"github.com/omcgo/omcgo/internal/authz"
 	"github.com/omcgo/omcgo/internal/bundle"
@@ -358,6 +359,16 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	v1.GET("/auth/menus", ad.adminHandler.GetUserMenusByRole)
 	// Authenticated user routes (any authenticated user)
 	ad.adminHandler.RegisterAuthenticatedRoutes(v1)
+
+	agentActionService := agentaction.NewService(c.DeviceService, c.AlarmPgStore, c.Logger)
+	agentActionHandler := agentaction.NewHandler(c.JWTService, agentActionService, c.PermService, c.Logger)
+	agentActionHandler.RegisterDelegationRoutes(v1)
+
+	agentActions := r.Group("/api/v1/agent-actions")
+	agentActions.Use(agentaction.RequireDelegation(c.JWTService))
+	agentActions.Use(admin.AuditLogger(ad.auditRepo))
+	agentActions.Use(admin.OperLogger(ad.logRepo, c.Logger.Named("oper-log")))
+	agentActionHandler.RegisterActionRoutes(agentActions)
 
 	// Helper: permission-scoped sub-group.
 	//
