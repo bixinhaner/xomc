@@ -84,7 +84,28 @@ func (c *RedisCache) Get(ctx context.Context, productID uuid.UUID) (*KPIRoute, e
 		return nil, nil
 	}
 	r := entry.Payload
+	if !routeHasNormalizationMetadata(&r) {
+		// #866：旧缓存条目没有 Unit 字段，不能用于入库结果规范化；当作 miss 走 DB 重建。
+		return nil, nil
+	}
 	return &r, nil
+}
+
+func routeHasNormalizationMetadata(route *KPIRoute) bool {
+	if route == nil {
+		return false
+	}
+	for _, c := range route.Counters {
+		if c.Unit == "" || c.StatisType == "" {
+			return false
+		}
+	}
+	for _, k := range route.KPIs {
+		if k.Unit == "" || k.StatisType == "" {
+			return false
+		}
+	}
+	return true
 }
 
 // Put 写入缓存条目，SchemaVersion 取自当前 cache_version 整数（首次未 INCR → 0）。

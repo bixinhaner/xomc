@@ -61,9 +61,11 @@ type DeviceLookup interface {
 // CounterMeta 是 CounterWhitelist 命中后回填给 PMCounter 的元数据（PM-P2）。
 //   - IndicatorID：指标编号（perf_indicators_*.id，如 C000060216），落库即编号化的目标。
 //   - StatisType：'sum' / 'avg' / 'max' / 'pct'，或空串（indicator 元数据未填），驱动 G5 自然桶聚合。
+//   - Unit：指标业务单位文本（如 number/%/Mbps），驱动 15min 入库前结果值规范化。
 type CounterMeta struct {
 	IndicatorID string
 	StatisType  string
+	Unit        string
 }
 
 // CounterWhitelist 按设备 SN 返回指标库定义的"上报名(report_key) → CounterMeta"映射，
@@ -83,6 +85,9 @@ type CounterMeta struct {
 //   - 返回 (empty map, nil)：collector 同样跳过过滤（防误删全部 — 如启动期缓存未就绪）。
 //   - 返回 (map, nil)：map 内（按 report_key 命中）的 counter 保留、改写成编号并填充
 //     StatisType，其他作为孤儿丢弃。
+//
+// 注意：#866 接入结果值规范化后，过滤阶段仍保持 fail-open 以避免误删 counter；但写入前
+// normalizeResults 会要求每条待写结果必须具备 Unit/StatisType，缺失元数据会让该 PM 文件处理失败。
 type CounterWhitelist interface {
 	LookupCounters(ctx context.Context, deviceSN string) (map[string]CounterMeta, error)
 }
@@ -104,20 +109,21 @@ type CopyIngestor interface {
 // is registered directly, preserving legacy behaviour for tests / single-process
 // deployments without DLQ infra.
 type PMCollector struct {
-	minioClient      *minio.Client
-	bucket           string
-	parser           *PMXMLParser
-	kpiEngine        *kpi.KPIEngine
-	fileStore        pm.PMFileStore
-	eventBus         event.EventBus
-	metrics          *pm.PMMetrics
-	runner           runner.Wrapper
-	deviceLookup     DeviceLookup
-	counterWhitelist CounterWhitelist
-	copyIngestor     CopyIngestor
-	archiver         *rawarchive.Archiver
-	concurrency      int
-	logger           *zap.Logger
+	minioClient         *minio.Client
+	bucket              string
+	parser              *PMXMLParser
+	kpiEngine           *kpi.KPIEngine
+	fileStore           pm.PMFileStore
+	eventBus            event.EventBus
+	metrics             *pm.PMMetrics
+	runner              runner.Wrapper
+	deviceLookup        DeviceLookup
+	counterWhitelist    CounterWhitelist
+	numberProcessLookup NumberProcessLookup
+	copyIngestor        CopyIngestor
+	archiver            *rawarchive.Archiver
+	concurrency         int
+	logger              *zap.Logger
 }
 
 // NewPMCollector creates a new PM collector.
@@ -162,6 +168,12 @@ func (c *PMCollector) SetDeviceLookup(lookup DeviceLookup) {
 // counter。Nil-safe — 未设置时 collector 不过滤，行为退化到注入前。
 func (c *PMCollector) SetCounterWhitelist(w CounterWhitelist) {
 	c.counterWhitelist = w
+}
+
+// SetNumberProcessLookup 注入 indicator.process.number 读取函数，供 15min 入库前结果值规范化使用。
+// 未注入时使用 resultnorm 默认策略；读取错误会让当前 PM 文件处理失败并暴露。
+func (c *PMCollector) SetNumberProcessLookup(lookup NumberProcessLookup) {
+	c.numberProcessLookup = lookup
 }
 
 // SetCopyIngestor 注入 copy-direct 写路径（pm_files 标记 + 全部 metric 行单事务 plain COPY 原子
@@ -329,7 +341,8 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 	// T-0164 G1 BUG-6 方案 D：用产品指标库白名单过滤孤儿 counter。
 	// 厂家 PM 文件可能含未注册 counter（如 Baicells `MR.RIPPRB` × 53 PRB 索引把序号
 	// 编码在 measType.p 而不是 Name 里），落库会撞 pm_metrics 自然键。
-	// 过滤逻辑 fail-open：lookup 失败 / 空白名单时跳过过滤，保留原行为。
+	// 过滤逻辑 fail-open：lookup 失败 / 空白名单时跳过过滤，避免在本阶段误删全部 counter。
+	// #866 后续 normalizeResults 会校验每条待写结果的 Unit/StatisType，缺失元数据时失败并暴露。
 	content.Counters = c.filterByWhitelist(ctx, payload.DeviceSN, payload.Carrier, payload.Technology, content.Counters)
 
 	// PM 入库统一走 copy-direct 原子写路径（pm_files 标记 + counter + 内存算出的 KPI 单事务 plain
@@ -362,6 +375,9 @@ func (c *PMCollector) ingestViaCopy(
 		} else {
 			kpis = ks
 		}
+	}
+	if err := c.normalizeResults(ctx, content.Counters, kpis); err != nil {
+		return err
 	}
 
 	marker := metrics.FileMarker{
@@ -475,6 +491,7 @@ func applyPayloadIdentity(counters []model.PMCounter, oui, sn string) {
 
 // filterByWhitelist 用产品指标库白名单过滤 counter（T-0164 G1 BUG-6 方案 D）。
 // fail-open：whitelist 未注入 / 查询失败 / 空集合 → 返回原 counters 不过滤。
+// #866 接入结果值规范化后，最终写入前仍会要求每条结果具备 Unit/StatisType。
 //
 // issue #20：被丢弃的孤儿 counter 数除 log 外，额外记 omc_pm_dropped_counters_total
 // （reason=whitelist_miss，标签带 carrier × technology），让"厂家上报名漂移导致大批
@@ -503,6 +520,7 @@ func (c *PMCollector) filterByWhitelist(ctx context.Context, deviceSN, carrier, 
 		if meta, ok := allow[ctr.CounterName]; ok {
 			ctr.CounterName = meta.IndicatorID // 上报名 → 编号
 			ctr.StatisType = meta.StatisType   // T-0164-G6 收尾：填充 statis_type 驱动 G5 聚合 (BUG-A)
+			ctr.Unit = meta.Unit               // #866：填充单位元数据，入库前规范化 result value
 			kept = append(kept, ctr)
 		} else {
 			dropped++
