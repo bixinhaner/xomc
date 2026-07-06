@@ -2130,20 +2130,21 @@ func (s *DeviceService) ListGeo(ctx context.Context, filter GeoDeviceFilter) ([]
 // visibleGroups 携带 #64 设备组数据权限（nil 超管 / [] fail-closed / [g...] 限定）。
 // statusFilter 与 ListGeo 同口径（handler 已把 onlineActive/onlineInactive/offline 三档翻译为
 // model.DeviceStatus 列表），让顶部统计带随状态筛选变化与地图点位一致。
-func (s *DeviceService) GetGeoStats(ctx context.Context, groupIDs []string, statusFilter []model.DeviceStatus, visibleGroups []uuid.UUID) (*GeoStats, error) {
+func (s *DeviceService) GetGeoStats(ctx context.Context, groupIDs []string, statusFilter []model.DeviceStatus, visibleGrants []model.DeviceVisibilityGrant) (*GeoStats, error) {
 	realIDs, includeUngrouped := splitGeoGroupIDs(groupIDs)
 	return s.deviceRepo.GetGeoStats(ctx, GeoStatsFilter{
 		GroupIDs:         realIDs,
 		IncludeUngrouped: includeUngrouped,
 		Status:           statusFilter,
-		VisibleGroups:    visibleGroups,
+		VisibleGroups:    flattenVisibleGroupIDs(visibleGrants),
+		VisibleDeviceGrants: visibleGrants,
 	})
 }
 
 // SearchDevices searches devices by keyword for map display.
-// visibleGroups 携带 #64 设备组数据权限（nil 超管 / [] fail-closed / [g...] 限定）。
-func (s *DeviceService) SearchDevices(ctx context.Context, keyword string, limit int, visibleGroups []uuid.UUID) ([]GeoDevice, error) {
-	return s.deviceRepo.SearchDevices(ctx, keyword, limit, visibleGroups)
+// visibleGrants 携带 #64 设备数据权限（nil 超管 / [] fail-closed / [grant...] 限定）。
+func (s *DeviceService) SearchDevices(ctx context.Context, keyword string, limit int, visibleGrants []model.DeviceVisibilityGrant) ([]GeoDevice, error) {
+	return s.deviceRepo.SearchDevices(ctx, keyword, limit, visibleGrants)
 }
 
 // ===== Recycle Bin Operations =====

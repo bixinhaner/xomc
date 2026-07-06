@@ -32,16 +32,40 @@ func (f *fakeGroupReader) GetDeviceGroupIDs(_ context.Context, deviceID uuid.UUI
 
 // fakePermService implements VisibleGroupsResolver.
 //   - nil visibleByUser entry → superadmin path is decided by isSuper arg
-//   - non-nil → the L2 groups visible to that user
+//   - non-nil visibleByUser → the L2 groups visible to that user (unrestricted grants)
+//   - deviceGrantsByUser can override the unrestricted fallback for tech-specific cases
 type fakePermService struct {
-	visibleByUser map[uuid.UUID][]uuid.UUID
+	visibleByUser     map[uuid.UUID][]uuid.UUID
+	deviceGrantsByUser map[uuid.UUID][]model.DeviceVisibilityGrant
 }
 
 func (f *fakePermService) GetUserVisibleGroupIDs(_ context.Context, userID uuid.UUID, isSuperAdmin bool) ([]uuid.UUID, error) {
 	if isSuperAdmin {
 		return nil, nil // superadmin sees all
 	}
+	if grants, ok := f.deviceGrantsByUser[userID]; ok {
+		groups := make([]uuid.UUID, 0, len(grants))
+		for _, grant := range grants {
+			groups = append(groups, grant.GroupIDs...)
+		}
+		return groups, nil
+	}
 	return f.visibleByUser[userID], nil
+}
+
+func (f *fakePermService) GetUserVisibleDeviceGrants(_ context.Context, userID uuid.UUID, isSuperAdmin bool) ([]model.DeviceVisibilityGrant, error) {
+	if isSuperAdmin {
+		return nil, nil
+	}
+	if grants, ok := f.deviceGrantsByUser[userID]; ok {
+		return grants, nil
+	}
+	groups := f.visibleByUser[userID]
+	grants := make([]model.DeviceVisibilityGrant, 0, len(groups))
+	for _, groupID := range groups {
+		grants = append(grants, model.DeviceVisibilityGrant{GroupIDs: []uuid.UUID{groupID}})
+	}
+	return grants, nil
 }
 
 // authzRouter wires the device Handler with permService + group reader and an
@@ -78,11 +102,15 @@ func TestAuthorizeDeviceGroupAccess(t *testing.T) {
 	groupA := uuid.New()
 	groupB := uuid.New()
 	groupC := uuid.New()
+	ungrouped := uuid.New()
+	deviceRepo := newFakeDeviceRepo()
+	deviceRepo.devices[deviceID] = &model.Device{ID: deviceID, Technology: model.TechLTE}
+	deviceRepo.devices[ungrouped] = &model.Device{ID: ungrouped, Technology: model.TechLTE}
 
 	reader := &fakeGroupReader{groups: map[uuid.UUID][]uuid.UUID{
 		deviceID: {groupA, groupB},
 	}}
-	svc := NewDeviceService(newFakeDeviceRepo(), newFakeParamRepo(), nil, nil, zap.NewNop())
+	svc := NewDeviceService(deviceRepo, newFakeParamRepo(), nil, nil, zap.NewNop())
 	svc.SetDeviceGroupReader(reader)
 
 	t.Run("superadmin (nil visible groups) is allowed", func(t *testing.T) {
@@ -91,36 +119,47 @@ func TestAuthorizeDeviceGroupAccess(t *testing.T) {
 	})
 
 	t.Run("no permissions (empty slice) is forbidden", func(t *testing.T) {
-		err := svc.AuthorizeDeviceGroupAccess(context.Background(), deviceID, []uuid.UUID{})
+		err := svc.AuthorizeDeviceGroupAccessByGrants(context.Background(), deviceID, []model.DeviceVisibilityGrant{})
 		assert.ErrorIs(t, err, commonerrors.ErrForbidden)
 	})
 
 	t.Run("visible group intersects device groups → allowed", func(t *testing.T) {
-		err := svc.AuthorizeDeviceGroupAccess(context.Background(), deviceID, []uuid.UUID{groupB, groupC})
+		grants := []model.DeviceVisibilityGrant{{GroupIDs: []uuid.UUID{groupB}}, {GroupIDs: []uuid.UUID{groupC}}}
+		err := svc.AuthorizeDeviceGroupAccessByGrants(context.Background(), deviceID, grants)
 		assert.NoError(t, err)
 	})
 
 	t.Run("no intersection → forbidden", func(t *testing.T) {
-		err := svc.AuthorizeDeviceGroupAccess(context.Background(), deviceID, []uuid.UUID{groupC})
+		grants := []model.DeviceVisibilityGrant{{GroupIDs: []uuid.UUID{groupC}}}
+		err := svc.AuthorizeDeviceGroupAccessByGrants(context.Background(), deviceID, grants)
 		assert.ErrorIs(t, err, commonerrors.ErrForbidden)
 	})
 
 	t.Run("ungrouped device → forbidden for non-super", func(t *testing.T) {
-		ungrouped := uuid.New() // not in reader.groups → empty memberships
-		err := svc.AuthorizeDeviceGroupAccess(context.Background(), ungrouped, []uuid.UUID{groupA})
+		err := svc.AuthorizeDeviceGroupAccessByGrants(context.Background(), ungrouped, []model.DeviceVisibilityGrant{{GroupIDs: []uuid.UUID{groupA}}})
 		assert.ErrorIs(t, err, commonerrors.ErrForbidden)
 	})
 
 	t.Run("ungrouped device → allowed when pseudo-group is visible", func(t *testing.T) {
-		ungrouped := uuid.New() // not in reader.groups → empty memberships
 		unassigned := uuid.MustParse(global.DefaultLevel2GroupID)
-		err := svc.AuthorizeDeviceGroupAccess(context.Background(), ungrouped, []uuid.UUID{unassigned})
+		err := svc.AuthorizeDeviceGroupAccessByGrants(context.Background(), ungrouped, []model.DeviceVisibilityGrant{{GroupIDs: []uuid.UUID{unassigned}}})
 		assert.NoError(t, err)
+	})
+
+	t.Run("group hit but technology mismatch is forbidden", func(t *testing.T) {
+		techRestricted := []model.DeviceVisibilityGrant{{GroupIDs: []uuid.UUID{groupA}, Technologies: []model.Technology{model.TechLTE}}}
+		reader.groups[deviceID] = []uuid.UUID{groupA}
+		deviceRepo := newFakeDeviceRepo()
+		deviceRepo.devices[deviceID] = &model.Device{ID: deviceID, Technology: model.TechNR}
+		restrictedSvc := NewDeviceService(deviceRepo, newFakeParamRepo(), nil, nil, zap.NewNop())
+		restrictedSvc.SetDeviceGroupReader(reader)
+		err := restrictedSvc.AuthorizeDeviceGroupAccessByGrants(context.Background(), deviceID, techRestricted)
+		assert.ErrorIs(t, err, commonerrors.ErrForbidden)
 	})
 
 	t.Run("nil group reader degrades to allow", func(t *testing.T) {
 		noReader := NewDeviceService(newFakeDeviceRepo(), newFakeParamRepo(), nil, nil, zap.NewNop())
-		err := noReader.AuthorizeDeviceGroupAccess(context.Background(), deviceID, []uuid.UUID{groupC})
+		err := noReader.AuthorizeDeviceGroupAccessByGrants(context.Background(), deviceID, []model.DeviceVisibilityGrant{{GroupIDs: []uuid.UUID{groupC}}})
 		assert.NoError(t, err, "无 reader 时不应拦截（dev/test 退化）")
 	})
 }

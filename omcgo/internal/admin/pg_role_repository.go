@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
@@ -819,6 +820,62 @@ func (r *PgRoleRepository) GetUserVisibleGroupIDs(ctx context.Context, userID uu
 		ids = append(ids, id)
 	}
 	return ids, rows.Err()
+}
+
+func (r *PgRoleRepository) GetUserVisibleDeviceGrants(ctx context.Context, userID uuid.UUID) ([]model.DeviceVisibilityGrant, error) {
+	const rawSQL = `
+		SELECT rdg.group_id, COALESCE(rdg.network_types, '{}')
+		FROM user_roles ur
+		JOIN role_device_groups rdg ON rdg.role_id = ur.role_id
+		WHERE ur.user_id = $1`
+
+	rows, err := r.pool.Query(ctx, rawSQL, userID)
+	if err != nil {
+		return nil, fmt.Errorf("get user visible device grants: %w", err)
+	}
+	defer rows.Close()
+
+	grants := make([]model.DeviceVisibilityGrant, 0)
+	for rows.Next() {
+		var groupID uuid.UUID
+		var networkTypes []string
+		if err := rows.Scan(&groupID, &networkTypes); err != nil {
+			return nil, fmt.Errorf("scan visible device grant: %w", err)
+		}
+		grants = append(grants, model.DeviceVisibilityGrant{
+			GroupIDs:     []uuid.UUID{groupID},
+			Technologies: normalizeNetworkTypesForDeviceVisibility(networkTypes),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate visible device grants: %w", err)
+	}
+	return grants, nil
+}
+
+func normalizeNetworkTypesForDeviceVisibility(networkTypes []string) []model.Technology {
+	if len(networkTypes) == 0 {
+		return nil
+	}
+	techSet := make(map[model.Technology]struct{})
+	for _, rawType := range networkTypes {
+		switch strings.ToLower(strings.TrimSpace(rawType)) {
+		case "lte", "enb":
+			techSet[model.TechLTE] = struct{}{}
+		case "nr", "gnb":
+			techSet[model.TechNR] = struct{}{}
+		case "gsm":
+			techSet[model.TechGSM] = struct{}{}
+		}
+	}
+	if len(techSet) == 0 {
+		return nil
+	}
+	techs := make([]model.Technology, 0, len(techSet))
+	for tech := range techSet {
+		techs = append(techs, tech)
+	}
+	return techs
 }
 
 // CheckPermission 通过 Casbin 检查 (path, method) 端点级权限。

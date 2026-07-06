@@ -326,18 +326,18 @@ func (mr *MockDeviceRepositoryMockRecorder) RestoreDevices(ctx, ids any) *gomock
 }
 
 // SearchDevices mocks base method.
-func (m *MockDeviceRepository) SearchDevices(ctx context.Context, keyword string, limit int, visibleGroups []uuid.UUID) ([]GeoDevice, error) {
+func (m *MockDeviceRepository) SearchDevices(ctx context.Context, keyword string, limit int, visibleGrants []model.DeviceVisibilityGrant) ([]GeoDevice, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "SearchDevices", ctx, keyword, limit, visibleGroups)
+	ret := m.ctrl.Call(m, "SearchDevices", ctx, keyword, limit, visibleGrants)
 	ret0, _ := ret[0].([]GeoDevice)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // SearchDevices indicates an expected call of SearchDevices.
-func (mr *MockDeviceRepositoryMockRecorder) SearchDevices(ctx, keyword, limit, visibleGroups any) *gomock.Call {
+func (mr *MockDeviceRepositoryMockRecorder) SearchDevices(ctx, keyword, limit, visibleGrants any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SearchDevices", reflect.TypeOf((*MockDeviceRepository)(nil).SearchDevices), ctx, keyword, limit, visibleGroups)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SearchDevices", reflect.TypeOf((*MockDeviceRepository)(nil).SearchDevices), ctx, keyword, limit, visibleGrants)
 }
 
 // Update mocks base method.

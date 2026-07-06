@@ -21,6 +21,7 @@ import (
 // v1.0：第三参数从 carrier 改为 isSuperAdmin（详见 docs/prd/system/users.md §11.11）。
 type VisibleGroupsResolver interface {
 	GetUserVisibleGroupIDs(ctx context.Context, userID uuid.UUID, isSuperAdmin bool) ([]uuid.UUID, error)
+	GetUserVisibleDeviceGrants(ctx context.Context, userID uuid.UUID, isSuperAdmin bool) ([]model.DeviceVisibilityGrant, error)
 }
 
 // Handler provides HTTP handlers for device management REST API.
@@ -51,12 +52,12 @@ func authorizeDeviceAccess(c *gin.Context, svc *DeviceService, permService Visib
 	isSuperVal, _ := c.Get(admin.CtxKeyIsSuperAdmin)
 	isSuper, _ := isSuperVal.(bool)
 
-	visibleGroups, err := permService.GetUserVisibleGroupIDs(c.Request.Context(), uid, isSuper)
+	visibleGrants, err := permService.GetUserVisibleDeviceGrants(c.Request.Context(), uid, isSuper)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return false
 	}
-	if authErr := svc.AuthorizeDeviceGroupAccess(c.Request.Context(), deviceID, visibleGroups); authErr != nil {
+	if authErr := svc.AuthorizeDeviceGroupAccessByGrants(c.Request.Context(), deviceID, visibleGrants); authErr != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(authErr), authErr)
 		return false
 	}
@@ -73,12 +74,9 @@ func (h *Handler) SetPermissionService(ps VisibleGroupsResolver) {
 	h.permService = ps
 }
 
-// resolveVisibleGroups 解析调用者可见设备组（三态：nil 超管 / [] 无权限 / [g...] 限定）。
+// resolveVisibleDeviceGrants 解析调用者可见设备数据权限（三态：nil 超管 / [] 无权限 / [grant...] 限定）。
 // 返回 ok=false 表示解析失败已 abort（403/500），调用方应立即 return。
-//
-// permService 为 nil（dev/test 未注入数据权限）→ 返回 (nil, true)，与既有 nil-safe 语义一致
-// （ListDevices 旧的内联逻辑同口径）。#64：GIS / 列表读链路统一经此入口。
-func (h *Handler) resolveVisibleGroups(c *gin.Context) (groups []uuid.UUID, ok bool) {
+func (h *Handler) resolveVisibleDeviceGrants(c *gin.Context) (grants []model.DeviceVisibilityGrant, ok bool) {
 	if h.permService == nil {
 		return nil, true
 	}
@@ -91,12 +89,38 @@ func (h *Handler) resolveVisibleGroups(c *gin.Context) (groups []uuid.UUID, ok b
 	}
 	isSuperVal, _ := c.Get(admin.CtxKeyIsSuperAdmin)
 	isSuper, _ := isSuperVal.(bool)
-	visibleGroups, err := h.permService.GetUserVisibleGroupIDs(c.Request.Context(), uid, isSuper)
+	visibleGrants, err := h.permService.GetUserVisibleDeviceGrants(c.Request.Context(), uid, isSuper)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return nil, false
 	}
-	return visibleGroups, true
+	return visibleGrants, true
+}
+
+// resolveVisibleGroups 兼容旧调用：从 grants 展平出 group IDs。
+func (h *Handler) resolveVisibleGroups(c *gin.Context) (groups []uuid.UUID, ok bool) {
+	grants, ok := h.resolveVisibleDeviceGrants(c)
+	if !ok {
+		return nil, false
+	}
+	return flattenVisibleGroupIDs(grants), true
+}
+
+func flattenVisibleGroupIDs(grants []model.DeviceVisibilityGrant) []uuid.UUID {
+	if grants == nil {
+		return nil
+	}
+	groupSet := make(map[uuid.UUID]struct{})
+	for _, grant := range grants {
+		for _, groupID := range grant.GroupIDs {
+			groupSet[groupID] = struct{}{}
+		}
+	}
+	result := make([]uuid.UUID, 0, len(groupSet))
+	for groupID := range groupSet {
+		result = append(result, groupID)
+	}
+	return result
 }
 
 // RegisterRoutes registers device routes on the given router group.
@@ -386,17 +410,12 @@ func (h *Handler) ListDevices(c *gin.Context) {
 	// Inject data permission: restrict to user-visible groups.
 	// v1.0：超管判定从 carrier IS NULL 改为 source = 'builtIn'（来自 ctx CtxKeyIsSuperAdmin）。
 	if h.permService != nil {
-		userID, _ := c.Get(admin.CtxKeyUserID)
-		isSuperVal, _ := c.Get(admin.CtxKeyIsSuperAdmin)
-		isSuper, _ := isSuperVal.(bool)
-		if uid, ok := userID.(uuid.UUID); ok {
-			visibleGroups, err := h.permService.GetUserVisibleGroupIDs(c.Request.Context(), uid, isSuper)
-			if err != nil {
-				commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
-				return
-			}
-			filter.VisibleGroups = visibleGroups
+		visibleGrants, ok := h.resolveVisibleDeviceGrants(c)
+		if !ok {
+			return
 		}
+		filter.VisibleDeviceGrants = visibleGrants
+		filter.VisibleGroups = flattenVisibleGroupIDs(visibleGrants)
 	}
 
 	result, err := h.service.ListDevicesWithInfo(c.Request.Context(), filter)
@@ -571,11 +590,12 @@ func (h *Handler) ListGeo(c *gin.Context) {
 	}
 
 	// #64 设备组数据权限：限定到调用者可见分组（三态 fail-closed 在仓库层施加）。
-	visibleGroups, ok := h.resolveVisibleGroups(c)
+	visibleGrants, ok := h.resolveVisibleDeviceGrants(c)
 	if !ok {
 		return
 	}
-	filter.VisibleGroups = visibleGroups
+	filter.VisibleDeviceGrants = visibleGrants
+	filter.VisibleGroups = flattenVisibleGroupIDs(visibleGrants)
 
 	// Parse ue_count_max：用于过滤 UE=0 基站（如 ue_count_max=0）
 	if v := c.Query("ue_count_max"); v != "" {
@@ -613,12 +633,12 @@ func (h *Handler) GetGeoStats(c *gin.Context) {
 	statusFilter := parseGeoStatusFilter(c.Query("status"))
 
 	// #64 设备组数据权限：统计只覆盖调用者可见分组（三态 fail-closed 在仓库层施加）。
-	visibleGroups, ok := h.resolveVisibleGroups(c)
+	visibleGrants, ok := h.resolveVisibleDeviceGrants(c)
 	if !ok {
 		return
 	}
 
-	stats, err := h.service.GetGeoStats(c.Request.Context(), groupIDs, statusFilter, visibleGroups)
+	stats, err := h.service.GetGeoStats(c.Request.Context(), groupIDs, statusFilter, visibleGrants)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
@@ -674,12 +694,12 @@ func (h *Handler) SearchDevices(c *gin.Context) {
 	}
 
 	// #64 设备组数据权限：搜索结果限定到调用者可见分组（三态 fail-closed 在仓库层施加）。
-	visibleGroups, ok := h.resolveVisibleGroups(c)
+	visibleGrants, ok := h.resolveVisibleDeviceGrants(c)
 	if !ok {
 		return
 	}
 
-	devices, err := h.service.SearchDevices(c.Request.Context(), keyword, limit, visibleGroups)
+	devices, err := h.service.SearchDevices(c.Request.Context(), keyword, limit, visibleGrants)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return

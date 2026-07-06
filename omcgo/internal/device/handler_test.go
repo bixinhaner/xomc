@@ -171,8 +171,15 @@ func (m *fakeDeviceRepo) GetGeoStats(_ context.Context, filter GeoStatsFilter) (
 	m.geoStatsVisible = filter.VisibleGroups
 	return &GeoStats{}, nil
 }
-func (m *fakeDeviceRepo) SearchDevices(_ context.Context, _ string, _ int, visibleGroups []uuid.UUID) ([]GeoDevice, error) {
-	m.geoSearchVisible = visibleGroups
+func (m *fakeDeviceRepo) SearchDevices(_ context.Context, _ string, _ int, visibleGrants []model.DeviceVisibilityGrant) ([]GeoDevice, error) {
+	if visibleGrants == nil {
+		m.geoSearchVisible = nil
+		return nil, nil
+	}
+	m.geoSearchVisible = []uuid.UUID{}
+	for _, grant := range visibleGrants {
+		m.geoSearchVisible = append(m.geoSearchVisible, grant.GroupIDs...)
+	}
 	return nil, nil
 }
 func (m *fakeDeviceRepo) FindStaleDevices(_ context.Context, _ time.Time, _ int) ([]*model.Device, error) {
