@@ -1625,6 +1625,7 @@
         <param standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.AGServerIp2" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.AGServerIp3" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.ExistPlmnidList" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.MmeStatus" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <param standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.MmePool.Enable" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate"/>
         <param standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.MmePool.MmePool1IpsecAddr" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <param standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.MmePool.MmePool1List" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="256"/>

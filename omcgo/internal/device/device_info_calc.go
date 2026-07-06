@@ -64,14 +64,31 @@ func CalcOpState(params map[string]string) string {
 }
 
 // CalcMMEStatus computes the mme_status quick-query column from device_parameters.
-// Iterates MmePoolConfigParam.{1-16}.MME1Status, counts active connections.
+//
+// Priority:
+//  1. LTE strict path `Device.Services.FAPService.1.FAPControl.LTE.Gateway.MmeStatus`
+//  2. Legacy fallback: count `...MmePoolConfigParam.{1-16}.MME1Status`
 //
 // Returns:
 //
 //	"disconnected" — no active MME
-//	"partial"      — 1 active MME
-//	"connected"    — 2+ active MMEs
+//	"partial"      — 1 active MME (legacy pool fallback only)
+//	"connected"    — 2+ active MMEs / gateway indicates connected
 func CalcMMEStatus(params map[string]string) string {
+	if gatewayStatus := strings.TrimSpace(params["Device.Services.FAPService.1.FAPControl.LTE.Gateway.MmeStatus"]); gatewayStatus != "" {
+		switch strings.ToLower(gatewayStatus) {
+		case "1", "true", "connected", "active", "up", "on":
+			return "connected"
+		case "partial":
+			return "partial"
+		case "0", "false", "disconnected", "inactive", "down", "off":
+			return "disconnected"
+		default:
+			// Unknown non-empty value: be conservative for UI state.
+			return "disconnected"
+		}
+	}
+
 	activeCount := 0
 	for i := 1; i <= 16; i++ {
 		prefix := fmt.Sprintf("Device.Services.FAPService.1.CellConfig.LTE.EPC.MmePoolConfigParam.%d.", i)
