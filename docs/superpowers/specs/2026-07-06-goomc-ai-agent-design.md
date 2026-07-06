@@ -62,7 +62,7 @@ goomc Web
   └─ @agentkit/react AgentPanelHost
      └─ @agentkit/runtime-client
         └─ Agent Runtime (agent-studio / agent-gateway / sidecar)
-           └─ @agentkit/goomc-skill
+           └─ @agentkit/action-skill
               ├─ goomc Action API (primary)
               └─ omcctl --output json (fallback)
 
@@ -77,7 +77,7 @@ goomc Backend
 - AgentKit：协议、client、React UI，项目无关。
 - goomc Action API：安全业务动作，权限和审计在 goomc 内闭环。
 - goomc Web Adapter：页面上下文采集和 `uiIntent` 执行。
-- goomc Skill：把自然语言任务映射到 Action API/CLI。
+- Action Skill：把自然语言任务映射到通用 Action API/CLI。Agent Runtime 侧不写死 goomc 名称。
 
 ## 共享组件包
 
@@ -88,8 +88,7 @@ goomc Backend
 - `@agentkit/protocol`
 - `@agentkit/runtime-client`
 - `@agentkit/react`
-- `@agentkit/goomc-adapter`
-- `@agentkit/goomc-skill`
+- `@agentkit/action-skill`
 
 如果 `agentkit` scope 不可用，可替换为内部中性 scope，例如 `@internal-agent/*`。
 
@@ -132,24 +131,55 @@ goomc Backend
 
 UI 必须通过 theme adapter/token 适配宿主项目，不携带固定视觉风格。
 
-### `@agentkit/goomc-adapter`
+### goomc Web Adapter
 
-goomc Web 侧适配：
+goomc Web 侧适配代码属于 goomc 仓库，不属于 agent-studio 通用 runtime：
 
 - 采集当前 route、页面类型、语言、当前角色。
 - 采集选中设备、告警、任务、筛选条件。
 - 把页面状态转换为 `AgentContext`。
 - 消费 `uiIntent`，执行跳转、刷新、打开详情和列表高亮。
 
-### `@agentkit/goomc-skill`
+### `@agentkit/action-skill`
 
-agent runtime 侧专有 skill：
+agent runtime 侧通用 action skill：
 
-- 使用 goomc Action API。
+- 使用配置中的 Action API。
 - sidecar/运维场景可 fallback 到 `omcctl --output json`。
-- 不访问 goomc 数据库。
+- 不访问业务系统数据库。
 - 不使用 MCP。
-- 常驻工具只暴露 `goomc.actions.search`、`goomc.actions.describe`、`goomc.actions.preview`、`goomc.actions.execute`。
+- 常驻工具只暴露 `actions.search`、`actions.describe`、`actions.preview`、`actions.execute`。
+- 业务系统名称、显示名、base URL、delegation 路径和 action 路径都来自 integration instance 配置。
+
+## Agent Studio 通用集成约束
+
+agent-studio 侧不得新增 goomc 专用枚举、路由、组件、skill 名或工具前缀。
+
+正确抽象是通用 Action Connector：
+
+```ts
+type ActionConnectorConfig = {
+  connectorId: string;
+  displayName: string;
+  baseUrl: string;
+  delegationExchangePath: string;
+  actionSearchPath: string;
+  actionDescribePath: string;
+  actionPreviewPathTemplate: string;
+  actionExecutePathTemplate: string;
+  streamEventDialect?: 'agentkit-v1';
+};
+```
+
+agent-studio 只识别 `action_connector` 这类通用集成类型。goomc、crest 或其他业务系统只是配置实例：
+
+- `connectorId`: 机器可读实例 ID，例如 `omc-prod`，由管理员配置。
+- `displayName`: UI 展示名，例如 `OMC Production`，由管理员配置。
+- action 路径和 delegation 路径来自配置，不写死。
+- runtime 注入的是 `@agentkit/action-skill`，不是 `goomc-skill`。
+- 工具名保持 `actions.search/describe/preview/execute`，由请求参数中的 `connectorId` 定位业务系统。
+
+goomc 侧可以在自己的仓库里保留 OMC 领域文案、页面上下文 adapter 和 Action 定义；这些内容不能进入 agent-studio 的通用代码路径。
 
 ## goomc Action API
 
@@ -492,7 +522,7 @@ CLI fallback 只用于：
 
 ### M4 sidecar/CLI fallback
 
-- `goomc-skill` 支持 API-first。
+- `@agentkit/action-skill` 支持 API-first。
 - `omcctl --output json` fallback。
 - 私有化部署适配。
 
@@ -517,6 +547,7 @@ CLI fallback 只用于：
 
 - AgentKit protocol/runtime-client/react-ui 骨架。
 - goomc 三皮肤 Agent Panel 入口和 imagegen 示意图确认。
+- agent-studio 通用 `action_connector` 集成，不出现 goomc 专用代码路径。
 - goomc delegation token。
 - 首批 read-only actions。
 - 从 goomc 页面发起一次查询并通过 SSE 返回答案。
@@ -536,6 +567,7 @@ CLI fallback 只用于：
 - 首期安全运维助手，不做全自动运维员。
 - AgentKit 拆为 protocol/runtime-client/react-ui。
 - 共享包使用中性命名，不绑定品牌。
+- agent-studio 侧使用通用 `action_connector`，不写死 goomc 名称。
 - goomc Web 主入口为全局 Agent Panel。
 - Web 登录态通过 token exchange 换 delegation token，不直接复用 Web JWT。
 - 前端实现必须先基于 imagegen 效果图确认，再按图还原。
