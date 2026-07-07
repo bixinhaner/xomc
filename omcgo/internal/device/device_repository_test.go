@@ -36,6 +36,8 @@ func (f fakeGeoRow) Scan(dest ...interface{}) error {
 				*d = nil
 			case **uuid.UUID:
 				*d = nil
+			case **int:
+				*d = nil
 			default:
 				return fmt.Errorf("can't scan into dest[%d]: cannot scan NULL into %T", i, dest[i])
 			}
@@ -61,6 +63,9 @@ func (f fakeGeoRow) Scan(dest ...interface{}) error {
 			*d = v.(bool)
 		case *int:
 			*d = v.(int)
+		case **int:
+			i := v.(int)
+			*d = &i
 		case *model.DeviceLifecycle:
 			*d = v.(model.DeviceLifecycle)
 		default:
@@ -70,7 +75,7 @@ func (f fakeGeoRow) Scan(dest ...interface{}) error {
 	return nil
 }
 
-// geoRowVals 按 ListGeo / SearchDevices 的 SELECT 列顺序构造一行（16 列）。
+// geoRowVals 按 ListGeo / SearchDevices 的 SELECT 列顺序构造一行（19 列）。
 func geoRowVals(id uuid.UUID, lat, lng any) []any {
 	return []any{
 		id, "SN-001", "SN-001", // id, serial_number, name
@@ -79,6 +84,7 @@ func geoRowVals(id uuid.UUID, lat, lng any) []any {
 		nil, nil, // group_id, group_name
 		"site-a", 0, "FAP-100", // address, alarm_count, type
 		"10.0.0.1", "AA:BB:CC", "120", "dev-a", // ip, mac, pci, device_name
+		0, nil, 0, // ue_count, highest_alarm_severity, highest_severity_alarm_count
 	}
 }
 
@@ -149,6 +155,7 @@ func TestScanGeoDeviceRow_NullableJoinColumns(t *testing.T) {
 		nil, nil, // group_id, group_name NULL
 		nil, 0, nil, // address, alarm_count, type（site_name/model_name 可空）
 		"", "", "", "", // COALESCE 空串 → 响应里省略（nil 指针）
+		0, nil, 0, // ue_count, highest_alarm_severity, highest_severity_alarm_count
 	}
 
 	d, err := scanGeoDeviceRow(fakeGeoRow{vals: vals})
