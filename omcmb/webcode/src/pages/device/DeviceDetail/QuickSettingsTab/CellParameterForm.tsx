@@ -836,6 +836,7 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
       { value: '0', label: 'NTP Client' },
     ];
   }, [schemaByPath]);
+  const deviceTimeModeOptionsKey = deviceTimeModeOptions.map((option) => option.value).join('\u0000');
   const bindSelectOptions = useMemo(
     () => buildBindSelectOptions(ethernetSchemaResp?.parameters ?? []),
     [ethernetSchemaResp],
@@ -874,11 +875,13 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
   useEffect(() => {
     if (!hasSchemaData) return;
     visibleParams.forEach((p) => {
+      const currentValue = form.getFieldValue(p.name);
       if (draft && draft[p.name] !== undefined) {
-        if (specialConfigByName.get(p.name)?.kind === 'mme-ip-plmn-table') {
-          form.setFieldValue(p.name, toMmeIpPlmnRows(draft[p.name]));
-        } else {
-          form.setFieldValue(p.name, String(draft[p.name] ?? ''));
+        const nextValue = specialConfigByName.get(p.name)?.kind === 'mme-ip-plmn-table'
+          ? toMmeIpPlmnRows(draft[p.name])
+          : String(draft[p.name] ?? '');
+        if (currentValue !== nextValue) {
+          form.setFieldValue(p.name, nextValue);
         }
         return;
       }
@@ -919,7 +922,7 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
         );
       }
     });
-  }, [hasSchemaData, visibleParams, instanceContext, form, schemaByPath, rawParameterByPath, draft, specialConfigByName, mmeIpPlmnParams, nrNguParams, isDeviceTimeGroup, deviceTimeModeOptions]);
+  }, [hasSchemaData, visibleParams, instanceContext, form, schemaByPath, rawParameterByPath, draft, specialConfigByName, mmeIpPlmnParams, nrNguParams, isDeviceTimeGroup, deviceTimeModeOptionsKey]);
 
   const handleSave = async () => {
     const values = form.getFieldsValue() as Record<string, unknown>;
@@ -1108,14 +1111,23 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
             isDeviceTimeGroup && p.name === 'Enable' ? deviceTimeModeOptions : p.enumOptions,
           );
       }
-      form.setFieldsValue(nextValues);
+      const currentValues = form.getFieldsValue(true) as Record<string, unknown>;
+      const changedValues: Record<string, unknown> = {};
+      for (const [name, value] of Object.entries(nextValues)) {
+        if (currentValues[name] !== value) {
+          changedValues[name] = value;
+        }
+      }
+      if (Object.keys(changedValues).length > 0) {
+        form.setFieldsValue(changedValues);
+      }
       clearDraft(fbKey);
       setFieldErrors({});
     })();
     return () => {
       cancelled = true;
     };
-  }, [active, lastTask?.id, lastTask?.status, lastSubmit?.at, refetchCommonSchema, refetchDeviceTimeSchema, refetchManagementServerSchema, effectiveParams, instanceContext, form, clearDraft, fbKey, group.titleZh, specialConfigByName, t, isDeviceTimeGroup, deviceTimeModeOptions, queryClient, deviceId]);
+  }, [active, lastTask?.id, lastTask?.status, lastSubmit?.at, refetchCommonSchema, refetchDeviceTimeSchema, refetchManagementServerSchema, effectiveParams, instanceContext, form, clearDraft, fbKey, group.titleZh, specialConfigByName, t, isDeviceTimeGroup, deviceTimeModeOptionsKey, queryClient, deviceId]);
 
   // T-0146:基站应答失败时弹一次 notification(只在 status 第一次变成 failed 时触发,避免重复弹)
   // notifiedFailedTaskId 同样存 store —— 切顶层 tab 再切回不会重复弹。

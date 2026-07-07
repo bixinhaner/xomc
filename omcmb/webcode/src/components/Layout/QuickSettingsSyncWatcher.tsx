@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { App } from 'antd';
 import { useQuickSettingsFeedbackStore } from '@core/store/quickSettingsFeedbackStore';
@@ -55,13 +55,18 @@ export default function QuickSettingsSyncWatcher() {
   const { message } = App.useApp();
   const queryClient = useQueryClient();
   const quickSettingsSyncs = useQuickSettingsFeedbackStore((s) => s.quickSettingsSyncs);
+  const pollingRef = useRef(false);
 
   useEffect(() => {
+    let disposed = false;
+
     const poll = async () => {
+      if (disposed) return;
       const entries = Object.entries(useQuickSettingsFeedbackStore.getState().quickSettingsSyncs);
       if (entries.length === 0) return;
 
       await Promise.all(entries.map(async ([deviceId, sync]) => {
+        if (disposed) return;
         // 悬挂 monitor 自动回收：拒绝把过期 sync 当作仍在运行。
         if (Date.now() - sync.startedAt > staleMonitorTimeoutMs) {
           let timeoutMsg = t('device.detail.deviceFetchWaitingPersist');
@@ -109,7 +114,6 @@ export default function QuickSettingsSyncWatcher() {
 
           if (hasNewSuccess) {
             useQuickSettingsFeedbackStore.getState().clearDraftsByDevice(deviceId);
-            useQuickSettingsFeedbackStore.getState().bumpRefreshTick(deviceId);
             deviceParameterApi.invalidateParameterSchemaCache(deviceId);
             void queryClient.invalidateQueries({ queryKey: ['devices', 'list'] });
             void queryClient.invalidateQueries({ queryKey: ['devices', 'detail-composite-v2', deviceId] });
@@ -137,11 +141,24 @@ export default function QuickSettingsSyncWatcher() {
       }));
     };
 
-    void poll();
+    const runPoll = async () => {
+      if (disposed || pollingRef.current) return;
+      pollingRef.current = true;
+      try {
+        await poll();
+      } finally {
+        pollingRef.current = false;
+      }
+    };
+
+    void runPoll();
     const timer = window.setInterval(() => {
-      void poll();
+      void runPoll();
     }, 2000);
-    return () => window.clearInterval(timer);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
   }, [message, queryClient, quickSettingsSyncs, t]);
 
   return null;
