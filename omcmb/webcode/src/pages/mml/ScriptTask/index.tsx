@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
-import { Button, Descriptions, Drawer, Empty, Form, Input, Modal, Select, Space, Spin, Tag, Typography, message } from 'antd';
+import { Button, Descriptions, Drawer, Empty, Form, Input, Modal, Select, Space, Spin, Tag, Typography, message, theme } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 
@@ -40,6 +40,7 @@ interface ScriptForm {
 // 任务执行记录（mml_tasks）由独立页面 mml/task-records 承载。
 export default function ScriptTask() {
   const t = useT();
+  const { token } = theme.useToken();
   const username = useUserStore((s) => s.currentUser?.username) ?? '';
 
   const [page, setPage] = useState(1);
@@ -309,7 +310,9 @@ export default function ScriptTask() {
                   <pre
                     style={{
                       marginTop: 8,
-                      background: '#f5f5f5',
+                      background: token.colorFillQuaternary,
+                      border: `1px solid ${token.colorBorderSecondary}`,
+                      color: token.colorText,
                       padding: 12,
                       borderRadius: 4,
                       maxHeight: '55vh',
