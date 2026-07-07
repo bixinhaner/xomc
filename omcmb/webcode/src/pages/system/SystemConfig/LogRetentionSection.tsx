@@ -4,7 +4,7 @@
 //   log.retention  审计/业务日志按时间保留（worker 每日 05:00 cron 批量删过期行）
 //                  enabled + 8 张表各自保留天数（audit/ops_audit/login/oper/task/system/ne_message/event）
 //   log.rotation   运行期日志文件轮转（app/acs/worker logger override watcher 读，≤1 分钟生效）
-//                  max_size_mb / max_age_days / keep_files
+//                  max_size_mb / max_age_days / keep_files / rotate_interval_minutes
 //
 // 接入方式与 RetentionBackpressureSection 一致：复用 useSysConfigsByCategory + useBatchUpdateSysConfigs，
 // 每张卡片自管 form + 保存（一次保存 = 该分类一次 batch upsert，触发后端热加载）。
@@ -57,6 +57,7 @@ const CARDS: CardSpec[] = [
     descKey: 'logCfg.rotation.desc',
     fields: [
       { key: 'max_size_mb', type: 'int', min: 1, max: 10240 },
+      { key: 'rotate_interval_minutes', type: 'int', min: 1, max: 1440 },
       { key: 'max_age_days', type: 'int', min: 1, max: 3650 },
       { key: 'keep_files', type: 'int', min: 1, max: 1000 },
     ],

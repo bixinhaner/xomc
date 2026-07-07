@@ -88,19 +88,6 @@ const buildProductTypeOptions = (t: (id: string) => string) => [
   { label: t('role.picoBaseStation'), value: 'Pico' },
 ];
 
-const READ_API_GROUPS_BY_MENU_KEY: Record<string, string[]> = {
-  'system:user': ['users', 'roles'],
-  'system:role': ['roles', 'menus', 'api-endpoints', 'device-groups', 'groups'],
-  'system:menu': ['menus'],
-  'system:operation-log': ['audit-logs'],
-  'system:config': ['sysConfig', 'public'],
-  'system:api-management': ['api-endpoints'],
-  'system:data-dict': ['sysDictionary', 'sysDictionaryDetail'],
-  'system:ui-custom': ['sysConfig'],
-  'system:kpi-config': ['dashboard'],
-  'mml:admin:catalog': ['mml_admin'],
-};
-
 // 构建设备组树形数据（带筛选）
 const buildDeviceGroupTreeData = (
   groups: DeviceGroup[],
