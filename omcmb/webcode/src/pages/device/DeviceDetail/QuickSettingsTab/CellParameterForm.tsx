@@ -18,6 +18,7 @@ import type { DeviceParameter, ParameterSchemaItem, ParameterUpdateRequest } fro
 import type { DeviceTaskStatus } from '@core/types/deviceTask';
 import type { QuickSettingsGroup, QuickSettingsParam } from '@core/types/quicksettings';
 import { applyInstanceContext, getEffectiveEnumMeta, getFeedbackScopeContext, validateValue, type QuickSettingsInstanceContext } from './validators';
+import { inferDeviceTimeMode, isNrNetworkType, mapDeviceTimeModeLabel } from './deviceTimeMode';
 import { formatDeviceFaultBrief } from './MultiInstanceTable';
 import { useT } from '@/hooks/useT';
 
@@ -268,25 +269,6 @@ function formatTimeZoneDisplay(value: string): string {
   const normalized = String(value ?? '').trim();
   if (!normalized) return '';
   return mapTimezoneAliasToDisplay(normalized);
-}
-
-function inferDeviceTimeMode(
-  rawParameterByPath: Map<string, DeviceParameter>,
-  schemaByPath: Map<string, ParameterSchemaItem>,
-): string {
-  const current = rawParameterByPath.get('Device.Time.Enable')?.parameterValue
-    ?? schemaByPath.get('Device.Time.Enable')?.currentValue;
-  const normalized = String(current ?? '').trim().toLowerCase();
-  if (normalized === '1' || normalized === 'true') return '1';
-  if (normalized === '0' || normalized === 'false') return '0';
-
-  const hasNtpServers = ['Device.Time.NTPServer1', 'Device.Time.NTPServer2', 'Device.Time.NTPServer3', 'Device.Time.NTPServer4', 'Device.Time.NTPServer5']
-    .some((path) => String(
-      rawParameterByPath.get(path)?.parameterValue
-        ?? schemaByPath.get(path)?.currentValue
-        ?? '',
-    ).trim() !== '');
-  return hasNtpServers ? '0' : '1';
 }
 
 interface CellParameterFormProps {
@@ -823,19 +805,34 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
     })),
     [timezoneOptions],
   );
+  const nrServerLabel = t('device.cell.ntpServer');
+  const nrClientLabel = t('device.cell.ntpClient');
+  const enableLabel = t('common.enable');
+  const disableLabel = t('common.disable');
   const deviceTimeModeOptions = useMemo(() => {
     const meta = getEffectiveEnumMeta(schemaByPath.get('Device.Time.Enable')?.constraints, 'Device.Time.Enable');
     if (meta && meta.values.length > 0) {
       return meta.values.map((value, index) => ({
         value,
-        label: meta.labels[index] || value,
+        label: mapDeviceTimeModeLabel(value, meta.labels[index] || value, instanceContext.networkType, {
+          nrServer: nrServerLabel,
+          nrClient: nrClientLabel,
+          enable: enableLabel,
+          disable: disableLabel,
+        }),
       }));
     }
+    if (isNrNetworkType(instanceContext.networkType)) {
+      return [
+        { value: '1', label: nrServerLabel },
+        { value: '0', label: nrClientLabel },
+      ];
+    }
     return [
-      { value: '1', label: 'NTP Server' },
-      { value: '0', label: 'NTP Client' },
+      { value: '1', label: enableLabel },
+      { value: '0', label: disableLabel },
     ];
-  }, [schemaByPath]);
+  }, [schemaByPath, instanceContext.networkType, nrServerLabel, nrClientLabel, enableLabel, disableLabel]);
   const deviceTimeModeOptionsKey = deviceTimeModeOptions.map((option) => option.value).join('\u0000');
   const bindSelectOptions = useMemo(
     () => buildBindSelectOptions(ethernetSchemaResp?.parameters ?? []),
@@ -885,8 +882,10 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
         }
         return;
       }
-      // 优先级 2: 用户在当前会话已 touched
-      if (form.isFieldTouched(p.name)) return;
+      // 优先级 2: 用户当前存在未保存草稿时，保留本地编辑。
+      // 仅 touched 但无 draft（例如刷新后 watcher 已清草稿）应允许被最新 schema 回填，
+      // 否则会出现“刷新成功但需切页再回来才看到新值”。
+      if (form.isFieldTouched(p.name) && draft?.[p.name] !== undefined) return;
       // 优先级 3: schema 原值
       const special = specialConfigByName.get(p.name);
       const path = special?.configPath ?? resolveReadPath(p.standardPath || '');
@@ -900,9 +899,12 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
       if (special?.kind === 'mme-ip-plmn-table') {
         form.setFieldValue(p.name, toMmeIpPlmnRows(rawItem?.parameterValue ?? item?.currentValue ?? ''));
       } else {
-        let raw = rawItem?.parameterValue ?? item?.currentValue ?? '';
+        // device-time 组优先采用 schema 当前值，避免 search 缓存滞后覆盖刚回读的数据。
+        let raw = isDeviceTimeGroup
+          ? (item?.currentValue ?? rawItem?.parameterValue ?? '')
+          : (rawItem?.parameterValue ?? item?.currentValue ?? '');
         if (isDeviceTimeGroup && p.name === 'Enable' && (raw === '' || raw == null)) {
-          raw = inferDeviceTimeMode(rawParameterByPath, schemaByPath);
+          raw = inferDeviceTimeMode(rawParameterByPath, schemaByPath, instanceContext.networkType);
         }
         // BSC osmo-bsc 不上报 DeviceGSM.Bts.{i}.ID,该字段语义即为 BTS 实例号本身,
         // 此处按实例号派生填充,避免显示"未上报"。
@@ -952,7 +954,9 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
       const newVal = special?.kind === 'mme-ip-plmn-table'
         ? serializeMmeIpPlmnList(toMmeIpPlmnRows(values[p.name]))
         : String(values[p.name] ?? '');
-      const oldVal = rawItem?.parameterValue ?? item?.currentValue ?? '';
+      const oldVal = isDeviceTimeGroup
+        ? (item?.currentValue ?? rawItem?.parameterValue ?? '')
+        : (rawItem?.parameterValue ?? item?.currentValue ?? '');
       if (newVal === oldVal) continue;
 
       const parameterType = rawItem?.parameterType ?? (item?.type as never) ?? 'string';

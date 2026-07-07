@@ -1198,6 +1198,8 @@ const messages: Record<string, string> = {
   'device.cell.freqMHz':                  'Frequency (MHz)',
   'device.cell.uplink':                   'Uplink',
   'device.cell.downlink':                 'Downlink',
+  'device.cell.ntpServer':                'NTP Server',
+  'device.cell.ntpClient':                'NTP Client',
   'device.cell.readonly':                 '(read-only)',
   'device.cell.lmtLockedHint':            '(LMT-controlled, modify via LMT)',
   'device.cell.routeIndexBoundRu':        'Route Index (Bound RU)',
