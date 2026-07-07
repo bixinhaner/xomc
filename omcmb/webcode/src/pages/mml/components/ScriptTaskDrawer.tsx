@@ -19,7 +19,7 @@ import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
 
 import { useCreateMMLTask } from '@core/hooks/api/useMML';
-import type { MMLExecuteType } from '@core/types/mml';
+import type { MMLExecuteType, MMLTaskCommandInput } from '@core/types/mml';
 import { useT } from '@/hooks/useT';
 import { toast } from '@/utils/toast';
 import DeviceSelectModal from '../Console/components/DeviceSelectModal';
@@ -105,7 +105,7 @@ export default function ScriptTaskDrawer({
 
   const [deviceSns, setDeviceSns] = useState<string[]>([]);
   const [fileList, setFileList] = useState<UploadFile[]>([]);
-  const [parsedCommands, setParsedCommands] = useState<string[]>([]);
+  const [parsedCommands, setParsedCommands] = useState<MMLTaskCommandInput[]>([]);
   // Console 入口预填的命令文本同样允许用户手动调整（to-do-list 当轮 #6）。
   // 文件入口下，scriptContent 仅在解析完成后用于本地展示，不直接提交。
   const [scriptContent, setScriptContent] = useState('');
@@ -133,13 +133,13 @@ export default function ScriptTaskDrawer({
     setFileList([]);
     const initial = prefillContent ?? '';
     setScriptContent(initial);
-    setParsedCommands(initial ? splitScriptLines(initial) : []);
+    setParsedCommands(initial ? parseScriptCommands(initial) : []);
   }, [open, prefillContent, prefillTaskName, prefillDeviceSns, form]);
 
   // 用户在 Console 入口手动改命令时，实时同步解析结果。
   const handleScriptContentChange = useCallback((value: string) => {
     setScriptContent(value);
-    setParsedCommands(splitScriptLines(value));
+    setParsedCommands(parseScriptCommands(value));
   }, []);
 
   // BUG-19：设备选择弹框确认回调——把选中的 SN 追加进来（去重）。
@@ -152,7 +152,7 @@ export default function ScriptTaskDrawer({
     const reader = new FileReader();
     reader.onload = (event) => {
       const content = event.target?.result as string;
-      setParsedCommands(splitScriptLines(content));
+      setParsedCommands(parseScriptCommands(content));
     };
     reader.readAsText(file);
   }, []);
@@ -529,12 +529,91 @@ export default function ScriptTaskDrawer({
   );
 }
 
-// 把脚本内容按行拆分，剔除空行与 # 开头的注释行。
-function splitScriptLines(content: string): string[] {
+// 把脚本文本解析为后端可执行的结构化 commands。
+// 支持：
+//   LST DEVICE_INFO;
+//   MOD DEVICE_INFO:USER_LABEL=站点A,DN_PREFIX=abc;
+//   MOD_DEVICE_INFO USER_LABEL=站点A
+function parseScriptCommands(content: string): MMLTaskCommandInput[] {
   return content
     .split(/\r?\n/)
-    .map((line) => line.trim())
-    // BUG-01 防御：trim 尾部分号，保持与后端 mml_commands.command_code 格式一致
-    .map((line) => line.replace(/;+$/, '').trimEnd())
-    .filter((line) => line && !line.startsWith('#'));
+    .map(parseScriptLine)
+    .filter((cmd): cmd is MMLTaskCommandInput => Boolean(cmd));
+}
+
+function parseScriptLine(raw: string): MMLTaskCommandInput | null {
+  let line = raw.trim();
+  const commentIndex = findCommentIndex(line);
+  if (commentIndex >= 0) line = line.slice(0, commentIndex).trim();
+  line = line.replace(/;+$/, '').trim();
+  if (!line) return null;
+
+  const colonIndex = line.indexOf(':');
+  let commandCode = '';
+  let paramPart = '';
+
+  if (colonIndex >= 0) {
+    commandCode = line.slice(0, colonIndex).trim();
+    paramPart = line.slice(colonIndex + 1).trim();
+  } else {
+    const fields = line.split(/\s+/);
+    const firstParamIndex = fields.findIndex((field) => field.includes('='));
+    if (firstParamIndex >= 0) {
+      commandCode = fields.slice(0, firstParamIndex).join(' ').trim();
+      paramPart = fields.slice(firstParamIndex).join(' ');
+    } else {
+      commandCode = line;
+    }
+  }
+
+  if (!commandCode) return null;
+  const parameters = parseParameterPart(paramPart);
+  const command: MMLTaskCommandInput = { commandCode };
+  const operationType = deriveOperationType(commandCode);
+  if (operationType) command.operationType = operationType;
+  if (Object.keys(parameters).length > 0) command.parameters = parameters;
+  return command;
+}
+
+function deriveOperationType(commandCode: string): MMLTaskCommandInput['operationType'] | undefined {
+  const op = commandCode.trim().split(/\s+|_/)[0]?.toUpperCase();
+  return op || undefined;
+}
+
+function parseParameterPart(paramPart: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const token of splitParameterTokens(paramPart)) {
+    const eq = token.indexOf('=');
+    if (eq <= 0) continue;
+    const key = token.slice(0, eq).trim();
+    const value = token.slice(eq + 1).trim();
+    if (key) out[key] = value;
+  }
+  return out;
+}
+
+function splitParameterTokens(input: string): string[] {
+  const tokens: string[] = [];
+  let current = '';
+  let braceDepth = 0;
+  for (const ch of input) {
+    if (ch === '{') braceDepth += 1;
+    if (ch === '}' && braceDepth > 0) braceDepth -= 1;
+    if (braceDepth === 0 && (ch === ',' || /\s/.test(ch))) {
+      if (current.trim()) tokens.push(current.trim());
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  if (current.trim()) tokens.push(current.trim());
+  return tokens;
+}
+
+function findCommentIndex(line: string): number {
+  const hash = line.indexOf('#');
+  const slash = line.indexOf('//');
+  if (hash < 0) return slash;
+  if (slash < 0) return hash;
+  return Math.min(hash, slash);
 }

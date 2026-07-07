@@ -1,6 +1,6 @@
 import http from '../http';
 import { generateUid } from '../../utils/uid';
-import type { MMLCommand, MMLScript, MMLTask, MMLTaskCommandDetail, MMLParam, MMLCustomCommand, ParamPath, MMLOperationType, DeviceTaskResultItem, MMLParamRef, MMLTaskResultsStats, MMLPathTranslationView, PathTranslationSource } from '../../types/mml';
+import type { MMLCommand, MMLScript, MMLTask, MMLTaskCommandDetail, MMLTaskCommandInput, MMLParam, MMLCustomCommand, ParamPath, MMLOperationType, DeviceTaskResultItem, MMLParamRef, MMLTaskResultsStats, MMLPathTranslationView, PathTranslationSource } from '../../types/mml';
 import type { PageRequest, PageResponse } from '../../types/pagination';
 import type {
   BackendStatement,
@@ -773,14 +773,28 @@ export const mmlApi = {
   },
 
   async createTask(
-    data: Partial<Omit<MMLTask, 'id' | 'status' | 'results' | 'createdAt' | 'updatedAt'>> &
-    Pick<MMLTask, 'taskName' | 'deviceSns' | 'commands'>
+    data: Partial<Omit<MMLTask, 'id' | 'status' | 'results' | 'createdAt' | 'updatedAt' | 'commands'>> &
+    Pick<MMLTask, 'taskName' | 'deviceSns'> & {
+      commands: Array<string | MMLTaskCommandInput | MMLTaskCommandDetail>;
+    }
   ): Promise<MMLTask> {
+    const commands = data.commands.map((cmd) => {
+      if (typeof cmd === 'string') return { command_code: cmd };
+      const commandCode = 'commandCode' in cmd ? cmd.commandCode : undefined;
+      const detail = cmd as MMLTaskCommandInput & MMLTaskCommandDetail;
+      const entry: Record<string, unknown> = {
+        command_code: commandCode ?? detail.commandCode,
+      };
+      if (detail.operationType) entry.operation_type = detail.operationType;
+      if (detail.paramPaths) entry.param_paths = detail.paramPaths;
+      if (detail.parameters) entry.parameters = detail.parameters;
+      return entry;
+    });
     const payload: Record<string, unknown> = {
       task_name: data.taskName,
       script_id: data.scriptId,
       device_sns: data.deviceSns,
-      commands: data.commands.map((cmd) => ({ command_code: cmd })),
+      commands,
       total_devices: data.deviceSns?.length ?? 0,
       creator: data.creator || '',
       execute_type: data.executeType || 'immediate',

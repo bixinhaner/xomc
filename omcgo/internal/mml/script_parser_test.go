@@ -39,6 +39,33 @@ func TestParseScriptContent_WithParameters(t *testing.T) {
 	assert.Equal(t, map[string]string{"Azimuth": "180", "Downtilt": "5"}, lines[0].Parameters)
 }
 
+func TestParseScriptContent_SpacedCommandCode(t *testing.T) {
+	content := `LST DEVICE_INFO;`
+	lines, err := ParseScriptContent(content)
+	require.NoError(t, err)
+	require.Len(t, lines, 1)
+	assert.Equal(t, "LST DEVICE_INFO", lines[0].CommandCode)
+	assert.Empty(t, lines[0].Parameters)
+}
+
+func TestParseScriptContent_ColonParameters(t *testing.T) {
+	content := `MOD DEVICE_INFO:USER_LABEL=站点A,DN_PREFIX=abc;`
+	lines, err := ParseScriptContent(content)
+	require.NoError(t, err)
+	require.Len(t, lines, 1)
+	assert.Equal(t, "MOD DEVICE_INFO", lines[0].CommandCode)
+	assert.Equal(t, map[string]string{"USER_LABEL": "站点A", "DN_PREFIX": "abc"}, lines[0].Parameters)
+}
+
+func TestParseScriptContent_ColonParametersWithBraceComma(t *testing.T) {
+	content := `TEST_MOD:v1={name,name2},v2={3};`
+	lines, err := ParseScriptContent(content)
+	require.NoError(t, err)
+	require.Len(t, lines, 1)
+	assert.Equal(t, "TEST_MOD", lines[0].CommandCode)
+	assert.Equal(t, map[string]string{"v1": "{name,name2}", "v2": "{3}"}, lines[0].Parameters)
+}
+
 func TestParseScriptContent_FailFast_InvalidCommandCode(t *testing.T) {
 	content := `
 LST_OK
@@ -111,9 +138,9 @@ func TestScriptParseError_Format(t *testing.T) {
 // splitScriptLines 兼容 fallback：fail 时返回 nil（老 caller 无错误返回路径）
 func TestSplitScriptLines_BackwardCompat(t *testing.T) {
 	good := `LST_FOO
-MOD_BAR`
+MOD BAR`
 	codes := splitScriptLines(good)
-	assert.Equal(t, []string{"LST_FOO", "MOD_BAR"}, codes)
+	assert.Equal(t, []string{"LST_FOO", "MOD BAR"}, codes)
 
 	// 坏脚本 → 返 nil（不抛错；fail-fast 由新接口 ParseScriptContent 承担）
 	bad := `lowercase_invalid`
