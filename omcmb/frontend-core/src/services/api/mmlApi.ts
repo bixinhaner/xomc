@@ -774,7 +774,7 @@ export const mmlApi = {
 
   async createTask(
     data: Partial<Omit<MMLTask, 'id' | 'status' | 'results' | 'createdAt' | 'updatedAt' | 'commands'>> &
-    Pick<MMLTask, 'taskName' | 'deviceSns'> & {
+      Pick<MMLTask, 'taskName' | 'deviceSns'> & {
       commands: Array<string | MMLTaskCommandInput | MMLTaskCommandDetail>;
     }
   ): Promise<MMLTask> {
