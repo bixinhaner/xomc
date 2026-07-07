@@ -219,8 +219,7 @@ export const mmlService = {
   },
 
   async createTask(
-    data: Partial<Omit<MMLTask, 'id' | 'status' | 'results' | 'createdAt' | 'updatedAt' | 'commands'>> &
-    Pick<MMLTask, 'taskName' | 'deviceSns'> & {
+    data: Omit<MMLTask, 'id' | 'status' | 'results' | 'createdAt' | 'updatedAt' | 'commands'> & {
       commands: Array<string | MMLTaskCommandInput | MMLTaskCommandDetail>;
     }
   ): Promise<MMLTask> {
@@ -232,18 +231,9 @@ export const mmlService = {
       id: generateId('mmltask'),
       status: data.executeType === 'suspended' ? 'paused' : 'pending',
       results: [],
-      creator: data.creator ?? '',
-      executeType: data.executeType ?? 'immediate',
-      offlineRetry: data.offlineRetry ?? false,
-      offlineRetryWait: data.offlineRetryWait ?? 60,
-      failedRetry: data.failedRetry ?? false,
-      failedRetryCount: data.failedRetryCount ?? 3,
-      failedRetryInterval: data.failedRetryInterval ?? 5,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       totalDevices: data.deviceSns?.length ?? 0,
-      successCount: data.successCount ?? 0,
-      failedCount: data.failedCount ?? 0,
     };
     tasks.push(newItem);
     return newItem;
