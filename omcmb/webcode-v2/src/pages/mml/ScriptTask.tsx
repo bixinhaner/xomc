@@ -22,7 +22,7 @@ import {
   formatTime,
 } from '@/components/layout/PageShell'
 
-import { useMMLScripts } from '@core/hooks/api/useMML'
+import { useMMLScriptById, useMMLScripts } from '@core/hooks/api/useMML'
 import type { MMLScript, MMLScriptStatus } from '@core/types/mml'
 
 // ============================================================
@@ -228,7 +228,9 @@ function ScriptDetailDrawer({
   script: MMLScript
   onClose: () => void
 }) {
-  const meta = statusMeta(script.status)
+  const { data, isFetching } = useMMLScriptById(script.id)
+  const detailScript = data ?? script
+  const meta = statusMeta(detailScript.status)
   return (
     <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} aria-hidden />
@@ -236,10 +238,10 @@ function ScriptDetailDrawer({
         <div className="flex items-center justify-between border-b px-4 py-3">
           <div className="min-w-0">
             <div className="truncate text-base font-semibold">
-              {script.scriptName}
+              {detailScript.scriptName}
             </div>
             <div className="truncate font-mono text-[11px] text-muted-foreground">
-              {script.id}
+              {detailScript.id}
             </div>
           </div>
           <Button variant="ghost" size="icon" onClick={onClose} aria-label="关闭">
@@ -249,25 +251,25 @@ function ScriptDetailDrawer({
 
         <div className="grid grid-cols-2 gap-3 border-b px-4 py-3">
           <Field label="状态" value={<Badge variant={meta.variant}>{meta.label}</Badge>} />
-          <Field label="类型" value={script.type} />
-          <Field label="创建人" value={script.creator || '—'} />
-          <Field label="进度" value={`${script.progress ?? 0}%`} />
-          <Field label="创建时间" value={formatTime(script.createTime)} />
-          <Field label="更新时间" value={formatTime(script.updateTime)} />
+          <Field label="类型" value={detailScript.type} />
+          <Field label="创建人" value={detailScript.creator || '—'} />
+          <Field label="进度" value={`${detailScript.progress ?? 0}%`} />
+          <Field label="创建时间" value={formatTime(detailScript.createTime)} />
+          <Field label="更新时间" value={formatTime(detailScript.updateTime)} />
         </div>
 
-        {script.description ? (
+        {detailScript.description ? (
           <div className="border-b px-4 py-3">
             <div className="mb-1 text-xs uppercase tracking-wider text-muted-foreground">
               描述
             </div>
-            <div className="text-sm">{script.description}</div>
+            <div className="text-sm">{detailScript.description}</div>
           </div>
         ) : null}
 
-        {script.tags && script.tags.length > 0 ? (
+        {detailScript.tags && detailScript.tags.length > 0 ? (
           <div className="flex flex-wrap items-center gap-1.5 border-b px-4 py-3">
-            {script.tags.map((tag) => (
+            {detailScript.tags.map((tag) => (
               <span
                 key={tag}
                 className="rounded border bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground"
@@ -279,12 +281,19 @@ function ScriptDetailDrawer({
         ) : null}
 
         <div className="min-h-0 flex-1 overflow-auto px-4 py-3">
-          <div className="mb-1.5 text-xs uppercase tracking-wider text-muted-foreground">
-            脚本内容
+          <div className="mb-1.5 flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground">
+            <span>脚本内容</span>
+            {isFetching ? <span>加载中...</span> : null}
           </div>
-          <pre className="overflow-auto whitespace-pre-wrap rounded border bg-muted/40 p-3 font-mono text-xs leading-relaxed">
-            {script.content || '(空)'}
-          </pre>
+          {detailScript.content?.trim() ? (
+            <pre className="overflow-auto whitespace-pre-wrap rounded border bg-muted/40 p-3 font-mono text-xs leading-relaxed">
+              {detailScript.content}
+            </pre>
+          ) : (
+            <div className="rounded border border-dashed bg-muted/20 px-3 py-8 text-center text-sm text-muted-foreground">
+              暂无脚本内容
+            </div>
+          )}
         </div>
       </div>
     </div>
