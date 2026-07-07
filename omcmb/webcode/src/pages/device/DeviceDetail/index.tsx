@@ -1375,6 +1375,49 @@ export default function DeviceDetail() {
         break;
       case 'quickSettings':
         if (deviceId) {
+          const hasQuickSettingsDrafts = Object.keys(useQuickSettingsFeedbackStore.getState().drafts)
+            .some((key) => key.startsWith(`${deviceId}::`));
+          if (hasQuickSettingsDrafts) {
+            modal.confirm({
+              title: t('device.detail.quickSettingsRefreshConfirmTitle'),
+              content: t('device.detail.quickSettingsRefreshConfirmContent'),
+              okText: t('common.confirm'),
+              cancelText: t('common.cancel'),
+              onOk: () => {
+                useQuickSettingsFeedbackStore.getState().startQuickSettingsSync(deviceId, {
+                  lastParamSyncAt: paramSyncStatus?.lastParamSyncAt,
+                  lastParamSyncFailedAt: paramSyncStatus?.lastParamSyncFailedAt,
+                  targetCount: quickSettingsSyncTargetPaths.length,
+                  gpvTaskCount: 0,
+                  startedAt: Date.now(),
+                });
+                syncMutation.mutate(
+                  { deviceId, parameterPaths: quickSettingsSyncTargetPaths },
+                  {
+                    onSuccess: (data) => {
+                      const targetCount = data.parameterPathsCount ?? quickSettingsSyncTargetPaths.length;
+                      const gpvTaskCount = data.gpvTaskCount ?? 0;
+                      useQuickSettingsFeedbackStore.getState().patchQuickSettingsSync(deviceId, {
+                        sourceId: data.sourceId,
+                        targetCount,
+                        gpvTaskCount,
+                      });
+                      message.success(targetCount > 0
+                        ? t('device.detail.deviceFetchQueuedScoped', { id: data.sourceId, count: targetCount, gpvCount: gpvTaskCount })
+                        : t('device.detail.deviceFetchQueued', { id: data.sourceId }));
+                      void refetchParamSyncStatus();
+                    },
+                    onError: (err) => {
+                      useQuickSettingsFeedbackStore.getState().finishQuickSettingsSync(deviceId);
+                      const errMsg = err instanceof Error ? err.message : t('device.detail.deviceFetchTriggerFailed');
+                      message.error(errMsg);
+                    },
+                  },
+                );
+              },
+            });
+            break;
+          }
           useQuickSettingsFeedbackStore.getState().startQuickSettingsSync(deviceId, {
             lastParamSyncAt: paramSyncStatus?.lastParamSyncAt,
             lastParamSyncFailedAt: paramSyncStatus?.lastParamSyncFailedAt,
@@ -1410,7 +1453,7 @@ export default function DeviceDetail() {
       default:
         break;
     }
-  }, [activeTab, device?.id, message, paramSyncStatus?.lastParamSyncAt, paramSyncStatus?.lastParamSyncFailedAt, queryClient, quickSettingsSyncTargetPaths, refetch, refetchParamSyncStatus, syncMutation, t]);
+  }, [activeTab, device?.id, message, modal, paramSyncStatus?.lastParamSyncAt, paramSyncStatus?.lastParamSyncFailedAt, queryClient, quickSettingsSyncTargetPaths, refetch, refetchParamSyncStatus, syncMutation, t]);
 
   const SEVERITY_LABEL: Record<string, string> = useMemo(() => ({
     critical: t('alarm.severity.critical'),

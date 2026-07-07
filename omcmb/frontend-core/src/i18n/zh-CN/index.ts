@@ -1038,6 +1038,8 @@ const messages: Record<string, string> = {
   'device.detail.deviceFetchWaitingPersist': '设备已返回数据，正在等待 OMC 入库，请稍后重试',
   'device.detail.deviceFetchQueueBusy': '设备同步队列拥塞（待处理 {pending} 条），OMC 正在后台追赶，请稍候',
   'device.detail.deviceFetchTimeoutQueue': '设备同步超时（待处理 {pending} 条），请稍后重试或降低并发',
+  'device.detail.quickSettingsRefreshConfirmTitle': '确认刷新快速设置？',
+  'device.detail.quickSettingsRefreshConfirmContent': '当前快速设置存在未保存编辑。继续刷新会丢弃这些本地修改，并以设备最新返回值重建页面。',
   'device.paramTree.addInstance':         '添加实例',
   'device.paramTree.deleteInstance':      '删除实例 #{name}',
   'device.paramTree.noData':              '暂无参数数据',
