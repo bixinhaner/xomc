@@ -540,6 +540,10 @@ func (c *PMCollector) filterByWhitelistWithAllow(ctx context.Context, deviceSN, 
 			if meta.ReportKey == "" {
 				meta.ReportKey = ctr.CounterName
 			}
+			reportGroup := measurementGroupFromReportKey(meta.ReportKey)
+			if ctr.CounterGroup == "" || !counterGroupMatchesReportKey(ctr.CounterGroup, meta.ReportKey) {
+				ctr.CounterGroup = reportGroup
+			}
 			ctr.CounterName = meta.IndicatorID // 上报名 → 编号
 			ctr.StatisType = meta.StatisType   // T-0164-G6 收尾：填充 statis_type 驱动 G5 聚合 (BUG-A)
 			ctr.Unit = meta.Unit               // #866：填充单位元数据，入库前规范化 result value
@@ -564,7 +568,7 @@ func (c *PMCollector) filterByWhitelistWithAllow(ctx context.Context, deviceSN, 
 type missingCounterAnchor struct {
 	oui          string
 	sn           string
-	cellID       string
+	objectLDN    string
 	counterGroup string
 	timeKey      string
 	granularity  int
@@ -598,7 +602,7 @@ func fillMissingSupportedCounters(counters []model.PMCounter, allow map[string]C
 	order := make([]missingCounterAnchor, 0)
 	for _, ctr := range counters {
 		key := missingCounterAnchor{
-			oui: ctr.OUI, sn: ctr.DeviceSN, cellID: ctr.CellID,
+			oui: ctr.OUI, sn: ctr.DeviceSN, objectLDN: ctr.CellID,
 			counterGroup: ctr.CounterGroup, timeKey: ctr.Time.UTC().Format(time.RFC3339Nano), granularity: ctr.Granularity,
 		}
 		g := groups[key]
@@ -631,7 +635,19 @@ func fillMissingSupportedCounters(counters []model.PMCounter, allow map[string]C
 
 func counterGroupMatchesReportKey(counterGroup, reportKey string) bool {
 	if counterGroup == "" || reportKey == "" {
-		return true
+		return false
 	}
-	return reportKey == counterGroup || strings.HasPrefix(reportKey, counterGroup+".")
+	return counterGroup == measurementGroupFromReportKey(reportKey) ||
+		reportKey == counterGroup ||
+		strings.HasPrefix(reportKey, counterGroup+".")
+}
+
+func measurementGroupFromReportKey(reportKey string) string {
+	if reportKey == "" {
+		return ""
+	}
+	if i := strings.IndexByte(reportKey, '.'); i > 0 {
+		return reportKey[:i]
+	}
+	return reportKey
 }

@@ -40,6 +40,7 @@ func TestIngestViaCopy_NormalizesCounterValuesBeforeCopyIngest(t *testing.T) {
 				OUI:          "48BF74",
 				DeviceSN:     "SN-1",
 				CellID:       "Cellid=1",
+				CounterGroup: "C",
 				CounterName:  "C-PCT",
 				CounterValue: 19.45245145567464,
 				Granularity:  15,
@@ -52,6 +53,7 @@ func TestIngestViaCopy_NormalizesCounterValuesBeforeCopyIngest(t *testing.T) {
 				OUI:          "48BF74",
 				DeviceSN:     "SN-1",
 				CellID:       "Cellid=1",
+				CounterGroup: "C",
 				CounterName:  "C-NUM",
 				CounterValue: 3.6,
 				Granularity:  15,
@@ -70,9 +72,9 @@ func TestIngestViaCopy_NormalizesCounterValuesBeforeCopyIngest(t *testing.T) {
 	}
 
 	allow := map[string]CounterMeta{
-		"C-PCT-REPORT": {IndicatorID: "C-PCT", ReportKey: "C-PCT-REPORT", Unit: "%", StatisType: "pct"},
-		"C-NUM-REPORT": {IndicatorID: "C-NUM", ReportKey: "C-NUM-REPORT", Unit: "number", StatisType: "sum"},
-		"C-MISSING":    {IndicatorID: "C-MISSING", ReportKey: "C.MISSING", Unit: "number", StatisType: "sum"},
+		"C.PCT":     {IndicatorID: "C-PCT", ReportKey: "C.PCT", Unit: "%", StatisType: "pct"},
+		"C.NUM":     {IndicatorID: "C-NUM", ReportKey: "C.NUM", Unit: "number", StatisType: "sum"},
+		"C.MISSING": {IndicatorID: "C-MISSING", ReportKey: "C.MISSING", Unit: "number", StatisType: "sum"},
 	}
 
 	err := c.ingestViaCopy(ctx, trace.SpanFromContext(ctx), time.Now(), time.Now(), 123, uuid.New(), payload, content, allow)
