@@ -551,67 +551,13 @@ func (r *PgDeviceRepository) List(ctx context.Context, filter DeviceFilter) (*mo
 	}
 
 	// VisibleGroups filter - data permission restriction
-	// #64 fail-open 收口：对齐 device_info_pg_repository.go 的三态 fail-closed 语义。
+	// #64 fail-open 收口：沿用 authz.ApplyDeviceVisibilityFilter 的三态 fail-closed 语义。
 	//   nil         → 超管，不过滤
-	//   []（非 nil）  → 非超管且无任何可见分组，短路空集（此前 len>0 判断会 fail-open 返全量）
-	//   [g1, ...]   → 限定到这些分组
-	realVisibleGroups, includeUngrouped := authz.SplitVisibleGroups(filter.VisibleGroups)
-	if filter.VisibleGroups != nil && len(filter.VisibleGroups) == 0 {
-		builder = builder.Where("FALSE")
-		countBuilder = countBuilder.Where("FALSE")
-	} else if filter.GroupID != nil || len(filter.GroupIDs) > 0 || len(realVisibleGroups) > 0 || includeUngrouped {
-		if filter.GroupID == nil {
-			// Only add JOIN if not already added by GroupID
-			builder = builder.Join("device_group_members dgm2 ON d.id = dgm2.device_id")
-			countBuilder = countBuilder.Join("device_group_members dgm2 ON d.id = dgm2.device_id")
-		}
-		// Use separate alias if JOIN already exists
-		joinAlias := "dgm"
-		if filter.GroupID != nil {
-			// Already joined with dgm, need subquery or additional condition
-			// For simplicity, we use EXISTS subquery for visible groups check
-			if len(realVisibleGroups) > 0 && includeUngrouped {
-				builder = builder.Where(sq.Or{
-					sq.Eq{"d.id": sq.Select("dgm_vis.device_id").
-						From("device_group_members dgm_vis").
-						Where(sq.Eq{"dgm_vis.group_id": realVisibleGroups})},
-					sq.Expr(ungroupedDevicesWhere),
-				})
-				countBuilder = countBuilder.Where(sq.Or{
-					sq.Eq{"d.id": sq.Select("dgm_vis.device_id").
-						From("device_group_members dgm_vis").
-						Where(sq.Eq{"dgm_vis.group_id": realVisibleGroups})},
-					sq.Expr(ungroupedDevicesWhere),
-				})
-			} else if includeUngrouped {
-				builder = builder.Where(sq.Expr(ungroupedDevicesWhere))
-				countBuilder = countBuilder.Where(sq.Expr(ungroupedDevicesWhere))
-			} else if len(realVisibleGroups) > 0 {
-				builder = builder.Where(sq.Eq{"d.id": sq.Select("dgm_vis.device_id").
-					From("device_group_members dgm_vis").
-					Where(sq.Eq{"dgm_vis.group_id": realVisibleGroups})})
-				countBuilder = countBuilder.Where(sq.Eq{"d.id": sq.Select("dgm_vis.device_id").
-					From("device_group_members dgm_vis").
-					Where(sq.Eq{"dgm_vis.group_id": realVisibleGroups})})
-			}
-		} else {
-			if len(realVisibleGroups) > 0 && includeUngrouped {
-				builder = builder.Where(sq.Or{
-					sq.Eq{joinAlias + ".group_id": realVisibleGroups},
-					sq.Expr(ungroupedDevicesWhere),
-				})
-				countBuilder = countBuilder.Where(sq.Or{
-					sq.Eq{joinAlias + ".group_id": realVisibleGroups},
-					sq.Expr(ungroupedDevicesWhere),
-				})
-			} else if includeUngrouped {
-				builder = builder.Where(sq.Expr(ungroupedDevicesWhere))
-				countBuilder = countBuilder.Where(sq.Expr(ungroupedDevicesWhere))
-			} else if len(realVisibleGroups) > 0 {
-				builder = builder.Where(sq.Eq{joinAlias + ".group_id": realVisibleGroups})
-				countBuilder = countBuilder.Where(sq.Eq{joinAlias + ".group_id": realVisibleGroups})
-			}
-		}
+	//   []（非 nil）  → 非超管且无任何可见分组，短路空集
+	//   [g1, ...]   → 限定到这些分组；包含 DefaultLevel2GroupID 时自动放行未分组设备
+	if filter.VisibleGroups != nil {
+		builder = authz.ApplyDeviceVisibilityFilter(builder, "d.id", filter.VisibleGroups)
+		countBuilder = authz.ApplyDeviceVisibilityFilter(countBuilder, "d.id", filter.VisibleGroups)
 	}
 
 	if filter.Carrier != nil {
