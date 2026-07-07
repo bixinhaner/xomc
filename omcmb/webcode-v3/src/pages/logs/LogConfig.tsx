@@ -66,6 +66,7 @@ const CARDS: CardSpec[] = [
     accent: '#a855f7',
     fields: [
       { key: 'max_size_mb', label: '单文件上限', type: 'int', min: 1, max: 10240, suffix: 'MB' },
+      { key: 'rotate_interval_minutes', label: '轮转间隔', type: 'int', min: 1, max: 1440, suffix: '分钟' },
       { key: 'max_age_days', label: '最大保留', type: 'int', min: 1, max: 3650, suffix: '天' },
       { key: 'keep_files', label: '保留份数', type: 'int', min: 1, max: 1000, suffix: '份' },
     ],

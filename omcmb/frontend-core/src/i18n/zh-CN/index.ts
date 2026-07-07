@@ -6900,7 +6900,7 @@ const messages: Record<string, string> = {
   'logCfg.retention.title':             '审计/业务日志保留',
   'logCfg.retention.desc':              '各类日志表按时间保留，worker 每日 05:00 批量删除过期行。安全/审计类建议久留、高频报文类可短留；总开关关闭则跳过整轮清理。',
   'logCfg.rotation.title':              '日志文件轮转',
-  'logCfg.rotation.desc':               'app/acs/worker 各自运行日志文件的大小/个数/过期。改完热加载，≤1 分钟生效（单文件大小调小即时生效，调大以各服务 YAML 为硬兜底）。',
+  'logCfg.rotation.desc':               'app/acs/worker 各自运行日志文件的大小/定时切割间隔/个数/过期。改完热加载，≤1 分钟生效（未配置时以各服务 YAML 为启动默认值）。',
   'logCfg.field.enabled':               '启用日志保留清理',
   'logCfg.field.audit_days':            '审计日志保留天数',
   'logCfg.field.ops_audit_days':        '运维审计日志保留天数',
@@ -6911,6 +6911,7 @@ const messages: Record<string, string> = {
   'logCfg.field.ne_message_days':       '网元报文日志保留天数',
   'logCfg.field.event_days':            '设备事件日志保留天数',
   'logCfg.field.max_size_mb':           '单文件最大大小（MB，超过切割）',
+  'logCfg.field.rotate_interval_minutes': '定时轮转间隔（分钟）',
   'logCfg.field.max_age_days':          '日志归档保留天数',
   'logCfg.field.keep_files':            '保持不压缩的最新归档个数',
 

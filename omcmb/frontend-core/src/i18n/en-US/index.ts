@@ -6871,7 +6871,7 @@ const messages: Record<string, string> = {
   'logCfg.retention.title':             'Audit / Business Log Retention',
   'logCfg.retention.desc':              'Time-based retention per log table; worker batch-deletes expired rows daily at 05:00. Keep security/audit logs longer, high-volume message logs shorter; disabling the master switch skips the whole cleanup.',
   'logCfg.rotation.title':              'Log File Rotation',
-  'logCfg.rotation.desc':               'Per-service (app/acs/worker) runtime log file size/count/age. Hot-reloaded within ≤1 minute (shrinking max size takes effect immediately; enlarging is bounded by each service YAML as a hard backstop).',
+  'logCfg.rotation.desc':               'Per-service (app/acs/worker) runtime log file size/timed rotation interval/count/age. Hot-reloaded within ≤1 minute; missing values fall back to each service YAML startup default.',
   'logCfg.field.enabled':               'Enable Log Retention Cleanup',
   'logCfg.field.audit_days':            'Audit Log Retention (days)',
   'logCfg.field.ops_audit_days':        'Ops Audit Log Retention (days)',
@@ -6882,6 +6882,7 @@ const messages: Record<string, string> = {
   'logCfg.field.ne_message_days':       'NE Message Log Retention (days)',
   'logCfg.field.event_days':            'Device Event Log Retention (days)',
   'logCfg.field.max_size_mb':           'Max File Size (MB, rotate above)',
+  'logCfg.field.rotate_interval_minutes': 'Timed Rotation Interval (minutes)',
   'logCfg.field.max_age_days':          'Archive Retention (days)',
   'logCfg.field.keep_files':            'Uncompressed Recent Archives to Keep',
 
