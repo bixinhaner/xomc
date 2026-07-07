@@ -42,11 +42,13 @@ func TestEffectiveRotation_FullOverride(t *testing.T) {
 func TestEffectiveRotateInterval(t *testing.T) {
 	resetOverride()
 	assert.Equal(t, 5*time.Minute, effectiveRotateInterval(5*time.Minute))
+	assert.Equal(t, DefaultRotateInterval, effectiveRotateInterval(0))
 
 	SetRotationOverride(RotationOverride{RotateIntervalMinutes: 30})
 	assert.Equal(t, 30*time.Minute, effectiveRotateInterval(5*time.Minute))
 	SetRotationOverride(RotationOverride{RotateIntervalMinutes: -1})
 	assert.Equal(t, 5*time.Minute, effectiveRotateInterval(5*time.Minute))
+	assert.Equal(t, DefaultRotateInterval, effectiveRotateInterval(0))
 	resetOverride()
 }
 
