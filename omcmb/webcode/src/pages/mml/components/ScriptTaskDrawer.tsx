@@ -8,6 +8,7 @@ import {
   Form,
   Input,
   InputNumber,
+  Alert,
   Radio,
   Select,
   Space,
@@ -74,6 +75,11 @@ interface TaskForm {
   failedRetryWaitTime: number;
 }
 
+interface DeviceParamRow {
+  deviceSn: string;
+  parameters: Record<string, string>;
+}
+
 const SECTION_DOT: React.CSSProperties = {
   display: 'inline-block',
   width: 4,
@@ -105,6 +111,8 @@ export default function ScriptTaskDrawer({
 
   const [deviceSns, setDeviceSns] = useState<string[]>([]);
   const [fileList, setFileList] = useState<UploadFile[]>([]);
+  const [deviceParamFileList, setDeviceParamFileList] = useState<UploadFile[]>([]);
+  const [deviceParamRows, setDeviceParamRows] = useState<DeviceParamRow[]>([]);
   const [parsedCommands, setParsedCommands] = useState<MMLTaskCommandInput[]>([]);
   // Console 入口预填的命令文本同样允许用户手动调整（to-do-list 当轮 #6）。
   // 文件入口下，scriptContent 仅在解析完成后用于本地展示，不直接提交。
@@ -131,6 +139,8 @@ export default function ScriptTaskDrawer({
     // 预填来自父组件的已选设备 SN；做一次排重避免重复项。
     setDeviceSns(prefillDeviceSns ? Array.from(new Set(prefillDeviceSns.filter(Boolean))) : []);
     setFileList([]);
+    setDeviceParamFileList([]);
+    setDeviceParamRows([]);
     const initial = prefillContent ?? '';
     setScriptContent(initial);
     setParsedCommands(initial ? parseScriptCommands(initial) : []);
@@ -156,6 +166,22 @@ export default function ScriptTaskDrawer({
     };
     reader.readAsText(file);
   }, []);
+
+  const parseDeviceParamFile = useCallback((file: File) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const content = event.target?.result as string;
+        const rows = parseDeviceParamCsv(content);
+        setDeviceParamRows(rows);
+        toast.success(t('mml.deviceParamRowsParsed', { count: rows.length }));
+      } catch (err) {
+        setDeviceParamRows([]);
+        toast.error(err, t('mml.deviceParamParseFailed'));
+      }
+    };
+    reader.readAsText(file);
+  }, [t]);
 
   // 模板内容同步自 docs/design 附带的 MMLTemplate.txt（to-do-list 本轮 #2），
   // 覆盖内建与自定义 MML 命令的书写格式，与 ACS 解析一致。
@@ -210,17 +236,15 @@ export default function ScriptTaskDrawer({
     return form
       .validateFields()
       .then(async (values) => {
-        // 设备 SN 始终必填（to-do-list 当轮 #2）：哪怕用户已经选了脚本，
-        // 没有目标设备也不能提交任务。
-        if (deviceSns.length === 0) {
+        const hasDeviceParamRows = deviceParamRows.length > 0;
+        // 设备 SN 始终必填（to-do-list 当轮 #2）：设备参数表模式下从 CSV 取 device_sn。
+        if (!hasDeviceParamRows && deviceSns.length === 0) {
           toast.warning(t('mml.snRequired'));
           throw new Error('SN_REQUIRED');
         }
 
-        const payload = {
+        const basePayload = {
           taskName: values.taskName.trim(),
-          deviceSns,
-          commands: parsedCommands,
           // BUG-06 fix (#706)：脚本任务页传入 scriptId 时随 commands 一同提交，
           // 后端保存 mml_tasks.script_id 用于历史关联与 last_run_status 回写。
           scriptId: scriptId ?? undefined,
@@ -248,8 +272,30 @@ export default function ScriptTaskDrawer({
               ? values.periodTime.format('HH:mm:ss')
               : undefined,
         };
-        await createTaskMutation.mutateAsync(payload as Parameters<typeof createTaskMutation.mutateAsync>[0]);
-        toast.success(t('mml.taskCreated'));
+
+        if (hasDeviceParamRows) {
+          const writableCommands = parsedCommands.filter((cmd) => isWriteOperation(cmd.operationType));
+          if (writableCommands.length === 0) {
+            toast.warning(t('mml.deviceParamRequiresWriteCommand'));
+            throw new Error('DEVICE_PARAM_REQUIRES_WRITE_COMMAND');
+          }
+          for (const row of deviceParamRows) {
+            await createTaskMutation.mutateAsync({
+              ...basePayload,
+              taskName: `${basePayload.taskName}_${row.deviceSn}`,
+              deviceSns: [row.deviceSn],
+              commands: mergeDeviceRowParams(parsedCommands, row.parameters),
+            });
+          }
+          toast.success(t('mml.deviceParamTasksCreated', { count: deviceParamRows.length }));
+        } else {
+          await createTaskMutation.mutateAsync({
+            ...basePayload,
+            deviceSns,
+            commands: parsedCommands,
+          });
+          toast.success(t('mml.taskCreated'));
+        }
 
         onSuccess?.();
         onClose();
@@ -259,6 +305,7 @@ export default function ScriptTaskDrawer({
         // 校验错误 err 没有 message，静默即可；其它错误统一通过 toast 暴露。
         if (err && (err as { errorFields?: unknown }).errorFields) return;
         if (err instanceof Error && err.message === 'SN_REQUIRED') return;
+        if (err instanceof Error && err.message === 'DEVICE_PARAM_REQUIRES_WRITE_COMMAND') return;
         toast.error(err, t('mml.taskCreateFailedPrefix'));
       });
   }, [
@@ -335,6 +382,37 @@ export default function ScriptTaskDrawer({
           </Space.Compact>
           <span style={{ color: '#999', fontSize: 12 }}>{t('mml.deviceSnTip')}</span>
         </div>
+
+        <Form.Item label={t('mml.deviceParamTable')} style={{ marginLeft: 12 }}>
+          <Space orientation="vertical" style={{ width: '100%' }}>
+            <Space>
+              <Upload
+                accept=".csv"
+                fileList={deviceParamFileList}
+                beforeUpload={(file) => {
+                  setDeviceParamFileList([file as unknown as UploadFile]);
+                  parseDeviceParamFile(file);
+                  return false;
+                }}
+                onRemove={() => {
+                  setDeviceParamFileList([]);
+                  setDeviceParamRows([]);
+                }}
+                maxCount={1}
+              >
+                <Button icon={<UploadOutlined />}>{t('mml.importDeviceParamCsv')}</Button>
+              </Upload>
+              <span style={{ color: '#999', fontSize: 12 }}>{t('mml.deviceParamCsvTip')}</span>
+            </Space>
+            {deviceParamRows.length > 0 && (
+              <Alert
+                type="info"
+                showIcon
+                message={t('mml.deviceParamSplitTaskTip', { count: deviceParamRows.length })}
+              />
+            )}
+          </Space>
+        </Form.Item>
 
         {prefillContent !== undefined ? (
           // MML Console 入口：预填的命令也允许用户手动微调（to-do-list 当轮 #6）。
@@ -616,4 +694,83 @@ function findCommentIndex(line: string): number {
   if (hash < 0) return slash;
   if (slash < 0) return hash;
   return Math.min(hash, slash);
+}
+
+function parseDeviceParamCsv(content: string): DeviceParamRow[] {
+  const lines = content
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length < 2) throw new Error('CSV requires header and at least one data row');
+
+  const headers = parseCsvLine(lines[0]).map((header) => header.trim());
+  const deviceIndex = headers.findIndex((header) => header.toLowerCase() === 'device_sn');
+  if (deviceIndex < 0) throw new Error('CSV header must include device_sn');
+
+  const paramHeaders = headers
+    .map((header, index) => ({ header, index }))
+    .filter((item) => item.index !== deviceIndex && item.header);
+  if (paramHeaders.length === 0) throw new Error('CSV must include at least one parameter column');
+
+  const rows: DeviceParamRow[] = [];
+  for (const line of lines.slice(1)) {
+    const values = parseCsvLine(line);
+    const deviceSn = values[deviceIndex]?.trim();
+    if (!deviceSn) continue;
+    const parameters: Record<string, string> = {};
+    for (const { header, index } of paramHeaders) {
+      const value = values[index]?.trim();
+      if (value) parameters[header] = value;
+    }
+    rows.push({ deviceSn, parameters });
+  }
+  if (rows.length === 0) throw new Error('CSV contains no valid device rows');
+  return rows;
+}
+
+function parseCsvLine(line: string): string[] {
+  const cells: string[] = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+    if (ch === ',' && !inQuotes) {
+      cells.push(current);
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  cells.push(current);
+  return cells;
+}
+
+function mergeDeviceRowParams(
+  commands: MMLTaskCommandInput[],
+  rowParams: Record<string, string>
+): MMLTaskCommandInput[] {
+  return commands.map((cmd) => {
+    if (!isWriteOperation(cmd.operationType)) return cmd;
+    return {
+      ...cmd,
+      parameters: {
+        ...(cmd.parameters ?? {}),
+        ...rowParams,
+      },
+    };
+  });
+}
+
+function isWriteOperation(operationType?: string): boolean {
+  const op = operationType?.toUpperCase();
+  return op === 'MOD' || op === 'ADD';
 }
