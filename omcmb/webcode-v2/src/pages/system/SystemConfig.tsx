@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Loader2, RotateCcw, Save } from 'lucide-react'
+import { CheckCircle2, Copy, Loader2, PlugZap, RotateCcw, Save } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -18,6 +18,13 @@ import {
   useSysConfigsByCategory,
   useBatchUpdateSysConfigs,
 } from '@core/hooks/api/useSystem'
+import {
+  useAdminAgentConfig,
+  useSaveAdminAgentConfig,
+  useSyncAdminAgentConfig,
+  useTestAdminAgentConfig,
+} from '@core/hooks/api/useAgentConfig'
+import type { AgentAdminConfigUpdate } from '@core/types/agentConfig'
 import type {
   BatchUpdateSysConfigItem,
   SysConfigItem,
@@ -41,6 +48,7 @@ const CATEGORIES: { key: string; label: string }[] = [
   { key: 'security', label: '安全' },
   { key: 'device', label: '设备' },
   { key: 'storage', label: '存储' },
+  { key: 'agent', label: 'Agent' },
   // northbound 已隐藏（#820）：北向功能未完成，待完成后恢复
 ]
 
@@ -324,6 +332,232 @@ function CategoryEditor({ category }: { category: string }) {
   )
 }
 
+type AgentDraft = {
+  enabled: boolean
+  agentStudioBaseUrl: string
+  agentStudioServiceToken: string
+  omcPublicBaseUrl: string
+  connectorSlug: string
+}
+
+function agentDraftFromConfig(config: ReturnType<typeof useAdminAgentConfig>['data']): AgentDraft {
+  return {
+    enabled: Boolean(config?.enabled),
+    agentStudioBaseUrl: config?.agentStudioBaseUrl ?? '',
+    agentStudioServiceToken: '',
+    omcPublicBaseUrl: config?.omcPublicBaseUrl ?? '',
+    connectorSlug: config?.connectorSlug ?? '',
+  }
+}
+
+function statusVariant(status: string): 'success' | 'destructive' | 'warning' | 'muted' {
+  if (status === 'connected') return 'success'
+  if (status === 'error') return 'destructive'
+  if (status === 'disabled') return 'muted'
+  return 'warning'
+}
+
+function AgentConfigEditor() {
+  const t = useT()
+  const configQ = useAdminAgentConfig()
+  const saveM = useSaveAdminAgentConfig()
+  const testM = useTestAdminAgentConfig()
+  const syncM = useSyncAdminAgentConfig()
+  const [draft, setDraft] = useState<AgentDraft>(() => agentDraftFromConfig(undefined))
+
+  useEffect(() => {
+    setDraft(agentDraftFromConfig(configQ.data))
+  }, [configQ.data])
+
+  function patch(next: Partial<AgentDraft>) {
+    setDraft((prev) => ({ ...prev, ...next }))
+  }
+
+  function payload(): AgentAdminConfigUpdate {
+    const token = draft.agentStudioServiceToken.trim()
+    return {
+      enabled: draft.enabled,
+      agentStudioBaseUrl: draft.agentStudioBaseUrl.trim(),
+      agentStudioServiceToken: token || undefined,
+      omcPublicBaseUrl: draft.omcPublicBaseUrl.trim(),
+      connectorSlug: draft.connectorSlug.trim() || undefined,
+    }
+  }
+
+  async function copyText(value: string) {
+    if (!value) return
+    await navigator.clipboard?.writeText(value)
+  }
+
+  const busy = saveM.isPending || testM.isPending || syncM.isPending
+  const mutationError = saveM.error || testM.error || syncM.error
+  const mutationErrorText = mutationError instanceof Error ? mutationError.message : ''
+
+  if (configQ.isLoading) {
+    return (
+      <div className="flex h-40 items-center justify-center text-muted-foreground">
+        <Loader2 className="size-5 animate-spin" />
+      </div>
+    )
+  }
+
+  if (configQ.isError) {
+    return (
+      <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+        加载失败：{configQ.error instanceof Error ? configQ.error.message : '未知错误'}
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      {configQ.data?.lastError ? (
+        <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          {t('system.agent.lastError')}：{configQ.data.lastError}
+        </div>
+      ) : null}
+      {mutationErrorText ? (
+        <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          {mutationErrorText}
+        </div>
+      ) : null}
+
+      <div className="overflow-hidden rounded-lg border bg-card">
+        <div className="flex items-center justify-between border-b px-4 py-3">
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            <PlugZap className="size-4 text-primary" />
+            {t('system.agent.section.connection')}
+          </div>
+          <Badge variant={statusVariant(configQ.data?.status ?? 'not_configured')}>
+            {configQ.data?.status ?? 'not_configured'}
+          </Badge>
+        </div>
+
+        <div className="divide-y">
+          <div className="grid gap-2 px-4 py-3 md:grid-cols-[240px_1fr] md:items-center">
+            <Label>{t('system.agent.enabled')}</Label>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="size-4 accent-primary"
+                checked={draft.enabled}
+                onChange={(event) => patch({ enabled: event.target.checked })}
+              />
+              {draft.enabled ? '开启' : '关闭'}
+            </label>
+          </div>
+          <AgentInputRow
+            label={t('system.agent.agentStudioBaseUrl')}
+            value={draft.agentStudioBaseUrl}
+            onChange={(value) => patch({ agentStudioBaseUrl: value })}
+            placeholder="https://agent.example.com"
+          />
+          <div className="grid gap-2 px-4 py-3 md:grid-cols-[240px_1fr] md:items-center">
+            <div>
+              <Label>{t('system.agent.serviceToken')}</Label>
+              <div className="mt-1">
+                <Badge variant={configQ.data?.serviceTokenConfigured ? 'success' : 'warning'}>
+                  {configQ.data?.serviceTokenConfigured
+                    ? t('system.agent.serviceTokenSet')
+                    : t('system.agent.serviceTokenUnset')}
+                </Badge>
+              </div>
+            </div>
+            <Input
+              type="password"
+              value={draft.agentStudioServiceToken}
+              onChange={(event) => patch({ agentStudioServiceToken: event.target.value })}
+              placeholder={t('system.agent.serviceTokenPlaceholder')}
+              autoComplete="new-password"
+            />
+          </div>
+          <AgentInputRow
+            label={t('system.agent.omcPublicBaseUrl')}
+            value={draft.omcPublicBaseUrl}
+            onChange={(value) => patch({ omcPublicBaseUrl: value })}
+            placeholder="https://ops.example.com"
+          />
+          <AgentInputRow
+            label={t('system.agent.connectorSlug')}
+            value={draft.connectorSlug ?? ''}
+            onChange={(value) => patch({ connectorSlug: value })}
+            placeholder="external-agent-..."
+          />
+          <ReadonlyRow
+            label={t('system.agent.connectorId')}
+            value={configQ.data?.connectorId || t('system.agent.emptyValue')}
+            onCopy={() => copyText(configQ.data?.connectorId ?? '')}
+          />
+          <ReadonlyRow
+            label={t('system.agent.runtimeStreamUrl')}
+            value={configQ.data?.runtimeStreamUrl || t('system.agent.emptyValue')}
+            onCopy={() => copyText(configQ.data?.runtimeStreamUrl ?? '')}
+          />
+          <div className="grid gap-2 px-4 py-3 md:grid-cols-[240px_1fr] md:items-center">
+            <Label>{t('system.agent.lastValidatedAt')}</Label>
+            <span className="text-sm text-muted-foreground">
+              {configQ.data?.lastValidatedAt || '—'}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Button variant="outline" size="sm" disabled={busy} onClick={() => setDraft(agentDraftFromConfig(configQ.data))}>
+          <RotateCcw className="size-4" /> {t('system.agent.reset')}
+        </Button>
+        <Button variant="outline" size="sm" disabled={busy} onClick={() => testM.mutate(payload())}>
+          {testM.isPending ? <Loader2 className="size-4 animate-spin" /> : <PlugZap className="size-4" />}
+          {t('system.agent.test')}
+        </Button>
+        <Button variant="outline" size="sm" disabled={busy} onClick={() => saveM.mutate(payload())}>
+          {saveM.isPending ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
+          {t('system.agent.save')}
+        </Button>
+        <Button size="sm" disabled={busy} onClick={() => syncM.mutate(payload())}>
+          {syncM.isPending ? <Loader2 className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />}
+          {t('system.agent.sync')}
+        </Button>
+        {testM.isSuccess ? <Badge variant="success">{t('system.agent.testSuccess')}</Badge> : null}
+        {saveM.isSuccess ? <Badge variant="success">{t('system.agent.saveSuccess')}</Badge> : null}
+        {syncM.isSuccess ? <Badge variant="success">{t('system.agent.syncSuccess')}</Badge> : null}
+      </div>
+    </div>
+  )
+}
+
+function AgentInputRow(props: {
+  label: string
+  value: string
+  placeholder?: string
+  onChange(value: string): void
+}) {
+  return (
+    <div className="grid gap-2 px-4 py-3 md:grid-cols-[240px_1fr] md:items-center">
+      <Label>{props.label}</Label>
+      <Input
+        value={props.value}
+        placeholder={props.placeholder}
+        onChange={(event) => props.onChange(event.target.value)}
+      />
+    </div>
+  )
+}
+
+function ReadonlyRow(props: { label: string; value: string; onCopy(): void }) {
+  return (
+    <div className="grid gap-2 px-4 py-3 md:grid-cols-[240px_1fr] md:items-center">
+      <Label>{props.label}</Label>
+      <div className="flex min-w-0 items-center gap-2">
+        <Input value={props.value} readOnly className="font-mono text-xs" />
+        <Button type="button" variant="outline" size="icon" onClick={props.onCopy}>
+          <Copy className="size-4" />
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 export default function SystemConfig() {
   const [category, setCategory] = useState<string>(CATEGORIES[0].key)
 
@@ -346,7 +580,7 @@ export default function SystemConfig() {
         </div>
       }
     >
-      <CategoryEditor key={category} category={category} />
+      {category === 'agent' ? <AgentConfigEditor /> : <CategoryEditor key={category} category={category} />}
     </PageShell>
   )
 }

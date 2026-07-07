@@ -16,6 +16,7 @@ import DeviceSettings from './DeviceSettings';
 import StorageSettings from './StorageSettings';
 // NorthboundSettings import 已移除（#820：北向功能未完成，tab 已隐藏）
 import TransferSettings from './TransferSettings';
+import AgentSettings from './AgentSettings';
 import PmRetentionSection from './PmRetentionSection';
 import RetentionBackpressureSection from './RetentionBackpressureSection';
 import LogRetentionSection from './LogRetentionSection';
@@ -30,7 +31,7 @@ import { buildBatchItems } from './sysConfigSerialize';
 // notify tab 已隐藏（#781）：邮件/短信后端未真实打通前不展示，避免误导用户
 // omc tab 已隐藏（#802）：rsyslog/磁盘告警后端未实现，两个卡片均为空壳
 // northbound tab 已隐藏（#820）：北向功能未完成（用户管理 Mock 数据、服务信息无 DB 记录），待完成后恢复
-type SettingsTab = 'basic' | 'security' | 'device' | 'storage' | 'acs_transfer' | 'pm_retention' | 'retention_bp' | 'log_cfg';
+type SettingsTab = 'basic' | 'security' | 'device' | 'storage' | 'acs_transfer' | 'agent' | 'pm_retention' | 'retention_bp' | 'log_cfg';
 
 // 设置子页签配置
 const settingsTabs: { key: SettingsTab; labelKey: string }[] = [
@@ -39,6 +40,7 @@ const settingsTabs: { key: SettingsTab; labelKey: string }[] = [
   { key: 'device', labelKey: 'system.config.device' },
   { key: 'storage', labelKey: 'system.config.storage' },
   { key: 'acs_transfer', labelKey: 'system.config.acsTransfer' },
+  { key: 'agent', labelKey: 'system.config.agent' },
   // northbound 已隐藏（#820）
   // T-0164 收尾 G2-Gap-1：PM 数据保留策略页签
   { key: 'pm_retention', labelKey: 'system.config.pmRetention' },
@@ -103,12 +105,13 @@ export default function SystemConfig() {
   );
 
   // 拉当前 tab 的所有 KV（按 category）。切 tab 自动重发请求。
-  const { data: configList, isFetching } = useSysConfigsByCategory(activeTab);
+  const activeForm = formMap[activeTab];
+  const { data: configList, isFetching } = useSysConfigsByCategory(activeTab, Boolean(activeForm));
 
   // 把后端返回的 KV 灌进对应 tab 的 form。空数据也照样 reset，避免显示其他 tab 的残留值。
   useEffect(() => {
-    const form = formMap[activeTab];
-    // 自管表单页签（pm_retention）无对应 form，跳过 —— 否则 form.resetFields()
+    const form = activeForm;
+    // 自管表单页签（pm_retention / agent 等）无对应 form，跳过 —— 否则 form.resetFields()
     // 会抛 "Cannot read properties of undefined (reading 'resetFields')"。
     if (!form) return;
     form.resetFields();
@@ -118,7 +121,7 @@ export default function SystemConfig() {
       fields[item.key] = decodeValue(item.value, item.valueType);
     }
     form.setFieldsValue(fields);
-  }, [activeTab, configList, formMap]);
+  }, [activeForm, configList]);
 
   const batchUpdate = useBatchUpdateSysConfigs();
 
@@ -161,6 +164,8 @@ export default function SystemConfig() {
         return <StorageSettings form={storageForm} />;
       case 'acs_transfer':
 		return <TransferSettings form={transferForm} />;
+      case 'agent':
+        return <AgentSettings />;
       // northbound case 已移除（#820）
       case 'pm_retention':
         // T-0164 收尾 G2-Gap-1：PM 数据保留独立组件，内部自管 form + state（不需要 form props）
