@@ -1172,7 +1172,9 @@ function KPITabContent({ device, t }: KPITabContentProps) {
                       // KPI 算不出、该设备无 KPI 行，泛化「暂无数据」无法区分「指标库未注册」
                       // 与「时段无采样」。其它制式保持通用文案。
                       description={
-                        technology === 'nr'
+                        chart.hasSamples
+                          ? t('device.detail.kpiAllMissing')
+                          : technology === 'nr'
                           ? t('device.detail.kpiNoDataNr')
                           : t('common.noData')
                       }

@@ -1028,6 +1028,7 @@ const messages: Record<string, string> = {
   'device.parameter.noMatchHint': '未找到匹配的参数',
   'device.quickSettings.tabTitle': '快速设置',
   'device.detail.kpiPrevPeriod':          '{name}（上一周期）',
+  'device.detail.kpiAllMissing':          '已有 PM 记录，但该 KPI 在当前窗口全部缺值',
   'device.detail.kpiNoDataNr':            '该设备暂无可用 KPI 数据，请确认厂商指标库已注册',
   'device.detail.deviceFetchFailed':      '设备侧取数失败',
   'device.detail.deviceFetchLatest':      '已获取设备侧最新数据',

@@ -191,6 +191,8 @@ export function KPIQueryPage() {
       metricPaths,
       startTime: range?.start,
       endTime: range?.end,
+      fillEmpty: true,
+      limit: 5000,
       objectLdns: effectiveLdns.length > 0 ? effectiveLdns : undefined,
     },
     deviceSns,

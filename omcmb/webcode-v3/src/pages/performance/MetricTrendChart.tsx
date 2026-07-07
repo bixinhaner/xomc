@@ -3,6 +3,7 @@ import { useMemo } from 'react'
 import { GlassPanel } from '@/components/ui/GlassPanel'
 import { Sparkline } from '@/components/viz/Sparkline'
 import { alignPointsToGrid } from '@core/utils/buildRegularTimeGrid'
+import { normalizePmMetricValue } from '@core/utils/pmMetricValue'
 import type { AggregatedRow, Granularity } from '@core/types/pmDashboard'
 
 interface Props {
@@ -32,12 +33,11 @@ export function MetricTrendChart({
   endTime,
   granularity,
 }: Props) {
-  const { series, latest, avg, min, max, points } = useMemo(() => {
+  const { series, latest, avg, min, max, points, hasRows } = useMemo(() => {
     // 同桶多设备/小区取最后一条值聚一条总线；缺采行(metricValue==null)记 null 占位。
     const byBucket = new Map<string, number | null>()
     rows.forEach((r) => {
-      const v = r.metricValue
-      byBucket.set(r.startTime, v === undefined ? null : v)
+      byBucket.set(r.startTime, normalizePmMetricValue(r.metricValue))
     })
     const sparsePoints = Array.from(byBucket.entries()).map(([time, value]) => ({
       timeMs: Date.parse(time),
@@ -60,6 +60,7 @@ export function MetricTrendChart({
         min: null,
         max: null,
         points: 0,
+        hasRows: rows.length > 0,
       }
     }
     const sum = nums.reduce((a, b) => a + b, 0)
@@ -72,6 +73,7 @@ export function MetricTrendChart({
       min: Math.min(...nums),
       max: Math.max(...nums),
       points: nums.length,
+      hasRows: rows.length > 0,
     }
   }, [rows, startTime, endTime, granularity])
 
@@ -86,7 +88,7 @@ export function MetricTrendChart({
       <div className="p-4">
         {points === 0 ? (
           <div className="flex items-center justify-center py-6 font-mono text-[11px] uppercase tracking-[0.2em] text-cyan-300/40">
-            NO SAMPLE IN WINDOW
+            {hasRows ? 'MISSING VALUE IN WINDOW' : 'NO SAMPLE IN WINDOW'}
           </div>
         ) : (
           <>

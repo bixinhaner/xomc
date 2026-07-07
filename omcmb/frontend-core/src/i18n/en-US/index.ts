@@ -1026,6 +1026,7 @@ const messages: Record<string, string> = {
   'device.parameter.noMatchHint': 'No matching parameters found',
   'device.quickSettings.tabTitle': 'Quick Settings',
   'device.detail.kpiPrevPeriod':          '{name} (Prev. Period)',
+  'device.detail.kpiAllMissing':          'PM records exist, but this KPI is missing in all buckets',
   'device.detail.kpiNoDataNr':            'No KPI data available for this device; please verify the vendor indicator library is registered',
   'device.detail.deviceFetchFailed':      'Failed to fetch from device',
   'device.detail.deviceFetchLatest':      'Latest device-side data fetched',

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { pivotLongToWide, parseObjectLdn } from '../pmPivotTransform';
+import { formatPivotNumber, pivotLongToWide, parseObjectLdn } from '../pmPivotTransform';
 import type { AggregatedRow } from '../../types/pmDashboard';
 
 function row(partial: Partial<AggregatedRow>): AggregatedRow {
@@ -134,6 +134,26 @@ describe('pivotLongToWide', () => {
     expect(t1.cells['M2']).toBeNull();
     expect(t2.cells['M1']).toBeNull();
     expect(t2.cells['M2']).toBe(2);
+  });
+
+  it('入库缺值行 metricValue=null 时保留行和设备维度，单元格显示占位符', () => {
+    const r = pivotLongToWide([
+      row({ metricPath: 'M1', metricValue: null, time: '2026-05-26T10:00:00Z', deviceSn: 'DEV-NULL' }),
+    ]);
+    expect(r.rows).toHaveLength(1);
+    expect(r.rows[0].deviceSn).toBe('DEV-NULL');
+    expect(r.rows[0].cells['M1']).toBeNull();
+    expect(formatPivotNumber(r.rows[0].cells['M1'])).toBe('-');
+  });
+
+  it('非有限数按缺值处理，避免表格/导出出现 NaN', () => {
+    const r = pivotLongToWide([
+      row({ metricPath: 'M1', metricValue: Number.NaN }),
+      row({ metricPath: 'M2', metricValue: Number.POSITIVE_INFINITY }),
+    ]);
+    expect(r.rows[0].cells['M1']).toBeNull();
+    expect(r.rows[0].cells['M2']).toBeNull();
+    expect(formatPivotNumber(Number.NaN)).toBe('-');
   });
 
   it('行按时间倒序 → SN 升序 → LDN 升序（最新数据在前）', () => {
