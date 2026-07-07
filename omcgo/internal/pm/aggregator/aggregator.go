@@ -21,6 +21,7 @@ package aggregator
 
 import (
 	"context"
+	dbsql "database/sql"
 	"fmt"
 	"time"
 
@@ -311,16 +312,19 @@ func (a *Aggregator) loadCountersByObjectLdn(ctx context.Context, target, oui, s
 	out := make(map[string]map[string]float64)
 	for rows.Next() {
 		var objectLdn, name string
-		var val float64
+		var val dbsql.NullFloat64
 		if err := rows.Scan(&objectLdn, &name, &val); err != nil {
 			return nil, err
+		}
+		if !val.Valid {
+			continue
 		}
 		m := out[objectLdn]
 		if m == nil {
 			m = make(map[string]float64)
 			out[objectLdn] = m
 		}
-		m[name] = val
+		m[name] = val.Float64
 	}
 	return out, rows.Err()
 }
@@ -343,9 +347,12 @@ func (a *Aggregator) loadCountersForDevices(ctx context.Context, target string, 
 	defer rows.Close()
 	for rows.Next() {
 		var oui, sn, objectLdn, name string
-		var val float64
+		var val dbsql.NullFloat64
 		if err := rows.Scan(&oui, &sn, &objectLdn, &name, &val); err != nil {
 			return nil, err
+		}
+		if !val.Valid {
+			continue
 		}
 		dk := deviceKey{oui, sn}
 		byLdn := out[dk]
@@ -358,7 +365,7 @@ func (a *Aggregator) loadCountersForDevices(ctx context.Context, target string, 
 			m = make(map[string]float64)
 			byLdn[objectLdn] = m
 		}
-		m[name] = val
+		m[name] = val.Float64
 	}
 	return out, rows.Err()
 }
