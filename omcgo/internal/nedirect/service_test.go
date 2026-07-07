@@ -147,6 +147,9 @@ func (m *mockDeviceRepo) GetBySerialNumber(ctx context.Context, sn string) (*mod
 	}
 	return d, nil
 }
+func (m *mockDeviceRepo) GetDeletedBySerialNumber(_ context.Context, _ string, _ model.CarrierCode) (*model.Device, error) {
+	return nil, nil
+}
 func (m *mockDeviceRepo) Update(ctx context.Context, d *model.Device) error { return nil }
 func (m *mockDeviceRepo) Delete(ctx context.Context, id uuid.UUID) error    { return nil }
 func (m *mockDeviceRepo) List(ctx context.Context, filter device.DeviceFilter) (*model.ListResponse[model.Device], error) {
@@ -185,7 +188,7 @@ func (m *mockDeviceRepo) GetGeoStats(_ context.Context, _ device.GeoStatsFilter)
 func (m *mockDeviceRepo) BatchDelete(_ context.Context, _ []uuid.UUID, _ string) (int64, error) {
 	return 0, nil
 }
-func (m *mockDeviceRepo) SearchDevices(_ context.Context, _ string, _ int, _ []uuid.UUID) ([]device.GeoDevice, error) {
+func (m *mockDeviceRepo) SearchDevices(_ context.Context, _ string, _ int, _ []model.DeviceVisibilityGrant) ([]device.GeoDevice, error) {
 	return nil, nil
 }
 func (m *mockDeviceRepo) FindStaleDevices(_ context.Context, _ time.Time, _ int) ([]*model.Device, error) {
@@ -298,14 +301,24 @@ func (m *mockAlarmStore) ListHistory(ctx context.Context, filter alarm.AlarmFilt
 func (m *mockAlarmStore) Statistics(ctx context.Context, filter alarm.AlarmFilter) (*alarm.AlarmStatistics, error) {
 	return &alarm.AlarmStatistics{}, nil
 }
-func (m *mockAlarmStore) BatchAcknowledge(_ context.Context, _ []uuid.UUID, _ string, _ string) error { return nil }
-func (m *mockAlarmStore) BatchClear(_ context.Context, _ []uuid.UUID, _ string, _ string) error { return nil }
-func (m *mockAlarmStore) HistoryStatistics(_ context.Context, _ alarm.AlarmFilter) (*alarm.AlarmStatistics, error) { return nil, nil }
+func (m *mockAlarmStore) BatchAcknowledge(_ context.Context, _ []uuid.UUID, _ string, _ string) error {
+	return nil
+}
+func (m *mockAlarmStore) BatchClear(_ context.Context, _ []uuid.UUID, _ string, _ string) error {
+	return nil
+}
+func (m *mockAlarmStore) HistoryStatistics(_ context.Context, _ alarm.AlarmFilter) (*alarm.AlarmStatistics, error) {
+	return nil, nil
+}
 func (m *mockAlarmStore) BatchUnacknowledge(_ context.Context, _ []uuid.UUID) error { return nil }
-func (m *mockAlarmStore) BatchHistoryAcknowledge(_ context.Context, _ []uuid.UUID, _ string, _ string) error { return nil }
-func (m *mockAlarmStore) BatchHistoryUnacknowledge(_ context.Context, _ []uuid.UUID) error { return nil }
+func (m *mockAlarmStore) BatchHistoryAcknowledge(_ context.Context, _ []uuid.UUID, _ string, _ string) error {
+	return nil
+}
+func (m *mockAlarmStore) BatchHistoryUnacknowledge(_ context.Context, _ []uuid.UUID) error {
+	return nil
+}
 func (m *mockAlarmStore) BatchHistoryDelete(_ context.Context, _ []uuid.UUID) error { return nil }
-func (m *mockAlarmStore) MarkRead(_ context.Context, _ uuid.UUID) error { return nil }
+func (m *mockAlarmStore) MarkRead(_ context.Context, _ uuid.UUID) error             { return nil }
 
 type mockEventBus struct {
 	published []event.Event

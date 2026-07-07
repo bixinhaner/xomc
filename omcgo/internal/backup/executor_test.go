@@ -72,6 +72,9 @@ func (m *execDeviceRepo) GetBySerialNumber(ctx context.Context, sn string) (*mod
 	}
 	return nil, nil
 }
+func (m *execDeviceRepo) GetDeletedBySerialNumber(_ context.Context, _ string, _ model.CarrierCode) (*model.Device, error) {
+	return nil, nil
+}
 func (m *execDeviceRepo) List(_ context.Context, _ device.DeviceFilter) (*model.ListResponse[model.Device], error) {
 	return nil, nil
 }
@@ -105,7 +108,7 @@ func (m *execDeviceRepo) ListGeo(_ context.Context, _ device.GeoDeviceFilter) ([
 func (m *execDeviceRepo) GetGeoStats(_ context.Context, _ device.GeoStatsFilter) (*device.GeoStats, error) {
 	return &device.GeoStats{}, nil
 }
-func (m *execDeviceRepo) SearchDevices(_ context.Context, _ string, _ int, _ []uuid.UUID) ([]device.GeoDevice, error) {
+func (m *execDeviceRepo) SearchDevices(_ context.Context, _ string, _ int, _ []model.DeviceVisibilityGrant) ([]device.GeoDevice, error) {
 	return nil, nil
 }
 func (m *execDeviceRepo) BatchDelete(_ context.Context, _ []uuid.UUID, _ string) (int64, error) {
