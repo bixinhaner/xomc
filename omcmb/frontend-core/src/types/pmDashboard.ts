@@ -49,7 +49,7 @@ export interface BackendAggregatedRow {
   // counter 行 display_name = metric_path（本身可读）。
   display_name?: string;
   metric_type: string;
-  metric_value: number;
+  metric_value: number | null;
   statis_type?: string;
   granularity: string;
   time: string;
@@ -94,7 +94,7 @@ export function mapBackendAggregatedRow(b: BackendAggregatedRow): AggregatedRow 
     metricPath: b.metric_path,
     displayName: b.display_name || undefined,
     metricType: (b.metric_type as 'counter' | 'kpi') ?? 'counter',
-    // filled=true 是 fill_empty 占位行，后端 metric_value 字段无意义，前端统一显示 "-"。
+    // filled=true 是 fill_empty 占位行；metric_value=null 是入库缺值行，前端统一显示 "-"。
     metricValue: b.filled ? null : b.metric_value,
     statisType: b.statis_type,
     granularity: b.granularity as Granularity,

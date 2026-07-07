@@ -2,8 +2,10 @@ package aggregator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -513,7 +515,9 @@ func scanInto(row []any, dest []any) error {
 		case *float64:
 			*dp = row[i].(float64)
 		case *jsonx.Float:
-			*dp = jsonx.Float(row[i].(float64))
+			if err := dp.Scan(row[i]); err != nil {
+				return err
+			}
 		case *time.Time:
 			*dp = row[i].(time.Time)
 		case **string:
@@ -547,6 +551,36 @@ func scanInto(row []any, dest []any) error {
 		}
 	}
 	return nil
+}
+
+func Test_queryDeviceTable_NullMetricValueKeepsRowAndSerializesNull(t *testing.T) {
+	now := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
+	db := &recordingDB{
+		results: []pgx.Rows{
+			&fakeRows{rows: [][]any{
+				{
+					"48BF74", "SN-899", "C000010002", "counter", nil,
+					"sum", "15min", now, now, now.Add(15 * time.Minute), now, "Cellid=1", nil,
+				},
+			}},
+		},
+	}
+	a := New(db, nil, nil)
+
+	rows, err := a.queryDeviceTable(context.Background(), "pm_metrics", QueryRequest{
+		Dimension:   DimensionDevice,
+		Granularity: metrics.Granularity15Min,
+		DeviceSNs:   []string{"SN-899"},
+		MetricPaths: []string{"C000010002"},
+		Limit:       10,
+	})
+	require.NoError(t, err)
+	require.Len(t, rows, 1, "metric_value=NULL 的 DB 行仍应作为缺值指标返回")
+	assert.True(t, math.IsNaN(float64(rows[0].MetricValue)), "SQL NULL 应映射为 NaN 供 JSON 层输出 null")
+
+	body, err := json.Marshal(rows[0])
+	require.NoError(t, err)
+	assert.Contains(t, string(body), `"metric_value":null`)
 }
 
 func Test_AggregateKPIs_EvaluatesFormulaAndInserts(t *testing.T) {

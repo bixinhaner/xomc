@@ -5,7 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"path"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -64,6 +67,7 @@ type DeviceLookup interface {
 //   - Unit：指标业务单位文本（如 number/%/Mbps），驱动 15min 入库前结果值规范化。
 type CounterMeta struct {
 	IndicatorID string
+	ReportKey   string
 	StatisType  string
 	Unit        string
 }
@@ -343,7 +347,8 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 	// 编码在 measType.p 而不是 Name 里），落库会撞 pm_metrics 自然键。
 	// 过滤逻辑 fail-open：lookup 失败 / 空白名单时跳过过滤，避免在本阶段误删全部 counter。
 	// #866 后续 normalizeResults 会校验每条待写结果的 Unit/StatisType，缺失元数据时失败并暴露。
-	content.Counters = c.filterByWhitelist(ctx, payload.DeviceSN, payload.Carrier, payload.Technology, content.Counters)
+	var allow map[string]CounterMeta
+	content.Counters, allow = c.filterByWhitelistWithAllow(ctx, payload.DeviceSN, payload.Carrier, payload.Technology, content.Counters)
 
 	// PM 入库统一走 copy-direct 原子写路径（pm_files 标记 + counter + 内存算出的 KPI 单事务 plain
 	// COPY，见 ingestViaCopy / metrics.CopyIngest）。worker 启动期总是注入 copyIngestor；未注入仅见
@@ -351,7 +356,7 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 	if c.copyIngestor == nil {
 		return fmt.Errorf("pm collector: copy ingestor not wired (copy is the sole write path)")
 	}
-	return c.ingestViaCopy(ctx, span, startTime, now, fileSize, deviceID, &payload, content)
+	return c.ingestViaCopy(ctx, span, startTime, now, fileSize, deviceID, &payload, content, allow)
 }
 
 // ingestViaCopy 是 copy 模式的写收尾：用内存 counter 算出 KPI（只算不写），把 counter + KPI +
@@ -363,7 +368,7 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 // 返回 nil 让该文件 ack（含 marker 冲突=已入库的幂等跳过与迟到压缩 chunk 降级）。
 func (c *PMCollector) ingestViaCopy(
 	ctx context.Context, span trace.Span, startTime, now time.Time, fileSize int64,
-	deviceID uuid.UUID, payload *FileReceivedPayload, content *PMFileContent,
+	deviceID uuid.UUID, payload *FileReceivedPayload, content *PMFileContent, allow map[string]CounterMeta,
 ) error {
 	// KPI：用本文件已过白名单、已编号化的内存 counter 直接算，不落库（随 counter 一起 COPY）。
 	var kpis []model.KPIValue
@@ -379,6 +384,7 @@ func (c *PMCollector) ingestViaCopy(
 	if err := c.normalizeResults(ctx, content.Counters, kpis); err != nil {
 		return err
 	}
+	content.Counters = fillMissingSupportedCounters(content.Counters, allow)
 
 	marker := metrics.FileMarker{
 		DeviceID:     deviceID,
@@ -497,19 +503,32 @@ func applyPayloadIdentity(counters []model.PMCounter, oui, sn string) {
 // （reason=whitelist_miss，标签带 carrier × technology），让"厂家上报名漂移导致大批
 // counter 被静默丢弃"成为可告警的可观测信号，而非只在 worker 日志里翻 grep。
 func (c *PMCollector) filterByWhitelist(ctx context.Context, deviceSN, carrier, technology string, counters []model.PMCounter) []model.PMCounter {
+	out, _ := c.filterByWhitelistWithAllow(ctx, deviceSN, carrier, technology, counters)
+	return out
+}
+
+func (c *PMCollector) filterAndFillByWhitelist(ctx context.Context, deviceSN, carrier, technology string, counters []model.PMCounter) []model.PMCounter {
+	filtered, allow := c.filterByWhitelistWithAllow(ctx, deviceSN, carrier, technology, counters)
+	if len(allow) == 0 {
+		return filtered
+	}
+	return fillMissingSupportedCounters(filtered, allow)
+}
+
+func (c *PMCollector) filterByWhitelistWithAllow(ctx context.Context, deviceSN, carrier, technology string, counters []model.PMCounter) ([]model.PMCounter, map[string]CounterMeta) {
 	if c.counterWhitelist == nil || len(counters) == 0 {
-		return counters
+		return counters, nil
 	}
 	allow, err := c.counterWhitelist.LookupCounters(ctx, deviceSN)
 	if err != nil {
 		c.logger.Warn("counter whitelist lookup failed, skip filter",
 			zap.String("device_sn", deviceSN), zap.Error(err))
-		return counters
+		return counters, nil
 	}
 	if len(allow) == 0 {
 		c.logger.Warn("counter whitelist empty, skip filter (likely cache warming / product not matched)",
 			zap.String("device_sn", deviceSN))
-		return counters
+		return counters, nil
 	}
 
 	kept := counters[:0] // 原地 reslice 复用 slice
@@ -518,6 +537,9 @@ func (c *PMCollector) filterByWhitelist(ctx context.Context, deviceSN, carrier, 
 		// PM-P2：按 report_key（=上报名 ctr.CounterName）命中白名单。命中后
 		// 把 CounterName 改写成指标编号（落库即编号化的唯一翻译入口），并填 statis_type。
 		if meta, ok := allow[ctr.CounterName]; ok {
+			if meta.ReportKey == "" {
+				meta.ReportKey = ctr.CounterName
+			}
 			ctr.CounterName = meta.IndicatorID // 上报名 → 编号
 			ctr.StatisType = meta.StatisType   // T-0164-G6 收尾：填充 statis_type 驱动 G5 聚合 (BUG-A)
 			ctr.Unit = meta.Unit               // #866：填充单位元数据，入库前规范化 result value
@@ -536,5 +558,80 @@ func (c *PMCollector) filterByWhitelist(ctx context.Context, deviceSN, carrier, 
 			zap.Int("dropped_orphans", dropped),
 			zap.Int("whitelist_size", len(allow)))
 	}
-	return kept
+	return kept, allow
+}
+
+type missingCounterAnchor struct {
+	oui          string
+	sn           string
+	cellID       string
+	counterGroup string
+	timeKey      string
+	granularity  int
+}
+
+type missingCounterGroup struct {
+	rep  model.PMCounter
+	have map[string]struct{}
+}
+
+func fillMissingSupportedCounters(counters []model.PMCounter, allow map[string]CounterMeta) []model.PMCounter {
+	if len(counters) == 0 || len(allow) == 0 {
+		return counters
+	}
+	supported := make([]CounterMeta, 0, len(allow))
+	for reportKey, meta := range allow {
+		if meta.IndicatorID == "" {
+			continue
+		}
+		if meta.ReportKey == "" {
+			meta.ReportKey = reportKey
+		}
+		supported = append(supported, meta)
+	}
+	sort.Slice(supported, func(i, j int) bool { return supported[i].IndicatorID < supported[j].IndicatorID })
+	if len(supported) == 0 {
+		return counters
+	}
+
+	groups := make(map[missingCounterAnchor]*missingCounterGroup)
+	order := make([]missingCounterAnchor, 0)
+	for _, ctr := range counters {
+		key := missingCounterAnchor{
+			oui: ctr.OUI, sn: ctr.DeviceSN, cellID: ctr.CellID,
+			counterGroup: ctr.CounterGroup, timeKey: ctr.Time.UTC().Format(time.RFC3339Nano), granularity: ctr.Granularity,
+		}
+		g := groups[key]
+		if g == nil {
+			g = &missingCounterGroup{rep: ctr, have: make(map[string]struct{})}
+			groups[key] = g
+			order = append(order, key)
+		}
+		g.have[ctr.CounterName] = struct{}{}
+	}
+	for _, key := range order {
+		g := groups[key]
+		for _, meta := range supported {
+			if !counterGroupMatchesReportKey(g.rep.CounterGroup, meta.ReportKey) {
+				continue
+			}
+			if _, ok := g.have[meta.IndicatorID]; ok {
+				continue
+			}
+			ctr := g.rep
+			ctr.CounterName = meta.IndicatorID
+			ctr.CounterValue = math.NaN()
+			ctr.StatisType = meta.StatisType
+			ctr.Unit = meta.Unit
+			counters = append(counters, ctr)
+		}
+	}
+	return counters
+}
+
+func counterGroupMatchesReportKey(counterGroup, reportKey string) bool {
+	if counterGroup == "" || reportKey == "" {
+		return true
+	}
+	return reportKey == counterGroup || strings.HasPrefix(reportKey, counterGroup+".")
 }

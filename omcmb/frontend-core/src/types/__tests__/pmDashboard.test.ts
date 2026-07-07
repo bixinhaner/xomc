@@ -48,6 +48,12 @@ describe('mapBackendAggregatedRow — 占位行 / 全零 UUID / 类型漂移', (
     expect(r.filled).toBe(true);
   });
 
+  it('metric_value=null 的真实缺值行：metricValue 保持 null（渲染 "-"）', () => {
+    const r = mapBackendAggregatedRow(row({ metric_value: null }));
+    expect(r.metricValue).toBeNull();
+    expect(r.filled).toBeUndefined();
+  });
+
   it('object_ldn null 透传；extra 缺省 → {}', () => {
     const r = mapBackendAggregatedRow(row({ object_ldn: null }));
     expect(r.objectLdn).toBeNull();

@@ -3,7 +3,9 @@ package collector
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -176,6 +178,44 @@ func TestFilterByWhitelist_DroppedCountersMetric(t *testing.T) {
 
 	got := testutil.ToFloat64(c.metrics.DroppedCountersTotal.WithLabelValues("cmcc", "lte", "whitelist_miss"))
 	assert.Equal(t, float64(2), got, "应记录 2 个被丢弃的孤儿 counter")
+}
+
+func TestFilterAndFillByWhitelist_AddsNullRowsForSupportedMissingCounters(t *testing.T) {
+	c := collectorWithWhitelist(&fakeWhitelist{set: map[string]CounterMeta{
+		"RRC.AttConn": {IndicatorID: "C000010001", ReportKey: "RRC.AttConn", Unit: "number", StatisType: "sum"},
+		"RRC.Fail":    {IndicatorID: "C000010002", ReportKey: "RRC.Fail", Unit: "number", StatisType: "sum"},
+	}})
+	tm := time.Date(2026, 7, 7, 10, 15, 0, 0, time.UTC)
+	in := []model.PMCounter{{
+		Time: tm, OUI: "48BF74", DeviceSN: "SN-1", CellID: "Cellid=1",
+		CounterGroup: "RRC", CounterName: "RRC.AttConn", CounterValue: 10, Granularity: 15,
+	}}
+
+	out := c.filterAndFillByWhitelist(context.Background(), "SN-1", "cmcc", "lte", in)
+	require.Len(t, out, 2)
+	assert.Equal(t, "C000010001", out[0].CounterName)
+	assert.Equal(t, float64(10), out[0].CounterValue)
+	assert.Equal(t, "C000010002", out[1].CounterName)
+	assert.True(t, math.IsNaN(out[1].CounterValue), "缺值记录用 NaN 作为写库前 NULL 哨兵")
+	assert.Equal(t, "Cellid=1", out[1].CellID)
+	assert.Equal(t, "RRC", out[1].CounterGroup)
+	assert.Equal(t, tm, out[1].Time)
+}
+
+func TestFilterAndFillByWhitelist_DoesNotFillOtherMeasurementGroups(t *testing.T) {
+	c := collectorWithWhitelist(&fakeWhitelist{set: map[string]CounterMeta{
+		"RRC.AttConn": {IndicatorID: "C000010001", ReportKey: "RRC.AttConn", Unit: "number", StatisType: "sum"},
+		"S1.Setup":    {IndicatorID: "C000020001", ReportKey: "S1.Setup", Unit: "number", StatisType: "sum"},
+	}})
+	in := []model.PMCounter{{
+		Time: time.Date(2026, 7, 7, 10, 15, 0, 0, time.UTC),
+		OUI:  "48BF74", DeviceSN: "SN-1", CellID: "Cellid=1",
+		CounterGroup: "RRC", CounterName: "RRC.AttConn", CounterValue: 10, Granularity: 15,
+	}}
+
+	out := c.filterAndFillByWhitelist(context.Background(), "SN-1", "cmcc", "lte", in)
+	require.Len(t, out, 1, "只有 RRC 测量记录存在时，不应补出 S1 测量组指标")
+	assert.Equal(t, "C000010001", out[0].CounterName)
 }
 
 type trackingWhitelist struct {

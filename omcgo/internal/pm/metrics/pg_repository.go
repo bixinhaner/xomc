@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/Masterminds/squirrel"
@@ -13,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/omcgo/omcgo/internal/authz"
+	"github.com/omcgo/omcgo/internal/core/jsonx"
 	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -306,8 +308,12 @@ func metricRowValues(m PMMetric) ([]any, error) {
 		}
 		extra = b
 	}
+	var metricValue any = m.MetricValue
+	if math.IsNaN(m.MetricValue) {
+		metricValue = nil
+	}
 	return []any{
-		id, m.DeviceOUI, m.DeviceSN, m.MetricPath, string(m.MetricType), m.MetricValue,
+		id, m.DeviceOUI, m.DeviceSN, m.MetricPath, string(m.MetricType), metricValue,
 		statis, string(m.Granularity), t, m.StartTime, m.EndTime,
 		ingest, ldn, extra,
 	}, nil
@@ -385,13 +391,15 @@ func (r *PgRepository) Query(ctx context.Context, q QueryRequest) ([]PMMetric, e
 		var statis, ldn *string
 		var extraBytes []byte
 		var metricType, granularity string
+		var metricValue jsonx.Float
 		if err := rows.Scan(
-			&m.ID, &m.DeviceOUI, &m.DeviceSN, &m.MetricPath, &metricType, &m.MetricValue,
+			&m.ID, &m.DeviceOUI, &m.DeviceSN, &m.MetricPath, &metricType, &metricValue,
 			&statis, &granularity, &m.Time, &m.StartTime, &m.EndTime,
 			&m.IngestTime, &ldn, &extraBytes,
 		); err != nil {
 			return nil, fmt.Errorf("scan pm_metrics: %w", err)
 		}
+		m.MetricValue = float64(metricValue)
 		m.MetricType = MetricType(metricType)
 		m.Granularity = Granularity(granularity)
 		if statis != nil {

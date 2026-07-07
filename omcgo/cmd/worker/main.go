@@ -1132,6 +1132,7 @@ func (a *routerCounterWhitelist) LookupCounters(ctx context.Context, deviceSN st
 		}
 		out[c.ReportKey] = collector.CounterMeta{
 			IndicatorID: c.IndicatorID,
+			ReportKey:   c.ReportKey,
 			StatisType:  c.StatisType,
 			Unit:        c.Unit,
 		}

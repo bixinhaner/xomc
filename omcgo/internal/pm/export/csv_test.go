@@ -3,6 +3,7 @@ package export
 import (
 	"bytes"
 	"encoding/csv"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -116,6 +117,22 @@ func TestWideCSVWriter_MissingMetricPlaceholder(t *testing.T) {
 	// 列序：开始时间 | 结束时间 | 设备 SN | Cell ID | PLMN | K001 | C002
 	assert.Equal(t, "9", row[5]) // K001 有值
 	assert.Equal(t, "-", row[6]) // C002 缺值 → "-"
+}
+
+func TestWideCSVWriter_NullMetricValuePlaceholder(t *testing.T) {
+	var buf bytes.Buffer
+	cw, err := newWideCSVWriter(&buf, "设备 SN", false, true, wideTestCols(), "-")
+	require.NoError(t, err)
+
+	tm := time.Date(2026, 6, 4, 10, 0, 0, 0, time.UTC)
+	require.NoError(t, cw.AddRow(ExportRow{Device: "d2", Time: tm, StartTime: tm, MetricCode: "K001", Value: math.NaN()}))
+	require.NoError(t, cw.Flush())
+
+	body := strings.TrimPrefix(buf.String(), string(utf8BOM))
+	recs, err := csv.NewReader(strings.NewReader(body)).ReadAll()
+	require.NoError(t, err)
+	row := recs[1]
+	assert.Equal(t, "-", row[5], "DB NULL 缺值应导出为 '-'")
 }
 
 // 不同时间 → 时间桶切换，各成一横行。
