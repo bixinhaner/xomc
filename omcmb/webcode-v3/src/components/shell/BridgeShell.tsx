@@ -1,10 +1,11 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 
 import { HUDStatusBar } from '@/components/shell/HUDStatusBar'
 import { CockpitDock } from '@/components/shell/CockpitDock'
 import { MiniRadar } from '@/components/shell/MiniRadar'
 import { TelemetryStream } from '@/components/shell/TelemetryStream'
+import { AgentConsole } from '@/components/agent/AgentConsole'
 import { cn } from '@/lib/utils'
 import { MODULES } from '@/router/navConfig'
 import { useRouteAccessGuard } from '@core/hooks/useRouteGuard'
@@ -65,6 +66,7 @@ function SubNav() {
 export function BridgeShell() {
   const root = useRef<HTMLDivElement>(null)
   const { pathname } = useLocation()
+  const [agentOpen, setAgentOpen] = useState(false)
   // 路由门禁（admin 恒放行）：拉用户菜单 + 判定当前路由可访问性
   const allowed = useRouteAccessGuard(pathname, DYNAMIC_MENU)
 
@@ -139,7 +141,8 @@ export function BridgeShell() {
           </aside>
         </div>
 
-        <CockpitDock />
+        <AgentConsole open={agentOpen} onClose={() => setAgentOpen(false)} />
+        <CockpitDock agentOpen={agentOpen} onAgentToggle={() => setAgentOpen((open) => !open)} />
       </div>
     </div>
   )

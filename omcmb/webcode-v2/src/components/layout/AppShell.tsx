@@ -1,5 +1,6 @@
+import { useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { Activity, Clock, LogOut, ShieldAlert } from 'lucide-react'
+import { Activity, Bot, Clock, LogOut, ShieldAlert } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -10,6 +11,8 @@ import { useSystemTimezone } from '@core/hooks/api/useSystemTimezone'
 import { useSystemClock } from '@core/hooks/useSystemClock'
 import { useRouteAccessGuard, useModuleVisibility } from '@core/hooks/useRouteGuard'
 import { MODULES, SECTIONS } from '@/router/navConfig'
+import { AgentPanel } from '@/components/agent/AgentPanel'
+import { useT } from '@/hooks/useT'
 
 // 动态菜单门禁开关（与 v1 webcode 对齐）。admin/超管恒放行，非 admin 按模块级菜单门禁。
 const DYNAMIC_MENU = import.meta.env.VITE_DYNAMIC_MENU === 'true'
@@ -51,6 +54,8 @@ function Forbidden() {
 export function AppShell() {
   const navigate = useNavigate()
   const location = useLocation()
+  const t = useT()
+  const [agentOpen, setAgentOpen] = useState(false)
   const user = useUserStore((s) => s.currentUser)
   const clearAuth = useUserStore((s) => s.clearAuth)
   // 路由门禁（admin 恒放行）：拉用户菜单 + 判定当前路由可访问性
@@ -148,6 +153,16 @@ export function AppShell() {
       <div className="flex flex-1 flex-col">
         <header className="sticky top-0 z-10 flex h-14 items-center justify-end gap-3 border-b border-border/60 bg-card/40 px-6 backdrop-blur">
           <SystemClockBadge />
+          <Button
+            size="sm"
+            variant={agentOpen ? 'default' : 'outline'}
+            onClick={() => setAgentOpen((open) => !open)}
+            aria-pressed={agentOpen}
+            aria-label={t('agent.open')}
+            title={t('agent.open')}
+          >
+            <Bot className="size-4" />
+          </Button>
           <span className="text-sm text-muted-foreground">{userLabel}</span>
           <Button size="sm" variant="ghost" onClick={onLogout}>
             <LogOut /> 退出
@@ -158,6 +173,7 @@ export function AppShell() {
           {allowed ? <Outlet /> : <Forbidden />}
         </main>
       </div>
+      <AgentPanel open={agentOpen} onClose={() => setAgentOpen(false)} />
     </div>
   )
 }

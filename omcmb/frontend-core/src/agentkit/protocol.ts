@@ -23,6 +23,14 @@ export interface AgentPageContext {
   extra?: Record<string, unknown>;
 }
 
+export type AgentRuntimeMode = 'preview' | 'execute';
+
+export interface AgentApprovedAction {
+  actionId: string;
+  input?: Record<string, unknown>;
+  dryRun?: boolean;
+}
+
 export interface AgentActionDescriptor {
   id: string;
   title: string;
@@ -35,6 +43,8 @@ export interface AgentActionDescriptor {
 export interface AgentRuntimeRequest {
   message: string;
   conversationId?: string;
+  mode?: AgentRuntimeMode;
+  approvedAction?: AgentApprovedAction;
   locale: string;
   timezone: string;
   context: AgentPageContext;
@@ -149,4 +159,3 @@ export function isAgentStreamEvent(value: unknown): value is AgentStreamEvent {
       return false;
   }
 }
-

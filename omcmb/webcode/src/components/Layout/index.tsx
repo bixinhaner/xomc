@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { useAppStore } from '@core/store/appStore';
 import { useTabStore } from '@core/store/tabStore';
@@ -13,6 +13,7 @@ import Sidebar from './Sidebar';
 import TabBar from './TabBar';
 import TaskPanel from './TaskPanel';
 import QuickSettingsSyncWatcher from './QuickSettingsSyncWatcher';
+import { AgentPanel } from '@/components/AgentPanel/AgentPanel';
 import ParticleCanvas from '@/components/Effects/ParticleCanvas';
 import DynamicLightSource from '@/components/Effects/DynamicLightSource';
 import styles from './AppShell.module.css';
@@ -25,6 +26,7 @@ export default function AppShell() {
   const isMobileOverlayOpen = useAppStore((s) => s.isMobileOverlayOpen);
   const setMobileOverlayOpen = useAppStore((s) => s.setMobileOverlayOpen);
   const locale = useAppStore((s) => s.locale);
+  const [agentOpen, setAgentOpen] = useState(false);
 
   const { isMobile, isTablet } = useResponsive();
   const { isTouchPrimary } = useIsTouchDevice();
@@ -98,7 +100,10 @@ export default function AppShell() {
       >
         <QuickSettingsSyncWatcher />
         <div className={styles.header}>
-          <Header />
+          <Header
+            agentOpen={agentOpen}
+            onAgentToggle={() => setAgentOpen((open) => !open)}
+          />
         </div>
         <div className={styles.sidebar}>
           <Sidebar />
@@ -127,6 +132,7 @@ export default function AppShell() {
             <TaskPanel />
           </div>
         )}
+        <AgentPanel open={agentOpen} onClose={() => setAgentOpen(false)} />
       </div>
 
       {/* Mobile sidebar drawer overlay */}
