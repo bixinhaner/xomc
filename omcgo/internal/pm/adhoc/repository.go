@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
@@ -608,11 +609,18 @@ func buildInsertResultsSQL(rows []ResultRow) (string, []any, error) {
 			t = row.EndTime
 		}
 		ib = ib.Values(
-			row.TaskID, row.DeviceOUI, row.DeviceSN, nullableUUID(row.ProductID), row.MetricPath, row.MetricType, row.MetricValue,
+			row.TaskID, row.DeviceOUI, row.DeviceSN, nullableUUID(row.ProductID), row.MetricPath, row.MetricType, nullableMetricValue(row.MetricValue),
 			stype, row.Granularity, t, row.StartTime, row.EndTime, ldn, extra,
 		)
 	}
 	return ib.Suffix(onConflictResultsBusiness).ToSql()
+}
+
+func nullableMetricValue(value float64) any {
+	if math.IsNaN(value) {
+		return nil
+	}
+	return value
 }
 
 // InsertResults 批量写 pm_adhoc_aggregation_results。
