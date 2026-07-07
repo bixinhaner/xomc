@@ -343,6 +343,7 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	// 详见 docs/prd/system/ui-customization.md §6
 	ad.sysConfigHandler.RegisterPublicRoutes(publicV1)
 	ad.uiAssetHandler.RegisterPublicRoutes(publicV1)
+	ad.agentConfigHandler.RegisterPublicRoutes(publicV1)
 
 	// Protected API v1 routes (JWT or API Key authentication required)
 	v1 := r.Group("/api/v1")
@@ -362,6 +363,7 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 
 	agentActionService := agentaction.NewService(c.DeviceService, c.AlarmPgStore, c.Logger)
 	agentActionHandler := agentaction.NewHandler(c.JWTService, agentActionService, c.PermService, c.Logger)
+	ad.agentConfigHandler.RegisterRuntimeRoutes(v1)
 	agentActionHandler.RegisterDelegationRoutes(v1)
 
 	agentActions := r.Group("/api/v1/agent-actions")
@@ -706,6 +708,7 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 
 	// ----- System config management routes (require admin permission) -----
 	ad.sysConfigHandler.RegisterRoutes(adminGroup)
+	ad.agentConfigHandler.RegisterAdminRoutes(adminGroup)
 
 	// ----- UI 定制化：上传 Logo / 登录背景图（require admin permission）-----
 	ad.uiAssetHandler.RegisterRoutes(adminGroup)
