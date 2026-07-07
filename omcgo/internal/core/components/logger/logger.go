@@ -126,17 +126,17 @@ func NewLogger(cfg appconfig.LogConfig) (*zap.Logger, error) {
 
 // NewLumberjackWriter 构造日志轮转写入器，支持两种归档管理模式：
 //
-//   Compactor 模式（cfg.KeepUncompressed > 0）：
-//     - lumberjack 仅做切割（MaxBackups=0 / MaxAge=0 / Compress=false 都禁用）
-//     - 后台 compactor goroutine 每分钟扫描归档目录：
-//         · mtime > MaxAgeDays → 删
-//         · 最新 KeepUncompressed 个 → 保持 .log 形式，rename 到分钟精度
-//         · 其余 .log → gzip 为 .log.gz，删原文件
-//     - 用于 app/acs/worker 三个主日志 + acs protocol_log
+//	Compactor 模式（cfg.KeepUncompressed > 0）：
+//	  - lumberjack 仅做切割（MaxBackups=0 / MaxAge=0 / Compress=false 都禁用）
+//	  - 后台 compactor goroutine 每分钟扫描归档目录：
+//	      · mtime > MaxAgeDays → 删
+//	      · 最新 KeepUncompressed 个 → 保持 .log 形式，rename 到分钟精度
+//	      · 其余 .log → gzip 为 .log.gz，删原文件
+//	  - 用于 app/acs/worker 三个主日志 + acs protocol_log
 //
-//   Legacy 模式（cfg.KeepUncompressed == 0）：
-//     - 完全沿用 lumberjack 原生 MaxBackups + MaxAge + Compress 行为
-//     - 仅在极少数需保留 lumberjack 原生归档语义的场景下使用
+//	Legacy 模式（cfg.KeepUncompressed == 0）：
+//	  - 完全沿用 lumberjack 原生 MaxBackups + MaxAge + Compress 行为
+//	  - 仅在极少数需保留 lumberjack 原生归档语义的场景下使用
 //
 // MaxSizeMB 与 RotateInterval 是 OR 关系：任一满足都触发切割。空文件保护防止
 // 低流量环境下每个 tick 产生空 .gz 归档。
@@ -185,9 +185,22 @@ func NewLumberjackWriter(path string, cfg appconfig.RotationConfig) io.Writer {
 // 空文件保护防止低流量环境下每个 tick 都产生 ~20 字节的空 .gz 归档。
 func startTimedRotation(lj *lumberjack.Logger, path string, interval time.Duration) {
 	go func() {
-		t := time.NewTicker(interval)
-		defer t.Stop()
-		for range t.C {
+		lastAttempt := time.Now()
+		for {
+			current := effectiveRotateInterval(interval)
+			if current <= 0 {
+				return
+			}
+			sleep := current
+			if sleep > time.Minute {
+				sleep = time.Minute
+			}
+			time.Sleep(sleep)
+			now := time.Now()
+			if now.Sub(lastAttempt) < effectiveRotateInterval(interval) {
+				continue
+			}
+			lastAttempt = now
 			info, err := os.Stat(path)
 			if err != nil || info.Size() == 0 {
 				continue // 文件不存在或为空 — 跳过这次轮转
@@ -198,8 +211,9 @@ func startTimedRotation(lj *lumberjack.Logger, path string, interval time.Durati
 }
 
 // lumberjackBackupTimeRe 匹配 lumberjack 原生归档名的秒+毫秒部分：
-//   acs-2026-05-15T03-55-16.790.log    → 捕获 "-16.790"
-//   acs-2026-05-15T03-55-16.790.log.gz → 同上（.gz 后缀走第二个正则）
+//
+//	acs-2026-05-15T03-55-16.790.log    → 捕获 "-16.790"
+//	acs-2026-05-15T03-55-16.790.log.gz → 同上（.gz 后缀走第二个正则）
 var (
 	lumberjackBackupTimeRe = regexp.MustCompile(`(-\d{4}-\d{2}-\d{2}T\d{2}-\d{2})-\d{2}\.\d{3}(\.log)$`)
 	lumberjackBackupTimeGz = regexp.MustCompile(`(-\d{4}-\d{2}-\d{2}T\d{2}-\d{2})-\d{2}\.\d{3}(\.log\.gz)$`)

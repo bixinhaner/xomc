@@ -103,7 +103,7 @@ func runACS(cmd *cobra.Command, args []string) error {
 	}
 	inf.Logger.Info("task service initialized")
 
-	// 日志轮转可配 watcher：让 acs 自身日志文件（acs.log / protocol.log）的大小/个数/过期可在
+	// 日志轮转可配 watcher：让 acs 自身日志文件（acs.log / protocol.log）的大小/间隔/个数/过期可在
 	// 系统配置页里调（category=log.rotation，≤1 分钟生效）。与 app/worker 各自起一份管自己的日志。
 	{
 		rotRepo := admin.NewPgSysConfigRepository(inf.PgPool)
