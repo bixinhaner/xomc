@@ -1138,11 +1138,51 @@ func (s *Service) resolveRPCMethods(ctx context.Context, commands []map[string]i
 			if _, hasCat := entry["category"]; !hasCat && cmd.Category != "" {
 				entry["category"] = cmd.Category
 			}
+			s.attachObjectNameParam(entry, cmd)
 			s.attachParamRefs(ctx, entry, cmd.ID)
 			break
 		}
 	}
 	return commands
+}
+
+// attachObjectNameParam 让脚本/直接 API 入口的 ADD/RMV 标准命令与控制台结构化执行保持一致：
+// 用户写 "ADD FOO;" 时通常不会手填 object_name，需从命令字典 target_object 补齐。
+func (s *Service) attachObjectNameParam(entry map[string]interface{}, cmd *MMLCommand) {
+	if entry == nil || cmd == nil || strings.TrimSpace(cmd.TargetObject) == "" {
+		return
+	}
+	method := strings.TrimSpace(cmd.RPCMethod)
+	op := strings.ToUpper(strings.TrimSpace(cmd.OperationType))
+	if op == "" {
+		op = deriveOperationType(cmd.CommandCode)
+	}
+	if method != "AddObject" && method != "DeleteObject" && op != "ADD" && op != "RMV" && op != "DEL" {
+		return
+	}
+
+	params := map[string]interface{}{}
+	switch raw := entry["parameters"].(type) {
+	case map[string]interface{}:
+		params = raw
+	case map[string]string:
+		for k, v := range raw {
+			params[k] = v
+		}
+	case nil:
+	default:
+		return
+	}
+	if existing, ok := params["object_name"].(string); ok && strings.TrimSpace(existing) != "" {
+		return
+	}
+
+	targetObject := strings.TrimSpace(cmd.TargetObject)
+	if !strings.HasSuffix(targetObject, ".") {
+		targetObject += "."
+	}
+	params["object_name"] = targetObject
+	entry["parameters"] = params
 }
 
 // attachParamRefs 把 mml_command_sub_fields JOIN standard_params 的结果挂到 entry 上。
