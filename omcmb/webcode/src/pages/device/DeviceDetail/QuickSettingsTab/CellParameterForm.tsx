@@ -583,6 +583,10 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
   const setDraftField = useQuickSettingsFeedbackStore((s) => s.setDraftField);
   const clearDraft = useQuickSettingsFeedbackStore((s) => s.clearDraft);
   const isDeviceTimeGroup = group.id === 'device-time';
+  const preferSchemaCurrentValue = isDeviceTimeGroup
+    || group.id === 'device-ipsec-control'
+    || group.id === 'enb-mme'
+    || group.id === 'gnb-core';
   const effectiveParams = useMemo<QuickSettingsParam[]>(() => {
     if (!isDeviceTimeGroup || group.params.some((param) => param.name === 'Enable')) {
       return group.params;
@@ -897,10 +901,14 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
             ? findRawValueBySuffix(nrNguParams, '.BindInterface')
             : undefined);
       if (special?.kind === 'mme-ip-plmn-table') {
-        form.setFieldValue(p.name, toMmeIpPlmnRows(rawItem?.parameterValue ?? item?.currentValue ?? ''));
+        const raw = preferSchemaCurrentValue
+          ? (item?.currentValue ?? rawItem?.parameterValue ?? '')
+          : (rawItem?.parameterValue ?? item?.currentValue ?? '');
+        form.setFieldValue(p.name, toMmeIpPlmnRows(raw));
       } else {
-        // device-time 组优先采用 schema 当前值，避免 search 缓存滞后覆盖刚回读的数据。
-        let raw = isDeviceTimeGroup
+        // 这些分组会同时读 search + schema。优先采用 schema 当前值，避免 search 缓存
+        // 在 refreshTick remount 后短暂覆盖刚回读的新值。
+        let raw = preferSchemaCurrentValue
           ? (item?.currentValue ?? rawItem?.parameterValue ?? '')
           : (rawItem?.parameterValue ?? item?.currentValue ?? '');
         if (isDeviceTimeGroup && p.name === 'Enable' && (raw === '' || raw == null)) {
@@ -924,7 +932,7 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
         );
       }
     });
-  }, [hasSchemaData, visibleParams, instanceContext, form, schemaByPath, rawParameterByPath, draft, specialConfigByName, mmeIpPlmnParams, nrNguParams, isDeviceTimeGroup, deviceTimeModeOptionsKey]);
+  }, [hasSchemaData, visibleParams, instanceContext, form, schemaByPath, rawParameterByPath, draft, specialConfigByName, mmeIpPlmnParams, nrNguParams, preferSchemaCurrentValue, isDeviceTimeGroup, deviceTimeModeOptionsKey]);
 
   const handleSave = async () => {
     const values = form.getFieldsValue() as Record<string, unknown>;
@@ -954,9 +962,13 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
       const newVal = special?.kind === 'mme-ip-plmn-table'
         ? serializeMmeIpPlmnList(toMmeIpPlmnRows(values[p.name]))
         : String(values[p.name] ?? '');
-      const oldVal = isDeviceTimeGroup
-        ? (item?.currentValue ?? rawItem?.parameterValue ?? '')
-        : (rawItem?.parameterValue ?? item?.currentValue ?? '');
+      const oldVal = special?.kind === 'mme-ip-plmn-table'
+        ? (preferSchemaCurrentValue
+          ? (item?.currentValue ?? rawItem?.parameterValue ?? '')
+          : (rawItem?.parameterValue ?? item?.currentValue ?? ''))
+        : (preferSchemaCurrentValue
+          ? (item?.currentValue ?? rawItem?.parameterValue ?? '')
+          : (rawItem?.parameterValue ?? item?.currentValue ?? ''));
       if (newVal === oldVal) continue;
 
       const parameterType = rawItem?.parameterType ?? (item?.type as never) ?? 'string';
@@ -1335,12 +1347,19 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
                   : undefined);
             const displayPath = special?.displayPath;
             const displayValue = displayPath
-              ? getRawValueByPath(rawParameterByPath, displayPath)?.parameterValue
-                ?? (special?.kind === 'bind-select' && p.name === 'NguBindInterface'
-                  ? findRawValueBySuffix(nrNguParams, '.NguLocalIp')?.parameterValue
-                  : undefined)
-                ?? schemaByPath.get(displayPath)?.currentValue
-                ?? ''
+              ? (preferSchemaCurrentValue
+                ? (schemaByPath.get(displayPath)?.currentValue
+                  ?? getRawValueByPath(rawParameterByPath, displayPath)?.parameterValue
+                  ?? (special?.kind === 'bind-select' && p.name === 'NguBindInterface'
+                    ? findRawValueBySuffix(nrNguParams, '.NguLocalIp')?.parameterValue
+                    : undefined)
+                  ?? '')
+                : (getRawValueByPath(rawParameterByPath, displayPath)?.parameterValue
+                  ?? (special?.kind === 'bind-select' && p.name === 'NguBindInterface'
+                    ? findRawValueBySuffix(nrNguParams, '.NguLocalIp')?.parameterValue
+                    : undefined)
+                  ?? schemaByPath.get(displayPath)?.currentValue
+                  ?? ''))
               : '';
             // 紧贴 ARFCN 之后插入派生的 Frequency(MHz) 显示行。
             // 命中分组:BSC 的 GSM 空口分组(gsm-cell) 与 BTS 的基站信息分组(bts-cell-info)。
