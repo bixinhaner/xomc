@@ -5826,6 +5826,7 @@ const messages: Record<string, string> = {
   'mml.inputScriptDescription':              '请输入脚本描述',
   'mml.inputScriptContent':                  '请输入脚本内容（每行一条MML命令）',
   'mml.contentRequired':                     '请输入脚本内容',
+  'mml.emptyScriptContent':                  '暂无脚本内容',
   'mml.tags':                                '标签',
   'mml.inputTags':                           '输入标签',
   'mml.exportResult':                        '导出结果',
