@@ -1200,6 +1200,8 @@ const messages: Record<string, string> = {
   'device.cell.freqMHz':                  '频率 (MHz)',
   'device.cell.uplink':                   '上行',
   'device.cell.downlink':                 '下行',
+  'device.cell.ntpServer':                'NTP Server',
+  'device.cell.ntpClient':                'NTP Client',
   'device.cell.readonly':                 '(只读)',
   'device.cell.lmtLockedHint':            '(当前策略以基站为准，请在 LMT 侧修改)',
   'device.cell.routeIndexBoundRu':        'Route Index (绑定 RU)',
