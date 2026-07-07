@@ -16,7 +16,7 @@ import { GlassPanel } from '@/components/ui/GlassPanel'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Sparkline } from '@/components/viz/Sparkline'
 import { formatTime } from '@/lib/format'
-import { useMMLScripts } from '@core/hooks/api/useMML'
+import { useMMLScriptById, useMMLScripts } from '@core/hooks/api/useMML'
 import type { MMLScript, MMLScriptStatus } from '@core/types/mml'
 
 // ─────────────────────────────────────────────────────────────
@@ -179,6 +179,8 @@ export function MMLScriptPage() {
 }
 
 function ScriptDetailDrawer({ script, onClose }: { script: MMLScript; onClose: () => void }) {
+  const { data, isFetching } = useMMLScriptById(script.id)
+  const detailScript = data ?? script
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/60 backdrop-blur-sm" onClick={onClose}>
       <div
@@ -187,8 +189,8 @@ function ScriptDetailDrawer({ script, onClose }: { script: MMLScript; onClose: (
       >
         <div className="flex items-center justify-between border-b border-cyan-500/20 px-4 py-3">
           <div className="min-w-0">
-            <div className="truncate font-display text-base font-bold text-cyan-100">{script.scriptName}</div>
-            <div className="truncate font-mono text-[10px] text-cyan-300/50">{script.id}</div>
+            <div className="truncate font-display text-base font-bold text-cyan-100">{detailScript.scriptName}</div>
+            <div className="truncate font-mono text-[10px] text-cyan-300/50">{detailScript.id}</div>
           </div>
           <button
             type="button"
@@ -203,27 +205,27 @@ function ScriptDetailDrawer({ script, onClose }: { script: MMLScript; onClose: (
           <div>
             <div className="font-mono text-[9px] uppercase tracking-[0.18em] text-cyan-300/50">状态</div>
             <div className="mt-0.5">
-              <StatusBadge status={scriptTone(script.status)} label={script.status} />
+              <StatusBadge status={scriptTone(detailScript.status)} label={detailScript.status} />
             </div>
           </div>
-          <Meta label="类型" value={script.type} />
-          <Meta label="创建人" value={script.creator || '—'} />
-          <Meta label="进度" value={`${script.progress ?? 0}%`} />
-          <Meta label="创建时间" value={formatTime(script.createTime)} />
-          <Meta label="更新时间" value={formatTime(script.updateTime)} />
+          <Meta label="类型" value={detailScript.type} />
+          <Meta label="创建人" value={detailScript.creator || '—'} />
+          <Meta label="进度" value={`${detailScript.progress ?? 0}%`} />
+          <Meta label="创建时间" value={formatTime(detailScript.createTime)} />
+          <Meta label="更新时间" value={formatTime(detailScript.updateTime)} />
         </div>
 
-        {script.description ? (
+        {detailScript.description ? (
           <div className="border-b border-cyan-500/15 px-4 py-3">
             <div className="mb-1 font-mono text-[10px] uppercase tracking-[0.18em] text-cyan-300/55">描述</div>
-            <div className="text-sm text-cyan-100/85">{script.description}</div>
+            <div className="text-sm text-cyan-100/85">{detailScript.description}</div>
           </div>
         ) : null}
 
-        {script.tags && script.tags.length > 0 ? (
+        {detailScript.tags && detailScript.tags.length > 0 ? (
           <div className="flex flex-wrap items-center gap-1.5 border-b border-cyan-500/15 px-4 py-3">
             <TagIcon className="size-3.5 text-cyan-300/45" />
-            {script.tags.map((tag) => (
+            {detailScript.tags.map((tag) => (
               <span
                 key={tag}
                 className="rounded-sm border border-cyan-500/25 bg-cyan-500/8 px-2 py-0.5 font-mono text-[10px] text-cyan-300/80"
@@ -235,10 +237,19 @@ function ScriptDetailDrawer({ script, onClose }: { script: MMLScript; onClose: (
         ) : null}
 
         <div className="min-h-0 flex-1 overflow-auto px-4 py-3">
-          <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-cyan-300/55">脚本内容</div>
-          <pre className="overflow-auto whitespace-pre-wrap rounded-sm border border-emerald-500/20 bg-black/40 p-3 font-mono text-[12px] leading-relaxed text-emerald-300/90">
-            {script.content || '(空)'}
-          </pre>
+          <div className="mb-1.5 flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.18em] text-cyan-300/55">
+            <span>脚本内容</span>
+            {isFetching ? <span>LOADING…</span> : null}
+          </div>
+          {detailScript.content?.trim() ? (
+            <pre className="overflow-auto whitespace-pre-wrap rounded-sm border border-emerald-500/20 bg-black/40 p-3 font-mono text-[12px] leading-relaxed text-emerald-300/90">
+              {detailScript.content}
+            </pre>
+          ) : (
+            <div className="rounded-sm border border-dashed border-cyan-500/20 bg-cyan-500/5 px-3 py-8 text-center font-mono text-xs uppercase tracking-[0.18em] text-cyan-300/55">
+              暂无脚本内容
+            </div>
+          )}
         </div>
       </div>
     </div>

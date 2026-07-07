@@ -5798,6 +5798,7 @@ const messages: Record<string, string> = {
   'mml.inputScriptDescription':              'Enter description',
   'mml.inputScriptContent':                  'Enter script content (one MML command per line)',
   'mml.contentRequired':                     'Script content is required',
+  'mml.emptyScriptContent':                  'No script content',
   'mml.tags':                                'Tags',
   'mml.inputTags':                           'Enter tags',
   'mml.exportResult':                        'Export Result',
