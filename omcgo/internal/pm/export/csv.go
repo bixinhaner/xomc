@@ -15,6 +15,8 @@ var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
 // csvTimeLayout CSV 时间列格式：本地可读（与前端展示口径一致，避免 RFC3339 的 T/Z 噪音）。
 const csvTimeLayout = "2006-01-02 15:04:05"
 
+const missingMetricValuePlaceholder = "-"
+
 // ExportRow 是一行导出数据点（来源无关的中间表示）。
 // dashboard 来源由 aggregator.Row 映射；adhoc 来源由结果表行映射。
 // 横表模式下按 (Device, CellPLMN, Time) 行键聚合，每个 MetricCode 摊成一列。
@@ -64,14 +66,15 @@ type wideKey struct {
 // 前提：上游 RowSource 按 time 连续返回（device/adhoc 走 (time,id) keyset、aggregate 走 time DESC，
 // 同一 time 的行天然连续，可能跨多个批次但不交错）。
 type WideCSVWriter struct {
-	w           *csv.Writer
-	cols        []WideColumn
-	colIdx      map[string]int // 指标编号 → 列下标
-	rowCount    int64          // 已写出的横行数（= 去重 (设备×小区×时间) 行数）
-	firstHeader string         // 首列表头（随 adhoc 维度变：设备 / 设备组 / 产品 / 频段 / 全网 / 聚合组）
-	includeTech bool           // 是否含「制式」列（仅 device_group 维度为 true）
-	includeCell bool           // 是否含「小区/PLMN」列（仅 device 维度为 true）
-	fixedCount  int            // 固定行键列数（含/不含制式列与小区列各态），用于行容量预分配
+	w                             *csv.Writer
+	cols                          []WideColumn
+	colIdx                        map[string]int // 指标编号 → 列下标
+	rowCount                      int64          // 已写出的横行数（= 去重 (设备×小区×时间) 行数）
+	firstHeader                   string         // 首列表头（随 adhoc 维度变：设备 / 设备组 / 产品 / 频段 / 全网 / 聚合组）
+	includeTech                   bool           // 是否含「制式」列（仅 device_group 维度为 true）
+	includeCell                   bool           // 是否含「小区/PLMN」列（仅 device 维度为 true）
+	fixedCount                    int            // 固定行键列数（含/不含制式列与小区列各态），用于行容量预分配
+	missingMetricValuePlaceholder string         // 指标缺失时的单元格占位符；空串表示沿用 CSV 空单元格。
 
 	// 当前时间桶状态。
 	active              bool
@@ -86,6 +89,10 @@ type WideCSVWriter struct {
 // includeTech 控制是否在对象列后输出「制式」列（仅 device_group 维度为 true，与页面表格一致）；
 // includeCell 控制是否输出「Cell ID / PLMN」两列（仅 device 维度为 true，聚合维度小区已聚掉、不含）。
 func NewWideCSVWriter(out io.Writer, firstColHeader string, includeTech, includeCell bool, cols []WideColumn) (*WideCSVWriter, error) {
+	return newWideCSVWriter(out, firstColHeader, includeTech, includeCell, cols, "")
+}
+
+func newWideCSVWriter(out io.Writer, firstColHeader string, includeTech, includeCell bool, cols []WideColumn, missingPlaceholder string) (*WideCSVWriter, error) {
 	if _, err := out.Write(utf8BOM); err != nil {
 		return nil, err
 	}
@@ -107,10 +114,12 @@ func NewWideCSVWriter(out io.Writer, firstColHeader string, includeTech, include
 	if err := cw.Write(header); err != nil {
 		return nil, err
 	}
-	return &WideCSVWriter{
+	writer := &WideCSVWriter{
 		w: cw, cols: cols, colIdx: idx,
 		firstHeader: firstColHeader, includeTech: includeTech, includeCell: includeCell, fixedCount: len(fixed),
-	}, nil
+		missingMetricValuePlaceholder: missingPlaceholder,
+	}
+	return writer, nil
 }
 
 // AddRow 把一个数据点喂进当前时间桶；time 变化时先 flush 上一桶。
@@ -130,6 +139,11 @@ func (c *WideCSVWriter) AddRow(r ExportRow) error {
 	cells, ok := c.cells[k]
 	if !ok {
 		cells = make([]string, len(c.cols))
+		if c.missingMetricValuePlaceholder != "" {
+			for i := range cells {
+				cells[i] = c.missingMetricValuePlaceholder
+			}
+		}
 		c.cells[k] = cells
 		c.order = append(c.order, k)
 	}
