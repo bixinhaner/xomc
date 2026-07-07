@@ -24,6 +24,11 @@ export interface ParamPath {
   path: string;
   label: string;
   writable: boolean;
+  /** 命令上下文参数码（mml_command_sub_fields.mml_code），MOD 脚本参数 key 使用它。 */
+  mmlCode?: string;
+  valueType?: string;
+  defaultValue?: string;
+  description?: string;
 }
 
 export type MMLOperationType = 'LST' | 'MOD' | 'ADD' | 'RMV' | 'DSP' | 'ACT' | 'DEA' | 'RST' | 'CLR' | 'UPG';
@@ -171,6 +176,13 @@ export interface MMLTaskCommandDetail {
    * MOD 下发值的 path→value 映射（裸路径/自定义命令通道存于此，而非 paramValues 数组）；
    * 取下发值时优先 paramValues[i]，缺则回退 parameters[path]。
    */
+  parameters?: Record<string, unknown>;
+}
+
+export interface MMLTaskCommandInput {
+  commandCode: string;
+  operationType?: MMLOperationType | string;
+  paramPaths?: string[];
   parameters?: Record<string, unknown>;
 }
 

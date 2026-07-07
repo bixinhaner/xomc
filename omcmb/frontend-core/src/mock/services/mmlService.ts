@@ -1,4 +1,4 @@
-import type { MMLCommand, MMLScript, MMLTask, MMLResult, MMLCustomCommand } from '../../types/mml';
+import type { MMLCommand, MMLScript, MMLTask, MMLTaskCommandDetail, MMLTaskCommandInput, MMLResult, MMLCustomCommand } from '../../types/mml';
 import type { PageRequest, PageResponse } from '../../types/pagination';
 import { mockMMLCommands, mockMMLScripts, mockMMLTasks } from '../data/mml';
 import { delay, paginate, generateId } from '../utils';
@@ -218,10 +218,16 @@ export const mmlService = {
     return paginate(filtered, p.page, p.pageSize);
   },
 
-  async createTask(data: Omit<MMLTask, 'id' | 'status' | 'results' | 'createdAt' | 'updatedAt'>): Promise<MMLTask> {
+  async createTask(
+    data: Omit<MMLTask, 'id' | 'status' | 'results' | 'createdAt' | 'updatedAt' | 'commands'> & {
+      commands: Array<string | MMLTaskCommandInput | MMLTaskCommandDetail>;
+    }
+  ): Promise<MMLTask> {
     await delay(200, 400);
+    const commands = data.commands.map((cmd) => (typeof cmd === 'string' ? cmd : cmd.commandCode));
     const newItem: MMLTask = {
       ...data,
+      commands,
       id: generateId('mmltask'),
       status: data.executeType === 'suspended' ? 'paused' : 'pending',
       results: [],

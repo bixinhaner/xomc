@@ -61,11 +61,15 @@ export function subFieldsToParamPaths(subFields: SubFieldDef[]): CommandParamPat
   return subFields
     .filter((sf) => sf.tr069Path)
     .map((sf) => ({
+      mmlCode: sf.mmlCode,
       path: sf.tr069Path,
       label: sf.label || sf.tr069Path.split('.').filter(Boolean).pop() || sf.tr069Path,
       writable: sf.accessType === 'READ_WRITE',
       isObject: sf.isObject,
       minValue: sf.minValue,
+      valueType: sf.valueType,
+      defaultValue: sf.defaultValue,
+      description: sf.description,
     }));
 }
 
