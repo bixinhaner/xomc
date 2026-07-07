@@ -82,6 +82,7 @@ func (s *RedisAlarmStore) GetAlarmCountsPipeline(ctx context.Context, deviceIDs 
 	if len(deviceIDs) == 0 {
 		return nil, nil
 	}
+
 	
 	pipe := s.client.Pipeline()
 	var cmds []*redis.StringCmd
@@ -94,6 +95,7 @@ func (s *RedisAlarmStore) GetAlarmCountsPipeline(ctx context.Context, deviceIDs 
 	if err != nil && err != redis.Nil {
 		// Pipeline returns redis.Nil if ANY of the keys does not exist. We can ignore it safely.
 	}
+
 	
 	res := make(map[string]int, len(deviceIDs))
 	for i, id := range deviceIDs {
@@ -103,6 +105,7 @@ func (s *RedisAlarmStore) GetAlarmCountsPipeline(ctx context.Context, deviceIDs 
 		}
 		res[id] = val
 	}
+
 	
 	return res, nil
 }
