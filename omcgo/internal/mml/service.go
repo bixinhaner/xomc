@@ -703,15 +703,18 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 			if err != nil {
 				return nil, fmt.Errorf("resolve script %s: %w", sid, err)
 			}
-			// Parse script content into command entries (one command per line)
-			for _, line := range splitScriptLines(script.Content) {
-				if line == "" {
-					continue
-				}
+			// Parse script content into structured command entries (one command per line).
+			lines, err := ParseScriptContent(script.Content)
+			if err != nil {
+				return nil, fmt.Errorf("parse script %s content: %w", sid, err)
+			}
+			for _, line := range lines {
 				commands = append(commands, map[string]interface{}{
-					"command_code": line,
-					"source":       "script",
-					"script_name":  script.ScriptName,
+					"command_code":   line.CommandCode,
+					"parameters":     scriptLineParameters(line),
+					"operation_type": deriveOperationType(line.CommandCode),
+					"source":         "script",
+					"script_name":    script.ScriptName,
 				})
 			}
 		}
@@ -1135,11 +1138,51 @@ func (s *Service) resolveRPCMethods(ctx context.Context, commands []map[string]i
 			if _, hasCat := entry["category"]; !hasCat && cmd.Category != "" {
 				entry["category"] = cmd.Category
 			}
+			s.attachObjectNameParam(entry, cmd)
 			s.attachParamRefs(ctx, entry, cmd.ID)
 			break
 		}
 	}
 	return commands
+}
+
+// attachObjectNameParam 让脚本/直接 API 入口的 ADD/RMV 标准命令与控制台结构化执行保持一致：
+// 用户写 "ADD FOO;" 时通常不会手填 object_name，需从命令字典 target_object 补齐。
+func (s *Service) attachObjectNameParam(entry map[string]interface{}, cmd *MMLCommand) {
+	if entry == nil || cmd == nil || strings.TrimSpace(cmd.TargetObject) == "" {
+		return
+	}
+	method := strings.TrimSpace(cmd.RPCMethod)
+	op := strings.ToUpper(strings.TrimSpace(cmd.OperationType))
+	if op == "" {
+		op = deriveOperationType(cmd.CommandCode)
+	}
+	if method != "AddObject" && method != "DeleteObject" && op != "ADD" && op != "RMV" && op != "DEL" {
+		return
+	}
+
+	params := map[string]interface{}{}
+	switch raw := entry["parameters"].(type) {
+	case map[string]interface{}:
+		params = raw
+	case map[string]string:
+		for k, v := range raw {
+			params[k] = v
+		}
+	case nil:
+	default:
+		return
+	}
+	if existing, ok := params["object_name"].(string); ok && strings.TrimSpace(existing) != "" {
+		return
+	}
+
+	targetObject := strings.TrimSpace(cmd.TargetObject)
+	if !strings.HasSuffix(targetObject, ".") {
+		targetObject += "."
+	}
+	params["object_name"] = targetObject
+	entry["parameters"] = params
 }
 
 // attachParamRefs 把 mml_command_sub_fields JOIN standard_params 的结果挂到 entry 上。
@@ -1515,21 +1558,16 @@ func ParseScriptContent(content string) ([]ScriptLine, error) {
 			continue
 		}
 
-		// 拆分 token：第一个 token 为 command_code，后续 token 是 K=V
-		tokens := strings.Fields(line)
-		if len(tokens) == 0 {
-			continue
-		}
-		code := tokens[0]
+		code, paramTokens := splitScriptCommandAndParams(line)
 		if !isValidCommandCode(code) {
 			return nil, &ScriptParseError{
 				LineNumber: lineNum, Raw: raw,
-				Reason: fmt.Sprintf("invalid command_code %q (allowed: [A-Z0-9_]+)", code),
+				Reason: fmt.Sprintf("invalid command_code %q (allowed: uppercase letters/digits/_ with optional spaces)", code),
 			}
 		}
 
 		params := make(map[string]string)
-		for _, t := range tokens[1:] {
+		for _, t := range paramTokens {
 			eq := strings.IndexByte(t, '=')
 			if eq < 0 {
 				return nil, &ScriptParseError{
@@ -1562,6 +1600,86 @@ func ParseScriptContent(content string) ([]ScriptLine, error) {
 	return out, nil
 }
 
+func splitScriptCommandAndParams(line string) (string, []string) {
+	if idx := strings.IndexByte(line, ':'); idx >= 0 {
+		return strings.TrimSpace(line[:idx]), splitScriptParamTokens(line[idx+1:])
+	}
+
+	tokens := strings.Fields(line)
+	firstParam := -1
+	for i, token := range tokens {
+		if strings.Contains(token, "=") {
+			firstParam = i
+			break
+		}
+	}
+	if firstParam < 0 {
+		return strings.TrimSpace(line), nil
+	}
+	if firstParam > 1 && !isOperationToken(tokens[0]) {
+		return tokens[0], splitScriptParamTokens(strings.Join(tokens[1:], " "))
+	}
+	return strings.Join(tokens[:firstParam], " "), splitScriptParamTokens(strings.Join(tokens[firstParam:], " "))
+}
+
+func isOperationToken(token string) bool {
+	switch strings.ToUpper(strings.TrimSpace(token)) {
+	case "LST", "MOD", "ADD", "RMV", "DSP", "ACT", "DEA", "RST", "CLR", "UPG", "REBOOT", "RESET":
+		return true
+	default:
+		return false
+	}
+}
+
+func splitScriptParamTokens(input string) []string {
+	var out []string
+	var b strings.Builder
+	braceDepth := 0
+	flush := func() {
+		token := strings.TrimSpace(b.String())
+		if token != "" {
+			out = append(out, token)
+		}
+		b.Reset()
+	}
+	for _, r := range input {
+		switch r {
+		case '{':
+			braceDepth++
+		case '}':
+			if braceDepth > 0 {
+				braceDepth--
+			}
+		}
+		if braceDepth == 0 && (r == ',' || r == ' ' || r == '\t' || r == '\r' || r == '\n') {
+			flush()
+			continue
+		}
+		b.WriteRune(r)
+	}
+	flush()
+	return out
+}
+
+func scriptLineParameters(line ScriptLine) map[string]interface{} {
+	if len(line.Parameters) == 0 {
+		return map[string]interface{}{}
+	}
+	params := make(map[string]interface{}, len(line.Parameters))
+	for k, v := range line.Parameters {
+		params[k] = v
+	}
+	return params
+}
+
+func deriveOperationType(commandCode string) string {
+	op := strings.ToUpper(strings.TrimSpace(commandCode))
+	if idx := strings.IndexAny(op, " _"); idx > 0 {
+		op = op[:idx]
+	}
+	return op
+}
+
 // indexOfComment 返回该行内首个 # 或 // 的位置；-1 表示无注释。
 // 简单实现：不解析引号包裹（脚本本身不会含字符串字面量），首个出现就算。
 func indexOfComment(s string) int {
@@ -1581,18 +1699,25 @@ func indexOfComment(s string) int {
 	}
 }
 
-// isValidCommandCode command_code 字符集约束：[A-Z0-9_]+，至少 1 字符。
-// 与 Loader 生成规则一致（mml_commands.command_code 都是这个形态）。
+// isValidCommandCode command_code 字符集约束：大写字母/数字/_，允许空格分隔逻辑码。
+// 兼容新标准命令码（如 "MOD DEVICE_INFO"）与老命令码（如 "MOD_DEVICE_INFO"）。
 func isValidCommandCode(s string) bool {
-	if s == "" {
+	s = strings.TrimSpace(s)
+	if s == "" || strings.Contains(s, "  ") {
 		return false
 	}
+	previousSpace := false
 	for _, r := range s {
-		if !((r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_') {
+		isSpace := r == ' '
+		if isSpace && previousSpace {
 			return false
 		}
+		if !((r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || isSpace) {
+			return false
+		}
+		previousSpace = isSpace
 	}
-	return true
+	return !previousSpace
 }
 
 // splitScriptLines 兼容老接口：调 ParseScriptContent 取 command_code 列表。

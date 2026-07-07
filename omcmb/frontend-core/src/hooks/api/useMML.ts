@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import type { MMLScript, MMLTask, MMLCustomCommand } from '../../types/mml';
+import type { MMLScript, MMLCustomCommand } from '../../types/mml';
 import type { PageRequest } from '../../types/pagination';
 import { mmlService } from '../../mock/services/mmlService';
 import { mmlApi } from '../../services/api/mmlApi';
@@ -148,7 +148,7 @@ export function useCancelMMLScript() {
 export function useCreateMMLTask() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (data: Omit<MMLTask, 'id' | 'status' | 'results' | 'createdAt' | 'updatedAt'>) =>
+    mutationFn: (data: Parameters<typeof api.createTask>[0]) =>
       api.createTask(data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['mml', 'tasks'] });

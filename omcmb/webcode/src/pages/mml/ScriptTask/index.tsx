@@ -8,9 +8,11 @@ import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import SearchInput from '@/components/SearchInput';
 import ScriptTaskDrawer from '../components/ScriptTaskDrawer';
+import CommandSelectModal from '../Console/components/CommandSelectModal';
 import { useT } from '@/hooks/useT';
 
 import type { MMLScript } from '@core/types/mml';
+import type { CommandItem, CommandParamPath } from '../Console/types';
 import {
   useMMLScripts,
   useMMLScriptById,
@@ -71,6 +73,15 @@ export default function ScriptTask() {
   const [editing, setEditing] = useState<MMLScript | null>(null);
   const [formVisible, setFormVisible] = useState(false);
   const [form] = Form.useForm<ScriptForm>();
+  const contentValue = Form.useWatch('content', form) ?? '';
+  const [commandSelectOpen, setCommandSelectOpen] = useState(false);
+  const [selectedCommand, setSelectedCommand] = useState<CommandItem | null>(null);
+  const [commandParamValues, setCommandParamValues] = useState<Record<string, string>>({});
+
+  const writableParams = useMemo(
+    () => selectedCommand ? writableScriptParams(selectedCommand) : [],
+    [selectedCommand]
+  );
 
   // 弹窗打开后再回填表单：Modal 子节点惰性挂载，openEdit 时 Form 实例可能尚未连接，
   // 因此把回填放进 formVisible 的副作用里，确保 Form 已挂载。
@@ -90,19 +101,48 @@ export default function ScriptTask() {
 
   const openCreate = useCallback(() => {
     setEditing(null);
+    setSelectedCommand(null);
+    setCommandParamValues({});
     setFormVisible(true);
   }, []);
 
   const openEdit = useCallback((script: MMLScript) => {
     setEditing(script);
+    setSelectedCommand(null);
+    setCommandParamValues({});
     setFormVisible(true);
   }, []);
 
   const closeForm = useCallback(() => {
     setFormVisible(false);
     setEditing(null);
+    setSelectedCommand(null);
+    setCommandParamValues({});
     form.resetFields();
   }, [form]);
+
+  const handleCommandSelected = useCallback((command: CommandItem) => {
+    const defaults: Record<string, string> = {};
+    for (const param of writableScriptParams(command)) {
+      const key = scriptParamKey(param);
+      const defaultValue = param.defaultValue ?? (param.minValue !== undefined ? String(param.minValue) : '');
+      defaults[key] = defaultValue;
+    }
+    setSelectedCommand(command);
+    setCommandParamValues(defaults);
+    setCommandSelectOpen(false);
+  }, []);
+
+  const insertSelectedCommand = useCallback(() => {
+    if (!selectedCommand) return;
+    const line = buildScriptLine(selectedCommand, commandParamValues);
+    const current = String(contentValue || '');
+    const next = current.trim()
+      ? `${current.replace(/\s*$/, '')}\n${line}`
+      : line;
+    form.setFieldValue('content', next);
+    form.validateFields(['content']).catch(() => undefined);
+  }, [selectedCommand, commandParamValues, contentValue, form]);
 
   const handleSave = useCallback(() => {
     form
@@ -257,6 +297,89 @@ export default function ScriptTask() {
           <Form.Item label={t('mml.tags')} name="tags">
             <Select mode="tags" tokenSeparators={[',']} placeholder={t('mml.tags')} open={false} />
           </Form.Item>
+          <Form.Item label={t('mml.scriptCommandBuilder')}>
+            <Space direction="vertical" size={12} style={{ width: '100%' }}>
+              <Space wrap>
+                <Button icon={<PlusOutlined />} onClick={() => setCommandSelectOpen(true)}>
+                  {t('mml.selectInsertCommand')}
+                </Button>
+                <Button
+                  type="primary"
+                  ghost
+                  disabled={!selectedCommand}
+                  onClick={insertSelectedCommand}
+                >
+                  {t('mml.insertCommand')}
+                </Button>
+                {selectedCommand && (
+                  <>
+                    <Tag color="blue">{selectedCommand.operationType}</Tag>
+                    <Typography.Text code>{selectedCommand.commandCode}</Typography.Text>
+                  </>
+                )}
+              </Space>
+
+              {selectedCommand && (
+                <div
+                  style={{
+                    border: `1px solid ${token.colorBorderSecondary}`,
+                    borderRadius: 4,
+                    padding: 12,
+                    background: token.colorFillQuaternary,
+                  }}
+                >
+                  <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                    <div>
+                      <Typography.Text strong>{selectedCommand.commandName}</Typography.Text>
+                      <Typography.Text type="secondary" style={{ marginLeft: 8 }}>
+                        {selectedCommand.groupName}
+                      </Typography.Text>
+                    </div>
+                    <Typography.Text type="secondary">
+                      {t('mml.commandParamPathCount', { count: selectedCommand.paramPaths.length })}
+                    </Typography.Text>
+
+                    {writableParams.length > 0 ? (
+                      <div style={{ maxHeight: 220, overflow: 'auto' }}>
+                        {writableParams.map((param) => {
+                          const key = scriptParamKey(param);
+                          return (
+                            <div key={`${key}:${param.path}`} style={{ marginBottom: 8 }}>
+                              <Input
+                                addonBefore={
+                                  <span style={{ display: 'inline-block', minWidth: 110 }}>
+                                    {key}
+                                  </span>
+                                }
+                                value={commandParamValues[key] ?? ''}
+                                placeholder={param.defaultValue || param.description || param.label}
+                                onChange={(e) =>
+                                  setCommandParamValues((prev) => ({
+                                    ...prev,
+                                    [key]: e.target.value,
+                                  }))
+                                }
+                              />
+                              <Typography.Text
+                                type="secondary"
+                                style={{ display: 'block', marginTop: 2, fontSize: 12 }}
+                              >
+                                {param.label} · {param.path}
+                              </Typography.Text>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <Typography.Text type="secondary">
+                        {t('mml.noWritableCommandParams')}
+                      </Typography.Text>
+                    )}
+                  </Space>
+                </div>
+              )}
+            </Space>
+          </Form.Item>
           <Form.Item
             label={t('mml.scriptContent')}
             name="content"
@@ -351,6 +474,36 @@ export default function ScriptTask() {
         scriptId={execScript?.id ?? undefined}
         onSuccess={() => void refetch()}
       />
+      <CommandSelectModal
+        open={commandSelectOpen}
+        value={selectedCommand}
+        onCancel={() => setCommandSelectOpen(false)}
+        onConfirm={handleCommandSelected}
+        onGotoRawParams={() => {
+          setCommandSelectOpen(false);
+          void message.info(t('mml.rawParamScriptTip'));
+        }}
+      />
     </ListPageLayout>
   );
+}
+
+function writableScriptParams(command: CommandItem): CommandParamPath[] {
+  if (command.operationType !== 'MOD' && command.operationType !== 'ADD') return [];
+  return command.paramPaths.filter((param) => param.writable && scriptParamKey(param));
+}
+
+function scriptParamKey(param: CommandParamPath): string {
+  return (param.mmlCode || param.label || '').trim();
+}
+
+function buildScriptLine(command: CommandItem, values: Record<string, string>): string {
+  const params = writableScriptParams(command)
+    .map((param) => {
+      const key = scriptParamKey(param);
+      const value = values[key]?.trim();
+      return key && value ? `${key}=${value}` : '';
+    })
+    .filter(Boolean);
+  return `${command.commandCode}${params.length ? `:${params.join(',')}` : ''};`;
 }
