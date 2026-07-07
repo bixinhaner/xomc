@@ -188,6 +188,7 @@ func (e *AlarmEngine) Process(ctx context.Context, alarm *model.Alarm) (err erro
 						if updateErr := e.store.UpdateActive(ctx, existing); updateErr != nil {
 							return fmt.Errorf("update existing alarm: %w", updateErr)
 						}
+						e.syncDeviceSeverityStatsAsync(existing.DeviceID)
 						e.logger.Debug("deduplicated alarm updated",
 							zap.String("device_sn", alarm.DeviceSN),
 							zap.String("alarm_identifier", alarm.AlarmIdentifier))
@@ -205,6 +206,7 @@ func (e *AlarmEngine) Process(ctx context.Context, alarm *model.Alarm) (err erro
 		if updateErr := e.store.UpdateActive(ctx, existing); updateErr != nil {
 			return fmt.Errorf("update existing alarm: %w", updateErr)
 		}
+		e.syncDeviceSeverityStatsAsync(existing.DeviceID)
 		if e.redisStore != nil {
 			if redisErr := e.redisStore.Set(ctx, alarm.DeviceSN, dedupKey, existing.ID.String()); redisErr != nil {
 				e.logger.Warn("redis set alarm dedup key", zap.Error(redisErr))
@@ -530,6 +532,7 @@ func (e *AlarmEngine) UpdateByEvent(ctx context.Context, alarm *model.Alarm) err
 	if err := e.store.UpdateActive(ctx, existing); err != nil {
 		return fmt.Errorf("update alarm by event: %w", err)
 	}
+	e.syncDeviceSeverityStatsAsync(existing.DeviceID)
 
 	// Adjust metrics if severity changed
 	if e.metrics != nil && oldSeverity != existing.Severity {
