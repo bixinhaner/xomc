@@ -1261,12 +1261,13 @@ export default function DeviceDetail() {
   const urlTab = searchParams.get('tab') ?? 'basic';
   const activeTab = urlTab;
   const setActiveTab = useCallback((key: string) => {
+    if (key === urlTab) return;
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
       next.set('tab', key);
       return next;
     }, { replace: true });
-  }, [setSearchParams]);
+  }, [setSearchParams, urlTab]);
 
   // 将设备详情页注册为按 SN 唯一的 TabBar 项。
   // 同一设备复用同 key，并用 path 刷新当前 ?tab=alarm/gps 等深链接；
@@ -1306,6 +1307,16 @@ export default function DeviceDetail() {
     isLoading: quickSettingsLoading,
   } = useQuickSettingsGroups(device?.id);
   const showQuickSettingsTab = !quickSettingsLoading && (quickSettingsData?.groups?.length ?? 0) > 0;
+  useEffect(() => {
+    if (!device?.id) return;
+    if (quickSettingsLoading) return;
+    if (urlTab !== 'quickSettings' || showQuickSettingsTab) return;
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('tab', 'basic');
+      return next;
+    }, { replace: true });
+  }, [device?.id, quickSettingsLoading, setSearchParams, showQuickSettingsTab, urlTab]);
   const [activeBmTech, setActiveBmTech] = useState<BmCellTech>('LTE');
 
   const detailQuickSettingsNetworkType = normalizeQuickSettingsNetworkType(displayDevice?.networkType);
