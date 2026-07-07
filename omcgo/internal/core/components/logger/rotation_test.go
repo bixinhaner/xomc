@@ -39,6 +39,19 @@ func TestEffectiveRotation_FullOverride(t *testing.T) {
 	resetOverride()
 }
 
+func TestEffectiveRotateInterval(t *testing.T) {
+	resetOverride()
+	assert.Equal(t, 5*time.Minute, effectiveRotateInterval(5*time.Minute))
+	assert.Equal(t, DefaultRotateInterval, effectiveRotateInterval(0))
+
+	SetRotationOverride(RotationOverride{RotateIntervalMinutes: 30})
+	assert.Equal(t, 30*time.Minute, effectiveRotateInterval(5*time.Minute))
+	SetRotationOverride(RotationOverride{RotateIntervalMinutes: -1})
+	assert.Equal(t, 5*time.Minute, effectiveRotateInterval(5*time.Minute))
+	assert.Equal(t, DefaultRotateInterval, effectiveRotateInterval(0))
+	resetOverride()
+}
+
 func TestReadIntCfg(t *testing.T) {
 	ctx := context.Background()
 	lookup := func(_ context.Context, category, key string) (string, bool) {
@@ -49,15 +62,18 @@ func TestReadIntCfg(t *testing.T) {
 		case KeyMaxSizeMB:
 			return "64", true
 		case KeyMaxAgeDays:
-			return "0", true // ≤0 → 视为未覆盖
+			return "-1", true // ≤0 → 视为未覆盖
 		case KeyKeepFiles:
 			return "abc", true // 非法 → 0
+		case KeyRotateIntervalMinutes:
+			return "15", true
 		}
 		return "", false
 	}
 	assert.Equal(t, 64, readIntCfg(ctx, lookup, KeyMaxSizeMB))
 	assert.Equal(t, 0, readIntCfg(ctx, lookup, KeyMaxAgeDays))
 	assert.Equal(t, 0, readIntCfg(ctx, lookup, KeyKeepFiles))
+	assert.Equal(t, 15, readIntCfg(ctx, lookup, KeyRotateIntervalMinutes))
 	assert.Equal(t, 0, readIntCfg(ctx, lookup, "missing"))
 }
 

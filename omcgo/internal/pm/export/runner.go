@@ -230,9 +230,10 @@ func (r *Runner) buildSource(ctx context.Context, task *Task) (RowSource, []Wide
 		}
 		cols := newNameResolver(r.adhocDB, loc).resolveColumns(ctx, keys)
 		layout := csvLayout{
-			FirstColHeader:    adhocFirstColHeader(dim),
-			IncludeTechnology: dim == "device_group", // 设备组维度按制式分行，导出补「制式」列（与页面表格一致）
-			IncludeCell:       adhocIncludesCell(dim),
+			FirstColHeader:                adhocFirstColHeader(dim),
+			IncludeTechnology:             dim == "device_group", // 设备组维度按制式分行，导出补「制式」列（与页面表格一致）
+			IncludeCell:                   adhocIncludesCell(dim),
+			MissingMetricValuePlaceholder: missingMetricValuePlaceholder,
 		}
 		return newAdhocSource(r.adhocDB, taskID, startTime, endTime, dim, deviceCount), cols, layout, nil
 

@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useQuickSettingsFeedbackStore } from '@core/store/quickSettingsFeedbackStore';
 import { deviceParameterApi } from '@core/services/api/deviceParameterApi';
@@ -47,13 +47,18 @@ function shouldHintCongestion(status: ParameterSyncStatus, sync: QuickSettingsSy
 export default function QuickSettingsSyncWatcherCore() {
   const queryClient = useQueryClient();
   const quickSettingsSyncs = useQuickSettingsFeedbackStore((s) => s.quickSettingsSyncs);
+  const pollingRef = useRef(false);
 
   useEffect(() => {
+    let disposed = false;
+
     const poll = async () => {
+      if (disposed) return;
       const entries = Object.entries(useQuickSettingsFeedbackStore.getState().quickSettingsSyncs);
       if (entries.length === 0) return;
 
       await Promise.all(entries.map(async ([deviceId, sync]) => {
+        if (disposed) return;
         if (Date.now() - sync.startedAt > staleMonitorTimeoutMs) {
           // Core watcher only maintains sync state and cache; UI notification is skin-owned.
           useQuickSettingsFeedbackStore.getState().finishQuickSettingsSync(deviceId);
@@ -81,7 +86,6 @@ export default function QuickSettingsSyncWatcherCore() {
 
           if (hasNewSuccess) {
             useQuickSettingsFeedbackStore.getState().clearDraftsByDevice(deviceId);
-            useQuickSettingsFeedbackStore.getState().bumpRefreshTick(deviceId);
             deviceParameterApi.invalidateParameterSchemaCache(deviceId);
             void queryClient.invalidateQueries({ queryKey: ['devices', 'list'] });
             void queryClient.invalidateQueries({ queryKey: ['devices', 'detail-composite-v2', deviceId] });
@@ -103,12 +107,25 @@ export default function QuickSettingsSyncWatcherCore() {
       }));
     };
 
-    void poll();
+    const runPoll = async () => {
+      if (disposed || pollingRef.current) return;
+      pollingRef.current = true;
+      try {
+        await poll();
+      } finally {
+        pollingRef.current = false;
+      }
+    };
+
+    void runPoll();
     const timer = window.setInterval(() => {
-      void poll();
+      void runPoll();
     }, 2000);
 
-    return () => window.clearInterval(timer);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
   }, [queryClient, quickSettingsSyncs]);
 
   return null;

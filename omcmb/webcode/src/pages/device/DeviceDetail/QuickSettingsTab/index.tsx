@@ -322,6 +322,11 @@ export default function QuickSettingsTab({ deviceId, networkType, active = true,
           paths.add(applyInstanceContext(param.extraInfoPath, instanceContext));
         }
       }
+      // 某些 quicksettings XML 会遗漏 Device.Time.Enable 的标准路径声明，
+      // 这里兜底补齐，确保头部“刷新”一定会同步 NTP 开关值。
+      if (group.id === 'device-time') {
+        paths.add(applyInstanceContext('Device.Time.Enable', instanceContext));
+      }
     }
     return Array.from(paths).filter(Boolean).sort();
   }, [visibleGroups, instanceContext]);

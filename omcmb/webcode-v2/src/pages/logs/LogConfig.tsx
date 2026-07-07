@@ -42,6 +42,7 @@ import { LogNavTabs, Stat } from './_shared'
 // ===========================================================================
 
 const CATEGORY = 'log.retention'
+const ROTATION_CATEGORY = 'log.rotation'
 
 export default function LogConfig() {
   const { data, isLoading, isError, error, isFetching, refetch } =
@@ -199,6 +200,135 @@ export default function LogConfig() {
           </TableBody>
         </Table>
       </TableCard>
+
+      <RotationSection />
     </PageShell>
+  )
+}
+
+function RotationSection() {
+  const { data, isLoading, isError, error, isFetching, refetch } =
+    useSysConfigsByCategory(ROTATION_CATEGORY)
+  const batchUpdate = useBatchUpdateSysConfigs()
+  const items = useMemo(() => data ?? [], [data])
+  const [drafts, setDrafts] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    setDrafts((prev) => {
+      const next: Record<string, string> = {}
+      for (const it of items) {
+        next[it.key] = it.key in prev ? prev[it.key] : it.value
+      }
+      return next
+    })
+  }, [items])
+
+  const dirty = useMemo(
+    () => items.some((it) => (drafts[it.key] ?? it.value) !== it.value),
+    [items, drafts]
+  )
+
+  function handleSave() {
+    const changed: BatchUpdateSysConfigItem[] = items
+      .filter((it) => (drafts[it.key] ?? it.value) !== it.value)
+      .map((it) => ({
+        key: it.key,
+        value: drafts[it.key] ?? it.value,
+        value_type: it.valueType,
+      }))
+    if (changed.length === 0) return
+    batchUpdate.mutate({ category: ROTATION_CATEGORY, items: changed })
+  }
+
+  function handleReset() {
+    setDrafts(Object.fromEntries(items.map((it) => [it.key, it.value])))
+  }
+
+  const cols = ['配置项', '说明', '类型', '当前值', '']
+
+  return (
+    <div className="mt-6">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <div>
+          <h2 className="text-base font-semibold">运行期日志文件轮转</h2>
+          <p className="text-xs text-muted-foreground">
+            app / acs / worker 读取 log.rotation，保存后约 1 分钟内热加载。
+          </p>
+        </div>
+        {isFetching ? <span className="text-xs text-muted-foreground">同步中...</span> : null}
+        {batchUpdate.isSuccess && !dirty ? (
+          <span className="text-xs text-emerald-600 dark:text-emerald-400">已保存</span>
+        ) : null}
+        {batchUpdate.isError ? (
+          <span className="text-xs text-destructive">
+            保存失败：
+            {batchUpdate.error instanceof Error ? batchUpdate.error.message : '未知错误'}
+          </span>
+        ) : null}
+        <div className="ml-auto flex items-center gap-2">
+          {dirty ? (
+            <Button variant="ghost" size="sm" onClick={handleReset}>
+              撤销修改
+            </Button>
+          ) : null}
+          <Button variant="outline" size="sm" onClick={() => refetch()}>
+            <RefreshCcw className="size-4" /> 刷新
+          </Button>
+          <Button size="sm" disabled={!dirty || batchUpdate.isPending} onClick={handleSave}>
+            <Save className="size-4" /> 保存
+          </Button>
+        </div>
+      </div>
+
+      <TableCard>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              {cols.map((c, i) => (
+                <TableHead key={c || `rotation-c-${i}`}>{c}</TableHead>
+              ))}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {isLoading ? (
+              <LoadingRow colSpan={cols.length} />
+            ) : isError ? (
+              <ErrorRow colSpan={cols.length} error={error} />
+            ) : items.length === 0 ? (
+              <EmptyRow colSpan={cols.length}>暂无日志轮转配置</EmptyRow>
+            ) : (
+              items.map((it) => {
+                const draft = drafts[it.key] ?? it.value
+                const isDirty = draft !== it.value
+                return (
+                  <TableRow key={it.key} data-state={isDirty ? 'selected' : undefined}>
+                    <TableCell className="font-mono text-xs">{it.key}</TableCell>
+                    <TableCell className="max-w-[360px] text-xs text-muted-foreground">
+                      {it.description || '—'}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="muted">{it.valueType || 'string'}</Badge>
+                    </TableCell>
+                    <TableCell>
+                      <Input
+                        className="w-36"
+                        type={it.valueType === 'int' || it.valueType === 'float' ? 'number' : 'text'}
+                        value={draft}
+                        onChange={(e) =>
+                          setDrafts((prev) => ({ ...prev, [it.key]: e.target.value }))
+                        }
+                      />
+                    </TableCell>
+                    <TableCell className="text-right text-xs text-muted-foreground">
+                      {isDirty ? <span className="text-amber-600 dark:text-amber-400">已改</span> : null}
+                    </TableCell>
+                  </TableRow>
+                )
+              })
+            )}
+          </TableBody>
+        </Table>
+      </TableCard>
+    </div>
   )
 }

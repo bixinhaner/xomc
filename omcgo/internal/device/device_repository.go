@@ -551,67 +551,13 @@ func (r *PgDeviceRepository) List(ctx context.Context, filter DeviceFilter) (*mo
 	}
 
 	// VisibleGroups filter - data permission restriction
-	// #64 fail-open 收口：对齐 device_info_pg_repository.go 的三态 fail-closed 语义。
+	// #64 fail-open 收口：沿用 authz.ApplyDeviceVisibilityFilter 的三态 fail-closed 语义。
 	//   nil         → 超管，不过滤
-	//   []（非 nil）  → 非超管且无任何可见分组，短路空集（此前 len>0 判断会 fail-open 返全量）
-	//   [g1, ...]   → 限定到这些分组
-	realVisibleGroups, includeUngrouped := authz.SplitVisibleGroups(filter.VisibleGroups)
-	if filter.VisibleGroups != nil && len(filter.VisibleGroups) == 0 {
-		builder = builder.Where("FALSE")
-		countBuilder = countBuilder.Where("FALSE")
-	} else if filter.GroupID != nil || len(filter.GroupIDs) > 0 || len(realVisibleGroups) > 0 || includeUngrouped {
-		if filter.GroupID == nil {
-			// Only add JOIN if not already added by GroupID
-			builder = builder.Join("device_group_members dgm2 ON d.id = dgm2.device_id")
-			countBuilder = countBuilder.Join("device_group_members dgm2 ON d.id = dgm2.device_id")
-		}
-		// Use separate alias if JOIN already exists
-		joinAlias := "dgm"
-		if filter.GroupID != nil {
-			// Already joined with dgm, need subquery or additional condition
-			// For simplicity, we use EXISTS subquery for visible groups check
-			if len(realVisibleGroups) > 0 && includeUngrouped {
-				builder = builder.Where(sq.Or{
-					sq.Eq{"d.id": sq.Select("dgm_vis.device_id").
-						From("device_group_members dgm_vis").
-						Where(sq.Eq{"dgm_vis.group_id": realVisibleGroups})},
-					sq.Expr(ungroupedDevicesWhere),
-				})
-				countBuilder = countBuilder.Where(sq.Or{
-					sq.Eq{"d.id": sq.Select("dgm_vis.device_id").
-						From("device_group_members dgm_vis").
-						Where(sq.Eq{"dgm_vis.group_id": realVisibleGroups})},
-					sq.Expr(ungroupedDevicesWhere),
-				})
-			} else if includeUngrouped {
-				builder = builder.Where(sq.Expr(ungroupedDevicesWhere))
-				countBuilder = countBuilder.Where(sq.Expr(ungroupedDevicesWhere))
-			} else if len(realVisibleGroups) > 0 {
-				builder = builder.Where(sq.Eq{"d.id": sq.Select("dgm_vis.device_id").
-					From("device_group_members dgm_vis").
-					Where(sq.Eq{"dgm_vis.group_id": realVisibleGroups})})
-				countBuilder = countBuilder.Where(sq.Eq{"d.id": sq.Select("dgm_vis.device_id").
-					From("device_group_members dgm_vis").
-					Where(sq.Eq{"dgm_vis.group_id": realVisibleGroups})})
-			}
-		} else {
-			if len(realVisibleGroups) > 0 && includeUngrouped {
-				builder = builder.Where(sq.Or{
-					sq.Eq{joinAlias + ".group_id": realVisibleGroups},
-					sq.Expr(ungroupedDevicesWhere),
-				})
-				countBuilder = countBuilder.Where(sq.Or{
-					sq.Eq{joinAlias + ".group_id": realVisibleGroups},
-					sq.Expr(ungroupedDevicesWhere),
-				})
-			} else if includeUngrouped {
-				builder = builder.Where(sq.Expr(ungroupedDevicesWhere))
-				countBuilder = countBuilder.Where(sq.Expr(ungroupedDevicesWhere))
-			} else if len(realVisibleGroups) > 0 {
-				builder = builder.Where(sq.Eq{joinAlias + ".group_id": realVisibleGroups})
-				countBuilder = countBuilder.Where(sq.Eq{joinAlias + ".group_id": realVisibleGroups})
-			}
-		}
+	//   []（非 nil）  → 非超管且无任何可见分组，短路空集
+	//   [g1, ...]   → 限定到这些分组；包含 DefaultLevel2GroupID 时自动放行未分组设备
+	if filter.VisibleGroups != nil {
+		builder = authz.ApplyDeviceVisibilityFilter(builder, "d.id", filter.VisibleGroups)
+		countBuilder = authz.ApplyDeviceVisibilityFilter(countBuilder, "d.id", filter.VisibleGroups)
 	}
 
 	if filter.Carrier != nil {
@@ -1204,11 +1150,11 @@ func (r *PgDeviceRepository) ListGeo(ctx context.Context, filter GeoDeviceFilter
 		"d.id", "d.serial_number", "d.serial_number as name",
 		"d.lifecycle_state", "d.is_online",
 		"d.latitude", "d.longitude", "dg.id as group_id", "dg.name as group_name",
-		"d.site_name as address", "COALESCE(di.active_alarm_count, 0) as alarm_count", "d.model_name as type",
+		"d.site_name as address", "0 as alarm_count", "d.model_name as type",
 		"COALESCE(host(d.ip_address), '')", "COALESCE(di.mac, '')", "COALESCE(di.pci, '')", "COALESCE(di.device_name, '')",
 		"COALESCE(di.ue_count, 0)",
-		"di.highest_alarm_severity",
-		"COALESCE(di.highest_severity_alarm_count, 0)",
+		"NULL::int as highest_alarm_severity",
+		"0 as highest_severity_alarm_count",
 	).From("devices d").
 		LeftJoin("device_group_members dgm ON d.id = dgm.device_id").
 		LeftJoin("device_groups dg ON dgm.group_id = dg.id").
@@ -1468,11 +1414,11 @@ func (r *PgDeviceRepository) SearchDevices(ctx context.Context, keyword string, 
 		"d.id", "d.serial_number", "d.serial_number as name",
 		"d.lifecycle_state", "d.is_online",
 		"d.latitude", "d.longitude", "dg.id as group_id", "dg.name as group_name",
-		"d.site_name as address", "COALESCE(di.active_alarm_count, 0) as alarm_count", "d.model_name as type",
+		"d.site_name as address", "0 as alarm_count", "d.model_name as type",
 		"COALESCE(host(d.ip_address), '')", "COALESCE(di.mac, '')", "COALESCE(di.pci, '')", "COALESCE(di.device_name, '')",
 		"COALESCE(di.ue_count, 0)",
-		"di.highest_alarm_severity",
-		"COALESCE(di.highest_severity_alarm_count, 0)",
+		"NULL::int as highest_alarm_severity",
+		"0 as highest_severity_alarm_count",
 	).From("devices d").
 		LeftJoin("device_group_members dgm ON d.id = dgm.device_id").
 		LeftJoin("device_groups dg ON dgm.group_id = dg.id").

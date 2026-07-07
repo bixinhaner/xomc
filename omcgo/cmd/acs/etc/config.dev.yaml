@@ -136,7 +136,6 @@ log:
   rotation:
     enabled: true # 是否启用轮转
     max_size_mb: 50 # 单文件最大 MB（触发 size-based 切割）
-    rotate_interval: 5m # 周期强制切割（与 max_size_mb 为 OR：任一条件满足都切）
     max_age_days: 7 # 保留天数（时间维度删旧归档）
     compress: true # 压缩旧文件
     local_time: true # 使用本地时间
@@ -153,7 +152,6 @@ protocol_log:
   rotation:
     enabled: true
     max_size_mb: 50    # 协议日志文件较大
-    rotate_interval: 5m # 与 max_size_mb 为 OR：任一条件满足都切
     max_age_days: 7
     compress: true
     local_time: true

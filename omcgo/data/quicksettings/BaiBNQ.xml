@@ -89,8 +89,8 @@
        <group id="device-time" titleZh="NTP" titleEn="NTP">
         <param name="Enable" titleZh="NTP 模式" titleEn="NTP Mode"
                        standardPath="Device.Time.Enable">
-              <option value="1" label="NTP Server"/>
-              <option value="0" label="NTP Client"/>
+                <option value="1" label="NTP Client"/>
+                <option value="0" label="NTP Server"/>
         </param>
     <param name="LocalTimeZoneName" titleZh="本地时区" titleEn="Local Time Zone"
            standardPath="Device.Time.LocalTimeZoneName"/>

@@ -20,6 +20,14 @@ func initAlarmModule(c *Container) error {
 
 	alarmRedisStore := alarm.NewRedisAlarmStore(c.Redis)
 	alarmPgStore := alarm.NewPgAlarmStore(c.PgPool, c.TsPool)
+	
+	alarmReconciler := alarm.NewReconciler(c.PgPool, alarmRedisStore, logger)
+	alarmReconciler.Start()
+	c.GS.Register("alarm-reconciler", 2, func(ctx context.Context) error {
+		alarmReconciler.Stop()
+		return nil
+	})
+
 	alarmEngine := alarm.NewAlarmEngine(alarmPgStore, alarmRedisStore, c.Carriers, c.EventBus, logger)
 	alarmEngine.SetMetrics(alarm.NewAlarmMetrics(c.MetricsReg))
 

@@ -9,9 +9,9 @@ import (
 
 // 日志轮转可配 wiring（category=log.rotation）。
 //
-// 让 app 进程自身日志文件（app.log）的「大小/个数/过期」可在系统配置页里调：启动一个轮询
-// watcher 从 sys_configs 读 log.rotation，热更新进程级 logger override（compactor 下一个
-// tick ≤1 分钟生效）。acs/worker 各自在自己的 main 里起同样的 watcher（管各自日志文件）。
+// 让 app 进程自身日志文件（app.log）的「大小/间隔/个数/过期」可在系统配置页里调：启动一个轮询
+// watcher 从 sys_configs 读 log.rotation，热更新进程级 logger override（后台轮转检查
+// ≤1 分钟生效）。acs/worker 各自在自己的 main 里起同样的 watcher（管各自日志文件）。
 func initLogRotationModule(c *Container) error {
 	repo := admin.NewPgSysConfigRepository(c.PgPool)
 	lookup := func(ctx context.Context, category, key string) (string, bool) {
