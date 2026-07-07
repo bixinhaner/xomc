@@ -13,10 +13,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
-	"github.com/omcgo/omcgo/internal/task"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/internal/task"
 )
 
 // --- Mock DeviceRepository ---
@@ -87,7 +87,7 @@ func (m *mockDeviceRepo) ListGeo(_ context.Context, _ device.GeoDeviceFilter) ([
 func (m *mockDeviceRepo) GetGeoStats(_ context.Context, _ device.GeoStatsFilter) (*device.GeoStats, error) {
 	return &device.GeoStats{}, nil
 }
-func (m *mockDeviceRepo) SearchDevices(_ context.Context, _ string, _ int, _ []uuid.UUID) ([]device.GeoDevice, error) {
+func (m *mockDeviceRepo) SearchDevices(_ context.Context, _ string, _ int, _ []model.DeviceVisibilityGrant) ([]device.GeoDevice, error) {
 	return nil, nil
 }
 func (m *mockDeviceRepo) BatchDelete(_ context.Context, _ []uuid.UUID, _ string) (int64, error) {
