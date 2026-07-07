@@ -25,7 +25,8 @@ func buildNetworkKPISeriesQuery(codes []string, startTimeArg, endTimeArg any) (s
 			WHEN 'avg' THEN AVG(avg_val)
 			WHEN 'max' THEN MAX(max_val)
 			WHEN 'min' THEN MIN(min_val)
-			ELSE SUM(sum_val)
+			WHEN 'pct' THEN AVG(avg_val)
+			ELSE AVG(avg_val)
 		END`
 
 	return storage.Psql.Select("metric_path", "bucket_time AS time", aggValueExpr+" AS metric_value").

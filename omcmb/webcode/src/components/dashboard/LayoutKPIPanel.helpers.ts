@@ -116,13 +116,13 @@ export function buildSeries(
         currentDays.has(d) ? currentDays.get(d)! : null,
       );
       const todayName = showCompare ? todayLabel : meta.name;
-      out.push({ name: todayName, data: currentValues, color });
+      out.push({ name: todayName, data: currentValues, color, unit: meta.unit });
 
       if (showCompare) {
         const compareValues: Array<number | null> = sortedDates.map((d) =>
           compareDays.has(d) ? compareDays.get(d)! : null,
         );
-        out.push({ name: compareLabel, data: compareValues, color: KPI_COMPARE_LINE_COLOR, dashed: true });
+        out.push({ name: compareLabel, data: compareValues, color: KPI_COMPARE_LINE_COLOR, dashed: true, unit: meta.unit });
       }
     });
 
@@ -159,10 +159,10 @@ export function buildSeries(
 
     // 选 1 个时使用传入的 todayLabel（"今日"或"本周"）；多选时使用指标名（决策 D2）。
     const todayName = showCompare ? todayLabel : meta.name;
-    out.push({ name: todayName, data: todayValues, color });
+    out.push({ name: todayName, data: todayValues, color, unit: meta.unit });
 
     if (showCompare) {
-      out.push({ name: compareLabel, data: yesterdayValues, color: KPI_COMPARE_LINE_COLOR, dashed: true });
+      out.push({ name: compareLabel, data: yesterdayValues, color: KPI_COMPARE_LINE_COLOR, dashed: true, unit: meta.unit });
     }
   });
 
