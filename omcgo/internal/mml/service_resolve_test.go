@@ -109,6 +109,56 @@ func TestResolveRPCMethods_NoSemicolon(t *testing.T) {
 	assert.Equal(t, "SetParameterValues", result[0]["rpc_method"])
 }
 
+func TestResolveRPCMethods_AddObjectFillsObjectNameFromTargetObject(t *testing.T) {
+	svc := newResolveService(map[string]*MMLCommand{
+		"ADD DRX_INITIAL_PARAM": {
+			CommandCode:   "ADD DRX_INITIAL_PARAM",
+			RPCMethod:     "AddObject",
+			OperationType: "ADD",
+			TargetObject:  "Device.Services.FAPService.CellConfig.LTE.RAN.MAC.DrxInitialParam.",
+		},
+	})
+
+	commands := []map[string]interface{}{
+		{"command_code": "ADD DRX_INITIAL_PARAM"},
+	}
+	result := svc.resolveRPCMethods(context.Background(), commands)
+
+	require.Len(t, result, 1)
+	assert.Equal(t, "AddObject", result[0]["rpc_method"])
+	params, ok := result[0]["parameters"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t,
+		"Device.Services.FAPService.CellConfig.LTE.RAN.MAC.DrxInitialParam.",
+		params["object_name"])
+}
+
+func TestResolveRPCMethods_AddObjectKeepsExplicitObjectName(t *testing.T) {
+	svc := newResolveService(map[string]*MMLCommand{
+		"ADD DRX_INITIAL_PARAM": {
+			CommandCode:   "ADD DRX_INITIAL_PARAM",
+			RPCMethod:     "AddObject",
+			OperationType: "ADD",
+			TargetObject:  "Device.Default.",
+		},
+	})
+
+	commands := []map[string]interface{}{
+		{
+			"command_code": "ADD DRX_INITIAL_PARAM",
+			"parameters": map[string]interface{}{
+				"object_name": "Device.Custom.",
+			},
+		},
+	}
+	result := svc.resolveRPCMethods(context.Background(), commands)
+
+	require.Len(t, result, 1)
+	params, ok := result[0]["parameters"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "Device.Custom.", params["object_name"])
+}
+
 // TestResolveRPCMethods_AlreadyHasRpcMethod 确保已有 rpc_method 的条目不重复查库。
 func TestResolveRPCMethods_AlreadyHasRpcMethod(t *testing.T) {
 	// 故意让 repo 里无数据；若 resolveRPCMethods 再查库会返回 errResolveNotFound
