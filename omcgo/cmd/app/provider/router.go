@@ -155,7 +155,7 @@ func Setup(r *gin.Engine, c *Container) error {
 	})
 	graph.Add(components.ModuleInitializer{
 		Name:    "dashboard",
-		Depends: []string{"device", "alarm", "pm", "topology"},
+		Depends: []string{"device", "alarm", "pm", "topology", "misc"},
 		Init:    func() error { return initDashboardModule(c) },
 	})
 	graph.Add(components.ModuleInitializer{
