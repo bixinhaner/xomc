@@ -902,16 +902,15 @@ type LogConfig struct {
 //   - Legacy 模式（KeepUncompressed = 0）：完全沿用 lumberjack 原生 MaxBackups +
 //     MaxAge + Compress 三件套。用于 protocol_log 等暂未启用 compactor 的场景。
 //
-// MaxSizeMB 与 RotateInterval 是 OR 关系：任一满足都触发切割。
+// MaxSizeMB 与 sys_configs.log.rotation.rotate_interval_minutes 是 OR 关系：任一满足都触发切割。
 type RotationConfig struct {
-	Enabled          bool          `mapstructure:"enabled"`           // enable log rotation
-	MaxSizeMB        int           `mapstructure:"max_size_mb"`       // max size in MB before rotation (default: 50)
-	MaxAgeDays       int           `mapstructure:"max_age_days"`      // max days to retain old log files (default: 7)
-	MaxBackups       int           `mapstructure:"max_backups"`       // legacy 模式总归档数上限；compactor 模式忽略
-	Compress         bool          `mapstructure:"compress"`          // legacy 模式 lumberjack 自动 gzip；compactor 模式忽略（compactor 自行管理压缩）
-	LocalTime        bool          `mapstructure:"local_time"`        // use local time for rotation
-	RotateInterval   time.Duration `mapstructure:"rotate_interval"`   // time-based rotation interval (e.g., "5m" for 5 minutes)
-	KeepUncompressed int           `mapstructure:"keep_uncompressed"` // > 0 启用 compactor 模式，保留最新 N 个 .log 不压缩
+	Enabled          bool `mapstructure:"enabled"`           // enable log rotation
+	MaxSizeMB        int  `mapstructure:"max_size_mb"`       // max size in MB before rotation (default: 50)
+	MaxAgeDays       int  `mapstructure:"max_age_days"`      // max days to retain old log files (default: 7)
+	MaxBackups       int  `mapstructure:"max_backups"`       // legacy 模式总归档数上限；compactor 模式忽略
+	Compress         bool `mapstructure:"compress"`          // legacy 模式 lumberjack 自动 gzip；compactor 模式忽略（compactor 自行管理压缩）
+	LocalTime        bool `mapstructure:"local_time"`        // use local time for rotation
+	KeepUncompressed int  `mapstructure:"keep_uncompressed"` // > 0 启用 compactor 模式，保留最新 N 个 .log 不压缩
 }
 
 // ProtocolLogConfig 配置 ACS 协议交互原始日志（独立于结构化日志）。

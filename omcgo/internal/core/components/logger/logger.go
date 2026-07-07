@@ -138,7 +138,7 @@ func NewLogger(cfg appconfig.LogConfig) (*zap.Logger, error) {
 //	  - 完全沿用 lumberjack 原生 MaxBackups + MaxAge + Compress 行为
 //	  - 仅在极少数需保留 lumberjack 原生归档语义的场景下使用
 //
-// MaxSizeMB 与 RotateInterval 是 OR 关系：任一满足都触发切割。空文件保护防止
+// MaxSizeMB 与页面配置的 rotate_interval_minutes 是 OR 关系：任一满足都触发切割。空文件保护防止
 // 低流量环境下每个 tick 产生空 .gz 归档。
 func NewLumberjackWriter(path string, cfg appconfig.RotationConfig) io.Writer {
 	maxSize := cfg.MaxSizeMB
@@ -169,9 +169,7 @@ func NewLumberjackWriter(path string, cfg appconfig.RotationConfig) io.Writer {
 	}
 	// Compactor 模式下故意不设 MaxBackups/MaxAge/Compress，让 lumberjack 仅做切割
 
-	if cfg.RotateInterval > 0 {
-		startTimedRotation(lj, path, cfg.RotateInterval)
-	}
+	startTimedRotation(lj, path, DefaultRotateInterval)
 	if useCompactor {
 		startCompactor(lj, path, cfg.KeepUncompressed, time.Duration(maxAge)*24*time.Hour)
 	}

@@ -20,14 +20,18 @@ import (
 // timed rotation goroutine 读取它来决定「定时轮转间隔(rotate_interval_minutes)」，故改完无需
 // 重启即在下一轮检查（≤1 分钟）生效。
 //
-// 安全性：override 为 nil 或某字段 ≤0 时，对应维度回退到启动期 YAML 值——即「未配置」时行为与
-// 改动前完全一致，对默认路径零影响。compactor 和 timed rotation goroutine 只读原子指针，无数据
+// 安全性：override 为 nil 或某字段 ≤0 时，对应维度回退到启动期值或内置默认值。compactor 和
+// timed rotation goroutine 只读原子指针，无数据
 // 竞争；max_size 的执行通过 compactor stat 活动文件后调用 lumberjack 公开的 Rotate()（线程安全），
 // 不直接改 lumberjack.MaxSize 字段，避免与其内部写锁竞争。lumberjack 自身 YAML MaxSize 仍作为
 // 每次写入的硬兜底。
 
 // RotationCategory 是 sys_configs 中日志轮转配置的 category。
 const RotationCategory = "log.rotation"
+
+// DefaultRotateInterval 是 sys_configs.rotate_interval_minutes 缺失/非法时的定时轮转兜底。
+// 该值故意不再放 YAML，避免「页面可配」与「启动配置」出现双默认源。
+const DefaultRotateInterval = 24 * time.Hour
 
 const (
 	// KeyMaxSizeMB 单个日志文件触发切割的大小（MB）。
@@ -76,11 +80,14 @@ func effectiveRotation(startupKeep int, startupMaxAge time.Duration) (keep int, 
 }
 
 // effectiveRotateInterval 返回当前生效的定时轮转间隔。
-func effectiveRotateInterval(startupInterval time.Duration) time.Duration {
+func effectiveRotateInterval(fallbackInterval time.Duration) time.Duration {
 	if o := loadRotationOverride(); o != nil && o.RotateIntervalMinutes > 0 {
 		return time.Duration(o.RotateIntervalMinutes) * time.Minute
 	}
-	return startupInterval
+	if fallbackInterval > 0 {
+		return fallbackInterval
+	}
+	return DefaultRotateInterval
 }
 
 // enforceMaxSize 若活动文件 ≥ maxBytes 则用 lumberjack 的线程安全 Rotate() 切割（不改其内部字段）。
