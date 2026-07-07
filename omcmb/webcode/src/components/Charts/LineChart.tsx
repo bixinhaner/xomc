@@ -1,10 +1,10 @@
+/* eslint-disable react-refresh/only-export-components */
 import React, { useMemo } from 'react';
 import ReactECharts from 'echarts-for-react';
 import type { EChartsOption } from 'echarts';
 import { getBaseOption, getChartPalette } from './chartTheme';
 import { useIsDark } from '@/hooks/useThemeToken';
 import { useAppStore } from '@core/store/appStore';
-import { calculateSmartTicks } from '@/utils/chartUtils';
 
 export interface LineSeries {
   name: string;
@@ -17,6 +17,10 @@ export interface LineSeries {
    * 默认 true。应用场景：上一周期虚线、阈值辅助线等“带、位但不需要 legend 项」的线。
    */
   showInLegend?: boolean;
+  /**
+   * 单位，如 "Mbps", "%" 等，渲染 tooltip 时会附加到数值后。
+   */
+  unit?: string;
 }
 
 /**
@@ -113,11 +117,16 @@ export function buildLineChartOption({
 
   // 使用工具函数计算智能刻度
   const seriesData = series.map((s) => s.data.filter((v): v is number => v !== null));
-  // 对于百分比数据，根据数据范围动态调整Y轴
-  const { interval, max: calculatedMax } = calculateSmartTicks(seriesData);
+  // 找出最大值
+  const maxVal = Math.max(...(seriesData.flat().length ? seriesData.flat() : [0]));
   const isPercentage = unit === '%';
   // 对于百分比数据，当最大值小于10%时，使用动态计算的Y轴最大值，否则固定为100%
-  const yMax = isPercentage && calculatedMax > 10 ? 100 : calculatedMax;
+  let yMax: number | undefined = isPercentage && maxVal > 10 ? 100 : undefined;
+  
+  // 极小值或全0情况（如最大值不足1），使用 1 作为 max，并结合 minInterval 使得刻度仅为 0 和 1
+  if (maxVal === 0) {
+    yMax = 1;
+  }
 
   // Legend always at top with scroll enabled for multiple rows
   const getLegendConfig = () => {
@@ -180,7 +189,7 @@ export function buildLineChartOption({
         size: { contentSize: [number, number]; viewSize: [number, number] },
       ) => computeTooltipPosition(point, size),
       formatter: (params: unknown) => {
-        const items = params as Array<{ marker: string; seriesName: string; value: unknown; axisValue: string; dataIndex: number }>;
+        const items = params as Array<{ marker: string; seriesName: string; value: unknown; axisValue: string; dataIndex: number; seriesIndex: number }>;
         if (!Array.isArray(items) || items.length === 0) return '';
 
         // 数值格式化函数：处理null/undefined，显示"-"，否则根据 integerValues 决定是否显示小数
@@ -193,10 +202,15 @@ export function buildLineChartOption({
         };
 
         // 附加单位到数值后（如果单位不为空且不是"%"）
-        const displayUnit = (unit && unit !== '%') ? `${unit}` : '';
-        const unitSuffix = displayUnit ? ` ${displayUnit}` : '';
+        // const displayUnit = (unit && unit !== '%') ? `${unit}` : '';
+        // const unitSuffix = displayUnit ? ` ${displayUnit}` : '';
 
         const lines = items.map(item => {
+          const s = series[item.seriesIndex];
+          const itemUnit = s?.unit ?? unit;
+          const displayUnit = (itemUnit && itemUnit !== '%') ? `${itemUnit}` : '';
+          const unitSuffix = displayUnit ? ` ${displayUnit}` : '';
+
           const formattedVal = formatTooltipValue(item.value);
           // 如果是空值显示"-"，则不附加单位
           const displayValue = formattedVal === '-' ? '-' : `${formattedVal}${unitSuffix}`;
@@ -207,6 +221,7 @@ export function buildLineChartOption({
         const idx = items[0].dataIndex;
         const compareLabel = compareLabels?.[idx];
         const headerExtra = compareLabel
+          // eslint-disable-next-line no-restricted-syntax
           ? `<div style="font-size: 11px; color: #8c8c8c; margin-bottom: 4px;">上一周期 ${compareLabel}</div>`
           : '';
 
@@ -239,11 +254,8 @@ export function buildLineChartOption({
       name: yAxisName,
       nameTextStyle: { color: secondaryText, fontSize: 12 },
       min: 0,
-      interval: interval,
       max: yMax,
-      axisLabel: {
-        formatter: (value: number) => Number.isInteger(value) ? value.toString() : '',
-      },
+      minInterval: maxVal === 0 || integerValues ? 1 : undefined,
       splitLine: {
         lineStyle: {
           type: 'dashed',
