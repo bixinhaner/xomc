@@ -1794,7 +1794,7 @@ const messages: Record<string, string> = {
   'role.permissionConfig':    '权限配置',
   'role.userCount':           '用户数',
   'role.copyConfirmTitle':    '确认复制角色',
-  'role.copyConfirmContent':  '将复制角色「{roleName}」的菜单/数据/API 权限到新副本（副本名自动生成 {roleName}_copy）。',
+  'role.copyConfirmContent':  '将复制角色「{roleName}」的菜单/数据权限到新副本（副本名自动生成 {roleName}_copy）。',
   'role.copySuccess':         '已复制：{roleName}',
   'role.copyFailed':          '复制失败',
   'role.clearGroupBindingTitle': '确认清空设备分组绑定',

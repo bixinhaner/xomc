@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from 'react';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useMutation } from '@tanstack/react-query';
 import {
   Alert,
   App,
@@ -39,10 +39,9 @@ import {
   useDeleteRoles,
   useAllDeviceGroups,
 } from '@core/hooks/api/useSystem';
-import type { Role, ApiEndpoint } from '@core/types/system';
+import type { Role } from '@core/types/system';
 import type { DeviceGroup } from '@core/types/device';
 import { useT } from '@/hooks/useT';
-import { apiPermissionApi } from '@core/services/api/apiPermissionApi';
 import { adminApi } from '@core/services/api/adminApi';
 import { useMenuTree, useInvalidateUserMenus } from '@core/hooks/api/useMenus';
 import { fetchRoleMenuIds, setRoleMenus as apiSetRoleMenus } from '@core/services/api/menuApi';
@@ -50,12 +49,8 @@ import type { Menu } from '@core/types/menu';
 import { formatSystemTime } from '@core/utils/systemTime';
 import { UNASSIGNED_GROUP_ID } from '@core/utils/deviceGroupTargets';
 
-// PERMISSION_MODULES 已删除（B3-Phase2-B + 菜单动态加载 P3）。
-// 角色菜单权限的唯一权威源是后端 menus 表（GET /admin/menus/tree）；
+// 菜单权限的唯一权威源是后端 menus 表（GET /admin/menus/tree）；
 // 树形数据由 buildMenuPermissionTree(menuTree) 构建，节点 key 即 menu.id (UUID)。
-//
-// 历史 PERMISSION_MODULES 是把"模块/二级/三级操作"硬编码成字符串 (`device.list.add`)
-// 的写法，与后端 permissions 表三元组 1:1 对应；该表已 DROP，常量同步删除。
 
 // 网络类型权限选项
 const DATA_NETWORK_TYPE_OPTIONS = [
@@ -105,50 +100,6 @@ const READ_API_GROUPS_BY_MENU_KEY: Record<string, string[]> = {
   'system:kpi-config': ['dashboard'],
   'mml:admin:catalog': ['mml_admin'],
 };
-
-function flattenMenus(menus: Menu[]): Menu[] {
-  const result: Menu[] = [];
-  const walk = (list: Menu[]) => {
-    for (const menu of list) {
-      result.push(menu);
-      if (menu.children?.length) walk(menu.children);
-    }
-  };
-  walk(menus);
-  return result;
-}
-
-function collectMenuAndDescendantIds(menuIds: string[], menus: Menu[]): Set<string> {
-  const selected = new Set(menuIds);
-  const result = new Set(menuIds);
-  const walk = (menu: Menu, inherited: boolean) => {
-    const active = inherited || selected.has(menu.id);
-    if (active) result.add(menu.id);
-    for (const child of menu.children ?? []) walk(child, active);
-  };
-  for (const menu of menus) walk(menu, false);
-  return result;
-}
-
-function menuReadApiGroups(menu: Menu): string[] {
-  const key = menu.permissionKey;
-  if (READ_API_GROUPS_BY_MENU_KEY[key]) return READ_API_GROUPS_BY_MENU_KEY[key];
-  const pageKey = key.split(':').slice(0, 2).join(':');
-  return READ_API_GROUPS_BY_MENU_KEY[pageKey] ?? [];
-}
-
-function inferReadApiEndpointIds(menuIds: string[], menus: Menu[], endpoints: ApiEndpoint[]): string[] {
-  const effectiveMenuIds = collectMenuAndDescendantIds(menuIds, menus);
-  const groups = new Set<string>();
-  for (const menu of flattenMenus(menus)) {
-    if (!effectiveMenuIds.has(menu.id)) continue;
-    for (const group of menuReadApiGroups(menu)) groups.add(group);
-  }
-  if (groups.size === 0) return [];
-  return endpoints
-    .filter((endpoint) => endpoint.method.toUpperCase() === 'GET' && endpoint.apiGroup && groups.has(endpoint.apiGroup))
-    .map((endpoint) => endpoint.id);
-}
 
 // 构建设备组树形数据（带筛选）
 const buildDeviceGroupTreeData = (
@@ -327,11 +278,6 @@ export default function RoleManagement() {
   // 设备组筛选条件
   const [deviceGroupNetworkType, setDeviceGroupNetworkType] = useState<string>('');
   const [deviceGroupProductClass, setDeviceGroupProductClass] = useState<string>('');
-  // API权限选择
-  const [selectedApiEndpointIds, setSelectedApiEndpointIds] = useState<string[]>([]);
-  // API 树展开状态 + 父子联动（与菜单权限 UI 保持一致）
-  const [expandedApiGroupKeys, setExpandedApiGroupKeys] = useState<React.Key[]>([]);
-  const [apiCheckStrictly, setApiCheckStrictly] = useState(false);
   // role_menus 中属于 button 类型的原始 ID（从后端读回的角色绑定里拆出来）。
   // 菜单权限树只展示 directory/menu，按钮不在树里；保存时把"祖先菜单仍勾选"的
   // 按钮 ID 回填进 PUT 请求，避免按钮级 RBAC 被本面板顺手清空。
@@ -397,99 +343,7 @@ export default function RoleManagement() {
   const updateRole = useUpdateRole();
   const deleteRoles = useDeleteRoles();
 
-  // API权限数据（全部端点列表）
-  const { data: apiEndpoints, isLoading: isLoadingApiEndpoints } = useQuery({
-    queryKey: ['apiEndpoints', 'all'],
-    queryFn: apiPermissionApi.listEndpoints,
-    staleTime: 5 * 60 * 1000,
-  });
-
-  // 按 apiGroup 分组
-  const apiGroupMap = useMemo(() => {
-    const map = new Map<string, ApiEndpoint[]>();
-    for (const ep of apiEndpoints ?? []) {
-      const group = ep.apiGroup || 'other';
-      const list = map.get(group) || [];
-      list.push(ep);
-      map.set(group, list);
-    }
-    return map;
-  }, [apiEndpoints]);
-
-  const apiGroupNames = useMemo(() => Array.from(apiGroupMap.keys()).sort(), [apiGroupMap]);
-
-  // 父级（分组）节点 key 用 'group:<name>' 前缀避免与端点 UUID 冲突。
-  const apiGroupParentKeys = useMemo<string[]>(
-    () => apiGroupNames.map((g) => `group:${g}`),
-    [apiGroupNames],
-  );
-  // 所有 API 端点 ID（叶子，用于"全选"）。
-  const allApiEndpointIds = useMemo<string[]>(
-    () => (apiEndpoints ?? []).map((ep) => ep.id),
-    [apiEndpoints],
-  );
-
-  // antd Tree 渲染颜色 helper（GET=blue / POST=green / ...）。
-  const apiMethodColor = (method: string): string => {
-    switch (method) {
-      case 'GET': return 'blue';
-      case 'POST': return 'green';
-      case 'PUT': return 'orange';
-      case 'DELETE': return 'red';
-      case 'PATCH': return 'purple';
-      default: return 'default';
-    }
-  };
-
-  // 构建 API 权限树：分组（父）→ 端点（叶）。
-  const apiTreeData = useMemo<TreeDataNode[]>(() => {
-    return apiGroupNames.map((groupName) => {
-      const group = apiGroupMap.get(groupName) || [];
-      return {
-        key: `group:${groupName}`,
-        title: (
-          <span>
-            <span style={{ fontWeight: 500 }}>{groupName}</span>
-            <span style={{ marginLeft: 8, color: 'var(--color-text-secondary)', fontSize: 12 }}>
-              ({group.length})
-            </span>
-          </span>
-        ),
-        children: group.map((ep) => ({
-          key: ep.id,
-          title: (
-            <span style={{ display: 'inline-flex', alignItems: 'center' }}>
-              <Tag color={apiMethodColor(ep.method)} style={{ marginRight: 8, minWidth: 56, textAlign: 'center' }}>
-                {ep.method}
-              </Tag>
-              <span style={{ fontFamily: 'monospace', fontSize: 13 }}>{ep.path}</span>
-              {ep.name ? (
-                <span style={{ marginLeft: 8, color: 'var(--color-text-secondary)', fontSize: 12 }}>
-                  {ep.name}
-                </span>
-              ) : null}
-            </span>
-          ),
-          isLeaf: true,
-        })),
-      };
-    });
-  }, [apiGroupNames, apiGroupMap]);
-
-  // API 权限分组默认折叠（"展开/折叠"复选框默认未勾选）。用户需要展开时点击复选框或单个分组。
-  // 历史上此处有一个 useEffect 在数据首次到位后自动展开所有分组，已移除以保持
-  // 与菜单权限的默认折叠行为一致。
-
-  const getRoleApiPermissions = useMutation({
-    mutationFn: (roleId: string) => apiPermissionApi.getRolePermissions(roleId),
-  });
-
-  const setRoleApiPermissions = useMutation({
-    mutationFn: ({ roleId, endpointIds }: { roleId: string; endpointIds: string[] }) =>
-      apiPermissionApi.setRolePermissions(roleId, endpointIds),
-  });
-
-  // v0.5：与 API 权限对齐的专项端点回显（参 docs/prd/system/roles.md）。
+  // 菜单 / 设备组专项端点回显（参 docs/prd/system/roles.md）。
   // 列表 / GetByID 接口虽已带 device_group_ids，但 network_types 仍由专项端点返回；
   // 同时 GetByID(id) 返回完整 permissions（菜单权限），避免列表接口的回显空洞。
   const getRoleDetail = useMutation({
@@ -522,14 +376,13 @@ export default function RoleManagement() {
 
   const isBuiltIn = useCallback((role: Role) => role.builtIn === 1 || role.builtIn === 2, []);
 
-  // v0.5：编辑/查看面板打开时的统一回显逻辑（修复菜单权限 + 数据权限回显空白 bug）。
+  // 编辑/查看面板打开时的统一回显逻辑（修复菜单权限 + 数据权限回显空白 bug）。
   //
   // 回显数据来源：
   //   - 菜单权限（permissions） → adminApi.getRoleById(id) 的 permissions 字段
   //     列表接口 ListWithPagination 不填充 permissions（性能考虑），用单角色详情兜底
   //   - 数据权限（deviceGroupIds + networkTypes） → adminApi.getRoleDeviceGroups(id)
   //     network_types 只有专项端点返回；列表接口的 device_group_ids 不带制式
-  //   - API 权限（apiPermissions） → 沿用 getRoleApiPermissions.mutate（已有，不动）
   //
   // 列表数据中的 role.deviceGroupIds（v0.5 起后端已填充）作为「⚠️ 未绑分组」标识用，
   // 不参与编辑面板回显，避免与专项端点结果冲突。
@@ -539,10 +392,9 @@ export default function RoleManagement() {
       roleName: role.roleName,
       description: role.description,
     });
-    // 默认折叠：菜单 / API 权限树打开编辑面板时不预展开，与"展开/折叠"复选框默认未勾选一致。
+    // 默认折叠：菜单 / 资源权限打开编辑面板时不预展开，与"展开/折叠"复选框默认未勾选一致。
     // 用户需要展开时手动点击复选框或单个目录节点。
     setExpandedPermissionKeys([]);
-    setExpandedApiGroupKeys([]);
     // 清空快速回显，避免上一个角色的菜单 ID 残留
     setCheckedPermissionKeys([]);
     setOriginalButtonIds([]);
@@ -590,11 +442,7 @@ export default function RoleManagement() {
         setSelectedNetworkTypes(networkTypes);
       },
     });
-    // 3) 拉 API 权限专项端点（保持原有逻辑）
-    getRoleApiPermissions.mutate(role.id, {
-      onSuccess: (ids) => setSelectedApiEndpointIds(ids),
-    });
-  }, [form, allMenuIds, menuTree, getRoleMenuIdsMut, getRoleDeviceGroupsMut, getRoleApiPermissions]);
+  }, [form, allMenuIds, menuTree, getRoleMenuIdsMut, getRoleDeviceGroupsMut]);
 
   // 已有的角色名称列表（用于重复检查）
   const existingRoleNames = useMemo(
@@ -624,20 +472,6 @@ export default function RoleManagement() {
     const preservedButtons = originalButtonIds.filter((id) => liveButtons.has(id));
     return [...menuIds, ...preservedButtons];
   }, [allMenuIds, originalButtonIds, menuTree]);
-
-  const apiEndpointIdsToSave = useCallback((menuIds: string[]): string[] => {
-    const inferred = inferReadApiEndpointIds(menuIds, menuTree, apiEndpoints ?? []);
-    return Array.from(new Set([...selectedApiEndpointIds, ...inferred]));
-  }, [apiEndpoints, menuTree, selectedApiEndpointIds]);
-
-  const resolveApiEndpointIdsToSave = useCallback(async (menuIds: string[]): Promise<string[]> => {
-    const current = apiEndpointIdsToSave(menuIds);
-    if (menuIds.length === 0 || current.length > selectedApiEndpointIds.length) return current;
-
-    const freshEndpoints = await apiPermissionApi.listEndpoints();
-    const inferred = inferReadApiEndpointIds(menuIds, menuTree, freshEndpoints);
-    return Array.from(new Set([...selectedApiEndpointIds, ...inferred]));
-  }, [apiEndpointIdsToSave, menuTree, selectedApiEndpointIds]);
 
   // 至少选了一个菜单（无论目录/菜单/按钮）即视为有权限。
   const hasAnyPermission = useMemo(
@@ -783,7 +617,6 @@ export default function RoleManagement() {
 
     form.validateFields().then(async (vals) => {
       const menuIds = permissionsToMenuIds(checkedPermissionKeys);
-      const endpointIds = await resolveApiEndpointIdsToSave(menuIds);
       try {
         const newRole = await createRole.mutateAsync(
           {
@@ -807,12 +640,6 @@ export default function RoleManagement() {
             deviceGroupIds: selectedDeviceGroupIds,
             networkTypes: selectedNetworkTypes,
           });
-          if (endpointIds.length > 0) {
-            await setRoleApiPermissions.mutateAsync({
-              roleId: newRole.id,
-              endpointIds,
-            });
-          }
         }
         // 让当前用户的侧边栏菜单立即刷新（非 builtIn 用户）。
         await invalidateUserMenus();
@@ -828,13 +655,12 @@ export default function RoleManagement() {
         setExpandedPermissionKeys([]);
         setSelectedDeviceGroupIds([]);
         setSelectedNetworkTypes([]);
-        setSelectedApiEndpointIds([]);
       } catch (err) {
         const msg = err instanceof Error ? err.message : t('common.saveFailed');
         message.error(msg);
       }
     });
-    }, [form, createRole, checkedPermissionKeys, selectedDeviceGroupIds, selectedNetworkTypes, hasAnyPermission, allDataPermissionGroupIds, permissionsToMenuIds, resolveApiEndpointIdsToSave, setRoleMenusMut, setRoleDeviceGroupsMut, setRoleApiPermissions, invalidateUserMenus, refetch, message, t]);
+    }, [form, createRole, checkedPermissionKeys, selectedDeviceGroupIds, selectedNetworkTypes, hasAnyPermission, allDataPermissionGroupIds, permissionsToMenuIds, setRoleMenusMut, setRoleDeviceGroupsMut, invalidateUserMenus, refetch, message, t]);
 
   // doEditSubmit 拆出实际提交逻辑，配合下方"清空设备分组二次确认"复用。
   // 必须先于 handleEdit 声明，否则 React 的 useCallback 会触发 react-hooks/refs：
@@ -843,7 +669,6 @@ export default function RoleManagement() {
     if (!selectedRole) return;
     form.validateFields().then(async (vals) => {
       const menuIds = permissionsToMenuIds(checkedPermissionKeys);
-      const endpointIds = await resolveApiEndpointIdsToSave(menuIds);
       try {
         await updateRole.mutateAsync({
           id: selectedRole.id,
@@ -866,10 +691,6 @@ export default function RoleManagement() {
           deviceGroupIds: selectedDeviceGroupIds,
           networkTypes: selectedNetworkTypes,
         });
-        await setRoleApiPermissions.mutateAsync({
-          roleId: selectedRole.id,
-          endpointIds,
-        });
         // 让当前用户的侧边栏菜单立即刷新（非 builtIn 用户）。
         await invalidateUserMenus();
         // 刷新角色列表：updateRole 的 invalidate 在专项端点（设备分组/菜单/API）写入
@@ -885,13 +706,12 @@ export default function RoleManagement() {
         setExpandedPermissionKeys([]);
         setSelectedDeviceGroupIds([]);
         setSelectedNetworkTypes([]);
-        setSelectedApiEndpointIds([]);
       } catch (err) {
         const msg = err instanceof Error ? err.message : t('common.saveFailed');
         message.error(msg);
       }
     });
-  }, [selectedRole, form, updateRole, checkedPermissionKeys, selectedDeviceGroupIds, selectedNetworkTypes, permissionsToMenuIds, resolveApiEndpointIdsToSave, setRoleMenusMut, setRoleDeviceGroupsMut, setRoleApiPermissions, invalidateUserMenus, refetch, message, t]);
+  }, [selectedRole, form, updateRole, checkedPermissionKeys, selectedDeviceGroupIds, selectedNetworkTypes, permissionsToMenuIds, setRoleMenusMut, setRoleDeviceGroupsMut, invalidateUserMenus, refetch, message, t]);
 
   // 校验并提交编辑
   const handleEdit = useCallback(() => {
@@ -1323,111 +1143,6 @@ export default function RoleManagement() {
     );
   };
 
-  // 渲染API权限配置（按分组展示，支持分组批量勾选）
-  // 渲染 API 权限：父=API分组、叶=端点（method+path），UI 与菜单权限 Tree 一致。
-  const renderApiPermissionConfig = (readOnly = false) => {
-    const isAllExpanded =
-      apiGroupParentKeys.length > 0 && expandedApiGroupKeys.length >= apiGroupParentKeys.length;
-    const isAllSelected =
-      allApiEndpointIds.length > 0 && selectedApiEndpointIds.length === allApiEndpointIds.length;
-    const isIndeterminate =
-      selectedApiEndpointIds.length > 0 && selectedApiEndpointIds.length < allApiEndpointIds.length;
-
-    const handleExpandAll = (checked: boolean) => {
-      setExpandedApiGroupKeys(checked ? apiGroupParentKeys : []);
-    };
-    const handleSelectAll = (checked: boolean) => {
-      setSelectedApiEndpointIds(checked ? allApiEndpointIds : []);
-    };
-    const handleLinkage = (checked: boolean) => {
-      // 勾选"父子联动" => checkStrictly=false（一致于菜单权限的语义）。
-      setApiCheckStrictly(!checked);
-    };
-
-    const handleCheck: TreeProps['onCheck'] = (checked) => {
-      // 联动模式 checked: Key[]；strict 模式 checked: { checked, halfChecked }。
-      const all = Array.isArray(checked) ? checked : checked.checked;
-      // 仅保留叶子（端点 UUID），过滤掉 'group:xxx' 父节点 key。
-      const leaves = (all as React.Key[]).filter(
-        (k): k is string => typeof k === 'string' && !k.startsWith('group:'),
-      );
-      setSelectedApiEndpointIds(leaves);
-    };
-
-    const handleExpand: TreeProps['onExpand'] = (expanded) => {
-      setExpandedApiGroupKeys(expanded as React.Key[]);
-    };
-
-    // checkStrictly=true 时 antd Tree 要求对象形态；strict=false 直接传叶子数组即可，
-    // antd 会自动从子节点推导父节点 halfChecked。
-    const treeCheckedKeys: TreeProps['checkedKeys'] = apiCheckStrictly
-      ? { checked: selectedApiEndpointIds, halfChecked: [] }
-      : selectedApiEndpointIds;
-
-    return (
-      <Form.Item label={t('role.apiPermission')}>
-        <div style={{ border: '1px solid var(--color-border)', borderRadius: 6 }}>
-          <div
-            style={{
-              padding: '8px 12px',
-              borderBottom: '1px solid var(--color-border)',
-              background: 'var(--color-fill-quaternary)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 16,
-              flexWrap: 'wrap',
-            }}
-          >
-            <Checkbox
-              checked={isAllExpanded}
-              onChange={(e) => handleExpandAll(e.target.checked)}
-              disabled={readOnly || apiGroupParentKeys.length === 0}
-            >
-              {t('role.expandCollapse')}
-            </Checkbox>
-            <Checkbox
-              checked={isAllSelected}
-              indeterminate={isIndeterminate}
-              onChange={(e) => handleSelectAll(e.target.checked)}
-              disabled={readOnly || allApiEndpointIds.length === 0}
-            >
-              {t('role.selectAllOrNone')}
-            </Checkbox>
-            <Checkbox
-              checked={!apiCheckStrictly}
-              onChange={(e) => handleLinkage(e.target.checked)}
-              disabled={readOnly}
-            >
-              {t('role.parentChildLinkage')}
-            </Checkbox>
-            <span style={{ marginLeft: 'auto', color: 'var(--color-text-secondary)', fontSize: 12 }}>
-              {t('role.selectedApiCount', { count: selectedApiEndpointIds.length })}
-              {' / '}
-              {allApiEndpointIds.length}
-            </span>
-          </div>
-          <div style={{ padding: 8, maxHeight: 500, overflow: 'auto' }}>
-            {isLoadingApiEndpoints ? (
-              <div style={{ textAlign: 'center', padding: 24 }}><Spin /></div>
-            ) : (
-              <Tree
-                treeData={apiTreeData}
-                expandedKeys={expandedApiGroupKeys}
-                checkedKeys={treeCheckedKeys}
-                selectable={false}
-                checkable
-                disabled={readOnly}
-                checkStrictly={apiCheckStrictly}
-                onCheck={readOnly ? undefined : handleCheck}
-                onExpand={handleExpand}
-              />
-            )}
-          </div>
-        </div>
-      </Form.Item>
-    );
-  };
-
   // 关闭抽屉时重置状态
   const handleCloseCreate = useCallback(() => {
     setCreateVisible(false);
@@ -1437,7 +1152,6 @@ export default function RoleManagement() {
     setExpandedPermissionKeys([]);
     setSelectedDeviceGroupIds([]);
     setSelectedNetworkTypes([]);
-    setSelectedApiEndpointIds([]);
     setActiveTab('menu');
   }, [form]);
 
@@ -1450,7 +1164,6 @@ export default function RoleManagement() {
     setExpandedPermissionKeys([]);
     setSelectedDeviceGroupIds([]);
     setSelectedNetworkTypes([]);
-    setSelectedApiEndpointIds([]);
     setActiveTab('menu');
   }, [form]);
 
@@ -1463,7 +1176,6 @@ export default function RoleManagement() {
     setExpandedPermissionKeys([]);
     setSelectedDeviceGroupIds([]);
     setSelectedNetworkTypes([]);
-    setSelectedApiEndpointIds([]);
     setActiveTab('menu');
   }, [form]);
 
@@ -1556,7 +1268,7 @@ export default function RoleManagement() {
           </Form.Item>
         </Form>
 
-        {/* 标签页：角色菜单、角色API、资源权限 */}
+        {/* 标签页：角色菜单、资源权限 */}
         <Tabs
           activeKey={activeTab}
           onChange={setActiveTab}
@@ -1565,11 +1277,6 @@ export default function RoleManagement() {
               key: 'menu',
               label: t('role.menuPermission'),
               children: renderPermissionConfig(false),
-            },
-            {
-              key: 'api',
-              label: t('role.apiPermission'),
-              children: renderApiPermissionConfig(false),
             },
             {
               key: 'resource',
@@ -1636,7 +1343,7 @@ export default function RoleManagement() {
           </Form.Item>
         </Form>
 
-        {/* 标签页：角色菜单、角色API、资源权限 */}
+        {/* 标签页：角色菜单、资源权限 */}
         <Tabs
           activeKey={activeTab}
           onChange={setActiveTab}
@@ -1645,11 +1352,6 @@ export default function RoleManagement() {
               key: 'menu',
               label: t('role.menuPermission'),
               children: renderPermissionConfig(false),
-            },
-            {
-              key: 'api',
-              label: t('role.apiPermission'),
-              children: renderApiPermissionConfig(false),
             },
             {
               key: 'resource',
@@ -1693,7 +1395,7 @@ export default function RoleManagement() {
           </Form.Item>
         </Form>
 
-        {/* 标签页：角色菜单、角色API、资源权限 */}
+        {/* 标签页：角色菜单、资源权限 */}
         <Tabs
           activeKey={activeTab}
           onChange={setActiveTab}
@@ -1702,11 +1404,6 @@ export default function RoleManagement() {
               key: 'menu',
               label: t('role.menuPermission'),
               children: renderPermissionConfig(true),
-            },
-            {
-              key: 'api',
-              label: t('role.apiPermission'),
-              children: renderApiPermissionConfig(true),
             },
             {
               key: 'resource',

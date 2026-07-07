@@ -192,22 +192,12 @@ func RequirePermission(roleRepo PermissionChecker, resource, action string) gin.
 	}
 }
 
-// RequireAPIPermission returns a Gin middleware that checks the authenticated
-// user has permission for the current request's URL path + HTTP method.
+// RequireAPIPermission 保留为认证门禁，但不再做端点级 API 权限判断。
 //
-// 端点级（path+method）鉴权 — B3-Phase2 切换段使用，对齐 GVA 风格。
-// 当前 (Phase1) 已挂上的 LoadPolicy 双源加载使端点级策略可被 Casbin Enforce 命中，
-// 但本中间件暂未挂任何路由组——Phase2 会替换 router.go 中的 RequirePermission /
-// RequireResourcePermission 调用为本中间件。
-//
-// 与 RequirePermission 的差异：
-//   - RequirePermission(roleRepo, resource, action) → 硬编码业务字符串（粗粒度）
-//   - RequireAPIPermission(roleRepo)               → 自动读 c.Request.URL.Path /
-//     c.Request.Method（端点级）
-//
-// 超管旁路：claims.IsSuperAdmin（user.source='builtIn' 派生）一致。
-// 详见 docs/prd/system/menu-dynamic-loading.md §4.2.4 (B3-Phase1/Phase2)。
-func RequireAPIPermission(roleRepo PermissionChecker) gin.HandlerFunc {
+// 菜单权限已经足够表达页面可见性和页面内操作能力；再叠加 path+method 级 API
+// 权限只会增加角色配置复杂度，并容易制造“菜单能进但接口 403”的困惑。
+// 现在该中间件只要求请求已完成认证，然后直接放行。
+func RequireAPIPermission(_ PermissionChecker) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, exists := c.Get(CtxKeyUserID)
 		if !exists {
@@ -216,38 +206,9 @@ func RequireAPIPermission(roleRepo PermissionChecker) gin.HandlerFunc {
 			return
 		}
 
-		userID, ok := userIDVal.(uuid.UUID)
-		if !ok {
+		if _, ok := userIDVal.(uuid.UUID); !ok {
 			commonerrors.AbortWithError(c, http.StatusInternalServerError,
 				errors.New("invalid user context"))
-			return
-		}
-
-		// builtIn 超管旁路（与 RequirePermission/RequireResourcePermission 行为一致）
-		if isSuper, _ := c.Get(CtxKeyIsSuperAdmin); isSuper == true {
-			c.Next()
-			return
-		}
-
-		// 端点级鉴权：obj=path, act=method
-		path := c.Request.URL.Path
-		method := c.Request.Method
-		ctx := c.Request.Context()
-		allowed, err := roleRepo.CheckPermission(ctx, userID, path, method)
-		if err != nil {
-			logger.L(ctx).Error("api permission check failed",
-				zap.String("user_id", userID.String()),
-				zap.String("path", path),
-				zap.String("method", method),
-				zap.Error(err),
-			)
-			commonerrors.AbortWithError(c, http.StatusInternalServerError,
-				errors.New("permission check failed"))
-			return
-		}
-		if !allowed {
-			commonerrors.AbortWithError(c, http.StatusForbidden,
-				errors.New("insufficient permissions"))
 			return
 		}
 

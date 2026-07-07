@@ -1789,7 +1789,7 @@ const messages: Record<string, string> = {
   'role.permissionConfig':    'Permission Configuration',
   'role.userCount':           'User Count',
   'role.copyConfirmTitle':    'Confirm Copy Role',
-  'role.copyConfirmContent':  'This will copy the menu/data/API permissions of role "{roleName}" to a new copy (the copy name is auto-generated as {roleName}_copy).',
+  'role.copyConfirmContent':  'This will copy the menu/data permissions of role "{roleName}" to a new copy (the copy name is auto-generated as {roleName}_copy).',
   'role.copySuccess':         'Copied: {roleName}',
   'role.copyFailed':          'Copy failed',
   'role.clearGroupBindingTitle': 'Confirm Clearing Device Group Binding',

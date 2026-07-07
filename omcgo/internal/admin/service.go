@@ -1081,7 +1081,7 @@ func (s *AdminService) UnlockUser(ctx context.Context, id uuid.UUID) error {
 }
 
 // GetRole returns a role by ID. B3-Phase2-B 起 permissions 表已 DROP，
-// role.Permissions 永远为空切片；权限以 role_menus / role_api_permissions 双轨承载。
+// role.Permissions 永远为空切片；权限以 role_menus 承载。
 func (s *AdminService) GetRole(ctx context.Context, id uuid.UUID) (*Role, error) {
 	role, err := s.roleRepo.GetByID(ctx, id)
 	if err != nil {
@@ -1112,7 +1112,7 @@ func (s *AdminService) CreateRole(ctx context.Context, req CreateRoleRequest) (*
 	}
 
 	// B3-Phase2-B：permissions 表已 DROP；角色权限改由 role_menus（菜单可见性）+
-	// role_api_permissions（API 鉴权）双轨承载。req.Permissions 仅为前端兼容字段，已忽略。
+	// req.Permissions 仅为前端兼容字段，已忽略；菜单权限改由 role_menus 承载。
 	_ = req.Permissions
 
 	return s.GetRole(ctx, role.ID)
@@ -1180,7 +1180,7 @@ func (s *AdminService) DeleteRole(ctx context.Context, id uuid.UUID) error {
 }
 
 // CopyRole 一键复制一个角色（roles.md §7 P2 #9）。
-// 复制项：name + "_copy_N"（N 自动递增直到不冲突）/ description / permissions / role_menus / role_device_groups（含 network_types）/ role_api_permissions。
+// 复制项：name + "_copy_N"（N 自动递增直到不冲突）/ description / permissions / role_menus / role_device_groups（含 network_types）。
 // 不复制项：is_system（副本固定 false，绝不会复制出新内置角色）/ created_by / updated_by（重新写为操作者）。
 //
 // 失败语义：源不存在 → ErrNotFound；副本名冲突超 99 次 → 报错；其它操作失败立即返回（已创建副本不回滚，便于排查）。
@@ -1207,15 +1207,13 @@ func (s *AdminService) CopyRole(ctx context.Context, sourceID uuid.UUID) (*Role,
 		return nil, fmt.Errorf("create copy role: %w", err)
 	}
 
-	// B3-Phase2-B：permissions 表已 DROP；复制路径走 role_menus + role_api_permissions
-	// 双轨（下面已按这两个关联复制）。src.Permissions 字段保留向后兼容，不消费。
+	// B3-Phase2-B：permissions 表已 DROP；复制路径走 role_menus。
+	// src.Permissions 字段保留向后兼容，不消费。
 	_ = src.Permissions
 
-	// 复制 role_device_groups（含 network_types）/ role_api_permissions：
-	// 这两类绑定走 RoleDeviceGroupRepository / RoleApiPermissionRepository 接口，
-	// 当前 service 没有独立字段引用它们；走类型断言直接调 PgRoleRepository（生产实现），
-	// 与 LockUserByUsername 中 s.userRepo.(*PgUserRepository) 模式一致；
-	// 单测里若使用 mock 则该断言失败，CopyRole 的绑定复制不生效（仅 base + permissions 复制）。
+	// 复制 role_device_groups（含 network_types）：
+	// 该绑定走 RoleDeviceGroupRepository 接口；当前 service 没有独立字段引用它，
+	// 直接调 PgRoleRepository（生产实现）与 LockUserByUsername 中的类型断言模式一致。
 	if pgRepo, ok := s.roleRepo.(*PgRoleRepository); ok {
 		// device groups + network_types
 		if data, err := pgRepo.GetDeviceGroupData(ctx, sourceID); err == nil && data != nil && len(data.GroupIDs) > 0 {
@@ -1224,15 +1222,8 @@ func (s *AdminService) CopyRole(ctx context.Context, sourceID uuid.UUID) (*Role,
 					zap.String("role_id", copied.ID.String()), zap.Error(err))
 			}
 		}
-		// api permissions
-		if endpointIDs, err := pgRepo.GetRoleApiEndpointIDs(ctx, sourceID); err == nil && len(endpointIDs) > 0 {
-			if err := pgRepo.SetRoleApiEndpoints(ctx, copied.ID, endpointIDs); err != nil {
-				s.logger.Warn("copy role api permissions failed",
-					zap.String("role_id", copied.ID.String()), zap.Error(err))
-			}
-		}
 	} else {
-		s.logger.Warn("copy role: roleRepo not *PgRoleRepository, device-groups & api-permissions skipped",
+		s.logger.Warn("copy role: roleRepo not *PgRoleRepository, device-groups skipped",
 			zap.String("role_id", copied.ID.String()))
 	}
 
