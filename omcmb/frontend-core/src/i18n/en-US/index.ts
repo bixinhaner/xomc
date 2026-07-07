@@ -1036,6 +1036,8 @@ const messages: Record<string, string> = {
   'device.detail.deviceFetchWaitingPersist': 'Device has responded; waiting for OMC persistence, please retry shortly',
   'device.detail.deviceFetchQueueBusy': 'Device sync queue is congested ({pending} pending); OMC is catching up in background',
   'device.detail.deviceFetchTimeoutQueue': 'Device sync timed out ({pending} pending); retry later or reduce concurrency',
+  'device.detail.quickSettingsRefreshConfirmTitle': 'Refresh Quick Settings?',
+  'device.detail.quickSettingsRefreshConfirmContent': 'There are unsaved Quick Settings edits. Continuing will discard local changes and rebuild the page from the latest device values.',
   'device.paramTree.addInstance':         'Add Instance',
   'device.paramTree.deleteInstance':      'Delete Instance #{name}',
   'device.paramTree.noData':              'No parameter data',
