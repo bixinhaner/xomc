@@ -868,9 +868,10 @@ type BatchImportResponse struct {
 
 // BatchImportRowError 描述单行导入失败的原因（携带行号方便用户定位）。
 type BatchImportRowError struct {
-	Row    int    `json:"row"`          // 1-based, 与 CSV 用户视角行号一致（不含 header）
-	SN     string `json:"sn,omitempty"` // 失败行的设备 SN（即使插库失败，方便用户定位）
-	Reason string `json:"reason"`       // 友好的中文/英文错误描述
+	Row       int    `json:"row"`                  // 1-based, 与 CSV 用户视角行号一致（不含 header）
+	SN        string `json:"sn,omitempty"`         // 失败行的设备 SN（即使插库失败，方便用户定位）
+	ErrorCode string `json:"error_code,omitempty"` // 机器可读错误码，前端据此做 i18n；为空时前端降级展示 Reason
+	Reason    string `json:"reason"`               // 英文兜底描述（含运行时 err.Error()）
 }
 
 // BatchImportDevices handles POST /api/v1/devices/batch-import.
@@ -898,11 +899,13 @@ func (h *Handler) BatchImportDevices(c *gin.Context) {
 		dev, err := h.service.GetBySerialNumber(c.Request.Context(), row.SerialNumber)
 		if err != nil || dev == nil {
 			resp.Failed++
-			reason := "设备不存在（导入仅更新已注册设备的名称/备注，并归入当前分组）"
+			errCode := "device_not_found"
+			reason := "device not found (import only updates registered devices; assign to current group)"
 			if err != nil && !errors.Is(err, commonerrors.ErrNotFound) {
+				errCode = ""
 				reason = err.Error()
 			}
-			resp.Errors = append(resp.Errors, BatchImportRowError{Row: i + 1, SN: row.SerialNumber, Reason: reason})
+			resp.Errors = append(resp.Errors, BatchImportRowError{Row: i + 1, SN: row.SerialNumber, ErrorCode: errCode, Reason: reason})
 			continue
 		}
 
@@ -910,7 +913,7 @@ func (h *Handler) BatchImportDevices(c *gin.Context) {
 		if row.DeviceName != nil {
 			if _, err := h.service.UpdateDevice(c.Request.Context(), dev.ID, UpdateDeviceRequest{DeviceName: row.DeviceName}); err != nil {
 				resp.Failed++
-				resp.Errors = append(resp.Errors, BatchImportRowError{Row: i + 1, SN: row.SerialNumber, Reason: "更新设备名称失败：" + err.Error()})
+				resp.Errors = append(resp.Errors, BatchImportRowError{Row: i + 1, SN: row.SerialNumber, ErrorCode: "update_name_failed", Reason: "update device name failed: " + err.Error()})
 				continue
 			}
 		}
@@ -918,7 +921,7 @@ func (h *Handler) BatchImportDevices(c *gin.Context) {
 		if row.Remark != nil {
 			if err := h.service.UpdateDeviceInfo(c.Request.Context(), dev.ID, UpdateDeviceInfoRequest{Remark: row.Remark}, updater); err != nil {
 				resp.Failed++
-				resp.Errors = append(resp.Errors, BatchImportRowError{Row: i + 1, SN: row.SerialNumber, Reason: "更新备注失败：" + err.Error()})
+				resp.Errors = append(resp.Errors, BatchImportRowError{Row: i + 1, SN: row.SerialNumber, ErrorCode: "update_remark_failed", Reason: "update remark failed: " + err.Error()})
 				continue
 			}
 		}
@@ -980,15 +983,15 @@ func (h *Handler) BatchRebootDevices(c *gin.Context) {
 
 // RecycleBinFilterQuery binds query parameters for recycle bin list.
 type RecycleBinFilterQuery struct {
-	Page      int    `form:"page" binding:"omitempty,min=1"`
-	PageSize  int    `form:"page_size" binding:"omitempty,min=1,max=100"`
-	SortBy    string `form:"sort_by" binding:"omitempty"`
-	SortDir   string `form:"sort_dir" binding:"omitempty,oneof=asc desc"`
-	Search    string `form:"search" binding:"omitempty"`
-	Carrier   string `form:"carrier" binding:"omitempty"`
+	Page       int    `form:"page" binding:"omitempty,min=1"`
+	PageSize   int    `form:"page_size" binding:"omitempty,min=1,max=100"`
+	SortBy     string `form:"sort_by" binding:"omitempty"`
+	SortDir    string `form:"sort_dir" binding:"omitempty,oneof=asc desc"`
+	Search     string `form:"search" binding:"omitempty"`
+	Carrier    string `form:"carrier" binding:"omitempty"`
 	Technology string `form:"technology" binding:"omitempty"`
-	GroupID   string `form:"group_id" binding:"omitempty,uuid"`
-	DeletedBy string `form:"deleted_by" binding:"omitempty"`
+	GroupID    string `form:"group_id" binding:"omitempty,uuid"`
+	DeletedBy  string `form:"deleted_by" binding:"omitempty"`
 }
 
 // ListRecycleBin handles GET /api/v1/devices/recycle.

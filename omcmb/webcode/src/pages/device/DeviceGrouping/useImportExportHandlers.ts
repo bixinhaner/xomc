@@ -102,19 +102,18 @@ export function useImportExportHandlers(deps: {
   );
 
   const handleDownloadTemplate = useCallback(() => {
-    // 模板表头与导出共享中文表头命名（IMPORT_COLUMNS / EXPORT_COLUMNS 共用
-    // deviceCsvSchema）；解析器接受中文 + snake_case 两种表头（向后兼容）。
-    const required = IMPORT_COLUMNS.filter((c) => c.required).map((c) => c.zh).join(', ');
-    const optional = IMPORT_COLUMNS.filter((c) => !c.required).map((c) => c.zh).join(', ');
-    // 导入按 SN 匹配已注册设备，更新名称/备注并归入当前分组（不新建设备）。
-    const csvComment = `# 必填: ${required} | 可选: ${optional} | 说明: 按 SN 匹配已注册设备，更新名称/备注并归入当前分组；SN 不存在的行会失败`;
-    const csvHeader = IMPORT_COLUMNS.map((c) => csvField(c.zh)).join(',');
+    // 模板表头与导出共享 i18nKey，随当前语言渲染列名；
+    // 解析器仍接受中文 + snake_case 两种表头（向后兼容）。
+    const required = IMPORT_COLUMNS.filter((c) => c.required).map((c) => t(c.i18nKey)).join(', ');
+    const optional = IMPORT_COLUMNS.filter((c) => !c.required).map((c) => t(c.i18nKey)).join(', ');
+    const csvComment = t('device.csv.template.comment', { required, optional });
+    const csvHeader = IMPORT_COLUMNS.map((c) => csvField(t(c.i18nKey))).join(',');
     const csvExamples = [0, 1, 2].map((rowIdx) =>
       IMPORT_COLUMNS.map((c) => csvField(c.example[rowIdx] ?? '')).join(','),
     );
     const csvContent = csvComment + '\n' + csvHeader + '\n' + csvExamples.join('\n') + '\n';
-    // UTF-8 BOM (U+FEFF) prefix 让 Excel 正确识别中文编码。
-    const blob = new Blob(['﻿' + csvContent], {
+    // UTF-8 BOM (U+FEFF) prefix 让 Excel 正确识别编码。
+    const blob = new Blob(['\uFEFF' + csvContent], {
       type: 'text/csv;charset=utf-8;',
     });
     const url = URL.createObjectURL(blob);
@@ -160,12 +159,12 @@ function buildCsvForDeviceList(
   devices: Device[],
   t: (id: string, values?: Record<string, string | number>) => string,
 ): string {
-  const headers = EXPORT_COLUMNS.map((c) => csvField(c.zh)).join(',');
+  const headers = EXPORT_COLUMNS.map((c) => csvField(t(c.i18nKey))).join(',');
   const rows = devices.map((d) =>
     EXPORT_COLUMNS.map((c) => csvField(c.getValue(d, { t }))).join(','),
   );
-  // UTF-8 BOM 前缀让 Excel 正确识别中文。
-  return '﻿' + headers + '\n' + rows.join('\n') + '\n';
+  // UTF-8 BOM 前缀让 Excel 正确识别编码。
+  return '\uFEFF' + headers + '\n' + rows.join('\n') + '\n';
 }
 
 function buildExportFileName(selectedGroupName?: string): string {

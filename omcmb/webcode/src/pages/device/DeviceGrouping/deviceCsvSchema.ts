@@ -17,8 +17,10 @@ export interface ExportCtx {
 // ─── 1) 导入字段元数据：模板使用 + 解析器使用 ─────────────────────────────────
 
 export interface ImportColumn {
-  /** 中文表头 */
+  /** 中文表头（解析器 HEADER_ALIAS 用） */
   zh: string;
+  /** i18n key，模板/导出表头随当前语言渲染 */
+  i18nKey: string;
   /** snake_case 字段名（与后端 CreateDeviceRequest 对齐） */
   snake: string;
   /** 是否必填 */
@@ -30,11 +32,11 @@ export interface ImportColumn {
 // 产品要求：导入只保留 SN（必填）+ 设备名称 + 备注三列。
 // 表头 SN 与「设备列表/设备分组」页一致。serial_number 仍是后端字段名。
 export const IMPORT_COLUMNS: readonly ImportColumn[] = [
-  { zh: 'SN', snake: 'serial_number', required: true,
+  { zh: 'SN', i18nKey: 'device.csv.column.sn', snake: 'serial_number', required: true,
     example: ['120288069823C4B0060', '1202000690241FB0010', '120200087125BJB0002'] },
-  { zh: '设备名称', snake: 'device_name', required: false,
-    example: ['北京海淀中关村站', '北京朝阳CBD站', '上海浦东陆家嘴站'] },
-  { zh: '备注', snake: 'remark', required: false,
+  { zh: '设备名称', i18nKey: 'device.csv.column.deviceName', snake: 'device_name', required: false,
+    example: ['北京海淠中关村站', '北京朝阳CBD站', '上海浦东陆家嘴站'] },
+  { zh: '备注', i18nKey: 'device.csv.column.remark', snake: 'remark', required: false,
     example: ['一期', '二期', ''] },
 ] as const;
 
@@ -57,8 +59,10 @@ export const KNOWN_IMPORT_SNAKE: ReadonlySet<string> = new Set(IMPORT_COLUMNS.ma
 // ─── 2) 导出列：设备列表展示字段 + OUI/运营商/制式（便于 roundtrip） ─────────
 
 export interface ExportColumn {
-  /** 中文表头（与 IMPORT_COLUMNS 共享字段时同名） */
+  /** 中文表头（解析器向后兼容用） */
   zh: string;
+  /** i18n key，导出表头随当前语言渲染 */
+  i18nKey: string;
   /** 取值器 */
   getValue: (d: Device, ctx: ExportCtx) => string | number;
 }
@@ -66,21 +70,21 @@ export interface ExportColumn {
 // 导出列 = /device/group 页面实际展示列，顺序与页面一致：
 //   SN / 设备名称 / 连接状态 / MAC地址 / 设备分组 / 归属来源 / 备注
 export const EXPORT_COLUMNS: readonly ExportColumn[] = [
-  { zh: 'SN',
+  { zh: 'SN', i18nKey: 'device.csv.column.sn',
     getValue: (d) => d.sn ?? '' },
-  { zh: '设备名称',
+  { zh: '设备名称', i18nKey: 'device.csv.column.deviceName',
     getValue: (d) => d.name ?? '' },
-  { zh: '连接状态',
+  { zh: '连接状态', i18nKey: 'device.csv.column.connStatus',
     getValue: (d, { t }) => d.connStatus === 'online' ? t('status.online') : t('status.offline') },
-  { zh: 'MAC地址',
+  { zh: 'MAC地址', i18nKey: 'device.csv.column.macAddress',
     getValue: (d) => d.macAddress ?? '' },
-  { zh: '设备分组',
+  { zh: '设备分组', i18nKey: 'device.csv.column.deviceGrouping',
     getValue: (d) => d.groupName ?? '' },
-  { zh: '归属来源',
+  { zh: '归属来源', i18nKey: 'device.csv.column.sourceType',
     getValue: (d, { t }) => {
       const src = d.sourceType ?? 'manual';
       return src === 'rule' ? t('device.sourceType.rule') : t('device.sourceType.manual');
     } },
-  { zh: '备注',
+  { zh: '备注', i18nKey: 'device.csv.column.remark',
     getValue: (d) => d.remark ?? '' },
 ] as const;
