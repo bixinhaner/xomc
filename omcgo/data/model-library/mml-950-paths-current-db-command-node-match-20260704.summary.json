@@ -1,0 +1,228 @@
+{
+  "input_file": "omcgo/data/model-library/mml-950-paths-secondary-node-match-20260704.csv",
+  "output_csv": "omcgo/data/model-library/mml-950-paths-current-db-command-node-match-20260704.csv",
+  "command_summary_csv": "omcgo/data/model-library/mml-950-paths-current-db-command-node-match-20260704.command-summary.csv",
+  "current_db_group_tree": {
+    "group_levels": "mml_command_groups 当前仅有 nlevel(path)=1 的 18 个章节；无 nlevel(path)=2 的二级 group",
+    "command_node_count": 198
+  },
+  "counts": {
+    "total": 950,
+    "matched": 834,
+    "unmatched": 116,
+    "by_kind": {
+      "no_current_db_command_node": 116,
+      "object_prefix_current_command_node": 834
+    }
+  },
+  "matched_by_chapter": {
+    "SL WAN口配置参数管理": 23,
+    "SA 设备信息参数管理": 123,
+    "SC 基站网管参数管理": 2,
+    "SF 小区服务参数管理（总体）": 669,
+    "SI 邻区参数管理": 8,
+    "SJ 移动性参数管理": 9
+  },
+  "top_command_matches": [
+    {
+      "chapter_code": "SF",
+      "chapter_name": "小区服务参数管理（总体）",
+      "command_name": "FAP 载波基本配置",
+      "command_code": "LST FAP_SERVICE",
+      "operation_type": "LST",
+      "match_kind": "object_prefix_current_command_node",
+      "path_count": 665,
+      "sample_paths": "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}; Device.Services.FAPService.{i}.X_COM.LTE.ANR.AnrA3Offset; Device.Services.FAPService.{i}.X_COM.LTE.ANR.AnrReportCfgVal; Device.Services.FAPService.{i}.X_COM.LTE.ANR.InterAnrA5Threshold1RSRP; Device.Services.FAPService.{i}.X_COM.LTE.ANR.InterAnrA5Threshold2RSRP; Device.Services.FAPService.{i}.FAPControl.CONFIG_STATS_FLOW.STATS_FLOW_SWITCH; Device.Services.FAPService.{i}.FAPControl.CONFIG_STATS_FLOW.STATS_FLOW_UPLOAD_ADDRESS; Device.Services.FAPService.{i}.FAPControl.CONFIG_STATS_FLOW.STATS_FLOW_UPLOAD_INTERVAL"
+    },
+    {
+      "chapter_code": "SF",
+      "chapter_name": "小区服务参数管理（总体）",
+      "command_name": "FAP 载波基本配置",
+      "command_code": "MOD FAP_SERVICE",
+      "operation_type": "MOD",
+      "match_kind": "object_prefix_current_command_node",
+      "path_count": 665,
+      "sample_paths": "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}; Device.Services.FAPService.{i}.X_COM.LTE.ANR.AnrA3Offset; Device.Services.FAPService.{i}.X_COM.LTE.ANR.AnrReportCfgVal; Device.Services.FAPService.{i}.X_COM.LTE.ANR.InterAnrA5Threshold1RSRP; Device.Services.FAPService.{i}.X_COM.LTE.ANR.InterAnrA5Threshold2RSRP; Device.Services.FAPService.{i}.FAPControl.CONFIG_STATS_FLOW.STATS_FLOW_SWITCH; Device.Services.FAPService.{i}.FAPControl.CONFIG_STATS_FLOW.STATS_FLOW_UPLOAD_ADDRESS; Device.Services.FAPService.{i}.FAPControl.CONFIG_STATS_FLOW.STATS_FLOW_UPLOAD_INTERVAL"
+    },
+    {
+      "chapter_code": "SA",
+      "chapter_name": "设备信息参数管理",
+      "command_name": "设备基本信息",
+      "command_code": "LST DEVICE_INFO",
+      "operation_type": "LST",
+      "match_kind": "object_prefix_current_command_node",
+      "path_count": 123,
+      "sample_paths": "Device.DeviceInfo.AntennaInfo.Azimuth; Device.DeviceInfo.AntennaInfo.Azimuth2; Device.DeviceInfo.AntennaInfo.Azimuth3; Device.DeviceInfo.AntennaInfo.Beamwidth; Device.DeviceInfo.AntennaInfo.Beamwidth2; Device.DeviceInfo.AntennaInfo.Beamwidth3; Device.DeviceInfo.AntennaInfo.Downtilt; Device.DeviceInfo.AntennaInfo.Downtilt2"
+    },
+    {
+      "chapter_code": "SA",
+      "chapter_name": "设备信息参数管理",
+      "command_name": "设备基本信息",
+      "command_code": "MOD DEVICE_INFO",
+      "operation_type": "MOD",
+      "match_kind": "object_prefix_current_command_node",
+      "path_count": 123,
+      "sample_paths": "Device.DeviceInfo.AntennaInfo.Azimuth; Device.DeviceInfo.AntennaInfo.Azimuth2; Device.DeviceInfo.AntennaInfo.Azimuth3; Device.DeviceInfo.AntennaInfo.Beamwidth; Device.DeviceInfo.AntennaInfo.Beamwidth2; Device.DeviceInfo.AntennaInfo.Beamwidth3; Device.DeviceInfo.AntennaInfo.Downtilt; Device.DeviceInfo.AntennaInfo.Downtilt2"
+    },
+    {
+      "chapter_code": "SL",
+      "chapter_name": "WAN口配置参数管理",
+      "command_name": "以太网接口",
+      "command_code": "ADD ETHERNET_INTERFACE",
+      "operation_type": "ADD",
+      "match_kind": "object_prefix_current_command_node",
+      "path_count": 9,
+      "sample_paths": "Device.Ethernet.Interface.{i}; Device.Ethernet.Interface.{i}.PppoeAddress.{i}; Device.Ethernet.Interface.{i}.PppoeAddress.{i}.Ipv4SubnetMask; Device.Ethernet.Interface.{i}.PppoeAddress.{i}.PppoeAddressType; Device.Ethernet.Interface.{i}.PppoeAddress.{i}.PppoeConnectStatus; Device.Ethernet.Interface.{i}.PppoeAddress.{i}.PppoeDiallingMethod; Device.Ethernet.Interface.{i}.PppoeAddress.{i}.PppoeIpAddress; Device.Ethernet.Interface.{i}.PppoeAddress.{i}.PppoePassword"
+    },
+    {
+      "chapter_code": "SL",
+      "chapter_name": "WAN口配置参数管理",
+      "command_name": "以太网接口",
+      "command_code": "ADD INTERFACE",
+      "operation_type": "ADD",
+      "match_kind": "object_prefix_current_command_node",
+      "path_count": 9,
+      "sample_paths": "Device.Ethernet.Interface.{i}; Device.Ethernet.Interface.{i}.PppoeAddress.{i}; Device.Ethernet.Interface.{i}.PppoeAddress.{i}.Ipv4SubnetMask; Device.Ethernet.Interface.{i}.PppoeAddress.{i}.PppoeAddressType; Device.Ethernet.Interface.{i}.PppoeAddress.{i}.PppoeConnectStatus; Device.Ethernet.Interface.{i}.PppoeAddress.{i}.PppoeDiallingMethod; Device.Ethernet.Interface.{i}.PppoeAddress.{i}.PppoeIpAddress; Device.Ethernet.Interface.{i}.PppoeAddress.{i}.PppoePassword"
+    },
+    {
+      "chapter_code": "SL",
+      "chapter_name": "WAN口配置参数管理",
+      "command_name": "VLAN 子接口",
+      "command_code": "ADD VLAN_INTERFACE",
+      "operation_type": "ADD",
+      "match_kind": "object_prefix_current_command_node",
+      "path_count": 9,
+      "sample_paths": "Device.Ethernet.Interface.{i}.VlanInterface.{i}; Device.Ethernet.Interface.{i}.VlanInterface.{i}.VlanPppoeAddress.{i}; Device.Ethernet.Interface.{i}.VlanInterface.{i}.VlanPppoeAddress.{i}.Ipv4SubnetMask; Device.Ethernet.Interface.{i}.VlanInterface.{i}.VlanPppoeAddress.{i}.PppoeAddressType; Device.Ethernet.Interface.{i}.VlanInterface.{i}.VlanPppoeAddress.{i}.PppoeConnectStatus; Device.Ethernet.Interface.{i}.VlanInterface.{i}.VlanPppoeAddress.{i}.PppoeDiallingMethod; Device.Ethernet.Interface.{i}.VlanInterface.{i}.VlanPppoeAddress.{i}.PppoeIpAddress; Device.Ethernet.Interface.{i}.VlanInterface.{i}.VlanPppoeAddress.{i}.PppoePassword"
+    },
+    {
+      "chapter_code": "SL",
+      "chapter_name": "WAN口配置参数管理",
+      "command_name": "以太网接口",
+      "command_code": "LST ETHERNET_INTERFACE",
+      "operation_type": "LST",
+      "match_kind": "object_prefix_current_command_node",
+      "path_count": 9,
+      "sample_paths": "Device.Ethernet.Interface.{i}; Device.Ethernet.Interface.{i}.PppoeAddress.{i}; Device.Ethernet.Interface.{i}.PppoeAddress.{i}.Ipv4SubnetMask; Device.Ethernet.Interface.{i}.PppoeAddress.{i}.PppoeAddressType; Device.Ethernet.Interface.{i}.PppoeAddress.{i}.PppoeConnectStatus; Device.Ethernet.Interface.{i}.PppoeAddress.{i}.PppoeDiallingMethod; Device.Ethernet.Interface.{i}.PppoeAddress.{i}.PppoeIpAddress; Device.Ethernet.Interface.{i}.PppoeAddress.{i}.PppoePassword"
+    },
+    {
+      "chapter_code": "SL",
+      "chapter_name": "WAN口配置参数管理",
+      "command_name": "VLAN 子接口",
+      "command_code": "LST VLAN_INTERFACE",
+      "operation_type": "LST",
+      "match_kind": "object_prefix_current_command_node",
+      "path_count": 9,
+      "sample_paths": "Device.Ethernet.Interface.{i}.VlanInterface.{i}; Device.Ethernet.Interface.{i}.VlanInterface.{i}.VlanPppoeAddress.{i}; Device.Ethernet.Interface.{i}.VlanInterface.{i}.VlanPppoeAddress.{i}.Ipv4SubnetMask; Device.Ethernet.Interface.{i}.VlanInterface.{i}.VlanPppoeAddress.{i}.PppoeAddressType; Device.Ethernet.Interface.{i}.VlanInterface.{i}.VlanPppoeAddress.{i}.PppoeConnectStatus; Device.Ethernet.Interface.{i}.VlanInterface.{i}.VlanPppoeAddress.{i}.PppoeDiallingMethod; Device.Ethernet.Interface.{i}.VlanInterface.{i}.VlanPppoeAddress.{i}.PppoeIpAddress; Device.Ethernet.Interface.{i}.VlanInterface.{i}.VlanPppoeAddress.{i}.PppoePassword"
+    },
+    {
+      "chapter_code": "SL",
+      "chapter_name": "WAN口配置参数管理",
+      "command_name": "以太网接口",
+      "command_code": "MOD ETHERNET_INTERFACE",
+      "operation_type": "MOD",
+      "match_kind": "object_prefix_current_command_node",
+      "path_count": 9,
+      "sample_paths": "Device.Ethernet.Interface.{i}; Device.Ethernet.Interface.{i}.PppoeAddress.{i}; Device.Ethernet.Interface.{i}.PppoeAddress.{i}.Ipv4SubnetMask; Device.Ethernet.Interface.{i}.PppoeAddress.{i}.PppoeAddressType; Device.Ethernet.Interface.{i}.PppoeAddress.{i}.PppoeConnectStatus; Device.Ethernet.Interface.{i}.PppoeAddress.{i}.PppoeDiallingMethod; Device.Ethernet.Interface.{i}.PppoeAddress.{i}.PppoeIpAddress; Device.Ethernet.Interface.{i}.PppoeAddress.{i}.PppoePassword"
+    },
+    {
+      "chapter_code": "SL",
+      "chapter_name": "WAN口配置参数管理",
+      "command_name": "VLAN 子接口",
+      "command_code": "MOD VLAN_INTERFACE",
+      "operation_type": "MOD",
+      "match_kind": "object_prefix_current_command_node",
+      "path_count": 9,
+      "sample_paths": "Device.Ethernet.Interface.{i}.VlanInterface.{i}; Device.Ethernet.Interface.{i}.VlanInterface.{i}.VlanPppoeAddress.{i}; Device.Ethernet.Interface.{i}.VlanInterface.{i}.VlanPppoeAddress.{i}.Ipv4SubnetMask; Device.Ethernet.Interface.{i}.VlanInterface.{i}.VlanPppoeAddress.{i}.PppoeAddressType; Device.Ethernet.Interface.{i}.VlanInterface.{i}.VlanPppoeAddress.{i}.PppoeConnectStatus; Device.Ethernet.Interface.{i}.VlanInterface.{i}.VlanPppoeAddress.{i}.PppoeDiallingMethod; Device.Ethernet.Interface.{i}.VlanInterface.{i}.VlanPppoeAddress.{i}.PppoeIpAddress; Device.Ethernet.Interface.{i}.VlanInterface.{i}.VlanPppoeAddress.{i}.PppoePassword"
+    },
+    {
+      "chapter_code": "SL",
+      "chapter_name": "WAN口配置参数管理",
+      "command_name": "以太网接口",
+      "command_code": "RMV ETHERNET_INTERFACE",
+      "operation_type": "RMV",
+      "match_kind": "object_prefix_current_command_node",
+      "path_count": 9,
+      "sample_paths": "Device.Ethernet.Interface.{i}; Device.Ethernet.Interface.{i}.PppoeAddress.{i}; Device.Ethernet.Interface.{i}.PppoeAddress.{i}.Ipv4SubnetMask; Device.Ethernet.Interface.{i}.PppoeAddress.{i}.PppoeAddressType; Device.Ethernet.Interface.{i}.PppoeAddress.{i}.PppoeConnectStatus; Device.Ethernet.Interface.{i}.PppoeAddress.{i}.PppoeDiallingMethod; Device.Ethernet.Interface.{i}.PppoeAddress.{i}.PppoeIpAddress; Device.Ethernet.Interface.{i}.PppoeAddress.{i}.PppoePassword"
+    },
+    {
+      "chapter_code": "SL",
+      "chapter_name": "WAN口配置参数管理",
+      "command_name": "VLAN 子接口",
+      "command_code": "RMV VLAN_INTERFACE",
+      "operation_type": "RMV",
+      "match_kind": "object_prefix_current_command_node",
+      "path_count": 9,
+      "sample_paths": "Device.Ethernet.Interface.{i}.VlanInterface.{i}; Device.Ethernet.Interface.{i}.VlanInterface.{i}.VlanPppoeAddress.{i}; Device.Ethernet.Interface.{i}.VlanInterface.{i}.VlanPppoeAddress.{i}.Ipv4SubnetMask; Device.Ethernet.Interface.{i}.VlanInterface.{i}.VlanPppoeAddress.{i}.PppoeAddressType; Device.Ethernet.Interface.{i}.VlanInterface.{i}.VlanPppoeAddress.{i}.PppoeConnectStatus; Device.Ethernet.Interface.{i}.VlanInterface.{i}.VlanPppoeAddress.{i}.PppoeDiallingMethod; Device.Ethernet.Interface.{i}.VlanInterface.{i}.VlanPppoeAddress.{i}.PppoeIpAddress; Device.Ethernet.Interface.{i}.VlanInterface.{i}.VlanPppoeAddress.{i}.PppoePassword"
+    },
+    {
+      "chapter_code": "SI",
+      "chapter_name": "邻区参数管理",
+      "command_name": "LTE 同系统邻区",
+      "command_code": "ADD LTE_CELL",
+      "operation_type": "ADD",
+      "match_kind": "object_prefix_current_command_node",
+      "path_count": 8,
+      "sample_paths": "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell.{i}.CID; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell.{i}.CIO; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell.{i}.EUTRACarrierARFCN; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell.{i}.PLMNID; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell.{i}.PhyCellID; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell.{i}.QOffset; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell.{i}.TAC"
+    },
+    {
+      "chapter_code": "SI",
+      "chapter_name": "邻区参数管理",
+      "command_name": "LTE 同系统邻区",
+      "command_code": "LST LTE_CELL",
+      "operation_type": "LST",
+      "match_kind": "object_prefix_current_command_node",
+      "path_count": 8,
+      "sample_paths": "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell.{i}.CID; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell.{i}.CIO; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell.{i}.EUTRACarrierARFCN; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell.{i}.PLMNID; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell.{i}.PhyCellID; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell.{i}.QOffset; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell.{i}.TAC"
+    },
+    {
+      "chapter_code": "SI",
+      "chapter_name": "邻区参数管理",
+      "command_name": "LTE 同系统邻区",
+      "command_code": "MOD LTE_CELL",
+      "operation_type": "MOD",
+      "match_kind": "object_prefix_current_command_node",
+      "path_count": 8,
+      "sample_paths": "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell.{i}.CID; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell.{i}.CIO; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell.{i}.EUTRACarrierARFCN; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell.{i}.PLMNID; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell.{i}.PhyCellID; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell.{i}.QOffset; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell.{i}.TAC"
+    },
+    {
+      "chapter_code": "SI",
+      "chapter_name": "邻区参数管理",
+      "command_name": "LTE 同系统邻区",
+      "command_code": "RMV LTE_CELL",
+      "operation_type": "RMV",
+      "match_kind": "object_prefix_current_command_node",
+      "path_count": 8,
+      "sample_paths": "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell.{i}.CID; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell.{i}.CIO; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell.{i}.EUTRACarrierARFCN; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell.{i}.PLMNID; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell.{i}.PhyCellID; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell.{i}.QOffset; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell.{i}.TAC"
+    },
+    {
+      "chapter_code": "SJ",
+      "chapter_name": "移动性参数管理",
+      "command_name": "空闲态异频载波",
+      "command_code": "ADD CARRIER",
+      "operation_type": "ADD",
+      "match_kind": "object_prefix_current_command_node",
+      "path_count": 8,
+      "sample_paths": "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.CellReselectionPriority; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.EUTRACarrierARFCN; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.PMax; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.QOffsetFreq; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.QRxLevMinSIB5; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.ThreshXHigh; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.ThreshXLow"
+    },
+    {
+      "chapter_code": "SJ",
+      "chapter_name": "移动性参数管理",
+      "command_name": "空闲态异频载波",
+      "command_code": "LST CARRIER",
+      "operation_type": "LST",
+      "match_kind": "object_prefix_current_command_node",
+      "path_count": 8,
+      "sample_paths": "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.CellReselectionPriority; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.EUTRACarrierARFCN; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.PMax; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.QOffsetFreq; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.QRxLevMinSIB5; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.ThreshXHigh; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.ThreshXLow"
+    },
+    {
+      "chapter_code": "SJ",
+      "chapter_name": "移动性参数管理",
+      "command_name": "空闲态异频载波",
+      "command_code": "MOD CARRIER",
+      "operation_type": "MOD",
+      "match_kind": "object_prefix_current_command_node",
+      "path_count": 8,
+      "sample_paths": "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.CellReselectionPriority; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.EUTRACarrierARFCN; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.PMax; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.QOffsetFreq; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.QRxLevMinSIB5; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.ThreshXHigh; Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.ThreshXLow"
+    }
+  ]
+}

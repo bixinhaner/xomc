@@ -1,13 +1,13 @@
 ---
 name: ship
-description: OMC 一键交付流程，从想法或 GitHub Issue 推进到 feature 分支 PR。用户显式调用 $ship、要求交付 OMC Issue、执行 issue-to-PR 流水线、查看 status/audit、处理 ready-for-agent Issue，或要求从实现推进到构建、验证、审查、提交、推送、开 PR 时使用；严禁直接合并或推送 main。
+description: OMC 一键交付流程，从想法或 GitHub Issue 推进到 feature 分支 PR。用户显式调用 $ship、要求交付 OMC Issue、执行 issue-to-PR 流水线、查看 status/audit、处理 ready-for-agent Issue，或要求从实现推进到构建、验证、审查、提交、推送、开 PR 时使用；默认不合并 PR，不直接推送 main；仅当用户在当前回合明确指定合并某个 PR 时允许合并。
 ---
 
 # Ship
 
 驱动 OMC 从需求或 GitHub Issue 到可审查 PR 的开发流程。本 skill 只做编排：把设计、实现、审查、交接委派给对应 skill 或工具，并在阶段之间执行硬门检查。
 
-永远不要直接在 `main` 或 `master` 上提交、合并或推送。进入实现阶段后，必须在 feature 分支工作，并以 PR 作为交付终点。不要 force-push 共享分支。
+永远不要直接在 `main` 或 `master` 上提交或推送。进入实现阶段后，必须在 feature 分支工作，并默认以 PR 作为交付终点。不要 force-push 共享分支。仅当用户在当前回合明确指定合并某个 PR 时，允许通过 `gh pr merge` 合并该指定 PR；合并前必须确认 PR 仍 open、目标分支正确、工作区状态已知，并向用户报告检查结果。
 
 ## 调用参数
 
@@ -110,7 +110,7 @@ CRITICAL 示例：运营商硬编码如 `if carrier == "cmcc"`、字符串拼接
 - 当前分支不是 `main` 或 `master`。
 - `git push -u origin <feature-branch>` 成功。
 - `gh pr create` 返回 PR URL。
-- 不合并 PR。review 和 merge 不属于本 skill。
+- 默认不合并 PR；review 和 merge 不属于常规交付硬门。仅当用户在当前回合明确指定合并某个 PR 时，允许执行 `gh pr merge <PR>`；不得直接推送 `main`/`master`。
 
 如果工作无法完成，使用 `$handoff` 保存现场和下一步。
 

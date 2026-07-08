@@ -288,38 +288,44 @@ func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter
 		LeftJoin("device_group_members dgm ON dgm.device_id = d.id").
 		Where(sq.Eq{"d.deleted_at": nil})
 
-	// Data permission filter: VisibleGroups semantics:
-	//   nil          → superadmin (v1.0：source='builtIn'，由 PermissionService 上游决定)，no filtering (see all devices)
-	//   []uuid.UUID{} → no permissions, return empty result
-	//   [id1, id2]   → filter to devices in these groups
-	// Note: dgm (device_group_members) is already joined via LeftJoin at line 167
-	// 注：filter.Carrier 是**设备**的 carrier (devices.carrier，物理属性)，不是用户的 carrier；users.carrier 在 v1.0 已删除。
-	realVisibleGroups, includeUngrouped := authz.SplitVisibleGroups(filter.VisibleGroups)
-	if filter.VisibleGroups != nil && len(filter.VisibleGroups) == 0 {
-		// User has no group permissions — short-circuit to empty result.
-		builder = builder.Where("FALSE")
-		countBuilder = countBuilder.Where("FALSE")
-	} else if filter.GroupID != nil || len(filter.GroupIDs) > 0 || len(realVisibleGroups) > 0 || includeUngrouped {
-		// dgm is already joined, just add WHERE conditions
-		if filter.GroupID != nil || len(filter.GroupIDs) > 0 {
-			builder = applyDeviceGroupFilter(builder, filter)
-			countBuilder = applyDeviceGroupFilter(countBuilder, filter)
-		}
-		if len(realVisibleGroups) > 0 && includeUngrouped {
-			builder = builder.Where(sq.Or{
-				sq.Eq{"dgm.group_id": realVisibleGroups},
-				sq.Expr(ungroupedDevicesWhere),
-			})
-			countBuilder = countBuilder.Where(sq.Or{
-				sq.Eq{"dgm.group_id": realVisibleGroups},
-				sq.Expr(ungroupedDevicesWhere),
-			})
-		} else if includeUngrouped {
-			builder = builder.Where(sq.Expr(ungroupedDevicesWhere))
-			countBuilder = countBuilder.Where(sq.Expr(ungroupedDevicesWhere))
-		} else if len(realVisibleGroups) > 0 {
-			builder = builder.Where(sq.Eq{"dgm.group_id": realVisibleGroups})
-			countBuilder = countBuilder.Where(sq.Eq{"dgm.group_id": realVisibleGroups})
+	// Data permission filter: grant-based visibility is authoritative.
+	// Legacy VisibleGroups fallback is retained for callers not yet switched.
+	if filter.VisibleDeviceGrants != nil {
+		builder = authz.ApplyDeviceVisibilityGrantsFilter(builder, "d.id", "d.technology", filter.VisibleDeviceGrants)
+		countBuilder = authz.ApplyDeviceVisibilityGrantsFilter(countBuilder, "d.id", "d.technology", filter.VisibleDeviceGrants)
+	} else {
+		//   nil          → superadmin (v1.0：source='builtIn'，由 PermissionService 上游决定)，no filtering (see all devices)
+		//   []uuid.UUID{} → no permissions, return empty result
+		//   [id1, id2]   → filter to devices in these groups
+		// Note: dgm (device_group_members) is already joined via LeftJoin at line 167
+		// 注：filter.Carrier 是**设备**的 carrier (devices.carrier，物理属性)，不是用户的 carrier；users.carrier 在 v1.0 已删除。
+		realVisibleGroups, includeUngrouped := authz.SplitVisibleGroups(filter.VisibleGroups)
+		if filter.VisibleGroups != nil && len(filter.VisibleGroups) == 0 {
+			// User has no group permissions — short-circuit to empty result.
+			builder = builder.Where("FALSE")
+			countBuilder = countBuilder.Where("FALSE")
+		} else if filter.GroupID != nil || len(filter.GroupIDs) > 0 || len(realVisibleGroups) > 0 || includeUngrouped {
+			// dgm is already joined, just add WHERE conditions
+			if filter.GroupID != nil || len(filter.GroupIDs) > 0 {
+				builder = applyDeviceGroupFilter(builder, filter)
+				countBuilder = applyDeviceGroupFilter(countBuilder, filter)
+			}
+			if len(realVisibleGroups) > 0 && includeUngrouped {
+				builder = builder.Where(sq.Or{
+					sq.Eq{"dgm.group_id": realVisibleGroups},
+					sq.Expr(ungroupedDevicesWhere),
+				})
+				countBuilder = countBuilder.Where(sq.Or{
+					sq.Eq{"dgm.group_id": realVisibleGroups},
+					sq.Expr(ungroupedDevicesWhere),
+				})
+			} else if includeUngrouped {
+				builder = builder.Where(sq.Expr(ungroupedDevicesWhere))
+				countBuilder = countBuilder.Where(sq.Expr(ungroupedDevicesWhere))
+			} else if len(realVisibleGroups) > 0 {
+				builder = builder.Where(sq.Eq{"dgm.group_id": realVisibleGroups})
+				countBuilder = countBuilder.Where(sq.Eq{"dgm.group_id": realVisibleGroups})
+			}
 		}
 	}
 
@@ -674,19 +680,23 @@ func applyDeviceFilters(b sq.SelectBuilder, filter DeviceFilter) sq.SelectBuilde
 	if filter.GroupID != nil || len(filter.GroupIDs) > 0 {
 		b = applyDeviceGroupFilter(b, filter)
 	}
-	realVisibleGroups, includeUngrouped := authz.SplitVisibleGroups(filter.VisibleGroups)
-	if filter.VisibleGroups != nil && len(filter.VisibleGroups) == 0 {
-		b = b.Where("FALSE")
-	} else if len(realVisibleGroups) > 0 || includeUngrouped {
-		if len(realVisibleGroups) > 0 && includeUngrouped {
-			b = b.Where(sq.Or{
-				sq.Eq{"dgm.group_id": realVisibleGroups},
-				sq.Expr(ungroupedDevicesWhere),
-			})
-		} else if includeUngrouped {
-			b = b.Where(sq.Expr(ungroupedDevicesWhere))
-		} else {
-			b = b.Where(sq.Eq{"dgm.group_id": realVisibleGroups})
+	if filter.VisibleDeviceGrants != nil {
+		b = authz.ApplyDeviceVisibilityGrantsFilter(b, "d.id", "d.technology", filter.VisibleDeviceGrants)
+	} else {
+		realVisibleGroups, includeUngrouped := authz.SplitVisibleGroups(filter.VisibleGroups)
+		if filter.VisibleGroups != nil && len(filter.VisibleGroups) == 0 {
+			b = b.Where("FALSE")
+		} else if len(realVisibleGroups) > 0 || includeUngrouped {
+			if len(realVisibleGroups) > 0 && includeUngrouped {
+				b = b.Where(sq.Or{
+					sq.Eq{"dgm.group_id": realVisibleGroups},
+					sq.Expr(ungroupedDevicesWhere),
+				})
+			} else if includeUngrouped {
+				b = b.Where(sq.Expr(ungroupedDevicesWhere))
+			} else {
+				b = b.Where(sq.Eq{"dgm.group_id": realVisibleGroups})
+			}
 		}
 	}
 	if filter.Search != nil {

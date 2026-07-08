@@ -157,7 +157,7 @@ func Setup(r *gin.Engine, c *Container) error {
 	})
 	graph.Add(components.ModuleInitializer{
 		Name:    "dashboard",
-		Depends: []string{"device", "alarm", "pm", "topology"},
+		Depends: []string{"device", "alarm", "pm", "topology", "misc"},
 		Init:    func() error { return initDashboardModule(c) },
 	})
 	graph.Add(components.ModuleInitializer{
@@ -374,11 +374,10 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	agentActions.Use(admin.OperLogger(ad.logRepo, c.Logger.Named("oper-log")))
 	agentActionHandler.RegisterActionRoutes(agentActions)
 
-	// Helper: permission-scoped sub-group.
+	// Helper: authenticated sub-group.
 	//
-	// B3-Phase2（参 docs/prd/system/menu-dynamic-loading.md §4.2.4）：
-	// 内部从粗粒度 RequireResourcePermission(resource) 切换为端点级
-	// RequireAPIPermission（按 c.Request.URL.Path + Method 鉴权，对齐 GVA 风格）。
+	// 这里保留 helper 只是为了延续原来的路由组织方式；当前 API 不再做端点级
+	// 权限判断，路由组只要求完成认证。
 	// resource 参数保留供 30+ 调用点签名兼容，新版被忽略；helper 名留作"受保护
 	// 路由组"语义提示。
 	permGroup := func(_ string) *gin.RouterGroup {
@@ -687,7 +686,6 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	md.reportHandler.RegisterRoutes(permGroup("pm"))
 
 	// ----- System Info endpoint -----
-	// B3-Phase2：原 RequirePermission("devices","read") 改为端点级 RequireAPIPermission。
 	sysInfoGroup := v1.Group("")
 	sysInfoGroup.Use(admin.RequireAPIPermission(ad.roleRepo))
 	sysInfoGroup.GET("/system/info", md.sysInfoHandler.GetSystemInfo)
@@ -699,8 +697,7 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	ad.apiKeyHandler.RegisterRoutes(v1)
 
 	// ----- Admin management routes -----
-	// B3-Phase2：原 RequirePermission("users","admin") 改为端点级 RequireAPIPermission。
-	// 受保护粒度：/admin/* 下每个具体端点 path+method 单独鉴权。
+	// 仍保留独立路由组，便于后续再收紧权限；当前只要求认证。
 	adminGroup := v1.Group("/admin")
 	adminGroup.Use(admin.RequireAPIPermission(ad.roleRepo))
 	ad.adminHandler.RegisterAdminRoutes(adminGroup)
@@ -721,8 +718,7 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	// ----- Dead-letter queue admin routes (T-0012 / R-106) -----
 	// adminGroup already enforces RBAC users:admin; dead-letter handler nests
 	// under /admin via its own internal /admin/dead-letters group. Mount under
-	// v1 directly with the same admin permission to avoid double /admin prefix.
-	// B3-Phase2：dlqAdmin 同 adminGroup 切换为端点级。
+	// v1 directly to avoid double /admin prefix.
 	dlqAdmin := v1.Group("")
 	dlqAdmin.Use(admin.RequireAPIPermission(ad.roleRepo))
 	if md.deadLetterHandler != nil {

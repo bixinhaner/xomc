@@ -3,7 +3,9 @@ package collector
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -55,8 +57,8 @@ func names(cs []model.PMCounter) []string {
 // 丢 C/D（孤儿）；保留的 counter 应带正确 StatisType。
 func TestFilterByWhitelist_DropsOrphans_RewritesToIndicatorID(t *testing.T) {
 	c := collectorWithWhitelist(&fakeWhitelist{set: map[string]CounterMeta{
-		"L.Cell.Avail": {IndicatorID: "C000010001", StatisType: "avg"},
-		"RRC.AttConn":  {IndicatorID: "C000010002", StatisType: "sum"},
+		"L.Cell.Avail": {IndicatorID: "C000010001", Unit: "%", StatisType: "avg"},
+		"RRC.AttConn":  {IndicatorID: "C000010002", Unit: "number", StatisType: "sum"},
 	}})
 	in := sample("L.Cell.Avail", "MR.RIPPRB", "RRC.AttConn", "MR.RECEIVEDIPOWER")
 	out := c.filterByWhitelist(context.Background(), "SN-1", "cmcc", "lte", in)
@@ -68,6 +70,12 @@ func TestFilterByWhitelist_DropsOrphans_RewritesToIndicatorID(t *testing.T) {
 	}
 	assert.Equal(t, "avg", statisByID["C000010001"])
 	assert.Equal(t, "sum", statisByID["C000010002"])
+	unitByID := map[string]string{}
+	for _, c := range out {
+		unitByID[c.CounterName] = c.Unit
+	}
+	assert.Equal(t, "%", unitByID["C000010001"])
+	assert.Equal(t, "number", unitByID["C000010002"])
 }
 
 // PM-P2 锚点专项：上报名匹配 report_key（而非 en_name）。构造 report_key≠en_name 的桩：
@@ -170,6 +178,163 @@ func TestFilterByWhitelist_DroppedCountersMetric(t *testing.T) {
 
 	got := testutil.ToFloat64(c.metrics.DroppedCountersTotal.WithLabelValues("cmcc", "lte", "whitelist_miss"))
 	assert.Equal(t, float64(2), got, "应记录 2 个被丢弃的孤儿 counter")
+}
+
+func TestFilterAndFillByWhitelist_AddsNullRowsForSupportedMissingCounters(t *testing.T) {
+	c := collectorWithWhitelist(&fakeWhitelist{set: map[string]CounterMeta{
+		"RRC.AttConn": {IndicatorID: "C000010001", ReportKey: "RRC.AttConn", Unit: "number", StatisType: "sum"},
+		"RRC.Fail":    {IndicatorID: "C000010002", ReportKey: "RRC.Fail", Unit: "number", StatisType: "sum"},
+	}})
+	tm := time.Date(2026, 7, 7, 10, 15, 0, 0, time.UTC)
+	in := []model.PMCounter{{
+		Time: tm, OUI: "48BF74", DeviceSN: "SN-1", CellID: "Cellid=1",
+		CounterGroup: "RRC", CounterName: "RRC.AttConn", CounterValue: 10, Granularity: 15,
+	}}
+
+	out := c.filterAndFillByWhitelist(context.Background(), "SN-1", "cmcc", "lte", in)
+	require.Len(t, out, 2)
+	assert.Equal(t, "C000010001", out[0].CounterName)
+	assert.Equal(t, float64(10), out[0].CounterValue)
+	assert.Equal(t, "C000010002", out[1].CounterName)
+	assert.True(t, math.IsNaN(out[1].CounterValue), "缺值记录用 NaN 作为写库前 NULL 哨兵")
+	assert.Equal(t, "Cellid=1", out[1].CellID)
+	assert.Equal(t, "RRC", out[1].CounterGroup)
+	assert.Equal(t, tm, out[1].Time)
+}
+
+func TestFilterAndFillByWhitelist_DoesNotFillOtherMeasurementGroups(t *testing.T) {
+	c := collectorWithWhitelist(&fakeWhitelist{set: map[string]CounterMeta{
+		"RRC.AttConn": {IndicatorID: "C000010001", ReportKey: "RRC.AttConn", Unit: "number", StatisType: "sum"},
+		"S1.Setup":    {IndicatorID: "C000020001", ReportKey: "S1.Setup", Unit: "number", StatisType: "sum"},
+	}})
+	in := []model.PMCounter{{
+		Time: time.Date(2026, 7, 7, 10, 15, 0, 0, time.UTC),
+		OUI:  "48BF74", DeviceSN: "SN-1", CellID: "Cellid=1",
+		CounterGroup: "RRC", CounterName: "RRC.AttConn", CounterValue: 10, Granularity: 15,
+	}}
+
+	out := c.filterAndFillByWhitelist(context.Background(), "SN-1", "cmcc", "lte", in)
+	require.Len(t, out, 1, "只有 RRC 测量记录存在时，不应补出 S1 测量组指标")
+	assert.Equal(t, "C000010001", out[0].CounterName)
+}
+
+func TestFilterAndFillByWhitelist_IsolatesObjectLDNAnchors(t *testing.T) {
+	c := collectorWithWhitelist(&fakeWhitelist{set: map[string]CounterMeta{
+		"RRC.AttConn": {IndicatorID: "C000010001", ReportKey: "RRC.AttConn", Unit: "number", StatisType: "sum"},
+		"RRC.Fail":    {IndicatorID: "C000010002", ReportKey: "RRC.Fail", Unit: "number", StatisType: "sum"},
+	}})
+	tm := time.Date(2026, 7, 7, 10, 15, 0, 0, time.UTC)
+	in := []model.PMCounter{
+		{
+			Time: tm, OUI: "48BF74", DeviceSN: "SN-1", CellID: "Cellid=1",
+			CounterGroup: "RRC", CounterName: "RRC.AttConn", CounterValue: 10, Granularity: 15,
+		},
+		{
+			Time: tm, OUI: "48BF74", DeviceSN: "SN-1", CellID: "Cellid=1,PLMN=46001",
+			CounterGroup: "RRC", CounterName: "RRC.AttConn", CounterValue: 8, Granularity: 15,
+		},
+	}
+
+	out := c.filterAndFillByWhitelist(context.Background(), "SN-1", "cmcc", "lte", in)
+
+	require.Len(t, out, 4)
+	assert.Equal(t, 1, countCounters(out, "Cellid=1", "C000010002"))
+	assert.Equal(t, 1, countCounters(out, "Cellid=1,PLMN=46001", "C000010002"))
+	assert.Equal(t, "Cellid=1", out[2].CellID)
+	assert.True(t, math.IsNaN(out[2].CounterValue))
+	assert.Equal(t, "Cellid=1,PLMN=46001", out[3].CellID)
+	assert.True(t, math.IsNaN(out[3].CounterValue))
+}
+
+func TestFilterAndFillByWhitelist_DoesNotInventPLMNObjectAnchor(t *testing.T) {
+	c := collectorWithWhitelist(&fakeWhitelist{set: map[string]CounterMeta{
+		"RRC.AttConn": {IndicatorID: "C000010001", ReportKey: "RRC.AttConn", Unit: "number", StatisType: "sum"},
+		"RRC.Fail":    {IndicatorID: "C000010002", ReportKey: "RRC.Fail", Unit: "number", StatisType: "sum"},
+	}})
+	in := []model.PMCounter{{
+		Time: time.Date(2026, 7, 7, 10, 15, 0, 0, time.UTC),
+		OUI:  "48BF74", DeviceSN: "SN-1", CellID: "Cellid=1",
+		CounterGroup: "RRC", CounterName: "RRC.AttConn", CounterValue: 10, Granularity: 15,
+	}}
+
+	out := c.filterAndFillByWhitelist(context.Background(), "SN-1", "cmcc", "lte", in)
+
+	require.Len(t, out, 2)
+	assert.Equal(t, 0, countObjectLDN(out, "Cellid=1,PLMN=46001"), "没有 PLMN 测量记录锚点时，不应凭空补 PLMN 对象")
+	assert.Equal(t, 1, countCounters(out, "Cellid=1", "C000010002"))
+}
+
+func TestFillMissingSupportedCounters_DoesNotFillWithoutMeasurementGroupAnchor(t *testing.T) {
+	in := []model.PMCounter{{
+		Time: time.Date(2026, 7, 7, 10, 15, 0, 0, time.UTC),
+		OUI:  "48BF74", DeviceSN: "SN-1", CellID: "Cellid=1",
+		CounterName: "C000010001", CounterValue: 10, Granularity: 15,
+	}}
+	allow := map[string]CounterMeta{
+		"RRC.AttConn": {IndicatorID: "C000010001", ReportKey: "RRC.AttConn", Unit: "number", StatisType: "sum"},
+		"RRC.Fail":    {IndicatorID: "C000010002", ReportKey: "RRC.Fail", Unit: "number", StatisType: "sum"},
+	}
+
+	out := fillMissingSupportedCounters(in, allow)
+
+	require.Len(t, out, 1, "缺少 measurement type / metric group 锚点时，不应跨组猜测补齐")
+	assert.Equal(t, "C000010001", out[0].CounterName)
+}
+
+func TestFilterAndFillByWhitelist_DerivesMeasurementGroupFromReportKey(t *testing.T) {
+	c := collectorWithWhitelist(&fakeWhitelist{set: map[string]CounterMeta{
+		"RRC.AttConn": {IndicatorID: "C000010001", ReportKey: "RRC.AttConn", Unit: "number", StatisType: "sum"},
+		"RRC.Fail":    {IndicatorID: "C000010002", ReportKey: "RRC.Fail", Unit: "number", StatisType: "sum"},
+		"S1.Setup":    {IndicatorID: "C000020001", ReportKey: "S1.Setup", Unit: "number", StatisType: "sum"},
+	}})
+	in := []model.PMCounter{{
+		Time: time.Date(2026, 7, 7, 10, 15, 0, 0, time.UTC),
+		OUI:  "48BF74", DeviceSN: "SN-1", CellID: "Cellid=1",
+		CounterName: "RRC.AttConn", CounterValue: 10, Granularity: 15,
+	}}
+
+	out := c.filterAndFillByWhitelist(context.Background(), "SN-1", "cmcc", "lte", in)
+
+	require.Len(t, out, 2, "无 measInfoId 的真实 PM 样本可从 report_key 派生 RRC 组，只补同组缺值")
+	assert.Equal(t, "RRC", out[0].CounterGroup)
+	assert.Equal(t, 1, countCounters(out, "Cellid=1", "C000010002"))
+	assert.Equal(t, 0, countCounters(out, "Cellid=1", "C000020001"))
+}
+
+func TestFilterAndFillByWhitelist_DoesNotFillUnsupportedProductMetric(t *testing.T) {
+	c := collectorWithWhitelist(&fakeWhitelist{set: map[string]CounterMeta{
+		"RRC.AttConn": {IndicatorID: "C000010001", ReportKey: "RRC.AttConn", Unit: "number", StatisType: "sum"},
+	}})
+	in := []model.PMCounter{{
+		Time: time.Date(2026, 7, 7, 10, 15, 0, 0, time.UTC),
+		OUI:  "48BF74", DeviceSN: "SN-1", CellID: "Cellid=1",
+		CounterGroup: "RRC", CounterName: "RRC.AttConn", CounterValue: 10, Granularity: 15,
+	}}
+
+	out := c.filterAndFillByWhitelist(context.Background(), "SN-1", "cmcc", "lte", in)
+
+	require.Len(t, out, 1, "产品白名单不支持 RRC.Fail 时，不应生成 RRC.Fail 缺值记录")
+	assert.Equal(t, "C000010001", out[0].CounterName)
+}
+
+func countCounters(counters []model.PMCounter, objectLDN, counterName string) int {
+	n := 0
+	for _, c := range counters {
+		if c.CellID == objectLDN && c.CounterName == counterName {
+			n++
+		}
+	}
+	return n
+}
+
+func countObjectLDN(counters []model.PMCounter, objectLDN string) int {
+	n := 0
+	for _, c := range counters {
+		if c.CellID == objectLDN {
+			n++
+		}
+	}
+	return n
 }
 
 type trackingWhitelist struct {

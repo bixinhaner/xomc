@@ -19,6 +19,7 @@ import { usePmAdhocDetail, usePmAdhocResults } from '@core/hooks/api/usePmAdhoc'
 import { useCreateKpiExport } from '@core/hooks/api/useKpiExport';
 import { useSystemTimezoneValue } from '@core/hooks/api/useSystemTimezone';
 import type { AdhocResultRow, AdhocDimension } from '@core/types/pmAdhoc';
+import { isFinitePmMetricValue, normalizePmMetricValue } from '@core/utils/pmMetricValue';
 import { buildAdhocExportParams, defaultExportTaskName } from '@core/utils/kpiExportParams';
 import { adhocIncludesCell, adhocObjectHeaderKey, adhocObjectName, adhocTechnology, objectKeyOf } from './adhocObjectColumn';
 import { formatSystemTime, nowInSystemTimezone, toSystemTimezoneRFC3339 } from '@core/utils/systemTime';
@@ -68,7 +69,9 @@ function buildSeriesByMetric(rows: AdhocResultRow[], granularity: string): Metri
       m = { name: r.displayName || r.metricPath, points: new Map() };
       byMetric.set(r.metricPath, m);
     }
-    m.points.set(r.startTime, r.metricValue);
+    if (isFinitePmMetricValue(r.metricValue)) {
+      m.points.set(r.startTime, r.metricValue);
+    }
   });
   const out: MetricSeries[] = [];
   byMetric.forEach((m) => {
@@ -95,7 +98,7 @@ interface WideResultRow {
   technology: string; // device_group 维度从 objectLdn 解析出的制式（lte/nr/gsm 大写）；其它维度空
   time: string;
   endTime: string;
-  values: Record<string, number>;
+  values: Record<string, number | null>;
 }
 
 function buildWideTable(
@@ -135,7 +138,7 @@ function buildWideTable(
       };
       rowMap.set(rowKey, wr);
     }
-    wr.values[r.metricPath] = r.metricValue;
+    wr.values[r.metricPath] = normalizePmMetricValue(r.metricValue);
   });
   const data = Array.from(rowMap.values()).sort((a, b) => {
     if (a.deviceLabel !== b.deviceLabel) return a.deviceLabel.localeCompare(b.deviceLabel);
@@ -430,7 +433,7 @@ function GranularityView({
             width: 200,
             render: (_: unknown, r: WideResultRow) => {
               const v = r.values[c.metricPath];
-              return v === undefined ? '-' : v;
+              return v === undefined || v === null ? '-' : v;
             },
           })),
         ]}

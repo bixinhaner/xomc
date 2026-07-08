@@ -199,6 +199,57 @@ func Test_fillEmptyBuckets_NoDuplicateWhenMetricExists(t *testing.T) {
 	assert.False(t, out[0].Filled)
 }
 
+func Test_fillEmptyBuckets_DoesNotUseOtherMetricTypeAsAnchor(t *testing.T) {
+	bktTime := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	ldn := strPtr("Cellid=1")
+	rows := []aggregator.Row{
+		{
+			DeviceSN: "SN1", MetricPath: "K1", MetricType: metrics.MetricTypeKPI,
+			Granularity: metrics.GranularityMonthly, Time: bktTime, ObjectLDN: ldn,
+		},
+	}
+	mt := metrics.MetricTypeCounter
+	req := aggregator.QueryRequest{
+		Dimension:   aggregator.DimensionDevice,
+		DeviceSNs:   []string{"SN1"},
+		MetricPaths: []string{"C1"},
+		MetricType:  &mt,
+		Granularity: metrics.GranularityMonthly,
+	}
+
+	out := fillEmptyBuckets(rows, req)
+
+	require.Len(t, out, 1, "counter 查询不能用 KPI 行作为测量记录锚点补占位")
+	assert.Equal(t, "K1", out[0].MetricPath)
+	assert.False(t, out[0].Filled)
+}
+
+func Test_fillEmptyBuckets_FilledRowUsesRequestedMetricType(t *testing.T) {
+	bktTime := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	ldn := strPtr("Cellid=1")
+	rows := []aggregator.Row{
+		{
+			DeviceSN: "SN1", MetricPath: "C1", MetricType: metrics.MetricTypeCounter,
+			Granularity: metrics.GranularityMonthly, Time: bktTime, ObjectLDN: ldn,
+		},
+	}
+	mt := metrics.MetricTypeCounter
+	req := aggregator.QueryRequest{
+		Dimension:   aggregator.DimensionDevice,
+		DeviceSNs:   []string{"SN1"},
+		MetricPaths: []string{"C1", "C2"},
+		MetricType:  &mt,
+		Granularity: metrics.GranularityMonthly,
+	}
+
+	out := fillEmptyBuckets(rows, req)
+
+	c2, ok := findRow(out, ldn, bktTime, "C2")
+	require.True(t, ok)
+	assert.True(t, c2.Filled)
+	assert.Equal(t, metrics.MetricTypeCounter, c2.MetricType)
+}
+
 // Test_fillEmptyBuckets_GuardsNotDeviceDimensionOrMultiSN
 // 验收 5（守卫）：非 device 维度 / 多 SN → 原样返回不补。
 func Test_fillEmptyBuckets_GuardsNotDeviceDimensionOrMultiSN(t *testing.T) {

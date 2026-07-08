@@ -124,7 +124,7 @@ func (m *mockDeviceRepo) PermanentDelete(_ context.Context, _ []uuid.UUID) (int6
 func (m *mockDeviceRepo) ListProductClasses(_ context.Context) ([]string, error) {
 	return nil, nil
 }
-func (m *mockDeviceRepo) SearchDevices(_ context.Context, _ string, _ int, _ []uuid.UUID) ([]device.GeoDevice, error) {
+func (m *mockDeviceRepo) SearchDevices(_ context.Context, _ string, _ int, _ []model.DeviceVisibilityGrant) ([]device.GeoDevice, error) {
 	return nil, nil
 }
 

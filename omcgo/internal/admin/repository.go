@@ -97,6 +97,10 @@ type RoleDeviceGroupRepository interface {
 	GetGroupIDs(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error)
 	SetGroupIDs(ctx context.Context, roleID uuid.UUID, groupIDs []uuid.UUID) error
 	GetUserVisibleGroupIDs(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error)
+	// GetUserVisibleDeviceGrants returns raw role_device_groups rows for a user.
+	// PermissionService expands each grant to the role's device-group subtree and
+	// applies network_types when resolving device visibility.
+	GetUserVisibleDeviceGrants(ctx context.Context, userID uuid.UUID) ([]model.DeviceVisibilityGrant, error)
 	// GetDeviceGroupData returns group IDs plus network_types for a role.
 	GetDeviceGroupData(ctx context.Context, roleID uuid.UUID) (*RoleDeviceGroupData, error)
 	// SetDeviceGroupData replaces group IDs and network_types for a role.

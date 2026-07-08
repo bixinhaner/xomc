@@ -9,7 +9,8 @@ import (
 // device_group 维度再聚合一次写入 groupTarget。
 //
 // JOIN 链：deviceTarget m → devices d (oui+sn 双键) → device_group_members dgm (device_id)
-//   → GROUP BY dgm.group_id, m.metric_path, m.statis_type
+//
+//	→ GROUP BY dgm.group_id, m.metric_path, m.statis_type
 //
 // 注意：
 //   - 仅 counter 行参与（KPI 跨设备求和无业务意义；如需 group 级 KPI 应在 group 维度
@@ -20,7 +21,11 @@ import (
 //
 // 返回写入行数。
 func (a *Aggregator) AggregateDeviceGroup(ctx context.Context, deviceTarget, groupTarget string, w WindowSpec) (int, error) {
-	sql, args := buildDeviceGroupSQL(deviceTarget, groupTarget, w)
+	numberProcess, err := a.numberProcess(ctx)
+	if err != nil {
+		return 0, err
+	}
+	sql, args := buildDeviceGroupSQLWithNumberProcess(deviceTarget, groupTarget, w, numberProcess)
 	tag, err := a.db.Exec(ctx, sql, args...)
 	if err != nil {
 		return 0, fmt.Errorf("aggregator.AggregateDeviceGroup %s→%s: %w", deviceTarget, groupTarget, err)
@@ -56,6 +61,10 @@ func (a *Aggregator) AggregateDeviceGroup(ctx context.Context, deviceTarget, gro
 // 消除原按非分区列 start_time 全表扫。等价性：#479 已统一 time == start_time，查的是
 // 同一批源行、聚合行为完全不变；半开区间语义不变；args 顺序不变（$2=w.Start, $3=w.End）。
 func buildDeviceGroupSQL(deviceTarget, groupTarget string, w WindowSpec) (string, []any) {
+	return buildDeviceGroupSQLWithNumberProcess(deviceTarget, groupTarget, w, "")
+}
+
+func buildDeviceGroupSQLWithNumberProcess(deviceTarget, groupTarget string, w WindowSpec, numberProcess string) (string, []any) {
 	conflictTarget := conflictTargetForTable(groupTarget)
 	withID := targetHasIDColumn(groupTarget)
 
@@ -69,19 +78,23 @@ func buildDeviceGroupSQL(deviceTarget, groupTarget string, w WindowSpec) (string
 		selectIDExpr = "gen_random_uuid(),\n    "
 	}
 
+	aggregateValue := `CASE m.statis_type
+        WHEN 'sum' THEN SUM(m.metric_value)
+        WHEN 'avg' THEN AVG(m.metric_value)
+        WHEN 'max' THEN MAX(m.metric_value)
+        WHEN 'min' THEN MIN(m.metric_value)
+    END`
+	normalizedValue := normalizeSQLValue(aggregateValue, "im.unit_id", "im.statis_type", "$4", "m.metric_path")
+
 	sql := fmt.Sprintf(`
+WITH %s
 INSERT INTO %s (%s)
 SELECT
     %sdgm.group_id,
     d.technology,
     m.metric_path,
     'counter',
-    CASE m.statis_type
-        WHEN 'sum' THEN SUM(m.metric_value)
-        WHEN 'avg' THEN AVG(m.metric_value)
-        WHEN 'max' THEN MAX(m.metric_value)
-        WHEN 'min' THEN MIN(m.metric_value)
-    END,
+    %s,
     m.statis_type,
     $1,
     m.time,
@@ -90,6 +103,7 @@ SELECT
     NOW(),
     NULL::jsonb
 FROM %s m
+LEFT JOIN indicator_meta im ON im.id = m.metric_path
 JOIN device_dim d
   ON d.oui = m.device_oui AND d.serial_number = m.device_sn
 JOIN device_group_member_dim dgm
@@ -98,14 +112,16 @@ WHERE m.metric_type = 'counter'
   AND m.time >= $2
   AND m.time <  $3
   AND m.statis_type IN ('sum','avg','max','min')
-GROUP BY dgm.group_id, d.technology, m.metric_path, m.statis_type, m.time, m.start_time, m.end_time
+GROUP BY dgm.group_id, d.technology, m.metric_path, m.statis_type, m.time, m.start_time, m.end_time, im.unit_id, im.statis_type
 ON CONFLICT %s DO UPDATE SET
     metric_value = EXCLUDED.metric_value,
     ingest_time  = NOW()`,
+		indicatorMetaSQL(),
 		groupTarget, insertCols,
 		selectIDExpr,
+		normalizedValue,
 		deviceTarget,
 		conflictTarget,
 	)
-	return sql, []any{string(w.Granularity), w.Start, w.End}
+	return sql, []any{string(w.Granularity), w.Start, w.End, numberProcess}
 }

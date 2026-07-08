@@ -48,7 +48,7 @@ func Test_buildDeviceGroupSQL_HourlyGroupTableHasIDAndJoins(t *testing.T) {
 
 	// issue #395：time 来自源行（m.time）后不再需要 bucketStart 占位，args 仅余
 	// granularity / whereStart / whereEnd 三参。
-	assert.Equal(t, []any{"hourly", w.Start, w.End}, args)
+	assert.Equal(t, []any{"hourly", w.Start, w.End, ""}, args)
 }
 
 // #516 分区裁剪：device_group 源筛选必须按**分区列** time 框半开窗口 [w.Start, w.End)，
@@ -104,7 +104,7 @@ func Test_buildDeviceGroupSQL_FramesBy_StartTime_AllGranularities(t *testing.T) 
 			assert.NotContains(t, sql, "AND m.end_time <  $3", "源筛选不应再按 end_time 框桶")
 			// 写入 time/start_time/end_time 仍取源行自身桶时刻（逐档对齐、无偏移；写入列不动）
 			assert.Contains(t, sql, "m.time,\n    m.start_time,\n    m.end_time,")
-			assert.Equal(t, []any{string(c.gran), w.Start, w.End}, args)
+			assert.Equal(t, []any{string(c.gran), w.Start, w.End, ""}, args)
 		})
 	}
 }
@@ -142,7 +142,7 @@ func Test_buildDeviceGroupSQL_Issue395_BucketsBySourceTime_NoOffset(t *testing.T
 	assert.NotContains(t, sql, "AND m.end_time <  $3", "源筛选不应再按 end_time 框桶")
 
 	// args 去掉了多余的 bucketStart 占位，仅 granularity + where 区间
-	assert.Equal(t, []any{"hourly", w.Start, w.End}, args)
+	assert.Equal(t, []any{"hourly", w.Start, w.End, ""}, args)
 }
 
 func Test_buildDeviceGroupSQL_DailyGroupTableNoID(t *testing.T) {
@@ -158,6 +158,22 @@ func Test_buildDeviceGroupSQL_DailyGroupTableNoID(t *testing.T) {
 	assert.NotContains(t, sql, "gen_random_uuid()")
 	// daily 冲突目标 PK 5 列（无 time，尾部含 technology），列序与迁移 000026 主键一致
 	assert.Contains(t, sql, "ON CONFLICT (device_group_id, metric_path, granularity, end_time, technology)")
+}
+
+func Test_buildDeviceGroupSQL_PreservesNullAggregationSemantics(t *testing.T) {
+	w := WindowSpec{
+		Granularity: metrics.GranularityHourly,
+		Start:       time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC),
+		End:         time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),
+	}
+	sql, _ := buildDeviceGroupSQL("pm_metrics_hourly", "pm_group_metrics_hourly", w)
+
+	assert.Contains(t, sql, "WHEN 'sum' THEN SUM(m.metric_value)")
+	assert.Contains(t, sql, "WHEN 'avg' THEN AVG(m.metric_value)")
+	assert.Contains(t, sql, "WHEN 'max' THEN MAX(m.metric_value)")
+	assert.Contains(t, sql, "WHEN 'min' THEN MIN(m.metric_value)")
+	assert.NotContains(t, sql, "COALESCE(m.metric_value", "缺值不能在聚合前被当作 0")
+	assert.NotContains(t, sql, "m.metric_value IS NOT NULL", "全 NULL 窗口仍应产出 NULL 聚合行")
 }
 
 // AggregateDeviceGroup 通过 stub DB 验证 SQL + args 透传到 Exec。
@@ -176,5 +192,5 @@ func Test_AggregateDeviceGroup_PassesThroughToExec(t *testing.T) {
 	assert.Equal(t, 2, n)
 	assert.Contains(t, db.execSQL, "INSERT INTO pm_group_metrics_hourly")
 	assert.Contains(t, db.execSQL, "JOIN device_group_member_dim dgm")
-	assert.Equal(t, []any{"hourly", w.Start, w.End}, db.execArgs)
+	assert.Equal(t, []any{"hourly", w.Start, w.End, ""}, db.execArgs)
 }

@@ -1,0 +1,32 @@
+{
+  "generated_at": "2026-07-04",
+  "input_candidate_file": "omcgo/data/model-library/standard-params-to-mml-tree-analysis-20260703.detail.csv",
+  "candidate_filter": "mml_action == create_new_command_node_for_parameter",
+  "candidate_count": 1182,
+  "matched_existing_xml_or_json_group_count": 950,
+  "not_matched_existing_xml_or_json_group_count": 232,
+  "decision_counts": {
+    "YES_PARAM_MAPPING_XML_OBJECT": 55,
+    "NO_SECONDARY_MATCH": 228,
+    "YES_QUICKSETTINGS_XML_GROUP": 93,
+    "YES_SAME_EXISTING_GROUP_CODE": 36,
+    "YES_EXISTING_JSON_PARENT_GROUP": 766,
+    "DOC_GROUP_ONLY_NOT_EXISTING_MML": 4
+  },
+  "raw_evidence_counts": {
+    "same_existing_group_code": 36,
+    "existing_json_parent_group": 831,
+    "quicksettings_xml_exact_group": 98,
+    "param_mapping_xml_object_prefix": 204,
+    "model_library_doc_group_only": 335
+  },
+  "output_csv": "omcgo/data/model-library/mml-create-new-node-params-rematch-existing-groups-20260704.csv",
+  "source_files": [
+    "omcgo/data/model-library/standard-params-to-mml-tree-analysis-20260703.detail.csv",
+    "omcgo/internal/config/parammodel/mmlstandardloader/seeds/cmcc_tdlte_v23.json",
+    "omcgo/datamodels/mml-catalog/cmcc-tdlte-v2.3.json",
+    "omcgo/data/param-mappings/*.xml",
+    "omcgo/data/quicksettings/*.xml",
+    "omcgo/data/model-library/mml-tree-path-addition-plan-20260703.csv"
+  ]
+}

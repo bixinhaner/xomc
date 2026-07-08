@@ -41,6 +41,7 @@ describe('buildKpiChartData', () => {
     ]);
     expect(out.values).toEqual([10, 20, 30]);
     expect(out.isEmpty).toBe(false);
+    expect(out.hasSamples).toBe(true);
   });
 
   it('displayName 优先，缺失时回退配置兜底名', () => {
@@ -99,6 +100,7 @@ describe('buildKpiChartData', () => {
     expect(out.xData).toEqual([]);
     expect(out.values).toEqual([]);
     expect(out.isEmpty).toBe(true);
+    expect(out.hasSamples).toBe(false);
     expect(out.displayName).toBe('f');
   });
 
@@ -108,6 +110,22 @@ describe('buildKpiChartData', () => {
       row({ metricPath: 'K1', time: 't2', metricValue: null, filled: true }),
     ];
     const out = buildKpiChartData(rows, 'K1', null, 'f');
+    expect(out.isEmpty).toBe(true);
+    expect(out.hasSamples).toBe(true);
+    expect(out.values).toEqual([null, null]);
+  });
+
+  it('NaN/Infinity 按缺值点处理，不参与有效数据判断', () => {
+    const out = buildKpiChartData(
+      [
+        row({ metricPath: 'K1', time: 't1', metricValue: Number.NaN }),
+        row({ metricPath: 'K1', time: 't2', metricValue: Number.POSITIVE_INFINITY }),
+      ],
+      'K1',
+      null,
+      'K1',
+    );
+    expect(out.hasSamples).toBe(true);
     expect(out.isEmpty).toBe(true);
     expect(out.values).toEqual([null, null]);
   });
@@ -155,6 +173,7 @@ describe('buildKpiCompareData（周期对比对齐，T-0194 回归）', () => {
       series: [{ objectLdn: '', name: 'd', values }],
       displayName: 'd',
       isEmpty: values.every((v) => v == null),
+      hasSamples: values.length > 0,
     };
   }
 

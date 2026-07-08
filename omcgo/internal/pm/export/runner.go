@@ -182,7 +182,12 @@ func (r *Runner) generate(ctx context.Context, task *Task) (genResult, error) {
 func (r *Runner) buildSource(ctx context.Context, task *Task) (RowSource, []WideColumn, csvLayout, error) {
 	loc := appcontext.GetLocale(ctx)
 	// dashboard 路径恒为 device 维度：首列「设备 SN」+ 含 Cell ID/PLMN 列（与页面表格一致）。
-	dashboardLayout := csvLayout{FirstColHeader: "设备 SN", IncludeCell: true}
+	// 缺值与 adhoc 导出保持一致写 "-"，避免 CSV 空单元格被误读为未导出。
+	dashboardLayout := csvLayout{
+		FirstColHeader:                "设备 SN",
+		IncludeCell:                   true,
+		MissingMetricValuePlaceholder: missingMetricValuePlaceholder,
+	}
 	switch task.SourceType {
 	case SourceDashboard:
 		req, objectLDNs, err := parseDashboardParams(task.Params)
@@ -230,9 +235,10 @@ func (r *Runner) buildSource(ctx context.Context, task *Task) (RowSource, []Wide
 		}
 		cols := newNameResolver(r.adhocDB, loc).resolveColumns(ctx, keys)
 		layout := csvLayout{
-			FirstColHeader:    adhocFirstColHeader(dim),
-			IncludeTechnology: dim == "device_group", // 设备组维度按制式分行，导出补「制式」列（与页面表格一致）
-			IncludeCell:       adhocIncludesCell(dim),
+			FirstColHeader:                adhocFirstColHeader(dim),
+			IncludeTechnology:             dim == "device_group", // 设备组维度按制式分行，导出补「制式」列（与页面表格一致）
+			IncludeCell:                   adhocIncludesCell(dim),
+			MissingMetricValuePlaceholder: missingMetricValuePlaceholder,
 		}
 		return newAdhocSource(r.adhocDB, taskID, startTime, endTime, dim, deviceCount), cols, layout, nil
 

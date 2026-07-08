@@ -2,8 +2,14 @@ import { describe, it, expect } from 'vitest';
 import { activationStatusLabelOf, activationStatusOf } from '../activationStatus';
 
 describe('activationStatusOf — 三皮肤共享的"激活状态"判定单一来源', () => {
-  it('严格 === "1" → active', () => {
+  it('"1" → active', () => {
     expect(activationStatusOf('1')).toBe('active');
+  });
+
+  it('"true"（大小写不敏感）→ active', () => {
+    expect(activationStatusOf('true')).toBe('active');
+    expect(activationStatusOf('TRUE')).toBe('active');
+    expect(activationStatusOf(' True ')).toBe('active');
   });
 
   it('严格 === "0" → inactive', () => {
@@ -15,6 +21,7 @@ describe('activationStatusOf — 三皮肤共享的"激活状态"判定单一来
     expect(activationStatusOf(null)).toBeNull();
     expect(activationStatusOf('')).toBeNull();
     expect(activationStatusOf('unknown')).toBeNull();
+    expect(activationStatusOf(' Unknown ')).toBeNull();
   });
 
   it('其它非 "1" 字符串一律按未激活展示（避免详情页回显 raw 字符串与列表脱节）', () => {

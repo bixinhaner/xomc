@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/global"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/storage"
 )
 
@@ -62,6 +63,101 @@ func TestAuthorizeDeviceAccess_UnassignedPseudoGroupAllowsUngroupedDevice(t *tes
 	if err != nil {
 		t.Fatalf("unassigned pseudo-group should allow ungrouped device, got %v", err)
 	}
+}
+
+func TestAuthorizeDeviceAccessByGrants(t *testing.T) {
+	groupA, groupB := uuid.New(), uuid.New()
+	grants := []model.DeviceVisibilityGrant{{GroupIDs: []uuid.UUID{groupA}, Technologies: []model.Technology{model.TechLTE}}}
+
+	t.Run("匹配分组且制式命中时放行", func(t *testing.T) {
+		err := AuthorizeDeviceAccessByGrants([]uuid.UUID{groupA, groupB}, model.TechLTE, grants)
+		if err != nil {
+			t.Fatalf("AuthorizeDeviceAccessByGrants() = %v, want nil", err)
+		}
+	})
+
+	t.Run("分组命中但制式不符时拒绝", func(t *testing.T) {
+		err := AuthorizeDeviceAccessByGrants([]uuid.UUID{groupA}, model.TechNR, grants)
+		if err != commonerrors.ErrForbidden {
+			t.Fatalf("AuthorizeDeviceAccessByGrants() = %v, want forbidden", err)
+		}
+	})
+
+	t.Run("空技术列表视为不限制", func(t *testing.T) {
+		err := AuthorizeDeviceAccessByGrants([]uuid.UUID{groupA}, model.TechNR, []model.DeviceVisibilityGrant{{GroupIDs: []uuid.UUID{groupA}, Technologies: []model.Technology{}}})
+		if err != nil {
+			t.Fatalf("AuthorizeDeviceAccessByGrants() = %v, want nil", err)
+		}
+	})
+
+	t.Run("空 grant fail-closed", func(t *testing.T) {
+		err := AuthorizeDeviceAccessByGrants([]uuid.UUID{groupA}, model.TechLTE, []model.DeviceVisibilityGrant{})
+		if err != commonerrors.ErrForbidden {
+			t.Fatalf("AuthorizeDeviceAccessByGrants() = %v, want forbidden", err)
+		}
+	})
+}
+
+func TestApplyDeviceVisibilityGrantsFilter(t *testing.T) {
+	groupA, groupB := uuid.New(), uuid.New()
+
+	t.Run("nil 不过滤", func(t *testing.T) {
+		sql, args, err := ApplyDeviceVisibilityGrantsFilter(
+			storage.Psql.Select("*").From("devices"), "d.id", "d.technology", nil).ToSql()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(sql, "device_group_members") || len(args) != 0 {
+			t.Fatalf("nil grants should not filter: sql=%q args=%v", sql, args)
+		}
+	})
+
+	t.Run("空 grants fail-closed", func(t *testing.T) {
+		sql, _, err := ApplyDeviceVisibilityGrantsFilter(
+			storage.Psql.Select("*").From("devices"), "d.id", "d.technology", []model.DeviceVisibilityGrant{}).ToSql()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(sql, "FALSE") {
+			t.Fatalf("empty grants should be WHERE FALSE: sql=%q", sql)
+		}
+	})
+
+	t.Run("分组+制式子查询", func(t *testing.T) {
+		sql, args, err := ApplyDeviceVisibilityGrantsFilter(
+			storage.Psql.Select("*").From("devices"), "d.id", "d.technology",
+			[]model.DeviceVisibilityGrant{{GroupIDs: []uuid.UUID{groupA}, Technologies: []model.Technology{model.TechLTE}}, {GroupIDs: []uuid.UUID{groupB}}}).ToSql()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(sql, "d.id IN (SELECT device_id FROM device_group_members WHERE group_id IN ($1))") {
+			t.Fatalf("unexpected grant filter sql: %q", sql)
+		}
+		if !strings.Contains(sql, "d.technology IN ($2)") {
+			t.Fatalf("expected technology predicate in sql: %q", sql)
+		}
+		if len(args) != 3 {
+			t.Fatalf("expected 3 args, got %v", args)
+		}
+	})
+
+	t.Run("空技术列表不加制式过滤", func(t *testing.T) {
+		sql, args, err := ApplyDeviceVisibilityGrantsFilter(
+			storage.Psql.Select("*").From("devices"), "d.id", "d.technology",
+			[]model.DeviceVisibilityGrant{{GroupIDs: []uuid.UUID{groupA}, Technologies: []model.Technology{}}}).ToSql()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(sql, "FALSE") {
+			t.Fatalf("empty technologies should not fail-closed: sql=%q", sql)
+		}
+		if strings.Contains(sql, "d.technology IN") {
+			t.Fatalf("empty technologies should not add technology predicate: sql=%q", sql)
+		}
+		if len(args) != 1 {
+			t.Fatalf("expected 1 arg, got %v", args)
+		}
+	})
 }
 
 func TestApplyDeviceVisibilityFilter(t *testing.T) {

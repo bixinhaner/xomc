@@ -71,6 +71,27 @@ describe('buildDeviceMetricCharts — 设备级转置', () => {
     expect(charts[0].series[0].values).toEqual([5, '-', 7]);
   });
 
+  it('真实站级 NULL 行不是 fill_empty，占位为设备线断点而不是整条记录消失', () => {
+    const rows: AggregatedRow[] = [
+      row({ deviceSn: 'SN-A', metricPath: 'M1', startTime: 'T1', metricValue: null, filled: false, objectLdn: null }),
+      row({ deviceSn: 'SN-A', metricPath: 'M1', startTime: 'T2', metricValue: 7, objectLdn: null }),
+    ];
+    const charts = buildDeviceMetricCharts(rows, '15min');
+    expect(charts[0].series).toHaveLength(1);
+    expect(charts[0].series[0].key).toBe('SN-A');
+    expect(charts[0].series[0].values).toEqual(['-', 7]);
+  });
+
+  it('NaN/Infinity 值按缺值断点处理', () => {
+    const rows: AggregatedRow[] = [
+      row({ deviceSn: 'SN-A', metricPath: 'M1', startTime: 'T1', metricValue: Number.NaN }),
+      row({ deviceSn: 'SN-A', metricPath: 'M1', startTime: 'T2', metricValue: Number.POSITIVE_INFINITY }),
+      row({ deviceSn: 'SN-A', metricPath: 'M1', startTime: 'T3', metricValue: 9 }),
+    ];
+    const charts = buildDeviceMetricCharts(rows, '15min');
+    expect(charts[0].series[0].values).toEqual(['-', '-', 9]);
+  });
+
   it('空输入 → 空数组', () => {
     expect(buildDeviceMetricCharts([], '15min')).toEqual([]);
   });

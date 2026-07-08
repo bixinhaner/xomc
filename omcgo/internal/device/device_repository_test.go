@@ -64,8 +64,8 @@ func (f fakeGeoRow) Scan(dest ...interface{}) error {
 		case *int:
 			*d = v.(int)
 		case **int:
-			n := v.(int)
-			*d = &n
+			i := v.(int)
+			*d = &i
 		case *model.DeviceLifecycle:
 			*d = v.(model.DeviceLifecycle)
 		default:
@@ -155,7 +155,7 @@ func TestScanGeoDeviceRow_NullableJoinColumns(t *testing.T) {
 		nil, nil, // group_id, group_name NULL
 		nil, 0, nil, // address, alarm_count, type（site_name/model_name 可空）
 		"", "", "", "", // COALESCE 空串 → 响应里省略（nil 指针）
-		0, nil, 0, // 告警/UE 聚合列
+		0, nil, 0, // ue_count, highest_alarm_severity, highest_severity_alarm_count
 	}
 
 	d, err := scanGeoDeviceRow(fakeGeoRow{vals: vals})

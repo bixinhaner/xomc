@@ -1,0 +1,18 @@
+{
+  "candidate_xlsx": "/Users/a1/Desktop/vscode/goomc/omcgo/data/model-library/standard-params-to-mml-tree-analysis-20260703-node-names-20260704.xlsx",
+  "model_library_xlsx": "/Users/a1/Desktop/vscode/goomc/omcgo/data/model-library/cmcc-southbound-model-library-path-rows-dedup-category-path-20260703.xlsx",
+  "output_xlsx": "/Users/a1/Desktop/vscode/goomc/omcgo/data/model-library/standard-params-to-mml-tree-node-name-model-library-comparison-20260704.xlsx",
+  "generated_at": "2026-07-04T02:31:17.620Z",
+  "candidate_rows": 256,
+  "unique_node_candidates": 243,
+  "duplicate_candidate_rows": 13,
+  "model_matched": 88,
+  "exact_object_matched": 27,
+  "parameter_prefix_matched": 61,
+  "no_model_match": 155,
+  "high_confidence": 27,
+  "medium_confidence": 59,
+  "low_confidence": 157,
+  "need_manual_review": 164,
+  "evidence_rows": 557
+}

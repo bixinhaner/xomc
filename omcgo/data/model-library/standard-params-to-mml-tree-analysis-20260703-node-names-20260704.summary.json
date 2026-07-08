@@ -1,0 +1,10 @@
+{
+  "input": "/Users/a1/Desktop/vscode/goomc/omcgo/data/model-library/standard-params-to-mml-tree-analysis-20260703.xlsx",
+  "output": "/Users/a1/Desktop/vscode/goomc/omcgo/data/model-library/standard-params-to-mml-tree-analysis-20260703-node-names-20260704.xlsx",
+  "candidateRows": 256,
+  "oldInstanceNameRows": 80,
+  "emptySuggestedRows": 0,
+  "conflictRows": 144,
+  "zhMatchedRows": 12,
+  "generatedAt": "2026-07-04T02:02:34.807Z"
+}

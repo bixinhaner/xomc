@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from 'react';
-import { Button, Card, Col, Form, Input, Row, Select, Space, Spin, Table, Tag, Tooltip, Typography, message, notification } from 'antd';
+import { Alert, Button, Card, Col, Form, Input, Row, Select, Space, Spin, Table, Tag, Tooltip, Typography, message, notification } from 'antd';
 import type { FormInstance } from 'antd';
 import { CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, DeleteOutlined, PlusOutlined, SendOutlined, SyncOutlined } from '@ant-design/icons';
 import { useQueryClient } from '@tanstack/react-query';
@@ -17,7 +17,15 @@ import {
 import type { DeviceParameter, ParameterSchemaItem, ParameterUpdateRequest } from '@core/types/deviceParameter';
 import type { DeviceTaskStatus } from '@core/types/deviceTask';
 import type { QuickSettingsGroup, QuickSettingsParam } from '@core/types/quicksettings';
-import { applyInstanceContext, getEffectiveEnumMeta, getFeedbackScopeContext, validateValue, type QuickSettingsInstanceContext } from './validators';
+import {
+  applyInstanceContext,
+  getEffectiveEnumMeta,
+  getFeedbackScopeContext,
+  validateMmeIpPlmnLimit,
+  validateValue,
+  type QuickSettingsInstanceContext,
+} from './validators';
+import { inferDeviceTimeMode, isNrNetworkType, mapDeviceTimeModeLabel } from './deviceTimeMode';
 import { formatDeviceFaultBrief } from './MultiInstanceTable';
 import { useT } from '@/hooks/useT';
 
@@ -270,25 +278,6 @@ function formatTimeZoneDisplay(value: string): string {
   return mapTimezoneAliasToDisplay(normalized);
 }
 
-function inferDeviceTimeMode(
-  rawParameterByPath: Map<string, DeviceParameter>,
-  schemaByPath: Map<string, ParameterSchemaItem>,
-): string {
-  const current = rawParameterByPath.get('Device.Time.Enable')?.parameterValue
-    ?? schemaByPath.get('Device.Time.Enable')?.currentValue;
-  const normalized = String(current ?? '').trim().toLowerCase();
-  if (normalized === '1' || normalized === 'true') return '1';
-  if (normalized === '0' || normalized === 'false') return '0';
-
-  const hasNtpServers = ['Device.Time.NTPServer1', 'Device.Time.NTPServer2', 'Device.Time.NTPServer3', 'Device.Time.NTPServer4', 'Device.Time.NTPServer5']
-    .some((path) => String(
-      rawParameterByPath.get(path)?.parameterValue
-        ?? schemaByPath.get(path)?.currentValue
-        ?? '',
-    ).trim() !== '');
-  return hasNtpServers ? '0' : '1';
-}
-
 interface CellParameterFormProps {
   deviceId: string;
   active?: boolean;
@@ -322,6 +311,7 @@ interface MmeIpPlmnTableProps {
   onChange?: (value: MmeIpPlmnRow[]) => void;
   disabled?: boolean;
   locale: 'zh-CN' | 'en-US';
+  maxRows?: number;
 }
 
 function normalizeMmeIpPlmnRows(rows: MmeIpPlmnRow[]): MmeIpPlmnRow[] {
@@ -374,10 +364,11 @@ function toMmeIpPlmnRows(value: unknown): MmeIpPlmnRow[] {
   return parseMmeIpPlmnList(value);
 }
 
-function MmeIpPlmnTable({ value = [], onChange, disabled = false, locale }: MmeIpPlmnTableProps) {
+function MmeIpPlmnTable({ value = [], onChange, disabled = false, locale, maxRows }: MmeIpPlmnTableProps) {
   void locale;
   const t = useT();
   const rows = isMmeIpPlmnRows(value) ? value : [];
+  const maxReached = maxRows !== undefined && normalizeMmeIpPlmnRows(rows).length >= maxRows;
 
   const setRows = (nextRows: MmeIpPlmnRow[]) => {
     onChange?.(nextRows);
@@ -388,6 +379,10 @@ function MmeIpPlmnTable({ value = [], onChange, disabled = false, locale }: MmeI
   };
 
   const addRow = () => {
+    if (maxReached) {
+      message.warning(t('device.cell.mmeIpPlmnLimitReached', { max: maxRows ?? 0 }));
+      return;
+    }
     setRows([
       ...rows,
       { key: `row-${Date.now()}-${rows.length}`, mmeIp: '', plmn: '' },
@@ -453,10 +448,17 @@ function MmeIpPlmnTable({ value = [], onChange, disabled = false, locale }: MmeI
       <Button
         icon={<PlusOutlined />}
         onClick={addRow}
-        disabled={disabled}
+        disabled={disabled || maxReached}
       >
         {t('device.cell.addRow')}
       </Button>
+      {maxRows !== undefined && (
+        <Alert
+          type={maxReached ? 'warning' : 'info'}
+          showIcon
+          message={t('device.cell.mmeIpPlmnLimitHint', { max: maxRows })}
+        />
+      )}
     </Space>
   );
 }
@@ -601,6 +603,10 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
   const setDraftField = useQuickSettingsFeedbackStore((s) => s.setDraftField);
   const clearDraft = useQuickSettingsFeedbackStore((s) => s.clearDraft);
   const isDeviceTimeGroup = group.id === 'device-time';
+  const preferSchemaCurrentValue = isDeviceTimeGroup
+    || group.id === 'device-ipsec-control'
+    || group.id === 'enb-mme'
+    || group.id === 'gnb-core';
   const effectiveParams = useMemo<QuickSettingsParam[]>(() => {
     if (!isDeviceTimeGroup || group.params.some((param) => param.name === 'Enable')) {
       return group.params;
@@ -823,19 +829,35 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
     })),
     [timezoneOptions],
   );
+  const nrServerLabel = t('device.cell.ntpServer');
+  const nrClientLabel = t('device.cell.ntpClient');
+  const enableLabel = t('common.enable');
+  const disableLabel = t('common.disable');
   const deviceTimeModeOptions = useMemo(() => {
     const meta = getEffectiveEnumMeta(schemaByPath.get('Device.Time.Enable')?.constraints, 'Device.Time.Enable');
     if (meta && meta.values.length > 0) {
       return meta.values.map((value, index) => ({
         value,
-        label: meta.labels[index] || value,
+        label: mapDeviceTimeModeLabel(value, meta.labels[index] || value, instanceContext.networkType, {
+          nrServer: nrServerLabel,
+          nrClient: nrClientLabel,
+          enable: enableLabel,
+          disable: disableLabel,
+        }),
       }));
     }
+    if (isNrNetworkType(instanceContext.networkType)) {
+      return [
+        { value: '1', label: nrServerLabel },
+        { value: '0', label: nrClientLabel },
+      ];
+    }
     return [
-      { value: '1', label: 'NTP Server' },
-      { value: '0', label: 'NTP Client' },
+      { value: '1', label: enableLabel },
+      { value: '0', label: disableLabel },
     ];
-  }, [schemaByPath]);
+  }, [schemaByPath, instanceContext.networkType, nrServerLabel, nrClientLabel, enableLabel, disableLabel]);
+  const deviceTimeModeOptionsKey = deviceTimeModeOptions.map((option) => option.value).join('\u0000');
   const bindSelectOptions = useMemo(
     () => buildBindSelectOptions(ethernetSchemaResp?.parameters ?? []),
     [ethernetSchemaResp],
@@ -874,16 +896,20 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
   useEffect(() => {
     if (!hasSchemaData) return;
     visibleParams.forEach((p) => {
+      const currentValue = form.getFieldValue(p.name);
       if (draft && draft[p.name] !== undefined) {
-        if (specialConfigByName.get(p.name)?.kind === 'mme-ip-plmn-table') {
-          form.setFieldValue(p.name, toMmeIpPlmnRows(draft[p.name]));
-        } else {
-          form.setFieldValue(p.name, String(draft[p.name] ?? ''));
+        const nextValue = specialConfigByName.get(p.name)?.kind === 'mme-ip-plmn-table'
+          ? toMmeIpPlmnRows(draft[p.name])
+          : String(draft[p.name] ?? '');
+        if (currentValue !== nextValue) {
+          form.setFieldValue(p.name, nextValue);
         }
         return;
       }
-      // 优先级 2: 用户在当前会话已 touched
-      if (form.isFieldTouched(p.name)) return;
+      // 优先级 2: 用户当前存在未保存草稿时，保留本地编辑。
+      // 仅 touched 但无 draft（例如刷新后 watcher 已清草稿）应允许被最新 schema 回填，
+      // 否则会出现“刷新成功但需切页再回来才看到新值”。
+      if (form.isFieldTouched(p.name) && draft?.[p.name] !== undefined) return;
       // 优先级 3: schema 原值
       const special = specialConfigByName.get(p.name);
       const path = special?.configPath ?? resolveReadPath(p.standardPath || '');
@@ -895,11 +921,18 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
             ? findRawValueBySuffix(nrNguParams, '.BindInterface')
             : undefined);
       if (special?.kind === 'mme-ip-plmn-table') {
-        form.setFieldValue(p.name, toMmeIpPlmnRows(rawItem?.parameterValue ?? item?.currentValue ?? ''));
+        const raw = preferSchemaCurrentValue
+          ? (item?.currentValue ?? rawItem?.parameterValue ?? '')
+          : (rawItem?.parameterValue ?? item?.currentValue ?? '');
+        form.setFieldValue(p.name, toMmeIpPlmnRows(raw));
       } else {
-        let raw = rawItem?.parameterValue ?? item?.currentValue ?? '';
+        // 这些分组会同时读 search + schema。优先采用 schema 当前值，避免 search 缓存
+        // 在 refreshTick remount 后短暂覆盖刚回读的新值。
+        let raw = preferSchemaCurrentValue
+          ? (item?.currentValue ?? rawItem?.parameterValue ?? '')
+          : (rawItem?.parameterValue ?? item?.currentValue ?? '');
         if (isDeviceTimeGroup && p.name === 'Enable' && (raw === '' || raw == null)) {
-          raw = inferDeviceTimeMode(rawParameterByPath, schemaByPath);
+          raw = inferDeviceTimeMode(rawParameterByPath, schemaByPath, instanceContext.networkType);
         }
         // BSC osmo-bsc 不上报 DeviceGSM.Bts.{i}.ID,该字段语义即为 BTS 实例号本身,
         // 此处按实例号派生填充,避免显示"未上报"。
@@ -919,7 +952,7 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
         );
       }
     });
-  }, [hasSchemaData, visibleParams, instanceContext, form, schemaByPath, rawParameterByPath, draft, specialConfigByName, mmeIpPlmnParams, nrNguParams, isDeviceTimeGroup, deviceTimeModeOptions]);
+  }, [hasSchemaData, visibleParams, instanceContext, form, schemaByPath, rawParameterByPath, draft, specialConfigByName, mmeIpPlmnParams, nrNguParams, preferSchemaCurrentValue, isDeviceTimeGroup, deviceTimeModeOptionsKey]);
 
   const handleSave = async () => {
     const values = form.getFieldsValue() as Record<string, unknown>;
@@ -943,13 +976,25 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
             : undefined);
 
       if (special?.kind === 'mme-ip-plmn-table') {
-        values[p.name] = normalizeMmeIpPlmnRows(toMmeIpPlmnRows(values[p.name]));
+        const normalizedRows = normalizeMmeIpPlmnRows(toMmeIpPlmnRows(values[p.name]));
+        values[p.name] = normalizedRows;
+        const limitErr = validateMmeIpPlmnLimit(normalizedRows, p.maxValue);
+        if (limitErr) {
+          errors[p.name] = limitErr;
+          continue;
+        }
       }
 
       const newVal = special?.kind === 'mme-ip-plmn-table'
         ? serializeMmeIpPlmnList(toMmeIpPlmnRows(values[p.name]))
         : String(values[p.name] ?? '');
-      const oldVal = rawItem?.parameterValue ?? item?.currentValue ?? '';
+      const oldVal = special?.kind === 'mme-ip-plmn-table'
+        ? (preferSchemaCurrentValue
+          ? (item?.currentValue ?? rawItem?.parameterValue ?? '')
+          : (rawItem?.parameterValue ?? item?.currentValue ?? ''))
+        : (preferSchemaCurrentValue
+          ? (item?.currentValue ?? rawItem?.parameterValue ?? '')
+          : (rawItem?.parameterValue ?? item?.currentValue ?? ''));
       if (newVal === oldVal) continue;
 
       const parameterType = rawItem?.parameterType ?? (item?.type as never) ?? 'string';
@@ -1108,14 +1153,23 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
             isDeviceTimeGroup && p.name === 'Enable' ? deviceTimeModeOptions : p.enumOptions,
           );
       }
-      form.setFieldsValue(nextValues);
+      const currentValues = form.getFieldsValue(true) as Record<string, unknown>;
+      const changedValues: Record<string, unknown> = {};
+      for (const [name, value] of Object.entries(nextValues)) {
+        if (currentValues[name] !== value) {
+          changedValues[name] = value;
+        }
+      }
+      if (Object.keys(changedValues).length > 0) {
+        form.setFieldsValue(changedValues);
+      }
       clearDraft(fbKey);
       setFieldErrors({});
     })();
     return () => {
       cancelled = true;
     };
-  }, [active, lastTask?.id, lastTask?.status, lastSubmit?.at, refetchCommonSchema, refetchDeviceTimeSchema, refetchManagementServerSchema, effectiveParams, instanceContext, form, clearDraft, fbKey, group.titleZh, specialConfigByName, t, isDeviceTimeGroup, deviceTimeModeOptions, queryClient, deviceId]);
+  }, [active, lastTask?.id, lastTask?.status, lastSubmit?.at, refetchCommonSchema, refetchDeviceTimeSchema, refetchManagementServerSchema, effectiveParams, instanceContext, form, clearDraft, fbKey, group.titleZh, specialConfigByName, t, isDeviceTimeGroup, deviceTimeModeOptionsKey, queryClient, deviceId]);
 
   // T-0146:基站应答失败时弹一次 notification(只在 status 第一次变成 failed 时触发,避免重复弹)
   // notifiedFailedTaskId 同样存 store —— 切顶层 tab 再切回不会重复弹。
@@ -1231,13 +1285,16 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
                 (sItem?.type as never) ?? 'string',
                 sItem?.constraints,
               );
+              const mmeLimitErr = special?.kind === 'mme-ip-plmn-table'
+                ? validateMmeIpPlmnLimit(toMmeIpPlmnRows(value), p.maxValue)
+                : null;
               // XML 驱动的 extraInfoPath 范围校验:在 schema 校验之后追加;
               // schema 已报错时优先展示 schema 错误,避免双错信息互盖。
               const extraBounds = extraInfoBoundsByName.get(name);
-              const rangeErr = !err && extraBounds
+              const rangeErr = !err && !mmeLimitErr && extraBounds
                 ? validateExtraInfoBounds(normalizedValue, extraBounds)
                 : null;
-              const finalErr = err ?? rangeErr;
+              const finalErr = err ?? mmeLimitErr ?? rangeErr;
               if (finalErr) next[name] = finalErr;
               else delete next[name];
               // 镜像字段同时清/重新校验（值刚被程序性写入，旧 error 应失效）
@@ -1319,12 +1376,19 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
                   : undefined);
             const displayPath = special?.displayPath;
             const displayValue = displayPath
-              ? getRawValueByPath(rawParameterByPath, displayPath)?.parameterValue
-                ?? (special?.kind === 'bind-select' && p.name === 'NguBindInterface'
-                  ? findRawValueBySuffix(nrNguParams, '.NguLocalIp')?.parameterValue
-                  : undefined)
-                ?? schemaByPath.get(displayPath)?.currentValue
-                ?? ''
+              ? (preferSchemaCurrentValue
+                ? (schemaByPath.get(displayPath)?.currentValue
+                  ?? getRawValueByPath(rawParameterByPath, displayPath)?.parameterValue
+                  ?? (special?.kind === 'bind-select' && p.name === 'NguBindInterface'
+                    ? findRawValueBySuffix(nrNguParams, '.NguLocalIp')?.parameterValue
+                    : undefined)
+                  ?? '')
+                : (getRawValueByPath(rawParameterByPath, displayPath)?.parameterValue
+                  ?? (special?.kind === 'bind-select' && p.name === 'NguBindInterface'
+                    ? findRawValueBySuffix(nrNguParams, '.NguLocalIp')?.parameterValue
+                    : undefined)
+                  ?? schemaByPath.get(displayPath)?.currentValue
+                  ?? ''))
               : '';
             // 紧贴 ARFCN 之后插入派生的 Frequency(MHz) 显示行。
             // 命中分组:BSC 的 GSM 空口分组(gsm-cell) 与 BTS 的基站信息分组(bts-cell-info)。
@@ -1433,7 +1497,11 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
                       options={effectiveBindOptions}
                     />
                   ) : special?.kind === 'mme-ip-plmn-table' ? (
-                    <MmeIpPlmnTable disabled={!finalWritable} locale={locale} />
+                    <MmeIpPlmnTable
+                      disabled={!finalWritable}
+                      locale={locale}
+                      maxRows={p.maxValue}
+                    />
                   ) : isEnum ? (
                     <Select
                       disabled={!finalWritable}

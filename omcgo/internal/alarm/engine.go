@@ -188,6 +188,7 @@ func (e *AlarmEngine) Process(ctx context.Context, alarm *model.Alarm) (err erro
 						if updateErr := e.store.UpdateActive(ctx, existing); updateErr != nil {
 							return fmt.Errorf("update existing alarm: %w", updateErr)
 						}
+						e.syncDeviceSeverityStatsAsync(existing.DeviceID)
 						e.logger.Debug("deduplicated alarm updated",
 							zap.String("device_sn", alarm.DeviceSN),
 							zap.String("alarm_identifier", alarm.AlarmIdentifier))
@@ -205,6 +206,7 @@ func (e *AlarmEngine) Process(ctx context.Context, alarm *model.Alarm) (err erro
 		if updateErr := e.store.UpdateActive(ctx, existing); updateErr != nil {
 			return fmt.Errorf("update existing alarm: %w", updateErr)
 		}
+		e.syncDeviceSeverityStatsAsync(existing.DeviceID)
 		if e.redisStore != nil {
 			if redisErr := e.redisStore.Set(ctx, alarm.DeviceSN, dedupKey, existing.ID.String()); redisErr != nil {
 				e.logger.Warn("redis set alarm dedup key", zap.Error(redisErr))
@@ -225,6 +227,9 @@ func (e *AlarmEngine) Process(ctx context.Context, alarm *model.Alarm) (err erro
 
 	if err := e.store.SaveActive(ctx, alarm); err != nil {
 		return fmt.Errorf("save active alarm: %w", err)
+	}
+	if e.redisStore != nil && alarm.DeviceID.String() != "00000000-0000-0000-0000-000000000000" {
+		_ = e.redisStore.IncrementActiveAlarmCount(ctx, alarm.DeviceID.String())
 	}
 
 	// Record metrics for new alarm
@@ -322,6 +327,9 @@ func (e *AlarmEngine) clearActiveAlarm(ctx context.Context, alarm *model.Alarm) 
 	// Remove from active
 	if err := e.store.RemoveActive(ctx, alarm.ID); err != nil {
 		return fmt.Errorf("remove active alarm: %w", err)
+	}
+	if e.redisStore != nil && alarm.DeviceID.String() != "00000000-0000-0000-0000-000000000000" {
+		_ = e.redisStore.DecrementActiveAlarmCount(ctx, alarm.DeviceID.String())
 	}
 
 	// Decrement active alarm gauge
@@ -477,6 +485,9 @@ func (e *AlarmEngine) ClearBySync(ctx context.Context, alarm *model.Alarm) (err 
 	if err := e.store.RemoveActive(ctx, alarm.ID); err != nil {
 		return fmt.Errorf("sync remove active alarm: %w", err)
 	}
+	if e.redisStore != nil && alarm.DeviceID.String() != "00000000-0000-0000-0000-000000000000" {
+		_ = e.redisStore.DecrementActiveAlarmCount(ctx, alarm.DeviceID.String())
+	}
 	if e.redisStore != nil {
 		if err := e.redisStore.Delete(ctx, alarm.DeviceSN, alarm.AlarmIdentifier); err != nil {
 			e.logger.Warn("redis delete alarm on sync clear", zap.Error(err))
@@ -530,6 +541,7 @@ func (e *AlarmEngine) UpdateByEvent(ctx context.Context, alarm *model.Alarm) err
 	if err := e.store.UpdateActive(ctx, existing); err != nil {
 		return fmt.Errorf("update alarm by event: %w", err)
 	}
+	e.syncDeviceSeverityStatsAsync(existing.DeviceID)
 
 	// Adjust metrics if severity changed
 	if e.metrics != nil && oldSeverity != existing.Severity {

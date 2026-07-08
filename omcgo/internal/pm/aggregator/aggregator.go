@@ -4,9 +4,10 @@
 // 实施 plan：docs/project/plan-T-0164-P5-natural-bucket-aggregation.md
 //
 // 流水线：pm_metrics (15min) ──hourly──▶ pm_metrics_hourly
-//                                       ──daily ──▶ pm_metrics_daily
-//                                                  ──weekly──▶ pm_metrics_weekly
-//                                                             ──monthly──▶ pm_metrics_monthly
+//
+//	──daily ──▶ pm_metrics_daily
+//	           ──weekly──▶ pm_metrics_weekly
+//	                      ──monthly──▶ pm_metrics_monthly
 //
 // 每个 cron runner 内做两步：
 //
@@ -20,6 +21,7 @@ package aggregator
 
 import (
 	"context"
+	dbsql "database/sql"
 	"fmt"
 	"time"
 
@@ -31,6 +33,7 @@ import (
 	"github.com/omcgo/omcgo/internal/pm/kpi/expr"
 	"github.com/omcgo/omcgo/internal/pm/kpi/router"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
+	"github.com/omcgo/omcgo/internal/pm/resultnorm"
 )
 
 // WindowSpec 描述一个自然桶聚合窗口。
@@ -68,10 +71,11 @@ type PgQuerier interface {
 // resolveEnabledIndicators 必须走 metaDB（启用集表只在主库）；其余聚合/重算走 db。
 // metaDB 为 nil（旧构造 / 单测）时退回 db，保持向后兼容（旧路径不读 enabled_pm_indicators_*）。
 type Aggregator struct {
-	db        PgQuerier
-	metaDB    PgQuerier
-	kpiRouter KPIRouter
-	logger    *zap.Logger
+	db                  PgQuerier
+	metaDB              PgQuerier
+	kpiRouter           KPIRouter
+	numberProcessLookup func(ctx context.Context) (string, error)
+	logger              *zap.Logger
 }
 
 // New 构造 Aggregator。kpiRouter 可为 nil（表示禁用 KPI 聚合）。
@@ -90,6 +94,23 @@ func NewWithMeta(db, metaDB PgQuerier, kpiRouter KPIRouter, logger *zap.Logger) 
 		metaDB = db
 	}
 	return &Aggregator{db: db, metaDB: metaDB, kpiRouter: kpiRouter, logger: logger.Named("pm.aggregator")}
+}
+
+// SetNumberProcessLookup injects sys_configs indicator.process.number lookup.
+// Empty values are allowed and make resultnorm use its default policy.
+func (a *Aggregator) SetNumberProcessLookup(lookup func(ctx context.Context) (string, error)) {
+	a.numberProcessLookup = lookup
+}
+
+func (a *Aggregator) numberProcess(ctx context.Context) (string, error) {
+	if a.numberProcessLookup == nil {
+		return "", nil
+	}
+	value, err := a.numberProcessLookup(ctx)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", resultnorm.ConfigName, err)
+	}
+	return value, nil
 }
 
 // NewWithPool 便利构造器（外部传 *pgxpool.Pool 时省去接口断言）。
@@ -115,7 +136,11 @@ func NewWithPools(tsPool, pgPool *pgxpool.Pool, kpiRouter KPIRouter, logger *zap
 //
 // 返回写入行数（含 UPSERT 冲突更新）。
 func (a *Aggregator) AggregateCounters(ctx context.Context, source, target string, w WindowSpec) (int, error) {
-	sql, args := buildCountersSQL(source, target, w)
+	numberProcess, err := a.numberProcess(ctx)
+	if err != nil {
+		return 0, err
+	}
+	sql, args := buildCountersSQLWithNumberProcess(source, target, w, numberProcess)
 	tag, err := a.db.Exec(ctx, sql, args...)
 	if err != nil {
 		return 0, fmt.Errorf("aggregator.AggregateCounters %s→%s: %w", source, target, err)
@@ -159,6 +184,10 @@ const kpiInsertBatchSize = 1000
 func (a *Aggregator) AggregateKPIs(ctx context.Context, target string, w WindowSpec) (int, error) {
 	if a.kpiRouter == nil {
 		return 0, nil
+	}
+	numberProcess, err := a.numberProcess(ctx)
+	if err != nil {
+		return 0, err
 	}
 	entities, err := a.listEntitiesInBucket(ctx, target, w)
 	if err != nil {
@@ -222,7 +251,10 @@ func (a *Aggregator) AggregateKPIs(ctx context.Context, target string, w WindowS
 
 			for _, ent := range devEntities[dk] {
 				counters := countersForEntity(byObjectLdn, ent.objectLdn)
-				rows := a.evalKPIs(ent, route.KPIs, counters)
+				rows, err := a.evalKPIs(ent, route.KPIs, counters, numberProcess)
+				if err != nil {
+					return 0, fmt.Errorf("aggregator.AggregateKPIs normalize kpis: %w", err)
+				}
 				for _, r := range rows {
 					pending = append(pending, entityRow{ent: ent, row: r})
 				}
@@ -280,16 +312,19 @@ func (a *Aggregator) loadCountersByObjectLdn(ctx context.Context, target, oui, s
 	out := make(map[string]map[string]float64)
 	for rows.Next() {
 		var objectLdn, name string
-		var val float64
+		var val dbsql.NullFloat64
 		if err := rows.Scan(&objectLdn, &name, &val); err != nil {
 			return nil, err
+		}
+		if !val.Valid {
+			continue
 		}
 		m := out[objectLdn]
 		if m == nil {
 			m = make(map[string]float64)
 			out[objectLdn] = m
 		}
-		m[name] = val
+		m[name] = val.Float64
 	}
 	return out, rows.Err()
 }
@@ -312,9 +347,12 @@ func (a *Aggregator) loadCountersForDevices(ctx context.Context, target string, 
 	defer rows.Close()
 	for rows.Next() {
 		var oui, sn, objectLdn, name string
-		var val float64
+		var val dbsql.NullFloat64
 		if err := rows.Scan(&oui, &sn, &objectLdn, &name, &val); err != nil {
 			return nil, err
+		}
+		if !val.Valid {
+			continue
 		}
 		dk := deviceKey{oui, sn}
 		byLdn := out[dk]
@@ -327,7 +365,7 @@ func (a *Aggregator) loadCountersForDevices(ctx context.Context, target string, 
 			m = make(map[string]float64)
 			byLdn[objectLdn] = m
 		}
-		m[name] = val
+		m[name] = val.Float64
 	}
 	return out, rows.Err()
 }
@@ -367,7 +405,8 @@ func (a *Aggregator) evalKPIs(
 	ent entityKey,
 	kpis []router.KPIDef,
 	counters map[string]float64,
-) []kpiRow {
+	numberProcess string,
+) ([]kpiRow, error) {
 	var rows []kpiRow
 	for _, k := range kpis {
 		if k.Formula == "" {
@@ -390,9 +429,16 @@ func (a *Aggregator) evalKPIs(
 		if statis == "" {
 			statis = string(metrics.StatisPct) // KPI 缺省按 pct 写
 		}
-		rows = append(rows, kpiRow{path: k.IndicatorID, value: val, stype: statis})
+		normalized, err := resultnorm.Normalize(val, &resultnorm.Metadata{
+			Unit:       k.Unit,
+			StatisType: statis,
+		}, numberProcess)
+		if err != nil {
+			return nil, fmt.Errorf("normalize PM rollup KPI result %s: %w", k.IndicatorID, err)
+		}
+		rows = append(rows, kpiRow{path: k.IndicatorID, value: normalized, stype: statis})
 	}
-	return rows
+	return rows, nil
 }
 
 // batchInsertKPIs 把全桶累积的 KPI 行批量写入 target（#516 N+1 批量化）：
@@ -430,6 +476,10 @@ func (a *Aggregator) batchInsertKPIs(ctx context.Context, target string, w Windo
 //   - daily/weekly/monthly：PRIMARY KEY (oui, sn, metric_path, granularity, end_time)
 //     time 列恒等于 w.Start（桶起点），两种 conflict target 在业务上唯一。
 func buildCountersSQL(source, target string, w WindowSpec) (string, []any) {
+	return buildCountersSQLWithNumberProcess(source, target, w, "")
+}
+
+func buildCountersSQLWithNumberProcess(source, target string, w WindowSpec, numberProcess string) (string, []any) {
 	conflictTarget := conflictTargetForTable(target)
 	withID := targetHasIDColumn(target)
 
@@ -450,19 +500,23 @@ func buildCountersSQL(source, target string, w WindowSpec) (string, []any) {
 	// 全表扫（公共环境 EXPLAIN 约 106 倍成本差）。
 	// 等价性：#479 已统一桶头语义 time == start_time，查的是同一批源行、聚合行为完全不变，
 	// 仅获得分区裁剪 + 索引收益。半开区间语义不变；args 顺序不变（$4=w.Start, $5=w.End）。
+	aggregateValue := `CASE m.statis_type
+        WHEN 'sum' THEN SUM(m.metric_value)
+        WHEN 'avg' THEN AVG(m.metric_value)
+        WHEN 'max' THEN MAX(m.metric_value)
+        WHEN 'min' THEN MIN(m.metric_value)
+    END`
+	normalizedValue := normalizeSQLValue(aggregateValue, "im.unit_id", "im.statis_type", "$6", "m.metric_path")
+
 	sql := fmt.Sprintf(`
+WITH %s
 INSERT INTO %s (%s)
 SELECT
     %sm.device_oui,
     m.device_sn,
     m.metric_path,
     'counter',
-    CASE m.statis_type
-        WHEN 'sum' THEN SUM(m.metric_value)
-        WHEN 'avg' THEN AVG(m.metric_value)
-        WHEN 'max' THEN MAX(m.metric_value)
-        WHEN 'min' THEN MIN(m.metric_value)
-    END,
+    %s,
     m.statis_type,
     $1,
     $2,
@@ -472,20 +526,69 @@ SELECT
     m.object_ldn,
     NULL::jsonb
 FROM %s m
+LEFT JOIN indicator_meta im ON im.id = m.metric_path
 WHERE m.metric_type = 'counter'
   AND m.time >= $4
   AND m.time <  $5
   AND m.statis_type IN ('sum','avg','max','min')
-GROUP BY m.device_oui, m.device_sn, m.metric_path, m.statis_type, m.object_ldn
+GROUP BY m.device_oui, m.device_sn, m.metric_path, m.statis_type, m.object_ldn, im.unit_id, im.statis_type
 ON CONFLICT %s DO UPDATE SET
     metric_value = EXCLUDED.metric_value,
     ingest_time  = NOW()`,
+		indicatorMetaSQL(),
 		target, insertCols,
 		selectIDExpr,
+		normalizedValue,
 		source,
 		conflictTarget,
 	)
-	return sql, []any{string(w.Granularity), w.Start, w.End, w.Start, w.End}
+	return sql, []any{string(w.Granularity), w.Start, w.End, w.Start, w.End, numberProcess}
+}
+
+func indicatorMetaSQL() string {
+	return `indicator_meta AS (
+    SELECT id, MIN(unit_id) AS unit_id, MIN(statis_type) AS statis_type
+    FROM (
+        SELECT id, unit_id, statis_type FROM perf_indicators_enb
+        UNION ALL
+        SELECT id, unit_id, statis_type FROM perf_indicators_gnb
+        UNION ALL
+        SELECT id, unit_id, statis_type FROM perf_indicators_gsm
+    ) im
+    GROUP BY id
+)`
+}
+
+func normalizeSQLValue(valueExpr, unitExpr, statisExpr, numberProcessExpr, metricPathExpr string) string {
+	processExpr := fmt.Sprintf("COALESCE(NULLIF(btrim(%s::text), ''), '%s')", numberProcessExpr, resultnorm.DefaultNumberProcess)
+	round0 := fmt.Sprintf("round((%s)::numeric)::double precision", valueExpr)
+	round2 := fmt.Sprintf("round((%s)::numeric, 2)::double precision", valueExpr)
+	round2Numeric := fmt.Sprintf("round((%s)::numeric, 2)", valueExpr)
+	return fmt.Sprintf(`CASE
+        WHEN btrim(COALESCE(%[2]s, '')) = '' OR btrim(COALESCE(%[3]s, '')) = '' THEN ('missing PM indicator metadata for ' || %[5]s)::double precision
+        WHEN btrim(%[2]s) = 'number' AND %[4]s <> '%[8]s' THEN
+            CASE %[4]s
+                WHEN '%[6]s' THEN CEIL(%[1]s)
+                WHEN '%[7]s' THEN FLOOR(%[1]s)
+                ELSE %[9]s
+            END
+        WHEN btrim(%[2]s) = '%%' OR lower(btrim(%[3]s)) IN ('pct','avg') THEN
+            CASE WHEN btrim(%[2]s) = '%%' AND %[11]s > 100 THEN 100 ELSE %[10]s END
+        WHEN %[1]s = trunc(%[1]s) THEN %[1]s
+        ELSE %[10]s
+    END`,
+		valueExpr,
+		unitExpr,
+		statisExpr,
+		processExpr,
+		metricPathExpr,
+		resultnorm.NumberProcessIntUp,
+		resultnorm.NumberProcessIntDown,
+		resultnorm.NumberProcessNone,
+		round0,
+		round2,
+		round2Numeric,
+	)
 }
 
 // buildListEntitiesInBucketSQL 构造"列出本桶有计数的实体（设备 + 小区/PLMN）" SELECT。
@@ -591,7 +694,7 @@ func buildKPIInsertSQL(target string, ent entityKey, w WindowSpec, rows []kpiRow
 // #516：从"每实体一条单实体 INSERT"改为"全桶累积行一次多行 VALUES"——单条 SQL 跨多个实体/小区/PLMN，
 // 每行各自带自身实体的 oui/sn/object_ldn。往返从"每实体一次（上万次）"降到"每批一次"。
 //
-// T-B：object_ldn 写实体实际 object_ldn（设备级实体 object_ldn=='' 仍写 ''），
+// T-B：object_ldn 写实体实际 object_ldn（设备级实体 object_ldn==” 仍写 ”），
 // 让 KPI 按小区/PLMN 落库分行下钻。复用 T-A 的唯一键（已含 object_ldn），同桶重跑幂等覆盖。
 func buildKPIInsertSQLMulti(target string, w WindowSpec, pending []entityRow) (string, []any) {
 	conflictTarget := conflictTargetForTable(target)

@@ -43,7 +43,7 @@
 | `acs`       | Dockerfile.acs           | `9095:9090` (metrics), `7557:7557` | ACS 服务，处理 TR-069 CWMP 设备通信。metrics 让出宿主 9090 给 Prometheus |
 | `app`       | Dockerfile.app           | `18081:8081` (host loopback), `9091:9091` (metrics) | REST API 管理面服务，业务流量通过 Nginx 代理 |
 | `worker`    | Dockerfile.worker        | `9092:9092`                | 后台异步任务 Worker                       |
-| `web`       | Dockerfile.web           | `host network`              | Nginx 网关：宿主机 8081 前端+API，8080 ACS 代理；使用 host networking 以保留真实客户端 IP |
+| `web`       | Dockerfile.web           | `8080:8080`, `8081:8081`    | Nginx 网关：宿主机 8081 前端+API，8080 ACS 代理；默认通过 Docker bridge 访问 app/acs |
 | `prometheus` | prom/prometheus:v2.51.0 | `9090:9090`                | 指标存储与查询                            |
 | `alertmanager` | prom/alertmanager:v0.27.0 | `9093:9093`            | 告警路由                                  |
 | `grafana`   | grafana/grafana:10.4.0   | `3030:3000`                | 可视化（admin/admin，dev 默认）。宿主 3030 避让 vite dev :3000 |
@@ -123,15 +123,17 @@ docker compose -f deployments/docker/docker-compose.yml up -d --build app
 
 > **注意**：`restart` 只是停止并重启已有容器，不会重新编译代码。修改了 Go 源码或前端代码后，必须使用 `up -d --build` 才能生效。
 
-### 4.6 本地 bridge 网络覆盖
+### 4.6 可选 host network 覆盖
 
-默认 `web` 服务使用 host network，以保留设备/浏览器真实来源地址。本机开发如果需要 `web` 容器通过 Compose 服务名访问 `app`、`acs`，叠加本地覆盖文件：
+默认 `web` 服务使用 Docker bridge 网络，通过服务名访问 `app`、`acs`，并显式暴露宿主 `8081`、`8080` 端口。
+
+如果部署环境明确需要 `web` 直接绑定宿主网络，可叠加本地覆盖文件：
 
 ```bash
 docker compose -f deployments/docker/docker-compose.yml -f deployments/docker/docker-compose.local.yml up -d --build web
 ```
 
-该覆盖会使用 `default.local.conf`，把 Nginx 上游切到 `app:8081` 和 `acs:7557`，不改变默认部署拓扑。
+该覆盖会使用 `default.local.conf`，把 Nginx 上游切到宿主映射端口 `127.0.0.1:18081` 和 `127.0.0.1:7557`，不改变默认部署拓扑。
 
 ---
 

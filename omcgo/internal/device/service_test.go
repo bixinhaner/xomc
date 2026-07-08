@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/internal/core/carrier"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
@@ -148,7 +149,7 @@ func (m *mockDeviceRepo) ListGeo(_ context.Context, _ GeoDeviceFilter) ([]GeoDev
 func (m *mockDeviceRepo) GetGeoStats(_ context.Context, _ GeoStatsFilter) (*GeoStats, error) {
 	return &GeoStats{}, nil
 }
-func (m *mockDeviceRepo) SearchDevices(_ context.Context, _ string, _ int, _ []uuid.UUID) ([]GeoDevice, error) {
+func (m *mockDeviceRepo) SearchDevices(_ context.Context, _ string, _ int, _ []model.DeviceVisibilityGrant) ([]GeoDevice, error) {
 	return nil, nil
 }
 func (m *mockDeviceRepo) ListStaleForParamSync(_ context.Context, _ time.Time, _ int) ([]*model.Device, error) {
@@ -668,6 +669,56 @@ func TestDeviceService_UpdateFromInform_DoesNotDowngradeWithoutStrongPath(t *tes
 	require.NotNil(t, device)
 	require.NotNil(t, updatedDevice)
 	assert.Equal(t, model.TechNR, updatedDevice.Technology)
+}
+
+func TestDeviceService_UpdateFromInform_ReconnectRecordsLastOnlineTimeWhenStatusAlreadyActive(t *testing.T) {
+	deviceID := uuid.New()
+	var updatedDevice *model.Device
+	recordCalls := 0
+
+	deviceRepo := &mockDeviceRepo{
+		getBySerialNumberFn: func(_ context.Context, sn string) (*model.Device, error) {
+			return &model.Device{
+				ID:             deviceID,
+				SerialNumber:   sn,
+				Technology:     model.TechLTE,
+				LifecycleState: model.LifecycleCommissioned,
+				IsOnline:       false,             // 关键场景：离线后恢复
+				Status:         model.DeviceActive, // 但状态本身已是 active
+				InformInterval: 300,
+			}, nil
+		},
+		updateFn: func(_ context.Context, device *model.Device) error {
+			updatedDevice = device
+			return nil
+		},
+	}
+
+	svc := newTestDeviceService(deviceRepo, &mockParamRepo{})
+	registry := carrier.NewRegistry()
+	registry.Register(testCarrier{})
+	svc.infoSyncer = &InfoSyncer{
+		logger: zap.NewNop(),
+		paramRepo: &mockParamRepo{},
+		carrierRegistry: registry,
+		infoRepo: stubDeviceInfoRepo{
+			updateSyncFields: func(_ context.Context, gotID uuid.UUID, fields map[string]interface{}) error {
+				recordCalls++
+				assert.Equal(t, deviceID, gotID)
+				_, hasLast := fields["last_online_time"]
+				assert.True(t, hasLast)
+				return nil
+			},
+		},
+	}
+
+	device, err := svc.UpdateFromInform(context.Background(), sampleInform("SN-RECONNECT-001"))
+	require.NoError(t, err)
+	require.NotNil(t, device)
+	require.NotNil(t, updatedDevice)
+
+	assert.True(t, updatedDevice.IsOnline)
+	assert.Equal(t, 1, recordCalls, "offline->online edge should refresh last_online_time exactly once")
 }
 
 // ---------------------------------------------------------------------------

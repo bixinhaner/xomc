@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -13,9 +14,11 @@ import (
 
 	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/core/asyncjob"
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
 	pmexport "github.com/omcgo/omcgo/internal/pm/export"
 	"github.com/omcgo/omcgo/internal/pm/kpi/router"
+	"github.com/omcgo/omcgo/internal/pm/resultnorm"
 )
 
 // startPMAggregatorPipeline wire 起 T-0164-P5 / G5 自然桶聚合 + T-0164-P8 / G8 asyncjob 框架。
@@ -43,6 +46,17 @@ func startPMAggregatorPipeline(
 
 	// 1) 构造 aggregator + asyncjob 基础设施
 	aggr := aggregator.NewWithPool(w.TsPool, kpiRouter, logger)
+	pmResultNormSysCfg := admin.NewPgSysConfigRepository(w.PgPool)
+	aggr.SetNumberProcessLookup(func(ctx context.Context) (string, error) {
+		row, err := pmResultNormSysCfg.GetByKey(ctx, resultnorm.ConfigCategory, resultnorm.ConfigKey)
+		if err != nil {
+			if errors.Is(err, commonerrors.ErrNotFound) {
+				return "", nil
+			}
+			return "", err
+		}
+		return row.Value, nil
+	})
 	jobRepo := asyncjob.NewPgRepository(w.PgPool)
 	cronStateRepo := asyncjob.NewPgCronStateRepository(w.PgPool)
 	lockOwner := buildLockOwner()
@@ -208,6 +222,7 @@ type cronEntry struct {
 //
 //	设备级 hourly :05 / daily 00:05 / weekly Mon 00:10 / monthly 1日 00:15
 //	→ 各自成功后立即 chain 出对应粒度的设备组聚合任务（同一 [Start,End)）。
+//
 // pmAggregatorCronEntries 接受固定 loc，等价 pmAggregatorCronEntriesFn(func() loc)。
 // 保留此签名供既有单测直接断言某时区下的窗口边界。
 func pmAggregatorCronEntries(loc *time.Location) []cronEntry {

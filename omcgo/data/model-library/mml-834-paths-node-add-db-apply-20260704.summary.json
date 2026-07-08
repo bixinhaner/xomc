@@ -1,0 +1,17 @@
+{
+  "sourceCsv": "/Users/a1/Desktop/vscode/goomc/omcgo/data/model-library/mml-950-paths-current-db-command-node-match-20260704.csv",
+  "sourceWorkbook": "/Users/a1/Desktop/vscode/goomc/omcgo/data/model-library/mml-834-paths-node-add-rows-20260704.xlsx",
+  "applySql": "/Users/a1/Desktop/vscode/goomc/omcgo/scripts/mml_add_834_paths_to_existing_command_nodes_20260704.sql",
+  "verifySql": "/Users/a1/Desktop/vscode/goomc/omcgo/scripts/mml_add_834_paths_to_existing_command_nodes_20260704_verify.sql",
+  "rollbackSql": "/Users/a1/Desktop/vscode/goomc/omcgo/scripts/mml_add_834_paths_to_existing_command_nodes_20260704_rollback.sql",
+  "uniquePaths": 834,
+  "rowsFromDocument": 1746,
+  "uniqueCommandPathRows": 1746,
+  "uniqueCommands": 46,
+  "operationRows": {
+    "LST": 834,
+    "MOD": 834,
+    "ADD": 39,
+    "RMV": 39
+  }
+}

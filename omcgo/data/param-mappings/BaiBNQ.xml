@@ -181,7 +181,7 @@
         <param name="Device.ManagementServer.Username" standardPath="Device.ManagementServer.Username" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="1" max="256"/>
         <param name="Device.ManagementServer.sslStatus.endDate" standardPath="Device.ManagementServer.sslStatus.endDate" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <param name="Device.ManagementServer.sslStatus.startDate" standardPath="Device.ManagementServer.sslStatus.startDate" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Time.Enable" standardPath="Device.Time.Enable" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate" enumValues="1,0" enumLabels="NTP Server,NTP Client"/>
+        <param name="Device.Time.Enable" standardPath="Device.Time.Enable" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate" enumValues="1,0" enumLabels="NTP Client,NTP Server"/>
         <param name="Device.Time.LocalTimeZoneName" standardPath="Device.Time.LocalTimeZoneName" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="256"/>
         <param name="Device.Time.NTPServer1" standardPath="Device.Time.NTPServer1" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="256"/>
         <param name="Device.Time.NTPServer2" standardPath="Device.Time.NTPServer2" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="256"/>

@@ -93,6 +93,26 @@
   overflow: hidden;
 }
 
+/* 给表体底部预留一点滚动空间，避免横向滚动条覆盖最后一行的操作按钮。 */
+:global(.omc-data-table) :global(.ant-table-body) {
+  padding-bottom: 16px;
+}
+
+/* antd 5 固定列的新类名会把 shadow 列单独拆出来；白天皮肤下必须把这些单元格也涂成不透明底，
+   否则横向滚到最右后，操作列 hover 会透出后方滚动列的字段。 */
+:global(.omc-data-table) :global(.ant-table-cell-fix),
+:global(.omc-data-table) :global(.ant-table-cell-fix-start),
+:global(.omc-data-table) :global(.ant-table-cell-fix-end),
+:global(.omc-data-table) :global(.ant-table-cell-fix-start-shadow),
+:global(.omc-data-table) :global(.ant-table-cell-fix-end-shadow) {
+  background-color: var(--color-bg-container);
+}
+
+:global(.omc-data-table) :global(.ant-table-cell-fix-start-shadow-show),
+:global(.omc-data-table) :global(.ant-table-cell-fix-end-shadow-show) {
+  background-color: var(--color-bg-container) !important;
+}
+
 /* Unified font size */
 :global(.omc-data-table) :global(.ant-table-thead > tr > th),
 :global(.omc-data-table) :global(.ant-table-tbody > tr > td) {
@@ -112,38 +132,52 @@
   background-color: var(--color-row-hover) !important;
 }
 
-/* 固定列基础不透明背景兜底:任何未被下方"按行状态"规则命中的固定单元格(含表头、
-   告警行、measure 行、无 row-odd/even 的行)都至少有一个不透明背景,杜绝横向滚动时
-   下层滚动列从固定列透出。不加 !important,让下方斑马/hover/告警的 !important 规则按需覆盖。 */
+/* 固定列基础不透明背景兜底 */
 :global(.omc-data-table) :global(.ant-table-cell-fix-left),
-:global(.omc-data-table) :global(.ant-table-cell-fix-right) {
+:global(.omc-data-table) :global(.ant-table-cell-fix-right),
+:global(.omc-data-table) :global(.ant-table-cell-fix-start),
+:global(.omc-data-table) :global(.ant-table-cell-fix-end),
+:global(.omc-data-table) :global(.ant-table-cell-fix-start-shadow),
+:global(.omc-data-table) :global(.ant-table-cell-fix-end-shadow) {
   background-color: var(--color-bg-container);
 }
 
-/* 固定列(选择/序号列 fixed:true)单元格需不透明背景,否则横向滚动时其它列内容透出、与固定列重叠。
-   斑马 + hover 感知,与上面行背景保持一致。 */
+/* 固定列(选择/序号列 fixed:true)单元格需不透明背景，避免横向滚动时内容透出。 */
 :global(.omc-data-table) :global(.row-odd) > td:global(.ant-table-cell-fix-left),
-:global(.omc-data-table) :global(.row-odd) > td:global(.ant-table-cell-fix-right) {
+:global(.omc-data-table) :global(.row-odd) > td:global(.ant-table-cell-fix-right),
+:global(.omc-data-table) :global(.row-odd) > td:global(.ant-table-cell-fix-start),
+:global(.omc-data-table) :global(.row-odd) > td:global(.ant-table-cell-fix-end),
+:global(.omc-data-table) :global(.row-odd) > td:global(.ant-table-cell-fix-start-shadow),
+:global(.omc-data-table) :global(.row-odd) > td:global(.ant-table-cell-fix-end-shadow) {
   background-color: var(--color-bg-container) !important;
 }
 :global(.omc-data-table) :global(.row-even) > td:global(.ant-table-cell-fix-left),
-:global(.omc-data-table) :global(.row-even) > td:global(.ant-table-cell-fix-right) {
+:global(.omc-data-table) :global(.row-even) > td:global(.ant-table-cell-fix-right),
+:global(.omc-data-table) :global(.row-even) > td:global(.ant-table-cell-fix-start),
+:global(.omc-data-table) :global(.row-even) > td:global(.ant-table-cell-fix-end),
+:global(.omc-data-table) :global(.row-even) > td:global(.ant-table-cell-fix-start-shadow),
+:global(.omc-data-table) :global(.row-even) > td:global(.ant-table-cell-fix-end-shadow) {
   background-color: var(--color-neutral-50) !important;
 }
-/* 固定列 hover 不透明合成(修复半透明主题横向滚动透出):
-   部分主题的 --color-row-hover 是半透明 rgba(如 rgba(99,102,241,0.04)),直接作固定列
-   背景时,固定列覆盖在滚动列之上 → 鼠标所在行向左滑动会透出下层文字。
-   改为「hover 色叠加在不透明容器底色上」合成不透明背景 —— 与非固定列(上方
-   tr:hover > td 规则,半透明 hover 叠在容器底色上)最终同色,且保证不透明。
-   不透明主题(如 #e6f7ff)下 gradient 本身即不透明,行为不变。 */
+
+/* 固定列 hover 不透明合成 */
 :global(.omc-data-table) :global(.ant-table-tbody > tr:hover) > td:global(.ant-table-cell-fix-left),
-:global(.omc-data-table) :global(.ant-table-tbody > tr:hover) > td:global(.ant-table-cell-fix-right) {
+:global(.omc-data-table) :global(.ant-table-tbody > tr:hover) > td:global(.ant-table-cell-fix-right),
+:global(.omc-data-table) :global(.ant-table-tbody > tr:hover) > td:global(.ant-table-cell-fix-start),
+:global(.omc-data-table) :global(.ant-table-tbody > tr:hover) > td:global(.ant-table-cell-fix-end),
+:global(.omc-data-table) :global(.ant-table-tbody > tr:hover) > td:global(.ant-table-cell-fix-start-shadow),
+:global(.omc-data-table) :global(.ant-table-tbody > tr:hover) > td:global(.ant-table-cell-fix-end-shadow) {
   background-color: var(--color-bg-container) !important;
   background-image: linear-gradient(var(--color-row-hover), var(--color-row-hover)) !important;
 }
+
 /* 固定表头单元格同样需不透明(纵向滚动时不被表体透出) */
 :global(.omc-data-table) :global(.ant-table-thead > tr > th.ant-table-cell-fix-left),
-:global(.omc-data-table) :global(.ant-table-thead > tr > th.ant-table-cell-fix-right) {
+:global(.omc-data-table) :global(.ant-table-thead > tr > th.ant-table-cell-fix-right),
+:global(.omc-data-table) :global(.ant-table-thead > tr > th.ant-table-cell-fix-start),
+:global(.omc-data-table) :global(.ant-table-thead > tr > th.ant-table-cell-fix-end),
+:global(.omc-data-table) :global(.ant-table-thead > tr > th.ant-table-cell-fix-start-shadow),
+:global(.omc-data-table) :global(.ant-table-thead > tr > th.ant-table-cell-fix-end-shadow) {
   background-color: var(--color-neutral-50) !important;
 }
 
@@ -202,39 +236,69 @@
   background-color: var(--color-severity-warning-hover) !important;
 }
 
-/* 告警行的固定列单元格:与该行的告警底色一致(否则被上面斑马固定列规则按特异性盖成
-   普通底色,横向滚动时固定列与行身不同色/透出)。放在告警底色规则之后,特异性持平时
-   靠源码顺序胜出。hover 态同理。 */
+/* 告警行的固定列单元格 */
 :global(.omc-data-table) :global(.row-critical) > td:global(.ant-table-cell-fix-left),
-:global(.omc-data-table) :global(.row-critical) > td:global(.ant-table-cell-fix-right) {
+:global(.omc-data-table) :global(.row-critical) > td:global(.ant-table-cell-fix-right),
+:global(.omc-data-table) :global(.row-critical) > td:global(.ant-table-cell-fix-start),
+:global(.omc-data-table) :global(.row-critical) > td:global(.ant-table-cell-fix-end),
+:global(.omc-data-table) :global(.row-critical) > td:global(.ant-table-cell-fix-start-shadow),
+:global(.omc-data-table) :global(.row-critical) > td:global(.ant-table-cell-fix-end-shadow) {
   background-color: var(--color-severity-critical-bg) !important;
 }
 :global(.omc-data-table) :global(.row-major) > td:global(.ant-table-cell-fix-left),
-:global(.omc-data-table) :global(.row-major) > td:global(.ant-table-cell-fix-right) {
+:global(.omc-data-table) :global(.row-major) > td:global(.ant-table-cell-fix-right),
+:global(.omc-data-table) :global(.row-major) > td:global(.ant-table-cell-fix-start),
+:global(.omc-data-table) :global(.row-major) > td:global(.ant-table-cell-fix-end),
+:global(.omc-data-table) :global(.row-major) > td:global(.ant-table-cell-fix-start-shadow),
+:global(.omc-data-table) :global(.row-major) > td:global(.ant-table-cell-fix-end-shadow) {
   background-color: var(--color-severity-major-bg) !important;
 }
 :global(.omc-data-table) :global(.row-minor) > td:global(.ant-table-cell-fix-left),
-:global(.omc-data-table) :global(.row-minor) > td:global(.ant-table-cell-fix-right) {
+:global(.omc-data-table) :global(.row-minor) > td:global(.ant-table-cell-fix-right),
+:global(.omc-data-table) :global(.row-minor) > td:global(.ant-table-cell-fix-start),
+:global(.omc-data-table) :global(.row-minor) > td:global(.ant-table-cell-fix-end),
+:global(.omc-data-table) :global(.row-minor) > td:global(.ant-table-cell-fix-start-shadow),
+:global(.omc-data-table) :global(.row-minor) > td:global(.ant-table-cell-fix-end-shadow) {
   background-color: var(--color-severity-minor-bg) !important;
 }
 :global(.omc-data-table) :global(.row-warning) > td:global(.ant-table-cell-fix-left),
-:global(.omc-data-table) :global(.row-warning) > td:global(.ant-table-cell-fix-right) {
+:global(.omc-data-table) :global(.row-warning) > td:global(.ant-table-cell-fix-right),
+:global(.omc-data-table) :global(.row-warning) > td:global(.ant-table-cell-fix-start),
+:global(.omc-data-table) :global(.row-warning) > td:global(.ant-table-cell-fix-end),
+:global(.omc-data-table) :global(.row-warning) > td:global(.ant-table-cell-fix-start-shadow),
+:global(.omc-data-table) :global(.row-warning) > td:global(.ant-table-cell-fix-end-shadow) {
   background-color: var(--color-severity-warning-bg) !important;
 }
 :global(.omc-data-table) :global(.row-critical:hover) > td:global(.ant-table-cell-fix-left),
-:global(.omc-data-table) :global(.row-critical:hover) > td:global(.ant-table-cell-fix-right) {
+:global(.omc-data-table) :global(.row-critical:hover) > td:global(.ant-table-cell-fix-right),
+:global(.omc-data-table) :global(.row-critical:hover) > td:global(.ant-table-cell-fix-start),
+:global(.omc-data-table) :global(.row-critical:hover) > td:global(.ant-table-cell-fix-end),
+:global(.omc-data-table) :global(.row-critical:hover) > td:global(.ant-table-cell-fix-start-shadow),
+:global(.omc-data-table) :global(.row-critical:hover) > td:global(.ant-table-cell-fix-end-shadow) {
   background-color: var(--color-severity-critical-hover) !important;
 }
 :global(.omc-data-table) :global(.row-major:hover) > td:global(.ant-table-cell-fix-left),
-:global(.omc-data-table) :global(.row-major:hover) > td:global(.ant-table-cell-fix-right) {
+:global(.omc-data-table) :global(.row-major:hover) > td:global(.ant-table-cell-fix-right),
+:global(.omc-data-table) :global(.row-major:hover) > td:global(.ant-table-cell-fix-start),
+:global(.omc-data-table) :global(.row-major:hover) > td:global(.ant-table-cell-fix-end),
+:global(.omc-data-table) :global(.row-major:hover) > td:global(.ant-table-cell-fix-start-shadow),
+:global(.omc-data-table) :global(.row-major:hover) > td:global(.ant-table-cell-fix-end-shadow) {
   background-color: var(--color-severity-major-hover) !important;
 }
 :global(.omc-data-table) :global(.row-minor:hover) > td:global(.ant-table-cell-fix-left),
-:global(.omc-data-table) :global(.row-minor:hover) > td:global(.ant-table-cell-fix-right) {
+:global(.omc-data-table) :global(.row-minor:hover) > td:global(.ant-table-cell-fix-right),
+:global(.omc-data-table) :global(.row-minor:hover) > td:global(.ant-table-cell-fix-start),
+:global(.omc-data-table) :global(.row-minor:hover) > td:global(.ant-table-cell-fix-end),
+:global(.omc-data-table) :global(.row-minor:hover) > td:global(.ant-table-cell-fix-start-shadow),
+:global(.omc-data-table) :global(.row-minor:hover) > td:global(.ant-table-cell-fix-end-shadow) {
   background-color: var(--color-severity-minor-hover) !important;
 }
 :global(.omc-data-table) :global(.row-warning:hover) > td:global(.ant-table-cell-fix-left),
-:global(.omc-data-table) :global(.row-warning:hover) > td:global(.ant-table-cell-fix-right) {
+:global(.omc-data-table) :global(.row-warning:hover) > td:global(.ant-table-cell-fix-right),
+:global(.omc-data-table) :global(.row-warning:hover) > td:global(.ant-table-cell-fix-start),
+:global(.omc-data-table) :global(.row-warning:hover) > td:global(.ant-table-cell-fix-end),
+:global(.omc-data-table) :global(.row-warning:hover) > td:global(.ant-table-cell-fix-start-shadow),
+:global(.omc-data-table) :global(.row-warning:hover) > td:global(.ant-table-cell-fix-end-shadow) {
   background-color: var(--color-severity-warning-hover) !important;
 }
 
@@ -329,17 +393,7 @@
   color: var(--color-neutral-500);
 }
 
-/* 全选 checkbox 与每行 checkbox 水平对齐(根因解析):
- * antd 5 selection-column 默认 align:'center' + paddingInline:8px,把表头的
- * <Checkbox> 又套了一层 .ant-table-selection(inline-flex; flex-direction:column,
- * 留 indeterminate / selections 扩展位)。inline-flex column 容器在 text-align:
- * center 下,其"被居中的盒子"边界跟单独 .ant-checkbox-wrapper(行 cell)的边界算法
- * 不一致 → 视觉错位几像素。
- *
- * 强制方案:把 selection-column 改成 text-align:left + 固定 padding-inline-start;
- * 同时把表头的 .ant-table-selection wrapper 退化成 inline,让里面的 Checkbox 跟
- * 行 cell 的 Checkbox 走同样的 inline-level 起点。两边都从 cell 左 padding 起步,
- * 像素级对齐。 */
+/* 全选 checkbox 与每行 checkbox 水平对齐 */
 :global(.omc-data-table) :global(.ant-table-selection-column) {
   text-align: left;
   padding-inline-start: 16px;

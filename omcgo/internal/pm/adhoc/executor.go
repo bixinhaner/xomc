@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,6 +13,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
+	"github.com/omcgo/omcgo/internal/pm/resultnorm"
 )
 
 // AggregatorQuerier 是 Executor 对 G5 aggregator 的最小依赖（便于单测 stub）。
@@ -33,6 +35,13 @@ type WatermarkReader interface {
 type ProgressPublisher interface {
 	Publish(ctx context.Context, subject string, payload any) error
 }
+
+// NumberProcessLookup reads sys_configs indicator.process.number.
+// Empty values are allowed and make resultnorm use its default policy.
+type NumberProcessLookup func(ctx context.Context) (string, error)
+
+// IndicatorMetadataLookup loads PM indicator metadata keyed by metric_path.
+type IndicatorMetadataLookup func(ctx context.Context, metricPaths []string) (map[string]resultnorm.Metadata, error)
 
 // 事件主题。SSE handler 订阅这两个主题。
 const (
@@ -81,6 +90,9 @@ type Executor struct {
 
 	// now 是当前时刻取值器，便于单测注入固定时刻断言「最近一格」窗口。默认 time.Now。
 	now func() time.Time
+
+	numberProcessLookup NumberProcessLookup
+	metadataLookup      IndicatorMetadataLookup
 }
 
 // NewExecutor 构造 Executor。publisher 可为 nil（不上报进度事件）。
@@ -145,6 +157,20 @@ func (e *Executor) SetStoreAllMetrics(v bool) *Executor {
 	return e
 }
 
+// SetNumberProcessLookup 注入 indicator.process.number 读取函数，供 adhoc 结果写入前规范化使用。
+// 未注入时使用 resultnorm 默认策略；读取错误会让当前 adhoc 任务失败并暴露。
+func (e *Executor) SetNumberProcessLookup(lookup NumberProcessLookup) *Executor {
+	e.numberProcessLookup = lookup
+	return e
+}
+
+// SetIndicatorMetadataLookup 注入指标元数据读取函数。未注入时跳过规范化，供旧单测/非 worker
+// 构造保持兼容；生产 worker 必须注入，缺失 metadata 会让任务失败。
+func (e *Executor) SetIndicatorMetadataLookup(lookup IndicatorMetadataLookup) *Executor {
+	e.metadataLookup = lookup
+	return e
+}
+
 // SetWatermarkReader 注入「上游完成水位」读取器（#528 P2，worker 启动期注入主库水位仓库）。
 // 注入后持续任务目标桶改为「按 (粒度,层级) 水位的桶起点」；nil 时退化为不取数（不回归）。
 // 返回自身便于链式调用。
@@ -184,6 +210,10 @@ func (e *Executor) ExecuteOneshot(ctx context.Context, task *Task) (int, error) 
 		// 存储范围开关：仅存所选时落库前按 task.MetricPaths 过滤（设计 §2.4）。
 		if !e.storeAllMetrics {
 			rows = filterByMetricPaths(rows, task.MetricPaths)
+		}
+		rows, err = e.normalizeResultRows(ctx, rows)
+		if err != nil {
+			return totalRows, fmt.Errorf("normalize results for %s: %w", g, err)
 		}
 		if len(rows) > 0 {
 			if err := e.repo.InsertResults(ctx, rows); err != nil {
@@ -320,6 +350,76 @@ func (e *Executor) queryAndConvert(ctx context.Context, task *Task, g metrics.Gr
 		})
 	}
 	return out, nil
+}
+
+func (e *Executor) numberProcess(ctx context.Context) (string, error) {
+	if e.numberProcessLookup == nil {
+		return "", nil
+	}
+	value, err := e.numberProcessLookup(ctx)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", resultnorm.ConfigName, err)
+	}
+	return value, nil
+}
+
+func (e *Executor) normalizeResultRows(ctx context.Context, rows []ResultRow) ([]ResultRow, error) {
+	if len(rows) == 0 || e.metadataLookup == nil {
+		return rows, nil
+	}
+	numberProcess, err := e.numberProcess(ctx)
+	if err != nil {
+		return nil, err
+	}
+	paths := uniqueMetricPaths(rows)
+	metaByPath, err := e.metadataLookup(ctx, paths)
+	if err != nil {
+		return nil, fmt.Errorf("load indicator metadata: %w", err)
+	}
+	out := make([]ResultRow, len(rows))
+	copy(out, rows)
+	for i := range out {
+		row := &out[i]
+		meta, ok := metaByPath[row.MetricPath]
+		if !ok {
+			return nil, fmt.Errorf("normalize adhoc result %s: %w", row.MetricPath, resultnorm.ErrMissingMetadata)
+		}
+		if math.IsNaN(row.MetricValue) {
+			continue
+		}
+		statisType := meta.StatisType
+		if row.StatisType != nil && *row.StatisType != "" {
+			statisType = *row.StatisType
+		} else if statisType != "" {
+			st := statisType
+			row.StatisType = &st
+		}
+		normalized, err := resultnorm.Normalize(row.MetricValue, &resultnorm.Metadata{
+			Unit:       meta.Unit,
+			StatisType: statisType,
+		}, numberProcess)
+		if err != nil {
+			return nil, fmt.Errorf("normalize adhoc result %s: %w", row.MetricPath, err)
+		}
+		row.MetricValue = normalized
+	}
+	return out, nil
+}
+
+func uniqueMetricPaths(rows []ResultRow) []string {
+	seen := make(map[string]struct{}, len(rows))
+	paths := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if row.MetricPath == "" {
+			continue
+		}
+		if _, ok := seen[row.MetricPath]; ok {
+			continue
+		}
+		seen[row.MetricPath] = struct{}{}
+		paths = append(paths, row.MetricPath)
+	}
+	return paths
 }
 
 // continuousTargetBucket 求持续任务在给定粒度下的目标桶起点（#528 P2）。

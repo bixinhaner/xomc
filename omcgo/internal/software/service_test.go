@@ -279,7 +279,7 @@ func (m *svcMockDeviceRepo) ListGeo(_ context.Context, _ device.GeoDeviceFilter)
 func (m *svcMockDeviceRepo) GetGeoStats(_ context.Context, _ device.GeoStatsFilter) (*device.GeoStats, error) {
 	return &device.GeoStats{}, nil
 }
-func (m *svcMockDeviceRepo) SearchDevices(_ context.Context, _ string, _ int, _ []uuid.UUID) ([]device.GeoDevice, error) {
+func (m *svcMockDeviceRepo) SearchDevices(_ context.Context, _ string, _ int, _ []model.DeviceVisibilityGrant) ([]device.GeoDevice, error) {
 	return nil, nil
 }
 func (m *svcMockDeviceRepo) BatchDelete(_ context.Context, _ []uuid.UUID, _ string) (int64, error) {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/csv"
 	"errors"
+	"math"
 	"strings"
 	"testing"
 
@@ -35,6 +36,40 @@ func TestStreamCSVToObject_Success(t *testing.T) {
 	recs, err := csv.NewReader(strings.NewReader(body)).ReadAll()
 	require.NoError(t, err)
 	assert.Len(t, recs, 4)
+}
+
+func TestStreamCSVToObject_MissingMetricCellUsesPlaceholder(t *testing.T) {
+	src := &sliceSource{batches: [][]ExportRow{{
+		{Device: "d1", MetricCode: "K1", Value: 1},
+	}}}
+	up := &stubUploader{}
+	cols := []WideColumn{{Code: "K1", Type: "kpi", Name: "K1"}, {Code: "K2", Type: "kpi", Name: "K2"}}
+
+	_, err := streamCSVToObject(context.Background(), up, "bkt", "obj.csv", src, cols, csvLayout{FirstColHeader: "设备", IncludeCell: true, MissingMetricValuePlaceholder: "-"})
+	require.NoError(t, err)
+
+	body := strings.TrimPrefix(string(up.gotBody), string(utf8BOM))
+	recs, err := csv.NewReader(strings.NewReader(body)).ReadAll()
+	require.NoError(t, err)
+	require.Len(t, recs, 2)
+	assert.Equal(t, "-", recs[1][6])
+}
+
+func TestStreamCSVToObject_NullMetricValueUsesPlaceholder(t *testing.T) {
+	src := &sliceSource{batches: [][]ExportRow{{
+		{Device: "d1", MetricCode: "K1", Value: math.NaN()},
+	}}}
+	up := &stubUploader{}
+	cols := []WideColumn{{Code: "K1", Type: "kpi", Name: "K1"}}
+
+	_, err := streamCSVToObject(context.Background(), up, "bkt", "obj.csv", src, cols, csvLayout{FirstColHeader: "设备", IncludeCell: true, MissingMetricValuePlaceholder: "-"})
+	require.NoError(t, err)
+
+	body := strings.TrimPrefix(string(up.gotBody), string(utf8BOM))
+	recs, err := csv.NewReader(strings.NewReader(body)).ReadAll()
+	require.NoError(t, err)
+	require.Len(t, recs, 2)
+	assert.Equal(t, "-", recs[1][5])
 }
 
 func TestStreamCSVToObject_SourceError_Propagates(t *testing.T) {

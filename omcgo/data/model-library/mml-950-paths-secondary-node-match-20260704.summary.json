@@ -1,0 +1,159 @@
+{
+  "generated_at": "2026-07-04",
+  "input_csv": "omcgo/data/model-library/mml-create-new-node-params-strict-mml-tree-match-20260704.csv",
+  "input_count": 950,
+  "secondary_node_definition": "MML group-tree chapter 下的 command/operation 二级节点，即 mml_commands 挂在 mml_command_groups 下的节点；quicksettings 和 param-mappings 不算",
+  "secondary_node_match_yes": 802,
+  "secondary_node_match_no": 148,
+  "match_kind_counts": {
+    "not_mml_tree_param_mapping_object": 55,
+    "not_mml_tree_quicksettings": 93,
+    "direct_existing_command_group": 36,
+    "existing_command_object_parent": 766
+  },
+  "top_yes_secondary_nodes": [
+    {
+      "chapter_code": "SF",
+      "chapter_name": "小区服务参数管理（总体）",
+      "secondary_node_name": "FAP 载波基本配置",
+      "object_path": "Device.Services.FAPService.{i}.",
+      "count": 627
+    },
+    {
+      "chapter_code": "SA",
+      "chapter_name": "设备信息参数管理",
+      "secondary_node_name": "设备基本信息",
+      "object_path": "Device.DeviceInfo.",
+      "count": 119
+    },
+    {
+      "chapter_code": "SI",
+      "chapter_name": "邻区参数管理",
+      "secondary_node_name": "LTE 同系统邻区",
+      "object_path": "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.",
+      "count": 8
+    },
+    {
+      "chapter_code": "SJ",
+      "chapter_name": "移动性参数管理",
+      "secondary_node_name": "空闲态异频载波",
+      "object_path": "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.",
+      "count": 8
+    },
+    {
+      "chapter_code": "SL",
+      "chapter_name": "WAN口配置参数管理",
+      "secondary_node_name": "VLAN 子接口",
+      "object_path": "Device.Ethernet.Interface.{i}.VlanInterface.{i}.",
+      "count": 8
+    },
+    {
+      "chapter_code": "SL",
+      "chapter_name": "WAN口配置参数管理",
+      "secondary_node_name": "以太网接口",
+      "object_path": "Device.Ethernet.Interface.{i}.",
+      "count": 8
+    },
+    {
+      "chapter_code": "SH",
+      "chapter_name": "RAN协议栈参数",
+      "secondary_node_name": "RF",
+      "object_path": "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.",
+      "count": 6
+    },
+    {
+      "chapter_code": "SF",
+      "chapter_name": "小区服务参数管理",
+      "secondary_node_name": "LTE",
+      "object_path": "Device.Services.FAPService.{i}.Capabilities.LTE.",
+      "count": 4
+    },
+    {
+      "chapter_code": "SH",
+      "chapter_name": "RAN协议栈参数",
+      "secondary_node_name": "RRCTimers",
+      "object_path": "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.",
+      "count": 2
+    },
+    {
+      "chapter_code": "SC",
+      "chapter_name": "基站网管参数管理",
+      "secondary_node_name": "基站网管连接",
+      "object_path": "Device.ManagementServer.",
+      "count": 2
+    },
+    {
+      "chapter_code": "SA",
+      "chapter_name": "设备信息参数管理",
+      "secondary_node_name": "设备基本信息",
+      "object_path": "Device.DeviceInfo.",
+      "count": 1
+    },
+    {
+      "chapter_code": "SL",
+      "chapter_name": "WAN口配置参数管理",
+      "secondary_node_name": "VLAN 子接口",
+      "object_path": "Device.Ethernet.Interface.{i}.VlanInterface.{i}.",
+      "count": 1
+    },
+    {
+      "chapter_code": "SL",
+      "chapter_name": "WAN口配置参数管理",
+      "secondary_node_name": "VLAN 子接口 IPv4 地址",
+      "object_path": "Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}.",
+      "count": 1
+    },
+    {
+      "chapter_code": "SL",
+      "chapter_name": "WAN口配置参数管理",
+      "secondary_node_name": "VLAN 子接口 IPv6 地址",
+      "object_path": "Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}.",
+      "count": 1
+    },
+    {
+      "chapter_code": "SL",
+      "chapter_name": "WAN口配置参数管理",
+      "secondary_node_name": "以太网接口",
+      "object_path": "Device.Ethernet.Interface.{i}.",
+      "count": 1
+    },
+    {
+      "chapter_code": "SL",
+      "chapter_name": "WAN口配置参数管理",
+      "secondary_node_name": "接口 IPv4 地址",
+      "object_path": "Device.Ethernet.Interface.{i}.IPv4Address.{i}.",
+      "count": 1
+    },
+    {
+      "chapter_code": "SL",
+      "chapter_name": "WAN口配置参数管理",
+      "secondary_node_name": "接口 IPv6 地址",
+      "object_path": "Device.Ethernet.Interface.{i}.IPv6Address.{i}.",
+      "count": 1
+    },
+    {
+      "chapter_code": "SL",
+      "chapter_name": "WAN口配置参数管理",
+      "secondary_node_name": "静态路由表项",
+      "object_path": "Device.Ethernet.IpRoute.{i}.",
+      "count": 1
+    },
+    {
+      "chapter_code": "SH",
+      "chapter_name": "RAN协议栈参数",
+      "secondary_node_name": "RAN PHY 物理层",
+      "object_path": "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.",
+      "count": 1
+    },
+    {
+      "chapter_code": "SJ",
+      "chapter_name": "移动性参数管理",
+      "secondary_node_name": "连接态 IRAT 测量",
+      "object_path": "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.",
+      "count": 1
+    }
+  ],
+  "output_all_csv": "omcgo/data/model-library/mml-950-paths-secondary-node-match-20260704.csv",
+  "output_yes_csv": "omcgo/data/model-library/mml-950-paths-secondary-node-match-yes-20260704.csv",
+  "group_summary_csv": "omcgo/data/model-library/mml-950-paths-secondary-node-match-20260704.group-summary.csv"
+}

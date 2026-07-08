@@ -10,10 +10,10 @@
  *   - 其它字符串  → 含 deviceApi.mapBackendDevice 把空值兜底成的 'unknown'，
  *                  以及任何理论上不该出现的 raw 值
  *
- * 判定规则（严格）:
+ * 判定规则（统一）:
  *   - 空 / null / undefined / 字符串 'unknown'  → null (UI 应显示占位符 '-' 或 '—')
- *   - 严格 === '1'                                → 'active'
- *   - 其它一切                                    → 'inactive'
+ *   - '1' / 'true'（忽略大小写）                 → 'active'
+ *   - 其它一切                                   → 'inactive'
  *     (按"未激活"展示比按原值回显更安全 —— 避免详情页打出 raw "unknown"/"active" 等
  *      内部字符串与列表 Tag 表现脱节)
  */
@@ -22,8 +22,10 @@ import { getI18nText, type Locale } from './i18nText';
 export type ActivationStatus = 'active' | 'inactive' | null;
 
 export function activationStatusOf(opState: string | undefined | null): ActivationStatus {
-  if (opState == null || opState === '' || opState === 'unknown') return null;
-  return opState === '1' ? 'active' : 'inactive';
+  if (opState == null) return null;
+  const normalized = opState.trim().toLowerCase();
+  if (normalized === '' || normalized === 'unknown') return null;
+  return normalized === '1' || normalized === 'true' ? 'active' : 'inactive';
 }
 
 interface ActivationStatusDetailLike {

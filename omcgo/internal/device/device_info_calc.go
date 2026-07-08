@@ -16,11 +16,10 @@ import (
 //	All observed cells inactive → "inactive"
 //	No cell data                → "inactive"
 //
-// 覆盖制式:
-//   - LTE / NR (FAPService.{i}.{FAPControl|CellConfig}.{LTE|NR}.*OpState) —— isCellActiveForIndex
-//   - GSM (GsmBTSCellDT.{i}.OpState)                                       —— hasActiveGSMCell
-// CMCC/CTCC/CUCC 在 LTE/NR 上走同一组标准 TR-181 路径，X_CMCC/X_CTCC/X_CUCC 私有命名
-// 空间未提供独立 OpState 字段。
+// 覆盖制式（严格路径）:
+//   - LTE: Device.Services.FAPService.{i}.FAPControl.LTE.OpState
+//   - NR:  Device.Services.FAPService.1.CellConfig.{i}.NR.RAN.OpState
+//   - GSM: Device.Services.GsmBTSCellDT.{i}.OpState
 func CalcCellStatus(params map[string]string) string {
 	// GSM 制式并行检查——走 GsmBTSCellDT.{i}.* 对象树,与 FAPService 体系独立,
 	// 任一 GSM cell active 也算设备激活(不依赖 FAPService maxIndex)。
@@ -65,14 +64,31 @@ func CalcOpState(params map[string]string) string {
 }
 
 // CalcMMEStatus computes the mme_status quick-query column from device_parameters.
-// Iterates MmePoolConfigParam.{1-16}.MME1Status, counts active connections.
+//
+// Priority:
+//  1. LTE strict path `Device.Services.FAPService.1.FAPControl.LTE.Gateway.MmeStatus`
+//  2. Legacy fallback: count `...MmePoolConfigParam.{1-16}.MME1Status`
 //
 // Returns:
 //
 //	"disconnected" — no active MME
-//	"partial"      — 1 active MME
-//	"connected"    — 2+ active MMEs
+//	"partial"      — 1 active MME (legacy pool fallback only)
+//	"connected"    — 2+ active MMEs / gateway indicates connected
 func CalcMMEStatus(params map[string]string) string {
+	if gatewayStatus := strings.TrimSpace(params["Device.Services.FAPService.1.FAPControl.LTE.Gateway.MmeStatus"]); gatewayStatus != "" {
+		switch strings.ToLower(gatewayStatus) {
+		case "1", "true", "connected", "active", "up", "on":
+			return "connected"
+		case "partial":
+			return "partial"
+		case "0", "false", "disconnected", "inactive", "down", "off":
+			return "disconnected"
+		default:
+			// Unknown non-empty value: be conservative for UI state.
+			return "disconnected"
+		}
+	}
+
 	activeCount := 0
 	for i := 1; i <= 16; i++ {
 		prefix := fmt.Sprintf("Device.Services.FAPService.1.CellConfig.LTE.EPC.MmePoolConfigParam.%d.", i)
@@ -256,34 +272,48 @@ func isSynchronizedValue(v string) bool {
 	return strings.EqualFold(strings.TrimSpace(v), "synchronized") || strings.EqualFold(strings.TrimSpace(v), "synced")
 }
 
+// isCellActiveForIndex 仅处理 LTE/NR 两种 FAPService 路径；GSM 由 hasActiveGSMCell 独立判定。
 func isCellActiveForIndex(params map[string]string, index int) (bool, bool) {
-	ctrlPrefix := fmt.Sprintf("Device.Services.FAPService.%d.FAPControl.", index)
-	lteConfigPrefix := fmt.Sprintf("Device.Services.FAPService.%d.CellConfig.LTE.", index)
-	nrConfigPrefix := fmt.Sprintf("Device.Services.FAPService.%d.CellConfig.NR.", index)
-	nrIndexedConfigPrefix := fmt.Sprintf("Device.Services.FAPService.%d.CellConfig.1.NR.", index)
+	ltePath := fmt.Sprintf("Device.Services.FAPService.%d.FAPControl.LTE.OpState", index)
+	nrPath := fmt.Sprintf("Device.Services.FAPService.1.CellConfig.%d.NR.RAN.OpState", index)
 
-	cellOpState := firstNonEmpty(
-		params[ctrlPrefix+"LTE.CellOpState"],
-		params[ctrlPrefix+"LTE.OpState"],
-		params[lteConfigPrefix+"RAN.Common.CellOpState"],
-		params[nrIndexedConfigPrefix+"RAN.OpState"],
-		params[nrConfigPrefix+"RAN.OpState"],
-		params[ctrlPrefix+"NR.CellOpState"],
-		params[ctrlPrefix+"NR.OpState"],
-		params[nrConfigPrefix+"RAN.Common.CellOpState"],
-	)
+	lteOpStates := []string{params[ltePath]}
+	nrOpStates := []string{params[nrPath]}
 
-	if cellOpState == "" {
+	lteActive, lteObserved := anyOpStateActive(lteOpStates)
+	if lteActive {
+		return true, true
+	}
+
+	nrActive, nrObserved := anyOpStateActive(nrOpStates)
+	if nrActive {
+		return true, true
+	}
+
+	if !(lteObserved || nrObserved) {
 		return false, false
 	}
-	return isTrueValue(cellOpState) || strings.EqualFold(cellOpState, "active"), true
+	return false, true
+}
+
+func anyOpStateActive(values []string) (active bool, observed bool) {
+	for _, cellOpState := range values {
+		trimmed := strings.TrimSpace(cellOpState)
+		if trimmed == "" {
+			continue
+		}
+		observed = true
+		if isTrueValue(trimmed) || strings.EqualFold(trimmed, "active") || strings.EqualFold(trimmed, "enabled") {
+			return true, true
+		}
+	}
+	return false, observed
 }
 
 // hasActiveGSMCell 遍历 GsmBTSCellDT.{i}.OpState 判定是否有 GSM cell active。
 //
-// GSM 制式在 BM (BaseManager) 形态下走 Device.Services.GsmBTSCellDT.{i}.* 对象树,
-// 与 LTE/NR 的 FAPService.{i}.* 体系完全并行。与 detail_assembler.AssembleGSMCells 同口径,
-// 只看带 .InUse=true 的 cell。
+// GSM 制式在 BM (BaseManager) 形态下走 Device.Services.GsmBTSCellDT.{i}.OpState。
+// 仅当 InUse=true 时，该 cell 才算有效并纳入判定；InUse=false 或缺失都不处理。
 //
 // 返回:
 //   - active=true,observed=true   —— 至少一个 GSM cell active
@@ -292,15 +322,13 @@ func isCellActiveForIndex(params map[string]string, index int) (bool, bool) {
 func hasActiveGSMCell(params map[string]string) (active, observed bool) {
 	const prefix = "Device.Services.GsmBTSCellDT."
 
-	// 先扫一遍看是否有 .InUse 表明着是 GSM 设备;同时收集联败 idx 集合
-	hasAnyInUse := false
 	cellIdx := map[int]struct{}{}
 	for path := range params {
 		if !strings.HasPrefix(path, prefix) {
 			continue
 		}
-		if strings.HasSuffix(path, ".InUse") {
-			hasAnyInUse = true
+		if !(strings.HasSuffix(path, ".InUse") || strings.HasSuffix(path, ".OpState")) {
+			continue
 		}
 		rest := strings.TrimPrefix(path, prefix)
 		dot := strings.Index(rest, ".")
@@ -319,13 +347,9 @@ func hasActiveGSMCell(params map[string]string) (active, observed bool) {
 	observed = true
 	for i := range cellIdx {
 		cellPrefix := fmt.Sprintf("%s%d.", prefix, i)
-		// 与 detail_assembler.AssembleGSMCells 一致: 有任何 InUse 信息时按 InUse 过滤,
-		// 跳过未启用 cell。无 InUse 字段时（老设备快照）不过滤。
-		if hasAnyInUse {
-			inUse := strings.TrimSpace(params[cellPrefix+"InUse"])
-			if inUse == "" || (!isTrueValue(inUse) && !strings.EqualFold(inUse, "enabled")) {
-				continue
-			}
+		inUse := strings.TrimSpace(params[cellPrefix+"InUse"])
+		if inUse == "" || (!isTrueValue(inUse) && !strings.EqualFold(inUse, "enabled")) {
+			continue
 		}
 		cellOp := strings.TrimSpace(params[cellPrefix+"OpState"])
 		if cellOp == "" {
@@ -353,6 +377,20 @@ func detectMaxFAPServiceIndexFromMap(params map[string]string) int {
 		index, err := strconv.Atoi(remainder[:dot])
 		if err == nil && index > maxIndex {
 			maxIndex = index
+		}
+
+		const nrPrefix = "Device.Services.FAPService.1.CellConfig."
+		if !strings.HasPrefix(path, nrPrefix) || !strings.Contains(path, ".NR.") {
+			continue
+		}
+		remainder = path[len(nrPrefix):]
+		dot = strings.IndexByte(remainder, '.')
+		if dot <= 0 {
+			continue
+		}
+		cellIndex, err := strconv.Atoi(remainder[:dot])
+		if err == nil && cellIndex > maxIndex {
+			maxIndex = cellIndex
 		}
 	}
 	return maxIndex

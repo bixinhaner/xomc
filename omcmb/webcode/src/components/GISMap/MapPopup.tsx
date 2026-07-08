@@ -209,7 +209,7 @@ const MapPopup: React.FC<MapPopupProps> = ({
               onMouseLeave={() => setAlarmHovered(false)}
             >
               ⚠ {intl.formatMessage({ id: severityCfg.i18nKey })}
-              ({device.highestSeverityAlarmCount ?? device.alarmCount})
+              ({device.highestSeverityAlarmCount || device.alarmCount})
             </span>
           ) : (
             <span style={{ ...alarmBadgeStyle, background: '#F0F0F0', color: '#8C8C8C' }}>0</span>

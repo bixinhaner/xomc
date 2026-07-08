@@ -188,7 +188,7 @@ func TestParameterTreeHandler_UsesDefaultParamModelForTreeAndChildren(t *testing
 		assert.Equal(t, "SN-PARAM-001", payload.Items[1].ParameterValue)
 	})
 
-	t.Run("schema only includes actual parameters", func(t *testing.T) {
+	t.Run("schema includes model-only parameter", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest(
 			http.MethodGet,

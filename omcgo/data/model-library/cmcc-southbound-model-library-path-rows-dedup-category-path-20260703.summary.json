@@ -1,0 +1,16 @@
+{
+  "source_csv": "/Users/a1/Desktop/vscode/goomc/omcgo/data/model-library/cmcc-southbound-model-library-path-rows-20260703.csv",
+  "generated_at": "2026-07-03T08:09:41Z",
+  "dedupe_key": [
+    "category",
+    "path"
+  ],
+  "source_rows": 6195,
+  "output_rows": 2802,
+  "removed_duplicate_rows": 3393,
+  "duplicate_groups": 2313,
+  "unique_path_count": 2802,
+  "category_count": 100,
+  "output_xlsx": "/Users/a1/Desktop/vscode/goomc/omcgo/data/model-library/cmcc-southbound-model-library-path-rows-dedup-category-path-20260703.xlsx",
+  "output_csv": "/Users/a1/Desktop/vscode/goomc/omcgo/data/model-library/cmcc-southbound-model-library-path-rows-dedup-category-path-20260703.csv"
+}

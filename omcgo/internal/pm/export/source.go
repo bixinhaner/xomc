@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/omcgo/omcgo/internal/core/jsonx"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
@@ -67,7 +68,7 @@ func (s *dashboardDeviceSource) Next(ctx context.Context) ([]ExportRow, bool, er
 		var id uuid.UUID
 		var oui, sn, metricPath, metricType, gran string
 		var statis, ldn *string
-		var value float64
+		var value jsonx.Float
 		var tm, st, et time.Time
 		if err := rows.Scan(&id, &oui, &sn, &metricPath, &metricType, &value, &statis, &gran, &tm, &st, &et, &ldn); err != nil {
 			return nil, false, fmt.Errorf("export dashboard device scan %s: %w", s.table, err)
@@ -81,7 +82,7 @@ func (s *dashboardDeviceSource) Next(ctx context.Context) ([]ExportRow, bool, er
 			Time:        tm,
 			StartTime:   st,
 			EndTime:     et,
-			Value:       value,
+			Value:       float64(value),
 			StatisType:  derefStr(statis),
 		})
 		lastTime, lastID = tm, id
@@ -226,7 +227,7 @@ func (s *adhocSource) Next(ctx context.Context) ([]ExportRow, bool, error) {
 		var id uuid.UUID
 		var oui, sn, metricPath, metricType, gran string
 		var statis, ldn, productID, productName, groupName *string
-		var value float64
+		var value jsonx.Float
 		var tm, st, et time.Time
 		// 列序必须与 adhocSelectCols 完全一致：
 		// id, oui, sn, metric_path, metric_type, metric_value, statis_type, granularity,
@@ -256,7 +257,7 @@ func (s *adhocSource) Next(ctx context.Context) ([]ExportRow, bool, error) {
 			Time:        tm,
 			StartTime:   st,
 			EndTime:     et,
-			Value:       value,
+			Value:       float64(value),
 			StatisType:  derefStr(statis),
 		})
 		lastTime, lastID = tm, id
@@ -371,4 +372,3 @@ func ldnAllowSet(ldns []string) map[string]bool {
 	}
 	return m
 }
-

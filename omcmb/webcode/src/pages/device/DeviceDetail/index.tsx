@@ -57,6 +57,8 @@ import ConfirmWithNoteModal from '@/pages/alarm/components/ConfirmWithNoteModal'
 import { formatSystemTime } from '@core/utils/systemTime';
 import { useAppStore } from '@core/store/appStore';
 import { formatDeviceSyncStatus, getDeviceSyncStatusKind, normalizeDeviceSyncStatus } from '@core/utils/deviceSyncStatus';
+import { computeCumulativeOnlineDurationSeconds, computeCurrentOnlineDurationSeconds } from '@core/utils/onlineDuration';
+import { rfStatusLabelOf, rfStatusOf } from '@core/utils/rfStatus';
 
 const { Title, Text } = Typography;
 
@@ -491,25 +493,6 @@ const fmtDuration = (seconds: number | string | undefined | null) => {
   return d > 0 ? `${d}d ${h}h ${m}m` : h > 0 ? `${h}h ${m}m` : `${m}m`;
 };
 
-// T-0173: 计算"总在线时长"。
-//   后端 cumulativeOnlineDuration 字段在 online→offline 边沿才事务性追加,
-//   在线期间它不会随时间增长。展示时把"本次在线区间长度（NOW - onlineTime)
-//   "加上,让用户看到的总时长持续变化。
-//   onlineTime 是 ISO 字符串（device.last_online_time）。
-const computeTotalOnline = (
-  cumulative: number | null | undefined,
-  isOnline: boolean | undefined,
-  onlineTime: string | undefined,
-): number | null => {
-  const cum = typeof cumulative === 'number' ? cumulative : 0;
-  if (!isOnline || !onlineTime) return cum > 0 ? cum : null;
-  const start = Date.parse(onlineTime);
-  if (Number.isNaN(start)) return cum > 0 ? cum : null;
-  const currentSegment = Math.max(0, Math.floor((Date.now() - start) / 1000));
-  const total = cum + currentSegment;
-  return total > 0 ? total : null;
-};
-
 // 状态渲染
 const renderStatusTag = (value: string | undefined, map: Record<string, { label: string; color: string }>) => {
   if (!value) return '-';
@@ -711,13 +694,24 @@ const getOtherFields = (t: ReturnType<typeof useT>, networkType: string, device:
     // 时间信息
     { key: 'onlineTime', label: t('device.onlineTime'), render: (d) => fmtTime(d.onlineTime) },
     { key: 'offlineTime', label: t('device.offlineTime'), render: (d) => fmtTime(d.offlineTime) },
-    { key: 'onlineDuration', label: t('device.onlineDuration'), render: (d) => fmtDuration(d.onlineDuration) },
+    { key: 'onlineDuration', label: t('device.onlineDuration'), render: (d) => fmtDuration(computeCurrentOnlineDurationSeconds({
+      isOnline: d.isOnline,
+      onlineTime: d.onlineTime,
+      offlineTime: d.offlineTime,
+      fallbackOnlineDuration: d.onlineDuration,
+    })) },
     { key: 'upTime', label: t('device.upTime'), render: (d) => fmtDuration(d.upTime) },
     // T-0173: 累计在线时长 = 后端 cumulative_online_duration + 本次在线区间。
     // 在线时由 DeviceStatusReconciler 在 online→offline 边沿才追加,所以前端补一个
     // 当前段 (NOW - onlineTime) 让展示精确到当前。
     { key: 'cumulativeOnlineDuration', label: t('device.cumulativeOnlineDuration'),
-      render: (d) => fmtDuration(computeTotalOnline(d.cumulativeOnlineDuration, d.isOnline, d.onlineTime)) },
+      render: (d) => fmtDuration(computeCumulativeOnlineDurationSeconds({
+        isOnline: d.isOnline,
+        onlineTime: d.onlineTime,
+        offlineTime: d.offlineTime,
+        fallbackOnlineDuration: d.onlineDuration,
+        cumulativeOnlineDuration: d.cumulativeOnlineDuration,
+      })) },
     // T-0173: 离线原因（仅离线时显示有意义,在线时也展示便于追溯上次掉线原因)。
     { key: 'lastOfflineReason', label: t('device.lastOfflineReason'),
       render: (d) => d.lastOfflineReason ? t(`device.lastOfflineReason.${d.lastOfflineReason}`) : '-' },
@@ -821,15 +815,17 @@ const renderCellOpState = (
   return <Tag color={status === 'active' ? 'success' : 'error'}>{label}</Tag>;
 };
 
-const renderCellRfStatus = (value: string | undefined, t: ReturnType<typeof useT>) =>
-  renderStatusTag(value, {
-    on: { label: t('status.rfOn'), color: 'success' },
-    off: { label: t('status.rfOff'), color: 'error' },
-    '1': { label: t('status.rfOn'), color: 'success' },
-    '0': { label: t('status.rfOff'), color: 'error' },
-    true: { label: t('status.rfOn'), color: 'success' },
-    false: { label: t('status.rfOff'), color: 'error' },
-  });
+const renderCellRfStatus = (value: string | undefined, t: ReturnType<typeof useT>) => {
+  const kind = rfStatusOf(value);
+  if (!kind) return '-';
+  const labels = {
+    on: t('status.rfOn'),
+    off: t('status.rfOff'),
+    error: t('status.failed'),
+  };
+  const color = kind === 'on' ? 'success' : 'error';
+  return <Tag color={color}>{rfStatusLabelOf(value, labels)}</Tag>;
+};
 
 const renderCellAdminState = (
   value: string | undefined,
@@ -1179,7 +1175,9 @@ function KPITabContent({ device, t }: KPITabContentProps) {
                       // KPI 算不出、该设备无 KPI 行，泛化「暂无数据」无法区分「指标库未注册」
                       // 与「时段无采样」。其它制式保持通用文案。
                       description={
-                        technology === 'nr'
+                        chart.hasSamples
+                          ? t('device.detail.kpiAllMissing')
+                          : technology === 'nr'
                           ? t('device.detail.kpiNoDataNr')
                           : t('common.noData')
                       }
@@ -1268,12 +1266,13 @@ export default function DeviceDetail() {
   const urlTab = searchParams.get('tab') ?? 'basic';
   const activeTab = urlTab;
   const setActiveTab = useCallback((key: string) => {
+    if (key === urlTab) return;
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
       next.set('tab', key);
       return next;
     }, { replace: true });
-  }, [setSearchParams]);
+  }, [setSearchParams, urlTab]);
 
   // 将设备详情页注册为按 SN 唯一的 TabBar 项。
   // 同一设备复用同 key，并用 path 刷新当前 ?tab=alarm/gps 等深链接；
@@ -1313,6 +1312,16 @@ export default function DeviceDetail() {
     isLoading: quickSettingsLoading,
   } = useQuickSettingsGroups(device?.id);
   const showQuickSettingsTab = !quickSettingsLoading && (quickSettingsData?.groups?.length ?? 0) > 0;
+  useEffect(() => {
+    if (!device?.id) return;
+    if (quickSettingsLoading) return;
+    if (urlTab !== 'quickSettings' || showQuickSettingsTab) return;
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('tab', 'basic');
+      return next;
+    }, { replace: true });
+  }, [device?.id, quickSettingsLoading, setSearchParams, showQuickSettingsTab, urlTab]);
   const [activeBmTech, setActiveBmTech] = useState<BmCellTech>('LTE');
 
   const detailQuickSettingsNetworkType = normalizeQuickSettingsNetworkType(displayDevice?.networkType);
@@ -1371,6 +1380,49 @@ export default function DeviceDetail() {
         break;
       case 'quickSettings':
         if (deviceId) {
+          const hasQuickSettingsDrafts = Object.keys(useQuickSettingsFeedbackStore.getState().drafts)
+            .some((key) => key.startsWith(`${deviceId}::`));
+          if (hasQuickSettingsDrafts) {
+            modal.confirm({
+              title: t('device.detail.quickSettingsRefreshConfirmTitle'),
+              content: t('device.detail.quickSettingsRefreshConfirmContent'),
+              okText: t('common.confirm'),
+              cancelText: t('common.cancel'),
+              onOk: () => {
+                useQuickSettingsFeedbackStore.getState().startQuickSettingsSync(deviceId, {
+                  lastParamSyncAt: paramSyncStatus?.lastParamSyncAt,
+                  lastParamSyncFailedAt: paramSyncStatus?.lastParamSyncFailedAt,
+                  targetCount: quickSettingsSyncTargetPaths.length,
+                  gpvTaskCount: 0,
+                  startedAt: Date.now(),
+                });
+                syncMutation.mutate(
+                  { deviceId, parameterPaths: quickSettingsSyncTargetPaths },
+                  {
+                    onSuccess: (data) => {
+                      const targetCount = data.parameterPathsCount ?? quickSettingsSyncTargetPaths.length;
+                      const gpvTaskCount = data.gpvTaskCount ?? 0;
+                      useQuickSettingsFeedbackStore.getState().patchQuickSettingsSync(deviceId, {
+                        sourceId: data.sourceId,
+                        targetCount,
+                        gpvTaskCount,
+                      });
+                      message.success(targetCount > 0
+                        ? t('device.detail.deviceFetchQueuedScoped', { id: data.sourceId, count: targetCount, gpvCount: gpvTaskCount })
+                        : t('device.detail.deviceFetchQueued', { id: data.sourceId }));
+                      void refetchParamSyncStatus();
+                    },
+                    onError: (err) => {
+                      useQuickSettingsFeedbackStore.getState().finishQuickSettingsSync(deviceId);
+                      const errMsg = err instanceof Error ? err.message : t('device.detail.deviceFetchTriggerFailed');
+                      message.error(errMsg);
+                    },
+                  },
+                );
+              },
+            });
+            break;
+          }
           useQuickSettingsFeedbackStore.getState().startQuickSettingsSync(deviceId, {
             lastParamSyncAt: paramSyncStatus?.lastParamSyncAt,
             lastParamSyncFailedAt: paramSyncStatus?.lastParamSyncFailedAt,
@@ -1406,7 +1458,7 @@ export default function DeviceDetail() {
       default:
         break;
     }
-  }, [activeTab, device?.id, message, paramSyncStatus?.lastParamSyncAt, paramSyncStatus?.lastParamSyncFailedAt, queryClient, quickSettingsSyncTargetPaths, refetch, refetchParamSyncStatus, syncMutation, t]);
+  }, [activeTab, device?.id, message, modal, paramSyncStatus?.lastParamSyncAt, paramSyncStatus?.lastParamSyncFailedAt, queryClient, quickSettingsSyncTargetPaths, refetch, refetchParamSyncStatus, syncMutation, t]);
 
   const SEVERITY_LABEL: Record<string, string> = useMemo(() => ({
     critical: t('alarm.severity.critical'),

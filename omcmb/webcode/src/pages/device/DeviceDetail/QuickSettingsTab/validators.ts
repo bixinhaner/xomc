@@ -50,6 +50,15 @@ export function formatLteBandwidthDisplay(value?: string | null): string {
   return formatEnumDisplayValue(value, undefined, LTE_BANDWIDTH_PATH);
 }
 
+export function validateMmeIpPlmnLimit(
+  rows: Array<{ mmeIp?: string | null; plmn?: string | null }>,
+  max?: number,
+): string | null {
+  if (max === undefined || max <= 0) return null;
+  const count = rows.filter((row) => String(row.mmeIp ?? '').trim() || String(row.plmn ?? '').trim()).length;
+  return count > max ? `最多支持 ${max} 个 MME` : null;
+}
+
 export interface QuickSettingsInstanceContext {
   networkType: string;
   fapInstance: number;

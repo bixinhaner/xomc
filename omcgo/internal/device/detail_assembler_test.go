@@ -219,9 +219,9 @@ func TestAssembleCells_SingleCell(t *testing.T) {
 	assert.Equal(t, 1, cells[0].Index)
 }
 
-// TestAssembleCells_FAPControlPaths verifies Phase 4 mapper fix —
+// TestAssembleCells_FAPControlPaths verifies strict OpState mapping + RF/Admin mapping —
 // 实际上报路径：
-//   - OpState 来自 `FAPControl.LTE.CellOpState`
+//   - OpState 来自 `FAPControl.LTE.OpState`
 //   - RFTxStatus 来自 `FAPControl.LTE.RFTxStatus`（非 RAN.RF 子树）
 //
 // 设计文档 §3.3。
@@ -230,7 +230,7 @@ func TestAssembleCells_FAPControlPaths(t *testing.T) {
 		{ParameterPath: "Device.Services.FAPService.1.CellConfig.LTE.RAN.Common.CellIdentity", ParameterValue: "654321"},
 		{ParameterPath: "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.PhyCellID", ParameterValue: "2"},
 		{ParameterPath: "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.EARFCNDL", ParameterValue: "1500"},
-		{ParameterPath: "Device.Services.FAPService.1.FAPControl.LTE.CellOpState", ParameterValue: "0"},
+		{ParameterPath: "Device.Services.FAPService.1.FAPControl.LTE.OpState", ParameterValue: "false"},
 		{ParameterPath: "Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus", ParameterValue: "false"},
 		{ParameterPath: "Device.Services.FAPService.1.FAPControl.LTE.AdminState", ParameterValue: "false"},
 	}
@@ -240,14 +240,13 @@ func TestAssembleCells_FAPControlPaths(t *testing.T) {
 	assert.Equal(t, "654321", cells[0].ECI)
 	assert.Equal(t, "2", cells[0].PCI)
 	assert.Equal(t, "1500", cells[0].FreqPoint)
-	assert.Equal(t, "0", cells[0].OpState)
+	assert.Equal(t, "false", cells[0].OpState)
 	assert.Equal(t, "false", cells[0].RFTxStatus)
 	assert.Equal(t, "false", cells[0].AdminState)
 }
 
-// TestAssembleCells_LegacyOpStatePath verifies backward compatibility —
-// 老路径 `FAPControl.LTE.OpState` 仍能命中（CellOpState 缺失时兜底）。
-func TestAssembleCells_LegacyOpStatePath(t *testing.T) {
+// TestAssembleCells_LTEOpStatePath verifies strict LTE OpState path.
+func TestAssembleCells_LTEOpStatePath(t *testing.T) {
 	params := []model.DeviceParameter{
 		{ParameterPath: "Device.Services.FAPService.1.FAPControl.LTE.OpState", ParameterValue: "true"},
 	}
@@ -297,7 +296,7 @@ func TestAssembleCells_DetectsHigherFAPServiceIndex(t *testing.T) {
 	params := []model.DeviceParameter{
 		{ParameterPath: "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.PhyCellID", ParameterValue: "11"},
 		{ParameterPath: "Device.Services.FAPService.6.CellConfig.LTE.RAN.RF.PhyCellID", ParameterValue: "66"},
-		{ParameterPath: "Device.Services.FAPService.6.FAPControl.LTE.CellOpState", ParameterValue: "1"},
+		{ParameterPath: "Device.Services.FAPService.6.FAPControl.LTE.OpState", ParameterValue: "1"},
 	}
 
 	// 设备表 num_of_cells 即使是 1，也应按参数路径探测到 6 个实例。
@@ -329,6 +328,69 @@ func TestAssembleCells_NRIndexedPaths(t *testing.T) {
 	assert.Equal(t, "1", cells[0].AdminState)
 	assert.Equal(t, "1153", cells[0].ECI)
 	assert.Equal(t, "", cells[0].Bandwidth)
+}
+
+func TestAssembleCells_NRStrictPathForIndexTwo(t *testing.T) {
+	params := []model.DeviceParameter{
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.2.NR.RAN.OpState", ParameterValue: "true"},
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.2.NR.CN.TA.1.NrcellIdentity", ParameterValue: "2202"},
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.2.NR.RAN.Common.CellLocalId", ParameterValue: "2202"},
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.2.NR.RAN.RF.PhyCellID", ParameterValue: "22"},
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.2.NR.RAN.RF.NRARFCNDL", ParameterValue: "630000"},
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.2.NR.RAN.RF.ChannelBandwidth", ParameterValue: "100"},
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.2.NR.RAN.PHY.FrequencyInfoDLSIB.MultiFrequencyBandListNRSIB.1.FreqBandIndicatorNR", ParameterValue: "78"},
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.2.NR.RAN.rftxEnable", ParameterValue: "1"},
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.2.NR.RAN.CellEnable.AdminState", ParameterValue: "1"},
+	}
+
+	cells := AssembleCells(params, 2)
+	assert.Len(t, cells, 2)
+	assert.Equal(t, "", cells[0].OpState)
+	assert.Equal(t, "2202", cells[1].CellID)
+	assert.Equal(t, "2202", cells[1].ECI)
+	assert.Equal(t, "22", cells[1].PCI)
+	assert.Equal(t, "630000", cells[1].FreqPoint)
+	assert.Equal(t, "100", cells[1].Bandwidth)
+	assert.Equal(t, "78", cells[1].Band)
+	assert.Equal(t, "true", cells[1].OpState)
+	assert.Equal(t, "1", cells[1].RFTxStatus)
+	assert.Equal(t, "1", cells[1].AdminState)
+}
+
+func TestAssembleCells_NRLegacyPathIgnoredForIndexTwo(t *testing.T) {
+	params := []model.DeviceParameter{
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.NR.RAN.OpState", ParameterValue: "true"},
+	}
+
+	cells := AssembleCells(params, 2)
+	assert.Len(t, cells, 2)
+	assert.Equal(t, "", cells[1].OpState)
+}
+
+func TestAssembleCells_NRStatusOnlyPathsDoNotFallbackToLTEOrRU(t *testing.T) {
+	params := []model.DeviceParameter{
+		{ParameterPath: "Device.Services.FAPService.2.FAPControl.LTE.RFTxStatus", ParameterValue: "false"},
+		{ParameterPath: "Device.Services.FAPService.2.FAPControl.LTE.AdminState", ParameterValue: "false"},
+		{ParameterPath: "Device.DeviceInfo.RU.1.RFTxStatus", ParameterValue: "0"},
+		{ParameterPath: "Device.DeviceInfo.RU.2.RFTxStatus", ParameterValue: "0"},
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.2.NR.RAN.rftxEnable", ParameterValue: "1"},
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.2.NR.RAN.CellEnable.AdminState", ParameterValue: "1"},
+	}
+
+	cells := AssembleCells(params, 2)
+	assert.Len(t, cells, 2)
+	assert.Equal(t, "1", cells[1].RFTxStatus)
+	assert.Equal(t, "1", cells[1].AdminState)
+}
+
+func TestAssembleCells_StrictNRPathLiftsDetectedIndex(t *testing.T) {
+	params := []model.DeviceParameter{
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.2.NR.RAN.OpState", ParameterValue: "true"},
+	}
+
+	cells := AssembleCells(params, 1)
+	assert.Len(t, cells, 2)
+	assert.Equal(t, "true", cells[1].OpState)
 }
 
 func TestAssembleGSMCells(t *testing.T) {

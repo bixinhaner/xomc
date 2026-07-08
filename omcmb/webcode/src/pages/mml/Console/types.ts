@@ -43,6 +43,8 @@ export interface CommandItem {
 
 /** 命令绑定的参数路径 */
 export interface CommandParamPath {
+  /** 命令上下文参数码（如 USER_LABEL），脚本 MOD 参数和后端 formValues 均用它索引。 */
+  mmlCode?: string;
   /** TR-069 标准路径（可能含 `.{i}.` 实例占位符） */
   path: string;
   /** 展示用短标签（结果表格列头） */
@@ -53,6 +55,9 @@ export interface CommandParamPath {
   isObject: boolean;
   /** standard_params.min_value：MOD/ADD 填值时该标量参数的默认值 */
   minValue?: number;
+  valueType?: string;
+  defaultValue?: string;
+  description?: string;
 }
 
 /**

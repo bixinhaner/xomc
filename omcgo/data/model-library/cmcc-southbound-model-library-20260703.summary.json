@@ -1,0 +1,18 @@
+{
+  "generated_at": "2026-07-03T07:03:28Z",
+  "row_count": 3913,
+  "unique_primary_path_count": 1874,
+  "unique_normalized_path_count": 1519,
+  "by_model": {
+    "CMCC_5G_EXT_PICO_V1.9.4": 1201,
+    "CMCC_TD_LTE_V2.3": 841,
+    "CMCC_LTE_V2.1": 744,
+    "CMCC_NR_V1.7": 1127
+  },
+  "by_entry_type": {
+    "parameter": 3719,
+    "object": 194
+  },
+  "output_xlsx": "/Users/a1/Desktop/vscode/goomc/omcgo/data/model-library/cmcc-southbound-model-library-20260703.xlsx",
+  "output_csv": "/Users/a1/Desktop/vscode/goomc/omcgo/data/model-library/cmcc-southbound-model-library-20260703.csv"
+}

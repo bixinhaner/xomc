@@ -2,8 +2,11 @@ package aggregator
 
 import (
 	"context"
+	dbsql "database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -36,6 +39,14 @@ func Test_buildCountersSQL_HourlyFromPmMetrics(t *testing.T) {
 	assert.Contains(t, sql, "WHEN 'avg' THEN AVG(m.metric_value)")
 	assert.Contains(t, sql, "WHEN 'max' THEN MAX(m.metric_value)")
 	assert.Contains(t, sql, "WHEN 'min' THEN MIN(m.metric_value)")
+	// 结果值规范化：写入前必须解析指标元数据，并按 unit/statis_type + number 配置处理。
+	assert.Contains(t, sql, "WITH indicator_meta AS")
+	assert.Contains(t, sql, "SELECT id, MIN(unit_id) AS unit_id, MIN(statis_type) AS statis_type")
+	assert.Contains(t, sql, "GROUP BY id")
+	assert.Contains(t, sql, "LEFT JOIN indicator_meta im ON im.id = m.metric_path")
+	assert.Contains(t, sql, "missing PM indicator metadata for")
+	assert.Contains(t, sql, "WHEN btrim(im.unit_id) = 'number'")
+	assert.Contains(t, sql, "btrim($6::text)")
 	// pct/NULL counter 不进聚合
 	assert.Contains(t, sql, "AND m.statis_type IN ('sum','avg','max','min')")
 	// hourly 目标含 id 列（hypertable）
@@ -49,8 +60,8 @@ func Test_buildCountersSQL_HourlyFromPmMetrics(t *testing.T) {
 	assert.Contains(t, sql, "m.object_ldn,", "object_ldn 应原样带入 SELECT")
 	// source 表名正确
 	assert.Contains(t, sql, "FROM pm_metrics m")
-	// args 顺序：granularity / bucket_start / bucket_end / where_start / where_end
-	assert.Equal(t, []any{"hourly", w.Start, w.End, w.Start, w.End}, args)
+	// args 顺序：granularity / bucket_start / bucket_end / where_start / where_end / number_process
+	assert.Equal(t, []any{"hourly", w.Start, w.End, w.Start, w.End, ""}, args)
 }
 
 // #516 分区裁剪：buildCountersSQL 的源筛选必须按**分区列** time 框半开窗口
@@ -104,8 +115,8 @@ func Test_buildCountersSQL_FramesBy_StartTime_AllGranularities(t *testing.T) {
 			// 红：也绝不按 end_time 框桶（旧法导致偏一格）
 			assert.NotContains(t, sql, "AND m.end_time >= $4", "源筛选不应再按 end_time 框桶")
 			assert.NotContains(t, sql, "AND m.end_time <  $5", "源筛选不应再按 end_time 框桶")
-			// args 顺序未变：$4/$5 仍是 w.Start/w.End
-			assert.Equal(t, []any{string(c.gran), w.Start, w.End, w.Start, w.End}, args)
+			// args 顺序：$4/$5 仍是 w.Start/w.End，$6 是 number 处理配置。
+			assert.Equal(t, []any{string(c.gran), w.Start, w.End, w.Start, w.End, ""}, args)
 		})
 	}
 }
@@ -206,6 +217,35 @@ func Test_buildCountersSQL_DailyFromHourly(t *testing.T) {
 	assert.Contains(t, sql, "FROM pm_metrics_hourly m")
 	// granularity 参数
 	assert.Equal(t, "daily", args[0])
+	assert.Equal(t, "", args[5])
+}
+
+func Test_buildCountersSQL_PreservesNullAggregationSemantics(t *testing.T) {
+	w := WindowSpec{
+		Granularity: metrics.GranularityHourly,
+		Start:       time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC),
+		End:         time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),
+	}
+	sql, _ := buildCountersSQL("pm_metrics", "pm_metrics_hourly", w)
+
+	assert.Contains(t, sql, "WHEN 'sum' THEN SUM(m.metric_value)")
+	assert.Contains(t, sql, "WHEN 'avg' THEN AVG(m.metric_value)")
+	assert.Contains(t, sql, "WHEN 'max' THEN MAX(m.metric_value)")
+	assert.Contains(t, sql, "WHEN 'min' THEN MIN(m.metric_value)")
+	assert.NotContains(t, sql, "COALESCE(m.metric_value", "缺值不能在聚合前被当作 0")
+	assert.NotContains(t, sql, "m.metric_value IS NOT NULL", "全 NULL 窗口仍应产出 NULL 聚合行")
+}
+
+func Test_buildCountersSQL_AcceptsNumberProcessArgument(t *testing.T) {
+	w := WindowSpec{
+		Granularity: metrics.GranularityHourly,
+		Start:       time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC),
+		End:         time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),
+	}
+	sql, args := buildCountersSQLWithNumberProcess("pm_metrics", "pm_metrics_hourly", w, "intDown")
+
+	assert.Contains(t, sql, "btrim($6::text)")
+	assert.Equal(t, "intDown", args[5])
 }
 
 func Test_buildCountersSQL_GroupHourlyHasGroupIDConflict(t *testing.T) {
@@ -354,7 +394,7 @@ func Test_AggregateCounters_PassesThroughToExec(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 3, n)
 	assert.Contains(t, db.execSQL, "INSERT INTO pm_metrics_hourly")
-	assert.Equal(t, []any{"hourly", w.Start, w.End, w.Start, w.End}, db.execArgs)
+	assert.Equal(t, []any{"hourly", w.Start, w.End, w.Start, w.End, ""}, db.execArgs)
 }
 
 // #516 死判（设备维度）：第一段 counter 聚合的区间过滤谓词列必须是**分区列** time，
@@ -388,6 +428,11 @@ func Test_buildDeviceGroupSQL_IntervalFilterUsesPartitionColumn_NotStartTime(t *
 		End:         time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),
 	}
 	sql, _ := buildDeviceGroupSQL("pm_metrics_hourly", "pm_group_metrics_hourly", w)
+	assert.Contains(t, sql, "WITH indicator_meta AS")
+	assert.Contains(t, sql, "LEFT JOIN indicator_meta im ON im.id = m.metric_path")
+	assert.Contains(t, sql, "missing PM indicator metadata for")
+	assert.Contains(t, sql, "WHEN btrim(im.unit_id) = 'number'")
+	assert.Contains(t, sql, "btrim($4::text)")
 	assert.Contains(t, sql, "AND m.time >= $2", "区间过滤下界应为分区列 time")
 	assert.Contains(t, sql, "AND m.time <  $3", "区间过滤上界应为分区列 time")
 	assert.NotContains(t, sql, "AND m.start_time >= $2", "区间过滤不应再用非分区列 start_time")
@@ -411,6 +456,24 @@ func Test_AggregateCounters_EmptyWindow_WritesZeroRows_NoError(t *testing.T) {
 	n, err := a.AggregateCounters(context.Background(), "pm_metrics", "pm_metrics_hourly", w)
 	require.NoError(t, err)
 	assert.Equal(t, 0, n, "窗口内无源行应写 0 行")
+}
+
+func Test_AggregateCounters_ReadsNumberProcessBeforeExec(t *testing.T) {
+	db := &stubDB{execTag: pgconn.NewCommandTag("INSERT 0 1")}
+	a := New(db, nil, nil)
+	a.SetNumberProcessLookup(func(ctx context.Context) (string, error) {
+		return "intDown", nil
+	})
+	w := WindowSpec{
+		Granularity: metrics.GranularityHourly,
+		Start:       time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC),
+		End:         time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),
+	}
+
+	_, err := a.AggregateCounters(context.Background(), "pm_metrics", "pm_metrics_hourly", w)
+	require.NoError(t, err)
+	require.Len(t, db.execArgs, 6)
+	assert.Equal(t, "intDown", db.execArgs[5])
 }
 
 // #516 失败/空路径（设备组维度）：窗口内无源行 → AggregateDeviceGroup 返回 (0, nil)。
@@ -468,8 +531,16 @@ func scanInto(row []any, dest []any) error {
 			*dp = row[i].(string)
 		case *float64:
 			*dp = row[i].(float64)
+		case *dbsql.NullFloat64:
+			if row[i] == nil {
+				*dp = dbsql.NullFloat64{}
+			} else {
+				*dp = dbsql.NullFloat64{Float64: row[i].(float64), Valid: true}
+			}
 		case *jsonx.Float:
-			*dp = jsonx.Float(row[i].(float64))
+			if err := dp.Scan(row[i]); err != nil {
+				return err
+			}
 		case *time.Time:
 			*dp = row[i].(time.Time)
 		case **string:
@@ -505,6 +576,36 @@ func scanInto(row []any, dest []any) error {
 	return nil
 }
 
+func Test_queryDeviceTable_NullMetricValueKeepsRowAndSerializesNull(t *testing.T) {
+	now := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
+	db := &recordingDB{
+		results: []pgx.Rows{
+			&fakeRows{rows: [][]any{
+				{
+					"48BF74", "SN-899", "C000010002", "counter", nil,
+					"sum", "15min", now, now, now.Add(15 * time.Minute), now, "Cellid=1", nil,
+				},
+			}},
+		},
+	}
+	a := New(db, nil, nil)
+
+	rows, err := a.queryDeviceTable(context.Background(), "pm_metrics", QueryRequest{
+		Dimension:   DimensionDevice,
+		Granularity: metrics.Granularity15Min,
+		DeviceSNs:   []string{"SN-899"},
+		MetricPaths: []string{"C000010002"},
+		Limit:       10,
+	})
+	require.NoError(t, err)
+	require.Len(t, rows, 1, "metric_value=NULL 的 DB 行仍应作为缺值指标返回")
+	assert.True(t, math.IsNaN(float64(rows[0].MetricValue)), "SQL NULL 应映射为 NaN 供 JSON 层输出 null")
+
+	body, err := json.Marshal(rows[0])
+	require.NoError(t, err)
+	assert.Contains(t, string(body), `"metric_value":null`)
+}
+
 func Test_AggregateKPIs_EvaluatesFormulaAndInserts(t *testing.T) {
 	// device (oui=A, sn=S1) 关联一个 KPI：avail_rate = numerator / denominator
 	rt := &router.KPIRoute{
@@ -512,6 +613,7 @@ func Test_AggregateKPIs_EvaluatesFormulaAndInserts(t *testing.T) {
 			{
 				IndicatorID:  "K1",
 				Name:         "L.Cell.Avail.Rate",
+				Unit:         "%",
 				StatisType:   "pct",
 				Formula:      "numerator / denominator",
 				Dependencies: []string{"numerator", "denominator"},
@@ -567,6 +669,7 @@ func Test_AggregateKPIs_SameDisplayNameUsesDistinctIndicatorID(t *testing.T) {
 			{
 				IndicatorID:  "K900010029",
 				Name:         "RRC连接建立成功率",
+				Unit:         "%",
 				StatisType:   "pct",
 				Formula:      "numerator / denominator",
 				Dependencies: []string{"numerator", "denominator"},
@@ -575,6 +678,7 @@ func Test_AggregateKPIs_SameDisplayNameUsesDistinctIndicatorID(t *testing.T) {
 				// plmn 级变体：显示名完全相同，编号不同
 				IndicatorID:  "K900010059",
 				Name:         "RRC连接建立成功率",
+				Unit:         "%",
 				StatisType:   "pct",
 				Formula:      "numerator / denominator",
 				Dependencies: []string{"numerator", "denominator"},
@@ -615,6 +719,51 @@ func Test_AggregateKPIs_SameDisplayNameUsesDistinctIndicatorID(t *testing.T) {
 	assert.Equal(t, "K900010059", db.execArgs[11])
 	assert.NotEqual(t, db.execArgs[2], db.execArgs[11],
 		"两个同显示名 KPI 的 metric_path 必须按编号区分，否则撞 ON CONFLICT 唯一键")
+}
+
+func Test_AggregateKPIs_NormalizesBeforeInsert(t *testing.T) {
+	rt := &router.KPIRoute{
+		KPIs: []router.KPIDef{
+			{
+				IndicatorID:  "Knumber",
+				Name:         "NumberKPI",
+				Unit:         "number",
+				StatisType:   "avg",
+				Formula:      "numerator / denominator",
+				Dependencies: []string{"numerator", "denominator"},
+			},
+		},
+	}
+	kr := &stubKPIRouter{byDevice: map[string]*router.KPIRoute{"S1": rt}}
+
+	queryCalls := 0
+	db := &stubDB{
+		execTag: pgconn.NewCommandTag("INSERT 0 1"),
+		queryFn: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+			queryCalls++
+			switch queryCalls {
+			case 1:
+				return &fakeRows{rows: [][]any{{"A", "S1", ""}}}, nil
+			case 2:
+				return &fakeRows{rows: [][]any{
+					{"A", "S1", "", "numerator", float64(5)},
+					{"A", "S1", "", "denominator", float64(2)},
+				}}, nil
+			}
+			return nil, errors.New("unexpected Query")
+		},
+	}
+
+	a := New(db, kr, nil)
+	w := WindowSpec{
+		Granularity: metrics.GranularityHourly,
+		Start:       time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC),
+		End:         time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),
+	}
+	_, err := a.AggregateKPIs(context.Background(), "pm_metrics_hourly", w)
+	require.NoError(t, err)
+	require.Len(t, db.execArgs, 9)
+	assert.Equal(t, float64(3), db.execArgs[3], "number KPI 应按默认 intHalfUp 规范化后写入")
 }
 
 // ---------------------------------------------------------------------------
@@ -981,6 +1130,7 @@ func Test_AggregateKPIs_PLMN_OwnRowOnly_MixedFormulaSkipped(t *testing.T) {
 		KPIs: []router.KPIDef{{
 			IndicatorID:  "Kmix",
 			Name:         "Mixed",
+			Unit:         "%",
 			StatisType:   "pct",
 			Formula:      "numerator / denominator",
 			Dependencies: []string{"numerator", "denominator"},
@@ -1034,6 +1184,7 @@ func Test_AggregateKPIs_PureCellKPI_DoesNotLeakToPLMN(t *testing.T) {
 				// 纯小区级 KPI：依赖全在基础小区上报的小区级计数器
 				IndicatorID:  "KcellOnly",
 				Name:         "PureCell",
+				Unit:         "%",
 				StatisType:   "pct",
 				Formula:      "cellNum / cellDen",
 				Dependencies: []string{"cellNum", "cellDen"},
@@ -1042,6 +1193,7 @@ func Test_AggregateKPIs_PureCellKPI_DoesNotLeakToPLMN(t *testing.T) {
 				// 纯 PLMN 级 KPI：依赖全在 PLMN 行上报的 PLMN 级计数器
 				IndicatorID:  "KplmnOnly",
 				Name:         "PurePLMN",
+				Unit:         "%",
 				StatisType:   "pct",
 				Formula:      "plmnNum / plmnDen",
 				Dependencies: []string{"plmnNum", "plmnDen"},
@@ -1105,6 +1257,7 @@ func Test_AggregateKPIs_PLMN_OnlyOwnRowCounters(t *testing.T) {
 		KPIs: []router.KPIDef{{
 			IndicatorID:  "KplmnOnly",
 			Name:         "PurePLMN",
+			Unit:         "%",
 			StatisType:   "pct",
 			Formula:      "plmnNum / plmnDen",
 			Dependencies: []string{"plmnNum", "plmnDen"},
@@ -1225,6 +1378,7 @@ func avilRateRoute() *router.KPIRoute {
 			{
 				IndicatorID:  "K1",
 				Name:         "L.Cell.Avail.Rate",
+				Unit:         "%",
 				StatisType:   "pct",
 				Formula:      "numerator / denominator",
 				Dependencies: []string{"numerator", "denominator"},
@@ -1341,6 +1495,7 @@ func (b *s516FixtureDB) QueryRow(ctx context.Context, sql string, args ...any) p
 // Query 模拟 #516 改后两条 SELECT 的分区列精确过滤：
 //   - listEntities SQL：args = [granularity, bucketHead]，最后一个 arg 即分区列 time 桶头；
 //   - loadCounters SQL：args = [oui, sn, granularity, bucketHead]，最后一个 arg 即分区列 time 桶头。
+//
 // 仅按桶头精确等值（外加 loadCounters 的 oui/sn）过滤夹具，正是 #516 改后 WHERE time = $N 的行为。
 func (b *s516FixtureDB) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
 	// 断言被测 SQL 确实用分区列 time 精确等值、且不含桶尾时刻列 end_time（守住改动方向）。
@@ -1441,6 +1596,41 @@ func Test_loadCountersByObjectLdn_DoesNotLeakToAdjacentBuckets(t *testing.T) {
 	assert.Len(t, byLdn, 2, "目标桶恰两个实体计数器，无相邻桶混入")
 }
 
+func Test_loadCountersByObjectLdn_SkipsNullMetricValues(t *testing.T) {
+	bucket := time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC)
+	db := &recordingDB{results: []pgx.Rows{&fakeRows{rows: [][]any{
+		{"Cellid=1", "C-null", nil},
+		{"Cellid=1", "C-real", 42.0},
+	}}}}
+	a := New(db, nil, nil)
+
+	byLdn, err := a.loadCountersByObjectLdn(context.Background(), "pm_metrics_hourly", "A", "S1",
+		WindowSpec{Granularity: metrics.GranularityHourly, Start: bucket, End: bucket.Add(time.Hour)})
+
+	require.NoError(t, err)
+	require.Contains(t, byLdn, "Cellid=1")
+	assert.NotContains(t, byLdn["Cellid=1"], "C-null", "NULL counter 应按缺依赖处理，不进入 KPI 入参")
+	assert.Equal(t, 42.0, byLdn["Cellid=1"]["C-real"])
+}
+
+func Test_loadCountersForDevices_SkipsNullMetricValues(t *testing.T) {
+	bucket := time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC)
+	db := &recordingDB{results: []pgx.Rows{&fakeRows{rows: [][]any{
+		{"A", "S1", "Cellid=1", "C-null", nil},
+		{"A", "S1", "Cellid=1", "C-real", 7.0},
+	}}}}
+	a := New(db, nil, nil)
+
+	byDevice, err := a.loadCountersForDevices(context.Background(), "pm_metrics_hourly", []deviceKey{{"A", "S1"}},
+		WindowSpec{Granularity: metrics.GranularityHourly, Start: bucket, End: bucket.Add(time.Hour)})
+
+	require.NoError(t, err)
+	byLdn := byDevice[deviceKey{"A", "S1"}]
+	require.Contains(t, byLdn, "Cellid=1")
+	assert.NotContains(t, byLdn["Cellid=1"], "C-null", "NULL counter 应按缺依赖处理，不进入 KPI 入参")
+	assert.Equal(t, 7.0, byLdn["Cellid=1"]["C-real"])
+}
+
 // ===========================================================================
 // #516 阶段3：第二段 N+1 批量化 —— 调用形状 / 等价 / 分批控内存 / 失败路径
 //
@@ -1453,13 +1643,13 @@ func Test_loadCountersByObjectLdn_DoesNotLeakToAdjacentBuckets(t *testing.T) {
 // s3RecordingDB 记录每次 Query / Exec 的 SQL 与 args，供断言"调用形状/批数/单条行数"。
 // counters：deviceKey → object_ldn → metric_path → value（整桶真实数据，按桶头 time 过滤）。
 type s3RecordingDB struct {
-	entities  []entityKey                                  // 本桶实体（listEntitiesInBucket 返回）
+	entities  []entityKey                                 // 本桶实体（listEntitiesInBucket 返回）
 	counters  map[deviceKey]map[string]map[string]float64 // 整桶计数器
-	loadSQLs  []string                                     // 每次"取计数器"查询的 SQL
-	loadArgs  [][]any                                      // 每次"取计数器"查询的 args
-	execSQLs  []string                                     // 每次 KPI 写入的 SQL
-	execArgs  [][]any                                      // 每次 KPI 写入的 args
-	listCount int                                          // listEntitiesInBucket 调用次数
+	loadSQLs  []string                                    // 每次"取计数器"查询的 SQL
+	loadArgs  [][]any                                     // 每次"取计数器"查询的 args
+	execSQLs  []string                                    // 每次 KPI 写入的 SQL
+	execArgs  [][]any                                     // 每次 KPI 写入的 args
+	listCount int                                         // listEntitiesInBucket 调用次数
 }
 
 func (db *s3RecordingDB) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
@@ -1554,8 +1744,8 @@ func Test_AggregateKPIs_S3_EquivalentRowSet_BeforeAfterBatching(t *testing.T) {
 
 	// 混合数据：两设备、各含基础小区 + 两 PLMN（覆盖跨层级配对 + 自身门槛），纯小区级 + 纯 PLMN 级 KPI。
 	route := &router.KPIRoute{KPIs: []router.KPIDef{
-		{IndicatorID: "KcellOnly", Name: "PureCell", StatisType: "pct", Formula: "cellNum / cellDen", Dependencies: []string{"cellNum", "cellDen"}},
-		{IndicatorID: "KplmnOnly", Name: "PurePLMN", StatisType: "pct", Formula: "plmnNum / plmnDen", Dependencies: []string{"plmnNum", "plmnDen"}},
+		{IndicatorID: "KcellOnly", Name: "PureCell", Unit: "%", StatisType: "pct", Formula: "cellNum / cellDen", Dependencies: []string{"cellNum", "cellDen"}},
+		{IndicatorID: "KplmnOnly", Name: "PurePLMN", Unit: "%", StatisType: "pct", Formula: "plmnNum / plmnDen", Dependencies: []string{"plmnNum", "plmnDen"}},
 	}}
 	counters := map[deviceKey]map[string]map[string]float64{
 		{"A", "S1"}: {
@@ -1583,7 +1773,9 @@ func Test_AggregateKPIs_S3_EquivalentRowSet_BeforeAfterBatching(t *testing.T) {
 	for _, ent := range entities {
 		byLdn := counters[deviceKey{ent.oui, ent.sn}]
 		c := countersForEntity(byLdn, ent.objectLdn)
-		for _, r := range refA.evalKPIs(ent, route.KPIs, c) {
+		rows, err := refA.evalKPIs(ent, route.KPIs, c, "")
+		require.NoError(t, err)
+		for _, r := range rows {
 			want[kpiKey{ent.oui, ent.sn, ent.objectLdn, r.path}] = r.value
 		}
 	}
