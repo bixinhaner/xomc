@@ -8,10 +8,10 @@ OMC（Operations, Management and Control）是面向小基站 / 皮基站 / 微�
 
 ## 仓库边界
 
-- 仓库根目录是 `goomc/`，所有 git 操作在根目录执行。
+- 仓库根目录是 `xomc/`，所有 git 操作在根目录执行。
 - `omcgo/` 是 Go 后端源码目录，不是独立 git 仓库。
 - `omcmb/` 是前端源码目录，不是独立 git 仓库。
-- `AGENTS.md`、`.codex/`、`.agents/` 等本机 AI 配置默认视为本地文件，不加入 git、不提交、不进 PR，除非用户明确要求。
+- `AGENTS.md`、`.codex/`、`.agents/` 等本机 AI 配置默认视为本地文件，不加入 git、不提交、不进 MR，除非用户明确要求。
 
 ## 重要入口
 
@@ -82,7 +82,7 @@ codex plugin marketplace add .agents/plugins
 
 以下场景通常会被 sandbox 限制；需要执行时默认直接按权限规则提权，不先故意试错再重试。
 
-- GitHub 相关 `gh issue` / `gh pr`、`git push` 需要网络，直接提权执行。
+- GitLab 相关 `glab issue` / `glab mr`、`git push` 需要网络，直接提权执行。
 - Docker socket、Compose 部署、可见 Chrome / CDP、访问本机部署端口通常需要提权，直接提权执行。
 - `go test ./...` 中涉及 `miniredis` / `httptest` 本地监听时，普通 sandbox 可能报 `bind: operation not permitted`；直接提权复跑以区分环境问题和真实测试失败。
 
