@@ -1403,7 +1403,7 @@ const messages: Record<string, string> = {
   'device.csv.column.macAddress':     'MAC Address',
   'device.csv.column.deviceGrouping': 'Device Group',
   'device.csv.column.sourceType':     'Source',
-  'device.csv.template.comment':      '# Required: {required} | Optional: {optional} | Note: Match registered devices by SN, update name/remark and assign to current group; rows with non-existent SN will fail',
+  'device.csv.template.comment':      '# Required: {required} | Optional: {optional} | Note: Match registered devices by SN, update name/remark only (group membership is not changed); rows with non-existent SN will fail',
   // Batch import backend error codes
   'device.batchImport.error.device_not_found':    'Device not found (import only updates registered devices, assigning to current group)',
   'device.batchImport.error.update_name_failed':  'Update device name failed',
