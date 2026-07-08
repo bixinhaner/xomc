@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
@@ -67,6 +68,16 @@ func (u *stubUploader) PutObject(_ context.Context, _, _ string, reader io.Reade
 		return minio.UploadInfo{}, u.uploadErr
 	}
 	return minio.UploadInfo{Size: int64(len(b))}, nil
+}
+
+type stubTimezoneProvider struct {
+	loc   *time.Location
+	calls int
+}
+
+func (s *stubTimezoneProvider) Location(_ context.Context) *time.Location {
+	s.calls++
+	return s.loc
 }
 
 // sliceSource 把固定批次的 ExportRow 当成 RowSource（测试用）。
@@ -154,6 +165,71 @@ func TestRunner_Run_Success(t *testing.T) {
 	var res map[string]any
 	require.NoError(t, json.Unmarshal(out, &res))
 	assert.Equal(t, "succeeded", res["status"])
+}
+
+func TestRunner_Run_FormatsCSVTimesInTimezoneProviderLocation(t *testing.T) {
+	task := newTestTask(SourceDashboard)
+	repo := &stubTaskRepo{task: task}
+	up := &stubUploader{}
+	shanghai, err := time.LoadLocation("Asia/Shanghai")
+	require.NoError(t, err)
+	tzp := &stubTimezoneProvider{loc: shanghai}
+	r := NewRunner(RunnerDeps{Repo: repo, Uploader: up, Bucket: "reports", TimezoneProvider: tzp})
+	start := time.Date(2026, 6, 4, 10, 0, 0, 0, time.UTC)
+	r.buildSourceFn = func(_ context.Context, _ *Task) (RowSource, []WideColumn, csvLayout, error) {
+		return &sliceSource{batches: [][]ExportRow{{
+				{Device: "SN1", MetricCode: "K001", Time: start, StartTime: start, EndTime: start.Add(time.Hour), Value: 1},
+			}}},
+			[]WideColumn{{Code: "K001", Type: "kpi", Name: "上行吞吐"}},
+			csvLayout{FirstColHeader: "设备", IncludeCell: true}, nil
+	}
+
+	payload, _ := BuildJobPayload(task.ID)
+	_, err = r.Run(context.Background(), &asyncjob.Job{Payload: payload})
+	require.NoError(t, err)
+
+	row := nthCSVRow(t, up.gotBody, 1)
+	assert.Equal(t, "2026-06-04 18:00:00", row[0])
+	assert.Equal(t, "2026-06-04 19:00:00", row[1])
+	assert.Equal(t, 1, tzp.calls)
+}
+
+func TestRunner_Run_NilTimezoneFallsBackToUTC(t *testing.T) {
+	tests := []struct {
+		name string
+		deps RunnerDeps
+	}{
+		{name: "nil provider", deps: RunnerDeps{}},
+		{name: "nil location", deps: RunnerDeps{TimezoneProvider: &stubTimezoneProvider{}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			task := newTestTask(SourceDashboard)
+			repo := &stubTaskRepo{task: task}
+			up := &stubUploader{}
+			tt.deps.Repo = repo
+			tt.deps.Uploader = up
+			tt.deps.Bucket = "reports"
+			r := NewRunner(tt.deps)
+			start := time.Date(2026, 6, 4, 10, 0, 0, 0, time.UTC)
+			r.buildSourceFn = func(_ context.Context, _ *Task) (RowSource, []WideColumn, csvLayout, error) {
+				return &sliceSource{batches: [][]ExportRow{{
+						{Device: "SN1", MetricCode: "K001", Time: start, StartTime: start, EndTime: start.Add(time.Hour), Value: 1},
+					}}},
+					[]WideColumn{{Code: "K001", Type: "kpi", Name: "上行吞吐"}},
+					csvLayout{FirstColHeader: "设备", IncludeCell: true}, nil
+			}
+
+			payload, _ := BuildJobPayload(task.ID)
+			_, err := r.Run(context.Background(), &asyncjob.Job{Payload: payload})
+			require.NoError(t, err)
+
+			row := nthCSVRow(t, up.gotBody, 1)
+			assert.Equal(t, "2026-06-04 10:00:00", row[0])
+			assert.Equal(t, "2026-06-04 11:00:00", row[1])
+		})
+	}
 }
 
 // ── 失败路径：取数报错 → MarkFailed + error 落库，job 不重试（返回 nil） ───────

@@ -81,6 +81,51 @@ func TestWideCSVWriter_PivotSameKey(t *testing.T) {
 	assert.Equal(t, "2.5", row[6])                 // C002 列
 }
 
+func TestWideCSVWriter_FormatsTimeInOutputLocation(t *testing.T) {
+	var buf bytes.Buffer
+	shanghai, err := time.LoadLocation("Asia/Shanghai")
+	require.NoError(t, err)
+	cw, err := newWideCSVWriterWithLocation(&buf, "设备 SN", false, true, wideTestCols(), "", shanghai)
+	require.NoError(t, err)
+
+	start := time.Date(2026, 6, 4, 10, 0, 0, 0, time.UTC)
+	end := start.Add(time.Hour)
+	require.NoError(t, cw.AddRow(ExportRow{
+		Device:     "SN1",
+		MetricCode: "K001",
+		Time:       start,
+		StartTime:  start,
+		EndTime:    end,
+		Value:      1,
+	}))
+	require.NoError(t, cw.Flush())
+
+	row := nthCSVRow(t, buf.Bytes(), 1)
+	assert.Equal(t, "2026-06-04 18:00:00", row[0])
+	assert.Equal(t, "2026-06-04 19:00:00", row[1])
+}
+
+func TestWideCSVWriter_NilOutputLocationFallsBackToUTC(t *testing.T) {
+	var buf bytes.Buffer
+	cw, err := newWideCSVWriterWithLocation(&buf, "设备 SN", false, true, wideTestCols(), "", nil)
+	require.NoError(t, err)
+
+	start := time.Date(2026, 6, 4, 10, 0, 0, 0, time.UTC)
+	require.NoError(t, cw.AddRow(ExportRow{
+		Device:     "SN1",
+		MetricCode: "K001",
+		Time:       start,
+		StartTime:  start,
+		EndTime:    start.Add(time.Hour),
+		Value:      1,
+	}))
+	require.NoError(t, cw.Flush())
+
+	row := nthCSVRow(t, buf.Bytes(), 1)
+	assert.Equal(t, "2026-06-04 10:00:00", row[0])
+	assert.Equal(t, "2026-06-04 11:00:00", row[1])
+}
+
 // 某指标在该行键缺值，默认保持 CSV 空单元格。
 func TestWideCSVWriter_MissingMetricDefaultEmptyCell(t *testing.T) {
 	var buf bytes.Buffer

@@ -163,6 +163,21 @@ func newTzManagerWithProvider(p *systimezone.Provider) *tzManager {
 	return m
 }
 
+func TestExportTimezoneProvider_UsesTzManagerProvider(t *testing.T) {
+	sf := &stubFetcher{}
+	sf.set("Asia/Shanghai")
+	m := newTzManagerWithProvider(systimezone.New(sf.fetch, nil))
+
+	got := exportTimezoneProvider(m)
+	require.NotNil(t, got)
+	require.Equal(t, "Asia/Shanghai", got.Location(context.Background()).String())
+}
+
+func TestExportTimezoneProvider_NilSafe(t *testing.T) {
+	require.Nil(t, exportTimezoneProvider(nil))
+	require.Nil(t, exportTimezoneProvider(&tzManager{}))
+}
+
 // 验收 5（改）：业务时区改读 sys_configs 统一源；空/非法回落 UTC 不 panic。
 func TestTzManager_ResolveFromSysConfig_FallbackUTC(t *testing.T) {
 	ctx := context.Background()
