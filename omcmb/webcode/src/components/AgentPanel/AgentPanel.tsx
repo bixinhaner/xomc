@@ -117,6 +117,25 @@ function AssistantContent({ message }: { message: AgentPanelMessage }) {
   );
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function restInput(input: unknown) {
+  if (!isRecord(input)) return null;
+  const method = typeof input.method === 'string' ? input.method.toUpperCase() : '';
+  const path = typeof input.path === 'string' ? input.path : '';
+  if (!method || !path) return null;
+  return {
+    method,
+    path,
+    operationId: typeof input.operationId === 'string' ? input.operationId : '',
+    query: isRecord(input.query) ? input.query : {},
+    body: input.body,
+    reason: typeof input.reason === 'string' ? input.reason : '',
+  };
+}
+
 function ActivityCard({
   activity,
   isPending,
@@ -131,24 +150,37 @@ function ActivityCard({
   onCancel: () => void;
 }) {
   const t = useT();
-  const input = activity.request?.input ?? {};
-  const inputRows = Object.entries(input);
+  const rawInput = activity.request?.input ?? activity.input ?? {};
+  const rest = restInput(rawInput);
+  const inputRows = Object.entries(rest?.query ?? (isRecord(rawInput) ? rawInput : {}));
   const resultRows = extractAgentRows(activity.output ?? activity.preview, 6);
   const isError = activity.status === 'error';
   const isActive = activity.status === 'calling' || activity.status === 'running' || isPending;
+  const isRead = rest?.method === 'GET' || activity.risk === 'read';
 
   return (
     <section className={`${styles.activity} ${isActive ? styles.activityActive : ''}`}>
       <div className={styles.activityHeader}>
         <span className={styles.activityTitle}>
-          <ThunderboltOutlined /> {activity.status === 'preview' ? t('agent.actionPreview') : t('agent.callingTool')}
+          <ThunderboltOutlined /> {rest ? rest.path : activity.status === 'preview' ? t('agent.actionPreview') : t('agent.callingTool')}
         </span>
-        <span className={styles.readOnly}>{t('agent.readOnly')}</span>
+        <span className={isRead ? styles.readOnly : styles.writeMode}>
+          {isRead ? t('agent.readOnly') : t('agent.writeMode')}
+        </span>
       </div>
+      {rest && (
+        <div className={styles.restMeta}>
+          <span className={`${styles.methodPill} ${rest.method === 'GET' ? styles.methodGet : styles.methodWrite}`}>
+            {rest.method}
+          </span>
+          <span>{t('agent.operationId')}: {rest.operationId || '-'}</span>
+        </div>
+      )}
       <div className={styles.metaRow}>
         <span>{t('agent.tool')}</span>
         <strong>{activity.request?.actionId || activity.title}</strong>
       </div>
+      {rest?.reason && <p className={styles.summary}>{rest.reason}</p>}
       {activity.summary && <p className={styles.summary}>{activity.summary}</p>}
       {inputRows.length > 0 && (
         <div className={styles.tableBlock}>
@@ -165,7 +197,7 @@ function ActivityCard({
           </table>
         </div>
       )}
-      <div className={styles.policy}>{t('agent.readOnlyPolicy')}</div>
+      <div className={styles.policy}>{isRead ? t('agent.readOnlyPolicy') : t('agent.writePolicy')}</div>
       {isPending && (
         <div className={styles.actions}>
           <button type="button" className={styles.primaryBtn} disabled={isStreaming} onClick={onExecute}>

@@ -336,17 +336,27 @@ type AgentDraft = {
   enabled: boolean
   agentStudioBaseUrl: string
   agentStudioServiceToken: string
-  omcPublicBaseUrl: string
   connectorSlug: string
+  allowedMethods: string[]
+  blockedPathPrefixes: string[]
+  toolTimeoutSeconds: number
+  maxResponseBytes: number
 }
+
+const METHOD_OPTIONS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
+const READ_ONLY_METHODS = ['GET']
+const WRITE_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
 
 function agentDraftFromConfig(config: ReturnType<typeof useAdminAgentConfig>['data']): AgentDraft {
   return {
     enabled: Boolean(config?.enabled),
     agentStudioBaseUrl: config?.agentStudioBaseUrl ?? '',
     agentStudioServiceToken: '',
-    omcPublicBaseUrl: config?.omcPublicBaseUrl ?? '',
     connectorSlug: config?.connectorSlug ?? '',
+    allowedMethods: config?.policy.allowedMethods?.length ? config.policy.allowedMethods : READ_ONLY_METHODS,
+    blockedPathPrefixes: config?.policy.blockedPathPrefixes ?? [],
+    toolTimeoutSeconds: config?.policy.toolTimeoutSeconds ?? 30,
+    maxResponseBytes: config?.policy.maxResponseBytes ?? 262144,
   }
 }
 
@@ -379,8 +389,11 @@ function AgentConfigEditor() {
       enabled: draft.enabled,
       agentStudioBaseUrl: draft.agentStudioBaseUrl.trim(),
       agentStudioServiceToken: token || undefined,
-      omcPublicBaseUrl: draft.omcPublicBaseUrl.trim(),
       connectorSlug: draft.connectorSlug.trim() || undefined,
+      allowedMethods: draft.allowedMethods.length ? draft.allowedMethods : READ_ONLY_METHODS,
+      blockedPathPrefixes: draft.blockedPathPrefixes,
+      toolTimeoutSeconds: draft.toolTimeoutSeconds,
+      maxResponseBytes: draft.maxResponseBytes,
     }
   }
 
@@ -392,6 +405,7 @@ function AgentConfigEditor() {
   const busy = saveM.isPending || testM.isPending || syncM.isPending
   const mutationError = saveM.error || testM.error || syncM.error
   const mutationErrorText = mutationError instanceof Error ? mutationError.message : ''
+  const executionMode = draft.allowedMethods.some((method) => method !== 'GET') ? 'write' : 'read'
 
   if (configQ.isLoading) {
     return (
@@ -472,16 +486,44 @@ function AgentConfigEditor() {
             />
           </div>
           <AgentInputRow
-            label={t('system.agent.omcPublicBaseUrl')}
-            value={draft.omcPublicBaseUrl}
-            onChange={(value) => patch({ omcPublicBaseUrl: value })}
-            placeholder="https://ops.example.com"
-          />
-          <AgentInputRow
             label={t('system.agent.connectorSlug')}
             value={draft.connectorSlug ?? ''}
             onChange={(value) => patch({ connectorSlug: value })}
             placeholder="external-agent-..."
+          />
+          <AgentModeRow
+            label={t('system.agent.executionMode')}
+            value={executionMode}
+            readLabel={t('system.agent.readOnlyMode')}
+            writeLabel={t('system.agent.writeMode')}
+            onChange={(value) => patch({ allowedMethods: value === 'write' ? WRITE_METHODS : READ_ONLY_METHODS })}
+          />
+          <AgentMethodsRow
+            label={t('system.agent.allowedMethods')}
+            value={draft.allowedMethods}
+            onChange={(value) => patch({ allowedMethods: value.length ? value : READ_ONLY_METHODS })}
+          />
+          <AgentNumberRow
+            label={t('system.agent.maxResponseBytes')}
+            value={draft.maxResponseBytes}
+            min={4096}
+            max={4194304}
+            step={4096}
+            onChange={(value) => patch({ maxResponseBytes: value })}
+          />
+          <AgentNumberRow
+            label={t('system.agent.toolTimeoutSeconds')}
+            value={draft.toolTimeoutSeconds}
+            min={1}
+            max={300}
+            step={1}
+            onChange={(value) => patch({ toolTimeoutSeconds: value })}
+          />
+          <AgentTextAreaRow
+            label={t('system.agent.blockedPathPrefixes')}
+            value={draft.blockedPathPrefixes.join('\n')}
+            onChange={(value) => patch({ blockedPathPrefixes: value.split(/[\n,]+/).map((item) => item.trim()).filter(Boolean) })}
+            placeholder="/api/v1/auth/*"
           />
           <ReadonlyRow
             label={t('system.agent.connectorId')}
@@ -539,6 +581,103 @@ function AgentInputRow(props: {
         value={props.value}
         placeholder={props.placeholder}
         onChange={(event) => props.onChange(event.target.value)}
+      />
+    </div>
+  )
+}
+
+function AgentModeRow(props: {
+  label: string
+  value: 'read' | 'write'
+  readLabel: string
+  writeLabel: string
+  onChange(value: 'read' | 'write'): void
+}) {
+  return (
+    <div className="grid gap-2 px-4 py-3 md:grid-cols-[240px_1fr] md:items-center">
+      <Label>{props.label}</Label>
+      <div className="inline-flex w-fit rounded-md border bg-muted/30 p-1">
+        {([
+          ['read', props.readLabel],
+          ['write', props.writeLabel],
+        ] as const).map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            className={`rounded px-3 py-1.5 text-xs font-medium ${props.value === value ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'}`}
+            onClick={() => props.onChange(value)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function AgentMethodsRow(props: { label: string; value: string[]; onChange(value: string[]): void }) {
+  return (
+    <div className="grid gap-2 px-4 py-3 md:grid-cols-[240px_1fr] md:items-center">
+      <Label>{props.label}</Label>
+      <div className="flex flex-wrap gap-3 text-sm">
+        {METHOD_OPTIONS.map((method) => (
+          <label key={method} className="inline-flex items-center gap-2">
+            <input
+              type="checkbox"
+              className="size-4 accent-primary"
+              checked={props.value.includes(method)}
+              onChange={(event) => {
+                const next = event.target.checked
+                  ? [...props.value, method]
+                  : props.value.filter((item) => item !== method)
+                props.onChange(METHOD_OPTIONS.filter((item) => next.includes(item)))
+              }}
+            />
+            {method}
+          </label>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function AgentNumberRow(props: {
+  label: string
+  value: number
+  min: number
+  max: number
+  step: number
+  onChange(value: number): void
+}) {
+  return (
+    <div className="grid gap-2 px-4 py-3 md:grid-cols-[240px_1fr] md:items-center">
+      <Label>{props.label}</Label>
+      <Input
+        type="number"
+        value={props.value}
+        min={props.min}
+        max={props.max}
+        step={props.step}
+        onChange={(event) => props.onChange(Math.min(props.max, Math.max(props.min, Number(event.target.value) || props.min)))}
+      />
+    </div>
+  )
+}
+
+function AgentTextAreaRow(props: {
+  label: string
+  value: string
+  placeholder?: string
+  onChange(value: string): void
+}) {
+  return (
+    <div className="grid gap-2 px-4 py-3 md:grid-cols-[240px_1fr]">
+      <Label>{props.label}</Label>
+      <textarea
+        value={props.value}
+        placeholder={props.placeholder}
+        onChange={(event) => props.onChange(event.target.value)}
+        className="min-h-20 rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
       />
     </div>
   )

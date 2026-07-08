@@ -35,7 +35,8 @@
 
 .connected,
 .disconnected,
-.readOnly {
+.readOnly,
+.writeMode {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -58,6 +59,11 @@
 .readOnly {
   border: 1px solid rgba(24, 144, 255, 0.35);
   color: #69b1ff;
+}
+
+.writeMode {
+  border: 1px solid rgba(250, 173, 20, 0.36);
+  color: #ffc53d;
 }
 
 .liveDot {
@@ -612,10 +618,41 @@
 }
 
 .activityTitle {
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 8px;
   font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.restMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 14px 0;
+  color: #9aa6b6;
+  font-size: 12px;
+}
+
+.methodPill {
+  min-width: 44px;
+  border-radius: 6px;
+  font-family: SFMono-Regular, Consolas, 'Liberation Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 22px;
+  text-align: center;
+}
+
+.methodGet {
+  background: rgba(82, 196, 26, 0.16);
+  color: #73d13d;
+}
+
+.methodWrite {
+  background: rgba(250, 173, 20, 0.16);
+  color: #ffc53d;
 }
 
 .metaRow,

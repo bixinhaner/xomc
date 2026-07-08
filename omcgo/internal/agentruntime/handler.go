@@ -1,8 +1,10 @@
 package agentruntime
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -30,9 +32,10 @@ type Handler struct {
 	jwt    *admin.JWTService
 	http   HTTPDoer
 	logger *zap.Logger
+	tools  *ToolExecutor
 }
 
-func NewHandler(config ConfigProvider, jwtService *admin.JWTService, httpClient HTTPDoer, logger *zap.Logger) *Handler {
+func NewHandler(config ConfigProvider, jwtService *admin.JWTService, httpClient HTTPDoer, logger *zap.Logger, localHandler http.Handler, routes RouteProvider) *Handler {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
@@ -44,6 +47,7 @@ func NewHandler(config ConfigProvider, jwtService *admin.JWTService, httpClient 
 		jwt:    jwtService,
 		http:   httpClient,
 		logger: logger.Named("agentruntime"),
+		tools:  NewToolExecutor(localHandler, routes, jwtService),
 	}
 }
 
@@ -80,6 +84,7 @@ func (h *Handler) ChatStream(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, fmt.Errorf("read agent chat body: %w", err))
 		return
 	}
+	rawBody = injectExternalIdentity(rawBody, claims)
 	delegationToken, _, err := h.jwt.GenerateAgentDelegationToken(claims)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
@@ -121,7 +126,7 @@ func (h *Handler) ChatStream(c *gin.Context) {
 	c.Writer.Header().Set("Connection", "keep-alive")
 	c.Writer.Header().Set("X-Accel-Buffering", "no")
 	c.Status(http.StatusOK)
-	streamBody(c.Writer, resp.Body, h.logger)
+	h.streamAgentStudioResponse(c.Request.Context(), c.Writer, resp.Body, claims, delegationToken, target)
 }
 
 func currentClaims(c *gin.Context) (*admin.Claims, bool) {
@@ -134,6 +139,10 @@ func buildActionConnectorStreamURL(baseURL, connectorID string) string {
 	return strings.TrimRight(baseURL, "/") + "/api/action-connectors/" + url.PathEscape(connectorID) + "/chat/stream"
 }
 
+func buildToolResultURL(baseURL, connectorID string) string {
+	return strings.TrimRight(baseURL, "/") + "/api/action-connectors/" + url.PathEscape(connectorID) + "/tool-results"
+}
+
 func copyHeader(dst http.Header, src http.Header, key string) {
 	value := src.Get(key)
 	if value == "" {
@@ -142,26 +151,157 @@ func copyHeader(dst http.Header, src http.Header, key string) {
 	dst.Set(key, value)
 }
 
-func streamBody(w gin.ResponseWriter, body io.Reader, logger *zap.Logger) {
+type sseFrame struct {
+	raw       string
+	eventName string
+	data      string
+}
+
+func injectExternalIdentity(raw []byte, claims *admin.Claims) []byte {
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return raw
+	}
+	contextValue, _ := payload["context"].(map[string]any)
+	if contextValue == nil {
+		contextValue = map[string]any{}
+	}
+	contextValue["externalIdentity"] = map[string]any{
+		"externalUserId":   claims.UserID.String(),
+		"externalUserName": claims.Username,
+		"username":         claims.Username,
+		"roles":            claims.Roles,
+		"scopes":           claims.Scopes,
+	}
+	payload["context"] = contextValue
+	next, err := json.Marshal(payload)
+	if err != nil {
+		return raw
+	}
+	return next
+}
+
+func parseSSEFrame(raw string) sseFrame {
+	frame := sseFrame{raw: raw}
+	lines := strings.Split(raw, "\n")
+	dataLines := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSuffix(line, "\r")
+		if strings.HasPrefix(line, "event:") {
+			frame.eventName = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+			continue
+		}
+		if strings.HasPrefix(line, "data:") {
+			dataLines = append(dataLines, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
+		}
+	}
+	frame.data = strings.Join(dataLines, "\n")
+	return frame
+}
+
+func toolRequestFromFrame(frame sseFrame) (ToolRequest, bool) {
+	if frame.data == "" || frame.data == "[DONE]" {
+		return ToolRequest{}, false
+	}
+	var envelope struct {
+		Type       string          `json:"type"`
+		RunID      string          `json:"runId"`
+		ToolCallID string          `json:"toolCallId"`
+		Tool       string          `json:"tool"`
+		Title      string          `json:"title"`
+		Input      ToolRequestBody `json:"input"`
+	}
+	if err := json.Unmarshal([]byte(frame.data), &envelope); err != nil {
+		return ToolRequest{}, false
+	}
+	if envelope.Type != "tool_request" {
+		return ToolRequest{}, false
+	}
+	return ToolRequest{
+		RunID:      envelope.RunID,
+		ToolCallID: envelope.ToolCallID,
+		Tool:       envelope.Tool,
+		Title:      envelope.Title,
+		Input:      envelope.Input,
+	}, true
+}
+
+func (h *Handler) streamAgentStudioResponse(ctx context.Context, w gin.ResponseWriter, body io.Reader, claims *admin.Claims, delegationToken string, target *agentconfig.RuntimeTarget) {
 	flusher, _ := w.(http.Flusher)
-	buf := make([]byte, 32*1024)
+	reader := bufio.NewReader(body)
+	var frame strings.Builder
 	for {
-		n, err := body.Read(buf)
-		if n > 0 {
-			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
-				logger.Debug("agent stream client write failed", zap.Error(writeErr))
-				return
-			}
-			if flusher != nil {
-				flusher.Flush()
+		line, err := reader.ReadString('\n')
+		if line != "" {
+			if strings.TrimRight(line, "\r\n") == "" {
+				rawFrame := frame.String()
+				frame.Reset()
+				if !h.handleSSEFrame(ctx, w, rawFrame, claims, delegationToken, target, flusher) {
+					return
+				}
+				if flusher != nil {
+					flusher.Flush()
+				}
+			} else {
+				frame.WriteString(line)
 			}
 		}
 		if err == io.EOF {
+			if frame.Len() > 0 {
+				_ = h.handleSSEFrame(ctx, w, frame.String(), claims, delegationToken, target, flusher)
+			}
 			return
 		}
 		if err != nil {
-			logger.Warn("agent stream upstream read failed", zap.Error(err))
+			h.logger.Warn("agent stream upstream read failed", zap.Error(err))
 			return
 		}
 	}
+}
+
+func (h *Handler) handleSSEFrame(ctx context.Context, w gin.ResponseWriter, raw string, claims *admin.Claims, delegationToken string, target *agentconfig.RuntimeTarget, flusher http.Flusher) bool {
+	if strings.TrimSpace(raw) == "" {
+		return true
+	}
+	if _, err := w.Write([]byte(raw + "\n\n")); err != nil {
+		h.logger.Debug("agent stream client write failed", zap.Error(err))
+		return false
+	}
+	if flusher != nil {
+		flusher.Flush()
+	}
+	frame := parseSSEFrame(raw)
+	request, ok := toolRequestFromFrame(frame)
+	if !ok {
+		return true
+	}
+	result := h.tools.Execute(ctx, claims, request, target.Policy)
+	if err := h.postToolResult(ctx, target, delegationToken, result); err != nil {
+		h.logger.Warn("agent tool result callback failed", zap.Error(err))
+	}
+	return true
+}
+
+func (h *Handler) postToolResult(ctx context.Context, target *agentconfig.RuntimeTarget, delegationToken string, result ToolResult) error {
+	body, err := json.Marshal(result)
+	if err != nil {
+		return fmt.Errorf("marshal tool result: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, buildToolResultURL(target.AgentStudioBaseURL, target.ConnectorID), bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("build tool result request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+delegationToken)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	resp, err := h.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("post tool result: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		detail, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		return fmt.Errorf("tool result callback HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(detail)))
+	}
+	return nil
 }

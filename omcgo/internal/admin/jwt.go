@@ -30,6 +30,7 @@ type jwtClaims struct {
 
 const minJWTSecretLength = 32
 const agentDelegationSubject = "agent_delegation"
+const agentRuntimeScope = "agent-runtime"
 
 var agentDelegationTTL = 5 * time.Minute
 
@@ -125,7 +126,7 @@ func (s *JWTService) ValidateRefreshToken(tokenString string) (*Claims, error) {
 	return s.validateToken(tokenString, "refresh")
 }
 
-// GenerateAgentDelegationToken creates a short-lived token for agent-action APIs.
+// GenerateAgentDelegationToken creates a short-lived token for agent runtime callbacks.
 // It intentionally uses a separate subject and scope from normal web access tokens.
 func (s *JWTService) GenerateAgentDelegationToken(claims *Claims) (string, time.Time, error) {
 	now := time.Now()
@@ -137,7 +138,7 @@ func (s *JWTService) GenerateAgentDelegationToken(claims *Claims) (string, time.
 		Roles:          claims.Roles,
 		CurrentRoleID:  claims.CurrentRoleID,
 		IssuedAtMicros: now.UnixMicro(),
-		Scopes:         []string{"agent-actions"},
+		Scopes:         []string{agentRuntimeScope},
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   agentDelegationSubject,
 			IssuedAt:  jwt.NewNumericDate(now),
@@ -154,18 +155,18 @@ func (s *JWTService) GenerateAgentDelegationToken(claims *Claims) (string, time.
 	return tokenString, expiresAt, nil
 }
 
-// ValidateAgentDelegationToken validates the short-lived agent-action token.
+// ValidateAgentDelegationToken validates the short-lived agent runtime token.
 func (s *JWTService) ValidateAgentDelegationToken(tokenString string) (*Claims, error) {
 	claims, err := s.validateToken(tokenString, agentDelegationSubject)
 	if err != nil {
 		return nil, err
 	}
 	for _, scope := range claims.Scopes {
-		if scope == "agent-actions" {
+		if scope == agentRuntimeScope {
 			return claims, nil
 		}
 	}
-	return nil, fmt.Errorf("missing agent-actions scope")
+	return nil, fmt.Errorf("missing %s scope", agentRuntimeScope)
 }
 
 func (s *JWTService) validateToken(tokenString, expectedSubject string) (*Claims, error) {

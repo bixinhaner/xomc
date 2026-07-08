@@ -9,20 +9,20 @@ export interface AgentAdminConfig {
   enabled: boolean;
   agentStudioBaseUrl: string;
   serviceTokenConfigured: boolean;
-  omcPublicBaseUrl: string;
   connectorSlug: string;
   connectorId: string;
   runtimeStreamUrl: string;
   status: AgentConfigStatus;
   lastValidatedAt: string;
   lastError: string;
-  healthPath: string;
-  actionListPath: string;
-  actionSearchPath: string;
-  actionDescribePath: string;
-  actionPreviewPath: string;
-  actionExecutePath: string;
-  identityPath: string;
+  policy: AgentRuntimePolicy;
+}
+
+export interface AgentRuntimePolicy {
+  allowedMethods: string[];
+  blockedPathPrefixes: string[];
+  toolTimeoutSeconds: number;
+  maxResponseBytes: number;
 }
 
 export interface AgentRuntimeServerConfig {
@@ -34,6 +34,7 @@ export interface AgentRuntimeServerConfig {
   lastValidatedAt: string;
   lastError: string;
   configuredSource: 'server' | string;
+  policy: AgentRuntimePolicy;
 }
 
 export interface AgentVisibilityConfig {
@@ -48,8 +49,11 @@ export interface AgentAdminConfigUpdate {
   enabled?: boolean;
   agentStudioBaseUrl?: string;
   agentStudioServiceToken?: string;
-  omcPublicBaseUrl?: string;
   connectorSlug?: string;
+  allowedMethods?: string[];
+  blockedPathPrefixes?: string[];
+  toolTimeoutSeconds?: number;
+  maxResponseBytes?: number;
 }
 
 export interface AgentProvisionResult {

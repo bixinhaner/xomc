@@ -10,7 +10,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/admin"
-	"github.com/omcgo/omcgo/internal/agentaction"
 	"github.com/omcgo/omcgo/internal/agentruntime"
 	"github.com/omcgo/omcgo/internal/alarm"
 	"github.com/omcgo/omcgo/internal/authz"
@@ -362,17 +361,9 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	// Authenticated user routes (any authenticated user)
 	ad.adminHandler.RegisterAuthenticatedRoutes(v1)
 
-	agentActionService := agentaction.NewService(c.DeviceService, c.AlarmPgStore, c.Logger)
-	agentActionHandler := agentaction.NewHandler(c.JWTService, agentActionService, c.PermService, c.Logger)
-	agentRuntimeHandler := agentruntime.NewHandler(ad.agentConfigHandler.Service(), c.JWTService, http.DefaultClient, c.Logger)
+	agentRuntimeHandler := agentruntime.NewHandler(ad.agentConfigHandler.Service(), c.JWTService, http.DefaultClient, c.Logger, r, r)
 	ad.agentConfigHandler.RegisterRuntimeRoutes(v1)
 	agentRuntimeHandler.RegisterRoutes(v1)
-
-	agentActions := r.Group("/api/v1/agent-actions")
-	agentActions.Use(agentaction.RequireDelegation(c.JWTService))
-	agentActions.Use(admin.AuditLogger(ad.auditRepo))
-	agentActions.Use(admin.OperLogger(ad.logRepo, c.Logger.Named("oper-log")))
-	agentActionHandler.RegisterActionRoutes(agentActions)
 
 	// Helper: authenticated sub-group.
 	//

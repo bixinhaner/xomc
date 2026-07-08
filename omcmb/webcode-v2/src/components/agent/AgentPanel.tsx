@@ -169,6 +169,24 @@ function AssistantContent({ message }: { message: AgentPanelMessage }) {
   )
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function restInput(input: unknown) {
+  if (!isRecord(input)) return null
+  const method = typeof input.method === 'string' ? input.method.toUpperCase() : ''
+  const path = typeof input.path === 'string' ? input.path : ''
+  if (!method || !path) return null
+  return {
+    method,
+    path,
+    operationId: typeof input.operationId === 'string' ? input.operationId : '',
+    query: isRecord(input.query) ? input.query : {},
+    reason: typeof input.reason === 'string' ? input.reason : '',
+  }
+}
+
 function ActivityCard({
   activity,
   isPending,
@@ -183,10 +201,13 @@ function ActivityCard({
   onCancel: () => void
 }) {
   const t = useT()
-  const inputRows = Object.entries(activity.request?.input ?? {})
+  const rawInput = activity.request?.input ?? activity.input ?? {}
+  const rest = restInput(rawInput)
+  const inputRows = Object.entries(rest?.query ?? (isRecord(rawInput) ? rawInput : {}))
   const rows = extractAgentRows(activity.output ?? activity.preview, 6)
   const isError = activity.status === 'error'
   const isActive = activity.status === 'calling' || activity.status === 'running' || isPending
+  const isRead = rest?.method === 'GET' || activity.risk === 'read'
 
   return (
     <section
@@ -199,17 +220,24 @@ function ActivityCard({
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <div className="flex items-center gap-2 text-sm font-semibold">
           <Sparkles className="size-4 text-primary" />
-          {activity.status === 'preview' ? t('agent.actionPreview') : t('agent.callingTool')}
+          {rest ? rest.path : activity.status === 'preview' ? t('agent.actionPreview') : t('agent.callingTool')}
         </div>
-        <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
-          {t('agent.readOnly')}
+        <span className={cn('rounded-full px-2 py-0.5 text-xs font-medium', isRead ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700')}>
+          {isRead ? t('agent.readOnly') : t('agent.writeMode')}
         </span>
       </div>
       <div className="space-y-3 p-4 text-sm">
+        {rest && (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <span className={cn('rounded px-2 py-0.5 font-mono font-semibold', rest.method === 'GET' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700')}>{rest.method}</span>
+            <span>{t('agent.operationId')}: {rest.operationId || '-'}</span>
+          </div>
+        )}
         <div className="flex items-center justify-between gap-3">
           <span className="text-muted-foreground">{t('agent.tool')}</span>
           <strong className="truncate text-foreground">{activity.request?.actionId || activity.title}</strong>
         </div>
+        {rest?.reason && <p className="text-muted-foreground">{rest.reason}</p>}
         {activity.summary && <p className="text-muted-foreground">{activity.summary}</p>}
         {inputRows.length > 0 && (
           <div>
@@ -224,9 +252,12 @@ function ActivityCard({
             </div>
           </div>
         )}
-        <div className="flex items-center gap-2 rounded-md border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+        <div className={cn(
+          'flex items-center gap-2 rounded-md border px-3 py-2 text-xs',
+          isRead ? 'border-emerald-100 bg-emerald-50 text-emerald-700' : 'border-amber-100 bg-amber-50 text-amber-700'
+        )}>
           <ShieldCheck className="size-4" />
-          {t('agent.readOnlyPolicy')}
+          {isRead ? t('agent.readOnlyPolicy') : t('agent.writePolicy')}
         </div>
         {isPending && (
           <div className="grid grid-cols-2 gap-2">

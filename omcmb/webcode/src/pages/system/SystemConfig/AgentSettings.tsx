@@ -3,8 +3,12 @@ import {
   Alert,
   Button,
   Card,
+  Checkbox,
   Form,
   Input,
+  InputNumber,
+  Segmented,
+  Select,
   Space,
   Spin,
   Switch,
@@ -31,6 +35,10 @@ import { useT } from '@/hooks/useT';
 type AgentFormValues = AgentAdminConfigUpdate & {
   agentStudioServiceToken?: string;
 };
+
+const METHOD_OPTIONS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
+const READ_ONLY_METHODS = ['GET'];
+const WRITE_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
 
 function statusColor(status: string) {
   if (status === 'connected') return 'success';
@@ -59,6 +67,8 @@ export default function AgentSettings() {
   const syncM = useSyncAdminAgentConfig();
   const config = configQ.data;
   const enabled = Form.useWatch('enabled', form);
+  const allowedMethods = Form.useWatch('allowedMethods', form) ?? READ_ONLY_METHODS;
+  const executionMode = allowedMethods.some((method) => method !== 'GET') ? 'write' : 'read';
 
   useEffect(() => {
     if (!config) return;
@@ -66,8 +76,11 @@ export default function AgentSettings() {
       enabled: config.enabled,
       agentStudioBaseUrl: config.agentStudioBaseUrl,
       agentStudioServiceToken: '',
-      omcPublicBaseUrl: config.omcPublicBaseUrl,
       connectorSlug: config.connectorSlug,
+      allowedMethods: config.policy.allowedMethods,
+      blockedPathPrefixes: config.policy.blockedPathPrefixes,
+      toolTimeoutSeconds: config.policy.toolTimeoutSeconds,
+      maxResponseBytes: config.policy.maxResponseBytes,
     });
   }, [config, form]);
 
@@ -79,8 +92,11 @@ export default function AgentSettings() {
         enabled: Boolean(values.enabled),
         agentStudioBaseUrl: values.agentStudioBaseUrl?.trim() ?? '',
         agentStudioServiceToken: token || undefined,
-        omcPublicBaseUrl: values.omcPublicBaseUrl?.trim() ?? '',
         connectorSlug: values.connectorSlug?.trim() || undefined,
+        allowedMethods: values.allowedMethods?.length ? values.allowedMethods : READ_ONLY_METHODS,
+        blockedPathPrefixes: values.blockedPathPrefixes ?? [],
+        toolTimeoutSeconds: values.toolTimeoutSeconds,
+        maxResponseBytes: values.maxResponseBytes,
       };
     } catch {
       void message.error(t('common.formValidationFailed'));
@@ -147,9 +163,6 @@ export default function AgentSettings() {
           title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.agent.section.connection')}</span>}
           style={{ marginBottom: 16 }}
         >
-          <Form.Item name="enabled" label={t('system.agent.enabled')} valuePropName="checked">
-            <Switch />
-          </Form.Item>
           <Form.Item
             name="agentStudioBaseUrl"
             label={t('system.agent.agentStudioBaseUrl')}
@@ -182,13 +195,6 @@ export default function AgentSettings() {
           >
             <Input.Password placeholder={t('system.agent.serviceTokenPlaceholder')} autoComplete="new-password" />
           </Form.Item>
-          <Form.Item
-            name="omcPublicBaseUrl"
-            label={t('system.agent.omcPublicBaseUrl')}
-            rules={[urlRule]}
-          >
-            <Input placeholder="https://ops.example.com" />
-          </Form.Item>
           <Form.Item name="connectorSlug" label={t('system.agent.connectorSlug')}>
             <Input placeholder="external-agent-..." />
           </Form.Item>
@@ -197,6 +203,7 @@ export default function AgentSettings() {
         <Card
           size="small"
           title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.agent.section.runtime')}</span>}
+          style={{ marginBottom: 16 }}
         >
           <Space direction="vertical" style={{ width: '100%' }} size={12}>
             <Space>
@@ -236,6 +243,69 @@ export default function AgentSettings() {
                 />
               }
             />
+          </Space>
+        </Card>
+
+        <Card
+          size="small"
+          title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.agent.section.security')}</span>}
+        >
+          <Space direction="vertical" style={{ width: '100%' }} size={14}>
+            <Form.Item name="enabled" label={t('system.agent.visible')} valuePropName="checked" style={{ marginBottom: 0 }}>
+              <Switch />
+            </Form.Item>
+            <Form.Item label={t('system.agent.executionMode')} style={{ marginBottom: 0 }}>
+              <Segmented
+                size="small"
+                value={executionMode}
+                options={[
+                  { label: t('system.agent.readOnlyMode'), value: 'read' },
+                  { label: t('system.agent.writeMode'), value: 'write' },
+                ]}
+                onChange={(value) => {
+                  form.setFieldValue('allowedMethods', value === 'write' ? WRITE_METHODS : READ_ONLY_METHODS);
+                }}
+              />
+            </Form.Item>
+            <Form.Item
+              name="allowedMethods"
+              label={t('system.agent.allowedMethods')}
+              rules={[
+                {
+                  validator: (_: unknown, value?: string[]) => {
+                    if (!value?.length) return Promise.reject(new Error(t('system.agent.required')));
+                    return Promise.resolve();
+                  },
+                },
+              ]}
+            >
+              <Checkbox.Group options={METHOD_OPTIONS} />
+            </Form.Item>
+            <Space wrap size={16}>
+              <Form.Item
+                name="maxResponseBytes"
+                label={t('system.agent.maxResponseBytes')}
+                rules={[{ type: 'number', min: 4096, max: 4194304 }]}
+              >
+                <InputNumber min={4096} max={4194304} step={4096} style={{ width: 180 }} />
+              </Form.Item>
+              <Form.Item
+                name="toolTimeoutSeconds"
+                label={t('system.agent.toolTimeoutSeconds')}
+                rules={[{ type: 'number', min: 1, max: 300 }]}
+              >
+                <InputNumber min={1} max={300} style={{ width: 160 }} addonAfter={t('common.seconds')} />
+              </Form.Item>
+            </Space>
+            <Form.Item name="blockedPathPrefixes" label={t('system.agent.blockedPathPrefixes')}>
+              <Select
+                mode="tags"
+                tokenSeparators={[',', '\n']}
+                placeholder="/api/v1/auth/*"
+                options={(config?.policy.blockedPathPrefixes ?? []).map((value) => ({ label: value, value }))}
+              />
+            </Form.Item>
+            <Alert type="info" showIcon message={t('system.agent.securityHint')} />
           </Space>
         </Card>
 

@@ -281,6 +281,25 @@ export function useAgentPanelController(
           case 'start':
             updateConversationId(event.conversationId);
             break;
+          case 'tool_request':
+            setActivities((current) =>
+              upsertActivity(current, {
+                callId: event.toolCallId,
+                toolName: event.tool,
+                title: event.title,
+                status: 'calling',
+                input: event.input,
+                updatedAt: now(),
+              })
+            );
+            appendAssistantProcess(assistantId, {
+              type: 'process',
+              id: processId('tool-request', event.toolCallId),
+              kind: 'tool_call',
+              title: event.title,
+              detail: event.input,
+            });
+            break;
           case 'thought':
             appendAssistantThought(assistantId, event);
             break;

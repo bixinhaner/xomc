@@ -189,7 +189,7 @@ func TestJWTService_AgentDelegationToken(t *testing.T) {
 	assert.Equal(t, userID, parsed.UserID)
 	assert.Equal(t, "operator", parsed.Username)
 	assert.Equal(t, []string{"operator"}, parsed.Roles)
-	assert.Equal(t, []string{"agent-actions"}, parsed.Scopes)
+	assert.Equal(t, []string{"agent-runtime"}, parsed.Scopes)
 }
 
 func TestJWTService_AgentDelegationRejectsAccessToken(t *testing.T) {

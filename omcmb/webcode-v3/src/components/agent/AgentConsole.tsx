@@ -169,6 +169,24 @@ function AssistantContent({ message }: { message: AgentPanelMessage }) {
   )
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function restInput(input: unknown) {
+  if (!isRecord(input)) return null
+  const method = typeof input.method === 'string' ? input.method.toUpperCase() : ''
+  const path = typeof input.path === 'string' ? input.path : ''
+  if (!method || !path) return null
+  return {
+    method,
+    path,
+    operationId: typeof input.operationId === 'string' ? input.operationId : '',
+    query: isRecord(input.query) ? input.query : {},
+    reason: typeof input.reason === 'string' ? input.reason : '',
+  }
+}
+
 function ActivityCard({
   activity,
   isPending,
@@ -183,10 +201,13 @@ function ActivityCard({
   onCancel: () => void
 }) {
   const t = useT()
-  const inputRows = Object.entries(activity.request?.input ?? {})
+  const rawInput = activity.request?.input ?? activity.input ?? {}
+  const rest = restInput(rawInput)
+  const inputRows = Object.entries(rest?.query ?? (isRecord(rawInput) ? rawInput : {}))
   const rows = extractAgentRows(activity.output ?? activity.preview, 6)
   const isError = activity.status === 'error'
   const isActive = activity.status === 'calling' || activity.status === 'running' || isPending
+  const isRead = rest?.method === 'GET' || activity.risk === 'read'
 
   return (
     <section
@@ -199,17 +220,32 @@ function ActivityCard({
       <div className="flex items-center justify-between border-b border-cyan-400/25 px-3 py-2">
         <div className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.18em] text-cyan-200">
           <Sparkles className="size-3.5" />
-          {activity.status === 'preview' ? t('agent.actionPreview') : t('agent.callingTool')}
+          {rest ? rest.path : activity.status === 'preview' ? t('agent.actionPreview') : t('agent.callingTool')}
         </div>
-        <span className="border border-amber-300/60 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.18em] text-amber-200">
-          {t('agent.readOnly')}
+        <span className={cn(
+          'border px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.18em]',
+          isRead ? 'border-emerald-300/60 text-emerald-200' : 'border-amber-300/60 text-amber-200'
+        )}>
+          {isRead ? t('agent.readOnly') : t('agent.writeMode')}
         </span>
       </div>
       <div className="space-y-3 p-3 font-mono text-xs text-cyan-100/80">
+        {rest && (
+          <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.14em] text-cyan-300/70">
+            <span className={cn(
+              'border px-2 py-0.5 text-cyan-50',
+              rest.method === 'GET' ? 'border-emerald-300/40 bg-emerald-300/10' : 'border-amber-300/40 bg-amber-300/10'
+            )}>
+              {rest.method}
+            </span>
+            <span>{t('agent.operationId')}: {rest.operationId || '-'}</span>
+          </div>
+        )}
         <div className="grid grid-cols-[86px_1fr] gap-3">
           <span className="text-cyan-300/60">{t('agent.tool')}</span>
           <strong className="truncate text-cyan-100">{activity.request?.actionId || activity.title}</strong>
         </div>
+        {rest?.reason && <p className="leading-5 text-cyan-100/70">{rest.reason}</p>}
         {activity.summary && <p className="leading-5 text-cyan-100/70">{activity.summary}</p>}
         {inputRows.length > 0 && (
           <div className="border border-cyan-400/20">
@@ -221,9 +257,9 @@ function ActivityCard({
             ))}
           </div>
         )}
-        <div className="flex items-center gap-2 text-emerald-300">
+        <div className={cn('flex items-center gap-2', isRead ? 'text-emerald-300' : 'text-amber-200')}>
           <ShieldCheck className="size-4" />
-          {t('agent.readOnlyPolicy')}
+          {isRead ? t('agent.readOnlyPolicy') : t('agent.writePolicy')}
         </div>
         {isPending && (
           <div className="grid grid-cols-2 gap-2">

@@ -69,6 +69,14 @@ export interface AgentRuntimeRequest {
 export type AgentStreamEvent =
   | { type: 'start'; runId: string; conversationId: string }
   | {
+      type: 'tool_request';
+      runId: string;
+      toolCallId: string;
+      tool: string;
+      title: string;
+      input: unknown;
+    }
+  | {
       type: 'thought';
       id?: string;
       text: string;
@@ -183,6 +191,14 @@ export function isAgentStreamEvent(value: unknown): value is AgentStreamEvent {
   switch (value.type) {
     case 'start':
       return isString(value.runId) && isString(value.conversationId);
+    case 'tool_request':
+      return (
+        isString(value.runId) &&
+        isString(value.toolCallId) &&
+        isString(value.tool) &&
+        isString(value.title) &&
+        'input' in value
+      );
     case 'thought':
       return (
         isString(value.text) &&

@@ -8,58 +8,60 @@ const (
 	KeyEnabled                 = "enabled"
 	KeyAgentStudioBaseURL      = "agent_studio_base_url"
 	KeyAgentStudioServiceToken = "agent_studio_service_token"
-	KeyOMCPublicBaseURL        = "omc_public_base_url"
 	KeyConnectorSlug           = "connector_slug"
 	KeyConnectorID             = "connector_id"
 	KeyRuntimeStreamURL        = "runtime_stream_url"
 	KeyStatus                  = "status"
 	KeyLastValidatedAt         = "last_validated_at"
 	KeyLastError               = "last_error"
+	KeyAllowedMethods          = "allowed_methods"
+	KeyBlockedPathPrefixes     = "blocked_path_prefixes"
+	KeyToolTimeoutSeconds      = "tool_timeout_seconds"
+	KeyMaxResponseBytes        = "max_response_bytes"
 
 	StatusNotConfigured = "not_configured"
 	StatusDisabled      = "disabled"
 	StatusConnected     = "connected"
 	StatusError         = "error"
 
-	DefaultHealthPath         = "/api/v1/agent/health"
-	DefaultActionListPath     = "/api/v1/agent-actions/actions"
-	DefaultActionSearchPath   = "/api/v1/agent-actions/actions/search"
-	DefaultActionDescribePath = "/api/v1/agent-actions/actions/describe"
-	DefaultActionPreviewPath  = "/api/v1/agent-actions/actions/preview"
-	DefaultActionExecutePath  = "/api/v1/agent-actions/actions/execute"
-	DefaultIdentityPath       = "/api/v1/agent-actions/identity"
-	DefaultRuntimeStreamPath  = "/api/v1/agent/chat/stream"
+	DefaultRuntimeStreamPath = "/api/v1/agent/chat/stream"
+
+	DefaultAllowedMethods      = "GET"
+	DefaultBlockedPathPrefixes = "/api/v1/auth/*\n/api/v1/agent/*\n/api/v1/admin/agent-config*\n/api/v1/admin/sysConfig*"
+	DefaultToolTimeoutSeconds  = 30
+	DefaultMaxResponseBytes    = 262144
 )
 
+type RuntimePolicy struct {
+	AllowedMethods      []string `json:"allowedMethods"`
+	BlockedPathPrefixes []string `json:"blockedPathPrefixes"`
+	ToolTimeoutSeconds  int      `json:"toolTimeoutSeconds"`
+	MaxResponseBytes    int      `json:"maxResponseBytes"`
+}
+
 type AdminConfig struct {
-	Enabled                bool   `json:"enabled"`
-	AgentStudioBaseURL     string `json:"agentStudioBaseUrl"`
-	ServiceTokenConfigured bool   `json:"serviceTokenConfigured"`
-	OMCPublicBaseURL       string `json:"omcPublicBaseUrl"`
-	ConnectorSlug          string `json:"connectorSlug"`
-	ConnectorID            string `json:"connectorId"`
-	RuntimeStreamURL       string `json:"runtimeStreamUrl"`
-	Status                 string `json:"status"`
-	LastValidatedAt        string `json:"lastValidatedAt"`
-	LastError              string `json:"lastError"`
-	HealthPath             string `json:"healthPath"`
-	ActionListPath         string `json:"actionListPath"`
-	ActionSearchPath       string `json:"actionSearchPath"`
-	ActionDescribePath     string `json:"actionDescribePath"`
-	ActionPreviewPath      string `json:"actionPreviewPath"`
-	ActionExecutePath      string `json:"actionExecutePath"`
-	IdentityPath           string `json:"identityPath"`
+	Enabled                bool          `json:"enabled"`
+	AgentStudioBaseURL     string        `json:"agentStudioBaseUrl"`
+	ServiceTokenConfigured bool          `json:"serviceTokenConfigured"`
+	ConnectorSlug          string        `json:"connectorSlug"`
+	ConnectorID            string        `json:"connectorId"`
+	RuntimeStreamURL       string        `json:"runtimeStreamUrl"`
+	Status                 string        `json:"status"`
+	LastValidatedAt        string        `json:"lastValidatedAt"`
+	LastError              string        `json:"lastError"`
+	Policy                 RuntimePolicy `json:"policy"`
 }
 
 type RuntimeConfig struct {
-	Visible          bool   `json:"visible"`
-	Enabled          bool   `json:"enabled"`
-	Endpoint         string `json:"endpoint"`
-	ConnectorID      string `json:"connectorId"`
-	Status           string `json:"status"`
-	LastValidatedAt  string `json:"lastValidatedAt"`
-	LastError        string `json:"lastError"`
-	ConfiguredSource string `json:"configuredSource"`
+	Visible          bool          `json:"visible"`
+	Enabled          bool          `json:"enabled"`
+	Endpoint         string        `json:"endpoint"`
+	ConnectorID      string        `json:"connectorId"`
+	Status           string        `json:"status"`
+	LastValidatedAt  string        `json:"lastValidatedAt"`
+	LastError        string        `json:"lastError"`
+	ConfiguredSource string        `json:"configuredSource"`
+	Policy           RuntimePolicy `json:"policy"`
 }
 
 type VisibilityConfig struct {
@@ -76,14 +78,18 @@ type RuntimeTarget struct {
 	ConnectorID        string
 	Status             string
 	LastError          string
+	Policy             RuntimePolicy
 }
 
 type UpdateRequest struct {
-	Enabled                 *bool   `json:"enabled"`
-	AgentStudioBaseURL      *string `json:"agentStudioBaseUrl"`
-	AgentStudioServiceToken *string `json:"agentStudioServiceToken"`
-	OMCPublicBaseURL        *string `json:"omcPublicBaseUrl"`
-	ConnectorSlug           *string `json:"connectorSlug"`
+	Enabled                 *bool     `json:"enabled"`
+	AgentStudioBaseURL      *string   `json:"agentStudioBaseUrl"`
+	AgentStudioServiceToken *string   `json:"agentStudioServiceToken"`
+	ConnectorSlug           *string   `json:"connectorSlug"`
+	AllowedMethods          *[]string `json:"allowedMethods"`
+	BlockedPathPrefixes     *[]string `json:"blockedPathPrefixes"`
+	ToolTimeoutSeconds      *int      `json:"toolTimeoutSeconds"`
+	MaxResponseBytes        *int      `json:"maxResponseBytes"`
 }
 
 type ProvisionResult struct {

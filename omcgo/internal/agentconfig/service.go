@@ -3,8 +3,6 @@ package agentconfig
 import (
 	"bytes"
 	"context"
-	"crypto/sha1"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -78,6 +76,7 @@ func (s *Service) GetRuntimeConfig(ctx context.Context) (*RuntimeConfig, error) 
 		LastValidatedAt:  cfg.LastValidatedAt,
 		LastError:        cfg.LastError,
 		ConfiguredSource: "server",
+		Policy:           cfg.Policy,
 	}, nil
 }
 
@@ -108,6 +107,7 @@ func (s *Service) GetRuntimeTarget(ctx context.Context) (*RuntimeTarget, error) 
 		ConnectorID:        cfg.ConnectorID,
 		Status:             cfg.Status,
 		LastError:          cfg.LastError,
+		Policy:             cfg.Policy,
 	}, nil
 }
 
@@ -200,8 +200,8 @@ type mergedSettings struct {
 	Enabled                 bool
 	AgentStudioBaseURL      string
 	AgentStudioServiceToken string
-	OMCPublicBaseURL        string
 	ConnectorSlug           string
+	Policy                  RuntimePolicy
 }
 
 func (s *Service) mergeSettings(ctx context.Context, req UpdateRequest) (map[string]string, mergedSettings, error) {
@@ -214,8 +214,8 @@ func (s *Service) mergeSettings(ctx context.Context, req UpdateRequest) (map[str
 		Enabled:                 parseBool(values[KeyEnabled]),
 		AgentStudioBaseURL:      values[KeyAgentStudioBaseURL],
 		AgentStudioServiceToken: values[KeyAgentStudioServiceToken],
-		OMCPublicBaseURL:        values[KeyOMCPublicBaseURL],
 		ConnectorSlug:           values[KeyConnectorSlug],
+		Policy:                  policyFromValues(values),
 	}
 	if req.Enabled != nil {
 		settings.Enabled = *req.Enabled
@@ -235,33 +235,36 @@ func (s *Service) mergeSettings(ctx context.Context, req UpdateRequest) (map[str
 	if req.AgentStudioServiceToken != nil && strings.TrimSpace(*req.AgentStudioServiceToken) != "" {
 		settings.AgentStudioServiceToken = strings.TrimSpace(*req.AgentStudioServiceToken)
 	}
-	if req.OMCPublicBaseURL != nil {
-		raw := strings.TrimSpace(*req.OMCPublicBaseURL)
-		if raw != "" {
-			base, err := normalizeHTTPURL(raw)
-			if err != nil {
-				return nil, mergedSettings{}, fmt.Errorf("%w: invalid omcPublicBaseUrl: %v", commonerrors.ErrInvalidInput, err)
-			}
-			settings.OMCPublicBaseURL = base
-		} else {
-			settings.OMCPublicBaseURL = ""
-		}
-	}
 	if req.ConnectorSlug != nil {
 		settings.ConnectorSlug = strings.TrimSpace(*req.ConnectorSlug)
 	}
 	if settings.ConnectorSlug == "" {
-		settings.ConnectorSlug = defaultConnectorSlug(settings.OMCPublicBaseURL)
+		settings.ConnectorSlug = defaultConnectorSlug()
+	}
+	if req.AllowedMethods != nil {
+		settings.Policy.AllowedMethods = normalizeMethods(*req.AllowedMethods)
+	}
+	if req.BlockedPathPrefixes != nil {
+		settings.Policy.BlockedPathPrefixes = normalizePrefixes(*req.BlockedPathPrefixes)
+	}
+	if req.ToolTimeoutSeconds != nil {
+		settings.Policy.ToolTimeoutSeconds = normalizePositiveInt(*req.ToolTimeoutSeconds, DefaultToolTimeoutSeconds, 300)
+	}
+	if req.MaxResponseBytes != nil {
+		settings.Policy.MaxResponseBytes = normalizePositiveInt(*req.MaxResponseBytes, DefaultMaxResponseBytes, 4<<20)
 	}
 	return values, settings, nil
 }
 
 func (s mergedSettings) toValues(includeSecret bool) map[string]string {
 	values := map[string]string{
-		KeyEnabled:            fmt.Sprintf("%t", s.Enabled),
-		KeyAgentStudioBaseURL: s.AgentStudioBaseURL,
-		KeyOMCPublicBaseURL:   s.OMCPublicBaseURL,
-		KeyConnectorSlug:      s.ConnectorSlug,
+		KeyEnabled:             fmt.Sprintf("%t", s.Enabled),
+		KeyAgentStudioBaseURL:  s.AgentStudioBaseURL,
+		KeyConnectorSlug:       s.ConnectorSlug,
+		KeyAllowedMethods:      strings.Join(s.Policy.AllowedMethods, ","),
+		KeyBlockedPathPrefixes: strings.Join(s.Policy.BlockedPathPrefixes, "\n"),
+		KeyToolTimeoutSeconds:  fmt.Sprintf("%d", s.Policy.ToolTimeoutSeconds),
+		KeyMaxResponseBytes:    fmt.Sprintf("%d", s.Policy.MaxResponseBytes),
 	}
 	if includeSecret && s.AgentStudioServiceToken != "" {
 		values[KeyAgentStudioServiceToken] = s.AgentStudioServiceToken
@@ -275,9 +278,6 @@ func (s mergedSettings) validateForProvision() error {
 	}
 	if s.AgentStudioServiceToken == "" {
 		return fmt.Errorf("%w: agentStudioServiceToken is required", commonerrors.ErrInvalidInput)
-	}
-	if s.OMCPublicBaseURL == "" {
-		return fmt.Errorf("%w: omcPublicBaseUrl is required", commonerrors.ErrInvalidInput)
 	}
 	if s.ConnectorSlug == "" {
 		return fmt.Errorf("%w: connectorSlug is required", commonerrors.ErrInvalidInput)
@@ -330,19 +330,16 @@ func (s *Service) provision(ctx context.Context, settings mergedSettings) (*Prov
 		"runtimeBaseUrl": settings.AgentStudioBaseURL,
 		"config": map[string]any{
 			"displayName":        "External Operations",
-			"baseUrl":            settings.OMCPublicBaseURL,
-			"healthPath":         DefaultHealthPath,
-			"actionListPath":     DefaultActionListPath,
-			"actionSearchPath":   DefaultActionSearchPath,
-			"actionDescribePath": DefaultActionDescribePath,
-			"actionPreviewPath":  DefaultActionPreviewPath,
-			"actionExecutePath":  DefaultActionExecutePath,
-			"identityPath":       DefaultIdentityPath,
 			"delegationHeader":   "Authorization",
+			"runtimeInstruction": "Use the generic REST tool bridge. Search the API catalog, describe the selected operation, then request /api/v1 paths through the bridge. Do not invent data.",
 			"policy": map[string]any{
-				"allowReadActions":     true,
-				"allowLowRiskActions":  false,
-				"allowHighRiskActions": false,
+				"allowReadActions":     methodAllowed(settings.Policy, http.MethodGet),
+				"allowLowRiskActions":  hasWriteMethod(settings.Policy),
+				"allowHighRiskActions": hasWriteMethod(settings.Policy),
+				"allowedMethods":       settings.Policy.AllowedMethods,
+				"blockedPathPrefixes":  settings.Policy.BlockedPathPrefixes,
+				"toolTimeoutSeconds":   settings.Policy.ToolTimeoutSeconds,
+				"maxResponseBytes":     settings.Policy.MaxResponseBytes,
 			},
 		},
 	}
@@ -403,26 +400,116 @@ func adminConfigFromValues(values map[string]string) *AdminConfig {
 		Enabled:                enabled,
 		AgentStudioBaseURL:     values[KeyAgentStudioBaseURL],
 		ServiceTokenConfigured: strings.TrimSpace(values[KeyAgentStudioServiceToken]) != "",
-		OMCPublicBaseURL:       values[KeyOMCPublicBaseURL],
 		ConnectorSlug:          values[KeyConnectorSlug],
 		ConnectorID:            values[KeyConnectorID],
 		RuntimeStreamURL:       values[KeyRuntimeStreamURL],
 		Status:                 status,
 		LastValidatedAt:        values[KeyLastValidatedAt],
 		LastError:              values[KeyLastError],
-		HealthPath:             DefaultHealthPath,
-		ActionListPath:         DefaultActionListPath,
-		ActionSearchPath:       DefaultActionSearchPath,
-		ActionDescribePath:     DefaultActionDescribePath,
-		ActionPreviewPath:      DefaultActionPreviewPath,
-		ActionExecutePath:      DefaultActionExecutePath,
-		IdentityPath:           DefaultIdentityPath,
+		Policy:                 policyFromValues(values),
 	}
 }
 
 func parseBool(value string) bool {
 	v := strings.TrimSpace(strings.ToLower(value))
 	return v == "true" || v == "1" || v == "yes" || v == "on"
+}
+
+func policyFromValues(values map[string]string) RuntimePolicy {
+	return RuntimePolicy{
+		AllowedMethods:      normalizeMethods(splitConfigList(defaultString(values[KeyAllowedMethods], DefaultAllowedMethods))),
+		BlockedPathPrefixes: normalizePrefixes(splitConfigList(defaultString(values[KeyBlockedPathPrefixes], DefaultBlockedPathPrefixes))),
+		ToolTimeoutSeconds:  normalizePositiveInt(parseInt(values[KeyToolTimeoutSeconds]), DefaultToolTimeoutSeconds, 300),
+		MaxResponseBytes:    normalizePositiveInt(parseInt(values[KeyMaxResponseBytes]), DefaultMaxResponseBytes, 4<<20),
+	}
+}
+
+func defaultString(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
+}
+
+func splitConfigList(value string) []string {
+	fields := strings.FieldsFunc(value, func(r rune) bool {
+		return r == ',' || r == '\n' || r == '\r' || r == '\t'
+	})
+	out := make([]string, 0, len(fields))
+	for _, field := range fields {
+		if trimmed := strings.TrimSpace(field); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
+func normalizeMethods(input []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(input))
+	for _, method := range input {
+		normalized := strings.ToUpper(strings.TrimSpace(method))
+		switch normalized {
+		case http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+			if !seen[normalized] {
+				seen[normalized] = true
+				out = append(out, normalized)
+			}
+		}
+	}
+	if len(out) == 0 {
+		return []string{http.MethodGet}
+	}
+	return out
+}
+
+func normalizePrefixes(input []string) []string {
+	out := make([]string, 0, len(input))
+	seen := map[string]bool{}
+	for _, prefix := range input {
+		trimmed := strings.TrimSpace(prefix)
+		if trimmed == "" || seen[trimmed] {
+			continue
+		}
+		seen[trimmed] = true
+		out = append(out, trimmed)
+	}
+	return out
+}
+
+func parseInt(value string) int {
+	var parsed int
+	_, _ = fmt.Sscanf(strings.TrimSpace(value), "%d", &parsed)
+	return parsed
+}
+
+func normalizePositiveInt(value, fallback, max int) int {
+	if value <= 0 {
+		return fallback
+	}
+	if value > max {
+		return max
+	}
+	return value
+}
+
+func methodAllowed(policy RuntimePolicy, method string) bool {
+	normalized := strings.ToUpper(strings.TrimSpace(method))
+	for _, allowed := range policy.AllowedMethods {
+		if allowed == normalized {
+			return true
+		}
+	}
+	return false
+}
+
+func hasWriteMethod(policy RuntimePolicy) bool {
+	for _, method := range policy.AllowedMethods {
+		if method != http.MethodGet {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeHTTPURL(value string) (string, error) {
@@ -445,25 +532,16 @@ func normalizeHTTPURL(value string) (string, error) {
 	return strings.TrimRight(u.String(), "/"), nil
 }
 
-func defaultConnectorSlug(publicBaseURL string) string {
-	base := strings.TrimSpace(publicBaseURL)
-	if base == "" {
-		return "external-agent-connector"
-	}
-	sum := sha1.Sum([]byte(strings.ToLower(base)))
-	return "external-agent-" + hex.EncodeToString(sum[:])[:12]
-}
-
-func buildRuntimeStreamURL(agentStudioBaseURL, connectorID string) string {
-	if agentStudioBaseURL == "" || connectorID == "" {
-		return ""
-	}
-	return agentStudioBaseURL + "/api/action-connectors/" + url.PathEscape(connectorID) + "/chat/stream"
+func defaultConnectorSlug() string {
+	return "external-agent-connector"
 }
 
 func valueTypeForKey(key string) string {
 	if key == KeyEnabled {
 		return "bool"
+	}
+	if key == KeyToolTimeoutSeconds || key == KeyMaxResponseBytes {
+		return "int"
 	}
 	return "string"
 }

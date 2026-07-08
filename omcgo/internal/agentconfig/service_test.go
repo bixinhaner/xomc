@@ -95,13 +95,11 @@ func TestSaveKeepsExistingServiceTokenWhenOmitted(t *testing.T) {
 	_, err := svc.Save(context.Background(), UpdateRequest{
 		Enabled:            &enabled,
 		AgentStudioBaseURL: stringPtr("https://agent.example.com/"),
-		OMCPublicBaseURL:   stringPtr("https://ops.example.com/"),
 	})
 
 	require.NoError(t, err)
 	require.Equal(t, "old-token", store.values[KeyAgentStudioServiceToken])
 	require.Equal(t, "https://agent.example.com", store.values[KeyAgentStudioBaseURL])
-	require.Equal(t, "https://ops.example.com", store.values[KeyOMCPublicBaseURL])
 }
 
 func TestSavePatchDoesNotClearExistingValuesWhenFieldsAreOmitted(t *testing.T) {
@@ -109,7 +107,6 @@ func TestSavePatchDoesNotClearExistingValuesWhenFieldsAreOmitted(t *testing.T) {
 		KeyEnabled:                 "true",
 		KeyAgentStudioBaseURL:      "https://agent.example.com",
 		KeyAgentStudioServiceToken: "old-token",
-		KeyOMCPublicBaseURL:        "https://ops.example.com",
 		KeyConnectorSlug:           "ops",
 	})
 	svc := NewService(store, store, nil, nil)
@@ -123,7 +120,6 @@ func TestSavePatchDoesNotClearExistingValuesWhenFieldsAreOmitted(t *testing.T) {
 	require.False(t, cfg.Enabled)
 	require.Equal(t, "https://agent.example.com", store.values[KeyAgentStudioBaseURL])
 	require.Equal(t, "old-token", store.values[KeyAgentStudioServiceToken])
-	require.Equal(t, "https://ops.example.com", store.values[KeyOMCPublicBaseURL])
 	require.Equal(t, "ops", store.values[KeyConnectorSlug])
 }
 
@@ -171,13 +167,13 @@ func TestSyncProvisionsConnectorAndPersistsRuntimeConfig(t *testing.T) {
 	cfg, err := svc.Sync(context.Background(), UpdateRequest{
 		Enabled:            &enabled,
 		AgentStudioBaseURL: stringPtr("https://agent.example.com/"),
-		OMCPublicBaseURL:   stringPtr("https://ops.example.com/"),
 	})
 
 	require.NoError(t, err)
 	require.Equal(t, "Bearer provision-token", capturedAuth)
-	require.Contains(t, capturedBody, `"healthPath":"/api/v1/agent/health"`)
-	require.Contains(t, capturedBody, `"identityPath":"/api/v1/agent-actions/identity"`)
+	require.NotContains(t, capturedBody, "agent-actions")
+	require.Contains(t, capturedBody, `"runtimeInstruction"`)
+	require.Contains(t, capturedBody, `"allowedMethods":["GET"]`)
 	require.Equal(t, StatusConnected, cfg.Status)
 	require.Equal(t, "connector-1", cfg.ConnectorID)
 	require.Equal(t, DefaultRuntimeStreamPath, cfg.RuntimeStreamURL)
@@ -201,7 +197,6 @@ func TestSyncFailurePersistsErrorWithoutClearingExistingConnector(t *testing.T) 
 	_, err := svc.Sync(context.Background(), UpdateRequest{
 		Enabled:            &enabled,
 		AgentStudioBaseURL: stringPtr("https://agent.example.com/"),
-		OMCPublicBaseURL:   stringPtr("https://ops.example.com/"),
 	})
 
 	require.Error(t, err)

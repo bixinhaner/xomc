@@ -2,7 +2,6 @@ package agentconfig
 
 import (
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -118,28 +117,5 @@ func (h *Handler) bindUpdate(c *gin.Context) (UpdateRequest, bool) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return UpdateRequest{}, false
 	}
-	if req.OMCPublicBaseURL != nil && strings.TrimSpace(*req.OMCPublicBaseURL) == "" {
-		inferred := inferPublicBaseURL(c)
-		req.OMCPublicBaseURL = &inferred
-	}
 	return req, true
-}
-
-func inferPublicBaseURL(c *gin.Context) string {
-	proto := strings.TrimSpace(c.GetHeader("X-Forwarded-Proto"))
-	if proto == "" {
-		if c.Request.TLS != nil {
-			proto = "https"
-		} else {
-			proto = "http"
-		}
-	}
-	host := strings.TrimSpace(c.GetHeader("X-Forwarded-Host"))
-	if host == "" {
-		host = strings.TrimSpace(c.Request.Host)
-	}
-	if host == "" {
-		return ""
-	}
-	return proto + "://" + host
 }

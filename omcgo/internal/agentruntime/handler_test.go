@@ -58,7 +58,8 @@ func TestChatStreamProxiesToAgentStudioWithDelegation(t *testing.T) {
 		AgentStudioBaseURL: upstream.URL,
 		ConnectorID:        "connector-1",
 		Status:             agentconfig.StatusConnected,
-	}}, jwtSvc, upstream.Client(), nil).RegisterRoutes(group)
+		Policy:             agentconfig.RuntimePolicy{AllowedMethods: []string{http.MethodGet}},
+	}}, jwtSvc, upstream.Client(), nil, nil, nil).RegisterRoutes(group)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/agent/chat/stream", strings.NewReader(`{"message":"hello"}`))
@@ -68,7 +69,8 @@ func TestChatStreamProxiesToAgentStudioWithDelegation(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	require.Contains(t, w.Body.String(), `"type":"start"`)
 	require.Contains(t, w.Body.String(), `"type":"done"`)
-	require.Equal(t, `{"message":"hello"}`, capturedBody)
+	require.Contains(t, capturedBody, `"message":"hello"`)
+	require.Contains(t, capturedBody, `"externalIdentity"`)
 	require.True(t, strings.HasPrefix(capturedAuth, "Bearer "))
 	token := strings.TrimPrefix(capturedAuth, "Bearer ")
 	claims, err := jwtSvc.ValidateAgentDelegationToken(token)
@@ -90,7 +92,7 @@ func TestChatStreamRequiresConfiguredRuntime(t *testing.T) {
 	NewHandler(fakeConfigProvider{target: &agentconfig.RuntimeTarget{
 		Enabled: false,
 		Status:  agentconfig.StatusDisabled,
-	}}, jwtSvc, nil, nil).RegisterRoutes(group)
+	}}, jwtSvc, nil, nil, nil, nil).RegisterRoutes(group)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/agent/chat/stream", strings.NewReader(`{"message":"hello"}`))

@@ -57,26 +57,28 @@ describe('agentApi', () => {
       enabled: true,
       agentStudioBaseUrl: 'https://agent.example.com',
       agentStudioServiceToken: 'secret',
-      omcPublicBaseUrl: 'https://ops.example.com',
+      allowedMethods: ['GET'],
+      blockedPathPrefixes: ['/api/v1/auth/*'],
+      toolTimeoutSeconds: 30,
+      maxResponseBytes: 262144,
     };
     postMock.mockResolvedValue({
       data: {
         enabled: true,
         agentStudioBaseUrl: payload.agentStudioBaseUrl,
         serviceTokenConfigured: true,
-        omcPublicBaseUrl: payload.omcPublicBaseUrl,
         connectorSlug: 'external-agent',
         connectorId: 'c1',
         runtimeStreamUrl: '/api/v1/agent/chat/stream',
         status: 'connected',
         lastValidatedAt: '2026-07-07T10:00:00Z',
         lastError: '',
-        healthPath: '/api/v1/agent/health',
-        actionListPath: '/api/v1/agent-actions/actions',
-        actionSearchPath: '/api/v1/agent-actions/actions/search',
-        actionDescribePath: '/api/v1/agent-actions/actions/describe',
-        actionPreviewPath: '/api/v1/agent-actions/actions/preview',
-        actionExecutePath: '/api/v1/agent-actions/actions/execute',
+        policy: {
+          allowedMethods: payload.allowedMethods,
+          blockedPathPrefixes: payload.blockedPathPrefixes,
+          toolTimeoutSeconds: payload.toolTimeoutSeconds,
+          maxResponseBytes: payload.maxResponseBytes,
+        },
       },
     });
 

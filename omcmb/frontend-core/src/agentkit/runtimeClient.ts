@@ -8,6 +8,9 @@ import {
 export interface AgentStreamHandlers {
   onEvent?: (event: AgentStreamEvent) => void;
   onStart?: (event: Extract<AgentStreamEvent, { type: 'start' }>) => void;
+  onToolRequest?: (
+    event: Extract<AgentStreamEvent, { type: 'tool_request' }>
+  ) => void;
   onDelta?: (event: Extract<AgentStreamEvent, { type: 'delta' }>) => void;
   onThought?: (event: Extract<AgentStreamEvent, { type: 'thought' }>) => void;
   onToolCall?: (
@@ -75,6 +78,9 @@ function emitEvent(handlers: AgentStreamHandlers, event: AgentStreamEvent) {
       break;
     case 'delta':
       handlers.onDelta?.(event);
+      break;
+    case 'tool_request':
+      handlers.onToolRequest?.(event);
       break;
     case 'thought':
       handlers.onThought?.(event);
