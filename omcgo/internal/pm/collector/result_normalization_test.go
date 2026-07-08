@@ -2,6 +2,7 @@ package collector
 
 import (
 	"context"
+	"math"
 	"testing"
 	"time"
 
@@ -68,12 +69,20 @@ func TestIngestViaCopy_NormalizesCounterValuesBeforeCopyIngest(t *testing.T) {
 		Technology: "lte",
 	}
 
-	err := c.ingestViaCopy(ctx, trace.SpanFromContext(ctx), time.Now(), time.Now(), 123, uuid.New(), payload, content)
+	allow := map[string]CounterMeta{
+		"C-PCT-REPORT": {IndicatorID: "C-PCT", ReportKey: "C-PCT-REPORT", Unit: "%", StatisType: "pct"},
+		"C-NUM-REPORT": {IndicatorID: "C-NUM", ReportKey: "C-NUM-REPORT", Unit: "number", StatisType: "sum"},
+		"C-MISSING":    {IndicatorID: "C-MISSING", ReportKey: "C.MISSING", Unit: "number", StatisType: "sum"},
+	}
+
+	err := c.ingestViaCopy(ctx, trace.SpanFromContext(ctx), time.Now(), time.Now(), 123, uuid.New(), payload, content, allow)
 
 	require.NoError(t, err)
-	require.Len(t, copyIngestor.counters, 2)
+	require.Len(t, copyIngestor.counters, 3)
 	assert.InDelta(t, 19.45, copyIngestor.counters[0].CounterValue, 1e-9)
 	assert.Equal(t, float64(4), copyIngestor.counters[1].CounterValue)
+	assert.Equal(t, "C-MISSING", copyIngestor.counters[2].CounterName)
+	assert.True(t, math.IsNaN(copyIngestor.counters[2].CounterValue), "缺值补齐应发生在真实值规范化之后")
 }
 
 func TestNormalizeResults_NormalizesKPIValuesAndFailsMissingMetadata(t *testing.T) {

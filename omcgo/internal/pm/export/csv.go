@@ -3,6 +3,7 @@ package export
 import (
 	"encoding/csv"
 	"io"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -148,7 +149,11 @@ func (c *WideCSVWriter) AddRow(r ExportRow) error {
 		c.order = append(c.order, k)
 	}
 	if idx, ok := c.colIdx[r.MetricCode]; ok {
-		cells[idx] = strconv.FormatFloat(r.Value, 'f', -1, 64)
+		if math.IsNaN(r.Value) {
+			cells[idx] = c.missingMetricValuePlaceholder
+		} else {
+			cells[idx] = strconv.FormatFloat(r.Value, 'f', -1, 64)
+		}
 	}
 	return nil
 }

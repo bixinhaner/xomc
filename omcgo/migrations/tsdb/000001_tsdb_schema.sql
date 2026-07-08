@@ -147,7 +147,7 @@ CREATE TABLE public.pm_metrics (
     device_sn text NOT NULL,
     metric_path text NOT NULL,
     metric_type text NOT NULL,
-    metric_value double precision NOT NULL,
+    metric_value double precision,
     statis_type text,
     granularity text NOT NULL,
     "time" timestamp with time zone NOT NULL,

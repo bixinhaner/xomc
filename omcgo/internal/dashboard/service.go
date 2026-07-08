@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/omcgo/omcgo/internal/alarm"
+	"github.com/omcgo/omcgo/internal/core/jsonx"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/omcgo/omcgo/internal/device"
@@ -122,8 +123,8 @@ type AlarmTypePieEntry struct {
 
 // KPITimeSeriesEntry represents a single data point within a named KPI series.
 type KPITimeSeriesEntry struct {
-	Time  string  `json:"time"`
-	Value float64 `json:"value"`
+	Time  string      `json:"time"`
+	Value jsonx.Float `json:"value"`
 }
 
 // KPITimeSeriesResponse maps KPI names to their time-series data.
@@ -951,7 +952,7 @@ func (s *Service) GetKPITimeSeries(ctx context.Context, kpiNames []string, start
 type networkSeriesPoint struct {
 	code  string
 	time  time.Time
-	value float64
+	value jsonx.Float
 }
 
 // fetchNetworkKCodeSeries 读多个指标编号的全网时序，三段式策略（issue #359 + 尾部补点）：
@@ -964,8 +965,8 @@ type networkSeriesPoint struct {
 //     - 当前不完整小时：17:30 时 17:00 桶未聚合，补出 17:00/17:15 打点。
 //     - 延迟的完整小时：聚合任务落后多个小时时，15min 补点同样覆盖（从缺口开始填）。
 //     - 跨制式混合指标：LTE/NR/GSM 聚合任务各自独立运行，不同制式指标可能有不同的最新桶
-//       时间；以所有 code 各自「下一桶起点」的最小值作为尾部查询起点，并在合并时按 code
-//       过滤掉与现有小时数据重叠的 15min 点，避免同一 code 同一时段双重计数。
+//     时间；以所有 code 各自「下一桶起点」的最小值作为尾部查询起点，并在合并时按 code
+//     过滤掉与现有小时数据重叠的 15min 点，避免同一 code 同一时段双重计数。
 //
 // 两条链路都查时序库（tsPool）。策略 2 是整体缺数据时触发；策略 3 是常态下的尾部实时补充。
 func (s *Service) fetchNetworkKCodeSeries(ctx context.Context, kcodes []string, startTime, endTime time.Time) ([]networkSeriesPoint, error) {
@@ -1018,7 +1019,7 @@ func (s *Service) queryNetworkKPISeries(ctx context.Context, kpiName string, sta
 	for _, p := range points {
 		entries = append(entries, KPITrendEntry{
 			Time:  p.time.Format(time.RFC3339),
-			Value: p.value,
+			Value: float64(p.value),
 		})
 	}
 	return entries, nil
