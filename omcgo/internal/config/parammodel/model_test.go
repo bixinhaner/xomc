@@ -63,3 +63,25 @@ func TestBMNeighborListHasPrivateArfcnAlias(t *testing.T) {
 
 	t.Fatalf("expected BM.xml to define alias %s -> %s", privatePath, standardPath)
 }
+
+func TestBMUpTimeUsesStandardPath(t *testing.T) {
+	xmlPath := filepath.Join("..", "..", "..", "data", "param-mappings", "BM.xml")
+	body, err := os.ReadFile(xmlPath)
+	require.NoError(t, err)
+
+	var doc xmlParameterModel
+	require.NoError(t, xml.Unmarshal(body, &doc))
+
+	const path = "Device.DeviceInfo.UpTime"
+	matches := 0
+
+	for _, param := range doc.Params {
+		if param.StandardPath == path {
+			matches++
+			assert.Equal(t, path, param.Name)
+			assert.Equal(t, "U_INT", param.DataType)
+		}
+	}
+
+	assert.Equal(t, 1, matches, "BM must expose uptime only via standard Device.DeviceInfo.UpTime")
+}
