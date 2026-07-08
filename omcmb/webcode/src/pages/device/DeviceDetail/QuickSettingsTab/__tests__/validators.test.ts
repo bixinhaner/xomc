@@ -4,7 +4,10 @@ import {
   formatEnumDisplayValue,
   formatLteBandwidthDisplay,
   LTE_BANDWIDTH_PATH,
+  validateMmeIp,
   validateMmeIpPlmnLimit,
+  validateMmeIpPlmnRows,
+  validatePlmn,
 } from '../validators';
 
 describe('LTE bandwidth display formatting', () => {
@@ -65,5 +68,42 @@ describe('MME list limit validation', () => {
       plmn: '46000',
     }));
     expect(validateMmeIpPlmnLimit(rows, undefined)).toBeNull();
+  });
+});
+
+describe('MME IP + PLMN validation', () => {
+  it('accepts valid IPv4 and PLMN values', () => {
+    expect(validateMmeIp('10.0.0.1')).toBeNull();
+    expect(validateMmeIp(' 172.16.1.254 ')).toBeNull();
+    expect(validatePlmn('46000')).toBeNull();
+    expect(validatePlmn('460000')).toBeNull();
+  });
+
+  it('rejects malformed MME IP values', () => {
+    expect(validateMmeIp('1.2.3')).toBe('MME IP 必须为合法 IPv4 地址');
+    expect(validateMmeIp('999.1.1.1')).toBe('MME IP 必须为合法 IPv4 地址');
+    expect(validateMmeIp('01.2.3.4')).toBe('MME IP 必须为合法 IPv4 地址');
+  });
+
+  it('rejects PLMN values outside 5-6 digits', () => {
+    expect(validatePlmn('4600')).toBe('PLMN 必须为 5-6 位数字');
+    expect(validatePlmn('4600000')).toBe('PLMN 必须为 5-6 位数字');
+    expect(validatePlmn('46A00')).toBe('PLMN 必须为 5-6 位数字');
+  });
+
+  it('rejects partial MME rows before serialization', () => {
+    expect(validateMmeIpPlmnRows([{ mmeIp: '10.0.0.1', plmn: '' }])).toBe('第 1 行 PLMN 不能为空');
+    expect(validateMmeIpPlmnRows([{ mmeIp: '', plmn: '46000' }])).toBe('第 1 行 MME IP 不能为空');
+  });
+
+  it('reports row-specific MME IP and PLMN errors', () => {
+    expect(validateMmeIpPlmnRows([
+      { mmeIp: '10.0.0.1', plmn: '46000' },
+      { mmeIp: '999.1.1.1', plmn: '46000' },
+    ])).toBe('第 2 行 MME IP 必须为合法 IPv4 地址');
+    expect(validateMmeIpPlmnRows([
+      { mmeIp: '10.0.0.1', plmn: '46000' },
+      { mmeIp: '10.0.0.2', plmn: '4600000' },
+    ])).toBe('第 2 行 PLMN 必须为 5-6 位数字');
   });
 });

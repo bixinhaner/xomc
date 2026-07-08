@@ -59,6 +59,46 @@ export function validateMmeIpPlmnLimit(
   return count > max ? `最多支持 ${max} 个 MME` : null;
 }
 
+function isValidIpv4(value: string): boolean {
+  const parts = value.split('.');
+  if (parts.length !== 4) return false;
+  return parts.every((part) => {
+    if (!/^\d+$/.test(part)) return false;
+    if (part.length > 1 && part.startsWith('0')) return false;
+    const num = Number(part);
+    return Number.isInteger(num) && num >= 0 && num <= 255;
+  });
+}
+
+export function validateMmeIp(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return isValidIpv4(trimmed) ? null : 'MME IP 必须为合法 IPv4 地址';
+}
+
+export function validatePlmn(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return /^\d{5,6}$/.test(trimmed) ? null : 'PLMN 必须为 5-6 位数字';
+}
+
+export function validateMmeIpPlmnRows(
+  rows: Array<{ mmeIp?: string | null; plmn?: string | null }>,
+): string | null {
+  for (let i = 0; i < rows.length; i += 1) {
+    const mmeIp = String(rows[i]?.mmeIp ?? '').trim();
+    const plmn = String(rows[i]?.plmn ?? '').trim();
+    if (!mmeIp && !plmn) continue;
+    if (!mmeIp) return `第 ${i + 1} 行 MME IP 不能为空`;
+    if (!plmn) return `第 ${i + 1} 行 PLMN 不能为空`;
+    const ipErr = validateMmeIp(mmeIp);
+    if (ipErr) return `第 ${i + 1} 行 ${ipErr}`;
+    const plmnErr = validatePlmn(plmn);
+    if (plmnErr) return `第 ${i + 1} 行 ${plmnErr}`;
+  }
+  return null;
+}
+
 export interface QuickSettingsInstanceContext {
   networkType: string;
   fapInstance: number;
